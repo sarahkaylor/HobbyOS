@@ -1,0 +1,10 @@
+[TEST] HOBBYOS_ROOT=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb088v
+[TEST] menu: (informational) parsed NES.BIN idx=22
+[TEST] PASS: NES.BIN present in launcher menu ()
+[TEST] PASS: NES.BIN pinned adjacent after XCRYPT.BIN (XCRYPT=21 NES=22)
+[TEST] PASS: NES frame within 30s (bright dominates + dark top band) (t=0.4s bright_frac=0.97 topband_dark_frac=1.00)
+[TEST] PASS: bright field dominates the NES area (bright_frac=0.97)
+[TEST] PASS: dark band present across the top row (topband_dark_frac=1.00)
+[TEST] FAIL: input reaches the emulator (frame visibly changes / game live) (diffs=10 after 31.0s)
+[TEST] RESULT: FAIL (1)
+FALB_RC=1

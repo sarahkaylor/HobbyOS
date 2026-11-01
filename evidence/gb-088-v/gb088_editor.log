@@ -1,0 +1,7 @@
+[probe] NANO.BIN menu idx=15
+[probe] before=/home/sarah/.hermes/cache/scratch/gb088/gb088_editor/ed_before.ppm
+[probe] after=/home/sarah/.hermes/cache/scratch/gb088/gb088_editor/ed_after.ppm
+[probe] changed_px=650 bbox=(10, 44, 1894, 1069)
+[probe] serial_has_Modified=True
+[probe] done
+EDITOR_RC=0

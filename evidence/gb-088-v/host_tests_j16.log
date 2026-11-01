@@ -1,0 +1,758 @@
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/editor.c -o obj/host_user_editor.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/compat.c -o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/dialog.c -o obj/host_user_dialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/filedialog.c -o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/editor_test.c -o obj/host_editor_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Dmain=desktop_main -c src/user/desktop.c -o obj/host_user_desktop.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/graphics/graphics.c -o obj/host_user_graphics_graphics.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/graphics/window.c -o obj/host_user_graphics_window.o
+=== cache_test: cold vs cached build time ===
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/games_scan_test.c -o obj/host_games_scan_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/games_scan.c -o obj/host_user_games_scan.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/gfx_stats_test.c -o obj/host_gfx_stats_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/gfx_stats.c -o obj/host_user_gfx_stats.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_menu_test.c -o obj/host_desktop_menu_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_drag_test.c -o obj/host_desktop_drag_test.o
+=== build + capture hello ===
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_damage_test.c -o obj/host_desktop_damage_test.o
+src/host/desktop_menu_test.c:219:10: warning: unused variable 'late' [-Wunused-variable]
+  219 |     char late[32];
+      |          ^~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_input_test.c -o obj/host_desktop_input_test.o
+1 warning generated.
+src/host/compat.c:132:90: warning: unused parameter 'args' [-Wunused-parameter]
+  132 | int spawn2(const char *filename, int stdclang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_term_test.c -o obj/host_desktop_term_test.o
+in_fd, int stdout_fd, int stderr_fd, const char *args) {
+      |                                                                                          ^
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_pixel_test.c -o obj/host_desktop_pixel_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -c src/user/x11/xlib_display.c -o obj/host_user_x11_xlib_display.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/x11_lib_test.c -o obj/host_x11_lib_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -c src/user/x11/xlib_window.c -o obj/host_user_x11_xlib_window.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -c src/user/x11/xlib_draw.c -o obj/host_user_x11_xlib_draw.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -c src/user/x11/xlib_event.c -o obj/host_user_x11_xlib_event.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/xcalc_test.c -o obj/host_xcalc_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/antfarm_test.c -o obj/host_antfarm_test.o
+1 warning generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/xnibbler_test.c -o obj/host_xnibbler_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/xeyes_test.c -o obj/host_xeyes_test.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/apps_suite_test.c src/host/compat.c src/user/gui.c src/user/dialog.c src/user/filedialog.c -o apps_suite_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/nano_term_test.c -o obj/host_nano_term_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/nano -c src/user/nano/hb_curses.c -o obj/nano_hb_curses_host.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/nfs_proto.c src/host/nfs_proto_test.c -o nfs_proto_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/user/resolv.c src/host/resolv_test.c -o resolv_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/time_math_test.c -o obj/host_time_math_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/time_math.c -o obj/host_hb_time_math.o
+src/host/desktop_pixel_test.c:360:7: warning: unused variable 'cw' [-Wunused-variable]
+  360 |   int cw = SCREEN_WIDTH - 4, ch = span_h - 36;   /* single-window content */
+      |       ^~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/console_test.c -o obj/host_console_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/gui.c -o obj/host_user_gui.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/pong_test.c -o obj/host_pong_test.o
+src/user/nano/hb_curses.c:167:12: warning: unused function 'cell_index' [-Wunused-function]
+  167 | static int cell_index(int row, int col) { return row * scr_cols + col; }
+      |            ^~~~~~~~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/stardust_test.c -o obj/host_stardust_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/dialog_arrow_test.c -o obj/host_dialog_arrow_test.o
+  PASS: hello built
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/gui_test.c -o obj/host_gui_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/errno_test.c -o obj/host_errno_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/host/elf_image_test.c -o obj/host_elf_image_test.o
+1 warning generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/kernel/elf_image.c -o obj/host_elf_image.o
+1 warning generated.
+python3 tools/linux-abi/gen_test_elf.py
+cold_ms=81 warm_ms=10
+ccache stats: hits~2 misses~2
+  PASS: warm compile is a ccache HIT (hits=2)
+  PASS: warm <= cold (cached build not slower)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/host/linux_abi_test.c -o obj/host_linux_abi_test.o
+=== cache_test DoD: cold vs cached build time measured (real numbers above) ===
+CACHE TEST PASSED
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -pthread -include src/host/host_pthread_compat.h -c src/user/thrd_test.c -o obj/host_thrd_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -pthread -c src/user/tls_test.c -o obj/host_tls_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -pthread -include src/host/host_pthread_compat.h -c src/user/wk1c_test.c -o obj/host_wk1c_test.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/ipc_proto.c src/host/ipc_proto_test.c -o ipc_proto_test_host
+wrote tests/fixtures/elf/valid-x86_64-exec.elf (12288 bytes)
+wrote tests/fixtures/elf/valid-exec-bss.elf (8192 bytes)
+wrote tests/fixtures/elf/reject-bad-magic.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-arm-machine.elf (12288 bytes)
+wrote tests/fixtures/elf/valid-static-pie.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-dyn-interp.elf (16384 bytes)
+wrote tests/fixtures/elf/reject-truncated.elf (7680 bytes)
+wrote tests/fixtures/elf/reject-phoff-oob.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-phnum-zero.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-interp.elf (16384 bytes)
+wrote tests/fixtures/elf/reject-nonload-only.elf (8192 bytes)
+wrote tests/fixtures/elf/reject-class32.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-bigendian.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-filesz-gt-memsz.elf (8192 bytes)
+wrote tests/fixtures/elf/reject-overlap.elf (16384 bytes)
+wrote tests/fixtures/elf/reject-bad-entry.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-no-exec.elf (8192 bytes)
+wrote tests/fixtures/elf/tour-exec-3seg.elf (16384 bytes)
+18 vectors
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/ipc_test.c -o obj/host_ipc_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -pthread -c src/user/torture_test.c -o obj/host_torture_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/wsurf_test.c -o obj/host_wsurf_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/graphics/wsurf.c -o obj/host_user_graphics_wsurf.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/graphics_lib_test.c -o obj/host_graphics_lib_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/window_damage_test.c -o obj/host_window_damage_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/window_text_test.c -o obj/host_window_text_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/string.c -o obj/host_hb_string.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_string_test.c -o obj/host_libc_string_test.o
+src/user/wk1c_test.c:83:19: warning: address of stack memory associated with local variable 'p' returned [-Wreturn-stack-address]
+   83 |   return (void *)&p;
+      |                   ^
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_ctype_test.c -o obj/host_libc_ctype_test.o
+1 warning generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/ctype.c -o obj/host_hb_ctype.o
+  PASS: capture ref run
+  PASS: capture re-run
+  PASS: stdout is the hello contract (hello line + errno line)
+  PASS: exit is 0
+  PASS: errno is ENOENT(=2)
+=== identical re-run -> MATCH ===
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/stdlib.c -o obj/host_hb_stdlib.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_stdlib_test.c -o obj/host_libc_stdlib_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/setjmp.c -o obj/host_hb_setjmp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_setjmp_test.c -o obj/host_libc_setjmp_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/malloc.c -o obj/host_malloc_hb.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_realloc_test.c -o obj/host_libc_realloc_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_printf_test.c -o obj/host_libc_printf_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/stdio.c -o obj/host_hb_stdio.o
+clang -Isrc/libc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_headers_test.c -o obj/host_libc_headers_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -std=c++17 -fno-exceptions -fno-rtti -c src/host/cxxrt_test.cpp -o obj/host_cxxrt_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -std=c++17 -fno-exceptions -fno-rtti -Isrc/libc/include -c src/libc/src/cxxrt.cpp -o obj/host_cxxrt.o
+  PASS: identical captures MATCH (MATCH)
+=== lie detector: planted divergences must be DIVERGE ===
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -std=c++17 -fno-exceptions -fno-rtti -Isrc/libc/include -Isrc/include -c src/host/cxx_headers_test.cpp -o obj/host_cxx_headers_test.o
+clang -Wall -Wextra -g -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c src/host/rtti_test.cpp -o obj/host_rtti_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/getopt.c -o obj/host_hb_getopt.o
+clang -Wall -Wextra -g -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c src/host/rtti_test_support.cpp -o obj/host_rtti_test_support.o
+src/host/libc_printf_test.c:215:9: warning: unused variable 'star' [-Wunused-variable]
+  215 |     int star = 0;   /* star width/prec is exercised by star_suite,
+      |         ^~~~
+src/host/libc_printf_test.c:287:26clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_getopt_test.c -o obj/host_libc_getopt_test.o
+: warning: format specifies type 'int *' but the argument has type 'void *' [-Wformat]
+  287 |   sprintf(tb, "abc%n%d", (void *)&b, 5);
+      |                   ~~     ^~~~~~~~~~
+src/host/libc_printf_test.c:290:29: warning: format specifies type 'int *' but the argument has type 'void *' [-Wformat]
+  290 |   sprintf(tb, "%sx%n", "q", (void *)&bb);
+      |                   ~~        ^~~~~~~~~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/libc/src/regex.c -o obj/host_hb_regex.o
+src/host/libc_printf_test.c:92:8: warning: unused function 'run_sizet' [-Wunused-function]
+   92 | RUNNER(run_sizet, size_t)
+      |        ^~~~~~~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/host/libc_regex_test.c -o obj/host_libc_regex_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/glibc_regex_layout.c -o obj/glibc_regex_layout.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/host/libc_langinfo_test.c -o obj/host_libc_langinfo_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/libc/src/langinfo.c -o obj/host_hb_langinfo.o
+4 warnings generated.
+  PASS: wrong stdout -> DIVERGE (DIVERGE (stdout))
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_scanf_wprintf_test.c -o obj/host_libc_scanf_wprintf_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/stdio.c -o obj/host_hb_stdio_sp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/wchar.c -o obj/host_hb_wchar_sp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_num_parity_test.c -o obj/host_libc_num_parity_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -ffp-contract=off -c src/libc/src/math.c -o obj/host_hb_math_np.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/strtod.c -o obj/host_hb_strtod_np.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/math_transcend_test.c -o obj/host_math_transcend_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_wide_parity_test.c -o obj/host_libc_wide_parity_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/wchar.c -o obj/host_hb_wchar_wp.o
+In file included from src/libc/src/regex.c:90:
+src/libc/src/regcomp.c:519:50: warning: unused parameter 'preg' [-Wunused-parameter]
+  519 | regerror (int errcode, const regex_t *__restrict preg, char *__restrict errbuf,
+      |                                                  ^
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/wctype.c -o obj/host_hb_wctype_wp.o
+src/libc/src/regcomp.c:588:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  588 |     for (i = 0; i < dfa->nodes_len; ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:591:17: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  591 |   for (i = 0; i < dfa->nodes_len; ++i)
+      |               ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:606:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 're_hashval_t' (aka 'unsigned int') [-Wsign-compare]
+  606 |     for (i = 0; i <= dfa->state_hash_mask; ++i)
+      |                 ~ ^  ~~~~~~~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1181:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1181 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1184:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1184 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1187:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1187 |       if (i == preg->re_nsub)
+      |           ~ ^  ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1404:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 1404 | calc_next (void *extra, bin_tree_t *node)
+      |                  ^
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/strftime.c -o obj/host_hb_strftime_wp.o
+src/libc/src/regcomp.c:1632:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1632 |   for (idx = 0; idx < dfa->nodes_len; ++idx)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1635:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1635 |   for (src = 0; src < dfa->nodes_len; ++src)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1663:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1663 |       if (node_idx == dfa->nodes_len)
+      |           ~~~~~~~~ ^  ~~~~~~~~~~~~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/xlocale.c -o obj/host_hb_xlocale_wp.o
+src/libc/src/regcomp.c:2698:37: warning: unused parameter 'syntax' [-Wunused-parameter]
+ 2698 | build_range_exp (const reg_syntax_t syntax,
+      |                                     ^
+src/libc/src/regcomp.c:3394:54: warning: unused parameter 'dfa' [-Wunused-parameter]
+ 3394 |                        re_token_t *token, int token_len, re_dfa_t *dfa,
+      |                                                                    ^
+src/libc/src/regcomp.c:3869:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 3869 | free_tree (void *extra, bin_tree_t *node)
+      |                  ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:486:39: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  486 |       if (__glibc_unlikely (need_regs > regs->num_regs))
+      |                             ~~~~~~~~~ ^ ~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:507:27: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  507 |       DEBUG_ASSERT (nregs <= regs->num_regs);
+      |                     ~~~~~ ^  ~~~~~~~~~~~~~~
+src/libc/src/regex_internal.h:42:34: note: expanded from macro 'DEBUG_ASSERT'
+   42 | # define DEBUG_ASSERT(x) assume (x)
+      |                                  ^
+src/libc/include/verify.h:286:22: note: expanded from macro 'assume'
+  286 | # define assume(R) ((R) ? (void) 0 : __builtin_unreachable ())
+      |                      ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:517:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  517 |   for ( ; i < regs->num_regs; ++i)
+      |           ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regexec.c:656:9: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  655 |       if (__glibc_unlikely ((MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  656 |                              <= mctx.input.bufs_len)))
+      |                              ^~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:837:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  837 |       for (reg_idx = 1; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:858:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  858 |       for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:886:32: warning: comparison of integers of different signs: 'int' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  886 |         for (reg_idx = 0; reg_idx + 1 < nmatch; reg_idx++)
+      |                           ~~~~~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c  PASS: wrong exit -> DIVERGE (DIVERGE (exit)):920
+:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  919 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  920 |                         <= match_last))
+      |                         ^~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:1414:34: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1414 |               for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                                 ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:1417:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1417 |               if (reg_idx == nmatch)
+      |                   ~~~~~~~ ^  ~~~~~~
+src/libc/src/xlocale.c:47:9: warning: 'isdigit_l' macro redefined [-Wmacro-redefined]
+   47 | #define isdigit_l hb_isdigit_l
+      |         ^
+/usr/include/ctype.h:307:11: note: previous definition is here
+  307 | #  define isdigit_l(c,l)        __isdigit_l ((c), (l))
+      |           ^
+src/libc/src/xlocale.c:48:9: warning: 'isxdigit_l' macro redefined [-Wmacro-redefined]
+   48 | #define iclang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/wc.c -o obj/host_wc.o
+sxdigit_l hb_isxdigit_l
+      |         ^
+/usr/include/ctype.h:314:11: note: previous definition is here
+  314 | #  define isxdigit_l(c,l)       __isxdigit_l ((c), (l))
+      |           ^
+src/libc/src/xlocale.c:109:10: warning: incompatible pointer types returning 'struct __hb_locale *' from a function with result type 'locale_t' (aka 'struct __locale_struct *') [-Wincompatible-pointer-types]
+  109 |   return loc;
+      |          ^~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/error.c -o obj/host_hb_error.o
+src/libc/src/xlocale.c:116:9: warning: incompatible pointer types assigning to 'locale_t' (aka 'struct __locale_struct *') from 'struct __hb_locale *' [-Wincompatible-pointer-types]
+  116 |     loc = &c_locale_object;
+      |         ^ ~~~~~~~~~~~~~~~~
+src/libc/src/xlocale.c:133:10: warning: incompatible pointer types returning 'struct __hb_locale *' from a function with result type 'locale_t' (aka 'struct __locale_struct *') [-Wincompatible-pointer-types]
+  133 |   return copy;
+      |          ^~~~
+src/host/compat.c:132:90: warning: unused parameter 'args' [-Wunused-parameter]
+  132 | int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
+      |                                                                                          ^
+src/libc/src/regexec.c:2850:65: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 2850 |       if (__glibc_unlikely (SIZE_MAX / sizeof (re_dfastate_t *) < new_alloc))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/head_gnu.c -o obj/host_head.o
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:3323:36: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'Idx' (aka 'int') [-Wsign-compare]
+ 3323 |   if (__glibc_unlikely (ndests_max < ndests))
+      |                         ~~~~~~~~~~ ^ ~~~~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/tail_gnu.c -o obj/host_tail.o
+src/libc/src/regexec.c:4035:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4034 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *)) / 2
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 4035 |                         <= pstr->bufs_len))
+      |                         ^~~~~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:525: warning snote:  generatedexpanded from macro '__glibc_unlikely'.
+
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/hb_assert.c -o obj/host_hb_assert.o
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:4104:71: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4104 |       if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / max_object_size) < n))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/cut_gnu.c -o obj/host_cut.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/tr_gnu.c -o obj/host_tr.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/paste_gnu.c -o obj/host_paste.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/fold_gnu.c -o obj/host_fold.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/nl_gnu.c -o obj/host_nl.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/comm_gnu.c -o obj/host_comm.o
+1 warning generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/tsort_gnu.c -o obj/host_tsort.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/expand_gnu.c -o obj/host_expand.o
+  PASS: wrong errno -> DIVERGE (DIVERGE (errno))
+
+Checks: 10, failed: 0
+DIFF HARNESS TEST PASSED
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/unexpand_gnu.c -o obj/host_unexpand.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/cksum_gnu.c -o obj/host_cksum.o
+src/user/tail_gnu.c:455:24: warning: misleading indentation; statement is not part of the previous 'if' [-Wmisleading-indentation]
+  455 |     offset = -offset;  {
+      |                        ^
+src/user/tail_gnu.c:454:3: note: previous statement is here
+  454 |   if (offset < 0)
+      |   ^
+src/user/tr_gnu.c:996:34: warning: comparison of integers of different signs: 'long' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  996 |             || d_end - digit_str != digit_str_len) {
+      |                ~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~~~~~
+src/user/tail_gnu.c:1058:27: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'off_t' (aka 'long') [-Wsign-compare]
+ 1058 |       if (bytes_remaining <= n_bytes) {
+      |           ~~~~~~~~~~~~~~~ ^  ~~~~~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/md5sum_gnu.c -o obj/host_md5sum.o
+src/user/tr_gnu.c:1621:24: warning: passing arguments to a function without a prototype is deprecated in all versions of C and is not supported in C23 [-Wdeprecated-non-prototype]
+ 1621 |         nr = (*reader) (buf, size, NULL);
+      |                        ^
+src/user/tr_gnu.c:1614:11: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1614 |     if (i >= nr) {
+      |         ~ ^  ~~
+src/user/tr_gnu.c:1644:16: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1644 |       for (; i < nr && !in_squeeze_set[buf[i]]; i += 2)
+      |              ~ ^ ~~
+src/user/tr_gnu.c:1650:13: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1650 |       if (i == nr && in_squeeze_set[buf[i - 1]])src/user/tail_gnu.c
+:      | 171          ~ ^  ~~:
+26: warning: src/user/tr_gnu.cunused variable 'follow_mode_string' [-Wunused-const-variable]:
+1653:13:   warning: 171comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare] | 
+st a1653t | i c   c h a ri fc o(nis t> =* cnorn)s
+t       | f          ~ ^  ~~o
+llosrc/user/tr_gnu.cw:_1679m:o16d:e _warning: scomparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]t
+rin g1679[ | ]   =   { 
+       f| o                         ^~~~~~~~~~~~~~~~~~r
+ (;src/user/tail_gnu.c :i175 :<31 :n rwarning:  unused variable 'follow_mode_map' [-Wunused-const-variable]&
+& b  u175f | [sit]a t=i=c  cehnaurm_ tFoo_lslqouwe_emzoed;e  ic+o+n)s
+t       | f             ~ ^ ~~o
+llosrc/user/tr_gnu.cw:_1681m:o13d:e _warning: mcomparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]a
+p[ ]1681  | =   { 
+        |                                ^~~~~~~~~~~~~~~i
+f (i < nr)
+      |           ~ ^ ~~
+src/user/tr_gnu.c:1724:19: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1724 |     for (i = 0; i < nr && !in_delete_set[buf[i]]; i++)
+      |                 ~ ^ ~~
+src/user/tr_gnu.c:1728:17: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1728 |     for (++i; i < nr; i++)
+      |               ~ ^ ~~
+src/user/tr_gnu.c:1758:17: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1758 |   for (i = 0; i < chars_read; i++)
+      |               ~ ^ ~~~~~~~~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/tac_gnu.c -o obj/host_tac.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/cmp_gnu.c -o obj/host_cmp.o
+clang -O2 -g -Wall -Wextra -c src/host/tar_test.c -o obj/host_tar_test.o
+tar --format=ustar -cf obj/tar_fixture.tar -C tests/fixtures/tar .
+4 warnings generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/files_test.c -o obj/host_files_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/calc_test.c -o obj/host_calc_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/clock_test.c -o obj/host_clock_test.o
+11 warnings generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/sysmon_test.c -o obj/host_sysmon_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/hex_test.c -o obj/host_hex_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/tasks_test.c -o obj/host_tasks_test.o
+src/user/tac_gnu.c:284:57: warning: comparison of integers of different signs: 'ssize_t' (aka 'long') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  284 |   if (safe_read (input_fd, G_buffer, saved_record_size) != saved_record_size) {
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~~~~~~~~~
+src/user/tac_gnu.c:352:20: warning: comparison of integers of different signs: 'off_t' (aka 'long') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  352 |       if (file_pos >= read_size)
+      |           ~~~~~~~~ ^  ~~~~~~~~~
+src/user/tac_gnu.c:370:53: warning: comparison of integers of different signs: 'ssize_t' (aka 'long') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  370 |       if (safe_read (input_fd, G_buffer, read_size) != read_size) {
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/find_test.c -o obj/host_find_test.o
+src/user/tac_gnu.c:453:47: clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/diff_test.c -o obj/host_diff_test.o
+warning: comparison of integers of different signs: 'unsigned long' and 'ssize_t' (aka 'long') [-Wsign-compare]
+  453 |     if (fwrite (G_buffer, 1, bytes_read, tmp) != bytes_read)
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~~
+src/user/tac_gnu.c:547:30: warning: comparison of integers of different signs: 'int' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  547 |   while (sentinel_length * 2 >= read_size)
+      |          ~~~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/notes_test.c -o obj/host_notes_test.o
+5 warnings generated.
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/fb_ioctl.c src/host/fb_ioctl_test.c -o fb_ioctl_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/unit_test.c -o obj/host_unit_test.o
+build_diffutils_cmp_ref: ref sources: /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb088v/obj/third_party/refs/diffutils-2.8.1
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/fb_pixel_test.c -o fb_pixel_test_host
+In file included from src/host/tar_test.c:33:
+src/host/ho_scratch.h:59:20: warning: unused function 'ho_scratch_path' [-Wunused-function]
+   59 | static const char *ho_scratch_path(const char *name) {
+      |                    ^~~~~~~~~~~~~~~
+28 warnings generated.
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/evdev.c src/host/evdev_test.c -o evdev_test_host
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/joypad_test.c -o joypad_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/clockabi_test.c -o clockabi_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/nano -Isrc/user_include -DHOST_TEST -c src/host/xcrypt_test.c -o obj/host_xcrypt_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/memfd_test.c -o memfd_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/nes_test.c -o obj/host_nes_test.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/linux_input_test.c -o linux_input_test_host
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/input_node.c src/host/input_node_test.c -o input_node_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/host/linux_layout_test.c -o obj/host_linux_layout_test.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/fb_mmap.c src/kernel/fb_ioctl.c src/host/fb_mmap_test.c -o fb_mmap_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/host/linux_abi_constants_test.c -o obj/host_linux_abi_constants_test.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/arch/x64/locks.c src/host/locksteal_test.c -o locksteal_test_host
+src/host/xcrypt_test.c:129:7: warning: unused variable 'stairs_here' [-Wunused-variable]
+  129 |   int stairs_here = (px == stairs_x && py == stairs_y);
+      |       ^~~~~~~~~~~
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/fb_ioctl.c src/kernel/fb_mmap.c src/host/m2_dev_contract_test.c -o m2_dev_contract_test_host
+1 warning generated.
+[self-test] clause 2 (wrong shim must FAIL):
+src/kernel/arch/x64/locks.c:150:40: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  150 |     lock_wait_caller2[cpu] = (uint64_t)__builtin_return_address(1);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:180:39: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  180 |         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+  OK — absent member correctly NOT found (FAIL path reachable)
+  OK — wrong shim FAILED as required
+[self-test] clause 3 (absent probe must FAIL, not skip):
+  OK — absent probe FAILED as required
+[self-test] GB-079 (a probe edit must FAIL in both --check modes):
+  OK — probe never dispatched -> gate FAILs (not a pass)
+self-test: glued fixture count=4 (want >0), clean fixture count=0 (want 0)
+2 warnings generated.
+[self-test] good wave (all members arrived):
+  OK — CAT absent -> WAVE.CFG corpus member FAILs (no silent drop)
+  OK — inline manifest parses to clean names (no stray backslash-n)
+src/host/input_node_test.c:91:10: warning: array index 34 is past the end of the array (that has type 'uint8_t[16]' (aka 'unsigned char[16]')) [-Warray-bounds]
+   91 |   check((keys[HB_BTN_LEFT >> 3] & (1u << (HB_BTN_LEFself-test: absent-log exit=2 (want non-zero):           clean log: 0 glued lines cannot be measured over nothing.
+T & 7))) &&
+      |          ^    ~~~~~~~~~~~~~~~~
+src/host/input_node_test.c:88:3: note: array 'keys' declared here
+   88 |   uinself-test: OK — counter can fail, stays 0 on clean, and refuses a missing log
+t8_t keys[16];
+      |   ^
+clang --target=x86_64-linux-musl -fPIE -static-pie -Isrc/include tools/sdl/sdl_test_app.c -o obj/sdl_test_app_pie
+1 warning generated.
+  OK — a member named inline that DID run is matchable (the old bug: it was not)
+self-test: pass=6 fail=0
+  PASS vector   0: NO_ERR matches architecture
+  PASS vector   1: NO_ERR matches architecture
+  PASS vector   2: NO_ERR matches architecture
+  PASS vector   3: NO_ERR matches architecture
+  PASS vector   4: NO_ERR matches architecture
+  PASS vector   5: NO_ERR matches architecture
+  PASS vector   6: NO_ERR matches architecture
+  PASS vector   7: NO_ERR matches architecture
+  PASS vector   8: ERR matches architecture
+  PASS vector   9: NO_ERR matches architecture
+  PASS vector  10: ERR matches architecture
+  PASS vector  11: ERR matches architecture
+  PASS vector  12: ERR matches architecture
+  PASS vector  13: ERR matches architecture
+  PASS vector  14: ERR matches architecture
+  PASS vector  15: NO_ERR matches architecture
+  PASS vector  16: NO_ERR matches architecture
+  PASS vector  17: ERR matches architecture
+  PASS vector  18: NO_ERR matches architecture
+  PASS vector  19: NO_ERR matches architecture
+  PASS vector  20: NO_ERR matches architecture
+  PASS vector  21: ERR matches architecture
+  PASS vector  22: NO_ERR matches architecture
+  PASS vector  23: NO_ERR matches architecture
+  PASS vector  24: NO_ERR matches architecture
+  PASS vector  25: NO_ERR matches architecture
+  PASS vector  26: NO_ERR matches architecture
+  PASS vector  27: NO_ERR matches architecture
+  PASS vector  28: NO_ERR matches architecture
+  PASS vector  29: ERR matches architecture
+  PASS vector  30: ERR matches architecture
+  PASS vector  31: NO_ERR matches architecture
+  PASS vector  32: NO_ERR matches architecture
+  PASS vector  33: NO_ERR matches architecture
+  PASS vector  34: NO_ERR matches architecture
+  PASS vector  35: NO_ERR matches architecture
+  PASS vector  36: NO_ERR matches architecture
+  PASS vector  37: NO_ERR matches architecture
+  PASS vector  38: NO_ERR matches architecture
+  PASS vector  39: NO_ERR matches architecture
+  PASS vector  40: NO_ERR matches architecture
+  PASS vector  41: NO_ERR matches architecture
+  PASS vector  42: NO_ERR matches architecture
+  PASS vector  43: NO_ERR matches architecture
+  PASS vector  44: NO_ERR matches architecture
+  PASS vector  45: NO_ERR matches architecture
+  PASS vector  46: NO_ERR matches architecture
+  PASS vector  47: NO_ERR matches architecture
+  PASS vector 129: NO_ERR matches architecture
+  PASS vector 130: NO_ERR matches architecture
+vector_shape_scan: 53 checks, 0 FAIL
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/host/linux_uname_parity.c -o obj/host_linux_uname_parity.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/kernel/linux_uname.c -o obj/host_linux_uname.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/audio_stub.c src/host/audio_stub_test.c -o audio_stub_test_host
+  OK — healthy probe PASSES (leg A absent)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/x11_libc_test.c -o obj/host_x11_libc_test.o
+  OK — all W0 members PASS (matched Linux leg)
+[self-test] missing CAT (must FAIL):
+  OK — absent member FAILED as required
+[self-test] broken HELLO output (must FAIL):
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/inet.c -o obj/host_hb_inet.o
+  OK — injected probe row FAILS (leg A absent)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/utsname.c -o obj/host_hb_utsname.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/math_ext.c -o obj/host_hb_math_ext.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/x11ext_libc_test.c -o obj/host_x11ext_libc_test.o
+  OK — broken member FAILED as required
+[self-test] W0PIE-compat flag absent (must FAIL):
+1 warning generated.
+  OK — gate FAILED a member whose compat flag (abi=0x1) is absent
+self-test result: fails=0
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -DVDISP_HOST_TEST src/kernel/vdisplay.c src/host/vdisplay_test.c -o vdisplay_test_host
+clang -o EDITOR.BIN_host obj/host_user_editor.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o editor_test_host obj/host_editor_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o games_scan_test_host obj/host_games_scan_test.o obj/host_user_games_scan.o obj/host_compat.o
+clang -o gfx_stats_test_host obj/host_gfx_stats_test.o obj/host_user_gfx_stats.o
+  OK — healthy probe PASSES (leg A present)
+clang -o desktop_menu_test_host obj/host_desktop_menu_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o desktop_drag_test_host obj/host_desktop_drag_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o desktop_damage_test_host obj/host_desktop_damage_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o desktop_input_test_host obj/host_desktop_input_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o desktop_term_test_host obj/host_desktop_term_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o desktop_pixel_test_host obj/host_desktop_pixel_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o x11_lib_test_host obj/host_x11_lib_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -o xcalc_test_host obj/host_xcalc_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -o antfarm_test_host obj/host_antfarm_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -o xeyes_test_host obj/host_xeyes_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -o xnibbler_test_host obj/host_xnibbler_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -o nano_term_test_host obj/host_nano_term_test.o obj/nano_hb_curses_host.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+open-mode scan: 0 two-argument O_CREAT open() calls in '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb088v/tools/gate/../../src'
+clang -o time_math_test_host obj/host_time_math_test.o obj/host_hb_time_math.o
+clang -o console_test_host obj/host_console_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o pong_test_host obj/host_pong_test.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -o stardust_test_host obj/host_stardust_test.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -o dialog_arrow_test_host obj/host_dialog_arrow_test.o obj/host_user_dialog.o obj/host_user_filedialog.o obj/host_compat.o
+clang -o gui_test_host obj/host_gui_test.o obj/host_compat.o
+  OK — injected probe row FAILS (leg A present)
+self-test result: fail_count=0
+clang -o errno_test_host obj/host_errno_test.o obj/host_compat.o
+clang -o elf_image_test_host obj/host_elf_image_test.o obj/host_elf_image.o
+clang -o linux_abi_test_host obj/host_linux_abi_test.o
+clang -o thrd_test_host obj/host_thrd_test.o obj/host_compat.o
+clang -o tls_test_host obj/host_tls_test.o obj/host_compat.o
+clang -o wk1c_test_host obj/host_wk1c_test.o obj/host_compat.o
+clang -o ipc_test_host obj/host_ipc_test.o obj/host_compat.o
+clang -o torture_test_host obj/host_torture_test.o obj/host_compat.o
+clang -o wsurf_test_host obj/host_wsurf_test.o obj/host_user_graphics_wsurf.o
+clang -o graphics_lib_test_host obj/host_graphics_lib_test.o obj/host_compat.o
+clang -o window_damage_test_host obj/host_window_damage_test.o obj/host_compat.o
+clang -o window_text_test_host obj/host_window_text_test.o obj/host_compat.o
+clang -o libc_string_test_host obj/host_libc_string_test.o obj/host_hb_string.o
+clang -o libc_ctype_test_host obj/host_libc_ctype_test.o obj/host_hb_ctype.o
+clang -o libc_stdlib_test_host obj/host_libc_stdlib_test.o obj/host_hb_stdlib.o
+clang -o libc_setjmp_test_host obj/host_libc_setjmp_test.o obj/host_hb_setjmp.o
+clang -o libc_realloc_test_host obj/host_libc_realloc_test.o obj/host_malloc_hb.o
+clang -o libc_printf_test_host obj/host_libc_printf_test.o obj/host_hb_stdio.o
+clang -o libc_headers_test_host obj/host_libc_headers_test.o
+clang -o cxxrt_test_host obj/host_cxxrt_test.o obj/host_cxxrt.o obj/host_compat.o obj/host_malloc_hb.o
+clang -o cxx_headers_test_host obj/host_cxx_headers_test.o
+clang -o libc_getopt_test_host obj/host_libc_getopt_test.o obj/host_hb_getopt.o
+clang -o libc_regex_test_host obj/host_libc_regex_test.o obj/host_hb_regex.o obj/glibc_regex_layout.o
+clang -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/src/private_typeinfo.cpp -o obj/host_rtti_private_typeinfo.o
+clang -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/src/stdlib_typeinfo.cpp -o obj/host_rtti_stdlib_typeinfo.o
+clang -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/src/stdlib_exception.cpp -o obj/host_rtti_stdlib_exception.o
+clang -o libc_langinfo_test_host obj/host_libc_langinfo_test.o obj/host_hb_langinfo.o
+clang -o libc_scanf_wprintf_parity_run obj/host_libc_scanf_wprintf_test.o obj/host_hb_stdio_sp.o obj/host_hb_wchar_sp.o
+clang -o libc_num_parity_run obj/host_libc_num_parity_test.o obj/host_hb_math_np.o obj/host_hb_strtod_np.o -lm
+clang -o math_transcend_parity_run obj/host_math_transcend_test.o obj/host_hb_math_np.o -lm
+clang -o libc_wide_parity_run obj/host_libc_wide_parity_test.o obj/host_hb_wchar_wp.o obj/host_hb_wctype_wp.o obj/host_hb_strftime_wp.o obj/host_hb_xlocale_wp.o
+clang -o obj/wc_host obj/host_wc.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/head_host obj/host_head.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/tail_host obj/host_tail.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/cut_host obj/host_cut.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/tr_host obj/host_tr.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/paste_host obj/host_paste.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/fold_host obj/host_fold.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/nl_host obj/host_nl.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/comm_host obj/host_comm.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/tsort_host obj/host_tsort.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/expand_host obj/host_expand.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/unexpand_host obj/host_unexpand.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/cksum_host obj/host_cksum.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/md5sum_host obj/host_md5sum.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/tac_host obj/host_tac.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/cmp_host obj/host_cmp.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+clang -o obj/tar_test obj/host_tar_test.o
+clang -o files_test_host obj/host_files_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o calc_test_host obj/host_calc_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o clock_test_host obj/host_clock_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o sysmon_test_host obj/host_sysmon_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o hex_test_host obj/host_hex_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o tasks_test_host obj/host_tasks_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o find_test_host obj/host_find_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+./obj/tar_test obj/tar_fixture.tar tests/fixtures/tar
+clang -o diff_test_host obj/host_diff_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o notes_test_host obj/host_notes_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o unit_test_host obj/host_unit_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -o xcrypt_test_host obj/host_xcrypt_test.o obj/nano_hb_curses_host.o obj/host_compat.o
+clang -o nes_test_host obj/host_nes_test.o
+[TAR] error: truncated archive padding: /home/sarah/.hermes/cache/scratch/h321603/out_trunc/PFX/DIR/PREFIX.TXT
+[TAR] error: bad header checksum at entry 1
+PASS: synthetic tar written
+[TAR] /home/sarah/.hermes/cache/scratch/h321603/synthetic.tar -> /home/sarah/.hermes/cache/scratch/h321603/out
+[TAR] done: files=5 dirs=2 bytes=1856 skipped=0 errors=0
+PASS: extract synthetic archive rc=0
+PASS: extracted GREET.TXT exists
+PASS: GREET.TXT content byte-equal
+PASS: BIG.TXT (1024B, 512-multiple) byte-equal
+PASS: ODD.BIN (777B, not 512-multiple) byte-equal
+PASS: GNU long-name entry extracted
+PASS: ustar prefix path assembled
+PASS: explicit directory entries created
+SUB
+SUB/DEEPER
+GREET.TXT
+BIG.TXT
+ODD.BIN
+LongName-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.TXT
+PFX/DIR/PREFIX.TXT
+[TAR] 9 entries
+PASS: list synthetic archive rc=0
+PASS: truncated tar written
+[TAR] /home/sarah/.hermes/cache/scratch/h321603/trunc.tar -> /home/sarah/.hermes/cache/scratch/h321603/out_trunc
+[TAR] done: files=4 dirs=2 bytes=1840 skipped=0 errors=1
+PASS: truncated archive reports failure
+PASS: corrupt tar written
+[TAR] /home/sarah/.hermes/cache/scratch/h321603/corrupt.tar -> /home/sarah/.hermes/cache/scratch/h321603/out_trunc
+[TAR] done: files=0 dirs=0 bytes=0 skipped=0 errors=1
+PASS: corrupt checksum reports failure
+Usage: tar xf ARCHIVE [DEST] | tar tf ARCHIVE
+PASS: usage error rc=2
+[TAR] obj/tar_fixture.tar -> /home/sarah/.hermes/cache/scratch/h321603/real_out
+[TAR] done: files=6 dirs=2 bytes=1262 skipped=0 errors=0
+PASS: extract real GNU-tar archive rc=0
+PASS: real archive tree byte-identical to source
+PASS: real archive carried all fixture files
+INFO: real-archive files verified: 6
+TAR_TEST OK (18 checks)
+clang -o linux_layout_test_host obj/host_linux_layout_test.o
+clang -o linux_abi_constants_test_host obj/host_linux_abi_constants_test.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/elf_image.c src/host/sdl_test_app_host.c -o sdl_test_app_test_host
+clang -o uname_parity_host obj/host_linux_uname_parity.o obj/host_linux_uname.o
+[t4-device] leg A captured -> obj/intel/t4_legA.out
+clang -o x11_libc_test_host obj/host_x11_libc_test.o obj/host_hb_inet.o obj/host_hb_utsname.o
+clang -o x11ext_libc_test_host obj/host_x11ext_libc_test.o obj/host_hb_math_ext.o -lm
+./vdisplay_test_host
+vdisplay_test: PASS (0 failures)
+note: reference is not GNU; skipping old-syntax and stderr wording
+note: reference /usr/bin/head is not GNU; using modern-coreutils wording
+      and skipping old-syntax (-Nl) cases it does not support
+tr parity: reference=/usr/bin/tr mode=loose
+note: reference /usr/bin/wc is not GNU-layout; using layout-normalized
+      comparison (counts still byte-exact, padding relaxed)
+built obj/intel/diffutils_cmp_ref
+cmp (GNU diffutils) 2.8.1
+note: reference is not GNU; skipping escaped-check-file and --status races
+note: skipping --string cases (2.1-only option)
+note: skipping (2.1-vs-modern divergence): paste  (f:noeol.txt f:a.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:a.txt f:noeol.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:noeol.txt f:noeol2.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:noeol.txt f:empty.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:c.txt f:noeol.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:- f:noeol.txt)
+note: skipping 1,,2 list cases (2.1 accepts, modern cut rejects)
+note: gating lone-pending-blank cases (GNU prints a space where modern references emit a tab)
+note: skipping (2.1-vs-modern divergence): paste -s -s (f:a.txt f:b.txt)
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name /home/sarah/.hermes/cache/scratch/tmp.tfly836X7j/hello.txt - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - /home/sarah/.hermes/cache/scratch/tmp.tfly836X7j/hello.txt — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum 2.1 vs modern --help text differs --help — 2.1 vs modern --help text differs
+note: skipping (strict-only): cksum 2.1 vs modern --version text differs --version — 2.1 vs modern --version text differs
+note: skipping (strict-only): cksum 2.1 vs modern --help text differs --hel — 2.1 vs modern --help text differs
+note: skipping (strict-only): cksum 2.1 vs modern --help text differs --help /home/sarah/.hermes/cache/scratch/tmp.tfly836X7j/hello.txt — 2.1 vs modern --help text differs
+cksum parity: PASS (30 cases byte-exact vs /usr/bin/cksum, loose mode)
+note: gating tab-stop-list overshoot cases (modern references re-space past the last stop)
+note: skipping (2.1-vs-modern divergence): paste -d , -d : (f:a.txt f:b.txt)
+note: stdout order differs from the modern reference but is a valid topological order: tsort  [file:crlf.txt]
+note: gating long-option prefix matching (modern parsers reject prefixes)
+note: gating --help/--version text (belongs to each build's own version)
+FAIL: stdout differs (legA_musl vs legB_host)
+  A: t4-probe|write_stdout rc=9|open_nonexistent rc=-1 errno=2|open_notdir rc=-1 errno=20|read_badfd rc=-1 errno=9|write_badfd rc=-1 errno=9|close_badfd rc=-1 errno=9|getcwd_success rc=0 len=1 first='/'|getrandom_16 rc=16|urandom_open rc=3|urandom_read16 rc=16|null_open_w rc=3|null_write3 rc=3|null_open_r rc=3|null_read1 rc=0|fcntl_getfl_rdwr rc=32770|fcntl_setfl_append rc=0|fcntl_getfl_after rc=33794|fcntl_append_bit rc=1|ioctl_tiocgwinsz_entty rc=25|ioctl_tcgets_entty rc=25|dent_created rc=3|dent_opendir rc=3|dent charlie type=8|dent beta type=8|dent alpha type=8|dent_total rc=3|dent_have_alpha rc=1|dent_have_beta rc=1|dent_have_charlie rc=1|procfd_opendir rc=0|procfd_read rc=1|mode_open_creat rc=3|mode_stat rc=0|mode_is_0600 rc=1|uname_rc rc=0|uname_sysname_linux rc=1|uname_machine_x86_64 rc=1|uname sysname=Linux machine=x86_64|pipe2 rc=0|poll_ready rc=1|poll_ready_revents rc=1|select_ready rc=1|select_ready_fdset rc=1|pselect6_ready rc=1|pselect6_ready_fdset rc=1|select_timeout_rc rc=1|select_timeout_fdset rc=1|poll_badfd rc=1|poll_badfd_revents rc=32|sockpair rc=0|sockpoll_ready rc=1|sockpoll_revents rc=1|sockselect_ready rc=1|sockselect_fdset rc=1|sockpselect_ready rc=1|sockpselect_fdset rc=1|sigaction_install rc=0|raise_sigusr1 rc=0|sigusr1_delivered rc=1|sigprocmask_block rc=0|kill_self_while_blocked rc=0|sigusr1_fired_while_blocked rc=0|sigusr1_pending rc=1|sigprocmask_unblock rc=0|sigusr1_delivered_after_unblock rc=1|arch_get_fs_rc rc=0|arch_get_fs_nonzero rc=1|arch_set_fs_rc rc=0|arch_fs_roundtrip rc=1|tls_create_a rc=0|tls_create_b rc=0|tls_join_a rc=0|tls_join_b rc=0|tls_thread_a_seed rc=101|tls_thread_b_seed rc=202|tls_main_errno_untouched rc=0|thread_create rc=0|thread_create rc=0|thread_create rc=0|thread_create rc=0|thread_join_sum rc=8000|thread_counter rc=4000|futex_wake_ok rc=1|futex_waiter_woken rc=1|probe-exit|
+note: skipped 52 textutils-2.1-only cases in loose mode (puts(print_no_line_fmt) extra newline for unnumbered fields, -i 0 / -l 0 / -v past INT_MAX, logical-page numbering, aborted-on-missing-file; see the comments on cmp_case_21)
+nl parity: PASS (55 cases byte-exact vs /usr/bin/nl)
+  B: t4-probe|write_stdout rc=9|open_nonexistent rc=999|open_notdir rc=999|read_badfd rc=-1 errno=9|write_badfd rc=-1 errno=9|close_badfd rc=-1 errno=9|getcwd_success rc=0 len=1 first='/'|getrandom_16 rc=16|urandom_open rc=1004|urandom_read16 rc=-1 errno=9|null_open_w rc=1005|null_write3 rc=-1 errno=9|null_open_r rc=1006|null_read1 rc=-1 errno=9|fcntl_getfl_rdwr rc=-1 errno=9|fcntl_setfl_append rc=-1 errno=9|fcntl_getfl_after rc=-1 errno=9|fcntl_append_bit rc=1|ioctl_tiocgwinsz_entty rc=9|ioctl_tcgets_entty rc=9|dent_created rc=3|dent_opendir rc=1010|dent_total rc=0|dent_have_alpha rc=0|dent_have_beta rc=0|dent_have_charlie rc=0|procfd_opendir rc=0|procfd_read rc=0|mode_open_creat rc=1012|mode_stat rc=0|mode_is_0600 rc=1|uname_rc rc=0|uname_sysname_linux rc=1|uname_machine_x86_64 rc=1|uname sysname=Linux machine=x86_64|pipe2 rc=0|poll_ready rc=1|poll_ready_revents rc=1|select_ready rc=1|select_ready_fdset rc=1|pselect6_ready rc=1|pselect6_ready_fdset rc=1|select_timeout_rc rc=1|select_timeout_fdset rc=1|poll_badfd rc=1|poll_badfd_revents rc=32|sockpair rc=0|sockpoll_ready rc=1|sockpoll_revents rc=1|sockselect_ready rc=1|sockselect_fdset rc=1|sockpselect_ready rc=1|sockpselect_fdset rc=1|sigaction_install rc=0|raise_sigusr1 rc=0|sigusr1_delivered rc=1|sigprocmask_block rc=0|kill_self_while_blocked rc=0|sigusr1_fired_while_blocked rc=0|sigusr1_pending rc=1|sigprocmask_unblock rc=0|sigusr1_delivered_after_unblock rc=1|arch_get_fs_rc rc=0|arch_get_fs_nonzero rc=1|arch_set_fs_rc rc=0|arch_fs_roundtrip rc=1|tls_create_a rc=0|tls_create_b rc=0|tls_join_a rc=0|tls_join_b rc=0|tls_thread_a_seed rc=101|tls_thread_b_seed rc=202|tls_main_errno_untouched rc=0|thread_create rc=0|thread_create rc=0|thread_create rc=0|thread_create rc=0|thread_join_sum rc=8000|thread_counter rc=4000|futex_wake_ok rc=1|futex_waiter_woken rc=1|probe-exit|
+t4 host differential: A=0 B=0 cases=3
+t4_parity: FAIL
+make: *** [Makefile:3745: t4_compat_parity] Error 1
+make: *** Waiting for unfinished jobs....
+note: gating the obsolete `-LIST' cases (2.1/port reject, modern references accept)
+unexpand parity: PASS (62/77 cases compared, 15 gated vs the loose reference: /usr/bin/unexpand)
+note: '--help FILE'/'--version FILE' not compared (2.1 argc==2-only quirk, see port note)
+note: skipping --help/--version cases (2.1 text vs modern coreutils)
+note: skipping unsorted-input cases (2.1 has no order check, modern comm exits 1)
+note: skipping 'comm - -' (2.1 double-fcloses stdin; modern comm hangs)
+comm parity: PASS (48 cases byte-exact vs /usr/bin/comm)
+tsort parity: PASS (63 cases vs /usr/bin/tsort; 2 stdout+rc only; 12 modern-divergence skips; 1 valid-order notes)
+note: skipping --status-with-missing-file (uutils prints a FAILED line)
+note: skipping -t [:lower:] abc (2.1 rejects, modern tr translates)
+note: 'tac -r -s .\|NL' (byte-reverse) exercised via the '[0-9]+' and 'x*' regex cases
+note: skipping (2.1-vs-modern divergence): paste -s (f:a.txt f:nonexistent_xyz.txt)
+note: skipping (2.1-vs-modern divergence): paste -s (f:nonexistent_xyz.txt f:a.txt)
+note: skipping --help/--version (2.1 vs coreutils text differs)
+md5sum parity: PASS (89 cases byte-exact vs /usr/bin/md5sum)
+
+cmp parity: 55/55 byte-exact PASS
+note: skipping (2.1-vs-modern divergence): paste -s (f:adir)
+note: skipping --help/--version cases (modern text differs; strict ref races them)
+cut parity: PASS (89 cases byte-exact vs /usr/bin/cut)
+note: skipping --help/--version (modern tr text legitimately differs)
+note: skipping --help/--version cases (2.1 text vs coreutils)
+paste parity: PASS (87 cases byte-exact vs /usr/bin/paste, loose mode)
+note: skipping trailing-backslash cases (2.1 rejects, modern tr warns)
+note: skipping --help/--version cases (2.1-lineage texts; run head_parity_strict)
+head parity: PASS (95 cases byte-exact vs /usr/bin/head)
+tac parity: PASS (62 cases vs /usr/bin/tac; 2 stdout+rc only; 8 modern-divergence skips)
+tr parity: PASS (125 cases byte-exact vs /usr/bin/tr)
+note: skipping --help/--version cases (2.1-lineage texts; run wc_parity_strict)
+wc parity: PASS (103 cases byte-exact vs /usr/bin/wc)
+self-test: OK — flipping ho_open FAILs (rc=0 clean pass), restoring passes
+note: skipping --help/--version cases (2.1-lineage texts; run tail_parity_strict)
+tail parity: PASS (166 cases byte-exact vs /usr/bin/tail)
+note: reference accepts -4,8 too (its POSIX-200112 gate is off/absent)
+note: skipping --help/--version text cases (2.1 text vs modern coreutils)
+expand parity: PASS (171 cases byte-exact vs /usr/bin/expand)
+note: skipping -w 0 / -w 2147483648 cases (uutils fold accepts 0 and loops, and clamps huge widths; 2.1/GNU reject)
+note: skipping 11 uutils-vs-2.1 divergence cases (tab/space-run break points incl. context-dependent output, -w ' 7', -- end-of-options, missing-operand continue)
+note: skipping --help/--version text and 200112-rejection cases (modern fold text differs)
+fold parity: PASS (122 cases byte-exact vs /usr/bin/fold)
+HOST_TESTS_RC=2
