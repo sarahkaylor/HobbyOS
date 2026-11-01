@@ -2232,6 +2232,13 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         }
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
+        /* GB-031-V: musl's mmap/munmap/mprotect are Linux 9/11/10.  They were
+           absent, so SDL's first surface allocation got -ENOSYS; __syscall_ret
+           then wrote errno at tp-8 and the process died in __errno_location.
+           The native handlers already take the Linux 6-arg shape. */
+        case 9:  syscall_num = SYS_MMAP;     break; /* mmap(addr,len,prot,fl,fd,off) */
+        case 10: syscall_num = SYS_MPROTECT; break; /* mprotect(addr,len,prot)       */
+        case 11: syscall_num = SYS_MUNMAP;   break; /* munmap(addr,len)              */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
         /* GB-141 (V evidence): musl's _Exit calls exit_group(231), not exit(60)
            when the program has a thread/group — the compat table had NO 231, so it
