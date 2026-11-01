@@ -7,6 +7,10 @@ musl SDL2 app, plus the profile recorded where M2 can cite it. Gate: a build
 from a clean tree succeeds twice in a row with the same artifact hash, and the
 app links as a static non-PIE ELF that the loader accepts."
 
+*(Corrected at GB-031-V: the loader's contract is **static-PIE**, not static
+non-PIE — an `ET_EXEC` below the user window is refused with "a -static-pie
+build is required". The profile now links and asserts static-PIE.)*
+
 ## Toolchain — musl-gcc, not clang-musl (GB-031-V RED fix, 2026-10-25)
 
 The verifier's RED (#166) caught the previous profile producing a **glibc**
@@ -35,8 +39,9 @@ Pins SDL2 `release-2.30.10` (archive SHA256 `f59adf36...661196aa`), configures
 with `CC=musl-gcc --host=x86_64-pc-linux-musl`, `--disable-shared
 --enable-static`, enabling the Linux **evdev** input driver and the
 dummy/offscreen video drivers; disables X11/wayland/GL/audio/joystick (not
-needed on HobbyOS). Outputs `<dest>/build/.libs/libSDL2.a` and a static musl
-`sdl2_static_test` ELF.
+needed on HobbyOS). Outputs `<dest>/build/.libs/libSDL2.a` and a **static-PIE**
+musl `sdl2_static_test` that initialises video, creates a 64×48 window, fills
+it and updates the surface.
 
 ## Reproducibility (the gate) — cross-destination
 
@@ -49,18 +54,18 @@ identically:
 (libSDL2.a and sdl2_static_test sha256 — recorded from the gate run below)
 libSDL2.a         sha256 = 141e47ccb2a54914141f43d59304f88ba65490dbf5b0420bf9a87b718a2ba35a  (dest A)
 libSDL2.a         sha256 = 141e47ccb2a54914141f43d59304f88ba65490dbf5b0420bf9a87b718a2ba35a  (dest B, identical)
-sdl2_static_test  sha256 = dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a054f5ee2f99  (dest A)
-sdl2_static_test  sha256 = dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a054f5ee2f99  (dest B, identical)
+sdl2_static_test  sha256 = 593874048a2b2a3c706ae84e12180bd5b982d8de5c34c249b9807bb55a46a44f  (dest A)
+sdl2_static_test  sha256 = 593874048a2b2a3c706ae84e12180bd5b982d8de5c34c249b9807bb55a46a44f  (dest B, identical)
 ```
 
-`file` on the linked app: `ELF 64-bit LSB executable, x86-64, statically linked`.
+`file` on the linked app: `ELF 64-bit LSB pie executable, x86-64, static-pie linked`.
 `nm` shows musl's `libc_start_main_stage2` and **no** `__libc_start_main_impl`.
 
 The gate **asserts**, rather than prints, the ELF class the loader needs — a PIE
 or dynamically-linked artifact is a failure on exit status, not a line in a log:
 
 ```
-readelf -h <app> | grep -q 'Type:.*EXEC'        # non-PIE
+readelf -h <app> | grep -q 'Type:.*DYN'         # static-PIE (loader contract)
 readelf -h <app> | grep -q 'Machine:.*X86-64'
 readelf -l <app> | grep -q 'INTERP'  -> FAIL    # no PT_INTERP (not dynamic)
 ```
@@ -75,5 +80,8 @@ two missing files can never compare "IDENTICAL".
   the on-screen driver is a small shim over the merged fb node (GB-025/026),
   tracked separately. As the verifier noted, "fbcon" is not a claim this
   profile's build carries; it is a follow-on half.
-- The **loader-acceptance boot test** (static non-PIE ELF actually mapped by
-  the running HobbyOS kernel) — needs the booted OS, tracked for the T3 tier.
+- The **loader-acceptance boot test** (static-PIE ELF actually mapped by the
+  running HobbyOS kernel) — needs the booted OS, tracked for the T3 tier. The
+  vehicle now dispatches at `abi=0x1` and reaches `SDL_Init(SDL_INIT_VIDEO)`;
+  it currently parks on the compat `futex(202)`/`clone(56)` gap, tracked on
+  GB-031.
