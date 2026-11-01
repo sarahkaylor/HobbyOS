@@ -11,7 +11,7 @@ not built anything yet — never a requirement.
 
 | Path | Role |
 |---|---|
-| `webkit-hobbyos-rp-f-e9a040c5b4.tar.xz.part-00/01` | The fork snapshot (split tarball; parts are sha-verified) |
+| `webkit-hobbyos-bu-2148171ff6.tar.xz.part-00/01` | The fork snapshot (split tarball; parts are sha-verified) |
 | `extract.sh` | Reassemble the parts → verify sha256 → extract to `src/` |
 | `build.sh` | Build `WebProcess` from the vendored source → `build/<arch>/browser.bin` |
 | `rebuild_browser.sh` | Regenerate the optional caches (`cache/browser-{arm,x64}.bin.xz`) from the vendored source |
@@ -36,13 +36,17 @@ sanity check), and `--deps-only` just builds the cross-deps prefix.
 
 - Fork origin: `https://github.com/WebKit/WebKit.git` (clone; base = tag
   `webkitgtk-2.54.0` @ `5220e80b97a253c60ed899361654142ab5021998`).
-- Snapshot ref: **`browser/rp-f` @ `e9a040c5b4`**
-  (2026-10-08) — the integration tip containing every merged port line
-  (`browser/l8-wk5` @ `cdabe011af` included): D1 pthread smoke, D2 URL
-  normalization, the crash-fix toolchain hardening (mtime-aware shims,
-  `IS_NEWER_THAN`), the tracer guard, and the D3 UI-thread split (close owned
-  by the UI thread).  Port content is grouped under `HobbyOS/` in the tree
-  (AD-11).
+- Snapshot ref: **`browser-usability` @ `2148171ff6`** (2026-10-29), on top
+  of `ci-on-main` @ `acb77fd6a9` — the browser usability integration: real
+  address-bar editing + omnibox search + browser shortcuts (addrbar), engine-
+  driven page mouse with hover/wheel/drag-select/`<select>` popup/visible form
+  controls (pagemouse), complete page keyboard input with modifiers, Tab focus
+  ring and clipboard (pagekeys), real form POST, http→https, gzip/deflate,
+  cookies across redirects, in-memory localStorage and opt-in page timers
+  (netcompat), failed navigations recorded in tab history, and the WK5Alloc
+  malloc(0) size-class fix (cnn.com crash).  The previous
+  snapshot was `browser/rp-f` @ `e9a040c5b4` (2026-10-08).  Port content is
+  grouped under `HobbyOS/` in the tree (AD-11).
 - Exclusions (and why):
   - Test suites: `LayoutTests/`, `JSTests/`, `PerformanceTests/`, `Websites/`,
     `WebDriverTests/`, `ManualTests/` — not build inputs.
@@ -58,16 +62,16 @@ sanity check), and `--deps-only` just builds the cross-deps prefix.
     they are meta, not build inputs.  `Source/ThirdParty/{skia,ANGLE,capstone,...}`
     are KEPT (skia is on the port's link graph; ANGLE/capstone mirror the
     upstream release-tarball composition).
-- Contents: 55,157 files; raw tar 865,218,560 B; xz 173,734,396 B over two parts.
+- Contents: 55,169 files; raw tar 865,628,160 B; xz 173,840,972 B over two parts.
 
 SHA256 (canonical list in `SHA256SUMS`):
 
 | Artifact | SHA256 |
 |---|---|
-| reassembled snapshot `.tar.xz` | `b850179d07c034e10d4b17cd864f26f313f61a18270a739c02119fca16536b2e` |
-| `...part-00` | `c77cdf82d956647fa6f3d0b51963a8a5d3ac0d13bda41019cc9fc1d8d9528b56` |
-| `...part-01` | `3bb5a81fb012d596b2a41ef6a5d644662c2aebf41a9560943a588b9510afaea2` |
-| raw tar (reference) | `6ee50d00f0c732c0c55038e8b4e282a5f97d7fc1dc355adbd9f3102d0ad72d72` |
+| reassembled snapshot `.tar.xz` | `b848d0c70c92ae17c47372b4d9a9e990452ee524b742a8fa3eb9fdc0972dc245` |
+| `...part-00` | `3b54e0e20c1599b6c8b5c3b95c01325fc8faf0961d6fecc4131ecfa06c8e6123` |
+| `...part-01` | `b73cb894004c558dcb424e1c46773e289252774c25ec6cb241188620a8215116` |
+| raw tar (reference) | `c9ed59ae7d83a24164de9e88b99b70ab4fea2d9dbd1f1413cebca72c77417195` |
 
 Refreshing the snapshot when the fork moves (run in the fork clone, from the
 desired ref; then re-split with `split -b 90000000 -d`, update `SHA256SUMS`
@@ -164,8 +168,8 @@ committed cache carries the two known-good flat images:
 
 | Cache file | Flat sha256 (decompressed) | Size | Built from |
 |---|---|---|---|
-| `cache/browser-arm.bin.xz` | `4dcdd5095ff80efb03c081f3ffe99cf70a6e1ada0b4077904a5ae52c9d8515ae` | 87,568,624 B | from-source build of this snapshot (`e9a040c5b4`; `build/arm/browser.bin`, ELF `3553f80a…`), 2026-10-08 |
-| `cache/browser-x64.bin.xz` | `8f256a3641c2ec70e7723d5d04dabd1036a2e438339bda59429aa04fa6a208ba` | 101,206,816 B | **STALE** — wf1b-era `WebKitBuild/HobbyOS-intel` `WebProcess` (ELF sha256 `a90337ea…`), 2026-10-06, pre-D2/D3 (no `ui close-detected` / `url-norm`). Not regenerated; refresh when the intel track resumes. |
+| `cache/browser-arm.bin.xz` | `879e9c2ad95a81c83aba93f1df80ba07be6b10905d6eb988f83e0c055389b6d1` | 87,860,448 B | from-source build of this snapshot (`2148171ff6`; `build/arm/browser.bin`, ELF `c185bd0d…`), 2026-10-29 |
+| `cache/browser-x64.bin.xz` | `9c915e154c0e4165f6a55eeef99d9dfaf9b5e7b3084cf8e801143a01d3ca5b66` | 105,698,048 B | from-source build of this snapshot (`2148171ff6`; `build/intel/browser.bin`, ELF `89c5b353…`), 2026-10-29 |
 
 `make disk.img` uses a cache file only when neither a `BROWSER_BIN` file
 (explicit override or a local fork/worktree build) nor a vendored-source

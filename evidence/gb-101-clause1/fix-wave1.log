@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/wabi-gb101/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 7890 console lines, 254 FAIL lines, 5 user memory fault records across 5 processes, 84 programs exited, halted=1
+T3_intel: FAIL — 10 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 254 FAIL line(s); first 20:
+2389:MMTEST FAIL 13
+3190:[SEDTEST] FAIL basic_s (stdout)
+3225:[WCTEST] FAIL multi-file total
+3266:[SEDTEST] FAIL s_g (cannot write fixtures)
+3268:[SEDTEST] FAIL s_2nd (cannot write fixtures)
+3275:[FOLDTEST] FAIL default 80
+3285:[WCTEST] FAIL long opts
+3293:[WCTEST] FAILURES: 5
+3299:CUT.BINLoading program for scheduler (v2 AS):   TLS_T errno-isolation: FAIL
+3304:[SIGTEST] FAIL waitpid returns the child got=32 want=4294964048
+3311:[PASTETEST] FAIL --serial long option
+3328:/BLKT2.TXT[SIGTEST] FAIL pipe() for the poll park got=-1 want=0
+3424:[CUTTEST] FAIL --output-delimiter file
+3505:[SEDTEST] FAIL s_p_n (spawn SED.BIN failed)
+3531:[HEDTEST] FAIL multi-file headers
+3552:[GREPTEST] FAIL count_c_neg (spawn GREP.BIN failed)
+3818:[CKSUMTEST] FAIL 'a\n' (2 bytes)
+3827:[GREPTEST] FAIL invert_v (spawn GREP.BIN failed)
+3865:[SEDTEST] FAIL amp (spawn SED.BIN failed)
+3900:  FPU_T torture-child: FAIL
+T3_intel EXIT=1
+EXIT=1

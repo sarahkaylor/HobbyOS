@@ -1,0 +1,7 @@
+# server stage pins (lane xserver).  Format: <tarball> <source>
+# sha256 of every tarball lives in ../sums/<tarball>.sha256 (README.md table).
+pixman-0.46.4.tar.xz        https://www.x.org/archive/individual/lib/pixman-0.46.4.tar.xz
+libfontenc-1.1.9.tar.xz     https://www.x.org/archive/individual/lib/libfontenc-1.1.9.tar.xz
+libXfont2-2.0.9.tar.xz      https://www.x.org/archive/individual/lib/libXfont2-2.0.9.tar.xz
+libxkbfile-1.2.0.tar.xz     https://www.x.org/archive/individual/lib/libxkbfile-1.2.0.tar.xz
+xorg-server-21.1.25.tar.xz  https://www.x.org/archive/individual/xserver/xorg-server-21.1.25.tar.xz

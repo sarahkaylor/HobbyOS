@@ -1,0 +1,3 @@
+# /ICEWM/toolbar -- HobbyOS IceWM taskbar quick-launch buttons.
+prog "XEyes" xload XEYESR.BIN
+prog "XCalc" app XCALCR.BIN

@@ -38,7 +38,10 @@
 #include <sys/select.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
+#include <sys/un.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
+#include <stdio.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -52,6 +55,8 @@ void print_dec(long val);
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
+#include <sys/un.h>
+#include <sys/ioctl.h>
 #endif
 
 /* MSG_CMSG_CLOEXEC is a Linux recvmsg flag.  macOS has no such constant --
@@ -890,6 +895,241 @@ static void t_select_unix(void) {
   close(sv[0]);
 }
 
+
+/* ---- 8. IceWM M1 (icewm.md 4.1): named AF_UNIX stream sockets ---------- *
+ * The X11 transport shape: a listener bound to a path (and the abstract
+ * twin), a forked client connecting by name, accept/read/write, names via
+ * getsockname/getpeername, poll readiness on the listener, a real blocking
+ * accept() woken by a late connect, readv/writev with > 8 vectors,
+ * shutdown(SHUT_WR) half-close, FIONREAD.  On the host the same checks run
+ * against Linux (the reference semantics). */
+
+static socklen_t mk_un(struct sockaddr_un *sa, const char *name, int abstract) {
+  memset(sa, 0, sizeof *sa);
+  sa->sun_family = AF_UNIX;
+  size_t n = strlen(name);
+  if (abstract) {
+    memcpy(sa->sun_path + 1, name, n);
+    return (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + n);
+  }
+  memcpy(sa->sun_path, name, n);
+  return (socklen_t)(offsetof(struct sockaddr_un, sun_path) + n + 1);
+}
+
+static void t_named(void) {
+  char path[64];
+#ifdef HOST_TEST
+  snprintf(path, sizeof path, "/tmp/ipct-%d.sock", (int)getpid());
+  unlink(path);
+#else
+  strcpy(path, "/tmp/.X11-unix/X7");
+  unlink(path); /* HobbyOS: a harmless no-op (names are not files) */
+#endif
+  struct sockaddr_un sa, ab, out;
+  socklen_t salen = mk_un(&sa, path, 0);
+  socklen_t ablen = mk_un(&ab, path, 1);
+
+  int l = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  check("named: socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC)", l >= 0);
+  if (l < 0) return;
+  check("named: bind(path)", bind(l, (struct sockaddr *)&sa, salen) == 0);
+  check("named: listen(8)", listen(l, 8) == 0);
+  socklen_t olen = sizeof out;
+  memset(&out, 0, sizeof out);
+  int r = getsockname(l, (struct sockaddr *)&out, &olen);
+  check("named: getsockname(listener) == the bound path",
+        r == 0 && olen == salen && strcmp(out.sun_path, path) == 0);
+
+  int dup_l = socket(AF_UNIX, SOCK_STREAM, 0);
+  errno = 0;
+  check("named: second bind(path) -> -1/EADDRINUSE",
+        bind(dup_l, (struct sockaddr *)&sa, salen) == -1 && errno == EADDRINUSE);
+  check("named: abstract twin is a distinct key (bind ok)",
+        bind(dup_l, (struct sockaddr *)&ab, ablen) == 0);
+  close(dup_l);
+
+  {
+    struct sockaddr_un nx;
+    socklen_t nxlen = mk_un(&nx, "ipct-nobody-listens", 1);
+    int c = socket(AF_UNIX, SOCK_STREAM, 0);
+    errno = 0;
+    check("named: connect(absent abstract name) -> -1/ECONNREFUSED",
+          connect(c, (struct sockaddr *)&nx, nxlen) == -1 &&
+              errno == ECONNREFUSED);
+    close(c);
+  }
+
+  /* Nonblocking accept on an empty queue; listener not readable. */
+  {
+    int fl = fcntl(l, F_GETFL);
+    fcntl(l, F_SETFL, fl | O_NONBLOCK);
+    errno = 0;
+    r = accept(l, 0, 0);
+    check("named: O_NONBLOCK accept on an empty queue -> -1/EAGAIN",
+          r == -1 && errno == EAGAIN);
+    if (r >= 0) close(r);
+    fcntl(l, F_SETFL, fl & ~O_NONBLOCK);
+    struct pollfd pf = {l, POLLIN, 0};
+    check("named: idle listener poll(0) -> 0", poll(&pf, 1, 0) == 0);
+  }
+
+  int pressure = 0;
+  uint64_t t0 = now_ms();
+  int pid = fork_retry(&pressure);
+  if (pressure) {
+    print_console("  IPC_T named: SKIP fork checks (slot pressure)\n");
+    close(l);
+    return;
+  }
+  if (pid < 0) {
+    check("named: fork", 0);
+    close(l);
+    return;
+  }
+  if (pid == 0) {
+    /* Client: connect late (the parent is parked in accept), then talk. */
+    close(l);
+    ms_wait(100);
+    int c = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (c < 0) exit(10);
+    if (connect(c, (struct sockaddr *)&sa, salen) != 0) exit(11);
+    struct sockaddr_un pn;
+    socklen_t pl = sizeof pn;
+    if (getpeername(c, (struct sockaddr *)&pn, &pl) != 0 ||
+        strcmp(pn.sun_path, path) != 0)
+      exit(12);
+    if (write(c, "ping", 4) != 4) exit(13);
+    char b[8];
+    int got = 0;
+    while (got < 4) {
+      int n = (int)read(c, b + got, 4 - got);
+      if (n <= 0) exit(14);
+      got += n;
+    }
+    if (memcmp(b, "pong", 4) != 0) exit(15);
+    /* 10 vectors (> the kernel's 8 per sendmsg): writev must chunk. */
+    char v[10][3];
+    struct iovec iov[10];
+    for (int i = 0; i < 10; i++) {
+      v[i][0] = (char)('a' + i);
+      v[i][1] = (char)('A' + i);
+      v[i][2] = (char)('0' + i);
+      iov[i].iov_base = v[i];
+      iov[i].iov_len = 3;
+    }
+    if (writev(c, iov, 10) != 30) exit(16);
+    if (shutdown(c, SHUT_WR) != 0) exit(17);
+    errno = 0;
+    if (write(c, "x", 1) != -1 || errno != EPIPE) exit(18);
+    /* Wait for the server's goodbye, then EOF. */
+    got = (int)read(c, b, 1);
+    if (got != 1 || b[0] != 'Q') exit(19);
+    if (read(c, b, 1) != 0) exit(20);
+    close(c);
+    exit(0);
+  }
+
+  /* Server: a blocking accept() parks until the child connects. */
+  struct sockaddr_un cn;
+  socklen_t cl = sizeof cn;
+  int s = accept(l, (struct sockaddr *)&cn, &cl);
+  uint64_t el = now_ms() - t0;
+  check("named: blocking accept() returned the client", s >= 0);
+  check("named: accept() parked until the late connect (>= 50ms)", el >= 50);
+  check("named: accepted peer address is unnamed (family only)",
+        s >= 0 && cl == (socklen_t)offsetof(struct sockaddr_un, sun_path));
+  if (s < 0) {
+    int st = 0;
+    waitpid(pid, &st, 0);
+    close(l);
+    return;
+  }
+  check("named: accept() without SOCK_CLOEXEC leaves FD_CLOEXEC clear",
+        fcntl(s, F_GETFD) == 0);
+  olen = sizeof out;
+  r = getsockname(s, (struct sockaddr *)&out, &olen);
+  check("named: accepted fd's local name is the listener path",
+        r == 0 && strcmp(out.sun_path, path) == 0);
+
+  char b[64];
+  int got = 0;
+  while (got < 4) {
+    int n = (int)read(s, b + got, 4 - got);
+    if (n <= 0) break;
+    got += n;
+  }
+  check("named: server read the client's 4 bytes", got == 4 &&
+        memcmp(b, "ping", 4) == 0);
+  check("named: server write reaches the client", write(s, "pong", 4) == 4);
+
+  /* readv: up to 30 bytes into 10 vectors (wait for them via poll). */
+  {
+    struct pollfd pf = {s, POLLIN, 0};
+    int pr = poll(&pf, 1, 5000);
+    check("named: accepted fd POLLIN once data arrives",
+          pr == 1 && (pf.revents & POLLIN));
+    ms_wait(50); /* let the whole writev land */
+    int avail = -1;
+    check("named: ioctl(FIONREAD) reports the queued bytes",
+          ioctl(s, FIONREAD, &avail) == 0 && avail >= 1 && avail <= 30);
+    char v[10][3];
+    struct iovec iov[10];
+    for (int i = 0; i < 10; i++) {
+      iov[i].iov_base = v[i];
+      iov[i].iov_len = 3;
+    }
+    int tot = 0;
+    while (tot < 30) {
+      /* Re-aim the vectors past what already arrived. */
+      struct iovec rest[10];
+      int k = 0, off = tot;
+      for (int i = 0; i < 10; i++) {
+        if (off >= 3) { off -= 3; continue; }
+        rest[k].iov_base = v[i] + off;
+        rest[k].iov_len = (size_t)(3 - off);
+        off = 0;
+        k++;
+      }
+      int n = (int)readv(s, rest, k);
+      if (n <= 0) break;
+      tot += n;
+    }
+    check("named: writev(10 iovecs) -> readv delivers all 30 bytes in order",
+          tot == 30 && v[0][0] == 'a' && v[9][2] == '9' && v[5][1] == 'F');
+  }
+  /* Half-close from the client: EOF here, but we can still write. */
+  check("named: read after peer shutdown(SHUT_WR) -> 0 (EOF)",
+        read(s, b, sizeof b) == 0);
+  check("named: write after peer SHUT_WR still delivered", write(s, "Q", 1) == 1);
+  close(s);
+
+  int st = 0;
+  waitpid(pid, &st, 0);
+  int code = (st >> 8) & 0xff;
+  check("named: client exit 0 (connect/getpeername/writev/shutdown ok)",
+        code == 0);
+  if (code != 0) {
+    print_console("  IPC_T named: client exit code ");
+    print_dec(code);
+    print_console("\n");
+  }
+
+  close(l);
+#ifdef HOST_TEST
+  unlink(path);
+#endif
+  /* Closing the listener frees the name (device) / leaves a dead path
+   * (Linux, before unlink): either way a connect must now fail. */
+  {
+    int c = socket(AF_UNIX, SOCK_STREAM, 0);
+    errno = 0;
+    int cr = connect(c, (struct sockaddr *)&sa, salen);
+    check("named: connect after listener close -> ENOENT/ECONNREFUSED",
+          cr == -1 && (errno == ENOENT || errno == ECONNREFUSED));
+    close(c);
+  }
+}
+
 int main(void) {
   print_console("IPC_T: AF_UNIX socketpair + poll + SCM_RIGHTS acceptance\n");
 #ifdef HOST_TEST
@@ -899,6 +1139,10 @@ int main(void) {
   signal(SIGPIPE, SIG_IGN);
 #endif
 
+  /* IceWM M1 first: the named-socket surface is the newest and the one
+   * the X11 session depends on; run it before the older P4 sections so a
+   * late-wave fault elsewhere cannot hide its verdict. */
+  t_named();
   t_stream_fork();
   t_stream_ring();
   t_seqpacket();

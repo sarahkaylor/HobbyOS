@@ -51,6 +51,11 @@ struct file {
   file_type_t type;   /**< Type of the file */
   int ref_count;      /**< Number of processes currently using this file */
   spinlock_t lock;    /**< Lock for atomic access to file state */
+  /* GB-019: the O_* flags this file was opened with (access mode + status bits).
+     Linux F_GETFL (and compat ioctl F_GETFL) must return these on ANY fd, not
+     just sockets; without it a regular file //dev/null answers -ENOTSOCK instead
+     of its flags.  Set at open, read by file_fcntl F_GETFL, written by F_SETFL. */
+  uint32_t open_flags;
   union {
     struct {
       struct fat16_dir_entry entry; /**< FAT16 directory entry copy */
@@ -196,6 +201,9 @@ struct fd_set_k {
 #define K_F_SETFL      4
 #define K_FD_CLOEXEC   1
 #define K_O_NONBLOCK   0x800
+/* GB-019: O_APPEND — Linux value (02000 = 0x400), distinct from the userlibc's
+ * 8.  F_GETFL returns it; F_SETFL(O_APPEND) sets it on the stored word. */
+#define K_O_APPEND    0x400
 /* P2.4 (S4, design section 4.3): memfd sealing commands + seal bits
  * (Linux numbers; SHRINK/GROW enforced at ftruncate, WRITE advisory). */
 #define K_F_ADD_SEALS  1033
@@ -231,6 +239,15 @@ struct fd_set_k {
 #define K_SOCK_SEQPACKET 5
 #define K_SOCK_CLOEXEC  0x80000
 #define K_SO_DOMAIN     39
+/* IceWM M1 (icewm.md section 4.1): named AF_UNIX (Linux values). */
+#define K_SOCK_NONBLOCK 0x800
+#define K_SO_SNDBUF     7
+#define K_SO_RCVBUF     8
+#define K_SO_KEEPALIVE  9
+#define K_SO_PASSCRED   16
+#define K_SO_PEERCRED   17
+#define K_SO_ACCEPTCONN 30
+#define K_UCRED_SIZE    12 /* struct ucred { pid_t; uid_t; gid_t; } */
 
 /* SYS_SOCKET: create a socket and install it in the process fd table.
  * Returns the user fd (>= 0) or -errno (EAFNOSUPPORT, EPROTONOSUPPORT,
@@ -332,6 +349,33 @@ int file_recvmsg(struct process *p, int fd, uint64_t umsg, int flags);
  * entries with nonzero revents, 0 on timeout, -errno (EINVAL/EFAULT). */
 int file_poll(struct process *p, struct k_pollfd *fds, int nfds,
               int timeout_ms);
+
+/* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX stream sockets ------
+ * Kernel-buffer forms (unit tests drive these directly): `sa` is a struct
+ * sockaddr (sockaddr_un for unix fds, sockaddr_in for INET connect) of
+ * `salen` bytes in kernel memory; outputs are K_UNIX_SUN_LEN-byte kernel
+ * buffers with the Linux address length in *salen_out.  Return 0 / an fd /
+ * -errno; -2 means "parked, restart the syscall" (blocking accept/connect).
+ * INET fds: connect routes to file_socket_connect; bind/listen/accept/
+ * getsockname/getpeername/shutdown answer -EOPNOTSUPP (unchanged INET). */
+int file_bind(struct process *p, int fd, const uint8_t *sa, int salen);
+int file_listen(struct process *p, int fd, int backlog);
+int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
+                int *salen_out);
+int file_connect_sa(struct process *p, int fd, const uint8_t *sa, int salen);
+int file_sockname(struct process *p, int fd, int peer, uint8_t *sa_out,
+                  int *salen_out);
+int file_shutdown(struct process *p, int fd, int how);
+
+/* User-pointer forms for the trap layer (SYS_BIND..SYS_GETPEERNAME):
+ * every user range is validated here before any state changes; `ulenp`
+ * is a user socklen_t* (value-result). */
+int file_bind_user(struct process *p, int fd, uint64_t usa, int salen);
+int file_connect_user(struct process *p, int fd, uint64_t usa, int salen);
+int file_accept_user(struct process *p, int fd, uint64_t usa, uint64_t ulenp,
+                     int flags);
+int file_sockname_user(struct process *p, int fd, int peer, uint64_t usa,
+                       uint64_t ulenp);
 
 /* 1 when the global slot holds an IPC endpoint end (pipe or unix socket
  * end): the spawn2 default-stderr exclusion class. */

@@ -48,7 +48,7 @@ extern "C" {
 #define kill ho_kill
 #define fork ho_fork
 #define pipe ho_pipe
-#define connect ho_connect
+#define net_connect ho_connect
 #define sleep ho_sleep
   /* Host-side mocks live in src/host/compat.c; these declarations make the
    * renamed symbols callable from legacy apps compiled under HOST_TEST. */
@@ -78,7 +78,11 @@ extern "C" {
 
   int kill(int pid, int sig);
   void yield(void);
-  int connect(uint32_t ip, uint16_t port, int protocol);
+  /* Legacy F0 one-shot "socket + connect" (ip/port host order, protocol
+   * 6/17) -> fd.  Renamed from connect() by IceWM M1 (icewm.md 4.1) so the
+   * POSIX connect(fd, sockaddr*, socklen_t) in <sys/socket.h> owns the
+   * name; same SYS_CONNECT syscall, same behaviour. */
+  int net_connect(uint32_t ip, uint16_t port, int protocol);
   int dup(int fd);
   int dup2(int oldfd, int newfd);
   int spawn(const char *filename, const char *args);
@@ -312,15 +316,25 @@ extern "C" {
   /* P6.1: variadic like glibc — F_GETLK/F_SETLK/F_SETLKW pass a pointer to
    * struct flock (<fcntl.h>), which the full-width syscall arg preserves. */
   int fcntl(int fd, int cmd, ...);
-  int getsockopt(int fd, int level, int optname, void *val, int *len);
-  int setsockopt(int fd, int level, int optname, const void *val, int len);
+  /* socklen_t-compatible (unsigned int) since IceWM M1, so these match the
+   * POSIX prototypes in <sys/socket.h> when a TU includes both. */
+  int getsockopt(int fd, int level, int optname, void *val,
+                 unsigned int *len);
+  int setsockopt(int fd, int level, int optname, const void *val,
+                 unsigned int len);
   int getrandom(void *buf, size_t len, unsigned int flags);
 
   /* select() over the frozen syscall: masks are FD_SETSIZE (256) wide —
    * eight 32-bit words.  timeout_ms < 0 waits forever, 0 polls.  Returns the
    * number of ready descriptors, 0 on timeout, -1/errno on error. */
 #define FD_SETSIZE 256
-  typedef struct { unsigned int bits[FD_SETSIZE / 32]; } fd_set;
+  /* `fds_bits` aliases `bits` (same storage) -- see <sys/select.h>. */
+  typedef struct {
+    union {
+      unsigned int bits[FD_SETSIZE / 32];
+      unsigned int fds_bits[FD_SETSIZE / 32];
+    };
+  } fd_set;
 #define FD_ZERO(set)       memset((set), 0, sizeof(fd_set))
 #define FD_SET(fd, set)    ((set)->bits[(fd) / 32] |= (1u << ((fd) % 32)))
 #define FD_CLR(fd, set)    ((set)->bits[(fd) / 32] &= ~(1u << ((fd) % 32)))

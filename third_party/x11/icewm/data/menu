@@ -1,0 +1,7 @@
+# /ICEWM/menu -- HobbyOS IceWM start menu (third_party/x11/icewm/data/menu).
+# Commands are HobbyOS flat images in the disk root, found via PATH=/.
+prog "XEyes" app XEYESR.BIN
+prog "XCalc" app XCALCR.BIN
+separator
+menufile Programs folder programs
+menufile "Tool bar" folder toolbar

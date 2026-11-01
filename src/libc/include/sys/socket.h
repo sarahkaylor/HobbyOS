@@ -32,7 +32,14 @@ extern "C" {
   /* Address families (Linux values). */
 #define AF_UNSPEC 0
 #define AF_UNIX   1
+#define AF_LOCAL  AF_UNIX
 #define AF_INET   2
+#define AF_INET6  10
+#define PF_UNSPEC AF_UNSPEC
+#define PF_UNIX   AF_UNIX
+#define PF_LOCAL  AF_UNIX
+#define PF_INET   AF_INET
+#define PF_INET6  AF_INET6
 
   /* Socket types; SOCK_CLOEXEC is OR'd into `type` (P4). */
 #define SOCK_STREAM    1
@@ -40,6 +47,7 @@ extern "C" {
 #define SOCK_RAW       3
 #define SOCK_SEQPACKET 5
 #define SOCK_CLOEXEC   0x80000
+#define SOCK_NONBLOCK  0x800 /* IceWM M1: socket/socketpair/accept4 */
 
   /* Protocols. */
 #define IPPROTO_IP  0
@@ -51,26 +59,48 @@ extern "C" {
 #define SO_REUSEADDR 2
 #define SO_TYPE      3
 #define SO_ERROR     4
+#define SO_DONTROUTE 5
+#define SO_BROADCAST 6
+#define SO_SNDBUF    7
+#define SO_RCVBUF    8
 #define SO_KEEPALIVE 9
+#define SO_OOBINLINE 10
+#define SO_LINGER    13
+#define SO_PASSCRED  16
+#define SO_PEERCRED  17
+#define SO_RCVLOWAT  18
+#define SO_SNDLOWAT  19
+#define SO_RCVTIMEO  20
+#define SO_SNDTIMEO  21
+#define SO_ACCEPTCONN 30
 #define SO_DOMAIN    39
+
+  /* listen() backlog ceiling (Linux); the kernel clamps to its queue. */
+#define SOMAXCONN 4096
 
   /* Ancillary data: the only kind P4 carries. */
 #define SCM_RIGHTS 1
+#define SCM_CREDENTIALS 2
 
   /* sendmsg/recvmsg flags + msg_flags bits (Linux values). */
+#define MSG_OOB          0x1
 #define MSG_PEEK         0x2
+#define MSG_DONTROUTE    0x4
+#define MSG_EOR          0x80
+#define MSG_WAITALL      0x100
 #define MSG_CTRUNC       0x8
 #define MSG_TRUNC        0x20
 #define MSG_DONTWAIT     0x40
 #define MSG_NOSIGNAL     0x4000
 #define MSG_CMSG_CLOEXEC 0x40000000
 
-  /* shutdown() how values (the syscall row itself is deferred, §6.4). */
+  /* shutdown() how values (SYS_SHUTDOWN, IceWM M1). */
 #define SHUT_RD   0
 #define SHUT_WR   1
 #define SHUT_RDWR 2
 
   typedef uint32_t socklen_t;
+  typedef uint16_t sa_family_t;
 
   struct sockaddr {
     uint16_t sa_family; /* sa_family_t */
@@ -125,11 +155,49 @@ extern "C" {
        : (struct cmsghdr *)((unsigned char *)(cmsg) +                        \
                             CMSG_ALIGN((cmsg)->cmsg_len)))
 
+  /* SO_PEERCRED payload (glibc exposes it under _GNU_SOURCE; always here).
+   * HobbyOS reports it zeroed (single-user OS). */
+  struct ucred {
+    int32_t pid;  /* pid_t */
+    uint32_t uid; /* uid_t */
+    uint32_t gid; /* gid_t */
+  };
+
+  struct linger {
+    int l_onoff;
+    int l_linger;
+  };
+
   /* P4 wrappers (src/user/libc.c; host builds take glibc's). */
   int socketpair(int domain, int type, int protocol, int sv[2]);
   ssize_t sendmsg(int fd, const struct msghdr *msg, int flags);
   ssize_t recvmsg(int fd, struct msghdr *msg, int flags);
+
+  /* IceWM M1 (icewm.md section 4.1): the POSIX socket surface.  AF_UNIX
+   * SOCK_STREAM/SEQPACKET get bind/listen/accept/connect by name (path and
+   * abstract names both; kernel name table, never the filesystem).
+   * connect() on an AF_INET socket takes a struct sockaddr_in.  Wrappers in
+   * src/libc/src/socket.c (and src/user/libc.c for socket/getsockopt/
+   * setsockopt). */
+  int socket(int domain, int type, int protocol);
+  int bind(int fd, const struct sockaddr *addr, socklen_t addrlen);
+  int listen(int fd, int backlog);
+  int accept(int fd, struct sockaddr *addr, socklen_t *addrlen);
+  int accept4(int fd, struct sockaddr *addr, socklen_t *addrlen, int flags);
+  int connect(int fd, const struct sockaddr *addr, socklen_t addrlen);
+  int getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen);
+  int getpeername(int fd, struct sockaddr *addr, socklen_t *addrlen);
   int shutdown(int fd, int how);
+  int getsockopt(int fd, int level, int optname, void *optval,
+                 socklen_t *optlen);
+  int setsockopt(int fd, int level, int optname, const void *optval,
+                 socklen_t optlen);
+  ssize_t send(int fd, const void *buf, size_t len, int flags);
+  ssize_t recv(int fd, void *buf, size_t len, int flags);
+  ssize_t sendto(int fd, const void *buf, size_t len, int flags,
+                 const struct sockaddr *dest, socklen_t addrlen);
+  ssize_t recvfrom(int fd, void *buf, size_t len, int flags,
+                   struct sockaddr *src, socklen_t *addrlen);
 
 #ifdef __cplusplus
 }

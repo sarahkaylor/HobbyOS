@@ -3,6 +3,8 @@
 #include "fs.h"
 #include "net.h"
 #include "process.h"
+#include "vdisplay.h"
+#include "display_mode.h"
 #include "setjmp.h"
 #include "timer.h"
 #include "lock.h"
@@ -741,6 +743,64 @@ static void sys_set_tls(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)(int64_t)process_set_tls(caller, tf->regs[5]);
 }
 
+/* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX (96-102).  Thin
+ * layer over fs.c, which validates every user range before changing any
+ * state; -2 parks (blocking accept/connect) ride the pipe restart. ---- */
+
+static void sys_bind(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_bind_user(
+      current_process(), (int)tf->regs[5], tf->regs[4], (int)tf->regs[3]);
+}
+
+static void sys_listen(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_listen(current_process(),
+                                               (int)tf->regs[5], (int)tf->regs[4]);
+}
+
+static void sys_accept4(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int r = file_accept_user(caller, (int)tf->regs[5], tf->regs[4], tf->regs[3],
+                           (int)tf->regs[9]);
+  if (r == -2) {
+    if ((tf->cs & 3) == 3) {
+      tf->elr -= 2; /* rewind over `syscall`: restart when woken */
+    }
+    save_context(caller, tf);
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)(int64_t)r;
+  }
+}
+
+static void sys_connect_addr(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int r = file_connect_user(caller, (int)tf->regs[5], tf->regs[4], (int)tf->regs[3]);
+  if (r == -2) {
+    if ((tf->cs & 3) == 3) {
+      tf->elr -= 2; /* rewind over `syscall`: restart when woken */
+    }
+    save_context(caller, tf);
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)(int64_t)r;
+  }
+}
+
+static void sys_getsockname(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_sockname_user(
+      current_process(), (int)tf->regs[5], 0, tf->regs[4], tf->regs[3]);
+}
+
+static void sys_getpeername(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_sockname_user(
+      current_process(), (int)tf->regs[5], 1, tf->regs[4], tf->regs[3]);
+}
+
+static void sys_shutdown(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_shutdown(current_process(),
+                                                 (int)tf->regs[5], (int)tf->regs[4]);
+}
+
 static void sys_getsockopt(struct trap_frame *tf) {
   void *val = (void *)tf->regs[9]; // r10
   int *len = (int *)tf->regs[7]; // r8
@@ -748,6 +808,13 @@ static void sys_getsockopt(struct trap_frame *tf) {
 
   if (!val || !len || !sys_user_range((uint64_t)val, sizeof(int), 1) ||
       !sys_user_range((uint64_t)len, sizeof(int), 1)) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  /* IceWM M1: SO_PEERCRED writes a 12-byte struct ucred; validate what
+   * the caller's *len offers beyond one int (capped). */
+  if (*len > (int)sizeof(int) &&
+      !sys_user_range((uint64_t)val, (uint64_t)(*len > 64 ? 64 : *len), 1)) {
     tf->regs[0] = -EFAULT;
     return;
   }
@@ -891,6 +958,53 @@ static void sys_write(struct trap_frame *tf) {
   }
 }
 
+/* GB-141 (mechanism, V2): musl's stdio writes through writev(2), NOT write(2) —
+   __stdio_write builds an iovec and calls writev.  The compat table had no case 20,
+   so every printf byte fell to -ENOSYS and died (raw write(1) landed via file_write's
+   fd-1 walk).  Loop the iovec array, validating each range, and write each segment
+   through file_write (which carries the WK-1 fd-1/2 console fallback).
+   GB-143 (reviewer bounce): honour file_write's OTHER return shapes, not just full
+   size/negative errno — a parked write (-2), a short write (0 <= r < len), and one
+   over-2GiB iovec_len would otherwise fabricate a byte count the caller never wrote. */
+#define COMPAT_MAX_RW_COUNT 0x7ffff000ULL  /* Linux MAX_RW_COUNT per write() */
+static void compat_writev(struct trap_frame *tf) {
+  struct process *c = current_process();
+  int fd = (int)tf->regs[5];
+  uint64_t iov = tf->regs[4];
+  long cnt = (long)tf->regs[3];
+  if (cnt < 0 || cnt > 1024) { tf->regs[0] = (uint64_t)(int64_t)-EINVAL; return; }
+  if (cnt == 0) { tf->regs[0] = 0; return; }
+  if (!sys_user_range_ok(iov, (uint64_t)cnt * 16)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+  int64_t total = 0;
+  for (long i = 0; i < cnt; i++) {
+    uint64_t base = 0, len = 0;
+    if (vm_user_read(c, iov + (uint64_t)i * 16, &base, 8) != 0 ||
+        vm_user_read(c, iov + (uint64_t)i * 16 + 8, &len, 8) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
+    }
+    if (len == 0) continue;
+    if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT; /* clamp one write() */
+    int r = file_write(c, fd, (const void *)(uintptr_t)base, (int)len, tf);
+    if (r == -2) {
+      /* A parked write (full pipe / unix socket).  Mirror sys_write: rewind the
+         2-byte `syscall` and re-schedule so the write RESTARTS on wake; the parked
+         segment resumes as if nothing was written.  A subsequent iovec segment that
+         already advanced total is a short write, not a park — see below. */
+      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if ((tf->cs & 3) == 3) tf->elr -= 2;
+      save_context(c, tf);
+      schedule(tf, 0);
+      return;
+    }
+    if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)r; return; }
+    total += r;
+    /* Short write: Linux stops here and returns the partial total, NOT the next
+       segment (a reordered stream with a matching count would hide the loss). */
+    if ((uint64_t)r < len) { tf->regs[0] = (uint64_t)total; return; }
+  }
+  tf->regs[0] = (uint64_t)total;
+}
+
 extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid);
 extern int load_and_run_program_in_scheduler_args(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid, const char *args);
 extern struct process *process_get_pcb(int pid);
@@ -932,7 +1046,9 @@ static void sys_spawn(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[5]; // rdi
   int stdin_fd = (int)tf->regs[4]; // rsi
   int stdout_fd = (int)tf->regs[3]; // rdx
-  int stderr_fd = (int)tf->regs[2]; // rcx
+  int stderr_fd = (int)tf->regs[9]; // r10 — the 4th syscall arg.  (regs[2] is
+  /* rcx, clobbered by the syscall instruction to hold the return address --
+     reading stderr_fd from it handed the child a garbage fd (GB-095).) */
   const char *args_ptr = (const char *)tf->regs[7]; // r8
 
   struct process *caller = current_process();
@@ -1224,6 +1340,14 @@ extern int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects,
 
 static void sys_map_fb(struct trap_frame *tf) {
   uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
+  {
+    /* icewm.md §9: an attached process maps its private surface. */
+    int vd = vdisp_attached(current_process());
+    if (vd) {
+      tf->regs[0] = (uint64_t)vdisp_map_fb(current_process(), vd);
+      return;
+    }
+  }
   struct process *cur = current_process();
   if (cur)
     cur = process_group(cur);
@@ -1267,12 +1391,31 @@ static void sys_fb_ioctl(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
     return;
   }
+  if (sz == 0 && vdisp_attached(current_process())) {
+    tf->regs[0] = 0; /* icewm.md §9: FBIOBLANK never reaches the real display */
+    return;
+  }
   /* FBIOBLANK (sz==0) takes a value, not a buffer: nothing to validate. */
-  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+  if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
   tf->regs[0] = (uint64_t)(int64_t)hb_fb_ioctl_route(req, arg, smem_start);
+}
+
+/* icewm.md §9: an attached process's present sleeps until its frame slot
+ * (vdisp_flush_pace); same park as SYS_SLEEP, returning 0. */
+static void vdisp_present_pace(struct trap_frame *tf, int vd) {
+  int ms = vdisp_flush_pace(vd);
+  tf->regs[0] = 0;
+  struct process *cur = current_process();
+  if (cur && ms > 0) {
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    cur->wake_ms = timer_get_ms() + ms;
+    cur->state = PROC_STATE_BLOCKED;
+    spinlock_release_irqrestore(&proc_lock, flags);
+    schedule(tf, 0);
+  }
 }
 
 static void sys_flush_fb(struct trap_frame *tf) {
@@ -1285,6 +1428,14 @@ static void sys_flush_fb(struct trap_frame *tf) {
   print_int(pid);
   uart_puts("\n");
 #endif
+  {
+    int vd = vdisp_attached(current_process());
+    if (vd) { /* icewm.md §9: record damage for the host, not the display */
+      vdisp_flush(vd, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+      vdisp_present_pace(tf, vd);
+      return;
+    }
+  }
   virtio_gpu_flush();
   tf->regs[0] = 0;
 }
@@ -1324,6 +1475,15 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)-EINVAL;
     return;
   }
+  {
+    int vd = vdisp_attached(current_process());
+    if (vd) { /* icewm.md §9 */
+      for (int i = 0; i < count; i++)
+        vdisp_flush(vd, krects[i].x, krects[i].y, krects[i].w, krects[i].h);
+      vdisp_present_pace(tf, vd);
+      return;
+    }
+  }
   virtio_gpu_flush_rects(krects, count);
   tf->regs[0] = 0;
 }
@@ -1333,7 +1493,13 @@ static void sys_get_events(struct trap_frame *tf) {
   int max_events = (int)tf->regs[4]; // rsi
   if (sys_user_range((uint64_t)buf,
                      max_events > 0 ? (uint64_t)max_events * 8 : 8, 1)) {
-    tf->regs[0] = virtio_input_get_events(buf, max_events);
+    int vd = vdisp_attached(current_process()); /* icewm.md §9 */
+    if (vd)
+      tf->regs[0] = max_events > 0
+          ? (uint64_t)(int64_t)vdisp_get_events(vd, (struct vdisp_event *)buf, max_events)
+          : 0;
+    else
+      tf->regs[0] = virtio_input_get_events(buf, max_events);
   } else {
     tf->regs[0] = -1;
   }
@@ -1351,7 +1517,7 @@ static void sys_input_ioctl(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
     return;
   }
-  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+  if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
@@ -1373,7 +1539,7 @@ static void sys_input_read(struct trap_frame *tf) {
     tf->regs[0] = 0;
     return;
   }
-  if (sys_user_range((uint64_t)ubuf,
+  if (!sys_user_range((uint64_t)ubuf, /* returns 1 when the range is OK */
                      (uint64_t)max * sizeof(struct hb_input_event), 1)) {
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
@@ -1381,13 +1547,61 @@ static void sys_input_read(struct trap_frame *tf) {
   extern uint64_t timer_get_ms(void);
   struct virtio_input_event raw[32];
   int want = max > 32 ? 32 : max;         /* bounded scratch: non-blocking */
-  int got = virtio_input_get_events(raw, want);
+  int vdr = vdisp_attached(current_process()); /* icewm.md §9 */
+  int got = vdr ? vdisp_get_events(vdr, (struct vdisp_event *)raw, want)
+                : virtio_input_get_events(raw, want);
   uint64_t t = timer_get_ms();
   uint64_t sec = t / 1000u, usec = (t % 1000u) * 1000u;
   for (int i = 0; i < got; i++)
     hb_input_fill_event(&ubuf[i], raw[i].type, raw[i].code, raw[i].value,
                         sec, usec);
   tf->regs[0] = (uint64_t)got;
+}
+
+/* icewm.md §9: SYS_VDISPLAY (op, a1, a2) -- see src/include/vdisplay.h. */
+static void sys_vdisplay(struct trap_frame *tf) {
+  int op = (int)tf->regs[5];
+  uint64_t a1 = tf->regs[4];
+  uint64_t a2 = tf->regs[3];
+  struct process *cur = current_process();
+  int64_t r;
+  if (op == VDISP_OP_ATTACH) {
+    r = vdisp_sys_attach(cur, (int)a1);
+  } else if (op == VDISP_OP_DETACH) {
+    r = vdisp_sys_detach(cur);
+  } else if (op == VDISP_OP_INJECT) {
+    int n = (int)a2;
+    struct vdisp_event k[64];
+    if (n < 0 || n > 64) {
+      r = -EINVAL;
+    } else if (n == 0) {
+      r = 0;
+    } else if (!a1 || (a1 & 3) ||
+               vm_user_read(cur, a1, k, n * (int)sizeof(struct vdisp_event)) != 0) {
+      r = -EFAULT;
+    } else {
+      r = vdisp_sys_inject(cur, k, n);
+    }
+  } else if (op == VDISP_OP_STATUS) {
+    if (!a1 || (a1 & 3) || !sys_user_range(a1, sizeof(struct vdisp_status), 1)) {
+      r = -EFAULT;
+    } else {
+      struct vdisp_status st;
+      r = vdisp_sys_status(cur, &st);
+      if (r == 0) {
+        struct vdisp_status *u = (struct vdisp_status *)a1;
+        u->flush_seq = st.flush_seq;
+        u->dx = st.dx; u->dy = st.dy; u->dw = st.dw; u->dh = st.dh;
+        u->mapped = st.mapped;
+        u->reads = st.reads;
+        u->read_age_ms = st.read_age_ms;
+        u->queued = st.queued;
+      }
+    }
+  } else {
+    r = -EINVAL;
+  }
+  tf->regs[0] = (uint64_t)r;
 }
 
 static void sys_get_cpuid(struct trap_frame *tf) {
@@ -1668,28 +1882,19 @@ static void sys_getppid(struct trap_frame *tf) {
  * rsi->regs[4], rdx->regs[3]); remap here so real userland waitpid calls
  * -- and the blocking save_context below -- carry the right values. */
 static void sys_waitpid(struct trap_frame *tf) {
-  uint64_t pid = tf->regs[5];  /* rdi */
-  uint64_t st = tf->regs[4];   /* rsi */
-  uint64_t opt = tf->regs[3];  /* rdx */
-  tf->regs[0] = pid;
-  tf->regs[1] = st;
-  tf->regs[2] = opt;
-  tf->regs[0] = process_waitpid(tf);
+  /* icewm.md fix log: never rewrite regs[1..3] (rbx/rcx/rdx) -- regs[1] is
+     the caller's callee-saved rbx; the old remap returned it holding the
+     status pointer (clang -mcmodel=large code keeps addresses in rbx). */
+  tf->regs[0] = (uint64_t)(int64_t)process_wait_args(
+      tf, (int)tf->regs[5], (int *)tf->regs[4], (int)tf->regs[3], 0);
 }
 
 /* W2-5 (selfhost): SYS_WAIT4 -- wait4(pid, status, options, rusage):
- * rdi->regs[5], rsi->regs[4], rdx->regs[3], r10->regs[9].  Remap onto
- * the canonical regs[0..3] the shared core reads (regs[3] = rusage). */
+ * rdi->regs[5], rsi->regs[4], rdx->regs[3], r10->regs[9]. */
 static void sys_wait4(struct trap_frame *tf) {
-  uint64_t pid = tf->regs[5];  /* rdi */
-  uint64_t st = tf->regs[4];   /* rsi */
-  uint64_t opt = tf->regs[3];  /* rdx */
-  uint64_t ru = tf->regs[9];   /* r10 */
-  tf->regs[0] = pid;
-  tf->regs[1] = st;
-  tf->regs[2] = opt;
-  tf->regs[3] = ru;
-  tf->regs[0] = process_wait4(tf);
+  tf->regs[0] = (uint64_t)(int64_t)process_wait_args(
+      tf, (int)tf->regs[5], (int *)tf->regs[4], (int)tf->regs[3],
+      tf->regs[9]);
 }
 
 /* SYS_EXEC: replace the current image. Shared loader helper in
@@ -2028,8 +2233,58 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
+        /* GB-141 (V evidence): musl's _Exit calls exit_group(231), not exit(60)
+           when the program has a thread/group — the compat table had NO 231, so it
+           fell to the default -ENOSYS and the probe "died inside _Exit" (GB-113
+           signature: exit-0 observed as a signal death, last_user_pc in _Exit),
+           rows never flushed to write(1).  exit_group(code) with code in rdi. */
+        case 231: syscall_num = SYS_EXIT;  break;  /* exit_group(code)  */
+        /* GB-141 (V2 mechanism): musl stdio calls writev(20), not write — the compat
+           table had no case 20, so every printf byte hit -ENOSYS. */
+        case 20: compat_writev(tf); return;
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
+        /* GB-019 clause 4: Linux fcntl(72)(fd, cmd, arg) SHARES file_fcntl with the
+           ioctl(16) F_GETFL/F_SETFL dispatch.  cmd=3/4 (K_F_GETFL/K_F_SETFL are 3/4)
+           route to file_fcntl; a non-3/4 cmd is file_fcntl's own decision.  regs:
+           rdi=fd, rsi=cmd, rdx=arg. */
+        case 72: syscall_num = SYS_FCNTL; break;   /* fcntl(fd, cmd, arg) */
+        /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
+           =fd, regs[4]=rsi=request, regs[3]=rdx=arg.  This is a genuine dispatch on
+           the request number, and every non-ENOTTY outcome is falsifiable:
+           - F_GETFL (3) / F_SETFL (4): route to file_fcntl (K_F_GETFL/SETFL are the
+             same Linux numbers, K_F_GETFL=3, K_F_SETFL=4), which returns the fd's
+             flags / applies O_APPEND etc — real, mutable state. Mis-routing these two
+             changes the result, so the gate's falsifier has a mapping to break.
+           - TCGETS (0x5401) / TIOCGWINSZ (0x5413): a tty-class request.  It takes a
+             struct arg; a bad pointer is -EFAULT.  The compat O0 surface's nodes are
+             not ttys (/dev/null is the probe's deterministic source), so Linux answers
+             ENOTTY (25) here — honestly, after validating the arg, not by skipping it.
+           - any other request: ENOTTY (the node does not implement it).
+           - bad fd: EBADF. */
+        case 16: {
+          struct process *c16 = current_process();
+          int cfd = (int)tf->regs[5];         /* rdi: fd      */
+          int32_t ireq = (int32_t)tf->regs[4]; /* rsi: request */
+          uint64_t iarg = tf->regs[3];         /* rdx: arg     */
+          if (!c16 || cfd < 0 || cfd >= MAX_OPEN_FDS) { tf->regs[0] = (uint64_t)(int64_t)(-9); return; } /* EBADF */
+          if (ireq == 3 || ireq == 4) {  /* F_GETFL(3) / F_SETFL(4) → route to the real fcntl handler */
+            tf->regs[0] = (uint64_t)file_fcntl(c16, cfd, ireq, iarg);
+            return;
+          }
+          if (ireq == 0x5401 || ireq == 0x5413) {  /* TCGETS / TIOCGWINSZ (measured: linux_syscall.h L_TCGETS/L_TIOCGWINSZ) */
+            /* GB-019 (V3 ordering): Linux answers ENOTTY for a tty-class ioctl on a
+               NON-tty WITHOUT dereferencing the arg — the pointer is never read, so a
+               NULL/garbage arg is still ENOTTY, not EFAULT.  The compat surface has no
+               tty (the probe's /dev/null is the deterministic source), so the honest
+               answer is ENOTTY regardless of iarg; validating the pointer first made a
+               non-tty return EFAULT and failed the gate's clause-2 rows. */
+            tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY */
+            return;
+          }
+          tf->regs[0] = (uint64_t)(int64_t)(-25);       /* -ENOTTY: node lacks this request */
+          return;
+        }
         default:
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
@@ -2214,6 +2469,22 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_sendmsg(tf);
   } else if (syscall_num == SYS_RECVMSG) {
     sys_recvmsg(tf);
+  } else if (syscall_num == SYS_BIND) {         /* IceWM M1 (96-102) */
+    sys_bind(tf);
+  } else if (syscall_num == SYS_LISTEN) {
+    sys_listen(tf);
+  } else if (syscall_num == SYS_ACCEPT4) {
+    sys_accept4(tf);
+  } else if (syscall_num == SYS_CONNECT_ADDR) {
+    sys_connect_addr(tf);
+  } else if (syscall_num == SYS_GETSOCKNAME) {
+    sys_getsockname(tf);
+  } else if (syscall_num == SYS_GETPEERNAME) {
+    sys_getpeername(tf);
+  } else if (syscall_num == SYS_SHUTDOWN) {
+    sys_shutdown(tf);
+  } else if (syscall_num == SYS_VDISPLAY) {
+    sys_vdisplay(tf);
   } else {
     uart_puts("Unknown System Call Invoked!\n");
     tf->regs[0] = -ENOSYS;
@@ -2648,6 +2919,44 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern int virtio_net_irq;
 
   uint32_t cpu = get_cpuid();
+  /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
+     (vectors 0-31 exceptions, 32-255 IRQ/syscall); a `vector` > 0xFF (measured:
+     vector=20000, rip=0x97) cannot have been pushed by the CPU, so the frame is
+     corrupt.  This alone misses the family's below-32 garbage vectors (measured:
+     vector=6 rip=0x7, vector=13 rip=0x7009, vector=6 rip=0x1000007) whose frames
+     are also torn.  The GB-101-V gate's fix direction: a FRAME-COHERENCE test,
+     not a wider threshold.  A real x86-64 entry ALWAYS has the CPU push CS (0x08
+     kernel / 0x1B user -- SS/RSP are only pushed on a privilege change, so SS is
+     NOT authoritative on same-privilege kernel traps and must not be judged here);
+     a torn/overwritten frame that a garbage vector rode in on carries a garbage
+     CS slot.  Never dispatch on garbage: emit a line containing "FAIL" (the
+     tier's FAIL-line grep names it), halt-record (GB-060, so a lock a stopped
+     CPU held is recoverable and other cores don't spin behind it forever), and
+     stop THIS CPU rather than run an unknown-vector path on a bogus frame. */
+  {
+    extern void uart_puts_raw(const char *s);
+    extern void uart_print_hex_raw(uint64_t v);
+    extern void print_int_raw(int val);
+    extern void cpu_halt_record(uint32_t cpu);
+    uint64_t frame_cs = tf->cs;
+    int bad_vec = ((uint64_t)tf->vector > 0xFFu);
+    int bad_cs  = (frame_cs != 0x08u && frame_cs != 0x1Bu);
+    if (bad_vec || bad_cs) {
+      uart_puts_raw("[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=");
+      print_int_raw((int)(uint64_t)tf->vector);
+      uart_puts_raw(" rip="); uart_print_hex_raw((uint64_t)tf->elr);
+      uart_puts_raw(" cs=");   uart_print_hex_raw(frame_cs);
+      uart_puts_raw(" (impossible vector="); print_int_raw((int)(uint64_t)tf->vector);
+      uart_puts_raw(" or invalid cs; a real gate entry pushes cs 0x08/0x1B\n");
+      uart_puts_raw("\n");
+      cpu_halt_record(cpu);
+      extern int spinlock_release_if_held_by_me(spinlock_t *lock);
+      extern spinlock_t proc_lock;
+      if (spinlock_release_if_held_by_me(&proc_lock))
+        uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
+      while (1);
+    }
+  }
   gic_set_current_vector(cpu, tf->vector);
   watchdog_tick(cpu, tf);
 
@@ -3299,9 +3608,9 @@ EXCEPTION_NO_ERR(4); EXCEPTION_NO_ERR(5); EXCEPTION_NO_ERR(6); EXCEPTION_NO_ERR(
 EXCEPTION_ERR(8);    EXCEPTION_NO_ERR(9); EXCEPTION_ERR(10);   EXCEPTION_ERR(11);
 EXCEPTION_ERR(12);   EXCEPTION_ERR(13);   EXCEPTION_ERR(14);   EXCEPTION_NO_ERR(15);
 EXCEPTION_NO_ERR(16);EXCEPTION_ERR(17);   EXCEPTION_NO_ERR(18);EXCEPTION_NO_ERR(19);
-EXCEPTION_NO_ERR(20);EXCEPTION_NO_ERR(21);EXCEPTION_NO_ERR(22);EXCEPTION_NO_ERR(23);
+EXCEPTION_NO_ERR(20);EXCEPTION_ERR(21);   EXCEPTION_NO_ERR(22);EXCEPTION_NO_ERR(23);
 EXCEPTION_NO_ERR(24);EXCEPTION_NO_ERR(25);EXCEPTION_NO_ERR(26);EXCEPTION_NO_ERR(27);
-EXCEPTION_NO_ERR(28);EXCEPTION_NO_ERR(29);EXCEPTION_NO_ERR(30);EXCEPTION_NO_ERR(31);
+EXCEPTION_NO_ERR(28);EXCEPTION_ERR(29);   EXCEPTION_ERR(30);   EXCEPTION_NO_ERR(31);
 
 // PIT timer
 EXCEPTION_NO_ERR(32);
@@ -3495,21 +3804,20 @@ __asm__(
 "    mov rax, [rsp + 0]\n"
 "    \n"
 "    /* Pop regs, lr, elr, spsr */\n"
-"    add rsp, 264\n"
 "    \n"
-"    /* Pop Vector and Error Code (16 bytes) */\n"
-"    add rsp, 16\n"
-"    \n"
-"    /* GB-057: before the iretq, ask whether the frame about to be consumed\n"
-"       is a legal return.  rsp points at the hardware frame; rax/rcx are\n"
-"       scratch and are preserved, and the two pushes keep the stack\n"
-"       16-byte aligned for the call. */\n"
+"    /* GB-123: the frame check must not push into the frame it inspects.\n"
+"       Its two saves and the call's return address used to land at\n"
+"       [rsp+264]/[rsp+272]/[rsp+256] -- the vector, error and spsr slots\n"
+"       (measured live: [EXITFRAME] spsr_slot=0x7003D87F).  Push below the\n"
+"       frame, run the check, then advance past the frame. */\n"
 "    push rax\n"
 "    push rcx\n"
-"    lea rdi, [rsp + 16]\n"
+"    lea rdi, [rsp + 296]\n"
 "    call trap_exit_frame_check\n"
 "    pop rcx\n"
 "    pop rax\n"
+"    add rsp, 264\n"
+"    add rsp, 16\n"
 "    /* restore the process's rdi from its saved slot: the frame_check\n"\
 "       call above clobbered rdi to &frame, and iretq hands the user that\n"\
 "       kernel-frame address (kstack_top-0x28) unless reloaded -> user\n"\
@@ -3626,18 +3934,16 @@ __asm__(
 "    mov [rsp + 280], rax\n"
 "    /* Restore the original rax */\n"
 "    mov rax, [rsp]\n"
-"    add rsp, 264\n"
-"    add rsp, 16\n"
-"    /* GB-057: before the iretq, ask whether the frame about to be consumed\n"
-"       is a legal return.  rsp points at the hardware frame; rax/rcx are\n"
-"       scratch and are preserved, and the two pushes keep the stack\n"
-"       16-byte aligned for the call. */\n"
+"    /* GB-123: see the common_trap_exit note -- the check pushes below the\n"
+"       frame, never into it; advance past the frame only afterwards. */\n"
 "    push rax\n"
 "    push rcx\n"
-"    lea rdi, [rsp + 16]\n"
+"    lea rdi, [rsp + 296]\n"
 "    call trap_exit_frame_check\n"
 "    pop rcx\n"
 "    pop rax\n"
+"    add rsp, 264\n"
+"    add rsp, 16\n"
 "    /* restore the process's rdi from its saved slot: the frame_check\n"\
 "       call above clobbered rdi to &frame, and iretq hands the user that\n"\
 "       kernel-frame address (kstack_top-0x28) unless reloaded -> user\n"\

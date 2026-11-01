@@ -1,0 +1,19 @@
+isExeFile: no execute bits on HobbyOS FAT; accept regular files (HOBBYOS_ICEWM only)
+
+--- a/src/misc.cc	2026-08-06 16:15:47.000000000 -0500
++++ b/src/misc.cc	2026-10-30 11:14:53.081807358 -0500
+@@ -492,8 +492,14 @@
+ 
+ bool isExeFile(const char* path) {
+     struct stat s;
++#ifdef HOBBYOS_ICEWM
++    /* HobbyOS's FAT VFS has no execute bits (files stat as 0644): any
++       regular file is a candidate image, exec() decides. */
++    return stat(path, &s) == 0 && S_ISREG(s.st_mode);
++#else
+     return stat(path, &s) == 0 && S_ISREG(s.st_mode)
+         && (s.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH));
++#endif
+ }
+ 
+ // parse a C-style identifier

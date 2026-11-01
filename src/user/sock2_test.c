@@ -75,10 +75,10 @@ static void hard_socket_error_paths(void) {
   if (fd < 0) return;
 
   int type = 0;
-  int len = (int)sizeof(type);
+  socklen_t len = (socklen_t)sizeof(type);
   r = getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &len);
   check("getsockopt(SO_TYPE) == SOCK_STREAM after socket()",
-        r == 0 && type == SOCK_STREAM && len == (int)sizeof(int));
+        r == 0 && type == SOCK_STREAM && len == (socklen_t)sizeof(int));
 
   int soerr = -1;
   len = (int)sizeof(soerr);
@@ -251,7 +251,7 @@ static void net_section(void) {
 
   /* Writable: SO_ERROR carries the handshake outcome. */
   int soerr = -12345;
-  int len = (int)sizeof(soerr);
+  socklen_t len = (socklen_t)sizeof(soerr);
   r = getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &len);
   if (r != 0 || soerr != 0) {
     print_console("  SOCK2TST SO_ERROR after connect: SKIP (errno=");

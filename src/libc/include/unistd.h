@@ -130,6 +130,19 @@ extern "C" {
   char *getcwd(char *buf, size_t size);
   int chdir(const char *path);
 
+  /* icewm.md M2: fixed native identity ($HOSTNAME or "hobbyos"),
+   * src/libc/src/utsname.c. */
+  int gethostname(char *name, size_t len);
+
+  /* icewm.md M2 (xlibs-ext): glibc also declares getentropy() here (expat's
+   * entropy probe includes only <unistd.h>).  Same prototype as
+   * <sys/random.h>; implemented in src/user/libc.c over SYS_GETRANDOM. */
+  int getentropy(void *buf, size_t length);
+
+  /* icewm.md M2 (xlibs-ext): remove an empty directory over SYS_RMDIR
+   * (src/libc/src/fsext.c). */
+  int rmdir(const char *path);
+
 #define F_OK 0
 #define R_OK 4
 #define W_OK 2

@@ -29,7 +29,14 @@ STAGE="mcopy -o -i $ROOT/disk.img $BIN ::PROC_TEST.BIN; mcopy -o -i $ROOT/disk.i
 echo "=== t4_proctest: booting intel guest with PROC_TEST-only manifest ==="
 T3_STAGE="$STAGE" bash "$ROOT/tools/t3_tier.sh" intel > "$OUT" 2>&1
 
+# GB-140: the guest console is T3_LOG, NOT the captured stdout.  Derive it from
+# the machine contract and fail loudly if absent — never grep $OUT for markers.
+CONSOLE="$(sed -n 's/^T3_LOG=//p' "$OUT" | tail -1)"
+if [ -z "$CONSOLE" ] || [ ! -r "$CONSOLE" ]; then
+  echo "t4_proctest: FATAL — t3_tier did not print a readable T3_LOG (GB-140 clause 3)"; exit 1
+fi
+
 echo "=== fault ledger ==="
 grep -E "T3_intel: [0-9]+ console" "$OUT" | tail -1
 echo "=== atomic fault line ==="
-grep -E "memory fault|FATAL kernel-mode|FATAL: Exception|IDLESTUCK|EXITPC" "$OUT" | tail -6
+grep -E "memory fault|FATAL kernel-mode|FATAL: Exception|IDLESTUCK|EXITPC" "$CONSOLE" | tail -6

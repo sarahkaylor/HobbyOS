@@ -126,7 +126,7 @@ subprocess.run(["pkill","-9","-f","qemu-system[-]" + ("aarch64" if ARCH=="arm" e
 for f in (SER, QMP):
     if os.path.exists(f): os.remove(f)
 qemu = "qemu-system-aarch64" if ARCH == "arm" else "qemu-system-x86_64"
-subprocess.Popen(["stdbuf","-oL","make","run",f"ARCH={ARCH}",
+subprocess.Popen(["stdbuf","-oL","make","run","DESKTOP=hobby",f"ARCH={ARCH}",
                   f"QEMU_ARGS=-display none -qmp unix:{QMP},server,nowait"],
                  stdout=open(SER,"w"), stderr=subprocess.STDOUT)
 q = Q(QMP)
@@ -152,7 +152,11 @@ xcr_i = name_idx.get("XCRYPT.BIN")
 check(xcr_i is not None and nes_i == xcr_i + 1,
       "NES.BIN pinned adjacent after XCRYPT.BIN", f"XCRYPT={xcr_i} NES={nes_i}")
 
-q.click(38, TASKBAR_Y+13); time.sleep(0.8)
+# GB-116: on intel the pointer click cannot land (Makefile has no pointer
+# device and the PS/2 path delivers keys, not buttons); F1 opens the same
+# Apps menu by keyboard on BOTH arches (desktop.c:2213).  A click here made
+# this harness un-runnable on intel before it measured anything.
+q.key("f1", 0.4); time.sleep(0.4)
 q.key("home", 0.3)
 for _ in range(nes_i): q.key("down", 0.06)
 q.key("ret", 0.3)
@@ -178,11 +182,22 @@ check(tbn > 0 and tbd > 0.15*tbn, "dark band present across the top row",
 
 # T5: input reaches the emulator -> the picture visibly changes (emulator live)
 shot2 = q.shot("nes_before.ppm")
-q.key("left", 0.4); time.sleep(4.0)   # one controller edge -> invert once (slow renderer)
-shot3 = q.shot("nes_after.ppm")
-d = diff(shot2, shot3)
+q.key("spc", 0.4)   # GB-088: Space inverts the frame
+# GB-088: the flip is not instantaneous on a slow host.  The emulator redraws
+# 256x240 at 4x per frame, and the old fixed 4 s window sampled the frame
+# BEFORE the flip rendered (measured diffs=4 on 2026-10-24).  Poll, bounded at
+# 30 s, and report how long the delta actually took.
+t0 = time.time(); d = 0; shot3 = shot2
+while time.time() - t0 < 30.0:
+    time.sleep(1.0)
+    cand = q.shot("nes_after.ppm")
+    dc = diff(shot2, cand)
+    if dc > d:
+        d = dc; shot3 = cand
+    if d > 5000:
+        break
 check(d > 5000, "input reaches the emulator (frame visibly changes / game live)",
-      f"diffs={d}")
+      f"diffs={d} after {time.time()-t0:.1f}s")
 
 if fails:
     log(f"RESULT: FAIL ({len(fails)})")

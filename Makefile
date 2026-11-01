@@ -1,5 +1,5 @@
 # Default architecture
-ARCH ?= arm
+ARCH ?= intel
 
 # --- OS Detection ---
 # Detect whether we are on macOS (Homebrew) or Linux (system packages)
@@ -62,6 +62,14 @@ QEMU_SMP ?= 8
 #     resolves to soft, so every headless tier (test/unit_tests/desktop_test
 #     modes, the run_*.py E2E overrides, CI) keeps its exact current
 #     behavior: plain 2D device + `-display none`.
+#     ARCH=intel: auto picks GL only when the patched QEMU from
+#     tools/qemu-glfix/ is installed (QEMU_GLFIX_DIR), and then runs that
+#     binary.  Stock QEMU 10.2.1 has two GL-display bugs that make
+#     `gtk,gl=on` unusable here: OVMF's ExitBootServices virtio reset steals
+#     GTK's EGL context onto a vCPU thread ("Gdk-WARNING: eglMakeCurrent
+#     failed" ~5x/s), and a guest resolution change drops the window back to
+#     a blank 2D surface (tools/qemu-glfix/README.md).  Without the patched
+#     build, auto stays soft (plain `gtk`, BGA).  QEMU_GPU=gl still opts in.
 #   gl:   force the GL path.  NOTE: combining QEMU_GPU=gl with a
 #     `-display none` override fails by design — QEMU rejects
 #     virtio-gpu-gl-device when the display backend has no OpenGL support
@@ -71,8 +79,36 @@ QEMU_SMP ?= 8
 # headless tiers stay on the plain device forever.  `make gpu-check` probes
 # this host and prints which mode `auto` will pick.
 QEMU_GPU ?= auto
+QEMU_GLFIX_DIR ?= $(HOME)/.local/share/hobbyos-tools/qemu-glfix/prefix/bin
+QEMU_GLFIX_X64 := $(wildcard $(QEMU_GLFIX_DIR)/qemu-system-x86_64)
 OBJ_DIR = obj/$(ARCH)
 MODE_FILE = $(OBJ_DIR)/.mode
+
+# Desktop selection (icewm.md §4.5, §10).  DESKTOP selects what the kernel
+# launches in the default (MODE=desktop) branch:
+#   icewm (default for MODE=desktop, i.e. `make run`): XSESSION.BIN
+#                    (src/user/x11sess/), which starts the X server
+#                    XHOBBY.BIN + IceWM and falls back to DESKTOP.BIN if the
+#                    X session dies.  The disk additionally gets the X
+#                    binaries (icewm.md §4.3) and data tree (§4.4) from
+#                    $(X11_BUILD_DIR), built by third_party/x11/build.sh
+#                    when missing.
+#   hobby:           DESKTOP.BIN, the original native HobbyOS desktop.
+#                    `make run DESKTOP=hobby [ARCH=arm]`.
+# Every other MODE (test, unit_tests, desktop_test, apps_test, ...) defaults
+# to hobby: those tiers boot DESKTOP.BIN or no desktop at all, so they never
+# need the X stack (and CI never builds it).  The native-desktop QMP
+# harnesses (run_*_test.py) pass DESKTOP=hobby explicitly.
+# DESKTOP_FILE is the knob's stamp (like MODE_FILE): switching DESKTOP
+# rebuilds main.o and disk.img.  DESKTOP=hobby adds no compiler flag and no
+# disk file (verified by diffing kernel build lines + mdir listings, M5).
+ifeq ($(MODE),desktop)
+DESKTOP ?= icewm
+else
+DESKTOP ?= hobby
+endif
+DESKTOP_FILE = $(OBJ_DIR)/.desktop
+X11_BUILD_DIR ?= third_party/x11/build/$(ARCH)
 
 # Flat WebProcess binary (WK-5 windowed browser shell).  The browser SOURCE is
 # vendored in this repo since 2026-10-07 — third_party/webkit-hobbyos/
@@ -211,6 +247,15 @@ ifneq ($(CURRENT_MODE),$(MODE))
 $(shell mkdir -p $(OBJ_DIR) && echo $(MODE) > $(MODE_FILE))
 endif
 
+# Same tracker for the DESKTOP knob (icewm.md §4.5).
+ifeq ($(filter hobby icewm,$(DESKTOP)),)
+$(error DESKTOP must be 'icewm' (default for make run) or 'hobby', got '$(DESKTOP)')
+endif
+CURRENT_DESKTOP := $(shell [ -f $(DESKTOP_FILE) ] && cat $(DESKTOP_FILE) || echo none)
+ifneq ($(CURRENT_DESKTOP),$(DESKTOP))
+$(shell mkdir -p $(OBJ_DIR) && echo $(DESKTOP) > $(DESKTOP_FILE))
+endif
+
 ifeq ($(ARCH),intel)
   QEMU = qemu-system-x86_64
   # Intel/AMD 64-bit compiler flags
@@ -254,7 +299,12 @@ ifeq ($(ARCH),intel)
   # misbehaves on a host, plain `-device virtio-gpu-pci -vga none` is the
   # lane-G2-verified equivalent (the driver negotiates VIRTIO_F_VERSION_1
   # only, so the gl variant's virgl capability is simply not negotiated).
-  QEMU_CMD = $(QEMU) -M q35 -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
+  # Pointer: vmport=on (q35's default, made explicit) exposes the VMware
+  # backdoor "vmmouse" the kernel switches to absolute mode
+  # (src/kernel/virtio_input.c), so the GTK window needs no pointer grab and
+  # the guest cursor sits exactly under the host pointer; the PS/2 mouse
+  # (IntelliMouse, wheel) remains the fallback when vmport is off.
+  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
@@ -366,6 +416,13 @@ else
   CFLAGS += -DKERNEL_MODE_DESKTOP
 endif
 
+# DESKTOP=icewm (icewm.md §4.5): main.c's default desktop branch launches
+# XSESSION.BIN.  Only src/kernel/main.c reads this macro, so only main.o
+# carries the stamp dependency (see the DESKTOP_FILE rule by XSESSION_BIN).
+ifeq ($(DESKTOP),icewm)
+  CFLAGS += -DKERNEL_DESKTOP_ICEWM
+endif
+
 # W4-kernel (selfhost): in-OS MKFSFAT TCG-timing probe (Mission B).  Set
 # W4_MKFS_PROBE=1 to build the unit tier with the [W4-PROBE] ftruncate
 # timings (fat16_test.c test_fat16_extend_timing_probe) so a probe run
@@ -409,7 +466,11 @@ ifeq ($(QEMU_GPU),auto)
   ifeq ($(MODE),desktop)
     ifneq ($(DISPLAY),)
       ifeq ($(findstring -display none,$(QEMU_ARGS)),)
-        GX_GPU_GL := 1
+        ifneq ($(ARCH),intel)
+          GX_GPU_GL := 1
+        else ifneq ($(QEMU_GLFIX_X64),)
+          GX_GPU_GL := 1
+        endif
       endif
     endif
   endif
@@ -433,6 +494,11 @@ endif
 # test/unit/soak/desktop_test waves keep their exact historical qemu lines.
 ifeq ($(GX_GPU_GL),1)
   GX_X64_GPU_DEV := -device virtio-gpu-gl-pci -vga none
+  ifeq ($(ARCH),intel)
+    ifneq ($(QEMU_GLFIX_X64),)
+      QEMU := $(QEMU_GLFIX_X64)
+    endif
+  endif
 else
   GX_X64_GPU_DEV :=
 endif
@@ -1227,7 +1293,28 @@ $(OBJ_DIR)/builtins/%.o: $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c $(LIBCXX_VE
 	@mkdir -p $(OBJ_DIR)/builtins
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(OBJ_DIR)/libc_pwd.o $(OBJ_DIR)/libc_setjmp.o $(OBJ_DIR)/libc_dlfcn.o $(OBJ_DIR)/libc_resource.o $(OBJ_DIR)/libc_statvfs.o $(OBJ_DIR)/libc_syscall.o $(OBJ_DIR)/libc_ioctl.o $(LIBC_BUILTIN_OBJS)
+# icewm.md M2 (lane xlibs-core): <arpa/inet.h>/<netdb.h>,
+# uname/gethostname, POSIX select (hb_select_posix) for the X11 client stack.  A separate prerequisite-only
+# rule: the recipe's $^ picks these up without touching the line below.
+LIBC_X11_OBJS = $(OBJ_DIR)/libc_inet.o $(OBJ_DIR)/libc_utsname.o $(OBJ_DIR)/libc_select_posix.o
+$(OBJ_DIR)/libc.a: $(LIBC_X11_OBJS)
+
+# icewm.md M2 (lane xlibs-ext): rmdir() over SYS_RMDIR (fontconfig) and the
+# frexp/ldexp/scalbn families (libpng via freetype/Xft).  Same
+# prerequisite-only pattern as LIBC_X11_OBJS above.
+LIBC_X11EXT_OBJS = $(OBJ_DIR)/libc_fsext.o $(OBJ_DIR)/libc_math_ext.o
+$(OBJ_DIR)/libc.a: $(LIBC_X11EXT_OBJS)
+# ...plus the rest of compiler-rt's binary128 soft-float set: on aarch64
+# `long double` is IEEE quad, so any long double arithmetic in ported C
+# (fontconfig's fcfreetype.c: twips / 20.0L) needs __divtf3/__floatunsitf...
+# LIBC_BUILTIN_SRCS (above) already carries the conversions libc++ needed.
+LIBC_X11EXT_BUILTIN_SRCS = addtf3.c subtf3.c multf3.c divtf3.c comparetf2.c extendsftf2.c \
+  floatsitf.c floatunsitf.c floatditf.c floatunditf.c fixtfsi.c fixtfdi.c fixunstfsi.c fixunstfdi.c
+LIBC_X11EXT_BUILTIN_OBJS = $(addprefix $(OBJ_DIR)/builtins/,$(LIBC_X11EXT_BUILTIN_SRCS:.c=.o))
+$(OBJ_DIR)/libc.a: $(LIBC_X11EXT_BUILTIN_OBJS)
+.SECONDARY: $(addprefix $(LIBCXX_ROOT)/compiler-rt/lib/builtins/,$(LIBC_X11EXT_BUILTIN_SRCS))
+
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(OBJ_DIR)/libc_pwd.o $(OBJ_DIR)/libc_setjmp.o $(OBJ_DIR)/libc_dlfcn.o $(OBJ_DIR)/libc_resource.o $(OBJ_DIR)/libc_statvfs.o $(OBJ_DIR)/libc_syscall.o $(OBJ_DIR)/libc_ioctl.o $(OBJ_DIR)/libc_socket.o $(LIBC_BUILTIN_OBJS)
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -2149,6 +2236,108 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/sqltest.elf $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlite3.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sqltest.elf $(SQLTEST_BIN)
 
+# --- IceWM session (icewm.md §4.3/§4.5, lane session) --------------------
+# XSESSION.BIN: the X session launcher (src/user/x11sess/xsession.c).  The
+# named-AF_UNIX readiness probe compiles in only when the kernel ABI has the
+# lane-kern named-socket rows (icewm.md §4.1); before that XSESSION uses a
+# fixed grace period and logs that it does.
+XSESSION_BIN = $(OBJ_DIR)/xsession.bin
+X11SESS_DEFS := $(if $(shell grep -qs 'SYS_BIND' src/include/syscall.h && echo y),-DX11SESS_HAVE_NAMED_UNIX)
+X11SESS_HDRS = src/user/x11sess/xsess_probe.h $(USER_HDRS)
+$(OBJ_DIR)/x11sess_xsession.o: src/user/x11sess/xsession.c $(X11SESS_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(X11SESS_DEFS) -c $< -o $@
+$(OBJ_DIR)/x11sess_probe.o: src/user/x11sess/xsess_probe.c $(X11SESS_HDRS) src/include/syscall.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(X11SESS_DEFS) -c $< -o $@
+$(XSESSION_BIN): $(OBJ_DIR)/x11sess_xsession.o $(OBJ_DIR)/x11sess_probe.o $(OBJ_DIR)/libc.a src/user/linker.ld
+	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/xsession.elf $(OBJ_DIR)/x11sess_xsession.o $(OBJ_DIR)/x11sess_probe.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/xsession.elf $(XSESSION_BIN)
+.PHONY: xsession
+xsession: $(XSESSION_BIN)
+
+# Stub X binaries (src/user/x11sess/xstub.c) laid out like a real
+# $(X11_BUILD_DIR) (bin/ + disk/), for exercising XSESSION.BIN before the
+# X stack exists:  make icewm-stubs && make DESKTOP=icewm X11_BUILD_DIR=obj/<arch>/x11stub disk.img
+# The server stub "crashes" after 4 s, so the session must fall back to
+# DESKTOP.BIN (run_icewm_test.py --stubs checks exactly that).
+X11STUB_DIR = $(OBJ_DIR)/x11stub
+X11STUB_BINS = $(X11STUB_DIR)/bin/XHOBBY.BIN $(X11STUB_DIR)/bin/ICEWM.BIN $(X11STUB_DIR)/bin/ICEWMBG.BIN
+$(OBJ_DIR)/x11stub_role%.o: src/user/x11sess/xstub.c $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -DXSTUB_ROLE=$* -c $< -o $@
+$(X11STUB_DIR)/role%.bin: $(OBJ_DIR)/x11stub_role%.o $(OBJ_DIR)/libc.a src/user/linker.ld
+	@mkdir -p $(X11STUB_DIR)
+	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(X11STUB_DIR)/role$*.elf $< $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(X11STUB_DIR)/role$*.elf $@
+$(X11STUB_DIR)/bin/XHOBBY.BIN: $(X11STUB_DIR)/role1.bin
+	@mkdir -p $(dir $@) && cp $< $@
+$(X11STUB_DIR)/bin/ICEWM.BIN: $(X11STUB_DIR)/role2.bin
+	@mkdir -p $(dir $@) && cp $< $@
+$(X11STUB_DIR)/bin/ICEWMBG.BIN: $(X11STUB_DIR)/role3.bin
+	@mkdir -p $(dir $@) && cp $< $@
+.PHONY: icewm-stubs
+icewm-stubs: $(X11STUB_BINS)
+	@mkdir -p $(X11STUB_DIR)/disk/X11 $(X11STUB_DIR)/disk/ICEWM/themes/default
+	@printf '# stub session env (lane session test)\nXSTUB=1\n' > $(X11STUB_DIR)/disk/X11/XSESSION.ENV
+	@printf '<fontconfig></fontconfig>\n' > $(X11STUB_DIR)/disk/X11/FONTS.CNF
+	@printf '# stub IceWM preferences (long-name staging probe)\n' > $(X11STUB_DIR)/disk/ICEWM/preferences
+	@printf 'Look="flat"\n' > $(X11STUB_DIR)/disk/ICEWM/themes/default/default.theme
+	@echo "[icewm-stubs] stub X11 build dir: $(X11STUB_DIR)"
+
+# Resolve the X stack for a DESKTOP=icewm disk (icewm.md §4.5): use
+# $(X11_BUILD_DIR) when it carries the required binaries, else build it from
+# source with third_party/x11/build.sh (default build dir only — an explicit
+# X11_BUILD_DIR that lacks them is an error, never a silent rebuild).
+X11_REQUIRED_BINS = XHOBBY.BIN ICEWM.BIN
+# The runtime prerequisites build.sh links every flat .BIN against: listing
+# them here makes the outer make build them first, so build.sh's own
+# `make obj/<arch>/libc.a` is a no-op instead of rewriting libc.a while a
+# parallel sibling recipe is linking against it.
+.PHONY: x11-staged
+x11-staged: $(OBJ_DIR)/libc.a $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libcxx.a
+	@missing=""; for b in $(X11_REQUIRED_BINS); do [ -f "$(X11_BUILD_DIR)/bin/$$b" ] || missing="$$missing $$b"; done; \
+	if [ -z "$$missing" ]; then echo "[x11] using $(X11_BUILD_DIR)"; exit 0; fi; \
+	if [ "$(X11_BUILD_DIR)" != "third_party/x11/build/$(ARCH)" ]; then \
+	  echo "[x11] ERROR: X11_BUILD_DIR=$(X11_BUILD_DIR) lacks:$$missing (expected in $(X11_BUILD_DIR)/bin/)"; exit 1; fi; \
+	if [ ! -f third_party/x11/build.sh ]; then \
+	  echo "[x11] ERROR: DESKTOP=icewm needs the X11 stack (missing:$$missing in $(X11_BUILD_DIR)/bin/)"; \
+	  echo "[x11]        and third_party/x11/build.sh is not in this tree yet (icewm.md §4.2)."; \
+	  echo "[x11]        Point X11_BUILD_DIR at a prebuilt tree, or try the launcher with stubs:"; \
+	  echo "[x11]          make ARCH=$(ARCH) icewm-stubs && make ARCH=$(ARCH) DESKTOP=icewm X11_BUILD_DIR=$(X11STUB_DIR) run"; \
+	  echo "[x11]        Or boot the original native desktop:  make ARCH=$(ARCH) DESKTOP=hobby run"; \
+	  exit 1; fi; \
+	echo "[x11] missing:$$missing - building the X11 stack from source (third_party/x11/build.sh --arch $(ARCH) --stage all)"; \
+	bash third_party/x11/build.sh --arch $(ARCH) --stage all -j $(or $(X11_JOBS),8); \
+	for b in $(X11_REQUIRED_BINS); do [ -f "$(X11_BUILD_DIR)/bin/$$b" ] || { echo "[x11] ERROR: build.sh did not produce $(X11_BUILD_DIR)/bin/$$b"; exit 1; }; done
+
+# icewm.md §9 (lane apps): HBHOST.BIN, the native-app host IceWM's menu
+# launches every HobbyOS program through.  It compiles this tree's desktop
+# code (desktop.c, window.c, graphics.c) so it is rebuilt here whenever
+# those change -- via build.sh's "hbhost" sub-step, against the X client
+# libraries in X11_PREFIX (default: the build dir's own prefix).
+X11_PREFIX ?= $(X11_BUILD_DIR)/prefix
+HBHOST_SRCS = src/user/hbhost/hbhost.c src/user/hbhost/hbhost_desk.c src/user/hbhost/hbhost.h \
+  src/user/desktop.c src/user/graphics/graphics.c src/user/graphics/window.c src/user/games_scan.c \
+  src/include/vdisplay.h src/include/syscall.h src/user_include/graphics/window.h
+$(X11_BUILD_DIR)/bin/HBHOST.BIN: $(HBHOST_SRCS) $(OBJ_DIR)/libc.a $(OBJ_DIR)/crt0.o | x11-staged
+	@if [ -f "$(X11_PREFIX)/lib/libX11.a" ]; then \
+	  X11_BUILD_DIR=$(abspath $(X11_BUILD_DIR)) bash third_party/x11/build.sh --arch $(ARCH) \
+	    --prefix $(abspath $(X11_PREFIX)) --stage icewm --only hbhost -j $(or $(X11_JOBS),8); \
+	elif [ -f "$@" ]; then echo "[hbhost] WARN: no libX11 under X11_PREFIX=$(X11_PREFIX); keeping $@"; touch "$@"; \
+	else echo "[hbhost] ERROR: building HBHOST.BIN needs the X client libs: set X11_PREFIX (no $(X11_PREFIX)/lib/libX11.a)"; exit 1; fi
+ifeq ($(DESKTOP),icewm)
+disk.img: $(X11_BUILD_DIR)/bin/HBHOST.BIN
+endif
+
+# The DESKTOP knob's disk/kernel wiring.  The stamp prerequisites change no
+# file on the hobby disk; the icewm ones only exist under DESKTOP=icewm.
+$(OBJ_DIR)/main.o: $(DESKTOP_FILE)
+disk.img: $(DESKTOP_FILE)
+ifeq ($(DESKTOP),icewm)
+disk.img: $(XSESSION_BIN) x11-staged
+endif
+
 # GNU make port: stay out of the giant prerequisite lists above (they are
 # merge-owner territory) and hang MAKE.BIN off linker.ld + the disk recipe
 # with target-specific rules of its own.
@@ -2231,7 +2420,13 @@ else
 	@echo "protocol: multiboot1" >> obj/$(ARCH)/limine.conf
 	@echo "path: boot():/boot/hobbyos.elf" >> obj/$(ARCH)/limine.conf
 	$(MCOPY) -i disk.img obj/$(ARCH)/limine.conf ::/boot/limine.conf
-	$(MCOPY) -i disk.img $(TARGET) ::/boot/hobbyos.elf
+	# Limine's multiboot1 loader also allocates room for the ELF's section
+	# contents and panics ("multiboot1: Cannot allocate elf sections") once the
+	# DWARF grows past what it can place -- reached by the icewm.md §9 kernel
+	# code.  Boot a debug-stripped copy; $(TARGET) keeps the symbols for
+	# objdump/addr2line (same loadable segments, byte for byte).
+	$(OBJCOPY) --strip-debug $(TARGET) obj/$(ARCH)/hobbyos.boot.elf
+	$(MCOPY) -i disk.img obj/$(ARCH)/hobbyos.boot.elf ::/boot/hobbyos.elf
 endif
 	$(MCOPY) -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
 	$(MCOPY) -i disk.img $(FILE_IO_BIN) ::/FILEIO.BIN
@@ -2459,10 +2654,27 @@ endif
 	# for whoever remembered to stage it.
 	perl -e 'print chr($$_ % 251) for (0..4095)' > STAGE4K.BIN
 	$(MCOPY) -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+ifeq ($(DESKTOP),icewm)
+	# icewm.md §4.3/§4.4: X binaries + data tree + XSESSION.BIN (DESKTOP=icewm only).
+	sh src/user/x11sess/stage-disk.sh disk.img "$(X11_BUILD_DIR)" $(XSESSION_BIN) "$(MCOPY)" "$(MMD)"
+endif
 	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
 
 # Target to run the OS inside QEMU
+# RUN_STAGE: optional staging hook, run AFTER disk.img is (re)built and BEFORE
+# QEMU starts -- the exact contract of t3_tier.sh's T3_STAGE (GB-118).  A fixture
+# (or wave manifest) the guest must see is placed on the image here, after the
+# build that would have wiped it.  The recipe sets ROOT and hands the command to
+# the shell via $$RUN_STAGE (GNU make would otherwise eat `$ROOT` -> `$R`+`OOT`
+# in the value -- GB-118-V RED, 2026-10-28), the same `ROOT="$ROOT" sh -c "$T3_STAGE"`
+# shape t3_tier.sh uses.  A failing stage is fatal rather than booting an image
+# without the fixture:
+#   RUN_STAGE='mcopy -o -i "$ROOT/disk.img" /tmp/pie_hello ::HELLO.BIN' make run
+# Off by default -- an unset/empty RUN_STAGE changes nothing.
+# The evidence rig shares this same hook (evidence_rig.py --stage), so the rig and
+# the T3 tier put a fixture on the image by one mechanism, not two (GB-118).
 run: $(TARGET) disk.img
+	$(if $(RUN_STAGE),@echo "=== run: stage ==="; ROOT="$(CURDIR)" $(SHELL) -c "$$RUN_STAGE" || { echo "run: STAGE FAILED - refusing to boot a stale image"; exit 2; },)
 	$(QEMU_CMD)
 
 # GX (docs/graphics-accel.md §3-D5): probe this host for a working
@@ -2504,13 +2716,16 @@ gpu-check:
 	  else \
 	    echo "  => ARM verdict: GL unavailable — auto falls back to soft (virtio-gpu-device + plain display)"; \
 	  fi; \
-	  echo "-- x64 (qemu-system-x86_64) --"; \
-	  if command -v qemu-system-x86_64 >/dev/null 2>&1; then \
+	  X64Q="$(QEMU_GLFIX_X64)"; [ -n "$$X64Q" ] || X64Q=qemu-system-x86_64; \
+	  echo "-- x64 ($$X64Q) --"; \
+	  if command -v "$$X64Q" >/dev/null 2>&1; then \
 	    probe "gtk,gl=on + virtio-gpu-gl-pci + -vga none (the GL config)" \
-	      qemu-system-x86_64 -M q35 -m 512M -display gtk,gl=on -device virtio-gpu-gl-pci -vga none -S -monitor none -serial none -nodefaults && GLX64=1 || true; \
+	      "$$X64Q" -M q35 -m 512M -display gtk,gl=on -device virtio-gpu-gl-pci -vga none -S -monitor none -serial none -nodefaults && GLX64=1 || true; \
 	  else echo "  (qemu-system-x86_64 not on PATH)"; fi; \
-	  if [ "$$GLX64" = "1" ]; then \
-	    echo "  => x64 verdict: GL OK — auto picks virtio-gpu-gl-pci + -vga none + gtk,gl=on for interactive desktop boots"; \
+	  if [ "$$GLX64" = "1" ] && [ -n "$(QEMU_GLFIX_X64)" ]; then \
+	    echo "  => x64 verdict: GL OK with the patched QEMU — auto picks virtio-gpu-gl-pci + -vga none + gtk,gl=on for interactive desktop boots"; \
+	  elif [ "$$GLX64" = "1" ]; then \
+	    echo "  => x64 verdict: stock QEMU starts gtk,gl=on but its GL display is broken (tools/qemu-glfix/README.md) — auto stays soft; run tools/qemu-glfix/build.sh to enable GL"; \
 	  else \
 	    echo "  => x64 verdict: gtk,gl=on unavailable — auto falls back to plain gtk (no virtio device; guest uses BGA/std-VGA)"; \
 	  fi; \
@@ -2621,6 +2836,11 @@ antfarm_test:
 
 xeyes_test:
 	python3 ./run_xeyes_test.py
+
+# IceWM desktop (icewm.md §4.5): headless DESKTOP=icewm boot with
+# QMP screenshots.  M5 stub scenario: make icewm_test ICEWM_TEST_ARGS=--stubs
+icewm_test:
+	python3 ./run_icewm_test.py --arch $(ARCH) $(ICEWM_TEST_ARGS)
 
 files_nav_test:
 	python3 ./run_files_nav_test.py
@@ -2906,10 +3126,22 @@ $(FB_MMAP_TEST): src/host/fb_mmap_test.c src/kernel/fb_mmap.c src/kernel/fb_ioct
 # PT_INTERP), and (b) into the host golden suite as the T1/T4 gate.  T4 parses
 # the REAL static-PIE binary with src/kernel/elf_image.c and cross-checks the
 # type against readelf — a differential, and it runs inside host_tests.
+#
+# GB-137 (2026-11-01): build SDLAPP.BIN with musl-gcc.  `clang
+# --target=x86_64-linux-musl` is not a musl build on this fleet: the driver
+# compiles for the musl triple but links through the host ld with glibc paths
+# (`/usr/bin/ld -L/lib/x86_64-linux-gnu`), producing an 862,760-byte glibc
+# static-PIE regardless of the triple.  musl-gcc produces a real musl
+# static-PIE here (46,800 bytes, 11 R_X86_64_RELATIVE) and it runs clean on the
+# loader.  The build fix stands on that measurement alone; it is NOT evidence
+# about any earlier 0xCF8 fault (that control rebuilt a third, non-identical
+# binary — see GB-137's card).  A missing musl-gcc must fail the build loudly
+# rather than silently shipping a glibc binary.
+MUSL_CC ?= musl-gcc
 SDL_APP_PIE = obj/sdl_test_app_pie
 $(SDL_APP_PIE): tools/sdl/sdl_test_app.c src/include/fb_pixel.h src/include/linux_input.h src/include/display_mode.h
 	@mkdir -p obj
-	clang --target=x86_64-linux-musl -fPIE -static-pie -Isrc/include tools/sdl/sdl_test_app.c -o $@
+	$(MUSL_CC) -fPIE -static-pie -Isrc/include tools/sdl/sdl_test_app.c -o $@
 
 SDL_TEST_APP_HOST = sdl_test_app_test_host
 $(SDL_TEST_APP_HOST): src/host/sdl_test_app_host.c tools/sdl/sdl_test_app.c src/kernel/elf_image.c src/include/fb_pixel.h src/include/linux_input.h src/include/linux_joystick.h src/include/elf_image.h src/include/display_mode.h $(SDL_APP_PIE)
@@ -3079,6 +3311,25 @@ $(IPC_PROTO_TEST): src/host/ipc_proto_test.c src/kernel/ipc_proto.c src/include/
 # property-tested byte-exact against glibc on literal + randomized inputs.
 obj/host_hb_%.o: src/libc/src/%.c src/libc/include/*.h
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+
+# icewm.md M2 (lane xlibs-core): inet/netdb, uname vs glibc.
+# Wired into host_tests through a prerequisite-only run target.
+X11_LIBC_TEST = x11_libc_test_host
+$(X11_LIBC_TEST): obj/host_x11_libc_test.o obj/host_hb_inet.o obj/host_hb_utsname.o
+	$(HOST_CC) -o $@ $^
+x11_libc_test_run: $(X11_LIBC_TEST)
+	./$(X11_LIBC_TEST)
+host_tests: x11_libc_test_run
+.PHONY: x11_libc_test_run
+
+# icewm.md M2 (lane xlibs-ext): math_ext.c (frexp/ldexp/scalbn) bit-exact vs glibc.
+X11EXT_LIBC_TEST = x11ext_libc_test_host
+$(X11EXT_LIBC_TEST): obj/host_x11ext_libc_test.o obj/host_hb_math_ext.o
+	$(HOST_CC) -o $@ $^ -lm
+x11ext_libc_test_run: $(X11EXT_LIBC_TEST)
+	./$(X11EXT_LIBC_TEST)
+host_tests: x11ext_libc_test_run
+.PHONY: x11ext_libc_test_run
 
 STRING_TEST = libc_string_test_host
 $(STRING_TEST): obj/host_libc_string_test.o obj/host_hb_string.o
@@ -3510,6 +3761,13 @@ T4_COMPAT_SELFTEST = t4_compat_selftest
 $(T4_COMPAT_SELFTEST): src/host/t4_parity.sh src/host/t4_compat_probe.c
 	@bash src/host/t4_parity.sh --self-test
 
+# GB-126: x86 exception stubs must push the right frame shape — EXCEPTION_ERR for
+# #CP/#VC/#SX (21/29/30), not EXCEPTION_NO_ERR. Table-driven over the dispatcher,
+# so a future exception cannot get the wrong macro in silence. Host-side, no QEMU.
+VECTOR_SHAPE_SCAN = vector_shape_scan
+$(VECTOR_SHAPE_SCAN): tools/gate/vector_shape_scan.py
+	@python3 tools/gate/vector_shape_scan.py
+
 # GB-084: open() must always pass its mode when O_CREAT — the in-suite scan
 # FAILs if any two-argument O_CREAT open() is (re)introduced.
 OPEN_MODE_SCAN = open_mode_scan
@@ -3533,14 +3791,36 @@ $(OPEN_MODE_SCAN): tools/gate/open_mode_scan.py
 # and ASSERT the result is ET_DYN (readelf -h Type: DYN) so a regression to
 # -static fails the build loudly instead of silently shipping a probe the guest
 # rejects (the GB-066-V2 RED's clause-1 failure).
+# GB-138 (2026-10-30): the W0 corpus is native flat .bin, so no process in a
+# T4/T3 wave ever carries PROC_FLAG_LINUX_ABI and the compat table cannot be
+# measured.  A W0 HELLO member built as a Linux-ABI static-PIE ELF is the fix:
+# same hello source, musl -static-pie, asserted ET_DYN so a flat-only regression
+# fails loudly, staged on the image and dispatched through elf_loader_load
+# (program_loader.c:865 sets the flag for ELF).  The `[..] abi=0x1` loader line
+# then proves the flag at runtime (GB-138 clause 2).
 T4_DEVICE_GATE = t4_device_gate
 T4_DEVICE_SELFTEST = t4_device_selftest
 T4_DEVICE_CHECK = t4_device_check
 T4_LEGA_OUT = $(OBJ_DIR)/t4_legA.out
 T4_PROBE_ELF = $(OBJ_DIR)/t4_probe.elf
+W0_PIE_ELF = $(OBJ_DIR)/w0_hello_pie.elf
 $(T4_PROBE_ELF): src/user/t4_probe.c
 	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/t4_probe.c -o $(T4_PROBE_ELF)
 	@readelf -h $(T4_PROBE_ELF) | grep -q 'Type: *DYN' || ( echo "t4_probe: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it (GB-066-V2)"; readelf -h $(T4_PROBE_ELF) | head -4; exit 1 )
+# GB-138 clause 1: the W0 HELLO member also ships as a static-PIE ELF so the W0
+# gate can exercise the compat path; build + assert ET_DYN + assert it parses with
+# is_pie (elf_parse accepts ET_DYN, no PT_INTERP) via the T1 loader host binary.
+$(W0_PIE_ELF): src/user/w0_pie_probe.c
+	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/w0_pie_probe.c -o $(W0_PIE_ELF)
+	@readelf -h $(W0_PIE_ELF) | grep -q 'Type: *DYN' || ( echo "w0_hello_pie: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it (GB-138)"; readelf -h $(W0_PIE_ELF) | head -4; exit 1 )
+
+# GB-019 compat ioctl(16) dispatch probe — same W0 static-PIE vehicle as W0PIE, but
+# this member exercises the ioctl dispatch rows (TIOCGWINSZ/TCGETS/F_GETFL/F_SETFL/
+# default -ENOTTY) so GB-019-V7 can grade them from a Linux-ABI proc.
+GB019_IOCTL_ELF = $(OBJ_DIR)/gb019_ioctl.elf
+$(GB019_IOCTL_ELF): src/user/gb019_ioctl_probe.c
+	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/gb019_ioctl_probe.c -o $(GB019_IOCTL_ELF)
+	@readelf -h $(GB019_IOCTL_ELF) | grep -q 'Type: *DYN' || ( echo "gb019_ioctl: build is not ET_DYN/static-PIE"; readelf -h $(GB019_IOCTL_ELF) | head -4; exit 1 )
 $(T4_LEGA_OUT): $(T4_PROBE_ELF)
 	@./$(T4_PROBE_ELF) > $(T4_LEGA_OUT) && echo "[t4-device] leg A captured -> $(T4_LEGA_OUT)"
 $(T4_DEVICE_GATE): tools/gate/t4_device.sh $(T4_LEGA_OUT)
@@ -3581,10 +3861,48 @@ $(T4_WAVE_GATE): tools/gate/t4_wave.sh
 $(T4_WAVE_SELFTEST): tools/gate/t4_wave.sh
 	@bash tools/gate/t4_wave.sh --self-test
 
+# GB-138 compat-dispatch gate: build the W0PIE static-PIE ELF member, stage it +
+# its W0 manifest onto disk.img via T3_STAGE (NOT the default disk.img recipe, so
+# no other tier's image is touched — GB-138-V2 clause 5), boot the $ARCH guest
+# once, and assert [ARRIVED] W0PIE.BIN + a loader abi=0x1 line.  A staged member
+# no wave dispatches is the SKIP-that-prints-PASS trap GB-138 records.
+T4_W0_DISPATCH = t4_w0_dispatch
+T4_W0_DISPATCH_SELFTEST = t4_w0_dispatch_selftest
+$(T4_W0_DISPATCH): tools/gate/t4_w0_dispatch.sh
+	@bash tools/gate/t4_w0_dispatch.sh
+# GB-019 gate: dispatch the ioctl(16) probe as a Linux-ABI member and assert the
+# five dispatch rows + three negatives from the console (T3_LOG contract).
+T4_GB019_IOCTL = t4_gb019_ioctl
+T4_GB019_IOCTL_SELFTEST = t4_gb019_ioctl_selftest
+$(T4_GB019_IOCTL): tools/gate/t4_gb019_ioctl.sh
+	@bash tools/gate/t4_gb019_ioctl.sh
+$(T4_GB019_IOCTL_SELFTEST): tools/gate/t4_gb019_ioctl.sh
+	@bash tools/gate/t4_gb019_ioctl.sh --self-test
+# self-test: the gate FAILs (exit 1) when the expected observations are absent —
+# proves the gate cannot be painted green by silence.  This runs the GREP logic on
+# an empty capture and on a capture naming W0PIE but no abi line.
+$(T4_W0_DISPATCH_SELFTEST):
+	@tmp=$$(mktemp); echo "=== t4_w0_dispatch self-test ==="; \
+	OUT=$$tmp bash -c 'set -u; echo "no members here" > "$$1"; \
+	  if grep -ac "\[ARRIVED\] W0PIE.BIN" "$$1" | grep -q "^0$$"; then echo "  OK — no W0PIE arrival detected (gate RED on emptiness)"; else echo "  FAIL — missed an arrival"; fi; \
+	  echo "arrived W0PIE.BIN but the loader line carries no PROC_FLAG_LINUX_ABI marker" > "$$1"; \
+	  if ! grep -qa "abi=0x1" "$$1"; then echo "  OK — absent abi marker detected (gate RED on no-abi)"; else echo "  FAIL — missed missing abi"; fi' _ $$tmp; \
+	rm -f $$tmp
+
 # GB-082 glued-console-line counter (whole-line console atomicity observability).
 T4_GLUED_SELFTEST = t4_glued_selftest
 $(T4_GLUED_SELFTEST): tools/gate/t4_glued.sh
 	@bash tools/gate/t4_glued.sh --self-test
+
+# GB-140 t3_tier console-contract gate: prove a gate DERIVES the console path from
+# the T3_LOG machine line (never greps the captured summary), fails LOUDLY when a
+# T3_LOG is absent/unreadable, and that the real tier actually emits it.  The trap
+# this blocks: t3_tier writes the guest console to T3_LOG and the summary to
+# stdout; grepping stdout reported a RUNNING member as "never arrived" — GB-138-V3
+# went RED on a working feature for exactly that (the -V -> GB-140 path).
+T4_T3LOG_SELFTEST = t4_t3log_selftest
+$(T4_T3LOG_SELFTEST): tools/gate/t4_t3log.sh tools/t3_tier.sh
+	@bash tools/gate/t4_t3log.sh --self-test
 
 # GB-086 clause-3 gate: boot the broken-select control (POLLBRK.BIN) and assert
 # the >=85ms select-timeout check FAILs (elapsed_ms=0, POLLTST FAILED) with the
@@ -3649,7 +3967,7 @@ DIFF_RUN = python3 tools/differential/diff_harness_test.py
 test_diff_harness:
 	$(HOST_RUN) $(DIFF_RUN)
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
 	$(HOST_RUN) ./$(GFX_STATS_TEST)
@@ -3843,4 +4161,15 @@ parity_ci:
 test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
+.PHONY: icewm_test
 .PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan uname_parity_host t3_pollbrk t3_nullentry
+
+# icewm.md §9 (lane apps): virtual-display core host golden test
+# (src/kernel/vdisplay.c with the kernel glue compiled out).
+VDISPLAY_TEST = vdisplay_test_host
+$(VDISPLAY_TEST): src/host/vdisplay_test.c src/kernel/vdisplay.c src/include/vdisplay.h src/include/virtio_input.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) -DVDISP_HOST_TEST src/kernel/vdisplay.c src/host/vdisplay_test.c -o $@
+vdisplay_test_run: $(VDISPLAY_TEST)
+	./$(VDISPLAY_TEST)
+host_tests: vdisplay_test_run
+.PHONY: vdisplay_test_run

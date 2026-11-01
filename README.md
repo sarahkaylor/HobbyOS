@@ -1,109 +1,271 @@
 # HobbyOS
 
-A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 secondary — booting bare-metal in QEMU to a graphical desktop with a tiling window manager, ten GUI apps, three ported X11 applications (the `XCALC` calculator, `XANTFARM` and `XEYES`, powered by the Xlib-for-HobbyOS support library in `src/user/x11/`), two arcade games, a shell and a small libc.
+A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 secondary — booting bare-metal in QEMU to an **X11 desktop**: an X.Org-derived X server (`XHOBBY.BIN`) with a HobbyOS DDX driving the framebuffer, **[IceWM](https://github.com/bbidulock/icewm)** as the window manager, and the desktop applications, arcade games and WebKit browser each running in a real managed window (`HBHOST.BIN` hosts the native pixel-window apps; `XCALC` and `XEYES` are true Xlib clients). Under the hood: a preemptive SMP kernel, a POSIX-flavoured libc and shell, a read-only NFSv3 client, and an in-OS LLVM toolchain.
 
 ## Screenshots
 
 | | |
 |---|---|
-| ![The tiling window manager running four apps](docs/screenshots/tiling-windows.png) | ![The Apps menu](docs/screenshots/apps-menu.png) |
-| **Tiling window manager** — FILES, CLOCK, CALC and SYSMON, each launched into a tile from the Apps menu | **The Apps menu** — the pinned apps (including the ported X11 apps) and both arcade games at the top |
-| ![The Files app](docs/screenshots/files-icons.png) | ![PONG running full-screen](docs/screenshots/pong.png) |
-| **Files** — 8×8 icon font glyphs, `[DIR]`/`[TXT]`/`[EXE]` type tags, sizes, FAT/NFS badge, and drag & drop of files onto folders | **PONG** — full-screen arcade game running as a user-space program |
-| ![MILLIPED running full-screen](docs/screenshots/millipede.png) | |
-| **MILLIPED** — ship, mushrooms and score, drawn straight to the framebuffer | |
+| ![The IceWM desktop running Files, Console, SysMon and Clock](docs/screenshots/icewm-desktop.png) | ![The WebKit browser showing a Wikipedia article](docs/screenshots/icewm-browser.png) |
+| **The desktop** — IceWM managing FILES, CONSOLE (`ls /home`, `free`, `ps`), SYSMON and CLOCK, each a real window with a title bar, and the taskbar below | **The browser** — the WebKit port rendering a live Wikipedia article, fetched over TLS from inside the guest |
+| ![PONG, STARDUST and XNIBBLER in IceWM windows](docs/screenshots/icewm-games.png) | ![The start menu with the Apps submenu open](docs/screenshots/icewm-apps-menu.png) |
+| **Games** — PONG, STARDUST and XNIBBLER as user-space programs, each scaled into its own IceWM window | **The start menu** — Apps, Games and All programs, generated from the desktop's pinned lists at disk-build time |
+| ![The Games submenu](docs/screenshots/icewm-games-menu.png) | ![XCALC, ANTFARM and XEYES](docs/screenshots/icewm-x11.png) |
+| **Games menu** — the pinned games plus anything in `/GAMES`, launched into a window through `HBHOST.BIN` | **X11 clients** — XCALC computing through clicks on real Xlib, ANTFARM animating on the native graphics API, XEYES following the pointer |
 
 *Captured from a live QEMU boot — [`capture_screenshots.py`](capture_screenshots.py) reproduces them.*
 
 ## Setup
 
-### Required Software Installation (macOS)
+HobbyOS builds and runs on **macOS** and **Linux**. Both need the same three
+kinds of host tool:
 
-This project requires the following tools, which can be installed via Homebrew:
+| | what | why |
+|---|---|---|
+| **LLVM 21+** | `clang`, `ld.lld`, `llvm-objcopy`, `llvm-ar` | the kernel, the libc and every userland `.BIN` are compiled and linked with LLVM |
+| **QEMU 10+** | `qemu-system-aarch64`, `qemu-system-x86_64` and UEFI firmware for both | the OS only ever runs bare-metal under QEMU — it boots through EDK2/OVMF, not `-kernel` |
+| **FAT tools** | `mkfs.fat`, `mcopy`, `mmd`, `mdir`, `mdeltree` | `disk.img` is a FAT-16 image assembled on the host and handed to the guest as a real disk |
 
-1. **Install Homebrew** (if not already installed):
-   ```bash
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   ```
+The default `make run` (the IceWM desktop) additionally cross-builds a vendored
+X.Org + IceWM stack the first time, which needs `meson`, `ninja`, `cmake`,
+`xkbcomp` plus the `xkeyboard-config` data, and a host C compiler. The test
+tiers (`make host_tests`, `make test`) do not need any of that — but
+`make host_tests` runs a ccache cold-vs-warm measurement, so it does want
+`ccache` on the PATH.
 
-2. **Install LLVM** (for Clang compiler and LLD linker):
-   ```bash
-   brew install llvm lld
-   ```
+### macOS (Homebrew)
 
-3. **Install QEMU** (for running the OS):
-   ```bash
-   brew install qemu
-   ```
-
-4. **Install dosfstools** (for creating FAT16 disk images):
-   ```bash
-   brew install dosfstools
-   ```
-
-5. **Install mtools** (for manipulating FAT disk images):
-   ```bash
-   brew install mtools
-   ```
-
-### Verify Installation
-
-After installation, verify the tools are available:
 ```bash
-/opt/homebrew/opt/llvm/bin/clang --version
-/opt/homebrew/bin/qemu-system-aarch64 --version
+# 1. Homebrew, if you do not have it
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 2. LLVM (clang + LLD), QEMU, and the FAT tooling
+brew install llvm lld qemu dosfstools mtools
+
+# 3. host tools for the X11/IceWM desktop build, plus the harness helpers
+brew install meson ninja cmake xkbcomp xkeyboard-config
+brew install ccache xz socat python@3
+```
+
+The Makefile points straight at `/opt/homebrew/opt/llvm/bin` and
+`/opt/homebrew/sbin/mkfs.fat`, so no PATH juggling is needed for `make`. Two
+things the IceWM build does look up through the environment on macOS (the X
+keyboard data lives under the Homebrew prefix, not `/usr/share/X11/xkb`):
+
+```bash
+export XKB_CONFIG_ROOT="$(brew --prefix)/share/X11/xkb"   # for third_party/x11/build.sh
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"            # for scripts that call clang/llvm-* by name
+```
+
+Homebrew's `qemu` ships the EDK2 firmware the Makefile expects
+(`/opt/homebrew/share/qemu/edk2-aarch64-code.fd`,
+`edk2-x86_64-code.fd`), so there is nothing else to install for booting.
+
+### Linux (Debian / Ubuntu)
+
+```bash
+sudo apt update
+sudo apt install -y clang lld llvm ccache            # LLVM 21+ (Ubuntu 26.04 ships 21)
+sudo apt install -y qemu-system-arm qemu-system-x86 qemu-efi-aarch64 ovmf
+sudo apt install -y dosfstools mtools
+sudo apt install -y meson ninja-build cmake x11-xkb-utils xkb-data
+sudo apt install -y build-essential git make perl python3
+sudo apt install -y curl xz-utils unzip socat
+```
+
+Debian and Ubuntu install the LLVM binaries with a version suffix
+(`clang-21`, `ld.lld-21`, `llvm-objcopy-21`) while the Makefile calls the
+unsuffixed names, so put the LLVM bin directory on your PATH:
+
+```bash
+export PATH="/usr/lib/llvm-21/bin:$PATH"     # add to ~/.profile; use the version you installed
+```
+
+On Fedora: `sudo dnf install clang lld llvm ccache qemu-system-aarch64
+qemu-system-x86 edk2-aarch64 edk2-ovmf dosfstools mtools meson ninja-build cmake
+xkbcomp xkeyboard-config curl xz unzip socat python3 perl`. On Arch:
+`sudo pacman -S clang lld llvm ccache qemu-full edk2-armvirt edk2-ovmf dosfstools
+mtools meson ninja cmake xorg-xkbcomp xkeyboard-config curl xz unzip socat python
+perl`.
+
+The Linux branch of the Makefile reads its UEFI firmware from two fixed paths
+under `$HOME`, so copy (or symlink) the distro's files there once:
+
+```bash
+mkdir -p ~/.local/share/OVMF ~/.local/share/AAVMF
+cp  /usr/share/OVMF/OVMF_CODE_4M.fd  ~/.local/share/OVMF/OVMF_CODE_4M.fd
+cp -L /usr/share/AAVMF/AAVMF_CODE.fd ~/.local/share/AAVMF/AAVMF_CODE.fd
+```
+
+`cp -L` matters: the distro file is a symlink to `AAVMF_CODE.no-secboot.fd`, and
+a secure-boot image will refuse to boot Limine. `make run ARCH=intel` (the
+default) needs only the OVMF file; `ARCH=arm` needs the AAVMF one.
+
+### Verify the installation
+
+```bash
+clang --version                # 21.x
+ld.lld --version
+llvm-objcopy --version
+qemu-system-aarch64 --version  # 10.x
+qemu-system-x86_64 --version
+mkfs.fat --version && mcopy --version
+```
+
+Then the fast host-side gate — it compiles and runs the host golden tests with
+no QEMU involved:
+
+```bash
+make host_tests
 ```
 
 ## Build
 
-Run `make` to compile the project:
 ```bash
-make
+make                  # kernel + userland + disk.img (ARCH=intel, DESKTOP=icewm)
+make ARCH=arm         # the ARM64 image instead
 ```
 
-This will:
-- Compile all kernel source files from `src/kernel/`
-- Compile user test programs from `src/user/`
-- Create a FAT16 disk image with the test binaries
-- Link the final `hobbyos.elf` kernel binary
+A full build:
 
-### Build Individual Components
+- compiles the kernel from `src/kernel/` with Clang and links it with `ld.lld`,
+- compiles every user-space program in `src/user/` — the desktop apps, the shell
+  and the GNU-style tools, the arcade games, the test programs,
+- assembles the FAT-16 `disk.img` that carries the kernel, all the `.BIN`s, the
+  WebKit browser, and — for the IceWM desktop — the X server, IceWM, the
+  `HBHOST.BIN` window host and the `/X11`, `/ICEWM` data trees.
 
-Build only the kernel:
-```bash
-make hobbyos.elf
-```
+The first IceWM build also downloads the pinned X.Org / IceWM / fontconfig
+tarballs into `third_party/x11/dl/`, checks them against
+`third_party/x11/sums/`, and cross-builds them into
+`third_party/x11/build/<arch>/` (that takes a while once; later builds reuse
+it). `X11_BUILD_DIR=<dir>` points the build at a prebuilt tree instead.
 
-Build user test programs:
-```bash
-make tests
-```
+| target | what it does |
+|---|---|
+| `make` | everything, default `ARCH=intel` + `DESKTOP=icewm` |
+| `make ARCH=arm` | the same for ARM64 |
+| `make hobbyos.elf` | just the kernel |
+| `make disk.img` | just the FAT-16 disk image (needs the userland) |
+| `make host_tests` | host-side golden tests (fast, no QEMU) |
+| `make clean` | remove `obj/`, `disk.img`, the ELFs and any running QEMU |
 
 ### Clean Build Artifacts
 
 Remove all compiled files and start fresh:
+
 ```bash
 make clean
 ```
 
+`make clean` also kills a leftover QEMU. Switching `ARCH` or `MODE` normally
+rebuilds what it needs by itself (stamp files under `obj/<arch>/`), so a clean
+is rarely required.
+
 ## Run
 
-Run the OS in QEMU with the disk image:
 ```bash
-make run
+make run                 # x86_64/KVM, IceWM desktop — the default
+make run ARCH=arm        # ARM64 under TCG (much slower, same desktop)
 ```
 
-This launches QEMU with:
-- ARM64 virt machine with Cortex-A53 CPU
-- 128MB of RAM
-- The kernel binary loaded directly
-- Serial console output (ttyAMA0)
-- VirtIO block device with the disk image
+That launches QEMU with:
+
+- `qemu-system-x86_64 -M q35` + OVMF for `ARCH=intel` (the default), or
+  `qemu-system-aarch64 -M virt -cpu cortex-a53` + AAVMF for `ARCH=arm`,
+- 12 GiB of RAM and 8 vCPUs on x86_64, 16 GiB on ARM (`QEMU_SMP=` overrides the
+  core count; the guest caps at 8),
+- the disk image as a real disk — NVMe on q35, virtio-blk on virt,
+- user-mode networking (`10.0.2.x`, host reachable at `10.0.2.2`) and a
+  virtio-gpu display,
+- the kernel's serial console on stdio.
+
+Extra QEMU flags go through `QEMU_ARGS`, e.g. a headless boot with a QMP socket
+for scripted screenshots (the serial console stays on stdout, so tee it):
+
+```bash
+make run QEMU_ARGS="-display none -qmp unix:./qmp-sock,server,nowait" | tee serial.log
+```
 
 ### QEMU Controls
 
-When running in nographic mode:
-- Press `Ctrl+A`, then `X` to exit QEMU
+- Close the QEMU window (or `pkill -f qemu-system`) to stop the OS.
+- In a `-nographic` session, press `Ctrl+A` then `X` to exit QEMU.
+
+### Desktop: IceWM (default) or the original HobbyOS desktop (`DESKTOP=hobby`)
+
+`make run` boots into an X11 session managed by
+[IceWM](https://github.com/bbidulock/icewm). The original native HobbyOS
+desktop is still available with `DESKTOP=hobby`. The plan and status are in
+`icewm.md`.
+
+```bash
+make run                            # IceWM, intel (default ARCH)
+make run ARCH=arm                   # IceWM, ARM64 (TCG, slow)
+make run DESKTOP=hobby              # the original HobbyOS desktop
+make run DESKTOP=hobby ARCH=arm
+```
+
+`DESKTOP` only matters for the interactive desktop boot (`MODE=desktop`, the
+default). The test tiers (`make test`, `unit_tests`, `desktop_test`,
+`apps_test`, ...) default to `DESKTOP=hobby`, and the native-desktop QMP
+harnesses (`run_*_test.py`) pass `DESKTOP=hobby` themselves, so none of them
+needs the X stack.
+
+| |
+|---|
+| ![The original HobbyOS desktop running four tiled apps](docs/screenshots/tiling-windows.png) |
+| **`DESKTOP=hobby`** — the original native desktop: its own window manager, tiling, and the Apps menu, with no X server involved |
+
+With `DESKTOP=icewm`:
+- the kernel is built with `-DKERNEL_DESKTOP_ICEWM` and launches `XSESSION.BIN`
+  (`src/user/x11sess/`) instead of `DESKTOP.BIN`;
+- the disk also gets the X server `XHOBBY.BIN`, `ICEWM.BIN`, `ICEWMBG.BIN` and
+  the `/X11`, `/ICEWM` data trees from `X11_BUILD_DIR` (default
+  `third_party/x11/build/<arch>`). If those binaries are missing, the build runs
+  `third_party/x11/build.sh --arch <arch> --stage all` (this takes a while the
+  first time). `X11_BUILD_DIR=<dir>` uses a prebuilt tree instead.
+- `XSESSION.BIN` sets `DISPLAY=:0`, `HOME`, `FONTCONFIG_FILE=/X11/FONTS.CNF` and
+  `PATH`, plus any `KEY=VALUE` lines in `/X11/XSESSION.ENV`. It starts the X
+  server, waits for it (with a time limit), and then starts IceWM. If the X
+  server or IceWM exits, or never starts, it falls back to the normal HobbyOS
+  desktop. The serial log shows each step on lines starting with `[XSESS]`.
+
+What you get: the X.Org-based server `XHOBBY.BIN` (hw/hobbyos DDX), IceWM 4.1.0 with its
+taskbar, start menu, toolbar and workspaces, and two real-Xlib demo clients (XEyes,
+XCalc). The start menu mirrors the HobbyOS desktop's Apps menu: **Apps** (the desktop's
+pinned apps — BROWSER, CONSOLE, FILES, CALC, XCALC, ANTFARM, XEYES, CLOCK, SYSMON, HEX,
+TASKS, FIND, DIFF, NOTES, NANO, UNIT), **Games** (PONG, MILLIPED, DOOM, STARDUST,
+XNIBBLER, XCRYPT, NES and anything in `/GAMES`) and **All programs** (every other `.BIN`
+on the disk). These native programs run in normal IceWM windows through `HBHOST.BIN`
+(`src/user/hbhost/`), which gives each one a private framebuffer and input queue (the
+kernel's virtual display) and draws its window exactly as the HobbyOS desktop would; the
+games show their whole screen scaled into the window. The toolbar has CONSOLE, FILES,
+XEyes and XCalc. Close a window with IceWM's X button or F4. The menu is generated when
+`disk.img` is built (`src/user/x11sess/gen-icewm-menu.sh`), from `desktop.c`'s pinned
+lists and the files on that disk. Details: `icewm.md` §9.
+The children's stdout/stderr appear on the serial console as `[X] ...` lines.
+IceWM's Logout ends the session and drops you to the HobbyOS desktop.
+
+First build: `third_party/x11/build.sh` downloads the pinned X.Org/IceWM/fontconfig
+tarballs into `third_party/x11/dl/` and checks each sha256 (`third_party/x11/sums/`).
+This is the only extra network access the IceWM desktop needs (the build already
+fetches the llvm-project and ICU sources the same way on a fresh checkout). Host tools:
+meson, ninja, cmake, xkbcomp and xkb-data.
+
+`HBHOST.BIN` is rebuilt by `make` whenever the desktop/window code it shares changes; it
+links the X client libraries from `X11_PREFIX` (default `$(X11_BUILD_DIR)/prefix`; point
+it at a shared prefix when the build dir has none).
+
+Switching `DESKTOP` rebuilds the kernel's `main.o` and `disk.img`
+(stamp file `obj/<arch>/.desktop`).
+
+Headless test (QMP screenshots in `/tmp/hobbyos_icewm_<arch>/`):
+```bash
+make icewm_test                                   # real X stack: taskbar, start menu, CONSOLE + XCALC via HBHOST
+make icewm_test ICEWM_TEST_ARGS=--stubs           # launcher + fallback with stub X binaries
+make icewm-stubs && make run X11_BUILD_DIR=obj/intel/x11stub
+```
 
 ## Graphics acceleration
 
@@ -207,25 +369,34 @@ Tests:
 ```
 HobbyOS/
 ├── src/
-│   ├── kernel/          # Kernel source files
-│   │   ├── main.c       # Entry point
-│   │   ├── boot.s       # Boot assembly code
-│   │   └── ...          # Other kernel components
-│   └── include/         # Kernel headers
-├── user/                # User-space test programs
-│   ├── x11/             # Xlib-on-HobbyOS support library (see x11/README.md)
-│   │   └── apps/
-│   │       ├── xcalc/   # XCALC: Skalculator running on that library
-│   │       ├── antfarm/ # XANTFARM: xantfarm ant-hill simulation
-│   │       └── xeyes/   # XEYES: xeyes, the eyes that follow the mouse
-│   ├── mem_test.c       # Memory allocation tests
-│   ├── file_io_test.c   # File I/O tests
-│   └── ...              # Other test programs
-├── user_include/        # User-space headers
-│   └── libc.h           # Minimal C library
-├── linker.ld            # Kernel linker script
-├── Makefile             # Build configuration
-└── README.md            # This file
+│   ├── kernel/            # kernel: mm, scheduler, VFS, FAT16/NFS, net, POSIX layer
+│   │   ├── main.c         # entry point; KERNEL_DESKTOP_ICEWM selects the session
+│   │   ├── arch/{arm,x64}/ # boot, traps, MMU, per-arch syscall entry
+│   │   └── vdisplay.c     # per-process virtual framebuffer + input queues
+│   ├── include/           # kernel headers (syscall ABI, fs, process, vdisplay)
+│   ├── libc/              # libc, libc++ runtime and the POSIX headers
+│   ├── user/              # user-space programs
+│   │   ├── x11sess/       # XSESSION.BIN: starts the X server + IceWM, menu generator
+│   │   ├── hbhost/        # HBHOST.BIN: hosts a native app inside an X window
+│   │   ├── doom/ nes/ rogue/ …            # game ports (PONG, MILLIPED, STARDUST,
+│   │   │                                  #  XNIBBLER and XCRYPT are single files)
+│   │   ├── files.c console.c calc.c sysmon.c clock.c hex.c tasks.c …  # desktop apps
+│   │   ├── desktop.c      # the native DESKTOP.BIN (DESKTOP=hobby) and its pinned lists
+│   │   ├── sh.c ls.c grep/ sed/ nano/ …   # the shell and the GNU-style tools
+│   │   ├── browser/       # the WebKit port's HobbyOS toolchain glue
+│   │   └── *_test.c       # in-OS integration tests (MODE=test)
+│   ├── host/              # host-side golden tests (make host_tests)
+│   └── user_include/      # headers shared by userland apps (libc.h, gui.h, files.h …)
+├── third_party/
+│   ├── x11/               # cross-build of X.Org + IceWM + client libs (build.sh)
+│   ├── llvm-21.1.8/       # in-OS clang/lld staging for /TOOLS
+│   └── webkit-hobbyos/    # the WebKit port that becomes /BROWSER.BIN
+├── docs/                  # design docs: browser, desktop, fs, selfhost, graphics
+├── tools/                 # harnesses: QMP drivers, screenshot tools, CI helpers
+├── capture_screenshots.py # regenerates the screenshots on this page
+├── run_icewm_test.py      # headless IceWM gate (taskbar, menu, HBHOST clients)
+├── Makefile               # build configuration
+└── README.md              # this file
 ```
 
 ## License

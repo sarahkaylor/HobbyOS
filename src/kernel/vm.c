@@ -97,11 +97,17 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   struct addr_space *as = &vm_as_pool[tgid];
   if (as->ver == AS_V2) {
     spinlock_release_irqrestore(&vm_lock, flags);
+    /* GB-124: distinguish a pid-reuse AS collision from frame OOM — the idle
+       reaper / slot reuse can hand us a pid whose AS pool entry is still
+       AS_V2 (its teardown raced or never ran), which is a different defect
+       from running out of frames. */
+    { static int c_old; if (c_old<3){c_old++; uart_puts("[GB124-AS] fail: pid AS_V2 collision\n");} }
     return 0;
   }
   uint64_t arr = frame_alloc_zeroed();
   if (!arr) {
     spinlock_release_irqrestore(&vm_lock, flags);
+    { static int c_oom; if (c_oom<3){c_oom++; uart_puts("[GB124-AS] fail: frame OOM\n");} }
     return 0;
   }
   as->ver = AS_V2;
@@ -125,6 +131,7 @@ struct addr_space *vm_as_create(uint64_t tgid) {
     as->cap = 0;
     frame_free(arr);
     spinlock_release_irqrestore(&vm_lock, flags);
+    { static int c_root; if (c_root<3){c_root++; uart_puts("[GB124-AS] fail: root alloc\n");} }
     return 0;
   }
   as->root_phys = root;
@@ -1678,6 +1685,28 @@ struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid) {
     return 0;
   }
   return dst;
+}
+
+/* Virtual display (icewm.md §9, src/kernel/vdisplay.c): an attached
+ * process's SYS_MAP_FB maps a memfd object at the same USER_FB slot the
+ * real framebuffer would use (MAP_SHARED, demand-materialized from the
+ * object like any memfd mapping).  Idempotent per address space. */
+int64_t vm_map_fb_obj(struct process *grp, struct vm_object *obj, uint64_t len) {
+  if (!grp || !grp->as || !obj)
+    return -EINVAL;
+  struct addr_space *as = grp->as;
+  if (vm_region_find(as, USER_FB_BASE_V2))
+    return (int64_t)USER_FB_BASE_V2; /* idempotent (also across fork) */
+  len = (len + 0xFFF) & ~0xFFFULL;
+  if (len > USER_FB_SIZE)
+    len = USER_FB_SIZE;
+  uint64_t cap = (vm_object_size(obj) + 0xFFF) & ~0xFFFULL;
+  if (len > cap)
+    return -EINVAL;
+  if (vm_region_insert(as, USER_FB_BASE_V2, len, VM_PROT_READ | VM_PROT_WRITE,
+                       VMK_SHARED, VM_MAP_SHARED, obj, 0) != 0)
+    return -ENOMEM;
+  return (int64_t)USER_FB_BASE_V2;
 }
 
 int64_t vm_map_fb(struct process *grp, uint64_t fb_phys) {

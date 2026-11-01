@@ -23,6 +23,22 @@
 # Env:    T3_TIMEOUT (default 2700 s), T3_LOG (default obj/t3_<arch>.log)
 set -euo pipefail
 
+# GB-140: the machine-readable console contract.  A gate that needs the guest
+# console MUST derive the path from T3_LOG, never from the captured stdout (the
+# stdout verdict summary does not contain program markers; grepping it reports a
+# running member as "never arrived" — GB-138-V3 went RED on a working feature for
+# exactly that reason).  Prints via EXIT trap so it is the LAST stdout line on
+# EVERY exit path (run and police).  Defined at the top so police mode (which
+# exits before the run path) still emits it.
+_report_contract() {
+  [ -n "${LOG:-}" ] || return 0
+  echo "T3_LOG=$LOG"
+  echo "T3_ARCH=${ARCH:-}"
+  echo "T3_FAILS=${FAIL_LINES:-0}"
+}
+_exit_hook() { cleanup 2>/dev/null || true; _report_contract; }
+trap '_exit_hook' EXIT
+
 ARCH_ARG="${1:-arm}"
 POLICE_ONLY=""
 if [ "$ARCH_ARG" = "police" ]; then
@@ -75,6 +91,17 @@ instrument_failure_evident() {
   [ "$3" = "1" ] && { [ "$1" != "0" ] || [ ! -S "$2" ]; }
 }
 
+# GB-121: kernel-mode FATAL banner count.  The x64 reporter writes through the
+# lock-free raw sink (uart_puts_raw, src/kernel/arch/x64/trap.c:3052), so a second
+# CPU can interleave the "FATAL kernel-mode fault" line and the old exact-substring
+# grep ("FATAL kernel-mode fault") silently lost the shredded fatalities (the card's
+# measurement: 28 of 30 missed).  Match the banner's STABLE fragments ("FATAL
+# kernel-m" survives char-level interleave; "Exception in Kernel Mode" is the mode
+# fatal banner) — a clean wave prints neither, so this stays 0 on a healthy run.
+kernel_fatal_count() {
+  grep -acE "FATAL kernel-m|Exception in Kernel Mode" "$1" || true
+}
+
 if [ -n "$POLICE_ONLY" ]; then
   LOG="$POLICE_ONLY"
   # GB-103 DoD clause 3, forced deterministically: T3_FORCE_INSTRUMENT_FAIL=1 on a
@@ -99,7 +126,7 @@ if [ -n "$POLICE_ONLY" ]; then
   halted=0; grep -aq "System halt" "$LOG" && halted=1
   if [ "${T3_SKIP_HALT_CHECK:-0}" = "1" ]; then halted=1; fi
   FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
-  KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+  KFAULT=$(kernel_fatal_count "$LOG")
   MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
   MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG" 2>/dev/null \
     | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
@@ -258,12 +285,11 @@ fi
 make -o disk.img ARCH="$ARCH" MODE=test run ${T3_SMP:+QEMU_SMP=$T3_SMP} QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
 MAKE_PID=$!
 cleanup() {
+  [ -n "${MAKE_PID:-}" ] || return 0
   pkill -P "$MAKE_PID" 2>/dev/null || true
   kill "$MAKE_PID" 2>/dev/null || true
   wait "$MAKE_PID" 2>/dev/null || true
 }
-trap cleanup EXIT
-
 # GB-057 (Coordinator 2026-10-24): the post-freeze sample as a FUNCTION, called
 # the moment a stall marker appears -- on a freeze QEMU is still alive then, and
 # by the end of the wait loop it usually is not (measured: three passes of a
@@ -392,7 +418,7 @@ if [ "$probed" = 0 ] && ! grep -aq "System halt" "$LOG"; then
 fi
 
 cleanup
-trap - EXIT
+trap '_report_contract' EXIT
 
 # Re-read the log: the guest can halt and make can exit between two polls, so
 # the loop above may leave `halted` at 0 for a run that DID halt (observed on
@@ -475,7 +501,7 @@ fi
 # called it a PASS -- a verdict on a wreck.  Two structural criteria fix that, both
 # measured rather than assumed: a kernel fault is never a pass, and a wave that
 # halted without doing its work is not a pass either.
-KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+  KFAULT=$(kernel_fatal_count "$LOG")
 LINES=$(wc -l <"$LOG")
 # Completeness is measured by PROGRAMS THAT EXITED, not by console lines.  The line
 # floor was calibrated when a healthy wave carried ~2,300 lines of [IDLESTUCK]/

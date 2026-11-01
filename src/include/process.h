@@ -102,7 +102,7 @@
 #define GICC_BASE 0x08010000 // CPU Interface base address (v2)
 #define GICR_BASE 0x080A0000 // Redistributor base address (v3)
 
-#define MAX_OPEN_FDS 32 // Increased per user request
+#define MAX_OPEN_FDS 64 // IceWM M1: X server + clients (was 32); fd_cloexec is 64-bit
 
 /* P2.2: the address-space object (src/include/vm.h) — only ever a pointer
    here, so the kernel headers don't grow a hard include chain. */
@@ -319,7 +319,7 @@ struct process {
    * closed at exec.  fcntl F_GETFD/F_SETFD read/write bit 0; dup2/dup and
    * spawn2's 0/1/2 grants clear the bit on the new fd; P5's execve runs
    * the sweep.  Appended at the END so parallel lanes merge additively. */
-  uint32_t fd_cloexec;
+  uint64_t fd_cloexec; /* IceWM M1: 64 bits, one per fd (MAX_OPEN_FDS 64) */
 
   /* --- P5 (docs/browser/p5-exec-signals-design.md D7): exec + signals --- *
    * Appended at the END so parallel lanes merge additively.  All of this
@@ -343,6 +343,9 @@ struct process {
    * cross-context before waking the parked parent, then clears it.
    * Appended at the END so parallel lanes merge additively. */
   uint64_t wait4_rusage;
+  /* Blocking waitpid/wait4 status out-pointer (0 = none).  Kept out of
+   * context[1] because on x64 that slot is the caller's rbx. */
+  uint64_t wait_status_va;
 
   /* --- GB-013 (linux-abi.md §2): compat-process flag ----------------- *
    * Set by the ELF loader for a Linux-ABI image so the trap path routes
@@ -370,6 +373,15 @@ struct process {
    * caused).  One line per process keeps the diagnostic and drops the
    * storm.  Appended at the END so parallel lanes merge additively. */
   uint32_t echild_logged;
+
+  /* Virtual display (icewm.md §9, src/kernel/vdisplay.c).  Appended at the END.  Group-anchor
+   * state: the display this group is attached to (inherited by spawned /
+   * forked children) and the one it OWNS (created by VDISP_OP_ATTACH).
+   * 0 = none; *_gen guards against slot reuse. */
+  int vdisp_id;
+  uint32_t vdisp_gen;
+  int vdisp_own;
+  uint32_t vdisp_own_gen;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
@@ -408,6 +420,9 @@ void process_free(int pid);
 // Blocking waitpid: reaps an exited child (returns its pid + status),
 // returns 0 with WNOHANG when children are running, -ECHILD when none.
 int process_waitpid(struct trap_frame *tf);
+/* Same core with explicit args; does not rewrite tf (x64 trap handler). */
+int process_wait_args(struct trap_frame *tf, int want_pid, int *status,
+                      int options, uint64_t rusage_va);
 
 /* W2-5 (selfhost, os-gap-audit.md §§4/12): kernel-side rusage blob.
  * Byte layout mirrors the sysroot's Linux-shaped `struct rusage`

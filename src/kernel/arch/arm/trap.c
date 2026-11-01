@@ -4,6 +4,8 @@
 #include "fs.h"
 #include "net.h"
 #include "process.h"
+#include "vdisplay.h"
+#include "display_mode.h"
 #include "setjmp.h"
 #include "timer.h"
 #include "lock.h"
@@ -609,6 +611,58 @@ static void sys_set_tls(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)(int64_t)r;
 }
 
+/* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX (96-102).  Thin
+ * layer over fs.c, which validates every user range before changing any
+ * state; -2 parks (blocking accept/connect) ride the pipe restart. ---- */
+
+static void sys_bind(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_bind_user(
+      current_process(), (int)tf->regs[0], tf->regs[1], (int)tf->regs[2]);
+}
+
+static void sys_listen(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_listen(current_process(),
+                                               (int)tf->regs[0], (int)tf->regs[1]);
+}
+
+static void sys_accept4(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int r = file_accept_user(caller, (int)tf->regs[0], tf->regs[1], tf->regs[2],
+                           (int)tf->regs[3]);
+  if (r == -2) {
+    tf->elr -= 4; /* restart when woken (pipe park model) */
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)(int64_t)r;
+  }
+}
+
+static void sys_connect_addr(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int r = file_connect_user(caller, (int)tf->regs[0], tf->regs[1], (int)tf->regs[2]);
+  if (r == -2) {
+    tf->elr -= 4; /* restart when woken (pipe park model) */
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)(int64_t)r;
+  }
+}
+
+static void sys_getsockname(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_sockname_user(
+      current_process(), (int)tf->regs[0], 0, tf->regs[1], tf->regs[2]);
+}
+
+static void sys_getpeername(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_sockname_user(
+      current_process(), (int)tf->regs[0], 1, tf->regs[1], tf->regs[2]);
+}
+
+static void sys_shutdown(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_shutdown(current_process(),
+                                                 (int)tf->regs[0], (int)tf->regs[1]);
+}
+
 static void sys_getsockopt(struct trap_frame *tf) {
   void *val = (void *)tf->regs[3];
   int *len = (int *)tf->regs[4];
@@ -616,6 +670,13 @@ static void sys_getsockopt(struct trap_frame *tf) {
 
   if (!val || !len || !sys_user_range((uint64_t)val, sizeof(int), 1) ||
       !sys_user_range((uint64_t)len, sizeof(int), 1)) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  /* IceWM M1: SO_PEERCRED writes a 12-byte struct ucred; validate what
+   * the caller's *len offers beyond one int (capped). */
+  if (*len > (int)sizeof(int) &&
+      !sys_user_range((uint64_t)val, (uint64_t)(*len > 64 ? 64 : *len), 1)) {
     tf->regs[0] = -EFAULT;
     return;
   }
@@ -1093,6 +1154,14 @@ extern void mmu_map_user_framebuffer(uint64_t phys_addr);
 
 static void sys_map_fb(struct trap_frame *tf) {
   uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
+  {
+    /* icewm.md §9: an attached process maps its private surface. */
+    int vd = vdisp_attached(current_process());
+    if (vd) {
+      tf->regs[0] = (uint64_t)vdisp_map_fb(current_process(), vd);
+      return;
+    }
+  }
   struct process *cur = current_process();
   if (cur)
     cur = process_group(cur);
@@ -1120,14 +1189,41 @@ static void sys_fb_ioctl(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
     return;
   }
-  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+  if (sz == 0 && vdisp_attached(current_process())) {
+    tf->regs[0] = 0; /* icewm.md §9: FBIOBLANK never reaches the real display */
+    return;
+  }
+  if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
   tf->regs[0] = (uint64_t)(int64_t)hb_fb_ioctl_route(req, arg, smem_start);
 }
 
+/* icewm.md §9: an attached process's present sleeps until its frame slot
+ * (vdisp_flush_pace); same park as SYS_SLEEP, returning 0. */
+static void vdisp_present_pace(struct trap_frame *tf, int vd) {
+  int ms = vdisp_flush_pace(vd);
+  tf->regs[0] = 0;
+  struct process *cur = current_process();
+  if (cur && ms > 0) {
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    cur->wake_ms = timer_get_ms() + ms;
+    cur->state = PROC_STATE_BLOCKED;
+    spinlock_release_irqrestore(&proc_lock, flags);
+    schedule(tf, 0);
+  }
+}
+
 static void sys_flush_fb(struct trap_frame *tf) {
+  {
+    int vd = vdisp_attached(current_process());
+    if (vd) { /* icewm.md §9: record damage for the host, not the display */
+      vdisp_flush(vd, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+      vdisp_present_pace(tf, vd);
+      return;
+    }
+  }
   virtio_gpu_flush();
   tf->regs[0] = 0;
 }
@@ -1167,6 +1263,15 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)-EINVAL;
     return;
   }
+  {
+    int vd = vdisp_attached(current_process());
+    if (vd) { /* icewm.md §9 */
+      for (int i = 0; i < count; i++)
+        vdisp_flush(vd, krects[i].x, krects[i].y, krects[i].w, krects[i].h);
+      vdisp_present_pace(tf, vd);
+      return;
+    }
+  }
   virtio_gpu_flush_rects(krects, count);
   tf->regs[0] = 0;
 }
@@ -1181,7 +1286,7 @@ static void sys_input_ioctl(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
     return;
   }
-  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+  if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
@@ -1202,7 +1307,7 @@ static void sys_input_read(struct trap_frame *tf) {
     tf->regs[0] = 0;
     return;
   }
-  if (sys_user_range((uint64_t)ubuf,
+  if (!sys_user_range((uint64_t)ubuf, /* returns 1 when the range is OK */
                      (uint64_t)max * sizeof(struct hb_input_event), 1)) {
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
@@ -1210,7 +1315,9 @@ static void sys_input_read(struct trap_frame *tf) {
   extern uint64_t timer_get_ms(void);
   struct virtio_input_event raw[32];
   int want = max > 32 ? 32 : max;         /* bounded scratch: non-blocking */
-  int got = virtio_input_get_events(raw, want);
+  int vdr = vdisp_attached(current_process()); /* icewm.md §9 */
+  int got = vdr ? vdisp_get_events(vdr, (struct vdisp_event *)raw, want)
+                : virtio_input_get_events(raw, want);
   uint64_t t = timer_get_ms();
   uint64_t sec = t / 1000u, usec = (t % 1000u) * 1000u;
   for (int i = 0; i < got; i++)
@@ -1224,10 +1331,62 @@ static void sys_get_events(struct trap_frame *tf) {
   int max_events = (int)tf->regs[1];
   if (sys_user_range((uint64_t)buf,
                      max_events > 0 ? (uint64_t)max_events * 8 : 8, 1)) {
-    tf->regs[0] = virtio_input_get_events(buf, max_events);
+    int vd = vdisp_attached(current_process()); /* icewm.md §9 */
+    if (vd)
+      tf->regs[0] = max_events > 0
+          ? (uint64_t)(int64_t)vdisp_get_events(vd, (struct vdisp_event *)buf, max_events)
+          : 0;
+    else
+      tf->regs[0] = virtio_input_get_events(buf, max_events);
   } else {
     tf->regs[0] = -1;
   }
+}
+
+/* icewm.md §9: SYS_VDISPLAY (op, a1, a2) -- see src/include/vdisplay.h. */
+static void sys_vdisplay(struct trap_frame *tf) {
+  int op = (int)tf->regs[0];
+  uint64_t a1 = tf->regs[1];
+  uint64_t a2 = tf->regs[2];
+  struct process *cur = current_process();
+  int64_t r;
+  if (op == VDISP_OP_ATTACH) {
+    r = vdisp_sys_attach(cur, (int)a1);
+  } else if (op == VDISP_OP_DETACH) {
+    r = vdisp_sys_detach(cur);
+  } else if (op == VDISP_OP_INJECT) {
+    int n = (int)a2;
+    struct vdisp_event k[64];
+    if (n < 0 || n > 64) {
+      r = -EINVAL;
+    } else if (n == 0) {
+      r = 0;
+    } else if (!a1 || (a1 & 3) ||
+               vm_user_read(cur, a1, k, n * (int)sizeof(struct vdisp_event)) != 0) {
+      r = -EFAULT;
+    } else {
+      r = vdisp_sys_inject(cur, k, n);
+    }
+  } else if (op == VDISP_OP_STATUS) {
+    if (!a1 || (a1 & 3) || !sys_user_range(a1, sizeof(struct vdisp_status), 1)) {
+      r = -EFAULT;
+    } else {
+      struct vdisp_status st;
+      r = vdisp_sys_status(cur, &st);
+      if (r == 0) {
+        struct vdisp_status *u = (struct vdisp_status *)a1;
+        u->flush_seq = st.flush_seq;
+        u->dx = st.dx; u->dy = st.dy; u->dw = st.dw; u->dh = st.dh;
+        u->mapped = st.mapped;
+        u->reads = st.reads;
+        u->read_age_ms = st.read_age_ms;
+        u->queued = st.queued;
+      }
+    }
+  } else {
+    r = -EINVAL;
+  }
+  tf->regs[0] = (uint64_t)r;
 }
 
 static void sys_get_cpuid(struct trap_frame *tf) {
@@ -2110,6 +2269,22 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_sendmsg(tf);
     } else if (syscall_num == SYS_RECVMSG) {
       sys_recvmsg(tf);
+    } else if (syscall_num == SYS_BIND) {         /* IceWM M1 (96-102) */
+      sys_bind(tf);
+    } else if (syscall_num == SYS_LISTEN) {
+      sys_listen(tf);
+    } else if (syscall_num == SYS_ACCEPT4) {
+      sys_accept4(tf);
+    } else if (syscall_num == SYS_CONNECT_ADDR) {
+      sys_connect_addr(tf);
+    } else if (syscall_num == SYS_GETSOCKNAME) {
+      sys_getsockname(tf);
+    } else if (syscall_num == SYS_GETPEERNAME) {
+      sys_getpeername(tf);
+    } else if (syscall_num == SYS_SHUTDOWN) {
+      sys_shutdown(tf);
+    } else if (syscall_num == SYS_VDISPLAY) {
+      sys_vdisplay(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -ENOSYS;

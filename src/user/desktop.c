@@ -28,7 +28,14 @@ char shift_keymap[128] = {0,    27,  '!', '@',  '#',  '$',  '%', '^', '&',  '*',
 
 static int shift_pressed = 0;
 
-#define MAX_MENU_ITEMS 128
+/* GB-119: the [MENU] dump cap must cover the whole image root or a NEW staged
+ * fixture is truncated out of the listing and the evidence rig (which proves a
+ * fixture by finding its name in the guest's own [MENU] dump) cannot see it.
+ * Measured root counts (2026-10-28, MODE=test disk.img): arm=176, intel=158.
+ * 256 is a bounded headroom above both; the tables are 256x16=4KiB + 256 bytes,
+ * and the dump stays bounded (no truncation lie).  The menu is still capped, so
+ * the console/UI budget is unchanged-in-kind. */
+#define MAX_MENU_ITEMS 256
 char menu_items[MAX_MENU_ITEMS][16];
 int num_menu_items = 0;
 /* GB-039 (2nd half): 1 when menu_items[i] is a /GAMES-scanned entry (not a
@@ -106,6 +113,19 @@ static int focused_window = -1;
 static int mouse_x = SCREEN_WIDTH / 2;
 static int mouse_y = SCREEN_HEIGHT / 2;
 
+/* EV_ABS [0, 0x7FFF] -> screen pixel [0, dim-1].  Every absolute source
+ * (QEMU virtio-tablet / vmmouse, the x86 PS/2 integrator) encodes a pixel
+ * as floor(px * 0x7FFF / dim), so the inverse is the CEILING: flooring
+ * here put the pointer one pixel up/left of the host pointer for most
+ * positions, and 0x7FFF itself mapped one past the last pixel. */
+int desktop_abs_to_px(uint32_t value, int dim) {
+  if (value > 0x7FFF) value = 0x7FFF;
+  int px = (int)(((uint64_t)value * (uint64_t)dim + 0x7FFE) / 0x7FFF);
+  if (px > dim - 1) px = dim - 1;
+  if (px < 0) px = 0;
+  return px;
+}
+
 /* ---- Pointer drag support (drag & drop) ------------------------------
  * A press in the content area of a window that opted into mouse events
  * (ESC ] P 1 ~) opens a "drag session" for that window. While the button is
@@ -159,6 +179,7 @@ static struct window *find_window(int id);   /* window lookup, defined below */
 
 static int ctrl_pressed = 0;
 static int alt_pressed = 0;
+static int caps_lock_on = 0;   /* toggled by KEY_CAPSLOCK (58) presses */
 
 /* Modifier bits reported to pixel-mode windows (ESC [ K <mods> ~, the
  * F1.8 input-v2 addition -- see window.h): 1=Shift 2=Ctrl 4=Alt, OR-ed.
@@ -190,6 +211,10 @@ static int held_key_last_ms = 0;
 static char map_key_char(int code) {
   if (code < 0 || code >= 128) return 0;
   char c = shift_pressed ? shift_keymap[code] : keymap[code];
+  /* Caps Lock inverts the case of letters only (Shift+letter with Caps Lock
+   * on gives lowercase, as on every desktop). */
+  if (caps_lock_on && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
+    c = (char)(c ^ 0x20);
   if (ctrl_pressed && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
     c = (char)(c & 0x1f);
   return c;
@@ -200,7 +225,7 @@ static char map_key_char(int code) {
  * nothing repeats while Ctrl is held -- a held Ctrl+C must fire once. */
 static int key_may_repeat(int code) {
   if (ctrl_pressed) return 0;
-  if (code >= 103 && code <= 108) return 1;          /* arrows */
+  if (code == 103 || code == 105 || code == 106 || code == 108) return 1; /* arrows */
   char c = map_key_char(code);
   return c >= 0x20 && c != 0x7f;
 }
@@ -209,7 +234,11 @@ static int key_may_repeat(int code) {
  * length, or 0 when there is nothing to forward (unknown key, or one the
  * desktop consumes itself such as F4). */
 static int key_payload(int code, char *out) {
-  if (code >= 103 && code <= 108) {                  /* arrows */
+  /* Arrows are 103/105/106/108 only: 104 (PgUp) and 107 (End) sit inside
+   * that range but are NOT arrows -- matching them here left out[2]
+   * uninitialized and sent ESC [ <stack garbage>, so End and PgUp never
+   * reached any window. */
+  if (code == 103 || code == 105 || code == 106 || code == 108) { /* arrows */
     out[0] = 27; out[1] = '[';
     if (code == 103) out[2] = 'A';                   /* Up */
     if (code == 108) out[2] = 'B';                   /* Down */
@@ -1586,6 +1615,15 @@ int desktop_damage(const struct desktop_chrome *prev,
 
 static void present_add(struct fb_rect *out, int *n, int max, int x, int y,
                         int w, int h) {
+  /* Clip to the screen: the kernel rejects the WHOLE present call when any
+   * rect pokes outside the framebuffer (SEC-7 boundary validation), and the
+   * pointer cell (hotspot - 1 .. + 10x14) does exactly that at the screen
+   * edges -- the frame's restore of the old sprite was then never shown,
+   * leaving a ghost cursor (typically top-left after a big move). */
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (x + w > SCREEN_WIDTH) w = SCREEN_WIDTH - x;
+  if (y + h > SCREEN_HEIGHT) h = SCREEN_HEIGHT - y;
   if (w <= 0 || h <= 0) return;
   for (int i = 0; i < *n; i++) {
     if (out[i].x == x && out[i].y == y && out[i].w == w && out[i].h == h)
@@ -2010,6 +2048,10 @@ int main(void) {
           alt_pressed = ev->value;
           continue;
         }
+        if (ev->code == 58) {                     /* Caps Lock: toggle on press */
+          if (ev->value == 1) caps_lock_on = !caps_lock_on;
+          continue;
+        }
         if (ev->value == 0 && ev->code != 0x110) {
           /* Key release: a released key must never auto-repeat.  (The
            * mouse button release is handled by the BTN_LEFT block.) */
@@ -2251,10 +2293,10 @@ int main(void) {
         }
       } else if (ev->type == EV_ABS) {
         if (ev->code == ABS_X) {
-          mouse_x = (ev->value * SCREEN_WIDTH) / 0x7FFF;
+          mouse_x = desktop_abs_to_px(ev->value, SCREEN_WIDTH);
           needs_redraw = 1;
         } else if (ev->code == ABS_Y) {
-          mouse_y = (ev->value * SCREEN_HEIGHT) / 0x7FFF;
+          mouse_y = desktop_abs_to_px(ev->value, SCREEN_HEIGHT);
           needs_redraw = 1;
         }
         /* Pointer motion during a drag session is forwarded to the window. */
