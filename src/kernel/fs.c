@@ -1776,10 +1776,10 @@ int console_write_user(struct process *p, const void *buf, int size) {
     }
     {
       extern spinlock_t uart_lock;
-      extern void uart_putc_raw(char c);
+      extern void panic_putc(char c);
       uint64_t uflags = spinlock_acquire_irqsave(&uart_lock);
       for (int i = 0; i < emit; i++)
-        uart_putc_raw(stage[i]);   /* raw: uart_putc would re-take uart_lock */
+        panic_putc(stage[i]);   /* raw: uart_putc would re-take uart_lock */
       spinlock_release_irqrestore(&uart_lock, uflags);
     }
     /* Advance by the completed (emitted) bytes of this window.  A partial
