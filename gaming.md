@@ -316,6 +316,45 @@ The loop:
 3. Coordinator posts the re-plan summary as a comment on the `PLAN` ticket and closes it.
 4. New tickets are `Ready` for workers by the next loop. The swarm therefore never waits for a human to discover what to do next — **autonomy is key**.
 
+### 4.4 Work policy — claims, lanes, card size, delivery (in force 2026-11-01, set by Sarah)
+
+Added after a 12-hour window in which every swarm unit was `active`, 0 restarts, ~300 clean resumes —
+and the fleet merged **one** PR (a plan document) while `Ready` held 0 for nine hours. The constraint was
+never capacity: 30 of 32 `In Progress` cards had been silent for ≥6 h, every Backlog card was `blocked`
+or `decision`, and 15 PRs sat open with **zero** cards in `In Review`/`Merge Gate`. Liveness was healthy;
+output was zero. These rules are prepended to every agent charter and copied to `/opt/swarm/WORK-POLICY.txt`.
+
+1. **Claim lease (DECISION-006).** `In Progress` is a lease. A claim is live while the claimant produces
+   evidence: a comment on the card, a branch commit, or an open PR. wt-S/wt-M release after **6 h** of
+   silence, wt-L after **24 h**; `hobbyos-lease-sweep.timer` on the coordinator (15 min) moves a silent
+   claim back to `Ready` with an explanatory comment. A release is not a verdict — re-claim if it is still
+   yours. Every step posts one line **on the card**; that line is the heartbeat.
+2. **A card with an open PR belongs in `In Review`, never `In Progress`.** `hobbyos-pr-sync.timer` (hourly)
+   maps every open PR to its card by `GB-n` and moves it, posting the PR number, head sha, age and mergeable
+   state. A Verifier mints/claims `GB-nnn-V` against that head; `Merge Gate` only after a recorded GREEN.
+3. **Split, don't re-round.** Two RED verdicts on one card ⇒ split it before a third round. REDs that
+   accumulate new complaints each round are the signature of a card too large to grade in one run
+   (DECISION-005: GB-031's three REDs in four days).
+4. **Card size cap.** No new card whose DoD cannot be met by one gate run. More than ~2 h of lane time or
+   more than one full-suite run ⇒ a milestone checkpoint plus child cards, not one wt-L.
+5. **Promotion rule.** Promote Backlog → Ready only when the `blocked` reason is resolved or absent.
+   `decision` cards are Sarah's; promoting one manufactures false Ready work. An empty lane is reported
+   once, not re-scanned in a loop.
+6. **Status tax.** No per-cycle "nothing claimable"/re-scan lines on the caretaker log (#72) — it reached
+   2,366 comments and every agent re-reads it on every resume. Lane status goes on the card being worked;
+   #72 carries decisions and machine digests.
+7. **Meta-work rule.** A new card names the code artifact it changes (file/function) and a falsifier; a
+   planning-only card attaches to an implementation card. Before minting, grep open branches and PRs for the
+   experiment — GB-147 was minted as "the one experiment no card names" six hours after GB-146 built it.
+8. **Delivery metric.** A pass counts only if it lands a merge, closes a card, or produces a new measured
+   fact on a named card. The caretaker's report opens with merges / cards closed / Ready depth / idle lanes;
+   **0 merges and 0 Ready is RED** regardless of driver health.
+
+**Branch retirement (DECISION-004).** Delete a remote head when its tip is already an ancestor of
+`origin/main` OR it is patch-equivalent to an open/merged PR; keep any head whose ticket is still open
+(it is the stale-claim evidence). The 2026-10-24 pass took 165 heads → 131 by deleting only
+merged-ancestor, closed-ticket heads; apply the same rule rather than re-asking the question.
+
 ---
 
 ## 5. Swarm operating model
@@ -727,8 +766,10 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 3. **Workers** on the farms: one long-lived `hermes -w` session per subsystem
    (abi/loader/libc, graphics/input/audio, native-ports, tests); each claims `Ready` tickets.
 4. **Re-plan cron** (GB-048): `hermes cronjob` daily on the coordinator → `deep` `PLAN` ticket.
-5. Evidence/artifacts land on the shared store (NAS `/mnt/fast` or c2flash) under `evidence/` —
-   the planner reads them at re-plan time.
+5. **Evidence home (DECISION-003, decided 2026-11-01):** the coordinator's local disk is the canonical
+   evidence store, and one-off probe logs are force-added (`git add -f evidence/…`) because `evidence/` is
+   gitignored by design. The NAS `/mnt/fast` clause is retired until a service account and a mount unit
+   exist on `.233`.
 
 ### 11.5 Day-to-day operation / monitoring
 - Watch the board (UI or API). Every merge passes the full gate (T1–T3 both arches, + T4/T5 where
@@ -753,6 +794,17 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 - LLVM 21.1.8 dist-staging cached on farm-1.
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
+
+**2026-11-01 — WORK POLICY: claims become leases, PRs become lanes, delivery becomes the metric.**
+
+| | |
+|---|---|
+| **Why** | A 12 h window with every unit `active`, 0 restarts, ~300 resumes and **one** merge (a plan doc). Measured: 30 of 32 `In Progress` cards silent ≥6 h (oldest 220 h), 16/16 Backlog cards `blocked`/`decision`, `Ready` 0, `In Review` 0, `Merge Gate` 0, 15 PRs open (oldest 5 days), 78% of the window's 199 comments on #72. |
+| **Board actions (23:15Z)** | `hobbyos-pr-sync` moved **13** cards to `In Review` (every open PR now has a card); `hobbyos-lease-sweep` released **19** silent claims to `Ready`; 5 `Done`-labelled issues closed. Census after: `Ready 19 · In Review 13 · In Progress 3 · Backlog 14 · Icebox 4 · Merge Gate 0`. |
+| **New machinery** | `/opt/swarm-lease/{lease_sweep,pr_sync}.py` on `.233`; `hobbyos-lease-sweep.timer` (15 min) and `hobbyos-pr-sync.timer` (hourly). Both dry-run by default; both write an explanatory comment on every card they move. |
+| **Policy channels** | gaming.md §4.4 + §11.4 step 5; `/opt/swarm/WORK-POLICY.txt` on 140–143; the policy block prepended to every charter (`*.txt`, `.continue.txt`, `.verify.*`, `.review.*`); worker "promote a Backlog card" sentences rewritten to rule 5; coordinator's stale "ZERO Ready / FAN OUT" paragraph replaced with the measured state and a merge-first priority; healthcheck prompt gained a DELIVERY GATE and now distinguishes a decision-queue stall from a worker fault; caretaker cadence hourly → 3-hourly (`17 */3 * * *`). |
+| **Decisions closed by Sarah (2026-11-01)** | DECISION-006 claim lease (option 1) — implemented; DECISION-005 GB-031 — split path (rule 3); DECISION-004 branch retirement — rule stated above; DECISION-003 evidence home — coordinator-local (option 2); PLAN-011 M0 — exceptions signed off. |
+
 
 **2026-10-31 — SINGLE-MODEL POLICY: the swarm runs on `llm.localdomain` only (v4.1 Flash); fleet rebooted.**
 
