@@ -17,8 +17,12 @@ if [ ! -f disk.img ]; then
 fi
 
 echo "[evidence] capturing XNIBBLER bundle via evidence_rig.py ..."
+# GB-059 clause 3: never pass a magic launcher slot — the rig resolves the
+# title BY NAME from the parsed [MENU] dump (resolve_launch_slot()), so a
+# stale index here can only mislead a reader (the value used to be 18 while
+# XNIBBLER.BIN had moved to 20).
 ARCH="$ARCH" python3 tools/evidence_rig.py \
-  --game xnibbler --bin XNIBBLER.BIN --slot 18 --arch "$ARCH" \
+  --game xnibbler --bin XNIBBLER.BIN --arch "$ARCH" \
   --checkpoints boot,launch,gameplay --run-seconds 6 --input "up,left,up,left"
 
 echo "[evidence] done. Bundle:"
