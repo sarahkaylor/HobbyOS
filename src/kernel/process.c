@@ -1632,6 +1632,35 @@ void schedule(struct trap_frame *tf, int is_yield) {
         }
         continue;
       }
+      /* GB-145 ghost detector: a thread must never be picked when its group
+         anchor is already gone.  A resurrected member (thread_create racing
+         group teardown) still carries the anchor's freed AS; resuming it
+         installs a dangling address space, and the next instruction fetch
+         lands wherever that CR3 maps (measured: NVMe MMIO, KVM emulation
+         failure, guest frozen).  Skip it and say so instead of dying. */
+      if (proc_table[idx].is_thread) {
+        int tg = proc_table[idx].tgid;
+        int dead = (tg <= 0 || tg >= MAX_PROCESSES) ||
+                   proc_table[tg].state == PROC_STATE_FREE ||
+                   proc_table[tg].state == PROC_STATE_EXITED ||
+                   proc_table[tg].state == PROC_STATE_THREAD_DONE;
+        if (dead) {
+          static volatile uint32_t ghost_shouts;
+          if (ghost_shouts < 8) {
+            ghost_shouts++;
+            uart_puts("[GB145-GHOST] skipping thread slot=");
+            print_int(idx);
+            uart_puts(" pid=");
+            print_int(proc_table[idx].pid);
+            uart_puts(" tgid=");
+            print_int(tg);
+            uart_puts(" anchor_state=");
+            print_int((tg > 0 && tg < MAX_PROCESSES) ? (int)proc_table[tg].state : -1);
+            uart_puts("\n");
+          }
+          continue;
+        }
+      }
       next = idx;
       break;
     }
@@ -4488,7 +4517,34 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
   t->context[32] = 0; /* SPSR=EL0t / RFLAGS as a fresh user */
   t->context[34] = 0; /* x64: classify fresh -> user selectors on resume */
   t->context[35] = 0;
-  t->state = PROC_STATE_READY;
+  /* GB-145: publish the thread only if its group is STILL ALIVE.  Everything
+     above runs outside proc_lock (PCB fields are not individually locked), so
+     the group can exit and run group_teardown while this thread is being
+     built.  Publishing it READY afterwards resurrects a member into a dead
+     group whose `as` pointer has already been freed: the scheduler then
+     installs that dangling address space and resumes into whatever memory
+     the recycled CR3 now maps.  Measured on the default 63-program wave: a
+     CPU took CS=0x08 with RIP=0x1FC000000 (the NVMe MMIO window) and KVM
+     stopped the guest with an emulation failure -- a wave that never halts,
+     with no THRD_T park line to read.  The anchor is the group's liveness
+     token: once teardown clears block/as (or the anchor leaves the live
+     states), no new member may become READY. */
+  {
+    uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
+    if (grp->state == PROC_STATE_FREE || grp->state == PROC_STATE_EXITED ||
+        grp->state == PROC_STATE_THREAD_DONE ||
+        (grp->as == 0 && grp->phys_block_idx < 0)) {
+      if (grp->live_threads > 0)
+        grp->live_threads--;
+      t->as = 0;
+      t->phys_block_idx = -1;
+      t->state = PROC_STATE_THREAD_DONE; /* tombstone: never ran, reclaimable */
+      spinlock_release_irqrestore(&proc_lock, f2);
+      return -EINVAL;
+    }
+    t->state = PROC_STATE_READY;
+    spinlock_release_irqrestore(&proc_lock, f2);
+  }
 
   return pid;
 }
