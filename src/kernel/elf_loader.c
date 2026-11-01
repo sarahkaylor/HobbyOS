@@ -239,9 +239,12 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
   for (uint32_t k = 0; k < stage_pages; k++)
     frame_free(stage + k * FRAME_SIZE);
 
-  /* Runtime entry: base + e_entry (never the raw e_entry — 0x78a0 is not a
-     mapped address). */
-  *entry_out = base + img.entry;
+  /* Runtime entry: base + (e_entry - vaddr_base).  For a PIE vaddr_base is 0
+     and this is base + e_entry; for a fixed-base ET_EXEC (e.g. linked at
+     USER_IMG_BASE) e_entry is already absolute, so adding base + e_entry
+     double-based it (measured 2026-11-01: EXECTEST linked at 0x1000000000
+     faulted at PC=0x2000001000, in=HOLE). */
+  *entry_out = base + (img.entry - img.vaddr_base);
   /* GB-014: report where the program headers are mapped and how many, so the
      caller can put AT_PHDR/AT_PHNUM in the startup auxv.  For a PIE the phdrs
      live inside the first PT_LOAD, so their runtime address is base plus the
