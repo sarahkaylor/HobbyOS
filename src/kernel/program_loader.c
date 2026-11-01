@@ -772,7 +772,6 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
      anything else -> the existing flat .bin loader, unchanged.  Peek the
      magic 4 bytes into a tiny scratch and branch. */
   int is_elf = 0;
-#ifdef __x86_64__
   {
     uint64_t magicw = 0;
     /* dest is a physical address integer; &magicw is a stack VA == phys
@@ -783,11 +782,11 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
     }
   }
-#endif
   uint64_t elf_entry = 0;
   uint64_t elf_phdr = 0;
   uint32_t elf_phnum = 0;
   if (is_elf) {
+#ifdef __x86_64__
     /* ELF mapper: parse + plan + map.  On success *elf_entry = base+e_entry
        and the process below is marked PROC_FLAG_LINUX_ABI. */
     int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, &elf_entry,
@@ -797,6 +796,19 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       process_free(pid);
       return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC */
     }
+#else
+    /* GB-137 clause 4: the aarch64 ELF mapper is not implemented.  The old
+       code left the magic peek inside #ifdef __x86_64__, so on ARM a 0x7fELF
+       image fell through to the flat .bin mapper and was executed at
+       USER_IMG_BASE as if it were flat (measured 2026-11-01: A64BAD.BIN
+       "loaded", then faulted at ELR=0x1000000000).  Refuse it by name
+       instead of silently skipping the ELF path. */
+    uart_puts("elf loader: aarch64 ELF images are not implemented on ARM -- "
+              "refusing by name (flat .bin only)\n");
+    fat16_close(&f);
+    process_free(pid);
+    return -ENOEXEC;
+#endif
   } else if (v2_map_image(as, &f, fsize) != 0) {
     fat16_close(&f);
     process_free(pid);
