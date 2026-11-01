@@ -109,8 +109,11 @@ static void test_net_socket_fd_table(void) {
   int ffd = file_open(cur, "TEST.TXT", 0);
   if (ffd >= 0) {
     EXPECT_EQ(file_socket_connect(cur, ffd, 0x01010101, 0x5000), -ENOTSOCK);
-    /* fcntl is socket-scoped in v1: a non-socket fd reports ENOTSOCK. */
-    EXPECT_EQ(file_fcntl(cur, ffd, K_F_GETFL, 0), -ENOTSOCK);
+    /* GB-019 (merged 06a33970) changed a non-socket F_GETFL to return the
+     * stored O_* flags (Linux semantics) instead of -ENOTSOCK.  This file was
+     * opened with flags=0, so the answer is 0; the old -ENOTSOCK expectation
+     * was stale and made the unit suite red on main. */
+    EXPECT_EQ(file_fcntl(cur, ffd, K_F_GETFL, 0), 0);
     file_close(cur, ffd);
   }
 
