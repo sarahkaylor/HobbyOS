@@ -1,0 +1,11 @@
+t4_w0_dispatch: building /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb144v/obj/intel/w0_hello_pie.elf...
+=== t4_w0_dispatch: booting intel guest with W0PIE-only manifest (GB-138) ===
+=== t4_w0_dispatch: [ARRIVED] W0PIE.BIN x1, abi=0x1 x1 (boot rc=1) ===
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6 abi=0x0
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6 abi=0x0
+v2 loader: PID=4 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6 abi=0x0
+v2 loader: PID=5 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6 abi=0x0
+v2 loader: PID=6 entry=0x10000011B8 sp=0x1800000000 resident=26 tables=6 abi=0x1
+[ARRIVED] W0PIE.BIN rc>0
+t4_w0_dispatch: PASS — W0PIE.BIN dispatched and carried PROC_FLAG_LINUX_ABI in the guest
+DISPATCH_RC=0

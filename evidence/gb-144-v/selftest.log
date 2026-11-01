@@ -1,0 +1,13 @@
+[self-test] good wave (all members arrived):
+  OK — all W0 members PASS (matched Linux leg)
+[self-test] missing CAT (must FAIL):
+  OK — absent member FAILED as required
+[self-test] broken HELLO output (must FAIL):
+  OK — broken member FAILED as required
+[self-test] W0PIE-compat flag absent (must FAIL):
+  OK — gate FAILED a member whose compat flag (abi=0x1) is absent
+[self-test] absent .ref for a member that emits a marker (must FAIL):
+  OK — member emitting a marker with no .ref FAILED (absent ref is no longer a pass)
+[self-test] committed .ref but no marker (must FAIL):
+  OK — committed .ref + no marker FAILED (a silent member is no longer a pass)
+self-test result: fails=0

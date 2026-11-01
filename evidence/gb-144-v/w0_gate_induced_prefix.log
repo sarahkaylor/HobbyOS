@@ -1,0 +1,13 @@
+=== t4_w0: W0 corpus gate over evidence/gb-144-v/w0_no_marker.log ===
+  PASS W0PIE (arrived in guest)
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS SH (arrived in guest)
+  PASS SH output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS CAT (arrived in guest)
+  PASS CAT output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS LS (arrived in guest)
+  PASS LS output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+t4_w0: PASS — every W0 corpus member arrived in the intel wave; members emitting a
+               '[W0] <member> linux=' marker had their output verified against the
+               Linux-leg .ref corpus (a mismatched marker FAILs).

@@ -1,0 +1,12 @@
+=== t4_w0: W0 corpus gate over evidence/gb-144-v/w0_no_marker.log ===
+  PASS W0PIE (arrived in guest)
+  FAIL W0PIE — has a committed .ref but emitted no '[W0] W0PIE linux=' marker: its output cannot be compared (GB-144)
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS SH (arrived in guest)
+  PASS SH output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS CAT (arrived in guest)
+  PASS CAT output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS LS (arrived in guest)
+  PASS LS output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+t4_w0: FAIL — W0 corpus incomplete or output mismatch
