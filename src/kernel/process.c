@@ -1229,6 +1229,58 @@ int process_create_kernel_nowait(void (*entry)(void*), void *arg) {
   return process_create_kernel_internal(entry, arg);
 }
 
+/* GB-146: the last three writes of a slot's resumed RIP/SP, with the site that
+   made them.  Three instrument generations measured the CORPSE (stack
+   headroom at the fault, per-trap minimum, per-resume range) and each either
+   measured the reporter or produced a false positive; the surviving records are
+   all shapes (wild RIP, impossible vector, all-zero frame) whose writer the
+   corpse cannot name.  This records the write instead, so a fault can print how
+   the faulting slot's context[31]/[33] got that way. */
+#define PCB_RING_N 3
+struct pcb_ring_ent { uint8_t tag; uint64_t rip, sp; };
+static struct pcb_ring_ent pcb_ring[MAX_PROCESSES][PCB_RING_N];
+static uint8_t pcb_ring_next[MAX_PROCESSES];
+
+/* GB-146: the last resume's target slot, stack and installed CR3. */
+/* GB-146: the last resume's target stack and installed CR3, PER SLOT.  A single
+   global compared the wrong process (run L: the fault was in pid 26, the global
+   held slot 13's resume) and produced a meaningless cr3/asroot mismatch. */
+volatile uint64_t gb146_rs_sp[MAX_PROCESSES];
+volatile uint64_t gb146_rs_cr3[MAX_PROCESSES];
+
+void pcb_ctx_note(int slot, int tag) {
+  if (slot < 0 || slot >= MAX_PROCESSES)
+    return;
+  uint8_t i = (uint8_t)(pcb_ring_next[slot]++ % PCB_RING_N);
+  pcb_ring[slot][i].tag = (uint8_t)tag;
+  pcb_ring[slot][i].rip = proc_table[slot].context[31];
+  pcb_ring[slot][i].sp = proc_table[slot].context[33];
+}
+
+/* Print the ring for one slot, oldest first: tag(1=usave 2=ksave 3=thread
+   4=loader) rip sp.  Raw sink: called from the fault path. */
+void pcb_ctx_dump(int slot) {
+  if (slot < 0 || slot >= MAX_PROCESSES)
+    return;
+  extern void uart_puts_raw(const char *s);
+  extern void print_int_raw(int val);
+  extern void uart_print_hex_raw(uint64_t v);
+  uart_puts_raw("[GB146-CTXRING] slot=");
+  print_int_raw(slot);
+  for (int k = 0; k < PCB_RING_N; k++) {
+    int i = (pcb_ring_next[slot] + k) % PCB_RING_N;
+    if (!pcb_ring[slot][i].tag)
+      continue;
+    uart_puts_raw(" | t");
+    print_int_raw((int)pcb_ring[slot][i].tag);
+    uart_puts_raw(" rip=0x");
+    uart_print_hex_raw(pcb_ring[slot][i].rip);
+    uart_puts_raw(" sp=0x");
+    uart_print_hex_raw(pcb_ring[slot][i].sp);
+  }
+  uart_puts_raw("\n");
+}
+
 void save_context(struct process *p, struct trap_frame *tf) {
   for (int i = 0; i < 30; i++) {
     p->context[i] = tf->regs[i];
@@ -1305,6 +1357,12 @@ void save_context(struct process *p, struct trap_frame *tf) {
   /* P1 (design section 4): the TLS register joins the switch as one per-PCB
      word -- read the live value here, write it back in restore_context(). */
   p->tls_base = tls_read_live();
+  /* GB-146: record this write (1 = user save, 2 = kernel save). */
+  {
+    int slot = (int)(p - proc_table);
+    if (slot >= 0 && slot < MAX_PROCESSES)
+      pcb_ctx_note(slot, (tf->cs & 3) == 0 ? 2 : 1);
+  }
 }
 
 void wd_dump_proc_table(void) {
@@ -1743,7 +1801,33 @@ void schedule(struct trap_frame *tf, int is_yield) {
       if (proc_table[next].as && !proc_table[next].is_kernel_process &&
           target_sp > USER_VA_BASE + 0x1000 && target_sp <= USER_VA_TOP) {
         uint64_t lo = (target_sp - 0x1000) & ~0xFFFULL;
-        (void)vm_touch(&proc_table[next], lo, target_sp - lo, /*write=*/1);
+        int tr = vm_touch(&proc_table[next], lo, target_sp - lo, /*write=*/1);
+        /* GB-146: this result used to be discarded.  If the window cannot be
+           materialised, the frame copy inside enter_user_space runs on a page
+           that is not there: the #PF is taken at CPL0, the kernel-mode path
+           kills the process and schedules -- and resumes the NEXT slot from
+           inside that fault, on the same kernel stack.  Nothing faults until
+           the 64 KiB slice is crossed into the neighbouring core's frames,
+           which is the measured family (stk_at_entry=0, #GP at rip 0x93/0x97,
+           garbage vector numbers).  Report it before trusting the resume. */
+        if (tr != 0) {
+          static volatile int nostack_seen;
+          if (nostack_seen < 5) {
+            extern void uart_puts_raw(const char *s);
+            extern void print_int_raw(int val);
+            extern void uart_print_hex_raw(uint64_t v);
+            nostack_seen++;
+            uart_puts_raw("[GB146-NOSTACK] resume window unmappable: slot=");
+            print_int_raw(next);
+            uart_puts_raw(" pid=");
+            print_int_raw(proc_table[next].pid);
+            uart_puts_raw(" sp=0x");
+            uart_print_hex_raw(target_sp);
+            uart_puts_raw(" vm_touch=");
+            print_int_raw(tr);
+            uart_puts_raw("\n");
+          }
+        }
       }
 #endif
 
@@ -1856,6 +1940,69 @@ void schedule(struct trap_frame *tf, int is_yield) {
             uart_puts(rb);
           }
         }
+      }
+      /* GB-146: a slot must resume on a stack its own context owns.  Two gaps
+         in the user-only check above: (a) the materialisation guard only runs
+         INSIDE the user window, so a corrupt context[33] below USER_VA_BASE
+         skips it entirely; (b) kernel tasks were not checked at all, and their
+         context[33] IS the resume stack (`target_sp = context[33]`, then
+         enter_user_space moves RSP there).  A pool address in either field puts
+         the kernel's C frames on physical RAM, and the first `ret` pops garbage
+         (measured: #GP at rip 0x93/0x97, RIP/RSP in the 0x39FFE... pool,
+         impossible vectors, all-zero frame).  Print both context fields and the
+         CR3 actually loaded, so the record names which case it is. */
+      {
+        uint64_t sp33 = proc_table[next].context[33];
+        uint64_t rip31 = proc_table[next].context[31];
+        int bad = 0;
+        if (proc_table[next].as && !proc_table[next].is_kernel_process) {
+          bad = (target_sp <= USER_VA_BASE || target_sp > USER_VA_TOP);
+        } else if (proc_table[next].is_kernel_process) {
+          extern char __stack_top;
+          uint64_t lo = (uint64_t)&__stack_top - (uint64_t)MAX_CPUS * 0x10000ULL;
+          bad = (target_sp < lo || target_sp > (uint64_t)&__stack_top);
+        }
+        if (bad) {
+          static volatile int badsp_seen;
+          if (badsp_seen < 5) {
+            extern void uart_puts_raw(const char *s);
+            extern void print_int_raw(int val);
+            extern void uart_print_hex_raw(uint64_t v);
+            uint64_t cr3_now;
+            __asm__ volatile("mov %%cr3, %0" : "=r"(cr3_now));
+            badsp_seen++;
+            uart_puts_raw(proc_table[next].is_kernel_process
+                              ? "[GB146-BADSP] KERNEL task resuming on a non-stack: slot="
+                              : "[GB146-BADSP] user slot resuming outside the user window: slot=");
+            print_int_raw(next);
+            uart_puts_raw(" pid=");
+            print_int_raw(proc_table[next].pid);
+            uart_puts_raw(" name=");
+            uart_puts_raw(proc_table[next].name[0] ? proc_table[next].name : "?");
+            uart_puts_raw(" ctx31=0x");
+            uart_print_hex_raw(rip31);
+            uart_puts_raw(" ctx33=0x");
+            uart_print_hex_raw(sp33);
+            uart_puts_raw(" target_sp=0x");
+            uart_print_hex_raw(target_sp);
+            uart_puts_raw(" cr3=0x");
+            uart_print_hex_raw(cr3_now & ~0xFFFULL);
+            uart_puts_raw("\n");
+          }
+        }
+      }
+      /* GB-146: remember what this resume actually installed, so a fault taken
+         inside enter_user_space can be compared against the slot's own AS.  The
+         frame copy there runs on the user stack at CPL0; if the loaded CR3 is
+         not this slot's root, the copy is reading a foreign address space --
+         which is what a #PF at a *user image* address (cr2=0x1000012030, err=0)
+         during the resume tail looks like. */
+      {
+        extern volatile uint64_t gb146_rs_sp[], gb146_rs_cr3[];
+        uint64_t cr3n;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3n));
+        gb146_rs_sp[next] = target_sp;
+        gb146_rs_cr3[next] = cr3n & ~0xFFFULL;
       }
       enter_user_space(&local_tf, target_sp);
       /* GB-060 (cheap half): a resume call that returns is a defect --

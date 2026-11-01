@@ -61,6 +61,16 @@ struct cpu_local {
   uint64_t user_sp_temp;
   uint64_t cpu_id;
   struct process *current_proc;
+  /* GB-146 stub snapshot (appended: the asm above addresses 0/8/16/24 only).
+     Written from the entry stub with NO intervening call, at two points:
+     right after the frame is pushed (a) and right before the first call (b). */
+  uint64_t gb146_rsp_a;
+  uint64_t gb146_cr3_a;
+  uint64_t gb146_rsp_b;
+  uint64_t gb146_cr3_b;
+  /* The process that owned this CPU when the frame was pushed, so the torn
+     record names its owner (reviewer 15:23Z). */
+  uint64_t gb146_proc_a;
 } __attribute__((packed));
 
 struct cpu_local cpu_locals[MAX_CPUS];
@@ -627,6 +637,33 @@ static void sys_poll(struct trap_frame *tf) {
   if (r == -2) {
     if ((tf->cs & 3) == 3) {
       tf->elr -= 2; // rewind over the `syscall` instruction
+    } else {
+      /* GB-146: the park fell through with a KERNEL frame.  The trap exit will
+         iretq back to elr == the `syscall` instruction at CPL0, which re-enters
+         the syscall path ON THE KERNEL STACK -- each pass pushes another frame,
+         and the 64 KiB slices have no guard page, so the neighbouring core's
+         stack gets overwritten instead of a fault being raised.  Name it: this
+         is the shape that produces execute-at-physical-pool RIPs, impossible
+         vector numbers and `resume call RETURNED`. */
+      static volatile int kpark_seen;
+      if (kpark_seen < 5) {
+        extern void uart_puts_raw(const char *s);
+        extern void print_int_raw(int val);
+        extern void uart_print_hex_raw(uint64_t v);
+        extern uint64_t kernel_stack_remaining(void);
+        kpark_seen++;
+        uart_puts_raw("[POLL-KPARK] park on a KERNEL frame: pid=");
+        print_int_raw(caller ? (int)caller->pid : -1);
+        uart_puts_raw(" cs=0x");
+        uart_print_hex_raw((uint64_t)tf->cs);
+        uart_puts_raw(" elr=0x");
+        uart_print_hex_raw((uint64_t)tf->elr);
+        uart_puts_raw(" -- trap exit would re-execute `syscall` at CPL0\n");
+        extern uint64_t kernel_stack_remaining(void);
+        uart_puts_raw("[POLL-KPARK] kernel stack remaining=");
+        print_int_raw((int)kernel_stack_remaining());
+        uart_puts_raw("\n");
+      }
     }
     save_context(caller, tf);
     schedule(tf, 0);
@@ -2900,7 +2937,202 @@ static void fl_dec(struct fl_buf *f, int v) {
  * handler body unchanged. */
 static void general_interrupt_inner(struct trap_frame *tf);
 
+/* GB-146 snapshot storage + the comparison the coordinator asked for. */
+static struct trap_frame gb146_snap[MAX_CPUS];
+static volatile uint8_t gb146_snap_valid[MAX_CPUS];
+static volatile uint8_t gb146_snap_depth[MAX_CPUS];
+static volatile uint64_t gb146_snap_rsp[MAX_CPUS];
+static volatile uint64_t gb146_snap_cr3[MAX_CPUS];
+
+/* Print which qwords of the handler's frame differ from the entry snapshot.
+   The differing index is the write; identical means the CPU pushed garbage.
+   Built into ONE buffer and emitted with a single raw write (house rule): a
+   fault dump with eight CPUs printing at once is otherwise unreadable, which is
+   exactly how this record came out on the first attempt. */
+static void gb146_snap_diff(const struct trap_frame *tf) {
+  extern void uart_puts_raw(const char *s);
+  extern void print_int_raw(int val);
+  extern void uart_print_hex_raw(uint64_t v);
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS || !gb146_snap_valid[c])
+    return;
+  const uint64_t *now = (const uint64_t *)tf;
+  const uint64_t *was = (const uint64_t *)&gb146_snap[c];
+  int n = (int)(sizeof(struct trap_frame) / sizeof(uint64_t));
+  if (n > 40) n = 40;
+  int diffs = 0, printed = 0;
+  for (int i = 0; i < n; i++)
+    if (now[i] != was[i]) diffs++;
+  char b[560];
+  int k = 0;
+  static const char hx[] = "0123456789ABCDEF";
+  const char *pre = "[GB146-SNAP] cpu=";
+  while (*pre && k < 40) b[k++] = *pre++;
+  { char t[8]; int ti = 0; int v = (int)c;
+    if (v == 0) t[ti++] = '0';
+    while (v > 0 && ti < 7) { t[ti++] = (char)('0' + (v % 10)); v /= 10; }
+    while (ti > 0 && k < 44) b[k++] = t[--ti]; }
+  const char *m1 = " diffs=";
+  while (*m1 && k < 54) b[k++] = *m1++;
+  { char t[8]; int ti = 0; int v = diffs;
+    if (v == 0) t[ti++] = '0';
+    while (v > 0 && ti < 7) { t[ti++] = (char)('0' + (v % 10)); v /= 10; }
+    while (ti > 0 && k < 60) b[k++] = t[--ti]; }
+  /* Where the frame is, where the entry stack was, and where the reader's
+     stack is now.  If rsp_now lies inside [tf, tf+sizeof), the handler's own C
+     frames are landing on the saved frame. */
+  {
+    uint64_t rsp_now;
+    __asm__ volatile("mov %%rsp, %0" : "=r"(rsp_now));
+    const char *m2 = " tf=0x";
+    while (*m2 && k < 70) b[k++] = *m2++;
+    for (int sh = 60; sh >= 0 && k < 86; sh -= 4) b[k++] = hx[((uint64_t)(uintptr_t)tf >> sh) & 0xF];
+    const char *m3 = " rsp0=0x";
+    while (*m3 && k < 96) b[k++] = *m3++;
+    for (int sh = 60; sh >= 0 && k < 112; sh -= 4) b[k++] = hx[(gb146_snap_rsp[c] >> sh) & 0xF];
+    const char *m4 = " rsp=0x";
+    while (*m4 && k < 122) b[k++] = *m4++;
+    for (int sh = 60; sh >= 0 && k < 138; sh -= 4) b[k++] = hx[(rsp_now >> sh) & 0xF];
+    {
+      uint64_t base = (uint64_t)(uintptr_t)tf;
+      uint64_t top = base + sizeof(struct trap_frame);
+      int inside = (rsp_now >= base && rsp_now < top);
+      const char *m5 = inside ? " rsp_IN_frame=1" : " rsp_IN_frame=0";
+      while (*m5 && k < 178) b[k++] = *m5++;
+    }
+    /* The reviewer's discriminator: same CR3 + RSP inside the frame = stack
+       overlap; different CR3 = a stale tf across an address-space switch. */
+    {
+      uint64_t cr3_now;
+      __asm__ volatile("mov %%cr3, %0" : "=r"(cr3_now));
+      const char *m6 = " cr3_0=0x";
+      while (*m6 && k < 190) b[k++] = *m6++;
+      for (int sh = 60; sh >= 0 && k < 206; sh -= 4) b[k++] = hx[(gb146_snap_cr3[c] >> sh) & 0xF];
+      const char *m7 = " cr3=0x";
+      while (*m7 && k < 214) b[k++] = *m7++;
+      for (int sh = 60; sh >= 0 && k < 230; sh -= 4) b[k++] = hx[((cr3_now & ~0xFFFULL) >> sh) & 0xF];
+      {
+        const char *m8 = ((cr3_now & ~0xFFFULL) == gb146_snap_cr3[c])
+                             ? " cr3_SAME=1" : " cr3_SAME=0";
+        while (*m8 && k < 246) b[k++] = *m8++;
+      }
+      /* Which RANGE is the frame in?  The reviewer's point: the slot class is
+         not enough, because v1 processes have two regimes at once -- the fixed
+         user window (VA recycled, backing per-process => an alias is possible)
+         and the identity pool (same VA = same RAM => any clobber is a real
+         write).  This decides which mechanism can even apply. */
+      {
+        uint64_t a = (uint64_t)(uintptr_t)tf;
+        const char *r;
+        if (a >= USER_VA_BASE && a < USER_VA_TOP)
+          r = " rng=user_window";
+        else if (a >= PROC_PHYS_POOL_BASE && a < PROC_PHYS_POOL_TOP)
+          r = " rng=identity_pool";
+        else if (a >= 0x70000000ULL && a < 0x76000000ULL)
+          r = " rng=kernel_stack";
+        else
+          r = " rng=other";
+        while (*r && k < 286) b[k++] = *r++;
+      }
+      /* Stub snapshot: A (as pushed) vs B (just before the first call).  A != B
+         means a stack switch happened inside the stub; B vs the C entry is the
+         same frame if no switch. */
+      {
+        const char *m9 = " stub_a=0x";
+        while (*m9 && k < 298) b[k++] = *m9++;
+        for (int sh = 60; sh >= 0 && k < 314; sh -= 4)
+          b[k++] = hx[(cpu_locals[c].gb146_rsp_a >> sh) & 0xF];
+        const char *ma = " stub_b=0x";
+        while (*ma && k < 324) b[k++] = *ma++;
+        for (int sh = 60; sh >= 0 && k < 340; sh -= 4)
+          b[k++] = hx[(cpu_locals[c].gb146_rsp_b >> sh) & 0xF];
+        const char *mb = (cpu_locals[c].gb146_rsp_a == cpu_locals[c].gb146_rsp_b)
+                             ? " stub_same=1" : " stub_same=0";
+        while (*mb && k < 354) b[k++] = *mb++;
+      }
+      /* Owner of the frame at push time vs owner now: same pid on a pool block
+         means the block stack was reused within one process; different pid on
+         the same block is a different bug (two processes on one block). */
+      {
+        struct process *pa = (struct process *)(uintptr_t)cpu_locals[c].gb146_proc_a;
+        struct process *pn = current_process();
+        const char *mp = " pid_a=";
+        while (*mp && k < 366) b[k++] = *mp++;
+        { int v = pa ? pa->pid : -1; int neg = 0; char t[8]; int ti = 0;
+          if (v < 0) { neg = 1; v = -v; }
+          if (v == 0) t[ti++] = '0';
+          while (v > 0 && ti < 7) { t[ti++] = (char)('0' + (v % 10)); v /= 10; }
+          if (neg && k < 380) b[k++] = '-';
+          while (ti > 0 && k < 384) b[k++] = t[--ti]; }
+        const char *mq = " base_a=0x";
+        while (*mq && k < 394) b[k++] = *mq++;
+        for (int sh = 28; sh >= 0 && k < 406; sh -= 4)
+          b[k++] = hx[(((uint64_t)(pa ? pa->user_phys_base : 0)) >> sh) & 0xF];
+        const char *mr = " pid=";
+        while (*mr && k < 414) b[k++] = *mr++;
+        { int v = pn ? pn->pid : -1; int neg = 0; char t[8]; int ti = 0;
+          if (v < 0) { neg = 1; v = -v; }
+          if (v == 0) t[ti++] = '0';
+          while (v > 0 && ti < 7) { t[ti++] = (char)('0' + (v % 10)); v /= 10; }
+          if (neg && k < 420) b[k++] = '-';
+          while (ti > 0 && k < 424) b[k++] = t[--ti]; }
+      }
+    }
+  }
+  if (diffs == 0) {
+    const char *id = " IDENTICAL (frame as pushed)";
+    while (*id && k < 520) b[k++] = *id++;
+  } else {
+    const char *cl = " CLOBBERED:";
+    while (*cl && k < 436) b[k++] = *cl++;
+    for (int i = 0; i < n && printed < 2 && k < 528; i++) {
+      if (now[i] == was[i])
+        continue;
+      printed++;
+      b[k++] = ' ';
+      b[k++] = (char)('0' + (i / 10) % 10);
+      b[k++] = (char)('0' + i % 10);
+      b[k++] = ':';
+      for (int sh = 28; sh >= 0 && k < 516; sh -= 4) b[k++] = hx[(was[i] >> sh) & 0xF];
+      b[k++] = '>';
+      for (int sh = 28; sh >= 0 && k < 532; sh -= 4) b[k++] = hx[(now[i] >> sh) & 0xF];
+    }
+  }
+  b[k++] = '\n';
+  b[k] = 0;
+  uart_puts_raw(b);
+}
+
 void general_interrupt_handler(struct trap_frame *tf) {
+  /* GB-146 (coordinator 2026-11-01T13:29Z): the SNAPSHOT TEST.
+     Copy the frame the CPU pushed as the first thing the C side does, into a
+     STATIC per-CPU slot -- never onto either stack, or the instrument shares the
+     corruption it is measuring.  The fatal path later compares this snapshot
+     against the frame the handler is reading:
+       * differing qwords  -> the frame was clobbered between push and read, and
+                             the differing index is the exit-path write;
+       * identical         -> the CPU pushed garbage, i.e. the fault is upstream
+                             of the handler.
+     One run distinguishes GB-100's claim from GB-123's; four gates would not. */
+  {
+    uint32_t c = get_cpuid();
+    if (c < MAX_CPUS) {
+      gb146_snap[c] = *tf;
+      gb146_snap_valid[c] = 1;
+      if (gb146_snap_depth[c] < 255)
+        gb146_snap_depth[c]++;
+      {
+        uint64_t rspn;
+        __asm__ volatile("mov %%rsp, %0" : "=r"(rspn));
+        gb146_snap_rsp[c] = rspn;
+        {
+          uint64_t cr3n;
+          __asm__ volatile("mov %%cr3, %0" : "=r"(cr3n));
+          gb146_snap_cr3[c] = cr3n & ~0xFFFULL;
+        }
+      }
+    }
+  }
 #ifdef KERNEL_MODE_UNIT_TEST
   extern void lockdbg_irq_enter(void);
   extern void lockdbg_irq_exit(void);
@@ -2910,6 +3142,11 @@ void general_interrupt_handler(struct trap_frame *tf) {
 #else
   general_interrupt_inner(tf);
 #endif
+  {
+    uint32_t c = get_cpuid();
+    if (c < MAX_CPUS && gb146_snap_depth[c] > 0)
+      gb146_snap_depth[c]--;
+  }
 }
 
 static void general_interrupt_inner(struct trap_frame *tf) {
@@ -2959,6 +3196,41 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   }
   gic_set_current_vector(cpu, tf->vector);
   watchdog_tick(cpu, tf);
+  /* GB-146: name the moment a kernel stack gets dangerous.  The 64 KiB slices
+     are contiguous with no guard page, so an overflow does not fault -- it
+     writes into the neighbouring core's live frames (measured fault family:
+     execute-at-physical-pool RIPs, `resume call RETURNED` with a clobbered pid,
+     impossible vector numbers).  Record and report the first pass below 4 KiB
+     per CPU, with the trap that did it: vector, elr, and the syscall that was
+     executing.  Printed once per CPU, so it cannot become a console storm. */
+  {
+    extern uint64_t kernel_stack_remaining(void);
+    static uint64_t min_stk[MAX_CPUS];
+    static uint8_t min_reported[MAX_CPUS];
+    uint64_t rem = kernel_stack_remaining();
+    if (cpu < MAX_CPUS && (min_stk[cpu] == 0 || rem < min_stk[cpu]))
+      min_stk[cpu] = rem ? rem : 1;
+    if (cpu < MAX_CPUS && !min_reported[cpu] && rem < 4096u) {
+      extern void uart_puts_raw(const char *s);
+      extern void uart_print_hex_raw(uint64_t v);
+      extern void print_int_raw(int val);
+      struct process *cp = current_process();
+      min_reported[cpu] = 1;
+      uart_puts_raw("[GB146-STACK] cpu=");
+      print_int_raw((int)cpu);
+      uart_puts_raw(" remaining=");
+      print_int_raw((int)rem);
+      uart_puts_raw(" vector=");
+      print_int_raw((int)tf->vector);
+      uart_puts_raw(" elr=0x");
+      uart_print_hex_raw((uint64_t)tf->elr);
+      uart_puts_raw(" sys=");
+      print_int_raw(cp ? (int)cp->last_syscall : -1);
+      uart_puts_raw(" pid=");
+      print_int_raw(cp ? (int)cp->pid : -1);
+      uart_puts_raw("\n");
+    }
+  }
 
   /* SEC-OBS-B: drain deferred lost-wakeup requests here rather than at
    * the virtio-blk completion that raised them (see process.h). */
@@ -3049,6 +3321,16 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
+    /* GB-146: the headroom in this CPU's 64 KiB kernel slice AT FAULT ENTRY,
+       before any report code runs.  Measuring it at the print site instead
+       measured the reporter's own depth -- the fault dump pushes a full frame
+       before it prints, so a healthy 3 KiB margin read as 0 and looked like an
+       overflow that had not happened.  This is the number the fault owns. */
+    uint64_t kstk_entry = 0;
+    {
+      extern uint64_t kernel_stack_remaining(void);
+      kstk_entry = kernel_stack_remaining();
+    }
     /* P2.3 (S3, design section 5.2): a v2 process's user #PF is either a
        demand fault (materialize + retry) or a kill with an exact reason.
        Error code: bit0 P (0 = not-present), bit1 W/R, bit4 I/D. */
@@ -3436,6 +3718,17 @@ static void general_interrupt_inner(struct trap_frame *tf) {
          fault for whoever reads the log next. */
       uart_puts_raw("[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=");
       print_int_raw((int)tf->vector);
+      /* GB-146: the headroom left in this CPU's 64 KiB kernel stack at the
+         moment the fault is reported.  The slices are contiguous with no guard
+         page, so an overflow corrupts the neighbouring core's stack instead of
+         faulting — and the observed shapes (execute-at-physical-pool, "resume
+         call RETURNED", garbage vector/error fields) are exactly what a smashed
+         return address looks like.  This field turns that from a theory into a
+         number in the fault record itself. */
+      {
+        uart_puts_raw(" stk_at_entry=");
+        print_int_raw((int)kstk_entry);
+      }
       uart_puts_raw(" rip=");
       uart_print_hex_raw((uint64_t)tf->elr);
       uart_puts_raw(" cr2=");
@@ -3466,6 +3759,30 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         uart_print_hex_raw(cpu_pd7[480]);
       }
       uart_puts_raw("\n");
+      /* GB-146: how did this slot's context[31]/[33] get here? */
+      {
+        extern void pcb_ctx_dump(int slot);
+        pcb_ctx_dump(cur ? (int)cur->pid : -1);
+      }
+      /* GB-146: was the resume running in its own address space?  Per slot: the
+         faulting process's own last resume, not the machine's most recent. */
+      {
+        extern volatile uint64_t gb146_rs_sp[], gb146_rs_cr3[];
+        int rs = cur ? (int)cur->pid : -1;
+        uart_puts_raw("[GB146-RESUME] slot=");
+        print_int_raw(rs);
+        uart_puts_raw(" sp=0x");
+        uart_print_hex_raw((rs >= 0 && rs < MAX_PROCESSES) ? gb146_rs_sp[rs] : 0);
+        uart_puts_raw(" cr3_at_resume=0x");
+        uart_print_hex_raw((rs >= 0 && rs < MAX_PROCESSES) ? gb146_rs_cr3[rs] : 0);
+        uart_puts_raw(" asroot=0x");
+        uart_print_hex_raw((cur && cur->as) ? cur->as->root_phys : 0);
+        uart_puts_raw(" cur=");
+        print_int_raw(rs);
+        uart_puts_raw("\n");
+      }
+      /* GB-146: the snapshot test — entry frame vs the frame being read now. */
+      gb146_snap_diff(tf);
       /* GB-060: same rule as the resume-return halt -- if this CPU is holding
          proc_lock, give it back before stopping, so the survivors are not left
          spinning behind a CPU that will never run again.  Only if the lock
@@ -3777,6 +4094,14 @@ __asm__(
 "    mov qword ptr [rsp + 232], 0\n"
 "    mov qword ptr [rsp + 240], 0\n" /* lr */
 "    \n"
+"    /* GB-146 stub snapshot, point A: the frame as pushed, written per-CPU\n"
+"       through gs with NO intervening call. */\n"
+"    mov gs:[48], rsp\n"
+"    mov rax, cr3\n"
+"    mov gs:[56], rax\n"
+"    mov rax, gs:[40]\n"      /* current_proc at push time */
+"    mov gs:[80], rax\n"
+"    \n"
 "    /* Carry the user RSP inside the trap frame (the dummy `lr` slot,\n"
 "       [rsp + 240]) on EVERY entry, so it survives a process switch during\n"
 "       a -2 syscall restart.  From user mode the hardware-pushed RSP\n"
@@ -3817,6 +4142,13 @@ __asm__(
 "    /* 4. SS ([rsp + 312]) -> ss ([rsp + 288]) */\n"
 "    mov rax, [rsp + 312]\n"
 "    mov [rsp + 288], rax\n"
+"    \n"
+"    /* GB-146 stub snapshot, point B: immediately before the first C call.\n"
+"       Comparing A with B answers whether a stack switch happened between\n"
+"       the frame push and the handler. */\n"
+"    mov gs:[64], rsp\n"
+"    mov rax, cr3\n"
+"    mov gs:[72], rax\n"
 "    \n"
 "    /* Call C Handler */\n"
 "    mov rdi, rsp\n"
