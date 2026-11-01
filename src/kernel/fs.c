@@ -13,6 +13,18 @@
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
 
+/* GB-108: fds 0-2 are the process's stdio and must never be handed out by an
+ * implicit fd allocation (open/pipe/socket/dup/accept/memfd/msg-install).
+ * A process launched by the boot wave starts with open_fds[0..2] == -1, and
+ * file_write()'s fd-1/2 console fallback relies on that.  Without a floor the
+ * first open takes fd 0 and the second takes fd 1 — which silently redirects
+ * stdout into whatever was opened.  Measured in-guest (t4_fd_diag):
+ *   [DIAG] null_w_fd=0   [DIAG] urandom_fd=1
+ * and the golden T4 probe's open("/dev/urandom") -> 0 followed by
+ * open("/dev/null", O_WRONLY) -> 1 swallowed 22 probe rows with no syscall
+ * error at all.  Linux reserves 0-2 for every process; so does this. */
+#define FD_STDIO_FIRST 3
+
 /* P6.1: advisory record-lock table (the engine lives further down with
  * the fcntl commands; declared up here so fs_init initializes its lock). */
 #define MAX_FILE_LOCKS 64
@@ -173,7 +185,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
       return -ENOENT;
     }
     int dfd = -1;
-    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
       if (cur->open_fds[i] == -1) {
         cur->open_fds[i] = get_global_fd(f);
         cur->num_open_fds++;
@@ -203,7 +215,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
     f->type = FILE_TYPE_PROCFD;
     f->fat16.cursor = 0;
     int pdfd = -1;
-    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
       if (cur->open_fds[i] == -1) {
         cur->open_fds[i] = get_global_fd(f);
         cur->num_open_fds++;
@@ -225,7 +237,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
       return -ENOENT;
     }
     int dfd = -1;
-    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
       if (cur->open_fds[i] == -1) {
         cur->open_fds[i] = get_global_fd(f);
         cur->num_open_fds++;
@@ -291,7 +303,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
   }
 
   int fd = -1;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
     if (cur->open_fds[i] == -1) {
       cur->open_fds[i] = get_global_fd(f);
       cur->num_open_fds++;
@@ -334,7 +346,7 @@ int file_connect(struct process *cur, uint32_t ip, uint16_t port, int protocol) 
   f->socket.pcb = pcb;
 
   int fd = -1;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
     if (cur->open_fds[i] == -1) {
       cur->open_fds[i] = get_global_fd(f);
       cur->num_open_fds++;
@@ -419,7 +431,7 @@ int file_socket(struct process *p, int domain, int type, int protocol) {
     f->usock.end = 0;
 
     int fd = -1;
-    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
       if (p->open_fds[i] == -1) {
         p->open_fds[i] = get_global_fd(f);
         p->num_open_fds++;
@@ -468,7 +480,7 @@ int file_socket(struct process *p, int domain, int type, int protocol) {
   f->socket.pcb = pcb;
 
   int fd = -1;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
     if (p->open_fds[i] == -1) {
       p->open_fds[i] = get_global_fd(f);
       p->num_open_fds++;
@@ -1513,7 +1525,7 @@ int file_dup(struct process *cur, int fd) {
   if (f->type == FILE_TYPE_EMPTY) return -EBADF;
   if (cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
   int newfd = -1;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
     if (cur->open_fds[i] == -1) {
       newfd = i;
       break;
@@ -1880,7 +1892,7 @@ int file_pipe(struct process *cur, int fds[2]) {
   }
 
   int user_fd0 = -1, user_fd1 = -1;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
     if (cur->open_fds[i] == -1) {
       if (user_fd0 == -1) user_fd0 = i;
       else if (user_fd1 == -1) {
@@ -1945,7 +1957,7 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS)
     return -EMFILE;
   int ufd = -1;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
     if (cur->open_fds[i] == -1) {
       ufd = i;
       break;
@@ -2083,7 +2095,7 @@ int file_socketpair(struct process *p, int domain, int type, int proto,
   f1->usock.end = 1;
 
   int fd0 = -1, fd1 = -1;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
     if (p->open_fds[i] == -1) {
       if (fd0 == -1) fd0 = i;
       else if (fd1 == -1) { fd1 = i; break; }
@@ -2153,7 +2165,7 @@ int fs_msg_install_gfd(struct process *p, int gfd) {
   if (global_file_table[gfd].type == FILE_TYPE_EMPTY) return -EBADF;
   if (p->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
   int fd = -1;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
     if (p->open_fds[i] == -1) { fd = i; break; }
   }
   if (fd < 0) return -EMFILE;
@@ -2385,7 +2397,7 @@ int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
     return r; /* -EAGAIN / -EINVAL / -2 (parked) */
   }
   int nfd = -1;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
     if (pg->open_fds[i] == -1) { nfd = i; break; }
   }
   if (nfd < 0) { /* raced with a sibling thread filling the table */
