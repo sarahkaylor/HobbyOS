@@ -3343,6 +3343,82 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           uart_puts_raw("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
           print_int_raw(cur->pid);
           uart_puts_raw("\n");
+          /* GB-145: name the fault from ONE record.  The two-line form above
+             says "a kernel-mode #PF happened" but not WHERE the kernel was
+             (rip) nor with which stack -- and those are what separate "the
+             user passed a bad pointer" from "a resume/restore delivered a
+             context that is not this process's".  The previous 17-char CR2
+             print also lost its "0x" to a prefix clamp; this one is measured
+             as one string, so a peer CPU cannot shred it. */
+          {
+            char kb[192];
+            int ki = 0;
+            const char *k1 = "[KPF-KILL] pid=";
+            while (*k1 && ki < 20) kb[ki++] = *k1++;
+            {
+              int v = cur ? cur->pid : -1;
+              char td[12];
+              int ti = 0;
+              if (v < 0) { kb[ki++] = '-'; v = -v; }
+              if (v == 0) td[ti++] = '0';
+              while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+              while (ti > 0 && ki < 34) kb[ki++] = td[--ti];
+            }
+            const char *k2 = " vec=";
+            while (*k2 && ki < 40) kb[ki++] = *k2++;
+            {
+              int v = (int)tf->vector;
+              if (v == 0) kb[ki++] = '0';
+              char td[6]; int ti = 0;
+              while (v > 0 && ti < 5) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+              while (ti > 0 && ki < 48) kb[ki++] = td[--ti];
+            }
+            const char *k3 = " cr2=0x";
+            while (*k3 && ki < 60) kb[ki++] = *k3++;
+            {
+              static const char hx4[] = "0123456789ABCDEF";
+              uint64_t v = kcr2;
+              for (int sh = 60; sh >= 0 && ki < 78; sh -= 4)
+                kb[ki++] = hx4[(v >> sh) & 0xF];
+            }
+            const char *k4 = " rip=0x";
+            while (*k4 && ki < 88) kb[ki++] = *k4++;
+            {
+              static const char hx5[] = "0123456789ABCDEF";
+              uint64_t v = (uint64_t)tf->elr;
+              for (int sh = 60; sh >= 0 && ki < 106; sh -= 4)
+                kb[ki++] = hx5[(v >> sh) & 0xF];
+            }
+            const char *k5 = " err=";
+            while (*k5 && ki < 114) kb[ki++] = *k5++;
+            {
+              static const char hx6[] = "0123456789ABCDEF";
+              uint64_t v = (uint64_t)tf->error_code;
+              for (int sh = 12; sh >= 0 && ki < 124; sh -= 4)
+                kb[ki++] = hx6[(v >> sh) & 0xF];
+            }
+            const char *k6 = " cs=";
+            while (*k6 && ki < 130) kb[ki++] = *k6++;
+            {
+              static const char hx7[] = "0123456789ABCDEF";
+              uint64_t v = (uint64_t)tf->cs;
+              for (int sh = 12; sh >= 0 && ki < 140; sh -= 4)
+                kb[ki++] = hx7[(v >> sh) & 0xF];
+            }
+            const char *k7 = " state=";
+            while (*k7 && ki < 152) kb[ki++] = *k7++;
+            {
+              int v = cur ? (int)cur->state : -1;
+              char td[8]; int ti = 0;
+              if (v < 0) { kb[ki++] = '-'; v = -v; }
+              if (v == 0) td[ti++] = '0';
+              while (v > 0 && ti < 7) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+              while (ti > 0 && ki < 162) kb[ki++] = td[--ti];
+            }
+            kb[ki++] = '\n';
+            kb[ki] = 0;
+            uart_puts_raw(kb);
+          }
           process_fault_exit(tf, 11); /* SIGSEGV status byte */
           /* process_fault_exit -> process_exit -> schedule() never
              returns (it resumes another process or idles forever). */
