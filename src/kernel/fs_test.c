@@ -25,6 +25,10 @@ static void test_fs_file_open_close(void) {
   // Open a known file
   int fd = file_open(cur, "TEST.TXT", 0);
   EXPECT_EQ((fd >= 0), 1); // Should successfully assign a local FD
+  /* GB-108: fds 0-2 are stdio and must never be handed out by an implicit
+   * allocation.  Before the fix this open returned 0 (stdin), and in the
+   * boot wave the second implicit open took fd 1 and redirected stdout. */
+  EXPECT_EQ((fd >= 3), 1);
   EXPECT_EQ((cur->open_fds[fd] >= 0), 1); // Should have a global fd
   EXPECT_EQ(cur->num_open_fds, 1);
 
