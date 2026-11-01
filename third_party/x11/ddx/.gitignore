@@ -1,0 +1,3 @@
+# The repo-root .gitignore ignores every path named "hobbyos" (the kernel
+# binary); the DDX source directory must stay tracked.
+!hobbyos

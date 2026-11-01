@@ -91,6 +91,34 @@ static void test_map_key_char(void) {
   check(map_key_char(46) == 3, "Ctrl+Shift+C is still 0x03");
   shift_pressed = 0;
   ctrl_pressed = 0;
+
+  /* Caps Lock flips letter case only; Shift+letter under Caps is lower. */
+  caps_lock_on = 1;
+  check(map_key_char(46) == 'C', "Caps Lock: 'c' is upper-case");
+  check(map_key_char(2) == '1', "Caps Lock: digits unaffected");
+  shift_pressed = 1;
+  check(map_key_char(46) == 'c', "Caps Lock + Shift: 'c' is lower-case");
+  check(map_key_char(2) == '!', "Caps Lock + Shift: '1' is '!'");
+  shift_pressed = 0;
+  ctrl_pressed = 1;
+  check(map_key_char(46) == 3, "Caps Lock + Ctrl+C is still 0x03");
+  ctrl_pressed = 0;
+  caps_lock_on = 0;
+}
+
+/* End (107) and PgUp (104) sit inside the arrow code range 103..108 but
+ * are not arrows: they must produce their own sequences. */
+static void test_nav_key_payloads(void) {
+  char out[8];
+  ctrl_pressed = 0; shift_pressed = 0;
+  check(key_payload(107, out) == 3 && out[0] == 27 && out[1] == '[' && out[2] == 'F',
+        "End is ESC [ F");
+  check(key_payload(104, out) == 4 && out[2] == '5' && out[3] == '~',
+        "PgUp is ESC [ 5 ~");
+  check(key_payload(102, out) == 3 && out[2] == 'H', "Home is ESC [ H");
+  check(key_payload(109, out) == 4 && out[2] == '6', "PgDn is ESC [ 6 ~");
+  check(key_payload(111, out) == 4 && out[2] == '3', "Delete is ESC [ 3 ~");
+  check(key_payload(105, out) == 3 && out[2] == 'D', "Left is ESC [ D");
 }
 
 /* ---- 2. Repeat arbitration ---- */
@@ -542,6 +570,7 @@ int main(void) {
   setvbuf(stdout, NULL, _IONBF, 0);
   printf("=== Desktop input (Ctrl bytes + key auto-repeat) host tests ===\n");
   test_map_key_char();
+  test_nav_key_payloads();
   test_key_may_repeat();
   test_repeat_delay_and_period();
   test_repeat_letter_and_up_arrow();

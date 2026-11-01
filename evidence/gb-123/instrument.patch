@@ -1,0 +1,38 @@
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 9658c02..f95b6c9 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -108,6 +108,33 @@ void trap_exit_frame_check(uint64_t *frame) {
+   uint64_t cs = frame[1];
+   int implausible;
+ 
++  /* GB-123 observation (evidence-only instrument, NOT a fix): the exit path
++     pushes two registers and this call's return address into the frame slots it
++     has already consumed (common_trap_exit: add $0x108; add $0x10; push rax;
++     push rcx; call trap_exit_frame_check).  With `frame` pointing at RIP
++     (+280), those stores land at -8 (vector slot, 264), -16 (error slot, 272)
++     and -24 (spsr slot, 256).  Print them from inside the call, so the write is
++     observed by the callee rather than inferred from a later dump. */
++  {
++    static volatile int exitframe_shown;
++    extern void uart_puts_raw(const char *s);
++    extern void uart_print_hex_raw(uint64_t v);
++    if (exitframe_shown < 6) {
++      exitframe_shown++;
++      uart_puts_raw("[EXITFRAME] vector_slot(-8)=");
++      uart_print_hex_raw(frame[-8 / 8]);
++      uart_puts_raw(" error_slot(-16)=");
++      uart_print_hex_raw(frame[-16 / 8]);
++      uart_puts_raw(" spsr_slot(-24,retaddr)=");
++      uart_print_hex_raw(frame[-24 / 8]);
++      uart_puts_raw(" rip=");
++      uart_print_hex_raw(rip);
++      uart_puts_raw(" cs=");
++      uart_print_hex_raw(cs);
++      uart_puts_raw("\n");
++    }
++  }
++
+   if ((cs & 3u) != 3u) {
+     /* GB-061: a kernel-mode return can have a perfectly legal kernel RIP --
+        that is why the CS discriminator exists -- but it can never be below the

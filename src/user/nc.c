@@ -47,7 +47,7 @@ int main(void) {
   uint32_t ip = parse_ip(argv[0]);
   int port = nc_atoi(argv[1]);
 
-  int fd = connect(ip, port, 17);
+  int fd = net_connect(ip, port, 17);
   if (fd < 0) {
     print("nc: failed to connect\n");
     return 1;

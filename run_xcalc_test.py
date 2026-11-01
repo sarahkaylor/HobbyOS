@@ -326,7 +326,7 @@ def main():
     if INTEL:
         qemu_args += " -enable-kvm"
     proc = subprocess.Popen(
-        ["stdbuf", "-oL", "-eL", "make", "run", f"ARCH={ARCH}",
+        ["stdbuf", "-oL", "-eL", "make", "run", "DESKTOP=hobby", f"ARCH={ARCH}",
          f"QEMU_ARGS={qemu_args}"],
         stdout=serial, stderr=subprocess.STDOUT)
 

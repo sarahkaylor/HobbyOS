@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/wabi-gb101/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 39043 console lines, 190 FAIL lines, 34 user memory fault records across 25 processes, 82 programs exited, halted=1
+T3_intel: FAIL — 32 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 190 FAIL line(s); first 20:
+2722:MMTEST FAIL /TEST4.TXT1
+3116:[SEDTEST] FAIL basic_s (stdout)
+3484:[SIGTEST] FAIL waitpid returns the child got=1 want=4294964048
+3861:[SEDTEST] FAIL s_g (stdout)
+3929:  FPU_T torture-child: FAIL
+4537:[SEDTEST] FAIL s_2nd (stdout)
+4669:NL.BINLoading program for scheduler (v2 AS): FPU_T FAILED: 2
+8211:[SEDTEST] FAIL basic_s (stdout)
+8284:MMTEST FAIL /RM.BIN
+8591:[SIGTEST] FAIL waitpid returns the child got=30 want=4294964048
+8647:[MD5TEST] FAIL multi-file order
+8684:[MD5TEST] FAIL -b binary marker
+8695:[MD5TEST] FAIL stdin dash digest
+8711:[MD5TEST] FAIL --string digest
+8723:[MD5TEST] FAIL -c pass output
+8739:[MD5TEST] FAIL --check long option
+8750:[MD5TEST] FAIL -c fail output
+8753:  want: [/MD5ABC.TXT: FAILED
+8755:[MD5TEST] FAIL -c fail rc (rc 0 != 1)
+8770:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+T3_intel EXIT=1
+EXIT=1

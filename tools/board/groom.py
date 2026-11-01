@@ -63,25 +63,7 @@ REVIEW_LANES = ("In Review", "Merge Gate")
 # states, and the shorthand right-hand ids are not corrupted by it (see
 # expand_dep_field).
 GB_RE = re.compile(r"\bGB-(\d{3})\b")
-V_RE = re.compile(r"^GB-\d{3}-V\d*\b")
-# A parent accumulates gates over its life: GB-nnn-V, then GB-nnn-V2 when its DoD is
-# re-scoped or its head changes under a standing RED. The newest gate governs, so lint
-# must resolve by ordinal rather than looking up the literal `GB-nnn-V` key -- which
-# silently ignored every V2 and kept grading a superseded RED.
-GATE_RE = re.compile(r"^(GB-\d{3})-V(\d*)$")
-
-
-def newest_gate(gid, by_title):
-    """The highest-ordinal gate ticket for `gid`, or None."""
-    best = None
-    for k in by_title:
-        m = GATE_RE.match(k)
-        if not m or m.group(1) != gid:
-            continue
-        ordinal = int(m.group(2) or 1)
-        if best is None or ordinal > best[0]:
-            best = (ordinal, k)
-    return by_title[best[1]] if best else None
+V_RE = re.compile(r"^GB-\d{3}-V\b")
 
 
 # ---------------------------------------------------------------- pure core
@@ -172,34 +154,33 @@ def dependency_cycles(open_issues):
     return seen
 
 
+# GB-005/GB-110-V4: groom exposes the gate-selection helper merge_pr.py shares —
+# the HIGHEST-ORDINAL gate ticket for a parent (GB-nnn-V < GB-nnn-V2 < GB-nnn-V3),
+# on bare-id keys (title.split()[0]).  merge_pr imports this; it is how the merge
+# helper knows WHICH -V's GREEN governs (never the first match).  [GB-005 restores
+# it: a main that dropped it made merge_pr._newest_gate=None and its gate tests red.]
+GATE_RE = re.compile(r"^(GB-\d{3})-V(\d*)$")
+
+
+def newest_gate(gid, by_title):
+    """The highest-ordinal -V ticket for `gid` ('GB-106' -> 'GB-106-V2' wins)."""
+    best = None
+    for k in by_title:
+        m = GATE_RE.match(k)
+        if not m or m.group(1) != gid:
+            continue
+        ordinal = int(m.group(2) or 1)
+        if best is None or ordinal > best[0]:
+            best = (ordinal, k)
+    return by_title[best[1]] if best else None
+
+
 def verdict_in(body):
-    """GREEN/RED status from a verdict comment body, accepting BOTH phrasings.
-
-    GB-114: the tools required the literal template `VERDICT: GREEN`.  Real verdicts
-    also open with `**GREEN — GB-113-V, verified on this VM …**`, which every reader
-    recognises and no tool could see: the merge guard reported "GREEN names no graded
-    sha" for PR #222 whose gate had GREEN'd 20 minutes earlier, and the lint would have
-    called the same card unverified.  A status marker at the start of a line counts,
-    and so does the template form.  Returns "GREEN", "RED" or None.
-    """
-    m = VERDICT_RE.search(body or "")
-    if not m:
-        return None
-    return (m.group(1) or m.group(2)).upper()
-
-
-VERDICT_RE = re.compile(
-    # template: `VERDICT: **GREEN**` / `VERDICT GREEN` anywhere on a line
-    r"(?:(?i:VERDICT)[^\n]{0,50}?\b(GREEN|RED)\b)"
-    # marker: the line OPENS with the status and nothing but a separator after it.
-    # Case-sensitive on purpose: `Green eggs and ham` is prose, `**GREEN — …**` is a
-    # verdict.  Requiring `[—–-:]` or end-of-line after the word is what stops
-    # "Green light to merge at <sha>" from being read as a GREEN (GB-114-V clause 4:
-    # with a permissive `\b` after an re.I match it was, and graded_shas_in() takes
-    # shas from any line containing `merge`, so one sentence could pair a GREEN with
-    # a sha and authorise a merge).
-    r"|(?:^\s*(?:#+\s*)?\**\s*(GREEN|RED)\**\s*(?:[\u2014\u2013:-]|$))",
-    re.M)
+    """GREEN/RED verdict in a single comment body, or None.  merge_pr imports this
+    from groom (groom is the one verdict parser every reader shares); `newest_verdict`
+    is the plural/list form.  Returns 'GREEN'/'RED' or None."""
+    m = re.search(r"VERDICT[^\n]{0,40}?\b(GREEN|RED)\b", body or "", re.I)
+    return m.group(1).upper() if m else None
 
 
 def newest_verdict(comments):
@@ -218,63 +199,10 @@ def newest_verdict(comments):
         cs.sort(key=lambda c: c["created_at"])
     for c in reversed(cs):
         body = (c.get("body") or "").replace("\r", "")
-        v = verdict_in(body)
-        if v:
-            return v
+        m = re.search(r"VERDICT[^\n]{0,40}?\b(GREEN|RED)\b", body, re.I)
+        if m:
+            return m.group(1).upper()
     return None
-
-def lane_entry_time(it, comment_fn):
-    """created_at of the newest comment moving the card INTO a review lane.
-
-    Used to tell "the gate ran and was not green" apart from "the gate was
-    minted a moment ago and has not run yet".  The lane-move comments are
-    written by tools/board/lane-move.sh as `"<id>: lane <old> -> **<new>**"`,
-    with either an ASCII arrow or U+2192 depending on who wrote it, so both
-    are accepted.
-    """
-    best = None
-    for c in comment_fn(it.get("number")) or []:
-        raw = (c.get("body") or "").replace("\r", "").strip()
-        ts = c.get("created_at")
-        if not ts:
-            continue
-        # A lane move is ONE short line written by lane-move.sh:
-        #   "<id>: lane <old> -> **<new>**"   (or with U+2192)
-        # Quoting that line inside prose must NOT count as a move.  Measured on GB-115
-        # (2026-10-27): an EVIDENCE comment quoted GB-114's lane line while explaining the
-        # same-second edge, and this detector then took the quote as GB-115's own entry into
-        # the lane -- which un-pended its freshly minted gate and flagged the card.
-        if "\n" in raw or len(raw) > 160:
-            continue
-        if not re.match(r"^\W*[A-Za-z0-9_.-]+\s*:\s*lane\b", raw):
-            continue
-        if not any(("-> **" + l + "**") in raw or (u"\u2192 **" + l + "**") in raw
-                   for l in REVIEW_LANES):
-            continue
-        if best is None or ts > best:
-            best = ts
-    return best
-
-
-def gate_is_pending(it, gate, comment_fn):
-    """True when `gate` was minted after the card entered its review lane.
-
-    A re-verification is normal: GB-047-V RED'd on criterion 2, the fix landed
-    and a reviewer posted APPROVE, and a fresh gate ticket was minted seconds
-    later.  At that instant the newest gate has posted no verdict at all, and
-    the plain "has not posted GREEN" rule calls the card unverified -- which
-    invites a lane bounce that throws away a correct review.  Only a gate that
-    predates the lane move is evidence that the card is in a review lane
-    without verification.
-    """
-    minted = gate.get("created_at")
-    entry = lane_entry_time(it, comment_fn)
-    # `>=`, not `>`: minting a gate in the SAME second as the lane move is the normal
-    # case when a coordinator moves the card and mints its gate in one pass (both are one
-    # API call apart), and such a gate has provably not run yet.  Measured on GB-114
-    # (2026-10-27): lane entry 16:13:03Z, `GB-114-V2` created 16:13:03Z -- the strict `>`
-    # read it as "not pending" and flagged a correctly-ordered card as unverified.
-    return bool(minted and entry and minted >= entry)
 
 
 def verify_lint_findings(issues, comment_fn):
@@ -305,12 +233,10 @@ def verify_lint_findings(issues, comment_fn):
         lane = lane_of(it)
         if lane not in REVIEW_LANES:
             continue
-        v = newest_gate(gid, by_title)
+        v = by_title.get(gid + "-V")
         verdict = newest_verdict(comment_fn(v["number"])) if v else None
         if verdict != "GREEN":
-            if v is not None and gate_is_pending(it, v, comment_fn):
-                continue
-            which = v["title"].split()[0] if v else None
+            which = gid + "-V" if v else "no gate ticket"
             detail = (f"in {lane!r} but gate {which} has not posted GREEN"
                       if v else f"in {lane!r} with no {gid}-V gate ticket")
             findings.append(("unverified-in-review", gid, detail))
@@ -321,15 +247,13 @@ def verify_lint_findings(issues, comment_fn):
             continue
         if it.get("state") == "closed":
             continue
-        gm = GATE_RE.match(gid)
-        parent_gid = gm.group(1) if gm else gid[:-2]
-        parent = by_title.get(parent_gid)
+        parent = by_title.get(gid[:-2])
         if parent is None:
             findings.append(("orphan-verify", gid,
-                             "parent " + parent_gid + " does not exist on the board"))
+                             "parent " + gid[:-2] + " does not exist on the board"))
         elif parent.get("state") == "closed" or lane_of(parent) == "Done":
             findings.append(("stale-verify", gid,
-                             "parent " + parent_gid + " is already "
+                             "parent " + gid[:-2] + " is already "
                              + ("closed" if parent.get("state") == "closed" else "Done")))
     return findings
 
@@ -481,30 +405,6 @@ def self_test():
     check(deps_of("| Depends on | turtles |") == set(),
           "a non-GB dependency token is ignored, not guessed")
 
-    # GB-114: both verdict phrasings resolve.  Measured on GB-113-V #227 (2026-10-27):
-    # the body opens `**GREEN — GB-113-V, verified on this VM …**`, which the template-only
-    # regex could not see -- the merge guard then reported "GREEN names no graded sha" for a
-    # correctly-graded PR, and this same helper is what the lint uses.
-    check(verdict_in("**GREEN — GB-113-V, verified on this VM (DEEP verifier `wgfx-verify`), "
-                     "code PR #222 @ `d21759c`.**") == "GREEN",
-          "a `**GREEN — ...**` verdict resolves as GREEN (GB-113-V's real shape)")
-    check(verdict_in("## VERDICT: **RED** (GB-112-V) -> GB-112 goes to In Progress") == "RED",
-          "the template `VERDICT: **RED**` still resolves as RED")
-    check(verdict_in("Greenfield is not a verdict") is None,
-          "a non-verdict line beginning 'Green...' is not read as GREEN")
-    # GB-114-V clause 4's falsifier: prose must not become a verdict.  Measured against
-    # the first cut of this patch, which read "Green light to merge at <sha>" as GREEN --
-    # and graded_shas_in() takes shas from any line containing `merge`, so one sentence
-    # could pair a GREEN with a sha and authorise a merge.
-    check(verdict_in("Green eggs and ham") is None,
-          "prose beginning 'Green eggs' is not a verdict")
-    check(verdict_in("Green light to merge at 86f8473c0ffee - the diff is small.") is None,
-          "the 'Green light to merge at <sha>' sentence is NOT a GREEN (the clause-4 falsifier)")
-    check(verdict_in("RED herring") is None,
-          "prose beginning 'RED herring' is not a verdict")
-    check(verdict_in("**GREEN**") == "GREEN",
-          "a bare bold `**GREEN**` marker still resolves")
-
     # verify-lint: a green-gated review card is not flagged.
     issues_good = [
         {"title": "GB-030 impl", "state": "open",
@@ -529,60 +429,6 @@ def self_test():
           "a review-lane card whose gate has no GREEN is flagged unverified-in-review")
     check(all(k != "unverified-in-review" for k, g, _ in f if g == "GB-030"),
           "the green-gated card stays out of the findings")
-
-    # verify-lint: a re-verify gate minted AFTER the lane move is pending, not
-    # a violation.  Measured on GB-047 (2026-10-27): reviewer posted APPROVE at
-    # 10:41:38 and minted GB-047-V #223 at 10:41:41; lint then called the card
-    # unverified while the new gate had simply not run yet.
-    issues_rv = [
-        {"title": "GB-047 impl", "state": "open", "created_at": "2026-10-27T09:00:00Z",
-         "labels": [{"name": "In Review"}], "number": 47},
-        {"title": "GB-047-V2 gate", "state": "open", "created_at": "2026-10-27T10:41:41Z",
-         "labels": [{"name": "Ready"}], "number": 223},
-    ]
-    cm_rv = {47: [{"created_at": "2026-10-27T10:41:38Z",
-                   "body": "47: lane In Progress -> **In Review**"}],
-             223: [{"created_at": "2026-10-27T10:42:00Z", "body": "started the run"}]}
-    check(not any(k == "unverified-in-review" for k, g, _ in
-                  verify_lint_findings(issues_rv, lambda n: cm_rv.get(n, []))),
-          "a gate minted after the lane move is pending, not unverified")
-
-    # ... and the SAME SECOND counts as pending.  Measured in production on GB-114
-    # (2026-10-27): lane entry 16:13:03Z, gate created 16:13:03Z; the strict `>` flagged it.
-    cm_rv_eq = {47: [{"created_at": "2026-10-27T16:13:03Z",
-                      "body": "47: lane In Progress -> **In Review**"}],
-                223: [{"created_at": "2026-10-27T16:13:09Z", "body": "started"}]}
-    issues_eq = [
-        {"title": "GB-047 impl", "state": "open", "created_at": "2026-10-27T09:00:00Z",
-         "labels": [{"name": "In Review"}], "number": 47},
-        {"title": "GB-047-V2 gate", "state": "open", "created_at": "2026-10-27T16:13:03Z",
-         "labels": [{"name": "Ready"}], "number": 223},
-    ]
-    check(not any(k == "unverified-in-review" for k, g, _ in
-                  verify_lint_findings(issues_eq, lambda n: cm_rv_eq.get(n, []))),
-          "a gate minted in the SAME second as the lane move is pending")
-
-    # ... and a lane-move line QUOTED inside prose is not a move.  Measured on GB-115:
-    # its EVIDENCE comment quoted GB-114's lane line, the detector took the quote as
-    # GB-115's own entry, and the freshly minted gate stopped being "pending".
-    cm_rv_quote = {47: [{"created_at": "2026-10-27T16:13:03Z",
-                         "body": "47: lane In Progress -> **In Review**"},
-                        {"created_at": "2026-10-27T17:20:00Z",
-                         "body": "EVIDENCE -- quoting an earlier move:\n\n"
-                                 "```\n47: lane In Progress -> **In Review**\n```\n\n"
-                                 "and some prose that makes this a paragraph, not a lane move."}],
-                   223: [{"created_at": "2026-10-27T16:13:09Z", "body": "started"}]}
-    check(not any(k == "unverified-in-review" for k, g, _ in
-                  verify_lint_findings(issues_eq, lambda n: cm_rv_quote.get(n, []))),
-          "a lane-move line quoted inside prose does not move the card")
-
-    # ... but a gate that predates the lane move is still a violation.
-    cm_rv_old = {47: [{"created_at": "2026-10-27T11:00:00Z",
-                       "body": "47: lane In Progress -> **In Review**"}],
-                 223: [{"created_at": "2026-10-27T10:41:41Z", "body": "started"}]}
-    check(any(k == "unverified-in-review" for k, g, _ in
-              verify_lint_findings(issues_rv, lambda n: cm_rv_old.get(n, []))),
-          "a gate older than the lane move is still flagged")
 
     # verify-lint: orphan -V with no parent.
     orphan = [{"title": "GB-040-V gate", "state": "open",

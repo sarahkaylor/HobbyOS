@@ -46,6 +46,7 @@ void run_all_unit_tests(void) {
   virtio_gpu_test_suite();
   virtio_input_test_suite();
   fb_ioctl_test_suite();
+  vdisplay_test_suite();
   evdev_test_suite();
   input_node_test_suite();
   fb_mmap_test_suite();

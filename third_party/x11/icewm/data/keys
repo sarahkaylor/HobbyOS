@@ -1,0 +1,3 @@
+# /ICEWM/keys -- global hot keys (HobbyOS X clients).
+key "Alt+Ctrl+e"   XEYESR.BIN
+key "Alt+Ctrl+c"   XCALCR.BIN

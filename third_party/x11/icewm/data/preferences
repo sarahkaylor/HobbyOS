@@ -1,0 +1,81 @@
+# /ICEWM/preferences -- HobbyOS system-wide IceWM 4.1.0 preferences
+# (third_party/x11/icewm/data/preferences, installed by build-icewm.sh).
+# Per-user overrides: $ICEWM_PRIVCFG (/home/.icewm) preferences.
+# Full option list: icewm --help / upstream "icewm-preferences(5)".
+
+# --- applets that read /proc, sysctl, /sys or mailboxes: not on HobbyOS ---
+TaskBarShowCPUStatus=0
+TaskBarShowMEMStatus=0
+TaskBarShowNetStatus=0
+TaskBarShowAPMStatus=0
+TaskBarShowAPMAuto=0
+TaskBarShowMailboxStatus=0
+TaskBarEnableSystemTray=1
+
+# --- taskbar ---
+ShowTaskBar=1
+TaskBarAtTop=0
+TaskBarShowClock=1
+TaskBarShowStartMenu=1
+TaskBarShowWindowListMenu=1
+TaskBarShowWorkspaces=1
+TaskBarShowWindows=1
+TaskBarShowShowDesktopButton=1
+TaskBarShowCollapseButton=0
+ShowAddressBar=0
+WorkspaceNames=" 1 ", " 2 ", " 3 ", " 4 "
+
+# --- start menu: entries whose helpers HobbyOS lacks are hidden ---
+ShowProgramsMenu=1
+ShowSettingsMenu=1
+ShowFocusModeMenu=1
+ShowThemesMenu=1
+ShowHelp=0
+ShowRun=0
+ShowLogoutMenu=1
+ShowLogoutSubMenu=0
+ShowWindowList=1
+ShowAbout=1
+
+# --- commands (programs are flat .BIN images in the disk root; PATH=/) ---
+TerminalCommand=""
+LockCommand=""
+ClockCommand=""
+RunCommand=""
+OpenCommand=""
+LogoutCommand=""
+ShutdownCommand=""
+RebootCommand=""
+NewMailCommand=""
+AddressBarCommand=""
+
+# --- look and feel ---
+FocusMode=1
+ClickToFocus=1
+RaiseOnFocus=1
+DesktopBackgroundColor="rgb:30/50/80"
+DesktopBackgroundCenter=0
+IconPath="/ICEWM/icons"
+# Xft names resolve through /X11/FONTS.CNF (DejaVu set).
+TitleFontName="sans-serif:size=11:bold"
+MenuFontName="sans-serif:size=11"
+StatusFontName="monospace:size=10"
+NormalButtonFontName="sans-serif:size=11"
+ActiveButtonFontName="sans-serif:size=11:bold"
+NormalTaskBarFontName="sans-serif:size=11"
+ActiveTaskBarFontName="sans-serif:size=11:bold"
+ToolButtonFontName="sans-serif:size=11"
+NormalWorkspaceFontName="sans-serif:size=11"
+ActiveWorkspaceFontName="sans-serif:size=11:bold"
+ListBoxFontName="sans-serif:size=11"
+ToolTipFontName="sans-serif:size=10"
+ClockFontName="monospace:size=11"
+InputFontName="monospace:size=11"
+LabelFontName="sans-serif:size=11"
+QuickSwitchFontName="sans-serif:size=12"
+
+# --- cheaper on a framebuffer X server ---
+OpaqueMove=1
+OpaqueResize=0
+MenuMouseTracking=1
+DelayFuzziness=4

@@ -39,7 +39,7 @@ This document captures the major design decisions, architecture constraints, and
 
 ## 8. Build Modes & Testing Environment
 HobbyOS provides multiple distinct build and execution targets through its Makefile, designed to support both kernel-level validation and high-level user-space integration:
-- **Default / Desktop (`make run`)**: Compiles the OS defining `KERNEL_MODE_DESKTOP`. The kernel boots, initializes all drivers, and starts the window manager/desktop environment natively.
+- **Default / Desktop (`make run`)**: Compiles the OS defining `KERNEL_MODE_DESKTOP`. The kernel boots, initializes all drivers, and starts the desktop: IceWM via `XSESSION.BIN` by default, or the native `DESKTOP.BIN` with `DESKTOP=hobby`.
 - **Integration Tests (`make test`)**: Compiles with `KERNEL_MODE_TEST`. Instead of booting the desktop, the kernel's scheduler automatically spawns a predefined sequence of user-space test binaries (e.g., `fork_test.bin`, `smp_test.bin`, `pipe_test.bin`) to validate syscalls and parallel multi-core process execution.
 - **Kernel Unit Tests (`make unit_tests`)**: Compiles with `KERNEL_MODE_UNIT_TEST`. This isolates and tests kernel subsystems directly in EL1 (e.g., file system reads, lock behaviors, trap dispatchers, process control blocks) before the scheduler even starts. Upon test completion, QEMU forcefully halts.
 - **Automated Desktop Test (`make desktop_test`)**: Compiles with `KERNEL_MODE_DESKTOP_TEST`. Boots the desktop environment but immediately auto-launches an arbitrary UI application to validate the graphical framebuffer pipeline and event subsystems without requiring manual user input.

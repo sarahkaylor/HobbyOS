@@ -31,10 +31,11 @@ respectively, which are not one-month builds for any swarm. The plan therefore s
 week 4 we expect: **a playable game delivered through each of the two tracks** (native port +
 unmodified Linux static-ELF binary), plus a game launcher, plus full multiplan testing.
 
-**Autonomy model:** one **Coordinator** agent (the only agent allowed to call the deep model)
-runs the board, the plan, and a **hourly/daily re-plan loop** that invokes **DeepSeek v4.1
-Flash** to re-assess and mint new tickets. Every other agent runs almost entirely on the **much
-faster DeepSeek V4 Flash** workhorse.
+**Autonomy model:** one **Coordinator** agent (the only agent that may hold deep-class
+planning/verification work) runs the board, the plan, and a **12-hourly re-plan loop** that
+invokes **DeepSeek v4.1 Flash** to re-assess and mint new tickets. Every agent — Coordinator,
+workers, Verifiers, reviewer — runs on the **same single model, DeepSeek v4.1 Flash at
+`llm.localdomain:8000`** (§3.1). There is no second endpoint and no second model tier.
 
 ---
 
@@ -153,41 +154,46 @@ HobbyOS (QEMU: -M virt aarch64 / -M q35 x86_64)
 
 ## 3. Environment & hardware
 
-### 3.1 Inference servers — model-tier policy (how we use the fast model as much as possible)
+### 3.1 Inference server — single-model policy (in force 2026-10-31)
+
+**Every agent uses one endpoint and one model: `http://llm.localdomain:8000/v1`, serving
+DeepSeek V4.1 Flash.** Sarah's standing instruction (2026-10-31): the swarm uses
+`llm.localdomain` only. There is no second inference tier.
 
 | Tier | Model | Endpoint | Used by | Policy |
 |---|---|---|---|---|
-| **FLASH (workhorse)** | DeepSeek **V4 Flash** | `http://llm.localdomain:8000/v1` (vLLM, RTX 6000 pair box) | **every** worker / reviewer / tester agent | **Default for ~all tickets.** Target >90% of fleet tokens. |
-| **DEEP (planner)** | DeepSeek **v4.1 Flash** (8× DGX Spark) | `http://dgx1.localdomain:8000/v1` (vLLM; alias `dgx-main`) | **Coordinator + farm Verifiers** | Planning, re-planning, ABI/architecture design, blocked-root-cause after 1 FLASH retry, milestone reviews, **and verification/gate verdicts (`verify` tickets)**. |
+| **the only tier** | DeepSeek **V4.1 Flash** | `http://llm.localdomain:8000/v1` (vLLM, RTX 6000 pair box) | **every** agent — Coordinator, Workers, Verifiers, Reviewer, Tester, Infra | **All work**: routine tickets, planning, re-plan, ABI/architecture design, root-cause, and gate verdicts. |
 
-Measures behind us (Sept/Oct 2026 community benchmarks for exactly this class of hardware):
-~156–241 tok/s aggregate on the 8-Spark v4.1 box; ~47 tok/s single-stream per RTX 6000 card;
-cold prefill ~840–2,100 tok/s depending on context. Consequences coded into the plan:
+Why: the box now hosts the v4.1-Flash weights, which are both faster and more capable than the old
+V4 workhorse it used to serve, so the two-endpoint split only bought latency and a model-id
+mismatch. Consequences coded into the plan:
 
-- **Agent count ≈ 8–12 full-speed agents** (fleet ceiling ~250–335 tok/s sustained). Configure
-  10–14 agents; expect ~8 actively generating at any time. More agents ≠ faster; deeper/batched
-  tickets get more throughput, not more agents.
-- **Long-lived sessions, never churn.** Restarting a 300K-context agent costs minutes of
-  prefill. Agents stay on their subsystem; new work = new ticket, not new session.
+- **Two ids, one model.** `GET /v1/models` lists `deepseek-v4.1-flash` (canonical) and
+  `deepseek-v4-flash` (legacy alias). Both resolve to root
+  `/home/sarah/models/deepseek-v4.1-flash-1017`, and every completion reports
+  `"model": "deepseek-v4.1-flash"`. The legacy id is **not** a weaker model — never reason about it
+  as one — but new config uses the canonical id.
+- **`dgx1.localdomain` is retired for swarm work.** No lane calls it, no config carries a `dgx`
+  provider, and no charter or prompt offers it as a fallback. The 2026-10-17…10-30 `DEEP`/`FLASH`
+  two-tier split survives only in dated log entries as history.
+- **`reasoning_effort` on this server:** `low`, `high`, `xhigh`, `max`, or an integer 1–100.
+  `medium` is rejected with HTTP 400, and `ultra` is not served either (its ceiling is `max`).
+  **Standing setting (2026-10-31): `max` on every lane** — `agent.reasoning_effort: max` in every
+  VM config and `--reasoning max` on the verifier loops. Sarah's call: the thinking is affordable,
+  so do not lower it without her say-so.
+- **Deep-class work is a classification, not a model.** Planning, re-plan, ABI/architecture design,
+  blocked-root-cause after 1 retry and gate verdicts keep the `deep` label and still belong to the
+  Coordinator and the farm Verifiers; they run on the same v4.1 Flash endpoint.
 - **Deterministic work stays in tools** (grep/sed/test/CI), never in model tokens.
-- **Verification is DEEP-class work.** Every `verify`-labeled gate ticket (T3 QEMU intel+arm, merge-gate,
-  device-tier) is run by a farm **Verifier** session on **DeepSeek v4.1 Flash (`dgx1`)** via
-  `--provider dgx -m deepseek-v4.1-flash --reasoning high` — never on the FLASH workhorse. A wrong verdict
-  is the costliest mistake a swarm can make, so gate judgment gets the stronger model; gates stay
-  scripted/deterministic, so DEEP stays ~10% of tokens even with verification parallelized.
-- Endpoints recorded and verified 2026-10-17 (GB-004), see §11.3 for the probe evidence. Mapping the
-  tiers to the built infra: **FLASH = DeepSeek V4 on the RTX-6000 pair box** (workhorse),
-  **DEEP = DeepSeek v4.1 on the 8× DGX Spark fleet** (planner/coordinator only).
-- **Measured 2026-10-17 (single stream, GB-004, `max_tokens=200`, temp 0):** FLASH
-  `llm.localdomain:8000` **57.7 tok/s** (196 completion tokens); DEEP `dgx1.localdomain:8000`
-  **40.5 tok/s** (119 tokens). Both serve `max_model_len: 1048576`. These are *single-stream*
-  numbers on a shared box — §3.1's 94–150 tok/s is an aggregate/community figure, so cap active
-  workers from measurement, not from the table.
-- **Model budget (validated 2026-10-17):** split lands ~90% FLASH / ~10% DEEP tokens; DEEP duty
-  ~3% (it is mostly parked — that is intended). The binding constraint is FLASH throughput:
-  the RTX pair measures ~94–150 tok/s, which feeds only **~3–5 agents** at full clip (the
-  8–11 named in §5 is optimistic). Before scaling agents past ~4–6, benchmark both endpoints
-  at GB-004 and cap concurrency at what FLASH sustains; keep DEEP reserved for planning + verification verdicts.
+- **Capacity:** one box now carries the whole fleet (it used to take ~90% of tokens on a two-box
+  split), so cap active lanes by measured throughput — start from the fleet as provisioned (≤6
+  lanes) and raise it only on a benchmark. Never put build/test load on the inference box.
+- **The old "8–12 full-speed agents" ceiling was a two-endpoint figure.** The 2026-10-17
+  single-stream measurements (57.7 tok/s FLASH / 40.5 tok/s DEEP) belong to that retired
+  deployment; re-measure before sizing any lane increase, and prefer deeper/batched tickets over
+  more agents.
+- **Long-lived sessions, never churn.** Restarting a 300K-context agent costs minutes of prefill.
+  Agents stay on their subsystem; new work = new ticket, not new session.
 
 ### 3.2 QEMU focus (scope boundary)
 
@@ -210,7 +216,7 @@ physical GPU**. All guests Ubuntu 26.04.1; dev VMs run the Kubuntu desktop (like
 | 140 | `swarm-farm-1` | 192.168.0.230 | 32 / 64 GiB / 128 G | QEMU build/test farm + worker agents |
 | 141 | `swarm-farm-2` | 192.168.0.231 | 32 / 64 GiB / 128 G | same |
 | 142 | `swarm-farm-3` | 192.168.0.232 | 32 / 64 GiB / 128 G | same |
-| 143 | `swarm-coordinator` | 192.168.0.233 | 32 / 64 GiB / 128 G | coordinator Hermes (DEEP), re-plan cron |
+| 143 | `swarm-coordinator` | 192.168.0.233 | 32 / 64 GiB / 128 G | coordinator Hermes (v4.1 Flash), re-plan cron |
 | 144 | `swarm-ticketing` | 192.168.0.234 | 8 / 16 GiB / 64 G | Forgejo (git + issues + projects) |
 
 Every dev VM already has: clang/lld/llvm, `qemu-system-arm`+`qemu-system-x86`, `qemu-efi-aarch64`
@@ -237,7 +243,7 @@ boards in one, milestones and labels, light enough for a VM.
 
 - **Project:** `GAMING-BOARD` (kanban).
 - Lanes: `📋 Backlog` → `🟦 Ready` → `🟨 In Progress` → `🟧 In Review` → `🚦 Merge Gate` → `✅ Done`; plus `🧊 Icebox` (Program-2 vision epics).
-- Labels: `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (DEEP-model required), `blocked`, `debug` (DEEP root-cause / design-freeze work claimed by a farm Verifier only when no `verify` ticket is Ready — §5.1 debug reserve), `parity-ar` (ARM), `parity-x64`.
+- Labels: `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (deep-class work: planning/design/gate verdicts — same v4.1 Flash model as everything else, §3.1), `blocked`, `debug` (root-cause / design-freeze work claimed by a farm Verifier only when no `verify` ticket is Ready — §5.1 debug reserve), `parity-ar` (ARM), `parity-x64`.
 - Milestones: `M0·infra` `M1·abi-core` `M2·devices-sdl` `M3·games` `M4·acceptance`.
 - Ticket skeleton: ID, workstream, weight S/M/L, depends-on, DoD + test, evidence link.
 - Bot user: `swarm-bot` (API token) — the Coordinator and workers move/annotate tickets through it. Webhook on the board posts to the Coordinator.
@@ -264,8 +270,16 @@ skeleton as an issue header block (see `tools/board/README.md`).
    exact gate command(s) + pass criteria per §6 + two-arch parity). Minting happens at every re-plan for the
    `In Review` backlog, so gates run **in parallel** with new production tickets instead of queueing behind
    a single verifier.
-5. A farm **Verifier** (DEEP session, §5.1) claims `GB-nnn-V` → `In Progress` → runs the gate on its own VM →
+5. A farm **Verifier** (deep-class session, §5.1) claims `GB-nnn-V` → `In Progress` → runs the gate on its own VM →
    posts evidence + a **RED/GREEN** verdict on both the verification and the implementation ticket.
+   **Verdict format (binding from 2026-10-30, ruled on GB-139 after GB-139-V's census):** the verdict is one line
+   `VERDICT: GREEN sha=<7–40 hex>` or `VERDICT: RED sha=<hex>|none`, optionally inside an HTML comment
+   (`<!-- VERDICT: GREEN sha=… -->`); a markdown prefix (`>`, `-`, `**`) is fine, code spans are not. **A GREEN
+   without a `sha=` is not a verdict.** The reason is measured, not stylistic: `check_verdicts.py` went through
+   seven gates reading prose, and 16 lines on the board are byte-identical to a verdict while being DoD text
+   (`GREEN → this ticket to Merge Gate. RED → back to In Progress …`), so any rule that reads English is a bet.
+   Older shapes are still accepted by a **legacy fallback** whose output is tagged `(legacy)`, so history is
+   kept and the board shows which cards still need a marker; no back-fill is required.
    GREEN → the implementation ticket to `Merge Gate`; RED → back to `In Progress` with the failing output
    quoted verbatim. **This propagation is machine-checked:** `python3 tools/board/check_verdicts.py`
    (and `--self-test`, which proves the check can fail) compares every posted verdict against its
@@ -302,6 +316,45 @@ The loop:
 3. Coordinator posts the re-plan summary as a comment on the `PLAN` ticket and closes it.
 4. New tickets are `Ready` for workers by the next loop. The swarm therefore never waits for a human to discover what to do next — **autonomy is key**.
 
+### 4.4 Work policy — claims, lanes, card size, delivery (in force 2026-11-01, set by Sarah)
+
+Added after a 12-hour window in which every swarm unit was `active`, 0 restarts, ~300 clean resumes —
+and the fleet merged **one** PR (a plan document) while `Ready` held 0 for nine hours. The constraint was
+never capacity: 30 of 32 `In Progress` cards had been silent for ≥6 h, every Backlog card was `blocked`
+or `decision`, and 15 PRs sat open with **zero** cards in `In Review`/`Merge Gate`. Liveness was healthy;
+output was zero. These rules are prepended to every agent charter and copied to `/opt/swarm/WORK-POLICY.txt`.
+
+1. **Claim lease (DECISION-006).** `In Progress` is a lease. A claim is live while the claimant produces
+   evidence: a comment on the card, a branch commit, or an open PR. wt-S/wt-M release after **6 h** of
+   silence, wt-L after **24 h**; `hobbyos-lease-sweep.timer` on the coordinator (15 min) moves a silent
+   claim back to `Ready` with an explanatory comment. A release is not a verdict — re-claim if it is still
+   yours. Every step posts one line **on the card**; that line is the heartbeat.
+2. **A card with an open PR belongs in `In Review`, never `In Progress`.** `hobbyos-pr-sync.timer` (hourly)
+   maps every open PR to its card by `GB-n` and moves it, posting the PR number, head sha, age and mergeable
+   state. A Verifier mints/claims `GB-nnn-V` against that head; `Merge Gate` only after a recorded GREEN.
+3. **Split, don't re-round.** Two RED verdicts on one card ⇒ split it before a third round. REDs that
+   accumulate new complaints each round are the signature of a card too large to grade in one run
+   (DECISION-005: GB-031's three REDs in four days).
+4. **Card size cap.** No new card whose DoD cannot be met by one gate run. More than ~2 h of lane time or
+   more than one full-suite run ⇒ a milestone checkpoint plus child cards, not one wt-L.
+5. **Promotion rule.** Promote Backlog → Ready only when the `blocked` reason is resolved or absent.
+   `decision` cards are Sarah's; promoting one manufactures false Ready work. An empty lane is reported
+   once, not re-scanned in a loop.
+6. **Status tax.** No per-cycle "nothing claimable"/re-scan lines on the caretaker log (#72) — it reached
+   2,366 comments and every agent re-reads it on every resume. Lane status goes on the card being worked;
+   #72 carries decisions and machine digests.
+7. **Meta-work rule.** A new card names the code artifact it changes (file/function) and a falsifier; a
+   planning-only card attaches to an implementation card. Before minting, grep open branches and PRs for the
+   experiment — GB-147 was minted as "the one experiment no card names" six hours after GB-146 built it.
+8. **Delivery metric.** A pass counts only if it lands a merge, closes a card, or produces a new measured
+   fact on a named card. The caretaker's report opens with merges / cards closed / Ready depth / idle lanes;
+   **0 merges and 0 Ready is RED** regardless of driver health.
+
+**Branch retirement (DECISION-004).** Delete a remote head when its tip is already an ancestor of
+`origin/main` OR it is patch-equivalent to an open/merged PR; keep any head whose ticket is still open
+(it is the stale-claim evidence). The 2026-10-24 pass took 165 heads → 131 by deleting only
+merged-ancestor, closed-ticket heads; apply the same rule rather than re-asking the question.
+
 ---
 
 ## 5. Swarm operating model
@@ -310,12 +363,12 @@ The loop:
 
 | Role | Count | Model | Where | Responsibility |
 |---|---|---|---|---|
-| **Coordinator** | 1 | DEEP | `swarm-coordinator` (.233) | plan + board + re-plan loop + merges + escalation; primary DEEP consumer |
-| **Worker** | 3–8 | FLASH | `swarm-farm-1..3` | claim tickets, branch, code+tests, MR — one long-lived session per subsystem |
-| **Verifier** | 3 (one per farm) | DEEP | `swarm-farm-1..3` | claim `verify`+`deep` tickets, run §6 gates on own VM, post RED/GREEN verdicts; gate-running is its own role so gates parallelize. **Debug reserve:** when no `verify`+`deep` Ready ticket exists, a farm Verifier may claim a Ready `debug`+`deep` ticket (root-cause / design-freeze work that is DEEP-class but not a gate, e.g. kernel-wall debugging, build-profile freezes) and work it — this keeps DEEP wall work from serializing on the Coordinator alone |
-| **Reviewer** | 1 (dedicated cross-lane loop `wrev`, FLASH, farm-3) | FLASH | farm-3 + any farm | contract/diff/DoD review of In-Review + In-Progress-with-PR cards across ALL workstreams; posts APPROVE/BOUNCE/FLAG verdicts; **mints missing `GB-nnn-V` gate tickets (§4.2 step 4) for gate-ready In-Review cards so farm Verifiers gate in parallel**; flags `decision`. Review verdicts are NOT gate verdicts — Verifiers own RED/GREEN |
-| **Tester** | 1 | FLASH | `swarm-farm-1..3` | playthrough + stress harnesses, flaky triage |
-| **Infra worker** | 1 (`winf`, farm-1) | FLASH | `swarm-farm-1` | owns the **`infra`** label, which no subsystem worker lane covers: board tooling + hygiene (`tools/board`), host-test harness and its fixtures, CI/heartbeat scripts, evidence/staging plumbing. Claims Ready `infra` cards only; never kernel/ABI code unless the ticket says so. Its lane exists because `infra` cards were left Ready and unclaimed while all three subsystem workers reported an empty lane |
+| **Coordinator** | 1 | v4.1 Flash (deep-class) | `swarm-coordinator` (.233) | plan + board + re-plan loop + merges + escalation; primary DEEP consumer |
+| **Worker** | 3–8 | v4.1 Flash | `swarm-farm-1..3` | claim tickets, branch, code+tests, MR — one long-lived session per subsystem |
+| **Verifier** | 3 (one per farm) | v4.1 Flash (deep-class) | `swarm-farm-1..3` | claim `verify`+`deep` tickets, run §6 gates on own VM, post RED/GREEN verdicts; gate-running is its own role so gates parallelize. **Debug reserve:** when no `verify`+`deep` Ready ticket exists, a farm Verifier may claim a Ready `debug`+`deep` ticket (root-cause / design-freeze work that is DEEP-class but not a gate, e.g. kernel-wall debugging, build-profile freezes) and work it — this keeps DEEP wall work from serializing on the Coordinator alone |
+| **Reviewer** | 1 (dedicated cross-lane loop `wrev`, farm-3) | v4.1 Flash | farm-3 + any farm | contract/diff/DoD review of In-Review + In-Progress-with-PR cards across ALL workstreams; posts APPROVE/BOUNCE/FLAG verdicts; **mints missing `GB-nnn-V` gate tickets (§4.2 step 4) for gate-ready In-Review cards so farm Verifiers gate in parallel**; flags `decision`. Review verdicts are NOT gate verdicts — Verifiers own RED/GREEN |
+| **Tester** | 1 | v4.1 Flash | `swarm-farm-1..3` | playthrough + stress harnesses, flaky triage |
+| **Infra worker** | 1 (`winf`, farm-1) | v4.1 Flash | `swarm-farm-1` | owns the **`infra`** label, which no subsystem worker lane covers: board tooling + hygiene (`tools/board`), host-test harness and its fixtures, CI/heartbeat scripts, evidence/staging plumbing. Claims Ready `infra` cards only; never kernel/ABI code unless the ticket says so. Its lane exists because `infra` cards were left Ready and unclaimed while all three subsystem workers reported an empty lane |
 
 ### 5.2 Agent mechanics (existing Hermes capabilities; no custom build)
 
@@ -323,10 +376,10 @@ The loop:
   `HERMES_HOME`; workers use `hermes -w` (worktree mode) so parallel agents never collide on
   files. Sessions under `tmux` on their VM; transcripts/evidence land on the shared NFS store so
   the Coordinator/planner can read them.
-- **Verifier session** = a second headless session on each farm running at the DEEP provider
-  (`--provider dgx -m deepseek-v4.1-flash --reasoning high`), same `~/.hermes`, its own worktree,
-  kept alive by a `swarm-verify@<agent>` systemd unit (clone of `swarm-driver@` carrying the DEEP
-  provider flags) — see §11.4/§11.5.
+- **Verifier session** = a second headless session on each farm doing deep-class work on the same
+  model (`--provider llm -m deepseek-v4.1-flash --reasoning max`), same `~/.hermes`, its own
+  worktree, kept alive by a `swarm-verify@<agent>` systemd unit (clone of `swarm-driver@` carrying
+  the provider flags) — see §11.4/§11.5.
 - Re-plan cadence via `hermes cronjob` (every 12 h) on `swarm-coordinator`.
 - **Session rotation:** an agent session is cleared at a **ticket boundary once it is older than 2 days**. The charter has the agent record each finished ticket with `printf '%s %s\n' "$(date -u +%FT%TZ)" "<TICKET-ID>" >> ~/.swarm/<agent>.ticketclose`; the driver (`ROTATE_DAYS=2`) sees a marker newer than its last launch plus a session age > 2 days, archives the old session id to `<agent>.sessions.log` and starts a fresh session from the charter on the next tick. Never rotate mid-ticket (no marker = no rotation). This keeps one ticket's working context but stops an eight-day session from re-prefeeding thousands of stale messages on every 25-minute resume.
 - `gaming.md`, `docs/linux-abi.md`, and this board are the only cross-agent interface points —
@@ -383,7 +436,7 @@ compat layer's numbers are T4-locked before any T3/T5 work depends on them.
 
 ## 8. Seed backlog (first wave of tickets)
 
-~55 tickets, `GB-001+`. Weights S/M/L; `[DEEP]` = v4.1-only (all others are FLASH). The
+~55 tickets, `GB-001+`. Weights S/M/L; `[DEEP]` marks deep-class work (planning/design/root-cause — same v4.1 Flash model as every other card, §3.1). The
 re-plan loop (GB-048) will grow/re-prioritize this continuously — this is the seed, not the
 final list.
 
@@ -395,7 +448,7 @@ final list.
 | GB-002 | Forgejo already deployed (§11.2, `swarm-ticketing` .234:3000, repo `sarah/gaming-program`, admin `sarah`, `swarm-bot` token) — finish: `GAMING-BOARD` project, labels, milestones, repo mirrors | M | GB-001 | board visible; bot token works via API |
 | GB-003 | Board automation: webhook board→Coordinator; `swarm-bot` lane-move + comment scripts | S | GB-002 | moving a ticket posts to coordinator |
 | GB-004 | Hermes fleet: profile per role, endpoints (`FLASH` default, `DEEP` coordinator-only), tmux supervisors, session-store on NFS | M | GB-001 | every worker `GET /models` shows FLASH; coordinator shows DEEP |
-| GB-005 | Git workflow + merge gate: branch-per-ticket, and **the local gate is the only merge authority** (GitHub Actions is not a gate — 2026-10-26 CI policy) | M | GB-001/002 | the **merge path consults the posted verdict**: a card cannot reach `Merge Gate` without a GREEN from its `-V`, and a merge that bypasses it is detectable after the fact; `tools/gate/merge_gate_test.sh` proves a dummy branch fails→passes (`MERGE_GATE_TEST: PASS`) |
+| GB-005 | Git workflow + merge gate: branch-per-ticket, and **the local gate is the only merge authority** (GitHub Actions is not a gate — 2026-10-26 CI policy) | M | GB-001/002 | **enforcement, not detection** (`merge_gate_test.sh` already proves a dummy fails→passes): (1) `lane-move.sh GB-nnn "Merge Gate"` exits non-zero with the reason unless the newest `GB-nnn-V` comment is GREEN, with a `--force` path that records who forced it; (2) a merge helper refuses a PR whose card has no GREEN, quoting `check_verdicts.py`'s verdict line; (3) a host test proves **both refusals can fail** (sabotage the GREEN detector, watch the refusal stop refusing, restore). T1 only — no QEMU, no CI. Filed because PR #184 opened 04:43Z and merged 04:44:26Z (86 s) with no verdict consulted |
 | GB-006 | Shared build cache: sccache/ccache + the prebuilt clang 21.1.8 cross toolchain; seed from farm-1 (LLVM dist-staging already built there → rsync `third_party/llvm-21.1.8/dist-staging` to farms 2/3 + coordinator) | M | GB-001 | cold vs cached build time measured |
 | GB-007 | Differential harness skeleton: builder image (x86_64-musl cross on Linux) + run-on-HobbyOS-intel + stdout/exit/errno compare | M | GB-005 | `hello` diverges/lie detector works |
 | GB-008 | `gaming.md`↔board sync script (tickets must match plan §1/§7) | S | GB-002 | lint passes |
@@ -412,8 +465,11 @@ final list.
 | GB-106 | **A gate verdict names a tree, a PR names a head, and nothing here makes them agree.** Measured twice on 2026-10-26: GB-067's GREEN was reconciled against a stale RED (and a `404` from `GET /issues/GB-067-V`, which takes an index not a title), and GB-103's GREEN named `7de6dde` while the PR head was `e8c7dc89` — merged after I read all nine ungated lines, i.e. **code the gate never saw** judged safe by reading rather than by a gate. Attention is not a control | M | — | a check that extracts the sha a GREEN says it graded, compares it to the PR's current head, and **fails closed** — including when the verdict names no sha — with `merge_pr.py` refusing to merge until it passes or an override records a written reason; self-tested against today's merges, including #194 which must go red |
 | GB-109 | **The merge guard refuses every real verdict and can be made vacuous by its caller.** Found on `merge_pr.py`'s first real use, minutes after GB-106 landed. (1) Verdicts name **7-character** shas (`509d9ce`) and the guard compares by exact string equality, so it refused `509d9ce != 509d9cea` — correct-shaped, wrong in practice: a guard that always says no teaches people to route around it. (2) `--head` is caller-supplied, so passing the same string for `--head` and `--graded` produced `ok: graded sha equals current head — merge allowed` and merged. **I did exactly that** merging GB-107: the decision was right because I had read the verdict and the API head myself, but the tool did not establish it. That is the failure GB-106 exists to remove, reproduced by its first user | M | — | abbreviated graded shas compare as **prefixes** (≥7 chars; shorter refuses); the head comes from the **API**, never from a flag, and an unreachable API refuses; the self-test covers prefix-allow, prefix-refuse, too-short-refuse, and makes the vacuous call inexpressible |
 | GB-110 | **The merge guard's graded sha comes from a writable local file, not the board's verdict.** `GB-109` made the *comparison* sound (7-char prefixes, API-only head, no vacuous `--head`), but `graded_sha_of()` still answers "what was graded?" by reading `obj/gate/graded-<pr>.sha`, so `echo "$(git rev-parse HEAD)" > obj/gate/graded-1.sha` permits merging an ungated tree. Same class as the flag GB-109 removed — the evidence supplied by the party the check constrains, which is how I made the original guard vacuous on its first use. Second half: the file path demands **40 hex** while every real verdict names **7–8** characters, so it refuses honest verdicts and can only *succeed* for a fabricated value | M | — | the graded sha is read from the **newest GREEN verdict comment over the Forgejo API** (via the already-written `graded_shas_in()`, currently never called), failing closed on no-GREEN / no-sha / unreachable board; the local file becomes a cache that must match; a forged file cannot permit a merge |
+| GB-119 | **The rig cannot prove a NEW staged fixture: `[MENU]` is capped at 128 entries and the arm image has 176**, so a staged new name is on the image but never listed and the rig cannot launch it | S | GB-118 | a newly staged title is launchable from the capped menu; merged `7eea550` (PR #238) on GB-119-V GREEN at `b9e8647c` |
 
 ### Milestone M1 — ABI core / ELF loader (GB-013 … GB-024)
+
+> **M1 CLOSED 2026-11-01** — GB-024's gate (`GB-024-V3` #339) GREEN at `2d7605d`, merged `9f35f66` (PR #289). The W0 corpus runs, matches its `.ref`, **and includes a Linux-ABI member whose output is compared rather than skipped**. What it took: GB-138 (`6b91bad`, a dispatched `abi=0x1` member), GB-141/143 (`06a3397`, `writev(20)` — compat `printf` had never reached the console because musl's stdio calls `writev` and the compat table had no `case 20`), GB-142 (`67ebde6`, the exit code was read and never printed), GB-137 (`634b5fa`, the musl SDL build, which also supplies M2's drawing evidence). **Most of M1's failures were instruments, not kernel code** — the kernel work was correct for most of those hours and the program could not see it. Carried forward as **named, open follow-ups** (minted by the overseer from GB-024-V3's own record note, so the milestone does not read as unconditionally clean): **GB-144** — `t4_w0.sh` guards the whole comparison on the `[W0] <m> linux=` marker with **no `else`**, so a member with a committed `.ref` that *stops* emitting is silently skipped and the gate prints PASS (GB-024-V3 proved the `.ref` is compared **when the member emits**; it did not prove the gate can fail a member that stops); **GB-145** — the **default 63-program wave hangs in `THRD_T.BIN`** (`st=9`, `wake=0`, `park_returns=0`, no halt), pre-existing and not the gate diff, which is why the *directed* 5-program W0 corpus was used to close M1. And **GB-031's `fbcon` question** (the pinned SDL 2.30.10 has no `fbcon` driver, so M2's DoD names a driver that does not exist in the library it builds) is a decision, not an implementation increment.
 
 | ID | Ticket | Wt | Depends | DoD |
 |---|---|---|---|---|
@@ -479,6 +535,33 @@ final list.
 | GB-116 | **The evidence rig cannot open the guest's start menu on intel, so no title it stages is ever launched.** `tools/evidence_rig.py:launch_from_menu()` opens the menu with `q.click(38, taskbar_y + 13)` — a QMP absolute pointer event — and `Makefile:257` gives the intel guest **no pointer device at all**, so the click has nowhere to land. The guest already has a keyboard path for exactly this: `src/user/desktop.c` maps **F1 (evdev 59)** to open the start menu, with the comment *"on x64 the kernel's PS/2 input path does not deliver mouse buttons (browser.md, WF1B), so an F1 map keeps the menu launchable on both arches"*. The rig never presses it. Measured as `[LAUNCH] = 0` on `GB-059-V`'s intel run and as the acceptance failure on `GB-053` (XNIBBLER/XCRYPT/NES appear in `[MENU]`, never load). This is the apparatus behind five cards: `GB-039`, `GB-039-V`, `GB-041`, `GB-053`, `GB-059-V`, `GB-088`. | S | — | `--gesture {auto,click,keys}` selects the menu-opening gesture and `auto` presses F1 before the best-effort click; a run on intel with `--gesture keys` produces a `[LAUNCH] <TITLE>.BIN` line for a non-auto-launch title, and the same title with `--gesture click` does not (the falsifier); `replay.jsonl` records the F1 keypress; on ARM both gestures still launch |
 | GB-117 | **The board cannot report claim age, so `DECISION-006` cannot be sized.** `updated_at` is not usable: bulk sweeps move it without any work — measured 2026-10-27, nine unrelated cards sharing two timestamps inside one minute (`07:20:10` x4, `07:20:58` x5) while no comment was written. The only honest liveness signal is the **newest comment per card**, which nobody computes. Measured by hand at 22:3xZ: 42 cards `In Progress`, **28 with no comment in >24 h**, oldest `GB-071` at 138.7 h and `GB-068` (the M1 blocker) at 131.6 h — and **0 of the 42 carry a `decision` label**, so "abandoned claim" and "waiting on a human" are indistinguishable. Without this report a claim lease is a policy aimed at a number nobody can see. **Re-scoped 2026-10-28 after three gate rounds**, each of which failed in the reading half: round 1 matched authorship by prose, round 2 printed one clock where two were asked for, round 3 printed two labelled clocks but no per-card line naming both. The per-card dual-clock view is moved out — it is a presentation nicety on a tool nobody has used yet, and the third round already measured everything the decision needs. | S | — | the report prints **both clocks, labelled and defined in the output itself** (`any-comment`: newest comment by anyone; `working-attempt`: newest non-bookkeeping comment), with bucket counts and a stale/fresh split for each; `updated_at` never drives either clock, proven by a sweep fixture (fresh `updated_at`, 30 h-old comments -> stale); the output separates `blocked`/`decision` cards from ordinary ones; `make host_tests` passes with the test self-registered |
 | GB-118 | **The evidence rig and the T3 tier are two boot paths, and only one can stage a fixture — so no rig-driven test can run a specific user binary.** `tools/t3_tier.sh:175-183` has a working staging hook (`T3_STAGE`, run *after* the build and *before* QEMU, fatal on failure, not on by default) and the gate scripts use it (`t4_proctest.sh`, `t3_pollbrk.sh`, `t3_nullentry.sh`, `t5_doom_manifest.sh`). `tools/evidence_rig.py` does **not** use that path: it boots with `make run` (`evidence_rig.py:109`, `:249`), and `Makefile:2465` `run:` is a bare `$(QEMU_CMD)` with no stage step. Measured consequence: `GB-059-V` is blocked on exactly this clause (its ground (b), *stage a compat ELF where the boot expects it*) — the mechanism exists in the repository and simply is not reachable from the rig that takes the evidence. Every card that must run a **named** binary rather than whatever the default image ships is downstream. The defect is the duplication, not a missing feature. | M | -- | The rig gains staging on the same terms as the tier: a documented flag places a named host file at a named guest path after the image is built and before QEMU starts, the guest proves it with its own serial output (a listing or a size/hash) quoted verbatim, and running the same command twice yields the same guest-visible content. It is **off by default**, a failed stage is fatal rather than booting a stale image, both host-path and guest-path traversal are refused with the refusal quoted, `make host_tests` is green, and a test proves the rig and `t3_tier.sh` agree on the result for the same fixture. |
+| GB-120 | **The rig↔tier agreement test is a command compared with itself** — make it invoke `make run` and `t3_tier.sh` and fail when they diverge | S | GB-118 | the agreement test has two real legs; shipped as GB-118's third commit (`9866b7d`, +113/−55 in `tools/evidence_rig_test.py`), graded by GB-118-V3 clause 8 |
+| GB-121 | **The intel T3 FATAL counter misses 28 of 30 fatal banners** — the reporter writes through the lock-free raw sink and interleaving shreds the line | S | GB-097 | every FATAL banner is counted; merged `78d5656` (PR #241) on GB-121-V GREEN (#267) at `85d8b5c` |
+| GB-122 | **The resume frame copy takes a `#PF` because the destination page has no leaf PTE** — the 37-quad (296-byte) frame copy in `enter_user_space` writes at `target_sp - 0x140` from CPL0, and `pte=0` on **25/25** anomalies, every destination in the top page of the user window (`0x17FFFFF000`). Not a hole (`region=yes covers=1`), not permissions (`prot=3`), not a wrong AS (`cr3 == as`): the stack region is registered but its top leaf was never materialised, and **a kernel store does not fault a lazy page in**. Deliverable: materialise the page before the copy (`vm_touch`/`vm_kwrite`) or map the top stack page when the AS is built, with `pte=0`→`pte=1 w=1` quoted before/after on the same `[RESUME-DIAG]` probe | S | GB-101 | the anomaly probe no longer takes the `#PF` and exec-heavy waves stay alive; **it is a mask, not the fix — GB-134 owns the underlying exec prefault, and the mask must not be dropped while GB-097 is open** |
+| GB-123 | **The trap frame is torn AFTER entry by its own exit path** — return addresses land in frame slots (`SS` = `restore_user_sp_helper+0x12`, `vector` = `arch_fpu_restore+0x1E`), so a gate at entry structurally cannot see it (the merged `[TORNFRAME]` detector fired 0 times while the impossible-vector fatal appeared). Clause 1 is **observe the store**, not fix it: symbolise the writing instruction and prove it writes into the frame | M | GB-101 | the store is observed and named with its instruction and slot, then the exit path stops writing into the frame; without clause 1 no fix is graded |
+| GB-124 | **`process_create_v2: no address space!` 184 times in one wave** — processes reach the resume path with no AS, and the refusal is what hides it | S | — | the refusal is tagged and bounded (≤3 lines/branch, ≤9/boot) so the shape is countable; merged `e057da7` (PR #244) on GB-124-V GREEN |
+| GB-125 | **The torn-frame crash survived the exit-path fix — one candidate eliminated, so which frame is the printer reading?** (rule out a printer-offset bug with a guard) | M | GB-124 | closed `Done` on a **negative**: the `[RESUME-NOMA]` guard works in isolation, is rejected by measurement as the mechanism, and the defect it was built for was fixed elsewhere (GB-126/GB-132) |
+| GB-126 | **`EXCEPTION_NO_ERR(21/29/30)` is wrong for #CP/#VC/#SX** — all three push an error code, so the stub skews the frame by 8 (latent; cannot fire on this hardware) | S | — | no `EXCEPTION_NO_ERR(21/29/30)` remains, `push $0x15/$0x1d/$0x1e` with no `push 0` while `exception_22` still does, scan 53/0; merged `215b79b` (PR #245) |
+| GB-127 | **Is the aarch64 build on `main` actually broken?** (a reviewer reported an `arm/fpu.s` fp-armv8 failure; if true no two-arch gate can pass) | S | — | measured on a **fresh worktree at `e057da7f`** with the full §6 arm command, no arch skipped and no `|| true`: the build is **not** broken; closed on that measurement |
+| GB-128 | **Baseline the arm T3 tier at `main`** — "two-arch gate" had meant one arch built and one arch exercised | S | — | arm baseline recorded at the same head as intel (`215b79b`, 84 vs 85 programs exited); the two arches come out **opposite** on the same wave, which is what makes the arch split measurable |
+| GB-129 | **Bisect when intel T3 started tearing** (arm green at the same head, so the window is bounded and the predicate is boolean) | M | GB-128 | the window is bounded and the premise refuted by running it; delivered with two findings instead of a first-bad commit |
+| GB-130 | **Bisect `d4e180a..8fccec7` (62 commits) for the first bad intel T3 head** | M | GB-129 | no first-bad commit is named that could be defended — the correct outcome; the measured finding undercuts the day's other counts and is carried into GB-082/GB-102 |
+| GB-131 | **Bisect family B (the tear) `c6ca6e9..ed65c8f`** — 16 commits, discriminator is the halting banner not a fatal count | S | GB-129 | `ed65c8f` identified as a test-gate commit; the "first B-family" label weakened by GB-132's printer classification |
+| GB-132 | **Family B: what puts a non-vector into the frame slot, given the resume copy produces a CLEAN kill instead?** | M | GB-131 | closed on the strongest result available: **the only thing that produces family B is our own instrument** — the fatal printer writes field-by-field through `uart_puts_raw` and interleaves, so the torn frame was a logging artifact, not a trap-frame corruption |
+| GB-133 | **Who re-clears the committed resume page?** (the commit is proven to stick; the hole returns by the next resume) | M | GB-122 | **nothing re-clears it**: `5333` probe lines, `0` same-root flips, `8` root-changed → **8 of 8 flips are AS replacements** (see GB-134) |
+| GB-134 | **`exec` never prefaults the stack top — and the obvious 64 KiB prefault starves the wave (8 programs vs 86).** `process_exec_current()` has zero `vm_touch` calls and sets `context[33] = USER_MAIN_STK_TOP_V2 - 8` in a new AS whose stack-top page has no leaf; the spawn path prefaults 64 KiB, exec does not. The fix is measured **correct and cheap** (`ms=0`, `rc=0`, `root == cr3`, `+18` frames = 16 data + 2 tables) but a wave with it runs 8 programs, and wave 81 (no printing at all) wedges on the same `uart_lock` — so console traffic is **not** the trigger. Deliverable: explain the starvation on `uart_lock`, then fix it there | M | GB-122, GB-097 | the prefault (`20-inst-exec.patch`) is re-applied verbatim and a wave reaches the normal program count with clauses 2–5 complete; blocked on GB-097 proving the console path survives an exec-heavy wave |
+| GB-135 | **The `In Progress` lane reports 43 cards and at least 7 of them are patch-equivalent heads** — `git diff --shortstat origin/main...<branch>` is empty for GB-017, GB-021, GB-032, GB-039, GB-059, GB-068 and GB-047, i.e. the code is on `main` and the card was never closed, while GB-016/GB-018 have real unmerged branches and no PR. This is DECISION-004's "patch-equivalent heads" appearing as lane inflation, and it is the difference between "43 cards in flight" and ~30. A sweep would repeat the GB-010/GB-070 failure — **GB-032's `-V` is RED** — so each card needs its own newest-verdict read | S | DECISION-004 | each of the nine cards lands on exactly one of: `In Review` with its `-V` named (minting one if missing), `In Progress` with a named live successor, or `Backlog`+`blocked` with the blocking id; the supporting command output is on the card; `check_verdicts.py` reports no new mismatches (quote before and after) and `sync_gaming_md.py` still prints `IN SYNC` |
+| GB-136 | **`check_verdicts.py` cannot tell a superseded RED from an ignored one** — 9 mismatched parents on a healthy board (GB-035, GB-060, GB-066, GB-071, GB-074, GB-106, GB-110, GB-117, GB-120), each a RED that a **later gate card** (`GB-nnn-V2`, `-V3`) overturned while the old RED stayed the newest verdict on its own card. The tool keys on "newest verdict for the parent", so *overturned* and *ignored* are the same string, and the failure GB-010/GB-070 was minted for is indistinguishable from a correct re-gate. This is load-bearing, not cosmetic: GB-005's enforcement reuses the parser, and `merge_pr.py`'s first real use proved a guard that always says no gets routed around (GB-109) | S | GB-112, GB-115, GB-114 | a RED followed by a GREEN on a later gate card for the same parent is not reported, and the successor is named (id + sha) in the output; a RED with no successor is still reported; the self-test covers both directions and fails when the supersession rule is disabled; on the live board **9 → 0** with all nine pointed at their successor, and anything unpointable stays reported; lane semantics unchanged (§4.2 still requires `In Progress` under a standing RED — GB-122's move back on 2026-10-30 stays correct) |
+| GB-138 | **The T4 W0 corpus is native flat binaries, so no process in any wave carries `PROC_FLAG_LINUX_ABI`** — the compat differential cannot fail for a compat reason. Measured twice in one afternoon: GB-014-V's clause 5 (*"nothing with Linux ABI runs in a T3 wave … the falsifier left every check green and every row identical"*) and GB-019-V2's clause 2 (`ioctl=0` in every W0 member, `W0_MEMBERS="HELLO SH CAT LS"`, so `ioctl_*` rows cannot appear by construction). Confirmed in the tree: `hello.bin` is `objcopy`'d from a `linker.ld` build (native), while the flag is set only for an ELF image (`program_loader.c:865`) | L | GB-013, GB-107 | at least one W0 member is a static-PIE Linux ELF dispatched through `elf_loader_load`; `PROC_FLAG_LINUX_ABI` is proven at runtime with a diagnostic line; **a deliberately mis-pointed mapping makes the T4 gate go RED** (the clause the last two gates proved impossible); at least one row per reachable request class (`ioctl_*`, `poll_*`, `uname_*`, `fcntl_*`) with the row count quoted before/after; both arches build and the ARM leg names the skipped member rather than dropping it silently |
+| GB-139 | **`check_verdicts.py` misses the verdict shapes this board actually uses** — `**VERDICT — GREEN (GB-nnn-V2).**` (an em dash, not a colon) and `**GB-101-V6 — GREEN at …**` (a bolded card id). Because those GREENs were invisible, an **older RED governed the parent** and six `Done` cards (GB-044, GB-060, GB-066-V2, GB-085-V, GB-099-V, GB-106-V) were reported as failing their last gate. Live count 7 → 1 once both parse, and the one that remains is real (GB-101-V6 GREEN over a `Backlog` card). Seven gates have been spent on this parser and every one found a *reading* defect, not a logic defect — the lesson is that the shapes must be derived from what Verifiers write, not imagined | S | GB-136 | (A) accepts `VERDICT` + colon/em dash/en dash/hyphen, line-initial; (A2) accepts a bolded card id + dash + verdict; **no regression** on the three fictions (`red or …`, `RED fixed …`, `red log: …`), the inline-quoted shape, the alternation guard, or `## GB-136-V3 — **RED**`; the live count is **accounted for card by card** with the deciding verdict line quoted, not merely counted; the four board suites pass with exit codes from both trees |
+| GB-140 | **`t3_tier.sh`'s console log is in `T3_LOG`, its summary on stdout — and gates grep the captured stream.** GB-138-V3 went **RED on a working feature** because a gate grepped `obj/t4_w0_dispatch.log` (`[ARRIVED] W0PIE.BIN` → 0) instead of `obj/t3_intel.log` (→ 1). Both directions are dangerous: absence-based assertions could report success on failure. Third instrument defect in one night, all failing the same way — a working thing reported as broken by a tool nobody asked to be right about output routing. Fix the contract once: `T3_LOG=<path>` printed machine-readably, every gate derives the path from it, and a missing `T3_LOG` fails loudly instead of grepping an empty file | S | GB-138 | `t3_tier.sh` prints `T3_LOG`/`T3_ARCH`/`T3_FAILS` as machine-readable lines; **every** gate under `tools/gate/` that greps a captured T3 output derives the path from `T3_LOG` (list them, before/after greps quoted); a gate that cannot find `T3_LOG` fails loudly; self-test both directions — a console containing the marker is seen, one without it is not |
+| GB-141 | **CAUSE MEASURED — `writev(20)` is missing from the compat dispatch, so every compat `printf` loses its bytes.** *(This row was wrong twice while the cause was a guess; the measurement at `b00e0f1d` ended it. FDPROBE at one head: `write(1, …)` **works**, `writev(1, iov, 2)` returns negative, process exits cleanly `code=0x0`. The compat table in `trap.c` carries `0,1,2,3,16,60,72,158,217,231` and **no `case 20`**, so `writev` → `-ENOSYS`; musl's `__stdio_write` calls `writev`, not `write`. That is why `setvbuf(_IONBF)` changed nothing (it changes* when*, not* which syscall*) and why `exit_group(231)` fixed the exit but not the output. Falsified on the way: missing `write` routing, death-before-write, stdio buffering.)* GB-019-V7's one boot at `32aa81b` dispatched a compat probe correctly (`v2 loader: PID=2 … abi=0x1`, `[ARRIVED] GB019.BIN rc>0`) and the 126-line serial contained **zero** rows. **The mechanism, measured at `b00e0f1d`:** `write(1, …)` lands and `writev(1, iov, 2)` returns negative at the same head — the compat table has no `case 20`, and musl's stdio calls `writev`. **The fix is GB-143** (`case 20` in the compat dispatch). This is the floor under M1's compat half: not "can a compat member run" (GB-138 proved that, `6b91bad`) but "can anything it does be seen" | M | GB-138, GB-140, GB-143 | the FDPROBE contrast at the graded head (`write` works, `writev` works after GB-143); a compat `printf` row quoted through `T3_LOG` with matching byte count; a negative case (bad `iov`/`iovcnt` returns the error, no kernel fault); **the falsifier** — reverting `case 20` reproduces the silent drop, quoted; and GB-019's `req=` rows reported on GB-019 in the same run |
+| GB-142 | **Every process exit is logged without its exit code — so a process that cannot print is unobservable in both channels.** `process.c:2123` prints the message, `:2134` prints `[EXITPC]`, and the code is read two lines later (`int code = (int)tf->regs[0];`) and **never printed**. GB-141 has had three hypotheses die because its only diagnostic channel is a console that does not work; GB-031 (`0xCF8` at `exit_group`) and GB-024's clause 3 have the same blind spot. One `[EXIT] pid=… code=…` line turns three cards from "we cannot see" into "we can see", for two lines of kernel code | S | — | every process exit logs its code in the `[EXITPC]` family, **for native and compat processes alike**; a normal `return 0` logs `code=0` and an explicit `exit(N)` logs `code=N`, both quoted from a real boot; **a signal/abnormal termination is distinguishable from a normal exit** rather than printing a code that means two things (`process.c:769` documents the Linux-layout high byte); no existing log line is removed or reordered — `grep -c '\[EXITPC\]'` equal before/after; suites pass with exit codes |
+| GB-144 | **`t4_w0.sh` silently skips a member that has a committed `.ref` and emits no `[W0] <m> linux=` marker.** The whole comparison is guarded on the marker with **no `else`**, so a non-emitting member is never examined and the gate prints PASS. GB-024-V3's GREEN proves the `.ref` **is compared when the member emits** — it does not prove the gate can fail a member that *stops*. This is GB-024-V2's original RED (W0PIE emitting nothing while `abi=0x1` sat on the loader line), caught last time only because a human read the console | S | GB-024 | a member with a committed `.ref` that emits no marker **FAILs**, with the failure quoted (induce it); the `else` branch names the member and the reason; a member with **no** `.ref` and no marker behaves as the DoD says rather than by omission; self-test gains the non-emitting case in both directions |
+| GB-145 | **The default 63-program wave hangs in `THRD_T.BIN`** — `st=9`, `wake=0`, `park_returns=0`, no halt, and the run never reaches the W0 gate stage. Pre-existing and not the gate diff; the *directed* 5-program W0 corpus is clean, which is why M1 closed. Every full wave is therefore ungraded | M | — | the default wave reaches its halt, or the hang is attributed to a named mechanism with the evidence quoted; `THRD_T.BIN`'s park/wake state explained; a full-wave run that completes and one that reproduces the hang, both quoted; no gate depends on the directed corpus to appear clean |
+| GB-143 | **Implement `writev(20)` in the compat dispatch — musl `__stdio_write` calls `writev`, not `write`, so every compat `printf` loses its bytes.** Measured at `b00e0f1d`: `write(1, …)` works, `writev(1, iov, 2)` returns negative, the process exits cleanly (`code=0x0`), and the rows are absent. The compat table has `0,1,2,3,16,60,72,158,217,231` and **no `case 20`**, so `writev` → `-ENOSYS`. This is the single mechanism behind GB-141's three falsified hypotheses and GB-019's five silent gates | S | GB-141, GB-138, GB-142 | `case 20:` implements `writev` over the existing `SYS_WRITE` path (loop the iovecs; stdio uses 1–2), **or** `__stdio_write`'s single-iov path degrades to `write` on `-ENOSYS` — with the choice and its reason stated (the first fixes the ABI for every compat program, not just musl's stdio); a compat `printf` row appears in the console quoted through `T3_LOG` with matching byte count; the FDPROBE contrast reproduced at the new head (`write` works, `writev` now works); bad `iov`/`iovcnt` returns the error rather than faulting the kernel, quoted; **the falsifier** — reverting `case 20` reproduces the silent drop; and GB-019's `req=` rows reported on GB-019 in the same run |
+| GB-146 | **The full 63-program wave crashes the kernel four times** — `vector=13` `#GP` with `rip=0x93` (a jump into nothing), `vector=1879307563` (not a vector: a corrupted trap frame or fault-path re-entry), and `TORTURE poll-many-fds` failing six times. **Unreachable until GB-145's hang was fixed:** the wave died in `THRD_T.BIN` at program ~2 and never reached program 35. **M1 closed on a 5-program directed corpus; the corpus the program ships is not green** | L | GB-145 | every FATAL fault in the full wave attributed with its mechanism (`rip=0x93`, `vector=1879307563`, and the other two), not silenced; `TORTURE poll-many-fds` passes or is shown to be a test bug with evidence; a full 63-program wave halts with `0 FAIL lines` and `0 kernel faults`, quoted; **the pre-fix log cited as the contrast** (`evidence/gb-145-v/t3_intel_full.log`); **two consecutive full-wave runs both clean**, because a fault that halves per run looks like a fix after one; suites with exit codes |
+| GB-147 | **Snapshot the pushed trap frame at entry and compare it against what the handler reads** — the one experiment GB-100/101/123/146 all need. Snapshot the frame in the first assembly instruction of the fault stub, emit `[FRAMESNAP] pushed … read … match=0-or-1` (a single line, no separators), and let the comparison name the mechanism: match=1 with impossible values ⇒ the CPU pushed garbage (GB-100); match=0 ⇒ the exit path clobbers it (GB-123); snapshots < faults ⇒ nested/re-entered fault path (GB-123) | L | none | `[FRAMESNAP]` quoted verbatim from a real wave (not a synthetic probe); the verdict names **which of the three rows held** by comparing frames, not by argument; snapshot count == fault count, stated; the conclusion posted on **all four** cards so they stop re-measuring it; the falsifier stated plainly if match=1 with possible values throughout |
 
 ### Milestone M2 — Compat device nodes + SDL (GB-025 … GB-033)
 
@@ -493,6 +576,7 @@ final list.
 | GB-031 | **[DEEP]** SDL2 static-musl build profile: fbcon + evdev drivers, no X11; freeze exact flag set | L | GB-027 | build reproducibly |
 | GB-032 | SDL test app (`surface`, 2D blit, input echo) under compat | M | GB-031 | draws + echoes input |
 | GB-033 | **M2 gate:** static-musl SDL app on intel shows window, responds to input, quits clean | M | GB-032 | gate evidence |
+| GB-137 | **A static-PIE's absolute addresses never receive the load base: `R_X86_64_RELATIVE` relocations are not applied in the v2 address space.** Measured by GB-033's worker: `[ARRIVED] SDLAPP.BIN rc>0` then `memory fault VA=0xCF8 PC=0x100000A997 rw=w in=PROT region=NONE`, where `PC` is inside the image (`USER_VA_BASE 0x1000000000`) and the faulting address is exactly one load base below it. Clause 0 must exclude the two cheap explanations first (an errno used as a pointer; a base applied twice). Deliverable: walk `.rela.dyn`, apply `base + addend` for every `R_X86_64_RELATIVE`, **refuse unknown relocation types by name** rather than silently skipping | L | GB-013, GB-032 | `SDLAPP.BIN` and the GB-066 probe run without a memory fault; a build with the relocation pass disabled reproduces the `VA=0xCF8` class of fault (the falsifier); a fixed-base `Type: EXEC` image still loads; both arches build, with an unimplemented aarch64 path refused by name rather than silently skipped |
 
 ### Milestone M3 — Games (GB-034 … GB-042, native catalog = the parallel swarm)
 
@@ -546,7 +630,8 @@ final list.
 | Licensing (DOOM shareware WAD, game ROMs, TA content) | Ship only freely-distributable assets; document provenance per title |
 | Legacy `-mgeneral-regs-only`/parity regressions | two-arch gate; kernel constraint checklist in review |
 
-**Open (Sarah or `decision` tickets):** final endpoint/IP mapping for the two model tiers;
+**Open (Sarah or `decision` tickets):** final IP mapping for the single model endpoint
+(`llm.localdomain:8000`; the two-tier split is retired — §3.1);
 whether audio is in-scope this month; `ARCH=intel` promotion stakes for ARM primary target
 (compat is intel-only by design — no ARM ABI change); optional nested-KVM enablement.
 
@@ -649,27 +734,28 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
    still expensive. Tracked as part of GB-006's provisioning checklist. `tools/t3_tier.sh` takes
    `T3_QEMU_ARGS` so the fix is a one-liner away: `T3_QEMU_ARGS="-enable-kvm" make test_intel`.
 
-### 11.3 Model endpoints & Hermes profiles
-- Two vLLM OpenAI-compatible endpoints, **recorded + verified 2026-10-17 (GB-004)**:
-  - **FLASH — DeepSeek V4 Flash** = `http://llm.localdomain:8000/v1`, `GET /v1/models` →
-    `["deepseek-v4-flash"]` (root `/mnt/fast/deepseek-v4-flash-0731`), `max_model_len` 1048576.
-    Default for every role; all routine work. Measured **57.7 tok/s** single-stream.
-  - **DEEP — DeepSeek v4.1 Flash** = `http://dgx1.localdomain:8000/v1`, `GET /v1/models` →
-    `["deepseek-v4.1-flash", "dgx-main"]` (root `/models/deepseek-v4.1-flash`), `max_model_len`
-    1048576. Coordinator + farm Verifiers: planning/re-plan/review/verification. Measured **40.5 tok/s** single-stream.
-- Verification (GB-004): `swarm-coordinator` resolved `model.default=deepseek-v4.1-flash`,
-  `model.provider=dgx` → `hermes chat -q` answered (DEEP-LINK-OK); `swarm-farm-1..3` resolved
-  `model.default=deepseek-v4-flash`, `model.provider=flash`, `model.base_url=http://llm.localdomain:8000/v1`
-  → answered (FLASH-LINK-OK) with only `llm.localdomain:8000` in the logs. Role provisioning is
-  scripted: `tools/swarm/provision-hermes-role.sh` (`ROLE=flash|deep`); it uses `hermes config set`
-  only (never hand-edits `config.yaml`) and writes `FORGEJO_TOKEN` to `~/.hermes/.env` (chmod 600),
-  never to a tracked file.
-- Budget (validated 2026-10-17): ~90% FLASH / ~10% DEEP tokens. FLASH sustains ~94–150 tok/s →
-  cap active workers at ~3–5 until GB-004 benchmarks say otherwise. Never put build/test load on
-  the inference boxes.
-- Per-role Hermes config: one profile per role (`swarm-coordinator`→DEEP, `swarm-worker`→FLASH),
-  distinct `HERMES_HOME`; workers run `hermes -w` (worktree) so parallel agents never collide on
-  files. Hermes is installed at `sarah:~/.hermes` on every VM.
+### 11.3 Model endpoint & Hermes profiles
+- **One OpenAI-compatible endpoint (in force 2026-10-31):** `http://llm.localdomain:8000/v1`.
+  `GET /v1/models` → `["deepseek-v4.1-flash", "deepseek-v4-flash"]`, both aliasing the same
+  v4.1-Flash weights (root `/home/sarah/models/deepseek-v4.1-flash-1017`), `max_model_len`
+  1048576. Every role — coordinator, worker, verifier, reviewer — resolves
+  `model.provider=llm`, `model.default=deepseek-v4.1-flash`,
+  `model.base_url=http://llm.localdomain:8000/v1`. `dgx1.localdomain` and provider `dgx` are
+  retired (§3.1); no lane may call them.
+- **Reasoning gate:** the server accepts `reasoning_effort` of `low|high|xhigh|max` or an integer
+  1–100, and rejects `medium` with HTTP 400 (`ultra` is also unserved: `max` is the ceiling).
+  Every lane — coordinator, workers, verifiers — sends **`max`** (§3.1).
+- **Verified 2026-10-31:** all four agent VMs answer a `hermes chat -q` ping on the `llm` provider
+  and the reply's `model` field is `deepseek-v4.1-flash`; `dgx1` appears in no config, charter,
+  prompt or driver flag.
+- Lanes are resumed, not re-created: `model.*` is read from `~/.hermes/config.yaml` at each
+  `hermes chat` launch, so a config change lands on the lane's next pass with no driver restart.
+- Provisioning is scripted: `tools/swarm/provision-hermes-role.sh`; it uses `hermes config set`
+  only (never hand-edits `config.yaml`) and writes `FORGEJO_TOKEN` to `~/.hermes/.env`
+  (chmod 600), never to a tracked file.
+- Per-role Hermes config: one profile per role (`swarm-coordinator`, `swarm-worker`), distinct
+  `HERMES_HOME`; workers run `hermes -w` (worktree) so parallel agents never collide on files.
+  Hermes is installed at `sarah:~/.hermes` on every VM.
 
 ### 11.4 Standing the swarm up (order matters)
 1. **Coordinator first** on `swarm-coordinator` (.233): start in a tmux session with the
@@ -680,8 +766,10 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 3. **Workers** on the farms: one long-lived `hermes -w` session per subsystem
    (abi/loader/libc, graphics/input/audio, native-ports, tests); each claims `Ready` tickets.
 4. **Re-plan cron** (GB-048): `hermes cronjob` daily on the coordinator → `deep` `PLAN` ticket.
-5. Evidence/artifacts land on the shared store (NAS `/mnt/fast` or c2flash) under `evidence/` —
-   the planner reads them at re-plan time.
+5. **Evidence home (DECISION-003, decided 2026-11-01):** the coordinator's local disk is the canonical
+   evidence store, and one-off probe logs are force-added (`git add -f evidence/…`) because `evidence/` is
+   gitignored by design. The NAS `/mnt/fast` clause is retired until a service account and a mount unit
+   exist on `.233`.
 
 ### 11.5 Day-to-day operation / monitoring
 - Watch the board (UI or API). Every merge passes the full gate (T1–T3 both arches, + T4/T5 where
@@ -706,6 +794,28 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 - LLVM 21.1.8 dist-staging cached on farm-1.
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
+
+**2026-11-01 — WORK POLICY: claims become leases, PRs become lanes, delivery becomes the metric.**
+
+| | |
+|---|---|
+| **Why** | A 12 h window with every unit `active`, 0 restarts, ~300 resumes and **one** merge (a plan doc). Measured: 30 of 32 `In Progress` cards silent ≥6 h (oldest 220 h), 16/16 Backlog cards `blocked`/`decision`, `Ready` 0, `In Review` 0, `Merge Gate` 0, 15 PRs open (oldest 5 days), 78% of the window's 199 comments on #72. |
+| **Board actions (23:15Z)** | `hobbyos-pr-sync` moved **13** cards to `In Review` (every open PR now has a card); `hobbyos-lease-sweep` released **19** silent claims to `Ready`; 5 `Done`-labelled issues closed. Census after: `Ready 19 · In Review 13 · In Progress 3 · Backlog 14 · Icebox 4 · Merge Gate 0`. |
+| **New machinery** | `/opt/swarm-lease/{lease_sweep,pr_sync}.py` on `.233`; `hobbyos-lease-sweep.timer` (15 min) and `hobbyos-pr-sync.timer` (hourly). Both dry-run by default; both write an explanatory comment on every card they move. |
+| **Policy channels** | gaming.md §4.4 + §11.4 step 5; `/opt/swarm/WORK-POLICY.txt` on 140–143; the policy block prepended to every charter (`*.txt`, `.continue.txt`, `.verify.*`, `.review.*`); worker "promote a Backlog card" sentences rewritten to rule 5; coordinator's stale "ZERO Ready / FAN OUT" paragraph replaced with the measured state and a merge-first priority; healthcheck prompt gained a DELIVERY GATE and now distinguishes a decision-queue stall from a worker fault; caretaker cadence hourly → 3-hourly (`17 */3 * * *`). |
+| **Decisions closed by Sarah (2026-11-01)** | DECISION-006 claim lease (option 1) — implemented; DECISION-005 GB-031 — split path (rule 3); DECISION-004 branch retirement — rule stated above; DECISION-003 evidence home — coordinator-local (option 2); PLAN-011 M0 — exceptions signed off. |
+
+
+**2026-10-31 — SINGLE-MODEL POLICY: the swarm runs on `llm.localdomain` only (v4.1 Flash); fleet rebooted.**
+
+| | |
+|---|---|
+| **Sarah's directive** | The swarm uses **`http://llm.localdomain:8000/v1` only** going forward. That box now serves **DeepSeek V4.1 Flash** despite listing the model as v4 Flash — faster and more capable than what it replaced — so all work uses it. |
+| **What that retired** | The `DEEP`/`FLASH` two-tier split (§3.1): `dgx1.localdomain:8000`, provider `dgx`, and the `--provider dgx -m deepseek-v4.1-flash` flags on the verifier loops. `deep` stays a **work-class label** (planning/design/root-cause/gate verdicts), not a different model. |
+| **Fleet** | All six VMs were stopped; booted in order (ticketing 144 → coordinator 143 → farms 140-142 → dashboard 145) and every swarm unit came back `active`. |
+| **Wired on every agent VM (140-143)** | `providers.llm` → `llm.localdomain:8000/v1`; `model.provider=llm`, `model.default=deepseek-v4.1-flash`; `providers.dgx` removed; `/opt/swarm/MODEL-POLICY.txt` added as the canonical copy the charters point at; charters (`.txt`, `.continue.txt`, `.verify.*`, `.review.*`) and `healthcheck.prompt.txt` de-`dgx`'d; `swarm-driver.py` `DEEP` lanes now launch `--provider llm -m deepseek-v4.1-flash --reasoning max`; `agent.reasoning_effort: max` on all four VMs (Sarah: raise it, we can afford it — `max` is this server's ceiling, `ultra` is rejected). |
+| **Model-id note** | `deepseek-v4-flash` still answers on this endpoint — it is an **alias for the same v4.1 weights**, not a different or weaker model. New config uses `deepseek-v4.1-flash`. |
+| **Terminology swept off the board** | `DEEP`/`FLASH` are retired as *model* names: label descriptions (`deep`/`verify`/`debug`) rewritten, the 41 open cards' `\| Model tier \|` row replaced with `\| Class \| deep\|worker \|`, and `tools/board/import_seed.py` + the `wrev` minting instruction changed so no new card emits a model tier. `[DEEP]` in a pre-2026-10-31 title means the work class. |
 
 **2026-10-28 — coordinator pass: the "board is static" verdict was wrong about its cause. The lanes were empty because *claims* were holding cards, and one `In Review` card had no gate card at all.**
 
@@ -1034,7 +1144,7 @@ long-lived `hermes -w` tmux sessions).**
 |---|---|
 | Board (GB-002) | 55 seed tickets + PLAN-001; lanes are labels (no Projects REST in this Forgejo build, §4.1) |
 | Board automation (GB-003) | webhook `coordinator-board-hook` + 60 s poll, both systemd units on .233 (§11.2a) |
-| Model split (GB-004) | DEEP `dgx1:8000` on the coordinator, FLASH `llm:8000` on farms 1-3 (§11.3) |
+| Model split (GB-004) | DEEP `dgx1:8000` on the coordinator, FLASH `llm:8000` on farms 1-3 (§11.3) — **superseded 2026-10-31, single endpoint `llm.localdomain`** |
 | Plan sync (GB-008) | `tools/board/sync_gaming_md.py` — IN SYNC, drift detection proven |
 | Baseline (GB-009) | T1 green (coordinator + farm-1); **T2 green arm + intel** (344/0 intel); **T3 ARM green (0 FAIL lines), T3 intel red-but-exit-0** (222 FAIL lines) → GB-057. The baseline is **not** complete on intel and no intel gate may cite T3 until it is |
 | ABI contract (GB-010) | `docs/linux-abi.md` v1 (measured; `gen_abi_doc.py --check` guards drift) — In Review |

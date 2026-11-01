@@ -1,0 +1,38 @@
+--- a/ui/gtk-gl-area.c
++++ b/ui/gtk-gl-area.c
+@@ -20,6 +20,16 @@
+ 
+ static void gtk_gl_area_set_scanout_mode(VirtualConsole *vc, bool scanout)
+ {
++    if (scanout) {
++        /*
++         * A new scanout supersedes any queued 2D surface updates, such as
++         * the full-surface update from the console resize that precedes
++         * every resolution change.  Left pending, the next refresh would
++         * drop back out of scanout mode and show the blank 2D surface.
++         */
++        vc->gfx.glupdates = 0;
++    }
++
+     if (vc->gfx.scanout_mode == scanout) {
+         return;
+     }
+--- a/ui/gtk-egl.c
++++ b/ui/gtk-egl.c
+@@ -26,6 +26,16 @@
+ 
+ static void gtk_egl_set_scanout_mode(VirtualConsole *vc, bool scanout)
+ {
++    if (scanout) {
++        /*
++         * A new scanout supersedes any queued 2D surface updates, such as
++         * the full-surface update from the console resize that precedes
++         * every resolution change.  Left pending, the next refresh would
++         * drop back out of scanout mode and show the blank 2D surface.
++         */
++        vc->gfx.glupdates = 0;
++    }
++
+     if (vc->gfx.scanout_mode == scanout) {
+         return;
+     }

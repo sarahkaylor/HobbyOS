@@ -102,6 +102,27 @@ static void test_kbd_e0_arrows(void) {
   evdev_kbd_byte(&d, 0xC8, cap_emit, &c); /* UP release (0x80|0x48) */
   check(c.n == 2 && c.code[0] == 103 && c.value[0] == 0,
         "kbd: E0 release maps to KEY_UP(103,0)");
+
+  CAP_RESET(c);
+  evdev_kbd_byte(&d, 0xE0, cap_emit, &c);
+  evdev_kbd_byte(&d, 0x53, cap_emit, &c); /* DELETE */
+  check(c.n == 2 && c.code[0] == 111 && c.value[0] == 1,
+        "kbd: E0 0x53 maps to KEY_DELETE(111)");
+
+  CAP_RESET(c);
+  evdev_kbd_byte(&d, 0xE0, cap_emit, &c);
+  evdev_kbd_byte(&d, 0x52, cap_emit, &c); /* INSERT */
+  check(c.n == 2 && c.code[0] == 110, "kbd: E0 0x52 maps to KEY_INSERT(110)");
+
+  CAP_RESET(c);
+  evdev_kbd_byte(&d, 0xE0, cap_emit, &c);
+  evdev_kbd_byte(&d, 0x1D, cap_emit, &c); /* RIGHT CTRL */
+  check(c.n == 2 && c.code[0] == 97, "kbd: E0 0x1D maps to KEY_RIGHTCTRL(97)");
+
+  CAP_RESET(c);
+  evdev_kbd_byte(&d, 0xE0, cap_emit, &c);
+  evdev_kbd_byte(&d, 0xAA, cap_emit, &c); /* fake shift release */
+  check(c.n == 0, "kbd: E0 0xAA (fake shift) emits nothing");
 }
 
 /* A bare 0xE0 with no follow-up key must not emit anything (stalls the
@@ -117,201 +138,315 @@ static void test_kbd_bare_e0(void) {
 
 /* ---- mouse ---- */
 
-/* A 3-byte no-button packet with no movement: x/y clamp stays, EV_ABS
- * x and y emitted (absolute), then EV_SYN. */
+/* The desktop's decode of an EV_ABS value (src/user/desktop.c
+ * desktop_abs_to_px): ceil(abs * dim / 0x7FFF), clamped to dim-1. */
+static int px_of(uint32_t abs, int dim) {
+  int px = (int)(((uint64_t)abs * (uint64_t)dim + 0x7FFE) / 0x7FFF);
+  return px > dim - 1 ? dim - 1 : px;
+}
+
+static void feed3(struct evdev_decoder *d, uint8_t a, uint8_t b, uint8_t c,
+                  struct evdev_cap *cp) {
+  evdev_mouse_byte(d, a, cap_emit, cp);
+  evdev_mouse_byte(d, b, cap_emit, cp);
+  evdev_mouse_byte(d, c, cap_emit, cp);
+}
+
+static void feed4(struct evdev_decoder *d, uint8_t a, uint8_t b, uint8_t c,
+                  uint8_t z, struct evdev_cap *cp) {
+  feed3(d, a, b, c, cp);
+  evdev_mouse_byte(d, z, cap_emit, cp);
+}
+
+/* Find the last emitted value of (type, code); -1 when absent. */
+static long last_of(const struct evdev_cap *c, uint16_t type, uint16_t code) {
+  long v = -1;
+  for (int i = 0; i < c->n; i++)
+    if (c->type[i] == type && c->code[i] == code) v = (long)c->value[i];
+  return v;
+}
+
+static int count_of(const struct evdev_cap *c, uint16_t type, uint16_t code) {
+  int k = 0;
+  for (int i = 0; i < c->n; i++)
+    if (c->type[i] == type && c->code[i] == code) k++;
+  return k;
+}
+
+/* The pixel encoding round-trips exactly through the desktop decode for
+ * every pixel on both axes (no off-by-one anywhere on the screen). */
+static void test_abs_roundtrip(void) {
+  int bad = 0;
+  for (int px = 0; px < 1920; px++)
+    if (px_of(evdev_abs_from_px(px, 1920), 1920) != px) bad++;
+  for (int py = 0; py < 1080; py++)
+    if (px_of(evdev_abs_from_px(py, 1080), 1080) != py) bad++;
+  check(bad == 0, "abs: floor encode / ceil decode round-trips every pixel");
+  /* QEMU's own absolute scaling for a host pixel is the same floor. */
+  bad = 0;
+  for (int px = 0; px < 1920; px++)
+    if (px_of((uint32_t)((px * 32767) / 1920), 1920) != px) bad++;
+  check(bad == 0, "abs: QEMU-scaled host pixel decodes to the same pixel");
+}
+
+/* A 3-byte no-button packet with no movement: EV_ABS x/y at the screen
+ * centre, then EV_SYN. */
 static void test_mouse_still(void) {
   struct evdev_decoder d;
   struct evdev_cap c;
   evdev_decoder_init(&d);
   c.n = 0;
 
-  /* center-ish pointer: default 16384; packet flags=0x08 (status byte,
-     no button, no sign, no overflow), deltas 0,0.  Bit3 (0x08) is the
-     PS/2 alignment bit that must be set for a valid packet start. */
-  evdev_mouse_byte(&d, 0x08, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
+  feed3(&d, 0x08, 0x00, 0x00, &c);
 
   check(c.n == 3 && c.type[0] == EVDEV_EV_ABS && c.code[0] == EVDEV_ABS_X &&
-            c.value[0] == 16384 && c.type[1] == EVDEV_EV_ABS &&
-            c.code[1] == EVDEV_ABS_Y && c.value[1] == 16384 &&
+            px_of(c.value[0], 1920) == 960 && c.type[1] == EVDEV_EV_ABS &&
+            c.code[1] == EVDEV_ABS_Y && px_of(c.value[1], 1080) == 540 &&
             c.type[2] == EVDEV_EV_SYN,
-        "mouse: still packet emits ABS x/y + SYN at default pos");
+        "mouse: still packet emits ABS x/y + SYN at the screen centre");
 }
 
-/* Rightward + downward movement: dx and dy integrate with sign mapping
- * (down = +dy*40 subtracted).  flags bit4 (0x10)=x negative? -- here we
- * use positive deltas, no sign bits. */
+/* 1 count = 1 pixel on BOTH axes (isotropic); PS/2 +dy is up. */
 static void test_mouse_move(void) {
   struct evdev_decoder d;
   struct evdev_cap c;
   evdev_decoder_init(&d);
   c.n = 0;
 
-  /* dx=+2, dy=+1 (y moves down in payload = cursor down = dy-relative;
-     the driver does mouse_y -= dy*40, so a +1 payload moves UP.  We only
-     assert the resulting absolute values below.  First byte 0x08 status. */
-  evdev_mouse_byte(&d, 0x08, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x02, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x01, cap_emit, &c);
-
-  /* x = 16384 + 2*40 = 16464 ; y = 16384 - 1*40 = 16344 */
-  check(c.n == 3 && c.value[0] == 16464 && c.value[1] == 16344,
-        "mouse: +2,+1 packet integrates to (16464, 16344)");
+  feed3(&d, 0x08, 0x02, 0x01, &c); /* dx=+2, dy=+1 (up) */
+  check(c.n == 3 && px_of(c.value[0], 1920) == 962 &&
+            px_of(c.value[1], 1080) == 539,
+        "mouse: +2,+1 packet moves (+2 px, -1 px)");
 
   CAP_RESET(c);
-  /* Negative deltas via sign bits: set bit4 (0x10) => dx = payload-256,
-     set bit5 (0x20) => dy = payload-256.  To express dx=-3 the payload
-     byte is 0xFD (253-256=-3); for dy=-4, 0xFC (252-256=-4). */
-  evdev_mouse_byte(&d, 0x08 | 0x10 | 0x20, cap_emit, &c); /* status + signs */
-  evdev_mouse_byte(&d, 0xFD, cap_emit, &c); /* dx = -3 */
-  evdev_mouse_byte(&d, 0xFC, cap_emit, &c); /* dy = -4 */
-
-  /* x = 16464 + (-3*40) = 16344 ; y = 16344 - (-4*40) = 16504 */
-  check(c.n == 3 && c.value[0] == 16344 && c.value[1] == 16504,
+  feed3(&d, 0x08 | 0x10 | 0x20, 0xFD, 0xFC, &c); /* dx=-3, dy=-4 (down) */
+  check(c.n == 3 && px_of(c.value[0], 1920) == 959 &&
+            px_of(c.value[1], 1080) == 543,
         "mouse: negative-sign packet integrates correctly");
+
+  /* Isotropy: 100 counts right / 100 counts down move 100 px each. */
+  evdev_decoder_init(&d);
+  CAP_RESET(c);
+  for (int i = 0; i < 5; i++) feed3(&d, 0x08, 20, 0x00, &c);
+  CAP_RESET(c);
+  feed3(&d, 0x08, 0, 0, &c);
+  check(px_of(c.value[0], 1920) == 960 + 100 && px_of(c.value[1], 1080) == 540,
+        "mouse: x moves 1 px/count");
+  evdev_decoder_init(&d);
+  for (int i = 0; i < 5; i++) feed3(&d, 0x08 | 0x20, 0, (uint8_t)-20, &c);
+  CAP_RESET(c);
+  feed3(&d, 0x08, 0, 0, &c);
+  check(px_of(c.value[1], 1080) == 540 + 100,
+        "mouse: y moves 1 px/count (isotropic with x)");
 }
 
-/* Clamp at the extreme edges: runaway deltas must not push past
- * EVDEV_ABS_MAX nor below 0. */
+/* Clamp at the screen edges: runaway deltas pin at pixel 0 / dim-1. */
 static void test_mouse_clamp(void) {
   struct evdev_decoder d;
   struct evdev_cap c;
   evdev_decoder_init(&d);
   c.n = 0;
 
-  /* Drive x negative from its 16384 center: dx = -128 (payload 0x80 with
-     the 0x10 sign bit => 128-256=-128) subtracts 5120 per packet.  Four
-     packets cross 0; the position must clamp at 0, not go negative. */
-  for (int i = 0; i < 4; i++) {
-    evdev_mouse_byte(&d, 0x08 | 0x10, cap_emit, &c); /* status + dx negative */
-    evdev_mouse_byte(&d, 0x80, cap_emit, &c); /* dx = -128 */
-    evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  }
-  /* last packet's ABS X is the (n-3)th event */
+  for (int i = 0; i < 10; i++) feed3(&d, 0x08 | 0x10, 0x80, 0x00, &c);
   check(c.value[c.n - 3] == 0, "mouse: runaway -dx clamps x at 0 (not below)");
 
-  /* Drive y upward past EVDEV_ABS_MAX: dy = -128 (0x20 sign bit) makes
-     y increase by 5120 per packet; four packets cross 32767 and must
-     clamp exactly at EVDEV_ABS_MAX. */
   CAP_RESET(c);
-  evdev_decoder_init(&d); /* reset position to center */
-  for (int i = 0; i < 4; i++) {
-    evdev_mouse_byte(&d, 0x08 | 0x20, cap_emit, &c); /* status + dy negative */
-    evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-    evdev_mouse_byte(&d, 0x80, cap_emit, &c); /* dy = -128 */
-  }
-  check(c.value[c.n - 2] == EVDEV_ABS_MAX,
-        "mouse: runaway -dy clamps y at EVDEV_ABS_MAX (not above)");
+  evdev_decoder_init(&d);
+  for (int i = 0; i < 10; i++) feed3(&d, 0x08 | 0x20, 0x00, 0x80, &c);
+  check(px_of(c.value[c.n - 2], 1080) == 1079 &&
+            c.value[c.n - 2] <= EVDEV_ABS_MAX,
+        "mouse: runaway +y clamps at the last row");
+
+  /* Then moving back by one count leaves the edge by exactly one pixel. */
+  CAP_RESET(c);
+  feed3(&d, 0x08, 0x00, 0x01, &c);
+  check(px_of(c.value[1], 1080) == 1078, "mouse: no dead zone after the clamp");
 }
 
 /* Overflow-drop rule: a set overflow bit on an axis drops that axis's
- * delta (does not integrate) but still applies the button bits.  This is
- * the subtle correctness rule from virtio_input.c that prevents the
- * cursor being permanently unpinned by a garbage jump. */
+ * delta (does not integrate) but still applies the button bits. */
 static void test_mouse_overflow_drop(void) {
   struct evdev_decoder d;
   struct evdev_cap c;
   evdev_decoder_init(&d);
   c.n = 0;
 
-  /* X overflow (bit6=0x40) with dx payload 0x50 and a left-click
-     (bit0=0x01): dx must be DROPPED (x stays 16384), but the button edge
-     EV_KEY(0x110,1) must still fire, then EV_SYN.  Status byte carries
-     0x08 (alignment) | 0x40 (X overflow) | 0x01 (left down). */
-  evdev_mouse_byte(&d, 0x08 | 0x40 | 0x01, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x50, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-
-  /* Expect: EV_ABS(X,16384) [no dx jump], EV_ABS(Y,16384), EV_KEY
-     (0x110,1), EV_SYN  -> 4 events, x anchored at 16384. */
-  check(c.n == 4 && c.type[0] == EVDEV_EV_ABS && c.value[0] == 16384 &&
+  feed3(&d, 0x08 | 0x40 | 0x01, 0x50, 0x00, &c);
+  check(c.n == 4 && c.type[0] == EVDEV_EV_ABS && px_of(c.value[0], 1920) == 960 &&
             c.type[2] == EVDEV_EV_KEY && c.code[2] == EVDEV_BTN_LEFT &&
             c.value[2] == 1 && c.type[3] == EVDEV_EV_SYN,
         "mouse: X-overflow drops dx, still emits left button edge");
 
-  /* Releasing the left button on the next (non-overflow) packet must
-     emit BTN_LEFT 0. */
   CAP_RESET(c);
-  evdev_mouse_byte(&d, 0x08, cap_emit, &c); /* no button */
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
+  feed3(&d, 0x08, 0x00, 0x00, &c);
   check(c.n == 4 && c.type[2] == EVDEV_EV_KEY && c.code[2] == EVDEV_BTN_LEFT &&
             c.value[2] == 0,
         "mouse: button release edge emits BTN_LEFT 0");
 }
 
-/* Button edges fire only on CHANGE: holding the button across packets
- * must not re-emit the press. */
+/* Button edges fire only on CHANGE. */
 static void test_mouse_button_edge_only(void) {
   struct evdev_decoder d;
   struct evdev_cap c;
   evdev_decoder_init(&d);
   c.n = 0;
 
-  /* press */
-  evdev_mouse_byte(&d, 0x08 | 0x01, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  int key_presses = 0;
-  for (int i = 0; i < c.n; i++)
-    if (c.type[i] == EVDEV_EV_KEY && c.code[i] == EVDEV_BTN_LEFT &&
-        c.value[i] == 1)
-      key_presses++;
-
-  /* hold (button still down) */
+  feed3(&d, 0x08 | 0x01, 0x00, 0x00, &c);
+  int key_presses = count_of(&c, EVDEV_EV_KEY, EVDEV_BTN_LEFT);
   CAP_RESET(c);
-  evdev_mouse_byte(&d, 0x08 | 0x01, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  int held_edges = 0;
-  for (int i = 0; i < c.n; i++)
-    if (c.type[i] == EVDEV_EV_KEY && c.code[i] == EVDEV_BTN_LEFT)
-      held_edges++;
-
+  feed3(&d, 0x08 | 0x01, 0x00, 0x00, &c);
+  int held_edges = count_of(&c, EVDEV_EV_KEY, EVDEV_BTN_LEFT);
   check(key_presses == 1 && held_edges == 0,
         "mouse: held button emits no repeat edge");
 
-  /* right edge appears independently */
   CAP_RESET(c);
-  evdev_mouse_byte(&d, 0x08 | 0x02, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  int right_down = 0;
-  for (int i = 0; i < c.n; i++)
-    if (c.type[i] == EVDEV_EV_KEY && c.code[i] == EVDEV_BTN_RIGHT &&
-        c.value[i] == 1)
-      right_down++;
-  check(right_down == 1, "mouse: right button edge fires on change");
+  feed3(&d, 0x08 | 0x02, 0x00, 0x00, &c);
+  check(last_of(&c, EVDEV_EV_KEY, EVDEV_BTN_RIGHT) == 1,
+        "mouse: right button edge fires on change");
+
+  CAP_RESET(c);
+  feed3(&d, 0x08 | 0x04, 0x00, 0x00, &c);
+  check(last_of(&c, EVDEV_EV_KEY, EVDEV_BTN_MIDDLE) == 1 &&
+            last_of(&c, EVDEV_EV_KEY, EVDEV_BTN_RIGHT) == 0,
+        "mouse: middle button edge fires");
 }
 
-/* A mouse byte before lane alignment (no 0x08 in the status byte) is
- * dropped — the stream resynchronizes to the packet start. */
+/* A mouse byte before alignment (no 0x08) is dropped. */
 static void test_mouse_misaligned_start(void) {
   struct evdev_decoder d;
   struct evdev_cap c;
   evdev_decoder_init(&d);
   c.n = 0;
 
-  /* A nonzero byte without the 0x08 alignment bit is ignored. */
   evdev_mouse_byte(&d, 0x04, cap_emit, &c);
   check(c.n == 0, "mouse: misaligned start byte (no 0x08) dropped");
 
-  /* After garbage, a properly aligned packet still integrates. */
-  evdev_mouse_byte(&d, 0x08, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
-  evdev_mouse_byte(&d, 0x00, cap_emit, &c);
+  feed3(&d, 0x08, 0x00, 0x00, &c);
   check(c.n == 3 && c.type[2] == EVDEV_EV_SYN,
         "mouse: realigned packet still emits SYN");
+}
+
+/* IntelliMouse (4-byte): wheel z -> REL_WHEEL with evdev sign (+1 = up). */
+static void test_mouse_wheel(void) {
+  struct evdev_decoder d;
+  struct evdev_cap c;
+  evdev_decoder_init(&d);
+  evdev_mouse_set_packet_len(&d, 4);
+  c.n = 0;
+
+  feed4(&d, 0x08, 0, 0, 0xFF, &c); /* z = -1: wheel up */
+  check(last_of(&c, EVDEV_EV_REL, EVDEV_REL_WHEEL) == 1 &&
+            c.type[c.n - 1] == EVDEV_EV_SYN,
+        "wheel: PS/2 z=-1 emits REL_WHEEL +1 (up)");
+  CAP_RESET(c);
+  feed4(&d, 0x08, 0, 0, 0x01, &c);
+  check((int32_t)last_of(&c, EVDEV_EV_REL, EVDEV_REL_WHEEL) == -1,
+        "wheel: PS/2 z=+1 emits REL_WHEEL -1 (down)");
+  CAP_RESET(c);
+  feed4(&d, 0x08, 5, 0, 0x00, &c);
+  check(count_of(&c, EVDEV_EV_REL, EVDEV_REL_WHEEL) == 0 &&
+            px_of(c.value[0], 1920) == 965,
+        "wheel: z=0 packet is plain motion");
+}
+
+/* Burst desync: a lost byte in a 4-byte stream costs at most the broken
+ * packet; the decoder realigns and later packets decode exactly. */
+static void test_mouse_resync_lost_byte(void) {
+  struct evdev_decoder d;
+  struct evdev_cap c;
+  evdev_decoder_init(&d);
+  evdev_mouse_set_packet_len(&d, 4);
+  c.n = 0;
+
+  /* Packet A loses its dy byte; header|dx|z then packet B follows. */
+  evdev_mouse_byte(&d, 0x08, cap_emit, &c);
+  evdev_mouse_byte(&d, 0x40, cap_emit, &c); /* dx=64 (no bit 3) */
+  evdev_mouse_byte(&d, 0x00, cap_emit, &c); /* z (dy lost) */
+  /* Packet B: 3 counts right, button down -- stream continues. */
+  for (int k = 0; k < 6; k++) feed4(&d, 0x09, 3, 0, 0, &c);
+  CAP_RESET(c);
+  feed4(&d, 0x08, 0, 0, 0, &c);
+  feed4(&d, 0x08, 0, 0, 0, &c);
+  check(c.n >= 3 && c.type[c.n - 1] == EVDEV_EV_SYN &&
+            last_of(&c, EVDEV_EV_KEY, EVDEV_BTN_LEFT) == 0 &&
+            d.mouse_cycle == 0,
+        "resync: stream realigns after a lost byte (release seen, cycle 0)");
+  /* Position drifted by at most the broken packets, not a wild jump. */
+  int px = px_of((uint32_t)last_of(&c, EVDEV_EV_ABS, EVDEV_ABS_X), 1920);
+  check(px >= 960 && px <= 960 + 3 * 6 + 64,
+        "resync: no wild jump from the desynced bytes");
+
+  /* Timed resync: a partial packet older than the gap is discarded. */
+  evdev_decoder_init(&d);
+  CAP_RESET(c);
+  evdev_mouse_byte_at(&d, 0x08, 1000, cap_emit, &c);
+  evdev_mouse_byte_at(&d, 0x05, 1001, cap_emit, &c); /* partial: hdr, dx */
+  evdev_mouse_byte_at(&d, 0x08, 2000, cap_emit, &c); /* new packet later */
+  evdev_mouse_byte_at(&d, 0x07, 2000, cap_emit, &c);
+  evdev_mouse_byte_at(&d, 0x00, 2000, cap_emit, &c);
+  check(c.n == 3 && px_of(c.value[0], 1920) == 967,
+        "resync: stale partial packet dropped after a time gap");
+}
+
+/* vmmouse absolute packets: exact pixel placement, buttons, wheel, and
+ * the fake PS/2 packets QEMU injects are swallowed. */
+static void test_vmmouse(void) {
+  struct evdev_decoder d;
+  struct evdev_cap c;
+  evdev_decoder_init(&d);
+  evdev_mouse_set_packet_len(&d, 4);
+  c.n = 0;
+
+  /* QEMU: host pixel -> v = floor(px*0x7fff/1920), vmmouse sends v << 1. */
+  int bad = 0;
+  for (int px = 0; px < 1920; px += 7) {
+    uint32_t vx = (uint32_t)((px * 32767) / 1920) << 1;
+    uint32_t vy = (uint32_t)(((px % 1080) * 32767) / 1080) << 1;
+    CAP_RESET(c);
+    evdev_vmmouse_packet(&d, 0, vx, vy, 0, 0xFFFF, cap_emit, &c);
+    if (px_of(c.value[0], 1920) != px || px_of(c.value[1], 1080) != px % 1080 ||
+        c.value[0] != (vx >> 1) || c.value[1] != (vy >> 1)) bad++;
+  }
+  check(bad == 0, "vmmouse: host pixel lands on the same guest pixel");
+
+  CAP_RESET(c);
+  evdev_vmmouse_packet(&d, EVDEV_VMMOUSE_LEFT, 0, 0, 0, 0xFFFF, cap_emit, &c);
+  check(last_of(&c, EVDEV_EV_KEY, EVDEV_BTN_LEFT) == 1 && c.value[0] == 0,
+        "vmmouse: left press at (0,0)");
+  CAP_RESET(c);
+  evdev_vmmouse_packet(&d, EVDEV_VMMOUSE_RIGHT, 0, 0, 0, 0xFFFF, cap_emit, &c);
+  check(last_of(&c, EVDEV_EV_KEY, EVDEV_BTN_LEFT) == 0 &&
+            last_of(&c, EVDEV_EV_KEY, EVDEV_BTN_RIGHT) == 1,
+        "vmmouse: left release + right press");
+  CAP_RESET(c);
+  evdev_vmmouse_packet(&d, 0, 0, 0, 0xFFFFFFFFu, 0xFFFF, cap_emit, &c);
+  check(last_of(&c, EVDEV_EV_REL, EVDEV_REL_WHEEL) == 1,
+        "vmmouse: z=-1 is wheel up (REL_WHEEL +1)");
+
+  /* Fake PS/2 packets (dx=+1, no buttons) must not move or release. */
+  evdev_decoder_init(&d);
+  evdev_mouse_set_packet_len(&d, 4);
+  CAP_RESET(c);
+  evdev_vmmouse_packet(&d, EVDEV_VMMOUSE_LEFT, 1000 << 1, 1000 << 1, 0, 0xFFFF,
+                       cap_emit, &c);
+  CAP_RESET(c);
+  feed4(&d, 0x08, 1, 0, 0, &c);
+  check(c.n == 0, "vmmouse: fake PS/2 packet swallowed (no release, no move)");
+  /* Genuine relative motion still moves the shared position. */
+  feed4(&d, 0x08, 10, 0, 0, &c);
+  check(c.n == 3 && count_of(&c, EVDEV_EV_KEY, EVDEV_BTN_LEFT) == 0 &&
+            px_of(c.value[0], 1920) == px_of(1000, 1920) + 10,
+        "vmmouse: real rel motion moves from the absolute position");
 }
 
 /* ---- init determinism ---- */
 static void test_init_center(void) {
   struct evdev_decoder d;
   evdev_decoder_init(&d);
-  check(d.mouse_x == 16384 && d.mouse_y == 16384 && d.mouse_cycle == 0 &&
-            d.kbd_escaped == 0 && d.prev_left == 0 && d.prev_right == 0,
-        "init: decoder starts centered, idle, no buttons");
+  check(d.px_x == 960 && d.px_y == 540 && d.mouse_cycle == 0 &&
+            d.mouse_packet_len == 3 && d.kbd_escaped == 0 &&
+            d.prev_left == 0 && d.prev_right == 0 && !d.vmmouse_active,
+        "init: decoder starts centered, idle, no buttons, PS/2 3-byte");
 }
 
 int main(void) {
@@ -326,6 +461,10 @@ int main(void) {
   test_mouse_overflow_drop();
   test_mouse_button_edge_only();
   test_mouse_misaligned_start();
+  test_abs_roundtrip();
+  test_mouse_wheel();
+  test_mouse_resync_lost_byte();
+  test_vmmouse();
 
   printf("evdev_test_host: %d checks, %d failed\n", checks_run, checks_failed);
   return checks_failed ? 1 : 0;

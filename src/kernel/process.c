@@ -1,4 +1,5 @@
 #include "process.h"
+#include "vdisplay.h"
 #include "kline.h"
 #include "frame.h"
 #include "vm.h"
@@ -687,7 +688,8 @@ static void reap_deliver_locked(struct process *grp) {
     if (want > 0 && want != grp->pid)
       continue;
     parent->context[0] = grp->pid;         /* waitpid return value */
-    uint64_t stp = (uint64_t)parent->context[1]; /* saved arg1 */
+    uint64_t stp = parent->wait_status_va; /* saved status pointer */
+    parent->wait_status_va = 0;
     if (stp) {
       /* D5.7/OQ5: route the user-range check through P2's helper
          (materializes for v2), then write cross-context. */
@@ -783,7 +785,7 @@ static void group_teardown(struct process *grp, uint64_t code) {
 
   /* Wake a parent blocked in waitpid() and deliver the reap result.  The
      parent's saved context still holds the syscall args (context[0] = the
-     requested pid, context[1] = the status pointer), so a pid-specific wait
+     requested pid; the status pointer is in wait_status_va), so a pid-specific wait
      is matched and the user status is filled in place -- through the
      PARENT'S mapping (this runs on the dying group's context, so a
      user-virtual write would land in the wrong block).  P5 (D5.3/D5.4):
@@ -1072,6 +1074,7 @@ static int process_create_internal_ver(int ver) {
   p->eargv[0] = 0;
   p->cwd[0] = '/';
   p->cwd[1] = '\0';
+  vdisp_pcb_init(p); /* icewm.md §9: no virtual display */
   p->num_open_fds = 0;
   p->wake_ms = 0;
   p->spawn_retval = -1;
@@ -1120,6 +1123,20 @@ static int process_create_internal_ver(int ver) {
       uart_puts("Inside process_create: kmemset done.\n");
   }
 
+  /* GB-071 (family-B bootstrap): a fresh create shall start with rdi=0 (context[5]
+     is zeroed next), so a non-zero high-band value HERE means this slot arrived with
+     a stale kernel/stack-band context[5] that the next statement wipes — that
+     arrival is the unnamed bootstrap.  One kline write. */
+  if (p->context[5] >= 0x70000000ULL) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[GB071-CREATE] pid=");
+    kl_i(&kl, pid);
+    kl_s(&kl, " ctx5=");
+    kl_hex(&kl, p->context[5]);
+    kl_s(&kl, "\n");
+    kl_emit(&kl);
+  }
   for (int i = 0; i < 36; i++) {
     p->context[i] = 0;
   }
@@ -1683,6 +1700,23 @@ void schedule(struct trap_frame *tf, int is_yield) {
          the iretq restore the target's own RFLAGS. */
       interrupts_disable();
       spinlock_release(&proc_lock);
+#ifdef __x86_64__
+      /* x64 user resume runs ON the user stack at CPL0: enter_user_space
+         copies its frame to [target_sp-320, target_sp-24), moves RSP to
+         target_sp-616 and calls C from there.  A page below the user SP that
+         the process never touched is demand-zero and NOT resident; a #PF
+         with RSP on it cannot be delivered (#DF -> triple fault, the VM
+         resets).  GB-068 pre-faults the top of a FRESH stack (spawn, and now
+         exec); a forked child or a process preempted near a page boundary has
+         the same exposure.  Materialize the window here, outside proc_lock
+         (vm_touch takes vm_lock; it never sleeps for a stack page).
+         Observed: IceWM fork()+exec of HBHOST.BIN reset the VM (icewm.md §9). */
+      if (proc_table[next].as && !proc_table[next].is_kernel_process &&
+          target_sp > USER_VA_BASE + 0x1000 && target_sp <= USER_VA_TOP) {
+        uint64_t lo = (target_sp - 0x1000) & ~0xFFFULL;
+        (void)vm_touch(&proc_table[next], lo, target_sp - lo, /*write=*/1);
+      }
+#endif
 
       /* P5 S3 (D8.4a/b): the resume boundary — timer-preempt resume of a
          leader and the restart of a parked slice.  The resumed AS is
@@ -2093,7 +2127,12 @@ void process_exit(struct trap_frame *tf) {
   uart_puts(buf);
 
   /* GB-014: name the last user PC we saw trapped, so a program that stops
-     silently reports where it got to instead of just its entry point. */
+     silently reports where it got to instead of just its entry point.
+     GB-142: also log the exit code (regs[0], raw from SYS_EXIT / exit_group) so a
+     normal return 0 and an explicit exit(N) are distinguishable in the serial —
+     native and compat alike, both paths land here.  The EXITPC line count is
+     unchanged (the code is appended, not a new line). */
+  int exit_code = (int)tf->regs[0];
   if (!cur->is_kernel_process) {
     struct kline ku;
     kl_init(&ku);
@@ -2101,11 +2140,13 @@ void process_exit(struct trap_frame *tf) {
     kl_i(&ku, (long)cur->pid);
     kl_s(&ku, " last_user_pc=");
     kl_hex(&ku, (unsigned long)cur->last_user_pc);
+    kl_s(&ku, " code=");
+    kl_hex(&ku, (unsigned long)(unsigned int)exit_code);
     kl_s(&ku, "\n");
     kl_emit(&ku);
   }
 
-  int code = (int)tf->regs[0];
+  int code = exit_code;
 
   if (cur->is_kernel_process) {
     /* Kernel tasks keep the legacy path: FREE + block release, no groups. */
@@ -2420,7 +2461,7 @@ void process_exec_apply(struct process *grp, const char *env, int envc) {
     for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
       if ((grp->fd_cloexec >> fd) & 1u) {
         file_close(grp, fd); /* no-op -1 when the slot was already empty */
-        grp->fd_cloexec &= ~(1u << fd);
+        grp->fd_cloexec &= ~(1ull << fd);
       }
     }
   }
@@ -2877,14 +2918,25 @@ int sys_readenv(struct process *p, int idx, char *buf, int size) {
  * PROC_STATE_WAIT_CHILD until a matching child exits.
  *
  * Blocking delivery: the parent's saved context (context[0] = pid return,
- * context[1] = the still-saved status pointer) is filled by the unified
+ * wait_status_va = the status pointer) is filled by the unified
  * reap_deliver_locked() helper (D5.3) when the child dies -- whether the
  * death is a normal exit or a kill -- exactly like the spawn worker fills
  * context[0].
  */
-static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va);
+static int process_wait_common(struct trap_frame *tf, int want_pid,
+                               int *status, int options, uint64_t rusage_va);
 int process_waitpid(struct trap_frame *tf) {
-  return process_wait_common(tf, 0);
+  return process_wait_common(tf, (int)tf->regs[0], (int *)tf->regs[1],
+                             (int)tf->regs[2], 0);
+}
+
+/* icewm.md fix log: explicit-argument entry for arches whose syscall args
+ * do not sit in the canonical regs[0..3] (x64: rdi/rsi/rdx/r10).  The
+ * caller's trap frame is NOT rewritten, so callee-saved user registers
+ * (x64 rbx = regs[1]) survive both the immediate and the blocking path. */
+int process_wait_args(struct trap_frame *tf, int want_pid, int *status,
+                      int options, uint64_t rusage_va) {
+  return process_wait_common(tf, want_pid, status, options, rusage_va);
 }
 
 /* W2-5 (selfhost): SYS_WAIT4 -- waitpid(2) plus a rusage out-param.
@@ -2896,14 +2948,13 @@ int process_waitpid(struct trap_frame *tf) {
  * ru_maxrss).  Blocking waits store the rusage pointer in
  * caller->wait4_rusage so reap_deliver_locked() fills it cross-context. */
 int process_wait4(struct trap_frame *tf) {
-  return process_wait_common(tf, (uint64_t)tf->regs[3]);
+  return process_wait_common(tf, (int)tf->regs[0], (int *)tf->regs[1],
+                             (int)tf->regs[2], (uint64_t)tf->regs[3]);
 }
 
 /* Shared wait core.  rusage_va != 0 selects wait4 semantics. */
-static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va) {
-  int want_pid = (int)tf->regs[0];
-  int *status = (int *)tf->regs[1];
-  int options = (int)tf->regs[2];
+static int process_wait_common(struct trap_frame *tf, int want_pid,
+                               int *status, int options, uint64_t rusage_va) {
   int want_rusage = rusage_va != 0;
   struct process *caller = current_process();
 
@@ -3034,9 +3085,18 @@ static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va) {
      (x64's scattered register positions never reach this code), and a
      wait4 request parks its rusage pointer in the one-shot
      caller->wait4_rusage field for the delivery to fill. */
+  /* The live frame's return register carries the wanted pid too: schedule()
+     RE-SAVES the context of a WAIT_CHILD (and of a just-woken READY) caller
+     from tf, and on x64 regs[0] is rax = the syscall NUMBER, so the wanted
+     pid that reap_deliver_locked() matches on became 39/90 and a parent
+     that parked before its child exited was never woken (SH hung after
+     `ls`, both desktops).  ARM's x0 already held the pid, which masked it. */
+  tf->regs[0] = (uint64_t)(int64_t)want_pid;
   save_context(caller, tf);
   caller->context[0] = (uint64_t)want_pid;
-  caller->context[1] = (uint64_t)status;
+  /* The status pointer rides its own PCB field, never context[1]: on x64
+     context[1] is the caller's rbx, which must come back unchanged. */
+  caller->wait_status_va = (uint64_t)status;
   if (want_rusage)
     caller->wait4_rusage = rusage_va;
   caller->state = PROC_STATE_WAIT_CHILD;
@@ -3119,11 +3179,27 @@ int process_fork(struct trap_frame *tf) {
   for (int i = 0; i < 128; i++) {
     child->cwd[i] = group->cwd[i];
   }
+  vdisp_inherit(child, group); /* fork keeps the virtual display */
 
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
-
 #ifdef __x86_64__
+  /* GB-071 (family-B bootstrap, #2): fork gives the child the parent's rdi.  If
+     the fork's trap frame was taken in KERNEL mode (cs&3==0) the child starts a
+     USER child holding a kernel-origin rdi — one candidate bootstrap.  Report
+     only the high-band case, one kline write. */
+  if ((tf->cs & 3) == 0 || child->context[5] >= 0x70000000ULL) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[GB071-FORK] childpid=");
+    kl_i(&kl, child->pid);
+    kl_s(&kl, " cs=");
+    kl_i(&kl, (long)(tf->cs & 3));
+    kl_s(&kl, " ctx5=");
+    kl_hex(&kl, child->context[5]);
+    kl_s(&kl, "\n");
+    kl_emit(&kl);
+  }
   /* Frame-carried RSP (see save_context): the child inherits the parent's
      user RSP from THIS trap frame, not from the per-CPU slot. */
   child->context[33] = tf->lr;
@@ -4358,6 +4434,7 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
      double-closing the group's table. */
   for (int i = 0; i < 128; i++)
     t->cwd[i] = grp->cwd[i];
+  vdisp_pcb_init(t); /* threads use the anchor's (process_group) */
   t->heap_brk = grp->heap_brk;
   t->user_phys_base = grp->user_phys_base;
   t->user_l2_table = grp->user_l2_table;

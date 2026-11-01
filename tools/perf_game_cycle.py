@@ -239,7 +239,7 @@ def main():
     serial_log = os.path.join(path, "serial.log")
     qmp_sock = "/tmp/perf-cycle-qmp"
 
-    qemu_make = ["make", "run", f"ARCH={args.arch}",
+    qemu_make = ["make", "run", "DESKTOP=hobby", f"ARCH={args.arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp_sock},server,nowait"]
     print(f"[perf] booting {args.arch} once; cycling games; bundle -> {path}")
     q = boot(qemu_make, serial_log, qmp_sock, args.arch)

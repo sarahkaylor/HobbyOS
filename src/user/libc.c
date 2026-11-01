@@ -461,13 +461,27 @@ void yield(void) {
   ho_syscall4(SYS_YIELD, 0, 0, 0, 0);
 }
 
-int connect(uint32_t ip, uint16_t port, int protocol) {
+int net_connect(uint32_t ip, uint16_t port, int protocol) {
   return (int)errno_ret(ho_syscall4(SYS_CONNECT, (long)ip, (long)port, (long)protocol, 0));
 }
 
 /* Phase F1 (browser.md A.1a — frozen): sockets + select over syscalls
  * 65-71.  Device-only (host builds take glibc's surface, see libc.h). */
 int socket(int domain, int type, int protocol) {
+  /* IceWM M1: SOCK_NONBLOCK/SOCK_CLOEXEC are kernel-native for AF_UNIX;
+   * the frozen AF_INET path takes a bare type, so apply them via fcntl. */
+  if (domain == AF_INET && (type & (0x800 | 0x80000))) {
+    int extra = type & (0x800 | 0x80000);
+    int fd = (int)errno_ret(ho_syscall4(SYS_SOCKET, (long)domain,
+                                        (long)(type & ~extra),
+                                        (long)protocol, 0));
+    if (fd < 0) return fd;
+    if (extra & 0x800) /* SOCK_NONBLOCK -> O_NONBLOCK */
+      ho_syscall4(SYS_FCNTL, (long)fd, (long)F_SETFL, (long)O_NONBLOCK, 0);
+    if (extra & 0x80000) /* SOCK_CLOEXEC -> FD_CLOEXEC (F_SETFD = 2) */
+      ho_syscall4(SYS_FCNTL, (long)fd, 2L, 1L, 0);
+    return fd;
+  }
   return (int)errno_ret(ho_syscall4(SYS_SOCKET, (long)domain, (long)type, (long)protocol, 0));
 }
 
@@ -540,12 +554,12 @@ int getgroups(int size, unsigned int list[]) {
   return 0; /* no supplementary groups */
 }
 
-int getsockopt(int fd, int level, int optname, void *val, int *len) {
+int getsockopt(int fd, int level, int optname, void *val, unsigned int *len) {
   return (int)errno_ret(syscall5(SYS_GETSOCKOPT, (long)fd, (long)level,
                                  (long)optname, (long)val, (long)len));
 }
 
-int setsockopt(int fd, int level, int optname, const void *val, int len) {
+int setsockopt(int fd, int level, int optname, const void *val, unsigned int len) {
   return (int)errno_ret(syscall5(SYS_SETSOCKOPT, (long)fd, (long)level,
                                  (long)optname, (long)val, (long)len));
 }

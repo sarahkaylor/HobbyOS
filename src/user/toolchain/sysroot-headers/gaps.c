@@ -106,12 +106,15 @@ double erf(double x) {
   return sgn * (1.0 - y * exp(-ax * ax));
 }
 
-int bind(int fd, const void *addr, unsigned int addrlen) {
+/* IceWM M1 (icewm.md 4.1): libc.a now has real bind/listen/accept
+ * (libc_socket.o).  These stubs are weak so a link that also pulls that
+ * member takes the real ones instead of failing on duplicate symbols. */
+__attribute__((weak)) int bind(int fd, const void *addr, unsigned int addrlen) {
   (void)fd; (void)addr; (void)addrlen;
   errno = ENOSYS; return -1;
 }
-int listen(int fd, int backlog) { (void)fd; (void)backlog; errno = ENOSYS; return -1; }
-int accept(int fd, void *addr, unsigned int *addrlen) {
+__attribute__((weak)) int listen(int fd, int backlog) { (void)fd; (void)backlog; errno = ENOSYS; return -1; }
+__attribute__((weak)) int accept(int fd, void *addr, unsigned int *addrlen) {
   (void)fd; (void)addr; (void)addrlen;
   errno = ENOSYS; return -1;
 }
