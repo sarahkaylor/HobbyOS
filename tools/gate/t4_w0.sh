@@ -124,6 +124,13 @@ EOF
   printf '[W0] NOENTS linux=hello\n[W0-ARRIVED] NOENTS\nSystem halt\n' >> "$TMP/marker_only.log"
   if W0_OUT_DIR="$TMP/emptydir" bash "${BASH_SOURCE[0]}" --serial "$TMP/marker_only.log" --members NOENTS >/dev/null 2>&1; then echo "  UNEXPECTED PASS — member with an absent .ref did not fail"; FAILS=$((FAILS+1));
   else echo "  OK — member emitting a marker with no .ref FAILED (absent ref is no longer a pass)"; fi
+  echo "[self-test] committed .ref but no marker (must FAIL):"
+  # GB-144: the mirror case.  A member with a committed .ref that emits no
+  # '[W0] <m> linux=' marker used to be skipped entirely (the comparison was
+  # guarded on the marker), so a printf/writev regression would print PASS.
+  printf 't4-wave\n[W0-ARRIVED] W0PIE\nv2 loader: PID=1 abi=0x1 resident=1\nSystem halt\n' > "$TMP/no_marker.log"
+  if W0_OUT_DIR="$TMP/w0out" bash "${BASH_SOURCE[0]}" --serial "$TMP/no_marker.log" --members W0PIE >/dev/null 2>&1; then echo "  UNEXPECTED PASS — committed .ref with no marker did not fail"; FAILS=$((FAILS+1));
+  else echo "  OK — committed .ref + no marker FAILED (a silent member is no longer a pass)"; fi
 
   echo "self-test result: fails=$FAILS"
   [ "$FAILS" = "0" ]; exit $?
@@ -192,6 +199,13 @@ for m in $MEMS; do
     else
       echo "  PASS $m output — guest '$expected' == Linux-leg '$linuxref'"
     fi
+  elif [ -f "$W0_OUT_DIR/$m.ref" ]; then
+    # GB-144: the mirror of the absent-ref case.  A member with a committed
+    # .ref that stops emitting its marker used to be skipped entirely (the
+    # whole comparison was guarded on the marker), so a printf/writev
+    # regression would print PASS and the M1 gate would go green.
+    echo "  FAIL $m — has a committed .ref but emitted no '[W0] $m linux=' marker: its output cannot be compared (GB-144)"
+    fail=1
   fi
 done
 # DoD 3: a wave with no W0 arrival at all must fail, not skip
