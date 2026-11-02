@@ -3676,7 +3676,10 @@ VENDOR_HOST_CXXFLAGS = -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ \
   -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES \
   -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY
 RTTI_TEST = rtti_test_host
-obj/host_rtti_test.o: src/host/rtti_test.cpp
+# GB-157: the TU includes <typeinfo> from the fetched libc++ tree; without this
+# prerequisite a fresh worktree compiles it before any fetch guard can run and
+# dies with "'typeinfo' file not found" (the same guard cxx_t.o carries at :1145).
+obj/host_rtti_test.o: src/host/rtti_test.cpp $(LIBCXX_INCLUDE)/typeinfo
 	@mkdir -p obj
 	$(HOST_CC) -Wall -Wextra -g $(VENDOR_HOST_CXXFLAGS) -c $< -o $@
 obj/host_rtti_private_typeinfo.o: $(LIBCXX_ROOT)/libcxxabi/src/private_typeinfo.cpp $(LIBCXX_VENDOR)/.fetched-ok

@@ -164,7 +164,45 @@ cur = board.claimant_of(1)
 check("claimant_of returns the CURRENT (last) claim, not the first (GB-074-V FAIL)",
       cur == "current-agent")
 
-# ---- D. final report -------------------------------------------------------
+# ---- D. claim is ONLY from Ready (WORK POLICY rule 1, 2026-11-01): Backlog,
+#      In Review and lane-less cards must refuse without touching the board. ---
+def claim_once():
+    try:
+        board.cmd_claim(argparse.Namespace(gid="GB-074", by="HOST", host="mock"))
+        return "WON"
+    except SystemExit as e:
+        return f"LOST: {e}"
+
+
+for lane in ("Backlog", "In Review", "Merge Gate", None):
+    st = make_fake()
+    st["issues"][1]["labels"] = [{"name": lane, "id": 100}] if lane else []
+    res = claim_once()
+    label = lane or "lane-less"
+    check(f"claim refuses a {label} card (only Ready is claimable)",
+          res.startswith("LOST") and (lane or "") in res)
+    check(f"refusal leaves the {label} card where it was",
+          [l["name"] for l in st["issues"][1]["labels"]] == ([lane] if lane else []))
+    check(f"refusal posts no claim comment on the {label} card",
+          st["comments"].get(1, []) == [])
+    if lane in ("In Review", "Merge Gate"):
+        # Rule 2: a PR-bearing card must stay put.  The refusal must not print a
+        # command that would move it back to Ready (GB-156).
+        check(f"{label} refusal does not advise promoting to Ready",
+              "move GB-074 Ready" not in res)
+        check(f"{label} refusal explains the gate, not promotion",
+              ("verifier" if lane == "In Review" else "merge") in res.lower())
+    else:
+        check(f"{label} refusal still carries the promotion command",
+              "move GB-074 Ready" in res)
+
+# The guard must not remove the working path: Ready still claims.
+st = make_fake()
+res = claim_once()
+check("claim still claims a Ready card", res == "WON")
+check("Ready claim posts exactly one comment", len(st["comments"].get(1, [])) == 1)
+
+# ---- E. final report -------------------------------------------------------
 print()
 if fails:
     print(f"CLAIM_RACE_TEST: FAIL — {len(fails)}")
