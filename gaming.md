@@ -145,7 +145,7 @@ HobbyOS (QEMU: -M virt aarch64 / -M q35 x86_64)
 - `-mgeneral-regs-only` kernel rule, no unaligned access, byte-wise parsing, Normal-NC DMA — the
   existing kernel constraints continue to apply to all new code.
 - **Two-arch parity:** every native change must stay green on ARM **and** intel
-  (`make host_tests`, `./run_unit_tests.sh`, `./run_unit_tests_intel.sh`, `make test`,
+  (`make host_tests`, `ARCH=arm ./run_unit_tests.sh`, `./run_unit_tests_intel.sh`, `make test`,
   `make test_intel`). The ELF-compat work lives behind existing arch guards and adds its own
   intel-only test tier (differential).
 - **Tests are part of every ticket** (see §6) and every DoD names its test.
@@ -412,7 +412,7 @@ Reuse the proven discipline; add the two new tiers for the compat track:
 | Tier | What | How | Catches |
 |---|---|---|---|
 | T1 Host golden | pure userland logic on macOS, seconds | `make host_tests` (+ new per-game/function tests) | logic, refactor regressions |
-| T2 Kernel unit | in-EL1, pre-scheduler | `./run_unit_tests.sh`, `./run_unit_tests_intel.sh` | kernel subsystems |
+| T2 Kernel unit | in-EL1, pre-scheduler | `ARCH=arm ./run_unit_tests.sh`, `./run_unit_tests_intel.sh` | kernel subsystems |
 | T3 Integration | userland syscalls/SMP/IPC under booted kernel | `make test`, `make test_intel`; parallel `tools/run_parallel.sh`/`run_waves.sh` | ABI, scheduling, drivers |
 | **T4 Differential (new)** | same static-musl binary on the Linux build VM **and** on HobbyOS-intel; compare stdout/exit/errno | `run_differential.sh` (harness from GB-007/GB-015) | syscall/errno/struct-layout parity — the compat layer's core risk |
 | **T5 Playthrough (new)** | scripted QMP input + screendump assertions per game, long-duration cycles | extends `run_desktop_test.py` / `test_input.py` patterns | "launches and plays" at the acceptance level |
