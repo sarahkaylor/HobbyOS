@@ -24,6 +24,7 @@ typedef enum {
   FILE_TYPE_MEMFD,    /**< P2.4 (S4): memory file backed by a vm_object */
   FILE_TYPE_DEVNULL,  /**< GB-017: /dev/null — write-sink, EOF-on-read */
   FILE_TYPE_DEVURANDO,/**< GB-017: /dev/urandom — entropy file (F1.4 pool) */
+  FILE_TYPE_DEVINPUT, /**< GB-171: /dev/input/event0 — evdev key records */
   /* SEC-6: freshly allocated slot whose real type the caller has not set
      yet.  Distinct from FILE_TYPE_EMPTY (= free): an abandoned UNINIT slot
      must never be mistaken for a usable FAT16 file with garbage fields.
