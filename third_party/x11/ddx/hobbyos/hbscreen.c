@@ -205,12 +205,6 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
     int srcStride = pix->devKind;
     struct hb_fb_rect32 rects[HB_FLUSH_MAX_RECTS];
     int n = 0, i;
-    static WindowPtr lastFirst;
-
-    if (hbScreen.depth == 8 && pScreen->root &&
-        pScreen->root->firstChild != lastFirst) {
-        lastFirst = pScreen->root->firstChild;
-    }
 
     if (!hbScreen.fb || nbox <= 0)
         return;
@@ -314,18 +308,14 @@ hbInstallWindowColormap(WindowPtr pWin)
     ColormapPtr cmap = NULL;
     Colormap mid;
     ScreenPtr pScreen = pWin->drawable.pScreen;
-    int rc;
 
-    if (hbScreen.depth != 8)
-        return;
-    if (!pWin->optional)
+    if (hbScreen.depth != 8 || !pWin->optional)
         return;
     mid = pWin->optional->colormap;
     if (mid == None || mid == pScreen->defColormap)
         return;
-    rc = dixLookupResourceByType((void **) &cmap, mid, RT_COLORMAP,
-                                 serverClient, DixUseAccess);
-    if (rc != Success || !cmap)
+    if (dixLookupResourceByType((void **) &cmap, mid, RT_COLORMAP,
+                                serverClient, DixUseAccess) != Success || !cmap)
         return;
     if (cmap != GetInstalledmiColormap(pScreen))
         (*pScreen->InstallColormap) (cmap);
