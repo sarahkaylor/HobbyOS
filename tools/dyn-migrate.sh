@@ -35,7 +35,11 @@ bases=()
 case "${1:-}" in
 --list)
   f=${2:?--list needs a file}
-  while read -r b; do [ -n "$b" ] && bases+=("$b"); done <"$f" ;;
+  while IFS= read -r b; do
+    b=${b%%#*}                      # drop trailing comments
+    b=$(printf '%s' "$b" | tr -d ' \t\r')
+    [ -n "$b" ] && bases+=("$b")
+  done <"$f" ;;
 --all-simple)
   # The Makefile's rule shape "one own .o + libc" is the convertible core.
   python3 - "$OUT" <<'PY' > /tmp/dyn_bases.$$
@@ -70,48 +74,54 @@ if [ ! -f "$CRT0_DYN" ]; then
 fi
 
 ok=(); bad=()
-for base in "${bases[@]}"; do
-  src=""
-  for cand in "src/user/$base.c" "src/user/$base.cpp"; do
-    [ -f "$cand" ] && src=$cand && break
+for entry in "${bases[@]}"; do
+  # "name=base1,base2" builds NAME.BIN from several TUs; a bare "base" is the
+  # one-TU case.  Output name and list file names stay 8.3-friendly.
+  name=${entry%%=*}
+  if [ "$name" = "$entry" ]; then list=$entry; else list=${entry#*=}; fi
+  IFS=',' read -r -a tus <<<"$list"
+  objs=(); cpp=0; missing=0
+  for base in "${tus[@]}"; do
+    src=""
+    for cand in "src/user/$base.c" "src/user/$base.cpp"; do
+      [ -f "$cand" ] && src=$cand && break
+    done
+    if [ -z "$src" ]; then
+      src=$(find src -name "$base.c" -o -name "$base.cpp" 2>/dev/null | head -1)
+    fi
+    if [ -z "$src" ]; then echo "FAIL $name: no source for $base"; missing=1; break; fi
+    case "$src" in *.cpp) cpp=1; break ;; esac
+    obj="$OUT/dyn/$base.o"
+    if ! clang "${CFLAGS[@]}" -c "$src" -o "$obj" 2>/tmp/dyn_cc.$$; then
+      echo "FAIL $name: compile $src"; grep -m1 "error:" /tmp/dyn_cc.$$ | sed 's/^/       /'
+      missing=1; rm -f /tmp/dyn_cc.$$; break
+    fi
+    rm -f /tmp/dyn_cc.$$
+    objs+=("$obj")
   done
-  if [ -z "$src" ]; then
-    # Fall back to a search, so names that live in subdirectories still work.
-    src=$(find src -name "$base.c" -o -name "$base.cpp" 2>/dev/null | head -1)
-  fi
-  if [ -z "$src" ]; then
-    echo "FAIL $base: no source file"; bad+=("$base"); continue
-  fi
-  case "$src" in
-  *.cpp)
-    echo "SKIP $base: C++ (needs a PIC libcxx.a first)"; bad+=("$base"); continue ;;
-  esac
-  obj="$OUT/dyn/$base.o"
-  if ! clang "${CFLAGS[@]}" -c "$src" -o "$obj" 2>/tmp/dyn_cc.$$; then
-    echo "FAIL $base: compile"; grep -m1 "error:" /tmp/dyn_cc.$$ | sed 's/^/       /'
-    bad+=("$base"); rm -f /tmp/dyn_cc.$$; continue
-  fi
-  rm -f /tmp/dyn_cc.$$
+  if [ $cpp -eq 1 ]; then echo "SKIP $name: C++ (needs a PIC libcxx.a first)"; bad+=("$name"); continue; fi
+  if [ $missing -eq 1 ]; then bad+=("$name"); continue; fi
+  base=$name
   bin="$OUT/DYN/$base.BIN"
   # A TU without _start is a main()-style program: it needs crt0_dyn, or lld
   # emits "cannot find entry symbol _start" and an image whose e_entry is 0
   # (the kernel then refuses it with "e_entry outside every executable
   # segment" — measured on wc/cut/head/tail/touch).
   extra=()
-  if ! nm "$obj" 2>/dev/null | grep -qE '[0-9a-f]+ T _start$'; then
+  if ! nm "${objs[@]}" 2>/dev/null | grep -qE '[0-9a-f]+ T _start$'; then
     extra=("$CRT0_DYN")
   fi
   if ! ld.lld -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
-        -o "$bin" "${extra[@]}" "$obj" "$OUT/libc.so" 2>/tmp/dyn_ld.$$; then
-    echo "FAIL $base: link"; grep -m1 "error:" /tmp/dyn_ld.$$ | sed 's/^/       /'
-    bad+=("$base"); rm -f /tmp/dyn_ld.$$; continue
+        -o "$bin" "${extra[@]}" "${objs[@]}" "$OUT/libc.so" 2>/tmp/dyn_ld.$$; then
+    echo "FAIL $name: link"; grep -m1 "error:" /tmp/dyn_ld.$$ | sed 's/^/       /'
+    bad+=("$name"); rm -f /tmp/dyn_ld.$$; continue
   fi
   rm -f /tmp/dyn_ld.$$
   # A zero entry means the link silently lost its entry symbol.
   if readelf -h "$bin" | grep -q 'Entry point address: *0x0$'; then
-    echo "FAIL $base: linked with e_entry = 0"; bad+=("$base"); continue
+    echo "FAIL $name: linked with e_entry = 0"; bad+=("$base"); continue
   fi
-  ok+=("$base")
+  ok+=("$name")
 done
 
 # Regenerate the boot list for KERNEL_MODE_DYN_TEST (successes only).

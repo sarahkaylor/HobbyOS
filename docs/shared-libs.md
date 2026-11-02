@@ -372,21 +372,42 @@ no relocation at all.
 
 ### 10.2 What is convertible today
 
-Of 109 link rules, 77 are "one TU + libc"; 62 of those become `ET_DYN`
-unchanged (12 were naming artefacts of the survey, 3 are C++). The rest of
-userland is blocked on real work, not on ELF:
+The list of converted programs lives in `tools/dyn-programs.txt`; 43 of them
+are green on both arches. An entry is a bare object base (`cat`) or
+`name=base1,base2` when the program has more than one TU (`sh=sh,sh_aux`).
 
-- **Multi-TU glibc ports** (`grep`, `sed`, `tar`, `tr`, `nl`, `comm`, `tsort`,
-  `md5sum`, …) link many objects with per-program include trees; each needs
-  its object list taught to the PIC rule before it can be converted.
+Survey the real link line, not the rule text:
+
+```
+make -n ARCH=intel -s obj/intel/<bin> | grep 'ld.lld.*-o obj/intel/<bin>.elf'
+```
+
+Reading the Makefile's `$(X_BIN):` rules undercounts badly, because most
+utilities are built through variable lists (`$(TR_OBJS)`) or a shared rule —
+`tr` is a single TU called `tr_gnu`, and looks multi-TU from the rule text.
+By real link line, 61 programs are one own object; 43 of those are converted.
+
+Still blocked, and why:
+
+- **`selfhost`** converts and links but faults immediately with `PC=0` (a
+  call through a NULL symbol) and takes `/TOOLS/SH.BIN` down with it. It stays
+  static until that is understood; the smoke is what caught it.
+- **Multi-TU programs** (`grep`, `sed`, `make`, most of the 4–47-object
+  group) link many objects with per-program include trees; the PIC compile
+  must reproduce each object's own flags, which `dyn-migrate.sh` does not yet
+  replay.
 - **C++ programs** (`cxx_smoke`, `cxx_t`, `rtti_t`) link `libcxx.a`, which is
-  not built `-fPIC`; that archive needs a PIC flavour first.
+  not built `-fPIC`; the archive needs a PIC flavour first.
 - **X11 and full-screen programs** (`console`, `xsession`, `nano`, `pong`,
-  `doom`) are worth converting last: they are the hardest to smoke-test
-  headlessly.
+  `doom`) are worth converting last: hardest to smoke-test headlessly.
 
-### 10.3 Sizes (intel, this batch)
+### 10.3 Numbers (intel)
 
-`ls` 7056 vs 46080 static, `cat` 7536 vs 56744, `wc` 20400 vs ~46 K. The
+`ls` 7056 vs 46080 static, `cat` 7536 vs 56744, `sh` 219768 vs ~1 MB. The
 saving is what you would expect for small utilities; the real prize stays the
 large role blobs and future `dlopen`.
+
+With 43 dynamic processes created in one boot on a 1.25 GiB process pool
+(40 blocks of 32 MiB), every one still loaded: they exit fast enough that the
+loader's placement loop never runs dry. That is a property of this smoke, not
+a guarantee for 43 long-lived processes.
