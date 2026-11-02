@@ -25,8 +25,12 @@ for rp in replays:
         n = p.validate()
         ev = list(p)
         has_click = any(e["t"] == "click" for e in ev)
+        # GB-116: F1 opens the Apps menu on both arches; a click cannot land on
+        # intel (no pointer device), so a replay that opens the menu with `f1`
+        # is as valid a nav as one that clicks.
+        has_f1 = any(e["t"] == "key" and e["k"] == "f1" for e in ev)
         has_launch = any(e["t"] == "key" and e["k"] == "ret" for e in ev)
-        check(n >= 20 and has_click and has_launch,
+        check(n >= 20 and (has_click or has_f1) and has_launch,
               os.path.basename(rp) + f" parses ({n} events), navigates + launches")
     except Exception as ex:
         check(False, os.path.basename(rp) + f" FAILED: {ex}")
