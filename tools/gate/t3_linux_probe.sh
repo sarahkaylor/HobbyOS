@@ -32,11 +32,15 @@ fi
 
 CFG="$(mktemp)"
 printf 'PROBE.ELF\n' > "$CFG"
+# TOOLS_SKIP=1: a fresh worktree has no self-host LLVM dist-staging, and the
+# disk target would otherwise try to BUILD llvm from source ("cold = hours").
+# Nothing in a compat probe needs /TOOLS.
+TOOLS_SKIP="${TOOLS_SKIP:-1}"
 # Stage AFTER the tier's disk build (t3_tier regenerates disk.img first; a file
 # copied onto it beforehand is wiped -- the measured "probe tested nothing" mode).
 STAGE="mcopy -o -i \$ROOT/disk.img $ELF ::PROBE.ELF && mcopy -o -i \$ROOT/disk.img $CFG ::WAVE.CFG"
 echo "=== t3_linux_probe: $NAME (deadline ${TIMEOUT_S}s, log $OUT) ==="
-T3_TIMEOUT="$TIMEOUT_S" T3_STAGE="$STAGE" T3_MIN_LINES=1 \
+T3_TIMEOUT="$TIMEOUT_S" T3_STAGE="$STAGE" T3_MIN_LINES=1 TOOLS_SKIP="$TOOLS_SKIP" \
   bash "$ROOT/tools/t3_tier.sh" intel > "$OUT" 2>&1
 RC=$?
 CONSOLE="$(sed -n 's/^T3_LOG=//p' "$OUT" | tail -1)"
