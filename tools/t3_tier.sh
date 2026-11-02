@@ -102,6 +102,19 @@ kernel_fatal_count() {
   grep -acE "FATAL kernel-m|Exception in Kernel Mode" "$1" || true
 }
 
+# GB-082: the tier must REPORT the console-atomicity score it is graded on.
+# t4_glued.sh is the instrument (2+ record tags on one line); until this
+# wiring it was called by nothing but its own self-test, so "0 glued lines"
+# was a number quoted by hand from a run that may never have taken a fault.
+# Returns the count, or -1 when the instrument cannot measure the log — a
+# missing/unreadable log is NOT a clean log.
+glued_count() {
+  local out n
+  out=$(bash "$ROOT/tools/gate/t4_glued.sh" "$1" 2>/dev/null) || true
+  n=$(printf '%s\n' "$out" | sed -n 's/^t4_glued: \([0-9][0-9]*\) glued.*/\1/p' | tail -1)
+  if [ -n "$n" ]; then echo "$n"; else echo -1; fi
+}
+
 if [ -n "$POLICE_ONLY" ]; then
   LOG="$POLICE_ONLY"
   # GB-103 DoD clause 3, forced deterministically: T3_FORCE_INSTRUMENT_FAIL=1 on a
@@ -127,6 +140,7 @@ if [ -n "$POLICE_ONLY" ]; then
   if [ "${T3_SKIP_HALT_CHECK:-0}" = "1" ]; then halted=1; fi
   FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
   KFAULT=$(kernel_fatal_count "$LOG")
+  GLUED=$(glued_count "$LOG")
   MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
   MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG" 2>/dev/null \
     | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
@@ -141,7 +155,7 @@ if [ -n "$POLICE_ONLY" ]; then
   # "Controller reset complete!" is the virtio-blk init of a single boot; more
   # than two means the guest restarted.
   BOOTS=$(grep -ac "Controller reset complete" "$LOG" || true)
-  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} fault records across ${MEMFAULT_PROCS} processes, halted=${halted}, kfault=${KFAULT}, boots=${BOOTS}"
+  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} fault records across ${MEMFAULT_PROCS} processes, halted=${halted}, kfault=${KFAULT}, glued=${GLUED}, boots=${BOOTS}"
   rc=0
   if [ "${BOOTS:-0}" -gt 2 ]; then
     echo "T3_${ARCH}: FAIL — the guest BOOTED ${BOOTS} times: it is resetting mid-run (a triple fault has no handler, so the console cannot show it; capture it with T3_QEMU_ARGS=\"-d int,cpu_reset -D /tmp/q.log\")"
@@ -149,6 +163,14 @@ if [ -n "$POLICE_ONLY" ]; then
   fi
   [ "$halted" = "1" ] || { echo "T3_${ARCH}: FAIL — no halt line"; rc=1; }
   [ "$KFAULT" = "0" ] || { echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed"; rc=1; }
+  if [ "$GLUED" != "0" ]; then
+    if [ "$GLUED" = "-1" ]; then
+      echo "T3_${ARCH}: FAIL — t4_glued.sh could not measure this log (missing/unreadable): a missing serial is not a clean serial"
+    else
+      echo "T3_${ARCH}: FAIL — ${GLUED} glued console line(s) (t4_glued.sh): a line carrying two records cannot be attributed"
+    fi
+    rc=1
+  fi
   [ "$LINES" -ge "${T3_MIN_LINES:-1000}" ] || { echo "T3_${ARCH}: FAIL — only ${LINES} console lines (floor ${T3_MIN_LINES:-1000}): too little work for a complete wave"; rc=1; }
   if [ "$FAIL_LINES" != "0" ]; then
     echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 5:"
@@ -449,7 +471,8 @@ MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG"
   | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
 PROGS_EXITED=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
   | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ' || true)
-echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory fault records across ${MEMFAULT_PROCS} processes, ${PROGS_EXITED} programs exited, halted=${halted}"
+GLUED=$(glued_count "$LOG")
+echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory fault records across ${MEMFAULT_PROCS} processes, ${PROGS_EXITED} programs exited, glued=${GLUED}, halted=${halted}"
 
 # GB-068 regression guard: the intel wave carries a documented, long-standing
 # baseline of user-mode fatal faults (in=PROT) from legacy v1 flat binaries
@@ -517,6 +540,17 @@ EXITED_PROGS=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev
 MIN_LINES="${T3_MIN_LINES:-300}"
 if [ "$KFAULT" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed"; rc=1
+fi
+# GB-082: a serial carrying two records on one line cannot attribute a FAIL to
+# the tag in front of it, so a wave with glued lines is not a pass.  The count
+# is reported on the summary line above; -1 means the instrument could not
+# measure the log (missing/unreadable), which is also not a pass.
+if [ "$GLUED" != "0" ]; then
+  if [ "$GLUED" = "-1" ]; then
+    echo "T3_${ARCH}: FAIL — t4_glued.sh could not measure this log (missing/unreadable): a missing serial is not a clean serial"; rc=1
+  else
+    echo "T3_${ARCH}: FAIL — ${GLUED} glued console line(s) (t4_glued.sh): a line carrying two records cannot be attributed"; rc=1
+  fi
 fi
 if [ "$halted" = "1" ] && [ "$EXITED_PROGS" -lt "$MIN_PROGRAMS" ]; then
   echo "T3_${ARCH}: FAIL — only ${EXITED_PROGS} programs exited (floor ${MIN_PROGRAMS}): too little work for a complete wave, so this cannot be a pass"; rc=1
