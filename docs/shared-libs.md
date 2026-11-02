@@ -291,3 +291,40 @@ Two entry-point shapes, and the difference matters:
 Measured: `ls` drops from 46 KB static to **7 KB** dynamic. A program using a
 symbol that `libc.map` does not export fails at *link* time with the symbol
 named — that is the export set doing its job, not a loader bug.
+
+## 9. Sharing evidence, and the cache-init race
+
+`MODE=so_test` boots three dynamically linked programs (`HDYN.BIN`, `LSDYN.BIN`
+= `ls`, `CATDYN.BIN` = `cat E2E.TXT`) at the default 8 CPUs. Each boot prints
+exactly one sharing line, which is the proof that the library text exists once
+in RAM rather than per process (cluster/size are the file's FAT16 identity, so
+they differ per arch and per image build):
+
+```
+so cache: file (cluster=23366 size=350848) now shared by refs=6   # x86_64
+```
+
+`refs` counts the cache's own reference plus one per mapping; the same line
+names `LIBC.SO` by its on-disk identity, so a reader can tie it to the file.
+
+**The bug behind it.** With three mappers this boot crashed about one time in
+three: a process died at `VA=LIBC.SO+0x40`, `rw=r`, `in=PROT`, `kind=7`, with
+the last PC inside the interpreter. The cause was not the mapping but the
+cache's lazy lock initialiser:
+
+```c
+if (!file_obj_ready) { spinlock_init(&file_obj_lock); file_obj_ready = 1; }
+```
+
+Three CPUs reaching the first DSO mmap together can both run that body, and
+the second `spinlock_init()` **resets a lock the first CPU already holds**.
+Both then enter the critical section, both see an empty table, both take the
+same free slot, and the second insert overwrites the first. The orphaned
+object still serves the live mapping (`refs=3`, `used=1`) but is no longer
+findable by `(cluster, size)`, so its unfaulted pages can never be filled —
+the fill path returns `-EIO` and the fault is reported as `PROT`.
+
+The initialiser is now a CAS: one winner initialises, losers spin on a release
+store. `vm_lock_init_once()` had the identical shape and was fixed with it
+(unreachable today only because the boot core happens to win that race first).
+Measured: 3 crashes in 8 boots before, 0 in 15 after.
