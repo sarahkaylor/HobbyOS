@@ -243,6 +243,13 @@ static void sys_write_console(struct trap_frame *tf) {
  * output-comparing suites ("status) got 2, want 0" everywhere) — GB-057.
  * Remap exactly the way sys_waitpid/sys_fork do. */
 static void sys_exit(struct trap_frame *tf) {
+  struct process *cur = current_process();
+  /* GB-021: a musl pthread exits with exit(60), not SYS_THREAD_EXIT(74).
+     A clone(2) child must leave only its thread; the group stays alive. */
+  if (cur && cur->is_thread) {
+    process_thread_exit(tf, tf->regs[5]);
+    return;
+  }
   tf->regs[0] = tf->regs[5]; /* rdi = the exit code */
   process_exit(tf);
 }
@@ -806,6 +813,44 @@ static void sys_thread_exit(struct trap_frame *tf) {
 static void sys_set_tls(struct trap_frame *tf) {
   struct process *caller = current_process();
   tf->regs[0] = (uint64_t)(int64_t)process_set_tls(caller, tf->regs[5]);
+}
+
+/* --- GB-021: Linux clone(56) / futex(202) for a static-PIE musl binary.
+ * The x64 syscall register map is rdi=r5, rsi=r4, rdx=r3, r10=r9, r8=r7,
+ * r9=r8.  musl's pthread_create calls clone directly; it needs the caller's
+ * frame copied (process_clone), not the native entry(arg) thread ABI. ---- */
+static void compat_clone(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  tf->regs[0] = (uint64_t)(int64_t)process_clone(
+      caller, tf, tf->regs[5], tf->regs[4], tf->regs[3], tf->regs[9],
+      tf->regs[7]);
+}
+
+/* Linux futex ops carry FUTEX_PRIVATE_FLAG (0x80) / FUTEX_CLOCK_REALTIME
+ * (0x100) in the op word, and the timeout is a struct timespec*; the kernel
+ * futex takes a bare op and milliseconds.  WAIT/WAKE (0/1) is the surface
+ * musl's pthread mutex/join/condvar uses. */
+static void compat_futex(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int op = (int)tf->regs[4] & ~(0x80 | 0x100);
+  int64_t timeout_ms = -1;
+  if (op == 0 && tf->regs[9]) {
+    long ts[2];
+    if (sys_user_range(tf->regs[9], sizeof ts, 0) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+      return;
+    }
+    ts[0] = ((volatile long *)tf->regs[9])[0];
+    ts[1] = ((volatile long *)tf->regs[9])[1];
+    if (ts[0] < 0 || ts[1] < 0 || ts[1] >= 1000000000L) {
+      tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+      return;
+    }
+    timeout_ms = ts[0] * 1000 + ts[1] / 1000000;
+    if (timeout_ms == 0 && (ts[0] || ts[1])) timeout_ms = 1;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)process_futex(
+      caller, tf, tf->regs[5], op, (int)tf->regs[3], timeout_ms);
 }
 
 /* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX (96-102).  Thin
@@ -2319,6 +2364,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
+        /* GB-021: musl pthread_create -> clone(2); pthread mutex/join ->
+           futex(2).  Both are Linux-shaped and handled directly (the clone
+           child must resume from the caller's frame, which no existing
+           kernel syscall number expresses). */
+        case 56:  compat_clone(tf); return;  /* clone(flags,stack,ptid,ctid,tls) */
+        case 202: compat_futex(tf); return;  /* futex(uaddr,op,val,ts*) */
         /* GB-141 (V evidence): musl's _Exit calls exit_group(231), not exit(60)
            when the program has a thread/group — the compat table had NO 231, so it
            fell to the default -ENOSYS and the probe "died inside _Exit" (GB-113

@@ -1084,6 +1084,7 @@ static int process_create_internal_ver(int ver) {
   p->live_threads = 1;
   p->tls_base = 0;
   p->futex_uaddr = 0;
+  p->clear_child_tid = 0;
   p->thread_ret = 0;
   p->as = 0;
   p->fd_cloexec = 0;
@@ -4340,35 +4341,12 @@ void process_fault_exit(struct trap_frame *tf, int signo) {
  * user_l2_table), so there is no physical block, no image copy, no zeroing.
  * No per-thread kernel stack either: user threads trap onto the per-CPU
  * kernel stacks (design section 1). */
-int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
-                          uint64_t stack, uint64_t flags) {
-  if (!caller || caller->is_kernel_process)
-    return -EINVAL;
-  if (flags != 0)
-    return -EINVAL;
-  /* entry and [stack-16, stack) inside the caller's own window; stack
-     16-aligned (both ABIs enter with a 16-aligned SP).  S4: a v2 caller
-     validates against its AS -- entry mapped readable, stack top mapped
-     writable (the mmap+guard stack from libpthread). */
-  if (caller->as) {
-    if (stack < USER_VA_BASE + 16 || stack > USER_VA_TOP)
-      return -EINVAL;
-    if (stack & 15)
-      return -EINVAL;
-    if (vm_touch(caller, entry, 1, 0) != 0)
-      return -EINVAL;
-    if (vm_touch(caller, stack - 16, 16, 1) != 0)
-      return -EINVAL;
-  } else {
-    if (entry < USER_VIRT_BASE || entry >= USER_VIRT_BASE + USER_REGION_SIZE)
-      return -EINVAL;
-    if (stack < USER_VIRT_BASE + 16 ||
-        stack > USER_VIRT_BASE + USER_REGION_SIZE)
-      return -EINVAL;
-    if (stack & 15)
-      return -EINVAL;
-  }
-
+/* GB-021: share the slot/PCB setup between the native thread entry path
+ * (entry(arg) on a fresh frame) and the Linux clone(2) bridge (a copy of the
+ * caller's frame).  Splitting it here keeps ONE place that knows which PCB
+ * fields are group-shared and which must be reset per thread; the previous
+ * three-copy pattern is exactly the drift GB-152 fixed for struct cpu_local. */
+static struct process *thread_alloc_common(struct process *caller, int *err) {
   struct process *grp = process_group(caller);
 
   uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
@@ -4379,7 +4357,8 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
       grp->state == PROC_STATE_EXITED ||
       grp->state == PROC_STATE_THREAD_DONE) {
     spinlock_release_irqrestore(&proc_lock, p_flags);
-    return -EINVAL;
+    *err = -EINVAL;
+    return 0;
   }
   int pid = thread_alloc_slot_locked();
   if (pid < 0) {
@@ -4406,8 +4385,8 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
       print_int(caller->pid);
       uart_puts("\n");
     }
-    spinlock_release_irqrestore(&proc_lock, p_flags);
-    return -EAGAIN;
+    *err = -EAGAIN;
+    return 0;
   }
   struct process *t = &proc_table[pid];
   t->state = PROC_STATE_ALLOCATED;
@@ -4445,6 +4424,7 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
     t->open_fds[i] = -1;
   t->wake_ms = 0;
   t->futex_uaddr = 0;
+  t->clear_child_tid = 0;
   t->spawn_retval = -1;
   t->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
@@ -4477,6 +4457,44 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
      fault either way. */
   t->tls_base = tls_read_live();
 
+  *err = 0;
+  return t;
+}
+
+int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
+                          uint64_t stack, uint64_t flags) {
+  if (!caller || caller->is_kernel_process)
+    return -EINVAL;
+  if (flags != 0)
+    return -EINVAL;
+  /* entry and [stack-16, stack) inside the caller's own window; stack
+     16-aligned (both ABIs enter with a 16-aligned SP).  S4: a v2 caller
+     validates against its AS -- entry mapped readable, stack top mapped
+     writable (the mmap+guard stack from libpthread). */
+  if (caller->as) {
+    if (stack < USER_VA_BASE + 16 || stack > USER_VA_TOP)
+      return -EINVAL;
+    if (stack & 15)
+      return -EINVAL;
+    if (vm_touch(caller, entry, 1, 0) != 0)
+      return -EINVAL;
+    if (vm_touch(caller, stack - 16, 16, 1) != 0)
+      return -EINVAL;
+  } else {
+    if (entry < USER_VIRT_BASE || entry >= USER_VIRT_BASE + USER_REGION_SIZE)
+      return -EINVAL;
+    if (stack < USER_VIRT_BASE + 16 ||
+        stack > USER_VIRT_BASE + USER_REGION_SIZE)
+      return -EINVAL;
+    if (stack & 15)
+      return -EINVAL;
+  }
+
+  int err = 0;
+  struct process *t = thread_alloc_common(caller, &err);
+  if (!t) return err;
+  int pid = t->pid;
+
   /* Fresh user context: entry(arg) on this thread's stack. */
   t->context[31] = entry;
 #ifdef __x86_64__
@@ -4492,6 +4510,75 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
 
   return pid;
 }
+
+#ifdef __x86_64__
+/* SYS_CLONE (Linux 56): musl's pthread_create reaches THIS, not
+ * SYS_THREAD_CREATE(72).  Linux clone returns 0 in the child at the
+ * instruction after `syscall`, with the caller's registers, on child_stack,
+ * and TLS from r9 -- not entry(arg) on a zeroed frame.  Copy the trap frame,
+ * set rax=0/rsp=child_stack, and let the normal user resume path run. */
+int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
+                  uint64_t stack, uint64_t ptid, uint64_t ctid, uint64_t tls) {
+  if (!caller || caller->is_kernel_process)
+    return -EINVAL;
+  /* Accept exactly the set musl passes; reject namespaces / a new AS / a new
+     fd table rather than pretending to support them. */
+  const uint64_t allowed =
+      CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD |
+      CLONE_SYSVSEM | CLONE_SETTLS | CLONE_PARENT_SETTID |
+      CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | CLONE_DETACHED;
+  if ((flags & ~allowed) ||
+      (flags & (CLONE_VM | CLONE_THREAD)) != (CLONE_VM | CLONE_THREAD))
+    return -EINVAL;
+  if (!stack || (stack & 15))
+    return -EINVAL;
+  if (caller->as) {
+    if (stack < USER_VA_BASE || stack > USER_VA_TOP)
+      return -EINVAL;
+    if (vm_touch(caller, stack - 16, 16, 1) != 0)
+      return -EINVAL;
+  } else {
+    if (stack < USER_VIRT_BASE + 16 ||
+        stack > USER_VIRT_BASE + USER_REGION_SIZE)
+      return -EINVAL;
+  }
+  if ((flags & CLONE_PARENT_SETTID) && ptid) {
+    if (caller->as ? (vm_touch(caller, ptid, 4, 1) != 0)
+                   : (ptid < USER_VIRT_BASE ||
+                      ptid + 4 > USER_VIRT_BASE + USER_REGION_SIZE))
+      return -EFAULT;
+  }
+  if ((flags & (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID)) && ctid) {
+    if (caller->as ? (vm_touch(caller, ctid, 4, 1) != 0)
+                   : (ctid < USER_VIRT_BASE ||
+                      ctid + 4 > USER_VIRT_BASE + USER_REGION_SIZE))
+      return -EFAULT;
+  }
+
+  int err = 0;
+  struct process *t = thread_alloc_common(caller, &err);
+  if (!t) return err;
+
+  /* The child's whole register file is the caller's, except the two values
+     Linux clone defines: rax = 0 and rsp = child_stack.  save_context copies
+     regs[0..29], rip (elr), rflags (spsr) and the user rsp; override the two. */
+  save_context(t, tf);
+  t->context[0] = 0;
+  t->context[33] = stack;
+#ifdef __x86_64__
+  t->context[34] = 0; /* classify user -> user selectors on resume */
+  t->context[35] = 0;
+#endif
+  t->tls_base = (flags & CLONE_SETTLS) ? tls : tls_read_live();
+  t->clear_child_tid = (flags & CLONE_CHILD_CLEARTID) ? ctid : 0;
+  if ((flags & CLONE_PARENT_SETTID) && ptid)
+    *(volatile uint32_t *)ptid = (uint32_t)t->pid;
+  if ((flags & CLONE_CHILD_SETTID) && ctid)
+    *(volatile uint32_t *)ctid = (uint32_t)t->pid;
+  t->state = PROC_STATE_READY;
+  return t->pid;
+}
+#endif
 
 /* SYS_SET_TLS (75) (design sections 2/4): validate `tls` inside the caller's
  * region, store it in the calling PCB AND the live register (a save before
@@ -4527,6 +4614,17 @@ void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
   }
   struct process *grp = process_group(cur);
   cur->thread_ret = retval;
+
+  /* GB-021 (Linux CLONE_CHILD_CLEARTID): a thread's last act is to zero its
+     TCB tid word and wake a joiner parked on it.  Do it before the last-thread
+     teardown can release the address space the word lives in. */
+  if (cur->clear_child_tid) {
+    uint64_t at = cur->clear_child_tid;
+    cur->clear_child_tid = 0;
+    if (vm_touch(cur, at, 4, 1) == 0)
+      *(volatile uint32_t *)at = 0;
+    process_futex(cur, tf, at, 1, 1, -1);
+  }
   cur->exit_status = ((int)retval & 0xff) << 8;
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
