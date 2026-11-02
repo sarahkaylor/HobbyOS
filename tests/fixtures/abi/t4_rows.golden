@@ -51,3 +51,17 @@ dent_have_beta
 dent_have_charlie
 procfd_opendir
 procfd_read
+# GB-021: threads under the Linux ABI (musl pthread_create -> clone(56),
+# join -> futex(202)/CLONE_CHILD_CLEARTID, per-thread TLS+errno).
+tls_create_a
+tls_create_b
+tls_join_a
+tls_join_b
+tls_thread_a_seed
+tls_thread_b_seed
+tls_main_errno_untouched
+thread_create
+thread_join_sum
+thread_counter
+futex_wake_ok
+futex_waiter_woken
