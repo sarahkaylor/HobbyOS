@@ -41,6 +41,12 @@ OBJ="${OBJ_DIR:-$ROOT/obj}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# GB-162: leg B builds from this path.  --flip must NEVER edit the repo copy:
+# under `make -j` the parity target compiles compat.c while the self-test is
+# flipping it, and leg B then disagrees with leg A (a false RED).  The flip is
+# applied to a copy in $TMP instead, and --self-test needs no restore step.
+COMPAT_SRC="${T4_COMPAT_SRC:-$ROOT/src/host/compat.c}"
+
 DEVICE=""
 if [ "$#" -ge 1 ] && [ "$1" = "--device" ]; then
   DEVICE="${2:-intel}"
@@ -55,21 +61,22 @@ fi
 # three times: clean PASS, flipped-FAIL, restored-PASS, by re-invoking itself.
 # ---------------------------------------------------------------------------
 if [ "${1:-}" = "--self-test" ]; then
-  COMPAT="$ROOT/src/host/compat.c"
+  LOG="$(mktemp)"
   R=""
-  bash "$0" --flip ho_open >/tmp/t4p.selftest 2>&1; R="$?"
-  # restore the flipped source by applying the inverse flip (in-shell, no git):
-  # the --flip run changed `host, mode) + 1000` — undo it to the faithful form.
-  sed -i 's/return open(filename, host, mode) + 1000;/return open(filename, host, mode);/' "$COMPAT"
+  bash "$0" --flip ho_open >"$LOG" 2>&1; R="$?"
   if [ "$R" = "0" ]; then
-    echo "self-test: FAIL — flipping ho_open still PASSed (criterion inert); run=$R"; exit 1
+    echo "self-test: FAIL — flipping ho_open still PASSed (criterion inert); run=$R"; rm -f "$LOG"; exit 1
   fi
-  # clean restore must pass
-  bash "$0" >/tmp/t4p.selftest 2>&1; R="$?"
+  # clean restore must pass (the flip never touched the tree: GB-162)
+  if [ -n "$(git -C "$ROOT" status --porcelain src/host/compat.c 2>/dev/null)" ]; then
+    echo "self-test: FAIL — the flip modified src/host/compat.c in the tree"; rm -f "$LOG"; exit 1
+  fi
+  bash "$0" >"$LOG" 2>&1; R="$?"
   if [ "$R" != "0" ]; then
-    echo "self-test: FAIL — clean (unflipped) run returned $R; see /tmp/t4p.selftest"; exit 1
+    echo "self-test: FAIL — clean (unflipped) run returned $R; see $LOG"; exit 1
   fi
   echo "self-test: OK — flipping ho_open FAILs (rc=$R clean pass), restoring passes"
+  rm -f "$LOG"
   exit 0
 fi
 
@@ -103,21 +110,24 @@ fi
 # ---- build leg B: HobbyOS host compat surface ---------------------------------
 # Mirror the errno_test_host rule: host probe + compat.c ho_* mocks as glibc.
 # GB-083 --flip: break one ho_* shim so the differential MUST fail (the live
-# "wrong shim must FAIL" criterion).  Applied to compat.c before the build and
-# restored by the make target's shell (see the --self-test re-invocation: it
-# runs --flip then an unflipped run, so a leftover flip is restored by the
-# next clean invocation).
+# "wrong shim must FAIL" criterion).  GB-162: applied to a copy in $TMP, never
+# to the repo file — the parity target compiles compat.c concurrently under
+# `make -j`, and an in-place flip made it build a half-flipped shim.
 if [ -n "${FLIP_SHIM:-}" ]; then
-  cp "$ROOT/src/host/compat.c" "$TMP/compat.orig"
+  # GB-162: flip a COPY.  Editing $ROOT/src/host/compat.c here made the parity
+  # target build from a mid-flip file under `make -j` (leg B then differed from
+  # leg A by +1000 on every ho_* row: a false RED).
+  cp "$COMPAT_SRC" "$TMP/compat.flipped"
   case "$FLIP_SHIM" in
-    ho_open) sed -i 's/return open(filename, host, mode);/return open(filename, host, mode) + 1000;/' "$ROOT/src/host/compat.c" ;;
+    ho_open) sed -i 's/return open(filename, host, mode);/return open(filename, host, mode) + 1000;/' "$TMP/compat.flipped" ;;
   esac
+  COMPAT_SRC="$TMP/compat.flipped"
 fi
 if command -v "${HOST_CC:-clang}" >/dev/null 2>&1 || command -v clang >/dev/null 2>&1; then
   HOST_CC="${HOST_CC:-clang}"
   HOST_CFLAGS="${HOST_CFLAGS:--Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST}"
   if ! "$HOST_CC" $HOST_CFLAGS -Isrc/include -DLEG_B_SHIMS \
-        src/host/t4_compat_probe.c src/host/compat.c \
+        src/host/t4_compat_probe.c "$COMPAT_SRC" \
         -o "$TMP/t4_probe.host" 2>"$TMP/buildB.log"; then
     echo "FAIL: leg B build (HobbyOS host compat)"; tail -20 "$TMP/buildB.log"; fail=1
     B=buildfail
