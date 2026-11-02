@@ -338,6 +338,22 @@ int elf_build_plan(const struct elf_image *img, struct elf_plan *plan) {
   return ELF_OK;
 }
 
+/* Human-readable name for an ELF_ERR_* (for serial logs; never NULL).
+ *
+ * ARM KASLR SLIDE, measured 2026-11-01 (M0 lane B): this dense switch compiles
+ * to a jump table of ABSOLUTE string pointers in .rodata.  The aarch64 boot
+ * path has Limine place the kernel near RAM top with a link-space slide (see
+ * docs/blk-cache.md §11: slide 0x3FA600000 at the 16 GiB config) and the MMU
+ * identity-maps RAM, so PC-relative code works at the slid address while an
+ * absolute pointer baked into .rodata still names the LINK address — which is
+ * unmapped-image RAM reading as zero.  Symptom: every loader refusal printed
+ * "elf loader: " and an EMPTY reason on ARM while the same build on x64 printed
+ * the text.  optnone keeps the function a compare chain (PC-relative literal
+ * addresses only), which is correct under the slide; the platform fix belongs
+ * to the boot/MMU owner (relocate absolute pointers, or alias the link range). */
+#if defined(__aarch64__) && defined(__clang__)
+__attribute__((optnone))
+#endif
 const char *elf_strerror(int err) {
   switch (err) {
     case ELF_OK: return "ok";
