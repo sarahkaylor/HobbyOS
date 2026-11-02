@@ -60,8 +60,9 @@ int l_copy_from_user(struct process *p, void *kdst, uint64_t usrc,
 int l_copy_to_user(struct process *p, uint64_t udst, const void *ksrc,
                    uint64_t len) {
   if (len == 0) return 0;
+  if (len > (uint64_t)(1 << 20)) return -EINVAL;
   if (!l_user_ok(p, udst, len, 1)) return -EFAULT;
-  return vm_kwrite(p, udst, (void *)ksrc, len) == 0 ? 0 : -EFAULT;
+  return vm_kwrite(p, udst, ksrc, (int)len) == 0 ? 0 : -EFAULT;
 }
 
 int l_copy_cstr(struct process *p, char *kdst, uint64_t usrc, uint64_t cap) {
