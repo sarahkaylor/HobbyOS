@@ -1,0 +1,3 @@
+patched: FRAMESNAP_ASM is now a no-op
+nosnap: rows=0 arrived=0 unknown_syscall=1 halt=0
+NOSNAP_RC=0

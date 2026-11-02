@@ -1,0 +1,4 @@
+767dca6 (767dca63): build=0 rows=7 arrived=0 unknown_syscall=0 idlestuck=0 halt=1
+170e195 (170e1959): build=0 rows=0 arrived=0 unknown_syscall=1 idlestuck=0 halt=0
+2613ac4 (2613ac49): build=0 rows=0 arrived=0 unknown_syscall=1 idlestuck=48 halt=0
+BISECT2_RC=0

@@ -1,0 +1,17 @@
+8e231fb (8e231fb3): build=0 rows=7 arrived=0 unknown_syscall=0 idlestuck=0 halt=1
+error: The following untracked working tree files would be overwritten by checkout:
+	tools/gate/t4_gb016_uname.sh
+Please move or remove them before you switch branches.
+Aborting
+767dca6: checkout failed
+error: The following untracked working tree files would be overwritten by checkout:
+	tools/gate/t4_gb016_uname.sh
+Please move or remove them before you switch branches.
+Aborting
+170e195: checkout failed
+error: The following untracked working tree files would be overwritten by checkout:
+	tools/gate/t4_gb016_uname.sh
+Please move or remove them before you switch branches.
+Aborting
+2613ac4: checkout failed
+BISECT_RC=0
