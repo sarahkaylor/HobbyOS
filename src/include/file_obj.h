@@ -54,8 +54,9 @@ uint64_t file_obj_page(struct vm_object *o, uint64_t off);
 /* Invalidation (docs/shared-libs.md section 4 item 4): detach the cached
  * object so the next mmap re-reads the file.  Existing mappings keep the
  * pages they already faulted in (the object stays alive on their
- * references) but cannot fault in new ones — the stale-text hazard is
- * bounded and documented in docs/shared-libs.md.  file_obj_invalidate_all
+ * references) but cannot fault in new ones — the residual hazard (a live
+ * mapping keeps the frames it already touched) is bounded and called out
+ * in the lane A report.  file_obj_invalidate_all
  * is what fs.c's write hook calls (one hook, all files: over-invalidation
  * only costs a re-read).  Both are safe with no lock held. */
 void file_obj_invalidate(uint16_t start_cluster, uint32_t file_size);
