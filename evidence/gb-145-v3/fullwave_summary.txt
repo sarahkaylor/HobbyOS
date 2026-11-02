@@ -1,0 +1,17 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1100s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb016v/evidence/gb-145-v3/fullwave.log) ===
+T3_intel: 17813 console lines, 6 FAIL lines, 9 user memory fault records across 8 processes, 87 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1100s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 8 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 6 FAIL line(s); first 20:
+6634:  FPU_T torture-child: FAIL
+12420:[CMPTEST] FAIL identical files
+12659:[CMPTEST] FAILURES: 1
+13767:  TORTURE poll-many-fds: FAIL
+13778:TORTURE FAILED: 1
+15528:shell_test: FAILED 2>&1 dup redirect byte count. OUT7.TXT size= (want 194). wc saw: wc -c OUT7.TXT
+T3_intel EXIT=1
+T3_LOG=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb016v/evidence/gb-145-v3/fullwave.log
+T3_ARCH=intel
+T3_FAILS=6
+FULLWAVE_RC=1

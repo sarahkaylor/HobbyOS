@@ -1,0 +1,158 @@
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/abi_t2_test.c -o obj/arm/abi_t2_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/audio_stub.c -o obj/arm/audio_stub.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/blk_cache.c -o obj/arm/blk_cache.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/blk_cache_press_test.c -o obj/arm/blk_cache_press_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/blk_cache_test.c -o obj/arm/blk_cache_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/dhcp.c -o obj/arm/dhcp.o
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/elf_image.c -o obj/arm/elf_image.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/elf_loader.c -o obj/arm/elf_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/evdev.c -o obj/arm/evdev.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/evdev_test.c -o obj/arm/evdev_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/fat16.c -o obj/arm/fat16.o
+src/kernel/fat16.c:2178:25: warning: comparison of integers of different signs: 'int' and 'uint32_t' (aka 'unsigned int') [-Wsign-compare]
+ 2178 |       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+      |           ~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -Iobj/arm -c src/kernel/fat16_test.c -o obj/arm/fat16_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/fb_ioctl.c -o obj/arm/fb_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/fb_ioctl_test.c -o obj/arm/fb_ioctl_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/fb_mmap.c -o obj/arm/fb_mmap.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/fb_mmap_test.c -o obj/arm/fb_mmap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/frame.c -o obj/arm/frame.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/frame_test.c -o obj/arm/frame_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/fs.c -o obj/arm/fs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/fs_test.c -o obj/arm/fs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/input_node.c -o obj/arm/input_node.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/input_node_test.c -o obj/arm/input_node_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/iommu_vtd.c -o obj/arm/iommu_vtd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/ipc_proto.c -o obj/arm/ipc_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/linux_uname.c -o obj/arm/linux_uname.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/lock_order.c -o obj/arm/lock_order.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/locks_test.c -o obj/arm/locks_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/main.c -o obj/arm/main.o
+src/kernel/main.c:52:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   52 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/math_test.c -o obj/arm/math_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/mmu_test.c -o obj/arm/mmu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/net.c -o obj/arm/net.o
+src/kernel/net.c:552:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  552 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:815:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  815 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:657:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  657 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/net_rdma.c -o obj/arm/net_rdma.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/net_rdma_test.c -o obj/arm/net_rdma_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/net_test.c -o obj/arm/net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/nfs.c -o obj/arm/nfs.o
+src/kernel/nfs.c:157:12: warning: '/*' within block comment [-Wcomment]
+  157 |  * is *body/*body_len, valid until the next rpc_call (static buffer). */
+      |            ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/nfs_proto.c -o obj/arm/nfs_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/nfs_test.c -o obj/arm/nfs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/pipe.c -o obj/arm/pipe.o
+src/kernel/pipe.c:142:7: warning: unused variable 'i' [-Wunused-variable]
+  142 |   int i = 0;
+      |       ^
+src/kernel/pipe.c:139:68: warning: unused parameter 'tf' [-Wunused-parameter]
+  139 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+      |                                                                    ^
+src/kernel/pipe.c:219:7: warning: unused variable 'i' [-Wunused-variable]
+  219 |   int i = 0;
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/pipe_test.c -o obj/arm/pipe_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/process.c -o obj/arm/process.o
+src/kernel/process.c:1433:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1433 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:4183:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 4183 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/process_test.c -o obj/arm/process_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/program_loader.c -o obj/arm/program_loader.o
+src/kernel/program_loader.c:786:12: warning: unused variable 'elf_phdr' [-Wunused-variable]
+  786 |   uint64_t elf_phdr = 0;
+      |            ^~~~~~~~
+src/kernel/program_loader.c:787:12: warning: unused variable 'elf_phnum' [-Wunused-variable]
+  787 |   uint32_t elf_phnum = 0;
+      |            ^~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/program_loader_test.c -o obj/arm/program_loader_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/ssp.c -o obj/arm/ssp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/test_fw_cfg.c -o obj/arm/test_fw_cfg.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/test_smp.c -o obj/arm/test_smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/time.c -o obj/arm/time.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/time_test.c -o obj/arm/time_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/timer_test.c -o obj/arm/timer_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/trap_test.c -o obj/arm/trap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/unit_test.c -o obj/arm/unit_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/unix.c -o obj/arm/unix.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/unix_test.c -o obj/arm/unix_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/vdisplay.c -o obj/arm/vdisplay.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/vdisplay_test.c -o obj/arm/vdisplay_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/vfs.c -o obj/arm/vfs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/virtio_blk.c -o obj/arm/virtio_blk.o
+src/kernel/virtio_blk.c:656:12: warning: unused variable 'desc_idx' [-Wunused-variable]
+  656 |   uint16_t desc_idx = 0;
+      |            ^~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/virtio_blk_test.c -o obj/arm/virtio_blk_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/virtio_gpu.c -o obj/arm/virtio_gpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/virtio_gpu_test.c -o obj/arm/virtio_gpu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/virtio_gpu_x64.c -o obj/arm/virtio_gpu_x64.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/virtio_input.c -o obj/arm/virtio_input.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/virtio_input_test.c -o obj/arm/virtio_input_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/virtio_net.c -o obj/arm/virtio_net.o
+src/kernel/virtio_net.c:699:20: warning: unused function 'reg_write8' [-Wunused-function]
+  699 | static inline void reg_write8(uint32_t offset, uint8_t val) {
+      |                    ^~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/virtio_net_test.c -o obj/arm/virtio_net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/vm.c -o obj/arm/vm.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/vm_test.c -o obj/arm/vm_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/arch/arm/cpu.c -o obj/arm/cpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/arch/arm/gic.c -o obj/arm/gic.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/arch/arm/locks.c -o obj/arm/locks.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/arch/arm/mmu.c -o obj/arm/mmu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/arch/arm/rtc.c -o obj/arm/rtc.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/arch/arm/smp.c -o obj/arm/smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/arch/arm/timer.c -o obj/arm/timer.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/arch/arm/trap.c -o obj/arm/trap.o
+src/kernel/arch/arm/trap.c:1961:16: warning: unused variable 'l2idx' [-Wunused-variable]
+ 1961 |       uint32_t l2idx = ((uint64_t)tf->elr >> 21) & 0x1FF;
+      |                ^~~~~
+src/kernel/arch/arm/trap.c:1966:22: warning: array index 512 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1966 |       uart_print_hex(l2_table_1[cp][0x200]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1960:7: note: array 'l2_table_1' declared here
+ 1960 |       extern uint64_t l2_table_1[][512];
+      |       ^
+src/kernel/arch/arm/trap.c:1968:22: warning: array index 544 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1968 |       uart_print_hex(l2_table_1[cp][0x220]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1960:7: note: array 'l2_table_1' declared here
+ 1960 |       extern uint64_t l2_table_1[][512];
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -DKERNEL_DESKTOP_ICEWM -c src/kernel/arch/arm/uart.c -o obj/arm/uart.o
+ld.lld -T linker.ld -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o obj/arm/abi_t2_test.o obj/arm/audio_stub.o obj/arm/blk_cache.o obj/arm/blk_cache_press_test.o obj/arm/blk_cache_test.o obj/arm/dhcp.o obj/arm/elf_image.o obj/arm/elf_loader.o obj/arm/evdev.o obj/arm/evdev_test.o obj/arm/fat16.o obj/arm/fat16_test.o obj/arm/fb_ioctl.o obj/arm/fb_ioctl_test.o obj/arm/fb_mmap.o obj/arm/fb_mmap_test.o obj/arm/frame.o obj/arm/frame_test.o obj/arm/fs.o obj/arm/fs_test.o obj/arm/input_node.o obj/arm/input_node_test.o obj/arm/iommu_vtd.o obj/arm/ipc_proto.o obj/arm/linux_uname.o obj/arm/lock_order.o obj/arm/locks_test.o obj/arm/main.o obj/arm/math_test.o obj/arm/mmu_test.o obj/arm/net.o obj/arm/net_rdma.o obj/arm/net_rdma_test.o obj/arm/net_test.o obj/arm/nfs.o obj/arm/nfs_proto.o obj/arm/nfs_test.o obj/arm/pipe.o obj/arm/pipe_test.o obj/arm/process.o obj/arm/process_test.o obj/arm/program_loader.o obj/arm/program_loader_test.o obj/arm/ssp.o obj/arm/test_fw_cfg.o obj/arm/test_smp.o obj/arm/time.o obj/arm/time_test.o obj/arm/timer_test.o obj/arm/trap_test.o obj/arm/unit_test.o obj/arm/unix.o obj/arm/unix_test.o obj/arm/vdisplay.o obj/arm/vdisplay_test.o obj/arm/vfs.o obj/arm/virtio_blk.o obj/arm/virtio_blk_test.o obj/arm/virtio_gpu.o obj/arm/virtio_gpu_test.o obj/arm/virtio_gpu_x64.o obj/arm/virtio_input.o obj/arm/virtio_input_test.o obj/arm/virtio_net.o obj/arm/virtio_net_test.o obj/arm/vm.o obj/arm/vm_test.o obj/arm/cpu.o obj/arm/gic.o obj/arm/locks.o obj/arm/mmu.o obj/arm/rtc.o obj/arm/smp.o obj/arm/timer.o obj/arm/trap.o obj/arm/uart.o
+LINK_ARM_RC=0
