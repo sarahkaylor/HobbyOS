@@ -237,8 +237,9 @@ static int map_dso(struct ldso_ctx *c, const char *name, int *out_index) {
       if (flen == 0)
         continue;
       got2 = hb_ldso_platform_mmap((uint64_t)(uintptr_t)m->base + vstart, flen,
-                                   HB_PROT_READ, HB_MAP_PRIVATE | HB_MAP_FIXED,
-                                   fd, fstart);
+                                   HB_PROT_READ |
+                                       ((ph->p_flags & HB_PF_W) ? HB_PROT_WRITE : 0),
+                                   HB_MAP_PRIVATE | HB_MAP_FIXED, fd, fstart);
       if (got2 < 0 || (uint64_t)got2 != (uint64_t)(uintptr_t)m->base + vstart) {
         hb_ldso_platform_close(fd);
         if (have_slot)
@@ -474,6 +475,29 @@ static int tls_layout(struct ldso_ctx *c) {
   r->tls_tp = tp;
   if (hb_ldso_platform_set_tls(tp) != 0)
     return fail(r, HB_LDSO_E_TLS_SET, 0, "SYS_SET_TLS refused", tp, 1);
+
+  /* The interpreter is the TLS installer for a dynamic process, so it must
+     also set libc's "TLS is installed" marker.  __errno_location() otherwise
+     calls ho_tls_setup_initial(), which recomputes a SINGLE-module block from
+     libc.so's own __tls_* symbols and overwrites the thread pointer we just
+     installed — every errno access would then land at the wrong offset.  The
+     symbol is exported by src/libc/libc.map; a target libc that lacks it is a
+     contract violation, so that is a hard load failure (host fixtures have no
+     real libc, so there it is simply absent). */
+  {
+    struct hb_ldso_symref flagref;
+    int found = hb_ldso_lookup_scope(&r->scope, "ho_tls_ready_flag", 0,
+                                     &flagref);
+    if (found && flagref.sym && flagref.mod) {
+      *(volatile int *)(uintptr_t)(flagref.mod->base + flagref.sym->st_value) = 1;
+    }
+#ifndef HOST_TEST
+    else {
+      return fail(r, HB_LDSO_E_TLS, 0,
+                  "libc does not export ho_tls_ready_flag", 0, 1);
+    }
+#endif
+  }
   return HB_LDSO_OK;
 }
 
@@ -611,13 +635,28 @@ static int reloc_apply(struct ldso_ctx *c, struct hb_ldso_module *m,
 #else
   case HB_R_AARCH64_TLS_TPREL64:
 #endif
-    if (!sym)
-      return fail(r, HB_LDSO_E_RELOC, m->name,
-                  "TLS relocation against an undefined symbol", 0, 0);
+    if (!sym) {
+      /* Two legal shapes have no scope-resolved symbol:
+       *  - sym index 0 (measured in LIBC.SO: R_X86_64_TPOFF64 with addend 0
+       *    and 8) — the offset of a module-local `__thread` object rides in
+       *    the addend, S is zero;
+       *  - a STB_LOCAL symbol entry that the scope cannot see but the
+       *    relocating module defines itself.
+       * Anything else is a real undefined TLS symbol. */
+      if (si == 0) {
+        smod = m; /* S = 0; the addend carries the TLS offset */
+      } else if (refsym && refsym->st_shndx != 0 /* SHN_UNDEF */) {
+        sym = refsym;
+        smod = m;
+      } else {
+        return fail(r, HB_LDSO_E_RELOC, m->name,
+                    "TLS relocation against an undefined symbol", 0, 0);
+      }
+    }
     if (smod->tls_memsz == 0)
       return fail(r, HB_LDSO_E_TLS, m->name,
                   "TLS relocation against a module with no PT_TLS", 0, 0);
-    value = (uint64_t)((int64_t)sym->st_value + rel->r_addend +
+    value = (uint64_t)((int64_t)(sym ? sym->st_value : 0) + rel->r_addend +
                        (int64_t)smod->tls_bias);
     *(uint64_t *)(uintptr_t)where = value;
     r->n_tls++;
@@ -825,6 +864,19 @@ int hb_ldso_run(const struct hb_start *st, struct hb_ldso_result *out) {
   hb_ldso_memset(&ctx, 0, sizeof(ctx));
   ctx.res = r;
   ctx.st = st;
+
+  /* The kernel has ALREADY placed the interpreter in a USER_LIB slot, so that
+   * slot is not free.  Without this the first slot_take() returns slot 0 and
+   * the first DT_NEEDED is mapped on top of the interpreter's own image —
+   * measured: LIBC.SO's mapping landed at interp_base and the ELF header read
+   * back there was the interpreter's (8 phdrs instead of LIBC.SO's 9). */
+  if (st->interp_base >= HB_LDSO_USER_LIB_BASE &&
+      st->interp_base < HB_LDSO_USER_LIB_BASE + USER_LIB_SIZE) {
+    uint32_t s = (uint32_t)((st->interp_base - HB_LDSO_USER_LIB_BASE) /
+                            USER_LIB_SLOT_SIZE);
+    if (s < USER_LIB_MAX)
+      ctx.slots[s / 32] |= 1u << (s % 32);
+  }
 
   rc = build_exec(&ctx);
   if (rc != HB_LDSO_OK)
