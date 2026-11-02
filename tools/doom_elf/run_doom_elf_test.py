@@ -150,6 +150,16 @@ def main():
                     help="exact /XSTART.TXT line (default: /DOOM.ELF)")
     ap.add_argument("--keys", default="ret,f1",
                     help="comma-separated qcode names pressed after the session is up")
+    ap.add_argument("--hold-ms", type=int, default=150,
+                    help="how long each qcode is held down (QMP send-key "
+                         "hold-time).  A default 100 ms tap moves Doom one tic, "
+                         "which is invisible; hold to actually walk/turn.")
+    ap.add_argument("--pointer", default="",
+                    help="X,Y to move the pointer to before the keys are sent.  "
+                         "Needed for a WM-less session: focus is PointerRoot, so "
+                         "key events go to the window under the pointer -- with "
+                         "the pointer parked at the screen centre a 320x200 "
+                         "client never sees the keys.")
     ap.add_argument("--skip-frame-check", action="store_true",
                     help="transport/session probes draw no game frame; grade only the chain")
     # A Doom window is 320x200 or 640x400 inside a 1920x1080 framebuffer: the
@@ -201,9 +211,25 @@ def main():
             log("session running")
         # Let the client map its window before the first shot.
         time.sleep(3)
+        if args.pointer:
+            try:
+                px_, py_ = (int(v) for v in args.pointer.split(","))
+                probe = os.path.join(work, "probe-size.ppm")
+                if qmp.shot(probe):
+                    _, pw, ph = ppm_pixels(probe)
+                    qmp.cmd("input-send-event", {"events": [
+                        {"type": "abs",
+                         "data": {"axis": "x", "value": px_ * 32767 // pw}},
+                        {"type": "abs",
+                         "data": {"axis": "y", "value": py_ * 32767 // ph}}]})
+                    log(f"pointer -> {px_},{py_} (of {pw}x{ph})")
+            except Exception as e:  # noqa: BLE001 - pointer is best-effort
+                log(f"pointer move failed: {e}")
+            time.sleep(0.5)
         for k in [k for k in args.keys.split(",") if k]:
             try:
-                qmp.cmd("send-key", {"keys": [{"type": "qcode", "data": k}]})
+                qmp.cmd("send-key", {"keys": [{"type": "qcode", "data": k}],
+                                     "hold-time": args.hold_ms})
             except Exception as e:  # noqa: BLE001 - a missing key is not fatal
                 log(f"send-key {k}: {e}")
             time.sleep(1.0)
