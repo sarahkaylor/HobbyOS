@@ -105,12 +105,15 @@ void hb_ldso_platform_exit(int status) {
 
 #include "syscall.h"
 
-#define HB_PROT_READ VM_PROT_READ
-#define HB_PROT_WRITE VM_PROT_WRITE
-#define HB_PROT_EXEC VM_PROT_EXEC
-#define HB_MAP_PRIVATE VM_MAP_PRIVATE
-#define HB_MAP_FIXED VM_MAP_FIXED
-#define HB_MAP_ANONYMOUS VM_MAP_ANONYMOUS
+#ifndef EINVAL
+#define EINVAL 22
+#endif
+#ifndef EIO
+#define EIO 5
+#endif
+#ifndef EBADF
+#define EBADF 9
+#endif
 
 static long hb_syscall3(long num, long a0, long a1, long a2) {
 #if defined(__x86_64__)
@@ -171,7 +174,7 @@ static long hb_syscall6(long num, long a0, long a1, long a2, long a3, long a4,
 
 int hb_ldso_platform_open(const char *name) {
   if (!name || !name[0])
-    return -22; /* -EINVAL */
+    return -EINVAL;
   /* The flat FAT16 root: a bare 8.3 name resolves at the root, and the
    * explicit "/NAME.SO" form covers a cwd that is not the root. */
   {
@@ -190,9 +193,9 @@ int hb_ldso_platform_open(const char *name) {
 int64_t hb_ldso_platform_read_at(int fd, void *buf, uint64_t len, uint64_t off) {
   uint64_t done = 0;
   if (fd < 0 || !buf)
-    return -22;
+    return -EINVAL;
   if (hb_syscall3(SYS_LSEEK, (long)fd, (long)off, 0 /* SEEK_SET */) < 0)
-    return -5; /* -EIO */
+    return -EIO;
   while (done < len) {
     long r = hb_syscall3(SYS_READ, (long)fd, (long)((uint8_t *)buf + done),
                          (long)(len - done));
@@ -207,7 +210,7 @@ int64_t hb_ldso_platform_read_at(int fd, void *buf, uint64_t len, uint64_t off) 
 
 int hb_ldso_platform_close(int fd) {
   if (fd < 0)
-    return -9;
+    return -EBADF;
   return (int)hb_syscall3(SYS_CLOSE, (long)fd, 0, 0);
 }
 
