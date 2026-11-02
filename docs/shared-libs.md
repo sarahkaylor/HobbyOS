@@ -1,7 +1,8 @@
 # Shared libraries on HobbyOS — path B (ELF-native dynamic linking)
 
-Status: **M0 frozen (2026-11-01).** Executing as four parallel lanes; this file
-is the contract every lane reads before its first commit.
+Status: **M1 — the pilot runs.** All four lanes merged (`466c6a84..e2d8f3a`-era tip);
+`HDYN.BIN` (ET_DYN + `PT_INTERP /LDHOBBY.SO` → `LIBC.SO`) prints its markers and exits 0
+on **x86_64 QEMU**. ARM build/verify in flight. §7 records the six seams integration found.
 Scope: native HobbyOS programs (not the Linux-compat track, which reaches
 `ld.so` by a different route — `docs/linux-abi.md` §W5).
 
@@ -181,3 +182,57 @@ wins), and a TLS-using DSO.
 
 `dlopen`/`dlsym` (needs DTV + dlclose), symbol versioning, lazy binding,
 prelinking, `LD_LIBRARY_PATH` (flat root only), NFS-hosted DSOs, unloading.
+
+## 7. What the first integration measured (the seams)
+
+Every lane was green on its own branch; these six only appear when the pieces
+meet. Each is fixed in the merged tree, and each has a serial-log signature.
+
+1. **The kernel must not relocate an interpreted executable.** `el_stage_build`
+   applied the whole `DT_RELA` table, which holds symbol-bearing
+   `GLOB_DAT`/`JUMP_SLOT` entries only the interpreter can resolve →
+   `elf loader: relocations: unsupported relocation type`. Fix: `apply_reloc=0`
+   for the exe when `PT_INTERP` is present, and leave `DT_RELASZ` intact
+   (zeroing it is a static-PIE-only trick). The interpreter itself is still
+   relocated by the kernel.
+2. **`PT_LOAD` segments share pages unless the link says otherwise.** lld packs
+   R / R+X / RW contiguously, so the interpreter's per-segment mapping is
+   unsound → `LDHOBBY: LIBC.SO: PT_LOAD segments share a page`. Fix:
+   `-z separate-loadable-segments` plus page-aligned `.text`/`.data.rel.ro` in
+   `src/libc/linker_so.ld`; the loader now accepts a shared page only when the
+   two segments agree on protection (lld's two adjacent RW segments do).
+3. **The interpreter's own slot is not free.** The kernel places `LDHOBBY.SO` in
+   `USER_LIB` slot 0 and hands `interp_base` over; ld.so's first-fit then
+   returned slot 0 and mapped `LIBC.SO` on top of itself → the ELF header read
+   back at `base` had the interpreter's 8 program headers instead of LIBC.SO's
+   9. Fix: mark the slot containing `interp_base` used before the first
+   `slot_take()`.
+4. **A COW write is a *present-page* fault, and the trap dispatch withheld
+   those.** `vm_handle_fault()` is the only thing that can break a copy, but
+   x64 called it only for `!pf_present`, and ARM only for translation faults;
+   a write to a read-only object frame was therefore killed as `in=PROT`
+   (measured at the first relocation write into LIBC.SO). Fix: dispatch both
+   classes on both arches — `vm_handle_fault` still answers `PROT` for a real
+   violation.
+5. **Local TLS is symbol-less.** lld emits `R_X86_64_TPOFF64` with **symbol
+   index 0** and the offset in the addend for `static __thread` objects, so the
+   scope lookup has nothing to resolve → `TLS relocation against an undefined
+   symbol`. Fix: `si == 0` means `S = 0`, take the offset from the addend
+   (a `STB_LOCAL` defined symbol is the other legal shape).
+6. **The TLS "installed" flag belongs to libc and the loader must set it.**
+   `__errno_location()` re-installs a single-module block when
+   `ho_tls_ready_flag` is clear, clobbering the interpreter's multi-module
+   layout. ld.so now writes that exported flag after `SYS_SET_TLS` and fails
+   loudly if libc does not export it.
+
+### Known blocker (pre-existing, not dynamic linking)
+
+With QEMU's default 8 CPUs the **first user process is unreliable**: it lands
+on an AP where `current_process()` reads NULL (`%gs:40`), so `open`, console
+writes and `exit` fail (`open` → "cannot open DT_NEEDED", console → `-EFAULT`).
+It is **not** specific to ELF: a plain flat `HELLO.BIN` booted under the same
+mode fails 2 runs in 3 with `[DEADCLAIM] ... the resume path halted that CPU`,
+and succeeds when it lands on CPU0. The pilot is therefore gated at
+`-smp 1` until the SMP boot-path claim/resume race is fixed; the evidence for
+both binaries is in the integration log. Do not treat a `-smp 8` failure of the
+pilot as a linking regression.
