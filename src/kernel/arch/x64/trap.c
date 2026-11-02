@@ -1884,6 +1884,93 @@ static void sys_fstat(struct trap_frame *tf) {
   }
 }
 
+/* GB-164: Linux-ABI stat family.  musl calls newfstatat(262) for stat()/lstat()
+   and fstat(5) for fstat(); the compat table had no arm for any of them, so a
+   musl program could open a file but never see its size (measured: DOOMW4's
+   IWAD search -> -ENOSYS -> "No IWAD file was found").  The kernel's k_stat is a
+   different, smaller shape than Linux x86_64's struct stat, so translate rather
+   than copy. */
+struct linux_stat_x64 {
+  uint64_t st_dev, st_ino, st_nlink;
+  uint32_t st_mode, st_uid, st_gid, __pad0;
+  uint64_t st_rdev, st_size, st_blksize, st_blocks;
+  int64_t st_atime_sec, st_atime_nsec;
+  int64_t st_mtime_sec, st_mtime_nsec;
+  int64_t st_ctime_sec, st_ctime_nsec;
+  int64_t __unused[3];
+};
+
+static void linux_stat_x64_fill(struct linux_stat_x64 *o, const struct k_stat *k) {
+  o->st_dev = k->st_dev;
+  o->st_ino = k->st_ino;
+  o->st_nlink = (uint64_t)k->st_nlink;
+  o->st_mode = k->st_mode;
+  o->st_uid = k->st_uid;
+  o->st_gid = k->st_gid;
+  o->__pad0 = 0;
+  o->st_rdev = k->st_rdev;
+  o->st_size = (uint64_t)k->st_size;
+  o->st_blksize = (uint64_t)k->st_blksize;
+  o->st_blocks = (uint64_t)k->st_blocks;
+  o->st_atime_sec = k->st_atime; o->st_atime_nsec = 0;
+  o->st_mtime_sec = k->st_mtime; o->st_mtime_nsec = 0;
+  o->st_ctime_sec = k->st_ctime; o->st_ctime_nsec = 0;
+  o->__unused[0] = o->__unused[1] = o->__unused[2] = 0;
+}
+
+static void compat_fstat(struct trap_frame *tf) {
+  int fd = (int)tf->regs[5];                                  /* rdi */
+  struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[4]; /* rsi */
+  if (!sys_user_range((uint64_t)out, sizeof *out, 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)(-EFAULT);
+    return;
+  }
+  struct k_stat k;
+  int err = 0;
+  extern int file_stat_fd(struct process *, int, struct k_stat *, int *);
+  if (file_stat_fd(current_process(), fd, &k, &err) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  linux_stat_x64_fill(out, &k);
+  tf->regs[0] = 0;
+}
+
+static void compat_stat_path(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[5];                /* rdi */
+  struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[4]; /* rsi */
+  if (!sys_user_range_ok((uint64_t)path, 1) ||
+      !sys_user_range((uint64_t)out, sizeof *out, 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)(-EFAULT);
+    return;
+  }
+  struct k_stat k;
+  int err = 0;
+  extern int file_stat_path(struct process *, const char *, struct k_stat *, int *);
+  if (file_stat_path(current_process(), path, &k, &err) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  linux_stat_x64_fill(out, &k);
+  tf->regs[0] = 0;
+}
+
+/* newfstatat(dirfd, path, buf, flags): only AT_FDCWD (-100) is honoured; a
+   real dirfd is not used by musl's stat()/lstat()/fstatat() on a path string
+   here, and returning EBADF is honest for anything else. */
+static void compat_newfstatat(struct trap_frame *tf) {
+  int dirfd = (int)tf->regs[5];                                /* rdi */
+  const char *path = (const char *)tf->regs[4];                /* rsi */
+  struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[3]; /* rdx */
+  if (dirfd != -100) {                                         /* AT_FDCWD */
+    tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uintptr_t)path;
+  tf->regs[4] = (uint64_t)(uintptr_t)out;
+  compat_stat_path(tf);
+}
+
 static void sys_chdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = process_group(current_process()); /* P1 (D7) */
@@ -2461,6 +2548,13 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            mkdirat, so the dent block's mkdir() was -ENOSYS without this. */
         case 83:  syscall_num = SYS_MKDIR;      break;  /* mkdir(path, mode) */
         case 258: compat_mkdirat(tf);           return; /* mkdirat(dirfd, path, mode) */
+        /* GB-164: stat family.  musl's stat()/lstat() go through newfstatat(262)
+           with AT_FDCWD and fstat is 5; with no arm the caller gets -ENOSYS and
+           a file it can open still has no size (DOOMW4's IWAD search). */
+        case 4:   compat_stat_path(tf);         return; /* stat(path, buf)  */
+        case 6:   compat_stat_path(tf);         return; /* lstat (FAT: same) */
+        case 5:   compat_fstat(tf);             return; /* fstat(fd, buf)   */
+        case 262: compat_newfstatat(tf);        return; /* newfstatat(...)  */
         /* GB-149: brk/mmap for the musl allocator.  SYS_MMAP is already the
            6-arg Linux shape (sys_mmap6); SYS_BRK takes rdi.  Mapped here to
            measure the guest's heap setup before committing to a fix. */
