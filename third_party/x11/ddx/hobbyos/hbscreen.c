@@ -122,7 +122,31 @@ hbQueryFb(void)
 /* Depth 8: rebuild hbPalette[] from the colormap the server has installed.
  * miCreateDefColormap installs the default map, and every XInstallColormap /
  * window-colormap install goes through miInstallColormap (fbInstallColormap),
- * so GetInstalledmiColormap() always names the map that is on screen. */
+ * so GetInstalledmiColormap() always names the map that is on screen.  The
+ * table is rebuilt at EVERY present, not just on install: dix writes a cell's
+ * value before it calls the screen's StoreColors, so a client that cycles its
+ * palette with XStoreColors (Doom's I_SetPalette) is visible on the next
+ * frame with no hooks at all. */
+static ColormapPtr hbLoggedCmap;
+
+static void
+hbLogColormap(ColormapPtr cmap)
+{
+    if (cmap == hbLoggedCmap)
+        return;
+    hbLoggedCmap = cmap;
+    ErrorF("hobbyos: depth8 colormap 0x%lx%s entries "
+           "[0x10]=%04x/%04x/%04x [0x50]=%04x/%04x/%04x [0xA0]=%04x/%04x/%04x\n",
+           (unsigned long) cmap->mid,
+           cmap->mid == cmap->pScreen->defColormap ? " (default)" : "",
+           cmap->red[0x10].co.local.red, cmap->red[0x10].co.local.green,
+           cmap->red[0x10].co.local.blue,
+           cmap->red[0x50].co.local.red, cmap->red[0x50].co.local.green,
+           cmap->red[0x50].co.local.blue,
+           cmap->red[0xA0].co.local.red, cmap->red[0xA0].co.local.green,
+           cmap->red[0xA0].co.local.blue);
+}
+
 static void
 hbLoadPalette(ScreenPtr pScreen)
 {
@@ -131,6 +155,7 @@ hbLoadPalette(ScreenPtr pScreen)
 
     if (!cmap)
         return;
+    hbLogColormap(cmap);
     n = cmap->pVisual ? cmap->pVisual->ColormapEntries : 256;
     if (n > 256)
         n = 256;
@@ -170,6 +195,24 @@ hbFlushBatch(struct hb_fb_rect32 *r, int n)
 }
 
 static void
+hbDumpWindows(ScreenPtr pScreen)
+{
+    WindowPtr pWin;
+    int i = 0;
+
+    for (pWin = pScreen->root ? pScreen->root->firstChild : NULL;
+         pWin && i < 8; pWin = pWin->nextSib, i++) {
+        ErrorF("hobbyos: TEMP child[%d] win=0x%lx viewable=%d mapped=%d "
+               "optional=%d cmap=0x%lx depth=%d %dx%d+%d+%d\n", i,
+               (unsigned long) pWin->drawable.id, pWin->viewable ? 1 : 0,
+               pWin->mapped ? 1 : 0, pWin->optional ? 1 : 0,
+               (unsigned long) (pWin->optional ? pWin->optional->colormap : 0),
+               pWin->drawable.depth, pWin->drawable.width,
+               pWin->drawable.height, pWin->drawable.x, pWin->drawable.y);
+    }
+}
+
+static void
 hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
 {
     RegionPtr damage = DamageRegion(pBuf->pDamage);
@@ -180,6 +223,13 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
     int srcStride = pix->devKind;
     struct hb_fb_rect32 rects[HB_FLUSH_MAX_RECTS];
     int n = 0, i;
+    static WindowPtr lastFirst;
+
+    if (hbScreen.depth == 8 && pScreen->root &&
+        pScreen->root->firstChild != lastFirst) {
+        lastFirst = pScreen->root->firstChild;
+        hbDumpWindows(pScreen);
+    }
 
     if (!hbScreen.fb || nbox <= 0)
         return;
@@ -207,9 +257,9 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
             if (hbScreen.depth == 8) {
                 /* one byte per pixel: expand the index through the palette */
                 const unsigned char *src8 = src + (size_t) y * srcStride + x1;
-                int n = x2 - x1;
+                int npix = x2 - x1;
 
-                while (n-- > 0)
+                while (npix-- > 0)
                     *dst++ = hbPalette[*src8++];
             }
             else
@@ -262,6 +312,59 @@ static Bool
 hbSaveScreen(ScreenPtr pScreen, int on)
 {
     return TRUE;                /* no blanking hardware: nothing to do */
+}
+
+/* ---- depth 8: install a mapped window's colormap ----------------------- */
+/* X has no server-side "install the window's colormap when it is mapped":
+ * the client is expected to call XInstallColormap, or a window manager does
+ * it for the focused window.  Doom 1.10 does neither -- it creates a private
+ * AllocAll colormap, sets it as the window's colormap attribute and only
+ * calls XStoreColors (i_video.c UploadNewPalette) -- and the no-WM session
+ * (XSESS_NO_WM=1) has no window manager to install it either.  Measured
+ * before this hook: the server kept expanding every frame through the
+ * DEFAULT 256-cell map (logged as "colormap 0x20 (default)"), so a Doom
+ * frame came out as a handful of 0x55/0xAA colours.  Depth 8 therefore
+ * installs a private window colormap when the window is realized. */
+static Bool (*hbRealizeWindowOrig) (WindowPtr pWin);
+
+static void
+hbInstallWindowColormap(WindowPtr pWin)
+{
+    ColormapPtr cmap = NULL;
+    Colormap mid;
+    ScreenPtr pScreen = pWin->drawable.pScreen;
+    int rc;
+
+    if (hbScreen.depth != 8)
+        return;
+    /* TEMP probe */
+    ErrorF("hobbyos: TEMP realize win=0x%lx optional=%d mid=0x%lx def=0x%lx\n",
+           (unsigned long) pWin->drawable.id, pWin->optional ? 1 : 0,
+           (unsigned long) (pWin->optional ? pWin->optional->colormap : 0),
+           (unsigned long) pScreen->defColormap);
+    if (!pWin->optional)
+        return;
+    mid = pWin->optional->colormap;
+    if (mid == None || mid == pScreen->defColormap)
+        return;
+    rc = dixLookupResourceByType((void **) &cmap, mid, RT_COLORMAP,
+                                 serverClient, DixUseAccess);
+    ErrorF("hobbyos: TEMP lookup mid=0x%lx rc=%d cmap=%p\n",
+           (unsigned long) mid, rc, (void *) cmap);
+    if (rc != Success || !cmap)
+        return;
+    if (cmap != GetInstalledmiColormap(pScreen))
+        (*pScreen->InstallColormap) (cmap);
+}
+
+static Bool
+hbRealizeWindow(WindowPtr pWin)
+{
+    Bool ret = (*hbRealizeWindowOrig) (pWin);
+
+    if (ret && pWin->viewable)
+        hbInstallWindowColormap(pWin);
+    return ret;
 }
 
 /* ---- RandR: one fixed output/mode (enough for clients that query it) --- */
@@ -408,13 +511,20 @@ hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
     miSetPixmapDepths();
 
     /* fb's "width" is the frame buffer's pixel width; it derives devKind as
-     * PixmapBytePad(width, root depth), which is exactly shadowStride. */
+     * PixmapBytePad(width, root depth), which is exactly shadowStride.  The
+     * bpp argument is the SCREEN's bits per pixel, not the depth: depth 24
+     * runs at 32 bpp (B8G8R8A8), and fbScreenInit rejects a non-power-of-two
+     * bpp (Ones(24) != 1) -- passing hbScreen.depth here is a fatal error. */
     if (!fbScreenInit(pScreen, hbScreen.shadow, hbScreen.width,
                       hbScreen.height, dpi, dpi,
-                      hbScreen.width, hbScreen.depth))
+                      hbScreen.width, hbScreen.depth == 8 ? 8 : 32))
         return FALSE;
     if (hbRender && !fbPictureInit(pScreen, 0, 0))
         return FALSE;
+    if (hbScreen.depth == 8) {
+        hbRealizeWindowOrig = pScreen->RealizeWindow;
+        pScreen->RealizeWindow = hbRealizeWindow;
+    }
     if (!shadowSetup(pScreen))
         return FALSE;
     if (!hbRandRInit(pScreen))
