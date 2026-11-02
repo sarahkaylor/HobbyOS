@@ -1,0 +1,13 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 1200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb016v/obj/t3_intel_pollbrk.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 154 console lines, 2 FAIL lines, 0 user memory fault records across 0 processes, 1 programs exited, halted=1
+T3_intel: FAIL — only 1 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_intel: FAIL — 2 FAIL line(s); first 20:
+139:  POLLTST timeout took >= 85ms and < 30000ms (elapsed seen): FAIL
+150:1POLLTST FAILED:  check(s)
+T3_intel EXIT=1
+T3_LOG=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb016v/obj/t3_intel_pollbrk.log
+T3_ARCH=intel
+T3_FAILS=2
