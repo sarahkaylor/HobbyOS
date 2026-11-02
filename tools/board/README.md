@@ -20,7 +20,7 @@ Fallback (documented, in force until a Forgejo version with `/projects` lands):
 | milestone | Forgejo **milestone** `M0-infra … M4-acceptance` (native) |
 | lane | **label** with the lane's name and colour (§4.1 names kept verbatim) |
 | ticket skeleton | **issue header block** (ID / workstream / weight / depends / tier) |
-| claim | assignee + `In Progress` label + a claim comment |
+| claim | only from `Ready`: assignee + `In Progress` label + a claim comment (`board.py claim` refuses every other lane) |
 | gate | `Merge Gate` / `In Review` labels + a mandatory `EVIDENCE` comment |
 
 Exactly one lane label per issue; `board.py move` swaps it atomically.
