@@ -4191,3 +4191,14 @@ vdisplay_test_run: $(VDISPLAY_TEST)
 	./$(VDISPLAY_TEST)
 host_tests: vdisplay_test_run
 .PHONY: vdisplay_test_run
+
+# GB-160 (parent GB-041): W4 DOOM static-musl port surface.  The deliverable is
+# a static-PIE (Type DYN) ELF — the class elf_loader.c:124 accepts — carrying the
+# DG_* surface.  The second line is the falsifier: the gate must reject a
+# -no-pie ET_EXEC and a dynamic EXEC, or it cannot fail on its own clause.
+w4_doom_test:
+	python3 tools/sdl/w4/w4_doom_test.py
+	python3 tools/sdl/w4/w4_doom_test.py --self-test
+host_tests: w4_doom_test
+.PHONY: w4_doom_test
+
