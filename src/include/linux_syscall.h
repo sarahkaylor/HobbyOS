@@ -88,6 +88,11 @@
 #define L_SYS_getppid 110
 #define L_SYS_arch_prctl 158
 #define L_SYS_gettid 186
+/* set_tid_address(2): musl's __init_tp stores its result as the thread id and
+   pthread_join/exit paths read it back.  ENOSYS is survivable for a
+   single-threaded program but leaks a negative tid into musl's own TLS, so the
+   compat layer answers it (returns the process's pid). */
+#define L_SYS_set_tid_address 218
 
 /* --- threads / signals / time / ipc --------------------------------------- */
 #define L_SYS_rt_sigaction 13
