@@ -57,6 +57,12 @@
 #define USER_LIB_SIZE 0x037F00000ULL /* 895.9 MiB — ends where USER_START begins */
 #define USER_LIB_SLOT_SIZE 0x01000000ULL /* 16 MiB per DSO */
 #define USER_LIB_MAX 55                  /* USER_LIB_SIZE / SLOT_SIZE */
+/* so-vm lane A: the derived window bounds (the frozen numbers above stay
+ * untouched; docs/shared-libs.md §2 names the band by these two macros).
+ * SYS_MMAP accepts a MAP_FIXED/hint address inside this band so an
+ * interpreter can place one DSO per 16 MiB sub-slot, first-fit. */
+#define USER_LIB_BASE (USER_VA_BASE + USER_LIB_OFF)
+#define USER_LIB_LIMIT (USER_LIB_BASE + USER_LIB_SIZE)
 /* The interpreter startup block (docs/shared-libs.md §4): one read-only
  * page the kernel fills before entering a PT_INTERP program.  Fixed VA so
  * the interpreter needs no register/stack ABI change on either arch. */
@@ -339,8 +345,20 @@ void vm_object_unref(struct vm_object *o);
 
 /* The physical frame backing `off` (materialized zero-fill on first
  * touch), or 0 when off is past the object's capacity or the pool is
- * exhausted.  Caller holds vm_lock (the demand/fault paths do). */
+ * exhausted.  Caller holds vm_lock (the demand/fault paths do).
+ * VM_OBJ_FILE objects always answer 0 here: their pages are read from the
+ * FAT16 file by file_obj_page(), which cannot run under vm_lock (disk I/O),
+ * and silently zero-filling one would corrupt mapped text. */
 uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off);
+
+/* so-vm lane A (docs/shared-libs.md): the file page-cache plumbing that
+ * file_obj.c drives.  `peek` reports the already-materialized frame without
+ * allocating (0 when the page is still absent); `install_page` publishes a
+ * frame file_obj_page filled from disk, keeping the first one there and
+ * freeing the loser's.  Both take vm_lock themselves. */
+uint64_t vm_object_peek(struct vm_object *o, uint64_t off);
+uint64_t vm_object_peek_locked(struct vm_object *o, uint64_t off);
+uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr);
 
 /* ftruncate for objects: set the byte size.  Grow allocates a bigger
  * frame array; shrink frees materialized pages above the new size.
