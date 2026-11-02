@@ -4283,3 +4283,24 @@ w4_doom_test:
 host_tests: w4_doom_test
 .PHONY: w4_doom_test
 
+# Linux-ABI probe ELFs (docs/linux-abi.md bring-up harness).
+#
+# One probe = one src/user/linux_probe_<name>.c, built with musl for x86_64 as a
+# static-PIE ELF (the only class the v2 loader accepts for the compat track:
+# elf_loader.c refuses a fixed-address ET_EXEC below the user window).  Probes
+# are ordinary Linux programs -- they include NO HobbyOS header and compile
+# unchanged on a Linux box, which is what makes them a differential vehicle.
+#
+# The list is wildcard-driven on purpose: a lane adds a probe by dropping a file
+# in, never by editing this Makefile (the parallel-lane rule: one file set per
+# lane, no shared-file edits).  Run one with tools/gate/t3_linux_probe.sh <name>.
+LINUX_PROBE_SRCS := $(wildcard src/user/linux_probe_*.c)
+LINUX_PROBE_ELFS := $(patsubst src/user/linux_probe_%.c,$(OBJ_DIR)/probe_%.elf,$(LINUX_PROBE_SRCS))
+$(OBJ_DIR)/probe_%.elf: src/user/linux_probe_%.c
+	@test "$(ARCH)" = intel || { echo "$@: Linux-ABI probes are x86_64-only (ARCH=intel)"; exit 2; }
+	musl-gcc -static-pie -fPIE -O1 -g -Wall -Wextra -o $@ $<
+	@readelf -h $@ | grep -q 'Type:.*DYN' || { echo "$@: not static-PIE"; exit 1; }
+linux_probes: $(LINUX_PROBE_ELFS)
+	@echo "linux_probes: $(LINUX_PROBE_ELFS)"
+.PHONY: linux_probes
+

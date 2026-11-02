@@ -36,6 +36,7 @@
 #endif
 #include "errno.h"
 #include "linux_uname.h"   /* GB-016: linux_fill_utsname + linux_utsname_t */
+#include "linux_compat.h"  /* compat handler-table dispatch + [LCOMPAT] tracer */
 #include "vfs.h"
 #include "vm.h"
 #include "blk_cache.h"
@@ -2358,6 +2359,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   {
     struct process *lp = current_process();
     if (lp && (lp->abi_flags & PROC_FLAG_LINUX_ABI)) {
+      /* Compatibility-table dispatch (docs/linux-abi.md, src/include/
+         linux_compat.h): a subsystem handler that owns the number answers it
+         with LINUX semantics and writes tf->regs[0] itself.  The switch below
+         is the older number-translation path and stays as the fallback; a
+         handler that returns 0 means "not mine", not "fail". */
+      if (linux_compat_dispatch(lp, tf, syscall_num)) return;
       switch (syscall_num) {
         case 0:  syscall_num = SYS_READ;  break;   /* read(fd, buf, n)   */
         case 1:  syscall_num = SYS_WRITE; break;   /* write(fd, buf, n)  */
@@ -2505,6 +2512,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
           return;
         }
         default:
+          /* Nothing owns this number: name it on the console once, then answer
+             -ENOSYS as Linux does.  Bring-up of a real Linux program is this
+             line plus the next handler, never a guess. */
+          linux_compat_unhandled(lp, syscall_num, tf->elr);
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
       }
