@@ -32,6 +32,20 @@ extern struct cpu_local cpu_locals[];
 uint32_t smp_init_count(void);
 #endif
 
+/* GB-021: the Linux clone(2) flag bits the x64 compat bridge accepts.  musl's
+ * pthread_create passes exactly this set; anything else (namespaces, a new
+ * file table) is refused rather than silently ignored. */
+#define CLONE_VM 0x00000100ULL
+#define CLONE_FS 0x00000200ULL
+#define CLONE_FILES 0x00000400ULL
+#define CLONE_SIGHAND 0x00000800ULL
+#define CLONE_THREAD 0x00010000ULL
+#define CLONE_SYSVSEM 0x00040000ULL
+#define CLONE_SETTLS 0x00080000ULL
+#define CLONE_PARENT_SETTID 0x00100000ULL
+#define CLONE_CHILD_CLEARTID 0x00200000ULL
+#define CLONE_DETACHED 0x00400000ULL
+#define CLONE_CHILD_SETTID 0x01000000ULL
 
 // Process states for lifecycle management
 #define PROC_STATE_FREE 0      // Slot is available for a new process
@@ -320,6 +334,8 @@ struct process {
   int live_threads;      /**< leaders: members not yet dead incl. self; 0 elsewhere */
   uint64_t tls_base;     /**< opaque TLS register value (TPIDR_EL0 / IA32_FS_BASE) */
   uint64_t futex_uaddr;  /**< P1.2: non-zero while parked in FUTEX WAIT */
+  uint64_t clear_child_tid; /**< GB-021: Linux clone CLONE_CHILD_CLEARTID word,
+                                 zeroed and futex-woken at thread exit */
   uint64_t thread_ret;   /**< SYS_THREAD_EXIT argument (diagnostics only) */
 
   /* --- P2 (docs/browser/p2-vm-design.md section 1.3): address space ---- *
@@ -585,6 +601,11 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
  * first). Fixed per-PCB state, O(64) scans; no allocation, no new lock. */
 int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
                   int op, int64_t val, int64_t timeout_ms);
+#ifdef __x86_64__
+/* GB-021: Linux clone(2) bridge (mutex/thread model, x64 compat only). */
+int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
+                  uint64_t stack, uint64_t ptid, uint64_t ctid, uint64_t tls);
+#endif
 
 /* SYS_THREAD_EXIT (74): exit only the calling thread; retval recorded in
  * the PCB for diagnostics (the authoritative value travels via the user
