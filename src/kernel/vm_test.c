@@ -3,6 +3,7 @@
 #include "unit_test.h"
 #include "errno.h"
 #include "fat16.h"
+#include "file_obj.h"
 #include "frame.h"
 #include "fs.h"
 #include "vm.h"
@@ -1005,6 +1006,398 @@ static void test_vm_kwrite(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* =====================================================================
+ * so-vm lane A (docs/shared-libs.md section 4): file-backed shared
+ * mappings.  SYS_MMAP of a regular FAT16 file goes through the
+ * VM_OBJ_FILE page cache, so two address spaces mapping one file share
+ * the same physical frames until a MAP_PRIVATE write breaks the copy.
+ * The fixture is created through the FAT16 API on the unit-test disk
+ * (VMOBJ1.DAT, 8.3) and tolerates a leftover copy from an earlier run:
+ * it is truncated and rewritten every time.
+ * ===================================================================== */
+
+#define VM_FILE_TAG1 60
+#define VM_FILE_TAG2 61
+#define VM_FILE_NAME "/VMOBJ1.DAT"
+#define VM_FILE_LEN 5000u /* 0x1388: 2 pages, 0x388-byte zero tail past EOF */
+
+static void vm_file_pat(unsigned char *b, int n, uint32_t start) {
+  for (int i = 0; i < n; i++)
+    b[i] = (unsigned char)(((start + (uint32_t)i) * 7u + 3u) & 0xFFu);
+}
+
+/* (Re)write the fixture and report the identity SYS_MMAP keys the page
+ * cache by.  Returns 0 / -1. */
+static int vm_file_fixture(uint16_t *cluster, uint32_t *size) {
+  struct file f;
+  for (unsigned i = 0; i < sizeof(f); i++)
+    ((unsigned char *)&f)[i] = 0;
+  if (fat16_open(VM_FILE_NAME, &f) != 0)
+    return -1;
+  if (fat16_truncate_to(&f, 0) != 0) {
+    fat16_close(&f);
+    return -1;
+  }
+  unsigned char buf[125]; /* chunked: no large kernel stack frames */
+  uint32_t done = 0;
+  while (done < VM_FILE_LEN) {
+    int n = (int)(VM_FILE_LEN - done);
+    if (n > (int)sizeof(buf))
+      n = (int)sizeof(buf);
+    vm_file_pat(buf, n, done);
+    int w = fat16_write(&f, buf, n);
+    if (w != n) {
+      fat16_close(&f);
+      return -1;
+    }
+    done += (uint32_t)n;
+  }
+  fat16_close(&f);
+
+  struct file g;
+  for (unsigned i = 0; i < sizeof(g); i++)
+    ((unsigned char *)&g)[i] = 0;
+  if (fat16_open(VM_FILE_NAME, &g) != 0)
+    return -1;
+  *cluster = g.fat16.entry.start_cluster;
+  *size = g.fat16.entry.file_size;
+  fat16_close(&g);
+  return (*cluster != 0 && *size == VM_FILE_LEN) ? 0 : -1;
+}
+
+/* A fake process with a usable fd table (open_fds[] must read -1 = free). */
+static void vm_file_proc_init(struct process *p, struct addr_space *as) {
+  for (unsigned i = 0; i < sizeof(*p); i++)
+    ((unsigned char *)p)[i] = 0;
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    p->open_fds[i] = -1;
+  p->num_open_fds = 0;
+  p->as = as;
+}
+
+/* (a) one file, two address spaces, the SAME physical frames;
+ * (b) a MAP_PRIVATE write is invisible to the peer and to the object page;
+ * (c) a MAP_SHARED write IS visible through the other mapping. */
+static void test_vm_file_map_shared_frames(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_file_map_shared_frames...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+
+  struct process p1, p2;
+  vm_file_proc_init(&p1, vm_as_create(VM_FILE_TAG1));
+  vm_file_proc_init(&p2, vm_as_create(VM_FILE_TAG2));
+  EXPECT_EQ((p1.as != 0 && p2.as != 0), 1);
+  if (!p1.as || !p2.as) {
+    if (p1.as)
+      vm_as_teardown(p1.as);
+    if (p2.as)
+      vm_as_teardown(p2.as);
+    return;
+  }
+  int fd1 = file_open(&p1, VM_FILE_NAME, 0);
+  int fd2 = file_open(&p2, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd1 >= 0 && fd2 >= 0), 1);
+  if (fd1 < 0 || fd2 < 0)
+    goto out;
+
+  /* (a) MAP_PRIVATE in both spaces — the DSO text case. */
+  int64_t b1 = vm_mmap(&p1, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE, fd1, 0);
+  int64_t b2 = vm_mmap(&p2, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE, fd2, 0);
+  EXPECT_EQ((b1 > 0 && b2 > 0), 1);
+  EXPECT_EQ((b1 == b2), 1); /* same slot in two independent ASs */
+  EXPECT_EQ(file_obj_count(), c0 + 1); /* ONE cache object for the file */
+  if (b1 <= 0 || b2 <= 0)
+    goto out;
+
+  struct vm_region *r = vm_region_find(p1.as, (uint64_t)b1);
+  EXPECT_EQ((r != 0), 1);
+  EXPECT_EQ((r && r->kind == VMK_LIB), 1);
+  EXPECT_EQ((r && r->obj != 0), 1);
+  EXPECT_EQ((r && r->obj && r->obj->kind == VM_OBJ_FILE), 1);
+
+  EXPECT_EQ(vm_touch(&p1, (uint64_t)b1, 8, 0), 0);
+  EXPECT_EQ(vm_touch(&p2, (uint64_t)b2, 8, 0), 0);
+  uint64_t l1 = 0, l2 = 0;
+  EXPECT_EQ(vm_arch_walk(p1.as, (uint64_t)b1, &l1), 0);
+  EXPECT_EQ(vm_arch_walk(p2.as, (uint64_t)b2, &l2), 0);
+  uint64_t ph1 = vm_arch_leaf_phys(l1);
+  uint64_t ph2 = vm_arch_leaf_phys(l2);
+  /* THE acceptance property: two address spaces, one physical frame. */
+  EXPECT_EQ((ph1 != 0 && ph1 == ph2), 1);
+  /* ... and that frame is the page cache's own page 0. */
+  EXPECT_EQ((r && r->obj && vm_object_peek(r->obj, 0) == ph1), 1);
+
+  /* The page really came from the file (not a zero fill). */
+  {
+    int bad = 0;
+    for (int i = 0; i < 64; i++) {
+      if (((const volatile unsigned char *)ph1)[i] !=
+          (unsigned char)((i * 7 + 3) & 0xFF))
+        bad = 1;
+    }
+    EXPECT_EQ(bad, 0);
+  }
+
+  /* (b) a write fault in p1 copies: new private frame, same bytes. */
+  const char *why = 0;
+  EXPECT_EQ(vm_handle_fault(&p1, (uint64_t)b1, 1, 0, &why), 0);
+  uint64_t l1b = 0;
+  EXPECT_EQ(vm_arch_walk(p1.as, (uint64_t)b1, &l1b), 0);
+  uint64_t ph1b = vm_arch_leaf_phys(l1b);
+  EXPECT_EQ((ph1b != 0 && ph1b != ph1), 1);
+  {
+    int bad = 0;
+    for (int i = 0; i < 64; i++) {
+      if (((const volatile unsigned char *)ph1b)[i] !=
+          (unsigned char)((i * 7 + 3) & 0xFF))
+        bad = 1;
+    }
+    EXPECT_EQ(bad, 0); /* the copy carries the file's bytes */
+  }
+  ((volatile unsigned char *)ph1b)[0] = 0xEE;
+  /* Peer mapping and object page are untouched. */
+  EXPECT_EQ((int)(((const volatile unsigned char *)ph2)[0]), 3);
+  EXPECT_EQ((int)(((const volatile unsigned char *)vm_object_peek(r->obj, 0))[0]),
+            3);
+  /* The private page stays private: a second write never COWs again. */
+  EXPECT_EQ(vm_touch(&p1, (uint64_t)b1, 1, 1), 0);
+  uint64_t l1c = 0;
+  EXPECT_EQ(vm_arch_walk(p1.as, (uint64_t)b1, &l1c), 0);
+  EXPECT_EQ((vm_arch_leaf_phys(l1c) == ph1b), 1);
+  EXPECT_EQ((int)(((const volatile unsigned char *)ph1b)[0]), 0xEE);
+
+  /* (c) MAP_SHARED in both spaces: one frame, write-through both ways. */
+  int64_t s1 = vm_mmap(&p1, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_SHARED, fd1, 0);
+  int64_t s2 = vm_mmap(&p2, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_SHARED, fd2, 0);
+  EXPECT_EQ((s1 > 0 && s2 > 0), 1);
+  EXPECT_EQ((s1 == s2), 1);
+  if (s1 > 0 && s2 > 0) {
+    struct vm_region *rs = vm_region_find(p1.as, (uint64_t)s1);
+    EXPECT_EQ((rs && rs->kind == VMK_LIB && rs->obj == r->obj), 1);
+    EXPECT_EQ(vm_touch(&p1, (uint64_t)s1, 8, 1), 0);
+    EXPECT_EQ(vm_touch(&p2, (uint64_t)s2, 8, 0), 0);
+    uint64_t ls1 = 0, ls2 = 0;
+    EXPECT_EQ(vm_arch_walk(p1.as, (uint64_t)s1, &ls1), 0);
+    EXPECT_EQ(vm_arch_walk(p2.as, (uint64_t)s2, &ls2), 0);
+    uint64_t shp1 = vm_arch_leaf_phys(ls1);
+    uint64_t shp2 = vm_arch_leaf_phys(ls2);
+    EXPECT_EQ((shp1 != 0 && shp1 == shp2), 1);
+    EXPECT_EQ((shp1 == ph1), 1); /* the very same page-cache page */
+    *(volatile uint64_t *)shp1 = 0xCAFEF00D12345678ULL;
+    EXPECT_EQ((*(volatile uint64_t *)shp2 == 0xCAFEF00D12345678ULL), 1);
+    /* ... and a third view (the object page the private mapping bypassed)
+       sees the same write: MAP_SHARED really is write-through. */
+    EXPECT_EQ((*(volatile uint64_t *)vm_object_peek(r->obj, 0) ==
+               0xCAFEF00D12345678ULL),
+              1);
+  }
+
+out:
+  if (p1.as)
+    vm_as_teardown(p1.as);
+  if (p2.as)
+    vm_as_teardown(p2.as);
+  if (fd1 >= 0)
+    file_close(&p1, fd1);
+  if (fd2 >= 0)
+    file_close(&p2, fd2);
+  /* The page cache owns its frames by design; flush it so the suite's
+     exact frame accounting starts from the recorded baseline. */
+  file_obj_invalidate_all();
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* (d) a file whose size is not a page multiple: the bytes past EOF in the
+ * last page read as zeros.  (5) mprotect can drop PROT_WRITE on a mapped
+ * file region (W^X) and the next write faults cleanly; mprotect that ADDS
+ * PROT_WRITE never hands out a writable shared text page. */
+static void test_vm_file_map_tail_wx(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_file_map_tail_wx...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_FILE_TAG1));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ, VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (fd < 0 || b <= 0)
+    goto out;
+
+  /* (d) page 1 = file bytes 4096..4999 then zeros to the page end. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b + 0x1000, 8, 0), 0);
+  {
+    uint64_t leaf = 0;
+    EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b + 0x1000, &leaf), 0);
+    const volatile unsigned char *pa =
+        (const volatile unsigned char *)vm_arch_leaf_phys(leaf);
+    EXPECT_EQ((int)pa[0], (int)((4096u * 7u + 3u) & 0xFFu));
+    EXPECT_EQ((int)pa[903], (int)((4999u * 7u + 3u) & 0xFFu));
+    EXPECT_EQ((int)pa[904], 0); /* first byte past EOF */
+    EXPECT_EQ((int)pa[4095], 0);
+    int nz = 0;
+    for (int i = 904; i < 4096; i++) {
+      if (pa[i])
+        nz = 1;
+    }
+    EXPECT_EQ(nz, 0); /* the whole tail is zero-filled */
+  }
+
+  /* (5) W^X: adding PROT_WRITE to a resident file page must not make the
+     shared object frame writable — the write breaks the copy instead. */
+  uint64_t objleaf = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b + 0x1000, &objleaf), 0);
+  uint64_t objph = vm_arch_leaf_phys(objleaf);
+  EXPECT_EQ(vm_mprotect(&p, (uint64_t)b + 0x1000, 0x1000,
+                        VM_PROT_READ | VM_PROT_WRITE),
+            0);
+  const char *why = 0;
+  EXPECT_EQ(vm_handle_fault(&p, (uint64_t)b + 0x1000, 1, 0, &why), 0);
+  {
+    uint64_t leaf = 0;
+    EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b + 0x1000, &leaf), 0);
+    EXPECT_EQ((vm_arch_leaf_phys(leaf) != objph), 1);
+    /* the object page still carries the file's byte, not our write */
+    EXPECT_EQ((int)(((const volatile unsigned char *)objph)[0]), 
+              (int)((4096u * 7u + 3u) & 0xFFu));
+  }
+
+  /* A lazy page (never touched) under mprotect(PROT_READ|PROT_WRITE): the
+     fill installs it read-only, so the write fault is the COW, never a
+     direct store into the page cache. */
+  EXPECT_EQ(vm_mprotect(&p, (uint64_t)b, 0x1000,
+                        VM_PROT_READ | VM_PROT_WRITE),
+            0);
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, 0), -1);
+  EXPECT_EQ(vm_handle_fault(&p, (uint64_t)b, 1, 0, &why), 0);
+  {
+    uint64_t leaf = 0;
+    EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &leaf), 0);
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    struct vm_region *rr = vm_region_find(p.as, (uint64_t)b);
+    EXPECT_EQ((ph != 0 && rr && rr->obj && ph != vm_object_peek(rr->obj, 0)), 1);
+  }
+
+  /* Drop PROT_WRITE (the interpreter's post-relocation W^X step): the
+     resident page goes read-only and the next write is a clean PROT kill,
+     never a silent store. */
+  EXPECT_EQ(vm_mprotect(&p, (uint64_t)b, 0x2000, VM_PROT_READ), 0);
+  EXPECT_EQ(vm_handle_fault(&p, (uint64_t)b, 1, 0, &why), 1);
+  EXPECT_EQ((why && why[0] == 'P'), 1); /* "PROT" */
+
+out:
+  if (p.as)
+    vm_as_teardown(p.as);
+  if (fd >= 0)
+    file_close(&p, fd);
+  file_obj_invalidate_all();
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* (e) munmap and AS teardown never free the page cache's frames: the
+ * object keeps them (other mappings may share them), and only the cache
+ * flush returns the pool to the exact baseline. */
+static void test_vm_file_map_accounting(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_file_map_accounting...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_FILE_TAG1));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (fd < 0 || b <= 0)
+    goto out;
+
+  /* Fault both pages in: two page-cache frames + the AS's own frames. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 0), 0);
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b + 0x1000, 8, 0), 0);
+  EXPECT_EQ(p.as->resident_frames, 2);
+  struct vm_region *r = vm_region_find(p.as, (uint64_t)b);
+  EXPECT_EQ((r && r->obj != 0), 1);
+  uint64_t ph0 = vm_object_peek(r->obj, 0);
+  uint64_t ph1 = vm_object_peek(r->obj, 0x1000);
+  EXPECT_EQ((ph0 != 0 && ph1 != 0 && ph0 != ph1), 1);
+  int f_mapped = frame_free_count();
+  EXPECT_EQ((f_mapped < free0), 1);
+
+  /* munmap: resident object pages are dropped from the mapping WITHOUT
+     freeing their frames (the object still owns them). */
+  EXPECT_EQ(vm_munmap_range(&p, (uint64_t)b, fsize), 0);
+  EXPECT_EQ(p.as->resident_frames, 0);
+  EXPECT_EQ(frame_free_count(), f_mapped);
+  EXPECT_EQ((vm_region_find(p.as, (uint64_t)b) == 0), 1);
+  EXPECT_EQ((vm_object_peek(r->obj, 0) == ph0), 1);
+  EXPECT_EQ((vm_object_peek(r->obj, 0x1000) == ph1), 1);
+
+  /* Teardown: only the AS's own table frames and region array come back;
+     the cache's frames stay allocated. */
+  {
+    int tabs = p.as->table_frames;
+    int arrf = (int)(((uint64_t)p.as->cap * sizeof(struct vm_region)) /
+                     FRAME_SIZE) + 1;
+    int f_pre = frame_free_count();
+    vm_as_teardown(p.as);
+    p.as = 0;
+    EXPECT_EQ(frame_free_count(), f_pre + tabs + arrf);
+    EXPECT_EQ((frame_free_count() < free0), 1); /* cache frames still out */
+  }
+
+  /* Flushing the cache returns every remaining frame: exact baseline. */
+  file_obj_invalidate_all();
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+
+out:
+  if (p.as)
+    vm_as_teardown(p.as);
+  if (fd >= 0)
+    file_close(&p, fd);
+  file_obj_invalidate_all();
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -1022,6 +1415,10 @@ void vm_test_suite(void) {
   test_vm_teardown_leak_cycles();
   test_vm_user_read(); /* SEC-2 */
   test_vm_kwrite();    /* SEC-8 */
+  /* so-vm lane A: file-backed shared mappings (docs/shared-libs.md §4) */
+  test_vm_file_map_shared_frames();
+  test_vm_file_map_tail_wx();
+  test_vm_file_map_accounting();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */
