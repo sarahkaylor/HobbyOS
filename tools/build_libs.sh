@@ -672,7 +672,26 @@ EOF
 # main
 # ---------------------------------------------------------------------------
 usage() {
-  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' >&2
+  cat <<'EOF' >&2
+tools/build_libs.sh — lane C (docs/shared-libs.md §4): PIC libc + LIBC.SO
+
+  tools/build_libs.sh arm|intel   build obj/<arch>/libc.so + evidence
+  tools/build_libs.sh all         both arches, arm first
+  tools/build_libs.sh gen_map     regenerate src/libc/libc.map from the archives
+  tools/build_libs.sh check_map   fail if libc.map drifts from the archives
+  tools/build_libs.sh build_interp <arch>
+                                  build obj/<arch>/LDHOBBY.SO from src/user/ld/
+                                  (fails with the command block if lane D's
+                                  sources are not in the tree yet)
+  tools/build_libs.sh print_interp_cmd <arch>
+                                  print that command block only
+
+Environment: JOBS=16, CC, LD, NM, READELF, HOBBYOS_USE_CCACHE=1,
+LIBC_SO_DEBUG=1 (keep DWARF in libc.so; default is --strip-debug).
+
+Outputs: obj/<arch>/libc.so, obj/<arch>/libc.so.evidence.txt,
+obj/<arch>/libc.so.map, obj/<arch>/pic/ (objects + per-TU logs).
+EOF
   exit 2
 }
 
