@@ -134,9 +134,8 @@ static int map_dso(struct ldso_ctx *c, const char *name, int *out_index) {
   char err[HB_LDSO_ERR_MAX];
   int fd, rc, have_slot = 0;
   uint32_t slot = 0;
-  int64_t got;
+  int64_t got, got2;
   uint64_t want, file_span, span;
-  int flags;
 
   if (r->nmodules >= HB_LDSO_MAX_MODULES)
     return fail(r, HB_LDSO_E_COUNT, name, "too many modules", 0, 0);
@@ -173,13 +172,19 @@ static int map_dso(struct ldso_ctx *c, const char *name, int *out_index) {
   if (file_span > span)
     file_span = span;
 
-  flags = HB_MAP_PRIVATE | HB_MAP_FIXED;
-  got = hb_ldso_platform_mmap(want, file_span, HB_PROT_READ, flags, fd, 0);
+  /* Reserve the whole span first, then map the file over its head.  One
+   * reservation means the .bss tail is already ours (zero-filled anonymous),
+   * and the file mapping replaces only a range this loader just reserved --
+   * never a mapping the kernel happened to place next door. */
+  span = probe.span;
+  got = hb_ldso_platform_mmap(want, span, HB_PROT_READ | HB_PROT_WRITE,
+                              HB_MAP_PRIVATE | HB_MAP_FIXED | HB_MAP_ANON, -1,
+                              0);
   if (got < 0) {
     /* A kernel that refuses MAP_FIXED outside the mmap arena still maps the
-     * file; take what it gives us rather than failing a valid program. */
-    got = hb_ldso_platform_mmap(0, file_span, HB_PROT_READ, HB_MAP_PRIVATE, fd,
-                                0);
+     * range; take what it gives us rather than failing a valid program. */
+    got = hb_ldso_platform_mmap(0, span, HB_PROT_READ | HB_PROT_WRITE,
+                                HB_MAP_PRIVATE | HB_MAP_ANON, -1, 0);
   }
   if (got < 0) {
     hb_ldso_platform_close(fd);
@@ -204,34 +209,60 @@ static int map_dso(struct ldso_ctx *c, const char *name, int *out_index) {
     hb_ldso_err_add(err, sizeof(err), "\n");
     hb_ldso_platform_console(err);
   }
-  if (file_span < span) {
-    uint64_t tail_addr = (uint64_t)got + file_span;
-    uint64_t tail_len = span - file_span;
-    int64_t t = hb_ldso_platform_mmap(tail_addr, tail_len,
-                                      HB_PROT_READ | HB_PROT_WRITE,
-                                      HB_MAP_PRIVATE | HB_MAP_FIXED | HB_MAP_ANON,
-                                      -1, 0);
-    if (t < 0 || (uint64_t)t != tail_addr) {
-      hb_ldso_platform_close(fd);
-      if (have_slot)
-        slot_put(c, slot);
-      return fail(r, HB_LDSO_E_MMAP, name, "mmap of DSO .bss failed",
-                  (uint64_t)(t < 0 ? -t : t), 1);
+  /* Map each PT_LOAD at base + page_down(p_vaddr) from page_down(p_offset).
+   * One whole-span reservation was taken above, so every MAP_FIXED here
+   * replaces only memory this loader owns; each segment's .bss tail is left
+   * as the reservation's zero-filled pages.  The segment congruence rule
+   * (checked by the probe) makes p_vaddr/p_offset page-compatible. */
+  {
+    uint32_t k;
+    for (k = 0; k < probe.phnum; k++) {
+      const hb_elf64_phdr *ph = &probe.phdr[k];
+      uint64_t vstart, vlen, fstart, flen;
+      if (ph->p_type != HB_PT_LOAD)
+        continue;
+      uint64_t delta = ph->p_vaddr & HB_PAGE_MASK;
+      vstart = ph->p_vaddr - delta;
+      vlen = ((ph->p_vaddr + ph->p_memsz + HB_PAGE - 1) & ~HB_PAGE_MASK) -
+             vstart;
+      /* The congruence rule makes this page-aligned; page_down(p_offset)
+       * would be wrong whenever vaddr and offset sit on different pages
+       * (lld's -z separate-code layout), silently mapping the segment's
+       * bytes at the wrong place inside the image. */
+      fstart = ph->p_offset - delta;
+      /* Exact byte length, never page-rounded: rounding up would map past
+       * EOF, and a page wholly beyond the file is a SIGBUS on access.  The
+       * partial last page is zero-filled by the kernel; everything past it
+       * stays the reservation's anonymous zero pages. */
+      flen = ph->p_offset + ph->p_filesz - fstart;
+      if (flen > vlen)
+        flen = vlen;
+      if (flen == 0)
+        continue;
+      got2 = hb_ldso_platform_mmap((uint64_t)(uintptr_t)m->base + vstart, flen,
+                                   HB_PROT_READ, HB_MAP_PRIVATE | HB_MAP_FIXED,
+                                   fd, fstart);
+      if (got2 < 0 || (uint64_t)got2 != (uint64_t)(uintptr_t)m->base + vstart) {
+        hb_ldso_platform_close(fd);
+        if (have_slot)
+          slot_put(c, slot);
+        return fail(r, HB_LDSO_E_MMAP, name, "cannot map a DSO segment",
+                    (uint64_t)(got2 < 0 ? -got2 : got2), 1);
+      }
     }
   }
   hb_ldso_platform_close(fd);
 
   if (probe.ehdr.e_phoff + (uint64_t)probe.phnum * sizeof(hb_elf64_phdr) >
-      file_span) {
+      probe.file_size) {
     if (have_slot)
       slot_put(c, slot);
     return fail(r, HB_LDSO_E_PHDR, name, "program headers outside the mapping",
                 0, 0);
   }
-  rc = hb_ldso_module_parse(m, m->base,
-                            (const hb_elf64_phdr *)(const void *)(m->base +
-                                                                  probe.ehdr.e_phoff),
-                            probe.phnum, err, sizeof(err));
+  rc = hb_ldso_module_parse(
+      m, m->base, (const hb_elf64_phdr *)hb_ldso_atc(m->base, probe.ehdr.e_phoff),
+      probe.phnum, err, sizeof(err));
   if (rc != HB_LDSO_OK) {
     if (have_slot)
       slot_put(c, slot);
@@ -419,7 +450,7 @@ static int tls_layout(struct ldso_ctx *c) {
 #endif
     if (m->tls_vaddr + m->tls_filesz > m->span)
       return fail(r, HB_LDSO_E_TLS, m->name, "PT_TLS outside the module", 0, 0);
-    hb_ldso_memcpy(dst, m->base + m->tls_vaddr, m->tls_filesz);
+    hb_ldso_memcpy(dst, hb_ldso_atc(m->base, m->tls_vaddr), m->tls_filesz);
   }
 
 #ifdef HB_TLS_VARIANT_II
@@ -465,13 +496,13 @@ static int reloc_apply(struct ldso_ctx *c, struct hb_ldso_module *m,
   if (rel->r_offset + 8 > m->span)
     return fail(r, HB_LDSO_E_RELOC, m->name,
                 "relocation target outside the module", rel->r_offset, 1);
-  where = (uint64_t)(uintptr_t)(m->base + rel->r_offset);
+  where = (uint64_t)(uintptr_t)hb_ldso_at(m->base, rel->r_offset);
 
   if (si) {
-    if (!m->dynsym || si >= m->dynsym_count)
+    refsym = hb_ldso_sym_at(m, si);
+    if (!refsym)
       return fail(r, HB_LDSO_E_RELOC, m->name, "symbol index out of range",
                   si, 2);
-    refsym = &m->dynsym[si];
   }
 
   if (si) {
@@ -524,7 +555,8 @@ static int reloc_apply(struct ldso_ctx *c, struct hb_ldso_module *m,
   case HB_R_AARCH64_GLOB_DAT:
   case HB_R_AARCH64_JUMP_SLOT:
 #endif
-    value = sym ? (uint64_t)(uintptr_t)(smod->base + sym->st_value) : 0;
+    value = sym ? (uint64_t)(uintptr_t)hb_ldso_at(smod->base, sym->st_value)
+                : 0;
     *(uint64_t *)(uintptr_t)where = value;
 #ifdef __x86_64__
     if (type == HB_R_X86_64_GLOB_DAT)
@@ -541,7 +573,8 @@ static int reloc_apply(struct ldso_ctx *c, struct hb_ldso_module *m,
 #else
   case HB_R_AARCH64_ABS64:
 #endif
-    value = (sym ? (uint64_t)(uintptr_t)(smod->base + sym->st_value) : 0) +
+    value = (sym ? (uint64_t)(uintptr_t)hb_ldso_at(smod->base, sym->st_value)
+                 : 0) +
             (uint64_t)rel->r_addend;
     *(uint64_t *)(uintptr_t)where = value;
     r->n_abs64++;
@@ -562,7 +595,7 @@ static int reloc_apply(struct ldso_ctx *c, struct hb_ldso_module *m,
         return fail(r, HB_LDSO_E_RELOC, m->name,
                     "COPY relocation source outside the module", 0, 0);
       hb_ldso_memcpy((void *)(uintptr_t)where,
-                     (const void *)(uintptr_t)(smod->base + sym->st_value), n);
+                     hb_ldso_atc(smod->base, sym->st_value), n);
     }
     r->n_copy++;
     return HB_LDSO_OK;
@@ -653,6 +686,22 @@ static int relax_for_reloc(struct ldso_ctx *c, struct hb_ldso_module *m) {
   return HB_LDSO_OK;
 }
 
+/* A segment's .bss tail must be zero.  The file mapping covers whole pages,
+ * so the page holding the end of the file data may also hold whatever the
+ * file has after it (section headers, symbol tables).  Writing the tail
+ * explicitly is the only layout-independent answer; it runs after
+ * relax_for_reloc, so the pages are already writable. */
+static void zero_bss(struct hb_ldso_module *m) {
+  uint32_t i;
+  for (i = 0; i < m->phnum; i++) {
+    const hb_elf64_phdr *ph = &m->phdr[i];
+    if (ph->p_type != HB_PT_LOAD || ph->p_memsz <= ph->p_filesz)
+      continue;
+    hb_ldso_memset(hb_ldso_at(m->base, ph->p_vaddr + ph->p_filesz), 0,
+                   ph->p_memsz - ph->p_filesz);
+  }
+}
+
 /* Final protections: each segment gets exactly its p_flags (W^X), and the
  * GNU_RELRO range becomes read-only.  RELRO is only applied when the page
  * rounded range does not cover an executable segment — a linker that packs
@@ -667,7 +716,15 @@ static int protect_module(struct ldso_ctx *c, struct hb_ldso_module *m) {
     int prot;
     if (ph->p_type != HB_PT_LOAD)
       continue;
-    prot = (int)(ph->p_flags & (HB_PF_R | HB_PF_W | HB_PF_X));
+    /* ELF p_flags and PROT_* happen to mirror R and X (4/1), so they must
+     * be translated, never masked across. */
+    prot = 0;
+    if (ph->p_flags & HB_PF_R)
+      prot |= HB_PROT_READ;
+    if (ph->p_flags & HB_PF_W)
+      prot |= HB_PROT_WRITE;
+    if (ph->p_flags & HB_PF_X)
+      prot |= HB_PROT_EXEC;
     if (prot == 0)
       prot = HB_PROT_READ;
     rc = set_prot_range(r, m, ph->p_vaddr, ph->p_memsz, prot);
@@ -729,9 +786,11 @@ static int check_start(struct hb_ldso_result *r, const struct hb_start *st) {
   if (st->phnum == 0 || st->phnum > HB_LDSO_MAX_PHNUM)
     return fail(r, HB_LDSO_E_START_FIELD, 0, "hb_start phnum out of range",
                 st->phnum, 2);
-  if (!st->base || !st->entry || !st->phdr)
+  /* base may be zero: that is the ET_EXEC no-slide case (link-time vaddrs
+   * are absolute).  entry and phdr must always be real addresses. */
+  if (!st->entry || !st->phdr)
     return fail_msg(r, HB_LDSO_E_START_FIELD,
-                    "hb_start has a null base/entry/phdr");
+                    "hb_start has a null entry/phdr");
   return HB_LDSO_OK;
 }
 
@@ -773,6 +832,7 @@ int hb_ldso_run(const struct hb_start *st, struct hb_ldso_result *out) {
     rc = relax_for_reloc(&ctx, &r->modules[i]);
     if (rc != HB_LDSO_OK)
       return rc;
+    zero_bss(&r->modules[i]);
     rc = relocate_module(&ctx, &r->modules[i]);
     if (rc != HB_LDSO_OK)
       return rc;

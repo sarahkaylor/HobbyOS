@@ -382,6 +382,17 @@ int hb_ldso_self_relocate(const void *ehdr, char *err, uint32_t errcap);
 
 /* --- internals shared by ldso.c / elf_dyn.c / strtab.c ----------------- */
 
+/* base + off without pointer arithmetic: a no-slide ET_EXEC has base == 0,
+ * and `NULL + off` is undefined behaviour that the optimiser is allowed to
+ * turn into anything (observed: a NULL return from a bounds-checked lookup). */
+static inline void *hb_ldso_at(uint8_t *base, uint64_t off) {
+  return (void *)(uintptr_t)((uint64_t)(uintptr_t)base + off);
+}
+static inline const void *hb_ldso_atc(const uint8_t *base, uint64_t off) {
+  return (const void *)(uintptr_t)((uint64_t)(uintptr_t)base + off);
+}
+
+
 uint32_t hb_ldso_gnu_hash(const char *name);
 uint32_t hb_ldso_sysv_hash(const char *name);
 uint64_t hb_ldso_strlen(const char *s);
