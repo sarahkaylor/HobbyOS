@@ -108,9 +108,31 @@ PNG + PPM + `stats.json` + the engine's stdout are in `evidence/`:
 
 * `evidence/doom10/title/`, `evidence/doom10/e1m1/` — the shareware
   credits/title page and E1M1 with the full status bar.
+* `evidence/doom10/e1m1-long/` — a 35-second run of the same view (exit was
+  our SIGTERM, `-15`); Doom 1.10 does not exit on its own.
 * `evidence/doomgen/attract/`, `evidence/doomgen/e1m1/` — attract-mode demo and
   E1M1 at 640x400.
+* `evidence/doomgen/attract-motion/` — two demo frames six seconds apart:
+  **170 960 / 256 000 pixels differ (66.8 %)**, i.e. the engine loop and the
+  raycaster are running, not a frozen first frame.
+* `evidence/doom10/no-mitshm/` — doom10 on `Xvfb :95 -extension MIT-SHM`:
+  `Xlib: extension "MIT-SHM" missing on display ":95"` yet the frame still has
+  158 colours, because `i_video.c` falls back to `XPutImage` when
+  `XShmQueryExtension` returns false. **HobbyOS's X server does not need to
+  implement MIT-SHM for doom10.**  (The `Using MITSHM extension` line in the
+  log is printed unconditionally at `i_video.c:791`, even when SHM is off.)
 * `evidence/depth-compat/` — what happens on the *wrong* screen depth (below).
+
+Both binaries are `ldd`-clean: `ldd doom10.elf` → `statically linked`.
+
+### How the IWAD is found
+
+`IdentifyVersion()` builds the path from `$DOOMWADDIR` (default `.`) plus the
+literal lowercase name `doom1.wad`; there is no `-iwad` option in 1.10.  Hence
+the runs above use a directory containing `doom1.wad`, or set
+`DOOMWADDIR=<dir>` (verified: `adding /tmp/wadonly/doom1.wad` with cwd `/tmp`).
+The shipped artifact is `DOOM1.WAD`; on a case-insensitive FAT mount that name
+works as-is, otherwise install it as `doom1.wad`.
 
 Why the window grab and not `import -window root`: on an 8-bit PseudoColor
 root, Xvfb returns child-window pixels without colour-translating them through
@@ -129,10 +151,10 @@ The two binaries want **opposite** screens:
       Error: xdoom currently only supports 256-color PseudoColor screens
 
   (`evidence/depth-compat/doom10-on-depth24.log`.)
-* **doomgen.elf needs depth >= 24.**  Its stock backend blits a 32-bpp buffer
-  with `XCreateImage(..., depth = DefaultDepth(...), ...)`; on a depth-8 root
-  that is interpreted as 8 bpp and the image collapses to 19 colours
-  (`evidence/depth-compat/doomgen-on-depth8.stats.json`,
+* **doomgen.elf needs a 24/32-bit TrueColor screen.**  Its stock backend always
+  builds a 32-bpp buffer but passes `DefaultDepth(...)` to `XCreateImage`;
+  on a depth-8 root that buffer is read as 8 bpp and the image collapses to
+  19 colours (`evidence/depth-compat/doomgen-on-depth8.stats.json`,
   `doomgen-on-depth8.png`).
 
 So HobbyOS's X server must expose a depth-8 PseudoColor screen for `doom10`
