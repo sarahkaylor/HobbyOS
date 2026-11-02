@@ -71,10 +71,10 @@ def build(args):
         sys.exit(2)
 
 
-def stage(disk, work, x11_build_dir):
+def stage(disk, work, x11_build_dir, xdepth=True):
     """Put the freshly built server + probe on the disk, make /XDEPTH8.BIN the
-    session autostart and switch the server to depth 8.  Never touch the
-    repo's disk.img (the caller passes a copy)."""
+    session autostart and (unless this is the 24-bit control run) switch the
+    server to depth 8.  Never touch the repo's disk.img (caller passes a copy)."""
     bindir = os.path.join(REPO, x11_build_dir, "bin")
     for name in ("XHOBBY.BIN", "XDEPTH8.BIN"):
         src = os.path.join(bindir, name)
@@ -100,11 +100,14 @@ def stage(disk, work, x11_build_dir):
     with open(env, "w") as f:
         for ln in keep:
             f.write(ln + "\n")
-        f.write("HB_XDEPTH=8\n")
+        if xdepth:
+            f.write("HB_XDEPTH=8\n")
         f.write("XSESS_NO_WM=1\n")
     subprocess.run(["mcopy", "-o", "-i", disk, env, "::/X11/XSESSION.ENV"],
                    check=True)
-    log("staged /XSTART.TXT (/XDEPTH8.BIN) and HB_XDEPTH=8, XSESS_NO_WM=1")
+    log("staged /XSTART.TXT (/XDEPTH8.BIN) and "
+        + ("HB_XDEPTH=8, " if xdepth else "(no HB_XDEPTH), ")
+        + "XSESS_NO_WM=1")
 
 
 def read_serial(path):
@@ -148,6 +151,9 @@ def main():
     ap.add_argument("--timeout", type=int, default=180)
     ap.add_argument("--keep", action="store_true",
                     help="keep the booted disk copy and serial log")
+    ap.add_argument("--control24", action="store_true",
+                    help="negative control: same client/disk WITHOUT HB_XDEPTH; "
+                         "expect a depth 24 root and a failed visual match")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -181,18 +187,30 @@ def main():
                 log(f"ok   {what}  (+{time.time() - t0:.1f}s)")
             return max(i, 0)
 
-        pos = need("hobbyos: screen 640x400 depth 8 PseudoColor",
-                   "server came up as a depth 8 PseudoColor screen")
-        pos = need("[XD8] XMatchVisualInfo depth 8 PseudoColor ok",
-                   "client XMatchVisualInfo(8, PseudoColor)", dl=60)
-        pos = need("[XD8] XPutImage 640x400 ZPixmap depth 8 done",
-                   "client XPutImage of a depth 8 ZPixmap", dl=60)
-        pos = need("[XD8] XGetImage green band (320,200) = index 0x50",
-                   "server read-back of the green band as index 0x50", dl=60)
-        need("[XD8] ready", "client reached its idle loop", dl=60)
+        if args.control24:
+            # Negative control: the identical client, the identical disk, only
+            # HB_XDEPTH absent.  The server must stay depth 24 and the visual
+            # match must fail exactly where Doom would I_Error.
+            need("[XD8] display :0 open: screen 0 1920x1080, root depth 24",
+                 "control: no HB_XDEPTH -> depth 24 root")
+            need("[XD8] FAIL XMatchVisualInfo(depth 8, PseudoColor)",
+                 "control: XMatchVisualInfo(8, PseudoColor) fails at depth 24",
+                 dl=60)
+        else:
+            pos = need("hobbyos: screen 640x400 depth 8 PseudoColor",
+                       "server came up as a depth 8 PseudoColor screen")
+            pos = need("[XD8] XMatchVisualInfo depth 8 PseudoColor ok",
+                       "client XMatchVisualInfo(8, PseudoColor)", dl=60)
+            pos = need("[XD8] XPutImage 640x400 ZPixmap depth 8 done",
+                       "client XPutImage of a depth 8 ZPixmap", dl=60)
+            pos = need("[XD8] XGetImage green band (320,200) = index 0x50",
+                       "server read-back of the green band as index 0x50", dl=60)
+            need("[XD8] ready", "client reached its idle loop", dl=60)
         time.sleep(3)                  # let the present reach the framebuffer
 
-        ppm = os.path.join(args.out, "xdepth8.ppm")
+        ppm = os.path.join(args.out,
+                           "xdepth8-control24.ppm" if args.control24
+                           else "xdepth8.ppm")
         if not qmp.shot(ppm):
             fails.append("QMP screendump failed")
         else:
@@ -201,6 +219,13 @@ def main():
             log(f"screendump {ppm} ({w}x{h})")
             if not px:
                 fails.append("screendump is not a P6 PPM")
+            elif args.control24:
+                got = pixel(px, w, 320, 200)
+                ok = near(got, BLACK, 8)
+                log(f"{'ok  ' if ok else 'FAIL'} control: (320,200) = {got} "
+                    f"(no 8-bit window was drawn)")
+                if not ok:
+                    fails.append(f"control (320,200) is {got}, want black")
             else:
                 probes = [
                     ("red band   (100,200)", 100, 200, RED),

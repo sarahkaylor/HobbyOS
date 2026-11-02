@@ -55,3 +55,16 @@ QEMU with the same device set as `run_icewm_test.py`, and checks:
 
 Artifacts land in `/tmp/hobbyos_xdepth8/` (`xdepth8.ppm`, `serial.log`,
 `REPORT.txt`); exit 0 only when every check passes.
+
+## Negative control
+
+`--control24` boots the same disk and the same client with `XSESS_NO_WM=1`
+but **no** `HB_XDEPTH`.  It must then see a depth 24 root and log
+`[XD8] FAIL XMatchVisualInfo(depth 8, PseudoColor): no such visual` — the
+exact call Doom 1.10 turns into `I_Error`.  That pins the pixel evidence above
+on `HB_XDEPTH=8` rather than on anything else in the image:
+
+```sh
+python3 src/user/x11/apps/xdepth8/run_xdepth8_test.py --no-build --control24 \
+    --out /tmp/hobbyos_xdepth8_control
+```
