@@ -180,7 +180,7 @@ def main():
     os.makedirs(outdir, exist_ok=True)
     serial = os.path.join(outdir, "serial.log")
     qmp = "/tmp/acceptance-qmp"
-    qemu_make = ["make", "run", f"ARCH={args.arch}",
+    qemu_make = ["make", "run", "DESKTOP=hobby", f"ARCH={args.arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp},server,nowait"]
 
     from evidence_rig import boot, find_menu_slot, launch_from_menu
@@ -209,7 +209,11 @@ def main():
         if not ok:
             all_ok = False
         prev_ppm = ppm
-        q.key("esc", 0.4)
+        # Close the game's window before the next launch: ESC is forwarded to
+        # the focused game, not the desktop (measured in GB-046), so it closes
+        # nothing and the menu cursor/launch gesture drifts after the first
+        # title.  F4 is the desktop's close-focused-window key.
+        q.key("f4", 0.4)
         time.sleep(1.2)
 
     # report
@@ -231,8 +235,8 @@ def main():
         if r.get('reasons'):
             L.append(f"  - reasons: {'; '.join(r['reasons'])}\n")
     L.append(f"\nSummary: **{'PASS' if all_ok else 'FAIL'}**\n")
-    L.append("\n- intel leg gated on GB-057 (intel spawn deadlock); this run is ARM.\n")
-    L.append("- 'S0+S1 signed off' is the milestone judgment; this run is its evidence base.\n")
+    L.append(f"\n- arch: {args.arch}; 'S0+S1 signed off' is the milestone judgment, "
+             f"this run is its evidence base.\n")
     with open("S0-S1-ACCEPTANCE.md", "w") as f:
         f.write("".join(L))
 
