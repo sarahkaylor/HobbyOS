@@ -3739,7 +3739,10 @@ VENDOR_HOST_CXXFLAGS = -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ \
   -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES \
   -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY
 RTTI_TEST = rtti_test_host
-obj/host_rtti_test.o: src/host/rtti_test.cpp
+# GB-157: the TU includes <typeinfo> from the fetched libc++ tree; without this
+# prerequisite a fresh worktree compiles it before any fetch guard can run and
+# dies with "'typeinfo' file not found" (the same guard cxx_t.o carries at :1145).
+obj/host_rtti_test.o: src/host/rtti_test.cpp $(LIBCXX_INCLUDE)/typeinfo
 	@mkdir -p obj
 	$(HOST_CC) -Wall -Wextra -g $(VENDOR_HOST_CXXFLAGS) -c $< -o $@
 obj/host_rtti_private_typeinfo.o: $(LIBCXX_ROOT)/libcxxabi/src/private_typeinfo.cpp $(LIBCXX_VENDOR)/.fetched-ok
@@ -4251,3 +4254,14 @@ vdisplay_test_run: $(VDISPLAY_TEST)
 	./$(VDISPLAY_TEST)
 host_tests: vdisplay_test_run
 .PHONY: vdisplay_test_run
+
+# GB-160 (parent GB-041): W4 DOOM static-musl port surface.  The deliverable is
+# a static-PIE (Type DYN) ELF — the class elf_loader.c:124 accepts — carrying the
+# DG_* surface.  The second line is the falsifier: the gate must reject a
+# -no-pie ET_EXEC and a dynamic EXEC, or it cannot fail on its own clause.
+w4_doom_test:
+	python3 tools/sdl/w4/w4_doom_test.py
+	python3 tools/sdl/w4/w4_doom_test.py --self-test
+host_tests: w4_doom_test
+.PHONY: w4_doom_test
+
