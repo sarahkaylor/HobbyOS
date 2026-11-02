@@ -1,0 +1,3 @@
+patched: macro no-op + fault_count++ removed; struct growth KEPT
+probeB: rows=0 arrived=0 unknown_syscall=0 halt=0
+PROBEB_RC=0
