@@ -1837,8 +1837,8 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
       /* so-vm lane A (W^X, docs/shared-libs.md section 4 item 5): never
          hand out WRITE on an object frame in a MAP_PRIVATE region — the
          write fault breaks the copy instead (vm_handle_fault does it, and
-         a later mprotect that DROPS PROT_WRITE leaves leaves read-only so
-         a stale write faults).  This is what lets the interpreter map DSO
+         a later mprotect that DROPS PROT_WRITE leaves the leaf read-only,
+         so a stale write faults cleanly).  This is what lets the interpreter map DSO
          text PROT_READ, mprotect it PROT_READ|PROT_WRITE for relocations,
          then mprotect it back with no shared text ever dirtied. */
       struct vm_region *mr = vm_region_find(as, a);
