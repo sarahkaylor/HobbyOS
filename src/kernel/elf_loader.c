@@ -216,8 +216,8 @@ static void el_clear_reloc_counts(const struct elf_image *img, uint8_t *stage,
  * mapped and belongs to the caller.  Returns 0 / -ENOMEM / -ENOEXEC. */
 static int el_stage_build(const struct elf_image *img, const struct elf_plan *plan,
                           const uint8_t *file, uint64_t flen, uint64_t base,
-                          const char *what, uint8_t **stage_out,
-                          uint64_t *pages_out) {
+                          const char *what, int apply_reloc,
+                          uint8_t **stage_out, uint64_t *pages_out) {
   uint64_t span = plan->span;
   uint64_t pages = (span + FRAME_SIZE - 1) / FRAME_SIZE;
   uint64_t stage = frame_alloc_contig((int)pages);
@@ -233,16 +233,25 @@ static int el_stage_build(const struct elf_image *img, const struct elf_plan *pl
     el_free_contig(stage, pages);
     return -ENOEXEC;
   }
-  rc = elf_apply_relocations(img, (uint8_t *)stage, span, base);
-  if (rc != ELF_OK) {
-    uart_puts(what);
-    uart_puts(": relocations: ");
-    uart_puts(elf_strerror(rc));
-    uart_puts("\n");
-    el_free_contig(stage, pages);
-    return -ENOEXEC;
+  /* M0 (docs/shared-libs.md §1): an INTERPRETED executable is relocated by its
+     interpreter, not by the kernel.  Its DT_RELA holds symbol-bearing entries
+     (GLOB_DAT/JUMP_SLOT) that only the interpreter can resolve, so applying the
+     table here fails with ELF_ERR_RELOC on the first such entry — measured on
+     the first pilot boot.  The table must also stay intact (no RELASZ zeroing),
+     because the interpreter walks it.  The interpreter ITSELF is static-PIE and
+     still takes the kernel's RELATIVE pass. */
+  if (apply_reloc) {
+    rc = elf_apply_relocations(img, (uint8_t *)stage, span, base);
+    if (rc != ELF_OK) {
+      uart_puts(what);
+      uart_puts(": relocations: ");
+      uart_puts(elf_strerror(rc));
+      uart_puts("\n");
+      el_free_contig(stage, pages);
+      return -ENOEXEC;
+    }
+    el_clear_reloc_counts(img, (uint8_t *)stage, span);
   }
-  el_clear_reloc_counts(img, (uint8_t *)stage, span);
   *stage_out = (uint8_t *)stage;
   *pages_out = pages;
   return 0;
@@ -415,7 +424,7 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
     return -ENOSPC;
   }
   rc = el_stage_build(eimg, &eplan, exe, exe_len, base, "elf loader",
-                      &stage, &stage_pages);
+                      iimg ? 0 : 1, &stage, &stage_pages);
   if (rc != 0) goto done;
   exe_entry = base + (eimg->entry - eimg->vaddr_base);
   rc = el_map_stage(as, base, &eplan, stage, VMK_IMG);
@@ -443,7 +452,7 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
       goto done;
     }
     rc = el_stage_build(iimg, &iplan, ib, ilen, interp_base,
-                        "elf loader: interpreter", &istage, &istage_pages);
+                        "elf loader: interpreter", 1, &istage, &istage_pages);
     if (rc != 0) goto done;
     rc = el_map_stage(as, interp_base, &iplan, istage, VMK_LIB);
     if (rc != 0) goto done;
