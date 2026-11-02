@@ -365,6 +365,11 @@ ifeq ($(MODE),test)
   USER_CFLAGS += -DKERNEL_MODE_TEST
 else ifeq ($(MODE),unit_tests)
   CFLAGS += -DKERNEL_MODE_UNIT_TEST
+else ifeq ($(MODE),so_test)
+  # docs/shared-libs.md §5.5: boot ONLY the dynamically linked pilot HDYN.BIN
+  # (ET_DYN + PT_INTERP /LDHOBBY.SO -> the interpreter -> LIBC.SO).
+  CFLAGS += -DKERNEL_MODE_SO_TEST
+  USER_CFLAGS += -DKERNEL_MODE_SO_TEST
 else ifeq ($(MODE),desktop_test)
   CFLAGS += -DKERNEL_MODE_DESKTOP_TEST
   USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
@@ -2654,11 +2659,44 @@ endif
 	# for whoever remembered to stage it.
 	perl -e 'print chr($$_ % 251) for (0..4095)' > STAGE4K.BIN
 	$(MCOPY) -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+	# Dynamic linking (docs/shared-libs.md §5): the interpreter, the shared
+	# libc, and the pilot program.  All three are 8.3 names on the FAT root.
+	$(MCOPY) -i disk.img $(OBJ_DIR)/LDHOBBY.SO ::/LDHOBBY.SO
+	$(MCOPY) -i disk.img $(OBJ_DIR)/libc.so ::/LIBC.SO
+	$(MCOPY) -i disk.img $(HDYN_BIN) ::/HDYN.BIN
 ifeq ($(DESKTOP),icewm)
 	# icewm.md §4.3/§4.4: X binaries + data tree + XSESSION.BIN (DESKTOP=icewm only).
 	sh src/user/x11sess/stage-disk.sh disk.img "$(X11_BUILD_DIR)" $(XSESSION_BIN) "$(MCOPY)" "$(MMD)"
 endif
 	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
+
+# ---------------------------------------------------------------------------
+# Shared libraries (docs/shared-libs.md).  LIBC.SO + the interpreter
+# LDHOBBY.SO come from tools/build_libs.sh (the PIC object set lives in
+# obj/<arch>/pic/ and never collides with the static libc.a flavour); HDYN.BIN
+# is the pilot program, the first native executable built ET_DYN + PT_INTERP.
+# ---------------------------------------------------------------------------
+LIBS_SH = tools/build_libs.sh
+HDYN_BIN = $(OBJ_DIR)/HDYN.BIN
+
+$(OBJ_DIR)/libc.so: $(OBJ_DIR)/libc.a src/libc/libc.map src/libc/linker_so.ld $(LIBS_SH)
+	@$(LIBS_SH) $(ARCH)
+
+$(OBJ_DIR)/LDHOBBY.SO: src/user/ld/ldso.c src/user/ld/elf_dyn.c src/user/ld/mmap_io.c \
+                       src/user/ld/strtab.c src/include/ldso.h $(OBJ_DIR)/libc.a $(LIBS_SH)
+	@$(LIBS_SH) build_interp $(ARCH)
+
+# A dynamically linked program is position independent by construction (it is
+# placed at a base the interpreter picks), so its TUs take -fPIC.
+$(OBJ_DIR)/crt0_dyn.o: src/libc/crt0_dyn.c src/user_include/libc.h
+	$(CC) $(USER_CFLAGS) -fPIC -c $< -o $@
+
+$(OBJ_DIR)/hello_dyn.o: src/user/hello_dyn.c src/user_include/libc.h
+	$(CC) $(USER_CFLAGS) -fPIC -c $< -o $@
+
+$(HDYN_BIN): $(OBJ_DIR)/crt0_dyn.o $(OBJ_DIR)/hello_dyn.o $(OBJ_DIR)/libc.so
+	$(LD) -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+	  -o $@ $(OBJ_DIR)/crt0_dyn.o $(OBJ_DIR)/hello_dyn.o $(OBJ_DIR)/libc.so
 
 # Target to run the OS inside QEMU
 # RUN_STAGE: optional staging hook, run AFTER disk.img is (re)built and BEFORE
