@@ -1,8 +1,9 @@
 # Shared libraries on HobbyOS — path B (ELF-native dynamic linking)
 
-Status: **M1 — the pilot runs.** All four lanes merged (`466c6a84..e2d8f3a`-era tip);
-`HDYN.BIN` (ET_DYN + `PT_INTERP /LDHOBBY.SO` → `LIBC.SO`) prints its markers and exits 0
-on **x86_64 QEMU**. ARM build/verify in flight. §7 records the six seams integration found.
+Status: **M2 — the pilot runs on both arches at the default 8 CPUs.** All four lanes
+merged; `HDYN.BIN` (ET_DYN + `PT_INTERP /LDHOBBY.SO` → `LIBC.SO`) prints its markers and
+exits 0 on x86_64 and aarch64. §7 records the six integration seams and the `cpu_local`
+stride bug (which used to gate the pilot at `-smp 1`, now fixed).
 Scope: native HobbyOS programs (not the Linux-compat track, which reaches
 `ld.so` by a different route — `docs/linux-abi.md` §W5).
 
@@ -182,7 +183,7 @@ wins), and a TLS-using DSO.
    ```
    tools/build_libs.sh intel && tools/build_libs.sh build_interp intel
    make ARCH=intel MODE=so_test -j32 hobbyos.elf disk.img
-   timeout 45 make ARCH=intel MODE=so_test run QEMU_ARGS="-display none -smp 1"
+   timeout 45 make ARCH=intel MODE=so_test run QEMU_ARGS="-display none"
    # expect on the serial log:
    #   HDYN: entered (dynamic)
    #   HDYN: libc.so symbols resolved
@@ -190,8 +191,8 @@ wins), and a TLS-using DSO.
    #   [EXITPC] pid=1 ... code=0x0
    ```
 
-   (aarch64: same with `arm`. The `-smp 1` is the pre-existing boot-path
-   blocker in §7, not a linking requirement.)
+   (aarch64: same with `arm`. The default 8-CPU boot is expected: the
+   `cpu_local` stride bug that used to require `-smp 1` is fixed — §7.)
 6. Only then convert real programs (`ls`, `nano`, `desktop`).
 
 ## 6. Deliberate non-goals (v1)
@@ -241,14 +242,52 @@ meet. Each is fixed in the merged tree, and each has a serial-log signature.
    layout. ld.so now writes that exported flag after `SYS_SET_TLS` and fails
    loudly if libc does not export it.
 
-### Known blocker (pre-existing, not dynamic linking)
+### Blocker found and fixed during M2: `cpu_local` had two sizes
 
-With QEMU's default 8 CPUs the **first user process is unreliable**: it lands
-on an AP where `current_process()` reads NULL (`%gs:40`), so `open`, console
-writes and `exit` fail (`open` → "cannot open DT_NEEDED", console → `-EFAULT`).
-It is **not** specific to ELF: a plain flat `HELLO.BIN` booted under the same
-mode fails 2 runs in 3 with `[DEADCLAIM] ... the resume path halted that CPU`,
-and succeeds when it lands on CPU0. The pilot is therefore gated at
-`-smp 1` until the SMP boot-path claim/resume race is fixed; the evidence for
-both binaries is in the integration log. Do not treat a `-smp 8` failure of the
-pilot as a linking regression.
+With QEMU's default 8 CPUs the first user process was unreliable: it landed
+on an AP where `current_process()` read NULL (`%gs:40`), so `open` →
+"cannot open DT_NEEDED", console writes → `-EFAULT`, and `exit` never
+terminated (the process spun in the compiler's `noreturn` trap).
+
+Root cause: `struct cpu_local` was defined **twice** — the real block in
+`trap.c` (104 bytes, with the GB-147 frame-snapshot fields) and a six-field
+mirror in `process.c` (48 bytes) for its `extern cpu_locals[]`. `cpu_locals`
+is defined in `trap.c`, so `process.c` indexed it with the wrong stride:
+`set_current_process_pid(cpu, pid)` wrote `base + cpu*48 + 40` while that
+CPU's GS base pointed at `base + cpu*104`. CPU 0 coincides, which is why
+anything on the boot core worked and every AP saw NULL.
+
+It was **not** specific to ELF: a plain flat `HELLO.BIN` failed 2 runs in 3
+with `[DEADCLAIM] ... the resume path halted that CPU`. The struct now lives
+in `src/include/arch/cpu_local.h` with its offsets pinned. After the fix:
+3/3 dynamic-pilot runs and 4/4 flat runs on 8 CPUs, and the pilot no longer
+needs `-smp 1`.
+
+## 8. Converting a program (validated on `ls`)
+
+A program becomes dynamically linked by changing **only its link flavour** —
+no source edit is required if it already builds:
+
+```
+# 1. same TU, position independent (the static .o is absolute and lld will
+#    reject it with "relocation R_X86_64_64 cannot be used against symbol")
+clang <USER_CFLAGS> -fPIC -c src/user/ls.c -o obj/<arch>/dyn/ls.o
+
+# 2. ET_DYN + PT_INTERP, linked against the shared libc
+ld.lld -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+       -o obj/<arch>/LSDYN.BIN obj/<arch>/dyn/ls.o obj/<arch>/libc.so
+```
+
+Two entry-point shapes, and the difference matters:
+
+* **legacy `_start` programs** (most ports: `ls`, `cat`, `grep`) link with no
+  crt0 at all — their own `_start` is the entry, and they read argv through
+  `SYS_GETARGS`. TLS stays correct because the interpreter installed the block
+  and set `ho_tls_ready_flag`, so libc's lazy `__errno_location()` install
+  stands down.
+* **`main()`-style programs** need `crt0_dyn.o` (never `crt0.o`: it would
+  recompute a single-module TLS block from the executable's own `__tls_*`).
+
+Measured: `ls` drops from 46 KB static to **7 KB** dynamic. A program using a
+symbol that `libc.map` does not export fails at *link* time with the symbol
+named — that is the export set doing its job, not a loader bug.
