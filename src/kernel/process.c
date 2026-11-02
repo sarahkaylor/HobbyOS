@@ -732,13 +732,20 @@ static void reap_deliver_locked(struct process *grp) {
 static void group_teardown(struct process *grp, uint64_t code) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   int block = grp->phys_block_idx;
-  struct addr_space *as = grp->as;
-  if (block < 0 && !as) {
+  if (grp->teardown_done) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return;
   }
+  /* GB-159: the exactly-once token is now a flag, not the AS/block pair.
+     This CPU is still executing the exit path; a tick between clearing `as`
+     and state=EXITED saves a kernel frame that schedule() then refuses to
+     resume ([NOAS]: no AS, no v1 base), so the slot stays READY for ever and
+     never prints an exit line.  The AS stays attached here and is released by
+     the slot-reuse / zombie-reclaim paths, which only take it once
+     process_still_running(i) is false -- i.e. no CPU still translates
+     through it (the [FREERACE] at mmu.c:665). */
+  grp->teardown_done = 1;
   grp->phys_block_idx = -1;
-  grp->as = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
 
   /* Close the group's descriptors once.  SEC-9 (security-plan.md #9):
@@ -752,8 +759,6 @@ static void group_teardown(struct process *grp, uint64_t code) {
   flags = spinlock_acquire_irqsave(&proc_lock);
   if (block >= 0)
     frame_block_free(block);
-  if (as)
-    vm_as_teardown(as); /* P2.2: the v2 group's AS goes with the block */
   grp->state = PROC_STATE_EXITED;
   grp->thread_ret = code;
   /* P2.3 (design section 5.4): a fault kill passes PROCESS_STATUS_SIGNAL
@@ -1077,6 +1082,7 @@ static int process_create_internal_ver(int ver) {
   p->tls_base = 0;
   p->futex_uaddr = 0;
   p->clear_child_tid = 0;
+  p->teardown_done = 0;
   p->thread_ret = 0;
   p->as = 0;
   p->fd_cloexec = 0;
@@ -2299,7 +2305,20 @@ void process_kill_group_sig(struct process *p, int sig) {
   /* Deliver the terminating-signal status (low byte) so a waiting parent
      can reap a kill with a signal-shaped status. */
   p->exit_status = sig & 0x7f;
-  proc_release_mem_locked(p);
+  /* GB-159: a kill can land while the victim is still executing on another
+     CPU.  Freeing its AS here is the [FREERACE] (`freeing root=... while
+     cpu=... still translates through it`); the victim then re-enters
+     schedule() with as==0, the NOAS guard parks its slot for ever, and no exit
+     line is printed.  Mark the teardown done and release the block, but leave
+     the AS to the slot-reuse/zombie paths, which free it only once
+     process_still_running(i) is false. */
+  p->teardown_done = 1;
+  {
+    int block = p->phys_block_idx;
+    p->phys_block_idx = -1;
+    if (block >= 0)
+      frame_block_free(block);
+  }
   /* P1: killing a group leader kills the whole group. */
   for (int i = 0; i < MAX_PROCESSES; i++) {
     struct process *m = &proc_table[i];
@@ -4425,6 +4444,7 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   t->wake_ms = 0;
   t->futex_uaddr = 0;
   t->clear_child_tid = 0;
+  t->teardown_done = 0;
   t->spawn_retval = -1;
   t->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
