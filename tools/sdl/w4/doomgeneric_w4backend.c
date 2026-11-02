@@ -15,10 +15,20 @@
 static int DG_RESX = 640;
 static int DG_RESY = 400;
 static uint32_t *fb; /* 640x400 B8G8R8A8, alpha=0xFF */
+/* GB-166: a 1 MB malloc returned NULL once DOOM's zone allocator had taken the
+   heap (measured in-guest: `[W4] DG_Init 640x400 fb=0x00000000`, while a bare
+   static-PIE malloc of the same size succeeds).  The framebuffer is fixed-size,
+   so it belongs in BSS, not on the heap. */
+static uint32_t fb_static[DOOMGENERIC_RESX * DOOMGENERIC_RESY];
 
 void DG_Init(void) {
-    fb = malloc((size_t)DOOMGENERIC_RESX * DOOMGENERIC_RESY * 4);
+    fb = fb_static;
     DG_ScreenBuffer = fb;
+    /* GB-166 evidence channel: the console is the only stdout sink and it
+       scrolls, so also drop the pointer where the host can read it after the
+       run (mcopy the image). */
+    FILE *f = fopen("/W4FB.TXT", "w");
+    if (f) { fprintf(f, "fb=%p\n", (void*)fb); fclose(f); }
     printf("[W4] DG_Init %dx%d fb=%p\n", DOOMGENERIC_RESX, DOOMGENERIC_RESY, (void*)fb);
 }
 
