@@ -28,6 +28,10 @@ $ make doom_elf_test_gen      # doomgeneric, stock backend, depth 24
 | `doom10-fullscreen.png` | linuxdoom-1.10 | the same title in the 1920×1080 HobbyOS framebuffer (320×200 client window, 3.1 % of the screen) |
 | `doom10-e1m1-640x400.png` | linuxdoom-1.10 | **gameplay** — launched with `-warp 1 1`: E1M1's blue-floored room, pillars, a health bonus, the pistol, and the full status bar (`AMMO 50`, `HEALTH 100 %`, `ARMS`, `ARMOR 0 %`, `BULL 50/200`, `SHEL/ROKT/CELL`) |
 | `doom10-e1m1-fullscreen.png` | linuxdoom-1.10 | the same gameplay frame in the whole framebuffer |
+| `doom10-e1m1-start-room.png` | linuxdoom-1.10 | E1M1 first room after `-warp 1 1` (barrel, corpse, pistol) |
+| `doom10-e1m1-outdoors-firing.png` | linuxdoom-1.10 | **driven by input**: two 900 ms forward holds walked the player out of the start room — shotgun mid-fire, muzzle flash, AMMO 48 |
+| `doom10-e1m1-corridor.png` | linuxdoom-1.10 | deeper in E1M1 (`-skill 3`), rusted corridor |
+| `doom10-e1m1-desktop-context.png` | linuxdoom-1.10 | the whole 1920×1080 framebuffer: a 320×200 client window at (0,0), no WM |
 | `doomgen-e1m1-640x400.png` | doomgeneric | E1M1 gameplay: corridor, HUD (`AMMO 34 / HEALTH 82 % / ARMOR 94 %`), Doomguy face, `YOU GOT THE SHOTGUN!` |
 | `doomgen-e1m1-fullscreen.png` | doomgeneric | the same frame in the full framebuffer |
 

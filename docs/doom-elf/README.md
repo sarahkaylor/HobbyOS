@@ -21,6 +21,10 @@ what was measured, what the gaps are).  This file is the early run log.
 | `REPORT.md` | the full account: architecture, measurements, gaps |
 | `doom10-title-660x400.png` | id Doom title screen, guest framebuffer, 320×200 client @ 2× |
 | `doom10-fullscreen.png` | the same, whole 1920×1080 HobbyOS screen |
+| `doom10-e1m1-start-room.png` | E1M1's first room: barrel, corpse, pistol, HUD 50/100 %/0 % |
+| `doom10-e1m1-outdoors-firing.png` | walked out to the blue-floored yard — rocky ridge, grey sky — **shotgun mid-fire** with the muzzle flash, AMMO 48 |
+| `doom10-e1m1-corridor.png` | further in: rusted corridor, pistol, AMMO 50 |
+| `doom10-e1m1-desktop-context.png` | the whole 1920×1080 framebuffer: the 320×200 client window at (0,0), no WM, no root background |
 | `doomgen-e1m1-640x400.png` | doomgeneric E1M1 gameplay frame, guest framebuffer |
 | `doomgen-e1m1-fullscreen.png` | the same, whole screen |
 | `serial-doom10.txt` / `serial-doomgen.txt` | unedited guest consoles for those runs |
