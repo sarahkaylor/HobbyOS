@@ -1,6 +1,6 @@
 {
-  "arch": "arm",
-  "captured_at": "2026-11-02T04:08:43.439653+00:00",
+  "arch": "intel",
+  "captured_at": "2026-11-02T04:37:54.127909+00:00",
   "results": [
     {
       "game": "PONG.BIN",
@@ -8,7 +8,7 @@
       "live": true,
       "ok": true,
       "reasons": [],
-      "sha16": "c13b0ef5ffc8e7c8"
+      "sha16": "fe8bbe5d2a9ef4b9"
     },
     {
       "game": "MILLIPED.BIN",
@@ -16,7 +16,7 @@
       "live": true,
       "ok": true,
       "reasons": [],
-      "sha16": "d7deb8d8cc076e91"
+      "sha16": "01c82ae540edc2c5"
     },
     {
       "game": "XNIBBLER.BIN",
@@ -24,7 +24,7 @@
       "live": true,
       "ok": true,
       "reasons": [],
-      "sha16": "c99801d6c64f48ca"
+      "sha16": "94a59e16717b6d38"
     },
     {
       "game": "XCRYPT.BIN",
@@ -32,7 +32,7 @@
       "live": true,
       "ok": true,
       "reasons": [],
-      "sha16": "7d41222fdf25cffe"
+      "sha16": "554d6135994bc504"
     },
     {
       "game": "NES.BIN",
@@ -40,7 +40,7 @@
       "live": true,
       "ok": true,
       "reasons": [],
-      "sha16": "c9ce35d258849dd1"
+      "sha16": "3725af60b38088a3"
     }
   ],
   "summary": "PASS"
