@@ -427,9 +427,13 @@ build_libc() {
   # reports those as errors by default; this flag keeps the single committed
   # map authoritative for both flavours.  Anything genuinely missing shows up
   # in check_map and in the .dynsym count of the evidence file.
+  # -z text turns "no TEXTREL" from a post-link assertion into a link-time
+  # error: any relocation that would force a write to a PT_LOAD mapped read-only
+  # (or R+X) fails the link instead of shipping a self-modifying image.
   "$LD" -shared --soname=LIBC.SO -T "$LINKER_SO" --version-script "$LIBC_MAP" \
     --undefined-version \
-    -z relro -z now -z defs -z noexecstack --hash-style=both "${strip[@]}" \
+    -z relro -z now -z defs -z noexecstack -z text --hash-style=both \
+    "${strip[@]}" \
     -o "$SO_OUT" "${objs[@]}" || die "$arch: ld.lld -shared failed (see above)"
 
   [ -f "$SO_OUT" ] || die "$arch: linker produced no $SO_OUT"
