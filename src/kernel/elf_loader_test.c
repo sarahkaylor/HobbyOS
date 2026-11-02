@@ -459,10 +459,16 @@ static void test_map_interp(void) {
   /* enter at interp_base + the interpreter's e_entry, not the executable's */
   EXPECT_EQ(info.entry == (lib0 + FX_ENTRY_OFF), 1);
 
-  /* The executable's own relocation still ran. */
-  uint64_t exe_slot = 0;
+  /* The executable's relocations belong to the INTERPRETER (docs/shared-libs.md
+   * §7.1): the kernel must leave DT_RELA intact and must not apply it, or the
+   * first symbol-bearing GLOB_DAT/JUMP_SLOT entry aborts the load with
+   * ELF_ERR_RELOC (measured on the first pilot boot).  The slot therefore
+   * keeps its link-time value (the fixture zeroes it); the interpreter
+   * applies R_*_RELATIVE and the symbol relocations once the DSOs are mapped.
+   * The static-PIE case above still asserts the kernel pass. */
+  uint64_t exe_slot = ~0ULL;
   EXPECT_EQ(va_read64(as, FX_IMG_BASE + FX_SLOT, &exe_slot), 0);
-  EXPECT_EQ(exe_slot == (FX_IMG_BASE + FX_ADDEND), 1);
+  EXPECT_EQ(exe_slot == 0, 1);
 
   /* The interpreter got ITS base, ITS p_flags, ITS relocation. */
   struct vm_region *it = vm_region_find(as, lib0);
