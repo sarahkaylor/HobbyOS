@@ -39,6 +39,10 @@ static void row(const char *fmt, ...) {
   va_start(ap, fmt);
   int n = vsnprintf(b, sizeof b, fmt, ap);
   va_end(ap);
+  /* vsnprintf returns the length it WOULD have written; past the buffer that is
+     a write of uninitialised stack (measured: a long PATH row printed heap
+     garbage).  Clamp before writing. */
+  if (n > (int)sizeof b - 1) n = (int)sizeof b - 1;
   if (n > 0) (void)!write(1, b, (size_t)n);
 }
 
