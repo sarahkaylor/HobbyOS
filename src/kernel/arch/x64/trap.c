@@ -243,6 +243,13 @@ static void sys_write_console(struct trap_frame *tf) {
  * output-comparing suites ("status) got 2, want 0" everywhere) — GB-057.
  * Remap exactly the way sys_waitpid/sys_fork do. */
 static void sys_exit(struct trap_frame *tf) {
+  struct process *cur = current_process();
+  /* GB-021: a musl pthread exits with exit(60), not SYS_THREAD_EXIT(74).
+     A clone(2) child must leave only its thread; the group stays alive. */
+  if (cur && cur->is_thread) {
+    process_thread_exit(tf, tf->regs[5]);
+    return;
+  }
   tf->regs[0] = tf->regs[5]; /* rdi = the exit code */
   process_exit(tf);
 }
@@ -806,6 +813,70 @@ static void sys_thread_exit(struct trap_frame *tf) {
 static void sys_set_tls(struct trap_frame *tf) {
   struct process *caller = current_process();
   tf->regs[0] = (uint64_t)(int64_t)process_set_tls(caller, tf->regs[5]);
+}
+
+/* --- GB-021: Linux clone(56) / futex(202) for a static-PIE musl binary.
+ * The x64 syscall register map is rdi=r5, rsi=r4, rdx=r3, r10=r9, r8=r7,
+ * r9=r8.  musl's pthread_create calls clone directly; it needs the caller's
+ * frame copied (process_clone), not the native entry(arg) thread ABI. ---- */
+static void compat_clone(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  long r = (long)process_clone(caller, tf, tf->regs[5], tf->regs[4],
+                               tf->regs[3], tf->regs[9], tf->regs[7]);
+  {
+    static int clone_reports = 0;
+    if (clone_reports < 5) {
+      clone_reports++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[GB021-CLONE] r=");
+      kl_i(&kl, r);
+      kl_s(&kl, " flags=0x");
+      kl_hex(&kl, (unsigned long)tf->regs[5]);
+      kl_s(&kl, " stack=0x");
+      kl_hex(&kl, tf->regs[4]);
+      kl_s(&kl, " ptid=0x");
+      kl_hex(&kl, tf->regs[3]);
+      kl_s(&kl, " ctid=0x");
+      kl_hex(&kl, tf->regs[9]);
+      kl_s(&kl, "\n");
+      kl_emit(&kl);
+    }
+  }
+  tf->regs[0] = (uint64_t)(int64_t)r;
+}
+
+/* Linux futex ops carry FUTEX_PRIVATE_FLAG (0x80) / FUTEX_CLOCK_REALTIME
+ * (0x100) in the op word, and the timeout is a struct timespec*; the kernel
+ * futex takes a bare op and milliseconds.  WAIT/WAKE (0/1) is the surface
+ * musl's pthread mutex/join/condvar uses. */
+static void compat_futex(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int op = (int)tf->regs[4] & ~(0x80 | 0x100);
+  /* musl's timed waits (pthread_join/condvar) use FUTEX_WAIT_BITSET /
+     FUTEX_WAKE_BITSET (9/10); the kernel futex is a single-word wait/wake, so
+     map them onto 0/1.  Returning -ENOSYS here leaks ENOSYS into the caller's
+     errno even when the join succeeds (measured: tls_main_errno_untouched=38). */
+  if (op == 9) op = 0;
+  else if (op == 10) op = 1;
+  int64_t timeout_ms = -1;
+  if (op == 0 && tf->regs[9]) {
+    long ts[2];
+    if (sys_user_range(tf->regs[9], sizeof ts, 0) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+      return;
+    }
+    ts[0] = ((volatile long *)tf->regs[9])[0];
+    ts[1] = ((volatile long *)tf->regs[9])[1];
+    if (ts[0] < 0 || ts[1] < 0 || ts[1] >= 1000000000L) {
+      tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+      return;
+    }
+    timeout_ms = ts[0] * 1000 + ts[1] / 1000000;
+    if (timeout_ms == 0 && (ts[0] || ts[1])) timeout_ms = 1;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)process_futex(
+      caller, tf, tf->regs[5], op, (int)tf->regs[3], timeout_ms);
 }
 
 /* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX (96-102).  Thin
@@ -2379,6 +2450,46 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
+        /* GB-021: musl pthread_create -> clone(2); pthread mutex/join ->
+           futex(2).  Both are Linux-shaped and handled directly (the clone
+           child must resume from the caller's frame, which no existing
+           kernel syscall number expresses). */
+        case 56:  compat_clone(tf); return;  /* clone(flags,stack,ptid,ctid,tls) */
+        case 202: compat_futex(tf); return;  /* futex(uaddr,op,val,ts*) */
+        /* GB-021: musl's pthread plumbing touches these; an ENOSYS return
+           pollutes the caller's errno even when the thread operation succeeds
+           (measured: tls_main_errno_untouched=38). */
+        case 186:                            /* gettid() -> this thread's pid */
+          tf->regs[0] = (uint64_t)(int64_t)(current_process() ? current_process()->pid : -1);
+          return;
+        case 228: syscall_num = SYS_GETTIME; break; /* clock_gettime(clk,ts) */
+        case 100: {                          /* gettimeofday(timeval*, tz*) */
+          uint64_t tv = tf->regs[5];
+          uint32_t ms = (uint32_t)timer_get_ms();
+          if (!tv) { tf->regs[0] = 0; return; }
+          if (sys_user_range(tv, 16, 1) != 0) {
+            tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+            return;
+          }
+          ((volatile uint32_t *)tv)[0] = ms / 1000;
+          ((volatile uint32_t *)tv)[1] = (ms % 1000) * 1000;
+          tf->regs[0] = 0;
+          return;
+        }
+        case 24:  tf->regs[0] = 0; return;   /* sched_yield(): voluntary no-op */
+        case 273: tf->regs[0] = 0; return;   /* set_robust_list(): accepted, unused */
+        case 204: {                          /* sched_getaffinity(pid,len,mask) */
+          int len = (int)tf->regs[4];
+          uint64_t mask = tf->regs[3];
+          int n = len < 8 ? len : 8;
+          if (n > 0 && sys_user_range(mask, (uint64_t)n, 1) == 0) {
+            for (int i = 0; i < n; i++) ((volatile unsigned char *)mask)[i] = 0xFF;
+            tf->regs[0] = (uint64_t)n;
+          } else {
+            tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+          }
+          return;
+        }
         /* GB-141 (V evidence): musl's _Exit calls exit_group(231), not exit(60)
            when the program has a thread/group — the compat table had NO 231, so it
            fell to the default -ENOSYS and the probe "died inside _Exit" (GB-113
@@ -2424,6 +2535,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            6-arg Linux shape (sys_mmap6); SYS_BRK takes rdi.  Mapped here to
            measure the guest's heap setup before committing to a fix. */
         case 9:   syscall_num = SYS_MMAP;       break;  /* mmap(...)        */
+        case 11:  syscall_num = SYS_MUNMAP;     break;  /* munmap(addr,len) */
         case 10:  syscall_num = SYS_MPROTECT;   break;  /* mprotect(...)    */
         case 12:  syscall_num = SYS_BRK;        break;  /* brk(addr)        */
         /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
