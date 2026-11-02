@@ -188,9 +188,11 @@ def classify(verdict, parent_lane):
 def governing(gates):
     """GB-136 supersession resolution for one parent's gate chain.
 
-    gates: list of (gid, verdict, ordinal) — every gate card for the SAME parent,
-    each with its newest verdict.  ordinal: base `-V`=1, `-V2`=2, …; the PARENT
-    card itself is passed with ordinal 0.
+    gates: list of (ordinal, gid, verdict, timestamp) — every gate card for the
+    SAME parent, each with its newest verdict.  ordinal: base `-V`=1, `-V2`=2, …;
+    the PARENT card itself is passed with ordinal 0.  `timestamp` is the verdict
+    comment's ISO time and is the primary key (ordinal breaks ties) — GB-139's
+    change; the test calls must pass it too, or `governing()` unpacks a 3-tuple.
 
     GB-136-V (#301) defect 1: the first version returned the highest-ordinal member
     whatever its verdict, so a LATER RED "superseded" an earlier RED — the standing
