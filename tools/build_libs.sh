@@ -56,6 +56,29 @@
 # stubs and the allocator, they are what libc.a ships, and lane D's programs
 # need them from LIBC.SO.
 # ---------------------------------------------------------------------------
+# MAKEFILE WIRING (for the coordinator; this script does not touch the
+# Makefile).  Insert next to the existing libc.a rules:
+#
+#   # --- lane C (docs/shared-libs.md §4): PIC libc + LIBC.SO --------------
+#   LIBS_SCRIPT = tools/build_libs.sh
+#   .PHONY: libs libs-arm libs-intel libs-fixtures
+#   libs: libs-arm libs-intel
+#   libs-arm: $(OBJ_DIR-for-arm)          # or just rely on the archive rule
+#   libs-arm:
+#           $(MAKE) ARCH=arm obj/arm/libc.a
+#           $(LIBS_SCRIPT) arm
+#   libs-intel:
+#           $(MAKE) ARCH=intel obj/intel/libc.a
+#           $(LIBS_SCRIPT) intel
+#   libs-fixtures:
+#           tools/elf-dyn/gen_so_fixtures.sh
+#           tools/elf-dyn/gen_so_fixtures.sh --check
+#
+# (obj/<arch>/libc.a is only a *baseline* for the size/evidence comparison and
+# for `gen_map`; the .so build itself does not read it.  `make libs` must not
+# become a prerequisite of `all`, so nothing links against LIBC.SO until the
+# pilot conversion in §5.)
+# ---------------------------------------------------------------------------
 
 set -uo pipefail
 
@@ -179,8 +202,8 @@ pool_drain() {
 # ---------------------------------------------------------------------------
 # compile
 # ---------------------------------------------------------------------------
-# compile_tu <src> <out> [extra flags...]
-compile_tu() {
+# compile_tu_inner <src> <out> [extra flags...] — the actual compiler call
+compile_tu_inner() {
   local src=$1 out=$2
   shift 2
   mkdir -p "$(dirname "$out")"
@@ -194,6 +217,25 @@ compile_tu() {
   esac
   "${cc_cmd[@]}" "${PLATFORM_FLAGS[@]}" "${PIC_FLAGS[@]}" "${lang_flags[@]}" \
     "${ffp[@]}" "$@" -c "$src" -o "$out"
+}
+
+# compile_tu <src> <out> [extra flags...] — the pool entry point: one log per
+# TU, and a *named* failure.  "A TU that cannot be built -fPIC must be reported
+# by name, not silently dropped" (lane C brief), so a failure prints the TU and
+# the tail of its log instead of vanishing into interleaved -j output.
+compile_tu() {
+  local src=$1 out=$2
+  shift 2
+  local log="$OBJ_PIC/log/$(printf '%s' "$src" | tr '/' '_').log"
+  mkdir -p "$OBJ_PIC/log"
+  if ! compile_tu_inner "$src" "$out" "$@" >"$log" 2>&1; then
+    { printf 'build_libs: TU FAILED: %s\n' "$src"
+      printf 'build_libs:   log: %s\n' "$log"
+      sed -n '1,40p' "$log" | sed 's/^/build_libs:   | /'
+    } >&2
+    return 1
+  fi
+  return 0
 }
 
 # obj name: keep the origin visible so two TUs with the same basename can
@@ -443,6 +485,21 @@ emit_evidence() {
     echo "== readelf -l =="
     "$READELF" -l -W "$so"
     echo
+    echo "-- mapping congruence: LOAD p_vaddr vs p_offset (equal ⇒ lane D can mmap"
+    echo "   the whole file at a 16 MiB slot base and every segment lands at p_vaddr)"
+    {
+      local nload=0 nok=0 moff mva
+      while read -r moff mva; do
+        nload=$((nload + 1))
+        if [ $((moff)) -eq $((mva)) ]; then
+          nok=$((nok + 1))
+        else
+          echo "   MISMATCH: p_offset=$moff p_vaddr=$mva (page-congruent only)"
+        fi
+      done < <("$READELF" -l -W "$so" | awk '$1=="LOAD"{print $2, $3}')
+      echo "   $nok/$nload LOAD segments have p_vaddr == p_offset"
+    }
+    echo
     echo "== readelf -d =="
     "$READELF" -d -W "$so"
     echo
@@ -599,11 +656,12 @@ interp_cmd_text() {
   configure_arch "$arch"
   local flags
   flags=$(printf '%q ' "${PLATFORM_FLAGS[@]}")
+  flags=${flags% }
   cat <<EOF
 # $arch ($TARGET): ET_DYN static PIE, RELATIVE relocations only, no DT_NEEDED
-$CC $flags-fPIE -c src/user/ld/ldso.c   -o obj/$arch/ld/ldso.o
-$CC $flags-fPIE -c src/user/ld/elf_dyn.c -o obj/$arch/ld/elf_dyn.o
-$CC $flags-fPIE -c src/user/ld/mmap_io.c -o obj/$arch/ld/mmap_io.o
+$CC $flags -fPIE -c src/user/ld/ldso.c    -o obj/$arch/ld/ldso.o
+$CC $flags -fPIE -c src/user/ld/elf_dyn.c -o obj/$arch/ld/elf_dyn.o
+$CC $flags -fPIE -c src/user/ld/mmap_io.c -o obj/$arch/ld/mmap_io.o
 $LD -pie --no-dynamic-linker -e _start -z relro -z now -z defs \\
     -z noexecstack --hash-style=both -o obj/$arch/LDHOBBY.SO \\
     obj/$arch/ld/ldso.o obj/$arch/ld/elf_dyn.o obj/$arch/ld/mmap_io.o
