@@ -2489,6 +2489,17 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            ("W_GetNumForName: PNAMES not found!" at a WAD it had just opened).
            Linux and HobbyOS agree on (fd, offset, whence). */
         case 8:  syscall_num = SYS_LSEEK; break;   /* lseek(fd, off, wh) */
+        /* GB-169: fsync(74) on an /dev/fb0 fd presents the mapped surface — the
+           "commit" verb a framebuffer program needs, since the native path
+           (SYS_FLUSH_FB) is not reachable from a Linux-ABI process.  Any other
+           fd is a success no-op: there is no writeback cache to drain. */
+        case 74: {
+          extern int file_fd_is_devfb(struct process *, int);
+          if (file_fd_is_devfb(current_process(), (int)tf->regs[5]))
+            virtio_gpu_flush();
+          tf->regs[0] = 0;
+          return;
+        }
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
         /* GB-021: musl pthread_create -> clone(2); pthread mutex/join ->
            futex(2).  Both are Linux-shaped and handled directly (the clone
