@@ -1413,6 +1413,99 @@ out:
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* (f) fork with a file mapping (vm_as_clone_into): a page still pointing at
+ * the object's frame is re-mapped SHARED in the child (same physical frame);
+ * a page the parent already copied-on-write is copied again, so the child
+ * never inherits the object's stale text. */
+static void test_vm_file_map_fork(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_file_map_fork...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_FILE_TAG1 + 1)); /* tag 61 */
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  struct addr_space *child = 0;
+  if (fd < 0 || b <= 0)
+    goto out;
+
+  struct vm_region *r = vm_region_find(p.as, (uint64_t)b);
+  EXPECT_EQ((r && r->obj != 0), 1);
+  if (!r || !r->obj)
+    goto out;
+
+  /* Page 0: read-touch (object frame), then a write fault copies it. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 0), 0);
+  const char *why = 0;
+  EXPECT_EQ(vm_handle_fault(&p, (uint64_t)b, 1, 0, &why), 0);
+  uint64_t lp0 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &lp0), 0);
+  uint64_t priv0 = vm_arch_leaf_phys(lp0);
+  EXPECT_EQ((priv0 != 0 && priv0 != vm_object_peek(r->obj, 0)), 1);
+  ((volatile unsigned char *)priv0)[0] = 0x5A; /* parent-private edit */
+
+  /* Page 1: read-touch only — still the object's shared frame. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b + 0x1000, 8, 0), 0);
+  uint64_t lp1 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b + 0x1000, &lp1), 0);
+  uint64_t shared1 = vm_arch_leaf_phys(lp1);
+  EXPECT_EQ((shared1 != 0 && shared1 == vm_object_peek(r->obj, 0x1000)), 1);
+
+  child = vm_as_clone(p.as, VM_FILE_TAG1 + 2); /* tag 62 */
+  EXPECT_EQ((child != 0), 1);
+  if (!child)
+    goto out;
+  struct process pc;
+  vm_file_proc_init(&pc, child); /* the child's fake PCB (fault context) */
+
+  /* The COW'd page is copied: different frame, same content (0x5A), and the
+     object page still holds the file's byte. */
+  uint64_t lc0 = 0;
+  EXPECT_EQ(vm_arch_walk(child, (uint64_t)b, &lc0), 0);
+  uint64_t c0phys = vm_arch_leaf_phys(lc0);
+  EXPECT_EQ((c0phys != 0 && c0phys != priv0), 1);
+  EXPECT_EQ((int)(((const volatile unsigned char *)c0phys)[0]), 0x5A);
+  EXPECT_EQ((int)(((const volatile unsigned char *)vm_object_peek(r->obj, 0))[0]),
+            3);
+  /* The shared page keeps the SAME physical frame across the fork. */
+  uint64_t lc1 = 0;
+  EXPECT_EQ(vm_arch_walk(child, (uint64_t)b + 0x1000, &lc1), 0);
+  EXPECT_EQ((vm_arch_leaf_phys(lc1) == shared1), 1);
+  /* A child write to it copies instead of dirtying the page cache. */
+  EXPECT_EQ(vm_handle_fault(&pc, (uint64_t)b + 0x1000, 1, 0, &why), 0);
+  uint64_t lc1b = 0;
+  EXPECT_EQ(vm_arch_walk(child, (uint64_t)b + 0x1000, &lc1b), 0);
+  EXPECT_EQ((vm_arch_leaf_phys(lc1b) != shared1), 1);
+  EXPECT_EQ((int)(((const volatile unsigned char *)shared1)[0]),
+            (int)((4096u * 7u + 3u) & 0xFFu));
+
+out:
+  if (child)
+    vm_as_teardown(child);
+  if (p.as)
+    vm_as_teardown(p.as);
+  if (fd >= 0)
+    file_close(&p, fd);
+  file_obj_invalidate_all();
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -1434,6 +1527,7 @@ void vm_test_suite(void) {
   test_vm_file_map_shared_frames();
   test_vm_file_map_tail_wx();
   test_vm_file_map_accounting();
+  test_vm_file_map_fork();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */
