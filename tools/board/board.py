@@ -337,15 +337,35 @@ def cmd_show(a):
 
 def cmd_status(a):
     issues = all_issues("all")
-    lanes = {n: [] for n in LANES}
-    lanes["(no lane)"] = []
-    for it in issues:
-        lanes[lane_of(it) or "(no lane)"].append(it)
-    print(f"BOARD {REPO} @ {API}  — {len(issues)} tickets")
+    op = [it for it in issues if it["state"] == "open"]
+    closed = [it for it in issues if it["state"] != "open"]
+    lanes = {n: 0 for n in LANES}
+    lanes["(no lane)"] = 0
+    for it in op:
+        lanes[lane_of(it) or "(no lane)"] += 1
+    # GB-158: lane rows are the WORKFLOW view, so they count OPEN tickets only.
+    # A ticket closed by a PR without a lane move keeps its lane label; counting
+    # it made `Ready` read 1 with nothing claimable and `In Progress` read 11 with
+    # 2 open cards.  Those closed-outside-Done cards are named below because
+    # lint() walks open issues and cannot see them.
+    done = sum(1 for it in closed if lane_of(it) == "Done")
+    outside = {}
+    for it in closed:
+        lane = lane_of(it) or "(no lane)"
+        if lane != "Done":
+            outside.setdefault(lane, []).append(it["number"])
+    print(f"BOARD {REPO} @ {API}  — {len(issues)} tickets "
+          f"({len(op)} open, {len(closed)} closed)")
+    print("  lane rows are OPEN tickets; Done is the closed count")
     for n in LANES + ["(no lane)"]:
-        row = lanes[n]
-        if row or n == "(no lane)":
-            print(f"  {n:<12} {len(row):>3}")
+        if n == "Done":
+            print(f"  {n:<12} {done:>3} closed")
+        else:
+            print(f"  {n:<12} {lanes[n]:>3}")
+    if outside:
+        ids = " ".join(
+            f"#{x}" for n in LANES + ["(no lane)"] for x in sorted(outside.get(n, [])))
+        print(f"\n  closed outside Done: {sum(len(v) for v in outside.values())} — {ids}")
     print()
     ms = api_get(f"/repos/{REPO}/milestones", "?state=all&limit=50")
     for m in ms:
