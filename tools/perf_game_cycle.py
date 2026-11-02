@@ -211,6 +211,9 @@ def main():
                     help="comma list NAME.BIN[:hold_s] to cycle (name-matched in menu)")
     ap.add_argument("--cycles", type=int, default=3)
     ap.add_argument("--hold", type=int, default=6, help="default hold seconds per game")
+    ap.add_argument("--settle", type=int, default=0,
+                    help="idle seconds after the last close, before teardown "
+                         "(GB-161: lets the serial show the post-close ALIVE-SET)")
     ap.add_argument("--freeze-window", type=int, default=4,
                     help="consecutive identical frames to call a freeze")
     ap.add_argument("--max-growth-mb", type=int, default=64,
@@ -325,6 +328,10 @@ def main():
             # six-cycle run therefore never exercised the kill/reap path.
             q.key("f4", 0.4)
             time.sleep(1.0)
+
+    if args.settle:
+        print(f"[perf] settle {args.settle}s after the last close")
+        time.sleep(args.settle)
 
     floor_mb, peak_mb, growth_mb, mem_ok = \
         rss_floor_peak_growth(all_rss, args.max_growth_mb)
