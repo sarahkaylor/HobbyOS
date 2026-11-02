@@ -24,7 +24,8 @@ def ok(cond, name):
         fails += 1
 
 # direction 1: an EARLIER RED gate overtren by a later GREEN -> not a mismatch.
-gov_gid, gov_v = C.governing([(1, "GB-117-V", "RED"), (5, "GB-117-V5", "GREEN")])
+gov_gid, gov_v = C.governing([(1, "GB-117-V", "RED", "2026-10-30T00:00:00Z"),
+                               (5, "GB-117-V5", "GREEN", "2026-10-31T00:00:00Z")])
 ok(gov_gid == "GB-117-V5" and gov_v == "GREEN",
    "GB-136: earlier RED superseded by a later GREEN -> not a mismatch "
    "(governing=%s=%s, successor named)" % (gov_gid, gov_v))
@@ -32,11 +33,12 @@ ok(C.is_superseded("GB-117-V", gov_gid),
    "GB-136: is_superseded marks the earlier -V as overtren")
 
 # direction 2: a RED with NO successor is still reported.
-gov2, v2 = C.governing([(1, "GB-121-V", "RED")])
+gov2, v2 = C.governing([(1, "GB-121-V", "RED", "2026-10-30T00:00:00Z")])
 ok(gov2 == "GB-121-V" and v2 == "RED" and not C.is_superseded("GB-121-V", gov2),
    "GB-136: RED with no successor is still reported (governing=%s=%s)" % (gov2, v2))
 # direction 3: a parent-GREEN (ordinal 0) supersedes an earlier gate RED.
-gov3, v3 = C.governing([(0, "GB-120", "GREEN"), (1, "GB-120-V", "RED")])
+gov3, v3 = C.governing([(0, "GB-120", "GREEN", "2026-10-31T00:00:00Z"),
+                        (1, "GB-120-V", "RED", "2026-10-30T00:00:00Z")])
 ok(gov3 == "GB-120" and v3 == "GREEN",
    "GB-136: a GREEN on the parent (ordinal 0) supersedes an earlier gate RED (governing=%s=%s)" % (gov3, v3))
 # the FAIL branch: naive 'newest on its own card' would re-report the superseded
