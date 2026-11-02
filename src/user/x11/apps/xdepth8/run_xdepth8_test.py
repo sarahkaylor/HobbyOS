@@ -71,7 +71,7 @@ def build(args):
         sys.exit(2)
 
 
-def stage(disk, work, x11_build_dir, xdepth=True):
+def stage(disk, work, x11_build_dir, xdepth=True, client_args=""):
     """Put the freshly built server + probe on the disk, make /XDEPTH8.BIN the
     session autostart and (unless this is the 24-bit control run) switch the
     server to depth 8.  Never touch the repo's disk.img (caller passes a copy)."""
@@ -86,7 +86,8 @@ def stage(disk, work, x11_build_dir, xdepth=True):
 
     start = os.path.join(work, "XSTART.TXT")
     with open(start, "w") as f:
-        f.write("# staged by run_xdepth8_test.py\n/XDEPTH8.BIN\n")
+        f.write("# staged by run_xdepth8_test.py\n/XDEPTH8.BIN"
+                + (" " + client_args if client_args else "") + "\n")
     subprocess.run(["mcopy", "-o", "-i", disk, start, "::/XSTART.TXT"],
                    check=True)
 
@@ -151,6 +152,8 @@ def main():
     ap.add_argument("--timeout", type=int, default=180)
     ap.add_argument("--keep", action="store_true",
                     help="keep the booted disk copy and serial log")
+    ap.add_argument("--client-args", default="",
+                    help="extra argv for /XDEPTH8.BIN (e.g. -noinstall)")
     ap.add_argument("--control24", action="store_true",
                     help="negative control: same client/disk WITHOUT HB_XDEPTH; "
                          "expect a depth 24 root and a failed visual match")
@@ -164,7 +167,8 @@ def main():
     disk = os.path.join(work, "disk.img")
     shutil.copy(os.path.join(REPO, "disk.img"), disk)
     log(f"booting a copy of disk.img in {work}")
-    stage(disk, work, args.x11_build_dir)
+    stage(disk, work, args.x11_build_dir, xdepth=not args.control24,
+          client_args=args.client_args)
 
     class _A:                          # qemu_cmd only reads args.arch
         arch = args.arch
@@ -205,6 +209,10 @@ def main():
                        "client XPutImage of a depth 8 ZPixmap", dl=60)
             pos = need("[XD8] XGetImage green band (320,200) = index 0x50",
                        "server read-back of the green band as index 0x50", dl=60)
+            if args.client_args.strip() == "-noinstall":
+                need("[XD8] -noinstall: relying on the server's",
+                     "client skipped XInstallColormap (server install path)",
+                     dl=60)
             need("[XD8] ready", "client reached its idle loop", dl=60)
         time.sleep(3)                  # let the present reach the framebuffer
 

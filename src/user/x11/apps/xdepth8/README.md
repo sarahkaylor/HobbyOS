@@ -40,6 +40,17 @@ bash third_party/x11/build.sh --arch intel \
 python3 src/user/x11/apps/xdepth8/run_xdepth8_test.py
 ```
 
+`-noinstall` as the client's argv skips its explicit `XInstallColormap`, which
+is exactly what linuxdoom-1.10 does (it creates a private AllocAll colormap,
+sets it on the window and only ever calls `XStoreColors`).  The DDX installs a
+mapped window's colormap itself (`hbRealizeWindow`), so the bands must come out
+identical either way:
+
+```sh
+python3 src/user/x11/apps/xdepth8/run_xdepth8_test.py --no-build \
+    --client-args=-noinstall
+```
+
 `run_xdepth8_test.py` builds `disk.img` (`TOOLS_SKIP=1`), copies it, stages
 `/XDEPTH8.BIN` as the session autostart and `/X11/XSESSION.ENV` with
 `HB_XDEPTH=8` + `XSESS_NO_WM=1` (IceWM cannot run on an 8-bit screen), boots

@@ -195,24 +195,6 @@ hbFlushBatch(struct hb_fb_rect32 *r, int n)
 }
 
 static void
-hbDumpWindows(ScreenPtr pScreen)
-{
-    WindowPtr pWin;
-    int i = 0;
-
-    for (pWin = pScreen->root ? pScreen->root->firstChild : NULL;
-         pWin && i < 8; pWin = pWin->nextSib, i++) {
-        ErrorF("hobbyos: TEMP child[%d] win=0x%lx viewable=%d mapped=%d "
-               "optional=%d cmap=0x%lx depth=%d %dx%d+%d+%d\n", i,
-               (unsigned long) pWin->drawable.id, pWin->viewable ? 1 : 0,
-               pWin->mapped ? 1 : 0, pWin->optional ? 1 : 0,
-               (unsigned long) (pWin->optional ? pWin->optional->colormap : 0),
-               pWin->drawable.depth, pWin->drawable.width,
-               pWin->drawable.height, pWin->drawable.x, pWin->drawable.y);
-    }
-}
-
-static void
 hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
 {
     RegionPtr damage = DamageRegion(pBuf->pDamage);
@@ -223,13 +205,6 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
     int srcStride = pix->devKind;
     struct hb_fb_rect32 rects[HB_FLUSH_MAX_RECTS];
     int n = 0, i;
-    static WindowPtr lastFirst;
-
-    if (hbScreen.depth == 8 && pScreen->root &&
-        pScreen->root->firstChild != lastFirst) {
-        lastFirst = pScreen->root->firstChild;
-        hbDumpWindows(pScreen);
-    }
 
     if (!hbScreen.fb || nbox <= 0)
         return;
@@ -333,25 +308,14 @@ hbInstallWindowColormap(WindowPtr pWin)
     ColormapPtr cmap = NULL;
     Colormap mid;
     ScreenPtr pScreen = pWin->drawable.pScreen;
-    int rc;
 
-    if (hbScreen.depth != 8)
-        return;
-    /* TEMP probe */
-    ErrorF("hobbyos: TEMP realize win=0x%lx optional=%d mid=0x%lx def=0x%lx\n",
-           (unsigned long) pWin->drawable.id, pWin->optional ? 1 : 0,
-           (unsigned long) (pWin->optional ? pWin->optional->colormap : 0),
-           (unsigned long) pScreen->defColormap);
-    if (!pWin->optional)
+    if (hbScreen.depth != 8 || !pWin->optional)
         return;
     mid = pWin->optional->colormap;
     if (mid == None || mid == pScreen->defColormap)
         return;
-    rc = dixLookupResourceByType((void **) &cmap, mid, RT_COLORMAP,
-                                 serverClient, DixUseAccess);
-    ErrorF("hobbyos: TEMP lookup mid=0x%lx rc=%d cmap=%p\n",
-           (unsigned long) mid, rc, (void *) cmap);
-    if (rc != Success || !cmap)
+    if (dixLookupResourceByType((void **) &cmap, mid, RT_COLORMAP,
+                                serverClient, DixUseAccess) != Success || !cmap)
         return;
     if (cmap != GetInstalledmiColormap(pScreen))
         (*pScreen->InstallColormap) (cmap);
