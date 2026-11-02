@@ -553,6 +553,135 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
   return 0;
 }
 
+#define COMPAT_MAX_ARGV 16
+#define COMPAT_MAX_ENV 24
+#define COMPAT_STR_MAX 512
+
+/* Layer the SysV AMD64 process-initialization block on a COMPAT process's
+ * stack and point its entry at it:
+ *
+ *     %rsp -> argc, argv[0..argc-1], NULL, envp[0..envc-1], NULL, auxv, AT_NULL
+ *
+ * Both arrays come from the PCB blobs (sys_readargv / sys_readenv, the same
+ * source SYS_GETARGV / SYS_GETENV serve to native programs), so a Linux program
+ * sees exactly what its launcher passed.
+ *
+ * Measured need (2026-11-02): the block used to hardcode argc = 1 and an empty
+ * envp.  That is enough for `hello`, but a real program dies on it: Doom reads
+ * "-iwad <file>" from argv and the X11 display name from DISPLAY, so with the
+ * fixed block it reported "no IWAD" and Xlib would have had no display at all.
+ *
+ * Bounded deliberately (16 argv / 24 env / 512 B each): the whole block stays a
+ * few KiB, far inside the 64 KiB stack window the loader prefaults, and
+ * vm_kwrite validates every page it touches so a bad layout faults here with a
+ * line instead of a triple fault later.
+ */
+static int compat_stack_block(struct process *child, int pid, uint64_t entry,
+                              uint64_t phdr, uint32_t phnum) {
+  struct process *grp = process_group(child);
+  char s[COMPAT_STR_MAX];
+  uint64_t argp[COMPAT_MAX_ARGV + 1];
+  uint64_t envp[COMPAT_MAX_ENV + 1];
+  uint64_t sp = USER_MAIN_STK_TOP_V2;
+
+  int argc = grp ? sys_readargv(grp, -1, 0, 0) : 0;
+  int envc = grp ? sys_readenv(grp, -1, 0, 0) : 0;
+  if (argc < 0) argc = 0;
+  if (envc < 0) envc = 0;
+  if (argc > COMPAT_MAX_ARGV) argc = COMPAT_MAX_ARGV;
+  if (envc > COMPAT_MAX_ENV) envc = COMPAT_MAX_ENV;
+
+  /* Strings first, highest address first, so the arrays below them can be laid
+     down front-to-back without tracking each string's end. */
+  for (int i = envc - 1; i >= 0; i--) {
+    int n = sys_readenv(grp, i, s, (int)sizeof s);
+    if (n < 0) {
+      s[0] = '\0';
+      n = 0;
+    }
+    sp -= (uint64_t)n + 1;
+    if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
+    envp[i] = sp;
+  }
+  for (int i = argc - 1; i >= 0; i--) {
+    int n = sys_readargv(grp, i, s, (int)sizeof s);
+    if (n < 0) {
+      s[0] = '\0';
+      n = 0;
+    }
+    sp -= (uint64_t)n + 1;
+    if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
+    argp[i] = sp;
+  }
+  uint64_t name_addr;
+  if (argc > 0) {
+    name_addr = argp[0];
+  } else {
+    /* A name-only spawn (the wave path) has no argv blob: argv[0] is the
+       program name, exactly as a shell would pass it. */
+    const char *nm = child->name[0] ? child->name : "PROGRAM";
+    int nlen = 0;
+    while (nm[nlen]) nlen++;
+    sp -= (uint64_t)nlen + 1;
+    if (vm_kwrite(child, sp, nm, nlen + 1) != 0) return -EFAULT;
+    name_addr = sp;
+    argp[0] = name_addr;
+    argc = 1;
+  }
+  argp[argc] = 0;
+  envp[envc] = 0;
+
+  /* Lay the fixed part of the block in ASCENDING address order, which means
+     writing it in DESCENDING order: auxv (highest, right under the strings),
+     then envp[], then argv[], then argc.  argv must sit ABOVE envp — the first
+     version wrote argv first and the guest read a NULL argv[0] and faulted at
+     VA=0x1000. */
+  sp = (sp - 16) & ~(uint64_t)0xF;
+  uint64_t rnd_addr = sp;
+  uint8_t rnd[16];
+  net_get_random_bytes(rnd, 16);
+  if (vm_kwrite(child, rnd_addr, rnd, 16) != 0) return -EFAULT;
+
+  uint64_t w[20];
+  sp = (sp - (uint64_t)sizeof w) & ~(uint64_t)0xF;
+  uint64_t blk = sp;
+  w[0] = 6;                        /* AT_PAGESZ */
+  w[1] = 4096;
+  w[2] = 3;                        /* AT_PHDR   */
+  w[3] = phdr;
+  w[4] = 5;                        /* AT_PHNUM  */
+  w[5] = (uint64_t)phnum;
+  w[6] = 9;                        /* AT_ENTRY  */
+  w[7] = entry;
+  w[8] = 7;                        /* AT_BASE: 0 for a static image */
+  w[9] = 0;
+  w[10] = 25;                      /* AT_RANDOM */
+  w[11] = rnd_addr;
+  w[12] = 31;                      /* AT_EXECFN: argv[0], what /proc/self/exe
+                                      answers for a static binary */
+  w[13] = name_addr;
+  w[14] = 0;                       /* AT_NULL */
+  w[15] = 0;
+  if (vm_kwrite(child, blk, w, 16 * 8) != 0) return -EFAULT;
+
+  sp -= (uint64_t)(envc + 1) * 8;
+  uint64_t envp_addr = sp;
+  if (vm_kwrite(child, envp_addr, envp, (int)((envc + 1) * 8)) != 0)
+    return -EFAULT;
+  sp -= (uint64_t)(argc + 1) * 8;
+  uint64_t argv_addr = sp;
+  if (vm_kwrite(child, argv_addr, argp, (int)((argc + 1) * 8)) != 0)
+    return -EFAULT;
+
+  /* %rsp points at argc; musl's _start pops it and aligns the rest itself. */
+  sp = (sp - 8) & ~(uint64_t)0xF;
+  uint64_t argcw = (uint64_t)argc;
+  if (vm_kwrite(child, sp, &argcw, 8) != 0) return -EFAULT;
+
+  process_set_entry(pid, entry, sp);
+  return 0;
+}
+
 /* The v2 loader body, shared by spawn2 (ex == 0) and spawn_ex (ex != 0).
  * Returns the child pid or -errno; the spawn2 wrapper below maps a
  * negative result back to the historical -1 so existing callers see the
@@ -913,54 +1042,15 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        So: lay the block down and point %rsp at argc. The stack is already
        prefaulted above, and vm_kwrite self-validates each page, so this is a
        placement rather than an allocation. */
-    uint64_t stk_top = USER_MAIN_STK_TOP_V2;
-    const char *nm = child->name[0] ? child->name : "PROGRAM";
-    int nlen = 0;
-    while (nm[nlen]) nlen++;
-    uint64_t name_addr = (stk_top - 8 - (uint64_t)nlen) & ~(uint64_t)0xF;
-    /* argc, argv[0], argv NULL, envp NULL, AT_PAGESZ, 4096,
-       AT_PHDR, phdr, AT_PHNUM, phnum, AT_ENTRY, entry, AT_BASE, 0,
-       AT_RANDOM, rnd, AT_NULL, 0.
-       The first four pairs were the original block; musl's _start also reads
-       AT_PHDR/AT_PHNUM/AT_ENTRY to locate its own program headers, and with them
-       absent it dereferenced small offsets (measured: fault at VA=0x210).
-
-       GB-163 (2026-11-02): the startup shim seeds its stack canary from
-       AT_RANDOM. With the entry absent the loader's `_dl_random` stays NULL and
-       __libc_start_main dies at `movq (%rax),%rax` (measured: DOOMW4.ELF,
-       PC=0x100004F415, VA=0x0). Place 16 random bytes on the stack and point
-       AT_RANDOM at them. */
-    uint64_t w[18];
-    uint64_t blk = (name_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
-    uint64_t rnd_addr = (blk - 16) & ~(uint64_t)0xF;
-    w[0] = 1;
-    w[1] = name_addr;
-    w[2] = 0;
-    w[3] = 0;
-    w[4] = 6;                       /* AT_PAGESZ */
-    w[5] = 4096;
-    w[6] = 3;                       /* AT_PHDR   */
-    w[7] = elf_phdr;
-    w[8] = 5;                       /* AT_PHNUM  */
-    w[9] = (uint64_t)elf_phnum;
-    w[10] = 9;                      /* AT_ENTRY  */
-    w[11] = elf_entry;
-    w[12] = 7;                      /* AT_BASE: 0 for a static image */
-    w[13] = 0;
-    w[14] = 25;                     /* AT_RANDOM */
-    w[15] = rnd_addr;
-    w[16] = 0;                      /* AT_NULL */
-    w[17] = 0;
-    uint8_t rnd[16];
-    net_get_random_bytes(rnd, 16);
-    if (vm_kwrite(child, blk, w, (int)sizeof w) != 0 ||
-        vm_kwrite(child, name_addr, nm, nlen + 1) != 0 ||
-        vm_kwrite(child, rnd_addr, rnd, 16) != 0) {
+    /* GB-164: one helper owns the whole block (argv/envp from the PCB blobs,
+       auxv, %rsp).  Two measured walls live in its comment: musl needs
+       AT_RANDOM (GB-163) and a real program needs its own argv/envp (Doom's
+       "-iwad" and DISPLAY). */
+    if (compat_stack_block(child, pid, elf_entry, elf_phdr, elf_phnum) != 0) {
       uart_puts("v2 loader: startup block write failed\n");
       process_free(pid);
       return -EFAULT;
     }
-    process_set_entry(pid, elf_entry, blk);
   } else if (is_elf) {
     /* Native track (static ET_DYN or PT_INTERP): arguments come from the PCB
        via SYS_GETARGS, not from an auxv block, so the stack is plain top-of-

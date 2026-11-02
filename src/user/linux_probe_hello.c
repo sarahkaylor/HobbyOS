@@ -19,6 +19,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/time.h>
@@ -37,8 +38,13 @@ static void row(const char *fmt, ...) {
   if (n > 0) (void)!write(1, b, (size_t)n);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
   row("[LP] hello pid=%ld uid=%ld\n", (long)getpid(), (long)getuid());
+  /* The startup block's argv/envp rows: a wave spawn passes the program name
+     only, while a session launch (XSTART) passes real arguments and the
+     session environment.  Both must arrive intact. */
+  row("[LP] argv argc=%d argv0=%s\n", argc, (argc > 0 && argv[0]) ? argv[0] : "(null)");
+  row("[LP] env DISPLAY=%s\n", getenv("DISPLAY") ? getenv("DISPLAY") : "(unset)");
 
   struct utsname u;
   if (uname(&u) == 0) row("[LP] uname sysname=%s machine=%s\n", u.sysname, u.machine);
