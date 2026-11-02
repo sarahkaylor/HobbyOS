@@ -175,11 +175,19 @@ int file_open(struct process *cur, const char *filename, int flags) {
     int isurand = (rest[0] == '/' && rest[1] == 'u' && rest[2] == 'r' &&
                    rest[3] == 'a' && rest[4] == 'n' && rest[5] == 'd' &&
                    rest[6] == 'o' && rest[7] == 'm' && rest[8] == '\0');
+    /* GB-167: /dev/fb0 — the compat framebuffer node.  Opening it is free; the
+       mode comes from ioctl(FBIOGET_VSCREENINFO), which the Linux-ABI ioctl
+       arm routes to hb_fb_ioctl_route(). */
+    int isfb = (rest[0] == '/' && rest[1] == 'f' && rest[2] == 'b' &&
+                rest[3] == '0' && rest[4] == '\0');
     if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
       f->open_flags = (uint32_t)flags;
     } else if (isurand) {
       f->type = FILE_TYPE_DEVURANDO;
+      f->open_flags = (uint32_t)flags;
+    } else if (isfb) {
+      f->type = FILE_TYPE_DEVFB;
       f->open_flags = (uint32_t)flags;
     } else {
       f->type = FILE_TYPE_EMPTY;
@@ -1412,6 +1420,18 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
   return rc;
 }
 
+/* GB-167: is this fd the /dev/fb0 node?  The Linux-ABI ioctl arm needs it to
+   route FBIO* requests to the framebuffer machinery instead of ENOTTY. */
+int file_fd_is_devfb(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return 0;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_EMPTY) return 0;
+  return f->type == FILE_TYPE_DEVFB;
+}
+
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp) {
   (void)p;
@@ -1655,6 +1675,8 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return 0; /* /dev/null reads always yield EOF (0 bytes) */
+  } else if (f->type == FILE_TYPE_DEVFB) {
+    return 0; /* GB-167: no readback of the framebuffer (Linux EINVAL; EOF here) */
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     if (size <= 0) return 0;
     return net_get_random_bytes(buf, (uint32_t)size); /* never short */
@@ -1833,6 +1855,10 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return size; /* /dev/null swallows any write, accepts it fully */
+  } else if (f->type == FILE_TYPE_DEVFB) {
+    /* GB-167: pixel writes are accepted and counted; compositing them onto a
+       window is the next child (the node has no surface to own yet). */
+    return size;
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     return -EINVAL; /* writes to /dev/urandom are not supported (Linux EINVAL) */
   } else if (f->type == FILE_TYPE_FAT16) {
