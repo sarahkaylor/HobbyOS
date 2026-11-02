@@ -8,6 +8,39 @@
 #define MAX_PROCESSES 64 // Maximum number of concurrent processes
 #define MAX_CPUS 8       // Maximum number of CPU cores supported
 
+#ifdef __x86_64__
+/* GB-152: ONE declaration of the per-CPU GS block.  It used to be copied in
+ * trap.c (full), process.c (partial, only current_proc) and test_smp.c (a
+ * third copy in the test).  Three declarations mean a field-order change can
+ * silently desync the asm's fixed gs: offsets or make the test measure its own
+ * copy; the compiler cannot catch it.  The snap_* offsets are load-bearing for
+ * FRAMESNAP_ASM (gs:[48]..gs:[104]) and are pinned by the typedefs in trap.c. */
+struct process;
+struct cpu_local {
+  uint64_t kernel_stack;
+  uint64_t user_rsp;
+  uint64_t temp_rax;
+  uint64_t user_sp_temp;
+  uint64_t cpu_id;
+  struct process *current_proc;
+  uint64_t snap_rip;     /* 48 */
+  uint64_t snap_cs;      /* 56 */
+  uint64_t snap_rflags;  /* 64 */
+  uint64_t snap_rsp;     /* 72 (CPL3 only) */
+  uint64_t snap_ss;      /* 80 (CPL3 only) */
+  uint64_t snap_valid;   /* 88 */
+  uint64_t snap_count;   /* 96 */
+  uint64_t fault_count;  /* 104 */
+  uint64_t initialized;  /* 112: set by trap_init_core_with_id on each core */
+} __attribute__((packed));
+
+extern struct cpu_local cpu_locals[];
+/* Number of cores that have actually run trap_init_core_with_id.  AP bring-up
+ * is sequential, so ids 0..n-1 are exactly the initialized ones. */
+uint32_t smp_init_count(void);
+#endif
+
+
 // Process states for lifecycle management
 #define PROC_STATE_FREE 0      // Slot is available for a new process
 #define PROC_STATE_ALLOCATED 1 // Process is being initialized

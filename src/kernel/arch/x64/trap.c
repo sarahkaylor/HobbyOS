@@ -55,25 +55,8 @@ extern uint64_t hb_clock_realtime_ms(void);
 static int sys_user_range(uint64_t ptr, uint64_t len, int write);
 int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
-struct cpu_local {
-  uint64_t kernel_stack;
-  uint64_t user_rsp;
-  uint64_t temp_rax;
-  uint64_t user_sp_temp;
-  uint64_t cpu_id;
-  struct process *current_proc;
-  /* GB-147: the frame the CPU pushed, copied by the FIRST instruction of
-     every exception stub (before any prologue).  The offsets are
-     load-bearing: FRAMESNAP_ASM addresses them as gs:[48]..gs:[104]. */
-  uint64_t snap_rip;     /* 48 */
-  uint64_t snap_cs;      /* 56 */
-  uint64_t snap_rflags;  /* 64 */
-  uint64_t snap_rsp;     /* 72  (CPL3 only; 0 for a kernel-mode entry) */
-  uint64_t snap_ss;      /* 80  (CPL3 only; 0 for a kernel-mode entry) */
-  uint64_t snap_valid;   /* 88 */
-  uint64_t snap_count;   /* 96 */
-  uint64_t fault_count;  /* 104 */
-} __attribute__((packed));
+/* GB-152: struct cpu_local is declared once in process.h (the asm's fixed
+   gs: offsets are pinned by the typedefs below). */
 
 /* The stub asm cannot see sizeof(): pin the offsets it uses. */
 extern void uart_puts_raw(const char *s);
@@ -3622,6 +3605,10 @@ void trap_init_core_with_id(uint32_t cpu) {
   cpu_locals[cpu].kernel_stack = (uint64_t)&__stack_top - (cpu * 64 * 1024) - 4096;
   cpu_locals[cpu].cpu_id = cpu;
   cpu_locals[cpu].current_proc = 0;
+  /* GB-152: mark this core as having run init, so the unit suite measures the
+     cores that exist instead of hardcoding four.  AP bring-up is sequential
+     (0, 1, 2, ...), so smp_init_count() also bounds the id range it asserts. */
+  cpu_locals[cpu].initialized = 1;
 
   /* F1.5: x87/SSE enable is per-core (CR0/CR4).  This runs on the boot core
      from mmu_init() and on every AP from secondary_main(), always before
@@ -3654,6 +3641,17 @@ void trap_init_core_with_id(uint32_t cpu) {
 
 void trap_init_core(void) {
   trap_init_core_with_id(get_cpuid());
+}
+
+/* GB-152: how many cores have actually run trap_init_core_with_id.  The T2
+ * suite runs before the scheduler, so on a 1-CPU run this is 1 — the old test
+ * hardcoded four and asserted cpu_id == i for cores that had not been brought
+ * up, which is the red baseline this card fixes. */
+uint32_t smp_init_count(void) {
+  uint32_t n = 0;
+  for (uint32_t i = 0; i < MAX_CPUS; i++)
+    if (cpu_locals[i].initialized) n++;
+  return n;
 }
 
 void syscall_init(void) {
