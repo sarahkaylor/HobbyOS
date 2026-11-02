@@ -2300,6 +2300,29 @@ static int sig_known(int sig) {
   }
 }
 
+/* GB-161: force a CPU back through schedule() so a victim's
+   cpu_current_pids claim is dropped.  Vector 0x81 is the reschedule IPI the
+   timer broadcasts (0x000C0081); a directed fixed-delivery send uses the same
+   vector with the destination in ICR_HIGH.  Self-delivery is the software
+   `int $0x81` path arch_yield() uses. */
+static void resched_cpu(uint32_t c) {
+#ifdef __x86_64__
+  if (c == get_cpuid()) {
+    __asm__ volatile("int $0x81" ::: "memory");
+    return;
+  }
+  volatile uint32_t *icr_hi = (volatile uint32_t *)0xFEE00310;
+  volatile uint32_t *icr_lo = (volatile uint32_t *)0xFEE00300;
+  *icr_hi = (uint32_t)(c << 24);
+  *icr_lo = 0x00002081u; /* fixed delivery, vector 0x81, level assert, edge */
+  for (int i = 0; i < 200000; i++) {
+    if ((*icr_lo & (1u << 12)) == 0)
+      break;
+    __asm__ volatile("pause" ::: "memory");
+  }
+#endif
+}
+
 /* The immediate group-kill body (D9's default action / SIGKILL): anchor
  * EXITED with the signal byte in the waitpid status, memory released,
  * sibling threads ended, fds closed.  Never blocks on claims (P1's
@@ -2356,6 +2379,17 @@ void process_kill_group_sig(struct process *p, int sig) {
      third-party-kill wakeup gap this design closes. */
   reap_deliver_locked(p);
   spinlock_release_irqrestore(&proc_lock, flags);
+
+  /* GB-161: the anchor is EXITED, but a CPU that was running it still claims
+     the pid in cpu_current_pids until its own next trap enters schedule().  If
+     that trap never lands (kernel-mode busy-wait, or the pick raced the kill),
+     the slot stays st=RUNNING with claimed_by=<cpu> after its [EXITPC] line and
+     the deferred AS is never released.  Force those CPUs out now: on the IPI
+     they enter schedule(), see EXITED, save nothing, and drop the claim. */
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    if (current_pid_of_cpu((int)c) == kpid)
+      resched_cpu(c);
+  }
 
   /* SEC-9 (security-plan.md #9): close through file_close(), which claims
    * each fd slot atomically under proc_lock.  The old loop snapshotted
