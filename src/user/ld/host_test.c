@@ -54,6 +54,16 @@ static void check(int ok, const char *name) {
   fflush(stdout);
 }
 
+/* One-line view of a loader error (its own message ends with a newline). */
+static const char *errmsg(const char *e) {
+  static char buf[HB_LDSO_ERR_MAX];
+  unsigned i;
+  for (i = 0; e && e[i] && i + 1 < sizeof buf; i++)
+    buf[i] = (e[i] == '\n' || e[i] == '\r') ? ' ' : e[i];
+  buf[i] = 0;
+  return buf;
+}
+
 static void checkf(int ok, const char *fmt, ...) {
   char buf[256];
   va_list ap;
@@ -377,20 +387,20 @@ int main(int argc, char **argv) {
     rc = hb_ldso_run(&bad, &res);
     checkf(rc == HB_LDSO_E_START && res.status == HB_LDSO_E_START &&
                strstr(res.error, "HBST") != NULL,
-           "hb_start: wrong magic refused (%s)", res.error[0] ? res.error : "-");
+           "hb_start: wrong magic refused (%s)", errmsg(res.error));
     bad = st;
     bad.abi = HB_START_ABI + 7;
     memset(&res, 0, sizeof res);
     rc = hb_ldso_run(&bad, &res);
     checkf(rc == HB_LDSO_E_START && strstr(res.error, "ABI") != NULL,
-           "hb_start: wrong ABI refused (%s)", res.error[0] ? res.error : "-");
+           "hb_start: wrong ABI refused (%s)", errmsg(res.error));
   }
 
   /* 3: the real load. */
   memset(&res, 0, sizeof res);
   rc = hb_ldso_run(&st, &res);
   checkf(rc == HB_LDSO_OK, "load: completes (status %d%s%s)", rc,
-         rc ? " err=" : "", rc ? res.error : "");
+         rc ? " err=" : "", rc ? errmsg(res.error) : "");
   if (rc != HB_LDSO_OK) {
     printf("FAIL cannot continue without a completed load\n");
     return 1;
@@ -606,7 +616,7 @@ int main(int argc, char **argv) {
       rc = hb_ldso_run(&st2, &res);
       checkf(rc == HB_LDSO_E_OPEN && strstr(res.error, "LIBNOPE.SO") != NULL,
              "error: missing DT_NEEDED refused by name (%s)",
-             res.error[0] ? res.error : "-");
+             errmsg(res.error));
       free_image(&bad);
     } else {
       check(0, "error: missing DT_NEEDED fixture present");
@@ -624,7 +634,7 @@ int main(int argc, char **argv) {
       checkf(rc == HB_LDSO_E_RELOC && strstr(res.error, "LIBBAD.SO") != NULL &&
                  strstr(res.error, "0xdead") != NULL,
              "error: unsupported relocation type names module and type (%s)",
-             res.error[0] ? res.error : "-");
+             errmsg(res.error));
       free_image(&bad);
     } else {
       check(0, "error: bad-reloc fixture present");
@@ -668,6 +678,23 @@ int main(int argc, char **argv) {
     }
   }
 
+  /* 25b: a DSO larger than one USER_LIB slot is refused by name. */
+  {
+    struct image big;
+    struct hb_start stb;
+    if (map_image("APP_BIG", &big) == 0) {
+      fill_start(&big, &stb);
+      memset(&res, 0, sizeof res);
+      rc = hb_ldso_run(&stb, &res);
+      checkf(rc == HB_LDSO_E_TOOBIG && strstr(res.error, "LIBBIG.SO") != NULL,
+             "error: DSO larger than a slot refused by name (%s)",
+             errmsg(res.error));
+      free_image(&big);
+    } else {
+      check(0, "error: oversized-DSO fixture present");
+    }
+  }
+
   /* 26: R_*_COPY from a fixed-address executable.  A COPY relocation only
    * exists when the executable takes a fixed address for a DSO's data object
    * (a non-PIE ET_EXEC), so this fixture is ET_EXEC and is loaded at its
@@ -706,7 +733,7 @@ int main(int argc, char **argv) {
                before, after, dso_before, dso_after, cres.n_copy);
       } else {
         checkf(0, "reloc: R_*_COPY load failed (%s) [count=%u gnu=%p span=%llu]",
-               cres.error, cres.modules[0].dynsym_count,
+               errmsg(cres.error), cres.modules[0].dynsym_count,
                (void *)cres.modules[0].gnu_hash,
                (unsigned long long)cres.modules[0].span);
       }

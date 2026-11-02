@@ -167,6 +167,19 @@ int use_bad(void) { return bad_x; }
 void _start(void) { for (;;) { } }
 EOF
 
+cat >"$SRC/libbig.c" <<'EOF'
+/* LIBBIG.SO: a 20 MiB .bss segment — larger than one 16 MiB USER_LIB slot, so
+ * the loader must refuse it by name instead of mapping across slot bounds. */
+char big[20 * 1024 * 1024];
+int big_fn(void) { return big[0]; }
+EOF
+
+cat >"$SRC/app_big.c" <<'EOF'
+extern int big_fn(void);
+int use_big(void) { return big_fn(); }
+void _start(void) { for (;;) { } }
+EOF
+
 cat >"$SRC/libcopy.c" <<'EOF'
 /* LIBCOPY.SO: the COPY relocation source for the ET_EXEC fixture. */
 int copy_value = 21;
@@ -201,6 +214,7 @@ $FIX_CC -fPIC -shared -Wl,-soname,LIBD.SO -o "$FIX/LIBD.SO" "$SRC/libd.c" "$FIX/
 $FIX_CC -fPIC -shared -Wl,-soname,LIBNOPE.SO -o "$LIBDIR/LIBNOPE.SO" "$SRC/libnope.c" 2>"$OBJ/err" || { cat "$OBJ/err"; fail "build LIBNOPE.SO"; }
 $FIX_CC -fPIC -shared -Wl,-soname,LIBBAD.SO -o "$FIX/LIBBAD.SO" "$SRC/libbad.c" 2>"$OBJ/err" || { cat "$OBJ/err"; fail "build LIBBAD.SO"; }
 $FIX_CC -fPIC -shared -Wl,-soname,LIBCOPY.SO -o "$FIX/LIBCOPY.SO" "$SRC/libcopy.c" 2>"$OBJ/err" || { cat "$OBJ/err"; fail "build LIBCOPY.SO"; }
+$FIX_CC -fPIC -shared -Wl,-soname,LIBBIG.SO -o "$FIX/LIBBIG.SO" "$SRC/libbig.c" 2>"$OBJ/err" || { cat "$OBJ/err"; fail "build LIBBIG.SO"; }
 
 # The executable: ET_DYN + PT_INTERP naming LDHOBBY.SO.  -fno-pic is a
 # deliberate choice: it is what produces the COPY relocation under test.
@@ -213,6 +227,11 @@ $FIX_CC -fno-pic -mcmodel=large -no-pie -Wl,--export-dynamic \
   -Wl,--no-dynamic-linker -Wl,-e,_start -Wl,-rpath-link,"$FIX" \
   -o "$FIX/APP_COPY" "$SRC/app_copy_exec.c" "$FIX/LIBCOPY.SO" \
   2>"$OBJ/err" || { cat "$OBJ/err"; fail "build APP_COPY"; }
+
+$FIX_CC -fPIC -pie -Wl,--export-dynamic -Wl,--no-dynamic-linker \
+  -Wl,-e,_start -Wl,-rpath-link,"$FIX" \
+  -o "$FIX/APP_BIG" "$SRC/app_big.c" "$FIX/LIBBIG.SO" \
+  2>"$OBJ/err" || { cat "$OBJ/err"; fail "build APP_BIG"; }
 
 $FIX_CC -fPIC -pie -Wl,--export-dynamic \
   -Wl,--no-dynamic-linker -Wl,-e,_start -Wl,-rpath-link,"$LIBDIR" \
@@ -236,7 +255,7 @@ have "$FIX/LIBA.SO" "HASH" && ! $READELF -d "$FIX/LIBA.SO" | grep -q "GNU_HASH" 
   || fail "LIBA.SO is not sysv-hash-only"
 have "$FIX/LIBB.SO" "GNU_HASH" && ! $READELF -d "$FIX/LIBB.SO" | grep -q "(HASH)" \
   || fail "LIBB.SO is not gnu-hash-only"
-$READELF -d "$FIX/LIBD.SO" | grep -q "LIBNOPE\|NEEDED.*LIBE.SO" \
+$READELF -d "$FIX/LIBD.SO" | grep -q "NEEDED.*LIBE.SO" \
   || fail "LIBD.SO does not carry a DT_NEEDED for LIBE.SO"
 $READELF -h "$FIX/APP" | grep -q "Type:.*DYN" || fail "APP is not ET_DYN"
 $READELF -Wr "$FIX/APP_COPY" | grep -q "R_X86_64_COPY" || fail "APP_COPY has no COPY relocation"
