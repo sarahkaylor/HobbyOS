@@ -631,7 +631,11 @@ int main(void) {
   }
 #endif
 
-  row("[LP] mem probe pid=%ld pagesz=%ld\n", (long)getpid(), (long)sysconf(_SC_PAGESIZE));
+  /* build= is deliberate: tools/gate/t3_linux_probe.sh builds the ELF only
+     when it is MISSING, so a stale obj/intel/probe_mem.elf silently re-runs the
+     old probe.  A row that does not say build=mem-3 is a stale binary. */
+  row("[LP] mem probe build=mem-3 pid=%ld pagesz=%ld\n", (long)getpid(),
+      (long)sysconf(_SC_PAGESIZE));
 
   test_sizes();
   test_anon_fd();
