@@ -14,7 +14,7 @@ Usage:
   board.py lanes                      # list lane labels (create missing with --create)
   board.py list [--lane L] [--milestone M0] [--label x] [--state open|closed|all]
   board.py show GB-013
-  board.py claim GB-013 [--by swarm-worker-1]
+  board.py claim GB-013 [--by swarm-worker-1]   # Ready only (WORK POLICY rule 1)
   board.py move GB-013 "In Progress" [--no-comment]
   board.py comment GB-013 -m "text"   (or --file path)
   board.py status                     # lane/milestone rollup (board at a glance)
@@ -256,6 +256,16 @@ def cmd_claim(a):
             raise SystemExit(
                 f"{a.gid} #{it['number']} already claimed by `{winner or 'another agent'}` "
                 "(lane already In Progress) — not re-claiming (GB-074); run no gate")
+        # WORK POLICY rule 1 (2026-11-01): `In Progress` is a lease, and claims are
+        # only made from `Ready`.  A Backlog card must be promoted first (rule 5);
+        # an In Review card with an open PR must stay In Review (rule 2).  Until
+        # GB-154 the only refusal was the In-Progress one above, so a mis-typed
+        # claim silently skipped promotion or fought pr_sync.py for an hour.
+        if cur != "Ready":
+            raise SystemExit(
+                f"{a.gid} #{it['number']} is `{cur or 'not in a lane'}` — claims are only "
+                "from `Ready` (WORK POLICY rule 1, 2026-11-01); no claim posted, lane "
+                f"unchanged. Promote it first: python3 tools/board/board.py move {a.gid} Ready")
         prev = set_lane(it, "In Progress")
         msg = (f"claimed by `{by}` on {a.host or 'swarm-coordinator'} — "
                f"lane: {prev or 'Backlog'} → In Progress")
