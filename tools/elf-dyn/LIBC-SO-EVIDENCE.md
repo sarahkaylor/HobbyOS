@@ -12,6 +12,7 @@ summary so the numbers survive a clean checkout.
 make ARCH=arm   obj/arm/libc.a      # archive baseline for the size column
 make ARCH=intel obj/intel/libc.a
 tools/build_libs.sh all            # obj/<arch>/libc.so + evidence
+tools/build_libs.sh link_probe all # link a throwaway program against it
 tools/elf-dyn/gen_so_fixtures.sh   # fixtures for lane D (+ --check to diff)
 ```
 
@@ -106,6 +107,27 @@ resolved the symbols and left the in-module offsets in the addend:
   00000000000493c0     0 NOTYPE  LOCAL  DEFAULT   14 __tls_tcb_head
   0000000000000010     0 NOTYPE  LOCAL  DEFAULT  ABS __tls_size
 ```
+
+## Linkable, not just loadable
+
+`tools/build_libs.sh link_probe <arch>` builds the §5 pilot shape — a tiny
+ET_DYN program that imports `strlen`, `malloc`, `free`, `strcmp` — and links it
+against `obj/<arch>/libc.so`:
+
+```
+$ ld.lld -pie --no-dynamic-linker -e _start -z relro -z now -z defs \
+          -z noexecstack --hash-style=both -o APP.ELF probe.o obj/<arch>/libc.so
+
+arm:   Type DYN (Position-Independent Executable file), Entry 0x10320,
+       NEEDED LIBC.SO, imports {malloc, strlen, strcmp, free}
+intel: Type DYN (Position-Independent Executable file), Entry 0x1380,
+       NEEDED LIBC.SO, imports {malloc, strlen, strcmp, free}
+```
+
+So LIBC.SO's `.dynsym` is a usable link input (types/sizes/bindings are right
+on every export), `DT_SONAME LIBC.SO` propagates into the consumer's
+`DT_NEEDED`, and the result has the ET_DYN + real-entry shape the kernel and
+interpreter expect.
 
 ## Reading of the numbers
 
