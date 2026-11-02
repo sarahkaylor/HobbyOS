@@ -421,6 +421,58 @@ int main(void) {
           "rc=%d revents=0x%x", r, (unsigned)pf.revents);
   (void)!read(ar, buf, sizeof buf);
 
+  /* ---- 7d. sendmsg / recvmsg: scattered iovecs ----------------------- */
+  memset(buf, 0, sizeof buf);
+  {
+    char part1[3] = "ms";
+    char part2[3] = "g!";
+    struct iovec siv[2];
+    siv[0].iov_base = part1;
+    siv[0].iov_len = 2;
+    siv[1].iov_base = part2;
+    siv[1].iov_len = 2;
+    struct msghdr smh;
+    memset(&smh, 0, sizeof smh);
+    smh.msg_iov = siv;
+    smh.msg_iovlen = 2;
+    errno = 0;
+    ssize_t sr = sendmsg(sv[0], &smh, 0);
+
+    char rbuf[16];
+    struct iovec riv[1];
+    riv[0].iov_base = rbuf;
+    riv[0].iov_len = sizeof rbuf;
+    struct msghdr rmh;
+    memset(&rmh, 0, sizeof rmh);
+    rmh.msg_iov = riv;
+    rmh.msg_iovlen = 1;
+    errno = 0;
+    ssize_t rr = recvmsg(sv[1], &rmh, 0);
+    verdict("sendmsg_recvmsg",
+            sr == 4 && rr == 4 && memcmp(rbuf, "msg!", 4) == 0,
+            "send=%d recv=%d data=%.4s flags=0x%x errno=%d", (int)sr, (int)rr,
+            rbuf, (unsigned)rmh.msg_flags, errno);
+  }
+
+  /* ---- 7e. accept4 with SOCK_NONBLOCK | SOCK_CLOEXEC ----------------- */
+  {
+    int c2s = socket(AF_UNIX, SOCK_STREAM, 0);
+    memset(&sa, 0, sizeof sa);
+    sa.sun_family = AF_UNIX;
+    strcpy(sa.sun_path, LP_PATH);
+    int cc = (c2s >= 0) ? connect(c2s, (struct sockaddr *)&sa, sizeof sa) : -1;
+    errno = 0;
+    int a4 = accept4(ls, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+    int afl = (a4 >= 0) ? fcntl(a4, F_GETFL) : -1;
+    int afd = (a4 >= 0) ? fcntl(a4, F_GETFD) : -1;
+    verdict("accept4",
+            cc == 0 && a4 >= 3 && (afl & O_NONBLOCK) && (afd & FD_CLOEXEC),
+            "connect=%d fd=%d getfl=0x%x getfd=0x%x errno=%d", cc, a4, afl, afd,
+            errno);
+    if (a4 >= 3) close(a4);
+    if (c2s >= 0) close(c2s);
+  }
+
   /* ---- 7c. shutdown(SHUT_WR) -> EOF on the peer --------------------- */
   errno = 0;
   int shr = shutdown(cl, SHUT_WR);
