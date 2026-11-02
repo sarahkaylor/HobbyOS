@@ -569,6 +569,15 @@ void main(void) {
             "open; app + static-PIE ELF props proven on host by "
             "sdl_test_app_test_host)\n");
 #endif
+#elif defined(KERNEL_MODE_SO_TEST)
+  /* docs/shared-libs.md §5.5 pilot: boot ONLY HDYN.BIN, which is an ET_DYN
+     executable whose PT_INTERP is /LDHOBBY.SO.  The kernel maps the program,
+     maps the interpreter into USER_LIB slot 0, writes struct hb_start and
+     enters the interpreter; the interpreter maps LIBC.SO and jumps to the
+     program.  One program only, so the first failure is the first thing on
+     the serial log. */
+  uart_puts("Mode: SO_TEST - booting the dynamic-linking pilot HDYN.BIN\n");
+  load_and_run_program_in_scheduler("HDYN.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);
