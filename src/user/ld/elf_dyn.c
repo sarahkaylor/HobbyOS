@@ -125,21 +125,28 @@ static int check_load_shape(const hb_elf64_phdr *ph, uint32_t n, char *err,
     const hb_elf64_phdr *a = &ph[i];
     if (a->p_type != HB_PT_LOAD)
       continue;
-    /* Two segments may not share a page.  The loader maps each PT_LOAD at
-     * base + page_down(p_vaddr) with its own file offset; a shared page would
-     * mean one segment's mapping silently overwrites the other's.  (lld's
-     * -z separate-code layout keeps a page between segments, so this only
-     * rejects hand-made or exotic images.) */
+    /* Two segments may share a page ONLY if they carry the same protection.
+     * The loader maps each PT_LOAD at base + page_down(p_vaddr) with its own
+     * file offset; because the congruence rule makes both offsets point at
+     * the same file page, the second mapping is byte-identical to the first,
+     * so an overlap is harmless — unless the segments disagree about
+     * protection, where the later mapping would silently redefine the
+     * earlier one's page (text turning writable, or data turning executable).
+     * Measured: lld gives LIBC.SO two adjacent RW segments (.data/.bss) that
+     * share one page, which is fine; an R/RX or RX/RW overlap is not. */
     for (j = i + 1; j < n; j++) {
       const hb_elf64_phdr *b = &ph[j];
       uint64_t a0, a1, b0, b1;
+      uint32_t pa, pb;
       if (b->p_type != HB_PT_LOAD)
         continue;
       a0 = align_down(a->p_vaddr, HB_PAGE);
       a1 = align_up(a->p_vaddr + a->p_memsz, HB_PAGE);
       b0 = align_down(b->p_vaddr, HB_PAGE);
       b1 = align_up(b->p_vaddr + b->p_memsz, HB_PAGE);
-      if (a0 < b1 && b0 < a1) {
+      pa = a->p_flags & (HB_PF_R | HB_PF_W | HB_PF_X);
+      pb = b->p_flags & (HB_PF_R | HB_PF_W | HB_PF_X);
+      if (a0 < b1 && b0 < a1 && pa != pb) {
         hb_ldso_err_reset(err, cap);
         hb_ldso_err_add(err, cap, "PT_LOAD segments share a page");
         return HB_LDSO_E_LAYOUT;
@@ -351,8 +358,14 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
     return rc;
   if (m->ehdr->e_phnum != phnum) {
     hb_ldso_err_reset(err, cap);
-    hb_ldso_err_add(err, cap, "e_phnum disagrees with the supplied table");
-    return HB_LDSO_E_PHDR;
+    hb_ldso_err_add(err, cap, "e_phnum disagrees: mem=");
+    hb_ldso_err_add_hex(err + hb_ldso_strlen(err),
+                        cap - (uint32_t)hb_ldso_strlen(err),
+                        m->ehdr->e_phnum);
+    hb_ldso_err_add(err, cap, " file=");
+    hb_ldso_err_add_hex(err + hb_ldso_strlen(err),
+                        cap - (uint32_t)hb_ldso_strlen(err), phnum);
+    return HB_LDSO_E_LAYOUT;
   }
   {
     int lrc = check_load_shape(phdr, phnum, err, cap);
