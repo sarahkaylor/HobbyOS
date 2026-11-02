@@ -1071,6 +1071,44 @@ static void compat_writev(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)total;
 }
 
+/* GB-169: readv(19).  musl's stdio reads through readv(fd, iov, 2) — a buffered
+   file read is a two-segment iovec — so with no arm every fread() returned
+   -ENOSYS: DOOM opened doom1.wad and then rejected its magic ("doesn't have
+   IWAD or PWAD id") even though the same file read()s fine.  Mirrors
+   compat_writev's iovec walk and parked-pipe handling. */
+static void compat_readv(struct trap_frame *tf) {
+  struct process *c = current_process();
+  int fd = (int)tf->regs[5];
+  uint64_t iov = tf->regs[4];
+  long cnt = (long)tf->regs[3];
+  if (cnt < 0 || cnt > 1024) { tf->regs[0] = (uint64_t)(int64_t)-EINVAL; return; }
+  if (cnt == 0) { tf->regs[0] = 0; return; }
+  if (!sys_user_range_ok(iov, (uint64_t)cnt * 16)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+  int64_t total = 0;
+  for (long i = 0; i < cnt; i++) {
+    uint64_t base = 0, len = 0;
+    if (vm_user_read(c, iov + (uint64_t)i * 16, &base, 8) != 0 ||
+        vm_user_read(c, iov + (uint64_t)i * 16 + 8, &len, 8) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
+    }
+    if (len == 0) continue;
+    if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT;
+    if (!sys_user_range_ok(base, len)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+    int r = file_read(c, fd, (void *)(uintptr_t)base, (int)len, tf);
+    if (r == -2) {
+      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if ((tf->cs & 3) == 3) tf->elr -= 2;
+      save_context(c, tf);
+      schedule(tf, 0);
+      return;
+    }
+    if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : r); return; }
+    total += r;
+    if ((uint64_t)r < len) { tf->regs[0] = (uint64_t)total; return; }
+  }
+  tf->regs[0] = (uint64_t)total;
+}
+
 extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid);
 extern int load_and_run_program_in_scheduler_args(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid, const char *args);
 extern struct process *process_get_pcb(int pid);
@@ -2550,6 +2588,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         /* GB-141 (V2 mechanism): musl stdio calls writev(20), not write — the compat
            table had no case 20, so every printf byte hit -ENOSYS. */
         case 20: compat_writev(tf); return;
+        /* GB-169: the read half — musl's fread() is readv(19) with a two-segment
+           iovec; without it a file opens but every buffered read fails, which is
+           how DOOM rejected a WAD it had just opened. */
+        case 19: compat_readv(tf); return;
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
         /* GB-019 clause 4: Linux fcntl(72)(fd, cmd, arg) SHARES file_fcntl with the
