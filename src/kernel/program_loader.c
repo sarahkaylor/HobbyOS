@@ -631,20 +631,35 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
   argp[argc] = 0;
   envp[envc] = 0;
 
-  /* Lay the fixed part of the block in ASCENDING address order, which means
-     writing it in DESCENDING order: auxv (highest, right under the strings),
-     then envp[], then argv[], then argc.  argv must sit ABOVE envp — the first
-     version wrote argv first and the guest read a NULL argv[0] and faulted at
-     VA=0x1000. */
-  sp = (sp - 16) & ~(uint64_t)0xF;
-  uint64_t rnd_addr = sp;
+  /* The fixed part of the block, laid out by ADDRESS rather than by luck:
+   *
+   *     rsp -> argc            (16-byte aligned, SysV)
+   *            argv[0..argc-1], NULL
+   *            envp[0..envc-1], NULL
+   *            auxv pairs, AT_NULL
+   *            AT_RANDOM's 16 bytes
+   *            the strings
+   *
+   * musl's _start reads argc at %rsp and argv at %rsp+8, so argv[0] must sit
+   * exactly 8 bytes above the argc word, and %rsp must be 16-aligned.  An
+   * earlier cut placed the arrays in descending order and then re-aligned %rsp
+   * to 16: that leaves an 8-byte hole between argc and argv[0] whenever the
+   * array sizes make the base 16-aligned.  With argc=3 it happened to line up
+   * (argv and DISPLAY arrived); with argc=1 the guest read argv[0] == NULL and
+   * an empty environment, and Doom then asked libXau for $HOME and died.
+   * Computing argv_base first makes the layout independent of the counts. */
+  uint64_t w[20];
+  uint64_t rnd_addr = (sp - 16) & ~(uint64_t)0xF;
+  uint64_t auxv_addr = (rnd_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
+  uint64_t arrays = (uint64_t)(argc + 1) * 8 + (uint64_t)(envc + 1) * 8;
+  uint64_t argv_addr = (auxv_addr - arrays) & ~(uint64_t)0x7;
+  if ((argv_addr & 0xF) == 0) argv_addr -= 8; /* argv[0] must be 8 mod 16 */
+  uint64_t envp_addr = argv_addr + (uint64_t)(argc + 1) * 8;
+
   uint8_t rnd[16];
   net_get_random_bytes(rnd, 16);
   if (vm_kwrite(child, rnd_addr, rnd, 16) != 0) return -EFAULT;
 
-  uint64_t w[20];
-  sp = (sp - (uint64_t)sizeof w) & ~(uint64_t)0xF;
-  uint64_t blk = sp;
   w[0] = 6;                        /* AT_PAGESZ */
   w[1] = 4096;
   w[2] = 3;                        /* AT_PHDR   */
@@ -662,19 +677,13 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
   w[13] = name_addr;
   w[14] = 0;                       /* AT_NULL */
   w[15] = 0;
-  if (vm_kwrite(child, blk, w, 16 * 8) != 0) return -EFAULT;
-
-  sp -= (uint64_t)(envc + 1) * 8;
-  uint64_t envp_addr = sp;
-  if (vm_kwrite(child, envp_addr, envp, (int)((envc + 1) * 8)) != 0)
-    return -EFAULT;
-  sp -= (uint64_t)(argc + 1) * 8;
-  uint64_t argv_addr = sp;
+  if (vm_kwrite(child, auxv_addr, w, 16 * 8) != 0) return -EFAULT;
   if (vm_kwrite(child, argv_addr, argp, (int)((argc + 1) * 8)) != 0)
     return -EFAULT;
+  if (vm_kwrite(child, envp_addr, envp, (int)((envc + 1) * 8)) != 0)
+    return -EFAULT;
 
-  /* %rsp points at argc; musl's _start pops it and aligns the rest itself. */
-  sp = (sp - 8) & ~(uint64_t)0xF;
+  sp = argv_addr - 8;
   uint64_t argcw = (uint64_t)argc;
   if (vm_kwrite(child, sp, &argcw, 8) != 0) return -EFAULT;
 
