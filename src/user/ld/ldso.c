@@ -100,7 +100,9 @@ static int fail_msg(struct hb_ldso_result *r, int code, const char *msg) {
 
 /* --- mapping ----------------------------------------------------------- */
 
-static int slot_take(struct ldso_ctx *c, uint64_t span, uint32_t *slot_out) {
+/* First-fit over the USER_LIB slots.  16 MiB each, so any module that fits a
+ * slot fits any free one; the bitmap makes "first-fit" a scan of slot 0 up. */
+static int slot_take(struct ldso_ctx *c, uint32_t *slot_out) {
   uint32_t i;
   for (i = 0; i < USER_LIB_MAX; i++) {
     if (c->slots[i / 32] & (1u << (i % 32)))
@@ -109,7 +111,6 @@ static int slot_take(struct ldso_ctx *c, uint64_t span, uint32_t *slot_out) {
     *slot_out = i;
     return 1;
   }
-  (void)span;
   return 0;
 }
 
@@ -135,7 +136,7 @@ static int map_dso(struct ldso_ctx *c, const char *name, int *out_index) {
   int fd, rc, have_slot = 0;
   uint32_t slot = 0;
   int64_t got, got2;
-  uint64_t want, file_span, span;
+  uint64_t want, span;
 
   if (r->nmodules >= HB_LDSO_MAX_MODULES)
     return fail(r, HB_LDSO_E_COUNT, name, "too many modules", 0, 0);
@@ -155,27 +156,23 @@ static int map_dso(struct ldso_ctx *c, const char *name, int *out_index) {
     return fail(r, HB_LDSO_E_TOOBIG, name, "DSO larger than a USER_LIB slot",
                 probe.span, 1);
   }
-  if (!slot_take(c, probe.span, &slot)) {
+  if (!slot_take(c, &slot)) {
     hb_ldso_platform_close(fd);
     return fail(r, HB_LDSO_E_NOSLOT, name, "USER_LIB slot region exhausted",
                 0, 0);
   }
   have_slot = 1;
   want = HB_LDSO_USER_LIB_BASE + (uint64_t)slot * USER_LIB_SLOT_SIZE;
-  span = probe.span;
-  file_span = probe.file_size;
-  if (file_span > span)
-    file_span = span;
-  file_span = (file_span + HB_PAGE - 1) & ~HB_PAGE_MASK;
-  if (file_span < HB_PAGE)
-    file_span = HB_PAGE;
-  if (file_span > span)
-    file_span = span;
+  if (probe.max_align > USER_LIB_SLOT_SIZE) {
+    hb_ldso_platform_close(fd);
+    return fail(r, HB_LDSO_E_LAYOUT, name,
+                "DSO p_align larger than a USER_LIB slot", probe.max_align, 1);
+  }
 
-  /* Reserve the whole span first, then map the file over its head.  One
-   * reservation means the .bss tail is already ours (zero-filled anonymous),
-   * and the file mapping replaces only a range this loader just reserved --
-   * never a mapping the kernel happened to place next door. */
+  /* Reserve the whole span first, then map each segment over it.  One
+   * reservation means every MAP_FIXED below replaces only memory this loader
+   * just took (never a mapping the kernel happened to place next door), and
+   * each segment's .bss tail is already zero-filled anonymous memory. */
   span = probe.span;
   got = hb_ldso_platform_mmap(want, span, HB_PROT_READ | HB_PROT_WRITE,
                               HB_MAP_PRIVATE | HB_MAP_FIXED | HB_MAP_ANON, -1,
@@ -209,11 +206,11 @@ static int map_dso(struct ldso_ctx *c, const char *name, int *out_index) {
     hb_ldso_err_add(err, sizeof(err), "\n");
     hb_ldso_platform_console(err);
   }
-  /* Map each PT_LOAD at base + page_down(p_vaddr) from page_down(p_offset).
-   * One whole-span reservation was taken above, so every MAP_FIXED here
-   * replaces only memory this loader owns; each segment's .bss tail is left
-   * as the reservation's zero-filled pages.  The segment congruence rule
-   * (checked by the probe) makes p_vaddr/p_offset page-compatible. */
+  /* Map each PT_LOAD at base + page_down(p_vaddr), from the file offset that
+   * the p_align congruence rule makes correct for that address.  Text stays
+   * PROT_READ from the first mapping: no segment is ever writable unless its
+   * p_flags say so (relax_for_reloc adds W only to PF_W segments, and only
+   * until protect_module restores the final flags). */
   {
     uint32_t k;
     for (k = 0; k < probe.phnum; k++) {
@@ -290,6 +287,15 @@ static int build_exec(struct ldso_ctx *c) {
                             c->st->phnum, err, sizeof(err));
   if (rc != HB_LDSO_OK)
     return fail(r, rc, "EXEC", err, 0, 0);
+  /* The startup block's entry and phdr must point into the image the kernel
+   * says it mapped; anything else is a kernel-side contract break and must
+   * be a clean refusal, not a jump into nothing. */
+  if (c->st->entry < c->st->base || c->st->entry >= c->st->base + m->span)
+    return fail(r, HB_LDSO_E_START_FIELD, "EXEC",
+                "hb_start entry outside the executable image", c->st->entry, 1);
+  if (c->st->phdr < c->st->base || c->st->phdr >= c->st->base + m->span)
+    return fail(r, HB_LDSO_E_START_FIELD, "EXEC",
+                "hb_start phdr outside the executable image", c->st->phdr, 1);
   hb_ldso_strcpy(m->name, "EXEC", HB_LDSO_NAME_MAX);
   m->is_exec = 1;
   m->loaded = 1;
