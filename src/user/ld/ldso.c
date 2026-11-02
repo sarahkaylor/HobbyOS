@@ -809,8 +809,15 @@ int hb_ldso_run(const struct hb_start *st, struct hb_ldso_result *out) {
     return HB_LDSO_E_ARG;
   hb_ldso_memset(out, 0, sizeof(*out));
   out->status = HB_LDSO_OK;
-  if (!st)
+  if (!st) {
+#ifdef HOST_TEST
+    /* No fixed startup page exists in a host process; a NULL here is a
+     * harness bug, not a kernel one. */
+    return fail_msg(out, HB_LDSO_E_ARG, "hb_ldso_run: no startup block");
+#else
     st = (const struct hb_start *)(uintptr_t)HB_LDSO_USER_START_BASE;
+#endif
+  }
   rc = check_start(out, st);
   if (rc != HB_LDSO_OK)
     return rc;
