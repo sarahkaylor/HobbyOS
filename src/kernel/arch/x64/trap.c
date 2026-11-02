@@ -1971,6 +1971,24 @@ static void compat_newfstatat(struct trap_frame *tf) {
   compat_stat_path(tf);
 }
 
+/* GB-165: openat(dirfd, path, flags, mode).  The clang/musl-target build of
+   DOOMW4 reaches the kernel through openat(257), not open(2): 126 `mov $0x101`
+   sites in the ELF, none in a musl-gcc build of the same probe.  Only
+   AT_FDCWD is honoured (that is all musl's fopen passes); a real dirfd is
+   refused rather than silently resolved against the wrong directory. */
+static void compat_openat(struct trap_frame *tf) {
+  int dirfd = (int)tf->regs[5];                                  /* rdi */
+  const char *path = (const char *)tf->regs[4];                  /* rsi */
+  int flags = (int)tf->regs[3];                                  /* rdx */
+  if (dirfd != -100) {                                           /* AT_FDCWD */
+    tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uintptr_t)path;
+  tf->regs[4] = (uint64_t)(uintptr_t)(int64_t)flags;
+  sys_open(tf);
+}
+
 static void sys_chdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = process_group(current_process()); /* P1 (D7) */
@@ -2466,6 +2484,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         }
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
+        /* GB-165: lseek(8).  DOOM's W_AddFile seeks to the WAD directory; with
+           no arm the seek returned -ENOSYS and every lump lookup failed
+           ("W_GetNumForName: PNAMES not found!" at a WAD it had just opened).
+           Linux and HobbyOS agree on (fd, offset, whence). */
+        case 8:  syscall_num = SYS_LSEEK; break;   /* lseek(fd, off, wh) */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
         /* GB-021: musl pthread_create -> clone(2); pthread mutex/join ->
            futex(2).  Both are Linux-shaped and handled directly (the clone
@@ -2555,6 +2578,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 6:   compat_stat_path(tf);         return; /* lstat (FAT: same) */
         case 5:   compat_fstat(tf);             return; /* fstat(fd, buf)   */
         case 262: compat_newfstatat(tf);        return; /* newfstatat(...)  */
+        /* GB-165: openat(257) — the clang/musl-target build of DOOMW4 uses it
+           for every fopen; without an arm its IWAD search could not open the
+           file that `open(2)` was happy to serve. */
+        case 257: compat_openat(tf);            return; /* openat(...)      */
         /* GB-149: brk/mmap for the musl allocator.  SYS_MMAP is already the
            6-arg Linux shape (sys_mmap6); SYS_BRK takes rdi.  Mapped here to
            measure the guest's heap setup before committing to a fix. */
