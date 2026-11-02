@@ -2364,7 +2364,17 @@ void sync_lower_handler_c(struct trap_frame *tf) {
          with LINUX semantics and writes tf->regs[0] itself.  The switch below
          is the older number-translation path and stays as the fallback; a
          handler that returns 0 means "not mine", not "fail". */
-      if (linux_compat_dispatch(lp, tf, syscall_num)) return;
+      if (linux_compat_dispatch(lp, tf, syscall_num)) {
+        /* Linux delivers a signal raised BY a syscall at syscall exit, so the
+           frame the handler sees carries the syscall's return value in rax.
+           Returning straight to user mode skipped the leader's return-to-user
+           boundary below (the process_signal_trap_exit(tf) at the end of this
+           function), which deferred such a signal to the next 100 Hz tick --
+           measured by the proc lane as handler entry up to one tick late.  The
+           hook is a no-op unless a deliverable handler signal is pending. */
+        process_signal_trap_exit(tf);
+        return;
+      }
       switch (syscall_num) {
         case 0:  syscall_num = SYS_READ;  break;   /* read(fd, buf, n)   */
         case 1:  syscall_num = SYS_WRITE; break;   /* write(fd, buf, n)  */
