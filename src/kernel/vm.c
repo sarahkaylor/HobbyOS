@@ -1677,10 +1677,13 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
     /* so-vm lane A: the DSO band (USER_LIB_BASE..LIMIT) is a legal
        MAP_FIXED target — that is where the interpreter places each
        library, one 16 MiB slot at a time (docs/shared-libs.md section 2).
-       The MMAP arena keeps its exact previous rule. */
-    int in_mmap = addr >= USER_VA_BASE &&
-                  addr + len <= USER_VA_BASE + USER_MMAP_SIZE + USER_MMAP_OFF;
-    int in_lib = addr >= USER_LIB_BASE && addr + len <= USER_LIB_LIMIT;
+       The MMAP arena keeps its exact previous rule.  Both bounds are
+       written as "len <= limit - addr" so a wrapping addr+len cannot pass. */
+    const uint64_t mmap_lim = USER_VA_BASE + USER_MMAP_SIZE + USER_MMAP_OFF;
+    int in_mmap = addr >= USER_VA_BASE && addr <= mmap_lim &&
+                  len <= mmap_lim - addr;
+    int in_lib = addr >= USER_LIB_BASE && addr <= USER_LIB_LIMIT &&
+                 len <= USER_LIB_LIMIT - addr;
     if ((addr & 0xFFF) || (!in_mmap && !in_lib))
       return -EINVAL;
     /* MAP_FIXED replaces whatever was mapped in range. */
@@ -1691,7 +1694,8 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
     /* First-fit bottom-up from USER_MMAP_BASE; the hint is honored when
        free and inside the arena. */
     uint64_t start = USER_MMAP_BASE_V2;
-    if (addr && addr >= USER_MMAP_BASE_V2 && addr + len <= USER_MMAP_LIMIT_V2) {
+    if (addr && addr >= USER_MMAP_BASE_V2 && addr <= USER_MMAP_LIMIT_V2 &&
+        len <= USER_MMAP_LIMIT_V2 - addr) {
       uint64_t hf = vm_hole_find(as, addr, USER_MMAP_LIMIT_V2, len);
       if (hf == addr) {
         base = hf;
@@ -1699,7 +1703,8 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       }
     }
     /* so-vm lane A: a hint inside the DSO band is honored the same way. */
-    if (addr && addr >= USER_LIB_BASE && addr + len <= USER_LIB_LIMIT) {
+    if (addr && addr >= USER_LIB_BASE && addr <= USER_LIB_LIMIT &&
+        len <= USER_LIB_LIMIT - addr) {
       uint64_t lh = vm_hole_find(as, addr, USER_LIB_LIMIT, len);
       if (lh == addr) {
         base = lh;

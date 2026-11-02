@@ -405,7 +405,12 @@ static void test_vm_mmap_family(void) {
   EXPECT_EQ((b2 >= (int64_t)USER_MMAP_BASE_V2 + 0x2000), 1);
   EXPECT_EQ((b2 > b1), 1);
 
-  /* fd-backed and MAP_SHARED are S4: rejected, and a bad len too. */
+  /* fd-backed and MAP_SHARED are S4: rejected, and a bad len too.  Pin the
+     fake fd table first: a zeroed struct reads global fd 0, which an earlier
+     suite may have left holding a real file — and a regular-file fd is now
+     a legal (file-backed) mmap source.  fd 3 CLOSED is the deterministic
+     "not a mappable fd" case: -ENOTSUP, unchanged. */
+  fake.open_fds[3] = -1;
   EXPECT_EQ(vm_mmap(&fake, 0, 0x1000, VM_PROT_READ, VM_MAP_PRIVATE, 3, 0),
             -ENOTSUP);
   EXPECT_EQ(vm_mmap(&fake, 0, 0, VM_PROT_READ, VM_MAP_PRIVATE, -1, 0), -EINVAL);
