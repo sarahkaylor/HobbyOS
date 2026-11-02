@@ -3821,6 +3821,13 @@ GB019_IOCTL_ELF = $(OBJ_DIR)/gb019_ioctl.elf
 $(GB019_IOCTL_ELF): src/user/gb019_ioctl_probe.c
 	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/gb019_ioctl_probe.c -o $(GB019_IOCTL_ELF)
 	@readelf -h $(GB019_IOCTL_ELF) | grep -q 'Type: *DYN' || ( echo "gb019_ioctl: build is not ET_DYN/static-PIE"; readelf -h $(GB019_IOCTL_ELF) | head -4; exit 1 )
+
+# GB-016: uname(2) compat probe.  Same static-PIE vehicle as GB-019 so the
+# process carries PROC_FLAG_LINUX_ABI and its uname arrives as Linux number 63.
+GB016_UNAME_ELF = $(OBJ_DIR)/gb016_uname.elf
+$(GB016_UNAME_ELF): src/user/gb016_uname_probe.c
+	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/gb016_uname_probe.c -o $(GB016_UNAME_ELF)
+	@readelf -h $(GB016_UNAME_ELF) | grep -q 'Type: *DYN' || ( echo "gb016_uname: build is not ET_DYN/static-PIE"; readelf -h $(GB016_UNAME_ELF) | head -4; exit 1 )
 $(T4_LEGA_OUT): $(T4_PROBE_ELF)
 	@./$(T4_PROBE_ELF) > $(T4_LEGA_OUT) && echo "[t4-device] leg A captured -> $(T4_LEGA_OUT)"
 $(T4_DEVICE_GATE): tools/gate/t4_device.sh $(T4_LEGA_OUT)
@@ -3878,6 +3885,14 @@ $(T4_GB019_IOCTL): tools/gate/t4_gb019_ioctl.sh
 	@bash tools/gate/t4_gb019_ioctl.sh
 $(T4_GB019_IOCTL_SELFTEST): tools/gate/t4_gb019_ioctl.sh
 	@bash tools/gate/t4_gb019_ioctl.sh --self-test
+
+# GB-016: uname(2) from a Linux-ABI process (dispatch, not just the fill).
+T4_GB016_UNAME = t4_gb016_uname
+T4_GB016_UNAME_SELFTEST = t4_gb016_uname_selftest
+$(T4_GB016_UNAME): tools/gate/t4_gb016_uname.sh
+	@bash tools/gate/t4_gb016_uname.sh
+$(T4_GB016_UNAME_SELFTEST): tools/gate/t4_gb016_uname.sh
+	@bash tools/gate/t4_gb016_uname.sh --self-test
 # self-test: the gate FAILs (exit 1) when the expected observations are absent —
 # proves the gate cannot be painted green by silence.  This runs the GREP logic on
 # an empty capture and on a capture naming W0PIE but no abi line.
