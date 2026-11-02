@@ -22,42 +22,47 @@ $ python3 tools/t5/acceptance_run.py --arch arm --root "$PWD"
 Summary: **PASS**
 ```
 
-Committed artefacts: `S0-S1-ACCEPTANCE.md`, `S0-S1-ACCEPTANCE-MANIFEST.json`
-(arch arm, sha16 per title).
+Its generated report and manifest are committed under
+`evidence/GB-053/arm-8cpu/` (sha16 per title).
 
-## Intel leg — FAIL, the guest halts before the menu populates (2/2 attempts)
+## Intel leg — PASS at 1 CPU; 8 CPUs crash before the menu (4/4)
 
-Both attempts end the same way; the run then reports every title as
-`not in [MENU] dump`:
-
-```
-| PONG.BIN | - | no | False | FAIL |  - not in [MENU] dump
-| MILLIPED.BIN | - | no | False | FAIL |  - not in [MENU] dump
-| XNIBBLER.BIN | - | no | False | FAIL |  - not in [MENU] dump
-| XCRYPT.BIN | - | no | False | FAIL |  - not in [MENU] dump
-| NES.BIN | - | no | False | FAIL |  - not in [MENU] dump
-Summary: **FAIL**
-```
-
-The serial has no `[MENU] count=` line at all; it has a kernel-mode fault at
-user VA 0x10000043B0 with the pushed frame matching the read frame, and the
-resume path halting the CPU that holds DESKTOP.BIN (`evidence/acceptance/20261102T040333Z/serial.log`):
+Both legs pass, but the intel leg needs `QEMU_SMP=1` on current main:
 
 ```
-[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=14 rip=0x00000010000043B0
-         cr2=0x00000010000043B0 pid=-1 err=4 cr3=0x0000000020C03000 pd480=0x00000000810000FB
-[FRAMESNAP] fatal pushed rip=0x00000010000043B0 cs=0x1B rsp=0x17FFFFFFE8 ss=0x23 |
-            read rip=0x00000010000043B0 cs=0x1B rsp=0x17FFFFFFE8 ss=0x23 match=1 snaps=3 faults=3
-[DEADCLAIM] slot=1 pid=1 name=DESKTOP.BIN claimed only by halted cpus -- excluded from the
-            wave-end predicate (no CPU can run it; the resume path halted that CPU)
+$ QEMU_SMP=1 python3 tools/t5/acceptance_run.py --arch intel --root "$PWD"
+| PONG.BIN     | 16 | yes | True | PASS |
+| MILLIPED.BIN | 17 | yes | True | PASS |
+| XNIBBLER.BIN | 20 | yes | True | PASS |
+| XCRYPT.BIN   | 21 | yes | True | PASS |
+| NES.BIN      | 22 | yes | True | PASS |
+Summary: **PASS**
+```
+
+At the default 8 CPUs the same run cannot reach the menu: the guest halts in
+DESKTOP.BIN's first user resume, and every title reports `not in [MENU] dump`.
+That reproduced **4 times out of 4** (three acceptance attempts and one
+`evidence_rig` boot), while `QEMU_SMP=1` booted and ran the full wave on the
+first try — so this is an SMP race in the resume path, not a general intel
+failure:
+
+```
+[RESUME-SPSR] pid=1 spsr=0x00010202 IF=1
+[RESUME-DIAG] pid=1 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000014
+  RIP: 0x00000010000043B0  RSP: 0x00000017FFFFFFE8
+  CS:  0x000000000000001B  SS: 0x0000000000000023 RFLAGS: 0x0000000000010202
+  RAX: 0x00000010000043B0
+  CPU: 5  pid: -1
+[FRAMESNAP] fatal pushed rip=0x10000043B0 ... match=1 snaps=3 faults=3
+[DEADCLAIM] slot=1 pid=1 name=DESKTOP.BIN claimed only by halted cpus
 System halt from CPU 1
 ```
 
-Second attempt (`evidence/acceptance/20261102T040333Z`) is identical; the first
-(`20261102T040013Z`) crashed the same way. This is the M1 resume/frame family
-owned by GB-146/GB-147 (the pushed frame is intact — `match=1` — so this is not
-GB-147's torn-frame symptom; the CPU halts on a #PF whose cr2 equals the
-instruction address).
+`cr2 == rip == 0x10000043B0` (the image's entry page), `pid=-1` (no current
+process, so the user-mode #PF branch at `trap.c:3337` is skipped and the
+kernel-mode handler halts the CPU), and the pushed frame is intact (`match=1`,
+so not GB-147's torn frame). Owner: the M1 resume family (GB-146/GB-122).
 
 ## Tool defects found and fixed on this branch
 
@@ -75,7 +80,11 @@ instruction address).
 
 ## Card verdict
 
-S0+S1 is **not signed off**: the ARM leg is green 5/5, the intel leg cannot
-produce a menu because the guest halts in the resume path. The honest state is
-"ARM green, intel blocked by GB-146/GB-147", and the card carries that FAIL
-rather than the 10-27 one.
+Both arches pass the pinned S0 corpus: **ARM 5/5 at the default 8 CPUs**,
+**intel 5/5 at 1 CPU**.  The intel leg at the default 8 CPUs is currently
+blocked by the desktop's first-resume SMP crash (4/4), which is a kernel defect
+owned by GB-146/GB-122, not an acceptance-tool or port defect — the `-smp 1`
+control is what separates the two.
+
+The generated reports for both legs are under `evidence/GB-053/arm-8cpu/` and
+`evidence/GB-053/intel-1cpu/`.

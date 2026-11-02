@@ -1,0 +1,47 @@
+{
+  "arch": "intel",
+  "captured_at": "2026-11-02T04:37:54.127909+00:00",
+  "results": [
+    {
+      "game": "PONG.BIN",
+      "slot": 16,
+      "live": true,
+      "ok": true,
+      "reasons": [],
+      "sha16": "fe8bbe5d2a9ef4b9"
+    },
+    {
+      "game": "MILLIPED.BIN",
+      "slot": 17,
+      "live": true,
+      "ok": true,
+      "reasons": [],
+      "sha16": "01c82ae540edc2c5"
+    },
+    {
+      "game": "XNIBBLER.BIN",
+      "slot": 20,
+      "live": true,
+      "ok": true,
+      "reasons": [],
+      "sha16": "94a59e16717b6d38"
+    },
+    {
+      "game": "XCRYPT.BIN",
+      "slot": 21,
+      "live": true,
+      "ok": true,
+      "reasons": [],
+      "sha16": "554d6135994bc504"
+    },
+    {
+      "game": "NES.BIN",
+      "slot": 22,
+      "live": true,
+      "ok": true,
+      "reasons": [],
+      "sha16": "3725af60b38088a3"
+    }
+  ],
+  "summary": "PASS"
+}
