@@ -32,6 +32,32 @@ echo "t3_linux_probe: building $ELF"
 make -C "$ROOT" ARCH=intel "obj/intel/probe_$NAME.elf" || {
   echo "t3_linux_probe: BUILD FAILED"; exit 2; }
 
+# A probe that needs a LIVE X SERVER (x11) cannot run in a wave: a wave boot has
+# no XSESSION, so the probe's connect() gets ENOENT and the gate grades the
+# absence of a display as a probe defect.  Those probes run through the session
+# harness instead, as the /XSTART.TXT line (--skip-frame-check: the point is the
+# protocol, not a game frame).
+case "$NAME" in
+x11)
+  echo "=== t3_linux_probe: $NAME via an X session (log $OUT) ==="
+  DOOM_XDEPTH="${DOOM_XDEPTH:-24}" TOOLS_SKIP="${TOOLS_SKIP:-1}" \
+    python3 "$ROOT/tools/doom_elf/run_doom_elf_test.py" \
+      --elf "$ELF" --wad "$ROOT/obj/doom-linux/DOOM1.WAD" \
+      --start-line /DOOM.ELF --skip-frame-check --seconds 25 \
+      --out "$ROOT/obj/doom_elf_probe" > "$OUT" 2>&1
+  CONSOLE="$ROOT/obj/doom_elf_probe/serial.log"
+  # The session relays a child's stdout through the X server's stderr, so a row
+  # arrives as "[X] [LP] ..." — match the prefix anywhere in the line.
+  grep -a '\[LP\] ' "$CONSOLE" 2>/dev/null || { echo "(no [LP] rows — see $OUT)"; exit 1; }
+  if grep -aq '\[LP\] done rc=0' "$CONSOLE"; then
+    echo "t3_linux_probe: PASS — $NAME reached its done marker"
+    exit 0
+  fi
+  echo "t3_linux_probe: FAIL — $NAME never printed '[LP] done rc=0'"
+  exit 1
+  ;;
+esac
+
 CFG="$(mktemp)"
 printf 'PROBE.ELF\n' > "$CFG"
 # TOOLS_SKIP=1: a fresh worktree has no self-host LLVM dist-staging, and the
