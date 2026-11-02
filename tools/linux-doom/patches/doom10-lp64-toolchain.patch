@@ -1,0 +1,271 @@
+linuxdoom-1.10: LP64 + modern-toolchain fixes for a static x86_64 build
+=======================================================================
+
+Applies to a pristine copy of github.com/id-software/doom linuxdoom-1.10
+(1997-01-06 release).  Apply with `patch -p1` from the source root.
+
+linuxdoom-1.10 was written for 32-bit ILP32 machines (Linux/386, SGI).  It
+does not compile or run on x86_64 as published; every hunk below is required,
+either to satisfy a C23-default compiler or to remove a 32-bit assumption that
+is silently wrong on LP64.  Nothing here changes game logic or the WAD format.
+
+m_misc.c
+  * default_t.defaultvalue was `int` but holds either an int or a char*
+    (the DOS sound/mouse path names and the ten chat macros).  Casting a
+    string literal to `int` is not a constant expression any more -> "error:
+    initializer element is not computable at load time".  Widen the field to
+    intptr_t (it mirrors the pointer-sized storage the table writes through).
+  * M_LoadDefaults stored a char* through an `int*` -> truncated pointer on
+    LP64.  Store through intptr_t* instead.
+  (M_SaveDefaults already keys off the magnitude of defaultvalue to tell
+   string from integer entries, which only works once the field is wide.)
+
+i_sound.c
+  * `extern int errno;` inside myioctl referenced a symbol that musl does not
+    export (errno is a macro over __errno_location).  Include <errno.h> so the
+    diagnostic compiles against the modern definition.
+
+r_data.c
+  * maptexture_t is a *file format* struct: on disk the "columndirectory"
+    field is 32 bits, but the source declared it `void**`, so on LP64 the
+    struct gained 4 bytes of padding and every patch offset read from
+    TEXTURE1/TEXTURE2 was garbage (SIGSEGV in R_InitTextures at startup).
+    Declare it `int`, matching the WAD.
+  * textures/texturecolumnlump/texturecolumnofs/texturecomposite are pointer
+    arrays allocated with a hardcoded `*4`; use sizeof(*p) so they get 8-byte
+    slots.  (The remaining *4 allocations in that block really are int arrays.)
+  * colormaps 256-byte alignment truncated the pointer to int; use intptr_t.
+
+r_draw.c
+  * same int-truncating alignment arithmetic for translationtables.
+
+p_setup.c
+  * linebuffer is a line_t** array allocated with `*4`; use sizeof(*linebuffer).
+
+p_saveg.c
+  * PADSAVEP() aligned save_p by truncating it to int; use intptr_t so save
+    games do not corrupt memory.
+
+info.c / info.h
+  * sprnames[] has exactly NUMSPRITES (138) initialisers and no NULL
+    terminator, yet R_InitSpriteDefs counts entries with `while (*check != 0)`.
+    On ILP32 the zero word that happened to follow the array ended the scan;
+    on LP64 at -O2 it does not, numsprites comes out as 139+, and startup
+    SIGSEGVs in R_InitSprites.  Add the sentinel (array becomes NUMSPRITES+1)
+    so the scan has the terminator it was always written to expect.
+
+Known remaining 32-bit assumptions (not exercised by single-player, left
+untouched): d_net.c NetbufferChecksum's `(int)&field` offsets (netgames only)
+and d_main.c's -statcopy `(void*)atoi(...)` (deathmatch stats only).
+
+EOF
+--- a/m_misc.c
++++ b/m_misc.c
+@@ -28,6 +28,7 @@
+ rcsid[] = "$Id: m_misc.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
+ 
+ #include <sys/stat.h>
++#include <stdint.h>		/* intptr_t: the config-default table stores string pointers */
+ #include <sys/types.h>
+ #include <fcntl.h>
+ #include <stdlib.h>
+@@ -226,7 +227,7 @@
+ {
+     char*	name;
+     int*	location;
+-    int		defaultvalue;
++    intptr_t	defaultvalue;
+     int		scantranslate;		// PC scan code hack
+     int		untranslated;		// lousy hack
+ } default_t;
+@@ -254,15 +255,15 @@
+ 
+ // UNIX hack, to be removed. 
+ #ifdef SNDSERV
+-    {"sndserver", (int *) &sndserver_filename, (int) "sndserver"},
++    {"sndserver", (int *) &sndserver_filename, (intptr_t) "sndserver"},
+     {"mb_used", &mb_used, 2},
+ #endif
+     
+ #endif
+ 
+ #ifdef LINUX
+-    {"mousedev", (int*)&mousedev, (int)"/dev/ttyS0"},
+-    {"mousetype", (int*)&mousetype, (int)"microsoft"},
++    {"mousedev", (int*)&mousedev, (intptr_t)"/dev/ttyS0"},
++    {"mousetype", (int*)&mousetype, (intptr_t)"microsoft"},
+ #endif
+ 
+     {"use_mouse",&usemouse, 1},
+@@ -285,16 +286,16 @@
+ 
+     {"usegamma",&usegamma, 0},
+ 
+-    {"chatmacro0", (int *) &chat_macros[0], (int) HUSTR_CHATMACRO0 },
+-    {"chatmacro1", (int *) &chat_macros[1], (int) HUSTR_CHATMACRO1 },
+-    {"chatmacro2", (int *) &chat_macros[2], (int) HUSTR_CHATMACRO2 },
+-    {"chatmacro3", (int *) &chat_macros[3], (int) HUSTR_CHATMACRO3 },
+-    {"chatmacro4", (int *) &chat_macros[4], (int) HUSTR_CHATMACRO4 },
+-    {"chatmacro5", (int *) &chat_macros[5], (int) HUSTR_CHATMACRO5 },
+-    {"chatmacro6", (int *) &chat_macros[6], (int) HUSTR_CHATMACRO6 },
+-    {"chatmacro7", (int *) &chat_macros[7], (int) HUSTR_CHATMACRO7 },
+-    {"chatmacro8", (int *) &chat_macros[8], (int) HUSTR_CHATMACRO8 },
+-    {"chatmacro9", (int *) &chat_macros[9], (int) HUSTR_CHATMACRO9 }
++    {"chatmacro0", (int *) &chat_macros[0], (intptr_t) HUSTR_CHATMACRO0 },
++    {"chatmacro1", (int *) &chat_macros[1], (intptr_t) HUSTR_CHATMACRO1 },
++    {"chatmacro2", (int *) &chat_macros[2], (intptr_t) HUSTR_CHATMACRO2 },
++    {"chatmacro3", (int *) &chat_macros[3], (intptr_t) HUSTR_CHATMACRO3 },
++    {"chatmacro4", (int *) &chat_macros[4], (intptr_t) HUSTR_CHATMACRO4 },
++    {"chatmacro5", (int *) &chat_macros[5], (intptr_t) HUSTR_CHATMACRO5 },
++    {"chatmacro6", (int *) &chat_macros[6], (intptr_t) HUSTR_CHATMACRO6 },
++    {"chatmacro7", (int *) &chat_macros[7], (intptr_t) HUSTR_CHATMACRO7 },
++    {"chatmacro8", (int *) &chat_macros[8], (intptr_t) HUSTR_CHATMACRO8 },
++    {"chatmacro9", (int *) &chat_macros[9], (intptr_t) HUSTR_CHATMACRO9 }
+ 
+ };
+ 
+@@ -391,8 +392,8 @@
+ 			if (!isstring)
+ 			    *defaults[i].location = parm;
+ 			else
+-			    *defaults[i].location =
+-				(int) newstring;
++			    *(intptr_t *) defaults[i].location =
++				(intptr_t) newstring;
+ 			break;
+ 		    }
+ 	    }
+--- a/i_sound.c
++++ b/i_sound.c
+@@ -39,6 +39,7 @@
+ 
+ #include <fcntl.h>
+ #include <unistd.h>
++#include <errno.h>	/* errno is a macro in modern libcs (musl exports no `errno` symbol) */
+ #include <sys/ioctl.h>
+ 
+ // Linux voxware output.
+--- a/r_data.c
++++ b/r_data.c
+@@ -42,6 +42,7 @@
+ #include "r_sky.h"
+ 
+ #ifdef LINUX
++#include <stdint.h>	/* intptr_t for the 256-byte alignment arithmetic */
+ #include  <alloca.h>
+ #endif
+ 
+@@ -87,7 +88,7 @@
+     boolean		masked;	
+     short		width;
+     short		height;
+-    void		**columndirectory;	// OBSOLETE
++    int		columndirectory;	// OBSOLETE (32-bit on disk: was `void**`, LP64-unsafe)
+     short		patchcount;
+     mappatch_t	patches[1];
+ } maptexture_t;
+@@ -479,10 +480,10 @@
+     }
+     numtextures = numtextures1 + numtextures2;
+ 	
+-    textures = Z_Malloc (numtextures*4, PU_STATIC, 0);
+-    texturecolumnlump = Z_Malloc (numtextures*4, PU_STATIC, 0);
+-    texturecolumnofs = Z_Malloc (numtextures*4, PU_STATIC, 0);
+-    texturecomposite = Z_Malloc (numtextures*4, PU_STATIC, 0);
++    textures = Z_Malloc (numtextures*sizeof(*textures), PU_STATIC, 0);
++    texturecolumnlump = Z_Malloc (numtextures*sizeof(*texturecolumnlump), PU_STATIC, 0);
++    texturecolumnofs = Z_Malloc (numtextures*sizeof(*texturecolumnofs), PU_STATIC, 0);
++    texturecomposite = Z_Malloc (numtextures*sizeof(*texturecomposite), PU_STATIC, 0);
+     texturecompositesize = Z_Malloc (numtextures*4, PU_STATIC, 0);
+     texturewidthmask = Z_Malloc (numtextures*4, PU_STATIC, 0);
+     textureheight = Z_Malloc (numtextures*4, PU_STATIC, 0);
+@@ -639,7 +640,7 @@
+     lump = W_GetNumForName("COLORMAP"); 
+     length = W_LumpLength (lump) + 255; 
+     colormaps = Z_Malloc (length, PU_STATIC, 0); 
+-    colormaps = (byte *)( ((int)colormaps + 255)&~0xff); 
++    colormaps = (byte *)( ((intptr_t)colormaps + 255)&~0xff); 
+     W_ReadLump (lump,colormaps); 
+ }
+ 
+--- a/r_draw.c
++++ b/r_draw.c
+@@ -40,6 +40,7 @@
+ #include "v_video.h"
+ 
+ // State.
++#include <stdint.h>	/* intptr_t for the 256-byte alignment arithmetic */
+ #include "doomstat.h"
+ 
+ 
+@@ -461,7 +462,7 @@
+     int		i;
+ 	
+     translationtables = Z_Malloc (256*3+255, PU_STATIC, 0);
+-    translationtables = (byte *)(( (int)translationtables + 255 )& ~255);
++    translationtables = (byte *)(( (intptr_t)translationtables + 255 )& ~255);
+     
+     // translate just the 16 green colors
+     for (i=0 ; i<256 ; i++)
+--- a/p_setup.c
++++ b/p_setup.c
+@@ -533,7 +533,7 @@
+     }
+ 	
+     // build line tables for each sector	
+-    linebuffer = Z_Malloc (total*4, PU_LEVEL, 0);
++    linebuffer = Z_Malloc (total*sizeof(*linebuffer), PU_LEVEL, 0);
+     sector = sectors;
+     for (i=0 ; i<numsectors ; i++, sector++)
+     {
+--- a/p_saveg.c
++++ b/p_saveg.c
+@@ -29,6 +29,7 @@
+ #include "p_local.h"
+ 
+ // State.
++#include <stdint.h>	/* intptr_t for the 4-byte save-buffer alignment */
+ #include "doomstat.h"
+ #include "r_state.h"
+ 
+@@ -37,7 +38,7 @@
+ 
+ // Pads save_p to a 4-byte boundary
+ //  so that the load/save works on SGI&Gecko.
+-#define PADSAVEP()	save_p += (4 - ((int) save_p & 3)) & 3
++#define PADSAVEP()	save_p += (4 - ((intptr_t) save_p & 3)) & 3
+ 
+ 
+ 
+--- a/info.c
++++ b/info.c
+@@ -37,7 +37,7 @@
+ 
+ #include "p_mobj.h"
+ 
+-char *sprnames[NUMSPRITES] = {
++char *sprnames[NUMSPRITES+1] = {
+     "TROO","SHTG","PUNG","PISG","PISF","SHTF","SHT2","CHGG","CHGF","MISG",
+     "MISF","SAWG","PLSG","PLSF","BFGG","BFGF","BLUD","PUFF","BAL1","BAL2",
+     "PLSS","PLSE","MISL","BFS1","BFE1","BFE2","TFOG","IFOG","PLAY","POSS",
+@@ -51,7 +51,8 @@
+     "POL3","POL1","POL6","GOR2","GOR3","GOR4","GOR5","SMIT","COL1","COL2",
+     "COL3","COL4","CAND","CBRA","COL6","TRE1","TRE2","ELEC","CEYE","FSKU",
+     "COL5","TBLU","TGRN","TRED","SMBT","SMGT","SMRT","HDB1","HDB2","HDB3",
+-    "HDB4","HDB5","HDB6","POB1","POB2","BRS1","TLMP","TLP2"
++    "HDB4","HDB5","HDB6","POB1","POB2","BRS1","TLMP","TLP2",
++    0		/* NULL sentinel: R_InitSpriteDefs scans until it sees one */
+ };
+ 
+ 
+--- a/info.h
++++ b/info.h
+@@ -1156,7 +1156,7 @@
+ } state_t;
+ 
+ extern state_t	states[NUMSTATES];
+-extern char *sprnames[NUMSPRITES];
++extern char *sprnames[NUMSPRITES+1];
+ 
+ 
+ 

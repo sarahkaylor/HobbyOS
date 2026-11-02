@@ -1,0 +1,40 @@
+doomgeneric: restore the stock i_video.c for the Linux/X11 build
+================================================================
+
+The vendored tree (third_party/doomgeneric) carries one HobbyOS-native-port
+edit: a static FB_ScreenInfo initialiser that hardcodes a 32bpp render target
+plus `fb_scaling = DOOMGENERIC_RESX / SCREENWIDTH` (2).  That is what the
+HobbyOS VirtIO-GPU backend wants, but it is not upstream doomgeneric.
+
+This lane builds the *stock* doomgeneric X11 backend so the parent has a
+reference binary that runs on a normal X server with no HobbyOS shims.  The
+hunk below reverts the file to upstream (ozkl/doomgeneric @ e257a095,
+i_video.c lines 75-76).  Behaviour is unchanged in practice: upstream's
+I_InitGraphics computes `fb_scaling = s_Fb.xres / SCREENWIDTH` (=2 for the
+640x400 DG default) itself, so the game is still blitted 2x.
+
+Apply with `patch -p1` from the doomgeneric source root.
+--- a/i_video.c
++++ b/i_video.c
+@@ -72,19 +72,8 @@
+ 	struct FB_BitField transp;	/* transparency			*/
+ };
+ 
+-/* HobbyOS port: the render target IS DG_ScreenBuffer at DOOMGENERIC_RESX x
+- * RESY, 32bpp.  cmap_to_fb packs 0x00RRGGBB using these offsets; the HobbyOS
+- * backend forces the alpha byte to 0xFF on blit. */
+-static struct FB_ScreenInfo s_Fb = {
+-	.xres = DOOMGENERIC_RESX, .yres = DOOMGENERIC_RESY,
+-	.xres_virtual = DOOMGENERIC_RESX, .yres_virtual = DOOMGENERIC_RESY,
+-	.bits_per_pixel = 32,
+-	.red = { .offset = 16, .length = 8 },
+-	.green = { .offset = 8, .length = 8 },
+-	.blue = { .offset = 0, .length = 8 },
+-	.transp = { .offset = 24, .length = 8 },
+-};
+-int fb_scaling = DOOMGENERIC_RESX / SCREENWIDTH;   /* 2 = 640x400 out of 320x200 */
++static struct FB_ScreenInfo s_Fb;
++int fb_scaling = 1;
+ int usemouse = 0;
+ 
+ 
