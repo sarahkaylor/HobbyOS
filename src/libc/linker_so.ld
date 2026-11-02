@@ -127,7 +127,13 @@ SECTIONS
         PROVIDE_HIDDEN(__fini_array_end = .);
     }
 
-    .data : ALIGN(16) {
+    /* .data must start on a NEW page: the RELRO range (.data.rel.ro /
+     * .dynamic / .got) ends mid-page, and the interpreter can only protect
+     * whole pages — with .data sharing that page it was made read-only and
+     * the first libc data write faulted (measured: `ls` writing near
+     * libc's .data at +0x4AC30, region prot=1, in=PROT).  Giving .data its
+     * own page makes RELRO's page-rounded end land in padding. */
+    .data : ALIGN(0x1000) {
         *(.data .data.*)
         *(.ldata .ldata.*)
         *(.gnu.linkonce.d.*)

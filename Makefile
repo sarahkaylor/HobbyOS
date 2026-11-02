@@ -2664,6 +2664,7 @@ endif
 	$(MCOPY) -i disk.img $(OBJ_DIR)/LDHOBBY.SO ::/LDHOBBY.SO
 	$(MCOPY) -i disk.img $(OBJ_DIR)/libc.so ::/LIBC.SO
 	$(MCOPY) -i disk.img $(HDYN_BIN) ::/HDYN.BIN
+	$(MCOPY) -i disk.img $(OBJ_DIR)/LSDYN.BIN ::/LSDYN.BIN
 ifeq ($(DESKTOP),icewm)
 	# icewm.md §4.3/§4.4: X binaries + data tree + XSESSION.BIN (DESKTOP=icewm only).
 	sh src/user/x11sess/stage-disk.sh disk.img "$(X11_BUILD_DIR)" $(XSESSION_BIN) "$(MCOPY)" "$(MMD)"
@@ -2697,6 +2698,18 @@ $(OBJ_DIR)/hello_dyn.o: src/user/hello_dyn.c src/user_include/libc.h
 $(HDYN_BIN): $(OBJ_DIR)/crt0_dyn.o $(OBJ_DIR)/hello_dyn.o $(OBJ_DIR)/libc.so
 	$(LD) -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
 	  -o $@ $(OBJ_DIR)/crt0_dyn.o $(OBJ_DIR)/hello_dyn.o $(OBJ_DIR)/libc.so
+
+# The first REAL program converted to dynamic linking (docs/shared-libs.md §8):
+# same source, PIC object, ET_DYN against LIBC.SO.  7 KB instead of 46 KB.
+$(OBJ_DIR)/dyn/ls.o: src/user/ls.c src/user_include/libc.h
+	@mkdir -p $(OBJ_DIR)/dyn
+	$(CC) $(USER_CFLAGS) -fPIC -c $< -o $@
+
+$(OBJ_DIR)/LSDYN.BIN: $(OBJ_DIR)/dyn/ls.o $(OBJ_DIR)/libc.so
+	$(LD) -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+	  -o $@ $(OBJ_DIR)/dyn/ls.o $(OBJ_DIR)/libc.so
+
+disk.img: $(HDYN_BIN) $(OBJ_DIR)/libc.so $(OBJ_DIR)/LDHOBBY.SO $(OBJ_DIR)/LSDYN.BIN
 
 # Target to run the OS inside QEMU
 # RUN_STAGE: optional staging hook, run AFTER disk.img is (re)built and BEFORE
