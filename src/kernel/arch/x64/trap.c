@@ -35,6 +35,7 @@
 #define TRAP_SYSCALL_DEBUG 0
 #endif
 #include "errno.h"
+#include "linux_uname.h"   /* GB-016: linux_fill_utsname + linux_utsname_t */
 #include "vfs.h"
 #include "vm.h"
 #include "blk_cache.h"
@@ -1755,6 +1756,27 @@ static void sys_lseek(struct trap_frame *tf) {
   tf->regs[0] = r < 0 ? (uint64_t)(-err) : (uint64_t)r;
 }
 
+/* GB-016: Linux uname(2), number 63.  rdi = struct utsname *.
+   The identity fill is linux_fill_utsname() in src/kernel/linux_uname.c
+   (merged with PR #61 and already pinned by abi_t2_test.c); what was missing --
+   and what the compat probe's uname_* rows have been waiting for -- is this
+   dispatch.  Linux returns 0, or -EFAULT when the pointer is not writable.
+   The struct is linux_utsname_t (6 x 65 bytes, 390 total), so the range check
+   covers the whole thing rather than just the first field. */
+static void sys_uname(struct trap_frame *tf) {
+  uint64_t up = tf->regs[5];                 /* rdi */
+  if (!sys_user_range(up, sizeof(linux_utsname_t), 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  linux_utsname_t u;
+  linux_fill_utsname(&u);
+  char *dst = (char *)(uintptr_t)up;
+  const char *src = (const char *)&u;
+  for (unsigned i = 0; i < sizeof(u); i++) dst[i] = src[i];
+  tf->regs[0] = 0;
+}
+
 /* P6.1: SYS_FTRUNCATE (row 33) -- plain (fd, length) pair. */
 static void sys_ftruncate(struct trap_frame *tf) {
   struct process *caller = current_process();
@@ -2249,6 +2271,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            route to file_fcntl; a non-3/4 cmd is file_fcntl's own decision.  regs:
            rdi=fd, rsi=cmd, rdx=arg. */
         case 72: syscall_num = SYS_FCNTL; break;   /* fcntl(fd, cmd, arg) */
+        /* GB-016: uname(2), Linux number 63.  rdi = struct utsname *.
+           Handled inline (no HobbyOS equivalent), and the identity itself comes
+           from linux_fill_utsname() so the T2-pinned strings and the syscall
+           can never drift apart. */
+        case 63: sys_uname(tf); return;
         /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
            =fd, regs[4]=rsi=request, regs[3]=rdx=arg.  This is a genuine dispatch on
            the request number, and every non-ENOTTY outcome is falsifiable:
