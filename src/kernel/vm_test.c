@@ -11,6 +11,7 @@
 
 extern void uart_puts(const char *s);
 extern void print_int(int v);
+extern void uart_print_hex(uint64_t v); /* so-vm lane A: physaddr evidence */
 
 /* P2.2 (S2) window/paging unit tests.  Everything here runs against the
  * real frame allocator and the real arch page-table code (the same paths
@@ -1141,6 +1142,15 @@ static void test_vm_file_map_shared_frames(void) {
   EXPECT_EQ((ph1 != 0 && ph1 == ph2), 1);
   /* ... and that frame is the page cache's own page 0. */
   EXPECT_EQ((r && r->obj && vm_object_peek(r->obj, 0) == ph1), 1);
+  /* Printed as quotable evidence: the two ASs' leaves, and the object page,
+     are one and the same physical frame. */
+  uart_puts("  [VM-FILE] as1 leaf=");
+  uart_print_hex(ph1);
+  uart_puts(" as2 leaf=");
+  uart_print_hex(ph2);
+  uart_puts(" object page0=");
+  uart_print_hex(r ? vm_object_peek(r->obj, 0) : 0);
+  uart_puts("\n");
 
   /* The page really came from the file (not a zero fill). */
   {
