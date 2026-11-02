@@ -10,6 +10,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
+#include <unistd.h>
 #include "doomgeneric.h"
 
 static int DG_RESX = 640;
@@ -29,9 +31,21 @@ void DG_DrawFrame(void) {
     for (int i = 0; i < DOOMGENERIC_RESX * DOOMGENERIC_RESY; i++) fb[i] |= 0xFF000000u;
 }
 
-void DG_SleepMs(uint32_t ms) { (void)ms; }
+/* GB-168: the clock must advance or BuildNewTic never runs; the original
+   stubs (`return 0`, no-op sleep) left the engine spinning until the 20 s
+   console watchdog.  clock_gettime(CLOCK_MONOTONIC) is compat syscall 228
+   (GB-021); musl's usleep() lands on nanosleep, now mapped to the kernel's
+   millisecond sleep. */
+void DG_SleepMs(uint32_t ms) {
+    if (ms) usleep((useconds_t)ms * 1000u);
+}
 
-uint32_t DG_GetTicksMs(void) { return 0; }
+uint32_t DG_GetTicksMs(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u +
+                      (uint64_t)ts.tv_nsec / 1000000u);
+}
 
 int DG_GetKey(int *pressed, unsigned char *key) {
     (void)pressed; (void)key; return 0; /* input stays 0: no input device yet */
