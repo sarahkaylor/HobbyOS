@@ -45,7 +45,7 @@ label() { case "${1%.BIN}" in *_*) printf '_%s' "${1%.BIN}" ;; *) printf '%s' "$
 
 # X-stack / session binaries are not desktop apps (and XEYESR/XCALCR keep
 # their own real-X entries below).
-SKIP="XSESSION.BIN XHOBBY.BIN ICEWM.BIN ICEWMBG.BIN ICEWMHNT.BIN ICESH.BIN HBHOST.BIN XFILES.BIN XEYESR.BIN XCALCR.BIN"
+SKIP="XSESSION.BIN XHOBBY.BIN ICEWM.BIN ICEWMBG.BIN ICEWMHNT.BIN ICESH.BIN HBHOST.BIN XFILES.BIN XEYESR.BIN XCALCR.BIN DOOML.BIN"
 skipped() { for s in $SKIP; do [ "$1" = "$s" ] && return 0; done; return 1; }
 in_list() { printf '%s\n' "$2" | grep -qx "$1"; }
 
@@ -62,6 +62,11 @@ M="$OUT/menu"
   done
   echo '}'
   echo 'menu "Games" folder {'
+  # The Linux-ELF Doom (id's linuxdoom-1.10).  It is an X client that needs a
+  # depth-8 PseudoColor screen, so DOOML.BIN points it at the server's :0.1
+  # screen; running it through HBHOST the way native .BIN programs run would
+  # put it in a window on the 24-bit screen, where it cannot start at all.
+  on_disk DOOM.ELF && echo '    prog "Doom (Linux ELF)" app /DOOML.BIN'
   for g in $GAMES; do
     on_disk "$g" && echo "    prog \"$(label "$g")\" app HBHOST.BIN $g"
   done
