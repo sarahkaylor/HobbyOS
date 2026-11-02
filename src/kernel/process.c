@@ -348,15 +348,7 @@ void process_init(void) {
 }
 
 #ifdef __x86_64__
-struct cpu_local {
-  uint64_t kernel_stack;
-  uint64_t user_rsp;
-  uint64_t temp_rax;
-  uint64_t user_sp_temp;
-  uint64_t cpu_id;
-  struct process *current_proc;
-} __attribute__((packed));
-extern struct cpu_local cpu_locals[];
+/* GB-152: struct cpu_local is declared once in process.h. */
 #endif
 
 void set_current_process_pid(uint32_t cpu, int pid) {

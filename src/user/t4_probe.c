@@ -89,6 +89,24 @@ static void prow_skip(const char *name, const char *why) {
   (void)write(1, buf, (size_t)n);
 }
 
+/* GB-149: FAT16 has no long-name (LFN) support, so an 8.3 name created as
+ * "alpha" is stored and returned as "ALPHA" — the case cannot survive the
+ * filesystem, on either leg of the differential.  The dent rows assert
+ * MEMBERSHIP of the three names, so compare ASCII case-insensitively; the
+ * literal-case comparison was asserting a property FAT16 cannot provide and
+ * made the row permanently red for a filesystem limitation rather than a
+ * syscall defect.  Linux leg A still matches (its names are lowercase and
+ * normalize to the same uppercase). */
+static int ci_eq(const char *a, const char *b) {
+  for (;;) {
+    char ca = *a++, cb = *b++;
+    if (ca >= 'a' && ca <= 'z') ca = (char)(ca - 32);
+    if (cb >= 'a' && cb <= 'z') cb = (char)(cb - 32);
+    if (ca != cb) return 0;
+    if (!ca) return 1;
+  }
+}
+
 int main(int argc, char **argv) {
   (void)argc; (void)argv;
   pstr("t4-probe\n");
@@ -278,9 +296,9 @@ int main(int argc, char **argv) {
           char *nm = e->d_name;
           if (strcmp(nm, ".") && strcmp(nm, "..")) {
             total++;
-            if (!strcmp(nm, "alpha"))   saw_alpha = 1;
-            else if (!strcmp(nm, "beta"))  saw_beta = 1;
-            else if (!strcmp(nm, "charlie")) saw_charlie = 1;
+            if (ci_eq(nm, "alpha"))   saw_alpha = 1;
+            else if (ci_eq(nm, "beta"))  saw_beta = 1;
+            else if (ci_eq(nm, "charlie")) saw_charlie = 1;
           }
           off += e->d_reclen;
         }
