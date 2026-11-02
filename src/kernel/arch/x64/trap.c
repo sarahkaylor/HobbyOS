@@ -2333,6 +2333,27 @@ static int compat_timeout_ms(uint64_t ptr, int is_timespec, int *err) {
   return (int)(a * 1000 + (b + 999) / 1000);
 }
 
+/* GB-168: musl's usleep() lands on nanosleep({sec,nsec}, rem).  The kernel's
+   sleep syscall (SYS_SLEEP) takes a millisecond count in rdi, so convert the
+   timespec and hand it over.  `rem` is left untouched: the call is not
+   restarted.  Without this arm usleep() returns -ENOSYS at once and the W4
+   tick loop busy-spins (DG_SleepMs was a no-op too). */
+static void compat_nanosleep(struct trap_frame *tf) {
+  uint64_t req = tf->regs[5];
+  int err = 0;
+  int ms = compat_timeout_ms(req, 1, &err);
+  if (err) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  if (ms <= 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uint32_t)ms;
+  sys_sleep(tf);
+}
+
 static void compat_select(struct trap_frame *tf) {
   int err = 0;
   int ms = compat_timeout_ms(tf->regs[7], 0, &err);
@@ -2503,6 +2524,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
           tf->regs[0] = (uint64_t)(int64_t)(current_process() ? current_process()->pid : -1);
           return;
         case 228: syscall_num = SYS_GETTIME; break; /* clock_gettime(clk,ts) */
+        case 35:  compat_nanosleep(tf); return;    /* nanosleep(req, rem)   */
         case 100: {                          /* gettimeofday(timeval*, tz*) */
           uint64_t tv = tf->regs[5];
           uint32_t ms = (uint32_t)timer_get_ms();
