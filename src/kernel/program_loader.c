@@ -1,6 +1,7 @@
 #include "program_loader.h"
 #include "kline.h"
 #include "fs.h"
+#include "net.h"
 #include "setjmp.h"
 #include "process.h"
 #include "vdisplay.h"
@@ -918,11 +919,20 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     while (nm[nlen]) nlen++;
     uint64_t name_addr = (stk_top - 8 - (uint64_t)nlen) & ~(uint64_t)0xF;
     /* argc, argv[0], argv NULL, envp NULL, AT_PAGESZ, 4096,
-       AT_PHDR, phdr, AT_PHNUM, phnum, AT_ENTRY, entry, AT_BASE, 0, AT_NULL, 0.
+       AT_PHDR, phdr, AT_PHNUM, phnum, AT_ENTRY, entry, AT_BASE, 0,
+       AT_RANDOM, rnd, AT_NULL, 0.
        The first four pairs were the original block; musl's _start also reads
        AT_PHDR/AT_PHNUM/AT_ENTRY to locate its own program headers, and with them
-       absent it dereferenced small offsets (measured: fault at VA=0x210). */
-    uint64_t w[16];
+       absent it dereferenced small offsets (measured: fault at VA=0x210).
+
+       GB-163 (2026-11-02): the startup shim seeds its stack canary from
+       AT_RANDOM. With the entry absent the loader's `_dl_random` stays NULL and
+       __libc_start_main dies at `movq (%rax),%rax` (measured: DOOMW4.ELF,
+       PC=0x100004F415, VA=0x0). Place 16 random bytes on the stack and point
+       AT_RANDOM at them. */
+    uint64_t w[18];
+    uint64_t blk = (name_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
+    uint64_t rnd_addr = (blk - 16) & ~(uint64_t)0xF;
     w[0] = 1;
     w[1] = name_addr;
     w[2] = 0;
@@ -937,11 +947,15 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     w[11] = elf_entry;
     w[12] = 7;                      /* AT_BASE: 0 for a static image */
     w[13] = 0;
-    w[14] = 0;                      /* AT_NULL */
-    w[15] = 0;
-    uint64_t blk = (name_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
+    w[14] = 25;                     /* AT_RANDOM */
+    w[15] = rnd_addr;
+    w[16] = 0;                      /* AT_NULL */
+    w[17] = 0;
+    uint8_t rnd[16];
+    net_get_random_bytes(rnd, 16);
     if (vm_kwrite(child, blk, w, (int)sizeof w) != 0 ||
-        vm_kwrite(child, name_addr, nm, nlen + 1) != 0) {
+        vm_kwrite(child, name_addr, nm, nlen + 1) != 0 ||
+        vm_kwrite(child, rnd_addr, rnd, 16) != 0) {
       uart_puts("v2 loader: startup block write failed\n");
       process_free(pid);
       return -EFAULT;
