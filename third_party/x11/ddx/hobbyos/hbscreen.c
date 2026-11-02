@@ -3,17 +3,12 @@
  * output side and the DDX entry points.  Derived from hw/vfb/InitOutput.c
  * (X Consortium / X.Org license, see COPYING in the xserver tree).
  *
- * Output model: one screen.  By default it is depth 24 / 32 bpp TrueColor
- * with the standard little-endian masks 0xff0000/0xff00/0xff -- byte-identical
- * to HobbyOS's B8G8R8A8 framebuffer.  With HB_XDEPTH=8 in the server's
- * environment the screen is instead depth 8 PseudoColor (XMatchVisualInfo
- * (screen, 8, PseudoColor) then succeeds, which Doom 1.10 requires): fb
- * renders palette indexes into the shadow, and the present expands every
- * index through the installed colormap into the B8G8R8A8 framebuffer.
- * fb renders into a malloc'd shadow; miext/shadow tracks damage, and from
- * the server's block handler hbShadowUpdate() copies the damaged boxes into
- * the SYS_MAP_FB mapping and presents them with SYS_FLUSH_FB_RECTS (batches
- * of <= 32 rects, the kernel's limit).
+ * Output model: one screen, depth 24 / 32 bpp TrueColor with the standard
+ * little-endian masks 0xff0000/0xff00/0xff -- byte-identical to HobbyOS's
+ * B8G8R8A8 framebuffer.  fb renders into a malloc'd shadow; miext/shadow
+ * tracks damage, and from the server's block handler hbShadowUpdate()
+ * copies the damaged boxes into the SYS_MAP_FB mapping and presents them
+ * with SYS_FLUSH_FB_RECTS (batches of <= 32 rects, the kernel's limit).
  *
  * Source of truth: third_party/x11/ddx/hobbyos/ in the HobbyOS repo;
  * build-server.sh copies it into the extracted xserver as hw/hobbyos.
@@ -64,7 +59,6 @@ struct hb_var_prefix { uint32_t xres, yres, xres_virtual, yres_virtual,
 
 typedef struct {
     int width, height;          /* screen size (pixels) */
-    int depth;                  /* 24 (TrueColor) or 8 (PseudoColor) */
     uint32_t *fb;               /* SYS_MAP_FB mapping */
     int fbStride;               /* fb row pitch in pixels */
     int fbWidth, fbHeight;      /* real framebuffer size */
@@ -78,13 +72,6 @@ static HbScreenRec hbScreen;
 static Bool hbRender = TRUE;
 static int hbReqWidth, hbReqHeight;     /* -screen WxH override */
 unsigned long hbFlushCount, hbFlushRects;  /* stats (debugger aid) */
-
-/* Depth 8: index -> B8G8R8A8 word, rebuilt from the installed colormap at
- * every present.  256 entries is nothing next to one 640x400 present, and
- * reading the live colormap means an XStoreColors palette change shows up
- * on the next frame without hooking InstallColormap/StoreColors (dix writes
- * the entries before it calls the screen's StoreColors). */
-static uint32_t hbPalette[256];
 
 /* ---- fb geometry -------------------------------------------------------- */
 static void
@@ -119,45 +106,6 @@ hbQueryFb(void)
 }
 
 /* ---- present ------------------------------------------------------------ */
-/* Depth 8: rebuild hbPalette[] from the colormap the server has installed.
- * miCreateDefColormap installs the default map, and every XInstallColormap /
- * window-colormap install goes through miInstallColormap (fbInstallColormap),
- * so GetInstalledmiColormap() always names the map that is on screen. */
-static void
-hbLoadPalette(ScreenPtr pScreen)
-{
-    ColormapPtr cmap = GetInstalledmiColormap(pScreen);
-    int i, n, direct;
-
-    if (!cmap)
-        return;
-    n = cmap->pVisual ? cmap->pVisual->ColormapEntries : 256;
-    if (n > 256)
-        n = 256;
-    /* PseudoColor keeps all three components in the red table's LOCO cells
-     * (green/blue are only allocated for DirectColor, where each table holds
-     * its own channel); reading cmap->green here would dereference NULL. */
-    direct = cmap->pVisual &&
-             (cmap->pVisual->class | DynamicClass) == DirectColor;
-    for (i = 0; i < n; i++) {
-        unsigned int r, g, b;
-
-        if (direct) {
-            r = cmap->red[i].co.local.red;
-            g = cmap->green[i].co.local.green;
-            b = cmap->blue[i].co.local.blue;
-        }
-        else {
-            r = cmap->red[i].co.local.red;
-            g = cmap->red[i].co.local.green;
-            b = cmap->red[i].co.local.blue;
-        }
-        hbPalette[i] = ((r >> 8) << 16) | ((g >> 8) << 8) | (b >> 8);
-    }
-    for (; i < 256; i++)
-        hbPalette[i] = 0;
-}
-
 static void
 hbFlushBatch(struct hb_fb_rect32 *r, int n)
 {
@@ -183,8 +131,6 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
 
     if (!hbScreen.fb || nbox <= 0)
         return;
-    if (hbScreen.depth == 8)
-        hbLoadPalette(pScreen);
     /* Many tiny boxes: present their extents instead (one copy, one rect). */
     if (nbox > 4 * HB_FLUSH_MAX_RECTS) {
         box = RegionExtents(damage);
@@ -201,21 +147,10 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
         if (y2 > hbScreen.height) y2 = hbScreen.height;
         if (x1 >= x2 || y1 >= y2)
             continue;
-        for (y = y1; y < y2; y++) {
-            uint32_t *dst = hbScreen.fb + (size_t) y * hbScreen.fbStride + x1;
-
-            if (hbScreen.depth == 8) {
-                /* one byte per pixel: expand the index through the palette */
-                const unsigned char *src8 = src + (size_t) y * srcStride + x1;
-                int n = x2 - x1;
-
-                while (n-- > 0)
-                    *dst++ = hbPalette[*src8++];
-            }
-            else
-                memcpy(dst, src + (size_t) y * srcStride + (size_t) x1 * 4,
-                       (size_t) (x2 - x1) * 4);
-        }
+        for (y = y1; y < y2; y++)
+            memcpy(hbScreen.fb + (size_t) y * hbScreen.fbStride + x1,
+                   src + (size_t) y * srcStride + (size_t) x1 * 4,
+                   (size_t) (x2 - x1) * 4);
         rects[n].x = x1;
         rects[n].y = y1;
         rects[n].w = x2 - x1;
@@ -346,44 +281,15 @@ static miPointerScreenFuncRec hbPointerCursorFuncs = {
 };
 
 /* ---- screen init -------------------------------------------------------- */
-/* HB_XDEPTH=8 selects a depth 8 PseudoColor screen (what Doom 1.10 and other
- * 1990s X clients require); anything else, unset included, keeps the depth 24
- * TrueColor screen.  It is read from the environment rather than the command
- * line so XSESSION.BIN's /X11/XSESSION.ENV rows can switch it per disk image. */
-static int
-hbDepthFromEnv(void)
-{
-    const char *s = getenv("HB_XDEPTH");
-    int d;
-
-    if (!s || !*s)
-        return 24;
-    d = atoi(s);
-    if (d == 8)
-        return 8;
-    if (d != 24)
-        ErrorF("hobbyos: HB_XDEPTH=%s unsupported (8 or 24), using 24\n", s);
-    return 24;
-}
-
 static Bool
 hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
 {
     int dpi = monitorResolution ? monitorResolution : 96;
     void *fbmap;
 
-    hbScreen.depth = hbDepthFromEnv();
     hbQueryFb();
-    if (hbScreen.depth == 8) {
-        /* The classic 640x400 8-bit screen (Xvfb's "-screen 0 640x400x8"),
-         * presented 1:1 at the framebuffer's top-left corner. */
-        hbScreen.width = hbReqWidth ? hbReqWidth : 640;
-        hbScreen.height = hbReqHeight ? hbReqHeight : 400;
-    }
-    else {
-        hbScreen.width = hbReqWidth ? hbReqWidth : hbScreen.fbWidth;
-        hbScreen.height = hbReqHeight ? hbReqHeight : hbScreen.fbHeight;
-    }
+    hbScreen.width = hbReqWidth ? hbReqWidth : hbScreen.fbWidth;
+    hbScreen.height = hbReqHeight ? hbReqHeight : hbScreen.fbHeight;
 
     fbmap = map_fb();
     if (fbmap == NULL || fbmap == (void *) -1L ||
@@ -392,26 +298,19 @@ hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
         return FALSE;
     }
     hbScreen.fb = fbmap;
-    hbScreen.shadowStride = PixmapBytePad(hbScreen.width, hbScreen.depth);
+    hbScreen.shadowStride = PixmapBytePad(hbScreen.width, 24);
     hbScreen.shadow = calloc((size_t) hbScreen.shadowStride, hbScreen.height);
     if (!hbScreen.shadow)
         return FALSE;
 
-    if (hbScreen.depth == 8) {
-        if (!miSetVisualTypesAndMasks(8, (1 << PseudoColor), 8, PseudoColor,
-                                      0, 0, 0))
-            return FALSE;
-    }
-    else if (!miSetVisualTypesAndMasks(24, (1 << TrueColor), 8, TrueColor,
-                                       0xff0000, 0x00ff00, 0x0000ff))
+    if (!miSetVisualTypesAndMasks(24, (1 << TrueColor), 8, TrueColor,
+                                  0xff0000, 0x00ff00, 0x0000ff))
         return FALSE;
     miSetPixmapDepths();
 
-    /* fb's "width" is the frame buffer's pixel width; it derives devKind as
-     * PixmapBytePad(width, root depth), which is exactly shadowStride. */
     if (!fbScreenInit(pScreen, hbScreen.shadow, hbScreen.width,
                       hbScreen.height, dpi, dpi,
-                      hbScreen.width, hbScreen.depth))
+                      hbScreen.shadowStride / 4, 32))
         return FALSE;
     if (hbRender && !fbPictureInit(pScreen, 0, 0))
         return FALSE;
@@ -420,13 +319,10 @@ hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
     if (!hbRandRInit(pScreen))
         return FALSE;
 
-    /* Pixel values, not colours: depth 8 wants palette indexes (the cursor
-     * and the root weave draw with these). */
-    pScreen->blackPixel = 0;
-    pScreen->whitePixel = hbScreen.depth == 8 ? 0xff : 0xffffff;
-
     miDCInitialize(pScreen, &hbPointerCursorFuncs);
 
+    pScreen->blackPixel = 0;
+    pScreen->whitePixel = 0xffffff;
     pScreen->SaveScreen = hbSaveScreen;
 
     hbScreen.createScreenResources = pScreen->CreateScreenResources;
@@ -436,16 +332,9 @@ hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
 
     if (!fbCreateDefColormap(pScreen))
         return FALSE;
-    if (hbScreen.depth == 8) {
-        /* Unconditional (ErrorF, not LogMessage): this line is the harness's
-         * marker that the 8-bit path, not the 24-bit one, is what came up. */
-        ErrorF("hobbyos: screen %dx%d depth 8 PseudoColor (fb %dx%d pitch %d px)"
-               " -- HB_XDEPTH=8\n", hbScreen.width, hbScreen.height,
-               hbScreen.fbWidth, hbScreen.fbHeight, hbScreen.fbStride);
-    }
-    LogMessage(X_INFO, "hobbyos: screen %dx%d depth %d (fb %dx%d pitch %d px)\n",
-               hbScreen.width, hbScreen.height, hbScreen.depth,
-               hbScreen.fbWidth, hbScreen.fbHeight, hbScreen.fbStride);
+    LogMessage(X_INFO, "hobbyos: screen %dx%d depth 24 (fb %dx%d pitch %d px)\n",
+               hbScreen.width, hbScreen.height, hbScreen.fbWidth,
+               hbScreen.fbHeight, hbScreen.fbStride);
     return TRUE;
 }
 
@@ -558,9 +447,7 @@ ddxInputThreadInit(void)
 void
 ddxUseMsg(void)
 {
-    ErrorF("-screen WxH            screen size (default: the framebuffer's,\n");
-    ErrorF("                       640x400 when HB_XDEPTH=8 is set)\n");
-    ErrorF("HB_XDEPTH=8            environment: depth 8 PseudoColor screen\n");
+    ErrorF("-screen WxH            screen size (default: the framebuffer's)\n");
     ErrorF("+/-render              turn on/off RENDER extension support (default on)\n");
     ErrorF("-xkm file              compiled keymap to load (default /X11/US.XKM)\n");
     ErrorF("-verbose [n]           stderr log verbosity (default 0; 3 if n omitted)\n");
