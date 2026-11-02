@@ -35,6 +35,10 @@ static void row(const char *fmt, ...) {
   va_start(ap, fmt);
   int n = vsnprintf(b, sizeof b, fmt, ap);
   va_end(ap);
+  /* vsnprintf returns the length it WOULD have written; past the buffer that is
+     a write of uninitialised stack (measured: a long PATH row printed heap
+     garbage).  Clamp before writing. */
+  if (n > (int)sizeof b - 1) n = (int)sizeof b - 1;
   if (n > 0) (void)!write(1, b, (size_t)n);
 }
 
@@ -44,7 +48,16 @@ int main(int argc, char **argv) {
      only, while a session launch (XSTART) passes real arguments and the
      session environment.  Both must arrive intact. */
   row("[LP] argv argc=%d argv0=%s\n", argc, (argc > 0 && argv[0]) ? argv[0] : "(null)");
-  row("[LP] env DISPLAY=%s\n", getenv("DISPLAY") ? getenv("DISPLAY") : "(unset)");
+  row("[LP] env DISPLAY=%s HOME=%s PATH=%s\n",
+      getenv("DISPLAY") ? getenv("DISPLAY") : "(unset)",
+      getenv("HOME") ? getenv("HOME") : "(unset)",
+      getenv("PATH") ? getenv("PATH") : "(unset)");
+  {
+    extern char **environ;
+    int n = 0;
+    for (char **e = environ; e && *e; e++) n++;
+    row("[LP] env count=%d\n", n);
+  }
 
   struct utsname u;
   if (uname(&u) == 0) row("[LP] uname sysname=%s machine=%s\n", u.sysname, u.machine);
