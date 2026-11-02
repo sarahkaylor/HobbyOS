@@ -24,11 +24,13 @@ TIMEOUT_S="${LP_TIMEOUT:-300}"
 
 [ -f "$ROOT/src/user/linux_probe_$NAME.c" ] || {
   echo "t3_linux_probe: no such probe src/user/linux_probe_$NAME.c"; exit 2; }
-if [ ! -f "$ELF" ]; then
-  echo "t3_linux_probe: building $ELF"
-  make -C "$ROOT" ARCH=intel "obj/intel/probe_$NAME.elf" || {
-    echo "t3_linux_probe: BUILD FAILED"; exit 2; }
-fi
+# ALWAYS rebuild: an ELF left over from before a source edit silently grades the
+# OLD probe (measured: a stale probe_mem still performed the fault-entrapment
+# write that the new source had turned off, so the gate reported a defect the
+# tree no longer had).  One musl compile is ~0.2 s.
+echo "t3_linux_probe: building $ELF"
+make -C "$ROOT" ARCH=intel "obj/intel/probe_$NAME.elf" || {
+  echo "t3_linux_probe: BUILD FAILED"; exit 2; }
 
 CFG="$(mktemp)"
 printf 'PROBE.ELF\n' > "$CFG"
