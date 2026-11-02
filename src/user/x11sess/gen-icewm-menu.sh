@@ -45,7 +45,7 @@ label() { case "${1%.BIN}" in *_*) printf '_%s' "${1%.BIN}" ;; *) printf '%s' "$
 
 # X-stack / session binaries are not desktop apps (and XEYESR/XCALCR keep
 # their own real-X entries below).
-SKIP="XSESSION.BIN XHOBBY.BIN ICEWM.BIN ICEWMBG.BIN ICEWMHNT.BIN ICESH.BIN HBHOST.BIN XEYESR.BIN XCALCR.BIN"
+SKIP="XSESSION.BIN XHOBBY.BIN ICEWM.BIN ICEWMBG.BIN ICEWMHNT.BIN ICESH.BIN HBHOST.BIN XFILES.BIN XEYESR.BIN XCALCR.BIN"
 skipped() { for s in $SKIP; do [ "$1" = "$s" ] && return 0; done; return 1; }
 in_list() { printf '%s\n' "$2" | grep -qx "$1"; }
 
@@ -54,6 +54,8 @@ M="$OUT/menu"
   echo "# /ICEWM/menu -- GENERATED at disk-build time by src/user/x11sess/gen-icewm-menu.sh"
   echo "# from src/user/desktop.c (pinned_apps/pinned_games) and this disk's files."
   echo "# Native HobbyOS programs run in an X window through HBHOST.BIN (icewm.md §9)."
+  on_disk XFILES.BIN && echo 'prog "Files (X11)" folder /XFILES.BIN'
+  echo 'separator'
   echo 'menu "Apps" folder {'
   for a in $APPS; do
     on_disk "$a" && echo "    prog \"$(label "$a")\" app HBHOST.BIN $a"
@@ -102,6 +104,7 @@ T="$OUT/toolbar"
   for a in CONSOLE.BIN FILES.BIN; do
     on_disk "$a" && echo "prog \"$(label "$a")\" app HBHOST.BIN $a"
   done
+  on_disk XFILES.BIN && echo 'prog "Files (X11)" folder XFILES.BIN'
   on_disk XEYESR.BIN && echo 'prog "XEyes" xload XEYESR.BIN'
   on_disk XCALCR.BIN && echo 'prog "XCalc" app XCALCR.BIN'
 } > "$T"
