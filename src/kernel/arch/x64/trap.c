@@ -62,9 +62,73 @@ struct cpu_local {
   uint64_t user_sp_temp;
   uint64_t cpu_id;
   struct process *current_proc;
+  /* GB-147: the frame the CPU pushed, copied by the FIRST instruction of
+     every exception stub (before any prologue).  The offsets are
+     load-bearing: FRAMESNAP_ASM addresses them as gs:[48]..gs:[104]. */
+  uint64_t snap_rip;     /* 48 */
+  uint64_t snap_cs;      /* 56 */
+  uint64_t snap_rflags;  /* 64 */
+  uint64_t snap_rsp;     /* 72  (CPL3 only; 0 for a kernel-mode entry) */
+  uint64_t snap_ss;      /* 80  (CPL3 only; 0 for a kernel-mode entry) */
+  uint64_t snap_valid;   /* 88 */
+  uint64_t snap_count;   /* 96 */
+  uint64_t fault_count;  /* 104 */
 } __attribute__((packed));
 
+/* The stub asm cannot see sizeof(): pin the offsets it uses. */
+extern void uart_puts_raw(const char *s);
+extern void uart_print_hex_raw(uint64_t v);
+extern void print_int_raw(int v);
+typedef char gb147_off48[(__builtin_offsetof(struct cpu_local, snap_rip) == 48) ? 1 : -1];
+typedef char gb147_off56[(__builtin_offsetof(struct cpu_local, snap_cs) == 56) ? 1 : -1];
+typedef char gb147_off64[(__builtin_offsetof(struct cpu_local, snap_rflags) == 64) ? 1 : -1];
+typedef char gb147_off72[(__builtin_offsetof(struct cpu_local, snap_rsp) == 72) ? 1 : -1];
+typedef char gb147_off80[(__builtin_offsetof(struct cpu_local, snap_ss) == 80) ? 1 : -1];
+typedef char gb147_off88[(__builtin_offsetof(struct cpu_local, snap_valid) == 88) ? 1 : -1];
+typedef char gb147_off96[(__builtin_offsetof(struct cpu_local, snap_count) == 96) ? 1 : -1];
+typedef char gb147_off104[(__builtin_offsetof(struct cpu_local, fault_count) == 104) ? 1 : -1];
+
 struct cpu_local cpu_locals[MAX_CPUS];
+
+/* GB-147: print the pushed frame beside the frame the handler read, so the
+   trap-frame family is decided by a comparison rather than an argument.
+   `is_fatal` only tags the line; the comparison is the same at both sites. */
+static void gb147_framesnap(struct trap_frame *tf, const char *tag) {
+  struct cpu_local *cl = &cpu_locals[get_cpuid()];
+  uint64_t read_rsp = (uint64_t)tf->lr;
+  int match;
+  match = (cl->snap_valid != 0) &&
+          (cl->snap_rip == (uint64_t)tf->elr) &&
+          (cl->snap_cs == (uint64_t)tf->cs) &&
+          (cl->snap_rflags == (uint64_t)tf->spsr) &&
+          (((tf->cs & 3u) != 3u) ||
+           (cl->snap_rsp == read_rsp && cl->snap_ss == (uint64_t)tf->ss));
+  uart_puts_raw("[FRAMESNAP] ");
+  uart_puts_raw(tag);
+  uart_puts_raw(" pushed rip=");
+  uart_print_hex_raw(cl->snap_rip);
+  uart_puts_raw(" cs=");
+  uart_print_hex_raw(cl->snap_cs);
+  uart_puts_raw(" rsp=");
+  uart_print_hex_raw(cl->snap_rsp);
+  uart_puts_raw(" ss=");
+  uart_print_hex_raw(cl->snap_ss);
+  uart_puts_raw(" | read rip=");
+  uart_print_hex_raw((uint64_t)tf->elr);
+  uart_puts_raw(" cs=");
+  uart_print_hex_raw((uint64_t)tf->cs);
+  uart_puts_raw(" rsp=");
+  uart_print_hex_raw(read_rsp);
+  uart_puts_raw(" ss=");
+  uart_print_hex_raw((uint64_t)tf->ss);
+  uart_puts_raw(" match=");
+  print_int_raw(match);
+  uart_puts_raw(" snaps=");
+  print_int_raw((int)cl->snap_count);
+  uart_puts_raw(" faults=");
+  print_int_raw((int)cl->fault_count);
+  uart_puts_raw("\n");
+}
 
 void save_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
@@ -2928,6 +2992,13 @@ static void fl_dec(struct fl_buf *f, int v) {
 static void general_interrupt_inner(struct trap_frame *tf);
 
 void general_interrupt_handler(struct trap_frame *tf) {
+  /* GB-147: count every entry that came through an exception stub.  The
+     syscall path (vector 0x80) builds its frame in syscall_entry and has no
+     stub snapshot, so it is excluded — every stub entry must have exactly
+     one snapshot, and snap_count == fault_count is the invariant the dump
+     reports. */
+  if (tf->vector != 0x80)
+    cpu_locals[get_cpuid()].fault_count++;
 #ifdef KERNEL_MODE_UNIT_TEST
   extern void lockdbg_irq_enter(void);
   extern void lockdbg_irq_exit(void);
@@ -3370,6 +3441,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           uart_puts_raw("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
           print_int_raw(cur->pid);
           uart_puts_raw("\n");
+          gb147_framesnap(tf, "user-pf");
           process_fault_exit(tf, 11); /* SIGSEGV status byte */
           /* process_fault_exit -> process_exit -> schedule() never
              returns (it resumes another process or idles forever). */
@@ -3417,6 +3489,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         uart_print_hex_raw(cpu_pd7[480]);
       }
       uart_puts_raw("\n");
+      gb147_framesnap(tf, "fatal");
       /* GB-060: same rule as the resume-return halt -- if this CPU is holding
          proc_lock, give it back before stopping, so the survivors are not left
          spinning behind a CPU that will never run again.  Only if the lock
@@ -3607,12 +3680,45 @@ void syscall_init(void) {
 }
 
 // Exception assembly entries
+/* GB-147: at the first instruction of the stub, copy the CPU-pushed frame
+   (RIP, CS, RFLAGS, and RSP/SS when the CPU pushed them) into this CPU's
+   slot.  rax is the only register touched and it is restored before the
+   stub's own pushes.  base = distance from [rsp] to RIP after push rax:
+   8 for a no-error exception, 16 when the CPU pushed an error code. */
+#define FRAMESNAP_ASM(base) \
+        "    push rax\n" \
+        "    mov rax, [rsp + " #base "]\n" \
+        "    mov gs:[48], rax\n" \
+        "    mov rax, [rsp + " #base " + 8]\n" \
+        "    mov gs:[56], rax\n" \
+        "    mov rax, [rsp + " #base " + 16]\n" \
+        "    mov gs:[64], rax\n" \
+        "    mov rax, [rsp + " #base " + 8]\n" \
+        "    test rax, 3\n" \
+        "    jz 1f\n" \
+        "    mov rax, [rsp + " #base " + 24]\n" \
+        "    mov gs:[72], rax\n" \
+        "    mov rax, [rsp + " #base " + 32]\n" \
+        "    mov gs:[80], rax\n" \
+        "    jmp 2f\n" \
+        "1:\n" \
+        "    mov qword ptr gs:[72], 0\n" \
+        "    mov qword ptr gs:[80], 0\n" \
+        "2:\n" \
+        "    mov rax, 1\n" \
+        "    mov gs:[88], rax\n" \
+        "    mov rax, gs:[96]\n" \
+        "    inc rax\n" \
+        "    mov gs:[96], rax\n" \
+        "    pop rax\n"
+
 #define EXCEPTION_NO_ERR(num) \
     extern void exception_##num(void); \
     __asm__( \
         ".intel_syntax noprefix\n" \
         ".global exception_" #num "\n" \
         "exception_" #num ":\n" \
+        FRAMESNAP_ASM(8) \
         "    push 0\n" \
         "    push " #num "\n" \
         "    jmp common_trap_wrapper\n" \
@@ -3625,6 +3731,7 @@ void syscall_init(void) {
         ".intel_syntax noprefix\n" \
         ".global exception_" #num "\n" \
         "exception_" #num ":\n" \
+        FRAMESNAP_ASM(16) \
         "    push " #num "\n" \
         "    jmp common_trap_wrapper\n" \
         ".att_syntax prefix\n" \
