@@ -7,7 +7,7 @@
 # -DPOLLTST_BROKEN_SELECT, a zero-timeout select that returns ~0ms) must be
 # booted and its FULL result asserted: the guest reaches "System halt"
 # (halted=1) AND the log contains the failure row
-#     POLLTST timeout took >= 85ms and < 5000ms (elapsed seen): FAIL
+#     POLLTST timeout took >= 85ms and < 30000ms (elapsed seen): FAIL
 #     POLLTST elapsed_ms=0
 # and POLLTST FAILED: 1 check(s).  A control that PASSES (or a guest that
 # crashes before reaching the check) is a gate FAILURE — the gate proves the
@@ -60,7 +60,7 @@ echo "=== tier exited $TIER_RC (its wave-floor FAIL for a 1-program manifest is 
 # --- assert: control shipped, ran, and FAILed, guest halted ---------------------
 HALTED=$(grep -ac "System halt" "$LOG")
 LOADED=$(grep -ac "\[ARRIVED\] POLLBRK.BIN rc>0" "$LOG")
-TIMEOUT_FAIL=$(grep -ac "timeout took >= 85ms and < 5000ms (elapsed seen): FAIL" "$LOG")
+TIMEOUT_FAIL=$(grep -ac "timeout took >= 85ms and < 30000ms (elapsed seen): FAIL" "$LOG")
 ZERO=$(grep -ac "elapsed_ms=0" "$LOG")
 FAILED=$(grep -ac "POLLTST FAILED: 1 check(s)" "$LOG")
 KFATAL=$(grep -ac "FATAL kernel-mode\|Synchronous Exception in EL1\|halting this CPU" "$LOG")
@@ -79,7 +79,7 @@ if [ "$EXPECT" = fail ]; then
   [ "$KFATAL" -eq 0 ]      || { echo "t3_pollbrk: FAIL — kernel faulted (GB-087?) instead of the control FAILing"; OK=0; }
 else
   # --expect-pass: the healthy (non-broken) POLLTST must PASS the timeout check
-  PS=$(grep -ac "timeout took >= 85ms and < 5000ms (elapsed seen): PASS" "$LOG")
+  PS=$(grep -ac "timeout took >= 85ms and < 30000ms (elapsed seen): PASS" "$LOG")
   [ "$PS" -ge 1 ] && [ "$TIMEOUT_FAIL" -eq 0 ] || { echo "t3_pollbrk: FAIL — expected PASS, got FAIL"; OK=0; }
 fi
 

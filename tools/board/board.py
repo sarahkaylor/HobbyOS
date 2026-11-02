@@ -14,7 +14,7 @@ Usage:
   board.py lanes                      # list lane labels (create missing with --create)
   board.py list [--lane L] [--milestone M0] [--label x] [--state open|closed|all]
   board.py show GB-013
-  board.py claim GB-013 [--by swarm-worker-1]
+  board.py claim GB-013 [--by swarm-worker-1]   # Ready only (WORK POLICY rule 1)
   board.py move GB-013 "In Progress" [--no-comment]
   board.py comment GB-013 -m "text"   (or --file path)
   board.py status                     # lane/milestone rollup (board at a glance)
@@ -256,6 +256,31 @@ def cmd_claim(a):
             raise SystemExit(
                 f"{a.gid} #{it['number']} already claimed by `{winner or 'another agent'}` "
                 "(lane already In Progress) — not re-claiming (GB-074); run no gate")
+        # WORK POLICY rule 1 (2026-11-01): `In Progress` is a lease, and claims are
+        # only made from `Ready`.  A Backlog card must be promoted first (rule 5);
+        # an In Review card with an open PR must stay In Review (rule 2).  Until
+        # GB-154 the only refusal was the In-Progress one above, so a mis-typed
+        # claim silently skipped promotion or fought pr_sync.py for an hour.
+        if cur != "Ready":
+            # The hint must fit the lane: a Backlog card is promoted (rule 5), but
+            # an In Review / Merge Gate card is at or past its verifier gate and
+            # moving it back to Ready would fight pr_sync.py (rule 2) — GB-156.
+            if cur == "In Review":
+                hint = ("Leave it in `In Review` — it is waiting on its GB-nnn-V verifier "
+                        "gate; do not move it to `Ready` (WORK POLICY rule 2).")
+            elif cur == "Merge Gate":
+                hint = ("Leave it in `Merge Gate` — it is past verification and waiting on "
+                        "the merge; do not move it to `Ready` (WORK POLICY rule 2).")
+            elif cur == "Icebox":
+                hint = "It is `Icebox`; move it to `Backlog` only if it is real work."
+            elif cur == "Done":
+                hint = "It is `Done`; not claimable."
+            else:  # Backlog or no lane: promotion is the legitimate path (rule 5).
+                hint = f"Promote it first: python3 tools/board/board.py move {a.gid} Ready"
+            raise SystemExit(
+                f"{a.gid} #{it['number']} is `{cur or 'not in a lane'}` — claims are only "
+                "from `Ready` (WORK POLICY rule 1, 2026-11-01); no claim posted, lane "
+                f"unchanged. {hint}")
         prev = set_lane(it, "In Progress")
         msg = (f"claimed by `{by}` on {a.host or 'swarm-coordinator'} — "
                f"lane: {prev or 'Backlog'} → In Progress")
@@ -312,15 +337,35 @@ def cmd_show(a):
 
 def cmd_status(a):
     issues = all_issues("all")
-    lanes = {n: [] for n in LANES}
-    lanes["(no lane)"] = []
-    for it in issues:
-        lanes[lane_of(it) or "(no lane)"].append(it)
-    print(f"BOARD {REPO} @ {API}  — {len(issues)} tickets")
+    op = [it for it in issues if it["state"] == "open"]
+    closed = [it for it in issues if it["state"] != "open"]
+    lanes = {n: 0 for n in LANES}
+    lanes["(no lane)"] = 0
+    for it in op:
+        lanes[lane_of(it) or "(no lane)"] += 1
+    # GB-158: lane rows are the WORKFLOW view, so they count OPEN tickets only.
+    # A ticket closed by a PR without a lane move keeps its lane label; counting
+    # it made `Ready` read 1 with nothing claimable and `In Progress` read 11 with
+    # 2 open cards.  Those closed-outside-Done cards are named below because
+    # lint() walks open issues and cannot see them.
+    done = sum(1 for it in closed if lane_of(it) == "Done")
+    outside = {}
+    for it in closed:
+        lane = lane_of(it) or "(no lane)"
+        if lane != "Done":
+            outside.setdefault(lane, []).append(it["number"])
+    print(f"BOARD {REPO} @ {API}  — {len(issues)} tickets "
+          f"({len(op)} open, {len(closed)} closed)")
+    print("  lane rows are OPEN tickets; Done is the closed count")
     for n in LANES + ["(no lane)"]:
-        row = lanes[n]
-        if row or n == "(no lane)":
-            print(f"  {n:<12} {len(row):>3}")
+        if n == "Done":
+            print(f"  {n:<12} {done:>3} closed")
+        else:
+            print(f"  {n:<12} {lanes[n]:>3}")
+    if outside:
+        ids = " ".join(
+            f"#{x}" for n in LANES + ["(no lane)"] for x in sorted(outside.get(n, [])))
+        print(f"\n  closed outside Done: {sum(len(v) for v in outside.values())} — {ids}")
     print()
     ms = api_get(f"/repos/{REPO}/milestones", "?state=all&limit=50")
     for m in ms:
