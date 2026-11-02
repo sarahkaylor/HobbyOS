@@ -100,7 +100,8 @@ Every claim above comes from a run, not from reading code:
 |---|---|
 | `make doom_elf_test` (linuxdoom, depth 8) | **PASS**, best frame 232 distinct colours, 3.1 % of screen covered (320×200 on 1920×1080) |
 | `make doom_elf_test_gen` (doomgeneric, depth 24) | **PASS**, 185 colours, 12.3 % covered (640×400 window) |
-| `bash tools/gate/t3_linux_probe.sh {hello,fd,mem,proc,x11,wad}` | all PASS in-guest, each a plain Linux ELF |
+| `bash tools/gate/t3_linux_probe.sh {hello,fd,mem,proc,x11,wad}` | all PASS in-guest, each a plain Linux ELF (`x11` runs through an X session: `connect ok`, `setup status=1 body=236`, `screen0 root=0x41 depth=24`, `GetInputFocus focus=0x1`) |
+| `python3 src/user/x11/apps/xdepth8/run_xdepth8_test.py` | PASS — a plain client that maps with a private 256-cell colormap and never calls `XInstallColormap` gets its exact cells back (13 `[XD8]` rows) |
 | `./run_unit_tests_intel.sh` | 397 run, 0 failed |
 | `linux_abi_test_host` | 12 tables, 0 failed |
 | `x11_lib_test_host` | 124 checks, 0 failed |
