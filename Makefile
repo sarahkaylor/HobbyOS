@@ -4306,12 +4306,21 @@ linux_probes: $(LINUX_PROBE_ELFS)
 
 # Doom as an unmodified Linux ELF (docs/doom-linux-elf-plan.md): build the
 # icewm disk, stage DOOM.ELF + DOOM1.WAD + /XSTART.TXT onto a COPY of it, boot
-# the intel guest, and grade the QMP screendumps.  The binary itself is built
-# by tools/linux-doom/build-doom10.sh (host-only, musl static-PIE) and copied to
-# obj/doom-linux/doom10.elf; see that script's README.
+# the intel guest, and grade the QMP screendumps.  The binaries are built by
+# tools/linux-doom/build-doom10.sh / build-doomgen.sh (host-only, musl
+# static-PIE) and copied to obj/doom-linux/; see tools/linux-doom/README.md.
+#
+#   doom_elf_test       id linuxdoom-1.10 — needs the depth-8 PseudoColor screen
+#                       (HB_XDEPTH=8), because 1.10 refuses anything else
+#   doom_elf_test_gen   doomgeneric's stock X11 backend — depth 24, no args
 DOOM_ELF ?= obj/doom-linux/doom10.elf
+DOOM_GEN ?= obj/doom-linux/doomgen.elf
 DOOM_WAD ?= obj/doom-linux/DOOM1.WAD
 doom_elf_test:
-	python3 tools/doom_elf/run_doom_elf_test.py --elf $(DOOM_ELF) --wad $(DOOM_WAD)
-.PHONY: doom_elf_test
+	DOOM_XDEPTH=8 python3 tools/doom_elf/run_doom_elf_test.py \
+	    --elf $(DOOM_ELF) --wad $(DOOM_WAD) --start-line /DOOM.ELF
+doom_elf_test_gen:
+	python3 tools/doom_elf/run_doom_elf_test.py \
+	    --elf $(DOOM_GEN) --wad $(DOOM_WAD) --start-line "/DOOM.ELF -iwad /DOOM1.WAD"
+.PHONY: doom_elf_test doom_elf_test_gen
 
