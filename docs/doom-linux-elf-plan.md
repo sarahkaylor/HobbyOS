@@ -29,7 +29,10 @@ concessions are build-level and are listed in §5.
 
 Launch path: kernel starts `XSESSION.BIN` (DESKTOP=icewm) → it starts
 `XHOBBY.BIN`, then (no-WM or IceWM mode) spawns the programs listed in
-`/XSTART.TXT`, which the disk build fills with `/DOOM.ELF -iwad /DOOM1.WAD`.
+`/XSTART.TXT` (`/DOOM.ELF` for 1.10, which has no `-iwad` and reads
+`$DOOMWADDIR`; `/DOOM.ELF -iwad /DOOM1.WAD` for doomgeneric).  The disk build
+stages the binary, the IWAD, `/XSTART.TXT` and `/X11/XSESSION.ENV`
+(`HB_XDEPTH=8` + `XSESS_NO_WM=1` for the Doom session).
 
 ## 3. Why this shape (facts measured on this tree, 2026-11-02)
 
@@ -43,7 +46,7 @@ Launch path: kernel starts `XSESSION.BIN` (DESKTOP=icewm) → it starts
 | the DDX screen is depth 24 TrueColor only | `ddx/hobbyos/hbscreen.c:` `miSetVisualTypesAndMasks(24, …)` |
 | upstream Doom **requires** depth-8 PseudoColor | `linuxdoom-1.10/i_video.c`: `XMatchVisualInfo(…, 8, PseudoColor, …)` else `I_Error("xdoom currently only supports 256-color PseudoColor screens")` |
 | image slot is 128 MiB, so a 3 MB static binary is not a size problem | `src/include/vm.h`: `USER_IMG_SIZE 0x08000000` |
-| Doom's build needs two mechanical fixes on a 2026 toolchain | `#include <errnos.h>` (typo for `<errno.h>`), and `(int)"literal"` static initializers in `m_misc.c` that no modern C compiler accepts; `-lnsl` no longer exists |
+| Doom 1.10 is not buildable-as-published on a 64-bit target | `tools/linux-doom/patches/doom10-lp64-toolchain.patch`: 18 hunks, 6 files, all word-size corrections (on-disk `maptexture_t` field, `*4` pointer arrays, `(int)` casts on pointers) — no game logic |
 
 ## 4. Work breakdown
 
