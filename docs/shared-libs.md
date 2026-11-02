@@ -328,3 +328,65 @@ The initialiser is now a CAS: one winner initialises, losers spin on a release
 store. `vm_lock_init_once()` had the identical shape and was fixed with it
 (unreachable today only because the boot core happens to win that race first).
 Measured: 3 crashes in 8 boots before, 0 in 15 after.
+
+## 10. Userland migration
+
+The loader dispatch is per file, so migration is opt-in and reversible: a
+program moves to `ET_DYN` when `tools/dyn-migrate.sh` writes `DYN/<base>.BIN`
+and the disk rule copies it over the program's static 8.3 name. Nothing else
+in the tree changes — the shell, the desktop and the test wave launch the
+dynamic build by the same name.
+
+```
+tools/dyn-migrate.sh intel cat cp ls wc head tail sort uniq free ps uptime \
+    kill mkdir mv rm touch cut_gnu head_gnu tail_gnu monitor
+make ARCH=intel MODE=dyn_test -j32 fresh_disk
+make ARCH=intel MODE=dyn_test run QEMU_ARGS="-display none"
+```
+
+`dyn-migrate.sh` compiles the program's TU with `-fPIC`, links it `-pie` with
+`--dynamic-linker /LDHOBBY.SO` against `libc.so`, and appends each success to
+`obj/<arch>/dyn_list.h`. `MODE=dyn_test` boots one process per entry, so the
+converted set is exercised on every build rather than one program at a time.
+A no-argument invocation is the smoke: a tool either does its work, prints
+usage, or reads a closed stdin — all three paths run, and a memory fault is
+the only failure mode we care about.
+
+### 10.1 Two ways a program silently fails to link
+
+**`main()`-style programs need `crt0_dyn.o`.** Linking a TU that has no
+`_start` with `-e _start` makes `lld` print a warning and leave `e_entry` at
+0. The kernel then rejects the image with `e_entry outside every executable
+segment`, which reads like a segment bug and is not one. `dyn-migrate.sh`
+tests the object with `nm` for `T _start` and adds `crt0_dyn.o` when it is
+absent; it also refuses any link whose `readelf -h` entry is `0x0`.
+
+**A const table of pointers needs `.data.rel.ro`.** `dyn_list.h` was first
+emitted as `static const char *const names[]`, which puts a relocation in
+`.data.rel.ro`. Neither kernel link script had that output section, so on the
+PIE-linked aarch64 kernel the relocations were dropped and every entry read
+as `NULL` — the boot printed `dyn_test: ` twenty times and loaded nothing,
+while x86_64 (linked absolute) was fine. Both scripts now place
+`.data.rel.ro`, and the generated list is a 2-D `char[][16]` array that needs
+no relocation at all.
+
+### 10.2 What is convertible today
+
+Of 109 link rules, 77 are "one TU + libc"; 62 of those become `ET_DYN`
+unchanged (12 were naming artefacts of the survey, 3 are C++). The rest of
+userland is blocked on real work, not on ELF:
+
+- **Multi-TU glibc ports** (`grep`, `sed`, `tar`, `tr`, `nl`, `comm`, `tsort`,
+  `md5sum`, …) link many objects with per-program include trees; each needs
+  its object list taught to the PIC rule before it can be converted.
+- **C++ programs** (`cxx_smoke`, `cxx_t`, `rtti_t`) link `libcxx.a`, which is
+  not built `-fPIC`; that archive needs a PIC flavour first.
+- **X11 and full-screen programs** (`console`, `xsession`, `nano`, `pong`,
+  `doom`) are worth converting last: they are the hardest to smoke-test
+  headlessly.
+
+### 10.3 Sizes (intel, this batch)
+
+`ls` 7056 vs 46080 static, `cat` 7536 vs 56744, `wc` 20400 vs ~46 K. The
+saving is what you would expect for small utilities; the real prize stays the
+large role blobs and future `dlopen`.

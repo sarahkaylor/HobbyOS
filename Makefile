@@ -365,6 +365,10 @@ ifeq ($(MODE),test)
   USER_CFLAGS += -DKERNEL_MODE_TEST
 else ifeq ($(MODE),unit_tests)
   CFLAGS += -DKERNEL_MODE_UNIT_TEST
+else ifeq ($(MODE),dyn_test)
+  # docs/shared-libs.md §10: boot every converted program (one process each).
+  CFLAGS += -DKERNEL_MODE_DYN_TEST -I$(OBJ_DIR)
+  USER_CFLAGS += -DKERNEL_MODE_DYN_TEST
 else ifeq ($(MODE),so_test)
   # docs/shared-libs.md §5.5: boot ONLY the dynamically linked pilot HDYN.BIN
   # (ET_DYN + PT_INTERP /LDHOBBY.SO -> the interpreter -> LIBC.SO).
@@ -2666,6 +2670,14 @@ endif
 	$(MCOPY) -i disk.img $(HDYN_BIN) ::/HDYN.BIN
 	$(MCOPY) -i disk.img $(OBJ_DIR)/LSDYN.BIN ::/LSDYN.BIN
 	$(MCOPY) -i disk.img $(OBJ_DIR)/CATDYN.BIN ::/CATDYN.BIN
+	# Dynamic conversion (docs/shared-libs.md §10): each converted program
+	# replaces its static build under the same 8.3 name, so every existing
+	# launcher (shell, desktop, wave) exercises the DSO version.
+	@for f in $(OBJ_DIR)/DYN/*.BIN; do \
+	  [ -f "$$f" ] || continue; \
+	  b=$$(basename "$$f" | tr 'a-z' 'A-Z'); \
+	  $(MCOPY) -o -i disk.img "$$f" "::/$$b"; \
+	done
 ifeq ($(DESKTOP),icewm)
 	# icewm.md §4.3/§4.4: X binaries + data tree + XSESSION.BIN (DESKTOP=icewm only).
 	sh src/user/x11sess/stage-disk.sh disk.img "$(X11_BUILD_DIR)" $(XSESSION_BIN) "$(MCOPY)" "$(MMD)"
@@ -2722,6 +2734,12 @@ $(OBJ_DIR)/CATDYN.BIN: $(OBJ_DIR)/dyn/cat.o $(OBJ_DIR)/libc.so
 
 disk.img: $(HDYN_BIN) $(OBJ_DIR)/libc.so $(OBJ_DIR)/LDHOBBY.SO $(OBJ_DIR)/LSDYN.BIN \
           $(OBJ_DIR)/CATDYN.BIN
+
+$(OBJ_DIR)/dyn_list.h:
+	@mkdir -p $(OBJ_DIR)
+	@printf '/* no converted programs yet: run tools/dyn-migrate.sh */\nstatic const char dyn_smoke_names[][16] = { "" };\n' > $@
+
+$(OBJ_DIR)/main.o: $(OBJ_DIR)/dyn_list.h
 
 # Target to run the OS inside QEMU
 # RUN_STAGE: optional staging hook, run AFTER disk.img is (re)built and BEFORE

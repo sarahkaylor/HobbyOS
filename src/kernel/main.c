@@ -569,6 +569,24 @@ void main(void) {
             "open; app + static-PIE ELF props proven on host by "
             "sdl_test_app_test_host)\n");
 #endif
+#elif defined(KERNEL_MODE_DYN_TEST)
+  /* docs/shared-libs.md §10: boot every program tools/dyn-migrate.sh converted.
+   * One process each, no arguments: the smoke is "does it start, trap, and
+   * exit without a fault" — an argument-hungry tool prints usage or reads a
+   * closed stdin and exits, which is exactly the path we want exercised. */
+  uart_puts("Mode: DYN_TEST - booting converted userland\n");
+  {
+#include "dyn_list.h"
+    unsigned nd = (unsigned)(sizeof(dyn_smoke_names) / sizeof(dyn_smoke_names[0]));
+    for (unsigned i = 0; i < nd; i++) {
+      if (!dyn_smoke_names[i][0])
+        continue;
+      uart_puts("dyn_test: ");
+      uart_puts(dyn_smoke_names[i]);
+      uart_puts("\n");
+      load_and_run_program_in_scheduler(dyn_smoke_names[i], -1, -1, -1, -1);
+    }
+  }
 #elif defined(KERNEL_MODE_SO_TEST)
   /* docs/shared-libs.md §5.5 pilot: boot ONLY HDYN.BIN, which is an ET_DYN
      executable whose PT_INTERP is /LDHOBBY.SO.  The kernel maps the program,
