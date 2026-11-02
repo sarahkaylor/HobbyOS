@@ -259,7 +259,10 @@ def main():
             log("FAIL: " + x)
         log("report: " + report)
         return 1
-    log("PASS: Doom ELF ran under X and produced a frame")
+    if args.skip_frame_check:
+        log("PASS: the chain completed (frame check skipped)")
+    else:
+        log("PASS: Doom ELF ran under X and produced a frame")
     log("report: " + report)
     return 0
 
