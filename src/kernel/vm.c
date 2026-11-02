@@ -16,6 +16,7 @@
 
 #include "errno.h"
 #include "fat16.h" /* L9 (pagein): positional lazy-IMAGE page fill */
+#include "file_obj.h" /* so-vm lane A: VM_OBJ_FILE page cache */
 #include "frame.h"
 #include "fs.h" /* P2.4 (S4): memfd object lookup for fd-backed mmap */
 #include "lock.h"
@@ -45,14 +46,27 @@ static spinlock_t vm_lock;
 static struct addr_space vm_as_pool[MAX_PROCESSES];
 static int vm_lock_ready;
 
+/* Same one-time-init hazard as file_obj_init_once(): two CPUs racing here
+ * would both spinlock_init() the VM lock and the second reset would let both
+ * into every critical section it protects.  Practically unreachable today
+ * (the boot core initialises it before APs start) but not by construction. */
 static void vm_lock_init_once(void) {
-  if (!vm_lock_ready) {
+  if (__atomic_load_n(&vm_lock_ready, __ATOMIC_ACQUIRE))
+    return;
+  static volatile int init_state; /* 0 free, 1 busy, 2 done */
+  int expect = 0;
+  if (__atomic_compare_exchange_n(&init_state, &expect, 1, 0,
+                                  __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
     spinlock_init(&vm_lock);
 #ifdef KERNEL_MODE_UNIT_TEST
     lockdbg_register(&vm_lock, "vm_lock", LOCK_RANK_VM); /* SEC-OBS-B */
 #endif
-    vm_lock_ready = 1;
+    __atomic_store_n(&vm_lock_ready, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&init_state, 2, __ATOMIC_RELEASE);
+    return;
   }
+  while (__atomic_load_n(&init_state, __ATOMIC_ACQUIRE) != 2)
+    ;
 }
 
 static uint64_t v2_memcpy_frames(uint64_t dst, uint64_t src, uint64_t n) {
@@ -306,6 +320,11 @@ void vm_object_unref(struct vm_object *o) {
 uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off) {
   if (!o || !o->used)
     return 0;
+  /* so-vm lane A: a file-backed page is read from disk by file_obj_page()
+     outside vm_lock; zero-filling one here would silently corrupt mapped
+     text, so refuse instead. */
+  if (o->kind == VM_OBJ_FILE)
+    return 0;
   uint64_t idx = off / FRAME_SIZE;
   if (idx >= (uint64_t)o->nr_frames)
     return 0; /* past the capacity */
@@ -316,6 +335,47 @@ uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off) {
     o->frames[idx] = fr;
   }
   return o->frames[idx];
+}
+
+uint64_t vm_object_peek_locked(struct vm_object *o, uint64_t off) {
+  if (!o || !o->used)
+    return 0;
+  uint64_t idx = off / FRAME_SIZE;
+  if (idx >= (uint64_t)o->nr_frames)
+    return 0;
+  return o->frames[idx];
+}
+
+uint64_t vm_object_peek(struct vm_object *o, uint64_t off) {
+  if (!o)
+    return 0;
+  vm_lock_init_once();
+  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fr = vm_object_peek_locked(o, off);
+  spinlock_release_irqrestore(&vm_lock, flags);
+  return fr;
+}
+
+uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr) {
+  if (!o || !fr)
+    return 0;
+  vm_lock_init_once();
+  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t idx = off / FRAME_SIZE;
+  if (!o->used || idx >= (uint64_t)o->nr_frames) {
+    spinlock_release_irqrestore(&vm_lock, flags);
+    frame_free(fr);
+    return 0;
+  }
+  if (o->frames[idx]) {
+    uint64_t peer = o->frames[idx]; /* a peer filled it first */
+    spinlock_release_irqrestore(&vm_lock, flags);
+    frame_free(fr);
+    return peer;
+  }
+  o->frames[idx] = fr;
+  spinlock_release_irqrestore(&vm_lock, flags);
+  return fr;
 }
 
 int vm_object_truncate(struct vm_object *o, uint64_t size) {
@@ -664,6 +724,151 @@ int vm_prot_page(struct addr_space *as, uint64_t va, uint16_t prot) {
  * with vm_lock held. */
 static int v2_image_materialize(struct addr_space *as, uint64_t a);
 
+/* Defined with the fork clone below; needed by the lane A file-cache fill. */
+static void vm_frame_copy(uint64_t dst, uint64_t src, uint64_t n);
+
+/* ---------------------------------------------------------------------
+ * so-vm lane A (docs/shared-libs.md section 4): VM_OBJ_FILE fill + COW.
+ *
+ * Two primitives, both arch-independent and shared by vm_touch and
+ * vm_handle_fault:
+ *
+ *   vm_page_is_obj_frame_locked  — is the resident leaf at `a` still the
+ *       object's own frame (shared) rather than a private copy?
+ *   vm_cow_page_locked          — break one page's sharing: copy the
+ *       object frame into a private frame and remap it.  The object's
+ *       frame is never written and never freed.
+ *
+ * The invariant that makes this sound: an object frame mapped into a
+ * MAP_PRIVATE region is ALWAYS installed read-only (see the fill path and
+ * vm_mprotect below), so the first write to it faults and is copied.  A
+ * MAP_SHARED mapping installs the same frame writable and writes go
+ * straight through — that is the write-visibility half of the contract.
+ * ------------------------------------------------------------------- */
+
+static int vm_page_is_obj_frame_locked(struct addr_space *as,
+                                       struct vm_region *r, uint64_t a,
+                                       uint64_t *leaf_out) {
+  if (!r->obj)
+    return 0;
+  uint64_t leaf = 0;
+  if (vm_arch_walk(as, a, &leaf) != 0)
+    return 0;
+  if (leaf_out)
+    *leaf_out = leaf;
+  uint64_t objfr =
+      vm_object_peek_locked(r->obj, (a - r->base) + r->obj_off);
+  return objfr != 0 && vm_arch_leaf_phys(leaf) == objfr;
+}
+
+/* Caller holds vm_lock; the leaf at `a` is present and is the object frame.
+ * Returns 0 or -ENOMEM. */
+static int vm_cow_page_locked(struct addr_space *as, struct vm_region *r,
+                              uint64_t a) {
+  uint64_t leaf = 0;
+  if (vm_arch_walk(as, a, &leaf) != 0)
+    return 0; /* absent: the fill path makes the private copy */
+  uint64_t fr = frame_alloc_zeroed();
+  if (!fr)
+    return -ENOMEM;
+  vm_frame_copy(fr, vm_arch_leaf_phys(leaf), FRAME_SIZE);
+  /* Drop the old leaf WITHOUT freeing the frame: it is the object's (the
+     arch marks shared leaves, so vm_arch_unmap leaves it alone). */
+  vm_arch_unmap(as, a);
+  as->resident_frames--;
+  /* The private copy is a normal private page: r->kind, freeable at
+     munmap/teardown, and writable per the region's protection. */
+  if (vm_arch_map(as, a, fr, r->prot, r->kind) != 0) {
+    frame_free(fr);
+    return -ENOMEM; /* page is now absent; a refault refills it privately */
+  }
+  as->resident_frames++;
+  if (as->resident_frames > as->peak_frames)
+    as->peak_frames = as->resident_frames;
+  return 0;
+}
+
+/* Fill-and-map one page of a VM_OBJ_FILE-backed region.  MUST be called
+ * with NO lock held (it reads the disk, and fat_lock sits above vm_lock).
+ * `cow` != 0 is a MAP_PRIVATE write: the object page is copied into a new
+ * private frame and that frame is mapped, so the object's frame is never
+ * written.  Mirrors v2_image_materialize's re-validate-then-map protocol —
+ * a peer that wins the race costs one frame, never corruption.
+ * Returns 0 (mapped, or a peer already mapped it), -ENOMEM, -EIO,
+ * -EFAULT (region gone / no longer file-backed), -ESRCH (AS torn down). */
+static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
+                                   int cow) {
+  struct vm_object *o = 0;
+  uint64_t off = 0;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  struct vm_region *r = vm_region_find(as, a);
+  if (as->ver != AS_V2 || !r || !r->obj || r->obj->kind != VM_OBJ_FILE ||
+      a < r->base || a + FRAME_SIZE > r->base + r->len) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    return -EFAULT;
+  }
+  o = r->obj;
+  off = (a - r->base) + r->obj_off;
+  vm_object_ref_locked(o); /* hold it across the unlocked disk read */
+  spinlock_release_irqrestore(&vm_lock, fl);
+
+  uint64_t src = file_obj_page(o, off); /* disk I/O: no lock held */
+  if (!src) {
+    vm_object_unref(o);
+    return -EIO;
+  }
+
+  uint64_t priv = 0;
+  if (cow) {
+    priv = frame_alloc_zeroed();
+    if (!priv) {
+      vm_object_unref(o);
+      return -ENOMEM;
+    }
+    vm_frame_copy(priv, src, FRAME_SIZE);
+  }
+  uint64_t phys = priv ? priv : src;
+  int rc = 0;
+
+  fl = spinlock_acquire_irqsave(&vm_lock);
+  struct vm_region *r2 = vm_region_find(as, a);
+  if (as->ver != AS_V2) {
+    rc = -ESRCH;
+  } else if (!r2 || r2->obj != o || a < r2->base ||
+             a + FRAME_SIZE > r2->base + r2->len) {
+    rc = -EFAULT; /* region unmapped / replaced while we read */
+  } else if (vm_arch_walk(as, a, 0) == 0) {
+    rc = 0; /* a peer CPU mapped the page while we read: drop ours */
+  } else {
+    uint16_t lp = r2->prot;
+    uint16_t lk = VMK_SHARED;
+    if (priv) {
+      lk = r2->kind; /* private copy: freeable, normal region kind */
+    } else if (r2->flags & VM_MAP_PRIVATE) {
+      /* An object frame in a private region is never handed out writable:
+         the first write faults here and becomes a private copy. */
+      lp = (uint16_t)(lp & ~VM_PROT_WRITE);
+    }
+    if (vm_arch_map(as, a, phys, lp, lk) != 0) {
+      rc = -ENOMEM;
+    } else {
+      as->resident_frames++;
+      if (as->resident_frames > as->peak_frames)
+        as->peak_frames = as->resident_frames;
+      if (priv)
+        priv = 0; /* the AS owns it now */
+      rc = 0;
+    }
+  }
+  spinlock_release_irqrestore(&vm_lock, fl);
+
+  if (priv)
+    frame_free(priv); /* only the failed-COW copy can reach here */
+  vm_object_unref(o);
+  return rc;
+}
+
+
 int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
   if (!p || !p->as)
     return -1;
@@ -704,6 +909,17 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
           return (mrc == -ENOMEM) ? -2 : -1;
         continue;
       }
+      /* so-vm lane A: a VM_OBJ_FILE page is read from the file, one page at
+         a time, outside vm_lock (disk I/O).  A write into a MAP_PRIVATE
+         mapping materializes the page privately, straight into a copy. */
+      if (r->obj && r->obj->kind == VM_OBJ_FILE) {
+        int cow = write && (r->flags & VM_MAP_PRIVATE);
+        spinlock_release_irqrestore(&vm_lock, fl);
+        int mrc = vm_file_obj_materialize(as, a, cow);
+        if (mrc != 0)
+          return (mrc == -ENOMEM) ? -2 : -1;
+        continue;
+      }
       uint64_t fr;
       int shared = (r->obj != 0);
       if (shared) {
@@ -729,6 +945,15 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       as->resident_frames++;
       if (as->resident_frames > as->peak_frames)
         as->peak_frames = as->resident_frames;
+    } else if (write && r->obj && (r->flags & VM_MAP_PRIVATE) &&
+               vm_page_is_obj_frame_locked(as, r, a, 0)) {
+      /* so-vm lane A: a kernel-side write into a MAP_PRIVATE file page must
+         break the copy exactly like a user write fault, or it would dirty
+         the page cache every other mapping shares. */
+      if (vm_cow_page_locked(as, r, a) != 0) {
+        spinlock_release_irqrestore(&vm_lock, fl);
+        return -2; /* -ENOMEM */
+      }
     }
     spinlock_release_irqrestore(&vm_lock, fl);
   }
@@ -952,6 +1177,36 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
       *why = "PROT";
     return 1;
   }
+  /* so-vm lane A: a present leaf that is the object's own frame, in a
+     MAP_PRIVATE region whose protection allows the write, is a COW fault —
+     the fill path installs object frames read-only for exactly this reason.
+     Break the copy (bounded: after FAULT_RETRY_MAX consecutive COWs on the
+     same VA something is genuinely wrong). */
+  if (write && r->obj && (r->flags & VM_MAP_PRIVATE) &&
+      vm_page_is_obj_frame_locked(as, r, a, 0)) {
+    if (as->retry_va == a && as->retry_count >= FAULT_RETRY_MAX) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      if (why)
+        *why = "PROT";
+      return 1;
+    }
+    if (vm_cow_page_locked(as, r, a) != 0) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      if (why)
+        *why = "OOM";
+      return 1;
+    }
+    if (as->retry_va != a) {
+      as->retry_va = a;
+      as->retry_count = 1;
+    } else {
+      as->retry_count++;
+    }
+    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_arch_flush_va(as, a);
+    return 0; /* retry the instruction against the private copy */
+  }
+
   if (vm_arch_walk(as, a, 0) == 0) {
     /* w5 (iv): the leaf IS present and (checked above) permissive, yet
        the hardware aborted.  This is the L9 prefetch race (w4-clang
@@ -984,6 +1239,23 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   if (r->kind == VMK_IMG && as->img_active) {
     spinlock_release_irqrestore(&vm_lock, fl);
     int mrc = v2_image_materialize(as, a);
+    if (mrc != 0) {
+      if (why)
+        *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
+      return 1;
+    }
+    return 0; /* the instruction retries (ELR/CR2 untouched) */
+  }
+
+  /* so-vm lane A: an absent VM_OBJ_FILE page is read from the FAT16 file
+     (disk I/O, so vm_lock must be dropped); the helper re-validates and
+     maps, mapping the object's frame shared — read-only when the region is
+     MAP_PRIVATE — or a private copy for a MAP_PRIVATE write. */
+  if (r->obj && r->obj->kind == VM_OBJ_FILE) {
+    int cow = write && (r->flags & VM_MAP_PRIVATE);
+    uint64_t off_dbg = (a - r->base) + r->obj_off;
+    spinlock_release_irqrestore(&vm_lock, fl);
+    int mrc = vm_file_obj_materialize(as, a, cow);
     if (mrc != 0) {
       if (why)
         *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
@@ -1358,28 +1630,53 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
   /* S4 (design section 4.1): fd >= 0 is memfd-only and the S4 contract is
      the MAP_SHARED / write-visibility semantics (private-for-memfd is
      deferred); fd == -1 with MAP_SHARED is the anonymous-object form
-     (visible to forked children, unreachable from other processes). */
+     (visible to forked children, unreachable from other processes).
+     so-vm lane A (docs/shared-libs.md section 2): a REGULAR FAT16 file fd
+     maps the file through the shared VM_OBJ_FILE page cache, MAP_PRIVATE
+     (copy-on-write) or MAP_SHARED (write-through).  Every fd type that is
+     not a regular file keeps its previous answer (-ENOTSUP). */
   struct vm_object *obj = 0;
   uint64_t obj_off = 0;
   int anon_obj = 0;
+  int file_backed = 0; /* obj carries one reference for this call */
+  uint16_t f_cluster = 0;
+  uint32_t f_size = 0;
   uint16_t kind = VMK_ANON;
   if (fd >= 0) {
     if (fd >= MAX_OPEN_FDS)
       return -EBADF;
-    if (!(fl2 & VM_MAP_SHARED))
-      return -ENOTSUP;
-    if (offset & 0xFFF)
-      return -EINVAL;
     obj = file_memfd_obj(grp, fd);
-    if (!obj)
-      return -ENOTSUP; /* FAT16/NFS/socket/pipe: file-backed waits for P6 */
-    uint64_t cap = (vm_object_size(obj) + 0xFFF) & ~0xFFFULL;
-    if (offset >= cap || len > cap - offset)
-      return -EINVAL; /* mapping past the object's page capacity */
-    if ((vm_object_get_seals(obj) & VM_SEAL_WRITE) && (p & VM_PROT_WRITE))
-      return -EPERM; /* prot may not exceed the memfd's seals (4.1) */
-    obj_off = offset;
-    kind = VMK_SHARED;
+    if (obj) {
+      /* Everything below is the S4 memfd contract, byte for byte. */
+      if (!(fl2 & VM_MAP_SHARED))
+        return -ENOTSUP;
+      if (offset & 0xFFF)
+        return -EINVAL;
+      uint64_t cap = (vm_object_size(obj) + 0xFFF) & ~0xFFFULL;
+      if (offset >= cap || len > cap - offset)
+        return -EINVAL; /* mapping past the object's page capacity */
+      if ((vm_object_get_seals(obj) & VM_SEAL_WRITE) && (p & VM_PROT_WRITE))
+        return -EPERM; /* prot may not exceed the memfd's seals (4.1) */
+      obj_off = offset;
+      kind = VMK_SHARED;
+    } else {
+      if (file_fat16_ident(grp, fd, &f_cluster, &f_size) != 0)
+        return -ENOTSUP; /* pipe/socket/NFS/dir/closed fd: unchanged */
+      if (offset & 0xFFF)
+        return -EINVAL;
+      if (!(fl2 & (VM_MAP_SHARED | VM_MAP_PRIVATE)))
+        return -EINVAL; /* a file mapping is private or shared, never neither */
+      /* VM_OBJ_MAX_BYTES is the per-object page-cache ceiling (S4 scope):
+         refuse a larger file rather than map it partially. */
+      if (f_size == 0 || f_size > VM_OBJ_MAX_BYTES)
+        return -ENOMEM;
+      uint64_t fcap = ((uint64_t)f_size + 0xFFF) & ~0xFFFULL;
+      if (offset >= fcap || len > fcap - offset)
+        return -EINVAL;
+      file_backed = 1;
+      obj_off = offset;
+      kind = VMK_LIB;
+    }
   } else if (fl2 & VM_MAP_SHARED) {
     if (!(fl2 & VM_MAP_ANONYMOUS))
       return -EINVAL;
@@ -1391,8 +1688,17 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
 
   uint64_t base;
   if (fl2 & VM_MAP_FIXED) {
-    if ((addr & 0xFFF) || addr < USER_VA_BASE ||
-        addr + len > USER_VA_BASE + USER_MMAP_SIZE + USER_MMAP_OFF)
+    /* so-vm lane A: the DSO band (USER_LIB_BASE..LIMIT) is a legal
+       MAP_FIXED target — that is where the interpreter places each
+       library, one 16 MiB slot at a time (docs/shared-libs.md section 2).
+       The MMAP arena keeps its exact previous rule.  Both bounds are
+       written as "len <= limit - addr" so a wrapping addr+len cannot pass. */
+    const uint64_t mmap_lim = USER_VA_BASE + USER_MMAP_SIZE + USER_MMAP_OFF;
+    int in_mmap = addr >= USER_VA_BASE && addr <= mmap_lim &&
+                  len <= mmap_lim - addr;
+    int in_lib = addr >= USER_LIB_BASE && addr <= USER_LIB_LIMIT &&
+                 len <= USER_LIB_LIMIT - addr;
+    if ((addr & 0xFFF) || (!in_mmap && !in_lib))
       return -EINVAL;
     /* MAP_FIXED replaces whatever was mapped in range. */
     base = addr;
@@ -1402,10 +1708,20 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
     /* First-fit bottom-up from USER_MMAP_BASE; the hint is honored when
        free and inside the arena. */
     uint64_t start = USER_MMAP_BASE_V2;
-    if (addr && addr >= USER_MMAP_BASE_V2 && addr + len <= USER_MMAP_LIMIT_V2) {
+    if (addr && addr >= USER_MMAP_BASE_V2 && addr <= USER_MMAP_LIMIT_V2 &&
+        len <= USER_MMAP_LIMIT_V2 - addr) {
       uint64_t hf = vm_hole_find(as, addr, USER_MMAP_LIMIT_V2, len);
       if (hf == addr) {
         base = hf;
+        goto have_base;
+      }
+    }
+    /* so-vm lane A: a hint inside the DSO band is honored the same way. */
+    if (addr && addr >= USER_LIB_BASE && addr <= USER_LIB_LIMIT &&
+        len <= USER_LIB_LIMIT - addr) {
+      uint64_t lh = vm_hole_find(as, addr, USER_LIB_LIMIT, len);
+      if (lh == addr) {
+        base = lh;
         goto have_base;
       }
     }
@@ -1421,12 +1737,18 @@ have_base:
     /* create returned refs=1 (the creator's); the insert below takes the
        record's own reference and the trailing unref releases ours. */
   }
+  if (file_backed) {
+    obj = file_obj_get(f_cluster, f_size);
+    if (!obj)
+      return -ENOMEM; /* cache full / frame OOM: refuse, never evict */
+    /* Same reference discipline as the anon object: this call owns one. */
+  }
   if (vm_region_insert(as, base, len, p, kind, fl2, obj, obj_off) != 0) {
-    if (anon_obj)
+    if (anon_obj || file_backed)
       vm_object_unref(obj);
     return -ENOMEM;
   }
-  if (anon_obj)
+  if (anon_obj || file_backed)
     vm_object_unref(obj); /* the record holds its own reference */
   return (int64_t)base;
 }
@@ -1530,7 +1852,20 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
       vm_arch_unmap(as, a);
       as->resident_frames--;
     } else {
-      vm_arch_prot(as, a, p);
+      uint16_t lp = p;
+      /* so-vm lane A (W^X, docs/shared-libs.md section 4 item 5): never
+         hand out WRITE on an object frame in a MAP_PRIVATE region — the
+         write fault breaks the copy instead (vm_handle_fault does it, and
+         a later mprotect that DROPS PROT_WRITE leaves the leaf read-only,
+         so a stale write faults cleanly).  This is what lets the interpreter map DSO
+         text PROT_READ, mprotect it PROT_READ|PROT_WRITE for relocations,
+         then mprotect it back with no shared text ever dirtied. */
+      struct vm_region *mr = vm_region_find(as, a);
+      if (mr && (lp & VM_PROT_WRITE) && mr->obj &&
+          (mr->flags & VM_MAP_PRIVATE) &&
+          vm_page_is_obj_frame_locked(as, mr, a, 0))
+        lp = (uint16_t)(lp & ~VM_PROT_WRITE);
+      vm_arch_prot(as, a, lp);
     }
   }
   int rc = vm_prot_set_span(as, addr, len, p);
@@ -1628,19 +1963,38 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
       uint16_t mkind = r.kind;
       uint64_t phys;
       if (r.obj) {
-        /* Object-backed page: same backing frame, shared leaf. */
+        /* so-vm lane A: a page still pointing at the object's own frame is
+           shared (re-map the same frame); a page that was already broken by
+           copy-on-write is private to the parent and must be COPIED, or the
+           child would see the unmodified file text. */
         fl = spinlock_acquire_irqsave(&vm_lock);
-        phys = vm_object_page_locked(r.obj, (a - r.base) + r.obj_off);
+        uint64_t objfr = vm_object_peek_locked(r.obj, (a - r.base) + r.obj_off);
         spinlock_release_irqrestore(&vm_lock, fl);
-        if (!phys) {
-          uart_puts("[VM] clone: obj page failed i=");
-          print_int(i);
-          uart_puts(" va=");
-          uart_print_hex(a);
-          uart_puts("\n");
-          goto fail;
+        uint64_t lphys = vm_arch_leaf_phys(leaf);
+        if (objfr && lphys == objfr) {
+          phys = objfr; /* same backing frame, shared leaf */
+          mkind = VMK_SHARED;
+        } else if (!objfr) {
+          /* Not materialized in the object: refill it (allocates). */
+          fl = spinlock_acquire_irqsave(&vm_lock);
+          phys = vm_object_page_locked(r.obj, (a - r.base) + r.obj_off);
+          spinlock_release_irqrestore(&vm_lock, fl);
+          if (!phys) {
+            uart_puts("[VM] clone: obj page failed i=");
+            print_int(i);
+            uart_puts(" va=");
+            uart_print_hex(a);
+            uart_puts("\n");
+            goto fail;
+          }
+          mkind = VMK_SHARED;
+        } else {
+          /* Private (copy-on-write) page: copy frame-by-frame. */
+          phys = frame_alloc_zeroed();
+          if (!phys)
+            goto fail;
+          vm_frame_copy(phys, lphys, FRAME_SIZE);
         }
-        mkind = VMK_SHARED;
       } else if (r.kind == VMK_FB) {
         phys = vm_arch_leaf_phys(leaf); /* kernel framebuffer frame(s) */
       } else {

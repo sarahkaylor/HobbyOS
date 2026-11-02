@@ -365,6 +365,15 @@ ifeq ($(MODE),test)
   USER_CFLAGS += -DKERNEL_MODE_TEST
 else ifeq ($(MODE),unit_tests)
   CFLAGS += -DKERNEL_MODE_UNIT_TEST
+else ifeq ($(MODE),dyn_test)
+  # docs/shared-libs.md §10: boot every converted program (one process each).
+  CFLAGS += -DKERNEL_MODE_DYN_TEST -I$(OBJ_DIR)
+  USER_CFLAGS += -DKERNEL_MODE_DYN_TEST
+else ifeq ($(MODE),so_test)
+  # docs/shared-libs.md §5.5: boot ONLY the dynamically linked pilot HDYN.BIN
+  # (ET_DYN + PT_INTERP /LDHOBBY.SO -> the interpreter -> LIBC.SO).
+  CFLAGS += -DKERNEL_MODE_SO_TEST
+  USER_CFLAGS += -DKERNEL_MODE_SO_TEST
 else ifeq ($(MODE),desktop_test)
   CFLAGS += -DKERNEL_MODE_DESKTOP_TEST
   USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
@@ -2654,11 +2663,83 @@ endif
 	# for whoever remembered to stage it.
 	perl -e 'print chr($$_ % 251) for (0..4095)' > STAGE4K.BIN
 	$(MCOPY) -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+	# Dynamic linking (docs/shared-libs.md §5): the interpreter, the shared
+	# libc, and the pilot program.  All three are 8.3 names on the FAT root.
+	$(MCOPY) -i disk.img $(OBJ_DIR)/LDHOBBY.SO ::/LDHOBBY.SO
+	$(MCOPY) -i disk.img $(OBJ_DIR)/libc.so ::/LIBC.SO
+	$(MCOPY) -i disk.img $(HDYN_BIN) ::/HDYN.BIN
+	$(MCOPY) -i disk.img $(OBJ_DIR)/LSDYN.BIN ::/LSDYN.BIN
+	$(MCOPY) -i disk.img $(OBJ_DIR)/CATDYN.BIN ::/CATDYN.BIN
+	# Dynamic conversion (docs/shared-libs.md §10): each converted program
+	# replaces its static build under the same 8.3 name, so every existing
+	# launcher (shell, desktop, wave) exercises the DSO version.
+	@for f in $(OBJ_DIR)/DYN/*.BIN; do \
+	  [ -f "$$f" ] || continue; \
+	  b=$$(basename "$$f" | tr 'a-z' 'A-Z'); \
+	  $(MCOPY) -o -i disk.img "$$f" "::/$$b"; \
+	done
 ifeq ($(DESKTOP),icewm)
 	# icewm.md §4.3/§4.4: X binaries + data tree + XSESSION.BIN (DESKTOP=icewm only).
 	sh src/user/x11sess/stage-disk.sh disk.img "$(X11_BUILD_DIR)" $(XSESSION_BIN) "$(MCOPY)" "$(MMD)"
 endif
 	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
+
+# ---------------------------------------------------------------------------
+# Shared libraries (docs/shared-libs.md).  LIBC.SO + the interpreter
+# LDHOBBY.SO come from tools/build_libs.sh (the PIC object set lives in
+# obj/<arch>/pic/ and never collides with the static libc.a flavour); HDYN.BIN
+# is the pilot program, the first native executable built ET_DYN + PT_INTERP.
+# ---------------------------------------------------------------------------
+LIBS_SH = tools/build_libs.sh
+HDYN_BIN = $(OBJ_DIR)/HDYN.BIN
+
+$(OBJ_DIR)/libc.so: $(OBJ_DIR)/libc.a src/libc/libc.map src/libc/linker_so.ld $(LIBS_SH)
+	@$(LIBS_SH) $(ARCH)
+
+$(OBJ_DIR)/LDHOBBY.SO: src/user/ld/ldso.c src/user/ld/elf_dyn.c src/user/ld/mmap_io.c \
+                       src/user/ld/strtab.c src/include/ldso.h $(OBJ_DIR)/libc.a $(LIBS_SH)
+	@$(LIBS_SH) build_interp $(ARCH)
+
+# A dynamically linked program is position independent by construction (it is
+# placed at a base the interpreter picks), so its TUs take -fPIC.
+$(OBJ_DIR)/crt0_dyn.o: src/libc/crt0_dyn.c src/user_include/libc.h
+	$(CC) $(USER_CFLAGS) -fPIC -c $< -o $@
+
+$(OBJ_DIR)/hello_dyn.o: src/user/hello_dyn.c src/user_include/libc.h
+	$(CC) $(USER_CFLAGS) -fPIC -c $< -o $@
+
+$(HDYN_BIN): $(OBJ_DIR)/crt0_dyn.o $(OBJ_DIR)/hello_dyn.o $(OBJ_DIR)/libc.so
+	$(LD) -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+	  -o $@ $(OBJ_DIR)/crt0_dyn.o $(OBJ_DIR)/hello_dyn.o $(OBJ_DIR)/libc.so
+
+# The first REAL program converted to dynamic linking (docs/shared-libs.md §8):
+# same source, PIC object, ET_DYN against LIBC.SO.  7 KB instead of 46 KB.
+$(OBJ_DIR)/dyn/ls.o: src/user/ls.c src/user_include/libc.h
+	@mkdir -p $(OBJ_DIR)/dyn
+	$(CC) $(USER_CFLAGS) -fPIC -c $< -o $@
+
+$(OBJ_DIR)/LSDYN.BIN: $(OBJ_DIR)/dyn/ls.o $(OBJ_DIR)/libc.so
+	$(LD) -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+	  -o $@ $(OBJ_DIR)/dyn/ls.o $(OBJ_DIR)/libc.so
+
+# cat proves the open/read/write surface across the DSO boundary (4.4 KB vs
+# 56.7 KB static) and gives the 3-process sharing evidence in §9.
+$(OBJ_DIR)/dyn/cat.o: src/user/cat.c src/user_include/libc.h
+	@mkdir -p $(OBJ_DIR)/dyn
+	$(CC) $(USER_CFLAGS) -fPIC -c $< -o $@
+
+$(OBJ_DIR)/CATDYN.BIN: $(OBJ_DIR)/dyn/cat.o $(OBJ_DIR)/libc.so
+	$(LD) -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+	  -o $@ $(OBJ_DIR)/dyn/cat.o $(OBJ_DIR)/libc.so
+
+disk.img: $(HDYN_BIN) $(OBJ_DIR)/libc.so $(OBJ_DIR)/LDHOBBY.SO $(OBJ_DIR)/LSDYN.BIN \
+          $(OBJ_DIR)/CATDYN.BIN
+
+$(OBJ_DIR)/dyn_list.h:
+	@mkdir -p $(OBJ_DIR)
+	@printf '/* no converted programs yet: run tools/dyn-migrate.sh */\nstatic const char dyn_smoke_names[][16] = { "" };\n' > $@
+
+$(OBJ_DIR)/main.o: $(OBJ_DIR)/dyn_list.h
 
 # Target to run the OS inside QEMU
 # RUN_STAGE: optional staging hook, run AFTER disk.img is (re)built and BEFORE
@@ -4191,3 +4272,14 @@ vdisplay_test_run: $(VDISPLAY_TEST)
 	./$(VDISPLAY_TEST)
 host_tests: vdisplay_test_run
 .PHONY: vdisplay_test_run
+
+# GB-160 (parent GB-041): W4 DOOM static-musl port surface.  The deliverable is
+# a static-PIE (Type DYN) ELF — the class elf_loader.c:124 accepts — carrying the
+# DG_* surface.  The second line is the falsifier: the gate must reject a
+# -no-pie ET_EXEC and a dynamic EXEC, or it cannot fail on its own clause.
+w4_doom_test:
+	python3 tools/sdl/w4/w4_doom_test.py
+	python3 tools/sdl/w4/w4_doom_test.py --self-test
+host_tests: w4_doom_test
+.PHONY: w4_doom_test
+

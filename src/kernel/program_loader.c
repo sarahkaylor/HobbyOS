@@ -1,6 +1,7 @@
 #include "program_loader.h"
 #include "kline.h"
 #include "fs.h"
+#include "net.h"
 #include "setjmp.h"
 #include "process.h"
 #include "vdisplay.h"
@@ -785,30 +786,51 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   uint64_t elf_entry = 0;
   uint64_t elf_phdr = 0;
   uint32_t elf_phnum = 0;
+  uint64_t elf_sp = USER_MAIN_STK_TOP_V2;
+  uint64_t elf_interp_base = 0;
+  int elf_native = 0;
   if (is_elf) {
-#ifdef __x86_64__
-    /* ELF mapper: parse + plan + map.  On success *elf_entry = base+e_entry
-       and the process below is marked PROC_FLAG_LINUX_ABI. */
-    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, &elf_entry,
-                              &elf_phdr, &elf_phnum);
+    /* M0 freeze (docs/shared-libs.md §4 lane B): which track does this image
+       belong to?  On x86_64, a PT_INTERP naming the native interpreter
+       (/LDHOBBY.SO) is a native dynamically linked program; EVERY other image
+       — in particular every Linux compat binary — stays on the Linux-ABI path,
+       which still refuses PT_INTERP with ELF_ERR_INTERP and the same serial
+       message.  aarch64 has no compat track, so every ELF there is native. */
+    uint32_t lflags = 0;
+#if defined(__x86_64__)
+    if (elf_loader_probe_native(f.fat16.entry.start_cluster, fsize) == 1)
+      lflags = ELF_LOAD_NATIVE;
+#else
+    lflags = ELF_LOAD_NATIVE;
+#endif
+    struct elf_load_info elf_info;
+    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, lflags,
+                              &elf_info);
     fat16_close(&f);
     if (erc != 0) {
       process_free(pid);
-      return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC */
+      return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC / -ENOENT */
     }
-#else
-    /* GB-137 clause 4: the aarch64 ELF mapper is not implemented.  The old
-       code left the magic peek inside #ifdef __x86_64__, so on ARM a 0x7fELF
-       image fell through to the flat .bin mapper and was executed at
-       USER_IMG_BASE as if it were flat (measured 2026-11-01: A64BAD.BIN
-       "loaded", then faulted at ELR=0x1000000000).  Refuse it by name
-       instead of silently skipping the ELF path. */
-    uart_puts("elf loader: aarch64 ELF images are not implemented on ARM -- "
-              "refusing by name (flat .bin only)\n");
-    fat16_close(&f);
-    process_free(pid);
-    return -ENOEXEC;
-#endif
+    elf_entry = elf_info.entry;
+    elf_phdr = elf_info.phdr;
+    elf_phnum = elf_info.phnum;
+    elf_sp = elf_info.sp;
+    elf_native = elf_info.native;
+    elf_interp_base = elf_info.interp_base;
+    if (elf_info.interpreted) {
+      /* One line of evidence that the interpreter path ran: the gate reads it
+         from the serial log instead of re-deriving it from the source. */
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "elf loader: PT_INTERP mapped: interp_base=");
+      kl_hex(&k, elf_info.interp_base);
+      kl_s(&k, " exe_base=");
+      kl_hex(&k, elf_info.base);
+      kl_s(&k, " entry=");
+      kl_hex(&k, elf_entry);
+      kl_c(&k, '\n');
+      kl_emit(&k);
+    }
   } else if (v2_map_image(as, &f, fsize) != 0) {
     fat16_close(&f);
     process_free(pid);
@@ -873,10 +895,12 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     process_free(pid);
     return -ENOMEM;
   }
-  if (is_elf) {
+  if (is_elf && !elf_native) {
     /* GB-013: the ELF mapper set the runtime entry (base+e_entry).  Mark the
        process Linux-ABI so its x86_64 syscall traps route to the compat table
-       (GB-014). */
+       (GB-014).  Only the COMPAT track gets this flag: a native dynamically
+       linked program (PT_INTERP) uses HobbyOS syscalls, and marking it would
+       send every call through the Linux table. */
     child->abi_flags |= PROC_FLAG_LINUX_ABI;
     /* GB-078 (2026-10-21): a Linux program reads its arguments from the STACK,
        per the SysV AMD64 process-initialization contract: at _start %rsp points
@@ -895,11 +919,20 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     while (nm[nlen]) nlen++;
     uint64_t name_addr = (stk_top - 8 - (uint64_t)nlen) & ~(uint64_t)0xF;
     /* argc, argv[0], argv NULL, envp NULL, AT_PAGESZ, 4096,
-       AT_PHDR, phdr, AT_PHNUM, phnum, AT_ENTRY, entry, AT_BASE, 0, AT_NULL, 0.
+       AT_PHDR, phdr, AT_PHNUM, phnum, AT_ENTRY, entry, AT_BASE, 0,
+       AT_RANDOM, rnd, AT_NULL, 0.
        The first four pairs were the original block; musl's _start also reads
        AT_PHDR/AT_PHNUM/AT_ENTRY to locate its own program headers, and with them
-       absent it dereferenced small offsets (measured: fault at VA=0x210). */
-    uint64_t w[16];
+       absent it dereferenced small offsets (measured: fault at VA=0x210).
+
+       GB-163 (2026-11-02): the startup shim seeds its stack canary from
+       AT_RANDOM. With the entry absent the loader's `_dl_random` stays NULL and
+       __libc_start_main dies at `movq (%rax),%rax` (measured: DOOMW4.ELF,
+       PC=0x100004F415, VA=0x0). Place 16 random bytes on the stack and point
+       AT_RANDOM at them. */
+    uint64_t w[18];
+    uint64_t blk = (name_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
+    uint64_t rnd_addr = (blk - 16) & ~(uint64_t)0xF;
     w[0] = 1;
     w[1] = name_addr;
     w[2] = 0;
@@ -914,21 +947,34 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     w[11] = elf_entry;
     w[12] = 7;                      /* AT_BASE: 0 for a static image */
     w[13] = 0;
-    w[14] = 0;                      /* AT_NULL */
-    w[15] = 0;
-    uint64_t blk = (name_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
+    w[14] = 25;                     /* AT_RANDOM */
+    w[15] = rnd_addr;
+    w[16] = 0;                      /* AT_NULL */
+    w[17] = 0;
+    uint8_t rnd[16];
+    net_get_random_bytes(rnd, 16);
     if (vm_kwrite(child, blk, w, (int)sizeof w) != 0 ||
-        vm_kwrite(child, name_addr, nm, nlen + 1) != 0) {
+        vm_kwrite(child, name_addr, nm, nlen + 1) != 0 ||
+        vm_kwrite(child, rnd_addr, rnd, 16) != 0) {
       uart_puts("v2 loader: startup block write failed\n");
       process_free(pid);
       return -EFAULT;
     }
     process_set_entry(pid, elf_entry, blk);
+  } else if (is_elf) {
+    /* Native track (static ET_DYN or PT_INTERP): arguments come from the PCB
+       via SYS_GETARGS, not from an auxv block, so the stack is plain top-of-
+       stack.  The interpreter (if any) starts at interp_base + its e_entry and
+       reads struct hb_start at USER_START_BASE; the kernel passes no registers. */
+    process_set_entry(pid, elf_entry, elf_sp);
   } else {
     process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2 - 8);
   }
 #else
-  process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2);
+  if (is_elf)
+    process_set_entry(pid, elf_entry, elf_sp);
+  else
+    process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2);
 #endif
   {
     struct kline kl;
@@ -949,6 +995,13 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        re-deriving whether the member went through elf_loader_load. */
     kl_s(&kl, " abi=");
     kl_hex(&kl, (unsigned long)child->abi_flags);
+    /* M0 freeze: which track the ELF took, and where the interpreter landed
+       (0 = none).  Read straight from the loader's report, so a gate never has
+       to re-derive whether PT_INTERP was honoured. */
+    kl_s(&kl, " native=");
+    kl_i(&kl, (long)elf_native);
+    kl_s(&kl, " interp=");
+    kl_hex(&kl, (unsigned long)elf_interp_base);
     kl_s(&kl, "\n");
     kl_emit(&kl);
   }

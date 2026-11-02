@@ -7,6 +7,7 @@
 #include "nfs.h"
 #include "vfs.h"
 #include "errno.h"
+#include "file_obj.h" /* so-vm lane A (CROSS-LANE): page-cache invalidation */
 #include "timer.h"
 #include "vm.h" /* P2.4 (S4): memfd objects */
 
@@ -1835,7 +1836,16 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     return -EINVAL; /* writes to /dev/urandom are not supported (Linux EINVAL) */
   } else if (f->type == FILE_TYPE_FAT16) {
-    return fat16_write(f, buf, size);
+    int wr = fat16_write(f, buf, size);
+    /* so-vm lane A (CROSS-LANE, additive): an in-place write changes the
+       bytes behind (start_cluster, file_size), so the VM_OBJ_FILE page
+       cache must drop its frames — otherwise a rebuilt DSO would keep
+       serving its old text to every mapping.  Over-invalidation only costs
+       a re-read; the object (and any live mapping) stays alive on its own
+       references. */
+    if (wr > 0)
+      file_obj_invalidate_all();
+    return wr;
   } else if (f->type == FILE_TYPE_NFS) {
     return -1;      /* NFS mounts are read-only */
   } else if (f->type == FILE_TYPE_PIPE) {
@@ -1997,6 +2007,32 @@ struct vm_object *file_memfd_obj(struct process *p, int fd) {
   if (!f || !f->memfd.obj)
     return 0;
   return f->memfd.obj;
+}
+
+/* so-vm lane A (CROSS-LANE, additive; flagged in the lane report):
+ * resolve an fd to a REGULAR FAT16 file's on-disk identity so SYS_MMAP can
+ * key the VM_OBJ_FILE page cache by (start_cluster, file_size) — the same
+ * identity the lazy v2 IMAGE loader uses.  Declared in file_obj.h because
+ * fs.h is frozen for this lane.  Returns 0 and fills the out-params (either
+ * may be NULL), -EBADF for an absent fd, -ENOTSUP for every other fd type
+ * (memfd/pipe/socket/NFS/dir), which is what keeps their mmap answers
+ * unchanged. */
+int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
+                     uint32_t *size) {
+  p = process_group(p); /* P1 (D7): the fd table is group state */
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return -EBADF;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return -EBADF;
+  struct file *f = &global_file_table[gfd];
+  if (f->type != FILE_TYPE_FAT16)
+    return -ENOTSUP;
+  if (cluster)
+    *cluster = f->fat16.entry.start_cluster;
+  if (size)
+    *size = f->fat16.entry.file_size;
+  return 0;
 }
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) for memfd (design 4.3, OQ7 minimal set:

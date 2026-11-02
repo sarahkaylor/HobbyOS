@@ -2304,9 +2304,13 @@ void sync_lower_handler_c(struct trap_frame *tf) {
        zero-fill page; everything else is a kill with the exact reason. */
     if (gcur && gcur->as) {
       const char *why = "PROT";
-      int demand = ((dfsc & 0x3C) == 0x04);
-      if (demand &&
-          vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why) == 0) {
+      /* Not only translation faults are legal: a MAP_PRIVATE file page is
+       * installed read-only so the first write copies it (so-vm lane A), and
+       * that arrives here as a PERMISSION fault.  vm_handle_fault answers
+       * "PROT" for a genuine violation, so both classes go through it — the
+       * old demand-only gate killed every COW write.  (x64's #PF dispatch
+       * had the same gate; both were measured on the dynamic-link pilot.) */
+      if (vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why) == 0) {
         return; /* mapping is live; eret re-executes the instruction */
       }
       uart_puts("[KERNEL] pid=");

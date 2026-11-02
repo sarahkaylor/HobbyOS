@@ -46,6 +46,28 @@
 #define USER_HEAP_SIZE 0x040000000ULL /* 1 GiB */
 #define USER_MMAP_OFF 0x080000000ULL
 #define USER_MMAP_SIZE 0x480000000ULL /* 18 GiB */
+/* Dynamically linked system libraries (docs/shared-libs.md, M0 freeze).
+ * The IMAGE slot ends at USER_IMG_LIMIT (+128 MiB) and HEAP starts at
+ * +1 GiB, so 0x0800_0000..0x4000_0000 (896 MiB) is a genuine hole in the
+ * v2 layout: DSOs live there, one 16 MiB sub-slot each, first-fit from
+ * USER_LIB_BASE upward.  A DSO is mapped by its interpreter (LDHOBBY.SO)
+ * with SYS_MMAP over a file-backed shared object, NOT by the kernel
+ * loader; the kernel only needs the hole and the alignment rule. */
+#define USER_LIB_OFF 0x008000000ULL
+#define USER_LIB_SIZE 0x037F00000ULL /* 895.9 MiB — ends where USER_START begins */
+#define USER_LIB_SLOT_SIZE 0x01000000ULL /* 16 MiB per DSO */
+#define USER_LIB_MAX 55                  /* USER_LIB_SIZE / SLOT_SIZE */
+/* so-vm lane A: the derived window bounds (the frozen numbers above stay
+ * untouched; docs/shared-libs.md §2 names the band by these two macros).
+ * SYS_MMAP accepts a MAP_FIXED/hint address inside this band so an
+ * interpreter can place one DSO per 16 MiB sub-slot, first-fit. */
+#define USER_LIB_BASE (USER_VA_BASE + USER_LIB_OFF)
+#define USER_LIB_LIMIT (USER_LIB_BASE + USER_LIB_SIZE)
+/* The interpreter startup block (docs/shared-libs.md §4): one read-only
+ * page the kernel fills before entering a PT_INTERP program.  Fixed VA so
+ * the interpreter needs no register/stack ABI change on either arch. */
+#define USER_START_OFF 0x03FF00000ULL
+#define USER_START_SIZE 0x000001000ULL
 #define USER_TSTK_OFF 0x500000000ULL
 #define USER_TSTK_SIZE 0x100000000ULL /* 4 GiB */
 /* Framebuffer slot: reserved in the 0x6..0x7.FF GiB band (section 7.3).
@@ -85,6 +107,7 @@
 #define VMK_SHARED 4
 #define VMK_STACK 5
 #define VMK_FB 6
+#define VMK_LIB 7 /* DSO text/rodata mapped by the interpreter (docs/shared-libs.md) */
 
 /* Persistent MAP_* flags recorded on the region (S2/S3 subset). */
 #define VM_MAP_SHARED 0x01
@@ -108,6 +131,12 @@
 
 #define VM_OBJ_MEMFD 1 /* SYS_MEMFD_CREATE backing */
 #define VM_OBJ_ANON 2  /* MAP_SHARED|MAP_ANONYMOUS backing (no fd) */
+/* M0 freeze (docs/shared-libs.md §2): a regular FAT16 file's page cache.
+ * One object per file, keyed by (start_cluster, file_size), so every
+ * process that mmaps the same DSO shares the same physical text pages;
+ * MAP_PRIVATE writes copy-on-write.  Frames are filled from the file on
+ * first touch by the demand fault, never eagerly at map time. */
+#define VM_OBJ_FILE 3
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) subset (design section 4.3, Linux
  * numbers; SHRINK/GROW enforced at ftruncate, WRITE recorded advisory). */
@@ -316,8 +345,20 @@ void vm_object_unref(struct vm_object *o);
 
 /* The physical frame backing `off` (materialized zero-fill on first
  * touch), or 0 when off is past the object's capacity or the pool is
- * exhausted.  Caller holds vm_lock (the demand/fault paths do). */
+ * exhausted.  Caller holds vm_lock (the demand/fault paths do).
+ * VM_OBJ_FILE objects always answer 0 here: their pages are read from the
+ * FAT16 file by file_obj_page(), which cannot run under vm_lock (disk I/O),
+ * and silently zero-filling one would corrupt mapped text. */
 uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off);
+
+/* so-vm lane A (docs/shared-libs.md): the file page-cache plumbing that
+ * file_obj.c drives.  `peek` reports the already-materialized frame without
+ * allocating (0 when the page is still absent); `install_page` publishes a
+ * frame file_obj_page filled from disk, keeping the first one there and
+ * freeing the loser's.  Both take vm_lock themselves. */
+uint64_t vm_object_peek(struct vm_object *o, uint64_t off);
+uint64_t vm_object_peek_locked(struct vm_object *o, uint64_t off);
+uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr);
 
 /* ftruncate for objects: set the byte size.  Grow allocates a bigger
  * frame array; shrink frees materialized pages above the new size.

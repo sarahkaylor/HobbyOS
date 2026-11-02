@@ -12,7 +12,7 @@ perf baseline, and gate history, with real paths and sha256 provenance.
 
 The scan/aggregate helpers are import-testable (T1).
 """
-import argparse, glob, hashlib, json, os, re, time
+import argparse, glob, hashlib, json, os, re, sys, time
 
 # evidence markers the pack treats as an S0/S1 artifact
 MARKERS = {
@@ -54,6 +54,32 @@ def resolve_marker(root, key, pat):
     return [(os.path.relpath(h, root), sha256(h)) for h in hits]
 
 
+# The pack's own outputs are written into --root and match the scan globs
+# ("S0*" and *-REPORT.md).  They must never count as acceptance evidence, or a
+# second run over the same empty tree sees run 1's manifest and exits 0
+# (GB-047-V's one-shot bug).
+MANIFEST_NAME = "S0-S1-EVIDENCE-MANIFEST.json"
+
+
+def collect_artifacts(root, exclude=()):
+    """The artifact index for `root`, minus the pack's own outputs."""
+    arts = {}
+    excl = {os.path.normpath(e) for e in exclude}
+    excl.add(MANIFEST_NAME)
+    for name, pat in MARKERS.items():
+        for rel, h in resolve_marker(root, name, pat):
+            if os.path.normpath(rel) in excl:
+                continue
+            arts[rel] = {"kind": name, "sha16": h}
+    for p in find_game_evidence(root) + find_reports(root):
+        rel = os.path.relpath(p, root)
+        if os.path.normpath(rel) in excl:
+            continue
+        arts.setdefault(rel, {"kind": "report", "sha16": sha256(p)})
+    return arts
+
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -73,36 +99,40 @@ def main():
 
     L.append("\n## Native-port / harness evidence (S0)\n")
     L.append("| kind | path | sha16 |\n|---|---|---|\n")
-    for name, pat in MARKERS.items():
-        for rel, h in resolve_marker(root, name, pat):
-            L.append(f"| {name} | `{rel}` | {h} |\n")
-    for p in find_game_evidence(root):
-        rel = os.path.relpath(p, root)
-        L.append(f"| game evidence | `{rel}` | {sha256(p)} |\n")
+
+    # One artifact index for both outputs, minus the pack's own outputs: the
+    # manifest is written into --root and would otherwise be counted by the
+    # next run's scan (GB-047-V: empty tree exited 0 on the second run).
+    out_rel = os.path.relpath(os.path.abspath(args.out), os.path.abspath(root))
+    arts = collect_artifacts(root, exclude=(out_rel,))
+    for rel, meta in sorted(arts.items()):
+        L.append(f"| {meta['kind']} | `{rel}` | {meta['sha16']} |\n")
 
     L.append("\n## Committed reports (S0/S1 gate history)\n")
-    for p in find_reports(root):
-        rel = os.path.relpath(p, root)
-        L.append(f"- `{rel}` (sha16 {sha256(p)})\n")
+    for rel in sorted(arts):
+        L.append(f"- `{rel}` (sha16 {arts[rel]['sha16']})\n")
 
     # archive manifest (json) for the NAS placement step
     manifest = {"generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "artifacts": {}}
-    for name, pat in MARKERS.items():
-        for rel, h in resolve_marker(root, name, pat):
-            manifest["artifacts"][rel] = {"kind": name, "sha16": h}
-    for p in find_game_evidence(root) + find_reports(root):
-        rel = os.path.relpath(p, root)
-        if rel not in manifest["artifacts"]:
-            manifest["artifacts"][rel] = {"kind": "report", "sha16": sha256(p)}
-    with open(os.path.join(root, "S0-S1-EVIDENCE-MANIFEST.json"), "w") as f:
+                "artifacts": arts}
+    with open(os.path.join(root, MANIFEST_NAME), "w") as f:
         json.dump(manifest, f, indent=2)
 
     with open(os.path.join(root, args.out), "w") as f:
         f.write("".join(L))
     print("".join(L))
-    print(f"[pack] wrote {args.out} + S0-S1-EVIDENCE-MANIFEST.json "
+    print(f"[pack] wrote {args.out} + {MANIFEST_NAME} "
           f"({len(manifest['artifacts'])} artifacts)")
 
+    # FAIL CLOSED, after both outputs exist: an empty tree is not an evidence
+    # pack, and this must hold on every run, not just the first.
+    if not manifest["artifacts"]:
+        print(f"[pack] FAIL: zero artifacts found under --root {root} — an empty "
+              f"tree is not an acceptance evidence pack (GB-047-V criterion 2: "
+              f"this must not exit 0)")
+        return 1
+    return 0
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
+
