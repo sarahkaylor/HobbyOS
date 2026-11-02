@@ -51,6 +51,29 @@
 #define L_SYS_nanosleep 35
 #define L_SYS_getitimer 36
 
+/* --- sockets: the AF_UNIX transport an X11 client (libX11's Xtrans) talks
+ * over.  The numbers are the x86_64 ones (probe-measured, docs/linux-abi.md
+ * §4): 41..55 are one contiguous run, accept4 is 288 and the msg-passing
+ * pair is 46/47.  The handlers live in src/kernel/linux_compat_fd.c and
+ * translate onto the native unix-socket engine (src/kernel/unix.c) — they
+ * are not a second socket stack. */
+#define L_SYS_socket 41
+#define L_SYS_connect 42
+#define L_SYS_accept 43
+#define L_SYS_sendto 44
+#define L_SYS_recvfrom 45
+#define L_SYS_sendmsg 46
+#define L_SYS_recvmsg 47
+#define L_SYS_shutdown 48
+#define L_SYS_bind 49
+#define L_SYS_listen 50
+#define L_SYS_getsockname 51
+#define L_SYS_getpeername 52
+#define L_SYS_socketpair 53
+#define L_SYS_setsockopt 54
+#define L_SYS_getsockopt 55
+#define L_SYS_accept4 288
+
 /* --- process / scheduling ------------------------------------------------- */
 #define L_SYS_getpid 39
 #define L_SYS_clone 56
