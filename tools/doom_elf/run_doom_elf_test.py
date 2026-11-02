@@ -150,6 +150,11 @@ def main():
                     help="exact /XSTART.TXT line (default: /DOOM.ELF)")
     ap.add_argument("--keys", default="ret,f1",
                     help="comma-separated qcode names pressed after the session is up")
+    ap.add_argument("--keys-after", type=float, default=3.0,
+                    help="seconds to wait after 'session running' before the keys are "
+                         "sent (and before the first screendump).  3 s is enough for "
+                         "a window that maps at once; a game that loads a WAD first "
+                         "needs ~10 s, or the keys land before its window exists.")
     ap.add_argument("--hold-ms", type=int, default=150,
                     help="how long each qcode is held down (QMP send-key "
                          "hold-time).  A default 100 ms tap moves Doom one tic, "
@@ -210,7 +215,7 @@ def main():
         else:
             log("session running")
         # Let the client map its window before the first shot.
-        time.sleep(3)
+        time.sleep(args.keys_after)
         if args.pointer:
             try:
                 px_, py_ = (int(v) for v in args.pointer.split(","))
