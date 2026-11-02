@@ -4304,3 +4304,14 @@ linux_probes: $(LINUX_PROBE_ELFS)
 	@echo "linux_probes: $(LINUX_PROBE_ELFS)"
 .PHONY: linux_probes
 
+# Doom as an unmodified Linux ELF (docs/doom-linux-elf-plan.md): build the
+# icewm disk, stage DOOM.ELF + DOOM1.WAD + /XSTART.TXT onto a COPY of it, boot
+# the intel guest, and grade the QMP screendumps.  The binary itself is built
+# by tools/linux-doom/build-doom10.sh (host-only, musl static-PIE) and copied to
+# obj/doom-linux/doom10.elf; see that script's README.
+DOOM_ELF ?= obj/doom-linux/doom10.elf
+DOOM_WAD ?= obj/doom-linux/DOOM1.WAD
+doom_elf_test:
+	python3 tools/doom_elf/run_doom_elf_test.py --elf $(DOOM_ELF) --wad $(DOOM_WAD)
+.PHONY: doom_elf_test
+
