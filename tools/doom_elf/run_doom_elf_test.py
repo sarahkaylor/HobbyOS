@@ -118,10 +118,12 @@ def stage(disk, elf, wad, start_line):
     if os.path.exists(env):
         existing = open(env).read()
     keep = [ln for ln in existing.splitlines()
-            if not ln.startswith("XSESS_") and not ln.startswith("HB_XDEPTH")]
+            if not ln.startswith("XSESS_") and not ln.startswith("HB_XDEPTH")
+            and not ln.startswith("DOOMWADDIR")]
     with open(env, "w") as f:
         for ln in keep:
             f.write(ln + "\n")
+        f.write("DOOMWADDIR=/\n")
         f.write("HB_XDEPTH=%s\n" % os.environ.get("DOOM_XDEPTH", "24"))
         if os.environ.get("DOOM_NO_WM", "1") == "1":
             f.write("XSESS_NO_WM=1\n")
@@ -138,7 +140,7 @@ def main():
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--seconds", type=int, default=70)
     ap.add_argument("--start-line", default=None,
-                    help="exact /XSTART.TXT line (default: /DOOM.ELF -iwad /DOOM1.WAD)")
+                    help="exact /XSTART.TXT line (default: /DOOM.ELF)")
     ap.add_argument("--keys", default="ret,f1",
                     help="comma-separated qcode names pressed after the session is up")
     ap.add_argument("--skip-frame-check", action="store_true",
@@ -153,7 +155,10 @@ def main():
     report = os.path.join(work, "REPORT.txt")
     fails = []
 
-    start_line = args.start_line or "/DOOM.ELF -iwad /DOOM1.WAD"
+    # Upstream linuxdoom-1.10 has NO -iwad option (verified in d_main.c
+    # IdentifyVersion): it looks for doom1.wad in $DOOMWADDIR (default "."), so
+    # the WAD sits at the disk root and the env carries DOOMWADDIR=/.
+    start_line = args.start_line or "/DOOM.ELF"
     stage_elf = args.start_line is None or os.path.exists(args.elf)
     if args.start_line is None and not os.path.exists(args.elf):
         log(f"FAIL: no ELF at {args.elf}")
