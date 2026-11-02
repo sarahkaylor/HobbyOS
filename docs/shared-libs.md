@@ -176,6 +176,22 @@ wins), and a TLS-using DSO.
 5. **Pilot**: convert `hello` (38 KB, no deps beyond libc) to `ET_DYN` +
    `LIBC.SO`, put `LDHOBBY.SO` + `LIBC.SO` on the disk, boot x64 and ARM,
    assert the marker on the serial console and a clean exit.
+
+   **Done — reproduce with:**
+
+   ```
+   tools/build_libs.sh intel && tools/build_libs.sh build_interp intel
+   make ARCH=intel MODE=so_test -j32 hobbyos.elf disk.img
+   timeout 45 make ARCH=intel MODE=so_test run QEMU_ARGS="-display none -smp 1"
+   # expect on the serial log:
+   #   HDYN: entered (dynamic)
+   #   HDYN: libc.so symbols resolved
+   #   HDYN: done
+   #   [EXITPC] pid=1 ... code=0x0
+   ```
+
+   (aarch64: same with `arm`. The `-smp 1` is the pre-existing boot-path
+   blocker in §7, not a linking requirement.)
 6. Only then convert real programs (`ls`, `nano`, `desktop`).
 
 ## 6. Deliberate non-goals (v1)
