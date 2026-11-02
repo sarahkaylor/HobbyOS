@@ -22,6 +22,13 @@ Evidence produced (in --out, default /tmp/hobbyos_doom_elf/):
 Exit 0 only when: the session reached "session running", the autostart line was
 spawned, no FALLBACK happened, and at least one screendump looks like Doom
 (many colours + a large non-black area).  Every wait is bounded.
+
+GRADING NOTE (learned the hard way): Doom animates through SCREEN-MELT frames
+whose content is jagged blue/black bands with as few as 4-11 distinct colours —
+identical on a stock Xvfb, so they are not a rendering fault.  Grade the BEST
+frame of a >=30 s run (the title/demo frames reach 40-200 colours), never a
+single early screenshot, and never call a low-colour frame "garbled" without
+comparing it against the same binary on a host X server.
 """
 import argparse
 import json
