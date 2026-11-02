@@ -1,0 +1,71 @@
+### readelf -h (identity) — LIBUSE.SO
+  Class:                             ELF64
+  Type:                              DYN (Shared object file)
+  Machine:                           AArch64
+  Entry point address:               0x0
+
+### readelf -l (program headers) — LIBUSE.SO
+Program Headers:
+  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
+  PHDR           0x000040 0x0000000000000040 0x0000000000000040 0x0001f8 0x0001f8 R   0x8
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x0004a0 0x0004a0 R   0x10000
+  LOAD           0x0004a0 0x00000000000104a0 0x00000000000104a0 0x0000c0 0x0000c0 R E 0x10000
+  LOAD           0x000560 0x0000000000020560 0x0000000000020560 0x000178 0x000aa0 RW  0x10000
+  LOAD           0x0006d8 0x00000000000306d8 0x00000000000306d8 0x000010 0x000010 RW  0x10000
+  TLS            0x000560 0x0000000000020560 0x0000000000020560 0x000004 0x000008 R   0x4
+  DYNAMIC        0x000568 0x0000000000020568 0x0000000000020568 0x000130 0x000130 RW  0x8
+  GNU_RELRO      0x000560 0x0000000000020560 0x0000000000020560 0x000178 0x000aa0 R   0x1
+  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0
+ Section to Segment mapping:
+
+### readelf -d (dynamic section) — LIBUSE.SO
+
+Dynamic section at offset 0x568 contains 19 entries:
+  Tag        Type                         Name/Value
+ 0x0000000000000001 (NEEDED)             Shared library: [LIBDEP.SO]
+ 0x000000000000000e (SONAME)             Library soname: [LIBUSE.SO]
+ 0x000000000000001e (FLAGS)              BIND_NOW STATIC_TLS
+ 0x000000006ffffffb (FLAGS_1)            Flags: NOW
+ 0x0000000000000007 (RELA)               0x410
+ 0x0000000000000008 (RELASZ)             120 (bytes)
+ 0x0000000000000009 (RELAENT)            24 (bytes)
+ 0x000000006ffffff9 (RELACOUNT)          1
+ 0x0000000000000017 (JMPREL)             0x488
+ 0x0000000000000002 (PLTRELSZ)           24 (bytes)
+ 0x0000000000000003 (PLTGOT)             0x206b8
+ 0x0000000000000014 (PLTREL)             RELA
+ 0x0000000000000006 (SYMTAB)             0x238
+ 0x000000000000000b (SYMENT)             24 (bytes)
+ 0x0000000000000005 (STRTAB)             0x39c
+ 0x000000000000000a (STRSZ)              110 (bytes)
+ 0x000000006ffffef5 (GNU_HASH)           0x310
+ 0x0000000000000004 (HASH)               0x34c
+ 0x0000000000000000 (NULL)               0x0
+
+### readelf -r (relocations) — LIBUSE.SO
+
+Relocation section '.rela.dyn' at offset 0x410 contains 5 entries:
+    Offset             Info             Type               Symbol's Value  Symbol's Name + Addend
+00000000000306e0  0000000000000403 R_AARCH64_RELATIVE                        306d8
+00000000000206a0  0000000200000401 R_AARCH64_GLOB_DAT     0000000000000000 dep_counter + 0
+0000000000020698  0000000400000406 R_AARCH64_TLS_TPREL64  0000000000000004 use_tls + 0
+00000000000206a8  0000000500000406 R_AARCH64_TLS_TPREL64  0000000000000000 use_tls_init + 0
+00000000000206b0  0000000800000401 R_AARCH64_GLOB_DAT     00000000000306e0 use_localp + 0
+
+Relocation section '.rela.plt' at offset 0x488 contains 1 entry:
+    Offset             Info             Type               Symbol's Value  Symbol's Name + Addend
+00000000000206d0  0000000100000402 R_AARCH64_JUMP_SLOT    0000000000000000 dep_bump + 0
+
+### readelf --dyn-syms (dynamic symbols) — LIBUSE.SO
+
+Symbol table '.dynsym' contains 9 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND 
+     1: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND dep_bump
+     2: 0000000000000000     0 OBJECT  GLOBAL DEFAULT  UND dep_counter
+     3: 00000000000104a0    84 FUNC    GLOBAL DEFAULT    7 use_call
+     4: 0000000000000004     4 TLS     GLOBAL DEFAULT   10 use_tls
+     5: 0000000000000000     4 TLS     GLOBAL DEFAULT    9 use_tls_init
+     6: 0000000000010500    20 FUNC    GLOBAL DEFAULT    7 use_get_tls
+     7: 0000000000010520    16 FUNC    GLOBAL DEFAULT    7 use_get_localp
+     8: 00000000000306e0     8 OBJECT  GLOBAL DEFAULT   15 use_localp

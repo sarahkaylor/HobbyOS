@@ -3397,10 +3397,15 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
       int pf_w = (int)(tf->error_code & 2);
       int pf_x = (int)((tf->error_code >> 4) & 1);
-      int pf_present = (int)(tf->error_code & 1);
       const char *why = "PROT";
-      if (!pf_present &&
-          vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why) == 0) {
+      /* A present page can still fault legally: a MAP_PRIVATE file page is
+         installed read-only so the first write copies it (so-vm lane A), and
+         a just-mapped page can race the TLB.  vm_handle_fault distinguishes
+         those from a real protection violation and answers "PROT" for the
+         latter, so both classes go through it now — the old !pf_present gate
+         sent every COW write straight to the kill path (measured: the
+         interpreter's first relocation write to LIBC.SO). */
+      if (vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why) == 0) {
         return; /* mapping is live; iretq re-executes the instruction */
       }
       {
