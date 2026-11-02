@@ -63,6 +63,10 @@ int hb_ldso_lookup_scope(struct hb_ldso_scope *s, const char *name,
                          struct hb_ldso_module *skip,
                          struct hb_ldso_symref *out);
 
+/* Bounds-checked index into .dynsym: NULL when the index is outside the
+ * module's mapping (or beyond an exactly known symbol count). */
+const hb_elf64_sym *hb_ldso_sym_at(struct hb_ldso_module *m, uint32_t idx);
+
 /* Runtime address of a symbol in its defining module. */
 uint64_t hb_ldso_sym_addr(struct hb_ldso_symref *ref);
 

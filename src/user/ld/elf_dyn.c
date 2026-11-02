@@ -125,14 +125,11 @@ static int check_load_shape(const hb_elf64_phdr *ph, uint32_t n, char *err,
     const hb_elf64_phdr *a = &ph[i];
     if (a->p_type != HB_PT_LOAD)
       continue;
-    /* The loader maps one contiguous file span and zero-fills the tail, so a
-     * segment's .bss tail must lie beyond every mapped file byte.  Anything
-     * else would silently expose later file contents as "zero" bss. */
-    if (a->p_memsz > a->p_filesz && a->p_offset + a->p_filesz < file_end) {
-      hb_ldso_err_reset(err, cap);
-      hb_ldso_err_add(err, cap, "PT_LOAD has a non-tail .bss region");
-      return HB_LDSO_E_LAYOUT;
-    }
+    /* Two segments may not share a page.  The loader maps each PT_LOAD at
+     * base + page_down(p_vaddr) with its own file offset; a shared page would
+     * mean one segment's mapping silently overwrites the other's.  (lld's
+     * -z separate-code layout keeps a page between segments, so this only
+     * rejects hand-made or exotic images.) */
     for (j = i + 1; j < n; j++) {
       const hb_elf64_phdr *b = &ph[j];
       uint64_t a0, a1, b0, b1;
@@ -142,10 +139,9 @@ static int check_load_shape(const hb_elf64_phdr *ph, uint32_t n, char *err,
       a1 = align_up(a->p_vaddr + a->p_memsz, HB_PAGE);
       b0 = align_down(b->p_vaddr, HB_PAGE);
       b1 = align_up(b->p_vaddr + b->p_memsz, HB_PAGE);
-      if (a0 < b1 && b0 < a1 && a->p_flags != b->p_flags) {
+      if (a0 < b1 && b0 < a1) {
         hb_ldso_err_reset(err, cap);
-        hb_ldso_err_add(err, cap,
-                        "PT_LOAD segments share a page with different flags");
+        hb_ldso_err_add(err, cap, "PT_LOAD segments share a page");
         return HB_LDSO_E_LAYOUT;
       }
     }
@@ -256,6 +252,53 @@ static int in_span(const struct hb_ldso_module *m, uint64_t va, uint64_t len) {
   return 1;
 }
 
+static uint64_t mod_off(const struct hb_ldso_module *m, const void *p);
+static int span_ok(const struct hb_ldso_module *m, uint64_t off, uint64_t len);
+static const uint32_t *u32_at(struct hb_ldso_module *m, const uint32_t *arr,
+                              uint32_t idx);
+
+/* Exact .dynsym entry count from a GNU hash table: every bucket whose value
+ * is >= symoffset starts a contiguous chain that ends with the low bit set,
+ * so the highest index reached is the last symbol. */
+static uint32_t gnu_symcount(struct hb_ldso_module *m) {
+  const uint32_t *gh = m->gnu_hash;
+  uint32_t nbuckets, symoffset, bloom_size, b, max, guard;
+  const uint64_t *bloom;
+  const uint32_t *buckets;
+  if (!gh)
+    return 0;
+  nbuckets = gh[0];
+  symoffset = gh[1];
+  bloom_size = gh[2];
+  if (nbuckets == 0 || nbuckets > 0x100000 || bloom_size > 0x100000)
+    return 0;
+  bloom = (const uint64_t *)(const void *)(gh + 4);
+  buckets = (const uint32_t *)(const void *)(bloom + bloom_size);
+  if (!span_ok(m, mod_off(m, buckets), (uint64_t)nbuckets * 4))
+    return 0;
+  max = symoffset;
+  guard = 0;
+  for (b = 0; b < nbuckets; b++) {
+    uint32_t idx = buckets[b];
+    if (idx < symoffset || idx >= (1u << 20))
+      continue;
+    for (;;) {
+      const uint32_t *ch;
+      if (++guard > (1u << 21))
+        return max;
+      ch = u32_at(m, buckets + nbuckets, idx - symoffset);
+      if (!ch)
+        return max;
+      if (idx + 1 > max)
+        max = idx + 1;
+      if (*ch & 1u)
+        break;
+      idx++;
+    }
+  }
+  return max;
+}
+
 static int have_dyn(const struct hb_ldso_module *m, int64_t tag, uint64_t *out) {
   uint32_t i;
   for (i = 0; i < m->dyn_count; i++) {
@@ -276,15 +319,33 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
   const hb_elf64_phdr *dyn_ph = 0, *tls_ph = 0;
   int rc;
 
-  if (!m || !base || !phdr || phnum == 0) {
+  if (!m || !phdr || phnum == 0) {
     hb_ldso_err_reset(err, cap);
     hb_ldso_err_add(err, cap, "module: bad argument");
     return HB_LDSO_E_ARG;
   }
+  /* base == NULL is the ET_EXEC no-slide case; the header lookup below then
+   * lands on the first PT_LOAD's absolute vaddr. */
   m->base = base;
-  m->ehdr = (const hb_elf64_ehdr *)base;
   m->phdr = phdr;
   m->phnum = phnum;
+  /* The ELF header sits at the base of the lowest PT_LOAD: base + 0 for an
+   * ET_DYN (its first LOAD is vaddr 0) and base + p_vaddr for an ET_EXEC,
+   * whose base is the no-slide zero.  Deriving it from the program headers
+   * avoids assuming e_type before the header can be read. */
+  {
+    uint64_t first = ~0ULL;
+    uint32_t k;
+    for (k = 0; k < phnum; k++)
+      if (phdr[k].p_type == HB_PT_LOAD && phdr[k].p_vaddr < first)
+        first = phdr[k].p_vaddr;
+    if (first == ~0ULL) {
+      hb_ldso_err_reset(err, cap);
+      hb_ldso_err_add(err, cap, "no PT_LOAD segment");
+      return HB_LDSO_E_LAYOUT;
+    }
+    m->ehdr = (const hb_elf64_ehdr *)hb_ldso_atc(base, first);
+  }
   rc = hb_ldso_check_ehdr(m->ehdr, err, cap);
   if (rc != HB_LDSO_OK)
     return rc;
@@ -328,7 +389,7 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
     hb_ldso_err_add(err, cap, "PT_DYNAMIC outside the mapped image");
     return HB_LDSO_E_LAYOUT;
   }
-  m->dyn = (const hb_elf64_dyn *)(base + dyn_ph->p_vaddr);
+  m->dyn = (const hb_elf64_dyn *)hb_ldso_atc(base, dyn_ph->p_vaddr);
   m->dyn_count = (uint32_t)(dyn_ph->p_memsz / sizeof(hb_elf64_dyn));
   if (m->dyn_count > 1024)
     m->dyn_count = 1024;
@@ -348,7 +409,7 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
     hb_ldso_err_add(err, cap, "DT_SYMTAB outside the mapped image");
     return HB_LDSO_E_LAYOUT;
   }
-  m->dynsym = (const hb_elf64_sym *)(base + v);
+  m->dynsym = (const hb_elf64_sym *)hb_ldso_atc(base, v);
   {
     uint64_t ent = 0;
     if (have_dyn(m, HB_DT_SYMENT, &ent) && ent != sizeof(hb_elf64_sym)) {
@@ -374,7 +435,7 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
       hb_ldso_err_add(err, cap, "DT_STRTAB outside the mapped image");
       return HB_LDSO_E_LAYOUT;
     }
-    m->dynstr = (const char *)(base + v);
+    m->dynstr = (const char *)hb_ldso_atc(base, v);
     m->dynstr_size = sz;
   }
 
@@ -384,7 +445,7 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
       hb_ldso_err_add(err, cap, "DT_HASH outside the mapped image");
       return HB_LDSO_E_LAYOUT;
     }
-    m->sysv_hash = (const uint32_t *)(base + v);
+    m->sysv_hash = (const uint32_t *)hb_ldso_atc(base, v);
   }
   if (have_dyn(m, HB_DT_GNU_HASH, &v)) {
     if (!in_span(m, v, 16 * 4)) {
@@ -392,15 +453,18 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
       hb_ldso_err_add(err, cap, "DT_GNU_HASH outside the mapped image");
       return HB_LDSO_E_LAYOUT;
     }
-    m->gnu_hash = (const uint32_t *)(base + v);
+    m->gnu_hash = (const uint32_t *)hb_ldso_atc(base, v);
   }
 
-  /* Symbol count: DT_HASH's nchain is authoritative.  Without it, .dynstr
-   * normally follows .dynsym, so the distance between them is the count.  A
-   * module with neither still resolves through its hash table; only the
-   * linear fallback needs the count. */
+  /* Symbol count: DT_HASH's nchain is authoritative and exact.  Without it,
+   * the GNU hash still describes every symbol >= symoffset (each bucket's
+   * chain is contiguous and terminated by the low bit), so walking the
+   * buckets gives the exact count.  The .dynstr-.dynsym distance is a last
+   * resort only: lld may put .gnu.hash between them. */
   if (m->sysv_hash && m->sysv_hash[1] < 0x100000)
     m->dynsym_count = m->sysv_hash[1];
+  if (m->dynsym_count == 0 && m->gnu_hash)
+    m->dynsym_count = gnu_symcount(m);
   if (m->dynsym_count == 0) {
     uint64_t symtab = 0, strtab = 0;
     have_dyn(m, HB_DT_SYMTAB, &symtab);
@@ -432,7 +496,7 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
       hb_ldso_err_add(err, cap, "DT_RELA table malformed");
       return HB_LDSO_E_LAYOUT;
     }
-    m->rela = (const hb_elf64_rela *)(base + v);
+    m->rela = (const hb_elf64_rela *)hb_ldso_atc(base, v);
     m->rela_count = (uint32_t)(sz / sizeof(hb_elf64_rela));
   }
   if (have_dyn(m, HB_DT_JMPREL, &v)) {
@@ -453,7 +517,7 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
       hb_ldso_err_add(err, cap, "DT_JMPREL table malformed");
       return HB_LDSO_E_LAYOUT;
     }
-    m->jmprel = (const hb_elf64_rela *)(base + v);
+    m->jmprel = (const hb_elf64_rela *)hb_ldso_atc(base, v);
     m->jmprel_count = (uint32_t)(sz / sizeof(hb_elf64_rela));
   }
 
@@ -461,7 +525,7 @@ int hb_ldso_module_parse(struct hb_ldso_module *m, uint8_t *base,
     uint64_t sz = 0;
     if (have_dyn(m, HB_DT_INIT_ARRAYSZ, &sz) && sz % sizeof(uint64_t) == 0 &&
         in_span(m, v, sz)) {
-      m->init_array = (void (**)(void))(base + v);
+      m->init_array = (void (**)(void))hb_ldso_at(base, v);
       m->init_count = (uint32_t)(sz / sizeof(uint64_t));
     } else if (sz) {
       hb_ldso_err_reset(err, cap);
@@ -517,7 +581,9 @@ int hb_ldso_needed(struct hb_ldso_module *m,
 /* --- symbol lookup ----------------------------------------------------- */
 
 static uint64_t mod_off(const struct hb_ldso_module *m, const void *p) {
-  return (uint64_t)((const uint8_t *)p - (const uint8_t *)m->base);
+  /* Integer arithmetic: base is NULL for a no-slide ET_EXEC, and pointer
+   * subtraction against a null base is undefined behaviour. */
+  return (uint64_t)(uintptr_t)p - (uint64_t)(uintptr_t)m->base;
 }
 
 static int span_ok(const struct hb_ldso_module *m, uint64_t off, uint64_t len) {
@@ -530,7 +596,7 @@ static const hb_elf64_sym *sym_at(struct hb_ldso_module *m, uint32_t idx) {
   uint64_t off = mod_off(m, m->dynsym) + (uint64_t)idx * sizeof(hb_elf64_sym);
   if (!m->dynsym || !span_ok(m, off, sizeof(hb_elf64_sym)))
     return 0;
-  return (const hb_elf64_sym *)(const void *)(m->base + off);
+  return (const hb_elf64_sym *)hb_ldso_atc(m->base, off);
 }
 
 static const uint32_t *u32_at(struct hb_ldso_module *m, const uint32_t *arr,
@@ -538,7 +604,7 @@ static const uint32_t *u32_at(struct hb_ldso_module *m, const uint32_t *arr,
   uint64_t off = mod_off(m, arr) + (uint64_t)idx * 4u;
   if (!arr || !span_ok(m, off, 4))
     return 0;
-  return (const uint32_t *)(const void *)(m->base + off);
+  return (const uint32_t *)hb_ldso_atc(m->base, off);
 }
 
 static int name_eq(const char *s, uint64_t remaining, const char *name) {
@@ -675,6 +741,14 @@ static int lookup_linear(struct hb_ldso_module *m, const char *name,
   return 0;
 }
 
+const hb_elf64_sym *hb_ldso_sym_at(struct hb_ldso_module *m, uint32_t idx) {
+  if (!m || !m->dynsym)
+    return 0;
+  if (m->dynsym_count && idx >= m->dynsym_count)
+    return 0;
+  return sym_at(m, idx);
+}
+
 int hb_ldso_lookup_name(struct hb_ldso_module *m, const char *name, int mode,
                         struct hb_ldso_symref *out) {
   uint32_t h;
@@ -713,5 +787,5 @@ int hb_ldso_lookup_scope(struct hb_ldso_scope *s, const char *name,
 uint64_t hb_ldso_sym_addr(struct hb_ldso_symref *ref) {
   if (!ref || !ref->sym || !ref->mod)
     return 0;
-  return (uint64_t)(ref->mod->base + ref->sym->st_value);
+  return (uint64_t)(uintptr_t)hb_ldso_at(ref->mod->base, ref->sym->st_value);
 }
