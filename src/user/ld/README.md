@@ -112,7 +112,7 @@ checks both targets.
 with clang + ld.lld (`LIBA.SO` sysv-hash-only, `LIBB.SO` gnu-hash-only,
 `LIBD.SO` depends on `LIBE.SO`, `APP` ET_DYN + `PT_INTERP`) plus an ET_EXEC
 `COPY` fixture, a missing-`DT_NEEDED` fixture and a patched-relocation fixture,
-then runs 33 assertions. It owns no build-order dependency on lane C.
+then runs 34 assertions. It owns no build-order dependency on lane C.
 
 ## Kernel contract: what is assumed, and the gaps found
 
