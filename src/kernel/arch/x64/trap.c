@@ -55,38 +55,12 @@ extern uint64_t hb_clock_realtime_ms(void);
 static int sys_user_range(uint64_t ptr, uint64_t len, int write);
 int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
-struct cpu_local {
-  uint64_t kernel_stack;
-  uint64_t user_rsp;
-  uint64_t temp_rax;
-  uint64_t user_sp_temp;
-  uint64_t cpu_id;
-  struct process *current_proc;
-  /* GB-147: the frame the CPU pushed, copied by the FIRST instruction of
-     every exception stub (before any prologue).  The offsets are
-     load-bearing: FRAMESNAP_ASM addresses them as gs:[48]..gs:[104]. */
-  uint64_t snap_rip;     /* 48 */
-  uint64_t snap_cs;      /* 56 */
-  uint64_t snap_rflags;  /* 64 */
-  uint64_t snap_rsp;     /* 72  (CPL3 only; 0 for a kernel-mode entry) */
-  uint64_t snap_ss;      /* 80  (CPL3 only; 0 for a kernel-mode entry) */
-  uint64_t snap_valid;   /* 88 */
-  uint64_t snap_count;   /* 96 */
-  uint64_t fault_count;  /* 104 */
-} __attribute__((packed));
+#include "arch/cpu_local.h" /* the ONE cpu_local definition */
 
-/* The stub asm cannot see sizeof(): pin the offsets it uses. */
+/* Raw console helpers used by the fault paths (no lock, no formatting). */
 extern void uart_puts_raw(const char *s);
 extern void uart_print_hex_raw(uint64_t v);
 extern void print_int_raw(int v);
-typedef char gb147_off48[(__builtin_offsetof(struct cpu_local, snap_rip) == 48) ? 1 : -1];
-typedef char gb147_off56[(__builtin_offsetof(struct cpu_local, snap_cs) == 56) ? 1 : -1];
-typedef char gb147_off64[(__builtin_offsetof(struct cpu_local, snap_rflags) == 64) ? 1 : -1];
-typedef char gb147_off72[(__builtin_offsetof(struct cpu_local, snap_rsp) == 72) ? 1 : -1];
-typedef char gb147_off80[(__builtin_offsetof(struct cpu_local, snap_ss) == 80) ? 1 : -1];
-typedef char gb147_off88[(__builtin_offsetof(struct cpu_local, snap_valid) == 88) ? 1 : -1];
-typedef char gb147_off96[(__builtin_offsetof(struct cpu_local, snap_count) == 96) ? 1 : -1];
-typedef char gb147_off104[(__builtin_offsetof(struct cpu_local, fault_count) == 104) ? 1 : -1];
 
 struct cpu_local cpu_locals[MAX_CPUS];
 
