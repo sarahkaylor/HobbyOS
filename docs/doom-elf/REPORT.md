@@ -11,6 +11,11 @@ $ make doom_elf_test          # id linuxdoom-1.10 at depth 8 (PseudoColor)
 [DOOMELF] PASS: Doom ELF ran under X and produced a frame
 [DOOMELF] best=/tmp/hobbyos_doom_elf/shot-00.ppm nonblack=0.031 colours=232
 
+$ DOOM_XDEPTH=8 python3 tools/doom_elf/run_doom_elf_test.py \
+      --elf obj/doom-linux/doom10.elf --wad obj/doom-linux/DOOM1.WAD \
+      --start-line "/DOOM.ELF -warp 1 1"        # straight into E1M1
+[DOOMELF] PASS: Doom ELF ran under X and produced a frame
+
 $ make doom_elf_test_gen      # doomgeneric, stock backend, depth 24
 [DOOMELF] PASS: Doom ELF ran under X and produced a frame
 ```
@@ -21,6 +26,8 @@ $ make doom_elf_test_gen      # doomgeneric, stock backend, depth 24
 |---|---|---|
 | `doom10-title-660x400.png` | linuxdoom-1.10 | the shareware title screen — DOOM logo, space marine, `id SOFTWARE ©1993`, the `PROVIDED BY id FREE OF CHARGE` footer |
 | `doom10-fullscreen.png` | linuxdoom-1.10 | the same title in the 1920×1080 HobbyOS framebuffer (320×200 client window, 3.1 % of the screen) |
+| `doom10-e1m1-640x400.png` | linuxdoom-1.10 | **gameplay** — launched with `-warp 1 1`: E1M1's blue-floored room, pillars, a health bonus, the pistol, and the full status bar (`AMMO 50`, `HEALTH 100 %`, `ARMS`, `ARMOR 0 %`, `BULL 50/200`, `SHEL/ROKT/CELL`) |
+| `doom10-e1m1-fullscreen.png` | linuxdoom-1.10 | the same gameplay frame in the whole framebuffer |
 | `doomgen-e1m1-640x400.png` | doomgeneric | E1M1 gameplay: corridor, HUD (`AMMO 34 / HEALTH 82 % / ARMOR 94 %`), Doomguy face, `YOU GOT THE SHOTGUN!` |
 | `doomgen-e1m1-fullscreen.png` | doomgeneric | the same frame in the full framebuffer |
 
