@@ -2246,6 +2246,43 @@ static void compat_nanosleep(struct trap_frame *tf) {
     return;
   }
   tf->regs[5] = (uint64_t)(uint32_t)ms;
+  tf->regs[0] = 0; /* Linux's nanosleep returns 0; sys_sleep's blocking path
+                      leaves rax holding the syscall number otherwise */
+  sys_sleep(tf);
+}
+
+/* GB-170: musl's nanosleep() — and therefore usleep() — does NOT use syscall
+   35.  Measured in the rebuilt musl DoomW4.elf: nanosleep() calls musl's
+   clock_nanosleep, whose body loads 0xe6 (230) into rax.  The compat table had
+   neither arm, so usleep() returned -ENOSYS instantly.  Convert the relative
+   form into the kernel's millisecond SYS_SLEEP; TIMER_ABSTIME is rejected
+   (SYS_SLEEP has no absolute deadline) and unknown clock ids are -EINVAL
+   rather than a silent wrong sleep. */
+static void compat_clock_nanosleep(struct trap_frame *tf) {
+  int clk = (int)tf->regs[5];        /* rdi: clockid */
+  int flags = (int)tf->regs[4];      /* rsi: flags   */
+  uint64_t req = tf->regs[3];        /* rdx: req     */
+  int err = 0;
+  if (flags & 1) { /* TIMER_ABSTIME */
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  /* CLOCK_REALTIME(0), CLOCK_MONOTONIC(1), CLOCK_BOOTTIME(4). */
+  if (clk != 0 && clk != 1 && clk != 4) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  int ms = compat_timeout_ms(req, 1, &err);
+  if (err) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  if (ms <= 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uint32_t)ms;
+  tf->regs[0] = 0; /* clock_nanosleep returns 0 on success (restart-safe) */
   sys_sleep(tf);
 }
 
@@ -2415,6 +2452,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
           return;
         case 228: syscall_num = SYS_GETTIME; break; /* clock_gettime(clk,ts) */
         case 35:  compat_nanosleep(tf); return;    /* nanosleep(req, rem)   */
+        case 230: compat_clock_nanosleep(tf); return; /* clock_nanosleep(clk,fl,req,rem) */
         case 100: {                          /* gettimeofday(timeval*, tz*) */
           uint64_t tv = tf->regs[5];
           uint32_t ms = (uint32_t)timer_get_ms();
