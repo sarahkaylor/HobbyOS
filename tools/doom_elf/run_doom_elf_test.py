@@ -89,7 +89,7 @@ def qemu_cmd(work, disk):
     return cmd, qmp, serial
 
 
-def stage(disk, elf, wad, extra_lines):
+def stage(disk, elf, wad, start_line):
     """mcopy the game and its launch config onto a COPY of the disk image."""
     pairs = []
 
@@ -99,13 +99,14 @@ def stage(disk, elf, wad, extra_lines):
 
     tmp = os.path.join(os.path.dirname(disk), "tmp")
     os.makedirs(tmp, exist_ok=True)
-    put(elf, "::DOOM.ELF")
+    if elf:
+        put(elf, "::DOOM.ELF")
     if wad and os.path.exists(wad):
         put(wad, "::DOOM1.WAD")
     start = os.path.join(tmp, "XSTART.TXT")
     with open(start, "w") as f:
         f.write("# autostart (staged by run_doom_elf_test.py)\n")
-        f.write(f"/DOOM.ELF -iwad /DOOM1.WAD{extra_lines}\n")
+        f.write(start_line + "\n")
     put(start, "::XSTART.TXT")
     # /X11/XSESSION.ENV already exists on an icewm disk: read it out, append our
     # switches, and put it back (mcopy -o would otherwise drop the existing
@@ -136,8 +137,12 @@ def main():
     ap.add_argument("--out", default="/tmp/hobbyos_doom_elf")
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--seconds", type=int, default=70)
+    ap.add_argument("--start-line", default=None,
+                    help="exact /XSTART.TXT line (default: /DOOM.ELF -iwad /DOOM1.WAD)")
     ap.add_argument("--keys", default="ret,f1",
                     help="comma-separated qcode names pressed after the session is up")
+    ap.add_argument("--skip-frame-check", action="store_true",
+                    help="transport/session probes draw no game frame; grade only the chain")
     ap.add_argument("--min-nonblack", type=float, default=0.05)
     ap.add_argument("--min-colours", type=int, default=200)
     args = ap.parse_args()
@@ -148,7 +153,9 @@ def main():
     report = os.path.join(work, "REPORT.txt")
     fails = []
 
-    if not os.path.exists(args.elf):
+    start_line = args.start_line or "/DOOM.ELF -iwad /DOOM1.WAD"
+    stage_elf = args.start_line is None or os.path.exists(args.elf)
+    if args.start_line is None and not os.path.exists(args.elf):
         log(f"FAIL: no ELF at {args.elf}")
         return 2
 
@@ -163,7 +170,7 @@ def main():
             return 2
     log("copying disk.img -> work image (repo image is never mutated)")
     shutil.copyfile(os.path.join(REPO, "disk.img"), disk)
-    stage(disk, args.elf, args.wad, extra_lines="")
+    stage(disk, args.elf if stage_elf else None, args.wad, start_line)
 
     cmd, qmp_path, serial = qemu_cmd(work, disk)
     log("booting: " + " ".join(cmd[:8]) + " ...")
@@ -204,8 +211,8 @@ def main():
     ser = read_serial(serial)
     if "FALLBACK" in ser:
         fails.append("session FALLBACK (the X stack or a client failed)")
-    if "XSTART: /DOOM.ELF" not in ser:
-        fails.append("the staged /XSTART.TXT line was never spawned")
+    if f"XSTART: {start_line}" not in ser:
+        fails.append(f"the staged /XSTART.TXT line was never spawned: {start_line}")
     ensys = sorted(set(re.findall(r"\[LCOMPAT\] ENOSYS nr=(\d+) name=(\S+)", ser)))
     if not shots:
         fails.append("no screendump was produced")
@@ -215,7 +222,8 @@ def main():
         nb, colours, _ = screen_stats(p)
         if best is None or (nb, colours) > best[1:]:
             best = (p, nb, colours)
-    if best and (best[1] < args.min_nonblack or best[2] < args.min_colours):
+    if not args.skip_frame_check and best and (
+            best[1] < args.min_nonblack or best[2] < args.min_colours):
         fails.append(
             f"no Doom-like frame: best {best[0]} nonblack={best[1]:.3f} colours={best[2]}"
             f" (want >= {args.min_nonblack} / {args.min_colours})")
@@ -233,6 +241,17 @@ def main():
     log("--- serial tail ---")
     for line in ser.splitlines()[-40:]:
         log("  " + line)
+    # The client's own words, when it has any: XSESSION relays a child's stderr
+    # to the console as "[X] ...", and these are the strings that tell the
+    # failure modes apart (no display / no IWAD / X error) instead of leaving
+    # "black screen" as the only symptom.
+    said = [ln for ln in ser.splitlines()
+            if re.search(r"\[X\] |I_Error|Could not open|No IWAD|Game mode|"
+                         r"XIO|BadWindow|BadMatch|XPutImage|MITSHM|undefined symbol", ln)]
+    if said:
+        log("--- what the client said ---")
+        for line in said[-25:]:
+            log("  " + line)
     if ensys:
         log("unhandled Linux syscalls seen: " + ", ".join(f"{n}({nm})" for n, nm in ensys[:30]))
     if fails:
