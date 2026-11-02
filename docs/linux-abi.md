@@ -598,3 +598,34 @@ Device-free, so the same route helper is locked by the host differential suite
 - Whether `uname.release` should mimic a specific kernel version for SDL's version gate.
 - `/proc/self/exe` implementation strategy (symlink in the FAT16-backed VFS vs. a compat-only
   read hook) — affects GB-020 and the launcher (GB-039).
+
+## 13. Implementation map (2026-11-02, the Doom-ELF bring-up)
+
+The contract above is unchanged; this section records WHERE it is implemented, so
+the next reader does not have to re-derive the shape from `trap.c`.
+
+| piece | file |
+|---|---|
+| dispatch contract (`struct l_sysent`, `l_arg`, user-copy helpers) | `src/include/linux_compat.h` |
+| dispatcher, `l_tab_core` (identity, sleep, gettimeofday), `[LCOMPAT]` tracer | `src/kernel/linux_compat.c` |
+| subsystem tables (weak symbols; absent = skipped) | `l_tab_fd` / `l_tab_mem` / `l_tab_proc` / `l_tab_misc` → `src/kernel/linux_compat_<sub>.c` |
+| entry point | `src/kernel/arch/x64/trap.c`: `linux_compat_dispatch(lp, tf, nr)` runs before the legacy number switch |
+| startup block (argc/argv/envp/auxv/AT_RANDOM/AT_EXECFN, `%rsp`) | `src/kernel/program_loader.c`: `compat_stack_block()` |
+| probe harness | `src/user/linux_probe_<name>.c` + `tools/gate/t3_linux_probe.sh <name>` |
+| session launch of a compat program | `/XSTART.TXT` (one program per line) + `XSESS_NO_WM=1`, both in `src/user/x11sess/xsession.c` |
+| end-to-end X evidence | `tools/doom_elf/run_doom_elf_test.py` (`make doom_elf_test`) |
+
+Rules the map encodes:
+
+- **A handler owns its number.** Return 1 after writing `tf->regs[0]`;
+  `>= 0` success, `-errno` failure in Linux numbering. Return 0 = "not mine".
+- **Unhandled numbers are named, once per boot**: `[LCOMPAT] ENOSYS nr=<n>
+  name=<prog> pid=<p> rip=<addr>`. Bring-up is driven by that record.
+- **A blocking handler stores its result BEFORE `schedule(tf, 0)`** — the
+  scheduler saves the frame and never returns into the handler's C frame.
+  Measured: storing after the call made `nanosleep` return `rax == 35`.
+- **The startup block carries the launcher's argv and envp** (up to 16/24
+  entries). Measured: with `argc` fixed at 1 and empty `envp`, Doom reported
+  "no IWAD file was found" and Xlib had no `DISPLAY`.
+- **Probes are ordinary Linux programs** (musl, no HobbyOS headers), so the same
+  source produces the reference behaviour on a Linux host.
