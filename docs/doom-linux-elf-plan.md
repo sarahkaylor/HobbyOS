@@ -64,12 +64,16 @@ edits `trap.c`, `linux_compat.c`, the Makefile or `docs/linux-abi.md`.
 
 1. `errnos.h` → provided by a shim include directory (`-I tools/linux-doom/shim`
    with a one-line `errnos.h` that includes `<errno.h>`). No source edit.
-2. `m_misc.c`: four `(int)"literal"` initializers → `(intptr_t)"literal"` with the
-   field widened to `intptr_t`. Patched at build time from
-   `tools/linux-doom/patches/*.patch` against a pristine clone; upstream's tree
-   is never hand-edited in place. Reason: the cast is a 32-bit-ism that no
-   modern C compiler accepts, and the value is a truncated pointer on x86_64
-   anyway (these entries are DOS-sound/mouse defaults unused on Linux).
+2. **LP64 fixes** — `tools/linux-doom/patches/doom10-lp64-toolchain.patch`, 18
+   hunks in 6 files, applied to a COPY of a pristine clone. The published 1.10
+   source does not build correctly on a 64-bit target: `maptexture_t`'s
+   `void *columndirectory` is a 32-bit on-disk field (every texture read
+   garbage), pointer arrays sized `num*4`, `(int)` casts on string pointers in
+   the config-default table (which no modern compiler accepts), a `char*`/`int`
+   default-value table, and a missing NULL sentinel on `sprnames[]` that only
+   worked because ILP32 layout happened to leave a zero word after the array.
+   No game logic is changed; each hunk is a word-size correction.  This is the
+   same class of fix any 64-bit Linux build of 1993 Doom needs.
 3. `-std=gnu89 -fcommon` (the code is K&R-era C with tentative definitions).
 4. `-lnsl` dropped (merged into glibc/musl long ago).
 5. Static link (`-static-pie`), because the compat track is static-ELF only.
@@ -91,6 +95,15 @@ edits `trap.c`, `linux_compat.c`, the Makefile or `docs/linux-abi.md`.
    of `[LCOMPAT] ENOSYS` for the numbers Doom uses.
 
 ## 7. Log
+
+- 2026-11-02 **lane `doom-build` merged**: `tools/linux-doom/` with two
+  one-command builds, a hash-pinned Alpine/musl X11 sysroot, the LP64 patch above,
+  and host evidence.  Binaries: `doom10.elf` (id linuxdoom-1.10, 1 569 504 B,
+  `eff32985…`) and `doomgen.elf` (doomgeneric stock X11 backend, 1 555 424 B),
+  both `Type: DYN (Position-Independent Executable file)`, `NEEDED` count 0,
+  `ldd` -> statically linked.  Host frames on Xvfb: doom10 E1M1 **158** distinct
+  colours, doomgen E1M1 **155**, and a two-frame demo diff of 66.8 % of pixels —
+  the raycaster is running, not a frozen first frame.
 
 - 2026-11-02 **compat-fd merged** (sockets/poll/fcntl/dup on the native unix
   engine): its probe passes in the merged tree —
