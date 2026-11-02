@@ -108,7 +108,7 @@ checks both targets.
 
 ## Host gate
 
-`tools/ldso_host_test.sh [--cross] [--keep]` builds a five-module fixture chain
+`bash tools/ldso_host_test.sh [--cross] [--keep]` builds a five-module fixture chain
 with clang + ld.lld (`LIBA.SO` sysv-hash-only, `LIBB.SO` gnu-hash-only,
 `LIBD.SO` depends on `LIBE.SO`, `APP` ET_DYN + `PT_INTERP`) plus an ET_EXEC
 `COPY` fixture, a missing-`DT_NEEDED` fixture and a patched-relocation fixture,
