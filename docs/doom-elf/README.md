@@ -7,8 +7,24 @@ Two binaries are in play (see `docs/doom-linux-elf-plan.md`):
   runs on HobbyOS's default depth-24 screen. **Working: the screenshots below.**
 - **`doom10.elf`** — id Software's `linuxdoom-1.10` (github.com/id-software/doom)
   built for x86_64 Linux. It requires a depth-8 PseudoColor screen
-  (`XMatchVisualInfo(..., 8, PseudoColor, ...)`); the compat layer carries it all
-  the way to that call. Pending the depth-8 screen mode in the X server.
+  (`XMatchVisualInfo(..., 8, PseudoColor, ...)`) and never calls
+  XInstallColormap. **Working:** `HB_XDEPTH=8` plus the DDX's map-time colormap
+  install; `doom10-title-*.png` is its title screen captured from the guest.
+
+**Read `REPORT.md` first** — it is the complete account (what had to be built,
+what was measured, what the gaps are).  This file is the early run log.
+
+## Files
+
+| file | what |
+|---|---|
+| `REPORT.md` | the full account: architecture, measurements, gaps |
+| `doom10-title-660x400.png` | id Doom title screen, guest framebuffer, 320×200 client @ 2× |
+| `doom10-fullscreen.png` | the same, whole 1920×1080 HobbyOS screen |
+| `doomgen-e1m1-640x400.png` | doomgeneric E1M1 gameplay frame, guest framebuffer |
+| `doomgen-e1m1-fullscreen.png` | the same, whole screen |
+| `serial-doom10.txt` / `serial-doomgen.txt` | unedited guest consoles for those runs |
+| `run-report-doom10.txt` / `run-report.txt` | harness reports (frame stats, ENOSYS list) |
 
 ## Run that produced these files
 
