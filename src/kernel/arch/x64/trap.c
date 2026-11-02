@@ -2114,6 +2114,66 @@ static void sys_getenv(struct trap_frame *tf) {
  * addresses and calling them jumps to unloaded RAM — executing zeroes on
  * the first syscall).  Any added x64 syscall must append an else-if. */
 
+/* GB-018: Linux select(23) and pselect6(270) pass a struct timeval / struct
+ * timespec POINTER, while SYS_SELECT takes a millisecond count in r8.  Convert
+ * the pointer to milliseconds before handing the (unchanged) fd-set registers
+ * to sys_select().  A NULL pointer means "wait forever" (-1), matching Linux;
+ * a negative field is EINVAL; a usec/nsec field >= 1e6/1e9 is EINVAL; the
+ * timeout rounds UP to the next millisecond, as Linux does.
+ *
+ * pselect6's sixth argument (r9, a pointer to {sigmask, sigsetsize}) is not
+ * applied: the compat surface has no signal-mask swap, and the T4 probe passes
+ * an empty set.  That limitation is stated here rather than silently assumed. */
+static int compat_timeout_ms(uint64_t ptr, int is_timespec, int *err) {
+  struct process *c = current_process();
+  int64_t a = 0, b = 0;
+  *err = 0;
+  if (!ptr) return -1;
+  if (!c || !sys_user_range_ok(ptr, 16)) { *err = EFAULT; return 0; }
+  if (vm_user_read(c, ptr, &a, 8) != 0 ||
+      vm_user_read(c, ptr + 8, &b, 8) != 0) { *err = EFAULT; return 0; }
+  if (a < 0 || b < 0) { *err = EINVAL; return 0; }
+  if (is_timespec) {
+    if (b >= 1000000000LL) { *err = EINVAL; return 0; }
+    return (int)(a * 1000 + (b + 999999) / 1000000);
+  }
+  if (b >= 1000000LL) { *err = EINVAL; return 0; }
+  return (int)(a * 1000 + (b + 999) / 1000);
+}
+
+static void compat_select(struct trap_frame *tf) {
+  int err = 0;
+  int ms = compat_timeout_ms(tf->regs[7], 0, &err);
+  if (err) { tf->regs[0] = (uint64_t)(int64_t)(-err); return; }
+  tf->regs[7] = (uint64_t)(int64_t)ms;
+  sys_select(tf);
+}
+
+static void compat_pselect6(struct trap_frame *tf) {
+  int err = 0;
+  int ms = compat_timeout_ms(tf->regs[7], 1, &err);
+  if (err) { tf->regs[0] = (uint64_t)(int64_t)(-err); return; }
+  tf->regs[7] = (uint64_t)(int64_t)ms;
+  sys_select(tf);
+}
+
+/* GB-148: musl's mkdir()/mkdirat() both use mkdirat(258) (dirfd, path, mode).
+ * HobbyOS SYS_MKDIR takes only (path) in rdi, so shift rsi -> rdi.  Only
+ * AT_FDCWD (-100) is supported: there is no per-directory fd resolution for
+ * mkdir on this surface, and a real dirfd answers -EBADF rather than silently
+ * creating the path relative to the process cwd.  mode is ignored by the FAT
+ * layer (existing behaviour of SYS_MKDIR). */
+static void compat_mkdirat(struct trap_frame *tf) {
+  int dirfd = (int)tf->regs[5];       /* rdi */
+  uint64_t path = tf->regs[4];        /* rsi */
+  if (dirfd != -100) {                /* AT_FDCWD */
+    tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
+    return;
+  }
+  tf->regs[5] = path;
+  sys_mkdir(tf);
+}
+
 /* Last syscall each core entered; 0 = not in a syscall.  A core wedged
    inside a syscall leaves this set, which the stall watchdog prints. */
 static volatile int core_in_syscall[MAX_CPUS];
@@ -2249,6 +2309,26 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            route to file_fcntl; a non-3/4 cmd is file_fcntl's own decision.  regs:
            rdi=fd, rsi=cmd, rdx=arg. */
         case 72: syscall_num = SYS_FCNTL; break;   /* fcntl(fd, cmd, arg) */
+        /* GB-018: the pipe/poll/select/pselect6/socketpair block the T4 probe
+           measures.  Linux numbers: poll 7, pipe 22, select 23, socketpair 53,
+           pselect6 270, pipe2 293, getrandom 318.  poll/socketpair/pipe share
+           the HobbyOS argument order exactly (rdi/rsi/rdx/r10); select and
+           pselect6 need the timeout POINTER converted to the millisecond int
+           sys_select expects (compat_select/compat_pselect6).  pipe2 is mapped
+           for its flags=0 form (musl's pipe() always uses pipe2(fd, 0)); a
+           non-zero flags word is not applied yet and is recorded on GB-018. */
+        case 7:   syscall_num = SYS_POLL;       break;  /* poll(fds, n, ms) */
+        case 22:  syscall_num = SYS_PIPE;       break;  /* pipe(fds)        */
+        case 23:  compat_select(tf);            return; /* select(..., tv*) */
+        case 53:  syscall_num = SYS_SOCKETPAIR; break;  /* socketpair(...)  */
+        case 270: compat_pselect6(tf);          return; /* pselect6(..., ts*) */
+        case 293: syscall_num = SYS_PIPE;       break;  /* pipe2(fds, 0)    */
+        case 318: syscall_num = SYS_GETRANDOM;  break;  /* getrandom(...)   */
+        /* GB-148: mkdir(83) is (path, mode) = rdi, rsi — SYS_MKDIR takes rdi.
+           mkdirat(258) is (dirfd, path, mode); musl uses it for BOTH mkdir and
+           mkdirat, so the dent block's mkdir() was -ENOSYS without this. */
+        case 83:  syscall_num = SYS_MKDIR;      break;  /* mkdir(path, mode) */
+        case 258: compat_mkdirat(tf);           return; /* mkdirat(dirfd, path, mode) */
         /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
            =fd, regs[4]=rsi=request, regs[3]=rdx=arg.  This is a genuine dispatch on
            the request number, and every non-ENOTTY outcome is falsifiable:
