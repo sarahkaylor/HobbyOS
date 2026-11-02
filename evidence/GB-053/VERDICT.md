@@ -88,3 +88,13 @@ control is what separates the two.
 
 The generated reports for both legs are under `evidence/GB-053/arm-8cpu/` and
 `evidence/GB-053/intel-1cpu/`.
+
+## Corpus scope (what "signed off" covers here)
+
+The acceptance corpus is the tool's `PINNED` list — PONG, MILLIPED, XNIBBLER,
+XCRYPT, NES (5 titles).  The desktop also pins DOOM and STARDUST; neither is in
+this corpus: DOOM needs the fetch-time IWAD (`doom1.wad`, not on a fresh image)
+and STARDUST is simply not in the corpus.  So this run's evidence is "the five
+pinned titles render live and distinct on both arches", not "every pinned title
+was exercised"; DOOM's own playthrough is measured separately in GB-091/GB-034
+(PR #237).
