@@ -25,9 +25,15 @@
  *   malloc stress    8 MiB malloc, every page written, freed: musl's allocator
  *                    and Doom's 8 MiB zone both live on this path.
  *
- * SIGSEGV rows are handled inside the probe (sigaction + siglongjmp), the same
- * way a real program would observe a protection change; a kernel that kills
- * the process instead fails the gate by never printing the done marker.
+ * PROTECTION ENFORCEMENT IS REPORTED, NOT ASSERTED.  Observing that a
+ * PROT_READ page really refuses a write needs the kernel to turn a HARDWARE
+ * fault into a caught signal.  The compat layer does not do that yet: explicit
+ * raise()/kill() delivery works, but a bad access still terminates the process.
+ * A faulting row here would therefore kill the probe before mremap/munmap/brk/
+ * malloc ever ran, and would be asserting a capability the layer does not
+ * promise.  So the default build prints those rows as "unmeasurable" with the
+ * reason and never faults; build with -DLP_FAULT_PROBE on a tree that delivers
+ * fault signals to turn them into real assertions.
  */
 #define _GNU_SOURCE /* mremap + sigjmp_buf are GNU/musl extensions */
 #include <errno.h>
@@ -65,18 +71,21 @@ static void check(int ok, const char *what, long detail) {
   row("[LP] %-28s %s detail=%ld\n", what, ok ? "ok" : "FAIL", detail);
 }
 
-/* --- SIGSEGV harness: prove that a protection change is ENFORCED ----------
+/* --- fault entrapment: opt-in only ---------------------------------------
  *
- * A faulting access is the ONLY way to observe that a protection change is
- * enforced, and it needs SIGSEGV delivery.  On a guest whose compat layer has
- * no signal delivery yet (rt_sigaction/rt_sigprocmask still ENOSYS) the fault
- * KILLS the process, which would take the rest of the probe with it.  So the
- * faulting rows are measured when delivery works and reported as
- * "unmeasurable" (not failed) when it does not: this gate measures the MEMORY
- * contract, and a missing sibling lane must not read as a memory defect. */
+ * 1 = the faulting rows run (needs a kernel that delivers hardware faults as
+ * signals).  0 = they print "unmeasurable" and the access is NEVER performed.
+ * The default is 0; see the header comment for why. */
+#ifdef LP_FAULT_PROBE
+#define FAULTS_MEASURABLE 1
+#else
+#define FAULTS_MEASURABLE 0
+#endif
+
+#if FAULTS_MEASURABLE
+
 static sigjmp_buf segv_jmp;
 static volatile sig_atomic_t segv_hit;
-static int have_segv;
 
 static void segv_handler(int sig) {
   (void)sig;
@@ -96,6 +105,19 @@ static int access_faults(volatile unsigned char *p, int write_it) {
   }
   return 1; /* the handler ran: the access was refused */
 }
+
+#else /* !LP_FAULT_PROBE */
+
+/* Never called: every call site is guarded by FAULTS_MEASURABLE, which is 0
+   here.  Defined so those guarded branches still compile (and so an -O0 build
+   cannot leave an undefined symbol behind). */
+static int access_faults(volatile unsigned char *p, int write_it) {
+  (void)p;
+  (void)write_it;
+  return -1;
+}
+
+#endif /* LP_FAULT_PROBE */
 
 /* --- 1. three anonymous mappings of different sizes ---------------------- */
 struct maprow {
@@ -213,8 +235,10 @@ static void test_mprotect(void) {
     munmap(p, len);
     return;
   }
-  int ro_enforced = have_segv ? access_faults(p, 1) : -1; /* write must SIGSEGV */
-  int ro_readable = have_segv ? !access_faults(p, 0) : 1; /* read must work */
+  /* The write would have to be caught as SIGSEGV to prove enforcement; see
+     FAULTS_MEASURABLE.  The read is safe either way (the region allows it). */
+  int ro_enforced = FAULTS_MEASURABLE ? access_faults(p, 1) : -1;
+  int ro_readable = FAULTS_MEASURABLE ? !access_faults(p, 0) : 1;
 
   if (mprotect(p, len, PROT_READ | PROT_WRITE) != 0) {
     row("[LP] mprotect RW FAIL errno=%d\n", errno);
@@ -225,11 +249,15 @@ static void test_mprotect(void) {
   int kept = 1;
   for (size_t off = 0; off < len; off += 4096)
     if (p[off] != 0x11) kept = 0;
-  if (have_segv) {
+  if (FAULTS_MEASURABLE) {
     check(ro_enforced && ro_readable && kept, "mprotect RO enforced",
           (long)((ro_enforced << 2) | (ro_readable << 1) | kept));
   } else {
-    row("[LP] mprotect RO enforced=unmeasurable kept=%d (no signal delivery)\n",
+    /* Explicit gap row: PROT_READ was applied (the region reports it and the
+       kernel refuses the write, measured as an in=PROT fault), but the refusal
+       is a process kill, not a catchable signal -- so it is not asserted. */
+    row("[LP] mprotect RO enforced=unmeasurable kept=%d "
+        "(no fault-signal delivery in compat; raise() path only)\n",
         kept);
     if (!kept) fails++;
   }
@@ -241,16 +269,19 @@ static void test_mprotect(void) {
     row("[LP] mprotect NONE FAIL errno=%d\n", errno);
     fails++;
   } else {
-    int none_enforced = have_segv ? access_faults(p, 0) : -1;
+    int none_enforced = FAULTS_MEASURABLE ? access_faults(p, 0) : -1;
     if (mprotect(p, len, PROT_READ | PROT_WRITE) != 0) {
       row("[LP] mprotect NONE->RW FAIL errno=%d\n", errno);
       fails++;
     } else {
+      /* preserved=0 is the DOCUMENTED x64 divergence (vm.c 4.4: a PROT_NONE
+         leaf cannot exist, so mprotect drops the pages); it is reported, not
+         failed, and it is not the enforcement question above. */
       int preserved = (p[0] == 0x11);
       row("[LP] mprotect NONE enforced=%s preserved=%d (x64: 0 expected)\n",
           none_enforced < 0 ? "unmeasurable" : (none_enforced ? "yes" : "no"),
           preserved);
-      if (have_segv && !none_enforced) fails++;
+      if (FAULTS_MEASURABLE && !none_enforced) fails++;
     }
   }
   munmap(p, len);
@@ -364,17 +395,20 @@ static void test_munmap_partial(void) {
   size_t off = 64 * 1024, n = 64 * 1024;
   int rc = munmap(p + off, n);
   /* The unmapped span must fault, the neighbours must survive. */
-  int gone = have_segv ? access_faults(p + off, 0) : -1;
+  int gone = FAULTS_MEASURABLE ? access_faults(p + off, 0) : -1;
   int left_ok = (p[off - 4096] == 0x22);
   int right_ok = (p[off + n] == 0x22);
-  if (have_segv) {
+  if (FAULTS_MEASURABLE) {
     check(rc == 0 && gone && left_ok && right_ok, "munmap interior range",
           (long)((rc == 0) | (gone << 1) | (left_ok << 2) | (right_ok << 3)));
   } else {
-    /* Without SIGSEGV delivery the "gone" half is unobservable; the split
-       itself is still measured by the surviving neighbours. */
+    /* The split is measured by the surviving neighbours on both sides; that
+       the middle is UNMAPPED (not merely zeroed) needs a fault to observe, so
+       it gets its own explicit gap row instead of a silent pass. */
     check(rc == 0 && left_ok && right_ok, "munmap interior range",
           (long)((rc == 0) | (left_ok << 2) | (right_ok << 3)));
+    row("[LP] munmap interior gone=unmeasurable (no fault-signal delivery "
+        "in compat)\n");
   }
   /* Re-unmapping the same span, and unmapping a hole, must SUCCEED (Linux). */
   errno = 0;
@@ -585,12 +619,17 @@ static void test_malloc(void) {
 }
 
 int main(void) {
+#if FAULTS_MEASURABLE
   struct sigaction sa;
   memset(&sa, 0, sizeof sa);
   sa.sa_handler = segv_handler;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_NODEFER;
-  have_segv = sigaction(SIGSEGV, &sa, 0) == 0;
+  if (sigaction(SIGSEGV, &sa, 0) != 0) {
+    row("[LP] sigaction FAIL errno=%d\n", errno);
+    return 1; /* LP_FAULT_PROBE asked for a measurement it cannot make */
+  }
+#endif
 
   row("[LP] mem probe pid=%ld pagesz=%ld\n", (long)getpid(), (long)sysconf(_SC_PAGESIZE));
 
