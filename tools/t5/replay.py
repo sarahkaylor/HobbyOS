@@ -64,6 +64,9 @@ def main():
     ap.add_argument("--root", default=os.getcwd())
     ap.add_argument("--shot-dir", default=None,
                     help="dir for a post-launch screendump (else cwd)")
+    ap.add_argument("--settle", type=float, default=2.0,
+                    help="seconds to wait after the launch before replaying the "
+                         "in-game events (DOOM needs ~5 for its title screen)")
     args = ap.parse_args()
 
     parser = ReplayParser(args.replay)
@@ -79,9 +82,30 @@ def main():
     qemu_make = ["make", "run", "DESKTOP=hobby", f"ARCH={args.arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp_sock},server,nowait"]
 
-    from evidence_rig import boot
+    from evidence_rig import boot, find_menu_slot, launch_from_menu
     q = boot(qemu_make, serial_log, qmp_sock, args.arch)
-    driver = events_to_qmp(list(parser))
+
+    # GB-091/GB-059: launch the requested title BY NAME from the [MENU] dump.
+    # The authored nav prefix (f1/home/downs/ret) is a fixed slot count and
+    # goes to the wrong row as soon as the image gains a file (measured: 18
+    # downs launched MILLIPED.BIN on a 177-entry menu).  Resolve the slot here
+    # and replay only the events after the launcher's confirm.
+    events = list(parser)
+    cut = 0
+    for i, e in enumerate(events):
+        if e.get("t") == "key" and e.get("k") == "ret":
+            cut = i + 1
+            break
+    slot = find_menu_slot(serial_log, args.game)
+    if slot is None:
+        print(f"[replay] FATAL: {args.game} not in the start-menu dump")
+        sys.exit(1)
+    print(f"[replay] {args.game} slot: found by name = {slot}")
+    launch_from_menu(q, slot, arch=args.arch, gesture="keys")
+    if args.settle > 0:
+        time.sleep(args.settle)
+    print(f"[replay] replaying {len(events) - cut} in-game events")
+    driver = events_to_qmp(events[cut:])
     driver(q)
     time.sleep(2)
     shot = os.path.join(path, "replay_end.ppm")

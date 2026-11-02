@@ -17,11 +17,12 @@
 {"t": "key", "k": "down"}
 {"t": "key", "k": "down"}
 {"t": "key", "k": "down"}
-{"t": "key", "k": "ret"}
-{"t": "key", "k": "ret", "pause": 0.8}
-{"t": "key", "k": "ret", "pause": 0.8}
-{"t": "key", "k": "ret", "pause": 0.8}
-{"t": "key", "k": "up", "pause": 0.25}
+{"t": "key", "k": "ret", "pause": 3.0}
+{"t": "key", "k": "esc", "pause": 0.8}
+{"t": "key", "k": "ret", "pause": 0.6}
+{"t": "key", "k": "ret", "pause": 0.6}
+{"t": "key", "k": "ret", "pause": 0.6}
 {"t": "key", "k": "right", "pause": 0.25}
-{"t": "key", "k": "up", "pause": 0.25}
+{"t": "key", "k": "right", "pause": 0.25}
+{"t": "key", "k": "right", "pause": 0.25}
 {"t": "key", "k": "right", "pause": 0.25}
