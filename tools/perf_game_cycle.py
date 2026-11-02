@@ -228,6 +228,9 @@ def main():
                     help="seconds to wait after each launch attempt before "
                          "checking the serial for [LAUNCH]")
     ap.add_argument("--arch", default="arm", choices=["arm", "intel"])
+    ap.add_argument("--stage", default="",
+                    help="shell command run after disk.img is built and before "
+                         "QEMU starts (make RUN_STAGE contract); $ROOT is set")
     ap.add_argument("--root", default=os.getcwd())
     args = ap.parse_args()
     try:
@@ -244,6 +247,12 @@ def main():
 
     qemu_make = ["make", "run", "DESKTOP=hobby", f"ARCH={args.arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp_sock},server,nowait"]
+    if args.stage:
+        # Same contract as t3_tier.sh's T3_STAGE and evidence_rig --stage: the
+        # hook runs after disk.img is rebuilt and before QEMU starts, so a
+        # fixture survives the recipe (GB-118).  Without it, staging into
+        # disk.img before `make run` is wiped by the rebuild.
+        qemu_make.append(f"RUN_STAGE={args.stage}")
     print(f"[perf] booting {args.arch} once; cycling games; bundle -> {path}")
     q = boot(qemu_make, serial_log, qmp_sock, args.arch)
     serial_log_content = open(serial_log, errors="ignore").read()
