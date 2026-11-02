@@ -96,6 +96,12 @@ edits `trap.c`, `linux_compat.c`, the Makefile or `docs/linux-abi.md`.
   64-bit fix; blocking-syscall return-value fix (store before `schedule`);
   intel unit tests 397/0; `hello` probe green in-guest.
 - 2026-11-02 `xsession`: `/XSTART.TXT` autostart + `XSESS_NO_WM` switch.
+- 2026-11-02 X path baseline: `run_icewm_test.py --arch intel --no-apps
+  --settle 20` => PASS (XHOBBY + IceWM + XEYESR under a QMP harness), and the
+  same session with `XSESS_NO_WM=1` runs a real Xlib client (`/XEYESR.BIN`) that
+  paints 3% of the screen — so "client -> server -> framebuffer" works without a
+  window manager.  (An earlier run failed at `--settle 8`: the start-menu click
+  fired before the WM was ready; not a code defect.)
 - 2026-11-02 startup block: real argv + envp from the PCB blobs.  Session
   launch of the probe measures `[X] [LP] argv argc=3 argv0=/DOOM.ELF` and
   `[X] [LP] env DISPLAY=:0` — the two things upstream Doom reads (its `-iwad`
