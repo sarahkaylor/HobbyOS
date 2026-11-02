@@ -145,8 +145,12 @@ def main():
                     help="comma-separated qcode names pressed after the session is up")
     ap.add_argument("--skip-frame-check", action="store_true",
                     help="transport/session probes draw no game frame; grade only the chain")
-    ap.add_argument("--min-nonblack", type=float, default=0.05)
-    ap.add_argument("--min-colours", type=int, default=200)
+    # A Doom window is 320x200 or 640x400 inside a 1920x1080 framebuffer: the
+    # frame is 100% covered but only ~3-12% of the SCREEN.  These floors
+    # discriminate a game frame from a blank/fallback desktop while tolerating
+    # both window sizes; the garbled depth-8 run (10 colours, 1%) fails them.
+    ap.add_argument("--min-nonblack", type=float, default=0.02)
+    ap.add_argument("--min-colours", type=int, default=120)
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -216,7 +220,9 @@ def main():
     ser = read_serial(serial)
     if "FALLBACK" in ser:
         fails.append("session FALLBACK (the X stack or a client failed)")
-    if f"XSTART: {start_line}" not in ser:
+    # XSESSION logs the line AFTER tokenising it in place, so only argv[0]
+    # survives in the log line; match that token, not the whole line.
+    if f"XSTART: {start_line.split()[0]}" not in ser:
         fails.append(f"the staged /XSTART.TXT line was never spawned: {start_line}")
     ensys = sorted(set(re.findall(r"\[LCOMPAT\] ENOSYS nr=(\d+) name=(\S+)", ser)))
     if not shots:
