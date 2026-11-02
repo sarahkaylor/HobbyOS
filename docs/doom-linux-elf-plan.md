@@ -107,6 +107,18 @@ edits `trap.c`, `linux_compat.c`, the Makefile or `docs/linux-abi.md`.
 - 2026-11-02 first real Doom ELF in the guest: loads (666 pages, `abi=0x1`),
   runs, and names its first wall — `[LCOMPAT] ENOSYS nr=21` (`access`), which is
   why it reports `W_InitFiles: no files found`.
+- 2026-11-02 second wall, same method: `[LCOMPAT] ENOSYS nr=8` (lseek) — Doom's
+  `fseek` did nothing, so it read the WAD directory from offset 0 and reported
+  `W_GetNumForName: PNAMES not found!`.  `src/kernel/linux_compat_misc.c` adds
+  lseek/readv/pread/pwrite + the path ops; `src/user/linux_probe_wad.c` walks the
+  IWAD directory both raw and through musl stdio and now matches the host
+  exactly (1264 lumps, PNAMES idx 106, TEXTURE1 present).
+- 2026-11-02 **Doom's whole init chain now runs in the guest**: sound server
+  probe fails as designed, `D_CheckNetGame` reports
+  `startskill 2 deathmatch: 0 startmap: 1 startepisode: 1 / player 1 of 1`,
+  and then the last wall is the one predicted at plan time:
+  `Error: xdoom currently only supports 256-color PseudoColor screens`.
+  Nothing else in the compat layer stands between Doom and a frame.
 
 - 2026-11-02 freeze: dispatcher + tracer + probe harness; `gettimeofday`
   64-bit fix; blocking-syscall return-value fix (store before `schedule`);
