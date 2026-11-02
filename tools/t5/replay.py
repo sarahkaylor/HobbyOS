@@ -55,6 +55,19 @@ def events_to_qmp(events):
 
 
 # --- runner --------------------------------------------------------------
+def split_nav(events):
+    """Split a replay into (nav prefix, in-game events).
+
+    GB-091: the authored nav prefix (f1/home/downs/ret) ends at the launcher's
+    confirm; the runner launches the title by name and replays only the events
+    after it.  A replay with no `ret` is all in-game.
+    """
+    for i, e in enumerate(events):
+        if e.get("t") == "key" and e.get("k") == "ret":
+            return events[:i + 1], events[i + 1:]
+    return [], events
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -91,11 +104,8 @@ def main():
     # downs launched MILLIPED.BIN on a 177-entry menu).  Resolve the slot here
     # and replay only the events after the launcher's confirm.
     events = list(parser)
-    cut = 0
-    for i, e in enumerate(events):
-        if e.get("t") == "key" and e.get("k") == "ret":
-            cut = i + 1
-            break
+    nav, in_game = split_nav(events)
+    print(f"[replay] nav prefix {len(nav)} events; {len(in_game)} in-game events")
     slot = find_menu_slot(serial_log, args.game)
     if slot is None:
         print(f"[replay] FATAL: {args.game} not in the start-menu dump")
@@ -104,8 +114,8 @@ def main():
     launch_from_menu(q, slot, arch=args.arch, gesture="keys")
     if args.settle > 0:
         time.sleep(args.settle)
-    print(f"[replay] replaying {len(events) - cut} in-game events")
-    driver = events_to_qmp(events[cut:])
+    print(f"[replay] replaying {len(in_game)} in-game events")
+    driver = events_to_qmp(in_game)
     driver(q)
     time.sleep(2)
     shot = os.path.join(path, "replay_end.ppm")
