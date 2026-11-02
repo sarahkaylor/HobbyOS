@@ -319,6 +319,19 @@ static int el_map_start_page(struct addr_space *as, const struct hb_start *s) {
   return 0;
 }
 
+/* User stack pointer a NATIVE program starts with.  x86_64 keeps the SysV
+ * shape the flat loader has always used (one phantom return-address slot, so
+ * RSP % 16 == 8 at the first instruction); aarch64 has no such rule and uses
+ * the plain top.  The startup block reports the same value the process gets, so
+ * LDHOBBY.SO sees one story. */
+static uint64_t el_native_sp(void) {
+#if defined(__x86_64__)
+  return USER_MAIN_STK_TOP_V2 - 8;
+#else
+  return USER_MAIN_STK_TOP_V2;
+#endif
+}
+
 /* Parse the executable and apply every refusal that does not need the
  * interpreter's bytes.  Prints the reason (the compat track's message is the
  * same string it always printed) and fills info->parse_rc. */
@@ -450,7 +463,7 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
       hs.phnum = eimg->phnum;
       hs.phent = eimg->phent;
       hs.interp_base = interp_base;
-      hs.sp = USER_MAIN_STK_TOP_V2;
+      hs.sp = el_native_sp();
     } /* else: magic == 0, the documented "not interpreted" answer */
     rc = el_map_start_page(as, &hs);
     if (rc != 0) goto done;
@@ -464,7 +477,7 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
   info->interp_base = interp_base;
   info->interpreted = iimg ? 1 : 0;
   info->native = native;
-  info->sp = USER_MAIN_STK_TOP_V2;
+  info->sp = el_native_sp();
   rc = 0;
 
 done:

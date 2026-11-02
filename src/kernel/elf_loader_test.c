@@ -69,6 +69,14 @@
 /* ELF user window base (vm.h): where every executable is placed. */
 #define FX_IMG_BASE USER_IMG_BASE
 
+/* The stack pointer a native load reports: the flat loader's x86_64 SysV shape
+ * (top - 8) on intel, the plain top on aarch64.  Same rule as elf_loader.c. */
+#if defined(__x86_64__)
+#define FX_EXPECT_SP (USER_MAIN_STK_TOP_V2 - 8)
+#else
+#define FX_EXPECT_SP (USER_MAIN_STK_TOP_V2)
+#endif
+
 /* --- byte writers ------------------------------------------------------ */
 
 static void w16(uint8_t *p, uint16_t v) {
@@ -351,7 +359,7 @@ static void test_map_static_native(void) {
   EXPECT_EQ(info.phnum, 3); /* no-interp build has 3 phdrs */
   EXPECT_EQ(info.phent, 56);
   EXPECT_EQ(info.interp_base == 0, 1);
-  EXPECT_EQ(info.sp == USER_MAIN_STK_TOP_V2, 1);
+  EXPECT_EQ(info.sp == FX_EXPECT_SP, 1);
   EXPECT_EQ(info.parse_rc, ELF_OK);
 
   /* Real p_flags: text is R|X, data is R|W — never one big RWX region. */
@@ -478,7 +486,7 @@ static void test_map_interp(void) {
   EXPECT_EQ(hs.phnum, 4);
   EXPECT_EQ(hs.phent, 56);
   EXPECT_EQ(hs.interp_base == lib0, 1);
-  EXPECT_EQ(hs.sp == USER_MAIN_STK_TOP_V2, 1);
+  EXPECT_EQ(hs.sp == FX_EXPECT_SP, 1);
   EXPECT_EQ(hs.reserved[0] == 0 && hs.reserved[5] == 0, 1);
 
   vm_as_teardown(as);
