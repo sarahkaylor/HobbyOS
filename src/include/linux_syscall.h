@@ -200,6 +200,14 @@
 #define L_MAP_PRIVATE 0x02
 #define L_MAP_FIXED 0x10
 #define L_MAP_ANONYMOUS 0x20
+/* mmap flag bits the memory lane needs and the measured set above lacks.
+   Values are Linux x86_64's (sys/mman.h); MAP_NORESERVE is a no-op on
+   HobbyOS (every page is demand-zero) but is recorded on the region. */
+#define L_MAP_NORESERVE 0x4000
+#define L_MAP_FIXED_NOREPLACE 0x100000
+/* mremap(2) flags (linux/mman.h). */
+#define L_MREMAP_MAYMOVE 0x01
+#define L_MREMAP_FIXED 0x02
 
 #define L_SEEK_SET 0
 #define L_SEEK_CUR 1
