@@ -13,8 +13,8 @@
  * trap.c (full), process.c (partial, only current_proc) and test_smp.c (a
  * third copy in the test).  Three declarations mean a field-order change can
  * silently desync the asm's fixed gs: offsets or make the test measure its own
- * copy; the compiler cannot catch it.  The snap_* offsets are load-bearing for
- * FRAMESNAP_ASM (gs:[48]..gs:[104]) and are pinned by the typedefs in trap.c. */
+ * copy; the compiler cannot catch it.  The field order is load-bearing for the
+ * asm's fixed gs: offsets (kernel_stack 0 … current_proc 40, initialized 48). */
 struct process;
 struct cpu_local {
   uint64_t kernel_stack;
@@ -23,15 +23,7 @@ struct cpu_local {
   uint64_t user_sp_temp;
   uint64_t cpu_id;
   struct process *current_proc;
-  uint64_t snap_rip;     /* 48 */
-  uint64_t snap_cs;      /* 56 */
-  uint64_t snap_rflags;  /* 64 */
-  uint64_t snap_rsp;     /* 72 (CPL3 only) */
-  uint64_t snap_ss;      /* 80 (CPL3 only) */
-  uint64_t snap_valid;   /* 88 */
-  uint64_t snap_count;   /* 96 */
-  uint64_t fault_count;  /* 104 */
-  uint64_t initialized;  /* 112: set by trap_init_core_with_id on each core */
+  uint64_t initialized;  /* 48: set by trap_init_core_with_id on each core */
 } __attribute__((packed));
 
 extern struct cpu_local cpu_locals[];
