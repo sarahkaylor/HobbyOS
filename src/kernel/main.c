@@ -578,6 +578,10 @@ void main(void) {
      the serial log. */
   uart_puts("Mode: SO_TEST - booting the dynamic-linking pilot HDYN.BIN\n");
   load_and_run_program_in_scheduler("HDYN.BIN", -1, -1, -1, -1);
+  /* The first REAL conversion: `ls`, same source, no static libc (7 KB vs
+   * 46 KB).  Loading it alongside the pilot also makes the shared page cache
+   * observable end to end — two processes mapping the same LIBC.SO. */
+  load_and_run_program_in_scheduler("LSDYN.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);
