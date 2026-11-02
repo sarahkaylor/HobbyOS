@@ -96,3 +96,9 @@ edits `trap.c`, `linux_compat.c`, the Makefile or `docs/linux-abi.md`.
   64-bit fix; blocking-syscall return-value fix (store before `schedule`);
   intel unit tests 397/0; `hello` probe green in-guest.
 - 2026-11-02 `xsession`: `/XSTART.TXT` autostart + `XSESS_NO_WM` switch.
+- 2026-11-02 startup block: real argv + envp from the PCB blobs.  Session
+  launch of the probe measures `[X] [LP] argv argc=3 argv0=/DOOM.ELF` and
+  `[X] [LP] env DISPLAY=:0` — the two things upstream Doom reads (its `-iwad`
+  argument and the X display name).  First cut wrote argv before envp, guest
+  read argv[0]==NULL and faulted at VA=0x1000; the ordering is pinned in the
+  helper's comment.
