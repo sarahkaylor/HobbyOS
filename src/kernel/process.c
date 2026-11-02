@@ -732,13 +732,20 @@ static void reap_deliver_locked(struct process *grp) {
 static void group_teardown(struct process *grp, uint64_t code) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   int block = grp->phys_block_idx;
-  struct addr_space *as = grp->as;
-  if (block < 0 && !as) {
+  if (grp->teardown_done) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return;
   }
+  /* GB-159: the exactly-once token is now a flag, not the AS/block pair.
+     This CPU is still executing the exit path; a tick between clearing `as`
+     and state=EXITED saves a kernel frame that schedule() then refuses to
+     resume ([NOAS]: no AS, no v1 base), so the slot stays READY for ever and
+     never prints an exit line.  The AS stays attached here and is released by
+     the slot-reuse / zombie-reclaim paths, which only take it once
+     process_still_running(i) is false -- i.e. no CPU still translates
+     through it (the [FREERACE] at mmu.c:665). */
+  grp->teardown_done = 1;
   grp->phys_block_idx = -1;
-  grp->as = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
 
   /* Close the group's descriptors once.  SEC-9 (security-plan.md #9):
@@ -752,8 +759,6 @@ static void group_teardown(struct process *grp, uint64_t code) {
   flags = spinlock_acquire_irqsave(&proc_lock);
   if (block >= 0)
     frame_block_free(block);
-  if (as)
-    vm_as_teardown(as); /* P2.2: the v2 group's AS goes with the block */
   grp->state = PROC_STATE_EXITED;
   grp->thread_ret = code;
   /* P2.3 (design section 5.4): a fault kill passes PROCESS_STATUS_SIGNAL
@@ -901,6 +906,17 @@ static int process_create_internal_ver(int ver) {
   uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 1; i < MAX_PROCESSES; i++) {
     if (proc_table[i].state == PROC_STATE_FREE) {
+      /* GB-159: if the previous pid's CPU is still in its teardown tail, the
+         slot is not reusable yet -- reusing it would collide the pid and free
+         an AS a CPU still translates through.  The zombie/reclaim paths below
+         do the same check. */
+      if (process_still_running(i))
+        continue;
+      /* A reaped slot can still carry the deferred AS (see sys_wait4);
+         release it before the slot is handed out, or the AS_V2 pool leaks a
+         slot and every later spawn collides. */
+      if (proc_table[i].phys_block_idx >= 0 || proc_table[i].as)
+        proc_release_mem_locked(&proc_table[i]);
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
       /* GB-068 probe: -1 distinguishes "never called the kernel" from
@@ -1077,6 +1093,7 @@ static int process_create_internal_ver(int ver) {
   p->tls_base = 0;
   p->futex_uaddr = 0;
   p->clear_child_tid = 0;
+  p->teardown_done = 0;
   p->thread_ret = 0;
   p->as = 0;
   p->fd_cloexec = 0;
@@ -2283,6 +2300,29 @@ static int sig_known(int sig) {
   }
 }
 
+/* GB-161: force a CPU back through schedule() so a victim's
+   cpu_current_pids claim is dropped.  Vector 0x81 is the reschedule IPI the
+   timer broadcasts (0x000C0081); a directed fixed-delivery send uses the same
+   vector with the destination in ICR_HIGH.  Self-delivery is the software
+   `int $0x81` path arch_yield() uses. */
+static void resched_cpu(uint32_t c) {
+#ifdef __x86_64__
+  if (c == get_cpuid()) {
+    __asm__ volatile("int $0x81" ::: "memory");
+    return;
+  }
+  volatile uint32_t *icr_hi = (volatile uint32_t *)0xFEE00310;
+  volatile uint32_t *icr_lo = (volatile uint32_t *)0xFEE00300;
+  *icr_hi = (uint32_t)(c << 24);
+  *icr_lo = 0x00002081u; /* fixed delivery, vector 0x81, level assert, edge */
+  for (int i = 0; i < 200000; i++) {
+    if ((*icr_lo & (1u << 12)) == 0)
+      break;
+    __asm__ volatile("pause" ::: "memory");
+  }
+#endif
+}
+
 /* The immediate group-kill body (D9's default action / SIGKILL): anchor
  * EXITED with the signal byte in the waitpid status, memory released,
  * sibling threads ended, fds closed.  Never blocks on claims (P1's
@@ -2295,11 +2335,31 @@ void process_kill_group_sig(struct process *p, int sig) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return;
   }
+  int kpid = p->pid;
+  unsigned long kpc = (unsigned long)p->last_user_pc;
+  char kname[32];
+  int kn = 0;
+  for (; kn < 31 && p->name[kn]; kn++)
+    kname[kn] = p->name[kn];
+  kname[kn] = '\0';
   p->state = PROC_STATE_EXITED;
   /* Deliver the terminating-signal status (low byte) so a waiting parent
      can reap a kill with a signal-shaped status. */
   p->exit_status = sig & 0x7f;
-  proc_release_mem_locked(p);
+  /* GB-159: a kill can land while the victim is still executing on another
+     CPU.  Freeing its AS here is the [FREERACE] (`freeing root=... while
+     cpu=... still translates through it`); the victim then re-enters
+     schedule() with as==0, the NOAS guard parks its slot for ever, and no exit
+     line is printed.  Mark the teardown done and release the block, but leave
+     the AS to the slot-reuse/zombie paths, which free it only once
+     process_still_running(i) is false. */
+  p->teardown_done = 1;
+  {
+    int block = p->phys_block_idx;
+    p->phys_block_idx = -1;
+    if (block >= 0)
+      frame_block_free(block);
+  }
   /* P1: killing a group leader kills the whole group. */
   for (int i = 0; i < MAX_PROCESSES; i++) {
     struct process *m = &proc_table[i];
@@ -2320,6 +2380,17 @@ void process_kill_group_sig(struct process *p, int sig) {
   reap_deliver_locked(p);
   spinlock_release_irqrestore(&proc_lock, flags);
 
+  /* GB-161: the anchor is EXITED, but a CPU that was running it still claims
+     the pid in cpu_current_pids until its own next trap enters schedule().  If
+     that trap never lands (kernel-mode busy-wait, or the pick raced the kill),
+     the slot stays st=RUNNING with claimed_by=<cpu> after its [EXITPC] line and
+     the deferred AS is never released.  Force those CPUs out now: on the IPI
+     they enter schedule(), see EXITED, save nothing, and drop the claim. */
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    if (current_pid_of_cpu((int)c) == kpid)
+      resched_cpu(c);
+  }
+
   /* SEC-9 (security-plan.md #9): close through file_close(), which claims
    * each fd slot atomically under proc_lock.  The old loop snapshotted
    * open_fds[i] and called fs_close_global() outside any lock, so a
@@ -2331,6 +2402,32 @@ void process_kill_group_sig(struct process *p, int sig) {
   for (int i = 0; i < MAX_OPEN_FDS; i++)
     file_close(p, i);
   process_wake_all();
+
+  /* GB-159: the desktop's close path is kill()+waitpid(); it never reaches
+     process_exit(), so a closed window's pid produced no exit line at all
+     (0 [EXITPC] / 0 "Process N ... exited" for 12 closed windows in the
+     GB-046-V3 evidence).  An exit line naming the pid is part of GB-159's
+     DoD, so emit the same shape here -- after the lock is dropped and using
+     the pid/PC/name copied under it, so a slot reuse cannot change them. */
+  struct kline ku;
+  kl_init(&ku);
+  kl_s(&ku, "[KERNEL] Process ");
+  kl_i(&ku, (long)kpid);
+  kl_s(&ku, ": ");
+  kl_s(&ku, kname);
+  kl_s(&ku, " exited (signal ");
+  kl_i(&ku, (long)(sig & 0x7f));
+  kl_s(&ku, ").\n");
+  kl_emit(&ku);
+  kl_init(&ku);
+  kl_s(&ku, "[EXITPC] pid=");
+  kl_i(&ku, (long)kpid);
+  kl_s(&ku, " last_user_pc=");
+  kl_hex(&ku, kpc);
+  kl_s(&ku, " code=");
+  kl_hex(&ku, (unsigned long)(sig & 0x7f));
+  kl_s(&ku, " killed\n");
+  kl_emit(&ku);
 }
 
 /* Legacy entry point (existing callers: unit-test cleanup, sysmon/desktop
@@ -2992,6 +3089,12 @@ static int process_wait_common(struct trap_frame *tf, int want_pid,
     ho_rusage_fill(&ru, p);
     p->state = PROC_STATE_FREE;
     p->exit_status = 0;
+    /* GB-159: the child's AS is now deferred out of the exit/kill path.  The
+       exiting CPU may still be inside its teardown tail, so free only when no
+       CPU claims the pid; otherwise the AS rides the FREE slot until
+       process_create_internal releases it before reuse. */
+    if (!process_still_running(i))
+      proc_release_mem_locked(p);
     spinlock_release_irqrestore(&proc_lock, flags);
 
     /* The status range was validated at entry (vm_touch for v2, range for
@@ -4425,6 +4528,7 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   t->wake_ms = 0;
   t->futex_uaddr = 0;
   t->clear_child_tid = 0;
+  t->teardown_done = 0;
   t->spawn_retval = -1;
   t->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {

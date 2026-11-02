@@ -336,6 +336,8 @@ struct process {
   uint64_t futex_uaddr;  /**< P1.2: non-zero while parked in FUTEX WAIT */
   uint64_t clear_child_tid; /**< GB-021: Linux clone CLONE_CHILD_CLEARTID word,
                                  zeroed and futex-woken at thread exit */
+  uint32_t teardown_done; /**< GB-159: exactly-once token for group_teardown;
+                               the AS is freed later, off-CPU, by slot reuse */
   uint64_t thread_ret;   /**< SYS_THREAD_EXIT argument (diagnostics only) */
 
   /* --- P2 (docs/browser/p2-vm-design.md section 1.3): address space ---- *
