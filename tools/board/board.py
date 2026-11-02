@@ -262,10 +262,25 @@ def cmd_claim(a):
         # GB-154 the only refusal was the In-Progress one above, so a mis-typed
         # claim silently skipped promotion or fought pr_sync.py for an hour.
         if cur != "Ready":
+            # The hint must fit the lane: a Backlog card is promoted (rule 5), but
+            # an In Review / Merge Gate card is at or past its verifier gate and
+            # moving it back to Ready would fight pr_sync.py (rule 2) — GB-156.
+            if cur == "In Review":
+                hint = ("Leave it in `In Review` — it is waiting on its GB-nnn-V verifier "
+                        "gate; do not move it to `Ready` (WORK POLICY rule 2).")
+            elif cur == "Merge Gate":
+                hint = ("Leave it in `Merge Gate` — it is past verification and waiting on "
+                        "the merge; do not move it to `Ready` (WORK POLICY rule 2).")
+            elif cur == "Icebox":
+                hint = "It is `Icebox`; move it to `Backlog` only if it is real work."
+            elif cur == "Done":
+                hint = "It is `Done`; not claimable."
+            else:  # Backlog or no lane: promotion is the legitimate path (rule 5).
+                hint = f"Promote it first: python3 tools/board/board.py move {a.gid} Ready"
             raise SystemExit(
                 f"{a.gid} #{it['number']} is `{cur or 'not in a lane'}` — claims are only "
                 "from `Ready` (WORK POLICY rule 1, 2026-11-01); no claim posted, lane "
-                f"unchanged. Promote it first: python3 tools/board/board.py move {a.gid} Ready")
+                f"unchanged. {hint}")
         prev = set_lane(it, "In Progress")
         msg = (f"claimed by `{by}` on {a.host or 'swarm-coordinator'} — "
                f"lane: {prev or 'Backlog'} → In Progress")

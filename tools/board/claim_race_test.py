@@ -174,7 +174,7 @@ def claim_once():
         return f"LOST: {e}"
 
 
-for lane in ("Backlog", "In Review", None):
+for lane in ("Backlog", "In Review", "Merge Gate", None):
     st = make_fake()
     st["issues"][1]["labels"] = [{"name": lane, "id": 100}] if lane else []
     res = claim_once()
@@ -185,6 +185,16 @@ for lane in ("Backlog", "In Review", None):
           [l["name"] for l in st["issues"][1]["labels"]] == ([lane] if lane else []))
     check(f"refusal posts no claim comment on the {label} card",
           st["comments"].get(1, []) == [])
+    if lane in ("In Review", "Merge Gate"):
+        # Rule 2: a PR-bearing card must stay put.  The refusal must not print a
+        # command that would move it back to Ready (GB-156).
+        check(f"{label} refusal does not advise promoting to Ready",
+              "move GB-074 Ready" not in res)
+        check(f"{label} refusal explains the gate, not promotion",
+              ("verifier" if lane == "In Review" else "merge") in res.lower())
+    else:
+        check(f"{label} refusal still carries the promotion command",
+              "move GB-074 Ready" in res)
 
 # The guard must not remove the working path: Ready still claims.
 st = make_fake()
