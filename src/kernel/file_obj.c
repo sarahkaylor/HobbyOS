@@ -15,6 +15,7 @@
  * documented order (lock.h), so it must never run under vm_lock.
  */
 #include "file_obj.h"
+#include "kline.h" /* the shared-cache evidence line (docs/shared-libs.md §9) */
 
 #include <stdint.h>
 
@@ -35,11 +36,27 @@ static struct file_obj_entry file_obj_tab[VM_OBJ_MAX];
 static spinlock_t file_obj_lock;
 static int file_obj_ready;
 
+/* One-time init must be race-free: a plain "if (!ready) { init; ready = 1; }"
+ * lets two CPUs on their first DSO mmap BOTH call spinlock_init() on the same
+ * lock, and the second init resets a lock the first already holds.  Both then
+ * enter the critical section, pick the same free slot and overwrite each
+ * other's entry — the orphaned object keeps serving live mappings but is no
+ * longer in the table, so its unfaulted pages can never be filled
+ * (measured: "dead object" under 3 concurrent DSO mappers, ~1 boot in 3). */
 static void file_obj_init_once(void) {
-  if (!file_obj_ready) {
+  if (__atomic_load_n(&file_obj_ready, __ATOMIC_ACQUIRE))
+    return;
+  static volatile int init_state; /* 0 free, 1 busy, 2 done */
+  int expect = 0;
+  if (__atomic_compare_exchange_n(&init_state, &expect, 1, 0,
+                                  __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
     spinlock_init(&file_obj_lock);
-    file_obj_ready = 1;
+    __atomic_store_n(&file_obj_ready, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&init_state, 2, __ATOMIC_RELEASE);
+    return;
   }
+  while (__atomic_load_n(&init_state, __ATOMIC_ACQUIRE) != 2)
+    ; /* the winner is initializing; the release store publishes it */
 }
 
 int file_obj_count(void) {
@@ -75,6 +92,26 @@ struct vm_object *file_obj_get(uint16_t start_cluster, uint32_t file_size) {
       struct vm_object *hit = file_obj_tab[i].obj;
       vm_object_ref(hit); /* the caller's reference (takes vm_lock) */
       spinlock_release_irqrestore(&file_obj_lock, fl);
+      /* docs/shared-libs.md §9: a hit is the whole point of a shared library.
+       * Printed once per (file, refcount reached) so a boot log shows DSO
+       * text being shared rather than re-read: "io.so" names the file. */
+      static volatile int reported;
+      int claim = 0;
+      if (!__atomic_load_n(&reported, __ATOMIC_ACQUIRE) && file_size > 0x8000 &&
+          hit->refs >= 2 &&
+          __atomic_compare_exchange_n(&reported, &claim, 1, 0, __ATOMIC_ACQ_REL,
+                                      __ATOMIC_ACQUIRE)) {
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "so cache: file (cluster=");
+        kl_i(&kl, (long)start_cluster);
+        kl_s(&kl, " size=");
+        kl_i(&kl, (long)file_size);
+        kl_s(&kl, ") now shared by refs=");
+        kl_i(&kl, (long)hit->refs);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
       return hit;
     }
   }

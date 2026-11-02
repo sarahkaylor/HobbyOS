@@ -46,14 +46,27 @@ static spinlock_t vm_lock;
 static struct addr_space vm_as_pool[MAX_PROCESSES];
 static int vm_lock_ready;
 
+/* Same one-time-init hazard as file_obj_init_once(): two CPUs racing here
+ * would both spinlock_init() the VM lock and the second reset would let both
+ * into every critical section it protects.  Practically unreachable today
+ * (the boot core initialises it before APs start) but not by construction. */
 static void vm_lock_init_once(void) {
-  if (!vm_lock_ready) {
+  if (__atomic_load_n(&vm_lock_ready, __ATOMIC_ACQUIRE))
+    return;
+  static volatile int init_state; /* 0 free, 1 busy, 2 done */
+  int expect = 0;
+  if (__atomic_compare_exchange_n(&init_state, &expect, 1, 0,
+                                  __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
     spinlock_init(&vm_lock);
 #ifdef KERNEL_MODE_UNIT_TEST
     lockdbg_register(&vm_lock, "vm_lock", LOCK_RANK_VM); /* SEC-OBS-B */
 #endif
-    vm_lock_ready = 1;
+    __atomic_store_n(&vm_lock_ready, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&init_state, 2, __ATOMIC_RELEASE);
+    return;
   }
+  while (__atomic_load_n(&init_state, __ATOMIC_ACQUIRE) != 2)
+    ;
 }
 
 static uint64_t v2_memcpy_frames(uint64_t dst, uint64_t src, uint64_t n) {
@@ -1240,6 +1253,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
      MAP_PRIVATE — or a private copy for a MAP_PRIVATE write. */
   if (r->obj && r->obj->kind == VM_OBJ_FILE) {
     int cow = write && (r->flags & VM_MAP_PRIVATE);
+    uint64_t off_dbg = (a - r->base) + r->obj_off;
     spinlock_release_irqrestore(&vm_lock, fl);
     int mrc = vm_file_obj_materialize(as, a, cow);
     if (mrc != 0) {
