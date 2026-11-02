@@ -430,9 +430,16 @@ build_libc() {
   # -z text turns "no TEXTREL" from a post-link assertion into a link-time
   # error: any relocation that would force a write to a PT_LOAD mapped read-only
   # (or R+X) fails the link instead of shipping a self-modifying image.
+  # -z separate-loadable-segments: give every PT_LOAD its own page range.
+  # Without it lld packs the segments contiguously (p_vaddr == p_offset, no
+  # page alignment), so R, R+X and RW segments share pages — and the
+  # interpreter maps each segment at page_down(p_vaddr) with its own file
+  # offset, which is only sound when a page belongs to one segment.  Measured:
+  # the first pilot boot refused LIBC.SO with "PT_LOAD segments share a page".
   "$LD" -shared --soname=LIBC.SO -T "$LINKER_SO" --version-script "$LIBC_MAP" \
     --undefined-version \
     -z relro -z now -z defs -z noexecstack -z text --hash-style=both \
+    -z separate-loadable-segments \
     "${strip[@]}" \
     -o "$SO_OUT" "${objs[@]}" || die "$arch: ld.lld -shared failed (see above)"
 
@@ -660,7 +667,13 @@ build_interp() {
   local srcdir=src/user/ld
   local -a srcs=()
   local f
-  for f in "$srcdir"/*.c; do [ -f "$f" ] && srcs+=("$f"); done
+  for f in "$srcdir"/*.c; do
+    # host_test.c is the HOST-side harness (it includes <sys/syscall.h> and
+    # is driven by tools/ldso_host_test.sh); it must never enter the target
+    # link.  Same for any *_test.c that lands in the directory later.
+    case "$f" in */host_test.c|*_test.c) continue ;; esac
+    [ -f "$f" ] && srcs+=("$f")
+  done
   if [ "${#srcs[@]}" -eq 0 ]; then
     say "build_interp: lane D sources are not in this tree yet ($srcdir/*.c)."
     say "  expected: ldso.c elf_dyn.c mmap_io.c (docs/shared-libs.md §4 lane D)."
@@ -694,7 +707,11 @@ build_interp() {
   rt=$("$READELF" -r -W "$interp" | awk '/^R_/ {print $3}' | grep -v '^R_[A-Z0-9_]*_RELATIVE$' | LC_ALL=C sort -u)
   if [ -n "$needed" ]; then say "$arch: FAIL LDHOBBY.SO has DT_NEEDED: $needed"; rc=1; fi
   if [ -n "$rt" ]; then say "$arch: FAIL LDHOBBY.SO has non-RELATIVE dynamic relocations: $rt"; rc=1; fi
-  "$READELF" -h -W "$interp" | grep -q 'DYN (Shared object file)' || { say "$arch: FAIL LDHOBBY.SO is not ET_DYN"; rc=1; }
+  # e_type must be DYN (3).  Match the TYPE FIELD, not readelf's human
+  # description: lld labels a -pie output "DYN (Position-Independent
+  # Executable file)" and a -shared one "DYN (Shared object file)", and the
+  # interpreter is legitimately either.
+  "$READELF" -h -W "$interp" | grep -q 'Type:[[:space:]]*DYN' || { say "$arch: FAIL LDHOBBY.SO is not ET_DYN"; rc=1; }
   [ "$rc" -eq 0 ] || die "$arch: LDHOBBY.SO contract violated"
 
   {

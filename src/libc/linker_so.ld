@@ -90,8 +90,13 @@ SECTIONS
     .eh_frame_hdr : { *(.eh_frame_hdr) }
     .eh_frame : { KEEP(*(.eh_frame)) }
 
-    /* --- read-only, executable --- */
-    .text : {
+    /* --- read-only, executable ---
+     * Page-aligned so the R and R+X segments never share a page: the
+     * interpreter maps each PT_LOAD with its own file offset and its own
+     * protection, which is only sound when a page belongs to one segment
+     * (measured: the first pilot boot refused LIBC.SO with "PT_LOAD
+     * segments share a page"). */
+    .text : ALIGN(0x1000) {
         *(.text .text.*)
         *(.ltext .ltext.*)
     }
@@ -99,8 +104,9 @@ SECTIONS
     .fini : { KEEP(*(.fini)) }
     .plt : { *(.plt) *(.plt.*) *(.iplt) }
 
-    /* --- writable, RELRO (made read-only by the interpreter) --- */
-    .data.rel.ro : ALIGN(8) {
+    /* --- writable, RELRO (made read-only by the interpreter) ---
+     * Page-aligned: same rule at the R+X -> RW boundary. */
+    .data.rel.ro : ALIGN(0x1000) {
         *(.data.rel.ro .data.rel.ro.*)
         *(.ldata.rel.ro .ldata.rel.ro.*)
     }
