@@ -259,10 +259,16 @@ int main(void) {
   int cr_errno = errno;
   /* F_GETFL, not F_GETFD: HobbyOS answers F_GETFD from a bitmap that keeps
    * no record of a closed slot, so only F_GETFL reveals the close. */
-  int closed_ok = (r == 0) && (fcntl(40, F_GETFL) == -1) &&
-                  (fcntl(41, F_GETFL) == -1);
-  verdict("close_range", closed_ok, "rc=%d c1=%d c2=%d errno=%d", r, c1, c2,
-          cr_errno);
+  errno = 0;
+  int f40 = fcntl(40, F_GETFL);
+  int e40 = errno;
+  errno = 0;
+  int f41 = fcntl(41, F_GETFL);
+  int e41 = errno;
+  int closed_ok = (r == 0) && (f40 == -1) && (f41 == -1);
+  verdict("close_range", closed_ok,
+          "rc=%d c1=%d c2=%d f40=%d/e%d f41=%d/e%d errno=%d", r, c1, c2, f40,
+          e40, f41, e41, cr_errno);
 
   /* ---- 7. the named socket: bind / listen / connect / accept --------- */
   (void)unlink(LP_PATH); /* Linux needs this; HobbyOS has no socket inode */
