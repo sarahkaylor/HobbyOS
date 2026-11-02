@@ -30,6 +30,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #define IMG_W 640
@@ -81,10 +82,7 @@ int main(int argc, char **argv) {
   XImage *img;
   GC gc;
   unsigned char *pixels;
-  int i, x, y;
-
-  (void) argc;
-  (void) argv;
+  int i, x, y, noinstall;
 
   dpy = XOpenDisplay(":0");
   if (!dpy) {
@@ -102,6 +100,12 @@ int main(int argc, char **argv) {
     fprintf(stderr, "[XD8] FAIL XOpenDisplay(:0)\n");
     return 1;
   }
+  /* -noinstall reproduces linuxdoom-1.10's path exactly: it creates a
+   * private AllocAll colormap, sets it on the window and never calls
+   * XInstallColormap, so the server must install it when the window is
+   * mapped.  Without the flag the client installs it explicitly (both must
+   * show the same bands). */
+  noinstall = argc > 1 && strcmp(argv[1], "-noinstall") == 0;
   screen = DefaultScreen(dpy);
   fprintf(stderr, "[XD8] display :0 open: screen %d %dx%d, root depth %d\n",
           screen, DisplayWidth(dpy, screen), DisplayHeight(dpy, screen),
@@ -169,7 +173,13 @@ int main(int argc, char **argv) {
 
   /* Doom installs its colormap the same way (the window attribute, then
    * XInstallColormap is implicit on map; be explicit here). */
-  XInstallColormap(dpy, cmap);
+  if (noinstall) {
+    fprintf(stderr, "[XD8] -noinstall: relying on the server's "
+            "map-time colormap install\n");
+  } else {
+    fprintf(stderr, "[XD8] XInstallColormap explicit\n");
+    XInstallColormap(dpy, cmap);
+  }
 
   pixels = malloc((size_t) IMG_W * IMG_H);
   if (!pixels) {
