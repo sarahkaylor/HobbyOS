@@ -403,9 +403,13 @@ Still blocked, and why:
 
 ### 10.3 Numbers (intel)
 
-`ls` 7056 vs 46080 static, `cat` 7536 vs 56744, `sh` 219768 vs ~1 MB. The
-saving is what you would expect for small utilities; the real prize stays the
-large role blobs and future `dlopen`.
+`ls` 7056 vs 46080 static, `cat` 7536 vs 56744 — programs dominated by libc
+shrink by roughly 6x. The shell barely moves: `sh` 219768 vs 224776 static
+(aarch64 195744 vs 198024), because its own 277 KB of code dominates the
+link; only the libc share was ever removable. That is the honest shape of the
+saving — a program's benefit is proportional to how much libc it used, so
+the real prize stays the large role blobs and future `dlopen`, not the
+utility set.
 
 With 43 dynamic processes created in one boot on a 1.25 GiB process pool
 (40 blocks of 32 MiB), every one still loaded: they exit fast enough that the
