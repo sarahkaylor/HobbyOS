@@ -86,8 +86,15 @@
 #define L_SYS_getegid 108
 #define L_SYS_setpgid 109
 #define L_SYS_getppid 110
+/* sigaltstack(2) and setrlimit(2) sit in the same 100..200 band as the rest
+   of the identity/limit rows on x86_64 (131 / 160). */
+#define L_SYS_sigaltstack 131
 #define L_SYS_arch_prctl 158
+#define L_SYS_setrlimit 160
 #define L_SYS_gettid 186
+/* tkill(2): musl's raise() uses tkill(tid, sig), not tgkill — an ENOSYS here
+   makes raise()/abort() silently do nothing. */
+#define L_SYS_tkill 200
 /* set_tid_address(2): musl's __init_tp stores its result as the thread id and
    pthread_join/exit paths read it back.  ENOSYS is survivable for a
    single-threaded program but leaks a negative tid into musl's own TLS, so the
@@ -242,7 +249,24 @@
 #define L_DT_CHR 2
 
 /* --- rlimit (docs §3) --------------------------------------------------- */
+/* getrlimit/setrlimit/prlimit64 resource ids (Linux numbers).  NOFILE is the
+   fd table (MAX_OPEN_FDS); STACK is the demand-paged 8 MiB main stack. */
+#define L_RLIMIT_STACK 3
 #define L_RLIMIT_NOFILE 7
+/* RLIM_INFINITY: the "no limit" value the kernel reports for a resource it
+   does not model.  0xFFFFFFFFFFFFFFFF, i.e. (rlim_t)-1. */
+#define L_RLIM_INFINITY (~0ULL)
+
+/* --- rusage who (getrusage) --------------------------------------------- */
+#define L_RUSAGE_SELF 0
+#define L_RUSAGE_CHILDREN (-1)
+
+/* --- times(2): the kernel clock tick (USER_HZ on Linux x86_64) ---------- */
+#define L_CLK_TCK 100
+
+/* --- *at() flags (newfstatat / faccessat / readlinkat) ------------------ */
+#define L_AT_SYMLINK_NOFOLLOW 0x100
+#define L_AT_EMPTY_PATH 0x1000
 
 #define L_ELFMAG_0 0x7F
 
