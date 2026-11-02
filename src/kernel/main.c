@@ -582,6 +582,10 @@ void main(void) {
    * 46 KB).  Loading it alongside the pilot also makes the shared page cache
    * observable end to end — two processes mapping the same LIBC.SO. */
   load_and_run_program_in_scheduler("LSDYN.BIN", -1, -1, -1, -1);
+  /* cat, dynamically linked, reading a real file — and the third mapper of
+   * LIBC.SO, which is what makes the page-cache evidence (file_obj.c "so
+   * cache: ... refs=N") meaningful. */
+  load_and_run_program_in_scheduler_args("CATDYN.BIN", -1, -1, -1, -1, "E2E.TXT");
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

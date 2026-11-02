@@ -2665,6 +2665,7 @@ endif
 	$(MCOPY) -i disk.img $(OBJ_DIR)/libc.so ::/LIBC.SO
 	$(MCOPY) -i disk.img $(HDYN_BIN) ::/HDYN.BIN
 	$(MCOPY) -i disk.img $(OBJ_DIR)/LSDYN.BIN ::/LSDYN.BIN
+	$(MCOPY) -i disk.img $(OBJ_DIR)/CATDYN.BIN ::/CATDYN.BIN
 ifeq ($(DESKTOP),icewm)
 	# icewm.md §4.3/§4.4: X binaries + data tree + XSESSION.BIN (DESKTOP=icewm only).
 	sh src/user/x11sess/stage-disk.sh disk.img "$(X11_BUILD_DIR)" $(XSESSION_BIN) "$(MCOPY)" "$(MMD)"
@@ -2709,7 +2710,18 @@ $(OBJ_DIR)/LSDYN.BIN: $(OBJ_DIR)/dyn/ls.o $(OBJ_DIR)/libc.so
 	$(LD) -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
 	  -o $@ $(OBJ_DIR)/dyn/ls.o $(OBJ_DIR)/libc.so
 
-disk.img: $(HDYN_BIN) $(OBJ_DIR)/libc.so $(OBJ_DIR)/LDHOBBY.SO $(OBJ_DIR)/LSDYN.BIN
+# cat proves the open/read/write surface across the DSO boundary (4.4 KB vs
+# 56.7 KB static) and gives the 3-process sharing evidence in §9.
+$(OBJ_DIR)/dyn/cat.o: src/user/cat.c src/user_include/libc.h
+	@mkdir -p $(OBJ_DIR)/dyn
+	$(CC) $(USER_CFLAGS) -fPIC -c $< -o $@
+
+$(OBJ_DIR)/CATDYN.BIN: $(OBJ_DIR)/dyn/cat.o $(OBJ_DIR)/libc.so
+	$(LD) -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+	  -o $@ $(OBJ_DIR)/dyn/cat.o $(OBJ_DIR)/libc.so
+
+disk.img: $(HDYN_BIN) $(OBJ_DIR)/libc.so $(OBJ_DIR)/LDHOBBY.SO $(OBJ_DIR)/LSDYN.BIN \
+          $(OBJ_DIR)/CATDYN.BIN
 
 # Target to run the OS inside QEMU
 # RUN_STAGE: optional staging hook, run AFTER disk.img is (re)built and BEFORE
