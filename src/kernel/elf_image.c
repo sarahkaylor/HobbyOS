@@ -72,7 +72,10 @@ static void wr64(uint8_t *p, uint64_t v) {
 #ifndef ELF_USER_WINDOW_BASE
 #define ELF_USER_WINDOW_BASE 0x1000000000ULL /* 64 GiB */
 #endif
-#define EM_X86_64 62
+/* Pre-M0 names kept as aliases: the machine check is now ELF_MACHINE_NATIVE
+ * (elf_image.h), which resolves to EM_X86_64 on the x86_64 kernel + host test
+ * and EM_AARCH64 on the aarch64 kernel. */
+#define EM_X86_64 ELF_EM_X86_64
 #define ELFCLASS64 2
 #define ELFDATA2LSB 1
 #define EV_CURRENT 1
@@ -85,7 +88,8 @@ static int power_of_two_or_trivial(uint64_t v) {
   return (v & (v - 1)) == 0;
 }
 
-int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
+int elf_parse_ex(const void *buf, uint64_t len, struct elf_image *img,
+                 uint32_t flags) {
   if (buf == NULL || img == NULL) return ELF_ERR_ARGS;
   if (len < EHDR_SIZE) return ELF_ERR_HDR_SHORT;
 
@@ -98,7 +102,11 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
 
   const uint16_t e_type = rd16(b + E_TYPE_OFF);
   if (e_type != ET_EXEC && e_type != ET_DYN) return ELF_ERR_TYPE;
-  if (rd16(b + E_MACHINE_OFF) != EM_X86_64) return ELF_ERR_MACHINE;
+  /* Build-conditional machine check (ELF_MACHINE_NATIVE): the aarch64 kernel
+   * accepts EM_AARCH64 and still refuses EM_X86_64, the x86_64 kernel/host test
+   * the reverse.  Same refusal, same message, on both. */
+  const uint16_t e_machine = rd16(b + E_MACHINE_OFF);
+  if (e_machine != (uint16_t)ELF_MACHINE_NATIVE) return ELF_ERR_MACHINE;
   if (rd32(b + E_VERSION_OFF) != EV_CURRENT) return ELF_ERR_VERSION;
 
   const uint16_t phentsize = rd16(b + E_PHENTSIZE_OFF);
@@ -121,6 +129,10 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
   img->dyn_size = 0;
   img->phoff = phoff;
   img->phent = phentsize;
+  img->machine = e_machine;
+  img->has_interp = 0;
+  img->interp_len = 0;
+  for (uint32_t i = 0; i < ELF_INTERP_PATH_MAX; i++) img->interp[i] = 0;
 
   int have_interp = 0;
   uint64_t base = 0, end = 0;
@@ -131,7 +143,28 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
     const uint32_t type = rd32(ph + P_TYPE_OFF);
     if (type == PT_NULL) continue;
     if (type == PT_INTERP) {
+      /* M0 freeze: capture the path when the caller may honour it.  With the
+         default flags this is only a flag and the loop-end refusal below is
+         untouched, so a compat load behaves exactly as it did. */
+      if (have_interp) return ELF_ERR_INTERP_PATH; /* two interpreters: nonsense */
       have_interp = 1;
+      if (flags & ELF_PARSE_ALLOW_INTERP) {
+        const uint64_t ioff = rd64(ph + P_OFFSET_OFF);
+        const uint64_t isz = rd64(ph + P_FILESZ_OFF);
+        /* Bounded and NUL-terminated: a path is a C string the kernel will
+           hand to fat16_resolve_path, so embedded NULs or a missing terminator
+           are refused rather than guessed at. */
+        if (isz < 2 || isz > ELF_INTERP_PATH_MAX) return ELF_ERR_INTERP_PATH;
+        if (ioff > len || isz > len - ioff) return ELF_ERR_INTERP_PATH;
+        const uint8_t *s = b + ioff;
+        for (uint64_t k = 0; k + 1 < isz; k++)
+          if (s[k] == 0) return ELF_ERR_INTERP_PATH;
+        if (s[isz - 1] != 0) return ELF_ERR_INTERP_PATH;
+        if (s[0] != '/') return ELF_ERR_INTERP_PATH; /* root-relative only */
+        for (uint64_t k = 0; k + 1 < isz; k++) img->interp[k] = (char)s[k];
+        img->interp[isz - 1] = '\0';
+        img->interp_len = (uint32_t)(isz - 1);
+      }
       continue;
     }
     if (type == PT_DYNAMIC) {
@@ -182,7 +215,15 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
   }
 
   if (img->nsegs == 0) return ELF_ERR_NO_LOAD;
-  if (have_interp) return ELF_ERR_INTERP; /* decisive: a static loader can't honour it */
+  if (have_interp) {
+    /* Decisive by default: a static loader can't honour an interpreter, and
+       that is exactly the compat track's contract (same error, same message as
+       GB-013).  Only a caller that explicitly opted in gets the path. */
+    if (!(flags & ELF_PARSE_ALLOW_INTERP)) return ELF_ERR_INTERP;
+    if (img->interp_len == 0 || img->interp[0] != '/')
+      return ELF_ERR_INTERP_PATH;
+    img->has_interp = 1;
+  }
 
   /* entry must land inside an executable segment */
   int entry_ok = 0, have_text = 0;
@@ -203,6 +244,37 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
    * recognise.  A static-PIE (ET_DYN) has no such constraint. */
   if (!img->is_pie && base < ELF_USER_WINDOW_BASE) img->needs_low_window = 1;
   return ELF_OK;
+}
+
+/* The GB-013 face: identical behaviour to elf_parse before the M0 freeze
+ * (flags == 0, so PT_INTERP is still ELF_ERR_INTERP). */
+int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
+  return elf_parse_ex(buf, len, img, 0);
+}
+
+/* "/LDHOBBY.SO" — the one interpreter the kernel knows how to start
+ * (docs/shared-libs.md §2).  Case-insensitive (FAT16 namespace), optional
+ * leading '/', no trailing noise.  Pure and bounded: `len` bytes are examined
+ * and nothing is dereferenced past them. */
+int elf_interp_is_native(const char *path, uint32_t len) {
+  static const char want[] = "/LDHOBBY.SO"; /* 10 chars + NUL */
+  if (path == NULL) return 0;
+  uint32_t p = 0;
+  uint32_t w = 1; /* skip want's leading '/' */
+  if (len > 0 && path[0] == '/') {
+    p = 1; /* the leading slash is optional: root-relative either way */
+  }
+  while (w < sizeof(want) - 1) {
+    if (p >= len) return 0;
+    char c = path[p];
+    if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+    if (c != want[w]) return 0;
+    p++;
+    w++;
+  }
+  /* `len` may or may not include the NUL: accept both, but nothing after. */
+  if (p < len && path[p] != '\0') return 0;
+  return 1;
 }
 
 uint64_t elf_image_span(const struct elf_image *img) {
@@ -274,7 +346,7 @@ const char *elf_strerror(int err) {
     case ELF_ERR_ENDIAN: return "big-endian image";
     case ELF_ERR_VERSION: return "bad e_version";
     case ELF_ERR_TYPE: return "not ET_EXEC (ET_DYN/REL/CORE needs the dynamic loader)";
-    case ELF_ERR_MACHINE: return "not EM_X86_64";
+    case ELF_ERR_MACHINE: return "e_machine is not this build's architecture";
     case ELF_ERR_HDR_SHORT: return "file shorter than Elf64_Ehdr";
     case ELF_ERR_PHENTSIZE: return "e_phentsize != 56";
     case ELF_ERR_TOOMANY: return "too many PT_LOAD segments";
@@ -291,6 +363,7 @@ const char *elf_strerror(int err) {
     case ELF_ERR_DST_RANGE: return "destination buffer too small";
     case ELF_ERR_ARGS: return "null argument";
     case ELF_ERR_RELOC: return "unsupported relocation type or bad RELA table";
+    case ELF_ERR_INTERP_PATH: return "bad PT_INTERP path";
     default: return "unknown ELF error";
   }
 }
