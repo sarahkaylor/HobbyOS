@@ -320,7 +320,10 @@ def main():
                            "launched": launched})
             if frozen or not launched:
                 ok = False
-            q.key("esc", 0.4)
+            # GB-159: F4 (keycode 62) is the desktop's close-window key
+            # (desktop.c:2200); ESC does not close a window (GB-091) and the
+            # six-cycle run therefore never exercised the kill/reap path.
+            q.key("f4", 0.4)
             time.sleep(1.0)
 
     floor_mb, peak_mb, growth_mb, mem_ok = \

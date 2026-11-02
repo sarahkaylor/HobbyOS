@@ -906,6 +906,17 @@ static int process_create_internal_ver(int ver) {
   uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 1; i < MAX_PROCESSES; i++) {
     if (proc_table[i].state == PROC_STATE_FREE) {
+      /* GB-159: if the previous pid's CPU is still in its teardown tail, the
+         slot is not reusable yet -- reusing it would collide the pid and free
+         an AS a CPU still translates through.  The zombie/reclaim paths below
+         do the same check. */
+      if (process_still_running(i))
+        continue;
+      /* A reaped slot can still carry the deferred AS (see sys_wait4);
+         release it before the slot is handed out, or the AS_V2 pool leaks a
+         slot and every later spawn collides. */
+      if (proc_table[i].phys_block_idx >= 0 || proc_table[i].as)
+        proc_release_mem_locked(&proc_table[i]);
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
       /* GB-068 probe: -1 distinguishes "never called the kernel" from
@@ -2301,6 +2312,13 @@ void process_kill_group_sig(struct process *p, int sig) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return;
   }
+  int kpid = p->pid;
+  unsigned long kpc = (unsigned long)p->last_user_pc;
+  char kname[32];
+  int kn = 0;
+  for (; kn < 31 && p->name[kn]; kn++)
+    kname[kn] = p->name[kn];
+  kname[kn] = '\0';
   p->state = PROC_STATE_EXITED;
   /* Deliver the terminating-signal status (low byte) so a waiting parent
      can reap a kill with a signal-shaped status. */
@@ -2350,6 +2368,32 @@ void process_kill_group_sig(struct process *p, int sig) {
   for (int i = 0; i < MAX_OPEN_FDS; i++)
     file_close(p, i);
   process_wake_all();
+
+  /* GB-159: the desktop's close path is kill()+waitpid(); it never reaches
+     process_exit(), so a closed window's pid produced no exit line at all
+     (0 [EXITPC] / 0 "Process N ... exited" for 12 closed windows in the
+     GB-046-V3 evidence).  An exit line naming the pid is part of GB-159's
+     DoD, so emit the same shape here -- after the lock is dropped and using
+     the pid/PC/name copied under it, so a slot reuse cannot change them. */
+  struct kline ku;
+  kl_init(&ku);
+  kl_s(&ku, "[KERNEL] Process ");
+  kl_i(&ku, (long)kpid);
+  kl_s(&ku, ": ");
+  kl_s(&ku, kname);
+  kl_s(&ku, " exited (signal ");
+  kl_i(&ku, (long)(sig & 0x7f));
+  kl_s(&ku, ").\n");
+  kl_emit(&ku);
+  kl_init(&ku);
+  kl_s(&ku, "[EXITPC] pid=");
+  kl_i(&ku, (long)kpid);
+  kl_s(&ku, " last_user_pc=");
+  kl_hex(&ku, kpc);
+  kl_s(&ku, " code=");
+  kl_hex(&ku, (unsigned long)(sig & 0x7f));
+  kl_s(&ku, " killed\n");
+  kl_emit(&ku);
 }
 
 /* Legacy entry point (existing callers: unit-test cleanup, sysmon/desktop
@@ -3011,6 +3055,12 @@ static int process_wait_common(struct trap_frame *tf, int want_pid,
     ho_rusage_fill(&ru, p);
     p->state = PROC_STATE_FREE;
     p->exit_status = 0;
+    /* GB-159: the child's AS is now deferred out of the exit/kill path.  The
+       exiting CPU may still be inside its teardown tail, so free only when no
+       CPU claims the pid; otherwise the AS rides the FREE slot until
+       process_create_internal releases it before reuse. */
+    if (!process_still_running(i))
+      proc_release_mem_locked(p);
     spinlock_release_irqrestore(&proc_lock, flags);
 
     /* The status range was validated at entry (vm_touch for v2, range for
