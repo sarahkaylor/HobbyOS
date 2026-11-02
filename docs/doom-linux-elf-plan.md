@@ -92,6 +92,22 @@ edits `trap.c`, `linux_compat.c`, the Makefile or `docs/linux-abi.md`.
 
 ## 7. Log
 
+- 2026-11-02 **compat-fd merged** (sockets/poll/fcntl/dup on the native unix
+  engine): its probe passes in the merged tree —
+  `socketpair / sendto_recvfrom / poll_accepted / sendmsg_recvmsg / accept4 /
+  shutdown_eof / poll_hup` all `ok`, `[LP] done rc=0`.
+- 2026-11-02 **the X11 transport works from a Linux-ABI process** (the milestone
+  this whole design rests on). `src/user/linux_probe_x11.c` in-guest, via
+  `/XSTART.TXT` under `XSESS_NO_WM=1`:
+  `connect ok` -> `setup status=1 body=236 bytes` ->
+  `release=12101025 vendor=The X.Org Foundation roots=1` ->
+  `screen0 root=0x00000041 depth=24 ok` -> `GetInputFocus reply ok`
+  -> `[LP] done rc=0`.  A compat process speaks X11 to HobbyOS's own X.Org
+  server; nothing about that path is emulated.
+- 2026-11-02 first real Doom ELF in the guest: loads (666 pages, `abi=0x1`),
+  runs, and names its first wall — `[LCOMPAT] ENOSYS nr=21` (`access`), which is
+  why it reports `W_InitFiles: no files found`.
+
 - 2026-11-02 freeze: dispatcher + tracer + probe harness; `gettimeofday`
   64-bit fix; blocking-syscall return-value fix (store before `schedule`);
   intel unit tests 397/0; `hello` probe green in-guest.
