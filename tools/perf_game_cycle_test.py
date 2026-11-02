@@ -7,7 +7,8 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from perf_game_cycle import (FreezeWatchdog, rss_trend_growth, flag_freeze_free,
                              rss_floor_peak_growth, parse_ppm_header,
-                             crop_sha256, launch_seen, launch_retry_needed)
+                             crop_sha256, launch_seen, launch_retry_needed,
+                             launched_name)
 
 fails = 0
 def check(cond, msg):
@@ -110,6 +111,16 @@ check(launch_seen("boot...\n[LAUNCH] /GAMES/NES.BIN\n", "NES.BIN"),
       "sees a /GAMES-path launch in the new serial bytes")
 check(launch_seen("boot...nothing happened...", "XNIBBLER.BIN") is False,
       "missing launch -> False (no-op visit must FAIL)")
+
+print("launched_name (GB-046: a wrong-title launch is not a no-op)")
+check(launched_name("a\n[LAUNCH] XNIBBLER.BIN\n") == "XNIBBLER.BIN",
+      "reports the last launched name")
+check(launched_name("a\n[LAUNCH] XNIBBLER.BIN\n[LAUNCH] MILLIPED.BIN\n") == "MILLIPED.BIN",
+      "reports the LATEST launch when several appear")
+check(launched_name("a\n[LAUNCH] /GAMES/NES.BIN\n") == "NES.BIN",
+      "strips the /GAMES/ prefix")
+check(launched_name("nothing happened") is None,
+      "no launch -> None")
 
 print("launch_retry_needed (bounded retry; persistent no-op still FAILs)")
 check(launch_retry_needed(False, 0, 3) is True,
