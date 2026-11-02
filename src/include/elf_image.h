@@ -25,8 +25,12 @@
  *                 HobbyOS CANNOT map today (that VA is the kernel identity map).
  *                 It parses, and the loader must refuse it with a clear reason
  *                 rather than mis-map it.
- *   ET_DYN **with** PT_INTERP or any PT_INTERP -> refused: dynamic, needs ld.so
- *                 (Program-2 per §2.2 #1).
+ *   ET_DYN **with** PT_INTERP or any PT_INTERP -> refused by default:
+ *                 dynamic, needs ld.so (Program-2 per §2.2 #1).  Since the M0
+ *                 shared-library freeze (docs/shared-libs.md §1/§4) the NATIVE
+ *                 track may opt in with ELF_PARSE_ALLOW_INTERP and gets the
+ *                 interpreter path; the compat track keeps this refusal with
+ *                 the same error and the same serial message.
  *
  * All multi-byte fields are read little-endian, byte-by-byte.
  */
@@ -39,6 +43,33 @@
 #define ELF_PF_X 1u
 #define ELF_PF_W 2u
 #define ELF_PF_R 4u
+
+/* e_machine values this tree knows about.  The parser accepts the BUILD's own
+ * machine only: `elf_image.c` is compiled unchanged for the aarch64 kernel, the
+ * x86_64 kernel and the x86_64 host test, and each build must refuse an image
+ * for the other architecture (a mis-executed foreign image is a mysterious
+ * crash; a refusal is a one-line diagnosis).  There is exactly one place that
+ * decides, ELF_MACHINE_NATIVE below — never compare against a literal. */
+#define ELF_EM_X86_64 62
+#define ELF_EM_AARCH64 183
+#ifndef ELF_MACHINE_NATIVE
+#if defined(__aarch64__)
+#define ELF_MACHINE_NATIVE ELF_EM_AARCH64
+#else
+#define ELF_MACHINE_NATIVE ELF_EM_X86_64
+#endif
+#endif
+
+/* PT_INTERP (docs/shared-libs.md §2): the interpreter is a FAT16 root file
+ * named by an absolute path, 8.3 ("/LDHOBBY.SO"), so 64 bytes is generous.
+ * A path that does not fit is REFUSED (ELF_ERR_INTERP_PATH), never truncated:
+ * a truncated path would silently name a different file. */
+#define ELF_INTERP_PATH_MAX 64
+
+/* elf_parse_ex() flags.  The default (elf_parse) keeps GB-013's decision —
+ * PT_INTERP is a refusal — so the Linux-compat track's behaviour is unchanged;
+ * only the native track opts in. */
+#define ELF_PARSE_ALLOW_INTERP 0x1u
 
 /* Parse / validation results.  Negative = refusal; the caller maps them onto
  * Linux errno (mostly -ENOEXEC) and logs the specific reason. */
@@ -65,7 +96,8 @@ enum {
   ELF_ERR_NO_TEXT = -19,     /* no executable segment                       */
   ELF_ERR_DST_RANGE = -20,   /* destination buffer can't hold the image     */
   ELF_ERR_ARGS = -21,        /* null pointer / zero length                  */
-  ELF_ERR_RELOC = -22        /* unsupported relocation type / bad RELA table */
+  ELF_ERR_RELOC = -22,       /* unsupported relocation type / bad RELA table */
+  ELF_ERR_INTERP_PATH = -23  /* PT_INTERP path empty / too long / unterminated */
 };
 
 struct elf_segment {
@@ -98,12 +130,40 @@ struct elf_image {
      startup dereferences small offsets (measured: fault at VA=0x210). */
   uint64_t phoff;
   uint32_t phent;
+  /* M0 freeze (docs/shared-libs.md §4 lane B): PT_INTERP, captured only when
+     the caller passes ELF_PARSE_ALLOW_INTERP.  `interp` is a NUL-terminated
+     bounded path (ELF_INTERP_PATH_MAX bytes); has_interp == 0 means the image
+     is not interpreted (interp[0] == 0).  With the default flags a PT_INTERP
+     image still fails with ELF_ERR_INTERP, exactly as it did before. */
+  uint32_t has_interp;
+  uint32_t interp_len;  /* strlen(interp), excluding the NUL */
+  char interp[ELF_INTERP_PATH_MAX];
+  /* e_machine the image declares (ELF_EM_*).  Equal to ELF_MACHINE_NATIVE on
+     every successful parse; kept so diagnostics can name what was seen. */
+  uint32_t machine;
   struct elf_segment segs[ELF_MAX_LOAD_SEGMENTS];
 };
 
 /* Parse and fully validate `buf` (len bytes) into `img`.  Returns ELF_OK or a
- * negative ELF_ERR_*.  `img` is only meaningful on ELF_OK. */
+ * negative ELF_ERR_*.  `img` is only meaningful on ELF_OK.
+ *
+ * `flags` is 0 or ELF_PARSE_ALLOW_INTERP.  flags == 0 is the GB-013 contract
+ * (PT_INTERP -> ELF_ERR_INTERP); the native PT_INTERP track passes
+ * ELF_PARSE_ALLOW_INTERP and gets the interpreter path in img->interp. */
+int elf_parse_ex(const void *buf, uint64_t len, struct elf_image *img,
+                 uint32_t flags);
+
+/* The GB-013 entry point: elf_parse_ex(buf, len, img, 0).  Kept as the
+ * compat/default face so every existing caller and the T1 host test keep
+ * their exact behaviour. */
 int elf_parse(const void *buf, uint64_t len, struct elf_image *img);
+
+/* M0 freeze: is `path` (len bytes, no NUL required) the native interpreter,
+ * i.e. "/LDHOBBY.SO"?  Case-insensitive because the path names a FAT16 8.3
+ * file, whose namespace is case-insensitive; a bare "LDHOBBY.SO" is accepted
+ * too (the kernel resolves it against the root anyway).  Pure: the kernel's
+ * PT_INTERP policy and the unit suite share this one predicate. */
+int elf_interp_is_native(const char *path, uint32_t len);
 
 /* Page containing `addr` (ELF images are p_align=0x1000 in practice). */
 uint64_t elf_page_down(uint64_t addr);
