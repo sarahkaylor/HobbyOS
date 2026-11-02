@@ -37,7 +37,12 @@
 #include "fs.h"
 #include "startup.h"
 #include "program_loader.h"
+#include "process.h"
 #include "errno.h"
+
+/* Same local declaration program_loader_test.c uses (the kill entry point is
+ * not in process.h). */
+int process_kill(int pid);
 
 /* Tag 55 is outside the ranges the other suites reserve (vm_test 60..63, and
  * the low pids belong to process_test), so a leaked AS here shows up in THIS
@@ -658,6 +663,84 @@ static void test_fs_end_to_end(void) {
   vm_as_teardown(as);
 }
 
+/* The DISPATCH: program_loader's track selection and process_set_entry, on a
+ * real boot with the real FAT16 root.  The buffer tests above prove the mapper;
+ * this proves what the kernel actually does with a file on disk: which track it
+ * picks, what entry/stack the child PCB ends up with, and that a foreign
+ * interpreter is still refused (the compat track's behaviour).
+ *
+ * No user code runs here — the unit tier has no scheduler — so this checks the
+ * PCB the loader produced, not EL0 execution. */
+static void test_dispatch_track(void) {
+  tests_run++;
+  uart_puts("  Running test_elf_dispatch_track...\n");
+
+  static uint8_t dyn[FX_SIZE];
+  static uint8_t stat[FX_SIZE];
+  static uint8_t foreign[FX_SIZE];
+  static uint8_t interp[FX_SIZE];
+  uint32_t dlen = fx_build(dyn, 3, 0, "/LDHOBBY.SO", -1, FX_RELOC_TYPE, FX_ADDEND);
+  uint32_t slen = fx_build(stat, 3, 0, 0, -1, FX_RELOC_TYPE, FX_ADDEND);
+  uint32_t flen = fx_build(foreign, 3, 0, "/lib/ld-musl-x86_64.so.1", -1,
+                           FX_RELOC_TYPE, 0);
+  uint32_t ilen = fx_build(interp, 3, 0, 0, -1, FX_RELOC_TYPE, FX_IADDEND);
+
+  uint16_t c = 0;
+  uint32_t s = 0;
+  EXPECT_EQ(fx_write_file("/ELFDYN.BIN", dyn, dlen, &c, &s), 0);
+  EXPECT_EQ(fx_write_file("/ELDSTAT.BIN", stat, slen, &c, &s), 0);
+  EXPECT_EQ(fx_write_file("/ELDFOR.BIN", foreign, flen, &c, &s), 0);
+  /* the interpreter must exist or the native load is a (correct) -ENOENT */
+  EXPECT_EQ(fx_write_file("/LDHOBBY.SO", interp, ilen, &c, &s), 0);
+
+  /* 1. PT_INTERP naming /LDHOBBY.SO: the native track.  Entry is
+   * interp_base + the interpreter's e_entry, sp is the native convention, and
+   * the child is NOT marked Linux-ABI (it uses HobbyOS syscalls). */
+  int pid = load_and_run_program_in_scheduler("ELFDYN.BIN", -1, -1, -1, -1);
+  EXPECT_EQ((pid > 0), 1);
+  if (pid > 0) {
+    struct process *p = process_get_pcb(pid);
+    ASSERT(p != 0);
+    EXPECT_EQ(p->state, PROC_STATE_READY);
+    EXPECT_EQ((p->abi_flags & PROC_FLAG_LINUX_ABI) == 0, 1);
+    EXPECT_EQ(p->context[31] ==
+                  (USER_VA_BASE + USER_LIB_OFF + FX_ENTRY_OFF), 1);
+    EXPECT_EQ(p->context[33] == FX_EXPECT_SP, 1);
+    process_kill(pid);
+  }
+
+  /* 2. a foreign interpreter (/lib/ld-musl-x86_64.so.1) is refused exactly as
+   * the compat track always refused dynamic binaries: -1, no child. */
+  EXPECT_EQ(load_and_run_program_in_scheduler("ELDFOR.BIN", -1, -1, -1, -1), -1);
+
+#if defined(__x86_64__)
+  /* 3. x86_64 ONLY: an ET_DYN without PT_INTERP stays on the Linux-ABI track —
+   * entry is base + e_entry and PROC_FLAG_LINUX_ABI IS set.  This is the
+   * "compat behaviour unchanged" check at the dispatch level. */
+  int cpid = load_and_run_program_in_scheduler("ELDSTAT.BIN", -1, -1, -1, -1);
+  EXPECT_EQ((cpid > 0), 1);
+  if (cpid > 0) {
+    struct process *p = process_get_pcb(cpid);
+    ASSERT(p != 0);
+    EXPECT_EQ((p->abi_flags & PROC_FLAG_LINUX_ABI) != 0, 1);
+    EXPECT_EQ(p->context[31] == (FX_IMG_BASE + FX_ENTRY_OFF), 1);
+    process_kill(cpid);
+  }
+#else
+  /* 3'. aarch64 has no compat track: the same static image is a native load. */
+  int cpid = load_and_run_program_in_scheduler("ELDSTAT.BIN", -1, -1, -1, -1);
+  EXPECT_EQ((cpid > 0), 1);
+  if (cpid > 0) {
+    struct process *p = process_get_pcb(cpid);
+    ASSERT(p != 0);
+    EXPECT_EQ((p->abi_flags & PROC_FLAG_LINUX_ABI) == 0, 1);
+    EXPECT_EQ(p->context[31] == (FX_IMG_BASE + FX_ENTRY_OFF), 1);
+    EXPECT_EQ(p->context[33] == FX_EXPECT_SP, 1);
+    process_kill(cpid);
+  }
+#endif
+}
+
 void elf_loader_test_suite(void) {
   uart_puts("\n--- ELF loader (lane B: arch-neutral mapper, PT_INTERP, startup block) ---\n");
   uart_puts("  machine=");
@@ -672,6 +755,7 @@ void elf_loader_test_suite(void) {
   test_interp_second_slot();
   test_refusals();
   test_fs_end_to_end();
+  test_dispatch_track();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */
