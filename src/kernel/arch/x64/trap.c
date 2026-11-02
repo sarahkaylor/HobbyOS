@@ -2329,6 +2329,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            mkdirat, so the dent block's mkdir() was -ENOSYS without this. */
         case 83:  syscall_num = SYS_MKDIR;      break;  /* mkdir(path, mode) */
         case 258: compat_mkdirat(tf);           return; /* mkdirat(dirfd, path, mode) */
+        /* GB-149: brk/mmap for the musl allocator.  SYS_MMAP is already the
+           6-arg Linux shape (sys_mmap6); SYS_BRK takes rdi.  Mapped here to
+           measure the guest's heap setup before committing to a fix. */
+        case 9:   syscall_num = SYS_MMAP;       break;  /* mmap(...)        */
+        case 10:  syscall_num = SYS_MPROTECT;   break;  /* mprotect(...)    */
+        case 12:  syscall_num = SYS_BRK;        break;  /* brk(addr)        */
         /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
            =fd, regs[4]=rsi=request, regs[3]=rdx=arg.  This is a genuine dispatch on
            the request number, and every non-ENOTTY outcome is falsifiable:
