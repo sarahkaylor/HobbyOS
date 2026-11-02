@@ -26,7 +26,10 @@
  * while it does, :0.0's shadow updates are dropped -- their damage is still
  * consumed by miext/shadow, which empties the region after calling us -- and
  * when the last screen-1 window goes away the desktop is presented in FULL so
- * it reappears instead of waiting for the next damage.
+ * it reappears instead of waiting for the next damage.  The same transition
+ * moves the pointer onto the game's window and hands it the keyboard (warp +
+ * a synthesized motion, then a keyboard grab owned by the game's client), and
+ * moves the pointer back to :0.0 when it ends; see the hand-over section.
  *
  * Both screens render into their own malloc'd shadow; miext/shadow tracks
  * damage, and from the server's block handler hbShadowUpdate() copies the
@@ -50,12 +53,14 @@
 #include <X11/Xproto.h>
 #include <X11/Xos.h>
 #include "scrnintstr.h"
+#include "windowstr.h"
 #include "servermd.h"
 #include "fb.h"
 #include "colormapst.h"
 #include "gcstruct.h"
 #include "input.h"
 #include "inputstr.h"
+#include "inpututils.h"
 #include "mipointer.h"
 #include "micmap.h"
 #include "dix.h"
@@ -431,13 +436,36 @@ hbRealizeWindow(WindowPtr pWin)
  * a pointer parked on the desktop is never over the game's 320x200 window, so
  * the game receives nothing.  Warp onto the window's centre.
  *
+ * miPointerWarpCursor alone is NOT enough: it updates the pointer device's
+ * position but does not go through dix's motion path, so pSprite->hot and
+ * pSprite->win keep naming the OLD screen's window.  With PointerRoot focus
+ * dix then delivers keys to that stale window -- measured: the pointer warp
+ * logged "screen 1 at 160,100" and Doom still received nothing.  So every warp
+ * here is followed by a real motion event at the same position (the call the
+ * evdev driver makes for a mouse move), which runs SetSpritePosition and
+ * CheckMotion and repoints the sprite window (and sends the Enter/Leave pair).
+ *
  * Keyboard: with IceWM running on :0.0 the focus is a screen-0 frame, not
- * PointerRoot; no amount of pointer warping puts a key into the game.  When
- * the focus is a window on the desktop screen it is handed to the game's
- * window with RevertToPointerRoot, and released to PointerRoot again when the
- * game window goes away (IceWM's click-to-focus takes it back on the next
- * click).  A PointerRoot/None focus is left alone -- the warp already routes
- * keys to the game, which is the measured no-WM behaviour. */
+ * PointerRoot; no amount of pointer warping puts a key into the game.  When the
+ * focus is a window on the desktop screen (or None, where nothing receives
+ * keys at all) it is handed to the game's window with RevertToPointerRoot, and
+ * released to PointerRoot again when the game window goes away (IceWM's
+ * click-to-focus takes it back on the next click).  A PointerRoot focus is left
+ * alone -- the warp already routes keys to the game. */
+static void
+hbQueueMotion(ScreenPtr pScreen, int x, int y)
+{
+    ValuatorMask mask;
+
+    if (!inputInfo.pointer)
+        return;
+    valuator_mask_zero(&mask);
+    valuator_mask_set(&mask, 0, x);
+    valuator_mask_set(&mask, 1, y);
+    QueuePointerEvents(inputInfo.pointer, MotionNotify, 0,
+                       POINTER_ABSOLUTE | POINTER_SCREEN, &mask);
+}
+
 static void
 hbPointerToWindow(WindowPtr pWin)
 {
@@ -452,6 +480,7 @@ hbPointerToWindow(WindowPtr pWin)
     if (!inputInfo.pointer)
         return;
     miPointerWarpCursor(inputInfo.pointer, pScreen, x, y);
+    hbQueueMotion(pScreen, x, y);
     ErrorF("hobbyos: pointer -> screen %d at %d,%d\n",
            pScreen->myNum, x, y);
 }
@@ -459,12 +488,27 @@ hbPointerToWindow(WindowPtr pWin)
 static void
 hbPointerToScreen(ScreenPtr pScreen)
 {
+    int x, y;
+
     if (!inputInfo.pointer || !pScreen)
         return;
-    miPointerWarpCursor(inputInfo.pointer, pScreen,
-                        pScreen->width / 2, pScreen->height / 2);
-    ErrorF("hobbyos: pointer -> screen %d at %d,%d\n", pScreen->myNum,
-           pScreen->width / 2, pScreen->height / 2);
+    x = pScreen->width / 2;
+    y = pScreen->height / 2;
+    miPointerWarpCursor(inputInfo.pointer, pScreen, x, y);
+    hbQueueMotion(pScreen, x, y);
+    ErrorF("hobbyos: pointer -> screen %d at %d,%d\n", pScreen->myNum, x, y);
+}
+
+static const char *
+hbFocusName(WindowPtr w, char *buf, int size)
+{
+    if (w == PointerRootWin)
+        return "PointerRoot";
+    if (w == NoneWin || !w)
+        return "None";
+    snprintf(buf, size, "window 0x%lx screen %d", (unsigned long) w->drawable.id,
+             w->drawable.pScreen->myNum);
+    return buf;
 }
 
 static void
@@ -472,14 +516,24 @@ hbKeyboardToWindow(WindowPtr pWin)
 {
     DeviceIntPtr kbd = inputInfo.keyboard;
     WindowPtr cur;
+    char buf[64];
 
     if (!kbd || !kbd->focus)
         return;
     cur = kbd->focus->win;
-    if (cur == PointerRootWin || cur == NoneWin || !cur)
-        return;                 /* PointerRoot: the warp already routes keys */
-    if (cur->drawable.pScreen == pWin->drawable.pScreen)
+    ErrorF("hobbyos: keyboard focus was %s\n", hbFocusName(cur, buf, sizeof buf));
+    if (cur == PointerRootWin)
+        return;                 /* the warp + motion already routes keys here */
+    if (cur == pWin)
+        return;                 /* already focused */
+    if (cur && cur != NoneWin && cur->drawable.pScreen == pWin->drawable.pScreen)
         return;                 /* focus is already on the game's screen */
+    /* A real window on the desktop screen (IceWM's frame) or None: hand the
+     * keyboard to the game.  Note that a window manager re-asserts its own
+     * focus within a second of the FocusOut this produces (measured: the focus
+     * moved 0x800003 -> 0x5c -> 0x200002 and the game stopped receiving keys),
+     * which is why PointerRoot -- where no client owns the focus and the
+     * sprite window decides -- is the state to prefer, not to replace. */
     if (SetInputFocus(serverClient, kbd, pWin->drawable.id,
                       RevertToPointerRoot, CurrentTime, TRUE) == Success) {
         hbFocusStolen = TRUE;
@@ -497,6 +551,63 @@ hbKeyboardRelease(void)
     if (SetInputFocus(serverClient, inputInfo.keyboard, PointerRoot,
                       RevertToPointerRoot, CurrentTime, TRUE) == Success)
         ErrorF("hobbyos: keyboard focus -> PointerRoot\n");
+}
+
+/* ---- second screen: the keyboard grab ------------------------------- */
+/* A window manager on :0.0 keeps the focus for itself: IceWM runs a
+ * pointer-focus policy, so the moment the pointer leaves its windows (our warp
+ * to :0.1) it puts the focus back on its own frame -- measured: PointerRoot at
+ * the hand-over, then "window 0x5c screen 0" two seconds later, and the game
+ * received nothing even though the sprite window was its own.  A WM only
+ * manages :0.0's root, so nothing can be done with focus: the game has to own
+ * the keyboard outright.  GrabDevice on behalf of the CLIENT that owns the
+ * game window gives it exactly that (the same state XGrabKeyboard would
+ * create, including the automatic release when the client disconnects), and
+ * the desktop's keyboard comes back with UngrabDevice when the window goes. */
+static ClientPtr hbGrabClient;
+
+static void
+hbGrabKeyboard(WindowPtr pWin)
+{
+    GrabMask mask;
+    CARD8 status = GrabSuccess;
+    ClientPtr client = wClient(pWin);
+
+    if (hbGrabClient || !client || !inputInfo.keyboard)
+        return;
+    memset(&mask, 0, sizeof mask);
+    mask.core = KeyPressMask | KeyReleaseMask;
+    if (GrabDevice(client, inputInfo.keyboard, GrabModeAsync, GrabModeAsync,
+                   pWin->drawable.id, TRUE, CurrentTime, &mask, CORE,
+                   None, None, &status) != Success || status != GrabSuccess) {
+        ErrorF("hobbyos: keyboard grab on screen %d failed (status %d)\n",
+               pWin->drawable.pScreen->myNum, status);
+        return;
+    }
+    hbGrabClient = client;
+    ErrorF("hobbyos: keyboard grab -> screen %d window 0x%lx\n",
+           pWin->drawable.pScreen->myNum, (unsigned long) pWin->drawable.id);
+}
+
+static void
+hbUngrabKeyboard(void)
+{
+    GrabPtr grab;
+
+    if (!hbGrabClient)
+        return;
+    hbGrabClient = NULL;
+    grab = inputInfo.keyboard ? inputInfo.keyboard->deviceGrab.grab : NULL;
+    if (!grab) {
+        /* The client disconnected: dix freed its grab with the client, and
+         * DeactivateKeyboardGrab() dereferences the grab unconditionally
+         * (grab->window in DoFocusEvents) -- calling it here killed the server
+         * with a fault at VA=0x18 right after the game exited. */
+        ErrorF("hobbyos: keyboard grab already released by the client\n");
+        return;
+    }
+    DeactivateKeyboardGrab(inputInfo.keyboard);
+    ErrorF("hobbyos: keyboard ungrab\n");
 }
 
 /* dix's WakeupHandler calls the registered function unconditionally, so the
@@ -545,12 +656,14 @@ hbOwnershipPoll(void *blockData, void *timeout)
         ErrorF("hobbyos: present -> screen %d\n", pGame->myNum);
         hbPointerToWindow(pWin);
         hbKeyboardToWindow(pWin);
+        hbGrabKeyboard(pWin);
     }
     else if (!pWin && hbSecondActive) {
         hbSecondActive = FALSE;
         hbOwner = pDesktop->myNum;
         hbPresentFull(pDesktop);
         ErrorF("hobbyos: present -> screen %d\n", pDesktop->myNum);
+        hbUngrabKeyboard();
         hbKeyboardRelease();
         hbPointerToScreen(pDesktop);
     }
