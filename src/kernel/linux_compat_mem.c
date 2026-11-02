@@ -322,7 +322,18 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
     if (!dst) return l_ret(tf, -ENOMEM);
   }
 
-  if (vm_region_insert(as, dst, new_len, prot, kind, rflags, obj, obj_off) !=
+  /* The copy below runs through the kernel's user-write path, which honours the
+     mapping's protection, so a moved READ-ONLY mapping is installed writable
+     for the duration of the copy and its real protection is restored after --
+     otherwise mremap of a read-only mapping would fail with -EFAULT, which
+     Linux does not do (its copy is a kernel copy). */
+  uint16_t ins_prot = prot;
+  int restore_prot = 0;
+  if (!obj && !(prot & VM_PROT_WRITE)) {
+    ins_prot = (uint16_t)(prot | VM_PROT_WRITE);
+    restore_prot = 1;
+  }
+  if (vm_region_insert(as, dst, new_len, ins_prot, kind, rflags, obj, obj_off) !=
       0)
     return l_ret(tf, -ENOMEM);
 
@@ -334,6 +345,7 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
       return l_ret(tf, cr);
     }
   }
+  if (restore_prot) (void)sys_mprotect(dst, new_len, prot);
   l_zap_pages(as, old_addr, old_len);
   vm_region_remove(as, old_addr, old_len);
   return l_ret(tf, (int64_t)dst);
