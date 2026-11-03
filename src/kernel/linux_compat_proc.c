@@ -259,49 +259,95 @@ static int l_proc_newfstatat(struct process *p, struct trap_frame *tf) {
 
 /* ---- readlink / readlinkat --------------------------------------------- */
 
-/* The virtual symlinks a static binary actually reads.  /proc/self/exe is the
-   one the contract names (SDL and musl's dlsym-free paths read it); cwd and
-   root are one line each and cost nothing. */
+/* The virtual symlinks a compat program actually reads.
+ *
+ * MEASURED on the host against the real RimWorld binary (tools/rw/proc-usage.sh,
+ * 2026-11-02): readlinkat("/proc/self/exe") once with a 4096 buffer, then
+ * readlink("/proc/self/exe") 6x with 99-byte buffers from the startup and
+ * render threads; readlink("/proc/self") once (the kernel answers the pid as
+ * a decimal string); and NO readlink of /proc/self/fd/N (the fds there are
+ * re-opened by PATH, which is why the open path resolves that link, below).
+ *
+ * /proc/self/exe answers the executable the loader was asked to run, never
+ * the interpreter it entered and never the truncated display name in
+ * p->name.  That distinction is load-bearing: Unity's SDL derives its data
+ * directory from this link, and with ld.so there it reports "There is no data
+ * folder" (measured on the host; see docs/rimworld-launch-log.md).
+ *
+ * Return: > 0 length copied into `out` (never NUL-terminated, like
+ * readlink(2)); 0 = "not a virtual link, decide from the volume" (the
+ * caller's sentinel); < 0 = -errno.  (0 rather than 1 on purpose: a pid
+ * string for pid < 10 is one character long and used to be mistaken for the
+ * sentinel — measured on the first probe boot, /proc/self answered ENOENT.)
+ */
+static int l_streq(const char *a, const char *b) {
+  if (!a || !b) return 0;
+  while (*a && *a == *b) { a++; b++; }
+  return *a == '\0' && *b == '\0';
+}
+
+static int l_dec(char *out, unsigned v) {
+  char tmp[12];
+  int n = 0;
+  if (v == 0) { out[0] = '0'; return 1; }
+  while (v && n < 11) { tmp[n++] = (char)('0' + (v % 10)); v /= 10; }
+  for (int i = 0; i < n; i++) out[i] = tmp[n - 1 - i];
+  return n;
+}
+
+/* "/proc/self/fd/<decimal>" exactly. */
+static int l_self_fd_path(const char *path, int *fd_out) {
+  static const char pfx[] = "/proc/self/fd/";
+  int i = 0;
+  for (; pfx[i]; i++)
+    if (path[i] != pfx[i]) return 0;
+  const char *n = path + i;
+  if (!*n) return 0;
+  unsigned v = 0;
+  for (; *n; n++) {
+    if (*n < '0' || *n > '9') return 0;
+    v = v * 10 + (unsigned)(*n - '0');
+    if (v > 100000u) return 0;
+  }
+  *fd_out = (int)v;
+  return 1;
+}
+
 static int l_readlink_target(struct process *p, const char *path, char *out,
                              uint64_t cap) {
   if (path[0] != '/') return -ENOENT;
-  const char *q = path + 1;
-  int is_exe = 0, is_cwd = 0, is_root = 0;
-  const char *exe = "proc/self/exe", *cwd = "proc/self/cwd",
-             *root = "proc/self/root";
-  int i = 0;
-  while (exe[i] && q[i] == exe[i]) i++;
-  if (exe[i] == '\0' && q[i] == '\0') is_exe = 1;
-  for (i = 0; !is_exe && cwd[i] && q[i] == cwd[i]; i++)
-    ;
-  if (!is_exe && cwd[i] == '\0' && q[i] == '\0') is_cwd = 1;
-  for (i = 0; !is_exe && !is_cwd && root[i] && q[i] == root[i]; i++)
-    ;
-  if (!is_exe && !is_cwd && root[i] == '\0' && q[i] == '\0') is_root = 1;
-  if (!is_exe && !is_cwd && !is_root) return 1; /* not a virtual link */
+  struct process *g = p ? process_group(p) : 0;
+  const char *src = 0;
+  char buf[160];
+  int fd = -1;
 
-  const char *src;
-  char joined[160];
-  if (is_exe) {
-    /* The loader names the process after the staged image ("PROBE.ELF",
-       "DOOM.ELF"); present it as an absolute path, which is what a guest
-       that re-execs itself or prints its own path expects. */
-    src = p->name;
+  if (l_streq(path, "/proc/self")) {
+    int n = l_dec(buf, (unsigned)(g ? g->pid : 0));
+    buf[n] = '\0';
+    src = buf;
+  } else if (l_streq(path, "/proc/self/exe")) {
+    /* The loaded executable's path (absolute at load time).  Fall back to the
+       display name for a process that predates the field / a kernel thread. */
+    src = (g && g->exe_path[0]) ? g->exe_path : (p ? p->name : "/");
     if (src[0] != '/') {
       uint64_t n = 0;
-      joined[n++] = '/';
-      while (src[n - 1] && n < sizeof joined - 1) {
-        joined[n] = src[n - 1];
-        n++;
-      }
-      joined[n] = '\0';
-      src = joined;
+      buf[n++] = '/';
+      for (int i = 0; src[i] && n < sizeof buf - 1; i++) buf[n++] = src[i];
+      buf[n] = '\0';
+      src = buf;
     }
-  } else if (is_cwd) {
-    src = p->cwd[0] ? p->cwd : "/";
-  } else {
+  } else if (l_streq(path, "/proc/self/cwd")) {
+    src = (g && g->cwd[0]) ? g->cwd : "/";
+  } else if (l_streq(path, "/proc/self/root")) {
     src = "/";
+  } else if (l_self_fd_path(path, &fd)) {
+    int r = file_path_of(g, fd, buf, (int)sizeof buf);
+    if (r != 0) return r; /* -EBADF for a closed fd, -ENOENT for a nameless one */
+    src = buf;
+  } else {
+    return 0; /* not a virtual link */
   }
+
   uint64_t len = 0;
   while (src[len]) len++;
   uint64_t n = len < cap ? len : cap; /* truncated, but no NUL terminator */
@@ -317,7 +363,7 @@ static int l_readlink_common(struct process *p, uint64_t upath, uint64_t ubuf,
   if (r != 0) return r;
   char target[160];
   int n = l_readlink_target(p, path, target, sizeof target);
-  if (n == 1) {
+  if (n == 0) {
     /* A real FAT16 path: readlink(2) on a non-symlink is -EINVAL, and on a
        missing path -ENOENT.  Decide from the volume, not by guessing. */
     struct k_stat ks;
