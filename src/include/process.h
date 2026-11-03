@@ -214,6 +214,19 @@ struct process {
   char cwd[128];  /**< Current working directory */
 
   /**
+   * The path the loader was asked to execute, resolved to an absolute path
+   * (relative names use the spawning cwd).  Distinct from `name`: name is the
+   * 32-byte display/LFN name that `ps`-style listings print, while this is
+   * what /proc/self/exe must answer.  M6 launch plumbing: for a Linux-ABI
+   * process the kernel maps an interpreter and enters IT, so "the process
+   * name" is ambiguous — Unity's SDL derives its data directory from
+   * readlink("/proc/self/exe"), and answering the interpreter (or a truncated
+   * display name) makes it report "There is no data folder".  Empty for a
+   * kernel process / before the first exec.
+   */
+  char exe_path[160];
+
+  /**
    * Positional-parameter blob (SYS_GETARGV).  eargv holds argv[0..eargc-1]
    * NUL-separated, copied at spawn (from the flat args string) or exec
    * (from the caller's argv[] array).  Unlike the space-joined `args`

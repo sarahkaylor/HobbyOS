@@ -153,6 +153,107 @@ static int get_global_fd(struct file *f) {
 #define O_DIRECTORY 0x10000
 #endif
 
+/* ---- /proc/self/maps: a real rendering of this AS's region list ----------
+ *
+ * Mono opens /proc/self/maps at startup (measured on the host: 3 opens, then
+ * 1024-byte reads until EOF, plus one access(F_OK); fstat reports S_IFREG|
+ * 0444 with st_size 0 and the reader ignores the size).  The file is
+ * therefore a STREAM, not a stored object: every line below is one region
+ * this address space genuinely holds, rendered in Linux's
+ *   start-end perms offset dev inode pathname
+ * shape.  Nothing is invented: a region the AS does not have is not printed,
+ * and no synthetic heap/stack/vdso rows are added.  The IMAGE region is
+ * labelled with the executable path (the only mapping name the kernel
+ * actually knows); DSO and anonymous regions print an empty pathname, which
+ * is exactly how Linux renders an unnamed mapping.
+ *
+ * The read cursor is (region_index << 8) | byte_offset_in_line.  A rendered
+ * line is bounded by two 16-digit hex numbers plus a 159-byte path, well
+ * under 256, so 8 bits of line offset cannot overflow.
+ */
+
+static int fs_streq(const char *a, const char *b) {
+  if (!a || !b) return 0;
+  while (*a && *a == *b) { a++; b++; }
+  return *a == '\0' && *b == '\0';
+}
+
+static void fs_copy_path(char *dst, const char *src) {
+  int i = 0;
+  if (src)
+    for (; src[i] && i < VFS_PATH_MAX - 1; i++) dst[i] = src[i];
+  dst[i] = '\0';
+}
+
+static int maps_hex(char *out, uint64_t v) {
+  char tmp[16];
+  int n = 0;
+  if (v == 0) { out[0] = '0'; return 1; }
+  while (v && n < 16) { tmp[n++] = "0123456789abcdef"[v & 0xF]; v >>= 4; }
+  for (int i = 0; i < n; i++) out[i] = tmp[n - 1 - i];
+  return n;
+}
+
+/* One rendered line for region `idx`.  Returns the length (always > 0). */
+static int maps_line(struct process *p, struct addr_space *as, int idx,
+                     char *out, int cap) {
+  const struct vm_region *r = &as->regions[idx];
+  int n = 0;
+#define MPUT(ch) do { if (n < cap - 1) out[n++] = (ch); } while (0)
+  n += maps_hex(out + n, r->base);
+  MPUT('-');
+  n += maps_hex(out + n, r->base + r->len);
+  MPUT(' ');
+  MPUT((r->prot & VM_PROT_READ) ? 'r' : '-');
+  MPUT((r->prot & VM_PROT_WRITE) ? 'w' : '-');
+  MPUT((r->prot & VM_PROT_EXEC) ? 'x' : '-');
+  MPUT((r->flags & VM_MAP_SHARED) ? 's' : 'p');
+  MPUT(' ');
+  /* offset: 8 lowercase hex digits, zero-padded, like the kernel's %08llx.
+     A VMK_LIB region carries the interpreter's own file offset (ld.so sets
+     it); the kernel-loaded IMAGE is carved from the file start, so its
+     segment offset is base - USER_IMG_BASE. */
+  {
+    uint64_t off = (r->kind == VMK_IMG) ? (r->base - USER_IMG_BASE) : r->obj_off;
+    for (int sh = 28; sh >= 0; sh -= 4) MPUT("0123456789abcdef"[(off >> sh) & 0xF]);
+  }
+  MPUT(' ');
+  MPUT('0'); MPUT('0'); MPUT(':'); MPUT('0'); MPUT('0');
+  MPUT(' ');
+  MPUT('0'); /* inode: this VFS has no inode numbers for mapped objects */
+  if (r->kind == VMK_IMG && p && p->exe_path[0]) {
+    MPUT(' ');
+    for (int i = 0; p->exe_path[i] && n < cap - 2; i++) out[n++] = p->exe_path[i];
+  }
+  MPUT('\n');
+#undef MPUT
+  out[n] = '\0';
+  return n;
+}
+
+static int file_read_maps(struct process *p, struct file *f, char *ubuf,
+                          int size) {
+  struct addr_space *as = p ? p->as : 0;
+  if (!as || size <= 0) return 0;
+  int used = 0;
+  unsigned idx = f->maps_cursor >> 8;
+  unsigned off = f->maps_cursor & 0xFF;
+  char line[256];
+  while (used < size) {
+    if (idx >= (unsigned)as->nr) break;
+    int n = maps_line(p, as, (int)idx, line, (int)sizeof line);
+    if (off >= (unsigned)n) { idx++; off = 0; continue; }
+    int chunk = n - (int)off;
+    if (chunk > size - used) chunk = size - used;
+    for (int k = 0; k < chunk; k++) ubuf[used + k] = line[off + (unsigned)k];
+    used += chunk;
+    off += (unsigned)chunk;
+    if ((int)off >= n) { idx++; off = 0; }
+  }
+  f->maps_cursor = (idx << 8) | (off & 0xFF);
+  return used;
+}
+
 int file_open(struct process *cur, const char *filename, int flags) {
   cur = process_group(cur); /* P1 (D7): fd table + cwd are group state */
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
@@ -160,6 +261,18 @@ int file_open(struct process *cur, const char *filename, int flags) {
   struct file *f = file_alloc();
   if (!f) return -EMFILE;
   f->open_flags = (uint32_t)flags;
+  /* Remember the name this fd was opened under: /proc/self/fd/N is a link to
+     it, and re-opening through that link must go back to the SAME file.  The
+     VFS-resolved absolute form is what Linux prints. */
+  f->path[0] = '\0';
+  if (filename) {
+    char absp[VFS_PATH_MAX];
+    if (vfs_abs_path(filename, absp, sizeof absp) == 0)
+      fs_copy_path(f->path, absp);
+    else
+      fs_copy_path(f->path, filename);
+  }
+  f->maps_cursor = 0;
 
   /* GB-017: /dev/null and /dev/urandom are virtual device nodes served by
    * the file layer (independent of GB-014's syscall-table routing, per the
@@ -202,6 +315,31 @@ int file_open(struct process *cur, const char *filename, int flags) {
       return -EMFILE;
     }
     return dfd;
+  }
+
+  /* M6 launch plumbing: /proc/self/maps -- a virtual 0444 regular file whose
+     read() renders this process's region list (see file_read_maps).  Mono
+     opens it at start-up; the host trace shows O_RDONLY|O_CLOEXEC, no seek,
+     1024-byte reads to EOF. */
+  if (filename && fs_streq(filename, "/proc/self/maps")) {
+    if (flags & O_DIRECTORY) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -ENOTDIR;
+    }
+    f->type = FILE_TYPE_PROCMAPS;
+    f->maps_cursor = 0;
+    int mpfd = -1;
+    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+      if (cur->open_fds[i] == -1) {
+        cur->open_fds[i] = get_global_fd(f);
+        cur->num_open_fds++;
+        mpfd = i;
+        break;
+      }
+    }
+    if (mpfd == -1) { f->type = FILE_TYPE_EMPTY; f->ref_count = 0; return -EMFILE; }
+    return mpfd;
   }
 
   /* GB-020: virtual /proc/self/fd.  `ls /proc/self/fd` / sh readdir over it
@@ -1359,10 +1497,32 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     k_stat_fill(st, fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
                 K_S_IFDIR | 0755, 0);
     return 0;
+  case FILE_TYPE_PROCMAPS:
+    /* Linux reports the maps file as a 0444 regular file with st_size 0
+       (measured host-side); readers must not size-gate it. */
+    k_stat_fill(st, 0, K_S_IFREG | 0444, 0);
+    return 0;
   default:
     *errp = EBADF;
     return -1;
   }
+}
+
+/* M6 launch plumbing: the name an open fd was opened under.  This is what
+ * readlink("/proc/self/fd/N") prints and what opening that link re-opens. */
+int file_path_of(struct process *p, int fd, char *out, int cap) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS || !out || cap <= 0) return -EBADF;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
+  if (f->type == FILE_TYPE_EMPTY) return -EBADF;
+  if (!f->path[0]) return -ENOENT;
+  int i = 0;
+  for (; f->path[i] && i < cap - 1; i++) out[i] = f->path[i];
+  out[i] = '\0';
+  return 0;
 }
 
 /* GB-020: getdents64 over an open directory fd (FILE_TYPE_FAT16DIR or
@@ -1417,6 +1577,12 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp) {
   (void)p;
   if (!path) { *errp = EINVAL; return -1; }
+  /* M6 launch plumbing: the virtual maps file exists for access()/stat()
+     (the host trace shows access("/proc/self/maps", F_OK) before the open). */
+  if (fs_streq(path, "/proc/self/maps")) {
+    k_stat_fill(st, 0, K_S_IFREG | 0444, 0);
+    return 0;
+  }
   char abs[256];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
   struct fat16_dir_entry entry;
@@ -1656,6 +1822,8 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return 0; /* /dev/null reads always yield EOF (0 bytes) */
+  } else if (f->type == FILE_TYPE_PROCMAPS) {
+    return file_read_maps(cur, f, (char *)buf, size);
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     if (size <= 0) return 0;
     return net_get_random_bytes(buf, (uint32_t)size); /* never short */

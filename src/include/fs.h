@@ -7,6 +7,7 @@
 #include "process.h"
 #include "nfs.h"
 #include "ipc_proto.h"
+#include "vfs.h"
 
 struct socket_pcb;
 struct usock;
@@ -38,7 +39,12 @@ typedef enum {
      process's open fds; read/write refuse it.  Distinct from FAT16DIR
      because there is no on-disk dir entry.  Appended last so the values
      above never shift. */
-  FILE_TYPE_PROCFD
+  FILE_TYPE_PROCFD,
+  /* M6 launch plumbing: the virtual /proc/self/maps text stream.  read()
+     renders this process's real vm_region list; fstat reports a 0444
+     regular file of size 0, which is what Linux reports (the content has
+     no stored length).  Appended last so existing values never shift. */
+  FILE_TYPE_PROCMAPS
 } file_type_t;
 
 struct vm_object;
@@ -56,6 +62,16 @@ struct file {
      just sockets; without it a regular file //dev/null answers -ENOTSOCK instead
      of its flags.  Set at open, read by file_fcntl F_GETFL, written by F_SETFL. */
   uint32_t open_flags;
+  /* M6 launch plumbing: the absolute path this fd was opened from, as the
+     VFS resolved it.  /proc/self/fd/N must answer exactly that string on
+     readlink, and opening /proc/self/fd/N re-opens the same file by path
+     (fresh open file description, offset 0 — NOT dup semantics).  Empty
+     when the open had no name (a memfd without one, an internal slot). */
+  char path[VFS_PATH_MAX];
+  /* /proc/self/maps streaming cursor: (region_index << 8) | byte offset
+     inside that region's rendered line.  A line is < 192 bytes by
+     construction, so 8 bits are enough. */
+  uint32_t maps_cursor;
   union {
     struct {
       struct fat16_dir_entry entry; /**< FAT16 directory entry copy */
@@ -328,6 +344,10 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
 int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp);
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp);
+/* M6 launch plumbing: the absolute path an open fd was opened from, for
+ * readlink("/proc/self/fd/N") and for re-opening through that link.
+ * Returns 0, or -EBADF (no such fd) / -ENOENT (fd has no name). */
+int file_path_of(struct process *p, int fd, char *out, int cap);
 
 /* GB-020: getdents64 over an open directory fd.  (p, fd, ubuf, bufsize) ->
  * bytes written (0 at end) | negative errno (-EBADF/-ENOTDIR/-EINVAL). */

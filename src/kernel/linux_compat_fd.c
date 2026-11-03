@@ -629,6 +629,28 @@ static int l_fd_fcntl(struct process *p, struct trap_frame *tf) {
 
 /* ---- openat / fchmod / fchown ------------------------------------------- */
 
+/* "/proc/self/fd/<decimal>" exactly -- the path the host trace re-opens 639
+ * times in a 20 s Unity run (libudev/sysfs probes).  Linux resolves the link
+ * and opens the underlying file with a FRESH description: offset 0, its own
+ * status flags.  That is not dup() (which would share the offset): the
+ * caller re-opens precisely to read the file again from the start. */
+static int l_parse_self_fd(const char *path, int *fd_out) {
+  static const char pfx[] = "/proc/self/fd/";
+  int i = 0;
+  for (; pfx[i]; i++)
+    if (path[i] != pfx[i]) return 0;
+  const char *n = path + i;
+  if (!*n) return 0;
+  unsigned v = 0;
+  for (; *n; n++) {
+    if (*n < '0' || *n > '9') return 0;
+    v = v * 10 + (unsigned)(*n - '0');
+    if (v > 100000u) return 0;
+  }
+  *fd_out = (int)v;
+  return 1;
+}
+
 /* openat(dirfd, path, flags, mode).  glibc's ld.so opens every DSO candidate
  * through openat(AT_FDCWD, ...), so this is the first call of the M1 startup
  * gate.
@@ -674,6 +696,22 @@ static int l_fd_openat(struct process *p, struct trap_frame *tf) {
   if (r != 0) return l_ret(tf, r);
   if (path[0] == '\0') return l_ret(tf, -ENOENT);
   if (dirfd != L_AT_FDCWD && path[0] != '/') return l_ret(tf, -ENOTSUP);
+
+  /* /proc/self/fd/N: re-open the file the fd names.  Measured shape:
+     openat(AT_FDCWD, "/proc/self/fd/13", O_RDONLY|O_NOCTTY|O_CLOEXEC) -> a
+     fresh fd on the same file, read from offset 0. */
+  int self_fd = -1;
+  if (l_parse_self_fd(path, &self_fd)) {
+    char target[VFS_PATH_MAX];
+    int rr = file_path_of(p, self_fd, target, sizeof target);
+    if (rr == -EBADF) return l_ret(tf, -ENOENT); /* Linux: no such fd */
+    if (rr != 0) return l_ret(tf, -ENXIO);       /* nameless fd: ENXIO */
+    int nfd = file_open(p, target, flags & ~L_O_CLOEXEC);
+    if (nfd < 0) return l_ret(tf, nfd);
+    if (flags & L_O_CLOEXEC)
+      (void)file_fcntl(p, nfd, K_F_SETFD, K_FD_CLOEXEC);
+    return l_ret(tf, nfd);
+  }
 
   /* vfs_clean() truncates at 255 characters, so a longer name would silently
      open a DIFFERENT file; refuse it instead. */
