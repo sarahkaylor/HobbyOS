@@ -2114,6 +2114,10 @@ void process_exit(struct trap_frame *tf) {
   if (!cur)
     return;
 
+  /* GB-173: never leave the evdev owner pointing at a dead process. */
+  extern void hb_evdev_owner_clear(struct process *);
+  hb_evdev_owner_clear(cur);
+
   char buf[128];
   int len = 0;
   const char *prefix = "[KERNEL] Process ";

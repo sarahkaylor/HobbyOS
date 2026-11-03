@@ -2036,6 +2036,11 @@ int main(void) {
       struct virtio_input_event *ev = &events[i];
 
       if (ev->type == EV_KEY) {
+        /* GB-173: hand every press to the process that owns
+           /dev/input/event0.  A static-musl game has no desktop window, so
+           the window-shaped forwarding below can never reach it; -ENODEV is
+           the normal case when no compat process is reading keys. */
+        if (ev->value == 1) evdev_push(ev->code, 1);
         if (ev->code == 42 || ev->code == 54) {
           shift_pressed = ev->value;
           continue;
