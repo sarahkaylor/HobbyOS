@@ -147,6 +147,8 @@ Every claim above comes from a run, not from reading code:
 | `x11_lib_test_host` | 124 checks, 0 failed |
 | `run_icewm_test.py --arch intel --no-apps --settle 20` | **PASS** — the default depth-24 desktop is unregressed |
 | `tools/gate/t4_w0_dispatch.sh` | PASS — `W0PIE.BIN` carries `PROC_FLAG_LINUX_ABI` |
+| `make run` → Games → **Doom (Linux ELF)** | PASS — Doom renders on `:0.1` (0.0309 coverage = 320x200, 232 colours), F10 returns the IceWM desktop, serial `present -> screen 0` |
+| the same, on the merged tip (with the parallel GB-164/165 + GB-171 work) | unit tests 397/0, `t3_linux_probe.sh proc`/`mem` PASS, `make doom_elf_test` PASS, Doom on `:0.1` PASS, IceWM 24-bit gate PASS |
 
 The harness stages every run onto a *copy* of the disk and boots the real
 `intel` guest under QEMU/KVM; `docs/doom-elf/serial-doom10.txt` is the unedited
