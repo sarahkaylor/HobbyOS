@@ -260,6 +260,9 @@ struct process {
   struct { unsigned short code; int value; } evdev_q[64];
   int evdev_qhead; /**< next slot to write (producer: the desktop's syscall) */
   int evdev_qtail; /**< next slot to read (consumer: the owner's read()) */
+  int evdev_read_once; /**< the owner has polled the node at least once — keys
+                            pressed before that (the launch ENTER) are dropped
+                            so an engine cannot receive input mid-init */
 
   uint64_t wake_ms; /**< Timestamp in ms when this process should wake up */
 
