@@ -50,6 +50,7 @@
 #include "ipc_proto.h"
 #include "linux_syscall.h"
 #include "process.h"
+#include "vfs.h"
 
 /* close_range(2) flags (Linux values; not syscall numbers, so local). */
 #define L_CLOSE_RANGE_UNSHARE 0x2u
@@ -626,9 +627,117 @@ static int l_fd_fcntl(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, file_fcntl(p, fd, cmd, arg));
 }
 
+/* ---- openat / fchmod / fchown ------------------------------------------- */
+
+/* openat(dirfd, path, flags, mode).  glibc's ld.so opens every DSO candidate
+ * through openat(AT_FDCWD, ...), so this is the first call of the M1 startup
+ * gate.
+ *
+ * Translation, not a second open path: the path is made absolute through
+ * vfs_abs_path (the same cwd resolution the native file_open eventually does,
+ * applied HERE so a relative name is resolved before the O_DIRECTORY probe
+ * below), then handed to file_open — the one routine that owns FAT16 / NFS /
+ * device / /proc dispatch, O_CREAT|O_EXCL atomicity and the fd table.
+ *
+ * Flag handling:
+ *   O_CLOEXEC   is stripped from the word file_open records (Linux's F_GETFL
+ *               does not report it either) and applied afterwards through
+ *               file_fcntl(K_F_SETFD, K_FD_CLOEXEC) — the same mechanism dup3
+ *               and pipe2 already use.
+ *   O_DIRECTORY is passed through; fs.c routes it to fat16_open_dir.  A
+ *               regular file then answers ENOTDIR (Linux) instead of fs.c's
+ *               internal ENOENT, decided by one file_stat_path probe so the
+ *               two ABIs cannot disagree about what exists.
+ *   everything else (access mode, O_CREAT/O_EXCL/O_TRUNC/O_APPEND) keeps the
+ *               Linux bit values, which fs.c's K_O_* mirror.
+ *
+ * A real dirfd (not AT_FDCWD) is refused with -ENOTSUP unless the path is
+ * absolute: an fd is a slot in the file table, not a node in a namespace, and
+ * this VFS has no way to name the directory an fd refers to.  That is the same
+ * answer newfstatat/readlinkat give for the same argument, and it is better
+ * than silently resolving the name against the cwd (which would open the WRONG
+ * file).
+ */
+static int l_fd_openat(struct process *p, struct trap_frame *tf) {
+  int dirfd = (int)l_argi(tf, 0);
+  uint64_t upath = l_arg(tf, 1);
+  int flags = (int)l_argi(tf, 2);
+  char path[256];
+
+  int r = l_copy_cstr(p, path, upath, sizeof path);
+  if (r != 0) return l_ret(tf, r);
+  if (path[0] == '\0') return l_ret(tf, -ENOENT);
+  if (dirfd != L_AT_FDCWD && path[0] != '/') return l_ret(tf, -ENOTSUP);
+
+  /* vfs_clean() truncates at 255 characters, so a longer name would silently
+     open a DIFFERENT file; refuse it instead. */
+  int len = 0;
+  while (path[len]) len++;
+  if (len >= 255) return l_ret(tf, -ENAMETOOLONG);
+
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return l_ret(tf, -ENAMETOOLONG);
+
+  int fd = file_open(p, abs, flags & ~L_O_CLOEXEC);
+  if (fd == -ENOENT && (flags & L_O_DIRECTORY)) {
+    struct k_stat ks;
+    int err = 0;
+    if (file_stat_path(p, abs, &ks, &err) == 0 &&
+        (ks.st_mode & L_S_IFMT) != L_S_IFDIR)
+      return l_ret(tf, -ENOTDIR);
+  }
+  if (fd < 0) return l_ret(tf, fd);
+  if (flags & L_O_CLOEXEC)
+    (void)file_fcntl(p, fd, K_F_SETFD, K_FD_CLOEXEC);
+  return l_ret(tf, fd);
+}
+
+/* fchmod(fd, mode) / fchown(fd, uid, gid).
+ *
+ * FAT16 has no permission bits and no owner: every node is synthesized as 0644
+ * (files) / 0755 (directories), owned by uid/gid 0, and there is no on-disk
+ * field to write even if the kernel wanted one.  The two honest translations:
+ *
+ *  - fchmod is a no-op that still VALIDATES the descriptor (EBADF for a closed
+ *    one) and masks the mode to 07777 as Linux does.  It succeeds because no
+ *    access decision on this volume consults the mode — a portable copier that
+ *    chmods after writing must not abort — and the header says plainly that a
+ *    caller which READS the mode back sees the synthesized one.
+ *  - fchown succeeds only when it asks for the owner every file already has
+ *    (0, with (uid_t)-1 meaning "leave alone"); a request for a foreign owner
+ *    is -EPERM rather than a success that the next stat() would contradict. */
+static int l_fd_valid(struct process *p, int fd) {
+  int fl = file_fcntl(p, fd, K_F_GETFL, 0);
+  if (fl < 0) return fl == -EINVAL ? -EBADF : fl;
+  return 0;
+}
+
+static int l_fd_fchmod(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  uint32_t mode = (uint32_t)l_arg(tf, 1) & 07777u;
+  (void)mode; /* recorded nowhere: see the header note above */
+  int rc = l_fd_valid(p, fd);
+  return l_ret(tf, rc);
+}
+
+static int l_fd_fchown(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  uint32_t uid = (uint32_t)l_arg(tf, 1);
+  uint32_t gid = (uint32_t)l_arg(tf, 2);
+  if ((uid != 0xFFFFFFFFu && uid != 0) ||
+      (gid != 0xFFFFFFFFu && gid != 0))
+    return l_ret(tf, -EPERM);
+  int rc = l_fd_valid(p, fd);
+  return l_ret(tf, rc);
+}
+
 /* ---- the table --------------------------------------------------------- */
 
 const struct l_sysent l_tab_fd[] = {
+  /* descriptors */
+  {L_SYS_openat, l_fd_openat, "openat"},
+  {L_SYS_fchmod, l_fd_fchmod, "fchmod"},
+  {L_SYS_fchown, l_fd_fchown, "fchown"},
   /* sockets: the X11 transport */
   {L_SYS_socket, l_fd_socket, "socket"},
   {L_SYS_socketpair, l_fd_socketpair, "socketpair"},

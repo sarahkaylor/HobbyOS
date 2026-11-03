@@ -60,6 +60,28 @@
  * translates that into the 144-byte Linux layout, so the two ABIs can never
  * disagree about a file's size — and Doom's WAD is opened, seeked and read by
  * size, while libX11 fstats its sockets and musl's stdio probes its files.
+ *
+ * JOB CONTROL / NICE / AFFINITY — WHAT IS MODELLED
+ * -----------------------------------------------
+ * The PCB has a pid, a parent_pid and a group anchor (tgid); it has no pgid,
+ * no session, no nice value and no CPU mask, and this lane may not add fields
+ * to process.h.  Each handler below therefore translates onto the anchor and
+ * reports what is TRUE of this kernel instead of inventing state:
+ *
+ *   getpgid/getsid     the group anchor's pid (sid == pgid here).
+ *   setpgid(0,0)       success — every process is already its own anchor.
+ *   setpgid(other)     -EPERM; joining a group is not expressible.
+ *   setsid             -EPERM; Linux's own refusal for a group leader.
+ *   getpriority        nice 0 (raw 20) for every target.
+ *   setpriority        non-negative nice accepted and ignored (a one-class
+ *                      scheduler cannot honour it and it can never be a
+ *                      correctness failure); negative nice is -EPERM.
+ *   sched_getaffinity  the online CPU set, 8 bytes written, the caller's whole
+ *                      128-byte buffer zeroed first (see the handler).
+ *   sched_setaffinity  accepted, not enforced: the scheduler has no per-process
+ *                      mask, and affinity is a hint.
+ *   prctl              PR_SET/GET_NAME, PR_SET/GET_DUMPABLE, PR_SET/GET_PDEATHSIG
+ *                      (see the handler for exactly how much each one does).
  */
 #include "linux_compat.h"
 
@@ -790,8 +812,276 @@ static int l_proc_faccessat(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, l_access_check(p, upath, mode));
 }
 
+/* ---- identity: prctl, nice, job control, affinity ----------------------- */
+
+/* Resolve a pid argument the way Linux's getpgid/getsid/prlimit do: 0 is the
+ * caller, a pid that names no live process is -ESRCH. */
+static struct process *l_pcb_of(struct process *p, int pid, int *err) {
+  *err = 0;
+  if (pid == 0) return p;
+  if (p && pid == p->pid) return p;
+  struct process *t = process_get_pcb(pid);
+  if (!t || t->state == PROC_STATE_FREE || t->state == PROC_STATE_EXITED) {
+    *err = -ESRCH;
+    return 0;
+  }
+  return t;
+}
+
+/* prctl(option, a2, a3, a4, a5).  glibc's pthread_create sets the 16-byte comm
+ * (PR_SET_NAME) and reads it back for /proc/self/task/<tid>/comm-shaped
+ * diagnostics; Mono's crash reporter asks for dumpability.  The answered set is
+ * exactly the one the task/plan names:
+ *
+ *   PR_SET_NAME / PR_GET_NAME   round-trip through p->name, the native PCB's own
+ *                               32-byte name.  Linux TRUNCATES a longer comm to
+ *                               15 characters (16 bytes including NUL) rather
+ *                               than refusing it — copied faithfully.  NOTE:
+ *                               p->name is also what /proc/self/exe is
+ *                               synthesized from (l_readlink_target), so naming
+ *                               the MAIN process changes that path too; the
+ *                               common caller, pthread_setname_np on a worker,
+ *                               renames a thread PCB and leaves it alone.
+ *   PR_SET_DUMPABLE             0 (accepted, recorded nowhere).  HobbyOS has no
+ *                               core-dump path and no ptrace, so the flag has
+ *                               nothing to gate; PR_GET_DUMPABLE reports the
+ *                               default 1 a process that never set it reads.
+ *   PR_SET_PDEATHSIG            0 (clearing a hook that was never armed) is
+ *                               trivially true; a NON-ZERO signal is -ENOSYS,
+ *                               because the PCB has no field and the reaper is
+ *                               the parent's waitpid — promising a delivery
+ *                               that can never happen would be worse.
+ *   PR_GET_PDEATHSIG            writes 0 (nothing is ever armed).
+ *   anything else               -EINVAL, which is Linux's answer for an option
+ *                               the kernel does not know.
+ */
+static int l_proc_prctl(struct process *p, struct trap_frame *tf) {
+  int op = (int)l_argi(tf, 0);
+  uint64_t a2 = l_arg(tf, 1);
+
+  switch (op) {
+  case L_PR_SET_NAME: {
+      char name[L_PR_NAME_LEN];
+      int r = l_copy_cstr(p, name, a2, sizeof name);
+      if (r == -EFAULT) return l_ret(tf, r);
+      if (r != 0) {
+        /* No NUL inside 16 bytes: Linux's truncation case, not an error. Read
+           the 15 characters it would keep and terminate them here. */
+        if (l_copy_from_user(p, name, a2, L_PR_NAME_LEN - 1) != 0)
+          return l_ret(tf, -EFAULT);
+        name[L_PR_NAME_LEN - 1] = '\0';
+      }
+      if (!p) return l_ret(tf, -ESRCH);
+      for (int i = 0; i < (int)sizeof p->name; i++) p->name[i] = '\0';
+      for (int i = 0; i < L_PR_NAME_LEN - 1 && name[i]; i++) p->name[i] = name[i];
+      return l_ret(tf, 0);
+    }
+  case L_PR_GET_NAME: {
+      char out[L_PR_NAME_LEN];
+      l_zero(out, sizeof out);
+      if (p)
+        for (int i = 0; i < L_PR_NAME_LEN - 1 && p->name[i]; i++)
+          out[i] = p->name[i];
+      if (l_copy_to_user(p, a2, out, sizeof out) != 0) return l_ret(tf, -EFAULT);
+      return l_ret(tf, 0);
+    }
+  case L_PR_SET_DUMPABLE:
+    return l_ret(tf, 0);
+  case L_PR_GET_DUMPABLE:
+    return l_ret(tf, 1);
+  case L_PR_SET_PDEATHSIG:
+    return l_ret(tf, (int)l_argi(tf, 1) == 0 ? 0 : -ENOSYS);
+  case L_PR_GET_PDEATHSIG: {
+      int zero = 0;
+      if (l_copy_to_user(p, a2, &zero, sizeof zero) != 0)
+        return l_ret(tf, -EFAULT);
+      return l_ret(tf, 0);
+    }
+  default:
+    return l_ret(tf, -EINVAL);
+  }
+}
+
+/* getpriority(which, who) / setpriority(which, who, prio).
+ *
+ * The native scheduler has ONE priority class.  The truthful answers are:
+ *   - getpriority reports nice 0 for everything.  The RAW syscall returns
+ *     20 - nice (range 1..40) so that a -1 return stays unambiguous, and every
+ *     libc wrapper subtracts 20 again; L_PRIO_BASE is that 20.
+ *   - setpriority ACCEPTS a non-negative nice (a request to be scheduled less
+ *     aggressively): the one-class round-robin already treats every process
+ *     equally, so running at default priority is never a correctness failure,
+ *     and refusing would abort a program that only wanted to be polite.
+ *     A NEGATIVE nice (raise priority above default) is -EPERM, which is also
+ *     what unprivileged Linux answers: this kernel has no priority to raise
+ *     and no capability model to grant one.
+ * which/who are still validated (EINVAL / ESRCH) so a typo cannot read as a
+ * real answer. */
+static int l_proc_getpriority(struct process *p, struct trap_frame *tf) {
+  int which = (int)l_argi(tf, 0);
+  int who = (int)l_argi(tf, 1);
+  int err = 0;
+
+  if (which < L_PRIO_PROCESS || which > L_PRIO_USER) return l_ret(tf, -EINVAL);
+  if (which == L_PRIO_USER) {
+    /* Every compat process is uid 0; any other uid owns nothing here. */
+    if (who != 0) return l_ret(tf, -ESRCH);
+    return l_ret(tf, L_PRIO_BASE);
+  }
+  /* PRIO_PGRP's `who` is a PGID, and a pgid is the anchor's pid here, so the
+     same resolver answers both.  The value is identical for every target. */
+  (void)l_pcb_of(p, who, &err);
+  if (err != 0) return l_ret(tf, err);
+  return l_ret(tf, L_PRIO_BASE);
+}
+
+static int l_proc_setpriority(struct process *p, struct trap_frame *tf) {
+  int which = (int)l_argi(tf, 0);
+  int who = (int)l_argi(tf, 1);
+  int prio = (int)l_argi(tf, 2);
+  int err = 0;
+
+  if (which < L_PRIO_PROCESS || which > L_PRIO_USER) return l_ret(tf, -EINVAL);
+  if (prio < L_NICE_MIN) prio = L_NICE_MIN;
+  if (prio > L_NICE_MAX) prio = L_NICE_MAX;
+  if (which == L_PRIO_USER) {
+    if (who != 0) return l_ret(tf, -ESRCH);
+  } else {
+    (void)l_pcb_of(p, who, &err);
+    if (err != 0) return l_ret(tf, err);
+  }
+  if (prio < 0) return l_ret(tf, -EPERM);
+  return l_ret(tf, 0);
+}
+
+/* setpgid / getpgid / setsid / getsid.
+ *
+ * There is no pgid or session FIELD in the PCB, and this lane may not add one
+ * (process.h belongs to the process lane).  What exists is the group ANCHOR:
+ * process_group() maps a thread to its leader, and process.c sets tgid = pid at
+ * creation, so every process is its own anchor.  Translating onto that gives
+ * answers that are true of this kernel rather than invented:
+ *
+ *   getpgid / getsid   the anchor's pid (session == group here; documented).
+ *   setpgid(0,0)       "be your own group leader" — already true, success.
+ *   setpgid(_, other)  joining another group is not expressible: -EPERM, which
+ *                      is also what Linux answers for a cross-session join.
+ *   setsid             -EPERM: Linux refuses exactly when the caller is already
+ *                      a group leader, which every HobbyOS process is.
+ *
+ * A caller that needs real sessions (a daemon double-fork) will see the EPERM
+ * and the file header's note; nothing silently pretends the session changed. */
+static int l_proc_getpgid(struct process *p, struct trap_frame *tf) {
+  int err = 0;
+  struct process *t = l_pcb_of(p, (int)l_argi(tf, 0), &err);
+  if (err != 0 || !t) return l_ret(tf, err ? err : -ESRCH);
+  return l_ret(tf, process_group(t)->pid);
+}
+
+static int l_proc_getsid(struct process *p, struct trap_frame *tf) {
+  return l_proc_getpgid(p, tf); /* no session layer: sid == group anchor */
+}
+
+static int l_proc_setpgid(struct process *p, struct trap_frame *tf) {
+  int pgid = (int)l_argi(tf, 1);
+  int err = 0;
+  struct process *t = l_pcb_of(p, (int)l_argi(tf, 0), &err);
+  if (err != 0 || !t) return l_ret(tf, err ? err : -ESRCH);
+  if (pgid < 0) return l_ret(tf, -EINVAL);
+  if (t != p) return l_ret(tf, -EPERM);
+  if (pgid == 0 || pgid == p->pid) return l_ret(tf, 0);
+  return l_ret(tf, -EPERM);
+}
+
+static int l_proc_setsid(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  return l_ret(tf, -EPERM);
+}
+
+/* sched_getaffinity(pid, len, mask) / sched_setaffinity(pid, len, mask).
+ *
+ * THE SHAPE: a caller passes a 128-byte cpu_set_t (CPU_SETSIZE = 1024 bits),
+ * x86_64's kernel mask is one 8-byte word (nr_cpu_ids <= 64), and the syscall
+ * RETURNS THE NUMBER OF BYTES WRITTEN (8) — not 0.  len < 8 is -EINVAL, not a
+ * short write.
+ *
+ * DEVIATION, deliberate and measured against glibc: Linux leaves the guest
+ * bytes past the 8 it wrote UNTOUCHED, and glibc's sched_getaffinity does not
+ * zero the cpu_set_t first, so a caller that CPU_COUNTs its full 128-byte set
+ * counts its own stack garbage on a real kernel too.  We zero every byte the
+ * caller declared, which makes CPU_COUNT deterministic; the bits at and above
+ * the online CPU count stay 0 either way.
+ *
+ * setaffinity is ACCEPTED, NOT ENFORCED: the native scheduler runs any ready
+ * process on whichever CPU idles first and has no per-process mask (adding one
+ * is scheduler work outside this lane's files).  Success is safe because
+ * affinity is a performance hint; a caller that verifies with getaffinity sees
+ * the online set — the same thing it asked for in every program that pins to
+ * "all CPUs" and a superset for one that pins to a subset. */
+static int l_proc_sched_getaffinity(struct process *p, struct trap_frame *tf) {
+  int pid = (int)l_argi(tf, 0);
+  uint64_t len = l_arg(tf, 1);
+  uint64_t umask = l_arg(tf, 2);
+  int err = 0;
+
+  if (len < L_CPUMASK_KERNEL_BYTES) return l_ret(tf, -EINVAL);
+  if (!umask) return l_ret(tf, -EFAULT);
+  (void)l_pcb_of(p, pid, &err);
+  if (err != 0) return l_ret(tf, err);
+
+  uint8_t buf[L_CPUMASK_BYTES];
+  l_zero(buf, sizeof buf);
+  /* smp_init_count() is the boot-time truth ("cores that ran
+     trap_init_core_with_id", ids 0..n-1).  process_get_num_cpus() counts
+     cores that have entered the IDLE loop, which lags AP bring-up and made a
+     probe started early report a ONE-CPU machine; it is only the fallback. */
+  int ncpu = (int)smp_init_count();
+  if (ncpu <= 0) ncpu = process_get_num_cpus();
+  if (ncpu < 1) ncpu = 1;
+  if (ncpu > L_CPUMASK_MAX_CPUS) ncpu = L_CPUMASK_MAX_CPUS;
+  for (int i = 0; i < ncpu; i++) buf[i / 8] |= (uint8_t)(1u << (i % 8));
+
+  uint64_t n = len > sizeof buf ? (uint64_t)sizeof buf : len;
+  if (l_copy_to_user(p, umask, buf, n) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, L_CPUMASK_KERNEL_BYTES);
+}
+
+static int l_proc_sched_setaffinity(struct process *p, struct trap_frame *tf) {
+  int pid = (int)l_argi(tf, 0);
+  uint64_t len = l_arg(tf, 1);
+  uint64_t umask = l_arg(tf, 2);
+  int err = 0;
+
+  /* Linux wants len to be a multiple of sizeof(long); anything smaller than
+     the kernel mask is EINVAL. */
+  if (len < L_CPUMASK_KERNEL_BYTES || (len & (L_CPUMASK_KERNEL_BYTES - 1)) != 0)
+    return l_ret(tf, -EINVAL);
+  if (!umask) return l_ret(tf, -EFAULT);
+  uint64_t mask = 0;
+  if (l_copy_from_user(p, &mask, umask, sizeof mask) != 0)
+    return l_ret(tf, -EFAULT);
+  if (mask == 0) return l_ret(tf, -EINVAL); /* an empty mask is not a CPU set */
+
+  struct process *t = l_pcb_of(p, pid, &err);
+  if (err != 0) return l_ret(tf, err);
+  if (t != p) return l_ret(tf, -EPERM);
+  return l_ret(tf, 0);
+}
+
+/* statx(332) — deliberately -ENOSYS.  glibc 2.31's stat()/fstatat() TRY statx
+ * and, on ENOSYS, fall back to newfstatat (262), which this table implements
+ * against the real FAT16 metadata.  Implementing statx would mean a second,
+ * 256-byte layout and stx_mask/timestamp semantics to keep in sync with the
+ * 144-byte one, for callers that already have a working path. */
+static int l_proc_statx(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  return l_ret(tf, -ENOSYS);
+}
+
 /* ---- the table --------------------------------------------------------- */
 
-const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"},
+const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"},
   L_SYSENT_END
 };

@@ -72,6 +72,7 @@ unlink 87
 readlink 89
 chmod 90
 fchmod 91
+fchown 93
 umask 95
 gettimeofday 96
 getrlimit 97
@@ -84,7 +85,13 @@ geteuid 107
 getegid 108
 setpgid 109
 getppid 110
+setsid 112
+getpgid 121
+getsid 124
 sigaltstack 131
+getpriority 140
+setpriority 141
+prctl 157
 arch_prctl 158
 setrlimit 160
 gettid 186
@@ -131,6 +138,7 @@ pwritev 296
 prlimit64 302
 getrandom 318
 memfd_create 319
+membarrier 324
 statx 332
 rseq 334
 clone3 435
