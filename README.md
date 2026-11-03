@@ -12,8 +12,32 @@ A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 seco
 | **Games** — PONG, STARDUST and XNIBBLER as user-space programs, each scaled into its own IceWM window | **The start menu** — Apps, Games and All programs, generated from the desktop's pinned lists at disk-build time |
 | ![The Games submenu](docs/screenshots/icewm-games-menu.png) | ![XCALC, ANTFARM and XEYES](docs/screenshots/icewm-x11.png) |
 | **Games menu** — the pinned games plus anything in `/GAMES`, launched into a window through `HBHOST.BIN` | **X11 clients** — XCALC computing through clicks on real Xlib, ANTFARM animating on the native graphics API, XEYES following the pointer |
+| ![Doom E1M1, shotgun firing](docs/screenshots/doom-elf-outdoors.png) | ![The native DOOM.BIN port in an IceWM window](docs/screenshots/doom-native.png) |
+| **Doom, as an unmodified Linux ELF** — id Software's [`linuxdoom-1.10`](https://github.com/id-software/doom) built for x86_64 Linux and run *unchanged* through the Linux-ABI compat layer: E1M1, shotgun mid-fire, HUD and all | **Doom, native** — the doomgeneric port as a HobbyOS program, hosted in an IceWM window by `HBHOST.BIN`. Both are in the Games menu |
+| ![The game's 320x200 window on the otherwise black 8-bit screen](docs/screenshots/doom-elf-screen.png) | ![E1M1: a dark corridor with a barrel, a corpse and the pistol](docs/screenshots/doom-elf-start.png) |
+| **The 8-bit game screen** — `linuxdoom-1.10` needs a depth-8 PseudoColor screen, which X cannot provide as a window under a 24-bit root; `XHOBBY.BIN` therefore carries a second screen (`:0.1`) and hands it the framebuffer while the game runs | **In the level** — E1M1's dark first corridor: barrel, corpse, pistol, `AMMO 50 / HEALTH 100% / ARMOR 0%`, read from the guest's framebuffer |
 
-*Captured from a live QEMU boot — [`capture_screenshots.py`](capture_screenshots.py) reproduces them.*
+*Captured from a live QEMU boot: the desktop shots come from
+[`capture_screenshots.py`](capture_screenshots.py), the Doom frames from
+`tools/doom_elf/run_doom_elf_test.py` (a QMP screendump of the guest framebuffer).*
+
+## Doom as an unmodified Linux ELF
+
+`make run`, then **Games → Doom (Linux ELF)**. Nothing in that binary knows
+HobbyOS exists: it is `linuxdoom-1.10` built for x86_64 Linux (static-PIE musl,
+zero `NEEDED`), loaded by the compat ELF loader, reading its IWAD from FAT16,
+talking X11 to `XHOBBY.BIN` over `/tmp/.X11-unix/X0` and drawing through the
+HobbyOS DDX. The work is a Linux-ABI syscall layer (`src/kernel/linux_compat*.c`,
+`docs/linux-abi.md`), a correct `argv`/`envp`/`auxv` startup block, and a
+depth-8 PseudoColor screen in the X server — see
+[`docs/doom-elf/REPORT.md`](docs/doom-elf/REPORT.md) for the whole account,
+including what is *not* done (no audio, no Linux-shaped signal frames for
+hardware faults, no scaling of the 8-bit screen).
+
+```sh
+make doom_elf_test        # id linuxdoom-1.10 at depth 8, screendump-graded
+make doom_elf_test_gen    # doomgeneric's stock X11 backend at depth 24
+```
 
 ## Setup
 
