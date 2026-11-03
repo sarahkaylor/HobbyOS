@@ -746,70 +746,6 @@ static void sys_set_tls(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)(int64_t)process_set_tls(caller, tf->regs[5]);
 }
 
-/* --- GB-021: Linux clone(56) / futex(202) for a static-PIE musl binary.
- * The x64 syscall register map is rdi=r5, rsi=r4, rdx=r3, r10=r9, r8=r7,
- * r9=r8.  musl's pthread_create calls clone directly; it needs the caller's
- * frame copied (process_clone), not the native entry(arg) thread ABI. ---- */
-static void compat_clone(struct trap_frame *tf) {
-  struct process *caller = current_process();
-  long r = (long)process_clone(caller, tf, tf->regs[5], tf->regs[4],
-                               tf->regs[3], tf->regs[9], tf->regs[7]);
-  {
-    static int clone_reports = 0;
-    if (clone_reports < 5) {
-      clone_reports++;
-      struct kline kl;
-      kl_init(&kl);
-      kl_s(&kl, "[GB021-CLONE] r=");
-      kl_i(&kl, r);
-      kl_s(&kl, " flags=0x");
-      kl_hex(&kl, (unsigned long)tf->regs[5]);
-      kl_s(&kl, " stack=0x");
-      kl_hex(&kl, tf->regs[4]);
-      kl_s(&kl, " ptid=0x");
-      kl_hex(&kl, tf->regs[3]);
-      kl_s(&kl, " ctid=0x");
-      kl_hex(&kl, tf->regs[9]);
-      kl_s(&kl, "\n");
-      kl_emit(&kl);
-    }
-  }
-  tf->regs[0] = (uint64_t)(int64_t)r;
-}
-
-/* Linux futex ops carry FUTEX_PRIVATE_FLAG (0x80) / FUTEX_CLOCK_REALTIME
- * (0x100) in the op word, and the timeout is a struct timespec*; the kernel
- * futex takes a bare op and milliseconds.  WAIT/WAKE (0/1) is the surface
- * musl's pthread mutex/join/condvar uses. */
-static void compat_futex(struct trap_frame *tf) {
-  struct process *caller = current_process();
-  int op = (int)tf->regs[4] & ~(0x80 | 0x100);
-  /* musl's timed waits (pthread_join/condvar) use FUTEX_WAIT_BITSET /
-     FUTEX_WAKE_BITSET (9/10); the kernel futex is a single-word wait/wake, so
-     map them onto 0/1.  Returning -ENOSYS here leaks ENOSYS into the caller's
-     errno even when the join succeeds (measured: tls_main_errno_untouched=38). */
-  if (op == 9) op = 0;
-  else if (op == 10) op = 1;
-  int64_t timeout_ms = -1;
-  if (op == 0 && tf->regs[9]) {
-    long ts[2];
-    if (sys_user_range(tf->regs[9], sizeof ts, 0) != 0) {
-      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
-      return;
-    }
-    ts[0] = ((volatile long *)tf->regs[9])[0];
-    ts[1] = ((volatile long *)tf->regs[9])[1];
-    if (ts[0] < 0 || ts[1] < 0 || ts[1] >= 1000000000L) {
-      tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
-      return;
-    }
-    timeout_ms = ts[0] * 1000 + ts[1] / 1000000;
-    if (timeout_ms == 0 && (ts[0] || ts[1])) timeout_ms = 1;
-  }
-  tf->regs[0] = (uint64_t)(int64_t)process_futex(
-      caller, tf, tf->regs[5], op, (int)tf->regs[3], timeout_ms);
-}
-
 /* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX (96-102).  Thin
  * layer over fs.c, which validates every user range before changing any
  * state; -2 parks (blocking accept/connect) ride the pipe restart. ---- */
@@ -2378,31 +2314,16 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       switch (syscall_num) {
         case 0:  syscall_num = SYS_READ;  break;   /* read(fd, buf, n)   */
         case 1:  syscall_num = SYS_WRITE; break;   /* write(fd, buf, n)  */
-        /* GB-014: arch_prctl. musl's __init_tls ends with
-             call __set_thread_area ; test eax,eax ; js -> a_crash()
-           so a negative return is fatal: musl executes `hlt`, which at CPL=3
-           raises #GP and the process dies before main() -- measured as
-           RIP=0x1000003e6c (`f4`, inside __init_tls). ARCH_SET_FS is the only
-           opcode a static-pie startup needs; anything else gets -EINVAL, as
-           Linux returns. process_set_tls() validates the address and writes
-           IA32_FS_BASE. */
-        case 158: {                                /* arch_prctl(code, addr) */
-          uint64_t code = tf->regs[5];             /* rdi */
-          uint64_t addr = tf->regs[4];             /* rsi */
-          tf->regs[0] = (code == 0x1002ULL)        /* ARCH_SET_FS */
-                            ? (uint64_t)(int64_t)process_set_tls(lp, addr)
-                            : (uint64_t)(int64_t)(-22);
-          return;
-        }
+        /* arch_prctl(158) is l_thr_arch_prctl now (SET_FS/GET_FS/GET_CPUID):
+           musl's __init_tls treats a negative return as fatal, so it must
+           never be ENOSYS, and the table version also answers GET_FS. */
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
-        /* GB-021: musl pthread_create -> clone(2); pthread mutex/join ->
-           futex(2).  Both are Linux-shaped and handled directly (the clone
-           child must resume from the caller's frame, which no existing
-           kernel syscall number expresses). */
-        case 56:  compat_clone(tf); return;  /* clone(flags,stack,ptid,ctid,tls) */
-        case 202: compat_futex(tf); return;  /* futex(uaddr,op,val,ts*) */
+        /* clone(56) / futex(202) / arch_prctl(158) / set_robust_list(273)
+           live in l_tab_thr (src/kernel/linux_compat_thr.c) now: the M2
+           implementation is a table like every other compat subsystem, and a
+           second copy here would let the two disagree about thread state. */
         /* GB-021: musl's pthread plumbing touches these; an ENOSYS return
            pollutes the caller's errno even when the thread operation succeeds
            (measured: tls_main_errno_untouched=38). */
@@ -2424,7 +2345,6 @@ void sync_lower_handler_c(struct trap_frame *tf) {
           return;
         }
         case 24:  tf->regs[0] = 0; return;   /* sched_yield(): voluntary no-op */
-        case 273: tf->regs[0] = 0; return;   /* set_robust_list(): accepted, unused */
         /* sched_getaffinity(204) / sched_setaffinity(203) used to live here as
            a raw 8-byte 0xFF fill.  They are TABLE rows now (l_tab_proc): the
            table version implements the 128-byte cpu_set_t shape, zeroes the

@@ -634,6 +634,27 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
     if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
     argp[i] = sp;
   }
+  {
+    static int argv_diag;
+    if (argv_diag < 4) {
+      argv_diag++;
+      struct kline ka;
+      kl_init(&ka);
+      kl_s(&ka, "[LCOMPAT] argv argc=");
+      kl_i(&ka, argc);
+      for (int i = 0; i < argc && i < 3; i++) {
+        int n = sys_readargv(grp, i, s, (int)sizeof s);
+        kl_s(&ka, " a");
+        kl_i(&ka, i);
+        kl_s(&ka, "=");
+        kl_s(&ka, n > 0 ? s : "?");
+      }
+      kl_s(&ka, " execfn=");
+      kl_s(&ka, execfn ? execfn : "?");
+      kl_s(&ka, "\n");
+      kl_emit(&ka);
+    }
+  }
   uint64_t name_addr;
   if (argc > 0) {
     name_addr = argp[0];
@@ -719,7 +740,21 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
 
   uint64_t auxv_addr = (rnd_addr - (uint64_t)k * 8) & ~(uint64_t)0xF;
   uint64_t argv_addr = (auxv_addr - arrays) & ~(uint64_t)0x7;
-  if ((argv_addr & 0xF) == 0) argv_addr -= 8; /* argv[0] must be 8 mod 16 */
+  /* argv[0] must be 8 mod 16 (so %rsp = &argc is 16-aligned), AND the auxv
+   * must start EXACTLY at the envp NULL: glibc does not take the auxv address
+   * from anywhere -- it scans past argv's NULL, past envp's NULL, and reads the
+   * auxv from the next word.  The old code moved only argv_addr down by 8,
+   * leaving an 8-byte hole between envp's NULL and the auxv; glibc then read
+   * {0,0} = AT_NULL as the first pair, saw NO auxv at all, and fell into the
+   * "invoked directly as ld.so" path -- so it treated argv[1] as the program.
+   * Measured (M2): `mono --version` died with "--version: error while loading
+   * shared libraries: --version: invalid ELF header", and the same happened to
+   * any compat program whose (argc + envc) made argv_addr 16-aligned.  Move the
+   * auxv down WITH the arrays so the block stays contiguous. */
+  if ((argv_addr & 0xF) != 8) {
+    auxv_addr -= 8;
+    argv_addr -= 8;
+  }
   uint64_t envp_addr = argv_addr + (uint64_t)(argc + 1) * 8;
 
   uint8_t rnd[16];
@@ -1041,6 +1076,18 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       fat16_close(&f);
     }
     if (erc != 0) {
+      /* Name the refusal: a silent -ENOMEM here reads as "the program never
+         ran", which is the least diagnosable failure in the boot log. */
+      struct kline ke;
+      kl_init(&ke);
+      kl_s(&ke, "v2 loader: ELF load refused rc=");
+      kl_i(&ke, erc);
+      kl_s(&ke, " size=");
+      kl_i(&ke, (long)fsize);
+      kl_s(&ke, " file=");
+      kl_s(&ke, filename);
+      kl_s(&ke, "\n");
+      kl_emit(&ke);
       process_free(pid);
       return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC / -ENOENT */
     }

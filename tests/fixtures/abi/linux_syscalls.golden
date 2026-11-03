@@ -121,6 +121,7 @@ faccessat 269
 pselect6 270
 ppoll 271
 set_robust_list 273
+get_robust_list 274
 splice 275
 tee 276
 utimensat 280
@@ -136,6 +137,7 @@ inotify_init1 294
 preadv 295
 pwritev 296
 prlimit64 302
+getcpu 309
 getrandom 318
 memfd_create 319
 membarrier 324

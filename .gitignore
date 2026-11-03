@@ -181,6 +181,7 @@ third_party/llvm-21.1.8/dist-staging/
 # These paths only ever hold fetched runtime packages, probe output, or a
 # staging copy of the game tree served over NFS.
 /third_party/rw-runtime/
+/third_party/rw-mono/
 /rimworld/
 /nfs-export/
 

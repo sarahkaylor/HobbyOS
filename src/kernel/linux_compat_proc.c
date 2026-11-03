@@ -138,6 +138,11 @@ static int l_ret(struct trap_frame *tf, int rc) {
  * exactly how much of this the delivery engine honours today. */
 static uint64_t l_sigmask[MAX_PROCESSES];
 
+/* sa_flags per (pid, signal).  The native PCB stores handler/mask/restorer
+   but not the flag word, and the compat delivery engine needs SA_ONSTACK and
+   SA_SIGINFO to build a correct frame.  Keyed like everything else here. */
+static uint32_t l_sigflags[MAX_PROCESSES][HO_SIG_MAX];
+
 struct l_altstack_state {
   uint64_t ss_sp;
   uint64_t ss_size;
@@ -145,6 +150,39 @@ struct l_altstack_state {
   int32_t in_use;
 };
 static struct l_altstack_state l_altstack[MAX_PROCESSES];
+
+/* --- accessors for linux_compat_thr.c's frame engine ---------------------
+ * One file owns the state; the engine that builds Linux rt_sigframes asks. */
+uint64_t linux_compat_sigmask_get(struct process *p) {
+  int slot = l_slot(p);
+  return slot < 0 ? 0 : l_sigmask[slot];
+}
+
+void linux_compat_sigmask_set(struct process *p, uint64_t mask) {
+  int slot = l_slot(p);
+  if (slot < 0) return;
+  mask &= ~((1ull << (L_SIGKILL - 1)) | (1ull << (L_SIGSTOP - 1)));
+  l_sigmask[slot] = mask;
+}
+
+int linux_compat_altstack_get(struct process *p, uint64_t *sp, uint64_t *size,
+                              int *flags) {
+  int slot = l_slot(p);
+  if (slot < 0 || !l_altstack[slot].in_use) return -1;
+  if (sp) *sp = l_altstack[slot].ss_sp;
+  if (size) *size = l_altstack[slot].ss_size;
+  if (flags) *flags = l_altstack[slot].ss_flags;
+  return 0;
+}
+
+int linux_compat_sigflags_get(struct process *p, int sig) {
+  /* Dispositions (and therefore their flags) are group state: a handler
+     installed by one thread is entered by any thread, with that thread's
+     stack rules.  Resolve the anchor before the pid lookup. */
+  int slot = l_slot(process_group(p));
+  if (slot < 0 || sig <= 0 || sig >= HO_SIG_MAX) return 0;
+  return (int)l_sigflags[slot][sig];
+}
 
 /* The umask is process state in POSIX but a single kernel-wide value here:
  * every compat process is uid 0 and FAT16 carries no permission bits, so a
@@ -434,6 +472,13 @@ static int l_proc_rt_sigaction(struct process *p, struct trap_frame *tf) {
     }
     return l_ret(tf, rc);
   }
+  /* Record the flag word: the native PCB keeps handler/mask/restorer but not
+     flags, and the compat frame engine needs SA_ONSTACK/SA_SIGINFO. */
+  if (have_act) {
+    int slot = l_slot(process_group(p));
+    if (slot >= 0 && sig > 0 && sig < HO_SIG_MAX)
+      l_sigflags[slot][sig] = (uint32_t)ka.sa_flags;
+  }
   if (uold) {
     /* Exactly the 32 bytes the ABI defines — see the layout note above. */
     struct l_kernel_sigaction ko;
@@ -487,9 +532,12 @@ static int l_proc_rt_sigprocmask(struct process *p, struct trap_frame *tf) {
    process_sigreturn() writes -EINVAL into regs[0] on a stale call and the
    process continues, which is the documented defensive behaviour. */
 static int l_proc_rt_sigreturn(struct process *p, struct trap_frame *tf) {
-  (void)p;
-  process_sigreturn(tf);
-  return 1;
+  /* Compat processes are entered through a Linux x86-64 rt_sigframe (built by
+     linux_compat_thr.c), not the native HOS3 frame: the guest's restorer is
+     glibc's __restore_rt and its handler reads a Linux ucontext_t.  The
+     native restore would read the Linux frame as an HOS3 one. */
+  extern int linux_compat_sigreturn(struct process *p, struct trap_frame *tf);
+  return linux_compat_sigreturn(p, tf);
 }
 
 /* sigaltstack(ss, old_ss).  Stored and reported faithfully; the delivery

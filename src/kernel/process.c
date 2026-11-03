@@ -637,6 +637,7 @@ static int sig_deliverable(int sig) {
   case HO_SIGILL:
   case HO_SIGABRT:
   case HO_SIGBUS:
+  case HO_SIGFPE:
   case HO_SIGSEGV:
   case HO_SIGUSR1:
   case HO_SIGUSR2:
@@ -1312,9 +1313,16 @@ void save_context(struct process *p, struct trap_frame *tf) {
      one deliberately SIMD-capable TU, src/kernel/arch/arm/fpu.s. */
   fpu_save(p->fpu_state);
 #endif
-  /* P1 (design section 4): the TLS register joins the switch as one per-PCB
-     word -- read the live value here, write it back in restore_context(). */
-  p->tls_base = tls_read_live();
+  /* P1 (design section 4): the TLS register is one per-PCB word, restored in
+     restore_context().  It is NOT re-read from the live MSR here: the only
+     writers of IA32_FS_BASE/TPIDR_EL0 are process_set_tls() (which updates
+     the PCB too) and restore_context() itself, so p->tls_base is already
+     authoritative -- while the live MSR belongs to whatever this CPU is
+     executing, which is not necessarily `p` when a stale cpu_current_pids
+     claim made us save another thread's frame.  Measured (M2): the old read
+     copied one worker's FS base into the main thread's PCB, main then ran
+     with a foreign TCB and died inside __free_tcb. */
+  (void)0;
 }
 
 void wd_dump_proc_table(void) {
@@ -2288,6 +2296,7 @@ static int sig_known(int sig) {
   case HO_SIGABRT:
   case HO_SIGBUS:
   case HO_SIGKILL:
+  case HO_SIGFPE:
   case HO_SIGUSR1:
   case HO_SIGSEGV:
   case HO_SIGUSR2:
@@ -2596,16 +2605,24 @@ int process_signal(int pid, int sig) {
   if (!sig_known(sig))
     return -EINVAL;
   struct process *target = 0;
+  /* M2: the exact task, when the signal names one.  A Linux tgkill(tid) must
+     run the handler on THAT thread; recording the pending bit only on the
+     group anchor delivered it to whichever member trapped next. */
+  struct process *task = 0;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   if (pid > 0 && pid < MAX_PROCESSES) {
     struct process *p = &proc_table[pid];
     if (p->state != PROC_STATE_FREE && p->state != PROC_STATE_EXITED &&
-        p->state != PROC_STATE_THREAD_DONE)
+        p->state != PROC_STATE_THREAD_DONE) {
       target = process_group(p);
+      task = p;
+    }
   } else if (pid == 0) {
     struct process *cur = current_process();
-    if (cur)
+    if (cur) {
       target = process_group(cur);
+      task = cur;
+    }
   } else if (pid < -1 && -pid > 0 && -pid < MAX_PROCESSES) {
     /* Group leader -pid (D9.1; kill(-1) keeps "any process" meaning only
        in the existence-check path and is -ESRCH here). */
@@ -2629,8 +2646,20 @@ int process_signal(int pid, int sig) {
     return 0;
   }
   /* Real handler: record pending + wake a restartable-slice park (D8.3). */
-  target->sig_pending |= (1u << (sig - 1));
+  struct process *pender = (task && task->is_thread) ? task : target;
+  pender->sig_pending |= (1u << (sig - 1));
   sig_wake_leader_locked(target, sig);
+  /* M2: a compat thread parked in futex must see the signal as EINTR, or a
+     stop-the-world tgkill never reaches a parked worker. */
+  if (pender->abi_flags & PROC_FLAG_LINUX_ABI) {
+    extern void linux_compat_signal_interrupt(struct process *)
+        __attribute__((weak));
+    if (linux_compat_signal_interrupt) {
+      linux_compat_signal_interrupt(pender);
+      if (pender != target)
+        linux_compat_signal_interrupt(target);
+    }
+  }
   spinlock_release_irqrestore(&proc_lock, flags);
   return 0;
 }
@@ -2756,6 +2785,17 @@ static void sig_drop_pending(struct process *grp, int sig) {
  * Returns 1 when a handler frame was planted (the trap will enter the
  * handler instead of returning to the interrupted PC). */
 int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
+  /* M2: a Linux-ABI group gets a real x86-64 rt_sigframe instead of the HOS3
+     frame below, because the guest's restorer is glibc's __restore_rt and its
+     handler reads a Linux ucontext_t.  The hook is weak so a tree without
+     linux_compat_thr.c still links, and it is only consulted for compat
+     processes: the native engine is untouched. */
+  extern int linux_compat_signal_deliver(struct process *,
+                                         struct trap_frame *)
+      __attribute__((weak));
+  if (grp && linux_compat_signal_deliver &&
+      (grp->abi_flags & PROC_FLAG_LINUX_ABI))
+    return linux_compat_signal_deliver(grp, tf);
   if (!grp || grp->is_kernel_process || grp->is_thread || !tf)
     return 0;
 #ifdef __x86_64__
@@ -4427,6 +4467,16 @@ void process_fault_set_status(struct trap_frame *tf, int signo) {
     tf->regs[0] = (uint64_t)(PROCESS_STATUS_SIGNAL | (signo & 0x7f));
 }
 void process_fault_exit(struct trap_frame *tf, int signo) {
+  /* M2: a compat process with a handler for this fault resumes in the
+     handler (Linux frame, on the faulting thread's stack) instead of dying.
+     SIGSEGV/SIGBUS/SIGILL/SIGFPE were not deliverable at all before this. */
+  extern int linux_compat_fault(struct process *, struct trap_frame *, int)
+      __attribute__((weak));
+  struct process *cur = current_process();
+  if (cur && linux_compat_fault &&
+      (cur->abi_flags & PROC_FLAG_LINUX_ABI) &&
+      linux_compat_fault(cur, tf, signo))
+    return;
   process_fault_set_status(tf, signo);
   process_exit(tf);
 }
@@ -4722,6 +4772,16 @@ void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
   }
   struct process *grp = process_group(cur);
   cur->thread_ret = retval;
+
+  /* M2: walk the thread's robust list (mark OWNER_DIED + wake) and drop its
+     futex queue entry while the address space is still alive.  A thread that
+     dies holding a robust mutex would otherwise park its joiners forever. */
+  {
+    extern void linux_compat_thread_exit(struct process *)
+        __attribute__((weak));
+    if (linux_compat_thread_exit && (cur->abi_flags & PROC_FLAG_LINUX_ABI))
+      linux_compat_thread_exit(cur);
+  }
 
   /* GB-021 (Linux CLONE_CHILD_CLEARTID): a thread's last act is to zero its
      TCB tid word and wake a joiner parked on it.  Do it before the last-thread

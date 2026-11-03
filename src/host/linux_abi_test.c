@@ -54,9 +54,9 @@ static const struct row syscall_rows[] = {
   X(epoll_create) X(getdents64) X(fadvise64) X(clock_gettime) X(clock_getres) X(clock_nanosleep) X(exit_group)
   X(epoll_wait) X(epoll_ctl) X(tgkill) X(openat) X(mkdirat) X(newfstatat)
   X(unlinkat) X(renameat) X(readlinkat) X(fchmodat) X(faccessat) X(pselect6)
-  X(ppoll) X(set_robust_list) X(splice) X(tee) X(utimensat) X(epoll_pwait)
+  X(ppoll) X(set_robust_list) X(get_robust_list) X(splice) X(tee) X(utimensat) X(epoll_pwait)
   X(signalfd) X(eventfd) X(eventfd2) X(epoll_create1) X(dup3) X(pipe2)
-  X(inotify_init1) X(preadv) X(pwritev) X(prlimit64) X(getrandom) X(memfd_create)
+  X(inotify_init1) X(preadv) X(pwritev) X(prlimit64) X(getcpu) X(getrandom) X(memfd_create)
   X(membarrier) X(statx) X(rseq) X(clone3) X(close_range) X(faccessat2) X(process_madvise)
   /* glibc 2.31 startup batch (M1, lane L3): descriptors + job control */
   X(fchown) X(setsid) X(getpgid) X(getsid) X(getpriority) X(setpriority) X(prctl)
