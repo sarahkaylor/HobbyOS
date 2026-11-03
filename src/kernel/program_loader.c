@@ -387,6 +387,22 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
     }
   }
 
+  /* Every spawned program gets a real stdin.  Without one, fd 0 stays
+     unassigned (-1) and Mono's System.Console ctor dies before running a
+     single managed statement: FileStream(IntPtr handle) calls fstat(0), gets
+     EBADF and throws ArgumentException "handle: Invalid", which surfaces as
+     TypeInitializationException for System.Console (measured on mono 6.12:
+     the stack trace showed Console..cctor -> OpenStandardInput -> FileStream).
+     /dev/null reads EOF forever -- the same thing `< /dev/null` gives on
+     Linux, and exactly what a batch-run program wants. */
+  if (child && child->open_fds[0] == -1) {
+    int nf = file_open(child, "/dev/null", 0);
+    if (nf > 0 && child->open_fds[nf] != -1) {
+      child->open_fds[0] = child->open_fds[nf];
+      child->open_fds[nf] = -1;
+    }
+  }
+
   /* SysV AMD64 ABI (browser.md F1.5): at the first instruction of a
      function RSP must be 16n+8 — the caller's return address occupies the
      8 bytes at 16n.  The user entry (_start) is compiled C whose prologue
