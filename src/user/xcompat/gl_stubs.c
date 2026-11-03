@@ -599,6 +599,14 @@ float powf(float x, float y) { return (float)pow((double)x, (double)y); }
 float logf(float x) { return (float)log((double)x); }
 float log2f(float x) { return (float)log2((double)x); }
 float log10f(float x) { return (float)log10((double)x); }
+/* libc.a's math.c has no log2/log10/lrint/llrint either (MESA-NOTES §6.2
+ * only counted the float forms). */
+double log2(double x) { return log(x) * 1.4426950408889634074; }
+double log10(double x) { return log(x) * 0.43429448190325182765; }
+long lrint(double x) { return (long)rint(x); }
+long lrintf(float x) { return (long)rintf(x); }
+long long llrint(double x) { return (long long)rint(x); }
+long long llrintf(float x) { return (long long)rintf(x); }
 float expf(float x) { return (float)exp((double)x); }
 float exp2f(float x) { return (float)exp2((double)x); }
 float sqrtf(float x) { return (float)sqrt((double)x); }
