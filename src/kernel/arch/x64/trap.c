@@ -2639,6 +2639,20 @@ void sync_lower_handler_c(struct trap_frame *tf) {
             tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY */
             return;
           }
+          /* GB-167: the FBIO family on /dev/fb0.  Only an fb node answers these;
+             any other fd keeps the honest ENOTTY.  sys_fb_ioctl() takes its
+             request/arg in rdi/rsi, so shuffle the Linux (fd, req, arg) into it. */
+          if (ireq == 0x4600 || ireq == 0x4601 || ireq == 0x4611) {
+            extern int file_fd_is_devfb(struct process *, int);
+            if (file_fd_is_devfb(c16, cfd)) {
+              tf->regs[5] = (uint64_t)(int64_t)ireq;
+              tf->regs[4] = iarg;
+              sys_fb_ioctl(tf);
+              return;
+            }
+            tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY: not an fb node */
+            return;
+          }
           tf->regs[0] = (uint64_t)(int64_t)(-25);       /* -ENOTTY: node lacks this request */
           return;
         }
