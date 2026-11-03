@@ -159,6 +159,11 @@
 #define L_SYS_fadvise64 221
 #define L_SYS_clock_gettime 228
 #define L_SYS_rt_sigtimedwait 128
+#define L_SYS_statfs 137
+#define L_SYS_sched_get_priority_max 146
+#define L_SYS_sched_get_priority_min 147
+#define L_SYS_sched_rr_get_interval 148
+
 #define L_SYS_sched_getparam 143
 #define L_SYS_sched_getscheduler 145
 #define L_SYS_clock_getres 229
