@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include "doomgeneric.h"
+#include "doomkeys.h"
 
 static int DG_RESX = 640;
 static int DG_RESY = 400;
@@ -80,8 +81,70 @@ uint32_t DG_GetTicksMs(void) {
                       (uint64_t)ts.tv_nsec / 1000000u);
 }
 
+/* GB-172: evdev (Linux input-event-codes) -> doomkeys.  Only the keys the
+   menu, the movement bindings and the cheats need; 0 = not forwarded. */
+static unsigned char ev_to_doomkey(unsigned short code) {
+    switch (code) {
+    case 1:   return KEY_ESCAPE;
+    case 14:  return KEY_BACKSPACE;
+    case 15:  return KEY_TAB;
+    case 28:  return KEY_ENTER;
+    case 57:  return ' ';              /* space fires */
+    case 103: return KEY_UPARROW;
+    case 105: return KEY_LEFTARROW;
+    case 106: return KEY_RIGHTARROW;
+    case 108: return KEY_DOWNARROW;
+    case 29:  return KEY_FIRE;         /* left ctrl */
+    case 42: case 54: return KEY_RSHIFT;
+    case 56:  return KEY_RALT;
+    case 100: return KEY_LALT;
+    case 59: case 60: case 61: case 62: case 63:
+    case 64: case 65: case 66: case 67: case 68:
+        return (unsigned char)(KEY_F1 + (code - 59));
+    case 88:  return KEY_F12;
+    /* digits 1..0 */
+    case 2: case 3: case 4: case 5: case 6:
+    case 7: case 8: case 9: case 10: case 11:
+        return (unsigned char)('1' + (code - 2));
+    /* q w e r t y u i o p */
+    case 16: return 'q'; case 17: return 'w'; case 18: return 'e';
+    case 19: return 'r'; case 20: return 't'; case 21: return 'y';
+    case 22: return 'u'; case 23: return 'i'; case 24: return 'o';
+    case 25: return 'p';
+    /* a s d f g h j k l */
+    case 30: return 'a'; case 31: return 's'; case 32: return 'd';
+    case 33: return 'f'; case 34: return 'g'; case 35: return 'h';
+    case 36: return 'j'; case 37: return 'k'; case 38: return 'l';
+    /* z x c v b n m */
+    case 44: return 'z'; case 45: return 'x'; case 46: return 'c';
+    case 47: return 'v'; case 48: return 'b'; case 49: return 'n';
+    case 50: return 'm';
+    default:  return 0;
+    }
+}
+
+static int kbd_fd = -1;
+static int kbd_tried = 0;
+
 int DG_GetKey(int *pressed, unsigned char *key) {
-    (void)pressed; (void)key; return 0; /* input stays 0: no input device yet */
+    struct { unsigned long sec, usec; unsigned short type, code; int value; } ev;
+    if (!kbd_tried) {
+        kbd_fd = open("/dev/input/event0", O_RDONLY | O_NONBLOCK);
+        kbd_tried = 1;
+    }
+    if (kbd_fd < 0) return 0;
+    /* drain until an EV_KEY we can map; EV_SYN/EV_MSC are skipped */
+    for (int guard = 0; guard < 32; guard++) {
+        ssize_t n = read(kbd_fd, &ev, sizeof ev);
+        if (n != (ssize_t)sizeof ev) return 0;
+        if (ev.type != 1) continue;                 /* EV_KEY */
+        unsigned char k = ev_to_doomkey(ev.code);
+        if (!k) continue;
+        *pressed = (ev.value != 0);                 /* 1 down, 0 up, 2 repeat */
+        *key = k;
+        return 1;
+    }
+    return 0;
 }
 
 void DG_SetWindowTitle(const char *title) { (void)title; }
