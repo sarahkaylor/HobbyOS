@@ -51,6 +51,7 @@ static const struct row syscall_rows[] = {
   X(geteuid) X(getegid) X(setpgid) X(getppid) X(sigaltstack) X(arch_prctl)
   X(setrlimit) X(gettid) X(set_tid_address) X(tkill)
   X(rt_sigaction) X(rt_sigprocmask) X(rt_sigreturn) X(futex) X(sched_setaffinity) X(sched_getaffinity)
+  X(rt_sigtimedwait) X(sched_getparam) X(sched_getscheduler)
   X(epoll_create) X(getdents64) X(fadvise64) X(clock_gettime) X(clock_getres) X(clock_nanosleep) X(exit_group)
   X(epoll_wait) X(epoll_ctl) X(tgkill) X(openat) X(mkdirat) X(newfstatat)
   X(unlinkat) X(renameat) X(readlinkat) X(fchmodat) X(faccessat) X(pselect6)

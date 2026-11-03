@@ -88,9 +88,12 @@ getppid 110
 setsid 112
 getpgid 121
 getsid 124
+rt_sigtimedwait 128
 sigaltstack 131
 getpriority 140
 setpriority 141
+sched_getparam 143
+sched_getscheduler 145
 prctl 157
 arch_prctl 158
 setrlimit 160
