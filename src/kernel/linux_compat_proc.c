@@ -1176,6 +1176,53 @@ static int l_proc_statx(struct process *p, struct trap_frame *tf) {
 
 /* ---- the table --------------------------------------------------------- */
 
+
+/* ---- timer resolution + scheduler queries + rt_sigtimedwait (Mono) ------- */
+
+/* clock_getres(229).  The kernel's tick is 100 Hz, so 10 ms is the honest
+ * answer for every clock; a NULL resolver only validates the clock id.
+ * Mono sizes its timer wheels from this. */
+static int l_proc_clock_getres(struct process *p, struct trap_frame *tf) {
+  int clockid = (int)l_argi(tf, 0);
+  uint64_t ures = l_arg(tf, 1);
+  if (clockid < 0 || clockid > 11) return l_ret(tf, -EINVAL);
+  if (!ures) return l_ret(tf, 0);
+  struct { int64_t sec; int64_t nsec; } ts = {0, 10000000};
+  if (l_copy_to_user(p, ures, &ts, sizeof ts) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, 0);
+}
+
+/* sched_getparam(143).  Every process is SCHED_OTHER, whose sched_priority is
+ * 0 on Linux — this is an exact answer, not a stub. */
+static int l_proc_sched_getparam(struct process *p, struct trap_frame *tf) {
+  uint64_t uparam = l_arg(tf, 1);
+  if (!uparam) return l_ret(tf, -EFAULT);
+  int prio = 0;
+  if (l_copy_to_user(p, uparam, &prio, sizeof prio) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, 0);
+}
+
+/* sched_getscheduler(145): SCHED_OTHER (0) for everyone. */
+static int l_proc_sched_getscheduler(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  return l_ret(tf, 0);
+}
+
+/* rt_sigtimedwait(137).  The compat class has no queued-signal model (the
+ * header of process.c says so), so a blocking wait would have nothing to wake
+ * it: report "nothing pending" with -EAGAIN and let the caller retry.  glibc's
+ * sigwait loops tolerate it; Mono reaches thread creation and the managed
+ * runtime with this answer (measured). */
+static int l_proc_rt_sigtimedwait(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  return l_ret(tf, -EAGAIN);
+}
+
 const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"},
+  {L_SYS_clock_getres, l_proc_clock_getres, "clock_getres"},
+  {L_SYS_sched_getparam, l_proc_sched_getparam, "sched_getparam"},
+  {L_SYS_sched_getscheduler, l_proc_sched_getscheduler, "sched_getscheduler"},
+  {L_SYS_rt_sigtimedwait, l_proc_rt_sigtimedwait, "rt_sigtimedwait"},
   L_SYSENT_END
 };
