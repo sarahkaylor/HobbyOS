@@ -10,6 +10,8 @@
 #include "file_obj.h" /* so-vm lane A (CROSS-LANE): page-cache invalidation */
 #include "timer.h"
 #include "vm.h" /* P2.4 (S4): memfd objects */
+#include "input_node.h"   /* GB-171: evdev record fill for /dev/input/event0 */
+#include "virtio_input.h" /* GB-171: the key ring that node drains */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -175,11 +177,22 @@ int file_open(struct process *cur, const char *filename, int flags) {
     int isurand = (rest[0] == '/' && rest[1] == 'u' && rest[2] == 'r' &&
                    rest[3] == 'a' && rest[4] == 'n' && rest[5] == 'd' &&
                    rest[6] == 'o' && rest[7] == 'm' && rest[8] == '\0');
+    /* GB-171: /dev/input/event0 — the evdev node a Linux-ABI program polls for
+       keys.  GB-027 delivered the record format and the kernel's own
+       SYS_INPUT_READ; this is the name in the filesystem, nothing more. */
+    int isinput = (rest[0] == '/' && rest[1] == 'i' && rest[2] == 'n' &&
+                   rest[3] == 'p' && rest[4] == 'u' && rest[5] == 't' &&
+                   rest[6] == '/' && rest[7] == 'e' && rest[8] == 'v' &&
+                   rest[9] == 'e' && rest[10] == 'n' && rest[11] == 't' &&
+                   rest[12] == '0' && rest[13] == '\0');
     if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
       f->open_flags = (uint32_t)flags;
     } else if (isurand) {
       f->type = FILE_TYPE_DEVURANDO;
+      f->open_flags = (uint32_t)flags;
+    } else if (isinput) {
+      f->type = FILE_TYPE_DEVINPUT;
       f->open_flags = (uint32_t)flags;
     } else {
       f->type = FILE_TYPE_EMPTY;
@@ -1655,6 +1668,24 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return 0; /* /dev/null reads always yield EOF (0 bytes) */
+  } else if (f->type == FILE_TYPE_DEVINPUT) {
+    /* GB-171: drain the virtio-input ring into Linux 24-byte `input_event`
+       records.  Non-blocking (0 when idle) — the model SYS_INPUT_READ already
+       uses for the native path, and what a polling client like DOOM's
+       DG_GetKey expects.  A partial trailing record is not returned. */
+    int max = size / (int)sizeof(struct hb_input_event);
+    if (max <= 0) return 0;
+    struct virtio_input_event raw[32];
+    int want = max > 32 ? 32 : max;
+    int got = virtio_input_get_events(raw, want);
+    if (got < 0) return -EIO;
+    extern uint64_t timer_get_ms(void);
+    uint64_t t = timer_get_ms();
+    for (int i = 0; i < got; i++)
+      hb_input_fill_event((struct hb_input_event *)buf + i, raw[i].type,
+                          raw[i].code, raw[i].value,
+                          t / 1000u, (t % 1000u) * 1000u);
+    return got * (int)sizeof(struct hb_input_event);
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     if (size <= 0) return 0;
     return net_get_random_bytes(buf, (uint32_t)size); /* never short */
