@@ -31,11 +31,18 @@
 #define NFS_SRC_MAX         64     /* "a.b.c.d:/export" source string */
 #define NFS_FH_MAX          64     /* NFSv3 file handles are <= 64 bytes */
 #define NFS_NAME_MAX        32     /* matches struct sys_dirent.name */
+#define NFS_COMP_MAX        256    /* one PATH COMPONENT in LOOKUP (NFSv3
+                                    * allows 255 bytes; readdir display is
+                                    * narrower than the real names) */
 #define NFS_MSG_MAX         1472   /* max UDP payload we ever send */
 #define NFS_READ_CHUNK      1024   /* READ rsize */
 #define NFS_READDIR_DCOUNT  512    /* READDIRPLUS dircount hint */
 #define NFS_READDIR_MAXC    1200   /* READDIRPLUS maxcount hint */
-#define NFS_DIR_CACHE_MAX   64     /* entries cached per directory listing */
+#define NFS_DIR_CACHE_MAX   256    /* entries cached per directory listing
+                                    * (RimWorldLinux_Data/Managed has 102;
+                                    * at 64 the listing silently stopped at
+                                    * 64 because read_dir(index) reports
+                                    * "past the end" for a cache miss) */
 #define NFS_RPC_TRIES       3
 #define NFS_RPC_TIMEOUT_MS  500
 #define NFS_EXPORT_MAX      96     /* exported directory path */
