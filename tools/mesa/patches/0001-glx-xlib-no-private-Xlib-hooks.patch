@@ -1,0 +1,65 @@
+--- a/src/gallium/frontends/glx/xlib/glx_api.c
++++ b/src/gallium/frontends/glx/xlib/glx_api.c
+@@ -606,41 +606,19 @@
+ 
+ 
+ /**
+- * Look for the named extension on given display and return a pointer
+- * to the _XExtension data, or NULL if extension not found.
+- */
+-static _XExtension *
+-lookup_extension(Display *dpy, const char *extName)
+-{
+-   _XExtension *ext;
+-   for (ext = dpy->ext_procs; ext; ext = ext->next) {
+-      if (ext->name && strcmp(ext->name, extName) == 0) {
+-         return ext;
+-      }
+-   }
+-   return NULL;
+-}
+-
+-
+-/**
+- * Whenever we're given a new Display pointer, call this function to
+- * register our close_display_callback function.
++ * HOBBYOS PATCH (M4/L5, tools/mesa/patches/0001): Mesa's xlib GLX frontend
++ * keeps its per-Display state alive by hooking XCloseDisplay through
++ * libX11's *private* extension list (dpy->ext_procs / _XExtension).  The
++ * compat class's libX11.so.6 (lane L4) implements the public X11 client
++ * surface only and does not lay out Display that way, so the hook cannot be
++ * installed.  Consequence: Mesa's display records are freed at process exit
++ * rather than at XCloseDisplay.  The game keeps one display for its whole
++ * lifetime, so this is a no-op in practice.
+  */
+ static void
+ register_with_display(Display *dpy)
+ {
+-   const char *extName = "MesaGLX";
+-   _XExtension *ext;
+-
+-   ext = lookup_extension(dpy, extName);
+-   if (!ext) {
+-      XExtCodes *c = XAddExtension(dpy);
+-      ext = dpy->ext_procs;  /* new extension is at head of list */
+-      assert(c->extension == ext->codes.extension);
+-      (void) c;
+-      ext->name = strdup(extName);
+-      ext->close_display = close_display_callback;
+-   }
++   (void) dpy;
+ }
+ 
+ 
+@@ -681,7 +659,10 @@
+    event.xerror.type = X_Error;
+    event.xerror.display = dpy;
+    event.xerror.resourceid = resourceid;
+-   event.xerror.serial = NextRequest(dpy) - 1;
++   /* HOBBYOS PATCH (M4/L5): the serial is a private Xlib field
++    * (NextRequest reads dpy->last_req).  Only the synthesised-error path
++    * uses it; 0 means "unknown serial" and the handler does not read it. */
++   event.xerror.serial = 0;
+    event.xerror.error_code = error_code;
+    event.xerror.request_code = major_opcode;
+    event.xerror.minor_code = minor_code;

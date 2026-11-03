@@ -97,6 +97,14 @@ extern "C" {
 }
 #endif
 #define errno (*__errno_location())
+
+/* M4/L5: glibc's program_invocation_name / program_invocation_short_name.
+ * Mesa's src/util/u_process.c reads them when /proc is unavailable; libc.a
+ * defines neither, so src/user/xcompat/gl_stubs.c supplies writable globals
+ * (initially NULL - Mesa falls back to "unknown" and then to its own
+ * constructor-set name). */
+extern char *program_invocation_name;
+extern char *program_invocation_short_name;
 #else
 /* Host tests link against glibc, where `errno` is a TLS macro, not a
  * variable. Some host rules compile with -Isrc/include, which shadows

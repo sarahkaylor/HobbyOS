@@ -36,6 +36,54 @@ extern "C" {
 #define INFINITY (__builtin_inff())
 #define NAN (__builtin_nanf(""))
 
+/* ---- XSI / POSIX numerical constants (M4/L5) ----
+ *
+ * <math.h> is required to expose these when _XOPEN_SOURCE / _GNU_SOURCE is
+ * in effect; this header exposed none, so every Mesa TU that uses M_PI,
+ * M_LOG2E, ... failed with "use of undeclared identifier".  Provided
+ * unconditionally (they are macros, no ABI) and guarded so a TU that gets
+ * them from elsewhere still wins.  Values are the usual correctly-rounded
+ * literals from the C99 rationale. */
+#ifndef M_E
+#define M_E        2.7182818284590452354
+#endif
+#ifndef M_LOG2E
+#define M_LOG2E    1.4426950408889634074
+#endif
+#ifndef M_LOG10E
+#define M_LOG10E   0.43429448190325182765
+#endif
+#ifndef M_LN2
+#define M_LN2      0.69314718055994530942
+#endif
+#ifndef M_LN10
+#define M_LN10     2.30258509299404568402
+#endif
+#ifndef M_PI
+#define M_PI       3.14159265358979323846
+#endif
+#ifndef M_PI_2
+#define M_PI_2     1.57079632679489661923
+#endif
+#ifndef M_PI_4
+#define M_PI_4     0.78539816339744830962
+#endif
+#ifndef M_1_PI
+#define M_1_PI     0.31830988618379067154
+#endif
+#ifndef M_2_PI
+#define M_2_PI     0.63661977236758134308
+#endif
+#ifndef M_2_SQRTPI
+#define M_2_SQRTPI 1.12837916709551257390
+#endif
+#ifndef M_SQRT2
+#define M_SQRT2    1.41421356237309504880
+#endif
+#ifndef M_SQRT1_2
+#define M_SQRT1_2  0.70710678118654752440
+#endif
+
 #define fpclassify(x)                                                          \
   __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_NORMAL, FP_SUBNORMAL, FP_ZERO,  \
                        x)

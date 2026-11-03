@@ -15,6 +15,8 @@
  * POSIX thread functions return the error number (not -1/errno). */
 
 #include <stddef.h>
+#include <time.h>
+#include <sched.h>   /* cpu_set_t for the _np affinity pair (M4/L5) */
 
 #ifdef __cplusplus
 extern "C" {
@@ -160,7 +162,30 @@ extern "C" {
   int pthread_cond_signal(pthread_cond_t *cond);
   int pthread_cond_broadcast(pthread_cond_t *cond);
   int pthread_condattr_init(pthread_condattr_t *attr);
+  /* M4/L5: two entry points Mesa's c11 shim and util/cnd_monotonic.c call.
+   * Both are declared for compile-time completeness and implemented in
+   * gl_stubs.c: mutex_timedlock ignores the timeout (single-threaded
+   * softpipe) and condattr_setclock accepts CLOCK_MONOTONIC and returns 0,
+   * because HobbyOS's condvar already times out on the monotonic clock. */
+  int pthread_mutex_timedlock(pthread_mutex_t *mutex,
+                              const struct timespec *abstime);
+  int pthread_condattr_setclock(pthread_condattr_t *attr, clockid_t clock_id);
   int pthread_condattr_destroy(pthread_condattr_t *attr);
+  /* M4/L5: glibc's pthread_setname_np (per-thread name, 16 bytes incl. NUL).
+   * Mesa's util/u_thread.c names its worker threads for debuggers; HobbyOS
+   * has no per-thread name yet, so gl_stubs.c records it in the TCB-less
+   * "nowhere" and returns 0 (callers treat it as best-effort). */
+  int pthread_setname_np(pthread_t thread, const char *name);
+  /* M4/L5: per-thread CPU clock id.  HobbyOS has one CPU clock per process,
+   * so gl_stubs.c returns CLOCK_PROCESS_CPUTIME_ID for any thread. */
+  int pthread_getcpuclockid(pthread_t thread, clockid_t *clock_id);
+  /* M4/L5: the _np affinity pair Mesa's util/u_thread.c calls when
+   * util_cpu_detect reports >1 CPU.  HobbyOS's scheduler has no affinity,
+   * so gl_stubs.c accepts the calls (mask copied, return 0). */
+  int pthread_getaffinity_np(pthread_t thread, size_t cpusetsize,
+                             cpu_set_t *cpuset);
+  int pthread_setaffinity_np(pthread_t thread, size_t cpusetsize,
+                             const cpu_set_t *cpuset);
 
   /* ---- once --------------------------------------------------------------- */
   int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
