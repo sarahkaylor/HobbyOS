@@ -3272,6 +3272,8 @@ int process_fork(struct trap_frame *tf) {
   for (int i = 0; i < 32; i++) {
     child->name[i] = parent->name[i];
   }
+  for (int i = 0; i < (int)sizeof child->exe_path; i++)
+    child->exe_path[i] = parent->exe_path[i];
   for (int i = 0; i < 128; i++) {
     child->cwd[i] = group->cwd[i];
   }
@@ -4501,6 +4503,8 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
     t->name[i] = 0;
   for (int i = 0; i < 31 && grp->name[i]; i++)
     t->name[i] = grp->name[i];
+  for (int i = 0; i < (int)sizeof t->exe_path; i++)
+    t->exe_path[i] = grp->exe_path[i];
   for (int i = 0; i < 256; i++)
     t->args[i] = 0;
   t->eargc = 0;

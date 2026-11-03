@@ -19,6 +19,25 @@ extern void uart_print_hex(uint64_t val);
 
 jmp_buf user_exit_context;
 
+/* M6 launch plumbing: /proc/self/exe must name the executable the loader was
+ * asked to run, not the interpreter it enters (glibc ld.so is the entry point
+ * for a compat image) and not the 32-byte display name in p->name (which is
+ * truncated and may be a bare 8.3 name).  Relative names resolve against the
+ * spawning/staying cwd, because Linux reports an absolute path here.  Called
+ * after cwd is established on spawn, and with the already-resolved absolute
+ * path on exec. */
+static void set_exe_path(struct process *p, const char *path) {
+  if (!p || !path) return;
+  int n = 0;
+  if (path[0] != '/') {
+    const char *cwd = p->cwd[0] ? p->cwd : "/";
+    for (int i = 0; cwd[i] && n < 158; i++) p->exe_path[n++] = cwd[i];
+    if (n == 0 || p->exe_path[n - 1] != '/') p->exe_path[n++] = '/';
+  }
+  for (int i = 0; path[i] && n < 159; i++) p->exe_path[n++] = path[i];
+  p->exe_path[n] = '\0';
+}
+
 /* Cap on the program image the loader copies into user memory.  A process
  * region is 32MB with its first USER_INITIAL_CLEAR_SIZE (1MB) bytes zeroed
  * at creation, so sizing the cap to match keeps "zeroed" and "loadable" the
@@ -842,6 +861,10 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     child->cwd[0] = '/';
     child->cwd[1] = '\0';
   }
+  /* /proc/self/exe's answer, from the path the loader was handed (the cwd is
+     established above, so a relative name resolves the way the loader will
+     actually open it). */
+  set_exe_path(child, filename);
   if (ex) {
     /* D4.5/D3.1: envp as given (NULL marshalled to empty); argv[0] stored
        as given (WebKit's aux main parses argv[1..]).  Dispositions are
@@ -1380,6 +1403,11 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     for (vi = 0; new_name && new_name[vi] && vi < 31; vi++)
       cur->name[vi] = new_name[vi];
     cur->name[vi] = '\0';
+    /* The executable path /proc/self/exe answers: `abs` is already resolved
+       against the caller's cwd.  Set on the caller and the group anchor so a
+       thread that exec'd does not leave the leader with the old path. */
+    set_exe_path(cur, abs);
+    if (grp != cur) set_exe_path(grp, abs);
     for (vi = 0; args && args[vi] && vi < HO_FLAT_ARGS_LEN - 1; vi++)
       cur->args[vi] = args[vi];
     cur->args[vi] = '\0';
@@ -1446,6 +1474,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   for (i = 0; new_name && new_name[i] && i < 31; i++)
     grp->name[i] = new_name[i];
   grp->name[i] = '\0';
+  set_exe_path(grp, abs);
   for (i = 0; args && args[i] && i < HO_FLAT_ARGS_LEN - 1; i++)
     grp->args[i] = args[i];
   grp->args[i] = '\0';
