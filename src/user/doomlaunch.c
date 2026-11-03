@@ -6,8 +6,9 @@
  * 24-bit root, so the server carries a second screen (:0.1) at depth 8 and this
  * launcher points the game at it.
  *
- * The menu entry is `prog "Doom" app /DOOML.BIN`, i.e. IceWM starts this program
- * and it hands over to /DOOM.ELF.
+ * The menu entry is `prog "Doom (Linux ELF)" app /DOOML.BIN`, i.e. IceWM starts
+ * this program and it hands over to /DOOM.ELF.  Arguments are forwarded, so a
+ * `prog` line can carry the game's own switches (`... /DOOML.BIN -warp 1 1`).
  *
  * The environment has to be passed EXPLICITLY: on HobbyOS a child inherits the
  * process group's environment BLOB, which only an envp-carrying spawn rewrites.
@@ -26,6 +27,7 @@
 
 #define GAME "/DOOM.ELF"
 #define MAX_ENV 62
+#define MAX_ARGV 12
 
 extern char **environ;
 
@@ -56,11 +58,9 @@ static int build_env(const char *disp, char **out) {
 int main(int argc, char **argv) {
   const char *disp = getenv("HB_GAME_DISPLAY");
   static char *envp[MAX_ENV + 1];
-  char *av[2];
-  int pid;
+  static char *av[MAX_ARGV];
+  int pid, i;
 
-  (void) argc;
-  (void) argv;
   if (!disp)
     disp = ":0.1";
   if (setenv("DISPLAY", disp, 1) != 0)
@@ -72,8 +72,11 @@ int main(int argc, char **argv) {
   print_console("\n");
 
   build_env(disp, envp);
+  /* Forward our arguments to the game: argv[0] becomes the game's path. */
   av[0] = (char *) GAME;
-  av[1] = NULL;
+  for (i = 1; i < argc && i < MAX_ARGV - 1; i++)
+    av[i] = argv[i];
+  av[i] = NULL;
   pid = spawn_ex(GAME, av, envp, NULL, 0);
   if (pid < 0) {
     print_console("[DOOML] spawn_ex(" GAME ") failed\n");
