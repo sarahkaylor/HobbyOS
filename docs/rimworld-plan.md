@@ -158,12 +158,16 @@ Runtime identity strings (from the binary, not from the store page):
 **The pin is a set, not one file** (measured 2026-11-02): running the game with
 glibc 2.31 as its own interpreter (patched `PT_INTERP` on a **copy**, never the
 user's file) resolves `Mono path[0]`, preloads `lib_burst_generated.so` and
-`libsteam_api.so`, and then stops at `Error getting num native displays: Video
-subsystem has not been initialized` — because SDL `dlopen`s the *host's*
-`libX11.so.6`, which requires `GLIBC_2.43`. So a host-side video proof needs one
-era for the whole stack: add focal-era `libx11-6`, `libgl1`, `libglx-mesa0`,
-`libasound2` (and their xcb/xau/xdmcp deps) to the harness pin. On HobbyOS this
-constraint does not bind: AD-4 replaces all three with HobbyOS-built DSOs.
+`libsteam_api.so`, then reports `Error getting num native displays: Video
+subsystem has not been initialized` and `Desktop is 0 x 0 @ 32764 Hz`, and never
+opens a window. Measured cause: the host's `libX11.so.6` and `libxcb.so.1`
+require `GLIBC_2.38` and `libasound.so.2` requires `GLIBC_2.43`, none loadable
+under the 2.31 pin (SDL does not log its dlopen failure, so the link is
+inference from those version requirements, not an SDL message). A host-side video
+proof therefore needs one era for the whole stack: add focal-era `libx11-6`,
+`libgl1`, `libglx-mesa0`, `libasound2` (and their xcb/xau/xdmcp deps) to the
+harness pin. On HobbyOS this constraint does not bind: AD-4 replaces all three
+with HobbyOS-built DSOs.
 
 **Rule**: game files never enter git. `tools/rw/check-no-game-files.sh` (M0)
 fails the build if a file matching a game artifact's size+hash prefix appears
