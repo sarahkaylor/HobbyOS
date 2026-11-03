@@ -1,0 +1,406 @@
+diff --git a/src/include/fs.h b/src/include/fs.h
+index c999471b..75cf9ed9 100755
+--- a/src/include/fs.h
++++ b/src/include/fs.h
+@@ -100,6 +100,12 @@ struct file {
+ void fs_init(void);
+ struct trap_frame;
+ int file_open(struct process *p, const char *filename, int flags);
++/* M5 exec-from-NFS: read a whole program image into a contiguous frame range
++ * via the same VFS route open() uses.  1 = NFS (buf/size/pages filled, caller
++ * frees the frames), 0 = FAT16 path (use the legacy cluster loader), <0 = a
++ * real failure. */
++int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
++                  uint32_t *pages_out);
+ int file_close(struct process *p, int fd);
+ int file_dup(struct process *p, int fd);
+ int file_dup2(struct process *p, int oldfd, int newfd);
+diff --git a/src/include/program_loader.h b/src/include/program_loader.h
+index 1d944f60..3af68694 100755
+--- a/src/include/program_loader.h
++++ b/src/include/program_loader.h
+@@ -36,6 +36,14 @@ struct elf_load_info {
+ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
+                     uint32_t flags, struct elf_load_info *info);
+ 
++/* The same load, for an image that is already in kernel memory (the VFS/NFS
++ * exec path: no FAT16 cluster exists for the file).  The PT_INTERP image is
++ * still resolved from the FAT16 root.  elf_loader_load is the FAT16 wrapper
++ * around this. */
++int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
++                          uint32_t fsize, uint32_t flags,
++                          struct elf_load_info *info);
++
+ /* The mapping half without a filesystem: both images are already in kernel
+  * memory.  Used by elf_loader_test.c to exercise the real mapper (plan,
+  * regions, p_flags, relocations, USER_LIB placement, startup block) on both
+@@ -50,6 +58,9 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
+  * file cannot be read.  The x86_64 dispatch uses it to pick the track. */
+ int elf_loader_probe_native(uint16_t cluster, uint32_t fsize);
+ 
++/* Buffer form of elf_loader_probe_native(), for the VFS exec path. */
++int elf_loader_probe_native_buf(const uint8_t *exe, uint32_t fsize);
++
+ /**
+  * Loads a user program from the disk and executes it in the current context.
+  * Bypasses the scheduler.
+diff --git a/src/kernel/elf_loader.c b/src/kernel/elf_loader.c
+index 49a596cd..71c26bdd 100644
+--- a/src/kernel/elf_loader.c
++++ b/src/kernel/elf_loader.c
+@@ -525,36 +525,25 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
+   return el_map_pair(as, exe, exe_len, &eimg, 0, 0, 0, flags, info);
+ }
+ 
+-/* Load an ELF image (opened at `cluster`/`fsize`) into `as` per the load
+- * plan.  On success fills *info (runtime entry, executable base/phdr, the
+- * interpreter base when interpreted, the user sp to start with) and returns 0;
+- * returns a negative errno (-ENOEXEC parse/validation, -ENOMEM OOM, -ENOSPC
+- * image too large / no slot, -ENOENT missing interpreter) on any refusal — the
+- * caller tears `as` down.
+- *
+- * stage[span] is the laid-out image (segment bytes at vaddr_base-relative
+- * offsets, holes untouched): a contiguous scratch of `span` frames.  For the
+- * W0 corpus (a few hundred KiB) this eager copy is cheap and correct; it is
+- * the design's "start eager" choice (docs/elf-loader.md §2.5). */
+-int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
+-                    uint32_t flags, struct elf_load_info *info) {
++/* Load an ELF image ALREADY IN KERNEL MEMORY into `as` per the load plan.
++ * This is the entry point for a filesystem that is not FAT16 (the VFS/NFS
++ * exec path): the caller holds the bytes, so no cluster is involved.  The
++ * PT_INTERP image is still resolved from the FAT16 root — the native
++ * dynamic contract's /LDHOBBY.SO is a boot-image file, not a game file.
++ * On success fills *info and returns 0; negative errno on any refusal. */
++int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
++                          uint32_t fsize, uint32_t flags,
++                          struct elf_load_info *info) {
+   if (!as || !info) return -ENOEXEC;
+   el_zero((uint8_t *)info, sizeof *info);
+   info->parse_rc = ELF_OK;
+-  if (fsize == 0 || fsize > USER_IMG_SIZE)
++  if (!exe || fsize == 0 || fsize > USER_IMG_SIZE)
+     return -ENOEXEC;
+ 
+-  uint64_t exe_pages = 0;
+-  uint64_t exe_buf = el_read_file(cluster, fsize, &exe_pages);
+-  if (!exe_buf)
+-    return -ENOMEM;
+-
+   struct elf_image eimg;
+-  int rc = el_admit_exe((const uint8_t *)exe_buf, fsize, flags, &eimg, info);
+-  if (rc != 0) {
+-    el_free_contig(exe_buf, exe_pages);
++  int rc = el_admit_exe(exe, fsize, flags, &eimg, info);
++  if (rc != 0)
+     return rc;
+-  }
+ 
+   /* Interpreter: resolved from the FAT16 root by the PT_INTERP path.  A miss is
+    * a clear refusal, not a mysterious guest crash — the whole point of the
+@@ -568,38 +557,65 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
+       uart_puts("elf loader: interpreter '");
+       uart_puts(eimg.interp);
+       uart_puts("' not found on the FAT16 root\n");
+-      el_free_contig(exe_buf, exe_pages);
+       return -ENOENT;
+     }
+     if (isz > USER_LIB_SLOT_SIZE) {
+       uart_puts("elf loader: interpreter '");
+       uart_puts(eimg.interp);
+       uart_puts("' is larger than one USER_LIB slot\n");
+-      el_free_contig(exe_buf, exe_pages);
+       return -ENOSPC;
+     }
+     ibuf = el_read_file(icl, isz, &ipages);
+-    if (!ibuf) {
+-      el_free_contig(exe_buf, exe_pages);
++    if (!ibuf)
+       return -ENOMEM;
+-    }
+     ilen = isz;
+     rc = el_admit_interp((const uint8_t *)ibuf, ilen, &iimg, info);
+     if (rc != 0) {
+-      el_free_contig(exe_buf, exe_pages);
+       el_free_contig(ibuf, ipages);
+       return rc;
+     }
+   }
+ 
+-  rc = el_map_pair(as, (const uint8_t *)exe_buf, fsize, &eimg,
++  rc = el_map_pair(as, exe, fsize, &eimg,
+                    (const uint8_t *)ibuf, ilen, eimg.has_interp ? &iimg : 0,
+                    flags, info);
+-  el_free_contig(exe_buf, exe_pages);
+   if (ibuf) el_free_contig(ibuf, ipages);
+   return rc;
+ }
+ 
++/* Load an ELF image (opened at `cluster`/`fsize`) into `as` per the load
++ * plan.  On success fills *info (runtime entry, executable base/phdr, the
++ * interpreter base when interpreted, the user sp to start with) and returns 0;
++ * returns a negative errno (-ENOEXEC parse/validation, -ENOMEM OOM, -ENOSPC
++ * image too large / no slot, -ENOENT missing interpreter) on any refusal — the
++ * caller tears `as` down.
++ *
++ * The FAT16 entry point: reads the image into a contiguous frame range, then
++ * hands it to elf_loader_load_image().  A caller that already holds the bytes
++ * (the VFS/NFS path in program_loader) calls elf_loader_load_image directly.
++ * stage[span] is the laid-out image (segment bytes at vaddr_base-relative
++ * offsets, holes untouched): a contiguous scratch of `span` frames.  For the
++ * W0 corpus (a few hundred KiB) this eager copy is cheap and correct; it is
++ * the design's "start eager" choice (docs/elf-loader.md §2.5). */
++int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
++                    uint32_t flags, struct elf_load_info *info) {
++  if (!as || !info) return -ENOEXEC;
++  el_zero((uint8_t *)info, sizeof *info);
++  info->parse_rc = ELF_OK;
++  if (fsize == 0 || fsize > USER_IMG_SIZE)
++    return -ENOEXEC;
++
++  uint64_t exe_pages = 0;
++  uint64_t exe_buf = el_read_file(cluster, fsize, &exe_pages);
++  if (!exe_buf)
++    return -ENOMEM;
++
++  int rc = elf_loader_load_image(as, (const uint8_t *)exe_buf, fsize, flags,
++                                 info);
++  el_free_contig(exe_buf, exe_pages);
++  return rc;
++}
++
+ /* Does the ELF at (cluster, fsize) carry a PT_INTERP naming the native
+  * interpreter?  1 = yes, 0 = no (or unreadable — the compat path then reports
+  * the real reason), -1 = the file cannot be read at all.
+@@ -646,3 +662,28 @@ int elf_loader_probe_native(uint16_t cluster, uint32_t fsize) {
+   }
+   return 0;
+ }
++
++/* Buffer form of elf_loader_probe_native(), for an image the caller already
++ * holds (the VFS/NFS exec path).  Same answer, same refusal boundaries. */
++int elf_loader_probe_native_buf(const uint8_t *exe, uint32_t fsize) {
++  if (!exe || fsize < EL_PROBE_EHDR) return 0;
++  const uint8_t *eh = exe;
++  if (!(eh[0] == 0x7f && eh[1] == 'E' && eh[2] == 'L' && eh[3] == 'F')) return 0;
++  if (eh[4] != 2 /* ELFCLASS64 */) return 0;
++  if (eh[5] != 1 /* ELFDATA2LSB */) return 0;
++  const uint64_t phoff = rd64(eh + 32);
++  const uint16_t phent = rd16(eh + 54);
++  const uint16_t phnum = rd16(eh + 56);
++  if (phent != EL_PROBE_PHDR || phnum == 0 || phnum > EL_PROBE_MAX_PH) return 0;
++  if (phoff > fsize || (uint64_t)phnum * phent > fsize - phoff) return 0;
++  for (uint16_t i = 0; i < phnum; i++) {
++    const uint8_t *ph = exe + phoff + (uint64_t)i * phent;
++    if (rd32(ph + 0) != 3 /* PT_INTERP */) continue;
++    const uint64_t ioff = rd64(ph + 8);
++    const uint64_t isz = rd64(ph + 32);
++    if (isz < 2 || isz > ELF_INTERP_PATH_MAX) return 0;
++    if (ioff > fsize || isz > fsize - ioff) return 0;
++    return elf_interp_is_native((const char *)(exe + ioff), (uint32_t)(isz - 1));
++  }
++  return 0;
++}
+diff --git a/src/kernel/fs.c b/src/kernel/fs.c
+index 594ec696..8380613a 100755
+--- a/src/kernel/fs.c
++++ b/src/kernel/fs.c
+@@ -10,6 +10,7 @@
+ #include "file_obj.h" /* so-vm lane A (CROSS-LANE): page-cache invalidation */
+ #include "timer.h"
+ #include "vm.h" /* P2.4 (S4): memfd objects */
++#include "frame.h" /* M5: fs_read_image contiguous image frames */
+ 
+ static struct file global_file_table[MAX_GLOBAL_FILES];
+ static spinlock_t fs_lock;
+@@ -2001,6 +2002,61 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
+   return ufd;
+ }
+ 
++/* Read a whole program image into a contiguous frame range, choosing the
++ * filesystem the same way open() does (M5 exec-from-NFS).  The exec path has
++ * always gone through fat16_open(), which knows only FAT16 and CREATES a
++ * zero-length root entry on a miss — so an image under an NFS mount was
++ * reported as "Failed to open file" and left a ghost behind.
++ *
++ * Returns
++ *   1  the path routed to NFS; buf/size/pages are filled and the caller
++ *      owns the frames (frame_free each page when done),
++ *   0  the path is a FAT16 path; the caller keeps the legacy cluster loader,
++ *  <0  a real failure (empty/oversized image, NFS read error, no memory).
++ */
++int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
++                  uint32_t *pages_out) {
++  if (!path || !buf_out || !size_out || !pages_out) return -1;
++
++  char abs[VFS_PATH_MAX];
++  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -1;
++  int midx = -1;
++  const char *rel = 0;
++  if (!vfs_route(abs, &midx, &rel)) return 0;    /* FAT16 handles it */
++
++  struct file f;
++  if (vfs_open_routed(abs, &f) != 1) return -1;
++  if (f.nfs.is_dir) return -1;
++
++  uint32_t size = f.nfs.size;
++  if (size == 0 || (uint64_t)size > USER_IMG_SIZE) return -1;
++  const struct nfs_mount *m = nfs_mount_at(midx);
++  if (!m) return -1;
++
++  uint32_t pages = (size + FRAME_SIZE - 1) / FRAME_SIZE;
++  uint64_t buf = frame_alloc_contig((int)pages);
++  if (!buf) return -1;
++
++  uint32_t off = 0;
++  while (off < size) {
++    uint32_t want = size - off;
++    if (want > NFS_READ_CHUNK) want = NFS_READ_CHUNK;
++    int got = nfs_read_file(m, &f.nfs.fh, off,
++                            (void *)(uintptr_t)(buf + off), want);
++    if (got <= 0) {
++      for (uint32_t i = 0; i < pages; i++)
++        frame_free(buf + (uint64_t)i * FRAME_SIZE);
++      return -1;
++    }
++    off += (uint32_t)got;
++  }
++
++  *buf_out = (uint8_t *)(uintptr_t)buf;
++  *size_out = size;
++  *pages_out = pages;
++  return 1;
++}
++
+ struct vm_object *file_memfd_obj(struct process *p, int fd) {
+   int err = 0;
+   struct file *f = f1_memfd(p, fd, &err);
+diff --git a/src/kernel/program_loader.c b/src/kernel/program_loader.c
+index 0996c305..92da2270 100755
+--- a/src/kernel/program_loader.c
++++ b/src/kernel/program_loader.c
+@@ -890,35 +890,57 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
+   }
+ 
+   struct file f;
+-  if (fat16_open(filename, &f) != 0) {
++  uint8_t *vfs_img = 0;
++  uint32_t vfs_len = 0, vfs_pages = 0;
++  /* M5: an image under an NFS mount comes through the VFS, not fat16_open().
++   * fs_read_image() answers 1 for an NFS-routed path (whole image in kernel
++   * memory), 0 for a FAT16 path (legacy cluster loader below, unchanged) and
++   * < 0 for a real read failure. */
++  int vfs_rc = fs_read_image(filename, &vfs_img, &vfs_len, &vfs_pages);
++  if (vfs_rc < 0) {
+     uart_puts("Failed to open file: ");
+     uart_puts(filename);
+     uart_puts("\n");
+     process_free(pid);
+     return -ENOENT;
+   }
+-  uint32_t fsize = f.fat16.entry.file_size;
+-  if (fsize == 0) {
+-    /* D4.4: a missing image surfaces as a zero-size entry (fat16_open
+-       creates on miss), and an empty image can never be executed -- the
+-       documented -ENOENT.  The spawn2 wrapper below folds it back to -1. */
+-    fat16_close(&f);
+-    process_free(pid);
+-    return -ENOENT;
+-  }
+-  /* GB-013 (ELF loader, docs/elf-loader.md §2): dispatch on the first four
+-     bytes.  0x7fELF -> the ELF mapper (x86_64 only; ARM never loads ELF);
+-     anything else -> the existing flat .bin loader, unchanged.  Peek the
+-     magic 4 bytes into a tiny scratch and branch. */
++
++  uint32_t fsize = 0;
+   int is_elf = 0;
+-  {
+-    uint64_t magicw = 0;
+-    /* dest is a physical address integer; &magicw is a stack VA == phys
+-       (kernel direct map), so the read lands in the local. */
+-    if (fat16_read_direct_pos(f.fat16.entry.start_cluster, fsize,
+-                              (uint64_t)&magicw, 4, 0) == 4) {
+-      uint8_t *mb = (uint8_t *)&magicw; /* little-endian: bytes 0..3 = magic */
+-      is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
++  if (vfs_rc == 1) {
++    fsize = vfs_len;
++    is_elf = (fsize >= 4 && vfs_img[0] == 0x7f && vfs_img[1] == 'E' &&
++              vfs_img[2] == 'L' && vfs_img[3] == 'F');
++  } else {
++    if (fat16_open(filename, &f) != 0) {
++      uart_puts("Failed to open file: ");
++      uart_puts(filename);
++      uart_puts("\n");
++      process_free(pid);
++      return -ENOENT;
++    }
++    fsize = f.fat16.entry.file_size;
++    if (fsize == 0) {
++      /* D4.4: a missing image surfaces as a zero-size entry (fat16_open
++         creates on miss), and an empty image can never be executed -- the
++         documented -ENOENT.  The spawn2 wrapper below folds it back to -1. */
++      fat16_close(&f);
++      process_free(pid);
++      return -ENOENT;
++    }
++    /* GB-013 (ELF loader, docs/elf-loader.md §2): dispatch on the first four
++       bytes.  0x7fELF -> the ELF mapper (x86_64 only; ARM never loads ELF);
++       anything else -> the existing flat .bin loader, unchanged.  Peek the
++       magic 4 bytes into a tiny scratch and branch. */
++    {
++      uint64_t magicw = 0;
++      /* dest is a physical address integer; &magicw is a stack VA == phys
++         (kernel direct map), so the read lands in the local. */
++      if (fat16_read_direct_pos(f.fat16.entry.start_cluster, fsize,
++                                (uint64_t)&magicw, 4, 0) == 4) {
++        uint8_t *mb = (uint8_t *)&magicw; /* little-endian: bytes 0..3 = magic */
++        is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
++      }
+     }
+   }
+   uint64_t elf_entry = 0;
+@@ -936,15 +958,26 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
+        message.  aarch64 has no compat track, so every ELF there is native. */
+     uint32_t lflags = 0;
+ #if defined(__x86_64__)
+-    if (elf_loader_probe_native(f.fat16.entry.start_cluster, fsize) == 1)
++    int native = (vfs_rc == 1)
++                     ? elf_loader_probe_native_buf(vfs_img, fsize)
++                     : elf_loader_probe_native(f.fat16.entry.start_cluster, fsize);
++    if (native == 1)
+       lflags = ELF_LOAD_NATIVE;
+ #else
+     lflags = ELF_LOAD_NATIVE;
+ #endif
+     struct elf_load_info elf_info;
+-    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, lflags,
+-                              &elf_info);
+-    fat16_close(&f);
++    int erc = (vfs_rc == 1)
++                  ? elf_loader_load_image(as, vfs_img, fsize, lflags, &elf_info)
++                  : elf_loader_load(as, f.fat16.entry.start_cluster, fsize,
++                                    lflags, &elf_info);
++    if (vfs_rc == 1) {
++      for (uint32_t i = 0; i < vfs_pages; i++)
++        frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
++      vfs_img = 0;
++    } else {
++      fat16_close(&f);
++    }
+     if (erc != 0) {
+       process_free(pid);
+       return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC / -ENOENT */
+@@ -969,6 +1002,14 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
+       kl_c(&k, '\n');
+       kl_emit(&k);
+     }
++  } else if (vfs_rc == 1) {
++    /* A flat .bin is mapped lazily by (start_cluster, size) identity, which
++     * only FAT16 has.  Say so instead of trying an uninitialised struct file. */
++    uart_puts("v2 loader: flat .bin images are FAT16-only (use an ELF on NFS)\n");
++    for (uint32_t i = 0; i < vfs_pages; i++)
++      frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
++    process_free(pid);
++    return -ENOEXEC;
+   } else if (v2_map_image(as, &f, fsize) != 0) {
+     fat16_close(&f);
+     process_free(pid);

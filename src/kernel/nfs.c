@@ -464,12 +464,17 @@ int nfs_lookup(const struct nfs_mount *m, const char *rel,
   }
 
   const char *p = rel + 1;
-  char comp[NFS_NAME_MAX];
+  /* A path component is NOT bounded by the 32-byte readdir display name:
+   * RimWorld ships names like
+   * UnityEngine.RuntimeInitializeOnLoadManagerInitializerModule.dll (63
+   * bytes).  The old buf was NFS_NAME_MAX and the loop stopped at 31 chars,
+   * then resumed mid-component — every such path failed LOOKUP. */
+  char comp[NFS_COMP_MAX];
   struct nfs_attr last_attr;
   int have_attr = 0;
   while (*p) {
     int len = 0;
-    while (p[len] && p[len] != '/' && len < NFS_NAME_MAX - 1) len++;
+    while (p[len] && p[len] != '/' && len < NFS_COMP_MAX - 1) len++;
     for (int i = 0; i < len; i++) comp[i] = p[i];
     comp[len] = '\0';
     if (len == 0) {

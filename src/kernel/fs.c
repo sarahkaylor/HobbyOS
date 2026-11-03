@@ -10,6 +10,7 @@
 #include "file_obj.h" /* so-vm lane A (CROSS-LANE): page-cache invalidation */
 #include "timer.h"
 #include "vm.h" /* P2.4 (S4): memfd objects */
+#include "frame.h" /* M5: fs_read_image contiguous image frames */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -1999,6 +2000,61 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
   if (flags & K_MFD_CLOEXEC)
     cur->fd_cloexec |= (1ull << ufd); /* recorded; P5's exec sweep consumes */
   return ufd;
+}
+
+/* Read a whole program image into a contiguous frame range, choosing the
+ * filesystem the same way open() does (M5 exec-from-NFS).  The exec path has
+ * always gone through fat16_open(), which knows only FAT16 and CREATES a
+ * zero-length root entry on a miss — so an image under an NFS mount was
+ * reported as "Failed to open file" and left a ghost behind.
+ *
+ * Returns
+ *   1  the path routed to NFS; buf/size/pages are filled and the caller
+ *      owns the frames (frame_free each page when done),
+ *   0  the path is a FAT16 path; the caller keeps the legacy cluster loader,
+ *  <0  a real failure (empty/oversized image, NFS read error, no memory).
+ */
+int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
+                  uint32_t *pages_out) {
+  if (!path || !buf_out || !size_out || !pages_out) return -1;
+
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -1;
+  int midx = -1;
+  const char *rel = 0;
+  if (!vfs_route(abs, &midx, &rel)) return 0;    /* FAT16 handles it */
+
+  struct file f;
+  if (vfs_open_routed(abs, &f) != 1) return -1;
+  if (f.nfs.is_dir) return -1;
+
+  uint32_t size = f.nfs.size;
+  if (size == 0 || (uint64_t)size > USER_IMG_SIZE) return -1;
+  const struct nfs_mount *m = nfs_mount_at(midx);
+  if (!m) return -1;
+
+  uint32_t pages = (size + FRAME_SIZE - 1) / FRAME_SIZE;
+  uint64_t buf = frame_alloc_contig((int)pages);
+  if (!buf) return -1;
+
+  uint32_t off = 0;
+  while (off < size) {
+    uint32_t want = size - off;
+    if (want > NFS_READ_CHUNK) want = NFS_READ_CHUNK;
+    int got = nfs_read_file(m, &f.nfs.fh, off,
+                            (void *)(uintptr_t)(buf + off), want);
+    if (got <= 0) {
+      for (uint32_t i = 0; i < pages; i++)
+        frame_free(buf + (uint64_t)i * FRAME_SIZE);
+      return -1;
+    }
+    off += (uint32_t)got;
+  }
+
+  *buf_out = (uint8_t *)(uintptr_t)buf;
+  *size_out = size;
+  *pages_out = pages;
+  return 1;
 }
 
 struct vm_object *file_memfd_obj(struct process *p, int fd) {
