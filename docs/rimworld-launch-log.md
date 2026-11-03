@@ -2,7 +2,7 @@
 
 Date: **2026-11-02 21:30 CST** (host: 32-core workstation, KVM).
 Tree: `rw-l10-launch` seeded from `rimworld` tip **7c07abe3**.
-Lane: L10 (launch plumbing). Reproduce with `tools/rw/run-rimworld.sh {probe|game|stub}`.
+Lane: L10 (launch plumbing). Reproduce with `tools/rw/run-rimworld.sh {probe|launchprobe|game|stub}`.
 
 This file records what the real binary does, in order. Every quoted line is
 raw serial output or raw host output; anything derived from reading code is
@@ -17,7 +17,7 @@ labelled as such. No line here is a prediction.
   `HOME`, sets `LC_ALL=C` / `LD_LIBRARY_PATH=/LIB64`, and spawns the game with
   `-force-glcore -screen-width 1280 -screen-height 720 -screen-fullscreen 0`.
   It is validated end-to-end by spawning the same glibc probe from `/NFS`
-  (`launchprobe` mode, 0 failures, §3.2).
+  (`launchprobe` mode, 0 failures, §3.1).
 - **The real `RimWorldLinux` never reaches userspace.** It is an **ET_EXEC
   linked at 0x200000**, and HobbyOS's compat loader refuses it:
 
@@ -40,7 +40,7 @@ Xvfb + llvmpipe, `-force-glcore`). Counts over one 30 s run:
 
 | call | count | shape |
 |---|---|---|
-| `openat("/proc/self/fd/N", O_RDONLY\|O_NOCTTY\|O_CLOEXEC)` | **639** | re-opens a `/sys/.../uevent` file after it was read to EOF (libudev device enumeration) |
+| `openat("/proc/self/fd/N", O_RDONLY\|O_NOCTTY\|O_CLOEXEC)` | **639** | re-opens a `/sys/.../uevent` file after it was read to EOF (a udev-style device enumeration: the targets are sysfs `uevent` nodes) |
 | `openat("/proc/self/maps", O_RDONLY\|O_CLOEXEC)` | **3** | then `fstat` → `S_IFREG\|0444, st_size=0`, then 1024-byte `read()`s to EOF |
 | `readlink("/proc/self/exe", …, 99)` | **5** | startup + render threads |
 | `readlinkat(AT_FDCWD, "/proc/self/exe", …, 4096)` | **1** | |
@@ -95,7 +95,7 @@ That is why `/proc/self/exe` answers a dedicated `exe_path` field and not
 | `src/user/rwlaunch.c` | native launcher: DHCP wait, `mount("10.0.2.2:/srv/nfs/rimworld","/NFS")`, `HOME=/RW_HOME`, `LC_ALL=C`, `LD_LIBRARY_PATH=/LIB64`, `-force-glcore` args, `spawn_ex`, `waitpid`, then dumps `Player.log` to the console |
 | `src/user/rwstub.c` | labelled PIE stand-in (`NEEDED UnityPlayer.so`, `RUNPATH $ORIGIN`) used only to measure the wall after ET_EXEC |
 | `tools/rw/proc-usage.sh` | host strace of `/proc/self/*` usage |
-| `tools/rw/run-rimworld.sh` | builds/stages/boots `probe`, `game` and `stub` modes and prints the ladder |
+| `tools/rw/run-rimworld.sh` | builds/stages/boots `probe`, `launchprobe`, `game` and `stub` modes and prints the ladder |
 
 `maps` renders `start-end perms offset dev inode [path]` from
 `as->regions`: perms from `prot`, `s`/`p` from `VM_MAP_SHARED`, offset from
@@ -152,7 +152,7 @@ Regression check: `tools/gate/t3_linux_probe.sh proc` still passes
 (`[LP] readlink exe=/PROBE.ELF len=10`, `[LP] done rc=0`) — the stat/readlink
 contract used by the existing compat probes is unchanged.
 
-### 3.2 The same probe through the launcher, executed from NFS
+### 3.1 The same probe through the launcher, executed from NFS
 
 `tools/rw/run-rimworld.sh launchprobe` stages the probe at
 `/NFS/RWPROBE.ELF` (the export, i.e. the game's own filesystem) and builds the
@@ -284,7 +284,7 @@ After it, in order:
    stand-in, §5; M5b).
 2. Threads/GL: **not measured**. The ladder never reaches `pthread_create` or
    a GL call, so no claim is made here about which one blocks first. The
-   host's 1.09 M `futex` calls (§3.4) make `futex`/`clone` the expected next
+   host's 1.09 M `futex` calls (plan §3.4) make `futex`/`clone` the expected next
    class, but that is inference from host traces, not an in-guest measurement.
 
 ## 7. Repro
