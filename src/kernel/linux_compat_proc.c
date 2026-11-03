@@ -1264,6 +1264,17 @@ static int l_proc_sched_rr_interval(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, 0);
 }
 
+
+/* sched_setscheduler(144).  Only SCHED_OTHER is real here; accepting it for
+ * this process (or a thread of it) is exact, and anything else is refused
+ * with -EPERM rather than silently pretended. */
+static int l_proc_sched_setscheduler(struct process *p, struct trap_frame *tf) {
+  int policy = (int)l_argi(tf, 2);
+  if (policy != 0 /* SCHED_OTHER */) return l_ret(tf, -EPERM);
+  (void)p;
+  return l_ret(tf, 0);
+}
+
 const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"},
   {L_SYS_clock_getres, l_proc_clock_getres, "clock_getres"},
   {L_SYS_sched_getparam, l_proc_sched_getparam, "sched_getparam"},
@@ -1273,5 +1284,6 @@ const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction,
   {L_SYS_sched_get_priority_max, l_proc_sched_prio_max, "sched_get_priority_max"},
   {L_SYS_sched_get_priority_min, l_proc_sched_prio_min, "sched_get_priority_min"},
   {L_SYS_sched_rr_get_interval, l_proc_sched_rr_interval, "sched_rr_get_interval"},
+  {L_SYS_sched_setscheduler, l_proc_sched_setscheduler, "sched_setscheduler"},
   L_SYSENT_END
 };

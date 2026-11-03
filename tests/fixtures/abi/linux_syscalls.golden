@@ -94,6 +94,7 @@ statfs 137
 getpriority 140
 setpriority 141
 sched_getparam 143
+sched_setscheduler 144
 sched_getscheduler 145
 sched_get_priority_max 146
 sched_get_priority_min 147

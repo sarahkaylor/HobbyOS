@@ -165,6 +165,7 @@
 #define L_SYS_sched_rr_get_interval 148
 
 #define L_SYS_sched_getparam 143
+#define L_SYS_sched_setscheduler 144
 #define L_SYS_sched_getscheduler 145
 #define L_SYS_clock_getres 229
 #define L_SYS_clock_nanosleep 230
