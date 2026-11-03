@@ -46,11 +46,14 @@
 
 #include "arch/trap.h"
 #include "errno.h"
+#include "fb_mmap.h" /* GB-025 / M3: FBIOGET_* on /dev/fb0 */
+#include "file_obj.h" /* GB-025 / M3: file_is_devfb() */
 #include "fs.h"
 #include "ipc_proto.h"
 #include "linux_syscall.h"
 #include "process.h"
 #include "vfs.h"
+#include "virtio_gpu.h" /* GB-025 / M3: the scanout address for FBIOGET_* */
 
 /* close_range(2) flags (Linux values; not syscall numbers, so local). */
 #define L_CLOSE_RANGE_UNSHARE 0x2u
@@ -608,6 +611,27 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
   }
   if (req == L_TCGETS || req == L_TCSETS || req == L_TIOCGWINSZ)
     return l_ret(tf, -ENOTTY);
+  /* GB-025 / M3: the /dev/fb0 ioctl surface (docs/linux-abi.md §9).  A
+   * compat X11 client reads its geometry with FBIOGET_VSCREENINFO before
+   * mmap, and SDL's fbcon driver reads both structs.  The node answers the
+   * same Linux-layout fills the native SYS_FB_IOCTL returns, through the one
+   * device-free route helper (fb_mmap.c), so the two paths cannot drift.
+   * The fill is rendered into a kernel buffer and then range-checked into
+   * the guest by l_copy_to_user (the route helper itself never sees a user
+   * pointer). */
+  if (file_is_devfb(p, fd)) {
+    size_t sz = hb_fb_ioctl_arg_size((unsigned long)req);
+    if (sz == (size_t)-1) return l_ret(tf, -ENOTTY); /* not an fb request */
+    if (sz == 0) return l_ret(tf, 0);                /* FBIOBLANK: no-op */
+    if (sz > 160) return l_ret(tf, -EINVAL);
+    if (!arg) return l_ret(tf, -EFAULT);
+    unsigned char kbuf[160];
+    int rr = hb_fb_ioctl_route((unsigned long)req, kbuf,
+                               (uint64_t)virtio_gpu_get_framebuffer());
+    if (rr != 0) return l_ret(tf, rr);
+    int cr = l_copy_to_user(p, arg, kbuf, sz);
+    return l_ret(tf, cr != 0 ? cr : 0);
+  }
   if (req == (uint32_t)L_F_GETFL) return l_ret(tf, file_fcntl(p, fd, K_F_GETFL, 0));
   if (req == (uint32_t)L_F_SETFL) return l_ret(tf, file_fcntl(p, fd, K_F_SETFL, arg));
   return l_ret(tf, -ENOTTY);
