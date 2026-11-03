@@ -175,3 +175,12 @@ third_party/llvm-21.1.8/dist-staging/
 
 # per-build ARCH marker (rewritten by every build)
 /.arch-stamp
+
+# --- RimWorld track (docs/rimworld-plan.md) ---------------------------------
+# The game is proprietary: no artifact from the user's copy may enter git.
+# These paths only ever hold fetched runtime packages, probe output, or a
+# staging copy of the game tree served over NFS.
+/third_party/rw-runtime/
+/tools/rw/out/
+/rimworld/
+/nfs-export/
