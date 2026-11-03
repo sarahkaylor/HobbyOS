@@ -172,9 +172,16 @@ struct addr_space;
 
 /* P5 (docs/browser/p5-exec-signals-design.md D7): env blob + signal
  * table sizes.  Numbers 1..HO_SIG_MAX-1 are the valid disposition range;
- * the signal set itself is frozen by the note's D6. */
+ * the signal set itself is frozen by the note's D6.
+ *
+ * HO_SIG_MAX is 64 because the Linux ABI's real-time signals start at 32:
+ * glibc's NPTL installs SIGCANCEL(32)/SIGSETXID(33) at pthread init and Mono
+ * installs its GC suspension handler on SIGRTMIN(35).  With a 32-entry range
+ * every one of those rt_sigaction calls answered -EINVAL (measured: Mono 6.12
+ * printed `[LCOMPAT] sigaction refused sig=32/33/35` and never reached managed
+ * code).  The pending set therefore had to widen from uint32_t to uint64_t. */
 #define HO_ENV_LEN 512
-#define HO_SIG_MAX 32
+#define HO_SIG_MAX 64
 
 /* P5 (D6): the frozen signal numbers (the Linux set the sysroot shares).
  * Kernel shorthand so process.c/pipe.c never leak magic numbers. */
@@ -387,7 +394,7 @@ struct process {
    *  sig_pending: bit (signum - 1); delivery state is the leader's (D8). */
   char env[HO_ENV_LEN];
   int envc;
-  uint32_t sig_pending;
+  uint64_t sig_pending;
   uint64_t sig_handler[HO_SIG_MAX];
   uint64_t sig_restorer;
   int sig_in_handler;

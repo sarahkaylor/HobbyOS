@@ -757,7 +757,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
 
 /* Drop a pending bit wherever it was recorded (thread or anchor). */
 static void l_sig_drop(struct process *cur, struct process *grp, int sig) {
-  uint64_t bit = 1u << (sig - 1);
+  uint64_t bit = 1ull << (sig - 1);
   cur->sig_pending &= ~bit;
   if (grp && grp != cur)
     grp->sig_pending &= ~bit;
@@ -786,7 +786,7 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
 
   int sig = 0;
   for (int s = 1; s < HO_SIG_MAX; s++) {
-    if (!(pend & (1u << (s - 1))))
+    if (!(pend & (1ull << (s - 1))))
       continue;
     if (s == HO_SIGKILL || s == HO_SIGSTOP)
       continue; /* not catchable */
@@ -827,8 +827,8 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
   /* Commit: mark this thread in-handler before the frame becomes visible, so
      a nested trap cannot plant a second one. */
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  if (!(cur->sig_pending & (1u << (sig - 1))) &&
-      !(grp->sig_pending & (1u << (sig - 1)))) {
+  if (!(cur->sig_pending & (1ull << (sig - 1))) &&
+      !(grp->sig_pending & (1ull << (sig - 1)))) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return 0;
   }

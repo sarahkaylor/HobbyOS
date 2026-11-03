@@ -383,7 +383,7 @@ static void test_p5_kill_semantics(void) {
   /* handler disposition: accepted-and-recorded, group survives */
   p->sig_handler[HO_SIGTERM] = USER_VIRT_BASE + 0x4000;
   EXPECT_EQ(process_signal(pid, HO_SIGTERM), 0);
-  EXPECT_EQ((p->sig_pending & (1u << (HO_SIGTERM - 1))) != 0, 1);
+  EXPECT_EQ((p->sig_pending & (1ull << (HO_SIGTERM - 1))) != 0, 1);
   EXPECT_EQ((p->state != PROC_STATE_EXITED), 1);
 
   /* SIG_IGN: no-op, no pending */
@@ -418,7 +418,7 @@ static void test_p5_sigpipe_semantics(void) {
   /* real handler: pending bit set, survives */
   p->sig_handler[HO_SIGPIPE] = USER_VIRT_BASE + 0x3000;
   EXPECT_EQ(signal_epipe(p), 0);
-  EXPECT_EQ((p->sig_pending & (1u << (HO_SIGPIPE - 1))) != 0, 1);
+  EXPECT_EQ((p->sig_pending & (1ull << (HO_SIGPIPE - 1))) != 0, 1);
 
   /* default: the writer's group dies immediately, WTERMSIG = SIGPIPE */
   p->sig_handler[HO_SIGPIPE] = HO_SIG_DFL;
@@ -501,7 +501,7 @@ static void test_p5_reap_delivery_on_kill(void) {
   EXPECT_EQ((int)parent->context[0], cpid);
   EXPECT_EQ(child->state, PROC_STATE_FREE);
   EXPECT_EQ(*(int *)(parent->user_phys_base + 0x120), HO_SIGTERM);
-  EXPECT_EQ((parent->sig_pending & (1u << (HO_SIGCHLD - 1))) != 0, 1);
+  EXPECT_EQ((parent->sig_pending & (1ull << (HO_SIGCHLD - 1))) != 0, 1);
 
   /* Parent #2 was waiting for a different pid: still parked. */
   EXPECT_EQ(parent2->state, PROC_STATE_WAIT_CHILD);
@@ -720,7 +720,7 @@ static void test_p5_exec_env_and_apply(void) {
   /* Dispositions: caught -> DFL, ignored stays ignored, pending cleared. */
   p->sig_handler[HO_SIGTERM] = USER_VIRT_BASE + 0x5000;
   p->sig_handler[HO_SIGINT] = HO_SIG_IGN;
-  p->sig_pending = 0xFFFFFFFFu;
+  p->sig_pending = 0xFFFFFFFFull;
 
   const char envblob[] = "A=1\0B=22\0";
   process_exec_apply(p, envblob, 2);

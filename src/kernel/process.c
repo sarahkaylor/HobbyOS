@@ -713,7 +713,7 @@ static void reap_deliver_locked(struct process *grp) {
   if (pp > 0 && pp < MAX_PROCESSES) {
     struct process *pgp = process_group(&proc_table[pp]);
     if (pgp->state != PROC_STATE_FREE) {
-      pgp->sig_pending |= (1u << (HO_SIGCHLD - 1));
+      pgp->sig_pending |= (1ull << (HO_SIGCHLD - 1));
       /* D8.2 minimal siginfo: si_pid = the dead child, si_status = the
          waitpid status word recorded by group_teardown. */
       pgp->sig_child_pid = grp->pid;
@@ -2647,7 +2647,7 @@ int process_signal(int pid, int sig) {
   }
   /* Real handler: record pending + wake a restartable-slice park (D8.3). */
   struct process *pender = (task && task->is_thread) ? task : target;
-  pender->sig_pending |= (1u << (sig - 1));
+  pender->sig_pending |= (1ull << (sig - 1));
   sig_wake_leader_locked(target, sig);
   /* M2: a compat thread parked in futex must see the signal as EINTR, or a
      stop-the-world tgkill never reaches a parked worker. */
@@ -2684,7 +2684,7 @@ int signal_epipe(struct process *grp) {
     return 1;
   }
   if (h != 1)
-    grp->sig_pending |= (1u << (HO_SIGPIPE - 1));
+    grp->sig_pending |= (1ull << (HO_SIGPIPE - 1));
   if (h != 1)
     sig_wake_leader_locked(grp, HO_SIGPIPE);
   spinlock_release_irqrestore(&proc_lock, flags);
@@ -2777,7 +2777,7 @@ static int sig_frame_range_ok(struct process *grp, uint64_t base, uint64_t top) 
 /* Drop one pending bit (used by the engines' disposition/bounds paths). */
 static void sig_drop_pending(struct process *grp, int sig) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  grp->sig_pending &= ~(1u << (sig - 1));
+  grp->sig_pending &= ~(1ull << (sig - 1));
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
@@ -2815,7 +2815,7 @@ int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
   /* Pick the lowest deliverable pending signal (no nesting, D8.5). */
   int sig = 0;
   for (int s = 1; s < HO_SIG_MAX; s++) {
-    if ((grp->sig_pending & (1u << (s - 1))) && sig_deliverable(s)) {
+    if ((grp->sig_pending & (1ull << (s - 1))) && sig_deliverable(s)) {
       sig = s;
       break;
     }
@@ -2850,7 +2850,7 @@ int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
   /* Commit: only the leader delivers for its group, so no other deliverer
      races this state; pending-set racers lose harmlessly. */
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  if (!(grp->sig_pending & (1u << (sig - 1))) || grp->sig_in_handler ||
+  if (!(grp->sig_pending & (1ull << (sig - 1))) || grp->sig_in_handler ||
       grp->sig_handler[sig] <= HO_SIG_IGN) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return 0;
@@ -2863,7 +2863,7 @@ int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
     si_status = grp->sig_child_status;
     si_code = 1; /* CLD_EXITED (minimal; D11 keeps siginfo fidelity out) */
   }
-  grp->sig_pending &= ~(1u << (sig - 1));
+  grp->sig_pending &= ~(1ull << (sig - 1));
   grp->sig_in_handler = 1;
   grp->sig_frame = base;
   spinlock_release_irqrestore(&proc_lock, flags);
