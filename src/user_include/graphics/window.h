@@ -203,6 +203,13 @@ extern "C" {
     int pix_expose_n;                /* queued partial repairs */
     struct wm_rect pix_expose[PIX_MAX_EXPOSE];
     int pix_restamp;                 /* app painted: re-stamp the pointer */
+    /* App pixels to present.  A native app presents by itself (SYS_FLUSH_FB
+     * after its blit); a *compat* app cannot issue a HobbyOS syscall, so its
+     * flush names the dirty content rect -- ESC ] F <x>;<y>;<w>;<h> ~ -- and
+     * the desktop presents it with the frame's other rects.  A bare
+     * ESC ] F keeps the historical meaning: re-stamp only. */
+    int pix_present_n;               /* 0 = nothing, 1 = pix_present */
+    struct wm_rect pix_present;      /* content-relative pixels to present */
 
     int escape_state;
     char escape_buf[128];

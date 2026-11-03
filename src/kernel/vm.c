@@ -17,10 +17,12 @@
 #include "errno.h"
 #include "fat16.h" /* L9 (pagein): positional lazy-IMAGE page fill */
 #include "file_obj.h" /* so-vm lane A: VM_OBJ_FILE page cache */
+#include "fb_mmap.h"  /* GB-025 / M3: /dev/fb0 mmap translation */
 #include "frame.h"
 #include "fs.h" /* P2.4 (S4): memfd object lookup for fd-backed mmap */
 #include "lock.h"
 #include "process.h"
+#include "virtio_gpu.h" /* GB-025 / M3: the scanout framebuffer address */
 
 extern void uart_puts(const char *s);
 extern void print_int(int v);
@@ -1645,6 +1647,24 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
   if (fd >= 0) {
     if (fd >= MAX_OPEN_FDS)
       return -EBADF;
+    if (file_is_devfb(grp, fd)) {
+      /* GB-025 / M3: /dev/fb0 is the framebuffer, not a file.  Map the
+       * scanout smem at the reserved USER_FB slot -- the exact mapping
+       * SYS_MAP_FB installs for a native process, so the desktop and a
+       * compat client share one physical framebuffer and the desktop's
+       * frame loop presents what the client paints.  The Linux contract
+       * (docs/linux-abi.md §9) only needs offset 0 and a page-aligned
+       * window inside smem; the slot is one full frame plus slack, so a
+       * whole-frame mmap (SDL fbcon, XOpenDisplay) is the only shape that
+       * maps and a partial window is refused rather than silently
+       * returning the whole slot. */
+      uint64_t fb_off = 0, mlen = 0;
+      if (hb_fb_mmap_translate(offset, len, &fb_off, &mlen) != 0)
+        return -EINVAL;
+      if (fb_off != 0)
+        return -ENOTSUP; /* sub-page window into scanout: not modelled */
+      return vm_map_fb(grp, (uint64_t)virtio_gpu_get_framebuffer());
+    }
     obj = file_memfd_obj(grp, fd);
     if (obj) {
       /* Everything below is the S4 memfd contract, byte for byte. */

@@ -289,11 +289,21 @@ int file_open(struct process *cur, const char *filename, int flags) {
     int isurand = (rest[0] == '/' && rest[1] == 'u' && rest[2] == 'r' &&
                    rest[3] == 'a' && rest[4] == 'n' && rest[5] == 'd' &&
                    rest[6] == 'o' && rest[7] == 'm' && rest[8] == '\0');
+    /* GB-025 / M3: /dev/fb0, the framebuffer device node (docs/linux-abi.md
+       §9).  Every compat X11 client opens it in XOpenDisplay() and mmaps the
+       scanout smem; SDL's fbcon driver does the same.  The node owns no
+       data of its own -- the mmap/ioctl halves live in vm_mmap and the
+       compat ioctl route. */
+    int isfb = (rest[0] == '/' && rest[1] == 'f' && rest[2] == 'b' &&
+                rest[3] == '0' && rest[4] == '\0');
     if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
       f->open_flags = (uint32_t)flags;
     } else if (isurand) {
       f->type = FILE_TYPE_DEVURANDO;
+      f->open_flags = (uint32_t)flags;
+    } else if (isfb) {
+      f->type = FILE_TYPE_DEVFB;
       f->open_flags = (uint32_t)flags;
     } else {
       f->type = FILE_TYPE_EMPTY;
@@ -2257,6 +2267,20 @@ int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
   if (size)
     *size = f->fat16.entry.file_size;
   return 0;
+}
+
+/* GB-025 / M3: is `fd` the /dev/fb0 node?  The mmap half (vm_mmap) needs to
+ * recognise the fd before it reaches the memfd/FAT16 object paths, and the
+ * compat ioctl route needs the same test.  One predicate, so the two halves
+ * cannot disagree about what /dev/fb0 is. */
+int file_is_devfb(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return 0;
+  return global_file_table[gfd].type == FILE_TYPE_DEVFB;
 }
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) for memfd (design 4.3, OQ7 minimal set:
