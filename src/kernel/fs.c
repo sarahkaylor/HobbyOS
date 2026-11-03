@@ -22,10 +22,19 @@ static spinlock_t fs_lock;
    and receives what the desktop handles.  Cleared when the process exits (the
    queue dies with the struct, so a stale pointer would be fatal). */
 static struct process *evdev_owner;
+static int evdev_owner_pid = -1;
 
 int hb_evdev_push(unsigned short code, int value) {
   struct process *p = evdev_owner;
   if (!p) return -ENODEV;
+  /* GB-173 hardening: the pointer is only valid while the same pid owns it.
+     A recycled process slot would otherwise receive (and overwrite) a queue
+     that belongs to someone else. */
+  if (p->pid != evdev_owner_pid || p->pid <= 0) {
+    evdev_owner = 0;
+    evdev_owner_pid = -1;
+    return -ENODEV;
+  }
   int next = (p->evdev_qhead + 1) % 64;
   if (next == p->evdev_qtail) return -EAGAIN; /* full: drop, never block */
   p->evdev_q[p->evdev_qhead].code = code;
@@ -35,7 +44,10 @@ int hb_evdev_push(unsigned short code, int value) {
 }
 
 void hb_evdev_owner_clear(struct process *p) {
-  if (p && evdev_owner == p) evdev_owner = 0;
+  if (p && evdev_owner == p) {
+    evdev_owner = 0;
+    evdev_owner_pid = -1;
+  }
 }
 
 /* GB-108: fds 0-2 are the process's stdio and must never be handed out by an
@@ -218,6 +230,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
       f->open_flags = (uint32_t)flags;
       /* GB-173: opening the node claims the key channel for this process. */
       evdev_owner = cur;
+      evdev_owner_pid = cur->pid;
       cur->evdev_qhead = 0;
       cur->evdev_qtail = 0;
     } else {
