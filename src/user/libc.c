@@ -725,6 +725,12 @@ __attribute__((weak)) int get_events(void *buf, int max_events) {
   return (int)ho_syscall4(SYS_GET_EVENTS, (long)buf, (long)max_events, 0, 0);
 }
 
+/* GB-173: forward one key to the process that owns /dev/input/event0.  The
+ * desktop calls this for every key it handles; with no owner it is -ENODEV. */
+__attribute__((weak)) int evdev_push(int code, int value) {
+  return (int)ho_syscall4(SYS_EVDEV_PUSH, (long)code, (long)value, 0, 0);
+}
+
 /* GB-027: compat /dev/input/event* node.  input_ioctl() routes the Linux
  * EVIOCGVERSION/EVIOCGNAME/EVIOCGBIT/EVIOCGABS probe ioctls SDL's evdev
  * driver sends before it reads; read_input_events() is the non-blocking
