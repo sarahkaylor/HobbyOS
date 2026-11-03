@@ -97,6 +97,10 @@
 #define L_SYS_readlink 89
 #define L_SYS_chmod 90
 #define L_SYS_fchmod 91
+/* fchown(2): glibc's ld.so and libc startup chown nothing, but portable code
+   that copies a tree (tar/cp -p) reaches it; FAT16 carries no owner, so the
+   handler validates the fd and reports the truth (see linux_compat_fd.c). */
+#define L_SYS_fchown 93
 #define L_SYS_umask 95
 #define L_SYS_gettimeofday 96
 #define L_SYS_getrlimit 97
@@ -109,9 +113,27 @@
 #define L_SYS_getegid 108
 #define L_SYS_setpgid 109
 #define L_SYS_getppid 110
+/* glibc 2.31's ld.so/libc startup asks about its job control context: setsid
+   (112), getpgid (121), getsid (124).  HobbyOS has one process group per
+   spawn tree and no session layer, so the handlers translate onto the group
+   anchor (process_group) and SAY SO in linux_compat_proc.c rather than
+   growing a second, fake pgid table. */
+#define L_SYS_setsid 112
+#define L_SYS_getpgid 121
+#define L_SYS_getsid 124
 /* sigaltstack(2) and setrlimit(2) sit in the same 100..200 band as the rest
    of the identity/limit rows on x86_64 (131 / 160). */
 #define L_SYS_sigaltstack 131
+/* Nice values: the native scheduler has one priority class, so getpriority
+   reports 0 (raw return 20) and setpriority accepts only the direction that
+   cannot need a capability (see linux_compat_proc.c). */
+#define L_SYS_getpriority 140
+#define L_SYS_setpriority 141
+/* prctl(2): glibc's pthreads set the 16-byte comm (PR_SET_NAME/PR_GET_NAME) and
+   dumpability; Mono's crash reporter reads both.  Only the ops listed in
+   linux_compat_proc.c are answered; the rest are -EINVAL, as Linux does for an
+   unknown option. */
+#define L_SYS_prctl 157
 #define L_SYS_arch_prctl 158
 #define L_SYS_setrlimit 160
 #define L_SYS_gettid 186
@@ -169,7 +191,20 @@
 #define L_SYS_prlimit64 302
 #define L_SYS_getrandom 318
 #define L_SYS_memfd_create 319
+/* membarrier(2): glibc's malloc() uses MEMBARRIER_CMD_PRIVATE_EXPEDITED and
+   falls back to its pre-membarrier algorithm on -ENOSYS.  That fallback is the
+   supported protocol (membarrier is a performance hint), and HobbyOS has no
+   cross-CPU TLB/instruction-sync primitive to translate it onto, so the answer
+   is deliberately -ENOSYS rather than a lie. */
+#define L_SYS_membarrier 324
+/* statx(2): glibc 2.31's stat()/fstatat() TRY statx first and fall back to
+   newfstatat (262) on -ENOSYS.  Answering ENOSYS is the protocol, not a gap;
+   the 256-byte statx layout is a second struct that would have to stay in sync
+   with the 144-byte one for no caller that needs it. */
 #define L_SYS_statx 332
+/* rseq(2): glibc 2.31 (the pinned runtime) predates it; newer glibc registers
+   and disables itself on -ENOSYS.  There is no restartable-sequence state in
+   this kernel, so -ENOSYS is the honest answer. */
 #define L_SYS_rseq 334
 #define L_SYS_clone3 435
 #define L_SYS_close_range 436
@@ -298,6 +333,39 @@
 /* --- *at() flags (newfstatat / faccessat / readlinkat) ------------------ */
 #define L_AT_SYMLINK_NOFOLLOW 0x100
 #define L_AT_EMPTY_PATH 0x1000
+
+/* --- prctl(2) options and shapes (linux/prctl.h) ------------------------- */
+/* Only these are answered; any other option is -EINVAL (Linux returns that for
+   an unknown option rather than ENOSYS). */
+#define L_PR_SET_PDEATHSIG 1
+#define L_PR_GET_PDEATHSIG 2
+#define L_PR_GET_DUMPABLE 3
+#define L_PR_SET_DUMPABLE 4
+#define L_PR_SET_NAME 15
+#define L_PR_GET_NAME 16
+/* The kernel's `comm` is 16 bytes INCLUDING the NUL: PR_SET_NAME truncates to
+  15 characters and PR_GET_NAME always writes all 16 bytes. */
+#define L_PR_NAME_LEN 16
+
+/* --- getpriority/setpriority `which` + nice range (sys/resource.h) ------- */
+#define L_PRIO_PROCESS 0
+#define L_PRIO_PGRP 1
+#define L_PRIO_USER 2
+#define L_NICE_MIN (-20)
+#define L_NICE_MAX 19
+/* Raw getpriority returns 20 - nice (range 1..40) so that -1 is unambiguous;
+   the libc wrapper subtracts 20 again.  nice 0 is therefore 20 at this layer. */
+#define L_PRIO_BASE 20
+
+/* --- sched_get/setaffinity: the cpumask the kernel writes ----------------
+ * Linux x86_64 caps nr_cpu_ids at 64 for the compat surface, so the kernel
+ * mask is 8 bytes (one unsigned long).  A caller passes a 128-byte cpu_set_t
+ * (CPU_SETSIZE 1024 bits) and the 128-byte shape is what the compat handler
+ * documents/validates; see linux_compat_proc.c for why it also ZEROES the
+ * guest's whole buffer instead of only the 8 bytes Linux writes. */
+#define L_CPUMASK_BYTES 128
+#define L_CPUMASK_KERNEL_BYTES 8
+#define L_CPUMASK_MAX_CPUS 64
 
 #define L_ELFMAG_0 0x7F
 
