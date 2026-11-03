@@ -300,7 +300,7 @@ lane can decide whether to extend the protocol (they are candidates for a
 | **no window move/resize** | `XMoveWindow`/`XResizeWindow` are no-ops; the desktop's reflow owns geometry | windowed mode works, Unity's own resize requests are ignored |
 | **no cursor object** | `XCreateFontCursor` returns an id; the desktop paints the pointer | cosmetic |
 | **no property store** | `XChangeProperty` accepted and dropped; only WM hints round-trip | `_NET_WM_*` queries by the engine |
-| **no pixmaps/fonts** | ids are handed out; `XDrawString` draws a box, not glyphs | nothing on the GL path |
+| **no pixmaps/fonts** | ids are handed out; `XDrawString` renders the vendored 8x8 ASCII font (no server fonts, no `XLoadQueryFont` metrics) | nothing on the GL path |
 | **no XCB / SHM / XShape / XKB / XI2** | `XGetXCBConnection` and friends answer "absent" | GLX (L5) must not need XCB |
 | **no selection/clipboard** | `XConvertSelection` is a no-op | copy/paste is dead |
 

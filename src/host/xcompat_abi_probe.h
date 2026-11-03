@@ -42,6 +42,19 @@
 #define ABI_CONST(n) { #n, (unsigned long)(n) },
 /* Field name spelled by the side (class/c_class). */
 #define ABI_FIELD_AS(t, label, f) { #t "." #label, (unsigned long)offsetof(t, f) },
+/* Explicit label, for a fact whose TYPE name differs between the two sides
+ * (the display prefix is `Display` in Xlib, `x_abi_display_prefix` here). */
+#define ABI_NAMED(label, expr) { label, (unsigned long)(expr) },
+
+/* The Display object a client's macros walk: Xlib spells it `Display`,
+ * xabi.h spells the public prefix `x_abi_display_prefix`.  Only the field
+ * OFFSETS are comparable -- Xlib's struct continues past `xdefaults` with
+ * private state, which is exactly where the DSO keeps its own. */
+#ifdef ABI_REF
+#define ABI_DPY Display
+#else
+#define ABI_DPY x_abi_display_prefix
+#endif
 
 static const struct abi_row abi_rows[] = {
   ABI_SIZE(XEvent)
@@ -62,6 +75,55 @@ static const struct abi_row abi_rows[] = {
   ABI_SIZE(XSizeHints)
   ABI_SIZE(XTextProperty)
   ABI_SIZE(XRectangle)
+
+  /* The Screen object behind ScreenOfDisplay(): every pixel/dimension macro
+   * (RootWindow, DisplayWidth, BlackPixel, DefaultGC, ...) dereferences it. */
+  ABI_SIZE(Screen)
+  ABI_FIELD(Screen, display)
+  ABI_FIELD(Screen, root)
+  ABI_FIELD(Screen, width)
+  ABI_FIELD(Screen, height)
+  ABI_FIELD(Screen, mwidth)
+  ABI_FIELD(Screen, mheight)
+  ABI_FIELD(Screen, ndepths)
+  ABI_FIELD(Screen, depths)
+  ABI_FIELD(Screen, root_depth)
+  ABI_FIELD(Screen, root_visual)
+  ABI_FIELD(Screen, default_gc)
+  ABI_FIELD(Screen, cmap)
+  ABI_FIELD(Screen, white_pixel)
+  ABI_FIELD(Screen, black_pixel)
+  ABI_FIELD(Screen, max_maps)
+  ABI_FIELD(Screen, min_maps)
+  ABI_FIELD(Screen, backing_store)
+  ABI_FIELD(Screen, root_input_mask)
+
+  /* The public prefix of Display.  A client reads these with macros, so an
+   * offset drift is a fault in the client's first statement, not a wrong
+   * return value (measured: xclient died at VA=0x10 in DefaultScreen). */
+  ABI_NAMED("Display.fd", offsetof(ABI_DPY, fd))
+  ABI_NAMED("Display.proto_major_version", offsetof(ABI_DPY, proto_major_version))
+  ABI_NAMED("Display.proto_minor_version", offsetof(ABI_DPY, proto_minor_version))
+  ABI_NAMED("Display.vendor", offsetof(ABI_DPY, vendor))
+  ABI_NAMED("Display.byte_order", offsetof(ABI_DPY, byte_order))
+  ABI_NAMED("Display.bitmap_unit", offsetof(ABI_DPY, bitmap_unit))
+  ABI_NAMED("Display.bitmap_pad", offsetof(ABI_DPY, bitmap_pad))
+  ABI_NAMED("Display.bitmap_bit_order", offsetof(ABI_DPY, bitmap_bit_order))
+  ABI_NAMED("Display.nformats", offsetof(ABI_DPY, nformats))
+  ABI_NAMED("Display.pixmap_format", offsetof(ABI_DPY, pixmap_format))
+  ABI_NAMED("Display.release", offsetof(ABI_DPY, release))
+  ABI_NAMED("Display.qlen", offsetof(ABI_DPY, qlen))
+  ABI_NAMED("Display.last_request_read", offsetof(ABI_DPY, last_request_read))
+  ABI_NAMED("Display.request", offsetof(ABI_DPY, request))
+  ABI_NAMED("Display.max_request_size", offsetof(ABI_DPY, max_request_size))
+  ABI_NAMED("Display.display_name", offsetof(ABI_DPY, display_name))
+  ABI_NAMED("Display.default_screen", offsetof(ABI_DPY, default_screen))
+  ABI_NAMED("Display.nscreens", offsetof(ABI_DPY, nscreens))
+  ABI_NAMED("Display.screens", offsetof(ABI_DPY, screens))
+  ABI_NAMED("Display.min_keycode", offsetof(ABI_DPY, min_keycode))
+  ABI_NAMED("Display.max_keycode", offsetof(ABI_DPY, max_keycode))
+  ABI_NAMED("Display.xdefaults", offsetof(ABI_DPY, xdefaults))
+  ABI_NAMED("xabi_display_prefix.sizeof", sizeof(ABI_DPY))
 
   ABI_FIELD(XKeyEvent, type)
   ABI_FIELD(XKeyEvent, serial)

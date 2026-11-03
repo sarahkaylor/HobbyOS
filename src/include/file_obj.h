@@ -33,6 +33,14 @@ struct process;
 int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
                      uint32_t *size);
 
+/* --- /dev/fb0 (GB-025 / M3, implemented in fs.c) -----------------------
+ * 1 when `fd` is the framebuffer node opened from /dev/fb0.  vm_mmap maps
+ * it to the scanout smem (USER_FB_BASE_V2) instead of a vm_object, and the
+ * compat ioctl route answers FBIOGET_VSCREENINFO/FSCREENINFO + FBIOBLANK
+ * from it. 0 for every other fd (including an absent one), so callers need
+ * no separate error path. */
+int file_is_devfb(struct process *p, int fd);
+
 /* --- the cache (file_obj.c) ------------------------------------------ */
 
 /* Get-or-create the page-cache object for this file and return it with ONE

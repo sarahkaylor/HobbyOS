@@ -42,6 +42,7 @@
  */
 #include "xabi.h"
 #include "xcore.h"
+#include "font8x8.h"
 
 #define XAPI __attribute__((visibility("default")))
 
@@ -164,12 +165,6 @@ struct _XGC {
 #define GC_MAX 8
 #define PROTO_MAX 8
 
-struct _XScreen {
-  int scr;
-  int width, height, width_mm, height_mm;
-  Display *dpy;
-};
-
 struct _XVisual {
   VisualID id;
   int c_class;
@@ -179,6 +174,13 @@ struct _XVisual {
 };
 
 struct _XDisplay {
+  /* The public prefix FIRST, at offset 0: a client compiled against the real
+   * <X11/Xlib.h> reads DefaultScreen/RootWindow/DisplayWidth/BlackPixel
+   * through macros, not calls, so these fields must sit exactly where Xlib
+   * puts them (xabi.h pins the offsets; measured on the M3 gate, where a
+   * private layout made the client fault at VA 0x10 in its first macro). */
+  x_abi_display_prefix pub;
+
   /* framebuffer */
   int fb_fd;
   unsigned char *fb;
@@ -256,6 +258,31 @@ static int put_uint(char *buf, int j, unsigned v) {
   return j;
 }
 
+/* Debug: the protocol geometry, on stderr (fd 2 = the serial console for a
+ * desktop-launched child).  Compiled in only for gate debugging. */
+#ifdef XCOMPAT_PROTO_DEBUG
+static void dbg(const char *tag, int a, int b, int c, int d2) {
+  char buf[96];
+  int j = 0;
+  const char *p = "[XE] ";
+  while (*p) buf[j++] = *p++;
+  while (*tag && j < 20) buf[j++] = *tag++;
+  buf[j++] = ' ';
+  int v[4]; v[0] = a; v[1] = b; v[2] = c; v[3] = d2;
+  for (int i = 0; i < 4; i++) {
+    int x = v[i];
+    if (x < 0) { buf[j++] = '-'; x = -x; }
+    char t[8]; int n = 0;
+    do { t[n++] = (char)('0' + x % 10); x /= 10; } while (x);
+    while (n) buf[j++] = t[--n];
+    buf[j++] = (i == 3) ? '\n' : ';';
+  }
+  xs_write(2, buf, (unsigned long)j);
+}
+#else
+#define dbg(tag, a, b, c, d2) ((void)0)
+#endif
+
 /* ---- shadow (client-side backing store) ------------------------------- *
  * Every drawing call lands here and extends the dirty bbox; XFlush blits the
  * bbox into the framebuffer and sends ESC ] F so the desktop presents and
@@ -276,6 +303,7 @@ static void shadow_blit(Display *d, int x, int y, int w, int h) {
   if (!xc_clip_to_content(&content, &cr)) return;
   struct xc_rect sr = cr;
   if (!xc_content_to_screen(&content, &sr, d->fb_w, d->fb_h)) return;
+  dbg("blit", sr.x, sr.y, sr.w, sr.h);
   unsigned char *dst = d->fb + (unsigned long)sr.y * d->fb_stride +
                        (unsigned long)sr.x * 4;
   const unsigned char *src = d->win.shadow +
@@ -290,14 +318,43 @@ static void shadow_blit(Display *d, int x, int y, int w, int h) {
   }
 }
 
+/* Tell the desktop which content pixels to present.  The compat class has no
+ * HobbyOS syscall (a native Xlib calls SYS_FLUSH_FB itself), so the flush
+ * message carries the dirty rect and the desktop presents it -- ESC ] F with
+ * no parameters keeps the historical "re-stamp the pointer only" meaning. */
+static void send_flush(Display *d, int x, int y, int w, int h) {
+  if (x < 0) x = 0;
+  if (y < 0) y = 0;
+  if (w <= 0 || h <= 0) {
+    const char msg[] = { 27, ']', 'F', '~' };
+    send_raw(msg, sizeof msg);
+    return;
+  }
+  if (x + w > d->win.cw) w = d->win.cw - x;
+  if (y + h > d->win.ch) h = d->win.ch - y;
+  if (w <= 0 || h <= 0) return;
+  char buf[40];
+  int j = 0;
+  buf[j++] = 27; buf[j++] = ']'; buf[j++] = 'F'; buf[j++] = ' ';
+  j = put_uint(buf, j, (unsigned)x);
+  buf[j++] = ';';
+  j = put_uint(buf, j, (unsigned)y);
+  buf[j++] = ';';
+  j = put_uint(buf, j, (unsigned)w);
+  buf[j++] = ';';
+  j = put_uint(buf, j, (unsigned)h);
+  buf[j++] = '~';
+  send_raw(buf, j);
+}
+
 static void shadow_flush(Display *d) {
   struct xc_rect r;
   if (!xc_dirty_take(&d->core, &r)) return;
+  dbg("flush", r.x, r.y, r.w, r.h);
   shadow_blit(d, r.x, r.y, r.w, r.h);
-  /* The desktop's frame loop presents the shared framebuffer; ESC ] F also
-   * asks it to re-stamp the pointer over our pixels (window.h). */
-  const char msg[] = { 27, ']', 'F', '~' };
-  send_raw(msg, sizeof msg);
+  /* The desktop's frame loop presents what the app names (window.h); ESC ] F
+   * also asks it to re-stamp the pointer over our pixels. */
+  send_flush(d, r.x, r.y, r.w, r.h);
 }
 
 /* ---- input decoder ---------------------------------------------------- *
@@ -374,6 +431,7 @@ static int next_int(const unsigned char *s, int *i) {
 }
 
 static void set_geometry(Display *d, int x, int y, unsigned w, unsigned h) {
+  dbg("geom-in", x, y, (int)w, (int)h);
   if (w < 1) w = 1;
   if (h < 1) h = 1;
   if (w > 1920) w = 1920;
@@ -443,6 +501,8 @@ static void handle_repair(Display *d, const unsigned char *seq, int len) {
   if (!d->win.content_ready || !d->win.shadow) return;
   int i = 1;
   int x = next_int(seq, &i);
+  int rx = 0, ry = 0, rw = d->win.cw, rh = d->win.ch;
+  dbg("repair", x, 0, d->win.cw, d->win.ch);
   if (x < 0) {
     shadow_blit(d, 0, 0, d->win.cw, d->win.ch);
   } else {
@@ -453,10 +513,12 @@ static void handle_repair(Display *d, const unsigned char *seq, int len) {
     if (seq[i] == ';') i++;
     int h = next_int(seq, &i);
     if (y < 0 || w < 0 || h < 0) shadow_blit(d, 0, 0, d->win.cw, d->win.ch);
-    else shadow_blit(d, x, y, w, h);
+    else {
+      shadow_blit(d, x, y, w, h);
+      rx = x; ry = y; rw = w; rh = h;
+    }
   }
-  const char msg[] = { 27, ']', 'F', '~' };
-  send_raw(msg, sizeof msg);
+  send_flush(d, rx, ry, rw, rh);
 }
 
 static void handle_mouse(Display *d, unsigned char kind,
@@ -715,12 +777,54 @@ XAPI Display *XOpenDisplay(const char *name) {
 
   d->screen = 0;
   d->root = 1;
-  d->screen_obj.scr = 0;
+  /* The public Display prefix (see xabi.h): the fields a client's Xlib
+   * macros read.  `fd` is the framebuffer descriptor here -- this display has
+   * no socket, and ConnectionNumber() is only ever used to poll it. */
+  d->pub.fd = fd;
+  d->pub.proto_major_version = 11;
+  d->pub.proto_minor_version = 0;
+  d->pub.vendor = (char *)"HobbyOS";
+  d->pub.release = 1;                    /* XVendorRelease: not an X server */
+  d->pub.byte_order = 0;                 /* LSBFirst */
+  d->pub.bitmap_unit = 32;
+  d->pub.bitmap_pad = 32;
+  d->pub.bitmap_bit_order = 0;           /* LSBFirst */
+  d->pub.nformats = 1;
+  d->pub.pixmap_format = 0;              /* XPixmapFormatValues: unused */
+  d->pub.qlen = 0;                       /* no request queue: no X wire */
+  d->pub.last_request_read = 0;
+  d->pub.request = 0;
+  d->pub.max_request_size = 1;
+  d->pub.display_name = (char *)":0";
+  d->pub.default_screen = 0;
+  d->pub.nscreens = 1;
+  d->pub.screens = &d->screen_obj;
+  d->pub.motion_buffer = 0;
+  d->pub.min_keycode = 8;
+  d->pub.max_keycode = 255;
+  d->pub.xdefaults = 0;
+
+  /* The single Screen a client reaches through ScreenOfDisplay(). */
+  d->screen_obj.ext_data = 0;
+  d->screen_obj.display = d;
+  d->screen_obj.root = d->root;
   d->screen_obj.width = d->fb_w;
   d->screen_obj.height = d->fb_h;
-  d->screen_obj.width_mm = d->fb_w * 254 / 960;   /* 96 dpi nominal */
-  d->screen_obj.height_mm = d->fb_h * 254 / 960;
-  d->screen_obj.dpy = d;
+  d->screen_obj.mwidth = d->fb_w * 254 / 960;   /* 96 dpi nominal */
+  d->screen_obj.mheight = d->fb_h * 254 / 960;
+  d->screen_obj.ndepths = 0;
+  d->screen_obj.depths = 0;
+  d->screen_obj.root_depth = 24;
+  d->screen_obj.root_visual = (Visual *)&d->visual;
+  d->screen_obj.cmap = 0x20;             /* filled again below, same value */
+  d->screen_obj.white_pixel = 0x00ffffff;
+  d->screen_obj.black_pixel = 0x00000000;
+  d->screen_obj.max_maps = 256;
+  d->screen_obj.min_maps = 1;
+  d->screen_obj.backing_store = 0;       /* NotUseful */
+  d->screen_obj.save_unders = 0;
+  d->screen_obj.root_input_mask = 0;
+
   d->visual.id = 0x21;                   /* TrueColor, 24-bit */
   d->visual.c_class = InputOutput;
   d->visual.red_mask = 0x00ff0000;
@@ -739,7 +843,9 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->vinfo.colormap_size = 256;
   d->vinfo.bits_per_rgb = 8;
   d->default_cmap = 0x20;
+  d->screen_obj.cmap = d->default_cmap;
   d->default_gc = XCreateGC(d, d->root, 0, 0);
+  d->screen_obj.default_gc = d->default_gc;
   return d;
 }
 
@@ -770,7 +876,7 @@ XAPI Screen *ScreenOfDisplay(Display *d, int scr) {
   (void)scr;
   return d ? &d->screen_obj : 0;
 }
-XAPI int XScreenNumberOfScreen(Screen *s) { return s ? s->scr : 0; }
+XAPI int XScreenNumberOfScreen(Screen *s) { (void)s; return 0; }
 XAPI int DisplayWidth(Display *d, int scr) {
   (void)scr;
   return d ? d->screen_obj.width : 0;
@@ -783,11 +889,11 @@ XAPI int XDisplayWidth(Display *d, int scr) { return DisplayWidth(d, scr); }
 XAPI int XDisplayHeight(Display *d, int scr) { return DisplayHeight(d, scr); }
 XAPI int DisplayWidthMM(Display *d, int scr) {
   (void)scr;
-  return d ? d->screen_obj.width_mm : 0;
+  return d ? d->screen_obj.mwidth : 0;
 }
 XAPI int DisplayHeightMM(Display *d, int scr) {
   (void)scr;
-  return d ? d->screen_obj.height_mm : 0;
+  return d ? d->screen_obj.mheight : 0;
 }
 XAPI int XDisplayWidthMM(Display *d, int scr) { return DisplayWidthMM(d, scr); }
 XAPI int XDisplayHeightMM(Display *d, int scr) { return DisplayHeightMM(d, scr); }
@@ -1627,17 +1733,32 @@ XAPI int XFillRectangle(Display *d, Drawable dr, GC gc, int x, int y,
   return 0;
 }
 
-/* The 8x8 system font of the native library is not available under compat
- * (it lives in HobbyOS libc).  XDrawString therefore fills the text box
- * with the GC's background and draws a 1-pixel baseline: visible, correct
- * geometry, no glyphs.  EXPORTS.md lists it as PARTIAL. */
+/* Text: the same 8x8 system font the native Xlib uses (font8x8.h, vendored
+ * from src/user_include/graphics/font.h).  `y` is the BASELINE, as on a real
+ * X server, and the font's row 7 is the baseline row, so glyphs start at
+ * y - 7.  Advance is 8 px: XTextWidth() and XQueryTextExtents() report the
+ * same metric.  (Before this, XDrawString filled the text box with the
+ * foreground -- visible but glyph-less; EXPORTS.md carried it as PARTIAL.) */
 XAPI int XDrawString(Display *d, Drawable dr, GC gc, int x, int y,
                      const char *s, int len) {
-  if (!d || dr != d->win.id || !s) return 0;
+  if (!d || dr != d->win.id || !s || !gc) return 0;
   if (len < 0) len = xlen(s);
-  int w = len * 6;
-  XFillRectangle(d, dr, gc, x, y - 7, (unsigned)w, 8);
-  XDrawLine(d, dr, gc, x, y, x + w - 1, y);
+  int cx = x;
+  int top = y - 7;
+  unsigned long fg = gc->fg;
+  for (int i = 0; i < len; i++) {
+    unsigned char c = (unsigned char)s[i];
+    if (c < 32 || c > 127) c = '?';
+    const unsigned char *rows = xc_font8x8[c - 32];
+    for (int row = 0; row < 8; row++) {
+      unsigned char bits = rows[row];
+      if (!bits) continue;
+      for (int col = 0; col < 8; col++)
+        if (bits & (1u << (7 - col))) put_px(d, gc, cx + col, top + row, fg);
+    }
+    cx += 8;
+  }
+  if (cx > x) dirty_add(d, x, top, cx, top + 8);
   return 0;
 }
 
@@ -1982,7 +2103,7 @@ XAPI int XTextExtents(XFontStruct *f, const char *s, int n, int *dir,
 }
 XAPI int XTextWidth(XFontStruct *f, const char *s, int n) {
   (void)f; (void)s;
-  return n * 6;
+  return n * 8;                    /* the 8x8 cell XDrawString advances */
 }
 XAPI int XSetFont(Display *d, GC gc, Font f) { (void)d; (void)gc; (void)f; return 0; }
 XAPI XFontSet XCreateFontSet(Display *d, const char *base, char ***missing,

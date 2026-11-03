@@ -633,15 +633,42 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
 
   /* Strings first, highest address first, so the arrays below them can be laid
      down front-to-back without tracking each string's end. */
+  int have_ldpath = 0;
   for (int i = envc - 1; i >= 0; i--) {
     int n = sys_readenv(grp, i, s, (int)sizeof s);
     if (n < 0) {
       s[0] = '\0';
       n = 0;
     }
+    /* Does the parent already own the library path?  Compared byte-wise: the
+       kernel is freestanding (no strncmp). */
+    {
+      static const char kLd[] = "LD_LIBRARY_PATH=";
+      int is_ld = 1;
+      for (int j = 0; kLd[j]; j++) {
+        if (s[j] != kLd[j]) { is_ld = 0; break; }
+      }
+      if (is_ld) have_ldpath = 1;
+    }
     sp -= (uint64_t)n + 1;
     if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
     envp[i] = sp;
+  }
+  /* F3 (plan Appendix A, docs/rw-ldso-design.md): the frozen DSO resolution
+     order is DT_RUNPATH -> LD_LIBRARY_PATH -> /LIB64, and /LIB64 is where the
+     compat runtime stages its DSOs.  glibc's ld.so has no /LIB64 in its
+     compiled-in default search path, so without this entry "stage it in
+     /LIB64" only works for a parent that exports LD_LIBRARY_PATH itself --
+     and a program launched from the desktop has NO environment at all
+     (measured on the M3 gate: envc == 0, so every DSO lookup failed with
+     "cannot open shared object file").  Supply the fallback here, once, so
+     every Linux-ABI process gets the same library path regardless of who
+     launched it; a parent that sets its own value keeps it. */
+  if (!have_ldpath && envc < COMPAT_MAX_ENV) {
+    uint64_t ldpath_addr = 0;
+    if (compat_put_str(child, &sp, "LD_LIBRARY_PATH=/LIB64", &ldpath_addr) != 0)
+      return -EFAULT;
+    envp[envc++] = ldpath_addr;
   }
   for (int i = argc - 1; i >= 0; i--) {
     int n = sys_readargv(grp, i, s, (int)sizeof s);
@@ -757,24 +784,25 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
   w[k++] = 31; w[k++] = execfn_addr;   /* AT_EXECFN */
   w[k++] = 0;  w[k++] = 0;             /* AT_NULL   */
 
-  uint64_t auxv_addr = (rnd_addr - (uint64_t)k * 8) & ~(uint64_t)0xF;
-  uint64_t argv_addr = (auxv_addr - arrays) & ~(uint64_t)0x7;
-  /* argv[0] must be 8 mod 16 (so %rsp = &argc is 16-aligned), AND the auxv
-   * must start EXACTLY at the envp NULL: glibc does not take the auxv address
-   * from anywhere -- it scans past argv's NULL, past envp's NULL, and reads the
-   * auxv from the next word.  The old code moved only argv_addr down by 8,
-   * leaving an 8-byte hole between envp's NULL and the auxv; glibc then read
-   * {0,0} = AT_NULL as the first pair, saw NO auxv at all, and fell into the
-   * "invoked directly as ld.so" path -- so it treated argv[1] as the program.
-   * Measured (M2): `mono --version` died with "--version: error while loading
-   * shared libraries: --version: invalid ELF header", and the same happened to
-   * any compat program whose (argc + envc) made argv_addr 16-aligned.  Move the
-   * auxv down WITH the arrays so the block stays contiguous. */
-  if ((argv_addr & 0xF) != 8) {
-    auxv_addr -= 8;
-    argv_addr -= 8;
-  }
+  /* argv[0] must sit 8 mod 16 (so %rsp = &argc is 16-aligned).  The auxv is
+   * derived from envp's end below, so no alignment hole can separate it from
+   * the arrays.  Measured (M2/M3): the old code nudged only argv down, and
+   * whenever (argc+envc) made the arrays land 16-aligned the hole read as
+   * {0,0} = AT_NULL -- glibc saw no auxv, took its "invoked directly as ld.so"
+   * path (`mono --version` -> "--version: invalid ELF header") and printed its
+   * usage text instead of running the program. */
+  uint64_t auxv_top = (rnd_addr - (uint64_t)k * 8) & ~(uint64_t)0xF;
+  uint64_t argv_addr = (auxv_top - arrays) & ~(uint64_t)0x7;
+  if ((argv_addr & 0xF) == 0) argv_addr -= 8; /* argv[0] must be 8 mod 16 */
   uint64_t envp_addr = argv_addr + (uint64_t)(argc + 1) * 8;
+  /* ld.so does NOT get an auxv pointer from the kernel: it walks argc ->
+   * argv -> envp and takes the auxv from the word after the envp NULL
+   * terminator.  So the auxv must start EXACTLY where the envp array ends --
+   * an alignment hole there reads as type AT_NULL and glibc's ld.so then
+   * concludes it was invoked directly (measured: the M1 hello printed ld.so's
+   * usage text as soon as one environment entry made the arrays land on a
+   * 16-byte boundary and the old code inserted its 8-byte nudge below them). */
+  uint64_t auxv_addr = envp_addr + (uint64_t)(envc + 1) * 8;
 
   uint8_t rnd[16];
   net_get_random_bytes(rnd, 16);
