@@ -520,6 +520,15 @@ a save file is written locally and read back.
 **Gate M6:** screenshot of the RimWorld main menu inside HobbyOS, plus the
 engine's own log lines (`Initialize engine version`, `GfxDevice`, `Mono path`).
 
+**AD-9 proven on the host 2026-11-02.** A 40-line launcher
+(`gcc -O2 -o RimWorldLinux rwmain.c -ldl`; `dlopen("./UnityPlayer.so",
+RTLD_NOW|RTLD_GLOBAL)` → `dlsym("_Z10PlayerMainiPPc")` → call it) boots the game
+to its main menu: `Mono path[0] = '<dir>/RimWorldLinux_Data/Managed'`,
+`Initialize engine version: 2022.3.35f1`, `Forcing GfxDevice: OpenGL Core`,
+`Renderer: llvmpipe`, `RimWorld 1.6.4871 rev600`, screenshot captured. The
+launcher must be named `RimWorldLinux` inside the game dir so `/proc/self/exe`
+resolves next to `RimWorldLinux_Data`. Nothing about the non-PIE stub matters.
+
 **Status 2026-11-02:** plumbing landed; the binary itself cannot be *loaded*
 (`ET_EXEC` at 0x200000, below the 64 GiB user window → `elf loader: ET_EXEC
 linked below the user window`), which is why AD-9 replaces the stub instead. A
