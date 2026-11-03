@@ -41,6 +41,10 @@ int main(void) {
   ssize_t n;
 
   printf("[PROC] proc probe start pid=%d\n", (int)getpid());
+  printf("[PROC] HOME=%s LC_ALL=%s LD_LIBRARY_PATH=%s\n",
+         getenv("HOME") ? getenv("HOME") : "(unset)",
+         getenv("LC_ALL") ? getenv("LC_ALL") : "(unset)",
+         getenv("LD_LIBRARY_PATH") ? getenv("LD_LIBRARY_PATH") : "(unset)");
 
   /* 1. /proc/self/exe ---------------------------------------------------- */
   n = readlink("/proc/self/exe", b, sizeof b - 1);

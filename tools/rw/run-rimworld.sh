@@ -5,6 +5,8 @@
 # failure ladder from the real serial log.
 #
 #   tools/rw/run-rimworld.sh probe [--timeout S]   # /proc plumbing probe
+#   tools/rw/run-rimworld.sh launchprobe [--timeout S]  # same probe, spawned
+#                                                  # from NFS by the launcher
 #   tools/rw/run-rimworld.sh game  [--timeout S]   # the real RimWorldLinux
 #   tools/rw/run-rimworld.sh stub  [--timeout S]   # PIE stand-in with the
 #                                                  # game's NEEDED list: the
@@ -20,14 +22,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 2
 
 MODE="${1:-game}"
-[ "$MODE" = probe ] || [ "$MODE" = game ] || [ "$MODE" = stub ] || {
-  echo "usage: $0 {probe|game|stub} [--timeout S]" >&2; exit 2; }
+[ "$MODE" = probe ] || [ "$MODE" = launchprobe ] || [ "$MODE" = game ] || \
+  [ "$MODE" = stub ] || {
+  echo "usage: $0 {probe|launchprobe|game|stub} [--timeout S]" >&2; exit 2; }
 shift || true
 TIMEOUT_S=180
 while [ $# -gt 0 ]; do
   case "$1" in
     --timeout) TIMEOUT_S="$2"; shift 2 ;;
-    *) echo "usage: $0 {probe|game|stub} [--timeout S]" >&2; exit 2 ;;
+    *) echo "usage: $0 {probe|launchprobe|game|stub} [--timeout S]" >&2; exit 2 ;;
   esac
 done
 
@@ -103,22 +106,31 @@ gcc -O2 -fPIE -pie -nostdlib -nostartfiles -o "$OUT/rw_procprobe" src/user/rw_pr
     -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none || { echo "probe link failed"; exit 2; }
 readelf -h "$OUT/rw_procprobe" | awk '/Type:/{print "  probe:",$2}'
 
-if [ "$MODE" = stub ]; then
-  # Same launcher, pointed at the stand-in; the stand-in carries the game's
-  # NEEDED list and $ORIGIN rpath so ld.so must resolve UnityPlayer.so from
-  # /NFS exactly as it would for the real binary.
-  [ -f /srv/nfs/rimworld/UnityPlayer.so ] || { echo "ENVIRONMENT: no UnityPlayer.so in export"; exit 2; }
-  clang "${UCFLAGS[@]}" -DRW_GAME='"/NFS/RWTEST.ELF"' -c src/user/rwlaunch.c -o "$OUT/rwstublaunch.o" || exit 2
-  ld.lld -T src/user/linker.ld -e _start -o "$OUT/rwstublaunch.elf" "$OUT/rwstublaunch.o" obj/intel/libc.a || exit 2
-  llvm-objcopy -O binary "$OUT/rwstublaunch.elf" "$OUT/rwstublaunch.bin"
-  gcc -O2 -fPIE -pie -nostdlib -nostartfiles -o "$OUT/RWTEST.ELF" src/user/rwstub.c \
-      "$DLIB/Scrt1.o" "$DLIB/crti.o" "$DLIB/libc_nonshared.a" \
-      "$LDIR/libc.so.6" "$DLIB/crtn.o" \
-      -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2 \
-      -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none \
-      -Wl,--no-as-needed -Wl,-rpath,'$ORIGIN' -L/srv/nfs/rimworld -l:UnityPlayer.so \
-      -Wl,--allow-shlib-undefined || { echo "stub link failed"; exit 2; }
-  readelf -dW "$OUT/RWTEST.ELF" | grep -E 'NEEDED|RUNPATH' | sed 's/^/  stub: /'
+if [ "$MODE" = stub ] || [ "$MODE" = launchprobe ]; then
+  if [ "$MODE" = stub ]; then
+    # Same launcher, pointed at the stand-in; the stand-in carries the game's
+    # NEEDED list and $ORIGIN rpath so ld.so must resolve UnityPlayer.so from
+    # /NFS exactly as it would for the real binary.
+    [ -f /srv/nfs/rimworld/UnityPlayer.so ] || { echo "ENVIRONMENT: no UnityPlayer.so in export"; exit 2; }
+    clang "${UCFLAGS[@]}" -DRW_GAME='"/NFS/RWTEST.ELF"' -c src/user/rwlaunch.c -o "$OUT/rwstublaunch.o" || exit 2
+    ld.lld -T src/user/linker.ld -e _start -o "$OUT/rwstublaunch.elf" "$OUT/rwstublaunch.o" obj/intel/libc.a || exit 2
+    llvm-objcopy -O binary "$OUT/rwstublaunch.elf" "$OUT/rwstublaunch.bin"
+    gcc -O2 -fPIE -pie -nostdlib -nostartfiles -o "$OUT/RWTEST.ELF" src/user/rwstub.c \
+        "$DLIB/Scrt1.o" "$DLIB/crti.o" "$DLIB/libc_nonshared.a" \
+        "$LDIR/libc.so.6" "$DLIB/crtn.o" \
+        -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2 \
+        -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none \
+        -Wl,--no-as-needed -Wl,-rpath,'$ORIGIN' -L/srv/nfs/rimworld -l:UnityPlayer.so \
+        -Wl,--allow-shlib-undefined || { echo "stub link failed"; exit 2; }
+    readelf -dW "$OUT/RWTEST.ELF" | grep -E 'NEEDED|RUNPATH' | sed 's/^/  stub: /'
+  else
+    # The /proc probe, but spawned by the launcher from NFS: proves the whole
+    # launch path (env, argv, executable path, /proc answers) short of the
+    # game binary itself.
+    clang "${UCFLAGS[@]}" -DRW_GAME='"/NFS/RWPROBE.ELF"' -c src/user/rwlaunch.c -o "$OUT/rwprobelaunch.o" || exit 2
+    ld.lld -T src/user/linker.ld -e _start -o "$OUT/rwprobelaunch.elf" "$OUT/rwprobelaunch.o" obj/intel/libc.a || exit 2
+    llvm-objcopy -O binary "$OUT/rwprobelaunch.elf" "$OUT/rwprobelaunch.bin"
+  fi
 fi
 
 echo "== stage: glibc runtime under /LIB64 (+ ld.so's own default dir)"
@@ -156,6 +168,10 @@ else
   if [ "$MODE" = stub ]; then
     cp -f "$OUT/RWTEST.ELF" /srv/nfs/rimworld/RWTEST.ELF
     stage "$OUT/rwstublaunch.bin" ::/RWLAUNCH.BIN
+  elif [ "$MODE" = launchprobe ]; then
+    cp -f "$OUT/rw_procprobe" /srv/nfs/rimworld/RWPROBE.ELF
+    stage "$OUT/rwprobelaunch.bin" ::/RWLAUNCH.BIN
+    stage "$OUT/PROBE.TXT" ::/PROBE.TXT
   else
     stage "$OUT/rwlaunch.bin" ::/RWLAUNCH.BIN
   fi
