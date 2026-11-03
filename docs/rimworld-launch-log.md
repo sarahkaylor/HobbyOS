@@ -16,7 +16,8 @@ labelled as such. No line here is a prediction.
 - The launcher (`RWLAUNCH.BIN`) mounts the NFS export, creates a writable
   `HOME`, sets `LC_ALL=C` / `LD_LIBRARY_PATH=/LIB64`, and spawns the game with
   `-force-glcore -screen-width 1280 -screen-height 720 -screen-fullscreen 0`.
-  It runs; the spawn is attempted.
+  It is validated end-to-end by spawning the same glibc probe from `/NFS`
+  (`launchprobe` mode, 0 failures, §3.2).
 - **The real `RimWorldLinux` never reaches userspace.** It is an **ET_EXEC
   linked at 0x200000**, and HobbyOS's compat loader refuses it:
 
@@ -151,6 +152,36 @@ Regression check: `tools/gate/t3_linux_probe.sh proc` still passes
 (`[LP] readlink exe=/PROBE.ELF len=10`, `[LP] done rc=0`) — the stat/readlink
 contract used by the existing compat probes is unchanged.
 
+### 3.2 The same probe through the launcher, executed from NFS
+
+`tools/rw/run-rimworld.sh launchprobe` stages the probe at
+`/NFS/RWPROBE.ELF` (the export, i.e. the game's own filesystem) and builds the
+launcher with that path as its target. This is the exact code path the game
+would take: launcher → `spawn_ex` → kernel maps from NFS → `ld.so` →
+compat process. Raw serial:
+
+```
+302  [RW] rwlaunch: exec /NFS/RWPROBE.ELF HOME=/RW_HOME LC_ALL=C LD_LIBRARY_PATH=/LIB64
+311  Loading program for scheduler (v2 AS): /NFS/RWPROBE.ELF
+319  elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000001A60 start=0x1008001100
+321  [RW] rwlaunch: spawn_ex -> 3
+     [PROC] proc probe start pid=3
+     [PROC] HOME=/RW_HOME LC_ALL=C LD_LIBRARY_PATH=/LIB64
+     [PROC] readlink(/proc/self/exe) = "/NFS/RWPROBE.ELF" (len=16)
+     [PROC] PASS exe link is absolute
+     [PROC] PASS exe link is the executable, not the interpreter
+     [PROC] AT_EXECFN = "/NFS/RWPROBE.ELF"
+     [PROC] readlink(/proc/self) = "3"
+     [PROC] maps: 1000000000-1000001000 r--p 00000000 00:00 0 /NFS/RWPROBE.ELF
+     ...
+     [PROC] done failures=0
+374  [RW] rwlaunch: waitpid=3 status=0
+```
+
+This proves the launcher's environment and argv reach the child, the
+child's `/proc/self/exe` names the NFS executable, and the whole launch path
+works for a PIE. The game is the one image that cannot use it — ET_EXEC.
+
 ## 4. The game run — ordered failure ladder
 
 `tools/rw/run-rimworld.sh game --timeout 200`. Raw serial, consecutive lines
@@ -233,9 +264,9 @@ Raw serial:
 So the next wall is `mmap` of a **file on NFS**: `ld.so` opens
 `/NFS/UnityPlayer.so` successfully (2.0 MB of libc are already mapped from
 FAT16 in the same run: `/LIB64/libc.so.6`, 2029592 bytes), then its `mmap`
-fails. Code path (static reading, not a measured errno): `vm_mmap` →
-`file_fat16_ident()` returns `-ENOTSUP` for an NFS fd (`fs.c:2076-2089`,
-`vm.c:1663-1664`), which `ld.so` renders as "failed to map segment". This is
+fails. Code path (static reading, not a measured errno): `vm_mmap()` calls
+`file_fat16_ident()` (`fs.c`), which answers `-ENOTSUP` for an NFS fd, and
+`ld.so` renders that as "failed to map segment". This is
 the known **M5b** gap ("a VM object with an NFS page-in callback"). It is the
 second blocker, not the first; fixing it without ET_EXEC changes nothing for
 the real binary.
@@ -263,11 +294,13 @@ export HOME=/home/sarah
 cd ~/hobbyos-rw-lanes/l10-launch
 bash tools/rw/proc-usage.sh 30        # host: what the game calls on /proc
 bash tools/rw/run-rimworld.sh probe   # in-guest /proc proof (expect failures=0)
+bash tools/rw/run-rimworld.sh launchprobe  # same probe spawned from NFS by the launcher
 bash tools/rw/run-rimworld.sh game    # the real binary: ladder ends at the loader
 bash tools/rw/run-rimworld.sh stub    # PIE stand-in: the NFS-mmap wall
 ```
 
-Logs land in `obj/rw-launch/serial-{probe,game,stub}.log` (git-ignored).
+Logs land in `obj/rw-launch/serial-{probe,launchprobe,game,stub}.log`
+(git-ignored).
 The game tree is never copied into the repo: it is served read-only from
 `/srv/nfs/rimworld`; `bash tools/rw/check-no-game-files.sh` stays green.
 
