@@ -31,6 +31,8 @@ be in scope.
 | `alsa_null.c` | the ALSA sink, 19 symbols, "no device". |
 | `EXPORTS.md` | **F4**: the generated per-symbol contract (IMPL / PARTIAL / STUB + the constant each stub returns). |
 | `EXPORTS.prose.md` | the hand-written half of `EXPORTS.md` (regeneration keeps it). |
+| `font8x8.h` | the 8x8 ASCII font, vendored from `src/user_include/graphics/font.h` (`tools/sync-font.sh` regenerates it). `XDrawString` renders it. |
+| `stage.sh` | puts the DSOs on a boot image's library path (`::/LIB64`), real sonames, LFN. |
 | `required-libx11.{txt,h}`, `required-alsa.{txt,h}` | the frozen required sets, generated from the game binary and checked in so the tree builds without the game. |
 | `tools/gen_exports.py` | regenerates all of the above from `UnityPlayer.so` + the host's real `libX11.so.6`. |
 | `Makefile.inc` | the makefile fragment (DSO rules, the F4 export gate, the host test). |
@@ -56,16 +58,96 @@ aggregation:
 include src/user/xcompat/Makefile.inc
 ```
 
+## Staging onto a boot image (plan M3, F3)
+
+The DSOs have to be reachable by a Linux-ABI process at run time, so they live
+in `/LIB64` on the boot disk under their real sonames:
+
+```sh
+bash src/user/xcompat/stage.sh disk.img     # ::/LIB64/libX11.so.6, libasound.so.2
+```
+
+`/LIB64` works with no environment because the kernel's compat startup block
+appends `LD_LIBRARY_PATH=/LIB64` to every Linux-ABI process's `envp` (F3's
+last resolution step; a desktop-launched program otherwise has *no*
+environment at all — measured `envc == 0` on the M3 gate, where every DSO
+lookup then failed). A launcher that exports its own `LD_LIBRARY_PATH`
+overrides it; a program with a `DT_RUNPATH` is searched first.
+
+The 4-line `disk.img` recipe change (integrator-owned, L0):
+
+```make
+# plan M3 / F3: the compat window/audio DSOs on the compat library path
+ifeq ($(ARCH),intel)
+disk.img: xcompat_dsos
+endif
+# ... inside the disk.img recipe, after the last mcopy:
+	$(MMD) -i disk.img ::/LIB64
+	$(MCOPY) -o -i disk.img $(XCOMPAT_LIBX11) ::/LIB64/libX11.so.6
+	$(MCOPY) -o -i disk.img $(XCOMPAT_LIBASOUND) ::/LIB64/libasound.so.2
+```
+
+Until that lands, `make ... disk.img && bash src/user/xcompat/stage.sh disk.img`
+is the supported sequence (and what the M3 gate does).
+
+## M3 gate: a real glibc Xlib client on the desktop
+
+```sh
+python3 tools/gate/m3_x11_client.py        # ARCH=intel, KVM, ~4 min
+```
+
+It builds `tests/fixtures/m3/xclient.c` with the host `gcc` against Ubuntu's
+`<X11/Xlib.h>` and `-lX11` (linked against the pinned glibc 2.31 startup
+objects, so its `DT_NEEDED` are exactly `libX11.so.6`, `libdl.so.2`,
+`libc.so.6`), stages it as `/XCLIENT.BIN`, boots the desktop, launches it from
+the Apps menu with real key events, and grades the serial log plus the
+screenshot. Expected rows:
+
+```
+[XC] LD_LIBRARY_PATH=/LIB64
+[XC] XOpenDisplay -> /LIB64/libX11.so.6 (base 0x1080000000)
+[XC] XOpenDisplay ok proto=11.0 vendor_release=1 screen=0 root=0x1 1920x1080
+[XC] macros: DefaultScreen=0 RootWindow=0x1 WhitePixel=0xffffff ...
+[XC] ConfigureNotify 1916x1018 at 2,34
+[XC] Expose 1916x1018 at 0,0 -> painting
+[XC] fb readback after-paint: green@(+100,+150)=0x00ff00 blue@(+300,+150)=0x0000ff
+[XC] done rc=0
+```
+
+`dladdr()` names the DSO the loader actually mapped, and the framebuffer
+readback is the client's own proof that its pixels reached the shared
+surface; the screenshot is the display's proof. Screenshots land in
+`obj/m3-shots/`.
+
 ## What "implemented" means here
 
 `libx11.c` draws into a client-side shadow and blits the dirty bbox into the
 framebuffer on `XFlush`/`XSync`, exactly like `src/user/x11`. It does **not**
-call `SYS_FLUSH_FB`: a compat client cannot issue HobbyOS syscalls, and it
-does not need to — the desktop's frame loop owns presentation, and
-`ESC ] F ~` tells it the app painted (which also re-stamps the pointer).
+call `SYS_FLUSH_FB`: a compat client cannot issue HobbyOS syscalls. Instead the
+flush message names the dirty content rectangle —
 
-`EXPORTS.md` is the authority on what is real. 45 of the 129 required
-symbols do real work, 5 are partial with a stated gap, 79 return a constant
+    ESC ] F <x>;<y>;<w>;<h> ~
+
+— and the desktop pushes exactly that rectangle to the display in its
+post-frame service (a bare `ESC ] F ~`, which native apps send because they
+present themselves, keeps the old "re-stamp the pointer only" meaning). The
+same message re-stamps the pointer over the app's pixels.
+
+Measured (M3 gate): without the rectangle in the message the client's pixels
+reach the shared framebuffer but never reach the scanout — the guest's
+framebuffer read back green/blue while a QEMU screendump showed the desktop's
+window body. Native pixel apps hid this because they call `SYS_FLUSH_FB`
+themselves.
+
+The display object is also ABI-shaped: `XOpenDisplay` returns a display whose
+first 296 bytes are Xlib's public `_XPrivDisplay` prefix and whose `screens`
+points at a real-layout `Screen`. That is not cosmetic — `DefaultScreen`,
+`RootWindow`, `DisplayWidth`, `BlackPixel` and friends are *macros* in
+`<X11/Xlib.h>` that dereference the pointer, so a client compiled against the
+real headers faults at VA 0x10 if the object is private (measured).
+
+`EXPORTS.md` is the authority on what is real. 46 of the 129 required
+symbols do real work, 6 are partial with a stated gap, 77 return a constant
 that is listed per symbol. No symbol is claimed implemented because it has a
 plausible body.
 
