@@ -400,6 +400,11 @@ and a 4-thread C# GC loop completes. Evidence: serial log of all three.
 - [ ] `libGLX.so.0`/`libGL.so.1` frontend contract (surface creation, swap,
       `glXGetProcAddress`), initially returning a 3.3 core context backed by
       Mesa's `st`/`softpipe`.
+- [ ] Stage `obj/xcompat/*.so*` onto the game's search path (`/LIB64` or the
+      NFS tree) and hang `xcompat_dsos` off the disk recipe. Both DSOs already
+      build (62 KB `libX11.so.6` with SONAME and **no `DT_NEEDED`**, 243
+      exports, `xcompat_exports_check`: "exports all 129 required symbols") —
+      what is missing is only the staging step.
 
 **Gate M3:** a host-built real-Xlib client (a 20-line program linked against
 Ubuntu's `libX11`) opens a window, draws, and exits 0 under compat; the window
