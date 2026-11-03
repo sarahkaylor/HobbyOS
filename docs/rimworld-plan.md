@@ -571,6 +571,9 @@ LC_ALL=C comm -23 /tmp/rw-syms.txt /tmp/hobbyos-libc.txt | wc -l   # 332
 objdump -T UnityPlayer.so | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1  # 2.15
 
 # host behaviour / fps
+# NB (measured pitfall): scope LD_LIBRARY_PATH to the game process (`env
+# LD_LIBRARY_PATH=... ./RimWorldLinux`); exporting it into the shell also
+# poisons Xvfb/import/cut in that shell with the pinned libc.
 LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe LP_NUM_THREADS=8 \
   GALLIUM_HUD=fps GALLIUM_HUD_DUMP_DIR=/tmp/hud ./RimWorldLinux \
   -screen-width 1280 -screen-height 720 -screen-fullscreen 0
