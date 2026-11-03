@@ -97,6 +97,22 @@ and no fight over the framebuffer. The rules, all measured here:
   `/dev/fb0` and reads its geometry; a program that fills the screen on open
   would wipe the desktop's chrome.
 
+## Native pixel apps still work (regression on the same desktop build)
+
+`M3_APP=XCALC.BIN python3 tools/gate/m3_x11_client.py` launches the native
+calculator through the same menu path and grades its `[APP] XCALC started`
+marker plus the screendump: **PASS** (keypad drawn, window present). The
+desktop host tests that own this protocol also pass:
+`desktop_pixel_test_host` (74 checks), `desktop_term_test_host` (34),
+`desktop_input_test_host` (93), `window_damage_test_host` (40).
+
+Note for the integrator: `run_xcalc_test.py` (the mouse-driven harness) fails
+on this host at *launch* — its QMP/PS-2 click on the Apps menu never produces
+`[LAUNCH]`, and the desktop sits idle afterwards. That is the harness's mouse
+path, not this change: the same desktop + disk launches XCALC fine through the
+keyboard path above, and no fault appears in the serial log. The M3 gate uses
+key events for exactly this reason.
+
 ## Remaining gaps (not M3 blockers)
 
 - No key-up on the wire: the shim synthesises `KeyRelease` on the next
