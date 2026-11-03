@@ -400,6 +400,7 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
     if (nf > 0 && child->open_fds[nf] != -1) {
       child->open_fds[0] = child->open_fds[nf];
       child->open_fds[nf] = -1;
+      child->num_open_fds++;
     }
   }
 
@@ -1042,7 +1043,23 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
         gb095_n++;
       }
     }
+
   }
+
+    /* Every v2 child gets a real stdin.  Mono's System.Console ctor opens fd 0
+     * through FileStream(handle), which fstat()s it and throws
+     * ArgumentException "handle: Invalid" when the slot is unassigned — the
+     * whole managed program then dies in Console..cctor before its first
+     * statement (measured: mono 6.12 on HELLO.EXE).  /dev/null reads EOF
+     * forever, which is exactly `< /dev/null` on Linux. */
+    if (child->open_fds[0] == -1) {
+      int nf = file_open(child, "/dev/null", 0);
+      if (nf > 0 && child->open_fds[nf] != -1) {
+        child->open_fds[0] = child->open_fds[nf];
+        child->open_fds[nf] = -1;
+        child->num_open_fds++;
+      }
+    }
 
   struct file f;
   uint8_t *vfs_img = 0;
