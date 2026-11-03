@@ -307,6 +307,10 @@ static void forward_payload_to_window(int win_id, const char *seq, int n) {
 /* Forward one key press to the focused window and arm auto-repeat (a fresh
  * press always re-arms; a non-repeatable key disarms a previous one). */
 static void forward_key_to_focused(int code, int now_ms) {
+  /* GB-173: a Linux-ABI game (static-musl DOOM) draws straight into /dev/fb0
+     and owns no desktop window, so window-shaped forwarding cannot reach it.
+     Hand the key to whoever claimed /dev/input/event0; -ENODEV is normal. */
+  evdev_push(code, 1);
   if (focused_window < 0) return;
   char seq[8];
   int n = key_payload(code, seq);

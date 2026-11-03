@@ -253,6 +253,14 @@ struct process {
 
   int num_open_fds; /**< Number of currently open file descriptors */
 
+  /** GB-173: keys the desktop forwarded to this process because it owns
+   *  /dev/input/event0.  A 64-slot single-producer ring; /dev/input/event0's
+   *  read() drains it before the global virtio-input ring (which the desktop
+   *  has usually already emptied for its own hotkeys). */
+  struct { unsigned short code; int value; } evdev_q[64];
+  int evdev_qhead; /**< next slot to write (producer: the desktop's syscall) */
+  int evdev_qtail; /**< next slot to read (consumer: the owner's read()) */
+
   uint64_t wake_ms; /**< Timestamp in ms when this process should wake up */
 
   /** Phase 4 (memory): current heap break (USER_VIRT_BASE + 0x100000 at
