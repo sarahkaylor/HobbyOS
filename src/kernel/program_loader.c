@@ -890,35 +890,57 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   }
 
   struct file f;
-  if (fat16_open(filename, &f) != 0) {
+  uint8_t *vfs_img = 0;
+  uint32_t vfs_len = 0, vfs_pages = 0;
+  /* M5: an image under an NFS mount comes through the VFS, not fat16_open().
+   * fs_read_image() answers 1 for an NFS-routed path (whole image in kernel
+   * memory), 0 for a FAT16 path (legacy cluster loader below, unchanged) and
+   * < 0 for a real read failure. */
+  int vfs_rc = fs_read_image(filename, &vfs_img, &vfs_len, &vfs_pages);
+  if (vfs_rc < 0) {
     uart_puts("Failed to open file: ");
     uart_puts(filename);
     uart_puts("\n");
     process_free(pid);
     return -ENOENT;
   }
-  uint32_t fsize = f.fat16.entry.file_size;
-  if (fsize == 0) {
-    /* D4.4: a missing image surfaces as a zero-size entry (fat16_open
-       creates on miss), and an empty image can never be executed -- the
-       documented -ENOENT.  The spawn2 wrapper below folds it back to -1. */
-    fat16_close(&f);
-    process_free(pid);
-    return -ENOENT;
-  }
-  /* GB-013 (ELF loader, docs/elf-loader.md §2): dispatch on the first four
-     bytes.  0x7fELF -> the ELF mapper (x86_64 only; ARM never loads ELF);
-     anything else -> the existing flat .bin loader, unchanged.  Peek the
-     magic 4 bytes into a tiny scratch and branch. */
+
+  uint32_t fsize = 0;
   int is_elf = 0;
-  {
-    uint64_t magicw = 0;
-    /* dest is a physical address integer; &magicw is a stack VA == phys
-       (kernel direct map), so the read lands in the local. */
-    if (fat16_read_direct_pos(f.fat16.entry.start_cluster, fsize,
-                              (uint64_t)&magicw, 4, 0) == 4) {
-      uint8_t *mb = (uint8_t *)&magicw; /* little-endian: bytes 0..3 = magic */
-      is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
+  if (vfs_rc == 1) {
+    fsize = vfs_len;
+    is_elf = (fsize >= 4 && vfs_img[0] == 0x7f && vfs_img[1] == 'E' &&
+              vfs_img[2] == 'L' && vfs_img[3] == 'F');
+  } else {
+    if (fat16_open(filename, &f) != 0) {
+      uart_puts("Failed to open file: ");
+      uart_puts(filename);
+      uart_puts("\n");
+      process_free(pid);
+      return -ENOENT;
+    }
+    fsize = f.fat16.entry.file_size;
+    if (fsize == 0) {
+      /* D4.4: a missing image surfaces as a zero-size entry (fat16_open
+         creates on miss), and an empty image can never be executed -- the
+         documented -ENOENT.  The spawn2 wrapper below folds it back to -1. */
+      fat16_close(&f);
+      process_free(pid);
+      return -ENOENT;
+    }
+    /* GB-013 (ELF loader, docs/elf-loader.md §2): dispatch on the first four
+       bytes.  0x7fELF -> the ELF mapper (x86_64 only; ARM never loads ELF);
+       anything else -> the existing flat .bin loader, unchanged.  Peek the
+       magic 4 bytes into a tiny scratch and branch. */
+    {
+      uint64_t magicw = 0;
+      /* dest is a physical address integer; &magicw is a stack VA == phys
+         (kernel direct map), so the read lands in the local. */
+      if (fat16_read_direct_pos(f.fat16.entry.start_cluster, fsize,
+                                (uint64_t)&magicw, 4, 0) == 4) {
+        uint8_t *mb = (uint8_t *)&magicw; /* little-endian: bytes 0..3 = magic */
+        is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
+      }
     }
   }
   uint64_t elf_entry = 0;
@@ -936,15 +958,26 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        message.  aarch64 has no compat track, so every ELF there is native. */
     uint32_t lflags = 0;
 #if defined(__x86_64__)
-    if (elf_loader_probe_native(f.fat16.entry.start_cluster, fsize) == 1)
+    int native = (vfs_rc == 1)
+                     ? elf_loader_probe_native_buf(vfs_img, fsize)
+                     : elf_loader_probe_native(f.fat16.entry.start_cluster, fsize);
+    if (native == 1)
       lflags = ELF_LOAD_NATIVE;
 #else
     lflags = ELF_LOAD_NATIVE;
 #endif
     struct elf_load_info elf_info;
-    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, lflags,
-                              &elf_info);
-    fat16_close(&f);
+    int erc = (vfs_rc == 1)
+                  ? elf_loader_load_image(as, vfs_img, fsize, lflags, &elf_info)
+                  : elf_loader_load(as, f.fat16.entry.start_cluster, fsize,
+                                    lflags, &elf_info);
+    if (vfs_rc == 1) {
+      for (uint32_t i = 0; i < vfs_pages; i++)
+        frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
+      vfs_img = 0;
+    } else {
+      fat16_close(&f);
+    }
     if (erc != 0) {
       process_free(pid);
       return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC / -ENOENT */
@@ -969,6 +1002,14 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       kl_c(&k, '\n');
       kl_emit(&k);
     }
+  } else if (vfs_rc == 1) {
+    /* A flat .bin is mapped lazily by (start_cluster, size) identity, which
+     * only FAT16 has.  Say so instead of trying an uninitialised struct file. */
+    uart_puts("v2 loader: flat .bin images are FAT16-only (use an ELF on NFS)\n");
+    for (uint32_t i = 0; i < vfs_pages; i++)
+      frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
+    process_free(pid);
+    return -ENOEXEC;
   } else if (v2_map_image(as, &f, fsize) != 0) {
     fat16_close(&f);
     process_free(pid);
