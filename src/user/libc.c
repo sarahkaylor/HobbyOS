@@ -564,8 +564,8 @@ int setsockopt(int fd, int level, int optname, const void *val, unsigned int len
                                  (long)optname, (long)val, (long)len));
 }
 
-int getrandom(void *buf, size_t len, unsigned int flags) {
-  return (int)errno_ret(ho_syscall4(SYS_GETRANDOM, (long)buf, (long)len, (long)flags, 0));
+ssize_t getrandom(void *buf, size_t len, unsigned int flags) {
+  return (ssize_t)errno_ret(ho_syscall4(SYS_GETRANDOM, (long)buf, (long)len, (long)flags, 0));
 }
 
 /* P4 (docs/browser/p4-ipc-design.md §6.3): the AF_UNIX IPC surface —

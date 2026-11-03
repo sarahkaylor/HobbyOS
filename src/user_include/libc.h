@@ -322,7 +322,7 @@ extern "C" {
                  unsigned int *len);
   int setsockopt(int fd, int level, int optname, const void *val,
                  unsigned int len);
-  int getrandom(void *buf, size_t len, unsigned int flags);
+  ssize_t getrandom(void *buf, size_t len, unsigned int flags);
 
   /* select() over the frozen syscall: masks are FD_SETSIZE (256) wide —
    * eight 32-bit words.  timeout_ms < 0 waits forever, 0 polls.  Returns the
