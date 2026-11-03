@@ -20,6 +20,38 @@ $ make doom_elf_test_gen      # doomgeneric, stock backend, depth 24
 [DOOMELF] PASS: Doom ELF ran under X and produced a frame
 ```
 
+## Running it from the desktop (make run -> Games -> Doom)
+
+The desktop screen (`:0.0`) is 24-bit TrueColor, and linuxdoom-1.10 needs a
+depth-8 PseudoColor screen.  A window cannot supply that: X requires a window's
+depth to equal its parent's, so an 8-bit window under a 24-bit root is a
+`BadMatch`, not a DDX limitation.  XFree86 solved the same problem with a second
+*screen*, and so does this port:
+
+| screen | depth | what runs there |
+|---|---|---|
+| `:0.0` | 24 TrueColor | XSESSION + IceWM + the 24-bit apps (unchanged) |
+| `:0.1` | 8 PseudoColor | attended only while an 8-bit client has a mapped window |
+
+`XHOBBY.BIN` creates `:0.1` whenever `:0.0` is 24-bit; the screen that owns the
+framebuffer is polled from the server's block handler, so while the game's window
+is up the 24-bit screen's shadow updates are dropped, and when it goes away the
+desktop's shadow is presented in full again (measured: `present -> screen 0`,
+pointer back at 960,540).  The game is handed the pointer (a warp *plus* a real
+motion event — the warp alone does not update the sprite's window) and a keyboard
+grab, because with a WM on `:0.0` focus can never stay on `:0.1`.
+
+The Games submenu carries two rows:
+
+```
+prog "Doom (Linux ELF)" app /DOOML.BIN            <- id's linuxdoom-1.10, :0.1
+prog "DOOM"             app HBHOST.BIN DOOM.BIN   <- native doomgeneric port, :0.0
+```
+
+`/DOOML.BIN` sets `DISPLAY=:0.1` (via `spawn_ex`, because `setenv`+`spawn` does
+not carry the environment blob to the child) and hands over to `/DOOM.ELF`.
+F10 quits back to the desktop.
+
 ## What the screenshots show
 
 | file | binary | what |
@@ -32,6 +64,10 @@ $ make doom_elf_test_gen      # doomgeneric, stock backend, depth 24
 | `doom10-e1m1-outdoors-firing.png` | linuxdoom-1.10 | **driven by input**: two 900 ms forward holds walked the player out of the start room — shotgun mid-fire, muzzle flash, AMMO 48 |
 | `doom10-e1m1-corridor.png` | linuxdoom-1.10 | deeper in E1M1 (`-skill 3`), rusted corridor |
 | `doom10-e1m1-desktop-context.png` | linuxdoom-1.10 | the whole 1920×1080 framebuffer: a 320×200 client window at (0,0), no WM |
+| `desktop-doom-elf-960x600.png` | linuxdoom-1.10 | **launched from the desktop**: `/DOOML.BIN` -> `:0.1`, Doom's title on the 24-bit machine |
+| `desktop-doom-elf-fullscreen.png` | linuxdoom-1.10 | the same frame in the 1920x1080 framebuffer (0.0309 = a 320x200 window) |
+| `desktop-back-after-quit.png` | — | F10 in the game returns the IceWM desktop, taskbar and clock intact |
+| `desktop-native-doom.png` | native `DOOM.BIN` | the *native* port's row in the same menu, in an IceWM window via HBHOST |
 | `doomgen-e1m1-640x400.png` | doomgeneric | E1M1 gameplay: corridor, HUD (`AMMO 34 / HEALTH 82 % / ARMOR 94 %`), Doomguy face, `YOU GOT THE SHOTGUN!` |
 | `doomgen-e1m1-fullscreen.png` | doomgeneric | the same frame in the full framebuffer |
 
