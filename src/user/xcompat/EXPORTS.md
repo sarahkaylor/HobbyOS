@@ -300,7 +300,7 @@ lane can decide whether to extend the protocol (they are candidates for a
 | **no window move/resize** | `XMoveWindow`/`XResizeWindow` are no-ops; the desktop's reflow owns geometry | windowed mode works, Unity's own resize requests are ignored |
 | **no cursor object** | `XCreateFontCursor` returns an id; the desktop paints the pointer | cosmetic |
 | **no property store** | `XChangeProperty` accepted and dropped; only WM hints round-trip | `_NET_WM_*` queries by the engine |
-| **no pixmaps/fonts** | ids are handed out; `XDrawString` draws a box, not glyphs | nothing on the GL path |
+| **no pixmaps/fonts** | ids are handed out; `XDrawString` renders the vendored 8x8 ASCII font (no server fonts, no `XLoadQueryFont` metrics) | nothing on the GL path |
 | **no XCB / SHM / XShape / XKB / XI2** | `XGetXCBConnection` and friends answer "absent" | GLX (L5) must not need XCB |
 | **no selection/clipboard** | `XConvertSelection` is a no-op | copy/paste is dead |
 
@@ -360,7 +360,7 @@ run on a tree with no game present.
 | `XDisplayName` | STUB | returns `(char *)":0"` |
 | `XDisplayString` | STUB | returns `(char *)":0"` |
 | `XDrawRectangle` | IMPL |  |
-| `XDrawString` | PARTIAL | fills the text box with the GC background and draws the baseline: correct geometry, no glyphs (no font machinery under compat) |
+| `XDrawString` | IMPL | the 8x8 ASCII font the native Xlib uses (`font8x8.h`, vendored from `src/user_include/graphics/font.h`): `y` is the baseline, advance 8 px, GXxor honoured through `put_px`. M3 gate renders legible text. |
 | `XESetEventToWire` | STUB | returns `0` |
 | `XESetWireToEvent` | STUB | returns `0` |
 | `XEventsQueued` | IMPL |  |
@@ -504,7 +504,7 @@ run on a tree with no game present.
 | `XDisplayHeightMM` | STUB | returns `DisplayHeightMM(d, scr)` |
 | `XDisplayWidth` | STUB | returns `DisplayWidth(d, scr)` |
 | `XDisplayWidthMM` | STUB | returns `DisplayWidthMM(d, scr)` |
-| `XDrawImageString` | STUB | returns `XDrawString(d, dr, gc, x, y, s, len)` |
+| `XDrawImageString` | PARTIAL | returns `XDrawString(d, dr, gc, x, y, s, len)`: glyphs are drawn, but the background is not filled first (X11's ImageString semantics) |
 | `XDrawLine` | IMPL |  |
 | `XDrawPoint` | IMPL |  |
 | `XESetCloseDisplay` | STUB | returns `0` |
@@ -568,7 +568,7 @@ run on a tree with no game present.
 | `XShmQueryVersion` | STUB | returns `False` |
 | `XStoreColor` | STUB | returns `0` |
 | `XTextPropertyToStringList` | STUB | returns `0` |
-| `XTextWidth` | STUB | returns `n * 6` |
+| `XTextWidth` | STUB | returns `n * 8` (the cell `XDrawString` advances) |
 | `XUnmapSubwindows` | STUB | returns `0` |
 | `XUnmapWindow` | PARTIAL | the protocol cannot retract a pixel window: the surface stays up and stops receiving events |
 | `XVendorRelease` | STUB | returns `1` |

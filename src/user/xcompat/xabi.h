@@ -882,6 +882,122 @@ typedef struct {
   int scanline_pad;
 } XPixmapFormatValues;
 
+/* ---- the Screen a client's macros dereference ------------------------
+ * `Screen` in <X11/Xlib.h> is an anonymous struct with exactly this layout
+ * (root at 0x10, width at 0x18, root_visual at 0x40, white_pixel at 0x58;
+ * sizeof 128 on x86-64).  Clients reach it through ScreenOfDisplay(), and
+ * every pixel/dimension macro in Xlib.h reads it. */
+typedef struct _XScreen {
+  void *ext_data;                 /*   0  XExtData *          */
+  Display *display;               /*   8  back pointer        */
+  Window root;                    /*  16                      */
+  int width, height;              /*  24, 28                  */
+  int mwidth, mheight;            /*  32, 36  millimetres     */
+  int ndepths;                    /*  40                      */
+  void *depths;                   /*  48  Depth * (opaque)    */
+  int root_depth;                 /*  56                      */
+  Visual *root_visual;            /*  64                      */
+  GC default_gc;                  /*  72                      */
+  Colormap cmap;                  /*  80                      */
+  unsigned long white_pixel;      /*  88                      */
+  unsigned long black_pixel;      /*  96                      */
+  int max_maps, min_maps;         /* 104, 108                 */
+  int backing_store;              /* 112                      */
+  Bool save_unders;               /* 116                      */
+  long root_input_mask;           /* 120                      */
+} Screen;
+
+/* ---- the Display / Screen objects a CLIENT's macros walk --------------
+ *
+ * Xlib's own headers make a client read the display object directly:
+ *
+ *     #define DefaultScreen(dpy)  (((_XPrivDisplay)(dpy))->default_screen)
+ *     #define ScreenOfDisplay(dpy,scr) (&((dpy)->screens[scr]))
+ *     #define RootWindow(dpy,scr)  (ScreenOfDisplay(dpy,scr)->root)
+ *     #define DisplayWidth(dpy,scr)(ScreenOfDisplay(dpy,scr)->width)
+ *     #define BlackPixel(dpy,scr)  (ScreenOfDisplay(dpy,scr)->black_pixel)
+ *
+ * so a compat libX11 cannot hand back a private struct: the object it returns
+ * from XOpenDisplay must START with the real `_XPrivDisplay` layout, and its
+ * `screens` pointer must address a real `Screen` array.  Measured on the M3
+ * gate: a client compiled against the real headers faulted at VA=0x10 in
+ * `DefaultScreen(dpy)+screens` before it ever made a call, because our
+ * display had no such fields.
+ *
+ * `x_abi_display_prefix` is the public prefix of Xlib's Display (everything
+ * up to `xdefaults`; Xlib's own comment says "there is more to this structure,
+ * but it is private to Xlib").  The DSO embeds it as the first member of its
+ * display and hangs its private state off the end.  Offsets are pinned by
+ * `_Static_assert` below and by the host ABI differential
+ * (src/host/xcompat_abi_probe.h).
+ *
+ * Fields below `screens` are opaque pointers (`Depth *`, `ScreenFormat *`,
+ * `struct _XPrivate *`, `XrmHashBucketRec *`): a client never dereferences
+ * them through these offsets, only stores the pointers. */
+typedef struct {
+  void *ext_data;                 /*   0  XExtData *           */
+  void *private1;                 /*   8  struct _XPrivate *   */
+  int fd;                         /*  16  network socket       */
+  int private2;                   /*  20                       */
+  int proto_major_version;        /*  24                       */
+  int proto_minor_version;        /*  28                       */
+  char *vendor;                   /*  32                       */
+  XID private3;                   /*  40                       */
+  XID private4;                   /*  48                       */
+  XID private5;                   /*  56                       */
+  int private6;                   /*  64                       */
+  void *resource_alloc;           /*  72  XID (*)(Display*)    */
+  int byte_order;                 /*  80                       */
+  int bitmap_unit;                /*  84                       */
+  int bitmap_pad;                 /*  88                       */
+  int bitmap_bit_order;           /*  92                       */
+  int nformats;                   /*  96                       */
+  void *pixmap_format;            /* 104  ScreenFormat *       */
+  int private8;                   /* 112                       */
+  int release;                    /* 116                       */
+  void *private9;                 /* 120                       */
+  void *private10;                /* 128                       */
+  int qlen;                       /* 136                       */
+  unsigned long last_request_read;/* 144                       */
+  unsigned long request;          /* 152                       */
+  void *private11;                /* 160                       */
+  void *private12;                /* 168                       */
+  void *private13;                /* 176                       */
+  void *private14;                /* 184                       */
+  unsigned max_request_size;      /* 192                       */
+  void *db;                       /* 200  XrmHashBucketRec *   */
+  void *private15;                /* 208                       */
+  char *display_name;             /* 216                       */
+  int default_screen;             /* 224  0xe0                  */
+  int nscreens;                   /* 228  0xe4                  */
+  Screen *screens;                /* 232  0xe8                  */
+  unsigned long motion_buffer;    /* 240                       */
+  unsigned long private16;        /* 248                       */
+  int min_keycode;                /* 256                       */
+  int max_keycode;                /* 260                       */
+  void *private17;                /* 264                       */
+  void *private18;                /* 272                       */
+  int private19;                  /* 280                       */
+  char *xdefaults;                /* 288                       */
+} x_abi_display_prefix;           /* sizeof 296 */
+
+_Static_assert(sizeof(x_abi_display_prefix) == 296, "Display prefix size");
+_Static_assert(offsetof(x_abi_display_prefix, fd) == 0x10, "Display.fd");
+_Static_assert(offsetof(x_abi_display_prefix, vendor) == 0x20, "Display.vendor");
+_Static_assert(offsetof(x_abi_display_prefix, release) == 0x74, "Display.release");
+_Static_assert(offsetof(x_abi_display_prefix, display_name) == 0xd8,
+               "Display.display_name");
+_Static_assert(offsetof(x_abi_display_prefix, default_screen) == 0xe0,
+               "Display.default_screen");
+_Static_assert(offsetof(x_abi_display_prefix, screens) == 0xe8, "Display.screens");
+_Static_assert(sizeof(Screen) == 128, "Screen size");
+_Static_assert(offsetof(Screen, root) == 0x10, "Screen.root");
+_Static_assert(offsetof(Screen, width) == 0x18, "Screen.width");
+_Static_assert(offsetof(Screen, root_visual) == 0x40, "Screen.root_visual");
+_Static_assert(offsetof(Screen, default_gc) == 0x48, "Screen.default_gc");
+_Static_assert(offsetof(Screen, white_pixel) == 0x58, "Screen.white_pixel");
+_Static_assert(offsetof(Screen, black_pixel) == 0x60, "Screen.black_pixel");
+
 typedef struct {
   int screen;
   int depth;

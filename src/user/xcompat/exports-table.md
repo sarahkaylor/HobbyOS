@@ -31,7 +31,7 @@
 | `XDisplayName` | STUB | returns `(char *)":0"` |
 | `XDisplayString` | STUB | returns `(char *)":0"` |
 | `XDrawRectangle` | IMPL |  |
-| `XDrawString` | PARTIAL | fills the text box with the GC background and draws the baseline: correct geometry, no glyphs (no font machinery under compat) |
+| `XDrawString` | IMPL | the 8x8 ASCII font the native Xlib uses (`font8x8.h`, vendored from `src/user_include/graphics/font.h`): `y` is the baseline, advance 8 px, GXxor honoured through `put_px`. M3 gate renders legible text. |
 | `XESetEventToWire` | STUB | returns `0` |
 | `XESetWireToEvent` | STUB | returns `0` |
 | `XEventsQueued` | IMPL |  |
@@ -175,7 +175,7 @@
 | `XDisplayHeightMM` | STUB | returns `DisplayHeightMM(d, scr)` |
 | `XDisplayWidth` | STUB | returns `DisplayWidth(d, scr)` |
 | `XDisplayWidthMM` | STUB | returns `DisplayWidthMM(d, scr)` |
-| `XDrawImageString` | STUB | returns `XDrawString(d, dr, gc, x, y, s, len)` |
+| `XDrawImageString` | PARTIAL | returns `XDrawString(d, dr, gc, x, y, s, len)`: glyphs are drawn, but the background is not filled first (X11's ImageString semantics) |
 | `XDrawLine` | IMPL |  |
 | `XDrawPoint` | IMPL |  |
 | `XESetCloseDisplay` | STUB | returns `0` |
@@ -239,7 +239,7 @@
 | `XShmQueryVersion` | STUB | returns `False` |
 | `XStoreColor` | STUB | returns `0` |
 | `XTextPropertyToStringList` | STUB | returns `0` |
-| `XTextWidth` | STUB | returns `n * 6` |
+| `XTextWidth` | STUB | returns `n * 8` (the cell `XDrawString` advances) |
 | `XUnmapSubwindows` | STUB | returns `0` |
 | `XUnmapWindow` | PARTIAL | the protocol cannot retract a pixel window: the surface stays up and stops receiving events |
 | `XVendorRelease` | STUB | returns `1` |
