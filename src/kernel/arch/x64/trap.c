@@ -2425,18 +2425,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         }
         case 24:  tf->regs[0] = 0; return;   /* sched_yield(): voluntary no-op */
         case 273: tf->regs[0] = 0; return;   /* set_robust_list(): accepted, unused */
-        case 204: {                          /* sched_getaffinity(pid,len,mask) */
-          int len = (int)tf->regs[4];
-          uint64_t mask = tf->regs[3];
-          int n = len < 8 ? len : 8;
-          if (n > 0 && sys_user_range(mask, (uint64_t)n, 1) == 0) {
-            for (int i = 0; i < n; i++) ((volatile unsigned char *)mask)[i] = 0xFF;
-            tf->regs[0] = (uint64_t)n;
-          } else {
-            tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
-          }
-          return;
-        }
+        /* sched_getaffinity(204) / sched_setaffinity(203) used to live here as
+           a raw 8-byte 0xFF fill.  They are TABLE rows now (l_tab_proc): the
+           table version implements the 128-byte cpu_set_t shape, zeroes the
+           caller's buffer, returns the byte count Linux returns, and answers
+           setaffinity too.  Keeping a second copy here would let the two
+           disagree. */
         /* GB-141 (V evidence): musl's _Exit calls exit_group(231), not exit(60)
            when the program has a thread/group — the compat table had NO 231, so it
            fell to the default -ENOSYS and the probe "died inside _Exit" (GB-113

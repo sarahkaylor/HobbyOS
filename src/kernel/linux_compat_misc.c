@@ -239,7 +239,35 @@ static int l_misc_unlinkat(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, -EINVAL);
 }
 
-const struct l_sysent l_tab_misc[] = { {L_SYS_lseek, l_misc_lseek, "lseek"}, {L_SYS_readv, l_misc_readv, "readv"}, {L_SYS_pread64, l_misc_pread64, "pread64"}, {L_SYS_pwrite64, l_misc_pwrite64, "pwrite64"}, {L_SYS_unlink, l_misc_unlink, "unlink"}, {L_SYS_unlinkat, l_misc_unlinkat, "unlinkat"}, {L_SYS_rename, l_misc_rename, "rename"}, {L_SYS_rmdir, l_misc_rmdir, "rmdir"}, {L_SYS_chdir, l_misc_chdir, "chdir"}, {L_SYS_getcwd, l_misc_getcwd, "getcwd"}, {L_SYS_fsync, l_misc_fsync, "fsync"},
+/* ---- deliberate refusals ------------------------------------------------ */
+
+/* membarrier(2) and rseq(2) are the two memory-model syscalls a modern glibc
+ * probes for and a 2.31 pin does not require.  Both are answered -ENOSYS ON
+ * PURPOSE, because that is the protocol each caller implements a fallback for:
+ *
+ *  - membarrier: glibc's malloc() uses MEMBARRIER_CMD_PRIVATE_EXPEDITED and
+ *    falls back to its pre-membarrier algorithm when the kernel says ENOSYS.
+ *    HobbyOS has no cross-CPU instruction/TLB sync primitive to translate it
+ *    onto, and returning 0 without doing the work would silently weaken the
+ *    allocator's write barrier.
+ *  - rseq: glibc >= 2.35 registers a restartable sequence per thread and
+ *    disables the optimisation on ENOSYS (2.31, the pinned runtime, never asks).
+ *    There is no per-thread rseq state in this kernel.
+ *
+ * Both are table rows rather than "falls through to the default" so the
+ * behaviour is explicit and the numbers are named in the golden. */
+static int l_misc_membarrier(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  return l_misc_ret(tf, -ENOSYS);
+}
+
+static int l_misc_rseq(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  return l_misc_ret(tf, -ENOSYS);
+}
+
+const struct l_sysent l_tab_misc[] = { {L_SYS_lseek, l_misc_lseek, "lseek"}, {L_SYS_readv, l_misc_readv, "readv"}, {L_SYS_pread64, l_misc_pread64, "pread64"}, {L_SYS_pwrite64, l_misc_pwrite64, "pwrite64"}, {L_SYS_unlink, l_misc_unlink, "unlink"}, {L_SYS_unlinkat, l_misc_unlinkat, "unlinkat"}, {L_SYS_rename, l_misc_rename, "rename"}, {L_SYS_rmdir, l_misc_rmdir, "rmdir"}, {L_SYS_chdir, l_misc_chdir, "chdir"}, {L_SYS_getcwd, l_misc_getcwd, "getcwd"}, {L_SYS_fsync, l_misc_fsync, "fsync"}, {L_SYS_membarrier, l_misc_membarrier, "membarrier"}, {L_SYS_rseq, l_misc_rseq, "rseq"},
   L_SYSENT_END
 };
 
