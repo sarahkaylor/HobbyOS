@@ -1,0 +1,47 @@
+# Programs converted to dynamic linking (docs/shared-libs.md §10).
+# One object base name per line; tools/dyn-migrate.sh --list reads this.
+# Add a program here only after it boots clean in MODE=dyn_test on both arches.
+cat
+cp
+ls
+wc
+head
+tail
+sort
+uniq
+free
+ps
+uptime
+kill
+mkdir
+mv
+rm
+touch
+cut_gnu
+head_gnu
+tail_gnu
+monitor
+less
+tar
+ping
+nc
+ifconfig
+hello
+sh=sh,sh_aux
+basename
+cksum=cksum_gnu
+cmp=cmp_gnu
+comm=comm_gnu
+cxx_smoke
+dirname
+expand=expand_gnu
+expr
+fold=fold_gnu
+md5sum=md5sum_gnu
+nl=nl_gnu
+paste=paste_gnu
+seq
+tac=tac_gnu
+tr=tr_gnu
+tsort=tsort_gnu
+unexpand=unexpand_gnu

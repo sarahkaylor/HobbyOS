@@ -7,11 +7,51 @@
 #include "nfs.h"
 #include "vfs.h"
 #include "errno.h"
+#include "file_obj.h" /* so-vm lane A (CROSS-LANE): page-cache invalidation */
 #include "timer.h"
 #include "vm.h" /* P2.4 (S4): memfd objects */
+#include "input_node.h"   /* GB-171: evdev record fill for /dev/input/event0 */
+#include "virtio_input.h" /* GB-171: the key ring that node drains */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
+
+/* GB-173: the process that owns the evdev key channel.  A static-musl game
+   draws straight into /dev/fb0 and has no desktop window, so "focused window"
+   cannot route its keys; whoever opened /dev/input/event0 last is the owner
+   and receives what the desktop handles.  Cleared when the process exits (the
+   queue dies with the struct, so a stale pointer would be fatal). */
+static struct process *evdev_owner;
+static int evdev_owner_pid = -1;
+
+int hb_evdev_push(unsigned short code, int value) {
+  struct process *p = evdev_owner;
+  if (!p) return -ENODEV;
+  /* GB-173 hardening: the pointer is only valid while the same pid owns it.
+     A recycled process slot would otherwise receive (and overwrite) a queue
+     that belongs to someone else. */
+  if (p->pid != evdev_owner_pid || p->pid <= 0) {
+    evdev_owner = 0;
+    evdev_owner_pid = -1;
+    return -ENODEV;
+  }
+  int next = (p->evdev_qhead + 1) % 64;
+  if (next == p->evdev_qtail) return -EAGAIN; /* full: drop, never block */
+  /* GB-173: nothing is delivered until the owner has polled the node once.
+     The launch ENTER is otherwise the engine's first key, mid-initialisation. */
+  if (!p->evdev_read_once) return -EAGAIN;
+  p->evdev_q[p->evdev_qhead].code = code;
+  p->evdev_q[p->evdev_qhead].value = value;
+  p->evdev_qhead = next;
+  return 0;
+}
+
+void hb_evdev_owner_clear(struct process *p) {
+  if (p && evdev_owner == p) {
+    evdev_owner = 0;
+    evdev_owner_pid = -1;
+  }
+}
 
 /* GB-108: fds 0-2 are the process's stdio and must never be handed out by an
  * implicit fd allocation (open/pipe/socket/dup/accept/memfd/msg-install).
@@ -174,12 +214,29 @@ int file_open(struct process *cur, const char *filename, int flags) {
     int isurand = (rest[0] == '/' && rest[1] == 'u' && rest[2] == 'r' &&
                    rest[3] == 'a' && rest[4] == 'n' && rest[5] == 'd' &&
                    rest[6] == 'o' && rest[7] == 'm' && rest[8] == '\0');
+    /* GB-171: /dev/input/event0 — the evdev node a Linux-ABI program polls for
+       keys.  GB-027 delivered the record format and the kernel's own
+       SYS_INPUT_READ; this is the name in the filesystem, nothing more. */
+    int isinput = (rest[0] == '/' && rest[1] == 'i' && rest[2] == 'n' &&
+                   rest[3] == 'p' && rest[4] == 'u' && rest[5] == 't' &&
+                   rest[6] == '/' && rest[7] == 'e' && rest[8] == 'v' &&
+                   rest[9] == 'e' && rest[10] == 'n' && rest[11] == 't' &&
+                   rest[12] == '0' && rest[13] == '\0');
     if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
       f->open_flags = (uint32_t)flags;
     } else if (isurand) {
       f->type = FILE_TYPE_DEVURANDO;
       f->open_flags = (uint32_t)flags;
+    } else if (isinput) {
+      f->type = FILE_TYPE_DEVINPUT;
+      f->open_flags = (uint32_t)flags;
+      /* GB-173: opening the node claims the key channel for this process. */
+      evdev_owner = cur;
+      evdev_owner_pid = cur->pid;
+      cur->evdev_qhead = 0;
+      cur->evdev_qtail = 0;
+      cur->evdev_read_once = 0;
     } else {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
@@ -1654,6 +1711,43 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return 0; /* /dev/null reads always yield EOF (0 bytes) */
+  } else if (f->type == FILE_TYPE_DEVINPUT) {
+    /* GB-171: drain the virtio-input ring into Linux 24-byte `input_event`
+       records.  Non-blocking (0 when idle) — the model SYS_INPUT_READ already
+       uses for the native path, and what a polling client like DOOM's
+       DG_GetKey expects.  A partial trailing record is not returned. */
+    int max = size / (int)sizeof(struct hb_input_event);
+    if (max <= 0) return 0;
+    /* GB-173: the owner is in its input loop — keys may be delivered now. */
+    if (cur == evdev_owner) cur->evdev_read_once = 1;
+    /* GB-173: keys the desktop forwarded to this process come first.  Without
+       this the desktop's own get_events() has already emptied the global ring
+       and the game sees nothing. */
+    if (cur == evdev_owner) {
+      int n = 0;
+      while (n < max && cur->evdev_qtail != cur->evdev_qhead) {
+        unsigned short code = cur->evdev_q[cur->evdev_qtail].code;
+        int value = cur->evdev_q[cur->evdev_qtail].value;
+        cur->evdev_qtail = (cur->evdev_qtail + 1) % 64;
+        extern uint64_t timer_get_ms(void);
+        uint64_t t = timer_get_ms();
+        hb_input_fill_event((struct hb_input_event *)buf + n, 1, code, value,
+                            t / 1000u, (t % 1000u) * 1000u);
+        n++;
+      }
+      if (n > 0) return n * (int)sizeof(struct hb_input_event);
+    }
+    struct virtio_input_event raw[32];
+    int want = max > 32 ? 32 : max;
+    int got = virtio_input_get_events(raw, want);
+    if (got < 0) return -EIO;
+    extern uint64_t timer_get_ms(void);
+    uint64_t t = timer_get_ms();
+    for (int i = 0; i < got; i++)
+      hb_input_fill_event((struct hb_input_event *)buf + i, raw[i].type,
+                          raw[i].code, raw[i].value,
+                          t / 1000u, (t % 1000u) * 1000u);
+    return got * (int)sizeof(struct hb_input_event);
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     if (size <= 0) return 0;
     return net_get_random_bytes(buf, (uint32_t)size); /* never short */
@@ -1835,7 +1929,16 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     return -EINVAL; /* writes to /dev/urandom are not supported (Linux EINVAL) */
   } else if (f->type == FILE_TYPE_FAT16) {
-    return fat16_write(f, buf, size);
+    int wr = fat16_write(f, buf, size);
+    /* so-vm lane A (CROSS-LANE, additive): an in-place write changes the
+       bytes behind (start_cluster, file_size), so the VM_OBJ_FILE page
+       cache must drop its frames — otherwise a rebuilt DSO would keep
+       serving its old text to every mapping.  Over-invalidation only costs
+       a re-read; the object (and any live mapping) stays alive on its own
+       references. */
+    if (wr > 0)
+      file_obj_invalidate_all();
+    return wr;
   } else if (f->type == FILE_TYPE_NFS) {
     return -1;      /* NFS mounts are read-only */
   } else if (f->type == FILE_TYPE_PIPE) {
@@ -1997,6 +2100,32 @@ struct vm_object *file_memfd_obj(struct process *p, int fd) {
   if (!f || !f->memfd.obj)
     return 0;
   return f->memfd.obj;
+}
+
+/* so-vm lane A (CROSS-LANE, additive; flagged in the lane report):
+ * resolve an fd to a REGULAR FAT16 file's on-disk identity so SYS_MMAP can
+ * key the VM_OBJ_FILE page cache by (start_cluster, file_size) — the same
+ * identity the lazy v2 IMAGE loader uses.  Declared in file_obj.h because
+ * fs.h is frozen for this lane.  Returns 0 and fills the out-params (either
+ * may be NULL), -EBADF for an absent fd, -ENOTSUP for every other fd type
+ * (memfd/pipe/socket/NFS/dir), which is what keeps their mmap answers
+ * unchanged. */
+int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
+                     uint32_t *size) {
+  p = process_group(p); /* P1 (D7): the fd table is group state */
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return -EBADF;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return -EBADF;
+  struct file *f = &global_file_table[gfd];
+  if (f->type != FILE_TYPE_FAT16)
+    return -ENOTSUP;
+  if (cluster)
+    *cluster = f->fat16.entry.start_cluster;
+  if (size)
+    *size = f->fat16.entry.file_size;
+  return 0;
 }
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) for memfd (design 4.3, OQ7 minimal set:

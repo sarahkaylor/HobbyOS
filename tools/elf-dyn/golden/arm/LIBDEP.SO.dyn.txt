@@ -1,0 +1,54 @@
+### readelf -h (identity) — LIBDEP.SO
+  Class:                             ELF64
+  Type:                              DYN (Shared object file)
+  Machine:                           AArch64
+  Entry point address:               0x0
+
+### readelf -l (program headers) — LIBDEP.SO
+Program Headers:
+  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
+  PHDR           0x000040 0x0000000000000040 0x0000000000000040 0x0001c0 0x0001c0 R   0x8
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x00033c 0x00033c R   0x10000
+  LOAD           0x000340 0x0000000000010340 0x0000000000010340 0x000018 0x000018 R E 0x10000
+  LOAD           0x000358 0x0000000000020358 0x0000000000020358 0x0000e8 0x000ca8 RW  0x10000
+  LOAD           0x000440 0x0000000000030440 0x0000000000030440 0x000010 0x000010 RW  0x10000
+  DYNAMIC        0x000358 0x0000000000020358 0x0000000000020358 0x0000e0 0x0000e0 RW  0x8
+  GNU_RELRO      0x000358 0x0000000000020358 0x0000000000020358 0x0000e8 0x000ca8 R   0x1
+  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0
+ Section to Segment mapping:
+
+### readelf -d (dynamic section) — LIBDEP.SO
+
+Dynamic section at offset 0x358 contains 14 entries:
+  Tag        Type                         Name/Value
+ 0x000000000000000e (SONAME)             Library soname: [LIBDEP.SO]
+ 0x000000000000001e (FLAGS)              BIND_NOW
+ 0x000000006ffffffb (FLAGS_1)            Flags: NOW
+ 0x0000000000000007 (RELA)               0x308
+ 0x0000000000000008 (RELASZ)             48 (bytes)
+ 0x0000000000000009 (RELAENT)            24 (bytes)
+ 0x000000006ffffff9 (RELACOUNT)          1
+ 0x0000000000000006 (SYMTAB)             0x200
+ 0x000000000000000b (SYMENT)             24 (bytes)
+ 0x0000000000000005 (STRTAB)             0x2d4
+ 0x000000000000000a (STRSZ)              51 (bytes)
+ 0x000000006ffffef5 (GNU_HASH)           0x278
+ 0x0000000000000004 (HASH)               0x2a4
+ 0x0000000000000000 (NULL)               0x0
+
+### readelf -r (relocations) — LIBDEP.SO
+
+Relocation section '.rela.dyn' at offset 0x308 contains 2 entries:
+    Offset             Info             Type               Symbol's Value  Symbol's Name + Addend
+0000000000030448  0000000000000403 R_AARCH64_RELATIVE                        30444
+0000000000020438  0000000200000401 R_AARCH64_GLOB_DAT     0000000000030440 dep_counter + 0
+
+### readelf --dyn-syms (dynamic symbols) — LIBDEP.SO
+
+Symbol table '.dynsym' contains 5 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND 
+     1: 0000000000010340    24 FUNC    GLOBAL DEFAULT    7 dep_bump
+     2: 0000000000030440     4 OBJECT  GLOBAL DEFAULT   11 dep_counter
+     3: 0000000000030448     8 OBJECT  GLOBAL DEFAULT   11 dep_localp
+     4: 0000000000000338     4 OBJECT  GLOBAL DEFAULT    6 dep_msg
