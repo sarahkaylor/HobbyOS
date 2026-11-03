@@ -52,6 +52,12 @@ HobbyOS needs for any Unity/CLR application anyway.
 - The runtime asks for at most **GLIBC_2.15** symbols, so the userspace pin can
   be glibc **2.31** (pre-`rseq`, pre-`clone3`), which is dramatically less
   kernel surface than a modern glibc.
+- **The shipped executable is a stub**: `RimWorldLinux` is `ET_EXEC` at
+  0x200000, 14 KB, whose `main` is `jmp PlayerMain@plt`; `UnityPlayer.so`
+  exports `PlayerMain(int, char**)`. The game is therefore launched by a
+  HobbyOS-built shim (AD-9) instead of teaching the kernel to map a non-PIE
+  binary in the low 8 GiB — that removes an MMU redesign from the critical
+  path.
 - The union of undefined symbols across the game's six DSOs is **648**;
   HobbyOS's `libc.a` already exports **316** of them.
 
@@ -179,8 +185,14 @@ in the tree, and `.gitignore` carries the NFS staging paths.
 
 ### 3.1 What the game is
 
-- `RimWorldLinux`: ELF64, dynamically linked, `interpreter /lib64/ld-linux-x86-64.so.2`,
-  `RUNPATH $ORIGIN`, `NEEDED UnityPlayer.so libm.so.6 libgcc_s.so.1 libpthread.so.0 libc.so.6`.
+- `RimWorldLinux`: **`ET_EXEC`, linked at 0x200000** (entry 0x201000), dynamically
+  linked, `interpreter /lib64/ld-linux-x86-64.so.2`, `RUNPATH $ORIGIN`,
+  `NEEDED UnityPlayer.so libm.so.6 libgcc_s.so.1 libpthread.so.0 libc.so.6`.
+  It is a **stub**: 14,720 B whose only real import is
+  `_Z10PlayerMainiPPc` (`PlayerMain(int, char**)`), and its `main` at 0x2010e0 is
+  literally `jmp PlayerMain@plt`. `UnityPlayer.so` exports that symbol at
+  0xe638b0. This is why AD-9 exists: the game is *not* a PIE, but it does not
+  need to be loaded as one either.
 - `UnityPlayer.so`: `NEEDED libdl.so.2 libm.so.6 librt.so.1 libgcc_s.so.1 libpthread.so.0 libc.so.6 ld-linux-x86-64.so.2`;
   dlopens (measured by `strings` + `/proc/pid/maps`): **`libX11.so.6`, `libGL.so.1`
   (+ `libGLX_mesa.so.0`), `libEGL.so.1`/`libGLESv2.so.2` (alternative), `libasound.so.2`**.
@@ -318,6 +330,34 @@ the kernel (already foreseen by `docs/graphics-accel.md`'s gl-capable devices).
 is the mount; the game's `Config/`, `Saves/` and `Player.log` redirect to a
 writable local dir. NFS write support is *not* required for v1.
 
+**AD-9 — Replace the `RimWorldLinux` stub with our own launcher; do not teach
+the kernel to load an `ET_EXEC` at 0x200000.** Measured: the shipped executable
+is a 14 KB stub whose `main` is `jmp PlayerMain@plt`, and `UnityPlayer.so`
+exports `PlayerMain(int, char**)`. A HobbyOS-built PIE launcher that `dlopen`s
+`UnityPlayer.so` and calls `PlayerMain(argc, argv)` is semantically identical to
+the stub and runs at the normal 64 GiB user base. The launcher must be **named
+`RimWorldLinux` and live in the game directory** (the NFS staging copy over the
+stub, original kept as `RimWorldLinux.orig`) because Unity resolves its data dir
+from `/proc/self/exe` → `<dir>/RimWorldLinux_Data`.
+Rationale: the alternative — a compat address space that can map user pages in
+the low 8 GiB — means removing the kernel's identity maps from that AS and
+splitting the address space, an MMU redesign that buys nothing else this project
+needs. Revisit only if some future title's *real* code is non-PIE.
+
+**AD-10 — Ship the game's DSOs locally for v1; NFS carries the data.** mmap of
+an NFS file is still `-ENOTSUP` (M5b), and `UnityPlayer.so` is 33 MB. Staging
+`UnityPlayer.so` (33 MB) + the three Mono DSOs (6.5 MB) + the two plugins
+(0.7 MB) on the FAT image (~40 MB of 627 MB free) removes M5b from the critical
+path; the 730 MiB of `Data/` stays on NFS. M5b remains scheduled for the case
+where the local staging is undesirable.
+
+**AD-11 — A compat DSO is compiled against *glibc* headers, not HobbyOS's.**
+Measured (L8): `pthread_mutex_t` is 8 bytes in HobbyOS's `<pthread.h>` and 40 in
+glibc's, and Mesa stores pthread types by value — the first DSO built against the
+HobbyOS headers loaded and then segfaulted in `glXChooseFBConfig`. Every DSO that
+runs inside a glibc compat process (`libGL`, `libX11`, `libasound`, …) must use
+glibc's type layouts; HobbyOS headers are for native programs only.
+
 **AD-8 — x86_64 only.** The compat class is x86_64 by contract
 (`docs/linux-abi.md` §2). ARM builds must keep compiling (compat TUs are
 `#ifdef __x86_64__`), but no ARM acceptance is claimed.
@@ -390,6 +430,17 @@ alias map stays dormant. `linux_probe_dyn` (the `dlopen` half) is still open.
 (the official Mono 6.x Linux build, fetched by the harness) run under compat**,
 and a 4-thread C# GC loop completes. Evidence: serial log of all three.
 
+**Status: threads half PASSED 2026-11-02 (lane L7); Mono blocked on `/proc`.**
+`[PTHR] threads=8 iters=4000 / barrier done ready=8 / joined 8 / tls_sum=32000
+(expect 32000)` and a dlopen'ed DSO's `__thread` (`dso per-thread: a=11 b=22`).
+Real x86-64 `rt_sigframe` with `ucontext`+`siginfo`+FXSAVE; SIGSEGV/BUS/ILL/FPE
+now deliverable to compat. Mono 6.12 loads all nine DSOs and initializes, then
+exits with **`Mono requires /proc to be mounted.`** — L10 implemented
+`/proc/self/{exe,fd,maps}` in the same wave, so this is re-testable now.
+Known limits: `MAX_PROCESSES` is 64 while the game needs 106 threads at menu;
+`SIGCANCEL`/`SIGSETXID` (32/33) exceed `HO_SIG_MAX`, so `pthread_cancel` is not
+yet honoured.
+
 ### M3 — Window + input (X11 client surface)
 - [ ] `src/user/xcompat/`: `libX11.so.6` implementing the SDL-used surface
       (`XOpenDisplay`, `XCreateWindow`, `XInternAtom`, `XChangeProperty`,
@@ -427,6 +478,14 @@ cannot be reused (they need 33 libX11-internal wire symbols).
 **Gate M4:** the probe reports 3.3 core; the cube renders; fps recorded.
 Evidence: screenshot + fps dump.
 
+**Status 2026-11-02 (lane L8): host gate PASSED, in-guest load unverified.**
+`tools/mesa/build-hobbyos.sh` cross-builds `libGL.so.1` for HobbyOS: 835/835 TUs,
+**0 `DT_NEEDED`**, 1378 exports, 20.0 MB stripped. It renders the reference
+GL 3.3 core cube in the host harness (`fnv1a64=0xc0b8ac43346002eb`, 291,572
+non-background pixels, **32.4 fps** at 1280×720 — faster than the host build's
+28.5 fps because the guest-targeted DSO avoids Xlib indirection). Remaining:
+stage it in `/LIB64` with `XLIB_NO_SHM=1` and prove an in-guest `dlopen` + cube.
+
 ### M5 — Assets, saves, audio
 - [ ] Mount `/NFS/RIMWORLD` at boot from `10.0.2.2:/srv/nfs/rimworld`
       (slirp) or the LAN server; `ls` shows the real tree (long names).
@@ -442,14 +501,31 @@ Evidence: screenshot + fps dump.
 a save file is written locally and read back.
 
 ### M6 — Unity boots to the menu
-- [ ] Launch row/session line for the game; environment (`LD_LIBRARY_PATH`,
-      `HOME`, `LC_ALL=C`); **`-force-glcore`** is mandatory (without it Unity
-      picks Vulkan and segfaults at resize).
+- [x] `/proc/self/exe` → the loaded executable path (Unity finds `*_Data` this
+      way; with ld.so as `/proc/self/exe` the host log says *"There is no data
+      folder"*). **Landed** (L10; probe: `readlink = "/RIMWORLD_PROBE_LONG_NAME/PROC.ELF"`).
+- [x] `/proc/self` → pid, `/proc/self/fd/N` re-open (measured 639 opens/30 s),
+      `/proc/self/maps` rendered from real `vm_region`s. **Landed** (L10).
+- [x] Launcher (`RWLAUNCH.BIN` + `tools/rw/run-rimworld.sh`): mounts
+      `10.0.2.2:/srv/nfs/rimworld`, sets `HOME`/`LC_ALL=C`/`LD_LIBRARY_PATH`,
+      spawns with `-force-glcore 1280x720 windowed`, dumps `Player.log`.
+      **Landed** (L10), validated by spawning a probe from NFS.
+- [ ] **Replace the stub (AD-9):** build the PIE launcher that `dlopen`s
+      `UnityPlayer.so` (staged locally per AD-10), calls `PlayerMain(argc, argv)`,
+      installs it as `RimWorldLinux` in the NFS staging copy (original kept as
+      `RimWorldLinux.orig`), and runs it through the L10 launcher.
 - [ ] Dismiss the Steam modal (click *Ignore*); Enter does not dismiss it.
 - [ ] Fix-forward the syscall/DSO failures the real binary reports.
 
 **Gate M6:** screenshot of the RimWorld main menu inside HobbyOS, plus the
 engine's own log lines (`Initialize engine version`, `GfxDevice`, `Mono path`).
+
+**Status 2026-11-02:** plumbing landed; the binary itself cannot be *loaded*
+(`ET_EXEC` at 0x200000, below the 64 GiB user window → `elf loader: ET_EXEC
+linked below the user window`), which is why AD-9 replaces the stub instead. A
+labelled PIE stand-in then failed at `UnityPlayer.so: failed to map segment
+from shared object` — the NFS-mmap gap, which AD-10 removes from the critical
+path.
 
 ### M7 — Playability
 - [ ] New colony → 10 minutes played; save/reload.
@@ -653,6 +729,20 @@ awk '/if \(linux_compat_dispatch\(lp, tf, syscall_num\)\)/,/^  }/' \
 ---
 
 ## 11. Fix log (append-only)
+
+- 2026-11-02 — **wave 2: M2, M3 and the M4 build land; M6 plumbing lands and
+  uncovers the ET_EXEC wall.** Merged `rw-l7-threads`, `rw-l10-launch`,
+  `rw-l9-x11stage`, `rw-l8-mesa` (conflicts: both new `fs.h` node types kept;
+  L9's auxv derivation adopted with L7's measured rationale). Threads/TLS/futex/
+  fault-signals proven (`[PTHR] tls_sum=32000`, 8 threads joined); Mono 6.12
+  loads and initializes, stopping at `Mono requires /proc to be mounted` — which
+  L10 then implemented. A real glibc Xlib client opens a window and paints
+  (`[XC] done rc=0`, `docs/rimworld-m3-xclient.png`), with `/dev/fb0` added.
+  `libGL.so.1` cross-builds (835/835 TUs, 0 `DT_NEEDED`) and renders the GL 3.3
+  cube at 32.4 fps in the host harness. **New decisions:** AD-9 (replace the
+  stub with a `PlayerMain` shim), AD-10 (DSOs staged locally; NFS carries data),
+  AD-11 (compat DSOs compile against glibc headers — `pthread_mutex_t` is 8 B in
+  HobbyOS, 40 B in glibc).
 
 - 2026-11-02 — **six M0 lanes reported; M1 gate passes.** Merged
   `rw-l1-evidence`, `rw-l3-syscalls`, `rw-l2-loader`, `rw-l6-assets`,
