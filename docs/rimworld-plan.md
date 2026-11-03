@@ -138,7 +138,7 @@ shipping any game asset, and "RimWorld on bare metal without NFS".
 |---|---|---|
 | `libc6_2.31-0ubuntu9.18_amd64.deb` (glibc runtime: `ld-2.31.so`, `libc.so.6`, `libm`, `libpthread`, `libdl`, `librt`, `libnsl`, `libresolv`) | `http://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_2.31-0ubuntu9.18_amd64.deb` | `1b2281aac4935dfea1f89dfc19e445fdbb45303202af60679ccb8bf035f081a0` |
 | `libgcc-s1_10.5.0-1ubuntu1~20.04_amd64.deb` (`libgcc_s.so.1` — the host's own copy requires GLIBC_2.34+) | `http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-10/libgcc-s1_10.5.0-1ubuntu1~20.04_amd64.deb` | `4aa7b9c9f3225df65a750ae0ff5c890fc6108c82a609b3c5abd45d211838bf3c` |
-| Mesa (softpipe + virgl gallium drivers, GLX/EGL frontend) | pin in M0 — **verify**: exact release tarball + published checksum | — |
+| Mesa **26.2.6** (softpipe now; virgl later). Build: `-Dgallium-drivers=softpipe -Dllvm=disabled -Dplatforms=x11 -Dglx=xlib -Dglvnd=disabled -Dvulkan-drivers= -Dopengl=true` (EGL needs a second build: EGL+`glx=xlib` is a hard meson error) | `https://archive.mesa3d.org/mesa-26.2.6.tar.xz` | `b9436b3e1a8be76fbd4823dc884f90596ab7c6ac5e1867a305e66ffccfb31a92` (matches the published relnote checksum; GPG good, Eric Engestrom) |
 
 Game copy (not redistributed; fingerprints only, so any machine can prove it is
 the same build):
@@ -225,6 +225,22 @@ This is the deciding number for AD-2: reimplementing 332 libc entry points
 (including locale/NSS semantics) is a bigger, buggier job than shipping the
 real glibc and translating the **syscalls** beneath it.
 
+### 3.4 What the M0 lanes measured against the real binary (2026-11-02)
+
+`docs/rimworld-evidence.md` is the full pack; the numbers that change decisions:
+
+| Measurement | Value | Consequence |
+|---|---|---|
+| Distinct Linux syscalls in a 150 s run | **92** — 53 served by a compat table, 13 by the legacy switch, **26 missing** | the gap is a list, not a class: 26 numbers |
+| Call volume | **1,095,446 `futex`** of 1,576,159 calls (69% of calls, 97% of syscall time) | M2's `futex` must be a real wait-queue implementation, never a tick poll |
+| `openat` | **20,372 calls**, 647 `ENOENT` (DSO search misses) | the single biggest gap; now implemented (L3) |
+| DSOs | 73 loaded (56 `DT_NEEDED`, 17 `dlopen`); 104 dlopen requests, 87 fail — **86 are `*.dll.so`** | Mono probing its native shims; benign, must not abort |
+| X11 surface | **327 symbols over 10 libraries** (libX11 235; 214 reached via `dlsym`) | F4 is ~4× the original estimate; per-library stubs needed |
+| GL | Unity asks for **4.5 core**; 1,226 frames, **110 draw calls/frame** | F5 must downgrade the request, not refuse it (AD-5) |
+| Threads / memory | 145 peak, **106 at menu**, 1.14 GB RSS, 33 fds | M2 numbers to gate on |
+| `/proc` | `/proc/self/fd/N` opened **639× in 20 s**, `maps` 3×, no `dl_iterate_phdr`/`dlmopen` | `/proc/self/fd` is on the startup path, not optional |
+| Menu reachability | a **Steam modal** parks the game; Enter does not dismiss it, a click on *Ignore* does | M6's gate needs a click step (harness: `RW_DISMISS_STEAM=1`) |
+
 ---
 
 ## 4. Gap analysis → scheduled work
@@ -265,11 +281,29 @@ all symbol work stays in userspace.** No ELF symbol parsing enters the kernel
 `AT_UID/EUID/GID/EGID`, `AT_PLATFORM`, `AT_SECURE=0`.
 
 **AD-4 — Windowing and GL are *compat DSOs*, not kernel features.**
-`libX11.so.6`, `libGL.so.1`, `libGLX.so.0`, `libEGL.so.1`, `libGLESv2.so.2`,
+`libX11.so.6` (+ the nine extension libraries SDL dlopens: Xext, Xrender,
+Xrandr, Xinerama, Xi, Xcursor, Xfixes, Xss, Xxf86vm), `libGL.so.1`,
+`libGLX.so.0`, `libEGL.so.1`, `libGLESv2.so.2`, `libpulse-simple.so.0` and
 `libasound.so.2` are HobbyOS-built DSOs placed on the game's search path. They
 implement SDL's actual usage over the desktop pixel-window protocol (the same
 protocol `src/user/x11` already speaks) and over Mesa. No X server, no DRI, no
 DRM ioctls: this keeps the kernel free of graphics ABI surface.
+
+*Corrected by measurement (L1/L4, 2026-11-02):* audio is **PulseAudio first** —
+FMOD opens `libpulse-simple.so.0`/`libpulse` and only falls back to
+`libasound.so.2`; the `libasound` shim alone still yields working video and
+`"FMOD failed to initialize any audio devices, running on emulated software
+output with no sound"` (host-verified). v1 ships the ALSA fallback (silence),
+PulseAudio is a later lane. `libXtst`/`libXm` are not used.
+
+**AD-5 — GL target is 3.3 core, but the *request* is 4.5 core.** Measured: Unity
+calls `glXCreateContextAttribsARB` asking for **4.5 core** (with
+`GLX_CONTEXT_FLAG_NO_ERROR_BIT` false, `FLUSH` set), and renders correctly when
+the returned context is 3.3 core / GLSL 3.30 with zero shader errors (§3,
+Appendix B). The frontend must therefore *accept* the 4.5 request and hand back
+the best context it has (3.3), never reject it — and 4.x-only extensions are not
+required. Unity must also be launched with `-force-glcore`: without it, it
+selects Vulkan/RADV and segfaults at the first resize (measured).
 
 **AD-5 — GL target is 3.3 core.** Measured: the game runs on 3.3 with no shader
 errors (§3, Appendix B). 4.x-only extensions are not required; if a shader
@@ -330,6 +364,17 @@ contains a syscall histogram and an fps table produced by the harness.
 exits 0; then `linux_probe_dyn` prints its markers. Evidence: serial log with
 both programs' output and `System halt.`
 
+**Status: PASSED 2026-11-02 (lanes L2+L3, merged).** `tools/gate/m1_glibc_hello.sh`
+builds a glibc-2.31 PIE, stages it, boots, and grades the log:
+`elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000
+exe_entry=0x10000011B0 start=0x1008001100` → `[M1] hello from glibc 2.31
+(pid 2)` → `[M1] done rc=0` → `[EXITPC] code=0x0` → `System halt`.
+Real glibc `ld.so` runs under the compat class: the blockers were `openat`
+(glibc's `open()` *is* `openat(AT_FDCWD,…)`), a 32-bit `AT_FDCWD` comparison,
+and `vm_mmap` refusing a file mapping longer than the file (glibc maps whole
+DSOs including `.bss`). FAT16 `open()` resolves VFAT long names, so F3's 8.3
+alias map stays dormant. `linux_probe_dyn` (the `dlopen` half) is still open.
+
 ### M2 — Threads, TLS, signals at CLR scale
 - [ ] `clone` (`CLONE_VM|THREAD|SETTLS|PARENT_SETTID|CHILD_CLEARTID`),
       `futex` (WAIT/WAKE/REQUEUE + robust list), per-thread FS via
@@ -358,7 +403,11 @@ and a 4-thread C# GC loop completes. Evidence: serial log of all three.
 
 **Gate M3:** a host-built real-Xlib client (a 20-line program linked against
 Ubuntu's `libX11`) opens a window, draws, and exits 0 under compat; the window
-is visible in a screenshot.
+is visible in a screenshot. Measured scope: **327 symbols over 10 libraries**
+(libX11 235, plus Xext/Xrender/Xrandr/Xinerama/Xi/Xcursor/Xfixes/Xss/Xxf86vm).
+Two measured traps: the shim must not load the *real* `libX11` (dlopen matches
+by SONAME and the real one shadows the interposer), and the real extension DSOs
+cannot be reused (they need 33 libX11-internal wire symbols).
 
 ### M4 — OpenGL 3.3 core
 - [ ] Build Mesa with `--disable-llvm`, gallium `softpipe` (+ `virgl` later),
@@ -376,8 +425,11 @@ Evidence: screenshot + fps dump.
 ### M5 — Assets, saves, audio
 - [ ] Mount `/NFS/RIMWORLD` at boot from `10.0.2.2:/srv/nfs/rimworld`
       (slirp) or the LAN server; `ls` shows the real tree (long names).
-- [ ] Exec the game's `RimWorldLinux` **from NFS** (`elf_loader` reads via the
-      VFS path, not FAT-only) and `mmap` a DSO from NFS.
+- [ ] Exec the game's `RimWorldLinux` **from NFS** — **landed** (L6: VFS image
+      read + `elf_loader_load_image`, `spawn_ex("/NFS/hdyn.bin")` → exit 0).
+- [ ] `mmap` a DSO from NFS — **not supported** (`fs.c:file_fat16_ident` →
+      `-ENOTSUP`; `vm.c` keys `VM_OBJ_FILE` by `(start_cluster,size)`). Needs a
+      VM object with an NFS page-in callback — scheduled as M5b.
 - [ ] Redirect `Config/`, `Saves/`, `Player.log` to a writable local dir.
 - [ ] Audio: `/dev/dsp` null sink first; virtio-sound only if needed.
 
@@ -386,7 +438,9 @@ a save file is written locally and read back.
 
 ### M6 — Unity boots to the menu
 - [ ] Launch row/session line for the game; environment (`LD_LIBRARY_PATH`,
-      `HOME`, `LC_ALL=C`).
+      `HOME`, `LC_ALL=C`); **`-force-glcore`** is mandatory (without it Unity
+      picks Vulkan and segfaults at resize).
+- [ ] Dismiss the Steam modal (click *Ignore*); Enter does not dismiss it.
 - [ ] Fix-forward the syscall/DSO failures the real binary reports.
 
 **Gate M6:** screenshot of the RimWorld main menu inside HobbyOS, plus the
@@ -594,6 +648,15 @@ awk '/if \(linux_compat_dispatch\(lp, tf, syscall_num\)\)/,/^  }/' \
 ---
 
 ## 11. Fix log (append-only)
+
+- 2026-11-02 — **six M0 lanes reported; M1 gate passes.** Merged
+  `rw-l1-evidence`, `rw-l3-syscalls`, `rw-l2-loader`, `rw-l6-assets`,
+  `rw-l4-window` into `rimworld` (two conflicts settled: duplicate `openat` →
+  L3's full version with L2's 32-bit `dirfd` rationale folded in; the VFS vs
+  FAT16 native-probe → L6's buffer probe for both tracks). Landed: compat
+  `PT_INTERP`, 15 new syscall rows, NFS-served assets with exec-from-NFS,
+  `src/user/xcompat/` (243 libX11 exports + ALSA shim, 157-row ABI diff clean),
+  Mesa 26.2.6 softpipe at GL 3.3 (27.2 fps @720p, cube checksum stable).
 
 - 2026-11-02 — v1 created. Track selected (Linux native, not Proton); evidence
   measured: menu under llvmpipe 33–40 fps @8 threads (median 33.2, p90 39.5, n=267),
