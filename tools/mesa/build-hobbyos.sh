@@ -93,13 +93,23 @@ CLANG_RES=$(${CC} -print-resource-dir)/include
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
 SELF_CONTAINED=0
 GEN_ONLY=0
+# Which C library ABI the DSO is compiled against.  Not cosmetic:
+# pthread_mutex_t is 8 bytes in HobbyOS's headers and 40 in glibc's, and Mesa
+# stores pthread types by value (struct xmesa_display::mutex, std::mutex in
+# the GLSL compiler).  A DSO compiled against HobbyOS headers but resolved
+# against glibc corrupts memory at the first mtx_init - measured: SIGSEGV in
+# xmesa_init_display with the whole display struct zeroed.
+#   abi=glibc    -> the compat class's libGL (it runs inside a glibc process)
+#   abi=hobbyos  -> --self-contained (links HobbyOS libc, its own pthread)
+ABI=glibc
 KEEP_BUILD=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     -j|--jobs)         JOBS="$2"; shift 2 ;;
     --gen-only)        GEN_ONLY=1; shift ;;
-    --self-contained)  SELF_CONTAINED=1; shift ;;
+    --self-contained)  SELF_CONTAINED=1; ABI=hobbyos; shift ;;
+    --abi)             ABI="$2"; [ "$ABI" = hobbyos ] && SELF_CONTAINED=1; shift 2 ;;
     --keep-build)      KEEP_BUILD=1; shift ;;
     --work)            WORK="$2"; OBJ=${WORK}/obj; LIBDIR=${WORK}/lib
                        HOSTBUILD=${WORK}/host-build; GEN=${WORK}/gen
@@ -282,7 +292,16 @@ PY
 # 4. Cross-compile every TU that goes into libGL
 # ---------------------------------------------------------------------------
 cross_compile() {
-  say "4/6 cross-compile (clang --target=x86_64-none-elf, HobbyOS sysroot)"
+  say "4/6 cross-compile (abi=${ABI})"
+  # The per-TU cache keys on object mtime vs log mtime, which cannot see a
+  # change of ABI (same source, same flags except the header set).  Switching
+  # flavours must not reuse objects: that is a silent mixed-ABI DSO (measured:
+  # hobbyos-ABI objects under a glibc link segfault at the first mtx_init).
+  if [ "$(cat "${WORK}/.abi" 2>/dev/null)" != "$ABI" ]; then
+    note "ABI changed to ${ABI}: clearing the object cache"
+    rm -rf "$OBJ" "${WORK}/log"
+    echo "$ABI" > "${WORK}/.abi"
+  fi
   mkdir -p "$OBJ" "${WORK}/log"
 
   if [ ! -d "${LIBCXX_SRC}/libcxx/include" ]; then
@@ -293,7 +312,7 @@ cross_compile() {
 
   CC="$CC" CXX_DRIVER="$CXX_DRIVER" LD="$LD" AR="$AR" \
   CLANG_RES="$CLANG_RES" JOBS="$JOBS" \
-  MESA_BUILD="$HOSTBUILD" MESA_SRC="$SRC" TREE="$TREE" \
+  MESA_BUILD="$HOSTBUILD" MESA_SRC="$SRC" TREE="$TREE" ABI="$ABI" \
   OBJ="$OBJ" LOGDIR="${WORK}/log" LIBCXX_INC="$libcxx_inc" \
   STAGE_INC="${STAGE}/x11-include" \
   python3 - <<'PY'
@@ -304,6 +323,7 @@ BUILD, SRC, TREE = E["MESA_BUILD"], E["MESA_SRC"], E["TREE"]
 OBJ, LOGDIR, STAGE_INC, LIBCXX_INC = E["OBJ"], E["LOGDIR"], E["STAGE_INC"], E["LIBCXX_INC"]
 CC, CXX_DRIVER, AR, CLANG_RES = E["CC"], E["CXX_DRIVER"], E["AR"], E["CLANG_RES"]
 JOBS = int(E["JOBS"])
+ABI = E.get("ABI", "glibc")
 
 # The archives that make up libGL, in Meson's link order (the two
 # link_whole targets are marked below).  Kept in sync with
@@ -372,10 +392,13 @@ def parse_build_ninja():
     return table
 
 
-DROP_PREFIXES = (
-    "-I/usr/", "-isystem/usr/", "-isystem/usr", "-fdiagnostics-color",
-    "-flifetime-dse", "-Wno-error=", "-Winvalid-pch",
-)
+# Host *include* paths: only the freestanding flavour must never see them; the
+# glibc flavour wants them (drm.h lives in /usr/include/libdrm).
+HOST_PATH_PREFIXES = ("-I/usr/", "-isystem/usr/", "-isystem/usr")
+# Compiler-flag spellings that must go in both flavours: gcc-only or
+# meson-noise flags clang rejects.
+DROP_PREFIXES = ("-fdiagnostics-color", "-flifetime-dse", "-Wno-error=",
+                 "-Winvalid-pch")
 DROP_EXACT = {
     "-pthread", "-mtls-dialect=gnu2",
     # GCC-only builtins clang does not implement; Mesa's generated
@@ -398,7 +421,23 @@ def rewrite(args, kind):
             continue
         if a in DROP_EXACT or a.startswith(DROP_PREFIXES):
             continue
+        if ABI != "glibc" and a.startswith(HOST_PATH_PREFIXES):
+            continue
         out.append(a)
+
+    if ABI == "glibc":
+        # The compat class is a glibc process: compile against glibc's headers
+        # so every by-value libc type (pthread_mutex_t, struct stat, FILE, ...)
+        # has the layout the runtime will use.  clang's default search path for
+        # x86_64-linux-gnu is exactly that; none of the HobbyOS sysroot or the
+        # tools/mesa shims is used in this flavour.
+        pre = ["--target=x86_64-linux-gnu", "-D__linux__=1",
+               "-D_FILE_OFFSET_BITS=64", "-mno-red-zone",
+               "-fno-stack-protector", "-fno-exceptions", "-fno-rtti",
+               "-Wno-error", "-g0"]
+        if kind == "cpp_COMPILER":
+            pre += ["-I", E["LIBCXX_INC"], "-nostdinc++", "--std=c++23"]
+        return pre + out
 
     pre = [
         "--target=x86_64-none-elf", "-ffreestanding", "-nostdinc",
@@ -560,16 +599,23 @@ libcxxabi/src/stdlib_stdexcept.cpp
 "
 
   local f n rc=0 cxxobjs=()
+  local abi_flags sysinc
+  if [ "$ABI" = glibc ]; then
+    # -D_GNU_SOURCE: glibc's <pthread.h> hides pthread_cond_clockwait behind it,
+    # and libc++ 21 uses that for condition_variable::wait_until.
+    abi_flags="--target=x86_64-linux-gnu -D_GNU_SOURCE"
+    sysinc=""
+  else
+    abi_flags="--target=x86_64-none-elf -ffreestanding -nostdinc -isystem ${CLANG_RES}"
+    sysinc="-I ${TREE}/src/libc/include -I ${TREE}/src/include -I ${TREE}/src/user_include"
+  fi
   for f in $tus; do
     n=$(basename "$f" .cpp)
     cxxobjs+=("${out}/${n}.o")
-    ${CXX_DRIVER} --driver-mode=g++ \
-      --target=x86_64-none-elf -ffreestanding -nostdinc \
-      -isystem "$CLANG_RES" \
+    # shellcheck disable=SC2086
+    ${CXX_DRIVER} --driver-mode=g++ $abi_flags \
       -I "${libcxx}/include" -I "${libcxx}/src" -I "${libcxx}/src/include" \
-      -I "${abi}/include" \
-      -I "${TREE}/src/libc/include" -I "${TREE}/src/include" \
-      -I "${TREE}/src/user_include" \
+      -I "${abi}/include" $sysinc \
       -nostdinc++ -std=c++23 -fno-exceptions -fno-rtti -fPIC -O2 \
       -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES \
       -DLIBCXX_BUILDING_LIBCXXABI \
@@ -579,17 +625,22 @@ libcxxabi/src/stdlib_stdexcept.cpp
   [ "$rc" = 0 ] || die "C++ runtime build failed"
 
   # The two hand-written pieces: libc gaps + the C++ ABI glue.
-  local inc_flags="-isystem ${CLANG_RES} -I ${TREE}/tools/mesa/include -I ${TREE}/src/include -I ${TREE}/src/libc/include -I ${TREE}/src/user_include"
+  local inc_flags
+  if [ "$ABI" = glibc ]; then
+    inc_flags=""      # glibc's own headers carry the correct by-value layouts
+  else
+    inc_flags="-isystem ${CLANG_RES} -I ${TREE}/tools/mesa/include -I ${TREE}/src/include -I ${TREE}/src/libc/include -I ${TREE}/src/user_include"
+  fi
   # shellcheck disable=SC2086
-  ${CC} --target=x86_64-none-elf -ffreestanding -nostdinc $inc_flags \
+  ${CC} $([ "$ABI" = glibc ] && echo "--target=x86_64-linux-gnu" || echo "--target=x86_64-none-elf -ffreestanding -nostdinc") $inc_flags \
     -mno-red-zone -fno-stack-protector -fPIC -std=c11 -O2 -Wall \
     -DHB_MESA_SELF_CONTAINED=${SELF_CONTAINED} \
     -c "${TREE}/src/user/xcompat/gl_stubs.c" -o "${out}/gl_stubs.o"
   # libc++'s include dir must come FIRST (its C-wrapper headers include_next
   # into the HobbyOS sysroot); hence a separate flag order from $inc_flags.
   # shellcheck disable=SC2086
-  ${CXX_DRIVER} --driver-mode=g++ --target=x86_64-none-elf -ffreestanding \
-    -nostdinc -I "${libcxx}/include" -I "${libcxx}/src" -I "${abi}/include" \
+  ${CXX_DRIVER} --driver-mode=g++ $([ "$ABI" = glibc ] && echo "--target=x86_64-linux-gnu" || echo "--target=x86_64-none-elf -ffreestanding -nostdinc") \
+    -I "${libcxx}/include" -I "${libcxx}/src" -I "${abi}/include" \
     $inc_flags -nostdinc++ -std=c++23 -fno-exceptions -fno-rtti \
     -fPIC -O2 -D_LIBCPP_BUILDING_LIBRARY \
     -c "${TREE}/src/user/xcompat/gl_cxx_glue.cpp" -o "${out}/gl_cxx_glue.o"
@@ -679,9 +730,18 @@ link_libgl() {
     "${cxx_extra[@]}" "${WORK}/cxxrt/gl_stubs.o" "${WORK}/cxxrt/gl_cxx_glue.o"
 
   ln -sf libGL.so.1 "${LIBDIR}/libGLX.so.0"
-  ${AR} rcs "${LIBDIR}/libGL.a" $(cat "${OBJ}/ar/ALL.txt") \
-      "${WORK}/cxxrt/gl_stubs.o" "${WORK}/cxxrt/gl_cxx_glue.o" \
-      "${WORK}/cxxrt/libcxx-pic.a"
+  ln -sf libGL.so.1 "${LIBDIR}/libGL.so"       # so `-lGL` finds the shared one
+  # The static archive is for in-guest probes: flatten libcxx-pic.a into it
+  # (`ar` would otherwise store the nested archive as one opaque member).
+  { echo "create ${LIBDIR}/libGL.a"
+    for o in $(cat "${OBJ}/ar/ALL.txt") \
+               "${WORK}/cxxrt/gl_stubs.o" "${WORK}/cxxrt/gl_cxx_glue.o"; do
+      echo "addmod $o"
+    done
+    echo "addlib ${WORK}/cxxrt/libcxx-pic.a"
+    echo save
+    echo end
+  } | ${AR} -M
 
   ${STRIP} --strip-unneeded "${LIBDIR}/libGL.so.1" -o "${LIBDIR}/libGL.so.1.stripped"
   mv "${LIBDIR}/libGL.so.1.stripped" "${LIBDIR}/libGL.so.1"
