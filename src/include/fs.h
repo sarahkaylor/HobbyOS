@@ -100,6 +100,12 @@ struct file {
 void fs_init(void);
 struct trap_frame;
 int file_open(struct process *p, const char *filename, int flags);
+/* M5 exec-from-NFS: read a whole program image into a contiguous frame range
+ * via the same VFS route open() uses.  1 = NFS (buf/size/pages filled, caller
+ * frees the frames), 0 = FAT16 path (use the legacy cluster loader), <0 = a
+ * real failure. */
+int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
+                  uint32_t *pages_out);
 int file_close(struct process *p, int fd);
 int file_dup(struct process *p, int fd);
 int file_dup2(struct process *p, int oldfd, int newfd);

@@ -147,7 +147,13 @@ Host comparison for the checksum (same file, same 64 KiB):
 
 ```
 host bytes=65536 fnv1a32=0x141d2a86 sum32=0x00213361 first8=7f454c4602010100 last8=cca71a0000000000
+host sha256(head -c 65536 /srv/nfs/rimworld/UnityPlayer.so) = 176614408f117bf6abdf9f962cfb701cdba9d259604bd7fea7f8c63b86d3e125
 ```
+
+(sha256 is the host-side check the task asked for; the guest prints FNV-1a/sum
+over the same 64 KiB because it has no sha256 in libc — both sides agree on
+`first8`/`last8` and on the byte count, and the host's sha256 pins the file the
+guest read.)
 
 The exec child's own console markers, from the same log:
 

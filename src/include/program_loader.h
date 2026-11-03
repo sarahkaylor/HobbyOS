@@ -36,6 +36,14 @@ struct elf_load_info {
 int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
                     uint32_t flags, struct elf_load_info *info);
 
+/* The same load, for an image that is already in kernel memory (the VFS/NFS
+ * exec path: no FAT16 cluster exists for the file).  The PT_INTERP image is
+ * still resolved from the FAT16 root.  elf_loader_load is the FAT16 wrapper
+ * around this. */
+int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
+                          uint32_t fsize, uint32_t flags,
+                          struct elf_load_info *info);
+
 /* The mapping half without a filesystem: both images are already in kernel
  * memory.  Used by elf_loader_test.c to exercise the real mapper (plan,
  * regions, p_flags, relocations, USER_LIB placement, startup block) on both
@@ -49,6 +57,9 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
  * interpreter, 0 when it does not (or its header is unreadable), -1 when the
  * file cannot be read.  The x86_64 dispatch uses it to pick the track. */
 int elf_loader_probe_native(uint16_t cluster, uint32_t fsize);
+
+/* Buffer form of elf_loader_probe_native(), for the VFS exec path. */
+int elf_loader_probe_native_buf(const uint8_t *exe, uint32_t fsize);
 
 /**
  * Loads a user program from the disk and executes it in the current context.
