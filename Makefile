@@ -2965,6 +2965,8 @@ apps_test:
 HOST_CC = clang
 HOST_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST
 
+include src/user/xcompat/Makefile.inc
+
 # GB-085 make-dependency fix: every host test object and binary that links
 # compat (the shared filesystem-mock layer) must rebuild when compat.c or
 # the shared scratch-dir header changes -- a stale obj/host_compat.o was the
