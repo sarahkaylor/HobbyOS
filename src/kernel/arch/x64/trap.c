@@ -54,6 +54,7 @@ extern uint64_t hb_clock_realtime_ms(void);
    msghdr/iovec/cmsg blocks through the same arch helper. */
 static int sys_user_range(uint64_t ptr, uint64_t len, int write);
 int sys_user_range_ok(uint64_t ptr, uint64_t len);
+static int copy_user_path(const char *user, char *kbuf, int cap);
 
 /* GB-152: struct cpu_local is declared once in process.h (the asm's fixed
    gs: offsets are pinned by the typedefs below). */
@@ -218,13 +219,15 @@ static void sys_open(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[5]; // rdi
   int flags = (int)tf->regs[4];                     // rsi (syscall arg 2)
   struct process *caller = current_process();
-  if (sys_user_range_ok((uint64_t)filename, 1)) {
-    /* file_open returns >= 0 (fd) or a negative errno it picked itself
-       (ENOENT/EEXIST/EMFILE), which errno_ret decodes in libc. */
-    tf->regs[0] = file_open(caller, filename, flags);
-  } else {
-    tf->regs[0] = -EFAULT;
+  char kpath[256];
+  int plen = copy_user_path(filename, kpath, sizeof kpath);
+  if (plen < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)plen;
+    return;
   }
+  /* file_open returns >= 0 (fd) or a negative errno it picked itself
+     (ENOENT/EEXIST/EMFILE), which errno_ret decodes in libc. */
+  tf->regs[0] = file_open(caller, kpath, flags);
 }
 
 static void sys_close(struct trap_frame *tf) {
@@ -481,13 +484,15 @@ static void sys_sysinfo(struct trap_frame *tf) {
 
 static void sys_unlink(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[5]; // rdi
-  if (sys_user_range_ok((uint64_t)filename, 1)) {
-    extern int vfs_unlink(const char *path);
-    int r = vfs_unlink(filename);
-    tf->regs[0] = r < 0 ? -ENOENT : r;
-  } else {
-    tf->regs[0] = -EFAULT;
+  char kpath[256];
+  int plen = copy_user_path(filename, kpath, sizeof kpath);
+  if (plen < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)plen;
+    return;
   }
+  extern int vfs_unlink(const char *path);
+  int r = vfs_unlink(kpath);
+  tf->regs[0] = r < 0 ? -ENOENT : r;
 }
 
 static void sys_rename(struct trap_frame *tf) {
@@ -549,6 +554,22 @@ static int sys_user_range(uint64_t ptr, uint64_t len, int write) {
  * same arch helper (extern in fs.c). */
 int sys_user_range_ok(uint64_t ptr, uint64_t len) {
   return sys_user_range(ptr, len, 0);
+}
+
+/* GB-178: copy a NUL-terminated user path byte by byte, validating each
+   byte's page before the load.  A one-byte guard at the syscall entry is
+   not enough: a string whose first byte is mapped and whose last byte is in
+   the next (unmapped) page faults at CPL0 inside vfs_clean.  Returns the
+   length on success, -EFAULT on an unmapped byte, -ENAMETOOLONG if no NUL
+   fits.  Kernel callers (string literals) do not use this helper. */
+static int copy_user_path(const char *user, char *kbuf, int cap) {
+  if (!user || !kbuf || cap <= 0) return -EINVAL;
+  for (int i = 0; i < cap; i++) {
+    if (!sys_user_range_ok((uint64_t)(uintptr_t)(user + i), 1)) return -EFAULT;
+    kbuf[i] = user[i];
+    if (kbuf[i] == '\0') return i;
+  }
+  return -ENAMETOOLONG;
 }
 
 static void sys_socket(struct trap_frame *tf) {
@@ -1738,13 +1759,15 @@ static void sys_getdents64(struct trap_frame *tf) {
 static void sys_mkdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = current_process();
-  if (sys_user_range_ok((uint64_t)path, 1)) {
-    extern int file_mkdir(struct process *cur, const char *path);
-    int r = file_mkdir(caller, path);
-    tf->regs[0] = r < 0 ? -EEXIST : r;
-  } else {
-    tf->regs[0] = -EFAULT;
+  char kpath[256];
+  int plen = copy_user_path(path, kpath, sizeof kpath);
+  if (plen < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)plen;
+    return;
   }
+  extern int file_mkdir(struct process *cur, const char *path);
+  int r = file_mkdir(caller, kpath);
+  tf->regs[0] = r < 0 ? -EEXIST : r;
 }
 
 /* W2-14 (selfhost): SYS_RMDIR -- remove an EMPTY directory.  The kernel
@@ -1852,19 +1875,20 @@ static void sys_ftruncate(struct trap_frame *tf) {
 static void sys_stat(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5];  // rdi
   struct k_stat *st = (struct k_stat *)tf->regs[4];  // rsi
-  if (sys_user_range_ok((uint64_t)path, 1) &&
-      sys_user_range((uint64_t)st, sizeof(struct k_stat), 1)) {
-    struct process *caller = current_process();
-    int err = 0;
-    extern int file_stat_path(struct process *p, const char *path,
-                              struct k_stat *st, int *errp);
-    if (file_stat_path(caller, path, st, &err) == 0)
-      tf->regs[0] = 0;
-    else
-      tf->regs[0] = (uint64_t)(-err);
-  } else {
-    tf->regs[0] = -EFAULT;
+  char kpath[256];
+  int plen = copy_user_path(path, kpath, sizeof kpath);
+  if (plen < 0 || !sys_user_range((uint64_t)st, sizeof(struct k_stat), 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)(plen < 0 ? plen : -EFAULT);
+    return;
   }
+  struct process *caller = current_process();
+  int err = 0;
+  extern int file_stat_path(struct process *p, const char *path,
+                            struct k_stat *st, int *errp);
+  if (file_stat_path(caller, kpath, st, &err) == 0)
+    tf->regs[0] = 0;
+  else
+    tf->regs[0] = (uint64_t)(-err);
 }
 
 static void sys_fstat(struct trap_frame *tf) {
@@ -1939,15 +1963,16 @@ static void compat_fstat(struct trap_frame *tf) {
 static void compat_stat_path(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5];                /* rdi */
   struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[4]; /* rsi */
-  if (!sys_user_range_ok((uint64_t)path, 1) ||
-      !sys_user_range((uint64_t)out, sizeof *out, 1)) {
-    tf->regs[0] = (uint64_t)(int64_t)(-EFAULT);
+  char kpath[256];
+  int plen = copy_user_path(path, kpath, sizeof kpath);
+  if (plen < 0 || !sys_user_range((uint64_t)out, sizeof *out, 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)(plen < 0 ? plen : -EFAULT);
     return;
   }
   struct k_stat k;
   int err = 0;
   extern int file_stat_path(struct process *, const char *, struct k_stat *, int *);
-  if (file_stat_path(current_process(), path, &k, &err) != 0) {
+  if (file_stat_path(current_process(), kpath, &k, &err) != 0) {
     tf->regs[0] = (uint64_t)(int64_t)(-err);
     return;
   }
@@ -1992,10 +2017,12 @@ static void compat_openat(struct trap_frame *tf) {
 static void sys_chdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = process_group(current_process()); /* P1 (D7) */
-  if (caller && sys_user_range_ok((uint64_t)path, 1)) {
+  char kpath[256];
+  int plen = copy_user_path(path, kpath, sizeof kpath);
+  if (caller && plen >= 0) {
     extern int vfs_chdir(const char *path, char *out_new_cwd, int cap);
     char new_cwd[128];
-    if (vfs_chdir(path, new_cwd, sizeof new_cwd) == 0) {
+    if (vfs_chdir(kpath, new_cwd, sizeof new_cwd) == 0) {
       int k = 0;
       while (new_cwd[k] && k < 127) {
         caller->cwd[k] = new_cwd[k];
@@ -2007,7 +2034,7 @@ static void sys_chdir(struct trap_frame *tf) {
       tf->regs[0] = -ENOENT;
     }
   } else {
-    tf->regs[0] = -EFAULT;
+    tf->regs[0] = (uint64_t)(int64_t)(plen < 0 ? plen : -EFAULT);
   }
 }
 
@@ -2631,6 +2658,9 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            mkdirat, so the dent block's mkdir() was -ENOSYS without this. */
         case 83:  syscall_num = SYS_MKDIR;      break;  /* mkdir(path, mode) */
         case 258: compat_mkdirat(tf);           return; /* mkdirat(dirfd, path, mode) */
+        /* GB-178: unlink(87) was not in the compat table at all, so the
+           bad-pointer probe saw -ENOSYS instead of -EFAULT.  rdi=path. */
+        case 87:  syscall_num = SYS_UNLINK;     break;  /* unlink(path)      */
         /* GB-164: stat family.  musl's stat()/lstat() go through newfstatat(262)
            with AT_FDCWD and fstat is 5; with no arm the caller gets -ENOSYS and
            a file it can open still has no size (DOOMW4's IWAD search). */
