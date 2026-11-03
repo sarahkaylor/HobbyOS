@@ -26,8 +26,13 @@
  *     and reports interp_base + e_entry as the runtime entry.  Everything after
  *     that is userspace: the kernel never reads a symbol table.
  *
- *   - The compat track still refuses PT_INTERP with ELF_ERR_INTERP and the same
- *     serial message: acceptance requires the explicit ELF_LOAD_NATIVE flag.
+ *   - The compat track refused PT_INTERP until the RimWorld lane: now an
+ *     explicit ELF_LOAD_COMPAT_INTERP accepts ANY absolute interpreter path
+ *     (a real glibc ld.so), maps it in a USER_LIB slot with its own p_flags
+ *     and NO kernel relocation pass, and reports the interpreter entry —
+ *     the Linux model (docs/rw-ldso-design.md).  flags == 0 keeps the
+ *     historical ELF_ERR_INTERP refusal, and elf_interp_is_native still
+ *     gates the native track, so LDHOBBY.SO semantics are untouched.
  *
  * Kernel constraints: freestanding (-ffreestanding, -mgeneral-regs-only), no
  * libc beyond the kernel's own helpers, byte-wise loops only, no FP/SIMD, no
@@ -346,7 +351,9 @@ static uint64_t el_native_sp(void) {
  * same string it always printed) and fills info->parse_rc. */
 static int el_admit_exe(const uint8_t *exe, uint64_t exe_len, uint32_t flags,
                         struct elf_image *eimg, struct elf_load_info *info) {
-  uint32_t pflags = (flags & ELF_LOAD_NATIVE) ? ELF_PARSE_ALLOW_INTERP : 0;
+  uint32_t pflags = (flags & (ELF_LOAD_NATIVE | ELF_LOAD_COMPAT_INTERP))
+                        ? ELF_PARSE_ALLOW_INTERP
+                        : 0;
   int prc = elf_parse_ex((const void *)exe, exe_len, eimg, pflags);
   info->parse_rc = prc;
   if (prc != ELF_OK) {
@@ -362,11 +369,16 @@ static int el_admit_exe(const uint8_t *exe, uint64_t exe_len, uint32_t flags,
               "build is required (docs/elf-loader.md §1)\n");
     return -ENOEXEC;
   }
-  /* PT_INTERP policy: the kernel knows how to start exactly one interpreter,
-     and it is named by docs/shared-libs.md §2.  Anything else keeps the compat
-     track's refusal — same ELF_ERR_INTERP, same message — with the path added
-     so a compat binary that slipped onto the native track says why. */
-  if (eimg->has_interp && !elf_interp_is_native(eimg->interp, eimg->interp_len)) {
+  /* PT_INTERP policy.  The native track knows exactly one interpreter
+     (/LDHOBBY.SO, docs/shared-libs.md §2); a compat binary that slipped onto
+     it keeps that refusal, same ELF_ERR_INTERP and message, with the path
+     added.  The Linux track (ELF_LOAD_COMPAT_INTERP) accepts any absolute
+     interpreter path: glibc's ld.so is a real elf_parse-able ET_DYN and the
+     kernel's only job is to map it and jump to its e_entry
+     (docs/rw-ldso-design.md).  flags == 0 — the historical compat call —
+     still refuses, so the GB-013 contract is unchanged. */
+  if (eimg->has_interp && !(flags & ELF_LOAD_COMPAT_INTERP) &&
+      !elf_interp_is_native(eimg->interp, eimg->interp_len)) {
     uart_puts("elf loader: ");
     uart_puts(elf_strerror(ELF_ERR_INTERP));
     uart_puts(" (interpreter '");
@@ -423,6 +435,14 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
     uart_puts("elf loader: image span overlaps the heap slot\n");
     return -ENOSPC;
   }
+  /* An INTERPRETED image must stay out of the DSO band as well: the
+     interpreter is placed there, and so is every DSO a real ld.so maps for
+     the program.  Without this an image between 128 MiB and 1 GiB would be
+     accepted and then collide with the library slots. */
+  if (iimg && base + eplan.span > ELF_USER_LIB_BASE) {
+    uart_puts("elf loader: image span overlaps the DSO band\n");
+    return -ENOSPC;
+  }
   rc = el_stage_build(eimg, &eplan, exe, exe_len, base, "elf loader",
                       iimg ? 0 : 1, &stage, &stage_pages);
   if (rc != 0) goto done;
@@ -451,8 +471,18 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
       rc = -ENOSPC;
       goto done;
     }
+    /* Relocation policy: the NATIVE interpreter (LDHOBBY.SO) is a static-PIE
+     * whose contract is "the kernel applies R_*_RELATIVE and zeroes
+     * DT_RELASZ".  A LINUX interpreter is the opposite: glibc's ld.so
+     * self-relocates in _dl_start using DT_RELA/DT_RELASZ from its own
+     * dynamic section and computes its load bias from its PC.  Applying or
+     * clearing that table would corrupt it before its first instruction, so
+     * on the compat track the bytes are mapped exactly as the file has them
+     * (`native` == 0 -> no relocation pass), which is also what Linux's
+     * ELF loader does for the interpreter. */
     rc = el_stage_build(iimg, &iplan, ib, ilen, interp_base,
-                        "elf loader: interpreter", 1, &istage, &istage_pages);
+                        "elf loader: interpreter", native, &istage,
+                        &istage_pages);
     if (rc != 0) goto done;
     rc = el_map_stage(as, interp_base, &iplan, istage, VMK_LIB);
     if (rc != 0) goto done;
@@ -480,6 +510,7 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
 
   info->base = base;
   info->entry = entry;
+  info->exe_entry = exe_entry;
   info->phdr = el_phdr_va(eimg, base);
   info->phnum = eimg->phnum;
   info->phent = eimg->phent;
@@ -502,7 +533,8 @@ done:
  * synthetic images, on both arches, without a filesystem.
  *
  * `flags`: ELF_LOAD_NATIVE honours PT_INTERP + writes the startup block;
- * 0 is the compat (Linux-ABI) track, which refuses PT_INTERP. */
+ * ELF_LOAD_COMPAT_INTERP honours a Linux interpreter (mapped, not relocated);
+ * 0 is the historical compat (Linux-ABI) track, which refuses PT_INTERP. */
 int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
                            uint64_t exe_len, const uint8_t *interp,
                            uint64_t interp_len, uint32_t flags,
