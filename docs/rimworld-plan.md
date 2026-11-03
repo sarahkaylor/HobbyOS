@@ -43,8 +43,9 @@ HobbyOS needs for any Unity/CLR application anyway.
 
 **Measured headline facts** (all reproduced in §3 and Appendix B):
 
-- RimWorld reaches its **main menu under llvmpipe at 1280×720, ≈39 fps**
-  (8 threads) — software rendering is viable at menu scale.
+- RimWorld reaches its **main menu under llvmpipe at 1280×720 at 30–40 fps**
+  (median 33.2, p90 39.5, n=267 samples over a 140 s run, `LP_NUM_THREADS=8`)
+  — software rendering is viable at menu scale.
 - The same game boots on a context forced to **OpenGL 3.3 core / GLSL 3.30**
   with zero shader errors and zero exceptions → **GL 3.3 is the target**, not
   4.5/4.6.
@@ -99,7 +100,7 @@ last rung slips.
   game on it.
 - The largest missing piece (GL) is a **bounded, well-understood port** (Mesa
   gallium) rather than an unbounded emulator.
-- Perf is plausible: the game hits 39 fps in a CPU rasterizer on 8 threads, and
+- Perf is plausible: the game holds 33–40 fps in a CPU rasterizer on 8 threads, and
   HobbyOS can hand it a host GPU through virtio-gpu (virgl) later.
 
 ### 1.4 Runners-up and revisit triggers
@@ -492,7 +493,7 @@ in their own worktree (§7.6) and report diffs, not commits to `rimworld`.
 - [ ] Game tree readable over NFS; binary exec'd from NFS; save written locally.
 - [ ] RimWorld main menu screenshot from HobbyOS.
 - [ ] Colony started, 10 minutes played, save/reload.
-- [ ] fps recorded against the host baseline (39 fps menu, llvmpipe@8).
+- [ ] fps recorded against the host baseline (median 33.2 / p90 39.5 menu, llvmpipe@8).
 - [ ] `git status` clean of game artifacts; ARM build still compiles.
 
 ### 8.4 Evidence standards
@@ -588,7 +589,8 @@ awk '/if \(linux_compat_dispatch\(lp, tf, syscall_num\)\)/,/^  }/' \
 ## 11. Fix log (append-only)
 
 - 2026-11-02 — v1 created. Track selected (Linux native, not Proton); evidence
-  measured: menu under llvmpipe 39 fps @8 threads, GL 3.3 core accepted, 648/332
+  measured: menu under llvmpipe 33–40 fps @8 threads (median 33.2, p90 39.5, n=267),
+  GL 3.3 core accepted, 648/332
   symbol split, glibc ≤2.15 requirement, 436 MB assets vs 627 MB disk free.
   Pins: glibc 2.31 + libgcc 10.5 sha256'd.
 - 2026-11-02 — probe: glibc 2.31 as the game's real `PT_INTERP` (patched copy)
