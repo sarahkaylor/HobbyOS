@@ -40,6 +40,7 @@ extern const struct l_sysent l_tab_fd[] __attribute__((weak));
 extern const struct l_sysent l_tab_mem[] __attribute__((weak));
 extern const struct l_sysent l_tab_proc[] __attribute__((weak));
 extern const struct l_sysent l_tab_misc[] __attribute__((weak));
+extern const struct l_sysent l_tab_thr[] __attribute__((weak));
 
 /* ---- user-memory helpers ------------------------------------------------ */
 
@@ -206,6 +207,7 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     (const struct l_sysent *)l_tab_mem,
     (const struct l_sysent *)l_tab_proc,
     (const struct l_sysent *)l_tab_misc,
+    (const struct l_sysent *)l_tab_thr,
   };
   for (unsigned t = 0; t < sizeof tables / sizeof tables[0]; t++) {
     const struct l_sysent *tab = tables[t];

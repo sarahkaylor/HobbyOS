@@ -175,6 +175,7 @@
 #define L_SYS_pselect6 270
 #define L_SYS_ppoll 271
 #define L_SYS_set_robust_list 273
+#define L_SYS_get_robust_list 274
 #define L_SYS_splice 275
 #define L_SYS_tee 276
 #define L_SYS_utimensat 280
@@ -189,6 +190,7 @@
 #define L_SYS_preadv 295
 #define L_SYS_pwritev 296
 #define L_SYS_prlimit64 302
+#define L_SYS_getcpu 309
 #define L_SYS_getrandom 318
 #define L_SYS_memfd_create 319
 /* membarrier(2): glibc's malloc() uses MEMBARRIER_CMD_PRIVATE_EXPEDITED and

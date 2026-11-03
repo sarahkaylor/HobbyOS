@@ -169,13 +169,41 @@ static void test_wave_loader(void *arg) {
           while (len > 0 && (p[len - 1] == '\r' || p[len - 1] == ' ')) p[--len] = '\0';
           while (*p == ' ' || *p == '\t') { p++; len--; }
           if (len > 0 && *p != '#') {
+            /* M2: a manifest line may carry arguments after the first space
+               ("MONO.EXE /HELLO.EXE").  The program is argv[0] and the rest is
+               the kernel-marshalled argv blob, exactly like an XSTART line.
+               Without this a gate could only launch a program that needs no
+               arguments -- and the M6 launch needs -force-glcore. */
+            /* M2: a manifest line may carry arguments after the first space
+               ("MONO.EXE /HELLO.EXE").  Split a COPY, never the manifest
+               buffer in place: the filename pointer handed to the loader must
+               stay valid until the child is created, and mutating `p` in place
+               made the second line's name point into the first line's args
+               (measured: "Loading program ... --versionMONO.EXE"). */
+            static char line[256];
+            int li = 0;
+            for (; li < 255 && p[li]; li++) line[li] = p[li];
+            line[li] = '\0';
+            char *fn = line;
+            char *cargs = 0;
+            char *sp = line;
+            while (*sp && *sp != ' ' && *sp != '\t') sp++;
+            if (*sp) {
+              *sp++ = '\0';
+              while (*sp == ' ' || *sp == '\t') sp++;
+              if (*sp) cargs = sp;
+            }
             struct kline kl;
             kl_init(&kl);
             kl_s(&kl, "[WAVE-MANIFEST] ");
-            kl_s(&kl, p);
+            kl_s(&kl, fn);
+            if (cargs) {
+              kl_s(&kl, " ");
+              kl_s(&kl, cargs);
+            }
             kl_s(&kl, "\n");
             kl_emit(&kl);
-            load_and_run_program_in_scheduler(p, -1, -1, -1, -1);
+            load_and_run_program_in_scheduler_args(fn, -1, -1, -1, -1, cargs);
             dispatched++;
           }
           if (!nl) break;

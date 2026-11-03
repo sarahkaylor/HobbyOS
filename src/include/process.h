@@ -183,6 +183,7 @@ struct addr_space;
 #define HO_SIGILL  4
 #define HO_SIGABRT 6
 #define HO_SIGBUS  7
+#define HO_SIGFPE  8
 #define HO_SIGKILL 9
 #define HO_SIGUSR1 10
 #define HO_SIGSEGV 11
