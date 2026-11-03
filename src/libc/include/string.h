@@ -58,6 +58,10 @@ extern "C" {
   char *strtok_r(char *str, const char *delim, char **saveptr);
 
   char *strdup(const char *s);
+  /* M4/L5: POSIX strndup - strdup of at most n bytes, always NUL-terminated.
+   * Mesa uses it in the glcpp/GLSL parsers and in util/u_printf.c.  The
+   * implementation is in src/user/xcompat/gl_stubs.c (libc.a has none). */
+  char *strndup(const char *s, size_t n);
 
   char *strerror(int errnum);
 
