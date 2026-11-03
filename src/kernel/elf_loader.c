@@ -557,6 +557,64 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
   return el_map_pair(as, exe, exe_len, &eimg, 0, 0, 0, flags, info);
 }
 
+/* Load an ELF image ALREADY IN KERNEL MEMORY into `as` per the load plan.
+ * This is the entry point for a filesystem that is not FAT16 (the VFS/NFS
+ * exec path): the caller holds the bytes, so no cluster is involved.  The
+ * PT_INTERP image is still resolved from the FAT16 root — the native
+ * dynamic contract's /LDHOBBY.SO is a boot-image file, not a game file.
+ * On success fills *info and returns 0; negative errno on any refusal. */
+int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
+                          uint32_t fsize, uint32_t flags,
+                          struct elf_load_info *info) {
+  if (!as || !info) return -ENOEXEC;
+  el_zero((uint8_t *)info, sizeof *info);
+  info->parse_rc = ELF_OK;
+  if (!exe || fsize == 0 || fsize > USER_IMG_SIZE)
+    return -ENOEXEC;
+
+  struct elf_image eimg;
+  int rc = el_admit_exe(exe, fsize, flags, &eimg, info);
+  if (rc != 0)
+    return rc;
+
+  /* Interpreter: resolved from the FAT16 root by the PT_INTERP path.  A miss is
+   * a clear refusal, not a mysterious guest crash — the whole point of the
+   * native dynamic contract is that the kernel says what it could not find. */
+  uint64_t ibuf = 0, ipages = 0, ilen = 0;
+  struct elf_image iimg;
+  if (eimg.has_interp) {
+    uint16_t icl = 0;
+    uint32_t isz = 0;
+    if (el_resolve_file(eimg.interp, &icl, &isz) != 0) {
+      uart_puts("elf loader: interpreter '");
+      uart_puts(eimg.interp);
+      uart_puts("' not found on the FAT16 root\n");
+      return -ENOENT;
+    }
+    if (isz > USER_LIB_SLOT_SIZE) {
+      uart_puts("elf loader: interpreter '");
+      uart_puts(eimg.interp);
+      uart_puts("' is larger than one USER_LIB slot\n");
+      return -ENOSPC;
+    }
+    ibuf = el_read_file(icl, isz, &ipages);
+    if (!ibuf)
+      return -ENOMEM;
+    ilen = isz;
+    rc = el_admit_interp((const uint8_t *)ibuf, ilen, &iimg, info);
+    if (rc != 0) {
+      el_free_contig(ibuf, ipages);
+      return rc;
+    }
+  }
+
+  rc = el_map_pair(as, exe, fsize, &eimg,
+                   (const uint8_t *)ibuf, ilen, eimg.has_interp ? &iimg : 0,
+                   flags, info);
+  if (ibuf) el_free_contig(ibuf, ipages);
+  return rc;
+}
+
 /* Load an ELF image (opened at `cluster`/`fsize`) into `as` per the load
  * plan.  On success fills *info (runtime entry, executable base/phdr, the
  * interpreter base when interpreted, the user sp to start with) and returns 0;
@@ -564,6 +622,9 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
  * image too large / no slot, -ENOENT missing interpreter) on any refusal — the
  * caller tears `as` down.
  *
+ * The FAT16 entry point: reads the image into a contiguous frame range, then
+ * hands it to elf_loader_load_image().  A caller that already holds the bytes
+ * (the VFS/NFS path in program_loader) calls elf_loader_load_image directly.
  * stage[span] is the laid-out image (segment bytes at vaddr_base-relative
  * offsets, holes untouched): a contiguous scratch of `span` frames.  For the
  * W0 corpus (a few hundred KiB) this eager copy is cheap and correct; it is
@@ -581,54 +642,9 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
   if (!exe_buf)
     return -ENOMEM;
 
-  struct elf_image eimg;
-  int rc = el_admit_exe((const uint8_t *)exe_buf, fsize, flags, &eimg, info);
-  if (rc != 0) {
-    el_free_contig(exe_buf, exe_pages);
-    return rc;
-  }
-
-  /* Interpreter: resolved from the FAT16 root by the PT_INTERP path.  A miss is
-   * a clear refusal, not a mysterious guest crash — the whole point of the
-   * native dynamic contract is that the kernel says what it could not find. */
-  uint64_t ibuf = 0, ipages = 0, ilen = 0;
-  struct elf_image iimg;
-  if (eimg.has_interp) {
-    uint16_t icl = 0;
-    uint32_t isz = 0;
-    if (el_resolve_file(eimg.interp, &icl, &isz) != 0) {
-      uart_puts("elf loader: interpreter '");
-      uart_puts(eimg.interp);
-      uart_puts("' not found on the FAT16 root\n");
-      el_free_contig(exe_buf, exe_pages);
-      return -ENOENT;
-    }
-    if (isz > USER_LIB_SLOT_SIZE) {
-      uart_puts("elf loader: interpreter '");
-      uart_puts(eimg.interp);
-      uart_puts("' is larger than one USER_LIB slot\n");
-      el_free_contig(exe_buf, exe_pages);
-      return -ENOSPC;
-    }
-    ibuf = el_read_file(icl, isz, &ipages);
-    if (!ibuf) {
-      el_free_contig(exe_buf, exe_pages);
-      return -ENOMEM;
-    }
-    ilen = isz;
-    rc = el_admit_interp((const uint8_t *)ibuf, ilen, &iimg, info);
-    if (rc != 0) {
-      el_free_contig(exe_buf, exe_pages);
-      el_free_contig(ibuf, ipages);
-      return rc;
-    }
-  }
-
-  rc = el_map_pair(as, (const uint8_t *)exe_buf, fsize, &eimg,
-                   (const uint8_t *)ibuf, ilen, eimg.has_interp ? &iimg : 0,
-                   flags, info);
+  int rc = elf_loader_load_image(as, (const uint8_t *)exe_buf, fsize, flags,
+                                 info);
   el_free_contig(exe_buf, exe_pages);
-  if (ibuf) el_free_contig(ibuf, ipages);
   return rc;
 }
 
@@ -675,6 +691,31 @@ int elf_loader_probe_native(uint16_t cluster, uint32_t fsize) {
                               (uint32_t)ioff) != (int)isz)
       return 0;
     return elf_interp_is_native(path, (uint32_t)(isz - 1));
+  }
+  return 0;
+}
+
+/* Buffer form of elf_loader_probe_native(), for an image the caller already
+ * holds (the VFS/NFS exec path).  Same answer, same refusal boundaries. */
+int elf_loader_probe_native_buf(const uint8_t *exe, uint32_t fsize) {
+  if (!exe || fsize < EL_PROBE_EHDR) return 0;
+  const uint8_t *eh = exe;
+  if (!(eh[0] == 0x7f && eh[1] == 'E' && eh[2] == 'L' && eh[3] == 'F')) return 0;
+  if (eh[4] != 2 /* ELFCLASS64 */) return 0;
+  if (eh[5] != 1 /* ELFDATA2LSB */) return 0;
+  const uint64_t phoff = rd64(eh + 32);
+  const uint16_t phent = rd16(eh + 54);
+  const uint16_t phnum = rd16(eh + 56);
+  if (phent != EL_PROBE_PHDR || phnum == 0 || phnum > EL_PROBE_MAX_PH) return 0;
+  if (phoff > fsize || (uint64_t)phnum * phent > fsize - phoff) return 0;
+  for (uint16_t i = 0; i < phnum; i++) {
+    const uint8_t *ph = exe + phoff + (uint64_t)i * phent;
+    if (rd32(ph + 0) != 3 /* PT_INTERP */) continue;
+    const uint64_t ioff = rd64(ph + 8);
+    const uint64_t isz = rd64(ph + 32);
+    if (isz < 2 || isz > ELF_INTERP_PATH_MAX) return 0;
+    if (ioff > fsize || isz > fsize - ioff) return 0;
+    return elf_interp_is_native((const char *)(exe + ioff), (uint32_t)(isz - 1));
   }
   return 0;
 }
