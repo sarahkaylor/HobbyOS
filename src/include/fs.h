@@ -38,7 +38,14 @@ typedef enum {
      process's open fds; read/write refuse it.  Distinct from FAT16DIR
      because there is no on-disk dir entry.  Appended last so the values
      above never shift. */
-  FILE_TYPE_PROCFD
+  FILE_TYPE_PROCFD,
+  /* GB-025 / M3: /dev/fb0 -- the framebuffer as a device node
+     (docs/linux-abi.md §9).  read/write refuse it; mmap maps the scanout
+     smem at USER_FB_BASE_V2 (the same mapping SYS_MAP_FB installs) and the
+     compat ioctl route answers FBIOGET_VSCREENINFO/FSCREENINFO +
+     FBIOBLANK.  This is what a Linux-ABI X11 client (and SDL's fbcon)
+     opens to reach the display.  Appended last: no values shift. */
+  FILE_TYPE_DEVFB
 } file_type_t;
 
 struct vm_object;
