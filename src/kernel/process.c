@@ -4489,6 +4489,14 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
       uart_puts("\n");
     }
     *err = -EAGAIN;
+    /* GB-177: this path used to return with proc_lock still held.  The caller
+       then went back to user mode holding the process table's global lock; the
+       next 100 Hz tick preempts a user-mode frame (trap.c:3490) and calls
+       schedule(), which re-takes proc_lock and self-deadlocks on that CPU --
+       measured: [LOCKFOREVER] cpu=0 owner=1 on 0x74543e78 with RIP inside
+       spinlock_acquire, reached from general_interrupt_inner.  One missing
+       release turned a full table into a frozen machine. */
+    spinlock_release_irqrestore(&proc_lock, p_flags);
     return 0;
   }
   struct process *t = &proc_table[pid];
