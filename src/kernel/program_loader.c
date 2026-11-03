@@ -557,6 +557,19 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
 #define COMPAT_MAX_ENV 24
 #define COMPAT_STR_MAX 512
 
+/* Write `s` (with its NUL) at the descending stack cursor and report its
+ * address.  Small helper so the argv/envp and the auxv strings share one
+ * placement rule: bytes go down, the array slots point up at them. */
+static int compat_put_str(struct process *child, uint64_t *sp, const char *s,
+                          uint64_t *addr) {
+  int n = 0;
+  while (s[n]) n++;
+  *sp -= (uint64_t)n + 1;
+  if (vm_kwrite(child, *sp, s, n + 1) != 0) return -EFAULT;
+  *addr = *sp;
+  return 0;
+}
+
 /* Layer the SysV AMD64 process-initialization block on a COMPAT process's
  * stack and point its entry at it:
  *
@@ -565,6 +578,13 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
  * Both arrays come from the PCB blobs (sys_readargv / sys_readenv, the same
  * source SYS_GETARGV / SYS_GETENV serve to native programs), so a Linux program
  * sees exactly what its launcher passed.
+ *
+ * Two entry points share the block:
+ *   - static compat binary: start == entry == base + e_entry, AT_BASE == 0;
+ *   - interpreter pair:     start == ld.so's entry, entry == the EXECUTABLE's
+ *                           entry (AT_ENTRY), AT_BASE == the ld.so load base.
+ * Getting AT_ENTRY wrong here is silent: ld.so would happily relocate and
+ * then jump back into itself instead of main (docs/rw-ldso-design.md §2).
  *
  * Measured need (2026-11-02): the block used to hardcode argc = 1 and an empty
  * envp.  That is enough for `hello`, but a real program dies on it: Doom reads
@@ -576,8 +596,9 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
  * vm_kwrite validates every page it touches so a bad layout faults here with a
  * line instead of a triple fault later.
  */
-static int compat_stack_block(struct process *child, int pid, uint64_t entry,
-                              uint64_t phdr, uint32_t phnum) {
+static int compat_stack_block(struct process *child, int pid, uint64_t start,
+                              uint64_t entry, uint64_t phdr, uint32_t phnum,
+                              uint64_t interp_base, const char *execfn) {
   struct process *grp = process_group(child);
   char s[COMPAT_STR_MAX];
   uint64_t argp[COMPAT_MAX_ARGV + 1];
@@ -631,6 +652,16 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
   argp[argc] = 0;
   envp[envc] = 0;
 
+  /* Auxiliary strings below the argv strings: AT_PLATFORM (glibc derives its
+     hwcaps subdirectory from it; "x86_64" is what Linux reports for this
+     class) and AT_EXECFN (the path the loader was asked to execute — Linux
+     puts the execve() argument here, not argv[0]). */
+  uint64_t platform_addr = 0, execfn_addr = 0;
+  if (compat_put_str(child, &sp, "x86_64", &platform_addr) != 0) return -EFAULT;
+  if (compat_put_str(child, &sp, (execfn && execfn[0]) ? execfn : "PROGRAM",
+                     &execfn_addr) != 0)
+    return -EFAULT;
+
   /* The fixed part of the block, laid out by ADDRESS rather than by luck:
    *
    *     rsp -> argc            (16-byte aligned, SysV)
@@ -648,10 +679,45 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
    * (argv and DISPLAY arrived); with argc=1 the guest read argv[0] == NULL and
    * an empty environment, and Doom then asked libXau for $HOME and died.
    * Computing argv_base first makes the layout independent of the counts. */
-  uint64_t w[20];
+  uint64_t w[40];                  /* 18 pairs + AT_NULL; see below */
   uint64_t rnd_addr = (sp - 16) & ~(uint64_t)0xF;
-  uint64_t auxv_addr = (rnd_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
   uint64_t arrays = (uint64_t)(argc + 1) * 8 + (uint64_t)(envc + 1) * 8;
+
+  /* The auxv set is the frozen compat contract (docs/rw-ldso-design.md §3,
+   * plan F1).  Every entry is required by real glibc ld.so 2.31:
+   *   AT_PHDR/AT_PHNUM/AT_PHENT  let it read the exe's dynamic section from
+   *                              the kernel's mapping (it never re-opens it);
+   *   AT_BASE                    where ld.so itself was mapped;
+   *   AT_ENTRY                   where to transfer after relocation;
+   *   AT_SECURE/AT_UID..EGID     credential/secure-mode queries;
+   *   AT_PLATFORM                hwcaps subdirectory name;
+   *   AT_HWCAP (0)               baseline x86_64 (SSE2) — never a guess at
+   *                              optional ISA bits the kernel has not probed;
+   *   AT_CLKTCK (100)            sysconf(_SC_CLK_TCK);
+   *   AT_RANDOM                  stack-guard seed (16 bytes);
+   *   AT_EXECFN                  the program path for diagnostics. */
+  int k = 0;
+  w[k++] = 3;  w[k++] = phdr;          /* AT_PHDR   */
+  w[k++] = 4;  w[k++] = 56;            /* AT_PHENT  */
+  w[k++] = 5;  w[k++] = (uint64_t)phnum; /* AT_PHNUM */
+  w[k++] = 6;  w[k++] = 4096;          /* AT_PAGESZ */
+  w[k++] = 7;  w[k++] = interp_base;   /* AT_BASE (0 for a static image) */
+  w[k++] = 8;  w[k++] = 0;             /* AT_FLAGS  */
+  w[k++] = 9;  w[k++] = entry;         /* AT_ENTRY: the EXECUTABLE's entry */
+  w[k++] = 11; w[k++] = 0;             /* AT_UID    */
+  w[k++] = 12; w[k++] = 0;             /* AT_EUID   */
+  w[k++] = 13; w[k++] = 0;             /* AT_GID    */
+  w[k++] = 14; w[k++] = 0;             /* AT_EGID   */
+  w[k++] = 15; w[k++] = platform_addr; /* AT_PLATFORM -> "x86_64" */
+  w[k++] = 16; w[k++] = 0;             /* AT_HWCAP  */
+  w[k++] = 17; w[k++] = 100;           /* AT_CLKTCK */
+  w[k++] = 23; w[k++] = 0;             /* AT_SECURE */
+  w[k++] = 25; w[k++] = rnd_addr;      /* AT_RANDOM */
+  w[k++] = 26; w[k++] = 0;             /* AT_HWCAP2 */
+  w[k++] = 31; w[k++] = execfn_addr;   /* AT_EXECFN */
+  w[k++] = 0;  w[k++] = 0;             /* AT_NULL   */
+
+  uint64_t auxv_addr = (rnd_addr - (uint64_t)k * 8) & ~(uint64_t)0xF;
   uint64_t argv_addr = (auxv_addr - arrays) & ~(uint64_t)0x7;
   if ((argv_addr & 0xF) == 0) argv_addr -= 8; /* argv[0] must be 8 mod 16 */
   uint64_t envp_addr = argv_addr + (uint64_t)(argc + 1) * 8;
@@ -660,24 +726,7 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
   net_get_random_bytes(rnd, 16);
   if (vm_kwrite(child, rnd_addr, rnd, 16) != 0) return -EFAULT;
 
-  w[0] = 6;                        /* AT_PAGESZ */
-  w[1] = 4096;
-  w[2] = 3;                        /* AT_PHDR   */
-  w[3] = phdr;
-  w[4] = 5;                        /* AT_PHNUM  */
-  w[5] = (uint64_t)phnum;
-  w[6] = 9;                        /* AT_ENTRY  */
-  w[7] = entry;
-  w[8] = 7;                        /* AT_BASE: 0 for a static image */
-  w[9] = 0;
-  w[10] = 25;                      /* AT_RANDOM */
-  w[11] = rnd_addr;
-  w[12] = 31;                      /* AT_EXECFN: argv[0], what /proc/self/exe
-                                      answers for a static binary */
-  w[13] = name_addr;
-  w[14] = 0;                       /* AT_NULL */
-  w[15] = 0;
-  if (vm_kwrite(child, auxv_addr, w, 16 * 8) != 0) return -EFAULT;
+  if (vm_kwrite(child, auxv_addr, w, k * 8) != 0) return -EFAULT;
   if (vm_kwrite(child, argv_addr, argp, (int)((argc + 1) * 8)) != 0)
     return -EFAULT;
   if (vm_kwrite(child, envp_addr, envp, (int)((envc + 1) * 8)) != 0)
@@ -687,7 +736,11 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
   uint64_t argcw = (uint64_t)argc;
   if (vm_kwrite(child, sp, &argcw, 8) != 0) return -EFAULT;
 
-  process_set_entry(pid, entry, sp);
+  /* start != entry for an interpreter pair: enter ld.so, tell it about the
+   * executable.  All GPRs on a fresh PCB are zero (process_create_internal_v2
+   * clears context[0..35]), so ld.so's %rdx — the rtld_fini slot glibc
+   * ignores at _start and sets itself before calling the exe — is 0. */
+  process_set_entry(pid, start, sp);
   return 0;
 }
 
@@ -926,6 +979,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   uint32_t elf_phnum = 0;
   uint64_t elf_sp = USER_MAIN_STK_TOP_V2;
   uint64_t elf_interp_base = 0;
+  uint64_t elf_exe_entry = 0;
   int elf_native = 0;
   if (is_elf) {
     /* M0 freeze (docs/shared-libs.md §4 lane B): which track does this image
@@ -936,8 +990,14 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        message.  aarch64 has no compat track, so every ELF there is native. */
     uint32_t lflags = 0;
 #if defined(__x86_64__)
+    /* Two tracks, and the probe decides: an image naming /LDHOBBY.SO is the
+       native dynamic track; everything else gets the explicit Linux-interp
+       opt-in, which is a no-op for a static compat binary and the whole
+       point for a glibc one (docs/rw-ldso-design.md). */
     if (elf_loader_probe_native(f.fat16.entry.start_cluster, fsize) == 1)
       lflags = ELF_LOAD_NATIVE;
+    else
+      lflags = ELF_LOAD_COMPAT_INTERP;
 #else
     lflags = ELF_LOAD_NATIVE;
 #endif
@@ -950,6 +1010,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC / -ENOENT */
     }
     elf_entry = elf_info.entry;
+    elf_exe_entry = elf_info.exe_entry;
     elf_phdr = elf_info.phdr;
     elf_phnum = elf_info.phnum;
     elf_sp = elf_info.sp;
@@ -964,7 +1025,9 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       kl_hex(&k, elf_info.interp_base);
       kl_s(&k, " exe_base=");
       kl_hex(&k, elf_info.base);
-      kl_s(&k, " entry=");
+      kl_s(&k, " exe_entry=");
+      kl_hex(&k, elf_exe_entry);
+      kl_s(&k, " start=");
       kl_hex(&k, elf_entry);
       kl_c(&k, '\n');
       kl_emit(&k);
@@ -1055,7 +1118,8 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        auxv, %rsp).  Two measured walls live in its comment: musl needs
        AT_RANDOM (GB-163) and a real program needs its own argv/envp (Doom's
        "-iwad" and DISPLAY). */
-    if (compat_stack_block(child, pid, elf_entry, elf_phdr, elf_phnum) != 0) {
+    if (compat_stack_block(child, pid, elf_entry, elf_exe_entry, elf_phdr,
+                           elf_phnum, elf_interp_base, filename) != 0) {
       uart_puts("v2 loader: startup block write failed\n");
       process_free(pid);
       return -EFAULT;

@@ -651,6 +651,12 @@ static int l_fd_fcntl(struct process *p, struct trap_frame *tf) {
  *   everything else (access mode, O_CREAT/O_EXCL/O_TRUNC/O_APPEND) keeps the
  *               Linux bit values, which fs.c's K_O_* mirror.
  *
+ * dirfd is compared as an int (low 32 bits): measured on the M1 gate, glibc's
+ * ld.so materialises AT_FDCWD with a 32-bit `mov`, leaving the upper half of
+ * %rdi zero, so a full-width -100 test read +4294967196 and every open
+ * answered -ENOTSUP (ld.so then reported "libc.so.6: cannot open shared
+ * object file: Error 95").
+ *
  * A real dirfd (not AT_FDCWD) is refused with -ENOTSUP unless the path is
  * absolute: an fd is a slot in the file table, not a node in a namespace, and
  * this VFS has no way to name the directory an fd refers to.  That is the same
