@@ -45,7 +45,19 @@ extern "C" {
   int vfscanf(FILE *stream, const char *format, va_list ap);
   int vsscanf(const char *str, const char *format, va_list ap);
 
-  /* --- FILE layer --- */
+  /* --- FILE layer --- */  /* M4/L5: process pipes (glibc decl).  HobbyOS has fork/exec but no
+   * pipe-based popen(); the ddebug gallium driver shells out to parsers for
+   * its .csv dumps, which guest builds never enable.  Fail-closed in
+   * gl_stubs.c: popen returns NULL / pclose returns -1. */
+  FILE *popen(const char *command, const char *type);
+  int pclose(FILE *stream);
+
+  /* M4/L5: POSIX.1-2008 open_memstream.  Mesa's util/u_memstream.c wraps it
+   * (GLSL error strings).  Declared here; gl_stubs.c supplies a
+   * growable-buffer implementation over HobbyOS's FILE layer. */
+  FILE *open_memstream(char **bufp, size_t *sizep);
+
+
   FILE *fopen(const char *path, const char *mode);
   FILE *freopen(const char *path, const char *mode, FILE *stream);
   FILE *fdopen(int fd, const char *mode);
