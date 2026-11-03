@@ -6,10 +6,10 @@ libglvnd and no shader cache. The kernel gains no graphics ABI: this is a
 userspace DSO (plan AD-4/AD-6).
 
 ```
-tools/mesa/build-hobbyos.sh                 # full build, ~6 min on 24 cores
+tools/mesa/build-hobbyos.sh                 # full build, 45 s on 24 cores
 tools/mesa/build-hobbyos.sh --gen-only      # stop after host code generation
-tools/mesa/build-hobbyos.sh --self-contained  # link HobbyOS libc instead of
-                                              # resolving libc from glibc
+tools/mesa/build-hobbyos.sh --self-contained  # hobbyos ABI: link HobbyOS libc
+tools/mesa/build-hobbyos.sh --abi hobbyos   # same, without the libc.a link
 ```
 
 Artifacts land in `obj/mesa/lib/`:
@@ -72,10 +72,26 @@ Mesa's own source: `glx_api.c` walks `Display->ext_procs` (a private libX11
 list) to hook `XCloseDisplay`. The compat libX11 has no such layout, so the
 hook is compiled out — the display record is freed at process exit instead.
 
+## Two ABIs, and why the default is glibc's
+
+`pthread_mutex_t` is **8 bytes** in HobbyOS's `<pthread.h>` and **40 bytes** in
+glibc's, and Mesa stores pthread types *by value* (`struct xmesa_display`'s
+`mtx_t`, `std::mutex` in libc++'s GLSL-facing code).  A DSO compiled against
+HobbyOS headers but loaded into a glibc process therefore writes 40 bytes over
+an 8-byte field: measured, `mtx_init()` zeroed the whole display struct and the
+first `glXChooseFBConfig` segfaulted at `xmdpy->screen->is_format_supported`.
+
+So the DSO's headers must match the *runtime* it will be loaded into:
+
+| flavour | headers | libc at run time | used for |
+|---|---|---|---|
+| default (`--abi glibc`) | glibc's (`--target=x86_64-linux-gnu`), libc++ 21.1.8 rebuilt -fPIC | the compat class's pinned glibc 2.31 | the shipped `libGL.so.1` |
+| `--abi hobbyos` (`--self-contained`) | HobbyOS sysroot + `tools/mesa/include` shims | HobbyOS libc, linked in | the no-glibc experiment |
+
 ## The two link flavours
 
 * **Default (compat-resolved).** `libGL.so.1` has no `DT_NEEDED` and leaves
-  258 symbols undefined. They resolve from the *compat class's* global scope:
+  252 symbols undefined. They resolve from the *compat class's* global scope:
   the pinned glibc 2.31 (`libc`, `libm`, `libpthread`, `libdl`, `librt`),
   lane L4's `libX11.so.6`, `libgcc_s.so.1`, plus `__tls_get_addr` from
   `ld.so`. Two symbols (TLS) are why the note "ELF TLS is a hard blocker"
@@ -85,7 +101,7 @@ hook is compiled out — the display record is freed at process exit instead.
   `src/user/{libc,malloc}.c` rebuilt `-fPIC` (the tree's `obj/intel/libc.a`
   is `-mcmodel=large` and cannot enter a DSO: measured `R_X86_64_64 against
   local symbol`), plus `gl_stubs.c`. Result: 0 `DT_NEEDED`, 1378 exports,
-  **45 undefined** — 23 libX11 + 3 libXext + 13 libc/libm left
+  **67 undefined** — 23 libX11 + 3 libXext + 13 libc/libm left
   (`__cxa_atexit`, `__cxa_finalize`, the double `sin/cos/exp/...` that
   `math.c` lacks, `sched_getaffinity`) + 4 `__tls_*` symbols that the
   *native* loader's linker script defines and a dlopened DSO cannot see.
@@ -126,9 +142,25 @@ The script fails the build if any of these stops being true:
 ```
 DT_NEEDED: 0
 exports:   1378 (glXGetProcAddress, glXSwapBuffers, glGetString present)
-size:      19,211,944 bytes stripped
-undefined: 258 — every one attributable to glibc/libX11/libgcc_s/ld.so
+size:      20,070,984 bytes stripped
+undefined: 252 — every one attributable to glibc/libX11/libgcc_s/ld.so
 ```
+
+and, beyond the link, the DSO **renders**: `cube.c` (the host proof's own
+GLSL-330 textured cube, linked against `obj/mesa/lib/libGL.so.1`) on Xvfb at
+1280x720 reports
+
+```
+GL_RENDERER : softpipe
+GL_VERSION  : 3.3 (Core Profile) Mesa 26.2.6      GLSL: 3.30
+readback 1280x720: fnv1a64=0xc0b8ac43346002eb glGetError=0x0
+                   non-background=291572/921600 (31.6%)  colours=364
+timed: 130 frames in 4.014 s => 32.39 fps (client-side, includes swap)
+```
+
+— byte-identical to the host build's reference checksum `0xc0b8ac43346002eb`,
+291 572 covered pixels and 364 distinct colours, i.e. the cross-built DSO is
+the same renderer, not merely a DSO that loads.
 
 `obj/mesa/obj/tu-summary.json` records the per-TU result (835/835 compiling on
 a clean run); `obj/mesa/log/` has the exact command line and the compiler's
