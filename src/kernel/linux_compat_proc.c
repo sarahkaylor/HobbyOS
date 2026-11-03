@@ -1219,10 +1219,59 @@ static int l_proc_rt_sigtimedwait(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, -EAGAIN);
 }
 
+
+/* statfs(137).  The compat class's processes see one filesystem; report the
+ * FAT page size and Linux's 255-byte name limit with free space taken from a
+ * zeroed counter (Mono only asks to decide whether it can write a temp file).
+ * Layout is the 120-byte x86-64 struct statfs. */
+struct l_statfs {
+  int64_t f_type, f_bsize;
+  uint64_t f_blocks, f_bfree, f_bavail, f_files, f_ffree;
+  int32_t f_fsid[2];
+  int64_t f_namelen, f_frsize, f_flags, f_spare[4];
+};
+static int l_proc_statfs(struct process *p, struct trap_frame *tf) {
+  uint64_t upath = l_arg(tf, 0);
+  uint64_t uout = l_arg(tf, 1);
+  char path[VFS_PATH_MAX];
+  if (l_copy_cstr(p, path, upath, sizeof path) != 0) return l_ret(tf, -EFAULT);
+  if (!uout) return l_ret(tf, -EFAULT);
+  struct l_statfs st;
+  for (unsigned i = 0; i < sizeof st; i++) ((uint8_t *)&st)[i] = 0;
+  st.f_type = 0x4d44;          /* MSDOS_SUPER_MAGIC */
+  st.f_bsize = 4096;
+  st.f_namelen = 255;
+  st.f_frsize = 4096;
+  if (l_copy_to_user(p, uout, &st, sizeof st) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, 0);
+}
+
+/* sched_get_priority_max/min(146/147): SCHED_OTHER has the single priority 0,
+ * so Linux's answer for the default policy is 0 for both. */
+static int l_proc_sched_prio_max(struct process *p, struct trap_frame *tf) {
+  (void)p; (void)tf; return l_ret(tf, 0);
+}
+static int l_proc_sched_prio_min(struct process *p, struct trap_frame *tf) {
+  (void)p; (void)tf; return l_ret(tf, 0);
+}
+
+/* sched_rr_get_interval(148): no SCHED_RR class exists, so the interval is 0. */
+static int l_proc_sched_rr_interval(struct process *p, struct trap_frame *tf) {
+  uint64_t uout = l_arg(tf, 1);
+  struct { int64_t sec, nsec; } ts = {0, 0};
+  if (!uout) return l_ret(tf, -EFAULT);
+  if (l_copy_to_user(p, uout, &ts, sizeof ts) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, 0);
+}
+
 const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"},
   {L_SYS_clock_getres, l_proc_clock_getres, "clock_getres"},
   {L_SYS_sched_getparam, l_proc_sched_getparam, "sched_getparam"},
   {L_SYS_sched_getscheduler, l_proc_sched_getscheduler, "sched_getscheduler"},
   {L_SYS_rt_sigtimedwait, l_proc_rt_sigtimedwait, "rt_sigtimedwait"},
+  {L_SYS_statfs, l_proc_statfs, "statfs"},
+  {L_SYS_sched_get_priority_max, l_proc_sched_prio_max, "sched_get_priority_max"},
+  {L_SYS_sched_get_priority_min, l_proc_sched_prio_min, "sched_get_priority_min"},
+  {L_SYS_sched_rr_get_interval, l_proc_sched_rr_interval, "sched_rr_get_interval"},
   L_SYSENT_END
 };
