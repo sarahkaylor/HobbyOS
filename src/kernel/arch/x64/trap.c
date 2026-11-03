@@ -2819,6 +2819,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_input_ioctl(tf);
   } else if (syscall_num == SYS_INPUT_READ) {
     sys_input_read(tf);
+  } else if (syscall_num == SYS_EVDEV_PUSH) {
+    /* GB-173: desktop -> owner of /dev/input/event0 (rdi=code, rsi=value). */
+    extern int hb_evdev_push(unsigned short, int);
+    tf->regs[0] = (uint64_t)(int64_t)hb_evdev_push((unsigned short)tf->regs[5],
+                                                   (int)tf->regs[4]);
   } else if (syscall_num == SYS_AVAILABLE) {
     sys_available(tf);
   } else if (syscall_num == SYS_READ_DIR) {
