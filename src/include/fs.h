@@ -25,6 +25,7 @@ typedef enum {
   FILE_TYPE_DEVNULL,  /**< GB-017: /dev/null — write-sink, EOF-on-read */
   FILE_TYPE_DEVURANDO,/**< GB-017: /dev/urandom — entropy file (F1.4 pool) */
   FILE_TYPE_DEVINPUT, /**< GB-171: /dev/input/event0 — evdev key records */
+  FILE_TYPE_DEVFB,    /**< GB-167: /dev/fb0 — framebuffer info ioctls, write-sink */
   /* SEC-6: freshly allocated slot whose real type the caller has not set
      yet.  Distinct from FILE_TYPE_EMPTY (= free): an abandoned UNINIT slot
      must never be mistaken for a usable FAT16 file with garbage fields.
@@ -321,6 +322,7 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
 /* Fill *st for an open fd or a path.  Return 0 on success, -1 with *errp
  * set (EBADF/ENOENT/EINVAL). */
 int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp);
+int file_fd_is_devfb(struct process *p, int fd);   /* GB-167: /dev/fb0 node? */
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp);
 

@@ -16,6 +16,43 @@
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
 
+/* GB-173: the process that owns the evdev key channel.  A static-musl game
+   draws straight into /dev/fb0 and has no desktop window, so "focused window"
+   cannot route its keys; whoever opened /dev/input/event0 last is the owner
+   and receives what the desktop handles.  Cleared when the process exits (the
+   queue dies with the struct, so a stale pointer would be fatal). */
+static struct process *evdev_owner;
+static int evdev_owner_pid = -1;
+
+int hb_evdev_push(unsigned short code, int value) {
+  struct process *p = evdev_owner;
+  if (!p) return -ENODEV;
+  /* GB-173 hardening: the pointer is only valid while the same pid owns it.
+     A recycled process slot would otherwise receive (and overwrite) a queue
+     that belongs to someone else. */
+  if (p->pid != evdev_owner_pid || p->pid <= 0) {
+    evdev_owner = 0;
+    evdev_owner_pid = -1;
+    return -ENODEV;
+  }
+  int next = (p->evdev_qhead + 1) % 64;
+  if (next == p->evdev_qtail) return -EAGAIN; /* full: drop, never block */
+  /* GB-173: nothing is delivered until the owner has polled the node once.
+     The launch ENTER is otherwise the engine's first key, mid-initialisation. */
+  if (!p->evdev_read_once) return -EAGAIN;
+  p->evdev_q[p->evdev_qhead].code = code;
+  p->evdev_q[p->evdev_qhead].value = value;
+  p->evdev_qhead = next;
+  return 0;
+}
+
+void hb_evdev_owner_clear(struct process *p) {
+  if (p && evdev_owner == p) {
+    evdev_owner = 0;
+    evdev_owner_pid = -1;
+  }
+}
+
 /* GB-108: fds 0-2 are the process's stdio and must never be handed out by an
  * implicit fd allocation (open/pipe/socket/dup/accept/memfd/msg-install).
  * A process launched by the boot wave starts with open_fds[0..2] == -1, and
@@ -185,6 +222,11 @@ int file_open(struct process *cur, const char *filename, int flags) {
                    rest[6] == '/' && rest[7] == 'e' && rest[8] == 'v' &&
                    rest[9] == 'e' && rest[10] == 'n' && rest[11] == 't' &&
                    rest[12] == '0' && rest[13] == '\0');
+    /* GB-167: /dev/fb0 — the compat framebuffer node.  Opening it is free; the
+       mode comes from ioctl(FBIOGET_VSCREENINFO), which the Linux-ABI ioctl
+       arm routes to hb_fb_ioctl_route(). */
+    int isfb = (rest[0] == '/' && rest[1] == 'f' && rest[2] == 'b' &&
+                rest[3] == '0' && rest[4] == '\0');
     if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
       f->open_flags = (uint32_t)flags;
@@ -193,6 +235,15 @@ int file_open(struct process *cur, const char *filename, int flags) {
       f->open_flags = (uint32_t)flags;
     } else if (isinput) {
       f->type = FILE_TYPE_DEVINPUT;
+      f->open_flags = (uint32_t)flags;
+      /* GB-173: opening the node claims the key channel for this process. */
+      evdev_owner = cur;
+      evdev_owner_pid = cur->pid;
+      cur->evdev_qhead = 0;
+      cur->evdev_qtail = 0;
+      cur->evdev_read_once = 0;
+    } else if (isfb) {
+      f->type = FILE_TYPE_DEVFB;
       f->open_flags = (uint32_t)flags;
     } else {
       f->type = FILE_TYPE_EMPTY;
@@ -1425,6 +1476,18 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
   return rc;
 }
 
+/* GB-167: is this fd the /dev/fb0 node?  The Linux-ABI ioctl arm needs it to
+   route FBIO* requests to the framebuffer machinery instead of ENOTTY. */
+int file_fd_is_devfb(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return 0;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_EMPTY) return 0;
+  return f->type == FILE_TYPE_DEVFB;
+}
+
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp) {
   (void)p;
@@ -1675,6 +1738,25 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
        DG_GetKey expects.  A partial trailing record is not returned. */
     int max = size / (int)sizeof(struct hb_input_event);
     if (max <= 0) return 0;
+    /* GB-173: the owner is in its input loop — keys may be delivered now. */
+    if (cur == evdev_owner) cur->evdev_read_once = 1;
+    /* GB-173: keys the desktop forwarded to this process come first.  Without
+       this the desktop's own get_events() has already emptied the global ring
+       and the game sees nothing. */
+    if (cur == evdev_owner) {
+      int n = 0;
+      while (n < max && cur->evdev_qtail != cur->evdev_qhead) {
+        unsigned short code = cur->evdev_q[cur->evdev_qtail].code;
+        int value = cur->evdev_q[cur->evdev_qtail].value;
+        cur->evdev_qtail = (cur->evdev_qtail + 1) % 64;
+        extern uint64_t timer_get_ms(void);
+        uint64_t t = timer_get_ms();
+        hb_input_fill_event((struct hb_input_event *)buf + n, 1, code, value,
+                            t / 1000u, (t % 1000u) * 1000u);
+        n++;
+      }
+      if (n > 0) return n * (int)sizeof(struct hb_input_event);
+    }
     struct virtio_input_event raw[32];
     int want = max > 32 ? 32 : max;
     int got = virtio_input_get_events(raw, want);
@@ -1686,6 +1768,8 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
                           raw[i].code, raw[i].value,
                           t / 1000u, (t % 1000u) * 1000u);
     return got * (int)sizeof(struct hb_input_event);
+  } else if (f->type == FILE_TYPE_DEVFB) {
+    return 0; /* GB-167: no readback of the framebuffer (Linux EINVAL; EOF here) */
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     if (size <= 0) return 0;
     return net_get_random_bytes(buf, (uint32_t)size); /* never short */
@@ -1864,6 +1948,10 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return size; /* /dev/null swallows any write, accepts it fully */
+  } else if (f->type == FILE_TYPE_DEVFB) {
+    /* GB-167: pixel writes are accepted and counted; compositing them onto a
+       window is the next child (the node has no surface to own yet). */
+    return size;
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     return -EINVAL; /* writes to /dev/urandom are not supported (Linux EINVAL) */
   } else if (f->type == FILE_TYPE_FAT16) {

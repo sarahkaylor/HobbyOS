@@ -1072,6 +1072,44 @@ static void compat_writev(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)total;
 }
 
+/* GB-169: readv(19).  musl's stdio reads through readv(fd, iov, 2) — a buffered
+   file read is a two-segment iovec — so with no arm every fread() returned
+   -ENOSYS: DOOM opened doom1.wad and then rejected its magic ("doesn't have
+   IWAD or PWAD id") even though the same file read()s fine.  Mirrors
+   compat_writev's iovec walk and parked-pipe handling. */
+static void compat_readv(struct trap_frame *tf) {
+  struct process *c = current_process();
+  int fd = (int)tf->regs[5];
+  uint64_t iov = tf->regs[4];
+  long cnt = (long)tf->regs[3];
+  if (cnt < 0 || cnt > 1024) { tf->regs[0] = (uint64_t)(int64_t)-EINVAL; return; }
+  if (cnt == 0) { tf->regs[0] = 0; return; }
+  if (!sys_user_range_ok(iov, (uint64_t)cnt * 16)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+  int64_t total = 0;
+  for (long i = 0; i < cnt; i++) {
+    uint64_t base = 0, len = 0;
+    if (vm_user_read(c, iov + (uint64_t)i * 16, &base, 8) != 0 ||
+        vm_user_read(c, iov + (uint64_t)i * 16 + 8, &len, 8) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
+    }
+    if (len == 0) continue;
+    if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT;
+    if (!sys_user_range_ok(base, len)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+    int r = file_read(c, fd, (void *)(uintptr_t)base, (int)len, tf);
+    if (r == -2) {
+      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if ((tf->cs & 3) == 3) tf->elr -= 2;
+      save_context(c, tf);
+      schedule(tf, 0);
+      return;
+    }
+    if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : r); return; }
+    total += r;
+    if ((uint64_t)r < len) { tf->regs[0] = (uint64_t)total; return; }
+  }
+  tf->regs[0] = (uint64_t)total;
+}
+
 extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid);
 extern int load_and_run_program_in_scheduler_args(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid, const char *args);
 extern struct process *process_get_pcb(int pid);
@@ -2334,6 +2372,64 @@ static int compat_timeout_ms(uint64_t ptr, int is_timespec, int *err) {
   return (int)(a * 1000 + (b + 999) / 1000);
 }
 
+/* GB-168: musl's usleep() lands on nanosleep({sec,nsec}, rem).  The kernel's
+   sleep syscall (SYS_SLEEP) takes a millisecond count in rdi, so convert the
+   timespec and hand it over.  `rem` is left untouched: the call is not
+   restarted.  Without this arm usleep() returns -ENOSYS at once and the W4
+   tick loop busy-spins (DG_SleepMs was a no-op too). */
+static void compat_nanosleep(struct trap_frame *tf) {
+  uint64_t req = tf->regs[5];
+  int err = 0;
+  int ms = compat_timeout_ms(req, 1, &err);
+  if (err) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  if (ms <= 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uint32_t)ms;
+  tf->regs[0] = 0; /* Linux's nanosleep returns 0; sys_sleep's blocking path
+                      leaves rax holding the syscall number otherwise */
+  sys_sleep(tf);
+}
+
+/* GB-170: musl's nanosleep() — and therefore usleep() — does NOT use syscall
+   35.  Measured in the rebuilt musl DoomW4.elf: nanosleep() calls musl's
+   clock_nanosleep, whose body loads 0xe6 (230) into rax.  The compat table had
+   neither arm, so usleep() returned -ENOSYS instantly.  Convert the relative
+   form into the kernel's millisecond SYS_SLEEP; TIMER_ABSTIME is rejected
+   (SYS_SLEEP has no absolute deadline) and unknown clock ids are -EINVAL
+   rather than a silent wrong sleep. */
+static void compat_clock_nanosleep(struct trap_frame *tf) {
+  int clk = (int)tf->regs[5];        /* rdi: clockid */
+  int flags = (int)tf->regs[4];      /* rsi: flags   */
+  uint64_t req = tf->regs[3];        /* rdx: req     */
+  int err = 0;
+  if (flags & 1) { /* TIMER_ABSTIME */
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  /* CLOCK_REALTIME(0), CLOCK_MONOTONIC(1), CLOCK_BOOTTIME(4). */
+  if (clk != 0 && clk != 1 && clk != 4) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  int ms = compat_timeout_ms(req, 1, &err);
+  if (err) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  if (ms <= 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uint32_t)ms;
+  tf->regs[0] = 0; /* clock_nanosleep returns 0 on success (restart-safe) */
+  sys_sleep(tf);
+}
+
 static void compat_select(struct trap_frame *tf) {
   int err = 0;
   int ms = compat_timeout_ms(tf->regs[7], 0, &err);
@@ -2506,6 +2602,17 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            ("W_GetNumForName: PNAMES not found!" at a WAD it had just opened).
            Linux and HobbyOS agree on (fd, offset, whence). */
         case 8:  syscall_num = SYS_LSEEK; break;   /* lseek(fd, off, wh) */
+        /* GB-169: fsync(74) on an /dev/fb0 fd presents the mapped surface — the
+           "commit" verb a framebuffer program needs, since the native path
+           (SYS_FLUSH_FB) is not reachable from a Linux-ABI process.  Any other
+           fd is a success no-op: there is no writeback cache to drain. */
+        case 74: {
+          extern int file_fd_is_devfb(struct process *, int);
+          if (file_fd_is_devfb(current_process(), (int)tf->regs[5]))
+            virtio_gpu_flush();
+          tf->regs[0] = 0;
+          return;
+        }
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
         /* GB-021: musl pthread_create -> clone(2); pthread mutex/join ->
            futex(2).  Both are Linux-shaped and handled directly (the clone
@@ -2520,6 +2627,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
           tf->regs[0] = (uint64_t)(int64_t)(current_process() ? current_process()->pid : -1);
           return;
         case 228: syscall_num = SYS_GETTIME; break; /* clock_gettime(clk,ts) */
+        case 35:  compat_nanosleep(tf); return;    /* nanosleep(req, rem)   */
+        case 230: compat_clock_nanosleep(tf); return; /* clock_nanosleep(clk,fl,req,rem) */
         case 100: {                          /* gettimeofday(timeval*, tz*) */
           uint64_t tv = tf->regs[5];
           uint32_t ms = (uint32_t)timer_get_ms();
@@ -2556,6 +2665,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         /* GB-141 (V2 mechanism): musl stdio calls writev(20), not write — the compat
            table had no case 20, so every printf byte hit -ENOSYS. */
         case 20: compat_writev(tf); return;
+        /* GB-169: the read half — musl's fread() is readv(19) with a two-segment
+           iovec; without it a file opens but every buffered read fails, which is
+           how DOOM rejected a WAD it had just opened. */
+        case 19: compat_readv(tf); return;
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
         /* GB-019 clause 4: Linux fcntl(72)(fd, cmd, arg) SHARES file_fcntl with the
@@ -2639,6 +2752,20 @@ void sync_lower_handler_c(struct trap_frame *tf) {
             tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY */
             return;
           }
+          /* GB-167: the FBIO family on /dev/fb0.  Only an fb node answers these;
+             any other fd keeps the honest ENOTTY.  sys_fb_ioctl() takes its
+             request/arg in rdi/rsi, so shuffle the Linux (fd, req, arg) into it. */
+          if (ireq == 0x4600 || ireq == 0x4601 || ireq == 0x4611) {
+            extern int file_fd_is_devfb(struct process *, int);
+            if (file_fd_is_devfb(c16, cfd)) {
+              tf->regs[5] = (uint64_t)(int64_t)ireq;
+              tf->regs[4] = iarg;
+              sys_fb_ioctl(tf);
+              return;
+            }
+            tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY: not an fb node */
+            return;
+          }
           tf->regs[0] = (uint64_t)(int64_t)(-25);       /* -ENOTTY: node lacks this request */
           return;
         }
@@ -2692,6 +2819,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_input_ioctl(tf);
   } else if (syscall_num == SYS_INPUT_READ) {
     sys_input_read(tf);
+  } else if (syscall_num == SYS_EVDEV_PUSH) {
+    /* GB-173: desktop -> owner of /dev/input/event0 (rdi=code, rsi=value). */
+    extern int hb_evdev_push(unsigned short, int);
+    tf->regs[0] = (uint64_t)(int64_t)hb_evdev_push((unsigned short)tf->regs[5],
+                                                   (int)tf->regs[4]);
   } else if (syscall_num == SYS_AVAILABLE) {
     sys_available(tf);
   } else if (syscall_num == SYS_READ_DIR) {
