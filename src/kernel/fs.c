@@ -37,6 +37,9 @@ int hb_evdev_push(unsigned short code, int value) {
   }
   int next = (p->evdev_qhead + 1) % 64;
   if (next == p->evdev_qtail) return -EAGAIN; /* full: drop, never block */
+  /* GB-173: nothing is delivered until the owner has polled the node once.
+     The launch ENTER is otherwise the engine's first key, mid-initialisation. */
+  if (!p->evdev_read_once) return -EAGAIN;
   p->evdev_q[p->evdev_qhead].code = code;
   p->evdev_q[p->evdev_qhead].value = value;
   p->evdev_qhead = next;
@@ -233,6 +236,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
       evdev_owner_pid = cur->pid;
       cur->evdev_qhead = 0;
       cur->evdev_qtail = 0;
+      cur->evdev_read_once = 0;
     } else {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
@@ -1714,6 +1718,8 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
        DG_GetKey expects.  A partial trailing record is not returned. */
     int max = size / (int)sizeof(struct hb_input_event);
     if (max <= 0) return 0;
+    /* GB-173: the owner is in its input loop — keys may be delivered now. */
+    if (cur == evdev_owner) cur->evdev_read_once = 1;
     /* GB-173: keys the desktop forwarded to this process come first.  Without
        this the desktop's own get_events() has already emptied the global ring
        and the game sees nothing. */
