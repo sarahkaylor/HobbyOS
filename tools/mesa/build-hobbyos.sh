@@ -634,20 +634,33 @@ link_libgl() {
     local piclibc=${WORK}/libc-pic.a
     if [ ! -f "$piclibc" ]; then
       note "rebuilding HobbyOS libc with -fPIC for the self-contained DSO"
-      local cfiles; cfiles=$(ls "${TREE}"/src/libc/src/*.c)
+      # regex_internal.c / regcomp.c / regexec.c are #included by regex.c,
+      # not translation units of their own (the tree's Makefile archives only
+      # libc_regex.o); compiling them standalone fails on types that regex.c
+      # defines first.
+      local cfiles; cfiles=$(ls "${TREE}"/src/libc/src/*.c | grep -vE '/(regex_internal|regcomp|regexec)\.c$')
       local pdir=${WORK}/libc-pic; mkdir -p "$pdir"
+      # Mirror the Makefile's USER_CFLAGS include order exactly: src/include
+      # carries kernel-flavoured headers (regex.h, ...) that must NOT shadow
+      # the libc ones, so src/user_include comes first as it does there.
+      local libc_cflags="--target=x86_64-none-elf -ffreestanding -nostdinc
+        -isystem ${CLANG_RES} -I ${TREE}/src/user_include
+        -I ${TREE}/src/user_include/graphics -I ${TREE}/src/include
+        -I ${TREE}/src/libc/include -mno-red-zone -fno-stack-protector
+        -fPIC -O2 -w"
       for f in $cfiles; do
-        ${CC} --target=x86_64-none-elf -ffreestanding -nostdinc \
-          -isystem "$CLANG_RES" -I "${TREE}/src/include" \
-          -I "${TREE}/src/libc/include" -I "${TREE}/src/user_include" \
-          -mno-red-zone -fno-stack-protector -fPIC -O2 -w \
-          -c "$f" -o "${pdir}/$(basename "$f" .c).o" || true
+        # shellcheck disable=SC2086
+        ${CC} $libc_cflags -c "$f" -o "${pdir}/$(basename "$f" .c).o" \
+          || note "libc-pic: $(basename "$f") did not rebuild (skipped)"
       done
-      ${CC} --target=x86_64-none-elf -ffreestanding -nostdinc \
-        -isystem "$CLANG_RES" -I "${TREE}/src/include" \
-        -I "${TREE}/src/libc/include" -I "${TREE}/src/user_include" \
-        -mno-red-zone -fno-stack-protector -fPIC -O2 -w \
-        -c "${TREE}/src/user/libc.c" -o "${pdir}/user_libc.o" || true
+      # The public heap (malloc/calloc/realloc/free/aligned_alloc) lives in
+      # src/user/malloc.c, and the syscall layer in src/user/libc.c - both are
+      # separate objects in every HobbyOS link flavour, so both are needed.
+      for f in "${TREE}/src/user/libc.c" "${TREE}/src/user/malloc.c"; do
+        # shellcheck disable=SC2086
+        ${CC} $libc_cflags -c "$f" -o "${pdir}/user_$(basename "$f" .c).o" \
+          || note "libc-pic: $f did not rebuild (skipped)"
+      done
       rm -f "$piclibc"; ${AR} rcs "$piclibc" "${pdir}"/*.o
     fi
     extra_libs=("$piclibc")
@@ -655,6 +668,11 @@ link_libgl() {
 
   local common=(-shared -soname libGL.so.1 --version-script "$verscript"
                 -z noexecstack --build-id)
+  # Self-contained: gl_stubs.c and libc.a overlap on the handful of float
+  # functions libc.a *does* have (expf/sqrtf/fabsf/rintf), on atexit and on
+  # _assert_fail.  The archive comes first, so libc's definitions win and the
+  # stub is only the fallback - exactly what we want.  lld needs permission.
+  [ "$SELF_CONTAINED" = 1 ] && common+=(--allow-multiple-definition)
   ${LD} "${common[@]}" -o "${LIBDIR}/libGL.so.1" \
     --whole-archive "${whole[@]}" --no-whole-archive \
     --start-group "${extra[@]}" "${notwhole[@]}" "${extra_libs[@]}" --end-group \

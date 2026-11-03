@@ -81,11 +81,33 @@ hook is compiled out — the display record is freed at process exit instead.
   `ld.so`. Two symbols (TLS) are why the note "ELF TLS is a hard blocker"
   does not apply here: glibc's `ld.so` is what processes `PT_TLS` in a
   `dlopen`ed DSO, and it does that correctly.
-* **`--self-contained`.** Links `src/libc/src/*.c` rebuilt `-fPIC` (the
-  tree's `obj/intel/libc.a` is `-mcmodel=large` and cannot enter a DSO:
-  measured `R_X86_64_64 against local symbol`) plus the `gl_stubs.c`
-  implementations of the 72-symbol gap list. Experimental: it duplicates
-  libc state (a second malloc arena, a second errno) inside the DSO.
+* **`--self-contained`** (measured, experimental). Links `src/libc/src/*.c` +
+  `src/user/{libc,malloc}.c` rebuilt `-fPIC` (the tree's `obj/intel/libc.a`
+  is `-mcmodel=large` and cannot enter a DSO: measured `R_X86_64_64 against
+  local symbol`), plus `gl_stubs.c`. Result: 0 `DT_NEEDED`, 1378 exports,
+  **45 undefined** — 23 libX11 + 3 libXext + 13 libc/libm left
+  (`__cxa_atexit`, `__cxa_finalize`, the double `sin/cos/exp/...` that
+  `math.c` lacks, `sched_getaffinity`) + 4 `__tls_*` symbols that the
+  *native* loader's linker script defines and a dlopened DSO cannot see.
+  Not the shipped path: it duplicates libc state (a second malloc arena, a
+  second errno) inside the DSO.
+
+## Integration (integrator-owned Makefile)
+
+The lane does not touch `Makefile`. The build needs exactly this, placed
+next to the existing `include src/user/xcompat/Makefile.inc`:
+
+```make
+# Mesa GL for the compat class (lane L5, M4).  Out-of-tree: obj/mesa/lib.
+MESA_JOBS ?= 8
+mesa_gl:
+	JOBS=$(MESA_JOBS) bash tools/mesa/build-hobbyos.sh -j $(MESA_JOBS)
+.PHONY: mesa_gl
+```
+
+Staging `obj/mesa/lib/libGL.so.1` + the `libGLX.so.0` symlink into `/LIB64`
+belongs to the disk recipe (M3's `xcompat_dsos` staging already does the same
+for `libX11.so.6`).
 
 ## What is *not* here
 
