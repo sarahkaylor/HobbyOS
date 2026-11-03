@@ -154,6 +154,16 @@ Runtime identity strings (from the binary, not from the store page):
 `RimWorldLinux_Data/MonoBleedingEdge/x86_64/` has **no `mono` CLI** — only
 `libmonobdwgc-2.0.so` (Boehm GC), `libmono-native.so`, `libMonoPosixHelper.so`.
 
+**The pin is a set, not one file** (measured 2026-11-02): running the game with
+glibc 2.31 as its own interpreter (patched `PT_INTERP` on a **copy**, never the
+user's file) resolves `Mono path[0]`, preloads `lib_burst_generated.so` and
+`libsteam_api.so`, and then stops at `Error getting num native displays: Video
+subsystem has not been initialized` — because SDL `dlopen`s the *host's*
+`libX11.so.6`, which requires `GLIBC_2.43`. So a host-side video proof needs one
+era for the whole stack: add focal-era `libx11-6`, `libgl1`, `libglx-mesa0`,
+`libasound2` (and their xcb/xau/xdmcp deps) to the harness pin. On HobbyOS this
+constraint does not bind: AD-4 replaces all three with HobbyOS-built DSOs.
+
 **Rule**: game files never enter git. `tools/rw/check-no-game-files.sh` (M0)
 fails the build if a file matching a game artifact's size+hash prefix appears
 in the tree, and `.gitignore` carries the NFS staging paths.
@@ -581,3 +591,8 @@ awk '/if \(linux_compat_dispatch\(lp, tf, syscall_num\)\)/,/^  }/' \
   measured: menu under llvmpipe 39 fps @8 threads, GL 3.3 core accepted, 648/332
   symbol split, glibc ≤2.15 requirement, 436 MB assets vs 627 MB disk free.
   Pins: glibc 2.31 + libgcc 10.5 sha256'd.
+- 2026-11-02 — probe: glibc 2.31 as the game's real `PT_INTERP` (patched copy)
+  loads Mono and the two plugin DSOs, then fails at SDL video init because the
+  host's `libX11.so.6` needs `GLIBC_2.43` → §2 records that the pin is a *set*
+  (focal-era libX11/libGL/libasound for any host-side video proof). Not a plan
+  change: AD-4 replaces those DSOs in-OS.
