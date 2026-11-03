@@ -437,9 +437,20 @@ Real x86-64 `rt_sigframe` with `ucontext`+`siginfo`+FXSAVE; SIGSEGV/BUS/ILL/FPE
 now deliverable to compat. Mono 6.12 loads all nine DSOs and initializes, then
 exits with **`Mono requires /proc to be mounted.`** — L10 implemented
 `/proc/self/{exe,fd,maps}` in the same wave, so this is re-testable now.
-Known limits: `MAX_PROCESSES` is 64 while the game needs 106 threads at menu;
-`SIGCANCEL`/`SIGSETXID` (32/33) exceed `HO_SIG_MAX`, so `pthread_cancel` is not
-yet honoured.
+Known limits: `MAX_PROCESSES` is 64 while the game needs 106 threads at menu.
+
+**Mono status 2026-11-02 (integrator, after merging L7+L10):** managed code
+runs. Mono loads `/etc/mono/config` and `/usr/lib/mono/4.5/mscorlib.dll`, spawns
+its worker threads (`[LCOMPAT] clone flags=0x3D0F00 -> 1,3`) and executes
+`Hello.Main()`; it dies inside `System.Console..cctor` because the stdio fds are
+not real files — `Console.OpenStandardInput` threw `ArgumentException "handle:
+Invalid"` from `FileStream(handle)`. `HO_SIG_MAX` was raised 32→64 (glibc's
+SIGCANCEL/SIGSETXID and Mono's SIGRTMIN handler were all being refused with
+EINVAL), `clock_getres`/`statfs`/`sched_*`/`rt_sigtimedwait` were added, and fd 0
+is now `/dev/null` for every spawn — after which the *same* exception moves to
+`Console.OpenStandardOutput` (fd 1). **Next step: a `FILE_TYPE_CONSOLE` node
+installed at 0/1/2 for compat spawns (write → `console_write_user`, read → EOF,
+fstat → char device), which is also what the game needs for `Player.log`.**
 
 ### M3 — Window + input (X11 client surface)
 - [ ] `src/user/xcompat/`: `libX11.so.6` implementing the SDL-used surface
