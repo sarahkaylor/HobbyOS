@@ -1645,6 +1645,18 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
   if (fd >= 0) {
     if (fd >= MAX_OPEN_FDS)
       return -EBADF;
+    /* GB-169: mmap() of /dev/fb0 maps the GPU surface itself — the Linux-shaped
+       equivalent of the native map_fb() (SYS_MAP_FB -> vm_map_fb).  Offset 0
+       only: the surface starts there and there is one of it. */
+    if (file_fd_is_devfb(grp, fd)) {
+      extern void *virtio_gpu_get_framebuffer(void);
+      if (offset != 0)
+        return -EINVAL;
+      void *fbp = virtio_gpu_get_framebuffer();
+      if (!fbp)
+        return -ENODEV;
+      return vm_map_fb(grp, (uint64_t)(uintptr_t)fbp);
+    }
     obj = file_memfd_obj(grp, fd);
     if (obj) {
       /* Everything below is the S4 memfd contract, byte for byte. */

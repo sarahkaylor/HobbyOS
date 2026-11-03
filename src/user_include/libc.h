@@ -172,6 +172,8 @@ extern "C" {
   };
 
   int get_events(void *buf, int max_events);
+  /* GB-173: hand one key to the process that owns /dev/input/event0. */
+  int evdev_push(int code, int value);
   /* GB-027: compat /dev/input/event* node (see src/user/libc.c). */
   int input_ioctl(unsigned long req, void *arg);
   int read_input_events(void *buf, int max_events);
