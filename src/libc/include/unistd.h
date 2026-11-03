@@ -74,6 +74,10 @@ extern "C" {
    * validate the fd and succeed. */
   int ftruncate(int fd, off_t length);
   int fsync(int fd);
+  /* M4/L5: POSIX sync().  HobbyOS has no dirty page cache (every FAT16 write
+   * is synchronous), so the implementation in gl_stubs.c is a no-op; Mesa's
+   * ddebug driver calls it after writing its dump files. */
+  void sync(void);
   int fdatasync(int fd);
 
   /* P6.1: single-user identity — HobbyOS has no accounts, uid/gid 0. */
@@ -96,6 +100,13 @@ extern "C" {
 #define _SC_VERSION           29
 #define _SC_PAGESIZE          30
 #define _SC_PAGE_SIZE         _SC_PAGESIZE
+  /* M4/L5: physical memory queries (glibc 31/32).  Mesa's util/os_misc.c
+   * calls sysconf(_SC_PHYS_PAGES) to report the machine's RAM; HobbyOS's
+   * sysconf() answers -1 for names it does not know, which Mesa treats as
+   * "unknown", so declaring them is safe.  _SC_PHYS_PAGES is wired to the
+   * kernel's sysinfo in gl_stubs.c only if a caller needs a real value. */
+#define _SC_PHYS_PAGES        31
+#define _SC_AVPHYS_PAGES      32
 #define _SC_GETPW_R_SIZE_MAX  70
 #define _SC_GETGR_R_SIZE_MAX  71
 #define _SC_LOGIN_NAME_MAX    73

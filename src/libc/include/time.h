@@ -52,6 +52,17 @@ extern "C" {
    * Linux/POSIX so ported code needs no remapping. */
 #define CLOCK_REALTIME  0
 #define CLOCK_MONOTONIC 1
+  /* M4/L5: the other POSIX clock ids.  HobbyOS implements REALTIME and
+   * MONOTONIC; the rest are names only (clock_gettime returns -1/EINVAL),
+   * which is what Mesa's pthread_getcpuclockid() stub needs to answer. */
+#ifndef CLOCK_PROCESS_CPUTIME_ID
+#define CLOCK_PROCESS_CPUTIME_ID 2
+#define CLOCK_THREAD_CPUTIME_ID  3
+#define CLOCK_MONOTONIC_RAW      4
+#define CLOCK_REALTIME_COARSE    5
+#define CLOCK_MONOTONIC_COARSE   6
+#define CLOCK_BOOTTIME           7
+#endif
 
 #ifndef __hb_clockid_t_defined
 #define __hb_clockid_t_defined
@@ -116,6 +127,17 @@ extern "C" {
    * round up; the remainder is always zero (the kernel sleep is not
    * interruptible), so rem is cleared.  Returns 0. */
   int nanosleep(const struct timespec *req, struct timespec *rem);
+
+  /* M4/L5: POSIX clock_nanosleep.  Mesa's src/util/os_time.c uses the
+   * absolute form (TIMER_ABSTIME) for its sleep-until helper.  HobbyOS has
+   * no absolute-timer wakeup, so the implementation (gl_stubs.c) converts
+   * an absolute deadline into a relative nanosleep; TIMER_ABSTIME_EXTRA is
+   * declared for source compatibility with code that tests it. */
+#ifndef TIMER_ABSTIME
+#define TIMER_ABSTIME 1
+#endif
+  int clock_nanosleep(clockid_t clk_id, int flags,
+                      const struct timespec *req, struct timespec *rem);
 
 #ifdef __cplusplus
 }

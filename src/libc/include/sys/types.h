@@ -35,6 +35,9 @@ extern "C" {
   typedef long nlink_t;
   typedef long blksize_t;
   typedef long blkcnt_t;
+  /* M4/L5: id_t for getpriority()/setpriority() and waitid().  glibc's is an
+   * unsigned int wide enough for a pid, pgid or uid. */
+  typedef unsigned int id_t;
 
 #ifdef __cplusplus
 }

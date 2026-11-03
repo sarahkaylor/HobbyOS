@@ -24,6 +24,17 @@ extern "C" {
 
   typedef unsigned long long rlim_t;
 
+  /* M4/L5: process priority.  Mesa's util/u_queue.c lowers its worker
+   * threads' nice level with setpriority(PRIO_PROCESS, 0, 19); HobbyOS has a
+   * single scheduler class, so gl_stubs.c accepts the call and does nothing.
+   * Values are the Linux ones. */
+#define PRIO_PROCESS 0
+#define PRIO_PGRP    1
+#define PRIO_USER    2
+
+  int getpriority(int which, id_t who);
+  int setpriority(int which, id_t who, int prio);
+
   struct rlimit {
     rlim_t rlim_cur; /* soft limit */
     rlim_t rlim_max; /* hard limit */

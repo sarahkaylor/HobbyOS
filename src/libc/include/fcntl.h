@@ -52,6 +52,21 @@ extern "C" {
 #define F_SETFL    4
 #define O_NONBLOCK 0x800
 
+  /* M4/L5: the fd flags and dup commands the Linux-ABI compat DSOs need at
+   * compile time.  Values are the Linux x86_64 ones (O_CLOEXEC = 0o2000000,
+   * F_DUPFD = 0, F_DUPFD_CLOEXEC = 1030) because the compat class's DSOs
+   * pass them straight through to the kernel ABI; HobbyOS's own kernel
+   * ignores close-on-exec (no exec of an inherited fd table yet). */
+#ifndef O_CLOEXEC
+#define O_CLOEXEC  0x80000
+#endif
+#ifndef F_DUPFD
+#define F_DUPFD    0
+#endif
+#ifndef F_DUPFD_CLOEXEC
+#define F_DUPFD_CLOEXEC 1030
+#endif
+
   /* P6.1: advisory record locks (Linux numbering; the kernel mirrors these
    * in src/include/fs.h).  F_SETLKW is blocking in libc: it retries the
    * non-blocking kernel command with short sleeps (bounded, see libc.c). */
