@@ -1671,7 +1671,18 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       if (f_size == 0 || f_size > VM_OBJ_MAX_BYTES)
         return -ENOMEM;
       uint64_t fcap = ((uint64_t)f_size + 0xFFF) & ~0xFFFULL;
-      if (offset >= fcap || len > fcap - offset)
+      /* Linux allows a file mapping LONGER than the file: mmap only installs
+       * the range, and a page past the object's page capacity is simply never
+       * backed (Linux SIGBUSes when it is touched).  Real glibc depends on
+       * this: for an ET_DYN it maps the whole segment span (maplength, which
+       * includes .bss past EOF) in ONE file mmap, then carves the individual
+       * segments with MAP_FIXED and replaces the bss tail anonymously
+       * (elf/dl-map-segments.h).  Refusing len > fcap - offset turned that
+       * into EINVAL and ld.so 2.31 reported "failed to map segment from
+       * shared object" for libc.so.6 — measured on the M1 compat boot
+       * (docs/rw-ldso-design.md §7).  The OFFSET must still be inside the
+       * file's page range: an offset past EOF has no first page to read. */
+      if (offset >= fcap)
         return -EINVAL;
       file_backed = 1;
       obj_off = offset;

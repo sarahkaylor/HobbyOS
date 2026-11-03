@@ -626,9 +626,43 @@ static int l_fd_fcntl(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, file_fcntl(p, fd, cmd, arg));
 }
 
+/* ---- path opens -------------------------------------------------------- */
+
+/* openat(2).  glibc's open()/open64() ALWAYS issue openat(AT_FDCWD, ...) on
+ * Linux (sysdeps/unix/sysv/linux/open64.c), so a real ld.so cannot open
+ * /etc/ld.so.cache, libc.so.6 or any DSO without this number — measured as
+ * `[LCOMPAT] ENOSYS nr=257` at rip inside ld.so on the first M1 boot
+ * (docs/rw-ldso-design.md §7).
+ *
+ * LINUX-LANE HANDOFF (L2 -> L3): the loader gate needed the number; this is
+ * the minimal AT_FDCWD translation onto the same file_open() the legacy
+ * open(2) case already uses.  A real directory fd is not modelled by the VFS,
+ * so it answers -ENOTSUP rather than opening a path relative to the wrong
+ * directory; O_CLOEXEC/O_DIRECTORY bits ride along in `flags` exactly as
+ * open(2) already passes them.  L3 owns this file — replace or extend it, the
+ * loader side has no opinion beyond "the number must resolve". */
+#define L_AT_FDCWD (-100)
+
+static int l_fd_openat(struct process *p, struct trap_frame *tf) {
+  int64_t dirfd = l_argi(tf, 0);
+  char path[256];
+  int r = l_copy_cstr(p, path, l_arg(tf, 1), sizeof path);
+  if (r != 0) return l_ret(tf, r);
+  /* Compare the LOW 32 BITS: AT_FDCWD is -100 as an int, and a caller that
+   * materialises it with a 32-bit `mov` leaves the upper half of %rdi zero
+   * (measured: glibc's ld.so did exactly that, so a full-width -100 test read
+   * +4294967196 and every open answered -ENOTSUP -- ld.so then reported
+   * "libc.so.6: cannot open shared object file: Error 95"). */
+  if ((int32_t)dirfd != L_AT_FDCWD) return l_ret(tf, -ENOTSUP);
+  int fd = file_open(p, path, (int)l_argi(tf, 2));
+  return l_ret(tf, fd);
+}
+
 /* ---- the table --------------------------------------------------------- */
 
 const struct l_sysent l_tab_fd[] = {
+  /* path opens: Linux's open() is openat(AT_FDCWD, ...) */
+  {L_SYS_openat, l_fd_openat, "openat"},
   /* sockets: the X11 transport */
   {L_SYS_socket, l_fd_socket, "socket"},
   {L_SYS_socketpair, l_fd_socketpair, "socketpair"},

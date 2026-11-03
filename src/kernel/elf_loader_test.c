@@ -11,9 +11,10 @@
  * choice, and the bytes of struct hb_start.
  *
  * The accept/refuse matrix also pins the contract the compat (Linux-ABI) track
- * must keep: a PT_INTERP image still fails with ELF_ERR_INTERP unless the
- * caller passes ELF_LOAD_NATIVE, and a non-native interpreter path is refused
- * on the native track too.
+ * must keep: flags == 0 still fails a PT_INTERP image with ELF_ERR_INTERP, a
+ * non-native interpreter path is refused on the NATIVE track, and the explicit
+ * ELF_LOAD_COMPAT_INTERP opt-in maps a Linux ld.so without touching its
+ * relocations (docs/rw-ldso-design.md).
  *
  * Fixture layout (fx_build, 0x1400 bytes, spans two pages):
  *   0x0000  Elf64_Ehdr
@@ -504,9 +505,54 @@ static void test_map_interp(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* The LINUX compat interpreter (docs/rw-ldso-design.md): a real ld.so path is
+ * accepted, mapped in a USER_LIB slot, left UNRELOCATED (glibc relocates
+ * itself), no hb_start page, and the reported pair is (start=interp entry,
+ * AT_ENTRY=executable entry). */
+static void test_map_compat_interp(void) {
+  tests_run++;
+  uart_puts("  Running test_elf_map_compat_interp...\n");
+
+  static uint8_t exe[FX_SIZE];
+  static uint8_t interp[FX_SIZE];
+  uint32_t elen = fx_build(exe, 3, 0, "/lib64/ld-linux-x86-64.so.2", -1,
+                           FX_RELOC_TYPE, FX_ADDEND);
+  uint32_t ilen = fx_build(interp, 3, 0, 0, -1, FX_RELOC_TYPE, FX_IADDEND);
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(ELF_TEST_TAG);
+  ASSERT(as != 0);
+
+  const uint64_t lib0 = USER_VA_BASE + USER_LIB_OFF;
+  struct elf_load_info info;
+  int rc = elf_loader_map_buffers(as, exe, elen, interp, ilen,
+                                  ELF_LOAD_COMPAT_INTERP, &info);
+  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(info.native, 0);
+  EXPECT_EQ(info.interpreted, 1);
+  EXPECT_EQ(info.base == FX_IMG_BASE, 1);
+  EXPECT_EQ(info.exe_entry == (FX_IMG_BASE + FX_ENTRY_OFF), 1);
+  EXPECT_EQ(info.entry == (lib0 + FX_ENTRY_OFF), 1); /* enter ld.so */
+  EXPECT_EQ(info.interp_base == lib0, 1);
+
+  /* ld.so relocates itself: the kernel must leave both the RELA table and the
+   * target slot untouched (a zeroed DT_RELASZ makes _dl_start skip its own
+   * relocation pass and every GOT slot stays at its link-time address). */
+  uint64_t relasz = 0, islot = ~0ULL;
+  EXPECT_EQ(va_read64(as, lib0 + FX_DYN + 24, &relasz), 0);
+  EXPECT_EQ(relasz == 24, 1);
+  EXPECT_EQ(va_read64(as, lib0 + FX_SLOT, &islot), 0);
+  EXPECT_EQ(islot == 0, 1);
+
+  /* No hb_start page on the Linux track: the SysV auxv carries the pair. */
+  EXPECT_EQ(vm_region_find(as, USER_VA_BASE + USER_START_OFF) == 0, 1);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 /* First-fit: with slot 0 occupied the interpreter takes slot 1. */
 static void test_interp_second_slot(void) {
-  tests_run++;
   uart_puts("  Running test_elf_interp_second_slot...\n");
 
   static uint8_t exe[FX_SIZE];
@@ -758,6 +804,7 @@ void elf_loader_test_suite(void) {
   test_map_static_native();
   test_map_compat_unchanged();
   test_map_interp();
+  test_map_compat_interp();
   test_interp_second_slot();
   test_refusals();
   test_fs_end_to_end();
