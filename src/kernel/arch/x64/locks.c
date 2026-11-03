@@ -377,6 +377,19 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
       : "memory"
   );
   spinlock_acquire(lock);
+  /* GB-145 probe: spinlock_acquire recorded __builtin_return_address(0), which
+     is INSIDE this wrapper -- so the held-lock table named the wrapper, not the
+     caller, and could not answer "which syscall leaked proc_lock".  Overwrite
+     the entry we just pushed with OUR caller (same lock, same CPU, top slot). */
+  {
+    uint32_t c = get_cpuid();
+    if (c < MAX_CPUS) {
+      uint32_t d = held_lock_depth[c];
+      if (d > 0 && d <= HELD_LOCK_SLOTS && held_locks[c][d - 1] == (uint64_t)lock) {
+        held_lock_pc[c][d - 1] = (uint64_t)__builtin_return_address(0);
+      }
+    }
+  }
   return flags;
 }
 
