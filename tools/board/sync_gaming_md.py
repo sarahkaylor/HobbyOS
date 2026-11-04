@@ -11,9 +11,10 @@ it. This checks, both directions:
                   a DoD cell, milestone ranges match the §7 timeline
 
 Exit 0 = in sync. Exit 1 = drift (the printed lines are the repair list). `--fix`
-re-runs import_seed.py to push plan-side fields back onto the board.
+re-runs import_seed.py to push plan-side fields back onto the board;
+`--adopt-orphans` appends a §8 row for each open board-only mint (GB-193).
 
-  sync_gaming_md.py [--fix] [-v]
+  sync_gaming_md.py [--fix | --adopt-orphans] [-v]
 """
 import argparse
 import re
@@ -57,6 +58,7 @@ def board_snapshot():
         out[m.group(1)] = {
             "number": it["number"],
             "title": it["title"],
+            "body": it.get("body") or "",
             "milestone": (it.get("milestone") or {}).get("title"),
             "labels": labs,
             "lane": board.lane_of(it),
@@ -74,14 +76,95 @@ def expected_labels(gid, weight):
     return set(labs)
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--fix", action="store_true", help="push plan-side fields back to the board")
-    p.add_argument("-v", "--verbose", action="store_true")
-    a = p.parse_args()
+def _flatten(s):
+    return re.sub(r"\s+", " ", s or "").strip()
 
-    plan, order = S.parse_plan(S.PLAN)
-    bd = board_snapshot()
+
+def _cell(s):
+    """A §8 table cell: one line, literal pipes escaped for _cells()."""
+    return _flatten(s).replace("|", "\\|")
+
+
+def row_from_issue(gid, issue):
+    """Build a §8 table row for a board-only mint from its own issue fields.
+
+    GB-193: every coordinator mint above GB-147 lands without a row, so the
+    sync check is red until someone hand-writes one.  The issue body already
+    carries the three fields a row needs (weight label, Depends on, DoD).
+    Returns None (and names the card) when a required field is missing.
+    """
+    labs = issue.get("labels") or []
+    wt = next((l[3] for l in labs if re.fullmatch(r"wt-[SML]", l)), None)
+    if wt is None:
+        print(f"CANNOT ADOPT {gid}: no wt-S/M/L label")
+        return None
+    title = re.sub(r"^GB-\d{3}\s+", "", issue.get("title") or "").strip()
+    body = issue.get("body") or ""
+
+    m = re.search(r"^\|\s*Depends on\s*\|\s*(.+?)\s*\|", body, re.M)
+    depends = _flatten(m.group(1)) if m else ""
+    depends = depends.replace("**", "").replace("`", "")
+    if not depends or depends in ("—", "-", "none", "None"):
+        depends = "—"
+
+    d = re.search(r"^###\s*DoD[^\n]*\n(.*?)(?=^###\s|\Z)", body, re.M | re.S)
+    items = []
+    if d:
+        for line in d.group(1).splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^(?:\d+[.)]|[-*])\s*", "", line)
+            if line:
+                items.append(line)
+    dod = _flatten("; ".join(items)) or f"see board #{issue.get('number')}"
+    return f"| {gid} | **{_cell(title)}** | {wt} | {_cell(depends)} | {_cell(dod)} |"
+
+
+def insert_plan_row(text, milestone, row):
+    """Append `row` to the §8 table of section `milestone` (e.g. M4-acceptance)."""
+    key = next((k for k, v in S.MS_KEY.items() if v == milestone), None)
+    if key is None:
+        raise ValueError(f"unknown milestone {milestone!r}")
+    m = re.search(r"^### Milestone %s\b.*$" % re.escape(key), text, re.M)
+    if not m:
+        raise ValueError(f"no §8 section for {milestone}")
+    start = m.end()
+    nxt = re.search(r"^#{1,3} ", text[start:], re.M)
+    end = start + (nxt.start() if nxt else len(text) - start)
+    rows = list(re.finditer(r"^\|.*\|[ \t]*$", text[start:end], re.M))
+    if not rows:
+        raise ValueError(f"no table in §8 section {milestone}")
+    at = start + rows[-1].end()
+    return text[:at] + "\n" + row + text[at:]
+
+
+def adopt_orphans(bd, plan):
+    """Append a §8 row for every OPEN board mint missing from the plan."""
+    text = open(S.PLAN, encoding="utf-8").read()
+    adopted = []
+    for gid, b in sorted(bd.items()):
+        if gid in plan or b.get("state") == "closed":
+            continue
+        ms = b.get("milestone")
+        if ms not in S.MS_KEY.values():
+            print(f"CANNOT ADOPT {gid}: milestone {ms!r} is not a known MS_KEY")
+            continue
+        row = row_from_issue(gid, b)
+        if row is None:
+            continue
+        try:
+            text = insert_plan_row(text, ms, row)
+        except ValueError as e:
+            print(f"CANNOT ADOPT {gid}: {e}")
+            continue
+        adopted.append(row)
+    if adopted:
+        open(S.PLAN, "w", encoding="utf-8").write(text)
+    return adopted
+
+
+def find_problems(plan, order, bd, text, verbose=False):
     problems = []
 
     # plan shape. Integrity = the SEED range GB-001..GB-147 is complete and no
@@ -111,7 +194,7 @@ def main():
             problems.append(f"{gid}: missing labels {sorted(missing)}")
         if b["lane"] is None:
             problems.append(f"{gid}: no lane label")
-        if a.verbose:
+        if verbose:
             print(f"ok  {gid:8} #{b['number']:<3} {t['ms']:<15} lane={b['lane']:<12} wt={t['weight']}")
 
     # board -> plan
@@ -126,10 +209,34 @@ def main():
                             f"add it to §8 or close it")
 
     # §7 milestone table must name the same milestone ids the issues carry
-    text = open(S.PLAN, encoding="utf-8").read()
     for key, title in S.MS_KEY.items():
         if f"**{key} " not in text and f"**{key}" not in text:
             problems.append(f"plan §7: milestone {key} missing from the timeline table")
+
+    return problems
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--fix", action="store_true", help="push plan-side fields back to the board")
+    p.add_argument("--adopt-orphans", action="store_true",
+                   help="append a §8 row for each open board-only mint")
+    p.add_argument("-v", "--verbose", action="store_true")
+    a = p.parse_args()
+
+    plan, order = S.parse_plan(S.PLAN)
+    bd = board_snapshot()
+
+    if a.adopt_orphans:
+        adopted = adopt_orphans(bd, plan)
+        if adopted:
+            print(f"ADOPTED {len(adopted)} row(s):")
+            for row in adopted:
+                print("  " + row)
+            plan, order = S.parse_plan(S.PLAN)
+
+    text = open(S.PLAN, encoding="utf-8").read()
+    problems = find_problems(plan, order, bd, text, verbose=a.verbose)
 
     for pr in problems:
         print("DRIFT " + pr)
