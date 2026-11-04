@@ -1,0 +1,232 @@
+Subject: [PATCH 5/5] glx/xlib: trace the client's GLX requests and our answers
+
+The compat class has no apitrace and Unity's only report on a refused visual,
+FBConfig or context is "Forced renderer 17 is not supported, exiting".  Every
+GLX entry point that can refuse a renderer is therefore untestable from the
+guest: you see the message, not the argument list that caused it.
+
+This adds an opt-in trace (HOBBYOS_GLX_TRACE in the environment) that prints,
+on stderr, the attribute lists glXChooseVisual / glXChooseFBConfig /
+glXCreateContextAttribsARB actually receive, what glXGetFBConfigAttrib answers
+for each attribute, and the config/context/drawable each call returns.  It is
+compiled in unconditionally and costs one getenv on the first GLX call when
+off; the shipped DSO's behaviour is unchanged.
+
+Measured use (lane L27): the whole ladder from "Unity asks for a DirectColor
+FBConfig" to "this frontend answers with a TrueColor visual" is one run.
+
+--- a/src/gallium/frontends/glx/xlib/glx_api.c
++++ b/src/gallium/frontends/glx/xlib/glx_api.c
+@@ -47,6 +47,62 @@
+ #include "util/u_math.h"
+ #include "util/u_memory.h"
+ 
++#include <stdlib.h>
++
++/* HOBBYOS (lane L27): GLX-level call trace.
++ *
++ * The guest has no apitrace and Unity's only report on a refused config or
++ * context is "Forced renderer 17 is not supported, exiting".  This prints the
++ * attribute lists Unity actually sends and exactly what this frontend answers,
++ * which is the only way to tell a missing visual from a rejected context.
++ * Compiled in always, active only when HOBBYOS_GLX_TRACE is in the environment
++ * (rwlaunch exports it from the /GLXON marker), so the shipped DSO costs one
++ * getenv on the first GLX call and nothing per call.
++ */
++static int
++hobbyos_glx_trace_on(void)
++{
++   static int on = -1;
++   if (on < 0)
++      on = getenv("HOBBYOS_GLX_TRACE") ? 1 : 0;
++   return on;
++}
++
++#define HGT(...) do {                                                    \
++   if (hobbyos_glx_trace_on()) {                                         \
++      fprintf(stderr, "[GLXT] " __VA_ARGS__);                            \
++      fflush(stderr);                                                    \
++   }                                                                     \
++} while (0)
++
++/* key/value attribute lists (glXChooseFBConfig, glXCreateContextAttribsARB) */
++static void
++hobbyos_glx_trace_kv(const char *what, const int *l, int max)
++{
++   int i;
++   if (!hobbyos_glx_trace_on())
++      return;
++   fprintf(stderr, "[GLXT] %s {", what);
++   for (i = 0; l && l[i] && i + 1 < max; i += 2)
++      fprintf(stderr, "%s0x%x=%d", i ? ", " : "", l[i], l[i + 1]);
++   fprintf(stderr, "}\n");
++   fflush(stderr);
++}
++
++/* single-token attribute lists (glXChooseVisual) */
++static void
++hobbyos_glx_trace_raw(const char *what, const int *l, int max)
++{
++   int i;
++   if (!hobbyos_glx_trace_on())
++      return;
++   fprintf(stderr, "[GLXT] %s [", what);
++   for (i = 0; l && i < max && l[i]; i++)
++      fprintf(stderr, "%s%d", i ? " " : "", l[i]);
++   fprintf(stderr, "]\n");
++   fflush(stderr);
++}
++
+ /* An "Atrribs/Attribs" typo was fixed in glxproto.h in Nov 2014.
+  * This is in case we don't have the updated header.
+  */
+@@ -1059,11 +1115,16 @@
+    /* register ourselves as an extension on this display */
+    register_with_display(dpy);
+ 
++   HGT("glXChooseVisual screen=%d\n", screen);
++   hobbyos_glx_trace_raw("  list", list, 64);
+    xmvis = choose_visual(dpy, screen, list, GL_FALSE);
+    if (xmvis) {
+       XVisualInfo* visinfo = malloc(sizeof(XVisualInfo));
+       if (visinfo) {
+          memcpy(visinfo, xmvis->visinfo, sizeof(XVisualInfo));
++         HGT("glXGetVisualFromFBConfig -> visualid=0x%lx class=%d depth=%d\n",
++             (unsigned long) visinfo->visualid, visinfo->CLASS,
++             visinfo->depth);
+       }
+       return visinfo;
+    }
+@@ -1116,6 +1177,10 @@
+ {
+    XMesaVisual xmvis;
+ 
++   HGT("glXCreateContext visinfo=%p visualid=0x%lx class=%d direct=%d\n",
++       (void *) visinfo,
++       visinfo ? (unsigned long) visinfo->visualid : 0UL,
++       visinfo ? visinfo->CLASS : -1, (int) direct);
+    xmvis = find_glx_visual( dpy, visinfo );
+    if (!xmvis) {
+       /* This visual wasn't found with glXChooseVisual() */
+@@ -1216,7 +1281,10 @@
+ PUBLIC Bool
+ glXMakeCurrent( Display *dpy, GLXDrawable drawable, GLXContext ctx )
+ {
+-   return glXMakeContextCurrent( dpy, drawable, drawable, ctx );
++   Bool rv = glXMakeContextCurrent( dpy, drawable, drawable, ctx );
++   HGT("glXMakeCurrent drawable=0x%lx ctx=%p -> %d\n",
++       (unsigned long) drawable, (void *) ctx, (int) rv);
++   return rv;
+ }
+ 
+ 
+@@ -1428,6 +1496,7 @@
+ PUBLIC Bool
+ glXQueryVersion( Display *dpy, int *maj, int *min )
+ {
++   HGT("glXQueryVersion\n");
+    (void) dpy;
+    /* Return GLX version, not Mesa version */
+    assert(CLIENT_MAJOR_VERSION == SERVER_MAJOR_VERSION);
+@@ -1759,7 +1828,12 @@
+    if (!dpy || !config || !value)
+       return -1;
+ 
+-   return get_config(v, attribute, value, GL_TRUE);
++   {
++      int rv = get_config(v, attribute, value, GL_TRUE);
++      HGT("glXGetFBConfigAttrib attr=0x%x -> %d rv=%d\n",
++          attribute, rv == 0 ? *value : -12345, rv);
++      return rv;
++   }
+ }
+ 
+ 
+@@ -1773,6 +1847,8 @@
+    /* Get list of all X visuals */
+    visTemplate.screen = screen;
+    visuals = XGetVisualInfo(dpy, visMask, &visTemplate, nelements);
++   HGT("glXGetFBConfigs screen=%d -> %d visuals\n", screen,
++       nelements ? *nelements : -1);
+    if (*nelements > 0) {
+       XMesaVisual *results = malloc(*nelements * sizeof(XMesaVisual));
+       if (!results) {
+@@ -1801,6 +1877,9 @@
+    /* register ourselves as an extension on this display */
+    register_with_display(dpy);
+ 
++   HGT("glXChooseFBConfig screen=%d\n", screen);
++   hobbyos_glx_trace_kv("  attribs", attribList, 64);
++
+    if (!attribList || !attribList[0]) {
+       /* return list of all configs (per GLX_SGIX_fbconfig spec) */
+       return glXGetFBConfigs(dpy, screen, nitems);
+@@ -1815,10 +1894,14 @@
+       }
+       *nitems = 1;
+       config[0] = (GLXFBConfig) xmvis;
++      HGT("  -> 1 config, visualid=0x%lx class=%d depth=%d\n",
++          (unsigned long) xmvis->visinfo->visualid,
++          xmvis->visinfo->CLASS, xmvis->visinfo->depth);
+       return (GLXFBConfig *) config;
+    }
+    else {
+       *nitems = 0;
++      HGT("  -> 0 configs\n");
+       return NULL;
+    }
+ }
+@@ -1851,6 +1934,8 @@
+       return 0;
+ 
+    xmbuf = XMesaCreateWindowBuffer(xmvis, win);
++   HGT("glXCreateWindow config=%p win=0x%lx -> buffer=%p\n",
++       (void *) config, (unsigned long) win, (void *) xmbuf);
+    if (!xmbuf)
+       return 0;
+ 
+@@ -2121,10 +2206,16 @@
+        (renderType != GLX_RGBA_TYPE && renderType != GLX_COLOR_INDEX_TYPE))
+       return 0;
+ 
+-   return create_context(dpy, xmvis,
+-                         shareCtx ? shareCtx->xmesaContext : NULL,
+-                         direct,
+-                         1, 0, GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB, 0x0);
++   {
++      GLXContext c = create_context(dpy, xmvis,
++                                    shareCtx ? shareCtx->xmesaContext : NULL,
++                                    direct,
++                                    1, 0,
++                                    GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
++                                    0x0);
++      HGT("glXCreateNewContext -> %p\n", (void *) c);
++      return c;
++   }
+ }
+ 
+ 
+@@ -2688,6 +2779,10 @@
+                                 GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB);
+    GLXContext ctx;
+ 
++   HGT("glXCreateContextAttribsARB config=%p direct=%d\n",
++       (void *) config, (int) direct);
++   hobbyos_glx_trace_kv("  attribs", attrib_list, 64);
++
+    /* parse attrib_list */
+    for (i = 0; !done && attrib_list && attrib_list[i]; i++) {
+       switch (attrib_list[i]) {
+@@ -2814,7 +2909,12 @@
+                            profileMask, contextFlags);
+    }
+    if (!ctx) {
++      HGT("  -> NULL (GLXBadFBConfig), requested %d.%d profile=0x%x\n",
++          majorVersion, minorVersion, profileMask);
+       generate_error(dpy, GLXBadFBConfig, 0, X_GLXCreateContextAttribsARB, False);
++   } else {
++      HGT("  -> ctx %p requested %d.%d profile=0x%x\n",
++          (void *) ctx, majorVersion, minorVersion, profileMask);
+    }
+ 
+    return ctx;

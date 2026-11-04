@@ -55,6 +55,7 @@
 #define SYS_poll 7
 #define SYS_mmap 9
 #define SYS_ioctl 16
+#define SYS_fstat 5
 
 static long xs_syscall6(long n, long a, long b, long c, long d, long e, long f) {
   long ret;
@@ -118,9 +119,23 @@ static void xtrn(int v) {
   b[n++] = '\n';
   (void)xs_write(2, b, (unsigned long)n);
 }
+static void xtr_hex(unsigned long v) {
+  char b[24];
+  int n = 0;
+  b[n++] = '0';
+  b[n++] = 'x';
+  char t[16];
+  int m = 0;
+  if (!v) t[m++] = '0';
+  while (v) { unsigned d = (unsigned)(v & 15u); t[m++] = (char)(d < 10 ? '0' + d : 'a' + d - 10); v >>= 4; }
+  while (m) b[n++] = t[--m];
+  b[n++] = '\n';
+  (void)xs_write(2, b, (unsigned long)n);
+}
 #else
 #define xtr(s) ((void)0)
 #define xtrn(v) ((void)0)
+#define xtr_hex(v) ((void)0)
 #endif
 
 #define XO_RDWR 2
@@ -228,8 +243,18 @@ struct _XDisplay {
   struct _XScreen screen_obj;
   struct _XVisual visual;
   XVisualInfo vinfo;
+  /* A real 24-bit X screen publishes TWO visuals at this depth: TrueColor
+   * 0x21 (the default) and DirectColor 0x22 -- measured on the host's Xvfb
+   * (`xdpyinfo`: 0x21 TrueColor, 0x22 DirectColor, then further TrueColor
+   * ids).  Mesa's glXChooseFBConfig is given GLX_X_VISUAL_TYPE by Unity and
+   * passes it to choose_x_visual(), which searches X visuals by class; with
+   * only 0x21 in the table a DirectColor request is answered with a
+   * TrueColor visual, and Unity's GLX device creation refuses it. */
+  struct _XVisual visual_dc;
+  XVisualInfo vinfo_dc;
   Colormap default_cmap;
   GC default_gc;
+  unsigned next_wid;      /* XIDs handed out by XCreateWindow */
 
   struct {
     Window id;
@@ -237,6 +262,9 @@ struct _XDisplay {
     unsigned long bg, border;
     Colormap cmap;
     int mapped, destroyed, content_ready, pointer_asked;
+    int map_notified;      /* MapNotify already queued for this window */
+    int structure_selected;/* StructureNotifyMask was selected at least once */
+    int exposure_selected; /* ExposureMask was selected at least once */
     int gx, gy, cw, ch;
     long event_mask;
     unsigned char *shadow;
@@ -296,8 +324,32 @@ static struct _XGC g_gc_pool[GC_MAX];
 
 /* ---- outbound protocol ------------------------------------------------ */
 
+/* The desktop's window protocol is a pipe pair: requests on the process's
+ * stdout, events on its stdin.  A game that passes -logFile (Unity does)
+ * dup2()s the log file over fd 1 and fd 2 before the first window call, so a
+ * shim writing to fd 1 puts "ESC ] X" into Player.log and the desktop never
+ * answers -- measured (L27): the first XMapWindow blocked forever in the read
+ * below.  The launcher keeps the pipe on fd 9 (dup2(1,9) before spawning the
+ * game), and this probe is self-validating with fstat: use fd 9 only when
+ * fd 1 is no longer a pipe and fd 9 is one.  A directly launched client --
+ * the m3/m4 probes -- has its protocol pipe on fd 1, so it never switches. */
+static int proto_fd(void) {
+  static int fd;
+  if (!fd) {
+    unsigned char st[144];
+    fd = 1;
+    if (xs_syscall6(SYS_fstat, 1, (long)st, 0, 0, 0, 0) == 0 &&
+        (*(unsigned *)(st + 24) & 0xF000u) == 0x8000u) {   /* fd 1: regular */
+      if (xs_syscall6(SYS_fstat, 9, (long)st, 0, 0, 0, 0) == 0 &&
+          (*(unsigned *)(st + 24) & 0xF000u) == 0x1000u)    /* fd 9: FIFO */
+        fd = 9;
+    }
+  }
+  return fd;
+}
+
 static void send_raw(const char *buf, int len) {
-  long w = xs_write(1, buf, (unsigned long)len);
+  long w = xs_write(proto_fd(), buf, (unsigned long)len);
   (void)w;
 }
 
@@ -510,6 +562,10 @@ static void set_geometry(Display *d, int x, int y, unsigned w, unsigned h) {
   d->win.gx = x;
   d->win.gy = y;
   d->win.content_ready = 1;
+  xtr("[XC] set_geometry ");
+  xtrn(x); xtr(";"); xtrn(y); xtr(";"); xtrn((int)w); xtr(";");
+  xtrn((int)h); xtr(" mask=0x"); xtrn((int)d->win.event_mask);
+  xtr(" first="); xtrn(first); xtr("\n");
   d->core.content.x = x;
   d->core.content.y = y;
   d->core.content.w = (int)w;
@@ -517,14 +573,15 @@ static void set_geometry(Display *d, int x, int y, unsigned w, unsigned h) {
   d->core.content_valid = 1;
 
   XEvent ev;
-  if (first && (d->win.event_mask & StructureNotifyMask)) {
+  if (first && !d->win.map_notified &&
+      (d->win.event_mask & StructureNotifyMask)) {
     xz(&ev, sizeof ev);
     ev.type = MapNotify;
     ev.xmap.window = d->win.id;
     ev.xmap.event = d->win.id;
     queue_event(d, &ev);
   }
-  if ((d->win.event_mask & StructureNotifyMask) && (first || resized || moved)) {
+  if (d->win.structure_selected && (first || resized || moved)) {
     xz(&ev, sizeof ev);
     ev.type = ConfigureNotify;
     ev.xconfigure.window = d->win.id;
@@ -535,7 +592,7 @@ static void set_geometry(Display *d, int x, int y, unsigned w, unsigned h) {
     ev.xconfigure.height = (int)h;
     queue_event(d, &ev);
   }
-  if ((d->win.event_mask & ExposureMask) && (first || resized)) {
+  if (d->win.exposure_selected && (first || resized)) {
     xz(&ev, sizeof ev);
     ev.type = Expose;
     ev.xexpose.window = d->win.id;
@@ -822,8 +879,15 @@ static int wait_event(Display *d) {
     if (d->desktop_closed) return deliver_wm_delete(d) ? 0 : -1;
     shadow_flush(d);
     unsigned char buf[256];
+    /* L27: if the ladder stops after XMapWindow, this row says whether the
+     * client is blocked here (waiting for the desktop's ESC ] G geometry)
+     * or somewhere else entirely. */
+    xtr("[XC] wait_event: blocking read fd0\n");
     long r = xs_read(0, buf, sizeof buf);
     if (r <= 0) return -1;
+    xtr("[XC] wait_event: read ");
+    xtrn((int)r);
+    xtr(" bytes\n");
     input_bytes(d, buf, (int)r);
     input_settle(d, input_available());
     if (xc_pending(&d->core)) return 0;
@@ -932,6 +996,28 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->vinfo.blue_mask = d->visual.blue_mask;
   d->vinfo.colormap_size = 256;
   d->vinfo.bits_per_rgb = 8;
+  /* The second visual at this depth: DirectColor 0x22, same 24-bit layout.
+   * Only the class differs -- DirectColor means "the colormap is applied to
+   * the pixel", which matters to GLX config selection, not to this shim's
+   * blit path (pixels arrive as 0x00RRGGBB either way). */
+  d->visual_dc.ext_data = 0;
+  d->visual_dc.visualid = 0x22;
+  d->visual_dc.c_class = DirectColor;
+  d->visual_dc.red_mask = d->visual.red_mask;
+  d->visual_dc.green_mask = d->visual.green_mask;
+  d->visual_dc.blue_mask = d->visual.blue_mask;
+  d->visual_dc.bits_per_rgb = 8;
+  d->visual_dc.map_entries = 256;
+  d->vinfo_dc.visual = (Visual *)&d->visual_dc;
+  d->vinfo_dc.visualid = d->visual_dc.visualid;
+  d->vinfo_dc.screen = 0;
+  d->vinfo_dc.depth = 24;
+  d->vinfo_dc.c_class = DirectColor;
+  d->vinfo_dc.red_mask = d->visual.red_mask;
+  d->vinfo_dc.green_mask = d->visual.green_mask;
+  d->vinfo_dc.blue_mask = d->visual.blue_mask;
+  d->vinfo_dc.colormap_size = 256;
+  d->vinfo_dc.bits_per_rgb = 8;
   d->default_cmap = 0x20;
   d->screen_obj.cmap = d->default_cmap;
   d->default_gc = XCreateGC(d, d->root, 0, 0);
@@ -1099,6 +1185,52 @@ XAPI int XmbTextListToTextProperty(Display *d, char **list, int count,
 
 /* ---- windows ---------------------------------------------------------- */
 
+/* One process gets one desktop window, but not one *lifetime*: measured (L27,
+ * [XC] rows) SDL creates a window, probes a legacy GL context in it, destroys
+ * it, and only then does Unity's GLX device create the real window.  Xlib lets
+ * a client do exactly that, so a destroy has to release the slot and a create
+ * has to re-arm every per-window field -- a stale `destroyed` alone would make
+ * the next XMapWindow fail. */
+static void win_clear(Display *d) {
+  d->win.mapped = 0;
+  d->win.destroyed = 0;
+  d->win.content_ready = 0;
+  d->win.pointer_asked = 0;
+  d->win.map_notified = 0;
+  d->win.structure_selected = 0;
+  d->win.exposure_selected = 0;
+  d->win.gx = d->win.gy = d->win.cw = d->win.ch = 0;
+  d->win.bg = 0;
+  d->win.border = 0;
+  d->win.cmap = d->default_cmap;
+  d->win.event_mask = 0;
+  d->win.override_redirect = 0;
+  d->win.shadow = 0;
+  d->win.shadow_cap = 0;
+  d->win.title_len = 0;
+  d->win.title[0] = 0;
+  d->win.nprotocols = 0;
+  d->win.wm_protocols_atom = 0;
+  d->win.wm_delete_atom = 0;
+  d->win.delete_registered = 0;
+  d->win.delete_delivered = 0;
+  d->win.class_name = 0;
+  d->win.class_class = 0;
+  d->win.has_size_hints = 0;
+  d->win.has_wm_hints = 0;
+  d->win.cursor = 0;
+}
+
+/* Every XID this shim handed out is a live alias of the single desktop
+ * window: the desktop protocol has one surface per process, but an X client
+ * may keep several windows (Unity creates a 32x32 probe, then the GL window,
+ * then a second 1920x1080 one and still maps the earlier id).  A map on any
+ * live id must therefore work and must carry that id in the MapNotify, or the
+ * client's XIfEvent(MapNotify, &id) waits forever. */
+static int win_id_live(Display *d, Window w) {
+  return d && w >= 0x200001u && w < d->next_wid;
+}
+
 XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
                           unsigned width, unsigned height,
                           unsigned border_width, int depth, unsigned c_class,
@@ -1107,8 +1239,21 @@ XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
   (void)parent; (void)x; (void)y; (void)border_width; (void)depth;
   (void)c_class; (void)visual;
   xtr("[XC] XCreateWindow\n");
-  if (!d || d->win.id) return 0;         /* one window per display */
-  d->win.id = 1;
+  if (!d) return 0;
+  /* The desktop gives a process ONE window, but X clients are allowed to
+   * create several: measured (L27) Unity creates its GL window, maps it, and
+   * then creates a second one -- the old "one window per display" rule
+   * answered 0 for the second and the device gave up ("Unable to find a
+   * supported OpenGL core profile").  Each create therefore replaces the
+   * single desktop window and returns a FRESH XID, so an XIfEvent predicate
+   * that matches on window id still sees the window it asked for.  Only one
+   * window is live at a time -- the desktop protocol has no second surface. */
+  win_clear(d);
+  if (!d->next_wid) d->next_wid = 0x200001;  /* root is 1; real Xids start high */
+  d->win.id = d->next_wid++;
+  if (d->next_wid >= 0x3fffffffu) d->next_wid = 0x200001;
+  xtr("[XC] XCreateWindow id=");
+  xtrn((int)d->win.id);
   d->win.pref_w = width ? width : 640;
   d->win.pref_h = height ? height : 480;
   d->win.bg = 0x00000000L;
@@ -1119,11 +1264,17 @@ XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
    * XCreateColormap just returned; XGetWindowAttributes reports both back. */
   if (attrs && (valuemask & (1L << 1))) d->win.bg = attrs->background_pixel;
   if (attrs && (valuemask & (1L << 3))) d->win.border = attrs->border_pixel;
-  if (attrs && (valuemask & (1L << 11))) d->win.event_mask = attrs->event_mask;
+  if (attrs && (valuemask & (1L << 11))) {
+    d->win.event_mask = attrs->event_mask;
+    if (d->win.event_mask & StructureNotifyMask) d->win.structure_selected = 1;
+    if (d->win.event_mask & ExposureMask) d->win.exposure_selected = 1;
+  }
   if (attrs && (valuemask & (1L << 13)) && attrs->colormap)
     d->win.cmap = attrs->colormap;
   if (attrs && (valuemask & (1L << 9))) d->win.override_redirect =
       attrs->override_redirect;
+  xtr("[XC] XCreateWindow -> ");
+  xtrn((int)d->win.id);
   return d->win.id;
 }
 
@@ -1132,8 +1283,11 @@ XAPI Window XCreateSimpleWindow(Display *d, Window parent, int x, int y,
                                 unsigned border_width, unsigned long border,
                                 unsigned long background) {
   (void)parent; (void)x; (void)y; (void)border_width;
-  if (!d || d->win.id) return 0;
-  d->win.id = 1;
+  if (!d) return 0;
+  win_clear(d);
+  if (!d->next_wid) d->next_wid = 0x200001;
+  d->win.id = d->next_wid++;
+  if (d->next_wid >= 0x3fffffffu) d->next_wid = 0x200001;
   d->win.pref_w = width ? width : 640;
   d->win.pref_h = height ? height : 480;
   d->win.border = border;
@@ -1143,19 +1297,25 @@ XAPI Window XCreateSimpleWindow(Display *d, Window parent, int x, int y,
 }
 
 XAPI int XDestroyWindow(Display *d, Window w) {
+  xtr("[XC] XDestroyWindow ");
+  xtrn((int)w);
+  xtr("\n");
   if (!d || !d->win.id || w != d->win.id) return 0;
+  /* Release the slot, not just mark it: the next XCreateWindow is a *new*
+   * window (SDL destroys its GL-probe window before Unity's device creates
+   * the real one) and every field below is re-armed by win_clear(). */
+  win_clear(d);
+  d->win.id = 0;
   d->win.destroyed = 1;
-  d->win.mapped = 0;
-  d->win.content_ready = 0;
-  d->win.shadow = 0;
   return 1;                              /* Xlib: success */
 }
 XAPI int XDestroySubwindows(Display *d, Window w) { (void)d; (void)w; return 0; }
 
 XAPI int XMapWindow(Display *d, Window w) {
   xtr("[XC] XMapWindow\n");
-  if (!d || !d->win.id || w != d->win.id || d->win.destroyed) return 0;
-  if (d->win.mapped) return 1;           /* already mapped: Xlib still says 1 */
+  if (!d || !d->win.id || !win_id_live(d, w) || d->win.destroyed) return 0;
+  if (d->win.mapped && w == d->win.id)
+    return 1;                            /* already mapped: Xlib still says 1 */
   d->win.mapped = 1;
   char buf[40];
   int j = 0;
@@ -1165,6 +1325,23 @@ XAPI int XMapWindow(Display *d, Window w) {
   j = put_uint(buf, j, d->win.pref_h);
   buf[j++] = '~';
   send_raw(buf, j);
+  /* MapNotify belongs to XMapWindow, not to the desktop's later geometry
+   * reply.  Measured (L27): Unity selects StructureNotifyMask, maps the
+   * window, and blocks in XIfEvent with the MapNotify predicate at
+   * UnityPlayer+0x194c19b; the desktop's ESC ] G arrives after Unity has
+   * replaced the mask with PropertyChangeMask, so a shim that only queues
+   * MapNotify from the geometry handler loses it forever.  Xlib processes the
+   * map request when it is issued, so the selection that counts is this one. */
+  if (d->win.structure_selected) {
+    XEvent ev;
+    xz(&ev, sizeof ev);
+    ev.type = MapNotify;
+    ev.xmap.window = w;
+    ev.xmap.event = w;
+    queue_event(d, &ev);
+    d->win.map_notified = 1;
+    xtr("[XC] MapNotify queued\n");
+  }
   /* Cursor: the desktop paints its own pointer; XCreateFontCursor is a
    * stub, so nothing to install. */
   return 1;                              /* Xlib: success */
@@ -1189,7 +1366,11 @@ XAPI int XIconifyWindow(Display *d, Window w, int scr) {
 }
 
 XAPI int XSelectInput(Display *d, Window w, long mask) {
-  if (!d || !d->win.id || w != d->win.id) return 0;
+  if (!d || !d->win.id || !win_id_live(d, w)) return 0;
+  xtr("[XC] XSelectInput mask=0x");
+  xtr_hex((unsigned long)mask);
+  if (mask & StructureNotifyMask) d->win.structure_selected = 1;
+  if (mask & ExposureMask) d->win.exposure_selected = 1;
   d->win.event_mask = mask;
   long pointer = ButtonPressMask | ButtonReleaseMask | PointerMotionMask;
   if (!d->win.pointer_asked && (mask & pointer)) {
@@ -1198,6 +1379,27 @@ XAPI int XSelectInput(Display *d, Window w, long mask) {
     d->win.pointer_asked = 1;
   }
   return 0;
+}
+
+/* A real X server sends PropertyNotify to every client that selected
+ * PropertyChangeMask on the window -- including the client that made the
+ * change.  Unity selects exactly that mask on its GL window and then waits in
+ * XIfEvent (measured L27: mask=0x4194304, blocked right after XMapWindow),
+ * so a shim that only stores the value never answers the wait.  The desktop
+ * has no property protocol; this is the client-visible half of it. */
+static void prop_notify(Display *d, Atom prop) {
+  if (!(d->win.event_mask & PropertyChangeMask)) return;
+  XEvent ev;
+  xz(&ev, sizeof ev);
+  ev.type = PropertyNotify;
+  ev.xproperty.window = d->win.id;
+  ev.xproperty.atom = prop;
+  ev.xproperty.time = 0;
+  ev.xproperty.state = PropertyNewValue;
+  queue_event(d, &ev);
+  xtr("[XC] PropertyNotify atom=");
+  xtrn((int)prop);
+  xtr("\n");
 }
 
 XAPI int XStoreName(Display *d, Window w, const char *name) {
@@ -1213,6 +1415,7 @@ XAPI int XStoreName(Display *d, Window w, const char *name) {
   for (int i = 0; i < n; i++) buf[j++] = d->win.title[i];
   buf[j++] = '~';
   send_raw(buf, j);
+  prop_notify(d, XA_WM_NAME);
   return 1;                              /* Xlib: success */
 }
 XAPI int XSetIconName(Display *d, Window w, const char *name) {
@@ -1263,6 +1466,7 @@ XAPI int XChangeProperty(Display *d, Window w, Atom property, Atom type,
     XStoreName(d, w, tmp);
   }
   (void)mode;                            /* no prepend/append semantics */
+  prop_notify(d, property);
   return 1;
 }
 
@@ -1390,6 +1594,7 @@ XAPI int XSetWMHints(Display *d, Window w, XWMHints *hints) {
   if (!d || w != d->win.id || !hints) return 0;
   d->win.wm_hints = *hints;
   d->win.has_wm_hints = 1;
+  prop_notify(d, XA_WM_HINTS);
   return 1;
 }
 
@@ -1402,6 +1607,7 @@ XAPI int XSetWMNormalHints(Display *d, Window w, XSizeHints *hints) {
   if (!d || w != d->win.id || !hints) return 0;
   d->win.size_hints = *hints;
   d->win.has_size_hints = 1;
+  prop_notify(d, XA_WM_NORMAL_HINTS);
   return 0;
 }
 
@@ -1417,6 +1623,7 @@ XAPI int XSetClassHint(Display *d, Window w, XClassHint *hint) {
   if (!d || w != d->win.id || !hint) return 0;
   d->win.class_name = hint->res_name;
   d->win.class_class = hint->res_class;
+  prop_notify(d, XA_WM_CLASS);
   return 1;
 }
 
@@ -1564,7 +1771,6 @@ XAPI int XClearArea(Display *d, Window w, int x, int y, unsigned width,
 
 XAPI Bool XQueryPointer(Display *d, Window w, Window *root, Window *child,
                         int *rx, int *ry, int *wx, int *wy, unsigned *mask) {
-  xtr("[XC] XQueryPointer\n");
   if (!d || !d->win.id || w != d->win.id) return False;
   int x = d->pointer_valid ? d->pointer_x_root : 0;
   int y = d->pointer_valid ? d->pointer_y_root : 0;
@@ -1664,6 +1870,10 @@ XAPI int XConvertSelection(Display *d, Atom sel, Atom target, Atom prop,
 
 XAPI int XNextEvent(Display *d, XEvent *ev) {
   if (!d || !ev) return 0;
+  /* L27: who is waiting?  The caller is inside UnityPlayer.so (SDL is static
+   * there), so (caller - the load base in Player.log) names the exact site. */
+  xtr("[XC] XNextEvent caller=");
+  xtr_hex((unsigned long)__builtin_return_address(0));
   if (wait_event(d) < 0) {
     /* WM_DELETE_WINDOW (or the desktop went away): the protocol's clean
      * exit is to leave, exactly like src/user/x11's XNextEvent. */
@@ -1671,6 +1881,9 @@ XAPI int XNextEvent(Display *d, XEvent *ev) {
     for (;;) { }
   }
   if (!xc_dequeue(&d->core, ev)) return 0;
+  xtr("[XC] XNextEvent type=");
+  xtrn(ev->type);
+  xtr("\n");
   /* Emit the synthetic key release the wire cannot carry. */
   if (ev->type == KeyPress && d->release_pending) {
     XEvent rel = *ev;
@@ -1686,6 +1899,7 @@ XAPI int XPending(Display *d) {
   if (!d) return 0;
   pump_nonblock(d);
   return xc_pending(&d->core);
+
 }
 
 XAPI int XEventsQueued(Display *d, int mode) {
@@ -1696,6 +1910,8 @@ XAPI int XEventsQueued(Display *d, int mode) {
 
 XAPI int XPeekEvent(Display *d, XEvent *ev) {
   if (!d || !ev) return 0;
+  xtr("[XC] XPeekEvent caller=");
+  xtr_hex((unsigned long)__builtin_return_address(0));
   while (!xc_pending(&d->core)) {
     if (wait_event(d) < 0) {
       xs_syscall6(60, 0, 0, 0, 0, 0, 0);
@@ -1719,14 +1935,43 @@ XAPI Bool XCheckIfEvent(Display *d, XEvent *ev, Bool (*pred)(),
 
 XAPI Bool XIfEvent(Display *d, XEvent *ev, Bool (*pred)(), void *arg) {
   if (!d || !ev || !pred) return False;
+  xtr("[XC] XIfEvent caller=");
+  xtr_hex((unsigned long)__builtin_return_address(0));
   typedef Bool (*pred_t)(Display *, XEvent *, void *);
+  /* Xlib's XIfEvent removes non-matching events from the queue and puts them
+   * back once the matching one is found.  The previous head-only version left
+   * them in place, so a pending ConfigureNotify that did not match a MapNotify
+   * predicate made this loop spin forever -- measured (L27): 127 million
+   * pump_nonblock calls, rip inside XIfEvent, 100% of one CPU, no forward
+   * progress after the window was mapped.  The held array is the ring's own
+   * capacity, so the queue can always be drained. */
+  /* BSS, not stack: this is 12 KiB and XIfEvent is called from threads whose
+   * stack budget is not ours to assume.  The display is single-threaded by
+   * contract (one process, one display), so one buffer is enough. */
+  static XEvent held[XC_EVENT_RING];
+  int nheld = 0;
   for (;;) {
+    XEvent e;
+    int got = 0;
     pump_nonblock(d);
-    if (xc_peek(&d->core, ev) && ((pred_t)pred)(d, ev, arg)) {
-      xc_dequeue(&d->core, ev);
-      return True;
+    while (nheld < XC_EVENT_RING && xc_dequeue(&d->core, &e)) {
+      got = 1;
+      if (((pred_t)pred)(d, &e, arg)) {
+        int i;
+        *ev = e;
+        for (i = 0; i < nheld; i++) xc_queue(&d->core, &held[i]);
+        xtr("[XC] XIfEvent matched type=");
+        xtrn(e.type);
+        return True;
+      }
+      held[nheld++] = e;
     }
-    if (wait_event(d) < 0) return False;
+    if (got) continue;                  /* drained the ring; pump again */
+    if (wait_event(d) < 0) {
+      int i;
+      for (i = 0; i < nheld; i++) xc_queue(&d->core, &held[i]);
+      return False;
+    }
   }
 }
 
@@ -1740,6 +1985,8 @@ XAPI int XSendEvent(Display *d, Window w, Bool propagate, long mask,
 
 XAPI int XWindowEvent(Display *d, Window w, long mask, XEvent *ev) {
   if (!d || w != d->win.id || !ev) return 0;
+  xtr("[XC] XWindowEvent caller=");
+  xtr_hex((unsigned long)__builtin_return_address(0));
   for (;;) {
     pump_nonblock(d);
     XEvent tmp;
@@ -2269,21 +2516,65 @@ XAPI int XParseColor(Display *d, Colormap c, const char *spec, void *def) {
   return 1;
 }
 
+/* XGetVisualInfo must honour its mask: Mesa's GLX frontend finds the visual
+ * for an FBConfig request by calling this with VisualScreenMask |
+ * VisualDepthMask | VisualClassMask (glx_api.c:get_visual()), and a shim that
+ * ignores the class answers a DirectColor request with the TrueColor visual.
+ * Measured (L27): glXChooseFBConfig(GLX_X_VISUAL_TYPE=GLX_DIRECT_COLOR)
+ * returned visualid 0x21 class 4, and Unity's GLX device creation stopped
+ * there.  Two visuals exist at depth 24 (0x21 TrueColor, 0x22 DirectColor),
+ * which is what a real 24-bit X screen publishes. */
 XAPI XVisualInfo *XGetVisualInfo(Display *d, long mask, XVisualInfo *tmpl,
                                  int *n) {
-  (void)mask; (void)tmpl;
-  if (!d) { if (n) *n = 0; return 0; }
+  XVisualInfo *cand[2];
+  XVisualInfo *out;
+  int i, matches = 0, k = 0;
+  if (!d || !tmpl) { if (n) *n = 0; return 0; }
+  cand[0] = &d->vinfo;
+  cand[1] = &d->vinfo_dc;
+  for (i = 0; i < 2; i++) {
+    const XVisualInfo *v = cand[i];
+    if ((mask & VisualIDMask) && v->visualid != tmpl->visualid) continue;
+    if ((mask & VisualScreenMask) && v->screen != tmpl->screen) continue;
+    if ((mask & VisualDepthMask) && v->depth != tmpl->depth) continue;
+    if ((mask & VisualClassMask) && v->c_class != tmpl->c_class) continue;
+    if ((mask & VisualRedMaskMask) && v->red_mask != tmpl->red_mask) continue;
+    if ((mask & VisualGreenMaskMask) && v->green_mask != tmpl->green_mask)
+      continue;
+    if ((mask & VisualBlueMaskMask) && v->blue_mask != tmpl->blue_mask) continue;
+    if ((mask & VisualColormapSizeMask) &&
+        v->colormap_size != tmpl->colormap_size) continue;
+    if ((mask & VisualBitsPerRGBMask) && v->bits_per_rgb != tmpl->bits_per_rgb)
+      continue;
+    matches++;
+  }
+  if (!matches) { if (n) *n = 0; return 0; }
   /* Real libX11 returns malloc'd memory here and its callers free() it:
    * Mesa's choose_visual() ends with `free(vis);` (glx_api.c:1047).  Returning
    * a pointer into this DSO's .bss was measured to abort the client in the
    * guest with `free(): invalid size` inside glXChooseFBConfig.  libX11 is
    * -nostdlib but it runs inside a glibc process, so the one allocation a real
    * Xlib also makes comes from the process's malloc. */
-  XVisualInfo *vi = (XVisualInfo *)xc_malloc(sizeof *vi);
-  if (!vi) { if (n) *n = 0; return 0; }
-  *vi = d->vinfo;
-  if (n) *n = 1;
-  return vi;
+  out = (XVisualInfo *)xc_malloc((unsigned long)matches * sizeof *out);
+  if (!out) { if (n) *n = 0; return 0; }
+  for (i = 0; i < 2; i++) {
+    const XVisualInfo *v = cand[i];
+    if ((mask & VisualIDMask) && v->visualid != tmpl->visualid) continue;
+    if ((mask & VisualScreenMask) && v->screen != tmpl->screen) continue;
+    if ((mask & VisualDepthMask) && v->depth != tmpl->depth) continue;
+    if ((mask & VisualClassMask) && v->c_class != tmpl->c_class) continue;
+    if ((mask & VisualRedMaskMask) && v->red_mask != tmpl->red_mask) continue;
+    if ((mask & VisualGreenMaskMask) && v->green_mask != tmpl->green_mask)
+      continue;
+    if ((mask & VisualBlueMaskMask) && v->blue_mask != tmpl->blue_mask) continue;
+    if ((mask & VisualColormapSizeMask) &&
+        v->colormap_size != tmpl->colormap_size) continue;
+    if ((mask & VisualBitsPerRGBMask) && v->bits_per_rgb != tmpl->bits_per_rgb)
+      continue;
+    out[k++] = *v;
+  }
+  if (n) *n = matches;
+  return out;
 }
 XAPI Status XMatchVisualInfo(Display *d, int scr, int depth, int c_class,
                              XVisualInfo *out) {
@@ -2298,10 +2589,17 @@ XAPI Status XMatchVisualInfo(Display *d, int scr, int depth, int c_class,
    * device" and Unity logged "Video subsystem has not been initialized". */
   xtr("[XC] XMatchVisualInfo class="); xtrn(c_class);
   if (depth != d->vinfo.depth) return 0;
-  if (c_class != TrueColor && c_class != d->visual.c_class) return 0;
-  *out = d->vinfo;
-  xtr("[XC] XMatchVisualInfo hit\n");
-  return 1;
+  if (c_class == d->vinfo.c_class) {
+    *out = d->vinfo;
+    xtr("[XC] XMatchVisualInfo hit\n");
+    return 1;
+  }
+  if (depth == d->vinfo_dc.depth && c_class == d->vinfo_dc.c_class) {
+    *out = d->vinfo_dc;
+    xtr("[XC] XMatchVisualInfo hit (direct)\n");
+    return 1;
+  }
+  return 0;
 }
 XAPI XPixmapFormatValues *XListPixmapFormats(Display *d, int *n) {
   (void)d;

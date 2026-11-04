@@ -195,6 +195,19 @@ typedef struct {
 #define TrueColor 4
 #define DirectColor 5
 
+/* ---- XGetVisualInfo masks (Xlib.h) ---------------------------------- */
+#define VisualNoMask           0x0
+#define VisualIDMask           0x1
+#define VisualScreenMask       0x2
+#define VisualDepthMask        0x4
+#define VisualClassMask        0x8
+#define VisualRedMaskMask      0x10
+#define VisualGreenMaskMask    0x20
+#define VisualBlueMaskMask     0x40
+#define VisualColormapSizeMask 0x80
+#define VisualBitsPerRGBMask   0x100
+#define VisualAllMask          0x1FF
+
 /* ---- window classes / map states ------------------------------------ */
 #define InputOutput 1
 #define InputOnly 2
@@ -209,6 +222,12 @@ typedef struct {
 #define YXSorted 2
 #define YXBanded 3
 #define PropModeReplace 0
+#define PropModePrepend 1
+#define PropModeAppend  2
+
+/* PropertyNotify state (X.h) */
+#define PropertyNewValue 0
+#define PropertyDelete   1
 #define PropModePrepend 1
 #define PropModeAppend 2
 #define Success 0

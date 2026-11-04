@@ -1813,3 +1813,217 @@ bash tools/gate/m2_pi.sh                 m2pi: PASS
   issues one yet.
 - No window, no GLX, no frame: the ladder now ends in the GL loader, one layer
   above where it started.
+
+## 17. 2026-11-04 — M6: the renderer predicate is Unity's own device-create, and the GLX answers were wrong in five places
+
+Lane L27 (`rw-l27-renderer`), tree seeded after wave 10 + the launcher preload.
+§16 ended at `Forced renderer 17 is not supported, exiting`. The hypothesis
+this wave started from — "Unity refuses the renderer from a GLX capability
+probe" — is **half right**: the refusal is Unity's `IsGfxRendererSupported`,
+but what fed it was not a version query. It was the **GL device create**, and
+that failed because `glXChooseFBConfig` answered a **TrueColor** visual to a
+`GLX_DIRECT_COLOR` request. Five shim bugs sat between the message and a
+mapped window.
+
+### 17.1 The predicate, with addresses
+
+All offsets are file-relative in `UnityPlayer.so` (base in Player.log:
+`[RWMAIN] dlopen ok libGL.so.1 ... base=` is libGL's, not this one;
+`[RWMAIN] dlopen ok /RWDSO/UnityPlayer.so ... base=0x1080b04000` is).
+
+```text
+e64b20  caller: if (!IsGfxRendererSupported(*renderer, mode, ctx) && *renderer != -1)
+e64b2f      printf("Forced renderer %d is not supported, exiting")   # .rodata 1b7635
+e65210  IsGfxRendererSupported(): switch (renderer)
+e6522a    cmp $0x11 (17, kGfxRendererOpenGLCore) -> the GL path
+e7b1c0      GfxDevice::Create(renderer 13, ctx)      [0xd = the clamp target]
+e7b240        e76e50(device)  -> the version-mapping loop
+               192cfec(desc)                <- THE REAL DEVICE CREATE
+               if NULL: 192cc31(0x11,&maj) / (0x12,&min)   (props 17/18)
+                        ef44d0(maj,min,0)  -> renderer id or 0
+                        if (id == 6) { printf("Unable to find a supported
+                                        OpenGL core profile")  # .rodata 23ba38
+                                        return NULL; }
+                        else  ef4340(id) -> {maj,min} table, retry 192cfec
+eeb2f0    return g_gfxDevice != NULL       (0x200f900)
+e65241    if (g_gfxDevice == NULL) printf("Failed to create valid graphics
+          context: please ensure you meet the minimum requirements")  # 29a1fa
+```
+
+`ef44d0(major, minor, 0)` linear-searches renderers **6..12** only
+(`ef4340()+16*i`, table at `0x200fb40`, entries `{maj,min,feature-mask}`:
+6={3,2} … 12={4,4}); renderer **13 = {4,5}** is the `-force-glcore` clamp
+target and is *not* in that scan, so a 4.5 request maps to 0 and the loop
+walks down. The message is therefore a **secondary** failure: it is printed
+when the downgrade loop reaches the 3.2-core floor, which only happens because
+`192cfec` kept failing.
+
+`192cfec` fails before any `glXCreateContextAttribsARB`: the GLX device create
+chooses an FBConfig, creates the window, and stops. That is where the real
+divergence was.
+
+### 17.2 Host vs guest, same game, same `-force-glcore`
+
+Host: Xvfb `:77`, Mesa 26.0.8 llvmpipe, `apitrace trace`. Guest: the same
+`UnityPlayer.so`, with the Mesa frontend's new `HOBBYOS_GLX_TRACE=1` trace
+(`tools/mesa/patches/0005`, staged by `/GLXON`).
+
+| step | host | guest (before) |
+|---|---|---|
+| `glXChooseFBConfig {RENDER_TYPE=RGBA, R/G/B/A=8, DOUBLEBUFFER=1, DEPTH=24, STENCIL=8, X_VISUAL_TYPE=GLX_DIRECT_COLOR}` | 6 configs; `config[0]` → `visualid=0x22, class=5 (DirectColor)` | **1 config; `visualid=0x21, class=4 (TrueColor)`** |
+| `glXGetFBConfigAttrib` | per attribute | never called |
+| `glXCreateContextAttribsARB {4.5 core, RELEASE_BEHAVIOR=FLUSH, NO_ERROR=False}` | context | **never called** |
+| `XCreateWindow` (device window) | (SDL's window already mapped; this path not taken) | `-> 0 (window already exists)` |
+
+Root cause of the first row: the compat `libX11.so.6` published **one** visual
+(`0x21 TrueColor`) and `XGetVisualInfo()` **ignored its mask** — it returned
+that visual whatever `VisualClassMask` asked for. Mesa's `choose_visual()` →
+`get_visual()` searches X visuals by class, so the DirectColor request was
+answered with TrueColor and Unity's GLX device gave up. A real 24-bit X screen
+publishes `0x21 TrueColor` *and* `0x22 DirectColor` (`xdpyinfo` on the host:
+exactly that pair, then more TrueColor ids).
+
+### 17.3 The five shim fixes (each measured, not guessed)
+
+1. **Visuals** — `XOpenDisplay` publishes `0x22 DirectColor` as well;
+   `XGetVisualInfo()` honours `VisualIDMask | VisualScreenMask |
+   VisualDepthMask | VisualClassMask` (and the colour-mask ones) over the two
+   visuals; `XMatchVisualInfo()` matches either class.
+2. **Window lifetime** — `XDestroyWindow()` releases the slot (`win.id = 0`,
+   every field re-armed by `win_clear()`). SDL creates a 32×32 window, probes
+   a legacy context in it, destroys it; the old rule left `win.id` set, so
+   Unity's device window could never be created.
+3. **The protocol fd** — Unity's `-logFile` `dup2()`s the log file over **fd 1
+   and fd 2**, so the shim's outbound `ESC ] X`/`] F` went into `Player.log`
+   and the desktop answered nothing: measured `[XC] wait_event: blocking read
+   fd0` forever after `XMapWindow`. `rwlaunch` now keeps the pipe on **fd 9**
+   (`dup2(1,9)` before spawn) and the shim selects it with an fstat probe —
+   *fd 1 regular file and fd 9 FIFO* — falling back to fd 1 for a directly
+   launched client (the m3/m4 probes), which is why those gates stay green.
+4. **PropertyNotify** — a real server notifies every client that selected
+   `PropertyChangeMask`, including the setter. Unity selects exactly that mask
+   on the GL window and waits in `XIfEvent`; `XChangeProperty` and the
+   `XStoreName`/`XSetWMHints`/`XSetWMNormalHints`/`XSetClassHint`/
+   `XSetWMProtocols` paths now queue it.
+5. **MapNotify belongs to XMapWindow**, not to the desktop's later `ESC ] G`
+   geometry: Unity replaces its event mask with `PropertyChangeMask` before
+   the geometry arrives, so a MapNotify queued from `set_geometry` under
+   "current mask has StructureNotifyMask" was lost. The shim remembers that
+   StructureNotify/Exposure were selected *at least once* on the window
+   (`structure_selected`/`exposure_selected`) and delivers MapNotify from
+   `XMapWindow` (ConfigureNotify/Expose still from the geometry).
+   Unity's predicate is `UnityPlayer+0x194c19b`: `event->type == 19
+   (MapNotify) && event->xmap.window == *(XPointer)arg`.
+
+Two further bugs found by the same trace, both real Xlib semantics:
+
+- **`XIfEvent` spun forever** on any pending event the predicate rejected: the
+  old loop peeked at the head and left it there, so `wait_event` returned
+  immediately (event pending) and the loop re-peeked. Measured rip inside
+  `XIfEvent`, **127 945 216** `pump_nonblock` calls, one CPU at 100 %. It now
+  dequeues non-matching events into a held array (BSS, ring-sized) and
+  re-queues them when the match is found — Xlib's documented behaviour.
+- **`XCreateWindow` returned 0 for a second window.** Unity creates three
+  (32×32 probe, 1920×1080 device window, 1920×1080 window) and still maps
+  earlier ids. Each create now returns a fresh XID (`0x200001+`) and replaces
+  the single desktop surface; `win_id_live()` lets any live XID be mapped and
+  the MapNotify carries that id.
+
+### 17.4 Before / after
+
+Before (the shipped ladder of §16, unchanged by wave 10's preload):
+
+```text
+[RWMAIN] dlopen ok libGL.so.1 -> 0x1040211eb0 base=0x1133006000
+Unable to find a supported OpenGL core profile
+Failed to create valid graphics context: please ensure you meet the minimum requirements
+E.g. OpenGL core profile 3.2 or later for OpenGL Core renderer
+Forced renderer 17 is not supported, exiting
+```
+
+After (`RW_TRACE_GLX=1 RW_TRACE_X11=1`, visualid now DirectColor and a window
+that the desktop maps):
+
+```text
+[GLXT] glXChooseFBConfig screen=0
+[GLXT]   attribs {0x8011=1, 0x8=8, 0x9=8, 0xa=8, 0xb=8, 0x5=1, 0xc=24, 0xd=8, 0x22=32771}
+[GLXT]   -> 1 config, visualid=0x22 class=5 depth=24
+[XC] XCreateWindow id=2097154
+[XC] XSelectInput mask=0x0x62c07f
+[XC] XSelectInput mask=0x0x400000
+[XC] PropertyNotify atom=107
+[XC] XMapWindow
+[XC] MapNotify queued
+[XC] XIfEvent caller=0x1082450466
+[XC] set_geometry 2
+;34
+;1916
+;1018
+[XC] XIfEvent matched type=19
+```
+
+The desktop puts the window into pixel mode at 1916×1018 (screenshot
+`obj/rw-desktop/shots/99_final.png`: full-screen app surface). `ESC ] X
+1920;1080~` no longer appears in `Player.log` — it goes to the desktop on
+fd 9.
+
+### 17.5 The next blocker (exact rows)
+
+After the third window's MapNotify, Unity waits in `XIfEvent` again — same
+predicate (`UnityPlayer+0x194c19b`, MapNotify) — for a window it never maps
+through the shim, and the desktop has no event left to give:
+
+```text
+[XC] XCreateWindow id=2097155
+[XC] XMapWindow
+[XC] XIfEvent matched type=19
+[XC] XInternAtom -> 0
+[XC] XIfEvent caller=0x1082451e6e
+[XC] wait_event: blocking read fd0
+```
+
+`[IDLESTUCK] slot=4 ... st=3 ... rip=<libX11>` shows the main thread runnable
+inside the shim, not parked: the remaining work is Unity's multi-window
+expectation against the desktop's one-surface protocol (a second/third window
+is aliased, but Unity still waits for a map event for one of them), or the
+first non-X call after the window handshake. It is **not** the renderer
+predicate any more: `IsGfxRendererSupported` never runs because
+`glXCreateContextAttribsARB` is still not reached.
+
+### 17.6 Instruments added (kept)
+
+- `tools/mesa/patches/0005-glx-trace.patch`: opt-in `HOBBYOS_GLX_TRACE` trace
+  of `glXChooseVisual`/`glXChooseFBConfig`/`glXGetFBConfigAttrib`/
+  `glXGetVisualFromFBConfig`/`glXCreateContext{,AttribsARB}`/`glXCreateWindow`/
+  `glXMakeCurrent`, with attribute lists. Costs one `getenv` when off.
+- `tools/rw/run-rimworld-desktop.sh`: `RW_TRACE_GLX=1` stages `/GLXON`
+  (rwlaunch exports `HOBBYOS_GLX_TRACE=1`); `RW_TRACE_X11=1` builds and stages
+  the `-DXC_TRACE` libX11.
+- `libx11.c` trace additions: `XCreateWindow id`, `XSelectInput mask`,
+  `MapNotify queued`, `PropertyNotify atom`, `XIfEvent caller/matched`,
+  `set_geometry`, `wait_event: blocking read`.
+
+### 17.7 Regressions (all serialized, never with the desktop harness)
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 407   Tests failed: 0
+make -f src/user/xcompat/Makefile.inc ARCH=intel xcompat_test_run
+                                          201 checks, 0 failed (204 ABI rows)
+python3 tools/gate/m3_window_probe.py     m3w: PASS
+python3 tools/gate/m4_gl_probe.py         m4: PASS
+```
+
+The m3 probe caught the fd change: the first version keyed on "fd 9 is open",
+which is also true for a directly launched client, and the probe's `ESC ] X`
+went to an unrelated descriptor (no geometry, no green/blue blocks). The
+fstat pair (`fd 1 regular` **and** `fd 9 FIFO`) is what makes the game and the
+probes both work.
+
+### 17.8 Limits
+
+- No `glXCreateContextAttribsARB` call is reached yet, so the 4.5→3.3 clamp
+  (§M4) is still unexercised by the game.
+- The shim aliases all X windows onto one desktop surface; a client that needs
+  two simultaneously visible windows would render both into the same pixels.
+- `XIfEvent`'s held array is static (one display per process by contract), so
+  two threads calling it concurrently would share it.
