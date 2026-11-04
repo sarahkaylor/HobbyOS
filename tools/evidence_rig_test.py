@@ -24,6 +24,56 @@ def check(cond, label, extra=""):
         print(f"FAIL: {label} ({extra})")
 
 
+def test_launch_verified():
+    """GB-194: a lost Down must not be reported as the intended launch.
+
+    Fake QMP: `ret` appends `[LAUNCH] NAME` from a scripted list, so the first
+    attempt can launch the wrong title.  The verifier must read the name,
+    close the wrong window, retry, and only then accept — and exhaust loudly.
+    """
+    d = tempfile.mkdtemp(prefix="evrig-launch-")
+    serial = os.path.join(d, "serial.log")
+    with open(serial, "w") as f:
+        f.write("[MENU] 16=PONG.BIN\n[MENU] 18=XNIBBLER.BIN\n")
+
+    class FakeQ:
+        def __init__(self, names):
+            self.names = list(names)
+            self.attempts = 0
+            self.keys = []
+
+        def key(self, k, pause=0.15):
+            self.keys.append(k)
+            if k == "ret":
+                name = self.names[min(self.attempts, len(self.names) - 1)]
+                self.attempts += 1
+                with open(serial, "a") as f:
+                    f.write(f"[LAUNCH] {name}\n")
+
+    try:
+        check(rig.launches(serial) == [], "launches parser sees no line yet")
+        q = FakeQ(["XNIBBLER.BIN"])
+        ok, actual, tries = rig.launch_verified(q, serial, "XNIBBLER.BIN", 18)
+        check(ok and actual == "XNIBBLER.BIN" and tries == 1,
+              "verified launch accepts the first correct title", f"tries={tries}")
+
+        q = FakeQ(["XCRYPT.BIN", "XNIBBLER.BIN"])
+        ok, actual, tries = rig.launch_verified(q, serial, "XNIBBLER.BIN", 18)
+        check(ok and tries == 2 and actual == "XNIBBLER.BIN",
+              "a wrong first launch is retried and the right title accepted",
+              f"tries={tries}")
+        check("f4" in q.keys, "the wrong window was closed before the retry")
+
+        q = FakeQ(["XCRYPT.BIN"])
+        ok, actual, tries = rig.launch_verified(q, serial, "XNIBBLER.BIN", 18)
+        check((not ok) and actual == "XCRYPT.BIN" and tries == 3,
+              "an exhausted retry names what actually launched, not the target",
+              f"actual={actual} tries={tries}")
+        check(rig.launches(serial)[-1] == "XCRYPT.BIN", "serial keeps the launched names")
+    finally:
+        shutil.rmtree(d)
+
+
 def test_menu_parse():
     # Real [MENU] shape from the serial dumps (with optional [CONSOLE] noise).
     dump = (
@@ -314,13 +364,14 @@ def test_stage_executes_both_consumers_one_fixture():
 if __name__ == "__main__":
     test_menu_parse()
     test_resolve_slot_by_name()
+    test_launch_verified()
     test_manifest_bundle()
     test_report_pointer()
     test_stage_cmd_matches_tier()
     test_stage_off_by_default()
     test_make_recipe_shape_live()
     test_stage_executes_both_consumers_one_fixture()
-    print(f"\nTests run: {8}, failed: {len(FAILS)}")
+    print(f"\nTests run: {9}, failed: {len(FAILS)}")
     if FAILS:
         print("EVIDENCE RIG TEST FAILED")
         sys.exit(1)
