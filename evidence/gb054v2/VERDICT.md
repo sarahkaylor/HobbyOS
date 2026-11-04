@@ -42,6 +42,6 @@ restore → PASS; deleting only the prose mention at line 44 (`The native route 
 
 **Clause 6 — honesty.** The doc states: "It does not claim RimWorld/DSP/TA run this month. The feasibility doc's verdict stands." and "It does not stage the epics into Ready. They stay in Icebox until their entry criteria are met."
 
-Evidence: commit on `origin/verify-gb054v2` (worktree branch), path `evidence/gb054v2/` — the 12-check test, the sync output, the four falsifier logs, host and link logs, SUMMARY.
+Evidence: commit `f41d7088` on `origin/verify-gb054v2` (worktree branch), path `evidence/gb054v2/` — the 12-check test, the sync output, the four falsifier logs, host and link logs, SUMMARY.
 
 GREEN → GB-054 to Merge Gate; GB-054-V2 to Done.
