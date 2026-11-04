@@ -630,26 +630,40 @@ Rules the map encodes:
 - **Probes are ordinary Linux programs** (musl, no HobbyOS headers), so the same
   source produces the reference behaviour on a Linux host.
 
-## 14. W5 — the Linux-dl ladder, first rung (GB-196)
+## 14. W5 — the Linux-dl ladder (GB-196 report, GB-199 entry)
 
-The compat track now parses `PT_INTERP` with `ELF_PARSE_CAPTURE_INTERP`: it names the
-interpreter and the first dependency set, and still never starts a non-native one.  A
-glibc `-pie` hello staged with a one-member `::WAVE.CFG` booted on intel at `MODE=test`
-prints, in order:
+GB-196 made the compat track parse `PT_INTERP` with `ELF_PARSE_CAPTURE_INTERP` and name
+the interpreter + first dependency set.  GB-199 maps the closure and enters `ld.so`.  A
+glibc `-pie` hello (`PT_INTERP /lib64/ld-linux-x86-64.so.2`, `NEEDED libc.so.6`) staged
+with a one-member `::WAVE.CFG`, intel `MODE=test`:
 
 ```
 elf loader: PT_INTERP /lib64/ld-linux-x86-64.so.2
 elf loader: interpreter LD64.SO mapped
-elf loader: DT_NEEDED LIBC6.SO
-elf loader: compat interpreter is not entered (GB-196 stops at the named report)
+elf loader: DSO LIBC6.SO mapped
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 entry=0x1008023340
+auxv: AT_PAGESZ=0x1000
+auxv: AT_PHDR=0x1000000040
+auxv: AT_ENTRY=0x1000001060
+auxv: AT_BASE=0x1008000000
+[ARRIVED] LDHELLO.BIN rc>0
+LDHELLO.BIN: error while loading shared libraries: libc.so.6: failed to map segment from shared object
+[EXITPC] pid=2 last_user_pc=0x1008029C67 code=0x7F
 ```
 
-- The interpreter and its first dependency are staged at the FAT16 root under the 8.3
-  names `LD64.SO` (= `ld-linux-x86-64.so.2`) and `LIBC6.SO` (= `libc.so.6`).  The
-  translation is the bounded `el_compat_83[]` table in `src/kernel/elf_loader.c`; a name
-  outside it gets a real root/basename lookup, and a miss is named:
-  `elf loader: first missing DSO <name>`.
-- `mapped` means the interpreter's PT_LOAD regions were installed in a USER_LIB slot
-  with `el_map_stage` and no relocations applied — nothing enters it yet.
-- Entering `ld.so` (dynamic symbol resolution, interpreter-loaded `DT_NEEDED`) is the
-  next rung and is deliberately not part of GB-196.
+- Names: `LD64.SO` = `ld-linux-x86-64.so.2`, `LIBC6.SO` = `libc.so.6`; the bounded
+  `el_compat_83[]` table in `src/kernel/elf_loader.c` translates the first, every other
+  name gets a real root/basename lookup, and a miss is named
+  (`elf loader: first missing DSO <name>`).
+- The closure is mapped depth-first (interpreter, then the executable's `DT_NEEDED`,
+  then each DSO's own), deduped by staged name.  No relocations are applied: `ld.so`
+  owns them.  `elf loader: DSO <name> mapped` is one line per DSO.
+- `auxv:` lines are the kernel's startup stack for the interpreter, one record per
+  entry; `AT_BASE` is the interpreter's USER_LIB base, `AT_ENTRY` the executable's.
+- The guest then executes `ld.so`; the first stop above is ld.so's own named load
+  error (libc's mmap), with the kernel's `[EXITPC]` naming the PC.
+- Falsifier: `make MODE=test ARCH=intel GB199_NO_AUXV=1 ...` omits the startup stack;
+  the same jump faults at `VA=0x1800000000 PC=0x1008021E18` (a HOLE just above the
+  stack top), which is what the auxv block prevents.
+- Entering the real glibc text (symbol resolution, interpreter-loaded DSOs) is the
+  next rung.

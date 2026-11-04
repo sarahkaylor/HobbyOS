@@ -79,7 +79,8 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
 /* One console record per (process, number) when nothing handles a number, plus
    a global cap so a spinning guest cannot flood the serial log.  Called from
    trap.c's compat default arm; safe on any CPU (single uart_puts record). */
-void linux_compat_unhandled(struct process *p, uint64_t nr, uint64_t rip);
+void linux_compat_unhandled(struct process *p, uint64_t nr, uint64_t rip,
+                            uint64_t rdi);
 
 /* --- user-memory helpers -------------------------------------------------
  * All return 0 on success, -EFAULT on a bad or unmapped user range.  They are

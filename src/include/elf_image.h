@@ -73,6 +73,8 @@
  * its dependencies and still refuses to start a non-native one. */
 #define ELF_PARSE_ALLOW_INTERP 0x1u
 #define ELF_PARSE_CAPTURE_INTERP 0x2u
+#define ELF_PARSE_DSO 0x4u   /* a shared library: an embedded PT_INTERP is not
+                                an entry requirement (glibc's libc.so.6 has one) */
 
 /* Parse / validation results.  Negative = refusal; the caller maps them onto
  * Linux errno (mostly -ENOEXEC) and logs the specific reason. */
