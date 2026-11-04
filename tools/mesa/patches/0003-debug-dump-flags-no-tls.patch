@@ -1,0 +1,28 @@
+Subject: [PATCH 3/3] util: keep debug_dump_flags' buffers out of TLS
+
+A dlopen()ed libGL cannot rely on glibc's static-TLS surplus: two 4 KiB
+thread_local scratch buffers in debug_dump_flags() made PT_TLS 4400 bytes
+against a 1664-byte surplus, and the first dlsym'd GL entry point that touched
+the dispatch TLS then either failed to allocate ("cannot allocate memory in
+static TLS block") or hung in the dynamic-TLS path.  They are debug-string
+scratch buffers, not state: plain statics are correct and keep the DSO's TLS
+under 100 bytes.
+
+--- a/src/util/u_debug.c	2026-11-03 22:44:19.675325761 -0600
++++ b/src/util/u_debug.c	2026-11-03 22:44:19.675359073 -0600
+@@ -408,8 +408,13 @@
+ const char *
+ debug_dump_flags(const struct debug_named_value *names, uint64_t value)
+ {
+-   static thread_local char output[4096];
+-   static thread_local char rest[256];
++   /* HobbyOS/compat: NOT thread_local.  These are scratch buffers for a debug
++    * string, and as TLS they made this DSO's PT_TLS 4400 bytes -- far beyond
++    * glibc's 1664-byte static-TLS surplus for a dlopen()ed object.  A plain
++    * static keeps the whole DSO's TLS under 100 bytes, so a dlopened libGL
++    * needs no dynamic-TLS allocation at all. */
++   static char output[4096];
++   static char rest[256];
+    int first = 1;
+ 
+    output[0] = '\0';

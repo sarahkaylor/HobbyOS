@@ -165,3 +165,67 @@ the same renderer, not merely a DSO that loads.
 `obj/mesa/obj/tu-summary.json` records the per-TU result (835/835 compiling on
 a clean run); `obj/mesa/log/` has the exact command line and the compiler's
 output for every TU.
+
+## In the guest (M4 gate): what the host build could not tell us
+
+The host harness proves the DSO renders; it does not prove it *loads into the
+compat class*. `tools/gate/m4_gl_probe.py` boots the real kernel, stages
+`libGL.so.1` + `libGLX.so.0` in `/LIB64` (`tools/mesa/stage.sh`), launches
+`src/user/gl_probe.c` (a glibc PIE whose `DT_NEEDED` are libX11/libdl/libm/
+libpthread/libc, the same shape as the game), and grades its serial rows.
+
+Five things only the guest found, each now enforced by the build or the DSO:
+
+1. **The build must use glibc 2.31's headers, not the host's.** `libGL.so.1`
+   compiled against the host's glibc names `__isoc23_strtol`, `__isoc23_strtoul`
+   and `fstat64`; none exists in 2.31, so `dlopen(RTLD_NOW)` died with
+   "undefined symbol: log10" once those were gone — i.e. `libm` is a load-time
+   dependency too. The script now extracts the pinned `libc6-dev` (sha256) and
+   compiles `-nostdinc` against it, then **audits every undefined symbol against
+   the pinned runtime**: 4103 glibc symbols, 29 from libX11, **0 unaccounted**.
+2. **`PT_TLS` must fit glibc's static-TLS surplus (1664 bytes).** Mesa keeps a
+   4 KiB `debug_dump_flags` scratch buffer in `thread_local`, which made
+   `PT_TLS` 4400 bytes → `dlopen` failed with "cannot allocate memory in static
+   TLS block" (host and guest alike). `patches/0003-debug-dump-flags-no-tls.patch`
+   makes those buffers plain statics: `PT_TLS` is 40 bytes, the DSO keeps
+   `DF_STATIC_TLS`, and `-ftls-model=global-dynamic` is only the fallback (see
+   `patches/0002`) if a future change grows it again.
+3. **`libGL` needs `libX11` symbols the compat DSO did not export**:
+   `_XLockMutex_fn`, `_XUnlockMutex_fn`, `_Xglobal_lock` (libX11's private
+   thread hooks) and `XDrawString16`/`XFreeFontInfo`/`XGetImage` (glXUseXFont /
+   glXGetImage paths). RTLD_NOW resolves *all* of them, so "never called" is not
+   good enough.
+4. **`XDestroyImage` is a macro, not a function.** `<X11/Xlib.h>` expands it to
+   `img->f.destroy_image(img)`, so an XImage whose `f` table is zero turns the
+   client's `XDestroyImage()` into a jump to address 0. Measured in the guest as
+   `memory fault VA=0x0 PC=0x0` inside `glXChooseFBConfig` →
+   `bits_per_pixel()`.
+5. **`XGetVisualInfo` must return freeable memory.** Mesa's `choose_visual()`
+   ends with `free(vis)`, so returning a pointer into the DSO's `.bss` aborts
+   the client with `free(): invalid size`. The compat libX11 now mallocs that
+   one structure (its only external symbol) and `XVisualInfo.class` reports
+   `TrueColor`, not `InputOutput` (Mesa maps 1 to GLX_GRAY_SCALE and then
+   refuses RGB rendering).
+
+With those in place the guest reports, from a real boot:
+
+```
+[GL] GL_VERSION  : 3.3 (Core Profile) Mesa 26.2.6
+[GL] GL_RENDERER : softpipe
+[GL] GLSL        : 3.30
+[GL] FBO 256x256 status=0x8cd5 (complete=0x8cd5)
+[GL] vertex compile: ok / fragment compile: ok / program link: ok
+[GL] readback 256x256: fnv1a64=0x25476e955b66d136 glGetError=0x0
+[GL] non-background=22890/65536 (34%) colours=22891
+```
+
+— the same checksum and the same 22 890 covered pixels the *host* run of the
+same DSO reports, so it is the same renderer and the same frame.
+
+**Still open:** `glXSwapBuffers` (Mesa's `xlib_sw_display` → `XPutImage` present
+path) faults in the guest with an instruction fetch into a non-executable page
+of libGL's mapping, so the probe draws into the window's default framebuffer but
+does not swap. The XImage/XPutImage ABI (`bits_per_pixel`, `format`,
+`bitmap_unit`, `data`, `bytes_per_line`, `f.destroy_image`) is in place; the
+present path is the next M4 item.
+

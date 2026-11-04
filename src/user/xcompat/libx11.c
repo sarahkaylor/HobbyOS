@@ -112,6 +112,13 @@ static void xcopy(void *d, const void *s, unsigned long n) {
 }
 static int xlen(const char *s) { int n = 0; while (s[n]) n++; return n; }
 
+/* The process's allocator.  Only XGetVisualInfo uses it, because real libX11
+ * mallocs that result and callers free() it; everything else in this DSO stays
+ * allocation-free (-nostdlib, raw syscalls).  Defined here as an extern so the
+ * link keeps it an undefined symbol resolved from the compat process's libc. */
+extern void *malloc(unsigned long size);
+static void *xc_malloc(unsigned long n) { return malloc(n); }
+
 /* ---- framebuffer ------------------------------------------------------ *
  * docs/linux-abi.md §9: /dev/fb0 maps the HobbyOS framebuffer.  The mode is
  * fixed 1920x1080 B8G8R8A8; FBIOGET_VSCREENINFO is used when the node
@@ -826,7 +833,12 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->screen_obj.root_input_mask = 0;
 
   d->visual.id = 0x21;                   /* TrueColor, 24-bit */
-  d->visual.c_class = InputOutput;
+  /* TrueColor (4), NOT InputOutput (1): the XVisualInfo/Visual `class` field
+   * is a *visual* class (StaticGray..DirectColor), while InputOutput is a
+   * window class.  Mesa's xmesa_convert_from_x_visual_type() maps 1 to
+   * GLX_GRAY_SCALE and then refuses RGB rendering ("XMesa: RGB mode rendering
+   * not supported in given visual"), so the GLX frontend needs 4 here. */
+  d->visual.c_class = TrueColor;
   d->visual.red_mask = 0x00ff0000;
   d->visual.green_mask = 0x0000ff00;
   d->visual.blue_mask = 0x000000ff;
@@ -836,7 +848,7 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->vinfo.visualid = d->visual.id;
   d->vinfo.screen = 0;
   d->vinfo.depth = 24;
-  d->vinfo.c_class = InputOutput;
+  d->vinfo.c_class = TrueColor;           /* a *visual* class (see above) */
   d->vinfo.red_mask = d->visual.red_mask;
   d->vinfo.green_mask = d->visual.green_mask;
   d->vinfo.blue_mask = d->visual.blue_mask;
@@ -1767,10 +1779,197 @@ XAPI int XDrawImageString(Display *d, Drawable dr, GC gc, int x, int y,
   return XDrawString(d, dr, gc, x, y, s, len);
 }
 
+/* ---- XImage ----------------------------------------------------------- *
+ * Mesa's xlib winsys builds an XImage in two places and the GLX frontend
+ * asserts on it: xm_api.c's bits_per_pixel() (an XImage probe, `assert(img)`),
+ * and xlib_sw_winsys.c's alloc_ximage() (the swap buffer, which then writes
+ * ximage->data / width / height / bytes_per_line and asserts format and
+ * bitmap_unit are non-zero).  A stub returning NULL aborts the first
+ * glXChooseFBConfig -- measured in the guest:
+ *   xm_api.c:307: int bits_per_pixel(XMesaVisual): Assertion `img' failed.
+ *
+ * The layout below is <X11/Xlib.h>'s XImage field for field: a client compiled
+ * against the real header (libGL is) indexes it by offset, so this is ABI, not
+ * a private detail.  x86-64: 4 ints, data at 16, five ints, one pad,
+ * bits_per_pixel at 48, three masks, obdata, then the six function pointers.
+ * There is no allocator in this -nostdlib DSO, so structures and pixel buffers
+ * come from anonymous mmap and are never freed (XDestroyImage is a no-op, and
+ * every caller in the GLX path replaces or drops the image anyway). */
+typedef struct xc_ximage {
+  int width, height;
+  int xoffset;
+  int format;
+  char *data;
+  int byte_order;
+  int bitmap_unit;
+  int bitmap_bit_order;
+  int bitmap_pad;
+  int depth;
+  int bytes_per_line;
+  int bits_per_pixel;
+  unsigned long red_mask, green_mask, blue_mask;
+  void *obdata;
+  struct {
+    struct xc_ximage *(*create_image)(void);
+    int (*destroy_image)(void);
+    unsigned long (*get_pixel)(void);
+    int (*put_pixel)(void);
+    struct xc_ximage *(*sub_image)(void);
+    int (*add_pixel)(void);
+  } f;
+} xc_ximage;
+
+#define XP_MAP_PRIVATE 0x02
+#define XP_MAP_ANON 0x20
+
+/* The three offsets every client reads (and Mesa writes) — checked, not hoped:
+ * <X11/Xlib.h> on x86-64 puts data at 16 and bits_per_pixel at 48 in a
+ * 136-byte struct. */
+_Static_assert(__builtin_offsetof(xc_ximage, data) == 16, "XImage.data offset");
+_Static_assert(__builtin_offsetof(xc_ximage, bits_per_pixel) == 48,
+               "XImage.bits_per_pixel offset");
+_Static_assert(sizeof(xc_ximage) == 136, "XImage size");
+
+/* XImage storage comes from a static pool, not mmap.  Two reasons: this DSO is
+ * -nostdlib and has no allocator, and an mmap issued from inside a GL call
+ * chain in the guest was measured to return 0 and take the process down (the
+ * same XCreateImage works when the probe calls it at the top of main, so it is
+ * the call site, not the syscall).  The pool is BSS, so it costs nothing in
+ * the file.  Pixel buffers that do not fit are left NULL: the only consumer
+ * (Mesa's xlib winsys) overwrites img->data with its own buffer before it
+ * presents, and bits_per_pixel() passes its own. */
+static unsigned char xc_img_pool[1u << 20] __attribute__((aligned(16)));
+static unsigned long xc_img_used;
+
+static void *xc_alloc(unsigned long n) {
+  if (!n) n = 1;
+  unsigned long aligned = (n + 15ul) & ~15ul;
+  if (xc_img_used + aligned > sizeof xc_img_pool) return 0;
+  void *p = xc_img_pool + xc_img_used;
+  xc_img_used += aligned;
+  return p;
+}
+
+static int xc_depth_to_bpp(unsigned depth) {
+  if (depth <= 1) return 1;
+  if (depth <= 8) return 8;
+  if (depth <= 16) return 16;
+  return 32;                     /* 24 and 32 both transfer as 32 bpp */
+}
+
+/* <X11/Xlib.h> makes XDestroyImage a MACRO:
+ *
+ *     #define XDestroyImage(ximage) ((*((ximage)->f.destroy_image))((ximage)))
+ *
+ * so a client does not call a libX11 entry point at all -- it calls the
+ * function pointer out of the XImage.  Leaving f.* zero therefore turns
+ * XDestroyImage() into a jump to address 0 inside the *client*: measured in
+ * the guest as `memory fault VA=0x0 PC=0x0 rw=rx` right after
+ * glXChooseFBConfig -> bits_per_pixel() -> free() -> XDestroyImage(img).
+ * The pool cannot be freed, so destroy just reports success. */
+static int xc_ximage_destroy(XImage *img) {
+  (void)img;
+  return 0;
+}
+static unsigned long xc_ximage_get_pixel(XImage *img, int x, int y) {
+  xc_ximage *im = (xc_ximage *)img;
+  if (!im || !im->data || x < 0 || y < 0 || x >= im->width || y >= im->height)
+    return 0;
+  if (im->bits_per_pixel != 32) return 0;
+  return ((const unsigned int *)(im->data +
+          (unsigned long)y * im->bytes_per_line))[x];
+}
+static int xc_ximage_put_pixel(XImage *img, int x, int y, unsigned long pixel) {
+  xc_ximage *im = (xc_ximage *)img;
+  if (!im || !im->data || x < 0 || y < 0 || x >= im->width || y >= im->height)
+    return 0;
+  if (im->bits_per_pixel != 32) return 0;
+  ((unsigned int *)(im->data + (unsigned long)y * im->bytes_per_line))[x] =
+      (unsigned int)pixel;
+  return 0;
+}
+
+XAPI XImage *XCreateImage(Display *d, Visual *v, unsigned depth, int format,
+                     int offset, char *data, unsigned w, unsigned h,
+                     int bitmap_pad, int bytes_per_line) {
+  if (!d || w == 0 || h == 0) return 0;
+  xc_ximage *img = (xc_ximage *)xc_alloc(sizeof *img);
+  if (!img) return 0;
+  xz(img, sizeof *img);
+
+  int bpp = xc_depth_to_bpp(depth);
+  int pad = bitmap_pad > 0 ? bitmap_pad : 32;
+  /* Xlib rounds a scanline up to the bitmap pad; the GLX winsys overrides
+   * bytes_per_line with its own stride before presenting, so this only has to
+   * be self-consistent (and big enough) here. */
+  int bpl = bytes_per_line;
+  if (bpl <= 0) {
+    bpl = ((int)w * bpp + pad - 1) / pad * (pad / 8);
+    if (bpl <= 0) bpl = (int)w * 4;
+  }
+
+  img->width = (int)w;
+  img->height = (int)h;
+  img->xoffset = offset;
+  img->format = format ? format : 2;          /* ZPixmap */
+  img->byte_order = 0;                        /* LSBFirst */
+  img->bitmap_unit = 32;
+  img->bitmap_bit_order = 0;                  /* LSBFirst */
+  img->bitmap_pad = pad;
+  img->depth = (int)depth;
+  img->bytes_per_line = bpl;
+  img->bits_per_pixel = bpp;
+  img->red_mask = v ? ((struct _XVisual *)v)->red_mask : 0x00ff0000ul;
+  img->green_mask = v ? ((struct _XVisual *)v)->green_mask : 0x0000ff00ul;
+  img->blue_mask = v ? ((struct _XVisual *)v)->blue_mask : 0x000000fful;
+  /* The function table a client reaches through the Xlib macros. */
+  img->f.destroy_image = (int (*)(void))(void *)xc_ximage_destroy;
+  img->f.get_pixel = (unsigned long (*)(void))(void *)xc_ximage_get_pixel;
+  img->f.put_pixel = (int (*)(void))(void *)xc_ximage_put_pixel;
+  if (data) {
+    img->data = data;                          /* caller owns it (Xlib rule) */
+  } else {
+    /* NULL in, NULL out -- the real Xlib rule, and it matters: Mesa's
+     * bits_per_pixel() passes malloc(8) and then free()s img->data, so
+     * handing back a pointer into this DSO's .bss would be a free() of a
+     * non-heap pointer.  (Measured: that is exactly how this call took the
+     * process down in the guest.)  Every caller that wants pixels either
+     * supplies the buffer or overwrites img->data before use. */
+    img->data = 0;
+  }
+  return (XImage *)img;
+}
+XAPI int XDestroyImage(XImage *img) { (void)img; return 0; }
+
 XAPI int XPutImage(Display *d, Drawable dr, GC gc, XImage *img, int sx, int sy,
                    int dx, int dy, unsigned w, unsigned h) {
-  (void)d; (void)dr; (void)gc; (void)img; (void)sx; (void)sy; (void)dx;
-  (void)dy; (void)w; (void)h;
+  (void)dr; (void)gc;
+  if (!d || !img || !d->win.shadow || !d->win.content_ready) return 0;
+  xc_ximage *im = (xc_ximage *)img;
+  if (!im->data || im->bits_per_pixel != 32) return 0;   /* 32bpp only */
+
+  /* Clamp to the window's content area: both the destination rect and, by the
+   * same amount, the source rect. */
+  if (dx < 0) { w += (unsigned)dx; sx -= dx; dx = 0; }
+  if (dy < 0) { h += (unsigned)dy; sy -= dy; dy = 0; }
+  if (dx + (int)w > d->win.cw) w = (unsigned)(d->win.cw - dx);
+  if (dy + (int)h > d->win.ch) h = (unsigned)(d->win.ch - dy);
+  if ((int)w <= 0 || (int)h <= 0) return 0;
+  if (sx < 0 || sy < 0) return 0;
+
+  for (unsigned row = 0; row < h; row++) {
+    const unsigned char *src = (const unsigned char *)im->data +
+                               (unsigned long)(sy + (int)row) * im->bytes_per_line +
+                               (unsigned long)sx * 4;
+    unsigned char *dst = d->win.shadow +
+                         (unsigned long)(dy + (int)row) * d->win.cw * 4 +
+                         (unsigned long)dx * 4;
+    unsigned int *dp = (unsigned int *)dst;
+    const unsigned int *sp = (const unsigned int *)src;
+    for (unsigned col = 0; col < w; col++) dp[col] = sp[col];   /* B8G8R8A8 */
+  }
+  /* The flush path (XFlush -> shadow_blit -> ESC ] F) presents the rect. */
+  dirty_add(d, dx, dy, dx + (int)w, dy + (int)h);
   return 0;
 }
 
@@ -1833,8 +2032,17 @@ XAPI XVisualInfo *XGetVisualInfo(Display *d, long mask, XVisualInfo *tmpl,
                                  int *n) {
   (void)mask; (void)tmpl;
   if (!d) { if (n) *n = 0; return 0; }
+  /* Real libX11 returns malloc'd memory here and its callers free() it:
+   * Mesa's choose_visual() ends with `free(vis);` (glx_api.c:1047).  Returning
+   * a pointer into this DSO's .bss was measured to abort the client in the
+   * guest with `free(): invalid size` inside glXChooseFBConfig.  libX11 is
+   * -nostdlib but it runs inside a glibc process, so the one allocation a real
+   * Xlib also makes comes from the process's malloc. */
+  XVisualInfo *vi = (XVisualInfo *)xc_malloc(sizeof *vi);
+  if (!vi) { if (n) *n = 0; return 0; }
+  *vi = d->vinfo;
   if (n) *n = 1;
-  return &d->vinfo;
+  return vi;
 }
 XAPI Status XMatchVisualInfo(Display *d, int scr, int depth, int c_class,
                              XVisualInfo *out) {
@@ -2170,15 +2378,6 @@ XAPI int XCopyArea(Display *d, Drawable s, Drawable dst, GC gc, int sx, int sy,
   return 0;
 }
 
-XAPI XImage *XCreateImage(Display *d, Visual *v, unsigned depth, int format,
-                     int offset, char *data, unsigned w, unsigned h,
-                     int bitmap_pad, int bytes_per_line) {
-  (void)d; (void)v; (void)depth; (void)format; (void)offset; (void)data;
-  (void)w; (void)h; (void)bitmap_pad; (void)bytes_per_line;
-  return 0;
-}
-XAPI int XDestroyImage(XImage *img) { (void)img; return 0; }
-
 /* ---- hint allocation -------------------------------------------------- *
  * Xlib allocates these with Xmalloc; there is no allocator in the DSO, so
  * each returns one slot of static storage.  Callers free them with XFree,
@@ -2237,6 +2436,46 @@ XAPI char *XGetDefault(Display *d, const char *prog, const char *name) {
 }
 XAPI int XResourceManagerString(Display *d) { (void)d; return 0; }
 XAPI char *XScreenResourceString(Screen *s) { (void)s; return 0; }
+
+/* ---- the libX11 surface Mesa's GLX frontend links against --------------- *
+ * libGL.so.1 has no DT_NEEDED (it is dlopen()ed into a compat process), so
+ * every Xlib symbol it references must already be in the global scope when it
+ * loads.  RTLD_NOW resolves *all* of them, including the ones only reachable
+ * from glXUseXFont()/glXGetImage() paths an app may never call -- measured:
+ * dlopen("libGL.so.1", RTLD_NOW) fails on the first absent name, so "we never
+ * call it" is not good enough.
+ *
+ * The three _X* names are libX11's private thread hooks (Xlibint.h): they are
+ * function pointers and a lock record pointer, and both the real libX11 and
+ * this one leave them null in a single-display, single-threaded client.  Null
+ * is also the correct value here: the compat Xlib has no lock to take. */
+XAPI void *_XLockMutex_fn = 0;
+XAPI void *_XUnlockMutex_fn = 0;
+XAPI void *_Xglobal_lock = 0;
+
+typedef struct { unsigned char byte1, byte2; } xc_char2b;
+
+/* glXUseXFont() renders through these two.  There is no server-side font in
+ * the compat class (XLoadQueryFont is a stub), so they draw nothing. */
+XAPI int XDrawString16(Display *d, Drawable dr, GC gc, int x, int y,
+                       const xc_char2b *s, int n) {
+  (void)d; (void)dr; (void)gc; (void)x; (void)y; (void)s; (void)n;
+  return 0;
+}
+XAPI int XFreeFontInfo(char **names, void *info, int count) {
+  (void)names; (void)info; (void)count;
+  return 0;
+}
+
+/* glXGetImage()/glXCopySubBuffer's source path.  No client-side XImage exists
+ * (XCreateImage is a stub too), so this reports "no image" rather than
+ * handing back a structure whose fields a caller would dereference. */
+XAPI XImage *XGetImage(Display *d, Drawable dr, int x, int y, unsigned w,
+                       unsigned h, unsigned long plane_mask, int format) {
+  (void)d; (void)dr; (void)x; (void)y; (void)w; (void)h; (void)plane_mask;
+  (void)format;
+  return 0;
+}
 
 /* The static backing store (one window per process, 1920x1080 B8G8R8A8
  * like the framebuffer). */

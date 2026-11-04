@@ -166,6 +166,17 @@ typedef struct {
 #define Button5Mask (1 << 12)
 #define AnyModifier (1 << 15)
 
+/* ---- visual classes (XVisualInfo.class / Visual.class) ----------------
+ * These are NOT the window classes below: X11 numbers visuals
+ * StaticGray..DirectColor from 0, and Mesa's xmesa_convert_from_x_visual_type
+ * switches on them. */
+#define StaticGray 0
+#define GrayScale 1
+#define StaticColor 2
+#define PseudoColor 3
+#define TrueColor 4
+#define DirectColor 5
+
 /* ---- window classes / map states ------------------------------------ */
 #define InputOutput 1
 #define InputOnly 2
