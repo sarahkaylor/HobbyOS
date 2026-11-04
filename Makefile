@@ -4038,6 +4038,14 @@ T4_GLUED_SELFTEST = t4_glued_selftest
 $(T4_GLUED_SELFTEST): tools/gate/t4_glued.sh
 	@bash tools/gate/t4_glued.sh --self-test
 
+# GB-195 (split of GB-122 clause 5): the resume-copy #PF invariant as a gate that
+# can FAIL.  Host-only self-test; the gate itself takes a T3 serial path
+# (`bash tools/gate/t3_resume_page.sh <log>`), deliberately NOT wired into
+# t3_tier.sh.  The GB-122 mask (src/kernel/process.c) is NOT part of this change.
+T3_RESUME_PAGE_SELFTEST = t3_resume_page_selftest
+$(T3_RESUME_PAGE_SELFTEST): tools/gate/t3_resume_page.sh
+	@bash tools/gate/t3_resume_page.sh --self-test
+
 # GB-140 t3_tier console-contract gate: prove a gate DERIVES the console path from
 # the T3_LOG machine line (never greps the captured summary), fails LOUDLY when a
 # T3_LOG is absent/unreadable, and that the real tier actually emits it.  The trap
@@ -4306,7 +4314,7 @@ test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
 .PHONY: icewm_test
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan uname_parity_host t3_pollbrk t3_nullentry
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan uname_parity_host t3_pollbrk t3_nullentry t3_resume_page_selftest
 
 # icewm.md §9 (lane apps): virtual-display core host golden test
 # (src/kernel/vdisplay.c with the kernel glue compiled out).
