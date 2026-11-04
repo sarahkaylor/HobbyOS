@@ -30,39 +30,39 @@ start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
 1
 [KERNEL] smp_init: Sending STARTUP IPI...
 [KERNEL] smp_init: Waiting for core to acknowledge...
-[KERNEL] Core 2 power-on acknowledged.
-start_scheduler called on CPU [KERNEL] smp_init: Sending INIT IPI to core 3...
-2
+start_scheduler called on CPU [KERNEL] Core 22 power-on acknowledged.
+
+[KERNEL] smp_init: Sending INIT IPI to core 3...
 [KERNEL] smp_init: Waiting after INIT IPI...
 [KERNEL] smp_init: Sending STARTUP IPI...
 [KERNEL] smp_init: Waiting for core to acknowledge...
 [KERNEL] Core 3 power-on acknowledged.
 [KERNEL] smp_init: Sending INIT IPI to core 4...
-start_scheduler called on CPU 3
-[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
+3
 [KERNEL] smp_init: Sending STARTUP IPI...
 [KERNEL] smp_init: Waiting for core to acknowledge...
 [KERNEL] Core 4 power-on acknowledged.
-start_scheduler called on CPU [KERNEL] smp_init: Sending INIT IPI to core 5...
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
 4
-[KERNEL] smp_init: Waiting after INIT IPI...
 [KERNEL] smp_init: Sending STARTUP IPI...
 [KERNEL] smp_init: Waiting for core to acknowledge...
 [KERNEL] Core 5 power-on acknowledged.
 [KERNEL] smp_init: Sending INIT IPI to core 6...
-start_scheduler called on CPU 5
-[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
+5
 [KERNEL] smp_init: Sending STARTUP IPI...
 [KERNEL] smp_init: Waiting for core to acknowledge...
 [KERNEL] Core 6 power-on acknowledged.
-start_scheduler called on CPU 6
 [KERNEL] smp_init: Sending INIT IPI to core 7...
-[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
+6
 [KERNEL] smp_init: Sending STARTUP IPI...
 [KERNEL] smp_init: Waiting for core to acknowledge...
 [KERNEL] Core 7 power-on acknowledged.
 start_scheduler called on CPU 7
-[KERNEL] LAPIC timer rate: 62554 counts/ms, TSC rate: 2596303 ticks/ms (PIT-counter calibrated)
+[KERNEL] LAPIC timer rate: 62573 counts/ms, TSC rate: 2596652 ticks/ms (PIT-counter calibrated)
 Found NVMe controller on PCI bus!
 PCI Config Space of NVMe:
 0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
@@ -103,10 +103,10 @@ Inside process_create: kmemset done.
 [GB-032] SDL test-app exec: SKIP (GB-013 compat exec leg not open; app + static-PIE ELF props proven on host by sdl_test_app_test_host)
 start_scheduler called on CPU [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
 0
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
   [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=2 
-[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
-[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
-/WAVE.CFG
+/WAVE.CFG[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+
 [WAVE-MANIFEST] IPC_T.BIN
 [WAVE-TRY] IPC_T.BIN
 Loading program for scheduler (v2 AS): IPC_T.BIN
@@ -114,7 +114,7 @@ Inside process_create: acquiring lock...
 [RESUME-SPSR] pid=1 spsr=0x00000203 IF=1
 Inside process_create: lock released. pid=2 block_idx=-1
 /IPC_T.BIN
-v2 loader: image mapped (lazy), bytes=252552 pages=62 first=in elap=0ms
+v2 loader: image mapped (lazy), bytes=252552 pages=62 first=in elap=1ms
 v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6 abi=0x0 native=0 interp=0x0
 [RESUME-SPSR] pid=2 spsr=0x00000202 IF=1
 [RESUME-SPSR] pid=1 spsr=0x00000297 IF=1
@@ -122,15 +122,15 @@ v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6 abi=0x0
 [ARRIVED] IPC_T.BIN rc>0
 [RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE50 covers=1
 IPC_T: AF_UNIX socketpair + poll + SCM_RIGHTS acceptance
-[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFA78 covers=1
-  IPC_T named: socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC): PASS
 [RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFAA8 covers=1
+  IPC_T named: socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC): PASS
   IPC_T named: bind(path): PASS
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFA78 covers=1
   IPC_T named: listen(8): PASS
   IPC_T named: getsockname(listener) == the bound path: PASS
   IPC_T named: second bind(path) -> -1/EADDRINUSE: PASS
-[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFA78 covers=1
   IPC_T named: abstract twin is a distinct key (bind ok): PASS
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFA78 covers=1
   IPC_T named: connect(absent abstract name) -> -1/ECONNREFUSED: PASS
   IPC_T named: O_NONBLOCK accept on an empty queue -> -1/EAGAIN: PASS
   IPC_T named: idle listener poll(0) -> 0: PASS
@@ -206,13 +206,13 @@ Inside process_create: lock released. pid=1 block_idx=-1
   IPC_T poll timeout 0 returns 0 promptly: PASS
   IPC_T poll timeout 40ms returns 0 with elapsed >= requested (10ms tick): PASS
 [KERNEL] Process 1: IPC_T.BIN exited unexpectedly or gracefully.
-  IPC_T poll(-1) woke with POLLIN after the child's write: PASS
 [EXITPC] pid=1 last_user_pc=0x100000565F code=0x0
+  IPC_T poll(-1) woke with POLLIN after the child's write: PASS
   IPC_T poll(-1) waited >= 50ms (real park, no spin): PASS
   IPC_T poll(nfds > 256) -> -1/EINVAL: PASS
 [KERNEL] Process 1: IPC_T.BIN exited unexpectedly or gracefully.
-  IPC_T blocking read returned the child's byte: PASS
 [EXITPC] pid=1 last_user_pc=0x100000565F code=0x0
+  IPC_T blocking read returned the child's byte: PASS
   IPC_T blocking read parked on the unix fd (elapsed >= 50ms): PASS
   IPC_T sendmsg on a pipe fd -> -1/ENOTSOCK: PASS
   IPC_T sendmsg on an unconnected unix endpoint -> -1/ENOTCONN: PASS
