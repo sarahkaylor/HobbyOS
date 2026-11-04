@@ -1,0 +1,9 @@
+[VIRGL] host=swarm-farm-3 qemu=QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.2)
+[VIRGL] device=virtio-gpu-gl-pci present=no line="qemu-system-x86_64: -device virtio-gpu-gl-pci,help: Device 'virtio-gpu-gl-pci' not found"
+[VIRGL] device=virtio-gpu-gl-device present=no line="qemu-system-x86_64: -device virtio-gpu-gl-device,help: Device 'virtio-gpu-gl-device' not found"
+[VIRGL] no virtio-gpu-gl device on this host (stock QEMU without --enable-virglrenderer)
+[VIRGL] control boot device=virtio-gpu-pci serial=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-8eb8e840/evidence/virgl/20261104T132100Z/control-serial.log
+[VIRGL] guest GPU line: VirtIO GPU: virtio-pci
+[VIRGL] guest 3D markers: 0
+[VIRGL] 3D capset: none — no device, no VIRGL feature, no capset path in the guest driver
+[VIRGL] verdict: BLOCKED ON DEVICE (valid measurement; the control boot is the negative control)
