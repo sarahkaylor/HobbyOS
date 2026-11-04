@@ -45,7 +45,7 @@ label() { case "${1%.BIN}" in *_*) printf '_%s' "${1%.BIN}" ;; *) printf '%s' "$
 
 # X-stack / session binaries are not desktop apps (and XEYESR/XCALCR keep
 # their own real-X entries below).
-SKIP="XSESSION.BIN XHOBBY.BIN ICEWM.BIN ICEWMBG.BIN ICEWMHNT.BIN ICESH.BIN HBHOST.BIN XFILES.BIN XEYESR.BIN XCALCR.BIN"
+SKIP="XSESSION.BIN XHOBBY.BIN ICEWM.BIN ICEWMBG.BIN ICEWMHNT.BIN ICESH.BIN HBHOST.BIN XFILES.BIN XEYESR.BIN XCALCR.BIN DOOML.BIN"
 skipped() { for s in $SKIP; do [ "$1" = "$s" ] && return 0; done; return 1; }
 in_list() { printf '%s\n' "$2" | grep -qx "$1"; }
 
@@ -62,6 +62,13 @@ M="$OUT/menu"
   done
   echo '}'
   echo 'menu "Games" folder {'
+  # The Linux-ELF Doom: DOOML.BIN points the game at the server's depth-8
+  # second screen (:0.1) and hands over to /DOOM.ELF.  It must NOT be launched
+  # through HBHOST.BIN (that path runs a native program inside an X window on
+  # the 24-bit screen, where linuxdoom-1.10 cannot start at all), so it is a
+  # curated entry and is excluded from "All programs" below.
+  on_disk DOOM.ELF && on_disk DOOML.BIN && \
+    echo '    prog "Doom (Linux ELF)" app /DOOML.BIN'
   for g in $GAMES; do
     on_disk "$g" && echo "    prog \"$(label "$g")\" app HBHOST.BIN $g"
   done

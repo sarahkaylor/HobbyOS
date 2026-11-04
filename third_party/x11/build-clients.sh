@@ -10,23 +10,50 @@
 set -euo pipefail
 
 stage_clients() {
-  hb_want xfiles || { hb_log "xfiles: skipped (--only)"; return 0; }
   local o="$HB_OBJ_DIR/xclients"
   mkdir -p "$o"
   : > "$HB_LOG_DIR/clients.log"
 
-  local src="$HB_REPO/src/user/x11/apps/xfiles/main.c"
-  [ -f "$src" ] || hb_die "xfiles: missing $src"
+  # XFILES.BIN: "Files (X11)", a file browser drawn directly on Xlib with Xft
+  # text.  Source: src/user/x11/apps/xfiles/main.c, GPL-2.0-or-later.
+  if hb_want xfiles; then
+    local src="$HB_REPO/src/user/x11/apps/xfiles/main.c"
+    [ -f "$src" ] || hb_die "xfiles: missing $src"
 
-  # shellcheck disable=SC2046,SC2086
-  hb_run clients "$CC" $CFLAGS \
-    $("$PKG_CONFIG" --cflags xft fontconfig x11) \
-    -c "$src" -o "$o/xfiles.o"
+    # shellcheck disable=SC2046,SC2086
+    hb_run clients "$CC" $CFLAGS \
+      $("$PKG_CONFIG" --cflags xft fontconfig x11) \
+      -c "$src" -o "$o/xfiles.o"
 
-  # shellcheck disable=SC2046
-  hb_run clients hb_link_flat "$o/XFILES.BIN" "$o/xfiles.o" \
-    $("$PKG_CONFIG" --libs xft fontconfig x11)
+    # shellcheck disable=SC2046
+    hb_run clients hb_link_flat "$o/XFILES.BIN" "$o/xfiles.o" \
+      $("$PKG_CONFIG" --libs xft fontconfig x11)
 
-  cp "$o/XFILES.BIN" "$HB_BIN_DIR/XFILES.BIN"
-  hb_log "clients: XFILES.BIN ($(stat -c %s "$HB_BIN_DIR/XFILES.BIN") bytes)"
+    cp "$o/XFILES.BIN" "$HB_BIN_DIR/XFILES.BIN"
+    hb_log "clients: XFILES.BIN ($(stat -c %s "$HB_BIN_DIR/XFILES.BIN") bytes)"
+  else
+    hb_log "xfiles: skipped (--only)"
+  fi
+
+  # XDEPTH8.BIN: the depth-8 PseudoColor probe (lane xdepth8).  The server
+  # only advertises a depth 8 visual when HB_XDEPTH=8, so this is the client
+  # that proves XMatchVisualInfo(8, PseudoColor) + an 8-bit XPutImage work.
+  if hb_want xdepth8; then
+    local src8="$HB_REPO/src/user/x11/apps/xdepth8/main.c"
+    [ -f "$src8" ] || hb_die "xdepth8: missing $src8"
+
+    # shellcheck disable=SC2046,SC2086
+    hb_run clients "$CC" $CFLAGS \
+      $("$PKG_CONFIG" --cflags x11) \
+      -c "$src8" -o "$o/xdepth8.o"
+
+    # shellcheck disable=SC2046
+    hb_run clients hb_link_flat "$o/XDEPTH8.BIN" "$o/xdepth8.o" \
+      $("$PKG_CONFIG" --libs x11)
+
+    cp "$o/XDEPTH8.BIN" "$HB_BIN_DIR/XDEPTH8.BIN"
+    hb_log "clients: XDEPTH8.BIN ($(stat -c %s "$HB_BIN_DIR/XDEPTH8.BIN") bytes)"
+  else
+    hb_log "xdepth8: skipped (--only)"
+  fi
 }

@@ -665,3 +665,13 @@ int sysinfo(int cmd, void *buf, int size) {
   }
   return -1;
 }
+
+/* GB-173: the host desktop tests link desktop.c without libc.c, so the weak
+   evdev_push() defined there is absent and the link fails at
+   src/user/desktop.c:2043. The host build has no kernel to push into, so a
+   no-op stub is the honest definition here. */
+int evdev_push(int code, int value) {
+  (void)code;
+  (void)value;
+  return -1;
+}

@@ -1,0 +1,278 @@
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[001;001Hm[001;002Hu[001;003Hl[001;004Ht[001;005Hi[001;006Hb[001;007Ho[001;008Ho[001;009Ht[001;010H1[001;011H:[001;012H [001;013HL[001;014Ho[001;015Ha[001;016Hd[001;017Hi[001;018Hn[001;019Hg[001;020H [001;021He[001;022Hx[001;023He[001;024Hc[001;025Hu[001;026Ht[001;027Ha[001;028Hb[001;029Hl[001;030He[001;031H [001;032H`[001;033Hb[001;034Ho[001;035Ho[001;036Ht[001;037H([001;038H)[001;039H:[001;040H/[001;041Hb[001;042Ho[001;043Ho[001;044Ht[001;045H/[001;046Hh[001;047Ho[001;048Hb[001;049Hb[001;050Hy[001;051Ho[001;052Hs[001;053H.[001;054He[001;055Hl[001;056Hf[001;057H`[001;058H.[001;059H.[001;060H.[001;061H[001;001H[002;001H[UART] lock @ 0x0000000075381e28
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: virtio-pci
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+[INPUT] PS/2 mouse: IntelliMouse (wheel, 4-byte)
+[INPUT] vmmouse absolute pointer enabled
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
+1
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+start_scheduler called on CPU 2
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core start_scheduler called on CPU 33 power-on acknowledged.
+
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on timeout!
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 5 power-on timeout!
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 6 power-on timeout!
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 7 power-on timeout!
+[KERNEL] LAPIC timer rate: 63576 counts/ms, TSC rate: 2994705 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000080000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010A 
+NVMe BAR0 Phys: 0x0000000080000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 11 (Vector: 43)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000751F6000 PFN: 0x00000000000751F6
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000751F9000 PFN: 0x00000000000751F9
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: DESKTOP (icewm) - Launching X session...
+[WAVE-TRY] XSESSION.BIN
+Loading program for scheduler (v2 AS): XSESSION.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+/XSESSION.BIN
+v2 loader: image mapped (lazy), bytes=78824 pages=20 first=in elap=0ms
+v2 loader: PID=1 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6 abi=0x0 native=0 interp=0x0
+[ARRIVED] XSESSION.BIN rc>0
+start_scheduler called on CPU [RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+0
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[RESUME-DIAG] pid=1 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=3 XSESSION.BIN
+[XSESS] IceWM session launcher starting
+[XSESS] WARN /dev/null did not land on fd 0 (got 3)
+[RESUME-SPSR] pid=1 spsr=0x00010202 IF=1
+[RESUME-DIAG] pid=1 region=yes prot=3 dest=0x00000017FFFFFD90 covers=1
+[XSESS] children's stdout/stderr relayed to the console (pipe fd 9)
+/X11/XSESSION.ENV
+[XSESS] env: 3 line(s) from /X11/XSESSION.ENV
+[XSESS] dir ok: /tmp
+[RESUME-SPSR] pid=1 spsr=0x00000246 IF=1
+[RESUME-DIAG] pid=1 region=yes prot=3 dest=0x00000017FFFFFCE8 covers=1
+[XSESS] dir created: /tmp/.X11-unix
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+[RESUME-SPSR] pid=2 spsr=0x00000202 IF=1
+Loading program for scheduler (v2 AS): /XHOBBY.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/XHOBBY.BIN
+v2 loader: image mapped (lazy), bytes=2729832 pages=667 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6 abi=0x0 native=0 interp=0x0
+[RESUME-SPSR] pid=3 spsr=0x00000202 IF=1
+Inside process_create: acquiring lock...
+[RESUME-DIAG] pid=3 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+Inside process_create: lock released. pid=4 block_idx=2
+Inside process_create: clearing memory at 0x0000000024000000
+Inside process_create: kmemset done.
+[RESUME-DIAG] pid=3 region=yes prot=3 dest=0x00000017FFFFFD38 covers=1
+[IMGPRF] pid=3 start: pages=667 batch=128
+[XSESS] spawned /XHOBBY.BIN pid=3
+[XSESS] waiting for /tmp/.X11-unix/X0 (named AF_UNIX connect probe)
+/tmp/.X11-unix
+[XSESS] server ready after ~0 ms
+[XSESS] no-WM mode (XSESS_NO_WM=1): server + autostart only
+/XSTART.TXT
+[XSESS] XSTART: /DOOM.ELF
+[GB071-CREATE] pid=2 ctx5=0x75381E28
+Loading program for scheduler (v2 AS): /DOOM.ELF
+/DOOM.ELF
+[IMGPRF] pid=3 done: pages=667 mapped=588 skipped=79 batches=6 stop=0 ms=173
+/X11/US.XKM
+v2 loader: PID=5 entry=0x100000D0E7 sp=0x1800000000 resident=647 tables=7 abi=0x1 native=0 interp=0x0
+[XSESS] spawned /DOOM.ELF pid=5
+[XSESS] XSTART: spawned 1 program(s)
+[XSESS] session running
+[X] _XSERVTransmkdir: Mode of /tmp/.X11-unix should be set to 1777
+[X] _XSERVTransmkdir: this may cause subsequent errors
+/doom1.wad
+[X] hobbyos: screen 640x400 depth 8 PseudoColor (fb 1920x1080 pitch 1920 px) -- HB_XDEPTH=8
+[X] hobbyos: depth8 colormap 0x20 (default) entries [0x10]=5555/0000/0000 [0x50]=0000/0000/0000 [0xA0]=0000/0000/0000
+[X]                             DOOM Shareware Startup v1.10                           
+[X] V_Init: allocate screens.
+[X] M_LoadDefaults: Load system defaults.
+[X] Z_Init: Init zone memory allocation daemon. 
+[X] W_Init: Init WADfiles.
+[X]  adding //doom1.wad
+[X] ===========================================================================
+[X]                                 Shareware!
+[X] ===========================================================================
+[X] M_Init: Init miscellaneous info.
+[X] R_Init: Init DOOM refresh daemon - [                   ]..
+[X] InitTextures
+[X] InitFlats........
+[X] InitSprites
+[X] InitColormaps
+[X] R_InitData
+[X] R_InitPointToAngle
+[X] R_InitTables
+[X] R_InitPlanes
+[X] R_InitLightTables
+[X] R_InitSkyMap
+[X] R_InitTranslationsTables
+[X] P_Init: Init Playloop state.
+[X] I_Init: Setting up machine state.
+[X] Could not start sound server [//sndserver]
+[X] D_CheckNetGame: Checking network game status.
+[X] startskill 2  deathmatch: 0  startmap: 1  startepisode: 1
+[X] player 1 of 1 (1 nodes)
+[X] S_Init: Setting up sound.
+[X] S_Init: default sfx volume 8
+[X] HU_Init: Setting up heads up display.
+[X] ST_Init: Init status bar.
+[X] Using MITSHM extension
+[X] hobbyos: depth8 colormap 0x200001 entries [0x10]=ffff/b7b7/b7b7 [0x50]=efef/efef/efef [0xA0]=ffff/ffff/7474
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=2 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=0 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=5 parent=1 claimed_by=-1 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=3 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=0 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=2 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=2 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=0 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=3 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=0 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=2 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=5 parent=1 claimed_by=-1 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=0 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=1 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=5 parent=1 claimed_by=-1 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=0 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=3 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=1 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=3 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=0 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=2 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=5 parent=1 claimed_by=-1 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=5 parent=1 claimed_by=-1 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=0 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=3 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=2 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=1 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=0 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=0 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=3 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=5 parent=1 claimed_by=-1 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=5 parent=1 claimed_by=-1 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=0 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=5 parent=1 claimed_by=-1 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=1 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=0 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=3 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=2 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=2 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=3 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=2 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=0 /DOOM.ELF
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=2 XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 /XHOBBY.BIN
+  [ALIVE-SET] slot=5 pid=5 st=3 parent=1 claimed_by=1 /DOOM.ELF

@@ -66,5 +66,6 @@ void virtio_net_test_suite(void);
 void net_test_suite(void);
 void net_rdma_test_suite(void);
 void nfs_test_suite(void);
+void elf_loader_test_suite(void); /* docs/shared-libs.md lane B */
 
 #endif // UNIT_TEST_H

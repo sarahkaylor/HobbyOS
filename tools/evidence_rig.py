@@ -354,6 +354,12 @@ def main():
     # Optional scripted input (replay seed), captured to replay.jsonl.
     if args.input:
         for code in [c.strip() for c in args.input.split(",") if c.strip()]:
+            # GB-172: `wait:N` holds the script for N seconds — a game that
+            # needs ten seconds to load its WAD cannot be tested with keys
+            # fired off in the same 200 ms as the launch click.
+            if code.startswith("wait:"):
+                time.sleep(float(code[5:]))
+                continue
             q.key(code, 0.2)
     time.sleep(args.run_seconds)
     if "gameplay" in checkpoints:

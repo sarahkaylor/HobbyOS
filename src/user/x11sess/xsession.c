@@ -64,15 +64,27 @@ static void xs_print_dec(long v) {
 #define XSESS_DISPLAY ":0"
 #define XSESS_SOCKET "/tmp/.X11-unix/X0"
 #define XSESS_ENV_FILE "/X11/XSESSION.ENV"
+/* Autostart list (harness + user hook): one program per line, e.g.
+     /DOOM.ELF -iwad /DOOM1.WAD
+   Lines starting '#' are comments.  This exists because proving a full-screen
+   X client runs must not depend on simulating a menu click, and because a
+   Linux-ABI game is launched by path, not hosted inside HBHOST. */
+#define XSESS_START_FILE "/XSTART.TXT"
+#define XSESS_MAX_ARGV 16
+/* Session switches read from the environment built below (so they can be set
+   per disk-image build through /X11/XSESSION.ENV, never recompiled):
+     XSESS_NO_WM=1   run the server without IceWM (a depth-8 or full-screen
+                     game session: no WM decorations, no WM colormap fights) */
+#define XSESS_OPT_NO_WM "XSESS_NO_WM"
 
 static const char *const kServerPath = "/XHOBBY.BIN";
 /* X.Org server args.  -noreset: the readiness probe's connect+close would
  * otherwise make the server reset after its "last client" leaves.
  * -dumbSched: no SIGALRM/setitimer scheduler (icewm.md §6). */
 static char *const kServerArgs[] = {
-    "XHOBBY.BIN", XSESS_DISPLAY, "-nolisten", "tcp", "-noreset", "-dumbSched",
-    "-s", "0",
-    NULL};
+  "XHOBBY.BIN", XSESS_DISPLAY, "-nolisten", "tcp", "-noreset", "-dumbSched",
+  "-s", "0",
+  NULL};
 
 static const char *const kBgPath = "/ICEWMBG.BIN";
 static char *const kBgArgs[] = {"ICEWMBG.BIN", NULL};
@@ -87,17 +99,17 @@ static char *const kDemoArgs[] = {"XEYESR.BIN", NULL};
 static const char *const kFallbackPath = "/DESKTOP.BIN";
 
 static const char *const kBaseEnv[] = {
-    "DISPLAY=" XSESS_DISPLAY,
-    "HOME=/home",
-    "USER=hobby",
-    "LOGNAME=hobby",
-    "SHELL=/SH.BIN",
-    "PATH=/",
-    "TMPDIR=/tmp",
-    "FONTCONFIG_FILE=/X11/FONTS.CNF",
-    "XDG_CACHE_HOME=/tmp",
-    "ICEWM_PRIVCFG=/home/.icewm",
-    NULL};
+  "DISPLAY=" XSESS_DISPLAY,
+  "HOME=/home",
+  "USER=hobby",
+  "LOGNAME=hobby",
+  "SHELL=/SH.BIN",
+  "PATH=/",
+  "TMPDIR=/tmp",
+  "FONTCONFIG_FILE=/X11/FONTS.CNF",
+  "XDG_CACHE_HOME=/tmp",
+  "ICEWM_PRIVCFG=/home/.icewm",
+  NULL};
 
 /* Readiness wait: poll every XSESS_POLL_MS for at most XSESS_READY_MS. */
 #define XSESS_POLL_MS 100
@@ -314,6 +326,59 @@ static int start(const char *path, char *const argv[], int required) {
   return pid;
 }
 
+/* ---- autostart (/XSTART.TXT) ---- */
+
+static int env_has(const char *key, const char *val) {
+  int klen = 0;
+  while (key[klen]) klen++;
+  for (int i = 0; i < g_nenv; i++) {
+    if (strncmp(g_env[i], key, (size_t)klen) != 0 || g_env[i][klen] != '=')
+      continue;
+    const char *v = g_env[i] + klen + 1;
+    return strncmp(v, val, 64) == 0;
+  }
+  return 0;
+}
+
+static void start_requested(void) {
+  static char buf[2048];
+  int fd = open(XSESS_START_FILE, O_RDONLY);
+  if (fd < 0) return;
+  int n = (int)read(fd, buf, sizeof(buf) - 1);
+  close(fd);
+  if (n <= 0) {
+    log_s("XSTART: empty");
+    return;
+  }
+  buf[n] = '\0';
+  char *p = buf;
+  int spawned = 0;
+  while (*p) {
+    char *line = p;
+    while (*p && *p != '\n' && *p != '\r') p++;
+    if (*p) *p++ = '\0';
+    while (*line == ' ' || *line == '\t') line++;
+    if (!*line || *line == '#') continue;
+    char *argv[XSESS_MAX_ARGV + 1];
+    int argc = 0;
+    char *q = line;
+    while (*q && argc < XSESS_MAX_ARGV) {
+      while (*q == ' ' || *q == '\t') q++;
+      if (!*q) break;
+      argv[argc++] = q;
+      while (*q && *q != ' ' && *q != '\t') q++;
+      if (*q) *q++ = '\0';
+    }
+    argv[argc] = NULL;
+    if (argc == 0) continue;
+    print("[XSESS] XSTART: ");
+    print(line);
+    print("\n");
+    if (start(argv[0], argv, 0) >= 0) spawned++;
+  }
+  log_sd("XSTART: spawned ", spawned, " program(s)");
+}
+
 static void describe_exit(const char *what, int pid, int status) {
   print("[XSESS] ");
   print(what);
@@ -432,14 +497,24 @@ int main(void) {
     fallback("X server never became ready");
   }
 
-  int bg = start(kBgPath, kBgArgs, 0);
-  int wm = start(kWmPath, kWmArgs, 1);
-  if (wm < 0) {
-    stop_child("background", bg);
-    stop_child("X server", server);
-    fallback("window manager could not be started");
+  int no_wm = env_has(XSESS_OPT_NO_WM, "1");
+  int bg = -1, wm = -1, demo = -1;
+  if (no_wm) {
+    /* Depth-8 / full-screen session: the client is the only window, and a WM
+       that allocates its own colors (or refuses an 8-bit screen) would take
+       the session down.  X itself maps the window. */
+    log_s("no-WM mode (" XSESS_OPT_NO_WM "=1): server + autostart only");
+  } else {
+    bg = start(kBgPath, kBgArgs, 0);
+    wm = start(kWmPath, kWmArgs, 1);
+    if (wm < 0) {
+      stop_child("background", bg);
+      stop_child("X server", server);
+      fallback("window manager could not be started");
+    }
+    demo = start(kDemoPath, kDemoArgs, 0);
   }
-  int demo = start(kDemoPath, kDemoArgs, 0);
+  start_requested();
   log_s("session running");
 
   /* Reap until the server or the WM goes; others just get logged. */
