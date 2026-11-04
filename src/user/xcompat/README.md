@@ -8,11 +8,13 @@ produces *Linux-ABI shared objects* for the compat class — the class that
 runs the game's own glibc build.
 
 ```
-libX11.so.6       the Xlib ABI Unity's embedded SDL2 resolves with dlsym()
-libasound.so.2    a "no audio device" ALSA sink (19 snd_* symbols)
+libX11.so.6            the Xlib ABI Unity's embedded SDL2 resolves with dlsym()
+libasound.so.2         a "no audio device" ALSA sink (19 snd_* symbols)
+libpulse-simple.so.0   a "no PulseAudio server" shim (FMOD's *first* audio
+libpulse.so.0          rung); both sonames, one source, 25 pa_* symbols
 ```
 
-Both are built with `HOST_CC`, `-shared -fPIC -nostdlib -ffreestanding`, and
+All four are built with `HOST_CC`, `-shared -fPIC -nostdlib -ffreestanding`, and
 reach the kernel through raw syscalls. They have **no `DT_NEEDED` and no
 undefined symbols at all** (`nm -D --undefined-only` prints nothing): they
 are mapped into a process whose only libc is the game's own glibc, and the
@@ -27,13 +29,15 @@ be in scope.
 | `xabi.h` | the ABI-exact Xlib surface: every struct is the real X11R7 layout (XEvent = 192 B, XKeyEvent = 96 B, XWindowAttributes = 136 B). Verified against the host's `<X11/Xlib.h>` by the test — 157 rows of sizeof/offsetof/constant, zero tolerance. |
 | `xrt.c` | hidden `memcpy`/`memset`/`strlen`/`memcmp`/`memmove` so the DSO has zero undefined symbols (never compiled into the host test). |
 | `xcore.h` / `xcore.c` | the pure half: atom table, event ring, geometry/clip maths, keymap. No syscalls, no allocation → host-testable, and shared by the DSO and the test. |
-| `libx11.c` | the DSO: framebuffer via `/dev/fb0` + `mmap`, the desktop pixel protocol (`ESC ] X`, `ESC ] T`, `ESC ] P 1`, `ESC ] F`, `ESC ] G`, `ESC [ E`, `ESC [ P/G/R`, `ESC [ T`, `ESC [ K`, `ESC [ D`), the input decoder, and the 243 exported entry points. |
+| `libx11.c` | the DSO: framebuffer via `/dev/fb0` + `mmap`, the desktop pixel protocol (`ESC ] X`, `ESC ] T`, `ESC ] P 1`, `ESC ] F`, `ESC ] G`, `ESC [ E`, `ESC [ P/G/R`, `ESC [ T`, `ESC [ K`, `ESC [ D`), the input decoder, and the 246 exported entry points. |
 | `alsa_null.c` | the ALSA sink, 19 symbols, "no device". |
+| `pulse_null.c` | the PulseAudio shim, 25 symbols, "no server": `pa_simple_new` returns NULL with `PA_ERR_CONNECTIONREFUSED`, the mainloop/context API answers `PA_CONTEXT_FAILED`, nothing blocks. Built twice, once per soname. |
+| `pulse_abi.h` | the four public pulse structures + enum values, written out because the DSO build must not need libpulse-dev; pinned against the real `<pulse/...>` headers by the host test. |
 | `EXPORTS.md` | **F4**: the generated per-symbol contract (IMPL / PARTIAL / STUB + the constant each stub returns). |
 | `EXPORTS.prose.md` | the hand-written half of `EXPORTS.md` (regeneration keeps it). |
 | `font8x8.h` | the 8x8 ASCII font, vendored from `src/user_include/graphics/font.h` (`tools/sync-font.sh` regenerates it). `XDrawString` renders it. |
 | `stage.sh` | puts the DSOs on a boot image's library path (`::/LIB64`), real sonames, LFN. |
-| `required-libx11.{txt,h}`, `required-alsa.{txt,h}` | the frozen required sets, generated from the game binary and checked in so the tree builds without the game. |
+| `required-libx11.{txt,h}`, `required-alsa.{txt,h}`, `required-pulse.{txt,h}` | the frozen required sets, generated from the game binary and checked in so the tree builds without the game. |
 | `tools/gen_exports.py` | regenerates all of the above from `UnityPlayer.so` + the host's real `libX11.so.6`. |
 | `Makefile.inc` | the makefile fragment (DSO rules, the F4 export gate, the host test). |
 
@@ -64,7 +68,8 @@ The DSOs have to be reachable by a Linux-ABI process at run time, so they live
 in `/LIB64` on the boot disk under their real sonames:
 
 ```sh
-bash src/user/xcompat/stage.sh disk.img     # ::/LIB64/libX11.so.6, libasound.so.2
+bash src/user/xcompat/stage.sh disk.img     # ::/LIB64/{libX11.so.6, libasound.so.2,
+                                            #          libpulse-simple.so.0, libpulse.so.0}
 ```
 
 `/LIB64` works with no environment because the kernel's compat startup block
@@ -85,6 +90,8 @@ endif
 	$(MMD) -i disk.img ::/LIB64
 	$(MCOPY) -o -i disk.img $(XCOMPAT_LIBX11) ::/LIB64/libX11.so.6
 	$(MCOPY) -o -i disk.img $(XCOMPAT_LIBASOUND) ::/LIB64/libasound.so.2
+	$(MCOPY) -o -i disk.img $(XCOMPAT_LIBPULSE_SIMPLE) ::/LIB64/libpulse-simple.so.0
+	$(MCOPY) -o -i disk.img $(XCOMPAT_LIBPULSE) ::/LIB64/libpulse.so.0
 ```
 
 Until that lands, `make ... disk.img && bash src/user/xcompat/stage.sh disk.img`

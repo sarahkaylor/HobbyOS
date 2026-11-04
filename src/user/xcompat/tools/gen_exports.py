@@ -34,10 +34,6 @@ XCOMPAT = os.path.dirname(HERE)          # .../src/user/xcompat
 # Symbols whose implementation is real but not complete; the reason is the
 # contract, so it is maintained here rather than guessed from the source.
 PARTIAL = {
-    "XDrawString": "fills the text box with the GC background and draws the "
-                   "baseline: correct geometry, no glyphs (no font machinery "
-                   "under compat)",
-    "XDrawImageString": "same as XDrawString",
     "XUnmapWindow": "the protocol cannot retract a pixel window: the surface "
                     "stays up and stops receiving events",
     "XChangeProperty": "accepted and dropped; no property list is kept",
@@ -53,6 +49,17 @@ PARTIAL = {
     "XGetKeyboardMapping": "returns the shim's static 2-keysym-per-keycode map",
     "XAllocColor": "TrueColor: the pixel is the colour; no colour map exists",
     "XStringListToTextProperty": "copies into one static 1 KiB buffer",
+}
+
+# Full implementations whose behaviour is worth a sentence in the table (the
+# status column alone would only say IMPL).
+IMPL_NOTE = {
+    "XDrawString": "the 8x8 ASCII font the native Xlib uses (`font8x8.h`, "
+                   "vendored from `src/user_include/graphics/font.h`): `y` is "
+                   "the baseline, advance 8 px, GXxor honoured through "
+                   "`put_px`. M3 gate renders legible text.",
+    "XDrawImageString": "`XDrawString` without the pre-fill (ImageString "
+                        "semantics are close enough: the font cell is opaque)",
 }
 
 STATEFUL = re.compile(
@@ -91,6 +98,55 @@ def alsa_set(game_dir):
     return sorted({s for s in strings if re.fullmatch(r"snd_[a-z_0-9]+", s)})
 
 
+def pulse_set(game_dir):
+    """Every pa_* name Unity's FMOD/SDL audio path resolves.
+
+    Unlike the Xlib set this needs no host-library intersection: the ^pa_
+    shape does not collide with binary noise, and the measured list is
+    exactly the union of libpulse-simple's public surface and the async
+    subset SDL's PulseAudio backend uses (see EXPORTS.prose.md §2.5).
+    """
+    so = os.path.join(game_dir, "UnityPlayer.so")
+    strings = run(["strings", "-a", so]).splitlines()
+    return sorted({s for s in strings if re.fullmatch(r"pa_[a-z_0-9]+", s)})
+
+
+# The contract of the pulse shim, one row per symbol.  Keyed by name so the
+# generated table cannot drift from the prose; the fallback documents itself.
+PULSE_BEHAVIOUR = {
+    "pa_simple_new": "returns NULL; `*error` = `PA_ERR_CONNECTIONREFUSED` (6), "
+                     "`PA_ERR_INVALID` (3) if the sample spec is malformed",
+    "pa_simple_free": "no-op (NULL-safe: FMOD's cleanup calls it after a failed new)",
+    "pa_simple_read": "returns `-PA_ERR_INVALID`",
+    "pa_simple_write": "returns `-PA_ERR_INVALID`",
+    "pa_simple_drain": "returns `-PA_ERR_INVALID`",
+    "pa_simple_flush": "returns `-PA_ERR_INVALID`",
+    "pa_simple_get_latency": "returns `(pa_usec_t)-1` (the documented unknown)",
+    "pa_strerror": "static text, `6` -> \"Connection refused\"",
+    "pa_get_library_version": "returns `\"17.0.0\"` (the ABI's measured era)",
+    "pa_channel_map_init_auto": "fills the caller's map with the default "
+                                "layout, returns it (NULL for 0 channels or >32)",
+    "pa_context_new": "returns a sentinel handle (non-NULL: constructing a "
+                      "context does not contact the server in the real library)",
+    "pa_context_connect": "returns `-PA_ERR_CONNECTIONREFUSED`",
+    "pa_context_get_state": "returns `PA_CONTEXT_FAILED` (5)",
+    "pa_context_errno": "returns `PA_ERR_CONNECTIONREFUSED` (6)",
+    "pa_context_disconnect": "no-op",
+    "pa_context_unref": "no-op",
+    "pa_context_get_server_info": "returns NULL (no operation object)",
+    "pa_context_get_sink_info_list": "returns NULL (no operation object)",
+    "pa_context_get_source_info_list": "returns NULL (no operation object)",
+    "pa_operation_get_state": "returns `PA_OPERATION_CANCELLED` (2), NULL-safe",
+    "pa_operation_unref": "no-op (NULL-safe)",
+    "pa_mainloop_new": "returns a sentinel handle (non-NULL)",
+    "pa_mainloop_get_api": "returns a complete inert vtable of 12 callbacks",
+    "pa_mainloop_iterate": "returns `-1` immediately (never blocks, even with "
+                           "`block=1`): the strongest stop signal for a "
+                           "READY-wait loop",
+    "pa_mainloop_free": "no-op",
+}
+
+
 def implemented(src):
     """(name, kind, value) for every XAPI function defined in `src`."""
     text = open(src).read()
@@ -126,6 +182,13 @@ def implemented(src):
     return out
 
 
+def pulse_exported(src):
+    """pa_* names defined with PULSEAPI in pulse_null.c (the DSO's surface)."""
+    text = open(src).read()
+    return sorted(set(re.findall(r"PULSEAPI\s+[A-Za-z_][A-Za-z0-9_ *]*?\b"
+                                 r"(pa_[a-z_0-9]+)\s*\(", text)))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", default=os.environ.get("RW_GAME_DIR", ""))
@@ -137,7 +200,9 @@ def main():
     libx11 = os.path.realpath(args.libx11)
     req = required_set(args.game, libx11)
     alsa = alsa_set(args.game) if args.game else []
+    pulse = pulse_set(args.game) if args.game else []
     impl = implemented(os.path.join(XCOMPAT, "libx11.c"))
+    pulse_impl = pulse_exported(os.path.join(XCOMPAT, "pulse_null.c"))
 
     print("required libX11 symbols : %d" % len(req))
     print("exported by the DSO     : %d (%d IMPL, %d STUB)"
@@ -147,6 +212,13 @@ def main():
     print("required but missing    : %d %s" % (len(missing), " ".join(missing)))
     if alsa:
         print("required ALSA symbols   : %d" % len(alsa))
+    if pulse:
+        pmiss = [s for s in pulse if s not in pulse_impl]
+        print("required pulse symbols  : %d (exported by the shims: %d, missing: %d)"
+              % (len(pulse), len(pulse_impl), len(pmiss)))
+        if pmiss:
+            print("  missing: %s" % " ".join(pmiss))
+            missing += pmiss
 
     if args.no_write:
         return 0 if not missing else 1
@@ -166,6 +238,25 @@ def main():
             f.write("#define XCOMPAT_ALSA_COUNT %d\n\n" % len(alsa))
             f.write("static const char *const xcompat_alsa_required[] = {\n")
             for s in alsa:
+                f.write('  "%s",\n' % s)
+            f.write("};\n\n#endif\n")
+
+    if pulse:
+        with open(os.path.join(XCOMPAT, "required-pulse.txt"), "w") as f:
+            f.write("\n".join(pulse) + "\n")
+        with open(os.path.join(XCOMPAT, "required-pulse.h"), "w") as f:
+            f.write("/* generated by tools/gen_exports.py -- do not edit.\n"
+                    " * The pa_* symbols Unity's audio path (FMOD's pulse output +\n"
+                    " * SDL's PulseAudio backend) resolves from libpulse-simple.so.0\n"
+                    " * and, through it, libpulse.so.0.  Measured from\n"
+                    " * UnityPlayer.so's string table.  This is the F4 contract for\n"
+                    " * the pulse shim: BOTH built sonames export every one of\n"
+                    " * them (see pulse_null.c). */\n")
+            f.write("#ifndef HOBBYOS_XCOMPAT_REQUIRED_PULSE_H\n"
+                    "#define HOBBYOS_XCOMPAT_REQUIRED_PULSE_H\n\n")
+            f.write("#define XCOMPAT_PULSE_COUNT %d\n\n" % len(pulse))
+            f.write("static const char *const xcompat_pulse_required[] = {\n")
+            for s in pulse:
                 f.write('  "%s",\n' % s)
             f.write("};\n\n#endif\n")
 
@@ -193,6 +284,8 @@ def main():
         kind, value = status.get(n, ("MISSING", ""))
         if kind == "IMPL" and n in PARTIAL:
             return "PARTIAL", PARTIAL[n]
+        if kind == "IMPL" and n in IMPL_NOTE:
+            return "IMPL", IMPL_NOTE[n]
         if kind == "STUB":
             return "STUB", "returns `%s`" % (value or "0")
         return kind, ""
@@ -236,6 +329,28 @@ def main():
                 b = "returns -ENODEV"
             lines.append("| `%s` | %s |" % (n, b))
         lines.append("")
+
+    if pulse:
+        lines.append("### (d) libpulse-simple.so.0 / libpulse.so.0 - the %d "
+                     "symbols the audio path resolves\n" % len(pulse))
+        lines.append("Both built sonames export this entire table (plus the "
+                     "extras in (e)):\n")
+        lines.append("| symbol | behaviour |")
+        lines.append("|---|---|")
+        for n in pulse:
+            lines.append("| `%s` | %s |"
+                         % (n, PULSE_BEHAVIOUR.get(n, "returns a failure value")))
+        lines.append("")
+
+        extra = [n for n in pulse_impl if n not in pulse]
+        if extra:
+            lines.append("### (e) libpulse - exported beyond the required set\n")
+            lines.append("| symbol | behaviour |")
+            lines.append("|---|---|")
+            for n in extra:
+                lines.append("| `%s` | %s |"
+                             % (n, PULSE_BEHAVIOUR.get(n, "returns a failure value")))
+            lines.append("")
     with open(os.path.join(XCOMPAT, "exports-table.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
 

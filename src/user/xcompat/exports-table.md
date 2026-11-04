@@ -85,7 +85,7 @@
 | `XOpenIM` | STUB | returns `0` |
 | `XPeekEvent` | IMPL |  |
 | `XPending` | IMPL |  |
-| `XPutImage` | STUB | returns `0` |
+| `XPutImage` | IMPL |  |
 | `XQueryExtension` | STUB | returns `False` |
 | `XQueryKeymap` | STUB | returns `0` |
 | `XQueryPointer` | IMPL |  |
@@ -95,7 +95,7 @@
 | `XReparentWindow` | STUB | returns `0` |
 | `XResetScreenSaver` | STUB | returns `0` |
 | `XResizeWindow` | STUB | returns `0` |
-| `XScreenNumberOfScreen` | STUB | returns `s ? s->scr : 0` |
+| `XScreenNumberOfScreen` | STUB | returns `0` |
 | `XSelectInput` | IMPL |  |
 | `XSendEvent` | STUB | returns `0` |
 | `XSetErrorHandler` | STUB | returns `old` |
@@ -175,17 +175,20 @@
 | `XDisplayHeightMM` | STUB | returns `DisplayHeightMM(d, scr)` |
 | `XDisplayWidth` | STUB | returns `DisplayWidth(d, scr)` |
 | `XDisplayWidthMM` | STUB | returns `DisplayWidthMM(d, scr)` |
-| `XDrawImageString` | PARTIAL | returns `XDrawString(d, dr, gc, x, y, s, len)`: glyphs are drawn, but the background is not filled first (X11's ImageString semantics) |
+| `XDrawImageString` | STUB | returns `XDrawString(d, dr, gc, x, y, s, len)` |
 | `XDrawLine` | IMPL |  |
 | `XDrawPoint` | IMPL |  |
+| `XDrawString16` | STUB | returns `0` |
 | `XESetCloseDisplay` | STUB | returns `0` |
 | `XESetError` | STUB | returns `0` |
 | `XFreeColormap` | STUB | returns `0` |
 | `XFreeExtensionList` | STUB | returns `0` |
+| `XFreeFontInfo` | STUB | returns `0` |
 | `XFreeFontNames` | STUB | returns `0` |
 | `XGetAtomNames` | IMPL |  |
 | `XGetGeometry` | IMPL |  |
 | `XGetIMValues` | STUB | returns `0` |
+| `XGetImage` | STUB | returns `0` |
 | `XGetKeyboardMapping` | PARTIAL | returns the shim's static 2-keysym-per-keycode map |
 | `XGetKeyboardMappingSupported` | STUB | returns `True` |
 | `XGetPointerMapping` | STUB | returns `1` |
@@ -239,7 +242,7 @@
 | `XShmQueryVersion` | STUB | returns `False` |
 | `XStoreColor` | STUB | returns `0` |
 | `XTextPropertyToStringList` | STUB | returns `0` |
-| `XTextWidth` | STUB | returns `n * 8` (the cell `XDrawString` advances) |
+| `XTextWidth` | STUB | returns `n * 8` |
 | `XUnmapSubwindows` | STUB | returns `0` |
 | `XUnmapWindow` | PARTIAL | the protocol cannot retract a pixel window: the surface stays up and stops receiving events |
 | `XVendorRelease` | STUB | returns `1` |
@@ -274,4 +277,41 @@
 | `snd_pcm_readi` | returns -ENODEV |
 | `snd_pcm_writei` | returns -ENODEV |
 | `snd_strerror` | static text, `-19` -> "No such device" |
+
+### (d) libpulse-simple.so.0 / libpulse.so.0 - the 21 symbols the audio path resolves
+
+Both built sonames export this entire table (plus the extras in (e)):
+
+| symbol | behaviour |
+|---|---|
+| `pa_channel_map_init_auto` | fills the caller's map with the default layout, returns it (NULL for 0 channels or >32) |
+| `pa_context_connect` | returns `-PA_ERR_CONNECTIONREFUSED` |
+| `pa_context_disconnect` | no-op |
+| `pa_context_get_server_info` | returns NULL (no operation object) |
+| `pa_context_get_sink_info_list` | returns NULL (no operation object) |
+| `pa_context_get_source_info_list` | returns NULL (no operation object) |
+| `pa_context_get_state` | returns `PA_CONTEXT_FAILED` (5) |
+| `pa_context_new` | returns a sentinel handle (non-NULL: constructing a context does not contact the server in the real library) |
+| `pa_context_unref` | no-op |
+| `pa_mainloop_free` | no-op |
+| `pa_mainloop_get_api` | returns a complete inert vtable of 12 callbacks |
+| `pa_mainloop_iterate` | returns `-1` immediately (never blocks, even with `block=1`): the strongest stop signal for a READY-wait loop |
+| `pa_mainloop_new` | returns a sentinel handle (non-NULL) |
+| `pa_operation_get_state` | returns `PA_OPERATION_CANCELLED` (2), NULL-safe |
+| `pa_operation_unref` | no-op (NULL-safe) |
+| `pa_simple_free` | no-op (NULL-safe: FMOD's cleanup calls it after a failed new) |
+| `pa_simple_get_latency` | returns `(pa_usec_t)-1` (the documented unknown) |
+| `pa_simple_new` | returns NULL; `*error` = `PA_ERR_CONNECTIONREFUSED` (6), `PA_ERR_INVALID` (3) if the sample spec is malformed |
+| `pa_simple_read` | returns `-PA_ERR_INVALID` |
+| `pa_simple_write` | returns `-PA_ERR_INVALID` |
+| `pa_strerror` | static text, `6` -> "Connection refused" |
+
+### (e) libpulse - exported beyond the required set
+
+| symbol | behaviour |
+|---|---|
+| `pa_context_errno` | returns `PA_ERR_CONNECTIONREFUSED` (6) |
+| `pa_get_library_version` | returns `"17.0.0"` (the ABI's measured era) |
+| `pa_simple_drain` | returns `-PA_ERR_INVALID` |
+| `pa_simple_flush` | returns `-PA_ERR_INVALID` |
 
