@@ -48,6 +48,11 @@ XCOMPAT_DSOFLAGS = -shared -fPIC -fvisibility=hidden -nostdlib \
 
 XCOMPAT_LIBX11    = $(XCOMPAT_OBJ)/libX11.so.6
 XCOMPAT_LIBASOUND = $(XCOMPAT_OBJ)/libasound.so.2
+# libudev.so.1: SDL's joystick stage must be able to initialise with zero
+# devices, or SDL_Init rolls the just-started video subsystem back (measured;
+# docs/rimworld-launch-log.md §11).  Same rules as the rest: real soname, no
+# DT_NEEDED, no libc.
+XCOMPAT_LIBUDEV   = $(XCOMPAT_OBJ)/libudev.so.1
 # PulseAudio is FMOD's *first* choice (libpulse-simple.so.0, which pulls
 # libpulse.so.0 through DT_NEEDED on a real system).  Both sonames are built
 # from the same source; see pulse_null.c for why the export set is a union.
@@ -92,9 +97,14 @@ $(XCOMPAT_LIBPULSE): $(XCOMPAT_DIR)/pulse_null.c $(XCOMPAT_DIR)/pulse_abi.h \
 	  -Wl,-soname,libpulse.so.0 -o $@ \
 	  $(XCOMPAT_DIR)/pulse_null.c $(XCOMPAT_DIR)/xrt.c
 
+$(XCOMPAT_LIBUDEV): $(XCOMPAT_DIR)/udev_null.c $(XCOMPAT_DIR)/udev_abi.h
+	@mkdir -p $(XCOMPAT_OBJ)
+	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_DSOFLAGS) \
+	  -Wl,-soname,libudev.so.1 -o $@ $(XCOMPAT_DIR)/udev_null.c
+
 ifeq ($(XCOMPAT_DSOS_ENABLED),1)
 xcompat_dsos: $(XCOMPAT_LIBX11) $(XCOMPAT_LIBASOUND) $(XCOMPAT_LIBPULSE_SIMPLE) \
-              $(XCOMPAT_LIBPULSE)
+              $(XCOMPAT_LIBPULSE) $(XCOMPAT_LIBUDEV)
 else
 xcompat_dsos:
 	@echo "xcompat: DSOs are x86_64-only (ARCH=$(ARCH)); skipped"
@@ -163,6 +173,35 @@ $(XCOMPAT_PULSE_CHECK): $(XCOMPAT_LIBPULSE_SIMPLE) $(XCOMPAT_LIBPULSE) \
 xcompat_pulse_check: $(XCOMPAT_PULSE_CHECK)
 .PHONY: xcompat_pulse_check
 
+# ---- the libudev export gate ------------------------------------------ *
+# Same rule again, and one extra assertion that matters more here than
+# anywhere else: the SONAME must be exactly libudev.so.1.  SDL dlopens that
+# name and falls back to libudev.so.0; a DSO whose SONAME drifted would load
+# by path but not by name, which looks like "the shim did nothing".
+XCOMPAT_UDEV_CHECK = $(XCOMPAT_OBJ)/.udev-exports-ok
+
+$(XCOMPAT_UDEV_CHECK): $(XCOMPAT_LIBUDEV) $(XCOMPAT_DIR)/required-udev.txt
+	@mkdir -p $(XCOMPAT_OBJ)
+	@nm -D --defined-only $(XCOMPAT_LIBUDEV) | \
+	  awk '$$2 ~ /^[TWi]$$/ {print $$3}' | sed 's/@.*//' | LC_ALL=C sort -u \
+	  > $(XCOMPAT_OBJ)/libudev.exports
+	@miss=$$(LC_ALL=C comm -23 $(XCOMPAT_DIR)/required-udev.txt \
+	          $(XCOMPAT_OBJ)/libudev.exports); \
+	if [ -n "$$miss" ]; then \
+	  echo "xcompat: libudev.so.1 is missing required symbols:"; \
+	  echo "$$miss" | sed 's/^/  /'; exit 1; fi
+	@if readelf -d $(XCOMPAT_LIBUDEV) | grep -q '(NEEDED)'; then \
+	  echo "xcompat: libudev.so.1 has a DT_NEEDED edge; compat DSOs must be free of them"; \
+	  exit 1; fi
+	@son=$$(readelf -d $(XCOMPAT_LIBUDEV) | sed -n 's/.*SONAME.*\[\(.*\)\].*/\1/p'); \
+	if [ "$$son" != "libudev.so.1" ]; then \
+	  echo "xcompat: libudev SONAME is '$$son', must be libudev.so.1"; exit 1; fi
+	@echo "xcompat: libudev.so.1 exports all $$(wc -l < $(XCOMPAT_DIR)/required-udev.txt) required udev symbols, 0 DT_NEEDED, SONAME ok"
+	@touch $@
+
+xcompat_udev_check: $(XCOMPAT_UDEV_CHECK)
+.PHONY: xcompat_udev_check
+
 # ---- host test (Tier 1) ----------------------------------------------- *
 # The ABI differential needs the host's own X11 headers.  They are optional:
 # without <X11/Xlib.h> the reference TU is compiled out and the test prints
@@ -178,12 +217,19 @@ XCOMPAT_HAVE_X11 := $(shell echo | $(HOST_CC) -E -include X11/Xlib.h - \
 # reference rows are only an extra proof that the two agree.
 XCOMPAT_HAVE_PULSE := $(shell echo | $(HOST_CC) -E -include pulse/sample.h - \
                         >/dev/null 2>&1 && echo 1 || echo 0)
+# ...and the libudev opaque-type check needs <libudev.h> (libudev-dev).  It is
+# *only* a differential on the opaque tags and dev_t: libudev has no public
+# structures to diff, so without the header the group prints SKIP and the
+# shim's own static asserts still run.
+XCOMPAT_HAVE_UDEV := $(shell echo | $(HOST_CC) -E -include libudev.h - \
+                       >/dev/null 2>&1 && echo 1 || echo 0)
 
 XCOMPAT_TEST = xcompat_test_host
 XCOMPAT_TEST_SRCS = src/host/xcompat_test.c src/host/xcompat_abi_mine.c \
                     src/user/xcompat/xcore.c
 XCOMPAT_TEST_DEFS = -DXCOMPAT_HAVE_X11_REF=$(XCOMPAT_HAVE_X11) \
                     -DXCOMPAT_HAVE_PULSE_REF=$(XCOMPAT_HAVE_PULSE) \
+                    -DXCOMPAT_HAVE_UDEV_REF=$(XCOMPAT_HAVE_UDEV) \
                     -DXCOMPAT_HAVE_REQUIRED=1 \
                     -Isrc/host -I$(XCOMPAT_DIR)
 ifeq ($(XCOMPAT_HAVE_X11),1)
@@ -196,9 +242,11 @@ ifeq ($(XCOMPAT_DSOS_ENABLED),1)
 XCOMPAT_TEST_DEFS += -DXCOMPAT_DSO_PATH='"$(XCOMPAT_LIBX11)"' \
                      -DXCOMPAT_ALSA_PATH='"$(XCOMPAT_LIBASOUND)"' \
                      -DXCOMPAT_PULSE_SIMPLE_PATH='"$(XCOMPAT_LIBPULSE_SIMPLE)"' \
-                     -DXCOMPAT_PULSE_PATH='"$(XCOMPAT_LIBPULSE)"'
+                     -DXCOMPAT_PULSE_PATH='"$(XCOMPAT_LIBPULSE)"' \
+                     -DXCOMPAT_UDEV_PATH='"$(XCOMPAT_LIBUDEV)"'
 XCOMPAT_TEST_DEPS  = $(XCOMPAT_LIBX11) $(XCOMPAT_LIBASOUND) \
-                     $(XCOMPAT_LIBPULSE_SIMPLE) $(XCOMPAT_LIBPULSE)
+                     $(XCOMPAT_LIBPULSE_SIMPLE) $(XCOMPAT_LIBPULSE) \
+                     $(XCOMPAT_LIBUDEV)
 else
 XCOMPAT_TEST_DEPS  =
 endif
@@ -207,6 +255,7 @@ $(XCOMPAT_TEST): $(XCOMPAT_TEST_SRCS) src/host/xcompat_abi_probe.h \
                  src/host/xcompat_abi_row.h $(XCOMPAT_DIR)/xcore.h \
                  $(XCOMPAT_DIR)/xabi.h $(XCOMPAT_DIR)/required-libx11.h \
                  $(XCOMPAT_DIR)/required-alsa.h $(XCOMPAT_DIR)/required-pulse.h \
+                 $(XCOMPAT_DIR)/required-udev.h $(XCOMPAT_DIR)/udev_abi.h \
                  $(XCOMPAT_DIR)/pulse_abi.h $(XCOMPAT_TEST_DEPS)
 	$(HOST_CC) -Wall -Wextra -g $(XCOMPAT_TEST_DEFS) -o $@ $(XCOMPAT_TEST_SRCS) -ldl
 

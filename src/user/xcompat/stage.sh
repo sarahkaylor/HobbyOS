@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# src/user/xcompat/stage.sh -- put the compat window/audio DSOs on a boot
-# image's library search path (RimWorld plan M3, interface F3).
+# src/user/xcompat/stage.sh -- put the compat window/audio/device DSOs on a
+# boot image's library search path (RimWorld plan M3, interface F3).
 #
 # A Linux-ABI process resolves its DT_NEEDED / dlopen() names through
 # LD_LIBRARY_PATH, then the requesting object's DT_RUNPATH, then /LIB64
@@ -35,8 +35,9 @@ die() { echo "xcompat-stage: $*" >&2; exit 1; }
 # The required set.  Anything else this tree has built (extension DSOs, the
 # GL frontend when it lands) is staged too, so a DSO that starts existing is
 # never silently left off the image.
-DSOS="libX11.so.6 libasound.so.2 libpulse-simple.so.0 libpulse.so.0"
-for f in "$OBJ"/libX*.so.* "$OBJ"/libasound.so.* "$OBJ"/libpulse*.so.*; do
+DSOS="libX11.so.6 libasound.so.2 libpulse-simple.so.0 libpulse.so.0 libudev.so.1"
+for f in "$OBJ"/libX*.so.* "$OBJ"/libasound.so.* "$OBJ"/libpulse*.so.* \
+         "$OBJ"/libudev.so.*; do
   [ -f "$f" ] || continue
   b="$(basename "$f")"
   case " $DSOS " in *" $b "*) continue ;; esac

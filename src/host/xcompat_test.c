@@ -27,14 +27,30 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <time.h>
+#include <dirent.h>
+#include <poll.h>
+#include <sys/types.h>
 
 #include "xcore.h"
 #include "pulse_abi.h"
+#include "udev_abi.h"
 
 #ifdef XCOMPAT_HAVE_REQUIRED
 #include "required-libx11.h"
 #include "required-alsa.h"
 #include "required-pulse.h"
+#include "required-udev.h"
+#endif
+
+/* The opaque-type differential is only possible where libudev's own header
+ * exists (libudev-dev).  libudev publishes *no* structures, so this check is
+ * a compile-time proof that the struct TAGS match -- nothing more, and
+ * nothing less is needed. */
+#ifndef XCOMPAT_HAVE_UDEV_REF
+#define XCOMPAT_HAVE_UDEV_REF 0
+#endif
+#if XCOMPAT_HAVE_UDEV_REF
+#include <libudev.h>
 #endif
 #ifdef XCOMPAT_DSO_PATH
 #include <dlfcn.h>
@@ -401,6 +417,19 @@ static void test_export_list(void) {
   check(psorted, "the required pulse list is sorted and duplicate-free");
 #endif
 
+#ifdef XCOMPAT_UDEV_COUNT
+  check(XCOMPAT_UDEV_COUNT == 26,
+        "the udev list is the measured 26 (3 'udev_*() failed' strings excluded)");
+  int ushaped = 1, usorted = 1;
+  for (int i = 0; i < XCOMPAT_UDEV_COUNT; i++) {
+    const char *s = xcompat_udev_required[i];
+    if (!s || strncmp(s, "udev_", 5) != 0) ushaped = 0;
+    if (i && strcmp(xcompat_udev_required[i - 1], s) >= 0) usorted = 0;
+  }
+  check(ushaped, "every required udev symbol is a udev_* name");
+  check(usorted, "the required udev list is sorted and duplicate-free");
+#endif
+
 #ifdef XCOMPAT_DSO_PATH
   /* The strongest form of the F4 check: dlopen the artifact this tree just
    * built and resolve every required name through it, exactly the way
@@ -757,6 +786,218 @@ static void test_pulse_dso(void) {
 #endif
 }
 
+/* ---- 5. libudev shim (libudev.so.1) ---------------------------------- *
+ * The interesting properties are not "does it return 0" but:
+ *   - every entry point is NULL-safe (SDL's error paths pass NULL);
+ *   - enumeration is *successful* and *empty* (a failure here rolls video
+ *     back, an empty success does not);
+ *   - the monitor fd never fires and never leaks.
+ */
+static int count_open_fds(void) {
+  DIR *d = opendir("/proc/self/fd");
+  if (!d) return -1;
+  int n = 0;
+  struct dirent *e;
+  while ((e = readdir(d)) != 0)
+    if (e->d_name[0] != '.') n++;
+  closedir(d);
+  return n;
+}
+
+static void test_udev_abi(void) {
+  check(sizeof(void *) == 8, "LP64: a libudev object is an 8-byte pointer");
+  check(sizeof(dev_t) == 8, "dev_t is 8 bytes on this ABI");
+  check(sizeof(dev_t) == sizeof(udev_devnum_t),
+        "the shim's udev_devnum_t is exactly dev_t's width");
+#if XCOMPAT_HAVE_UDEV_REF
+  /* Compile-time proof that the five struct tags are libudev's tags: these
+   * assignments are only legal if both headers name the same type. */
+  struct udev *u = 0; udev *u2 = u; (void)u2;
+  struct udev_enumerate *e = 0; udev_enumerate *e2 = e; (void)e2;
+  struct udev_list_entry *l = 0; udev_list_entry *l2 = l; (void)l2;
+  struct udev_device *d = 0; udev_device *d2 = d; (void)d2;
+  struct udev_monitor *m = 0; udev_monitor *m2 = m; (void)m2;
+  printf("     udev abi: 5 opaque tags identical to <libudev.h>, dev_t %zu B\n",
+         sizeof(dev_t));
+#else
+  printf("SKIP udev ABI differential (host has no <libudev.h>; libudev has "
+         "no public structs, and the tag/width asserts above still ran)\n");
+#endif
+}
+
+static void test_udev_dso(void) {
+#ifdef XCOMPAT_UDEV_PATH
+  void *h = dlopen(XCOMPAT_UDEV_PATH, RTLD_NOW | RTLD_LOCAL);
+  if (!h) {
+    printf("FAIL dlopen(%s): %s\n", XCOMPAT_UDEV_PATH, dlerror());
+    fails++;
+    checks++;
+    return;
+  }
+  check(1, "the built libudev.so.1 dlopens");
+
+#ifdef XCOMPAT_UDEV_COUNT
+  int missing = 0;
+  for (int i = 0; i < XCOMPAT_UDEV_COUNT; i++) {
+    if (!dlsym(h, xcompat_udev_required[i])) {
+      if (missing < 5) printf("FAIL dlsym(%s) is NULL\n", xcompat_udev_required[i]);
+      missing++;
+    }
+  }
+  check(missing == 0, "every required udev_* symbol resolves through the DSO");
+  printf("     udev: %d/%d required symbols resolve from %s\n",
+         XCOMPAT_UDEV_COUNT - missing, XCOMPAT_UDEV_COUNT, XCOMPAT_UDEV_PATH);
+#endif
+
+  typedef udev *(*new_fn)(void);
+  typedef udev *(*lib_unref_fn)(udev *);
+  typedef udev_enumerate *(*enum_new_fn)(udev *);
+  typedef udev_enumerate *(*enum_unref_fn)(udev_enumerate *);
+  typedef int (*enum_match_fn)(udev_enumerate *, const char *);
+  typedef int (*enum_match2_fn)(udev_enumerate *, const char *, const char *);
+  typedef int (*enum_scan_fn)(udev_enumerate *);
+  typedef udev_list_entry *(*enum_list_fn)(udev_enumerate *);
+  typedef udev_list_entry *(*le_next_fn)(const udev_list_entry *);
+  typedef const char *(*le_name_fn)(const udev_list_entry *);
+  typedef udev_device *(*dev_syspath_fn)(udev *, const char *);
+  typedef udev_device *(*dev_devnum_fn)(udev *, char, udev_devnum_t);
+  typedef udev_device *(*dev_unref_fn)(udev_device *);
+  typedef const char *(*dev_str_fn)(udev_device *);
+  typedef const char *(*dev_str2_fn)(udev_device *, const char *);
+  typedef udev_devnum_t (*dev_num_fn)(udev_device *);
+  typedef int (*dev_int_fn)(udev_device *);
+  typedef udev_device *(*dev_parent_fn)(udev_device *, const char *, const char *);
+  typedef udev_monitor *(*mon_new_fn)(udev *, const char *);
+  typedef udev_monitor *(*mon_unref_fn)(udev_monitor *);
+  typedef int (*mon_int_fn)(udev_monitor *);
+  typedef int (*mon_filter_fn)(udev_monitor *, const char *, const char *);
+  typedef int (*mon_buf_fn)(udev_monitor *, int);
+  typedef udev_device *(*mon_recv_fn)(udev_monitor *);
+
+  new_fn u_new = (new_fn)dlsym(h, "udev_new");
+  lib_unref_fn u_unref = (lib_unref_fn)dlsym(h, "udev_unref");
+  enum_new_fn e_new = (enum_new_fn)dlsym(h, "udev_enumerate_new");
+  enum_unref_fn e_unref = (enum_unref_fn)dlsym(h, "udev_enumerate_unref");
+  enum_match_fn e_match = (enum_match_fn)dlsym(h, "udev_enumerate_add_match_subsystem");
+  enum_match_fn e_tag = (enum_match_fn)dlsym(h, "udev_enumerate_add_match_tag");
+  enum_match2_fn e_prop = (enum_match2_fn)dlsym(h, "udev_enumerate_add_match_property");
+  enum_scan_fn e_scan = (enum_scan_fn)dlsym(h, "udev_enumerate_scan_devices");
+  enum_list_fn e_list = (enum_list_fn)dlsym(h, "udev_enumerate_get_list_entry");
+  le_next_fn l_next = (le_next_fn)dlsym(h, "udev_list_entry_get_next");
+  le_name_fn l_name = (le_name_fn)dlsym(h, "udev_list_entry_get_name");
+  const char *(*l_sysname)(const udev_list_entry *) =
+      (const char *(*)(const udev_list_entry *))dlsym(h, "udev_list_entry_get_sysname");
+  dev_syspath_fn d_syspath = (dev_syspath_fn)dlsym(h, "udev_device_new_from_syspath");
+  dev_devnum_fn d_devnum = (dev_devnum_fn)dlsym(h, "udev_device_new_from_devnum");
+  dev_unref_fn d_unref = (dev_unref_fn)dlsym(h, "udev_device_unref");
+  dev_str_fn d_action = (dev_str_fn)dlsym(h, "udev_device_get_action");
+  dev_str_fn d_devnode = (dev_str_fn)dlsym(h, "udev_device_get_devnode");
+  dev_str_fn d_subsys = (dev_str_fn)dlsym(h, "udev_device_get_subsystem");
+  dev_num_fn d_num = (dev_num_fn)dlsym(h, "udev_device_get_devnum");
+  dev_str2_fn d_attr = (dev_str2_fn)dlsym(h, "udev_device_get_sysattr_value");
+  dev_str2_fn d_prop = (dev_str2_fn)dlsym(h, "udev_device_get_property_value");
+  dev_parent_fn d_parent = (dev_parent_fn)dlsym(
+      h, "udev_device_get_parent_with_subsystem_devtype");
+  dev_int_fn d_init = (dev_int_fn)dlsym(h, "udev_device_get_is_initialized");
+  mon_new_fn m_new = (mon_new_fn)dlsym(h, "udev_monitor_new_from_netlink");
+  mon_unref_fn m_unref = (mon_unref_fn)dlsym(h, "udev_monitor_unref");
+  mon_int_fn m_fd = (mon_int_fn)dlsym(h, "udev_monitor_get_fd");
+  mon_int_fn m_enable = (mon_int_fn)dlsym(h, "udev_monitor_enable_receiving");
+  mon_filter_fn m_filter = (mon_filter_fn)dlsym(
+      h, "udev_monitor_filter_add_match_subsystem_devtype");
+  mon_buf_fn m_buf = (mon_buf_fn)dlsym(h, "udev_monitor_set_receive_buffer_size");
+  mon_recv_fn m_recv = (mon_recv_fn)dlsym(h, "udev_monitor_receive_device");
+
+  check(u_new && e_new && e_scan && e_list && m_new && m_fd && m_recv,
+        "the udev object/enumerate/monitor entry points are all present");
+  if (!(u_new && e_new && e_scan && e_list && m_new && m_fd && m_recv)) {
+    dlclose(h);
+    return;
+  }
+
+  /* ---- the library handle: non-NULL, no allocation ---- */
+  udev *u = u_new();
+  check(u != 0, "udev_new returns a non-NULL handle");
+  check(u_new() == u, "udev_new is allocation-free (same sentinel every time)");
+  check(!u_unref || u_unref(u) == 0, "udev_unref accepts the handle");
+  check(!u_unref || u_unref(0) == 0, "udev_unref(NULL) is safe");
+
+  /* ---- enumeration: success, then an empty list ---- */
+  udev_enumerate *e = e_new(u);
+  check(e != 0, "udev_enumerate_new returns a non-NULL enumerator");
+  check(e_new(0) != 0, "a NULL udev handle still yields an enumerator");
+  check(!e_match || e_match(e, "input") == 0, "add_match_subsystem succeeds");
+  check(!e_prop || e_prop(e, "ID_INPUT_JOYSTICK", "1") == 0,
+        "add_match_property succeeds");
+  check(!e_tag || e_tag(e, "seat") == 0, "add_match_tag succeeds (NULL-safe)");
+  check(!e_scan || e_scan(e) == 0, "scan_devices succeeds with zero devices");
+  check(!e_list || e_list(e) == 0, "get_list_entry returns NULL: the empty list");
+  check(!l_next || l_next(0) == 0, "list_entry_get_next(NULL) is NULL");
+  check(!l_name || l_name(0) == 0, "list_entry_get_name(NULL) is NULL");
+  check(!l_sysname || l_sysname(0) == 0, "list_entry_get_sysname(NULL) is NULL");
+  check(!e_unref || e_unref(e) == 0, "enumerate_unref returns NULL");
+  check(!e_unref || e_unref(0) == 0, "enumerate_unref(NULL) is safe");
+
+  /* ---- devices: none, and every getter survives a NULL device ---- */
+  check(!d_syspath || d_syspath(u, "/sys/class/input/event0") == 0,
+        "device_new_from_syspath returns NULL (no sysfs here)");
+  check(!d_devnum || d_devnum(u, 'c', 0) == 0,
+        "device_new_from_devnum returns NULL");
+  check(!d_action || d_action(0) == 0, "get_action(NULL) is NULL");
+  check(!d_devnode || d_devnode(0) == 0, "get_devnode(NULL) is NULL");
+  check(!d_subsys || d_subsys(0) == 0, "get_subsystem(NULL) is NULL");
+  check(!d_num || d_num(0) == 0, "get_devnum(NULL) is 0");
+  check(!d_attr || d_attr(0, "name") == 0, "get_sysattr_value(NULL) is NULL");
+  check(!d_prop || d_prop(0, "ID_INPUT") == 0, "get_property_value(NULL) is NULL");
+  check(!d_parent || d_parent(0, "input", "joystick") == 0,
+        "get_parent_with_subsystem_devtype(NULL) is NULL");
+  check(!d_init || d_init(0) == 1, "get_is_initialized(NULL) answers 1");
+  check(!d_unref || d_unref(0) == 0, "device_unref(NULL) is safe");
+
+  /* ---- the monitor: valid, enabled, silent ---- */
+  udev_monitor *m = m_new(u, "udev");
+  check(m != 0, "udev_monitor_new_from_netlink returns a non-NULL monitor");
+  check(m_new(0, "kernel") != 0, "a NULL udev handle still yields a monitor");
+  /* the first monitor creates the pipe: count fds only after it exists */
+  int fds_before = count_open_fds();
+  int fd = m_fd ? m_fd(m) : -1;
+  check(fd >= 3, "monitor_get_fd is a real descriptor (not -1, not stdio)");
+  check(!m_fd || m_fd(0) == fd, "monitor_get_fd(NULL) is NULL-safe");
+  check(!m_enable || m_enable(m) == 0, "enable_receiving succeeds");
+  check(!m_filter || m_filter(m, "input", 0) == 0,
+        "filter_add_match_subsystem_devtype succeeds");
+  check(!m_buf || m_buf(m, 1 << 20) == 0, "set_receive_buffer_size succeeds");
+  if (fd >= 3) {
+    struct pollfd p = { fd, POLLIN, 0 };
+    check(poll(&p, 1, 0) == 0, "the monitor is not readable immediately");
+    check(poll(&p, 1, 50) == 0, "the monitor never fires (50 ms poll)");
+  }
+  udev_device *ev = m_recv ? m_recv(m) : (udev_device *)0x1;
+  check(ev == 0, "receive_device reports nothing pending (NULL)");
+  check(!d_action || d_action(ev) == 0, "get_action on that NULL device is NULL");
+  check(!m_unref || m_unref(m) == 0, "monitor_unref returns NULL");
+  check(!m_unref || m_unref(0) == 0, "monitor_unref(NULL) is safe");
+
+  /* ---- no fd leak across create/destroy cycles ---- */
+  for (int i = 0; i < 200; i++) {
+    udev_monitor *mm = m_new(u, "udev");
+    if (mm && m_unref) m_unref(mm);
+  }
+  int fds_after = count_open_fds();
+  check(fds_before == fds_after,
+        "200 monitor create/destroy cycles leak no descriptors");
+  printf("     udev: monitor fd=%d, fds %d -> %d over 200 cycles\n",
+         fd, fds_before, fds_after);
+
+  /* ---- no allocation: repeated handles stay identical ---- */
+  check(e_new(u) == e, "enumerator handles are sentinels, not allocations");
+
+  dlclose(h);
+#else
+  printf("SKIP udev dso check (XCOMPAT_UDEV_PATH not set)\n");
+#endif
+}
+
 int main(void) {
   printf("xcompat host tests\n");
   test_abi();
@@ -767,6 +1008,8 @@ int main(void) {
   test_export_list();
   test_pulse_abi();
   test_pulse_dso();
+  test_udev_abi();
+  test_udev_dso();
   printf("[TEST] %d checks, %d failed\n", checks, fails);
   if (fails) {
     printf("SOME XCOMPAT TESTS FAILED\n");

@@ -850,3 +850,202 @@ creation/GLX, which are still unmeasured.
   (1214 B) and the identical stall.
 - Host reference runs are labelled as such; the guest evidence is the serial
   log `obj/rw-desktop/serial-desktop.log` and `obj/rw-desktop/shots/`.
+
+## 12. 2026-11-04 — M6: `libudev.so.1` keeps SDL's video subsystem; the wall moves to Unity's window creation
+
+Lane L19 (`rw-l19-udev`), tree seeded from `b9cd2bf1`. §11 ended at
+`Error getting num native displays: Video subsystem has not been initialized`
+because `SDL_Init` rolled the video subsystem back when its joystick stage
+could not `dlopen` `libudev.so.1`. This wave ships that DSO
+(`src/user/xcompat/udev_null.c`), and the line is **gone**: the player now
+reports a real display. It still does not create a window.
+
+### 12.1 The shim: 26 symbols, zero devices
+
+Measured from the binary, not from a header:
+
+```
+$ strings -a UnityPlayer.so | grep -E '^udev_' | sort -u
+26 symbols (the full list is in EXPORTS.md §2.6)
+```
+
+Three further `^udev_` strings are the engine's *error text*, not symbols
+(`udev_new() failed`, `udev_enumerate_new() failed`,
+`udev_monitor_new_from_netlink() failed`), so the generator
+(`tools/gen_exports.py`) takes the intersection of the `udev_*` shape with the
+host libudev's 92 dynamic exports — the same rule the libX11 set uses. All 26
+required names are exported by the shim (50 total; the extras are the rest of
+the public surface, all NULL-safe). `required-udev.txt` / `required-udev.h`
+are generated and checked in, like the libX11/ALSA/pulse sets.
+
+Contract (opaque handles only — libudev publishes no structs, so there is no
+layout to get wrong):
+
+| call | answer |
+|---|---|
+| `udev_new` / `udev_unref` | non-NULL sentinel handle / no-op, NULL-safe |
+| `udev_enumerate_new` | non-NULL sentinel, even for a NULL udev handle |
+| `add_match_*`, `scan_devices` | `0` (success) |
+| `get_list_entry`, `list_entry_*` | NULL — the empty list |
+| `device_new_from_*`, all device getters | NULL / 0 / 1 (`is_initialized`) |
+| `monitor_new_from_netlink` | non-NULL sentinel monitor + a pipe created once |
+| `monitor_get_fd` | the pipe **read end** (write end held open: readable never, EOF never) |
+| `enable_receiving`, `filter_*` | `0` |
+| `receive_device`, `get_action` | NULL ("nothing pending") |
+
+Built like every compat DSO: `-shared -fPIC -nostdlib`, **0 `DT_NEEDED`**,
+**0 undefined symbols**, SONAME `libudev.so.1`; `make xcompat_udev_check`
+asserts all three. Staged by `src/user/xcompat/stage.sh` into `/LIB64`, which
+is where the run below found it (`/LIB64/libudev.so.1` appears in the
+launcher's dlopen trace).
+
+### 12.2 Host A/B before the guest (and the fd choice)
+
+Same game, Xvfb `:77`, 800×600, 55 s per run, one shim build on
+`LD_LIBRARY_PATH` at a time:
+
+| variant | `Display 0` | `Initialize engine version` | `GfxDevice` | `Video subsystem … not initialized` |
+|---|---|---|---|---|
+| pipe fd (shipping) | yes | yes | yes (`Renderer: llvmpipe`) | absent |
+| `-1` fd (measurement build) | yes | yes | yes | absent |
+| control: `udev_new()` → NULL | **no** | yes | yes | **present, twice** |
+
+Both fd answers are tolerated by this SDL build; the pipe is shipped because
+it keeps "hotplug is enabled and being watched" true and cannot be read as a
+failed watch (`fd < 0`). The control is the important row: it proves the
+game is loading *this* DSO, because with a shim that refuses a handle the
+host prints the guest's §11 line verbatim. Details: `EXPORTS.md` §7.3.
+
+### 12.3 The guest ladder (raw rows, in order)
+
+`bash tools/rw/run-rimworld-desktop.sh`, `MODE=desktop DESKTOP=hobby`,
+launched from the Apps menu. The X rows come from the `-DXC_TRACE` build, the
+`[UD]` rows from a `-DUDEV_TRACE` build of the shim (both measurement-only;
+the shipping DSOs contain neither string and produce the identical
+`Player.log`, 1181 B).
+
+```
+[XC] XGetKeyboardControl
+[XC] XAutoRepeatOn
+[XC] XDisplayKeycodes
+[XC] XQueryPointer
+[RWMAIN] dlsym FAILED udev_device_get_action: /NFS/RimWorldLinux: undefined symbol: udev_device_get_action
+/LIB64/libudev.so.1
+[RWMAIN] dlopen ok libudev.so.1 -> 0x104005c1d0
+[UD] udev_new
+[UD] monitor_new
+[UD] monitor_filter
+[UD] monitor_filter
+[UD] monitor_enable
+[UD] enumerate_new
+[UD] scan_devices
+[UD] get_list_entry
+[UD] enumerate_new
+[UD] scan_devices
+[UD] get_list_entry
+[UD] enumerate_new
+[UD] scan_devices
+[UD] get_list_entry
+```
+
+Read in order:
+
+- SDL's X11 video driver finishes: `XMatchVisualInfo` → keyboard →
+  `XQueryPointer` is the last Xlib call of `X11_VideoInit`. **No
+  `XCloseDisplay`** (the §11 rollback) — the video subsystem stayed up.
+- `libudev.so.1` is dlopened from `/LIB64` and the joystick stage runs to
+  completion: one `udev_new`, one monitor (`new`/`filter`×2/`enable`), and
+  three enumerate/scan/list cycles (SDL's joystick detect). Every call
+  returns; `receive_device` is never called (nothing in this path polls the
+  monitor).
+- Then **nothing**. No further Xlib call, no `XCreateWindow`, no `XMapWindow`,
+  no `libGL.so.1` dlopen, no `glX*` call, no `[LCOMPAT] ENOSYS`
+  (`grep -c 'LCOMPAT.*ENOSYS'` = **0**). `libGL.so.1`/`libGLX.so.0` are
+  staged in `/LIB64` and are never asked for.
+
+The engine log is now 1181 B (was 1214 B) and its last line is the first
+display report this track has ever produced:
+
+```
+Mono path[0] = '/NFS/RimWorldLinux_Data/Managed'
+Mono config path = '/NFS/RimWorldLinux_Data/MonoBleedingEdge/etc'
+GC Warning: Couldn't read /proc/stat
+mono_thread_internal_set_priority: pthread_setschedparam failed, error: "Operation not permitted" (1)
+RuntimeInitializeOnLoadManagerInitializer: Failed reading 'ScriptingAssemblies.json'Display 0 '0': 1920x1080 (primary device).
+```
+
+**`Error getting num native displays: Video subsystem has not been
+initialized` does not appear at all**, and `Display 0 '0': 1920x1080` is new.
+The name `'0'` is SDL's X11 display name when RandR monitor info is
+unavailable, not a shim artifact: the host, with `libXrandr` hidden, prints
+`Display 0 '0': 1280x800` too (§12.4).
+
+The engine is quiescent, not looping: `[IDLESTUCK] cpu=6 rounds=80000` and
+the main thread (`slot=4 /NFS/RimWorldLinux`) is `st=8 wake=0
+rip=0x1082404170` — parked, not spinning; the player plus its 22 threads
+(16 × `Background Job.`, `Job.Worker 0`, `Finalizer`, `SDLTimer`,
+`AssetGarbageCol`, `BatchDeleteObje`, `Loading.AsyncRe`) are all waiting.
+
+### 12.4 The single next blocker
+
+**Unity never starts window creation.** The last engine line is
+
+```
+Display 0 '0': 1920x1080 (primary device).
+```
+
+and the step that should follow it — `XCreateWindow` → `XMapWindow` →
+`ESC ] X w;h ~` → `glXChooseFBConfig`/`glXCreateContextAttribsARB`, i.e. the
+first `libGL.so.1` dlopen — **does not happen**. So there is no `GfxDevice`,
+no `Initialize engine version`, and (the question §11 left open) **no GLX
+request at all**: Unity has not asked for 4.5 core, so the 4.5-vs-3.3
+question is still unmeasured in the guest.
+
+What it is *not*: not a missing symbol (every `dlsym` on the X11 surface
+succeeds), not a missing DSO (`libGL` is never requested), not a syscall
+(`0` `[LCOMPAT] ENOSYS` lines), and not the udev stage (all fourteen `[UD]`
+calls returned).
+
+**The empty display-mode list was tested and is not sufficient.** With
+`libXrandr` hidden from the host client (`tools/rw/xext-absent-probe.c`, Xvfb
+1280×800, `SDL_VIDEODRIVER=x11`) SDL reports `Display 0 '0': 1280x800` and the
+engine still reaches `Initialize engine version`, `GfxDevice` and
+`OPENGL LOG: Creating OpenGL 4.5 graphics device`. Hiding `libXext`/`libXi`
+*as well* is a different failure: SDL_Init itself rolls back again
+(`Error getting num native displays` ×2, 497-byte log), which is why the
+probe hides only RandR — that confound is worth remembering before blaming a
+missing extension DSO.
+
+Next diagnostics, cheapest first:
+
+1. **Find the parked syscall.** The main thread is `st=8 wake=0` with no
+   pending Xlib/udev/GL call; the IDLESTUCK row has only a rip. A compat
+   syscall trace for pid 4 (or an `rwmain` wrapper that prints the last
+   `SDL_*` entry) answers whether it waits in `read(0)` (the window-protocol
+   pipe), `write(1)` (same pipe, if the desktop stops draining) or a futex.
+2. **Wrap `SDL_*`.** The launcher already interposes `dlopen`; interposing
+   `SDL_CreateWindow`/`SDL_GL_LoadLibrary` the same way turns "no window" into
+   "the last SDL call attempted".
+3. **`SDL_JOYSTICK_DISABLE_UDEV=1` A/B** in the child env, to make the udev
+   exoneration an A/B rather than an inference.
+
+### 12.5 Screenshot
+
+`docs/rimworld-m6-udev-desktop.png` (from
+`obj/rw-desktop/shots/06_running.png`, taken while the game was running): the
+desktop with the launcher's window **still in terminal mode** — the Unity
+memory banner, `PlayerPrefs - Creating folder`, `Unable to load player prefs`
+— i.e. **no `ESC ] X` was ever written**, consistent with `XMapWindow` never
+being called (the `ESC ] X` is emitted by `XMapWindow` alone). The taskbar
+still shows the process under its launcher name.
+
+### 12.6 Limits
+
+- Still no window, no GLX, no frame. The frame evidence for this track is
+  still only the M4 cube (`docs/rimworld-m4-window.png`), not the game.
+- The guest run uses the untraced DSO for the `Player.log` and the traced
+  build only for the ordered rows; both produce the same 1181-byte log and
+  the same stall (verified by running both).
+- `pthread_setschedparam → EPERM`, `GC Warning: Couldn't read /proc/stat` and
+  `Failed reading 'ScriptingAssemblies.json'` are unchanged from §10/§11 and
+  are not on this wave's critical path.
