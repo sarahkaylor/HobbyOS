@@ -1,0 +1,2 @@
+t3_resume_page: FAIL (2) — '/nonexistent/absent.log' absent: an absent serial is not a passing gate
+absent_rc=2
