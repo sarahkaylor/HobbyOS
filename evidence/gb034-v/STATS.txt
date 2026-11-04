@@ -1,0 +1,17 @@
+GB-034-V frame statistics — centre region = 960x540 (25%..75% of 1920x1080)
+
+rig run (evidence/DOOM/20261104T122115Z):
+  boot.ppm      colours=61   nonzero=518400/518400
+  launch.ppm    colours=3    nonzero=90336/518400
+  gameplay.ppm  colours=178  nonzero=518400/518400
+
+key run (A = Freedoom title screen after [ARRIVED]+8 s; B = after QMP key "esc"):
+  A.png  colours=178  nonzero=518400/518400
+  B.png  colours=187  nonzero=518400/518400
+  changed pixels A->B = 101008/518400 (19.5%)
+
+Visual check (vision): A is the Freedoom Phase 1 title screen rendered by the
+DOOM engine (FREEDOOM / PHASE 1, demon head + marine artwork); B is the Freedoom
+main menu with NEW GAME / OPTIONS / LOAD GAME / SAVE GAME / READ THIS! /
+QUIT GAME and the skull cursor. The ESC keypress was consumed by the game, not
+the desktop.

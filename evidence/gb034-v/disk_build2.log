@@ -1,0 +1,1279 @@
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/audio_stub.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/elf_loader_test.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/file_obj.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/linux_compat.o obj/intel/linux_compat_fd.o obj/intel/linux_compat_mem.o obj/intel/linux_compat_misc.o obj/intel/linux_compat_proc.o obj/intel/linux_uname.o obj/intel/lock_order.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/ssp.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vdisplay.o obj/intel/vdisplay_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+[browser] third_party/webkit-hobbyos/cache/browser-x64.bin.xz (cache) -> obj/intel/browser.bin
+[tools] LLVM dist staging present
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/selfhost/selfhost.c -o obj/intel/selfhost.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/selfhost.elf obj/intel/selfhost.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/selfhost.elf obj/intel/selfhost.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/nes -c src/user/nes/main.c -o obj/intel/nesmain.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/nes -c src/user/nes/nes.c -o obj/intel/nescore.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/nes.elf obj/intel/nesmain.o obj/intel/nescore.o obj/intel/user_graphics.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/nes.elf obj/intel/nes.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c src/user/doom/doom.c -o obj/intel/doom.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c src/user/doom/doomgeneric_hobbyos.c -o obj/intel/doom_hobbyos.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/am_map.c -o obj/intel/doom_engine/am_map.o
+third_party/doomgeneric/am_map.c:427:64: warning: missing field 'data4' initializer [-Wmissing-field-initializers]
+  427 |     static event_t st_notify = { ev_keyup, AM_MSGENTERED, 0, 0 };
+      |                                                                ^
+third_party/doomgeneric/am_map.c:543:63: warning: missing field 'data4' initializer [-Wmissing-field-initializers]
+  543 |     static event_t st_notify = { 0, ev_keyup, AM_MSGEXITED, 0 };
+      |                                                               ^
+third_party/doomgeneric/am_map.c:1293:8: warning: unused parameter 'colorrange' [-Wunused-parameter]
+ 1293 |   int   colorrange)
+      |         ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/doomdef.c -o obj/intel/doom_engine/doomdef.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/doomstat.c -o obj/intel/doom_engine/doomstat.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/dstrings.c -o obj/intel/doom_engine/dstrings.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/d_event.c -o obj/intel/doom_engine/d_event.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/d_items.c -o obj/intel/doom_engine/d_items.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/d_iwad.c -o obj/intel/doom_engine/d_iwad.o
+third_party/doomgeneric/d_iwad.c:767:16: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  767 |     for (i=0; i<arrlen(iwads); ++i)
+      |               ~^~~~~~~~~~~~~~
+third_party/doomgeneric/d_iwad.c:822:19: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  822 |     for (i = 0; i < arrlen(iwads); ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~
+third_party/doomgeneric/d_iwad.c:837:19: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  837 |     for (i = 0; i < arrlen(iwads); ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/d_loop.c -o obj/intel/doom_engine/d_loop.o
+third_party/doomgeneric/d_loop.c:341:48: warning: unused parameter 'callback' [-Wunused-parameter]
+  341 |                     netgame_startup_callback_t callback)
+      |                                                ^
+third_party/doomgeneric/d_loop.c:695:15: warning: comparison of integers of different signs: 'unsigned int' and 'int' [-Wsign-compare]
+  695 |         if (i != localplayer)
+      |             ~ ^  ~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/d_main.c -o obj/intel/doom_engine/d_main.o
+third_party/doomgeneric/d_main.c:699:19: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  699 |     for (i = 0; i < arrlen(packs); ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~
+third_party/doomgeneric/d_main.c:710:19: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  710 |     for (i = 0; i < arrlen(packs); ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~
+third_party/doomgeneric/d_main.c:1570:42: warning: initializer-string for character array is too long, array size is 8 but initializer has size 9 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+ 1570 |             "dphoof","bfgga0","heada1","cybra1","spida1d1"
+      |                                                 ^~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/d_mode.c -o obj/intel/doom_engine/d_mode.o
+third_party/doomgeneric/d_mode.c:54:16: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   54 |     for (i=0; i<arrlen(valid_modes); ++i)
+      |               ~^~~~~~~~~~~~~~~~~~~~
+third_party/doomgeneric/d_mode.c:86:16: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   86 |     for (i=0; i<arrlen(valid_modes); ++i) 
+      |               ~^~~~~~~~~~~~~~~~~~~~
+third_party/doomgeneric/d_mode.c:147:16: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  147 |     for (i=0; i<arrlen(valid_versions); ++i) 
+      |               ~^~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/d_net.c -o obj/intel/doom_engine/d_net.o
+third_party/doomgeneric/d_net.c:132:29: warning: comparison of integers of different signs: 'unsigned int' and 'int' [-Wsign-compare]
+  132 |         playeringame[i] = i < settings->num_players;
+      |                           ~ ^ ~~~~~~~~~~~~~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/f_finale.c -o obj/intel/doom_engine/f_finale.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/f_wipe.c -o obj/intel/doom_engine/f_wipe.o
+third_party/doomgeneric/f_wipe.c:68:7: warning: unused parameter 'ticks' [-Wunused-parameter]
+   68 |   int   ticks )
+      |         ^
+third_party/doomgeneric/f_wipe.c:122:7: warning: unused parameter 'width' [-Wunused-parameter]
+  122 | ( int   width,
+      |         ^
+third_party/doomgeneric/f_wipe.c:123:7: warning: unused parameter 'height' [-Wunused-parameter]
+  123 |   int   height,
+      |         ^
+third_party/doomgeneric/f_wipe.c:124:7: warning: unused parameter 'ticks' [-Wunused-parameter]
+  124 |   int   ticks )
+      |         ^
+third_party/doomgeneric/f_wipe.c:136:7: warning: unused parameter 'ticks' [-Wunused-parameter]
+  136 |   int   ticks )
+      |         ^
+third_party/doomgeneric/f_wipe.c:220:7: warning: unused parameter 'width' [-Wunused-parameter]
+  220 | ( int   width,
+      |         ^
+third_party/doomgeneric/f_wipe.c:221:7: warning: unused parameter 'height' [-Wunused-parameter]
+  221 |   int   height,
+      |         ^
+third_party/doomgeneric/f_wipe.c:222:7: warning: unused parameter 'ticks' [-Wunused-parameter]
+  222 |   int   ticks )
+      |         ^
+third_party/doomgeneric/f_wipe.c:232:7: warning: unused parameter 'x' [-Wunused-parameter]
+  232 | ( int   x,
+      |         ^
+third_party/doomgeneric/f_wipe.c:233:7: warning: unused parameter 'y' [-Wunused-parameter]
+  233 |   int   y,
+      |         ^
+third_party/doomgeneric/f_wipe.c:234:7: warning: unused parameter 'width' [-Wunused-parameter]
+  234 |   int   width,
+      |         ^
+third_party/doomgeneric/f_wipe.c:235:7: warning: unused parameter 'height' [-Wunused-parameter]
+  235 |   int   height )
+      |         ^
+third_party/doomgeneric/f_wipe.c:258:7: warning: unused parameter 'x' [-Wunused-parameter]
+  258 |   int   x,
+      |         ^
+third_party/doomgeneric/f_wipe.c:259:7: warning: unused parameter 'y' [-Wunused-parameter]
+  259 |   int   y,
+      |         ^
+14 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/g_game.c -o obj/intel/doom_engine/g_game.o
+third_party/doomgeneric/g_game.c:297:16: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  297 |     for (i=0; i<arrlen(weapon_order_table); ++i)
+      |               ~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+third_party/doomgeneric/g_game.c:458:20: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  458 |         for (i=0; i<arrlen(weapon_keys); ++i)
+      |                   ~^~~~~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/hu_lib.c -o obj/intel/doom_engine/hu_lib.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/hu_stuff.c -o obj/intel/doom_engine/hu_stuff.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/info.c -o obj/intel/doom_engine/info.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/i_cdmus.c -o obj/intel/doom_engine/i_cdmus.o
+third_party/doomgeneric/i_cdmus.c:107:21: warning: unused parameter 'track' [-Wunused-parameter]
+  107 | int I_CDMusPlay(int track)
+      |                     ^
+third_party/doomgeneric/i_cdmus.c:160:26: warning: unused parameter 'volume' [-Wunused-parameter]
+  160 | int I_CDMusSetVolume(int volume)
+      |                          ^
+third_party/doomgeneric/i_cdmus.c:219:28: warning: unused parameter 'track_num' [-Wunused-parameter]
+  219 | int I_CDMusTrackLength(int track_num)
+      |                            ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/i_endoom.c -o obj/intel/doom_engine/i_endoom.o
+third_party/doomgeneric/i_endoom.c:42:21: warning: unused parameter 'endoom_data' [-Wunused-parameter]
+   42 | void I_Endoom(byte *endoom_data)
+      |                     ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/i_joystick.c -o obj/intel/doom_engine/i_joystick.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/i_scale.c -o obj/intel/doom_engine/i_scale.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/i_sound.c -o obj/intel/doom_engine/i_sound.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/i_system.c -o obj/intel/doom_engine/i_system.o
+third_party/doomgeneric/i_system.c:87:20: warning: unused parameter 'on' [-Wunused-parameter]
+   87 | void I_Tactile(int on, int off, int total)
+      |                    ^
+third_party/doomgeneric/i_system.c:87:28: warning: unused parameter 'off' [-Wunused-parameter]
+   87 | void I_Tactile(int on, int off, int total)
+      |                            ^
+third_party/doomgeneric/i_system.c:87:37: warning: unused parameter 'total' [-Wunused-parameter]
+   87 | void I_Tactile(int on, int off, int total)
+      |                                     ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/i_timer.c -o obj/intel/doom_engine/i_timer.o
+third_party/doomgeneric/i_timer.c:84:20: warning: unused parameter 'count' [-Wunused-parameter]
+   84 | void I_WaitVBL(int count)
+      |                    ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/memio.c -o obj/intel/doom_engine/memio.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/m_argv.c -o obj/intel/doom_engine/m_argv.o
+third_party/doomgeneric/m_argv.c:75:34: warning: unused parameter 'argv_index' [-Wunused-parameter]
+   75 | static void LoadResponseFile(int argv_index)
+      |                                  ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/m_bbox.c -o obj/intel/doom_engine/m_bbox.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/m_cheat.c -o obj/intel/doom_engine/m_cheat.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/m_config.c -o obj/intel/doom_engine/m_config.o
+third_party/doomgeneric/m_config.c:1609:57: warning: unused parameter 'collection' [-Wunused-parameter]
+ 1609 | static void SaveDefaultCollection(default_collection_t *collection)
+      |                                                         ^
+third_party/doomgeneric/m_config.c:1771:57: warning: unused parameter 'collection' [-Wunused-parameter]
+ 1771 | static void LoadDefaultCollection(default_collection_t *collection)
+      |                                                         ^
+third_party/doomgeneric/m_config.c:2087:30: warning: unused parameter 'iwadname' [-Wunused-parameter]
+ 2087 | char *M_GetSaveGameDir(char *iwadname)
+      |                              ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/m_controls.c -o obj/intel/doom_engine/m_controls.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/m_fixed.c -o obj/intel/doom_engine/m_fixed.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/m_menu.c -o obj/intel/doom_engine/m_menu.o
+third_party/doomgeneric/m_menu.c:585:22: warning: unused parameter 'choice' [-Wunused-parameter]
+  585 | void M_LoadGame (int choice)
+      |                      ^
+third_party/doomgeneric/m_menu.c:650:22: warning: unused parameter 'choice' [-Wunused-parameter]
+  650 | void M_SaveGame (int choice)
+      |                      ^
+third_party/doomgeneric/m_menu.c:845:18: warning: unused parameter 'choice' [-Wunused-parameter]
+  845 | void M_Sound(int choice)
+      |                  ^
+third_party/doomgeneric/m_menu.c:908:20: warning: unused parameter 'choice' [-Wunused-parameter]
+  908 | void M_NewGame(int choice)
+      |                    ^
+third_party/doomgeneric/m_menu.c:1007:20: warning: unused parameter 'choice' [-Wunused-parameter]
+ 1007 | void M_Options(int choice)
+      |                    ^
+third_party/doomgeneric/m_menu.c:1017:27: warning: parameter 'choice' set but not used [-Wunused-but-set-parameter]
+ 1017 | void M_ChangeMessages(int choice)
+      |                           ^
+third_party/doomgeneric/m_menu.c:1045:20: warning: parameter 'choice' set but not used [-Wunused-but-set-parameter]
+ 1045 | void M_EndGame(int choice)
+      |                    ^
+third_party/doomgeneric/m_menu.c:1069:21: warning: parameter 'choice' set but not used [-Wunused-but-set-parameter]
+ 1069 | void M_ReadThis(int choice)
+      |                     ^
+third_party/doomgeneric/m_menu.c:1075:22: warning: parameter 'choice' set but not used [-Wunused-but-set-parameter]
+ 1075 | void M_ReadThis2(int choice)
+      |                      ^
+third_party/doomgeneric/m_menu.c:1093:27: warning: parameter 'choice' set but not used [-Wunused-but-set-parameter]
+ 1093 | void M_FinishReadThis(int choice)
+      |                           ^
+third_party/doomgeneric/m_menu.c:1168:21: warning: unused parameter 'choice' [-Wunused-parameter]
+ 1168 | void M_QuitDOOM(int choice)
+      |                     ^
+third_party/doomgeneric/m_menu.c:1197:25: warning: parameter 'choice' set but not used [-Wunused-but-set-parameter]
+ 1197 | void M_ChangeDetail(int choice)
+      |                         ^
+12 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/m_misc.c -o obj/intel/doom_engine/m_misc.o
+third_party/doomgeneric/m_misc.c:498:30: warning: comparison of integers of different signs: 'int' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  498 |     if (result < 0 || result >= buf_len)
+      |                       ~~~~~~ ^  ~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/m_random.c -o obj/intel/doom_engine/m_random.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_ceilng.c -o obj/intel/doom_engine/p_ceilng.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_doors.c -o obj/intel/doom_engine/p_doors.o
+third_party/doomgeneric/p_doors.c:544:8: warning: unused parameter 'secnum' [-Wunused-parameter]
+  544 |   int           secnum )
+      |                 ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_enemy.c -o obj/intel/doom_engine/p_enemy.o
+third_party/doomgeneric/p_enemy.c:1778:13: warning: unused parameter 'psp' [-Wunused-parameter]
+ 1778 |   pspdef_t*     psp )
+      |                 ^
+third_party/doomgeneric/p_enemy.c:1786:13: warning: unused parameter 'psp' [-Wunused-parameter]
+ 1786 |   pspdef_t*     psp )
+      |                 ^
+third_party/doomgeneric/p_enemy.c:1811:28: warning: unused parameter 'mo' [-Wunused-parameter]
+ 1811 | void A_BrainAwake (mobj_t* mo)
+      |                            ^
+third_party/doomgeneric/p_enemy.c:1841:27: warning: unused parameter 'mo' [-Wunused-parameter]
+ 1841 | void A_BrainPain (mobj_t*       mo)
+      |                                 ^
+third_party/doomgeneric/p_enemy.c:1894:26: warning: unused parameter 'mo' [-Wunused-parameter]
+ 1894 | void A_BrainDie (mobj_t*        mo)
+      |                                 ^
+5 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_floor.c -o obj/intel/doom_engine/p_floor.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_inter.c -o obj/intel/doom_engine/p_inter.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_lights.c -o obj/intel/doom_engine/p_lights.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_map.c -o obj/intel/doom_engine/p_map.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_maputl.c -o obj/intel/doom_engine/p_maputl.o
+third_party/doomgeneric/p_maputl.c:849:43: warning: cast to smaller integer type 'int' from 'mobj_t *' (aka 'struct mobj_s *') [-Wpointer-to-int-cast]
+  849 |     InterceptsMemoryOverrun(location + 8, (int) intercept->d.thing);
+      |                                           ^~~~~~~~~~~~~~~~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_mobj.c -o obj/intel/doom_engine/p_mobj.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_plats.c -o obj/intel/doom_engine/p_plats.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_pspr.c -o obj/intel/doom_engine/p_pspr.o
+third_party/doomgeneric/p_pspr.c:336:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  336 |   pspdef_t*     psp )
+      |                 ^
+third_party/doomgeneric/p_pspr.c:359:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  359 |   pspdef_t*     psp )
+      |                 ^
+third_party/doomgeneric/p_pspr.c:442:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  442 |   pspdef_t*     psp ) 
+      |                 ^
+third_party/doomgeneric/p_pspr.c:461:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  461 |   pspdef_t*     psp ) 
+      |                 ^
+third_party/doomgeneric/p_pspr.c:495:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  495 |   pspdef_t*     psp ) 
+      |                 ^
+third_party/doomgeneric/p_pspr.c:561:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  561 |   pspdef_t*     psp ) 
+      |                 ^
+third_party/doomgeneric/p_pspr.c:574:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  574 |   pspdef_t*     psp ) 
+      |                 ^
+third_party/doomgeneric/p_pspr.c:589:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  589 |   pspdef_t*     psp ) 
+      |                 ^
+third_party/doomgeneric/p_pspr.c:658:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  658 |   pspdef_t*     psp ) 
+      |                 ^
+third_party/doomgeneric/p_pspr.c:680:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  680 |   pspdef_t*     psp ) 
+      |                 ^
+third_party/doomgeneric/p_pspr.c:707:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  707 |   pspdef_t*     psp ) 
+      |                 ^
+third_party/doomgeneric/p_pspr.c:770:44: warning: unused parameter 'psp' [-Wunused-parameter]
+  770 | void A_Light0 (player_t *player, pspdef_t *psp)
+      |                                            ^
+third_party/doomgeneric/p_pspr.c:775:44: warning: unused parameter 'psp' [-Wunused-parameter]
+  775 | void A_Light1 (player_t *player, pspdef_t *psp)
+      |                                            ^
+third_party/doomgeneric/p_pspr.c:780:44: warning: unused parameter 'psp' [-Wunused-parameter]
+  780 | void A_Light2 (player_t *player, pspdef_t *psp)
+      |                                            ^
+third_party/doomgeneric/p_pspr.c:829:13: warning: unused parameter 'psp' [-Wunused-parameter]
+  829 |   pspdef_t*     psp )
+      |                 ^
+15 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_saveg.c -o obj/intel/doom_engine/p_saveg.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_setup.c -o obj/intel/doom_engine/p_setup.o
+third_party/doomgeneric/p_setup.c:747:8: warning: unused parameter 'playermask' [-Wunused-parameter]
+  747 |   int           playermask,
+      |                 ^
+third_party/doomgeneric/p_setup.c:748:11: warning: unused parameter 'skill' [-Wunused-parameter]
+  748 |   skill_t       skill)
+      |                 ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_sight.c -o obj/intel/doom_engine/p_sight.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_spec.c -o obj/intel/doom_engine/p_spec.o
+third_party/doomgeneric/p_spec.c:1179:34: warning: unused parameter 'line' [-Wunused-parameter]
+ 1179 |                          line_t *line, sector_t *pillar_sector)
+      |                                  ^
+third_party/doomgeneric/p_spec.c:1179:50: warning: unused parameter 'pillar_sector' [-Wunused-parameter]
+ 1179 |                          line_t *line, sector_t *pillar_sector)
+      |                                                  ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_switch.c -o obj/intel/doom_engine/p_switch.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_telept.c -o obj/intel/doom_engine/p_telept.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_tick.c -o obj/intel/doom_engine/p_tick.o
+third_party/doomgeneric/p_tick.c:85:36: warning: unused parameter 'thinker' [-Wunused-parameter]
+   85 | void P_AllocateThinker (thinker_t*      thinker)
+      |                                         ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/p_user.c -o obj/intel/doom_engine/p_user.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/r_bsp.c -o obj/intel/doom_engine/r_bsp.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/r_data.c -o obj/intel/doom_engine/r_data.o
+third_party/doomgeneric/r_data.c:471:11: warning: variable 'totalwidth' set but not used [-Wunused-but-set-variable]
+  471 |     int                 totalwidth;
+      |                         ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/r_draw.c -o obj/intel/doom_engine/r_draw.o
+third_party/doomgeneric/r_draw.c:287:14: warning: variable 'frac' set but not used [-Wunused-but-set-variable]
+  287 |     fixed_t             frac;
+      |                         ^
+third_party/doomgeneric/r_draw.c:347:14: warning: variable 'frac' set but not used [-Wunused-but-set-variable]
+  347 |     fixed_t             frac;
+      |                         ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/r_main.c -o obj/intel/doom_engine/r_main.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/r_plane.c -o obj/intel/doom_engine/r_plane.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/r_segs.c -o obj/intel/doom_engine/r_segs.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/r_sky.c -o obj/intel/doom_engine/r_sky.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/r_things.c -o obj/intel/doom_engine/r_things.o
+third_party/doomgeneric/r_things.c:391:9: warning: unused parameter 'x1' [-Wunused-parameter]
+  391 |   int                   x1,
+      |                         ^
+third_party/doomgeneric/r_things.c:392:9: warning: unused parameter 'x2' [-Wunused-parameter]
+  392 |   int                   x2 )
+      |                         ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/sha1.c -o obj/intel/doom_engine/sha1.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/sounds.c -o obj/intel/doom_engine/sounds.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/statdump.c -o obj/intel/doom_engine/statdump.o
+third_party/doomgeneric/statdump.c:33:18: warning: unused variable 'doom1_par_times' [-Wunused-const-variable]
+   33 | static const int doom1_par_times[] =
+      |                  ^~~~~~~~~~~~~~~
+third_party/doomgeneric/statdump.c:39:18: warning: unused variable 'doom2_par_times' [-Wunused-const-variable]
+   39 | static const int doom2_par_times[] =
+      |                  ^~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/st_lib.c -o obj/intel/doom_engine/st_lib.o
+third_party/doomgeneric/st_lib.c:86:11: warning: unused parameter 'refresh' [-Wunused-parameter]
+   86 |   boolean       refresh )
+      |                 ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/st_stuff.c -o obj/intel/doom_engine/st_stuff.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/s_sound.c -o obj/intel/doom_engine/s_sound.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/tables.c -o obj/intel/doom_engine/tables.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/v_video.c -o obj/intel/doom_engine/v_video.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/wi_stuff.c -o obj/intel/doom_engine/wi_stuff.o
+third_party/doomgeneric/wi_stuff.c:409:31: warning: unused parameter 'ev' [-Wunused-parameter]
+  409 | boolean WI_Responder(event_t* ev)
+      |                               ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/w_checksum.c -o obj/intel/doom_engine/w_checksum.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/w_file.c -o obj/intel/doom_engine/w_file.o
+third_party/doomgeneric/w_file.c:72:19: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   72 |     for (i = 0; i < arrlen(wad_file_classes); ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/w_main.c -o obj/intel/doom_engine/w_main.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/w_wad.c -o obj/intel/doom_engine/w_wad.o
+third_party/doomgeneric/w_wad.c:102:35: warning: comparison of integers of different signs: 'unsigned int' and 'int' [-Wsign-compare]
+  102 |     for (i = 0; i < numlumps && i < newnumlumps; ++i)
+      |                                 ~ ^ ~~~~~~~~~~~
+third_party/doomgeneric/w_wad.c:591:19: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  591 |     for (i = 0; i < arrlen(unique_lumps); ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/z_zone.c -o obj/intel/doom_engine/z_zone.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/w_file_stdc.c -o obj/intel/doom_engine/w_file_stdc.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/i_input.c -o obj/intel/doom_engine/i_input.o
+third_party/doomgeneric/i_input.c:51:19: warning: unused variable 'at_to_doom' [-Wunused-const-variable]
+   51 | static const char at_to_doom[] =
+      |                   ^~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/i_video.c -o obj/intel/doom_engine/i_video.o
+third_party/doomgeneric/i_video.c:294:38: warning: comparison of integers of different signs: 'uint32_t' (aka 'unsigned int') and 'int' [-Wsign-compare]
+  294 |         if (s_Fb.yres / SCREENHEIGHT < fb_scaling)
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~ ^ ~~~~~~~~~~
+third_party/doomgeneric/i_video.c:335:19: warning: variable 'y_offset' set but not used [-Wunused-but-set-variable]
+  335 |     int x_offset, y_offset, x_offset_end;
+      |                   ^
+third_party/doomgeneric/i_video.c:488:51: warning: unused parameter 'func' [-Wunused-parameter]
+  488 | void I_SetGrabMouseCallback (grabmouse_callback_t func)
+      |                                                   ^
+third_party/doomgeneric/i_video.c:500:32: warning: unused parameter 'dots_on' [-Wunused-parameter]
+  500 | void I_DisplayFPSDots (boolean dots_on)
+      |                                ^
+third_party/doomgeneric/i_video.c:26:1: warning: unused variable 'rcsid' [-Wunused-const-variable]
+   26 | rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
+      | ^~~~~
+5 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/doomgeneric.c -o obj/intel/doom_engine/doomgeneric.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric -c third_party/doomgeneric/dummy.c -o obj/intel/doom_engine/dummy.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/doom.elf \
+  obj/intel/doom.o obj/intel/doom_hobbyos.o obj/intel/doom_engine/am_map.o obj/intel/doom_engine/doomdef.o obj/intel/doom_engine/doomstat.o obj/intel/doom_engine/dstrings.o obj/intel/doom_engine/d_event.o obj/intel/doom_engine/d_items.o obj/intel/doom_engine/d_iwad.o obj/intel/doom_engine/d_loop.o obj/intel/doom_engine/d_main.o obj/intel/doom_engine/d_mode.o obj/intel/doom_engine/d_net.o obj/intel/doom_engine/f_finale.o obj/intel/doom_engine/f_wipe.o obj/intel/doom_engine/g_game.o obj/intel/doom_engine/hu_lib.o obj/intel/doom_engine/hu_stuff.o obj/intel/doom_engine/info.o obj/intel/doom_engine/i_cdmus.o obj/intel/doom_engine/i_endoom.o obj/intel/doom_engine/i_joystick.o obj/intel/doom_engine/i_scale.o obj/intel/doom_engine/i_sound.o obj/intel/doom_engine/i_system.o obj/intel/doom_engine/i_timer.o obj/intel/doom_engine/memio.o obj/intel/doom_engine/m_argv.o obj/intel/doom_engine/m_bbox.o obj/intel/doom_engine/m_cheat.o obj/intel/doom_engine/m_config.o obj/intel/doom_engine/m_controls.o obj/intel/doom_engine/m_fixed.o obj/intel/doom_engine/m_menu.o obj/intel/doom_engine/m_misc.o obj/intel/doom_engine/m_random.o obj/intel/doom_engine/p_ceilng.o obj/intel/doom_engine/p_doors.o obj/intel/doom_engine/p_enemy.o obj/intel/doom_engine/p_floor.o obj/intel/doom_engine/p_inter.o obj/intel/doom_engine/p_lights.o obj/intel/doom_engine/p_map.o obj/intel/doom_engine/p_maputl.o obj/intel/doom_engine/p_mobj.o obj/intel/doom_engine/p_plats.o obj/intel/doom_engine/p_pspr.o obj/intel/doom_engine/p_saveg.o obj/intel/doom_engine/p_setup.o obj/intel/doom_engine/p_sight.o obj/intel/doom_engine/p_spec.o obj/intel/doom_engine/p_switch.o obj/intel/doom_engine/p_telept.o obj/intel/doom_engine/p_tick.o obj/intel/doom_engine/p_user.o obj/intel/doom_engine/r_bsp.o obj/intel/doom_engine/r_data.o obj/intel/doom_engine/r_draw.o obj/intel/doom_engine/r_main.o obj/intel/doom_engine/r_plane.o obj/intel/doom_engine/r_segs.o obj/intel/doom_engine/r_sky.o obj/intel/doom_engine/r_things.o obj/intel/doom_engine/sha1.o obj/intel/doom_engine/sounds.o obj/intel/doom_engine/statdump.o obj/intel/doom_engine/st_lib.o obj/intel/doom_engine/st_stuff.o obj/intel/doom_engine/s_sound.o obj/intel/doom_engine/tables.o obj/intel/doom_engine/v_video.o obj/intel/doom_engine/wi_stuff.o obj/intel/doom_engine/w_checksum.o obj/intel/doom_engine/w_file.o obj/intel/doom_engine/w_main.o obj/intel/doom_engine/w_wad.o obj/intel/doom_engine/z_zone.o obj/intel/doom_engine/w_file_stdc.o obj/intel/doom_engine/i_input.o obj/intel/doom_engine/i_video.o obj/intel/doom_engine/doomgeneric.o obj/intel/doom_engine/dummy.o \
+  obj/intel/user_graphics.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/doom.elf obj/intel/doom.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/doomlaunch.c -o obj/intel/doomlaunch.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/doomlaunch.elf obj/intel/doomlaunch.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/doomlaunch.elf obj/intel/dooml.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DMTOOLS_TOOL_mcopy -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mtools_port.c -o obj/intel/mtoolsm_mcopy.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/buffer.c -o obj/intel/mtools_buffer.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/charsetConv.c -o obj/intel/mtools_charsetConv.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/codepages.c -o obj/intel/mtools_codepages.o
+src/user/mtools/codepages.c:41:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   41 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:42:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   42 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6>ܢ<A3><A5>Pf"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~
+src/user/mtools/codepages.c:43:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   43 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>r<AC><BD><BC><A1><AB><BB>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:44:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   44 |           "_______________<AC>"
+      |                           ^~~~
+src/user/mtools/codepages.c:47:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   47 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |                  ^~~~     ~~~~~~~~
+src/user/mtools/codepages.c:48:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   48 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |             ^~~~    ~~~~ ~~~~~~~~~~~~  ~~~~
+src/user/mtools/codepages.c:54:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   54 |           "<A0><A1><A2><A3><A4><A5><A6><A7><A8><A9><AA><AB><AC><AD><AE><AF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:55:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   55 |           "<B0><B1><B2><B3><B4><B5><B6><B7><B8><B9><BA><BB><BC><BD><BE><BF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:56:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   56 |           "<C0><C1><C2><C3><C4><C5><C6><C7><C8><C9><CA><CB><CC><CD><CE><CF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:57:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   57 |           "<D0><D1><D2><D3><D4><D5><D6><D7><D8><D9><DA><DB><DC><DD><DE><DF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:58:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   58 |           "<E0><E1><E2><E3><E4><E5><E6><E7><E8><E9><EA><EB><EC><ED><EE><EF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:59:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   59 |           "<F0><F1><F2><F3><F4><F5><F6><F7><F8><F9><FA><FB><FC><FD><FE><FF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:63:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   63 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:64:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   64 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6><DC><F8><A3><D8><D7>_"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:65:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   65 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF><AE><AC><BD><BC><A1><AB><BB>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:66:10: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   66 |           "_____<C1><C2><C0><A9>____<A2><A5><AC>"
+      |                 ^~~~~~~~~~~~~~~~    ~~~~~~~~~~~~
+src/user/mtools/codepages.c:67:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   67 |           "______<E3><C3>_______<A4>"
+      |                  ^~~~~~~~       ~~~~
+src/user/mtools/codepages.c:68:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   68 |           "<F0><D0><C9><CB><C8>i<CD><CE><CF>____|I_"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~
+src/user/mtools/codepages.c:69:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   69 |           "<D3><DF><D4><D2><F5>յ<FE><DE><DA><D9><FD><DD>ޯ<B4>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:70:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   70 |           "<AD><B1>_<BE><B6><A7><F7><B8><B0><A8><B7><B9><B3><B2>__"
+      |            ^~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:74:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   74 |           "<C7><FC><E9><E2><E4>uc<E7>l<EB><D5><F5><EE>Z<C4>C"
+      |            ^~~~~~~~~~~~~~~~~~~~  ~~~~ ~~~~~~~~~~~~~~~~ ~~~~
+src/user/mtools/codepages.c:75:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   75 |           "<C9>Ll<F4><F6>LlSs<D6><DC>TtL<D7>c"
+      |            ^~~~  ~~~~~~~~    ~~~~~~~~   ~~~~
+src/user/mtools/codepages.c:76:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   76 |           "<E1><ED><F3><FA>AaZzEe zCs<AB><BB>"
+      |            ^~~~~~~~~~~~~~~~          ~~~~~~~~
+src/user/mtools/codepages.c:77:10: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   77 |           "_____<C1><C2>ES____Zz<AC>"
+      |                 ^~~~~~~~        ~~~~
+src/user/mtools/codepages.c:78:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   78 |           "______Aa_______<A4>"
+      |                           ^~~~
+src/user/mtools/codepages.c:79:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   79 |           "<F0><D0>D<CB>d<D1><CD><CE>e_r__TU_"
+      |            ^~~~~~~~ ~~~~ ~~~~~~~~~~~~
+src/user/mtools/codepages.c:80:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   80 |           "<D3><DF><D4>Nn<F1>SsR<DA>rU<FD><DD>t<B4>"
+      |            ^~~~~~~~~~~~  ~~~~   ~~~~  ~~~~~~~~ ~~~~
+src/user/mtools/codepages.c:81:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   81 |           "<AD>~.~~<A7><F7><B8><B0><A8><B7><B9>uRr_"
+      |            ^~~~    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:85:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   85 |           "<C7><FC><E9><E2><E3><E0><E5><E7><EA><EB><E8><CD><F5><EC><C3><C2>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:86:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   86 |           "<C9><C0><C8><F4><F5><F2><DA><F9><CC><D5>ܢ<A3><D9>P<D3>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~
+src/user/mtools/codepages.c:87:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   87 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>Ҭ<BD><BC><A1><AB><BB>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:88:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   88 |           "_______________<AC>"
+      |                           ^~~~
+src/user/mtools/codepages.c:91:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   91 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |                  ^~~~     ~~~~~~~~
+src/user/mtools/codepages.c:92:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   92 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |             ^~~~    ~~~~ ~~~~~~~~~~~~  ~~~~
+src/user/mtools/codepages.c:96:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   96 |           "<C7><FC><E9><E2><C2><E0><B6><E7><EA><EB><E8><EF><EE>_<C0><A7>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~
+src/user/mtools/codepages.c:97:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   97 |           "<C9><C8><CA><F4><CB><CF><FB><F9><A4><D4>ܢ<A3><D9><DB>f"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~
+src/user/mtools/codepages.c:98:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   98 |           "|<B4><F3><FA><A8> <B3><AF><CE>r<AC><BD><BC><BE><AB><BB>"
+      |             ^~~~~~~~~~~~~~~~ ~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:99:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   99 |           "_______________<AC>"
+      |                           ^~~~
+src/user/mtools/codepages.c:102:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  102 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |                  ^~~~     ~~~~~~~~
+src/user/mtools/codepages.c:103:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  103 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |             ^~~~    ~~~~ ~~~~~~~~~~~~  ~~~~
+src/user/mtools/codepages.c:107:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  107 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:108:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  108 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6><DC><F8><A3><D8>Pf"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:109:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  109 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>r<AC><BD><BC><A1><AB><A4>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:110:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  110 |           "_______________<AC>"
+      |                           ^~~~
+src/user/mtools/codepages.c:113:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  113 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |                  ^~~~     ~~~~~~~~
+src/user/mtools/codepages.c:114:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  114 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__",
+      |             ^~~~    ~~~~ ~~~~~~~~~~~~  ~~~~
+src/user/mtools/codepages.c:119:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  119 |          "<80><81><82><83><84><85><86><87><88><89><8A><8B><8C><8D><8E><8F>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:120:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  120 |          "<90><91><92><93><94><95><96><97><98><99><9A><9B><9C><9D><9E><9F>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:121:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  121 |          "<A0><A1><A2><A3><A4><A5><A6><A7><A8><A9><AA><AB><AC><AD><AE><AF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:122:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  122 |          "<B0><B1><B2><B3><B4><B5><B6><B7><B8><B9><BA><BB><BC><BD><BE><BF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:123:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  123 |          "<C0><C1><C2><C3><C4><C5><C6><C7><C8><C9><CA><CB><CC><CD><CE><CF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:124:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  124 |          "<D0><D1><D2><D3><D4><D5><D6><D7><D8><D9><DA><DB><DC><DD><DE><DF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:125:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  125 |          "<E0><E1><E2><E3><E4><E5><E6><E7><E8><E9><EA><EB><EC><ED><EE><EF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:126:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  126 |          "<F0><F1><F2><F3><F4><F5><F6><F7><F8><F9><FA><FB><FC><FD><FE><FF>",
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:41:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   41 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   42 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6>ܢ<A3><A5>Pf"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   43 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>r<AC><BD><BC><A1><AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   44 |           "_______________<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+   45 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   46 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   47 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   48 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:52:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   52 |           "________________"
+      |           ^~~~~~~~~~~~~~~~~~
+   53 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   54 |           "<A0><A1><A2><A3><A4><A5><A6><A7><A8><A9><AA><AB><AC><AD><AE><AF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |           "<B0><B1><B2><B3><B4><B5><B6><B7><B8><B9><BA><BB><BC><BD><BE><BF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |           "<C0><C1><C2><C3><C4><C5><C6><C7><C8><C9><CA><CB><CC><CD><CE><CF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   57 |           "<D0><D1><D2><D3><D4><D5><D6><D7><D8><D9><DA><DB><DC><DD><DE><DF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   58 |           "<E0><E1><E2><E3><E4><E5><E6><E7><E8><E9><EA><EB><EC><ED><EE><EF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   59 |           "<F0><F1><F2><F3><F4><F5><F6><F7><F8><F9><FA><FB><FC><FD><FE><FF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:63:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   63 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   64 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6><DC><F8><A3><D8><D7>_"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   65 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF><AE><AC><BD><BC><A1><AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   66 |           "_____<C1><C2><C0><A9>____<A2><A5><AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   67 |           "______<E3><C3>_______<A4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   68 |           "<F0><D0><C9><CB><C8>i<CD><CE><CF>____|I_"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   69 |           "<D3><DF><D4><D2><F5>յ<FE><DE><DA><D9><FD><DD>ޯ<B4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   70 |           "<AD><B1>_<BE><B6><A7><F7><B8><B0><A8><B7><B9><B3><B2>__"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:74:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   74 |           "<C7><FC><E9><E2><E4>uc<E7>l<EB><D5><F5><EE>Z<C4>C"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   75 |           "<C9>Ll<F4><F6>LlSs<D6><DC>TtL<D7>c"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   76 |           "<E1><ED><F3><FA>AaZzEe zCs<AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   77 |           "_____<C1><C2>ES____Zz<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   78 |           "______Aa_______<A4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+   79 |           "<F0><D0>D<CB>d<D1><CD><CE>e_r__TU_"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   80 |           "<D3><DF><D4>Nn<F1>SsR<DA>rU<FD><DD>t<B4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   81 |           "<AD>~.~~<A7><F7><B8><B0><A8><B7><B9>uRr_"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:85:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   85 |           "<C7><FC><E9><E2><E3><E0><E5><E7><EA><EB><E8><CD><F5><EC><C3><C2>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   86 |           "<C9><C0><C8><F4><F5><F2><DA><F9><CC><D5>ܢ<A3><D9>P<D3>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   87 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>Ҭ<BD><BC><A1><AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   88 |           "_______________<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+   89 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   90 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   91 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   92 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:96:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   96 |           "<C7><FC><E9><E2><C2><E0><B6><E7><EA><EB><E8><EF><EE>_<C0><A7>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   97 |           "<C9><C8><CA><F4><CB><CF><FB><F9><A4><D4>ܢ<A3><D9><DB>f"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   98 |           "|<B4><F3><FA><A8> <B3><AF><CE>r<AC><BD><BC><BE><AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   99 |           "_______________<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+  100 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+  101 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+  102 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  103 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:107:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+  107 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  108 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6><DC><F8><A3><D8>Pf"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  109 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>r<AC><BD><BC><A1><AB><A4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  110 |           "_______________<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+  111 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+  112 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+  113 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  114 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__",
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:119:3: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+  119 |          "<80><81><82><83><84><85><86><87><88><89><8A><8B><8C><8D><8E><8F>"
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  120 |          "<90><91><92><93><94><95><96><97><98><99><9A><9B><9C><9D><9E><9F>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  121 |          "<A0><A1><A2><A3><A4><A5><A6><A7><A8><A9><AA><AB><AC><AD><AE><AF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  122 |          "<B0><B1><B2><B3><B4><B5><B6><B7><B8><B9><BA><BB><BC><BD><BE><BF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  123 |          "<C0><C1><C2><C3><C4><C5><C6><C7><C8><C9><CA><CB><CC><CD><CE><CF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  124 |          "<D0><D1><D2><D3><D4><D5><D6><D7><D8><D9><DA><DB><DC><DD><DE><DF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  125 |          "<E0><E1><E2><E3><E4><E5><E6><E7><E8><E9><EA><EB><EC><ED><EE><EF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  126 |          "<F0><F1><F2><F3><F4><F5><F6><F7><F8><F9><FA><FB><FC><FD><FE><FF>",
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+62 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/config.c -o obj/intel/mtools_config.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/copyfile.c -o obj/intel/mtools_copyfile.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/device.c -o obj/intel/mtools_device.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/devices.c -o obj/intel/mtools_devices.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/dirCache.c -o obj/intel/mtools_dirCache.o
+src/user/mtools/dirCache.c:282:28: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  282 |                 entry->longName = wcsdup(longName);
+      |                                          ^~~~~~~~
+src/libc/include/string.h:60:28: note: passing argument to parameter 's' here
+   60 |   char *strdup(const char *s);
+      |                            ^
+src/user/mtools/dirCache.c:282:19: warning: assigning to 'unsigned char *' from 'char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  282 |                 entry->longName = wcsdup(longName);
+      |                                 ^ ~~~~~~~~~~~~~~~~
+src/user/mtools/dirCache.c:283:28: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  283 |         entry->shortName = wcsdup(shortName);
+      |                                   ^~~~~~~~~
+src/libc/include/string.h:60:28: note: passing argument to parameter 's' here
+   60 |   char *strdup(const char *s);
+      |                            ^
+src/user/mtools/dirCache.c:283:19: warning: assigning to 'unsigned char *' from 'char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  283 |         entry->shortName = wcsdup(shortName);
+      |                          ^ ~~~~~~~~~~~~~~~~~
+4 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/directory.c -o obj/intel/mtools_directory.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/direntry.c -o obj/intel/mtools_direntry.o
+src/user/mtools/direntry.c:81:24: warning: passing 'unsigned char[256]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+   81 |                 length += 1 + wcslen(entry->name);
+      |                                      ^~~~~~~~~~~
+src/libc/include/string.h:17:29: note: passing argument to parameter 's' here
+   17 |   size_t strlen(const char *s);
+      |                             ^
+src/user/mtools/direntry.c:124:25: warning: passing 'unsigned char[256]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  124 |                 if (escape && wcspbrk(entry->name, NEED_ESCAPE)) {
+      |                                       ^~~~~~~~~~~
+src/libc/include/string.h:53:29: note: passing argument to parameter 's' here
+   53 |   char *strpbrk(const char *s, const char *accept);
+      |                             ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/dos2unix.c -o obj/intel/mtools_dos2unix.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/fat.c -o obj/intel/mtools_fat.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/fat_free.c -o obj/intel/mtools_fat_free.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/file.c -o obj/intel/mtools_file.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/file_name.c -o obj/intel/mtools_file_name.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/force_io.c -o obj/intel/mtools_force_io.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/hash.c -o obj/intel/mtools_hash.o
+src/user/mtools/hash.c:110:7: warning: variable 'ctr' set but not used [-Wunused-but-set-variable]
+  110 |   int ctr;
+      |       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/init.c -o obj/intel/mtools_init.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/lba.c -o obj/intel/mtools_lba.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/llong.c -o obj/intel/mtools_llong.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/lockdev.c -o obj/intel/mtools_lockdev.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mainloop.c -o obj/intel/mtools_mainloop.o
+src/user/mtools/mainloop.c:165:47: warning: passing 'const unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  165 |         return (lookupflags & NO_DOTS) && isSpecialW(name);
+      |                                                      ^~~~
+src/user/mtools/file_name.h:55:27: note: passing argument to parameter 'name' here
+   55 | int isSpecial(const char *name);
+      |                           ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/match.c -o obj/intel/mtools_match.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mcopy.c -o obj/intel/mtools_mcopy.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mdel.c -o obj/intel/mtools_mdel.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/misc.c -o obj/intel/mtools_misc.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/missFuncs.c -o obj/intel/mtools_missFuncs.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mk_direntry.c -o obj/intel/mtools_mk_direntry.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mmd.c -o obj/intel/mtools_mmd.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/offset.c -o obj/intel/mtools_offset.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/old_dos.c -o obj/intel/mtools_old_dos.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/open_image.c -o obj/intel/mtools_open_image.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/partition.c -o obj/intel/mtools_partition.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/patchlevel.c -o obj/intel/mtools_patchlevel.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/plain_io.c -o obj/intel/mtools_plain_io.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/privileges.c -o obj/intel/mtools_privileges.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/remap.c -o obj/intel/mtools_remap.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/signal.c -o obj/intel/mtools_signal.o
+src/user/mtools/signal.c:79:40: warning: unused parameter 'ss' [-Wunused-parameter]
+   79 | void allow_interrupts(saved_sig_state *ss)
+      |                                        ^
+src/user/mtools/signal.c:113:42: warning: unused parameter 'ss' [-Wunused-parameter]
+  113 | void restore_interrupts(saved_sig_state *ss)
+      |                                          ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/stream.c -o obj/intel/mtools_stream.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/streamcache.c -o obj/intel/mtools_streamcache.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/strtonum.c -o obj/intel/mtools_strtonum.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/swap.c -o obj/intel/mtools_swap.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/tty.c -o obj/intel/mtools_tty.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/unix2dos.c -o obj/intel/mtools_unix2dos.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/unixdir.c -o obj/intel/mtools_unixdir.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/vfat.c -o obj/intel/mtools_vfat.o
+src/user/mtools/vfat.c:781:17: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  781 |                         (1 + (wcslen(longname) + VSE_NAMELEN - 1)/VSE_NAMELEN);
+      |                                      ^~~~~~~~
+src/libc/include/string.h:17:29: note: passing argument to parameter 's' here
+   17 |   size_t strlen(const char *s);
+      |                             ^
+src/user/mtools/vfat.c:873:21: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  873 |                                     !wcscasecmp(dce->longName, wlongname)) ||
+      |                                                 ^~~~~~~~~~~~~
+src/libc/include/strings.h:28:30: note: passing argument to parameter 's1' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                              ^
+src/user/mtools/vfat.c:873:36: warning: passing 'unsigned char[257]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  873 |                                     !wcscasecmp(dce->longName, wlongname)) ||
+      |                                                                ^~~~~~~~~
+src/libc/include/strings.h:28:46: note: passing argument to parameter 's2' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                                              ^
+src/user/mtools/vfat.c:875:21: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  875 |                                     !wcscasecmp(dce->shortName, wlongname))) {
+      |                                                 ^~~~~~~~~~~~~~
+src/libc/include/strings.h:28:30: note: passing argument to parameter 's1' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                              ^
+src/user/mtools/vfat.c:875:37: warning: passing 'unsigned char[257]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  875 |                                     !wcscasecmp(dce->shortName, wlongname))) {
+      |                                                                 ^~~~~~~~~
+src/libc/include/strings.h:28:46: note: passing argument to parameter 's2' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                                              ^
+src/user/mtools/vfat.c:888:21: warning: passing 'unsigned char[13]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  888 |                                     !wcscasecmp(shortName, dce->shortName))
+      |                                                 ^~~~~~~~~
+src/libc/include/strings.h:28:30: note: passing argument to parameter 's1' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                              ^
+src/user/mtools/vfat.c:888:32: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  888 |                                     !wcscasecmp(shortName, dce->shortName))
+      |                                                            ^~~~~~~~~~~~~~
+src/libc/include/strings.h:28:46: note: passing argument to parameter 's2' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                                              ^
+7 warnings generated.
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mcopy.elf obj/intel/mtoolsm_mcopy.o obj/intel/mtools_buffer.o obj/intel/mtools_charsetConv.o obj/intel/mtools_codepages.o obj/intel/mtools_config.o obj/intel/mtools_copyfile.o obj/intel/mtools_device.o obj/intel/mtools_devices.o obj/intel/mtools_dirCache.o obj/intel/mtools_directory.o obj/intel/mtools_direntry.o obj/intel/mtools_dos2unix.o obj/intel/mtools_fat.o obj/intel/mtools_fat_free.o obj/intel/mtools_file.o obj/intel/mtools_file_name.o obj/intel/mtools_force_io.o obj/intel/mtools_hash.o obj/intel/mtools_init.o obj/intel/mtools_lba.o obj/intel/mtools_llong.o obj/intel/mtools_lockdev.o obj/intel/mtools_mainloop.o obj/intel/mtools_match.o obj/intel/mtools_mcopy.o obj/intel/mtools_mdel.o obj/intel/mtools_misc.o obj/intel/mtools_missFuncs.o obj/intel/mtools_mk_direntry.o obj/intel/mtools_mmd.o obj/intel/mtools_offset.o obj/intel/mtools_old_dos.o obj/intel/mtools_open_image.o obj/intel/mtools_partition.o obj/intel/mtools_patchlevel.o obj/intel/mtools_plain_io.o obj/intel/mtools_privileges.o obj/intel/mtools_remap.o obj/intel/mtools_signal.o obj/intel/mtools_stream.o obj/intel/mtools_streamcache.o obj/intel/mtools_strtonum.o obj/intel/mtools_swap.o obj/intel/mtools_tty.o obj/intel/mtools_unix2dos.o obj/intel/mtools_unixdir.o obj/intel/mtools_vfat.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mcopy.elf obj/intel/mcopy.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DMTOOLS_TOOL_mdel -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mtools_port.c -o obj/intel/mtoolsm_mdel.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mdel.elf obj/intel/mtoolsm_mdel.o obj/intel/mtools_buffer.o obj/intel/mtools_charsetConv.o obj/intel/mtools_codepages.o obj/intel/mtools_config.o obj/intel/mtools_copyfile.o obj/intel/mtools_device.o obj/intel/mtools_devices.o obj/intel/mtools_dirCache.o obj/intel/mtools_directory.o obj/intel/mtools_direntry.o obj/intel/mtools_dos2unix.o obj/intel/mtools_fat.o obj/intel/mtools_fat_free.o obj/intel/mtools_file.o obj/intel/mtools_file_name.o obj/intel/mtools_force_io.o obj/intel/mtools_hash.o obj/intel/mtools_init.o obj/intel/mtools_lba.o obj/intel/mtools_llong.o obj/intel/mtools_lockdev.o obj/intel/mtools_mainloop.o obj/intel/mtools_match.o obj/intel/mtools_mcopy.o obj/intel/mtools_mdel.o obj/intel/mtools_misc.o obj/intel/mtools_missFuncs.o obj/intel/mtools_mk_direntry.o obj/intel/mtools_mmd.o obj/intel/mtools_offset.o obj/intel/mtools_old_dos.o obj/intel/mtools_open_image.o obj/intel/mtools_partition.o obj/intel/mtools_patchlevel.o obj/intel/mtools_plain_io.o obj/intel/mtools_privileges.o obj/intel/mtools_remap.o obj/intel/mtools_signal.o obj/intel/mtools_stream.o obj/intel/mtools_streamcache.o obj/intel/mtools_strtonum.o obj/intel/mtools_swap.o obj/intel/mtools_tty.o obj/intel/mtools_unix2dos.o obj/intel/mtools_unixdir.o obj/intel/mtools_vfat.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mdel.elf obj/intel/mdel.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DMTOOLS_TOOL_mmd -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mtools_port.c -o obj/intel/mtoolsm_mmd.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mmd.elf obj/intel/mtoolsm_mmd.o obj/intel/mtools_buffer.o obj/intel/mtools_charsetConv.o obj/intel/mtools_codepages.o obj/intel/mtools_config.o obj/intel/mtools_copyfile.o obj/intel/mtools_device.o obj/intel/mtools_devices.o obj/intel/mtools_dirCache.o obj/intel/mtools_directory.o obj/intel/mtools_direntry.o obj/intel/mtools_dos2unix.o obj/intel/mtools_fat.o obj/intel/mtools_fat_free.o obj/intel/mtools_file.o obj/intel/mtools_file_name.o obj/intel/mtools_force_io.o obj/intel/mtools_hash.o obj/intel/mtools_init.o obj/intel/mtools_lba.o obj/intel/mtools_llong.o obj/intel/mtools_lockdev.o obj/intel/mtools_mainloop.o obj/intel/mtools_match.o obj/intel/mtools_mcopy.o obj/intel/mtools_mdel.o obj/intel/mtools_misc.o obj/intel/mtools_missFuncs.o obj/intel/mtools_mk_direntry.o obj/intel/mtools_mmd.o obj/intel/mtools_offset.o obj/intel/mtools_old_dos.o obj/intel/mtools_open_image.o obj/intel/mtools_partition.o obj/intel/mtools_patchlevel.o obj/intel/mtools_plain_io.o obj/intel/mtools_privileges.o obj/intel/mtools_remap.o obj/intel/mtools_signal.o obj/intel/mtools_stream.o obj/intel/mtools_streamcache.o obj/intel/mtools_strtonum.o obj/intel/mtools_swap.o obj/intel/mtools_tty.o obj/intel/mtools_unix2dos.o obj/intel/mtools_unixdir.o obj/intel/mtools_vfat.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mmd.elf obj/intel/mmd.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -fPIC -c src/libc/crt0_dyn.c -o obj/intel/crt0_dyn.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -fPIC -c src/user/hello_dyn.c -o obj/intel/hello_dyn.o
+build_libs: == intel: compiling 42 libc TUs + 18 compiler-rt builtins (-fPIC, -ftls-model=initial-exec, -j16)
+build_libs:   TU fragments (reached through their parent TU, not compiled standalone): src/libc/src/regcomp.c src/libc/src/regex_internal.c src/libc/src/regexec.c
+build_libs:   libc.a baseline: 1319938 bytes
+build_libs: == intel: linking obj/intel/libc.so
+build_libs: intel: gates OK — SONAME=LIBC.SO, no TEXTREL, 613 defined globals, PT_TLS + __tls_* present
+build_libs: == intel: done — obj/intel/libc.so (350880 bytes)
+ld.lld -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+  -o obj/intel/HDYN.BIN obj/intel/crt0_dyn.o obj/intel/hello_dyn.o obj/intel/libc.so
+build_libs: intel: LDHOBBY.SO built — obj/intel/LDHOBBY.SO (27976 bytes), RELATIVE-only, no DT_NEEDED
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -fPIC -c src/user/ls.c -o obj/intel/dyn/ls.o
+ld.lld -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+  -o obj/intel/LSDYN.BIN obj/intel/dyn/ls.o obj/intel/libc.so
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -fPIC -c src/user/cat.c -o obj/intel/dyn/cat.o
+ld.lld -pie --dynamic-linker /LDHOBBY.SO -e _start -z noexecstack -z now \
+  -o obj/intel/CATDYN.BIN obj/intel/dyn/cat.o obj/intel/libc.so
+musl-gcc -fPIE -static-pie -Isrc/include tools/sdl/sdl_test_app.c -o obj/sdl_test_app_pie
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 1.7173 s, 625 MB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+# CA roots for the browser's TLS stack (libcurl/mbedTLS): the driver pins
+# /CERTS/CA.PEM (WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp).  Without
+# this every https:// navigation fails at certificate verification and the
+# user sees the previous page with no explanation.
+mmd -i disk.img ::/CERTS
+mcopy -i disk.img certs/cacert.pem ::/CERTS/CA.PEM
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# GB-059: the S2 launcher scans /GAMES for titles (.BIN native ports and
+# extension-less/.elf compat ELFs) — games_scan.c / desktop.c:915.  The
+# directory must exist on the image or the scan is a documented no-op and
+# no compat title can ever be launched by name.  Stage one of each kind
+# here so "both a native port and a compat title through the one rig" is
+# measurable from a shipped image rather than a hand-staged copy (which
+# `make run` would wipe).
+mmd -i disk.img ::/GAMES
+mcopy -i disk.img obj/intel/xnibbler.bin ::/GAMES/XNIBBLER.BIN
+mcopy -i disk.img obj/sdl_test_app_pie ::/GAMES/SDLTEST.ELF
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+mcopy -i disk.img obj/intel/limine.conf ::/boot/limine.conf
+# Limine's multiboot1 loader also allocates room for the ELF's section
+# contents and panics ("multiboot1: Cannot allocate elf sections") once the
+# DWARF grows past what it can place -- reached by the icewm.md §9 kernel
+# code.  Boot a debug-stripped copy; hobbyos.elf keeps the symbols for
+# objdump/addr2line (same loadable segments, byte for byte).
+llvm-objcopy --strip-debug hobbyos.elf obj/intel/hobbyos.boot.elf
+mcopy -i disk.img obj/intel/hobbyos.boot.elf ::/boot/hobbyos.elf
+mcopy -i disk.img obj/intel/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/intel/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/intel/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/intel/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/intel/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/intel/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/intel/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/intel/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/intel/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/intel/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/intel/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/intel/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/intel/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/intel/desktop.bin ::/DESKTOP.BIN
+browser: obj/intel/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+dejavu-2.37/AUTHORS: OK
+dejavu-2.37/BUGS: OK
+dejavu-2.37/fontconfig/20-unhint-small-dejavu-sans.conf: OK
+dejavu-2.37/fontconfig/20-unhint-small-dejavu-sans-mono.conf: OK
+dejavu-2.37/fontconfig/20-unhint-small-dejavu-serif.conf: OK
+dejavu-2.37/fontconfig/57-dejavu-sans.conf: OK
+dejavu-2.37/fontconfig/57-dejavu-sans-mono.conf: OK
+dejavu-2.37/fontconfig/57-dejavu-serif.conf: OK
+dejavu-2.37/langcover.txt: OK
+dejavu-2.37/LICENSE: OK
+dejavu-2.37/NEWS: OK
+dejavu-2.37/README.md: OK
+dejavu-2.37/status.txt: OK
+dejavu-2.37/ttf/DejaVuMathTeXGyre.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-BoldOblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed-BoldOblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed-Oblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-ExtraLight.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono-BoldOblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono-Oblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-Oblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSans.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif-BoldItalic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed-BoldItalic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed-Italic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif-Italic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif.ttf: OK
+dejavu-2.37/unicover.txt: OK
+mcopy -i disk.img obj/intel/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/intel/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/intel/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/intel/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/intel/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/intel/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/intel/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/intel/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/intel/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/intel/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/intel/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/intel/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/intel/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/intel/POLLBRK.BIN ::/POLLBRK.BIN
+mcopy -i disk.img obj/intel/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/intel/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/intel/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/intel/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/intel/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/intel/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/intel/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/intel/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/intel/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/intel/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/intel/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/intel/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/intel/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/intel/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/intel/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/intel/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/intel/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/intel/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/intel/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/intel/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/intel/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/intel/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/intel/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/intel/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/intel/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/intel/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/intel/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/intel/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/intel/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/intel/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/intel/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/intel/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/intel/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/intel/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/intel/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/intel/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/intel/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/intel/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/intel/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/intel/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/intel/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/intel/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/intel/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/intel/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/intel/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/intel/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/intel/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/intel/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/intel/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/intel/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/intel/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/intel/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/intel/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/intel/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/intel/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/intel/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/intel/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/intel/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/intel/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/intel/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/intel/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/intel/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/intel/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/intel/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/intel/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/intel/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/intel/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/intel/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/intel/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/intel/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/intel/fatbig_test.bin ::/FATBIG_T.BIN
+mcopy -i disk.img obj/intel/stage4k_test.bin ::/STAGE4K_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/intel/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/intel/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/intel/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/intel/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/intel/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/intel/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/intel/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/intel/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/intel/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/intel/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/intel/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/intel/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/intel/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/intel/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/intel/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/intel/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/intel/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/intel/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/intel/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/intel/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/intel/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/intel/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/intel/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/intel/doom.bin ::/DOOM.BIN
+mcopy -i disk.img obj/intel/dooml.bin ::/DOOML.BIN
+[disk] note: no Linux-ELF Doom (make doom_elf_build) — the Doom menu entry falls back to DOOM.BIN
+[disk] IWAD doom1.wad -> ::/DOOM1.WAD
+mcopy -i disk.img obj/intel/stardust.bin ::/STARDUST.BIN
+mcopy -i disk.img obj/intel/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/intel/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/intel/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/intel/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/intel/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/intel/xnibbler.bin ::/XNIBBLER.BIN
+mcopy -i disk.img obj/intel/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/intel/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/intel/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/intel/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/intel/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/intel/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/intel/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/intel/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/intel/nano.bin ::/NANO.BIN
+mcopy -i disk.img obj/intel/xcrypt.bin ::/XCRYPT.BIN
+mcopy -i disk.img obj/intel/nes.bin ::/NES.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/intel/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/intel/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/intel/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/intel/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage:   CLANG.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 (converted, 94194880 B)
+selfhost-stage:   LLD.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/lld (converted, 53253216 B)
+selfhost-stage:   LLVMAR.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-ar (converted, 8351784 B)
+selfhost-stage:   OBJCOPY.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-objcopy (converted, 4985256 B)
+selfhost-stage: WARNING: tool not built (obj/arm/make.bin) — ::/TOOLS/MAKE.BIN not staged (make obj/arm/make.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mcopy.bin) — ::/TOOLS/MCOPY.BIN not staged (make obj/arm/mcopy.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mdel.bin) — ::/TOOLS/MDEL.BIN not staged (make obj/arm/mdel.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mmd.bin) — ::/TOOLS/MMD.BIN not staged (make obj/arm/mmd.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mkfsfat.bin) — ::/TOOLS/MKFSFAT.BIN not staged (make obj/arm/mkfsfat.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/sh.bin) — ::/TOOLS/SH.BIN not staged (make obj/arm/sh.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/rm.bin) — ::/TOOLS/RM.BIN not staged (make obj/arm/rm.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/tar.bin) — ::/TOOLS/TAR.BIN not staged (make obj/arm/tar.bin)
+selfhost-stage: staged 276 files, 175512390 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+OBJCOPY  BIN   4985256 2026-11-04  12:20 
+RESDIR       <DIR>     2026-11-04  12:20 
+       10 files         161 437 432 bytes
+                        704 905 216 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+      295 files          14 727 254 bytes
+                        704 905 216 bytes free
+
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+selfhost-stage: WARNING: carried build product not built (obj/arm/libc.a) — ::/SRC/obj/arm/libc.a not staged (build the tree first)
+selfhost-stage: WARNING: carried build product not built (obj/arm/desktop.bin) — ::/SRC/bin/DESKTOP.BIN not staged (build the tree first)
+selfhost-stage: WARNING: carried build product not built (obj/arm/console.bin) — ::/SRC/bin/CONSOLE.BIN not staged (build the tree first)
+selfhost-stage: WARNING: carried build product not built (obj/arm/sh.bin) — ::/SRC/bin/SH.BIN not staged (build the tree first)
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 293 files, 3756579 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      373 files           3 756 648 bytes
+                        697 368 576 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/libc.a) — obj/arm/libc.a not in SRC.TAR (build the tree first)
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/desktop.bin) — bin/DESKTOP.BIN not in SRC.TAR (build the tree first)
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/console.bin) — bin/CONSOLE.BIN not in SRC.TAR (build the tree first)
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/sh.bin) — bin/SH.BIN not in SRC.TAR (build the tree first)
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 1270 (files+dirs), size: 23572480 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/intel/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/intel/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/intel/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+# GB-067 fixture: 4096 bytes, byte[i] = i % 251 (the pattern STAGE4K_T.BIN
+# byte-compares).  Staged HERE, by the host, because the DoD under test is
+# "a host-staged 4 KiB file reads back byte-exact in the guest" -- if the
+# guest wrote it, the test would be exercising the writer.  Until this
+# landed the fixture came from a hand-run `T3_STAGE` probe, so every CI
+# wave failed `[STAGE4K] FAIL open /STAGE4K.BIN` while passing locally
+# for whoever remembered to stage it.
+perl -e 'print chr($_ % 251) for (0..4095)' > STAGE4K.BIN
+mcopy -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+# Dynamic linking (docs/shared-libs.md §5): the interpreter, the shared
+# libc, and the pilot program.  All three are 8.3 names on the FAT root.
+mcopy -i disk.img obj/intel/LDHOBBY.SO ::/LDHOBBY.SO
+mcopy -i disk.img obj/intel/libc.so ::/LIBC.SO
+mcopy -i disk.img obj/intel/HDYN.BIN ::/HDYN.BIN
+mcopy -i disk.img obj/intel/LSDYN.BIN ::/LSDYN.BIN
+mcopy -i disk.img obj/intel/CATDYN.BIN ::/CATDYN.BIN
+# Dynamic conversion (docs/shared-libs.md §10): each converted program
+# replaces its static build under the same 8.3 name, so every existing
+# launcher (shell, desktop, wave) exercises the DSO version.
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
+
+real	0m22.921s
+user	0m19.668s
+sys	0m11.012s
+DISK_BUILD2_RC=0

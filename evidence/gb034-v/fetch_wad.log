@@ -1,0 +1,9 @@
+[wad] downloading https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip
+[wad] OK -> /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-8c0bfcbc/doom1.wad (27 MiB)
+[wad] sha256: 7323bcc168c5a45ff10749b339960e98314740a734c30d4b9f3337001f9e703d  (record this as asset provenance)
+[wad] next: add DOOM1.WAD to disk.img root (launcher cwd) and run
+[wad]       make disk.img ARCH=<arm|intel>, then ARCH=<arch> python3 run_doom_test.py
+
+real	0m1.077s
+user	0m0.194s
+sys	0m0.159s
