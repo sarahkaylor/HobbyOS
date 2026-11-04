@@ -68,6 +68,86 @@ def split_nav(events):
     return [], events
 
 
+# --- GB-182: whole-frame delta instrument ------------------------------
+# The two REDs on GB-091 were about the *instrument*, not the engine: the
+# with-input vs no-input claim rested on a local, uncommitted patch.  This
+# is the committed instrument — two screendumps of the same run (before and
+# after the in-game events) reduced to a whole-frame MAD and the non-black
+# bbox of the changed pixels, printed as one marker line the gate can grep.
+DELTA_THRESHOLD = 8  # per-channel |d| above which a pixel counts as changed
+
+
+def read_ppm(path):
+    """Parse a binary PPM (P6, maxval 255) -> (w, h, rgb bytes)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if not data.startswith(b"P6"):
+        raise ValueError(f"{path}: not a binary PPM (P6)")
+    # Header: P6 <w> <h> <maxval>\n, arbitrary whitespace, '#' comments.
+    fields, i, n = [], 2, len(data)
+    while len(fields) < 3:
+        while i < n and data[i:i + 1].isspace():
+            i += 1
+        if i < n and data[i:i + 1] == b"#":
+            while i < n and data[i:i + 1] != b"\n":
+                i += 1
+            continue
+        j = i
+        while j < n and not data[j:j + 1].isspace():
+            j += 1
+        fields.append(int(data[i:j]))
+        i = j
+    i += 1  # single whitespace byte before the raster
+    w, h, maxval = fields
+    if maxval != 255:
+        raise ValueError(f"{path}: maxval {maxval} != 255")
+    raster = data[i:i + w * h * 3]
+    if len(raster) != w * h * 3:
+        raise ValueError(f"{path}: short raster ({len(raster)} != {w * h * 3})")
+    return w, h, raster
+
+
+def frame_delta(before_path, after_path, threshold=DELTA_THRESHOLD):
+    """Whole-frame MAD (0..255) + non-black bbox of changed pixels.
+
+    Returns dict(mad, changed, total, bbox=(x0,y0,x1,y1) or None, w, h).
+    A pixel is "changed" when any channel differs by more than `threshold`.
+    """
+    w0, h0, a = read_ppm(before_path)
+    w1, h1, b = read_ppm(after_path)
+    if (w0, h0) != (w1, h1):
+        raise ValueError(f"frame size changed: {w0}x{h0} vs {w1}x{h1}")
+    total = w0 * h0
+    s = 0
+    changed = 0
+    x0 = y0 = 10 ** 9
+    x1 = y1 = -1
+    for p in range(total):
+        o = p * 3
+        dr = abs(a[o] - b[o])
+        dg = abs(a[o + 1] - b[o + 1])
+        db = abs(a[o + 2] - b[o + 2])
+        s += dr + dg + db
+        if dr > threshold or dg > threshold or db > threshold:
+            changed += 1
+            x, y = p % w0, p // w0
+            if x < x0: x0 = x
+            if x > x1: x1 = x
+            if y < y0: y0 = y
+            if y > y1: y1 = y
+    bbox = None if changed == 0 else (x0, y0, x1, y1)
+    return {"mad": s / (total * 3.0), "changed": changed, "total": total,
+            "bbox": bbox, "w": w0, "h": h0}
+
+
+def format_delta(tag, d):
+    """The one marker line the gate greps (GB-182)."""
+    box = "none" if d["bbox"] is None else "(%d,%d)-(%d,%d)" % d["bbox"]
+    return (f"[REPLAY-DELTA] {tag} mad={d['mad']:.3f} bbox={box} "
+            f"changed={d['changed']}/{d['total']} frame={d['w']}x{d['h']}")
+
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -80,6 +160,15 @@ def main():
     ap.add_argument("--settle", type=float, default=2.0,
                     help="seconds to wait after the launch before replaying the "
                          "in-game events (DOOM needs ~5 for its title screen)")
+    ap.add_argument("--delta", dest="delta", action="store_true", default=True,
+                    help="GB-182: capture a frame before and after the in-game "
+                         "events and print the whole-frame MAD/bbox marker")
+    ap.add_argument("--no-delta", dest="delta", action="store_false",
+                    help="GB-182 falsifier: suppress the [REPLAY-DELTA] marker "
+                         "(the gate must then FAIL)")
+    ap.add_argument("--drop-in-game", action="store_true",
+                    help="GB-182 no-input control: replay only the launch, with "
+                         "the in-game events removed")
     args = ap.parse_args()
 
     parser = ReplayParser(args.replay)
@@ -105,6 +194,9 @@ def main():
     # and replay only the events after the launcher's confirm.
     events = list(parser)
     nav, in_game = split_nav(events)
+    if args.drop_in_game:
+        print(f"[replay] no-input control: dropping {len(in_game)} in-game events")
+        in_game = []
     print(f"[replay] nav prefix {len(nav)} events; {len(in_game)} in-game events")
     slot = find_menu_slot(serial_log, args.game)
     if slot is None:
@@ -114,6 +206,9 @@ def main():
     launch_from_menu(q, slot, arch=args.arch, gesture="keys")
     if args.settle > 0:
         time.sleep(args.settle)
+    start_shot = os.path.join(path, "replay_start.ppm")
+    if args.delta:
+        q.screendump(start_shot)
     print(f"[replay] replaying {len(in_game)} in-game events")
     driver = events_to_qmp(in_game)
     driver(q)
@@ -121,6 +216,9 @@ def main():
     shot = os.path.join(path, "replay_end.ppm")
     q.screendump(shot)
     print(f"[replay] screendump after replay: {shot}")
+    if args.delta:
+        d = frame_delta(start_shot, shot)
+        print(format_delta(args.game, d))
     with open(os.path.join(path, "replay.replayed.jsonl"), "w") as f:
         for e in list(parser):
             f.write(json.dumps(e) + "\n")
