@@ -51,7 +51,17 @@ typedef enum {
      compat ioctl route answers FBIOGET_VSCREENINFO/FSCREENINFO +
      FBIOBLANK.  This is what a Linux-ABI X11 client (and SDL's fbcon)
      opens to reach the display.  Appended last: no values shift. */
-  FILE_TYPE_DEVFB
+  FILE_TYPE_DEVFB,
+  /* M2 stdio: /dev/console -- a character device for stdin/stdout/stderr.
+     read() is EOF (0); write() goes through console_write_user() (the same
+     serial sink file_write's fd-1/2 fallback uses); fstat reports
+     S_IFCHR|0644; mmap is refused.  Every compat spawn gets this node
+     installed on any of fds 0/1/2 that its parent left unassigned: Mono's
+     System.Console ctor wraps each stdio fd in a FileStream, and FileStream
+     fstat()s the handle -- a bare fd number with no file object behind it
+     throws ArgumentException ("handle"/"Invalid") before the first managed
+     statement.  Appended last: no values shift. */
+  FILE_TYPE_CONSOLE
 } file_type_t;
 
 struct vm_object;
@@ -201,6 +211,7 @@ struct k_stat {
 #define K_S_IFREG 0100000
 #define K_S_IFIFO 0010000
 #define K_S_IFSOCK 0140000
+#define K_S_IFCHR 0020000
 
 /* --- Phase F1 (browser.md A.1a — frozen): socket/select syscall support -- */
 
