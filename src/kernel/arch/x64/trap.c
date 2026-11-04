@@ -864,6 +864,16 @@ static void sys_connect_addr(struct trap_frame *tf) {
   struct process *caller = current_process();
   int r = file_connect_user(caller, (int)tf->regs[5], tf->regs[4], (int)tf->regs[3]);
   if (r == -2) {
+    /* GB-180: -ENOENT is 2, so a connect() to a missing path name returns
+       exactly the park/restart sentinel.  usock_name_park() sets the caller
+       BLOCKED before returning -2; a caller that is still runnable got
+       -ENOENT from usock_name_lookup().  Treat that as the errno it is --
+       otherwise the trap rewinds elr and re-executes the same connect()
+       forever (the wave's pid-63 terminal stall). */
+    if (!caller || caller->state != PROC_STATE_BLOCKED) {
+      tf->regs[0] = (uint64_t)(int64_t)-ENOENT;
+      return;
+    }
     if ((tf->cs & 3) == 3) {
       tf->elr -= 2; /* rewind over `syscall`: restart when woken */
     }
