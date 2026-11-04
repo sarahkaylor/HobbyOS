@@ -225,6 +225,33 @@ else
     MZ="$(readlink -f "$MZ")"   # stage the ELF, not a 14-byte symlink
     stage "$MZ" ::/LIB64/libz.so.1
     stage "$MZ" ::/lib/x86_64-linux-gnu/libz.so.1
+
+    # M5c: Mono mmaps EVERY managed assembly, and the only file-backed VM
+    # object on this kernel is FAT16's (`file_fat16_ident`); a mapping of an
+    # NFS file is -ENOTSUP until M5b.  So the 40 MiB Managed/ tree (102 DLLs,
+    # flat) is staged on the image and the launcher binds
+    # /NFS/RimWorldLinux_Data/Managed -> /RWMANAGED before the spawn.  Data/
+    # (730 MiB) stays on NFS: only the assemblies need to be mmap-able.
+    echo "== stage: M5c Managed/ locally under /RWMANAGED"
+    mmd -i "$IMG" ::/RWMANAGED >/dev/null 2>&1 || true
+    HOSTN=$(find /srv/nfs/rimworld/RimWorldLinux_Data/Managed -maxdepth 1 -type f | wc -l)
+    HOSTB=$(find /srv/nfs/rimworld/RimWorldLinux_Data/Managed -maxdepth 1 -type f -printf '%s\n' \
+            | awk '{s+=$1} END{print s+0}')
+    [ "$HOSTN" -gt 0 ] || { echo "ENVIRONMENT: no Managed/ assemblies in the export"; exit 2; }
+    mcopy -o -i "$IMG" /srv/nfs/rimworld/RimWorldLinux_Data/Managed/* ::/RWMANAGED/ || {
+      echo "mcopy of Managed/ failed"; exit 2; }
+    # Verify by both counts and bytes: a silent truncation would show up as a
+    # short byte total even with the right file count.  (mdir -b drops the
+    # "." / ".." entries that the long listing counts.)
+    GUESTN=$(mdir -b -i "$IMG" ::/RWMANAGED | wc -l)
+    GUESTB=$(mdir -i "$IMG" ::/RWMANAGED | awk '
+      / files /{ on=0; s=""; for (i=1;i<=NF;i++) {
+                   if ($i=="files") { on=1; continue }
+                   if ($i=="bytes") { print s+0; exit }
+                   if (on) s = s $i } }')
+    echo "  staged: ${GUESTN:-0}/$HOSTN assemblies, ${GUESTB:-0}/$HOSTB bytes"
+    [ "${GUESTN:-0}" = "$HOSTN" ] && [ "${GUESTB:-0}" = "$HOSTB" ] || {
+      echo "ENVIRONMENT: Managed/ staging incomplete (${GUESTN:-0}/$HOSTN files, ${GUESTB:-0}/$HOSTB bytes)"; exit 2; }
     # AD-9: install the launcher AS the game's executable, in the game dir; the
     # 14,720-byte ET_EXEC stub is preserved beside it as RimWorldLinux.orig.
     # A sync run above restores the stub, so this always re-installs.

@@ -282,6 +282,16 @@ extern "C" {
   /* Unmount the NFS export mounted exactly at `target`. 0 on success. */
   int umount(const char *target);
 
+  /* M5c: serve the VFS subtree at `from` from the path `to`.  After this,
+     opening "/from/x" resolves to "/to/x", so a tree that has to be
+     mmap-able can live on the FAT volume while its callers keep using the
+     original (e.g. NFS) path.  Path resolution only: nothing is copied and
+     no filesystem is mounted, so `to` must already exist on a real
+     filesystem.  Both arguments must be canonical absolute paths.  Returns 0
+     on success, -1 with errno EINVAL (malformed, would recurse, or the
+     4-entry table is full). */
+  int vfs_bind(const char *from, const char *to);
+
   /* ---- Phase F1 (browser.md A.1a — frozen): sockets + select -------------
    * Device-only: these are declarations over syscalls 65-71; HOST_TEST builds
    * use glibc's own socket/select surface instead, so the block is excluded

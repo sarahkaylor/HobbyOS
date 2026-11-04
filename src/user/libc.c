@@ -831,6 +831,12 @@ int umount(const char *target) {
   return (int)errno_ret(ho_syscall4(SYS_UMOUNT, (long)target, 0, 0, 0));
 }
 
+/* M5c: alias the VFS subtree `from` onto the path `to` (src/include/vfs_bind.h).
+ * Path resolution only: nothing is copied and no filesystem is mounted. */
+int vfs_bind(const char *from, const char *to) {
+  return (int)errno_ret(ho_syscall4(SYS_VFS_BIND, (long)from, (long)to, 0, 0));
+}
+
 char *getcwd(char *buf, size_t size) {
   long r = ho_syscall4(SYS_GETCWD, (long)buf, (long)size, 0, 0);
   if (r < 0) {
