@@ -810,7 +810,19 @@ link_libgl() {
   fi
 
   local common=(-shared -soname libGL.so.1 --version-script "$verscript"
-                -z noexecstack --build-id)
+                -z noexecstack -z nodelete --build-id)
+  # -z nodelete is load-bearing, not cosmetic.  Mesa calls plain atexit() from
+  # inside the DSO (src/mesa/main/formats.c:499 registers
+  # format_array_format_table_destroy; util/os_misc.c, main/extensions.c,
+  # main/context.c and util/strtod.c do the same).  glibc's atexit() is
+  # process-global, so those handlers are NOT scoped to this DSO and are NOT
+  # run by dlclose().  If dlclose() unmaps the segments, the process's later
+  # exit() jumps into what is now a hole: measured in the guest as
+  #   memory fault VA=0x0000001081ACFF50 PC=0x0000001081ACFF50 rw=rx
+  #   in=HOLE region=NONE
+  # where libGL's base + 0xe61f50 is exactly format_array_format_table_destroy.
+  # DF_1_NODELETE makes dlclose drop the reference without unmapping, which is
+  # also how libglvnd loads a vendor GL driver (RTLD_NODELETE).
   # Self-contained: gl_stubs.c and libc.a overlap on the handful of float
   # functions libc.a *does* have (expf/sqrtf/fabsf/rintf), on atexit and on
   # _assert_fail.  The archive comes first, so libc's definitions win and the
@@ -874,6 +886,14 @@ link_libgl() {
     || die "glGetString is not exported"
   grep -q " glXSwapBuffers$" "${LIBDIR}/exports.txt" \
     || die "glXSwapBuffers is not exported"
+  # A DSO that registers process-global atexit() handlers must not be unloadable
+  # (see the -z nodelete note in link_libgl): without DF_1_NODELETE a client's
+  # dlclose() unmaps the text, and its exit() then jumps into the hole.
+  local nodelete
+  nodelete=$(readelf -d "${LIBDIR}/libGL.so.1" | grep -c NODELETE || true)
+  [ "${nodelete:-0}" != 0 ] \
+    || die "libGL.so.1 lost DF_1_NODELETE: a client that dlclose()s it will crash in exit()"
+  note "df_1:        NODELETE (dlclose keeps the DSO mapped; its atexit() handlers stay valid)"
   [ -L "${LIBDIR}/libGLX.so.0" ] || die "libGLX.so.0 missing"
 
   # ---- the loadability audit ----------------------------------------------
