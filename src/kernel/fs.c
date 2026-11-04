@@ -1612,7 +1612,6 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
 
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp) {
-  (void)p;
   if (!path) { *errp = EINVAL; return -1; }
   /* M6 launch plumbing: the virtual maps file exists for access()/stat()
      (the host trace shows access("/proc/self/maps", F_OK) before the open). */
@@ -1626,8 +1625,53 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
     k_stat_fill(st, 0, K_S_IFCHR | 0644, 0);
     return 0;
   }
+  /* AD-9 (M6): Unity resolves its executable with
+       realpath("/proc/self/exe", buf)
+     and glibc's realpath lstat()s every component.  Without these entries it
+     fails at "/proc" with ENOENT and the player prints
+       "Error 2 encountered while resolving executable path".
+     /proc/self is presented as a directory (a procfs could; the kernel has no
+     per-pid directory to point a self->pid link at yet) and the links below it
+     are symlinks whose targets readlink() already answers. */
+  if (fs_streq(path, "/proc") || fs_streq(path, "/proc/self") ||
+      fs_streq(path, "/proc/self/fd")) {
+    k_stat_fill(st, 0, K_S_IFDIR | 0555, 0);
+    return 0;
+  }
+  if (fs_streq(path, "/proc/self/exe") || fs_streq(path, "/proc/self/cwd") ||
+      fs_streq(path, "/proc/self/root")) {
+    struct process *g = p ? process_group(p) : 0;
+    const char *tgt = "/";
+    if (fs_streq(path, "/proc/self/exe"))
+      tgt = (g && g->exe_path[0]) ? g->exe_path : "/";
+    else if (fs_streq(path, "/proc/self/cwd"))
+      tgt = (g && g->cwd[0]) ? g->cwd : "/";
+    long n = 0;
+    while (tgt[n]) n++;
+    k_stat_fill(st, 0, K_S_IFLNK | 0777, n);
+    return 0;
+  }
   char abs[256];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
+  /* Paths under an NFS mount: answer from the server's fattr3.  Before this,
+     stat()/lstat() of anything on /NFS was ENOENT because only FAT16 was
+     consulted — realpath() of the launcher's own path needs it (AD-9). */
+  int midx = -1;
+  const char *rel = 0;
+  if (vfs_route(abs, &midx, &rel)) {
+    const struct nfs_mount *m = nfs_mount_at(midx);
+    struct nfs_attr a;
+    if (!m || nfs_lookup(m, rel, 0, &a) != 0) {
+      *errp = ENOENT;
+      return -1;
+    }
+    k_stat_fill(st, 0,
+                (a.type == NF3DIR) ? (K_S_IFDIR | 0755)
+                                   : (K_S_IFREG | 0644),
+                (long)a.size);
+    st->st_atime = st->st_mtime = st->st_ctime = (long)a.mtime;
+    return 0;
+  }
   struct fat16_dir_entry entry;
   uint32_t sector = 0, offset = 0;
   if (fat16_resolve_path(abs, &entry, &sector, &offset) != 0) {

@@ -124,11 +124,12 @@ struct vm_object *file_obj_get(uint16_t start_cluster, uint32_t file_size) {
     return 0;
   }
 
-  struct vm_object *o = vm_object_create(VM_OBJ_FILE, file_size);
+  struct vm_object *o = vm_object_create(VM_OBJ_FILE, (uint64_t)file_size);
   if (!o) {
     spinlock_release_irqrestore(&file_obj_lock, fl);
     return 0; /* slot table or frame array exhausted */
   }
+  o->file_start_cluster = start_cluster; /* survives slot invalidation */
   vm_object_ref(o); /* the cache's own reference: object outlives mappings */
 
   file_obj_tab[free_slot].start_cluster = start_cluster;
@@ -200,7 +201,18 @@ uint64_t file_obj_page(struct vm_object *o, uint64_t off) {
     }
   }
   spinlock_release_irqrestore(&file_obj_lock, fl);
-  if (!live || size == 0)
+  if (!live) {
+    /* The slot was dropped by file_obj_invalidate_all() (any FAT16 write
+       does that so a rebuilt file is re-read by NEW mappings).  This object
+       is still referenced by live mappings and still knows its source, so it
+       keeps filling its pages.  Without this, writing the player's own log
+       would permanently break page-in for every mapped DSO. */
+    if (o->file_start_cluster == 0 || o->size == 0)
+      return 0;
+    cluster = o->file_start_cluster;
+    size = (uint32_t)o->size;
+  }
+  if (size == 0)
     return 0;
 
   uint64_t idx = off / FRAME_SIZE;
