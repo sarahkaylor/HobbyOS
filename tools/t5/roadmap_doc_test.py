@@ -23,10 +23,19 @@ def check(roadmap="program-2/ROADMAP.md", plan="gaming.md"):
     for epic in ("MONO", "RTS", "VULKAN"):
         out.append(("ok" if epic in txt else "fail", f"epic {epic} named"))
 
-    out.append(("ok" if "LDHOBBY.SO" in txt and "landed" in txt.lower()
-                else "fail", "native dynamic route LDHOBBY.SO stated as landed"))
-    out.append(("ok" if "§W5" in txt and "absent" in txt.lower()
-                else "fail", "Linux glibc dynamic route stated absent with §W5"))
+    # The boundary must be stated in the *capability table rows*, not merely somewhere
+    # in prose: deleting the row has to fail the check (GB-054-V clause 5).
+    def rows_with(needle):
+        return [l for l in txt.splitlines()
+                if l.lstrip().startswith("|") and needle in l]
+
+    native_rows = rows_with("LDHOBBY.SO")
+    linux_rows = rows_with("§W5")
+    out.append(("ok" if any("landed" in r.lower() and "absent" not in r.lower()
+                for r in native_rows) else "fail",
+                "native dynamic row says LDHOBBY.SO landed (row-level)"))
+    out.append(("ok" if any("absent" in r.lower() for r in linux_rows) else "fail",
+                "Linux glibc dynamic row says absent with §W5 (row-level)"))
 
     for card, art in (("GB-196", "src/kernel/elf_loader.c"),
                       ("GB-197", "tools/t4/virgl_probe.py")):
