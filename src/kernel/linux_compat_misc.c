@@ -221,10 +221,17 @@ static int l_misc_getcwd(struct process *p, struct trap_frame *tf) {
 }
 
 /* No write-back cache to flush: the FAT writer goes straight to the block
-   device, so fsync is honestly a successful no-op. */
+   device, so fsync on a regular file is honestly a successful no-op.
+   GB-032: on /dev/fb0 it is the present verb — the same arm trap.c's number
+   translation has — because linux_compat_dispatch() owns fsync(74) for a
+   Linux-ABI process, so that arm never ran and a mapped frame stayed on the
+   RAM buffer (measured: a correct draw + exit 0 with a black scanout). */
 static int l_misc_fsync(struct process *p, struct trap_frame *tf) {
-  (void)p;
-  (void)tf;
+  int fd = (int)l_argi(tf, 0);
+  extern int file_fd_is_devfb(struct process *, int);
+  extern void virtio_gpu_flush(void);
+  if (file_fd_is_devfb(p, fd))
+    virtio_gpu_flush();
   return l_misc_ret(tf, 0);
 }
 
