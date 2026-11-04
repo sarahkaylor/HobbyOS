@@ -439,7 +439,16 @@ exits with **`Mono requires /proc to be mounted.`** — L10 implemented
 `/proc/self/{exe,fd,maps}` in the same wave, so this is re-testable now.
 Known limits: `MAX_PROCESSES` is 64 while the game needs 106 threads at menu.
 
-**Mono status 2026-11-02 (integrator, after merging L7+L10):** managed code
+**M2 is now FULLY PASSED (2026-11-03):** Mono 6.12 runs a managed threaded C#
+program to completion under HobbyOS — `Hello from C# on HobbyOS` /
+`runtime: 4.0.30319.42000` / `thread counter=42` / `HELLO-OK`, exit 0. The wall
+was stdio: a `FILE_TYPE_CONSOLE` node (`/dev/console`) is installed at fds 0/1/2
+for every compat spawn, `fstat` reports `S_IFCHR|0644`, read is EOF, writes go
+through `console_write_user()`. `MAX_PROCESSES` is 192 and a 150-thread stress
+joins (`[T150] created=150 joined=150 tls_sum=11175 shared=1113775`) with
+`SIGCANCEL` delivery proven; RAM cost 1.75 MiB (docs/rimworld-m2-thread-ceiling.md).
+
+**Historical note (2026-11-02, before the console node):** managed code
 runs. Mono loads `/etc/mono/config` and `/usr/lib/mono/4.5/mscorlib.dll`, spawns
 its worker threads (`[LCOMPAT] clone flags=0x3D0F00 -> 1,3`) and executes
 `Hello.Main()`; it dies inside `System.Console..cctor` because the stdio fds are
@@ -489,7 +498,21 @@ cannot be reused (they need 33 libX11-internal wire symbols).
 **Gate M4:** the probe reports 3.3 core; the cube renders; fps recorded.
 Evidence: screenshot + fps dump.
 
-**Status 2026-11-02 (lane L8): host gate PASSED, in-guest load unverified.**
+**Status 2026-11-03: in-guest PASSED (lane L13).** `libGL.so.1` loads inside a
+compat process and renders: `GL_VERSION 3.3 (Core Profile) Mesa 26.2.6`,
+`GL_RENDERER softpipe`, GLSL 3.30, FBO complete, readback
+`fnv1a64=0x25476e955b66d136` — byte-identical to the host run — `done rc=0`.
+What the guest forced (all fixed): compiling against the pinned libc6-dev 2.31
+instead of host headers (`__isoc23_strtol` leak), a static-TLS surplus fix
+(PT_TLS 4400 B → 40 B; Mesa's 4 KiB debug buffer made them statics), four
+libX11 gaps for `RTLD_NOW`, a real `XCreateImage`/`XPutImage` (XImage was a stub
+whose `destructor` field is called through a *macro* — a zeroed table jumped to
+0), and `XGetVisualInfo` must be freeable. **Still open:** `glXSwapBuffers`'
+present path (`xlib_sw_display → XPutImage`) faults with an instruction fetch
+into a non-executable libGL page, so no window screenshot yet; teardown is
+unexercised.
+
+**Historical (2026-11-02, lane L8): host gate PASSED, in-guest load unverified.**
 `tools/mesa/build-hobbyos.sh` cross-builds `libGL.so.1` for HobbyOS: 835/835 TUs,
 **0 `DT_NEEDED`**, 1378 exports, 20.0 MB stripped. It renders the reference
 GL 3.3 core cube in the host harness (`fnv1a64=0xc0b8ac43346002eb`, 291,572
@@ -503,8 +526,14 @@ stage it in `/LIB64` with `XLIB_NO_SHM=1` and prove an in-guest `dlopen` + cube.
 - [ ] Exec the game's `RimWorldLinux` **from NFS** — **landed** (L6: VFS image
       read + `elf_loader_load_image`, `spawn_ex("/NFS/hdyn.bin")` → exit 0).
 - [ ] `mmap` a DSO from NFS — **not supported** (`fs.c:file_fat16_ident` →
-      `-ENOTSUP`; `vm.c` keys `VM_OBJ_FILE` by `(start_cluster,size)`). Needs a
-      VM object with an NFS page-in callback — scheduled as M5b.
+      `-ENOTSUP`; `vm.c` keys `VM_OBJ_FILE` by `(start_cluster,size)`). **Now on
+      the critical path**: Mono `mmap`s every assembly, so the game stops at
+      `mscorlib.dll` on `/NFS`. Two candidates: **(M5b)** a VM object with an NFS
+      page-in callback (durable, unblocks assets too), or **(M5c, cheaper)** a VFS
+      *bind* (`vfs_bind("/NFS/RimWorldLinux_Data/Managed", "/RWMANAGED")`) with the
+      40 MiB assembly tree staged locally — then the read/mmap path is FAT's and
+      already works. M5c first; keep M5b scheduled because the 730 MiB of `Data/`
+      will want it.
 - [ ] Redirect `Config/`, `Saves/`, `Player.log` to a writable local dir.
 - [ ] Audio: `/dev/dsp` null sink first; virtio-sound only if needed.
 
@@ -540,7 +569,23 @@ to its main menu: `Mono path[0] = '<dir>/RimWorldLinux_Data/Managed'`,
 launcher must be named `RimWorldLinux` inside the game dir so `/proc/self/exe`
 resolves next to `RimWorldLinux_Data`. Nothing about the non-PIE stub matters.
 
-**Status 2026-11-02:** plumbing landed; the binary itself cannot be *loaded*
+**Status 2026-11-03 (lane L14): the game runs inside HobbyOS up to Mono init.**
+`src/user/rwmain.c` is the AD-9 launcher (glibc-2.31 PIE, reads
+`/proc/self/exe`, `dlopen`s `/RWDSO/UnityPlayer.so`, `dlsym`s
+`_Z10PlayerMainiPPc`, calls it; its exported `dlopen` remaps Mono/plugin DSO
+basenames to `/RWDSO`). Installed as `/NFS/RimWorldLinux` with the original stub
+kept as `RimWorldLinux.orig`; 33 MB `UnityPlayer.so` + 6.4 MB Mono DSOs + 0.7 MB
+plugins staged locally per AD-10. Ladder retired this wave: ET_EXEC at 0x200000
+(AD-9), `Error 2 resolving executable path` (needs `/proc` + `/NFS` stat), a
+memory fault from page-cache invalidation killing UnityPlayer's text mapping
+(`vm_object` now keeps its source cluster), a missing `libz.so.1`. **Current
+wall:** `[LCOMPAT] mmap fail fd=4 len=4622848 off=0 -> -95
+path=/NFS/RimWorldLinux_Data/Managed/mscorlib.dll` → `The assembly mscorlib.dll
+was not found or could not be loaded.` — Mono `mmap`s every assembly and that
+tree is on NFS. No `[LCOMPAT] ENOSYS` occurred (count 0); no GL/X11/thread wall
+was reached yet.
+
+**Historical (2026-11-02):** plumbing landed; the binary itself cannot be *loaded*
 (`ET_EXEC` at 0x200000, below the 64 GiB user window → `elf loader: ET_EXEC
 linked below the user window`), which is why AD-9 replaces the stub instead. A
 labelled PIE stand-in then failed at `UnityPlayer.so: failed to map segment
@@ -747,6 +792,16 @@ awk '/if \(linux_compat_dispatch\(lp, tf, syscall_num\)\)/,/^  }/' \
 ```
 
 ---
+
+- 2026-11-03 — **wave 3: M2 fully passes (a C# program runs), GL renders
+  in-guest, and the game reaches Mono inside HobbyOS.** Merged `rw-l11-stdio`,
+  `rw-l12-procs`, `rw-l13-gl`, `rw-l14-launch` (one conflict: keep both the
+  `/dev/console` char-device and the `/proc` stat branches in `fs.c`). Receipts:
+  `Hello from C# on HobbyOS` → `HELLO-OK` exit 0; `GL_VERSION 3.3 (Core
+  Profile)` / `GL_RENDERER softpipe` / readback `0x25476e955b66d136`
+  (host-identical); `[T150] created=150 joined=150` with SIGCANCEL delivered.
+  Game ladder now stops at `Mono mmap ... mscorlib.dll -> -95` on NFS, so M5c
+  (VFS bind of `Managed/`) or M5b (NFS page-in) is the next blocker.
 
 ## 11. Fix log (append-only)
 
