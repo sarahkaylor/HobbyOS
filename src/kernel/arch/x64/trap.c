@@ -2735,6 +2735,33 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 270: compat_pselect6(tf);          return; /* pselect6(..., ts*) */
         case 293: syscall_num = SYS_PIPE;       break;  /* pipe2(fds, 0)    */
         case 318: syscall_num = SYS_GETRANDOM;  break;  /* getrandom(...)   */
+        /* GB-183 (rebase of PR #255): the ten Linux-ABI numbers main still
+           lacked after GB-141/149/164/165/169/178 landed the rest.  Each
+           native handler already speaks this argument layout -- x64 syscall
+           args land rdi->regs[5], rsi->regs[4], rdx->regs[3], r10->regs[9] --
+           and returns -errno, so these are number translations, not shims.
+           The three that are not a bare register shuffle are called out:
+             fork(57): no args.  process_fork() returns the child pid in the
+               parent and 0 in the child (child->context[0] = 0), -EAGAIN on
+               failure -- exactly Linux fork semantics.
+             execve(59): rdi=path, rsi=argv, rdx=envp.  sys_exec() marshals
+               rdx into the group env blob (P5 D3.1/D3.5) before the load, so
+               the Linux layout maps 1:1; failure returns -errno.
+             wait4(61): rdi=pid, rsi=status, rdx=options, r10=rusage.
+               process_wait_args() takes all four (rusage in regs[9]) and
+               fills the 144-byte rusage on reap, so the order matches.
+           dup/dup2/getpid/getppid/kill/getcwd/chdir are the plain
+           (fd)/(old,new)/()/()/(pid,sig)/(buf,size)/(path) shapes. */
+        case 32:  syscall_num = SYS_DUP;       break;  /* dup(fd)              */
+        case 33:  syscall_num = SYS_DUP2;      break;  /* dup2(oldfd, newfd)   */
+        case 39:  syscall_num = SYS_GETPID;    break;  /* getpid()             */
+        case 57:  syscall_num = SYS_FORK;      break;  /* fork()               */
+        case 59:  syscall_num = SYS_EXEC;      break;  /* execve(path,argv,envp) */
+        case 61:  syscall_num = SYS_WAIT4;     break;  /* wait4(pid,st,opt,ru) */
+        case 62:  syscall_num = SYS_KILL;      break;  /* kill(pid, sig)       */
+        case 79:  syscall_num = SYS_GETCWD;    break;  /* getcwd(buf, size)    */
+        case 80:  syscall_num = SYS_CHDIR;     break;  /* chdir(path)          */
+        case 110: syscall_num = SYS_GETPPID;   break;  /* getppid()            */
         /* GB-148: mkdir(83) is (path, mode) = rdi, rsi — SYS_MKDIR takes rdi.
            mkdirat(258) is (dirfd, path, mode); musl uses it for BOTH mkdir and
            mkdirat, so the dent block's mkdir() was -ENOSYS without this. */
