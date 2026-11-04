@@ -25,6 +25,27 @@ sys.path.insert(0, HERE)
 import board            # noqa: E402
 import import_seed as S  # noqa: E402
 
+# The seed range imported from the original plan: GB-001..GB-147.  Ids above it
+# are mints and may be sparse — GB-148..GB-150 went to gate/scratch cards, never
+# plan rows — so contiguity is required ONLY inside the seed (GB-185).
+SEED_MAX = 147
+
+
+def plan_id_problems(order, seed_max=SEED_MAX):
+    """Validate the plan's GB id set: the seed range complete, no id repeated.
+
+    GB-185: the old check required set(ids) == 1..len(ids), so adding one row
+    for a card minted after GB-147 reported a false drift ("missing=[148]") and
+    froze §8.  A sparse id above the seed is legitimate; a gap inside it is not.
+    """
+    ids = [int(g.split("-")[1]) for g in order]
+    dups = sorted({i for i in ids if ids.count(i) > 1})
+    gaps = sorted(set(range(1, seed_max + 1)) - set(ids))
+    if not gaps and not dups:
+        return []
+    return [f"plan: GB id set is not a clean GB-001..GB-{seed_max:03d} seed "
+            f"(missing={gaps}, duplicated={dups})"]
+
 
 def board_snapshot():
     out = {}
@@ -63,17 +84,10 @@ def main():
     bd = board_snapshot()
     problems = []
 
-    # plan shape. Integrity = "every id GB-001..GB-N present exactly once", NOT
-    # "sorted": §8 is organised by milestone, so a minted ticket belongs in the
-    # section it serves (e.g. an intel-tier defect in M1) even though its number
-    # is higher than the ids around it.
-    ids = [int(g.split("-")[1]) for g in order]
-    want = set(range(1, len(ids) + 1))
-    if set(ids) != want or len(ids) != len(set(ids)):
-        gaps = sorted(want - set(ids))
-        dups = sorted({i for i in ids if ids.count(i) > 1})
-        problems.append(f"plan: GB id set is not a clean GB-001..GB-{len(ids):03d} "
-                        f"(missing={gaps}, duplicated={dups})")
+    # plan shape. Integrity = the SEED range GB-001..GB-147 is complete and no
+    # id repeats.  §8 is organised by milestone, and mints above the seed are
+    # sparse by design — see plan_id_problems() (GB-185).
+    problems += plan_id_problems(order)
     for gid in order:
         t = plan[gid]
         if t["weight"] not in ("S", "M", "L"):
