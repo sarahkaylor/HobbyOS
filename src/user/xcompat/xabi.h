@@ -43,6 +43,23 @@ typedef unsigned long Mask;
 
 typedef struct _XDisplay Display;
 typedef struct _XScreen Screen;
+
+/* Visual: the REAL Xlib layout, defined here rather than privately in
+ * libx11.c because it is client-visible ABI.  XVisualInfo.visual points at
+ * one and a client reads vinfo.visual->visualid / ->class through it.  Xlib
+ * puts XExtData *ext_data first, so visualid lands at offset 8; a private
+ * struct starting with VisualID would answer garbage to that read (the SDL
+ * window probe prints the value it gets back). */
+struct _XVisual {
+  void *ext_data;                 /*   0   XExtData *            */
+  VisualID visualid;              /*   8                         */
+  int c_class;                    /*  16   (`class` in C)        */
+  unsigned long red_mask;         /*  24                         */
+  unsigned long green_mask;       /*  32                         */
+  unsigned long blue_mask;        /*  40                         */
+  int bits_per_rgb;               /*  48                         */
+  int map_entries;                /*  52                         */
+};
 typedef struct _XVisual Visual;
 typedef struct _XGC *GC;
 typedef struct _XImage XImage;
@@ -84,6 +101,7 @@ typedef struct {
 #define CopyFromParent 0L
 #define PointerRoot 1L
 #define ParentRelative 1L
+#define AnyPropertyType 0L
 #define AllPlanes ((unsigned long)~0L)
 
 /* ---- event types ----------------------------------------------------- */
@@ -201,6 +219,7 @@ typedef struct {
 #define BadAtom 5
 #define BadDrawable 9
 #define BadMatch 8
+#define BadAlloc 11
 #define BadGC 13
 
 /* ---- graphics context ------------------------------------------------- */

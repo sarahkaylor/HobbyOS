@@ -16,7 +16,7 @@ measurements in §2 plus a parse of `libx11.c`.
 $ python3 src/user/xcompat/tools/gen_exports.py \
       --game /mnt/fast/games/steamapps/common/RimWorld
 required libX11 symbols : 129
-exported by the DSO     : 256 (82 IMPL, 174 STUB)
+exported by the DSO     : 256 (85 IMPL, 171 STUB)
 required but missing    : 0
 required ALSA symbols   : 19
 required pulse symbols  : 21 (exported by the shims: 25, missing: 0)
@@ -27,7 +27,7 @@ Headline numbers:
 
 | DSO | required by the game | exported by our DSO | of the required: IMPL / PARTIAL / STUB |
 |---|---|---|---|
-| `libX11.so.6` | **129** | **256** | 47 / 4 / 78 |
+| `libX11.so.6` | **129** | **256** | 51 / 2 / 76 |
 | `libasound.so.2` | **19** | **19** | 0 / 0 / 19 (all "no device") |
 | `libpulse-simple.so.0` | **21** | **25** | 0 / 0 / 25 (all "no server"; the union is exported by both pulse sonames) |
 | `libpulse.so.0` | (reached through libpulse-simple's `DT_NEEDED` on a real host) | **25** (same source) | 0 / 0 / 25 |
@@ -466,7 +466,8 @@ lane can decide whether to extend the protocol (they are candidates for a
 | **no key-up message** | the DSO emits a synthetic `KeyRelease` on the next `XNextEvent` after a `KeyPress`. Typing and menu navigation work; a *held* key does not repeat (no auto-repeat, no "walk while held") | M7 gameplay |
 | **no window move/resize** | `XMoveWindow`/`XResizeWindow` are no-ops; the desktop's reflow owns geometry | windowed mode works, Unity's own resize requests are ignored |
 | **no cursor object** | `XCreateFontCursor` returns an id; the desktop paints the pointer | cosmetic |
-| **no property store** | `XChangeProperty` accepted and dropped; only WM hints round-trip | `_NET_WM_*` queries by the engine |
+| **property list is bounded** | `XChangeProperty` stores 12 properties of up to 512 bytes (`_NET_WM_NAME`, `_NET_WM_PID`, `WM_PROTOCOLS`, `WM_CLASS` round-trip); a larger blob (e.g. `_NET_WM_ICON`) is truncated | an engine that reads back a huge property |
+| **no `_NET_WM_STATE` / WM handshake** | there is no window manager: the desktop's pixel protocol is the WM, so `_NET_WM_STATE`-driven fullscreen/maximise requests are not interpreted | windowed/fullscreen policy stays the desktop's |
 | **no pixmaps/fonts** | ids are handed out; `XDrawString` renders the vendored 8x8 ASCII font (no server fonts, no `XLoadQueryFont` metrics) | nothing on the GL path |
 | **no XCB / SHM / XShape / XKB / XI2** | `XGetXCBConnection` and friends answer "absent" | GLX (L5) must not need XCB |
 | **no selection/clipboard** | `XConvertSelection` is a no-op | copy/paste is dead |
@@ -508,7 +509,7 @@ sonames, all 21 names, and a `readelf -d` assertion that neither has a
 | `XAutoRepeatOff` | STUB | returns `1` |
 | `XAutoRepeatOn` | STUB | returns `1` |
 | `XChangePointerControl` | STUB | returns `0` |
-| `XChangeProperty` | PARTIAL | accepted and dropped; no property list is kept |
+| `XChangeProperty` | IMPL | stores name/type/format/data in a 12-slot property list (`_NET_WM_NAME`, `_NET_WM_PID`, `WM_PROTOCOLS`, `WM_CLASS` all round-trip); a title written this way also drives the desktop frame (`ESC ] T`). |
 | `XCheckIfEvent` | IMPL |  |
 | `XClearWindow` | IMPL |  |
 | `XCloseDisplay` | IMPL |  |
@@ -524,7 +525,7 @@ sonames, all 21 names, and a `readelf -d` assertion that neither has a
 | `XCreatePixmapCursor` | STUB | returns `0x41` |
 | `XCreateWindow` | IMPL |  |
 | `XDefineCursor` | IMPL |  |
-| `XDeleteProperty` | STUB | returns `1` |
+| `XDeleteProperty` | IMPL |  |
 | `XDestroyIC` | STUB | returns `0` |
 | `XDestroyWindow` | IMPL |  |
 | `XDisplayKeycodes` | STUB | returns `0` |
@@ -562,7 +563,7 @@ sonames, all 21 names, and a `readelf -d` assertion that neither has a
 | `XGetWMHints` | IMPL |  |
 | `XGetWMNormalHints` | IMPL |  |
 | `XGetWindowAttributes` | IMPL |  |
-| `XGetWindowProperty` | PARTIAL | answers None/Success; nothing round-trips except WM hints (XGetWMHints/XGetWMNormalHints) |
+| `XGetWindowProperty` | IMPL | reads the property list back (malloc'd copy, as Xlib returns); only the first 512 bytes of a property are retained. |
 | `XGrabKeyboard` | IMPL |  |
 | `XGrabPointer` | IMPL |  |
 | `XGrabServer` | STUB | returns `0` |
@@ -610,13 +611,13 @@ sonames, all 21 names, and a `readelf -d` assertion that neither has a
 | `XSetWMHints` | IMPL |  |
 | `XSetWMNormalHints` | IMPL |  |
 | `XSetWMProperties` | IMPL |  |
-| `XSetWMProtocols` | IMPL |  |
+| `XSetWMProtocols` | IMPL | records the list, stores it as WM_PROTOCOLS/ATOM/32 and arms the WM_DELETE_WINDOW path: the desktop's in-band `ESC [ D ~` close becomes the ClientMessage SDL reads (see XNextEvent). |
 | `XSetWindowBackground` | IMPL |  |
 | `XStoreColors` | STUB | returns `0` |
 | `XStoreName` | IMPL |  |
 | `XStringListToTextProperty` | STUB | returns `0` |
 | `XSupportsLocale` | STUB | returns `True` |
-| `XSync` | STUB | returns `XFlush(d)` |
+| `XSync` | IMPL |  |
 | `XSynchronize` | IMPL |  |
 | `XTextExtents` | STUB | returns `0` |
 | `XTranslateCoordinates` | PARTIAL | window<->root is exact, window<->window is only approximate (there are no child windows) |
@@ -627,7 +628,7 @@ sonames, all 21 names, and a `readelf -d` assertion that neither has a
 | `XUninstallColormap` | STUB | returns `0` |
 | `XUnloadFont` | STUB | returns `0` |
 | `XUnsetICFocus` | STUB | returns `0` |
-| `XVisualIDFromVisual` | STUB | returns `v ? v->id : 0` |
+| `XVisualIDFromVisual` | STUB | returns `v ? v->visualid : 0` |
 | `XWarpPointer` | STUB | returns `0` |
 | `XWindowEvent` | IMPL |  |
 | `XWithdrawWindow` | IMPL |  |
@@ -697,12 +698,12 @@ sonames, all 21 names, and a `readelf -d` assertion that neither has a
 | `XInternAtoms` | IMPL |  |
 | `XListExtensions` | STUB | returns `0` |
 | `XListFonts` | STUB | returns `0` |
-| `XListProperties` | STUB | returns `0` |
+| `XListProperties` | IMPL |  |
 | `XLowerWindow` | STUB | returns `0` |
 | `XMapWindow` | IMPL |  |
 | `XMissingExtension` | STUB | returns `0` |
 | `XMoveResizeWindow` | STUB | returns `0` |
-| `XNextEvent` | IMPL |  |
+| `XNextEvent` | IMPL | polls the desktop pipe, drains queued events, and turns the desktop's close into a WM_PROTOCOLS/WM_DELETE_WINDOW ClientMessage when the client registered one via XSetWMProtocols; a client that never did keeps the old exit-the-process close. |
 | `XParseColor` | STUB | returns `1` |
 | `XProtocolRevision` | STUB | returns `0` |
 | `XProtocolVersion` | STUB | returns `11` |

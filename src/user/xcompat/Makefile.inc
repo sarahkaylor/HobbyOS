@@ -111,6 +111,26 @@ xcompat_dsos:
 endif
 .PHONY: xcompat_dsos
 
+# ---- a traced copy of libX11, for gate debugging ---------------------- *
+# -DXC_TRACE compiles the per-call trace in (xtr in libx11.c writes to fd 2,
+# which is the serial console for a desktop-launched compat process).  Same
+# source, same flags: the only difference is the trace macro, so a traced run
+# is evidence about the shipped code path, not a special build.  Kept in a
+# separate directory so `make xcompat_dsos` and the host test keep using the
+# quiet DSO.
+XCOMPAT_LIBX11_TRACE = $(XCOMPAT_OBJ)/trace/libX11.so.6
+
+$(XCOMPAT_LIBX11_TRACE): $(XCOMPAT_DIR)/libx11.c $(XCOMPAT_DIR)/xcore.c \
+                         $(XCOMPAT_DIR)/xrt.c $(XCOMPAT_DIR)/xabi.h \
+                         $(XCOMPAT_DIR)/xcore.h
+	@mkdir -p $(XCOMPAT_OBJ)/trace
+	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_DSOFLAGS) -DXC_TRACE \
+	  -Wl,-soname,libX11.so.6 -o $@ \
+	  $(XCOMPAT_DIR)/libx11.c $(XCOMPAT_DIR)/xcore.c $(XCOMPAT_DIR)/xrt.c
+
+xcompat_dsos_trace: $(XCOMPAT_LIBX11_TRACE)
+.PHONY: xcompat_dsos_trace
+
 # ---- the F4 export gate ----------------------------------------------- *
 # Every symbol Unity's SDL dlsyms from libX11.so.6 must be exported by the
 # DSO.  required-libx11.txt is generated from the game binary (tools/
