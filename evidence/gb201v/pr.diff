@@ -1,0 +1,182 @@
+diff --git a/docs/linux-abi.md b/docs/linux-abi.md
+index 3d19db91..c2b55e17 100644
+--- a/docs/linux-abi.md
++++ b/docs/linux-abi.md
+@@ -660,10 +660,30 @@ LDHELLO.BIN: error while loading shared libraries: libc.so.6: failed to map segm
+   owns them.  `elf loader: DSO <name> mapped` is one line per DSO.
+ - `auxv:` lines are the kernel's startup stack for the interpreter, one record per
+   entry; `AT_BASE` is the interpreter's USER_LIB base, `AT_ENTRY` the executable's.
+-- The guest then executes `ld.so`; the first stop above is ld.so's own named load
+-  error (libc's mmap), with the kernel's `[EXITPC]` naming the PC.
++- The guest then executes `ld.so` (GB-199 stopped at ld.so's own named load error,
++  libc's mmap).
+ - Falsifier: `make MODE=test ARCH=intel GB199_NO_AUXV=1 ...` omits the startup stack;
+   the same jump faults at `VA=0x1800000000 PC=0x1008021E18` (a HOLE just above the
+   stack top), which is what the auxv block prevents.
+-- Entering the real glibc text (symbol resolution, interpreter-loaded DSOs) is the
+-  next rung.
++
++### 14.1 The dependency open (GB-201)
++
++`ld.so` opens its dependency by SONAME, which FAT16 cannot name (two dots), so the compat
++`open`/`openat` path translates a **bounded** table (`src/kernel/arch/x64/trap.c`,
++`compat_sonames[]`: `libc.so.6` → `LIBC6.SO`, `ld-linux-x86-64.so.2` → `LD64.SO`) on the
++path's basename.  An unknown name keeps the ordinary `file_open` answer — the control
++`[GB201] nosuch.so.9 open fd=-1 errno=2 (ENOENT=2)` is in the same run as the hit.  The
++same image then continues:
++
++```
++open: /lib/x86_64-linux-gnu/libc.so.6 -> LIBC6.SO fd=3
++[LCOMPAT] ENOSYS nr=334 name=LDHELLO.BIN pid=3 rip=0x1008016F8E rdi=0x10802220A0
++hello from glibc pie
++[EXITPC] pid=3 last_user_pc=0x10800F7198 code=0x0
++```
++
++`334` is `rseq`, which glibc tolerates as ENOSYS; the program runs and exits 0.  `ld.so`
++maps a DSO's whole vaddr span (`p_memsz`, BSS included) in one file `mmap`, which is
++longer than the file; `vm_mmap` now allows that tail and `vm_file_obj_materialize` maps
++it as zero pages, while a short read *inside* the file stays `-EIO` (text is never
++silently zero-filled).
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 409214af..6c3f24c1 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -231,6 +231,69 @@ static void sys_open(struct trap_frame *tf) {
+   tf->regs[0] = file_open(caller, kpath, flags);
+ }
+ 
++/* GB-201: FAT16 cannot name a glibc SONAME (two dots), but ld.so opens its
++   dependencies by SONAME.  A compat open whose *basename* is one of the staged
++   SONAMEs resolves to the 8.3 name the loader staged.  The table is exact and
++   bounded: every other path, including an unknown .so name, keeps the ordinary
++   file_open result, so a miss is still ENOENT — never a wildcard. */
++static const struct {
++  const char *soname;
++  const char *staged;
++} compat_sonames[] = {
++  { "libc.so.6", "LIBC6.SO" },
++  { "ld-linux-x86-64.so.2", "LD64.SO" },
++};
++
++static int compat_name_eq_ci(const char *a, const char *b) {
++  while (*a && *b) {
++    char ca = *a, cb = *b;
++    if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
++    if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
++    if (ca != cb) return 0;
++    a++; b++;
++  }
++  return *a == '\0' && *b == '\0';
++}
++
++static const char *compat_soname_staged(const char *path) {
++  const char *base = path;
++  for (const char *p = path; *p; p++)
++    if (*p == '/') base = p + 1;
++  for (unsigned i = 0; i < sizeof compat_sonames / sizeof compat_sonames[0]; i++)
++    if (compat_name_eq_ci(base, compat_sonames[i].soname))
++      return compat_sonames[i].staged;
++  return 0;
++}
++
++static void compat_open(struct trap_frame *tf) {
++  const char *filename = (const char *)tf->regs[5]; /* rdi */
++  int flags = (int)tf->regs[4];                     /* rsi */
++  struct process *caller = current_process();
++  char kpath[256];
++  int plen = copy_user_path(filename, kpath, sizeof kpath);
++  if (plen < 0) {
++    tf->regs[0] = (uint64_t)(int64_t)plen;
++    return;
++  }
++  const char *staged = compat_soname_staged(kpath);
++  int fd = file_open(caller, staged ? staged : kpath, flags);
++  if (staged) {
++    /* One record: the guest's SONAME, the file it resolved to, and the fd —
++       the evidence the open path (not a staged rename) did the work. */
++    struct kline kl;
++    kl_init(&kl);
++    kl_s(&kl, "open: ");
++    kl_s(&kl, kpath);
++    kl_s(&kl, " -> ");
++    kl_s(&kl, staged);
++    kl_s(&kl, " fd=");
++    kl_i(&kl, fd);
++    kl_c(&kl, '\n');
++    kl_emit(&kl);
++  }
++  tf->regs[0] = (uint64_t)(int64_t)fd;
++}
++
+ static void sys_close(struct trap_frame *tf) {
+   int fd = (int)tf->regs[5]; // rdi
+   struct process *caller = current_process();
+@@ -2065,7 +2128,7 @@ static void compat_openat(struct trap_frame *tf) {
+   }
+   tf->regs[5] = (uint64_t)(uintptr_t)path;
+   tf->regs[4] = (uint64_t)(uintptr_t)(int64_t)flags;
+-  sys_open(tf);
++  compat_open(tf);
+ }
+ 
+ static void sys_chdir(struct trap_frame *tf) {
+@@ -2637,7 +2700,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
+                             : (uint64_t)(int64_t)(-22);
+           return;
+         }
+-        case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
++        case 2:  compat_open(tf);               return; /* open(path, fl, md) */
+         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
+         /* GB-165: lseek(8).  DOOM's W_AddFile seeks to the WAD directory; with
+            no arm the seek returned -ENOSYS and every lump lookup failed
+diff --git a/src/kernel/vm.c b/src/kernel/vm.c
+index f3256c74..ff956f42 100644
+--- a/src/kernel/vm.c
++++ b/src/kernel/vm.c
+@@ -813,13 +813,27 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
+   spinlock_release_irqrestore(&vm_lock, fl);
+ 
+   uint64_t src = file_obj_page(o, off); /* disk I/O: no lock held */
++  uint64_t priv = 0;
+   if (!src) {
+-    vm_object_unref(o);
+-    return -EIO;
++    /* GB-201: a page past the file's last page is the mapped DSO's BSS tail
++       (ld.so maps p_memsz in one call).  It reads as zero.  A page *inside*
++       the file that failed to read is still -EIO: zero-filling mapped text
++       would corrupt the image. */
++    uint64_t flz = spinlock_acquire_irqsave(&vm_lock);
++    int beyond = (off / FRAME_SIZE) >= (uint64_t)o->nr_frames;
++    spinlock_release_irqrestore(&vm_lock, flz);
++    if (!beyond) {
++      vm_object_unref(o);
++      return -EIO;
++    }
++    priv = frame_alloc_zeroed();
++    if (!priv) {
++      vm_object_unref(o);
++      return -ENOMEM;
++    }
+   }
+ 
+-  uint64_t priv = 0;
+-  if (cow) {
++  if (src && cow) {
+     priv = frame_alloc_zeroed();
+     if (!priv) {
+       vm_object_unref(o);
+@@ -1683,8 +1697,13 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
+       if (f_size == 0 || f_size > VM_OBJ_MAX_BYTES)
+         return -ENOMEM;
+       uint64_t fcap = ((uint64_t)f_size + 0xFFF) & ~0xFFFULL;
+-      if (offset >= fcap || len > fcap - offset)
++      if (offset >= fcap)
+         return -EINVAL;
++      /* GB-201: ld.so maps a DSO's whole vaddr span in ONE file mmap, and
++         that span is p_memsz (BSS included), which is longer than the file.
++         Allow the tail past EOF: vm_file_obj_materialize maps those pages as
++         zero, exactly the BSS they are.  A short read *inside* the file is
++         still an error there, so text is never silently zero-filled. */
+       file_backed = 1;
+       obj_off = offset;
+       kind = VMK_LIB;

@@ -1,0 +1,10 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/.hermes/cache/scratch/wt-gb201v/evidence/gb201v/serial_probe.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 129 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 1 programs exited, halted=1
+T3_intel: PASS (0 FAIL lines, halted, no kernel fault, 129 lines)
+T3_intel EXIT=0
+T3_LOG=/home/sarah/.hermes/cache/scratch/wt-gb201v/evidence/gb201v/serial_probe.log
+T3_ARCH=intel
+T3_FAILS=0

@@ -1,0 +1,12 @@
+== hello build ==
+/home/sarah/.hermes/cache/scratch/ldhello: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=acc6dee19b3c086fd181fd1dd35ee8d5e8d6e04a, for GNU/Linux 3.2.0, not stripped
+  Type:                              DYN (Position-Independent Executable file)
+  INTERP         0x0000000000000374 0x0000000000000374 0x0000000000000374
+                 0x000000000000001c 0x000000000000001c  R      0x1
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+
+== probe build ==
+/home/sarah/.hermes/cache/scratch/soname_probe: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, with debug_info, not stripped
+  Type:                              DYN (Position-Independent Executable file)
+no PT_INTERP
+no NEEDED
