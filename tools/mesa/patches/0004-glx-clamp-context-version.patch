@@ -1,0 +1,144 @@
+Subject: [PATCH 4/4] glx/xlib: clamp an over-version context request, do not refuse it
+
+Unity 2022.3 asks glXCreateContextAttribsARB for 4.5 core with an attribute
+list that also carries GLX_CONTEXT_RELEASE_BEHAVIOR_ARB/FLUSH and
+GLX_CONTEXT_OPENGL_NO_ERROR_ARB/False (measured with apitrace, see
+docs/rimworld-evidence.md §6).  On HobbyOS the driver is softpipe, whose core
+profile tops out at GL 3.3, so the state tracker answers
+ST_CONTEXT_ERROR_BAD_VERSION and the frontend generates GLXBadFBConfig -- a
+NULL context -- which kills the renderer before its first frame.  The two
+unknown attributes are refused even earlier, with BadValue.
+
+Both refusals are frontend policy, and the caller has no fallback: it is the
+frontend's job to hand back the best context the driver can serve (plan AD-5):
+
+  * an unknown context attribute is skipped (with a one-line notice) instead
+    of failing the request; release-behaviour FLUSH and NO_ERROR=false are
+    both what this frontend already does;
+  * if the requested version is above HOBBYOS_GLX_SERVE_{MAJOR,MINOR} and the
+    create failed, the request is retried at that version with the same
+    profile, flags and render type, and a rate-limited line names the rewrite:
+    "[GLX] context request 4.5 core -> 3.3 core".
+
+A request at or below the served version never reaches the retry, so lower
+versions pass through unchanged, and the returned context is always a real
+Mesa context reporting the version it implements.
+
+--- a/src/gallium/frontends/glx/xlib/glx_api.c
++++ b/src/gallium/frontends/glx/xlib/glx_api.c
+@@ -2621,6 +2621,56 @@
+ 
+ /*** GLX_ARB_create_context ***/
+ 
++/* HobbyOS/compat (plan AD-5): the GL target is 3.3 core, but Unity asks for
++ * 4.5 core with attributes this frontend has never seen
++ * (GLX_CONTEXT_RELEASE_BEHAVIOR_ARB, GLX_CONTEXT_OPENGL_NO_ERROR_ARB).  There
++ * is no fallback attempt in the caller, so a refusal is fatal: the renderer
++ * dies before its first frame.  Two rules make the request servable:
++ *
++ *   1. An attribute this frontend does not implement is *ignored*, not an
++ *      error.  The caller cannot act on BadValue, and every attribute Unity
++ *      sends is one we can honour: release behaviour FLUSH is what this
++ *      frontend already does (XMesaSwapBuffers flushes), and NO_ERROR=false is
++ *      the safe side (error reporting stays on).
++ *   2. A version above the one the driver can create is clamped -- after the
++ *      attempt, so a future driver that advertises 4.x keeps it -- and retried
++ *      with the same profile, flags and render type.  The context handed back
++ *      is a real Mesa context reporting the version it actually implements;
++ *      only the request is rewritten.
++ *
++ * A request at or below the served version never reaches the retry, so lower
++ * versions pass through unchanged.  The ladder reads the served version from
++ * here; keep it equal to the GL target the Mesa build advertises.
++ */
++#define HOBBYOS_GLX_SERVE_MAJOR 3
++#define HOBBYOS_GLX_SERVE_MINOR 3
++
++static void
++hobbyos_glx_clamp_notice(int req_major, int req_minor, int major, int minor,
++                         int profileMask)
++{
++   static int once;
++   const char *profile =
++      (profileMask == GLX_CONTEXT_CORE_PROFILE_BIT_ARB) ? "core" : "compat";
++
++   if (once)
++      return;
++   once = 1;
++   fprintf(stderr, "[GLX] context request %d.%d %s -> %d.%d %s\n",
++           req_major, req_minor, profile, major, minor, profile);
++}
++
++static void
++hobbyos_glx_ignored_attrib_notice(int attrib)
++{
++   static int once;
++
++   if (once)
++      return;
++   once = 1;
++   fprintf(stderr, "[GLX] ignoring unknown context attribute 0x%x\n", attrib);
++}
++
+ 
+ GLXContext
+ glXCreateContextAttribsARB(Display *dpy, GLXFBConfig config,
+@@ -2656,14 +2706,32 @@
+       case GLX_RENDER_TYPE:
+          renderType = attrib_list[++i];
+          break;
++      case GLX_CONTEXT_RELEASE_BEHAVIOR_ARB:
++         /* Accepted and honoured: this frontend flushes on release
++          * (XMesaSwapBuffers -> XFlush), which is exactly
++          * GLX_CONTEXT_RELEASE_BEHAVIOR_FLUSH_ARB.  Consume the value. */
++         i++;
++         break;
++      case GLX_CONTEXT_OPENGL_NO_ERROR_ARB:
++         /* Accepted and ignored: the attribute asks for a context that never
++          * reports GL errors.  Leaving error reporting on is the safe
++          * direction and changes nothing a caller can observe except that it
++          * gets errors it did not ask for. */
++         i++;
++         break;
+       case 0:
+          /* end of list */
+          done = True;
+          break;
+       default:
+-         /* bad attribute */
+-         generate_error(dpy, BadValue, 0, X_GLXCreateContextAttribsARB, True);
+-         return NULL;
++         /* HobbyOS: skip, do not fail.  A GLX client (Unity included) sends
++          * attributes whose only purpose is to tell the driver what it may
++          * optimise away; refusing the whole request over one of them is how
++          * a working renderer dies at context creation.  The value slot is
++          * consumed with the key. */
++         hobbyos_glx_ignored_attrib_notice(attrib_list[i]);
++         i++;
++         break;
+       }
+    }
+ 
+@@ -2729,6 +2797,22 @@
+                         direct,
+                         majorVersion, minorVersion,
+                         profileMask, contextFlags);
++   if (!ctx &&
++       profileMask != GLX_CONTEXT_ES_PROFILE_BIT_EXT &&
++       (majorVersion > HOBBYOS_GLX_SERVE_MAJOR ||
++        (majorVersion == HOBBYOS_GLX_SERVE_MAJOR &&
++         minorVersion > HOBBYOS_GLX_SERVE_MINOR))) {
++      /* The request is legal GLX but above what this driver implements.
++       * Hand back the best context it can serve instead of NULL. */
++      hobbyos_glx_clamp_notice(majorVersion, minorVersion,
++                               HOBBYOS_GLX_SERVE_MAJOR, HOBBYOS_GLX_SERVE_MINOR,
++                               profileMask);
++      ctx = create_context(dpy, xmvis,
++                           shareCtx ? shareCtx->xmesaContext : NULL,
++                           direct,
++                           HOBBYOS_GLX_SERVE_MAJOR, HOBBYOS_GLX_SERVE_MINOR,
++                           profileMask, contextFlags);
++   }
+    if (!ctx) {
+       generate_error(dpy, GLXBadFBConfig, 0, X_GLXCreateContextAttribsARB, False);
+    }

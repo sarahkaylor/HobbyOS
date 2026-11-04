@@ -261,4 +261,47 @@ checks the desktop, not the GL side: `tools/gate/m4_gl_probe.py` screendumps
 the window during a 6 s hold and grades the probe's `/dev/fb0` readback
 (`present check`, `pixel diff`) plus the four teardown rows.
 
+## The context-version clamp (AD-5, `patches/0004`)
+
+The game asks `glXCreateContextAttribsARB` for **4.5 core** with
+
+```
+{MAJOR,4, MINOR,5, PROFILE_MASK,CORE,
+ RELEASE_BEHAVIOR,FLUSH, OPENGL_NO_ERROR,False, 0}
+```
+
+and creates a second context sharing with the first (measured, apitrace;
+`docs/rimworld-evidence.md` §6). Mesa's `glx=xlib` frontend refuses that twice:
+`BadValue` from its attribute parser (it has no case for
+`GLX_CONTEXT_RELEASE_BEHAVIOR_ARB`/`GLX_CONTEXT_OPENGL_NO_ERROR_ARB`) and
+`GLXBadFBConfig` from `st_manager.c`'s version check
+(`st->ctx->Version (33) < 45`). Neither is a driver limitation the caller can
+act on, and Unity makes no second attempt, so the frontend must clamp:
+
+* unknown context attributes are skipped (notice:
+  `[GLX] ignoring unknown context attribute 0x...`), not fatal — release
+  behaviour FLUSH is what the xlib frontend already does, and NO_ERROR=false is
+  the safe side;
+* a version above `HOBBYOS_GLX_SERVE_{MAJOR,MINOR}` (3.3, this build's core
+  profile) is retried at 3.3 after the first attempt fails, with the same
+  profile, flags and render type, and announced once:
+  `[GLX] context request 4.5 core -> 3.3 core`.
+
+Trying first keeps a future 4.x driver at 4.x; a request at or below 3.3 never
+reaches the retry. The context returned is always a real Mesa context reporting
+the version it implements. In-guest the 4.5 request now yields
+`GL_VERSION 3.3 (Core Profile) Mesa 26.2.6`, `fnv1a64=0x25476e955b66d136`,
+`done rc=0` (`docs/rimworld-m4-glx-clamp.md`).
+
+## Patching a Mesa source means rebuilding its object
+
+The per-TU cache in `build-hobbyos.sh` compares object and log mtimes **and the
+source mtime**. Before that last term existed, applying a patch rewrote the
+source and the build still reported `applied patch: 0004-...` while shipping
+the pre-patch object — measured as a DSO with no `[GLX] context request` string
+and a guest that still got NULL. If a patch ever appears not to take effect,
+check `strings obj/mesa/lib/libGL.so.1` for something the patch adds before
+looking anywhere else.
+
+
 
