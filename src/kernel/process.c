@@ -534,22 +534,6 @@ static int proc_reap_parked_locked(void) {
   return n;
 }
 
-/* GB-179: terminal slot census for the halt line (and any probe): how many
-   slots are FREE / EXITED / THREAD_DONE.  Reads under proc_lock. */
-void process_slot_census(int *free_out, int *exited_out, int *thread_done_out) {
-  int f = 0, e = 0, t = 0;
-  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    if (proc_table[i].state == PROC_STATE_FREE) f++;
-    else if (proc_table[i].state == PROC_STATE_EXITED) e++;
-    else if (proc_table[i].state == PROC_STATE_THREAD_DONE) t++;
-  }
-  spinlock_release_irqrestore(&proc_lock, flags);
-  if (free_out) *free_out = f;
-  if (exited_out) *exited_out = e;
-  if (thread_done_out) *thread_done_out = t;
-}
-
 /* ---------------------------------------------------------------------------
  * P1 (docs/browser/p1-threads-design.md sections 1/3/5/6): threads & groups.
  * A thread IS a PCB slot sharing its leader's address space; the leader PCB
