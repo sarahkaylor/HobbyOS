@@ -1654,3 +1654,162 @@ bash tools/gate/t3_linux_probe.sh vmcommit  [LP] done rc=0
   pages, so it is not exercised.
 - `MAP_FIXED_NOREPLACE` still answers `-EINVAL` (the pre-4.17 Linux answer).
   Nothing in the boot uses it.
+
+## 16. 2026-11-04 — M6: the park was glibc REFUSING the mutex init (no PI futexes), not a held lock
+
+Lane L25 (`rw-l25-pifutex`), tree seeded from `6f42d9de`. §15 ended with a
+proven two-owner condition inside Unity's allocator. The hypothesis this wave
+tested was threading-side: `src/kernel/linux_compat_thr.c` answered
+`FUTEX_LOCK_PI`/`UNLOCK_PI`/`TRYLOCK_PI` with `-ENOSYS`, and a `PRIO_INHERIT`
+mutex whose lock silently failed would let two threads into a critical
+section. **That hypothesis is refuted as stated, and a different, worse
+consequence of the same `-ENOSYS` is confirmed.**
+
+### 16.1 What glibc 2.31 actually does with a PRIO_INHERIT mutex
+
+Disassembling the pinned `libpthread-2.31.so` (`__pthread_mutex_init`) and
+reproducing it on the host with a seccomp filter that answers `ENOSYS` to the
+PI futex commands gives the whole mechanism:
+
+1. The **first** `pthread_mutex_init()` of a `PRIO_INHERIT` mutex probes the
+   kernel: `futex(&local_zero, FUTEX_UNLOCK_PI|PRIVATE, 0)` at `+0xA7FF`.
+   A tolerated errno (EPERM, EAGAIN, …) sets `tpi_supported = +1`;
+   **`-ENOSYS` alone sets it to `-1`** (`+0xA84E`).
+2. With `tpi_supported == -1`, every `PRIO_INHERIT` init takes `+0xA7B8`
+   (`mov $0x5f,%eax` = **EOPNOTSUPP 95**) and jumps straight to the epilogue:
+   **the mutex is never written**. `__lock` keeps whatever the allocator left
+   in the block.
+3. `pthread_mutex_lock()` returning an error is *not* the failure mode: a
+   contended PI lock that gets `ENOSYS` calls `__libc_fatal` ("The futex
+   facility returned an unexpected error code") and aborts. Measured on the
+   host against the same DSO.
+
+So Unity's `Mutex` pool is not "locked by nobody" — it is a set of objects
+whose initialiser **returned 95 and did nothing**. Unity ignores the return
+(measured: no abort, the game continues), then locks the object. Its `__lock`
+is the 0x30-byte bucket's free-list `next` link, which is why §14 saw
+`0x10C00964D0` in the word and a chain of `next` pointers every 0x30 bytes.
+
+Measured in-guest with the new probe (`src/user/rw_pthread_pi.c`, gate
+`tools/gate/m2_pi.sh`), with the word pre-filled with exactly the measured
+link:
+
+```
+before (HEAD kernel):  [PTPI] init rv=95 kind=0 word=0xc00964d0
+                       [PTPI] FAIL pi-mutex-init (... the first lock would park
+                              on the stale word)
+after  (this lane):    [PTPI] init rv=0 kind=33 word=0
+```
+
+`kind 33` = `PTHREAD_MUTEX_RECURSIVE(1) | PRIO_INHERIT(32)` — also correcting
+§15's "ERRORCHECK" reading: `UnityPlayer+0x1BA2DF4` loads `1`, which is
+RECURSIVE.
+
+In the real game the same transition is visible in the launcher's recorder
+(`RW_TRACE_MUTEX=1`):
+
+```
+before:  [MTXR] init-odd m=0x10c00964a0 kind=0  rv=0   (kind 0 = never written)
+after:   [MTXR] init-odd m=0x10c00964a0 kind=33 rv=0
+```
+
+### 16.2 The implementation (`src/kernel/linux_compat_thr.c`)
+
+`FUTEX_LOCK_PI`, `FUTEX_UNLOCK_PI` and `FUTEX_TRYLOCK_PI` are real now.
+Priority inheritance itself is **not** implemented (this OS has no priority
+scheduling to inherit into); mutual exclusion is. The one non-obvious rule:
+
+**A woken `LOCK_PI` waiter must already own the word when it resumes.**
+`pthread_mutex_lock.c:419-441` checks only `ESRCH`/`EDEADLK` from
+`futex_lock_pi()` and otherwise proceeds to `__count = 1`; a plain wake with
+`rax = 0` would therefore be read as "the kernel gave me the mutex". So:
+
+- `UNLOCK_PI` **hands the lock over**: under `proc_lock` it CASes the word to
+  the first PI waiter's tid (`| FUTEX_WAITERS` if another waiter remains) and
+  only then makes that waiter READY with `context[0] = 0`.
+- `LOCK_PI` parks only after re-reading the word under `proc_lock` (so a
+  handoff cannot slip in), and `OWNER_DIED` is preserved when recovering so
+  glibc still turns it into `EOWNERDEAD`.
+- A plain `FUTEX_WAKE` **never** wakes a PI waiter, and
+  `linux_compat_signal_interrupt()` skips them: for the same glibc reason an
+  `-EINTR` resume would be read as ownership. The signal stays pending and is
+  delivered when the lock arrives.
+- `FUTEX_WAIT_REQUEUE_PI` / `CMP_REQUEUE_PI` stay `-ENOSYS` with a counted row:
+  no boot has issued one (a PI mutex used with `pthread_cond_wait` would).
+- The robust-list walk had a real bug this lane found and fixed: glibc marks a
+  PI entry with the **low bit** of the list pointer (`entry 0x1000004081` for a
+  mutex at `0x1000004060`), exactly as Linux's `exit_robust_list` masks it.
+  Without the mask the "futex word" landed at `mutex+1` and `OWNER_DIED` was
+  written into the wrong bytes, so a dying PI owner never marked its mutex.
+
+### 16.3 Tests
+
+- `src/kernel/linux_compat_pi_test.c` drives the **real** word transitions
+  (the handler exports them under `KERNEL_MODE_UNIT_TEST`): uncontended,
+  self-lock/EDEADLK, contended + WAITERS, trylock EAGAIN, owner-died recovery
+  (with and without waiters), release, foreign release EPERM, and a failed-CAS
+  must not store. 9 new tests: `Tests run: 407  Tests failed: 0`.
+- `src/user/rw_pthread_pi.c` + `tools/gate/m2_pi.sh`: the pre-filled-mutex
+  repro above, 8 threads × 20 000 critical sections (`total=160000 expect=160000`),
+  recursive re-lock, trylock → EBUSY, and a ROBUST|PI owner death →
+  `owner-died=EOWNERDEAD (130)`. `[PTPI] PASS`.
+
+### 16.4 The ladder after the fix
+
+```text
+[PhysX] Initialized MultithreadedTaskDispatcher with 2 workers.
+[MTXR] init-odd m=0x10c00964a0 kind=33 rv=0
+Desktop is 1920 x 1080 @ 0 Hz
+[RWMAIN] dlopen FAILED libGL.so.1: /LIB64/libGL.so.1: undefined symbol: _XLockMutex_fn
+Unable to find a supported OpenGL core profile
+Failed to create valid graphics context: please ensure you meet the minimum requirements
+Forced renderer 17 is not supported, exiting
+```
+
+- **No park.** `IDLESTUCK` count is 0 (was 1, on `0x10C00964A0`), and the mutex
+  summary is `lock=29653 bad=0 try=2531 bad=1 unlock=32183 bad=0` — the single
+  trylock failure is Mono's `EBUSY` (`kind=1`), not a PI mutex.
+- The game is **past** the allocator park and past PhysX; it reaches the
+  display, then dies loading `libGL.so.1`.
+- The next blocker is a **loader dependency**, not a syscall: our Mesa
+  frontend `obj/mesa/lib/libGL.so.1` has undefined `_XLockMutex_fn`,
+  `_XUnlockMutex_fn`, `_Xglobal_lock` and **no `DT_NEEDED` at all** (checked
+  with `readelf -dW`), so it can only resolve Xlib internals from the global
+  scope. The compat `libX11.so.6` does export them (`nm -D` shows all three),
+  but by the time the game dlopens libGL they are not in the scope it searches.
+  The M4 gate passes because its client links libX11 into the executable.
+  Next step: give the frontend `DT_NEEDED libX11.so.6` (link `-lX11` in the
+  Mesa build, `patches/`), or promote the already-loaded libX11 with
+  `RTLD_GLOBAL` in the AD-10 `dlopen` wrapper before returning libGL.
+
+### 16.5 Incidental finding: `alarm(2)` never fires — syscall 37 is ENOSYS
+
+The launcher's SIGALRM ring dump (§14) never ran because `alarm()` is
+`setitimer`-less here: `[LCOMPAT] ENOSYS nr=37` appears in every run. The
+recorder now prints its summary periodically from `pthread_mutex_init`
+instead. Not a blocker, but any diagnostic that relies on `alarm()` in this
+guest is dead code.
+
+### 16.6 Regressions
+
+Serialized (never with the desktop harness):
+
+```
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 407   Tests failed: 0
+bash tools/gate/m2_threads.sh            m2: PASS
+bash tools/gate/m12_thread_ceiling.sh    m12: PASS
+bash tools/gate/t3_linux_probe.sh vmcommit  [LP] done rc=0  (PASS)
+bash tools/gate/m2_pi.sh                 m2pi: PASS
+```
+
+### 16.7 Limits
+
+- No priority inheritance. A low-priority holder is not boosted; the handoff
+  gives mutual exclusion only. Stated, not implied.
+- PI waiters are not interruptible by signals while parked (deliberate: an
+  `-EINTR` resume would be read as ownership by glibc). A pending signal is
+  delivered after the lock is granted.
+- `FUTEX_WAIT_REQUEUE_PI`/`CMP_REQUEUE_PI` remain `-ENOSYS`; no measured boot
+  issues one yet.
+- No window, no GLX, no frame: the ladder now ends in the GL loader, one layer
+  above where it started.

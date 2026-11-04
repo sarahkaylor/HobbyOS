@@ -59,6 +59,7 @@
 #define L_FUTEX_WAIT_BITSET 9
 #define L_FUTEX_WAKE_BITSET 10
 #define L_FUTEX_WAIT_REQUEUE_PI 11
+#define L_FUTEX_CMP_REQUEUE_PI 12
 #define L_FUTEX_PRIVATE_FLAG 128
 #define L_FUTEX_CLOCK_REALTIME 256
 #define L_FUTEX_CMD_MASK (~(L_FUTEX_PRIVATE_FLAG | L_FUTEX_CLOCK_REALTIME))
@@ -70,6 +71,24 @@
 #define L_FUTEX_OWNER_DIED 0x40000000u
 
 #define L_ROBUST_LIST_LIMIT 2048
+
+/* Linux x86-64 value; src/include/errno.h carries no EDEADLK (nothing else
+   needs it), and a PI self-lock is the first caller. */
+#ifndef EDEADLK
+#define EDEADLK 35
+#endif
+
+/* Defined with the futex handler below; the PI helpers above it read the
+   caller's word through this. */
+static int l_futex_word(struct process *p, uint64_t uaddr, uint32_t *out);
+
+/* Sentinel: l_futex_lock_pi() parked the caller (it resumes in userspace with
+   rax = 0 when the lock is handed over), so the switch must not write rax. */
+#define L_PI_PARKED 1
+
+/* l_pi_acquire_word(): contended, the caller must park.  Distinct from the
+   syscall-level L_PI_PARKED. */
+#define L_PI_NEED_WAIT 2
 
 /* ---- per-thread compat state -------------------------------------------
  *
@@ -95,6 +114,7 @@ struct l_thr_slot {
   uint64_t uaddr;           /* futex key half 2 (0 when not queued) */
   uint32_t bitset;          /* FUTEX_WAIT_BITSET mask */
   uint64_t robust_head;     /* set_robust_list(head, 24) */
+  uint32_t pi;              /* queued as a PI (LOCK_PI) waiter: hand off */
   uint32_t waits;           /* diagnostics: parks / wakes */
   uint32_t wakes;
 };
@@ -115,6 +135,7 @@ static int l_thr_slot_of(struct process *p, int create) {
     s->uaddr = 0;
     s->bitset = 0;
     s->robust_head = 0;
+    s->pi = 0;
     s->waits = 0;
     s->wakes = 0;
   }
@@ -515,6 +536,11 @@ static int l_futex_wake_locked(struct addr_space *as, uint64_t uaddr,
       continue;
     if ((s->bitset & bitset) == 0)
       continue;
+    /* A PI waiter may ONLY be woken by an ownership handoff (see the PI note
+       below): waking it with 0 here would make glibc believe it holds a lock
+       nobody granted.  glibc never issues a plain FUTEX_WAKE on a PI word. */
+    if (s->pi)
+      continue;
     struct process *p = s->owner;
     s->uaddr = 0;
     s->wakes++;
@@ -554,6 +580,294 @@ static int l_futex_requeue_locked(struct addr_space *as, uint64_t uaddr1,
   }
   return moved;
 }
+
+/* ---- PI futexes: FUTEX_LOCK_PI / UNLOCK_PI / TRYLOCK_PI -----------------
+ *
+ * WHY THIS EXISTS (measured, not assumed)
+ * ---------------------------------------
+ * glibc 2.31 does not trust the kernel to have PI futexes.  The FIRST
+ * pthread_mutex_init() of a PRIO_INHERIT mutex probes the kernel
+ * (libpthread-2.31 __pthread_mutex_init+0x110):
+ *
+ *     futex(&local_zero, FUTEX_UNLOCK_PI | FUTEX_PRIVATE_FLAG, 0, NULL, 0, 0)
+ *
+ * and records `tpi_supported` from the answer:
+ *     -ENOSYS  -> -1   ("no PI futexes")      __pthread_mutex_init+0x1CC
+ *     tolerated errno (EPERM, EAGAIN, ...) -> +1
+ *
+ * With tpi_supported == -1 every PRIO_INHERIT pthread_mutex_init() returns
+ * EOPNOTSUPP (95) and **does not write the mutex at all** (+0x128 loads
+ * 0x5f and jumps to the epilogue).  UnityPlayer+0x1BA2E16 ignores that
+ * return and locks the object anyway, so __lock still contains whatever the
+ * allocator left in the block -- measured 0x10C00964D0, the free-list
+ * `next` link of Unity's 0x30-byte bucket.  The first pthread_mutex_lock()
+ * then cmpxchg's against that pointer, `__lll_lock_wait` sets the waiter
+ * bit and parks forever: exactly the M6 park (0x10C00964A0, __lock=0x2).
+ *
+ * PRIORITY INHERITANCE ITSELF IS NOT IMPLEMENTED.  This OS has no priority
+ * scheduling to inherit into.  Mutual EXCLUSION is what the game needs, and
+ * that is what is implemented below -- as an ownership HANDOFF, because
+ * glibc treats futex_lock_pi() returning 0 as "the kernel gave me the
+ * mutex": pthread_mutex_lock.c:419-441 checks only ESRCH/EDEADLK and
+ * otherwise proceeds to `__count = 1` and enqueues the robust node.  A
+ * woken LOCK_PI waiter therefore must ALREADY own the word when it resumes:
+ * UNLOCK_PI writes the waiter's tid (| WAITERS if more waiters remain) and
+ * only then wakes it.  For the same reason a signal must not wake a PI
+ * waiter with -EINTR -- linux_compat_signal_interrupt() skips PI waiters and
+ * the pending signal is delivered after the lock is acquired.
+ *
+ * Word layout (Linux uapi): bits 0..29 owner tid, 30 OWNER_DIED, 31 WAITERS.
+ */
+
+/* Atomic 32-bit compare-and-exchange on the CALLER's address space (the
+ * syscall runs on the caller's CR3, see l_futex_word).  Returns the value
+ * that was in the word. */
+static uint32_t l_pi_cas(uint64_t uaddr, uint32_t expect, uint32_t desire) {
+  uint32_t prev;
+  __asm__ __volatile__("lock cmpxchgl %1, %2"
+                       : "=a"(prev)
+                       : "r"(desire), "m"(*(volatile uint32_t *)(uintptr_t)uaddr),
+                         "0"(expect)
+                       : "memory", "cc");
+  return prev;
+}
+
+/* Is there a PI waiter queued on (as,uaddr) other than slot `skip`?
+   Caller holds proc_lock. */
+static int l_pi_other_waiter_locked(int skip, struct addr_space *as,
+                                    uint64_t uaddr) {
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (i == skip || !l_thr[i].used || !l_thr[i].pi)
+      continue;
+    if (l_futex_queued_locked(i, as, uaddr))
+      return 1;
+  }
+  return 0;
+}
+
+/* Give the PI lock at (as,uaddr) to its first queued waiter: write the new
+ * owner's tid into the word (CAS from `expect`, so a concurrent userspace
+ * fast-path acquisition cannot be overwritten), then make the waiter READY
+ * with resume value 0.  Caller holds proc_lock.
+ *
+ * Returns the new owner's pid, -1 when there is no PI waiter, or -2 when the
+ * word moved under us (the caller re-reads and retries). */
+static int l_pi_handoff_locked(struct addr_space *as, uint64_t uaddr,
+                               uint32_t expect, int keep_owner_died) {
+  int w = -1;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (!l_thr[i].used || !l_thr[i].pi)
+      continue;
+    if (l_futex_queued_locked(i, as, uaddr)) {
+      w = i;
+      break;
+    }
+  }
+  if (w < 0)
+    return -1;
+  struct process *np = l_thr[w].owner;
+  uint32_t nw = (uint32_t)np->pid;
+  if (l_pi_other_waiter_locked(w, as, uaddr))
+    nw |= L_FUTEX_WAITERS;
+  if (keep_owner_died && (expect & L_FUTEX_OWNER_DIED))
+    nw |= L_FUTEX_OWNER_DIED;
+  uint32_t cur = l_pi_cas(uaddr, expect, nw);
+  if (cur != expect)
+    return -2;
+  l_thr[w].uaddr = 0;
+  l_thr[w].pi = 0;
+  l_thr[w].wakes++;
+  np->futex_uaddr = 0;
+  np->wake_ms = 0;
+  np->context[0] = 0; /* futex_lock_pi returns 0 = "you own it now" */
+  np->state = PROC_STATE_READY;
+  return np->pid;
+}
+
+/* One acquisition attempt on the raw word (no user-memory checks: the caller
+ * has already validated the address, and the unit tier calls this directly).
+ *
+ *   0               acquired (or already ours and recoverable)
+ *   -EDEADLK        we already own it
+ *   -EAGAIN         trylock and held by someone else
+ *   L_PI_NEED_WAIT  held by someone else, not a trylock: park
+ */
+static int l_pi_acquire_word(uint64_t uaddr, uint32_t pid, int trylock) {
+  uint32_t w = *(volatile uint32_t *)(uintptr_t)uaddr;
+  if (w == 0)
+    return l_pi_cas(uaddr, 0, pid) == 0 ? 0 : L_PI_NEED_WAIT;
+  if ((w & L_FUTEX_TID_MASK) == pid) {
+    if (w & L_FUTEX_OWNER_DIED) {
+      /* We already own it and the previous owner died: take over, keep the
+         bit so glibc reports EOWNERDEAD for a robust mutex. */
+      return l_pi_cas(uaddr, w,
+                      pid | (w & L_FUTEX_WAITERS) | L_FUTEX_OWNER_DIED) == w
+                 ? 0
+                 : L_PI_NEED_WAIT;
+    }
+    return -EDEADLK; /* recursive/errorcheck self-lock */
+  }
+  if (w & L_FUTEX_OWNER_DIED) {
+    if ((w & L_FUTEX_TID_MASK) == 0)
+      return -EINVAL; /* nonsensical: died with no owner recorded */
+    /* The dead owner's word is recoverable: acquire it, preserving the bit
+       (glibc reads it back after a successful lock and returns EOWNERDEAD). */
+    return l_pi_cas(uaddr, w,
+                    pid | (w & L_FUTEX_WAITERS) | L_FUTEX_OWNER_DIED) == w
+               ? 0
+               : L_PI_NEED_WAIT;
+  }
+  if (trylock)
+    return -EAGAIN;
+  if (!(w & L_FUTEX_WAITERS))
+    l_pi_cas(uaddr, w, w | L_FUTEX_WAITERS); /* next attempt sees waiters */
+  return L_PI_NEED_WAIT;
+}
+
+/* FUTEX_LOCK_PI(6) / FUTEX_TRYLOCK_PI(8).
+ *
+ * The fast path is glibc's own cmpxchg(0 -> tid); the kernel is only called
+ * when the word is non-zero.  Timeout (arg 3) is an ABSOLUTE timespec, as
+ * for FUTEX_WAIT_BITSET; NULL means "wait forever" (what pthread_mutex_lock
+ * passes). */
+static int l_futex_lock_pi(struct process *p, struct trap_frame *tf,
+                           int trylock) {
+  uint64_t uaddr = l_arg(tf, 0);
+  uint64_t utime = l_arg(tf, 3);
+  struct addr_space *as = p->as;
+  int64_t timeout_ms = -1;
+
+  if (utime) {
+    int64_t ms = 0;
+    int r = l_timespec_to_ms(p, utime, &ms);
+    if (r != 0)
+      return r;
+    int64_t now = (int64_t)timer_get_ms();
+    ms -= now; /* absolute -> relative */
+    if (ms < 0)
+      ms = 0;
+    timeout_ms = ms;
+  }
+
+  int slot = l_thr_slot_of(p, 1);
+  if (slot < 0)
+    return -EAGAIN;
+
+  for (;;) {
+    uint32_t w = 0;
+    int r = l_futex_word(p, uaddr, &w);
+    if (r != 0)
+      return r;
+
+    int a = l_pi_acquire_word(uaddr, (uint32_t)p->pid, trylock);
+    if (a == 0)
+      return 0;
+    if (a < 0)
+      return a;
+
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    /* Re-read under proc_lock: UNLOCK_PI hands the word over while holding
+       this same lock, so a handoff cannot slip between the check and the
+       park. */
+    w = *(volatile uint32_t *)uaddr;
+    if (w == 0) {
+      if (l_pi_cas(uaddr, 0, (uint32_t)p->pid) == 0) {
+        spinlock_release_irqrestore(&proc_lock, flags);
+        return 0;
+      }
+      spinlock_release_irqrestore(&proc_lock, flags);
+      continue;
+    }
+    if ((w & L_FUTEX_TID_MASK) == (uint32_t)p->pid) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      continue;
+    }
+    if (!(w & L_FUTEX_WAITERS)) {
+      uint32_t nw = w | L_FUTEX_WAITERS;
+      l_pi_cas(uaddr, w, nw); /* if it moved, the loop re-reads */
+      spinlock_release_irqrestore(&proc_lock, flags);
+      continue;
+    }
+    if (timeout_ms == 0) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      return -ETIMEDOUT;
+    }
+    p->futex_uaddr = uaddr;
+    p->wake_ms = (timeout_ms < 0) ? 0 : timer_get_ms() + (uint64_t)timeout_ms;
+    p->context[0] = 0;
+    p->state = PROC_STATE_FUTEX;
+    tf->regs[0] = 0; /* resume value if the scheduler switches back here */
+    l_thr[slot].as = as;
+    l_thr[slot].uaddr = uaddr;
+    l_thr[slot].pi = 1;
+    l_thr[slot].bitset = L_FUTEX_BITSET_MATCH_ANY;
+    l_thr[slot].waits++;
+    {
+      struct futex_ev ev = {0};
+      ev.op = FTR_WAIT;
+      ev.pid = p->pid;
+      ev.as = (uint64_t)(uintptr_t)as;
+      ev.uaddr = uaddr;
+      ev.val = w;
+      ev.timeout_ms = timeout_ms;
+      ev.res = 0;
+      ev.rip = tf->elr;
+      futex_trace_note(&ev);
+    }
+    spinlock_release_irqrestore(&proc_lock, flags);
+    schedule(tf, 0);
+    return L_PI_PARKED; /* not reached: the handoff resumes us with rax = 0 */
+  }
+}
+
+/* Release with no PI waiter queued: CAS the word to 0 when `pid` owns it.
+ *   0 success, -EPERM not the owner, -EAGAIN word kept moving. */
+static int l_pi_release_word(uint64_t uaddr, uint32_t pid) {
+  for (int i = 0; i < 8; i++) {
+    uint32_t w = *(volatile uint32_t *)(uintptr_t)uaddr;
+    if ((w & L_FUTEX_TID_MASK) != pid)
+      return -EPERM;
+    if (l_pi_cas(uaddr, w, 0) == w)
+      return 0;
+  }
+  return -EAGAIN;
+}
+
+/* FUTEX_UNLOCK_PI(7): release and hand the lock to the first PI waiter.
+ * Linux answers -EPERM when the caller is not the recorded owner. */
+static int l_futex_unlock_pi(struct process *p, struct trap_frame *tf) {
+  uint64_t uaddr = l_arg(tf, 0);
+  struct addr_space *as = p->as;
+  uint32_t w = 0;
+  int r = l_futex_word(p, uaddr, &w);
+  if (r != 0)
+    return r;
+  if ((w & L_FUTEX_TID_MASK) != (uint32_t)p->pid)
+    return -EPERM;
+
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int tries = 0; tries < 64; tries++) {
+    w = *(volatile uint32_t *)uaddr;
+    if ((w & L_FUTEX_TID_MASK) != (uint32_t)p->pid) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      return -EPERM;
+    }
+    int ho = l_pi_handoff_locked(as, uaddr, w, 0);
+    if (ho >= 0)
+      break;                 /* new owner is running */
+    if (ho == -2)
+      continue;              /* word moved: re-read */
+    /* No PI waiter: plain release. */
+    int rr = l_pi_release_word(uaddr, (uint32_t)p->pid);
+    if (rr == 0 || rr == -EPERM) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      return rr;
+    }
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return 0;
+}
+
 
 /* ---- fork-free thread creation ----------------------------------------- */
 
@@ -799,17 +1113,55 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     return 1;
   }
 
-  case L_FUTEX_WAKE_OP:
   case L_FUTEX_LOCK_PI:
+  case L_FUTEX_TRYLOCK_PI: {
+    int r = l_futex_lock_pi(p, tf, cmd == L_FUTEX_TRYLOCK_PI);
+    if (r != L_PI_PARKED)
+      tf->regs[0] = (uint64_t)(int64_t)r;
+    return 1; /* a parked waiter resumes via the handoff, rax = 0 */
+  }
+
   case L_FUTEX_UNLOCK_PI:
-  case L_FUTEX_TRYLOCK_PI:
+    tf->regs[0] = (uint64_t)(int64_t)l_futex_unlock_pi(p, tf);
+    return 1;
+
+  case L_FUTEX_WAKE_OP:
   case L_FUTEX_WAIT_REQUEUE_PI:
-    /* Linux's own answer when PI futexes are not configured.  Nothing in the
-       measured profile uses them; a PRIO_INHERIT mutex fails loudly at
-       pthread_mutexattr_setprotocol time instead of deadlocking.  WAKE_OP is
-       not used by glibc 2.31's sem_post (atomic + plain wake). */
+  case L_FUTEX_CMP_REQUEUE_PI: {
+    /* WAKE_OP is not used by glibc 2.31's sem_post (atomic + plain wake).
+       WAIT_REQUEUE_PI / CMP_REQUEUE_PI are the condvar-on-PI-mutex path; glibc
+       issues them only if a PI mutex is used with pthread_cond_wait.  Keep
+       -ENOSYS until a boot shows one (the rows below are that measurement);
+       an ENOSYS there is returned to pthread_cond_wait, not fatal. */
+    static uint32_t pi_seen[32];
+    int c = (cmd >= 0 && cmd < 32) ? cmd : 31;
+    uint32_t n = ++pi_seen[c];
+    if (n <= 8 || n == 100 || n == 1000) {
+      uint32_t w = 0;
+      int wr = l_futex_word(p, uaddr, &w);
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[FUTEX] PI-enosys cmd=");
+      kl_i(&kl, cmd);
+      kl_s(&kl, " n=");
+      kl_i(&kl, (long)n);
+      kl_s(&kl, " pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " key=");
+      kl_hex(&kl, (unsigned long)uaddr);
+      kl_s(&kl, " word=");
+      if (wr == 0)
+        kl_hex(&kl, (unsigned long)w);
+      else
+        kl_s(&kl, "<bad>");
+      kl_s(&kl, " rip=");
+      kl_hex(&kl, (unsigned long)tf->elr);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
     tf->regs[0] = (uint64_t)(int64_t)-ENOSYS;
     return 1;
+  }
 
   default:
     tf->regs[0] = (uint64_t)(int64_t)-ENOSYS;
@@ -902,6 +1254,7 @@ void linux_compat_thread_exit(struct process *p) {
   int was_queued = l_thr[slot].uaddr != 0;
   uint64_t was_key = l_thr[slot].uaddr;
   l_thr[slot].uaddr = 0;
+  l_thr[slot].pi = 0;
   p->futex_uaddr = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
   if (was_queued) {
@@ -930,14 +1283,51 @@ void linux_compat_thread_exit(struct process *p) {
   if (l_copy_from_user(p, &pending, head + 16, 8) != 0)
     return;
 
+  {
+    /* One row per exiting thread that owns a robust list head: without it
+       "the kernel never marked the mutex" and "glibc never enqueued it" look
+       identical from the serial. */
+    static int rr;
+    if (rr < 32) {
+      rr++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[FUTEX] robust pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " head=");
+      kl_hex(&kl, (unsigned long)head);
+      kl_s(&kl, " list=");
+      kl_hex(&kl, (unsigned long)list);
+      kl_s(&kl, " off=");
+      kl_i(&kl, (long)off);
+      kl_s(&kl, " pi=");
+      kl_i(&kl, (list & 1) ? 1 : 0);
+      kl_s(&kl, " empty=");
+      kl_i(&kl, list == head ? 1 : 0);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+
   /* The list is CIRCULAR and an empty one points at the head itself.  glibc
      installs exactly that (head.list == &head.list, futex_offset == -32), so
      treating it as an entry reads 32 bytes BELOW the head -- which is
      pd->list (the stack-cache link) -- and ORs FUTEX_OWNER_DIED into it.
      Measured: pd->list.next 0x10802122D0 became 0x10C02122D0 and the next
-     pthread_join died in __free_tcb at 0x10C02122D8. */
-  for (int n = 0; n < L_ROBUST_LIST_LIMIT && list && list != head; n++) {
-    uint64_t word_va = list + (uint64_t)off;
+     pthread_join died in __free_tcb at 0x10802122D8.  The walk stops at
+     list == head.
+
+     A PI mutex is marked by the LOW BIT of its list entry (Linux
+     exit_robust_list does `if ((unsigned long)entry & 1) { pi = 1;
+     entry &= ~1UL; }`).  Measured here: entry 0x1000004081 for a mutex at
+     0x1000004060 with futex_offset -32 -- without the mask the "word" lands
+     at 0x1000004061, one byte off, so the atomic-or writes garbage into
+     __lock's upper bytes and the mutex is never marked OWNER_DIED. */
+  for (int n = 0; n < L_ROBUST_LIST_LIMIT && list; n++) {
+    uint64_t entry = list & ~(uint64_t)1;
+    if (!entry || entry == head)
+      break;
+    uint64_t word_va = entry + (uint64_t)off;
     uint32_t w = 0;
     if (l_copy_from_user(p, &w, word_va, 4) != 0)
       break;
@@ -947,20 +1337,26 @@ void linux_compat_thread_exit(struct process *p) {
         nw |= L_FUTEX_WAITERS;
       if (l_copy_to_user(p, word_va, &nw, 4) == 0 && (nw & L_FUTEX_WAITERS)) {
         uint64_t f = spinlock_acquire_irqsave(&proc_lock);
-        struct futex_ev ev = {0};
-        ev.op = FTR_WAKE;
-        ev.pid = p->pid; /* the dying owner is the waker here */
-        ev.rip = p->context[31];
-        l_futex_wake_locked(p->as, word_va, 0x7fffffff,
-                            L_FUTEX_BITSET_MATCH_ANY, &ev);
+        /* A PI waiter must be given the word, not merely woken: see the PI
+           note above.  l_pi_handoff_locked() preserves OWNER_DIED in the new
+           owner's word so glibc returns EOWNERDEAD to it. */
+        int ho = l_pi_handoff_locked(p->as, word_va, nw, 1);
+        if (ho < 0) {
+          struct futex_ev ev = {0};
+          ev.op = FTR_WAKE;
+          ev.pid = p->pid; /* the dying owner is the waker here */
+          ev.rip = p->context[31];
+          l_futex_wake_locked(p->as, word_va, 0x7fffffff,
+                              L_FUTEX_BITSET_MATCH_ANY, &ev);
+          futex_trace_note(&ev);
+        }
         spinlock_release_irqrestore(&proc_lock, f);
-        futex_trace_note(&ev);
       }
     }
     uint64_t next = 0;
-    if (l_copy_from_user(p, &next, list, 8) != 0)
+    if (l_copy_from_user(p, &next, entry, 8) != 0)
       break;
-    if (next == list)
+    if ((next & ~(uint64_t)1) == entry)
       break; /* self node: an empty list (defensive) */
     list = next;
   }
@@ -1459,6 +1855,16 @@ void linux_compat_signal_interrupt(struct process *t) {
     return;
   if (t->state != PROC_STATE_FUTEX)
     return;
+  /* A PI waiter must not leave its park without owning the lock: glibc's
+     pthread_mutex_lock treats futex_lock_pi() returning anything it does not
+     recognise (EINTR included) as success and enters the critical section
+     (pthread_mutex_lock.c:419-441).  Leave it parked; the signal stays pending
+     and is delivered when the lock is handed over and the syscall returns. */
+  {
+    int slot = l_thr_slot_of(t, 0);
+    if (slot >= 0 && l_thr[slot].pi)
+      return;
+  }
   t->context[0] = (uint64_t)(int64_t)-EINTR;
   {
     struct futex_ev ev = {0};
@@ -1484,3 +1890,19 @@ const struct l_sysent l_tab_thr[] = {
     {L_SYS_get_robust_list, l_thr_get_robust_list, "get_robust_list"},
     {L_SYS_getcpu, l_thr_getcpu, "getcpu"},
     L_SYSENT_END};
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* ---- unit-tier hooks (src/kernel/linux_compat_pi_test.c) ----------------
+ * The test drives the REAL word transitions above, not a copy of them, so a
+ * regression in the futex handler fails the unit tier. */
+int linux_compat_pi_test_acquire(uint32_t *word, uint32_t pid, int trylock) {
+  return l_pi_acquire_word((uint64_t)(uintptr_t)word, pid, trylock);
+}
+int linux_compat_pi_test_release(uint32_t *word, uint32_t pid) {
+  return l_pi_release_word((uint64_t)(uintptr_t)word, pid);
+}
+uint32_t linux_compat_pi_test_cas(uint32_t *word, uint32_t expect,
+                                  uint32_t desire) {
+  return l_pi_cas((uint64_t)(uintptr_t)word, expect, desire);
+}
+#endif

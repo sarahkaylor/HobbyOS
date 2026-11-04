@@ -67,5 +67,6 @@ void net_test_suite(void);
 void net_rdma_test_suite(void);
 void nfs_test_suite(void);
 void elf_loader_test_suite(void); /* docs/shared-libs.md lane B */
+void linux_compat_pi_test_suite(void); /* PI futex word state machine */
 
 #endif // UNIT_TEST_H

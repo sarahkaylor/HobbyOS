@@ -204,6 +204,20 @@ static struct mtx_ev mtx_ring[MTX_RING];
 static unsigned mtx_at;
 static int mtx_dumped;
 
+/* L25: return-value instrumentation.  Separate counters from mtx_rows so the
+   six-row "first few" budget below can never hide a failure.  Declared up
+   here because the alarm dump prints their totals. */
+#define MTX_FAIL_MAX 160
+static unsigned mtx_lock_n, mtx_lock_bad;
+static unsigned mtx_try_n, mtx_try_bad;
+static unsigned mtx_timed_n, mtx_timed_bad;
+static unsigned mtx_unlock_n, mtx_unlock_bad;
+static unsigned mtx_fail_rows;
+static unsigned mtx_init_rows;
+static unsigned mtx_init_total;
+static unsigned mtx_kind_init[64]; /* __kind histogram at pthread_mutex_init */
+static unsigned mtx_kind_fail[64]; /* __kind of a mutex whose call failed  */
+
 static char *mtx_put(char *p, char *end, const char *s);
 static char *mtx_putx(char *p, char *end, unsigned long v);
 static char *mtx_puti(char *p, char *end, long v);
@@ -288,6 +302,51 @@ static char *mtx_puti(char *p, char *end, long v) {
   return p;
 }
 
+/* L25: the totals, independent of every per-row cap.  Printed periodically
+   from pthread_mutex_init (alarm(2) is ENOSYS on this kernel, so a SIGALRM
+   dump never arrives) and once more by the dump if it ever does.
+   "lock=N bad=M" is the PI hypothesis in one row. */
+static void mtx_summary(const char *why) {
+  if (!mtx_on()) return;
+  char sb[768]; char *q = sb, *qe = sb + sizeof sb - 8;
+  q = mtx_put(q, qe, "[MTXR] summary ");
+  q = mtx_put(q, qe, why ? why : "");
+  q = mtx_put(q, qe, " lock=");
+  q = mtx_puti(q, qe, (long)mtx_lock_n);
+  q = mtx_put(q, qe, " bad=");
+  q = mtx_puti(q, qe, (long)mtx_lock_bad);
+  q = mtx_put(q, qe, " try=");
+  q = mtx_puti(q, qe, (long)mtx_try_n);
+  q = mtx_put(q, qe, " bad=");
+  q = mtx_puti(q, qe, (long)mtx_try_bad);
+  q = mtx_put(q, qe, " timed=");
+  q = mtx_puti(q, qe, (long)mtx_timed_n);
+  q = mtx_put(q, qe, " bad=");
+  q = mtx_puti(q, qe, (long)mtx_timed_bad);
+  q = mtx_put(q, qe, " unlock=");
+  q = mtx_puti(q, qe, (long)mtx_unlock_n);
+  q = mtx_put(q, qe, " bad=");
+  q = mtx_puti(q, qe, (long)mtx_unlock_bad);
+  q = mtx_put(q, qe, "\n[MTXR] init-kinds");
+  for (int k = 0; k < 64; k++)
+    if (mtx_kind_init[k]) {
+      q = mtx_put(q, qe, " ");
+      q = mtx_puti(q, qe, k);
+      q = mtx_put(q, qe, ":");
+      q = mtx_puti(q, qe, (long)mtx_kind_init[k]);
+    }
+  q = mtx_put(q, qe, "\n[MTXR] fail-kinds");
+  for (int k = 0; k < 64; k++)
+    if (mtx_kind_fail[k]) {
+      q = mtx_put(q, qe, " ");
+      q = mtx_puti(q, qe, k);
+      q = mtx_put(q, qe, ":");
+      q = mtx_puti(q, qe, (long)mtx_kind_fail[k]);
+    }
+  q = mtx_put(q, qe, "\n");
+  ssize_t w = write(2, sb, (size_t)(q - sb)); (void)w;
+}
+
 /* SIGALRM (armed for 20 s) dumps the ring.  A helper thread would need
    -lpthread in the launcher link and would add a 26th guest thread; a signal
    costs neither and is delivered to this same (parked) main thread -- the
@@ -330,6 +389,7 @@ static void mtx_alarm_handler(int sig) {
     }
   }
   if (p > buf) { ssize_t w = write(2, buf, (size_t)(p - buf)); (void)w; }
+  mtx_summary("alarm");
 }
 
 /* ---- mutex observation (RW_TRACE_MUTEX) ---------------------------------
@@ -342,6 +402,14 @@ static void mtx_alarm_handler(int sig) {
  * return address and the tid.  Off unless RW_TRACE_MUTEX is set, so the
  * shipping run's code path is unchanged.
  *
+ * L25: the RETURN VALUE of every mutex entry point is logged (uncapped, up to
+ * MTX_FAIL_MAX rows) together with the mutex's __kind and its __lock word
+ * before and after.  A PRIO_INHERIT mutex (__kind 34 = ERRORCHECK|PI) whose
+ * contended lock hits a kernel without FUTEX_LOCK_PI is the hypothesis this
+ * wave tests: if glibc returns an error that Unity ignores, the row says so;
+ * if glibc instead aborts, the serial says that instead.  A summary line at
+ * the alarm makes the totals independent of the row cap.
+ *
  * The real functions are reached through dlvsym(RTLD_NEXT,...) -- the same
  * non-interposed route the dlsym wrapper below uses, so there is no recursion.
  */
@@ -351,6 +419,24 @@ static int (*next_mutex_unlock)(pthread_mutex_t *);
 static int (*next_mutex_init)(pthread_mutex_t *, const pthread_mutexattr_t *);
 static unsigned mtx_rows;
 static int mtx_main_tid; /* gettid() of the thread that calls PlayerMain */
+
+/* glibc 2.31 x86-64 pthread_mutex_t: __lock(0) __count(4) __owner(8)
+   __nusers(12) __kind(16) __spins(20) ... -- 0x30 bytes total.  __kind 34 is
+   ERRORCHECK(2) | PRIO_INHERIT(32), the kind UnityPlayer+0xBA2E16 creates. */
+static int mtx_kind(const pthread_mutex_t *m) {
+  return m ? ((const volatile int *)m)[4] & 0x3f : -1;
+}
+
+static void mtx_fail_row(const char *what, const pthread_mutex_t *m,
+                         long pre, long rv, void *from) {
+  int k = mtx_kind(m);
+  if (k >= 0 && k < 64) mtx_kind_fail[k]++;
+  if (mtx_fail_rows >= MTX_FAIL_MAX) return;
+  mtx_fail_rows++;
+  fprintf(stderr, "[MTXR] %s m=%p kind=%d pre=%#lx rv=%ld from=%p tid=%d\n",
+          what, (const void *)m, k, pre, rv, from, (int)gettid());
+}
+
 
 static int mtx_on(void) {
   static int on = -1;
@@ -399,8 +485,13 @@ int pthread_mutex_lock(pthread_mutex_t *m) {
   if (mtx_on() && !mtx_boring(m) && (pre != 0 || mtx_hot(m)))
     mtx_row("lock", m, pre, __builtin_return_address(0));
   int r = next_mutex_lock(m);
-  if (mtx_on() && r != 0)
-    mtx_row("lock-rv", m, r, __builtin_return_address(0));
+  if (mtx_on()) {
+    mtx_lock_n++;
+    if (r != 0) {
+      mtx_lock_bad++;
+      mtx_fail_row("lock-fail", m, pre, r, __builtin_return_address(0));
+    }
+  }
   return r;
 }
 
@@ -417,17 +508,33 @@ int pthread_mutex_timedlock(pthread_mutex_t *m, const struct timespec *t) {
   mtx_rec(3, m, __builtin_return_address(0));
   if (mtx_on() && (pre != 0 || mtx_hot(m) || (int)gettid() == mtx_main_tid))
     mtx_row("timedlock", m, pre, __builtin_return_address(0));
-  return real ? real(m, t) : -1;
+  int r = real ? real(m, t) : -1;
+  if (mtx_on()) {
+    mtx_timed_n++;
+    if (r != 0) {
+      mtx_timed_bad++;
+      mtx_fail_row("timedlock-fail", m, pre, r, __builtin_return_address(0));
+    }
+  }
+  return r;
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *m) {
   if (!next_mutex_trylock)
     next_mutex_trylock = (int (*)(pthread_mutex_t *))
         dlvsym(RTLD_NEXT, "pthread_mutex_trylock", "GLIBC_2.2.5");
+  int pre = m ? *(volatile int *)m : -1;
   mtx_rec(2, m, __builtin_return_address(0));
   int r = next_mutex_trylock(m);
-  if (mtx_on() && (r != 0 || mtx_hot(m) || (int)gettid() == mtx_main_tid))
-    mtx_row("trylock", m, r, __builtin_return_address(0));
+  if (mtx_on()) {
+    mtx_try_n++;
+    if (r != 0) {
+      mtx_try_bad++;
+      mtx_fail_row("trylock-fail", m, pre, r, __builtin_return_address(0));
+    } else if (mtx_hot(m) || (int)gettid() == mtx_main_tid) {
+      mtx_row("trylock", m, r, __builtin_return_address(0));
+    }
+  }
   return r;
 }
 
@@ -439,7 +546,15 @@ int pthread_mutex_unlock(pthread_mutex_t *m) {
   mtx_rec(1, m, __builtin_return_address(0));
   if (mtx_on() && !mtx_boring(m) && mtx_hot(m))
     mtx_row("unlock", m, pre, __builtin_return_address(0));
-  return next_mutex_unlock(m);
+  int r = next_mutex_unlock(m);
+  if (mtx_on()) {
+    mtx_unlock_n++;
+    if (r != 0) {
+      mtx_unlock_bad++;
+      mtx_fail_row("unlock-fail", m, pre, r, __builtin_return_address(0));
+    }
+  }
+  return r;
 }
 
 int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a) {
@@ -456,8 +571,29 @@ int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a) {
   int r = next_mutex_init(m, a);
   /* __kind is the 5th int of a glibc pthread_mutex_t; logging it after the
      call avoids linking libpthread just for pthread_mutexattr_gettype. */
-  if (hot) mtx_row("init-kind", m, m ? ((volatile int *)m)[4] : -1,
-                   __builtin_return_address(0));
+  if (mtx_on()) {
+    int k = mtx_kind(m);
+    if (k >= 0 && k < 64) mtx_kind_init[k]++;
+    unsigned n = ++mtx_init_total;
+    /* Every non-plain kind is logged, always (bounded): the PI pool is 23
+       objects with kind 33 and their addresses are exactly the blocks found
+       later in a 0x30 free-list chain.  A cap over ALL inits hid them once. */
+    if (k != 1 && mtx_init_rows < 160) {
+      mtx_init_rows++;
+      fprintf(stderr, "[MTXR] init-odd m=%p kind=%d rv=%d from=%p tid=%d n=%u\n",
+              (void *)m, k, r, __builtin_return_address(0), (int)gettid(), n);
+    }
+    if (mtx_fd >= 0) { /* the log keeps kind for EVERY init */
+      char b[128]; char *q = b, *e = b + sizeof b - 8;
+      q = mtx_put(q, e, "[MTRK] init m=");
+      q = mtx_putx(q, e, (unsigned long)m);
+      q = mtx_put(q, e, " kind=");
+      q = mtx_puti(q, e, k);
+      q = mtx_put(q, e, "\n");
+      ssize_t w = write(mtx_fd, b, (size_t)(q - b)); (void)w;
+    }
+    if (n % 64 == 0) mtx_summary("inits");
+  }
   return r;
 }
 
