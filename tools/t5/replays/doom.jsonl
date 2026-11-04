@@ -26,3 +26,5 @@
 {"t": "key", "k": "right", "pause": 0.25}
 {"t": "key", "k": "right", "pause": 0.25}
 {"t": "key", "k": "right", "pause": 0.25}
+{"t": "key", "k": "esc", "pause": 1.5}
+{"t": "key", "k": "down", "pause": 0.4}
