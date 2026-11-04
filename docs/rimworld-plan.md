@@ -653,6 +653,30 @@ that line. Next: ship a compat `libudev.so.1` with a zero-device enumerator
 (the `libasound.so.2` null-driver pattern) — see
 `docs/rimworld-launch-log.md` §11.4.
 
+**Status 2026-11-04 (lane L28): the window handshake completes; the wall is a
+NULL dispatch slot.** The compat X11 shim now keeps **per-XID event state**
+(`struct xwin wins[XW_MAX]`, root included), so `XCreateWindow`,
+`XMapWindow`, `XUnmapWindow`, `XDestroyWindow` and `XSelectInput` act on the
+XID the client names and the desktop's `ESC ] G` addresses
+ConfigureNotify/Expose to the XID that asked for the surface (`d->surface`),
+not to whichever window was created last. `XReparentWindow` implements the real
+server rule — measured on Xvfb with `tools/rw/x11-reparent-probe.c`:
+reparenting a **mapped** window into a mapped parent unmaps it, reparents it
+and remaps it, delivering `UnmapNotify → ReparentNotify → MapNotify(+Expose)`
+for the child. That is exactly the event Unity blocks on (`XIfEvent` predicate
+`UnityPlayer+0x194c19b`; the instrumented wait names the awaited id **2097154**,
+the child — not the container it was reparented into). The game therefore
+passes the handshake, runs its window-activation path and reaches the tail of
+its window-show function. **Current wall: an indirect call to address 0**
+immediately after the post-reparent `XCheckIfEvent(UnmapNotify)` returns false —
+`PC=0`, `rdi = &g_d` (the `Display*`), `ret=0`, with no shim and no GLX entry
+point reached (`glXGetProcAddress` trace is empty; `glXCreateContextAttribsARB`,
+the only hidden glX symbol in the guest libGL, is now exported by Mesa patch
+0006). All 135 names of Unity's own X11 dispatch table are exported, so the
+remaining NULL slot lives in a table the shim cannot see; the next instrument
+is a `SIGSEGV` ucontext dump inside the DSO or a QEMU gdb stub. Rows and the
+full host-vs-guest diff: `docs/rimworld-launch-log.md` §18.
+
 **Historical (2026-11-02):** plumbing landed; the binary itself cannot be *loaded*
 (`ET_EXEC` at 0x200000, below the 64 GiB user window → `elf loader: ET_EXEC
 linked below the user window`), which is why AD-9 replaces the stub instead. A

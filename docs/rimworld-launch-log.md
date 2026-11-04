@@ -2027,3 +2027,200 @@ probes both work.
   two simultaneously visible windows would render both into the same pixels.
 - `XIfEvent`'s held array is static (one display per process by contract), so
   two threads calling it concurrently would share it.
+
+---
+
+## 18. 2026-11-04 — M6: the MapNotify Unity waits for belongs to a *reparented* window, and Xlib remaps it
+
+Lane L28 (`rw-l28-mapnotify`), tree seeded after wave 11 + §17. §17 ended with
+Unity blocked in `XIfEvent` for a MapNotify "for a window it never maps through
+the shim". That description was **wrong in one important way**: Unity *had*
+mapped the window. What it waits for is the MapNotify a real X server generates
+when a **mapped** window is **reparented** into a mapped parent — the shim's
+`XReparentWindow` was a `return 0` stub, so the event never existed.
+
+### 18.1 The awaited window, named by the instrument
+
+`XIfEvent` now prints the `XPointer` argument (the predicate dereferences it:
+`UnityPlayer+0x194c19b` is `event->type == 19 && xmap.window == *(Window *)arg`),
+and the whole queued `(type,window)` list. Before the fix, at the block:
+
+```text
+[XC] XReparentWindow win=2097154 parent=2097155
+[XC] XIfEvent caller=0x1082451e6e
+ arg=69794042712 want=2097154 q=22:2097155,22:2097154,12:2097154,28:2097154,
+[XC] wait_event: blocking read fd0
+```
+
+`want=2097154` — the **child** window, not the container (2097155) and not a new
+one. The queue held PropertyNotify(2097155), PropertyNotify(2097154),
+Expose(2097154) and MappingNotify; no MapNotify for 2097154 was ever generated
+because `XReparentWindow` did nothing. The next call site
+(`UnityPlayer+0x194c19e` → `0x194c187`) is the *peer* predicate for
+**UnmapNotify**, i.e. Unity sequences on both events.
+
+### 18.2 Host reference: what a real server does (Xvfb, same binary)
+
+Two instruments, both kept (`tools/rw/x11-watch.c`,
+`tools/rw/x11-reparent-probe.c`):
+
+| step | host (Xvfb `:95`, llvmpipe) |
+|---|---|
+| 1 | `Create 0x400003 32x32` → `Destroy` (SDL's GL probe) |
+| 2 | `Create 0x400007 1920x1080 override=0`, `Map` → **MapNotify(event=window)**, client mask `0x60c07f` |
+| 3 | `Create 0x400008 1920x1080 override=1` (client selects **0x20000 = StructureNotify only**), `Map` → MapNotify(container) |
+| 4 | `Unmap 0x400007`, `Reparent 0x400007 → 0x400008`, **`Map 0x400007`** → MapNotify(child) |
+| 5 | later: reparent back to root, resize to 1280x720, context created, `GfxDevice` |
+
+Step 4 is generated **by the server**: a native probe that maps a window,
+maps an override-redirect container, reparents the window into it and then
+simply drains events (no `XMapWindow` call) prints
+
+```text
+  event UnmapNotify      win=0x200001
+  event ReparentNotify   win=0x200001
+  event MapNotify        win=0x200001
+  event Expose           win=0x200001
+RESULT: MapNotify(w1) after reparent, no explicit map: YES (server remaps)
+```
+
+So the guest must deliver `UnmapNotify → ReparentNotify → MapNotify` (plus
+Expose) from `XReparentWindow`, for the reparented XID.
+
+### 18.3 The fix: event state per XID, not per display
+
+`libx11.c` had one `d->win` record for "the window". Unity creates three, and
+the *container's* create wiped the GL window's `structure_selected`, so the
+child's MapNotify could never be produced. The shim now keeps a
+`struct xwin wins[XW_MAX]` table (root included) with per-XID `parent`,
+`mapped`, `event_mask`, "ever selected" flags and geometry, and:
+
+- `XCreateWindow`/`XCreateSimpleWindow` add an entry and emit **CreateNotify**
+  to the parent's `SubstructureNotifyMask`;
+- `XMapWindow` marks *that* XID mapped, sends `ESC ] X` for the surface, and
+  emits **MapNotify** to the window (StructureNotify) and to its parent
+  (SubstructureNotify);
+- `XUnmapWindow` emits **UnmapNotify** (window + parent) and stops input for
+  the surface;
+- `XReparentWindow` implements the real semantics above: `UnmapNotify`,
+  `ReparentNotify`, then **MapNotify + Expose** for the remapped child, and the
+  child becomes the surface XID;
+- `XDestroyWindow` emits **DestroyNotify** (window + parent) and frees the slot;
+- the desktop's `ESC ] G` now addresses **ConfigureNotify/Expose to the XID
+  that asked for the surface** (`d->surface`), not to whichever window was
+  created last — the container used to receive them;
+- `XSelectInput` stores the mask per XID (root included), so the container's
+  `StructureNotifyMask` no longer replaces the GL window's mask;
+- key/button/motion events go to the surface XID with *its* mask (the
+  container selects no input); `XGetWindowAttributes`, `XQueryTree` and
+  `XGetGeometry` answer per XID;
+- `XCheckIfEvent` is traced, and `XPeekIfEvent` is exported (it was missing
+  from the DSO entirely).
+
+Two new defensive exports matter for the same reason: Unity's own X11
+dispatch table (135 names, extracted from the loader at
+`UnityPlayer+0x1940706`) and the extension families it resolves from the same
+handles (`Xkb*`, `XFixes*`, `XRR*`, `XF86VidMode*`, `XScreenSaver*`,
+`XShmCreatePixmap`) are called without a NULL check on this build. All are
+exported now; the extension ones answer "not present" coherently.
+
+### 18.4 Before / after
+
+Before (§17.5):
+
+```text
+[XC] XCreateWindow id=2097155
+[XC] XMapWindow
+[XC] XIfEvent matched type=19
+[XC] XInternAtom -> 0
+[XC] XIfEvent caller=0x1082451e6e
+[XC] wait_event: blocking read fd0        <- forever
+```
+
+After:
+
+```text
+[XC] XReparentWindow win=2097154 parent=2097155
+[XC] XIfEvent caller=0x1082456e6e
+ arg=… want=2097154 q=22:2097155,22:2097154,12:2097154,28:2097154,18:2097154,21:2097154,19:2097154,12:2097154,
+[XC] XIfEvent matched type=19
+[XC] XIfEvent matched win=2097154          <- the reparent remap
+[XC] XCheckIfEvent caller=0x1082456e87     <- UnmapNotify probe: false, as on the host
+```
+
+The window is on the desktop while it runs (screenshot `01_running.png`:
+maximized `RMLAUNCH` surface, 1916x1018 content rect) and the game moves past
+the handshake into its window-activation path.
+
+### 18.5 The next blocker (exact rows)
+
+Immediately after the UnmapNotify probe returns, the process jumps to address
+**0** — an indirect call through a NULL function pointer, with our `Display*`
+still in `rdi`:
+
+```text
+[XC] XCheckIfEvent caller=0x1082456e87
+[KERNEL] pid=4 (/NFS/RimWorldLinux) memory fault VA=0x0 PC=0x0 rw=rx
+         in=HOLE region=NONE … rdi=0x108020E000 rbp=0x0 ret=0x0 -> killed
+[LCOMPAT] fault sig=11 pid=4 tgid=4 …
+```
+
+`0x108020E000` is `&g_d` (libX11 base `0x10801fc000` + `g_d`'s `0x12000`), and
+`ret=0x0` says the jump pushed no return address — a tail jump through a NULL
+slot. What is ruled out by measurement:
+
+- every one of the 135 names in **Unity's own X11 table** is exported by the
+  shim (the four that were missing — `XFixesQueryVersion`,
+  `XFixesCreatePointerBarrier`, `XFixesDestroyPointerBarrier`,
+  `XIBarrierReleasePointer` — are now stubs and none is entered);
+- `XkbGetMap` is exported and not entered;
+- no `glXGetProcAddress` call is made at all (the new Mesa trace prints every
+  request), and `glXCreateContextAttribsARB` — the **only** hidden glX symbol
+  in the guest libGL — is now exported (patch 0006); the host's glvnd libGL
+  exports it, so Unity's GLX loader can find it there;
+- no shim entry point of any kind is reached between the probe and the fault.
+
+So the NULL slot is in a table the shim cannot see. The next instrument is a
+`SIGSEGV` ucontext dump inside the compat DSO (print `RIP`/`RSP` and walk the
+stack) or a QEMU gdb stub attached at the fault; both name the caller of the
+NULL jump, which is what the next lane needs.
+
+### 18.6 Instruments added (kept)
+
+- `libx11.c` trace: `xtr_u`/`xtr_s`/`xtr_awaited`/`xtr_queue` (single-row
+  records; `want=` is the predicate's window), all `XTNOINL` — an *inlined*
+  trace row previously buried a fault inside `XCreateWindow+0x10f8`;
+  `XCreateWindow` prints id/parent/geometry/vmask/evmask, `XSelectInput` its
+  XID, `XMapWindow`/`XUnmapWindow`/`XReparentWindow`/`XDestroyWindow` their
+  ids, `XCheckIfEvent` its caller.
+- `tools/rw/x11-watch.c`: host observer (SubstructureNotify on the root, a
+  line per create/map/unmap/reparent/configure/destroy plus the client's mask).
+- `tools/rw/x11-reparent-probe.c`: the native probe that establishes the
+  server-remaps-on-reparent rule.
+- `tools/mesa/patches/0006-glx-export-create-context-attribs.patch`:
+  `glXCreateContextAttribsARB` was `GLOBAL HIDDEN` in the guest object (the
+  only hidden glX entry point) and therefore absent from `libGL.so.1`'s
+  `.dynsym`; exported explicitly.
+- `tools/mesa/patches/0007-glx-trace-getproc.patch`: `HOBBYOS_GLX_TRACE` now
+  logs every `glXGetProcAddress` name and answer — a NULL answer there is a
+  jump to 0, and the last line names the missing entry.
+
+### 18.7 Regressions (serialized, never with the desktop harness)
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 407   Tests failed: 0
+python3 tools/gate/m3_window_probe.py     m3w: PASS
+python3 tools/gate/m4_gl_probe.py         m4: PASS
+```
+
+### 18.8 Limits
+
+- The shim still aliases every XID onto one desktop surface: the two windows
+  are not independently visible, they are one set of pixels with per-XID
+  *event* state. `XReparentWindow` therefore only changes the event topology,
+  never the pixels.
+- `XPeekIfEvent`'s held array is static, like `XIfEvent`'s (one display per
+  process by contract).
+- The Xkb/XFixes/RandR/VidMode/ScreenSaver/Shm exports are presence stubs:
+  they remove NULL slots and answer "extension not present", they do not
+  implement those extensions.
