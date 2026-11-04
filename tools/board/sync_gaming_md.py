@@ -48,6 +48,23 @@ def plan_id_problems(order, seed_max=SEED_MAX):
             f"(missing={gaps}, duplicated={dups})"]
 
 
+def plan_duplicate_ids(path=None):
+    """Ids with more than one §8 row (GB-202).
+
+    parse_plan() keeps the first row for an id and silently skips later ones, so
+    plan_id_problems() sees a clean id set even when the plan carries a doubled
+    row.  This scans the raw table rows instead; one row per id is the plan's
+    contract, so a duplicate is a defect even when the id set is perfect.
+    """
+    path = path or S.PLAN
+    counts = {}
+    for line in open(path, encoding="utf-8"):
+        m = re.match(r"^\|\s*(GB-\d{3})\s*\|", line)
+        if m:
+            counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    return sorted(g for g, n in counts.items() if n > 1)
+
+
 def board_snapshot():
     out = {}
     for it in board.all_issues("all"):
@@ -180,6 +197,8 @@ def find_problems(plan, order, bd, text, verbose=False):
     # id repeats.  §8 is organised by milestone, and mints above the seed are
     # sparse by design — see plan_id_problems() (GB-185).
     problems += plan_id_problems(order)
+    for gid in plan_duplicate_ids():
+        problems.append(f"plan: duplicate §8 rows for {gid} (one row per id)")
     for gid in order:
         t = plan[gid]
         if t["weight"] not in ("S", "M", "L"):
