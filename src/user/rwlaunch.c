@@ -240,9 +240,26 @@ __attribute__((section(".text._start"))) void _start(void) {
     mtx_env[k++] = on ? '1' : '0';
     mtx_env[k] = 0;
   }
+  /* HOBBYOS_GLX_TRACE: the Mesa GLX frontend's opt-in call trace
+     (tools/mesa/patches/0005).  Same marker-file rule as RW_TRACE_MUTEX: the
+     guest desktop starts the game, so the host cannot pass an environment.
+     This is how a refused FBConfig or context is told apart from a missing
+     visual: the trace prints the attrib list Unity sent. */
+  char glx_env[40];
+  {
+    int gk = open("/GLXON", 0 /* O_RDONLY */);
+    int on = gk >= 0;
+    if (gk >= 0) close(gk);
+    const char *nm = "HOBBYOS_GLX_TRACE=";
+    int k = 0;
+    while (nm[k]) { glx_env[k] = nm[k]; k++; }
+    glx_env[k++] = on ? '1' : '0';
+    glx_env[k] = 0;
+  }
   char *envp[] = {
       (char *)"HOME=" RW_HOME,
       mtx_env,
+      glx_env,
       (char *)"LC_ALL=C",
       (char *)"LANG=C",
       /* /LIB64: the glibc pin + compat libX11/libGL/libasound.  /RWDSO: the
@@ -286,6 +303,18 @@ __attribute__((section(".text._start"))) void _start(void) {
   pc(" HOME=" RW_HOME " LC_ALL=C DISPLAY=" RW_DISPLAY
      " LD_LIBRARY_PATH=/LIB64:" RW_DSO_DIR ":" RW_NFS_MNT
      " RW_DSO_DIR=" RW_DSO_DIR "\n");
+
+  /* The desktop window protocol is a pipe pair: requests on the process's
+   * stdout, events on its stdin.  Unity's -logFile replaces fd 1 (and 2) with
+   * the log file before the first window call, so the compat libX11's
+   * ESC ] X would land in Player.log and the desktop would never answer --
+   * measured L27: the first XMapWindow blocked forever in read(0).  Keep the
+   * pipe reachable on fd 9, which the shim probes with a zero-length write;
+   * a directly launched client has no fd 9 and keeps using fd 1. */
+  int protofd = dup2(1, 9);
+  pc("[RW] rwlaunch: protocol fd -> ");
+  pd(protofd);
+  pc("\n");
 
   int pid = spawn_ex(RW_GAME, argv, envp, (const int (*)[2])fdmap,
                      cfd >= 0 ? 1 : 0);

@@ -111,6 +111,11 @@ if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
   echo "== build: xcompat DSOs (must predate any libGL audit/stage)"
   make -s ARCH=intel xcompat_dsos >"$OUT/build_dsos.log" 2>&1 || {
     echo "BUILD FAILED (xcompat_dsos)"; tail -30 "$OUT/build_dsos.log"; exit 2; }
+  if [ "${RW_TRACE_X11:-0}" = 1 ]; then
+    echo "== build: traced libX11 (-DXC_TRACE) for the X-level ladder"
+    make -s ARCH=intel xcompat_dsos_trace >"$OUT/build_dsos_trace.log" 2>&1 || {
+      echo "BUILD FAILED (xcompat_dsos_trace)"; tail -20 "$OUT/build_dsos_trace.log"; exit 2; }
+  fi
 
   echo "== build: native rwlaunch + AD-9 PlayerMain launcher (glibc 2.31 PIE)"
   make -s ARCH=intel obj/intel/libc.a >"$OUT/build_libc.log" 2>&1 || {
@@ -160,6 +165,10 @@ stage "$LDIR/ld-2.31.so" ::/lib64/ld-linux-x86-64.so.2
 
 echo "== stage: compat window/audio DSOs (libX11.so.6, libasound.so.2)"
 bash src/user/xcompat/stage.sh "$IMG" | sed 's/^/  /' || exit 2
+if [ "${RW_TRACE_X11:-0}" = 1 ]; then
+  stage "$ROOT/obj/xcompat/trace/libX11.so.6" ::/LIB64/libX11.so.6
+  echo "  staged: traced libX11.so.6 over the shipped one (-DXC_TRACE)"
+fi
 echo "== stage: Mesa GL frontend (libGL.so.1, libGLX.so.0)"
 bash tools/mesa/stage.sh "$IMG" | sed 's/^/  /' || {
   echo "ENVIRONMENT: Mesa DSOs missing — run bash tools/mesa/build-hobbyos.sh"; exit 2; }
@@ -234,6 +243,16 @@ if [ "${RW_TRACE_MUTEX:-0}" = 1 ]; then
   echo "  staged: /MTXON -> RW_TRACE_MUTEX=1 in the game"
 else
   mdel -i "$IMG" ::/MTXON >/dev/null 2>&1 || true
+fi
+# Opt-in GLX-level trace (tools/mesa/patches/0005): /GLXON makes rwlaunch
+# export HOBBYOS_GLX_TRACE=1, so the serial log carries every glX* request
+# Unity made and what the Mesa xlib frontend answered.
+if [ "${RW_TRACE_GLX:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/glxon"
+  stage "$OUT/glxon" ::/GLXON
+  echo "  staged: /GLXON -> HOBBYOS_GLX_TRACE=1 in the game"
+else
+  mdel -i "$IMG" ::/GLXON >/dev/null 2>&1 || true
 fi
 # No WAVE.CFG: MODE=desktop has no boot-wave loader (KERNEL_MODE_TEST only),
 # and the game must be started from the desktop so it inherits the window
