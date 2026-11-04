@@ -80,6 +80,17 @@ periodic `[IDLESTUCK]` reaper dumps (slot=1 pid=1 claims c1=1) for the whole
 run while never disposing the process (desktop stayed alive 46 min). Watch
 item for G1/G2 while touching the flush/IRQ paths; NOT a GX gate.
 
+**Measured 2026-11-04 (GB-197, `tools/t4/virgl_probe.py`) on the graded farm
+host `swarm-farm-3`:** the GL device is **not available there as provisioned** —
+`qemu-system-x86_64 -device virtio-gpu-gl-pci,help` prints `Device
+'virtio-gpu-gl-pci' not found` (QEMU 10.2.1, stock Ubuntu/Debian build; the
+`qemu-system-modules-opengl` package that supplied the GL variants on the
+workstation above is not installed, candidate `1:10.2.1+ds-1ubuntu3.3`). The
+plain `virtio-gpu-pci` control boot reaches the desktop (`VirtIO GPU:
+virtio-pci`, `[MENU] count=186`, 0 3D markers). So the 3D surface is blocked on
+host provisioning, not on the guest driver: see `docs/gl2-surface.md` for the
+boundary and the epic entry criterion.
+
 ---
 
 ## 2. Current state (grounded)
