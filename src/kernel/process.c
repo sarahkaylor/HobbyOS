@@ -4343,20 +4343,41 @@ int64_t sys_brk(uint64_t addr) {
       uint64_t base = (old + 0xFFF) & ~0xFFFULL;
       uint64_t end = (addr + 0xFFF) & ~0xFFFULL;
       if (end > base) {
-        /* P2.5 (S5): the loader reserves the whole HEAP slot demand-zero,
-           so a grow that stays inside it is already backed -- and a
-           redundant insert would be rejected as an overlap.  Only an
-           uncovered span (no loader-created v2 AS looks like that) needs
-           its own region. */
-        struct vm_region *cov = vm_region_find(cur->as, base);
-        int covered = cov && cov->base <= base &&
-                      cov->base + cov->len >= end &&
-                      (cov->prot & VM_PROT_WRITE) && cov->kind == VMK_HEAP;
-        if (!covered &&
-            vm_region_insert(cur->as, base, end - base,
-                             VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
-                             VM_MAP_PRIVATE, 0, 0) != 0)
-          return -ENOMEM;
+        /* P2.5 (S5): the loader usually reserves the whole HEAP slot
+           demand-zero, so a grow inside it is already backed.  But the slot is
+           NOT always one region: a partial mprotect, a partial munmap or any
+           other split leaves several adjacent fragments, and every later grow
+           must still work (Linux's brk extends the data segment whatever its
+           VMA count).
+
+           The old single-region test (`one region must cover [base,end)`) then
+           fell through to an insert of the WHOLE span, which overlapped the
+           surviving fragment and answered -ENOMEM -- so one mprotect of one
+           heap page made every future brk grow fail for the life of the
+           process (measured: src/user/linux_probe_vmcommit.c "brk grow across
+           split heap" row: host ok / guest FAIL, grow returned the OLD break).
+           Walk the span instead: accept HEAP fragments, insert only the
+           uncovered tail, refuse only a FOREIGN region in the way. */
+        uint64_t cur_va = base;
+        while (cur_va < end) {
+          struct vm_region *r = vm_region_find(cur->as, cur_va);
+          if (!r) {
+            if (vm_region_insert(cur->as, cur_va, end - cur_va,
+                                 VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
+                                 VM_MAP_PRIVATE, 0, 0) != 0)
+              return -ENOMEM;
+            break; /* the insert either merged or covered the rest */
+          }
+          if (r->kind != VMK_HEAP)
+            return -ENOMEM; /* the break would swallow a foreign mapping */
+          /* A HEAP fragment counts whatever its protection: it is still the
+             data segment, and Linux's brk moves the break over a read-only
+             data page without complaint (only a *foreign* VMA is a conflict). */
+          uint64_t rend = r->base + r->len;
+          if (rend > end || rend <= cur_va)
+            break; /* this fragment (already) covers the rest */
+          cur_va = rend;
+        }
       }
     }
     cur->heap_brk = addr;

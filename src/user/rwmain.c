@@ -222,6 +222,10 @@ static void mtx_rec(int op, const void *m, void *from) {
     if ((a >= 0x1090000000UL && a < 0x1091000000UL) ||
         (a >= 0x108218cc00UL && a < 0x108218cd00UL))
       return;
+    /* L24: the log keeps the arena's history plus every init/destroy (rare,
+       and the only evidence of a lock pool).  Everything else (61k condvar
+       ops) would bury it. */
+    int hot = (a >= 0x10C0000000UL && a < 0x10C0400000UL);
     static unsigned printed;
     printed++;
     char buf[160]; char *p = buf, *end = buf + sizeof buf - 8;
@@ -229,6 +233,7 @@ static void mtx_rec(int op, const void *m, void *from) {
     p = mtx_put(p, end, (op == 0) ? "lock" : (op == 1) ? "unlock" :
                           (op == 2) ? "trylock" : (op == 3) ? "timedlock" :
                           (op == 4) ? "sem_wait" : (op == 5) ? "sem_post" :
+                          (op == 7) ? "init" : (op == 8) ? "destroy" :
                                       "cond_wait");
     p = mtx_put(p, end, " m=");
     p = mtx_putx(p, end, a);
@@ -237,8 +242,10 @@ static void mtx_rec(int op, const void *m, void *from) {
     p = mtx_put(p, end, " from=");
     p = mtx_putx(p, end, (unsigned long)from);
     p = mtx_put(p, end, "\n");
-    if (printed <= 6) { ssize_t w = write(2, buf, (size_t)(p - buf)); (void)w; }
-    if (mtx_fd >= 0) { ssize_t w = write(mtx_fd, buf, (size_t)(p - buf)); (void)w; }
+    if (hot && printed <= 6) { ssize_t w = write(2, buf, (size_t)(p - buf)); (void)w; }
+    if (mtx_fd >= 0 && (hot || op >= 7)) {
+      ssize_t w = write(mtx_fd, buf, (size_t)(p - buf)); (void)w;
+    }
   }
 }
 
@@ -251,6 +258,8 @@ static const char *mtx_opname(int op) {
   case 4: return "sem_wait";
   case 5: return "sem_post";
   case 6: return "cond_wait";
+  case 7: return "init";
+  case 8: return "destroy";
   default: return "?";
   }
 }
@@ -301,6 +310,11 @@ static void mtx_alarm_handler(int sig) {
     if ((e->m >= 0x1090000000UL && e->m < 0x1091000000UL) ||
         (e->m >= 0x108218cc00UL && e->m < 0x108218cd00UL))
       continue;
+    /* L24: the dump is about the parked arena and the lock lifetime.  Rows
+       for other addresses' condvars would evict the answer from the ring and
+       the serial budget alike. */
+    if (!(e->m >= 0x10C0000000UL && e->m < 0x10C0400000UL) && e->op < 7)
+      continue;
     p = mtx_put(p, end, "[MTR] ");
     p = mtx_put(p, end, mtx_opname(e->op));
     p = mtx_put(p, end, " m=");
@@ -340,7 +354,10 @@ static int mtx_main_tid; /* gettid() of the thread that calls PlayerMain */
 
 static int mtx_on(void) {
   static int on = -1;
-  if (on < 0) on = getenv("RW_TRACE_MUTEX") != 0;
+  if (on < 0) {
+    const char *v = getenv("RW_TRACE_MUTEX");
+    on = (v && v[0] && v[0] != '0') ? 1 : 0;
+  }
   return on;
 }
 
@@ -430,6 +447,11 @@ int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a) {
     next_mutex_init = (int (*)(pthread_mutex_t *, const pthread_mutexattr_t *))
         dlvsym(RTLD_NEXT, "pthread_mutex_init", "GLIBC_2.2.5");
   int hot = mtx_on() && mtx_hot(m);
+  /* L24: init/destroy go into the ring for EVERY address, not only the hot
+     arena: the question "was the parked word ever a mutex, and was it
+     destroyed" is answered by their presence/absence, and a lock pool is
+     identified by four consecutive inits. */
+  mtx_rec(7, m, __builtin_return_address(0));
   if (hot) mtx_row("init", m, -1, __builtin_return_address(0));
   int r = next_mutex_init(m, a);
   /* __kind is the 5th int of a glibc pthread_mutex_t; logging it after the
@@ -437,6 +459,21 @@ int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a) {
   if (hot) mtx_row("init-kind", m, m ? ((volatile int *)m)[4] : -1,
                    __builtin_return_address(0));
   return r;
+}
+
+/* L24: the missing half of the lifetime question.  A lock that is DESTROYED
+   and then locked is a use-after-free the allocator will happily rematerialise
+   as a free-list link in its first qword; a lock that is freed WITHOUT destroy
+   is a plain double allocation.  The two are told apart here, by rows. */
+int pthread_mutex_destroy(pthread_mutex_t *m) {
+  static int (*real)(pthread_mutex_t *);
+  if (!real)
+    real = (int (*)(pthread_mutex_t *))dlvsym(RTLD_NEXT, "pthread_mutex_destroy",
+                                              "GLIBC_2.2.5");
+  mtx_rec(8, m, __builtin_return_address(0));
+  if (mtx_on() && mtx_hot(m))
+    mtx_row("destroy", m, m ? *(volatile int *)m : -1, __builtin_return_address(0));
+  return real ? real(m) : 0;
 }
 
 /* ---- semaphore / condvar observation ------------------------------------ */

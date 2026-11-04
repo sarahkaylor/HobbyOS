@@ -225,8 +225,24 @@ __attribute__((section(".text._start"))) void _start(void) {
       (char *)"-logFile", (char *)RW_LOG,
       0,
   };
+  /* RW_TRACE_MUTEX is decided by a marker file staged on disk.img (/MTXON),
+     not by the host shell: the game is started from the guest desktop, so no
+     host environment reaches it.  Always emitted (value 0 or 1) so the array
+     shape stays static. */
+  char mtx_env[32];
+  {
+    int mk = open("/MTXON", 0 /* O_RDONLY */);
+    int on = mk >= 0;
+    if (mk >= 0) close(mk);
+    const char *nm = "RW_TRACE_MUTEX=";
+    int k = 0;
+    while (nm[k]) { mtx_env[k] = nm[k]; k++; }
+    mtx_env[k++] = on ? '1' : '0';
+    mtx_env[k] = 0;
+  }
   char *envp[] = {
       (char *)"HOME=" RW_HOME,
+      mtx_env,
       (char *)"LC_ALL=C",
       (char *)"LANG=C",
       /* /LIB64: the glibc pin + compat libX11/libGL/libasound.  /RWDSO: the

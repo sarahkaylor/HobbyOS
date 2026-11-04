@@ -81,6 +81,15 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
    trap.c's compat default arm; safe on any CPU (single uart_puts record). */
 void linux_compat_unhandled(struct process *p, uint64_t nr, uint64_t rip);
 
+#ifdef RW_TRACE_MEM
+/* Diagnostic (make RW_TRACE_MEM=1): one compact row per memory syscall with the
+   six raw arguments and the return value.  Called from the dispatcher, so no
+   handler needs a second exit path.  Cap is inside the implementation. */
+void l_mem_trace(const char *name, struct process *p, uint64_t a0, uint64_t a1,
+                 uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5,
+                 int64_t ret);
+#endif
+
 /* --- user-memory helpers -------------------------------------------------
  * All return 0 on success, -EFAULT on a bad or unmapped user range.  They are
  * the ONLY sanctioned way for a compat handler to touch guest memory: the

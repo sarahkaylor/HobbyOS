@@ -489,6 +489,60 @@ static int l_mem_memfd_create(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, sys_memfd_create(name, flags));
 }
 
+/* ---- RW_TRACE_MEM: one row per memory syscall ----------------------------
+ *
+ * Diagnostic only (`make RW_TRACE_MEM=1`).  Naming the strategy an allocator
+ * uses to carve its arena is impossible from the callers' code (Unity's is not
+ * ours) and from a read (the region list is the *result*, not the request): the
+ * request stream is the missing observation.  Rows are ordered, so the window
+ * of interest is found by position (the last rows before the park) and by pid.
+ *
+ * Shape (one line per call, no second row):
+ *   [MM] #41 mmap pid=4 a=0x0 b=0x1000 c=0x3 d=0x22 e=-1 f=0x0 -> 0x1080000000
+ * `a..f` are the raw six arguments in Linux order (a0..a5), so the meaning of
+ * each column is fixed by the syscall name, not by this printer.
+ */
+#ifdef RW_TRACE_MEM
+#define RW_MEM_ROW_MAX 40000
+static int rw_mem_rows;
+
+void l_mem_trace(const char *name, struct process *p, uint64_t a0, uint64_t a1,
+                 uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5,
+                 int64_t ret) {
+  if (rw_mem_rows >= RW_MEM_ROW_MAX) return;
+  int n = rw_mem_rows++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[MM] #");
+  kl_i(&kl, n);
+  kl_c(&kl, ' ');
+  kl_s(&kl, name);
+  kl_s(&kl, " pid=");
+  kl_i(&kl, p ? (long)p->pid : -1);
+  kl_s(&kl, " a=");
+  kl_hex(&kl, (unsigned long)a0);
+  kl_s(&kl, " b=");
+  kl_hex(&kl, (unsigned long)a1);
+  kl_s(&kl, " c=");
+  kl_hex(&kl, (unsigned long)a2);
+  kl_s(&kl, " d=");
+  kl_hex(&kl, (unsigned long)a3);
+  kl_s(&kl, " e=");
+  kl_hex(&kl, (unsigned long)a4);
+  kl_s(&kl, " f=");
+  kl_hex(&kl, (unsigned long)a5);
+  kl_s(&kl, " -> ");
+  if (ret < 0) {
+    kl_c(&kl, '-');
+    kl_i(&kl, (long)(-ret));
+  } else {
+    kl_hex(&kl, (unsigned long)ret);
+  }
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+#endif /* RW_TRACE_MEM */
+
 /* ---- the table ---------------------------------------------------------- */
 
 const struct l_sysent l_tab_mem[] = { {L_SYS_mmap, l_mem_mmap, "mmap"}, {L_SYS_mprotect, l_mem_mprotect, "mprotect"}, {L_SYS_munmap, l_mem_munmap, "munmap"}, {L_SYS_brk, l_mem_brk, "brk"}, {L_SYS_mremap, l_mem_mremap, "mremap"}, {L_SYS_msync, l_mem_msync, "msync"}, {L_SYS_mincore, l_mem_mincore, "mincore"}, {L_SYS_madvise, l_mem_madvise, "madvise"}, {L_SYS_memfd_create, l_mem_memfd_create, "memfd_create"},
