@@ -8,6 +8,7 @@
  */
 
 #include "vfs.h"
+#include "vfs_bind.h"
 #include "fs.h"
 #include "fat16.h"
 #include "process.h"
@@ -63,11 +64,28 @@ static void vfs_clean(const char *path, char *out, int cap) {
   out[pos] = '\0';
 }
 
+/* M5c: a bind may redirect this canonical path to another filesystem.  Applied
+ * here, at the single point every path-based operation funnels through, so
+ * open/stat/readdir/chdir all agree on what a bound path names.  A translation
+ * that does not fit is refused (-1) rather than truncated: a truncated path
+ * would name a different file. */
+static int vfs_bind_apply(char *path, int cap) {
+  char bound[VFS_PATH_MAX];
+  int t = vfs_bind_translate(path, bound, sizeof bound);
+  if (t <= 0) return t == 0 ? 0 : -1;
+
+  int n = 0;
+  while (bound[n]) n++;
+  if (n >= cap) return -1;
+  for (int i = 0; i <= n; i++) path[i] = bound[i];
+  return 0;
+}
+
 int vfs_abs_path(const char *path, char *out, int cap) {
   if (!path || cap <= 0) return -1;
   if (path[0] == '/') {
     vfs_clean(path, out, cap);
-    return 0;
+    return vfs_bind_apply(out, cap);
   }
 
   struct process *cur = process_group(current_process()); /* P1 (D7) */
@@ -86,7 +104,7 @@ int vfs_abs_path(const char *path, char *out, int cap) {
   }
   raw[pos + k] = '\0';
   vfs_clean(raw, out, cap);
-  return 0;
+  return vfs_bind_apply(out, cap);
 }
 
 int vfs_route(const char *abs, int *mount_idx, const char **rel) {
@@ -170,6 +188,12 @@ int vfs_mount_info(int idx, struct vfs_mountinfo *out) {
 /* path operations                                                      */
 /* ==================================================================== */
 
+/* Every operation below resolves through vfs_abs_path() first and hands the
+ * CANONICAL path to FAT16, not the caller's original spelling: since M5c a
+ * bind can move a path onto the FAT volume, so the caller's string is no
+ * longer necessarily something FAT16 can resolve.  With no bind registered the
+ * canonical path is exactly what fat16_absolute_path() would have produced. */
+
 int vfs_chdir(const char *path, char *out_new_cwd, int cap) {
   if (!path) return -1;
 
@@ -191,7 +215,7 @@ int vfs_chdir(const char *path, char *out_new_cwd, int cap) {
     return 0;
   }
 
-  return fat16_chdir(path, out_new_cwd);
+  return fat16_chdir(abs, out_new_cwd);
 }
 
 int vfs_read_dir(const char *path, int index, char *name, int ncap,
@@ -209,7 +233,7 @@ int vfs_read_dir(const char *path, int index, char *name, int ncap,
     return nfs_list_dir(m, rel, index, name, ncap, attr, size);
   }
 
-  return fat16_read_dir(path, index, name, attr, size);
+  return fat16_read_dir(abs, index, name, attr, size);
 }
 
 int vfs_unlink(const char *path) {
@@ -218,7 +242,7 @@ int vfs_unlink(const char *path) {
   int midx = -1;
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) return -1;      /* NFS: read-only */
-  return fat16_unlink(path);
+  return fat16_unlink(abs);
 }
 
 int vfs_rename(const char *oldp, const char *newp) {
@@ -232,7 +256,7 @@ int vfs_rename(const char *oldp, const char *newp) {
   const char *rel = 0;
   if (vfs_route(abs_old, &midx, &rel)) return -1;   /* NFS: read-only */
   if (vfs_route(abs_new, &midx, &rel)) return -1;   /* and no cross-fs moves */
-  return fat16_rename(oldp, newp);
+  return fat16_rename(abs_old, abs_new);
 }
 
 int vfs_mkdir(const char *path) {
@@ -241,7 +265,7 @@ int vfs_mkdir(const char *path) {
   int midx = -1;
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) return -1;       /* NFS: read-only */
-  return fat16_mkdir(path);
+  return fat16_mkdir(abs);
 }
 
 /* W2-14 (selfhost): remove an EMPTY directory.  fat16_rmdir returns the
@@ -254,7 +278,7 @@ int vfs_rmdir(const char *path) {
   int midx = -1;
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) return -EROFS;   /* NFS: read-only */
-  return fat16_rmdir(path);
+  return fat16_rmdir(abs);
 }
 
 int vfs_cwd_writable(void) {

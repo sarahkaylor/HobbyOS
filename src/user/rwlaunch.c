@@ -24,6 +24,11 @@
  * ("Initialize engine version", "Mono path", GfxDevice) become evidence in a
  * headless guest: on Linux the player writes them to the log file, not to
  * stdout.
+ *
+ * M5c: Mono mmaps every managed assembly and this kernel's only file-backed
+ * mmap is FAT16's, so the launcher binds
+ * /NFS/RimWorldLinux_Data/Managed -> /RWMANAGED (a local staging copy) before
+ * spawning.  Unity keeps using its own data-dir path; only resolution changes.
  */
 #include <fcntl.h>
 #include <errno.h>
@@ -45,6 +50,12 @@
 #define RW_LOG_DUMP   (24 * 1024)
 /* AD-10: the game's DSOs are staged on the FAT image; Data/ stays on NFS. */
 #define RW_DSO_DIR    "/RWDSO"
+/* M5c: Mono mmaps every managed assembly, and a file-backed mmap only exists
+ * for FAT16 on this kernel (NFS is -ENOTSUP until M5b).  The 40 MiB Managed/
+ * tree is staged on the FAT image and this prefix bind makes the engine's own
+ * /NFS/.../Managed/<dll> opens resolve there.  Data/ (730 MiB) is untouched. */
+#define RW_MANAGED_NFS "/NFS/RimWorldLinux_Data/Managed"
+#define RW_MANAGED_FAT "/RWMANAGED"
 #define RW_WAIT_SECS  180
 
 static void say(const char *s) { print("[RW] rwlaunch: "); print(s); print("\n"); }
@@ -61,6 +72,31 @@ static int wait_for_ip(void) {
     usleep(100000);
   }
   return -1;
+}
+
+/* Run the game from its own directory, the way a shell launch would: the wave
+ * leaves every process at cwd "/", while RimWorldLinux_Data sits beside the
+ * executable and a shell launch of the game has cwd = the game dir.  This is
+ * launcher fidelity, not a fix: it was A/B'd against the
+ * "Failed reading 'ScriptingAssemblies.json'" row and the Player.log came back
+ * byte-identical (docs/rimworld-launch-log.md §10.5), so cwd is not that bug's
+ * cause.  Kept because the next relative-path read should resolve where it
+ * would on the host. */
+static void chdir_gamedir(const char *game) {
+  char dir[128];
+  int cut = -1;
+  for (int i = 0; game[i] && i < (int)sizeof dir - 1; i++) {
+    dir[i] = game[i];
+    if (game[i] == '/') cut = i;
+  }
+  if (cut <= 0) return;
+  dir[cut] = '\0';
+  int rc = chdir(dir);
+  print("[RW] rwlaunch: chdir ");
+  print(dir);
+  print(" rc=");
+  print_dec(rc);
+  print("\n");
 }
 
 static void dump_player_log(void) {
@@ -117,6 +153,21 @@ __attribute__((section(".text._start"))) void _start(void) {
   (void)mkdir(RW_HOME);
   (void)mkdir(RW_HOME "/.config");
   (void)mkdir(RW_HOME "/.config/unity3d");
+
+  /* M5c: serve Managed/ from the FAT staging copy.  Done BEFORE the spawn, and
+   * it must succeed: without it Mono's first assembly mmap is refused with
+   * -ENOTSUP (an NFS file) and the engine dies before any window.  A failure is
+   * printed, not fatal -- the run then reproduces the old wall with evidence. */
+  int brc = vfs_bind(RW_MANAGED_NFS, RW_MANAGED_FAT);
+  print("[RW] rwlaunch: bind ");
+  print(RW_MANAGED_NFS);
+  print(" -> ");
+  print(RW_MANAGED_FAT);
+  print(" rc=");
+  print_dec(brc);
+  print("\n");
+
+  chdir_gamedir(RW_GAME);
 
   char *argv[] = {
       (char *)RW_GAME,

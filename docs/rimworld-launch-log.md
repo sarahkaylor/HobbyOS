@@ -525,3 +525,145 @@ It should have been installed in the `/NFS/RimWorldLinux_Data/Managed/mono/4.5/m
   `stat("/proc/self/exe")` reports a symlink rather than following it.
 - `GC Warning: Couldn't read /proc/stat` is recorded, not fixed: Mono's GC
   probes it once; it is not what stops `mscorlib`.
+
+---
+
+## 10. 2026-11-04 — M5c: `mscorlib.dll` mmaps, Mono runs, the wall moves to the display
+
+Lane L15 (`rw-l15-managed`), tree seeded from `93db7676`. Two changes: the VFS
+prefix bind (M5c) and a local 40 MiB `RimWorldLinux_Data/Managed/`, so Mono's
+assembly opens resolve to FAT16 and its `mmap`s are servable. Decision, cost and
+the host unit test are in `docs/rimworld-m5-managed.md`.
+
+### 10.1 Raw run, in order (serial rows verbatim)
+
+```
+[RW] rwlaunch: mount 10.0.2.2:/srv/nfs/rimworld -> /NFS rc=0
+[RW] rwlaunch: bind /NFS/RimWorldLinux_Data/Managed -> /RWMANAGED rc=0
+[RW] rwlaunch: chdir /NFS rc=0
+[RW] rwlaunch: exec /NFS/RimWorldLinux HOME=/RW_HOME LC_ALL=C LD_LIBRARY_PATH=/LIB64 RW_DSO_DIR=/RWDSO
+Loading program for scheduler (v2 AS): /NFS/RimWorldLinux
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x10000017C0 start=0x1008001100
+[LCOMPAT] argv argc=10 a0=/NFS/RimWorldLinux a1=-force-glcore a2=-screen-width execfn=/NFS/RimWorldLinux
+[RW] rwlaunch: spawn_ex -> 3
+[RWMAIN] AD-9 PlayerMain launcher start argc=10
+[RWMAIN] /proc/self/exe = /NFS/RimWorldLinux
+[RWMAIN] data dir = /NFS/RimWorldLinux_Data
+[RWMAIN] dlopen(/RWDSO/UnityPlayer.so, RTLD_NOW|RTLD_GLOBAL)
+/RWDSO/UnityPlayer.so
+/LIB64/libm.so.6
+/LIB64/librt.so.1
+/LIB64/libgcc_s.so.1
+/LIB64/libpthread.so.0
+[RWMAIN] UnityPlayer.so handle=0x10400004d0
+[RWMAIN] PlayerMain=0x108105f8b0 argc=10 — calling
+[LCOMPAT] clone flags=0x3D0F00 stack=0x1082C13FB0 tls=0x1082C14700 -> 1
+[UnityMemory] Configuration Parameters - Can be set up in boot.config
+PlayerPrefs - Creating folder: /RW_HOME/.config/unity3d/unknown
+PlayerPrefs - Creating folder: /RW_HOME/.config/unity3d/unknown/unknown
+Unable to load player prefs
+[LCOMPAT] clone flags=0x3D0F00 stack=0x1083414FB0 tls=0x1083415700 -> 4
+/RW_HOME/Player.log
+/RWDSO/libmonobdwgc-2.0.so
+/LIB64/libz.so.1
+/RWMANAGED/mscorlib.dll
+/RWMANAGED/mscorlib.dll
+[LCOMPAT] clone flags=0x3D0F00 stack=0x1083414FB0 tls=0x1083415700 -> 5
+[LCOMPAT] clone flags=0x3D0F00 stack=0x10849F4FB0 tls=0x10849F5700 -> 6
+[LCOMPAT] clone flags=0x3D0F00 stack=0x10851F5FB0 tls=0x10851F6700 -> 7
+```
+
+**No `[LCOMPAT] mmap fail` row exists in this run** (`grep -c` = 0; it was 1 at
+`mscorlib.dll` before). **No `[LCOMPAT] ENOSYS`** either (count 0). The
+`/RWMANAGED/mscorlib.dll` lines are `fat16_open_ex`'s own path print: the bind
+turned the engine's `/NFS/.../Managed/mscorlib.dll` open into a FAT16 open, and
+the mapping that follows succeeds.
+
+### 10.2 The engine's own log (`Player.log`, 534 B, dumped by the launcher)
+
+```
+[RWMAIN] dlopen remap /NFS/RimWorldLinux_Data/MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so -> /RWDSO/libmonobdwgc-2.0.so
+Mono path[0] = '/NFS/RimWorldLinux_Data/Managed'
+Mono config path = '/NFS/RimWorldLinux_Data/MonoBleedingEdge/etc'
+GC Warning: Couldn't read /proc/stat
+mono_thread_internal_set_priority: pthread_setschedparam failed, error: "Operation not permitted" (1)
+RuntimeInitializeOnLoadManagerInitializer: Failed reading 'ScriptingAssemblies.json'Error getting num native displays: Video subsystem has not been initialized
+```
+
+There is **no** `Initialize engine version` and **no** `GfxDevice` line: the
+engine never reached its own banner. `Mono path[0]` still names the NFS path on
+purpose — the bind changes resolution, not the string Unity keeps.
+
+### 10.3 What the run proves
+
+- **Mono is fully up.** `mscorlib` loaded (from FAT), the runtime initialised,
+  its thread pool created, and `RuntimeInitializeOnLoadManager` ran — managed
+  code executed in the guest. The last live-slot dump lists **23 slots**:
+  `AssetGarbageCol`, the main game thread, `Finalizer`, `Job.Worker 0`,
+  **17 × `Background Job.`**, `BatchDeleteObje`, `Loading.AsyncRe` (slot 4,
+  `SDLTimer`, is `THREAD_DONE`). At the previous ladder stop there were 3
+  threads; the game's Mono/Unity start-up now runs to its pool of 24.
+- **The run ends in a *park*, not a refusal.** Every one of those threads is
+  `st=8` (`PROC_STATE_FUTEX`) with no wake pending; the kernel says
+  `[ALIVE-SET] no READY work, yet the scheduler counts live work` and
+  `[IDLESTUCK] cpu=N rounds=2000x ... slot=3 pid=3 st=8 ... /NFS/RimWorldLinux`.
+  The main thread is waiting for a subsystem that failed and never posts a
+  completion.
+- The launcher's 180 s deadline then fires:
+  `[RW] rwlaunch: waitpid=0 status=-1` → dumps `Player.log` →
+  `[RW] rwlaunch: done`. There is no `System halt`: the game's threads are still
+  alive when the launcher exits, so the wave never quiesces.
+
+### 10.4 The single next blocker: **there is no display for the launched game**
+
+The last line the engine writes is
+
+```
+Error getting num native displays: Video subsystem has not been initialized
+```
+
+That is SDL's video subsystem failing *before* any GLX/GL work, and it is a
+launch-plumbing gap, not a kernel one:
+
+1. `run-rimworld.sh ad9` boots `MODE=test`, which starts **no X server** — the
+   desktop/X session only exists in `MODE=desktop` (that is how
+   `tools/gate/m3_x11_client.py` gives its Xlib client a display).
+2. The launcher's envp carries `HOME`, `LC_ALL`, `LANG`, `LD_LIBRARY_PATH`,
+   `TMPDIR`, `RW_UNITYPLAYER`, `RW_DSO_DIR` — **no `DISPLAY`**.
+3. `/LIB64` holds the glibc pin and `libz.so.1` only: **no `libX11.so.6`, no
+   `libGL.so.1`** (they are not `DT_NEEDED` of `UnityPlayer.so`; Unity/SDL load
+   them at runtime), so even with a display SDL's x11 driver could not open one.
+
+So the ladder is stopped earlier than GLX: **Unity's video/display init**. Until
+the game is launched inside the guest's X session with the `xcompat` X11/GL
+DSOs staged, no GLX context is attempted at all — `glXChooseFBConfig`,
+`GfxDevice`, input, audio (`libpulse`) and Steam are all still unmeasured.
+
+### 10.5 Two engine rows that are recorded, not explained
+
+- `mono_thread_internal_set_priority: pthread_setschedparam failed, error:
+  "Operation not permitted" (1)` — Mono sets a thread priority; the compat
+  `sched_setscheduler`/`setpriority` answers `EPERM`. Non-fatal (Mono continues
+  into managed code), but it is a real compat answer to fix or document.
+- `RuntimeInitializeOnLoadManagerInitializer: Failed reading
+  'ScriptingAssemblies.json'` — the file exists (2,915 B) at
+  `/NFS/RimWorldLinux_Data/ScriptingAssemblies.json`, and **no mmap was
+  attempted for it** (0 `mmap fail` rows), so this is not the old NFS-mmap wall.
+  A/B tested: the launcher was changed to `chdir` to the game directory (`/NFS`,
+  as a shell launch would — `[RW] rwlaunch: chdir /NFS rc=0`) and the 534-byte
+  `Player.log` came back **byte-identical**, so a relative-path/cwd explanation
+  is ruled out. Remaining candidates (unmeasured): Unity reading it through a
+  path that includes `Managed/`, or the read itself failing on NFS inside
+  Mono/Unity's file layer. It does not stop the run — the video failure does.
+
+### 10.6 Limits of this section
+
+- No window, no GL, no menu, no input, no audio: the engine died before its
+  banner. No screenshot and no `Initialize engine version` claim is made.
+- The run was made three times (before/after the launcher's `chdir`, and again
+  after the VFS call-site refactor that hands FAT16 the canonical path); all
+  three produced the same wall and a **byte-identical** 534-byte `Player.log`.
+  The ladder above is from the second run (`obj/rw-launch/serial-ad9-m5c-run2.log`);
+  the others are `...-run1.log` and `...-run3.log`.
+- `Data/` is still on NFS. Nothing in this run proved that an *asset* mmap is
+  needed; M5b stays scheduled for that case.

@@ -6,6 +6,7 @@
 #include "net.h"
 #include "nfs.h"
 #include "vfs.h"
+#include "vfs_bind.h"
 #include "errno.h"
 #include "file_obj.h" /* so-vm lane A (CROSS-LANE): page-cache invalidation */
 #include "timer.h"
@@ -257,6 +258,19 @@ static int file_read_maps(struct process *p, struct file *f, char *ubuf,
 int file_open(struct process *cur, const char *filename, int flags) {
   cur = process_group(cur); /* P1 (D7): fd table + cwd are group state */
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+
+  /* M5c: a VFS bind may move this path onto another filesystem, so a native
+   * absolute open() must see the same namespace a compat openat() does (that
+   * path canonicalises through vfs_abs_path before calling in here).  Only an
+   * actually-translated name is substituted; with no bind registered this is
+   * one table-length check and `filename` is untouched. */
+  char vpath[VFS_PATH_MAX];
+  if (filename && vfs_bind_count() != 0) {
+    char vabs[VFS_PATH_MAX];
+    if (vfs_abs_path(filename, vabs, sizeof vabs) == 0 &&
+        vfs_bind_translate(vabs, vpath, sizeof vpath) == 1)
+      filename = vpath;
+  }
 
   struct file *f = file_alloc();
   if (!f) return -EMFILE;

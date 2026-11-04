@@ -1714,6 +1714,22 @@ static void sys_mount(struct trap_frame *tf) {
   }
 }
 
+/* vfs_bind(from, to): alias the subtree at `from` onto the path `to` (M5c).
+ * Registers a prefix translation, not a second mount: only path resolution
+ * changes, so mmap of a bound file uses the target filesystem's objects. */
+static void sys_vfs_bind(struct trap_frame *tf) {
+  const char *from = (const char *)tf->regs[5]; // rdi
+  const char *to = (const char *)tf->regs[4];   // rsi
+  if (sys_user_range_ok((uint64_t)from, 1) &&
+      sys_user_range_ok((uint64_t)to, 1)) {
+    extern int vfs_bind_add(const char *from, const char *to);
+    int r = vfs_bind_add(from, to);
+    tf->regs[0] = r < 0 ? -EINVAL : r;
+  } else {
+    tf->regs[0] = -EFAULT;
+  }
+}
+
 /* umount(target): unmount the NFS export mounted exactly at `target`. */
 static void sys_umount(struct trap_frame *tf) {
   const char *target = (const char *)tf->regs[5]; // rdi
@@ -2525,6 +2541,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_ftruncate(tf);
   } else if (syscall_num == SYS_MOUNT) {
     sys_mount(tf);
+  } else if (syscall_num == SYS_VFS_BIND) {
+    sys_vfs_bind(tf);
   } else if (syscall_num == SYS_UMOUNT) {
     sys_umount(tf);
   } else if (syscall_num == SYS_GETPID) {

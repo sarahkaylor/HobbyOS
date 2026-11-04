@@ -18,6 +18,7 @@
 #include "unit_test.h"
 #include "nfs.h"
 #include "vfs.h"
+#include "vfs_bind.h"   /* M5c: prefix binds */
 #include "fs.h"
 #include "process.h"
 
@@ -494,6 +495,58 @@ static void test_vfs_path_cleaning(void) {
   EXPECT_EQ(vfs_mount_info(0, &mi), -1);
 }
 
+
+/* M5c: a prefix bind moves path RESOLUTION onto another filesystem, which is
+ * what lets Mono mmap an assembly whose path is under the read-only NFS mount.
+ * Asserted through vfs_abs_path() -- the integration point every path-based
+ * syscall funnels through -- not just through vfs_bind_translate(), which the
+ * host test (src/host/vfs_bind_test.c) already covers. */
+static int path_is(const char *a, const char *b) {
+  while (*a && *a == *b) { a++; b++; }
+  return *a == *b;
+}
+
+static void test_vfs_bind(void) {
+  uart_puts("  Running test_vfs_bind...\n");
+  tests_run++;
+
+  char out[VFS_PATH_MAX];
+  EXPECT_EQ(vfs_bind_count(), 0);
+  /* The chain that would break idempotence is refused (checked first: a
+     failure here leaves no state behind for the rest of the suite). */
+  EXPECT_EQ(vfs_bind_add("/NFS/A", "/NFS/A/sub"), -2);
+  EXPECT_EQ(vfs_bind_count(), 0);
+
+  EXPECT_EQ(vfs_bind_add("/NFS/RimWorldLinux_Data/Managed", "/RWMANAGED"), 0);
+  EXPECT_EQ(vfs_bind_count(), 1);
+
+  /* The engine's own string resolves to the FAT staging copy. */
+  EXPECT_EQ(vfs_abs_path("/NFS/RimWorldLinux_Data/Managed/mscorlib.dll",
+                         out, sizeof out), 0);
+  ASSERT(path_is(out, "/RWMANAGED/mscorlib.dll"));
+  EXPECT_EQ(vfs_abs_path("/NFS/RimWorldLinux_Data/Managed", out, sizeof out), 0);
+  ASSERT(path_is(out, "/RWMANAGED"));
+
+  /* Component boundary, and the rest of Data/ keeps its NFS path. */
+  EXPECT_EQ(vfs_abs_path("/NFS/RimWorldLinux_Data/ManagedX/a.dll", out,
+                         sizeof out), 0);
+  ASSERT(path_is(out, "/NFS/RimWorldLinux_Data/ManagedX/a.dll"));
+  EXPECT_EQ(vfs_abs_path("/NFS/RimWorldLinux_Data/resources.assets", out,
+                         sizeof out), 0);
+  ASSERT(path_is(out, "/NFS/RimWorldLinux_Data/resources.assets"));
+
+  /* Idempotent: the canonical path is fed back through the VFS more than once
+     (openat canonicalises, then file_open does again). */
+  EXPECT_EQ(vfs_abs_path("/RWMANAGED/mscorlib.dll", out, sizeof out), 0);
+  ASSERT(path_is(out, "/RWMANAGED/mscorlib.dll"));
+
+  vfs_bind_reset();
+  EXPECT_EQ(vfs_bind_count(), 0);
+  EXPECT_EQ(vfs_abs_path("/NFS/RimWorldLinux_Data/Managed/mscorlib.dll",
+                         out, sizeof out), 0);
+  ASSERT(path_is(out, "/NFS/RimWorldLinux_Data/Managed/mscorlib.dll"));
+}
+
 static void test_vfs_mount_validation(void) {
   uart_puts("  Running test_vfs_mount_validation...\n");
   tests_run++;
@@ -607,6 +660,7 @@ void nfs_test_suite(void) {
   test_parse_replies();
   test_parse_readdirplus();
   test_vfs_path_cleaning();
+  test_vfs_bind();
   test_vfs_mount_validation();
   test_vfs_fat_dispatch();
 }
