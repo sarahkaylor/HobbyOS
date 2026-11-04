@@ -605,8 +605,33 @@ no `libX11.so.6`/`libGL.so.1` for the game dir. Every thread then parks in futex
 and the run ends at the launcher's timeout. **Next step: launch inside the
 guest's X session (`MODE=desktop`, the `m3_x11_client.py` harness shape) with the
 xcompat X11/GL DSOs staged.** Open, recorded: `Failed reading
-'ScriptingAssemblies.json'` (file exists, not an mmap; `chdir` A/B showed a
+`'ScriptingAssemblies.json'` (file exists, not an mmap; `chdir` A/B showed a
 byte-identical log) and `pthread_setschedparam → EPERM` from Mono.
+
+**Status 2026-11-04 (lane L17): the game now runs inside a real desktop session;
+the wall moved past X11.** `tools/rw/run-rimworld-desktop.sh` boots
+`MODE=desktop DESKTOP=hobby`, waits for the desktop's `[MENU] count=`, and
+launches `RWLAUNCH.BIN` from the Apps menu with real key events (the
+`m3_x11_client.py` harness shape). `/LIB64` carries the pinned glibc plus
+`libX11.so.6`/`libasound.so.2` (xcompat) and `libGL.so.1`/`libGLX.so.0` (Mesa);
+`/RWDSO`/`/RWMANAGED` are unchanged. Two compat-DSO gaps retired: `libX11.so.6`
+now exports SDL's whole BASE-Xlib symbol set (ten private `XlibInt.h` I/O
+entries were missing, which made SDL discard the driver before it ever called
+`XOpenDisplay`), and `XMatchVisualInfo` matched `InputOutput` instead of the
+visual class `TrueColor`, so `X11_InitModes` skipped every screen. With both
+fixed the driver *initialises*: `XOpenDisplay` ok ×2 → `XMatchVisualInfo` hit →
+`XGetKeyboardControl`/`XAutoRepeatOn`/`XDisplayKeycodes`. **Current wall:
+`SDL_Init` rolls the video subsystem back when its joystick stage fails on the
+missing `libudev.so.1`** — the `libudev` dlopen failures are followed
+immediately by two `XCloseDisplay` calls (SDL_VideoQuit), no second
+`XOpenDisplay` ever happens, and the player logs `Error getting num native
+displays: Video subsystem has not been initialized` (SDL_video.c:441,
+`_this == NULL`). A host A/B that hides `libudev` from `dlopen` reproduces the
+same line verbatim, then recovers to `Initialize engine version`/`GfxDevice`.
+No `XCreateWindow`, no GLX call, no frame; `Player.log` is 1214 B and ends at
+that line. Next: ship a compat `libudev.so.1` with a zero-device enumerator
+(the `libasound.so.2` null-driver pattern) — see
+`docs/rimworld-launch-log.md` §11.4.
 
 **Historical (2026-11-02):** plumbing landed; the binary itself cannot be *loaded*
 (`ET_EXEC` at 0x200000, below the 64 GiB user window → `elf loader: ET_EXEC

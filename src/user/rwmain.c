@@ -21,6 +21,12 @@
  * The redirect is by basename inside RW_DSO_DIR, so it does not depend on how
  * Unity spells the data path.
  *
+ * Diagnostics go to stderr, not stdout: when the desktop launches this
+ * program as a menu app, fd 1 is the desktop's ESC-protocol window pipe
+ * (src/user/xcompat/libx11.c reads the same fd), and a [RWMAIN] text row
+ * would be parsed as window protocol.  The launcher (rwlaunch.c) maps the
+ * child's fd 2 to /dev/console, which is where these rows land.
+ *
  * The wrapper is a normal dynamic symbol of this executable (linked
  * -rdynamic).  glibc resolves UnityPlayer.so's dlopen@GLIBC_2.2.5 through the
  * global scope, and the main executable is first in it; the real dlopen is
@@ -39,7 +45,41 @@
 #define RW_PLAYERMAIN "_Z10PlayerMainiPPc"
 
 static void *(*next_dlopen)(const char *, int);
+static void *(*next_dlsym)(void *, const char *);
 static const char *dso_dir;
+
+/* ---- dlsym observation ---------------------------------------------------
+ * SDL loads libX11.so.6 with dlopen() and resolves the entry points it uses
+ * through dlsym(); a NULL return disables the whole X11 video driver and SDL
+ * reports only "No available video device" (Unity's log says "Video
+ * subsystem has not been initialized").  Recording a failed dlsym is the way
+ * to name the missing entry point.  The real dlsym is reached through
+ * dlvsym(), which this program does not export, so there is no recursion.
+ */
+void *dlsym(void *handle, const char *name) {
+  if (!next_dlsym) {
+    void *(*real_dlvsym)(void *, const char *, const char *) =
+        (void *(*)(void *, const char *, const char *))
+            dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5");
+    next_dlsym = real_dlvsym
+                     ? (void *(*)(void *, const char *))real_dlvsym(
+                           RTLD_NEXT, "dlsym", "GLIBC_2.2.5")
+                     : 0;
+    if (!next_dlsym) {
+      fprintf(stderr, "[RWMAIN] FATAL: cannot resolve the real dlsym\n");
+      return 0;
+    }
+  }
+  void *r = next_dlsym(handle, name);
+  if (!r) {
+    const char *e = dlerror();
+    fprintf(stderr, "[RWMAIN] dlsym FAILED %s: %s\n",
+            name ? name : "(null)", e ? e : "(no dlerror)");
+  } else if (getenv("RW_TRACE_DLOPEN") && name && name[0] == 'X') {
+    fprintf(stderr, "[RWMAIN] dlsym ok %s -> %p\n", name, r);
+  }
+  return r;
+}
 
 static const char *base_of(const char *p) {
   const char *s = strrchr(p, '/');
@@ -74,25 +114,36 @@ void *dlopen(const char *file, int mode) {
   if (!next_dlopen) {
     next_dlopen = (void *(*)(const char *, int))dlsym(RTLD_NEXT, "dlopen");
     if (!next_dlopen) {
-      printf("[RWMAIN] FATAL: cannot resolve the real dlopen via RTLD_NEXT\n");
-      fflush(stdout);
+      fprintf(stderr, "[RWMAIN] FATAL: cannot resolve the real dlopen via RTLD_NEXT\n");
       return 0;
     }
   }
   if (file && map_local(file, local, sizeof local)) {
-    printf("[RWMAIN] dlopen remap %s -> %s\n", file, local);
-    fflush(stdout);
+    fprintf(stderr, "[RWMAIN] dlopen remap %s -> %s\n", file, local);
     void *r = next_dlopen(local, mode);
     if (!r) {
       /* Unity only says "Unable to load mono library"; the loader's reason
          (a missing NEEDED, an undefined symbol, a version) is the evidence. */
       const char *e = dlerror();
-      printf("[RWMAIN] dlopen FAILED %s: %s\n", local, e ? e : "(no dlerror)");
-      fflush(stdout);
+      fprintf(stderr, "[RWMAIN] dlopen FAILED %s: %s\n", local, e ? e : "(no dlerror)");
     }
     return r;
   }
-  return next_dlopen(file, mode);
+  /* RW_TRACE_DLOPEN: every attempt and its result.  Unity/SDL disable a whole
+     video backend silently when a dlopen() of libX11/libGL fails, and the
+     engine's own log says only "Video subsystem has not been initialized";
+     the failing soname and the loader's reason are the ladder.  Off by
+     default; the M6 desktop harness turns it on. */
+  int trace = getenv("RW_TRACE_DLOPEN") != 0;
+  void *r = next_dlopen(file, mode);
+  if (!r) {
+    const char *e = dlerror();
+    fprintf(stderr, "[RWMAIN] dlopen FAILED %s: %s\n",
+            file ? file : "(null)", e ? e : "(no dlerror)");
+  } else if (trace) {
+    fprintf(stderr, "[RWMAIN] dlopen ok %s -> %p\n", file ? file : "(null)", r);
+  }
+  return r;
 }
 
 /* The executable path, and the directory Unity will append "_Data" to. */
@@ -101,7 +152,7 @@ static int exe_dir(char *out, size_t cap) {
   ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
   if (n <= 0) return -1;
   exe[n] = 0;
-  printf("[RWMAIN] /proc/self/exe = %s\n", exe);
+  fprintf(stderr, "[RWMAIN] /proc/self/exe = %s\n", exe);
   char *slash = strrchr(exe, '/');
   if (!slash) return -1;
   *slash = 0;
@@ -111,18 +162,17 @@ static int exe_dir(char *out, size_t cap) {
 }
 
 int main(int argc, char **argv) {
-  printf("[RWMAIN] AD-9 PlayerMain launcher start argc=%d\n", argc);
-  fflush(stdout);
+  fprintf(stderr, "[RWMAIN] AD-9 PlayerMain launcher start argc=%d\n", argc);
 
   char dir[4096];
   if (exe_dir(dir, sizeof dir) != 0) {
-    printf("[RWMAIN] FAIL readlink(/proc/self/exe)\n");
+    fprintf(stderr, "[RWMAIN] FAIL readlink(/proc/self/exe)\n");
     return 1;
   }
-  printf("[RWMAIN] data dir = %s/RimWorldLinux_Data\n", dir);
+  fprintf(stderr, "[RWMAIN] data dir = %s/RimWorldLinux_Data\n", dir);
 
   dso_dir = getenv("RW_DSO_DIR");
-  printf("[RWMAIN] RW_DSO_DIR = %s\n", dso_dir && dso_dir[0] ? dso_dir : "(unset)");
+  fprintf(stderr, "[RWMAIN] RW_DSO_DIR = %s\n", dso_dir && dso_dir[0] ? dso_dir : "(unset)");
 
   char beside[4096], chosen[4096];
   snprintf(beside, sizeof beside, "%s/UnityPlayer.so", dir);
@@ -130,39 +180,33 @@ int main(int argc, char **argv) {
   const char *env = getenv("RW_UNITYPLAYER");
   if (env && env[0]) {
     snprintf(chosen, sizeof chosen, "%s", env);
-    printf("[RWMAIN] UnityPlayer.so from RW_UNITYPLAYER\n");
+    fprintf(stderr, "[RWMAIN] UnityPlayer.so from RW_UNITYPLAYER\n");
   } else if (access(beside, R_OK) == 0) {
     snprintf(chosen, sizeof chosen, "%s", beside);
-    printf("[RWMAIN] UnityPlayer.so next to the executable\n");
+    fprintf(stderr, "[RWMAIN] UnityPlayer.so next to the executable\n");
   } else {
     snprintf(chosen, sizeof chosen, "%s", RW_UNITYPLAYER_DEFAULT);
-    printf("[RWMAIN] UnityPlayer.so from the built-in default\n");
+    fprintf(stderr, "[RWMAIN] UnityPlayer.so from the built-in default\n");
   }
 
-  printf("[RWMAIN] dlopen(%s, RTLD_NOW|RTLD_GLOBAL)\n", chosen);
-  fflush(stdout);
+  fprintf(stderr, "[RWMAIN] dlopen(%s, RTLD_NOW|RTLD_GLOBAL)\n", chosen);
   void *h = dlopen(chosen, RTLD_NOW | RTLD_GLOBAL);
   if (!h) {
-    printf("[RWMAIN] FAIL dlopen: %s\n", dlerror());
-    fflush(stdout);
+    fprintf(stderr, "[RWMAIN] FAIL dlopen: %s\n", dlerror());
     return 2;
   }
-  printf("[RWMAIN] UnityPlayer.so handle=%p\n", h);
-  fflush(stdout);
+  fprintf(stderr, "[RWMAIN] UnityPlayer.so handle=%p\n", h);
 
   dlerror();
   void *sym = dlsym(h, RW_PLAYERMAIN);
   const char *err = dlerror();
   if (!sym) {
-    printf("[RWMAIN] FAIL dlsym(" RW_PLAYERMAIN "): %s\n", err ? err : "?");
-    fflush(stdout);
+    fprintf(stderr, "[RWMAIN] FAIL dlsym(" RW_PLAYERMAIN "): %s\n", err ? err : "?");
     return 3;
   }
-  printf("[RWMAIN] PlayerMain=%p argc=%d — calling\n", sym, argc);
-  fflush(stdout);
+  fprintf(stderr, "[RWMAIN] PlayerMain=%p argc=%d — calling\n", sym, argc);
 
   int rc = ((int (*)(int, char **))sym)(argc, argv);
-  printf("[RWMAIN] PlayerMain returned %d\n", rc);
-  fflush(stdout);
+  fprintf(stderr, "[RWMAIN] PlayerMain returned %d\n", rc);
   return rc;
 }

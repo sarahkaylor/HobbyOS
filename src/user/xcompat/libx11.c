@@ -94,6 +94,35 @@ static int xs_ioctl(int fd, unsigned long req, void *arg) {
   return (int)xs_syscall6(SYS_ioctl, fd, (long)req, (long)arg, 0, 0, 0);
 }
 
+/* Optional ladder trace (M6): where the display path stops inside this DSO.
+ * Compiled only with -DXC_TRACE, because a compat DSO must stay silent in
+ * normal runs; the harness builds one traced copy to answer questions SDL
+ * swallows ("No available video device").  fd 2 is the serial console for a
+ * desktop-launched game (rwlaunch maps it). */
+#ifdef XC_TRACE
+static void xtr(const char *s) {
+  unsigned long n = 0;
+  while (s[n]) n++;
+  (void)xs_write(2, s, n);
+}
+static void xtrn(int v) {
+  char b[24];
+  int n = 0;
+  unsigned u = v < 0 ? (unsigned)(-v) : (unsigned)v;
+  char t[16];
+  int m = 0;
+  if (v < 0) b[n++] = '-';
+  if (!u) t[m++] = '0';
+  while (u) { t[m++] = (char)('0' + u % 10); u /= 10; }
+  while (m) b[n++] = t[--m];
+  b[n++] = '\n';
+  (void)xs_write(2, b, (unsigned long)n);
+}
+#else
+#define xtr(s) ((void)0)
+#define xtrn(v) ((void)0)
+#endif
+
 #define XO_RDWR 2
 #define XP_PROT_READ 1
 #define XP_PROT_WRITE 2
@@ -762,18 +791,21 @@ XAPI GC XCreateGC(Display *d, Drawable dr, unsigned long mask, XGCValues *v);
 
 XAPI Display *XOpenDisplay(const char *name) {
   (void)name;                            /* exactly one display exists */
+  xtr("[XC] XOpenDisplay enter\n");
   Display *d = &g_d;
   xz(d, sizeof *d);
   xc_init(&d->core);
 
   struct xfb_geom g;
   int fd = fb_probe(&g);
-  if (fd < 0) return 0;                  /* no framebuffer: no display */
+  if (fd < 0) { xtr("[XC] XOpenDisplay: fb open failed\n"); return 0; }  /* no framebuffer: no display */
   d->fb_fd = fd;
   unsigned long len = (unsigned long)g.xres * g.yres * (g.bpp / 8);
   d->fb = (unsigned char *)xs_mmap(0, len, XP_PROT_READ | XP_PROT_WRITE,
                                    XP_MAP_SHARED, fd, 0);
   if (!d->fb) {
+    xtr("[XC] XOpenDisplay: fb mmap failed len=");
+    xtrn((int)len);
     xs_close(fd);
     return 0;
   }
@@ -858,10 +890,12 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->screen_obj.cmap = d->default_cmap;
   d->default_gc = XCreateGC(d, d->root, 0, 0);
   d->screen_obj.default_gc = d->default_gc;
+  xtr("[XC] XOpenDisplay ok\n");
   return d;
 }
 
 XAPI int XCloseDisplay(Display *d) {
+  xtr("[XC] XCloseDisplay\n");
   if (!d) return 0;
   if (d->fb) {
     xs_syscall6(11 /* munmap */, (long)d->fb,
@@ -953,6 +987,70 @@ XAPI int XSynchronize(Display *d, Bool on) {
 }
 XAPI int XSetAfterFunction(Screen *s, void *f) { (void)s; (void)f; return 0; }
 
+/* ---- the base-Xlib private I/O surface ------------------------------- *
+ * SDL's dynamic X11 loader does not resolve symbols individually: every
+ * SDL_X11_SYM in the BASEXLIB module (SDL_x11sym.h:32-162) must be non-NULL
+ * or SDL_X11_LoadSymbols() clears SDL_X11_HAVE_BASEXLIB, unloads the driver
+ * and reports "No available video device".  Ten of those entries are the
+ * private XlibInt.h I/O entry points (_XFlush, _XRead, _XReply, ...), which a
+ * real libX11 exports from its .dynsym but this display-less shim never
+ * needed until an SDL consumer appeared.  They are implemented here against
+ * the ESC protocol, not stubbed to a return-only constant:
+ *   - outbound drawing is the shadow + ESC ] F present path (XFlush), so
+ *     _XFlush is that same flush;
+ *   - the desktop's messages arrive on fd 0 (the window protocol pipe), so
+ *     _XRead/_XReadPad/_XEatData read from it exactly as wait_event does;
+ *   - there is no X request/reply wire, so _XReply answers 0 and _XSend has
+ *     nowhere to go (the shim's own messages are ESC, built by send_raw).
+ */
+XAPI void _XFlush(Display *d) {
+  if (d) shadow_flush(d);
+}
+XAPI void _XFlushGCCache(Display *d, GC gc) { (void)d; (void)gc; }
+XAPI void _XSend(Display *d, const char *data, long size) {
+  (void)d; (void)data; (void)size;      /* no X wire: nothing to append to */
+}
+XAPI int _XRead(Display *d, char *data, long size) {
+  (void)d;
+  long got = 0;
+  while (got < size) {
+    long r = xs_read(0, data + got, (unsigned long)(size - got));
+    if (r <= 0) return 0;
+    got += r;
+  }
+  return 1;
+}
+XAPI void _XReadPad(Display *d, char *data, long size) {
+  (void)_XRead(d, data, size);
+}
+XAPI void _XEatData(Display *d, unsigned long n) {
+  (void)d;
+  char scratch[64];
+  unsigned long left = n;
+  while (left) {
+    unsigned long chunk = left < sizeof scratch ? left : sizeof scratch;
+    long r = xs_read(0, scratch, chunk);
+    if (r <= 0) return;
+    left -= (unsigned long)r;
+  }
+}
+XAPI int _XReply(Display *d, void *rep, int extra, int discard) {
+  (void)d; (void)rep; (void)extra; (void)discard;
+  return 0;                             /* the desktop never replies in-band */
+}
+XAPI void _XSetLastRequestRead(Display *d, unsigned long seq) {
+  if (d) d->pub.last_request_read = seq;
+}
+XAPI int XMissingExtension(Display *d, const char *ext) {
+  (void)d; (void)ext;
+  return 0;                             /* no extensions exist, none missing */
+}
+XAPI int XmbTextListToTextProperty(Display *d, char **list, int count,
+                                   int style, XTextProperty *prop) {
+  (void)d; (void)list; (void)count; (void)style; (void)prop;
+  return -1;                            /* no locale/font-set support */
+}
+
 /* ---- windows ---------------------------------------------------------- */
 
 XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
@@ -962,6 +1060,7 @@ XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
                           XSetWindowAttributes *attrs) {
   (void)parent; (void)x; (void)y; (void)border_width; (void)depth;
   (void)c_class; (void)visual; (void)valuemask; (void)attrs;
+  xtr("[XC] XCreateWindow\n");
   if (!d || d->win.id) return 0;         /* one window per display */
   d->win.id = 1;
   d->win.pref_w = width ? width : 640;
@@ -999,6 +1098,7 @@ XAPI int XDestroyWindow(Display *d, Window w) {
 XAPI int XDestroySubwindows(Display *d, Window w) { (void)d; (void)w; return 0; }
 
 XAPI int XMapWindow(Display *d, Window w) {
+  xtr("[XC] XMapWindow\n");
   if (!d || !d->win.id || w != d->win.id || d->win.destroyed) return 0;
   if (d->win.mapped) return 0;
   d->win.mapped = 1;
@@ -1338,6 +1438,7 @@ XAPI int XClearArea(Display *d, Window w, int x, int y, unsigned width,
 
 XAPI Bool XQueryPointer(Display *d, Window w, Window *root, Window *child,
                         int *rx, int *ry, int *wx, int *wy, unsigned *mask) {
+  xtr("[XC] XQueryPointer\n");
   if (!d || !d->win.id || w != d->win.id) return False;
   int x = d->pointer_valid ? d->pointer_x_root : 0;
   int y = d->pointer_valid ? d->pointer_y_root : 0;
@@ -1402,6 +1503,7 @@ XAPI int XGetPointerControl(Display *d, int *accel, int *thresh, int *numer,
   return 0;
 }
 XAPI int XGetPointerMapping(Display *d, unsigned char *map, int n) {
+  xtr("[XC] XGetPointerMapping\n");
   (void)d; (void)map; (void)n;
   return 1;
 }
@@ -1536,6 +1638,7 @@ XAPI int XFlush(Display *d) {
   return 0;
 }
 XAPI int XSync(Display *d, Bool discard) {
+  xtr("[XC] XSync\n");
   (void)discard;
   return XFlush(d);
 }
@@ -1544,7 +1647,9 @@ XAPI int XSync(Display *d, Bool discard) {
 
 XAPI Atom XInternAtom(Display *d, const char *name, Bool only_if_exists) {
   if (!d) return None;
-  return xc_intern(&d->core, name, only_if_exists);
+  Atom a = xc_intern(&d->core, name, only_if_exists);
+  xtr("[XC] XInternAtom -> "); xtrn((int)a);
+  return a;
 }
 
 XAPI Status XInternAtoms(Display *d, char **names, int count, Bool only_if_exists,
@@ -2047,8 +2152,19 @@ XAPI XVisualInfo *XGetVisualInfo(Display *d, long mask, XVisualInfo *tmpl,
 XAPI Status XMatchVisualInfo(Display *d, int scr, int depth, int c_class,
                              XVisualInfo *out) {
   (void)scr;
-  if (!d || !out || depth != 24 || c_class != InputOutput) return 0;
+  if (!d || !out) return 0;
+  /* c_class here is a *visual* class (TrueColor = 4), NOT the window class
+   * InputOutput = 1 — the same distinction vinfo.c_class records for Mesa.
+   * SDL's get_visualinfo() asks for
+   *     XMatchVisualInfo(dpy, screen, DefaultDepth(dpy,screen), TrueColor, &v)
+   * and treats 0 as "no visual on this screen"; with the old InputOutput test
+   * every screen was skipped, X11_InitModes reported "No available video
+   * device" and Unity logged "Video subsystem has not been initialized". */
+  xtr("[XC] XMatchVisualInfo class="); xtrn(c_class);
+  if (depth != d->vinfo.depth) return 0;
+  if (c_class != TrueColor && c_class != d->visual.c_class) return 0;
   *out = d->vinfo;
+  xtr("[XC] XMatchVisualInfo hit\n");
   return 1;
 }
 XAPI XPixmapFormatValues *XListPixmapFormats(Display *d, int *n) {
@@ -2156,6 +2272,7 @@ XAPI int XResetScreenSaver(Display *d) { (void)d; return 0; }
 
 XAPI int XDisplayKeycodes(Display *d, int *min, int *max) {
   (void)d;
+  xtr("[XC] XDisplayKeycodes\n");
   if (min) *min = 8;
   if (max) *max = 255;
   return 0;
@@ -2164,6 +2281,7 @@ XAPI int XDisplayKeycodes(Display *d, int *min, int *max) {
 XAPI KeySym *XGetKeyboardMapping(Display *d, unsigned char first, int count,
                                  int *nkeysyms) {
   (void)d;
+  xtr("[XC] XGetKeyboardMapping\n");
   /* One keysym pair per keycode (unshifted, shifted): the shape SDL reads.
    * The returned array is static storage reused per call, which is what
    * Xlib's own clients expect (they copy it). */
@@ -2194,10 +2312,15 @@ XAPI int XQueryKeymap(Display *d, char *keys) {
   return 0;
 }
 XAPI int XGetKeyboardControl(Display *d, void *ctl) {
+  xtr("[XC] XGetKeyboardControl\n");
   (void)d; (void)ctl;
   return 0;
 }
-XAPI int XAutoRepeatOn(Display *d) { (void)d; return 1; }
+XAPI int XAutoRepeatOn(Display *d) {
+  xtr("[XC] XAutoRepeatOn\n");
+  (void)d;
+  return 1;
+}
 XAPI int XAutoRepeatOff(Display *d) { (void)d; return 1; }
 XAPI Bool XGetKeyboardMappingSupported(Display *d) { (void)d; return True; }
 
@@ -2334,6 +2457,7 @@ XAPI Cursor XCreateFontCursor(Display *d, unsigned shape) {
 }
 XAPI Cursor XCreatePixmapCursor(Display *d, Pixmap src, Pixmap mask,
                                 void *fg, void *bg, unsigned x, unsigned y) {
+  xtr("[XC] XCreatePixmapCursor\n");
   (void)d; (void)src; (void)mask; (void)fg; (void)bg; (void)x; (void)y;
   return 0x41;
 }
@@ -2359,6 +2483,7 @@ XAPI Pixmap XCreatePixmap(Display *d, Drawable dr, unsigned w, unsigned h,
 }
 XAPI Pixmap XCreateBitmapFromData(Display *d, Drawable dr, const char *data,
                                   unsigned w, unsigned h) {
+  xtr("[XC] XCreateBitmapFromData\n");
   (void)d; (void)dr; (void)data; (void)w; (void)h;
   return 0x51;
 }

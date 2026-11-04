@@ -29,6 +29,18 @@
  * mmap is FAT16's, so the launcher binds
  * /NFS/RimWorldLinux_Data/Managed -> /RWMANAGED (a local staging copy) before
  * spawning.  Unity keeps using its own data-dir path; only resolution changes.
+ *
+ * Desktop-session launch (M6): the launcher may also be started from the
+ * native desktop's Apps menu instead of the boot wave.  Then fd 0/1 are the
+ * desktop's window protocol pipes (ESC ] X ... in, ESC ] G ... out) and the
+ * compat libX11 inside the game speaks through them.  Two consequences, both
+ * handled here:
+ *   - this launcher's own rows must NOT go to fd 1 (they would be parsed as
+ *     window protocol); every row uses print_console(), i.e. SYS_WRITE_CONSOLE;
+ *   - the child keeps fd 0/1 (the desktop pipes) but its fd 2 is mapped to
+ *     /dev/console, so the compat loader's rows, the AD-9 shim's [RWMAIN] rows
+ *     and Unity's own stderr land in the serial log.  Without that mapping a
+ *     dlopen failure would exist only inside Player.log.
  */
 #include <fcntl.h>
 #include <errno.h>
@@ -56,17 +68,48 @@
  * /NFS/.../Managed/<dll> opens resolve there.  Data/ (730 MiB) is untouched. */
 #define RW_MANAGED_NFS "/NFS/RimWorldLinux_Data/Managed"
 #define RW_MANAGED_FAT "/RWMANAGED"
+/* The compat libX11 has no X server and ignores DISPLAY (it speaks the
+ * desktop's ESC protocol over stdio), but SDL/Unity read DISPLAY before they
+ * dlopen anything and refuse to initialise video without it.  ":0" is what the
+ * shim reports as DisplayString. */
+#define RW_DISPLAY    ":0"
 #define RW_WAIT_SECS  180
 
-static void say(const char *s) { print("[RW] rwlaunch: "); print(s); print("\n"); }
+/* Console-only output.  print()/print_dec() write fd 1, which in a
+ * desktop-launched session is the window protocol pipe; every row this
+ * launcher emits must go to the console instead.  pc()/pd() are the console
+ * forms; print_console() composes a logical line and emits it with
+ * SYS_WRITE_CONSOLE, so consecutive calls are safe. */
+static void pc(const char *s) { print_console(s); }
+static void pd(long val) {
+  char b[24];
+  int n = 0;
+  unsigned long u = (unsigned long)val;
+  char tmp[24];
+  int m = 0;
+  if (val < 0) {
+    b[n++] = '-';
+    u = (unsigned long)(-(val + 1)) + 1UL;   /* LONG_MIN-safe */
+  }
+  if (u == 0) tmp[m++] = '0';
+  while (u) {
+    tmp[m++] = (char)('0' + (u % 10UL));
+    u /= 10UL;
+  }
+  while (m) b[n++] = tmp[--m];
+  b[n] = '\0';
+  pc(b);
+}
+
+static void say(const char *s) { pc("[RW] rwlaunch: "); pc(s); pc("\n"); }
 
 static int wait_for_ip(void) {
   struct sys_netinfo ni;
   for (int i = 0; i < 120; i++) {
     if (sysinfo(4, &ni, sizeof ni) == 0 && ni.ip != 0) {
-      print("[RW] rwlaunch: net ip=");
-      print_dec((long)ni.ip);
-      print("\n");
+      pc("[RW] rwlaunch: net ip=");
+      pd((long)ni.ip);
+      pc("\n");
       return 0;
     }
     usleep(100000);
@@ -92,11 +135,11 @@ static void chdir_gamedir(const char *game) {
   if (cut <= 0) return;
   dir[cut] = '\0';
   int rc = chdir(dir);
-  print("[RW] rwlaunch: chdir ");
-  print(dir);
-  print(" rc=");
-  print_dec(rc);
-  print("\n");
+  pc("[RW] rwlaunch: chdir ");
+  pc(dir);
+  pc(" rc=");
+  pd(rc);
+  pc("\n");
 }
 
 static void dump_player_log(void) {
@@ -105,20 +148,24 @@ static void dump_player_log(void) {
     say("no Player.log (the engine never opened its log file)");
     return;
   }
-  print("[RW] rwlaunch: --- Player.log (first 24576 bytes) ---\n");
-  char buf[2048];
+  pc("[RW] rwlaunch: --- Player.log (first 24576 bytes) ---\n");
+  /* Console, not fd 1: a desktop-launched launcher's stdout is the window
+   * protocol pipe.  One NUL-terminated chunk at a time; print_console
+   * line-buffers internally. */
+  char buf[2049];
   int total = 0;
   while (total < RW_LOG_DUMP) {
-    int n = (int)read(fd, buf, sizeof buf);
+    int n = (int)read(fd, buf, sizeof buf - 1);
     if (n <= 0) break;
     if (total + n > RW_LOG_DUMP) n = RW_LOG_DUMP - total;
-    (void)write(1, buf, (size_t)n);
+    buf[n] = '\0';
+    pc(buf);
     total += n;
   }
   close(fd);
-  print("\n[RW] rwlaunch: --- end Player.log (");
-  print_dec(total);
-  print(" bytes) ---\n");
+  pc("\n[RW] rwlaunch: --- end Player.log (");
+  pd(total);
+  pc(" bytes) ---\n");
 }
 
 __attribute__((section(".text._start"))) void _start(void) {
@@ -136,13 +183,13 @@ __attribute__((section(".text._start"))) void _start(void) {
     source = RW_NFS_ALT ":" RW_NFS_EXPORT;
     rc = mount(source, RW_NFS_MNT);
   }
-  print("[RW] rwlaunch: mount ");
-  print(source);
-  print(" -> ");
-  print(RW_NFS_MNT);
-  print(" rc=");
-  print_dec(rc);
-  print("\n");
+  pc("[RW] rwlaunch: mount ");
+  pc(source);
+  pc(" -> ");
+  pc(RW_NFS_MNT);
+  pc(" rc=");
+  pd(rc);
+  pc("\n");
   if (rc != 0) {
     say("NFS mount failed — the launch ladder cannot start");
     exit(2);
@@ -159,13 +206,13 @@ __attribute__((section(".text._start"))) void _start(void) {
    * -ENOTSUP (an NFS file) and the engine dies before any window.  A failure is
    * printed, not fatal -- the run then reproduces the old wall with evidence. */
   int brc = vfs_bind(RW_MANAGED_NFS, RW_MANAGED_FAT);
-  print("[RW] rwlaunch: bind ");
-  print(RW_MANAGED_NFS);
-  print(" -> ");
-  print(RW_MANAGED_FAT);
-  print(" rc=");
-  print_dec(brc);
-  print("\n");
+  pc("[RW] rwlaunch: bind ");
+  pc(RW_MANAGED_NFS);
+  pc(" -> ");
+  pc(RW_MANAGED_FAT);
+  pc(" rc=");
+  pd(brc);
+  pc("\n");
 
   chdir_gamedir(RW_GAME);
 
@@ -182,23 +229,54 @@ __attribute__((section(".text._start"))) void _start(void) {
       (char *)"HOME=" RW_HOME,
       (char *)"LC_ALL=C",
       (char *)"LANG=C",
-      (char *)"LD_LIBRARY_PATH=/LIB64",
+      /* /LIB64: the glibc pin + compat libX11/libGL/libasound.  /RWDSO: the
+       * game's own DSOs (AD-10), also the UnityPlayer path below.  /NFS: the
+       * game directory, so a dlopen of a bare name that sits beside the
+       * executable resolves as it would in a shell launch there. */
+      (char *)"LD_LIBRARY_PATH=/LIB64:" RW_DSO_DIR ":" RW_NFS_MNT,
       (char *)"TMPDIR=" RW_HOME,
+      /* The compat libX11 ignores it, but Unity/SDL decide whether video
+       * exists at all from DISPLAY before any DSO is asked for a window. */
+      (char *)"DISPLAY=" RW_DISPLAY,
+      /* Only the x11 driver can work here: there is no libwayland in /LIB64
+       * and no compositor, and letting SDL probe wayland first costs a failed
+       * dlopen triple and changes which code path Unity's SDL wrapper takes. */
+      (char *)"SDL_VIDEODRIVER=x11",
       /* AD-9/AD-10: UnityPlayer.so and the Mono/plugin DSOs are staged on
        * disk.img (/RWDSO); the launcher and its dlopen wrapper read these. */
       (char *)"RW_UNITYPLAYER=" RW_DSO_DIR "/UnityPlayer.so",
       (char *)"RW_DSO_DIR=" RW_DSO_DIR,
+      /* M6 ladder: record every dlopen and its result on stderr (console).
+       * SDL disables a video backend silently when libX11/libGL fails to
+       * load, so this is the only place the soname + loader reason appear. */
+      (char *)"RW_TRACE_DLOPEN=1",
       0,
   };
 
-  print("[RW] rwlaunch: exec ");
-  print(RW_GAME);
-  print(" HOME=" RW_HOME " LC_ALL=C LD_LIBRARY_PATH=/LIB64 RW_DSO_DIR=" RW_DSO_DIR "\n");
+  /* fd 2 -> /dev/console.  The game's stdin/stdout are inherited (the
+   * desktop's protocol pipes); stderr is not part of that protocol, so the
+   * compat loader's rows, the shim's [RWMAIN] rows and Unity's own stderr go
+   * to the serial log where the harness can read them. */
+  int cfd = open("/dev/console", O_RDWR);
+  int fdmap[1][2];
+  fdmap[0][0] = cfd;
+  fdmap[0][1] = 2;
+  pc("[RW] rwlaunch: console fd for child stderr=");
+  pd(cfd);
+  pc("\n");
 
-  int pid = spawn_ex(RW_GAME, argv, envp, 0, 0);
-  print("[RW] rwlaunch: spawn_ex -> ");
-  print_dec(pid);
-  print("\n");
+  pc("[RW] rwlaunch: exec ");
+  pc(RW_GAME);
+  pc(" HOME=" RW_HOME " LC_ALL=C DISPLAY=" RW_DISPLAY
+     " LD_LIBRARY_PATH=/LIB64:" RW_DSO_DIR ":" RW_NFS_MNT
+     " RW_DSO_DIR=" RW_DSO_DIR "\n");
+
+  int pid = spawn_ex(RW_GAME, argv, envp, (const int (*)[2])fdmap,
+                     cfd >= 0 ? 1 : 0);
+  pc("[RW] rwlaunch: spawn_ex -> ");
+  pd(pid);
+  pc("\n");
+  if (cfd >= 0) close(cfd);
   if (pid < 0) {
     say("spawn_ex failed (see the kernel's loader line above)");
     exit(3);
@@ -213,21 +291,21 @@ __attribute__((section(".text._start"))) void _start(void) {
     wp = waitpid(pid, &status, 1 /* WNOHANG */);
     if (wp != 0) break;
     if (s > 0 && (s % 10) == 0) {
-      print("[RW] rwlaunch: child still running after ");
-      print_dec(s);
-      print("s\n");
+      pc("[RW] rwlaunch: child still running after ");
+      pd(s);
+      pc("s\n");
     }
     usleep(1000000);
   }
-  print("[RW] rwlaunch: waitpid=");
-  print_dec(wp);
-  print(" status=");
-  print_dec(status);
-  print("\n");
+  pc("[RW] rwlaunch: waitpid=");
+  pd(wp);
+  pc(" status=");
+  pd(status);
+  pc("\n");
   if (wp == 0) {
-    print("[RW] rwlaunch: still running at the ");
-    print_dec(RW_WAIT_SECS);
-    print("s deadline; dumping the log and leaving the child\n");
+    pc("[RW] rwlaunch: still running at the ");
+    pd(RW_WAIT_SECS);
+    pc("s deadline; dumping the log and leaving the child\n");
   }
 
   dump_player_log();

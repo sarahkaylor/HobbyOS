@@ -667,3 +667,184 @@ DSOs staged, no GLX context is attempted at all — `glXChooseFBConfig`,
   the others are `...-run1.log` and `...-run3.log`.
 - `Data/` is still on NFS. Nothing in this run proved that an *asset* mmap is
   needed; M5b stays scheduled for that case.
+
+## 11. 2026-11-04 — M6 in a real desktop session: X11 comes up, the wall is Unity's SDL lifecycle
+
+Lane L17 (`rw-l17-desktop`), tree seeded from `20a0e26f`. The run of §10 booted
+`MODE=test`: no desktop, no `DISPLAY`, no `libX11.so.6`/`libGL.so.1` in `/LIB64`.
+This wave boots the native desktop instead, starts the launcher **from the
+desktop's Apps menu** and stages the X11/GL compat DSOs, so the game finally
+reaches the display path — and the wall moves past X11 into Unity's own SDL
+lifecycle.
+
+### 11.1 The desktop-session harness
+
+`tools/rw/run-rimworld-desktop.sh` (+ `tools/rw/rw_desktop_drive.py`, the QMP
+half of `tools/gate/m3_x11_client.py`) does, in one boot:
+
+1. builds `MODE=desktop DESKTOP=hobby` (the same session the M3/M4 gates use),
+   rebuilds `xcompat_dsos`, links the AD-9 launcher and the native `rwlaunch`;
+2. stages `/LIB64` = glibc 2.31 pin + `libz` + `libX11.so.6`/`libasound.so.2`
+   (`src/user/xcompat/stage.sh`) + `libGL.so.1`/`libGLX.so.0`
+   (`tools/mesa/stage.sh`), `/RWDSO` = the game's DSOs (AD-10), `/RWMANAGED` =
+   the 102 assemblies (M5c), installs the AD-9 launcher as
+   `/srv/nfs/rimworld/RimWorldLinux` and `RWLAUNCH.BIN` in the image root;
+3. boots with QMP, waits for `[MENU] count=189`, and launches `RWLAUNCH.BIN`
+   with real key events (F1, End, Up×1, Enter) — the desktop spawns it with the
+   window-protocol pipe pair, which is the only way a compat client gets a
+   window: `src/user/xcompat/libx11.c` writes `ESC ] X <w>;<h> ~` on fd 1 and
+   reads `ESC ] G …` from fd 0, and the desktop owns the other ends.
+
+The launcher had to learn that it is a desktop child: its own rows now go
+through `print_console()` (fd 1 is the window protocol there, not the serial
+console), and the child keeps fd 0/1 (the pipes) while fd 2 is mapped to
+`/dev/console` with `spawn_ex`'s fd map, so `[RWMAIN]` and Unity stderr rows
+reach the serial log. `rwmain.c` writes its diagnostics to stderr for the same
+reason. The child environment is `HOME=/RW_HOME LC_ALL=C DISPLAY=:0
+LD_LIBRARY_PATH=/LIB64:/RWDSO:/NFS SDL_VIDEODRIVER=x11 RW_TRACE_DLOPEN=1`.
+
+### 11.2 Two compat-DSO gaps retired (both in `src/user/xcompat/libx11.c`)
+
+**a. `libX11.so.6` did not export SDL's BASE-Xlib symbol set.** SDL's dynamic
+loader does not resolve symbols one by one: every `SDL_X11_SYM` in the
+`BASEXLIB` module of `SDL_x11sym.h` must be non-NULL or
+`SDL_X11_LoadSymbols()` clears `SDL_X11_HAVE_BASEXLIB`, unloads the driver and
+reports "No available video device". Measured with the launcher's `dlopen`/
+`dlsym` trace (`RW_TRACE_DLOPEN=1`): `dlopen ok libX11.so.6` followed by
+
+```
+[RWMAIN] dlsym FAILED XMissingExtension: /LIB64/libX11.so.6: undefined symbol: XMissingExtension
+[RWMAIN] dlsym FAILED _XEatData / _XFlush / _XFlushGCCache / _XRead / _XReadPad
+[RWMAIN] dlsym FAILED _XReply / _XSend / _XSetLastRequestRead
+[RWMAIN] dlsym FAILED XmbTextListToTextProperty
+```
+
+and **no `XOpenDisplay` call anywhere in the run** — the driver had already been
+discarded. The ten private `XlibInt.h` I/O entry points are now implemented
+against this display's protocol (flush = the shadow + `ESC ] F` present path;
+read/eat = read fd 0, the desktop's message pipe; reply/send = no X wire).
+
+**b. `XMatchVisualInfo` matched the wrong class.** It required
+`c_class == InputOutput` (1, a *window* class); SDL's `get_visualinfo()` calls
+`XMatchVisualInfo(dpy, screen, DefaultDepth(), TrueColor, &v)` with the *visual*
+class (4) and treats a 0 return as "this screen has no visual". Every screen was
+skipped. It now matches the display's actual visual class and depth.
+
+### 11.3 Final ladder (raw serial rows, in order)
+
+```
+[MENU] count=189
+[LAUNCH] RWLAUNCH.BIN
+[RW] rwlaunch: start
+[RW] rwlaunch: mount 10.0.2.2:/srv/nfs/rimworld -> /NFS rc=0
+[RW] rwlaunch: bind /NFS/RimWorldLinux_Data/Managed -> /RWMANAGED rc=0
+[RW] rwlaunch: console fd for child stderr=3
+[RW] rwlaunch: exec /NFS/RimWorldLinux HOME=/RW_HOME LC_ALL=C DISPLAY=:0 LD_LIBRARY_PATH=/LIB64:/RWDSO:/NFS RW_DSO_DIR=/RWDSO
+[RW] rwlaunch: spawn_ex -> 4
+[RWMAIN] AD-9 PlayerMain launcher start argc=10
+[RWMAIN] dlopen ok /RWDSO/UnityPlayer.so
+[RWMAIN] PlayerMain=0x108105f8b0 argc=10 — calling
+[RWMAIN] dlopen ok libX11.so.6 -> 0x1040032610
+[RWMAIN] dlopen FAILED libXext.so.6 / libXcursor.so.1 / libXinerama.so.1
+[RWMAIN] dlopen FAILED libXi.so.6 / libXrandr.so.2 / libXss.so.1 / libXxf86vm.so.1
+[RWMAIN] dlopen FAILED libudev.so.1 / libudev.so.0
+```
+
+With the traced DSO (`-DXC_TRACE`) the same run shows the X11 driver's own
+progress, in order:
+
+```
+[XC] XOpenDisplay enter / ok          (twice — SDL's display + request_display)
+[XC] XSync ×2                         (window-manager probe)
+[XC] XMatchVisualInfo class=5         (DirectColor: miss)
+[XC] XMatchVisualInfo class=4         (TrueColor: hit)
+[XC] XGetKeyboardControl
+[XC] XAutoRepeatOn
+[XC] XDisplayKeycodes
+[XC] XQueryPointer
+[XC] XCloseDisplay                    (×2 — SDL_VideoQuit → X11_DeleteDevice)
+```
+
+`libXext`/`libXcursor`/`libXinerama`/`libXi`/`libXrandr`/`libXss`/`libXxf86vm`
+are SDL's optional extension modules; their absence disables XShape/XRandR/
+XInput2, not the driver. `libGL.so.1`/`libGLX.so.0` are staged but **never
+loaded**: no `glX*` call is made in this run.
+
+The engine's own log (`Player.log`, 1214 B, dumped by the launcher):
+
+```
+Mono path[0] = '/NFS/RimWorldLinux_Data/Managed'
+GC Warning: Couldn't read /proc/stat
+mono_thread_internal_set_priority: pthread_setschedparam failed, error: "Operation not permitted" (1)
+RuntimeInitializeOnLoadManagerInitializer: Failed reading 'ScriptingAssemblies.json'
+Error getting num native displays: Video subsystem has not been initialized
+```
+
+No `Display 0 'screen'`, no `Initialize engine version`, no `GfxDevice` — the
+engine never got past its display manager. The screenshot shows the desktop
+with the launcher's window still in *terminal* mode (Unity's stdout text,
+"Unable to load player prefs"), i.e. no `ESC ] X` was ever sent: no
+`XCreateWindow`/`XMapWindow` happened.
+
+### 11.4 The single next blocker
+
+**`Error getting num native displays: Video subsystem has not been initialized`**
+— SDL's own error (`SDL_video.c:441`, returned when `_this == NULL`) — because
+`SDL_Init` **rolled back the video subsystem it had just initialised when the
+joystick subsystem failed on the missing `libudev.so.1`**. In order:
+
+- the driver is up before that point: `X11_InitKeyboard`'s calls
+  (`XGetKeyboardControl`, `XAutoRepeatOn`, `XDisplayKeycodes`) only run after
+  `X11_InitModes()` returned success, and `X11_InitModes` refuses to return
+  success with zero displays;
+- immediately after them the joystick stage runs and fails:
+  `[RWMAIN] dlopen FAILED libudev.so.1 / libudev.so.1 / libudev.so.0`;
+- two `XCloseDisplay` calls follow in the same breath (`SDL_VideoQuit` →
+  `X11_DeleteDevice` closes `data->display` and `data->request_display`) — this
+  is `SDL_Init`'s rollback of the subsystems it had already started;
+- **no second `XOpenDisplay` ever happens** (and no second `dlopen` of
+  `libX11.so.6`): the player never re-initialises video, so its later display
+  query returns the error above and the engine parks (24 threads, all `st=8`,
+  launcher deadline at 180 s) before `Initialize engine version`.
+
+**Host A/B (the discriminator).** The same launcher, game and DSOs on the host
+(Xvfb `:99`) print the *same* line when `libudev` is hidden from `dlopen`:
+
+```
+$ LD_PRELOAD=/tmp/noudev.so ./RimWorldLinux -force-glcore ...   # hides libudev*
+Preloaded 'lib_burst_generated.so'
+Preloaded 'libsteam_api.so'
+Error getting num native displays: Video subsystem has not been initialized
+Error getting num native displays: Video subsystem has not been initialized
+Error getting num native displays: Video subsystem has not been initialized
+...
+Initialize engine version: 2022.3.35f1 (011206c7a712)
+GfxDevice: creating device client; threaded=1; jobified=0
+```
+
+So that line is not an X11-compat failure: it is what Unity prints when SDL's
+joystick subsystem cannot start. The difference is that the host engine then
+recovers (it re-initialises video and reaches `GfxDevice`), while the guest
+engine does not. Without the preload the host run is clean —
+`Display 0 'screen': 1920x1080`, `Initialize engine version`, `GfxDevice`,
+`Renderer: llvmpipe`, `OPENGL LOG: Creating OpenGL 4.5 graphics device`.
+
+**Fix direction (next lane):** ship a compat `libudev.so.1` the same way
+`libasound.so.2` ships a null ALSA: `udev_new`/`udev_monitor_new_from_netlink`
+return objects, the enumerate path returns **zero** input/sound devices (there
+are none on HobbyOS), and the monitor fd is a pipe read end that never signals.
+Then SDL's joystick init succeeds, `SDL_Init` does not roll video back, and the
+player's display query returns 1 display — the ladder then reaches window
+creation/GLX, which are still unmeasured.
+
+### 11.5 Limits
+
+- No frame, no GLX, no menu: `glXChooseFBConfig`/`glXCreateContext` have not
+  been reached, so M4's in-guest GL stack is still unmeasured under the player.
+- Audio and Steam are untouched (their DSOs are absent; SDL's audio init never
+  ran).
+- The traced DSO used for the X-level rows is the same source with
+  `-DXC_TRACE`; the untraced build produces the identical `Player.log`
+  (1214 B) and the identical stall.
+- Host reference runs are labelled as such; the guest evidence is the serial
+  log `obj/rw-desktop/serial-desktop.log` and `obj/rw-desktop/shots/`.
