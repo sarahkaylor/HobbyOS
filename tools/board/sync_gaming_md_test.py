@@ -16,6 +16,7 @@ No board/network: plan_id_problems() is pure.
 """
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sync_gaming_md as S  # noqa: E402
@@ -102,6 +103,23 @@ try:
 except ValueError as e:
     refused = "M9-nope" in str(e)
 check("an unknown milestone is refused by name", refused)
+
+# adopt_orphans skips a no-milestone card by name, still adopts a known one.
+with tempfile.TemporaryDirectory() as td:
+    tmp_plan = os.path.join(td, "plan.md")
+    with open(tmp_plan, "w", encoding="utf-8") as f:
+        f.write(fixture_plan)
+    bd = {
+        "GB-902": {"number": 902, "title": "GB-902 no milestone", "milestone": None,
+                   "labels": ["wt-S"], "state": "open", "body": "### DoD\n1. x\n"},
+        "GB-903": {"number": 903, "title": "GB-903 known milestone", "milestone": "M0-infra",
+                   "labels": ["wt-S"], "state": "open", "body": "### DoD\n1. y\n"},
+    }
+    got = S.adopt_orphans(bd, {}, path=tmp_plan)
+    adopted_text = open(tmp_plan, encoding="utf-8").read()
+check("adopt skips a card with no milestone", "GB-902" not in adopted_text)
+check("adopt takes the known-milestone card",
+      len(got) == 1 and "GB-903" in adopted_text)
 
 print()
 if fails:
