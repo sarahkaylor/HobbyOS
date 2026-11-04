@@ -1,5 +1,11 @@
 # GB-053 — fresh both-arch acceptance run at current main (2026-11-02)
 
+> **SUPERSEDED 2026-11-04 by GB-190** — at main `f24dcf60` both arches pass the
+> corpus at the default 8 CPUs (intel 5/5, ARM 5/5, 0 FATAL). This file is the
+> 2026-11-02 record and is kept as history; the current matrix is in
+> `S0-S1-ACCEPTANCE.md` at the root.
+
+
 Purpose (operator bounce, 2026-11-02T02:31Z): replace the five-day-old FAIL
 record with a fresh run of the GB-075 no-fabricated-PASS rig, both arches, at
 current main. The 10-27 evidence is NOT resubmitted here.

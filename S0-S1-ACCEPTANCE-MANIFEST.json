@@ -1,47 +1,103 @@
 {
-  "arch": "intel",
-  "captured_at": "2026-11-02T04:37:54.127909+00:00",
-  "results": [
-    {
-      "game": "PONG.BIN",
-      "slot": 16,
-      "live": true,
-      "ok": true,
-      "reasons": [],
-      "sha16": "fe8bbe5d2a9ef4b9"
+  "card": "GB-190",
+  "tree": "8c934f6b79da04bda174ed1a7688473f4459c109",
+  "main": "f24dcf6068db0a90fd0e20de6bb1f9a0f8f5901a",
+  "cpu": "default 8 (QEMU_SMP unset)",
+  "summary": "PASS",
+  "runs": {
+    "intel": {
+      "arch": "intel",
+      "captured_at": "2026-11-04T09:05:45.177106+00:00",
+      "summary": "PASS",
+      "results": [
+        {
+          "game": "PONG.BIN",
+          "slot": 16,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "c2376075d78b8351"
+        },
+        {
+          "game": "MILLIPED.BIN",
+          "slot": 17,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "cd06e0329bb813ee"
+        },
+        {
+          "game": "XNIBBLER.BIN",
+          "slot": 20,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "2197bb4a240d48da"
+        },
+        {
+          "game": "XCRYPT.BIN",
+          "slot": 21,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "4166a0db8d906e49"
+        },
+        {
+          "game": "NES.BIN",
+          "slot": 22,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "7e61a42977bc9b92"
+        }
+      ]
     },
-    {
-      "game": "MILLIPED.BIN",
-      "slot": 17,
-      "live": true,
-      "ok": true,
-      "reasons": [],
-      "sha16": "01c82ae540edc2c5"
-    },
-    {
-      "game": "XNIBBLER.BIN",
-      "slot": 20,
-      "live": true,
-      "ok": true,
-      "reasons": [],
-      "sha16": "94a59e16717b6d38"
-    },
-    {
-      "game": "XCRYPT.BIN",
-      "slot": 21,
-      "live": true,
-      "ok": true,
-      "reasons": [],
-      "sha16": "554d6135994bc504"
-    },
-    {
-      "game": "NES.BIN",
-      "slot": 22,
-      "live": true,
-      "ok": true,
-      "reasons": [],
-      "sha16": "3725af60b38088a3"
+    "arm": {
+      "arch": "arm",
+      "captured_at": "2026-11-04T09:08:47.516768+00:00",
+      "summary": "PASS",
+      "results": [
+        {
+          "game": "PONG.BIN",
+          "slot": 16,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "7ebc25f0ba572989"
+        },
+        {
+          "game": "MILLIPED.BIN",
+          "slot": 17,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "e94f12672c399965"
+        },
+        {
+          "game": "XNIBBLER.BIN",
+          "slot": 20,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "bf0e1ddceb9260d8"
+        },
+        {
+          "game": "XCRYPT.BIN",
+          "slot": 21,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "6232d06aa1b94ec9"
+        },
+        {
+          "game": "NES.BIN",
+          "slot": 22,
+          "live": true,
+          "ok": true,
+          "reasons": [],
+          "sha16": "c0b1b5dcf8c70afd"
+        }
+      ]
     }
-  ],
-  "summary": "PASS"
+  }
 }
