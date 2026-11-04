@@ -481,12 +481,57 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
  * just set its own state to EXITED keeps running its exit path until the
  * context switch completes, so its slot and physical block must not be
  * handed to a new process yet. */
+/* GB-179: forward declaration -- defined near the scheduler loop (the GB-057
+   deadclaim test the reaper reuses). */
+int slot_claimed_only_by_halted_cpus(int k);
+
 static int process_still_running(int pid) {
   for (int c = 0; c < MAX_CPUS; c++) {
     if (cpu_current_pids[c] == pid)
       return 1;
   }
   return 0;
+}
+
+/* GB-179: reap parked slots without waiting for a spawn.  Same admission
+ * rules as the spawn-time reclaim in process_create_internal(): an EXITED slot
+ * whose parent is gone can never be waitpid()ed, and a THREAD_DONE slot can go
+ * once it is off every CPU and its group is dead.  Without this the 63-program
+ * wave parks 18 EXITED + 40 THREAD_DONE slots and only a later spawn frees
+ * them -- a table that is full has no later spawn.  Caller holds proc_lock. */
+static int proc_reap_parked_locked(void) {
+  int n = 0;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = &proc_table[i];
+    /* GB-179: a CPU that recorded its own halt will never run the slot again,
+       so a claim held only by halted CPUs is dead (same rule as GB-057's
+       [DEADCLAIM]).  Without this a THREAD_DONE slot claimed by a halted CPU
+       parks for ever and keeps the table full. */
+    int off_cpu = !process_still_running(i) ||
+                  slot_claimed_only_by_halted_cpus(i);
+    if (!off_cpu)
+      continue;
+    if (q->state == PROC_STATE_EXITED) {
+      struct process *par =
+        (q->parent_pid >= 0 && q->parent_pid < MAX_PROCESSES)
+          ? &proc_table[q->parent_pid] : 0;
+      if (par && par->state != PROC_STATE_FREE &&
+          par->state != PROC_STATE_EXITED)
+        continue; /* live parent: keep its zombie for waitpid() */
+      proc_release_mem_locked(q);
+      q->state = PROC_STATE_FREE;
+      q->exit_status = 0;
+      n++;
+    } else if (q->state == PROC_STATE_THREAD_DONE) {
+      if (!q->is_thread && q->live_threads != 0)
+        continue;
+      if (!q->is_thread && (q->phys_block_idx >= 0 || q->as))
+        proc_release_mem_locked(q);
+      q->state = PROC_STATE_FREE;
+      n++;
+    }
+  }
+  return n;
 }
 
 /* ---------------------------------------------------------------------------
@@ -789,6 +834,10 @@ static void group_teardown(struct process *grp, uint64_t code) {
      this is now the shared reap_deliver_locked helper, also called from
      the kill path -- the confirmed third-party-kill wakeup gap. */
   reap_deliver_locked(grp);
+  /* GB-179: free parked slots now, not on the next spawn (which a full table
+     may never reach).  This group's own slot stays EXITED until its CPU
+     switches away -- process_still_running() guards it. */
+  proc_reap_parked_locked();
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
@@ -1852,6 +1901,11 @@ void schedule(struct trap_frame *tf, int is_yield) {
     // GB-057-a: a BLOCKED slot is alive only while it has a possible waker. Stamp
     // the first observation, exclude after the budget, and say so by name -- a
     // wave that loses a test silently is worse than a wave that halts.
+    /* GB-179: no READY work left -- reap parked slots here too, so the table
+       drains on the idle path instead of waiting for a spawn.  proc_lock is
+       held; process_still_running() keeps a slot whose CPU has not switched
+       away yet, so the last exit per CPU parks briefly and is freed next round. */
+    proc_reap_parked_locked();
     int any_alive = 0;
     {
       uint64_t now_l = timer_get_ms();
