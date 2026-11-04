@@ -660,10 +660,30 @@ LDHELLO.BIN: error while loading shared libraries: libc.so.6: failed to map segm
   owns them.  `elf loader: DSO <name> mapped` is one line per DSO.
 - `auxv:` lines are the kernel's startup stack for the interpreter, one record per
   entry; `AT_BASE` is the interpreter's USER_LIB base, `AT_ENTRY` the executable's.
-- The guest then executes `ld.so`; the first stop above is ld.so's own named load
-  error (libc's mmap), with the kernel's `[EXITPC]` naming the PC.
+- The guest then executes `ld.so` (GB-199 stopped at ld.so's own named load error,
+  libc's mmap).
 - Falsifier: `make MODE=test ARCH=intel GB199_NO_AUXV=1 ...` omits the startup stack;
   the same jump faults at `VA=0x1800000000 PC=0x1008021E18` (a HOLE just above the
   stack top), which is what the auxv block prevents.
-- Entering the real glibc text (symbol resolution, interpreter-loaded DSOs) is the
-  next rung.
+
+### 14.1 The dependency open (GB-201)
+
+`ld.so` opens its dependency by SONAME, which FAT16 cannot name (two dots), so the compat
+`open`/`openat` path translates a **bounded** table (`src/kernel/arch/x64/trap.c`,
+`compat_sonames[]`: `libc.so.6` → `LIBC6.SO`, `ld-linux-x86-64.so.2` → `LD64.SO`) on the
+path's basename.  An unknown name keeps the ordinary `file_open` answer — the control
+`[GB201] nosuch.so.9 open fd=-1 errno=2 (ENOENT=2)` is in the same run as the hit.  The
+same image then continues:
+
+```
+open: /lib/x86_64-linux-gnu/libc.so.6 -> LIBC6.SO fd=3
+[LCOMPAT] ENOSYS nr=334 name=LDHELLO.BIN pid=3 rip=0x1008016F8E rdi=0x10802220A0
+hello from glibc pie
+[EXITPC] pid=3 last_user_pc=0x10800F7198 code=0x0
+```
+
+`334` is `rseq`, which glibc tolerates as ENOSYS; the program runs and exits 0.  `ld.so`
+maps a DSO's whole vaddr span (`p_memsz`, BSS included) in one file `mmap`, which is
+longer than the file; `vm_mmap` now allows that tail and `vm_file_obj_materialize` maps
+it as zero pages, while a short read *inside* the file stays `-EIO` (text is never
+silently zero-filled).
