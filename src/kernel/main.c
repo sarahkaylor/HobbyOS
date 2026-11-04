@@ -272,8 +272,9 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("LKSTEST.BIN", -1, -1, -1, -1);
   /* WCTEST/HEDTEST spawn WC.BIN/HEDGNU.BIN through the real spawn2/pipe
      path; both run at the END so earlier processes have exited and freed
-     process-table slots (the pid masks are 64-bit, so MAX_PROCESSES
-     must stay <= 64). */
+     process-table slots (L12: MAX_PROCESSES is 192 and the parked-pid
+     masks are struct pid_mask word arrays, so the table can exceed 64;
+     this ordering is kept only to shorten the wave's slot high-water). */
   load_and_run_program_in_scheduler("HEDTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("TAILTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("PROCTEST.BIN", -1, -1, -1, -1);
