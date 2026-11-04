@@ -20,6 +20,16 @@
  * so painting early silently drops every pixel (measured -- a first version of
  * this probe swapped into nothing and still reported success).
  *
+ * The context request is Unity's, not a convenient one: the probe asks for
+ * **4.5 core** with the game's exact attribute list (RELEASE_BEHAVIOR=FLUSH,
+ * OPENGL_NO_ERROR=False), plus a second context sharing with it -- the shape
+ * measured from Unity with apitrace.  The GLX frontend we ship must clamp that
+ * request to the best context the driver has (3.3 core, plan AD-5) rather than
+ * refuse it, so the whole render/present proof runs on the 4.5-requested
+ * context.  A 3.3 request must still be served unchanged and a 2.1 request
+ * honoured or refused cleanly; all four rows appear in the log before the
+ * render, and only the 4.5 row failing makes the probe exit non-zero.
+ *
  * The DSO is dlopen()ed, never linked: libGL.so.1 has no DT_NEEDED of its own,
  * so its libc/libX11 symbols resolve from the process that is already running
  * (the pinned glibc 2.31 + /LIB64/libX11.so.6).  RTLD_NOW is deliberate: it
@@ -42,9 +52,10 @@
  *       libc_nonshared.a libc.so.6 crtn.o \
  *       -Wl,--allow-shlib-undefined -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2
  *
- * Exit status: 0 only when a 3.3 core context existed, the shaders compiled
- * and linked, the FBO was complete, the readback covered the triangle, the
- * desktop held the swapped frame byte for byte, and teardown was clean.
+ * Exit status: 0 only when the 4.5 core request came back as a live 3.3 core
+ * context, a 3.3 request was served unchanged, the shaders compiled and linked,
+ * the FBO was complete, the readback covered the triangle, the desktop held
+ * the swapped frame byte for byte, and teardown was clean.
  */
 #define _GNU_SOURCE 1
 #include <X11/Xlib.h>
@@ -387,6 +398,9 @@ static void *gpa(const char *name) {
 #define RESOLVE(field, name) (*(void **)(&gl.field) = gpa(name))
 
 static int resolve_gl(void) {
+  /* g_fail is process-wide (a refused 4.5 request sets it before the render
+   * proof starts), so this function must answer for its own lookups only. */
+  const int start = g_fail;
   RESOLVE(Clear, "glClear");
   RESOLVE(ClearColor, "glClearColor");
   RESOLVE(Viewport, "glViewport");
@@ -422,7 +436,7 @@ static int resolve_gl(void) {
   RESOLVE(FramebufferRenderbuffer, "glFramebufferRenderbuffer");
   RESOLVE(CheckFramebufferStatus, "glCheckFramebufferStatus");
   RESOLVE(GetAttribLocation, "glGetAttribLocation");
-  return g_fail ? -1 : 0;
+  return g_fail != start ? -1 : 0;
 }
 
 /* ---- shaders (GLSL 3.30 core: #version 330 is the M4 target) ------------ */
@@ -505,6 +519,74 @@ static void dump_maps(const char *tag) {
   }
   fclose(f);
 }
+
+/* ---- context requests: Unity's exact attrib list, and the clamp ---------
+ *
+ * The game asks for **4.5 core** with its own attribute list (measured from
+ * the apitrace capture, docs/rimworld-evidence.md §6):
+ *
+ *   {MAJOR,4, MINOR,5, PROFILE_MASK,CORE,
+ *    RELEASE_BEHAVIOR,FLUSH, OPENGL_NO_ERROR,False, 0}
+ *
+ * and creates a second context that shares with the first.  Mesa's xlib GLX
+ * frontend has two independent reasons to return NULL for that request: it
+ * rejects attributes it does not know (BadValue), and its state tracker
+ * refuses any version above the one the driver's core profile advertises
+ * (GLXBadFBConfig).  Both are the *frontend's* policy, not the game's, so the
+ * frontend we ship has to clamp the request to the best context it can serve
+ * instead of refusing it (plan AD-5).  All of the probe's requests go through
+ * this table so a rejection is always accompanied by the X error that caused
+ * it -- generate_error() is silent when the client installed no handler.
+ */
+static PFN_glXCreateContextAttribsARB p_create_ctx;
+static int g_xerr;
+
+static int on_xerror(Display *dpy, XErrorEvent *ev) {
+  (void)dpy;
+  g_xerr = ev->error_code;
+  return 0;
+}
+
+static const char *xerr_name(int code) {
+  /* GLX errors are offset by the extension's base (0 in the compat shim: its
+   * XQueryExtension knows no GLX extension), so 9 is GLXBadFBConfig. */
+  switch (code) {
+    case 0: return "";
+    case 2: return " (BadValue)";
+    case 8: return " (BadMatch)";
+    case 9: return " (GLXBadFBConfig)";
+    default: return "";
+  }
+}
+
+static GLXContext request_ctx(Display *dpy, GLXFBConfig fbc, GLXContext share,
+                              const char *label, const int *attribs) {
+  g_xerr = 0;
+  GLXContext c = p_create_ctx ? p_create_ctx(dpy, fbc, share, True, attribs)
+                              : NULL;
+  say("[GL] ctx request %-18s -> ctx=%p X-error=0x%x%s\n", label, (void *)c,
+      g_xerr, xerr_name(g_xerr));
+  return c;
+}
+
+/* The version a context actually reports, through glXMakeCurrent: this is the
+ * only row that proves a request was *served* rather than merely accepted. */
+static const char *ctx_version(Display *dpy, Window win, GLXContext c) {
+  if (!c) return "(no context)";
+  if (!x_glXMakeCurrent(dpy, win, c)) return "(glXMakeCurrent failed)";
+  PFN_glGetString gs = (PFN_glGetString)gpa("glGetString");
+  const GLubyte *v = gs ? gs(GL_VERSION) : NULL;
+  return v ? (const char *)v : "(glGetString returned NULL)";
+}
+
+/* Unity's request, kept separate from the classic attribute set so the log
+ * distinguishes "the frontend rejected the attributes" from "the driver
+ * refused the version". */
+#define GLX_CONTEXT_OPENGL_NO_ERROR_ARB_LOCAL 0x31B3
+#ifndef GLX_CONTEXT_OPENGL_NO_ERROR_ARB
+#define GLX_CONTEXT_OPENGL_NO_ERROR_ARB GLX_CONTEXT_OPENGL_NO_ERROR_ARB_LOCAL
+#endif
+
 
 int main(void) {
   say("[GL] probe start (pid %d)\n", (int)getpid());
@@ -592,13 +674,19 @@ int main(void) {
   say("[GL] glX exports resolved: query/extensions/fbconfig/visual/makecurrent/"
       "swap/destroy\n");
 
-  PFN_glXCreateContextAttribsARB create_ctx =
+  p_create_ctx =
       (PFN_glXCreateContextAttribsARB)gpa("glXCreateContextAttribsARB");
-  if (!create_ctx) {
+  if (!p_create_ctx) {
     say("[GL] FAIL glXCreateContextAttribsARB is not resolvable\n");
     return 2;
   }
-  say("[GL] glXCreateContextAttribsARB @ %p\n", (void *)create_ctx);
+  say("[GL] glXCreateContextAttribsARB @ %p\n", (void *)p_create_ctx);
+
+  /* A rejected context request is reported through Xlib's error handler, and
+   * the frontend's generate_error() does nothing at all when the client has
+   * none installed (measured: Mesa's glx_api.c calls XSetErrorHandler(NULL),
+   * sees NULL and returns).  Install one so "NULL" always comes with a code. */
+  XSetErrorHandler(on_xerror);
 
   /* 2. GLX version + extensions, now that the display exists. */
   int glx_major = 0, glx_minor = 0;
@@ -698,34 +786,78 @@ int main(void) {
   XGetWindowAttributes(dpy, win, &wa);
   const int WIN_W = wa.width, WIN_H = wa.height;
 
-  /* 4. a 3.3 CORE context -- the M4 target.  The compat libX11 answers the
-   *    GLX queries; the profile comes from Mesa's st/mesa frontend. */
-  int ctx_attribs[] = {GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
-                       GLX_CONTEXT_MINOR_VERSION_ARB, 3,
-                       GLX_CONTEXT_PROFILE_MASK_ARB,
-                       GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
-                       GLX_CONTEXT_FLAGS_ARB, 0,
-                       None};
-  GLXContext ctx = create_ctx(dpy, fbc, NULL, True, ctx_attribs);
+  /* 4. The context-version matrix.  Unity asks for 4.5 core with its own
+   *    attribute list and creates a second context that shares with it; the
+   *    clamp we ship (tools/mesa/patches/0004) must let both through and hand
+   *    back the best context the driver has -- 3.3 core on softpipe.  A 3.3
+   *    request must still be passed through unchanged, and a 2.1 request must
+   *    be honoured or refused cleanly (never a hang, never a bogus context).
+   *
+   *    Order matters for the evidence: the 4.5 row is printed first, so a
+   *    tree without the clamp shows the refusal before anything else. */
+  int unity45[] = {GLX_CONTEXT_MAJOR_VERSION_ARB, 4,
+                   GLX_CONTEXT_MINOR_VERSION_ARB, 5,
+                   GLX_CONTEXT_PROFILE_MASK_ARB,
+                   GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
+                   GLX_CONTEXT_RELEASE_BEHAVIOR_ARB,
+                   GLX_CONTEXT_RELEASE_BEHAVIOR_FLUSH_ARB,
+                   GLX_CONTEXT_OPENGL_NO_ERROR_ARB, False, None};
+  int plain45[] = {GLX_CONTEXT_MAJOR_VERSION_ARB, 4,
+                   GLX_CONTEXT_MINOR_VERSION_ARB, 5,
+                   GLX_CONTEXT_PROFILE_MASK_ARB,
+                   GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
+                   GLX_CONTEXT_FLAGS_ARB, 0, None};
+  int core33[] = {GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
+                  GLX_CONTEXT_MINOR_VERSION_ARB, 3,
+                  GLX_CONTEXT_PROFILE_MASK_ARB,
+                  GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
+                  GLX_CONTEXT_FLAGS_ARB, 0, None};
+  int compat21[] = {GLX_CONTEXT_MAJOR_VERSION_ARB, 2,
+                    GLX_CONTEXT_MINOR_VERSION_ARB, 1,
+                    GLX_CONTEXT_PROFILE_MASK_ARB,
+                    GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB, None};
+
+  GLXContext c45 = request_ctx(dpy, fbc, NULL, "unity-4.5-core", unity45);
+  GLXContext cp45 = request_ctx(dpy, fbc, NULL, "plain-4.5-core", plain45);
+  GLXContext c33 = request_ctx(dpy, fbc, NULL, "core-3.3", core33);
+  GLXContext c21 = request_ctx(dpy, fbc, NULL, "compat-2.1", compat21);
+  GLXContext c45s = c45 ? request_ctx(dpy, fbc, c45, "unity-4.5-shared",
+                                     unity45)
+                        : NULL;
+
+  /* What each accepted request was actually served.  A context that exists
+   * but cannot be made current is not a context. */
+  if (c45) say("[GL] ctx served unity-4.5-core : %s\n", ctx_version(dpy, win, c45));
+  if (c45s) say("[GL] ctx served unity-4.5-shared: %s\n", ctx_version(dpy, win, c45s));
+  if (c33) say("[GL] ctx served core-3.3        : %s\n", ctx_version(dpy, win, c33));
+  if (c21) say("[GL] ctx served compat-2.1      : %s\n", ctx_version(dpy, win, c21));
+  if (!c33) {
+    say("[GL] FAIL a plain 3.3 core request must still work\n");
+    g_fail = 1;
+  }
+  /* The 4.5 request is the lane's whole point: it must not be refused. */
+  if (!c45) {
+    say("[GL] FAIL the 4.5 core request returned NULL -- the GLX frontend "
+        "must clamp it to the best context it can serve (AD-5)\n");
+    g_fail = 1;
+  }
+
+  /* Pick the one context the render/present proof runs on -- the 4.5 request
+   * when it was served, otherwise the 3.3 one -- then drop the current binding
+   * and every context we are not using. */
+  GLXContext ctx = c45 ? c45 : c33;
   if (!ctx) {
-    say("[GL] FAIL glXCreateContextAttribsARB(3.3 core) -> NULL\n");
-    /* Diagnostic only: does *any* context work?  A compat context proving the
-     * frontend is alive narrows the failure to the profile, not the stack. */
-    int compat_attribs[] = {GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
-                            GLX_CONTEXT_MINOR_VERSION_ARB, 3,
-                            GLX_CONTEXT_PROFILE_MASK_ARB,
-                            GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
-                            None};
-    GLXContext c2 = create_ctx(dpy, fbc, NULL, True, compat_attribs);
-    say("[GL] diagnostic: 3.3 compat context -> %p\n", (void *)c2);
-    if (c2 && x_glXMakeCurrent(dpy, win, c2)) {
-      PFN_glGetString gs = (PFN_glGetString)dlsym(h, "glGetString");
-      const GLubyte *v = gs ? gs(GL_VERSION) : NULL;
-      say("[GL] diagnostic GL_VERSION: %s\n", v ? (const char *)v : "(null)");
-    }
+    say("[GL] FAIL no usable GLX context at all\n");
     return 4;
   }
-  say("[GL] context 3.3 core -> %p\n", (void *)ctx);
+  x_glXMakeCurrent(dpy, None, NULL);
+  if (cp45 && cp45 != ctx) x_glXDestroyContext(dpy, cp45);
+  if (c45s && c45s != ctx) x_glXDestroyContext(dpy, c45s);
+  if (c33 && c33 != ctx) x_glXDestroyContext(dpy, c33);
+  if (c21 && c21 != ctx) x_glXDestroyContext(dpy, c21);
+
+  say("[GL] using %s context -> %p\n",
+      c45 ? "the 4.5-requested (clamped)" : "the 3.3", (void *)ctx);
 
   if (!x_glXMakeCurrent(dpy, win, ctx)) {
     say("[GL] FAIL glXMakeCurrent\n");
