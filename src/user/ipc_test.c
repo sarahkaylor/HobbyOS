@@ -21,6 +21,9 @@
  * expectations are #ifndef HOST_TEST (documented divergences: the 8192-byte
  * message cap, STREAM+control EOPNOTSUPP, poll(nfds > 256), recvmsg with
  * msg_name set, and dup/dup2-clears-CLOEXEC as an fd-table invariant).
+ * A macOS host (IPC_HOST_DARWIN) additionally skips the abstract namespace,
+ * SOCK_SEQPACKET, the 64 KiB ring fill and control truncation, none of which
+ * Darwin has; each skip prints an "IPC_T ...: SKIP" line.
  * The host TU does not include libc.h: it uses native headers/mocks so the
  * fixed-arity libc.h fcntl declaration cannot collide with glibc's variadic
  * one (the fcntl declarations differ; the calls are ABI-identical).
@@ -31,6 +34,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,6 +78,29 @@ void print_dec(long val);
 #else
 #define IPC_RECV_CMSG_CLOEXEC 0
 #define IPC_HAVE_CMSG_CLOEXEC 0
+#endif
+
+/* SOCK_CLOEXEC is Linux-only as well: the device build and Linux hosts define
+   it, macOS does not (its host TU failed to compile with "use of undeclared
+   identifier 'SOCK_CLOEXEC'").  Where the constant is missing, pass 0 and do
+   not assert the flag's effect. */
+#ifdef SOCK_CLOEXEC
+#define IPC_SOCK_CLOEXEC SOCK_CLOEXEC
+#define IPC_HAVE_SOCK_CLOEXEC 1
+#else
+#define IPC_SOCK_CLOEXEC 0
+#define IPC_HAVE_SOCK_CLOEXEC 0
+#endif
+
+/* Host-build platform divergences.  Darwin's AF_UNIX differs from both
+   HobbyOS and Linux in four ways this test can see: it has no abstract
+   namespace, no SOCK_SEQPACKET, a send buffer large enough that a 70 000-byte
+   blocking write never returns a partial count, and different control-
+   truncation rules.  Those checks are skipped in the macOS HOST build only
+   (each prints a SKIP line); the device build and Linux hosts take the #else
+   branch and assert everything they always did. */
+#if defined(HOST_TEST) && !defined(__linux__)
+#define IPC_HOST_DARWIN 1
 #endif
 
 static int fails;
@@ -219,6 +246,13 @@ static void t_stream_fork(void) {
 }
 
 static void t_stream_ring(void) {
+#ifdef IPC_HOST_DARWIN
+  /* A 70 000-byte blocking write() returns a partial count because
+     Linux's unix sockets expose a fixed 64 KiB ring.  Darwin's send
+     buffer is larger, so the same write completes or blocks until the
+     peer drains -- on the host that is a hang, not a measurement. */
+  print_console("  IPC_T STREAM ring: SKIP (no fixed 64 KiB ring on this host)\n");
+#else
   int sv[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) {
     check("stream ring socketpair", 0);
@@ -247,6 +281,7 @@ static void t_stream_ring(void) {
   int n2 = (int)read(sv[1], out, sizeof out);
   check("STREAM EOF after sender close", n2 == 0);
   close(sv[1]);
+#endif
 }
 
 /* ---- 2. SEQPACKET: framing, truncation, EMSGSIZE, EOF ------------------ */
@@ -254,7 +289,11 @@ static void t_stream_ring(void) {
 static void t_seqpacket(void) {
   int sv[2];
   if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0) {
+#ifdef IPC_HOST_DARWIN
+    print_console("  IPC_T SEQPACKET: SKIP (SOCK_SEQPACKET unsupported on this host)\n");
+#else
     check("socketpair(AF_UNIX, SOCK_SEQPACKET)", 0);
+#endif
     return;
   }
   static char big[7000];
@@ -342,8 +381,16 @@ static void t_seqpacket(void) {
 
 static void t_fd_passing(void) {
   int down[2], up[2], sv[2];
+#ifdef IPC_HOST_DARWIN
+  /* SCM_RIGHTS needs only a connected AF_UNIX socket; Darwin has no
+     SOCK_SEQPACKET, and this exchange is strictly one message in flight per
+     direction, which is what SEQPACKET framed for us. */
+  int ch_type = SOCK_STREAM;
+#else
+  int ch_type = SOCK_SEQPACKET;
+#endif
   if (pipe(down) != 0 || pipe(up) != 0 ||
-      socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0) {
+      socketpair(AF_UNIX, ch_type, 0, sv) != 0) {
     check("fd-passing setup (pipes + socketpair)", 0);
     return;
   }
@@ -534,6 +581,13 @@ static void t_fd_passing(void) {
 #endif
     if (g2 >= 0) close(g2);
 
+#ifdef IPC_HOST_DARWIN
+    /* Darwin's control-truncation rules differ: dropping the control buffer
+       does not report MSG_CTRUNC the way Linux does, so the two assertions
+       below describe Linux/HobbyOS semantics only. */
+    print_console("  IPC_T fd-passing: SKIP control truncation (host semantics differ)\n");
+    (void)abp;
+#else
     /* (c) control truncation: no control buffer at all -> MSG_CTRUNC and
      * the undeliverable fd is closed with the message. */
     cl = mk_fd_cmsg(cbuf, sizeof cbuf, abp[0]);
@@ -557,6 +611,7 @@ static void t_fd_passing(void) {
     check("truncated fd was closed (peer read end is gone: HUP/ERR)",
           r == 1 && (pf.revents & (POLLHUP | POLLERR)) != 0);
     close(abp[1]);
+#endif
   }
 
   close(down[0]);
@@ -929,7 +984,7 @@ static void t_named(void) {
   socklen_t salen = mk_un(&sa, path, 0);
   socklen_t ablen = mk_un(&ab, path, 1);
 
-  int l = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  int l = socket(AF_UNIX, SOCK_STREAM | IPC_SOCK_CLOEXEC, 0);
   check("named: socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC)", l >= 0);
   if (l < 0) return;
   check("named: bind(path)", bind(l, (struct sockaddr *)&sa, salen) == 0);
@@ -944,10 +999,18 @@ static void t_named(void) {
   errno = 0;
   check("named: second bind(path) -> -1/EADDRINUSE",
         bind(dup_l, (struct sockaddr *)&sa, salen) == -1 && errno == EADDRINUSE);
+#ifdef IPC_HOST_DARWIN
+  /* sun_path[0] == 0 is the Linux abstract namespace; Darwin has none. */
+  print_console("  IPC_T named: SKIP abstract twin (no abstract namespace on this host)\n");
+  (void)ab;
+  (void)ablen;
+#else
   check("named: abstract twin is a distinct key (bind ok)",
         bind(dup_l, (struct sockaddr *)&ab, ablen) == 0);
+#endif
   close(dup_l);
 
+#ifndef IPC_HOST_DARWIN
   {
     struct sockaddr_un nx;
     socklen_t nxlen = mk_un(&nx, "ipct-nobody-listens", 1);
@@ -958,6 +1021,7 @@ static void t_named(void) {
               errno == ECONNREFUSED);
     close(c);
   }
+#endif
 
   /* Nonblocking accept on an empty queue; listener not readable. */
   {
@@ -1032,12 +1096,20 @@ static void t_named(void) {
   /* Server: a blocking accept() parks until the child connects. */
   struct sockaddr_un cn;
   socklen_t cl = sizeof cn;
+  memset(&cn, 0, sizeof cn);   /* accept() fills only what it reports */
   int s = accept(l, (struct sockaddr *)&cn, &cl);
   uint64_t el = now_ms() - t0;
   check("named: blocking accept() returned the client", s >= 0);
   check("named: accept() parked until the late connect (>= 50ms)", el >= 50);
+#ifdef IPC_HOST_DARWIN
+  /* Darwin reports an unbound peer with a different address length; the
+     portable claim is that no path came back. */
+  check("named: accepted peer address carries no path",
+        s >= 0 && cn.sun_path[0] == '\0');
+#else
   check("named: accepted peer address is unnamed (family only)",
         s >= 0 && cl == (socklen_t)offsetof(struct sockaddr_un, sun_path));
+#endif
   if (s < 0) {
     int st = 0;
     waitpid(pid, &st, 0);
