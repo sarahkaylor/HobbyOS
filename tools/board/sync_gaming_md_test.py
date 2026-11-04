@@ -53,6 +53,19 @@ regression = S.plan_id_problems(sparse)
 check("no false 'missing=[148]' for the 148th (minted, sparse) row",
       regression == [])
 
+# --- GB-202: a doubled §8 row is a defect even when the id set is clean ---------
+
+dup_plan = ("| ID | Ticket | Wt | Depends | DoD |\n|---|---|---|---|---|\n"
+            "| GB-196 | one | M | — | d |\n"
+            "| GB-196 | two | M | — | d |\n"
+            "| GB-197 | three | S | — | d |\n")
+with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+    f.write(dup_plan)
+    dup_path = f.name
+check("a doubled §8 row is named", S.plan_duplicate_ids(dup_path) == ["GB-196"])
+os.unlink(dup_path)
+check("the live plan has one row per id", S.plan_duplicate_ids() == [])
+
 # --- GB-193: --adopt-orphans row generation/insertion (pure, no board) -------
 
 fixture_plan = """### Milestone M0 — Infrastructure
