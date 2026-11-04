@@ -124,7 +124,13 @@ if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
          obj/intel/libc.a || exit 2
   llvm-objcopy -O binary "$OUT/rwlaunch.elf" "$OUT/rwlaunch.bin"
 
+  # RW_NO_SHADOW=1: A/B the pthread symbol-shadowing hypothesis.  The
+  # launcher keeps -rdynamic (AD-10's dlopen redirect needs it) but omits its
+  # own pthread_*/sem_* definitions, so DSOs bind libpthread's entry points.
+  SHADOW_CFLAGS=()
+  if [ "${RW_NO_SHADOW:-0}" = 1 ]; then SHADOW_CFLAGS=(-DRW_NO_SHADOW_PTHREAD); fi
   gcc -O2 -Wall -Wextra -fPIE -pie -nostdlib -nostartfiles -rdynamic \
+      "${SHADOW_CFLAGS[@]}" \
       -nostdinc -isystem "$D/usr/include" \
       -isystem "$D/usr/include/x86_64-linux-gnu" \
       -isystem "$(gcc -print-file-name=include)" \

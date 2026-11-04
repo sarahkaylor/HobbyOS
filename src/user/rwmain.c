@@ -159,6 +159,25 @@ void *dlopen(const char *file, int mode) {
 }
 
 
+/* ---- pthread symbol shadowing (A/B knob) --------------------------------
+ * This launcher is linked -rdynamic so that dlopen()/dlsym() are exported
+ * (AD-10's redirect needs them: the executable is first in the global scope
+ * and that is what makes the interposition reach UnityPlayer.so).  The same
+ * rule applies to every other symbol this file defines -- including the
+ * pthread_mutex_* / sem_* / pthread_cond_* wrappers below.  So the question
+ * "who holds the stuck mutex" has a cheaper discriminator than a watchpoint:
+ * does the park even survive when the shadowing is removed?
+ *
+ *   -DRW_NO_SHADOW_PTHREAD omits every pthread/sem definition (and its
+ *   recorder) from the link, while dlopen/dlsym stay exported.  The game then
+ *   binds glibc's own entry points from libpthread and the only difference in
+ *   the boot is the interposition itself.  Build with:
+ *       RW_NO_SHADOW=1 tools/rw/run-rimworld-desktop.sh
+ * which passes the define; the default build is byte-for-byte the shipping
+ * launcher.
+ */
+#ifndef RW_NO_SHADOW_PTHREAD
+
 /* ---- mutex flight recorder ----------------------------------------------
  * Printing every sync call floods the console (the allocator loops over three
  * mutexes hundreds of times) and printing none loses the one lock that
@@ -464,6 +483,8 @@ int pthread_cond_timedwait(pthread_cond_t *c, pthread_mutex_t *m,
   return real ? real(c, m, t) : -1;
 }
 
+#endif /* !RW_NO_SHADOW_PTHREAD */
+
 /* The executable path, and the directory Unity will append "_Data" to. */
 static int exe_dir(char *out, size_t cap) {
   char exe[4096];
@@ -481,6 +502,7 @@ static int exe_dir(char *out, size_t cap) {
 
 int main(int argc, char **argv) {
   fprintf(stderr, "[RWMAIN] AD-9 PlayerMain launcher start argc=%d\n", argc);
+#ifndef RW_NO_SHADOW_PTHREAD
   mtx_main_tid = (int)gettid();
   fprintf(stderr, "[MTX] enabled=%d main_tid=%d\n", mtx_on(), mtx_main_tid);
   if (mtx_on()) {
@@ -488,6 +510,9 @@ int main(int argc, char **argv) {
     signal(SIGALRM, mtx_alarm_handler);
     alarm(20);
   }
+#else
+  fprintf(stderr, "[RWMAIN] pthread shadowing compiled OUT (A/B)\n");
+#endif
 
   char dir[4096];
   if (exe_dir(dir, sizeof dir) != 0) {
