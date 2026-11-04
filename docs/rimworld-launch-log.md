@@ -1208,3 +1208,217 @@ bash tools/gate/m12_thread_ceiling.sh    m12: PASS — 150 threads, TLS, shared 
 - `pthread_setschedparam → EPERM`, `GC Warning: Couldn't read /proc/stat` and
   `Failed reading 'ScriptingAssemblies.json'` are unchanged and still not on
   the critical path.
+
+## 14. 2026-11-04 — M6: the post-display park is an UNINITIALIZED mutex, not a held one
+
+Lane L22 (`rw-l22-mutex`), tree seeded from `4d3e55d7` (the L20 merge). §13 ended
+with "the wait is legitimate and the holder is parked elsewhere", inferred from
+the absence of a `WAKE` and from three probes. This wave tested the two cheap
+alternatives first (launcher symbol shadowing, then a hardware write
+watchpoint) and **refutes that conclusion**: nobody holds the mutex, and the
+word was never a locked mutex in the first place. It is the first qword of a
+0x30-byte node in one of Unity's own block chains.
+
+### 14.1 A/B: the launcher's pthread shadowing is not the cause
+
+The AD-9 launcher is linked `-rdynamic`, so every `pthread_*`/`sem_*` wrapper it
+defines is exported from the executable and wins symbol resolution for
+UnityPlayer.so (the executable is first in the global scope). If the wrapper
+were non-reentrant, a NORMAL-mutex self-deadlock would look exactly like the
+measured park.
+
+The discriminator is one define, not a rewrite: `-DRW_NO_SHADOW_PTHREAD` omits
+every pthread/sem definition (and the mtx recorder) while keeping `dlopen`/
+`dlsym` exported, so AD-10's redirect still works and the only difference is the
+interposition itself.
+
+```
+launcher dynsym:            base      noshadow
+  pthread_mutex_lock          2          0        (readelf -sW --dyn-syms | grep -c)
+  dlopen                    yes        yes
+```
+
+Serial, same kernel, same disk, same run script, `--run-timeout 100`:
+
+| run | launcher | last futex ring row | park |
+|---|---|---|---|
+| A | shipping (`-rdynamic`, wrappers) | `r#67 WAIT pid=4 key=0x10C00964A0 rip=0x1082404170 val=0x2 to=-1` | `[IDLESTUCK] slot=4 … futex=0x10c00964a0` |
+| B | `RW_NO_SHADOW=1` | `r#66 WAIT pid=4 key=0x10C00964A0 rip=0x1082404170 val=0x2 to=-1` | `[IDLESTUCK] slot=4 … futex=0x10c00964a0` |
+
+**The park does not move.** Same key, same libpthread slow path, same infinite
+wait, same `__lock=2`. The interposition — and therefore the recorder and every
+`dlvsym(RTLD_NEXT,…)` path in the launcher — is ruled out by rows, not argument.
+(Keep the knob: `RW_NO_SHADOW=1 tools/rw/run-rimworld-desktop.sh` is now the
+standing A/B for any future "our wrapper did it" theory.)
+
+### 14.2 The instrument: DR0 data-write watchpoint (`src/kernel/rw_watch.c`)
+
+A read cannot name a writer, so the word gets a hardware breakpoint:
+`DR0 = 0x10C00964A0`, `DR7 = 0x000D0001` (L0=1, RW0=01 data-write, LEN0=11
+4 bytes), `#DB` (vector 1) consumed at the top of the trap handler, `DR6`
+cleared per hit, and one `[WATCH] wr` row per store with pid, cpu, rip, new
+value and the general registers. Built only with `make RW_WATCH_ADDR=0x…`; the
+default kernel compiles the module to nothing.
+
+Two instrument bugs were found and fixed before the rows meant anything, and
+both are worth keeping:
+
+1. **Arm on every trap, not on the timer range.** The first build armed only on
+   vectors 32..47; under `-smp 8` it printed one `[WATCH] armed cpu=0` and zero
+   write rows — the other seven cores take IPIs and syscalls, not the PIT.
+   Arming on any trap covers every core within a millisecond of boot.
+2. **Self-test before believing "no rows".** A silent mechanism and a
+   never-written word look identical. The module now points DR0 at a kernel
+   scratch word, writes it, and reports `[WATCH] selftest #DB=FIRED|MISSED`
+   (`FIRED` in every run below).
+
+```
+[WATCH] armed cpu=0 addr=0x10C00964A0 len=4 dr7=0xD0001
+[WATCH] selftest #DB=FIRED
+[WATCH] armed cpu=1..7 …            (8/8 cores)
+```
+
+### 14.3 The four writes to `0x10C00964A0` in the whole boot
+
+Rip → module+offset uses the run's own bases: UnityPlayer `0x10801FC000`
+(`[RWMAIN] PlayerMain=0x108105f8b0` − `PlayerMain`'s `0xe638b0`), libpthread
+`0x10823F1000` (`__lll_lock_wait`'s syscall return is `+0x13170`).
+
+| n | pid/cpu | rip | site | store | value at word |
+|---|---|---|---|---|---|
+| 1 | 4/0 | `0x1080B67DD9` | UnityPlayer+0x96BDD9 | after `movq $0,(%rcx)` @+0x96BDD2 | `0x0` |
+| 2 | 4/0 | `0x1080B67DEB` | UnityPlayer+0x96BDEB | after `mov %rcx,(%rsi)` @+0x96BDE8 | `0xC00964D0` |
+| 3 | 4/1 | `0x10823FBFF3` | libpthread+0xAFF3 | after `lock cmpxchg %edx,(%rdi)` in `__pthread_mutex_lock` — **the store does not happen**, the locked instruction still traps | `0xC00964D0` (unchanged) |
+| 4 | 4/1 | `0x1082404155` | libpthread+0x13155 | after `xchg` of 2 in `__lll_lock_wait` (sets the WAITERS bit) | `0x2` |
+
+`n=3` is the decisive one: `__pthread_mutex_lock`'s fast path
+(`atomic_compare_and_exchange_val_acq(lock, 1, 0)`) **failed** against a word
+holding `0xC00964D0`, returned that value in `rax`, and fell into
+`__lll_lock_wait`, which set the waiter bit and parked. Nothing was ever
+holding a lock.
+
+`n=1`/`n=2` are UnityPlayer's small-block pool: `movq $0,(%rcx)` then
+`xchg %rsi,0x80(%rbx)` (publish) and `mov %rcx,(%rsi)` (link the previous
+head), with `%rdx = %rdi = 0x30` — the block size. The block at
+`0x10C00964A0` is being **linked into a 0x30-byte chain**, and the link lands
+in the 40-byte `pthread_mutex_t`'s `__lock` field.
+
+### 14.4 The memory picture at the park (one-shot dump on the store of 2)
+
+```
+[WATCH] parkmem addr=0x10C00964A0 -0x30..+0x50:
+  0x10C00964A0 0x0 0x0 0x0 0x0 0x0  0x1000000002 0x0 0x0 0x0 0x0 0x0  0x10C0096500 0x0 0x0 0x0
+```
+
+Read it as qwords at `addr-0x30 … addr+0x50`: `[addr-0x30] = 0x10C00964A0`,
+`[addr] = 0x1000000002` (after the waiter-bit store; `__lock=2`, `__count=0x10`
+= the high half of the previous pointer `0x00000010C00964D0`), and
+`[addr+0x30] = 0x10C0096500`. **Every 0x30 bytes a qword points at the next
+block**: `0x…6470 → 0x…64A0 → 0x…64D0 → 0x…6500`. That is a chain, not a
+mutex: the word the kernel parks on is a node's `next` pointer.
+
+`__count=0x10` in §13's `[FUTEX] mutex` row is the same fact from the other
+side — it is not mutex state at all, it is the pointer's high half.
+
+### 14.5 Counterfactual: the mutex is the blocker, and the chain is systemic
+
+If a *free* mutex is all that stands between the game and window creation, then
+forging one acquisition answers it. `-DRW_WATCH_FIXUP=1` makes the `#DB`
+handler, at the failed `lock cmpxchg` only (`f0 0f b1 17` immediately before
+the rip, so the allocator's own stores are never touched), zero the word and set
+ZF in the saved `rflags`, so `__pthread_mutex_lock` continues as if it had
+acquired the mutex. Diagnostic only; never a shipping behaviour.
+
+```
+[WATCH] FIXUP n=1 was=0xC00964D0 rip=0x10823FBFF3 -> word=0, ZF forced (counterfactual, not a fix)
+[WATCH] wr n=4 … rip=0x10823FBFF3 val=0x0            (the acquire the fast path believes it made)
+[WATCH] wr n=5 … rip=0x10823FD7DD val=0x0 rdi=0x10C00964A0   (the caller's unlock — so the forgery was contract-consistent)
+[IDLESTUCK] slot=4 pid=4 st=8 futex=0x10c0096470 rip=0x1082404170 /NFS/RimWorldLinux
+```
+
+The lock at `0x10C00964A0` is gone. The game then locks **the next block down
+the chain**, `0x10C0096470`, from a *different* Unity call site:
+
+```
+[FUTEX] st pid=4 sp=0x17FFFFB408 0x10823FC0A3 0x10B0020010 0x10C0096470 0x10C0096470 0x10000024B9 0x108047DC9D word=0x2
+[FUTEX] mutex pid=4 key=0x10C0096470 0x2 0x10 0x0 0x0 0x0
+```
+
+`0x108047DC9D` = UnityPlayer+0x2801C9D — a *second* Unity call site (the first
+park's caller was UnityPlayer+0x1D43DA5). The word above the mutex in the frame
+is `0x10000024B9`, the return address inside the launcher's own
+`pthread_mutex_lock` (symbol start `0x1000002470`), i.e. the same interposed
+wrapper. Same shape: `__lock` holds a chain pointer, `__count` holds its high
+half, `__lll_lock_wait`, infinite.
+
+The engine itself moved one stage, which is what makes this a counterfactual and
+not a curiosity. `Player.log` gains a row that no previous run produced:
+
+```
+RuntimeInitializeOnLoadManagerInitializer: Failed reading 'ScriptingAssemblies.json'Display 0 '0': 1920x1080 (primary device).
+[PhysX] Initialized MultithreadedTaskDispatcher with 2 workers.
+```
+
+So the queue push that parked at `0x10C00964A0` really was the blocker in front
+of the *next* engine stage, and the chain node at `0x10C0096470` is the one
+behind it.
+
+### 14.6 Verdict
+
+- **Nobody holds the mutex.** There is no owner to name and no `WAKE` to wait
+  for: `pthread_mutex_lock` was called on a word that was already
+  `0x10C00964D0`, i.e. on memory that is a Unity pool node's link field. §13's
+  "the holder is itself parked in one of the 23 quiescent waits" is refuted by
+  the write rows.
+- **The wait is still "legitimate" in the kernel's terms** — glibc correctly
+  refuses to enter a critical section whose word is not 0 — so no futex,
+  scheduler or wake-path change can fix it. The bug is the *caller* locking an
+  uninitialized/relinked `pthread_mutex_t`.
+- **It is systemic, not one object.** Freeing that word moves the park to the
+  neighbouring node at `0x…6470`, from a second call site. The whole 0x30-byte
+  chain in `0x10C0000000+0x400000` is being used as mutexes whose `__lock` is a
+  chain link.
+
+### 14.7 The next instrument (not guessed — the address is computed)
+
+The remaining question is *who publishes the pointer* into the queue object and
+when the block was freed. Both are one watchpoint away:
+
+```
+queue   = *(UnityPlayer_base + 0x1F5C1F0)     ; the loader prints UnityPlayer_base
+                                                (measured 0x10801FC000 → slot 0x108211E1F0)
+mutex   = *(queue + 8)                         ; measured 0x10C00964A0
+```
+
+`this` comes from UnityPlayer+0x1BDB0D8 (`mov (%rax),%rdi` where
+`rax = *(0x1F5C1F0)`, then `call 0x1D43D90 { mov 0x8(%rdi),%rdi; call
+pthread_mutex_lock@plt }`). Re-point `RW_WATCH_ADDR` at `queue+8` and the same
+module names the store that installs `0x10C00964A0`, and `RW_WATCH_ADDR` at the
+node's owner (`pool+0x80`) names the free-list publisher. A second run with
+`RW_WATCH_ADDR` at `0x10C00964D0` shows whether the chain is a *free* list
+(pop leaves the link) or a live intrusive list.
+
+### 14.8 Regressions
+
+Serialized (never with the desktop harness):
+
+```
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 398   Tests failed: 0
+bash tools/gate/m2_threads.sh            m2: PASS
+bash tools/gate/m12_thread_ceiling.sh    m12: PASS
+```
+
+### 14.9 Limits
+
+- No window, no GLX, no frame; the ladder now ends on a *different* mutex
+  (`0x10C0096470`), not on `XCreateWindow`.
+- The fixup is a counterfactual probe, deliberately not a fix: it forges one
+  acquisition to prove the blocker.
+- The watchpoint is compile-time (`RW_WATCH_ADDR`) and must be re-pointed per
+  address; DR0 has one slot.
+- Why Unity's pool relinks a block that a live object points at is **not**
+  answered here. Two candidates remain: Unity frees and re-carves the page
+  (Unity-side), or an HobbyOS `mmap`/`madvise` semantic makes Unity believe a
+  page was released when it was not. `vm_region_insert_locked` rejects overlaps
+  and only merges exactly-adjacent identical regions, so a region-level double
+  map is ruled out.

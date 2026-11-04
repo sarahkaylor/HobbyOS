@@ -39,6 +39,7 @@
 #include "linux_compat.h"  /* compat handler-table dispatch + [LCOMPAT] tracer */
 #include "vfs.h"
 #include "vm.h"
+#include "rw_watch.h"
 #include "blk_cache.h"
 #include "fb_mmap.h"
 #include <stdint.h>
@@ -3131,6 +3132,18 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   }
   gic_set_current_vector(cpu, tf->vector);
   watchdog_tick(cpu, tf);
+
+  /* RW-WATCH: DR0 data-write breakpoint.  Two hooks, both compiled out
+     without -DRW_WATCH_ADDR:
+       (a) every trap arms this CPU's DR0/DR7 once (the registers are per-CPU
+           and this scheduler does not context-switch them).  Arming on ANY
+           vector, not just the timer range: measured, -smp 8 armed only cpu 0
+           when this was gated to vectors 32..47 -- the other cores take IPIs
+           and syscalls, so their writes stayed invisible;
+       (b) #DB is consumed here, before the generic exception path (which
+           would otherwise kill the process for an "unknown" vector 1). */
+  rw_watch_arm_cpu();
+  if (tf->vector == 1 && rw_watch_db(tf)) return;
 
   /* SEC-OBS-B: drain deferred lost-wakeup requests here rather than at
    * the virtio-blk completion that raised them (see process.h). */

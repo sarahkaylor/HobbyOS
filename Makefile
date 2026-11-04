@@ -110,6 +110,7 @@ endif
 DESKTOP_FILE = $(OBJ_DIR)/.desktop
 X11_BUILD_DIR ?= third_party/x11/build/$(ARCH)
 
+
 # Flat WebProcess binary (WK-5 windowed browser shell).  The browser SOURCE is
 # vendored in this repo since 2026-10-07 — third_party/webkit-hobbyos/
 # (sha-verified snapshot parts + extract.sh + build.sh; see its README.md).
@@ -518,6 +519,23 @@ GX_X64_NOTE_SOFT :=
 ifeq ($(ARCH),intel)
   GX_X64_NOTE_GL := (x64: $(GX_X64_GPU_DEV))
   GX_X64_NOTE_SOFT := (x64: no GPU device -- std VGA)
+endif
+
+# Diagnostic: x86 DR0 data-write watchpoint on one user word
+# (src/kernel/rw_watch.c + src/include/rw_watch.h).  Empty = the module
+# compiles to nothing and the trap hooks are no-ops, so a normal build is
+# unchanged.  A diagnostic boot names the address it wants trapped:
+#     make RW_WATCH_ADDR=0x10C00964A0 ... disk.img
+# The append lives here, after every CFLAGS assignment above, because a plain
+# `CFLAGS +=` earlier in this file is overwritten by the per-arch `CFLAGS =`.
+ifneq ($(RW_WATCH_ADDR),)
+  CFLAGS += -DRW_WATCH_ADDR=$(RW_WATCH_ADDR)
+endif
+# Counterfactual probe for the same module: forge a successful acquisition of
+# an uninitialized mutex (zero the word + force ZF) to answer "is THIS the
+# blocker".  Diagnostic only; never a shipping behaviour.
+ifneq ($(RW_WATCH_FIXUP),)
+  CFLAGS += -DRW_WATCH_FIXUP=1
 endif
 
 # Target and objects
