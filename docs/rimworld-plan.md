@@ -603,7 +603,31 @@ to its main menu: `Mono path[0] = '<dir>/RimWorldLinux_Data/Managed'`,
 launcher must be named `RimWorldLinux` inside the game dir so `/proc/self/exe`
 resolves next to `RimWorldLinux_Data`. Nothing about the non-PIE stub matters.
 
-**Status 2026-11-03 (lane L14): the game runs inside HobbyOS up to Mono init.**
+**Status 2026-11-04 — ENGINE UP, NO FRAME YET.** In a desktop session the game
+now gets through window activation, GL context creation and audio, and creates
+its graphics device: `Forcing GfxDevice: OpenGL Core` →
+`GfxDevice: creating device client` → `OPENGL LOG: Creating OpenGL 3.3 graphics
+device ; Context level <OpenGL 3.3>`, with a real 1916×1018 surface on the
+desktop. **No frame has been presented** — there is no `XPutImage`/`ESC ] F`
+content-flush row and the running screenshot is still the launcher's stdout
+window, so nothing here claims a render. The next wall is the **managed layer**:
+`Unable to find method ProcessFrame in [UnityEngine.CoreModule.dll]…` followed by
+a fault inside `libmonobdwgc-2.0.so` (`NULL+0x38`), and the death site varies per
+run (`NULL+0x6` in UnityPlayer, `NULL+0x38` in Mono, once a wild futex write) —
+i.e. memory/thread corruption at the CLR boundary, not a missing capability.
+
+Walls retired on the way there, each a real defect rather than a shim tweak: the
+compat signal frame was 8 bytes off the x86-64 ABI (`rsp%16` must be 8, so every
+`movaps` in a handler took `#GP`); `vm_handle_fault` charged correct COW copies to
+`FAULT_RETRY_MAX` and killed the 5th legitimate one (FMOD probes audio by
+dlopen/dlclose, so one base is copy-relocated per probe); `vm_as_clone_into`
+mapped object frames read-write into a forked child; `vm_mprotect` re-encoded
+leaves before region records; `st_dev` was 0 for every volume and every NFS
+`stat` returned `st_ino=0`. `XIGrabTouchBegin` (XInput2) was a NULL slot reached
+without a check, `glXCreateContextAttribsARB` was `GLOBAL HIDDEN` in Mesa, and
+`XReparentWindow` was a stub that Unity's window dance depends on.
+
+**Historical (lane L14, 2026-11-03): the game runs inside HobbyOS up to Mono init.**
 `src/user/rwmain.c` is the AD-9 launcher (glibc-2.31 PIE, reads
 `/proc/self/exe`, `dlopen`s `/RWDSO/UnityPlayer.so`, `dlsym`s
 `_Z10PlayerMainiPPc`, calls it; its exported `dlopen` remaps Mono/plugin DSO
@@ -926,6 +950,16 @@ awk '/if \(linux_compat_dispatch\(lp, tf, syscall_num\)\)/,/^  }/' \
   ENOSYS) and stops only because `MODE=test` has no display. GL reaches a real
   window (`docs/rimworld-m4-window.png`, 0.0049% pixel diff, clean teardown).
   Next: run the game inside the guest X session with the xcompat DSOs staged.
+
+- 2026-11-04 — **waves 11-13: the engine comes up.** Merged `rw-l27-renderer`,
+  `rw-l28-mapnotify`, `rw-l29-nulljump`, `rw-l30-loader` (all clean). Unity now
+  accepts the forced renderer, completes its reparent/window dance, creates a
+  GL 3.3 device (`GfxDevice: creating device client`, `Creating OpenGL 3.3
+  graphics device`), and survives audio. No frame is presented yet; the next
+  wall is the managed layer (nondeterministic faults inside Mono during Unity's
+  type resolution). Perf (wave 10) says softpipe gives 8.2 fps @720p / 4.3 @
+  1916x1018 and ~0.4 fps for the real menu, so **virgl is required for
+  playability** and the old ">=8 fps softpipe" M7 criterion is retired.
 
 ## 11. Fix log (append-only)
 
