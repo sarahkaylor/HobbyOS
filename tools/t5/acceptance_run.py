@@ -172,6 +172,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--arch", default="arm", choices=["arm", "intel"])
     ap.add_argument("--root", default=os.getcwd())
+    ap.add_argument("--drop-down", type=int, default=None, metavar="N",
+                    help="TEST HOOK: drop the Nth Down on each title's first "
+                         "launch attempt, exercising the verified-launch retry")
     args = ap.parse_args()
     root = args.root
     os.chdir(root)
@@ -183,7 +186,7 @@ def main():
     qemu_make = ["make", "run", "DESKTOP=hobby", f"ARCH={args.arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp},server,nowait"]
 
-    from evidence_rig import boot, find_menu_slot, launch_from_menu
+    from evidence_rig import boot, find_menu_slot, launch_verified
     q = boot(qemu_make, serial, qmp, args.arch)
     menu = open(serial, errors="ignore").read()
 
@@ -197,14 +200,20 @@ def main():
                          "note": "not in [MENU] dump"})
             all_ok = False
             continue
-        launch_from_menu(q, slot)
+        launched, actual, tries = launch_verified(
+            q, serial, game, slot, drop_down=args.drop_down)
         time.sleep(3)
         ppm = os.path.join(outdir, game.replace(".BIN", "") + ".ppm")
         q.screendump(ppm)
         serial_text = open(serial, errors="ignore").read()
         live = ppm_live(ppm)
         ok, reasons = gate_game(serial_text, game, ppm, prev_ppm)
+        if not launched:
+            ok = False
+            reasons = [f"launched {actual or 'nothing'} instead of {game} "
+                       f"after {tries} attempt(s)"] + reasons
         rows.append({"game": game, "slot": slot, "live": live, "ok": ok,
+                     "launched": actual, "tries": tries,
                      "reasons": reasons, "sha16": sha16(ppm)})
         if not ok:
             all_ok = False
@@ -223,14 +232,15 @@ def main():
          "  must LOAD (serial load line / live process), render a live whole-frame,\n"
          "  and (after the first title) differ from the previous one over the whole\n"
          "  frame by at least the stated margin.\n\n",
-         "| game | slot | loaded | live frame | result |\n|---|---|---|---|---|\n"]
+         "| game | slot | launched | tries | loaded | live frame | result |\n|---|---|---|---|---|---|---|\n"]
     for r in rows:
         if 'note' in r:
-            L.append(f"| {r['game']} | - | no | {r.get('live','-')} | FAIL |\n"
+            L.append(f"| {r['game']} | - | - | - | no | {r.get('live','-')} | FAIL |\n"
                      f"  - {r['note']}\n")
             continue
         loaded = "yes" if title_loaded(open(serial, errors="ignore").read(), r['game']) else "no"
-        L.append(f"| {r['game']} | {r.get('slot','-')} | {loaded} | {r.get('live','-')} |"
+        L.append(f"| {r['game']} | {r.get('slot','-')} | {r.get('launched','-')} |"
+                 f" {r.get('tries','-')} | {loaded} | {r.get('live','-')} |"
                  f" {'PASS' if r['ok'] else 'FAIL'} |\n")
         if r.get('reasons'):
             L.append(f"  - reasons: {'; '.join(r['reasons'])}\n")
