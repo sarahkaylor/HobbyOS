@@ -143,6 +143,10 @@ int elf_parse_ex(const void *buf, uint64_t len, struct elf_image *img,
     const uint32_t type = rd32(ph + P_TYPE_OFF);
     if (type == PT_NULL) continue;
     if (type == PT_INTERP) {
+      /* A shared library is not started by the kernel; glibc's libc.so.6
+         carries a PT_INTERP anyway (GB-199 measured it at 0x1e67c0), so a DSO
+         parse ignores it rather than refusing the dependency. */
+      if (flags & ELF_PARSE_DSO) continue;
       /* M0 freeze: capture the path when the caller may honour it.  With the
          default flags this is only a flag and the loop-end refusal below is
          untouched, so a compat load behaves exactly as it did. */
