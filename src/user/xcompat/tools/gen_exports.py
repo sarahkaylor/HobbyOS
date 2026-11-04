@@ -36,9 +36,6 @@ XCOMPAT = os.path.dirname(HERE)          # .../src/user/xcompat
 PARTIAL = {
     "XUnmapWindow": "the protocol cannot retract a pixel window: the surface "
                     "stays up and stops receiving events",
-    "XChangeProperty": "accepted and dropped; no property list is kept",
-    "XGetWindowProperty": "answers None/Success; nothing round-trips except "
-                          "WM hints (XGetWMHints/XGetWMNormalHints)",
     "XMoveWindow": "the desktop owns window placement; no-op",
     "XResizeWindow": "the desktop owns window size; no-op",
     "XMoveResizeWindow": "the desktop owns geometry; no-op",
@@ -60,6 +57,22 @@ IMPL_NOTE = {
                    "`put_px`. M3 gate renders legible text.",
     "XDrawImageString": "`XDrawString` without the pre-fill (ImageString "
                         "semantics are close enough: the font cell is opaque)",
+    "XChangeProperty": "stores name/type/format/data in a 12-slot property "
+                       "list (`_NET_WM_NAME`, `_NET_WM_PID`, `WM_PROTOCOLS`, "
+                       "`WM_CLASS` all round-trip); a title written this way "
+                       "also drives the desktop frame (`ESC ] T`).",
+    "XGetWindowProperty": "reads the property list back (malloc'd copy, as "
+                          "Xlib returns); only the first 512 bytes of a "
+                          "property are retained.",
+    "XSetWMProtocols": "records the list, stores it as WM_PROTOCOLS/ATOM/32 "
+                       "and arms the WM_DELETE_WINDOW path: the desktop's "
+                       "in-band `ESC [ D ~` close becomes the ClientMessage SDL "
+                       "reads (see XNextEvent).",
+    "XNextEvent": "polls the desktop pipe, drains queued events, and turns the "
+                  "desktop's close into a WM_PROTOCOLS/WM_DELETE_WINDOW "
+                  "ClientMessage when the client registered one via "
+                  "XSetWMProtocols; a client that never did keeps the old "
+                  "exit-the-process close.",
 }
 
 STATEFUL = re.compile(
@@ -69,7 +82,7 @@ STATEFUL = re.compile(
     r"xc_(queue|dequeue|peek|pending|intern|atom_name|clip|content_to_screen|"
     r"dirty|root_to_window|window_to_root|keysym|keycode|lookup_string|init)|"
     r"xs_(write|read|open|close|mmap|ioctl|syscall6)|"
-    r"XStoreName|XFillRectangle|XDrawLine|XUnmapWindow")
+    r"XStoreName|XFillRectangle|XDrawLine|XUnmapWindow|XSync")
 
 
 def run(cmd):

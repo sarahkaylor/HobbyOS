@@ -146,7 +146,9 @@ static int xlen(const char *s) { int n = 0; while (s[n]) n++; return n; }
  * allocation-free (-nostdlib, raw syscalls).  Defined here as an extern so the
  * link keeps it an undefined symbol resolved from the compat process's libc. */
 extern void *malloc(unsigned long size);
+extern void free(void *p);
 static void *xc_malloc(unsigned long n) { return malloc(n); }
+static void xc_free(void *p) { if (p) free(p); }
 
 /* ---- framebuffer ------------------------------------------------------ *
  * docs/linux-abi.md §9: /dev/fb0 maps the HobbyOS framebuffer.  The mode is
@@ -200,14 +202,11 @@ struct _XGC {
 #define QUEUE_MAX XC_EVENT_RING
 #define GC_MAX 8
 #define PROTO_MAX 8
-
-struct _XVisual {
-  VisualID id;
-  int c_class;
-  unsigned long red_mask, green_mask, blue_mask;
-  int bits_per_rgb;
-  int map_entries;
-};
+/* A small property list: SDL/Unity write _NET_WM_NAME, _NET_WM_PID,
+ * WM_PROTOCOLS, WM_CLASS and WM_NORMAL_HINTS, and a client is allowed to read
+ * back what it wrote.  Storage is static (no allocator in this DSO). */
+#define PROP_MAX 12
+#define PROP_BYTES 512
 
 struct _XDisplay {
   /* The public prefix FIRST, at offset 0: a client compiled against the real
@@ -236,6 +235,7 @@ struct _XDisplay {
     Window id;
     unsigned pref_w, pref_h;
     unsigned long bg, border;
+    Colormap cmap;
     int mapped, destroyed, content_ready, pointer_asked;
     int gx, gy, cw, ch;
     long event_mask;
@@ -245,6 +245,13 @@ struct _XDisplay {
     int title_len;
     Atom protocols[PROTO_MAX];
     int nprotocols;
+    /* WM_DELETE_WINDOW bookkeeping: the desktop's in-band close is
+     * ESC [ D ~, but SDL never sees that -- it expects a ClientMessage on
+     * WM_PROTOCOLS (see deliver_wm_delete). */
+    Atom wm_protocols_atom;
+    Atom wm_delete_atom;
+    int delete_registered;
+    int delete_delivered;
     char *class_name, *class_class;
     XSizeHints size_hints;
     XWMHints wm_hints;
@@ -252,6 +259,15 @@ struct _XDisplay {
     int override_redirect;
     Cursor cursor;
   } win;
+
+  /* The property list (see PROP_MAX). */
+  struct {
+    Atom name, type;
+    int format;
+    unsigned long nitems;
+    unsigned char data[PROP_BYTES];
+  } props[PROP_MAX];
+  int nprops;
 
   GC gcs[GC_MAX];
 
@@ -756,6 +772,33 @@ static int input_available(void) {
   return r > 0 && (p.revents & XPOLLIN);
 }
 
+/* The desktop's graceful close is the in-band ESC [ D ~ (see desktop.c:
+ * desktop_request_close).  A real X server would instead deliver
+ *   ClientMessage { message_type = WM_PROTOCOLS, format = 32,
+ *                    data.l[0] = WM_DELETE_WINDOW }
+ * to the client that registered WM_DELETE_WINDOW via XSetWMProtocols -- and
+ * that is the only close signal SDL understands (its X11 event loop turns it
+ * into SDL_QUIT).  So synthesise it once, after the desktop's message, and
+ * leave `desktop_closed` set: a client that ignores it and asks again falls
+ * through to the old exit-the-process behaviour instead of hanging. */
+static int deliver_wm_delete(Display *d) {
+  if (!d->desktop_closed || !d->win.delete_registered ||
+      d->win.delete_delivered || !d->win.id)
+    return 0;
+  XEvent ev;
+  xz(&ev, sizeof ev);
+  ev.type = ClientMessage;
+  ev.xclient.window = d->win.id;
+  ev.xclient.message_type = d->win.wm_protocols_atom;
+  ev.xclient.format = 32;
+  ev.xclient.send_event = True;
+  ev.xclient.data.l[0] = (long)d->win.wm_delete_atom;
+  ev.xclient.data.l[1] = 0;              /* CurrentTime */
+  d->win.delete_delivered = 1;
+  queue_event(d, &ev);
+  return 1;
+}
+
 static void pump_nonblock(Display *d) {
   unsigned char buf[256];
   for (;;) {
@@ -765,16 +808,18 @@ static void pump_nonblock(Display *d) {
     input_bytes(d, buf, (int)r);
   }
   input_settle(d, input_available());
+  deliver_wm_delete(d);
 }
 
 /* Returns 0 with an event ready, -1 when the desktop is gone/closed. */
 static int wait_event(Display *d) {
   for (;;) {
     if (xc_pending(&d->core)) return 0;
+    if (deliver_wm_delete(d)) return 0;
     if (d->desktop_closed) return -1;
     pump_nonblock(d);
     if (xc_pending(&d->core)) return 0;
-    if (d->desktop_closed) return -1;
+    if (d->desktop_closed) return deliver_wm_delete(d) ? 0 : -1;
     shadow_flush(d);
     unsigned char buf[256];
     long r = xs_read(0, buf, sizeof buf);
@@ -864,7 +909,8 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->screen_obj.save_unders = 0;
   d->screen_obj.root_input_mask = 0;
 
-  d->visual.id = 0x21;                   /* TrueColor, 24-bit */
+  d->visual.ext_data = 0;
+  d->visual.visualid = 0x21;             /* TrueColor, 24-bit */
   /* TrueColor (4), NOT InputOutput (1): the XVisualInfo/Visual `class` field
    * is a *visual* class (StaticGray..DirectColor), while InputOutput is a
    * window class.  Mesa's xmesa_convert_from_x_visual_type() maps 1 to
@@ -877,7 +923,7 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->visual.bits_per_rgb = 8;
   d->visual.map_entries = 256;
   d->vinfo.visual = (Visual *)&d->visual;
-  d->vinfo.visualid = d->visual.id;
+  d->vinfo.visualid = d->visual.visualid;
   d->vinfo.screen = 0;
   d->vinfo.depth = 24;
   d->vinfo.c_class = TrueColor;           /* a *visual* class (see above) */
@@ -906,7 +952,7 @@ XAPI int XCloseDisplay(Display *d) {
     xs_close(d->fb_fd);
     d->fb_fd = -1;
   }
-  return 0;
+  return 1;                              /* Xlib: success */
 }
 
 XAPI int DefaultScreen(Display *d) { return d ? d->screen : 0; }
@@ -965,7 +1011,7 @@ XAPI unsigned long BlackPixel(Display *d, int scr) {
 }
 XAPI unsigned long WhitePixelOfScreen(Screen *s) { (void)s; return 0x00FFFFFFL; }
 XAPI unsigned long BlackPixelOfScreen(Screen *s) { (void)s; return 0; }
-XAPI VisualID XVisualIDFromVisual(Visual *v) { return v ? v->id : 0; }
+XAPI VisualID XVisualIDFromVisual(Visual *v) { return v ? v->visualid : 0; }
 XAPI int XConnectionNumber(Display *d) { return d ? d->fb_fd : -1; }
 XAPI char *XDisplayName(const char *s) { (void)s; return (char *)":0"; }
 XAPI char *XDisplayString(Display *d) { (void)d; return (char *)":0"; }
@@ -1059,15 +1105,23 @@ XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
                           Visual *visual, unsigned long valuemask,
                           XSetWindowAttributes *attrs) {
   (void)parent; (void)x; (void)y; (void)border_width; (void)depth;
-  (void)c_class; (void)visual; (void)valuemask; (void)attrs;
+  (void)c_class; (void)visual;
   xtr("[XC] XCreateWindow\n");
   if (!d || d->win.id) return 0;         /* one window per display */
   d->win.id = 1;
   d->win.pref_w = width ? width : 640;
   d->win.pref_h = height ? height : 480;
   d->win.bg = 0x00000000L;
+  d->win.cmap = d->default_cmap;
+  /* CWBorderPixel(1<<3), CWEventMask(1<<11), CWColormap(1<<13) -- the mask SDL
+   * builds as CWColormap|CWEventMask|CWBorderPixel.  CWBorderPixel is always
+   * set by SDL (border_pixel = 0) and CWColormap carries the colormap
+   * XCreateColormap just returned; XGetWindowAttributes reports both back. */
   if (attrs && (valuemask & (1L << 1))) d->win.bg = attrs->background_pixel;
+  if (attrs && (valuemask & (1L << 3))) d->win.border = attrs->border_pixel;
   if (attrs && (valuemask & (1L << 11))) d->win.event_mask = attrs->event_mask;
+  if (attrs && (valuemask & (1L << 13)) && attrs->colormap)
+    d->win.cmap = attrs->colormap;
   if (attrs && (valuemask & (1L << 9))) d->win.override_redirect =
       attrs->override_redirect;
   return d->win.id;
@@ -1084,6 +1138,7 @@ XAPI Window XCreateSimpleWindow(Display *d, Window parent, int x, int y,
   d->win.pref_h = height ? height : 480;
   d->win.border = border;
   d->win.bg = background;
+  d->win.cmap = d->default_cmap;
   return d->win.id;
 }
 
@@ -1093,14 +1148,14 @@ XAPI int XDestroyWindow(Display *d, Window w) {
   d->win.mapped = 0;
   d->win.content_ready = 0;
   d->win.shadow = 0;
-  return 0;
+  return 1;                              /* Xlib: success */
 }
 XAPI int XDestroySubwindows(Display *d, Window w) { (void)d; (void)w; return 0; }
 
 XAPI int XMapWindow(Display *d, Window w) {
   xtr("[XC] XMapWindow\n");
   if (!d || !d->win.id || w != d->win.id || d->win.destroyed) return 0;
-  if (d->win.mapped) return 0;
+  if (d->win.mapped) return 1;           /* already mapped: Xlib still says 1 */
   d->win.mapped = 1;
   char buf[40];
   int j = 0;
@@ -1112,7 +1167,7 @@ XAPI int XMapWindow(Display *d, Window w) {
   send_raw(buf, j);
   /* Cursor: the desktop paints its own pointer; XCreateFontCursor is a
    * stub, so nothing to install. */
-  return 0;
+  return 1;                              /* Xlib: success */
 }
 XAPI int XMapRaised(Display *d, Window w) { return XMapWindow(d, w); }
 
@@ -1158,28 +1213,65 @@ XAPI int XStoreName(Display *d, Window w, const char *name) {
   for (int i = 0; i < n; i++) buf[j++] = d->win.title[i];
   buf[j++] = '~';
   send_raw(buf, j);
-  return 0;
+  return 1;                              /* Xlib: success */
 }
 XAPI int XSetIconName(Display *d, Window w, const char *name) {
   (void)d; (void)w; (void)name;
   return 0;
 }
 
-/* Property storage: the compat window has no property list to speak of,
- * but WM_PROTOCOLS and WM_NORMAL_HINTS are read back by SDL/Unity, so the
- * two that matter are recorded on the window and everything else is
- * accepted and dropped. */
+/* Property storage: a small list (PROP_MAX) of name/type/format/data slots.
+ * SDL writes _NET_WM_NAME (UTF8_STRING), _NET_WM_PID (CARDINAL),
+ * WM_PROTOCOLS (ATOM) and WM_CLASS through XChangeProperty, and a client is
+ * allowed to read back what it wrote -- the window probe does exactly that.
+ * WM_NAME/_NET_WM_NAME also drive the desktop's title (ESC ] T), because the
+ * desktop has no property protocol of its own. */
+static int prop_slot(Display *d, Atom name) {
+  for (int i = 0; i < d->nprops; i++)
+    if (d->props[i].name == name) return i;
+  return -1;
+}
+
 XAPI int XChangeProperty(Display *d, Window w, Atom property, Atom type,
                          int format, int mode, const unsigned char *data,
                          int nelements) {
-  (void)format; (void)mode; (void)data; (void)nelements;
   if (!d || !d->win.id || w != d->win.id) return 0;
-  if (property == XA_WM_NAME || property == 64 /* _NET_WM_NAME */) return 0;
+  if (!property) return 0;
+  int unit = format == 32 ? 4 : format == 16 ? 2 : 1;
+  unsigned long nbytes = (unsigned long)(nelements > 0 ? nelements : 0) *
+                         (unsigned long)unit;
+  int i = prop_slot(d, property);
+  if (i < 0) {
+    if (d->nprops >= PROP_MAX) return 0;
+    i = d->nprops++;
+    d->props[i].name = property;
+  }
+  d->props[i].type = type;
+  d->props[i].format = format;
+  if (nbytes > PROP_BYTES) nbytes = PROP_BYTES;
+  d->props[i].nitems = nbytes / (unsigned long)unit;
+  for (unsigned long k = 0; k < nbytes; k++)
+    d->props[i].data[k] = data ? data[k] : 0;
+  /* A title, by either name, is also what the desktop draws in the frame. */
+  if ((property == XA_WM_NAME ||
+       property == xc_intern(&d->core, "_NET_WM_NAME", 1)) &&
+      format == 8 && data && nelements > 0) {
+    char tmp[TITLE_MAX];
+    int n = nelements < TITLE_MAX - 1 ? nelements : TITLE_MAX - 1;
+    for (int k = 0; k < n; k++) tmp[k] = (char)data[k];
+    tmp[n] = 0;
+    XStoreName(d, w, tmp);
+  }
+  (void)mode;                            /* no prepend/append semantics */
   return 1;
 }
 
 XAPI int XDeleteProperty(Display *d, Window w, Atom property) {
-  (void)d; (void)w; (void)property;
+  if (!d || !d->win.id || w != d->win.id) return 0;
+  int i = prop_slot(d, property);
+  if (i < 0) return 1;
+  for (int k = i; k + 1 < d->nprops; k++) d->props[k] = d->props[k + 1];
+  d->nprops--;
   return 1;
 }
 
@@ -1189,24 +1281,47 @@ XAPI int XGetWindowProperty(Display *d, Window w, Atom property,
                             int *actual_format, unsigned long *nitems,
                             unsigned long *bytes_after,
                             unsigned char **prop) {
-  (void)length; (void)delete_; (void)req_type;
+  (void)length;
   if (actual_type) *actual_type = None;
   if (actual_format) *actual_format = 0;
   if (nitems) *nitems = 0;
   if (bytes_after) *bytes_after = 0;
   if (prop) *prop = 0;
   if (!d || !d->win.id || w != d->win.id) return BadWindow;
-  /* No property list is kept: SDL reads back nothing it needs (it uses
-   * XGetWMHints/XGetWMNormalHints, which do round-trip).  A client that
-   * reads a property it just set gets None -- documented in EXPORTS.md. */
-  (void)offset;
+  int i = prop_slot(d, property);
+  if (i < 0) return Success;             /* set-but-absent: None, like Xlib */
+  if (req_type && req_type != AnyPropertyType && req_type != d->props[i].type)
+    return Success;
+  int unit = d->props[i].format == 32 ? 4 :
+             d->props[i].format == 16 ? 2 : 1;
+  unsigned long start = (unsigned long)(offset > 0 ? offset : 0);
+  unsigned long have = d->props[i].nitems;
+  if (start > have) start = have;
+  unsigned long avail = have - start;
+  unsigned long want = length > 0 ? (unsigned long)length : avail;
+  if (want > avail) want = avail;
+  unsigned long nbytes = want * (unsigned long)unit;
+  unsigned char *out = (unsigned char *)xc_malloc(nbytes ? nbytes : 1);
+  if (!out) return BadAlloc;
+  for (unsigned long k = 0; k < nbytes; k++)
+    out[k] = d->props[i].data[start * (unsigned long)unit + k];
+  if (actual_type) *actual_type = d->props[i].type;
+  if (actual_format) *actual_format = d->props[i].format;
+  if (nitems) *nitems = want;
+  if (bytes_after) *bytes_after = (avail - want) * (unsigned long)unit;
+  if (prop) *prop = out; else xc_free(out);
+  if (delete_) XDeleteProperty(d, w, property);
   return Success;
 }
 
-XAPI int XListProperties(Display *d, Window w, int *n) {
-  (void)d; (void)w;
+XAPI Atom *XListProperties(Display *d, Window w, int *n) {
   if (n) *n = 0;
-  return 0;
+  if (!d || !d->win.id || w != d->win.id || !d->nprops) return 0;
+  Atom *list = (Atom *)xc_malloc((unsigned long)d->nprops * sizeof(Atom));
+  if (!list) return 0;
+  for (int i = 0; i < d->nprops; i++) list[i] = d->props[i].name;
+  if (n) *n = d->nprops;
+  return list;                           /* caller XFree()s it, like Xlib */
 }
 
 XAPI int XSetWMProtocols(Display *d, Window w, Atom *protocols, int count) {
@@ -1214,6 +1329,17 @@ XAPI int XSetWMProtocols(Display *d, Window w, Atom *protocols, int count) {
   if (count > PROTO_MAX) count = PROTO_MAX;
   for (int i = 0; i < count; i++) d->win.protocols[i] = protocols[i];
   d->win.nprotocols = count;
+  /* Real Xlib stores the list as the WM_PROTOCOLS/ATOM/32 property and that is
+   * how a WM learns the client accepts WM_DELETE_WINDOW.  There is no WM here
+   * to read it, but the property is what a client (and this shim's own close
+   * path) can read back, so keep the shape. */
+  d->win.wm_protocols_atom = xc_intern(&d->core, "WM_PROTOCOLS", 0);
+  d->win.wm_delete_atom = xc_intern(&d->core, "WM_DELETE_WINDOW", 0);
+  d->win.delete_registered = 0;
+  for (int i = 0; i < count; i++)
+    if (protocols[i] == d->win.wm_delete_atom) d->win.delete_registered = 1;
+  XChangeProperty(d, w, d->win.wm_protocols_atom, XA_ATOM, 32,
+                  PropModeReplace, (const unsigned char *)protocols, count);
   return 1;
 }
 
@@ -1370,7 +1496,7 @@ XAPI int XGetWindowAttributes(Display *d, Window w, XWindowAttributes *a) {
   a->all_event_masks = d->win.event_mask;
   a->override_redirect = d->win.override_redirect;
   a->screen = &d->screen_obj;
-  a->colormap = d->default_cmap;
+  a->colormap = d->win.cmap ? d->win.cmap : d->default_cmap;
   return 1;
 }
 
@@ -1635,12 +1761,13 @@ XAPI void XFreeEventData(Display *d, XGenericEventCookie *c) { (void)d; (void)c;
 XAPI int XFlush(Display *d) {
   if (!d) return 0;
   shadow_flush(d);
-  return 0;
+  return 1;                              /* Xlib: success */
 }
 XAPI int XSync(Display *d, Bool discard) {
   xtr("[XC] XSync\n");
   (void)discard;
-  return XFlush(d);
+  XFlush(d);
+  return 1;                              /* Xlib: success */
 }
 
 /* ---- atoms ------------------------------------------------------------ */
@@ -1702,15 +1829,24 @@ XAPI int XTextPropertyToStringList(XTextProperty *tp, char ***list, int *count) 
 }
 XAPI int XSetTextProperty(Display *d, Window w, XTextProperty *tp, Atom prop) {
   if (!d || w != d->win.id || !tp) return 0;
-  if (prop == XA_WM_NAME)
-    XStoreName(d, w, (const char *)tp->value);
-  return 0;
+  return XChangeProperty(d, w, prop, tp->encoding, tp->format,
+                         PropModeReplace, tp->value, (int)tp->nitems);
 }
 XAPI int XGetTextProperty(Display *d, Window w, XTextProperty *tp, Atom prop) {
-  (void)prop;
   if (!d || w != d->win.id || !tp) return 0;
   xz(tp, sizeof *tp);
-  return 0;
+  Atom type = None;
+  int format = 0;
+  unsigned long nitems = 0, after = 0;
+  unsigned char *data = 0;
+  int st = XGetWindowProperty(d, w, prop, 0, 0x10000, False, AnyPropertyType,
+                              &type, &format, &nitems, &after, &data);
+  if (st != Success || type == None || !data) return 0;
+  tp->value = data;
+  tp->encoding = type;
+  tp->format = format;
+  tp->nitems = nitems;
+  return 1;
 }
 
 /* ---- graphics contexts ------------------------------------------------ */

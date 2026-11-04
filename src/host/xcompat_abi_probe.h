@@ -202,6 +202,16 @@ static const struct abi_row abi_rows[] = {
   ABI_FIELD(XVisualInfo, red_mask)
   ABI_FIELD(XVisualInfo, bits_per_rgb)
 
+  /* The Visual that XVisualInfo.visual points at: SDL dereferences it
+   * (vinfo.visual->visualid), and Xlib puts XExtData *ext_data first, so
+   * visualid sits at 8 -- not 0.  Pinned because the DSO used to carry a
+   * private struct whose first member was VisualID (M3 window probe). */
+  ABI_SIZE(Visual)
+  ABI_FIELD(Visual, visualid)
+  ABI_FIELD_AS(Visual, class, ABIF_CLASS)
+  ABI_FIELD(Visual, red_mask)
+  ABI_FIELD(Visual, map_entries)
+
   ABI_FIELD(XGCValues, foreground)
   ABI_FIELD(XGCValues, background)
   ABI_FIELD(XGCValues, fill_style)

@@ -485,6 +485,26 @@ Two measured traps: the shim must not load the *real* `libX11` (dlopen matches
 by SONAME and the real one shadows the interposer), and the real extension DSOs
 cannot be reused (they need 33 libX11-internal wire symbols).
 
+**Status 2026-11-04: the window-creation half is PASSED (lane L21), before
+Unity reaches it.** `tools/gate/m3_window_probe.py` runs
+`src/user/xcompat/sdl_window_probe.c` -- an ordinary glibc PIE -- through SDL2's
+`X11_CreateWindow` ladder in SDL's order: `XMatchVisualInfo(TrueColor)` →
+`XCreateColormap` → `XCreateWindow(CWColormap|CWEventMask|CWBorderPixel)` →
+`XSetWMProtocols(WM_DELETE_WINDOW)` → `XChangeProperty(_NET_WM_NAME/UTF8_STRING,
+_NET_WM_PID/CARDINAL)` → `XStoreName` → `XMapWindow` → `MapNotify` +
+`ConfigureNotify` → paint → `XFlush` → `WM_DELETE_WINDOW` ClientMessage →
+exit 0. Serial rows + `docs/rimworld-m3-window.png`; `docs/rimworld-m3-window.md`
+is the write-up. A 320x240 request gets the desktop's 1916x1018 content rect at
+2,34, and the shim reports that rect identically through `ConfigureNotify`,
+`XGetWindowAttributes` and `XGetGeometry`. Four shim gaps were closed:
+`XVisualInfo.visual` now points at a real-layout `Visual` (`visualid` at offset
+8, 5 new ABI rows -- it used to be a private struct with `VisualID` first);
+`XChangeProperty`/`XGetWindowProperty`/`XDeleteProperty`/`XListProperties` keep
+a 12-slot property list instead of dropping; `XSetWMProtocols` stores
+WM_PROTOCOLS/ATOM/32; and the desktop's `ESC [ D ~` close becomes the
+WM_PROTOCOLS/WM_DELETE_WINDOW ClientMessage SDL's event loop reads (a client
+that never registers one keeps the old exit-the-process close).
+
 ### M4 — OpenGL 3.3 core
 - [ ] Build Mesa with `--disable-llvm`, gallium `softpipe` (+ `virgl` later),
       `st`, GLX/EGL frontends, vendored under `third_party/mesa` by fetch script.

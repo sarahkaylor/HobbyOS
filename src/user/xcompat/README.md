@@ -36,6 +36,7 @@ be in scope.
 | `EXPORTS.md` | **F4**: the generated per-symbol contract (IMPL / PARTIAL / STUB + the constant each stub returns). |
 | `EXPORTS.prose.md` | the hand-written half of `EXPORTS.md` (regeneration keeps it). |
 | `font8x8.h` | the 8x8 ASCII font, vendored from `src/user_include/graphics/font.h` (`tools/sync-font.sh` regenerates it). `XDrawString` renders it. |
+| `sdl_window_probe.c` | the **SDL-shaped window-creation probe**: an ordinary glibc PIE that runs SDL2's `X11_CreateWindow` ladder (`XMatchVisualInfo` → `XCreateColormap` → `XCreateWindow` → `XSetWMProtocols` → `_NET_WM_NAME`/`_NET_WM_PID` → `XStoreName` → `XMapWindow` → `MapNotify`+`ConfigureNotify` → paint → `WM_DELETE_WINDOW` ClientMessage) under compat. Gate: `tools/gate/m3_window_probe.py`. |
 | `stage.sh` | puts the DSOs on a boot image's library path (`::/LIB64`), real sonames, LFN. |
 | `required-libx11.{txt,h}`, `required-alsa.{txt,h}`, `required-pulse.{txt,h}` | the frozen required sets, generated from the game binary and checked in so the tree builds without the game. |
 | `tools/gen_exports.py` | regenerates all of the above from `UnityPlayer.so` + the host's real `libX11.so.6`. |
@@ -126,6 +127,22 @@ readback is the client's own proof that its pixels reached the shared
 surface; the screenshot is the display's proof. Screenshots land in
 `obj/m3-shots/`.
 
+### The window path: SDL's own creation sequence
+
+`XCreateSimpleWindow` is not what SDL uses.  The second gate runs
+`sdl_window_probe.c` through the sequence Unity's embedded SDL will use and
+grades every step (including `XVisualInfo.visual->visualid`, which only reads
+correctly if the shim's `Visual` is the real X11R7 layout):
+
+```sh
+python3 tools/gate/m3_window_probe.py      # ARCH=intel, KVM, ~5 min
+```
+
+It also runs a `-DXC_TRACE` copy of `libX11.so.6`
+(`make ... xcompat_dsos_trace`), so the serial log carries one row per X call
+the shim serves.  Evidence and the gap list: `docs/rimworld-m3-window.md`.
+Screenshots land in `obj/m3w-shots/`.
+
 ## What "implemented" means here
 
 `libx11.c` draws into a client-side shadow and blits the dirty bbox into the
@@ -153,8 +170,8 @@ points at a real-layout `Screen`. That is not cosmetic — `DefaultScreen`,
 `<X11/Xlib.h>` that dereference the pointer, so a client compiled against the
 real headers faults at VA 0x10 if the object is private (measured).
 
-`EXPORTS.md` is the authority on what is real. 46 of the 129 required
-symbols do real work, 6 are partial with a stated gap, 77 return a constant
+`EXPORTS.md` is the authority on what is real. 51 of the 129 required
+symbols do real work, 2 are partial with a stated gap, 76 return a constant
 that is listed per symbol. No symbol is claimed implemented because it has a
 plausible body.
 

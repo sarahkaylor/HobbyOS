@@ -8,7 +8,7 @@
 | `XAutoRepeatOff` | STUB | returns `1` |
 | `XAutoRepeatOn` | STUB | returns `1` |
 | `XChangePointerControl` | STUB | returns `0` |
-| `XChangeProperty` | PARTIAL | accepted and dropped; no property list is kept |
+| `XChangeProperty` | IMPL | stores name/type/format/data in a 12-slot property list (`_NET_WM_NAME`, `_NET_WM_PID`, `WM_PROTOCOLS`, `WM_CLASS` all round-trip); a title written this way also drives the desktop frame (`ESC ] T`). |
 | `XCheckIfEvent` | IMPL |  |
 | `XClearWindow` | IMPL |  |
 | `XCloseDisplay` | IMPL |  |
@@ -24,7 +24,7 @@
 | `XCreatePixmapCursor` | STUB | returns `0x41` |
 | `XCreateWindow` | IMPL |  |
 | `XDefineCursor` | IMPL |  |
-| `XDeleteProperty` | STUB | returns `1` |
+| `XDeleteProperty` | IMPL |  |
 | `XDestroyIC` | STUB | returns `0` |
 | `XDestroyWindow` | IMPL |  |
 | `XDisplayKeycodes` | STUB | returns `0` |
@@ -62,7 +62,7 @@
 | `XGetWMHints` | IMPL |  |
 | `XGetWMNormalHints` | IMPL |  |
 | `XGetWindowAttributes` | IMPL |  |
-| `XGetWindowProperty` | PARTIAL | answers None/Success; nothing round-trips except WM hints (XGetWMHints/XGetWMNormalHints) |
+| `XGetWindowProperty` | IMPL | reads the property list back (malloc'd copy, as Xlib returns); only the first 512 bytes of a property are retained. |
 | `XGrabKeyboard` | IMPL |  |
 | `XGrabPointer` | IMPL |  |
 | `XGrabServer` | STUB | returns `0` |
@@ -110,13 +110,13 @@
 | `XSetWMHints` | IMPL |  |
 | `XSetWMNormalHints` | IMPL |  |
 | `XSetWMProperties` | IMPL |  |
-| `XSetWMProtocols` | IMPL |  |
+| `XSetWMProtocols` | IMPL | records the list, stores it as WM_PROTOCOLS/ATOM/32 and arms the WM_DELETE_WINDOW path: the desktop's in-band `ESC [ D ~` close becomes the ClientMessage SDL reads (see XNextEvent). |
 | `XSetWindowBackground` | IMPL |  |
 | `XStoreColors` | STUB | returns `0` |
 | `XStoreName` | IMPL |  |
 | `XStringListToTextProperty` | STUB | returns `0` |
 | `XSupportsLocale` | STUB | returns `True` |
-| `XSync` | STUB | returns `XFlush(d)` |
+| `XSync` | IMPL |  |
 | `XSynchronize` | IMPL |  |
 | `XTextExtents` | STUB | returns `0` |
 | `XTranslateCoordinates` | PARTIAL | window<->root is exact, window<->window is only approximate (there are no child windows) |
@@ -127,7 +127,7 @@
 | `XUninstallColormap` | STUB | returns `0` |
 | `XUnloadFont` | STUB | returns `0` |
 | `XUnsetICFocus` | STUB | returns `0` |
-| `XVisualIDFromVisual` | STUB | returns `v ? v->id : 0` |
+| `XVisualIDFromVisual` | STUB | returns `v ? v->visualid : 0` |
 | `XWarpPointer` | STUB | returns `0` |
 | `XWindowEvent` | IMPL |  |
 | `XWithdrawWindow` | IMPL |  |
@@ -197,12 +197,12 @@
 | `XInternAtoms` | IMPL |  |
 | `XListExtensions` | STUB | returns `0` |
 | `XListFonts` | STUB | returns `0` |
-| `XListProperties` | STUB | returns `0` |
+| `XListProperties` | IMPL |  |
 | `XLowerWindow` | STUB | returns `0` |
 | `XMapWindow` | IMPL |  |
 | `XMissingExtension` | STUB | returns `0` |
 | `XMoveResizeWindow` | STUB | returns `0` |
-| `XNextEvent` | IMPL |  |
+| `XNextEvent` | IMPL | polls the desktop pipe, drains queued events, and turns the desktop's close into a WM_PROTOCOLS/WM_DELETE_WINDOW ClientMessage when the client registered one via XSetWMProtocols; a client that never did keeps the old exit-the-process close. |
 | `XParseColor` | STUB | returns `1` |
 | `XProtocolRevision` | STUB | returns `0` |
 | `XProtocolVersion` | STUB | returns `11` |
