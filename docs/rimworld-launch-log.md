@@ -808,9 +808,11 @@ joystick subsystem failed on the missing `libudev.so.1`**. In order:
   launcher deadline at 180 s) before `Initialize engine version`.
 
 **Host A/B (the discriminator).** The same launcher, game and DSOs on the host
-(Xvfb `:99`) print the *same* line when `libudev` is hidden from `dlopen`:
+(Xvfb `:99`) print the *same* line when `libudev` is hidden from `dlopen`
+(`tools/rw/udev-absent-probe.c` builds the preload):
 
 ```
+$ gcc -shared -fPIC -o /tmp/noudev.so tools/rw/udev-absent-probe.c -ldl
 $ LD_PRELOAD=/tmp/noudev.so ./RimWorldLinux -force-glcore ...   # hides libudev*
 Preloaded 'lib_burst_generated.so'
 Preloaded 'libsteam_api.so'
