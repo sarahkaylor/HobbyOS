@@ -401,6 +401,25 @@ static int l_readlink_common(struct process *p, uint64_t upath, uint64_t ubuf,
   if (r != 0) return r;
   char target[160];
   int n = l_readlink_target(p, path, target, sizeof target);
+  if (l_streq(path, "/proc/self/exe")) {
+    /* M6/AD-9 diagnostic: Unity resolves its data folder through this link
+       from more than one thread; record which caller and what answer, so a
+       failure is attributable instead of guessed at. */
+    static int exe_reports;
+    if (exe_reports < 12) {
+      exe_reports++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LCOMPAT] readlink exe pid=");
+      kl_i(&kl, (long)(process_group(p) ? process_group(p)->pid : 0));
+      kl_s(&kl, " bufsz=");
+      kl_i(&kl, (long)bufsz);
+      kl_s(&kl, " -> ");
+      kl_i(&kl, n);
+      kl_s(&kl, "\n");
+      kl_emit(&kl);
+    }
+  }
   if (n == 0) {
     /* A real FAT16 path: readlink(2) on a non-symlink is -EINVAL, and on a
        missing path -ENOENT.  Decide from the volume, not by guessing. */

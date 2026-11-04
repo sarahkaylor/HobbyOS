@@ -43,6 +43,9 @@
 #define RW_HOME       "/RW_HOME"
 #define RW_LOG        RW_HOME "/Player.log"
 #define RW_LOG_DUMP   (24 * 1024)
+/* AD-10: the game's DSOs are staged on the FAT image; Data/ stays on NFS. */
+#define RW_DSO_DIR    "/RWDSO"
+#define RW_WAIT_SECS  180
 
 static void say(const char *s) { print("[RW] rwlaunch: "); print(s); print("\n"); }
 
@@ -130,12 +133,16 @@ __attribute__((section(".text._start"))) void _start(void) {
       (char *)"LANG=C",
       (char *)"LD_LIBRARY_PATH=/LIB64",
       (char *)"TMPDIR=" RW_HOME,
+      /* AD-9/AD-10: UnityPlayer.so and the Mono/plugin DSOs are staged on
+       * disk.img (/RWDSO); the launcher and its dlopen wrapper read these. */
+      (char *)"RW_UNITYPLAYER=" RW_DSO_DIR "/UnityPlayer.so",
+      (char *)"RW_DSO_DIR=" RW_DSO_DIR,
       0,
   };
 
   print("[RW] rwlaunch: exec ");
   print(RW_GAME);
-  print(" HOME=" RW_HOME " LC_ALL=C LD_LIBRARY_PATH=/LIB64\n");
+  print(" HOME=" RW_HOME " LC_ALL=C LD_LIBRARY_PATH=/LIB64 RW_DSO_DIR=" RW_DSO_DIR "\n");
 
   int pid = spawn_ex(RW_GAME, argv, envp, 0, 0);
   print("[RW] rwlaunch: spawn_ex -> ");
@@ -146,13 +153,31 @@ __attribute__((section(".text._start"))) void _start(void) {
     exit(3);
   }
 
+  /* The game runs until it fails or reaches an interactive menu.  Bound the
+   * wait so a run that gets all the way up still yields Player.log and exits
+   * before the harness deadline, instead of dying with the QEMU process. */
   int status = -1;
-  int wp = waitpid(pid, &status, 0);
+  int wp = 0;
+  for (int s = 0; s < RW_WAIT_SECS; s++) {
+    wp = waitpid(pid, &status, 1 /* WNOHANG */);
+    if (wp != 0) break;
+    if (s > 0 && (s % 10) == 0) {
+      print("[RW] rwlaunch: child still running after ");
+      print_dec(s);
+      print("s\n");
+    }
+    usleep(1000000);
+  }
   print("[RW] rwlaunch: waitpid=");
   print_dec(wp);
   print(" status=");
   print_dec(status);
   print("\n");
+  if (wp == 0) {
+    print("[RW] rwlaunch: still running at the ");
+    print_dec(RW_WAIT_SECS);
+    print("s deadline; dumping the log and leaving the child\n");
+  }
 
   dump_player_log();
   say("done");

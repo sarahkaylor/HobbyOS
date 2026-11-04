@@ -154,6 +154,13 @@ struct vm_object {
   int nr_frames; /* frame-array capacity (pages) */
   int arr_frames;/* frames owned by the array itself */
   uint64_t *frames; /* frame-backed array; 0 = not materialized */
+  /* VM_OBJ_FILE source identity (start cluster of the mapped file).  Kept on
+     the object, not only in the file_obj slot table, so a live mapping can
+     still fill pages after an unrelated FAT write invalidates the slot
+     (file_obj_invalidate_all).  Without it, writing any file — e.g. the
+     player's own log — permanently breaks page-in for every DSO currently
+     mapped (measured: UnityPlayer.so faulted at its first new text page). */
+  uint16_t file_start_cluster;
 };
 
 struct vm_region {  /* sorted by base; per AS, under proc_lock */

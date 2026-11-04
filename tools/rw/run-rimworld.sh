@@ -11,6 +11,9 @@
 #   tools/rw/run-rimworld.sh stub  [--timeout S]   # PIE stand-in with the
 #                                                  # game's NEEDED list: the
 #                                                  # wall AFTER the ET_EXEC one
+#   tools/rw/run-rimworld.sh ad9   [--timeout S]   # AD-9 PlayerMain launcher
+#                                                  # installed as RimWorldLinux,
+#                                                  # DSOs staged locally (AD-10)
 #
 # Env: RW_NFS_SERVER (default 10.0.2.2), RW_NFS_ALT, RW_SKIP_EXPORT=1,
 #      GLIBC231 / GLIBC231_DEV to reuse an extraction.
@@ -23,14 +26,14 @@ cd "$ROOT" || exit 2
 
 MODE="${1:-game}"
 [ "$MODE" = probe ] || [ "$MODE" = launchprobe ] || [ "$MODE" = game ] || \
-  [ "$MODE" = stub ] || {
-  echo "usage: $0 {probe|launchprobe|game|stub} [--timeout S]" >&2; exit 2; }
+  [ "$MODE" = stub ] || [ "$MODE" = ad9 ] || {
+  echo "usage: $0 {probe|launchprobe|game|stub|ad9} [--timeout S]" >&2; exit 2; }
 shift || true
 TIMEOUT_S=180
 while [ $# -gt 0 ]; do
   case "$1" in
     --timeout) TIMEOUT_S="$2"; shift 2 ;;
-    *) echo "usage: $0 {probe|launchprobe|game|stub} [--timeout S]" >&2; exit 2 ;;
+    *) echo "usage: $0 {probe|launchprobe|game|stub|ad9} [--timeout S]" >&2; exit 2 ;;
   esac
 done
 
@@ -106,6 +109,27 @@ gcc -O2 -fPIE -pie -nostdlib -nostartfiles -o "$OUT/rw_procprobe" src/user/rw_pr
     -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none || { echo "probe link failed"; exit 2; }
 readelf -h "$OUT/rw_procprobe" | awk '/Type:/{print "  probe:",$2}'
 
+if [ "$MODE" = ad9 ]; then
+  # AD-9: the game's own executable, rebuilt as a glibc-2.31 PIE (AD-11: the
+  # compat ABI is glibc's, so its headers and crt objects are the pin's).
+  # -rdynamic keeps dlopen() in .dynsym: that wrapper is what redirects
+  # Unity's Mono/plugin DSO loads to the local AD-10 staging dir.
+  echo "== build: AD-9 PlayerMain launcher (glibc 2.31 PIE)"
+  gcc -O2 -Wall -Wextra -fPIE -pie -nostdlib -nostartfiles -rdynamic \
+      -nostdinc -isystem "$D/usr/include" \
+      -isystem "$D/usr/include/x86_64-linux-gnu" \
+      -isystem "$(gcc -print-file-name=include)" \
+      -o "$OUT/RimWorldLinux.ad9" src/user/rwmain.c \
+      "$DLIB/Scrt1.o" "$DLIB/crti.o" "$DLIB/libc_nonshared.a" \
+      "$LDIR/libc.so.6" "$LDIR/libdl-2.31.so" "$DLIB/crtn.o" \
+      -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2 \
+      -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none || {
+    echo "AD-9 launcher link failed"; exit 2; }
+  readelf -h "$OUT/RimWorldLinux.ad9" | awk '/Type:/{print "  ad9:",$2}'
+  readelf -sW "$OUT/RimWorldLinux.ad9" | grep -qw dlopen || {
+    echo "AD-9 launcher does not export dlopen"; exit 2; }
+fi
+
 if [ "$MODE" = stub ] || [ "$MODE" = launchprobe ]; then
   if [ "$MODE" = stub ]; then
     # Same launcher, pointed at the stand-in; the stand-in carries the game's
@@ -172,6 +196,44 @@ else
     cp -f "$OUT/rw_procprobe" /srv/nfs/rimworld/RWPROBE.ELF
     stage "$OUT/rwprobelaunch.bin" ::/RWLAUNCH.BIN
     stage "$OUT/PROBE.TXT" ::/PROBE.TXT
+  elif [ "$MODE" = ad9 ]; then
+    # AD-10: the game's DSOs live on disk.img; the data tree stays on NFS.
+    # 40.1 MiB: UnityPlayer.so 33.0 + the three Mono DSOs 6.4 + the two
+    # plugins 0.7.  Copied straight from the read-only export (never the
+    # worktree), so check-no-game-files.sh has nothing to see.
+    echo "== stage: AD-10 DSOs locally under /RWDSO"
+    mmd -i "$IMG" ::/RWDSO >/dev/null 2>&1 || true
+    for rel in UnityPlayer.so \
+               RimWorldLinux_Data/MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so \
+               RimWorldLinux_Data/MonoBleedingEdge/x86_64/libmono-native.so \
+               RimWorldLinux_Data/MonoBleedingEdge/x86_64/libMonoPosixHelper.so \
+               RimWorldLinux_Data/Plugins/lib_burst_generated.so \
+               RimWorldLinux_Data/Plugins/libsteam_api.so; do
+      src="/srv/nfs/rimworld/$rel"
+      [ -f "$src" ] || { echo "ENVIRONMENT: missing $src"; exit 2; }
+      stage "$src" "::/RWDSO/${rel##*/}"
+    done
+    mdir -i "$IMG" ::/RWDSO | sed 's/^/  /'
+    # libmonobdwgc / libMonoPosixHelper NEED libz.so.1, which /LIB64 does not
+    # carry yet (the m2_mono gate stages it from the same Mono tree).  The
+    # focal-era zlib from the Mono vendor tree matches the 2.31 pin.
+    MZ="$ROOT/third_party/rw-mono/root/lib/libz.so.1"
+    if [ ! -e "$MZ" ]; then
+      bash tools/rw/fetch-mono.sh >"$OUT/mono-fetch.log" 2>&1 || {
+        echo "ENVIRONMENT: no libz.so.1 for the Mono DSOs"; exit 2; }
+    fi
+    MZ="$(readlink -f "$MZ")"   # stage the ELF, not a 14-byte symlink
+    stage "$MZ" ::/LIB64/libz.so.1
+    stage "$MZ" ::/lib/x86_64-linux-gnu/libz.so.1
+    # AD-9: install the launcher AS the game's executable, in the game dir; the
+    # 14,720-byte ET_EXEC stub is preserved beside it as RimWorldLinux.orig.
+    # A sync run above restores the stub, so this always re-installs.
+    if [ "$(stat -c %s /srv/nfs/rimworld/RimWorldLinux)" = 14720 ]; then
+      cp -f /srv/nfs/rimworld/RimWorldLinux /srv/nfs/rimworld/RimWorldLinux.orig
+    fi
+    cp -f "$OUT/RimWorldLinux.ad9" /srv/nfs/rimworld/RimWorldLinux
+    echo "  installed: $(stat -c '%s bytes' /srv/nfs/rimworld/RimWorldLinux) -> RimWorldLinux (stub: $(stat -c '%s' /srv/nfs/rimworld/RimWorldLinux.orig 2>/dev/null || echo '?') bytes)"
+    stage "$OUT/rwlaunch.bin" ::/RWLAUNCH.BIN
   else
     stage "$OUT/rwlaunch.bin" ::/RWLAUNCH.BIN
   fi
@@ -200,9 +262,9 @@ sleep 1
 
 echo
 echo "== guest programs' own rows"
-grep -aE '^\[RW\]|^\[LP\]|^\[PROC\]|^\[WAVE-MANIFEST\]|PT_INTERP mapped' "$LOG" || echo "(none)"
+grep -aE '^\[RW\]|^\[RWMAIN\]|^\[LP\]|^\[PROC\]|^\[WAVE-MANIFEST\]|PT_INTERP mapped' "$LOG" || echo "(none)"
 echo
 echo "== ordered failure ladder (raw serial lines, in order)"
-grep -anE '\[LCOMPAT\]|error while loading|failed to map|cannot open shared|undefined symbol|symbol lookup|version `|No such file|Operation not supported|ENOSYS|Loading program|PT_INTERP|memory fault|FATAL|\[EXITPC\]|System halt|\[RW\] rwlaunch|\[PROC\] (FAIL|done)' "$LOG" || true
+grep -anE '\[LCOMPAT\]|\[RWMAIN\]|error while loading|failed to map|cannot open shared|undefined symbol|symbol lookup|version `|No such file|Operation not supported|ENOSYS|Loading program|PT_INTERP|memory fault|FATAL|\[EXITPC\]|System halt|\[RW\] rwlaunch|\[PROC\] (FAIL|done)' "$LOG" || true
 echo
 echo "raw serial: $LOG"
