@@ -16,6 +16,7 @@ No board/network: plan_id_problems() is pure.
 """
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sync_gaming_md as S  # noqa: E402
@@ -51,6 +52,74 @@ check("a duplicate fails, naming the id",
 regression = S.plan_id_problems(sparse)
 check("no false 'missing=[148]' for the 148th (minted, sparse) row",
       regression == [])
+
+# --- GB-193: --adopt-orphans row generation/insertion (pure, no board) -------
+
+fixture_plan = """### Milestone M0 — Infrastructure
+
+| ID | Ticket | Wt | Depends | DoD |
+|---|---|---|---|---|
+| GB-001 | one | S | — | d |
+
+### Milestone M4 — Integration
+
+| ID | Ticket | Wt | Depends | DoD |
+|---|---|---|---|---|
+| GB-043 | four | M | — | d |
+"""
+
+issue = {
+    "number": 900,
+    "title": "GB-900 a fixture mint with a | pipe",
+    "milestone": "M4-acceptance",
+    "labels": ["wt-M"],
+    "state": "open",
+    "body": ("| Depends on | GB-053 (PR #314) |\n\n"
+             "### DoD\n\n1. first check | with pipe\n2. second check\n\n"
+             "### Evidence slot\nx\n"),
+}
+row = S.row_from_issue("GB-900", issue)
+assert row is not None, "fixture row must be generated"
+check("row carries id, weight and depends",
+      "| GB-900 |" in row and "| M |" in row and "GB-053" in row)
+check("row escapes a literal pipe", "\\|" in row)
+check("row includes both DoD items", "first check" in row and "second check" in row)
+check("row stops at the next section", "Evidence slot" not in row)
+
+out = S.insert_plan_row(fixture_plan, "M4-acceptance", row)
+check("row lands in the M4 table", out.index("GB-900") > out.index("### Milestone M4"))
+check("row lands after the M4 rows", out.index("GB-900") > out.index("GB-043"))
+
+out0 = S.insert_plan_row(fixture_plan, "M0-infra", row)
+check("row lands in M0's table", out0.index("GB-900") < out0.index("### Milestone M4"))
+check("a following heading stays on its own line", "|\n\n### Milestone M4" in out0)
+
+bad = dict(issue, labels=[])
+check("a mint with no wt label is refused", S.row_from_issue("GB-901", bad) is None)
+
+try:
+    S.insert_plan_row(fixture_plan, "M9-nope", row)
+    refused = False
+except ValueError as e:
+    refused = "M9-nope" in str(e)
+check("an unknown milestone is refused by name", refused)
+
+# adopt_orphans skips a no-milestone card by name, still adopts a known one.
+with tempfile.TemporaryDirectory() as td:
+    tmp_plan = os.path.join(td, "plan.md")
+    with open(tmp_plan, "w", encoding="utf-8") as f:
+        f.write(fixture_plan)
+    bd = {
+        "GB-902": {"number": 902, "title": "GB-902 no milestone", "milestone": None,
+                   "labels": ["wt-S"], "state": "open", "body": "### DoD\n1. x\n"},
+        "GB-903": {"number": 903, "title": "GB-903 known milestone", "milestone": "M0-infra",
+                   "labels": ["wt-S"], "state": "open", "body": "### DoD\n1. y\n"},
+    }
+    got = S.adopt_orphans(bd, {}, path=tmp_plan)
+    adopted_text = open(tmp_plan, encoding="utf-8").read()
+check("adopt skips a card with no milestone", "GB-902" not in adopted_text)
+check("adopt takes the known-milestone card",
+      len(got) == 1 and "GB-903" in adopted_text)
 
 print()
 if fails:
