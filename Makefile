@@ -3259,6 +3259,12 @@ $(FB_MMAP_TEST): src/host/fb_mmap_test.c src/kernel/fb_mmap.c src/kernel/fb_ioct
 # rather than silently shipping a glibc binary.
 MUSL_CC ?= musl-gcc
 SDL_APP_PIE = obj/sdl_test_app_pie
+# GB-184-V RED: the disk.img prerequisite list is parsed at Makefile:2392,
+# BEFORE this definition, so GNU make expanded $(SDL_APP_PIE) to empty there
+# and a cold `make disk.img` ran the mcopy at :2427 against a file nothing
+# built (rc=2; a warm tree hid it).  Re-declare the dependency here, after the
+# definition, so the cold path always builds the PIE before the image.
+disk.img: $(SDL_APP_PIE)
 $(SDL_APP_PIE): tools/sdl/sdl_test_app.c src/include/fb_pixel.h src/include/linux_input.h src/include/display_mode.h
 	@mkdir -p obj
 	$(MUSL_CC) -fPIE -static-pie -Isrc/include tools/sdl/sdl_test_app.c -o $@
