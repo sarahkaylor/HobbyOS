@@ -38,6 +38,7 @@
 #include "arch/cpu.h"
 #include "arch/trap.h"
 #include "errno.h"
+#include "futex_trace.h"
 #include "kline.h"
 #include "linux_syscall.h"
 #include "lock.h"
@@ -129,12 +130,384 @@ static int l_futex_queued_locked(int i, struct addr_space *as,
          p->state == PROC_STATE_FUTEX && p->futex_uaddr == uaddr;
 }
 
+/* ---- [FUTEX] trace (contract: src/include/futex_trace.h) ---------------
+ *
+ * The recorder is deliberately boring: claim an index, copy the event, and
+ * print only the first FUTEX_TRACE_OPS rows.  The interesting output is
+ * futex_trace_dump_locked(), which the idle-loop hang report calls: it prints
+ * every slot still queued and the last FUTEX_TRACE_RING operations, so the
+ * order "main waits on X ... then nothing ever wakes X" is a row, not a
+ * theory.
+ */
+
+static struct futex_ev l_futex_ring[FUTEX_TRACE_RING];
+static unsigned l_futex_ring_at; /* total operations recorded this boot */
+static unsigned l_futex_printed; /* operations printed to the console */
+
+static const char *l_futex_opname(int op) {
+  switch (op) {
+  case FTR_WAIT: return "WAIT";
+  case FTR_WAKE: return "WAKE";
+  case FTR_REQUEUE: return "REQUEUE";
+  case FTR_TIMEOUT: return "TIMEOUT";
+  case FTR_SIGNAL: return "SIGNAL";
+  case FTR_EXIT: return "EXIT";
+  case FTR_WAITBITSET: return "WAITBS";
+  default: return "?";
+  }
+}
+
+/* One bounded record, one uart_puts: see kline.h for why this is not a
+   sequence of print_int calls. */
+static void l_futex_emit(const struct futex_ev *ev, int idx, char tag) {
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[FUTEX] ");
+  if (tag) {
+    kl_c(&kl, tag);
+    kl_c(&kl, '#');
+    kl_i(&kl, idx);
+    kl_c(&kl, ' ');
+  }
+  kl_s(&kl, l_futex_opname(ev->op));
+  kl_s(&kl, " pid=");
+  kl_i(&kl, ev->pid);
+  kl_s(&kl, " as=");
+  kl_hex(&kl, (unsigned long)ev->as);
+  kl_s(&kl, " key=");
+  kl_hex(&kl, (unsigned long)ev->uaddr);
+  kl_s(&kl, " rip=");
+  kl_hex(&kl, (unsigned long)ev->rip);
+  switch (ev->op) {
+  case FTR_WAIT:
+  case FTR_WAITBITSET:
+    kl_s(&kl, " val=");
+    kl_hex(&kl, ev->val);
+    kl_s(&kl, " bitset=");
+    kl_hex(&kl, ev->bitset);
+    kl_s(&kl, " to=");
+    kl_i(&kl, (long)ev->timeout_ms);
+    kl_s(&kl, " res=");
+    kl_i(&kl, ev->res);
+    break;
+  case FTR_WAKE:
+  case FTR_REQUEUE:
+    kl_s(&kl, " n=");
+    kl_i(&kl, (long)ev->val);
+    kl_s(&kl, " bitset=");
+    kl_hex(&kl, ev->bitset);
+    kl_s(&kl, " woke=");
+    kl_i(&kl, ev->woke);
+    if (ev->op == FTR_REQUEUE) {
+      kl_s(&kl, " moved=");
+      kl_i(&kl, ev->res);
+      kl_s(&kl, " key2=");
+      kl_hex(&kl, (unsigned long)ev->uaddr2);
+    }
+    kl_s(&kl, " of=");
+    if (ev->nwoke == 0) {
+      kl_s(&kl, "none");
+    } else {
+      for (int i = 0; i < ev->nwoke; i++) {
+        if (i) kl_c(&kl, ',');
+        kl_i(&kl, ev->woke_pids[i]);
+      }
+      if (ev->woke > ev->nwoke) kl_s(&kl, ",...");
+    }
+    break;
+  default:
+    break;
+  }
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+void futex_trace_note(struct futex_ev *ev) {
+  if (!ev)
+    return;
+  ev->ms = timer_get_ms();
+  unsigned at = __atomic_fetch_add(&l_futex_ring_at, 1u, __ATOMIC_RELAXED);
+  l_futex_ring[at % FUTEX_TRACE_RING] = *ev;
+  unsigned pr = __atomic_fetch_add(&l_futex_printed, 1u, __ATOMIC_RELAXED);
+  if (pr < FUTEX_TRACE_OPS)
+    l_futex_emit(ev, (int)at, '#');
+}
+
+/* Why a wake that found nobody is still suspicious: a thread parked on the
+   SAME word, whose wake failed for a reason the key alone does not show.  A
+   wake on a different uaddr is ordinary (two groups, two words); a wake on the
+   same uaddr with a disjoint bitset, or a different address space, is the
+   lost-wakeup shape.  Printed only when it is true. */
+static void l_futex_near_miss(const struct futex_ev *w) {
+  int reported = 0;
+  for (int i = 1; i < MAX_PROCESSES && reported < 4; i++) {
+    struct l_thr_slot *s = &l_thr[i];
+    if (!s->used || !s->owner)
+      continue;
+    struct process *p = s->owner;
+    if (p->state != PROC_STATE_FUTEX || p->futex_uaddr != w->uaddr)
+      continue;
+    const char *why;
+    if ((uint64_t)(uintptr_t)s->as != w->as)
+      why = "different-address-space";
+    else if ((s->bitset & w->bitset) == 0)
+      why = "disjoint-bitset";
+    else
+      why = "queued-but-not-woken";
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[FUTEX] near-miss slot=");
+    kl_i(&kl, i);
+    kl_s(&kl, " pid=");
+    kl_i(&kl, p->pid);
+    kl_s(&kl, " key=");
+    kl_hex(&kl, (unsigned long)s->uaddr);
+    kl_s(&kl, " wait_bitset=");
+    kl_hex(&kl, s->bitset);
+    kl_s(&kl, " wake_bitset=");
+    kl_hex(&kl, w->bitset);
+    kl_s(&kl, " reason=");
+    kl_s(&kl, why);
+    kl_s(&kl, " ");
+    kl_s(&kl, p->name);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    reported++;
+  }
+}
+
+void futex_trace_dump_locked(void) {
+  int used = 0, queued = 0;
+  {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[FUTEX] queue: used=");
+    kl_i(&kl, used);
+    kl_s(&kl, " parked=");
+    kl_i(&kl, queued);
+    kl_s(&kl, " ops=");
+    kl_i(&kl, (long)l_futex_ring_at);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct l_thr_slot *s = &l_thr[i];
+    if (!s->used || !s->owner)
+      continue;
+    struct process *p = s->owner;
+    if (p->state != PROC_STATE_FUTEX && s->uaddr == 0)
+      continue; /* idle slot: the [IDLESTUCK] rows already name it */
+    /* One map per process is enough to attribute every key and stack word:
+       kind 1=IMG 2=HEAP 3=ANON 4=SHARED 5=STACK 6=FB 7=LIB, so a key in a LIB
+       region is a DSO global and one in HEAP is a malloc'd object.  Printed
+       once per process (the `maps` flag below), at most 28 regions. */
+    static int maps_done_for_pid;
+    if (maps_done_for_pid != p->pid && p->as) {
+      maps_done_for_pid = p->pid;
+      struct kline km;
+      kl_init(&km);
+      kl_s(&km, "[FUTEX] maps pid=");
+      kl_i(&km, p->pid);
+      kl_s(&km, " n=");
+      kl_i(&km, p->as->nr);
+      kl_c(&km, '\n');
+      kl_emit(&km);
+      for (int r = 0; r < p->as->nr && r < 60; r++) {
+        struct vm_region *rg = &p->as->regions[r];
+        struct kline kr;
+        kl_init(&kr);
+        kl_s(&kr, "[FUTEX] map base=");
+        kl_hex(&kr, (unsigned long)rg->base);
+        kl_s(&kr, " len=");
+        kl_hex(&kr, (unsigned long)rg->len);
+        kl_s(&kr, " kind=");
+        kl_i(&kr, rg->kind);
+        kl_s(&kr, " prot=");
+        kl_i(&kr, rg->prot);
+        kl_c(&kr, '\n');
+        kl_emit(&kr);
+      }
+    }
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[FUTEX] q slot=");
+    kl_i(&kl, i);
+    kl_s(&kl, " pid=");
+    kl_i(&kl, p->pid);
+    kl_s(&kl, " st=");
+    kl_i(&kl, p->state);
+    kl_s(&kl, " as=");
+    kl_hex(&kl, (unsigned long)(uintptr_t)s->as);
+    kl_s(&kl, " key=");
+    kl_hex(&kl, (unsigned long)s->uaddr);
+    kl_s(&kl, " bitset=");
+    kl_hex(&kl, s->bitset);
+    kl_s(&kl, " waits=");
+    kl_i(&kl, (long)s->waits);
+    kl_s(&kl, " wakes=");
+    kl_i(&kl, (long)s->wakes);
+    kl_s(&kl, " sigp=");
+    kl_hex(&kl, (unsigned long)p->sig_pending);
+    {
+      struct process *g = process_group(p);
+      kl_s(&kl, "/");
+      kl_hex(&kl, (unsigned long)(g ? g->sig_pending : 0));
+    }
+    kl_s(&kl, " ");
+    kl_s(&kl, p->name);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    /* The user stack is the only place that still knows WHO this thread is
+       waiting for: glibc enters every futex through syscall(), so the saved
+       rip says nothing (it is the same libc stub in every row).  The return
+       address at [rsp] and the frames above it are the callers -- with these
+       six words an offline reader can symbolise the Unity/libc function this
+       thread is parked in.  p->context[33] is the user RSP saved by
+       save_context(). */
+    {
+      struct kline kl2;
+      kl_init(&kl2);
+      kl_s(&kl2, "[FUTEX] st pid=");
+      kl_i(&kl2, p->pid);
+      kl_s(&kl2, " sp=");
+      kl_hex(&kl2, (unsigned long)p->context[33]);
+      for (int w = 0; w < 6; w++) {
+        uint64_t v = 0;
+        if (l_copy_from_user(p, &v, p->context[33] + (uint64_t)w * 8, 8) != 0)
+          v = 0xDEAD;
+        kl_s(&kl2, " ");
+        kl_hex(&kl2, (unsigned long)v);
+      }
+      /* The current word itself: a mutex still reads 2 (locked+waiters) long
+         after the park, and a condvar reads 0.  The value is what separates
+         "the lock was never released" from "the lock was released but the
+         wake was lost".  The region says whether the key is a DSO global, a
+         heap object or a thread stack -- the three look identical in hex. */
+      {
+        uint32_t nowv = 0xFFFFFFFFu;
+        if (l_copy_from_user(p, &nowv, s->uaddr, 4) != 0)
+          nowv = 0xFFFFFFFFu;
+        kl_s(&kl2, " word=");
+        kl_hex(&kl2, nowv);
+      }
+      kl_c(&kl2, '\n');
+      kl_emit(&kl2);
+      /* A glibc pthread_mutex_t is 40 bytes: __lock(4) __count(4) __owner(4)
+         __nusers(4) __kind(4) ...  __owner is only meaningful for
+         ERRORCHECK/RECURSIVE mutexes, but when it is set it NAMES THE OWNER
+         tid outright -- the one thing the futex word cannot tell us.  Dump the
+         five words for every mutex-shaped park (word 1 or 2). */
+      {
+        uint32_t w0 = 0;
+        if (l_copy_from_user(p, &w0, s->uaddr, 4) == 0 && (w0 == 1 || w0 == 2)) {
+          struct kline kmx;
+          kl_init(&kmx);
+          kl_s(&kmx, "[FUTEX] mutex pid=");
+          kl_i(&kmx, p->pid);
+          kl_s(&kmx, " key=");
+          kl_hex(&kmx, (unsigned long)s->uaddr);
+          for (int mw = 0; mw < 5; mw++) {
+            uint32_t v32 = 0xDEADBEEFu;
+            if (l_copy_from_user(p, &v32, s->uaddr + (uint64_t)mw * 4, 4) != 0)
+              v32 = 0xDEADBEEFu;
+            kl_s(&kmx, " ");
+            kl_hex(&kmx, v32);
+          }
+          kl_c(&kmx, '\n');
+          kl_emit(&kmx);
+        }
+      }
+      /* The instruction bytes at the saved RIP identify WHICH futex wrapper
+         issued the wait: every glibc futex in this run shows the same libc
+         syscall() return address, so a different rip is a different (in-DSO)
+         syscall stub.  Searching the staged DSOs for these bytes offline names
+         the library and the file offset, which is how a stripped binary still
+         gets a call site. */
+      {
+        struct kline kc;
+        kl_init(&kc);
+        kl_s(&kc, "[FUTEX] code pid=");
+        kl_i(&kc, p->pid);
+        kl_s(&kc, " rip=");
+        kl_hex(&kc, (unsigned long)p->context[31]);
+        for (int b = 0; b < 16; b++) {
+          uint8_t byte = 0;
+          if (l_copy_from_user(p, &byte, p->context[31] + (uint64_t)b, 1) != 0)
+            break;
+          kl_c(&kc, ' ');
+          kl_c(&kc, "0123456789abcdef"[byte >> 4]);
+          kl_c(&kc, "0123456789abcdef"[byte & 0xF]);
+        }
+        kl_c(&kc, '\n');
+        kl_emit(&kc);
+      }
+    }
+    if (p->as) {
+      struct vm_region *rg = vm_region_find(p->as, s->uaddr);
+      struct kline kl3;
+      kl_init(&kl3);
+      kl_s(&kl3, "[FUTEX] rgn pid=");
+      kl_i(&kl3, p->pid);
+      kl_s(&kl3, " key=");
+      kl_hex(&kl3, (unsigned long)s->uaddr);
+      if (rg) {
+        kl_s(&kl3, " base=");
+        kl_hex(&kl3, (unsigned long)rg->base);
+        kl_s(&kl3, " len=");
+        kl_hex(&kl3, (unsigned long)rg->len);
+        kl_s(&kl3, " kind=");
+        kl_i(&kl3, rg->kind);
+        kl_s(&kl3, " prot=");
+        kl_i(&kl3, rg->prot);
+      } else {
+        kl_s(&kl3, " base=<unmapped>");
+      }
+      kl_c(&kl3, '\n');
+      kl_emit(&kl3);
+    }
+  }
+  unsigned total = l_futex_ring_at;
+  unsigned n = total < FUTEX_TRACE_RING ? total : FUTEX_TRACE_RING;
+  if (n == 0)
+    return;
+  {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[FUTEX] ring: last ");
+    kl_i(&kl, (long)n);
+    kl_s(&kl, " of ");
+    kl_i(&kl, (long)total);
+    kl_s(&kl, " (oldest first)\n");
+    kl_emit(&kl);
+  }
+  for (unsigned k = 0; k < n; k++) {
+    unsigned at = total - n + k;
+    const struct futex_ev *ev = &l_futex_ring[at % FUTEX_TRACE_RING];
+    l_futex_emit(ev, (int)at, 'r');
+    if (ev->op == FTR_WAKE && ev->woke == 0)
+      l_futex_near_miss(ev);
+  }
+}
+
 /* Wake up to `val` waiters on (as,uaddr) whose bitset intersects `bitset`.
-   Caller holds proc_lock.  Returns the number woken. */
+   Caller holds proc_lock.  Returns the number woken.  When `ev` is non-NULL
+   the woken pids are recorded in it (up to four) so the caller can emit one
+   [FUTEX] row that names both sides of the handshake. */
 static int l_futex_wake_locked(struct addr_space *as, uint64_t uaddr,
-                               uint32_t val, uint32_t bitset) {
-  if (val == 0)
+                               uint32_t val, uint32_t bitset,
+                               struct futex_ev *ev) {
+  if (val == 0) {
+    if (ev) {
+      ev->as = (uint64_t)(uintptr_t)as;
+      ev->uaddr = uaddr;
+      ev->val = val;
+      ev->bitset = bitset;
+      ev->woke = 0;
+      ev->woke_pid = -1;
+      ev->nwoke = 0;
+    }
     return 0;
+  }
   int woke = 0;
   for (int i = 1; i < MAX_PROCESSES && (uint32_t)woke < val; i++) {
     struct l_thr_slot *s = &l_thr[i];
@@ -149,7 +522,21 @@ static int l_futex_wake_locked(struct addr_space *as, uint64_t uaddr,
     p->wake_ms = 0;
     p->context[0] = 0; /* WAIT returns 0 on wake */
     p->state = PROC_STATE_READY;
+    if (ev) {
+      if (woke < 4) {
+        ev->woke_pids[woke] = p->pid;
+        ev->nwoke = (uint8_t)(woke + 1);
+      }
+    }
     woke++;
+  }
+  if (ev) {
+    ev->as = (uint64_t)(uintptr_t)as;
+    ev->uaddr = uaddr;
+    ev->val = val;
+    ev->bitset = bitset;
+    ev->woke = woke;
+    ev->woke_pid = woke ? ev->woke_pids[0] : -1;
   }
   return woke;
 }
@@ -308,6 +695,18 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     }
     if (timeout_ms == 0) {
       spinlock_release_irqrestore(&proc_lock, flags);
+      {
+        struct futex_ev ev = {0};
+        ev.op = FTR_WAIT;
+        ev.pid = p->pid;
+        ev.as = (uint64_t)(uintptr_t)as;
+        ev.uaddr = uaddr;
+        ev.val = val;
+        ev.bitset = bitset;
+        ev.timeout_ms = 0;
+        ev.res = -ETIMEDOUT;
+        futex_trace_note(&ev);
+      }
       tf->regs[0] = (uint64_t)(int64_t)-ETIMEDOUT;
       return 1;
     }
@@ -320,6 +719,21 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     l_thr[slot].uaddr = uaddr;
     l_thr[slot].bitset = bitset;
     l_thr[slot].waits++;
+    {
+      /* The park itself: this row plus the absence of a later WAKE on the
+         same key is the whole lost-wakeup diagnosis. */
+      struct futex_ev ev = {0};
+      ev.op = (cmd == L_FUTEX_WAIT_BITSET) ? FTR_WAITBITSET : FTR_WAIT;
+      ev.pid = p->pid;
+      ev.as = (uint64_t)(uintptr_t)as;
+      ev.uaddr = uaddr;
+      ev.val = val;
+      ev.bitset = bitset;
+      ev.timeout_ms = timeout_ms;
+      ev.res = 0;
+      ev.rip = tf->elr;
+      futex_trace_note(&ev);
+    }
     spinlock_release_irqrestore(&proc_lock, flags);
     schedule(tf, 0);
     return 1; /* not reached: resume re-enters user space via context[0] */
@@ -340,8 +754,13 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       return 1;
     }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    int woke = l_futex_wake_locked(as, uaddr, val, bitset);
+    struct futex_ev ev = {0};
+    ev.op = FTR_WAKE;
+    ev.pid = p->pid;
+    ev.rip = tf->elr;
+    int woke = l_futex_wake_locked(as, uaddr, val, bitset, &ev);
     spinlock_release_irqrestore(&proc_lock, flags);
+    futex_trace_note(&ev);
     tf->regs[0] = (uint64_t)(int64_t)woke;
     return 1;
   }
@@ -366,9 +785,16 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       tf->regs[0] = (uint64_t)(int64_t)-EAGAIN;
       return 1;
     }
-    int woke = l_futex_wake_locked(as, uaddr, val, L_FUTEX_BITSET_MATCH_ANY);
+    struct futex_ev ev = {0};
+    ev.op = FTR_REQUEUE;
+    ev.pid = p->pid;
+    ev.rip = tf->elr;
+    ev.uaddr2 = uaddr2;
+    int woke = l_futex_wake_locked(as, uaddr, val, L_FUTEX_BITSET_MATCH_ANY, &ev);
     int moved = l_futex_requeue_locked(as, uaddr, uaddr2, val2);
+    ev.res = moved;
     spinlock_release_irqrestore(&proc_lock, flags);
+    futex_trace_note(&ev);
     tf->regs[0] = (uint64_t)(int64_t)(woke + moved);
     return 1;
   }
@@ -447,14 +873,48 @@ static int l_thr_get_robust_list(struct process *p, struct trap_frame *tf) {
    pthread_join bug, not a kernel bug).  Called from process_thread_exit()
    BEFORE the address space is torn down. */
 void linux_compat_thread_exit(struct process *p) {
+  {
+    /* A thread that exits while holding a NON-robust mutex leaves it locked
+       forever and Linux cannot clean it up either -- so "did any thread exit
+       before the hang" is a fact worth recording, not an inference. */
+    static int exit_reports;
+    if (exit_reports < 40) {
+      exit_reports++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[FUTEX] exit pid=");
+      kl_i(&kl, p ? p->pid : -1);
+      kl_s(&kl, " st=");
+      kl_i(&kl, p ? p->state : -1);
+      kl_s(&kl, " key=");
+      kl_hex(&kl, (unsigned long)(p ? p->futex_uaddr : 0));
+      kl_s(&kl, " ");
+      kl_s(&kl, (p && p->name[0]) ? p->name : "?");
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   int slot = l_thr_slot_of(p, 0);
   if (slot < 0)
     return;
   /* Drop any futex queue entry: the PCB is leaving. */
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int was_queued = l_thr[slot].uaddr != 0;
+  uint64_t was_key = l_thr[slot].uaddr;
   l_thr[slot].uaddr = 0;
   p->futex_uaddr = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
+  if (was_queued) {
+    /* A thread that exits while queued leaves its waiters to the
+       clear_child_tid / robust-list paths; recording the exit with the key it
+       was parked on is what tells "the waker died" from "nobody woke it". */
+    struct futex_ev ev = {0};
+    ev.op = FTR_EXIT;
+    ev.pid = p->pid;
+    ev.as = (uint64_t)(uintptr_t)l_thr[slot].as;
+    ev.uaddr = was_key;
+    futex_trace_note(&ev);
+  }
 
   uint64_t head = l_thr[slot].robust_head;
   l_thr[slot].robust_head = 0;
@@ -487,9 +947,14 @@ void linux_compat_thread_exit(struct process *p) {
         nw |= L_FUTEX_WAITERS;
       if (l_copy_to_user(p, word_va, &nw, 4) == 0 && (nw & L_FUTEX_WAITERS)) {
         uint64_t f = spinlock_acquire_irqsave(&proc_lock);
+        struct futex_ev ev = {0};
+        ev.op = FTR_WAKE;
+        ev.pid = p->pid; /* the dying owner is the waker here */
+        ev.rip = p->context[31];
         l_futex_wake_locked(p->as, word_va, 0x7fffffff,
-                            L_FUTEX_BITSET_MATCH_ANY);
+                            L_FUTEX_BITSET_MATCH_ANY, &ev);
         spinlock_release_irqrestore(&proc_lock, f);
+        futex_trace_note(&ev);
       }
     }
     uint64_t next = 0;
@@ -995,6 +1460,14 @@ void linux_compat_signal_interrupt(struct process *t) {
   if (t->state != PROC_STATE_FUTEX)
     return;
   t->context[0] = (uint64_t)(int64_t)-EINTR;
+  {
+    struct futex_ev ev = {0};
+    ev.op = FTR_SIGNAL;
+    ev.pid = t->pid;
+    ev.as = (uint64_t)(uintptr_t)t->as;
+    ev.uaddr = t->futex_uaddr;
+    futex_trace_note(&ev);
+  }
   t->futex_uaddr = 0;
   t->wake_ms = 0;
   t->state = PROC_STATE_READY;
