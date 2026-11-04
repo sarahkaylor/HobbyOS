@@ -139,9 +139,10 @@ def insert_plan_row(text, milestone, row):
     return text[:at] + "\n" + row + text[at:]
 
 
-def adopt_orphans(bd, plan):
+def adopt_orphans(bd, plan, path=None):
     """Append a §8 row for every OPEN board mint missing from the plan."""
-    text = open(S.PLAN, encoding="utf-8").read()
+    path = path or S.PLAN
+    text = open(path, encoding="utf-8").read()
     adopted = []
     for gid, b in sorted(bd.items()):
         if gid in plan or b.get("state") == "closed":
@@ -160,7 +161,7 @@ def adopt_orphans(bd, plan):
             continue
         adopted.append(row)
     if adopted:
-        open(S.PLAN, "w", encoding="utf-8").write(text)
+        open(path, "w", encoding="utf-8").write(text)
     return adopted
 
 
