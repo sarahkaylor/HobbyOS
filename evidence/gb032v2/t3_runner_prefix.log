@@ -1,0 +1,14 @@
+[2.0s] draw line seen; screendump
+[2.9s] sending key 'a'
+--- GB-032 T3 rows ---
+[WAVE-TRY] SDL2TEST.BIN
+[ARRIVED] SDL2TEST.BIN rc>0
+sdl test app: fb unavailable (errno=25), using the local buffer
+sdl test app: drew 64x48 window, blitted 8x8 tile @(10,10)
+sdl test app echo: KEY 1e=1
+[EXITPC] pid=2 last_user_pc=0x1000005E8E code=0x0
+System halt from CPU 1.
+--- screendump: blue_window_px=0 magenta_tile_px=0 (evidence/gb032prefix/pre-fix/draw.ppm) ---
+--- artifacts: evidence/gb032prefix/pre-fix ---
+run_sdl_test_app_t3: FAIL
+  fb_line=False drew=True echoed=True exit0=True halted=True blue=0 magenta=0

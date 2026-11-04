@@ -1,0 +1,126 @@
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x1,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[001;001Hm[001;002Hu[001;003Hl[001;004Ht[001;005Hi[001;006Hb[001;007Ho[001;008Ho[001;009Ht[001;010H1[001;011H:[001;012H [001;013HL[001;014Ho[001;015Ha[001;016Hd[001;017Hi[001;018Hn[001;019Hg[001;020H [001;021He[001;022Hx[001;023He[001;024Hc[001;025Hu[001;026Ht[001;027Ha[001;028Hb[001;029Hl[001;030He[001;031H [001;032H`[001;033Hb[001;034Ho[001;035Ho[001;036Ht[001;037H([001;038H)[001;039H:[001;040H/[001;041Hb[001;042Ho[001;043Ho[001;044Ht[001;045H/[001;046Hh[001;047Ho[001;048Hb[001;049Hb[001;050Hy[001;051Ho[001;052Hs[001;053H.[001;054He[001;055Hl[001;056Hf[001;057H`[001;058H.[001;059H.[001;060H.[001;061H[001;001H[002;001H[UART] lock @ 0x0000000075381e28
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: virtio-pci
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+[INPUT] PS/2 mouse: IntelliMouse (wheel, 4-byte)
+[INPUT] vmmouse absolute pointer enabled
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 11 power-on acknowledged.
+
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+start_scheduler called on CPU [KERNEL] smp_init: Sending INIT IPI to core 3...
+2
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+start_scheduler called on CPU [KERNEL] smp_init: Sending INIT IPI to core 4...
+3
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on acknowledged.
+start_scheduler called on CPU 4
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 5
+5 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 6 power-on acknowledged.
+start_scheduler called on CPU 6
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 77
+ power-on acknowledged.
+[KERNEL] LAPIC timer rate: 62559 counts/ms, TSC rate: 2596428 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000080000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010A 
+NVMe BAR0 Phys: 0x0000000080000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 11 (Vector: 43)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000751F6000 PFN: 0x00000000000751F6
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000751F9000 PFN: 0x00000000000751F9
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+[GB-032] SDL test-app exec: SKIP (GB-013 compat exec leg not open; app + static-PIE ELF props proven on host by sdl_test_app_test_host)
+start_scheduler called on CPU [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=4 
+/WAVE.CFG
+0
+[RESUME-SPSR] pid=1 spsr=0x00000212 IF=1
+[WAVE-MANIFEST] SDL2TEST.BIN
+[WAVE-TRY] SDL2TEST.BIN
+Loading program for scheduler (v2 AS): SDL2TEST.BIN[RESUME-SPSR] pid=1 spsr=0x00000206 IF=1
+
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/SDL2TEST.BIN
+[RESUME-SPSR] pid=1 spsr=0x00000212 IF=1
+v2 loader: PID=2 entry=0x1000001067 sp=0x1800000000 resident=29 tables=6 abi=0x1 native=0 interp=0x0
+[RESUME-SPSR] pid=2 spsr=0x00000202 IF=1
+[ARRIVED] SDL2TEST.BIN rc>0
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFDE0 covers=1
+sdl test app: fb unavailable (errno=25), using the local buffer
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFF900 covers=1
+sdl test app: drew 64x48 window, blitted 8x8 tile @(10,10)
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFBC0 covers=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFBC0 covers=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFBC0 covers=1
+sdl test app echo: KEY 1e=1
+[KERNEL] Process 2: SDL2TEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=2 last_user_pc=0x1000005E8E code=0x0
+[HALT-CD] cpu=1 free=63 alloc=0 exited=1 running=0 blocked=0 other=0
+System halt from CPU 1.

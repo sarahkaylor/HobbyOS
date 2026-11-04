@@ -1,0 +1,13 @@
+[2.0s] draw line seen; screendump
+[2.9s] sending key 'a'
+--- GB-032 T3 rows ---
+[WAVE-TRY] SDL2TEST.BIN
+[ARRIVED] SDL2TEST.BIN rc>0
+sdl test app: fb /dev/fb0 fd=3 mode=1920x1080 bpp=32
+sdl test app: drew 64x48 window, blitted 8x8 tile @(10,10)
+sdl test app echo: KEY 1e=1
+[EXITPC] pid=2 last_user_pc=0x1000005E8E code=0x0
+System halt.
+--- screendump: blue_window_px=3008 magenta_tile_px=32 (evidence/gb032/20261104T074233Z/draw.ppm) ---
+--- artifacts: evidence/gb032/20261104T074233Z ---
+run_sdl_test_app_t3: PASS
