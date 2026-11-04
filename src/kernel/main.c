@@ -680,6 +680,20 @@ void main(void) {
   scheduler_started = 1;
   start_scheduler();
 
+  /* GB-179: terminal slot census -- quote what is parked instead of leaving
+     the wave-end predicate's numbers implicit.  exited/thread_done must be 0
+     once the proactive reap has run. */
+  {
+    int nf = 0, ne = 0, nt = 0;
+    process_slot_census(&nf, &ne, &nt);
+    uart_puts("[SLOTS] free=");
+    print_int(nf);
+    uart_puts(" exited=");
+    print_int(ne);
+    uart_puts(" thread_done=");
+    print_int(nt);
+    uart_puts("\n");
+  }
   uart_puts("System halt.\n");
   extern void halt(void);
   halt();
