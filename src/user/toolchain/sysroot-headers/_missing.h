@@ -11,9 +11,11 @@
  * <sys/wait.h> (wait4) — so everything those declare was REMOVED here to
  * avoid duplicate/divergent declarations in the same TU.
  *
- * What REMAINS is surface with no libc home yet (the blocking-socket
- * listener set, host/session identity, fork spelled for LLVM, the
- * toolchain's setjmp linkage pin, fseeko/ftello, two size macros).
+ * What REMAINS is surface with no libc home yet (host/session identity, fork
+ * spelled for LLVM, the toolchain's setjmp linkage pin, fseeko/ftello, two
+ * size macros).  POSIX sockets are NOT among them: <sys/socket.h> is included
+ * above instead of a hand-copied declaration set (the copy diverged on
+ * bind/accept/connect and broke every toolchain TU).
  *
  * Wave-2 merge note (integrator): reconciled against the MERGED libc.a —
  * nm-verified that every symbol libc.a defines is absent from this header
@@ -25,6 +27,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <signal.h>
@@ -54,14 +57,13 @@ extern "C" {
    * <unistd.h>, which LLVM includes. */
   int fork(void);
 
-  /* POSIX sockets -- used by Support/raw_socket_stream.cpp (compiled
-   * unconditionally into LLVMSupport).  HobbyOS P4 has socketpair/sendmsg/
-   * recvmsg only; the blocking listener surface is missing. */
-  int socket(int domain, int type, int protocol);
-  int bind(int fd, const void *addr, unsigned int addrlen);
-  int listen(int fd, int backlog);
-  int accept(int fd, void *addr, unsigned int *addrlen);
-  int connect(int fd, const void *addr, unsigned int addrlen);
+  /* POSIX sockets: NOT declared here.  src/libc/include/sys/socket.h owns
+   * this surface now (IceWM M1: socket/bind/listen/accept/connect ...), and
+   * keeping a second copy in this force-included header made every toolchain
+   * TU fail with "conflicting types for 'bind'" (void * and unsigned int here
+   * vs struct sockaddr and socklen_t there).  Pull the real header instead, so
+   * a TU that calls sockets without including it itself still compiles.
+   * Bodies: src/libc (libc_socket.o) with weak ENOSYS fallbacks in gaps.c. */
 
   /* PATH_MAX -- used throughout Unix/Path.inc (buffer sizes).  HobbyOS
    * limits.h does not define it. */
