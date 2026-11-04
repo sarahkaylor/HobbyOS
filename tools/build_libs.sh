@@ -181,21 +181,55 @@ configure_arch() {
 
 # ---------------------------------------------------------------------------
 # job pool: launch <cmd...>; at most $JOBS in flight, failures latched
+#
+# `wait -n` is bash >= 4.3.  macOS ships bash 3.2 as /bin/bash, where it is
+# `wait: -n: invalid option`: the pool reaped nothing, so every job past the
+# first $JOBS was orphaned and the run died on `make: *** [obj/<arch>/libc.so]
+# Error 1` (the mac CI gate).  Feature-detect once; on old bash the pool
+# blocks on the oldest queued pid instead — same cap, same failure latch.
 # ---------------------------------------------------------------------------
 pool_running=0
 pool_failed=0
-launch() {
-  "$@" &
-  pool_running=$((pool_running + 1))
-  if [ "$pool_running" -ge "$JOBS" ]; then
+pool_pids=""            # FIFO of live child pids, only used by the 3.2 path
+
+pool_have_wait_n=0
+if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] ||
+   { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+  pool_have_wait_n=1
+fi
+
+# pool_reap: one job leaves the pool; latch a failure.  Always returns 0.
+pool_reap() {
+  if [ "$pool_have_wait_n" = 1 ]; then
     if ! wait -n; then pool_failed=1; fi
     pool_running=$((pool_running - 1))
+    return 0
+  fi
+  local p=${pool_pids%% *}
+  if [ -z "$p" ]; then          # bookkeeping lost: nothing to wait for
+    pool_running=0
+    return 0
+  fi
+  case $pool_pids in
+    *" "*) pool_pids=${pool_pids#* } ;;
+    *)     pool_pids="" ;;
+  esac
+  if ! wait "$p"; then pool_failed=1; fi
+  pool_running=$((pool_running - 1))
+  return 0
+}
+
+launch() {
+  "$@" &
+  [ "$pool_have_wait_n" = 1 ] || pool_pids="${pool_pids:+$pool_pids }$!"
+  pool_running=$((pool_running + 1))
+  if [ "$pool_running" -ge "$JOBS" ]; then
+    pool_reap
   fi
 }
 pool_drain() {
   while [ "$pool_running" -gt 0 ]; do
-    if ! wait -n; then pool_failed=1; fi
-    pool_running=$((pool_running - 1))
+    pool_reap
   done
 }
 
