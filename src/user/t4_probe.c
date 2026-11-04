@@ -38,6 +38,8 @@
 #include <errno.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <pthread.h>   /* GB-021: musl pthread_create/join through clone/futex */
+#include <time.h>
 
 static void pstr(const char *s) {
   size_t n = 0; while (s[n]) n++;
@@ -73,6 +75,47 @@ static void prow(const char *name, long rc, long err, const unsigned char *out, 
   buf[n++] = '\n';
   (void)write(1, buf, (size_t)n);
 }
+
+/* GB-021: thread/futex workers.  Same row names and deterministic values as
+ * the host model (src/host/t4_compat_probe.c), so one golden name set covers
+ * both probes.  Per-thread storage goes through pthread keys rather than a C
+ * __thread variable: the musl static-PIE loader here does not yet map a
+ * PT_TLS segment (it faults inside musl static_init_tls), while the pthread
+ * TCB path is exactly what clone(2)/SETTLS has to get right anyway. */
+static pthread_key_t t4_key;
+static pthread_once_t t4_key_once = PTHREAD_ONCE_INIT;
+
+static void t4_key_make(void) { pthread_key_create(&t4_key, NULL); }
+
+static void *t4_thr_tls(void *p) {
+  long v = (long)p;
+  pthread_once(&t4_key_once, t4_key_make);
+  pthread_setspecific(t4_key, (void *)v);
+  errno = (int)(v + 1000);   /* per-thread errno store */
+  return (void *)(long)pthread_getspecific(t4_key);
+}
+
+static volatile int t4_counter;
+
+static void *t4_thr_worker(void *p) {
+  long n = (long)p;
+  for (long i = 0; i < n; i++)
+    __sync_fetch_and_add(&t4_counter, 1);
+  return (void *)(long)(2 * n);
+}
+
+static volatile int t4_futex_val;
+
+static void *t4_thr_futex(void *p) {
+  volatile int *v = (volatile int *)p;
+  struct timespec ts = {2, 0};
+  while (__atomic_load_n(v, __ATOMIC_RELAXED) == 0) {
+    long r = syscall(SYS_futex, (int *)v, 0 /* FUTEX_WAIT */, 0, &ts, NULL, 0);
+    if (r < 0 && errno != EAGAIN) break;
+  }
+  return (void *)(long)(__atomic_load_n(v, __ATOMIC_RELAXED) ? 0 : 1);
+}
+
 
 /* GB-111: a deterministic SKIP row for a whole block we could not run because the
  * primitives (socketpair/pipe2) failed — WITHOUT touching the uninitialised fds.
@@ -327,6 +370,57 @@ int main(int argc, char **argv) {
       close(fd_p);
     }
     prow("procfd_read", selfn > 0 ? 1 : 0, selfn == 0 ? 9 : 0, NULL, 0);
+  }
+
+  /* GB-021: threads under the Linux ABI.  musl's pthread_create reaches the
+     kernel as clone(56), join as futex(202)/CLONE_CHILD_CLEARTID.  Values are
+     deterministic: 4 threads x 1000 increments, exit value 2*1000 each. */
+  {
+    pthread_t a, b;
+    void *ra = NULL, *rb = NULL;
+    errno = 0;
+    int ca = pthread_create(&a, NULL, t4_thr_tls, (void *)101L);
+    prow("tls_create_a", ca, ca ? ca : 0, NULL, 0);
+    int cb = pthread_create(&b, NULL, t4_thr_tls, (void *)202L);
+    prow("tls_create_b", cb, cb ? cb : 0, NULL, 0);
+    int ja = pthread_join(a, &ra);
+    int jb = pthread_join(b, &rb);
+    prow("tls_join_a", ja, ja ? ja : 0, NULL, 0);
+    prow("tls_join_b", jb, jb ? jb : 0, NULL, 0);
+    prow("tls_thread_a_seed", (long)ra, 0, NULL, 0);  /* must be 101 */
+    prow("tls_thread_b_seed", (long)rb, 0, NULL, 0);  /* must be 202 */
+    prow("tls_main_errno_untouched", errno, 0, NULL, 0);
+
+    pthread_t t[4];
+    t4_counter = 0;
+    for (long i = 0; i < 4; i++) {
+      errno = 0;
+      int c = pthread_create(&t[i], NULL, t4_thr_worker, (void *)1000L);
+      prow("thread_create", c, c ? c : 0, NULL, 0);
+    }
+    long sum = 0;
+    for (int i = 0; i < 4; i++) {
+      void *ret = NULL;
+      pthread_join(t[i], &ret);
+      sum += (long)ret;
+    }
+    prow("thread_join_sum", sum, 0, NULL, 0);    /* 4 * 2000 = 8000 */
+    prow("thread_counter", t4_counter, 0, NULL, 0); /* 4000 */
+
+    /* futex handshake: a waiter parks on t4_futex_val==0; main stores 1 and
+       wakes it.  woken==0 on success (1 would be the timeout path).  The
+       WAKE return itself is racy by construction, so report only >= 0. */
+    t4_futex_val = 0;
+    pthread_t w;
+    pthread_create(&w, NULL, t4_thr_futex, (void *)&t4_futex_val);
+    usleep(20000); /* give the waiter a chance to park; the row is safe either way */
+    __atomic_store_n(&t4_futex_val, 1, __ATOMIC_RELEASE);
+    long wk = syscall(SYS_futex, (int *)&t4_futex_val, 1 /* FUTEX_WAKE */, 1,
+                      NULL, NULL, 0);
+    prow("futex_wake_ok", wk >= 0 ? 1 : 0, 0, NULL, 0);
+    void *wret = NULL;
+    pthread_join(w, &wret);
+    prow("futex_waiter_woken", (long)wret == 0 ? 1 : 0, 0, NULL, 0);
   }
 
   pstr("t4-probe-arrived\n");

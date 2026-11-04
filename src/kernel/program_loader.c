@@ -1,6 +1,7 @@
 #include "program_loader.h"
 #include "kline.h"
 #include "fs.h"
+#include "net.h"
 #include "setjmp.h"
 #include "process.h"
 #include "vdisplay.h"
@@ -552,6 +553,144 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
   return 0;
 }
 
+#define COMPAT_MAX_ARGV 16
+#define COMPAT_MAX_ENV 24
+#define COMPAT_STR_MAX 512
+
+/* Layer the SysV AMD64 process-initialization block on a COMPAT process's
+ * stack and point its entry at it:
+ *
+ *     %rsp -> argc, argv[0..argc-1], NULL, envp[0..envc-1], NULL, auxv, AT_NULL
+ *
+ * Both arrays come from the PCB blobs (sys_readargv / sys_readenv, the same
+ * source SYS_GETARGV / SYS_GETENV serve to native programs), so a Linux program
+ * sees exactly what its launcher passed.
+ *
+ * Measured need (2026-11-02): the block used to hardcode argc = 1 and an empty
+ * envp.  That is enough for `hello`, but a real program dies on it: Doom reads
+ * "-iwad <file>" from argv and the X11 display name from DISPLAY, so with the
+ * fixed block it reported "no IWAD" and Xlib would have had no display at all.
+ *
+ * Bounded deliberately (16 argv / 24 env / 512 B each): the whole block stays a
+ * few KiB, far inside the 64 KiB stack window the loader prefaults, and
+ * vm_kwrite validates every page it touches so a bad layout faults here with a
+ * line instead of a triple fault later.
+ */
+static int compat_stack_block(struct process *child, int pid, uint64_t entry,
+                              uint64_t phdr, uint32_t phnum) {
+  struct process *grp = process_group(child);
+  char s[COMPAT_STR_MAX];
+  uint64_t argp[COMPAT_MAX_ARGV + 1];
+  uint64_t envp[COMPAT_MAX_ENV + 1];
+  uint64_t sp = USER_MAIN_STK_TOP_V2;
+
+  int argc = grp ? sys_readargv(grp, -1, 0, 0) : 0;
+  int envc = grp ? sys_readenv(grp, -1, 0, 0) : 0;
+  if (argc < 0) argc = 0;
+  if (envc < 0) envc = 0;
+  if (argc > COMPAT_MAX_ARGV) argc = COMPAT_MAX_ARGV;
+  if (envc > COMPAT_MAX_ENV) envc = COMPAT_MAX_ENV;
+
+  /* Strings first, highest address first, so the arrays below them can be laid
+     down front-to-back without tracking each string's end. */
+  for (int i = envc - 1; i >= 0; i--) {
+    int n = sys_readenv(grp, i, s, (int)sizeof s);
+    if (n < 0) {
+      s[0] = '\0';
+      n = 0;
+    }
+    sp -= (uint64_t)n + 1;
+    if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
+    envp[i] = sp;
+  }
+  for (int i = argc - 1; i >= 0; i--) {
+    int n = sys_readargv(grp, i, s, (int)sizeof s);
+    if (n < 0) {
+      s[0] = '\0';
+      n = 0;
+    }
+    sp -= (uint64_t)n + 1;
+    if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
+    argp[i] = sp;
+  }
+  uint64_t name_addr;
+  if (argc > 0) {
+    name_addr = argp[0];
+  } else {
+    /* A name-only spawn (the wave path) has no argv blob: argv[0] is the
+       program name, exactly as a shell would pass it. */
+    const char *nm = child->name[0] ? child->name : "PROGRAM";
+    int nlen = 0;
+    while (nm[nlen]) nlen++;
+    sp -= (uint64_t)nlen + 1;
+    if (vm_kwrite(child, sp, nm, nlen + 1) != 0) return -EFAULT;
+    name_addr = sp;
+    argp[0] = name_addr;
+    argc = 1;
+  }
+  argp[argc] = 0;
+  envp[envc] = 0;
+
+  /* The fixed part of the block, laid out by ADDRESS rather than by luck:
+   *
+   *     rsp -> argc            (16-byte aligned, SysV)
+   *            argv[0..argc-1], NULL
+   *            envp[0..envc-1], NULL
+   *            auxv pairs, AT_NULL
+   *            AT_RANDOM's 16 bytes
+   *            the strings
+   *
+   * musl's _start reads argc at %rsp and argv at %rsp+8, so argv[0] must sit
+   * exactly 8 bytes above the argc word, and %rsp must be 16-aligned.  An
+   * earlier cut placed the arrays in descending order and then re-aligned %rsp
+   * to 16: that leaves an 8-byte hole between argc and argv[0] whenever the
+   * array sizes make the base 16-aligned.  With argc=3 it happened to line up
+   * (argv and DISPLAY arrived); with argc=1 the guest read argv[0] == NULL and
+   * an empty environment, and Doom then asked libXau for $HOME and died.
+   * Computing argv_base first makes the layout independent of the counts. */
+  uint64_t w[20];
+  uint64_t rnd_addr = (sp - 16) & ~(uint64_t)0xF;
+  uint64_t auxv_addr = (rnd_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
+  uint64_t arrays = (uint64_t)(argc + 1) * 8 + (uint64_t)(envc + 1) * 8;
+  uint64_t argv_addr = (auxv_addr - arrays) & ~(uint64_t)0x7;
+  if ((argv_addr & 0xF) == 0) argv_addr -= 8; /* argv[0] must be 8 mod 16 */
+  uint64_t envp_addr = argv_addr + (uint64_t)(argc + 1) * 8;
+
+  uint8_t rnd[16];
+  net_get_random_bytes(rnd, 16);
+  if (vm_kwrite(child, rnd_addr, rnd, 16) != 0) return -EFAULT;
+
+  w[0] = 6;                        /* AT_PAGESZ */
+  w[1] = 4096;
+  w[2] = 3;                        /* AT_PHDR   */
+  w[3] = phdr;
+  w[4] = 5;                        /* AT_PHNUM  */
+  w[5] = (uint64_t)phnum;
+  w[6] = 9;                        /* AT_ENTRY  */
+  w[7] = entry;
+  w[8] = 7;                        /* AT_BASE: 0 for a static image */
+  w[9] = 0;
+  w[10] = 25;                      /* AT_RANDOM */
+  w[11] = rnd_addr;
+  w[12] = 31;                      /* AT_EXECFN: argv[0], what /proc/self/exe
+                                      answers for a static binary */
+  w[13] = name_addr;
+  w[14] = 0;                       /* AT_NULL */
+  w[15] = 0;
+  if (vm_kwrite(child, auxv_addr, w, 16 * 8) != 0) return -EFAULT;
+  if (vm_kwrite(child, argv_addr, argp, (int)((argc + 1) * 8)) != 0)
+    return -EFAULT;
+  if (vm_kwrite(child, envp_addr, envp, (int)((envc + 1) * 8)) != 0)
+    return -EFAULT;
+
+  sp = argv_addr - 8;
+  uint64_t argcw = (uint64_t)argc;
+  if (vm_kwrite(child, sp, &argcw, 8) != 0) return -EFAULT;
+
+  process_set_entry(pid, entry, sp);
+  return 0;
+}
+
 /* The v2 loader body, shared by spawn2 (ex == 0) and spawn_ex (ex != 0).
  * Returns the child pid or -errno; the spawn2 wrapper below maps a
  * negative result back to the historical -1 so existing callers see the
@@ -785,30 +924,51 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   uint64_t elf_entry = 0;
   uint64_t elf_phdr = 0;
   uint32_t elf_phnum = 0;
+  uint64_t elf_sp = USER_MAIN_STK_TOP_V2;
+  uint64_t elf_interp_base = 0;
+  int elf_native = 0;
   if (is_elf) {
-#ifdef __x86_64__
-    /* ELF mapper: parse + plan + map.  On success *elf_entry = base+e_entry
-       and the process below is marked PROC_FLAG_LINUX_ABI. */
-    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, &elf_entry,
-                              &elf_phdr, &elf_phnum);
+    /* M0 freeze (docs/shared-libs.md §4 lane B): which track does this image
+       belong to?  On x86_64, a PT_INTERP naming the native interpreter
+       (/LDHOBBY.SO) is a native dynamically linked program; EVERY other image
+       — in particular every Linux compat binary — stays on the Linux-ABI path,
+       which still refuses PT_INTERP with ELF_ERR_INTERP and the same serial
+       message.  aarch64 has no compat track, so every ELF there is native. */
+    uint32_t lflags = 0;
+#if defined(__x86_64__)
+    if (elf_loader_probe_native(f.fat16.entry.start_cluster, fsize) == 1)
+      lflags = ELF_LOAD_NATIVE;
+#else
+    lflags = ELF_LOAD_NATIVE;
+#endif
+    struct elf_load_info elf_info;
+    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, lflags,
+                              &elf_info);
     fat16_close(&f);
     if (erc != 0) {
       process_free(pid);
-      return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC */
+      return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC / -ENOENT */
     }
-#else
-    /* GB-137 clause 4: the aarch64 ELF mapper is not implemented.  The old
-       code left the magic peek inside #ifdef __x86_64__, so on ARM a 0x7fELF
-       image fell through to the flat .bin mapper and was executed at
-       USER_IMG_BASE as if it were flat (measured 2026-11-01: A64BAD.BIN
-       "loaded", then faulted at ELR=0x1000000000).  Refuse it by name
-       instead of silently skipping the ELF path. */
-    uart_puts("elf loader: aarch64 ELF images are not implemented on ARM -- "
-              "refusing by name (flat .bin only)\n");
-    fat16_close(&f);
-    process_free(pid);
-    return -ENOEXEC;
-#endif
+    elf_entry = elf_info.entry;
+    elf_phdr = elf_info.phdr;
+    elf_phnum = elf_info.phnum;
+    elf_sp = elf_info.sp;
+    elf_native = elf_info.native;
+    elf_interp_base = elf_info.interp_base;
+    if (elf_info.interpreted) {
+      /* One line of evidence that the interpreter path ran: the gate reads it
+         from the serial log instead of re-deriving it from the source. */
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "elf loader: PT_INTERP mapped: interp_base=");
+      kl_hex(&k, elf_info.interp_base);
+      kl_s(&k, " exe_base=");
+      kl_hex(&k, elf_info.base);
+      kl_s(&k, " entry=");
+      kl_hex(&k, elf_entry);
+      kl_c(&k, '\n');
+      kl_emit(&k);
+    }
   } else if (v2_map_image(as, &f, fsize) != 0) {
     fat16_close(&f);
     process_free(pid);
@@ -873,10 +1033,12 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     process_free(pid);
     return -ENOMEM;
   }
-  if (is_elf) {
+  if (is_elf && !elf_native) {
     /* GB-013: the ELF mapper set the runtime entry (base+e_entry).  Mark the
        process Linux-ABI so its x86_64 syscall traps route to the compat table
-       (GB-014). */
+       (GB-014).  Only the COMPAT track gets this flag: a native dynamically
+       linked program (PT_INTERP) uses HobbyOS syscalls, and marking it would
+       send every call through the Linux table. */
     child->abi_flags |= PROC_FLAG_LINUX_ABI;
     /* GB-078 (2026-10-21): a Linux program reads its arguments from the STACK,
        per the SysV AMD64 process-initialization contract: at _start %rsp points
@@ -889,46 +1051,29 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        So: lay the block down and point %rsp at argc. The stack is already
        prefaulted above, and vm_kwrite self-validates each page, so this is a
        placement rather than an allocation. */
-    uint64_t stk_top = USER_MAIN_STK_TOP_V2;
-    const char *nm = child->name[0] ? child->name : "PROGRAM";
-    int nlen = 0;
-    while (nm[nlen]) nlen++;
-    uint64_t name_addr = (stk_top - 8 - (uint64_t)nlen) & ~(uint64_t)0xF;
-    /* argc, argv[0], argv NULL, envp NULL, AT_PAGESZ, 4096,
-       AT_PHDR, phdr, AT_PHNUM, phnum, AT_ENTRY, entry, AT_BASE, 0, AT_NULL, 0.
-       The first four pairs were the original block; musl's _start also reads
-       AT_PHDR/AT_PHNUM/AT_ENTRY to locate its own program headers, and with them
-       absent it dereferenced small offsets (measured: fault at VA=0x210). */
-    uint64_t w[16];
-    w[0] = 1;
-    w[1] = name_addr;
-    w[2] = 0;
-    w[3] = 0;
-    w[4] = 6;                       /* AT_PAGESZ */
-    w[5] = 4096;
-    w[6] = 3;                       /* AT_PHDR   */
-    w[7] = elf_phdr;
-    w[8] = 5;                       /* AT_PHNUM  */
-    w[9] = (uint64_t)elf_phnum;
-    w[10] = 9;                      /* AT_ENTRY  */
-    w[11] = elf_entry;
-    w[12] = 7;                      /* AT_BASE: 0 for a static image */
-    w[13] = 0;
-    w[14] = 0;                      /* AT_NULL */
-    w[15] = 0;
-    uint64_t blk = (name_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
-    if (vm_kwrite(child, blk, w, (int)sizeof w) != 0 ||
-        vm_kwrite(child, name_addr, nm, nlen + 1) != 0) {
+    /* GB-164: one helper owns the whole block (argv/envp from the PCB blobs,
+       auxv, %rsp).  Two measured walls live in its comment: musl needs
+       AT_RANDOM (GB-163) and a real program needs its own argv/envp (Doom's
+       "-iwad" and DISPLAY). */
+    if (compat_stack_block(child, pid, elf_entry, elf_phdr, elf_phnum) != 0) {
       uart_puts("v2 loader: startup block write failed\n");
       process_free(pid);
       return -EFAULT;
     }
-    process_set_entry(pid, elf_entry, blk);
+  } else if (is_elf) {
+    /* Native track (static ET_DYN or PT_INTERP): arguments come from the PCB
+       via SYS_GETARGS, not from an auxv block, so the stack is plain top-of-
+       stack.  The interpreter (if any) starts at interp_base + its e_entry and
+       reads struct hb_start at USER_START_BASE; the kernel passes no registers. */
+    process_set_entry(pid, elf_entry, elf_sp);
   } else {
     process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2 - 8);
   }
 #else
-  process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2);
+  if (is_elf)
+    process_set_entry(pid, elf_entry, elf_sp);
+  else
+    process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2);
 #endif
   {
     struct kline kl;
@@ -949,6 +1094,13 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        re-deriving whether the member went through elf_loader_load. */
     kl_s(&kl, " abi=");
     kl_hex(&kl, (unsigned long)child->abi_flags);
+    /* M0 freeze: which track the ELF took, and where the interpreter landed
+       (0 = none).  Read straight from the loader's report, so a gate never has
+       to re-derive whether PT_INTERP was honoured. */
+    kl_s(&kl, " native=");
+    kl_i(&kl, (long)elf_native);
+    kl_s(&kl, " interp=");
+    kl_hex(&kl, (unsigned long)elf_interp_base);
     kl_s(&kl, "\n");
     kl_emit(&kl);
   }

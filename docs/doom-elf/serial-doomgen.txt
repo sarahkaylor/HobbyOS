@@ -1,0 +1,33 @@
+[XSESS] IceWM session launcher starting
+[XSESS] WARN /dev/null did not land on fd 0 (got 3)
+[XSESS] children's stdout/stderr relayed to the console (pipe fd 9)
+[XSESS] env: 3 line(s) from /X11/XSESSION.ENV
+[XSESS] dir ok: /tmp
+[XSESS] dir created: /tmp/.X11-unix
+[XSESS] spawned /XHOBBY.BIN pid=3
+[XSESS] waiting for /tmp/.X11-unix/X0 (named AF_UNIX connect probe)
+[XSESS] server ready after ~0 ms
+[XSESS] no-WM mode (XSESS_NO_WM=1): server + autostart only
+[XSESS] XSTART: /DOOM.ELF
+[XSESS] spawned /DOOM.ELF pid=5
+[XSESS] XSTART: spawned 1 program(s)
+[XSESS] session running
+[X] _XSERVTransmkdir: Mode of /tmp/.X11-unix should be set to 1777
+[X] _XSERVTransmkdir: this may cause subsequent errors
+[X]                            Doom Generic 0.1
+[X] Z_Init: Init zone memory allocation daemon. 
+[X] zone memory: 0x108010c080, 600000 allocated for zone
+[X] Using . for configuration and saves
+[X] V_Init: allocate screens.
+[X] M_LoadDefaults: Load system defaults.
+[X] saving config in .default.cfg
+[X] W_Init: Init WADfiles.
+[X]  adding /DOOM1.WAD
+[X] Using ./.savegame/ for savegames
+[X] ===========================================================================
+[X]                             DOOM Shareware
+[X] ===========================================================================
+[X]  Doom Generic is free software, covered by the GNU General Public
+[X]  License.  There is NO warranty; not even for MERCHANTABILITY or FITNESS
+[X]  FOR A PARTICULAR PURPOSE. You are welcome to change and distribute
+  RDI: 0x00000010802BAF6F  RSI: 0x0000000000000006  RBP: 0x00000000[X]7 5 3cEo0p9i5e0s 

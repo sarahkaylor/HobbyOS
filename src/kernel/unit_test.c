@@ -59,6 +59,7 @@ void run_all_unit_tests(void) {
   smp_test_suite();
   time_test_suite();
   math_test_suite();
+  elf_loader_test_suite(); /* docs/shared-libs.md lane B (empty until it lands) */
 
   uart_puts("==================================\n");
   uart_puts("Tests run:    "); print_int(tests_run); uart_puts("\n");

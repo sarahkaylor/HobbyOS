@@ -569,6 +569,41 @@ void main(void) {
             "open; app + static-PIE ELF props proven on host by "
             "sdl_test_app_test_host)\n");
 #endif
+#elif defined(KERNEL_MODE_DYN_TEST)
+  /* docs/shared-libs.md §10: boot every program tools/dyn-migrate.sh converted.
+   * One process each, no arguments: the smoke is "does it start, trap, and
+   * exit without a fault" — an argument-hungry tool prints usage or reads a
+   * closed stdin and exits, which is exactly the path we want exercised. */
+  uart_puts("Mode: DYN_TEST - booting converted userland\n");
+  {
+#include "dyn_list.h"
+    unsigned nd = (unsigned)(sizeof(dyn_smoke_names) / sizeof(dyn_smoke_names[0]));
+    for (unsigned i = 0; i < nd; i++) {
+      if (!dyn_smoke_names[i][0])
+        continue;
+      uart_puts("dyn_test: ");
+      uart_puts(dyn_smoke_names[i]);
+      uart_puts("\n");
+      load_and_run_program_in_scheduler(dyn_smoke_names[i], -1, -1, -1, -1);
+    }
+  }
+#elif defined(KERNEL_MODE_SO_TEST)
+  /* docs/shared-libs.md §5.5 pilot: boot ONLY HDYN.BIN, which is an ET_DYN
+     executable whose PT_INTERP is /LDHOBBY.SO.  The kernel maps the program,
+     maps the interpreter into USER_LIB slot 0, writes struct hb_start and
+     enters the interpreter; the interpreter maps LIBC.SO and jumps to the
+     program.  One program only, so the first failure is the first thing on
+     the serial log. */
+  uart_puts("Mode: SO_TEST - booting the dynamic-linking pilot HDYN.BIN\n");
+  load_and_run_program_in_scheduler("HDYN.BIN", -1, -1, -1, -1);
+  /* The first REAL conversion: `ls`, same source, no static libc (7 KB vs
+   * 46 KB).  Loading it alongside the pilot also makes the shared page cache
+   * observable end to end — two processes mapping the same LIBC.SO. */
+  load_and_run_program_in_scheduler("LSDYN.BIN", -1, -1, -1, -1);
+  /* cat, dynamically linked, reading a real file — and the third mapper of
+   * LIBC.SO, which is what makes the page-cache evidence (file_obj.c "so
+   * cache: ... refs=N") meaningful. */
+  load_and_run_program_in_scheduler_args("CATDYN.BIN", -1, -1, -1, -1, "E2E.TXT");
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

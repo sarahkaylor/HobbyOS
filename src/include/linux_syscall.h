@@ -51,6 +51,29 @@
 #define L_SYS_nanosleep 35
 #define L_SYS_getitimer 36
 
+/* --- sockets: the AF_UNIX transport an X11 client (libX11's Xtrans) talks
+ * over.  The numbers are the x86_64 ones (probe-measured, docs/linux-abi.md
+ * §4): 41..55 are one contiguous run, accept4 is 288 and the msg-passing
+ * pair is 46/47.  The handlers live in src/kernel/linux_compat_fd.c and
+ * translate onto the native unix-socket engine (src/kernel/unix.c) — they
+ * are not a second socket stack. */
+#define L_SYS_socket 41
+#define L_SYS_connect 42
+#define L_SYS_accept 43
+#define L_SYS_sendto 44
+#define L_SYS_recvfrom 45
+#define L_SYS_sendmsg 46
+#define L_SYS_recvmsg 47
+#define L_SYS_shutdown 48
+#define L_SYS_bind 49
+#define L_SYS_listen 50
+#define L_SYS_getsockname 51
+#define L_SYS_getpeername 52
+#define L_SYS_socketpair 53
+#define L_SYS_setsockopt 54
+#define L_SYS_getsockopt 55
+#define L_SYS_accept4 288
+
 /* --- process / scheduling ------------------------------------------------- */
 #define L_SYS_getpid 39
 #define L_SYS_clone 56
@@ -86,8 +109,20 @@
 #define L_SYS_getegid 108
 #define L_SYS_setpgid 109
 #define L_SYS_getppid 110
+/* sigaltstack(2) and setrlimit(2) sit in the same 100..200 band as the rest
+   of the identity/limit rows on x86_64 (131 / 160). */
+#define L_SYS_sigaltstack 131
 #define L_SYS_arch_prctl 158
+#define L_SYS_setrlimit 160
 #define L_SYS_gettid 186
+/* tkill(2): musl's raise() uses tkill(tid, sig), not tgkill — an ENOSYS here
+   makes raise()/abort() silently do nothing. */
+#define L_SYS_tkill 200
+/* set_tid_address(2): musl's __init_tp stores its result as the thread id and
+   pthread_join/exit paths read it back.  ENOSYS is survivable for a
+   single-threaded program but leaks a negative tid into musl's own TLS, so the
+   compat layer answers it (returns the process's pid). */
+#define L_SYS_set_tid_address 218
 
 /* --- threads / signals / time / ipc --------------------------------------- */
 #define L_SYS_rt_sigaction 13
@@ -172,6 +207,14 @@
 #define L_MAP_PRIVATE 0x02
 #define L_MAP_FIXED 0x10
 #define L_MAP_ANONYMOUS 0x20
+/* mmap flag bits the memory lane needs and the measured set above lacks.
+   Values are Linux x86_64's (sys/mman.h); MAP_NORESERVE is a no-op on
+   HobbyOS (every page is demand-zero) but is recorded on the region. */
+#define L_MAP_NORESERVE 0x4000
+#define L_MAP_FIXED_NOREPLACE 0x100000
+/* mremap(2) flags (linux/mman.h). */
+#define L_MREMAP_MAYMOVE 0x01
+#define L_MREMAP_FIXED 0x02
 
 #define L_SEEK_SET 0
 #define L_SEEK_CUR 1
@@ -237,7 +280,24 @@
 #define L_DT_CHR 2
 
 /* --- rlimit (docs §3) --------------------------------------------------- */
+/* getrlimit/setrlimit/prlimit64 resource ids (Linux numbers).  NOFILE is the
+   fd table (MAX_OPEN_FDS); STACK is the demand-paged 8 MiB main stack. */
+#define L_RLIMIT_STACK 3
 #define L_RLIMIT_NOFILE 7
+/* RLIM_INFINITY: the "no limit" value the kernel reports for a resource it
+   does not model.  0xFFFFFFFFFFFFFFFF, i.e. (rlim_t)-1. */
+#define L_RLIM_INFINITY (~0ULL)
+
+/* --- rusage who (getrusage) --------------------------------------------- */
+#define L_RUSAGE_SELF 0
+#define L_RUSAGE_CHILDREN (-1)
+
+/* --- times(2): the kernel clock tick (USER_HZ on Linux x86_64) ---------- */
+#define L_CLK_TCK 100
+
+/* --- *at() flags (newfstatat / faccessat / readlinkat) ------------------ */
+#define L_AT_SYMLINK_NOFOLLOW 0x100
+#define L_AT_EMPTY_PATH 0x1000
 
 #define L_ELFMAG_0 0x7F
 
