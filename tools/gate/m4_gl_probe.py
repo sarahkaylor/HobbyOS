@@ -98,6 +98,15 @@ def ensure_pins():
 
 def build_libgl():
     out = os.path.join(ROOT, "obj", "mesa", "lib", "libGL.so.1")
+    # libGL has no DT_NEEDED: its libX11/libXext symbols must exist in the
+    # process AND in the audit's copy of the shim.  Rebuild the compat DSOs
+    # FIRST, or a merged tree with a newer libx11.c audits libGL against the
+    # stale obj/xcompat/libX11.so.6 and fails with "undefined symbols the
+    # compat process cannot provide" (measured on the wave-3 merge).
+    r = run(["make", "ARCH=intel", "xcompat_dsos"], cwd=ROOT,
+            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    if r.returncode != 0:
+        raise SystemExit("m4: xcompat_dsos build failed")
     if SKIP_BUILD and os.path.exists(out):
         log(f"m4: reusing {out} (M4_SKIP_BUILD=1)")
     else:
