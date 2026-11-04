@@ -2,15 +2,29 @@
 """tools/gate/m4_gl_probe.py -- the M4 in-guest gate.
 
 Proves, in one boot of the REAL kernel, that the cross-built Mesa libGL.so.1
-loads inside a Linux-ABI compat process and gives it a working GL 3.3 core
-context: the probe dlopen()s it, asks for 3.3 core, compiles a GLSL-330 shader
-pair, draws a triangle into an FBO, reads the pixels back and prints a checksum.
+loads inside a Linux-ABI compat process, gives it a working GL 3.3 core
+context, and puts a frame on the desktop:
+
+  * the probe dlopen()s the DSO, asks for 3.3 core, compiles a GLSL-330 shader
+    pair, draws a triangle into an FBO and prints an fnv1a64 of the readback
+    (renderer identity: the guest number equals the host number);
+  * it then creates a real window through the compat libX11, waits for the
+    desktop's content rect, makes the context current on it, draws, calls
+    glXSwapBuffers and reads the SAME rect back out of /dev/fb0 -- the surface
+    the desktop scans out -- and compares it pixel for pixel against the GL
+    back buffer (only the desktop re-stamped mouse pointer may differ);
+  * it holds the window for 6 s so this harness can screendump the presented
+    frame, then tears the stack down layer by layer (glXMakeCurrent(None),
+    glXDestroyContext, XCloseDisplay, dlclose) and exits 0.
 
 Steps (mirroring tools/gate/m3_x11_client.py, which this gate extends):
 
   1. extract the pinned glibc 2.31 runtime + dev headers (sha256-checked);
-  2. build libGL.so.1 with tools/mesa/build-hobbyos.sh (the script itself
-     verifies the Mesa pin and audits every undefined symbol against the pin);
+  2. rebuild the xcompat DSOs, then build libGL.so.1 with
+     tools/mesa/build-hobbyos.sh (the script itself verifies the Mesa pin,
+     audits every undefined symbol against the pin, and fails if the DSO loses
+     DF_1_NODELETE -- a client that dlclose()s a DSO holding Mesa's
+     process-global atexit() handlers would otherwise crash in exit());
   3. build src/user/gl_probe.c as an ordinary glibc PIE whose DT_NEEDED are
      libX11.so.6/libdl.so.2/libc.so.6 -- the same shape as the game binary;
   4. build the kernel + disk for the native desktop (MODE=desktop);
@@ -19,12 +33,16 @@ Steps (mirroring tools/gate/m3_x11_client.py, which this gate extends):
      /GLPROBE.BIN (real sonames; LFN open is measured working, M1);
   6. boot with QMP, wait for the desktop's [MENU] dump, launch GLPROBE.BIN with
      real key events (F1, End, Up*N, Enter), wait for the probe's rows;
-  7. grade the serial log: GL_VERSION must be 3.3 (Core Profile), GL_RENDERER
-     must name the software driver, the readback must have a checksum and a
-     covered triangle, and the probe must exit 0.  Then copy /GLPROBE.PPM off
-     the image so the frame itself is inspectable.
+  7. screendump the desktop while the probe holds its window;
+  8. grade the serial log: GL_VERSION must be 3.3 (Core Profile), GL_RENDERER
+     must name the software driver, the FBO readback must have a checksum and a
+     covered triangle, the swap must return, the desktop rect must match the
+     presented frame, every teardown row must be present and the probe must
+     exit 0.  Then copy /GLPROBE.PPM and /GLDESK.PPM off the image so both the
+     FBO frame and the desktop's own pixels are inspectable.
 
-Evidence is the serial log (plus the PPM); a build result is not a verdict.
+Evidence is the serial log + the desktop screenshot + the PPMs; a build result
+is not a verdict.
 """
 import hashlib
 import json
@@ -124,7 +142,7 @@ def build_libgl():
             tail = "\n".join(open(b, errors="ignore").read().splitlines()[-25:])
             raise SystemExit("m4: libGL BUILD FAILED\n" + tail)
         for line in open(b, errors="ignore").read().splitlines():
-            if re.search(r"(DT_NEEDED|exports|undefined|audit|TLS model|size):", line):
+            if re.search(r"(DT_NEEDED|exports|undefined|audit|TLS model|size|df_1):", line):
                 log("    " + line.strip())
     if not os.path.exists(out):
         raise SystemExit(f"m4: {out} missing after the build")
@@ -349,9 +367,15 @@ def main():
 
         started, _ = wait_serial("[GL] probe start", 60)
         log("[INFO] launch marker: " + ("seen" if started else "MISSING"))
-        # No swap: the present path is still open (see the probe's step 9), so
-        # there is no held frame to screendump.  The evidence is the readback
-        # rows plus /GLPROBE.PPM, which this harness copies off the image.
+        # The probe holds its window for 6 s after the swap, so this screendump
+        # is a picture of the presented frame on the real desktop -- the M4
+        # receipt that a build log or an FBO readback cannot give.
+        held, _ = wait_serial("[GL] hold start", RUN_TIMEOUT)
+        log("[INFO] window hold: " + ("seen" if held else "MISSING"))
+        time.sleep(0.7)
+        p = os.path.join(SHOT_DIR, "03_window.ppm")
+        q.shot(p)
+        shots["window"] = p
         done, _ = wait_serial("[GL] done rc=", RUN_TIMEOUT)
         log("[INFO] probe finished: " + ("yes" if done else "NO"))
         time.sleep(1)
@@ -372,13 +396,19 @@ def main():
         mren = next((l for l in rows if "GL_RENDERER" in l), "")
         msum = next((l for l in rows if "fnv1a64=" in l and "readback" in l), "")
         mdone = next((l for l in rows if "[GL] done rc=" in l), "")
+        mswap = next((l for l in rows if "[GL] swap returned" in l), "")
+        mfb = next((l for l in rows if "desktop rect" in l and "fnv1a64=0x" in l), "")
+        mdiff = next((l for l in rows if "[GL] pixel diff:" in l), "")
+        mtorn = next((l for l in rows if "[GL] teardown: clean" in l), "")
         ok = ("3.3" in mver and "Core Profile" in mver
               and "softpipe" in mren
               and "fnv1a64=0x" in msum
+              and mswap and "fnv1a64=0x" in mfb and mdiff and mtorn
               and "done rc=0" in mdone)
         log("")
-        log("m4: PASS — libGL.so.1 loaded in the guest and rendered a GL 3.3 "
-            "core triangle" if ok else "m4: FAIL — see the rows above")
+        log("m4: PASS — libGL.so.1 loaded in the guest, rendered a GL 3.3 core "
+            "triangle, PRESENTED it to a window, and tore the stack down"
+            if ok else "m4: FAIL — see the rows above")
         return 0 if ok else 1
     finally:
         try:
@@ -394,21 +424,23 @@ def main():
             subprocess.run(["convert", p, png], stderr=subprocess.DEVNULL)
             log(f"m4: screenshot {name}: {png}")
         # Pull the probe's own PPM off the image: the frame, not a screenshot.
-        ppm = os.path.join(BUILD, "glprobe.ppm")
-        if os.path.exists(ppm):
-            os.remove(ppm)
-        r = subprocess.run(["mcopy", "-o", "-i", IMG, "::/GLPROBE.PPM", ppm],
-                           capture_output=True, text=True)
-        if r.returncode == 0 and os.path.exists(ppm):
-            log(f"m4: guest readback image: {ppm} "
-                f"({os.path.getsize(ppm)} bytes)")
-            png = ppm[:-4] + ".png"
-            subprocess.run(["convert", ppm, png], stderr=subprocess.DEVNULL)
-            if os.path.exists(png):
-                log(f"m4: guest readback png: {png}")
-        else:
-            log("m4: note: /GLPROBE.PPM was not on the image "
-                "(root not writable, or the probe did not reach the write)")
+        for name, dst in (("GLPROBE.PPM", "glprobe.ppm"),
+                          ("GLDESK.PPM", "gldesk.ppm")):
+            ppm = os.path.join(BUILD, dst)
+            if os.path.exists(ppm):
+                os.remove(ppm)
+            r = subprocess.run(["mcopy", "-o", "-i", IMG, "::/" + name, ppm],
+                               capture_output=True, text=True)
+            if r.returncode == 0 and os.path.exists(ppm):
+                log(f"m4: guest image {name}: {ppm} "
+                    f"({os.path.getsize(ppm)} bytes)")
+                png = ppm[:-4] + ".png"
+                subprocess.run(["convert", ppm, png], stderr=subprocess.DEVNULL)
+                if os.path.exists(png):
+                    log(f"m4: guest image png: {png}")
+            else:
+                log(f"m4: note: /{name} was not on the image "
+                    "(root not writable, or the probe did not reach the write)")
 
 
 if __name__ == "__main__":
