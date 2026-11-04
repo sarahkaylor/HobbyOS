@@ -141,12 +141,38 @@ int load_and_run_program(const char* filename) {
   return -1;
 }
 
+/* M2 stdio (docs/rimworld-plan.md §M2): give a freshly created child a real
+ * file object behind every unassigned stdio fd.  A bare fd NUMBER is not an
+ * fd: Mono's System.Console ctor wraps fd 0/1/2 in FileStream(IntPtr), whose
+ * ctor fstat()s the handle, and an unassigned slot answers EBADF -- surfacing
+ * as `ArgumentException: handle / Parameter name: Invalid` from
+ * System.Console..cctor before the first managed statement (measured on mono
+ * 6.12: OpenStandardOutput, fd 1).  /dev/console reads EOF (like `< /dev/null`)
+ * and writes through console_write_user(), so batch programs behave the same
+ * as before while the descriptor is now a real char device.
+ *
+ * MUST run with no `parent` in scope: boot-wave loads pass caller_pid = -1 and
+ * therefore have no parent at all -- the fd 1/2 assignment used to live inside
+ * `if (parent && child)` and the wave never got it. */
+static void child_ensure_console_stdio(struct process *child) {
+  if (!child) return;
+  for (int fd = 0; fd <= 2; fd++) {
+    if (child->open_fds[fd] != -1) continue;
+    int nf = file_open(child, "/dev/console", 2 /* O_RDWR */);
+    if (nf < 0) return; /* out of fds: fd 1/2 still fall back to the console */
+    /* file_open only allocates slots >= FD_STDIO_FIRST, so nf is never 0..2.
+       Move the reference (do NOT bump num_open_fds again: file_open already
+       counted it once for this slot). */
+    child->open_fds[fd] = child->open_fds[nf];
+    child->open_fds[nf] = -1;
+  }
+}
+
 /**
  * Loads a program from the FAT16 filesystem into a new process's memory and
- * registers it with the scheduler.
- *
- * Parameters:
- *   filename - The name of the binary to load.
+ * registers it with the scheduler.  Every unassigned stdio fd gets the
+ * /dev/console node (see child_ensure_console_stdio), including boot-wave
+ * loads, which have no parent.
  *
  * Returns:
  *   The PID of the new process, or -1 on failure.
@@ -387,22 +413,14 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
     }
   }
 
-  /* Every spawned program gets a real stdin.  Without one, fd 0 stays
+  /* Every spawned program gets real stdio.  Without it, fd 0/1/2 stay
      unassigned (-1) and Mono's System.Console ctor dies before running a
-     single managed statement: FileStream(IntPtr handle) calls fstat(0), gets
-     EBADF and throws ArgumentException "handle: Invalid", which surfaces as
-     TypeInitializationException for System.Console (measured on mono 6.12:
-     the stack trace showed Console..cctor -> OpenStandardInput -> FileStream).
-     /dev/null reads EOF forever -- the same thing `< /dev/null` gives on
-     Linux, and exactly what a batch-run program wants. */
-  if (child && child->open_fds[0] == -1) {
-    int nf = file_open(child, "/dev/null", 0);
-    if (nf > 0 && child->open_fds[nf] != -1) {
-      child->open_fds[0] = child->open_fds[nf];
-      child->open_fds[nf] = -1;
-      child->num_open_fds++;
-    }
-  }
+     single managed statement: FileStream(IntPtr handle) calls fstat() on the
+     bare fd number, gets EBADF and throws ArgumentException ("handle",
+     "Invalid"), which surfaces as TypeInitializationException for
+     System.Console (measured on mono 6.12).  The console node reads EOF and
+     writes to the serial sink, so batch behavior is unchanged. */
+  child_ensure_console_stdio(child);
 
   /* SysV AMD64 ABI (browser.md F1.5): at the first instruction of a
      function RSP must be 16n+8 — the caller's return address occupies the
@@ -1046,21 +1064,6 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
 
   }
 
-    /* Every v2 child gets a real stdin.  Mono's System.Console ctor opens fd 0
-     * through FileStream(handle), which fstat()s it and throws
-     * ArgumentException "handle: Invalid" when the slot is unassigned — the
-     * whole managed program then dies in Console..cctor before its first
-     * statement (measured: mono 6.12 on HELLO.EXE).  /dev/null reads EOF
-     * forever, which is exactly `< /dev/null` on Linux. */
-    if (child->open_fds[0] == -1) {
-      int nf = file_open(child, "/dev/null", 0);
-      if (nf > 0 && child->open_fds[nf] != -1) {
-        child->open_fds[0] = child->open_fds[nf];
-        child->open_fds[nf] = -1;
-        child->num_open_fds++;
-      }
-    }
-
   struct file f;
   uint8_t *vfs_img = 0;
   uint32_t vfs_len = 0, vfs_pages = 0;
@@ -1238,6 +1241,14 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     process_free(pid);
     return -EBADF;
   }
+
+  /* M2 stdio: after ALL fd inheritance (spawn2's pipe wiring above and
+     spawn_ex's copy+map+sweep here), give every unassigned stdio slot a real
+     /dev/console file object.  This runs with caller_pid == -1 (boot wave, no
+     parent) too: the old fd-0-only /dev/null block was wiped by
+     spawn_ex_apply_fds, and fd 1/2 were never assigned at all when there was
+     no parent -- exactly the shape Mono's Console ctor rejects. */
+  child_ensure_console_stdio(child);
 
 #ifdef __x86_64__
   /* GB-068 follow-on: the stack is a DEMAND-ZERO region (VM_MAP_PRIVATE with

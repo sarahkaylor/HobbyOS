@@ -502,6 +502,31 @@ static void test_fs_devnull_devurandom(void) {
   int bad = file_open(cur, "/dev/no-such-node", 0x0);
   EXPECT_EQ(bad, -ENOENT);
 
+  /* M2 stdio: /dev/console is a real char device.  Mono's System.Console ctor
+     wraps each stdio fd in FileStream(IntPtr), which fstat()s the handle; a
+     bare fd number with no file object behind it throws ArgumentException
+     ("handle"/"Invalid") before the first managed statement.  So: fstat must
+     answer S_IFCHR|0644, read must be EOF, and lseek must be ESPIPE (a
+     non-seekable character device), not EBADF/EINVAL. */
+  int cfd = file_open(cur, "/dev/console", 0x2 /*O_RDWR*/);
+  EXPECT_EQ((cfd >= 0), 1);
+  struct k_stat cst;
+  int cerr = 0;
+  EXPECT_EQ(file_stat_fd(cur, cfd, &cst, &cerr), 0);
+  EXPECT_EQ((cst.st_mode & K_S_IFMT), K_S_IFCHR);
+  EXPECT_EQ((cst.st_mode & 07777), 0644);
+  EXPECT_EQ(file_read(cur, cfd, &c, 1, 0), 0); /* no input source: EOF */
+  cerr = 0;
+  EXPECT_EQ((int)file_seek(cur, cfd, 0, 0, &cerr), -1);
+  EXPECT_EQ(cerr, ESPIPE);
+  EXPECT_EQ(file_close(cur, cfd), 0);
+
+  /* fstat-by-path agrees with fstat-by-fd for the node. */
+  struct k_stat pst;
+  int perr = 0;
+  EXPECT_EQ(file_stat_path(cur, "/dev/console", &pst, &perr), 0);
+  EXPECT_EQ((pst.st_mode & K_S_IFMT), K_S_IFCHR);
+
   set_current_process_pid(0, old_pid);
 }
 

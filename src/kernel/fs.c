@@ -296,6 +296,12 @@ int file_open(struct process *cur, const char *filename, int flags) {
        compat ioctl route. */
     int isfb = (rest[0] == '/' && rest[1] == 'f' && rest[2] == 'b' &&
                 rest[3] == '0' && rest[4] == '\0');
+    /* M2 stdio: /dev/console, the character device the loader installs on
+       stdio.  Same shape as /dev/null on read/write; distinct type so fstat
+       can answer S_IFCHR (Mono's FileStream ctor fstat()s each stdio fd). */
+    int isconsole = (rest[0] == '/' && rest[1] == 'c' && rest[2] == 'o' &&
+                     rest[3] == 'n' && rest[4] == 's' && rest[5] == 'o' &&
+                     rest[6] == 'l' && rest[7] == 'e' && rest[8] == '\0');
     if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
       f->open_flags = (uint32_t)flags;
@@ -304,6 +310,9 @@ int file_open(struct process *cur, const char *filename, int flags) {
       f->open_flags = (uint32_t)flags;
     } else if (isfb) {
       f->type = FILE_TYPE_DEVFB;
+      f->open_flags = (uint32_t)flags;
+    } else if (isconsole) {
+      f->type = FILE_TYPE_CONSOLE;
       f->open_flags = (uint32_t)flags;
     } else {
       f->type = FILE_TYPE_EMPTY;
@@ -1408,7 +1417,9 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
     base = f->nfs.cursor;
     size = f->nfs.size;
   } else {
-    *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK)
+    *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK ||
+             f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL ||
+             f->type == FILE_TYPE_DEVFB)
                 ? ESPIPE : EINVAL;
     return -1;
   }
@@ -1512,6 +1523,22 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
        (measured host-side); readers must not size-gate it. */
     k_stat_fill(st, 0, K_S_IFREG | 0444, 0);
     return 0;
+  case FILE_TYPE_CONSOLE:
+    /* M2 stdio: a character device, 0644, size 0.  Mono's FileStream ctor
+       fstat()s each stdio handle and refuses anything that is not a real
+       file object (ArgumentException "handle"/"Invalid"); a char device is
+       exactly what Linux reports for a redirected-console fd. */
+    k_stat_fill(st, 0, K_S_IFCHR | 0644, 0);
+    return 0;
+  case FILE_TYPE_DEVNULL:
+    k_stat_fill(st, 0, K_S_IFCHR | 0666, 0);
+    return 0;
+  case FILE_TYPE_DEVURANDO:
+    k_stat_fill(st, 0, K_S_IFCHR | 0666, 0);
+    return 0;
+  case FILE_TYPE_DEVFB:
+    k_stat_fill(st, 0, K_S_IFCHR | 0644, 0);
+    return 0;
   default:
     *errp = EBADF;
     return -1;
@@ -1591,6 +1618,12 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
      (the host trace shows access("/proc/self/maps", F_OK) before the open). */
   if (fs_streq(path, "/proc/self/maps")) {
     k_stat_fill(st, 0, K_S_IFREG | 0444, 0);
+    return 0;
+  }
+  /* M2 stdio: the device nodes exist to stat()/access() too, not only to
+     open().  Linux reports /dev/console and /dev/null as char devices. */
+  if (fs_streq(path, "/dev/console") || fs_streq(path, "/dev/null")) {
+    k_stat_fill(st, 0, K_S_IFCHR | 0644, 0);
     return 0;
   }
   char abs[256];
@@ -1832,6 +1865,8 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return 0; /* /dev/null reads always yield EOF (0 bytes) */
+  } else if (f->type == FILE_TYPE_CONSOLE) {
+    return 0; /* /dev/console has no input source: EOF, like `< /dev/null` */
   } else if (f->type == FILE_TYPE_PROCMAPS) {
     return file_read_maps(cur, f, (char *)buf, size);
   } else if (f->type == FILE_TYPE_DEVURANDO) {
@@ -1900,6 +1935,8 @@ int file_available(struct process *cur, int fd) {
     /* IceWM M1: FIONREAD on a unix socket (Xtrans BytesReadable). */
     int a = usock_available(f->usock.ptr, f->usock.end);
     return a < 0 ? 0 : a;
+  } else if (f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL) {
+    return 0; /* no input source: always at EOF */
   }
   return -1;
 }
@@ -2012,6 +2049,10 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return size; /* /dev/null swallows any write, accepts it fully */
+  } else if (f->type == FILE_TYPE_CONSOLE) {
+    /* The same sink file_write's unassigned-fd 1/2 fallback uses, now behind
+       a real file object so fstat/dup/lseek on the fd behave like a device. */
+    return console_write_user(cur, buf, size);
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     return -EINVAL; /* writes to /dev/urandom are not supported (Linux EINVAL) */
   } else if (f->type == FILE_TYPE_FAT16) {
