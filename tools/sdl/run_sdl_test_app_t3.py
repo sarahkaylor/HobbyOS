@@ -96,6 +96,10 @@ def main():
     ap.add_argument("--key", default="a", help="QMP qcode to send (default: a)")
     ap.add_argument("--timeout", type=int, default=240)
     ap.add_argument("--outdir", default=None)
+    ap.add_argument("--no-build", action="store_true",
+                    help="use the existing obj/sdl_test_app_pie and disk.img "
+                         "as-is (deliberate A/B only: no rebuild, no freshness "
+                         "check). The default path builds both.")
     ap.add_argument("--no-gpu", action="store_true",
                     help="boot without the virtio-gpu device. On the merged "
                          "kernel the BGA/std-VGA path presents too, so this is "
@@ -120,34 +124,55 @@ def main():
     # obj/sdl_test_app_pie: the old script built the app only when the file was
     # absent, so it staged the pre-PR device-free binary — no `fb /dev/fb0`
     # line, the literal `ABS 00=512` echo, an instant exit (hence the
-    # screendump's Broken pipe) and blue=0.  Force the app, make the image
-    # current (disk.img depends on SDL_APP_PIE and stages it as
-    # /GAMES/SDLTEST.ELF), and refuse to boot a binary without the device path.
+    # screendump's Broken pipe) and blue=0.  GB-189: a worktree carrying a
+    # pre-#351 disk.img was the same failure one layer down.
+    #
+    # The default path force-builds the app and then hobbyos.elf + disk.img.
+    # Because disk.img depends on $(SDL_APP_PIE), force-building the app makes
+    # the image out of date, so the image is regenerated on every default run:
+    # a copied stale image cannot survive to the boot.  --no-build is the
+    # deliberate A/B opt-out and skips both.
     env = dict(os.environ, TOOLS_SKIP="1")
-    build_log = os.path.join(outdir, "build.log")
-    with open(build_log, "w") as bl:
-        for cmdline in (["make", "-B", "ARCH=intel", "MODE=test",
-                         "TOOLS_SKIP=1", APP],
-                        ["make", "-j", str(os.cpu_count() or 4),
-                         "ARCH=intel", "MODE=test", "TOOLS_SKIP=1",
-                         "hobbyos.elf", "disk.img"]):
-            r = subprocess.run(cmdline, env=env, stdout=bl,
-                               stderr=subprocess.STDOUT)
-            if r.returncode != 0:
-                print("run_sdl_test_app_t3: BUILD FAILED — " +
-                      " ".join(cmdline), flush=True)
-                print("".join(open(build_log, errors="ignore").read()
-                              .splitlines(True)[-30:]), flush=True)
-                return 2
-    with open(APP, "rb") as f:
-        if b"/dev/fb0" not in f.read():
-            print("run_sdl_test_app_t3: APPARATUS — the built app has no "
-                  "/dev/fb0 path; refusing to grade a device-free binary")
-            return 2
     head = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                           capture_output=True, text=True).stdout.strip()
-    print(f"run_sdl_test_app_t3: tree {head or '?'}, "
-          f"app {os.path.abspath(APP)}, build log {build_log}", flush=True)
+    if args.no_build:
+        missing = [p for p in (APP, "disk.img") if not os.path.exists(p)]
+        if missing:
+            print("run_sdl_test_app_t3: --no-build — missing "
+                  + ", ".join(missing) + "; nothing to grade")
+            return 2
+        print(f"run_sdl_test_app_t3: --no-build A/B, tree {head or '?'}, "
+              f"app {os.path.abspath(APP)} (no rebuild, no freshness check)",
+              flush=True)
+    else:
+        build_log = os.path.join(outdir, "build.log")
+        img_before = (os.path.getmtime("disk.img")
+                      if os.path.exists("disk.img") else None)
+        with open(build_log, "w") as bl:
+            for cmdline in (["make", "-B", "ARCH=intel", "MODE=test",
+                             "TOOLS_SKIP=1", APP],
+                            ["make", "-j", str(os.cpu_count() or 4),
+                             "ARCH=intel", "MODE=test", "TOOLS_SKIP=1",
+                             "hobbyos.elf", "disk.img"]):
+                r = subprocess.run(cmdline, env=env, stdout=bl,
+                                   stderr=subprocess.STDOUT)
+                if r.returncode != 0:
+                    print("run_sdl_test_app_t3: BUILD FAILED — " +
+                          " ".join(cmdline), flush=True)
+                    print("".join(open(build_log, errors="ignore").read()
+                                  .splitlines(True)[-30:]), flush=True)
+                    return 2
+        img_after = os.path.getmtime("disk.img")
+        print(f"run_sdl_test_app_t3: tree {head or '?'}, "
+              f"app {os.path.abspath(APP)}, disk.img "
+              f"{'REBUILT' if img_after != img_before else 'up to date'} "
+              f"(mtime {datetime.fromtimestamp(img_after, timezone.utc):%H:%M:%SZ}), "
+              f"build log {build_log}", flush=True)
+        with open(APP, "rb") as f:
+            if b"/dev/fb0" not in f.read():
+                print("run_sdl_test_app_t3: APPARATUS — the built app has no "
+                      "/dev/fb0 path; refusing to grade a device-free binary")
+                return 2
 
     cfg = os.path.join(outdir, "WAVE.CFG")
     with open(cfg, "w") as f:
