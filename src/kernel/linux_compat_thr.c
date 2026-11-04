@@ -1437,18 +1437,30 @@ static int l_thr_getcpu(struct process *p, struct trap_frame *tf) {
  *   frame+8    ucontext     uc_flags, uc_link, uc_stack[24], mcontext[256],
  *                           uc_sigmask[128]  (sizeof = 424)
  *   frame+432  siginfo_t    128 bytes
- *   frame+560  fpstate      512-byte FXSAVE image
- *   frame+1072 end
+ *   frame+568  fpstate      512-byte FXSAVE image
+ *   frame+1080 end
  *
- * At handler entry %rsp = frame, %rdi = signo, %rsi = &siginfo, %rdx = &uc.
- * The handler returns to pretcode, which does `mov $15,%rax; syscall`; that
- * reaches rt_sigreturn, which parses this frame back.
+ * ALIGNMENT: at handler entry %rsp = frame and **frame % 16 == 8**, exactly
+ * as Linux enters one (measured on the host with a naked handler: `%rsp & 15
+ * == 8`).  That is the x86-64 psABI's function-entry invariant (a `call`
+ * leaves rsp ≡ 8 mod 16), and GCC relies on it: a handler whose prologue
+ * spills with `movaps %xmm,0x30(%rsp)` takes #GP when the frame is 16-byte
+ * aligned.  Measured in the guest (L29): the launcher's SIGSEGV dump faulted
+ * at `movaps %xmm0,0x30(%rsp)` with Vector 13, and Unity's own crash handler
+ * died the same way.  So the frame starts 8 bytes BELOW a 16-byte boundary;
+ * the ucontext then lands on frame+8 (16-aligned, as Linux has it) and the
+ * FPSTATE moves to frame+568 to stay 16-aligned for FXSAVE/FXRSTOR.
+ *
+ * %rdi = signo, %rsi = &siginfo, %rdx = &uc at entry.  The handler returns
+ * to pretcode, which does `mov $15,%rax; syscall`; that reaches
+ * rt_sigreturn, which parses this frame back (rsp has popped the pretcode by
+ * then, so it re-derives frame = rsp - 8).
  */
 #define L_SF_PRETCODE 0
 #define L_SF_UC 8
 #define L_SF_INFO 432
-#define L_SF_FP 560
-#define L_SF_SIZE 1072
+#define L_SF_FP 568
+#define L_SF_SIZE 1088
 
 #define L_UC_FLAGS 0
 #define L_UC_LINK 8
@@ -1581,7 +1593,9 @@ static int l_sf_plant(struct process *p, struct process *cur,
   }
   if (sp < (uint64_t)L_SF_SIZE + 64)
     return 0;
-  uint64_t base = (sp - (uint64_t)L_SF_SIZE) & ~(uint64_t)15;
+  /* Linux enters a signal handler with rsp ≡ 8 (mod 16); see the layout
+     note above for why the frame must start 8 bytes below the boundary. */
+  uint64_t base = ((sp - (uint64_t)L_SF_SIZE) & ~(uint64_t)15) - 8;
   if (vm_touch(p, base, L_SF_SIZE, 1) != 0)
     return 0;
 
