@@ -16,20 +16,22 @@ measurements in §2 plus a parse of `libx11.c`.
 $ python3 src/user/xcompat/tools/gen_exports.py \
       --game /mnt/fast/games/steamapps/common/RimWorld
 required libX11 symbols : 129
-exported by the DSO     : 246 (78 IMPL, 168 STUB)
+exported by the DSO     : 256 (82 IMPL, 174 STUB)
 required but missing    : 0
 required ALSA symbols   : 19
 required pulse symbols  : 21 (exported by the shims: 25, missing: 0)
+required udev symbols   : 26 (exported by the shim: 50, missing: 0)
 ```
 
 Headline numbers:
 
 | DSO | required by the game | exported by our DSO | of the required: IMPL / PARTIAL / STUB |
 |---|---|---|---|
-| `libX11.so.6` | **129** | **246** | 47 / 4 / 78 |
+| `libX11.so.6` | **129** | **256** | 47 / 4 / 78 |
 | `libasound.so.2` | **19** | **19** | 0 / 0 / 19 (all "no device") |
 | `libpulse-simple.so.0` | **21** | **25** | 0 / 0 / 25 (all "no server"; the union is exported by both pulse sonames) |
 | `libpulse.so.0` | (reached through libpulse-simple's `DT_NEEDED` on a real host) | **25** (same source) | 0 / 0 / 25 |
+| `libudev.so.1` | **26** | **50** | 0 / 0 / 50 (all "zero devices"; 24 extras are NULL-safe public surface) |
 | `libXext`, `libXcursor`, `libXrandr`, `libXi`, `libXinerama`, `libXrender`, `libXfixes`, `libXss` | loaded by SDL, **out of scope here** | not built | see §6 — do **not** ship the real ones |
 
 ---
@@ -38,7 +40,7 @@ Headline numbers:
 
 **(a) `libX11.so.6`** — the Xlib ABI Unity's embedded SDL2 resolves at
 runtime. 129 names are *required* (the game will not take the X11 video
-driver if any one of them is missing); our DSO exports 243, because SDL also
+driver if any one of them is missing); our DSO exports 256, because SDL also
 probes a few paths it does not take on this build and because the shim needs
 its own helpers (`XDefaultScreen`, `XRootWindow`, … are macros in real Xlib
 but real symbols in a shared object).
@@ -52,6 +54,12 @@ libasound (§2.5); both sonames are built from one source
 (`pulse_null.c`) and export the same 25-symbol union, because the real
 `libpulse-simple` reaches the async API through its `DT_NEEDED` on
 `libpulse` and these shims deliberately carry no `DT_NEEDED` (§7.2).
+
+**(d) `libudev.so.1`** — 26 `udev_*` names, all answering "zero devices".
+This one is not about a device the game wants: it is about SDL_Init's
+*ordering*. The joystick stage runs after video and its failure makes SDL
+roll the video subsystem back, so a missing libudev costs the window, not
+the joystick (§2.6, §7.3).
 
 **Not in this file**: `libGL.so.1` / `libGLX.so.0` / `libEGL.so.1` /
 `libGLESv2.so.2` (lane L5 owns them, interface F5) and the X *extension*
@@ -180,6 +188,43 @@ handle would find holes. Both built sonames therefore carry the same 25
 exports: the 21 above plus `pa_simple_drain`, `pa_simple_flush` (SDL resolves
 the whole simple block at once), `pa_get_library_version` and
 `pa_context_errno`.
+
+### 2.6 libudev (the joystick stage that gates the video stage)
+
+```
+$ strings -a UnityPlayer.so | grep -E '^udev_' | sort -u
+26 symbols: udev_new udev_unref
+            udev_enumerate_new udev_enumerate_unref
+            udev_enumerate_add_match_subsystem udev_enumerate_add_match_property
+            udev_enumerate_scan_devices udev_enumerate_get_list_entry
+            udev_list_entry_get_next udev_list_entry_get_name
+            udev_device_new_from_syspath udev_device_new_from_devnum
+            udev_device_unref udev_device_get_action udev_device_get_devnode
+            udev_device_get_devnum udev_device_get_subsystem
+            udev_device_get_sysattr_value udev_device_get_property_value
+            udev_device_get_parent_with_subsystem_devtype
+            udev_monitor_new_from_netlink udev_monitor_unref
+            udev_monitor_enable_receiving udev_monitor_get_fd
+            udev_monitor_filter_add_match_subsystem_devtype
+            udev_monitor_receive_device
+```
+
+Three further strings match `^udev_` and are **not** symbols — they are the
+engine's own error text: `udev_new() failed`, `udev_enumerate_new() failed`,
+`udev_monitor_new_from_netlink() failed`. The generator filters them twice:
+the name must be `^udev_[a-z0-9_]+$`, and it must be exported by the host's
+real `libudev.so.1` (92 exports, measured), which is the same
+intersection-with-the-real-library rule the libX11 set uses.
+
+Nothing here is about joysticks in practice: HobbyOS has no `/dev/input` and
+no sysfs device tree. The reason the shim exists is that SDL's joystick
+stage runs *after* the video stage in `SDL_Init`, and its failure makes SDL
+roll back the subsystems it already started. Measured in the guest
+(`docs/rimworld-launch-log.md` §11.3): the two `XCloseDisplay` calls land
+immediately after the `libudev` `dlopen` failures, no second `XOpenDisplay`
+ever happens, and the player logs `Error getting num native displays: Video
+subsystem has not been initialized`. The shim's job is to make that stage
+succeed with an empty device list — §7.3 for why the monitor fd is a pipe.
 
 ---
 
@@ -377,6 +422,36 @@ mentions them, and the game finds them by the name it already asks for. On a
 guest that does not stage them the `dlopen` simply fails with `ENOENT`, which
 is the pre-shim behaviour — the shim is additive, never required.
 
+### 7.3 `libudev.so.1` — the monitor fd: pipe vs `-1` (host A/B)
+
+The only design question in this shim is what `udev_monitor_get_fd()` should
+answer. `udev_monitor_receive_device()` returning NULL is the documented
+"nothing pending" value and needs no measurement; the fd is different,
+because SDL stores it in its poll set (`udev_watch.fd`) and some SDL versions
+disable the watch outright when it is negative.
+
+Measured on the host, same game, same launcher, Xvfb `:77` at 800×600,
+55 s per run, `LD_LIBRARY_PATH` pointing at one shim build at a time:
+
+| variant | `Display 0` | `Initialize engine version` | `GfxDevice` | `Video subsystem … not initialized` |
+|---|---|---|---|---|
+| pipe read end (shipping build) | `Display 0 'screen': 1024x768 (primary device).` | yes | yes (`Renderer: llvmpipe (LLVM 21.1.8, 256 bits)`) | **absent** |
+| `-1` (measurement build, source `sed`-ed) | same line | yes | yes | **absent** |
+| control: `udev_new()` → NULL | **absent** | yes (after the error) | yes | **present, twice** |
+
+Both fd answers are tolerated by this SDL build — the two logs are the same
+22890 bytes, line for line, including `OPENGL LOG: Creating OpenGL 4.5
+graphics device`. The control is what makes the comparison meaningful: with
+a shim that refuses to produce a handle the host prints the guest's exact
+line, so the game in the two rows above is provably loading *this* DSO
+(`/proc/<pid>/maps` also resolves `libudev.so.1` to the `LD_LIBRARY_PATH`
+copy, checked with a `ctypes` probe).
+
+Choice: **the pipe**. It is the only variant that keeps "hotplug is enabled
+and being watched" true for every caller, costs two descriptors once per
+process, and cannot be mistaken for a failed watch by a caller that checks
+`fd < 0`. The `-1` build exists only as this measurement, not in the tree.
+
 ---
 
 ## 8. Protocol gaps (binding for the desktop/protocol lane)
@@ -412,10 +487,12 @@ make xcompat_exports_check
 make host_tests        # or: make -f src/user/xcompat/Makefile.inc xcompat_test_run
 ```
 
-`required-libx11.txt` / `required-alsa.txt` / `required-pulse.txt` are checked
-in, so steps 2 and 3 run on a tree with no game present. The pulse sets are
-checked by `make xcompat_pulse_check` (both sonames, all 21 names, and a
-`readelf -d` assertion that neither has a `DT_NEEDED` edge).
+`required-libx11.txt` / `required-alsa.txt` / `required-pulse.txt` /
+`required-udev.txt` are checked in, so steps 2 and 3 run on a tree with no
+game present. The pulse sets are checked by `make xcompat_pulse_check` (both
+sonames, all 21 names, and a `readelf -d` assertion that neither has a
+`DT_NEEDED` edge); the udev set by `make xcompat_udev_check` (26 names, no
+`DT_NEEDED`, and `SONAME == libudev.so.1`).
 
 ---
 
@@ -623,6 +700,7 @@ checked by `make xcompat_pulse_check` (both sonames, all 21 names, and a
 | `XListProperties` | STUB | returns `0` |
 | `XLowerWindow` | STUB | returns `0` |
 | `XMapWindow` | IMPL |  |
+| `XMissingExtension` | STUB | returns `0` |
 | `XMoveResizeWindow` | STUB | returns `0` |
 | `XNextEvent` | IMPL |  |
 | `XParseColor` | STUB | returns `1` |
@@ -675,7 +753,16 @@ checked by `make xcompat_pulse_check` (both sonames, all 21 names, and a
 | `XkbSetDetectableAutoRepeat` | STUB | returns `True` |
 | `XmbLookupString` | STUB | returns `XLookupString(ev, buf, n, ks, 0)` |
 | `XmbSetWMProperties` | STUB | returns `XSetWMProperties(d, w, n ? &tp : 0, 0, argv, argc, hints, wmh, ch)` |
+| `XmbTextListToTextProperty` | STUB | returns `-1` |
 | `Xutf8LookupString` | STUB | returns `XLookupString(ev, buf, n, ks, 0)` |
+| `_XEatData` | IMPL |  |
+| `_XFlush` | IMPL |  |
+| `_XFlushGCCache` | STUB | returns `0` |
+| `_XRead` | IMPL |  |
+| `_XReadPad` | STUB | returns `0` |
+| `_XReply` | STUB | returns `0` |
+| `_XSend` | STUB | returns `0` |
+| `_XSetLastRequestRead` | IMPL |  |
 
 ### (c) libasound.so.2 - the 19 symbols FMOD requires
 
@@ -737,4 +824,66 @@ Both built sonames export this entire table (plus the extras in (e)):
 | `pa_get_library_version` | returns `"17.0.0"` (the ABI's measured era) |
 | `pa_simple_drain` | returns `-PA_ERR_INVALID` |
 | `pa_simple_flush` | returns `-PA_ERR_INVALID` |
+
+### (f) libudev.so.1 - the 26 symbols SDL's udev backend resolves
+
+| symbol | behaviour |
+|---|---|
+| `udev_device_get_action` | returns NULL: no event |
+| `udev_device_get_devnode` | returns NULL (NULL-safe) |
+| `udev_device_get_devnum` | returns 0 (`dev_t` is 8 bytes on x86-64 glibc) |
+| `udev_device_get_parent_with_subsystem_devtype` | returns NULL (NULL-safe) |
+| `udev_device_get_property_value` | returns NULL (NULL-safe) |
+| `udev_device_get_subsystem` | returns NULL (NULL-safe) |
+| `udev_device_get_sysattr_value` | returns NULL (NULL-safe) |
+| `udev_device_new_from_devnum` | returns NULL: no such device |
+| `udev_device_new_from_syspath` | returns NULL: no such device |
+| `udev_device_unref` | no-op, returns NULL, NULL-safe |
+| `udev_enumerate_add_match_property` | returns 0 (filter accepted; nothing to match) |
+| `udev_enumerate_add_match_subsystem` | returns 0 (filter accepted; nothing to match) |
+| `udev_enumerate_get_list_entry` | returns NULL: the empty list |
+| `udev_enumerate_new` | returns a non-NULL sentinel enumerator, even for a NULL udev handle |
+| `udev_enumerate_scan_devices` | returns 0 — success with zero devices |
+| `udev_enumerate_unref` | no-op, returns NULL, NULL-safe |
+| `udev_list_entry_get_name` | returns NULL (NULL-safe) |
+| `udev_list_entry_get_next` | returns NULL (NULL-safe) |
+| `udev_monitor_enable_receiving` | returns 0 (enabled; nothing will arrive) |
+| `udev_monitor_filter_add_match_subsystem_devtype` | returns 0 |
+| `udev_monitor_get_fd` | the pipe read end (never readable), or -1 if `pipe2` failed |
+| `udev_monitor_new_from_netlink` | returns a non-NULL sentinel monitor and creates the never-signalling pipe |
+| `udev_monitor_receive_device` | returns NULL: the documented "nothing pending" answer, never an error |
+| `udev_monitor_unref` | no-op, returns NULL; the pipe fds stay open |
+| `udev_new` | returns a non-NULL sentinel handle (a caller treats NULL as "no udev available" and gives up) |
+| `udev_unref` | no-op, returns NULL, NULL-safe |
+
+### (g) libudev.so.1 - exported beyond the required set
+
+Nothing in UnityPlayer.so names these; they exist so a caller that probes the wider public surface gets the same empty answer instead of a missing symbol. Every one is NULL-safe.
+
+| symbol | behaviour |
+|---|---|
+| `udev_device_get_devtype` | no-op / NULL |
+| `udev_device_get_driver` | no-op / NULL |
+| `udev_device_get_is_initialized` | no-op / NULL |
+| `udev_device_get_parent` | no-op / NULL |
+| `udev_device_get_sysname` | no-op / NULL |
+| `udev_device_get_syspath` | no-op / NULL |
+| `udev_device_get_udev` | no-op / NULL |
+| `udev_device_new_from_subsystem_sysname` | no-op / NULL |
+| `udev_device_ref` | no-op / NULL |
+| `udev_enumerate_add_match_sysattr` | no-op / NULL |
+| `udev_enumerate_add_match_tag` | no-op / NULL |
+| `udev_enumerate_add_nomatch_subsystem` | no-op / NULL |
+| `udev_enumerate_add_nomatch_sysattr` | no-op / NULL |
+| `udev_enumerate_add_syspath` | no-op / NULL |
+| `udev_enumerate_get_udev` | no-op / NULL |
+| `udev_list_entry_get_by_name` | no-op / NULL |
+| `udev_list_entry_get_sysname` | no-op / NULL |
+| `udev_list_entry_get_value` | no-op / NULL |
+| `udev_monitor_filter_add_match_tag` | no-op / NULL |
+| `udev_monitor_filter_remove` | no-op / NULL |
+| `udev_monitor_filter_update` | no-op / NULL |
+| `udev_monitor_get_udev` | no-op / NULL |
+| `udev_monitor_set_receive_buffer_size` | no-op / NULL |
+| `udev_ref` | no-op / NULL |
 

@@ -111,6 +111,35 @@ def pulse_set(game_dir):
     return sorted({s for s in strings if re.fullmatch(r"pa_[a-z_0-9]+", s)})
 
 
+def udev_set(game_dir, libudev):
+    """Every udev_* name SDL's joystick/udev backend resolves at runtime.
+
+    Two filters, both necessary.  The name shape (`^udev_[...]`) drops the
+    binary's own error strings, which also start with udev_:
+
+        udev_new() failed
+        udev_enumerate_new() failed
+        udev_monitor_new_from_netlink() failed
+
+    ...and the host's real libudev.so.1 decides what is actually an entry
+    point, exactly like the libX11 set.  Without the host library (a CI box
+    with no libudev) the shape filter alone is used; the three strings above
+    are the only measured near-misses, and they contain a space and a
+    parenthesis, so the shape filter already rejects them.
+    """
+    so = os.path.join(game_dir, "UnityPlayer.so")
+    strings = run(["strings", "-a", so]).splitlines()
+    candidates = {s for s in strings if re.fullmatch(r"udev_[a-z0-9_]+", s)}
+    if libudev and os.path.exists(libudev):
+        exported = set()
+        for line in run(["nm", "-D", "--defined-only", libudev]).splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[1] in ("T", "W", "i"):
+                exported.add(parts[2].split("@")[0])
+        candidates &= exported
+    return sorted(candidates)
+
+
 # The contract of the pulse shim, one row per symbol.  Keyed by name so the
 # generated table cannot drift from the prose; the fallback documents itself.
 PULSE_BEHAVIOUR = {
@@ -144,6 +173,43 @@ PULSE_BEHAVIOUR = {
                            "`block=1`): the strongest stop signal for a "
                            "READY-wait loop",
     "pa_mainloop_free": "no-op",
+}
+
+# The libudev shim's contract, one row per measured symbol.  Everything in
+# this table is "zero devices": what matters is that the *answer* is the one
+# SDL's error paths already handle, never a failure to construct an object.
+UDEV_BEHAVIOUR = {
+    "udev_new": "returns a non-NULL sentinel handle (a caller treats NULL as "
+                "\"no udev available\" and gives up)",
+    "udev_unref": "no-op, returns NULL, NULL-safe",
+    "udev_enumerate_new": "returns a non-NULL sentinel enumerator, even for a "
+                          "NULL udev handle",
+    "udev_enumerate_unref": "no-op, returns NULL, NULL-safe",
+    "udev_enumerate_add_match_subsystem": "returns 0 (filter accepted; nothing to match)",
+    "udev_enumerate_add_match_property": "returns 0 (filter accepted; nothing to match)",
+    "udev_enumerate_scan_devices": "returns 0 — success with zero devices",
+    "udev_enumerate_get_list_entry": "returns NULL: the empty list",
+    "udev_list_entry_get_next": "returns NULL (NULL-safe)",
+    "udev_list_entry_get_name": "returns NULL (NULL-safe)",
+    "udev_device_new_from_syspath": "returns NULL: no such device",
+    "udev_device_new_from_devnum": "returns NULL: no such device",
+    "udev_device_unref": "no-op, returns NULL, NULL-safe",
+    "udev_device_get_action": "returns NULL: no event",
+    "udev_device_get_devnode": "returns NULL (NULL-safe)",
+    "udev_device_get_devnum": "returns 0 (`dev_t` is 8 bytes on x86-64 glibc)",
+    "udev_device_get_parent_with_subsystem_devtype": "returns NULL (NULL-safe)",
+    "udev_device_get_property_value": "returns NULL (NULL-safe)",
+    "udev_device_get_subsystem": "returns NULL (NULL-safe)",
+    "udev_device_get_sysattr_value": "returns NULL (NULL-safe)",
+    "udev_monitor_new_from_netlink": "returns a non-NULL sentinel monitor and "
+                                     "creates the never-signalling pipe",
+    "udev_monitor_enable_receiving": "returns 0 (enabled; nothing will arrive)",
+    "udev_monitor_filter_add_match_subsystem_devtype": "returns 0",
+    "udev_monitor_get_fd": "the pipe read end (never readable), or -1 if "
+                           "`pipe2` failed",
+    "udev_monitor_receive_device": "returns NULL: the documented \"nothing "
+                                   "pending\" answer, never an error",
+    "udev_monitor_unref": "no-op, returns NULL; the pipe fds stay open",
 }
 
 
@@ -189,11 +255,20 @@ def pulse_exported(src):
                                  r"(pa_[a-z_0-9]+)\s*\(", text)))
 
 
+def udev_exported(src):
+    """udev_* names defined with UDEVAPI in udev_null.c (the DSO's surface)."""
+    text = open(src).read()
+    return sorted(set(re.findall(r"UDEVAPI\s+[A-Za-z_][A-Za-z0-9_ *]*?\b"
+                                 r"(udev_[a-z0-9_]+)\s*\(", text)))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", default=os.environ.get("RW_GAME_DIR", ""))
     ap.add_argument("--libx11",
                     default="/usr/lib/x86_64-linux-gnu/libX11.so.6")
+    ap.add_argument("--libudev",
+                    default="/usr/lib/x86_64-linux-gnu/libudev.so.1")
     ap.add_argument("--no-write", action="store_true")
     args = ap.parse_args()
 
@@ -201,8 +276,10 @@ def main():
     req = required_set(args.game, libx11)
     alsa = alsa_set(args.game) if args.game else []
     pulse = pulse_set(args.game) if args.game else []
+    udev = udev_set(args.game, args.libudev) if args.game else []
     impl = implemented(os.path.join(XCOMPAT, "libx11.c"))
     pulse_impl = pulse_exported(os.path.join(XCOMPAT, "pulse_null.c"))
+    udev_impl = udev_exported(os.path.join(XCOMPAT, "udev_null.c"))
 
     print("required libX11 symbols : %d" % len(req))
     print("exported by the DSO     : %d (%d IMPL, %d STUB)"
@@ -219,6 +296,13 @@ def main():
         if pmiss:
             print("  missing: %s" % " ".join(pmiss))
             missing += pmiss
+    if udev:
+        umiss = [s for s in udev if s not in udev_impl]
+        print("required udev symbols   : %d (exported by the shim: %d, missing: %d)"
+              % (len(udev), len(udev_impl), len(umiss)))
+        if umiss:
+            print("  missing: %s" % " ".join(umiss))
+            missing += umiss
 
     if args.no_write:
         return 0 if not missing else 1
@@ -257,6 +341,25 @@ def main():
             f.write("#define XCOMPAT_PULSE_COUNT %d\n\n" % len(pulse))
             f.write("static const char *const xcompat_pulse_required[] = {\n")
             for s in pulse:
+                f.write('  "%s",\n' % s)
+            f.write("};\n\n#endif\n")
+
+    if udev:
+        with open(os.path.join(XCOMPAT, "required-udev.txt"), "w") as f:
+            f.write("\n".join(udev) + "\n")
+        with open(os.path.join(XCOMPAT, "required-udev.h"), "w") as f:
+            f.write("/* generated by tools/gen_exports.py -- do not edit.\n"
+                    " * The udev_* symbols SDL's joystick/udev backend resolves\n"
+                    " * from libudev.so.1.  Measured from UnityPlayer.so's\n"
+                    " * string table, intersected with the host's real libudev\n"
+                    " * (which drops the binary's own \"udev_new() failed\"\n"
+                    " * style messages).  This is the F4 contract for the\n"
+                    " * libudev shim. */\n")
+            f.write("#ifndef HOBBYOS_XCOMPAT_REQUIRED_UDEV_H\n"
+                    "#define HOBBYOS_XCOMPAT_REQUIRED_UDEV_H\n\n")
+            f.write("#define XCOMPAT_UDEV_COUNT %d\n\n" % len(udev))
+            f.write("static const char *const xcompat_udev_required[] = {\n")
+            for s in udev:
                 f.write('  "%s",\n' % s)
             f.write("};\n\n#endif\n")
 
@@ -351,6 +454,31 @@ def main():
                 lines.append("| `%s` | %s |"
                              % (n, PULSE_BEHAVIOUR.get(n, "returns a failure value")))
             lines.append("")
+    if udev:
+        lines.append("### (f) libudev.so.1 - the %d symbols SDL's udev backend "
+                     "resolves\n" % len(udev))
+        lines.append("| symbol | behaviour |")
+        lines.append("|---|---|")
+        for n in udev:
+            lines.append("| `%s` | %s |"
+                         % (n, UDEV_BEHAVIOUR.get(n, "returns a failure value")))
+        lines.append("")
+
+        uextra = [n for n in udev_impl if n not in udev]
+        if uextra:
+            lines.append("### (g) libudev.so.1 - exported beyond the required "
+                         "set\n")
+            lines.append("Nothing in UnityPlayer.so names these; they exist so "
+                         "a caller that probes the wider public surface gets "
+                         "the same empty answer instead of a missing symbol. "
+                         "Every one is NULL-safe.\n")
+            lines.append("| symbol | behaviour |")
+            lines.append("|---|---|")
+            for n in uextra:
+                lines.append("| `%s` | %s |"
+                             % (n, UDEV_BEHAVIOUR.get(n, "no-op / NULL")))
+            lines.append("")
+
     with open(os.path.join(XCOMPAT, "exports-table.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
 

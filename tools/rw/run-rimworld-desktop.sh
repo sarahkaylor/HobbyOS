@@ -17,7 +17,7 @@
 #   2. builds kernel + disk for MODE=desktop DESKTOP=hobby, rebuilds the
 #      xcompat DSOs (rule: rebuild before any libGL work), builds the AD-9
 #      PlayerMain launcher as a glibc-2.31 PIE and the native rwlaunch;
-#   3. stages /LIB64: glibc pin + libz + libX11.so.6/libasound.so.2
+#   3. stages /LIB64: glibc pin + libz + libX11.so.6/libasound.so.2/libudev.so.1
 #      (src/user/xcompat/stage.sh) + libGL.so.1/libGLX.so.0
 #      (tools/mesa/stage.sh); /RWDSO: the game's own DSOs (AD-10);
 #      /RWMANAGED: the 102 managed assemblies (M5c); installs the AD-9

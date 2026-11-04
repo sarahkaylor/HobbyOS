@@ -200,6 +200,7 @@
 | `XListProperties` | STUB | returns `0` |
 | `XLowerWindow` | STUB | returns `0` |
 | `XMapWindow` | IMPL |  |
+| `XMissingExtension` | STUB | returns `0` |
 | `XMoveResizeWindow` | STUB | returns `0` |
 | `XNextEvent` | IMPL |  |
 | `XParseColor` | STUB | returns `1` |
@@ -252,7 +253,16 @@
 | `XkbSetDetectableAutoRepeat` | STUB | returns `True` |
 | `XmbLookupString` | STUB | returns `XLookupString(ev, buf, n, ks, 0)` |
 | `XmbSetWMProperties` | STUB | returns `XSetWMProperties(d, w, n ? &tp : 0, 0, argv, argc, hints, wmh, ch)` |
+| `XmbTextListToTextProperty` | STUB | returns `-1` |
 | `Xutf8LookupString` | STUB | returns `XLookupString(ev, buf, n, ks, 0)` |
+| `_XEatData` | IMPL |  |
+| `_XFlush` | IMPL |  |
+| `_XFlushGCCache` | STUB | returns `0` |
+| `_XRead` | IMPL |  |
+| `_XReadPad` | STUB | returns `0` |
+| `_XReply` | STUB | returns `0` |
+| `_XSend` | STUB | returns `0` |
+| `_XSetLastRequestRead` | IMPL |  |
 
 ### (c) libasound.so.2 - the 19 symbols FMOD requires
 
@@ -314,4 +324,66 @@ Both built sonames export this entire table (plus the extras in (e)):
 | `pa_get_library_version` | returns `"17.0.0"` (the ABI's measured era) |
 | `pa_simple_drain` | returns `-PA_ERR_INVALID` |
 | `pa_simple_flush` | returns `-PA_ERR_INVALID` |
+
+### (f) libudev.so.1 - the 26 symbols SDL's udev backend resolves
+
+| symbol | behaviour |
+|---|---|
+| `udev_device_get_action` | returns NULL: no event |
+| `udev_device_get_devnode` | returns NULL (NULL-safe) |
+| `udev_device_get_devnum` | returns 0 (`dev_t` is 8 bytes on x86-64 glibc) |
+| `udev_device_get_parent_with_subsystem_devtype` | returns NULL (NULL-safe) |
+| `udev_device_get_property_value` | returns NULL (NULL-safe) |
+| `udev_device_get_subsystem` | returns NULL (NULL-safe) |
+| `udev_device_get_sysattr_value` | returns NULL (NULL-safe) |
+| `udev_device_new_from_devnum` | returns NULL: no such device |
+| `udev_device_new_from_syspath` | returns NULL: no such device |
+| `udev_device_unref` | no-op, returns NULL, NULL-safe |
+| `udev_enumerate_add_match_property` | returns 0 (filter accepted; nothing to match) |
+| `udev_enumerate_add_match_subsystem` | returns 0 (filter accepted; nothing to match) |
+| `udev_enumerate_get_list_entry` | returns NULL: the empty list |
+| `udev_enumerate_new` | returns a non-NULL sentinel enumerator, even for a NULL udev handle |
+| `udev_enumerate_scan_devices` | returns 0 — success with zero devices |
+| `udev_enumerate_unref` | no-op, returns NULL, NULL-safe |
+| `udev_list_entry_get_name` | returns NULL (NULL-safe) |
+| `udev_list_entry_get_next` | returns NULL (NULL-safe) |
+| `udev_monitor_enable_receiving` | returns 0 (enabled; nothing will arrive) |
+| `udev_monitor_filter_add_match_subsystem_devtype` | returns 0 |
+| `udev_monitor_get_fd` | the pipe read end (never readable), or -1 if `pipe2` failed |
+| `udev_monitor_new_from_netlink` | returns a non-NULL sentinel monitor and creates the never-signalling pipe |
+| `udev_monitor_receive_device` | returns NULL: the documented "nothing pending" answer, never an error |
+| `udev_monitor_unref` | no-op, returns NULL; the pipe fds stay open |
+| `udev_new` | returns a non-NULL sentinel handle (a caller treats NULL as "no udev available" and gives up) |
+| `udev_unref` | no-op, returns NULL, NULL-safe |
+
+### (g) libudev.so.1 - exported beyond the required set
+
+Nothing in UnityPlayer.so names these; they exist so a caller that probes the wider public surface gets the same empty answer instead of a missing symbol. Every one is NULL-safe.
+
+| symbol | behaviour |
+|---|---|
+| `udev_device_get_devtype` | no-op / NULL |
+| `udev_device_get_driver` | no-op / NULL |
+| `udev_device_get_is_initialized` | no-op / NULL |
+| `udev_device_get_parent` | no-op / NULL |
+| `udev_device_get_sysname` | no-op / NULL |
+| `udev_device_get_syspath` | no-op / NULL |
+| `udev_device_get_udev` | no-op / NULL |
+| `udev_device_new_from_subsystem_sysname` | no-op / NULL |
+| `udev_device_ref` | no-op / NULL |
+| `udev_enumerate_add_match_sysattr` | no-op / NULL |
+| `udev_enumerate_add_match_tag` | no-op / NULL |
+| `udev_enumerate_add_nomatch_subsystem` | no-op / NULL |
+| `udev_enumerate_add_nomatch_sysattr` | no-op / NULL |
+| `udev_enumerate_add_syspath` | no-op / NULL |
+| `udev_enumerate_get_udev` | no-op / NULL |
+| `udev_list_entry_get_by_name` | no-op / NULL |
+| `udev_list_entry_get_sysname` | no-op / NULL |
+| `udev_list_entry_get_value` | no-op / NULL |
+| `udev_monitor_filter_add_match_tag` | no-op / NULL |
+| `udev_monitor_filter_remove` | no-op / NULL |
+| `udev_monitor_filter_update` | no-op / NULL |
+| `udev_monitor_get_udev` | no-op / NULL |
+| `udev_monitor_set_receive_buffer_size` | no-op / NULL |
+| `udev_ref` | no-op / NULL |
 
