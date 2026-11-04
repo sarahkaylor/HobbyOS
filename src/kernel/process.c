@@ -481,6 +481,10 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
  * just set its own state to EXITED keeps running its exit path until the
  * context switch completes, so its slot and physical block must not be
  * handed to a new process yet. */
+/* GB-179: forward declaration -- defined near the scheduler loop (the GB-057
+   deadclaim test the reaper reuses). */
+int slot_claimed_only_by_halted_cpus(int k);
+
 static int process_still_running(int pid) {
   for (int c = 0; c < MAX_CPUS; c++) {
     if (cpu_current_pids[c] == pid)
@@ -499,9 +503,15 @@ static int proc_reap_parked_locked(void) {
   int n = 0;
   for (int i = 1; i < MAX_PROCESSES; i++) {
     struct process *q = &proc_table[i];
+    /* GB-179: a CPU that recorded its own halt will never run the slot again,
+       so a claim held only by halted CPUs is dead (same rule as GB-057's
+       [DEADCLAIM]).  Without this a THREAD_DONE slot claimed by a halted CPU
+       parks for ever and keeps the table full. */
+    int off_cpu = !process_still_running(i) ||
+                  slot_claimed_only_by_halted_cpus(i);
+    if (!off_cpu)
+      continue;
     if (q->state == PROC_STATE_EXITED) {
-      if (process_still_running(i))
-        continue;
       struct process *par =
         (q->parent_pid >= 0 && q->parent_pid < MAX_PROCESSES)
           ? &proc_table[q->parent_pid] : 0;
@@ -513,8 +523,6 @@ static int proc_reap_parked_locked(void) {
       q->exit_status = 0;
       n++;
     } else if (q->state == PROC_STATE_THREAD_DONE) {
-      if (process_still_running(i))
-        continue;
       if (!q->is_thread && q->live_threads != 0)
         continue;
       if (!q->is_thread && (q->phys_block_idx >= 0 || q->as))
