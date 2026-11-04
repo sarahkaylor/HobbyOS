@@ -32,6 +32,9 @@ extern struct cpu_local cpu_locals[];
 uint32_t smp_init_count(void);
 #endif
 
+/* GB-179: terminal slot census (FREE / EXITED / THREAD_DONE counts). */
+void process_slot_census(int *free_out, int *exited_out, int *thread_done_out);
+
 /* GB-021: the Linux clone(2) flag bits the x64 compat bridge accepts.  musl's
  * pthread_create passes exactly this set; anything else (namespaces, a new
  * file table) is refused rather than silently ignored. */
