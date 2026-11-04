@@ -1,16 +1,24 @@
 /*
  * gl_probe.c -- the M4 in-guest gate: a real glibc program that gets a GL 3.3
  * core context out of the cross-built libGL.so.1 INSIDE HobbyOS, compiles a
- * GLSL-330 shader pair, draws a triangle into an FBO, reads the pixels back
- * and prints a checksum of them.
+ * GLSL-330 shader pair, draws a triangle, PRESENTS it through glXSwapBuffers
+ * into a real X window, proves the pixels are on the desktop's framebuffer,
+ * and tears the whole stack down.
  *
- * Why an FBO and not the window: the pixels are the evidence, and an FBO
- * readback is the same code path on every host (no X server, no swap chain, no
- * driver present step in between).  A window is still created and made
- * current, because a GLX context needs a drawable -- that also exercises the
- * compat libX11's window path.  The window is *not* presented: libX11's
- * XCreateImage/XPutImage are stubs (measured), so Mesa's swap has nowhere to
- * put the frame yet.  That is the next M4 item, not this gate's claim.
+ * Two readbacks, because they prove different things:
+ *
+ *   1. an FBO readback (fnv1a64 of a 256x256 RGBA8 renderbuffer) -- the same
+ *      code path on every host, no window, no swap chain, so it is the
+ *      renderer-identity check (the guest number matches the host number);
+ *   2. the desktop framebuffer (/dev/fb0) at the window's content rect, hashed
+ *      in the same byte order -- only this proves the frame was *presented*.
+ *      A GL readback can agree with itself and never reach the screen.
+ *
+ * The window is created through the compat libX11 (the same way SDL/Unity will)
+ * and the probe waits for the desktop's ConfigureNotify/Expose before drawing:
+ * the shim's XPutImage refuses to blit a window the desktop has not laid out,
+ * so painting early silently drops every pixel (measured -- a first version of
+ * this probe swapped into nothing and still reported success).
  *
  * The DSO is dlopen()ed, never linked: libGL.so.1 has no DT_NEEDED of its own,
  * so its libc/libX11 symbols resolve from the process that is already running
@@ -18,6 +26,12 @@
  * turns "the DSO needs a symbol nobody provides" into a dlerror() here instead
  * of a crash inside a GL call later.  RTLD_GLOBAL matches what SDL/Unity do
  * (they dlopen libGL and then resolve gl* through glXGetProcAddress).
+ *
+ * Teardown is part of the claim: glXMakeCurrent(None) -> glXDestroyContext ->
+ * XCloseDisplay -> dlclose(libGL) -> exit().  libGL is linked DF_1_NODELETE
+ * because Mesa registers process-global atexit() handlers from inside the DSO;
+ * without it the exit() after dlclose jumps into the unmapped text (see
+ * tools/mesa/build-hobbyos.sh).
  *
  * Markers go to stderr: a desktop-launched program gets fd 0/1 as the pixel
  * protocol pipes, and fd 2 is the serial console (same rule as the M3 client).
@@ -29,7 +43,8 @@
  *       -Wl,--allow-shlib-undefined -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2
  *
  * Exit status: 0 only when a 3.3 core context existed, the shaders compiled
- * and linked, the FBO was complete and the readback covered the triangle.
+ * and linked, the FBO was complete, the readback covered the triangle, the
+ * desktop held the swapped frame byte for byte, and teardown was clean.
  */
 #define _GNU_SOURCE 1
 #include <X11/Xlib.h>
@@ -39,6 +54,7 @@
 #include <GL/glx.h>
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <link.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -46,6 +62,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -134,6 +151,115 @@ static uint64_t fnv1a64(const void *p, size_t n) {
     h *= 0x100000001b3ull;
   }
   return h;
+}
+
+/* ---- the desktop framebuffer (/dev/fb0) --------------------------------
+ * The compat libX11 paints into exactly this node (docs/linux-abi.md §9:
+ * fixed 1920x1080 B8G8R8A8), so a pixel the probe reads here has already left
+ * the GL stack, left libX11's shadow, and been blitted by XFlush.  That is the
+ * only readback that is *evidence of presentation*; glReadPixels on the GL
+ * side can agree with itself and still never reach the screen. */
+#define FB_W 1920
+#define FB_H 1080
+static unsigned int *g_fb;
+
+static int fb_map(void) {
+  int fd = open("/dev/fb0", O_RDWR);
+  if (fd < 0) {
+    say("[GL] desktop fb: open(/dev/fb0) failed\n");
+    return -1;
+  }
+  void *m = mmap(0, (size_t)FB_W * FB_H * 4, PROT_READ | PROT_WRITE,
+                 MAP_SHARED, fd, 0);
+  close(fd);
+  if (m == MAP_FAILED) {
+    say("[GL] desktop fb: mmap(/dev/fb0) failed\n");
+    return -1;
+  }
+  g_fb = (unsigned int *)m;
+  say("[GL] desktop fb: /dev/fb0 mapped at %p (%dx%d b8g8r8a8)\n", m, FB_W,
+      FB_H);
+  return 0;
+}
+
+/* Same FNV-1a over the same RGBA byte order the GL readback uses, so the two
+ * numbers are directly comparable.  Two conversions, both measured:
+ *
+ *   - /dev/fb0 is B8G8R8A8 in the *memory* sense the shim writes: the 32-bit
+ *     word is 0xAARRGGBB, so R is fed from bits 16..23.  Measured against the
+ *     GL frame: GL (07,07,f1,ff) [blue vertex] reads back as 0xff0707f1.
+ *   - X's origin is the top-left and GL's is the bottom-left, so the same frame
+ *     is stored with opposite row order.  Walking the rows bottom-up gives the
+ *     byte sequence glReadPixels produced.
+ */
+static uint64_t fb_hash_rect(int x, int y, int w, int h, int *nonbg_out,
+                             const unsigned char bg[4]) {
+  uint64_t hash = 0xcbf29ce484222325ull;
+  int nonbg = 0;
+  const unsigned int bgv = ((unsigned)bg[0] << 16) | ((unsigned)bg[1] << 8) |
+                           (unsigned)bg[2];
+  for (int row = h - 1; row >= 0; row--) {
+    const unsigned int *p = g_fb + (size_t)(y + row) * FB_W + x;
+    for (int col = 0; col < w; col++) {
+      unsigned int v = p[col];
+      unsigned char b[4] = {(unsigned char)((v >> 16) & 0xff),
+                            (unsigned char)((v >> 8) & 0xff),
+                            (unsigned char)(v & 0xff),
+                            (unsigned char)((v >> 24) & 0xff)};
+      for (int i = 0; i < 4; i++) {
+        hash ^= b[i];
+        hash *= 0x100000001b3ull;
+      }
+      if ((v & 0x00ffffffu) != bgv) nonbg++;
+    }
+  }
+  if (nonbg_out) *nonbg_out = nonbg;
+  return hash;
+}
+
+/* Pixel-exact comparison of the GL frame against the same rect of /dev/fb0.
+ * Rows are matched bottom-up (X is top-down, GL bottom-up) and channels are
+ * decoded from the fb's 0xAARRGGBB word.  Returns the number of differing
+ * pixels and, in *bbox, the rect that contains all of them -- a small box is
+ * the desktop re-stamping its mouse pointer over the app's pixels (which is
+ * what ESC ] F asks it to do), not a partial present. */
+static int fb_diff_rect(int x, int y, int w, int h, const unsigned char *gl,
+                        int *bbox, int *shown) {
+  int diff = 0;
+  bbox[0] = w; bbox[1] = h; bbox[2] = -1; bbox[3] = -1;
+  for (int gy = 0; gy < h; gy++) {
+    int dy = h - 1 - gy;                  /* GL row -> desktop row */
+    const unsigned char *g = gl + (size_t)gy * w * 4;
+    const unsigned int *p = g_fb + (size_t)(y + dy) * FB_W + x;
+    for (int gx = 0; gx < w; gx++) {
+      unsigned int v = p[gx];
+      unsigned char b[4] = {(unsigned char)((v >> 16) & 0xff),
+                            (unsigned char)((v >> 8) & 0xff),
+                            (unsigned char)(v & 0xff),
+                            (unsigned char)((v >> 24) & 0xff)};
+      if (b[0] != g[gx * 4] || b[1] != g[gx * 4 + 1] || b[2] != g[gx * 4 + 2] ||
+          b[3] != g[gx * 4 + 3]) {
+        diff++;
+        if (gx < bbox[0]) bbox[0] = gx;
+        if (dy < bbox[1]) bbox[1] = dy;
+        if (gx > bbox[2]) bbox[2] = gx;
+        if (dy > bbox[3]) bbox[3] = dy;
+        if (shown && *shown < 3) {
+          say("[GL]   diff at (%d,%d): gl=%02x%02x%02x%02x desktop=%02x%02x%02x%02x\n",
+              gx, gy, g[gx * 4], g[gx * 4 + 1], g[gx * 4 + 2], g[gx * 4 + 3],
+              b[0], b[1], b[2], b[3]);
+          (*shown)++;
+        }
+      }
+    }
+  }
+  return diff;
+}
+
+static long now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (long)ts.tv_sec * 1000 + (long)(ts.tv_nsec / 1000000);
 }
 
 /* ---- GL entry points, all through glXGetProcAddress --------------------- */
@@ -529,7 +655,48 @@ int main(void) {
   XStoreName(dpy, win, "GLPROBE");
   XMapWindow(dpy, win);
   XSync(dpy, False);
-  say("[GL] window 0x%lx mapped (320x240)\n", (unsigned long)win);
+  say("[GL] window 0x%lx mapped (320x240 requested)\n", (unsigned long)win);
+
+  /* A real X client does not get to paint the instant it maps: the desktop
+   * answers with the content rect (the protocol's geometry message), and the
+   * shim's XPutImage refuses to blit before it has one.  Wait for it the way
+   * the M3 client does -- unbounded painting into a window the desktop has not
+   * laid out yet silently drops every pixel. */
+  {
+    long deadline = now_ms() + 5000;
+    int got = 0;
+    while (now_ms() < deadline && !got) {
+      while (XPending(dpy)) {
+        XEvent ev;
+        memset(&ev, 0, sizeof ev);
+        XNextEvent(dpy, &ev);
+        if (ev.type == Expose || ev.type == ConfigureNotify) {
+          got = 1;
+          say("[GL] %s %dx%d at %d,%d\n",
+              ev.type == Expose ? "Expose" : "ConfigureNotify",
+              ev.type == Expose ? ev.xexpose.width : ev.xconfigure.width,
+              ev.type == Expose ? ev.xexpose.height : ev.xconfigure.height,
+              ev.type == Expose ? ev.xexpose.x : ev.xconfigure.x,
+              ev.type == Expose ? ev.xexpose.y : ev.xconfigure.y);
+        }
+      }
+      if (!got) usleep(10000);
+    }
+    XWindowAttributes wa;
+    if (!XGetWindowAttributes(dpy, win, &wa)) {
+      say("[GL] FAIL XGetWindowAttributes after map\n");
+      return 3;
+    }
+    say("[GL] window content rect x=%d y=%d %dx%d (laid out=%d)\n", wa.x, wa.y,
+        wa.width, wa.height, got);
+    if (!got) {
+      say("[GL] FAIL the desktop never reported the window's content rect\n");
+      return 3;
+    }
+  }
+  XWindowAttributes wa;
+  XGetWindowAttributes(dpy, win, &wa);
+  const int WIN_W = wa.width, WIN_H = wa.height;
 
   /* 4. a 3.3 CORE context -- the M4 target.  The compat libX11 answers the
    *    GLX queries; the profile comes from Mesa's st/mesa frontend. */
@@ -719,14 +886,12 @@ int main(void) {
     say("[GL] note: could not write /GLPROBE.PPM (read-only root?)\n");
   }
 
-  /* 9. draw to the window's default framebuffer too (the GLX drawable is a
-   *    real window, and this proves the default framebuffer path works), but
-   *    do NOT swap: Mesa's xlib winsys present path faults in the guest
-   *    (instruction fetch into a non-executable page of libGL's mapping), so
-   *    it is the next M4 item, not this gate's claim.  The pixels that are
-   *    evidence are the FBO readback above and the PPM below. */
+  /* 9. draw to the window's default framebuffer and PRESENT it.  The GLX
+   *    drawable is a real window; glXSwapBuffers runs Mesa's own present path
+   *    (xlib_sw_display -> XPutImage -> the compat Xlib's shadow ->
+   *    XFlush -> /dev/fb0), which is exactly what this step has to prove. */
   gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
-  gl.Viewport(0, 0, 320, 240);
+  gl.Viewport(0, 0, WIN_W, WIN_H);
   gl.ClearColor(0.05f, 0.05f, 0.10f, 1.0f);
   gl.Clear(GL_COLOR_BUFFER_BIT);
   gl.UseProgram(prog);
@@ -735,20 +900,143 @@ int main(void) {
   gl.EnableVertexAttribArray((GLuint)a_col);
   gl.DrawArrays(GL_TRIANGLES, 0, 3);
   gl.Finish();
-  say("[GL] window: default framebuffer drawn (no swap: present path open), "
-      "glGetError=0x%x\n", gl.GetError());
+  say("[GL] window: default framebuffer %dx%d drawn, glGetError=0x%x\n", WIN_W,
+      WIN_H, gl.GetError());
+
+  /* Snapshot the back buffer BEFORE the swap: those are the exact bytes the
+   * present path is about to ship, so this is the reference the desktop rect
+   * is compared against afterwards. */
+  unsigned char *back = (unsigned char *)malloc((size_t)WIN_W * WIN_H * 4);
+  uint64_t back_hash = 0;
+  if (back) {
+    gl.ReadPixels(0, 0, WIN_W, WIN_H, GL_RGBA, GL_UNSIGNED_BYTE, back);
+    gl.Finish();
+    back_hash = fnv1a64(back, (size_t)WIN_W * WIN_H * 4);
+    say("[GL] gl back buffer %dx%d fnv1a64=0x%016llx glGetError=0x%x\n", WIN_W,
+        WIN_H, (unsigned long long)back_hash, gl.GetError());
+  }
+
+  say("[GL] swap start drawable=0x%lx ctx=%p\n", (unsigned long)win,
+      (void *)ctx);
+  x_glXSwapBuffers(dpy, win);
+  /* Mesa's own XFlush runs inside xlib_sw_display; this one is the probe's
+   * own, so presentation does not depend on Mesa's ordering. */
+  XSync(dpy, False);
+  say("[GL] swap returned\n");
+
+  /* 10. read the pixels back OFF THE DESKTOP: /dev/fb0, the same surface the
+   *     desktop scans out.  The GL readback above can agree with itself and
+   *     still never be presented; this cannot. */
+  if (fb_map() == 0) {
+    int fb_nonbg = 0;
+    uint64_t fbh = fb_hash_rect(wa.x, wa.y, WIN_W, WIN_H, &fb_nonbg, bg);
+    say("[GL] desktop rect %d,%d %dx%d fnv1a64=0x%016llx nonbg=%d/%d\n", wa.x,
+        wa.y, WIN_W, WIN_H, (unsigned long long)fbh, fb_nonbg, WIN_W * WIN_H);
+    if (back) {
+      say("[GL] frame hashes: desktop=0x%016llx gl=0x%016llx\n",
+          (unsigned long long)fbh, (unsigned long long)back_hash);
+      int bbox[4], shown = 0;
+      int diff = fb_diff_rect(wa.x, wa.y, WIN_W, WIN_H, back, bbox, &shown);
+      say("[GL] pixel diff: %d of %d differ (%.4f%%)\n", diff, WIN_W * WIN_H,
+          diff * 100.0 / ((double)WIN_W * WIN_H));
+      if (diff) {
+        say("[GL] diff bbox: x %d..%d y %d..%d (%dx%d)\n", bbox[0], bbox[2],
+            bbox[1], bbox[3], bbox[2] - bbox[0] + 1, bbox[3] - bbox[1] + 1);
+      }
+      /* The frame is presented if (nearly) every pixel matches: the desktop
+       * re-stamps its mouse pointer over the app's pixels after ESC ] F, so a
+       * cursor-sized patch legitimately differs.  Anything larger is a partial
+       * or stale present and fails. */
+      say("[GL] present check: %s\n",
+          diff == 0 ? "exact" :
+          (diff <= 4096 ? "desktop holds the frame (only the re-stamped cursor "
+                          "differs)" : "MISMATCH"));
+      if (diff > 4096) {
+        say("[GL] FAIL the desktop does not hold the frame GL presented\n");
+        g_fail = 1;
+      }
+    }
+    /* Two interior samples (the blue vertex above the middle, the red one at
+     * lower left), each shown against BOTH row orders: an exact match under
+     * one of them names a flip, and no match at all names a channel-order or
+     * never-arrived frame.  GL row 0 is the bottom; the desktop's is the top. */
+    if (back) {
+      static const struct { int fx, fy; const char *name; } pts[] = {
+          {50, 88, "blue-vertex"}, {20, 20, "red-vertex"}};
+      for (int k = 0; k < 2; k++) {
+        int gx = WIN_W * pts[k].fx / 100, gy = WIN_H * pts[k].fy / 100;
+        const unsigned char *g = back + ((size_t)gy * WIN_W + gx) * 4;
+        unsigned int same = g_fb[(size_t)(wa.y + (WIN_H - 1 - gy)) * FB_W + wa.x + gx];
+        unsigned int flip = g_fb[(size_t)(wa.y + gy) * FB_W + wa.x + gx];
+        say("[GL] px %s (%d,%d): gl=%02x%02x%02x%02x desktop[rowflip]=%08x "
+            "desktop[direct]=%08x\n", pts[k].name, gx, gy, g[0], g[1], g[2],
+            g[3], same, flip);
+      }
+    }
+    /* A scaled copy of the desktop rect, so the frame can be looked at on the
+     * host without going through a screenshot of the whole screen. */
+    {
+      FILE *f = fopen("/GLDESK.PPM", "wb");
+      if (f) {
+        int dw = WIN_W / 4, dh = WIN_H / 4;
+        fprintf(f, "P6\n%d %d\n255\n", dw, dh);
+        for (int y = 0; y < dh; y++)
+          for (int x = 0; x < dw; x++) {
+            unsigned int v = g_fb[(size_t)(wa.y + y * 4) * FB_W + wa.x + x * 4];
+            fputc((v >> 16) & 0xff, f);
+            fputc((v >> 8) & 0xff, f);
+            fputc(v & 0xff, f);
+          }
+        fclose(f);
+        say("[GL] wrote /GLDESK.PPM (%dx%d, desktop rect, 1:4)\n", dw, dh);
+      }
+    }
+    if (fb_nonbg < 1000) {
+      say("[GL] FAIL the desktop framebuffer has no frame at the window rect\n");
+      g_fail = 1;
+    }
+  } else {
+    say("[GL] FAIL no desktop readback path\n");
+    g_fail = 1;
+  }
 
   if (nonbg < 1000) {
     say("[GL] FAIL the triangle did not cover the framebuffer\n");
     g_fail = 1;
   }
 
-  /* No teardown.  glXMakeCurrent(dpy, None, NULL) / glXDestroyContext /
-   * XCloseDisplay / dlclose each tear down a different layer of the compat
-   * stack, and the first of them faults in the guest today (the same class of
-   * ABI mismatch this gate exists to find, but not this gate's claim).  The
-   * process is about to exit and the kernel reclaims the address space, so the
-   * teardown path is left as the next M4 item instead of being half-run. */
+  /* 11. hold the window on screen: the harness screendumps this interval, so
+   *     the receipt is a photo of the desktop, not a number in a log. */
+  say("[GL] hold start\n");
+  {
+    long deadline = now_ms() + 6000;
+    while (now_ms() < deadline) {
+      while (XPending(dpy)) {
+        XEvent ev;
+        memset(&ev, 0, sizeof ev);
+        XNextEvent(dpy, &ev);
+      }
+      usleep(20000);
+    }
+  }
+  say("[GL] hold done\n");
+
+  /* 12. teardown, layer by layer.  Each of glXMakeCurrent(None) /
+   *     glXDestroyContext / XCloseDisplay / dlclose releases a different part
+   *     of the compat stack; a clean run must print all four rows. */
+  say("[GL] teardown: glXMakeCurrent(None)\n");
+  Bool mc = x_glXMakeCurrent(dpy, None, NULL);
+  say("[GL] teardown: glXMakeCurrent(None) -> %d\n", (int)mc);
+  say("[GL] teardown: glXDestroyContext\n");
+  x_glXDestroyContext(dpy, ctx);
+  say("[GL] teardown: glXDestroyContext returned\n");
+  say("[GL] teardown: XCloseDisplay\n");
+  XCloseDisplay(dpy);
+  say("[GL] teardown: XCloseDisplay returned\n");
+  say("[GL] teardown: dlclose(libGL)\n");
+  int dc = dlclose(h);
+  say("[GL] teardown: dlclose -> %d\n", dc);
+  say("[GL] teardown: clean\n");
 
   say("[GL] done rc=%d\n", g_fail);
   return g_fail ? 1 : 0;
