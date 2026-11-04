@@ -17,10 +17,10 @@ extern void uart_print_hex(uint64_t v); /* so-vm lane A: physaddr evidence */
  * real frame allocator and the real arch page-table code (the same paths
  * the loader and the scheduler use), then restores the pool exactly.
  *
- * AS tags 60..63 are reserved for this suite (MAX_PROCESSES is 64, so
- * 60..63 is the free top range; no process holds them, and each test tears
- * its AS down before the next one starts, so a leaked table frame shows up
- * as a count mismatch). */
+ * AS tags 60..63 are reserved for this suite (L12 raised MAX_PROCESSES to
+ * 192, so 60..63 is inside the table but no process holds those slots at
+ * test time; each test tears its AS down before the next one starts, so a
+ * leaked table frame shows up as a count mismatch). */
 
 #define VM_TEST_TAG 60
 

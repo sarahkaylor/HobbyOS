@@ -76,14 +76,16 @@
  * needed.  Slots are allocated lazily by the first call that needs one and
  * released by linux_compat_thread_exit().
  *
- * THE WAIT QUEUE IS THIS TABLE, NOT A HASH CHAIN.  With MAX_PROCESSES == 64 a
- * wake costs at most 64 comparisons of (as, uaddr) -- about 50 ns -- while a
- * bucket index over the same 64 slots has to keep a chain consistent across
- * enqueue/dequeue/requeue/timeout/exit.  The first cut did that and the chain
- * went stale (measured: a wake found 0 waiters while a thread was parked on
- * the exact word, i.e. a lost wakeup).  The table cannot go stale: the only
+ * THE WAIT QUEUE IS THIS TABLE, NOT A HASH CHAIN.  With MAX_PROCESSES == 192
+ * a wake costs at most 192 comparisons of (as, uaddr) -- a few hundred ns --
+ * while a bucket index over the same slots has to keep a chain consistent
+ * across enqueue/dequeue/requeue/timeout/exit.  The first cut did that and the
+ * chain went stale (measured: a wake found 0 waiters while a thread was parked
+ * on the exact word, i.e. a lost wakeup).  The table cannot go stale: the only
  * queue state is (as, uaddr, bitset) on the slot and futex_uaddr on the PCB,
  * and every match re-validates both against the PCB state under proc_lock.
+ * L12 raised the table from 64 to MAX_PROCESSES when the PCB table grew; the
+ * scan is still O(MAX_PROCESSES) with no allocation and no chain.
  */
 struct l_thr_slot {
   int used;
@@ -631,6 +633,10 @@ static int l_thr_getcpu(struct process *p, struct trap_frame *tf) {
 #define L_ILL_ILLOPC 1
 #define L_FPE_INTDIV 1
 #define L_BUS_ADRALN 1
+/* L12: kill/tgkill-delivered siginfo.  Linux's _kill layout puts si_pid at
+ * offset 16 and si_uid at 20; glibc's SIGCANCEL handler requires exactly
+ * (si_code == SI_TKILL && si_pid == getpid()) before it will run __do_cancel. */
+#define L_SI_TKILL (-6)
 
 static uintptr_t l_sf_addr(uint64_t base, uint32_t off) {
   return (uintptr_t)(base + off);
@@ -675,15 +681,22 @@ static void l_sf_fill_gregs(uint64_t base, struct trap_frame *tf,
 }
 
 static void l_sf_fill_siginfo(uint64_t base, int sig, int code,
-                              uint64_t fault_addr) {
+                              uint64_t fault_addr, int si_pid) {
   volatile int32_t *si = (volatile int32_t *)l_sf_addr(base, L_SF_INFO);
   /* si_signo, si_errno, si_code, __pad0 */
   si[0] = sig;
   si[1] = 0;
   si[2] = code;
   si[3] = 0;
-  /* union _sifields: _sigfault.si_addr at offset 16 */
-  *(volatile uint64_t *)l_sf_addr(base, L_SF_INFO + 16) = fault_addr;
+  if (code == L_SI_TKILL) {
+    /* union _kill: si_pid @16, si_uid @20.  setuid(0) is the only sender on
+       this track (SIGCANCEL/SIGSETXID are always self-sent by tgkill). */
+    *(volatile int32_t *)l_sf_addr(base, L_SF_INFO + 16) = si_pid;
+    *(volatile uint32_t *)l_sf_addr(base, L_SF_INFO + 20) = 0;
+  } else {
+    /* union _sigfault: si_addr at offset 16 */
+    *(volatile uint64_t *)l_sf_addr(base, L_SF_INFO + 16) = fault_addr;
+  }
 }
 
 /* Plant the frame for `sig` on the current thread.  Returns 1 on success. */
@@ -741,7 +754,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
     uint64_t m = linux_compat_sigmask_get(p);
     *(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_SIGMASK) = m;
   }
-  l_sf_fill_siginfo(base, sig, code, fault_addr);
+  l_sf_fill_siginfo(base, sig, code, fault_addr, (int)grp->pid);
 
   /* Enter the handler: Linux hands it rsp=frame (16-aligned), with the
      arguments in rdi/rsi/rdx and rax=0.  Clear DF, as Linux does. */
@@ -822,6 +835,10 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
     code = L_FPE_INTDIV;
   } else if (sig == HO_SIGBUS) {
     code = L_BUS_ADRALN;
+  } else if (sig >= 32) {
+    /* Real-time signal raised by tgkill: glibc's cancel/setxid handlers read
+       the _kill siginfo fields, not just the number. */
+    code = L_SI_TKILL;
   }
 
   /* Commit: mark this thread in-handler before the frame becomes visible, so
