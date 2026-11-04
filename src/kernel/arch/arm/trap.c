@@ -639,8 +639,19 @@ static void sys_accept4(struct trap_frame *tf) {
 
 static void sys_connect_addr(struct trap_frame *tf) {
   struct process *caller = current_process();
-  int r = file_connect_user(caller, (int)tf->regs[0], tf->regs[1], (int)tf->regs[2]);
+  int r = file_connect_user(caller, (int)tf->regs[0], tf->regs[1], tf->regs[2]);
   if (r == -2) {
+    /* GB-181: -ENOENT is 2, so a connect() to a missing path name returns
+       exactly the park/restart sentinel.  usock_name_park() sets the caller
+       BLOCKED before returning -2, and a waker may already have flipped it
+       to READY; a caller in any other state got -ENOENT from
+       usock_name_lookup().  Treat that as the errno it is -- otherwise the
+       trap rewinds elr and re-executes the same connect() forever. */
+    if (!caller || (caller->state != PROC_STATE_BLOCKED &&
+                    caller->state != PROC_STATE_READY)) {
+      tf->regs[0] = (uint64_t)(int64_t)-ENOENT;
+      return;
+    }
     tf->elr -= 4; /* restart when woken (pipe park model) */
     schedule(tf, 0);
   } else {
