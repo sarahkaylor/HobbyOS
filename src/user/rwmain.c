@@ -53,6 +53,12 @@ static void *(*next_dlopen)(const char *, int);
 static void *(*next_dlsym)(void *, const char *);
 static const char *dso_dir;
 
+/* Defined with the SIGSEGV dump below; refreshed after every dlopen so the
+ * dump can tag a PC with <module>+offset (the handler must not walk the
+ * module list itself: dl_iterate_phdr takes the loader lock, and the faults
+ * worth dumping happen inside ld.so). */
+static void rw_mods_collect(void);
+
 /* ---- dlsym observation ---------------------------------------------------
  * SDL loads libX11.so.6 with dlopen() and resolves the entry points it uses
  * through dlsym(); a NULL return disables the whole X11 video driver and SDL
@@ -126,6 +132,7 @@ void *dlopen(const char *file, int mode) {
   if (file && map_local(file, local, sizeof local)) {
     fprintf(stderr, "[RWMAIN] dlopen remap %s -> %s\n", file, local);
     void *r = next_dlopen(local, mode);
+    if (r) rw_mods_collect();
     if (!r) {
       /* Unity only says "Unable to load mono library"; the loader's reason
          (a missing NEEDED, an undefined symbol, a version) is the evidence. */
@@ -141,6 +148,7 @@ void *dlopen(const char *file, int mode) {
      default; the M6 desktop harness turns it on. */
   int trace = getenv("RW_TRACE_DLOPEN") != 0;
   void *r = next_dlopen(file, mode);
+  if (r) rw_mods_collect();
   if (!r) {
     const char *e = dlerror();
     fprintf(stderr, "[RWMAIN] dlopen FAILED %s: %s\n",
@@ -158,6 +166,379 @@ void *dlopen(const char *file, int mode) {
   return r;
 }
 
+
+/* ---- SIGSEGV/SIGBUS ucontext dump ---------------------------------------
+ * M6/L29: after the window handshake the game dies on `memory fault VA=0
+ * PC=0`, i.e. a jump through a NULL slot.  RIP=0 names the *target*, not the
+ * caller, and a `jmp` pushes nothing, so the caller has to come from the
+ * machine state: the ucontext's RIP/RSP, the GP registers (a dispatch-table
+ * jump usually still has the table base and the index in rbx/rax/r??), and a
+ * scan of the faulting stack for return addresses inside a mapped module.
+ *
+ * A signal handler on a broken stack must not call printf: deferred stdio
+ * takes locks, and a fault inside it loses the dump.  Everything below is
+ * write(2) over a hand-rolled hex/dec formatter, and every stack read is
+ * probed with mincore() first (an unmapped stack page would fault inside the
+ * handler and the kernel would kill the process before the row was flushed).
+ *
+ * RW_SIGDUMP=0 turns both handlers off; they are armed by default because a
+ * launcher that dies at PC=0 has no other way to name its caller.
+ */
+#include <ucontext.h>
+#include <sys/ucontext.h>
+#include <sys/mman.h>
+
+#define RW_MOD_MAX 16
+
+struct rw_mod {
+  unsigned long base, end;
+  char name[56];
+};
+static struct rw_mod rw_mods[RW_MOD_MAX];
+static int rw_mod_n;
+static int rw_sigdumped;
+
+static int rw_mods_cb(struct dl_phdr_info *info, size_t sz, void *data) {
+  (void)sz; (void)data;
+  if (rw_mod_n >= RW_MOD_MAX) return 1;
+  unsigned long lo = ~0ul, hi = 0;
+  for (int i = 0; i < info->dlpi_phnum; i++) {
+    const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+    if (ph->p_type != PT_LOAD) continue;
+    unsigned long b = (unsigned long)info->dlpi_addr + ph->p_vaddr;
+    if (b < lo) lo = b;
+    if (b + ph->p_memsz > hi) hi = b + ph->p_memsz;
+  }
+  if (!hi) return 0;
+  struct rw_mod *m = &rw_mods[rw_mod_n++];
+  m->base = lo;
+  m->end = hi;
+  const char *nm = info->dlpi_name;
+  if (!nm || !nm[0]) nm = "(main)";
+  const char *sl = strrchr(nm, '/');
+  if (sl) nm = sl + 1;
+  size_t k = 0;
+  for (; nm[k] && k < sizeof m->name - 1; k++) m->name[k] = nm[k];
+  m->name[k] = 0;
+  return 0;
+}
+
+static void rw_mods_collect(void) {
+  rw_mod_n = 0;
+  dl_iterate_phdr(rw_mods_cb, 0);
+}
+
+/* `<module>` when v is inside a mapped object, with its offset. */
+static const char *rw_mod_of(unsigned long v, unsigned long *off) {
+  for (int i = 0; i < rw_mod_n; i++)
+    if (v >= rw_mods[i].base && v < rw_mods[i].end) {
+      *off = v - rw_mods[i].base;
+      return rw_mods[i].name;
+    }
+  return 0;
+}
+
+static int rw_readable(unsigned long a) {
+  unsigned char vec[8];
+  unsigned long page = a & ~0xFFFul;
+  if (page < 0x10000ul) return 0;
+  return mincore((void *)page, 4096, vec) == 0;
+}
+
+struct rb { char *start, *p, *e; };
+
+static void rb_s(struct rb *b, const char *s) {
+  while (*s && b->p < b->e) *b->p++ = *s++;
+}
+static void rb_c(struct rb *b, char c) {
+  if (b->p < b->e) *b->p++ = c;
+}
+static void rb_hex(struct rb *b, unsigned long v) {
+  char t[17];
+  int n = 0;
+  if (!v) { rb_c(b, '0'); return; }
+  while (v) { t[n++] = "0123456789abcdef"[v & 15]; v >>= 4; }
+  while (n) rb_c(b, t[--n]);
+}
+static void rb_dec(struct rb *b, long v) {
+  char t[20];
+  int n = 0, neg = 0;
+  if (v < 0) { neg = 1; v = -v; }
+  if (!v) { rb_c(b, '0'); return; }
+  while (v) { t[n++] = (char)('0' + v % 10); v /= 10; }
+  if (neg) rb_c(b, '-');
+  while (n) rb_c(b, t[--n]);
+}
+static void rb_flush(struct rb *b) {
+  if (b->p > b->start) {
+    ssize_t w = write(2, b->start, (size_t)(b->p - b->start));
+    (void)w;
+  }
+  b->p = b->start;
+}
+/* `name=0x<v>` plus `(<mod>+0x<off>)` when the value points into a module. */
+static void rb_reg(struct rb *b, const char *name, unsigned long v, int tag) {
+  rb_c(b, ' ');
+  rb_s(b, name);
+  rb_s(b, "=0x");
+  rb_hex(b, v);
+  if (tag) {
+    unsigned long off = 0;
+    const char *m = rw_mod_of(v, &off);
+    if (m) {
+      rb_c(b, '(');
+      rb_s(b, m);
+      rb_s(b, "+0x");
+      rb_hex(b, off);
+      rb_c(b, ')');
+    }
+  }
+}
+
+/* One dump per process; then the default action so the kernel's own
+   `memory fault` row (and the exit status) still happen exactly once. */
+static void rw_sig_handler(int sig, siginfo_t *si, void *ucv) {
+  if (rw_sigdumped) {
+    signal(sig, SIG_DFL);
+    return;
+  }
+  rw_sigdumped = 1;
+  ucontext_t *uc = (ucontext_t *)ucv;
+  greg_t *g = uc->uc_mcontext.gregs;
+
+  char buf[2048];
+  struct rb b = {buf, buf, buf + sizeof buf - 8};
+
+  rb_s(&b, "[SIGDUMP] ");
+  rb_s(&b, sig == SIGSEGV ? "SIGSEGV" : (sig == SIGBUS ? "SIGBUS" : "SIGother"));
+  rb_s(&b, " code=");
+  rb_dec(&b, si ? si->si_code : -1);
+  rb_s(&b, " addr=0x");
+  rb_hex(&b, (unsigned long)(si ? si->si_addr : 0));
+  rb_s(&b, "\n");
+  rb_flush(&b);
+
+  /* The four fields the ladder asked for first, each tagged with the module
+     it points into (a dispatch-table base shows up as `U+0x...`). */
+  rb_s(&b, "[SIGDUMP] uctx");
+  rb_reg(&b, "rip", (unsigned long)g[REG_RIP], 1);
+  rb_reg(&b, "rsp", (unsigned long)g[REG_RSP], 0);
+  rb_reg(&b, "rax", (unsigned long)g[REG_RAX], 1);
+  rb_reg(&b, "rdi", (unsigned long)g[REG_RDI], 1);
+  rb_reg(&b, "rsi", (unsigned long)g[REG_RSI], 1);
+  rb_reg(&b, "rdx", (unsigned long)g[REG_RDX], 1);
+  rb_s(&b, "\n");
+  rb_flush(&b);
+
+  rb_s(&b, "[SIGDUMP] greg");
+  rb_reg(&b, "rbx", (unsigned long)g[REG_RBX], 1);
+  rb_reg(&b, "rcx", (unsigned long)g[REG_RCX], 1);
+  rb_reg(&b, "rbp", (unsigned long)g[REG_RBP], 1);
+  rb_reg(&b, "r8", (unsigned long)g[REG_R8], 1);
+  rb_reg(&b, "r9", (unsigned long)g[REG_R9], 1);
+  rb_reg(&b, "r10", (unsigned long)g[REG_R10], 1);
+  rb_reg(&b, "r11", (unsigned long)g[REG_R11], 1);
+  rb_reg(&b, "r12", (unsigned long)g[REG_R12], 1);
+  rb_reg(&b, "r13", (unsigned long)g[REG_R13], 1);
+  rb_reg(&b, "r14", (unsigned long)g[REG_R14], 1);
+  rb_reg(&b, "r15", (unsigned long)g[REG_R15], 1);
+  rb_s(&b, "\n");
+  rb_flush(&b);
+
+  /* The first four qwords behind each pointer-ish register: a dispatch table
+     (`call *0x18(%r14)`) or a vtable, i.e. the slot that was NULL and the
+     entries next to it, become visible without a second boot. */
+  {
+    struct { const char *n; unsigned long v; } rv[8] = {
+      {"rax", (unsigned long)g[REG_RAX]}, {"rbx", (unsigned long)g[REG_RBX]},
+      {"rcx", (unsigned long)g[REG_RCX]}, {"rdx", (unsigned long)g[REG_RDX]},
+      {"rsi", (unsigned long)g[REG_RSI]}, {"rdi", (unsigned long)g[REG_RDI]},
+      {"r14", (unsigned long)g[REG_R14]}, {"r15", (unsigned long)g[REG_R15]},
+    };
+    rb_s(&b, "[SIGDUMP] mem");
+    for (int i = 0; i < 8; i++) {
+      unsigned long v = rv[i].v;
+      if (!v || v >= 0x800000000000ul || !rw_readable(v)) continue;
+      rb_c(&b, ' ');
+      rb_s(&b, rv[i].n);
+      rb_c(&b, '=');
+      rb_c(&b, '[');
+      for (int k = 0; k < 4; k++) {
+        unsigned long a = v + (unsigned long)k * 8;
+        if (k) rb_c(&b, ',');
+        if (!rw_readable(a)) { rb_c(&b, '?'); break; }
+        rb_hex(&b, *(volatile unsigned long *)a);
+      }
+      rb_c(&b, ']');
+      if (b.p > b.e - 128) { rb_s(&b, "\n"); rb_flush(&b); rb_s(&b, "[SIGDUMP] mem"); }
+    }
+    rb_s(&b, "\n");
+    rb_flush(&b);
+  }
+
+  /* 24 qwords at the faulting RSP: a `call`-then-`jmp` leaves the caller's
+     return address at [rsp] (or one frame up, if the callee built a frame). */
+  unsigned long sp = (unsigned long)g[REG_RSP];
+  for (int i = 0; i < 24; i++) {
+    unsigned long a = sp + (unsigned long)i * 8;
+    if (i == 0) {
+      rb_s(&b, "[SIGDUMP] stk");
+    }
+    if (!rw_readable(a)) {
+      rb_s(&b, " [+unmapped]");
+      break;
+    }
+    unsigned long v = *(volatile unsigned long *)a;
+    rb_c(&b, ' ');
+    rb_c(&b, '[');
+    rb_hex(&b, (unsigned long)i * 8);
+    rb_s(&b, "]=0x");
+    rb_hex(&b, v);
+    unsigned long off = 0;
+    const char *m = rw_mod_of(v, &off);
+    if (m) {
+      rb_c(&b, '(');
+      rb_s(&b, m);
+      rb_s(&b, "+0x");
+      rb_hex(&b, off);
+      rb_c(&b, ')');
+    }
+    if ((i & 3) == 3) {
+      rb_s(&b, "\n");
+      rb_flush(&b);
+      rb_s(&b, "[SIGDUMP] stk");
+    }
+  }
+  rb_s(&b, "\n");
+  rb_flush(&b);
+
+  /* Every word of the first 2 KiB of stack that lands inside a module, in
+     stack order (so frame order): the caller chain, with offsets that
+     objdump -d resolves without the guest's missing /proc/self/maps. */
+  rb_s(&b, "[SIGDUMP] chain");
+  int hits = 0;
+  for (unsigned long i = 0; i < 0x800 && hits < 20; i += 8) {
+    unsigned long a = sp + i;
+    if (!rw_readable(a)) break;
+    unsigned long v = *(volatile unsigned long *)a;
+    unsigned long off = 0;
+    const char *m = rw_mod_of(v, &off);
+    if (!m) continue;
+    rb_s(&b, " [+0x");
+    rb_hex(&b, i);
+    rb_s(&b, "]->");
+    rb_s(&b, m);
+    rb_s(&b, "+0x");
+    rb_hex(&b, off);
+    hits++;
+  }
+  rb_s(&b, "\n");
+  rb_flush(&b);
+
+  signal(sig, SIG_DFL);
+}
+
+/* ---- who else installs SIGSEGV? -----------------------------------------
+ * Measured (L29, first instrumented run): the launcher armed its handler
+ * ("sigdump armed mods=4"), the game then died at PC=0 -- and not one
+ * [SIGDUMP] row appeared, while a SECOND fault followed inside UnityPlayer
+ * with every register reading 0xB.  That is somebody else's handler running
+ * and crashing.  Mono installs SIGSEGV for null-check translation and Unity
+ * installs a crash handler after it; a launcher-level dump is only useful if
+ * it survives both.  So the disposition is watched: every non-default
+ * SIGSEGV/SIGBUS/SIGILL install is logged with the installer's return
+ * address, and the launcher's dump stays installed (RW_SIGKEEP=0 restores
+ * the old "let them have it" behaviour for an A/B).
+ */
+static int (*next_sigaction)(int, const struct sigaction *, struct sigaction *);
+
+static int rw_sig_keep(void) {
+  static int on = -1;
+  if (on < 0) {
+    const char *v = getenv("RW_SIGKEEP");
+    on = (v && v[0] == '0') ? 0 : 1;
+  }
+  return on;
+}
+
+int sigaction(int sig, const struct sigaction *act, struct sigaction *old) {
+  if (!next_sigaction)
+    next_sigaction = (int (*)(int, const struct sigaction *, struct sigaction *))
+        dlvsym(RTLD_NEXT, "sigaction", "GLIBC_2.2.5");
+  if (act && act->sa_sigaction == rw_sig_handler)
+    return next_sigaction ? next_sigaction(sig, act, old) : -1; /* re-arming ours */
+  if (act && (sig == SIGSEGV || sig == SIGBUS || sig == SIGILL) &&
+      act->sa_handler != SIG_DFL && act->sa_handler != SIG_IGN) {
+    fprintf(stderr, "[RWMAIN] sigaction sig=%d handler=%p flags=0x%x from=%p %s\n",
+            sig, (void *)act->sa_handler, (unsigned)act->sa_flags,
+            __builtin_return_address(0), rw_sig_keep() ? "KEEP-OURS" : "replaced");
+    if (rw_sig_keep()) {
+      if (old) {
+        memset(old, 0, sizeof *old);
+        old->sa_sigaction = rw_sig_handler;
+        old->sa_flags = SA_SIGINFO;
+      }
+      return 0;
+    }
+  } else if (act && (sig == SIGSEGV || sig == SIGBUS || sig == SIGILL)) {
+    fprintf(stderr, "[RWMAIN] sigaction sig=%d handler=%s from=%p\n", sig,
+            act->sa_handler == SIG_DFL ? "SIG_DFL" : "SIG_IGN",
+            __builtin_return_address(0));
+  }
+  return next_sigaction ? next_sigaction(sig, act, old) : -1;
+}
+
+void (*signal(int sig, void (*h)(int)))(int) {
+  /* glibc's signal() is not routed through the exported sigaction(), so it
+     needs its own watch.  Reaching the real one through dlvsym keeps this
+     definition from recursing into itself. */
+  typedef void (*sigh_t)(int);
+  static sigh_t (*real_signal)(int, sigh_t);
+  if (!real_signal)
+    real_signal = (sigh_t (*)(int, sigh_t))
+        dlvsym(RTLD_NEXT, "signal", "GLIBC_2.2.5");
+  if (sig == SIGSEGV || sig == SIGBUS || sig == SIGILL) {
+    fprintf(stderr, "[RWMAIN] signal() sig=%d handler=%p from=%p %s\n",
+            sig, (void *)h, __builtin_return_address(0),
+            (h != SIG_DFL && h != SIG_IGN && rw_sig_keep()) ? "KEEP-OURS" : "");
+    if (h != SIG_DFL && h != SIG_IGN && rw_sig_keep()) {
+      return SIG_IGN; /* pretend it took; ours stays armed */
+    }
+  }
+  return real_signal ? real_signal(sig, h) : SIG_ERR;
+}
+
+static void rw_sig_install(void) {
+  const char *v = getenv("RW_SIGDUMP");
+  if (v && v[0] == '0') return;
+  rw_mods_collect();
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_sigaction = rw_sig_handler;
+  sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+  sigemptyset(&sa.sa_mask);
+  /* The interposed sigaction() above is this file's own definition, so
+     calling it here would take the "KEEP-OURS" branch and never reach the
+     kernel -- measured: the process died at PC=0 with no [SIGDUMP] row at
+     all.  Install through the real entry point. */
+  if (!next_sigaction)
+    next_sigaction = (int (*)(int, const struct sigaction *, struct sigaction *))
+        dlvsym(RTLD_NEXT, "sigaction", "GLIBC_2.2.5");
+  if (!next_sigaction || next_sigaction(SIGSEGV, &sa, 0) != 0 ||
+      next_sigaction(SIGBUS, &sa, 0) != 0) {
+    char e[96];
+    struct rb eb = {e, e, e + sizeof e - 2};
+    rb_s(&eb, "[RWMAIN] sigdump INSTALL FAILED\n");
+    rb_flush(&eb);
+    return;
+  }
+  char line[128];
+  struct rb b = {line, line, line + sizeof line - 2};
+  rb_s(&b, "[RWMAIN] sigdump armed mods=");
+  rb_dec(&b, rw_mod_n);
+  rb_s(&b, "\n");
+  rb_flush(&b);
+}
 
 /* ---- pthread symbol shadowing (A/B knob) --------------------------------
  * This launcher is linked -rdynamic so that dlopen()/dlsym() are exported
@@ -707,6 +1088,7 @@ static void preload_gl_deps(void) {
 
 int main(int argc, char **argv) {
   fprintf(stderr, "[RWMAIN] AD-9 PlayerMain launcher start argc=%d\n", argc);
+  rw_sig_install();
   if (!next_dlopen) next_dlopen = (void *(*)(const char *, int))dlsym(RTLD_NEXT, "dlopen");
   preload_gl_deps();
 #ifndef RW_NO_SHADOW_PTHREAD

@@ -2224,3 +2224,227 @@ python3 tools/gate/m4_gl_probe.py         m4: PASS
 - The Xkb/XFixes/RandR/VidMode/ScreenSaver/Shm exports are presence stubs:
   they remove NULL slots and answer "extension not present", they do not
   implement those extensions.
+
+## 19. 2026-11-04 — M6: the NULL jump is `XIGrabTouchBegin`, and the compat signal frame was 8 bytes off the ABI
+
+Lane L29 (`rw-l29-nulljump`), tree seeded after wave 12. §18 ended with a jump
+to address 0 (`PC=0`, `rdi=&g_d`) right after the post-reparent
+`XCheckIfEvent(UnmapNotify)` probe returned false, and the one instrument that
+could name the caller — a `SIGSEGV` ucontext dump — did not exist yet. It does
+now, and this section is what it said.
+
+### 19.1 The instrument, and the two bugs that made it lie
+
+`src/user/rwmain.c` (the AD-9 launcher) installs `SA_SIGINFO` handlers for
+`SIGSEGV`/`SIGBUS`. The handler is `write(2)` over a hand-rolled hex/dec
+formatter (no stdio, no allocation) and prints, in this order:
+
+- the fault (`si_code`, `si_addr`);
+- `ucontext` `rip`/`rsp`/`rax`/`rdi`/`rsi`/`rdx`, each tagged with
+  `<module>+0x<off>` when it points into a mapped object;
+- every other GP register, same tagging (`rbx rcx rbp r8..r15`);
+- the first four qwords *behind* each pointer-ish register (`mem`), so a
+  dispatch table, a vtable and the object that held the NULL are all visible
+  without a second boot;
+- 24 qwords at the faulting `rsp`, then a scan of the first 2 KiB of stack for
+  words that land inside a module (the caller chain, with offsets).
+
+Every stack read is probed with `mincore()` first: an unmapped page would fault
+inside the handler and the kernel would kill the process before the row was
+flushed.
+
+Two things were measured by *not* getting a dump, and both are real:
+
+1. **The install never reached the kernel.** `sigaction()` in this file is
+   interposed (see 19.1b), so `rw_sig_install()`'s own call hit the wrapper,
+   took its "keep ours" branch and returned success without a syscall. The
+   launcher printed `sigdump armed` and then died with the default action.
+   `rw_sig_install()` now goes through the real `sigaction` it resolved with
+   `dlvsym(RTLD_NEXT, ...)`.
+2. **Someone else owns SIGSEGV.** Mono installs a handler for null-check
+   translation and Unity installs a crash handler *before* it
+   (`UnityPlayer+0xde6800`, `SA_SIGINFO`), and both arrive after the launcher's
+   install. Measured: with our handler replaced, the first fault at `PC=0` was
+   followed by a *second* fault inside UnityPlayer with every register reading
+   `0xB` — somebody else's handler, crashing. So `sigaction`/`signal` are
+   interposed too: every non-default `SIGSEGV`/`SIGBUS`/`SIGILL` install is
+   logged with the installer's return address and the launcher's dump stays
+   installed (`RW_SIGKEEP=0` restores the old behaviour for an A/B).
+
+### 19.1b The compat signal frame was 8 bytes off the x86-64 ABI
+
+With the handler finally installed it was entered — and faulted immediately:
+
+```text
+[KERNEL] User process fault! Vector: 13 RIP: 0x1000003971
+```
+
+`0x1000003971` is `movaps %xmm0,0x30(%rsp)` in the handler's prologue: a #GP
+from a misaligned SSE spill. Linux enters a signal handler with
+`%rsp % 16 == 8` (the psABI's function-entry invariant, because a `call` leaves
+`rsp ≡ 8`); `l_sf_plant()` built the frame at a 16-byte boundary and entered the
+handler with `%rsp % 16 == 0`, so every normally-compiled handler that spills
+with `movaps` dies. Verified against the host with a naked handler:
+`host Linux: handler entry rsp % 16 == 8`.
+
+The fix (`src/kernel/linux_compat_thr.c`) makes the frame start 8 bytes *below*
+the boundary (`base = ((sp - L_SF_SIZE) & ~15) - 8`) — which also puts the
+ucontext on `frame+8` (16-aligned, exactly as Linux has it) — and moves the
+FXSAVE image from `frame+560` to `frame+568` so it stays 16-aligned for
+`FXSAVE`/`FXRSTOR`. `rt_sigreturn` already re-derives `frame = rsp - 8` because
+the handler's `ret` pops the pretcode, so nothing else changed. This is the
+*second* handler-side bug this frame had; `l_sf_plant` is now the one place a
+signal-frame ABI claim lives.
+
+### 19.2 The dump, and the callee it names
+
+```text
+[XC] XCheckIfEvent caller=0x1082456e87
+[SIGDUMP] SIGSEGV code=1 addr=0x0
+[SIGDUMP] uctx rip=0x0 rsp=0x17ffffb2d8 rax=0x10400c9370 rdi=0x1080210000 rsi=0x0 rdx=0x200002
+[SIGDUMP] greg rbx=0x10400c9370 rcx=0x1 rbp=0x0 r8=0x17ffffb2f8 r9=0x1 r10=0x1082b30358 r11=0x0
+          r12=0x10400cf050 r13=0x200003 r14=0x1080210000 r15=0x10400335c0
+[SIGDUMP] mem rax=[10400cf050,200002,200003,10802172b8] rdi=[0,0,5,b] r15=[1080d2ce6f,108244c034,...]
+[SIGDUMP] stk [0]=0x1082458083 [8]=0x17ffffb2f0 ... [30]=0x108245765d ...
+[SIGDUMP] chain [+0x680]->ld-linux-x86-64.so.2+0x12bdc ...
+```
+
+`stk[0]` is the return address of the faulting call, and `r10 = 0x1082b30358`
+is the slot it read. With `UnityPlayer.so` loaded at `0x1080b0a000`:
+
+- `stk[0] - base = 0x194e083` → **`0x194e080: call *(%r10)`**
+  (`mov 0x60c8d5(%rip),%r10 # 0x1f5a940` at `0x194e064`; `r10 = base+0x2026358`,
+  so the call is `call *(base+0x2026358)`);
+- the slot `UnityPlayer+0x2026358` is filled at `UnityPlayer+0x194162a`
+  (`mov %rax,0x6e4d22(%rip)`) from the resolver call
+  `0x19419cc(name=*0x294a76, ctx)` — and the string at `0x294a76` is
+  **`XIGrabTouchBegin`**;
+- the neighbouring slots name the whole family in order: `XIQueryDevice`,
+  `XIFreeDeviceInfo`, `XISelectEvents`, `XIGrabTouchBegin`,
+  `XIUngrabTouchBegin`, `XIQueryVersion`, `XIGetSelectedEvents` — the eight
+  names `tools/rw/x11-symbols.txt` attributes to `libXi.so.6`.
+
+The call signature matches the dump exactly
+(`XIGrabTouchBegin(dpy, deviceid=0, win=0x200002, owner_events=1, mask, 1, mods)`),
+and the reason the slot is NULL is one line earlier in the serial:
+
+```text
+[RWMAIN] dlopen FAILED libXi.so.6: libXi.so.6: cannot open shared object file: No such file or directory
+```
+
+Unity resolves the XI entry points out of that handle, stores NULL for every
+one of them, and calls `XIGrabTouchBegin` **without a NULL check** when the
+window is shown. A missing *extension* is survivable in this build —
+`XQueryExtension` already answers False for everything and Unity still calls the
+entry point — so "report the extension absent" was already the state and it
+crashed anyway. The soname has to exist.
+
+### 19.3 The fix: `libXi.so.6` with "no XInput2 device here" semantics
+
+`src/user/xcompat/xi_null.c` (staged by `src/user/xcompat/stage.sh` like every
+other `libX*.so.*`, built by `Makefile.inc`, gated by
+`src/user/xcompat/required-xi.txt` + `make xcompat_xi_check`):
+
+| entry point | answer |
+|---|---|
+| `XIQueryVersion` | `BadRequest`, `*major=2 *minor=0` — no XInput extension to negotiate with |
+| `XIQueryDevice` | `NULL`, `*ndevices_return = 0` |
+| `XISelectEvents` | `Success`, does nothing |
+| `XIGrabTouchBegin` | `Failure` (no touch device exists, so a touch grab cannot be granted) |
+| `XIUngrabTouchBegin` | `Success` (nothing was grabbed) |
+| `XIGetSelectedEvents` | `NULL`, `*num_masks_return = 0` |
+| `XIFreeDeviceInfo`, `XIBarrierReleasePointer` | no-ops |
+
+No libc, no allocation, nothing blocking, no `DT_NEEDED` — the same rules as
+`udev_null.c`/`alsa_null.c`. The grab row is traced to fd 2, so the ladder
+carries it: `[XI] XIGrabTouchBegin dev=0 win=0x200002 owner=1 -> Failure (no touch device)`.
+
+### 19.4 Also: the Mesa DSO the harness staged was stale
+
+`patches/0006` (export `glXCreateContextAttribsARB`) and `0007` (trace
+`glXGetProcAddress`) were committed in wave 12 but `obj/mesa/lib/libGL.so.1`
+was still the pre-patch object: `readelf --dyn-syms` had no
+`glXCreateContextAttribsARB` and `strings | grep HOBBYOS_GLX_TRACE` was empty
+(skill rule 29 again). That is why §18.5 concluded "no `glXGetProcAddress` call
+happens at all" — the trace it was looking for was not in the binary. After
+`bash tools/mesa/build-hobbyos.sh` (65 s, object cache) the trace fires on the
+first GLX call and the game's `glXGetProcAddress(glXCreateContextAttribsARB)`
+answers `0x1133abe250`. **A green source tree is not a staged DSO.**
+
+### 19.5 After: the ladder reaches GfxDevice and an OpenGL 3.3 device
+
+```text
+[XI] XIGrabTouchBegin dev=0 win=0x200002 owner=1 -> Failure (no touch device)
+[GLX] context request 4.5 core -> 3.3 core
+Initialize engine version: 2022.3.35f1 (011206c7a712)
+Forcing GfxDevice: OpenGL Core
+GfxDevice: creating device client; threaded=1; jobified=0
+Renderer: softpipe
+OPENGL LOG: Creating OpenGL 3.3 graphics device ; Context level  <OpenGL 3.3> ; Context handle 1076667072
+```
+
+The window is on the desktop and it **paints**: `01_running.png` shows the
+maximized `RLAUNCH` frame (1916x1018 content rect) whose white content area
+carries Unity's own on-screen log text (`UnityMemoryConfigurationParameters`,
+the PlayerPrefs path warning) — i.e. softpipe rendered glyphs, `XPutImage`
+presented them and the desktop composited them. The process then dies in audio
+init, below, so this is a presented frame, not a game scene.
+
+### 19.6 The next blocker (exact row): a relocation store into a dlopen'ed DSO's data page
+
+FMOD's audio probe loads the piece DSOs and then dies on a **write** to a page
+whose VMA says read-write but whose PTE does not:
+
+```text
+[RWMAIN] dlopen ok libpulse-simple.so.0 -> 0x104c644ac0 base=0x1087d12000
+[RWMAIN] dlopen ok libasound.so.2       -> 0x104c644ac0 base=0x1087d12000   <- same handle AND base
+[RWMAIN] dlopen ok libasound.so.2       -> 0x104c644b30 base=0x1087d12000   <- new handle, same base
+FMOD failed to initialize the output device.: "Error initializing output device. " (60)
+[SIGDUMP] SIGSEGV code=1 addr=0x1087d15f18
+[SIGDUMP] uctx rip=0x10080077ce(ld-linux-x86-64.so.2+0x77ce) rsp=... rax=0x1087d15f10 r10=0x1087d12000
+[KERNEL] pid=4 memory fault VA=0x1087D15F18 PC=0x10080077CE rw=w in=PROT
+         region=0x1087D15000+0x2000 prot=3 kind=7 -> killed
+```
+
+`ld.so+0x77ce` is applying a relocation (`rax` is the store address,
+`base+0x3f10`), i.e. the first write to a `MAP_PRIVATE` file page of a DSO the
+loader has just mapped: `vm_handle_fault` answered `PROT` instead of copying the
+page. Two facts to check first, both visible above: glibc's `dlopen` returned
+**the same handle** for two different sonames (a `st_dev`/`st_ino` collision
+would do that), and the third `dlopen` mapped a *different* object at **the same
+base** as the first. Both point at the loader/mmap side, not at audio.
+
+### 19.7 Regressions (serialized, never with the desktop harness)
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 407   Tests failed: 0
+python3 tools/gate/m3_window_probe.py     m3w: PASS
+python3 tools/gate/m4_gl_probe.py         m4: PASS
+```
+
+### 19.8 Instruments added (kept)
+
+- `src/user/rwmain.c`: `[SIGDUMP]` ucontext dump (registers, `mem`, stack,
+  chain), `sigaction`/`signal` install watch with `RW_SIGKEEP`, `rw_sig_install`
+  through the real entry point.
+- `src/kernel/linux_compat_thr.c`: Linux ABI signal-frame alignment (frame ≡ 8
+  mod 16, fpstate at `frame+568`).
+- `src/user/xcompat/xi_null.c` + `required-xi.txt` + `xcompat_xi_check`.
+- `tools/rw/build-ad9-launcher.sh`: rebuild only the AD-9 launcher (pair with
+  `RW_SKIP_BUILD=1 tools/rw/run-rimworld-desktop.sh`).
+
+### 19.9 Limits
+
+- `RW_SIGKEEP` keeps the launcher's dump installed, which also disables Mono's
+  null-check translation while it is on. It is a diagnostic default; a lane that
+  wants Mono's handler back should set `RW_SIGKEEP=0`.
+- The dump's module table is refreshed after every `dlopen` (the handler must
+  not walk the module list itself: `dl_iterate_phdr` takes the loader lock, and
+  the faults worth dumping happen inside `ld.so`). A register that points into a
+  DSO loaded *after* the last successful `dlopen` still prints untagged;
+  `mods=4` in the `sigdump armed` row is the startup value.
+- `RW_SKIP_BUILD=1` after a gate boots that gate's `disk.img` (`PROBE.ELF`,
+  `System halt`), not the desktop. Re-run the full harness after m3/m4.
+- `libXi.so.6` implements no XInput2 protocol: it answers "no devices, no
+  grab". A client that needs real XI2 (touch, tablets, raw events) gets the
+  no-hardware answer, which is what this desktop is.

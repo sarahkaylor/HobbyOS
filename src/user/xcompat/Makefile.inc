@@ -53,6 +53,12 @@ XCOMPAT_LIBASOUND = $(XCOMPAT_OBJ)/libasound.so.2
 # docs/rimworld-launch-log.md §11).  Same rules as the rest: real soname, no
 # DT_NEEDED, no libc.
 XCOMPAT_LIBUDEV   = $(XCOMPAT_OBJ)/libudev.so.1
+# libXi.so.6: Unity resolves its XInput2 entry points out of this handle and
+# calls XIGrabTouchBegin without a NULL check right after the window is shown
+# (measured: PC=0 with the Display* in rdi, docs/rimworld-launch-log.md §19).
+# A missing soname is not a survivable "extension absent" here, so the DSO
+# exists and every XI name answers "no device, no grab".
+XCOMPAT_LIBXI     = $(XCOMPAT_OBJ)/libXi.so.6
 # PulseAudio is FMOD's *first* choice (libpulse-simple.so.0, which pulls
 # libpulse.so.0 through DT_NEEDED on a real system).  Both sonames are built
 # from the same source; see pulse_null.c for why the export set is a union.
@@ -102,9 +108,14 @@ $(XCOMPAT_LIBUDEV): $(XCOMPAT_DIR)/udev_null.c $(XCOMPAT_DIR)/udev_abi.h
 	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_DSOFLAGS) \
 	  -Wl,-soname,libudev.so.1 -o $@ $(XCOMPAT_DIR)/udev_null.c
 
+$(XCOMPAT_LIBXI): $(XCOMPAT_DIR)/xi_null.c $(XCOMPAT_DIR)/xrt.c
+	@mkdir -p $(XCOMPAT_OBJ)
+	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_DSOFLAGS) \
+	  -Wl,-soname,libXi.so.6 -o $@ $(XCOMPAT_DIR)/xi_null.c $(XCOMPAT_DIR)/xrt.c
+
 ifeq ($(XCOMPAT_DSOS_ENABLED),1)
 xcompat_dsos: $(XCOMPAT_LIBX11) $(XCOMPAT_LIBASOUND) $(XCOMPAT_LIBPULSE_SIMPLE) \
-              $(XCOMPAT_LIBPULSE) $(XCOMPAT_LIBUDEV)
+              $(XCOMPAT_LIBPULSE) $(XCOMPAT_LIBUDEV) $(XCOMPAT_LIBXI)
 else
 xcompat_dsos:
 	@echo "xcompat: DSOs are x86_64-only (ARCH=$(ARCH)); skipped"
@@ -221,6 +232,31 @@ $(XCOMPAT_UDEV_CHECK): $(XCOMPAT_LIBUDEV) $(XCOMPAT_DIR)/required-udev.txt
 
 xcompat_udev_check: $(XCOMPAT_UDEV_CHECK)
 .PHONY: xcompat_udev_check
+
+# ---- the libXi export gate -------------------------------------------- *
+# Unity resolves exactly these eight names out of the libXi.so.6 handle
+# (tools/rw/x11-symbols.txt, measured from the game binary) and calls
+# XIGrabTouchBegin without a NULL check.  A missing export is the same jump to
+# address 0 that this DSO exists to remove, so the set is checked in the build.
+XCOMPAT_XI_CHECK = $(XCOMPAT_OBJ)/.xi-exports-ok
+
+$(XCOMPAT_XI_CHECK): $(XCOMPAT_LIBXI) $(XCOMPAT_DIR)/required-xi.txt
+	@nm -D --defined-only $(XCOMPAT_LIBXI) | \
+	  awk '$$2 ~ /^[TWi]$$/ {print $$3}' | sed 's/@.*//' | LC_ALL=C sort -u \
+	  > $(XCOMPAT_OBJ)/libXi.exports
+	@miss=$$(LC_ALL=C comm -23 $(XCOMPAT_DIR)/required-xi.txt \
+	          $(XCOMPAT_OBJ)/libXi.exports); \
+	if [ -n "$$miss" ]; then \
+	  echo "xcompat: libXi.so.6 is missing required symbols:"; \
+	  echo "$$miss" | sed 's/^/  /'; exit 1; fi
+	@if readelf -d $(XCOMPAT_LIBXI) | grep -q '(NEEDED)'; then \
+	  echo "xcompat: libXi.so.6 has a DT_NEEDED edge; compat DSOs must be free of them"; \
+	  exit 1; fi
+	@echo "xcompat: libXi.so.6 exports all $$(wc -l < $(XCOMPAT_DIR)/required-xi.txt) required XI2 symbols, 0 DT_NEEDED"
+	@touch $@
+
+xcompat_xi_check: $(XCOMPAT_XI_CHECK)
+.PHONY: xcompat_xi_check
 
 # ---- host test (Tier 1) ----------------------------------------------- *
 # The ABI differential needs the host's own X11 headers.  They are optional:
