@@ -46,8 +46,10 @@
 
 #include "arch/trap.h"
 #include "errno.h"
+#include "fb_mmap.h"
 #include "fs.h"
 #include "ipc_proto.h"
+#include "linux_fb.h"
 #include "linux_syscall.h"
 #include "process.h"
 
@@ -607,6 +609,28 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
   }
   if (req == L_TCGETS || req == L_TCSETS || req == L_TIOCGWINSZ)
     return l_ret(tf, -ENOTTY);
+  /* GB-032: the FBIO family on /dev/fb0.  linux_compat_dispatch() owns
+     ioctl(16), so the trap.c number-translation arm (which has the same
+     requests) never runs for a Linux-ABI process: a probe that opened and
+     mmap'd /dev/fb0 still got ENOTTY from FBIOGET_VSCREENINFO — measured
+     in the guest on GB-032 (2026-11-04) with `sdl test app: fb
+     unavailable (errno=25)`.  Route the requests the node actually
+     implements here, in sys_fb_ioctl()'s native (req, arg) register
+     shape, and keep ENOTTY for every other fd/request.
+     x86_64 only: the Linux-ABI layer is x64-only, and sys_fb_ioctl()'s
+     register convention above is the x86 one. */
+#ifdef __x86_64__
+  if (req == FBIOGET_VSCREENINFO || req == FBIOGET_FSCREENINFO ||
+      req == HB_FBIOBLANK) {
+    extern int file_fd_is_devfb(struct process *, int);
+    extern void sys_fb_ioctl(struct trap_frame *);
+    if (!file_fd_is_devfb(p, fd)) return l_ret(tf, -ENOTTY);
+    tf->regs[5] = (uint64_t)req;
+    tf->regs[4] = arg;
+    sys_fb_ioctl(tf);
+    return 1;
+  }
+#endif
   if (req == (uint32_t)L_F_GETFL) return l_ret(tf, file_fcntl(p, fd, K_F_GETFL, 0));
   if (req == (uint32_t)L_F_SETFL) return l_ret(tf, file_fcntl(p, fd, K_F_SETFL, arg));
   return l_ret(tf, -ENOTTY);
