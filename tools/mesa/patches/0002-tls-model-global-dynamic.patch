@@ -1,0 +1,36 @@
+Subject: [PATCH 2/2] util: allow a dlopen()ed libGL to use global-dynamic TLS
+
+Mesa marks the glapi dispatch TLS initial-exec (u_thread.h) because glibc
+reserves a fixed static-TLS surplus "even if [Mesa] is dlopen()ed after init".
+That assumption fails for the HobbyOS compat DSO: it keeps the 4 KiB
+thread-local debug buffer, so PT_TLS is 4400 bytes against glibc's 1664-byte
+surplus, and dlopen(RTLD_NOW) returns "cannot allocate memory in static TLS
+block" (measured on the host and in the guest).
+
+Compiling with -DMESA_TLS_GLOBAL_DYNAMIC drops the attribute (and
+REALLY_INITIAL_EXEC, whose asm entry only applies to KMS/DRM builds).  The cost
+is a __tls_get_addr call per dispatch, which is the correct trade for a DSO
+that must load after start-up.
+
+This is a marked patch of upstream source, like
+0001-glx-xlib-no-private-Xlib-hooks.patch; it changes nothing unless the define
+is set.
+--- a/src/util/u_thread.h	2026-11-03 21:41:34.046098641 -0600
++++ b/src/util/u_thread.h	2026-11-03 21:41:34.046116555 -0600
+@@ -50,9 +50,15 @@
+  * but not with __thread
+  */
+ #define __THREAD_INITIAL_EXEC __thread
+-#elif defined(__GLIBC__)
++#elif defined(__GLIBC__) && !defined(MESA_TLS_GLOBAL_DYNAMIC)
+ #define __THREAD_INITIAL_EXEC thread_local __attribute__((tls_model("initial-exec")))
+ #define REALLY_INITIAL_EXEC
++#elif defined(MESA_TLS_GLOBAL_DYNAMIC)
++/* HobbyOS/compat: a dlopen()ed libGL cannot assume glibc's static-TLS surplus.
++ * This DSO keeps Mesa's 4 KiB thread-local debug buffer, so its PT_TLS is 4400
++ * bytes while glibc reserves 1664, and dlopen() fails with "cannot allocate
++ * memory in static TLS block".  Global-dynamic TLS is allocated in the DTV. */
++#define __THREAD_INITIAL_EXEC thread_local
+ #else
+ #define __THREAD_INITIAL_EXEC thread_local
+ #endif
