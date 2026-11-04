@@ -1519,7 +1519,10 @@ static void sys_map_fb(struct trap_frame *tf) {
  * FBIOGET_VSCREENINFO/FSCREENINFO copy a Linux-layout struct OUT to arg
  * (validated first); FBIOBLANK takes a plain value (validated implicitly
  * by hb_fb_blank_ioctl).  Returns 0 | -1 (unknown request) | -EFAULT. */
-static void sys_fb_ioctl(struct trap_frame *tf) {
+/* GB-032: shared with the Linux-ABI ioctl arm in linux_compat_fd.c — that
+   dispatcher runs before this file's number-translation switch, so the FBIO
+   routing is called from both places. */
+void sys_fb_ioctl(struct trap_frame *tf) {
   unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
   void *arg = (void *)tf->regs[4];                    /* rsi */
   uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
