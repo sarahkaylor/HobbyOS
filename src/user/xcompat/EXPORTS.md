@@ -1,6 +1,9 @@
 # EXPORTS.md — frozen interface **F4**: the compat DSO symbol set
 
-Status: **measured and frozen 2026-11-02** (lane L4, branch `rw-l4-window`).
+Status: **measured and frozen 2026-11-02** (lane L4, branch `rw-l4-window`);
+**extended 2026-11-04** (lane L18) with the PulseAudio sets, and regenerated —
+which also resynced the libX11 rows with `libx11.c` (`XPutImage` is IMPL and
+`XDrawString` renders glyphs now; both landed after the 11-02 freeze).
 Owner: L4. Change protocol: regenerate with `tools/gen_exports.py` + an
 amendment in `docs/rimworld-plan.md` §7.3.
 
@@ -13,17 +16,20 @@ measurements in §2 plus a parse of `libx11.c`.
 $ python3 src/user/xcompat/tools/gen_exports.py \
       --game /mnt/fast/games/steamapps/common/RimWorld
 required libX11 symbols : 129
-exported by the DSO     : 243 (77 IMPL, 166 STUB)
+exported by the DSO     : 246 (78 IMPL, 168 STUB)
 required but missing    : 0
 required ALSA symbols   : 19
+required pulse symbols  : 21 (exported by the shims: 25, missing: 0)
 ```
 
 Headline numbers:
 
 | DSO | required by the game | exported by our DSO | of the required: IMPL / PARTIAL / STUB |
 |---|---|---|---|
-| `libX11.so.6` | **129** | **243** | 45 / 5 / 79 |
+| `libX11.so.6` | **129** | **246** | 47 / 4 / 78 |
 | `libasound.so.2` | **19** | **19** | 0 / 0 / 19 (all "no device") |
+| `libpulse-simple.so.0` | **21** | **25** | 0 / 0 / 25 (all "no server"; the union is exported by both pulse sonames) |
+| `libpulse.so.0` | (reached through libpulse-simple's `DT_NEEDED` on a real host) | **25** (same source) | 0 / 0 / 25 |
 | `libXext`, `libXcursor`, `libXrandr`, `libXi`, `libXinerama`, `libXrender`, `libXfixes`, `libXss` | loaded by SDL, **out of scope here** | not built | see §6 — do **not** ship the real ones |
 
 ---
@@ -39,6 +45,13 @@ but real symbols in a shared object).
 
 **(b) `libasound.so.2`** — 19 `snd_*` names, all returning "no device".
 This is deliberate: HobbyOS has no audio sink in v1 (plan M5). See §7.
+
+**(c) `libpulse-simple.so.0` + `libpulse.so.0`** — 21 `pa_*` names, all
+returning "no server". They are the *first* audio rung FMOD tries, before
+libasound (§2.5); both sonames are built from one source
+(`pulse_null.c`) and export the same 25-symbol union, because the real
+`libpulse-simple` reaches the async API through its `DT_NEEDED` on
+`libpulse` and these shims deliberately carry no `DT_NEEDED` (§7.2).
 
 **Not in this file**: `libGL.so.1` / `libGLX.so.0` / `libEGL.so.1` /
 `libGLESv2.so.2` (lane L5 owns them, interface F5) and the X *extension*
@@ -133,6 +146,40 @@ FMOD tries **PulseAudio first** (`libpulse-simple.so.0`, `libpulse.so.0`) and
 only then falls back to `libasound.so.2`. On this host PulseAudio exists, so
 `libasound` is never opened — which is why §7's verification needed a
 `dlopen` shim that hides Pulse (exactly what a HobbyOS guest looks like).
+
+### 2.5 PulseAudio (the rung before ALSA)
+
+```
+$ strings -a UnityPlayer.so | grep -E '^pa_[a-z_0-9]+$' | sort -u
+21 symbols: pa_channel_map_init_auto pa_context_connect pa_context_disconnect
+pa_context_get_server_info pa_context_get_sink_info_list
+pa_context_get_source_info_list pa_context_get_state pa_context_new
+pa_context_unref pa_mainloop_free pa_mainloop_get_api pa_mainloop_iterate
+pa_mainloop_new pa_operation_get_state pa_operation_unref pa_simple_free
+pa_simple_get_latency pa_simple_new pa_simple_read pa_simple_write
+pa_strerror
+```
+
+The list is the union of two consumers, and the split matters:
+
+| set | symbols | consumer | library that really provides them |
+|---|---|---|---|
+| simple (blocking) | `pa_simple_new/free/read/write/get_latency` | FMOD's `fmod_output_pulseaudio.cpp` | `libpulse-simple.so.0` |
+| async (mainloop) | `pa_context_*`, `pa_mainloop_*`, `pa_operation_*`, `pa_channel_map_init_auto`, `pa_strerror` | SDL's PulseAudio backend | `libpulse.so.0` |
+
+Only **one** soname is in the binary's string table: `libpulse-simple.so.0`.
+The async names still resolve on a real host because `dlsym(handle, …)`
+searches the handle's dependency chain and `libpulse-simple.so.0` NEEDs
+`libpulse.so.0` (which in turn NEEDs `libpulsecommon-17.0.so`, `libsndfile`,
+`libasyncns`, `libapparmor`). That is also why the host trace shows three
+pulse libraries for one `dlopen` — see `docs/rimworld-evidence.md` §4.
+
+Consequence for the shim: it has no `DT_NEEDED` (compat rule), so it must
+export the async names *itself* or a caller resolving through the simple
+handle would find holes. Both built sonames therefore carry the same 25
+exports: the 21 above plus `pa_simple_drain`, `pa_simple_flush` (SDL resolves
+the whole simple block at once), `pa_get_library_version` and
+`pa_context_errno`.
 
 ---
 
@@ -256,7 +303,9 @@ paints the pointer anyway).
 
 ---
 
-## 7. `libasound.so.2`: the failure path, verified against the real game
+## 7. The audio failure path, verified against the real game
+
+### 7.1 `libasound.so.2` — the last rung
 
 The contract is "enumerate zero devices, refuse to open, stay quiet". It was
 verified by making PulseAudio invisible (an `LD_PRELOAD` `dlopen` shim that
@@ -284,6 +333,49 @@ One measured bug fixed on the way, worth keeping: `snd_device_name_hint` must
 set `*hints` to a **NULL-terminated empty array**, not NULL. With NULL, FMOD's
 device walk dereferences it and the game dies with SIGSEGV during audio init
 (measured; the fix and the reason are commented in `alsa_null.c`).
+
+### 7.2 `libpulse-simple.so.0` / `libpulse.so.0` — the first rung
+
+The pulse shim's contract is "there is no server, and I will say so in
+microseconds". Verified two ways on the host (2026-11-04, lane L18), with the
+real game, `DISPLAY=:184` (Xvfb 1280x720), `-force-glcore`:
+
+**(a) the ladder actually runs, and does not stall.** With only the two pulse
+DSOs on the search path (`LD_LIBRARY_PATH=/tmp/pulse-shim`), `strace -f -tt
+-e openat` shows the probe and the fallback 239 µs apart:
+
+```
+17809: 07:53:49.085607 openat(AT_FDCWD, "/tmp/pulse-shim/libpulse-simple.so.0", O_RDONLY|O_CLOEXEC) = 20
+17810: 07:53:49.085846 openat(AT_FDCWD, "/tmp/pulse-shim/libasound.so.2",     O_RDONLY|O_CLOEXEC) = 20   <-- real one, via ld.so.cache
+```
+
+Nothing of ours answers `libasound`, so the *real* ALSA loads and audio init
+then succeeds: the run logs **no** FMOD error line and reaches the banner.
+That is the important negative result — the refusal is handled, not fatal, and
+it does not hold the audio thread.
+
+**(b) with the guest's exact configuration it produces the measured
+fallback.** Same run with `libpulse-simple.so.0`, `libpulse.so.0` *and*
+`libasound.so.2` from `obj/xcompat` on the path (`/LIB64`'s contents in the
+guest), the game's own log says:
+
+```
+24: FMOD failed to initialize the output device.: "Error initializing output device. " (60)
+25: Forced to initialize FMOD to to the device driver's system output rate 48000, this may impact performance and/or give inconsistent experiences compared to selected sample rate 48000
+26: FMOD failed to initialize the output device.: "Error initializing output device. " (60)
+27: FMOD failed to initialize any audio devices, running on emulated software output with no sound. Please check your audio drivers and/or hardware for malfunction.
+41: RimWorld 1.6.4871 rev600
+```
+
+i.e. the same silent-output path the ALSA-only evidence recorded in §7.1, now
+with PulseAudio present and refusing. The game continues to the banner; audio
+init costs two instant failures.
+
+**Staging is the only wiring.** `stage.sh` copies the two sonames to `/LIB64`
+like `libX11.so.6`/`libasound.so.2`; no launcher, env var or `LD_PRELOAD`
+mentions them, and the game finds them by the name it already asks for. On a
+guest that does not stage them the `dlopen` simply fails with `ENOENT`, which
+is the pre-shim behaviour — the shim is additive, never required.
 
 ---
 
@@ -320,8 +412,10 @@ make xcompat_exports_check
 make host_tests        # or: make -f src/user/xcompat/Makefile.inc xcompat_test_run
 ```
 
-`required-libx11.txt` / `required-alsa.txt` are checked in, so steps 2 and 3
-run on a tree with no game present.
+`required-libx11.txt` / `required-alsa.txt` / `required-pulse.txt` are checked
+in, so steps 2 and 3 run on a tree with no game present. The pulse sets are
+checked by `make xcompat_pulse_check` (both sonames, all 21 names, and a
+`readelf -d` assertion that neither has a `DT_NEEDED` edge).
 
 ---
 
@@ -414,7 +508,7 @@ run on a tree with no game present.
 | `XOpenIM` | STUB | returns `0` |
 | `XPeekEvent` | IMPL |  |
 | `XPending` | IMPL |  |
-| `XPutImage` | STUB | returns `0` |
+| `XPutImage` | IMPL |  |
 | `XQueryExtension` | STUB | returns `False` |
 | `XQueryKeymap` | STUB | returns `0` |
 | `XQueryPointer` | IMPL |  |
@@ -424,7 +518,7 @@ run on a tree with no game present.
 | `XReparentWindow` | STUB | returns `0` |
 | `XResetScreenSaver` | STUB | returns `0` |
 | `XResizeWindow` | STUB | returns `0` |
-| `XScreenNumberOfScreen` | STUB | returns `s ? s->scr : 0` |
+| `XScreenNumberOfScreen` | STUB | returns `0` |
 | `XSelectInput` | IMPL |  |
 | `XSendEvent` | STUB | returns `0` |
 | `XSetErrorHandler` | STUB | returns `old` |
@@ -504,17 +598,20 @@ run on a tree with no game present.
 | `XDisplayHeightMM` | STUB | returns `DisplayHeightMM(d, scr)` |
 | `XDisplayWidth` | STUB | returns `DisplayWidth(d, scr)` |
 | `XDisplayWidthMM` | STUB | returns `DisplayWidthMM(d, scr)` |
-| `XDrawImageString` | PARTIAL | returns `XDrawString(d, dr, gc, x, y, s, len)`: glyphs are drawn, but the background is not filled first (X11's ImageString semantics) |
+| `XDrawImageString` | STUB | returns `XDrawString(d, dr, gc, x, y, s, len)` |
 | `XDrawLine` | IMPL |  |
 | `XDrawPoint` | IMPL |  |
+| `XDrawString16` | STUB | returns `0` |
 | `XESetCloseDisplay` | STUB | returns `0` |
 | `XESetError` | STUB | returns `0` |
 | `XFreeColormap` | STUB | returns `0` |
 | `XFreeExtensionList` | STUB | returns `0` |
+| `XFreeFontInfo` | STUB | returns `0` |
 | `XFreeFontNames` | STUB | returns `0` |
 | `XGetAtomNames` | IMPL |  |
 | `XGetGeometry` | IMPL |  |
 | `XGetIMValues` | STUB | returns `0` |
+| `XGetImage` | STUB | returns `0` |
 | `XGetKeyboardMapping` | PARTIAL | returns the shim's static 2-keysym-per-keycode map |
 | `XGetKeyboardMappingSupported` | STUB | returns `True` |
 | `XGetPointerMapping` | STUB | returns `1` |
@@ -568,7 +665,7 @@ run on a tree with no game present.
 | `XShmQueryVersion` | STUB | returns `False` |
 | `XStoreColor` | STUB | returns `0` |
 | `XTextPropertyToStringList` | STUB | returns `0` |
-| `XTextWidth` | STUB | returns `n * 8` (the cell `XDrawString` advances) |
+| `XTextWidth` | STUB | returns `n * 8` |
 | `XUnmapSubwindows` | STUB | returns `0` |
 | `XUnmapWindow` | PARTIAL | the protocol cannot retract a pixel window: the surface stays up and stops receiving events |
 | `XVendorRelease` | STUB | returns `1` |
@@ -603,4 +700,41 @@ run on a tree with no game present.
 | `snd_pcm_readi` | returns -ENODEV |
 | `snd_pcm_writei` | returns -ENODEV |
 | `snd_strerror` | static text, `-19` -> "No such device" |
+
+### (d) libpulse-simple.so.0 / libpulse.so.0 - the 21 symbols the audio path resolves
+
+Both built sonames export this entire table (plus the extras in (e)):
+
+| symbol | behaviour |
+|---|---|
+| `pa_channel_map_init_auto` | fills the caller's map with the default layout, returns it (NULL for 0 channels or >32) |
+| `pa_context_connect` | returns `-PA_ERR_CONNECTIONREFUSED` |
+| `pa_context_disconnect` | no-op |
+| `pa_context_get_server_info` | returns NULL (no operation object) |
+| `pa_context_get_sink_info_list` | returns NULL (no operation object) |
+| `pa_context_get_source_info_list` | returns NULL (no operation object) |
+| `pa_context_get_state` | returns `PA_CONTEXT_FAILED` (5) |
+| `pa_context_new` | returns a sentinel handle (non-NULL: constructing a context does not contact the server in the real library) |
+| `pa_context_unref` | no-op |
+| `pa_mainloop_free` | no-op |
+| `pa_mainloop_get_api` | returns a complete inert vtable of 12 callbacks |
+| `pa_mainloop_iterate` | returns `-1` immediately (never blocks, even with `block=1`): the strongest stop signal for a READY-wait loop |
+| `pa_mainloop_new` | returns a sentinel handle (non-NULL) |
+| `pa_operation_get_state` | returns `PA_OPERATION_CANCELLED` (2), NULL-safe |
+| `pa_operation_unref` | no-op (NULL-safe) |
+| `pa_simple_free` | no-op (NULL-safe: FMOD's cleanup calls it after a failed new) |
+| `pa_simple_get_latency` | returns `(pa_usec_t)-1` (the documented unknown) |
+| `pa_simple_new` | returns NULL; `*error` = `PA_ERR_CONNECTIONREFUSED` (6), `PA_ERR_INVALID` (3) if the sample spec is malformed |
+| `pa_simple_read` | returns `-PA_ERR_INVALID` |
+| `pa_simple_write` | returns `-PA_ERR_INVALID` |
+| `pa_strerror` | static text, `6` -> "Connection refused" |
+
+### (e) libpulse - exported beyond the required set
+
+| symbol | behaviour |
+|---|---|
+| `pa_context_errno` | returns `PA_ERR_CONNECTIONREFUSED` (6) |
+| `pa_get_library_version` | returns `"17.0.0"` (the ABI's measured era) |
+| `pa_simple_drain` | returns `-PA_ERR_INVALID` |
+| `pa_simple_flush` | returns `-PA_ERR_INVALID` |
 

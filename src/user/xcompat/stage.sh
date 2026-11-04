@@ -35,8 +35,8 @@ die() { echo "xcompat-stage: $*" >&2; exit 1; }
 # The required set.  Anything else this tree has built (extension DSOs, the
 # GL frontend when it lands) is staged too, so a DSO that starts existing is
 # never silently left off the image.
-DSOS="libX11.so.6 libasound.so.2"
-for f in "$OBJ"/libX*.so.* "$OBJ"/libasound.so.*; do
+DSOS="libX11.so.6 libasound.so.2 libpulse-simple.so.0 libpulse.so.0"
+for f in "$OBJ"/libX*.so.* "$OBJ"/libasound.so.* "$OBJ"/libpulse*.so.*; do
   [ -f "$f" ] || continue
   b="$(basename "$f")"
   case " $DSOS " in *" $b "*) continue ;; esac

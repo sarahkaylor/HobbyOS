@@ -48,6 +48,11 @@ XCOMPAT_DSOFLAGS = -shared -fPIC -fvisibility=hidden -nostdlib \
 
 XCOMPAT_LIBX11    = $(XCOMPAT_OBJ)/libX11.so.6
 XCOMPAT_LIBASOUND = $(XCOMPAT_OBJ)/libasound.so.2
+# PulseAudio is FMOD's *first* choice (libpulse-simple.so.0, which pulls
+# libpulse.so.0 through DT_NEEDED on a real system).  Both sonames are built
+# from the same source; see pulse_null.c for why the export set is a union.
+XCOMPAT_LIBPULSE_SIMPLE = $(XCOMPAT_OBJ)/libpulse-simple.so.0
+XCOMPAT_LIBPULSE        = $(XCOMPAT_OBJ)/libpulse.so.0
 
 # The compat class is x86_64-only (docs/linux-abi.md §2, plan AD-8).
 XCOMPAT_DSOS_ENABLED = $(if $(filter intel,$(ARCH)),1,0)
@@ -68,8 +73,28 @@ $(XCOMPAT_LIBASOUND): $(XCOMPAT_DIR)/alsa_null.c
 	  -Wl,-soname,libasound.so.2 -o $@ $(XCOMPAT_DIR)/alsa_null.c \
 	  $(XCOMPAT_DIR)/xrt.c
 
+# One source, two sonames.  libpulse-simple.so.0 is what FMOD/SDL dlopen;
+# libpulse.so.0 is what a real libpulse-simple would have pulled in.  Neither
+# carries a DT_NEEDED edge to the other (the compat loader maps these DSOs
+# before ld.so finishes), so both export the same union -- see the comment at
+# the top of pulse_null.c.
+$(XCOMPAT_LIBPULSE_SIMPLE): $(XCOMPAT_DIR)/pulse_null.c \
+                            $(XCOMPAT_DIR)/pulse_abi.h $(XCOMPAT_DIR)/xrt.c
+	@mkdir -p $(XCOMPAT_OBJ)
+	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_DSOFLAGS) \
+	  -Wl,-soname,libpulse-simple.so.0 -o $@ \
+	  $(XCOMPAT_DIR)/pulse_null.c $(XCOMPAT_DIR)/xrt.c
+
+$(XCOMPAT_LIBPULSE): $(XCOMPAT_DIR)/pulse_null.c $(XCOMPAT_DIR)/pulse_abi.h \
+                     $(XCOMPAT_DIR)/xrt.c
+	@mkdir -p $(XCOMPAT_OBJ)
+	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_DSOFLAGS) \
+	  -Wl,-soname,libpulse.so.0 -o $@ \
+	  $(XCOMPAT_DIR)/pulse_null.c $(XCOMPAT_DIR)/xrt.c
+
 ifeq ($(XCOMPAT_DSOS_ENABLED),1)
-xcompat_dsos: $(XCOMPAT_LIBX11) $(XCOMPAT_LIBASOUND)
+xcompat_dsos: $(XCOMPAT_LIBX11) $(XCOMPAT_LIBASOUND) $(XCOMPAT_LIBPULSE_SIMPLE) \
+              $(XCOMPAT_LIBPULSE)
 else
 xcompat_dsos:
 	@echo "xcompat: DSOs are x86_64-only (ARCH=$(ARCH)); skipped"
@@ -104,26 +129,76 @@ $(XCOMPAT_EXPORTS_CHECK): $(XCOMPAT_LIBX11) $(XCOMPAT_DIR)/required-libx11.txt
 xcompat_exports_check: $(XCOMPAT_EXPORTS_CHECK)
 .PHONY: xcompat_exports_check
 
+# ---- the PulseAudio export gate --------------------------------------- *
+# Same rule as libX11: the set is measured from the game binary
+# (required-pulse.txt, 21 names) and checked in, so this runs with no game
+# present.  Both sonames must carry the full union: FMOD dlopens
+# libpulse-simple.so.0 and resolves the async names through it, which on a
+# real system happens via that DSO's DT_NEEDED on libpulse.so.0 -- an edge
+# these shims deliberately do not have.
+#
+# The same rule also asserts the no-DT_NEEDED contract on both pulse DSOs: the
+# loader maps them before ld.so has finished, so a dependency edge would drag
+# glibc's own resolution into a DSO that must stand alone.
+XCOMPAT_PULSE_CHECK = $(XCOMPAT_OBJ)/.pulse-exports-ok
+
+$(XCOMPAT_PULSE_CHECK): $(XCOMPAT_LIBPULSE_SIMPLE) $(XCOMPAT_LIBPULSE) \
+                        $(XCOMPAT_DIR)/required-pulse.txt
+	@mkdir -p $(XCOMPAT_OBJ)
+	@for so in $(XCOMPAT_LIBPULSE_SIMPLE) $(XCOMPAT_LIBPULSE); do \
+	  nm -D --defined-only $$so | \
+	    awk '$$2 ~ /^[TWi]$$/ {print $$3}' | sed 's/@.*//' | LC_ALL=C sort -u \
+	    > $$so.exports; \
+	  miss=$$(LC_ALL=C comm -23 $(XCOMPAT_DIR)/required-pulse.txt $$so.exports); \
+	  if [ -n "$$miss" ]; then \
+	    echo "xcompat: $$so is missing required pulse symbols:"; \
+	    echo "$$miss" | sed 's/^/  /'; exit 1; fi; \
+	  if readelf -d $$so | grep -q '(NEEDED)'; then \
+	    echo "xcompat: $$so has a DT_NEEDED edge; compat DSOs must be free of them"; \
+	    exit 1; fi; \
+	  echo "xcompat: $$(basename $$so) exports all $$(wc -l < $(XCOMPAT_DIR)/required-pulse.txt) required pulse symbols, 0 DT_NEEDED"; \
+	done
+	@touch $@
+
+xcompat_pulse_check: $(XCOMPAT_PULSE_CHECK)
+.PHONY: xcompat_pulse_check
+
 # ---- host test (Tier 1) ----------------------------------------------- *
 # The ABI differential needs the host's own X11 headers.  They are optional:
 # without <X11/Xlib.h> the reference TU is compiled out and the test prints
 # SKIP for that group (the pure-core tests still run).
-XCOMPAT_HAVE_X11 := $(shell echo '\#include <X11/Xlib.h>' | \
-                      $(HOST_CC) -E - >/dev/null 2>&1 && echo 1 || echo 0)
+#
+# The probe is `-include <header>`, not a `#include` piped into the shell: a
+# '#' inside a make variable starts a comment, and the old '\#' spelling
+# reached the compiler as a non-directive (so the test was always "yes").
+XCOMPAT_HAVE_X11 := $(shell echo | $(HOST_CC) -E -include X11/Xlib.h - \
+                      >/dev/null 2>&1 && echo 1 || echo 0)
+# ...and the PulseAudio ABI differential needs <pulse/...> (libpulse-dev).
+# Optional for the same reason: the shim carries its own pulse_abi.h, and the
+# reference rows are only an extra proof that the two agree.
+XCOMPAT_HAVE_PULSE := $(shell echo | $(HOST_CC) -E -include pulse/sample.h - \
+                        >/dev/null 2>&1 && echo 1 || echo 0)
 
 XCOMPAT_TEST = xcompat_test_host
 XCOMPAT_TEST_SRCS = src/host/xcompat_test.c src/host/xcompat_abi_mine.c \
                     src/user/xcompat/xcore.c
 XCOMPAT_TEST_DEFS = -DXCOMPAT_HAVE_X11_REF=$(XCOMPAT_HAVE_X11) \
+                    -DXCOMPAT_HAVE_PULSE_REF=$(XCOMPAT_HAVE_PULSE) \
                     -DXCOMPAT_HAVE_REQUIRED=1 \
                     -Isrc/host -I$(XCOMPAT_DIR)
 ifeq ($(XCOMPAT_HAVE_X11),1)
 XCOMPAT_TEST_SRCS += src/host/xcompat_abi_ref.c
 endif
+ifeq ($(XCOMPAT_HAVE_PULSE),1)
+XCOMPAT_TEST_SRCS += src/host/pulse_abi_ref.c
+endif
 ifeq ($(XCOMPAT_DSOS_ENABLED),1)
 XCOMPAT_TEST_DEFS += -DXCOMPAT_DSO_PATH='"$(XCOMPAT_LIBX11)"' \
-                     -DXCOMPAT_ALSA_PATH='"$(XCOMPAT_LIBASOUND)"'
-XCOMPAT_TEST_DEPS  = $(XCOMPAT_LIBX11) $(XCOMPAT_LIBASOUND)
+                     -DXCOMPAT_ALSA_PATH='"$(XCOMPAT_LIBASOUND)"' \
+                     -DXCOMPAT_PULSE_SIMPLE_PATH='"$(XCOMPAT_LIBPULSE_SIMPLE)"' \
+                     -DXCOMPAT_PULSE_PATH='"$(XCOMPAT_LIBPULSE)"'
+XCOMPAT_TEST_DEPS  = $(XCOMPAT_LIBX11) $(XCOMPAT_LIBASOUND) \
+                     $(XCOMPAT_LIBPULSE_SIMPLE) $(XCOMPAT_LIBPULSE)
 else
 XCOMPAT_TEST_DEPS  =
 endif
@@ -131,7 +206,8 @@ endif
 $(XCOMPAT_TEST): $(XCOMPAT_TEST_SRCS) src/host/xcompat_abi_probe.h \
                  src/host/xcompat_abi_row.h $(XCOMPAT_DIR)/xcore.h \
                  $(XCOMPAT_DIR)/xabi.h $(XCOMPAT_DIR)/required-libx11.h \
-                 $(XCOMPAT_DIR)/required-alsa.h $(XCOMPAT_TEST_DEPS)
+                 $(XCOMPAT_DIR)/required-alsa.h $(XCOMPAT_DIR)/required-pulse.h \
+                 $(XCOMPAT_DIR)/pulse_abi.h $(XCOMPAT_TEST_DEPS)
 	$(HOST_CC) -Wall -Wextra -g $(XCOMPAT_TEST_DEFS) -o $@ $(XCOMPAT_TEST_SRCS) -ldl
 
 xcompat_test_run: $(XCOMPAT_TEST)
