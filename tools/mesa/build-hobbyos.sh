@@ -578,8 +578,16 @@ def main():
         flat = obj.replace("/", "_")
         out = os.path.join(OBJ, flat)
         log = os.path.join(LOGDIR, flat + ".log")
+        # The cache must see a *source* newer than its object, not just a log
+        # older than it: applying a tools/mesa/patches/*.patch rewrites the
+        # source in place, and keying on (object, log) alone silently shipped
+        # the pre-patch object (measured: 0004 added a `[GLX] context request`
+        # string the DSO did not contain and the guest still got NULL).
+        srcpath = src if os.path.isabs(src) else os.path.join(BUILD, src)
+        src_ok = (not os.path.exists(srcpath) or
+                  os.path.getmtime(out) >= os.path.getmtime(srcpath))
         if os.path.exists(out) and os.path.exists(log) and \
-           os.path.getmtime(out) >= os.path.getmtime(log):
+           os.path.getmtime(out) >= os.path.getmtime(log) and src_ok:
             return obj, "cached", ""
         argv = ([CC] + rewrite(args, kind) + ["-c", src, "-o", out])
         with open(log, "w") as lf:
