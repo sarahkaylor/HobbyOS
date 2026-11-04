@@ -507,10 +507,18 @@ instead of host headers (`__isoc23_strtol` leak), a static-TLS surplus fix
 (PT_TLS 4400 B → 40 B; Mesa's 4 KiB debug buffer made them statics), four
 libX11 gaps for `RTLD_NOW`, a real `XCreateImage`/`XPutImage` (XImage was a stub
 whose `destructor` field is called through a *macro* — a zeroed table jumped to
-0), and `XGetVisualInfo` must be freeable. **Still open:** `glXSwapBuffers`'
-present path (`xlib_sw_display → XPutImage`) faults with an instruction fetch
-into a non-executable libGL page, so no window screenshot yet; teardown is
-unexercised.
+0), and `XGetVisualInfo` must be freeable.
+
+**Present path FIXED (2026-11-04, lane L16).** A GL 3.3 frame now reaches a real
+window: `desktop rect 2,34 1916x1018 fnv1a64=0x039795a9519bfdca`, pixel diff
+`96 of 1950488 differ (0.0049%)` (only the re-stamped cursor), `teardown: clean`,
+screenshot `docs/rimworld-m4-window.png`. Two causes, both measured: the swap
+returns success while the shim still has `content_ready==0`, so a client must
+wait for the desktop's content rect before painting; and the old "instruction
+fetch into a non-executable libGL page" was an **unload** defect — Mesa calls
+process-global `atexit()` inside the DSO and `dlclose()` does not run it, so
+`exit()` jumped into unmapped text. libGL is now linked **`-z nodelete`**
+(DF_1_NODELETE, as libglvnd does) and the build fails if the flag is lost.
 
 **Historical (2026-11-02, lane L8): host gate PASSED, in-guest load unverified.**
 `tools/mesa/build-hobbyos.sh` cross-builds `libGL.so.1` for HobbyOS: 835/835 TUs,
@@ -525,6 +533,12 @@ stage it in `/LIB64` with `XLIB_NO_SHM=1` and prove an in-guest `dlopen` + cube.
       (slirp) or the LAN server; `ls` shows the real tree (long names).
 - [ ] Exec the game's `RimWorldLinux` **from NFS** — **landed** (L6: VFS image
       read + `elf_loader_load_image`, `spawn_ex("/NFS/hdyn.bin")` → exit 0).
+- [x] `mmap` of managed assemblies — **landed (M5c, 2026-11-04)**: a VFS prefix
+      bind (`src/kernel/vfs_bind.c`, `SYS_VFS_BIND` 104, 4 entries, longest
+      prefix, allocation-free) maps `/NFS/RimWorldLinux_Data/Managed` →
+      `/RWMANAGED`, and 102 files / 39.8 MiB of `Managed/` are staged locally.
+      The game now logs `Mono path[0]` and runs `RuntimeInitializeOnLoadManager`
+      with 24 Unity threads and **0 `mmap fail`, 0 ENOSYS**.
 - [ ] `mmap` a DSO from NFS — **not supported** (`fs.c:file_fat16_ident` →
       `-ENOTSUP`; `vm.c` keys `VM_OBJ_FILE` by `(start_cluster,size)`). **Now on
       the critical path**: Mono `mmap`s every assembly, so the game stops at
@@ -578,12 +592,21 @@ kept as `RimWorldLinux.orig`; 33 MB `UnityPlayer.so` + 6.4 MB Mono DSOs + 0.7 MB
 plugins staged locally per AD-10. Ladder retired this wave: ET_EXEC at 0x200000
 (AD-9), `Error 2 resolving executable path` (needs `/proc` + `/NFS` stat), a
 memory fault from page-cache invalidation killing UnityPlayer's text mapping
-(`vm_object` now keeps its source cluster), a missing `libz.so.1`. **Current
-wall:** `[LCOMPAT] mmap fail fd=4 len=4622848 off=0 -> -95
-path=/NFS/RimWorldLinux_Data/Managed/mscorlib.dll` → `The assembly mscorlib.dll
-was not found or could not be loaded.` — Mono `mmap`s every assembly and that
-tree is on NFS. No `[LCOMPAT] ENOSYS` occurred (count 0); no GL/X11/thread wall
-was reached yet.
+(`vm_object` now keeps its source cluster), a missing `libz.so.1`. **Wall retired (M5c, 2026-11-04):** the `Managed/` tree is staged locally
+(102 files, 39.8 MiB) behind a VFS prefix bind, so Mono's assembly `mmap`s land
+on FAT. The game now reports `Mono path[0]`, runs `RuntimeInitializeOnLoadManager`
+and spawns **24 Unity threads** (`Finalizer`, `Job.Worker 0`, 17×
+`Background Job.`, `Loading.AsyncRe`, `SDLTimer`) with **0 `mmap` failures and 0
+`ENOSYS`**.
+**Current wall: no display.** The last engine line is `Error getting num native
+displays: Video subsystem has not been initialized`, because the run uses
+`MODE=test` (no desktop), the launcher env has no `DISPLAY`, and `/LIB64` holds
+no `libX11.so.6`/`libGL.so.1` for the game dir. Every thread then parks in futex
+and the run ends at the launcher's timeout. **Next step: launch inside the
+guest's X session (`MODE=desktop`, the `m3_x11_client.py` harness shape) with the
+xcompat X11/GL DSOs staged.** Open, recorded: `Failed reading
+'ScriptingAssemblies.json'` (file exists, not an mmap; `chdir` A/B showed a
+byte-identical log) and `pthread_setschedparam → EPERM` from Mono.
 
 **Historical (2026-11-02):** plumbing landed; the binary itself cannot be *loaded*
 (`ET_EXEC` at 0x200000, below the 64 GiB user window → `elf loader: ET_EXEC
@@ -802,6 +825,14 @@ awk '/if \(linux_compat_dispatch\(lp, tf, syscall_num\)\)/,/^  }/' \
   (host-identical); `[T150] created=150 joined=150` with SIGCANCEL delivered.
   Game ladder now stops at `Mono mmap ... mscorlib.dll -> -95` on NFS, so M5c
   (VFS bind of `Managed/`) or M5b (NFS page-in) is the next blocker.
+
+- 2026-11-04 — **wave 4: M5c and the present path land.** Merged
+  `rw-l15-managed` + `rw-l16-swap` (clean, no conflicts); 398/0 units after the
+  new bind test. The game now runs past Mono inside HobbyOS (`Mono path[0]`,
+  `RuntimeInitializeOnLoadManager`, 24 Unity threads, 0 mmap failures, 0
+  ENOSYS) and stops only because `MODE=test` has no display. GL reaches a real
+  window (`docs/rimworld-m4-window.png`, 0.0049% pixel diff, clean teardown).
+  Next: run the game inside the guest X session with the xcompat DSOs staged.
 
 ## 11. Fix log (append-only)
 
