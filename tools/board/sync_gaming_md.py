@@ -108,15 +108,23 @@ def row_from_issue(gid, issue):
         depends = "—"
 
     d = re.search(r"^###\s*DoD[^\n]*\n(.*?)(?=^###\s|\Z)", body, re.M | re.S)
-    items = []
+    items, cur = [], None
     if d:
         for line in d.group(1).splitlines():
-            line = line.strip()
-            if not line:
+            s = line.strip()
+            if not s:
                 continue
-            line = re.sub(r"^(?:\d+[.)]|[-*])\s*", "", line)
-            if line:
-                items.append(line)
+            if re.match(r"^(?:\d+[.)]|[-*])\s+", s):
+                if cur:
+                    items.append(cur)
+                cur = re.sub(r"^(?:\d+[.)]|[-*])\s+", "", s)
+            elif cur is not None:
+                # a wrapped continuation of the current item, not a new one
+                cur += " " + s
+            else:
+                cur = s
+        if cur:
+            items.append(cur)
     dod = _flatten("; ".join(items)) or f"see board #{issue.get('number')}"
     return f"| {gid} | **{_cell(title)}** | {wt} | {_cell(depends)} | {_cell(dod)} |"
 
