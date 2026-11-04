@@ -31,7 +31,7 @@ SYMBOLS = re.compile(r"\b(panic_puts2?|panic_putc2?|panic_print_hex2?)\b")
 # file -> (expected references, why a non-returning use is legitimate here)
 ALLOW = {
     # ---- the sink itself: definitions + the violation reporter ----
-    "src/kernel/arch/x64/uart.c": (15, "definitions, panic_enter/leave, violation report"),
+    "src/kernel/arch/x64/uart.c": (20, "definitions, panic_claim/enter/leave, violation + claim-loser + GB-204 suppressed reports"),
     "src/kernel/arch/arm/uart.c": (15, "arm definitions; arm has no COM2 violation channel"),
     "src/host/locksteal_test.c": (1, "host-test shim that stands in for the sink"),
 

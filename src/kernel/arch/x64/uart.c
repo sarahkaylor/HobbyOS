@@ -101,16 +101,48 @@ static void uart_putc_body(char c) {
    uart_lock here would be the deadlock the raw sink exists to avoid). */
 volatile int panic_depth = 0;
 static volatile int panic_sink_violations = 0;
+/* GB-204: every dropped record is counted BEFORE the cap check, so past the
+   cap the count still moves.  The same counter counts a second CPU's failed
+   claim: a claim loser is a dropped record too. */
+static volatile int panic_sink_dropped = 0;
+/* GB-204: one claim word.  The first CPU to exchange 0->1 owns the fatal
+   record; every other CPU sees 1, counts the drop and halts without writing. */
+static volatile int panic_claim_word = 0;
 
 void panic_puts2(const char *s); /* COM2 sink, defined below */
+void panic_putc2(char c);
+void print_int_raw2(int val);
 
-void panic_enter(void) { panic_depth++; }
+int panic_claim(void) {
+  if (__atomic_exchange_n(&panic_claim_word, 1, __ATOMIC_ACQ_REL) != 0) {
+    int d = __atomic_add_fetch(&panic_sink_dropped, 1, __ATOMIC_RELAXED);
+    /* COM2: the loser's own record, so a dropped fatal record is visible
+       rather than inferred from a missing line (GB-204). */
+    panic_puts2("[PANIC-CLAIM] dropped=");
+    print_int_raw2(d);
+    panic_putc2('\n');
+    return 0;
+  }
+  panic_depth++;
+  return 1;
+}
+
 void panic_leave(void) {
   if (panic_depth > 0) panic_depth--;
+  __atomic_store_n(&panic_claim_word, 0, __ATOMIC_RELEASE);
 }
+
+void panic_enter(void) { panic_depth++; }
 
 static void panic_sink_violation(const char *what, const char *s) {
   static volatile int reporting = 0;
+  /* Count first: a suppressed record is still a measured record (GB-204). */
+  __atomic_fetch_add(&panic_sink_dropped, 1, __ATOMIC_RELAXED);
+  /* COM2 carries every violation as one clean counter line, cap or no cap:
+     nothing else writes COM2, so this is the uncapped view of the count. */
+  panic_puts2("[PANIC-SINK] suppressed=");
+  print_int_raw2(__atomic_load_n(&panic_sink_dropped, __ATOMIC_RELAXED));
+  panic_putc2('\n');
   if (panic_sink_violations >= 3 || reporting) return;
   reporting = 1;
   panic_sink_violations++;
