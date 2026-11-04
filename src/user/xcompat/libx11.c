@@ -101,12 +101,17 @@ static int xs_ioctl(int fd, unsigned long req, void *arg) {
  * swallows ("No available video device").  fd 2 is the serial console for a
  * desktop-launched game (rwlaunch maps it). */
 #ifdef XC_TRACE
-static void xtr(const char *s) {
+/* No inlining: the trace must not grow the host functions into blocks the
+ * debugger cannot attribute, and a fault inside a trace helper must name the
+ * helper (measured: an inlined trace row buried a bad deref inside
+ * XCreateWindow+0x10f8). */
+#define XTNOINL __attribute__((noinline))
+XTNOINL static void xtr(const char *s) {
   unsigned long n = 0;
   while (s[n]) n++;
   (void)xs_write(2, s, n);
 }
-static void xtrn(int v) {
+XTNOINL static void xtrn(int v) {
   char b[24];
   int n = 0;
   unsigned u = v < 0 ? (unsigned)(-v) : (unsigned)v;
@@ -119,7 +124,7 @@ static void xtrn(int v) {
   b[n++] = '\n';
   (void)xs_write(2, b, (unsigned long)n);
 }
-static void xtr_hex(unsigned long v) {
+XTNOINL static void xtr_hex(unsigned long v) {
   char b[24];
   int n = 0;
   b[n++] = '0';
@@ -132,10 +137,50 @@ static void xtr_hex(unsigned long v) {
   b[n++] = '\n';
   (void)xs_write(2, b, (unsigned long)n);
 }
+/* Unsigned decimal, no newline: lets one trace row carry several fields
+ * ("create id=… parent=… geom=WxH …") instead of one number per line. */
+XTNOINL static void xtr_u(unsigned long v) {
+  char b[24];
+  int n = 0;
+  char t[16];
+  int m = 0;
+  if (!v) t[m++] = '0';
+  while (v) { t[m++] = (char)('0' + v % 10u); v /= 10u; }
+  while (m) b[n++] = t[--m];
+  (void)xs_write(2, b, (unsigned long)n);
+}
+XTNOINL static void xtr_s(const char *s) {
+  unsigned long n = 0;
+  while (s[n]) n++;
+  (void)xs_write(2, s, n);
+}
+/* The XIfEvent predicate Xlib is given is opaque, but the one Unity uses for
+ * its window handshake (UnityPlayer+0x194c19b) is
+ *     type == MapNotify && xmap.window == *(Window *)arg
+ * so printing *arg names the window the client is waiting for.  It is the
+ * same dereference the predicate itself performs on a matching event. */
+XTNOINL static void xtr_awaited(const void *arg) {
+  unsigned long p = (unsigned long)arg;
+  xtr(" arg=");
+  xtr_u(p);
+  /* Only dereference something that can be a user pointer: one XIfEvent call
+   * in the process passes a small integer as its predicate argument
+   * (measured: arg=0x23, a fault at VA 0x23 when dereferenced). */
+  if (p < 0x10000ul || p >= 0x0000800000000000ul || (p & 3ul)) return;
+  xtr(" want=");
+  xtr_u(*(const unsigned long *)arg);
+}
+/* Dump the queued (type, window) pairs without consuming them; defined after
+ * struct _XDisplay (it needs the ring). */
+static void xtr_queue(Display *d);
 #else
 #define xtr(s) ((void)0)
 #define xtrn(v) ((void)0)
 #define xtr_hex(v) ((void)0)
+#define xtr_u(v) ((void)0)
+#define xtr_s(s) ((void)0)
+#define xtr_awaited(a) ((void)0)
+#define xtr_queue(d) ((void)0)
 #endif
 
 #define XO_RDWR 2
@@ -210,6 +255,34 @@ struct _XGC {
   int function;
 };
 
+/* ---- the window table -------------------------------------------------
+ * The desktop protocol has ONE surface per process, but an X client creates
+ * several windows and each carries its own event state.  Measured (L28):
+ * Unity creates the GL window, maps it, creates an override-redirect
+ * container, selects StructureNotifyMask *on the container only*, maps the
+ * container, reparents the GL window into it and then waits for
+ * MapNotify(GL window).  A real X server remaps a mapped window when it is
+ * reparented into a mapped parent and sends UnmapNotify, ReparentNotify,
+ * MapNotify (verified on Xvfb with tools/rw/x11-watch and a native reparent
+ * probe).  A single record for "the window" forgets the GL window's
+ * StructureNotifyMask the moment the container is created, so that MapNotify
+ * is never generated and the client waits forever. */
+#define XW_MAX 16
+
+struct xwin {
+  Window id, parent;
+  int used;
+  int mapped;
+  int destroyed;
+  int override_redirect;
+  long event_mask;             /* current XSelectInput selection */
+  int structure_selected;      /* StructureNotifyMask selected at least once */
+  int exposure_selected;       /* ExposureMask selected at least once */
+  int substructure_selected;   /* SubstructureNotifyMask selected at least once */
+  int x, y;
+  unsigned w, h;
+};
+
 /* ---- the display ------------------------------------------------------ */
 
 #define WIN_SHADOW_MAX (1920u * 1080u * 4u)
@@ -238,6 +311,10 @@ struct _XDisplay {
 
   struct xc_core core;
 
+  /* Per-XID event state (see struct xwin).  wins[0] is the root window. */
+  struct xwin wins[XW_MAX];
+  Window surface;         /* XID whose ESC ] X opened the desktop surface */
+
   int screen;
   Window root;
   struct _XScreen screen_obj;
@@ -262,7 +339,6 @@ struct _XDisplay {
     unsigned long bg, border;
     Colormap cmap;
     int mapped, destroyed, content_ready, pointer_asked;
-    int map_notified;      /* MapNotify already queued for this window */
     int structure_selected;/* StructureNotifyMask was selected at least once */
     int exposure_selected; /* ExposureMask was selected at least once */
     int gx, gy, cw, ch;
@@ -320,7 +396,144 @@ struct _XDisplay {
  * window, and the DSO is mapped once per process anyway. */
 static struct _XDisplay g_d;
 
+#ifdef XC_TRACE
+/* Queued (type, window) pairs, for the XIfEvent rows: they separate "the
+ * event the client wants was never generated" from "it was generated for a
+ * different XID / consumed by an earlier wait". */
+XTNOINL static void xtr_queue(Display *d) {
+  int i = d->core.ring_head;
+  xtr(" q=");
+  while (i != d->core.ring_tail) {
+    xtr_u((unsigned long)d->core.ring[i].type);
+    xtr(":");
+    xtr_u((unsigned long)d->core.ring[i].xany.window);
+    xtr(",");
+    i = (i + 1) % XC_EVENT_RING;
+  }
+}
+#endif
+
 static struct _XGC g_gc_pool[GC_MAX];
+
+static void queue_event(Display *d, const XEvent *ev);
+
+/* ---- per-XID event bookkeeping ---------------------------------------- */
+
+static struct xwin *xw_find(Display *d, Window id) {
+  if (!d || !id) return 0;
+  for (int i = 0; i < XW_MAX; i++)
+    if (d->wins[i].used && d->wins[i].id == id) return &d->wins[i];
+  return 0;
+}
+
+static struct xwin *xw_alloc(Display *d, Window id, Window parent,
+                             int x, int y, unsigned w, unsigned h,
+                             int override_redirect) {
+  struct xwin *slot = 0;
+  for (int i = 0; i < XW_MAX; i++) {
+    if (!d->wins[i].used) { slot = &d->wins[i]; break; }
+    if (d->wins[i].destroyed) slot = &d->wins[i];
+  }
+  if (!slot) return 0;
+  xz(slot, sizeof *slot);
+  slot->used = 1;
+  slot->id = id;
+  slot->parent = parent;
+  slot->x = x;
+  slot->y = y;
+  slot->w = w;
+  slot->h = h;
+  slot->override_redirect = override_redirect;
+  return slot;
+}
+
+/* Fill one event for `win`, addressed to `event` (the window itself or its
+ * parent, depending on which selection matched).  Xlib puts the target of the
+ * notification in xany.window and the selector in the type-specific `event`
+ * field; both live at the same offsets in every XEvent. */
+static void ev_emit(Display *d, int type, Window win, Window event,
+                    Window parent, int x, int y, unsigned w, unsigned h) {
+  XEvent ev;
+  xz(&ev, sizeof ev);
+  ev.type = type;
+  switch (type) {
+    case MapNotify:
+      ev.xmap.event = event;
+      ev.xmap.window = win;
+      break;
+    case UnmapNotify:
+      ev.xunmap.event = event;
+      ev.xunmap.window = win;
+      break;
+    case ReparentNotify:
+      ev.xreparent.event = event;
+      ev.xreparent.window = win;
+      ev.xreparent.parent = parent;
+      ev.xreparent.x = x;
+      ev.xreparent.y = y;
+      break;
+    case ConfigureNotify:
+      ev.xconfigure.event = event;
+      ev.xconfigure.window = win;
+      ev.xconfigure.x = x;
+      ev.xconfigure.y = y;
+      ev.xconfigure.width = (int)w;
+      ev.xconfigure.height = (int)h;
+      ev.xconfigure.above = None;
+      break;
+    case Expose:
+      ev.xexpose.window = win;
+      ev.xexpose.width = (int)w;
+      ev.xexpose.height = (int)h;
+      ev.xexpose.count = 0;
+      break;
+    case CreateNotify:
+      ev.xcreatewindow.parent = parent;
+      ev.xcreatewindow.window = win;
+      ev.xcreatewindow.x = x;
+      ev.xcreatewindow.y = y;
+      ev.xcreatewindow.width = (int)w;
+      ev.xcreatewindow.height = (int)h;
+      break;
+    case DestroyNotify:
+      ev.xdestroywindow.event = event;
+      ev.xdestroywindow.window = win;
+      break;
+    default:
+      return;
+  }
+  queue_event(d, &ev);
+}
+
+/* Deliver a structure event to the window itself when it selected
+ * StructureNotifyMask (or ever did: SDL/Unity have been measured replacing
+ * the selection between create and map, and a lost MapNotify is a deadlock). */
+static void xw_notify_self(Display *d, int type, Window win,
+                           Window parent, int x, int y,
+                           unsigned w, unsigned h) {
+  struct xwin *e = xw_find(d, win);
+  if (!e) return;
+  if (type == Expose) {
+    if (!e->exposure_selected && !(e->event_mask & ExposureMask)) return;
+  } else if (!e->structure_selected && !(e->event_mask & StructureNotifyMask)) {
+    return;
+  }
+  ev_emit(d, type, win, win, parent, x, y, w, h);
+}
+
+/* Deliver the same structure event to the parent when it selected
+ * SubstructureNotifyMask (the WM/observer half of the protocol). */
+static int xw_parent_wants(Display *d, Window parent) {
+  struct xwin *p = xw_find(d, parent);
+  return p && (p->substructure_selected || (p->event_mask & SubstructureNotifyMask));
+}
+
+static void xw_notify_parent(Display *d, int type, Window win, Window parent,
+                             int x, int y, unsigned w, unsigned h) {
+  if (!xw_parent_wants(d, parent)) return;
+  ev_emit(d, type, win, parent, parent, x, y, w, h);
+}
+
 
 /* ---- outbound protocol ------------------------------------------------ */
 
@@ -471,15 +684,34 @@ static void queue_event(Display *d, const XEvent *ev) {
   xc_queue(&d->core, ev);
 }
 
+/* Input goes to the window that owns the visible surface (d->surface), not to
+ * whichever window was created last: Unity creates an override-redirect
+ * container after its GL window and selects no input mask on it, while the GL
+ * window (the reparented child) keeps KeyPress/Button/Motion.  A real server
+ * delivers to the window under the pointer; here the reparented child is it. */
+static Window input_target(Display *d, long *mask) {
+  Window w = d->surface ? d->surface : d->win.id;
+  struct xwin *e = xw_find(d, w);
+  if (e) {
+    if (mask) *mask = e->event_mask;
+    return w;
+  }
+  if (mask) *mask = d->win.event_mask;
+  return d->win.id;
+}
+
 static void key_event(Display *d, unsigned long keysym, unsigned extra_state) {
-  if (!d->win.mapped || d->win.destroyed) return;
-  if (!(d->win.event_mask & KeyPressMask)) return;
+  long sel = 0;
+  Window wid = input_target(d, &sel);
+  struct xwin *ie = xw_find(d, wid);
+  if (ie ? !ie->mapped : (!d->win.mapped || d->win.destroyed)) return;
+  if (!(sel & KeyPressMask)) return;
   unsigned char kc = xc_keysym_to_keycode(keysym);
   if (!kc) return;
   XEvent ev;
   xz(&ev, sizeof ev);
   ev.type = KeyPress;
-  ev.xkey.window = d->win.id;
+  ev.xkey.window = wid;
   ev.xkey.root = d->root;
   ev.xkey.subwindow = None;
   ev.xkey.time = 0;                       /* there is no server clock */
@@ -499,15 +731,18 @@ static void key_event(Display *d, unsigned long keysym, unsigned extra_state) {
 
 static void mouse_event(Display *d, int type, int x, int y, int btn,
                         unsigned state) {
-  if (!d->win.mapped || d->win.destroyed) return;
+  long sel = 0;
+  Window wid = input_target(d, &sel);
+  struct xwin *ie = xw_find(d, wid);
+  if (ie ? !ie->mapped : (!d->win.mapped || d->win.destroyed)) return;
   long need = (type == ButtonPress) ? ButtonPressMask
             : (type == ButtonRelease) ? ButtonReleaseMask
             : PointerMotionMask;
-  if (d->win.event_mask & need) {
+  if (sel & need) {
     XEvent ev;
     xz(&ev, sizeof ev);
     ev.type = type;
-    ev.xbutton.window = d->win.id;
+    ev.xbutton.window = wid;
     ev.xbutton.root = d->root;
     ev.xbutton.subwindow = None;
     ev.xbutton.x = x;
@@ -572,36 +807,22 @@ static void set_geometry(Display *d, int x, int y, unsigned w, unsigned h) {
   d->core.content.h = (int)h;
   d->core.content_valid = 1;
 
-  XEvent ev;
-  if (first && !d->win.map_notified &&
-      (d->win.event_mask & StructureNotifyMask)) {
-    xz(&ev, sizeof ev);
-    ev.type = MapNotify;
-    ev.xmap.window = d->win.id;
-    ev.xmap.event = d->win.id;
-    queue_event(d, &ev);
+  /* The desktop resizes its one surface; the client-visible ConfigureNotify /
+   * Expose belong to the XID that asked for the surface (d->surface), not to
+   * whichever window was created last.  Unity creates a container window after
+   * its GL window, so keying these off `d->win` addressed them to the wrong
+   * XID.  MapNotify is NOT generated here: a real server sends it from the
+   * map request, and XMapWindow does that per XID. */
+  Window sid = d->surface ? d->surface : d->win.id;
+  struct xwin *se = xw_find(d, sid);
+  if (se) { se->x = x; se->y = y; se->w = w; se->h = h; }
+  if (se && (first || resized || moved) &&
+      (se->structure_selected || (se->event_mask & StructureNotifyMask))) {
+    ev_emit(d, ConfigureNotify, sid, sid, se->parent, x, y, w, h);
   }
-  if (d->win.structure_selected && (first || resized || moved)) {
-    xz(&ev, sizeof ev);
-    ev.type = ConfigureNotify;
-    ev.xconfigure.window = d->win.id;
-    ev.xconfigure.event = d->win.id;
-    ev.xconfigure.x = x;
-    ev.xconfigure.y = y;
-    ev.xconfigure.width = (int)w;
-    ev.xconfigure.height = (int)h;
-    queue_event(d, &ev);
-  }
-  if (d->win.exposure_selected && (first || resized)) {
-    xz(&ev, sizeof ev);
-    ev.type = Expose;
-    ev.xexpose.window = d->win.id;
-    ev.xexpose.x = 0;
-    ev.xexpose.y = 0;
-    ev.xexpose.width = (int)w;
-    ev.xexpose.height = (int)h;
-    ev.xexpose.count = 0;
-    queue_event(d, &ev);
+  if (se && (first || resized) &&
+      (se->exposure_selected || (se->event_mask & ExposureMask))) {
+    ev_emit(d, Expose, sid, sid, se->parent, 0, 0, w, h);
   }
 }
 
@@ -925,6 +1146,13 @@ XAPI Display *XOpenDisplay(const char *name) {
 
   d->screen = 0;
   d->root = 1;
+  /* The root is a window like any other for event-selection purposes: a WM
+   * (or the m3 probe's observer) selects SubstructureNotifyMask on it. */
+  {
+    struct xwin *r = xw_alloc(d, d->root, None, 0, 0,
+                              (unsigned)d->fb_w, (unsigned)d->fb_h, 0);
+    if (r) r->mapped = 1;
+  }
   /* The public Display prefix (see xabi.h): the fields a client's Xlib
    * macros read.  `fd` is the framebuffer descriptor here -- this display has
    * no socket, and ConnectionNumber() is only ever used to poll it. */
@@ -1107,6 +1335,9 @@ XAPI int XVendorRelease(Display *d) { (void)d; return 1; }
 
 XAPI int XInitThreads(void) { return 1; }
 XAPI XErrorHandlerFn XSetErrorHandler(XErrorHandlerFn h) {
+  xtr("[XC] XSetErrorHandler handler=");
+  xtr_u((unsigned long)h);
+  xtr("\n");
   XErrorHandlerFn old = g_d.error_handler;
   g_d.error_handler = h;
   return old;
@@ -1196,7 +1427,6 @@ static void win_clear(Display *d) {
   d->win.destroyed = 0;
   d->win.content_ready = 0;
   d->win.pointer_asked = 0;
-  d->win.map_notified = 0;
   d->win.structure_selected = 0;
   d->win.exposure_selected = 0;
   d->win.gx = d->win.gy = d->win.cw = d->win.ch = 0;
@@ -1228,7 +1458,7 @@ static void win_clear(Display *d) {
  * live id must therefore work and must carry that id in the MapNotify, or the
  * client's XIfEvent(MapNotify, &id) waits forever. */
 static int win_id_live(Display *d, Window w) {
-  return d && w >= 0x200001u && w < d->next_wid;
+  return xw_find(d, w) != 0;
 }
 
 XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
@@ -1236,8 +1466,7 @@ XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
                           unsigned border_width, int depth, unsigned c_class,
                           Visual *visual, unsigned long valuemask,
                           XSetWindowAttributes *attrs) {
-  (void)parent; (void)x; (void)y; (void)border_width; (void)depth;
-  (void)c_class; (void)visual;
+  (void)border_width; (void)depth; (void)c_class; (void)visual;
   xtr("[XC] XCreateWindow\n");
   if (!d) return 0;
   /* The desktop gives a process ONE window, but X clients are allowed to
@@ -1245,15 +1474,34 @@ XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
    * then creates a second one -- the old "one window per display" rule
    * answered 0 for the second and the device gave up ("Unable to find a
    * supported OpenGL core profile").  Each create therefore replaces the
-   * single desktop window and returns a FRESH XID, so an XIfEvent predicate
-   * that matches on window id still sees the window it asked for.  Only one
-   * window is live at a time -- the desktop protocol has no second surface. */
+   * single desktop window and returns a FRESH XID; the per-XID event state
+   * lives in d->wins[] (see struct xwin) so every window keeps its own
+   * selection.  Only one window is visible at a time -- the desktop protocol
+   * has no second surface. */
   win_clear(d);
   if (!d->next_wid) d->next_wid = 0x200001;  /* root is 1; real Xids start high */
   d->win.id = d->next_wid++;
   if (d->next_wid >= 0x3fffffffu) d->next_wid = 0x200001;
+  long evmask = 0;
+  int override = 0;
   xtr("[XC] XCreateWindow id=");
-  xtrn((int)d->win.id);
+  xtr_u((unsigned long)d->win.id);
+  xtr("\n");
+  xtr("[XC]   parent=");
+  xtr_u((unsigned long)parent);
+  xtr(" geom=");
+  xtr_u(width);
+  xtr("x");
+  xtr_u(height);
+  xtr(" depth=");
+  xtr_u((unsigned long)depth);
+  xtr(" class=");
+  xtr_u((unsigned long)c_class);
+  xtr(" vmask=0x");
+  xtr_u((unsigned long)valuemask);
+  xtr(" evmask=0x");
+  xtr_u(attrs ? (unsigned long)attrs->event_mask : 0ul);
+  xtr("\n");
   d->win.pref_w = width ? width : 640;
   d->win.pref_h = height ? height : 480;
   d->win.bg = 0x00000000L;
@@ -1264,17 +1512,32 @@ XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
    * XCreateColormap just returned; XGetWindowAttributes reports both back. */
   if (attrs && (valuemask & (1L << 1))) d->win.bg = attrs->background_pixel;
   if (attrs && (valuemask & (1L << 3))) d->win.border = attrs->border_pixel;
-  if (attrs && (valuemask & (1L << 11))) {
-    d->win.event_mask = attrs->event_mask;
-    if (d->win.event_mask & StructureNotifyMask) d->win.structure_selected = 1;
-    if (d->win.event_mask & ExposureMask) d->win.exposure_selected = 1;
-  }
+  if (attrs && (valuemask & (1L << 11))) evmask = attrs->event_mask;
   if (attrs && (valuemask & (1L << 13)) && attrs->colormap)
     d->win.cmap = attrs->colormap;
-  if (attrs && (valuemask & (1L << 9))) d->win.override_redirect =
-      attrs->override_redirect;
+  if (attrs && (valuemask & (1L << 9))) override = attrs->override_redirect;
+  d->win.override_redirect = override;
+  d->win.event_mask = evmask;
+  if (evmask & StructureNotifyMask) d->win.structure_selected = 1;
+  if (evmask & ExposureMask) d->win.exposure_selected = 1;
+
+  Window par = parent ? parent : d->root;
+  struct xwin *e = xw_alloc(d, d->win.id, par, x, y,
+                            width ? width : 640, height ? height : 480,
+                            override);
+  if (e) {
+    e->event_mask = evmask;
+    e->structure_selected = (evmask & StructureNotifyMask) != 0;
+    e->exposure_selected = (evmask & ExposureMask) != 0;
+    e->substructure_selected = (evmask & SubstructureNotifyMask) != 0;
+  }
+  /* A real server tells the parent's SubstructureNotify selection about the
+   * new window; the WM and the desktop's own probes select that on the root. */
+  xw_notify_parent(d, CreateNotify, d->win.id, par, x, y,
+                   width ? width : 640, height ? height : 480);
   xtr("[XC] XCreateWindow -> ");
-  xtrn((int)d->win.id);
+  xtr_u((unsigned long)d->win.id);
+  xtr("\n");
   return d->win.id;
 }
 
@@ -1282,7 +1545,7 @@ XAPI Window XCreateSimpleWindow(Display *d, Window parent, int x, int y,
                                 unsigned width, unsigned height,
                                 unsigned border_width, unsigned long border,
                                 unsigned long background) {
-  (void)parent; (void)x; (void)y; (void)border_width;
+  (void)border_width;
   if (!d) return 0;
   win_clear(d);
   if (!d->next_wid) d->next_wid = 0x200001;
@@ -1293,30 +1556,53 @@ XAPI Window XCreateSimpleWindow(Display *d, Window parent, int x, int y,
   d->win.border = border;
   d->win.bg = background;
   d->win.cmap = d->default_cmap;
+  Window par = parent ? parent : d->root;
+  xw_alloc(d, d->win.id, par, x, y, d->win.pref_w, d->win.pref_h, 0);
+  xw_notify_parent(d, CreateNotify, d->win.id, par, x, y,
+                   d->win.pref_w, d->win.pref_h);
   return d->win.id;
 }
 
 XAPI int XDestroyWindow(Display *d, Window w) {
-  xtr("[XC] XDestroyWindow ");
-  xtrn((int)w);
+  xtr("[XC] XDestroyWindow id=");
+  xtr_u((unsigned long)w);
   xtr("\n");
-  if (!d || !d->win.id || w != d->win.id) return 0;
+  if (!d) return 0;
+  struct xwin *e = xw_find(d, w);
+  if (!e) return 0;                      /* BadWindow on a real server */
   /* Release the slot, not just mark it: the next XCreateWindow is a *new*
    * window (SDL destroys its GL-probe window before Unity's device creates
-   * the real one) and every field below is re-armed by win_clear(). */
-  win_clear(d);
-  d->win.id = 0;
-  d->win.destroyed = 1;
+   * the real one) and every field is re-armed by win_clear(). */
+  xw_notify_self(d, DestroyNotify, w, e->parent, e->x, e->y, e->w, e->h);
+  xw_notify_parent(d, DestroyNotify, w, e->parent, e->x, e->y, e->w, e->h);
+  if (d->surface == w) d->surface = 0;
+  if (w == d->win.id) {
+    win_clear(d);
+    d->win.id = 0;
+    d->win.destroyed = 1;
+  }
+  e->used = 0;
+  e->destroyed = 1;
   return 1;                              /* Xlib: success */
 }
 XAPI int XDestroySubwindows(Display *d, Window w) { (void)d; (void)w; return 0; }
 
 XAPI int XMapWindow(Display *d, Window w) {
-  xtr("[XC] XMapWindow\n");
-  if (!d || !d->win.id || !win_id_live(d, w) || d->win.destroyed) return 0;
-  if (d->win.mapped && w == d->win.id)
-    return 1;                            /* already mapped: Xlib still says 1 */
-  d->win.mapped = 1;
+  struct xwin *e = xw_find(d, w);
+  xtr("[XC] XMapWindow id=");
+  xtr_u((unsigned long)w);
+  xtr(" sel=");
+  xtr_u(e ? (unsigned long)e->event_mask : 0ul);
+  xtr(" mapped=");
+  xtr_u(e ? (unsigned long)e->mapped : 0ul);
+  xtr("\n");
+  if (!d || !e) return 0;                /* BadWindow on a real server */
+  if (e->mapped) return 1;               /* already mapped: Xlib still says 1 */
+  e->mapped = 1;
+  if (w == d->win.id) d->win.mapped = 1;
+  d->surface = w;                        /* the desktop has one surface */
+  if (e->w) d->win.pref_w = e->w;
+  if (e->h) d->win.pref_h = e->h;
   char buf[40];
   int j = 0;
   buf[j++] = 27; buf[j++] = ']'; buf[j++] = 'X'; buf[j++] = ' ';
@@ -1330,18 +1616,13 @@ XAPI int XMapWindow(Display *d, Window w) {
    * window, and blocks in XIfEvent with the MapNotify predicate at
    * UnityPlayer+0x194c19b; the desktop's ESC ] G arrives after Unity has
    * replaced the mask with PropertyChangeMask, so a shim that only queues
-   * MapNotify from the geometry handler loses it forever.  Xlib processes the
-   * map request when it is issued, so the selection that counts is this one. */
-  if (d->win.structure_selected) {
-    XEvent ev;
-    xz(&ev, sizeof ev);
-    ev.type = MapNotify;
-    ev.xmap.window = w;
-    ev.xmap.event = w;
-    queue_event(d, &ev);
-    d->win.map_notified = 1;
-    xtr("[XC] MapNotify queued\n");
-  }
+   * MapNotify from the geometry handler loses it forever.  It is per XID now
+   * (L28): a second window's create must not suppress the first one's map. */
+  xw_notify_self(d, MapNotify, w, e->parent, e->x, e->y, e->w, e->h);
+  xw_notify_parent(d, MapNotify, w, e->parent, e->x, e->y, e->w, e->h);
+  xtr("[XC] MapNotify queued id=");
+  xtr_u((unsigned long)w);
+  xtr("\n");
   /* Cursor: the desktop paints its own pointer; XCreateFontCursor is a
    * stub, so nothing to install. */
   return 1;                              /* Xlib: success */
@@ -1350,9 +1631,17 @@ XAPI int XMapRaised(Display *d, Window w) { return XMapWindow(d, w); }
 
 XAPI int XUnmapWindow(Display *d, Window w) {
   /* No protocol message retracts a pixel window: the surface stays up and
-   * stops receiving events.  Documented in EXPORTS.md. */
-  if (!d || w != d->win.id) return 0;
-  d->win.mapped = 0;
+   * stops receiving events.  Documented in EXPORTS.md.  The X-visible half
+   * (UnmapNotify) is still delivered, because Xlib clients sequence on it. */
+  struct xwin *e = xw_find(d, w);
+  xtr("[XC] XUnmapWindow id=");
+  xtr_u((unsigned long)w);
+  xtr("\n");
+  if (!d || !e || !e->mapped) return 0;
+  e->mapped = 0;
+  if (w == d->win.id) d->win.mapped = 0;
+  xw_notify_self(d, UnmapNotify, w, e->parent, e->x, e->y, e->w, e->h);
+  xw_notify_parent(d, UnmapNotify, w, e->parent, e->x, e->y, e->w, e->h);
   return 0;
 }
 XAPI int XUnmapSubwindows(Display *d, Window w) { (void)d; (void)w; return 0; }
@@ -1366,12 +1655,24 @@ XAPI int XIconifyWindow(Display *d, Window w, int scr) {
 }
 
 XAPI int XSelectInput(Display *d, Window w, long mask) {
-  if (!d || !d->win.id || !win_id_live(d, w)) return 0;
-  xtr("[XC] XSelectInput mask=0x");
+  struct xwin *e = xw_find(d, w);
+  xtr("[XC] XSelectInput id=");
+  xtr_u((unsigned long)w);
+  xtr(" mask=");
   xtr_hex((unsigned long)mask);
-  if (mask & StructureNotifyMask) d->win.structure_selected = 1;
-  if (mask & ExposureMask) d->win.exposure_selected = 1;
-  d->win.event_mask = mask;
+  if (!d) return 0;
+  if (!e && w == d->root)
+    e = xw_alloc(d, d->root, None, 0, 0, (unsigned)d->fb_w, (unsigned)d->fb_h, 0);
+  if (!e) return 0;                      /* BadWindow on a real server */
+  e->event_mask = mask;
+  if (mask & StructureNotifyMask) e->structure_selected = 1;
+  if (mask & ExposureMask) e->exposure_selected = 1;
+  if (mask & SubstructureNotifyMask) e->substructure_selected = 1;
+  if (w == d->win.id) {
+    d->win.event_mask = mask;
+    if (mask & StructureNotifyMask) d->win.structure_selected = 1;
+    if (mask & ExposureMask) d->win.exposure_selected = 1;
+  }
   long pointer = ButtonPressMask | ButtonReleaseMask | PointerMotionMask;
   if (!d->win.pointer_asked && (mask & pointer)) {
     const char msg[] = { 27, ']', 'P', ' ', '1', '~' };
@@ -1387,23 +1688,29 @@ XAPI int XSelectInput(Display *d, Window w, long mask) {
  * XIfEvent (measured L27: mask=0x4194304, blocked right after XMapWindow),
  * so a shim that only stores the value never answers the wait.  The desktop
  * has no property protocol; this is the client-visible half of it. */
-static void prop_notify(Display *d, Atom prop) {
-  if (!(d->win.event_mask & PropertyChangeMask)) return;
+static void prop_notify(Display *d, Window w, Atom prop) {
+  struct xwin *e = xw_find(d, w);
+  long sel = e ? e->event_mask : (w == d->win.id ? d->win.event_mask : 0);
+  if (!sel && w == d->win.id) sel = d->win.event_mask;
+  if (!(sel & PropertyChangeMask)) return;
   XEvent ev;
   xz(&ev, sizeof ev);
   ev.type = PropertyNotify;
-  ev.xproperty.window = d->win.id;
+  ev.xproperty.window = w;
   ev.xproperty.atom = prop;
   ev.xproperty.time = 0;
   ev.xproperty.state = PropertyNewValue;
   queue_event(d, &ev);
-  xtr("[XC] PropertyNotify atom=");
-  xtrn((int)prop);
+  xtr("[XC] PropertyNotify win=");
+  xtr_u((unsigned long)w);
+  xtr(" atom=");
+  xtr_u((unsigned long)prop);
   xtr("\n");
 }
 
 XAPI int XStoreName(Display *d, Window w, const char *name) {
-  if (!d || !d->win.id || w != d->win.id || !name) return 0;
+  xtr("[XC] XStoreName win="); xtr_u((unsigned long)w); xtr("\n");
+  if (!d || !win_id_live(d, w) || !name) return 0;
   int n = xlen(name);
   if (n > TITLE_MAX - 1) n = TITLE_MAX - 1;
   for (int i = 0; i < n; i++) d->win.title[i] = name[i];
@@ -1415,7 +1722,7 @@ XAPI int XStoreName(Display *d, Window w, const char *name) {
   for (int i = 0; i < n; i++) buf[j++] = d->win.title[i];
   buf[j++] = '~';
   send_raw(buf, j);
-  prop_notify(d, XA_WM_NAME);
+  prop_notify(d, w, XA_WM_NAME);
   return 1;                              /* Xlib: success */
 }
 XAPI int XSetIconName(Display *d, Window w, const char *name) {
@@ -1438,7 +1745,9 @@ static int prop_slot(Display *d, Atom name) {
 XAPI int XChangeProperty(Display *d, Window w, Atom property, Atom type,
                          int format, int mode, const unsigned char *data,
                          int nelements) {
-  if (!d || !d->win.id || w != d->win.id) return 0;
+  xtr("[XC] XChangeProperty win="); xtr_u((unsigned long)w);
+  xtr(" prop="); xtr_u((unsigned long)property); xtr("\n");
+  if (!d || !win_id_live(d, w)) return 0;
   if (!property) return 0;
   int unit = format == 32 ? 4 : format == 16 ? 2 : 1;
   unsigned long nbytes = (unsigned long)(nelements > 0 ? nelements : 0) *
@@ -1466,7 +1775,7 @@ XAPI int XChangeProperty(Display *d, Window w, Atom property, Atom type,
     XStoreName(d, w, tmp);
   }
   (void)mode;                            /* no prepend/append semantics */
-  prop_notify(d, property);
+  prop_notify(d, w, property);
   return 1;
 }
 
@@ -1529,7 +1838,9 @@ XAPI Atom *XListProperties(Display *d, Window w, int *n) {
 }
 
 XAPI int XSetWMProtocols(Display *d, Window w, Atom *protocols, int count) {
-  if (!d || !d->win.id || w != d->win.id) return 0;
+  xtr("[XC] XSetWMProtocols win="); xtr_u((unsigned long)w);
+  xtr(" n="); xtr_u((unsigned long)count); xtr("\n");
+  if (!d || !win_id_live(d, w)) return 0;
   if (count > PROTO_MAX) count = PROTO_MAX;
   for (int i = 0; i < count; i++) d->win.protocols[i] = protocols[i];
   d->win.nprotocols = count;
@@ -1559,7 +1870,7 @@ XAPI int XSetWMProperties(Display *d, Window w, XTextProperty *window_name,
                           XSizeHints *normal_hints, XWMHints *wm_hints,
                           XClassHint *class_hints) {
   (void)icon_name; (void)argv; (void)argc;
-  if (!d || !d->win.id || w != d->win.id) return 0;
+  if (!d || !win_id_live(d, w)) return 0;
   if (window_name && window_name->value)
     XStoreName(d, w, (const char *)window_name->value);
   if (normal_hints) {
@@ -1591,10 +1902,11 @@ XAPI int XmbSetWMProperties(Display *d, Window w, const char *n,
 }
 
 XAPI int XSetWMHints(Display *d, Window w, XWMHints *hints) {
-  if (!d || w != d->win.id || !hints) return 0;
+  xtr("[XC] XSetWMHints win="); xtr_u((unsigned long)w); xtr("\n");
+  if (!d || !win_id_live(d, w) || !hints) return 0;
   d->win.wm_hints = *hints;
   d->win.has_wm_hints = 1;
-  prop_notify(d, XA_WM_HINTS);
+  prop_notify(d, w, XA_WM_HINTS);
   return 1;
 }
 
@@ -1604,10 +1916,10 @@ XAPI XWMHints *XGetWMHints(Display *d, Window w) {
 }
 
 XAPI int XSetWMNormalHints(Display *d, Window w, XSizeHints *hints) {
-  if (!d || w != d->win.id || !hints) return 0;
+  if (!d || !win_id_live(d, w) || !hints) return 0;
   d->win.size_hints = *hints;
   d->win.has_size_hints = 1;
-  prop_notify(d, XA_WM_NORMAL_HINTS);
+  prop_notify(d, w, XA_WM_NORMAL_HINTS);
   return 0;
 }
 
@@ -1620,10 +1932,11 @@ XAPI int XGetWMNormalHints(Display *d, Window w, XSizeHints *hints,
 }
 
 XAPI int XSetClassHint(Display *d, Window w, XClassHint *hint) {
-  if (!d || w != d->win.id || !hint) return 0;
+  xtr("[XC] XSetClassHint win="); xtr_u((unsigned long)w); xtr("\n");
+  if (!d || !win_id_live(d, w) || !hint) return 0;
   d->win.class_name = hint->res_name;
   d->win.class_class = hint->res_class;
-  prop_notify(d, XA_WM_CLASS);
+  prop_notify(d, w, XA_WM_CLASS);
   return 1;
 }
 
@@ -1665,55 +1978,133 @@ XAPI int XMoveResizeWindow(Display *d, Window w, int x, int y,
   (void)d; (void)w; (void)x; (void)y; (void)width; (void)height;
   return 0;
 }
-XAPI int XRaiseWindow(Display *d, Window w) { (void)d; (void)w; return 0; }
+XAPI int XRaiseWindow(Display *d, Window w) {
+  xtr("[XC] XRaiseWindow win="); xtr_u((unsigned long)w); xtr("\n");
+  (void)d; (void)w; return 0;
+}
 XAPI int XLowerWindow(Display *d, Window w) { (void)d; (void)w; return 0; }
 XAPI int XReparentWindow(Display *d, Window w, Window p, int x, int y) {
-  (void)d; (void)w; (void)p; (void)x; (void)y;
-  return 0;
+  xtr("[XC] XReparentWindow win=");
+  xtr_u((unsigned long)w);
+  xtr(" parent=");
+  xtr_u((unsigned long)p);
+  xtr("\n");
+  if (!d) return 0;
+  struct xwin *e = xw_find(d, w);
+  struct xwin *np = xw_find(d, p);
+  if (!e || !np) return 0;               /* BadWindow on a real server */
+  /* Real X semantics, measured on Xvfb (tools/rw/x11-watch + a native
+   * reparent probe, L28): reparenting a MAPPED window into a mapped parent
+   * unmaps it, reparents it and then maps it again, delivering
+   *     UnmapNotify(w), ReparentNotify(w), MapNotify(w)
+   * to the client with no further XMapWindow call.  Unity depends on that:
+   * it reparents its GL window into an override-redirect container and then
+   * blocks in XIfEvent(MapNotify, &gl_window) whose predicate is
+   * UnityPlayer+0x194c19b -- measured, the awaited id was 2097154 and the
+   * queue held no matching event. */
+  int was_mapped = e->mapped;
+  Window oldp = e->parent;
+  if (was_mapped) {
+    e->mapped = 0;
+    if (w == d->win.id) d->win.mapped = 0;
+    xw_notify_self(d, UnmapNotify, w, oldp, e->x, e->y, e->w, e->h);
+    xw_notify_parent(d, UnmapNotify, w, oldp, e->x, e->y, e->w, e->h);
+  }
+  e->parent = p;
+  e->x = x;
+  e->y = y;
+  xw_notify_self(d, ReparentNotify, w, p, x, y, e->w, e->h);
+  if (xw_parent_wants(d, p))
+    ev_emit(d, ReparentNotify, w, p, p, x, y, e->w, e->h);
+  if (oldp && oldp != p && xw_parent_wants(d, oldp))
+    ev_emit(d, ReparentNotify, w, oldp, p, x, y, e->w, e->h);
+  if (was_mapped) {
+    e->mapped = 1;
+    if (w == d->win.id) d->win.mapped = 1;
+    /* The reparented window is the visible content now: the desktop's later
+     * ESC ] G must address it, not the frame it was placed in. */
+    d->surface = w;
+    xw_notify_self(d, MapNotify, w, p, e->x, e->y, e->w, e->h);
+    xw_notify_parent(d, MapNotify, w, p, e->x, e->y, e->w, e->h);
+    if (e->exposure_selected || (e->event_mask & ExposureMask))
+      ev_emit(d, Expose, w, w, p, 0, 0, e->w, e->h);
+  }
+  return 1;
 }
 
 XAPI Status XGetGeometry(Display *d, Drawable dr, Window *root, int *x, int *y,
                          unsigned *width, unsigned *height, unsigned *bw,
                          unsigned *depth) {
-  if (!d || dr != d->win.id) return 0;
+  struct xwin *e = xw_find(d, dr);
+  if (!d || !e) return 0;
   if (root) *root = d->root;
-  if (x) *x = d->win.content_ready ? 0 : 0;
-  if (y) *y = 0;
-  if (width) *width = d->win.content_ready ? (unsigned)d->win.cw : d->win.pref_w;
-  if (height) *height = d->win.content_ready ? (unsigned)d->win.ch : d->win.pref_h;
+  if (x) *x = e->x;
+  if (y) *y = e->y;
+  /* The surface's real size is the desktop's content rect; every other XID
+   * keeps the size it was created with. */
+  if (width)
+    *width = (dr == d->win.id && d->win.content_ready)
+             ? (unsigned)d->win.cw : e->w;
+  if (height)
+    *height = (dr == d->win.id && d->win.content_ready)
+              ? (unsigned)d->win.ch : e->h;
   if (bw) *bw = 0;
   if (depth) *depth = 24;
   return 1;
 }
 
 XAPI int XGetWindowAttributes(Display *d, Window w, XWindowAttributes *a) {
-  if (!d || !d->win.id || w != d->win.id || !a) return 0;
+  struct xwin *e = xw_find(d, w);
+  xtr("[XC] XGetWindowAttributes win=");
+  xtr_u((unsigned long)w);
+  xtr(" hit=");
+  xtr_u(e ? 1ul : 0ul);
+  xtr("\n");
+  if (!d || !e || !a) return 0;
   xz(a, sizeof *a);
-  a->x = d->win.gx;
-  a->y = d->win.gy;
-  a->width = d->win.content_ready ? d->win.cw : (int)d->win.pref_w;
-  a->height = d->win.content_ready ? d->win.ch : (int)d->win.pref_h;
+  int surface = (w == d->win.id);
+  a->x = surface ? d->win.gx : e->x;
+  a->y = surface ? d->win.gy : e->y;
+  a->width = (surface && d->win.content_ready) ? d->win.cw : (int)e->w;
+  a->height = (surface && d->win.content_ready) ? d->win.ch : (int)e->h;
   a->border_width = 0;
   a->depth = 24;
   a->visual = (Visual *)&d->visual;
   a->root = d->root;
   a->c_class = InputOutput;
-  a->map_state = d->win.mapped ? IsViewable : IsUnmapped;
-  a->your_event_mask = d->win.event_mask;
-  a->all_event_masks = d->win.event_mask;
-  a->override_redirect = d->win.override_redirect;
+  a->map_state = e->mapped ? IsViewable : IsUnmapped;
+  a->your_event_mask = e->event_mask;
+  a->all_event_masks = e->event_mask;
+  a->override_redirect = e->override_redirect;
   a->screen = &d->screen_obj;
-  a->colormap = d->win.cmap ? d->win.cmap : d->default_cmap;
+  a->colormap = surface && d->win.cmap ? d->win.cmap : d->default_cmap;
   return 1;
 }
 
 XAPI Status XQueryTree(Display *d, Window w, Window *root, Window *parent,
                        Window **children, unsigned *nchildren) {
-  if (!d || w != d->win.id) return 0;
+  struct xwin *e = xw_find(d, w);
+  xtr("[XC] XQueryTree win=");
+  xtr_u((unsigned long)w);
+  xtr(" hit=");
+  xtr_u(e ? 1ul : 0ul);
+  xtr("\n");
+  if (!d || !e) return 0;
   if (root) *root = d->root;
-  if (parent) *parent = d->root;
-  if (children) *children = 0;
-  if (nchildren) *nchildren = 0;
+  if (parent) *parent = e->parent;
+  if (children || nchildren) {
+    unsigned n = 0;
+    for (int i = 0; i < XW_MAX; i++)
+      if (d->wins[i].used && d->wins[i].parent == w && d->wins[i].id != w) n++;
+    Window *list = n ? (Window *)xc_malloc(n * sizeof(Window)) : 0;
+    unsigned k = 0;
+    if (list)
+      for (int i = 0; i < XW_MAX; i++)
+        if (d->wins[i].used && d->wins[i].parent == w && d->wins[i].id != w)
+          list[k++] = d->wins[i].id;
+    if (children) *children = list;
+    if (nchildren) *nchildren = k;
+  }
   return 1;
 }
 
@@ -1845,11 +2236,15 @@ XAPI int XSetPointerMapping(Display *d, const unsigned char *map, int n) {
 }
 
 XAPI int XSetInputFocus(Display *d, Window w, int revert, Time t) {
+  xtr("[XC] XSetInputFocus win=");
+  xtr_u((unsigned long)w);
+  xtr("\n");
   (void)revert; (void)t;
   if (!d || (w != d->win.id && w != PointerRoot && w != None)) return 0;
   return 0;
 }
 XAPI int XGetInputFocus(Display *d, Window *focus, int *revert) {
+  xtr("[XC] XGetInputFocus\n");
   if (focus) *focus = d ? d->win.id : PointerRoot;
   if (revert) *revert = 2 /* RevertToParent */;
   return 0;
@@ -1924,6 +2319,8 @@ XAPI int XPeekEvent(Display *d, XEvent *ev) {
 
 XAPI Bool XCheckIfEvent(Display *d, XEvent *ev, Bool (*pred)(),
                         void *arg) {
+  xtr("[XC] XCheckIfEvent caller=");
+  xtr_hex((unsigned long)__builtin_return_address(0));
   if (!d || !ev || !pred) return False;
   pump_nonblock(d);
   if (!xc_peek(&d->core, ev)) return False;
@@ -1937,6 +2334,9 @@ XAPI Bool XIfEvent(Display *d, XEvent *ev, Bool (*pred)(), void *arg) {
   if (!d || !ev || !pred) return False;
   xtr("[XC] XIfEvent caller=");
   xtr_hex((unsigned long)__builtin_return_address(0));
+  xtr_awaited(arg);
+  xtr_queue(d);
+  xtr("\n");
   typedef Bool (*pred_t)(Display *, XEvent *, void *);
   /* Xlib's XIfEvent removes non-matching events from the queue and puts them
    * back once the matching one is found.  The previous head-only version left
@@ -1962,6 +2362,9 @@ XAPI Bool XIfEvent(Display *d, XEvent *ev, Bool (*pred)(), void *arg) {
         for (i = 0; i < nheld; i++) xc_queue(&d->core, &held[i]);
         xtr("[XC] XIfEvent matched type=");
         xtrn(e.type);
+        xtr("[XC] XIfEvent matched win=");
+        xtr_u((unsigned long)e.xany.window);
+        xtr("\n");
         return True;
       }
       held[nheld++] = e;
@@ -1976,6 +2379,43 @@ XAPI Bool XIfEvent(Display *d, XEvent *ev, Bool (*pred)(), void *arg) {
 }
 
 XAPI Bool XFilterEvent(XEvent *ev, Window w) { (void)ev; (void)w; return False; }
+/* XPeekIfEvent is XIfEvent without consuming the match: Xlib's documented
+ * behaviour is that the event is copied out and left in the queue (together
+ * with every event the scan held aside).  Unity's X11 table has a slot for it
+ * next to XCheckIfEvent; a missing export is a NULL call, so implement it
+ * rather than leave the loader to find nothing. */
+XAPI Bool XPeekIfEvent(Display *d, XEvent *ev, Bool (*pred)(), void *arg) {
+  if (!d || !ev || !pred) return False;
+  xtr("[XC] XPeekIfEvent caller=");
+  xtr_hex((unsigned long)__builtin_return_address(0));
+  typedef Bool (*pred_t)(Display *, XEvent *, void *);
+  static XEvent held[XC_EVENT_RING];
+  int nheld = 0;
+  for (;;) {
+    XEvent e;
+    int got = 0;
+    pump_nonblock(d);
+    while (nheld < XC_EVENT_RING && xc_dequeue(&d->core, &e)) {
+      got = 1;
+      if (((pred_t)pred)(d, &e, arg)) {
+        int i;
+        *ev = e;
+        for (i = 0; i < nheld; i++) xc_queue(&d->core, &held[i]);
+        xc_queue(&d->core, &e);          /* peeked: stays in the queue */
+        return True;
+      }
+      held[nheld++] = e;
+    }
+    if (got) continue;
+    if (wait_event(d) < 0) {
+      int i;
+      for (i = 0; i < nheld; i++) xc_queue(&d->core, &held[i]);
+      return False;
+    }
+  }
+}
+
+
 
 XAPI int XSendEvent(Display *d, Window w, Bool propagate, long mask,
                     XEvent *ev) {
@@ -2006,6 +2446,8 @@ XAPI Bool XGetEventData(Display *d, XGenericEventCookie *c) { (void)d; (void)c; 
 XAPI void XFreeEventData(Display *d, XGenericEventCookie *c) { (void)d; (void)c; }
 
 XAPI int XFlush(Display *d) {
+  xtr("[XC] XFlush caller=");
+  xtr_hex((unsigned long)__builtin_return_address(0));
   if (!d) return 0;
   shadow_flush(d);
   return 1;                              /* Xlib: success */
@@ -2017,12 +2459,241 @@ XAPI int XSync(Display *d, Bool discard) {
   return 1;                              /* Xlib: success */
 }
 
+/* ---- entry points Unity's X11 table resolves but the shim lacked --------
+ * Unity resolves a fixed list of Xlib symbols into its own dispatch table and
+ * calls them without a NULL check.  A name the shim does not export becomes a
+ * NULL slot and the next call jumps to address 0 -- measured (L28) right after
+ * the window handshake: PC=0 with rdi = &g_d (the Display*), no shim entry
+ * point reached.  XkbGetMap is one of the names the loader logs as
+ * unresolved, and it is the first Display*-taking Xlib call after a window is
+ * reparented (the keyboard map is fetched when the window gets focus), so it
+ * is implemented here: a zeroed client map is not a usable XkbDescRec, but it
+ * is a *non-NULL* answer, which is what the caller's NULL check needs.  The
+ * full XKB keyboard description is not modelled; keys come from xcore's keymap
+ * (see key_event). */
+XAPI void *XkbGetMap(Display *d, unsigned int which, unsigned int device) {
+  xtr("[XC] XkbGetMap which=");
+  xtr_u((unsigned long)which);
+  xtr(" device=");
+  xtr_u((unsigned long)device);
+  xtr("\n");
+  (void)d;
+  static unsigned char zero_map[256];
+  return zero_map;
+}
+XAPI int XkbGetUpdatedMap(Display *d, unsigned int which, void *desc) {
+  xtr("[XC] XkbGetUpdatedMap\n");
+  (void)d; (void)which; (void)desc;
+  return 0;                              /* Success */
+}
+XAPI void XkbFreeClientMap(void *desc, unsigned int free, Bool all) {
+  xtr("[XC] XkbFreeClientMap\n");
+  (void)desc; (void)free; (void)all;
+}
+XAPI void XkbFreeKeyboard(void *desc, unsigned int free, Bool all) {
+  xtr("[XC] XkbFreeKeyboard\n");
+  (void)desc; (void)free; (void)all;
+}
+XAPI int XkbSelectEvents(Display *d, unsigned int device, unsigned int affect,
+                         unsigned int clear, unsigned int select_all) {
+  xtr("[XC] XkbSelectEvents\n");
+  (void)d; (void)device; (void)affect; (void)clear; (void)select_all;
+  return 0;                              /* Success */
+}
+
+/* XFixes / XInput2 barrier entry points: Unity's own X11 table (135 names,
+ * extracted from the loader at UnityPlayer+0x1940706) has four names the shim
+ * did not export -- and the loader logs them as unresolved.  They live in
+ * libXfixes/libXi on a real system; here they must at least exist, because the
+ * table calls them without a NULL check (a NULL slot is a jump to address 0:
+ * measured PC=0 with rdi = &Display right after the window is shown).  There
+ * is no barrier extension on this display, so each answers "not available":
+ * XFixesQueryVersion returning False is what makes a client skip the rest. */
+XAPI int XFixesQueryVersion(Display *d, int *major, int *minor) {
+  xtr("[XC] XFixesQueryVersion\n");
+  (void)d;
+  if (major) *major = 0;
+  if (minor) *minor = 0;
+  return 0;                              /* extension not present */
+}
+XAPI unsigned long XFixesCreatePointerBarrier(Display *d, Window w,
+                                              int x1, int y1, int x2, int y2,
+                                              int directions, int num_devices,
+                                              unsigned long *devices) {
+  xtr("[XC] XFixesCreatePointerBarrier\n");
+  (void)d; (void)w; (void)x1; (void)y1; (void)x2; (void)y2;
+  (void)directions; (void)num_devices; (void)devices;
+  return 0;
+}
+XAPI void XFixesDestroyPointerBarrier(Display *d, unsigned long barrier) {
+  xtr("[XC] XFixesDestroyPointerBarrier\n");
+  (void)d; (void)barrier;
+}
+XAPI void XIBarrierReleasePointer(Display *d, int deviceid,
+                                  unsigned long barrier, unsigned int eventid) {
+  xtr("[XC] XIBarrierReleasePointer\n");
+  (void)d; (void)deviceid; (void)barrier; (void)eventid;
+}
+
+/* XRandR / XF86VidMode / XScreenSaver / XShm / XI2: none of these extensions
+ * exists on this display, but Unity resolves their entry points into the same
+ * table it calls without a NULL check, and *has* been measured jumping to
+ * address 0 with the Display in rdi at this stage.  A coherent "extension not
+ * present" answer is what a client tests against: Query* returns False and
+ * everything that would return a pointer returns NULL.  Names and ABI come
+ * from <X11/extensions/Xrandr.h>; only the leading Display* and the return
+ * width matter to a caller that has already been told the extension is absent. */
+#define XNR(name) xtr("[XC] " name "\n")
+XAPI int XRRQueryExtension(Display *d, int *ev, int *err) {
+  XNR("XRRQueryExtension");
+  (void)d; if (ev) *ev = 0; if (err) *err = 0; return 0;
+}
+XAPI int XRRQueryVersion(Display *d, int *major, int *minor) {
+  XNR("XRRQueryVersion");
+  (void)d; if (major) *major = 0; if (minor) *minor = 0; return 0;
+}
+XAPI void *XRRGetScreenInfo(Display *d, Window w) {
+  XNR("XRRGetScreenInfo"); (void)d; (void)w; return 0;
+}
+XAPI void XRRFreeScreenConfigInfo(void *cfg) {
+  XNR("XRRFreeScreenConfigInfo"); (void)cfg;
+}
+XAPI short XRRConfigCurrentRate(void *cfg) {
+  XNR("XRRConfigCurrentRate"); (void)cfg; return 0;
+}
+XAPI int XRRConfigCurrentConfiguration(void *cfg, int *rotation) {
+  XNR("XRRConfigCurrentConfiguration");
+  (void)cfg; if (rotation) *rotation = 1; return 0;
+}
+XAPI short *XRRConfigRates(void *cfg, int size, int *n) {
+  XNR("XRRConfigRates"); (void)cfg; (void)size; if (n) *n = 0; return 0;
+}
+XAPI void *XRRConfigSizes(void *cfg, int *n) {
+  XNR("XRRConfigSizes"); (void)cfg; if (n) *n = 0; return 0;
+}
+XAPI int XRRSetScreenConfigAndRate(Display *d, void *cfg, int draw,
+                                   int size, int rotation, int rate, int t) {
+  XNR("XRRSetScreenConfigAndRate");
+  (void)d; (void)cfg; (void)draw; (void)size; (void)rotation; (void)rate;
+  (void)t; return 0;
+}
+XAPI void *XRRGetScreenResources(Display *d, Window w) {
+  XNR("XRRGetScreenResources"); (void)d; (void)w; return 0;
+}
+XAPI void *XRRGetScreenResourcesCurrent(Display *d, Window w) {
+  XNR("XRRGetScreenResourcesCurrent"); (void)d; (void)w; return 0;
+}
+XAPI void XRRFreeScreenResources(void *r) {
+  XNR("XRRFreeScreenResources"); (void)r;
+}
+XAPI void *XRRGetOutputInfo(Display *d, void *r, unsigned long out) {
+  XNR("XRRGetOutputInfo"); (void)d; (void)r; (void)out; return 0;
+}
+XAPI void XRRFreeOutputInfo(void *i) { XNR("XRRFreeOutputInfo"); (void)i; }
+XAPI void *XRRGetCrtcInfo(Display *d, void *r, unsigned long crtc) {
+  XNR("XRRGetCrtcInfo"); (void)d; (void)r; (void)crtc; return 0;
+}
+XAPI void XRRFreeCrtcInfo(void *i) { XNR("XRRFreeCrtcInfo"); (void)i; }
+XAPI int XRRSetCrtcConfig(Display *d, void *r, unsigned long crtc, int t,
+                          int x, int y, unsigned long mode, int rot,
+                          void *outputs, int n) {
+  XNR("XRRSetCrtcConfig");
+  (void)d; (void)r; (void)crtc; (void)t; (void)x; (void)y; (void)mode;
+  (void)rot; (void)outputs; (void)n; return 0;
+}
+XAPI int XRRSetScreenSize(Display *d, Window w, int cw, int ch,
+                          int mmw, int mmh) {
+  XNR("XRRSetScreenSize");
+  (void)d; (void)w; (void)cw; (void)ch; (void)mmw; (void)mmh; return 0;
+}
+XAPI int XRRGetScreenSizeRange(Display *d, Window w, int *a, int *b,
+                               int *c, int *e) {
+  XNR("XRRGetScreenSizeRange");
+  (void)d; (void)w;
+  if (a) *a = 0; if (b) *b = 0; if (c) *c = 0; if (e) *e = 0;
+  return 0;
+}
+XAPI unsigned long *XRRListOutputProperties(Display *d, unsigned long out,
+                                            int *n) {
+  XNR("XRRListOutputProperties"); (void)d; (void)out; if (n) *n = 0; return 0;
+}
+XAPI int XRRQueryOutputProperty(Display *d, unsigned long out, unsigned long p) {
+  XNR("XRRQueryOutputProperty"); (void)d; (void)out; (void)p; return 0;
+}
+XAPI int XRRGetOutputProperty(Display *d, unsigned long out, unsigned long p,
+                              int o, int l, int del, int req, int *type,
+                              int *fmt, unsigned long *n, unsigned long *after,
+                              unsigned char **data) {
+  XNR("XRRGetOutputProperty");
+  (void)d; (void)out; (void)p; (void)o; (void)l; (void)del; (void)req;
+  if (type) *type = 0; if (fmt) *fmt = 0; if (n) *n = 0;
+  if (after) *after = 0; if (data) *data = 0;
+  return 0;
+}
+XAPI unsigned long XRRGetOutputPrimary(Display *d, Window w) {
+  XNR("XRRGetOutputPrimary"); (void)d; (void)w; return 0;
+}
+XAPI int XRRGetCrtcTransform(Display *d, unsigned long crtc, void **attr) {
+  XNR("XRRGetCrtcTransform"); (void)d; (void)crtc;
+  if (attr) *attr = 0; return 0;
+}
+XAPI int XF86VidModeQueryExtension(Display *d, int *ev, int *err) {
+  XNR("XF86VidModeQueryExtension");
+  (void)d; if (ev) *ev = 0; if (err) *err = 0; return 0;
+}
+XAPI int XF86VidModeQueryVersion(Display *d, int *maj, int *min) {
+  XNR("XF86VidModeQueryVersion");
+  (void)d; if (maj) *maj = 0; if (min) *min = 0; return 0;
+}
+XAPI int XF86VidModeGetAllModeLines(Display *d, int scr, int *n, void *info) {
+  XNR("XF86VidModeGetAllModeLines");
+  (void)d; (void)scr; if (n) *n = 0; (void)info; return 0;
+}
+XAPI int XF86VidModeGetModeLine(Display *d, int scr, int *dot, void *info) {
+  XNR("XF86VidModeGetModeLine");
+  (void)d; (void)scr; if (dot) *dot = 0; (void)info; return 0;
+}
+XAPI int XF86VidModeGetViewPort(Display *d, int scr, int *x, int *y) {
+  XNR("XF86VidModeGetViewPort");
+  (void)d; (void)scr; if (x) *x = 0; if (y) *y = 0; return 0;
+}
+XAPI int XF86VidModeSwitchToMode(Display *d, int scr, void *info) {
+  XNR("XF86VidModeSwitchToMode"); (void)d; (void)scr; (void)info; return 0;
+}
+XAPI int XF86VidModeLockModeSwitch(Display *d, int scr, int lock) {
+  XNR("XF86VidModeLockModeSwitch"); (void)d; (void)scr; (void)lock; return 0;
+}
+XAPI int XScreenSaverQueryExtension(Display *d, int *ev, int *err) {
+  XNR("XScreenSaverQueryExtension");
+  (void)d; if (ev) *ev = 0; if (err) *err = 0; return 0;
+}
+XAPI int XScreenSaverQueryVersion(Display *d, int *maj, int *min) {
+  XNR("XScreenSaverQueryVersion");
+  (void)d; if (maj) *maj = 0; if (min) *min = 0; return 0;
+}
+XAPI void XScreenSaverSuspend(Display *d, int suspend) {
+  XNR("XScreenSaverSuspend"); (void)d; (void)suspend;
+}
+XAPI unsigned long XShmCreatePixmap(Display *d, Drawable dr, char *data,
+                                    void *shminfo, unsigned w, unsigned h,
+                                    unsigned depth) {
+  XNR("XShmCreatePixmap");
+  (void)d; (void)dr; (void)data; (void)shminfo; (void)w; (void)h; (void)depth;
+  return 0;
+}
+
 /* ---- atoms ------------------------------------------------------------ */
 
 XAPI Atom XInternAtom(Display *d, const char *name, Bool only_if_exists) {
   if (!d) return None;
   Atom a = xc_intern(&d->core, name, only_if_exists);
-  xtr("[XC] XInternAtom -> "); xtrn((int)a);
+  xtr("[XC] XInternAtom name=");
+  xtr_s(name ? name : "(null)");
+  xtr(" only=");
+  xtr_u((unsigned long)only_if_exists);
+  xtr(" -> ");
+  xtr_u((unsigned long)a);
+  xtr("\n");
   return a;
 }
 

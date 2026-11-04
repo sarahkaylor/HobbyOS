@@ -1,0 +1,34 @@
+--- a/src/gallium/frontends/glx/xlib/glx_getproc.c
++++ b/src/gallium/frontends/glx/xlib/glx_getproc.c
+@@ -31,6 +31,8 @@
+ 
+ #define GLX_GLXEXT_PROTOTYPES
+ 
++#include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "util/compiler.h"
+ #include "GL/glx.h"
+@@ -195,11 +197,19 @@
+    __GLXextFuncPtr f;
+ 
+    f = _glxapi_get_proc_address((const char *) procName);
+-   if (f) {
+-      return f;
++   if (!f) {
++      f = (__GLXextFuncPtr) _mesa_glapi_get_proc_address((const char *) procName);
+    }
+ 
+-   f = (__GLXextFuncPtr) _mesa_glapi_get_proc_address((const char *) procName);
++   /* HobbyOS/compat (L28): Unity resolves its GLX entry points through this
++    * call and *tail-jumps* to the answer, so a NULL return is an immediate
++    * jump to address 0 (measured: PC=0 with rdi = &Display right after the
++    * window handshake).  Under HOBBYOS_GLX_TRACE, name every request and the
++    * answer -- the last line before such a fault names the missing entry. */
++   if (getenv("HOBBYOS_GLX_TRACE")) {
++      fprintf(stderr, "[GLXT] glXGetProcAddress(%s) -> %p\n",
++              (const char *) procName, (void *) f);
++   }
+    return f;
+ }
+ 
