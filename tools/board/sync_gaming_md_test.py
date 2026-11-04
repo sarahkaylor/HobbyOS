@@ -86,6 +86,12 @@ check("row escapes a literal pipe", "\\|" in row)
 check("row includes both DoD items", "first check" in row and "second check" in row)
 check("row stops at the next section", "Evidence slot" not in row)
 
+wrapped = dict(issue, body="| Depends on | — |\n\n### DoD\n1. first line\n   continues here\n2. second item\n")
+row_w = S.row_from_issue("GB-904", wrapped)
+assert row_w is not None
+check("a wrapped DoD line joins its item", "first line continues here" in row_w)
+check("a wrapped DoD line does not start a new item", "first line; continues here" not in row_w)
+
 out = S.insert_plan_row(fixture_plan, "M4-acceptance", row)
 check("row lands in the M4 table", out.index("GB-900") > out.index("### Milestone M4"))
 check("row lands after the M4 rows", out.index("GB-900") > out.index("GB-043"))
