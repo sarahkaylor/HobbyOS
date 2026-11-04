@@ -866,11 +866,13 @@ static void sys_connect_addr(struct trap_frame *tf) {
   if (r == -2) {
     /* GB-180: -ENOENT is 2, so a connect() to a missing path name returns
        exactly the park/restart sentinel.  usock_name_park() sets the caller
-       BLOCKED before returning -2; a caller that is still runnable got
-       -ENOENT from usock_name_lookup().  Treat that as the errno it is --
-       otherwise the trap rewinds elr and re-executes the same connect()
-       forever (the wave's pid-63 terminal stall). */
-    if (!caller || caller->state != PROC_STATE_BLOCKED) {
+       BLOCKED before returning -2, and a waker may already have flipped it
+       to READY; a caller in any other state got -ENOENT from
+       usock_name_lookup().  Treat that as the errno it is -- otherwise the
+       trap rewinds elr and re-executes the same connect() forever (the
+       wave's pid-63 terminal stall). */
+    if (!caller || (caller->state != PROC_STATE_BLOCKED &&
+                    caller->state != PROC_STATE_READY)) {
       tf->regs[0] = (uint64_t)(int64_t)-ENOENT;
       return;
     }

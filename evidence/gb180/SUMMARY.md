@@ -25,8 +25,9 @@ rip=0x100001173d IPC_T.BIN` for the rest of the run.
 ## Fix
 
 `src/kernel/arch/x64/trap.c`, `sys_connect_addr()`: when `r == -2` and the
-caller is not `PROC_STATE_BLOCKED`, set `regs[0] = -ENOENT` and return instead
-of parking/rewinding.  A genuinely parked connect is unchanged.
+caller is neither `PROC_STATE_BLOCKED` (parked here) nor `PROC_STATE_READY`
+(parked here, already woken), set `regs[0] = -ENOENT` and return instead of
+parking/rewinding.  A genuinely parked connect is unchanged.
 
 ## Gate run
 
