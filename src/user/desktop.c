@@ -304,14 +304,58 @@ static void forward_payload_to_window(int win_id, const char *seq, int n) {
   desktop_send_hook(win_id, seq, n);
 }
 
-/* Forward one key press to the focused window and arm auto-repeat (a fresh
+/* GB-186: the desktop routes a key to exactly ONE owner.
+ *
+ *   WINDOWED owner   -- a focused desktop window (focused_window >= 0).  The
+ *                       payload is written to that window's stdin pipe; every
+ *                       app and every game the launcher tiles has one.
+ *   NON-WINDOWED owner -- otherwise, the child the desktop last launched
+ *                       (nonwindowed_key_fd).  A fullscreen game that maps the
+ *                       framebuffer and draws straight into it has no window
+ *                       to receive a forward; without this leg the desktop
+ *                       still drains the kernel's (single) input ring, so the
+ *                       key would be consumed and dropped on the floor.
+ *
+ * The owner is set at spawn time (the desktop owns the write end of the
+ * child's stdin pipe) and cleared when that child's window is torn down.
+ * -1 means "no owner", and the key is intentionally discarded.
+ */
+static int nonwindowed_key_fd = -1;    /* stdin write end of the last launch */
+static int nonwindowed_key_pid = -1;
+
+static void set_nonwindowed_key_owner(int pid, int fd) {
+  nonwindowed_key_pid = pid;
+  nonwindowed_key_fd = fd;
+  /* A key held while the owner changes must not leak its auto-repeat into
+   * the new owner: a fresh press is required to arm repeat again. */
+  held_key_code = -1;
+  held_key_last_ms = 0;
+}
+
+static void clear_nonwindowed_key_owner(int pid) {
+  if (pid >= 0 && pid != nonwindowed_key_pid) return;
+  nonwindowed_key_pid = -1;
+  nonwindowed_key_fd = -1;
+  held_key_code = -1;
+  held_key_last_ms = 0;
+}
+
+/* Forward one key press to the owning process and arm auto-repeat (a fresh
  * press always re-arms; a non-repeatable key disarms a previous one). */
 static void forward_key_to_focused(int code, int now_ms) {
-  if (focused_window < 0) return;
   char seq[8];
   int n = key_payload(code, seq);
   if (n <= 0) return;
-  forward_payload_to_window(focused_window, seq, n);
+  if (focused_window >= 0) {
+    forward_payload_to_window(focused_window, seq, n);
+  } else if (nonwindowed_key_fd >= 0) {
+    /* Non-windowed owner: the same terminal-shaped bytes a window would get,
+     * on the child's stdin pipe (native games drain it with read(0)). */
+    int wr = write(nonwindowed_key_fd, seq, n);
+    (void)wr;
+  } else {
+    return;   /* no owner: drop the key, as before */
+  }
   if (key_may_repeat(code)) {
     held_key_code = code;
     held_key_since_ms = now_ms;
@@ -630,6 +674,7 @@ static void close_window_now(int win_id) {
   struct window *w = find_window(win_id);
   if (!w) return;
   kill(w->pid, 9);
+  clear_nonwindowed_key_owner(w->pid);   /* GB-186: the fd dies with the window */
   wm_remove_window(win_id);
   if (focused_window == win_id) focused_window = -1;
   if (drag_win_id == win_id) desktop_drag_cancel();
@@ -1027,6 +1072,7 @@ static void launch_app_named(const char *bin, const char *args) {
     app_name_from_bin(bin, name, sizeof(name));
     wm_set_window_title(win_id, name);
     focused_window = win_id;
+    set_nonwindowed_key_owner(pid, in_pipe[1]);
     close(in_pipe[0]);
     close(out_pipe[1]);
   } else {
@@ -2357,6 +2403,7 @@ int main(void) {
           /* The app exited during a pending close grace: note it so the
            * fallback timer does not fire a kill at a dead pid. */
           desktop_close_note_gone(windows[i].id);
+          clear_nonwindowed_key_owner(windows[i].pid);
           wm_remove_window(windows[i].id);
           i--; // Adjust index after removal
           needs_redraw = 1;
