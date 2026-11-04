@@ -237,61 +237,164 @@ static int el_vaddr_to_offset(const struct elf_image *img, uint64_t va,
   return -1;
 }
 
-/* GB-196: print the executable's DT_NEEDED names, translated to the staged
- * root names, or the first one that is not on the disk (by name).  Reads the
- * file image directly -- this is a report, not a map. */
-static void el_report_needed(const uint8_t *file, uint64_t flen,
-                             const struct elf_image *img) {
-  if (img->dyn_vaddr == 0 || img->dyn_size < 16) {
-    uart_puts("elf loader: DT_NEEDED none\n");
-    return;
-  }
+/* A read-only view of an image's in-file dynamic section (GB-199 refactor of
+ * the GB-196 walker): the dyn entries and the string table resolved to file
+ * offsets, so DT_NEEDED names can be read without mapping anything. */
+struct el_dyn_view {
+  const uint8_t *file;
+  const uint8_t *d;
+  uint64_t size;
+  uint64_t str_off;
+  uint64_t strsz;
+  int have_str;
+};
+
+static int el_dyn_view(const uint8_t *file, uint64_t flen,
+                       const struct elf_image *img, struct el_dyn_view *v) {
+  v->file = file;
+  v->d = 0;
+  v->size = 0;
+  v->str_off = 0;
+  v->strsz = 0;
+  v->have_str = 0;
+  if (img->dyn_vaddr == 0 || img->dyn_size < 16) return -1;
   uint64_t dyn_off = 0;
   if (el_vaddr_to_offset(img, img->dyn_vaddr, 16, &dyn_off) != 0 ||
-      dyn_off > flen || img->dyn_size > flen - dyn_off) {
-    uart_puts("elf loader: DT_NEEDED unreadable\n");
-    return;
-  }
-  const uint8_t *d = file + dyn_off;
+      dyn_off > flen || img->dyn_size > flen - dyn_off)
+    return -1;
+  v->d = file + dyn_off;
+  v->size = img->dyn_size;
   uint64_t strtab_va = 0, strsz = 0;
-  for (uint64_t o = 0; o + 16 <= img->dyn_size; o += 16) {
-    uint64_t tag = rd64(d + o);
+  for (uint64_t o = 0; o + 16 <= v->size; o += 16) {
+    uint64_t tag = rd64(v->d + o);
     if (tag == 0) break;
-    if (tag == 5)  strtab_va = rd64(d + o + 8);  /* DT_STRTAB */
-    if (tag == 10) strsz = rd64(d + o + 8);      /* DT_STRSZ  */
+    if (tag == 5)  strtab_va = rd64(v->d + o + 8);  /* DT_STRTAB */
+    if (tag == 10) strsz = rd64(v->d + o + 8);      /* DT_STRSZ  */
   }
-  uint64_t str_off = 0;
-  int have_str = (strtab_va != 0 && strsz != 0 &&
-                  el_vaddr_to_offset(img, strtab_va, 1, &str_off) == 0 &&
-                  str_off <= flen && strsz <= flen - str_off);
-  int printed = 0;
-  for (uint64_t o = 0; o + 16 <= img->dyn_size; o += 16) {
-    uint64_t tag = rd64(d + o);
-    if (tag == 0) break;
+  if (strtab_va && strsz &&
+      el_vaddr_to_offset(img, strtab_va, 1, &v->str_off) == 0 &&
+      v->str_off <= flen && strsz <= flen - v->str_off) {
+    v->strsz = strsz;
+    v->have_str = 1;
+  }
+  return 0;
+}
+
+/* Next DT_NEEDED name at/after *cursor.  Returns 1 = filled, 0 = end. */
+static int el_dyn_next_needed(struct el_dyn_view *v, uint64_t *cursor,
+                              char *out, int cap) {
+  if (!v->d || !v->have_str || cap <= 0) return 0;
+  uint64_t o = *cursor;
+  for (; o + 16 <= v->size; o += 16) {
+    uint64_t tag = rd64(v->d + o);
+    if (tag == 0) {
+      *cursor = o + 16;
+      return 0;
+    }
     if (tag != 1) continue;                       /* DT_NEEDED */
-    uint64_t noff = rd64(d + o + 8);
-    if (!have_str || noff >= strsz) continue;
-    const char *name = (const char *)(file + str_off + noff);
-    uint64_t max = strsz - noff;
-    char nm[64];
-    uint64_t k = 0;
-    while (k < max && k < sizeof nm - 1 && name[k]) {
-      nm[k] = name[k];
+    uint64_t noff = rd64(v->d + o + 8);
+    *cursor = o + 16;
+    if (noff >= v->strsz) continue;
+    const char *name = (const char *)(v->file + v->str_off + noff);
+    uint64_t max = v->strsz - noff;
+    int k = 0;
+    while ((uint64_t)k < max && k < cap - 1 && name[k]) {
+      out[k] = name[k];
       k++;
     }
-    nm[k] = '\0';
-    if (!nm[0]) continue;
+    out[k] = '\0';
+    if (out[0]) return 1;
+  }
+  *cursor = o;
+  return 0;
+}
+
+/* GB-199: map one image's DT_NEEDED closure into `as`, depth-first, deduped
+ * by the staged root name.  Each mapped DSO prints one line.  No relocations:
+ * the interpreter owns them. */
+static int el_map_stage(struct addr_space *as, uint64_t base,
+                        const struct elf_plan *plan, const uint8_t *stage,
+                        uint16_t kind);
+static int el_stage_build(const struct elf_image *img, const struct elf_plan *plan,
+                          const uint8_t *file, uint64_t flen, uint64_t base,
+                          const char *what, int apply_reloc,
+                          uint8_t **stage_out, uint64_t *pages_out);
+static uint64_t el_lib_slot_find(struct addr_space *as, uint64_t span);
+
+#define EL_CLOSURE_MAX 8
+struct el_closure {
+  char name[EL_CLOSURE_MAX][64];
+  int n;
+};
+
+static int el_closure_seen(struct el_closure *c, const char *name) {
+  for (int i = 0; i < c->n; i++)
+    if (el_streq_ci(c->name[i], name)) return 1;
+  return 0;
+}
+
+static int el_map_closure(struct addr_space *as, const uint8_t *file,
+                          uint64_t flen, const struct elf_image *img,
+                          struct el_closure *seen, int depth) {
+  if (depth > 4) return 0;
+  struct el_dyn_view v;
+  if (el_dyn_view(file, flen, img, &v) != 0) return 0;
+  char nm[64];
+  uint64_t cur = 0;
+  while (el_dyn_next_needed(&v, &cur, nm, sizeof nm)) {
     char staged[64];
     uint16_t cl = 0;
     uint32_t sz = 0;
     if (el_compat_resolve(nm, &cl, &sz, staged, sizeof staged) != 0) {
       el_msg2("elf loader: first missing DSO ", staged);
-      return;
+      return -ENOENT;
     }
-    el_msg2("elf loader: DT_NEEDED ", staged);
-    printed++;
+    if (el_closure_seen(seen, staged)) continue;
+    if (seen->n < EL_CLOSURE_MAX)
+      el_copy_name(seen->name[seen->n++], 64, staged);
+    uint64_t pages = 0;
+    uint64_t buf = el_read_file(cl, sz, &pages);
+    if (!buf) return -ENOMEM;
+    struct elf_image dimg;
+    int prc = elf_parse_ex((const void *)buf, sz, &dimg, ELF_PARSE_DSO);
+    if (prc != ELF_OK || dimg.needs_low_window) {
+      el_msg2("elf loader: DSO ", staged);
+      uart_puts("elf loader: DSO parse failed: ");
+      uart_puts(prc != ELF_OK ? elf_strerror(prc) : "ET_EXEC below the window");
+      uart_puts("\n");
+      el_free_contig(buf, pages);
+      return -ENOEXEC;
+    }
+    struct elf_plan dplan;
+    if (elf_build_plan(&dimg, &dplan) != ELF_OK || dplan.nreg == 0 ||
+        dplan.span == 0 || dplan.span > USER_LIB_SLOT_SIZE) {
+      el_msg2("elf loader: DSO ", staged);
+      uart_puts("elf loader: DSO does not fit one USER_LIB slot\n");
+      el_free_contig(buf, pages);
+      return -ENOSPC;
+    }
+    uint64_t dbase = el_lib_slot_find(as, dplan.span);
+    if (!dbase) {
+      el_free_contig(buf, pages);
+      return -ENOSPC;
+    }
+    uint8_t *dstage = 0;
+    uint64_t dpages = 0;
+    int rc = el_stage_build(&dimg, &dplan, (const uint8_t *)buf, sz, dbase,
+                            "elf loader: DSO", 0, &dstage, &dpages);
+    if (rc == 0)
+      rc = el_map_stage(as, dbase, &dplan, dstage, VMK_LIB);
+    el_free_contig((uint64_t)dstage, dpages);
+    if (rc != 0) {
+      el_free_contig(buf, pages);
+      return rc;
+    }
+    el_msg3("elf loader: DSO ", staged, " mapped");
+    rc = el_map_closure(as, (const uint8_t *)buf, sz, &dimg, seen, depth + 1);
+    el_free_contig(buf, pages);
+    if (rc != 0) return rc;
   }
-  if (!printed) uart_puts("elf loader: DT_NEEDED none\n");
+  return 0;
 }
 
 /* Map one plan region [va, va+len) with `prot`: allocate one zeroed frame per
@@ -646,6 +749,7 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
 
   info->base = base;
   info->entry = entry;
+  info->exe_entry = exe_entry;
   info->phdr = el_phdr_va(eimg, base);
   info->phnum = eimg->phnum;
   info->phent = eimg->phent;
@@ -774,9 +878,36 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
   }
 
   if (compat && eimg.has_interp) {
-    /* GB-196 endpoint: map the interpreter image (no relocations -- nothing
-       enters it) and report the executable's dependency set by name.  The
-       compat track still refuses to start a non-native interpreter. */
+    /* GB-199: enter the interpreter.  The kernel maps the executable (ld.so
+       relocates it; the GB-196 named-report is now the closure-map evidence),
+       the interpreter, and the executable's DT_NEEDED closure; program_loader
+       then builds the Linux startup stack (AT_PHDR/AT_ENTRY/AT_BASE) and the
+       process starts at the interpreter's entry. */
+    struct elf_plan eplan;
+    int plc = elf_build_plan(&eimg, &eplan);
+    uint64_t exe_base = el_choose_base(&eimg);
+    if (plc != ELF_OK || eplan.nreg == 0 || eplan.span > USER_IMG_SIZE ||
+        exe_base + eplan.span > USER_HEAP_BASE_V2) {
+      uart_puts("elf loader: image span overlaps the heap slot\n");
+      el_free_contig(exe_buf, exe_pages);
+      el_free_contig(ibuf, ipages);
+      info->parse_rc = (plc != ELF_OK) ? plc : ELF_ERR_RELOC;
+      return -ENOSPC;
+    }
+    uint8_t *estage = 0;
+    uint64_t estage_pages = 0;
+    rc = el_stage_build(&eimg, &eplan, (const uint8_t *)exe_buf, fsize, exe_base,
+                        "elf loader", 0, &estage, &estage_pages);
+    if (rc == 0)
+      rc = el_map_stage(as, exe_base, &eplan, estage, VMK_IMG);
+    el_free_contig((uint64_t)estage, estage_pages);
+    if (rc != 0) {
+      el_free_contig(exe_buf, exe_pages);
+      el_free_contig(ibuf, ipages);
+      info->parse_rc = ELF_ERR_RELOC;
+      return rc;
+    }
+
     struct elf_plan iplan;
     int ipl = elf_build_plan(&iimg, &iplan);
     if (ipl != ELF_OK || iplan.nreg == 0 || iplan.span == 0 ||
@@ -809,13 +940,31 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
       return rc;
     }
     el_msg3("elf loader: interpreter ", istaged, " mapped");
-    el_report_needed((const uint8_t *)exe_buf, fsize, &eimg);
-    uart_puts("elf loader: compat interpreter is not entered (GB-196 stops at the "
-              "named report)\n");
+
+    struct el_closure seen;
+    seen.n = 0;
+    el_copy_name(seen.name[seen.n++], 64, istaged);   /* dedupe the interpreter */
+    rc = el_map_closure(as, (const uint8_t *)exe_buf, fsize, &eimg, &seen, 0);
+    if (rc != 0) {
+      el_free_contig(exe_buf, exe_pages);
+      el_free_contig(ibuf, ipages);
+      info->parse_rc = ELF_ERR_RELOC;
+      return rc;
+    }
+
+    info->base = exe_base;
+    info->exe_entry = exe_base + (eimg.entry - eimg.vaddr_base);
+    info->entry = ibase + (iimg.entry - iimg.vaddr_base);
+    info->phdr = el_phdr_va(&eimg, exe_base);
+    info->phnum = eimg.phnum;
+    info->phent = eimg.phent;
+    info->interp_base = ibase;
+    info->interpreted = 1;
+    info->native = 0;
+    info->sp = el_native_sp();
     el_free_contig(exe_buf, exe_pages);
     el_free_contig(ibuf, ipages);
-    info->parse_rc = ELF_ERR_INTERP;
-    return -ENOEXEC;
+    return 0;
   }
 
   rc = el_map_pair(as, (const uint8_t *)exe_buf, fsize, &eimg,
