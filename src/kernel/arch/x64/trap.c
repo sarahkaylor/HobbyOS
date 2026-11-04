@@ -2845,7 +2845,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
           /* Nothing owns this number: name it on the console once, then answer
              -ENOSYS as Linux does.  Bring-up of a real Linux program is this
              line plus the next handler, never a guess. */
-          linux_compat_unhandled(lp, syscall_num, tf->elr);
+          linux_compat_unhandled(lp, syscall_num, tf->elr, tf->regs[5]);
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
       }

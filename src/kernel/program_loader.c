@@ -577,6 +577,7 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
  * line instead of a triple fault later.
  */
 static int compat_stack_block(struct process *child, int pid, uint64_t entry,
+                              uint64_t at_entry, uint64_t interp_base,
                               uint64_t phdr, uint32_t phnum) {
   struct process *grp = process_group(child);
   char s[COMPAT_STR_MAX];
@@ -667,9 +668,9 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
   w[4] = 5;                        /* AT_PHNUM  */
   w[5] = (uint64_t)phnum;
   w[6] = 9;                        /* AT_ENTRY  */
-  w[7] = entry;
-  w[8] = 7;                        /* AT_BASE: 0 for a static image */
-  w[9] = 0;
+  w[7] = at_entry;
+  w[8] = 7;                        /* AT_BASE: the interpreter, 0 if static */
+  w[9] = interp_base;
   w[10] = 25;                      /* AT_RANDOM */
   w[11] = rnd_addr;
   w[12] = 31;                      /* AT_EXECFN: argv[0], what /proc/self/exe
@@ -682,6 +683,32 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
     return -EFAULT;
   if (vm_kwrite(child, envp_addr, envp, (int)((envc + 1) * 8)) != 0)
     return -EFAULT;
+
+  /* GB-199: when an interpreter is entered, its startup contract is the auxv
+     pairs above (AT_PHDR/AT_ENTRY/AT_BASE name the executable and the
+     interpreter).  One line per entry, one uart record per line (GB-082). */
+  if (interp_base) {
+    struct kline k;
+    kl_init(&k);
+    kl_s(&k, "auxv: AT_PAGESZ=0x1000");
+    kl_c(&k, '\n');
+    kl_emit(&k);
+    kl_init(&k);
+    kl_s(&k, "auxv: AT_PHDR=");
+    kl_hex(&k, (unsigned long)phdr);
+    kl_c(&k, '\n');
+    kl_emit(&k);
+    kl_init(&k);
+    kl_s(&k, "auxv: AT_ENTRY=");
+    kl_hex(&k, (unsigned long)at_entry);
+    kl_c(&k, '\n');
+    kl_emit(&k);
+    kl_init(&k);
+    kl_s(&k, "auxv: AT_BASE=");
+    kl_hex(&k, (unsigned long)interp_base);
+    kl_c(&k, '\n');
+    kl_emit(&k);
+  }
 
   sp = argv_addr - 8;
   uint64_t argcw = (uint64_t)argc;
@@ -926,6 +953,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   uint32_t elf_phnum = 0;
   uint64_t elf_sp = USER_MAIN_STK_TOP_V2;
   uint64_t elf_interp_base = 0;
+  uint64_t elf_exe_entry = 0;
   int elf_native = 0;
   if (is_elf) {
     /* M0 freeze (docs/shared-libs.md §4 lane B): which track does this image
@@ -955,6 +983,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     elf_sp = elf_info.sp;
     elf_native = elf_info.native;
     elf_interp_base = elf_info.interp_base;
+    elf_exe_entry = elf_info.exe_entry;
     if (elf_info.interpreted) {
       /* One line of evidence that the interpreter path ran: the gate reads it
          from the serial log instead of re-deriving it from the source. */
@@ -1055,7 +1084,17 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        auxv, %rsp).  Two measured walls live in its comment: musl needs
        AT_RANDOM (GB-163) and a real program needs its own argv/envp (Doom's
        "-iwad" and DISPLAY). */
-    if (compat_stack_block(child, pid, elf_entry, elf_phdr, elf_phnum) != 0) {
+#ifdef GB199_NO_AUXV
+    /* GB-199 falsifier: enter the same interpreter with no argc/argv/envp/auxv.
+       The jump must then fault at a named address (the gate builds this with
+       GB199_NO_AUXV=1); it is never a shipped configuration. */
+    if (elf_interp_base) {
+      uart_puts("GB199-NOAUXV: startup stack omitted for the entered interpreter\n");
+      process_set_entry(pid, elf_entry, USER_MAIN_STK_TOP_V2);
+    } else
+#endif
+    if (compat_stack_block(child, pid, elf_entry, elf_exe_entry,
+                           elf_interp_base, elf_phdr, elf_phnum) != 0) {
       uart_puts("v2 loader: startup block write failed\n");
       process_free(pid);
       return -EFAULT;

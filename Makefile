@@ -441,6 +441,13 @@ ifneq ($(W4_MKFS_PROBE),)
   CFLAGS += -DW4_MKFS_TIMING_PROBE
 endif
 
+# GB-199 falsifier: GB199_NO_AUXV=1 skips the Linux startup stack for an entered
+# interpreter, so the same jump faults at a named address instead of starting
+# ld.so.  A gate flag, never a shipped configuration.
+ifeq ($(GB199_NO_AUXV),1)
+  CFLAGS += -DGB199_NO_AUXV
+endif
+
 ifneq ($(MODE),desktop)
   QEMU_ARGS += -display none
 endif

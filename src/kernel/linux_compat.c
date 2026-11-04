@@ -224,7 +224,8 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
 static uint64_t lcompat_seen[LCOMPAT_SEEN];
 static int lcompat_reports;
 
-void linux_compat_unhandled(struct process *p, uint64_t nr, uint64_t rip) {
+void linux_compat_unhandled(struct process *p, uint64_t nr, uint64_t rip,
+                            uint64_t rdi) {
   int slot = (int)(nr % LCOMPAT_SEEN);
   if (lcompat_seen[slot] == nr + 1) return; /* already reported on this boot */
   lcompat_seen[slot] = nr + 1;
@@ -240,6 +241,10 @@ void linux_compat_unhandled(struct process *p, uint64_t nr, uint64_t rip) {
   kl_i(&kl, p ? (long)p->pid : -1);
   kl_s(&kl, " rip=");
   kl_hex(&kl, (unsigned long)rip);
+  /* GB-199: the first unhandled syscall of an entered ld.so is the named stop;
+     rdi is the argument that says which path/resource it asked for. */
+  kl_s(&kl, " rdi=");
+  kl_hex(&kl, (unsigned long)rdi);
   kl_s(&kl, "\n");
   kl_emit(&kl);
 }

@@ -16,6 +16,8 @@ struct addr_space;
 struct elf_load_info {
   uint64_t entry;       /* runtime entry to start at (interp_base + interp e_entry
                            when interpreted, else base + e_entry)              */
+  uint64_t exe_entry;   /* runtime entry of the EXECUTABLE (AT_ENTRY for the
+                           interpreter; equals entry when not interpreted)     */
   uint64_t base;        /* runtime base of the executable image                */
   uint64_t phdr;        /* runtime VA of the executable's program headers      */
   uint32_t phnum;       /* number of program headers                           */
