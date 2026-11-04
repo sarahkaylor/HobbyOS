@@ -813,13 +813,27 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   spinlock_release_irqrestore(&vm_lock, fl);
 
   uint64_t src = file_obj_page(o, off); /* disk I/O: no lock held */
+  uint64_t priv = 0;
   if (!src) {
-    vm_object_unref(o);
-    return -EIO;
+    /* GB-201: a page past the file's last page is the mapped DSO's BSS tail
+       (ld.so maps p_memsz in one call).  It reads as zero.  A page *inside*
+       the file that failed to read is still -EIO: zero-filling mapped text
+       would corrupt the image. */
+    uint64_t flz = spinlock_acquire_irqsave(&vm_lock);
+    int beyond = (off / FRAME_SIZE) >= (uint64_t)o->nr_frames;
+    spinlock_release_irqrestore(&vm_lock, flz);
+    if (!beyond) {
+      vm_object_unref(o);
+      return -EIO;
+    }
+    priv = frame_alloc_zeroed();
+    if (!priv) {
+      vm_object_unref(o);
+      return -ENOMEM;
+    }
   }
 
-  uint64_t priv = 0;
-  if (cow) {
+  if (src && cow) {
     priv = frame_alloc_zeroed();
     if (!priv) {
       vm_object_unref(o);
@@ -1683,8 +1697,13 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       if (f_size == 0 || f_size > VM_OBJ_MAX_BYTES)
         return -ENOMEM;
       uint64_t fcap = ((uint64_t)f_size + 0xFFF) & ~0xFFFULL;
-      if (offset >= fcap || len > fcap - offset)
+      if (offset >= fcap)
         return -EINVAL;
+      /* GB-201: ld.so maps a DSO's whole vaddr span in ONE file mmap, and
+         that span is p_memsz (BSS included), which is longer than the file.
+         Allow the tail past EOF: vm_file_obj_materialize maps those pages as
+         zero, exactly the BSS they are.  A short read *inside* the file is
+         still an error there, so text is never silently zero-filled. */
       file_backed = 1;
       obj_off = offset;
       kind = VMK_LIB;
