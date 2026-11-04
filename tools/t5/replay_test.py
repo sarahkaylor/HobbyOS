@@ -2,7 +2,7 @@
 """Host (T1) self-test for replay.py's ReplayParser + replay scripts (GB-043)."""
 import sys, os, json, glob, tempfile, shutil
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "t5"))
-from replay import ReplayParser
+from replay import ReplayParser, split_nav
 
 fails = 0
 def check(cond, msg):
@@ -25,8 +25,12 @@ for rp in replays:
         n = p.validate()
         ev = list(p)
         has_click = any(e["t"] == "click" for e in ev)
+        # GB-116: F1 opens the Apps menu on both arches; a click cannot land on
+        # intel (no pointer device), so a replay that opens the menu with `f1`
+        # is as valid a nav as one that clicks.
+        has_f1 = any(e["t"] == "key" and e["k"] == "f1" for e in ev)
         has_launch = any(e["t"] == "key" and e["k"] == "ret" for e in ev)
-        check(n >= 20 and has_click and has_launch,
+        check(n >= 20 and (has_click or has_f1) and has_launch,
               os.path.basename(rp) + f" parses ({n} events), navigates + launches")
     except Exception as ex:
         check(False, os.path.basename(rp) + f" FAILED: {ex}")
@@ -34,6 +38,19 @@ for rp in replays:
 # schema errors must raise (GB-085: per-process fixture -- two concurrent
 # `make host_tests` must not share a path, or one unlinks _bad.jsonl while the
 # other is parsing it and the loser throws FileNotFoundError)
+
+# GB-091/GB-059: the runner launches by name and replays only the events after
+# the launcher's confirm, so the split must be exact.
+print("split_nav (launch by name: nav prefix ends at the first ret)")
+nav, rest = split_nav([{"t": "key", "k": "f1"}, {"t": "key", "k": "ret"},
+                       {"t": "key", "k": "up"}, {"t": "key", "k": "ret"}])
+check(len(nav) == 2 and nav[-1]["k"] == "ret", "nav ends at the FIRST ret")
+check(len(rest) == 2 and rest[0]["k"] == "up", "in-game events start after it")
+nav2, rest2 = split_nav([{"t": "key", "k": "up"}])
+check(nav2 == [] and len(rest2) == 1, "no ret -> the whole replay is in-game")
+nav3, rest3 = split_nav([])
+check(nav3 == [] and rest3 == [], "empty replay splits into two empty halves")
+
 _bad_dir = tempfile.mkdtemp(prefix="gb085_replay_")
 try:
     bad = os.path.join(_bad_dir, "_bad.jsonl")
