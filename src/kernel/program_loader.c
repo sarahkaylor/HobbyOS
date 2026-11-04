@@ -154,8 +154,17 @@ int load_and_run_program(const char* filename) {
  * MUST run with no `parent` in scope: boot-wave loads pass caller_pid = -1 and
  * therefore have no parent at all -- the fd 1/2 assignment used to live inside
  * `if (parent && child)` and the wave never got it. */
-static void child_ensure_console_stdio(struct process *child) {
+static void child_ensure_console_stdio(struct process *child, int compat) {
   if (!child) return;
+  /* Linux-ABI processes only.  A native program keeps the historical
+   * behaviour (fd 1/2 unassigned -> file_write's immediate console fallback)
+   * because its libc mixes SYS_WRITE_CONSOLE with write(1): routing fd 1
+   * through the /dev/console file object made those two paths reorder, and
+   * the desktop's menu printed `0[MENU] =CONSOLE.BIN` — digits before their
+   * own prefix — which broke the M4 gate's menu parse (measured on the
+   * wave-3 merge).  Compat programs (Mono's Console, Unity's Player.log) are
+   * the ones that fstat/dup their stdio and need real files. */
+  if (!compat) return;
   for (int fd = 0; fd <= 2; fd++) {
     if (child->open_fds[fd] != -1) continue;
     int nf = file_open(child, "/dev/console", 2 /* O_RDWR */);
@@ -419,8 +428,9 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
      bare fd number, gets EBADF and throws ArgumentException ("handle",
      "Invalid"), which surfaces as TypeInitializationException for
      System.Console (measured on mono 6.12).  The console node reads EOF and
-     writes to the serial sink, so batch behavior is unchanged. */
-  child_ensure_console_stdio(child);
+     writes to the serial sink, so batch behavior is unchanged.  This v1 path
+     loads flat native images only, hence compat = 0. */
+  child_ensure_console_stdio(child, 0);
 
   /* SysV AMD64 ABI (browser.md F1.5): at the first instruction of a
      function RSP must be 16n+8 — the caller's return address occupies the
@@ -1247,8 +1257,11 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
      /dev/console file object.  This runs with caller_pid == -1 (boot wave, no
      parent) too: the old fd-0-only /dev/null block was wiped by
      spawn_ex_apply_fds, and fd 1/2 were never assigned at all when there was
-     no parent -- exactly the shape Mono's Console ctor rejects. */
-  child_ensure_console_stdio(child);
+     no parent -- exactly the shape Mono's Console ctor rejects.  Compat
+     only: this function sets PROC_FLAG_LINUX_ABI further below, so the
+     decision is passed in (is_elf && !elf_native) rather than read off the
+     PCB. */
+  child_ensure_console_stdio(child, is_elf && !elf_native);
 
 #ifdef __x86_64__
   /* GB-068 follow-on: the stack is a DEMAND-ZERO region (VM_MAP_PRIVATE with
