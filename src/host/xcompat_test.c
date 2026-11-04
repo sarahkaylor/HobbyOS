@@ -25,12 +25,16 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stddef.h>
+#include <time.h>
 
 #include "xcore.h"
+#include "pulse_abi.h"
 
 #ifdef XCOMPAT_HAVE_REQUIRED
 #include "required-libx11.h"
 #include "required-alsa.h"
+#include "required-pulse.h"
 #endif
 #ifdef XCOMPAT_DSO_PATH
 #include <dlfcn.h>
@@ -45,6 +49,14 @@
 extern const struct abi_row *abi_rows_mine(int *count);
 #if XCOMPAT_HAVE_X11_REF
 extern const struct abi_row *abi_rows_ref(int *count);
+#endif
+
+#ifndef XCOMPAT_HAVE_PULSE_REF
+#define XCOMPAT_HAVE_PULSE_REF 0
+#endif
+#if XCOMPAT_HAVE_PULSE_REF
+#include "pulse_abi_rows.h"
+extern const unsigned long xcompat_pulse_ref_values[XCOMPAT_PULSE_REF_ROWS];
 #endif
 
 static int checks, fails;
@@ -376,6 +388,19 @@ static void test_export_list(void) {
   printf("SKIP export list (required-libx11.h not generated)\n");
 #endif
 
+#ifdef XCOMPAT_PULSE_COUNT
+  check(XCOMPAT_PULSE_COUNT == 21,
+        "the pulse list is the measured 21 (5 simple + 16 async)");
+  int pshaped = 1, psorted = 1;
+  for (int i = 0; i < XCOMPAT_PULSE_COUNT; i++) {
+    const char *s = xcompat_pulse_required[i];
+    if (!s || s[0] != 'p' || s[1] != 'a' || s[2] != '_') pshaped = 0;
+    if (i && strcmp(xcompat_pulse_required[i - 1], s) >= 0) psorted = 0;
+  }
+  check(pshaped, "every required pulse symbol is a pa_* name");
+  check(psorted, "the required pulse list is sorted and duplicate-free");
+#endif
+
 #ifdef XCOMPAT_DSO_PATH
   /* The strongest form of the F4 check: dlopen the artifact this tree just
    * built and resolve every required name through it, exactly the way
@@ -441,6 +466,297 @@ static void test_export_list(void) {
 #endif
 }
 
+/* ---- 4. PulseAudio shim (libpulse-simple.so.0 / libpulse.so.0) -------- *
+ * Two things are checked.  First the ABI: the shim reads pa_sample_spec and
+ * writes pa_channel_map inside the caller's storage, so the four public
+ * layouts and the enum values are pinned here, and -- when libpulse-dev is
+ * installed -- compared row for row with the host's real <pulse/...>.
+ *
+ * Then the contract the game depends on: every required name resolves on
+ * BOTH sonames, pa_simple_new answers "connection refused" without
+ * allocating, and the whole probe is fast enough that FMOD's ladder cannot
+ * stall on it (10k probes must finish in well under a second -- a single
+ * sleep() anywhere in the shim would blow that). */
+static void test_pulse_abi(void) {
+  check(sizeof(pulse_channel_map) == PULSE_ABI_CHANNEL_MAP_SIZE,
+        "sizeof(pa_channel_map) is 132");
+  check(offsetof(pulse_channel_map, map) == PULSE_ABI_CHANNEL_MAP_MAP_OFF,
+        "pa_channel_map.map is at offset 4");
+  check(sizeof(pulse_sample_spec) == PULSE_ABI_SAMPLE_SPEC_SIZE,
+        "sizeof(pa_sample_spec) is 12");
+  check(offsetof(pulse_sample_spec, rate) == PULSE_ABI_SAMPLE_SPEC_RATE_OFF,
+        "pa_sample_spec.rate is at offset 4");
+  check(offsetof(pulse_sample_spec, channels) == PULSE_ABI_SAMPLE_SPEC_CH_OFF,
+        "pa_sample_spec.channels is at offset 8");
+  check(sizeof(pulse_buffer_attr) == PULSE_ABI_BUFFER_ATTR_SIZE,
+        "sizeof(pa_buffer_attr) is 20");
+  check(sizeof(pulse_mainloop_api) == PULSE_ABI_MAINLOOP_API_SIZE,
+        "sizeof(pa_mainloop_api) is 112");
+  check(offsetof(pulse_mainloop_api, io_new) ==
+            PULSE_ABI_MAINLOOP_API_IO_OFF,
+        "pa_mainloop_api.io_new is at offset 8");
+  check(offsetof(pulse_mainloop_api, quit) ==
+            PULSE_ABI_MAINLOOP_API_QUIT_OFF,
+        "pa_mainloop_api.quit is at offset 104");
+  check(PA_ERR_CONNECTIONREFUSED_ == 6, "PA_ERR_CONNECTIONREFUSED is 6");
+  check(PA_ERR_INVALID_ == 3, "PA_ERR_INVALID is 3");
+  check(PA_CONTEXT_FAILED_ == 5, "PA_CONTEXT_FAILED is 5");
+  check(PA_OPERATION_CANCELLED_ == 2, "PA_OPERATION_CANCELLED is 2");
+  check(PULSE_CHANNELS_MAX == 32, "PA_CHANNELS_MAX is 32");
+
+#if XCOMPAT_HAVE_PULSE_REF
+  static const char *const row_names[XCOMPAT_PULSE_REF_ROWS] = {
+    "sizeof(pa_channel_map)", "offsetof(pa_channel_map, map)",
+    "sizeof(pa_sample_spec)", "offsetof(pa_sample_spec, rate)",
+    "offsetof(pa_sample_spec, channels)", "sizeof(pa_buffer_attr)",
+    "sizeof(pa_mainloop_api)", "offsetof(pa_mainloop_api, io_new)",
+    "offsetof(pa_mainloop_api, quit)", "PA_ERR_CONNECTIONREFUSED",
+    "PA_CONTEXT_FAILED", "PA_OPERATION_CANCELLED", "PA_CHANNELS_MAX",
+  };
+  const unsigned long mine[XCOMPAT_PULSE_REF_ROWS] = {
+    (unsigned long)sizeof(pulse_channel_map),
+    (unsigned long)offsetof(pulse_channel_map, map),
+    (unsigned long)sizeof(pulse_sample_spec),
+    (unsigned long)offsetof(pulse_sample_spec, rate),
+    (unsigned long)offsetof(pulse_sample_spec, channels),
+    (unsigned long)sizeof(pulse_buffer_attr),
+    (unsigned long)sizeof(pulse_mainloop_api),
+    (unsigned long)offsetof(pulse_mainloop_api, io_new),
+    (unsigned long)offsetof(pulse_mainloop_api, quit),
+    (unsigned long)PA_ERR_CONNECTIONREFUSED_,
+    (unsigned long)PA_CONTEXT_FAILED_,
+    (unsigned long)PA_OPERATION_CANCELLED_,
+    (unsigned long)PULSE_CHANNELS_MAX,
+  };
+  int drift = 0;
+  for (int i = 0; i < XCOMPAT_PULSE_REF_ROWS; i++) {
+    if (mine[i] != xcompat_pulse_ref_values[i]) {
+      printf("FAIL pulse ABI row %s: shim says %lu, real <pulse/...> says "
+             "%lu\n", row_names[i], mine[i], xcompat_pulse_ref_values[i]);
+      drift++;
+    }
+  }
+  check(drift == 0, "every pulse ABI row matches the host's real headers");
+  printf("     pulse abi: %d rows identical to <pulse/...>\n",
+         XCOMPAT_PULSE_REF_ROWS);
+#else
+  printf("SKIP pulse ABI differential (no libpulse-dev headers; the pinned "
+         "sizes above still ran)\n");
+#endif
+}
+
+static void test_pulse_dso(void) {
+#ifdef XCOMPAT_PULSE_SIMPLE_PATH
+  const char *paths[2] = { XCOMPAT_PULSE_SIMPLE_PATH, XCOMPAT_PULSE_PATH };
+  const char *labels[2] = { "libpulse-simple.so.0", "libpulse.so.0" };
+  void *h[2] = { 0, 0 };
+
+  for (int k = 0; k < 2; k++) {
+    h[k] = dlopen(paths[k], RTLD_NOW | RTLD_LOCAL);
+    if (!h[k]) {
+      printf("FAIL dlopen(%s): %s\n", labels[k], dlerror());
+      fails++;
+    }
+    checks++;
+  }
+
+  for (int k = 0; k < 2; k++) {
+    if (!h[k]) continue;
+#ifdef XCOMPAT_PULSE_COUNT
+    int missing = 0;
+    for (int i = 0; i < XCOMPAT_PULSE_COUNT; i++) {
+      if (!dlsym(h[k], xcompat_pulse_required[i])) {
+        if (missing < 5)
+          printf("FAIL %s: dlsym(%s) is NULL\n", labels[k],
+                 xcompat_pulse_required[i]);
+        missing++;
+      }
+    }
+    check(missing == 0, "every required pa_* symbol resolves on both sonames");
+    printf("     pulse: %s resolves %d/%d required symbols\n", labels[k],
+           XCOMPAT_PULSE_COUNT - missing, XCOMPAT_PULSE_COUNT);
+#endif
+  }
+
+  void *s = h[0] ? h[0] : h[1];
+  if (!s) {
+    printf("SKIP pulse dso checks (neither soname dlopened)\n");
+    return;
+  }
+
+  /* ---- libpulse-simple: the probe FMOD actually makes ---- */
+  typedef void *(*simple_new_fn)(const char *, const char *, int, const char *,
+                                 const char *, const pulse_sample_spec *,
+                                 const pulse_channel_map *,
+                                 const pulse_buffer_attr *, int *);
+  typedef void (*simple_free_fn)(void *);
+  typedef int (*simple_io_fn)(void *, const void *, unsigned long, int *);
+  typedef unsigned long (*simple_lat_fn)(void *, int *);
+  typedef const char *(*strerror_fn)(int);
+  typedef const char *(*version_fn)(void);
+
+  simple_new_fn simple_new = (simple_new_fn)dlsym(s, "pa_simple_new");
+  simple_free_fn simple_free = (simple_free_fn)dlsym(s, "pa_simple_free");
+  simple_io_fn simple_write = (simple_io_fn)dlsym(s, "pa_simple_write");
+  simple_io_fn simple_read = (simple_io_fn)dlsym(s, "pa_simple_read");
+  simple_lat_fn simple_latency =
+      (simple_lat_fn)dlsym(s, "pa_simple_get_latency");
+  strerror_fn strerror_ = (strerror_fn)dlsym(s, "pa_strerror");
+  version_fn version = (version_fn)dlsym(s, "pa_get_library_version");
+
+  check(simple_new && simple_free && simple_write && simple_read &&
+            simple_latency && strerror_ && version,
+        "the simple-API block resolves as one unit (SDL loads it that way)");
+
+  pulse_sample_spec ss = { 5 /* PA_SAMPLE_FLOAT32LE */, 48000, 2 };
+  int err = 0;
+  void *stream = simple_new ? simple_new(0, "xcompat-test", 1,
+                                         0, "probe", &ss, 0, 0, &err) : 0;
+  check(stream == 0, "pa_simple_new returns NULL (there is no server)");
+  check(err == 6, "pa_simple_new reports PA_ERR_CONNECTIONREFUSED");
+  if (strerror_)
+    check(strcmp(strerror_(err), "Connection refused") == 0,
+          "pa_strerror(6) reads \"Connection refused\"");
+
+  pulse_sample_spec bad = { 5, 0, 0 };
+  err = 0;
+  if (simple_new) stream = simple_new(0, "xcompat-test", 1, 0, "probe", &bad,
+                                      0, 0, &err);
+  check(stream == 0 && err == 3,
+        "a malformed sample spec is PA_ERR_INVALID, still NULL");
+
+  simple_free(0);                       /* must not crash */
+  err = 0;
+  check(simple_write(0, 0, 0, &err) < 0, "pa_simple_write fails on a NULL handle");
+  err = 0;
+  check(simple_read(0, 0, 0, &err) < 0, "pa_simple_read fails on a NULL handle");
+  err = 0;
+  check(simple_latency(0, &err) == (pulse_u64)-1,
+        "pa_simple_get_latency returns the unknown value");
+  if (version)
+    check(strncmp(version(), "17.", 3) == 0,
+          "pa_get_library_version reports the measured 17.x era");
+  if (strerror_) {
+    check(strcmp(strerror_(0), "OK") == 0, "pa_strerror(0) is \"OK\"");
+    check(strcmp(strerror_(3), "Invalid argument") == 0,
+          "pa_strerror(3) is \"Invalid argument\"");
+    check(strerror_(999) != 0 && strerror_(999)[0] != 0,
+          "pa_strerror() never returns NULL");
+  }
+
+  /* The one entry point that writes into caller memory: bounds and layout. */
+  typedef pulse_channel_map *(*map_fn)(pulse_channel_map *, unsigned, int);
+  map_fn map_init = (map_fn)dlsym(s, "pa_channel_map_init_auto");
+  check(map_init != 0, "pa_channel_map_init_auto is exported");
+  if (map_init) {
+    struct {
+      pulse_channel_map m;
+      unsigned char guard[16];
+    } box;
+    memset(&box, 0xAA, sizeof box);
+    pulse_channel_map *r = map_init(&box.m, 2, 0);
+    check(r == &box.m, "pa_channel_map_init_auto returns the caller's map");
+    check(box.m.channels == 2 && box.m.map[0] == 1 && box.m.map[1] == 2,
+          "stereo default layout is front-left/front-right");
+    int guard_ok = 1;
+    for (unsigned i = 0; i < sizeof box.guard; i++)
+      if (box.guard[i] != 0xAA) guard_ok = 0;
+    check(guard_ok, "pa_channel_map_init_auto writes only inside the map");
+    check(map_init(&box.m, 0, 0) == 0 && map_init(&box.m, 33, 0) == 0,
+          "0 and >PA_CHANNELS_MAX are refused");
+  }
+
+  /* ---- libpulse: the async shape SDL/FMOD probe ---- */
+  typedef void *(*ml_new_fn)(void);
+  typedef pulse_mainloop_api *(*ml_api_fn)(void *);
+  typedef int (*ml_iter_fn)(void *, int, int *);
+  typedef void *(*ctx_new_fn)(pulse_mainloop_api *, const char *);
+  typedef int (*ctx_connect_fn)(void *, const char *, int, const void *);
+  typedef int (*ctx_state_fn)(void *);
+  typedef int (*ctx_errno_fn)(void *);
+  typedef void *(*ctx_ops_fn)(void *, void *, void *);
+  typedef int (*op_state_fn)(void *);
+
+  ml_new_fn ml_new = (ml_new_fn)dlsym(s, "pa_mainloop_new");
+  ml_api_fn ml_api = (ml_api_fn)dlsym(s, "pa_mainloop_get_api");
+  ml_iter_fn ml_iter = (ml_iter_fn)dlsym(s, "pa_mainloop_iterate");
+  ctx_new_fn ctx_new = (ctx_new_fn)dlsym(s, "pa_context_new");
+  ctx_connect_fn ctx_connect = (ctx_connect_fn)dlsym(s, "pa_context_connect");
+  ctx_state_fn ctx_state = (ctx_state_fn)dlsym(s, "pa_context_get_state");
+  ctx_errno_fn ctx_errno = (ctx_errno_fn)dlsym(s, "pa_context_errno");
+  ctx_ops_fn ctx_server = (ctx_ops_fn)dlsym(s, "pa_context_get_server_info");
+  op_state_fn op_state = (op_state_fn)dlsym(s, "pa_operation_get_state");
+
+  check(ml_new && ml_api && ml_iter && ctx_new && ctx_connect && ctx_state &&
+            ctx_errno && ctx_server && op_state,
+        "the async-API block resolves");
+
+  void *ml = ml_new ? ml_new() : 0;
+  check(ml != 0, "pa_mainloop_new returns a handle");
+  pulse_mainloop_api *api = ml_api ? ml_api(ml) : 0;
+  check(api != 0, "pa_mainloop_get_api returns a vtable");
+  if (api) {
+    /* A caller that walks the vtable must not jump to NULL. */
+    int nulls = 0;
+    nulls += api->io_new == 0;
+    nulls += api->io_enable == 0;
+    nulls += api->io_free == 0;
+    nulls += api->io_set_destroy == 0;
+    nulls += api->time_new == 0;
+    nulls += api->time_restart == 0;
+    nulls += api->time_free == 0;
+    nulls += api->time_set_destroy == 0;
+    nulls += api->defer_new == 0;
+    nulls += api->defer_enable == 0;
+    nulls += api->defer_free == 0;
+    nulls += api->defer_set_destroy == 0;
+    nulls += api->quit == 0;
+    check(nulls == 0, "all 13 vtable slots are callable");
+    check(api->io_new(api, 0, 0, 0, 0) == 0, "vtable io_new returns NULL");
+    api->quit(api, 0);                  /* inert, must not crash */
+  }
+  if (ml_iter) {
+    int ret = -123;
+    check(ml_iter(ml, 1, &ret) == -1,
+          "pa_mainloop_iterate returns -1 and never blocks");
+  }
+
+  void *ctx = ctx_new ? ctx_new(api, "xcompat-test") : 0;
+  check(ctx != 0, "pa_context_new returns a handle (as libpulse does)");
+  check(ctx_connect && ctx_connect(ctx, 0, 0, 0) == -6,
+        "pa_context_connect fails with -PA_ERR_CONNECTIONREFUSED");
+  check(ctx_state && ctx_state(ctx) == 5,
+        "pa_context_get_state is PA_CONTEXT_FAILED");
+  check(ctx_errno && ctx_errno(ctx) == 6,
+        "pa_context_errno is PA_ERR_CONNECTIONREFUSED");
+  check(ctx_server && ctx_server(ctx, 0, 0) == 0,
+        "pa_context_get_server_info returns no operation");
+  check(op_state && op_state(0) == 2,
+        "pa_operation_get_state(NULL) is CANCELLED, not a crash");
+
+  /* ---- the "fails fast" requirement ---- */
+  if (simple_new) {
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (int i = 0; i < 10000; i++) {
+      err = 0;
+      simple_new(0, "probe", 1, 0, "probe", &ss, 0, 0, &err);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double ms = (double)(t1.tv_sec - t0.tv_sec) * 1000.0 +
+                (double)(t1.tv_nsec - t0.tv_nsec) / 1000000.0;
+    check(ms < 500.0,
+          "10000 pa_simple_new probes finish in <500 ms (no sleep anywhere)");
+    printf("     pulse: 10000 pa_simple_new probes in %.2f ms\n", ms);
+  }
+
+  for (int k = 0; k < 2; k++)
+    if (h[k]) dlclose(h[k]);
+#else
+  printf("SKIP pulse dso check (XCOMPAT_PULSE_SIMPLE_PATH not set)\n");
+#endif
+}
+
 int main(void) {
   printf("xcompat host tests\n");
   test_abi();
@@ -449,6 +765,8 @@ int main(void) {
   test_geometry();
   test_keymap();
   test_export_list();
+  test_pulse_abi();
+  test_pulse_dso();
   printf("[TEST] %d checks, %d failed\n", checks, fails);
   if (fails) {
     printf("SOME XCOMPAT TESTS FAILED\n");
