@@ -673,8 +673,42 @@ static int exe_dir(char *out, size_t cap) {
   return 0;
 }
 
+/* libGL.so.1 is linked with NO DT_NEEDED (tools/mesa/build-hobbyos.sh) but
+ * imports libX11's private hooks (_XLockMutex_fn/_XUnlockMutex_fn/_Xglobal_lock)
+ * plus XDrawString16/XGetImage/XFreeFontInfo.  Without a NEEDED edge the loader
+ * searches only the already-loaded GLOBAL scope, so Unity's
+ * dlopen("libGL.so.1") failed with "undefined symbol: _XLockMutex_fn" and the
+ * engine exited with "Forced renderer 17 is not supported" (measured, wave 10).
+ * A real link would have made libX11 a global dependency; do the same thing
+ * explicitly, before anything asks for GL.  Runtime overrides let an experiment
+ * change the set without a rebuild. */
+static void preload_gl_deps(void) {
+  static const char *defaults[] = {"/LIB64/libX11.so.6", "/LIB64/libXext.so.6", 0};
+  const char *env = getenv("RW_PRELOAD_GLOBAL");
+  if (env && env[0] == '0') return;
+  if (env && env[0]) {
+    char buf[512];
+    snprintf(buf, sizeof buf, "%s", env);
+    for (char *p = buf; p && *p;) {
+      char *comma = strchr(p, ',');
+      if (comma) *comma = 0;
+      void *h = next_dlopen ? next_dlopen(p, RTLD_NOW | RTLD_GLOBAL) : dlopen(p, RTLD_NOW | RTLD_GLOBAL);
+      fprintf(stderr, "[RWMAIN] preload %s -> %s\n", p, h ? "ok" : "FAILED");
+      p = comma ? comma + 1 : 0;
+    }
+    return;
+  }
+  for (int i = 0; defaults[i]; i++) {
+    void *h = next_dlopen ? next_dlopen(defaults[i], RTLD_NOW | RTLD_GLOBAL)
+                          : dlopen(defaults[i], RTLD_NOW | RTLD_GLOBAL);
+    if (h) fprintf(stderr, "[RWMAIN] preload %s -> ok\n", defaults[i]);
+  }
+}
+
 int main(int argc, char **argv) {
   fprintf(stderr, "[RWMAIN] AD-9 PlayerMain launcher start argc=%d\n", argc);
+  if (!next_dlopen) next_dlopen = (void *(*)(const char *, int))dlsym(RTLD_NEXT, "dlopen");
+  preload_gl_deps();
 #ifndef RW_NO_SHADOW_PTHREAD
   mtx_main_tid = (int)gettid();
   fprintf(stderr, "[MTX] enabled=%d main_tid=%d\n", mtx_on(), mtx_main_tid);
