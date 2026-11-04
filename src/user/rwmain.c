@@ -41,6 +41,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -156,12 +157,22 @@ void *dlopen(const char *file, int mode) {
   } else if (trace) {
     /* The base address turns a runtime PC into a file offset: the M6 park's
        rip/stack words are otherwise unattributable (the guest has no
-       /proc/self/maps).  RTLD_DI_LINKMAP gives l_addr, the load bias. */
+       /proc/self/maps).  RTLD_DI_LINKMAP gives l_addr, the load bias.
+       M6/L30 also prints l_name and the (dev,ino) pair glibc uses to decide
+       "this object is already loaded": two identical shims under different
+       names MUST report distinct pairs, distinct handles and distinct bases. */
     struct link_map *lm = 0;
     unsigned long base = 0;
     if (dlinfo(r, RTLD_DI_LINKMAP, &lm) == 0 && lm) base = (unsigned long)lm->l_addr;
-    fprintf(stderr, "[RWMAIN] dlopen ok %s -> %p base=0x%lx\n",
-            file ? file : "(null)", r, base);
+    unsigned long d0 = 0, i0 = 0;
+    struct stat st;
+    if (lm && lm->l_name && lm->l_name[0] && stat(lm->l_name, &st) == 0) {
+      d0 = (unsigned long)st.st_dev;
+      i0 = (unsigned long)st.st_ino;
+    }
+    fprintf(stderr, "[RWMAIN] dlopen ok %s -> %p base=0x%lx dev=%lu ino=%lu name=%s\n",
+            file ? file : "(null)", r, base, d0, i0,
+            (lm && lm->l_name && lm->l_name[0]) ? lm->l_name : "?");
   }
   return r;
 }

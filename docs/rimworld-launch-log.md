@@ -2448,3 +2448,168 @@ python3 tools/gate/m4_gl_probe.py         m4: PASS
 - `libXi.so.6` implements no XInput2 protocol: it answers "no devices, no
   grab". A client that needs real XI2 (touch, tablets, raw events) gets the
   no-hardware answer, which is what this desktop is.
+
+## 20. 2026-11-04 — M6: the audio kill is the COW *refault budget*, and the loader was innocent
+
+Lane L30 (`rw-l30-loader`) started from §19.6's two open claims: "the COW path
+refuses a MAP_PRIVATE file write" and "dlopen returned the same handle / the
+allocator re-used a base". Instrumenting both (`[COW]` and `[MPROT]` rows in
+`vm.c`, `dev=`/`ino=`/`name=` on the launcher's `dlopen ok` row) retired the
+second claim and replaced the first with a sharper one.
+
+### 20.1 What the rows said: the copy worked, the *fifth* copy was killed
+
+The first instrumented run reproduced §19.6 exactly — and every COW row was an
+identity **hit** (the leaf really was the page-cache frame):
+
+```text
+/LIB64/libpulse-simple.so.0
+[COW] va=0x1087D13000 r.base=0x1087D13000+0x2000 prot=3 flags=18 kind=7 ooff=0x2000 leaf=0x2F54F000 obj=0x2F54F000 src=pagecache
+[MPROT] a=0x1087D13000 len=0x1000 prot=1 rc=0 r=0x1087D13000+0x1000 rprot=1
+/LIB64/libasound.so.2
+[COW] va=0x1087D13000 r.base=0x1087D13000+0x1000 prot=3 flags=18 kind=7 ooff=0x2000 leaf=0x2F54E000 obj=0x2F54E000 src=pagecache
+[MPROT] a=0x1087D13000 len=0x1000 prot=1 rc=0 r=0x1087D13000+0x1000 rprot=1
+... four more loads, four more COW+RELRO pairs ...
+[KERNEL] pid=4 memory fault VA=0x1087D13F18 PC=0x10080077CE rw=w in=PROT
+         region=0x1087D13000+0x2000 prot=3 kind=7 -> killed
+```
+
+Each COW succeeded (a different leaf each time, i.e. a fresh private copy per
+load). FMOD probes its audio backends by **dlopen/dlclose**: every probe maps a
+new DSO into the hole the previous one freed, so the *same VA* is
+copy-on-write relocated once per probe. `vm_handle_fault` charged every one of
+those correct copies to the "this page keeps refaulting" budget
+(`as->retry_va/retry_count`, `FAULT_RETRY_MAX` = 4) and killed the **fifth**
+legitimate copy. The budget is only meaningful for the case that makes no
+progress at all — a present, *writable* leaf, i.e. a stale TLB entry — so a COW
+now always runs and resets the counter (`retry_count = 0`) instead of
+incrementing it.
+
+Two more things the same rows proved:
+
+- `vm_mprotect` re-encoded the resident leaves *before* rewriting the region
+  records, so a span rewrite that failed left the VMA read-write with read-only
+  PTEs. Nothing failed in this boot (`[MPROT] ... rc=0`), but the order is now
+  records-then-leaves so that state cannot be produced.
+- The COW test itself no longer requires the leaf to BE the page-cache frame: a
+  private page a protection change left read-only, or a leaf that belongs to an
+  earlier object for the same file (`file_obj_invalidate_all()` drops the cache
+  slot on every FAT16 write), are both legitimate copy sources. Linux keys the
+  copy on "the VMA allows the write and the PTE does not", nothing else.
+
+**Also found by the new unit test:** `vm_as_clone_into` re-mapped an object
+frame into a forked child with the region's `prot` (read-write). The child's
+first store would have gone straight into the page-cache frame every other
+mapping shares — no COW, silent text/data corruption across processes. A
+private child now gets the same read-only object frame the fill path installs.
+
+### 20.2 The loader identity claim was a dlclose artifact
+
+The `dlopen ok` row now prints `l_name` and the `(dev, ino)` pair glibc keys
+"already loaded" on:
+
+```text
+[RWMAIN] dlopen ok libpulse-simple.so.0 -> 0x104c647d20 base=0x1087d10000 dev=257 ino=6270489 name=/LIB64/libpulse-simple.so.0
+[RWMAIN] dlopen ok libasound.so.2       -> 0x104c647d20 base=0x1087d10000 dev=257 ino=6270486 name=/LIB64/libasound.so.2
+[RWMAIN] dlopen ok libasound.so.2       -> 0x104c647d90 base=0x1087d10000 dev=257 ino=6270486 name=/LIB64/libasound.so.2
+```
+
+The handles and bases repeat because the *same link-map address and the same
+first-fit hole* are reused after `dlclose`, not because two objects collided:
+each row's `name`/`ino` is the object that was actually loaded. A third object
+at an already-used base was likewise a freed-then-reused base. The allocator is
+correct — and now has a test that says so (see 20.4).
+
+What was genuinely wrong was the *identity pair itself*:
+
+- `k_stat_fill` reported `st_dev = 0` for every file type, so the pair glibc
+  compares was the synthetic inode alone, and a FAT16 file and an NFS file with
+  equal inodes would have collided. Each volume now has its own `st_dev`
+  (`0x101` FAT16, `0x202` NFS, pseudo-volumes for pipes/sockets/procfs/devfs)
+  and `l_stat_fill` passes it through instead of zeroing it.
+- `file_stat_path` answered **`st_ino = 0` for every NFS path**. That is the
+  whole `/NFS` tree — UnityPlayer and the Mono DSOs — reporting one identity.
+  NFS path stats now fold the server file handle, the same value `fstat()`
+  reports, so `stat(path)` and `fstat(fd)` agree.
+
+```text
+  [FS-ID] 0x0000000000000101:0x00000000000022F2 0x0000000000000101:0x00000000000022F3
+```
+
+(two byte-identical files, distinct inodes, same volume — the loader identity
+test in `vm_test.c`.)
+
+### 20.3 After: the audio probe is survivable, the wall is Mono
+
+```text
+[XI] XIGrabTouchBegin dev=0 win=0x200002 owner=1 -> Failure (no touch device)
+Initialize engine version: 2022.3.35f1 (011206c7a712)
+Forcing GfxDevice: OpenGL Core
+GfxDevice: creating device client; threaded=1; jobified=0
+Renderer: softpipe
+OPENGL LOG: Creating OpenGL 3.3 graphics device ; Context level  <OpenGL 3.3> ; Context handle 1077918832
+[RWMAIN] dlopen ok libpulse-simple.so.0 -> 0x104c647d20 base=0x1087d10000
+... six more probe loads, each COW+RELRO, none killed ...
+FMOD failed to initialize the output device.: "Error initializing output device. " (60)
+Forced to initialize FMOD to to the device driver's system output rate 48000, ...
+FMOD failed to initialize the output device.: "An error occured that wasn't supposed to.  Contact support. " (33)
+Unable to initalize any audio device (even FMOD nosound device), please check your audio drivers and/or hardware for malfunction
+```
+
+Audio is now **non-fatal**: FMOD falls back twice, reports no device, and the
+engine keeps going into Mono. The next blocker is in the managed layer:
+
+```text
+Unable to find method ProcessFrame in [UnityEngine.CoreModule.dll]UnityEngine.Playables.IPlayableBehaviour
+Unable to find type [UnityEngine.CoreModule.dll]UnityEngine.Playables.Playable
+...
+[KERNEL] pid=4 (/NFS/RimWorldLinux) memory fault VA=0x0000000000000038
+         PC=0x0000001083EA8B92 rw=r in=HOLE region=NONE
+         rbx=0x10F0009488 rdi=0x0 rsi=0x10819B6500 -> killed
+[EXITPC] pid=4 last_user_pc=0x1080043099 code=0x4000000B
+```
+
+`0x1083EA8B92` is inside `libmonobdwgc-2.0.so` (its base is ~0x1083D6D000; the
+`sigaction` install rows put Mono at `0x1083d6d279`/`0x1083e3e933`), and the
+fault is a NULL+0x38 read, not a mapping failure. The `Unable to find type
+[...CoreModule.dll]` rows are the engine failing to resolve its own managed
+types just before it dies, so the next lane's question is *which assembled
+`UnityEngine.CoreModule.dll` Mono actually opened*, not the VM.
+
+The post-audio death site also varies run to run, which says the managed layer —
+not the fault path — is the flaky frontier. Four instrumented runs produced:
+`VA=0x6 UnityPlayer+0x198b548` (a `%rdi=0` table read) once, `VA=0x38
+libmonobdwgc` twice, and once a wild `sys=202` (futex) write to
+`VA=0x2882A10B78` while Unity was still resolving the GL entry points. None is
+a `region=NONE` hole the VM should have filled: they are NULL/garbage pointers
+used by code above the kernel. `01_running.png` still shows the process's stdout
+window (Unity's `memorysetup-*` lines), **not** a game frame, and no `XPutImage`
+content-flush row appears in any of them. This section does not claim a frame.
+
+### 20.4 Tests
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh    Tests run: 410   Tests failed: 0
+bash tools/gate/m2_mono.sh                PASS
+python3 tools/gate/m3_window_probe.py     m3w: PASS
+python3 tools/gate/m4_gl_probe.py         m4: PASS
+```
+
+New kernel tests (`src/kernel/vm_test.c`):
+
+| test | asserts |
+|---|---|
+| `test_vm_file_cow_private_leaf` | a write fault copies a present read-only private leaf even when it is not the object's frame; the copy is writable and carries the bytes; the page-cache frame is untouched; **eight consecutive COWs on one VA all succeed** (the measured fifth-load kill). |
+| `test_vm_dso_bases_distinct` | six DSOs of colliding size/hash get distinct, non-overlapping bases inside the mmap arena, one page-cache object, a hint naming an occupied base is skipped, and each mapping's private copy is independent. |
+| `test_fs_dso_identity_pair` | two byte-identical files report distinct `(st_dev, st_ino)`, `stat(path)` agrees with `fstat(fd)`, and `/dev/console` lives on its own volume. |
+
+### 20.5 Instruments kept
+
+- `[COW]` (`vm.c`): one bounded row per copy-on-write fault — region
+  base/len/prot/flags/kind/obj_off, the resident leaf, the object's page, and
+  `src=pagecache|private`.
+- `[MPROT]` (`vm.c`): every `mprotect` that touches an object-backed private
+  region, with `rc` and the resulting region — how the RELRO split-after-copy
+  pattern above is visible at all.
+- `dlopen ok ... dev=<n> ino=<n> name=<path>` (`rwmain.c`): the loader identity
+  table. Read it before believing a "same handle" row.

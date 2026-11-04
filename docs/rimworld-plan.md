@@ -677,6 +677,30 @@ remaining NULL slot lives in a table the shim cannot see; the next instrument
 is a `SIGSEGV` ucontext dump inside the DSO or a QEMU gdb stub. Rows and the
 full host-vs-guest diff: `docs/rimworld-launch-log.md` §18.
 
+**Status 2026-11-04 (lane L30): the audio probe is survivable; the wall is the
+managed layer.** The `in=PROT` kill after FMOD's probe was **not** a refused
+copy-on-write: every instrumented COW was an identity hit and installed a fresh
+private page. FMOD probes audio backends by dlopen/dlclose, so one base/VA is
+re-mapped, relocated (one COW) and RELRO-protected once per probe, and
+`vm_handle_fault` charged each correct copy to `FAULT_RETRY_MAX` — the **fifth**
+legitimate copy was killed. A COW now never touches that budget (it resets it);
+the budget stays for the only no-progress case, a present writable leaf (stale
+TLB). Same wave: `vm_mprotect` rewrites region records before leaves (no
+VMA-rw/PTE-ro state on a failed span), the COW source no longer has to be the
+object's frame, and `vm_as_clone_into` no longer maps an object frame
+*read-write* into a forked child (it would have dirtied the page cache for every
+mapping). Loader identity was measured, not assumed: distinct `ino`s and the
+right `l_name` per row, so §19's "same handle / same base" was `dlclose` reuse
+(now proven by a test). What *was* wrong: `st_dev` was 0 for every volume and
+every NFS **path** stat reported `st_ino = 0`, so the `(dev, ino)` pair glibc
+keys "already loaded" on was not unique per file. Per-volume `st_dev` + the NFS
+file handle in path stats fix it. **Current wall:** Mono — the engine logs
+`Unable to find method ProcessFrame in [UnityEngine.CoreModule.dll]...` and dies
+on a NULL+0x38 read inside `libmonobdwgc-2.0.so`
+(`VA=0x38 PC=0x1083EA8B92 in=HOLE`). No game frame yet (the window still shows
+the process's stdout text; no `XPutImage` content flush). Rows, the COW/MPROT
+evidence and the new tests: `docs/rimworld-launch-log.md` §20.
+
 **Historical (2026-11-02):** plumbing landed; the binary itself cannot be *loaded*
 (`ET_EXEC` at 0x200000, below the 64 GiB user window → `elf loader: ET_EXEC
 linked below the user window`), which is why AD-9 replaces the stub instead. A

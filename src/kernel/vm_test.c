@@ -1506,6 +1506,325 @@ out:
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* M6/L30 (a): the COW decision must not depend on the resident leaf being
+ * the region object's page.  Measured state from the RimWorld boot: the VMA
+ * permits the write, the PTE is read-only, and the leaf is NOT what the
+ * region's object would serve for that offset — the old test refused the
+ * copy, the "present but permissive" retry refaulted FAULT_RETRY_MAX times
+ * and the process was killed with in=PROT.  Build that state exactly (a
+ * private page a protection change left read-only under a writable VMA) and
+ * require: the write fault succeeds, the old page is untouched, and the new
+ * leaf is a writable private copy carrying the old bytes.
+ *
+ * (b) it also proves vm_arch_leaf_writable() and the fill path agree: the
+ * object's page-cache frame stays read-only and is never written. */
+static void test_vm_file_cow_private_leaf(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_file_cow_private_leaf...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_FILE_TAG1));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (fd < 0 || b <= 0)
+    goto out;
+
+  /* First touch is a READ fill: the object's frame, installed read-only. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 0), 0);
+  uint64_t l0 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &l0), 0);
+  uint64_t objfr = vm_arch_leaf_phys(l0);
+  EXPECT_EQ(vm_arch_leaf_writable(l0), 0); /* read-only: the COW setup */
+  struct vm_region *r = vm_region_find(p.as, (uint64_t)b);
+  EXPECT_EQ((r && r->obj && vm_object_peek(r->obj, 0) == objfr), 1);
+
+  /* The write fault breaks the copy: private, writable, same bytes. */
+  const char *why = 0;
+  EXPECT_EQ(vm_handle_fault(&p, (uint64_t)b, 1, 0, &why), 0);
+  uint64_t l1 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &l1), 0);
+  uint64_t priv = vm_arch_leaf_phys(l1);
+  EXPECT_EQ((priv != 0 && priv != objfr), 1);
+  EXPECT_EQ(vm_arch_leaf_writable(l1), 1);
+  EXPECT_EQ((int)(((const volatile unsigned char *)priv)[0]),
+            (int)((0u * 7u + 3u) & 0xFFu));
+
+  /* A protection change that leaves the PRIVATE page read-only while the VMA
+     still says read-write: exactly the disagreement the boot hit.  The leaf
+     is no longer the object's frame, so the old identity test said "not a
+     COW" and looped on the retry path until it killed the process. */
+  vm_arch_prot(p.as, (uint64_t)b, VM_PROT_READ);
+  uint64_t l2 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &l2), 0);
+  EXPECT_EQ(vm_arch_leaf_writable(l2), 0);
+  EXPECT_EQ(vm_arch_leaf_phys(l2), priv); /* still our private page */
+  struct vm_region *r2 = vm_region_find(p.as, (uint64_t)b);
+  EXPECT_EQ((r2 && (r2->prot & VM_PROT_WRITE) && r2->obj &&
+             vm_object_peek(r2->obj, 0) != priv),
+            1); /* VMA writable, leaf neither writable nor the object page */
+
+  ((volatile unsigned char *)priv)[0] = 0x5A; /* a private byte to carry */
+  EXPECT_EQ((int)(((const volatile unsigned char *)priv)[0]), 0x5A);
+  why = 0;
+  EXPECT_EQ(vm_handle_fault(&p, (uint64_t)b, 1, 0, &why), 0);
+  uint64_t l3 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &l3), 0);
+  uint64_t priv2 = vm_arch_leaf_phys(l3);
+  EXPECT_EQ((priv2 != 0 && priv2 != priv), 1);   /* a NEW private copy */
+  EXPECT_EQ(vm_arch_leaf_writable(l3), 1);       /* and it is writable */
+  EXPECT_EQ((int)(((const volatile unsigned char *)priv2)[0]), 0x5A);
+  /* The object's page-cache frame still carries the file's byte: the copy
+     never touched the page every other mapping shares. */
+  EXPECT_EQ((int)(((const volatile unsigned char *)objfr)[0]),
+            (int)((0u * 7u + 3u) & 0xFFu));
+
+  /* REGRESSION (measured, docs/rimworld-launch-log.md §19.6/§20): a loader
+     that dlopen/dlcloses probe DSOs re-uses one base, so the SAME VA is
+     copy-on-write relocated once per load — five times in the RimWorld audio
+     probe.  Charging each correct COW to the "keeps refaulting" budget killed
+     the fifth with in=PROT.  Eight consecutive COWs on one VA must all
+     succeed and each must leave a writable private page. */
+  for (int i = 0; i < 8; i++) {
+    vm_arch_prot(p.as, (uint64_t)b, VM_PROT_READ); /* next load's RO fill */
+    const char *w2 = 0;
+    if (vm_handle_fault(&p, (uint64_t)b, 1, 0, &w2) != 0) {
+      uart_puts("ASSERTION FAILED: COW #");
+      print_int(i + 1);
+      uart_puts(" on the same VA was killed (in=");
+      uart_puts(w2 ? w2 : "?");
+      uart_puts(")\n");
+      EXPECT_EQ(1, 0);
+      break;
+    }
+    uint64_t lr = 0;
+    if (vm_arch_walk(p.as, (uint64_t)b, &lr) != 0 ||
+        !vm_arch_leaf_writable(lr)) {
+      EXPECT_EQ(1, 0); /* a COW must install a writable page */
+      break;
+    }
+  }
+
+out:
+  if (p.as)
+    vm_as_teardown(p.as);
+  if (fd >= 0)
+    file_close(&p, fd);
+  file_obj_invalidate_all();
+  uart_puts("  [VM-FILE] cow_private_leaf objects c0=");
+  print_int(c0);
+  uart_puts(" now=");
+  print_int(file_obj_count());
+  uart_puts(" frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L30 (b): the DSO slot allocator.  A loader that maps several DSOs of
+ * colliding size/hash (our audio shims were byte-identical) must get a
+ * DISTINCT base for every live mapping, and a hint that names an occupied
+ * base must be skipped rather than honoured.  Also: one page-cache object
+ * per file no matter how many times it is mapped. */
+static void test_vm_dso_bases_distinct(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_dso_bases_distinct...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_FILE_TAG1));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  if (fd < 0)
+    goto out;
+
+#define DSO_N 6
+  int64_t b[DSO_N];
+  int ok = 1;
+  for (int i = 0; i < DSO_N; i++) {
+    b[i] = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                   VM_MAP_PRIVATE, fd, 0);
+    if (b[i] <= 0)
+      ok = 0;
+  }
+  EXPECT_EQ(ok, 1);
+  /* Every base is inside the mmap arena, distinct, and owned by the region
+     that was just created there. */
+  for (int i = 0; ok && i < DSO_N; i++) {
+    EXPECT_EQ((b[i] >= (int64_t)USER_MMAP_BASE_V2 &&
+               b[i] + (int64_t)fsize <= (int64_t)USER_MMAP_LIMIT_V2),
+              1);
+    struct vm_region *ri = vm_region_find(p.as, (uint64_t)b[i]);
+    EXPECT_EQ((ri && ri->base == (uint64_t)b[i]), 1);
+    for (int j = 0; j < i; j++) {
+      uint64_t lo1 = (uint64_t)b[i], lo2 = (uint64_t)b[j];
+      uint64_t end1 = lo1 + ((fsize + 0xFFFu) & ~0xFFFu);
+      uint64_t end2 = lo2 + ((fsize + 0xFFFu) & ~0xFFFu);
+      EXPECT_EQ((end1 <= lo2 || end2 <= lo1), 1); /* no overlap */
+      EXPECT_EQ((lo1 != lo2), 1);                /* distinct base */
+    }
+  }
+  /* Colliding size/hash still means ONE page-cache object.  (Region pointers
+     are re-fetched: the registry array can grow under an insert.) */
+  struct vm_object *ob0 = 0;
+  {
+    struct vm_region *r0 = vm_region_find(p.as, (uint64_t)b[0]);
+    ob0 = r0 ? r0->obj : 0;
+  }
+  EXPECT_EQ((ob0 != 0), 1);
+  for (int i = 1; ok && i < DSO_N; i++) {
+    struct vm_region *ri = vm_region_find(p.as, (uint64_t)b[i]);
+    EXPECT_EQ((ri && ri->obj == ob0), 1);
+  }
+  /* A hint that names an OCCUPIED base is not honoured: the allocator must
+     skip the live mapping, not land on top of it. */
+  int64_t hb = vm_mmap(&p, (uint64_t)b[0], fsize, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((hb > 0 && hb != b[0]), 1);
+  struct vm_region *rh = hb > 0 ? vm_region_find(p.as, (uint64_t)hb) : 0;
+  EXPECT_EQ((rh && rh->base == (uint64_t)hb && rh->obj == ob0), 1);
+
+  /* Independent private copies: a write fault in each mapping must not
+     disturb the others (no shared base means no shared leaves). */
+  for (int i = 0; ok && i < DSO_N; i++) {
+    const char *why = 0;
+    if (vm_handle_fault(&p, (uint64_t)b[i], 1, 0, &why) != 0) {
+      EXPECT_EQ(1, 0); /* a write fault must COW, never kill */
+      break;
+    }
+    uint64_t li = 0;
+    EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b[i], &li), 0);
+    ((volatile unsigned char *)vm_arch_leaf_phys(li))[0] =
+        (unsigned char)(0xA0 + i);
+  }
+  for (int i = 0; ok && i < DSO_N; i++) {
+    uint64_t li = 0;
+    EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b[i], &li), 0);
+    EXPECT_EQ((int)(((const volatile unsigned char *)
+                         vm_arch_leaf_phys(li))[0]),
+              (int)(0xA0 + i));
+  }
+  /* The file's page-cache page never saw any of those writes. */
+  EXPECT_EQ((int)(((const volatile unsigned char *)
+                       vm_object_peek(ob0, 0))[0]),
+            (int)((0u * 7u + 3u) & 0xFFu));
+#undef DSO_N
+
+out:
+  if (p.as)
+    vm_as_teardown(p.as);
+  if (fd >= 0)
+    file_close(&p, fd);
+  file_obj_invalidate_all();
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L30 (c): file identity as a loader sees it.  Two DSOs with IDENTICAL
+ * contents under different names (the audio shims were byte-identical) must
+ * report distinct (st_dev, st_ino) pairs, and stat(path) must agree with
+ * fstat(fd) for the same file — otherwise glibc's dlopen "already loaded"
+ * test hands back the same link map for two different libraries. */
+static void test_fs_dso_identity_pair(void) {
+  tests_run++;
+  uart_puts("  Running test_fs_dso_identity_pair...\n");
+
+  static const char *names[2] = {"/VMSOID1.DAT", "/VMSOID2.DAT"};
+  struct file f;
+  for (int i = 0; i < 2; i++) {
+    for (unsigned k = 0; k < sizeof(f); k++)
+      ((unsigned char *)&f)[k] = 0;
+    if (fat16_open(names[i], &f) != 0) {
+      uart_puts("ASSERTION FAILED: identity fixture not creatable\n");
+      return;
+    }
+    fat16_truncate_to(&f, 0);
+    unsigned char buf[256];
+    for (int k = 0; k < 256; k++)
+      buf[k] = (unsigned char)(0x40 + k); /* identical contents */
+    int w = fat16_write(&f, buf, 256);
+    fat16_close(&f);
+    EXPECT_EQ(w, 256);
+  }
+
+  struct k_stat sp[2], sf[2];
+  int e = 0;
+  EXPECT_EQ(file_stat_path(0, names[0], &sp[0], &e), 0);
+  EXPECT_EQ(file_stat_path(0, names[1], &sp[1], &e), 0);
+
+  struct process p;
+  vm_file_proc_init(&p, 0); /* stat/fstat need only the fd table */
+  for (int i = 0; i < 2; i++) {
+    int fd = file_open(&p, names[i], 0);
+    EXPECT_EQ((fd >= 0), 1);
+    if (fd < 0)
+      return;
+    EXPECT_EQ(file_stat_fd(&p, fd, &sf[i], &e), 0);
+    file_close(&p, fd);
+  }
+
+  uart_puts("  [FS-ID] ");
+  uart_print_hex((uint64_t)sp[0].st_dev);
+  uart_puts(":");
+  uart_print_hex((uint64_t)sp[0].st_ino);
+  uart_puts(" ");
+  uart_print_hex((uint64_t)sp[1].st_dev);
+  uart_puts(":");
+  uart_print_hex((uint64_t)sp[1].st_ino);
+  uart_puts("\n");
+
+  /* Both are regular files on the same volume... */
+  EXPECT_EQ((sp[0].st_dev != 0 && sp[0].st_dev == sp[1].st_dev), 1);
+  /* ...with different directory entries, so different inodes... */
+  EXPECT_EQ((sp[0].st_ino != sp[1].st_ino), 1);
+  /* ...and the pair a loader compares is never equal. */
+  EXPECT_EQ((sp[0].st_dev != sp[1].st_dev || sp[0].st_ino != sp[1].st_ino), 1);
+  /* stat(path) and fstat(fd) name the same object. */
+  for (int i = 0; i < 2; i++) {
+    EXPECT_EQ((sp[i].st_dev == sf[i].st_dev), 1);
+    EXPECT_EQ((sp[i].st_ino == sf[i].st_ino), 1);
+  }
+  {
+    struct k_stat sd = {0};
+    int ep = 0;
+    if (file_stat_path(0, "/dev/console", &sd, &ep) == 0) {
+      /* A device on its own pseudo-volume is never "the same file" as a FAT
+         volume object, and never (0,0). */
+      EXPECT_EQ((sd.st_dev != 0), 1);
+      EXPECT_EQ((sd.st_dev != sp[0].st_dev), 1);
+    }
+  }
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -1528,6 +1847,10 @@ void vm_test_suite(void) {
   test_vm_file_map_tail_wx();
   test_vm_file_map_accounting();
   test_vm_file_map_fork();
+  /* M6/L30: COW without the frame-identity gate; DSO base allocation */
+  test_vm_file_cow_private_leaf();
+  test_vm_dso_bases_distinct();
+  test_fs_dso_identity_pair();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

@@ -1152,6 +1152,40 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
   return 0;
 }
 
+/* M6/L30 COW evidence: one bounded row per copy-on-write fault, naming the
+ * resident leaf and the page the region's object would serve for that
+ * offset.  `src=pagecache` when the leaf IS that page (the normal first
+ * relocation store), `src=private` when a previous COW or an earlier object
+ * for the same file left a different frame resident — both are legitimate
+ * sources, which is exactly what §19.6 got wrong. */
+static int cow_diag_rows;
+static void cow_diag(struct vm_region *r, uint64_t a, uint64_t leaf) {
+  if (cow_diag_rows >= 24)
+    return;
+  cow_diag_rows++;
+  uint64_t peek = vm_object_peek_locked(r->obj, (a - r->base) + r->obj_off);
+  uart_puts("[COW] va=");
+  uart_print_hex(a);
+  uart_puts(" r.base=");
+  uart_print_hex(r->base);
+  uart_puts("+");
+  uart_print_hex(r->len);
+  uart_puts(" prot=");
+  print_int((int)r->prot);
+  uart_puts(" flags=");
+  print_int((int)r->flags);
+  uart_puts(" kind=");
+  print_int((int)r->kind);
+  uart_puts(" ooff=");
+  uart_print_hex(r->obj_off);
+  uart_puts(" leaf=");
+  uart_print_hex(vm_arch_leaf_phys(leaf));
+  uart_puts(" obj=");
+  uart_print_hex(peek);
+  uart_puts(vm_arch_leaf_phys(leaf) == peek ? " src=pagecache\n"
+                                            : " src=private\n");
+}
+
 int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why) {
   if (why)
@@ -1179,34 +1213,43 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
       *why = "PROT";
     return 1;
   }
-  /* so-vm lane A: a present leaf that is the object's own frame, in a
-     MAP_PRIVATE region whose protection allows the write, is a COW fault —
-     the fill path installs object frames read-only for exactly this reason.
-     Break the copy (bounded: after FAULT_RETRY_MAX consecutive COWs on the
-     same VA something is genuinely wrong). */
-  if (write && r->obj && (r->flags & VM_MAP_PRIVATE) &&
-      vm_page_is_obj_frame_locked(as, r, a, 0)) {
-    if (as->retry_va == a && as->retry_count >= FAULT_RETRY_MAX) {
-      spinlock_release_irqrestore(&vm_lock, fl);
-      if (why)
-        *why = "PROT";
-      return 1;
-    }
-    if (vm_cow_page_locked(as, r, a) != 0) {
-      spinlock_release_irqrestore(&vm_lock, fl);
-      if (why)
-        *why = "OOM";
-      return 1;
-    }
-    if (as->retry_va != a) {
+  /* so-vm lane A: a write fault into a MAP_PRIVATE object-backed region is
+     a copy-on-write fault, and Linux does not require the kernel to prove
+     WHY the leaf is read-only: the VMA permits the write (checked above)
+     and the hardware refused it, so the answer is a private copy of the
+     page.  Two things make this broader than the old "the leaf must BE the
+     page-cache frame" test:
+       - a leaf a previous COW already made private, and a leaf that belongs
+         to an earlier object for the same file (file_obj_invalidate_all()
+         drops the cache slot on every FAT16 write, so a re-mapped DSO gets a
+         fresh object while the resident leaf is still the old one's), are
+         both legitimate copy sources;
+       - a loader that dlopen/dlcloses probe DSOs RE-USES a base: the same VA
+         is mapped, relocated (one COW here), protected, unloaded, and mapped
+         again — five times in the measured RimWorld audio probe.  Each of
+         those is a fresh, correct COW, so a COW must NEVER be charged to the
+         refault budget: accounting it there killed the fifth legitimate copy
+         with in=PROT (docs/rimworld-launch-log.md §19.6/§20).  The budget
+         below stays for the one case that makes no progress, a present
+         writable leaf (stale TLB). */
+  if (write && r->obj && (r->flags & VM_MAP_PRIVATE)) {
+    uint64_t leaf = 0;
+    if (vm_arch_walk(as, a, &leaf) == 0 && !vm_arch_leaf_writable(leaf)) {
+      cow_diag(r, a, leaf);
+      if (vm_cow_page_locked(as, r, a) != 0) {
+        spinlock_release_irqrestore(&vm_lock, fl);
+        if (why)
+          *why = "OOM";
+        return 1;
+      }
+      /* The mapping changed under this VA: the next fault here is a new
+         event, not a repeat of this one. */
       as->retry_va = a;
-      as->retry_count = 1;
-    } else {
-      as->retry_count++;
+      as->retry_count = 0;
+      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_arch_flush_va(as, a);
+      return 0; /* retry the instruction against the private copy */
     }
-    spinlock_release_irqrestore(&vm_lock, fl);
-    vm_arch_flush_va(as, a);
-    return 0; /* retry the instruction against the private copy */
   }
 
   if (vm_arch_walk(as, a, 0) == 0) {
@@ -1855,6 +1898,8 @@ static int vm_prot_set_span(struct addr_space *as, uint64_t addr, uint64_t len,
   return 0;
 }
 
+static int mpr_diag_rows;
+
 int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot) {
   if (!grp || !grp->as)
     return -1;
@@ -1873,6 +1918,15 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
       spinlock_release_irqrestore(&vm_lock, fl);
       return -ENOMEM;
     }
+  }
+  /* Region records first, leaves second: if the span rewrite fails the PTE
+     protection must not already disagree with the VMA (that state — VMA
+     read-write, PTE read-only, no object frame under it — is what turned a
+     refused mprotect into an unbounded refault loop). */
+  int rc = vm_prot_set_span(as, addr, len, p);
+  if (rc != 0) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    return -ENOMEM;
   }
   /* Resident pages: re-encode in place, or ZAP for PROT_NONE (design
      section 4.4: documented divergence from Linux). */
@@ -1899,7 +1953,27 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
       vm_arch_prot(as, a, lp);
     }
   }
-  int rc = vm_prot_set_span(as, addr, len, p);
+  if (mpr_diag_rows < 40) {
+    struct vm_region *dr = vm_region_find(as, addr);
+    if (dr && dr->obj && (dr->flags & VM_MAP_PRIVATE)) {
+      mpr_diag_rows++;
+      uart_puts("[MPROT] a=");
+      uart_print_hex(addr);
+      uart_puts(" len=");
+      uart_print_hex(len);
+      uart_puts(" prot=");
+      print_int((int)p);
+      uart_puts(" rc=");
+      print_int(rc);
+      uart_puts(" r=");
+      uart_print_hex(dr->base);
+      uart_puts("+");
+      uart_print_hex(dr->len);
+      uart_puts(" rprot=");
+      print_int((int)dr->prot);
+      uart_puts("\n");
+    }
+  }
   spinlock_release_irqrestore(&vm_lock, fl);
   return rc == 0 ? 0 : -ENOMEM;
 }
@@ -1992,6 +2066,15 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
       if (!present)
         continue; /* holes stay holes */
       uint16_t mkind = r.kind;
+      /* M6/L30: an object frame re-mapped into a MAP_PRIVATE child must stay
+         READ-ONLY, exactly as the fill path installs it — otherwise the
+         child's first store would go straight into the page-cache frame that
+         every other mapping (the parent's text among them) shares, and no
+         write fault would ever break the copy. */
+      uint16_t mprot = r.prot;
+      if ((r.flags & VM_MAP_PRIVATE) && r.obj &&
+          r.obj->kind == VM_OBJ_FILE)
+        mprot = (uint16_t)(mprot & ~VM_PROT_WRITE);
       uint64_t phys;
       if (r.obj) {
         /* so-vm lane A: a page still pointing at the object's own frame is
@@ -2035,7 +2118,7 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
           goto fail;
         vm_frame_copy(phys, vm_arch_leaf_phys(leaf), FRAME_SIZE);
       }
-      if (vm_map_page(dst, a, phys, r.prot, mkind) != 0) {
+      if (vm_map_page(dst, a, phys, mprot, mkind) != 0) {
         if (!r.obj && r.kind != VMK_FB)
           frame_free(phys);
         uart_puts("[VM] clone: map failed i=");

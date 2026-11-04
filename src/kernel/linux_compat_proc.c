@@ -198,9 +198,12 @@ static int l_sa_diag;
 
 static void l_stat_fill(const struct k_stat *ks, linux_stat_t *o) {
   l_zero(o, sizeof *o);
-  /* One volume, mounted at /; the native ABI also reports 0.  A program that
-     compares st_dev between two paths still gets a stable answer. */
-  o->st_dev = 0;
+  /* M6/L30: the device comes from the volume (fs.c), not from a constant.
+     glibc's dlopen keys "is this object already loaded?" on (st_dev, st_ino);
+     reporting 0 for every volume left the pair keyed on the synthetic inode
+     alone, so files on two different filesystems with equal inode numbers
+     answered the same link map.  Linux reports one st_dev per mount. */
+  o->st_dev = (uint64_t)ks->st_dev;
   o->st_ino = ks->st_ino;
   o->st_nlink = ks->st_nlink > 0 ? (uint64_t)ks->st_nlink : 1;
   o->st_mode = ks->st_mode;

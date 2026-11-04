@@ -1478,9 +1478,25 @@ static unsigned long nfs_synth_ino(const struct nfs_fh *fh) {
   return h;
 }
 
-static void k_stat_fill(struct k_stat *st, unsigned long ino,
-                        unsigned long mode, long size) {
-  st->st_dev = 0;
+/* Volume identity.  Linux's (st_dev, st_ino) pair is what a loader keys a
+ * "is this object already mapped?" lookup on: glibc's
+ * _dl_map_object_from_fd() compares l_ino/l_dev against fstat() and returns
+ * the EXISTING link map when both match, so two distinct files that report
+ * the same pair become ONE handle.  Reporting st_dev = 0 for every file type
+ * (the old behaviour) left the pair keyed on the synthetic inode alone, so a
+ * FAT16 file and an NFS file whose hashes collided — or any two files the
+ * inode synthesis could not separate — silently shared a handle.  Give each
+ * volume its own device number, exactly as Linux does for two mounts. */
+#define K_DEV_FAT16 0x00000101u
+#define K_DEV_NFS 0x00000202u
+#define K_DEV_PIPE 0x00000303u
+#define K_DEV_SOCK 0x00000404u
+#define K_DEV_PROCFS 0x00000505u
+#define K_DEV_DEVFS 0x00000606u
+
+static void k_stat_fill(struct k_stat *st, unsigned long dev,
+                        unsigned long ino, unsigned long mode, long size) {
+  st->st_dev = dev;
   st->st_ino = ino;
   st->st_mode = mode;
   st->st_nlink = 1;
@@ -1502,7 +1518,7 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
   FS_SLOT_CHECK(f);
   switch (f->type) {
   case FILE_TYPE_FAT16: {
-    k_stat_fill(st,
+    k_stat_fill(st, K_DEV_FAT16,
                 fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
                 (f->fat16.entry.attr & 0x10)
                     ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
@@ -1514,44 +1530,49 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     return 0;
   }
   case FILE_TYPE_NFS:
-    k_stat_fill(st, nfs_synth_ino(&f->nfs.fh),
+    k_stat_fill(st, K_DEV_NFS, nfs_synth_ino(&f->nfs.fh),
                 f->nfs.is_dir ? (K_S_IFDIR | 0755)
                               : (K_S_IFREG | 0644),
                 f->nfs.size);
     return 0;
+  /* Anonymous objects: Linux gives each pipe/socket its own inode on its own
+     pseudo-filesystem.  Deriving the inode from the global slot keeps two
+     distinct pipes from reporting the same (dev, ino) pair — the property a
+     caller comparing two fds relies on. */
   case FILE_TYPE_PIPE:
-    k_stat_fill(st, 0, K_S_IFIFO | 0600, 0);
+    k_stat_fill(st, K_DEV_PIPE, (unsigned long)g_fd + 1, K_S_IFIFO | 0600, 0);
     return 0;
   case FILE_TYPE_SOCKET:
-    k_stat_fill(st, 0, K_S_IFSOCK | 0600, 0);
+    k_stat_fill(st, K_DEV_SOCK, (unsigned long)g_fd + 1, K_S_IFSOCK | 0600, 0);
     return 0;
   case FILE_TYPE_UNIXSOCK: /* P4: F_GETFD-probing tools stat caches use this */
-    k_stat_fill(st, 0, K_S_IFSOCK | 0600, 0);
+    k_stat_fill(st, K_DEV_SOCK, (unsigned long)g_fd + 1, K_S_IFSOCK | 0600, 0);
     return 0;
   case FILE_TYPE_FAT16DIR: /* GB-020: a directory fd stats as a directory */
-    k_stat_fill(st, fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
+    k_stat_fill(st, K_DEV_FAT16,
+                fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
                 K_S_IFDIR | 0755, 0);
     return 0;
   case FILE_TYPE_PROCMAPS:
     /* Linux reports the maps file as a 0444 regular file with st_size 0
        (measured host-side); readers must not size-gate it. */
-    k_stat_fill(st, 0, K_S_IFREG | 0444, 0);
+    k_stat_fill(st, K_DEV_PROCFS, (unsigned long)g_fd + 1, K_S_IFREG | 0444, 0);
     return 0;
   case FILE_TYPE_CONSOLE:
     /* M2 stdio: a character device, 0644, size 0.  Mono's FileStream ctor
        fstat()s each stdio handle and refuses anything that is not a real
        file object (ArgumentException "handle"/"Invalid"); a char device is
        exactly what Linux reports for a redirected-console fd. */
-    k_stat_fill(st, 0, K_S_IFCHR | 0644, 0);
+    k_stat_fill(st, K_DEV_DEVFS, 1, K_S_IFCHR | 0644, 0);
     return 0;
   case FILE_TYPE_DEVNULL:
-    k_stat_fill(st, 0, K_S_IFCHR | 0666, 0);
+    k_stat_fill(st, K_DEV_DEVFS, 2, K_S_IFCHR | 0666, 0);
     return 0;
   case FILE_TYPE_DEVURANDO:
-    k_stat_fill(st, 0, K_S_IFCHR | 0666, 0);
+    k_stat_fill(st, K_DEV_DEVFS, 3, K_S_IFCHR | 0666, 0);
     return 0;
   case FILE_TYPE_DEVFB:
-    k_stat_fill(st, 0, K_S_IFCHR | 0644, 0);
+    k_stat_fill(st, K_DEV_DEVFS, 4, K_S_IFCHR | 0644, 0);
     return 0;
   default:
     *errp = EBADF;
@@ -1630,13 +1651,14 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
   /* M6 launch plumbing: the virtual maps file exists for access()/stat()
      (the host trace shows access("/proc/self/maps", F_OK) before the open). */
   if (fs_streq(path, "/proc/self/maps")) {
-    k_stat_fill(st, 0, K_S_IFREG | 0444, 0);
+    k_stat_fill(st, K_DEV_PROCFS, 1, K_S_IFREG | 0444, 0);
     return 0;
   }
   /* M2 stdio: the device nodes exist to stat()/access() too, not only to
      open().  Linux reports /dev/console and /dev/null as char devices. */
   if (fs_streq(path, "/dev/console") || fs_streq(path, "/dev/null")) {
-    k_stat_fill(st, 0, K_S_IFCHR | 0644, 0);
+    k_stat_fill(st, K_DEV_DEVFS, fs_streq(path, "/dev/null") ? 2 : 1,
+                K_S_IFCHR | 0644, 0);
     return 0;
   }
   /* AD-9 (M6): Unity resolves its executable with
@@ -1649,7 +1671,7 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
      are symlinks whose targets readlink() already answers. */
   if (fs_streq(path, "/proc") || fs_streq(path, "/proc/self") ||
       fs_streq(path, "/proc/self/fd")) {
-    k_stat_fill(st, 0, K_S_IFDIR | 0555, 0);
+    k_stat_fill(st, K_DEV_PROCFS, 2, K_S_IFDIR | 0555, 0);
     return 0;
   }
   if (fs_streq(path, "/proc/self/exe") || fs_streq(path, "/proc/self/cwd") ||
@@ -1662,7 +1684,7 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
       tgt = (g && g->cwd[0]) ? g->cwd : "/";
     long n = 0;
     while (tgt[n]) n++;
-    k_stat_fill(st, 0, K_S_IFLNK | 0777, n);
+    k_stat_fill(st, K_DEV_PROCFS, 3, K_S_IFLNK | 0777, n);
     return 0;
   }
   char abs[256];
@@ -1675,11 +1697,18 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
   if (vfs_route(abs, &midx, &rel)) {
     const struct nfs_mount *m = nfs_mount_at(midx);
     struct nfs_attr a;
-    if (!m || nfs_lookup(m, rel, 0, &a) != 0) {
+    struct nfs_fh fh;
+    fh.len = 0;
+    if (!m || nfs_lookup(m, rel, &fh, &a) != 0) {
       *errp = ENOENT;
       return -1;
     }
-    k_stat_fill(st, 0,
+    /* The file handle is the server-side identity, and file_stat_fd() folds
+       the SAME handle for the same file — so stat(path) and fstat(fd) agree.
+       Leaving this at 0 made every NFS file report (dev=0, ino=0), which is
+       exactly the pair glibc's dlopen uses to decide "already loaded": two
+       different NFS DSOs answered the same link map. */
+    k_stat_fill(st, K_DEV_NFS, nfs_synth_ino(&fh),
                 (a.type == NF3DIR) ? (K_S_IFDIR | 0755)
                                    : (K_S_IFREG | 0644),
                 (long)a.size);
@@ -1692,7 +1721,7 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
     *errp = ENOENT;
     return -1;
   }
-  k_stat_fill(st, fat16_synth_ino(sector, offset),
+  k_stat_fill(st, K_DEV_FAT16, fat16_synth_ino(sector, offset),
               (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
               entry.file_size);
   /* w10-fstime: real RTC timestamp from the dirent (UTC; no FAT atime). */
