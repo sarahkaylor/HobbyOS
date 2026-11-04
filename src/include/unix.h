@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "lock.h"
 #include "ipc_proto.h"
+#include "pidmask.h"
 
 /* P4 (docs/browser/p4-ipc-design.md section 2.1): AF_UNIX endpoint pairs.
  * One `struct usock` is a socketpair; each open fd is an end (0|1) with its
@@ -47,7 +48,7 @@ struct usock_chan {
   uint32_t head, tail, used; /* byte ring / message arena cursors */
   uint32_t mhead, mtail;     /* SEQPACKET/DGRAM: message ring cursors */
   uint32_t mcount;           /* queued messages; full = K_UNIX_MSGS  */
-  uint64_t rwait, wwait;     /* pid masks: parked readers / writers */
+  struct pid_mask rwait, wwait; /* pid masks: parked readers / writers */
 };
 
 struct usock {
@@ -77,8 +78,8 @@ struct usock {
   int backlog;       /* accept-queue capacity (1..K_UNIX_BACKLOG) */
   struct usock *accq[K_UNIX_BACKLOG]; /* pending connections (ring) */
   uint32_t qhead, qcount;
-  uint64_t acc_wait;  /* pid mask: parked accept() callers  */
-  uint64_t conn_wait; /* pid mask: parked connect() callers (queue full) */
+  struct pid_mask acc_wait;  /* pid mask: parked accept() callers  */
+  struct pid_mask conn_wait; /* pid mask: parked connect() callers (queue full) */
   uint8_t *ring_base; /* frame-pool block: chan[0].ring | chan[1].ring */
 };
 

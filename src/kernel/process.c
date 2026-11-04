@@ -631,8 +631,20 @@ static void user_rusage_store(struct process *p, uint64_t va,
  * accepted-and-recorded but never delivered to a handler, and SIGUSR1/
  * SIGUSR2 delivery is deliberately deferred (D13/OQ3) — a mis-delivered
  * suspend/resume signal must never let WTF's suspend() proceed.  Pending
- * bits for these accumulate harmlessly; everything else delivers. */
+ * bits for these accumulate harmlessly; everything else delivers.
+ *
+ * D6/L12: the real-time range 32..63 is now named explicitly.  glibc's
+ * pthread_cancel raises SIGCANCEL(32), pthread_setxid broadcasts
+ * SIGSETXID(33) and Mono suspends threads on SIGRTMIN(35).  Each carries a
+ * handler installed through rt_sigaction, so they are catchable, and
+ * without this branch they were stored and never delivered (the 32-slot
+ * mask and sig_known() were the other two walls).  The native set below is
+ * unchanged. */
 static int sig_deliverable(int sig) {
+  if (sig <= 0 || sig >= HO_SIG_MAX)
+    return 0;
+  if (sig >= 32)
+    return 1; /* real-time range: SIGCANCEL/SIGSETXID/SIGRTMIN */
   switch (sig) {
   case HO_SIGILL:
   case HO_SIGABRT:
@@ -2602,7 +2614,12 @@ void process_exec_terminate_siblings(struct process *grp,
 /* Row 16 completion (D9): process-directed targeting + disposition-based
  * action.  See process.h for the contract. */
 int process_signal(int pid, int sig) {
-  if (!sig_known(sig))
+  /* L12: the real-time range is a valid signal number (glibc SIGCANCEL=32,
+   * SIGSETXID=33, Mono SIGRTMIN=35); whether THIS target may receive it is
+   * decided below, once the target's ABI is known.  Numbers outside both
+   * sets stay -EINVAL, exactly as before. */
+  int rt = (sig >= 32 && sig < HO_SIG_MAX);
+  if (!sig_known(sig) && !rt)
     return -EINVAL;
   struct process *target = 0;
   /* M2: the exact task, when the signal names one.  A Linux tgkill(tid) must
@@ -2634,6 +2651,13 @@ int process_signal(int pid, int sig) {
   if (!target) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return -ESRCH;
+  }
+  /* L12: a real-time number only enters the pending/ disposition logic for
+   * a Linux-ABI target.  The native contract (sig_known's frozen set) is
+   * unchanged: a native target still answers -EINVAL for 32..63. */
+  if (!sig_known(sig) && !(target->abi_flags & PROC_FLAG_LINUX_ABI)) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return -EINVAL;
   }
   uint64_t h = target->sig_handler[sig];
   if (sig == HO_SIGKILL || h == 0 /* SIG_DFL */) {
