@@ -231,6 +231,69 @@ static void sys_open(struct trap_frame *tf) {
   tf->regs[0] = file_open(caller, kpath, flags);
 }
 
+/* GB-201: FAT16 cannot name a glibc SONAME (two dots), but ld.so opens its
+   dependencies by SONAME.  A compat open whose *basename* is one of the staged
+   SONAMEs resolves to the 8.3 name the loader staged.  The table is exact and
+   bounded: every other path, including an unknown .so name, keeps the ordinary
+   file_open result, so a miss is still ENOENT — never a wildcard. */
+static const struct {
+  const char *soname;
+  const char *staged;
+} compat_sonames[] = {
+  { "libc.so.6", "LIBC6.SO" },
+  { "ld-linux-x86-64.so.2", "LD64.SO" },
+};
+
+static int compat_name_eq_ci(const char *a, const char *b) {
+  while (*a && *b) {
+    char ca = *a, cb = *b;
+    if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+    if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+    if (ca != cb) return 0;
+    a++; b++;
+  }
+  return *a == '\0' && *b == '\0';
+}
+
+static const char *compat_soname_staged(const char *path) {
+  const char *base = path;
+  for (const char *p = path; *p; p++)
+    if (*p == '/') base = p + 1;
+  for (unsigned i = 0; i < sizeof compat_sonames / sizeof compat_sonames[0]; i++)
+    if (compat_name_eq_ci(base, compat_sonames[i].soname))
+      return compat_sonames[i].staged;
+  return 0;
+}
+
+static void compat_open(struct trap_frame *tf) {
+  const char *filename = (const char *)tf->regs[5]; /* rdi */
+  int flags = (int)tf->regs[4];                     /* rsi */
+  struct process *caller = current_process();
+  char kpath[256];
+  int plen = copy_user_path(filename, kpath, sizeof kpath);
+  if (plen < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)plen;
+    return;
+  }
+  const char *staged = compat_soname_staged(kpath);
+  int fd = file_open(caller, staged ? staged : kpath, flags);
+  if (staged) {
+    /* One record: the guest's SONAME, the file it resolved to, and the fd —
+       the evidence the open path (not a staged rename) did the work. */
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "open: ");
+    kl_s(&kl, kpath);
+    kl_s(&kl, " -> ");
+    kl_s(&kl, staged);
+    kl_s(&kl, " fd=");
+    kl_i(&kl, fd);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  tf->regs[0] = (uint64_t)(int64_t)fd;
+}
+
 static void sys_close(struct trap_frame *tf) {
   int fd = (int)tf->regs[5]; // rdi
   struct process *caller = current_process();
@@ -2065,7 +2128,7 @@ static void compat_openat(struct trap_frame *tf) {
   }
   tf->regs[5] = (uint64_t)(uintptr_t)path;
   tf->regs[4] = (uint64_t)(uintptr_t)(int64_t)flags;
-  sys_open(tf);
+  compat_open(tf);
 }
 
 static void sys_chdir(struct trap_frame *tf) {
@@ -2637,7 +2700,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
                             : (uint64_t)(int64_t)(-22);
           return;
         }
-        case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
+        case 2:  compat_open(tf);               return; /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
         /* GB-165: lseek(8).  DOOM's W_AddFile seeks to the WAD directory; with
            no arm the seek returned -ENOSYS and every lump lookup failed
