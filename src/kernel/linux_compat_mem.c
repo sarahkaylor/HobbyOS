@@ -63,6 +63,8 @@
 #include "arch/trap.h"
 #include "errno.h"
 #include "frame.h"
+#include "fs.h"
+#include "kline.h"
 #include "linux_syscall.h"
 #include "process.h"
 #include "vm.h"
@@ -191,6 +193,32 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   int64_t r = sys_mmap6(addr, len, prot, (int64_t)hf, fd, off);
   if (r == -1 && as)
     r = -ENOMEM; /* v2 vm_mmap's only -1 is a caller-contract bug */
+  if (r < 0 && fd >= 0 && !(hf & L_MAP_ANONYMOUS)) {
+    /* A file-backed mmap that failed: name the file and the reason.  This is
+       the "first loader refusal" evidence for a DSO/assembly the caller
+       cannot map (NFS pages are -ENOTSUP until M5b). */
+    static int mmap_reports;
+    if (mmap_reports < 8) {
+      mmap_reports++;
+      char path[160];
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LCOMPAT] mmap fail fd=");
+      kl_i(&kl, (long)fd);
+      kl_s(&kl, " len=");
+      kl_i(&kl, (long)len);
+      kl_s(&kl, " off=");
+      kl_i(&kl, (long)off);
+      kl_s(&kl, " -> ");
+      kl_i(&kl, (long)r);
+      if (file_path_of(p, (int)fd, path, sizeof path) == 0) {
+        kl_s(&kl, " path=");
+        kl_s(&kl, path);
+      }
+      kl_s(&kl, "\n");
+      kl_emit(&kl);
+    }
+  }
   return l_ret(tf, r);
 }
 

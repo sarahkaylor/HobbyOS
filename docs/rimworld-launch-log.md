@@ -315,3 +315,213 @@ The game tree is never copied into the repo: it is served read-only from
   one in these runs.
 - `RWTEST.ELF`/`rwstub.c` are a measurement fixture. They are not the game and
   no result here claims the game ran.
+
+---
+
+## 9. M6 in-guest — the AD-9 launcher reaches Mono (2026-11-03)
+
+Tree: `rw-l14-launch`, seeded from `rimworld` tip **6e7474cc**.
+Repro: `export HOME=/home/sarah; bash tools/rw/run-rimworld.sh ad9 --timeout 150`
+(raw serial: `obj/rw-launch/serial-ad9.log`).
+
+This section is the first run of the **real** game in the guest — not the
+stub, not a stand-in. The executable is HobbyOS-built; the engine, Mono and
+the game's data are the shipped files.
+
+### 9.1 What was installed
+
+| Piece | Where | Size |
+|---|---|---|
+| `RimWorldLinux` (AD-9 launcher, `src/user/rwmain.c`) | `/NFS/RimWorldLinux` (game dir) | 15,808 B |
+| original ET_EXEC stub | `/NFS/RimWorldLinux.orig` (NFS copy only) | 14,720 B |
+| `UnityPlayer.so` | `/RWDSO/UnityPlayer.so` | 33,010,672 B |
+| `libmonobdwgc-2.0.so` + `libmono-native.so` + `libMonoPosixHelper.so` | `/RWDSO/` | 3,872,688 + 2,303,416 + 264,160 B |
+| `lib_burst_generated.so` + `libsteam_api.so` | `/RWDSO/` | 247,528 + 416,413 B |
+| `libz.so.1` (Mono NEEDED; focal-era zlib) | `/LIB64/`, `/lib/x86_64-linux-gnu/` | 108,936 B |
+
+The launcher is a glibc-2.31 PIE built against the pin's own headers and crt
+(`AD-11`), linked `-rdynamic` with `libdl-2.31.so`. It reads
+`/proc/self/exe`, derives `<dir>`, `dlopen`s `RW_UNITYPLAYER`
+(`/RWDSO/UnityPlayer.so`, set by `rwlaunch`) with `RTLD_NOW|RTLD_GLOBAL`,
+`dlsym`s `_Z10PlayerMainiPPc`, and calls it with the launcher's own
+`argc/argv`. Nothing about the game's code changes.
+
+AD-10's local staging is reached through the launcher's exported `dlopen`:
+Unity asks for the Mono/plugin DSOs by their data-dir path, the wrapper maps
+the **basename** into `/RWDSO` and calls the real `dlopen` via
+`dlsym(RTLD_NEXT, "dlopen")`:
+
+```
+[RWMAIN] dlopen remap /NFS/RimWorldLinux_Data/MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so -> /RWDSO/libmonobdwgc-2.0.so
+```
+
+That is the line that proves the 3.8 MiB Mono DSO was opened from the FAT
+image, not from NFS (`mmap` of an NFS file is `-ENOTSUP`, §5).
+
+### 9.2 Ordered failure ladder (each row: first symptom, then the fix)
+
+The rows below are in the order the real binary produced them. Each quote is
+raw serial output from the run that hit it.
+
+**1. ET_EXEC at 0x200000 — removed by AD-9 (previous run, §4).**
+The shipped stub never loads. Replaced by the PIE launcher above; the loader
+now accepts it:
+
+```
+Loading program for scheduler (v2 AS): /NFS/RimWorldLinux
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x10000017C0 start=0x1008001100
+[LCOMPAT] argv argc=10 a0=/NFS/RimWorldLinux a1=-force-glcore a2=-screen-width execfn=/NFS/RimWorldLinux
+```
+
+**2. `realpath("/proc/self/exe")` → ENOENT.** Unity does not `readlink` the
+link directly on this path; it calls `realpath`. glibc's `realpath` `lstat`s
+every component, and `file_stat_path()` only knew FAT16, so `/proc`, `/proc/self`
+and `/NFS` were all `ENOENT`:
+
+```
+[LCOMPAT] clone flags=0x3D0F00 stack=0x1082C13FB0 tls=0x1082C14700 -> 1
+Error 2 encountered while resolving executable path: No such file or directory
+[RWMAIN] PlayerMain returned 1
+```
+
+Fixed in `src/kernel/fs.c` (`file_stat_path`): `/proc` and `/proc/self` answer
+as directories, `/proc/self/{exe,cwd,root}` as symlinks whose size is the
+link target, and **NFS paths are answered from `nfs_lookup`'s fattr3** instead
+of falling through to FAT16. (No `[LCOMPAT] ENOSYS` was involved; the syscall
+existed and answered ENOENT.)
+
+**3. Page-cache invalidation killed a live DSO mapping.** After the engine
+opened its own `Player.log` (a FAT16 write), the first *new* UnityPlayer text
+page could not be filled and the process took SIGSEGV:
+
+```
+[KERNEL] pid=3 (/NFS/RimWorldLinux) memory fault VA=0x0000001080F50DF0 PC=0x0000001080F50DF0 rw=rx in=PROT region=0x000000108092F000+0x00000000017A4000 prot=5 kind=7 ... -> killed
+[LCOMPAT] fault sig=11 pid=3 tgid=3 tls=0x10801F3640 live_fs=0x0x10801F3640
+Unable to load mono library from /NFS/RimWorldLinux_Data/MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so
+Failed to load mono
+```
+
+Cause: every FAT16 write calls `file_obj_invalidate_all()`. The comment there
+says a live mapping "stays alive on its own references", but `file_obj_page()`
+refused to fill any page once the object had left the slot table, so the
+33 MB UnityPlayer text mapping died at its first page-in after any write.
+Fixed by keeping the source identity (`file_start_cluster`) on the
+`vm_object` itself and letting a live object keep refilling
+(`src/include/vm.h`, `src/kernel/file_obj.c`).
+
+**4. `libmonobdwgc` would not load: `libz.so.1` missing.** With page-in
+fixed, mono initialised far enough to be dlopen'ed and its NEEDED list checked;
+`libmonobdwgc` needs `libz.so.1`, which `/LIB64` did not carry. The raw
+evidence from that run (the wrapper's failure text was added afterwards; the
+engine's own lines are the proof):
+
+```
+/RWDSO/libmonobdwgc-2.0.so
+Unable to load mono library from /NFS/RimWorldLinux_Data/MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so
+Failed to load mono
+```
+
+`tools/rw/run-rimworld.sh ad9` now stages the Mono tree's `libz.so.1`
+(108,936 B) into `/LIB64` and `/lib/x86_64-linux-gnu`; the next run printed
+`Mono path[0]` instead of `Failed to load mono`.
+
+**5. The next blocker: Mono `mmap`s `mscorlib.dll` from NFS → `-ENOTSUP`.**
+Mono starts, prints its path and config path, then cannot load the core
+assembly. The exact refusal (a new `[LCOMPAT] mmap fail` row on the compat
+mmap error path):
+
+```
+[LCOMPAT] mmap fail fd=4 len=4622848 off=0 -> -95 path=/NFS/RimWorldLinux_Data/Managed/mscorlib.dll
+Mono path[0] = '/NFS/RimWorldLinux_Data/Managed'
+Mono config path = '/NFS/RimWorldLinux_Data/MonoBleedingEdge/etc'
+GC Warning: Couldn't read /proc/stat
+The assembly mscorlib.dll was not found or could not be loaded.
+It should have been installed in the `/NFS/RimWorldLinux_Data/Managed/mono/4.5/mscorlib.dll' directory.
+```
+
+`-95` is `-ENOTSUP`: `vm_mmap` only knows FAT16 file mappings
+(`file_fat16_ident`), and an NFS fd is refused before any page is mapped.
+`mscorlib.dll` exists at that path (4,622,848 B) and `open`/`fstat` succeed;
+the failure is the mapping, not the file.
+
+### 9.3 Where the ladder ends, and what that means for AD-10
+
+The engine itself runs: it prints its memory configuration, creates
+`PlayerPrefs` folders, spawns two threads (`clone flags=0x3D0F00`), opens
+`Player.log`, loads `UnityPlayer.so` and `libmonobdwgc-2.0.so` from the local
+staging, and reaches Mono initialisation. **No `[LCOMPAT] ENOSYS` occurred in
+this run (`grep -c ENOSYS serial-ad9.log` = 0), no loader refusal of the
+launcher, and no missing DSO symbol** — the first refusal is `mmap` of an NFS
+file.
+
+That is the **M5b** gap the plan already tracks, now measured on the game's
+own managed data: AD-10 stages the *native* DSOs, but Mono `mmap`s every
+managed assembly, and `RimWorldLinux_Data/Managed/` (40 MiB) is on NFS. So
+either AD-10 must also stage `Managed/` locally and route the assembly opens,
+or M5b (a VM object with an NFS page-in callback) must land. That decision is
+above this lane; it is the single next blocker, and this run does not claim
+the game reaches a window, GL, or the menu.
+
+### 9.4 Raw run (final, consecutive rows)
+
+```
+[WAVE-MANIFEST] RWLAUNCH.BIN
+[RW] rwlaunch: start
+[RW] rwlaunch: net ip=251789322
+[RW] rwlaunch: mount 10.0.2.2:/srv/nfs/rimworld -> /NFS rc=0
+[RW] rwlaunch: exec /NFS/RimWorldLinux HOME=/RW_HOME LC_ALL=C LD_LIBRARY_PATH=/LIB64 RW_DSO_DIR=/RWDSO
+Loading program for scheduler (v2 AS): /NFS/RimWorldLinux
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x10000017C0 start=0x1008001100
+[LCOMPAT] argv argc=10 a0=/NFS/RimWorldLinux a1=-force-glcore a2=-screen-width execfn=/NFS/RimWorldLinux
+[RW] rwlaunch: spawn_ex -> 3
+[RWMAIN] AD-9 PlayerMain launcher start argc=10
+[RWMAIN] /proc/self/exe = /NFS/RimWorldLinux
+[RWMAIN] data dir = /NFS/RimWorldLinux_Data
+[RWMAIN] RW_DSO_DIR = /RWDSO
+[RWMAIN] dlopen(/RWDSO/UnityPlayer.so, RTLD_NOW|RTLD_GLOBAL)
+[RWMAIN] UnityPlayer.so handle=0x10400022d0
+[RWMAIN] PlayerMain=0x108105f8b0 argc=10 — calling
+[LCOMPAT] clone flags=0x3D0F00 stack=0x1082C13FB0 tls=0x1082C14700 -> 1
+[UnityMemory] Configuration Parameters - Can be set up in boot.config
+PlayerPrefs - Creating folder: /RW_HOME/.config/unity3d/unknown
+PlayerPrefs - Creating folder: /RW_HOME/.config/unity3d/unknown/unknown
+Unable to load player prefs
+[LCOMPAT] clone flags=0x3D0F00 stack=0x1083414FB0 tls=0x1083415700 -> 4
+[LCOMPAT] mmap fail fd=4 len=4622848 off=0 -> -95 path=/NFS/RimWorldLinux_Data/Managed/mscorlib.dll
+[KERNEL] Process 3: /NFS/RimWorldLinux exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x10800E3146 code=0x1
+[RW] rwlaunch: waitpid=3 status=256
+[RWMAIN] dlopen remap /NFS/RimWorldLinux_Data/MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so -> /RWDSO/libmonobdwgc-2.0.so
+Mono path[0] = '/NFS/RimWorldLinux_Data/Managed'
+Mono config path = '/NFS/RimWorldLinux_Data/MonoBleedingEdge/etc'
+GC Warning: Couldn't read /proc/stat
+The assembly mscorlib.dll was not found or could not be loaded.
+It should have been installed in the `/NFS/RimWorldLinux_Data/Managed/mono/4.5/mscorlib.dll' directory.
+[RW] rwlaunch: done
+[KERNEL] Process 2: RWLAUNCH.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=2 last_user_pc=0x1000000CCF code=0x0
+System halt from CPU 3.
+```
+
+`Player.log` (the engine's own file, 440 B; dumped by the launcher):
+
+```
+Mono path[0] = '/NFS/RimWorldLinux_Data/Managed'
+Mono config path = '/NFS/RimWorldLinux_Data/MonoBleedingEdge/etc'
+GC Warning: Couldn't read /proc/stat
+The assembly mscorlib.dll was not found or could not be loaded.
+It should have been installed in the `/NFS/RimWorldLinux_Data/Managed/mono/4.5/mscorlib.dll' directory.
+```
+
+### 9.5 Limits of this section
+
+- The run stops inside Mono startup. It says nothing about GL, X11, audio or
+  the 125-thread footprint: the engine never got that far. No screenshot and
+  no menu claim is made.
+- The `dlopen` redirect is a *launcher* mechanism for native DSOs only. It
+  does not touch `open`/`mmap` of ordinary data or managed assemblies, which
+  is exactly where the ladder ends.
+- `/proc/self` is presented to `stat` as a directory, not as a pid symlink;
+  `stat("/proc/self/exe")` reports a symlink rather than following it.
+- `GC Warning: Couldn't read /proc/stat` is recorded, not fixed: Mono's GC
+  probes it once; it is not what stops `mscorlib`.

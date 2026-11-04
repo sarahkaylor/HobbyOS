@@ -199,6 +199,7 @@ struct k_stat {
 #define K_S_IFMT  0170000
 #define K_S_IFDIR 0040000
 #define K_S_IFREG 0100000
+#define K_S_IFLNK 0120000
 #define K_S_IFIFO 0010000
 #define K_S_IFSOCK 0140000
 
