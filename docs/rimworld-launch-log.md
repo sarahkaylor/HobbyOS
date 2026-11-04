@@ -1049,3 +1049,162 @@ still shows the process under its launcher name.
 - `pthread_setschedparam → EPERM`, `GC Warning: Couldn't read /proc/stat` and
   `Failed reading 'ScriptingAssemblies.json'` are unchanged from §10/§11 and
   are not on this wave's critical path.
+
+## 13. 2026-11-04 — M6: the post-display park is a pthread mutex that is never released
+
+Lane L20 (`rw-l20-park`), tree seeded from `4b6ad9c7`. §12 ended with the
+player's main thread parked (`st=8`) after `Display 0 '0': 1920x1080` and no
+`XCreateWindow`. The open question was *what* it waits on. This wave answers it
+with a futex flight recorder and three probes, and the answer is not a lost
+wakeup in the futex queue: the thread is blocked acquiring a `pthread_mutex_t`
+whose holder never unlocks.
+
+### 13.1 Instrumentation (diagnostic, no behaviour change)
+
+`src/include/futex_trace.h` + `src/kernel/linux_compat_thr.c`:
+
+| piece | what it prints | why |
+|---|---|---|
+| `[FUTEX] #n OP pid= as= key= rip= …` | the first 48 ops of a boot | boot-order handshakes |
+| 64-entry ring, dumped by `futex_trace_dump_locked()` | `[FUTEX] r#n …`, the last ops before the hang | 1.09 M ops cannot go to the console |
+| `WAIT` vs `WAITBS` | the actual futex op | `FUTEX_WAIT` = mutex, `WAIT_BITSET` = condvar/sem |
+| `rip=` | the syscall-site return address | names the libc/libpthread/Unity wrapper that issued it |
+| `[FUTEX] q slot= pid= st= as= key= bitset= waits= wakes= sigp= name` | every slot still queued, plus pending signals | names the waiter, not just the rip |
+| `[FUTEX] st pid= sp= <6 stack words> word=` | saved user RSP and what is on it | backtrace without frames |
+| `[FUTEX] mutex pid= … 5 words` | the `pthread_mutex_t` body for lock-shaped words | `__lock/__count/__owner/__nusers/__kind` |
+| `[FUTEX] rgn pid= base= len= kind= prot=` | the mapping the key lives in | heap vs DSO global vs stack |
+| `[FUTEX] code pid= rip= <16 bytes>` | the instruction stream at the saved rip | identifies the wrapper offline |
+| `[FUTEX] near-miss …` | a wake with `woke=0` while a thread is parked on the same key with a different address space or a disjoint bitset | the lost-wakeup shape, printed only when true |
+| `[FUTEX] exit pid=` | every thread exit | a dead owner is a deadlock |
+| `[SIG] send pid= sig= st= futex=` | every compat signal | Mono stop-the-world vs lock holder |
+
+`[IDLESTUCK]` rows gained `futex=<key>`, so the per-thread dump the hang needs
+(pid, name, rip, wait key, state) is now one line per slot. The app-side
+counterpart is in the AD-9 launcher (`src/user/rwmain.c`): with
+`RW_TRACE_MUTEX=1` it records every `pthread_mutex_lock/trylock/timedlock/
+unlock`, `sem_wait/post` and `pthread_cond_wait/timedwait` into
+`/RW_HOME/mtx.log` (61,414 rows in the run below). It is **off by default** —
+the launcher does not set the variable, so the shipping run is unchanged.
+
+### 13.2 The ladder (raw rows)
+
+```
+[FUTEX] r#64 WAIT pid=4 ... key=0x17FFFFB6D8 rip=0x108011895D val=0x0 to=4294967295 res=0
+[FUTEX] r#65 WAKE pid=24 ... key=0x17FFFFB6D8 rip=0x108011895D n=1 woke=1 of=4
+[FUTEX] r#66 WAIT pid=24 ... key=0x1110001EA0 rip=0x108011895D val=0x0 to=4294967295 res=0
+[FUTEX] r#67 WAIT pid=4 ... key=0x17FFFFB6B8 rip=0x108011895D val=0x0 to=4294967295 res=0
+[FUTEX] r#68 WAKE pid=25 ... key=0x17FFFFB6B8 rip=0x108011895D n=1 woke=1 of=4
+[FUTEX] r#69 WAIT pid=25 ... key=0x10F0000334 rip=0x108011895D val=0x0 to=4294967295 res=0
+[FUTEX] r#70 WAIT pid=4  ... key=0x10C00964A0 rip=0x1082404170 val=0x2 bitset=0xFFFFFFFF to=-1 res=0
+```
+
+`r#70` is the **last futex operation of the boot** (`queue: … ops=68…71`), and
+no `WAKE` on `0x10C00964A0` appears anywhere in the ring. Read in order:
+
+- Every other futex in the process is issued through libc's `syscall()`
+  wrapper (`rip=0x108011895D` = libc+0x11895D). `r#70` is the only one issued
+  from libpthread's own asm: `0x1082404170` = libpthread+0x13170, the
+  instruction after the `syscall` in `__lll_lock_wait` — a plain
+  **`pthread_mutex_lock` slow path**.
+- The wait value is **2** (glibc's "locked and a waiter set the WAITERS bit"),
+  the timeout is **infinite** (`to=-1`, i.e. `utime == NULL`), and the bitset
+  is `MATCH_ANY`, so this is not a bitset or timeout shape at all.
+- The key is in a 4 MiB anonymous mapping:
+
+```
+[FUTEX] rgn pid=4 key=0x10C00964A0 base=0x10C0000000 len=0x400000 kind=3 prot=3
+[FUTEX] mutex pid=4 key=0x10C00964A0 0x2 0x10 0x0 0x0 0x0
+[FUTEX] st pid=4 sp=0x17FFFFB4D8 0x10823FC0A3 0x0 0x10C00964A0 0x10C00964A0 0x1000002479 0x30 word=0x2
+```
+
+  `__lock=2`, and `__count=0x10`, `__owner=0`, `__nusers=0`, `__kind=0`
+  (NORMAL, so glibc keeps no owner tid — the one thing that would have named
+  the holder). `__count=0x10` is therefore the neighbouring field of the
+  enclosing 4 MiB object, not mutex state.
+- The stack is a real call chain: `[sp]` returns into libpthread's
+  `__pthread_mutex_clocklock_common` (+0xC0A3), `[sp+32]` returns into the
+  launcher's own `pthread_mutex_lock` wrapper (`0x1000002479`), and the
+  wrapper's caller is UnityPlayer+0x1D43DA5. So the call really is
+  `pthread_mutex_lock(H)` from Unity, entered through the normal PLT.
+
+**It is not `read(0)`, not `poll`, not `waitpid`.** The thread is in the
+kernel's futex wait, on a userspace mutex.
+
+### 13.3 Three probes: the wait is legitimate, and the word stays locked
+
+A lost wake would show up as a waiter that could have proceeded. Three
+independent probes say it could not:
+
+1. **Per-word prod.** Giving *only* `0x10C00964A0` a 1 s deadline makes the
+   main thread wake 14 times (`waits` 20 → 34) and re-park on every one: the
+   word is still 2 on each return. glibc's `__lll_lock_wait` re-executes
+   `xchg(lock,2)` after every return, so a wake only completes when the word
+   has become 0. It never does.
+2. **Mass spurious wake.** One-shot, at the first hang dump, the kernel set
+   every queued waiter READY:
+
+   ```
+   [FUTEX] prod: spuriously woke 23 parked threads
+   [FUTEX] r#71 WAIT pid=4  ... key=0x10C00964A0 ... val=0x2
+   [FUTEX] r#75 WAIT pid=15 ... key=0x10D07265C0 ... val=0xFF800002
+   [FUTEX] r#76 WAIT pid=14 ... key=0x10D071E480 ... val=0xFF800002
+   …
+   ```
+
+   Every worker *did* run and re-park — their semaphore word moved from
+   `0xFF800001` to `0xFF800002` — so the scheduler and the wake path work.
+   Main re-parked on `H` with the word still 2, and the game did not advance.
+3. **`near-miss` detector.** Across the whole boot it reported nothing: no
+   wake ever found a thread parked on the same key with a different address
+   space or a disjoint bitset.
+
+The app-side recorder agrees: of 61,414 recorded sync operations, **exactly
+one** touches the 4 MiB arena, and it is main's own lock; there is **no
+`unlock` of `0x10C00964A0` anywhere**, and no other thread ever locks it.
+
+**Verdict.** The wait is legitimate. The expected waker is the holder's
+`pthread_mutex_unlock(0x10C00964A0)`, which never runs: the holder is itself
+parked in one of the 23 quiescent waits. This is not the compare-and-park
+race (the compare and the park are under `proc_lock`), not a bitset mismatch
+(all masks `MATCH_ANY`), not a wrong address space (all rows `as=0x75304090`),
+and not a wake addressed to the group (the queue is per-thread and the woken
+pid is recorded). Those four candidates are ruled out by rows, not by
+argument.
+
+### 13.4 What is still unknown, and the next instrument
+
+Nothing in the kernel or in the userspace recorder sees the holder *take* the
+lock, which means the owner entered the critical section through a path that
+does not call the interposed `pthread_mutex_lock` — in practice either
+glibc's own condvar re-acquisition (`__pthread_mutex_cond_lock`, called
+inside `pthread_cond_wait`) or Unity's own raw-futex lock on the same word.
+Naming it needs a *write* observation on the word, not another read: an x86
+debug-register or read-only-page watchpoint on `0x10C00964A0`, logging
+(pid, rip) on every write, is the instrument that will name the owner. That
+is the next lane's first step; it is deliberately not guessed at here.
+
+The one structural fact worth carrying forward: the boot performs only ~70
+futex operations in total. A working Linux boot of this player has thousands
+by the time it prints `Display 0`. The process is quiescent from very early —
+the thread pool is created, each worker does one startup handshake and parks,
+and main then blocks on a lock that was already taken. So the bug is not in
+the *last* wait but in whatever made a worker park while holding that lock.
+
+### 13.5 Regressions
+
+Serialized (never with the desktop harness):
+
+```
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 398   Tests failed: 0
+bash tools/gate/m2_threads.sh            m2: PASS — 8 pthreads, mutex+condvar+TLS+join
+bash tools/gate/m12_thread_ceiling.sh    m12: PASS — 150 threads, TLS, shared futex, cancel
+```
+
+### 13.6 Limits
+
+- No window, no GLX, no frame; still the same `Display 0` line as §12.
+- The userspace recorder is a measurement build: it adds a `write()` per
+  recorded sync call and is off in the shipping launcher.
+- `pthread_setschedparam → EPERM`, `GC Warning: Couldn't read /proc/stat` and
+  `Failed reading 'ScriptingAssemblies.json'` are unchanged and still not on
+  the critical path.

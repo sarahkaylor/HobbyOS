@@ -1,6 +1,7 @@
 #include "process.h"
 #include "vdisplay.h"
 #include "kline.h"
+#include "futex_trace.h"
 #include "frame.h"
 #include "vm.h"
 #include "fs.h"
@@ -1444,6 +1445,17 @@ static void process_check_sleeping(void) {
     if (proc_table[i].state == PROC_STATE_FUTEX && proc_table[i].wake_ms > 0 &&
         current_time >= proc_table[i].wake_ms) {
       proc_table[i].context[0] = (uint64_t)(int64_t)-ETIMEDOUT;
+      {
+        /* A timeout is a wake too: without a row here, "parked and then
+           nothing" cannot be distinguished from "parked, timed out, and the
+           program chose to park again on the same word". */
+        struct futex_ev ev = {0};
+        ev.op = FTR_TIMEOUT;
+        ev.pid = proc_table[i].pid;
+        ev.as = (uint64_t)(uintptr_t)proc_table[i].as;
+        ev.uaddr = proc_table[i].futex_uaddr;
+        futex_trace_note(&ev);
+      }
       proc_table[i].futex_uaddr = 0;
       proc_table[i].wake_ms = 0;
       proc_table[i].state = PROC_STATE_READY;
@@ -2672,6 +2684,28 @@ int process_signal(int pid, int sig) {
   /* Real handler: record pending + wake a restartable-slice park (D8.3). */
   struct process *pender = (task && task->is_thread) ? task : target;
   pender->sig_pending |= (1ull << (sig - 1));
+  {
+    /* Every signal a compat program sends or receives is a candidate for "the
+       waker never ran": Mono's stop-the-world is a tgkill plus a park, and a
+       suspend that is never delivered leaves the suspended thread holding
+       whatever locks it had.  Capped, because a spin on signals is noise. */
+    static int sig_reports;
+    if (sig_reports < 40) {
+      sig_reports++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIG] send pid=");
+      kl_i(&kl, pender->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " st=");
+      kl_i(&kl, pender->state);
+      kl_s(&kl, " futex=");
+      kl_hex(&kl, (unsigned long)pender->futex_uaddr);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   sig_wake_leader_locked(target, sig);
   /* M2: a compat thread parked in futex must see the signal as EINTR, or a
      stop-the-world tgkill never reaches a parked worker. */
@@ -4141,6 +4175,23 @@ void start_scheduler(void) {
             if (v == 0) tmp[ti++] = '0';
             while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
             while (ti > 0) lb[li++] = tmp[--ti];
+            const char *hf = " futex=0x";
+            while (*hf) lb[li++] = *hf++;
+            {
+              /* The parked word, in the SAME row as the rip: the rip says
+                 "inside libc", the key says which handshake it is waiting
+                 on, and [FUTEX] rows in this dump say who was supposed to
+                 wake it.  A st=8 row with futex=0x0 cannot be a futex park
+                 and is itself the finding. */
+              uint64_t fv = proc_table[k].futex_uaddr;
+              int st3 = 0;
+              for (int sh = 60; sh >= 0 && li < 140; sh -= 4) {
+                unsigned d = (unsigned)((fv >> sh) & 0xF);
+                if (!d && !st3 && sh) continue;
+                st3 = 1;
+                lb[li++] = "0123456789abcdef"[d];
+              }
+            }
             const char *h5 = " rip=0x";
             while (*h5) lb[li++] = *h5++;
             {
@@ -4161,6 +4212,15 @@ void start_scheduler(void) {
             uart_puts(lb);
           }
         }
+      }
+      /* The futex queue + flight recorder: which threads are still queued,
+         on which keys, and the last operations in order.  Called under
+         proc_lock (already held here), which is why the callee does not take
+         it again. */
+      {
+        extern void futex_trace_dump_locked(void) __attribute__((weak));
+        if (futex_trace_dump_locked)
+          futex_trace_dump_locked();
       }
       uart_puts("[IDLESTUCK] claims:");
       /* GB-057: `c<N>=<pid>/<idle_rounds>`.  The second field is this CPU's own
@@ -4915,6 +4975,20 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
     caller->context[0] = 0;   /* resume value: 0 on wake */
     tf->regs[0] = 0;
     caller->state = PROC_STATE_FUTEX; /* save-set member: context is saved */
+    {
+      /* Same row shape as the compat path: one key, one waiter, one park. */
+      struct futex_ev ev = {0};
+      ev.op = FTR_WAIT;
+      ev.pid = caller->pid;
+      ev.as = (uint64_t)(uintptr_t)grp->as;
+      ev.uaddr = uaddr;
+      ev.val = (uint32_t)val;
+      ev.bitset = 0xffffffffu;
+      ev.timeout_ms = timeout_ms;
+      ev.res = 0;
+      ev.rip = tf ? tf->elr : 0;
+      futex_trace_note(&ev);
+    }
     spinlock_release_irqrestore(&proc_lock, flags);
     schedule(tf, 0);
     /* Not reached: the resume re-enters user space with context[0]. */
@@ -4930,6 +5004,12 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
       return 0;
     /* (2) wake up to `val` matching waiters (INT_MAX = all). */
     int woke = 0;
+    struct futex_ev ev = {0};
+    ev.op = FTR_WAKE;
+    ev.pid = caller->pid;
+    ev.rip = tf ? tf->elr : 0;
+    ev.val = (uint32_t)val;
+    ev.bitset = 0xffffffffu;
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     for (int i = 0; i < MAX_PROCESSES && woke < val; i++) {
       struct process *m = &proc_table[i];
@@ -4940,9 +5020,18 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
       m->wake_ms = 0;
       m->context[0] = 0; /* resume value: 0 on wake */
       m->state = PROC_STATE_READY;
+      if (woke < 4) {
+        ev.woke_pids[woke] = m->pid;
+        ev.nwoke = (uint8_t)(woke + 1);
+      }
       woke++;
     }
     spinlock_release_irqrestore(&proc_lock, flags);
+    ev.as = (uint64_t)(uintptr_t)grp->as;
+    ev.uaddr = uaddr;
+    ev.woke = woke;
+    ev.woke_pid = woke ? ev.woke_pids[0] : -1;
+    futex_trace_note(&ev);
     return woke;
   }
 
