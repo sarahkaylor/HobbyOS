@@ -629,3 +629,27 @@ Rules the map encodes:
   "no IWAD file was found" and Xlib had no `DISPLAY`.
 - **Probes are ordinary Linux programs** (musl, no HobbyOS headers), so the same
   source produces the reference behaviour on a Linux host.
+
+## 14. W5 — the Linux-dl ladder, first rung (GB-196)
+
+The compat track now parses `PT_INTERP` with `ELF_PARSE_CAPTURE_INTERP`: it names the
+interpreter and the first dependency set, and still never starts a non-native one.  A
+glibc `-pie` hello staged with a one-member `::WAVE.CFG` booted on intel at `MODE=test`
+prints, in order:
+
+```
+elf loader: PT_INTERP /lib64/ld-linux-x86-64.so.2
+elf loader: interpreter LD64.SO mapped
+elf loader: DT_NEEDED LIBC6.SO
+elf loader: compat interpreter is not entered (GB-196 stops at the named report)
+```
+
+- The interpreter and its first dependency are staged at the FAT16 root under the 8.3
+  names `LD64.SO` (= `ld-linux-x86-64.so.2`) and `LIBC6.SO` (= `libc.so.6`).  The
+  translation is the bounded `el_compat_83[]` table in `src/kernel/elf_loader.c`; a name
+  outside it gets a real root/basename lookup, and a miss is named:
+  `elf loader: first missing DSO <name>`.
+- `mapped` means the interpreter's PT_LOAD regions were installed in a USER_LIB slot
+  with `el_map_stage` and no relocations applied — nothing enters it yet.
+- Entering `ld.so` (dynamic symbol resolution, interpreter-loaded `DT_NEEDED`) is the
+  next rung and is deliberately not part of GB-196.

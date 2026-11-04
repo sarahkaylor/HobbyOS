@@ -68,8 +68,11 @@
 
 /* elf_parse_ex() flags.  The default (elf_parse) keeps GB-013's decision —
  * PT_INTERP is a refusal — so the Linux-compat track's behaviour is unchanged;
- * only the native track opts in. */
+ * only the native track opts in.  ELF_PARSE_CAPTURE_INTERP (GB-196) captures
+ * the path *without* honouring it: the loader then names the interpreter and
+ * its dependencies and still refuses to start a non-native one. */
 #define ELF_PARSE_ALLOW_INTERP 0x1u
+#define ELF_PARSE_CAPTURE_INTERP 0x2u
 
 /* Parse / validation results.  Negative = refusal; the caller maps them onto
  * Linux errno (mostly -ENOEXEC) and logs the specific reason. */
