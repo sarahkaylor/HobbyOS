@@ -34,9 +34,14 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <link.h>
+#include <pthread.h>
+#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifndef RW_UNITYPLAYER_DEFAULT
@@ -141,9 +146,322 @@ void *dlopen(const char *file, int mode) {
     fprintf(stderr, "[RWMAIN] dlopen FAILED %s: %s\n",
             file ? file : "(null)", e ? e : "(no dlerror)");
   } else if (trace) {
-    fprintf(stderr, "[RWMAIN] dlopen ok %s -> %p\n", file ? file : "(null)", r);
+    /* The base address turns a runtime PC into a file offset: the M6 park's
+       rip/stack words are otherwise unattributable (the guest has no
+       /proc/self/maps).  RTLD_DI_LINKMAP gives l_addr, the load bias. */
+    struct link_map *lm = 0;
+    unsigned long base = 0;
+    if (dlinfo(r, RTLD_DI_LINKMAP, &lm) == 0 && lm) base = (unsigned long)lm->l_addr;
+    fprintf(stderr, "[RWMAIN] dlopen ok %s -> %p base=0x%lx\n",
+            file ? file : "(null)", r, base);
   }
   return r;
+}
+
+
+/* ---- mutex flight recorder ----------------------------------------------
+ * Printing every sync call floods the console (the allocator loops over three
+ * mutexes hundreds of times) and printing none loses the one lock that
+ * matters.  So every call is recorded into a fixed ring and a watchdog thread
+ * dumps it after 20 s -- by then the guest has been parked for ~15 s, and the
+ * ring still holds the lock/unlock history that names the holder.
+ * Off unless RW_TRACE_MUTEX is set; the shipping path records nothing.
+ */
+static int mtx_on(void);
+/* fcntl.h drags in linux/falloc.h, which the pinned glibc-dev tree does not
+   ship; the three flags and the prototype are all this file needs. */
+#ifndef O_WRONLY
+#define O_WRONLY 1
+#define O_CREAT 0100
+#define O_TRUNC 01000
+#endif
+extern int open(const char *path, int flags, ...);
+
+static int mtx_fd = -1; /* /RW_HOME/mtx.log: survives console interleaving */
+
+#define MTX_RING 8192
+struct mtx_ev { unsigned long m, from; int tid; int op; };
+static struct mtx_ev mtx_ring[MTX_RING];
+static unsigned mtx_at;
+static int mtx_dumped;
+
+static char *mtx_put(char *p, char *end, const char *s);
+static char *mtx_putx(char *p, char *end, unsigned long v);
+static char *mtx_puti(char *p, char *end, long v);
+
+static void mtx_rec(int op, const void *m, void *from) {
+  if (!mtx_on()) return;
+  unsigned i = __atomic_fetch_add(&mtx_at, 1u, __ATOMIC_RELAXED) % MTX_RING;
+  mtx_ring[i].op = op;
+  mtx_ring[i].m = (unsigned long)m;
+  mtx_ring[i].from = (unsigned long)from;
+  mtx_ring[i].tid = (int)gettid();
+  /* Live rows for everything except the two hot loops; the ring keeps the
+     full history in case a line is missed. */
+  {
+    unsigned long a = (unsigned long)m;
+    if ((a >= 0x1090000000UL && a < 0x1091000000UL) ||
+        (a >= 0x108218cc00UL && a < 0x108218cd00UL))
+      return;
+    static unsigned printed;
+    printed++;
+    char buf[160]; char *p = buf, *end = buf + sizeof buf - 8;
+    p = mtx_put(p, end, "[MTR] ");
+    p = mtx_put(p, end, (op == 0) ? "lock" : (op == 1) ? "unlock" :
+                          (op == 2) ? "trylock" : (op == 3) ? "timedlock" :
+                          (op == 4) ? "sem_wait" : (op == 5) ? "sem_post" :
+                                      "cond_wait");
+    p = mtx_put(p, end, " m=");
+    p = mtx_putx(p, end, a);
+    p = mtx_put(p, end, " pid=");
+    p = mtx_puti(p, end, (long)mtx_ring[i].tid);
+    p = mtx_put(p, end, " from=");
+    p = mtx_putx(p, end, (unsigned long)from);
+    p = mtx_put(p, end, "\n");
+    if (printed <= 6) { ssize_t w = write(2, buf, (size_t)(p - buf)); (void)w; }
+    if (mtx_fd >= 0) { ssize_t w = write(mtx_fd, buf, (size_t)(p - buf)); (void)w; }
+  }
+}
+
+static const char *mtx_opname(int op) {
+  switch (op) {
+  case 0: return "lock";
+  case 1: return "unlock";
+  case 2: return "trylock";
+  case 3: return "timedlock";
+  case 4: return "sem_wait";
+  case 5: return "sem_post";
+  case 6: return "cond_wait";
+  default: return "?";
+  }
+}
+
+static char *mtx_put(char *p, char *end, const char *s) {
+  while (*s && p < end) *p++ = *s++;
+  return p;
+}
+static char *mtx_putx(char *p, char *end, unsigned long v) {
+  p = mtx_put(p, end, "0x");
+  int st = 0;
+  for (int sh = 60; sh >= 0; sh -= 4) {
+    unsigned d = (unsigned)((v >> sh) & 0xF);
+    if (!d && !st && sh) continue;
+    st = 1;
+    if (p < end) *p++ = "0123456789abcdef"[d];
+  }
+  return p;
+}
+static char *mtx_puti(char *p, char *end, long v) {
+  char t[24]; int i = 0, neg = v < 0; unsigned long u = neg ? (unsigned long)-v : (unsigned long)v;
+  if (!u) t[i++] = '0';
+  while (u) { t[i++] = (char)('0' + u % 10); u /= 10; }
+  if (neg && p < end) *p++ = '-';
+  while (i && p < end) *p++ = t[--i];
+  return p;
+}
+
+/* SIGALRM (armed for 20 s) dumps the ring.  A helper thread would need
+   -lpthread in the launcher link and would add a 26th guest thread; a signal
+   costs neither and is delivered to this same (parked) main thread -- the
+   dump runs before the interrupted futex is re-entered. */
+static void mtx_alarm_handler(int sig) {
+  (void)sig;
+  if (mtx_dumped) return;
+  mtx_dumped = 1;
+  unsigned total = __atomic_load_n(&mtx_at, __ATOMIC_RELAXED);
+  unsigned n = total < MTX_RING ? total : MTX_RING;
+  char buf[4096];
+  char *p = buf, *end = buf + sizeof buf - 200;
+  p = mtx_put(p, end, "[MTR] dump ");
+  p = mtx_puti(p, end, (long)n);
+  p = mtx_put(p, end, " of ");
+  p = mtx_puti(p, end, (long)total);
+  p = mtx_put(p, end, "\n");
+  for (unsigned i = 0; i < n; i++) {
+    struct mtx_ev *e = &mtx_ring[(total - n + i) % MTX_RING];
+    if ((e->m >= 0x1090000000UL && e->m < 0x1091000000UL) ||
+        (e->m >= 0x108218cc00UL && e->m < 0x108218cd00UL))
+      continue;
+    p = mtx_put(p, end, "[MTR] ");
+    p = mtx_put(p, end, mtx_opname(e->op));
+    p = mtx_put(p, end, " m=");
+    p = mtx_putx(p, end, e->m);
+    p = mtx_put(p, end, " pid=");
+    p = mtx_puti(p, end, e->tid);
+    p = mtx_put(p, end, " from=");
+    p = mtx_putx(p, end, e->from);
+    p = mtx_put(p, end, "\n");
+    if (p > buf + sizeof buf - 256) {
+      ssize_t w = write(2, buf, (size_t)(p - buf)); (void)w;
+      p = buf;
+    }
+  }
+  if (p > buf) { ssize_t w = write(2, buf, (size_t)(p - buf)); (void)w; }
+}
+
+/* ---- mutex observation (RW_TRACE_MUTEX) ---------------------------------
+ * The park that ends M6 is a futex WAIT with expected value 2 on a word in an
+ * anonymous 4 MiB mapping -- i.e. a userspace lock, and glibc keeps no owner
+ * tid for a normal mutex.  The kernel therefore cannot say WHO took it, only
+ * that nobody ever released it (no WAKE on that key exists).  This tracer
+ * names the other side: it logs contended lock attempts and every lock/unlock
+ * of an object inside the arena the parked word lives in, with the caller's
+ * return address and the tid.  Off unless RW_TRACE_MUTEX is set, so the
+ * shipping run's code path is unchanged.
+ *
+ * The real functions are reached through dlvsym(RTLD_NEXT,...) -- the same
+ * non-interposed route the dlsym wrapper below uses, so there is no recursion.
+ */
+static int (*next_mutex_lock)(pthread_mutex_t *);
+static int (*next_mutex_trylock)(pthread_mutex_t *);
+static int (*next_mutex_unlock)(pthread_mutex_t *);
+static int (*next_mutex_init)(pthread_mutex_t *, const pthread_mutexattr_t *);
+static unsigned mtx_rows;
+static int mtx_main_tid; /* gettid() of the thread that calls PlayerMain */
+
+static int mtx_on(void) {
+  static int on = -1;
+  if (on < 0) on = getenv("RW_TRACE_MUTEX") != 0;
+  return on;
+}
+
+/* The arena the stuck word lives in (measured: 0x10C00964A0 inside
+   0x10C0000000+0x400000 kind=ANON).  Kept as a range, not one address, so a
+   heap-layout shift does not silently blind the tracer. */
+static int mtx_hot(const void *m) {
+  unsigned long v = (unsigned long)m;
+  return v >= 0x10C0000000UL && v < 0x10C0400000UL;
+}
+
+/* The assembly-loader loop locks three mutexes in the 0x1090000000 arena
+   hundreds of times before the hang; logging them buries everything else.
+   They are not where the process stops (measured), so they are skipped. */
+static int mtx_boring(const void *m) {
+  unsigned long v = (unsigned long)m;
+  return (v >= 0x1090000000UL && v < 0x1091000000UL) ||
+         (v >= 0x108218cc00UL && v < 0x108218cd00UL);
+}
+
+static void mtx_row(const char *what, const void *m, long v, void *from) {
+  if (mtx_rows >= 6) return;
+  mtx_rows++;
+  fprintf(stderr, "[MTX] %s m=%p pid=%d v=%ld from=%p\n", what, m,
+          (int)gettid(), v, from);
+}
+
+int pthread_mutex_lock(pthread_mutex_t *m) {
+  if (!next_mutex_lock)
+    next_mutex_lock = (int (*)(pthread_mutex_t *))
+        dlvsym(RTLD_NEXT, "pthread_mutex_lock", "GLIBC_2.2.5");
+  static int first_few;
+  int pre = m ? *(volatile int *)m : -1;
+  mtx_rec(0, m, __builtin_return_address(0));
+  if (first_few < 3) {
+    first_few++;
+    mtx_row("first-lock", m, pre, __builtin_return_address(0));
+  }
+  if (mtx_on() && !mtx_boring(m) && (pre != 0 || mtx_hot(m)))
+    mtx_row("lock", m, pre, __builtin_return_address(0));
+  int r = next_mutex_lock(m);
+  if (mtx_on() && r != 0)
+    mtx_row("lock-rv", m, r, __builtin_return_address(0));
+  return r;
+}
+
+/* Unity's Mutex code may use timed/clocked entry points instead of the plain
+   one; they all funnel into __pthread_mutex_clocklock_common (which is where
+   the guest's stuck main thread sits), so a tracer that only wraps
+   pthread_mutex_lock can miss every call. */
+int pthread_mutex_timedlock(pthread_mutex_t *m, const struct timespec *t) {
+  static int (*real)(pthread_mutex_t *, const struct timespec *);
+  if (!real)
+    real = (int (*)(pthread_mutex_t *, const struct timespec *))
+        dlvsym(RTLD_NEXT, "pthread_mutex_timedlock", "GLIBC_2.2.5");
+  int pre = m ? *(volatile int *)m : -1;
+  mtx_rec(3, m, __builtin_return_address(0));
+  if (mtx_on() && (pre != 0 || mtx_hot(m) || (int)gettid() == mtx_main_tid))
+    mtx_row("timedlock", m, pre, __builtin_return_address(0));
+  return real ? real(m, t) : -1;
+}
+
+int pthread_mutex_trylock(pthread_mutex_t *m) {
+  if (!next_mutex_trylock)
+    next_mutex_trylock = (int (*)(pthread_mutex_t *))
+        dlvsym(RTLD_NEXT, "pthread_mutex_trylock", "GLIBC_2.2.5");
+  mtx_rec(2, m, __builtin_return_address(0));
+  int r = next_mutex_trylock(m);
+  if (mtx_on() && (r != 0 || mtx_hot(m) || (int)gettid() == mtx_main_tid))
+    mtx_row("trylock", m, r, __builtin_return_address(0));
+  return r;
+}
+
+int pthread_mutex_unlock(pthread_mutex_t *m) {
+  if (!next_mutex_unlock)
+    next_mutex_unlock = (int (*)(pthread_mutex_t *))
+        dlvsym(RTLD_NEXT, "pthread_mutex_unlock", "GLIBC_2.2.5");
+  int pre = m ? *(volatile int *)m : -1;
+  mtx_rec(1, m, __builtin_return_address(0));
+  if (mtx_on() && !mtx_boring(m) && mtx_hot(m))
+    mtx_row("unlock", m, pre, __builtin_return_address(0));
+  return next_mutex_unlock(m);
+}
+
+int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a) {
+  if (!next_mutex_init)
+    next_mutex_init = (int (*)(pthread_mutex_t *, const pthread_mutexattr_t *))
+        dlvsym(RTLD_NEXT, "pthread_mutex_init", "GLIBC_2.2.5");
+  int hot = mtx_on() && mtx_hot(m);
+  if (hot) mtx_row("init", m, -1, __builtin_return_address(0));
+  int r = next_mutex_init(m, a);
+  /* __kind is the 5th int of a glibc pthread_mutex_t; logging it after the
+     call avoids linking libpthread just for pthread_mutexattr_gettype. */
+  if (hot) mtx_row("init-kind", m, m ? ((volatile int *)m)[4] : -1,
+                   __builtin_return_address(0));
+  return r;
+}
+
+/* ---- semaphore / condvar observation ------------------------------------ */
+int sem_wait(sem_t *s) {
+  static int (*real)(sem_t *);
+  if (!real) real = (int (*)(sem_t *))dlvsym(RTLD_NEXT, "sem_wait", "GLIBC_2.2.5");
+  mtx_rec(4, s, __builtin_return_address(0));
+  if (mtx_on() && ((int)gettid() == mtx_main_tid || mtx_hot(s)))
+    mtx_row("sem_wait", s, s ? *(volatile int *)s : -1, __builtin_return_address(0));
+  return real ? real(s) : -1;
+}
+
+int sem_post(sem_t *s) {
+  static int (*real)(sem_t *);
+  if (!real) real = (int (*)(sem_t *))dlvsym(RTLD_NEXT, "sem_post", "GLIBC_2.2.5");
+  mtx_rec(5, s, __builtin_return_address(0));
+  if (mtx_on() && ((int)gettid() == mtx_main_tid || mtx_hot(s)))
+    mtx_row("sem_post", s, s ? *(volatile int *)s : -1, __builtin_return_address(0));
+  return real ? real(s) : -1;
+}
+
+int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) {
+  static int (*real)(pthread_cond_t *, pthread_mutex_t *);
+  if (!real)
+    real = (int (*)(pthread_cond_t *, pthread_mutex_t *))
+        dlvsym(RTLD_NEXT, "pthread_cond_wait", "GLIBC_2.2.5");
+  mtx_rec(6, c, __builtin_return_address(0));
+  if (mtx_on())
+    mtx_row("cond_wait", c, m ? *(volatile int *)m : -1,
+            __builtin_return_address(0));
+  return real ? real(c, m) : -1;
+}
+
+int pthread_cond_timedwait(pthread_cond_t *c, pthread_mutex_t *m,
+                           const struct timespec *t) {
+  static int (*real)(pthread_cond_t *, pthread_mutex_t *, const struct timespec *);
+  if (!real)
+    real = (int (*)(pthread_cond_t *, pthread_mutex_t *, const struct timespec *))
+        dlvsym(RTLD_NEXT, "pthread_cond_timedwait", "GLIBC_2.3.2");
+  mtx_rec(6, c, __builtin_return_address(0));
+  if (mtx_on())
+    mtx_row("cond_timedwait", c, m ? *(volatile int *)m : -1,
+            __builtin_return_address(0));
+  return real ? real(c, m, t) : -1;
 }
 
 /* The executable path, and the directory Unity will append "_Data" to. */
@@ -163,6 +481,13 @@ static int exe_dir(char *out, size_t cap) {
 
 int main(int argc, char **argv) {
   fprintf(stderr, "[RWMAIN] AD-9 PlayerMain launcher start argc=%d\n", argc);
+  mtx_main_tid = (int)gettid();
+  fprintf(stderr, "[MTX] enabled=%d main_tid=%d\n", mtx_on(), mtx_main_tid);
+  if (mtx_on()) {
+    mtx_fd = open("/RW_HOME/mtx.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    signal(SIGALRM, mtx_alarm_handler);
+    alarm(20);
+  }
 
   char dir[4096];
   if (exe_dir(dir, sizeof dir) != 0) {
