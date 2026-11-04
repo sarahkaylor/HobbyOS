@@ -222,10 +222,43 @@ With those in place the guest reports, from a real boot:
 — the same checksum and the same 22 890 covered pixels the *host* run of the
 same DSO reports, so it is the same renderer and the same frame.
 
-**Still open:** `glXSwapBuffers` (Mesa's `xlib_sw_display` → `XPutImage` present
-path) faults in the guest with an instruction fetch into a non-executable page
-of libGL's mapping, so the probe draws into the window's default framebuffer but
-does not swap. The XImage/XPutImage ABI (`bits_per_pixel`, `format`,
-`bitmap_unit`, `data`, `bytes_per_line`, `f.destroy_image`) is in place; the
-present path is the next M4 item.
+**The present path (fixed, lane L16).** `glXSwapBuffers` now puts a GL 3.3
+frame on the desktop: Mesa's `xlib_sw_display` builds an `XImage` over the
+display target, `XPutImage` copies it into the compat libX11's shadow, and
+`XFlush` blits that to `/dev/fb0` and tells the desktop to present. Three
+things had to be true, and the third was not:
+
+1. the `XImage` ABI (above) — `bits_per_pixel`, `format`, `bitmap_unit`,
+   `data`, `bytes_per_line`, `f.` table;
+2. the client has to wait for the desktop's content rect (`ConfigureNotify`/
+   `Expose`) before painting: the shim refuses to blit a window that has not
+   been laid out, so an early swap silently drops every pixel and still
+   "succeeds" — the trap that hid this for a wave;
+3. **`libGL.so.1` must be linked `-z nodelete`** (DF_1_NODELETE). Mesa calls
+   plain `atexit()` from inside the DSO (`src/mesa/main/formats.c:499`
+   registers `format_array_format_table_destroy`; `util/os_misc.c`,
+   `main/extensions.c`, `main/context.c`, `util/strtod.c` do the same). glibc's
+   `atexit()` is process-global and is *not* run by `dlclose()`, so after a
+   client's `dlclose(libGL)` the process's `exit()` jumped into the unmapped
+   text. Measured in the guest, after a *successful* swap and a clean
+   `glXMakeCurrent(None)`/`glXDestroyContext`/`XCloseDisplay`/`dlclose`:
+
+   ```
+   [KERNEL] pid=3 (GLPROBE.BIN) memory fault VA=0x1081ACFF50 PC=0x1081ACFF50
+            rw=rx in=HOLE region=NONE ... -> killed
+   ```
+
+   `libGL base + 0xe61f50` is exactly `format_array_format_table_destroy`
+   (confirmed by relinking the same objects unstripped). That was the recorded
+   "instruction fetch into a non-executable libGL page" — it is an
+   **unload** defect at process exit, not a fault in the swap path.
+   `DF_1_NODELETE` makes `dlclose` drop the reference without unmapping, which
+   is how libglvnd loads a vendor GL driver (`RTLD_NODELETE`); the build now
+   fails if the flag disappears.
+
+With those in place `src/user/gl_probe.c` presents a real window and the gate
+checks the desktop, not the GL side: `tools/gate/m4_gl_probe.py` screendumps
+the window during a 6 s hold and grades the probe's `/dev/fb0` readback
+(`present check`, `pixel diff`) plus the four teardown rows.
+
 
