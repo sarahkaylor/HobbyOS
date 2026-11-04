@@ -148,7 +148,7 @@ int elf_parse_ex(const void *buf, uint64_t len, struct elf_image *img,
          untouched, so a compat load behaves exactly as it did. */
       if (have_interp) return ELF_ERR_INTERP_PATH; /* two interpreters: nonsense */
       have_interp = 1;
-      if (flags & ELF_PARSE_ALLOW_INTERP) {
+      if (flags & (ELF_PARSE_ALLOW_INTERP | ELF_PARSE_CAPTURE_INTERP)) {
         const uint64_t ioff = rd64(ph + P_OFFSET_OFF);
         const uint64_t isz = rd64(ph + P_FILESZ_OFF);
         /* Bounded and NUL-terminated: a path is a C string the kernel will
@@ -218,8 +218,11 @@ int elf_parse_ex(const void *buf, uint64_t len, struct elf_image *img,
   if (have_interp) {
     /* Decisive by default: a static loader can't honour an interpreter, and
        that is exactly the compat track's contract (same error, same message as
-       GB-013).  Only a caller that explicitly opted in gets the path. */
-    if (!(flags & ELF_PARSE_ALLOW_INTERP)) return ELF_ERR_INTERP;
+       GB-013).  Only a caller that explicitly opted in gets the path;
+       ELF_PARSE_CAPTURE_INTERP gets it recorded for the named refusal without
+       being allowed to start it. */
+    if (!(flags & (ELF_PARSE_ALLOW_INTERP | ELF_PARSE_CAPTURE_INTERP)))
+      return ELF_ERR_INTERP;
     if (img->interp_len == 0 || img->interp[0] != '/')
       return ELF_ERR_INTERP_PATH;
     img->has_interp = 1;
