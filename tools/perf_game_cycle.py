@@ -168,6 +168,18 @@ def launch_seen(new_serial, spec):
             f"[LAUNCH] /GAMES/{spec}" in new_serial)
 
 
+def launched_name(new_serial):
+    """The last binary the desktop actually launched in `new_serial`, or None.
+
+    GB-046: the desktop kept launching after 8 visits — the wrong title
+    (SYSMON.BIN, MILLIPED.BIN) — because the menu cursor is not where the
+    gesture assumed.  A visit that launches the WRONG title is a different
+    failure from a no-op and must be reported as such, not as "no-op".
+    """
+    names = re.findall(r"\[LAUNCH\] (?:/GAMES/)?([A-Za-z0-9_.-]+)", new_serial)
+    return names[-1] if names else None
+
+
 def launch_retry_needed(launched, attempt, retries):
     """Keep retrying while the launch has not appeared and attempts remain.
     `retries` = total attempts allowed; GB-046-V: a persistent no-op (all
@@ -288,7 +300,10 @@ def main():
             new_serial = ""
             for attempt in range(args.launch_retries):
                 if attempt > 0:
-                    q.key("esc", 0.4)      # close anything the prior attempt opened
+                    # GB-046: ESC is forwarded to the FOCUSED window (the
+                    # game), not the desktop — it cannot close a menu.  F4 is
+                    # the desktop's close-focused-window key (desktop.c:2200).
+                    q.key("f4", 0.4)
                     time.sleep(1.0)
                 launch_from_menu(q, slot)
                 time.sleep(args.launch_retry_delay)
@@ -321,9 +336,14 @@ def main():
             frozen = wd.frozen
 
             if not launched:
-                print(f"[perf] FAIL: {spec} (cycle {cyc}) never appeared in "
-                      f"serial (launch no-op) — new serial bytes "
-                      f"[{len(new_serial)}] do not contain [LAUNCH] {spec}")
+                actual = launched_name(new_serial)
+                if actual:
+                    print(f"[perf] FAIL: {spec} (cycle {cyc}) — the desktop "
+                          f"launched {actual} instead (menu cursor drifted)")
+                else:
+                    print(f"[perf] FAIL: {spec} (cycle {cyc}) never appeared in "
+                          f"serial (launch no-op) — new serial bytes "
+                          f"[{len(new_serial)}] do not contain [LAUNCH] {spec}")
             else:
                 print(f"[perf] cycle={cyc} game={spec} samples={samples} "
                       f"frozen={frozen} launched=True")
