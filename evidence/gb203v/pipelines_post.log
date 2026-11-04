@@ -1,0 +1,24 @@
+=== old readelf pipeline (5x) ===
+run1 rc=141
+run2 rc=141
+run3 rc=141
+run4 rc=0
+run5 rc=141
+=== new readelf pipeline (5x) ===
+run1 rc=0
+run2 rc=0
+run3 rc=0
+run4 rc=0
+run5 rc=0
+=== old nm pipeline (5x) ===
+run1 rc=141
+run2 rc=141
+run3 rc=141
+run4 rc=141
+run5 rc=141
+=== new nm pipeline (5x) ===
+run1 rc=0
+run2 rc=0
+run3 rc=0
+run4 rc=0
+run5 rc=0

@@ -1,0 +1,7 @@
+[x11:intel] == stage server
+[x11:intel] pixman: cached
+[x11:intel] libfontenc: cached
+[x11:intel] libXfont2: cached
+[x11:intel] libxkbfile: cached
+[x11:intel] libsha1: cached
+[x11:intel] xserver: building XHOBBY.BIN (meson)

@@ -1,0 +1,11 @@
+[x11:intel] == stage server
+[x11:intel] pixman: cached
+[x11:intel] libfontenc: cached
+[x11:intel] libXfont2: cached
+[x11:intel] libxkbfile: cached
+[x11:intel] libsha1: cached
+[x11:intel] xserver: building XHOBBY.BIN (meson)
+[x11:intel] xserver: ok (/home/sarah/.hermes/cache/scratch/x11build-gb203/bin/XHOBBY.BIN, 2734184 bytes)
+[x11:intel] xkm: /home/sarah/.hermes/cache/scratch/x11build-gb203/disk/X11/US.XKM (12316 bytes)
+[x11:intel] == stage server done
+[x11:intel] prefix: /home/sarah/.hermes/cache/scratch/x11build-gb203/prefix
