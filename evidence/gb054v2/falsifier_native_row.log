@@ -1,0 +1,14 @@
+PASS: epic MONO named
+PASS: epic RTS named
+PASS: epic VULKAN named
+FAIL: native dynamic row says LDHOBBY.SO landed (row-level)
+PASS: Linux glibc dynamic row says absent with §W5 (row-level)
+PASS: GB-196 in the ordered backlog table
+PASS: GB-196 names its artifact src/kernel/elf_loader.c
+PASS: GB-196: the doc states a falsifier policy
+PASS: GB-197 in the ordered backlog table
+PASS: GB-197 names its artifact tools/t4/virgl_probe.py
+PASS: GB-197: the doc states a falsifier policy
+PASS: every cited GB id exists in gaming.md (missing=[])
+
+ROADMAP_DOC_TEST: FAIL (12 checks, 1 failed)
