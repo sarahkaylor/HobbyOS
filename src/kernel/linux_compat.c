@@ -225,7 +225,23 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     const struct l_sysent *tab = tables[t];
     if (!tab) continue;
     for (unsigned i = 0; tab[i].fn; i++) {
-      if ((uint64_t)(int64_t)tab[i].nr == nr) return tab[i].fn(p, tf);
+      if ((uint64_t)(int64_t)tab[i].nr == nr) {
+#ifdef RW_TRACE_MEM
+        /* The memory table is traced here, not in each handler: every handler
+           has several exits and a second exit path would drift.  Arguments are
+           read BEFORE the call (the handler writes regs[0]) and the return
+           value is what the handler left in regs[0]. */
+        if (tab == (const struct l_sysent *)l_tab_mem) {
+          uint64_t a0 = l_arg(tf, 0), a1 = l_arg(tf, 1), a2 = l_arg(tf, 2);
+          uint64_t a3 = l_arg(tf, 3), a4 = l_arg(tf, 4), a5 = l_arg(tf, 5);
+          int64_t r = tab[i].fn(p, tf);
+          l_mem_trace(tab[i].name, p, a0, a1, a2, a3, a4, a5,
+                      (int64_t)tf->regs[0]);
+          return (int)r;
+        }
+#endif
+        return tab[i].fn(p, tf);
+      }
     }
   }
   return 0;

@@ -1422,3 +1422,235 @@ bash tools/gate/m12_thread_ceiling.sh    m12: PASS
   page was released when it was not. `vm_region_insert_locked` rejects overlaps
   and only merges exactly-adjacent identical regions, so a region-level double
   map is ruled out.
+
+## 15. 2026-11-04 — M6: the memory-syscall stream of a real boot, and the one wrong semantic the audit found
+
+Lane L24 (`rw-l24-mem`), tree seeded from `4b9599ac`. §14 left two candidates
+for the free-list/live-object overlap: Unity re-carves the page, or an
+`mmap`/`madvise` semantic of ours makes Unity believe memory was released when
+it was not. This wave answers it with a **call stream** instead of a theory, and
+then diffs every call shape the stream contains against Linux.
+
+### 15.1 The instrument: `[MM]`, one row per memory syscall
+
+`make RW_TRACE_MEM=1` compiles `l_mem_trace()` into
+`src/kernel/linux_compat_mem.c` **and calls it from the dispatcher**
+(`linux_compat.c`), not from each handler: every handler has several exits and a
+second exit path drifts. The dispatcher snapshots the six argument registers
+before the call and reports what the handler left in `rax`, so one line carries
+`op`, pid, the raw six arguments and the return value:
+
+```
+[MM] #41 mmap pid=4 a=0x0 b=0x1000 c=0x3 d=0x22 e=-1 f=0x0 -> 0x1080000000
+```
+
+Empty build ⇒ not a byte changes in the shipping kernel.
+
+### 15.2 What the game actually calls (231 rows, whole boot to the park)
+
+| op | rows | notes |
+|---|---|---|
+| `mmap` | 94 | 4 file `MAP_FIXED` (ld.so segments), 2 `/dev/fb0` `MAP_SHARED`, the rest anon |
+| `mprotect` | 72 | every one a *commit* of a PROT_NONE reservation, or a stack guard |
+| `madvise` | 31 | **`MADV_NORMAL` only** (advice 0) |
+| `brk` | 20 | glibc malloc, 0x21000 a step |
+| `munmap` | 14 | every one a *trim* of a fresh reservation |
+| `mremap`, `msync`, `mincore`, `memfd` | **0** | not used at all |
+
+The strategy is unmistakable, and it is **not** the one the audit list guessed:
+the game never uses `mremap`, never uses `MADV_DONTNEED`/`MADV_FREE`, and never
+`mmap(MAP_FIXED)`s into its own arena. It **reserves, trims and commits**:
+
+```
+#45 mmap  (a=0, len=0x1FFFF000, prot=0, PRIVATE|ANON|NORESERVE) -> 0x1082414000
+#46 munmap(0x1082414000, 0xDBEC000)      trim the unaligned head  -> keeps 0x1090000000
+#47 munmap(0x10A0000000, 0x2413000)      trim the unaligned tail
+#48 madvise(0x1090000000, 0x100000, MADV_NORMAL)
+#49 mprotect(0x1090000000, 0x100000, RW)  commit the first window
+```
+
+and per job thread:
+
+```
+#57 mmap  (0, 0x801000, PROT_NONE, PRIVATE|ANON|MAP_STACK) -> 0x1082414000
+#58 mprotect(0x1082414000 + 0x1000, 0x800000, RW)          guard page below the stack
+```
+
+The arena that holds the park word is the *first 4 MiB* of a later reservation: `#63 mmap(0, 0x1FFFF000, PROT_NONE) -> 0x10C0000000`,
+`#64 munmap(0x10D0000000, 0xFFFF000)`, `#65 madvise(0x10C0000000, 0x400000,
+NORMAL)`, `#66 mprotect(0x10C0000000, 0x400000, RW)`. Nothing else in the whole
+boot maps, unmaps, mprotects or madvises that address again (checked by
+replaying every row).
+
+`tools/rw/mm_replay.py` replays the rows as ownership (mmap adds, munmap
+removes, MAP_FIXED overlays) and confirms what the region list already
+guaranteed: **no non-`MAP_FIXED` `mmap` ever returned a range overlapping a live
+one**. The only duplicate-range event in the boot is `/dev/fb0` mapped twice
+(both answers are the fixed `USER_FB_BASE_V2` slot, by design).
+
+### 15.3 The audit, call by call, against a real Linux
+
+`src/user/linux_probe_vmcommit.c` is an ordinary musl program that performs the
+shapes above — the reservation dance with an aligned 256 MiB window and two
+sibling 4 MiB commits, a 1 MiB commit in the middle of a reservation, the
+8 MiB + guard stack shape, a hint inside a live mapping, an interior `munmap`,
+`mremap` grow/shrink/move, `MADV_DONTNEED`, and `brk` — and prints one row per
+semantic. The same source builds on the workstation (reference) and in the guest
+(`bash tools/gate/t3_linux_probe.sh vmcommit`).
+
+| row | host | guest (before) |
+|---|---|---|
+| reserve trim (munmap head+tail) | ok | ok |
+| commit first 4MiB | ok | ok |
+| commit next 4MiB keeps sibling | ok | ok |
+| commit 1MiB in reservation middle | ok | ok |
+| stack commit (base+page, 8MiB) | ok | ok |
+| reserved guard page reads zero | ok | ok |
+| prot_none preserves contents | ok | ok (frame reuse, not a guarantee) |
+| hint inside live map is ignored | ok | ok |
+| munmap interior split | ok | ok |
+| mremap grow(maymove) / shrink / in place | ok | ok |
+| madvise DONTNEED zeroes anon | ok | ok |
+| **brk grow across a split heap** | **ok** | **FAIL (-ENOMEM)** |
+
+So `mremap`, `mmap` with a hint, `MAP_FIXED`, partial `munmap`,
+`madvise(DONTNEED)` and `mmap`-overlap are all Linux-conformant on this kernel —
+including `mremap`'s content copy, `MREMAP_MAYMOVE` placement and in-place
+shrink. The one wrong semantic was in `brk`.
+
+### 15.4 The bug: `brk` could not grow a heap that had been split
+
+`sys_brk` decided "is the grow already backed?" with a **single-region** test —
+one `vm_region` had to cover the whole `[base,end)` span with `VMK_HEAP` +
+`VM_PROT_WRITE` — and otherwise inserted the **whole span**. After any split (a
+partial `mprotect`, a partial `munmap`, anything that divides the heap) that
+insert overlaps the surviving fragment, so `vm_region_insert` answers `-ENOMEM`
+and **every later `brk` grow fails for the life of the process**. Linux's `brk`
+extends the data segment whatever its VMA count and only refuses a *foreign* VMA
+in the way.
+
+Fixed in `src/kernel/process.c`: walk the span fragment by fragment, accept any
+`VMK_HEAP` region whatever its protection (it is still the data segment),
+insert only the uncovered tail, and refuse only a non-HEAP region in the way.
+
+Evidence, same probe, same tree, only `process.c` swapped:
+
+```
+before (HEAD process.c):  [LP] brk grow across split heap   FAIL detail=115
+                          grow=0x1040010000 (the OLD break: refused)
+after  (span walk):       [LP] brk grow across split heap   ok   detail=127
+                          grow=0x1040040000
+host reference:           [LP] brk grow across split heap   ok   detail=127
+```
+
+This is a real defect (one `mprotect` of one heap page was enough), but it is
+**not** the park's cause: the game's heap is a single 1 GiB `VMK_HEAP` region
+(`[BRK] grow base=0x1040021000 r=0x1040000000+0x40000000k2p3`, measured), so
+every grow it issues takes the already-covered path. The park does not move
+(§15.6).
+
+### 15.5 What the park word actually is — measured, not inferred
+
+The corrupting stores are Unity's own, and the trace proves the kernel cannot be
+their author: the 4 MiB window that contains `0x10C00964A0` is mapped once
+(`#63`), committed once (`#66`) and never touched by any later memory syscall;
+its VMA is a single region; and no `mmap` in the boot overlaps it.
+
+`§14`'s DR0 rows, re-read with the extra registers now printed, are a **carve
+loop inside UnityPlayer**:
+
+```
+UnityPlayer+0x96BDD2  movq $0,(%rcx)          ; block->next = 0
+UnityPlayer+0x96BDDC  xchg %rsi,0x80(%rbx)    ; old = bucket->head; head = block
+UnityPlayer+0x96BDE8  mov  %rcx,(%rsi)        ; old->next = block
+UnityPlayer+0x96BDCA  add  %rdx,%rcx ; cmp %rax,%rcx ; jbe …
+```
+
+with `%rdx = %rdi = 0x30` (the bucket's block size), `%rbx = 0x108218D2B0` (the
+bucket), `%rax = 0x10C0097FD0` (the end of the 16 KiB unit
+`0x10C0094000..0x10C0098000`). It walks the unit and relinks **every 0x30 block
+in it**.
+
+The word's owner is a *live* Unity `Mutex`, not a stray pointer. The launcher's
+mutex tracer (`RW_TRACE_MUTEX=1`, staged by `/MTXON`, now also logging
+`pthread_mutex_init`/`destroy` for every address) records:
+
+```
+[MTR] init m=0x10c00962f0 … 0x10c0096710  23 rows, stride 0x30, same caller
+[MTR] init m=0x10c00964a0 pid=4 from=0x1081d9ee16
+[MTR] lock m=0x10c00964a0 pid=4 from=0x1081f3fda5     <- the park, and the only lock
+```
+
+23 consecutive `pthread_mutex_init`s from **one** call site. Disassembling that
+site (`/srv/nfs/rimworld/UnityPlayer.so`, vaddr == file offset) shows the
+initialiser:
+
+```
+1ba2de0  push %rbp ; mov %rdi,%rbp
+1ba2dec  call pthread_mutexattr_init
+1ba2df9  call pthread_mutexattr_settype(…, 1)      ; PTHREAD_MUTEX_ERRORCHECK
+1ba2e06  call pthread_mutexattr_setprotocol(…, 1)  ; PTHREAD_PRIO_INHERIT
+1ba2e11  call pthread_mutex_init(m, &attr)
+1ba2e30  jmp  pthread_mutex_destroy@plt            ; the matching fini
+1ba2e60  mov $0x30,%eax ; ret                      ; sizeof(Mutex) == 0x30
+```
+
+and the park site is a job-queue dequeue (`this+8` is the `pthread_mutex_t *`,
+`this+0xf8`/`+0xfc` are a ring's head/tail).
+
+So: 23 `Mutex`es allocated from this bucket, still live, **never
+`pthread_mutex_destroy`ed in the whole boot**, and the bucket's carve relinks
+their blocks as it walks the unit. One 16 KiB unit therefore has two owners
+inside Unity's allocator. No kernel memory operation can produce that on a
+mapping that was never split, moved or unmapped.
+
+### 15.6 Ladder after the fix
+
+```
+[IDLESTUCK] slot=4 pid=4 st=8 wake=0 futex=0x10c00964a0 rip=0x1082404170 /NFS/RimWorldLinux
+Player.log: … RuntimeInitializeOnLoadManagerInitializer: Failed reading
+            'ScriptingAssemblies.json'Display 0 '0': 1920x1080 (primary device).
+```
+
+Unchanged: no `[XC]` rows, no `XCreateWindow`/`XMapWindow`, no engine line past
+`Display 0`. The next blocker is still the same word.
+
+### 15.7 Where the next attempt should look
+
+The remaining question is not a syscall semantic — it is *which* of Unity's two
+allocator views is stale. Two instruments, both already built:
+
+- `RW_WATCH_ADDR=0x108218D2F0` (`bucket+0x40`, the "last block" the carve
+  publishes) and `RW_WATCH_ADDR=0x108218D330` (`bucket+0x80`, the head): every
+  push/pop then names the call site that hands the unit out, and the two
+  `rw` rows of the double-carve sit next to their callers (the watch row now
+  prints `rbp` and twelve user-stack qwords).
+- The `/MTXON` knob (`RW_TRACE_MUTEX=1` on the host) now logs `init`/`destroy`
+  for **every** address plus every arena op, to `/RW_HOME/mtx.log`; the harness
+  extracts it next to `Player.log`.
+
+### 15.8 Regressions
+
+Serialized (never with the desktop harness):
+
+```
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 398   Tests failed: 0
+bash tools/gate/m2_threads.sh            m2: PASS
+bash tools/gate/m12_thread_ceiling.sh    m12: PASS
+python3 tools/gate/m3_window_probe.py    m3: PASS
+bash tools/gate/t3_linux_probe.sh mem    [LP] done rc=0
+bash tools/gate/t3_linux_probe.sh vmcommit  [LP] done rc=0
+```
+
+### 15.9 Limits
+
+- The carve is named, the two-owner condition is proven, but *why* Unity's
+  allocator re-carves that unit is not answered here. It is a userspace
+  allocator invariant, not a syscall return value: every memory syscall in the
+  boot is Linux-conformant for the shapes the game uses.
+- `mprotect(PROT_NONE)` still drops the pages (vm.c 4.4). The probe shows the
+  contents usually survive because the frame allocator hands the same frame
+  back, but that is luck, not a contract; the game only guards never-touched
+  pages, so it is not exercised.
+- `MAP_FIXED_NOREPLACE` still answers `-EINVAL` (the pre-4.17 Linux answer).
+  Nothing in the boot uses it.

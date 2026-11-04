@@ -224,6 +224,17 @@ echo "  installed: $(stat -c '%s bytes' /srv/nfs/rimworld/RimWorldLinux) -> RimW
 
 # The desktop's Apps menu launches root entries by name; this is the launcher.
 stage "$OUT/rwlaunch.bin" ::/RWLAUNCH.BIN
+# Opt-in mutex lifetime tracer: the guest desktop starts the game, so no host
+# environment reaches it.  rwlaunch reads this marker and emits
+# RW_TRACE_MUTEX=1 in the child's env (0 otherwise).  Staged here, and REMOVED
+# when not asked for, because disk.img is reused across runs.
+if [ "${RW_TRACE_MUTEX:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/mtxon"
+  stage "$OUT/mtxon" ::/MTXON
+  echo "  staged: /MTXON -> RW_TRACE_MUTEX=1 in the game"
+else
+  mdel -i "$IMG" ::/MTXON >/dev/null 2>&1 || true
+fi
 # No WAVE.CFG: MODE=desktop has no boot-wave loader (KERNEL_MODE_TEST only),
 # and the game must be started from the desktop so it inherits the window
 # protocol pipes.
@@ -259,6 +270,14 @@ mdir -i "$IMG" ::/RW_HOME >/dev/null 2>&1 && \
     cat "$OUT/Player.log"
     echo "  ---"
   } || echo "  (no /RW_HOME/Player.log: the engine never opened it)"
+
+# The launcher's own mutex-lifetime log (RW_TRACE_MUTEX): init/destroy of every
+# lock plus every op inside the parked arena.  Only present when the marker was
+# staged, so a normal run does not spend disk space on it.
+mdir -i "$IMG" ::/RW_HOME >/dev/null 2>&1 && \
+  mcopy -o -i "$IMG" ::/RW_HOME/mtx.log "$OUT/mtx.log" 2>/dev/null && {
+    echo "  $OUT/mtx.log ($(stat -c %s "$OUT/mtx.log") bytes)"
+  } || true
 
 echo
 echo "== ordered ladder (raw serial lines, in order)"

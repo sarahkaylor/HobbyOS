@@ -216,6 +216,22 @@ int rw_watch_db(struct trap_frame *tf) {
     kl_hex(&kl, (unsigned long)tf->regs[4]);
     kl_s(&kl, " rdi=");
     kl_hex(&kl, (unsigned long)tf->regs[5]);
+    /* L24: the return addresses on the user stack.  The store names the
+       allocator's push; the STACK names who called it, which is the only way
+       to tell "Unity freed a live lock" from "Unity freed its own block".
+       The user RSP lives in the trap frame's `lr` slot (the x64 ISR mirrors
+       it there on every entry); regs[6] is rbp. */
+    if ((tf->cs & 3) == 3) {
+      unsigned long sp = (unsigned long)tf->lr;
+      unsigned long lim = (sp | 0xFFFUL) + 1; /* stay inside one page */
+      kl_s(&kl, " rbp=");
+      kl_hex(&kl, (unsigned long)tf->regs[6]);
+      kl_s(&kl, " stk=");
+      for (int i = 0; i < 12 && sp + 8 <= lim; i++, sp += 8) {
+        kl_s(&kl, " ");
+        kl_hex(&kl, (unsigned long)*(volatile uint64_t *)sp);
+      }
+    }
     kl_c(&kl, '\n');
     kl_emit(&kl);
     l_rows++;

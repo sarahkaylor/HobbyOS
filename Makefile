@@ -537,6 +537,14 @@ endif
 ifneq ($(RW_WATCH_FIXUP),)
   CFLAGS += -DRW_WATCH_FIXUP=1
 endif
+# Diagnostic: one compact serial row per memory syscall (mmap/munmap/mremap/
+# mprotect/madvise/brk/msync/mincore/memfd), with the caller's six arguments and
+# the return value.  Empty = no row, no code growth.  Used to name the strategy
+# an allocator uses to carve its arena (L24):
+#     make RW_TRACE_MEM=1 ... disk.img
+ifneq ($(RW_TRACE_MEM),)
+  CFLAGS += -DRW_TRACE_MEM=1
+endif
 
 # Target and objects
 TARGET = hobbyos.elf
