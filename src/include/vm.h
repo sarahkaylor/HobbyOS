@@ -440,6 +440,11 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
 /* P5 (D5.7): the physical address encoded in a vm_arch_walk leaf (OA
  * bits, both arches).  Used by vm_kwrite for cross-context writes. */
 uint64_t vm_arch_leaf_phys(uint64_t leaf);
+/* M6/L30 (COW): is the leaf's write permission set?  The fault path needs to
+ * tell "the hardware refused a write the VMA allows because the PTE is
+ * read-only" (a copy-on-write fault) from a stale TLB entry, and a kernel
+ * test wants to prove the copy it installed is writable. */
+int vm_arch_leaf_writable(uint64_t leaf);
 void vm_arch_teardown(uint64_t root_phys, uint16_t asid);
 void vm_arch_switch(struct addr_space *as);
 /* P2.2 (S2): hand the calling CPU back to the kernel table (no-op when

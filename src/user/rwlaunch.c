@@ -142,30 +142,56 @@ static void chdir_gamedir(const char *game) {
   pc("\n");
 }
 
+/* Bounded copy of the log, read once: the native libc has no lseek, and the
+ * tail is what matters, so keep the file in RAM and slice it. */
+#define RW_LOG_MAX (128 * 1024)
+static char rw_logbuf[RW_LOG_MAX];
+
+static void pc_span(const char *p, int n) {
+  char buf[2049];
+  while (n > 0) {
+    int k = n < (int)sizeof buf - 1 ? n : (int)sizeof buf - 1;
+    for (int i = 0; i < k; i++) buf[i] = p[i];
+    buf[k] = '\0';
+    pc(buf);
+    p += k;
+    n -= k;
+  }
+}
+
 static void dump_player_log(void) {
   int fd = open(RW_LOG, O_RDONLY);
   if (fd < 0) {
     say("no Player.log (the engine never opened its log file)");
     return;
   }
-  pc("[RW] rwlaunch: --- Player.log (first 24576 bytes) ---\n");
-  /* Console, not fd 1: a desktop-launched launcher's stdout is the window
-   * protocol pipe.  One NUL-terminated chunk at a time; print_console
-   * line-buffers internally. */
-  char buf[2049];
-  int total = 0;
-  while (total < RW_LOG_DUMP) {
-    int n = (int)read(fd, buf, sizeof buf - 1);
+  /* The tail of this log is the interesting part (the engine's LAST rows say
+     why the run ended) and it grows past the dump cap as the ladder gets
+     further — measured at exactly 24 576 B, cut mid-row, with the audio
+     fallback and the Mono rows missing.  Print the head of the budget and the
+     tail of the file, with an explicit omission marker between them. */
+  int size = 0;
+  while (size < RW_LOG_MAX - 1) {
+    int n = (int)read(fd, rw_logbuf + size, RW_LOG_MAX - 1 - size);
     if (n <= 0) break;
-    if (total + n > RW_LOG_DUMP) n = RW_LOG_DUMP - total;
-    buf[n] = '\0';
-    pc(buf);
-    total += n;
+    size += n;
   }
   close(fd);
-  pc("\n[RW] rwlaunch: --- end Player.log (");
-  pd(total);
-  pc(" bytes) ---\n");
+  int head = (size > RW_LOG_DUMP) ? (RW_LOG_DUMP / 3) : size;
+  int tail = (size > RW_LOG_DUMP) ? (RW_LOG_DUMP - head) : 0;
+  pc("[RW] rwlaunch: --- Player.log (");
+  pd(size);
+  pc(" bytes, head ");
+  pd(head);
+  pc(" + tail) ---\n");
+  pc_span(rw_logbuf, head);
+  if (tail) {
+    pc("\n[RW] rwlaunch: ... ");
+    pd(size - head - tail);
+    pc(" bytes omitted ...\n");
+    pc_span(rw_logbuf + size - tail, tail);
+  }
+  pc("\n[RW] rwlaunch: --- end Player.log ---\n");
 }
 
 __attribute__((section(".text._start"))) void _start(void) {

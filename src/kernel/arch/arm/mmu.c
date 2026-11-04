@@ -635,6 +635,9 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {
  * -- physical address for cross-context writes (vm_kwrite) and the v2
  * fork clone. */
 uint64_t vm_arch_leaf_phys(uint64_t leaf) { return leaf & ARM_OA_MASK; }
+int vm_arch_leaf_writable(uint64_t leaf) {
+  return (leaf & (3ULL << 6)) == ARM_AP_RW;
+}
 
 void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
   arm_v2_flush_va(as->asid, va);
