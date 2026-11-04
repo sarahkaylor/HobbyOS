@@ -1,0 +1,240 @@
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x0000000075581dd8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: [PANIC-SINK-VIOLATION] panic_putc from a returning path
+0[PANIC-SINK-VIOLATION] panic_putc from a returning path
+x[PANIC-SINK-VIOLATION] panic_putc from a returning path
+0000000000000047
+Modified CCB: 0x0000000000000047
+[INPUT] PS/2 mouse: IntelliMouse (wheel, 4-byte)
+[INPUT] vmmouse absolute pointer enabled
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+start_scheduler called on CPU 1
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 2 power-on acknowledged.
+2
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+start_scheduler called on CPU 3
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+start_scheduler called on CPU 4
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 5 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+start_scheduler called on CPU 5
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 6 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+start_scheduler called on CPU 6
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 7 power-on acknowledged.
+start_scheduler called on CPU 7
+[KERNEL] LAPIC timer rate: 63600 counts/ms, TSC rate: 2596381 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000753F6000 PFN: 0x00000000000753F6
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000753F9000 PFN: 0x00000000000753F9
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+[GB-032] SDL test-app exec: SKIP (GB-013 compat exec leg not open; app + static-PIE ELF props proven on host by sdl_test_app_test_host)
+start_scheduler called on CPU 0
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=4 
+/WAVE.CFG[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+
+[WAVE-MANIFEST] GB204A.BIN
+[RESUME-SPSR] pid=1 spsr=0x00000293 IF=1
+[WAVE-TRY] GB204A.BIN
+Loading program for scheduler (v2 AS): GB204A.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=[RESUME-SPSR] pid=1 spsr=0x00000293 IF=1
+2 block_idx=-1
+/GB204A.BIN
+v2 loader: image mapped (lazy), bytes=46168 pages=12 first=in elap=0ms
+[RESUME-SPSR] pid=1 spsr=0x00000297 IF=1
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] GB204A.BIN rc>0
+[WAVE-MANIFEST] GB204B.BIN
+[WAVE-TRY] GB204B.BIN
+Loading program for scheduler (v2 AS): GB204B.BIN
+Inside process_create: acquiring lock...
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+Inside process_create: lock released. pid=3 block_idx=-1[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE70 covers=1
+
+/GB204B.BIN
+v2 loader: image mapped (lazy), bytes=46168 pages=12 first=in elap=1ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE70 covers=1
+[ARRIVED] GB204B.BIN rc>0
+[RESUME-DIAG] pid=3 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE70 covers=1
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-45
+  CPU1 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 cr2=0x00000010000057E0 pid=3 resume_pid=3 resume_sp=0x00000017FFFFFFB0 age_ms=-176 syscall=254
+  CPU2 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 pid=2 resume_pid=2 resume_sp=0x00000017FFFFFFB0 age_ms=0 syscall=254
+  CPU3 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-335
+  CPU4 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 resume_pid=1 resume_sp=0x0000000023FFE788 age_ms=-415
+  CPU5 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-475
+  CPU6 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-525
+  CPU7 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-585
+  CSTK cpu1: 0x000000007003F7DF 0x000000007004B913 0x00000000700446C5 0x000000007003FD69 0x000000007002E64E 0x0000000070039A0B 0x000000007003E3C1 0x0000000070027411 0x000000007003F8D3 0x000000007003FB22 0x000000007003D76E 0x000000007002428E 0x000000007003CFDB 0x000000007003CFDB 0x0000000070009EFA 0x000000007003D76E
+  CDATA cpu1 cur~=0x00000000755F06B8: 0x000000007003D76E 0x0000000000000000 0x0000000000000018 0x00000000755F0940 0x0000000070009EFA 0x0000000000000000 0x0000000000000006 0x0000582800000000 0x00000000755F0960 0x0000000000000000 0x0000100000000000 0x0000000000000000
+  CSTK cpu3:
+  CSTK cpu4:
+  CSTK cpu5:
+  CSTK cpu6:
+  CSTK cpu7:
+[IDLESTUCK] cpu=5 rounds=20002 t=36709
+[IDLESTUCK] slot=2 pid=2 st=3 wake=0 rip=0x10000001d7 GB204A.BIN
+[IDLESTUCK] slot=3 pid=3 st=3 wake=0 rip=0x10000001d7 GB204B.BIN
+[IDLESTUCK] claims: c0=-1/3346 c1=3/6 c2=2/8 c3=-1/3347 c4=-1/3339 c5=-1/3346 c6=-1/3347 c7=-1/3347 lock_owner=6 park_returns=0
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-53
+  CPU1 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 cr2=0x00000010000057E0 pid=3 resume_pid=3 resume_sp=0x00000017FFFFFFB0 age_ms=-180 syscall=254
+  CPU2 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 pid=2 resume_pid=2 resume_sp=0x00000017FFFFFFB0 age_ms=0 syscall=254
+  CPU3 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-343
+  CPU4 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 resume_pid=1 resume_sp=0x0000000023FFE788 age_ms=-423
+  CPU5 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-483
+  CPU6 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-532
+  CPU7 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-593
+  CSTK cpu1: 0x000000007003F7DF 0x000000007004B913 0x00000000700446C5 0x000000007003FD69 0x000000007002E64E 0x0000000070039A0B 0x000000007003E3C1 0x0000000070027411 0x000000007003F8D3 0x000000007003FB22 0x000000007003D76E 0x000000007002428E 0x000000007003CFDB 0x000000007003CFDB 0x0000000070009EFA 0x000000007003D76E
+  CDATA cpu1 cur~=0x00000000755F06B8: 0x000000007003D76E 0x0000000000000000 0x0000000000000018 0x00000000755F0940 0x0000000070009EFA 0x0000000000000000 0x0000000000000006 0x0000582800000000 0x00000000755F0960 0x0000000000000000 0x0000100000000000 0x0000000000000000
+  CSTK cpu3:
+  CSTK cpu4:
+  CSTK cpu5:
+  CSTK cpu6:
+  CSTK cpu7:
+[IDLESTUCK] cpu=0 rounds=40005 t=70090
+[IDLESTUCK] slot=2 pid=2 st=3 wake=0 rip=0x10000001d7 GB204A.BIN
+[IDLESTUCK] slot=3 pid=3 st=3 wake=0 rip=0x10000001d7 GB204B.BIN
+[IDLESTUCK] claims: c0=-1/6684 c1=3/6 c2=2/8 c3=-1/6687 c4=-1/6679 c5=-1/6686 c6=-1/6687 c7=-1/6687 lock_owner=1 park_returns=0
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-50
+  CPU1 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 cr2=0x00000010000057E0 pid=3 resume_pid=3 resume_sp=0x00000017FFFFFFB0 age_ms=0 syscall=254
+  CPU2 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 pid=2 resume_pid=2 resume_sp=0x00000017FFFFFFB0 age_ms=-283 syscall=254
+  CPU3 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-340
+  CPU4 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 resume_pid=1 resume_sp=0x0000000023FFE788 age_ms=-420
+  CPU5 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-470
+  CPU6 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-530
+  CPU7 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-590
+  CSTK cpu2: 0x000000007003F7DF 0x00000000700446C5 0x0000000070047B90 0x000000007003FD69 0x000000007002E64E 0x0000000070027411 0x000000007003F8D3 0x000000007003FB22 0x000000007003D76E 0x000000007002428E 0x000000007003CFDB 0x000000007003CFDB
+  CDATA cpu2 cur~=0x00000000755E0798: 0x000000007003CFDB 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x000000007003CFDB 0x000000007002428E 0x0000000000000002 0x000000007003D76E 0x0000000000000002 0x0000000000003980
+  CSTK cpu3:
+  CSTK cpu4:
+  CSTK cpu5:
+  CSTK cpu6:
+  CSTK cpu7:
+[IDLESTUCK] cpu=7 rounds=60000 t=103441
+[IDLESTUCK] slot=2 pid=2 st=3 wake=0 rip=0x10000001d7 GB204A.BIN
+[IDLESTUCK] slot=3 pid=3 st=3 wake=0 rip=0x10000001d7 GB204B.BIN
+[IDLESTUCK] claims: c0=-1/10020 c1=3/6 c2=2/8 c3=-1/10024 c4=-1/10016 c5=-1/10023 c6=-1/10024 c7=-1/10023 lock_owner=8 park_returns=0
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-48
+  CPU1 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 cr2=0x00000010000057E0 pid=3 resume_pid=3 resume_sp=0x00000017FFFFFFB0 age_ms=-181 syscall=254
+  CPU2 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 pid=2 resume_pid=2 resume_sp=0x00000017FFFFFFB0 age_ms=0 syscall=254
+  CPU3 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-338
+  CPU4 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 resume_pid=1 resume_sp=0x0000000023FFE788 age_ms=-428
+  CPU5 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-478
+  CPU6 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-538
+  CPU7 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-588
+  CSTK cpu1: 0x000000007003F7DF 0x000000007004B913 0x00000000700446C5 0x0000000070047B90 0x000000007003FD69 0x000000007002E64E 0x0000000070039A0B 0x000000007003E3C1 0x0000000070027411 0x000000007003F8D3 0x000000007003FB22 0x000000007003D76E 0x000000007002428E 0x000000007003CFDB 0x000000007003CFDB 0x0000000070009EFA
+  CDATA cpu1 cur~=0x00000000755F06D8: 0x0000000070009EFA 0x0000000000000000 0x0000000000000006 0x0000582800000000 0x00000000755F0960 0x0000000000000000 0x0000100000000000 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000000000000
+  CSTK cpu3:
+  CSTK cpu4:
+  CSTK cpu5:
+  CSTK cpu6:
+  CSTK cpu7:
+[IDLESTUCK] cpu=7 rounds=80001 t=136845
+[IDLESTUCK] slot=2 pid=2 st=3 wake=0 rip=0x10000001d7 GB204A.BIN
+[IDLESTUCK] slot=3 pid=3 st=3 wake=0 rip=0x10000001d7 GB204B.BIN
+[IDLESTUCK] claims: c0=-1/13361 c1=3/6 c2=2/8 c3=-1/13366 c4=-1/13358 c5=-1/13365 c6=-1/13366 c7=-1/13364 lock_owner=8 park_returns=0
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-51
+  CPU1 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 cr2=0x00000010000057E0 pid=3 resume_pid=3 resume_sp=0x00000017FFFFFFB0 age_ms=-177 syscall=254
+  CPU2 rip=0x00000010000001D7 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 pid=2 resume_pid=2 resume_sp=0x00000017FFFFFFB0 age_ms=0 syscall=254
+  CPU3 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-341
+  CPU4 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 resume_pid=1 resume_sp=0x0000000023FFE788 age_ms=-421
+  CPU5 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-481
+  CPU6 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-531
+  CPU7 rip=0x000000007003BEE6 rflags=0x0000000000000212 pid=-1 age_ms=-591
+  CSTK cpu1: 0x000000007003F7DF 0x000000007004B913 0x00000000700446C5 0x0000000070047B90 0x000000007003FD69 0x000000007002E64E 0x0000000070039A0B 0x000000007003E3C1 0x0000000070027411 0x000000007003F8D3 0x000000007003FB22 0x000000007003D76E 0x000000007002428E 0x000000007003CFDB 0x000000007003CFDB 0x0000000070009EFA
+  CDATA cpu1 cur~=0x00000000755F06D8: 0x0000000070009EFA 0x0000000000000000 0x0000000000000006 0x0000582800000000 0x00000000755F0960 0x0000000000000000 0x0000100000000000 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000000000000
+  CSTK cpu3:
+  CSTK cpu4:
+  CSTK cpu5:
+  CSTK cpu6:
+  CSTK cpu7:
+[IDLESTUCK] cpu=6 rounds=100001 t=170215
+[IDLESTUCK] slot=2 pid=2 st=3 wake=0 rip=0x10000001d7 GB204A.BIN
+[IDLESTUCK] slot=3 pid=3 st=3 wake=0 rip=0x10000001d7 GB204B.BIN
+[IDLESTUCK] claims: c0=-1/16698 c1=3/6 c2=2/8 c3=-1/16705 c4=-1/16697 c5=-1/16704 c6=-1/16704 c7=-1/16703 lock_owner=7 park_returns=0
+qemu-system-x86_64: terminating on signal 15 from pid 3430699 (timeout)
+
+real	3m0.028s
+user	4m38.838s
+sys	1m34.253s
