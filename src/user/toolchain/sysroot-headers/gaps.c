@@ -108,13 +108,18 @@ double erf(double x) {
 
 /* IceWM M1 (icewm.md 4.1): libc.a now has real bind/listen/accept
  * (libc_socket.o).  These stubs are weak so a link that also pulls that
- * member takes the real ones instead of failing on duplicate symbols. */
-__attribute__((weak)) int bind(int fd, const void *addr, unsigned int addrlen) {
+ * member takes the real ones instead of failing on duplicate symbols.
+ * Signatures MUST match <sys/socket.h> (struct sockaddr pointer / socklen_t):
+ * _missing.h force-includes that header into this TU, so the old
+ * void-pointer / unsigned int spelling is a "conflicting types" error. */
+__attribute__((weak)) int bind(int fd, const struct sockaddr *addr,
+                               socklen_t addrlen) {
   (void)fd; (void)addr; (void)addrlen;
   errno = ENOSYS; return -1;
 }
 __attribute__((weak)) int listen(int fd, int backlog) { (void)fd; (void)backlog; errno = ENOSYS; return -1; }
-__attribute__((weak)) int accept(int fd, void *addr, unsigned int *addrlen) {
+__attribute__((weak)) int accept(int fd, struct sockaddr *addr,
+                                 socklen_t *addrlen) {
   (void)fd; (void)addr; (void)addrlen;
   errno = ENOSYS; return -1;
 }
