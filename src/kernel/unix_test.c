@@ -253,9 +253,9 @@ static void test_unix_park_marks(void) {
   int r = usock_recv(u, 0, buf, 4, 0); /* empty: park */
   EXPECT_EQ(r, -2);
   EXPECT_EQ(process_get_pcb(pid)->state, PROC_STATE_BLOCKED);
-  ASSERT((u->chan[1].rwait & (1ULL << pid)) != 0);
+  ASSERT(pid_mask_test(&u->chan[1].rwait, pid));
   process_get_pcb(pid)->state = PROC_STATE_RUNNING;
-  u->chan[1].rwait = 0;
+  pid_mask_zero(&u->chan[1].rwait);
 
   /* Full ring: a writer parks on chan[0]'s writer mask. */
   static uint8_t big[K_UNIX_RING];
@@ -263,9 +263,9 @@ static void test_unix_park_marks(void) {
   r = usock_send(u, 0, buf, 1, 0);
   EXPECT_EQ(r, -2);
   EXPECT_EQ(process_get_pcb(pid)->state, PROC_STATE_BLOCKED);
-  ASSERT((u->chan[0].wwait & (1ULL << pid)) != 0);
+  ASSERT(pid_mask_test(&u->chan[0].wwait, pid));
   process_get_pcb(pid)->state = PROC_STATE_RUNNING;
-  u->chan[0].wwait = 0;
+  pid_mask_zero(&u->chan[0].wwait);
 
   /* Dead peer: EPIPE immediately, never a park. */
   usock_close(u, 1);
@@ -844,9 +844,9 @@ static void test_unix_named_backlog_park(void) {
   int r = file_accept(cur, l, 0, 0, 0);
   EXPECT_EQ(r, -2);
   EXPECT_EQ(pcb->state, PROC_STATE_BLOCKED);
-  ASSERT((lu->acc_wait & (1ULL << e.pid)) != 0);
+  ASSERT(pid_mask_test(&lu->acc_wait, e.pid));
   pcb->state = PROC_STATE_RUNNING;
-  lu->acc_wait = 0;
+  pid_mask_zero(&lu->acc_wait);
   EXPECT_EQ(process_group(cur)->num_open_fds, e.baseline + 1); /* no leak */
 
   /* Queue capacity 1: the second nonblocking connect is EAGAIN, a
@@ -859,14 +859,14 @@ static void test_unix_named_backlog_park(void) {
   r = file_connect_sa(cur, c3, sa, salen);
   EXPECT_EQ(r, -2);
   EXPECT_EQ(pcb->state, PROC_STATE_BLOCKED);
-  ASSERT((lu->conn_wait & (1ULL << e.pid)) != 0);
+  ASSERT(pid_mask_test(&lu->conn_wait, e.pid));
   pcb->state = PROC_STATE_RUNNING;
 
   /* accept4 flags: CLOEXEC + NONBLOCK land on the new fd; accepting wakes
    * (clears) the parked connector mask. */
   int s1 = file_accept(cur, l, K_SOCK_CLOEXEC | K_SOCK_NONBLOCK, 0, 0);
   ASSERT(s1 >= 0);
-  EXPECT_EQ(lu->conn_wait, 0);
+  EXPECT_EQ(pid_mask_empty(&lu->conn_wait), 1);
   EXPECT_EQ(file_fcntl(cur, s1, K_F_GETFD, 0), K_FD_CLOEXEC);
   EXPECT_EQ(file_fcntl(cur, s1, K_F_GETFL, 0) & K_O_NONBLOCK, K_O_NONBLOCK);
   EXPECT_EQ(file_accept(cur, l, 0x4, 0, 0), -EINVAL); /* bad flag */

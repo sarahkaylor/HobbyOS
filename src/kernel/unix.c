@@ -59,11 +59,14 @@ static void usock_attach_rings(struct usock *u, uint8_t *base) {
 /* Wakes every pid in the mask.  MUST be called with no spinlock held:
  * process_wakeup() takes proc_lock and the global order is
  * proc_lock -> f->lock -> usock->lock. */
-static void drain_wakeup_mask(uint64_t mask) {
-  while (mask) {
-    int pid = __builtin_ctzll(mask);
-    mask &= mask - 1;
-    process_wakeup(pid);
+static void drain_wakeup_mask(const struct pid_mask *mask) {
+  for (int wi = 0; wi < PID_MASK_WORDS; wi++) {
+    uint64_t x = mask->w[wi];
+    while (x) {
+      int pid = (wi << 6) + __builtin_ctzll(x);
+      x &= x - 1;
+      process_wakeup(pid);
+    }
   }
 }
 
@@ -88,7 +91,8 @@ static struct usock *usock_alloc_common(int type, int connected) {
     u->shut[0] = u->shut[1] = 0;
     u->backlog = 0;
     u->qhead = u->qcount = 0;
-    u->acc_wait = u->conn_wait = 0;
+    u->acc_wait = (struct pid_mask){0};
+    u->conn_wait = (struct pid_mask){0};
     u->type = type;
     u->connected = connected;
     u->refs[0] = 1;
@@ -100,7 +104,8 @@ static struct usock *usock_alloc_common(int type, int connected) {
       c->head = c->tail = c->used = 0;
       c->mhead = c->mtail = 0;
       c->mcount = 0;
-      c->rwait = c->wwait = 0;
+      c->rwait = (struct pid_mask){0};
+      c->wwait = (struct pid_mask){0};
       for (int m = 0; m < K_UNIX_MSGS; m++) c->msg_nfds[m] = 0;
     }
     spinlock_release_irqrestore(&unix_pool_lock, flags);
@@ -151,7 +156,8 @@ void usock_close(struct usock *u, int end) {
   if (!u || end < 0 || end > 1) return;
   int close_fds[K_UNIX_MSGS * 2 * K_UNIX_MAX_FDS];
   int nclose = 0;
-  uint64_t wake = 0;
+  struct pid_mask wake;
+  pid_mask_zero(&wake);
   struct usock *pending[K_UNIX_BACKLOG];
   int npending = 0;
   uint8_t *free_rings = 0;
@@ -183,23 +189,25 @@ void usock_close(struct usock *u, int end) {
           u->qhead = (u->qhead + 1) % K_UNIX_BACKLOG;
           u->qcount--;
         }
-        wake |= u->acc_wait | u->conn_wait;
-        u->acc_wait = u->conn_wait = 0;
+        pid_mask_or(&wake, &u->acc_wait);
+        pid_mask_or(&wake, &u->conn_wait);
+        pid_mask_zero(&u->acc_wait);
+        pid_mask_zero(&u->conn_wait);
       }
     }
     /* The direction into the closed end is undeliverable. */
     drop_chan_queue(&u->chan[peer], close_fds, &nclose);
     /* Peer readers of chan[end] observe EOF; peer writers into chan[peer]
      * observe EPIPE. */
-    wake |= u->chan[end].rwait;
-    u->chan[end].rwait = 0;
-    wake |= u->chan[peer].wwait;
-    u->chan[peer].wwait = 0;
+    pid_mask_or(&wake, &u->chan[end].rwait);
+    pid_mask_zero(&u->chan[end].rwait);
+    pid_mask_or(&wake, &u->chan[peer].wwait);
+    pid_mask_zero(&u->chan[peer].wwait);
     if (u->refs[peer] == 0) {
       /* Both ends gone: nothing can consume the surviving direction. */
       drop_chan_queue(&u->chan[end], close_fds, &nclose);
-      u->chan[end].wwait = 0;
-      u->chan[peer].rwait = 0;
+      pid_mask_zero(&u->chan[end].wwait);
+      pid_mask_zero(&u->chan[peer].rwait);
       free_rings = u->ring_base;
       usock_attach_rings(u, 0);
       u->in_use = 0;
@@ -209,7 +217,7 @@ void usock_close(struct usock *u, int end) {
   spinlock_release_irqrestore(&u->lock, flags);
   if (named) spinlock_release_irqrestore(&unix_name_lock, nflags);
 
-  drain_wakeup_mask(wake);
+  drain_wakeup_mask(&wake);
   for (int i = 0; i < nclose; i++) fs_close_global(close_fds[i]);
   /* Never-accepted connections: drop the queue's end-1 reference. */
   for (int i = 0; i < npending; i++) usock_close(pending[i], 1);
@@ -429,9 +437,9 @@ static int usock_park(struct usock *u, int end, int read_side, int nonblock) {
     ret = 1;
   } else {
     if (read_side)
-      c->rwait |= (1ULL << cur->pid);
+      pid_mask_set(&c->rwait, cur->pid);
     else
-      c->wwait |= (1ULL << cur->pid);
+      pid_mask_set(&c->wwait, cur->pid);
     cur->state = PROC_STATE_BLOCKED;
     ret = -2;
   }
@@ -473,13 +481,14 @@ static int usock_stream_send(struct usock *u, int end, const struct k_iovec *io,
       c->used += (uint32_t)take;
       i += take;
     }
-    uint64_t wake = 0;
+    struct pid_mask wake;
+    pid_mask_zero(&wake);
     if (i > 0) {
       wake = c->rwait;
-      c->rwait = 0;
+      pid_mask_zero(&c->rwait);
     }
     spinlock_release_irqrestore(&u->lock, flags);
-    drain_wakeup_mask(wake);
+    drain_wakeup_mask(&wake);
     if (i > 0) return i; /* partial writes are legal on a stream */
 
     int r = usock_park(u, end, 0, nonblock);
@@ -514,13 +523,14 @@ static int usock_stream_recv(struct usock *u, int end, const struct k_iovec *io,
       c->used -= (uint32_t)take;
       i += take;
     }
-    uint64_t wake = 0;
+    struct pid_mask wake;
+    pid_mask_zero(&wake);
     if (i > 0 && c->used == 0) {
       wake = c->wwait; /* space freed */
-      c->wwait = 0;
+      pid_mask_zero(&c->wwait);
     }
     spinlock_release_irqrestore(&u->lock, flags);
-    drain_wakeup_mask(wake);
+    drain_wakeup_mask(&wake);
     if (i > 0) return i;
 
     /* Empty: usock_park re-checks under the lock and reports EOF (0) or
@@ -572,10 +582,10 @@ static int usock_msg_send(struct usock *u, int end, const struct k_iovec *io,
     for (int f = 0; f < nfds; f++) c->msg_fds[mi][f] = (int16_t)gfds[f];
     c->mhead = (mi + 1) % K_UNIX_MSGS;
     c->mcount++;
-    uint64_t wake = c->rwait;
-    c->rwait = 0;
+    struct pid_mask wake = c->rwait;
+    pid_mask_zero(&c->rwait);
     spinlock_release_irqrestore(&u->lock, flags);
-    drain_wakeup_mask(wake);
+    drain_wakeup_mask(&wake);
     return total;
   }
 }
@@ -636,10 +646,10 @@ static int usock_msg_recv(struct usock *u, int end, const struct k_iovec *io,
     c->msg_nfds[mi] = 0;
     c->mtail = (mi + 1) % K_UNIX_MSGS;
     c->mcount--;
-    uint64_t wake = c->wwait;
-    c->wwait = 0;
+    struct pid_mask wake = c->wwait;
+    pid_mask_zero(&c->wwait);
     spinlock_release_irqrestore(&u->lock, flags);
-    drain_wakeup_mask(wake);
+    drain_wakeup_mask(&wake);
 
     int installed = 0;
     for (int f = 0; f < deliver; f++) {
@@ -850,10 +860,10 @@ int usock_listen(struct usock *u, int end, int backlog) {
   u->backlog = backlog + 1;
   u->listening = 1;
   spinlock_release_irqrestore(&u->lock, uf);
-  uint64_t wake = u->conn_wait; /* a grown queue may admit parked peers */
-  u->conn_wait = 0;
+  struct pid_mask wake = u->conn_wait; /* a grown queue may admit parked peers */
+  pid_mask_zero(&u->conn_wait);
   spinlock_release_irqrestore(&unix_name_lock, nf);
-  drain_wakeup_mask(wake);
+  drain_wakeup_mask(&wake);
   return 0;
 }
 
@@ -862,7 +872,7 @@ int usock_is_listening(struct usock *u) { return u ? u->listening : 0; }
 /* Park the current process on *mask under proc_lock + unix_name_lock
  * after `recheck` (evaluated with both held) still says "wait".  Returns
  * -2 parked, 1 retry (state changed), -EAGAIN without a process. */
-static int usock_name_park(uint64_t *mask,
+static int usock_name_park(struct pid_mask *mask,
                            int (*still_wait)(struct usock *, void *),
                            struct usock *l, void *arg) {
   struct process *cur = current_process();
@@ -871,7 +881,7 @@ static int usock_name_park(uint64_t *mask,
   uint64_t nf = spinlock_acquire_irqsave(&unix_name_lock);
   int ret;
   if (still_wait(l, arg)) {
-    *mask |= (1ULL << cur->pid);
+    pid_mask_set(mask, cur->pid);
     cur->state = PROC_STATE_BLOCKED;
     ret = -2;
   } else {
@@ -955,10 +965,10 @@ int usock_connect(struct usock *u, int end, const struct usock_name *n,
     uint32_t slot = (l->qhead + l->qcount) % K_UNIX_BACKLOG;
     l->accq[slot] = u;
     l->qcount++;
-    uint64_t wake = l->acc_wait;
-    l->acc_wait = 0;
+    struct pid_mask wake = l->acc_wait;
+    pid_mask_zero(&l->acc_wait);
     spinlock_release_irqrestore(&unix_name_lock, nf);
-    drain_wakeup_mask(wake);
+    drain_wakeup_mask(&wake);
     return 0;
   }
 }
@@ -978,10 +988,10 @@ int usock_accept(struct usock *l, int end, int nonblock, struct usock **out) {
       l->accq[l->qhead] = 0;
       l->qhead = (l->qhead + 1) % K_UNIX_BACKLOG;
       l->qcount--;
-      uint64_t wake = l->conn_wait; /* room for a parked connect() */
-      l->conn_wait = 0;
+      struct pid_mask wake = l->conn_wait; /* room for a parked connect() */
+      pid_mask_zero(&l->conn_wait);
       spinlock_release_irqrestore(&unix_name_lock, nf);
-      drain_wakeup_mask(wake);
+      drain_wakeup_mask(&wake);
       *out = c;
       return 0;
     }
@@ -1025,13 +1035,16 @@ int usock_shutdown(struct usock *u, int end, int how) {
   }
   u->shut[end] |= bits;
   /* Everyone parked on either direction re-checks (EOF / EPIPE now). */
-  uint64_t wake = 0;
+  struct pid_mask wake;
+  pid_mask_zero(&wake);
   for (int d = 0; d < 2; d++) {
-    wake |= u->chan[d].rwait | u->chan[d].wwait;
-    u->chan[d].rwait = u->chan[d].wwait = 0;
+    pid_mask_or(&wake, &u->chan[d].rwait);
+    pid_mask_or(&wake, &u->chan[d].wwait);
+    pid_mask_zero(&u->chan[d].rwait);
+    pid_mask_zero(&u->chan[d].wwait);
   }
   spinlock_release_irqrestore(&u->lock, flags);
-  drain_wakeup_mask(wake);
+  drain_wakeup_mask(&wake);
   return 0;
 }
 

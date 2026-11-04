@@ -93,7 +93,19 @@ int l_timespec_to_ms(struct process *p, uint64_t uts, int64_t *out_ms) {
 
 /* ---- l_tab_core --------------------------------------------------------- */
 
+/* Linux getpid() is the TGID, not the calling thread's tid.  In this kernel a
+ * thread IS a pid slot, so returning p->pid made a worker's getpid() differ
+ * from the group leader's.  glibc depends on the equality: its SIGCANCEL
+ * handler refuses to cancel unless si_pid == getpid() (nptl/pthread_cancel.c),
+ * and user code that tags logs/state with getpid() expects one value per
+ * process.  gettid() keeps the per-thread number. */
 static int l_core_getpid(struct process *p, struct trap_frame *tf) {
+  struct process *grp = p ? process_group(p) : 0;
+  tf->regs[0] = grp ? (uint64_t)(int64_t)grp->pid : (uint64_t)(int64_t)(-1);
+  return 1;
+}
+
+static int l_core_gettid(struct process *p, struct trap_frame *tf) {
   tf->regs[0] = p ? (uint64_t)(int64_t)p->pid : (uint64_t)(int64_t)(-1);
   return 1;
 }
@@ -194,7 +206,7 @@ static int l_core_clock_nanosleep(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
-static const struct l_sysent l_tab_core[] = { {L_SYS_gettimeofday, l_core_gettimeofday, "gettimeofday"}, {L_SYS_nanosleep, l_core_nanosleep, "nanosleep"}, {L_SYS_clock_nanosleep, l_core_clock_nanosleep, "clock_nanosleep"}, {L_SYS_getpid, l_core_getpid, "getpid"}, {L_SYS_getppid, l_core_getppid, "getppid"}, {L_SYS_getuid, l_core_getuid, "getuid"}, {L_SYS_getgid, l_core_getuid, "getgid"}, {L_SYS_geteuid, l_core_getuid, "geteuid"}, {L_SYS_getegid, l_core_getuid, "getegid"}, {L_SYS_gettid, l_core_getpid, "gettid"}, {L_SYS_set_tid_address, l_core_set_tid, "set_tid_address"}, {L_SYS_sched_yield, l_core_yield, "sched_yield"},
+static const struct l_sysent l_tab_core[] = { {L_SYS_gettimeofday, l_core_gettimeofday, "gettimeofday"}, {L_SYS_nanosleep, l_core_nanosleep, "nanosleep"}, {L_SYS_clock_nanosleep, l_core_clock_nanosleep, "clock_nanosleep"}, {L_SYS_getpid, l_core_getpid, "getpid"}, {L_SYS_getppid, l_core_getppid, "getppid"}, {L_SYS_getuid, l_core_getuid, "getuid"}, {L_SYS_getgid, l_core_getuid, "getgid"}, {L_SYS_geteuid, l_core_getuid, "geteuid"}, {L_SYS_getegid, l_core_getuid, "getegid"}, {L_SYS_gettid, l_core_gettid, "gettid"}, {L_SYS_set_tid_address, l_core_set_tid, "set_tid_address"}, {L_SYS_sched_yield, l_core_yield, "sched_yield"},
   L_SYSENT_END
 };
 

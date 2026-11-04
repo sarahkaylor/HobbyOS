@@ -3,10 +3,23 @@
 
 #include "lock.h"
 #include "trap.h"
+#include "pidmask.h"
 #include <stdint.h>
 
-#define MAX_PROCESSES 64 // Maximum number of concurrent processes
+/* L12 (M2/M7): 64 slots could not hold the measured RimWorld process
+ * (106 threads at the menu, 145 peak, docs/rimworld-evidence.md §3.4), so
+ * thread_create() returned EAGAIN under real load.  192 gives 191 usable
+ * slots (slot 0 is reserved) -- 46 headroom over the measured peak -- and
+ * still fits the kernel BSS budget: the extra slots and the widened pid
+ * masks cost 1,834,496 B (~1.75 MiB) in total BSS, itemised in
+ * docs/rimworld-m2-thread-ceiling.md.  Keep this a multiple of 64: pid
+ * bitmaps are word arrays (src/include/pidmask.h) and slot allocation is a
+ * linear scan, so 192 keeps both cheap. */
+#define MAX_PROCESSES 192 // Maximum number of concurrent processes
 #define MAX_CPUS 8       // Maximum number of CPU cores supported
+
+_Static_assert(MAX_PROCESSES <= PID_MASK_BITS,
+               "MAX_PROCESSES outgrew struct pid_mask; widen PID_MASK_BITS");
 
 #ifdef __x86_64__
 /* GB-152: ONE declaration of the per-CPU GS block.  It used to be copied in
@@ -142,6 +155,12 @@ uint32_t smp_init_count(void);
 #define GICR_BASE 0x080A0000 // Redistributor base address (v3)
 
 #define MAX_OPEN_FDS 64 // IceWM M1: X server + clients (was 32); fd_cloexec is 64-bit
+/* L12: measured RimWorld fd high-water is 33 at the menu
+ * (docs/rimworld-evidence.md §3.4), so 64 already clears it with room for
+ * the /proc/self/fd re-opens.  fd_cloexec is ONE uint64_t, so this must
+ * never grow past 64 without widening that field too — the assert makes a
+ * silent shift-out-of-range a build error instead of a lost CLOEXEC bit. */
+_Static_assert(MAX_OPEN_FDS <= 64, "fd_cloexec is a single uint64_t");
 
 /* P2.2: the address-space object (src/include/vm.h) — only ever a pointer
    here, so the kernel headers don't grow a hard include chain. */

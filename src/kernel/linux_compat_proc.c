@@ -133,9 +133,9 @@ static int l_ret(struct trap_frame *tf, int rc) {
 
 /* ---- compat-only per-process state --------------------------------------
  * process.h has no room for these (it is another lane's file), so they live
- * here as pid-indexed tables: 64 entries, no allocation, no lock needed for a
- * naturally-aligned 64-bit store on this target.  See the header comment for
- * exactly how much of this the delivery engine honours today. */
+ * here as pid-indexed tables: MAX_PROCESSES entries, no allocation, no lock
+ * needed for a naturally-aligned 64-bit store on this target.  See the header
+ * comment for exactly how much of this the delivery engine honours today. */
 static uint64_t l_sigmask[MAX_PROCESSES];
 
 /* sa_flags per (pid, signal).  The native PCB stores handler/mask/restorer
