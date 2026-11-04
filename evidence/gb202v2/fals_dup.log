@@ -1,0 +1,3 @@
+DRIFT plan: duplicate §8 rows for GB-196 (one row per id)
+
+1 drift item(s); run with --fix to push plan fields to the board

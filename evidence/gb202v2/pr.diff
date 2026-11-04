@@ -1,0 +1,91 @@
+diff --git a/gaming.md b/gaming.md
+index 8e8f9987..34c38dde 100644
+--- a/gaming.md
++++ b/gaming.md
+@@ -472,6 +472,7 @@ final list.
+ | GB-193 | **every mint turns sync_gaming_md.py RED until a hand-written §8 row lands — add --adopt-orphans** | M | — | `python3 tools/board/sync_gaming_md.py --adopt-orphans` on this branch adopts the open orphans (measured: GB-193 and GB-194; GB-192 closed before the run), prints each generated row, and the same command then prints `IN SYNC` rc=0.; Unit tests cover: row extraction from a fixture issue (weight, depends, DoD, `\|` escaping), insertion into the correct milestone table (M0 vs M4), and refusal — by name — for an issue with no milestone or no weight label; `sync_gaming_md_test.py` still proves seed gaps/duplicates fail.; `make host_tests` green.; **Falsifier:** on pre-fix `main` at `1447edda` the quoted `DRIFT GB-192` rc=1 reproduces (GB-192 closed before adoption, so the live demo is GB-193/GB-194); deleting either adopted row from the branch brings its own `DRIFT` line back; and the test fails if insertion puts a row in the wrong table. |
+ | GB-198 | **plan §8 is two rows short — GB-196 and GB-197 are orphans; run --adopt-orphans** | S | — | `python3 tools/board/sync_gaming_md.py --adopt-orphans` prints the three rows and then `IN SYNC` rc=0 in the same run.; `python3 tools/board/sync_gaming_md_test.py` passes (the GB-193 tool tests are unchanged).; `make host_tests` green.; **Falsifier:** on `138a6874` the two quoted `DRIFT` lines reproduce, rc=1; deleting either adopted row brings its own line back. |
+ | GB-200 | **plan §8 is one row short — GB-199 is an orphan; run --adopt-orphans** | S | — | `python3 tools/board/sync_gaming_md.py --adopt-orphans` prints the two rows and then `IN SYNC` rc=0 in the same run.; `python3 tools/board/sync_gaming_md_test.py` passes.; `make host_tests` green.; **Falsifier:** on `90a672e6` the quoted `DRIFT GB-199` rc=1 reproduces; deleting either adopted row brings its own line back. |
++| GB-202 | **plan §8 is one row short — GB-201 is an orphan; run --adopt-orphans** | S | — | `python3 tools/board/sync_gaming_md.py --adopt-orphans` prints the two rows and then `IN SYNC` rc=0 in the same run.; `python3 tools/board/sync_gaming_md_test.py` passes.; `make host_tests` green.; **Falsifier:** on `5efe9a40` the quoted `DRIFT GB-201` rc=1 reproduces; deleting either adopted row brings its own line back. |
+ 
+ ### Milestone M1 — ABI core / ELF loader (GB-013 … GB-024)
+ 
+@@ -570,8 +571,6 @@ final list.
+ | GB-147 | **Snapshot the pushed trap frame at entry and compare it against what the handler reads** — the one experiment GB-100/101/123/146 all need. Snapshot the frame in the first assembly instruction of the fault stub, emit `[FRAMESNAP] pushed … read … match=0-or-1` (a single line, no separators), and let the comparison name the mechanism: match=1 with impossible values ⇒ the CPU pushed garbage (GB-100); match=0 ⇒ the exit path clobbers it (GB-123); snapshots < faults ⇒ nested/re-entered fault path (GB-123) | L | none | `[FRAMESNAP]` quoted verbatim from a real wave (not a synthetic probe); the verdict names **which of the three rows held** by comparing frames, not by argument; snapshot count == fault count, stated; the conclusion posted on **all four** cards so they stop re-measuring it; the falsifier stated plainly if match=1 with possible values throughout |
+ | GB-183 | **Rebase PR #255 onto main and land the ten syscalls main still lacks** — `dup`, `dup2`, `getpid`, `fork`, `execve`, `wait4`, `kill`, `getcwd`, `chdir`, `getppid`; ten of the PR's twenty numbers already landed via GB-149/165/141. | M | GB-014 | `git merge-tree --write-tree origin/main <head>` clean after the rebase, quoted; the ten Linux numbers dispatched in `sync_lower_handler_c`; each behaves as its Linux ABI requires, not merely exists; no already-landed number regressed; T1 green |
+ | GB-196 | **compat-track PT_INTERP capture + ld-linux image map + DT_NEEDED report — a glibc binary names its interpreter and first missing DSO** | M | — (the native dynamic route is landed; this is the Linux-compat rung) | On the **compat** track, `PT_INTERP` is captured and printed with the binary's real path: `elf loader: PT_INTERP /lib64/ld-linux-x86-64.so.2` (not an empty string). Quote a boot with a glibc dynamic hello staged on the image.; The loader resolves the interpreter image from the FAT16 root, maps it, and prints its `DT_NEEDED` entries — or the first missing DSO by name — instead of a generic refusal. (8.3 names: state the staged name, e.g. `LD64.SO` + `LIBC6.SO`.); **Regression:** the native `/LDHOBBY.SO` route still runs `HDYN.BIN` to its markers and exit 0 on both arches; the static-PIE compat path still runs a static hello.; **Falsifier:** on the pre-change tree the same hello prints `is not the native /LDHOBBY.SO` with an **empty** path; quote both lines. Without it the change is a message edit, not a measured step.; `make host_tests` 482/0; both arch links rc=0. |
+-
+-| GB-196 | **compat-track `PT_INTERP` capture + `ld-linux` image map + `DT_NEEDED` report** — the native `LDHOBBY.SO` route landed (`docs/shared-libs.md`), but the compat track parses without `ELF_PARSE_ALLOW_INTERP` and refuses a glibc binary with an **empty** path (`docs/linux-abi.md` §W5). First rung of the Program-2 Linux-dl ladder (GB-054) | M | — | a glibc dynamic hello prints `PT_INTERP /lib64/ld-linux-x86-64.so.2`; the loader maps the interpreter image from the FAT root and prints its `DT_NEEDED` closure or the first missing DSO by name; `HDYN.BIN` and a static hello unchanged; **falsifier:** the pre-change tree prints the empty-path refusal; T3 intel + T1 |
+ | GB-199 | **enter ld.so: map the interpreter's DT_NEEDED closure, build the Linux startup stack, and name the first unhandled syscall/fault** | M | GB-196 (landed: PT_INTERP path + LD64.SO map + DT_NEEDED report) | **Closure:** the interpreter's own `DT_NEEDED` closure (`LD64.SO` -> `LIBC6.SO` and any further entries) is mapped; each mapped DSO is printed. Quote.; **Startup stack:** argc/argv/envp/auxv with `AT_PHDR`, `AT_ENTRY`, `AT_BASE` (and `AT_PAGESZ`) are laid out for the interpreter; quote the kernel's auxv dump (a one-line-per-entry record, GB-082 lesson).; **Entry:** the kernel jumps to the interpreter's entry. The guest either executes `ld.so` or stops at the **first** unhandled syscall/fault, reported by name with the register set (`syscall=N rip=… rdi=…` or `fault VA=… PC=…`). No silent hang; a 30 s no-output hang is FAIL.; **Falsifier:** with the auxv/stack deliberately omitted (a test flag or the pre-change tree), the same jump faults at a named address — quote the contrast. Without it the stack's role is unproven.; **Regressions:** `HDYN.BIN` still reaches `HDYN: done` / exit 0; static-PIE `W0PIE.BIN` still dispatches; `make host_tests` 482/0; both arch links rc=0. |
+ 
+ ### Milestone M2 — Compat device nodes + SDL (GB-025 … GB-033)
+@@ -591,8 +590,6 @@ final list.
+ | GB-189 | **The SDL T3 runner grades a stale kernel: it reuses `disk.img` and only builds the app when absent** — `tools/sdl/run_sdl_test_app_t3.py` line 117 (`if not os.path.exists(APP): make APP`) plus the `mcopy` at 121-123 stage onto the existing image and never rebuild the kernel image. On `main 7c8f16a6` a pre-#351 `disk.img` printed `fb unavailable (errno=25)`, `blue_window_px=0`, FAIL; after `make MODE=test ARCH=intel disk.img` the same runner printed `fb /dev/fb0 fd=3 mode=1920x1080 bpp=32`, `blue_window_px=3008`, PASS | S | — | the runner builds or validates both `obj/sdl_test_app_pie` and `disk.img` before booting (or fails loudly naming the stale artifact); a documented `--no-build` A/B opt-out, default builds; falsifier: a pre-#351 `disk.img` is rebuilt (`fd=3`/`3008`/PASS) or refused by name; a clean tree gives PASS in one command; `make host_tests` green |
+ | GB-197 | **3D-device availability on the graded QEMU + GL2 surface gap — probe virtio-gpu-gl, record the capset or the absent device** | S | — (the answer gates the RTS/DSP epics, not this card) | `qemu-system-x86_64 -device virtio-gpu-gl-pci,help` on the graded host, quoted: device present or `not found`. (The coordinator host says `not found`; the farm may differ — state which host.); If present: boot with `-device virtio-gpu-gl-pci` and a guest probe that queries `VIRTGPU_GET_CAPSET`/`GETPARAM`; quote the capset id/features. If absent: boot with the plain `virtio-gpu-device` as the control and record that no 3D capset is exposed.; `docs/gl2-surface.md` either names the GL2 entrypoint boundary the Spring/DSP renderers need (with the EGL/GLX shape) or states **blocked on device** with the quoted line.; **Falsifier:** a probe that prints `3D supported` without the QEMU device line is RED; the plain `virtio-gpu-device` boot is the negative control.; `make host_tests` 482/0; both arch links rc=0. |
+ 
+-| GB-197 | **3D-device availability on the graded QEMU + GL2 surface gap** — the feasibility doc names the GL gap, and the coordinator host's QEMU has no `virtio-gpu-gl-pci`; answer it before a shim (GB-054) | S | — | the `-device virtio-gpu-gl-pci,help` line quoted for the graded host; if present, a guest `VIRTGPU_GET_CAPSET` report, if absent the plain `virtio-gpu-device` control and **blocked on device** in `docs/gl2-surface.md`; **falsifier:** "supported" without the device line is RED; T1 + T3 intel |
+-
+ ### Milestone M3 — Games (GB-034 … GB-042, native catalog = the parallel swarm)
+ 
+ | ID | Ticket | Wt | Depends | DoD |
+diff --git a/tools/board/sync_gaming_md.py b/tools/board/sync_gaming_md.py
+index d81d98bb..cef2ef38 100755
+--- a/tools/board/sync_gaming_md.py
++++ b/tools/board/sync_gaming_md.py
+@@ -48,6 +48,23 @@ def plan_id_problems(order, seed_max=SEED_MAX):
+             f"(missing={gaps}, duplicated={dups})"]
+ 
+ 
++def plan_duplicate_ids(path=None):
++    """Ids with more than one §8 row (GB-202).
++
++    parse_plan() keeps the first row for an id and silently skips later ones, so
++    plan_id_problems() sees a clean id set even when the plan carries a doubled
++    row.  This scans the raw table rows instead; one row per id is the plan's
++    contract, so a duplicate is a defect even when the id set is perfect.
++    """
++    path = path or S.PLAN
++    counts = {}
++    for line in open(path, encoding="utf-8"):
++        m = re.match(r"^\|\s*(GB-\d{3})\s*\|", line)
++        if m:
++            counts[m.group(1)] = counts.get(m.group(1), 0) + 1
++    return sorted(g for g, n in counts.items() if n > 1)
++
++
+ def board_snapshot():
+     out = {}
+     for it in board.all_issues("all"):
+@@ -180,6 +197,8 @@ def find_problems(plan, order, bd, text, verbose=False):
+     # id repeats.  §8 is organised by milestone, and mints above the seed are
+     # sparse by design — see plan_id_problems() (GB-185).
+     problems += plan_id_problems(order)
++    for gid in plan_duplicate_ids():
++        problems.append(f"plan: duplicate §8 rows for {gid} (one row per id)")
+     for gid in order:
+         t = plan[gid]
+         if t["weight"] not in ("S", "M", "L"):
+diff --git a/tools/board/sync_gaming_md_test.py b/tools/board/sync_gaming_md_test.py
+index 5d1d0903..f83b075e 100644
+--- a/tools/board/sync_gaming_md_test.py
++++ b/tools/board/sync_gaming_md_test.py
+@@ -53,6 +53,19 @@ regression = S.plan_id_problems(sparse)
+ check("no false 'missing=[148]' for the 148th (minted, sparse) row",
+       regression == [])
+ 
++# --- GB-202: a doubled §8 row is a defect even when the id set is clean ---------
++
++dup_plan = ("| ID | Ticket | Wt | Depends | DoD |\n|---|---|---|---|---|\n"
++            "| GB-196 | one | M | — | d |\n"
++            "| GB-196 | two | M | — | d |\n"
++            "| GB-197 | three | S | — | d |\n")
++with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
++    f.write(dup_plan)
++    dup_path = f.name
++check("a doubled §8 row is named", S.plan_duplicate_ids(dup_path) == ["GB-196"])
++os.unlink(dup_path)
++check("the live plan has one row per id", S.plan_duplicate_ids() == [])
++
+ # --- GB-193: --adopt-orphans row generation/insertion (pure, no board) -------
+ 
+ fixture_plan = """### Milestone M0 — Infrastructure
