@@ -60,6 +60,7 @@ void run_all_unit_tests(void) {
   time_test_suite();
   math_test_suite();
   elf_loader_test_suite(); /* docs/shared-libs.md lane B (empty until it lands) */
+  linux_compat_pi_test_suite(); /* PI futex word state machine (M6 park) */
 
   uart_puts("==================================\n");
   uart_puts("Tests run:    "); print_int(tests_run); uart_puts("\n");

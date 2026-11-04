@@ -59,8 +59,22 @@ can slip between compare and park (mismatch → `-EAGAIN`, timeout 0 → `-ETIME
 broadcast depends on it (two groups share one word with different bitsets) — and
 `WAIT_BITSET`'s timeout is absolute. `REQUEUE`/`CMP_REQUEUE` follow the raw ABI
 `futex(uaddr, op, val, val2, uaddr2, val3)` (`val` wake, `val2` requeue, `val3`
-the expected word). PI ops and `WAKE_OP` → `-ENOSYS`, Linux's own answer without
-PI futexes; nothing in the profile uses them.
+the expected word). `WAKE_OP` and the two PI **requeue** ops
+(`WAIT_REQUEUE_PI`/`CMP_REQUEUE_PI`, the condvar-on-PI-mutex path) → `-ENOSYS`
+with a counted serial row; no measured boot has issued one.
+
+**`FUTEX_LOCK_PI`/`UNLOCK_PI`/`TRYLOCK_PI` are implemented** (L25). Not for
+priority inheritance — this OS has no priority scheduling to inherit into — but
+because glibc 2.31 *probes* the kernel on the first `PRIO_INHERIT`
+`pthread_mutex_init()` (`futex(&zero, FUTEX_UNLOCK_PI|PRIVATE, 0)`); an
+`-ENOSYS` there makes `tpi_supported = -1` and every PI init return
+`EOPNOTSUPP` **without writing the mutex**, which is how the M6 park happened
+(see `docs/rimworld-launch-log.md` §16). The lock is granted by **handoff**:
+`UNLOCK_PI` writes the waiter's tid into the word before waking it, because
+glibc reads `futex_lock_pi()` returning 0 as "the kernel gave me the mutex".
+Consequently a plain `FUTEX_WAKE` and the signal-interrupt path must never wake
+a PI waiter; the signal stays pending until the lock arrives.
+
 ## 4. Robust lists — honoured, not stubbed
 
 `set_robust_list(head, 24)` records the head per thread; `get_robust_list` returns
