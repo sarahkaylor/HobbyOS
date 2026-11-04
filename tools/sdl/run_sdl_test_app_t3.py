@@ -97,8 +97,11 @@ def main():
     ap.add_argument("--timeout", type=int, default=240)
     ap.add_argument("--outdir", default=None)
     ap.add_argument("--no-gpu", action="store_true",
-                    help="boot the plain test line (no virtio-gpu device; the "
-                         "screendump cannot show the draw, so the gate fails)")
+                    help="boot without the virtio-gpu device. On the merged "
+                         "kernel the BGA/std-VGA path presents too, so this is "
+                         "a SECOND present path, not a negative control (the "
+                         "negative control is the pre-GB-032 tree); it does not "
+                         "make the screendump black.")
     args = ap.parse_args()
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -113,9 +116,39 @@ def main():
         if os.path.exists(p):
             os.remove(p)
 
-    if not os.path.exists(APP):
-        subprocess.run(["make", APP], check=True,
-                       env=dict(os.environ, TOOLS_SKIP="1"))
+    # A gate must grade THIS tree.  GB-033-V's 2026-11-04 RED was a stale
+    # obj/sdl_test_app_pie: the old script built the app only when the file was
+    # absent, so it staged the pre-PR device-free binary — no `fb /dev/fb0`
+    # line, the literal `ABS 00=512` echo, an instant exit (hence the
+    # screendump's Broken pipe) and blue=0.  Force the app, make the image
+    # current (disk.img depends on SDL_APP_PIE and stages it as
+    # /GAMES/SDLTEST.ELF), and refuse to boot a binary without the device path.
+    env = dict(os.environ, TOOLS_SKIP="1")
+    build_log = os.path.join(outdir, "build.log")
+    with open(build_log, "w") as bl:
+        for cmdline in (["make", "-B", "ARCH=intel", "MODE=test",
+                         "TOOLS_SKIP=1", APP],
+                        ["make", "-j", str(os.cpu_count() or 4),
+                         "ARCH=intel", "MODE=test", "TOOLS_SKIP=1",
+                         "hobbyos.elf", "disk.img"]):
+            r = subprocess.run(cmdline, env=env, stdout=bl,
+                               stderr=subprocess.STDOUT)
+            if r.returncode != 0:
+                print("run_sdl_test_app_t3: BUILD FAILED — " +
+                      " ".join(cmdline), flush=True)
+                print("".join(open(build_log, errors="ignore").read()
+                              .splitlines(True)[-30:]), flush=True)
+                return 2
+    with open(APP, "rb") as f:
+        if b"/dev/fb0" not in f.read():
+            print("run_sdl_test_app_t3: APPARATUS — the built app has no "
+                  "/dev/fb0 path; refusing to grade a device-free binary")
+            return 2
+    head = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+    print(f"run_sdl_test_app_t3: tree {head or '?'}, "
+          f"app {os.path.abspath(APP)}, build log {build_log}", flush=True)
+
     cfg = os.path.join(outdir, "WAVE.CFG")
     with open(cfg, "w") as f:
         f.write("SDL2TEST.BIN\n")
@@ -218,9 +251,13 @@ def main():
     rows = [ln for ln in log.splitlines()
             if "sdl test app" in ln or "[EXITPC]" in ln
             or "[WAVE-TRY]" in ln or "[ARRIVED]" in ln or "System halt" in ln]
-    print("--- GB-032 T3 rows ---")
+    print("--- sdl test app T3 rows ---")
     for ln in rows:
         print(ln)
+    if "sdl test app: fb unavailable" in log:
+        print("--- NOTE: the app ran the DEVICE-FREE fallback (no /dev/fb0). "
+              "The staged binary or the guest image does not match this tree; "
+              "that is not a draw result. ---")
     print(f"--- screendump: blue_window_px={blue} magenta_tile_px={magenta} "
           f"({shot_path}) ---")
     print(f"--- artifacts: {outdir} ---")
