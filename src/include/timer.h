@@ -19,4 +19,10 @@ void timer_reload(void);
  */
 uint64_t timer_get_ms(void);
 
+/**
+ * Gets the current system uptime in microseconds (TSC-derived; advances with
+ * interrupts disabled).  Instrumentation only — do not spin on it.
+ */
+uint64_t timer_get_us(void);
+
 #endif // TIMER_H

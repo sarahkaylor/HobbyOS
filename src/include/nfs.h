@@ -21,7 +21,8 @@
  *
  * Every request and reply is kept under a 1500-byte Ethernet frame: the
  * network stack does not reassemble IP fragments, so the client must never
- * provoke one.  READ uses a 1024-byte rsize and READDIRPLUS a 1200-byte
+ * provoke one.  READ uses a 1344-byte rsize (1472-byte datagram minus the
+ * READ reply's 128 bytes of RPC/NFS overhead) and READDIRPLUS a 1200-byte
  * maxcount hint.
  */
 
@@ -35,7 +36,18 @@
                                     * allows 255 bytes; readdir display is
                                     * narrower than the real names) */
 #define NFS_MSG_MAX         1472   /* max UDP payload we ever send */
-#define NFS_READ_CHUNK      1024   /* READ rsize */
+/* READ rsize.  The transport is UDP over a 1500-byte Ethernet MTU and this
+ * stack neither emits nor reassembles IP fragments, so a reply MUST fit one
+ * datagram: NFS_MSG_MAX (1472) minus the reply's fixed overhead
+ * (RPC header 24 + status 4 + post_op_attr 88 + count 4 + eof 4 + opaque
+ * length 4 = 128) = 1344 bytes of file data.  Asking for more would make
+ * slirp fragment the reply and the guest would splice fragments together as
+ * if they were datagrams.  The client also ADAPTS DOWN: if the server ever
+ * returns fewer bytes than asked for on a non-EOF read, read_size becomes
+ * that count, so a server with a smaller rsize is honoured instead of
+ * retried forever. */
+#define NFS_READ_RSIZE      1344   /* READ rsize actually requested */
+#define NFS_READ_DEPTH      16     /* READs kept outstanding per read() */
 #define NFS_READDIR_DCOUNT  512    /* READDIRPLUS dircount hint */
 #define NFS_READDIR_MAXC    1200   /* READDIRPLUS maxcount hint */
 #define NFS_DIR_CACHE_MAX   256    /* entries cached per directory listing
@@ -116,6 +128,21 @@ struct nfs_mount {
   uint8_t  root_fh[NFS_FH_MAX];
   uint32_t root_fh_len;
   uint32_t read_size;
+  /* L35: ONE cached READ socket per mount.  The old shape created a fresh
+   * UDP socket (and therefore a fresh ephemeral port) for every RPC; after a
+   * few thousand RPCs the per-port state on the far side of slirp made each
+   * round trip cost tens of milliseconds (measured: 124 us/RPC early in a
+   * run, 40 ms/RPC after ~20k RPCs) and the whole load crawled.  Reusing one
+   * socket removes that state churn.  `rd_busy` keeps two threads from
+   * sharing it: the loser of the CAS gets a temporary socket instead. */
+  struct socket_pcb *rd_sock;
+  volatile int rd_busy;
+  /* Adapt-down bookkeeping: a server whose rsize is smaller than ours
+   * answers short; honour it only when the SAME short count is seen twice
+   * in a row and it is a sane rsize (>= 512).  A one-off short reply must
+   * not drag read_size to 64 and turn a 64 KiB read into 1024 RPCs. */
+  uint32_t short_val;
+  uint32_t short_n;
 };
 
 /* ---- XDR writer (nfs_proto.c) ---------------------------------------- */
