@@ -5592,3 +5592,169 @@ question is the target of the *worker's* `Thread.Join`, which needs a managed
 stack; the next instrument is a working thread dump (or a breakpoint count of
 `mono_threads_signal_thread_handle` against thread exits).
 
+
+## 35. 2026-11-05 — M6/L48: the pool is EMPTY because the game is not using it; the dump stops inside Mono's suspend handshake
+
+§34.6 left one question open: "one work item never completes while the pool
+that would run it is empty". This lane answered it by counting work items at
+the only place where an *item* exists — the managed/native boundary — and the
+answer is a negative: **the ThreadPool holds no stranded item. In a 200 s run
+the game enqueues seven work items and all seven complete.** The pool is empty
+at the stall because RimWorld stopped using it, not because a worker lost
+something on its way out.
+
+### 35.1 Why Mono's own trace cannot see an item
+
+Two facts from the 6.12 sources (`mono/metadata/threadpool.c`,
+`threadpool-worker-default.c`, `mcs/.../threadpool.cs`) decide the instrument:
+
+* `ves_icall_System_Threading_ThreadPool_NotifyWorkItemQueued` is a **no-op**
+  (one perfcounter increment). Every managed enqueue calls it, so it is a free
+  and exact enqueue counter.
+* `worker.work_items_count` — the number §34.3 read as "the native hint" — is
+  incremented by `mono_threadpool_worker_request()`, i.e. once per
+  **`RequestWorkerThread` icall**, not once per item. `EnsureThreadRequested()`
+  asks for up to `processorCount` threads, so the counter is a *thread-request*
+  hint. Measured: **7 work items produced 22 requests** in one run. A zero
+  there says "no outstanding thread request", never "the queue is empty".
+
+The third boundary call is `NotifyWorkItemComplete()`, made after every item
+returns, so `enq - comp` is the number of items queued and not yet run.
+
+### 35.2 The instrument: icall accounting from the AD-9 launcher
+
+`src/user/rwmain.c` now installs three hooks with `mono_add_internal_call()`
+(a public API that *replaces* an existing registration):
+
+| icall | what it counts |
+|---|---|
+| `System.Threading.ThreadPool::NotifyWorkItemQueued` | one per managed `Enqueue` |
+| `System.Threading.ThreadPool::NotifyWorkItemComplete` | one per executed item |
+| `System.Threading.ThreadPool::RequestWorkerThread` | one per managed thread request, and whether the native pool granted it |
+
+The original function pointers come from `mono_lookup_internal_call()` on the
+methods found with `mono_class_from_name()`/`mono_class_get_method_from_name()`,
+and are still called, so the runtime's own behaviour is unchanged. The JIT
+binds an icall's address when it compiles the calling method, so a watchdog
+thread polls for the root domain, attaches, and registers **by name only** —
+a class lookup from that thread during `mono_init` aborted the runtime
+(`Assertion at object.c:1939, condition 'klass' not met`, measured), which is
+why phase 1 touches no class loader and phase 2 (the two remaining icalls)
+runs from inside the first enqueue, on a Mono thread with a live runtime.
+
+Every row carries the calling thread's tid and, for the ring dump, the managed
+caller resolved with `mono_jit_info_table_find()` on the icall's return
+address. Gated on `/TPTRACE`; nothing runs without the marker.
+
+### 35.3 The accounting, and the timeline
+
+```text
+[TPQT] t=0s  enq=0 comp=0 req=0  reqF=0
+[TPQT] t=10s enq=0 comp=0 req=0  reqF=0
+[TPQT] t=20s enq=0 comp=0 req=0  reqF=0
+[TPQT] t=25s enq=7 comp=7 req=22 reqF=0     <- the whole of the game's pool use
+[TPQT] t=30s enq=7 comp=7 req=22 reqF=0
+...                                          (frozen to the end of the run)
+[TPQSUM] enq=7 comp=7 req=22 reqF=0 stranding=0
+```
+
+Four runs agree, and the same four runs stall at the same byte:
+
+| run | `Loaded All Assemblies` | NFS bytes at the deadline | `[XSW]` | dump |
+|---|---|---|---|---|
+| baseline (no probe, no dump) | 9.476 s | 19,331,072 | 0 | — |
+| accounting run A | — | 19,335,720 | 0 | — |
+| accounting run B | 9.990 s | 19,339,984 | 0 | — |
+| accounting + `/SIGQUITON` | 9.314 s | 19,339,984 | 0 | `Full thread dump:` + `"Finalizer"`, nothing else |
+
+**Verdict: the ThreadPool is excluded.** §34.3's "capacity is not the wall", §34.1's
+"the managed exit ran", §34.2's "the main thread is not in a Join" and this
+lane's "enqueue == complete" now agree: the pool neither holds nor loses the
+item the loader waits for. The `starting = 0 working = 0 parked = 0` rows and
+the missing `work_item_count() > 0` monitor tick are the *pool being idle*, and
+an idle pool is not a bug. Any further theory that begins "the work item is in
+the pool" is refuted by 7/7.
+
+What the loader waits on is still unnamed. `Verse.GenThreading::ParallelForEach`
+is the only code in `Assembly-CSharp` that builds an `AutoResetEvent` and waits
+on it with an infinite timeout, and its IL is:
+
+```text
+foreach (var localBatch in SliceWork(list, maxDegree))
+    ThreadPool.QueueUserWorkItem(<ParallelForEach>b__0);   // return value popped
+while (Interlocked.Read(ref tasksDone) < list.Count) taskDoneEvent.WaitOne();
+```
+
+with the lambda doing `Interlocked.Add(ref tasksDone, localBatch.Count)` after
+running the batch (exceptions inside the batch are caught and logged, so a
+throwing element is not silently skipped from the count). The counts above
+say all its queued batches finished, so an unresolved `ParallelForEach` would
+need `list.Count` to exceed what `SliceWork` covered — not proven. A hook on
+`System.Threading.WaitHandle::Wait_internal` (the icall this mscorlib's
+`WaitOneNative` calls) registered at 2.5 s never fired in a 200 s run, so the
+managed wait site is still un-named; that is the next instrument.
+
+### 35.4 The managed dump: SIGQUIT lands, then Mono's own handshake stops
+
+`/SIGQUITON` fires at 60 s. The kernel now prints one row per delivery for
+SIGQUIT and the RT range (the global `[SIGD]` cap of 48 is always exhausted by
+Boehm's GC signals, which is why no earlier lane could see this), and the
+`[ALIVE-SET]` rows carry the saved user PC and its module+offset:
+
+```text
+[SIGR] pid=4 sig=3  ipc=0x1083503376 mask=0x0      <- SIGQUIT, delivered, mask empty
+[SIGR] pid=6 sig=35 ipc=0x10800DD23D mask=0x0      <- Mono's async suspend (SIGRTMIN+1)
+                                                      ... and then no further signal
+```
+
+The dump's own output stops after its first thread:
+
+```text
+Full thread dump:
+
+"Finalizer"
+```
+
+`[ALIVE-SET]` at the deadline (module offsets resolved against the pinned
+glibc 2.31 in `/tmp/glibc231`):
+
+```text
+slot=4 pid=4 st=8 pc=0x1083503376 mod=0x10834f4000+0xf376  pthread_cond_wait+0x??
+slot=6 pid=6 st=3 pc=0x108004348a mod=0x1080000000+0x4348a  sigsuspend+0x4a
+```
+
+i.e. the interrupted thread returned from the handler into its `WaitOne` cond
+wait, the one thread the dump suspended is sitting in **`sigsuspend`** — which
+is exactly what a suspended Mono thread does — and it is spinning there at
+100 % of a CPU (`[IDLESTUCK] claims: ... c6=6/9949`). No thread is parked
+inside `libmonobdwgc` at all, so the dumper is not waiting on a Mono lock in a
+way a native PC can name: it is inside `mono_thread_info_safe_suspend_and_run`
+-> `mono_threads_begin_global_suspend()`, i.e. the *global* suspend handshake,
+after having suspended one target. The failure is therefore in Mono's
+handshake, not in our SIGQUIT delivery (mask 0, delivered, handler ran).
+
+Two smaller findings belong with it. First, a suspended thread busy-spinning in
+`sigsuspend` is itself anomalous — a correctly parked suspend loop blocks — and
+`[IDLESTUCK]` shows it holding a whole vCPU for the rest of the run; either our
+`rt_sigsuspend` returns `-EINTR` on a wake that carried no deliverable signal,
+or a real signal is being re-delivered. Second, `[SIGB]` (sent-but-blocked) has
+not fired once, so no dump signal is being swallowed by a mask.
+
+### 35.5 Instruments added (all marker-gated)
+
+* `src/user/rwmain.c`: the icall accounting probe (35.2) and a stack-walk
+  primitive (`mono_jit_info_table_find` over raw stack words whose preceding
+  byte is `0xE8`, the §33/L46 filter), used for the ring dump and for waits.
+* `src/kernel/linux_compat_thr.c`: `[SIGR]` per-pid rows for SIGQUIT and
+  signals 34..40, with the target's mask.
+* `src/kernel/process.c`: `[SIGB]` (a signal the sender left pending because
+  the target blocks it) and `pc=`/`mod=` on every `[ALIVE-SET]` slot.
+
+### 35.6 Where it stops now
+
+Same ladder as §34.6 — banner, `world_stopped=0`, NFS frozen at 19.33-19.34 MB
+of 729 MiB, `[XSW]=0`, one static loading screen — but the pool is now
+*excluded by measurement* rather than suspected, and the dump's stopping point
+is localized to Mono's global-suspend handshake. The next instrument is a
+managed wait-site hook that actually binds (the `Wait_internal` registration
+never fired) or a kernel-side user-stack dump of the dumping thread.
