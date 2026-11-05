@@ -1,0 +1,45 @@
+hits=43
+phrases: {'console silent': 7, 'stale_ms=': 3, 'Error Code:': 6, 'stack trace': 5, 'Exception in Kernel Mode': 4, 'freeing root=': 2, 'halted this CPU': 16}
+L243 [console silent] Loading program for scheduler (v2 AS)[:WATC HDOG] CconsoAleT s.BileInt foN
+L1623 [stale_ms=] === T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; first stall marker in the serial) ===
+L1774 [console silent]   RTTI_T dow[WATCHDOG] consolne silent for more than 20s
+L1884 [Error Code:] 0000[KERNEL] FATAL: Exception in Kernel Mode! Vector0: 0140 Er0ror Code07: 0x09 0x0000000000000000000000000004E 02
+L2130 [Error Code:]   IPC_T STREAM child exit status 0  IPC_T STREAM EOF after both write ends closed (read -> 0)  IPC_T STREAM write on closed peer -> -1/EPIPE (no signal)  IPC_T STREAM sendmsg on cl
+L3561 [console silent] [TEST3] SU[WATCHDOGB2] c onsole silent for mloisre than 20ts
+L3909 [stack trace]   WK1C_T custom-stack thread reports the caller region: PASS
+L4140 [Exception in Kernel Mode] v2 loader: image mapped (lazy), bytes=111240 pages[KERNEL]= FATAL: Exception in Kernel28  fModirst=in ele! Vector: 1a4p=8ms
+L4141 [Error Code:]  Err/FOLor Code: D0x00TEST000.0TX00T000
+L5688 [freeing root=] Loading program for scheduler (v2 AS): TR.BINLoading program for scheduler (v2 AS): [GB071-CREATE] pid=14 ctx5=0x75580140
+L8558 [console silent]   PASS: clip b[locksWATCHDOG] co ounsole silent for mtore sidethan 20s
+L11598 [Error Code:]   IPC_T STREAM child exit status 0  IPC_T STREAM EOF after both write ends closed (read -> 0)  IPC_T STREAM write on closed peer -> -1/EPIPE (no signal)  IPC_T STREAM sendmsg on cl
+L12783 [console silent] Con[WATCHDOG] console silnent for more than 20s
+L12817 [stale_ms=] 3 1 BW0S pid=RF5_ resume_pid=T5  rebsume_sp=l0itx-0n0e0g0a0ti01v7eF-ForFigFinE-aCl7i0gn age_ms=e4d8:3 P5 syAscall=SS3
+L14377 [Error Code:]   IPC_T STREAM child exit status 0  IPC_T STREAM EOF after both write ends closed (read -> 0)  IPC_T STREAM write on closed peer -> -1/EPIPE (no signal)  IPC_T STREAM sendmsg on cl
+L15807 [stack trace]   WK1C_T custom-stack thread reports the caller region: PASS
+L16602 [Exception in Kernel Mode]  LoaFAdTAL: Excinepg ptroion ing Kramernel Mode fo! r sVecheduler c(vto2r:  A14 S):Er MD5SUM.BINror
+L17725 [console silent] EXPAND[.WATCHDOG] console sileBnt for more than 20sIN: 
+L20217 [halted this CPU] [DEADCLAIM] slot=18 pid=18 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L20218 [halted this CPU] [DEADCLAIM] slot=19 pid=19 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L20219 [halted this CPU] [DEADCLAIM] slot=46 pid=46 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L20220 [halted this CPU] [DEADCLAIM] slot=18 pid=18 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L20221 [halted this CPU] [DEADCLAIM] slot=19 pid=19 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L20222 [halted this CPU] [DEADCLAIM] slot=46 pid=46 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L20223 [halted this CPU] [DEADCLAIM] slot=18 pid=18 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L20224 [halted this CPU] [DEADCLAIM] slot=19 pid=19 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L23433 [stale_ms=] Loader (v2) starved (slot pressure):   BLKTEST P2 cold_ms=11771 warm_ms=175 speedup_x100=6726
+L23493 [stack trace]   SOCK2TST select() writability on connect completion: SKIP (network target unreachable)
+L23498 [Exception in Kernel Mode] [KERNE  L]SOCK2TST SO_ER FATAROL:R Excepti on aifter cn Kerneoln nMeodect com! Vectopletir: 6 on: SKIErrPo (r Code:n et0x0wor000000000000k 0tar00
+L24133 [Error Code:]   IPC_T STREAM child exit status 0  IPC_T STREAM EOF after both write ends closed (read -> 0)  IPC_T STREAM write on closed peer -> -1/EPIPE (no signal)  IPC_T STREAM sendmsg on cl
+L24180 [console silent]   CXX_T[WATCHDOG] t consoleh silent for more than 20s
+L24696 [stack trace]   WK1C_T custom-stack thread reports the caller region: PASS
+L26212 [freeing root=] Loading program for scheduler (v2 AS): Loading program for scheduler (v2 AS): [GB071-CREATE] pid=23 ctx5=0x7557DFC0
+L26910 [Exception in Kernel Mode] [GB071-CR[KERNEL] FATAL: EAExcepTE] tpid=46 ctx5=0xion in Kernel Mode! V7ector: 14 Error Cod4801008
+L32511 [halted this CPU] [DEADCLAIM] slot=20 pid=20 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L32512 [halted this CPU] [DEADCLAIM] slot=21 pid=21 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L32513 [halted this CPU] [DEADCLAIM] slot=25 pid=25 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L32514 [halted this CPU] [DEADCLAIM] slot=20 pid=20 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L32515 [halted this CPU] [DEADCLAIM] slot=21 pid=21 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L32516 [halted this CPU] [DEADCLAIM] slot=25 pid=25 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L32517 [halted this CPU] [DEADCLAIM] slot=20 pid=20 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L32518 [halted this CPU] [DEADCLAIM] slot=21 pid=21 name= claimed only by halted cpus -- excluded from the wave-end predicate (no CPU can run it; the resume path halted that CPU)
+L33083 [stack trace] [ORPHAN-WAIT] slot=50 pid=50 name=TRTEST.BIN parent=-1 wake_ms=0 waited_ms=60009 -- blocked past the wave budget with no possible waker: excluded from the wave-end predicate (the s

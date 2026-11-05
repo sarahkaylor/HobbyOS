@@ -1,0 +1,11 @@
+console_shred: 43 byte-interleaved record(s) in '/home/sarah/.hermes/cache/scratch/wt-gb097v2/evidence/gb097v2/serial_wave.log'
+  L243 [breaks 'console silent'] Loading program for scheduler (v2 AS)[:WATC HDOG] CconsoAleT s.BileInt foN
+  L1623 [breaks 'stale_ms='] === T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; first stall marker in the serial) ===
+  L1774 [breaks 'console silent']   RTTI_T dow[WATCHDOG] consolne silent for more than 20s
+  L1884 [breaks 'Error Code:'] 0000[KERNEL] FATAL: Exception in Kernel Mode! Vector0: 0140 Er0ror Code07: 0x09 0x0000000000000000000000000004E 02
+  L2130 [breaks 'Error Code:']   IPC_T STREAM child exit status 0  IPC_T STREAM EOF after both write ends closed (read -> 0)  IPC_T STREAM write on closed peer -> -1/EPIPE (no signa
+  L3561 [breaks 'console silent'] [TEST3] SU[WATCHDOGB2] c onsole silent for mloisre than 20ts
+  L3909 [breaks 'stack trace']   WK1C_T custom-stack thread reports the caller region: PASS
+  L4140 [breaks 'Exception in Kernel Mode'] v2 loader: image mapped (lazy), bytes=111240 pages[KERNEL]= FATAL: Exception in Kernel28  fModirst=in ele! Vector: 1a4p=8ms
+  L4141 [breaks 'Error Code:']  Err/FOLor Code: D0x00TEST000.0TX00T000
+  L5688 [breaks 'freeing root='] Loading program for scheduler (v2 AS): TR.BINLoading program for scheduler (v2 AS): [GB071-CREATE] pid=14 ctx5=0x75580140

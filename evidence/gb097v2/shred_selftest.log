@@ -1,0 +1,4 @@
+  PASS: fires on specimen (phrase 'Exception in Kernel Mode')
+  PASS: clean contiguous record not flagged
+  PASS: unrelated record not flagged
+self-test: OK
