@@ -1425,11 +1425,57 @@ static int l_proc_rt_sigsuspend(struct process *p, struct trap_frame *tf) {
      guest resumes with rax from that copy (the l_block_ms rule). */
   tf->regs[0] = (uint64_t)(int64_t)-EINTR;
   {
+    /* M6/L45: the pending check and the block MUST be one critical section.
+       process_signal() holds proc_lock across "set the pending bit + wake any
+       park", so a check made outside the lock can lose the wake: the signal
+       lands after we saw "nothing pending" but before state=BLOCKED, the
+       sender finds the thread still READY and wakes nobody, and sigsuspend
+       then sleeps for ever with an unblocked signal pending on it.  That is
+       exactly Boehm's GC restart signal (SIGXCPU) against a thread sitting in
+       GC_suspend_handler_inner's sigsuspend: the world stop is never released,
+       the suspended worker keeps every lock it held, and Mono's ThreadPool can
+       never grow again.  Re-check under the same lock that the sender takes. */
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    int late = l_pending_under(p, nm);
+    if (late) {
+      /* The signal won the race: do not park.  Linux restores the
+         pre-suspend mask and returns -EINTR; the handler runs at this
+         syscall's trap exit. */
+      p->sig_suspended = 0;
+      linux_compat_sigmask_set(p, p->sig_saved_mask);
+      p->sig_saved_mask = 0;
+      spinlock_release_irqrestore(&proc_lock, flags);
+      return l_ret(tf, -EINTR);
+    }
     p->wake_ms = 0;
     p->sig_park_kind = 1;
+    p->park_since_ms = timer_get_ms();
     p->state = PROC_STATE_BLOCKED;
     spinlock_release_irqrestore(&proc_lock, flags);
+  }
+  {
+    /* One row per (thread) sigsuspend: the park this signal has to break.
+       A restart signal that never wakes one of these is the starvation. */
+    static uint8_t sp_rows[MAX_PROCESSES];
+    int sp = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+    if (sp && sp_rows[sp] < 3) {
+      sp_rows[sp]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGSP] pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " mask=");
+      kl_hex(&kl, (unsigned long)nm);
+      kl_s(&kl, " pend=");
+      kl_hex(&kl, (unsigned long)(p->sig_pending |
+                                  (process_group(p) != p
+                                       ? process_group(p)->sig_pending
+                                       : 0)));
+      kl_s(&kl, " inh=");
+      kl_i(&kl, p->sig_in_handler);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
   }
   schedule(tf, 0);
   return 1;

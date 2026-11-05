@@ -1068,6 +1068,7 @@ static int l_futex_lock_pi(struct process *p, struct trap_frame *tf,
     }
     p->futex_uaddr = uaddr;
     p->wake_ms = (timeout_ms < 0) ? 0 : timer_get_ms() + (uint64_t)timeout_ms;
+    p->park_since_ms = timer_get_ms();
     p->context[0] = 0;
     p->state = PROC_STATE_FUTEX;
     tf->regs[0] = 0; /* resume value if the scheduler switches back here */
@@ -1382,6 +1383,7 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     p->sig_park_nr = L_SYS_futex; /* restart-on-SA_RESTART identity */
     p->context[0] = 0; /* resume value: 0 on wake */
     tf->regs[0] = 0;
+    p->park_since_ms = timer_get_ms();
     p->state = PROC_STATE_FUTEX; /* save-set member: context is saved */
     l_thr[slot].as = as;
     l_thr[slot].uaddr = uaddr;
@@ -2528,8 +2530,35 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
   }
   cur->sig_in_handler = 1;
   cur->sig_frame = 0;
+  cur->sig_frame_sig = sig;
   l_sig_drop(cur, grp, sig);
   spinlock_release_irqrestore(&proc_lock, flags);
+  /* M6/L45: per-thread plant row for the two signals that decide the
+     starvation question (SIGPWR 30 suspend / SIGXCPU 24 restart).  The
+     global [SIGD] rows are capped at 48 and were exhausted by pid 6/7/27
+     long before the pool workers existed, which is why the last
+     stop-the-world could not be read at all.  This one is capped PER PID. */
+  if (sig == 24 || sig == 30) {
+    static uint8_t plant_rows[MAX_PROCESSES];
+    int pi = (cur->pid > 0 && cur->pid < MAX_PROCESSES) ? cur->pid : 0;
+    if (pi && plant_rows[pi] < 8) {
+      plant_rows[pi]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SGPS] pid=");
+      kl_i(&kl, cur->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " ipc=");
+      kl_hex(&kl, (unsigned long)tf->elr);
+      kl_s(&kl, " susp=");
+      kl_i(&kl, cur->sig_suspended);
+      kl_s(&kl, " st=");
+      kl_i(&kl, cur->state);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
 
   uint64_t interrupted_pc = tf->elr;
   if (!l_sf_plant(cur, cur, grp, tf, sig, code, fault_addr)) {
@@ -2653,6 +2682,27 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
   }
   cur->sig_in_handler = 0;
   cur->sig_frame = 0;
+  /* M6/L45: pair the plant with its return, per pid.  A SIGPWR/SIGXCPU plant
+     with no [SIGY] is a handler that never returned -- the suspended thread
+     that keeps its locks and starves the pool. */
+  if (cur->sig_frame_sig == 24 || cur->sig_frame_sig == 30) {
+    static uint8_t ret_rows[MAX_PROCESSES];
+    int ri = (cur->pid > 0 && cur->pid < MAX_PROCESSES) ? cur->pid : 0;
+    if (ri && ret_rows[ri] < 8) {
+      ret_rows[ri]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SGY] pid=");
+      kl_i(&kl, cur->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, cur->sig_frame_sig);
+      kl_s(&kl, " rip=");
+      kl_hex(&kl, (unsigned long)rip);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  cur->sig_frame_sig = 0;
   return 1;
 }
 
@@ -2877,6 +2927,28 @@ void linux_compat_signal_interrupt(struct process *t) {
       t->sig_park_kind = 0;
       t->sig_park_nr = 0;
       l_sig_wake_row(t, sig, "sigsuspend", 0);
+      /* M6/L45: pair this with [SIGSP].  A [SIGSP] that has no [SIGW] is a
+         sigsuspend nobody ever woke; a [SIGW] with no [SGY] is a handler
+         that was entered and never returned. */
+      if (sig == 24 || sig == 30) {
+        static uint8_t sw_rows[MAX_PROCESSES];
+        int wi = (t->pid > 0 && t->pid < MAX_PROCESSES) ? t->pid : 0;
+        if (wi && sw_rows[wi] < 12) {
+          sw_rows[wi]++;
+          struct kline kw;
+          kl_init(&kw);
+          kl_s(&kw, "[SIGW] pid=");
+          kl_i(&kw, t->pid);
+          kl_s(&kw, " sig=");
+          kl_i(&kw, sig);
+          kl_s(&kw, " wait_ms=");
+          kl_i(&kw, (long)(t->park_since_ms
+                               ? timer_get_ms() - t->park_since_ms
+                               : 0));
+          kl_c(&kw, '\n');
+          kl_emit(&kw);
+        }
+      }
     } else if (t->sig_park_kind == 1) {
       /* nanosleep / clock_nanosleep: the syscall is not rewound. */
       if (!l_sig_restart_park(t, sig)) {
@@ -2895,6 +2967,69 @@ void linux_compat_signal_interrupt(struct process *t) {
     t->wake_ms = 0;
     t->state = PROC_STATE_READY;
   }
+}
+
+/* M6/L45: the lost-wake scanner.
+ *
+ * A compat thread must never sleep through a signal it would take.  Every
+ * blocking syscall checks `linux_compat_sig_deliverable()` before it commits
+ * its park, but a check and a commit in two different critical sections can
+ * still lose a wake: the sender records the bit, finds the thread not yet in
+ * its park, and wakes nobody.  The futex and rt_sigsuspend paths now re-check
+ * under proc_lock (the lock the sender holds), so the window is closed -- this
+ * scanner is the belt to that braces: it is the only place that can prove the
+ * claim "a thread sat in a park with a deliverable signal pending", and if it
+ * ever fires it repairs the wake instead of leaving the world stopped.
+ *
+ * Called from the idle loop (~every 0.5 s) with no lock held. */
+int linux_compat_lost_wake_scan(void) {
+  uint64_t now = timer_get_ms();
+  int fixed = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *t = process_get_pcb(i);
+    if (!t || !(t->abi_flags & PROC_FLAG_LINUX_ABI))
+      continue;
+    if (t->state != PROC_STATE_BLOCKED && t->state != PROC_STATE_FUTEX)
+      continue;
+    if (t->park_since_ms == 0 || now - t->park_since_ms < 250)
+      continue;
+    int sig = linux_compat_sig_deliverable(t);
+    if (!sig)
+      continue;
+    {
+      static uint8_t lw_rows[MAX_PROCESSES];
+      int li = (t->pid > 0 && t->pid < MAX_PROCESSES) ? t->pid : 0;
+      if (li && lw_rows[li] < 4) {
+        lw_rows[li]++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[LOSTW] pid=");
+        kl_i(&kl, t->pid);
+        kl_s(&kl, " sig=");
+        kl_i(&kl, sig);
+        kl_s(&kl, " st=");
+        kl_i(&kl, t->state);
+        kl_s(&kl, " wait_ms=");
+        kl_i(&kl, (long)(now - t->park_since_ms));
+        kl_s(&kl, " susp=");
+        kl_i(&kl, t->sig_suspended);
+        kl_s(&kl, " pend=");
+        kl_hex(&kl, (unsigned long)t->sig_pending);
+        kl_s(&kl, " mask=");
+        kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(t));
+        kl_s(&kl, " -> re-wake\n");
+        kl_emit(&kl);
+      }
+    }
+    /* linux_compat_signal_interrupt() is exactly the wake the sender should
+       have delivered; calling it here is the repair. */
+    linux_compat_signal_interrupt(t);
+    t->park_since_ms = 0;
+    fixed++;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return fixed;
 }
 
 /* ---- the table --------------------------------------------------------- */

@@ -487,6 +487,18 @@ struct process {
   uint32_t vdisp_gen;
   int vdisp_own;
   uint32_t vdisp_own_gen;
+
+  /* --- M6/L45: park + signal-frame bookkeeping for the starvation probe -- *
+   * park_since_ms: when this thread committed to BLOCKED/FUTEX.  The idle
+   *   lost-wake scanner uses it to name a thread that sits in a park while a
+   *   signal it would take is pending -- the exact shape of a lost
+   *   suspend/restart wakeup (Boehm's GC sigsuspend never returns and the
+   *   world stop is never released).
+   * sig_frame_sig: which signal the thread's active compat frame belongs to,
+   *   so [SIGY] rows and the stall dump can pair plant/return per signal.
+   * Both appended at the END so parallel lanes merge additively. */
+  uint64_t park_since_ms;
+  int sig_frame_sig;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
