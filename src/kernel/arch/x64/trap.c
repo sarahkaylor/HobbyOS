@@ -2905,9 +2905,14 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       extern void panic_puts(const char *s);
       extern void panic_print_hex(uint64_t v);
       extern void print_int_raw(int val);
-      extern void panic_enter(void);
+      extern int panic_claim(void);
       extern void panic_leave(void);
-      panic_enter(); /* GB-097: this path never returns; the raw sink is legal here */
+      if (!panic_claim()) {
+        /* GB-204: another CPU owns the fatal record.  Count the drop (done in
+           panic_claim), write nothing, and stop this CPU rather than
+           interleave fields into the one record. */
+        for (;;) __asm__ volatile("hlt");
+      }
       panic_puts("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
       print_int_raw((int)tf->vector);
       panic_puts(" Error Code: ");
