@@ -855,6 +855,182 @@ static int l_futex_requeue_locked(struct addr_space *as, uint64_t uaddr1,
   return moved;
 }
 
+#ifdef RW_FUTXW
+/* ---- L49: the set/wake timeline for the keys a MAIN THREAD waits on -----
+ *
+ * The question this answers is exactly one bit: when the game's main thread
+ * parks on a handle's signal condvar, does a setter ever reach the futex and
+ * how many waiters does the wake find?
+ *
+ *   [FUTXW] WAIT ...  word=  a park, with the futex word at park time
+ *   [FUTXW] WAKE ...  pre= post= parked= woke=   every wake on that key,
+ *                     with the word before and after and the number of
+ *                     queued waiters the wake actually found
+ *
+ * Three shapes are distinguishable in one boot:
+ *   no WAKE row for the key after the park      -> the signal was never issued
+ *   WAKE with parked=1, woke=1, waiter re-parks  -> our wake path is wrong
+ *   WAKE with parked=0                          -> the set came before the park
+ *                                                  (a lost wake in the caller)
+ *
+ * Gated on the build flag (make RW_FUTXW=1): an ordinary kernel is unchanged.
+ */
+#define FUTXW_MAXK 64
+static struct { uint64_t key; int pid; int waits, wakes, woke; } futxw_k[FUTXW_MAXK];
+static int futxw_kn;
+static int futxw_rows;
+
+static int futxw_slot(uint64_t key, int pid, int create) {
+  for (int i = 0; i < futxw_kn; i++)
+    if (futxw_k[i].key == key) return i;
+  if (!create || futxw_kn >= FUTXW_MAXK) return -1;
+  futxw_k[futxw_kn].key = key;
+  futxw_k[futxw_kn].pid = pid;
+  futxw_k[futxw_kn].waits = futxw_k[futxw_kn].wakes = futxw_k[futxw_kn].woke = 0;
+  {
+    struct kline k;
+    kl_init(&k);
+    kl_s(&k, "[FUTXW] KEY #");
+    kl_i(&k, futxw_kn);
+    kl_s(&k, " key=");
+    kl_hex(&k, (unsigned long)key);
+    kl_s(&k, " w32handle=");
+    kl_hex(&k, (unsigned long)(key - 0x38));
+    kl_s(&k, " waiter_pid=");
+    kl_i(&k, pid);
+    kl_c(&k, '\n');
+    kl_emit(&k);
+  }
+  return futxw_kn++;
+}
+
+static uint32_t futxw_word(struct process *p, uint64_t uaddr) {
+  uint32_t w = 0;
+  if (l_copy_from_user(p, &w, uaddr, 4) != 0) return 0xDEADBEEFu;
+  return w;
+}
+
+static int futxw_waiters(struct addr_space *as, uint64_t uaddr) {
+  int n = 0;
+  for (int i = 1; i < MAX_PROCESSES; i++)
+    if (l_futex_queued_locked(i, as, uaddr)) n++;
+  return n;
+}
+
+static void futxw_wait(struct process *p, uint64_t key, uint32_t val, long to) {
+  int s = futxw_slot(key, p->pid, 1);
+  if (s >= 0) futxw_k[s].waits++;
+  if (p->is_thread) return;              /* the leader is the main thread */
+  /* An INFINITE park is the one that has to be broken by somebody else, so
+     every one of them is printed (a 200 s run has ~200 in total).  Timed parks
+     are chatter: first 8 per key. */
+  if (to >= 0 && s >= 0 && futxw_k[s].waits > 8) return;
+  if (futxw_rows >= 600) return;
+  futxw_rows++;
+  struct kline k;
+  kl_init(&k);
+  kl_s(&k, "[FUTXW] WAIT pid=");
+  kl_i(&k, p->pid);
+  kl_s(&k, " key=");
+  kl_hex(&k, (unsigned long)key);
+  kl_s(&k, " val=");
+  kl_hex(&k, (unsigned long)val);
+  kl_s(&k, " to=");
+  kl_i(&k, to);
+  kl_s(&k, " word=");
+  kl_hex(&k, futxw_word(p, key));
+  kl_s(&k, " seq=");
+  kl_i(&k, s >= 0 ? futxw_k[s].waits : -1);
+  kl_c(&k, '\n');
+  kl_emit(&k);
+}
+
+/* Stall-time snapshot.  The per-event rows can be capped (a busy key prints
+   hundreds); this one says, at the moment the scheduler finds NO READY WORK,
+   which thread is parked on which key, for how long, and how many wakes that
+   key has seen.  Without it a capped ring reads as "no evidence". */
+void futxw_summary(void) {
+  uint64_t now = timer_get_ms();
+  static uint64_t last;
+  if (last && now - last < 1500) return;
+  last = now;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (!l_thr[i].uaddr || !l_thr[i].owner) continue;
+    struct process *p = l_thr[i].owner;
+    struct kline k;
+    kl_init(&k);
+    kl_s(&k, "[FUTXW] NOW pid=");
+    kl_i(&k, p->pid);
+    kl_s(&k, " key=");
+    kl_hex(&k, (unsigned long)l_thr[i].uaddr);
+    kl_s(&k, " parked_ms=");
+    kl_i(&k, (long)(now - p->park_since_ms));
+    kl_s(&k, " waits=");
+    kl_i(&k, (long)l_thr[i].waits);
+    kl_s(&k, " wakes=");
+    kl_i(&k, (long)l_thr[i].wakes);
+    kl_s(&k, " main=");
+    kl_i(&k, !p->is_thread);
+    kl_c(&k, '\n');
+    kl_emit(&k);
+  }
+  for (int i = 0; i < futxw_kn; i++) {
+    struct kline k;
+    kl_init(&k);
+    kl_s(&k, "[FUTXW] KEYSUM #");
+    kl_i(&k, i);
+    kl_s(&k, " key=");
+    kl_hex(&k, (unsigned long)futxw_k[i].key);
+    kl_s(&k, " by_pid=");
+    kl_i(&k, futxw_k[i].pid);
+    kl_s(&k, " waits=");
+    kl_i(&k, futxw_k[i].waits);
+    kl_s(&k, " wakes=");
+    kl_i(&k, futxw_k[i].wakes);
+    kl_s(&k, " woke=");
+    kl_i(&k, futxw_k[i].woke);
+    kl_c(&k, '\n');
+    kl_emit(&k);
+  }
+}
+
+static void futxw_wake(struct process *p, uint64_t key, uint32_t val,
+                       int parked, uint32_t pre, uint32_t post, int woke,
+                       const struct futex_ev *ev, uint64_t rip) {
+  int s = futxw_slot(key, 0, 0);
+  if (s < 0) return;                     /* not a key a main thread parks on */
+  futxw_k[s].wakes++;
+  futxw_k[s].woke += woke;
+  if (futxw_rows >= 900 && parked == 0 && woke == 0) return;
+  futxw_rows++;
+  struct kline k;
+  kl_init(&k);
+  kl_s(&k, "[FUTXW] WAKE key=");
+  kl_hex(&k, (unsigned long)key);
+  kl_s(&k, " by=");
+  kl_i(&k, p->pid);
+  kl_s(&k, " n=");
+  kl_i(&k, (long)val);
+  kl_s(&k, " pre=");
+  kl_hex(&k, pre);
+  kl_s(&k, " post=");
+  kl_hex(&k, post);
+  kl_s(&k, " parked=");
+  kl_i(&k, parked);
+  kl_s(&k, " woke=");
+  kl_i(&k, woke);
+  kl_s(&k, " pids=");
+  for (int i = 0; i < ev->nwoke; i++) { kl_i(&k, ev->woke_pids[i]); kl_c(&k, ','); }
+  kl_s(&k, " seq=");
+  kl_i(&k, futxw_k[s].wakes);
+  kl_s(&k, " rip=");
+  kl_hex(&k, (unsigned long)rip);
+  kl_c(&k, '\n');
+  kl_emit(&k);
+}
+#endif
+
+
 /* ---- PI futexes: FUTEX_LOCK_PI / UNLOCK_PI / TRYLOCK_PI -----------------
  *
  * WHY THIS EXISTS (measured, not assumed)
@@ -1381,6 +1557,9 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       }
     }
     p->sig_park_nr = L_SYS_futex; /* restart-on-SA_RESTART identity */
+#ifdef RW_FUTXW
+    futxw_wait(p, uaddr, val, (timeout_ms < 0) ? -1 : timeout_ms);
+#endif
     p->context[0] = 0; /* resume value: 0 on wake */
     tf->regs[0] = 0;
     p->park_since_ms = timer_get_ms();
@@ -1427,13 +1606,25 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
       return 1;
     }
+#ifdef RW_FUTXW
+    /* Snapshot the futex word OUTSIDE proc_lock: reading user memory takes the
+       vm lock, which must never nest inside the scheduler lock. */
+    uint32_t fx_pre = futxw_word(p, uaddr);
+#endif
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     struct futex_ev ev = {0};
     ev.op = FTR_WAKE;
     ev.pid = p->pid;
     ev.rip = tf->elr;
+#ifdef RW_FUTXW
+    int fx_parked = futxw_waiters(as, uaddr);
+#endif
     int woke = l_futex_wake_locked(as, uaddr, val, bitset, &ev);
     spinlock_release_irqrestore(&proc_lock, flags);
+#ifdef RW_FUTXW
+    futxw_wake(p, uaddr, val, fx_parked, fx_pre, futxw_word(p, uaddr), woke,
+               &ev, tf->elr);
+#endif
     /* L41: WHO wakes the main thread?  The park row says main is in
        pthread_cond_wait on a word nobody ever sets; knowing which pid used to
        wake it on that word separates "the signaler died" from "the signaler

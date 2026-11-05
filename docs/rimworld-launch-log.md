@@ -5796,3 +5796,228 @@ of 729 MiB, `[XSW]=0`, one static loading screen — but the pool is now
 is localized to Mono's global-suspend handshake. The next instrument is a
 managed wait-site hook that actually binds (the `Wait_internal` registration
 never fired) or a kernel-side user-stack dump of the dumping thread.
+
+## 36. 2026-11-05 — M6/L49: the wait site is PLINQ spooling, the completion signal is NEVER ISSUED, and the timers were a real gap
+
+§35 left two questions: *who* the main thread waits for (its managed wait site
+was un-named because the `Wait_internal` icall hook never fired) and *whether*
+the completion signal is issued at all. Both are answered here by measurement,
+and a third finding — the kernel had **no implementation of any timer syscall**
+— is closed as a real gap while being excluded as this stall's cause.
+
+### 36.1 The wait site, named: `System.Linq.Parallel` spooling
+
+The icall hook cannot be made to bind, and the reason is now a row rather than
+a guess. `mono_add_internal_call("System.Threading.WaitHandle::Wait_internal")`
+does replace the table entry — after it,
+
+```text
+[TPQW] bind arity=4 orig=0x10846d1701 hook=0x10000048c0 verify=HOOK
+```
+
+— but the JIT-compiled managed wrappers were compiled *earlier* and do not
+carry that pointer anywhere a patcher can find it:
+
+```text
+[TPQP] tag=WaitHandle/WaitOneNative4 code=0x1085531280 orig=0x10846d1701 sites=0
+       calls=+11:0x1075c89bdc +51:0x1085531479 +58:0x103d989e07 +79:0x108553146b ...
+[TPQP] tag=WaitHandle/WaitMultiple4  code=0x10855314c0 sites=0
+[TPQP] tag=NativeEventCalls/SetEvent1 code=0x1085531910 sites=0
+```
+
+`sites=0` for every one of them: the body's `call` targets are neither the
+registered icall address nor a `movabs` of it — the runtime reaches the icall
+through an indirection this patcher does not model. (The first patch attempt
+also named the wrong bodies: `WaitOne`/`WaitAny` compile with `sites=0` because
+they call the **private managed helpers** `WaitOneNative(SafeHandle,uint,bool,bool)`
+and `WaitMultiple(WaitHandle[],int,bool,bool)`, which is where the icall lives.)
+
+So the stack is taken from the thread itself instead of from the icall:
+SIGUSR2 → the parked thread's handler copies `[rsp, rsp+2048)` from its own
+ucontext (async-signal-safe: copy + flag only) → the watchdog thread resolves
+every word with `mono_jit_info_table_find`. Frame names, not addresses, and it
+works for **any** parked thread. Two samples, 30 s apart, identical:
+
+```text
+[TPWS] tgkill SIGUSR2 t=45s rc=0
+[TPWS] stack sp=0x17ffffa080 words=2048 bt=Monitor.ObjWait <- Monitor.Monitor_wait <-
+  Monitor.ObjWait <- Monitor.ObjWait <- Monitor.Wait <- Monitor.Wait <-
+  ManualResetEventSlim.Wait <- Task.AddTaskContinuation <- ManualResetEventSlim.Wait <-
+  Task.SpinThenBlockingWait <- TaskScheduler.TryRunInline <- Task.InternalRunSynchronously <-
+  Task.RunSynchronously <- SpoolingTask.SpoolStopAndGo <-
+  DefaultMergeHelper`2.System.Linq.Parallel.IMergeHelper<TInputOutput>.Execute <-
+  MergeExecutor`1.Execute
+```
+
+**The main thread is inside PLINQ's merge**, not in the loader, not in a Unity
+thread, and not in `GenThreading.ParallelForEach`. `SpoolingTask.SpoolStopAndGo`
+ran its merge task synchronously on the calling thread; `Task.RunSynchronously`
+→ `Task.InternalRunSynchronously` → `Task.SpinThenBlockingWait` is waiting on
+that task's **completion `ManualResetEventSlim`** (`SetOnInvokeMres`), and
+`ManualResetEventSlim.Wait` has fallen back to `Monitor.Wait` on its lock
+object — which is exactly the `pthread_cond_wait` park the kernel sees.
+
+`Assembly-CSharp.dll` does reference `AsParallel` (one MemberRef), so this is
+the game's own PLINQ query (RimWorld 1.6 uses PLINQ in its loading path). The
+same PLINQ shapes complete on the **host under the game's own runtime**
+(`Where(...).ToArray`, `Select(...).ToList`, `ForAll`, 32 CPUs, 8-17 ms), so
+PLINQ itself is not broken in this Mono build; the guest is what differs.
+
+### 36.2 Signal vs wake: the completion signal is NEVER ISSUED
+
+`[FUTXW]` (new, `make RW_FUTXW=1`) records the futex word before/after every
+wake, the number of queued waiters the wake found, and — at the scheduler's
+"no READY work" dump, where it cannot be capped away — which thread is parked
+on which key and how long it has been there:
+
+```text
+[FUTXW] KEY #62 key=0x104D7F0C68 w32handle=0x104D7F0C30 waiter_pid=4
+[FUTXW] NOW pid=4 key=0x104D7F0C68 parked_ms=3341    waits=128 wakes=107 main=1
+[FUTXW] NOW pid=4 key=0x104D7F0C68 parked_ms=61363   waits=128 wakes=107 main=1
+[FUTXW] NOW pid=4 key=0x104D7F0C68 parked_ms=116126  waits=128 wakes=107 main=1
+[FUTXW] KEYSUM #62 key=0x104D7F0C68 by_pid=4 waits=1 wakes=0 woke=0
+```
+
+One park on that key (the stall), **zero wakes for 116 s**, while the same
+instrument shows the wake path working everywhere else in the same run
+(`WAKE ... parked=1 woke=1 pids=4,` on the startup keys, and `parked=2 woke=1`
+under contention). The word's value is irrelevant here: no `mono_w32handle_set`
+/ `mono_os_cond_signal` ever reached that handle's condvar.
+
+**Verdict: the signal is never issued. This is not a dropped wake.** Every
+theory that begins "the kernel wakes the wrong waiter" is refuted for this key.
+
+### 36.3 The arithmetic reconciled: 7/7 has nothing to do with the wait
+
+`enq=7 comp=7` is right and the wait is still real, because the task the main
+thread awaits **was never enqueued at all**:
+
+```text
+[TPQT] t=25s enq=7 comp=7 req=20 reqF=0
+[TPQT] t=30s enq=7 comp=7 req=20 reqF=0
+...                                (frozen through the whole 116 s park)
+[TPQT] t=135s enq=7 comp=7 req=20 reqF=0
+```
+
+The park begins at ~t=34 s and no enqueue, no request and no completion happens
+after t=25 s. So:
+
+* the seven `ThreadPoolTaskScheduler.QueueTask` items completed (§35), and the
+  main thread does **not** wait on any of them;
+* the PLINQ merge task it waits on was neither queued to the pool
+  (`enq` would be 8) nor completed — it is a `Task` that
+  `Task.InternalRunSynchronously` is waiting for while nothing can complete it;
+* therefore the missing signal is **upstream of the ThreadPool**: no work item
+  is stranded, because no work item for this task exists. §34.6's "one work
+  item never completes while the pool is empty" is the same fact seen from the
+  wrong end.
+
+### 36.4 Timers: a real gap, closed — and excluded as this stall's cause
+
+The kernel had **no** `timerfd`, `setitimer`, `alarm`, `timer_create` or
+`epoll` implementation: `getitimer(36)` was in no table, and 37/38, 222-226 and
+283/286/287 were not even named in `linux_syscall.h`, so all of them answered
+ENOSYS. A `Task` whose continuation needed a timer would hang exactly like
+§36.1, so the gap had to be closed and then excluded by measurement.
+
+Implemented (`src/kernel/linux_compat_timers.c`, one 100 Hz tick, no per-timer
+thread): `setitimer`/`getitimer`/`alarm`/`pause`, POSIX
+`timer_create/settime/gettime/getoverrun/delete` (SIGEV_SIGNAL and SIGEV_NONE),
+`timerfd_create/settime/gettime` with a real `FILE_TYPE_TIMERFD` (read returns
+the accumulated u64 and drains it, poll/select report it readable, a read with
+none pending parks until the next expiry), and a level-triggered `epoll`
+(`create/create1/ctl/wait/pwait`) built on the kernel's one readiness engine,
+`file_poll`.
+
+`src/user/linux_probe_timers.c` (ordinary musl program, runs on the host and in
+the guest) is the differential. Host vs guest, same binary:
+
+| row | host | guest |
+|---|---|---|
+| `timerfd_create/settime/gettime` | ok, left=49ms | ok, left=49ms |
+| `timerfd read` (50 ms) | 50 ms | 60 ms |
+| `poll(timerfd)` (20 ms) | 20 ms | 25 ms |
+| `setitimer` + SIGALRM (50 ms) | 50 ms | 67 ms |
+| `alarm(1)` | 1000 ms | 1020 ms |
+| `timer_create` + SIGALRM (60 ms) | 60 ms | 76 ms |
+| `epoll_wait` empty (60 ms) | 60 ms | 65 ms |
+| `poll(NULL,0,60)` / `select` / `nanosleep` | 60/60/60 ms | 68/69/69 ms |
+| `done rc=` | 0 | 0 |
+
+The guest's extra 5-20 ms is the 100 Hz tick, not a defect. Gate:
+`bash tools/gate/t3_linux_probe.sh timers` (PASS, `done rc=0`).
+
+Managed side, under **the game's own runtime** (`tools/rw/mono-probe/timers.cs`
+via `tools/rw/run-tp-probe.sh`):
+
+```text
+A Task.Delay(50).ContinueWith OK
+B Timer(50ms) OK
+C Task.Run().Wait OK
+D chained continuations OK
+E Task.Delay(50).Wait OK
+F Task.Delay(300).Wait ms=319
+TIMERS-OK
+```
+
+So Mono's own Timer/Task machinery works in this guest, and `Task.Delay` fires
+on time. **Timers are excluded** — and the ENOSYS list they used to sit on is
+now empty for this family.
+
+### 36.5 Instruments added (all gated)
+
+* `src/user/rwmain.c`: the SIGUSR2 stack-capture handler + `mono_jit_info_table_find`
+  resolver (`[TPWS]`), the corrected `Wait_internal` ABI (it is
+  `(IntPtr* handles, int n, bool waitAll, int ms)`, not `(handle, ms, ...)`;
+  L48's hook would have mis-read its arguments even if it had fired), the
+  `bind/verify` + `[TPQP] calls=` row, and `[TPQE]` enqueue stacks.
+* `src/kernel/linux_compat_thr.c`: `[FUTXW]` (RW_FUTXW) — per-key WAIT/WAKE
+  timeline with the futex word before/after, waiters found, and an uncapped
+  `[FUTXW] NOW`/`KEYSUM` snapshot from the scheduler's no-work dump
+  (`src/kernel/process.c`).
+* `src/kernel/linux_compat_timers.c`, `src/user/linux_probe_timers.c`,
+  `tools/rw/mono-probe/timers.cs`, `tools/gate/t3_linux_probe.sh timers`.
+
+### 36.6 Where it stops, and the next single step
+
+The ladder is unchanged (banner, `world_stopped=0`, NFS frozen at 19.3 MB of
+729 MiB, `[XSW]=0`, one static loading screen) but the wall is now named
+precisely: **the main thread is in PLINQ's `SpoolingTask.SpoolStopAndGo`, waiting
+on a task-completion `ManualResetEventSlim` that nothing ever sets, and the
+task was never enqueued.**
+
+Two candidates remain, and they are separable in one boot:
+
+1. `Task.InternalRunSynchronously` queued the task to a scheduler that dropped
+   it (the enqueue would then be invisible to `NotifyWorkItemQueued` only if it
+   went through a path that does not call it — worth checking by hooking
+   `TaskScheduler.InternalQueueTask`'s callers instead of the pool's icall);
+2. the task completed *before* `Task.AddTaskContinuation(mres)` registered the
+   wait, and the waiter therefore blocks on a signal that was issued earlier and
+   consumed by nobody — the classic Mono `SpinThenBlockingWait` window, made
+   wide by this guest's timing.
+
+The discriminator is the awaited task's state at the park: print
+`task.IsCompleted`/`Task.Status` for the task `RunSynchronously` was given
+(a hook on `Task.InternalRunSynchronously` plus one field read), or hook
+`Task.AddTaskContinuation` and print its return value on that thread. If it
+returns false, the signal was issued before the wait — a lost wake *inside
+Mono*, and the kernel is not the cause.
+
+### 36.7 The 3-run ladder (deterministic, not intermittent)
+
+`bash tools/rw/run-rimworld-desktop.sh --timeout 400 --run-timeout 180`, three
+times, nothing staged but the build:
+
+| run | NFS bytes at the deadline | `[XSW]` | frame content |
+|---|---|---|---|
+| 1 | 19,344,568 | `n=1 swap=1 put=1 putok=1 flush=83 crc=0x940850F19945C95B changed=0` | `nz=921600/921600 box=0,0,1279,719` |
+| 2 | 19,344,568 | identical (same CRC, `changed=0`) | identical |
+| 3 | 19,344,568 | identical (same CRC, `changed=0`) | identical |
+
+Byte-for-byte the same stall in 3 of 3: one present, the same buffer checksum,
+no second swap, NFS frozen at 19.34 MB of 729 MiB, and the loading screen still
+on screen (the `[XSW]` row proves the client presented exactly one full-opaque
+1280x720 frame; there is no main menu, so no fps number is meaningful). This is
+the §35 ladder reproduced exactly — the stall is deterministic, which is what
+makes the single remaining question in §36.6 worth one more instrument.

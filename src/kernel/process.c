@@ -2270,6 +2270,12 @@ void schedule(struct trap_frame *tf, int is_yield) {
         db_s(&d, "\n");
         db_emit(&d);
       }
+#ifdef RW_FUTXW
+      /* L49: at the moment the scheduler finds no runnable work, say which
+         thread is parked on which futex key and what that key has seen.  The
+         per-event [FUTXW] rows are capped; this row is not. */
+      { extern void futxw_summary(void); futxw_summary(); }
+#endif
     }
   alive_dump_done:;
 

@@ -91,6 +91,9 @@ sed -e 's|\$mono_libdir/libmono-native.so|/usr/lib/libmono-native.so|g' \
     "$MB/etc/mono/config" >"$OUT/MONO.CONFIG"
 stage "$OUT/MONO.CONFIG" ::/MONO.CONFIG
 stage "$MAN/mscorlib.dll" ::/usr/lib/mono/4.5/mscorlib.dll
+# LINQ/PLINQ probes need System.Core staged as an assembly, not just as a
+# reference inside the probe.
+stage "$MAN/System.Core.dll" ::/usr/lib/mono/4.5/System.Core.dll
 stage "$EXE" ::/TP.EXE
 stage "$OUT/mono-launch" ::/MONO.EXE
 printf 'MONO.EXE --config /MONO.CONFIG /TP.EXE\n' >"$OUT/WAVE.CFG"

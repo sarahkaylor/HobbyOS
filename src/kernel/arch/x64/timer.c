@@ -226,6 +226,15 @@ void timer_init(void) {
 void timer_reload(void) {
   timer_ticks++;
   lapic_timer_calibration_tick();
+  /* L49: the Linux-ABI timer family's only clock.  A fixed 48-entry table and
+     no per-timer thread: an expiry raises the configured signal or bumps a
+     timerfd's counter (src/kernel/linux_compat_timers.c).  Called here because
+     this is the one periodic tick the kernel actually has, on CPU 0, with
+     interrupts off, and the work is lock-and-load only. */
+  {
+    extern void linux_compat_timer_tick(uint64_t now);
+    linux_compat_timer_tick(timer_get_ms());
+  }
   // NOTE: We intentionally do NOT call virtio_net_handle_irq() here.
   // The provider_loop on CPU 0 polls the RX used ring directly via poll_rx.
   // Calling handle_irq from ANY CPU's timer ISR reads inb(ISR) which clears

@@ -61,7 +61,12 @@ typedef enum {
      fstat()s the handle -- a bare fd number with no file object behind it
      throws ArgumentException ("handle"/"Invalid") before the first managed
      statement.  Appended last: no values shift. */
-  FILE_TYPE_CONSOLE
+  FILE_TYPE_CONSOLE,
+  /* L49: a timerfd (src/kernel/linux_compat_timers.c).  Readable when it has
+     unread expirations; read(2) drains them as one u64. */
+  FILE_TYPE_TIMERFD,
+  /* L49: an epoll instance (src/kernel/linux_compat_timers.c). */
+  FILE_TYPE_EPOLL
 } file_type_t;
 
 struct vm_object;
@@ -125,6 +130,14 @@ struct file {
                                         holds one object ref per fd instance */
       int mfd_flags;               /**< MFD_* passed at create (recorded) */
     } memfd;
+    struct {
+      int slot;                    /**< L49: index into linux_compat_timers'
+                                        timer table */
+    } timerfd;
+    struct {
+      int slot;                    /**< L49: index into linux_compat_timers'
+                                        epoll table */
+    } epollfd;
   };
 };
 
