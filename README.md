@@ -69,17 +69,27 @@ brew install llvm lld qemu dosfstools mtools
 # 3. host tools for the X11/IceWM desktop build, plus the harness helpers
 brew install meson ninja cmake xkbcomp xkeyboard-config
 brew install ccache xz socat python@3
+
+# 4. bash 5 — Apple ships bash 3.2 and the vendor build scripts use bash-4
+#    features (`mapfile`, empty-array expansion under `set -u`)
+brew install bash
 ```
 
 The Makefile points straight at `/opt/homebrew/opt/llvm/bin` and
-`/opt/homebrew/sbin/mkfs.fat`, so no PATH juggling is needed for `make`. Two
-things the IceWM build does look up through the environment on macOS (the X
-keyboard data lives under the Homebrew prefix, not `/usr/share/X11/xkb`):
+`/opt/homebrew/sbin/mkfs.fat`, and its macOS branch exports the two things the
+vendor scripts would otherwise need by hand: `/opt/homebrew/bin` on `PATH`
+(Homebrew `bash`, and the `llvm-*` tools that `third_party/x11` and
+`tools/build_libs.sh` invoke by name) and
+`XKB_CONFIG_ROOT=$(brew --prefix)/share/X11/xkb` (the IceWM/X-server keymap;
+the X keyboard data is not in `/usr/share/X11/xkb` on macOS). Nothing else
+needs exporting for `make`.
 
-```bash
-export XKB_CONFIG_ROOT="$(brew --prefix)/share/X11/xkb"   # for third_party/x11/build.sh
-export PATH="/opt/homebrew/opt/llvm/bin:$PATH"            # for scripts that call clang/llvm-* by name
-```
+`SDLAPP.BIN` (the GB-137 SDL test fixture) is built with `musl-gcc`, which
+macOS does not have, and no Homebrew musl cross toolchain can link
+`-static-pie` (all ship a non-PIC `libc.a`). On macOS the build therefore
+stages the committed musl static-PIE cache instead of failing; see
+`third_party/sdl/README.md`. Linux always builds it from source with
+`musl-tools`.
 
 Homebrew's `qemu` ships the EDK2 firmware the Makefile expects
 (`/opt/homebrew/share/qemu/edk2-aarch64-code.fd`,
