@@ -18,9 +18,24 @@ ifeq ($(OS),macos)
   LD = /opt/homebrew/bin/ld.lld
   OBJCOPY = /opt/homebrew/opt/llvm/bin/llvm-objcopy
   AR = /opt/homebrew/opt/llvm/bin/llvm-ar
+  # ELF readers for the evidence gates (tools/build_libs.sh).  Homebrew's llvm
+  # is keg-only, so llvm-readelf/llvm-nm are NOT on PATH: without these the
+  # libc.so gates call `llvm-readelf`, get "command not found" for every probe
+  # and report a wall of FAILs (soname '<none>', no PT_TLS, ...) on a good .so.
+  LLVM_NM ?= /opt/homebrew/opt/llvm/bin/llvm-nm
+  LLVM_READELF ?= /opt/homebrew/opt/llvm/bin/llvm-readelf
   MMD = /opt/homebrew/bin/mmd
   MCOPY = /opt/homebrew/bin/mcopy
   MKFS_FAT = /opt/homebrew/sbin/mkfs.fat
+  # Homebrew's prefix leads PATH for recipes.  Two things need it: `bash` (Apple
+  # ships 3.2; the vendor build scripts use bash-4 features -- mapfile in
+  # third_party/x11/build-server.sh, empty-array expansion under `set -u` in
+  # build.sh -- and die on 3.2) and anything else the scripts call unqualified.
+  export PATH := /opt/homebrew/bin:$(PATH)
+  # The X server build compiles a keymap from xkeyboard-config, which lives
+  # under the Homebrew prefix on macOS, not /usr/share/X11/xkb.  Default it
+  # here so `make run` works without the manual export the README documents.
+  export XKB_CONFIG_ROOT ?= /opt/homebrew/share/X11/xkb
   EDK2_X86_64 = /opt/homebrew/share/qemu/edk2-x86_64-code.fd
   EDK2_AARCH64 = /opt/homebrew/share/qemu/edk2-aarch64-code.fd
   QEMU_DISPLAY = cocoa
@@ -30,6 +45,8 @@ else
   LD = ld.lld
   OBJCOPY = llvm-objcopy
   AR = ar
+  LLVM_NM ?= llvm-nm
+  LLVM_READELF ?= llvm-readelf
   MMD = mmd
   MCOPY = mcopy
   MKFS_FAT = mkfs.fat
@@ -1208,15 +1225,22 @@ $(OBJ_DIR)/libcxx.a: $(LIBCXX_VENDOR)/build-target.sh $(LIBCXX_VENDOR)/sources.t
 # Additive by design: this lane touches no other build step.
 ICU_DIR = third_party/icu-78.3
 ICU_MANIFEST = $(OBJ_DIR)/icu/MANIFEST.txt
+# configure's link tests need a driver that emits ELF.  On macOS clang hands
+# every x86_64-none-elf link to /usr/bin/gcc (Apple's clang shim), which drives
+# the Mach-O linker and dies on the ELF flags; the repo's cc-x86-none-elf.sh
+# compiles with clang and links with ld.lld directly, which is the same recipe
+# the rest of the userland build uses.  Linux keeps $(CC)/$(CXX) untouched.
+ICU_CC = $(if $(filter macos,$(OS)),$(CURDIR)/tools/cc-x86-none-elf.sh,$(CC))
+ICU_CXX = $(if $(filter macos,$(OS)),$(CURDIR)/tools/cc-x86-none-elf.sh,$(CXX))
 
 $(ICU_MANIFEST): $(ICU_DIR)/build-target.sh $(ICU_DIR)/fetch.sh $(ICU_DIR)/build-host.sh $(ICU_DIR)/config/mh-unknown $(ICU_DIR)/data-filter-en.json $(ICU_DIR)/probe/icu_target_probe.cpp
 	@mkdir -p $(OBJ_DIR)/icu
-	bash $(ICU_DIR)/build-target.sh --arch $(ARCH)
+	CC="$(ICU_CC)" CXX="$(ICU_CXX)" bash $(ICU_DIR)/build-target.sh --arch $(ARCH)
 
 # Guard against a hand-deleted archive under an up-to-date MANIFEST: the
 # script re-stages the archives and rewrites the manifest (~1s warm).
 $(OBJ_DIR)/icu/libicuuc.a: $(ICU_MANIFEST)
-	@test -f $@ || bash $(ICU_DIR)/build-target.sh --arch $(ARCH)
+	@test -f $@ || CC="$(ICU_CC)" CXX="$(ICU_CXX)" bash $(ICU_DIR)/build-target.sh --arch $(ARCH)
 
 # The smoke TU compiles against the extracted ICU headers (gitignored,
 # created by the manifest rule) with the house user flags;
@@ -1228,7 +1252,7 @@ $(OBJ_DIR)/icu/libicuuc.a: $(ICU_MANIFEST)
 # missing <unicode/utypes.h>.  The guard invalidates the MANIFEST so
 # build-target.sh self-heals (fetch -> extract -> reconfigure -> rewrite).
 $(ICU_DIR)/src/source/common/unicode/utypes.h: $(ICU_MANIFEST)
-	@test -f $@ || { rm -f $(ICU_MANIFEST); bash $(ICU_DIR)/build-target.sh --arch $(ARCH); test -f $@; }
+	@test -f $@ || { rm -f $(ICU_MANIFEST); CC="$(ICU_CC)" CXX="$(ICU_CXX)" bash $(ICU_DIR)/build-target.sh --arch $(ARCH); test -f $@; }
 
 $(OBJ_DIR)/icu_smoke.o: src/user/icu_smoke.c $(USER_LIBC) $(USER_HDRS) $(ICU_MANIFEST) $(ICU_DIR)/src/source/common/unicode/utypes.h
 	@mkdir -p $(OBJ_DIR)
@@ -2740,11 +2764,11 @@ LIBS_SH = tools/build_libs.sh
 HDYN_BIN = $(OBJ_DIR)/HDYN.BIN
 
 $(OBJ_DIR)/libc.so: $(OBJ_DIR)/libc.a src/libc/libc.map src/libc/linker_so.ld $(LIBS_SH)
-	@$(LIBS_SH) $(ARCH)
+	@CC="$(CC)" LD="$(LD)" NM="$(LLVM_NM)" READELF="$(LLVM_READELF)" $(LIBS_SH) $(ARCH)
 
 $(OBJ_DIR)/LDHOBBY.SO: src/user/ld/ldso.c src/user/ld/elf_dyn.c src/user/ld/mmap_io.c \
                        src/user/ld/strtab.c src/include/ldso.h $(OBJ_DIR)/libc.a $(LIBS_SH)
-	@$(LIBS_SH) build_interp $(ARCH)
+	@CC="$(CC)" LD="$(LD)" NM="$(LLVM_NM)" READELF="$(LLVM_READELF)" $(LIBS_SH) build_interp $(ARCH)
 
 # A dynamically linked program is position independent by construction (it is
 # placed at a base the interpreter picks), so its TUs take -fPIC.
@@ -3264,7 +3288,16 @@ $(FB_MMAP_TEST): src/host/fb_mmap_test.c src/kernel/fb_mmap.c src/kernel/fb_ioct
 # about any earlier 0xCF8 fault (that control rebuilt a third, non-identical
 # binary — see GB-137's card).  A missing musl-gcc must fail the build loudly
 # rather than silently shipping a glibc binary.
-MUSL_CC ?= musl-gcc
+#
+# macOS has no `musl-gcc` (that wrapper is Debian/Ubuntu musl-tools), and no
+# Homebrew musl cross toolchain can stand in: they all ship a static-only
+# (non-PIC) libc.a, so `-static-pie` dies with "relocation R_X86_64_32 ... can
+# not be used when making a PIE object", and `zig cc` emits PT_TLS + TPOFF
+# relocations the loader refuses by name.  So only a real musl-gcc counts as a
+# compiler here; without one, tools/sdl/build_sdl_pie.sh stages the committed
+# musl static-PIE cache (third_party/sdl/README.md) and refuses a stale or
+# unverified one -- never a glibc binary, per the rule above.
+MUSL_CC ?= $(shell command -v musl-gcc 2>/dev/null)
 SDL_APP_PIE = obj/sdl_test_app_pie
 # GB-184-V RED: the disk.img prerequisite list is parsed at Makefile:2392,
 # BEFORE this definition, so GNU make expanded $(SDL_APP_PIE) to empty there
@@ -3272,9 +3305,9 @@ SDL_APP_PIE = obj/sdl_test_app_pie
 # built (rc=2; a warm tree hid it).  Re-declare the dependency here, after the
 # definition, so the cold path always builds the PIE before the image.
 disk.img: $(SDL_APP_PIE)
-$(SDL_APP_PIE): tools/sdl/sdl_test_app.c src/include/fb_pixel.h src/include/linux_input.h src/include/display_mode.h
+$(SDL_APP_PIE): tools/sdl/sdl_test_app.c src/include/fb_pixel.h src/include/linux_input.h src/include/display_mode.h tools/sdl/build_sdl_pie.sh
 	@mkdir -p obj
-	$(MUSL_CC) -fPIE -static-pie -Isrc/include tools/sdl/sdl_test_app.c -o $@
+	@bash tools/sdl/build_sdl_pie.sh $@ "$(MUSL_CC)"
 
 SDL_TEST_APP_HOST = sdl_test_app_test_host
 $(SDL_TEST_APP_HOST): src/host/sdl_test_app_host.c tools/sdl/sdl_test_app.c src/kernel/elf_image.c src/include/fb_pixel.h src/include/linux_input.h src/include/linux_joystick.h src/include/elf_image.h src/include/display_mode.h $(SDL_APP_PIE)

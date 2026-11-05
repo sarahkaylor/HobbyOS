@@ -87,7 +87,23 @@ hb_mark() { printf '%s\n' "$2" > "$HB_PREFIX/.stamps/$1"; }
 
 # hb_pkg_lock <pkg>: serialise installs of one package into a shared prefix
 # across concurrently building lanes (released when the subshell exits).
-hb_pkg_lock() { exec 9>"$HB_PREFIX/.stamps/.$1.lock"; flock 9; }
+# flock(1) is util-linux: Linux has it, macOS does not.  Where it is missing,
+# take an atomic mkdir lock instead (removed by the EXIT trap) so two lanes
+# still cannot install into the prefix at once.
+hb_pkg_lock() {
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$HB_PREFIX/.stamps/.$1.lock"; flock 9
+  else
+    local lk="$HB_PREFIX/.stamps/.$1.lockdir" n=0
+    mkdir -p "$HB_PREFIX/.stamps"
+    until mkdir "$lk" 2>/dev/null; do
+      n=$((n + 1))
+      [ "$n" -gt 600 ] && hb_die "timed out waiting for the $1 build lock ($lk)"
+      sleep 1
+    done
+    trap "rmdir '$lk' 2>/dev/null || true" EXIT
+  fi
+}
 
 # hb_src <pkg> <tarball>: fresh extraction into $HB_SRC_DIR/<pkg> (the
 # tarball's top dir stripped) + every patches/<pkg>/*.patch in name order
