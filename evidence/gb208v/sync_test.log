@@ -1,0 +1,25 @@
+  PASS: seed GB-001..GB-147 alone is valid
+  PASS: sparse ids above the seed are valid
+  PASS: a gap inside the seed fails, naming the missing id
+  PASS: a duplicate fails, naming the id
+  PASS: no false 'missing=[148]' for the 148th (minted, sparse) row
+  PASS: a doubled §8 row is named
+  PASS: the live plan has one row per id
+  PASS: row carries id, weight and depends
+  PASS: row escapes a literal pipe
+  PASS: row includes both DoD items
+  PASS: row stops at the next section
+  PASS: a wrapped DoD line joins its item
+  PASS: a wrapped DoD line does not start a new item
+  PASS: row lands in the M4 table
+  PASS: row lands after the M4 rows
+  PASS: row lands in M0's table
+  PASS: a following heading stays on its own line
+CANNOT ADOPT GB-901: no wt-S/M/L label
+  PASS: a mint with no wt label is refused
+  PASS: an unknown milestone is refused by name
+CANNOT ADOPT GB-902: milestone None is not a known MS_KEY
+  PASS: adopt skips a card with no milestone
+  PASS: adopt takes the known-milestone card
+
+SYNC_GAMING_MD_TEST: PASS — seed gaps/duplicates fail, sparse mints pass
