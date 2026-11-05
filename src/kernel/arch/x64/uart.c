@@ -1,4 +1,5 @@
 #include "lock.h"
+#include "kline.h"
 #include <stdint.h>
 
 /** The single console lock, shared with the arch-independent print
@@ -272,3 +273,121 @@ void uart_puts(const char *s) {
   }
   spinlock_release_irqrestore(&uart_lock, flags);
 }
+
+#ifdef PANIC_IPI_TEST
+/* ---- GB-207: opt-in two-CPU panic-injection vehicle ---------------------
+   A test-only IPI vector (0x83) makes CPU1 enter the fatal-record path while
+   CPU0 holds GB-204's claim and is writing its own record.  The proof is one
+   record and one counted drop (panic_sink_dropped); the same vehicle built on
+   the pre-fix tree, where every CPU writes, shows two records.  The driver is
+   selected by the build flag PANIC_IPI_TEST and is absent from every default
+   kernel (no boot-time cost, no default-wave timing change). */
+extern uint32_t get_cpuid(void);
+extern void print_int_raw(int val);
+extern void x64_send_test_ipi(uint32_t cpu, uint32_t vector);
+
+volatile int gb207_cpu1_ready = 0;
+static volatile int gb207_ipi_seen = 0;
+static volatile int gb207_records = 0;
+
+#ifndef GB207_PREFIX_NO_CLAIM
+int panic_dropped_count(void) {
+  return __atomic_load_n(&panic_sink_dropped, __ATOMIC_RELAXED);
+}
+#endif
+
+static void gb207_record(const char *who, uint32_t cpu) {
+  __atomic_add_fetch(&gb207_records, 1, __ATOMIC_RELAXED);
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[KERNEL] FATAL: GB-207 injected record by ");
+  kl_s(&kl, who);
+  kl_s(&kl, "  CPU: ");
+  kl_i(&kl, (int)cpu);
+  kl_c(&kl, '\n');
+  kl_emit(&kl); /* one record, one lock (GB-082) */
+}
+
+/* Vector 0x83, CPU1's context (trap.c dispatch).  A claim loser must write
+   nothing: panic_claim() has already counted the drop and put the COM2 line
+   on the wire.  Returning keeps CPU1 alive for the rest of the boot, which is
+   what makes this vehicle non-perturbing to the wave that follows. */
+void gb207_ipi_handler(void) {
+  uint32_t me = get_cpuid();
+  gb207_ipi_seen = 1;
+#ifdef GB207_PREFIX_NO_CLAIM
+  /* Pre-fix tree: no claim exists, so this CPU writes its own fatal record —
+     exactly the two-record failure GB-204 fixes. */
+  gb207_record("cpu1", me);
+#else
+  if (!panic_claim())
+    return;
+  gb207_record("cpu1", me);
+  panic_leave();
+#endif
+}
+
+void gb207_run(void) {
+  if (get_cpuid() != 0)
+    return;
+  for (volatile uint64_t spin = 0; spin < 400000000ULL && !gb207_cpu1_ready; spin++)
+    __asm__ volatile("pause");
+  if (!gb207_cpu1_ready) {
+    uart_puts("[GB207] SKIP: cpu1 never reached interrupts_enable\n");
+    return;
+  }
+  uart_puts("[GB207] two-CPU panic injection: cpu0 claims, fires IPI 0x83 at cpu1 mid-record\n");
+#ifndef GB207_PREFIX_NO_CLAIM
+  if (!panic_claim()) {
+    uart_puts("[GB207] FAIL: cpu0 could not claim the sink\n");
+    return;
+  }
+  int dropped_before = panic_dropped_count();
+#endif
+  /* Send before writing and leave only after cpu1's attempt: the claim is
+     held across the whole record, so cpu1's claim can only lose.  Retry a few
+     times: a fixed IPI written while the ICR is busy is silently lost. */
+  for (int attempt = 0; attempt < 2 && !gb207_ipi_seen; attempt++) {
+    x64_send_test_ipi(1, 0x83);
+    for (volatile uint64_t spin = 0; spin < 20000000ULL && !gb207_ipi_seen; spin++)
+      __asm__ volatile("pause");
+  }
+  gb207_record("cpu0", get_cpuid());
+  for (volatile uint64_t spin = 0; spin < 20000000ULL && !gb207_ipi_seen; spin++)
+    __asm__ volatile("pause");
+#ifndef GB207_PREFIX_NO_CLAIM
+  panic_leave();
+#endif
+  {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[GB207] records=");
+    kl_i(&kl, __atomic_load_n(&gb207_records, __ATOMIC_RELAXED));
+#ifndef GB207_PREFIX_NO_CLAIM
+    kl_s(&kl, " dropped_before=");
+    kl_i(&kl, dropped_before);
+    kl_s(&kl, " dropped_after=");
+    kl_i(&kl, panic_dropped_count());
+#else
+    kl_s(&kl, " mode=pre-fix-no-claim");
+#endif
+    kl_s(&kl, gb207_ipi_seen ? " ipi=seen\n" : " ipi=MISSED\n");
+    kl_emit(&kl);
+  }
+}
+
+/* Called from the CPU0 timer tick (trap.c, vector 32).  The injection must
+   run AFTER the wave starts: a secondary sits in start_scheduler's IF=0 wait
+   until there is a process to run, so an early IPI is never delivered
+   (measured: ipi=MISSED within the first second of boot). */
+void gb207_tick(void) {
+  static int fired = 0;
+  extern volatile int scheduler_started;
+  if (fired || get_cpuid() != 0)
+    return;
+  if (!scheduler_started || timer_get_ms() < 4000)
+    return;
+  fired = 1;
+  gb207_run();
+}
+#endif

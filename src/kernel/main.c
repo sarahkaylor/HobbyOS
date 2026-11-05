@@ -665,6 +665,13 @@ void secondary_main(void) {
   // 4. Enable interrupts
   interrupts_enable();
 
+#if defined(__x86_64__) && defined(PANIC_IPI_TEST)
+  /* GB-207: tell the boot core this CPU can take the test IPI. */
+  extern volatile int gb207_cpu1_ready;
+  if (cpu == 1)
+    gb207_cpu1_ready = 1;
+#endif
+
   // 5. Enter scheduler
   start_scheduler();
 }

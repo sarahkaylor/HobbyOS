@@ -558,6 +558,23 @@ static void x64_send_ipi(uint32_t cpu, uint32_t vector) {
   *icr_lo = vector;    /* fixed delivery, physical destination, edge */
 }
 
+#ifdef PANIC_IPI_TEST
+/* GB-207: the test vehicle owns vector 0x83 and needs the same delivery path
+   as the shootdown IPI.  Test-only; the default kernel has no such symbol.
+   Wait for the ICR delivery-status bit to clear before writing: the periodic
+   0x81 broadcast can leave a write pending, and a write while busy is lost
+   (measured: the first injection never reached cpu1). */
+void x64_send_test_ipi(uint32_t cpu, uint32_t vector) {
+  volatile uint32_t *icr_lo = (volatile uint32_t *)(0xFEE00000 + 0x300);
+  for (volatile int spin = 0; spin < 1000000; spin++) {
+    if ((*icr_lo & (1u << 12)) == 0)
+      break;
+    __asm__ volatile("pause");
+  }
+  x64_send_ipi(cpu, vector);
+}
+#endif
+
 void vm_arch_shootdown(struct addr_space *as) {
   if (!as || !as->root_phys)
     return;
