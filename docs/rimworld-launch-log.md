@@ -5118,3 +5118,114 @@ from its own missing `System.Native`.
 
 Regression at this tip: unit `413/0`; `redzone`, `m2_mono`, `m2_threads`,
 `m12`, `m3_window_probe`, `m4_gl_probe` PASS; `m2_tp` PASS.
+
+## 32. 2026-11-05 — M6/L44: the stranded park is Unity's, not Mono's; the joiner is the stall
+
+§31 left one row unexplained: pid 27 `Loading.Preload`, **13 parks / 0 wakes**, on a
+per-thread object whose inline name is `Loading.PreloadManager`, read as
+`MonoThreadInfo::wait_cond`. Two things were wrong with that reading, and both
+are decidable from the object itself.
+
+### 32.1 The park: Unity's PreloadManager semaphore, not Mono
+
+The `[FUTEX]` dump prints the key's owner (`at = key-0x38`) and the user stack.
+For pid 27 in a fresh run at this tip:
+
+```text
+[FUTEX] q slot=27 pid=27 st=8 key=0x10D08BAA00 waits=13 wakes=0 sc=202 hs=0 Loading.Preload
+[FUTEX] h pid=27 at=0x10D08BA9C8 0x200000001 0x40000 0x2E676E6964616F4C 0x4D64616F6C657250
+                                 0x726567616E61 0x2 0xE00000001 0x0 0x0 0xFFFFFFFF 0x0 0x0
+[FUTEX] st pid=27 sp=0x1142A6AD98 0x1082BE84AE ... word=0x0
+```
+
+- The ASCII is at **key-0x28**: `0x2E676E6964616F4C` = `Loading.`, `0x4D64616F6C657250`
+  = `PreloadM`, `0x726567616E61` = `anager`. That is a **thread name buffer inside
+  the Unity thread object**, not a MonoThreadInfo (mono 6.12's struct has no name
+  field and no `wait_cond` at all; upstream `mono_thread_info_install_interrupt`
+  only CASes `info->interrupt_token` at `+0x478` and wakes nothing).
+- `[rsp] = 0x1082BE84AE` is `UnityPlayer+0x18E94AE`: the instruction after
+  `call syscall@plt` in UnityPlayer's own futex helper at `+0x18E9460`
+  (`edi=0xca`, `edx=0x80` = `FUTEX_WAIT|FUTEX_PRIVATE_FLAG`, timeout from the
+  caller). The caller frame `0x1081F0F56C` is `UnityPlayer+0xC1056C`, i.e. the
+  loop at `+0xC1055D`: `if (*(int*)r14 <= 0) futex_wait(r14, 0, -1)` then
+  CAS-decrement. **It is a "wait until the counter is positive, then take one"
+  semaphore with an infinite timeout** — Unity's PreloadManager job gate.
+- `word=0x0`: the counter is zero and no producer ever incremented it. The
+  wake count is 0 because **no POST happened**, not because a pulse was lost.
+  The thread is idle: it is the consumer waiting for a preload job.
+
+So the park is named, and its unblocker is a producer: the Unity thread that
+posts preload work (`Loading.AsyncRead`/the main thread's preload queue). It is
+not a Mono interrupt, not `mono_thread_info_install_interrupt`, and not a
+managed `Pulse`.
+
+### 32.2 The thread that decides the stall is the main thread, in a managed wait
+
+The same dump shows the process main thread (pid 4) parked on a **heap** key
+(`0x105A117368` in one run, `0x104D8039E8` in another) with an infinite timeout
+and `waits=215 wakes=113` frozen across every later dump. `[FUTEX] bt` finds the
+Mono chain `mono_os_cond_timedwait+0xAF` <- `mono_w32handle_timedwait_signal_handle`
+<- `mono_w32handle_wait_one(+0x101)` <- `mono_join_uninterrupted` (a faithful
+`while (ret == ALERTED) ret = wait_one(...)` loop), and `[PARK]` rows show the
+same thread's earlier waits being woken by pids 30/31/32/34 (`[FUTEX] wake4`),
+so the machinery works and the last wait's signaller simply never ran.
+
+The managed caller is not a guess: the game's own assemblies are decompilable
+from `/srv/nfs/rimworld/RimWorldLinux_Data/Managed`. The only `Thread.Join()` in
+`Assembly-CSharp` is `Verse/DirectXmlLoader.cs:80` (`XmlAssetsInModFolder`
+spawns two `DirectXmlLoader Thread N of 2` workers, drains the same queue on
+the calling thread, then joins both). Above it, `PlayDataLoader.DoPlayLoad`
+runs `Parallel.ForEach(typeof(Def).AllSubclasses(), ...)` and each iteration
+enters `DefDatabase<T>.AddAllInMods` -> `Verse/GenThreading.cs:110/142`,
+`ParallelForEach`:
+
+```csharp
+AutoResetEvent taskDoneEvent = new AutoResetEvent(false);
+foreach (batch) ThreadPool.QueueUserWorkItem(_ => { ...; taskDoneEvent.Set(); });
+while (Interlocked.Read(ref tasksDone) < count) taskDoneEvent.WaitOne();
+```
+
+`taskDoneEvent.WaitOne()` is `mono_w32handle_wait_one(AutoResetEvent, -1, TRUE)`
+on a heap `signal_cond` — exactly the park in the dump. The unblocker is
+`taskDoneEvent.Set()` in the work item, i.e. **Mono's ThreadPool must run an item
+queued from inside a pool worker while every worker is blocked in the same
+nested wait.**
+
+### 32.3 What the rows say, in one line each
+
+| row | meaning |
+|---|---|
+| pid 27 `Loading.Preload` 13/0 on a Unity private-futex semaphore | idle consumer; not the stall |
+| pid 4 infinite park on `AutoResetEvent.signal_cond` (`wakes` frozen) | `GenThreading.ParallelForEach`'s done-event |
+| `[FUTEX] wake4` rows by 30/31/32/34 then none | the same wait works until workers starve |
+| 19 `mono_thread_internal_set_priority` rows at the end of `Player.log` | pool workers being created in the last second |
+| `[XSW] n=1 crc=0x940850f19945c95b changed=0` | one frame presented, then nothing |
+
+The UI agrees: the last frame is RimWorld's loading art with the animated `...`
+box (`LoadingDefs` is the event text `PlayDataLoader` sets immediately before
+the nested parallel work), frozen.
+
+### 32.4 Ladder at this tip (150 s and 60..75 s runs)
+
+| run | NFS bytes | `[XSW]` | screenshot |
+|---|---|---|---|
+| r1 (150 s) | `0x130B4C9` = 19,903,177 | n=1, crc `0x9408…c95b`, changed=0 | loading screen, static |
+| r3 (75 s) | `0x130B4C9` | n=1 | static |
+| r4 (70 s) | `0x130B4C9` | n=1 | static |
+
+Byte-for-byte the same read boundary as §31.6, but for a different reason: the
+game now presents a frame, and the stop is a ThreadPool starvation inside
+RimWorld's nested parallelism, not a clock or a lost signal.
+
+### 32.5 Instrumentation added (kept)
+
+`src/kernel/linux_compat_thr.c`: a `[PARK]` one-shot row for pid 4/27 infinite
+parks (key, expected value, `tf->elr`, the three stack words at the park); a
+`[FUTEX] dstk`/`obj` pair (32 raw stack words and 24 raw words from the key) and
+a 1024-word/10-hit `bt` scan for those two pids. `tools/rw/mono-probe/tp_starve.cs`
+is the guest/host reproducer for the nested-parallelism shape.
+
+### 32.6 Gates
+
+unit `413/0` at this tip. `m2_tp` PASS (ThreadPool parks and wakes), `m2_threads`
+PASS, `redzone`, `m2_mono`, `m12`, `m3_window_probe`, `m4_gl_probe` PASS.

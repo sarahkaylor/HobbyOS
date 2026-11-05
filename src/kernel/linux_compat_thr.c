@@ -532,7 +532,9 @@ void futex_trace_dump_locked(void) {
         kl_s(&kb, "[FUTEX] bt pid=");
         kl_i(&kb, p->pid);
         int hits = 0;
-        for (int w = 0; w < 256 && hits < 4; w++) {
+        int scan_words = (p->pid == 4 || p->pid == 27) ? 1024 : 256;
+        int hit_cap = (p->pid == 4 || p->pid == 27) ? 10 : 4;
+        for (int w = 0; w < scan_words && hits < hit_cap; w++) {
           uint64_t v = 0;
           if (l_copy_from_user(p, &v, p->context[33] + (uint64_t)w * 8, 8) != 0)
             continue;
@@ -601,6 +603,47 @@ void futex_trace_dump_locked(void) {
         }
         kl_c(&kb, '\n');
         kl_emit(&kb);
+      }
+      /* M6/L44: the two threads that decide this stall (the process main
+         thread and the Unity Loading.Preload worker) get a full raw window:
+         32 stack qwords from the parked RSP and 24 qwords of the object that
+         owns the futex word.  The bt filter above stops at four hits and at
+         the first non-call word, which is exactly the depth where the answer
+         lives for a park inside pthread_cond_timedwait (libpthread ->
+         mono_os_cond_timedwait -> mono_w32handle_* -> JIT frame).  Reading
+         the raw words lets the offline reader symbolise every frame instead
+         of accepting the four the heuristic kept. */
+      if (p->pid == 4 || p->pid == 27) {
+        struct kline kd;
+        kl_init(&kd);
+        kl_s(&kd, "[FUTEX] dstk pid=");
+        kl_i(&kd, p->pid);
+        kl_s(&kd, " sp=");
+        kl_hex(&kd, (unsigned long)p->context[33]);
+        for (int w = 0; w < 32; w++) {
+          uint64_t v = 0;
+          if (l_copy_from_user(p, &v, p->context[33] + (uint64_t)w * 8, 8) != 0)
+            v = 0xDEAD;
+          kl_s(&kd, " ");
+          kl_hex(&kd, (unsigned long)v);
+        }
+        kl_c(&kd, '\n');
+        kl_emit(&kd);
+        struct kline ko;
+        kl_init(&ko);
+        kl_s(&ko, "[FUTEX] obj pid=");
+        kl_i(&ko, p->pid);
+        kl_s(&ko, " at=");
+        kl_hex(&ko, (unsigned long)(s->uaddr - 0x48));
+        for (int w = 0; w < 24; w++) {
+          uint64_t v = 0;
+          if (l_copy_from_user(p, &v, s->uaddr - 0x48 + (uint64_t)w * 8, 8) != 0)
+            break;
+          kl_s(&ko, " ");
+          kl_hex(&ko, (unsigned long)v);
+        }
+        kl_c(&ko, '\n');
+        kl_emit(&ko);
       }
       /* L41: the frame-pointer chain.  The stack scan above also finds stale
          return addresses (every thread's [sp] held the same UnityPlayer
@@ -1302,6 +1345,40 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     }
     p->futex_uaddr = uaddr;
     p->wake_ms = (timeout_ms < 0) ? 0 : timer_get_ms() + (uint64_t)timeout_ms;
+    if ((p->pid == 4 || p->pid == 27) && timeout_ms < 0) {
+      /* M6/L44: the infinite park is the one that must be broken by somebody
+         else; a timed park breaks itself.  One row per park (capped) records
+         the key, the expected value, and the stack words that name the
+         wrapper that issued it, so "which wait is this" needs no inference
+         from a later stack dump. */
+      static int park_rows;
+      if (park_rows < 16) {
+        park_rows++;
+        struct kline kp;
+        kl_init(&kp);
+        kl_s(&kp, "[PARK] pid=");
+        kl_i(&kp, p->pid);
+        kl_s(&kp, " key=");
+        kl_hex(&kp, (unsigned long)uaddr);
+        kl_s(&kp, " val=");
+        kl_hex(&kp, (unsigned long)val);
+        kl_s(&kp, " to=-1 bitset=");
+        kl_hex(&kp, bitset);
+        kl_s(&kp, " rip=");
+        kl_hex(&kp, (unsigned long)tf->elr);
+        for (int w = 0; w < 3; w++) {
+          uint64_t v = 0;
+          if (l_copy_from_user(p, &v, p->context[33] + (uint64_t)w * 8, 8) != 0)
+            break;
+          kl_s(&kp, " s");
+          kl_i(&kp, w);
+          kl_s(&kp, "=");
+          kl_hex(&kp, (unsigned long)v);
+        }
+        kl_c(&kp, '\n');
+        kl_emit(&kp);
+      }
+    }
     p->sig_park_nr = L_SYS_futex; /* restart-on-SA_RESTART identity */
     p->context[0] = 0; /* resume value: 0 on wake */
     tf->regs[0] = 0;
