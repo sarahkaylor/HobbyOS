@@ -380,8 +380,51 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
   return flags;
 }
 
+#ifdef GB206_RELSNAP
+/* GB-206 falsifier: does the return slot of spinlock_release_irqrestore change
+   between entry and the pre-ret epilogue?  The compiler prologue is
+   `push rbp; mov rsp,rbp; push r14; push rbx`, so the return slot is at rbp+8.
+   Raw sink only (this runs with IRQs off); rate-limited to the vm_lock
+   (0x75303EE0) or the first 8 sampled pairs, hard cap 16 pairs. */
+static uint32_t relsnap_pairs;
+static int relsnap_this(spinlock_t *lock) {
+  if (relsnap_pairs >= 16) return 0;
+  if ((uint64_t)lock == 0x75303EE0ULL || relsnap_pairs < 8) {
+    relsnap_pairs++;
+    return 1;
+  }
+  return 0;
+}
+static void relsnap(const char *when, uint64_t lock, uint64_t retslot,
+                    uint64_t rbp, uint64_t rsp) {
+  for (const char *p = "[RELSNAP] "; *p; p++) uart_putc_raw(*p);
+  for (const char *p = when; *p; p++) uart_putc_raw(*p);
+  scream_hex(" lock=", lock);
+  scream_hex(" retslot=", retslot);
+  scream_hex(" rbp=", rbp);
+  scream_hex(" rsp=", rsp);
+  uart_putc_raw('\n');
+}
+#endif
+
 void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
+#ifdef GB206_RELSNAP
+  uint64_t rs_rbp = (uint64_t)__builtin_frame_address(0);
+  uint64_t rs_rsp = 0;
+  uint64_t rs_slot = *(volatile uint64_t *)(rs_rbp + 8);
+  __asm__ volatile("mov %%rsp, %0" : "=r"(rs_rsp));
+  int rs_snap = relsnap_this(lock);
+  if (rs_snap) relsnap("entry", (uint64_t)lock, rs_slot, rs_rbp, rs_rsp);
+#endif
   spinlock_release(lock);
+#ifdef GB206_RELSNAP
+  if (rs_snap) {
+    uint64_t rs2_rsp = 0;
+    uint64_t rs2_slot = *(volatile uint64_t *)(rs_rbp + 8);
+    __asm__ volatile("mov %%rsp, %0" : "=r"(rs2_rsp));
+    relsnap("ret", (uint64_t)lock, rs2_slot, rs_rbp, rs2_rsp);
+  }
+#endif
   __asm__ volatile(
       "push %0\n"
       "popfq\n"

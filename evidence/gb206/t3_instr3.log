@@ -1,0 +1,25 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/.hermes/cache/scratch/wt-gb206/evidence/gb206/serial_instr3.log) ===
+T3_intel: 56000 console lines, 14 FAIL lines, 55 user memory fault records across 28 processes, 69 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 17 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 14 FAIL line(s); first 20:
+27540:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+34867:  IPC_T fd-passing setup (pipes + socketpair): FAIL
+34868:  IPC_T poll setup: FAIL
+34869:  IPC_T park socketpair: FAIL
+34870:  IPC_T error-path setup: FAIL
+34871:  IPC_T select socketpair: FAIL
+34872:IPC_T FAILED: 5
+50592:  IPC_T socketpair(AF_UNIX, SOCK_STREAM): FAIL
+50835:  IPC_T fd-passing setup (pipes + socketpair): FAIL
+50836:Loader (v2) starved (slot pressure):   IPC_T poll setup: FAIL
+50837:  IPC_T park socketpair: FAIL
+50838:  IPC_T error-path setup: FAIL
+50840:  IPC_T select socketpair: FAIL
+50842:IPC_T FAILED: 6
+T3_intel EXIT=1
+T3_LOG=/home/sarah/.hermes/cache/scratch/wt-gb206/evidence/gb206/serial_instr3.log
+T3_ARCH=intel
+T3_FAILS=14
+tier rc=1

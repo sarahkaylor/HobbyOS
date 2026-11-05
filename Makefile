@@ -358,6 +358,11 @@ CXX_LIBCXX_USER_FLAGS = -I$(LIBCXX_INCLUDE) $(USER_CFLAGS) -std=c++23 -fno-excep
 # per-TU split lives in the vendor build (sources.txt class B).
 CXX_RTTI_USER_FLAGS = -I$(LIBCXX_INCLUDE) $(USER_CFLAGS) -std=c++23 -fno-exceptions -frtti -nostdinc++
 
+# GB-206 debug build knob: instrument spinlock_release_irqrestore's return slot.
+ifdef GB206_RELSNAP
+  CFLAGS += -DGB206_RELSNAP
+endif
+
 ifeq ($(MODE),test)
   CFLAGS += -DKERNEL_MODE_TEST
   # Userland sees the same fact: CONSOLE.BIN ships as the boot smoke in

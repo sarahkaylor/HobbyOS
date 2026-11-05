@@ -1,0 +1,31 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/.hermes/cache/scratch/wt-gb206/evidence/gb206/serial_instr4.log) ===
+T3_intel: 76142 console lines, 48 FAIL lines, 70 user memory fault records across 34 processes, 70 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 14 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 48 FAIL line(s); first 20:
+5763:[PROCTEST] FAIL no-children waitpid=-1 got=29 want=-1
+5764:WC.BIN[PROCTEST] FAIL errno==ECHILD got=0 want=1
+45420:  IPC_T fd-passing setup (pipes + socketpair): FAIL
+45421:  IPC_T poll setup: FAIL
+45422:  IPC_T park socketpair: FAIL
+45445:  IPC_T sendmsg on an unconnected unix endpoint -> -1/ENOTCONN: FAIL
+45472:  IPC_T open a plain file for the F_GETFD round-trip: FAIL
+45473:  IPC_T socketpair(SOCK_CLOEXEC) records FD_CLOEXEC on both ends: FAIL
+45500:IPC_T FAILED: 6
+49598:  IPC_T fd-passing setup (pipes + socketpair): FAIL
+49599:  IPC_T poll setup: FAIL
+49600:  IPC_T park socketpair: FAIL
+49601:  IPC_T error-path setup: FAIL
+49602:  IPC_T select socketpair: FAIL
+49603:IPC_T FAILED: 5
+58359:  TLS_T errno-isolation: FAIL
+59839:TLS_T FAILED: 1
+62879:[CUTTEST] FAIL -b 1-3 file
+62889:[CUTTEST] FAIL -c 5- file
+62899:[CUTTEST] FAIL -b 2,4 file
+T3_intel EXIT=1
+T3_LOG=/home/sarah/.hermes/cache/scratch/wt-gb206/evidence/gb206/serial_instr4.log
+T3_ARCH=intel
+T3_FAILS=48
+tier rc=1
