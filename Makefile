@@ -552,6 +552,13 @@ endif
 ifneq ($(RW_FUTXW),)
   CFLAGS += -DRW_FUTXW=1
 endif
+# Diagnostic: one spurious futex wake on every queued waiter, every 8 s from
+# t=30 s (rule 24b).  If the game's stall is a lost wake, this un-sticks it and
+# the loader continues; if it is not, nothing changes.  Diagnostic only.
+#     make RW_WAKEALL=1 ... disk.img
+ifneq ($(RW_WAKEALL),)
+  CFLAGS += -DRW_WAKEALL=1
+endif
 
 # Target and objects
 TARGET = hobbyos.elf

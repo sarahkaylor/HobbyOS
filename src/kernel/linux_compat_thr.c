@@ -3201,7 +3201,57 @@ void linux_compat_signal_interrupt(struct process *t) {
  * ever fires it repairs the wake instead of leaving the world stopped.
  *
  * Called from the idle loop (~every 0.5 s) with no lock held. */
+/* ---- RW_WAKEALL: rule 24(b) as an instrument ---------------------------
+ *
+ * "One-shot spurious-wake every queued waiter -- correct consumers just
+ * re-check."  The game's stall is a waiter asleep on a ManualResetEventSlim
+ * whose signalled bit is ALREADY 1 (`m_combinedState` bit 31, waiters=1) and
+ * on which no futex wake was ever issued: the wait is satisfiable the moment
+ * anybody touches the futex.  If a spurious wake un-sticks the loader, the
+ * waiters are correct and the signal never arrived at the futex; if it does
+ * not, the park was never on that key and the MRES is the wrong object.
+ *
+ * Gated at build time (`make RW_WAKEALL=1`); the shipping kernel is unchanged.
+ */
+#ifdef RW_WAKEALL
+void linux_compat_spurious_wake_all(void) {
+  static uint64_t last;
+  static int rows;
+  uint64_t now = timer_get_ms();
+  if (now < 30000) return;
+  if (last && now - last < 8000) return;
+  last = now;
+  int keys = 0, woke = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (!l_thr[i].owner || !l_thr[i].uaddr) continue;
+    struct futex_ev ev = {0};
+    int w = l_futex_wake_locked(l_thr[i].as, l_thr[i].uaddr, 1,
+                                L_FUTEX_BITSET_MATCH_ANY, &ev);
+    keys++;
+    woke += w;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  if (rows < 24) {
+    rows++;
+    struct kline k;
+    kl_init(&k);
+    kl_s(&k, "[FWAKE] t=");
+    kl_i(&k, (long)(now / 1000));
+    kl_s(&k, " keys=");
+    kl_i(&k, keys);
+    kl_s(&k, " woke=");
+    kl_i(&k, woke);
+    kl_c(&k, '\n');
+    kl_emit(&k);
+  }
+}
+#endif
+
 int linux_compat_lost_wake_scan(void) {
+#ifdef RW_WAKEALL
+  linux_compat_spurious_wake_all();
+#endif
   uint64_t now = timer_get_ms();
   int fixed = 0;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);

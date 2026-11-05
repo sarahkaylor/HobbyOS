@@ -280,6 +280,16 @@ if [ "${RW_TPTRACE:-0}" = 1 ]; then
 else
   mdel -i "$IMG" ::/TPTRACE >/dev/null 2>&1 || true
 fi
+# L50: /TPPOKE makes the stall probe do ONE spurious Monitor.PulseAll on the
+# ManualResetEventSlim the main thread is parked on (rule 24b).  Diagnostic
+# only: a correct MRES consumer re-checks IsSet and returns.
+if [ "${RW_TPPOKE:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/tppoke"
+  stage "$OUT/tppoke" ::/TPPOKE
+  echo "  staged: /TPPOKE -> one spurious PulseAll at each stall sample"
+else
+  mdel -i "$IMG" ::/TPPOKE >/dev/null 2>&1 || true
+fi
 # L42: ask Mono for cooperative thread suspension (thread dumps then avoid
 # the async-suspend handshake that aborts on the Finalizer).
 if [ "${RW_COOPSUSPEND:-0}" = 1 ]; then

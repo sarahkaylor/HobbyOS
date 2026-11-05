@@ -1240,6 +1240,7 @@ static struct {
   void *(*jit_method)(void *);
   void *compile;
   void *(*m_get_class)(void *);
+  void *(*invoke)(void *, void *, void **, void **);
   const char *(*c_get_name)(void *);
   const char *(*m_get_name)(void *);
   void *orig_q, *orig_c, *orig_r;
@@ -1524,12 +1525,483 @@ static void *tp_patch_method(void *klass, const char *name, int arity,
   return code;
 }
 
+/* ---- L50: the managed state of an awaited Task, read in place -----------
+ *
+ * 36.6 named the *wait* (`Task.SpinThenBlockingWait` on a completion
+ * ManualResetEventSlim that is never set) but not the task it waits for.
+ * Status, scheduler and continuation list are private managed fields, so they
+ * are read through Mono's own metadata API rather than at guessed offsets:
+ * mono_class_get_field_from_name + mono_field_get_value, i.e. the fields this
+ * mscorlib really has (tools/rw/mono-probe/taskinv.cs prints the inventory).
+ *
+ * The object is found WITHOUT unwinding: the parked thread's stack still holds
+ * `this` for Task.SpinThenBlockingWait and the SetOnInvokeMres local.  A word
+ * is a Task iff *(void**)word == the Task MonoVTable -- an exact type test --
+ * and every deref is guarded by rw_readable(), the same mincore-backed test the
+ * stack capture already depends on.
+ *
+ * The same scan on a Thread Pool Worker's stack answers the other open row of
+ * 36.8: `Thread.Join`'s target.  The Thread object on that stack carries
+ * internal_thread.thread_id / state / name, so "the target exited", "the target
+ * never started" and "the target is running" are different rows.
+ */
+/* Mono metadata entry points used by the L50 task/thread introspection.
+ * Kept separate from `tp` because they are pure reads and stay available even
+ * when the icall hooks above failed to bind. */
+static struct {
+  void *(*class_vtable)(void *, void *);
+  void *(*field_from_name)(void *, const char *);
+  void (*field_get_value)(void *, void *, void *);
+  void *(*obj_get_class)(void *);
+  void *(*nested)(void *, void **);
+  const char *(*class_namespace)(void *);
+} mo;
+
+static int tp_bt_words(const char *tag, unsigned long base, int n);
+
+struct tpcls {
+  void *task, *f_id, *f_flags, *f_sched, *f_cont, *f_cp, *f_action;
+  void *cp, *f_ev, *f_countdown;
+  void *mres, *f_comb, *f_lock;
+  void *monitor;
+  void *thr, *f_it;
+  void *it, *f_tid, *f_state, *f_nchars, *f_nlen, *f_mid, *f_started;
+  void *vt_task, *vt_thr, *vt_mres;
+  int state; /* 1 = ready, -1 = gave up */
+};
+static struct tpcls tpc;
+
+static void *tp_nested_cls(void *klass, const char *name) {
+  if (!klass || !mo.nested) return 0;
+  void *iter = 0;
+  for (int i = 0; i < 32; i++) {
+    void *k = mo.nested(klass, &iter);
+    if (!k) break;
+    const char *n = tp.c_get_name(k);
+    if (n && !strcmp(n, name)) return k;
+  }
+  return 0;
+}
+
+static long tp_f_i4(void *f, void *o) {
+  int v = 0;
+  if (!f || !o) return 0;
+  mo.field_get_value(o, f, &v);
+  return (long)v;
+}
+static long tp_f_i8(void *f, void *o) {
+  long v = 0;
+  if (!f || !o) return 0;
+  mo.field_get_value(o, f, &v);
+  return v;
+}
+static void *tp_f_p(void *f, void *o) {
+  void *v = 0;
+  if (!f || !o) return 0;
+  mo.field_get_value(o, f, &v);
+  return v;
+}
+static const char *tp_obj_cls(void *o) {
+  if (!o || !mo.obj_get_class) return 0;
+  void *k = mo.obj_get_class(o);
+  return k ? tp.c_get_name(k) : 0;
+}
+
+static int tp_cls_init(void) {
+  if (tpc.state) return tpc.state > 0;
+  tpc.state = -1;
+  if (!tp.class_from_name || !mo.field_from_name || !mo.field_get_value || !mo.obj_get_class) return 0;
+  void *img = tp.image_loaded("mscorlib");
+  if (!img) return 0;
+  void *task = tp.class_from_name(img, "System.Threading.Tasks", "Task");
+  if (!task) return 0;
+  tpc.task = task;
+  tpc.f_id = mo.field_from_name(task, "m_taskId");
+  tpc.f_flags = mo.field_from_name(task, "m_stateFlags");
+  tpc.f_sched = mo.field_from_name(task, "m_taskScheduler");
+  tpc.f_cont = mo.field_from_name(task, "m_continuationObject");
+  tpc.f_cp = mo.field_from_name(task, "m_contingentProperties");
+  tpc.f_action = mo.field_from_name(task, "m_action");
+  tpc.cp = tp_nested_cls(task, "ContingentProperties");
+  if (tpc.cp) {
+    tpc.f_ev = mo.field_from_name(tpc.cp, "m_completionEvent");
+    tpc.f_countdown = mo.field_from_name(tpc.cp, "m_completionCountdown");
+  }
+  void *mres = tp.class_from_name(img, "System.Threading", "ManualResetEventSlim");
+  if (mres) {
+    tpc.mres = mres;
+    tpc.f_comb = mo.field_from_name(mres, "m_combinedState");
+    tpc.f_lock = mo.field_from_name(mres, "m_lock");
+  }
+  tpc.monitor = tp.class_from_name(img, "System.Threading", "Monitor");
+  void *thr = tp.class_from_name(img, "System.Threading", "Thread");
+  if (thr) {
+    tpc.thr = thr;
+    tpc.f_it = mo.field_from_name(thr, "internal_thread");
+    tpc.f_started = mo.field_from_name(thr, "started");
+  }
+  void *it = tp.class_from_name(img, "System.Threading", "InternalThread");
+  if (it) {
+    tpc.it = it;
+    tpc.f_tid = mo.field_from_name(it, "thread_id");
+    tpc.f_state = mo.field_from_name(it, "state");
+    tpc.f_nchars = mo.field_from_name(it, "name_chars");
+    tpc.f_nlen = mo.field_from_name(it, "name_length");
+    tpc.f_mid = mo.field_from_name(it, "managed_id");
+  }
+  void *dom = tp.domain_get ? tp.domain_get() : 0;
+  if (dom && mo.class_vtable) {
+    tpc.vt_task = mo.class_vtable(dom, task);
+    if (thr) tpc.vt_thr = mo.class_vtable(dom, thr);
+    void *mres_sub = tp_nested_cls(task, "SetOnInvokeMres");
+    if (mres_sub) tpc.vt_mres = mo.class_vtable(dom, mres_sub);
+  }
+  tpc.state = (tpc.f_flags && tpc.f_sched && tpc.vt_task) ? 1 : -1;
+  /* One inventory row: a field name that does not resolve here would make
+     every later row read "sched=null", i.e. look like an answer. */
+  tp_w("[TPWI] Task id=");
+  tp_wx((unsigned long)tpc.f_id);
+  tp_w(" flags=");
+  tp_wx((unsigned long)tpc.f_flags);
+  tp_w(" sched=");
+  tp_wx((unsigned long)tpc.f_sched);
+  tp_w(" cont=");
+  tp_wx((unsigned long)tpc.f_cont);
+  tp_w(" cp=");
+  tp_wx((unsigned long)tpc.f_cp);
+  tp_w(" action=");
+  tp_wx((unsigned long)tpc.f_action);
+  tp_w(" CP.ev=");
+  tp_wx((unsigned long)tpc.f_ev);
+  tp_w(" CP.cd=");
+  tp_wx((unsigned long)tpc.f_countdown);
+  tp_w(" Thread.it=");
+  tp_wx((unsigned long)tpc.f_it);
+  tp_w(" IT.tid=");
+  tp_wx((unsigned long)tpc.f_tid);
+  tp_w(" vt_task=0x");
+  tp_wx((unsigned long)tpc.vt_task);
+  tp_w(" vt_thr=0x");
+  tp_wx((unsigned long)tpc.vt_thr);
+  tp_w(" ok=");
+  tp_wi(tpc.state > 0);
+  tp_w("\n");
+  return tpc.state > 0;
+}
+
+/* TASK_STATE_* as this mscorlib defines them (Task.cs). */
+static void tp_state_words(long f) {
+  int any = 0;
+#define TPST(bit, name) do { if (f & (bit)) { tp_w(any ? "|" name : name); any = 1; } } while (0)
+  TPST(0x10000, "started");
+  TPST(0x20000, "delegate");
+  TPST(0x40000, "disposed");
+  TPST(0x80000, "excobserved");
+  TPST(0x100000, "cancelack");
+  TPST(0x200000, "faulted");
+  TPST(0x400000, "canceled");
+  TPST(0x800000, "children");
+  TPST(0x1000000, "ran");
+  TPST(0x2000000, "waitactivation");
+  TPST(0x4000000, "completionreserved");
+  TPST(0x8000000, "threadaborted");
+#undef TPST
+  if (!any) tp_w("created");
+}
+
+static void tp_task_row(int tid, void *t) {
+  if (!tpc.state || !t) return;
+  long id = tp_f_i4(tpc.f_id, t);
+  long fl = tp_f_i4(tpc.f_flags, t);
+  void *sch = tp_f_p(tpc.f_sched, t);
+  void *cont = tp_f_p(tpc.f_cont, t);
+  void *cp = tp_f_p(tpc.f_cp, t);
+  void *act = tp_f_p(tpc.f_action, t);
+  void *ev = 0;
+  long comb = 0, cd = -1;
+  if (cp) {
+    if (tpc.f_countdown) cd = tp_f_i4(tpc.f_countdown, cp);
+    if (tpc.f_ev) ev = tp_f_p(tpc.f_ev, cp);
+  }
+  if (ev && tpc.f_comb) comb = tp_f_i4(tpc.f_comb, ev);
+  tp_w("[TPWT] tid=");
+  tp_wi(tid);
+  tp_w(" task=0x");
+  tp_wx((unsigned long)t);
+  tp_w(" id=");
+  tp_wi(id);
+  tp_w(" flags=0x");
+  tp_wx((unsigned long)(fl & 0xffffffffL));
+  tp_w(" st=");
+  tp_state_words(fl);
+  tp_w(" sched=0x");
+  tp_wx((unsigned long)sch);
+  tp_w("(");
+  {
+    const char *s = sch ? tp_obj_cls(sch) : 0;
+    tp_w(s ? s : "null");
+  }
+  tp_w(") action=0x");
+  tp_wx((unsigned long)act);
+  tp_w(" cont=0x");
+  tp_wx((unsigned long)cont);
+  tp_w("(");
+  {
+    const char *s = cont ? tp_obj_cls(cont) : 0;
+    tp_w(s ? s : "null");
+  }
+  tp_w(") cp=0x");
+  tp_wx((unsigned long)cp);
+  tp_w(" cd=");
+  tp_wi(cd);
+  tp_w(" ev=0x");
+  tp_wx((unsigned long)ev);
+  tp_w(" set=");
+  tp_wi(comb & 1);
+  tp_w("\n");
+}
+
+static void tp_thr_row(int tid, void *th) {
+  void *it = tp_f_p(tpc.f_it, th);
+  long itid = tp_f_i8(tpc.f_tid, it);
+  long st = tp_f_i4(tpc.f_state, it);
+  long mid = tp_f_i4(tpc.f_mid, it);
+  long started = tp_f_i4(tpc.f_started, th);
+  void *nc = tp_f_p(tpc.f_nchars, it);
+  long nl = tp_f_i4(tpc.f_nlen, it);
+  tp_w("[TPWY] tid=");
+  tp_wi(tid);
+  tp_w(" thread=0x");
+  tp_wx((unsigned long)th);
+  tp_w(" started=");
+  tp_wi(started);
+  tp_w(" itid=");
+  tp_wi(itid);
+  tp_w(" mid=");
+  tp_wi(mid);
+  tp_w(" tstate=");
+  tp_wi(st);
+  tp_w(" name=");
+  if (nc && nl > 0 && nl < 64 && rw_readable((unsigned long)nc)) {
+    for (long i = 0; i < nl && i < 32; i++) {
+      unsigned short c = ((volatile unsigned short *)nc)[i];
+      if (c < 0x20 || c > 0x7e) { tp_w("?"); continue; }
+      char s[2] = {(char)c, 0};
+      tp_w(s);
+    }
+  } else {
+    tp_w("(none)");
+  }
+  tp_w("\n");
+}
+
+static unsigned long tp_seen[32];
+static int tp_seen_n;
+static void *tp_poke_lock;   /* m_lock of the SetOnInvokeMres on the main stack */
+static void *tp_poke_mres;
+static volatile int tp_poke_n;
+
+static int tp_poke_on(void) {
+  static int on = -1;
+  if (on < 0) {
+    int f = open("/TPPOKE", TP_O_RDONLY);
+    on = (f >= 0);
+    if (f >= 0) close(f);
+  }
+  return on;
+}
+
+/* Rule 24(b): a one-shot spurious wake on the object the thread is parked on.
+ * MRES.Wait's loop is `while (!IsSet) Monitor.Wait(m_lock)` and MRES.Set has
+ * already set its signalled bit (m_combinedState bit 31), so a correct consumer
+ * re-checks and returns.  If this un-stalls the loader, the wait object was
+ * signalled and the pulse never reached the waiter -- which is a lost wake,
+ * not a missing task. */
+static void tp_poke(const char *why) {
+  if (!tp_poke_lock || !tpc.monitor || !tp.method_from_name || !tp.invoke) return;
+  void *m_enter = tp.method_from_name(tpc.monitor, "Enter", 1);
+  void *m_pulse = tp.method_from_name(tpc.monitor, "PulseAll", 1);
+  void *m_exit = tp.method_from_name(tpc.monitor, "Exit", 1);
+  tp_poke_n++;
+  if (!m_enter || !m_pulse || !m_exit) {
+    tp_w("[TPWK] no Monitor.Enter/PulseAll/Exit on this mscorlib\n");
+    return;
+  }
+  void *dom = tp.domain_get ? tp.domain_get() : 0;
+  if (dom && tp.attach && !tp.attached) {
+    tp.attach(dom);
+    tp.attached = 1;
+  }
+  void *args[1];
+  args[0] = tp_poke_lock;
+  void *e1 = 0, *e2 = 0, *e3 = 0;
+  tp.invoke(m_enter, 0, args, &e1);
+  tp.invoke(m_pulse, 0, args, &e2);
+  tp.invoke(m_exit, 0, args, &e3);
+  tp_w("[TPWK] n=");
+  tp_wi(tp_poke_n);
+  tp_w(" lock=0x");
+  tp_wx((unsigned long)tp_poke_lock);
+  tp_w(" mres=0x");
+  tp_wx((unsigned long)tp_poke_mres);
+  tp_w(" exc=");
+  tp_wx((unsigned long)e1);
+  tp_w(" ");
+  tp_wx((unsigned long)e2);
+  tp_w(" ");
+  tp_wx((unsigned long)e3);
+  tp_w(" why=");
+  tp_w(why);
+  tp_w("\n");
+}
+
+/* kind: 0 = Task, 1 = Thread, 2 = SetOnInvokeMres.  Deduped, because the same
+ * `this` is spilled at several slots of one frame and the first three hits used
+ * to be the same completed Task. */
+static int tp_scan_obj(int tid, int kind, int maxout) {
+  void *vt = kind == 1 ? tpc.vt_thr : kind == 2 ? tpc.vt_mres : tpc.vt_task;
+  int found = 0;
+  if (!tpc.state || !vt) return 0;
+  for (int i = 0; i < rw_stk_n && found < maxout; i++) {
+    unsigned long v = rw_stk_buf[i];
+    if (v < 0x10000000UL || v > 0x1800000000UL || (v & 7)) continue;
+    if (!rw_readable(v)) continue;
+    if (*(volatile void **)v != vt) continue;
+    int dup = 0;
+    for (int k = 0; k < tp_seen_n; k++) if (tp_seen[k] == v) dup = 1;
+    if (dup) continue;
+    if (tp_seen_n < 32) tp_seen[tp_seen_n++] = v;
+    if (kind == 1) {
+      tp_thr_row(tid, (void *)v);
+    } else if (kind == 2) {
+      long comb = tp_f_i4(tpc.f_comb, (void *)v);
+      tp_w("[TPWQ] tid=");
+      tp_wi(tid);
+      tp_w(" mres=0x");
+      tp_wx(v);
+      tp_w(" combined=0x");
+      tp_wx((unsigned long)comb);
+      tp_w(" set=");
+      tp_wi((comb >> 31) & 1);
+      tp_w(" waiters=");
+      tp_wi(comb & 0x7ffff);
+      if (tid == (int)getpid()) {
+        tp_poke_mres = (void *)v;
+        tp_poke_lock = tp_f_p(tpc.f_lock, (void *)v);
+        /* MonoObject = { MonoVTable *vtable; MonoThreadsSync *synchronization; }
+           so `lock+8` is the monitor's own word: a small tagged value for a
+           THIN lock, a heap pointer for an INFLATED (fat) one.  The waiter's
+           park key is printed by the kernel ([FUTXW] NOW / [PARK]); a cond
+           inside `sync` sits a few tens of bytes past it, so the pair decides
+           whether mono_monitor_pulse_all and mono_monitor_wait are on the same
+           sync block. */
+        if (tp_poke_lock && rw_readable((unsigned long)tp_poke_lock + 16)) {
+          unsigned long vt = *(volatile unsigned long *)tp_poke_lock;
+          unsigned long sy = *(volatile unsigned long *)((char *)tp_poke_lock + 8);
+          tp_w("[TPWM] tid=");
+          tp_wi(tid);
+          tp_w(" lock=0x");
+          tp_wx((unsigned long)tp_poke_lock);
+          tp_w(" vtable=0x");
+          tp_wx(vt);
+          tp_w(" sync=0x");
+          tp_wx(sy);
+          tp_w(" synccls=");
+          tp_w(sy && (sy & 7) == 0 ? "fat" : "thin/tagged");
+          tp_w("\n");
+        }
+      }
+      tp_w("\n");
+    } else {
+      tp_task_row(tid, (void *)v);
+    }
+    found++;
+  }
+  return found;
+}
+
+/* A thread whose stack resolves to no JIT frame: print the words themselves, so
+ * "native thread" and "the resolver failed" are different rows. */
+static void tp_raw_words(int tid) {
+  tp_w("[TPWD] tid=");
+  tp_wi(tid);
+  tp_w(" sp=0x");
+  tp_wx(rw_stk_base);
+  tp_w(" w=");
+  int shown = 0;
+  for (int i = 0; i < rw_stk_n && shown < 14; i++) {
+    unsigned long v = rw_stk_buf[i];
+    if (v < 0x100000UL) continue;
+    tp_w(" ");
+    tp_wx(v);
+    shown++;
+  }
+  tp_w("\n");
+}
+
+/* Deliver SIGUSR2 to one tid and wait for the handler to copy its stack.
+ * Returns the word count, 0 on a timeout, -1 when the tid does not exist. */
+static int tp_capture_tid(int tid, int wait_ms) {
+  rw_stk_ready = 0;
+  rw_stk_busy = 1;
+  long r = syscall(234 /* tgkill */, (long)getpid(), (long)tid, (long)SIGUSR2);
+  if (r != 0) return -1;
+  for (int i = 0; i < wait_ms / 5; i++) {
+    if (rw_stk_ready) return rw_stk_n;
+    usleep(5000);
+  }
+  return 0;
+}
+
+/* Sample every live thread once: its managed frames, then any Task / Thread
+ * object its stack still points at.  This is the stall's whole wait graph in
+ * one place -- who is joining whom, and who (if anyone) is running the task
+ * the main thread waits for. */
+static void tp_probe_stall(int at) {
+  tp_cls_init();
+  int self = (int)gettid();
+  tp_w("[TPWT] sample t=");
+  tp_wi(at);
+  tp_w("s pid=");
+  tp_wi((long)getpid());
+  tp_w(" self=");
+  tp_wi(self);
+  tp_w(" nt=");
+  tp_wi(tpc.state);
+  tp_w(" vt_mres=0x");
+  tp_wx((unsigned long)tpc.vt_mres);
+  tp_w("\n");
+  int live = 0;
+  for (int tid = 1; tid <= 120; tid++) {
+    if (tid == self) continue;
+    int n = tp_capture_tid(tid, 400);
+    if (n <= 0) continue;
+    live++;
+    tp_seen_n = 0;
+    tp_w("[TPWA] tid=");
+    tp_wi(tid);
+    tp_w(" sp=0x");
+    tp_wx(rw_stk_base);
+    tp_w(" words=");
+    tp_wi(n);
+    int before = tp_bt_words("[TPWA]", rw_stk_base, n);
+    if (before <= 0) tp_raw_words(tid);
+    tp_scan_obj(tid, 0, 6);
+    tp_scan_obj(tid, 2, 2);
+    tp_scan_obj(tid, 1, 2);
+  }
+  tp_w("[TPWT] sample done live=");
+  tp_wi(live);
+  tp_w("\n");
+  if (tp_poke_on() && tp_poke_lock) tp_poke("stall");
+}
+
 /* Resolve the words the SIGUSR2 handler copied out of the parked thread's
  * stack.  Runs on the watchdog thread, i.e. outside any signal context. */
-static void tp_bt_words(const char *tag, unsigned long base, int n) {
-  if (!tp.jit_find || !tp.domain_get) return;
+static int tp_bt_words(const char *tag, unsigned long base, int n) {
+  if (!tp.jit_find || !tp.domain_get) return -1;
   void *dom = tp.domain_get();
-  if (!dom) return;
+  if (!dom) return -1;
   int printed = 0;
   for (int i = 0; i < n && printed < 24; i++) {
     unsigned long v = rw_stk_buf[i];
@@ -1547,12 +2019,13 @@ static void tp_bt_words(const char *tag, unsigned long base, int n) {
     tp_w(mn ? mn : "?");
     printed++;
   }
-  if (printed) { tp_w("\n"); return; }
+  if (printed) { tp_w("\n"); return printed; }
   tp_w(" bt=(no JIT frame in ");
   tp_wi(n);
   tp_w(" words from 0x");
   tp_wx(base);
   tp_w(")\n");
+  return 0;
 }
 
 static int tp_register_w(void) {
@@ -1832,6 +2305,12 @@ static void *tp_watchdog(void *arg) {
       tp_wi(rw_stk_n);
       tp_bt_words("[TPWS]", rw_stk_base, rw_stk_n);
     }
+    /* L50: the stall's whole wait graph, twice.  Every live thread's managed
+       frames plus any Task / Thread object its stack still points at: the task
+       the main thread awaits, its scheduler, and the target of any
+       Thread.Join (36.8's one contradicting row). */
+    if (tp.on && i >= 700 && (i % 300) == 100 && tp.jit_find)
+      tp_probe_stall(i / 20);
     /* 3 s without a single event, at least 10 s in: dump the tail.  Up to
        six times, because the first quiet window is often just the gap before
        the loader starts. */
@@ -1863,10 +2342,18 @@ static void rw_tp_maybe_start(void *handle, const char *name) {
   tp.domain_get = (void *(*)(void))dlsym(handle, "mono_domain_get");
   tp.jit_find = (void *(*)(void *, void *))dlsym(handle, "mono_jit_info_table_find");
   tp.compile = dlsym(handle, "mono_compile_method");
+  tp.invoke = (void *(*)(void *, void *, void **, void **))dlsym(handle, "mono_runtime_invoke");
   tp.jit_method = (void *(*)(void *))dlsym(handle, "mono_jit_info_get_method");
   tp.m_get_class = (void *(*)(void *))dlsym(handle, "mono_method_get_class");
   tp.c_get_name = (const char *(*)(void *))dlsym(handle, "mono_class_get_name");
   tp.m_get_name = (const char *(*)(void *))dlsym(handle, "mono_method_get_name");
+  /* L50: metadata reads for the Task / Thread dumps (no JIT needed). */
+  mo.class_vtable = (void *(*)(void *, void *))dlsym(handle, "mono_class_vtable");
+  mo.field_from_name = (void *(*)(void *, const char *))dlsym(handle, "mono_class_get_field_from_name");
+  mo.field_get_value = (void (*)(void *, void *, void *))dlsym(handle, "mono_field_get_value");
+  mo.obj_get_class = (void *(*)(void *))dlsym(handle, "mono_object_get_class");
+  mo.nested = (void *(*)(void *, void **))dlsym(handle, "mono_class_get_nested_types");
+  mo.class_namespace = (const char *(*)(void *))dlsym(handle, "mono_class_get_namespace");
   tp_w("[TPQ] probe armed (libmonobdwgc);");
   tp_w(" get_root_domain=");
   tp_wx((unsigned long)tp.get_root_domain);
