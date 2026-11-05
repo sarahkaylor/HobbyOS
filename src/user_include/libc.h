@@ -268,6 +268,14 @@ extern "C" {
     uint64_t passthrough;   /* whole reads that bypassed the cache          */
   };
 
+  /* cmd 10 (L35): NFS READ traffic counters — bytes returned by READ RPCs
+   * and the number of READ RPCs issued, since boot.  Deltas across a read
+   * give the per-RPC payload and the RPC rate a throughput number needs. */
+  struct sys_nfsio {
+    uint64_t bytes;
+    uint64_t ops;
+  };
+
   int sysinfo(int cmd, void *buf, int size);
   int unlink(const char *filename);
   int rename(const char *oldname, const char *newname);

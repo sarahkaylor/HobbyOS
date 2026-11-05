@@ -2380,10 +2380,12 @@ int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
 
   uint32_t off = 0;
   while (off < size) {
-    uint32_t want = size - off;
-    if (want > NFS_READ_CHUNK) want = NFS_READ_CHUNK;
+    /* L35: hand the rest of the image to nfs_read_file in one call — it
+     * splits the request into rsize-sized READs and pipelines them.  The old
+     * 1 KiB clamp here serialized every exec image read at one RPC per
+     * millisecond-plus. */
     int got = nfs_read_file(m, &f.nfs.fh, off,
-                            (void *)(uintptr_t)(buf + off), want);
+                            (void *)(uintptr_t)(buf + off), size - off);
     if (got <= 0) {
       for (uint32_t i = 0; i < pages; i++)
         frame_free(buf + (uint64_t)i * FRAME_SIZE);

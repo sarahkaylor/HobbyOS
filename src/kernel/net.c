@@ -488,6 +488,17 @@ static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
       extern void arch_memory_barrier(void);
       arch_memory_barrier();
       sockets[i].rx_tail += data_len;
+      /* L35: record the datagram boundary so a recv() never splices two
+       * replies.  Drop the record (not the bytes) when the FIFO is full —
+       * a client that far behind has already lost the framing. */
+      {
+        uint32_t dt = sockets[i].rx_dgram_tail;
+        if (dt - sockets[i].rx_dgram_head < SOCKET_RX_DGRAM_MAX) {
+          sockets[i].rx_dgram_len[dt % SOCKET_RX_DGRAM_MAX] = data_len;
+          arch_memory_barrier();
+          sockets[i].rx_dgram_tail = dt + 1;
+        }
+      }
       break;
     }
   }
@@ -771,6 +782,8 @@ struct socket_pcb* net_socket_create(int protocol) {
       sockets[i].state = SOCKET_CLOSED;
       sockets[i].rx_head = 0;
       sockets[i].rx_tail = 0;
+      sockets[i].rx_dgram_head = 0;
+      sockets[i].rx_dgram_tail = 0;
       sockets[i].seq = 1000; // Random ISN
       sockets[i].ack = 0;
       // CRITICAL: Clear remote address fields to prevent stale values
@@ -1160,6 +1173,32 @@ int net_socket_send(struct socket_pcb* pcb, const void* buf, uint32_t len) {
   return -1;
 }
 
+/* L35: drain the NIC's RX used ring from a blocking socket wait.  Without
+ * this the only thing that can move a reply from the virtio ring into the
+ * socket is the device interrupt, so a missed/late IRQ costs a whole timer
+ * tick (10 ms) — measured as the 20-30 ms per-READ-RPC wall.  poll_rx()
+ * itself returns immediately when the ring is empty and does not poke the
+ * device in that case (its idle notify is throttled to 100 Hz), so calling
+ * it in a spin loop costs a memory read, not a VM exit.
+ *
+ * Skipped while the RDMA provider loop owns the ring (it polls in its own
+ * thread; two pollers would race on rx_ack_used_idx). */
+static void net_rx_pump(void) {
+#if defined(__x86_64__)
+  extern void virtio_net_poll_rx(void);
+  extern volatile int virtio_net_provider_active;
+  extern volatile uint32_t nfs_perf_pump_calls, nfs_perf_pump_hits;
+  extern volatile uint32_t dbg_poll_rx_pkts;
+  extern volatile int nfs_perf_legacy;   /* L35 A/B switch (nfs.c) */
+  if (nfs_perf_legacy) return;
+  if (virtio_net_provider_active) return;
+  nfs_perf_pump_calls++;
+  uint32_t before = dbg_poll_rx_pkts;
+  virtio_net_poll_rx();
+  if (dbg_poll_rx_pkts != before) nfs_perf_pump_hits++;
+#endif
+}
+
 int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
   if (!pcb) return -1;
 
@@ -1170,12 +1209,18 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
       uart_puts("[NET] Error: Recv timeout. No data received.\n");
       return -1;
     }
+    net_rx_pump();
+    if (pcb->rx_head != pcb->rx_tail) break;
     safe_wfi();
   }
 
   // Atomically read the available payload to prevent race conditions during interrupt delivery
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
-  uint32_t avail = pcb->rx_tail - pcb->rx_head;
+  int have_dgram = (pcb->protocol == IP_PROTO_UDP &&
+                    pcb->rx_dgram_head != pcb->rx_dgram_tail);
+  uint32_t avail = have_dgram
+      ? pcb->rx_dgram_len[pcb->rx_dgram_head % SOCKET_RX_DGRAM_MAX]
+      : pcb->rx_tail - pcb->rx_head;
   if (avail == 0) {
     spinlock_release_irqrestore(&net_lock, flags);
     return 0; // EOF
@@ -1186,6 +1231,11 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
   for (uint32_t i = 0; i < to_read; i++) {
     out[i] = pcb->rx_buf[pcb->rx_head % SOCKET_RX_BUF_SIZE];
     pcb->rx_head++;
+  }
+  if (have_dgram) {
+    if (to_read == avail) pcb->rx_dgram_head++;
+    else pcb->rx_dgram_len[pcb->rx_dgram_head % SOCKET_RX_DGRAM_MAX] =
+             avail - to_read;
   }
   spinlock_release_irqrestore(&net_lock, flags);
   /* WK-real-site (draft 0009): window-update ACK after the app drains
@@ -1200,15 +1250,34 @@ int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int
 
   /* Like net_socket_recv() but with a caller-provided timeout: the NFS RPC
    * client must not wait the fixed 5s per attempt.  Returns bytes received,
-   * 0 when the socket closed with no data, -1 on timeout. */
+   * 0 when the socket closed with no data, -1 on timeout.
+   *
+  /* L35: poll the NIC ring for the WHOLE wait instead of sleeping until the
+   * IRQ or the next timer tick.  Measured (bench, [NFSRTT]): a READ reply's
+   * true round trip through slirp+nfsd is 130-300 us, but a waiter that
+   * sleeps is woken by the 100 Hz timer, so the same RPC costs 6-9 ms and a
+   * pipeline of 16 stalls behind it.  A 200 us window caught only the
+   * fastest replies; the first 2 ms window fixed the idle case but the
+   * tick still bounded a loaded guest.  Spinning removes the timer from the
+   * data path entirely.  The cost is one busy core while an RPC is
+   * outstanding — the same trade a polled network driver makes, and this is
+   * a read-mostly client with 8 CPUs.
+   *
+   * safe_wfi() stays in net_socket_recv() (the 5 s variant other callers
+   * use) so a wedged peer still parks instead of burning a core. */
   uint64_t start = timer_get_ms();
   while (pcb->rx_head == pcb->rx_tail && pcb->state != SOCKET_CLOSED) {
     if ((int)(timer_get_ms() - start) > timeout_ms) return -1;
-    safe_wfi();
+    net_rx_pump();
+    cpu_relax();
   }
 
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
-  uint32_t avail = pcb->rx_tail - pcb->rx_head;
+  int have_dgram = (pcb->protocol == IP_PROTO_UDP &&
+                    pcb->rx_dgram_head != pcb->rx_dgram_tail);
+  uint32_t avail = have_dgram
+      ? pcb->rx_dgram_len[pcb->rx_dgram_head % SOCKET_RX_DGRAM_MAX]
+      : pcb->rx_tail - pcb->rx_head;
   if (avail == 0) {
     spinlock_release_irqrestore(&net_lock, flags);
     return 0; // EOF
@@ -1218,6 +1287,11 @@ int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int
   for (uint32_t i = 0; i < to_read; i++) {
     out[i] = pcb->rx_buf[pcb->rx_head % SOCKET_RX_BUF_SIZE];
     pcb->rx_head++;
+  }
+  if (have_dgram) {
+    if (to_read == avail) pcb->rx_dgram_head++;
+    else pcb->rx_dgram_len[pcb->rx_dgram_head % SOCKET_RX_DGRAM_MAX] =
+             avail - to_read;
   }
   spinlock_release_irqrestore(&net_lock, flags);
   if (to_read > 0 && pcb->state == SOCKET_ESTABLISHED && pcb->mac_cached)

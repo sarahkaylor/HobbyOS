@@ -369,6 +369,13 @@ struct sys_fsinfo {
   uint64_t free_bytes;
 };
 
+/* cmd 10 (L35): NFS READ traffic counters.  Mirrors struct sys_nfsio in
+ * src/user_include/libc.h. */
+struct sys_nfsio {
+  uint64_t bytes;
+  uint64_t ops;
+};
+
 static void sys_sysinfo(struct trap_frame *tf) {
   int cmd = (int)tf->regs[5]; // rdi
   void *buf = (void *)tf->regs[4]; // rsi
@@ -469,6 +476,16 @@ static void sys_sysinfo(struct trap_frame *tf) {
     } else if (cmd == 9) { // Block cache stats (docs/blk-cache.md)
       if (size >= (int)sizeof(struct blk_cache_stats)) {
         blk_cache_get_stats((struct blk_cache_stats *)buf);
+        tf->regs[0] = 0;
+      } else {
+        tf->regs[0] = -1;
+      }
+    } else if (cmd == 10) { // NFS READ traffic counters (L35 bench)
+      if (size >= (int)sizeof(struct sys_nfsio)) {
+        extern volatile uint64_t nfs_io_bytes, nfs_io_ops;
+        struct sys_nfsio *io = (struct sys_nfsio *)buf;
+        io->bytes = nfs_io_bytes;
+        io->ops = nfs_io_ops;
         tf->regs[0] = 0;
       } else {
         tf->regs[0] = -1;

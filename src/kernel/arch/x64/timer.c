@@ -246,3 +246,14 @@ uint64_t timer_get_ms(void) {
   }
   return rdtsc() / tsc_per_ms;
 }
+
+/* Microsecond time base for the NFS RPC/latency instrumentation (L35).
+ * Same TSC as timer_get_ms(), so it advances with interrupts disabled and
+ * has sub-millisecond resolution.  Not for scheduling decisions: a caller
+ * that must not spin should use timer_get_ms(). */
+uint64_t timer_get_us(void) {
+  if (tsc_per_ms == 0) {
+    return timer_ticks * 10000;
+  }
+  return (rdtsc() * 1000) / tsc_per_ms;
+}
