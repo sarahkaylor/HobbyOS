@@ -1,0 +1,15 @@
+# COM2 [PANIC-SINK-VIOLATION] records — one per RECORD, counter grows ~1/record
+# run: make MODE=test ARCH=intel disk.img; T3_QEMU_ARGS='-serial file:...' tools/t3_tier.sh intel
+# QEMU default 8 CPUs (QEMU_SMP unset), intel
+records=16855
+first_suppressed=1
+last_suppressed=1800
+--- first 5 ---
+[001;001H[001;001H[PANIC-SINK-VIOLATION] panic_putc from a returning path suppressed=1
+[PANIC-SINK-VIOLATION] panic_putc from a returning path suppressed=2
+[PANIC-SINK-VIOLATION] panic_putc from a returning path suppressed=3
+[PANIC-SINK-VIOLATION] panic_putc from a returning path suppressed=4
+[PANIC-SINK-VIOLATION] panic_putc from a returning path suppressed=5
+--- last 2 ---
+[PANIC-SINK-VIOLATION] panic_putc from a returning path suppressed=1799
+[PANIC-SINK-VIOLATION] panic_putc from a returning path suppressed=1800

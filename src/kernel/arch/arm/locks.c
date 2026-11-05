@@ -1,8 +1,8 @@
 #include "lock.h"
 #include "process.h" /* MAX_CPUS + LOSTWAKE_DEAD_OWNER_MS: the shared definition of a dead owner (GB-060) */
 
-extern void uart_puts_raw(const char *s);
-extern void uart_print_hex_raw(uint64_t v);
+extern void panic_puts(const char *s);
+extern void panic_print_hex(uint64_t v);
 extern uint32_t get_cpuid(void);
 
 /* GB-060 gate counters (mirror of arch/x64/locks.c): the tier must be able to
@@ -90,15 +90,15 @@ __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
       uint64_t addr = (uint64_t)(uintptr_t)lock;
       if (cpu < 64 && ld_reported[cpu] != addr) {
         ld_reported[cpu] = addr;
-        uart_puts_raw("[LOCKDIAG] cpu=");
-        uart_print_hex_raw(cpu);
-        uart_puts_raw(" lock=");
-        uart_print_hex_raw(addr);
-        uart_puts_raw(" val=");
-        uart_print_hex_raw(lock->locked);
-        uart_puts_raw(" caller=");
-        uart_print_hex_raw(ra);
-        uart_puts_raw("\n");
+        panic_puts("[LOCKDIAG] cpu=");
+        panic_print_hex(cpu);
+        panic_puts(" lock=");
+        panic_print_hex(addr);
+        panic_puts(" val=");
+        panic_print_hex(lock->locked);
+        panic_puts(" caller=");
+        panic_print_hex(ra);
+        panic_puts("\n");
       }
       /* GB-060: if the recorded owner is a CPU that has halted, free the lock and
          go back to contending for it normally.  Freeing-then-re-acquiring (rather
@@ -110,13 +110,13 @@ __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
         extern int cpu_is_halted(uint32_t cpu);
         uint32_t own = lock->owner;
         if (lock_steal_ok(own, cpu)) {
-          uart_puts_raw("[STOLEN] cpu=");
-          uart_print_hex_raw(cpu);
-          uart_puts_raw(" lock=");
-          uart_print_hex_raw((uint64_t)(uintptr_t)lock);
-          uart_puts_raw(" from halted cpu=");
-          uart_print_hex_raw(own - 1);
-          uart_puts_raw("\n");
+          panic_puts("[STOLEN] cpu=");
+          panic_print_hex(cpu);
+          panic_puts(" lock=");
+          panic_print_hex((uint64_t)(uintptr_t)lock);
+          panic_puts(" from halted cpu=");
+          panic_print_hex(own - 1);
+          panic_puts("\n");
           lock_cnt_stolen++;
           lock->owner = 0;
           __asm__ volatile("stlr wzr, [%0]\n" ::"r"(&lock->locked) : "memory");
@@ -125,15 +125,15 @@ __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
           extern volatile uint64_t cpu_heartbeat_ms[];
           uint64_t now = timer_get_ms();
           if (lock_stallbreak_ok(own, cpu, now)) {
-            uart_puts_raw("[STALLBREAK] cpu=");
-            uart_print_hex_raw(cpu);
-            uart_puts_raw(" lock=");
-            uart_print_hex_raw((uint64_t)(uintptr_t)lock);
-            uart_puts_raw(" owner_cpu=");
-            uart_print_hex_raw(own - 1);
-            uart_puts_raw(" stale_ms=");
-            uart_print_hex_raw(now - cpu_heartbeat_ms[own - 1]);
-            uart_puts_raw("\n");
+            panic_puts("[STALLBREAK] cpu=");
+            panic_print_hex(cpu);
+            panic_puts(" lock=");
+            panic_print_hex((uint64_t)(uintptr_t)lock);
+            panic_puts(" owner_cpu=");
+            panic_print_hex(own - 1);
+            panic_puts(" stale_ms=");
+            panic_print_hex(now - cpu_heartbeat_ms[own - 1]);
+            panic_puts("\n");
             lock_cnt_stallbreak++;
             lock->owner = 0;
             __asm__ volatile("stlr wzr, [%0]\n" ::"r"(&lock->locked) : "memory");
@@ -279,13 +279,13 @@ void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
 /* GB-060 gate: print the end-of-run lock-strand counter summary (mirror of the
    x64 version; same [LOCKCNT] line both arches). */
 void lock_print_counters(void) {
-  uart_puts_raw("\n[LOCKCNT] STALLBREAK=");
-  uart_print_hex_raw(lock_cnt_stallbreak);
-  uart_puts_raw(" STOLEN=");
-  uart_print_hex_raw(lock_cnt_stolen);
-  uart_puts_raw(" LOCKFOREVER=");
-  uart_print_hex_raw(lock_cnt_lockforever);
-  uart_puts_raw(" UNOWNED-FREED=");
-  uart_print_hex_raw(lock_cnt_unownedfreed);
-  uart_puts_raw("\n");
+  panic_puts("\n[LOCKCNT] STALLBREAK=");
+  panic_print_hex(lock_cnt_stallbreak);
+  panic_puts(" STOLEN=");
+  panic_print_hex(lock_cnt_stolen);
+  panic_puts(" LOCKFOREVER=");
+  panic_print_hex(lock_cnt_lockforever);
+  panic_puts(" UNOWNED-FREED=");
+  panic_print_hex(lock_cnt_unownedfreed);
+  panic_puts("\n");
 }

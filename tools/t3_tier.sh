@@ -449,7 +449,18 @@ MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG"
   | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
 PROGS_EXITED=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
   | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ' || true)
-echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory fault records across ${MEMFAULT_PROCS} processes, ${PROGS_EXITED} programs exited, halted=${halted}"
+# GB-097: byte-interleaved records.  Distinct from the glued count above: a
+# glued line carries TWO tags (record fusion), a shredded one carries ONE tag
+# whose body was overwritten character-by-character by another writer.  The
+# detector is in-tree (tools/gate/console_shred.py, --self-test) so any log can
+# be re-judged; a missing detector is reported as "?" and never as 0.
+SHREDDED="?"
+if [ -x "${ROOT:-.}/tools/gate/console_shred.py" ] || [ -f "${ROOT:-.}/tools/gate/console_shred.py" ]; then
+  SHREDDED=$(python3 "${ROOT:-.}/tools/gate/console_shred.py" "$LOG" 2>/dev/null \
+    | sed -nE 's/^console_shred: ([0-9]+) byte-interleaved.*/\1/p' | head -1 || true)
+  [ -n "$SHREDDED" ] || SHREDDED=0
+fi
+echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory fault records across ${MEMFAULT_PROCS} processes, ${PROGS_EXITED} programs exited, ${SHREDDED} shredded, halted=${halted}"
 
 # GB-068 regression guard: the intel wave carries a documented, long-standing
 # baseline of user-mode fatal faults (in=PROT) from legacy v1 flat binaries
