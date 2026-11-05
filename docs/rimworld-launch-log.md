@@ -2828,3 +2828,25 @@ No frame is claimed: `XPutImage` is resolved
   `File.*` call and then loads an assembly and enumerates its types.
 - `tools/rw/rw-runs-table.sh`: N archived desktop runs + the table above.
 - `tools/rw/rebuild-launcher.sh`: launcher-only rebuild for `RW_SKIP_BUILD=1`.
+
+### 21.9 Tests
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh    Tests run: 410   Tests failed: 0
+bash tools/gate/m2_mono.sh                PASS
+python3 tools/gate/m3_window_probe.py     PASS (M3_EXIT=0)
+python3 tools/gate/m4_gl_probe.py         PASS (M4_EXIT=0, guest GLDESK.PPM 365013 bytes)
+```
+
+New regression row in the M5 NFS gate (`tools/rw/run-rwnfs-probe.sh`,
+`oneshot_nfs()` in `src/user/rwnfs_probe.c`):
+
+```text
+[RW] ONESHOT want=2915 got=2915
+[RW] PASS one read() of a 2915-byte NFS file returns 2915 bytes
+```
+
+Before the `nfs_read_file()` fix the same request returned 1024 bytes (the
+engine's own `[XREAD] want=2915 got=1024` is the measured before). The gate's
+only remaining failure is the pre-existing, by-design `mmap` of an NFS file
+(`-ENOTSUP`, errno 95) — that is exactly why `/RWMANAGED` exists.
