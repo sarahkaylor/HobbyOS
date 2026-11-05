@@ -5398,3 +5398,197 @@ named — a managed joiner whose signaller never runs — but it is no longer
 `unit 414/0` (413 + the new `test_p5_directed_signal_owner`), `m2_mono`,
 `m2_tp` (work items, parking, clock), `m2_threads`, `m12`, `redzone`,
 `m3_window_probe`, `m4_gl_probe` all PASS at this tip.
+
+## 34. 2026-11-05 — M6/L47: the pool's own counters, the misattributed Join, and an "animation" that was the panel clock
+
+Three of §33's conclusions do not survive their own rows. This section
+re-derives them from the pool's own trace and from the pixels, and it corrects
+the two instruments that hid the truth.
+
+### 34.1 The `[TEXIT]` table: the managed exit DID run in every row
+
+`[TEXIT]`'s `mod=` column was computed by walking back over contiguous regions
+of the same `kind`, and adjacent DSOs here are packed back-to-back, so all 11
+rows of §33 claimed `mod=0x1083380000+0x17C6C6` — a 1.6 MiB "module" that is
+really four libraries. With the boundary fixed (a module's first segment is
+never writable, so a writable predecessor ends the walk; `src/kernel/process.c`),
+the same rows read `libpthread+0x86C6`:
+
+```text
+[TEXIT] pid=36 pre=0x24 touch=0 woke=0 live=35 mod=0x10834F4000+0x86C6 Thread Pool Wor
+[TEXIT] pid=30 pre=0x1E touch=0 woke=1 live=35 mod=0x10834F4000+0x86C6 Thread Pool Wor
+[TEXIT] pid=37 pre=0x25 touch=0 woke=0 live=35 mod=0x10834F4000+0x86C6 Thread Pool Wor
+[TEXIT] pid=32 pre=0x20 touch=0 woke=1 live=35 mod=0x10834F4000+0x86C6 Thread Pool Wor
+[TEXIT] pid=29 pre=0x1D touch=0 woke=0 live=32 mod=0x10834F4000+0x86C6 Thread Pool Wor
+[TEXIT] pid=38 pre=0x26 touch=0 woke=1 live=32 mod=0x10834F4000+0x86C6 /NFS/RimWorldLinux
+[TEXIT] pid=31 pre=0x1F touch=0 woke=0 live=30 mod=0x10834F4000+0x86C6 Thread Pool Wor
+[TEXIT] pid=34 pre=0x22 touch=0 woke=0 live=30 mod=0x10834F4000+0x86C6 Thread Pool Wor
+[TEXIT] pid=35 pre=0x23 touch=0 woke=1 live=28 mod=0x10834F4000+0x86C6 Thread Pool Wor
+[TEXIT] pid=33 pre=0x21 touch=0 woke=1 live=30 mod=0x10834F4000+0x86C6 Thread Pool Wor
+[TEXIT] pid=28 pre=0x1C touch=0 woke=0 live=26 mod=0x10834F4000+0x86C6 /NFS/RimWorldLinux
+```
+
+`0x86C6` is inside `start_thread`, at the `xor %edi,%edi; mov $0x3c,%eax;
+syscall; jmp` loop that glibc calls `__exit_thread` (`libpthread-2.31.so`,
+disassembled: `0x86c0..0x86c6`). It is reached through the unwind handler that
+`start_thread` installs — the same tail for a returned start routine and for
+`pthread_exit` — and, crucially, `start_thread` runs
+
+```text
+0x8612: call __call_tls_dtors        (__cxa_thread_atexit dtors)
+0x8625: call __nptl_deallocate_tsd   (pthread_key_create dtors <- Mono's)
+0x862a: call __libc_thread_freeres
+0x86c4: syscall 60 (exit)
+```
+
+Mono registers `thread_exited_dtor` as a `pthread_key_create` destructor, and
+that dtor calls `unregister_thread(info)`. `unregister_thread` is the **only**
+place `mono_threads_signal_thread_handle()` is called
+(`mono-threads.c:597`), i.e. the only place a `Thread.Join` waiter is woken.
+`mono_thread_info_exit()` runs the same function one step earlier via
+`mono_thread_info_detach()`, so both exit paths signal.
+
+**Verdict: "a worker that leaves without running the managed exit never signals
+its joiner" is eliminated** for all 11/16 rows: every one of them ran
+`unregister_thread`, signalled its `MonoThreadHandle`, and cleared its own
+`ctid` (`pre` is each row's own tid, `touch=0`). If a join is stuck, its target
+is not one of these threads.
+
+### 34.2 Whose join: the main thread is NOT in `mono_join_uninterrupted`
+
+`mono_join_uninterrupted()` in 6.12 does not touch a `MonoW32Handle` at all:
+
+```c
+ret = mono_thread_info_wait_one_handle (thread_to_join, wait, TRUE);
+   -> mono_os_event_wait_one (&thread_handle->event, timeout, alertable)
+      -> mono_os_event_wait_multiple (...)      /* os-event-unix.c */
+           mono_cond_t signal_cond;             /* a STACK local */
+           g_ptr_array_add (event->conds, &signal_cond);
+           mono_os_cond_wait (&signal_cond, &signal_mutex);
+```
+
+so a Thread.Join parks on a **stack** address, inside a `pthread_cond_wait`
+called directly by `mono_os_event_wait_multiple`. Two different keys are in the
+ladder, and they belong to two different waits:
+
+| thread | key | where the key lives | `waits/wakes` | decoded frame |
+|---|---|---|---|---|
+| pid 4 main | `0x105B6707F8` | heap | 208 / 121, frozen | `mono_os_cond_wait` <- `mono_w32handle_timedwait_signal_naked` <- `mono_w32handle_wait_one` <- `mono_wait_uninterrupted` |
+| pid 29 pool worker | `0x11A4028928` | **stack** (0x11A4000000+0x40000) | 5 / 4 | `pthread_cond_wait` <- `mono_os_event_wait_multiple` <- `mono_thread_info_wait_one_handle` = **Thread.Join** |
+
+The heap key is decisive for pid 4: the code at `libmono+0x20dec8` is
+`lea 0x38(%rbp),%rdi; add $0x10,%rbp; mov %rbp,%rsi; call
+mono_os_cond_timedwait` — cond at `handle+0x38`, mutex at `handle+0x10`, which
+is exactly `MonoW32Handle` (`type/ref/signalled/in_use`, `signal_mutex` at
+0x10, `signal_cond` at 0x38). Its caller at `libmono+0x23ca7b` calls
+`0x20db03` (that same `mono_w32handle_wait_one`) out of the alertable-wait
+loop, i.e. `mono_wait_uninterrupted` — a managed `WaitHandle.WaitOne()`.
+
+So: **main waits on the game's `taskDoneEvent` (AutoResetEvent) and one pool
+worker waits in `Thread.Join`.** §33.8's "pid 4 is in `mono_join_uninterrupted`"
+is a misattribution: a stack-scan candidate was named instead of the caller.
+Any theory built on "the main thread's join" has to be retired.
+
+### 34.3 The pool's own counters (Mono's threadpool trace, `/TPTRACE`)
+
+With a *current* `rwlaunch` (§34.5), `MONO_LOG_MASK=threadpool` +
+`MONO_LOG_LEVEL=debug` prints the pool's decisions. One run, in order:
+
+```text
+[0x10801f3680] try create worker, created 0x1148200700, now = 50 count = 1
+...                                                          ... count = 8
+[0x10801f3680] try create worker, failed: maximum number of working threads reached
+[0x10801f3680] request worker, failed
+[0x1148401700] try create worker, failed: maximum number of working threads reached
+[0x1148401700] request worker, failed
+[0x1148c05700] worker parking
+[0x1148c05700] worker unparking, timeout? yes interrupted? no
+[0x1148c05700] worker timed out, starting = 0 working = 2 parked = 0, setting max_working to 8
+[0x1148c05700] worker finishing
+[0x1148a04700] worker timed out, starting = 0 working = 0 parked = 0, setting max_working to 8
+[0x1148a04700] worker finishing
+```
+
+The counters the pool reads, at the stall:
+
+* `limit_worker_min = mono_cpu_count() * MONO_THREADS_PER_CPU = 8 * 1 = 8`;
+  `max_working` starts there and the hill climber pins it there —
+  `decr_max_working = MAX(limit_worker_min, MIN(num_active, max_working)) = 8`.
+* 8 workers, then every 9th request answers **"maximum number of working
+  threads reached"** (`counter._.working >= counter._.max_working`) and
+  `request worker, failed`.
+* **zero `monitor thread, created` / `monitor thread, unparked` rows**: the
+  monitor is the only path that raises `max_working`
+  (`counter._.max_working ++` then `worker_try_create()`), and it only runs that
+  path when `work_item_count() > 0` at its 500 ms tick. At the stall the native
+  hint is 0 — every item was already *dequeued* — so it does nothing.
+* the last rows are `starting = 0 working = 0 parked = 0`: the pool is empty
+  while the main thread still waits.
+
+A/B with `MONO_THREADS_PER_CPU=50` (`/TPCPU`): `max_working` 8 -> 400, 16
+`[TEXIT]` instead of 11, five of them pool workers that never entered
+`worker_callback` (they stayed unnamed, `/NFS/RimWorldLinux`, because
+`mono_threadpool_set_thread_name()` is the first thing `worker_callback` does),
+and the loader stops at the same place.
+
+**Verdict: pool capacity is not the wall.** The item the main thread waits for
+is not sitting in the pool's queue; another worker would not run it. Raising the
+ceiling only creates workers that park, time out and exit.
+
+### 34.4 `[XSW]=0` vs "the frame animates": the animation was the panel clock
+
+Consecutive `01..22_running.ppm` diff, pixel by pixel, at 1920x1080:
+
+```text
+02 diff_px=7   bbox=(1889,1065,1892,1068)
+03 diff_px=28  bbox=(1881,1063,1894,1068)
+04 diff_px=18  bbox=(1881,1064,1894,1069)
+05 diff_px=921534 bbox=(2,34,1894,1069)     <- the game window appears
+06 diff_px=36  bbox=(1881,1063,1894,1069)
+...
+22 diff_px=56  bbox=(1881,1063,1894,1069)
+```
+
+Every change after shot 05 is a 13x6 box in the **bottom-right corner of the
+1920x1080 screen** — the desktop panel's clock — 7 to 59 pixels. The game's
+loading art does not change by one pixel after it is first shown. "Every
+screenshot's SHA differs" was true and meant nothing; it measured the clock.
+
+So `[XSW] = 0` is the honest row: the client did not swap after the first
+frame, exactly as §32's `n=1` said. The hook itself is not the explanation
+either — `obj/mesa/lib/libGL.so.1` carries `UND XcPresentMark`, a `JUMP_SLOT`
+relocation and `jmp XcPresentMark@plt` at `0xab64fd` (guarded by `cmpq $0,GOT`),
+`obj/xcompat/libX11.so.6` exports `T XcPresentMark`, and the staged copies in
+`disk.img` md5-match both — but no such argument is needed: the pixels settle it.
+
+### 34.5 A stale `rwlaunch.bin` silently disables `/TPTRACE` and `/SIGQUITON`
+
+`RW_SKIP_BUILD=1` re-stages every DSO but **not** `obj/rw-desktop/rwlaunch.bin`
+(it is built inside the same `if` as the kernel). The lane's seeded binary
+predated L42: `strings obj/rw-desktop/rwlaunch.bin | grep TPTRACE` was empty
+while `src/user/rwlaunch.c` had the code. A `/TPTRACE` run therefore produced
+**zero** trace rows and read exactly like "Mono's trace does not work" — one
+boot lost. The same stale binary is why the first `/SIGQUITON` run printed
+nothing at all: `open("/SIGQUITON")` never ran.
+
+With a current launcher the SIGQUIT dump does fire, but Mono's own dump stops
+after `Full thread dump:` (its first line, `"Finalizer"`, then nothing) — the
+async-suspend walk dies there, so managed stacks are still not available from
+this kernel.
+
+### 34.6 Where it stops now
+
+`Loaded All Assemblies, in 13.660 s`, banner reached, `world_stopped=0`,
+`live=0`, `stop_count=44`, NFS at `[NFSRTT] ... bytes=19331072` (19.3 MB of
+729 MiB), 11 `[TEXIT]`, every pool slot `st=9`, and the main thread frozen in
+`WaitOne` on its `taskDoneEvent` at `waits=208 wakes=121`.
+
+The remaining wall is one work item that never completes while the pool that
+would run it is empty. §33.8 said "no Thread Pool Worker is alive" and that is
+right; what it got wrong is *why*. The corpus now says: not a stopped world
+(§33 fixed it), not a pool ceiling (§34.3 A/B), not a worker that skipped its
+managed exit (§34.1), and not the main thread's `Join` (§34.2). The open
+question is the target of the *worker's* `Thread.Join`, which needs a managed
+stack; the next instrument is a working thread dump (or a breakpoint count of
+`mono_threads_signal_thread_handle` against thread exits).
+

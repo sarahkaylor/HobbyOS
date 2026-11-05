@@ -5696,7 +5696,15 @@ void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
           int lo = idx;
           while (lo > 0) {
             struct vm_region *pv = &cur->as->regions[lo - 1];
+            /* L47: stop at a DSO boundary.  Adjacent DSOs are often laid out
+               back-to-back, so `kind` alone walks straight out of this module
+               and into the *previous* library: a pc in libpthread at
+               +0x86C6 was reported as base 0x1083380000+0x17C6C6 (a 1.6 MiB
+               span covering four libraries), which reads as one module.  A
+               module's first segment is never writable, so a writable
+               predecessor is another DSO's data segment. */
             if (pv->kind != rg->kind ||
+                (pv->prot & VM_PROT_WRITE) ||
                 pv->base + pv->len != cur->as->regions[lo].base)
               break;
             lo--;
