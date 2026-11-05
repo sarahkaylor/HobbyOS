@@ -105,6 +105,11 @@ static volatile int panic_sink_violations = 0;
    cap the count still moves.  The same counter counts a second CPU's failed
    claim: a claim loser is a dropped record too. */
 static volatile int panic_sink_dropped = 0;
+/* GB-209: one summary line per boot on COM1, and the open-record latch that
+   makes the counter count records instead of characters. */
+static volatile int panic_sink_summarized = 0;
+static volatile int panic_sink_record_open = 0;
+static volatile int panic_sink_claim = 0;
 /* GB-204: one claim word.  The first CPU to exchange 0->1 owns the fatal
    record; every other CPU sees 1, counts the drop and halts without writing. */
 static volatile int panic_claim_word = 0;
@@ -135,39 +140,64 @@ void panic_leave(void) {
 void panic_enter(void) { panic_depth++; }
 
 static void panic_sink_violation(const char *what, const char *s) {
-  static volatile int reporting = 0;
-  /* Count first: a suppressed record is still a measured record (GB-204). */
-  __atomic_fetch_add(&panic_sink_dropped, 1, __ATOMIC_RELAXED);
-  /* COM2 carries every violation as one clean counter line, cap or no cap:
-     nothing else writes COM2, so this is the uncapped view of the count. */
-  panic_puts2("[PANIC-SINK] suppressed=");
-  print_int_raw2(__atomic_load_n(&panic_sink_dropped, __ATOMIC_RELAXED));
-  panic_putc2('\n');
-  if (panic_sink_violations >= 3 || reporting) return;
-  reporting = 1;
-  panic_sink_violations++;
-  /* COM1, not COM2: the T3 harness captures only stdio (`-serial stdio`), so a
-     report on COM2 is a report nobody reads -- measured, 0 violations visible
-     with the COM2 reporter while 70 records shredded.  Writing byte-wise here
-     can itself shred one line, which is accepted: it is capped at 3 per boot
-     and the alternative is an instrument that cannot be observed. */
-  const char *tag = "[PANIC-SINK-VIOLATION] ";
-  for (const char *p = tag; *p; p++) uart_putc_body(*p);
-  for (const char *p = what; *p; p++) uart_putc_body(*p);
-  const char *mid = " from a returning path";
-  for (const char *p = mid; *p; p++) uart_putc_body(*p);
+  /* GB-209: panic_putc() arrives once per CHARACTER and panic_puts() once per
+     FRAGMENT, so the old per-call increment counted bytes (78,781 for one
+     returning-path diagnostic).  Count a RECORD — the span between newlines —
+     and emit one record per line. */
+  if (panic_sink_record_open)
+    return;                     /* mid-record: already counted and reported */
+  /* GB-209: a sink-local claim (GB-097 clause 1.2's claim word is the fatal
+     record's; this one is the violation reporter's).  Two returning CPUs can
+     enter here at once; only one may write, or the reports shred each other.
+     Deliberately NOT uart_lock: a halted CPU can own it (measured:
+     [LOCKFOREVER] cpu=0 owner=1 owner_hb_age=dead), and a diagnostic that
+     deadlocks the console is worse than one that is imperfect. */
+  if (__atomic_exchange_n(&panic_sink_claim, 1, __ATOMIC_ACQ_REL) != 0)
+    return;
+  panic_sink_record_open = 1;
+  int d = __atomic_add_fetch(&panic_sink_dropped, 1, __ATOMIC_RELAXED);
+
+  /* COM2: the full record.  COM2 is dedicated (nothing else writes it), so a
+     record here cannot be byte-interleaved by another CPU's console writer. */
+  panic_puts2("[PANIC-SINK-VIOLATION] ");
+  panic_puts2(what);
+  panic_puts2(" from a returning path suppressed=");
+  print_int_raw2(d);
   if (s) {
-    for (const char *p = ": "; *p; p++) uart_putc_body(*p);
-    for (int i = 0; s[i] && i < 48; i++) uart_putc_body(s[i]);
+    panic_puts2(": ");
+    for (int i = 0; s[i] && i < 48; i++) panic_putc2(s[i]);
   }
-  uart_putc_body('\n');
-  reporting = 0;
+  panic_putc2('\n');
+
+  /* COM1: exactly ONE summary line per boot, under the sink claim.  This is a
+     returning path (panic_depth == 0); the raw sink's lock-free rule applies
+     to the non-returning fatal printer, but uart_lock itself is off-limits
+     here (see above).  The old "byte-wise here can itself shred one line,
+     accepted" comment is gone: that acceptance was the defect (GB-097-V2). */
+  if (__atomic_exchange_n(&panic_sink_summarized, 1, __ATOMIC_ACQ_REL) == 0) {
+    const char *pre = "[PANIC-SINK-VIOLATION] ";
+    for (const char *p = pre; *p; p++) uart_putc_body(*p);
+    for (const char *p = what; *p; p++) uart_putc_body(*p);
+    const char *mid = " from a returning path (suppressed=";
+    for (const char *p = mid; *p; p++) uart_putc_body(*p);
+    char buf[12];
+    int n = 0;
+    int v = d;
+    if (v == 0) buf[n++] = '0';
+    while (v > 0 && n < (int)sizeof(buf)) { buf[n++] = (char)('0' + v % 10); v /= 10; }
+    while (n > 0) uart_putc_body(buf[--n]);
+    uart_putc_body(')');
+    uart_putc_body('\n');
+  }
+  panic_sink_violations++;
+  __atomic_store_n(&panic_sink_claim, 0, __ATOMIC_RELEASE);
 }
 
 /** Raw single character — lock-free, for NON-RETURNING paths only (GB-097). */
 void panic_putc(char c) {
   if (!panic_depth) panic_sink_violation("panic_putc", 0);
   uart_putc_body(c);
+  if (c == '\n') panic_sink_record_open = 0;   /* GB-209: record boundary */
 }
 
 /* ---- COM2: a second, uncontaminated diagnostic stream (x64 only).
@@ -244,10 +274,12 @@ void print_int_raw2(int val) {
 /** Raw string — lock-free, for NON-RETURNING paths only (GB-097). */
 void panic_puts(const char *s) {
   if (!panic_depth) panic_sink_violation("panic_puts", s);
-  while (*s != '\0') {
-    uart_putc_body(*s);
-    s++;
+  const char *p = s;
+  while (*p != '\0') {
+    uart_putc_body(*p);
+    p++;
   }
+  if (p > s && p[-1] == '\n') panic_sink_record_open = 0;   /* GB-209: record boundary */
 }
 
 /**
