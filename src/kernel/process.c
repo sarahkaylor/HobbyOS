@@ -2916,6 +2916,62 @@ int process_signal(int pid, int sig) {
   /* Real handler: record pending + wake a restartable-slice park (D8.3). */
   struct process *pender = (task && task->is_thread) ? task : target;
   pender->sig_pending |= (1ull << (sig - 1));
+  /* M6/L45: per-target rows for the two Boehm stop-the-world signals.  The
+     global [SIG] rows are capped at 400 and the interesting pids (the pool
+     workers created last) never made it into them.  A SIGPWR/SIGXCPU that is
+     *sent* is the first half of the handshake; [SGPS]/[SGY] are the other
+     halves.  A worker that never appears here was never signalled at all --
+     that is Mono's GC list, not our delivery. */
+  if (sig == 24 || sig == 30) {
+    extern uint64_t linux_compat_sigmask_get(struct process *);
+    static uint8_t sgs_rows[MAX_PROCESSES];
+    int si = (pender->pid > 0 && pender->pid < MAX_PROCESSES) ? pender->pid : 0;
+    /* A stop-the-world signal that lands BLOCKED is never handled, so the
+       collector waits for an ack that cannot come: the world stays stopped
+       for ever.  Name the thread and its mask -- this is the one shape that
+       explains a permanent GC stop with every other row looking healthy. */
+    if (si && (linux_compat_sigmask_get(pender) & (1ull << (sig - 1)))) {
+      static uint8_t blk_rows[MAX_PROCESSES];
+      if (blk_rows[si] < 4) {
+        blk_rows[si]++;
+        struct kline kb;
+        kl_init(&kb);
+        kl_s(&kb, "[SIGBLK] pid=");
+        kl_i(&kb, pender->pid);
+        kl_s(&kb, " sig=");
+        kl_i(&kb, sig);
+        kl_s(&kb, " st=");
+        kl_i(&kb, pender->state);
+        kl_s(&kb, " inh=");
+        kl_i(&kb, pender->sig_in_handler);
+        kl_s(&kb, " mask=");
+        kl_hex(&kb, (unsigned long)linux_compat_sigmask_get(pender));
+        kl_s(&kb, " -> never handled\n");
+        kl_emit(&kb);
+      }
+    }
+    if (si && sgs_rows[si] < 12) {
+      sgs_rows[si]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SGS] pid=");
+      kl_i(&kl, pender->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " st=");
+      kl_i(&kl, pender->state);
+      kl_s(&kl, " susp=");
+      kl_i(&kl, pender->sig_suspended);
+      kl_s(&kl, " inh=");
+      kl_i(&kl, pender->sig_in_handler);
+      kl_s(&kl, " pend=");
+      kl_hex(&kl, (unsigned long)pender->sig_pending);
+      kl_s(&kl, " mask=");
+      kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(pender));
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   {
     /* Every signal a compat program sends or receives is a candidate for "the
        waker never ran": Mono's stop-the-world is a tgkill plus a park, and a
@@ -4213,6 +4269,15 @@ void start_scheduler(void) {
        forever, so without the heartbeat the reaper would never reclaim
        its RUNNING process and every CPU would IDLESTUCK-cycle forever. */
     sched_idle_rounds++;
+    /* M6/L45: the whole machine is idle, so this is the one context that can
+       afford to look for a compat thread that is asleep on a signal it would
+       take (a lost suspend/restart wake).  It both reports ([LOSTW]) and
+       repairs; see linux_compat_lost_wake_scan(). */
+    if ((sched_idle_rounds % 500) == 0) {
+      extern int linux_compat_lost_wake_scan(void) __attribute__((weak));
+      if (linux_compat_lost_wake_scan)
+        (void)linux_compat_lost_wake_scan();
+    }
     { int _c = (int)get_cpuid(); if (_c >= 0 && _c < MAX_CPUS) sched_idle_rounds_cpu[_c]++; }
     int acted = 0;   /* w5 (v): this pass RECLAIMED or DISPOSED a slot */
     if (sched_idle_rounds >= 500) {
@@ -4549,6 +4614,38 @@ void start_scheduler(void) {
             lb[li] = 0;
             uart_puts(lb);
           }
+          /* M6/L45: a compat thread parked in a signal-aware wait, or one
+             sitting inside a handler, with its whole signal state in one row.
+             "st=5 for ever, no [LOSTW]" and "st=5, SIGXCPU pending but
+             blocked" look identical in every other record; this row separates
+             them.  pend is decimal (0x800000 = SIGXCPU 24, 0x20000000 =
+             SIGPWR 30). */
+          if (proc_table[k].state == PROC_STATE_BLOCKED ||
+              proc_table[k].sig_in_handler || proc_table[k].sig_pending) {
+            uart_puts("[SIGST] slot=");
+            print_int(k);
+            uart_puts(" pid=");
+            print_int(proc_table[k].pid);
+            uart_puts(" st=");
+            print_int(proc_table[k].state);
+            uart_puts(" inh=");
+            print_int(proc_table[k].sig_in_handler);
+            uart_puts(" susp=");
+            print_int(proc_table[k].sig_suspended);
+            uart_puts(" fsig=");
+            print_int(proc_table[k].sig_frame_sig);
+            uart_puts(" pend=");
+            print_int((int)proc_table[k].sig_pending);
+            uart_puts(" gpend=");
+            print_int((int)(process_group(&proc_table[k])
+                                ? process_group(&proc_table[k])->sig_pending
+                                : 0));
+            uart_puts(" since=");
+            print_int((int)(proc_table[k].park_since_ms
+                                ? timer_get_ms() - proc_table[k].park_since_ms
+                                : 0));
+            uart_puts("\n");
+          }
         }
       }
       /* The futex queue + flight recorder: which threads are still queued,
@@ -4559,6 +4656,47 @@ void start_scheduler(void) {
         extern void futex_trace_dump_locked(void) __attribute__((weak));
         if (futex_trace_dump_locked)
           futex_trace_dump_locked();
+      }
+      /* M6/L45: is Boehm's world still stopped?  A thread sitting in
+         GC_suspend_handler_inner's sigsuspend is only released when
+         GC_world_is_stopped clears (or GC_stop_count advances and the thread
+         gets the restart signal).  Reading the two globals turns "these
+         workers look suspended" into "the world was never restarted".
+         Offsets are properties of the shipped libmonobdwgc-2.0.so, verified
+         with nm: GC_suspend_handler 0x27c6e7, GC_stop_count 0x5b9250,
+         GC_world_is_stopped 0x5b9258.  Diagnostic only (read, never write). */
+      {
+        struct process *g0 = process_group(&proc_table[1]);
+        for (int k = 1; k < MAX_PROCESSES; k++) {
+          if (proc_table[k].pid == 4 && proc_table[k].is_thread == 0) {
+            g0 = &proc_table[k];
+            break;
+          }
+        }
+        if (g0 && g0->sig_handler[30] > 0x1000000) {
+          uint64_t base = g0->sig_handler[30] - 0x27c6e7;
+          uint32_t stopped = 0, sc = 0, ack = 0;
+          if (vm_user_read(g0, base + 0x5b9258, &stopped, 4) == 0 &&
+              vm_user_read(g0, base + 0x5b9250, &sc, 4) == 0) {
+            /* GC_suspend_ack_sem is a glibc sem_t whose first word is the
+               count: the collector sem_waits once per suspended thread, so
+               a value that matches the number of threads parked in
+               GC_suspend_handler means every ack arrived and the collector
+               stopped somewhere AFTER the handshake. */
+            (void)vm_user_read(g0, base + 0x5be728, &ack, 4);
+            uart_puts("[GCST] h30=0x");
+            uart_print_hex(g0->sig_handler[30]);
+            uart_puts(" base=0x");
+            uart_print_hex(base);
+            uart_puts(" world_stopped=");
+            print_int((int)stopped);
+            uart_puts(" stop_count=");
+            print_int((int)sc);
+            uart_puts(" ack_sem=");
+            print_int((int)ack);
+            uart_puts("\n");
+          }
+        }
       }
       uart_puts("[IDLESTUCK] claims:");
       /* GB-057: `c<N>=<pid>/<idle_rounds>`.  The second field is this CPU's own
