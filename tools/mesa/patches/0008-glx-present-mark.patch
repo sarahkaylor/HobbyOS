@@ -1,0 +1,117 @@
+tools/mesa: the present probe (L39) -- one row per glXSwapBuffers
+
+Why: "the window is black" was three different bugs wearing one screenshot.
+(RimWorld L38: 3 of 3 runs reached the game loop, 8 flushes, no frame on the
+desktop.)
+
+  (a) the client never presents       -> no glXSwapBuffers, no XPutImage
+  (b) it presents an unchanged or empty image -> "draws black"
+  (c) it presents real pixels that never reach /dev/fb0 -> present plumbing
+
+This tree's libGL is built from the gallium xlib frontend, NOT from src/glx
+(there is no glxcmds.c object in obj/mesa/obj), so glXSwapBuffers here is
+src/gallium/frontends/glx/xlib/glx_api.c: the hook has to live there.
+
+glXSwapBuffers now calls the compat libX11's XcPresentMark() with the swap
+count, the glFlush count (both counted here; _mesa_Flush is the other hook)
+and the GLXDrawable.  The shim owns the XPutImage/XFlush counters and the
+surface checksum and prints the [XSW] row, so the row exists even when the
+swap hands XPutImage nothing.
+
+The symbol is declared weak: against a real libX11 it resolves to NULL and the
+probe costs one branch.  The first three swaps also print [XSWM] with the
+resolved pointer and the XMesaBuffer, so "the client never swapped" and "the
+hook is not bound" are different rows.
+
+NOTE: this hunk deliberately sits at glXSwapBuffers and NOT at the include
+block, because patch 0005 already owns that region; a block there makes 0005's
+reverse-dry-run idempotency probe fail on an already-patched tree and the
+next build refuses to apply it ("Reversed (or previously applied) patch
+detected").
+
+It also names a real defect on the way: XMesaSwapBuffers ->
+xmesa_swap_st_framebuffer -> xmesa_st_framebuffer_display -> XPutImage, and
+nothing in that path calls XFlush/XSync (only XMesaFlush does, and it is not
+called by the swap).  A real Xlib writes the XPutImage request to the server
+socket as it builds it; a compat Xlib that buffers the frame in its shadow
+therefore never showed it.  XcPresentMark flushes the shadow it just filled.
+
+--- a/src/gallium/frontends/glx/xlib/glx_api.c	2026-11-05 04:35:12.622765943 -0600
++++ b/src/gallium/frontends/glx/xlib/glx_api.c	2026-11-05 04:35:12.624589727 -0600
+@@ -1452,6 +1452,23 @@
+ 
+ 
+ 
++/*
++ * HOBBYOS (lane L39): the present probe.
++ *
++ * XcPresentMark lives in the compat libX11.so.6 (src/user/xcompat/libx11.c).
++ * It is WEAK on purpose: on a host build against a real libX11 the loader
++ * leaves it NULL and this probe costs one predictable branch.  It is what
++ * turns "the window is black" into three separable rows -- the swap count
++ * here, the XPutImage count in the shim, and a checksum of the surface the
++ * shim is holding.
++ */
++extern int XcPresentMark(Display *dpy, unsigned long long swaps,
++                         unsigned long long glflush, unsigned long drawable)
++   __attribute__((weak));
++static unsigned long long hobbyos_swap_count;
++/* Defined in src/mesa/main/context.c; the glFlush half of the same probe. */
++extern unsigned long long hobbyos_glflush_count;
++
+ PUBLIC void
+ glXSwapBuffers( Display *dpy, GLXDrawable drawable )
+ {
+@@ -1463,16 +1480,30 @@
+       firsttime = 0;
+    }
+ 
+-   if (no_rast)
+-      return;
++   hobbyos_swap_count++;
+ 
+-   if (buffer) {
++   if (no_rast) {
++      /* Still a present attempt: the row must show that the client asked. */
++   }
++   else if (buffer) {
+       XMesaSwapBuffers(buffer);
+    }
+    else if (os_get_option("MESA_DEBUG")) {
+       _mesa_warning(NULL, "glXSwapBuffers: invalid drawable 0x%x\n",
+                     (int) drawable);
+    }
++
++   /* The row is written by the shim AFTER the put, so `put=` tells whether
++    * this swap handed XPutImage anything at all.  The first three swaps also
++    * print [XSWM] with the resolved pointer and the XMesaBuffer, so "the
++    * client never swapped" and "the hook is not bound" are different rows. */
++   if (hobbyos_swap_count <= 3)
++      fprintf(stderr, "[XSWM] n=%llu mark=%p drawable=0x%lx buffer=%p\n",
++              hobbyos_swap_count, (void *) (size_t) XcPresentMark,
++              (unsigned long) drawable, (void *) buffer);
++   if (XcPresentMark != NULL)
++      XcPresentMark(dpy, hobbyos_swap_count, hobbyos_glflush_count,
++                    (unsigned long) drawable);
+ }
+ 
+ 
+--- a/src/mesa/main/context.c	2026-11-05 04:35:12.623639603 -0600
++++ b/src/mesa/main/context.c	2026-11-05 04:35:12.625401039 -0600
+@@ -1648,10 +1648,16 @@
+  * Calls the #ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH macro and the
+  * dd_function_table::Flush driver callback, if not NULL.
+  */
++/* HOBBYOS (L39): glFlush is part of the present probe -- a client that
++ * flushes but never swaps is a different bug from one that never flushes at
++ * all.  Read by the GLX frontend's XcPresentMark row. */
++unsigned long long hobbyos_glflush_count;
++
+ void GLAPIENTRY
+ _mesa_Flush(void)
+ {
+    GET_CURRENT_CONTEXT(ctx);
++   hobbyos_glflush_count++;
+    ASSERT_OUTSIDE_BEGIN_END(ctx);
+    _mesa_flush(ctx);
+ }

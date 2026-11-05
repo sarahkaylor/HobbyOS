@@ -339,6 +339,11 @@ struct _XDisplay {
     unsigned long bg, border;
     Colormap cmap;
     int mapped, destroyed, content_ready, pointer_asked;
+    /* L39: a frame that arrived before the desktop laid the surface out.  It
+     * is kept in the shadow at its own size and presented by set_geometry(),
+     * instead of being dropped (which is what PUTSKIP used to do). */
+    int defer, defer_w, defer_h;
+    unsigned geom_seq;     /* count of accepted ESC ] G replies */
     int structure_selected;/* StructureNotifyMask was selected at least once */
     int exposure_selected; /* ExposureMask was selected at least once */
     int gx, gy, cw, ch;
@@ -623,6 +628,149 @@ static void l34_row(const char *tag, int a, int b, int c, int d2) {
   xs_write(2, buf, (unsigned long)j);
 }
 
+/* ---- L39: the present probe ------------------------------------------- *
+ * "The window is black" is at least three different bugs and only one of them
+ * is in the renderer:
+ *
+ *   (a) the client never presents      -> no glXSwapBuffers, no XPutImage;
+ *   (b) it presents an unchanged/empty image -> "draws black";
+ *   (c) it presents real pixels that never reach /dev/fb0 -> our plumbing.
+ *
+ * One [XSW] row per present attempt separates them, because every field is a
+ * counter:
+ *
+ *   [XSW] n=<marks> swap=<glXSwapBuffers> put=<XPutImage> putok=<copied>
+ *         flush=<XFlush> crc=<fnv64 of the surface> changed=<since last row>
+ *         w=<h> h=<h> ready=<content_ready> copy=<XCopyArea> glflush=<glFlush>
+ *
+ * put==putok==0 on a row with swap advancing is (a); changed=0 for every row
+ * while putok advances is (b); changed=1 with a black desktop is (c).
+ *
+ * Cost: the checksum is only taken when a row prints (first 3 marks, then
+ * every 10th, plus the first mark that carried pixels), so a 60 fps client
+ * pays one 7.8 MB scan every ten frames.  The GLX frontend passes its own swap
+ * and glFlush counters in through XcPresentMark -- see
+ * tools/mesa/patches/0008-glx-present-mark.patch. */
+
+#define PRES_ROW_EVERY 10
+
+static struct {
+  unsigned long long swaps;     /* glXSwapBuffers calls (from libGL) */
+  unsigned long long glflush;   /* glFlush calls (from libGL) */
+  unsigned long long marks;     /* XcPresentMark calls (== present attempts) */
+  unsigned long long puts;      /* XPutImage calls, including refused ones */
+  unsigned long long put_ok;    /* XPutImage calls that copied pixels */
+  unsigned long long put_skip;  /* ... refused (see the PUTSKIP reason) */
+  unsigned long long flushes;   /* XFlush calls */
+  unsigned long long copies;    /* XCopyArea calls */
+  unsigned long long heals;     /* desktop repair requests served */
+  unsigned long long crc;       /* surface checksum of the last printed row */
+  unsigned long long crc_nz;    /* pixels with a non-zero B/G/R */
+  unsigned long box[4];         /* their bounding box */
+  unsigned long long crc_tot;   /* pixels hashed */
+  unsigned long long pumps;     /* event-pump iterations */
+  unsigned long long wins;      /* XCreateWindow calls */
+  unsigned long long maps;      /* XMapWindow calls (not repeats) */
+  unsigned long long fs_reqs;   /* _NET_WM_STATE writes naming FULLSCREEN */
+  unsigned long long fs_granted;/* ... answered with a configure */
+  int have_crc, changed;
+  int last_w, last_h;
+  int first_ok_row;             /* the first present that carried pixels */
+  int rows, hb_rows;
+} g_pres;
+
+/* One pass: the checksum and the number of non-zero pixels.  A checksum answers
+ * "did anything change"; this answers "is there anything there at all", which
+ * is the question a 94%-black screenshot actually asks.  B8G8R8A8: a pixel is
+ * counted when any of its four bytes is non-zero. */
+static unsigned long long pres_fnv64_vis(const unsigned char *p,
+                                         unsigned long w, unsigned long h,
+                                         unsigned long *vis,
+                                         unsigned long *bbox) {
+  unsigned long npix = w * h;
+  unsigned long long hh = 1469598103934665603ull;
+  unsigned long c = 0;
+  unsigned long x0 = 0xfffffffful, y0 = 0xfffffffful, x1 = 0, y1 = 0;
+  for (unsigned long i = 0; i < npix * 4ul; i++) {
+    hh ^= (unsigned long long)p[i];
+    hh *= 1099511628211ull;
+  }
+  /* B8G8R8A8: alpha is the 4th byte and is 0xFF for any opaque frame, so the
+   * "is there anything to see" test must look at B|G|R only.  The bounding
+   * box then says WHERE it is (a splash logo is a small box, a black frame is
+   * no box at all). */
+  for (unsigned long i = 0; i < npix; i++) {
+    const unsigned char *q = p + i * 4ul;
+    if (q[0] | q[1] | q[2]) {
+      unsigned long x = i % w, y = i / w;
+      c++;
+      if (x < x0) x0 = x;
+      if (y < y0) y0 = y;
+      if (x > x1) x1 = x;
+      if (y > y1) y1 = y;
+    }
+  }
+  *vis = c;
+  bbox[0] = c ? x0 : 0; bbox[1] = c ? y0 : 0;
+  bbox[2] = c ? x1 : 0; bbox[3] = c ? y1 : 0;
+  return hh;
+}
+
+static int ap_s(char *b, int j, const char *s) {
+  while (*s) b[j++] = *s++;
+  return j;
+}
+static int ap_d(char *b, int j, unsigned long long v) {
+  char t[24];
+  int n = 0;
+  do { t[n++] = (char)('0' + (int)(v % 10)); v /= 10; } while (v);
+  while (n) b[j++] = t[--n];
+  return j;
+}
+static int ap_h(char *b, int j, unsigned long long v) {
+  b[j++] = '0'; b[j++] = 'x';
+  for (int i = 15; i >= 0; i--) b[j++] = "0123456789abcdef"[(v >> (i * 4)) & 15];
+  return j;
+}
+static int ap_i(char *b, int j, int v) {
+  if (v < 0) { b[j++] = '-'; return ap_d(b, j, (unsigned long long)(-v)); }
+  return ap_d(b, j, (unsigned long long)v);
+}
+
+/* One row, bounded by the caller.  fd 2 is the serial console for a
+ * desktop-launched child (Unity's -logFile only steals fd 1/2 *after* it
+ * starts, and these rows are the ones that must survive that). */
+static void pres_row(Display *d) {
+  char b[200];
+  int j = 0;
+  j = ap_s(b, j, "[XSW] n=");      j = ap_d(b, j, g_pres.marks);
+  j = ap_s(b, j, " swap=");        j = ap_d(b, j, g_pres.swaps);
+  j = ap_s(b, j, " put=");         j = ap_d(b, j, g_pres.puts);
+  j = ap_s(b, j, " putok=");       j = ap_d(b, j, g_pres.put_ok);
+  j = ap_s(b, j, " flush=");       j = ap_d(b, j, g_pres.flushes);
+  j = ap_s(b, j, " crc=");         j = ap_h(b, j, g_pres.crc);
+  j = ap_s(b, j, " changed=");     b[j++] = (char)('0' + (g_pres.changed ? 1 : 0));
+  j = ap_s(b, j, " w=");           j = ap_i(b, j, g_pres.last_w);
+  j = ap_s(b, j, " h=");           j = ap_i(b, j, g_pres.last_h);
+  j = ap_s(b, j, " ready=");
+  b[j++] = (char)('0' + ((d && d->win.content_ready) ? 1 : 0));
+  /* `nz` is the count of pixels whose B|G|R is not zero (alpha is 0xFF on
+   * every opaque frame, so counting alpha would always say "all"). */
+  j = ap_s(b, j, " nz=");          j = ap_d(b, j, g_pres.crc_nz);
+  j = ap_s(b, j, "/");             j = ap_d(b, j, g_pres.crc_tot);
+  j = ap_s(b, j, " box=");         j = ap_d(b, j, g_pres.box[0]);
+  b[j++] = ',';
+  j = ap_d(b, j, g_pres.box[1]);
+  b[j++] = ',';
+  j = ap_d(b, j, g_pres.box[2]);
+  b[j++] = ',';
+  j = ap_d(b, j, g_pres.box[3]);
+  j = ap_s(b, j, " copy=");        j = ap_d(b, j, g_pres.copies);
+  j = ap_s(b, j, " glflush=");     j = ap_d(b, j, g_pres.glflush);
+  b[j++] = '\n';
+  xs_write(2, b, (unsigned long)j);
+}
+
 /* ---- shadow (client-side backing store) ------------------------------- *
  * Every drawing call lands here and extends the dirty bbox; XFlush blits the
  * bbox into the framebuffer and sends ESC ] F so the desktop presents and
@@ -840,6 +988,55 @@ static void set_geometry(Display *d, int x, int y, unsigned w, unsigned h) {
   d->win.gx = x;
   d->win.gy = y;
   d->win.content_ready = 1;
+  d->win.geom_seq++;
+  /* L39: the surface is laid out now.  If a frame arrived before this (the
+   * client swapped between ESC ] X and the desktop's ESC ] G reply), it is
+   * sitting in the shadow at exactly this size -- present it instead of
+   * waiting for the client's next swap, which may never come.  Measured: the
+   * first swap of every run handed XPutImage a 0x0 image because Mesa's
+   * XGetGeometry answered 0x0 before this point, so that frame is genuinely
+   * empty and this row says so (`PUTLATE ... held=0`). */
+  if (first) {
+    /* The held frame may be a different size from the desktop's content rect
+     * (measured: 1280x720 frame, 1916x1018 surface); copy the overlap. */
+    int cw2 = d->win.defer_w < (int)w ? d->win.defer_w : (int)w;
+    int ch2 = d->win.defer_h < (int)h ? d->win.defer_h : (int)h;
+    int held = (d->win.defer && cw2 > 0 && ch2 > 0 && d->win.shadow);
+    if (held) {
+      extern unsigned char g_defer_store[];
+      const unsigned int *srcp = (const unsigned int *)g_defer_store;
+      for (int row = 0; row < ch2; row++) {
+        unsigned int *dp = (unsigned int *)(d->win.shadow +
+                           (unsigned long)row * (unsigned long)d->win.cw * 4);
+        const unsigned int *sp = srcp + (unsigned long)row *
+                                  (unsigned long)d->win.defer_w;
+        for (int col = 0; col < cw2; col++) dp[col] = sp[col];
+      }
+      shadow_blit(d, 0, 0, (int)w, (int)h);
+      send_flush(d, 0, 0, (int)w, (int)h);
+    }
+    {
+      static int late_rows;
+      if (late_rows < 4) {
+        late_rows++;
+        char b[96];
+        int j = 0;
+        j = ap_s(b, j, "[XE] PUTLATE held=");
+        b[j++] = (char)('0' + (held ? 1 : 0));
+        j = ap_s(b, j, " x=");  j = ap_i(b, j, x);
+        j = ap_s(b, j, " y=");  j = ap_i(b, j, y);
+        j = ap_s(b, j, " w=");  j = ap_i(b, j, (int)w);
+        j = ap_s(b, j, " h=");  j = ap_i(b, j, (int)h);
+        j = ap_s(b, j, " defer=");
+        j = ap_i(b, j, d->win.defer_w);
+        b[j++] = 'x';
+        j = ap_i(b, j, d->win.defer_h);
+        b[j++] = '\n';
+        xs_write(2, b, (unsigned long)j);
+      }
+    }
+    d->win.defer = 0;
+  }
   xtr("[XC] set_geometry ");
   xtrn(x); xtr(";"); xtrn(y); xtr(";"); xtrn((int)w); xtr(";");
   xtrn((int)h); xtr(" mask=0x"); xtrn((int)d->win.event_mask);
@@ -872,6 +1069,7 @@ static void set_geometry(Display *d, int x, int y, unsigned w, unsigned h) {
 static void handle_repair(Display *d, const unsigned char *seq, int len) {
   (void)len;
   if (!d->win.content_ready || !d->win.shadow) return;
+  g_pres.heals++;
   int i = 1;
   int x = next_int(seq, &i);
   int rx = 0, ry = 0, rw = d->win.cw, rh = d->win.ch;
@@ -1054,6 +1252,15 @@ static void input_bytes(Display *d, const unsigned char *buf, int len) {
       if (c == ' ') continue;
       if (c == '~') {
         d->desktop_closed = 1;            /* WM_DELETE_WINDOW */
+        {   /* L39: name the close.  A client that quits on its own is a very
+             * different ladder from one that never presents. */
+          static int close_rows;
+          if (close_rows < 2) {
+            close_rows++;
+            const char r[] = "[XE] CLOSED desktop sent WM_DELETE\n";
+            xs_write(2, r, sizeof r - 1);
+          }
+        }
         d->st = 0;
       } else {
         d->st = 0;
@@ -1122,6 +1329,7 @@ static int deliver_wm_delete(Display *d) {
 
 static void pump_nonblock(Display *d) {
   unsigned char buf[256];
+  g_pres.pumps++;
   for (;;) {
     if (!input_available()) break;
     long r = xs_read(0, buf, sizeof buf);
@@ -1130,6 +1338,28 @@ static void pump_nonblock(Display *d) {
   }
   input_settle(d, input_available());
   deliver_wm_delete(d);
+  /* L39: the event pump is the only thing that runs between presents, so it is
+   * where "the client is still alive but has stopped swapping" has to be
+   * visible.  Bounded: 12 rows, one per 20 000 pumps. */
+  if (g_pres.hb_rows < 12 && (g_pres.pumps % 20000ull) == 0) {
+    char b[128];
+    int j = 0;
+    g_pres.hb_rows++;
+    j = ap_s(b, j, "[XHB] pumps=");  j = ap_d(b, j, g_pres.pumps);
+    j = ap_s(b, j, " swaps=");       j = ap_d(b, j, g_pres.swaps);
+    j = ap_s(b, j, " puts=");        j = ap_d(b, j, g_pres.puts);
+    j = ap_s(b, j, " putok=");       j = ap_d(b, j, g_pres.put_ok);
+    j = ap_s(b, j, " flush=");       j = ap_d(b, j, g_pres.flushes);
+    j = ap_s(b, j, " heals=");       j = ap_d(b, j, g_pres.heals);
+    j = ap_s(b, j, " wins=");        j = ap_d(b, j, g_pres.wins);
+    j = ap_s(b, j, " maps=");        j = ap_d(b, j, g_pres.maps);
+    j = ap_s(b, j, " fs=");          j = ap_d(b, j, g_pres.fs_reqs);
+    j = ap_s(b, j, " grant=");       j = ap_d(b, j, g_pres.fs_granted);
+    j = ap_s(b, j, " ready=");
+    b[j++] = (char)('0' + (d->win.content_ready ? 1 : 0));
+    b[j++] = '\n';
+    xs_write(2, b, (unsigned long)j);
+  }
 }
 
 /* Returns 0 with an event ready, -1 when the desktop is gone/closed. */
@@ -1465,21 +1695,47 @@ XAPI int XmbTextListToTextProperty(Display *d, char **list, int count,
  * a client do exactly that, so a destroy has to release the slot and a create
  * has to re-arm every per-window field -- a stale `destroyed` alone would make
  * the next XMapWindow fail. */
+/* L39: reset the WINDOW record, not the SURFACE.
+ *
+ * `d->win` is a single-slot record and every XCreateWindow used to wipe the
+ * shadow, the content rect and content_ready with it.  A client that creates
+ * a second, auxiliary window -- Unity creates a borderless container after
+ * its GL window, ~90 times a second while its fullscreen transition is
+ * unanswered -- therefore destroyed the surface it presents into on every
+ * iteration: the frame landed (PUTLATE held=1, one flush) and the next
+ * XCreateWindow threw it away, leaving the desktop black.  The surface
+ * payload is re-laid only by set_geometry (a real resize) or when the surface
+ * itself is destroyed. */
+static void surf_reset(Display *d) {
+  d->win.content_ready = 0;
+  d->win.geom_seq = 0;
+  d->win.gx = d->win.gy = d->win.cw = d->win.ch = 0;
+  d->win.shadow = 0;
+  d->win.shadow_cap = 0;
+  d->win.defer = 0;
+  d->win.defer_w = d->win.defer_h = 0;
+}
+
 static void win_clear(Display *d) {
   d->win.mapped = 0;
   d->win.destroyed = 0;
-  d->win.content_ready = 0;
   d->win.pointer_asked = 0;
   d->win.structure_selected = 0;
   d->win.exposure_selected = 0;
-  d->win.gx = d->win.gy = d->win.cw = d->win.ch = 0;
+  /* L39: these five ARE reset here.  Keeping the surface across window churn
+   * looked like the fix for "the frame is wiped every create", but measured
+   * over 5 runs it made startup flaky (3 stalls in 5 runs against 1 in 13
+   * before): a stale content_ready/content rect makes XGetGeometry answer for
+   * a window the desktop has not laid out yet, and Unity then waits for a
+   * ConfigureNotify that never comes.  The churn is Unity's fullscreen retry
+   * loop (28.5), and the right place to stop it is the WM emulation, not the
+   * window record. */
+  surf_reset(d);
   d->win.bg = 0;
   d->win.border = 0;
   d->win.cmap = d->default_cmap;
   d->win.event_mask = 0;
   d->win.override_redirect = 0;
-  d->win.shadow = 0;
-  d->win.shadow_cap = 0;
   d->win.title_len = 0;
   d->win.title[0] = 0;
   d->win.nprotocols = 0;
@@ -1524,6 +1780,7 @@ XAPI Window XCreateWindow(Display *d, Window parent, int x, int y,
   win_clear(d);
   if (!d->next_wid) d->next_wid = 0x200001;  /* root is 1; real Xids start high */
   d->win.id = d->next_wid++;
+  g_pres.wins++;
   if (d->next_wid >= 0x3fffffffu) d->next_wid = 0x200001;
   long evmask = 0;
   int override = 0;
@@ -1593,6 +1850,7 @@ XAPI Window XCreateSimpleWindow(Display *d, Window parent, int x, int y,
   win_clear(d);
   if (!d->next_wid) d->next_wid = 0x200001;
   d->win.id = d->next_wid++;
+  g_pres.wins++;
   if (d->next_wid >= 0x3fffffffu) d->next_wid = 0x200001;
   d->win.pref_w = width ? width : 640;
   d->win.pref_h = height ? height : 480;
@@ -1618,7 +1876,7 @@ XAPI int XDestroyWindow(Display *d, Window w) {
    * the real one) and every field is re-armed by win_clear(). */
   xw_notify_self(d, DestroyNotify, w, e->parent, e->x, e->y, e->w, e->h);
   xw_notify_parent(d, DestroyNotify, w, e->parent, e->x, e->y, e->w, e->h);
-  if (d->surface == w) d->surface = 0;
+  if (d->surface == w) { d->surface = 0; surf_reset(d); }
   if (w == d->win.id) {
     win_clear(d);
     d->win.id = 0;
@@ -1629,6 +1887,64 @@ XAPI int XDestroyWindow(Display *d, Window w) {
   return 1;                              /* Xlib: success */
 }
 XAPI int XDestroySubwindows(Display *d, Window w) { (void)d; (void)w; return 0; }
+
+/* L39: poll(2) with a timeout, the bounded sibling of input_available(). */
+static int input_wait(int ms) {
+  struct xpollfd p;
+  p.fd = 0;
+  p.events = XPOLLIN;
+  p.revents = 0;
+  long r = xs_syscall6(SYS_poll, (long)&p, 1, ms, 0, 0, 0);
+  return r > 0 && (p.revents & XPOLLIN);
+}
+
+/* L39: make the surface ready BEFORE XMapWindow returns.
+ *
+ * The desktop answers ESC ] X with ESC ] G <x>;<y>;<w>;<h> in the same escape
+ * handler that receives it (src/user/desktop.c, wm_handle_app_escape ->
+ * wm_pixel_send_geometry + wm_pixel_queue_expose_all).  Until this shim read
+ * that reply, content_ready stayed 0 and Mesa's XGetGeometry answered the
+ * window's created size -- 0x0 -- so the client's FIRST swap produced an empty
+ * XPutImage (measured: `[XE] PUTSKIP 0;0;0;0` in 3 of 3 runs) and its first
+ * frame was lost.  A client that swaps before it pumps events (Unity does: the
+ * swap comes straight after XMapWindow) therefore presented nothing at all.
+ *
+ * Bounded on purpose: at most 8 polls of 20 ms, and only while no geometry has
+ * been accepted, so a desktop that does not answer costs 160 ms and no more.
+ * Poll, not a blocking read: a blocking read here would turn "the desktop is
+ * slow" into a hang in a gate. */
+#define MAPGEOM_POLLS 8
+#define MAPGEOM_MS    20
+
+static void wait_first_geometry(Display *d, unsigned seq0) {
+  int polls = 0;
+  while (d->win.geom_seq == seq0 && polls < MAPGEOM_POLLS) {
+    if (!input_wait(MAPGEOM_MS)) { polls++; continue; }
+    unsigned char b[256];
+    long r = xs_read(0, b, sizeof b);
+    if (r <= 0) break;
+    input_bytes(d, b, (int)r);
+    polls++;
+  }
+  {
+    static int geom_rows;
+    if (geom_rows < 4) {
+      geom_rows++;
+      char b[128];
+      int j = 0;
+      j = ap_s(b, j, "[XE] MAPGEOM ready=");
+      b[j++] = (char)('0' + (d->win.content_ready ? 1 : 0));
+      j = ap_s(b, j, " polls=");  j = ap_i(b, j, polls);
+      j = ap_s(b, j, " seq=");    j = ap_d(b, j, (unsigned long long)d->win.geom_seq);
+      j = ap_s(b, j, " x=");      j = ap_i(b, j, d->win.gx);
+      j = ap_s(b, j, " y=");      j = ap_i(b, j, d->win.gy);
+      j = ap_s(b, j, " w=");      j = ap_i(b, j, d->win.cw);
+      j = ap_s(b, j, " h=");      j = ap_i(b, j, d->win.ch);
+      b[j++] = '\n';
+      xs_write(2, b, (unsigned long)j);
+    }
+  }
+}
 
 XAPI int XMapWindow(Display *d, Window w) {
   struct xwin *e = xw_find(d, w);
@@ -1642,10 +1958,12 @@ XAPI int XMapWindow(Display *d, Window w) {
   if (!d || !e) return 0;                /* BadWindow on a real server */
   if (e->mapped) return 1;               /* already mapped: Xlib still says 1 */
   e->mapped = 1;
+  g_pres.maps++;
   if (w == d->win.id) d->win.mapped = 1;
   d->surface = w;                        /* the desktop has one surface */
   if (e->w) d->win.pref_w = e->w;
   if (e->h) d->win.pref_h = e->h;
+  unsigned seq0 = d->win.geom_seq;
   char buf[40];
   int j = 0;
   buf[j++] = 27; buf[j++] = ']'; buf[j++] = 'X'; buf[j++] = ' ';
@@ -1666,6 +1984,12 @@ XAPI int XMapWindow(Display *d, Window w) {
   xtr("[XC] MapNotify queued id=");
   xtr_u((unsigned long)w);
   xtr("\n");
+  /* L39: the desktop's ESC ] G reply is already on its way (it is sent from
+   * the same handler that parsed our ESC ] X).  Read it here, so the surface
+   * has a size before the client's first swap -- see wait_first_geometry().
+   * The wait is keyed on the geometry SEQUENCE: content_ready alone can
+   * already be 1 for an older window when a client churns windows. */
+  wait_first_geometry(d, seq0);
   /* Cursor: the desktop paints its own pointer; XCreateFontCursor is a
    * stub, so nothing to install. */
   return 1;                              /* Xlib: success */
@@ -1819,6 +2143,60 @@ XAPI int XChangeProperty(Display *d, Window w, Atom property, Atom type,
   }
   (void)mode;                            /* no prepend/append semantics */
   prop_notify(d, w, property);
+  /* L39: answer a fullscreen request the way a window manager does.
+   *
+   * Measured ladder (L39 run 2): Unity's splash window swaps exactly ONCE,
+   * then logs `requesting fullscreen 1920 x 1080 at 0/1 Hz`, sets
+   * _NET_WM_STATE(_NET_WM_STATE_FULLSCREEN) and never calls glXSwapBuffers
+   * again -- 240,000 event pumps later the swap counter is still 1.  This
+   * desktop is not an EWMH window manager, so nothing ever sends the
+   * ConfigureNotify that completes the transition, and the client waits for
+   * it forever.  Granting the state with a configure at the geometry the
+   * surface actually has is what a WM does when the window is already at the
+   * requested size. */
+  {
+    Atom wmstate = xc_intern(&d->core, "_NET_WM_STATE", 1);
+    if (wmstate && property == wmstate) {
+      Atom fs = xc_intern(&d->core, "_NET_WM_STATE_FULLSCREEN", 1);
+      Atom ab = xc_intern(&d->core, "_NET_WM_STATE_ABOVE", 1);
+      int want_fs = 0;
+      if (format == 32 && data && nelements > 0) {
+        for (int k = 0; k < nelements; k++) {
+          unsigned long v = 0;
+          for (int b = 3; b >= 0; b--)
+            v = (v << 8) | d->props[i].data[k * 4 + b];
+          if (fs && v == (unsigned long)fs) want_fs = 1;
+          (void)ab;
+        }
+      }
+      g_pres.fs_reqs++;
+      {
+        static int fs_rows;
+        if (fs_rows < 8) {
+          fs_rows++;
+          char b[96];
+          int j = 0;
+          j = ap_s(b, j, "[XE] WMSTATE n=");  j = ap_d(b, j, g_pres.fs_reqs);
+          j = ap_s(b, j, " atoms=");          j = ap_i(b, j, nelements);
+          j = ap_s(b, j, " fullscreen=");     b[j++] = (char)('0' + (want_fs ? 1 : 0));
+          b[j++] = '\n';
+          xs_write(2, b, (unsigned long)j);
+        }
+      }
+      if (want_fs && d->win.content_ready) {
+        Window sid = d->surface ? d->surface : d->win.id;
+        struct xwin *se = xw_find(d, sid);
+        if (se) {
+          ev_emit(d, ConfigureNotify, sid, sid, se->parent,
+                  d->win.gx, d->win.gy, (unsigned)d->win.cw, (unsigned)d->win.ch);
+          if (se->exposure_selected || (se->event_mask & ExposureMask))
+            ev_emit(d, Expose, sid, sid, se->parent, 0, 0,
+                    (unsigned)d->win.cw, (unsigned)d->win.ch);
+          g_pres.fs_granted++;
+        }
+      }
+    }
+  }
   return 1;
 }
 
@@ -2012,14 +2390,66 @@ XAPI int XMoveWindow(Display *d, Window w, int x, int y) {
    * own window (the protocol has no message for it). */
   return 0;
 }
+/* L39: honor a client resize of its own window.
+ *
+ * The desktop owns the window FRAME, but a client that resizes its own window
+ * has to SEE the new size, because that is how Unity's fullscreen transition
+ * works: XResizeWindow(1920,1080) followed by a size check, and a shim that
+ * answers 0 and keeps reporting the frame's size makes it destroy the window
+ * and try again -- measured L39: 12,224 XCreateWindow calls and 12,223 maps in
+ * one 150 s run, with no glXSwapBuffers after the first.  The drawable really
+ * does become that size (Mesa asks XGetGeometry, then hands XPutImage exactly
+ * that many pixels), so the shadow is resized with it and the blit clips to
+ * what the desktop actually shows.
+ *
+ * Clamped to the framebuffer: the client cannot make a window larger than the
+ * screen, which is what a real server would refuse too. */
+static int cli_resize(Display *d, Window w, unsigned width, unsigned height) {
+  struct xwin *e = xw_find(d, w);
+  if (!e) return 0;
+  if (w != d->win.id) { e->w = width; e->h = height; return 1; }
+  if (width < 1 || height < 1) return 0;
+  if ((int)width > d->fb_w || (int)height > d->fb_h) return 0;
+  if ((int)width == d->win.cw && (int)height == d->win.ch) return 1;
+  e->w = width; e->h = height;
+  if (d->win.shadow && (unsigned long)width * height <= WIN_SHADOW_MAX) {
+    unsigned int *p = (unsigned int *)d->win.shadow;
+    unsigned int bg = (unsigned int)d->win.bg;
+    d->win.cw = (int)width;
+    d->win.ch = (int)height;
+    for (unsigned long i = 0; i < (unsigned long)width * height; i++) p[i] = bg;
+    xc_dirty_reset(&d->core);
+    d->core.content.w = (int)width;
+    d->core.content.h = (int)height;
+  }
+  {
+    static int resize_rows;
+    if (resize_rows < 8) {
+      resize_rows++;
+      char b[80];
+      int j = 0;
+      j = ap_s(b, j, "[XE] RESIZE w=");  j = ap_i(b, j, (int)width);
+      j = ap_s(b, j, " h=");             j = ap_i(b, j, (int)height);
+      j = ap_s(b, j, " desktop=");       j = ap_i(b, j, d->fb_w);
+      b[j++] = 'x';
+      j = ap_i(b, j, d->fb_h);
+      b[j++] = '\n';
+      xs_write(2, b, (unsigned long)j);
+    }
+  }
+  if (e->structure_selected || (e->event_mask & StructureNotifyMask))
+    ev_emit(d, ConfigureNotify, w, w, e->parent, d->win.gx, d->win.gy,
+            width, height);
+  return 1;
+}
+
 XAPI int XResizeWindow(Display *d, Window w, unsigned width, unsigned height) {
-  (void)d; (void)w; (void)width; (void)height;
-  return 0;                              /* same: desktop owns geometry */
+  return d ? cli_resize(d, w, width, height) : 0;
 }
 XAPI int XMoveResizeWindow(Display *d, Window w, int x, int y,
                            unsigned width, unsigned height) {
-  (void)d; (void)w; (void)x; (void)y; (void)width; (void)height;
-  return 0;
+  (void)x; (void)y;
+  return d ? cli_resize(d, w, width, height) : 0;
 }
 XAPI int XRaiseWindow(Display *d, Window w) {
   xtr("[XC] XRaiseWindow win="); xtr_u((unsigned long)w); xtr("\n");
@@ -2462,7 +2892,51 @@ XAPI Bool XPeekIfEvent(Display *d, XEvent *ev, Bool (*pred)(), void *arg) {
 
 XAPI int XSendEvent(Display *d, Window w, Bool propagate, long mask,
                     XEvent *ev) {
-  (void)d; (void)w; (void)propagate; (void)mask; (void)ev;
+  (void)w; (void)propagate; (void)mask;
+  /* L39: the only client message that matters here is the EWMH fullscreen
+   * request a client sends to the ROOT window.  There is no WM on the other
+   * end (the desktop's protocol has no notion of window state), so if this
+   * shim drops the message the client waits for a state change that can never
+   * arrive -- measured: Unity's splash swaps once, sends this, then recreates
+   * its window 12,224 times without swapping again.  Answer it the way a WM
+   * would: the state is granted at the geometry the surface has. */
+  if (!d || !ev || ev->type != ClientMessage) return 0;
+  {
+    Atom wmstate = xc_intern(&d->core, "_NET_WM_STATE", 1);
+    if (wmstate && ev->xclient.message_type == wmstate) {
+      Atom fs = xc_intern(&d->core, "_NET_WM_STATE_FULLSCREEN", 1);
+      long a1 = ev->xclient.data.l[1];
+      long a2 = ev->xclient.data.l[2];
+      int want_fs = ((fs && a1 == (long)fs) || (fs && a2 == (long)fs));
+      g_pres.fs_reqs++;
+      {
+        static int fs_rows;
+        if (fs_rows < 8) {
+          fs_rows++;
+          char b[96];
+          int j = 0;
+          j = ap_s(b, j, "[XE] WMSEND n=");   j = ap_d(b, j, g_pres.fs_reqs);
+          j = ap_s(b, j, " action=");         j = ap_i(b, j, (int)ev->xclient.data.l[0]);
+          j = ap_s(b, j, " fullscreen=");     b[j++] = (char)('0' + (want_fs ? 1 : 0));
+          b[j++] = '\n';
+          xs_write(2, b, (unsigned long)j);
+        }
+      }
+      if (want_fs && d->win.content_ready) {
+        Window sid = d->surface ? d->surface : d->win.id;
+        struct xwin *se = xw_find(d, sid);
+        if (se) {
+          ev_emit(d, ConfigureNotify, sid, sid, se->parent,
+                  d->win.gx, d->win.gy, (unsigned)d->win.cw, (unsigned)d->win.ch);
+          if (se->exposure_selected || (se->event_mask & ExposureMask))
+            ev_emit(d, Expose, sid, sid, se->parent, 0, 0,
+                    (unsigned)d->win.cw, (unsigned)d->win.ch);
+          g_pres.fs_granted++;
+        }
+      }
+      return 1;
+    }
+  }
   return 0;                              /* no other client to talk to */
 }
 
@@ -2491,6 +2965,7 @@ XAPI void XFreeEventData(Display *d, XGenericEventCookie *c) { (void)d; (void)c;
 XAPI int XFlush(Display *d) {
   xtr("[XC] XFlush caller=");
   xtr_hex((unsigned long)__builtin_return_address(0));
+  g_pres.flushes++;
   if (!d) return 0;
   shadow_flush(d);
   return 1;                              /* Xlib: success */
@@ -2500,6 +2975,92 @@ XAPI int XSync(Display *d, Bool discard) {
   (void)discard;
   XFlush(d);
   return 1;                              /* Xlib: success */
+}
+
+/* L39: called by the GLX frontend (libGL) at the end of every
+ * glXSwapBuffers, with its own swap/glFlush counters and the drawable size it
+ * believes it has.  Returns 1 when a frame was pushed to the desktop.
+ *
+ * WHY IT HAS TO FLUSH.  Mesa's drisw present path is
+ *   glXSwapBuffers -> driswSwapBuffers -> driSwapBuffers -> swrast put_image
+ *   -> XPutImage
+ * and that is all: nothing in the path issues XFlush/XSync (only the
+ * SHM variant does, and XShmPutImage is disabled in this build -- there is no
+ * shm segment in the guest).  A real Xlib writes the XPutImage request to the
+ * socket as it builds it, so the server gets the pixels; this shim keeps them
+ * in the shadow until an XFlush, so every swapped frame stayed invisible until
+ * some *unrelated* XFlush happened to run -- which is why the desktop showed a
+ * stale (black) surface while the client believed it had presented.
+ *
+ * The row is written from here, not from XPutImage, so that "the client never
+ * swapped" (no row at all) and "it swapped but handed us nothing" (swap
+ * advancing, putok frozen) are different evidence. */
+XAPI int XcPresentMark(Display *dpy, unsigned long long swaps,
+                       unsigned long long glflush, unsigned long drawable) {
+  Display *d = dpy ? dpy : &g_d;
+  unsigned long long put_before = g_pres.put_ok;
+  int pushed = 0;
+
+  g_pres.swaps = swaps;
+  g_pres.glflush = glflush;
+  /* The size the frontend believes it has: its own XGetGeometry answer, which
+   * is the source of the width/height it hands XPutImage. */
+  {
+    struct xwin *e = xw_find(d, (Window)drawable);
+    int dw = 0, dh = 0;
+    if (e) {
+      if ((Window)drawable == d->win.id && d->win.content_ready) {
+        dw = d->win.cw; dh = d->win.ch;
+      } else {
+        dw = (int)e->w; dh = (int)e->h;
+      }
+    }
+    g_pres.last_w = dw;
+    g_pres.last_h = dh;
+  }
+  g_pres.marks++;
+
+  /* Push whatever the swap just put in the shadow. */
+  if (d->win.content_ready && d->win.shadow) {
+    shadow_flush(d);
+    pushed = (g_pres.put_ok != put_before);
+  }
+
+  int row = (g_pres.marks <= 3) || ((g_pres.marks % PRES_ROW_EVERY) == 0);
+  if (g_pres.put_ok && !g_pres.first_ok_row) {
+    g_pres.first_ok_row = 1;               /* the first frame with pixels */
+    row = 1;
+  }
+  if (row) {
+    unsigned long long crc = 0;
+    /* Hash whatever the surface holds, laid out or not: for the first swap the
+     * frame has been deferred (see XPutImage) and this checksum is the only
+     * record of what Unity actually drew -- all-zero pixels hash to
+     * 0x10cb11dbf9255803 at 1916x1018, so "draws black" and "draws something"
+     * are different numbers. */
+    unsigned long nz = 0;
+    g_pres.box[0] = g_pres.box[1] = g_pres.box[2] = g_pres.box[3] = 0;
+    if (!d->win.content_ready && d->win.defer && d->win.defer_w > 0 &&
+        d->win.defer_h > 0) {
+      extern unsigned char g_defer_store[];
+      g_pres.crc_tot = (unsigned long)d->win.defer_w * (unsigned long)d->win.defer_h;
+      crc = pres_fnv64_vis(g_defer_store, (unsigned long)d->win.defer_w,
+                           (unsigned long)d->win.defer_h, &nz, g_pres.box);
+    } else if (d->win.shadow && d->win.cw > 0 && d->win.ch > 0) {
+      g_pres.crc_tot = (unsigned long)d->win.cw * (unsigned long)d->win.ch;
+      crc = pres_fnv64_vis(d->win.shadow, (unsigned long)d->win.cw,
+                           (unsigned long)d->win.ch, &nz, g_pres.box);
+    } else {
+      g_pres.crc_tot = 0;
+    }
+    g_pres.crc_nz = nz;
+    g_pres.changed = (g_pres.have_crc && crc != g_pres.crc) ? 1 : 0;
+    g_pres.crc = crc;
+    g_pres.have_crc = 1;
+    g_pres.rows++;
+    pres_row(d);
+  }
+  return pushed;
 }
 
 /* ---- entry points Unity's X11 table resolves but the shim lacked --------
@@ -3143,13 +3704,46 @@ XAPI XImage *XCreateImage(Display *d, Visual *v, unsigned depth, int format,
 }
 XAPI int XDestroyImage(XImage *img) { (void)img; return 0; }
 
+/* L39: keep a frame that arrives before the desktop has laid the surface out.
+ * Mesa's drisw present path asks XGetGeometry for the drawable size and hands
+ * us exactly that many pixels, so an early swap is an image with a real size
+ * (the window's created size) and dropping it costs the client its first
+ * frame.  The shadow is allocated here at the image's size; set_geometry()
+ * presents it as soon as the desktop names the content rect.  Returns 1 when
+ * the pixels were kept. */
+static int put_deferred(Display *d, xc_ximage *im, int sx, int sy,
+                        int dx, int dy, unsigned w, unsigned h) {
+  if (dx < 0 || dy < 0 || w == 0 || h == 0) return 0;
+  unsigned long nw = (unsigned long)dx + w, nh = (unsigned long)dy + h;
+  if (nw > 1920 || nh > 1080) return 0;
+  extern unsigned char g_defer_store[];
+  unsigned int *base = (unsigned int *)g_defer_store;
+  unsigned int bg = (unsigned int)d->win.bg;
+  for (unsigned long i = 0; i < nw * nh; i++) base[i] = bg;
+  for (unsigned row = 0; row < h; row++) {
+    const unsigned char *src = (const unsigned char *)im->data +
+                               (unsigned long)(sy + (int)row) * im->bytes_per_line +
+                               (unsigned long)sx * 4;
+    unsigned int *dp = base + (unsigned long)(dy + (int)row) * nw +
+                       (unsigned long)dx;
+    const unsigned int *sp = (const unsigned int *)src;
+    for (unsigned col = 0; col < w; col++) dp[col] = sp[col];
+  }
+  d->win.defer = 1;
+  d->win.defer_w = (int)nw;
+  d->win.defer_h = (int)nh;
+  return 1;
+}
+
 XAPI int XPutImage(Display *d, Drawable dr, GC gc, XImage *img, int sx, int sy,
                    int dx, int dy, unsigned w, unsigned h) {
   (void)dr; (void)gc;
   /* L34: the present-side content row.  "No frame" is only meaningful if the
    * client never reached a present; one bounded row per XPutImage says which
    * side of the ladder is empty (client never swapped vs. swapped but the
-   * desktop never showed it).  Reuses the quiet-call rule: 8 rows, then off. */
+   * desktop never showed it).  Reuses the quiet-call rule: 8 rows, then off.
+   * L39: the running count is in every [XSW] row, so this stays bounded. */
+  g_pres.puts++;
   {
     static int put_rows;
     if (put_rows < 8) {
@@ -3157,16 +3751,42 @@ XAPI int XPutImage(Display *d, Drawable dr, GC gc, XImage *img, int sx, int sy,
       l34_row("PUT", dx, dy, (int)w, (int)h);
     }
   }
-  if (!d || !img || !d->win.shadow || !d->win.content_ready) {
-    static int put_skip_rows;
-    if (put_skip_rows < 8) {
-      put_skip_rows++;
-      l34_row("PUTSKIP", dx, dy, d ? (int)d->win.content_ready : -1, 0);
-    }
+  if (!d || !img) {
+    g_pres.put_skip++;
+    static int put_skip_rows0;
+    if (put_skip_rows0 < 8) { put_skip_rows0++; l34_row("PUTSKIP", 0, 0, -1, 0); }
     return 0;
   }
   xc_ximage *im = (xc_ximage *)img;
-  if (!im->data || im->bits_per_pixel != 32) return 0;   /* 32bpp only */
+  if (!im->data || im->bits_per_pixel != 32) {
+    g_pres.put_skip++;
+    static int put_skip_rows2;
+    if (put_skip_rows2 < 8) { put_skip_rows2++; l34_row("PUTSKIP", dx, dy, 2, 0); }
+    return 0;
+  }
+  if (!d->win.content_ready || !d->win.shadow) {
+    /* L39: the desktop has not laid the surface out yet.  Keep the frame (it
+     * is presented by set_geometry); the old behaviour threw it away and the
+     * client's first swap -- the only one some clients make -- was lost. */
+    if (put_deferred(d, im, sx, sy, dx, dy, w, h)) {
+      static int put_defer_rows;
+      if (put_defer_rows < 8) {
+        put_defer_rows++;
+        l34_row("PUTDEFER", dx, dy, (int)w, (int)h);
+      }
+      g_pres.put_ok++;
+      return 0;
+    }
+    g_pres.put_skip++;
+    {
+      static int put_skip_rows;
+      if (put_skip_rows < 8) {
+        put_skip_rows++;
+        l34_row("PUTSKIP", dx, dy, d->win.content_ready, (int)w);
+      }
+    }
+    return 0;
+  }
 
   /* Clamp to the window's content area: both the destination rect and, by the
    * same amount, the source rect. */
@@ -3174,8 +3794,8 @@ XAPI int XPutImage(Display *d, Drawable dr, GC gc, XImage *img, int sx, int sy,
   if (dy < 0) { h += (unsigned)dy; sy -= dy; dy = 0; }
   if (dx + (int)w > d->win.cw) w = (unsigned)(d->win.cw - dx);
   if (dy + (int)h > d->win.ch) h = (unsigned)(d->win.ch - dy);
-  if ((int)w <= 0 || (int)h <= 0) return 0;
-  if (sx < 0 || sy < 0) return 0;
+  if ((int)w <= 0 || (int)h <= 0) { g_pres.put_skip++; return 0; }
+  if (sx < 0 || sy < 0) { g_pres.put_skip++; return 0; }
 
   for (unsigned row = 0; row < h; row++) {
     const unsigned char *src = (const unsigned char *)im->data +
@@ -3190,6 +3810,7 @@ XAPI int XPutImage(Display *d, Drawable dr, GC gc, XImage *img, int sx, int sy,
   }
   /* The flush path (XFlush -> shadow_blit -> ESC ] F) presents the rect. */
   dirty_add(d, dx, dy, dx + (int)w, dy + (int)h);
+  g_pres.put_ok++;
   return 0;
 }
 
@@ -3664,8 +4285,9 @@ XAPI Pixmap XCreatePixmapFromBitmapData(Display *d, Drawable dr,
 XAPI int XFreePixmap(Display *d, Pixmap p) { (void)d; (void)p; return 0; }
 XAPI int XCopyArea(Display *d, Drawable s, Drawable dst, GC gc, int sx, int sy,
                    unsigned w, unsigned h, int dx, int dy) {
-  (void)d; (void)s; (void)dst; (void)gc; (void)sx; (void)sy; (void)w; (void)h;
-  (void)dx; (void)dy;
+  (void)s; (void)dst; (void)gc; (void)sx; (void)sy;
+  (void)w; (void)h; (void)dx; (void)dy;
+  g_pres.copies++;                       /* L39: counted in every [XSW] row */
   return 0;
 }
 
@@ -3771,3 +4393,9 @@ XAPI XImage *XGetImage(Display *d, Drawable dr, int x, int y, unsigned w,
 /* The static backing store (one window per process, 1920x1080 B8G8R8A8
  * like the framebuffer). */
 unsigned char g_shadow_store[1920u * 1080u * 4u];
+/* L39: a frame that arrived before the desktop laid the surface out.  It is
+ * kept at its OWN size and stride, because the geometry that arrives later
+ * may be a different size (measured: Unity's first frame is 1280x720 and the
+ * desktop's content rect is 1916x1018) and re-laying the shadow in place
+ * would destroy it -- which is exactly how the first frame was lost before. */
+unsigned char g_defer_store[1920u * 1080u * 4u];
