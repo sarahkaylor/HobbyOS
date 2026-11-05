@@ -73,7 +73,11 @@
  * dlopen anything and refuse to initialise video without it.  ":0" is what the
  * shim reports as DisplayString. */
 #define RW_DISPLAY    ":0"
-#define RW_WAIT_SECS  180
+/* L40: the run window is the HARNESS's call now (--run-timeout).  180 s was
+ * the old hard cap and it cut every run off during the assembly load; the
+ * harness kills the QEMU process at its own deadline, so this only has to be
+ * longer than any budget the harness is given. */
+#define RW_WAIT_SECS  420
 
 /* Console-only output.  print()/print_dec() write fd 1, which in a
  * desktop-launched session is the window protocol pipe; every row this

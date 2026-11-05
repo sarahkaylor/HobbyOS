@@ -4643,3 +4643,226 @@ after touching this patch.
 * `tools/rw/l39-table.py` — regenerates the §28.6 table from the logs;
 * `tools/rw/l39-runs.sh` — the ladder runner (sequential by construction: two
   desktop harnesses in one worktree fight over `disk.img`, rule 5).
+
+## 29. 2026-11-05 — M6/L40: the fullscreen dance is stopped; the answers that mattered were GEOMETRY, not state
+
+§28.5 left one sentence as the frontier: *the window-system emulation
+(fullscreen), not the renderer and not the present plumbing*. This section
+names the exact answer the client was missing, stops the loop (13,336
+`XCreateWindow` → **12** per run), and puts a real RimWorld frame on the
+desktop. It also finds that the "startup stall with no `[XHB]`" was **not the
+fullscreen dance** but a stale kernel in `disk.img`.
+
+### 29.1 The retry, as a signature
+
+`RW_TRACE_X11=1` on the L39 tree prints one fullscreen iteration in 67 rows.
+The shape, with the arguments that repeat, is:
+
+```text
+XCreateWindow     parent=1 geom=1920x1080        <- the container, override-redirect
+XSelectInput      id=<container> mask=0x20000    <- StructureNotify, container only
+XMapWindow        id=<container>                 -> ESC ] X 1920;1080 -> ESC ] G 2;34;1916;1018
+XIfEvent          MapNotify(<container>)
+XInternAtom       _MOTIF_WM_HINTS (absent)
+XReparentWindow   win=<gl> parent=<container>
+XIfEvent          MapNotify(<gl>)                <- the reparent's remap
+XRaiseWindow <gl> ; XSync x3
+XCheckIfEvent     (5x) ; then the *decision*: XCheckIfEvent for the geometry event
+XReparentWindow   win=<gl> parent=1              <- reverted: "not fullscreen"
+XUnmapWindow <container> ; XIfEvent UnmapNotify ; XDestroyWindow <container>
+```
+
+Counted from `trace1-1.serial.log` (L39, 150 s): 13,336 creates, 13,335 maps,
+13,332 repairs, **1** `glXSwapBuffers`. The trigger is therefore *not* a
+property the client polls and *not* a ClientMessage: it is the answer to the
+geometry question it asks immediately after the reparent. On the L40 tree the
+same trace shows what it asks, in order — this is the row set to read when a
+future client repeats:
+
+```text
+XCheckIfEvent matched type=12 (Expose)
+XCheckIfEvent matched type=28 (PropertyNotify)
+XGetWindowProperty  win=<gl> atom=69 (_NET_WM_STATE)      <- reads the state back
+XGetWindowAttributes win=<gl>                             <- the SIZE check
+XRaiseWindow <gl> ; XSync x3
+XCheckIfEvent matched type=22 (ConfigureNotify) ; XQueryTree win=<gl>  <- the PARENT check
+XCheckIfEvent matched type=22 (ConfigureNotify) ; XCheckIfEvent matched type=21 (ReparentNotify)
+```
+
+So the client checks three things and needs all three to agree: the state
+property it asked for, its window's **size**, and its window's **parent**. A
+shim that answers the EWMH `ClientMessage` with a ConfigureNotify carrying the
+*content* rect (1916x1018) fails the size check; a shim that never sends a
+ConfigureNotify at all fails on the missing event.
+
+### 29.2 Four defects, each with the row that found it
+
+1. **`XCheckIfEvent` only looked at the queue HEAD.** Real Xlib scans the whole
+   queue, holding non-matching events aside and re-queueing them (rule 37's
+   sibling — that rule fixed `XIfEvent` and left this one). With a
+   PropertyNotify in front, a queued ConfigureNotify was invisible, so the
+   decision "the WM did not resize me" was made with the event already in the
+   queue. Rows now carry `scanned=`; a match behind other events prints
+   `[XC] XCheckIfEvent matched type=22 ... scanned=2`.
+2. **The container's created size was overwritten by the desktop's content
+   rect.** `set_geometry()` writes the rect it got from `ESC ] G` into the
+   *window record* of the surface, and the container IS the surface while it
+   is mapped — so a container created at 1920x1080 read back as 1916x1018.
+   The grant refused every real container:
+   `[XE] FSDECL why=4 win=2097154 parent=2097156 pp=1 root=1 cw=1916 ch=1018
+   sw=1920 sh=1080 cp=2097156`. Fixed by keeping the client's **requested**
+   size (`req_w/req_h`, set by create and `XResizeWindow`) apart from the
+   laid-out one.
+3. **The reparent got no grant.** A reparent into a screen-sized top-level
+   container is a fullscreen request; a WM answers it by resizing the client to
+   the screen, setting `_NET_WM_STATE(_NET_WM_STATE_FULLSCREEN)` on the client
+   window and sending one ConfigureNotify with the screen geometry. The shim
+   did none of that, and an unanswered reparent is exactly the loop. The row is
+   one per handshake, bounded, with `rep=` set when the same child is granted
+   twice at the same size (a repeat is the client rejecting the answer):
+   `[XE] FSGRANT n=1 rep=0 win=2097154 parent=2097156 w=1920 h=1080`.
+   The revert half logs `[XE] FSREV`, and a refusal logs `[XE] FSDECL why=`.
+4. **Properties were readable only on "the window created last".** A read on
+   the ROOT answered `BadWindow`, so `_NET_WORKAREA` — which this client
+   interns and reads straight after the reparent — read as "there is no window
+   manager here". The root now publishes `_NET_SUPPORTED` (with
+   `_NET_WM_STATE`, `_NET_WM_STATE_FULLSCREEN`, `_NET_WM_STATE_ABOVE`),
+   `_NET_WORKAREA` = the screen, `_NET_CURRENT_DESKTOP` and
+   `_NET_NUMBER_OF_DESKTOPS`, and any live window or the root may read the
+   store. Row: `[XE] GETPROP win=1 atom=72 found=1` (72 = `_NET_WORKAREA`).
+
+Two smaller defects were fixed on the way and are independently correct:
+`XMapWindow` and a reparent now emit `VisibilityNotify` when the window
+selected `VisibilityChangeMask`, `XSetInputFocus` emits `FocusIn`, and
+`win_clear()` no longer throws away a **deferred** frame when an unrelated
+window is created — which is what dropped the splash's only frame
+(`[XE] PUTDEFER 0;0;1280;720` then `[XE] PUTLATE held=1 defer=1280x720`).
+
+### 29.3 Measured result
+
+Same command, 240 s runs, this tip. Churn counts come from the traced runs
+(`RW_TRACE_X11=1`, `[XC]` rows); every run also reports its handshake and its
+presents:
+
+| run | trace | `XCreateWindow` | `XMapWindow` | `FSGRANT` | `glXSwapBuffers` | final shot |
+|---|---|---|---|---|---|---|
+| `d1` | no | — | — | `n=1 … w=1920 h=1080` | 1 | `nonblack=65,534 colors=16,589` |
+| `d2` | no | — | — | `n=1`, `n=2` (both `rep=0`) | 1 | `nonblack=65,534 colors=16,589` |
+| `d3` | yes | **12** | **3** | `n=1`, `n=2` (both `rep=0`) | 1 | `nonblack=65,534 colors=16,589` |
+| `d4` | yes | **12** | **3** | `n=1`, `n=2` (both `rep=0`) | 1 | `nonblack=65,534 colors=16,589` |
+| L39 §28.5-28.6 | yes | 3,336-14,120 | 3,335-14,120 | `grant=0` | 1 | 94.1 % `#000000` |
+
+The `[XSW]` row is the same in every run:
+
+```text
+[XSW] n=1 swap=1 put=1 putok=1 flush=83 crc=0x940850f19945c95b changed=0
+      w=1280 h=720 ready=0 nz=921600/921600 box=0,0,1279,719 copy=0 glflush=15
+```
+
+`ready=0` is the splash swapping before the desktop's `ESC ] G` arrives; the
+frame is kept (`[XE] PUTDEFER 0;0;1280;720`) and presented by the next
+`set_geometry` (`[XE] PUTLATE held=1 x=2 y=34 w=1916 h=1018 defer=1280x720`),
+which is why the desktop shows the picture from the 4th screenshot on.
+
+
+The screenshot is **RimWorld's loading screen**: a brown-orange planet with
+polar ice and scattered water, a white fighter and a boxier orange cargo ship,
+a small moon at the lower right, a dark box with three white dots ("…") in the
+middle of the planet, inside a desktop window titled `RIMWORLD`. That is a
+game frame, not the launcher's stdout window (rule 61).
+
+The dance is gone in every run of this tip: `FSGRANT` totals 1-2 per run (one
+for the splash window, sometimes one for the game window), `rep=0` every time,
+and the create/map counters stay at 12/3 instead of climbing at ~89 Hz.
+
+### 29.4 Route A was already in place and is not enough
+
+`-force-glcore -screen-width 1280 -screen-height 720 -screen-fullscreen 0`
+has been in `rwlaunch`'s argv since `eda232bc`, and the game does read it:
+
+```text
+Command line arguments: -force-glcore -screen-width 1280 -screen-height 720 -screen-fullscreen 0 -logFile /RW_HOME/Player.log
+requesting resize 1280 x 720
+resizing window to 1280 x 720
+Using native desktop resolution 1920 x 1080
+requesting fullscreen 1920 x 1080 at 0/1 Hz
+```
+
+So the documented mode arguments work and are honoured for the *windowed*
+window, but RimWorld then makes its own fullscreen call ("using native desktop
+resolution"), so the argv route cannot avoid the transition — the game simply
+wants the whole screen. The transition was the thing that had to work.
+
+### 29.5 The startup stall was a STALE KERNEL, and it is not the dance
+
+Three runs in this lane produced `Assertion at
+../../mono/arch/amd64/../x86/x86-codegen.h:410, condition 'offset ==
+(gint32)offset' not met` (two of them) and `tramp-amd64.c:641` (the seed's own
+run) — i.e. **both** JIT assertions that §27 closed — with no `[XHB]` at all.
+The cause was not the code: the seeded `disk.img` carried a **pre-L38 kernel**
+(`strings` of `::/boot/hobbyos.elf` matched `JITA` **0** times while the tree's
+`hobbyos.elf` matched it twice). `RW_SKIP_BUILD=1` re-stages the DSOs but not
+`/boot`, so every run booted the old kernel. After rebuilding the image
+(`TOOLS_SKIP=1 make -j8 ARCH=intel MODE=desktop DESKTOP=hobby hobbyos.elf
+disk.img`, then proving `JITA` is in `::/boot/hobbyos.elf`), the banner comes
+back 4 of 4 with `- Loaded All Assemblies, in 9.2-11.1 seconds`.
+
+So the answer to §28's open question is: the "no `[XHB]`" runs are **process
+deaths**, and the row that names them is the Mono assertion line, which only
+reaches the console because the abort flushes the block buffer. It does not
+correlate with the fullscreen dance: `d1`/`c3` reach the loading screen with no
+assertion and still have no `[XHB]` row (see 29.6).
+
+### 29.6 What still does not happen
+
+One `glXSwapBuffers` per run, and after the last `XQueryTree` the client makes
+**no further X call at all** — `XCreateWindow` 12, and then nothing. The guest
+goes idle at ~30 s (`[WATCHDOG] console silent` 8 times from 30 s to 240 s) and
+`[NFSIO] bytes` freezes at 19,903,177 (0x130B4C9), so it is not asset loading:
+the process parks with the loading screen on screen and the window handshake
+complete.
+
+That is the next lane's target, and it is **not** the window system: the sizes
+(`XGetWindowAttributes` → 1920x1080 at 0,0), the tree (`XQueryTree` → the
+container), the state property (read back and found), the ConfigureNotify and
+the ReparentNotify were all consumed before the client stopped. The row to
+start from is the last block of `[XC]` rows in `d1`/`c3`: everything the client
+asked was answered, and then it stopped asking.
+
+### 29.7 Gates at this tip
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   413/0 PASS
+bash tools/gate/t3_linux_probe.sh redzone PASS — redzone reached its done marker
+bash tools/gate/m2_mono.sh               PASS — Mono 6.12 threaded C# HELLO-OK
+python3 tools/gate/m3_window_probe.py    PASS — SDL XCreateWindow ladder + WM_DELETE ClientMessage
+python3 tools/gate/m4_gl_probe.py        PASS — GL 3.3 core triangle PRESENTED in the guest
+```
+
+Also measured in this lane: the Mesa DSO the harness stages must be *checked*,
+not assumed — the seeded `obj/mesa/lib/libGL.so.1` predated patch 0008, so
+`XcPresentMark` was an undefined symbol in **no** build (`readelf --dyn-syms`
+showed no such import) and `[XSW]` could not appear at all. Rebuilding Mesa
+(`MESA_PYTHON=<a python with mako> bash tools/mesa/build-hobbyos.sh`, 43 s with
+the TU cache warm) puts `UND XcPresentMark` back in `--dyn-syms`.
+
+### 29.8 Evidence
+
+`obj/rw-desktop/evidence-l40/`:
+
+* `d1.{Player,serial}.log` + `d1.final.png` — first 240 s run of 29.3: the
+  handshake, one `[XSW]` row and the loading screen, with no trace DSO;
+* `d3.*`, `d4.*` — the same run with `RW_TRACE_X11=1`: the `[XC]` counts of
+  29.3 and the X-level order of 29.1 (`XCheckIfEvent matched … scanned=`), plus
+  the two `[XE] FSGRANT` rows;
+* `c2.harness.log`, `c3.harness.log`, `d1..d4.harness.log` — the harness
+  output of every run (screenshot sizes/colour counts per shot);
+* `obj/rw-desktop/l40/a3.harness.log`, `a4.harness.log`, `a5.harness.log` — the
+  stale-kernel runs of 29.5 (`Assertion at …x86-codegen.h:410`; then the banner
+  after the rebuild);
+* `tools/rw/l40-summary.py <Player.log> [serial.log]` — regenerates every
+  number in this section (churn counts, `[XHB]`, `[XSW]`, handshake rows, the
+  per-iteration signature), so none of them is typed by hand;
+* `tools/rw/l40-runs.sh <tag> <n> [run-timeout]` — the ladder runner
+  (sequential by construction: two desktop harnesses in one worktree fight over
+  `disk.img`, rule 5).

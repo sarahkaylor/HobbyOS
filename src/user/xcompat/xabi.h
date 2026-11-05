@@ -119,6 +119,11 @@ typedef struct {
 #define GraphicsExpose 13
 #define NoExpose 14
 #define VisibilityNotify 15
+#define VisibilityUnobscured 0
+#define VisibilityPartiallyObscured 1
+#define VisibilityFullyObscured 2
+#define NotifyNormal 0
+#define NotifyNonlinear 3
 #define CreateNotify 16
 #define DestroyNotify 17
 #define UnmapNotify 18
@@ -454,6 +459,19 @@ typedef struct {
   int state;
 } XVisibilityEvent;
 
+/* L40: FocusIn/FocusOut.  Same 8-byte-aligned prefix as every other event,
+ * then window/mode/detail -- a client reads it, so the layout has to be the
+ * real one. */
+typedef struct {
+  int type;
+  unsigned long serial;
+  Bool send_event;
+  Display *display;
+  Window window;
+  int mode;
+  int detail;
+} XFocusChangeEvent;
+
 typedef struct {
   int type;
   unsigned long serial;
@@ -783,6 +801,7 @@ typedef union _XEvent {
   XGraphicsExposeEvent xgraphicsexpose;
   XNoExposeEvent xnoexpose;
   XVisibilityEvent xvisibility;
+  XFocusChangeEvent xfocus;
   XCreateWindowEvent xcreatewindow;
   XDestroyWindowEvent xdestroywindow;
   XUnmapEvent xunmap;
