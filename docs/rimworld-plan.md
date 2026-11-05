@@ -424,6 +424,11 @@ alias map stays dormant. `linux_probe_dyn` (the `dlopen` half) is still open.
       report the real limits.
 - [ ] Fault signals: `SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE` deliverable to compat
       processes (Mono's null checks and crash handler depend on it).
+- [x] Stop-the-world signals: `pthread_kill(tid, SIGPWR=30)` (Boehm suspend)
+      and `SIGXCPU=24` (resume) are accepted for a Linux-ABI target and
+      delivered **to that thread**; the GC suspend/resume handshake completes
+      through 7 cycles and the managed domain resets (L32, launch log §22).
+      The remaining wall is the handshake's *resume* half, not the signal path.
 - [ ] Host-built pthread stress (`8 threads × mutex/condvar/TLS`) as a probe.
 
 **Gate M2:** pthread stress passes; **`mono --version` and `mono hello.exe`
