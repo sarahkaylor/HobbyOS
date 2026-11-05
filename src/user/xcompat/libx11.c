@@ -281,6 +281,20 @@ struct xwin {
   int substructure_selected;   /* SubstructureNotifyMask selected at least once */
   int x, y;
   unsigned w, h;
+  /* L40: the size the CLIENT asked for (create or XResizeWindow), kept apart
+   * from w/h, which set_geometry() overwrites with the desktop's content
+   * rect for the window it laid out.  A fullscreen container is recognised by
+   * what the client asked for -- 1920x1080 -- even though the desktop gives
+   * it a 1916x1018 content rect; conflating the two made fs_try_grant refuse
+   * every real container ("why=4 cw=1916 ch=1018"). */
+  unsigned req_w, req_h;
+  /* L40: this window has been granted _NET_WM_STATE_FULLSCREEN into a
+   * screen-sized container.  While it is set, the geometry every query
+   * answers is the SCREEN geometry, not the desktop's content rect: a WM
+   * that grants fullscreen resizes the client to the screen and hides the
+   * frame, and a client that is told anything smaller concludes the
+   * transition failed (see fs_try_grant). */
+  int fs;
 };
 
 /* ---- the display ------------------------------------------------------ */
@@ -293,7 +307,7 @@ struct xwin {
 /* A small property list: SDL/Unity write _NET_WM_NAME, _NET_WM_PID,
  * WM_PROTOCOLS, WM_CLASS and WM_NORMAL_HINTS, and a client is allowed to read
  * back what it wrote.  Storage is static (no allocator in this DSO). */
-#define PROP_MAX 12
+#define PROP_MAX 24
 #define PROP_BYTES 512
 
 struct _XDisplay {
@@ -395,6 +409,7 @@ struct _XDisplay {
   int error_handler_set;
   int sync_mode;
   int grab_pointer, grab_keyboard;
+  Window focus;                 /* last XSetInputFocus target (L40) */
 };
 
 /* One process, one display: the desktop gives a process exactly one
@@ -448,6 +463,8 @@ static struct xwin *xw_alloc(Display *d, Window id, Window parent,
   slot->y = y;
   slot->w = w;
   slot->h = h;
+  slot->req_w = w;
+  slot->req_h = h;
   slot->override_redirect = override_redirect;
   return slot;
 }
@@ -500,6 +517,15 @@ static void ev_emit(Display *d, int type, Window win, Window event,
       ev.xcreatewindow.width = (int)w;
       ev.xcreatewindow.height = (int)h;
       break;
+    case VisibilityNotify:
+      ev.xvisibility.window = win;
+      ev.xvisibility.state = VisibilityUnobscured;
+      break;
+    case FocusIn:
+      ev.xfocus.window = win;
+      ev.xfocus.mode = NotifyNormal;
+      ev.xfocus.detail = NotifyNonlinear;
+      break;
     case DestroyNotify:
       ev.xdestroywindow.event = event;
       ev.xdestroywindow.window = win;
@@ -537,6 +563,17 @@ static void xw_notify_parent(Display *d, int type, Window win, Window parent,
                              int x, int y, unsigned w, unsigned h) {
   if (!xw_parent_wants(d, parent)) return;
   ev_emit(d, type, win, parent, parent, x, y, w, h);
+}
+
+/* L40: VisibilityNotify is selected with VisibilityChangeMask (not
+ * StructureNotify) and a server sends it when a mapped window becomes
+ * viewable.  Unity selects every event on its GL window; an engine that gates
+ * its first frame on "my drawable is visible" otherwise waits for ever. */
+static void xw_notify_visible(Display *d, Window w) {
+  struct xwin *e = xw_find(d, w);
+  if (!e) return;
+  if (!(e->event_mask & VisibilityChangeMask)) return;
+  ev_emit(d, VisibilityNotify, w, w, e->parent, e->x, e->y, e->w, e->h);
 }
 
 
@@ -673,11 +710,22 @@ static struct {
   unsigned long long maps;      /* XMapWindow calls (not repeats) */
   unsigned long long fs_reqs;   /* _NET_WM_STATE writes naming FULLSCREEN */
   unsigned long long fs_granted;/* ... answered with a configure */
+  unsigned long long fs_revoked;/* a granted fullscreen reverted by the client */
   int have_crc, changed;
   int last_w, last_h;
   int first_ok_row;             /* the first present that carried pixels */
   int rows, hb_rows;
 } g_pres;
+
+/* Defined with the fullscreen handshake below; the two EWMH answers
+ * (XChangeProperty / XSendEvent) log through it as well. */
+static void fs_row(const char *tag, Window child, Window cont,
+                   unsigned w, unsigned h, unsigned long long n,
+                   unsigned long long rep);
+/* Defined with the property store below; XOpenDisplay publishes the root
+ * window's EWMH properties through it. */
+static void prop_set_atoms(Display *d, Window w, Atom name,
+                           const Atom *vals, int n);
 
 /* One pass: the checksum and the number of non-zero pixels.  A checksum answers
  * "did anything change"; this answers "is there anything there at all", which
@@ -1355,6 +1403,7 @@ static void pump_nonblock(Display *d) {
     j = ap_s(b, j, " maps=");        j = ap_d(b, j, g_pres.maps);
     j = ap_s(b, j, " fs=");          j = ap_d(b, j, g_pres.fs_reqs);
     j = ap_s(b, j, " grant=");       j = ap_d(b, j, g_pres.fs_granted);
+    j = ap_s(b, j, " rev=");         j = ap_d(b, j, g_pres.fs_revoked);
     j = ap_s(b, j, " ready=");
     b[j++] = (char)('0' + (d->win.content_ready ? 1 : 0));
     b[j++] = '\n';
@@ -1523,6 +1572,41 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->screen_obj.cmap = d->default_cmap;
   d->default_gc = XCreateGC(d, d->root, 0, 0);
   d->screen_obj.default_gc = d->default_gc;
+  /* L40: publish the EWMH surface a window manager would, on the ROOT window.
+   * A client asks for fullscreen in one of two ways: an EWMH ClientMessage
+   * (answered in XSendEvent) or, when it decides there is no WM, by
+   * reparenting into a screen-sized container it creates itself (answered in
+   * XReparentWindow).  Which path it takes is decided by what the root
+   * says: Unity interns _NET_WORKAREA straight after a reparent step, and an
+   * absent property reads as "no WM".  These values describe this desktop
+   * honestly: one screen, one desktop, the framebuffer as the work area. */
+  {
+    Atom sup[6];
+    int n = 0;
+    sup[n++] = xc_intern(&d->core, "_NET_WM_STATE", 0);
+    sup[n++] = xc_intern(&d->core, "_NET_WM_STATE_FULLSCREEN", 0);
+    sup[n++] = xc_intern(&d->core, "_NET_WM_STATE_ABOVE", 0);
+    sup[n++] = xc_intern(&d->core, "_NET_WORKAREA", 0);
+    sup[n++] = xc_intern(&d->core, "_NET_ACTIVE_WINDOW", 0);
+    sup[n++] = xc_intern(&d->core, "_NET_SUPPORTED", 0);
+    prop_set_atoms(d, d->root, xc_intern(&d->core, "_NET_SUPPORTED", 0), sup, n);
+    {
+      Atom wa[4];
+      wa[0] = 0;
+      wa[1] = 0;
+      wa[2] = (Atom)d->fb_w;
+      wa[3] = (Atom)d->fb_h;
+      prop_set_atoms(d, d->root, xc_intern(&d->core, "_NET_WORKAREA", 0), wa, 4);
+    }
+    {
+      Atom one[1];
+      one[0] = 0;
+      prop_set_atoms(d, d->root,
+                     xc_intern(&d->core, "_NET_CURRENT_DESKTOP", 0), one, 1);
+      prop_set_atoms(d, d->root,
+                     xc_intern(&d->core, "_NET_NUMBER_OF_DESKTOPS", 0), one, 1);
+    }
+  }
   xtr("[XC] XOpenDisplay ok\n");
   return d;
 }
@@ -1717,6 +1801,13 @@ static void surf_reset(Display *d) {
 }
 
 static void win_clear(Display *d) {
+  /* L40: an unrelated XCreateWindow must not throw away a frame that arrived
+   * before the desktop laid the surface out.  The defer store holds a copy of
+   * the CLIENT's own image at its own size, so it is independent of the
+   * surface record that is being reset here -- and the fullscreen step's
+   * container create landed exactly between the splash's first swap and the
+   * desktop's geometry reply, dropping the only frame the run had. */
+  int defer = d->win.defer, dw = d->win.defer_w, dh = d->win.defer_h;
   d->win.mapped = 0;
   d->win.destroyed = 0;
   d->win.pointer_asked = 0;
@@ -1731,6 +1822,9 @@ static void win_clear(Display *d) {
    * loop (28.5), and the right place to stop it is the WM emulation, not the
    * window record. */
   surf_reset(d);
+  d->win.defer = defer;
+  d->win.defer_w = dw;
+  d->win.defer_h = dh;
   d->win.bg = 0;
   d->win.border = 0;
   d->win.cmap = d->default_cmap;
@@ -1981,6 +2075,7 @@ XAPI int XMapWindow(Display *d, Window w) {
    * (L28): a second window's create must not suppress the first one's map. */
   xw_notify_self(d, MapNotify, w, e->parent, e->x, e->y, e->w, e->h);
   xw_notify_parent(d, MapNotify, w, e->parent, e->x, e->y, e->w, e->h);
+  xw_notify_visible(d, w);
   xtr("[XC] MapNotify queued id=");
   xtr_u((unsigned long)w);
   xtr("\n");
@@ -2075,6 +2170,45 @@ static void prop_notify(Display *d, Window w, Atom prop) {
   xtr("\n");
 }
 
+/* ---- the geometry a client is TOLD: one answer for every query --------
+ *
+ * L40: XGetGeometry, XGetWindowAttributes and the ConfigureNotify a
+ * fullscreen grant sends all read this one function, so no two answers can
+ * disagree.  Two states exist:
+ *
+ *  - windowed: the desktop owns the frame, so the only pixels the client can
+ *    reach are the CONTENT RECT (measured 2;34;1916;1018 inside a
+ *    1920x1080 frame).  Reporting that is also what makes Mesa size its
+ *    buffers to what the desktop actually shows.
+ *  - fullscreen granted (e->fs): the client asked for the whole screen, a
+ *    window manager would have resized it to the screen and hidden the
+ *    frame, and our blit clips the overlap.  The client MUST be told the
+ *    screen geometry: Unity's borderless-fullscreen transition checks the
+ *    window it reparented into a screen-sized container and, told anything
+ *    smaller, reverts and retries ~89 times a second with one swap in the
+ *    whole run (docs/rimworld-launch-log.md, 28.5 and L40).
+ */
+static void win_report_geom(Display *d, struct xwin *e, int *x, int *y,
+                            unsigned *w, unsigned *h) {
+  if (!e) return;
+  if (!e->fs && e->id == d->win.id && d->win.content_ready) {
+    *x = d->win.gx; *y = d->win.gy;
+    *w = (unsigned)d->win.cw; *h = (unsigned)d->win.ch;
+    return;
+  }
+  *x = e->x; *y = e->y; *w = e->w; *h = e->h;
+}
+
+/* The drawable a present lands in is d->surface (the XID whose ESC ] X
+ * opened the desktop surface), never "whichever XID was created last". */
+static void surface_report_geom(Display *d, int *x, int *y,
+                                unsigned *w, unsigned *h) {
+  struct xwin *se = xw_find(d, d->surface ? d->surface : d->win.id);
+  if (se) { win_report_geom(d, se, x, y, w, h); return; }
+  *x = d->win.gx; *y = d->win.gy;
+  *w = (unsigned)d->win.cw; *h = (unsigned)d->win.ch;
+}
+
 XAPI int XStoreName(Display *d, Window w, const char *name) {
   xtr("[XC] XStoreName win="); xtr_u((unsigned long)w); xtr("\n");
   if (!d || !win_id_live(d, w) || !name) return 0;
@@ -2109,12 +2243,37 @@ static int prop_slot(Display *d, Atom name) {
   return -1;
 }
 
+/* Write an ATOM list straight into the property table.  A window manager
+ * that answers a _NET_WM_STATE request must SET the state, and it must not
+ * re-enter the request path it is answering (XChangeProperty would run the
+ * grant block again), so the store is direct here. */
+static void prop_set_atoms(Display *d, Window w, Atom name,
+                           const Atom *vals, int n) {
+  (void)w;
+  if (!d || !name || n <= 0) return;
+  int i = prop_slot(d, name);
+  if (i < 0) {
+    if (d->nprops >= PROP_MAX) return;
+    i = d->nprops++;
+    d->props[i].name = name;
+  }
+  d->props[i].type = XA_ATOM;
+  d->props[i].format = 32;
+  if (n > (int)(PROP_BYTES / 4)) n = (int)(PROP_BYTES / 4);
+  for (int k = 0; k < n; k++) {
+    unsigned long v = (unsigned long)vals[k];
+    for (int b = 0; b < 4; b++)
+      d->props[i].data[k * 4 + b] = (unsigned char)((v >> (8 * b)) & 0xff);
+  }
+  d->props[i].nitems = (unsigned long)n;
+}
+
 XAPI int XChangeProperty(Display *d, Window w, Atom property, Atom type,
                          int format, int mode, const unsigned char *data,
                          int nelements) {
   xtr("[XC] XChangeProperty win="); xtr_u((unsigned long)w);
   xtr(" prop="); xtr_u((unsigned long)property); xtr("\n");
-  if (!d || !win_id_live(d, w)) return 0;
+  if (!d || (!win_id_live(d, w) && w != d->root)) return 0;
   if (!property) return 0;
   int unit = format == 32 ? 4 : format == 16 ? 2 : 1;
   unsigned long nbytes = (unsigned long)(nelements > 0 ? nelements : 0) *
@@ -2184,15 +2343,17 @@ XAPI int XChangeProperty(Display *d, Window w, Atom property, Atom type,
         }
       }
       if (want_fs && d->win.content_ready) {
+        int rx = 0, ry = 0;
+        unsigned rw = 0, rh = 0;
+        surface_report_geom(d, &rx, &ry, &rw, &rh);
         Window sid = d->surface ? d->surface : d->win.id;
         struct xwin *se = xw_find(d, sid);
         if (se) {
-          ev_emit(d, ConfigureNotify, sid, sid, se->parent,
-                  d->win.gx, d->win.gy, (unsigned)d->win.cw, (unsigned)d->win.ch);
+          ev_emit(d, ConfigureNotify, sid, sid, se->parent, rx, ry, rw, rh);
           if (se->exposure_selected || (se->event_mask & ExposureMask))
-            ev_emit(d, Expose, sid, sid, se->parent, 0, 0,
-                    (unsigned)d->win.cw, (unsigned)d->win.ch);
+            ev_emit(d, Expose, sid, sid, se->parent, 0, 0, rw, rh);
           g_pres.fs_granted++;
+          fs_row("FSSTATE", sid, se->parent, rw, rh, g_pres.fs_granted, 0);
         }
       }
     }
@@ -2221,7 +2382,29 @@ XAPI int XGetWindowProperty(Display *d, Window w, Atom property,
   if (nitems) *nitems = 0;
   if (bytes_after) *bytes_after = 0;
   if (prop) *prop = 0;
-  if (!d || !d->win.id || w != d->win.id) return BadWindow;
+  if (!d || !w) return BadWindow;
+  /* L40: properties live on whichever window wrote them, and the ROOT window
+   * is where a client looks for the window manager: _NET_SUPPORTED says which
+   * EWMH states exist, _NET_WORKAREA where the usable area is.  Answering
+   * BadWindow for the root told Unity "there is no WM here", so it took its
+   * reparent fallback and retried it ~89 times a second.  The store is one
+   * table (the desktop has one window per process), so a live window or the
+   * root may read it. */
+  if (w != d->win.id && w != d->root && !win_id_live(d, w)) return BadWindow;
+  {
+    static int gp_rows;
+    if (gp_rows < 24) {
+      gp_rows++;
+      char b[112];
+      int j = 0;
+      j = ap_s(b, j, "[XE] GETPROP win=");  j = ap_d(b, j, (unsigned long long)w);
+      j = ap_s(b, j, " atom=");             j = ap_d(b, j, (unsigned long long)property);
+      j = ap_s(b, j, " found=");
+      b[j++] = (char)('0' + (prop_slot(d, property) >= 0 ? 1 : 0));
+      b[j++] = '\n';
+      xs_write(2, b, (unsigned long)j);
+    }
+  }
   int i = prop_slot(d, property);
   if (i < 0) return Success;             /* set-but-absent: None, like Xlib */
   if (req_type && req_type != AnyPropertyType && req_type != d->props[i].type)
@@ -2407,11 +2590,13 @@ XAPI int XMoveWindow(Display *d, Window w, int x, int y) {
 static int cli_resize(Display *d, Window w, unsigned width, unsigned height) {
   struct xwin *e = xw_find(d, w);
   if (!e) return 0;
-  if (w != d->win.id) { e->w = width; e->h = height; return 1; }
+  if (w != d->win.id) { e->w = width; e->h = height;
+                        e->req_w = width; e->req_h = height; return 1; }
   if (width < 1 || height < 1) return 0;
   if ((int)width > d->fb_w || (int)height > d->fb_h) return 0;
   if ((int)width == d->win.cw && (int)height == d->win.ch) return 1;
   e->w = width; e->h = height;
+  e->req_w = width; e->req_h = height;
   if (d->win.shadow && (unsigned long)width * height <= WIN_SHADOW_MAX) {
     unsigned int *p = (unsigned int *)d->win.shadow;
     unsigned int bg = (unsigned int)d->win.bg;
@@ -2456,6 +2641,137 @@ XAPI int XRaiseWindow(Display *d, Window w) {
   (void)d; (void)w; return 0;
 }
 XAPI int XLowerWindow(Display *d, Window w) { (void)d; (void)w; return 0; }
+/* ---- the fullscreen handshake -----------------------------------------
+ *
+ * Unity's borderless-fullscreen transition, as measured (28.5, and the L39
+ * X-level trace), is one iteration of:
+ *
+ *   XCreateWindow  1920x1080 parent=root      (the container)
+ *   XSelectInput   StructureNotify ; XMapWindow ; wait MapNotify
+ *   XReparentWindow(GL window, container)     ; wait MapNotify(GL window)
+ *   XRaiseWindow + XSync x3, twice
+ *   ... then it looks for the event a WM sends when it RESIZES the client
+ *   to the screen.  When that never arrives it reverts (reparent to root,
+ *   unmap + destroy the container) and retries: 13,336 create and 13,335
+ *   map in 150 s with ONE glXSwapBuffers in the whole run.
+ *
+ * The client never reads a property back inside that loop and never calls
+ * XGetWindowAttributes (L39 trace: 0 property reads, 0 attribute queries
+ * between the reparent and the revert), so answering the EWMH ClientMessage
+ * alone cannot satisfy it -- the missing answer is the ConfigureNotify.
+ *
+ * The grant therefore does what a WM does for a _NET_WM_STATE_FULLSCREEN
+ * add: resize the client to the screen, set the state on the client window,
+ * and send one ConfigureNotify carrying the SCREEN geometry.  Every later
+ * query answers the same geometry through win_report_geom(), so the size the
+ * client checks and the size it draws to agree.  Our blit still clips to the
+ * desktop's content rect (1916x1018 of 1920x1080): the frame we have, not a
+ * lie about its size.
+ */
+static void fs_row(const char *tag, Window child, Window cont,
+                   unsigned w, unsigned h, unsigned long long n,
+                   unsigned long long rep) {
+  static int rows;
+  if (rows >= 8) return;
+  rows++;
+  char b[160];
+  int j = 0;
+  j = ap_s(b, j, "[XE] ");
+  j = ap_s(b, j, tag);
+  j = ap_s(b, j, " n=");      j = ap_d(b, j, n);
+  j = ap_s(b, j, " rep=");    j = ap_d(b, j, rep);
+  j = ap_s(b, j, " win=");    j = ap_d(b, j, (unsigned long long)child);
+  j = ap_s(b, j, " parent="); j = ap_d(b, j, (unsigned long long)cont);
+  j = ap_s(b, j, " w=");      j = ap_i(b, j, (int)w);
+  j = ap_s(b, j, " h=");      j = ap_i(b, j, (int)h);
+  b[j++] = '\n';
+  xs_write(2, b, (unsigned long)j);
+}
+
+/* A refused grant must name the test it failed, or "no row at all" and "the
+ * grant ran" look identical (that cost one boot).  why: 1 no window, 2 same
+ * window, 3 container is not a root child, 4 container is smaller than the
+ * screen, 5 the child is not inside the container. */
+static void fs_decline(int why, Display *d, struct xwin *child,
+                       struct xwin *cont) {
+  static int rows;
+  if (rows >= 8) return;
+  rows++;
+  char b[176];
+  int j = 0;
+  j = ap_s(b, j, "[XE] FSDECL why=");  j = ap_i(b, j, why);
+  j = ap_s(b, j, " win=");   j = ap_d(b, j, (unsigned long long)(child ? child->id : 0));
+  j = ap_s(b, j, " parent="); j = ap_d(b, j, (unsigned long long)(cont ? cont->id : 0));
+  j = ap_s(b, j, " pp=");    j = ap_d(b, j, (unsigned long long)(cont ? cont->parent : 0));
+  j = ap_s(b, j, " root=");  j = ap_d(b, j, (unsigned long long)(d ? d->root : 0));
+  j = ap_s(b, j, " cw=");    j = ap_i(b, j, cont ? (int)cont->w : -1);
+  j = ap_s(b, j, " ch=");    j = ap_i(b, j, cont ? (int)cont->h : -1);
+  j = ap_s(b, j, " sw=");    j = ap_i(b, j, d ? d->fb_w : -1);
+  j = ap_s(b, j, " sh=");    j = ap_i(b, j, d ? d->fb_h : -1);
+  j = ap_s(b, j, " cp=");    j = ap_d(b, j, (unsigned long long)(child ? child->parent : 0));
+  b[j++] = '\n';
+  xs_write(2, b, (unsigned long)j);
+}
+
+static int fs_try_grant(Display *d, struct xwin *child, struct xwin *cont) {
+  if (!d || !child || !cont) { fs_decline(1, d, child, cont); return 0; }
+  if (child == cont) { fs_decline(2, d, child, cont); return 0; }
+  if (cont->parent != d->root) { fs_decline(3, d, child, cont); return 0; }
+  /* The CONTAINER test uses req_w/req_h (what the client asked for), not the
+   * laid-out content rect.  A client that wants the whole screen creates its
+   * container at the screen size and only then learns the desktop's content
+   * rect; judging by the content rect rejected every real container. */
+  if ((int)cont->req_w < d->fb_w || (int)cont->req_h < d->fb_h) {
+    fs_decline(4, d, child, cont); return 0;
+  }
+  if (child->parent != cont->id) { fs_decline(5, d, child, cont); return 0; }
+  /* rep=1 means this child was already granted at this exact size: a second
+   * grant for the same window is the client rejecting our answer, so the row
+   * shows it (n= keeps the total). */
+  unsigned gw = cont->req_w ? cont->req_w : cont->w;
+  unsigned gh = cont->req_h ? cont->req_h : cont->h;
+  unsigned long long rep = (child->fs && child->w == gw &&
+                            child->h == gh) ? 1u : 0u;
+  child->fs = 1;
+  child->x = 0;
+  child->y = 0;
+  child->w = gw;
+  child->h = gh;
+  {
+    Atom wmstate = xc_intern(&d->core, "_NET_WM_STATE", 0);
+    Atom fs = xc_intern(&d->core, "_NET_WM_STATE_FULLSCREEN", 0);
+    if (wmstate && fs) {
+      Atom one[1];
+      one[0] = fs;
+      prop_set_atoms(d, child->id, wmstate, one, 1);
+      prop_notify(d, child->id, wmstate);
+    }
+  }
+  if (child->structure_selected || (child->event_mask & StructureNotifyMask))
+    ev_emit(d, ConfigureNotify, child->id, child->id, cont->id, 0, 0, gw, gh);
+  g_pres.fs_granted++;
+  fs_row("FSGRANT", child->id, cont->id, gw, gh, g_pres.fs_granted, rep);
+  return 1;
+}
+
+/* The revert half: the client moves its window back to the root.  A WM
+ * would unset the state and restore the windowed geometry. */
+static void fs_revoke(Display *d, struct xwin *e) {
+  if (!d || !e || !e->fs) return;
+  e->fs = 0;
+  {
+    Atom wmstate = xc_intern(&d->core, "_NET_WM_STATE", 0);
+    int i = wmstate ? prop_slot(d, wmstate) : -1;
+    if (i >= 0) { d->props[i].nitems = 0; prop_notify(d, e->id, wmstate); }
+  }
+  if (e->structure_selected || (e->event_mask & StructureNotifyMask))
+    ev_emit(d, ConfigureNotify, e->id, e->id, e->parent,
+            d->win.gx, d->win.gy, (unsigned)d->win.cw, (unsigned)d->win.ch);
+  g_pres.fs_revoked++;
+  fs_row("FSREV", e->id, e->parent, (unsigned)d->win.cw,
+         (unsigned)d->win.ch, g_pres.fs_revoked, 0);
+}
+
 XAPI int XReparentWindow(Display *d, Window w, Window p, int x, int y) {
   xtr("[XC] XReparentWindow win=");
   xtr_u((unsigned long)w);
@@ -2499,9 +2815,17 @@ XAPI int XReparentWindow(Display *d, Window w, Window p, int x, int y) {
     d->surface = w;
     xw_notify_self(d, MapNotify, w, p, e->x, e->y, e->w, e->h);
     xw_notify_parent(d, MapNotify, w, p, e->x, e->y, e->w, e->h);
+    xw_notify_visible(d, w);
     if (e->exposure_selected || (e->event_mask & ExposureMask))
       ev_emit(d, Expose, w, w, p, 0, 0, e->w, e->h);
   }
+  /* L40: the fullscreen handshake.  A reparent into a screen-sized top-level
+   * container is a fullscreen request; answer it the way a WM does, or the
+   * client reverts and retries for ever (see fs_try_grant).  Placed AFTER the
+   * MapNotify the client waits for, so both arrive in that order.  Called
+   * unconditionally: a refusal logs why=, so "no grant row" can never again
+   * be ambiguous between "the test failed" and "the call never happened". */
+  if (!fs_try_grant(d, e, np)) fs_revoke(d, e);
   return 1;
 }
 
@@ -2511,16 +2835,15 @@ XAPI Status XGetGeometry(Display *d, Drawable dr, Window *root, int *x, int *y,
   struct xwin *e = xw_find(d, dr);
   if (!d || !e) return 0;
   if (root) *root = d->root;
-  if (x) *x = e->x;
-  if (y) *y = e->y;
-  /* The surface's real size is the desktop's content rect; every other XID
-   * keeps the size it was created with. */
-  if (width)
-    *width = (dr == d->win.id && d->win.content_ready)
-             ? (unsigned)d->win.cw : e->w;
-  if (height)
-    *height = (dr == d->win.id && d->win.content_ready)
-              ? (unsigned)d->win.ch : e->h;
+  /* L40: one answer, shared with XGetWindowAttributes and with the
+   * ConfigureNotify a fullscreen grant sends (win_report_geom). */
+  int gx2 = 0, gy2 = 0;
+  unsigned gw2 = 0, gh2 = 0;
+  win_report_geom(d, e, &gx2, &gy2, &gw2, &gh2);
+  if (x) *x = gx2;
+  if (y) *y = gy2;
+  if (width) *width = gw2;
+  if (height) *height = gh2;
   if (bw) *bw = 0;
   if (depth) *depth = 24;
   return 1;
@@ -2536,10 +2859,13 @@ XAPI int XGetWindowAttributes(Display *d, Window w, XWindowAttributes *a) {
   if (!d || !e || !a) return 0;
   xz(a, sizeof *a);
   int surface = (w == d->win.id);
-  a->x = surface ? d->win.gx : e->x;
-  a->y = surface ? d->win.gy : e->y;
-  a->width = (surface && d->win.content_ready) ? d->win.cw : (int)e->w;
-  a->height = (surface && d->win.content_ready) ? d->win.ch : (int)e->h;
+  int gx2 = 0, gy2 = 0;
+  unsigned gw2 = 0, gh2 = 0;
+  win_report_geom(d, e, &gx2, &gy2, &gw2, &gh2);
+  a->x = gx2;
+  a->y = gy2;
+  a->width = (int)gw2;
+  a->height = (int)gh2;
   a->border_width = 0;
   a->depth = 24;
   a->visual = (Visual *)&d->visual;
@@ -2714,6 +3040,15 @@ XAPI int XSetInputFocus(Display *d, Window w, int revert, Time t) {
   xtr("\n");
   (void)revert; (void)t;
   if (!d || (w != d->win.id && w != PointerRoot && w != None)) return 0;
+  /* L40: a real server tells the window it now has the input focus
+   * (FocusIn, and FocusOut to the previous holder).  A client that gates its
+   * first frame on "my window is focused" waits for ever otherwise. */
+  if (w && w != PointerRoot && w != None) {
+    struct xwin *e = xw_find(d, w);
+    if (e && (e->event_mask & FocusChangeMask))
+      ev_emit(d, FocusIn, w, w, e->parent, e->x, e->y, e->w, e->h);
+    d->focus = w;
+  }
   return 0;
 }
 XAPI int XGetInputFocus(Display *d, Window *focus, int *revert) {
@@ -2796,11 +3131,39 @@ XAPI Bool XCheckIfEvent(Display *d, XEvent *ev, Bool (*pred)(),
   xtr_hex((unsigned long)__builtin_return_address(0));
   if (!d || !ev || !pred) return False;
   pump_nonblock(d);
-  if (!xc_peek(&d->core, ev)) return False;
+  /* L40: XCheckIfEvent scans the WHOLE queue for a match, exactly like
+   * XIfEvent (Xlib holds the non-matching events aside and re-queues them).
+   * The head-only version returned False whenever an unrelated event happened
+   * to sit in front -- and the fullscreen handshake's "did my ConfigureNotify
+   * arrive?" check is a XCheckIfEvent, so a queue holding a PropertyNotify
+   * first read as "the WM never answered".  Measured L39 trace: 15
+   * XCheckIfEvent calls per fullscreen retry, none ever matched. */
   typedef Bool (*pred_t)(Display *, XEvent *, void *);
-  if (!((pred_t)pred)(d, ev, arg)) return False;
-  xc_dequeue(&d->core, ev);
-  return True;
+  static XEvent held[XC_EVENT_RING];
+  int nheld = 0, scanned = 0, matched = 0;
+  XEvent hit, e;
+  /* ONE pass.  Re-queueing the held events and scanning again would read the
+   * same events for ever (measured L40 first attempt: the client spun at
+   * 240k pumps with no progress). */
+  while (nheld < XC_EVENT_RING && xc_dequeue(&d->core, &e)) {
+    scanned++;
+    if (!matched && ((pred_t)pred)(d, &e, arg)) { hit = e; matched = 1; continue; }
+    held[nheld++] = e;
+  }
+  for (int i = 0; i < nheld; i++) xc_queue(&d->core, &held[i]);
+  if (matched) {
+    *ev = hit;
+    xtr("[XC] XCheckIfEvent matched type=");
+    xtrn(hit.type);
+    xtr(" win=");
+    xtr_u((unsigned long)hit.xany.window);
+    xtr(" scanned=");
+    xtrn(scanned);
+    xtr("\n");
+    return True;
+  }
+  (void)scanned;                     /* only the XC_TRACE build prints it */
+  return False;
 }
 
 XAPI Bool XIfEvent(Display *d, XEvent *ev, Bool (*pred)(), void *arg) {
@@ -2922,16 +3285,39 @@ XAPI int XSendEvent(Display *d, Window w, Bool propagate, long mask,
           xs_write(2, b, (unsigned long)j);
         }
       }
+      if (want_fs && d->win.id) {
+        /* L40: a WM that grants the state also WRITES it on the client
+         * window.  Store it directly -- XChangeProperty would run the grant
+         * block a second time for the same request. */
+        Atom cur[4];
+        int nc = 0, have = 0;
+        int pi = prop_slot(d, wmstate);
+        if (pi >= 0 && d->props[pi].format == 32) {
+          unsigned long n = d->props[pi].nitems;
+          for (unsigned long k = 0; k < n && nc < 3; k++) {
+            unsigned long v = 0;
+            for (int b = 3; b >= 0; b--)
+              v = (v << 8) | d->props[pi].data[k * 4 + b];
+            if (v == (unsigned long)fs) have = 1;
+            cur[nc++] = (Atom)v;
+          }
+        }
+        if (!have && nc < 4) cur[nc++] = fs;
+        prop_set_atoms(d, d->win.id, wmstate, cur, nc);
+        prop_notify(d, d->win.id, wmstate);
+      }
       if (want_fs && d->win.content_ready) {
+        int rx = 0, ry = 0;
+        unsigned rw = 0, rh = 0;
+        surface_report_geom(d, &rx, &ry, &rw, &rh);
         Window sid = d->surface ? d->surface : d->win.id;
         struct xwin *se = xw_find(d, sid);
         if (se) {
-          ev_emit(d, ConfigureNotify, sid, sid, se->parent,
-                  d->win.gx, d->win.gy, (unsigned)d->win.cw, (unsigned)d->win.ch);
+          ev_emit(d, ConfigureNotify, sid, sid, se->parent, rx, ry, rw, rh);
           if (se->exposure_selected || (se->event_mask & ExposureMask))
-            ev_emit(d, Expose, sid, sid, se->parent, 0, 0,
-                    (unsigned)d->win.cw, (unsigned)d->win.ch);
+            ev_emit(d, Expose, sid, sid, se->parent, 0, 0, rw, rh);
           g_pres.fs_granted++;
+          fs_row("FSSTATE", sid, se->parent, rw, rh, g_pres.fs_granted, 0);
         }
       }
       return 1;
