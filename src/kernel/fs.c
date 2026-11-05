@@ -1,4 +1,5 @@
 #include "fs.h"
+#include "kline.h"
 #include "process.h"
 #include "pipe.h"
 #include "unix.h"
@@ -1712,6 +1713,22 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                 (a.type == NF3DIR) ? (K_S_IFDIR | 0755)
                                    : (K_S_IFREG | 0644),
                 (long)a.size);
+    /* M6/L31: the engine's JSON probe, as stat() sees it. */
+    {
+      const char *t = "ScriptingAssemblies.json";
+      int tl = 0, pl = 0, hit = 1;
+      while (t[tl]) tl++;
+      while (abs[pl]) pl++;
+      if (pl < tl) hit = 0;
+      for (int i = 0; hit && i < tl; i++)
+        if (abs[pl - tl + i] != t[i]) hit = 0;
+      if (hit) {
+        struct kline kl; kl_init(&kl);
+        kl_s(&kl, "[XSTAT] size="); kl_i(&kl, (long)a.size);
+        kl_s(&kl, " type="); kl_i(&kl, (long)a.type);
+        kl_c(&kl, '\n'); kl_emit(&kl);
+      }
+    }
     st->st_atime = st->st_mtime = st->st_ctime = (long)a.mtime;
     return 0;
   }
@@ -1972,6 +1989,24 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     if ((uint64_t)want > left) want = (uint32_t)left;
     if (want == 0) return 0;
     int got = nfs_read_file(m, &f->nfs.fh, f->nfs.cursor, buf, want);
+    /* M6/L31: the ScriptingAssemblies.json read, one row per call. */
+    {
+      const char *t = "ScriptingAssemblies.json";
+      int hit = 1, tl = 0, pl = 0;
+      while (t[tl]) tl++;
+      while (f->path[pl]) pl++;
+      if (pl < tl) hit = 0;
+      for (int i = 0; hit && i < tl; i++)
+        if (f->path[pl - tl + i] != t[i]) hit = 0;
+      if (hit) {
+        struct kline kl; kl_init(&kl);
+        kl_s(&kl, "[XREAD] want="); kl_i(&kl, (long)want);
+        kl_s(&kl, " got="); kl_i(&kl, (long)got);
+        kl_s(&kl, " cur="); kl_i(&kl, (long)f->nfs.cursor);
+        kl_s(&kl, " size="); kl_i(&kl, (long)f->nfs.size);
+        kl_c(&kl, '\n'); kl_emit(&kl);
+      }
+    }
     if (got > 0) f->nfs.cursor += (uint32_t)got;
     return got;
   } else if (f->type == FILE_TYPE_PIPE) {
