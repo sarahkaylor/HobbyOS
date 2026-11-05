@@ -304,6 +304,11 @@ struct process {
      fault records unreadable. */
   int64_t last_syscall;
   int64_t last_ret;
+  /* L42: the last 32 Linux syscall numbers this thread entered, oldest at
+     sys_ring_at.  A park row says where a thread stopped; this says what it
+     was doing on the way there (e.g. "pread, pread, futex" vs "write, futex"). */
+  uint16_t sys_ring[32];
+  uint8_t sys_ring_at;
   /** Phase 4 (memory): anonymous mmap regions (first-fit carving from the
    *  pre-mapped region; entries are VAs into the anon area). */
   struct anon_region { uint64_t addr; uint64_t len; } anon_maps[8];

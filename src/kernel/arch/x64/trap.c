@@ -2318,8 +2318,13 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   core_in_syscall[get_cpuid()] = (int)syscall_num;
   {
     struct process *sc = current_process();
-    if (sc)
+    if (sc) {
       sc->last_syscall = (int64_t)syscall_num;
+      if (sc->abi_flags & PROC_FLAG_LINUX_ABI) {
+        sc->sys_ring[sc->sys_ring_at & 31] = (uint16_t)syscall_num;
+        sc->sys_ring_at = (uint8_t)((sc->sys_ring_at + 1) & 31);
+      }
+    }
   }
 
   if (syscall_num == 0xFF) {

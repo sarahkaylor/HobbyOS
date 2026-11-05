@@ -106,6 +106,9 @@ elif [ "${M2M_ONLY:-hello}" = "none" ]; then
   printf 'MONO.EXE\n' > "$SRC/WAVE.CFG"
 elif [ "${M2M_ONLY:-hello}" = "version" ]; then
   printf 'MONO.EXE --version\n' > "$SRC/WAVE.CFG"
+elif [ "${M2M_ONLY:-hello}" = "tp" ]; then
+  # L42: Mono's own threadpool trace for the work-item strand probe.
+  printf 'MONO.EXE --trace=threadpool /HELLO.EXE\n' > "$SRC/WAVE.CFG"
 else
   printf 'MONO.EXE /HELLO.EXE\n' > "$SRC/WAVE.CFG"
 fi

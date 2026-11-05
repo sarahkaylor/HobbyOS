@@ -404,10 +404,65 @@ void futex_trace_dump_locked(void) {
        thing it did was write and the park is a different thread's". */
     kl_s(&kl, " sc=");
     kl_i(&kl, (long)p->last_syscall);
+    /* L42: IF this key is a Mono/W32 wait-handle condvar (mutex at key-0x28,
+       cond at key, signal word at key-0x2C -- measured layout of
+       mono_w32handle_set), print the signal word.  status=1 with the waiter
+       still parked is a LOST WAKE (the setter stored it and broadcast into the
+       void); status=0 is "the setter never ran".  Garbage on a non-handle
+       key, so only decode it when it is a small 0/1 value. */
+    {
+      uint32_t hs = 0xDEADBEEF;
+      if (s->uaddr >= 0x40 &&
+          l_copy_from_user(p, &hs, s->uaddr - 0x2C, 4) == 0 &&
+          hs <= 1) {
+        kl_s(&kl, " hs=");
+        kl_i(&kl, (long)hs);
+      }
+    }
     kl_s(&kl, " ");
     kl_s(&kl, p->name);
     kl_c(&kl, '\n');
     kl_emit(&kl);
+    /* L42: raw words at the object the key belongs to.  Mono's wait handles
+       put a mutex/cond/signal-flag triple in one allocation; the flag is the
+       word that decides "the setter never ran" (0) from "the setter ran but
+       the wake was lost" (1).  Printing the block lets the layout be read
+       from the guest's own memory instead of guessed from source. */
+    if (s->uaddr >= 0x38 && p->as) {
+      struct kline kh;
+      kl_init(&kh);
+      kl_s(&kh, "[FUTEX] h pid=");
+      kl_i(&kh, p->pid);
+      kl_s(&kh, " at=");
+      kl_hex(&kh, (unsigned long)(s->uaddr - 0x38));
+      for (int w = 0; w < 12; w++) {
+        uint64_t v = 0;
+        if (l_copy_from_user(p, &v, s->uaddr - 0x38 + (uint64_t)w * 8, 8) != 0)
+          break;
+        kl_s(&kh, " ");
+        kl_hex(&kh, (unsigned long)v);
+      }
+      kl_c(&kh, '\n');
+      kl_emit(&kh);
+    }
+    /* L42: the syscall path that led to the park.  Printed for the three
+       threads of the Unity load pipeline (main, AsyncRead, PreloadManager);
+       the numbers are Linux x86-64, converted offline. */
+    if (p->pid == 4 || p->pid == 25 || p->pid == 27) {
+      struct kline ks;
+      kl_init(&ks);
+      kl_s(&ks, "[FUTEX] sc pid=");
+      kl_i(&ks, p->pid);
+      kl_s(&ks, " n=");
+      kl_i(&ks, p->sys_ring_at);
+      for (int w = 0; w < 32; w++) {
+        int idx = (p->sys_ring_at - 32 + w) & 31;
+        kl_s(&ks, " ");
+        kl_i(&ks, p->sys_ring[idx]);
+      }
+      kl_c(&ks, '\n');
+      kl_emit(&ks);
+    }
     /* The user stack is the only place that still knows WHO this thread is
        waiting for: glibc enters every futex through syscall(), so the saved
        rip says nothing (it is the same libc stub in every row).  The return
