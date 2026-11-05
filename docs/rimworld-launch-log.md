@@ -3904,6 +3904,244 @@ blocker 1's frame 8 bytes off.
 
 ### 26.7 Gates at this tip
 
+### 27. L37 (merged separately): the resume frame wrote into the red zone
+
+## 26. 2026-11-05 — M6/L37: the pre-banner killer was the RESUME frame on the user stack (and §24's DSO was never staged)
+
+**Verdict: the class that killed 2 of 3 launches is decoded and fixed — 6 of 6
+desktop runs reach `RimWorld 1.6.4871 rev600`.** The value every earlier
+section read as a stack-shaped pointer (`rdi=0x2FFFF1A41`) is **not an address
+at all**: it is `3 × (uint32)(slot − 13)`, where the qword at `rsp-0x50` had
+been overwritten with the thread's own RSP by `enter_user_space`'s resume
+scratch. §21.5 / rule 51 moved the *signal* frame out of the 128-byte red zone;
+the *resume* frame was still inside it, on **every** preemption (851,968 of them
+in one run). Two more defects fell out of the same measurement: the staged
+`libX11.so.6` was older than the §24 display stamp, so §24's fix was not in any
+binary this worktree booted, and a blind `min(target_sp, tf->lr)` put the
+scratch at address 0 for fresh processes.
+
+### 26.1 Decode: `0x2FFFF1A41` is `3 x` a truncated index, not a stack VA
+
+The staged `UnityPlayer.so` (md5 `45408fc1…`, identical to the game dir and to
+`/srv/nfs/rimworld`) at `+0x91b119`, the site §21.5 named and §22.6/§24/§25 kept
+re-meeting:
+
+```text
+91b10e: mov  -0x50(%rsp),%rdi     ; a 32-bit index spilled into the RED ZONE
+91b113: add  %esi,%edi            ; esi = 0xFFFFFFF3 (-13); 32-bit, zero-extends
+91b115: lea  (%rdi,%rdi,2),%rdi   ; x3
+91b119: movdqu %xmm0,(%rax,%rdi,8)   <-- the fault
+```
+
+Measured in run `before-1` (full ucontext in `[SIGDUMP]`, one line per field):
+
+| value | where it came from |
+|---|---|
+| `rip=0x1081423119` | `UnityPlayer+0x91b119` (base `0x1080b08000`) |
+| `rsp=0x17FFFFB3D8` | interrupted user RSP |
+| `[SLOT-50] va=0x17FFFFB388 val=0x17FFFFB3D8 ==rsp=1` | **the slot holds the thread's own RSP** |
+| `esi=0xFFFFFFF3` | `-13` |
+| `rdi=0x2FFFF1B61` | `3 × 0xFFFFB3CB`, and `0xFFFFB3CB = (uint32)(0xFFFFB3D8 − 13)` |
+| `rax=0x1082A834F0`, `cr2=0x2882A10FF8` | `rax + 8 × 0x2FFFF1B61 = 0x2882A10FF8` — exact |
+
+So the "address" is a **negative int index** times a 12-byte stride: the low 32
+bits of a stack pointer read as `int` are negative, the 32-bit `add` keeps it
+negative, and the resulting 4 GiB-scale index lands in a hole. That is why the
+value looked "shaped like a stack VA": it *is* generated from a stack pointer,
+but through `3 × (uint32)`.
+
+The same arithmetic retro-decodes §22.6 without another boot:
+`0x2FFFF1A41 = 3 × 0xFFFFB36B`, `0xFFFFB36B = 0xFFFFB378 − 13`, and
+`0x17FFFFB378` is exactly the RSP that §22.6's own row implies
+(`[SIGP] fsp=0x17FFFFB2F8` = rsp−128, "clobbered slot at `0x17FFFFB328`" =
+rsp−0x50). §22.6 called that slot "a garbage red-zone local"; it was the
+thread's RSP, written by the resume path.
+
+### 26.2 The writer: `enter_user_space` builds its iretq frame on the user stack
+
+HobbyOS has no per-thread kernel stack for x64 user traps, so the resume path
+copies a 37-qword register image plus five iretq slots onto the **resumed
+task's own user stack**, then iretqs from there. Pre-fix geometry
+(`trap.c`, `enter_user_space`, user-mode branch):
+
+```text
+lea rdi,[r13-320] ; rep movsq (37 qwords)   -> [target_sp-320, target_sp-24)
+lea rsp,[rdi-296] ; five iretq slots         -> [target_sp-40, target_sp)
+```
+
+so the whole window is `[target_sp-320, target_sp)` — the psABI red zone
+`[target_sp-128, target_sp)` **and** 192 bytes below it. The register image
+lands at fixed offsets, which is what makes the fault diagnosable:
+
+| frame offset | written value | pre-fix address (rsp = target_sp) |
+|---|---|---|
+| dest+240 (`tf->lr`) | the interrupted user RSP | `rsp-0x50` |
+| dest+248 (`tf->elr`) | the interrupted RIP | `rsp-0x48` |
+| dest+256 (`tf->spsr`) | RFLAGS | `rsp-0x40` |
+| dest+288/296/304/312 | CS `0x1B`, RFLAGS, RSP, SS `0x23` | `rsp-0x20 … rsp-0x08` |
+
+`before-1`'s `[STK-80]` row IS that image, byte for byte:
+
+```text
+rsp-0x50 0x00000017FFFFB3D8   <- tf->lr  (the index the code then read)
+rsp-0x48 0x0000001081422FFE   <- tf->elr (an address inside the same function)
+rsp-0x40 0x0000000000200213   <- RFLAGS
+rsp-0x20 0x000000000000001B   <- CS
+rsp-0x10 0x00000017FFFFB3D8   <- RSP slot
+rsp-0x08 0x0000000000000023   <- SS
+```
+
+No signal was involved: the game's threads are preempted by the 100 Hz timer,
+so the poison is written ~10^5-10^6 times per run. Whether it *matters* depends
+on the interrupted function keeping a live red-zone slot: Unity's static
+initialiser loop spills its index at `-0x50(%rsp)` and reads it six
+instructions later, which is why 4 of 6 runs died at this one PC with three
+different `cr2` values.
+
+### 26.3 Six runs before the fix: 6/6 pre-banner, two writers
+
+`tools/rw/l37-runs.sh before 6 150` (each run: full `[SIGDUMP]`, 16 stack
+qwords, region rows; `tools/rw/l37-table.py` regenerates this table):
+
+| run | rip (module) | cr2 | rw | slot@rsp-0x50 | == rsp | reached `Initialize engine` | class |
+|---|---|---|---|---|---|---|---|
+| 1 | `UnityPlayer+0x91b119` | `0x2882A10FF8` | w | `0x17FFFFB3D8` | **yes** | yes | resume red-zone |
+| 2 | `UnityPlayer+0x198b548` | `0x6` | r | `0x17FFFFABD0` | **yes** | no | resume red-zone |
+| 3 | `UnityPlayer+0x1947cef` | `0xE8` | r | `0x10C02C8C70` | no | yes | NULL `Display*` (§24) |
+| 4 | `UnityPlayer+0x19862ef` | `0x75304098` | r | `0x17FFFFAC98` | **yes** | no | resume red-zone |
+| 5 | `UnityPlayer+0x1947cef` | `0xE8` | r | `0x1040034100` | no | yes | NULL `Display*` (§24) |
+| 6 | `UnityPlayer+0x19862ef` | `0x75304098` | r | `0x17FFFFAC98` | **yes** | no | resume red-zone |
+
+4 of 6 are the resume class at **three different PCs** (`+0x91b119`,
+`+0x198b548`, `+0x19862ef`) — the "the death site varies" observation that
+kept this class unexplained; the invariant is the slot, not the PC. 2 of 6 are
+`rdi=0` reading `+0xe8` (`Display::screens`), §24's class, whose fix was in the
+source but **not in the staged DSO** (§26.5).
+
+The pre-fix image is quoted from the `[STK-80]` row above, not from the
+`[SIGSIG]` scan: that scan looked for an adjacent `(0x1B, 0x23)` pair and could
+never fire (the slots are three qwords apart — §26.9), which is exactly the
+"broken instrument reads as no evidence" trap.
+
+### 26.4 The fix, and the bug the fix itself had
+
+`enter_user_space` now places the scratch **entirely below the red zone**:
+
+```text
+mov rax,[r12+240] ; tf->lr      \
+mov rcx,r13 ; sub rcx,rax       |  use tf->lr as the base only when it is a
+cmp rcx,0x100000 ; jae 8f       |  plausible planted-frame address just below
+cmp rax,0x10000  ; jb 8f        |  target_sp
+mov r13,rax                     /
+8: lea rdi,[r13-448]            ; 448 = 128 (red zone) + 320 (window)
+```
+
+The iretq RSP slot carries the resumed RSP, so the window does **not** have to
+end at `target_sp`; nothing at or above `target_sp-128` is written any more.
+The `tf->lr` term is for resume-boundary signal delivery, where `l_sf_plant`
+has already placed a frame at `tf->lr` ~1.2 KiB below `target_sp`: without it
+the scratch would overwrite that frame's FXSAVE image.
+
+The **first** version took `min(target_sp, tf->lr)` unconditionally, and a
+fresh process is created by `process_set_entry()`, which sets
+`context[31]/[33]` and leaves `context[30]` (`tf->lr`) **zero** — so the
+scratch became `0-448` and the kernel took `Vector: 14 Error Code: 0x2` at
+CPL0 within a second of boot (measured: `DESKTOP.BIN` died before the menu;
+zero `[RESUME-RZ]` rows). The `jae/jb` plausibility pair is the fix for that.
+
+Two assertion rows make the geometry checkable in every future run:
+
+- `[RESUME-RZ] pid=… tsp=… win_lo=… win_hi=… redzone_hit=0 bad_total=0
+  resumes=851968` — one row per user resume (first 8 and every 65536th
+  printed): the scratch window vs `[tsp-128, tsp)`, plus a counter.
+- `[SIGRZ] pid=… sig=… sp0=… base=… top=… rz=1 bad_total=0 plants=24` — one
+  row per **signal** delivery, asserting
+  `base + 1088 <= sp0 - 128` (Linux's rule); `rz=2` means SA_ONSTACK (no red
+  zone). 24/24 plants clean in the after runs, 0 violations in all 12 runs.
+
+### 26.5 The second killer: the staged `libX11.so.6` predated §24 (rule 45)
+
+With the kernel fixed but the seeded `obj/` in place, 1 of 6 runs reached the
+banner and **5 of 6** died at `UnityPlayer+0x1947cef` (`rdi=0`, `cr2=0xE8`) —
+§24's class, which §24 reported 0/4 after its fix. `make xcompat_dsos`
+produced a **different binary from the same source**:
+
+| | size | md5 |
+|---|---|---|
+| staged in `disk.img` / seeded `obj/` | 89,792 | `d84a6905bffca5a30ae27321f28d162d` |
+| rebuilt from the merged tip | 89,960 | `9af556477462cb0e568ac2442715f9bd` |
+
+and the rebuild contains 32 `mov %reg,0x18(%reg)` stores (the `xany.display`
+stamp + the `xmap/xunmap/xreparent` fields) against 14 in the seeded object.
+The lane had been running with `RW_SKIP_BUILD=1`, which skips the DSO build and
+stages whatever `obj/xcompat` holds — exactly the "green source tree, stale
+staged DSO" failure of rule 45. With the rebuilt DSO staged, the class is gone
+in 6 of 6.
+
+### 26.6 Six runs after the fix: 6/6 reach the game's banner
+
+`tools/rw/l37-runs.sh after2 6 150`, same kernel except the scratch move plus
+the DSO rebuild:
+
+| run | `Initialize engine version` | `RimWorld 1.6.4871 rev600` | death after the banner | `[RESUME-RZ]` bad/total | `[SIGRZ]` bad/plants |
+|---|---|---|---|---|---|
+| 1 | yes | **yes** | `x86-codegen.h:410` assertion → `VA=0xE` | 0 / 851,968 | 0 / 24 |
+| 2 | yes | **yes** | same | 0 / 851,968 | 0 / 24 |
+| 3 | yes | **yes** | same | 0 / 786,432 | 0 / 23 |
+| 4 | yes | **yes** | same | 0 / 851,968 | 0 / 24 |
+| 5 | yes | **yes** | same | 0 / 851,968 | 0 / 24 |
+| 6 | yes | **yes** | same | 0 / 917,504 | 0 / 24 |
+
+Before → after: pre-banner deaths **6/6 → 0/6**; `RimWorld 1.6` banner **0/6 →
+6/6**. No run in the after set faults before the banner; the only fault is the
+crash reporter's `VA=0xE` read after Mono aborts.
+
+### 26.7 The deterministic test: `linux_probe_redzone`
+
+`src/user/linux_probe_redzone.c` + `bash tools/gate/t3_linux_probe.sh redzone`.
+An ordinary musl static-PIE program plants six magics at `-0x08…-0x120(%rsp)` in
+one asm block, spins a 3-instruction loop (~0.2-0.6 s, so several 100 Hz ticks
+must land inside it), then reads them back. A control pass with `iters=0`
+(no preemption window) proves the measurement itself; only red-zone offsets are
+counted (`-0x90/-0x120` are reported as `info`: they are *below* the red zone,
+unallocated stack that the resume scratch legitimately uses).
+
+| kernel | control rows | red-zone spin rows | verdict |
+|---|---|---|---|
+| host (Linux reference) | 6/6 KEPT | 18/18 KEPT | `rc=0` |
+| pre-fix (`-320`) | 6/6 KEPT | **18/18 CLOBBERED** | `rc=18` |
+| fixed (`-448`) | 6/6 KEPT | 18/18 KEPT | `rc=0` |
+
+The pre-fix values name the writer: `-0x08 → 0x23` (SS), `-0x10 → ` the thread's
+own RSP, `-0x20 → 0x1B` (CS), `-0x30 → 0x100000000`, `-0x70 → 0`, `-0x120 → 0`.
+Evidence: `evidence-l37/probe-redzone-{before,after}.log`.
+
+### 26.8 What this says about (a) resume-boundary frames and (b) masks/altstack
+
+- **(a) nesting / SA_ONSTACK.** The signal frame was already correct: 24/24
+  `[SIGRZ]` plants per run with `rz=1` (or `rz=2` on Unity's SA_ONSTACK
+  handler, whose frame goes to the altstack at `0x1084B04BB8` and never touches
+  the user stack). The overlap that *did* exist was the resume scratch against
+  a freshly planted frame — the `min(target_sp, tf->lr)` term removes it; it is
+  visible in the old geometry (`[target_sp-320, target_sp)` vs the frame's
+  FXSAVE at `base+568…base+1080`), not as a separate measured crash.
+- **(b) mask / alt-stack skew.** Every delivery row carries the altstack state
+  (`alt=1` for Unity's handler, `alt=0` for Mono's Suspender) and `rt_sigreturn`
+  returns are counted (`[RT]`), with no skew in 12 runs; the mask semantics are
+  already gated by `linux_probe_futex_sig` cases C (pre-suspend mask restored)
+  and E (masked pending signal does not interrupt). No new defect found here.
+
+### 26.9 An instrument that lied, and was fixed
+
+The first `[SIGSIG]` scan looked for an adjacent `(0x1B, 0x23)` qword pair and
+therefore **could never fire**: the iretq stamping puts CS at `dest+288` and SS
+at `dest+312`, three qwords apart. A broken instrument reads exactly like "no
+image", which would have "confirmed" any theory. It now scans `q[i]==0x1B &&
+q[i+3]==0x23` and reports the CS offset (`-0x120` pre-fix at
+`target_sp == rsp`).
+
+### 26.10 Gates at this tip
+
 ```text
 TOOLS_SKIP=1 ./run_unit_tests_intel.sh   411/0 PASS
 bash tools/gate/m2_mono.sh               PASS — Mono 6.12 threaded C# HELLO-OK
@@ -3922,3 +4160,45 @@ ladder, the `[SFP]`/`[SFR]`/`[SFA]` tables, the trampoline aborts),
 before the launcher's `setvbuf`), `../l36/unit.log`, `m2mono.log`,
 `m2threads.log`, `m12.log`, `m3.log`, `m4.log`, `nfs.log`, and the probe's host
 and guest logs (`obj/linux_probe_tramp_sig.log` = guest).
+
+<!-- L37 side -->
+bash tools/gate/m12_thread_ceiling.sh    PASS — 150 threads + TLS + SIGCANCEL(32)
+python3 tools/gate/m3_window_probe.py    PASS — SDL XCreateWindow ladder (incl. §24 display stamp)
+python3 tools/gate/m4_gl_probe.py        PASS — GL 3.3 triangle PRESENTED
+bash tools/gate/t3_linux_probe.sh redzone PASS — 6/6 red-zone rows KEPT
+```
+
+### 26.11 Next blocker, exact line
+
+Every after run reaches the banner and then aborts in Mono:
+
+```text
+RimWorld 1.6.4871 rev600
+* Assertion at ../../mono/arch/amd64/../x86/x86-codegen.h:410,
+  condition `offset == (gint32)offset' not met
+[KERNEL] pid=4 memory fault VA=0x000000000000000E PC=0x00000010818E3804 rw=r in=HOLE -> killed
+```
+
+`UnityPlayer+0xddb804` is Mono's crash reporter reading `VA=0xE` — the same
+death chain §25.5 recorded after `tramp-amd64.c:641`, so the *assertion* moved
+and the cascade did not. `offset == (gint32)offset` is an x86 codegen
+displacement check: a call/jump/field offset that does not fit in 32 bits. In a
+96 GiB user window that is a code-layout question (a JIT stub farther than
+2 GiB from its target), not a signal-frame one — the next lane's first line.
+
+Evidence: `obj/rw-desktop/evidence-l37/` — `before-{1..6}.{serial,Player}.log`
+with `.summary`, `after-{1..6}` (kernel fix only, stale DSO), `after2-{1..6}`
+(the fix), `probe-redzone-{before,after}.{log,serial.log}`, `dso-hashes.txt`,
+`unit-l37.log`, `gate-*.log`.
+
+### 26.12 Post-gate boot (rule 5)
+
+After the gate set above, kernel + `disk.img` were rebuilt in order and the
+harness ran **without** `RW_SKIP_BUILD` (a probe/GL gate leaves its own image;
+`RW_SKIP_BUILD=1` would boot `PROBE.ELF`). That seventh run reaches
+`Initialize engine version` and `RimWorld 1.6.4871 rev600` again, hits the
+`tramp-amd64.c:641` variant of the JIT assertion, and reports
+`[RESUME-RZ] … redzone_hit=0 bad_total=0 resumes=917504`. So the fixed tree is
+7 of 7 reaching the banner, and both assertion variants (`tramp-amd64.c:641`
+and `x86-codegen.h:410`) are the same next blocker (rule 70's ±2 GB branch
+patch), not a regression of this lane.
