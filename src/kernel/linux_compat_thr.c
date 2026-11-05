@@ -1665,6 +1665,45 @@ static int l_sf_plant(struct process *p, struct process *cur,
   uint64_t base = ((sp - (uint64_t)L_SF_SIZE) & ~(uint64_t)15) - 8;
   if (vm_touch(p, base, L_SF_SIZE, 1) != 0)
     return 0;
+  /* M6/L37: an ASSERTION row per delivery, not an observation.  Linux's rule
+     is exact: the frame must lie entirely outside the interrupted function's
+     red zone, i.e. `base + L_SF_SIZE <= rsp0 - 128` (SA_ONSTACK: no red
+     zone, so the frame only has to fit the altstack).  `rz=1` is the pass.
+     This row is printed for EVERY delivery (the [SIGP] row below is capped at
+     32), so a lane can count plants and violations independently. */
+  {
+    static int rz_rows, rz_bad;
+    int rz;
+    if (on_altstack)
+      rz = 2; /* not applicable: an altstack has no red zone */
+    else
+      rz = (base + (uint64_t)L_SF_SIZE <= tf->lr - 128) ? 1 : 0;
+    if (rz == 0)
+      rz_bad++;
+    rz_rows++;
+    if (rz == 0 || rz_rows <= 24) {
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGRZ] pid=");
+      kl_i(&kl, p ? p->pid : -1);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " sp0=");
+      kl_hex(&kl, (unsigned long)tf->lr);
+      kl_s(&kl, " base=");
+      kl_hex(&kl, (unsigned long)base);
+      kl_s(&kl, " top=");
+      kl_hex(&kl, (unsigned long)(base + L_SF_SIZE));
+      kl_s(&kl, " rz=");
+      kl_i(&kl, rz);
+      kl_s(&kl, " bad_total=");
+      kl_i(&kl, rz_bad);
+      kl_s(&kl, " plants=");
+      kl_i(&kl, rz_rows);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
 
   /* pretcode + ucontext header */
   *(volatile uint64_t *)l_sf_addr(base, L_SF_PRETCODE) = restorer;
