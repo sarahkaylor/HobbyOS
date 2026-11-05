@@ -2591,6 +2591,32 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
       kl_emit(&kl);
     }
   }
+  /* L48: the thread-dump / async-suspend signal family (SIGQUIT 3 and the
+     RT range Mono's summarizer uses: 34..40).  The global [SIGD] cap is 48
+     and Boehm's GC signals eat all of it before any dump, so "SIGQUIT was
+     sent but nothing happened" had no row at all.  This one is per-signal
+     and per-pid bounded, and it also prints the mask the signal was planted
+     under, because a *blocked* SIGQUIT is never delivered and leaves the
+     dump silent. */
+  if (sig == 3 || (sig >= 34 && sig <= 40)) {
+    static uint8_t r48_rows[MAX_PROCESSES];
+    int ri = (cur->pid > 0 && cur->pid < MAX_PROCESSES) ? cur->pid : 0;
+    if (ri && r48_rows[ri] < 8) {
+      r48_rows[ri]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGR] pid=");
+      kl_i(&kl, cur->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " ipc=");
+      kl_hex(&kl, (unsigned long)interrupted_pc);
+      kl_s(&kl, " mask=");
+      kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(cur));
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   return 1;
 }
 

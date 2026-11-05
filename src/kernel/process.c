@@ -88,6 +88,16 @@ static void db_i(struct db_buf *f, long v) {
   if (neg) db_s(f, "-");
   while (k > 0) { char c2 = t[--k]; int n2 = f->n; if (n2 < (int)sizeof f->b - 1) f->b[n2] = c2; f->n = n2 + 1; }
 }
+static void db_x(struct db_buf *f, unsigned long v) {
+  char t[20]; int k = 0, i = 0;
+  char o[20];
+  o[i++] = '0'; o[i++] = 'x';
+  if (!v) t[k++] = '0';
+  while (v) { int d = (int)(v & 15); t[k++] = (char)(d < 10 ? '0' + d : 'a' + d - 10); v >>= 4; }
+  while (k) o[i++] = t[--k];
+  o[i] = 0;
+  db_s(f, o);
+}
 static void db_emit(struct db_buf *f) {
   if (f->n < (int)sizeof f->b) f->b[f->n] = 0; else f->b[sizeof f->b - 1] = 0;
   uart_puts(f->b);
@@ -2203,6 +2213,33 @@ void schedule(struct trap_frame *tf, int is_yield) {
         db_i(&d, proc_table[i].parent_pid);
         db_s(&d, " claimed_by=");
         db_i(&d, claimer);
+        /* L48: where the thread actually is.  A dump that "stops after Full
+           thread dump:" leaves its own thread parked somewhere in libmono and
+           no row said where; the saved user PC plus a module+offset is the
+           one fact that names it (the [TEXIT] mod= walk, rule 97). */
+        {
+          uint64_t pc48 = proc_table[i].context[31];
+          db_s(&d, " pc=");
+          db_x(&d, (unsigned long)pc48);
+          if (proc_table[i].as && pc48) {
+            struct vm_region *rg48 = vm_region_find(proc_table[i].as, pc48);
+            if (rg48) {
+              int idx48 = (int)(rg48 - proc_table[i].as->regions);
+              int lo48 = idx48;
+              while (lo48 > 0) {
+                struct vm_region *pv48 = &proc_table[i].as->regions[lo48 - 1];
+                if (pv48->kind != rg48->kind || (pv48->prot & VM_PROT_WRITE) ||
+                    pv48->base + pv48->len != proc_table[i].as->regions[lo48].base)
+                  break;
+                lo48--;
+              }
+              db_s(&d, " mod=");
+              db_x(&d, (unsigned long)proc_table[i].as->regions[lo48].base);
+              db_s(&d, "+");
+              db_x(&d, (unsigned long)(pc48 - proc_table[i].as->regions[lo48].base));
+            }
+          }
+        }
         db_s(&d, " ");
         db_s(&d, proc_table[i].name);
         if (st == PROC_STATE_RUNNING && claimer < 0)
@@ -3018,6 +3055,28 @@ int process_signal_directed(int pid, int sig, int directed) {
       kl_hex(&kl, (unsigned long)pender->futex_uaddr);
       kl_c(&kl, '\n');
       kl_emit(&kl);
+    }
+  }
+  {
+    /* L48: a SIGQUIT that lands on a thread whose mask blocks it is never
+       delivered, and the dump then simply never starts.  One row at the
+       sender names that case instead of leaving it to a theory. */
+    if (sig == 3 || (sig >= 34 && sig <= 40)) {
+      static int b48_rows;
+      uint64_t m48 = linux_compat_sigmask_get(pender);
+      if ((m48 & (1ull << (sig - 1))) && b48_rows < 40) {
+        b48_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[SIGB] pid=");
+        kl_i(&kl, pender->pid);
+        kl_s(&kl, " sig=");
+        kl_i(&kl, sig);
+        kl_s(&kl, " blocked mask=");
+        kl_hex(&kl, (unsigned long)m48);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
     }
   }
   sig_wake_leader_locked(target, sig);

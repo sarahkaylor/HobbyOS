@@ -53,6 +53,8 @@
 static void *(*next_dlopen)(const char *, int);
 static void *(*next_dlsym)(void *, const char *);
 static const char *dso_dir;
+/* L48: threadpool accounting probe (defined before main). */
+static void rw_tp_maybe_start(void *handle, const char *name);
 
 /* Defined with the SIGSEGV dump below; refreshed after every dlopen so the
  * dump can tag a PC with <module>+offset (the handler must not walk the
@@ -140,6 +142,7 @@ void *dlopen(const char *file, int mode) {
       const char *e = dlerror();
       fprintf(stderr, "[RWMAIN] dlopen FAILED %s: %s\n", local, e ? e : "(no dlerror)");
     }
+    if (r) rw_tp_maybe_start(r, local);
     return r;
   }
   /* RW_TRACE_DLOPEN: every attempt and its result.  Unity/SDL disable a whole
@@ -150,6 +153,7 @@ void *dlopen(const char *file, int mode) {
   int trace = getenv("RW_TRACE_DLOPEN") != 0;
   void *r = next_dlopen(file, mode);
   if (r) rw_mods_collect();
+  if (r) rw_tp_maybe_start(r, file);
   if (!r) {
     const char *e = dlerror();
     fprintf(stderr, "[RWMAIN] dlopen FAILED %s: %s\n",
@@ -1094,6 +1098,498 @@ static void preload_gl_deps(void) {
     void *h = next_dlopen ? next_dlopen(defaults[i], RTLD_NOW | RTLD_GLOBAL)
                           : dlopen(defaults[i], RTLD_NOW | RTLD_GLOBAL);
     if (h) fprintf(stderr, "[RWMAIN] preload %s -> ok\n", defaults[i]);
+  }
+}
+
+/* ---- L48: the ThreadPool's work-item accounting -------------------------
+ * The stall (docs/rimworld-launch-log.md §34) is "one work item never
+ * completes while the pool that would run it is empty", and the native
+ * /TPTRACE rows cannot see an *item* at all: in Mono 6.12 every managed
+ * enqueue goes through three icalls and nothing else --
+ *
+ *   ThreadPoolWorkQueue.Enqueue(cb)   -> ThreadPool.NotifyWorkItemQueued()
+ *   ThreadPoolWorkQueue.Dispatch()    -> ThreadPool.NotifyWorkItemComplete()
+ *   ThreadPoolWorkQueue.EnsureThreadRequested() -> RequestWorkerThread()
+ *
+ * `ve_icall_..._NotifyWorkItemQueued` is a no-op in this runtime (it only
+ * bumps a perfcounter), so hooking it is a free, exact enqueue counter.
+ * NotifyWorkItemComplete is called after every executed item, so
+ * enq - comp is the number of items queued and not yet run.
+ *
+ * mono_add_internal_call() replaces an existing registration (g_hash_table
+ * _insert), and the JIT binds an icall's address when it compiles the
+ * calling method, so the registration must land before the loader first
+ * touches ThreadPool.  A watchdog thread therefore polls for the root
+ * domain, attaches, and re-registers until the game's loading begins; the
+ * re-registration is idempotent and the self-test row proves it took.
+ *
+ * The managed caller of the enqueue is resolved with mono_jit_info_table_find
+ * on the icall's return address, so the row carries "Class::Method" -- the
+ * identity of the enqueuer, not just its tid.
+ *
+ * Gated on /TPTRACE (the same marker that turns on Mono's own threadpool
+ * trace), so an ordinary run executes none of this.
+ *
+ * NOTE: this file is compiled -nostdinc against the pinned glibc 2.31
+ * headers, and <fcntl.h> drags in <linux/falloc.h> which that set does not
+ * carry; open()/syscall() are therefore declared here directly. */
+extern int open(const char *path, int flags, ...);
+extern long syscall(long nr, ...);
+#define TP_O_RDONLY 0
+#define TP_SYS_gettid 186
+
+static void tp_w(const char *s) {
+  size_t n = 0;
+  while (s[n]) n++;
+  if (n) (void)!write(2, s, n);
+}
+static void tp_wi(long v) {
+  char t[24], b[24];
+  int i = 0, j = 0;
+  if (v < 0) { tp_w("-"); v = -v; }
+  if (!v) t[j++] = '0';
+  while (v) { t[j++] = (char)('0' + (v % 10)); v /= 10; }
+  while (j) b[i++] = t[--j];
+  (void)!write(2, b, (size_t)i);
+}
+static void tp_wx(unsigned long v) {
+  char t[20], b[22];
+  int i = 0, j = 0;
+  b[i++] = '0'; b[i++] = 'x';
+  if (!v) t[j++] = '0';
+  while (v) { int d = (int)(v & 15); t[j++] = (char)(d < 10 ? '0' + d : 'a' + d - 10); v >>= 4; }
+  while (j) b[i++] = t[--j];
+  (void)!write(2, b, (size_t)i);
+}
+
+#define TPRING 64
+struct tp_ev { long seq; int kind; int tid; void *ra; void *ra1; };
+
+static struct {
+  volatile int on, attached, registered_q, registered_w, dumps;
+  void *h;
+  void *(*get_root_domain)(void);
+  void *(*attach)(void *);
+  void *(*get_corlib)(void);
+  void *(*image_loaded)(const char *);
+  void *(*class_from_name)(void *, const char *, const char *);
+  void *(*method_from_name)(void *, const char *, int);
+  void *(*lookup_icall)(void *);
+  void (*add_icall)(const char *, const void *);
+  void *(*domain_get)(void);
+  void *(*jit_find)(void *, void *);
+  void *(*jit_method)(void *);
+  void *(*m_get_class)(void *);
+  const char *(*c_get_name)(void *);
+  const char *(*m_get_name)(void *);
+  void *orig_q, *orig_c, *orig_r;
+  void *m_q, *m_c, *m_r;
+  long enq, comp, req, reqf, seq, wtn;
+  volatile int wbt_inf;
+} tp;
+static struct tp_ev tp_ring[TPRING];
+
+static int tp_tid(void) {
+#ifdef TP_SYS_gettid
+  return (int)syscall(TP_SYS_gettid);
+#else
+  return 0;
+#endif
+}
+
+static void tp_note(int kind, void *ra, void *ra1) {
+  long s = __sync_fetch_and_add(&tp.seq, 1);
+  int i = (int)(s % TPRING);
+  /* No Mono API on this path: the icall runs on up to 8 threads at once and
+     mono_jit_info_table_find takes the loader's JIT-table lock, so the
+     return address is stored raw and resolved once, at dump time. */
+  tp_ring[i].seq = s;
+  tp_ring[i].kind = kind;
+  tp_ring[i].tid = tp_tid();
+  tp_ring[i].ra = ra;
+  tp_ring[i].ra1 = ra1;
+}
+
+/* Phase 2 — resolve the other two icalls and their originals.  Called from
+ * inside the NotifyWorkItemQueued hook, i.e. from a Mono thread with a fully
+ * initialised runtime: a class lookup from the watchdog thread proved fatal
+ * ("Assertion at object.c:1939, condition `klass' not met") because it ran
+ * during mono_init, before mscorlib's defaults existed.  Nothing in phase 1
+ * below touches the class loader for that reason. */
+static int tp_hook_c(void *err);
+static int tp_hook_r(void *err);
+
+/* The waiter's identity.  WaitHandle.WaitOne parks in Mono's w32handle code,
+ * so a native stack names mono_w32handle_wait_one but never the game method
+ * that called it.  WaitOneNative is an icall: hooking it gives the managed
+ * caller (return address one frame above WaitHandle.WaitOne) directly, which
+ * is the fact the stall needs -- "who is waiting, and on what". */
+#define TPW_MAX 24
+static struct { void *ra1; long n; unsigned last_ms; int last_tid; } tp_waits[TPW_MAX];
+static volatile int tp_w_n;
+static int (*tp_orig_w)(long, unsigned, long, long, void *);
+
+/* A poor man's managed stack: scan the raw stack for return addresses that
+ * Mono's JIT info table resolves to a method, keeping only words preceded by
+ * a `call rel32` (0xE8) -- the same filter that turned a page of stack
+ * garbage into a real chain in §33/L46.  This is what the broken SIGQUIT dump
+ * cannot give us: the managed caller of a wait, in-process, on demand. */
+static int tp_bt(const char *tag, int tid, long extra) {
+  unsigned long sp = 0;
+  __asm__ volatile("mov %%rsp, %0" : "=r"(sp));
+  if (!tp.jit_find || !tp.domain_get) return 0;
+  void *dom = tp.domain_get();
+  if (!dom) return 0;
+  int printed = 0;
+  unsigned long *p = (unsigned long *)sp;
+  for (int i = 0; i < 1536 && printed < 6; i++) {
+    if (!rw_readable((unsigned long)&p[i])) break;
+    unsigned long v = p[i];
+    if (v < 0x100000 || v > 0x7fffffffffffUL) continue;
+    if (!rw_readable(v - 1)) continue;
+    unsigned char prev = *(unsigned char *)(v - 1);
+    if (prev != 0xE8) continue;
+    void *ji = tp.jit_find(dom, (void *)v);
+    if (!ji) continue;
+    void *m = tp.jit_method(ji);
+    if (!m) continue;
+    void *k = tp.m_get_class(m);
+    const char *mn = tp.m_get_name(m);
+    const char *kn = k ? tp.c_get_name(k) : 0;
+    if (printed == 0) {
+      tp_w(tag);
+      tp_w(" tid=");
+      tp_wi(tid);
+      if (extra >= 0) { tp_w(" ms="); tp_wi(extra); }
+      tp_w(" bt=");
+    } else {
+      tp_w(" <- ");
+    }
+    tp_w(kn ? kn : "?");
+    tp_w(".");
+    tp_w(mn ? mn : "?");
+    printed++;
+  }
+  if (printed) { tp_w("\n"); return 1; }
+  return 0;
+}
+
+static int tp_hook_w(long h, unsigned ms, long a3, long a4, void *err) {
+  int infinite = (ms == 0xFFFFFFFFu);
+  int n = (int)__sync_fetch_and_add(&tp.wtn, 1);
+  if (n == 0) tp_w("[TPQW] first Wait_internal through the hook\n");
+  /* Only the interesting waits pay for a stack walk: infinite ones (the
+     stall) and the first few of everything else. */
+  if ((infinite && tp.wbt_inf < 6) || n < 3) {
+    if (infinite) tp.wbt_inf++;
+    tp_bt("[TPQW]", tp_tid(), infinite ? -1 : (long)ms);
+  }
+  int r = tp_orig_w ? tp_orig_w(h, ms, a3, a4, err) : 0;
+  void *ra1 = __builtin_return_address(1);
+  int slot = -1;
+  for (int i = 0; i < tp_w_n && i < TPW_MAX; i++)
+    if (tp_waits[i].ra1 == ra1) { slot = i; break; }
+  if (slot < 0 && tp_w_n < TPW_MAX) { slot = tp_w_n; tp_w_n = slot + 1; tp_waits[slot].ra1 = ra1; tp_waits[slot].n = 0; }
+  if (slot >= 0) {
+    tp_waits[slot].n++;
+    tp_waits[slot].last_ms = ms;
+    tp_waits[slot].last_tid = tp_tid();
+  }
+  return r;
+}
+
+static int tp_register_w(void) {
+  if (!tp.class_from_name || !tp.method_from_name || !tp.lookup_icall || !tp.image_loaded) return 0;
+  void *img = tp.image_loaded("mscorlib");
+  if (!img) { tp_w("[TPQW] no mscorlib image\n"); return 0; }
+  void *k = tp.class_from_name(img, "System.Threading", "WaitHandle");
+  if (!k) { tp_w("[TPQW] WaitHandle class lookup failed\n"); return 0; }
+  /* This runtime registers Wait_internal, not WaitOneNative: the mscorlib on
+     disk has WaitOneNative as a *managed* wrapper (DangerousAddRef/ExitContext)
+     around the icall, so the icall name that exists in libmonobdwgc's table is
+     the only one that can be hooked. */
+  static const char *names[] = {"Wait_internal", "WaitOneNative", "InternalWaitOne", 0};
+  int hooked = 0;
+  for (int ni = 0; names[ni]; ni++) {
+    void *m = 0;
+    int arity = 0;
+    for (arity = 4; arity >= 1; arity--) {
+      m = tp.method_from_name(k, names[ni], arity);
+      if (m) break;
+    }
+    if (!m) continue;
+    if (!tp_orig_w) tp_orig_w = (int (*)(long, unsigned, long, long, void *))tp.lookup_icall(m);
+    if (!tp_orig_w) continue;
+    char nm[64];
+    int i = 0;
+    for (const char *s = "System.Threading.WaitHandle::"; *s && i < 60; s++) nm[i++] = *s;
+    for (const char *s = names[ni]; *s && i < 62; s++) nm[i++] = *s;
+    nm[i] = 0;
+    tp.add_icall(nm, (const void *)tp_hook_w);
+    if (!hooked) {
+      tp_w("[TPQW] hooked ");
+      tp_w(nm);
+      tp_w(" arity=");
+      tp_wi(arity);
+      tp_w(" orig=");
+      tp_wx((unsigned long)tp_orig_w);
+      tp_w("\n");
+    }
+    hooked++;
+  }
+  if (!hooked) tp_w("[TPQW] no WaitHandle icall could be hooked\n");
+  return hooked;
+}
+
+static int tp_register_cr(void) {
+  int ok = 0;
+  if (!tp.add_icall || !tp.lookup_icall || !tp.image_loaded) return 0;
+  void *img = tp.image_loaded("mscorlib");
+  if (!img) return 0;
+  void *klass = tp.class_from_name(img, "System.Threading", "ThreadPool");
+  if (!klass) return 0;
+  if (!tp.m_c) tp.m_c = tp.method_from_name(klass, "NotifyWorkItemComplete", 0);
+  if (!tp.m_r) tp.m_r = tp.method_from_name(klass, "RequestWorkerThread", 0);
+  if (!tp.orig_c && tp.m_c) tp.orig_c = tp.lookup_icall(tp.m_c);
+  if (!tp.orig_r && tp.m_r) tp.orig_r = tp.lookup_icall(tp.m_r);
+  if (tp.m_c && tp.orig_c) { tp.add_icall("System.Threading.ThreadPool::NotifyWorkItemComplete", (const void *)tp_hook_c); ok |= 2; }
+  if (tp.m_r && tp.orig_r) { tp.add_icall("System.Threading.ThreadPool::RequestWorkerThread", (const void *)tp_hook_r); ok |= 4; }
+  return ok;
+}
+
+static void tp_hook_q(void *err) {
+  long n = __sync_fetch_and_add(&tp.enq, 1) + 1;
+  if (n == 1) {
+    tp_w("[TPQ] first enqueue through the hook (phase 2)\n");
+    int ok = tp_register_cr();
+    tp_w("[TPQ] phase2 c=");
+    tp_w((ok & 2) ? "HOOK" : "no");
+    tp_w(" r=");
+    tp_w((ok & 4) ? "HOOK" : "no");
+    tp_w(" orig_c=");
+    tp_wx((unsigned long)tp.orig_c);
+    tp_w(" orig_r=");
+    tp_wx((unsigned long)tp.orig_r);
+    tp_w("\n");
+  }
+  tp_note(0, __builtin_return_address(0), __builtin_return_address(1));
+}
+static int tp_hook_c(void *err) {
+  int r = tp.orig_c ? ((int (*)(void *))tp.orig_c)(err) : 1;
+  __sync_fetch_and_add(&tp.comp, 1);
+  tp_note(1, __builtin_return_address(0), __builtin_return_address(1));
+  return r;
+}
+static int tp_hook_r(void *err) {
+  int r = tp.orig_r ? ((int (*)(void *))tp.orig_r)(err) : 0;
+  if (r) __sync_fetch_and_add(&tp.req, 1);
+  else __sync_fetch_and_add(&tp.reqf, 1);
+  tp_note(r ? 2 : 3, __builtin_return_address(0), __builtin_return_address(1));
+  return r;
+}
+
+static void tp_meth_at(void *ra, const char **cls, const char **meth) {
+  *cls = 0;
+  *meth = 0;
+  if (!tp.jit_find || !ra) return;
+  void *dom = tp.domain_get ? tp.domain_get() : 0;
+  if (!dom) return;
+  void *ji = tp.jit_find(dom, ra);
+  if (!ji) return;
+  void *m = tp.jit_method(ji);
+  if (!m) return;
+  void *k = tp.m_get_class(m);
+  *meth = tp.m_get_name(m);
+  if (k) *cls = tp.c_get_name(k);
+}
+
+static void tp_dump(const char *why) {
+  tp_w("[TPQSUM] enq=");
+  tp_wi(tp.enq);
+  tp_w(" comp=");
+  tp_wi(tp.comp);
+  tp_w(" req=");
+  tp_wi(tp.req);
+  tp_w(" reqF=");
+  tp_wi(tp.reqf);
+  tp_w(" stranding=");
+  tp_wi(tp.enq - tp.comp);
+  tp_w(" why=");
+  tp_w(why);
+  tp_w("\n");
+  /* The waiters: who called WaitHandle.WaitOne, how often, with what timeout.
+     This is the row that names the stall's wait site in managed terms. */
+  for (int i = 0; i < tp_w_n && i < TPW_MAX; i++) {
+    const char *c1 = 0, *m1 = 0;
+    tp_meth_at(tp_waits[i].ra1, &c1, &m1);
+    tp_w("[TPQW] n=");
+    tp_wi(tp_waits[i].n);
+    tp_w(" tid=");
+    tp_wi(tp_waits[i].last_tid);
+    tp_w(" ms=");
+    tp_wi((long)tp_waits[i].last_ms);
+    tp_w(" caller=");
+    tp_w(c1 ? c1 : "?");
+    tp_w(".");
+    tp_w(m1 ? m1 : "?");
+    tp_w(" ra=");
+    tp_wx((unsigned long)tp_waits[i].ra1);
+    tp_w("\n");
+  }
+  long s0 = tp.seq;
+  long first = s0 > 24 ? s0 - 24 : 0;
+  for (long s = first; s < s0; s++) {
+    const struct tp_ev *e = &tp_ring[s % TPRING];
+    if (e->seq != s) continue;
+    const char *c0 = 0, *m0 = 0, *c1 = 0, *m1 = 0;
+    tp_meth_at(e->ra, &c0, &m0);
+    tp_meth_at(e->ra1, &c1, &m1);
+    tp_w("[TPQR] seq=");
+    tp_wi(e->seq);
+    tp_w(" kind=");
+    tp_w(e->kind == 0 ? "enq" : e->kind == 1 ? "cmp" : e->kind == 2 ? "req" : "reqF");
+    tp_w(" tid=");
+    tp_wi(e->tid);
+    tp_w(" icall=");
+    tp_w(c0 ? c0 : "?");
+    tp_w(".");
+    tp_w(m0 ? m0 : "?");
+    tp_w(" from=");
+    tp_w(c1 ? c1 : "?");
+    tp_w(".");
+    tp_w(m1 ? m1 : "?");
+    tp_w(" ra0=");
+    tp_wx((unsigned long)e->ra);
+    tp_w(" ra1=");
+    tp_wx((unsigned long)e->ra1);
+    tp_w("\n");
+  }
+}
+
+/* Phase 1 — register the enqueue icall BY NAME ONLY.  It needs no class
+ * lookup, and its original is a no-op in this runtime
+ * (ves_icall_..._NotifyWorkItemQueued only bumps a perfcounter), so nothing
+ * of the runtime's own work is lost by not calling through. */
+static int tp_register_q(void) {
+  if (!tp.add_icall) return 0;
+  tp.add_icall("System.Threading.ThreadPool::NotifyWorkItemQueued", (const void *)tp_hook_q);
+  return 1;
+}
+
+static void *tp_watchdog(void *arg) {
+  (void)arg;
+  long prev = -1;
+  int quiet = 0;
+  int late_attach_tried = 0;
+  for (int i = 0; i < 4800; i++) { /* <= 240 s at 50 ms */
+    /* Phase 1 must not run during mono_init: a class lookup from this thread
+       aborted the runtime (object.c:1939 `klass').  4 s after the DSO load
+       the runtime is executing managed code, and mscorlib is on the loaded
+       image list, so the name-only registration below is safe. */
+    if (i >= 40 && !tp.registered_q && tp.image_loaded && tp.add_icall) {
+      void *img = tp.image_loaded("mscorlib");
+      if (img) {
+        tp.registered_q = 1;
+        tp_register_q();
+        tp_w("[TPQ] phase1: NotifyWorkItemQueued registered by name\n");
+      }
+    }
+    /* The name resolution needs an attached thread; attach lazily and late,
+       and only once (a second attach of the same thread is a no-op anyway). */
+    if (!tp.attached && late_attach_tried == 0 && i >= 25 && tp.get_root_domain) {
+      void *root = tp.get_root_domain();
+      if (root) {
+        late_attach_tried = 1;
+        if (tp.attach) tp.attach(root);
+        tp.attached = 1;
+        tp_w("[TPQ] attached to the root domain\n");
+      }
+    }
+    /* 10 s in: the runtime has been executing managed code for seconds, so a
+       class lookup is safe here, and the loading wait starts before the pool's
+       first enqueue. */
+    if (!tp.registered_w && tp.attached && i >= 50) {
+      tp.registered_w = tp_register_w();
+      if (!tp.registered_w && i > 400) tp.registered_w = -1; /* give up, once */
+    }
+    long s = tp.enq + tp.comp + tp.req + tp.reqf;
+    if (s != prev) { prev = s; quiet = 0; }
+    else quiet++;
+    /* Every 5 s: the timeline.  A single end-of-run total cannot tell a pool
+       that never woke from one that woke and died. */
+    if ((i % 100) == 0) {
+      tp_w("[TPQT] t=");
+      tp_wi(i / 20);
+      tp_w("s enq=");
+      tp_wi(tp.enq);
+      tp_w(" comp=");
+      tp_wi(tp.comp);
+      tp_w(" req=");
+      tp_wi(tp.req);
+      tp_w(" reqF=");
+      tp_wi(tp.reqf);
+      tp_w("\n");
+    }
+    /* 3 s without a single event, at least 10 s in: dump the tail.  Up to
+       six times, because the first quiet window is often just the gap before
+       the loader starts. */
+    if (quiet == 60 && i >= 200 && tp.dumps < 6) { tp.dumps++; tp_dump("quiet3s"); }
+    usleep(50000);
+  }
+  tp_dump("exit");
+  return 0;
+}
+
+static void rw_tp_maybe_start(void *handle, const char *name) {
+  if (tp.on) return;
+  if (!name || !strstr(name, "libmonobdwgc")) return;
+  {
+    int f = open("/TPTRACE", TP_O_RDONLY);
+    if (f < 0) { tp.on = 0; return; }
+    close(f);
+  }
+  tp.on = 1;
+  tp.h = handle;
+  tp.get_root_domain = (void *(*)(void))dlsym(handle, "mono_get_root_domain");
+  tp.attach = (void *(*)(void *))dlsym(handle, "mono_thread_attach");
+  tp.get_corlib = (void *(*)(void))dlsym(handle, "mono_get_corlib");
+  tp.image_loaded = (void *(*)(const char *))dlsym(handle, "mono_image_loaded");
+  tp.class_from_name = (void *(*)(void *, const char *, const char *))dlsym(handle, "mono_class_from_name");
+  tp.method_from_name = (void *(*)(void *, const char *, int))dlsym(handle, "mono_class_get_method_from_name");
+  tp.lookup_icall = (void *(*)(void *))dlsym(handle, "mono_lookup_internal_call");
+  tp.add_icall = (void (*)(const char *, const void *))dlsym(handle, "mono_add_internal_call");
+  tp.domain_get = (void *(*)(void))dlsym(handle, "mono_domain_get");
+  tp.jit_find = (void *(*)(void *, void *))dlsym(handle, "mono_jit_info_table_find");
+  tp.jit_method = (void *(*)(void *))dlsym(handle, "mono_jit_info_get_method");
+  tp.m_get_class = (void *(*)(void *))dlsym(handle, "mono_method_get_class");
+  tp.c_get_name = (const char *(*)(void *))dlsym(handle, "mono_class_get_name");
+  tp.m_get_name = (const char *(*)(void *))dlsym(handle, "mono_method_get_name");
+  tp_w("[TPQ] probe armed (libmonobdwgc);");
+  tp_w(" get_root_domain=");
+  tp_wx((unsigned long)tp.get_root_domain);
+  tp_w(" add_icall=");
+  tp_wx((unsigned long)tp.add_icall);
+  tp_w("\n");
+  if (!tp.get_root_domain || !tp.add_icall || !tp.lookup_icall || !tp.image_loaded) {
+    tp_w("[TPQ] probe OFF: a needed Mono API symbol is missing\n");
+    tp.on = 0;
+    return;
+  }
+  int (*pc)(void *, void *, void *, void *) =
+      (int (*)(void *, void *, void *, void *))dlsym(RTLD_DEFAULT, "pthread_create");
+  if (!pc) {
+    void *lp = dlopen("/LIB64/libpthread.so.0", RTLD_NOW | RTLD_GLOBAL);
+    if (lp) pc = (int (*)(void *, void *, void *, void *))dlsym(lp, "pthread_create");
+  }
+  if (!pc) {
+    tp_w("[TPQ] probe OFF: no pthread_create\n");
+    tp.on = 0;
+    return;
+  }
+  void *th = 0;
+  if (pc(&th, 0, (void *)tp_watchdog, 0) != 0) {
+    tp_w("[TPQ] probe OFF: watchdog thread creation failed\n");
+    tp.on = 0;
   }
 }
 
