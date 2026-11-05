@@ -3494,3 +3494,187 @@ Evidence: `obj/rw-desktop/evidence-l34/run{1,2,3,5}.{serial,Player}.log`,
 `obj/rw-desktop/m3-nostamp.log` and `m3-stamp.log` (the A/B),
 `obj/rw-desktop/m4-l34.log`, `g-m2thr.log`, `g-m12.log`, `g-m2mono.log`,
 `unit-l34.log`.
+
+## 25. 2026-11-04 — M6/L35: the load was four multipliers; NFS now runs at 38.8 MB/s
+
+**Verdict: the NFS wall is gone.** A guest `read()` now moves 38.8 MB/s
+(9,902,968 bytes in 255 ms) and 40.0 MB/s sustained over 64 MiB, against
+1023.9 B/RPC at depth 1 and ~42 KB/s in §24. The game uses the new speed: it
+reaches `Initialize engine version` and `RimWorld 1.6.4871 rev600` in ~60 s
+of uptime, runs its own managed `Steamworks.NET` initialisation, and only
+then dies — not on I/O, on Mono's own trampoline check. Still **no frame**;
+the next blocker is named in §25.5.
+
+### 25.1 What one READ RPC actually spends its time on
+
+`[NFSRTT]` (new, `src/kernel/nfs.c`) buckets every READ RPC by the byte count
+it asked the server for and splits its life into `sock` (socket create +
+connect), `send`, and `wait` (`net_socket_recv_timeout`). Same bench, same
+guest, the pre-L35 transport (A/B switch `nfs_perf_legacy=1`):
+
+| want | n | sock_us | send_us | wait_us | wait_min | wait_max |
+|---|---|---|---|---|---|---|
+| 1024 | 1,024 | **0** | **4** | **6,335** | 23 | 21,917 |
+| 1024 | 4,097 | 0 | 4 | 9,217 | 23 | 54,198 |
+
+That table eliminates three of the five suspects and convicts a fourth:
+
+| suspect | verdict |
+|---|---|
+| rsize pinned at 1024 | **confirmed** — `NFS_READ_CHUNK`, 1023.9 B/RPC measured |
+| strictly serial (depth 1) | **confirmed by construction** — `rpc_call` created, connected, sent, received and closed one socket per RPC, and `nfs_read_file` looped over it |
+| one packet per poll | **not the bug** — `virtio_net_handle_irq`/`poll_rx` both drain the used ring in a `while` loop |
+| per-RPC setup (connect/handshake) | **eliminated** — `sock_us=0`, `send_us=4`; a UDP "connect" only records the peer |
+| SunRPC retransmit backoff | **eliminated** — `wait_max` is 22-54 ms, far under the 500 ms timeout, and no retry row appears |
+| **a wakeup that costs a timer tick** | **convicted** — `wait_min=23 us` proves the server+slirp round trip is *microseconds*; the mean is 6.3-9.2 ms and the distribution is the signature of "the reply arrived after the sleeper stopped looking, and the next wake is the 100 Hz PIT" |
+
+So the arithmetic was two independent multipliers, and both were real:
+
+```text
+before: 1023.9 B/RPC x depth 1  / 6.3 ms  =  162 KB/s   (measured 161.1 KB/s, 1 MiB)
+after : 1337   B/RPC x depth 16 / 0.26 ms =   82 MB/s   (ceiling; measured 38.8-40.0)
+
+ceiling table (bytes in flight / latency), before -> after
+  1 KiB  x 1  @ 6.3 ms  = 0.16 MB/s   <- where the launch was
+  1 KiB  x 8  @ 6.3 ms  = 1.3  MB/s
+  32 KiB x 1  @ 0.26 ms = 123  MB/s
+  20 KiB x 16 @ 0.26 ms = 82   MB/s   <- implemented (1344 B x 16)
+```
+
+The residual gap between 82 and 39 MB/s is the guest+slirp *service rate*:
+`[NFSPIPE]` shows 7,405 RPCs in 255 ms = ~29,000 RPC/s, and
+`1,337 B x 29,000/s = 38.8 MB/s`. Depth is no longer the limit; the number of
+datagrams per second is. 729 MiB therefore takes **~18 s**, not 4.9 h.
+
+### 25.2 The four fixes, each measured
+
+1. **rsize 1024 -> 1344.** The transport is UDP over a 1500-byte MTU and this
+   stack neither emits nor reassembles IP fragments, so a reply must fit one
+   datagram: 1472 (payload) - 128 (RPC header 24 + status 4 + post_op_attr 88
+   + count 4 + eof 4 + opaque length 4) = **1344 bytes**. Larger is not
+   "unsupported by negotiation", it is *impossible without fragment
+   reassembly* — the client also adapts down to a server that answers short
+   (two equal shorts in a row, never below 512).
+2. **Depth 1 -> 16.** `nfs_read_pipelined()` issues up to `NFS_READ_DEPTH`
+   READs on one socket before reaping, matches replies by xid (out-of-order
+   safe, duplicate/stale datagrams skipped), fills each block at its own file
+   offset, and falls back to serial reads from the last contiguous byte if a
+   block is short, dropped or times out. `[NFSPIPE]` proves the shape:
+   `len=65536 rs=1344 issued=49 replies=49 short=0 bad=0 got=65536`.
+3. **The wait stopped sleeping.** `net_socket_recv_timeout()` now drains the
+   virtio RX used ring itself (`net_rx_pump()` -> `virtio_net_poll_rx`) and
+   spins with `cpu_relax()` instead of `sti; hlt`. Two rounds of measurement
+   were needed: a 200 us poll window fixed only the fastest replies (mean
+   still 6.3 ms, pipeline minimum 6.5 ms), a 2 ms window fixed the idle guest
+   but not a loaded one, and only "never sleep on an outstanding RPC" removed
+   the 100 Hz tick from the data path. `wait_us` for a 1 KiB RPC: **6,335 ->
+   79 us**; `wait_min` 23 -> 33 us, `wait_max` 21,917 -> 3,133 us.
+4. **One socket per mount, not one per RPC.** This was invisible until the
+   other three were fixed and the run got long: the first full-file run did
+   9.9 MB at 10.8 MB/s and then *decayed* — 40 ms/RPC after ~20k RPCs, and a
+   single 64 KiB read taking 1.25 s. The cause is per-ephemeral-port state on
+   the far side of slirp: every RPC burned a new guest UDP port
+   (`net_socket_create` hands out 49,152..65,535). One cached socket per
+   mount (`struct nfs_mount.rd_sock`, CAS-guarded `rd_busy` so a second
+   thread gets a temporary socket instead of interleaving xids) removed the
+   decay entirely: 10.8 -> 38.8 MB/s, and the 64 MiB span now runs at the
+   same rate as the first megabyte.
+
+UDP `recv()` also had to become datagram-framed: `handle_udp` pushes one
+length record per datagram and `recv`/`recv_timeout` return at most one, or
+a pipelined client reads reply k's tail spliced onto reply k+1's head and
+fails to parse either.
+
+### 25.3 `src/user/rwnfs_bench.c` — the numbers
+
+In-guest, `read()` only, against the live export (`tools/rw/run-nfs-bench.sh`;
+each row prints bytes, ms, the kernel's READ-RPC delta and B/RPC so it can be
+recomputed). Host reference for the same file over loopback NFS: **3.3 GB/s**,
+i.e. the server was never the constraint.
+
+| phase | bytes | ms | rpcs | B/RPC | MB/s |
+|---|---|---|---|---|---|
+| open1024 (1 read) | 1,024 | 3 | 1 | 1024 | — (3 ms) |
+| sweep1024 | 1,048,576 | **89** | 1,024 | 1024 | **11.7** |
+| sweep4096 | 1,048,576 | 65 | 1,024 | 1024 | 16.1 |
+| sweep16384 | 1,048,576 | 46 | 832 | 1260 | 22.7 |
+| sweep65536 | 1,048,576 | 42 | 784 | 1337 | 24.9 |
+| **file64k (resources.assets)** | **9,902,968** | **255** | 7,405 | 1337 | **38.8** |
+| file1k (same file) | 9,902,968 | 650 | 9,671 | 1023 | 15.2 |
+| **span64m** | **67,151,056** | **1,678** | 50,212 | 1337 | **40.0** |
+| player64k (UnityPlayer.so) | 33,010,672 | 959 | 24,682 | 1337 | 34.4 |
+
+Before, same bench, same guest, 1 MiB per phase: `seq1024` **6,507 ms**
+(161.1 KB/s), `seq4096` 10,298 ms (101.8 KB/s), `seq16384` 10,395 ms,
+`seq65536` 10,736 ms — and over the full 9.9 MB, 107,919 ms (91.7 KB/s).
+The 9.9 MB target (< 2 s, >= 5 MB/s) lands at **0.255 s / 38.8 MB/s**.
+
+### 25.4 Byte-exactness
+
+`tools/rw/run-rwnfs-probe.sh`: the one-shot 64 KiB read of `UnityPlayer.so`
+and its FNV-1a/sum32 still match the host, the 2,915-byte single-`read()`
+regression (§21, rule 49) still returns 2,915 — now through the pipeline
+(`[NFSPIPE] len=2915 rs=1344 issued=3 replies=3 short=0 bad=0 got=2915
+us=246`) — the 102-entry `Managed` listing and the 63-character LOOKUP still
+pass. The one FAIL row is the **pre-existing by-design**
+`mmap(/NFS/...) -> -1 errno=95`: `vm_mmap` refuses any fd for which
+`file_fat16_ident()` fails (its comment names "pipe/socket/NFS/dir"), which is
+the §21/rule-14 limitation the `Managed` prefix bind exists to work around —
+`src/kernel/vm.c` is untouched by this lane.
+
+### 25.5 The ladder at this tip: NFS is no longer the wall
+
+One desktop run (`tools/rw/run-rimworld-desktop.sh --timeout 420
+--run-timeout 600`), host load average 12-16:
+
+```text
+[NFSIO] bytes=0x15887   rpcs=0x49   uptime_ms=0x7530    (30,000 ms)
+[NFSIO] bytes=0x47EAFB  rpcs=0xE15  uptime_ms=0xEA68    (60,008 ms)
+Initialize engine version: 2022.3.35f1 (011206c7a712)
+RimWorld 1.6.4871 rev600
+* Assertion: should not be reached at tramp-amd64.c:641
+```
+
+4.62 MB in that 30 s window, and the banner at 60 s of uptime, against §24's
+193.5 s to read 6.29 MB. Player.log's own last lines are the game's managed
+Steamworks init (`[Steamworks.NET] SteamAPI.Init() failed ...` — non-fatal,
+the game logs and continues), so the managed layer is executing game code.
+
+**No frame.** `[XE] PUT` (XPutImage) has **0** rows; the only `[XE]` row is
+the pre-paint `[XE] FLUSH 0;0;1916;1018` from §24.5, and the screenshots show
+the launcher's stdout window, not game content.
+
+**Next blocker, exact line: `* Assertion: should not be reached at
+tramp-amd64.c:641`** — Mono's `stack_unaligned()` trampoline guard, i.e. a
+Mono trampoline was entered with `%rsp` not 16-byte aligned. The death chain,
+verbatim from the serial, is:
+
+```text
+[SIGD] pid=4 sig=6 h=0x0x1083E3ECBF ipc=0x108004300B        <- SIGABRT: the assertion
+[KERNEL] pid=4 (/NFS/RimWorldLinux) memory fault VA=0x000000000000000E
+         PC=0x00000010818E3804 rw=r in=HOLE region=NONE ... -> killed
+[RW] rwlaunch: waitpid=4 status=11
+```
+
+i.e. the assertion aborts the runtime, Mono's own crash handler runs, and then
+a read of `VA=0xE` lands in an unmapped hole and the kernel kills the process.
+That is a signal-frame/trampoline alignment question in the compat layer
+(rules 42/58 are its siblings), **not** I/O, and it is the next lane's first
+line. `[LCOMPAT] ENOSYS nr=201` (`time(2)`) also appears once, earlier, and is
+worth filling in the same pass.
+
+### 25.6 Gates at this tip
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   411/0 PASS
+bash tools/gate/m2_mono.sh               PASS — Mono 6.12 threaded C# HELLO-OK
+python3 tools/gate/m3_window_probe.py    PASS (incl. the L34 display stamp)
+python3 tools/gate/m4_gl_probe.py        PASS — GL 3.3 triangle PRESENTED
+bash tools/rw/run-nfs-bench.sh           PASS — rows above
+bash tools/rw/run-rwnfs-probe.sh         6 PASS, 1 pre-existing mmap-of-NFS FAIL (-95)
+```
+
+Evidence: `obj/rw-desktop/evidence-l35/` — `bench-after.serial` (the `[BENCH]`,
+`[NFSRTT]` and `[NFSPIPE]` rows), `bench-before.log` (the A/B), `desktop.serial`,
+`Player.log`, `probe.serial`, `unit-l35.log`, `g-m2mono.log`, `g-m3.log`,
+`g-m4.log`, `shots/`.
