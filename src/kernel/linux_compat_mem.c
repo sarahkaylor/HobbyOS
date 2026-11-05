@@ -236,12 +236,14 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
     extern void l_jit_note(uint64_t base, uint64_t len);
     l_jit_note((uint64_t)r, len);
     static int jit_rows;
-    if (jit_rows < 40) {
+    if (jit_rows < 120) {
       jit_rows++;
       struct kline kl;
       kl_init(&kl);
       kl_s(&kl, "[JIT] pid=");
       kl_i(&kl, p ? p->pid : -1);
+      kl_s(&kl, " hint=");
+      kl_hex(&kl, (unsigned long)addr);
       kl_s(&kl, " base=0x");
       kl_hex(&kl, (unsigned long)r);
       kl_s(&kl, " len=0x");

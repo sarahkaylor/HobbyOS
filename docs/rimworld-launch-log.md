@@ -4202,3 +4202,208 @@ harness ran **without** `RW_SKIP_BUILD` (a probe/GL gate leaves its own image;
 7 of 7 reaching the banner, and both assertion variants (`tramp-amd64.c:641`
 and `x86-codegen.h:410`) are the same next blocker (rule 70's ±2 GB branch
 patch), not a regression of this lane.
+
+## 27. 2026-11-05 — M6/L38: a ±2 GiB JIT code arena; both JIT assertions are gone 3/3
+
+**Verdict: the game no longer dies in Mono's JIT.** Both assertion variants of
+§26.6 — `x86-codegen.h:410` (`offset == (gint32)offset`) and
+`tramp-amd64.c:641` — are **absent from 3 of 3 desktop runs**, and Mono JITs its
+methods instead of refusing a branch: 14-15 executable windows per run (44 in
+the three runs below), **every one served from a single arena** (`src=arena`),
+11 of them inside 704 KiB and the largest a 10 MiB block. The
+player reaches `Loaded All Assemblies` + `Finished resetting the current
+domain` + `RimWorld 1.6.4871 rev600` and then *keeps running its own frame
+loop* until the launcher's 180 s deadline — it issues
+`[XE] PUT 0;0;1916;1018` in 1 of 3 runs and eight `[XE] FLUSH 0;0;1916;1018`
+rows in all 3, instead of aborting. **No game content is on screen yet**: the window's pixels are all
+`#000000` (1,950,392 of 2,073,600), so §27.5 names the next blocker — the first
+non-black frame, not the JIT.
+
+### 27.1 The measurement: 64 KiB chunks, caller-supplied hints, first-fit that drops them
+
+The policy that produced the 2.8-3.0 GiB spread is `vm_mmap`'s non-fixed path,
+and it is one line of arithmetic: **first-fit bottom-up from
+`USER_MMAP_BASE_V2` (0x1080000000, +2 GiB in the 32 GiB user window) over the
+whole 18 GiB MMAP arena, with a 64 KiB `VM_HOLE_GAP` between temporally distinct
+regions**. There is no ASLR anywhere in this tree (the layout is a pure function
+of allocation order), and a caller hint is honoured **only** when
+`vm_hole_find(as, hint, LIMIT, len) == hint`, i.e. when the span starting exactly
+at the hint is free *and* the 64 KiB gap rule is satisfied for the next region.
+The module itself is not in a fixed slot: `UnityPlayer.so` is the first mmap and
+lands at 0x1080b08000 (11.03 MiB above the arena base) by first-fit.
+
+Mono's code manager asks for code with `mmap(NULL, 0x10000, RWX,
+MAP_PRIVATE|MAP_ANON)` — 64 KiB per chunk — and from the second chunk on it
+passes a **hint of `previous_end + 0x10000`**, exactly the 64 KiB gap. The
+kernel nonetheless refused that hint for chunks 2-4 and then lost the frontier
+to unrelated allocations, so the chunks marched:
+
+| chunk | base (`[JIT]` row, pre-arena ladder) | Δ from chunk 0 | hint honoured |
+|---|---|---|---|
+| 0 | 0x1084518000 | — | (no hint) |
+| 1 | 0x1084AF1000 | +5.8 MiB | no |
+| 2 | 0x108FAC6000 | +0.177 GiB | no (`hint=0x1084B01000`) |
+| 3 | 0x108FEE0000 | +0.181 GiB | no (`hint=0x108FAD6000`) |
+| 4 | 0x108FF75000 | +0.182 GiB | no (`hint=0x108FEF0000`) |
+| 5-10 | 0x108FF85000 … 0x108FFD5000 | +0.182 GiB | **yes** (6 chunks, 64 KiB apart) |
+| 11 | 0x1190000000 | **+4.18 GiB** | no |
+
+Why the gap between chunk 1 and chunk 2 is 0.17 GiB rather than 64 KiB: the span
+`[0x1084528000, 0x1090000000)` is not left to the JIT. Inside it, in the same
+window, Unity and Mono place four 256 KiB RW windows, a 0x60000 reservation,
+two 0x468A00 mappings, a 0x201000 reservation and Mono's 64 MiB GC heap
+reservation at 0x1088000000; above it sit **eight 256 MiB `PROT_NONE` windows**
+at 0x1090000000, 0x10A0000000 … 0x1100000000 (Unity's 512 MiB reservations,
+each trimmed by `munmap`), and the game's own 4 MiB block chain lives in the
+one at 0x10C0000000 (§16). So the free space below 0x1090000000 is consumed by
+everything *except* the JIT, and the 12th chunk has nowhere left but 4 GiB up —
+which is 2.85 GiB from the module text, i.e. outside every `rel32`.
+
+That is the whole of rule 70's mechanism, now measured from the request stream
+(`[MM]`, `RW_TRACE_MEM=1`: 4,617 rows) instead of inferred from a crash.
+
+### 27.2 The arena
+
+`src/kernel/vm.c`, new section "the JIT code arena":
+
+* **Claim.** On the first `PROT_EXEC` anonymous, non-`MAP_FIXED` mapping of an
+  address space, scan the region list for the **largest free gap inside
+  ±`USER_JIT_REACH` (2 GiB) of the address first-fit would have returned**,
+  clamped to the MMAP arena. Require ≥ `USER_JIT_MIN` (4 MiB), cap at
+  `USER_JIT_ARENA_MAX` (1 GiB), align the base up to `USER_JIT_ALIGN` (64 KiB,
+  Mono's chunk granularity) **and shrink the size by the same amount**.
+* **Reservation.** The span is covered by one placeholder region (protection 0,
+  flags 0, no object, kind `VMK_ANON`), so the ordinary first-fit can never
+  hand out an address inside it and no other placement rule changes. The claim
+  is pinned to the *first* anchor the process ever wanted (`jit_anchor0`), so a
+  claim that only becomes possible after megabytes of unrelated allocation is
+  refused rather than granted 6 GiB away.
+* **Serve.** Bump pointer + a 16-entry LIFO free list (a `munmap` of a span
+  fully inside the arena returns it; a code manager that frees a chunk gets the
+  same address back). The bump skips any span a `MAP_FIXED` request carved into
+  the arena instead of failing.
+* **Fallback, never an error.** No gap ≥ 4 MiB, arena exhausted, or a
+  `MAP_FIXED` request → the old first-fit path, with `[JITA] full` said once
+  when the arena had been claimed and ran out. A claim that finds no room is
+  silent on purpose (there is nothing to report but the layout); it shows up as
+  `[JITV] … src=fit` rows, which is exactly how §27.3's bug was finally seen. `brk`, thread stacks, the DSO band, the FB slot and
+  Unity's reserved windows are untouched: they never enter this path.
+* **Locking.** The claim, the bump, the free list and the placeholder carve all
+  move under `vm_lock` (the `_locked` region primitives): two threads of one
+  group can enter the compat mmap path together, and an unlocked bump hands
+  both the same base (the second `vm_region_insert` then fails and its caller
+  reads a spurious `ENOMEM`). `vm_jit_release` likewise runs inside
+  `vm_munmap_range`'s critical section.
+
+Measured in the game: `[JITA] claim base=0x1084520000 size=0xBAE0000
+anchor=0x1084518000 gap=0xBAE8000` — a **186.875 MiB** contiguous arena 58.1 MiB
+above the module base, i.e. 1/11th of the ±2 GiB budget, claimed where the first
+chunk would have gone anyway. All 15 windows of the run are inside it.
+
+### 27.3 The bug the first version had, and the test that now pins it
+
+The first arena passed its unit test (an empty address space, where every gap
+ends on a 2 GiB boundary) and **failed on every desktop run**: the claim found
+the 186.9 MiB gap (`gap=0xBAE8000`), aligned the base from 0x1084518000 up to
+0x1084520000, and inserted `size = gap` — one 32 KiB poke past the gap's end
+into the region at 0x1090000000. `vm_region_insert` refuses an overlap with
+`-1`, the claim returned 0 without a word, and the JIT fell back to first-fit:
+11 chunks scattered, the assertion still fired, and the only trace was a
+`[JITV] … src=fit`. The fix is to compute `gap_end` first and clamp the size to
+it; the regression is `test_vm_jit_arena_gap_end`, which builds a bounded
+mis-aligned gap, closes the whole ±2 GiB window at its end, and asserts
+`as->jit_end == ceiling` (it fails on the old code because no arena is claimed
+at all). The diagnostic that found it was a temporary `[JITA] try … anchor= lo=
+hi= gap= at= nr= cap=` row per attempt; it is not in the shipped tree (the
+permanent rows are `[JITA] claim` and `[JITA] full`), but it is the row to add
+first if a future tree ever claims nothing.
+
+### 27.4 Ladder at this tip
+
+`bash tools/rw/l38-runs.sh final 3 600` — three sequential desktop runs of the
+committed tree:
+
+| run | JIT windows | `src=arena` | `Initialize engine` | banner | assertion | `[XE] PUT` / `FLUSH` (Player.log) | `[XE] PUT` (serial) | window pixels |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 15 | 15 | yes | yes | **none** | 1 / 8 (skip 1) | 0 | 1,950,392/2,073,600 `#000000` (94.1%) |
+| 2 | 14 | 14 | yes | yes | **none** | 0 / 8 (skip 1) | 0 | 1,950,392/2,073,600 `#000000` (94.1%) |
+| 3 | 15 | 15 | yes | yes | **none** | 0 / 8 (skip 1) | 0 | 1,950,392/2,073,600 `#000000` (94.1%) |
+
+3 of 3 claim the same arena (`base=0x1084520000 size=0xBAE0000`), 44 of 44
+windows come from it, and **neither assertion appears in any run** — where the
+pre-arena ladder aborted in 6 of 6 (§26.6/§26.11). The window budget is 2.79 GiB
+of scatter before, 704 KiB of contiguous chunks after: chunk *n* is at
+`arena_base + n*0x10000` (`[JITV] n=1 … n=13`), and the last window of the run
+is a 10 MiB `len=0xA00000` request (n=14) that also lands inside the arena.
+
+Two things the table also says, because they bound the next step:
+
+* the **first** `XPutImage` is skipped in every run (`[XE] PUTSKIP 0;0;0;0`,
+  `content_ready == 0`, rule 23) — the presents that reach the desktop come
+  from the GL swap path (`[XE] FLUSH 0;0;1916;1018`, `send_flush`);
+* after the eighth flush the log turns into **40,360 / 40,736 / 43,198**
+  `[XI] XIGrabTouchBegin` rows and there is no further flush until the 180 s
+  deadline. The game's own window is on screen, is the right size (1916×1018
+  content rect in a 1920×1080 desktop), and is **all black** — of 2,073,600
+  pixels, 1,950,392 are `#000000` and the remaining 123,208 are the desktop's
+  own frame and title bar.
+
+### 27.5 Next blocker, exact line
+
+Not the JIT any more, and not a signal frame. In order:
+
+```text
+[XE] PUTSKIP 0;0;0;0                    src/user/xcompat/libx11.c:3164  (content_ready == 0)
+[XE] FLUSH 0;0;1916;1018                src/user/xcompat/libx11.c:672   (GL swap present, 8 rows)
+[XI] XIGrabTouchBegin dev=0 win=0x200002 owner=1 -> Failure (no touch device)   x 40,360
+```
+
+So the next lane's subject is the **first non-black frame**, and the two rows
+above separate its two halves: either the game draws and the swap presents a
+black buffer, or Unity never draws again after the 8th swap and the `[XI]` loop
+is what it does instead. The loop is suspicious on its own terms — rule 44's
+shim answers "no touch device, no grab" and Unity retries it twice per
+`XIUngrabTouchBegin`, 40k times in 180 s, which is a *polling* rate, not a frame
+rate. It is also the one unbounded trace in the tree: every call writes a row to
+fd 1, i.e. one console write per attempt, which throttles the very loop being
+measured.
+
+The decisive probe is cheap: bound the `[XI]` row (8 rows, like every other
+`l34_row`), and add a once-a-second `[XSW]` row carrying (swap count, a checksum
+of the first 4 KiB of the swapped buffer, the desktop's `content_ready`) — so
+"never draws" and "draws black" are different rows instead of one black
+screenshot.
+
+### 27.6 Gates at this tip
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   413/0 PASS  (411 + test_vm_jit_arena,
+                                                    test_vm_jit_arena_gap_end)
+bash tools/gate/t3_linux_probe.sh redzone PASS — 6/6 red-zone rows KEPT, rc=0
+bash tools/gate/m2_mono.sh               PASS — Mono 6.12 threaded C# HELLO-OK
+bash tools/gate/m2_threads.sh            PASS — 8 pthreads, mutex+condvar+TLS+join
+bash tools/gate/m12_thread_ceiling.sh    PASS — 150 threads + TLS + SIGCANCEL(32)
+python3 tools/gate/m3_window_probe.py    PASS — SDL XCreateWindow ladder + display stamp
+python3 tools/gate/m4_gl_probe.py        PASS — GL 3.3 triangle PRESENTED
+bash tools/rw/check-no-game-files.sh     OK   — no RimWorld artifacts in the tree
+```
+
+### 27.7 Evidence
+
+`obj/rw-desktop/evidence-l38/`:
+
+* `final-{1,2,3}.{serial,Player}.log` + `.summary` — the ladder above
+  (`final-N.summary` is generated by `tools/rw/l38-runs.sh`, the table by
+  `tools/rw/l38-table.py`);
+* `arena-{1,2,3}.*` — the *pre-fix* arena: `src=fit` rows, the 12th chunk 4.0 GiB
+  away, and the `[JITA] claim insert failed` diagnostic that named the
+  alignment bug;
+* `diag-1.*` — the run that printed `[JITA] try pid=4 anchor=0x1084518000 …
+  gap=0xBAE8000 at=0x1084518000 nr=96 cap=128` and then
+  `claim insert failed rc=-1 base=0x1084520000 size=0xBAE8000`;
+* `unit-final.log` (413/0), `gate-*.log` + `gate-*.rc` (the seven gates above);
+* `shots/` — the desktop screenshots (the game window is the black rectangle);
+* `tools/rw/l38-layout.py` — replays a `[MM]`/`[JITV]` trace and prints the
+  chunk table and the free-gap map at the moment of the first chunk (the
+  measurement in §27.1).
+

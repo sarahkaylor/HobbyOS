@@ -20,6 +20,7 @@
 #include "fb_mmap.h"  /* GB-025 / M3: /dev/fb0 mmap translation */
 #include "frame.h"
 #include "fs.h" /* P2.4 (S4): memfd object lookup for fd-backed mmap */
+#include "kline.h"
 #include "lock.h"
 #include "process.h"
 #include "virtio_gpu.h" /* GB-025 / M3: the scanout framebuffer address */
@@ -139,6 +140,13 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   as->img_active = 0;
   as->retry_va = 0; /* w5 (iv): a reused slot must not inherit retry state */
   as->retry_count = 0;
+  /* M6/L38: a reused slot must not inherit a JIT arena either -- its region
+     list starts empty, so a stale jit_base would skip the claim forever. */
+  as->jit_base = 0;
+  as->jit_end = 0;
+  as->jit_bump = 0;
+  as->jit_anchor0 = 0;
+  as->jit_nfree = 0;
   as->img_epoch++; /* a reused slot must never look like its old life */
   uint64_t root = vm_arch_root_alloc(as); /* sets as->root_phys accounting */
   if (!root) {
@@ -1694,6 +1702,322 @@ static uint16_t mmap_prot_sanitize(uint16_t prot) {
   return (uint16_t)(prot & (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC));
 }
 
+/* --- M6/L38: JIT code placement instrument -------------------------------
+ *
+ * Mono's amd64 codegen patches rel32 branches in JIT code and refuses any
+ * target more than +-2 GiB away (x86-codegen.h:410).  So the spread of the
+ * PROT_EXEC anonymous mappings IS a correctness property of the address
+ * space, not a performance detail: one row per window, plus a running span
+ * summary, is the measurement the placement policy is judged by.
+ *
+ * The hint is logged next to the result because "first-fit" and "the caller
+ * asked for this address" are indistinguishable from the result alone. */
+#define VM_JIT_LOG_MAX 256
+static int vm_jit_log_n;
+static uint64_t vm_jit_first, vm_jit_last;
+static int vm_jit_n;
+
+static void vm_jit_note(int pid, uint64_t hint, uint64_t base, uint64_t len,
+                        int arena) {
+  if (vm_jit_n == 0)
+    vm_jit_first = base;
+  vm_jit_last = base;
+  vm_jit_n++;
+  if (vm_jit_log_n < VM_JIT_LOG_MAX) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[JITV] pid=");
+    kl_i(&kl, pid);
+    kl_s(&kl, " n=");
+    kl_i(&kl, vm_jit_n - 1);
+    kl_s(&kl, " hint=");
+    kl_hex(&kl, (unsigned long)hint);
+    kl_s(&kl, " base=");
+    kl_hex(&kl, (unsigned long)base);
+    kl_s(&kl, " len=");
+    kl_hex(&kl, (unsigned long)len);
+    kl_s(&kl, " d=");
+    kl_hex(&kl, (unsigned long)(base - USER_VA_BASE));
+    kl_s(&kl, " src=");
+    kl_s(&kl, arena ? "arena" : "fit");
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    vm_jit_log_n++;
+  }
+  /* Running spread: emit on the first window and every 8th after it, so a
+   * launch that maps hundreds of chunks still reports its envelope. */
+  if (vm_jit_n == 1 || (vm_jit_n & 7) == 0) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[JITS] n=");
+    kl_i(&kl, vm_jit_n);
+    kl_s(&kl, " first=");
+    kl_hex(&kl, (unsigned long)vm_jit_first);
+    kl_s(&kl, " last=");
+    kl_hex(&kl, (unsigned long)vm_jit_last);
+    kl_s(&kl, " span=");
+    kl_hex(&kl, (unsigned long)(vm_jit_last - vm_jit_first));
+    kl_s(&kl, " span_mb=");
+    kl_i(&kl, (int)((vm_jit_last - vm_jit_first) >> 20));
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+}
+
+/* --- M6/L38: the JIT code arena -------------------------------------------
+ *
+ * Mono's amd64 codegen patches `rel32` branches in JIT code and refuses a
+ * target outside +-2 GiB (x86-codegen.h:410 `offset == (gint32)offset`).  On
+ * Linux that always holds, not because anything asks for it but because
+ * `mmap(NULL, ...)` for executable memory is served from ONE bottom-up arena,
+ * so a code manager's 64 KiB chunks land next to each other.  Here the same
+ * call is served by first-fit over an 18 GiB window that the game also fills
+ * with heap, stacks and Unity's reservations: measured (L38, [JITV] rows) the
+ * third chunk landed 0.18 GiB above the first and the twelfth 2.79 GiB above
+ * it, so `mono_x86_patch` refused the branch and aborted the player.
+ *
+ * The property is reproduced rather than the accident: on the first
+ * executable anonymous mapping, reserve the largest free span within
+ * +-USER_JIT_REACH of where that mapping would have gone (capped at
+ * USER_JIT_ARENA_MAX) and serve every later executable anonymous mapping from
+ * a bump pointer inside it.  A zero-protection placeholder region covers the
+ * span, so the ordinary first-fit can never hand out an address inside it and
+ * everything else (stacks, DSOs, brk, Unity's own reserved windows) keeps the
+ * placement it had.
+ *
+ * The arena is an optimisation, never a requirement: when no span is free,
+ * when it is exhausted, or when the caller asked for MAP_FIXED, the old
+ * first-fit path runs and only the clustering is lost.
+ */
+
+/* Is [base, base+len) free *for the arena*?  Inside the arena the placeholder
+ * is a zero-protection, flagless anonymous region that the arena itself owns:
+ * that is space, not an occupant.  Anything else overlapping the span (a live
+ * chunk, or a MAP_FIXED mapping someone carved into the span) is not. */
+static int vm_jit_span_free(struct addr_space *as, uint64_t base, uint64_t len) {
+  uint64_t end = base + len;
+  if (end < base)
+    return 0;
+  for (int i = 0; i < as->nr; i++) {
+    struct vm_region *r = &as->regions[i];
+    if (r->base >= end)
+      break;
+    if (r->base + r->len <= base)
+      continue;
+    if (r->prot != 0 || r->flags != 0 || r->obj || r->kind != VMK_ANON)
+      return 0;
+  }
+  return 1;
+}
+
+/* Largest free gap inside [lo, hi).  Returns its base (0 when there is none)
+ * and stores its length in *gap_out; ties go to the lower address. */
+static uint64_t vm_gap_largest(struct addr_space *as, uint64_t lo, uint64_t hi,
+                               uint64_t *gap_out) {
+  uint64_t cur = (lo + 0xFFF) & ~0xFFFULL;
+  uint64_t best = 0, best_len = 0;
+  for (int i = 0; i < as->nr && cur < hi; i++) {
+    struct vm_region *r = &as->regions[i];
+    uint64_t rend = r->base + r->len;
+    if (rend <= cur)
+      continue;
+    if (r->base >= hi)
+      break;
+    if (r->base > cur) {
+      uint64_t end = (r->base < hi) ? r->base : hi;
+      if (end - cur > best_len) {
+        best = cur;
+        best_len = end - cur;
+      }
+    }
+    cur = (rend + 0xFFF) & ~0xFFFULL;
+  }
+  if (cur < hi && hi - cur > best_len) {
+    best = cur;
+    best_len = hi - cur;
+  }
+  *gap_out = best_len;
+  return best;
+}
+
+static void vm_jit_log_claim(uint64_t base, uint64_t size, uint64_t gap,
+                             uint64_t anchor) {
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[JITA] claim base=");
+  kl_hex(&kl, (unsigned long)base);
+  kl_s(&kl, " size=");
+  kl_hex(&kl, (unsigned long)size);
+  kl_s(&kl, " anchor=");
+  kl_hex(&kl, (unsigned long)anchor);
+  kl_s(&kl, " gap=");
+  kl_hex(&kl, (unsigned long)gap);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+/* Claim the arena.  `anchor` is the address first-fit would have returned for
+ * the triggering mapping: the arena grows where the process's code wanted to
+ * be, so a busy window degrades to the old behaviour instead of moving the
+ * module.  CALLER HOLDS vm_lock -- every region operation below is the
+ * _locked form (the public wrappers would acquire the lock again).  The log
+ * row is emitted by the caller, outside the lock. */
+static int vm_jit_claim_locked(struct addr_space *as, uint64_t anchor,
+                               uint64_t *out_base, uint64_t *out_size,
+                               uint64_t *out_gap) {
+  uint64_t lo = (anchor > USER_JIT_REACH) ? anchor - USER_JIT_REACH
+                                          : USER_VA_BASE;
+  if (lo < USER_MMAP_BASE_V2)
+    lo = USER_MMAP_BASE_V2;
+  uint64_t hi = anchor + USER_JIT_REACH;
+  if (hi > USER_MMAP_LIMIT_V2 || hi < anchor)
+    hi = USER_MMAP_LIMIT_V2;
+  if (lo >= hi)
+    return 0;
+  uint64_t gap = 0;
+  uint64_t base = vm_gap_largest(as, lo, hi, &gap);
+  *out_gap = gap;
+  if (!base || gap < USER_JIT_MIN)
+    return 0;
+  /* The span END is what must not move: aligning the base up eats into the
+     free space, and an arena one byte past the gap's end overlaps the next
+     region -- vm_region_insert then refuses the placeholder, the claim fails
+     silently and the cluster is lost (measured: that was the first version's
+     bug on every desktop run, while an empty address space passed). */
+  uint64_t gap_end = base + gap;
+  uint64_t size = (gap > USER_JIT_ARENA_MAX) ? USER_JIT_ARENA_MAX : gap;
+  base = (base + USER_JIT_ALIGN - 1) & ~(USER_JIT_ALIGN - 1);
+  if (base >= gap_end)
+    return 0;
+  if (size > gap_end - base)
+    size = gap_end - base;
+  if (size < USER_JIT_MIN)
+    return 0;
+  /* The placeholder is a real VMA (protection 0, no flags, no object): the
+     normal first-fit now skips the whole span, and arena allocations carve
+     their own records out of it. */
+  if (vm_region_insert_locked(as, base, size, 0, VMK_ANON, 0, 0, 0) != 0)
+    return 0;
+  as->jit_base = base;
+  as->jit_end = base + size;
+  as->jit_bump = base;
+  as->jit_nfree = 0;
+  *out_base = base;
+  *out_size = size;
+  return 1;
+}
+
+/* Serve one executable anonymous mapping from the arena.  Returns 1 and sets
+ * *out when the arena had room, 0 when the caller must use first-fit.
+ *
+ * The bump pointer, the free list and the placeholder carve all move under
+ * vm_lock: two threads of one group can enter the compatible mmap path at the
+ * same time, and an unlocked bump would hand both of them the same base (the
+ * second insert then fails and its caller reads a spurious ENOMEM). */
+static int vm_jit_alloc(struct addr_space *as, uint64_t len, uint64_t *out) {
+  uint64_t chosen = 0, cbase = 0, csize = 0, cgap = 0;
+  int claimed = 0, full = 0;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  if (!as->jit_base) {
+    uint64_t anchor = vm_hole_find(as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2,
+                                   len);
+    if (anchor) {
+      /* Pin the window to the FIRST executable window this process wanted: a
+         claim that becomes possible only after megabytes of unrelated
+         allocation is not a cluster, it is a second scatter. */
+      if (!as->jit_anchor0)
+        as->jit_anchor0 = anchor;
+      claimed = vm_jit_claim_locked(as, as->jit_anchor0, &cbase, &csize, &cgap);
+    }
+  }
+  if (as->jit_base) {
+    /* LIFO reuse first: a code manager that frees a chunk asks for the same
+       size again, and getting the same address back is what a linker
+       expects. */
+    for (int i = (int)as->jit_nfree - 1; i >= 0; i--) {
+      if (as->jit_free_len[i] < len)
+        continue;
+      uint64_t b = as->jit_base + as->jit_free_off[i];
+      uint64_t rest = as->jit_free_len[i] - len;
+      if (rest == 0) {
+        as->jit_nfree--;
+        as->jit_free_off[i] = as->jit_free_off[as->jit_nfree];
+        as->jit_free_len[i] = as->jit_free_len[as->jit_nfree];
+      } else {
+        as->jit_free_off[i] += len;
+        as->jit_free_len[i] = rest;
+      }
+      chosen = b;
+      break;
+    }
+  }
+  if (!chosen && as->jit_base) {
+    /* Bump.  Skip anything a MAP_FIXED request carved into the span instead
+       of failing: the arena must never make a legal mapping impossible. */
+    uint64_t cur = (as->jit_bump + 0xF) & ~0xFULL;
+    while (cur + len <= as->jit_end) {
+      if (!vm_jit_span_free(as, cur, len)) {
+        struct vm_region *r = vm_region_find(as, cur);
+        uint64_t next =
+            r ? (r->base + r->len + 0xFFF) & ~0xFFFULL : cur + 0x1000;
+        if (next <= cur)
+          break;
+        cur = next;
+        continue;
+      }
+      if (vm_region_remove_locked(as, cur, len) != 0)
+        break; /* placeholder gone: stop trusting the span */
+      as->jit_bump = cur + len;
+      chosen = cur;
+      break;
+    }
+    if (!chosen)
+      full = 1;
+  }
+  uint64_t bump = as->jit_bump, jend = as->jit_end;
+  spinlock_release_irqrestore(&vm_lock, fl);
+  if (claimed)
+    vm_jit_log_claim(cbase, csize, cgap, as->jit_anchor0);
+  if (full) {
+    static int full_rows;
+    if (full_rows < 3) {
+      full_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[JITA] full: arena exhausted, exec mappings fall back to "
+                "first-fit (bump=");
+      kl_hex(&kl, (unsigned long)bump);
+      kl_s(&kl, " end=");
+      kl_hex(&kl, (unsigned long)jend);
+      kl_s(&kl, ")\n");
+      kl_emit(&kl);
+    }
+  }
+  *out = chosen;
+  return chosen != 0;
+}
+
+/* Return a freed span to the arena.  Conservative: only a span entirely
+ * inside the arena is remembered, and only its first VM_JIT_FREE_MAX frees
+ * are (a code manager frees chunks, it does not churn megabytes).  Caller
+ * holds vm_lock. */
+static void vm_jit_release(struct addr_space *as, uint64_t addr, uint64_t len) {
+  if (!as->jit_base || len == 0)
+    return;
+  if (addr < as->jit_base || addr + len > as->jit_end)
+    return;
+  if (addr == as->jit_base && len == as->jit_end - as->jit_base) {
+    as->jit_base = 0; /* the caller unmapped the whole arena: claim afresh */
+    as->jit_nfree = 0;
+    return;
+  }
+  if (as->jit_nfree >= VM_JIT_FREE_MAX)
+    return;
+  as->jit_free_off[as->jit_nfree] = addr - as->jit_base;
+  as->jit_free_len[as->jit_nfree] = len;
+  as->jit_nfree++;
+}
+
 int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
                 uint32_t flags, int fd, uint64_t offset) {
   if (!grp || !grp->as)
@@ -1797,6 +2121,7 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
   }
 
   uint64_t base;
+  int from_arena = 0;
   if (fl2 & VM_MAP_FIXED) {
     /* so-vm lane A: the DSO band (USER_LIB_BASE..LIMIT) is a legal
        MAP_FIXED target — that is where the interpreter places each
@@ -1815,6 +2140,17 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
     if (vm_region_remove(as, base, len) != 0)
       return -EINVAL;
   } else {
+    /* M6/L38: executable anonymous mappings are clustered first, so mono's
+       rel32 branch targets stay inside +-2 GiB (see the arena comment above).
+       MAP_FIXED deliberately skips this: the caller named the address. */
+    if (fd < 0 && (p & VM_PROT_EXEC)) {
+      uint64_t jb;
+      if (vm_jit_alloc(as, len, &jb)) {
+        base = jb;
+        from_arena = 1;
+        goto have_base;
+      }
+    }
     /* First-fit bottom-up from USER_MMAP_BASE; the hint is honored when
        free and inside the arena. */
     uint64_t start = USER_MMAP_BASE_V2;
@@ -1840,6 +2176,11 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       return -ENOMEM;
   }
 have_base:
+  /* M6/L38: an executable anonymous mapping is JIT code (Mono's code
+     manager, or the mprotect-commit of one of its reservations when the
+     caller asks for exec up front).  Record it with its spread. */
+  if (fd < 0 && (p & VM_PROT_EXEC) && !(fl2 & VM_MAP_FIXED))
+    vm_jit_note(grp->pid, addr, base, len, from_arena);
   if (anon_obj) {
     obj = vm_object_create(VM_OBJ_ANON, len);
     if (!obj)
@@ -1889,6 +2230,8 @@ int vm_munmap_range(struct process *grp, uint64_t addr, uint64_t len) {
   /* zap the resident pages first (the region list still describes them) */
   vm_zap_range(as, addr, len);
   int rc = vm_region_remove_locked(as, addr, len);
+  if (rc == 0)
+    vm_jit_release(as, addr, len); /* a freed code chunk is reusable */
   spinlock_release_irqrestore(&vm_lock, fl);
   return rc == 0 ? 0 : -EINVAL;
 }
@@ -2066,6 +2409,21 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   dst->img_active = src->img_active;
   dst->img_file_size = src->img_file_size;
   dst->img_start_cluster = src->img_start_cluster;
+
+  /* M6/L38: the child inherits the JIT arena's placement.  The placeholder
+     region is copied with the rest of the list, so a child that re-derived
+     the arena would find the span taken and fall back to first-fit -- which
+     is correct but needlessly un-clustered; copying the bump pointer keeps
+     both processes' code in the same +-2 GiB window. */
+  dst->jit_base = src->jit_base;
+  dst->jit_end = src->jit_end;
+  dst->jit_bump = src->jit_bump;
+  dst->jit_anchor0 = src->jit_anchor0;
+  dst->jit_nfree = src->jit_nfree;
+  for (int j = 0; j < VM_JIT_FREE_MAX; j++) {
+    dst->jit_free_off[j] = src->jit_free_off[j];
+    dst->jit_free_len[j] = src->jit_free_len[j];
+  }
 
   /* Copy the regions in list order; each insert takes vm_lock itself.
      Sibling threads of the parent could in principle mutate the list
