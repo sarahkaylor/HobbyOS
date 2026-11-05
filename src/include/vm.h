@@ -95,6 +95,22 @@
 #define USER_MAIN_STK_GUARD_LIMIT_V2 \
   (USER_MAIN_STK_LIMIT_V2 - USER_MAIN_STK_GUARD)
 
+/* JIT code arena (M6/L38, vm.c).  Mono's amd64 codegen patches `rel32`
+ * branches inside JIT code and refuses a target more than +-2 GiB away
+ * (x86-codegen.h:410 `offset == (gint32)offset`), so all of a process's
+ * executable anonymous mappings must stay in one cluster.  Linux gets that
+ * from a single bottom-up mmap arena; this kernel's first-fit is spread over
+ * an 18 GiB window the game also fills, so the arena is reserved explicitly:
+ * on the first PROT_EXEC anonymous mmap, the largest free span inside
+ * +-USER_JIT_REACH of where that mapping would have gone is claimed (capped
+ * at USER_JIT_ARENA_MAX) and later ones are bump-allocated from it.
+ * USER_JIT_MIN is the smallest span worth calling an arena. */
+#define USER_JIT_REACH 0x80000000ULL     /* +-2 GiB, mono's rel32 range */
+#define USER_JIT_ARENA_MAX 0x40000000ULL /* 1 GiB cap */
+#define USER_JIT_MIN 0x400000ULL         /* 4 MiB floor */
+#define USER_JIT_ALIGN 0x10000ULL        /* mono's code-chunk granularity */
+#define VM_JIT_FREE_MAX 16               /* freed arena spans kept for reuse */
+
 /* Region protection / kind (section 1.3).  Prot values are the MAP_*
  * PROT_* ABI values used by the syscall surface. */
 #define VM_PROT_READ 0x1
@@ -207,6 +223,20 @@ struct addr_space { /* one per group (leader PCB owned) */
      must die. */
   uint64_t retry_va;
   int retry_count;
+  /* M6/L38: the JIT code arena (vm.c).  jit_base == 0 means "not claimed
+     yet"; jit_end/jit_bump delimit the bump pointer; a span freed by munmap
+     goes on a small LIFO list so a code manager that frees a chunk can get
+     the same address back.  All of it is inherited by fork. */
+  uint64_t jit_base;
+  uint64_t jit_end;
+  uint64_t jit_bump;
+  /* The first address first-fit picked for an executable mapping: the arena
+   * window is pinned to it, so a claim that only becomes possible later can
+     never drift gigabytes away from the code it is meant to cluster. */
+  uint64_t jit_anchor0;
+  uint8_t jit_nfree;
+  uint64_t jit_free_off[VM_JIT_FREE_MAX];
+  uint64_t jit_free_len[VM_JIT_FREE_MAX];
 };
 
 /* --- AS lifecycle (vm.c) --------------------------------------------- */

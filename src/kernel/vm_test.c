@@ -1639,11 +1639,173 @@ out:
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* M6/L38: the JIT code arena.
+ *
+ * The property under test is the one Mono's amd64 codegen needs: every
+ * executable anonymous mapping of one process lands inside ONE contiguous
+ * span of at most 2 GiB, so `mono_x86_patch` can encode a rel32 branch
+ * between any two of them.  Everything else about placement must be
+ * unchanged: non-exec mappings never enter the arena, and an exhausted
+ * arena degrades to ordinary first-fit instead of failing.
+ */
+#define VM_JIT_TAG 63 /* 60=vm suite, 61=file suite, 62=trap_test */
+static void test_vm_jit_arena(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_jit_arena...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_JIT_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  fake.as = as;
+
+  /* --- (1) N exec mappings land inside a 2 GiB span ------------------- */
+#define JIT_N 12
+  int64_t b[JIT_N];
+  int ok = 1;
+  for (int i = 0; i < JIT_N; i++) {
+    b[i] = vm_mmap(&fake, 0, 0x10000, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                   VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+    if (b[i] <= 0)
+      ok = 0;
+  }
+  EXPECT_EQ(ok, 1);
+  /* The arena was claimed, is a real contiguous span, and every mapping is
+     inside it. */
+  EXPECT_EQ((as->jit_base != 0), 1);
+  EXPECT_EQ((as->jit_end > as->jit_base), 1);
+  EXPECT_EQ((as->jit_end - as->jit_base >= 0x10000 * JIT_N), 1);
+  uint64_t lo = (uint64_t)-1, hi = 0;
+  for (int i = 0; ok && i < JIT_N; i++) {
+    uint64_t a = (uint64_t)b[i];
+    EXPECT_EQ((a >= as->jit_base && a + 0x10000 <= as->jit_end), 1);
+    if (a < lo)
+      lo = a;
+    if (a + 0x10000 > hi)
+      hi = a + 0x10000;
+    struct vm_region *r = vm_region_find(as, a);
+    EXPECT_EQ((r && (r->prot & VM_PROT_EXEC)), 1);
+  }
+  /* The rel32 property itself: the whole cluster fits in +-2 GiB (it is
+     actually one arena, so far tighter). */
+  EXPECT_EQ((hi - lo <= 0x80000000ULL), 1);
+  /* And it is monotone: successive chunks take successive addresses, which
+     is what makes the cluster contiguous rather than merely close. */
+  for (int i = 1; ok && i < JIT_N; i++)
+    EXPECT_EQ((uint64_t)b[i] > (uint64_t)b[i - 1], 1);
+
+  /* --- (2) the arena is skipped for non-exec mappings ----------------- */
+  int64_t rw = vm_mmap(&fake, 0, 0x2000, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((rw > 0), 1);
+  /* Not inside the arena ... */
+  EXPECT_EQ((uint64_t)rw < as->jit_base ||
+            (uint64_t)rw + 0x2000 > as->jit_end, 1);
+  /* ... and the arena itself is untouched by it. */
+  uint64_t bump_before = as->jit_bump;
+  int64_t rw2 = vm_mmap(&fake, 0, 0x1000, VM_PROT_READ,
+                        VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((rw2 > 0), 1);
+  EXPECT_EQ(as->jit_bump, bump_before);
+  /* A DSO-band mapping (MAP_FIXED in the library window) is not moved
+     either: the arena must not change the DSO placement rule. */
+  uint64_t fix = USER_LIB_BASE + 0x200000;
+  int64_t fx = vm_mmap(&fake, fix, 0x1000, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS | VM_MAP_FIXED, -1, 0);
+  EXPECT_EQ((fx == (int64_t)fix), 1);
+
+  /* --- (3) a freed arena chunk comes back ----------------------------- */
+  int64_t freed = b[JIT_N - 1];
+  EXPECT_EQ(vm_munmap_range(&fake, (uint64_t)freed, 0x10000), 0);
+  int64_t reuse = vm_mmap(&fake, 0, 0x10000, VM_PROT_READ | VM_PROT_EXEC,
+                          VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((reuse == freed), 1);
+
+  /* --- (4) exhaustion falls back cleanly ------------------------------ */
+  /* Fill the remaining arena with one request that cannot fit inside it. */
+  uint64_t left = (as->jit_end - as->jit_bump) & ~0xFFFULL;
+  if (left >= 0x1000) {
+    int64_t big = vm_mmap(&fake, 0, left, VM_PROT_READ | VM_PROT_EXEC,
+                          VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+    /* It may take the arena's tail exactly, or (if the tail is unaligned)
+       go to first-fit; either way the mapping must exist. */
+    EXPECT_EQ((big > 0), 1);
+  }
+  /* Any further exec mapping now needs the ordinary first-fit path; it must
+     succeed, and it must NOT be inside the arena. */
+  int64_t fb = vm_mmap(&fake, 0, 0x10000, VM_PROT_READ | VM_PROT_EXEC,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((fb > 0), 1);
+  EXPECT_EQ((uint64_t)fb < as->jit_base || (uint64_t)fb + 0x10000 > as->jit_end,
+            1);
+  EXPECT_EQ((vm_region_find(as, (uint64_t)fb) != 0), 1);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 /* M6/L30 (b): the DSO slot allocator.  A loader that maps several DSOs of
  * colliding size/hash (our audio shims were byte-identical) must get a
  * DISTINCT base for every live mapping, and a hint that names an occupied
  * base must be skipped rather than honoured.  Also: one page-cache object
  * per file no matter how many times it is mapped. */
+/* M6/L38 (b): the arena must end where the free gap ends.
+ *
+ * The claim aligns its base up to the code-chunk granularity.  Aligning the
+ * BASE without shrinking the SIZE by the same amount pushes the arena one
+ * chunk past the gap's end, `vm_region_insert` then refuses the placeholder
+ * and the claim silently fails -- which is exactly how the first version lost
+ * the cluster on every desktop run while its own test (an empty address
+ * space, where every gap ends on a 2 GiB boundary) passed.  This test builds a
+ * bounded, deliberately mis-aligned gap and pins both ends.
+ */
+static void test_vm_jit_arena_gap_end(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_jit_arena_gap_end...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_JIT_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  fake.as = as;
+
+  /* A 32 KiB mapping at the arena base leaves the next free span starting at
+     MMAP_BASE+0x8000 (not 64 KiB aligned), and one big ceiling mapping closes
+     the span -- and the whole +-2 GiB window -- exactly at its end. */
+  int64_t lo = vm_mmap(&fake, 0, 0x8000, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((lo == (int64_t)USER_MMAP_BASE_V2), 1);
+  uint64_t ceiling = USER_MMAP_BASE_V2 + 0x10008000;
+  int64_t cl = vm_mmap(&fake, ceiling, 0x70000000ULL, VM_PROT_READ,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS | VM_MAP_FIXED, -1, 0);
+  EXPECT_EQ((cl == (int64_t)ceiling), 1);
+
+  int64_t e = vm_mmap(&fake, 0, 0x10000, VM_PROT_READ | VM_PROT_EXEC,
+                      VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((e > 0), 1);
+  /* The arena exists, is 64 KiB aligned, and its END is the gap's end -- never
+     one byte into the ceiling. */
+  EXPECT_EQ((as->jit_base != 0), 1);
+  EXPECT_EQ((as->jit_base & (USER_JIT_ALIGN - 1)), 0);
+  EXPECT_EQ((as->jit_base >= (uint64_t)lo + 0x8000), 1);
+  EXPECT_EQ((as->jit_end == ceiling), 1);
+  EXPECT_EQ((e >= (int64_t)as->jit_base && (uint64_t)e + 0x10000 <= as->jit_end),
+            1);
+  struct vm_region *rc = vm_region_find(as, ceiling);
+  EXPECT_EQ((rc && rc->base == ceiling), 1);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 static void test_vm_dso_bases_distinct(void) {
   tests_run++;
   uart_puts("  Running test_vm_dso_bases_distinct...\n");
@@ -1849,6 +2011,8 @@ void vm_test_suite(void) {
   test_vm_file_map_fork();
   /* M6/L30: COW without the frame-identity gate; DSO base allocation */
   test_vm_file_cow_private_leaf();
+  test_vm_jit_arena(); /* M6/L38: exec mappings cluster in one +-2 GiB span */
+  test_vm_jit_arena_gap_end(); /* M6/L38: the arena stops at the gap's end */
   test_vm_dso_bases_distinct();
   test_fs_dso_identity_pair();
 }
