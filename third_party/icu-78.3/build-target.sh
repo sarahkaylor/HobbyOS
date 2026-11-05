@@ -107,6 +107,34 @@ case "$ARCH" in
     ;;
 esac
 
+# --- compiler selection ----------------------------------------------------
+# On macOS the `clang` on PATH is Apple clang, whose `-fuse-ld=lld` selects the
+# Mach-O driver (ld64.lld).  Every ELF link test then fails with the Darwin
+# flag set appended by that driver:
+#   ld.lld: error: unknown argument '-dynamic' / '-platform_version' / '-arch'
+#   ld.lld: error: cannot open macos: No such file or directory
+# -> "C compiler cannot create executables" (configure exit 77).  The repo
+# Makefile pins Homebrew LLVM for exactly this reason; this block gives a
+# direct `bash build-target.sh` run the same default, and routes the driver
+# through tools/cc-x86-none-elf.sh (clang compiles, ld.lld links) because even
+# Homebrew clang hands x86_64-none-elf links to /usr/bin/gcc on Darwin -- see
+# that script's header.  CC/CXX from the environment (the Makefile passes its
+# own down) always win, and on Linux, where `clang` is already an ELF driver,
+# nothing changes.
+if [ "$(uname -s)" = "Darwin" ]; then
+  CC_GIVEN=${CC:+1}
+  for p in /opt/homebrew/opt/llvm/bin/clang /usr/local/opt/llvm/bin/clang; do
+    [ -x "$p" ] || continue
+    [ -n "${CC:-}" ]  || CC="$p"
+    [ -n "${CXX:-}" ] || CXX="$p"
+    break
+  done
+  if [ "${CC_GIVEN:-0}" != 1 ] && [ -x "${REPO_ROOT}/tools/cc-x86-none-elf.sh" ]; then
+    CC="${REPO_ROOT}/tools/cc-x86-none-elf.sh"
+    CXX="$CC"
+  fi
+fi
+
 CXX="${CXX:-clang}"
 CLANG_RESOURCE_INCLUDE="$("${CXX}" -print-resource-dir 2>/dev/null)/include"
 [ -d "$CLANG_RESOURCE_INCLUDE" ] || die "cannot locate the clang resource include dir"

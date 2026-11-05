@@ -5,6 +5,9 @@ obj/
 *.BIN_host
 *.BIN
 *.elf
+# ... except the committed SDLAPP fixture cache (third_party/sdl/README.md):
+# a musl static-PIE only Linux can build, staged on hosts without musl-gcc.
+!third_party/sdl/cache/*.elf
 *_test_host
 # Host parity harness run binaries (built in the repo root by host_tests)
 *_parity_run
