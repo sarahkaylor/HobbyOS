@@ -41,9 +41,9 @@ extern void uart_puts(const char *s);
    one lock (previously uart_puts used uart_lock while print_int used a
    second, print_lock — bytes interleaved under real SMP). */
 extern spinlock_t uart_lock;
-extern void uart_putc_raw(char c);
+extern void panic_putc(char c);
 void print_int_raw(int val);
-void uart_print_hex_raw(uint64_t val);
+void panic_print_hex(uint64_t val);
 
 /**
  * High-level handler for hardware interrupts (IRQs) occurring in the kernel
@@ -78,7 +78,7 @@ void irq_handler_c(struct trap_frame *tf) {
  * Takes the ONE console lock (uart_lock, shared with uart_puts/uart_putc)
  * for the whole write so multi-char output cannot interleave with other
  * console writers.  The per-char writes go through the lock-free
- * uart_putc_raw because we already hold the lock.
+ * panic_putc because we already hold the lock.
  */
 void print_int(int val) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
@@ -89,11 +89,11 @@ void print_int(int val) {
 /** Lock-free decimal print — deadlock diagnostics only. */
 void print_int_raw(int val) {
   if (val < 0) {
-    uart_putc_raw('-');
+    panic_putc('-');
     val = -val;
   }
   if (val == 0) {
-    uart_putc_raw('0');
+    panic_putc('0');
     return;
   }
   char buf[16];
@@ -103,7 +103,7 @@ void print_int_raw(int val) {
     val /= 10;
   }
   while (idx > 0)
-    uart_putc_raw(buf[--idx]);
+    panic_putc(buf[--idx]);
 }
 
 /**
@@ -111,17 +111,17 @@ void print_int_raw(int val) {
  */
 void uart_print_hex(uint64_t val) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  uart_print_hex_raw(val);
+  panic_print_hex(val);
   spinlock_release_irqrestore(&uart_lock, flags);
 }
 
 /** Lock-free hex print — deadlock diagnostics only. */
-void uart_print_hex_raw(uint64_t val) {
+void panic_print_hex(uint64_t val) {
   static const char hex_chars[] = "0123456789ABCDEF";
-  uart_putc_raw('0');
-  uart_putc_raw('x');
+  panic_putc('0');
+  panic_putc('x');
   for (int i = 60; i >= 0; i -= 4) {
-    uart_putc_raw(hex_chars[(val >> i) & 0xF]);
+    panic_putc(hex_chars[(val >> i) & 0xF]);
   }
 }
 

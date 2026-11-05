@@ -652,8 +652,8 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
      step is knowing whether this ever happens.  Lock-free printing on purpose:
      we may hold vm_lock here, and uart_puts can take a lock. */
   {
-    extern void uart_puts_raw(const char *s);
-    extern void uart_print_hex_raw(uint64_t v);
+    extern void panic_puts(const char *s);
+    extern void panic_print_hex(uint64_t v);
     static volatile uint64_t freerace_seen;
     uint32_t me = get_cpuid();
     for (uint32_t c = 0; c < MAX_CPUS; c++) {
@@ -662,11 +662,11 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
       if (freerace_seen >= 20)
         break;
       freerace_seen++;
-      uart_puts_raw("[FREERACE] freeing root=");
-      uart_print_hex_raw(root_phys);
-      uart_puts_raw(" while cpu=");
-      uart_print_hex_raw((uint64_t)c);
-      uart_puts_raw(" still translates through it\n");
+      panic_puts("[FREERACE] freeing root=");
+      panic_print_hex(root_phys);
+      panic_puts(" while cpu=");
+      panic_print_hex((uint64_t)c);
+      panic_puts(" still translates through it\n");
     }
   }
   uint64_t *p4 = (uint64_t *)root_phys;

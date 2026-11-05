@@ -49,7 +49,7 @@ uint64_t timer_get_ms(void) { return host_now_ms; }
 /* Capture the console: the steal must be announced, never silent. */
 static char con[4096];
 static size_t con_n;
-void uart_putc_raw(char c) {
+void panic_putc(char c) {
   if (con_n < sizeof con - 1)
     con[con_n++] = c;
   con[con_n] = '\0';

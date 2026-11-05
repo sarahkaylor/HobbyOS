@@ -1,0 +1,6 @@
+console_shred: 5 byte-interleaved record(s) in '/home/sarah/.hermes/cache/scratch/t3_gb209b.log'
+  L646 [breaks 'Exception in Kernel Mode'] [KERNEL] FATAL: Exception in Kerne/POLLTST.Bl Mode! VectoIN
+  L14216 [breaks 'console silent'] [W[ATWACHDOTCHDOG] consolGe ] silencot for morne solevt2 l silehnt foroaderan :  PI2D=6 emore than 20s0s
+  L32428 [breaks 'console silent'] [EXITPC] pid=43 last_[WATuserCHD_pc=0xOG] co100000nsole silent fo142r moF
+  L38823 [breaks 'Error Code:'] Loading program fo[KERNr schedulEL] FATAL: Exception in Kernel Mode! Vector: 14 Erroer (vr Code: 2 AS): 0xSED.B0000000000000002
+  L48196 [breaks 'console silent'] v2 loader: image mapped (lazy), bytes=223928 pages=5[5WAT firstCHDOG] console=i n elsilaepn=0mts

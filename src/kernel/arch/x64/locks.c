@@ -118,21 +118,21 @@ volatile uint64_t lock_wait_caller2[MAX_CPUS];
 /* Raw lock-free deadlock scream: a core spinning with IRQs disabled may be
    stuck because the lock's holder died mid-print, possibly while holding
    uart_lock itself.  This path must therefore never touch uart_lock (or any
-   lock) — it talks straight to COM1 via uart_putc_raw, the lock-free
+   lock) — it talks straight to COM1 via panic_putc, the lock-free
    diagnostic sink (uart_putc itself now serializes on uart_lock). */
-extern void uart_putc_raw(char c);
+extern void panic_putc(char c);
 static void scream_hex(const char *label, uint64_t v) {
   static const char hx[] = "0123456789abcdef";
-  for (const char *p = label; *p; p++) uart_putc_raw(*p);
-  uart_putc_raw('0'); uart_putc_raw('x');
-  for (int i = 15; i >= 0; i--) uart_putc_raw(hx[(v >> (i * 4)) & 0xF]);
+  for (const char *p = label; *p; p++) panic_putc(*p);
+  panic_putc('0'); panic_putc('x');
+  for (int i = 15; i >= 0; i--) panic_putc(hx[(v >> (i * 4)) & 0xF]);
 }
 static void scream_dec(const char *label, uint32_t v) {
-  for (const char *p = label; *p; p++) uart_putc_raw(*p);
+  for (const char *p = label; *p; p++) panic_putc(*p);
   char t[12]; int m = 0;
   if (v == 0) t[m++] = '0';
   while (v) { t[m++] = (char)('0' + (v % 10)); v /= 10; }
-  while (m) uart_putc_raw(t[--m]);
+  while (m) panic_putc(t[--m]);
 }
 
 void spinlock_init(spinlock_t *lock) {
@@ -178,7 +178,7 @@ void spinlock_acquire(spinlock_t *lock) {
         }
         scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
-        uart_putc_raw('\n');
+        panic_putc('\n');
         lock_cnt_lockforever++;
       }
       /* GB-060: break the strand when the holder is provably gone.  A CPU that
@@ -217,7 +217,7 @@ void spinlock_acquire(spinlock_t *lock) {
           scream_dec("\n[UNOWNED-FREED] cpu=", cpu);
           scream_hex(" lock=", (uint64_t)lock);
           scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
-          uart_putc_raw('\n');
+          panic_putc('\n');
           lock_cnt_unownedfreed++;
           __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
         } else if (lock_steal_ok(own, cpu)) {
@@ -225,7 +225,7 @@ void spinlock_acquire(spinlock_t *lock) {
           scream_hex(" lock=", (uint64_t)lock);
           scream_dec(" from halted cpu=", own - 1);
           scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
-          uart_putc_raw('\n');
+          panic_putc('\n');
           lock_cnt_stolen++;
           lock->owner = LOCK_OWNER_FREEING;
           __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
@@ -246,7 +246,7 @@ void spinlock_acquire(spinlock_t *lock) {
           scream_dec(" owner_cpu=", own - 1);
           scream_dec(" stale_ms=", age);
           scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
-          uart_putc_raw('\n');
+          panic_putc('\n');
           lock_cnt_stallbreak++;
           lock->owner = LOCK_OWNER_FREEING;
           __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
@@ -363,7 +363,7 @@ void lock_print_counters(void) {
   scream_dec(" STOLEN=", lock_cnt_stolen);
   scream_dec(" LOCKFOREVER=", lock_cnt_lockforever);
   scream_dec(" UNOWNED-FREED=", lock_cnt_unownedfreed);
-  uart_putc_raw('\n');
+  panic_putc('\n');
 }
 
 uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
