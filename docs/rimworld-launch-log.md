@@ -3337,11 +3337,20 @@ the host's `sha256sum`):
 
 ```text
 [R1] globalgamemanagers            want=738764 got=738764 count=OK sha=OK
+     246422d54d011cb5c0a2743feedde98cc80cd651776b914dd8e5bdef3c2304b5
 [R1] globalgamemanagers.assets     want=860632 got=860632 count=OK sha=OK
+     73223d29af351e5abda7904ce39da7335a9e5cf6e1266a0ede0b33ad8ce20166
 [R1] globalgamemanagers.assets.resS want=2796240 got=2796240 count=OK sha=OK
+     39dd38fcd8dd95d41d6d55fe16a448d29fe2c31d9a162c825c24c6d99a893d7a
 [R1] level0                        want=1776   got=1776   count=OK sha=OK
+     1b4cedcc07d5f279cc2bfca892aee56c5f59b0e4a345b8906194ce40cc8ed740
 [R1] level1                        want=3496   got=3496   count=OK sha=OK
+     6162acf02de9f895472c5cf4e30e13d0eba2eb06f88d13efb9ee0fab5e295dd2
 ```
+
+(`fstat` and `lseek(SEEK_END)` agreed with the host size on every row; the
+digests above are the guest's, computed over the bytes the single `read()`
+returned, and they equal the host's `sha256sum`.)
 
 `resources.assets` (9,902,968 bytes) did **not** return inside the 300 s
 window — not a short read, a throughput wall (§24.5). No `count=SHORT` row
@@ -3473,10 +3482,15 @@ datagram limit, before any more fault-path work.
 TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 411   Tests failed: 0
 python3 tools/gate/m3_window_probe.py    PASS (with the new display check)
 python3 tools/gate/m3_window_probe.py    FAIL on the no-stamp DSO (A/B, above)
+python3 tools/gate/m4_gl_probe.py        PASS — GL 3.3 triangle rendered and PRESENTED
+bash tools/gate/m2_threads.sh            PASS — 8 pthreads, mutex+condvar+TLS+join
+bash tools/gate/m12_thread_ceiling.sh    PASS — 150 threads + TLS + SIGCANCEL(32)
+bash tools/gate/m2_mono.sh               PASS — Mono 6.12 threaded C# program
 bash tools/rw/check-no-game-files.sh     OK
 ```
 
-`m4_gl_probe` / `m2_mono` / `m2_threads` / `m12` were not re-run after the
-final kernel edit; the only kernel changes are diagnostics plus the bounded
-NVMe poll, and the unit tier (411/0) covers `vm`, `file_obj`, `nfs` and the
-block layer's host-side tests.
+Evidence: `obj/rw-desktop/evidence-l34/run{1,2,3,5}.{serial,Player}.log`,
+`obj/rw-desktop/read1.log` + `read1.out` (the `[R1]` rows),
+`obj/rw-desktop/m3-nostamp.log` and `m3-stamp.log` (the A/B),
+`obj/rw-desktop/m4-l34.log`, `g-m2thr.log`, `g-m12.log`, `g-m2mono.log`,
+`unit-l34.log`.
