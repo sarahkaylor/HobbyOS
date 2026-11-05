@@ -6021,3 +6021,32 @@ on screen (the `[XSW]` row proves the client presented exactly one full-opaque
 1280x720 frame; there is no main menu, so no fps number is meaningful). This is
 the §35 ladder reproduced exactly — the stall is deterministic, which is what
 makes the single remaining question in §36.6 worth one more instrument.
+
+### 36.8 Regression, and the one row that re-opens the pool question
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh` → **414 run, 0 failed**. Gates:
+`t3_linux_probe redzone` PASS, `m2_mono` PASS, `m2_tp` PASS (clock row
+included), `m2_threads` PASS, `m12_thread_ceiling` PASS, `m3_window_probe`
+PASS, `m4_gl_probe` PASS. `tools/rw/check-no-game-files.sh` OK.
+
+One row in the 180 s run deserves to be carried forward, because it is the only
+thing left that contradicts "the pool is idle":
+
+```text
+[IDLESTUCK] slot=31 pid=31 st=8 futex=0x11AC005078 rip=0x1083503376 Thread Pool Wor
+[FUTEX] q slot=31 pid=31 st=8 key=0x11AC005078 waits=5 wakes=3 ... Thread Pool Wor
+[FUTEX] rgn pid=31 key=0x11AC005078 base=0x11AC000000 len=0x23000 kind=3 prot=3
+```
+
+`0x11AC005078` is inside a **thread stack** (`base=0x11AC000000`, 140 KiB,
+`kind=3`), which per rule 98 is the signature of `mono_join_uninterrupted`'s
+`mono_os_event_wait_multiple` — i.e. a **Thread Pool Worker is in
+`Thread.Join`** at the stall (5 waits, 3 wakes, still parked), not idle. If that
+worker is the one holding the PLINQ merge task, the task cannot complete while
+the worker joins a thread that never exits, and §36.6's candidate 1 becomes
+"the merge task IS being run, by a worker blocked in a Join". The next
+instrument is therefore cheap and specific: at the stall, resolve the *join
+target* of that worker (its `MonoThreadHandle`, one word on its stack) and print
+the target's pid/name, plus `Task.Status` for the task the main thread's
+`RunSynchronously` was given. Both are reads of state the two threads already
+carry; neither needs a new boot-time mechanism.
