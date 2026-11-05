@@ -296,9 +296,64 @@ __attribute__((section(".text._start"))) void _start(void) {
     mono_on = mk >= 0;
     if (mk >= 0) close(mk);
   }
+  /* L42: /TPTRACE turns on Mono's threadpool trace (worker park/unpark/
+     create/timeout).  It answers "was a work item stranded while the last
+     worker timed out?" with rows instead of a theory.  A second
+     MONO_LOG_MASK line would be shadowed by the first (Mono's g_getenv
+     returns the first match), so the mask/level strings are built here. */
+  int tp_on;
+  {
+    int tk = open("/TPTRACE", 0 /* O_RDONLY */);
+    tp_on = tk >= 0;
+    if (tk >= 0) close(tk);
+  }
+  char tp_level_env[32];
+  char tp_mask_env[32];
+  char coop_env[40];
+  char nogc_env[24];
+  char tpcpu_env[40];
+  {
+    const char *lvl = (mono_on || tp_on) ? "MONO_LOG_LEVEL=debug"
+                                         : "MONO_LOG_LEVEL=error";
+    int k = 0;
+    while (lvl[k]) { tp_level_env[k] = lvl[k]; k++; }
+    tp_level_env[k] = 0;
+    const char *msk = tp_on ? "MONO_LOG_MASK=threadpool"
+                            : (mono_on ? "MONO_LOG_MASK=asm"
+                                       : "MONO_LOG_MASK=none");
+    k = 0;
+    while (msk[k]) { tp_mask_env[k] = msk[k]; k++; }
+    tp_mask_env[k] = 0;
+    int ck = open("/COOPSUSPEND", 0 /* O_RDONLY */);
+    int coop = ck >= 0;
+    if (ck >= 0) close(ck);
+    /* Empty string when the marker is absent: an empty envp entry is
+       ignored, so the runtime's own default stays in force. */
+    const char *cn = coop ? "MONO_THREADS_SUSPEND=coop" : "";
+    k = 0;
+    while (cn[k]) { coop_env[k] = cn[k]; k++; }
+    coop_env[k] = 0;
+    int nk = open("/NOGC", 0 /* O_RDONLY */);
+    int nogc = nk >= 0;
+    if (nk >= 0) close(nk);
+    const char *ng = nogc ? "GC_DONT_GC=1" : "";
+    k = 0;
+    while (ng[k]) { nogc_env[k] = ng[k]; k++; }
+    nogc_env[k] = 0;
+    int tk2 = open("/TPCPU", 0 /* O_RDONLY */);
+    int tpcpu = tk2 >= 0;
+    if (tk2 >= 0) close(tk2);
+    const char *tc = tpcpu ? "MONO_THREADS_PER_CPU=50" : "";
+    k = 0;
+    while (tc[k]) { tpcpu_env[k] = tc[k]; k++; }
+    tpcpu_env[k] = 0;
+  }
   char *envp[] = {
-      (char *)(mono_on ? "MONO_LOG_LEVEL=debug" : "MONO_LOG_LEVEL=error"),
-      (char *)"MONO_LOG_MASK=asm", /* level=error silences it when off */
+      tp_level_env,
+      tp_mask_env,
+      coop_env,
+      nogc_env,
+      tpcpu_env,
       (char *)"HOME=" RW_HOME,
       mtx_env,
       glx_env,
@@ -369,6 +424,21 @@ __attribute__((section(".text._start"))) void _start(void) {
     exit(3);
   }
 
+  /* L42 diagnostic: when /SIGQUITON is staged, ask Mono for its own full
+   * thread dump once the game has had time to park.  Mono installs a SIGQUIT
+   * handler that prints "Full thread dump:" with every managed stack; the
+   * dump lands in Player.log (fd 2 is the log) and in this serial console.
+   * Gated on a marker so an ordinary run is not perturbed. */
+  int dump_at = -1;
+  {
+    int df = open("/SIGQUITON", O_RDONLY);
+    if (df >= 0) {
+      close(df);
+      dump_at = 60;
+      pc("[RW] rwlaunch: /SIGQUITON present -> SIGQUIT at 60s\n");
+    }
+  }
+
   /* The game runs until it fails or reaches an interactive menu.  Bound the
    * wait so a run that gets all the way up still yields Player.log and exits
    * before the harness deadline, instead of dying with the QEMU process. */
@@ -377,6 +447,10 @@ __attribute__((section(".text._start"))) void _start(void) {
   for (int s = 0; s < RW_WAIT_SECS; s++) {
     wp = waitpid(pid, &status, 1 /* WNOHANG */);
     if (wp != 0) break;
+    if (s == dump_at) {
+      pc("[RW] rwlaunch: SIGQUIT -> managed thread dump\n");
+      kill(pid, 3 /* SIGQUIT */);
+    }
     if (s > 0 && (s % 10) == 0) {
       pc("[RW] rwlaunch: child still running after ");
       pd(s);

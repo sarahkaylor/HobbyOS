@@ -4866,3 +4866,85 @@ the TU cache warm) puts `UND XcPresentMark` back in `--dyn-syms`.
 * `tools/rw/l40-runs.sh <tag> <n> [run-timeout]` — the ladder runner
   (sequential by construction: two desktop harnesses in one worktree fight over
   `disk.img`, rule 5).
+
+## 30. 2026-11-05 — M6/L42: the park is Mono's ThreadPool, not the joiner
+
+§30 answers L41's open question with a minimal reproducer rather than another
+theory. The managed wait is real (`mono_wait_uninterrupted` ->
+`mono_os_cond_timedwait`), but the waiter's signal word is **0**: no `Set()`
+ever ran. The signaller is a `ThreadPool.QueueUserWorkItem` callback, and
+Mono's ThreadPool does not execute work items in this guest at all.
+
+### 30.1 The managed side, as far as it can be named
+
+- The parked object is a `MonoW32Handle` at `key-0x38`: `signal_status` at
+  `+0xc` is **0**, `signal_mutex` at `+0x10`, `signal_cond` at `+0x38`
+  (`mono_w32handle_set` writes `1` to `+0xc` then broadcasts `+0x38`).
+  `status=0` with the waiter parked means the setter never ran; it is not a
+  lost broadcast.
+- `Loading.Preload` (pid 27) waits in `mono_os_event_wait_multiple`, whose
+  per-waiter `pthread_cond_t` is allocated **on the waiter's own stack**
+  (`mono_os_event_wait_multiple` builds it at `0x38(%rsp)`): the key sits
+  next to the thread-name string in the 16 MiB anon region. It is a Mono
+  event wait, not a raw Unity semaphore.
+- Mono's own SIGQUIT dump was attempted (`/SIGQUITON` -> `kill(pid,3)`):
+  `Full thread dump:` appears in Player.log, then Mono aborts the Finalizer
+  with `Cannot transition thread ... from RUNNING with FINISH_ASYNC_SUSPEND`.
+  The dump machinery is unusable here; the CFI backtrace + the w32handle
+  status word are the managed-side evidence instead.
+
+### 30.2 The reproducer: Mono ThreadPool never runs a work item
+
+`tools/rw/mono-probe/tp.cs` runs under the guest's own Mono 6.12:
+
+```text
+TP START cpus=8
+TP phase before-join
+TP TIMEOUT parallel done=0
+TP OK join v=7
+TP phase after-join
+TP TIMEOUT parallel done=0   (x6)
+```
+
+`Thread.Join` works. `ThreadPool.QueueUserWorkItem` + `AutoResetEvent.Set()`
+never runs a single callback: `done=0` after 5 s, every round, **before any
+managed Thread.Join**. `[TEXIT]` shows the workers being created and exiting
+with `st=3` (RUNNING), `key=0x0` — they never park and never execute a work
+item. That is exactly RimWorld's `Verse.GenThreading.ParallelFor` shape
+(AutoResetEvent + one work item per slice + `WaitOne` loop), so the game parks
+in the loading screen with the event status word still 0.
+
+A/B controls that did not move the park: `GC_DONT_GC=1`, and
+`MONO_THREADS_PER_CPU=50` (the threadpool's worker ceiling). The stall byte
+count is identical in every run (`0x130B4C9` = 19,903,177), so this is a
+deterministic missing signal, not a timing race.
+
+### 30.3 The join contract itself matches Linux
+
+`src/user/linux_probe_join.c` (host glibc vs guest compat, same static-PIE
+source) covers park-first join, wake-before-wait, join-after-exit and
+CLONE_CHILD_CLEARTID; all four graded rows agree with the host (see
+`obj/linux_probe_join.log`). `[TEXIT]` rows show every exiting compat thread
+with `touch=0`, `pre=<tid>`, and `woke=1` whenever a joiner was parked on its
+clear word. So pthread_join/clear_child_tid is **not** the lost-wakeup site;
+the missing signal is one level above it, in Mono's threadpool.
+
+### 30.4 Ladder at this tip (3 runs, 110 s each)
+
+| run | NFS bytes | main (pid 4) | Preload (pid 27) | screenshot |
+|---|---|---|---|---|
+| r1 | `0x130B4C9` (19,903,177) | futex, `hs=0`, waits=208/wakes=117 | futex, waits=13/wakes=0 | loading screen |
+| r2 | `0x130B4C9` | futex, `hs=0`, 216/115 | 13/0 | loading screen |
+| r3 | `0x130B4C9` | futex, `hs=0`, 206/117 | 13/0 | loading screen |
+
+All three runs are the same park, byte for byte — the deterministic signature
+of a missing signal, not a race. The ladder did **not** pass the loading
+screen: the blocker is the ThreadPool reproducer of 30.2, which is the next
+lane's target. The fixes this lane ships are diagnostic (the `[TEXIT]` rows,
+the syscall ring, the w32handle status word, `/SIGQUITON`, `/TPTRACE`,
+`/NOGC`, `/TPCPU`) plus the probe `linux_probe_join` and the managed
+reproducer `tools/rw/mono-probe/tp.cs`.
+
+Gates at this tip: unit `413/0`; `t3_linux_probe join` host/guest rows agree
+for A-D; `redzone`, `m2_threads`, `m12`, `m2_mono`, `m3_window_probe`,
+`m4_gl_probe` PASS.

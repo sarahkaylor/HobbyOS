@@ -963,6 +963,7 @@ static int process_create_internal_ver(int ver) {
          the same shape) and was reverted. */
       proc_table[i].last_syscall = -1;
       proc_table[i].last_ret = 0;
+      proc_table[i].sys_ring_at = 0;
       break;
     }
   }
@@ -4983,6 +4984,8 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   }
   struct process *t = &proc_table[pid];
   t->state = PROC_STATE_ALLOCATED;
+  t->sys_ring_at = 0;
+  t->last_syscall = -1;
   pid_alloc_seq[pid]++;
   t->tgid = grp->pid;
   t->is_thread = 1;
@@ -5240,12 +5243,73 @@ void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
   /* GB-021 (Linux CLONE_CHILD_CLEARTID): a thread's last act is to zero its
      TCB tid word and wake a joiner parked on it.  Do it before the last-thread
      teardown can release the address space the word lives in. */
-  if (cur->clear_child_tid) {
-    uint64_t at = cur->clear_child_tid;
+  uint64_t ctid = cur->clear_child_tid;
+  uint32_t ctid_pre = 0;
+  int ctid_touch = -1;
+  int ctid_woke = -1;
+  if (ctid) {
+    /* L42: the joiner's whole contract is this word.  Record what it held
+       BEFORE the clear, whether the page was reachable at all, and how many
+       waiters the wake found -- a nonzero pre-value with woke=0 is a wake
+       that arrived before the joiner parked; pre=0 with woke=0 is a joiner
+       that was never on this word. */
+    ctid_touch = vm_touch(cur, ctid, 4, 0);
+    if (ctid_touch == 0)
+      ctid_pre = *(volatile uint32_t *)ctid;
     cur->clear_child_tid = 0;
-    if (vm_touch(cur, at, 4, 1) == 0)
-      *(volatile uint32_t *)at = 0;
-    process_futex(cur, tf, at, 1, 1, -1);
+    if (vm_touch(cur, ctid, 4, 1) == 0) {
+      *(volatile uint32_t *)ctid = 0;
+      ctid_touch = 0;
+    }
+    ctid_woke = process_futex(cur, tf, ctid, 1, 1, -1);
+  }
+  {
+    /* One row per exiting Linux-ABI thread, bounded.  `pc` is the userspace
+       instruction that entered exit(2); `mod` names the DSO span it belongs
+       to (base+offset) so an offline reader can tell glibc's start_thread
+       from Mono's own exit trampoline without a symbol server. */
+    static int texit_rows;
+    if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) && texit_rows < 96) {
+      texit_rows++;
+      struct kline kt;
+      kl_init(&kt);
+      kl_s(&kt, "[TEXIT] pid=");
+      kl_i(&kt, cur->pid);
+      kl_s(&kt, " pc=");
+      kl_hex(&kt, (unsigned long)(tf ? tf->elr : 0));
+      kl_s(&kt, " clear=");
+      kl_hex(&kt, (unsigned long)ctid);
+      kl_s(&kt, " pre=");
+      kl_hex(&kt, (unsigned long)ctid_pre);
+      kl_s(&kt, " touch=");
+      kl_i(&kt, ctid_touch);
+      kl_s(&kt, " woke=");
+      kl_i(&kt, ctid_woke);
+      kl_s(&kt, " live=");
+      kl_i(&kt, grp->live_threads);
+      if (cur->as && tf) {
+        struct vm_region *rg = vm_region_find(cur->as, tf->elr);
+        if (rg) {
+          int idx = (int)(rg - cur->as->regions);
+          int lo = idx;
+          while (lo > 0) {
+            struct vm_region *pv = &cur->as->regions[lo - 1];
+            if (pv->kind != rg->kind ||
+                pv->base + pv->len != cur->as->regions[lo].base)
+              break;
+            lo--;
+          }
+          kl_s(&kt, " mod=");
+          kl_hex(&kt, (unsigned long)cur->as->regions[lo].base);
+          kl_s(&kt, "+");
+          kl_hex(&kt, (unsigned long)(tf->elr - cur->as->regions[lo].base));
+        }
+      }
+      kl_s(&kt, " ");
+      kl_s(&kt, cur->name);
+      kl_c(&kt, '\n');
+      kl_emit(&kt);
+    }
   }
   cur->exit_status = ((int)retval & 0xff) << 8;
 

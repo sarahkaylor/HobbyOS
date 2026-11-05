@@ -263,6 +263,48 @@ if [ "${RW_TRACE_MUTEX:-0}" = 1 ]; then
 else
   mdel -i "$IMG" ::/MTXON >/dev/null 2>&1 || true
 fi
+# L42: /SIGQUITON makes rwlaunch send SIGQUIT to the game at 60 s, which is
+# Mono's own full managed thread dump ("Full thread dump:" in Player.log).
+if [ "${RW_SIGQUIT:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/sigquiton"
+  stage "$OUT/sigquiton" ::/SIGQUITON
+  echo "  staged: /SIGQUITON -> SIGQUIT at 60 s (Mono managed thread dump)"
+else
+  mdel -i "$IMG" ::/SIGQUITON >/dev/null 2>&1 || true
+fi
+# L42: Mono's threadpool trace (worker park/unpark/create/timeout).
+if [ "${RW_TPTRACE:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/tptrace"
+  stage "$OUT/tptrace" ::/TPTRACE
+  echo "  staged: /TPTRACE -> MONO_LOG_MASK=threadpool, level=debug"
+else
+  mdel -i "$IMG" ::/TPTRACE >/dev/null 2>&1 || true
+fi
+# L42: ask Mono for cooperative thread suspension (thread dumps then avoid
+# the async-suspend handshake that aborts on the Finalizer).
+if [ "${RW_COOPSUSPEND:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/coopsuspend"
+  stage "$OUT/coopsuspend" ::/COOPSUSPEND
+  echo "  staged: /COOPSUSPEND -> MONO_THREADS_SUSPEND=coop"
+else
+  mdel -i "$IMG" ::/COOPSUSPEND >/dev/null 2>&1 || true
+fi
+# L42: GC_DONT_GC=1 A/B: does the park survive with Boehm not collecting?
+if [ "${RW_NOGC:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/nogc"
+  stage "$OUT/nogc" ::/NOGC
+  echo "  staged: /NOGC -> GC_DONT_GC=1"
+else
+  mdel -i "$IMG" ::/NOGC >/dev/null 2>&1 || true
+fi
+# L42: A/B the Mono threadpool's worker ceiling (min/max = cpu*threads_per_cpu).
+if [ "${RW_TPCPU:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/tpcpu"
+  stage "$OUT/tpcpu" ::/TPCPU
+  echo "  staged: /TPCPU -> MONO_THREADS_PER_CPU=50"
+else
+  mdel -i "$IMG" ::/TPCPU >/dev/null 2>&1 || true
+fi
 # Opt-in GLX-level trace (tools/mesa/patches/0005): /GLXON makes rwlaunch
 # export HOBBYOS_GLX_TRACE=1, so the serial log carries every glX* request
 # Unity made and what the Mesa xlib frontend answered.
