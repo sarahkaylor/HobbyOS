@@ -1,15 +1,20 @@
-/* tp.cs — L42: the exact managed wait shape RimWorld's loader uses.
+/* tp.cs — L42/L43: the exact managed wait shape RimWorld's loader uses.
  *
  * Verse.GenThreading.ParallelFor/ParallelForEach create an AutoResetEvent,
  * queue one ThreadPool work item per batch, and each item does
  * Interlocked.Add(tasksDone) then taskDoneEvent.Set(); the caller loops
  * `while (tasksDone < count) taskDoneEvent.WaitOne();`.
  *
- * If that pattern can strand on this kernel, the game parks in the loading
- * screen at 19.9 MB with a wait handle whose signal word is still 0.  This
- * probe runs the pattern (plus a Thread.Join control) under the guest's own
- * Mono, and prints one row per case; a case that never returns prints
- * TP TIMEOUT with the counter it reached.
+ * RUN IT UNDER THE GAME'S OWN RUNTIME, NOT mono-sgen.  The official 6.12
+ * mono-sgen is monolithic and hides four mono_* symbols that
+ * libmono-native.so imports, so System.Native cannot load and EVERY threadpool
+ * worker dies in ThreadPoolWorkQueueThreadLocals..ctor -> new Random() ->
+ * Interop.Sys -- on the HOST too, printing "TP TIMEOUT parallel done=0" for a
+ * reason that has nothing to do with this kernel.  tools/rw/run-tp-probe.sh
+ * drives MonoBleedingEdge/libmonobdwgc-2.0.so through mono_main instead (the
+ * exact runtime the game runs) and tools/gate/m2_tp.sh grades it.
+ *
+ * A case that never returns prints TP TIMEOUT with the counter it reached.
  */
 using System;
 using System.Threading;
