@@ -42,6 +42,10 @@ XCOMPAT_OBJ   = obj/xcompat
 # byte primitives it emits anyway, so the DSO ends up with zero undefined
 # symbols -- see the comment at the top of xrt.c).
 XCOMPAT_CFLAGS = -O2 -Wall -Wextra -Wno-unused-parameter -std=c11 -ffreestanding
+# A/B knob for the L34 event-display stamp: `make XCOMPAT_NO_EVENT_DISPLAY=1
+# xcompat_dsos` builds the pre-fix behaviour so m3_window_probe's regression
+# row can be shown failing on the old bytes and passing on the new ones.
+XCOMPAT_NOSTAMP_DEF = $(if $(XCOMPAT_NO_EVENT_DISPLAY),-DXCOMPAT_NO_EVENT_DISPLAY,)
 XCOMPAT_DSOFLAGS = -shared -fPIC -fvisibility=hidden -nostdlib \
                    -fno-stack-protector -fno-asynchronous-unwind-tables \
                    -Wl,-z,now -Wl,--hash-style=gnu
@@ -74,7 +78,7 @@ $(XCOMPAT_LIBX11): $(XCOMPAT_DIR)/libx11.c $(XCOMPAT_DIR)/xcore.c \
                    $(XCOMPAT_DIR)/xrt.c $(XCOMPAT_DIR)/xabi.h \
                    $(XCOMPAT_DIR)/xcore.h
 	@mkdir -p $(XCOMPAT_OBJ)
-	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_DSOFLAGS) \
+	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_NOSTAMP_DEF) $(XCOMPAT_DSOFLAGS) \
 	  -Wl,-soname,libX11.so.6 -o $@ \
 	  $(XCOMPAT_DIR)/libx11.c $(XCOMPAT_DIR)/xcore.c $(XCOMPAT_DIR)/xrt.c
 
@@ -135,7 +139,7 @@ $(XCOMPAT_LIBX11_TRACE): $(XCOMPAT_DIR)/libx11.c $(XCOMPAT_DIR)/xcore.c \
                          $(XCOMPAT_DIR)/xrt.c $(XCOMPAT_DIR)/xabi.h \
                          $(XCOMPAT_DIR)/xcore.h
 	@mkdir -p $(XCOMPAT_OBJ)/trace
-	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_DSOFLAGS) -DXC_TRACE \
+	$(HOST_CC) $(XCOMPAT_CFLAGS) $(XCOMPAT_NOSTAMP_DEF) $(XCOMPAT_DSOFLAGS) -DXC_TRACE \
 	  -Wl,-soname,libX11.so.6 -o $@ \
 	  $(XCOMPAT_DIR)/libx11.c $(XCOMPAT_DIR)/xcore.c $(XCOMPAT_DIR)/xrt.c
 

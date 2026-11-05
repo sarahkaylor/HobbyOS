@@ -2863,11 +2863,40 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   if (now < wd_next_report_ms) {
     return;
   }
+  /* L34: a launch that is alive but silent is not necessarily stuck -- the
+   * game writes its log to a file, so the console says nothing for minutes
+   * while it grinds through NFS reads.  A periodic counter row (30 s) is the
+   * difference between "hung" and "reading at 17 KiB/s".  It runs before the
+   * silence gate and does not reset it. */
+  {
+    static uint64_t next_nfsio_ms;
+    if (now >= next_nfsio_ms) {
+      extern volatile uint64_t nfs_io_bytes, nfs_io_ops;
+      next_nfsio_ms = now + 30000;
+      uart_puts_raw("[NFSIO] bytes=0x");
+      uart_print_hex_raw(nfs_io_bytes);
+      uart_puts_raw(" rpcs=0x");
+      uart_print_hex_raw(nfs_io_ops);
+      uart_puts_raw(" ms=0x");
+      uart_print_hex_raw(now);
+      uart_puts_raw("\n");
+    }
+  }
   if (now - uart_last_activity_ms < WATCHDOG_SILENCE_MS) {
     return;
   }
   wd_next_report_ms = now + WATCHDOG_COOLDOWN_MS;
   uart_puts_raw("[WATCHDOG] console silent for more than 20s\n");
+  {   /* L34: is the launch making progress at all, and at what rate? */
+    extern volatile uint64_t nfs_io_bytes, nfs_io_ops;
+    uart_puts_raw("  [NFSIO] bytes=0x");
+    uart_print_hex_raw(nfs_io_bytes);
+    uart_puts_raw(" rpcs=0x");
+    uart_print_hex_raw(nfs_io_ops);
+    uart_puts_raw(" uptime_ms=0x");
+    uart_print_hex_raw(now);
+    uart_puts_raw("\n");
+  }
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
     uart_puts_raw("  CPU");
     print_int_raw((int)c);

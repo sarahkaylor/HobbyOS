@@ -22,6 +22,14 @@
 extern void uart_puts(const char *s);
 extern void print_int(int val);
 
+/* L34: bytes actually transferred by READ RPCs, and how many RPCs did it.
+ * The launch's speed wall is visible in these two counters (the watchdog
+ * prints them): ~1 KiB per RPC over slirp UDP.  Deliberately plain globals:
+ * a single writer per CPU, read by a reporter, and an approximate value is
+ * all a progress line needs. */
+volatile uint64_t nfs_io_bytes;
+volatile uint64_t nfs_io_ops;
+
 /* ==================================================================== */
 /* small string helpers (kernel has no libc)                            */
 /* ==================================================================== */
@@ -513,7 +521,6 @@ int nfs_is_dir(const struct nfs_mount *m, const char *rel) {
 int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
                   uint32_t offset, void *buf, uint32_t len) {
   if (!m || !m->in_use || !fh || fh->len == 0) return -1;
-
   /* A regular-file read() returns the whole count unless it hits EOF or an
    * error; it does not stop at the transport's rsize.  One NFS READ RPC
    * carries at most m->read_size (NFS_READ_CHUNK = 1024) bytes, so a larger
@@ -552,6 +559,8 @@ int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
     if (count == 0)
       break;
     done += count;
+    nfs_io_bytes += count;
+    nfs_io_ops++;
     if (eof)
       break;
   }

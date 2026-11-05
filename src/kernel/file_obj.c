@@ -25,6 +25,8 @@
 #include "lock.h"
 #include "vm.h"
 
+extern void uart_print_hex(uint64_t val);
+
 struct file_obj_entry {
   int used;
   uint16_t start_cluster;
@@ -222,8 +224,27 @@ uint64_t file_obj_page(struct vm_object *o, uint64_t off) {
   uint64_t nf = frame_alloc();
   if (!nf)
     return 0;
+  /* L34: one row before and after a file-page fill.  An instruction-fetch
+   * fault on a DSO text page arrives here; when the block device wedges, the
+   * log's last [PIN] with no [POK] says so without another kernel theory. */
+  static int pin_rows;
+  int pin_dbg = (pin_rows < 24);
+  if (pin_dbg) {
+    pin_rows++;
+    uart_puts("[PIN] off=");
+    uart_print_hex(idx * FRAME_SIZE);
+    uart_puts(" size=");
+    uart_print_hex((uint64_t)size);
+    uart_puts("\n");
+  }
   int n = fat16_read_direct_pos(cluster, size, nf, (int)FRAME_SIZE,
                                 (uint32_t)(idx * FRAME_SIZE));
+  if (pin_dbg) {
+    uart_puts("[POK] off=");
+    uart_print_hex(idx * FRAME_SIZE);
+    uart_puts(" n=");
+    uart_puts(n == (int)FRAME_SIZE ? "full\n" : "short\n");
+  }
   if (n < 0) {
     frame_free(nf);
     return 0;

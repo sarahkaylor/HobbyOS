@@ -3305,3 +3305,178 @@ teardown `SIGSEGV` at `UnityPlayer.so+0x1947cef` (runs 1 and 3, with run 3
 exiting cleanly from the same point) and run 2's instruction-fetch `#PF` loop
 at `rip=cr2=0x10823B1C00`. Neither is the suspend handshake, and neither is
 fixed here.
+
+## 24. 2026-11-04 — M6/L34: every queued X event carried a NULL `Display*`, and that was the first-scene crash
+
+§23 left two deaths. Both are now named, one is fixed with a regression that
+fails on the old bytes, and the launch reaches the game's own banner without a
+fault. The short-read suspicion was wrong — but the layer under it is a
+throughput wall, now measured.
+
+### 24.1 Short-read audit: no cap below the caller's request
+
+Every read entry point was read, not grepped for a constant:
+
+| path | where | cap | verdict |
+|---|---|---|---|
+| compat `read(2)` | `trap.c` `sys_read` | none (`int size` passed through) | OK |
+| FAT16 file read | `fs.c`→`fat16_read` | `min(size, remaining)`, sector loop to EOF | OK |
+| NFS file read | `fs.c`→`nfs_read_file` | per-RPC `read_size`=1024, **loops** to `len`/EOF/0 | OK (L31 fix intact) |
+| NFS exec image | `fs_read_image` | 1024 per call, loops | OK |
+| mmap page-in | `file_obj_page` | exactly `FRAME_SIZE`, tail zero-filled | OK |
+| `readv` | `linux_compat_misc.c` | 0x10000000 per segment, short read legal at segment end | OK |
+| `pread64` | `linux_compat_misc.c` | passes `n` | OK |
+| pipe | `pipe.c` | returns available bytes (POSIX-legal short read) | OK |
+| console / `/dev/null` | `fs.c` | EOF (0) | OK |
+| `/proc/self/maps` | `fs.c` | 1024-byte streaming (legal) | OK |
+| VFS prefix bind | `vfs_bind.c` | path translation only, no data path | OK |
+
+End-to-end proof, from the guest, with one `read(fd, buf, size)` per file
+(`src/user/rwread1.c`, `tools/rw/run-guest-read1.sh`, `[R1]` rows compared with
+the host's `sha256sum`):
+
+```text
+[R1] globalgamemanagers            want=738764 got=738764 count=OK sha=OK
+[R1] globalgamemanagers.assets     want=860632 got=860632 count=OK sha=OK
+[R1] globalgamemanagers.assets.resS want=2796240 got=2796240 count=OK sha=OK
+[R1] level0                        want=1776   got=1776   count=OK sha=OK
+[R1] level1                        want=3496   got=3496   count=OK sha=OK
+```
+
+`resources.assets` (9,902,968 bytes) did **not** return inside the 300 s
+window — not a short read, a throughput wall (§24.5). No `count=SHORT` row
+exists anywhere.
+
+### 24.2 (a): `rdi=0` is `XConfigureEvent.display`; `+0xe8` is `Display::screens`
+
+The faulting instruction, from `objdump` at `UnityPlayer.so+0x1947cef`:
+
+```text
+1947ce8: mov 0x18(%r15),%rdi        ; XEvent* + 0x18 == xany.display
+1947cec: mov (%rbx),%rsi
+1947cef: mov 0xe8(%rdi),%rcx        ; Display::screens  <- fault, rdi = 0
+1947cf6: movslq 0xe0(%rdi),%rdx     ; Display::default_screen
+1947cfd: shl $0x7,%rdx              ;   x sizeof(Screen) = 0x80
+1947d01: mov 0x10(%rcx,%rdx,1),%rdx  ; screens[default_screen]->+0x10
+```
+
+The containing function's FDE is `0x19472d3..0x1948887` and its prologue is
+`mov %rsi,%r15` — its second argument is the `XEvent*` (its first compare is
+`(%r15)` = `type`; the key path reads `0x54(%r15)` = `XKeyEvent.keycode` and
+this path reads `0x10`=send_event, `0x18`=display, `0x28`=window, `0x30/0x34`=x/y
+of `XConfigureEvent`, all pinned by `src/user/xcompat/xabi.h`).
+
+So `rdi` is the `Display*` **inside the event**, and `+0xe8` is the `screens`
+slot of Xlib's public `Display` prefix, reached through the inlined
+`ScreenOfDisplay(dpy, DefaultScreen(dpy))` macros. It was NULL because the
+compat `libX11` never wrote `xany.display` when it queued an event — `grep`
+found no writer of that field anywhere in the shim. A real Xlib stamps the
+display it read the event from; a client may use `ev.xconfigure.display`
+instead of the handle it passed to `XNextEvent`, and Unity does.
+
+Fix (`libx11.c` `queue_event`, the single choke point for input and for
+re-queued held events): copy the event, stamp `e.xany.display = d` for every
+event that has the field (`XErrorEvent` and `KeymapNotify` excepted, same rule
+`xc_queue` already applies to `serial`), then enqueue.
+
+Regression: `src/user/xcompat/sdl_window_probe.c` now fails the M3 gate when
+`ev.xconfigure.display != d`. A/B on the same gate, same probe:
+
+```text
+before (make XCOMPAT_NO_EVENT_DISPLAY=1):
+  [WP] FAIL: ConfigureNotify display=(nil) expected 0x1080014000 (xany.display not stamped)
+  m3w: FAIL
+after:
+  m3w: PASS - the shim served SDL's whole XCreateWindow sequence and delivered WM_DELETE_WINDOW
+```
+
+### 24.3 (b): `cr2=0x10823B1C00` is UnityPlayer text + `0x18a9c00` — a demand page-in, not freed JIT
+
+`0x10823B1C00 - 0x1080b08000` (UnityPlayer's load base) = `0x18a9c00`, inside
+`.text` (`0x733040..0x1ed4f51`). The new `[PFE]` row (capped at 24, in
+`vm_handle_fault`) records the shape of every exec fault. A measured row from
+the same runs (a different DSO: 2 MiB, base `0x1080022000`):
+
+```text
+[PFE] rip=0x10800BDF50 page=0x10800BD000 base=0x1080022000+0x178000
+      prot=5 kind=7 flags=18 ooff=0x22000 obj=0x75308D00 objsz=0x1EF818 present=0
+[PIN] off=0x1EA000 size=0x1EF818
+[POK] off=0x1EA000 n=full
+```
+
+`prot=5` (R+X), `kind=7` (VM_OBJ_FILE), `flags=18` (MAP_PRIVATE) and
+`present=0`: this is the loader's `mmap` of a DSO file, and the page is
+legitimately absent. (The 24-row cap was exhausted by smaller DSOs' text pages
+before UnityPlayer's own region was reached in these runs; `0x10823B1C00` sits
+`0x18a9c00` into UnityPlayer's 33,010,672-byte mapping, i.e. well inside the
+region the loader maps whole at `0x1080b08000`.) It is **not** a freed JIT page
+(a JIT page would be an anonymous region, `obj=0`), and it is **not** a
+stale-TLB retry (that path requires a *present* leaf and would print
+`present=1`; the hardware's `err` says `P=0`). In runs 2/3/5 all 24
+instrumented exec faults were `present=0` and all 24 fills returned `n=full`.
+
+What turns it into a permanent loop is not the fault path but the block layer:
+L33's run 2 log at that moment is a flood of
+`submit_io_cmd: STILL SPINNING! io_cq[0].cid=65535 ...` — the NVMe poll never
+sees its completion, so `file_obj_page` never returns and the same fault frame
+is reported by every watchdog tick.
+
+L34 changes the failure mode: `submit_io_cmd` now fails the request after 100
+spin windows (tens of seconds) with a `BLKSTALL` row and an error status, so a
+wedged device becomes a named `in=PROT` kill instead of an unbounded kernel
+loop. The stall itself is not reproduced in L34's runs (0 `STILL SPINNING`
+rows in six runs); the wedge mechanism is still open and is *not* claimed.
+
+### 24.4 Six desktop runs at this tip
+
+| run | display stamp | duration | SIGSEGV | Player.log last real line | present |
+|---|---|---|---|---|---|
+| 1 | no (baseline) | 200 s | none | `Finished resetting the current domain` | no |
+| 2 | yes | 220 s | none | `RimWorld 1.6.4871 rev600` | no |
+| 3 | yes | 400 s | none | `RimWorld 1.6.4871 rev600` | no |
+| 4 | yes | ~8 s | `UnityPlayer+0x91b119`, `rdi=0x2ffff1a41` | — | no |
+| 5 | yes | 600 s | none | `RimWorld 1.6.4871 rev600` | no |
+| 6 | yes | 700 s | none | `RimWorld 1.6.4871 rev600` | no |
+
+Runs 2/3/5/6 all write `UnloadTime:` (2.0-2.2 s) and then the game's own
+banner; `[SIGDUMP]` at `UnityPlayer+0x1947cef` does not occur again (0/4).
+Run 4 is the §22.6 pre-existing wild-write class (`UnityPlayer+0x91b119`,
+`rdi=0x2ffff1a41`), unchanged by this lane and still unexplained.
+
+**No frame.** `[XE] PUT` (the always-on `XPutImage` row) has zero rows in all
+six runs: the client never presented a single image, so the window stays
+black. One `[XE] FLUSH 0;0;1916;1018` row exists, which is the pre-paint
+`XFlush` of an unconfigured full-size window, not a content flush.
+
+### 24.5 Next blocker, measured: the game is starved by 1 KiB NFS RPCs at ~42 KB/s
+
+`[NFSIO]` (bytes/rpcs/uptime, printed every 30 s) during run 6:
+
+```text
+ms=43,557  bytes=432,263   rpcs=426    (mount + first reads)
+ms=103,557 bytes=4,025,387 rpcs=3,936
+ms=163,557 bytes=4,991,136 rpcs=4,882
+ms=193,557 bytes=6,290,592 rpcs=6,151  -> ~42 KB/s steady, 23-31 ms per RPC
+```
+
+`NFS_READ_CHUNK` is 1024 bytes (one UDP datagram), and each RPC costs ~25 ms:
+a socket is created and connected per RPC (`rpc_call`), and
+`virtio_net_poll_rx()` throttles its idle `QUEUE_NOTIFY` to 100 Hz. 6.3 MB in
+193 s means RimWorld's def/scene load (tens of MB of XML and `.assets`) cannot
+finish inside any harness deadline. That is the line to attack next: reuse one
+UDP socket for READ RPCs, and/or raise `read_size` toward the 1472-byte
+datagram limit, before any more fault-path work.
+
+### 24.6 Gates at this tip
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 411   Tests failed: 0
+python3 tools/gate/m3_window_probe.py    PASS (with the new display check)
+python3 tools/gate/m3_window_probe.py    FAIL on the no-stamp DSO (A/B, above)
+bash tools/rw/check-no-game-files.sh     OK
+```
+
+`m4_gl_probe` / `m2_mono` / `m2_threads` / `m12` were not re-run after the
+final kernel edit; the only kernel changes are diagnostics plus the bounded
+NVMe poll, and the unit tier (411/0) covers `vm`, `file_obj`, `nfs` and the
+block layer's host-side tests.

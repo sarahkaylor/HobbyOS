@@ -42,8 +42,13 @@ gcc -O2 -Wall -Wextra -fPIE -pie -nostdlib -nostartfiles -rdynamic \
   echo "AD-9 launcher link failed"; exit 2; }
 
 readelf -h "$OUT/RimWorldLinux.ad9" | awk '/Type:/{print "  ad9:",$2}'
-readelf -sW "$OUT/RimWorldLinux.ad9" | grep -qw dlopen || {
+# NOTE: capture the symbol table first.  `readelf -sW ... | grep -q dlopen`
+# under `set -o pipefail` reports the pipeline as failed whenever grep exits
+# early and readelf takes SIGPIPE (141) -- measured: a correct launcher was
+# rejected with "does not export dlopen".  One read, then match the text.
+AD9_SYMS="$(readelf -sW "$OUT/RimWorldLinux.ad9")"
+grep -qw dlopen <<<"$AD9_SYMS" || {
   echo "AD-9 launcher does not export dlopen"; exit 2; }
-readelf -sW "$OUT/RimWorldLinux.ad9" | grep -qw sigaction || {
+grep -qw sigaction <<<"$AD9_SYMS" || {
   echo "AD-9 launcher does not export sigaction"; exit 2; }
 echo "  built: $OUT/RimWorldLinux.ad9"
