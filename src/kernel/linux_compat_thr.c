@@ -82,6 +82,12 @@
    caller's word through this. */
 static int l_futex_word(struct process *p, uint64_t uaddr, uint32_t *out);
 
+/* Per-thread compat signal mask (owned by linux_compat_proc.c).  Declared
+   here as well because the park-interrupt hook and the deliverable check
+   below use it before the frame engine's own declaration. */
+extern uint64_t linux_compat_sigmask_get(struct process *p);
+extern void linux_compat_sigmask_set(struct process *p, uint64_t mask);
+
 /* Sentinel: l_futex_lock_pi() parked the caller (it resumes in userspace with
    rax = 0 when the lock is handed over), so the switch must not write rax. */
 #define L_PI_PARKED 1
@@ -210,6 +216,10 @@ static void l_futex_emit(const struct futex_ev *ev, int idx, char tag) {
     kl_i(&kl, (long)ev->timeout_ms);
     kl_s(&kl, " res=");
     kl_i(&kl, ev->res);
+    if (ev->pend) {
+      kl_s(&kl, " pend=");
+      kl_hex(&kl, (unsigned long)ev->pend);
+    }
     break;
   case FTR_WAKE:
   case FTR_REQUEUE:
@@ -1007,6 +1017,41 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       tf->regs[0] = (uint64_t)(int64_t)-EAGAIN;
       return 1;
     }
+    /* M6/L33: Linux's futex_wait_queue_me() checks signal_pending() before it
+       sleeps and answers -EINTR when a signal the thread would take is
+       already pending.  Without this, a suspend signal that lands between the
+       last user instruction and the park is slept through (measured: the 8th
+       SIGPWR with the thread in state FUTEX, no [RT]).  The signal itself is
+       delivered at this syscall's trap exit, i.e. before user code sees the
+       -EINTR return. */
+    {
+      int sig = linux_compat_sig_deliverable(p);
+      if (sig) {
+        spinlock_release_irqrestore(&proc_lock, flags);
+        {
+          static int eintr_rows;
+          if (eintr_rows < 16) {
+            eintr_rows++;
+            struct kline kl;
+            kl_init(&kl);
+            kl_s(&kl, "[FB] tid=");
+            kl_i(&kl, p->pid);
+            kl_s(&kl, " key=");
+            kl_hex(&kl, uaddr);
+            kl_s(&kl, " sig=");
+            kl_i(&kl, sig);
+            kl_s(&kl, " pend=");
+            kl_hex(&kl, (unsigned long)p->sig_pending);
+            kl_s(&kl, " mask=");
+            kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(p));
+            kl_s(&kl, " -> EINTR before park\n");
+            kl_emit(&kl);
+          }
+        }
+        tf->regs[0] = (uint64_t)(int64_t)-EINTR;
+        return 1;
+      }
+    }
     if (timeout_ms == 0) {
       spinlock_release_irqrestore(&proc_lock, flags);
       {
@@ -1026,6 +1071,7 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     }
     p->futex_uaddr = uaddr;
     p->wake_ms = (timeout_ms < 0) ? 0 : timer_get_ms() + (uint64_t)timeout_ms;
+    p->sig_park_nr = L_SYS_futex; /* restart-on-SA_RESTART identity */
     p->context[0] = 0; /* resume value: 0 on wake */
     tf->regs[0] = 0;
     p->state = PROC_STATE_FUTEX; /* save-set member: context is saved */
@@ -1046,6 +1092,10 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       ev.timeout_ms = timeout_ms;
       ev.res = 0;
       ev.rip = tf->elr;
+      {
+        struct process *grp = process_group(p);
+        ev.pend = p->sig_pending | (grp != p ? grp->sig_pending : 0);
+      }
       futex_trace_note(&ev);
     }
     spinlock_release_irqrestore(&proc_lock, flags);
@@ -1656,6 +1706,18 @@ static int l_sf_plant(struct process *p, struct process *cur,
   tf->regs[0] = 0;                                /* rax */
   tf->elr = handler;
   tf->lr = base;
+  /* M6/L33: the resume path (schedule -> enter_user_space) takes the user RSP
+     from gs:[24] (context[33]), not from tf->lr, so a frame planted at a
+     resume boundary must update it here.  Without this the handler was
+     entered with RSP still on the interrupted function's stack, its `ret`
+     popped that function's local instead of pretcode, and the process died at
+     PC=0x8 (measured by linux_probe_futex_sig case A).  The native engine's
+     plant does exactly this. */
+  arch_set_user_sp(base);
+  /* The resume copy writes [target_sp-320, target_sp) around the handler's
+     entry SP; materialize that window too (the sigframe itself is [base,
+     base+L_SF_SIZE)). */
+  (void)vm_touch(p, base - 320, L_SF_SIZE + 320, 1);
   tf->spsr &= ~(uint64_t)0x400;                   /* clear DF */
   /* M6/L32: the exact frame extents.  At a crash the faulting rsp is known,
      so `[base, base+L_SF_SIZE)` vs `[sp-128, sp)` settles in one row whether
@@ -1744,6 +1806,15 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
       kl_emit(&kl);
     }
     return 0;
+  }
+
+  /* M6/L33: rt_sigsuspend installs a TEMPORARY mask and Linux restores the
+     pre-suspend mask once the signal has been dequeued, before the handler
+     runs (so the handler's ucontext carries the original mask). */
+  if (cur->sig_suspended) {
+    cur->sig_suspended = 0;
+    linux_compat_sigmask_set(cur, cur->sig_saved_mask);
+    cur->sig_saved_mask = 0;
   }
 
   uint64_t handler = grp->sig_handler[sig];
@@ -1963,36 +2034,165 @@ int linux_compat_fault(struct process *p, struct trap_frame *tf, int signo) {
   return 1;
 }
 
-/* process_signal() hook: a signal aimed at a thread parked in futex must
-   interrupt the wait (Linux returns EINTR and glibc re-checks the word).
-   Without this Mono's stop-the-world tgkill never reaches a parked worker. */
+/* The first signal this thread would take right now: pending on the thread
+   (tgkill) or on the group anchor (kill), unblocked in the thread's mask, and
+   not SIG_IGN.  0 when none.  This is Linux's signal_pending() for the compat
+   class, used by every blocking syscall at entry and by the park-interrupt
+   hook, so "the signal arrived while the program was still running" can never
+   sleep through the park. */
+int linux_compat_sig_deliverable(struct process *p) {
+  if (!p)
+    return 0;
+  struct process *grp = process_group(p);
+  uint64_t pend = p->sig_pending;
+  if (grp != p)
+    pend |= grp->sig_pending;
+  if (!pend)
+    return 0;
+  uint64_t mask = linux_compat_sigmask_get(p);
+  for (int s = 1; s < HO_SIG_MAX; s++) {
+    uint64_t bit = 1ull << (s - 1);
+    if (!(pend & bit))
+      continue;
+    if (s == HO_SIGKILL || s == HO_SIGSTOP)
+      continue; /* uncatchable; the kill path owns them */
+    if (mask & bit)
+      continue; /* blocked: Linux does not wake a park for it either */
+    if (grp->sig_handler[s] == HO_SIG_IGN)
+      continue; /* ignored signals never interrupt a syscall */
+    return s;
+  }
+  return 0;
+}
+
+/* [FWK] why a parked compat wait ended.  The futex ring already records
+   WAKE/TIMEOUT rows (key match / deadline); this row is the third reason and
+   names the syscall family, so a log can never show "parked and then
+   nothing" without also showing which signal was deliverable. */
+static void l_sig_wake_row(struct process *t, int sig, const char *why,
+                           uint64_t key) {
+  static int rows;
+  if (rows >= 24)
+    return;
+  rows++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[FWK] tid=");
+  kl_i(&kl, t->pid);
+  kl_s(&kl, " sig=");
+  kl_i(&kl, sig);
+  kl_s(&kl, " why=");
+  kl_s(&kl, why);
+  kl_s(&kl, " key=");
+  kl_hex(&kl, (unsigned long)key);
+  kl_s(&kl, " pend=");
+  kl_hex(&kl, (unsigned long)t->sig_pending);
+  kl_s(&kl, " mask=");
+  kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(t));
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+/* Linux's -ERESTARTSYS half: when the handler for `sig` carries SA_RESTART,
+   the interrupted syscall must RESTART, not return -EINTR.  Rewind the saved
+   PC over the two-byte `syscall` and put the number back in rax; the frame is
+   then planted at the resume boundary with the interrupted PC = the `syscall`
+   instruction, so rt_sigreturn lands back on it and the syscall re-executes
+   (its entry check now finds no pending signal and parks again). */
+static int l_sig_restart_park(struct process *t, int sig) {
+  if (!t->sig_park_nr || !t->context[31] || t->context[31] < 4)
+    return 0;
+  if (!(linux_compat_sigflags_get(process_group(t), sig) & L_SA_RESTART))
+    return 0;
+  t->context[0] = (uint64_t)t->sig_park_nr;
+#ifdef __x86_64__
+  t->context[31] -= 2; /* `syscall` is 0F 05 */
+#else
+  t->context[31] -= 4; /* `svc #0` */
+#endif
+  t->sig_park_kind = 3; /* deliver at resume, then re-execute */
+  t->sig_park_nr = 0;
+  return 1;
+}
+
+/* process_signal() hook: a signal aimed at a compat thread must end any
+   blocking park it is in, exactly as Linux does.
+
+   Linux semantics (and why each branch exists):
+     * FUTEX_WAIT returns -EINTR (or -ERESTARTSYS, restarted only when the
+       handler is SA_RESTART) *after* the handler runs.
+     * A PI waiter must not leave its park without owning the lock -- glibc's pthread_mutex_lock reads any non-ESRCH/EDEADLK answer
+       as ownership (pthread_mutex_lock.c:419-441), so a PI waiter keeps
+       sleeping and takes the signal after the handoff.
+     * nanosleep/clock_nanosleep return -EINTR (never restarted).
+     * rt_sigsuspend restores the pre-suspend mask (the delivery engine then
+       writes that mask into the handler's ucontext, as Linux does) and
+       returns -EINTR.
+     * A rewound park (l_park: poll/select/read/accept/connect) is left
+       rewound: the syscall re-executes and its own entry check
+       (linux_compat_sig_deliverable) answers -EINTR, after this handler has
+       run at that syscall's trap exit.
+     * A signal the thread has blocked does not interrupt anything. */
 void linux_compat_signal_interrupt(struct process *t) {
   if (!t || !(t->abi_flags & PROC_FLAG_LINUX_ABI))
     return;
-  if (t->state != PROC_STATE_FUTEX)
-    return;
-  /* A PI waiter must not leave its park without owning the lock: glibc's
-     pthread_mutex_lock treats futex_lock_pi() returning anything it does not
-     recognise (EINTR included) as success and enters the critical section
-     (pthread_mutex_lock.c:419-441).  Leave it parked; the signal stays pending
-     and is delivered when the lock is handed over and the syscall returns. */
-  {
+  int sig = linux_compat_sig_deliverable(t);
+  if (!sig)
+    return; /* blocked or ignored: the park stands, the bit stays pending */
+  if (t->state == PROC_STATE_FUTEX) {
+    /* See above: a PI waiter must not leave the park without the lock. */
     int slot = l_thr_slot_of(t, 0);
     if (slot >= 0 && l_thr[slot].pi)
       return;
+    t->context[0] = (uint64_t)(int64_t)-EINTR;
+    int restarting = l_sig_restart_park(t, sig);
+    {
+      struct futex_ev ev = {0};
+      ev.op = FTR_SIGNAL;
+      ev.pid = t->pid;
+      ev.as = (uint64_t)(uintptr_t)t->as;
+      ev.uaddr = t->futex_uaddr;
+      ev.woke_pid = sig;
+      ev.pend = t->sig_pending;
+      futex_trace_note(&ev);
+    }
+    l_sig_wake_row(t, sig, restarting ? "futex-sa-restart" : "futex",
+                   t->futex_uaddr);
+    t->futex_uaddr = 0;
+    t->wake_ms = 0;
+    t->state = PROC_STATE_READY;
+    return;
   }
-  t->context[0] = (uint64_t)(int64_t)-EINTR;
-  {
-    struct futex_ev ev = {0};
-    ev.op = FTR_SIGNAL;
-    ev.pid = t->pid;
-    ev.as = (uint64_t)(uintptr_t)t->as;
-    ev.uaddr = t->futex_uaddr;
-    futex_trace_note(&ev);
+  if (t->state == PROC_STATE_BLOCKED) {
+    if (t->sig_suspended) {
+      /* rt_sigsuspend: the signal was dequeued under the TEMPORARY mask.
+         The pre-suspend mask is restored in linux_compat_signal_deliver()
+         after the signal has been chosen -- restoring it here would make the
+         delivery re-check fail (the probe's thread blocks SIGUSR1 before
+         sigsuspend, exactly as POSIX allows) and the wake would be lost.
+         SA_RESTART does not apply: sigsuspend always returns -EINTR. */
+      t->context[0] = (uint64_t)(int64_t)-EINTR;
+      t->sig_park_kind = 0;
+      t->sig_park_nr = 0;
+      l_sig_wake_row(t, sig, "sigsuspend", 0);
+    } else if (t->sig_park_kind == 1) {
+      /* nanosleep / clock_nanosleep: the syscall is not rewound. */
+      if (!l_sig_restart_park(t, sig)) {
+        t->context[0] = (uint64_t)(int64_t)-EINTR;
+        t->sig_park_kind = 0;
+        l_sig_wake_row(t, sig, "sleep", 0);
+      } else {
+        l_sig_wake_row(t, sig, "sleep-sa-restart", 0);
+      }
+      t->sig_park_nr = 0;
+    } else {
+      /* A rewound park: leave the saved frame alone (rax must stay the
+         syscall number) and let the re-executed syscall answer -EINTR. */
+      l_sig_wake_row(t, sig, "restart", 0);
+    }
+    t->wake_ms = 0;
+    t->state = PROC_STATE_READY;
   }
-  t->futex_uaddr = 0;
-  t->wake_ms = 0;
-  t->state = PROC_STATE_READY;
 }
 
 /* ---- the table --------------------------------------------------------- */

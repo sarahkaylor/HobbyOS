@@ -574,7 +574,15 @@ static int l_proc_rt_sigprocmask(struct process *p, struct trap_frame *tf) {
   if (uset) {
     uint64_t set;
     if (l_copy_from_user(p, &set, uset, sizeof set) != 0) return l_ret(tf, -EFAULT);
-    uint64_t old = l_sigmask[slot];
+    /* M6/L33: Linux writes the mask as it was BEFORE the change into oldset.
+       This used to write the POST-change mask, so musl's __block_all_sigs()
+       (SIG_BLOCK, all ones, oldset = &set) captured "all blocked" as the
+       thread's saved mask, and every musl thread then restored that mask in
+       start() — i.e. every thread ran with SIGPWR/SIGUSR1 blocked and no park
+       could be interrupted (measured by linux_probe_futex_sig).  Same shape
+       for glibc's pthread_sigmask. */
+    uint64_t before = l_sigmask[slot];
+    uint64_t old = before;
     if (how == L_SIG_BLOCK) old |= set;
     else if (how == L_SIG_UNBLOCK) old &= ~set;
     else if (how == L_SIG_SETMASK) old = set;
@@ -582,6 +590,11 @@ static int l_proc_rt_sigprocmask(struct process *p, struct trap_frame *tf) {
     /* bit (signo-1): SIGKILL 9, SIGSTOP 19 */
     old &= ~((1ull << (L_SIGKILL - 1)) | (1ull << (L_SIGSTOP - 1)));
     l_sigmask[slot] = old;
+    if (uold) {
+      if (l_copy_to_user(p, uold, &before, sizeof before) != 0)
+        return l_ret(tf, -EFAULT);
+    }
+    return l_ret(tf, 0);
   } else if (how != L_SIG_BLOCK && how != L_SIG_UNBLOCK && how != L_SIG_SETMASK) {
     return l_ret(tf, -EINVAL);
   }
@@ -589,6 +602,23 @@ static int l_proc_rt_sigprocmask(struct process *p, struct trap_frame *tf) {
     uint64_t cur = l_sigmask[slot];
     if (l_copy_to_user(p, uold, &cur, sizeof cur) != 0) return l_ret(tf, -EFAULT);
   }
+  return l_ret(tf, 0);
+}
+
+/* rt_sigpending(127): the set of signals that are both pending and blocked.
+ * musl's sigpending() and any program that polls its own pending set use it;
+ * before this the guest got -ENOSYS and could not tell "no signal" from "the
+ * call is missing". */
+static int l_proc_rt_sigpending(struct process *p, struct trap_frame *tf) {
+  uint64_t uset = l_arg(tf, 0);
+  uint64_t setsize = l_arg(tf, 1);
+  if (setsize != 8) return l_ret(tf, -EINVAL);
+  int slot = l_slot(p);
+  if (slot < 0) return l_ret(tf, -EINVAL);
+  struct process *grp = process_group(p);
+  uint64_t pend = p->sig_pending | (grp != p ? grp->sig_pending : 0);
+  uint64_t out = pend & l_sigmask[slot];
+  if (l_copy_to_user(p, uset, &out, sizeof out) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
 }
 
@@ -1347,11 +1377,71 @@ static int l_proc_sched_setscheduler(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, 0);
 }
 
+/* rt_sigsuspend(130): atomically install `mask` and sleep until a signal is
+ * delivered.  Linux restores the pre-suspend mask BEFORE running the handler
+ * and the syscall returns -EINTR afterwards.
+ *
+ * This number is not optional for the RimWorld track: Boehm's GC suspend
+ * handler is exactly
+ *     sem_post(GC_suspend_ack_sem);
+ *     do { sigsuspend(&{restart signal only}); } while (GC_world_is_stopped);
+ * (libmonobdwgc GC_suspend_handler_inner, measured).  With the number missing
+ * the guest got -ENOSYS, so every "suspended" worker busy-spun in user space
+ * instead of parking: the world was never really stopped, the suspend acked
+ * late or not at all, and the handshake's timing became a race (section 23:
+ * the 8th SIGPWR planted, no [RT]). */
+static int l_pending_under(struct process *p, uint64_t mask) {
+  struct process *grp = process_group(p);
+  uint64_t pend = p->sig_pending;
+  if (grp != p) pend |= grp->sig_pending;
+  for (int s = 1; s < HO_SIG_MAX; s++) {
+    uint64_t bit = 1ull << (s - 1);
+    if (!(pend & bit)) continue;
+    if (s == HO_SIGKILL || s == HO_SIGSTOP) continue;
+    if (mask & bit) continue;
+    if (grp->sig_handler[s] == HO_SIG_IGN) continue;
+    return s;
+  }
+  return 0;
+}
+
+static int l_proc_rt_sigsuspend(struct process *p, struct trap_frame *tf) {
+  uint64_t umask = l_arg(tf, 0);
+  uint64_t size = l_arg(tf, 1);
+  if (size != 8) return l_ret(tf, -EINVAL);
+  uint64_t nm = 0;
+  if (l_copy_from_user(p, &nm, umask, sizeof nm) != 0)
+    return l_ret(tf, -EFAULT);
+  /* SIGKILL/SIGSTOP cannot be blocked, exactly like rt_sigprocmask. */
+  nm &= ~((1ull << (L_SIGKILL - 1)) | (1ull << (L_SIGSTOP - 1)));
+
+  /* A signal already pending and permitted by the new mask delivers now. */
+  if (l_pending_under(p, nm)) return l_ret(tf, -EINTR);
+
+  p->sig_saved_mask = linux_compat_sigmask_get(p);
+  p->sig_suspended = 1;
+  linux_compat_sigmask_set(p, nm);
+  /* The result must be in the saved frame: schedule() saves tf, and the
+     guest resumes with rax from that copy (the l_block_ms rule). */
+  tf->regs[0] = (uint64_t)(int64_t)-EINTR;
+  {
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    p->wake_ms = 0;
+    p->sig_park_kind = 1;
+    p->state = PROC_STATE_BLOCKED;
+    spinlock_release_irqrestore(&proc_lock, flags);
+  }
+  schedule(tf, 0);
+  return 1;
+}
+
 const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"},
   {L_SYS_clock_getres, l_proc_clock_getres, "clock_getres"},
   {L_SYS_sched_getparam, l_proc_sched_getparam, "sched_getparam"},
   {L_SYS_sched_getscheduler, l_proc_sched_getscheduler, "sched_getscheduler"},
   {L_SYS_rt_sigtimedwait, l_proc_rt_sigtimedwait, "rt_sigtimedwait"},
+  {L_SYS_rt_sigpending, l_proc_rt_sigpending, "rt_sigpending"},
+  {L_SYS_rt_sigsuspend, l_proc_rt_sigsuspend, "rt_sigsuspend"},
   {L_SYS_statfs, l_proc_statfs, "statfs"},
   {L_SYS_sched_get_priority_max, l_proc_sched_prio_max, "sched_get_priority_max"},
   {L_SYS_sched_get_priority_min, l_proc_sched_prio_min, "sched_get_priority_min"},

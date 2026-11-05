@@ -186,6 +186,21 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
         uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
         uint64_t pflags = spinlock_acquire_irqsave(&p->lock);
         if (p->count == 0 && p->writer_count > 0) {
+          /* M6/L33: Linux's pipe_read checks signal_pending() exactly here --
+             after "the pipe is empty" and before registering the waiter -- and
+             answers -ERESTARTSYS.  A compat reader that just resumed from a
+             signal wake must not silently sleep again (measured: the futex-sig
+             probe's read case re-parked forever).  Compat class only: the
+             native park/deliver contract is unchanged. */
+          extern int linux_compat_sig_deliverable(struct process *)
+              __attribute__((weak));
+          if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) &&
+              linux_compat_sig_deliverable &&
+              linux_compat_sig_deliverable(cur)) {
+            spinlock_release_irqrestore(&p->lock, pflags);
+            spinlock_release_irqrestore(&proc_lock, proc_flags);
+            return -EINTR;
+          }
           pid_mask_set(&p->reader_pid_mask, cur->pid);
           cur->state = PROC_STATE_BLOCKED;
           spinlock_release_irqrestore(&p->lock, pflags);
@@ -307,6 +322,17 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
         uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
         uint64_t pflags = spinlock_acquire_irqsave(&p->lock);
         if (p->count >= PIPE_SIZE && p->reader_count > 0) {
+          /* M6/L33: same Linux check on the write side: a compat writer with
+             a deliverable pending signal returns -EINTR instead of parking. */
+          extern int linux_compat_sig_deliverable(struct process *)
+              __attribute__((weak));
+          if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) &&
+              linux_compat_sig_deliverable &&
+              linux_compat_sig_deliverable(cur)) {
+            spinlock_release_irqrestore(&p->lock, pflags);
+            spinlock_release_irqrestore(&proc_lock, proc_flags);
+            return -EINTR;
+          }
           pid_mask_set(&p->writer_pid_mask, cur->pid);
           cur->state = PROC_STATE_BLOCKED;
           spinlock_release_irqrestore(&p->lock, pflags);

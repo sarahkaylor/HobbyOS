@@ -162,12 +162,22 @@ static int l_core_gettimeofday(struct process *p, struct trap_frame *tf) {
    saved frame), so a value stored after the call is never what the guest sees.
    Measured: with the store after the call, nanosleep returned rax == 35 (the
    syscall number) and the probe read it as a positive error. */
-static void l_block_ms(struct trap_frame *tf, int ms) {
+static void l_block_ms(struct trap_frame *tf, int ms, int nr) {
   struct process *cur = current_process();
   tf->regs[0] = 0;
   if (cur && ms > 0) {
+    /* M6/L33: Linux's nanosleep checks signal_pending() before it sleeps and
+       answers -EINTR when a signal the thread would take is already pending.
+       The handler runs at this syscall's trap exit, before user code sees the
+       return. */
+    if (linux_compat_sig_deliverable(cur)) {
+      tf->regs[0] = (uint64_t)(int64_t)-EINTR;
+      return;
+    }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     cur->wake_ms = timer_get_ms() + (uint64_t)ms;
+    cur->sig_park_kind = 1; /* not rewound: a signal wake returns -EINTR */
+    cur->sig_park_nr = nr;  /* identity for the SA_RESTART restart */
     cur->state = PROC_STATE_BLOCKED;
     spinlock_release_irqrestore(&proc_lock, flags);
     schedule(tf, 0);
@@ -181,7 +191,7 @@ static int l_core_nanosleep(struct process *p, struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)r;
     return 1;
   }
-  if (ms > 0) l_block_ms(tf, (int)ms);
+  if (ms > 0) l_block_ms(tf, (int)ms, L_SYS_nanosleep);
   tf->regs[0] = 0;
   return 1;
 }
@@ -201,7 +211,7 @@ static int l_core_clock_nanosleep(struct process *p, struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)r;
     return 1;
   }
-  if (ms > 0) l_block_ms(tf, (int)ms);
+  if (ms > 0) l_block_ms(tf, (int)ms, L_SYS_clock_nanosleep);
   tf->regs[0] = 0;
   return 1;
 }

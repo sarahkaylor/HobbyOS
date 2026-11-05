@@ -107,4 +107,12 @@ int l_copy_cstr(struct process *p, char *kdst, uint64_t usrc, uint64_t cap);
    Returns -EINVAL for a negative or absurd timespec. */
 int l_timespec_to_ms(struct process *p, uint64_t uts, int64_t *out_ms);
 
+/* --- M6/L33: pending-signal query for a blocking compat syscall ---------
+ * Returns the first signal this thread would take right now: pending on the
+ * thread or its group anchor, not blocked by the thread's mask, and not
+ * SIG_IGN.  Returns 0 when none.  A blocking syscall uses it at entry
+ * (Linux's "signal_pending" check) so a signal that arrived while the
+ * program was still running never sleeps through the park. */
+int linux_compat_sig_deliverable(struct process *p);
+
 #endif /* LINUX_COMPAT_H */

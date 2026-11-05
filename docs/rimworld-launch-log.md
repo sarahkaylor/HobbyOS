@@ -3090,3 +3090,218 @@ handshake behind it.
 
 Evidence: `obj/rw-desktop/evidence-l32/{before-abort,after-1,after-2,after-3,after-4-postgates}.serial.log`
 with the matching `Player.log`s.
+
+## 23. 2026-11-04 — M6/L33: a compat thread's park now takes its signal, and the game runs its own main
+
+§22 ended with the resume half of Boehm's handshake open: the 8th `SIGPWR` was
+planted with no `[RT]` after it, and the collector parked in
+`GC_suspend_ack_sem` for ever. The hypothesis handed to this lane — "a compat
+thread blocked in `futex_wait` does not take a pending signal" — was
+**partly right and partly backwards**, and the two pre-existing bugs found
+underneath it mattered more than the hypothesis.
+
+### 23.1 What the rows said (measured, three runs)
+
+Before any fix, the shape was:
+
+```text
+[SIGIN] pid=6 sig=30 st=8 …            <- suspend aimed at a PARKED thread
+[TGTK]  … tid=6 sig=30 st=2 … rc=0     <- our interrupt hook DID wake it
+[SIGD]  pid=6 sig=30 …                 <- …and the handler was planted…
+… [RT] pid=6 …                         <- …but only after the handler that
+                                          was ALREADY running returned
+```
+
+and the two decisive rows were not about delivery at all:
+
+```text
+[IDLESTUCK] slot=6 st=3 rip=0x108004348a Finalizer
+[SIGD] pid=6 sig=30 → [LCOMPAT] ENOSYS nr=130 name=Finalizer rip=0x108004348A
+```
+
+`nr=130` is **rt_sigsuspend**. Boehm's suspend handler is statically
+
+```text
+27c7b1: sem_post(&GC_suspend_ack_sem)      ; the ack
+27c845: sigsuspend(&{restart signal only}) ; park until SIGXCPU, loop on
+                                             GC_world_is_stopped / stop_count
+```
+
+(disassembled in `libmonobdwgc-2.0.so`, `GC_suspend_handler_inner`), so the
+"stopped" worker was spinning in an **ENOSYS loop** in user space. The world
+was never really stopped, every suspend acked at a timing-dependent point, and
+one late `SIGPWR` (queued while the previous handler was still spinning) was
+delivered only after that handler returned — which is exactly the `[SIGD]` with
+no `[RT]`.
+
+Two more rows explain why a woken thread did not run its handler before the
+syscall's return became visible:
+
+- `process_signal_resume_deliver()` skipped **every** `is_thread` PCB, so a
+  worker woken from `futex_wait` with `-EINTR` returned to glibc *without* the
+  frame, and glibc re-entered `futex_wait` before any trap exit could deliver.
+- `l_sf_plant()` set `tf->lr` but never `arch_set_user_sp()`, and the resume
+  path (`enter_user_space`) takes the user RSP from `gs:[24]`, not from
+  `tf->lr`. A frame planted at a resume boundary therefore entered the handler
+  on the interrupted function's stack; its `ret` popped a local instead of
+  pretcode and the thread died at `PC=0x8` (measured by the new probe, case A).
+
+### 23.2 The probe: host reference vs guest, one table
+
+`src/user/linux_probe_futex_sig.c` (musl static-PIE, ordinary Linux program;
+`tools/gate/t3_linux_probe.sh futex_sig`). It proves the ordering Linux
+guarantees — handler first, *then* the syscall's `-EINTR` is visible — and the
+discriminating SA_RESTART pair.
+
+| case | what it proves | host (reference) | guest before | guest after |
+|---|---|---|---|---|
+| A | `FUTEX_WAIT` (infinite), handler **without** SA_RESTART | `-1/EINTR`, handler ran first | slept forever, handler never ran | **same as host** |
+| B | same wait with **SA_RESTART** | handler runs once, wait RESTARTS; explicit wake returns 0 | returned EINTR (no restart) | **same as host** |
+| C | `rt_sigsuspend` | `-EINTR`, handler first, pre-suspend mask restored | `-ENOSYS` (loop) | **same as host** |
+| D | `clock_nanosleep` | `EINTR`, handler first | slept / no handler | **same as host** |
+| E | futex wait with a **masked** pending signal | `ETIMEDOUT`, no handler during the wait | mask not honoured in the other direction | **same as host** |
+| F | `poll` on an empty pipe | `-1/EINTR`, handler first | no interrupt | **same as host** |
+| G | `read` on an empty pipe | `-1/EINTR`, handler first | re-parked for ever | **same as host** |
+
+Guest row, final: `[LP] done rc=0` (7/7). Host row: identical text, `rc=0`.
+
+### 23.3 The fixes (all Linux semantics, none a workaround)
+
+1. **`rt_sigsuspend`(130) exists.** Atomically install the argument mask, park
+   (not spin), restore the pre-suspend mask once a signal has been dequeued
+   (before the handler runs, so the handler's `uc_sigmask` is the original),
+   and return `-EINTR`. `rt_sigpending`(127) also lands, because the probe's
+   mask case needs it and the guest previously answered `-ENOSYS`.
+2. **A compat thread takes its signal at its resume boundary.**
+   `process_signal_resume_deliver()` now accepts a Linux-ABI thread (the group
+   ANCHOR supplies handlers/restorer, the frame lands on the resumed thread)
+   and checks both pending masks. Rewound parks (`l_park`: poll/select/read)
+   still defer — their own entry check answers `-EINTR` after the handler.
+3. **Block time is checked, like `signal_pending()`.** `futex_wait`,
+   `nanosleep`/`clock_nanosleep`, `l_park`, `rt_sigsuspend` and the native
+   pipe read/write block all return `-EINTR` when a deliverable signal is
+   already pending, instead of sleeping through it.
+4. **SA_RESTART restarts.** When the interrupting handler carries
+   `L_SA_RESTART` (Mono's suspend and restart handlers both do), the saved PC
+   is rewound over the 2-byte `syscall` and `rax` becomes the number again;
+   the frame is planted with the `syscall` as the interrupted PC, so
+   `rt_sigreturn` re-executes it. This is what makes the probe's A/B pair
+   differ, and it is why every game row now says
+   `why=futex-sa-restart`.
+5. **The resume planted a frame on the wrong stack** — `l_sf_plant()` now
+   calls `arch_set_user_sp(base)` (as the native engine does) and materializes
+   `[base-320, base)` for the resume copy.
+6. **`rt_sigprocmask` returned the POST-change mask as `oldset`.** musl's
+   `__block_all_sigs(&set)` therefore captured "everything blocked" as a
+   thread's saved mask, and every musl thread restored that mask in `start()`:
+   `[SIGB] pid=… pend=0x200 mask=0xFFFFFFFEFFFBFEFF` on every probe thread. The
+   same shape affects glibc's `pthread_sigmask`. Fixed to return the mask as
+   it was before the change.
+7. **`clock_gettime(CLOCK_MONOTONIC_COARSE)` was `-EINVAL`.** Mono asks for
+   clock id 6 at domain reset and **aborts** on failure; ids 4/6/7 now answer
+   the monotonic clock and 5 answers realtime.
+
+### 23.4 Instrumentation added
+
+- `[FB]` — a `futex_wait` that refused its park because a deliverable signal
+  was pending (`tid key sig pend mask`). One row in run 2:
+  `[FB] tid=7 key=0x10D009F100 sig=30 pend=0x20000000 mask=0x0 -> EINTR before park`.
+- `[FWK]` — why a compat park ended: `why=futex`, `futex-sa-restart`,
+  `sigsuspend`, `sleep`, `sleep-sa-restart` or `restart`, with `pend`/`mask`.
+- `[SIGR]` — a frame planted at a resume boundary (the row that was missing in
+  §22's 8th suspend).
+- `[FUTEX] WAIT … pend=` — the waiter's pending mask at the instant it parked.
+
+### 23.5 Three desktop runs at this tip
+
+| run | SIGPWR | SIGXCPU | `[RT]` | 8th suspend | Player.log last real line | end |
+|---|---|---|---|---|---|---|
+| 1 | 11 | 11 | 23 | **resumed** (pid 7) | `[PhysX] Initialized MultithreadedTaskDispatcher with 2 workers.` + `UnloadTime: 2825.000000 ms` | SIGSEGV `UnityPlayer.so+0x1947cef`, `addr=0xe8`, `rdi=0` during window teardown |
+| 2 | 23 | 20 | 41 | **resumed** (pid 7) | `RimWorld 1.6.4871 rev600` | alive at the 170 s deadline; main thread looping on an instruction-fetch `#PF` at `rip=cr2=0x10823B1C00` (`vec=14 err=0x14`) |
+| 3 | 11 | 11 | 22 | **resumed** (pid 7) | `[PhysX] Initialized …` + `UnloadTime: 2417.000000 ms` | clean exit (no SIGDUMP, no fault) |
+
+Every suspend/resume pair in runs 1 and 3 is matched per pid (6: 8/8, 7: 2/2,
+27: 1/1). Run 2's three unresumed suspends are the last round, cut off by the
+main-thread fault described below, not by the handshake. The decisive rows for
+the old wall, verbatim from run 1:
+
+```text
+[FWK] tid=7 sig=30 why=futex-sa-restart key=0x10D009F100 pend=0x20000000 mask=0x0
+[TGTK] op=tgkill tgid=4 tid=7 sig=30 st=2 th=1 ptgid=4 gen=1 fut=0x0 rc=0
+[SIGP] pid=7 sig=30 fsp=0x1085509CF8 base=0x10855098A8 top=0x1085509CE8 alt=0
+[SIGD] pid=7 sig=30 h=0x0x1083FA66E7 ipc=0x108011895B
+[SIGR] pid=7 grp=4 ipc=0x1083FA66E7          <- planted at the resume boundary
+[RT]   pid=7 rip=0x108011895B rsp=0x1085509D78   <- handler returned
+```
+
+**`[LCOMPAT] ENOSYS nr=130` is absent from all three logs.** The managed layer
+now does real work: `- Loaded All Assemblies, in 32.584 seconds` (it was 0.000
+and hollow before), `- Finished resetting the current domain`, a GL 4.5→3.3
+context made current on window `0x200002`, `requesting resize 1280 x 720`,
+`[PhysX] Initialized`, and in run 2 the game's own banner
+`RimWorld 1.6.4871 rev600`.
+
+**No frame yet.** The window still shows no `XPutImage` content flush.
+
+### 23.6 Next blocker, named with its line
+
+1. **Runs 1 and 3: the player shuts down right after the first scene is set
+   up, and run 1's teardown faults in the X11 event path.** Exact rows:
+
+   ```text
+   [PhysX] Initialized MultithreadedTaskDispatcher with 2 workers.
+   UnloadTime: 2825.000000 ms
+   [XI] XIUngrabTouchBegin -> Success (nothing was grabbed)
+   [SIGDUMP] SIGSEGV code=1 addr=0xe8
+   [SIGDUMP] uctx rip=0x108244fcef(UnityPlayer.so+0x1947cef) rdi=0x0
+             rsp=0x17ffffb4e0 rax=0x1082b2e0c0(UnityPlayer.so+0x20260c0)
+   ```
+
+   `0x1947cef` is inside Unity's window/X-event code (the stack chain runs
+   through `libX11.so.6+0xe9dd`, `+0x9e68` and `UnityPlayer.so+0x1948b04`),
+   `rdi=0` and the fault is a read at `NULL+0xe8`. `UnloadTime` precedes the
+   fault, so this is a **teardown** defect, not the cause of the quit; the
+   quit itself is the first thing to explain (run 3 exits cleanly from the
+   same point, so it is timing-dependent).
+2. **Run 2: the main thread spins on an instruction-fetch page fault.**
+   `[WATCHDOG]` shows `CPU2 … vec=14 err=0x14 cr2=0x10823B1C00 pid=4` with
+   `rip=0x10823B1C00` (I/D=1, P=0: executing from a non-present user page)
+   while every other thread is parked in a futex. Either that page is a
+   legitimate lazy mapping the fault path refuses to materialize, or the PC
+   was corrupted — the fault's `err` says instruction fetch, and the RIP is a
+   user address on a CPU in kernel mode.
+
+Both are post-`domain reset` failures and neither is the suspend handshake;
+this lane does not claim them.
+
+### 23.7 Gates and regressions at this tip
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 411   Tests failed: 0
+bash tools/gate/m2_mono.sh               m2m: PASS — Mono 6.12 ran a threaded C# program
+bash tools/gate/m2_threads.sh            m2: PASS — 8 pthreads, mutex+condvar+TLS+join+dlopen TLS
+bash tools/gate/m12_thread_ceiling.sh    m12: PASS — 150 threads + per-thread TLS + SIGCANCEL(32)
+python3 tools/gate/m3_window_probe.py    m3w: PASS — full SDL XCreateWindow sequence
+python3 tools/gate/m4_gl_probe.py        m4: PASS — GL 3.3 core triangle rendered and PRESENTED
+bash tools/gate/t3_linux_probe.sh futex_sig   PASS — 7/7 cases, host rows identical
+```
+
+Evidence: `obj/rw-desktop/evidence-l33/run{1,2,3}.serial.log` and
+`run{1,2,3}.Player.log`; `tools/rw/l33-sig-summary.py` reproduces the suspend/
+resume table from any serial log.
+
+### 23.8 What this lane did not reproduce, and does not claim
+
+The §22.6 pre-existing class — a wild write in `UnityPlayer`'s static
+initializer, `UnityPlayer+0x91b119`, `VA=0x2882A106F8`, with
+`[SIGP] top=0x17FFFFB2E8` — **did not occur in these three runs** (0/3; no
+fault at that PC and no `VA=0x2882A106F8` anywhere in the logs). It is still
+unexplained and unchanged by this lane: the only frame in such a run would be
+the fault's own, 0x40 below the clobbered slot, which excludes signal-frame
+overflow by arithmetic.
+
+What replaced it is the post-`domain reset` pair in §23.6: the first-scene
+teardown `SIGSEGV` at `UnityPlayer.so+0x1947cef` (runs 1 and 3, with run 3
+exiting cleanly from the same point) and run 2's instruction-fetch `#PF` loop
+at `rip=cr2=0x10823B1C00`. Neither is the suspend handshake, and neither is
+fixed here.
