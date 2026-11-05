@@ -141,7 +141,18 @@ static int l_core_yield(struct process *p, struct trap_frame *tf) {
 static int l_core_gettimeofday(struct process *p, struct trap_frame *tf) {
   uint64_t tv = l_arg(tf, 0);
   if (tv != 0) {
-    uint64_t ms = timer_get_ms();
+    /* M6/L43: gettimeofday is CLOCK_REALTIME, not uptime.  It used to answer
+       timer_get_ms(), which broke every caller that builds an ABSOLUTE
+       deadline from it: Mono's mono_os_sem_timedwait() does
+       `gettimeofday() + timeout_ms` and passes it to sem_timedwait(), glibc
+       turns that into futex(FUTEX_WAIT_BITSET|FUTEX_CLOCK_REALTIME), and the
+       kernel compares it against hb_clock_realtime_ms() -- so a 5..60 s
+       threadpool park became "56 years in the past" and returned -ETIMEDOUT
+       at once.  Measured: sem_mono_deadline elapsed_ms=0 in the guest vs 50
+       on the host (tools/gate/t3_linux_probe.sh clock).  time(2) below already
+       used the RTC clock; this makes the two agree, as Linux does. */
+    extern uint64_t hb_clock_realtime_ms(void);
+    uint64_t ms = hb_clock_realtime_ms();
     uint64_t out[2];
     out[0] = ms / 1000;
     out[1] = (ms % 1000) * 1000;

@@ -2384,15 +2384,20 @@ void sync_lower_handler_c(struct trap_frame *tf) {
           return;
         case 228: syscall_num = SYS_GETTIME; break; /* clock_gettime(clk,ts) */
         case 100: {                          /* gettimeofday(timeval*, tz*) */
+          /* M6/L43: CLOCK_REALTIME, not uptime (see l_core_gettimeofday; the
+             same bug broke Mono's absolute sem_timedwait deadlines).  The
+             timeval is 16 bytes on x86-64: tv_sec is a 64-bit long and so is
+             tv_usec, so write both as 64-bit words. */
           uint64_t tv = tf->regs[5];
-          uint32_t ms = (uint32_t)timer_get_ms();
+          extern uint64_t hb_clock_realtime_ms(void);
+          uint64_t ms = hb_clock_realtime_ms();
           if (!tv) { tf->regs[0] = 0; return; }
           if (sys_user_range(tv, 16, 1) != 0) {
             tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
             return;
           }
-          ((volatile uint32_t *)tv)[0] = ms / 1000;
-          ((volatile uint32_t *)tv)[1] = (ms % 1000) * 1000;
+          ((volatile uint64_t *)tv)[0] = ms / 1000;
+          ((volatile uint64_t *)tv)[1] = (ms % 1000) * 1000;
           tf->regs[0] = 0;
           return;
         }

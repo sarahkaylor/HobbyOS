@@ -4948,3 +4948,173 @@ reproducer `tools/rw/mono-probe/tp.cs`.
 Gates at this tip: unit `413/0`; `t3_linux_probe join` host/guest rows agree
 for A-D; `redzone`, `m2_threads`, `m12`, `m2_mono`, `m3_window_probe`,
 `m4_gl_probe` PASS.
+
+## 31. 2026-11-05 — M6/L43: `gettimeofday` was uptime, so every Mono threadpool park expired 56 years early
+
+§30 named the park as Mono's ThreadPool on the strength of `tp.cs` under the
+guest's official Mono 6.12 (`mono-sgen`). Both halves of that claim needed
+re-measuring, and one of them was wrong:
+
+- The **reproducer was invalid as evidence about this kernel**. The official
+  `mono-sgen` is a monolithic build that does not export four symbols
+  `libmono-native.so` imports (`mono_add_internal_call_with_flags`,
+  `mono_marshal_set_last_error`, `mono_threads_enter_gc_safe_region_internal`,
+  `mono_threads_exit_gc_safe_region_internal`), so `System.Native` cannot load.
+  Every threadpool worker then dies in
+  `ThreadPoolWorkQueueThreadLocals..ctor` -> `new Random()` -> `Interop.Sys`,
+  and the probe prints `TP TIMEOUT parallel done=0`. Measured on the **host**,
+  with the same binary and the same mscorlib: identical failure. A probe that
+  fails identically off-kernel cannot name a kernel defect.
+- The **underlying defect was real but is a clock bug, not a ThreadPool bug**:
+  `gettimeofday(2)` answered **uptime** while `clock_gettime(CLOCK_REALTIME)`
+  answered the boot-anchored RTC epoch. Mono's `mono_os_sem_timedwait()`
+  builds an ABSOLUTE deadline as `gettimeofday() + timeout_ms` and passes it to
+  `sem_timedwait()`, which glibc implements as
+  `futex(FUTEX_WAIT_BITSET | FUTEX_CLOCK_REALTIME, &deadline)`. The kernel
+  compares that against `hb_clock_realtime_ms()`, so a 5..60 s worker park was
+  a deadline ~1.79e9 s in the past -- `-ETIMEDOUT` on the first futex call.
+  `worker_park()` returns "timed out", `worker_thread` sets
+  `worker_timed_out = TRUE` and `break`s: the worker never parks and exits.
+  That is exactly §30's `[TEXIT] ... st=3 key=0x0`.
+
+### 31.1 The clock contract, host vs guest (one static-PIE probe)
+
+`src/user/linux_probe_clock.c` / `tools/gate/t3_linux_probe.sh clock` asks the
+raw syscalls (musl implements `gettimeofday()` on top of `clock_gettime()`, so
+the libc wrapper cannot see a broken `gettimeofday`):
+
+| row | host | guest, before | guest, after |
+|---|---|---|---|
+| `raw_gettimeofday sec` | 1,793,891,631 | **3** | 1,793,891,693 |
+| `raw_realtime sec` | 1,793,891,631 | 1,793,891,651 | 1,793,891,693 |
+| `delta_gettimeofday_realtime` | 0 | **-1,793,891,648** | 0 |
+| `sem_timedwait` deadline = `gettimeofday()+50 ms` | 50 ms, ETIMEDOUT | **0 ms**, ETIMEDOUT | 58 ms, ETIMEDOUT |
+| `sem_timedwait` deadline = `CLOCK_REALTIME+50 ms` | 50 ms, ETIMEDOUT | 55 ms, ETIMEDOUT | 59 ms, ETIMEDOUT |
+| `pthread_cond_timedwait` 50 ms | 50 ms, ETIMEDOUT | 56 ms | 55 ms |
+| `nanosleep` 50 ms | 50 ms | 58 ms | 60 ms |
+| `pthread_cond_timedwait` 5 s | 5000 ms | 5009 ms | 5009 ms |
+
+The two `sem_timedwait` rows are the whole diagnosis: the *same* 50 ms wait is
+instant when its absolute deadline is built from `gettimeofday` and correct
+when it is built from `CLOCK_REALTIME`. `cond` and `nanosleep` are controls --
+they were already right, which is why only semaphore-based parks broke.
+
+### 31.2 The fix
+
+`gettimeofday` is `CLOCK_REALTIME`, so it must answer the same clock `time(2)`
+already did:
+
+- `src/kernel/linux_compat.c` `l_core_gettimeofday()`:
+  `timer_get_ms()` -> `hb_clock_realtime_ms()`.
+- `src/kernel/arch/x64/trap.c` raw `case 100` (native/non-table path): the same
+  change, and both `timeval` words are now written as 64-bit (the legacy arm
+  wrote `tv_sec` as 32-bit and left `tv_usec` untouched).
+
+Nothing else in the kernel changed. `clock_gettime` was already correct for
+every clock the target uses (`CLOCK_REALTIME` 0, `MONOTONIC` 1, `RAW` 4,
+`COARSE` 6, `BOOTTIME` 7, `REALTIME_COARSE` 5).
+
+### 31.3 A probe that tests the game's runtime, not mono-sgen
+
+`tools/rw/mono-probe/mono_main_launcher.c` `dlopen`s
+`MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so` (the exact runtime Unity runs)
+with `RTLD_GLOBAL` and calls `mono_main`, after `mono_set_dirs` and
+`MONO_PATH`. `System.Native` resolves against that same runtime, so the probe
+exercises the threadpool the game actually uses. `tools/rw/run-tp-probe.sh`
+stages glibc 2.31 + the game's runtime/mscorlib/config and boots it as a
+MODE=test wave.
+
+`tp.cs` under it, host and guest (both after the fix):
+
+```text
+TP START cpus=32|8
+TP phase before-join
+TP OK parallel done=8
+TP OK join v=7
+TP phase after-join
+TP OK parallel done=8   (x6)
+TP-OK
+```
+
+Under `mono-sgen`, host **and** guest print `TP TIMEOUT parallel done=0` x7 with
+`Unhandled Exception: ... DllNotFoundException: .../libmono-native.so`. The
+L42 sequence is a property of that binary, not of HobbyOS.
+
+With `/TPTRACE` staged the same probe also proves the *parking* half, which is
+what the clock bug broke (counts from one guest run):
+
+```text
+worker starting 40   worker parking 39   worker unparking 39
+worker timed out 39  worker executing 104              TP-OK
+```
+
+Before the fix every one of those 39 parks returned "timed out" on its first
+futex call, so the count was `worker parking 0`, `worker timed out 0` and the
+worker exited after its first callback.
+
+### 31.4 The ThreadPool was never dead -- and worker exit is normal
+
+With `/TPTRACE` staged, a desktop run shows the pool really running:
+
+```text
+Mono: [0x...] try create worker, created 0x..., now = 34 count = 1
+Mono: [0x...] worker starting
+Mono: [0x...] worker executing
+Mono: [0x...] worker running in domain 0x11100c2d80 (outstanding requests 1)
+```
+
+Four workers enter the managed `ThreadPoolWorkQueue.Dispatch()` and stay there
+(it is an infinite loop; it does not return "worker finishing" until shutdown).
+`[TEXIT] ... Thread Pool Worker` rows are the hill climber retiring an idle
+worker after its randomized 5..60 s park -- normal on Linux too. Neither row
+says anything about a work item being stranded.
+
+### 31.5 What still parks the game
+
+The ladder is unchanged: all three runs read exactly `0x130B4C9` = 19,903,177
+bytes of 729 MiB and stop (table below). The thread state at the stop is *not*
+a signaller that never ran in Mono's pool:
+
+| pid | name | state | waits/wakes | note |
+|---|---|---|---|---|
+| 4 | main | futex, `to=4294967295` | 1249/115 | wakes repeatedly, re-parks |
+| 27 | `Loading.Preload` | futex, `to=4294967295` | **13/0** | the only thread nobody wakes |
+| 25 | `Loading.AsyncRe` | futex | 19/18 | healthy ping-pong |
+| 26 | `UnityGfxDeviceW` | futex | 271/270 | healthy ping-pong |
+| 29..32 | `Thread Pool Wor` | 2 futex (0x1084AD5278) + 2 blocked | 14/12 | inside managed Dispatch |
+
+The waiting object at `0x10D08BAA00` is a per-thread structure -- the words
+below the key hold the inline ASCII name `Loading.PreloadManager` -- i.e.
+`MonoThreadInfo::wait_cond`, the object rule 91 already resolved to
+`mono_wait_uninterrupted`. So the strand is one waiter on
+`MonoThreadInfo::wait_cond` that nobody signals, while the pool it was
+suspected of waiting on is alive and its workers park. The next lane's first
+question is therefore *which park on `MonoThreadInfo::wait_cond` this is and
+who is supposed to `mono_thread_info_install_interrupt()` it*, not "does the
+ThreadPool run".
+
+### 31.6 Ladder at this tip (3 runs, 150 s each)
+
+| run | NFS bytes | rpcs | `[XSW]` | screenshot |
+|---|---|---|---|---|
+| r1 | `0x130B4C9` (19,903,177) | `0x3B2D` | 0 | loading screen |
+| r2 | `0x130B4C9` | `0x3B2D` | 0 | loading screen |
+| r3 | `0x130B4C9` | `0x3B2D` | 0 | loading screen |
+
+The kernel inside `disk.img` was proved to be this build (`mcopy ::/boot/hobbyos.elf`
+md5 == `obj/intel/hobbyos.boot.elf`). No `[XSW]` row appears at all, which per
+rule 89 means the staged `libGL.so.1` has no `XcPresentMark` probe, not that the
+client stopped swapping.
+
+### 31.7 Gates
+
+`m2_tp.sh` is the new regression: it builds `tp.cs` against the game's
+`mscorlib`, runs it under the game's runtime in the guest with `/TPTRACE` and
+requires 7x `TP OK parallel` + `TP OK join` + `TP-OK`, zero `TP TIMEOUT`, and
+at least one `worker parking`/`worker unparking` pair; then it runs
+`t3_linux_probe.sh clock` and requires `[LP] done rc=0`. The old `m2_mono.sh tp`
+mode (mono-sgen) is not a gate for this: it cannot distinguish a kernel defect
+from its own missing `System.Native`.
+
+Regression at this tip: unit `413/0`; `redzone`, `m2_mono`, `m2_threads`,
+`m12`, `m3_window_probe`, `m4_gl_probe` PASS; `m2_tp` PASS.
