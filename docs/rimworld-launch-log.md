@@ -5229,3 +5229,172 @@ is the guest/host reproducer for the nested-parallelism shape.
 
 unit `413/0` at this tip. `m2_tp` PASS (ThreadPool parks and wakes), `m2_threads`
 PASS, `redzone`, `m2_mono`, `m12`, `m3_window_probe`, `m4_gl_probe` PASS.
+
+## 33. 2026-11-05 — M6/L46: Boehm's suspend set was short by one, because a `tgkill` to the main thread could be claimed by any thread
+
+§32 left the stop-the-world as the thing to explain: `world_stopped=1
+stop_count=44` for the rest of a run, 4-6 threads parked in
+`GC_suspend_handler_inner`'s `sigsuspend`, and a collector sleeping in
+`sem_wait`. The hand-off said Boehm's live set was **one greater** than the
+number of `SIGPWR`s that reached their targets. That is exactly what the rows
+show, and the missing delivery is a kernel routing bug, not a Mono bug.
+
+### 33.1 The oracle first: `tp_starve` died at `GC_lookup_thread()==NULL`
+
+`tools/rw/mono-probe/tp_starve.cs` under the game's own runtime, *before* any
+kernel change (MODE=test, `[LCOMPAT]`/`[SGS]`/`[SIGD]` rows):
+
+```text
+[LCOMPAT] clone flags=0x3D0F00 stack=0x10C1C2CFB0 tls=0x10C1C2D700 -> 5
+[SGS] pid=1 sig=30 st=8 susp=0 inh=0 pend=0x20000000 mask=0x0
+[TGTK] op=tgkill tgid=2 tid=1 sig=30 st=2 th=1 ptgid=2 gen=1 rc=0
+[SGS] pid=3 sig=30 st=8 susp=0 inh=0 pend=0x20000000 mask=0x0
+[TGTK] op=tgkill tgid=2 tid=3 sig=30 st=2 th=1 ptgid=2 gen=1 rc=0
+[SGS] pid=2 sig=30 st=8 susp=0 inh=0 pend=0x20000000 mask=0x0
+[TGTK] op=tgkill tgid=2 tid=2 sig=30 st=2 th=0 ptgid=2 gen=0 rc=0
+[SIGD] pid=1 sig=30 ...
+[SIGD] pid=3 sig=30 ...
+[SIGD] pid=5 sig=30 ...          <- no [SGS] pid=5: nobody signalled pid 5
+[KERNEL] pid=5 (MONO.EXE) memory fault VA=0x0000000000000020
+         PC=0x0000001080478793 rw=r in=HOLE region=NONE
+         rbx=0x0 rdi=0x1 ... ret=0x1080478706 -> killed
+```
+
+`0x1080478793 - 0x27c793 = 0x10801FC000` (the DSO base), i.e.
+`GC_suspend_handler_inner+0x6F`, the `cmp QWORD PTR [rax],0x0` after
+`lea rax,[rbx+0x20]`; `rbx = 0` is `GC_lookup_thread(pthread_self())` returning
+NULL, and `ret=base+0x27c706` is the instruction after `call
+GC_suspend_handler_inner` in `GC_suspend_handler`. **pid 5 took a `SIGPWR` it
+was never sent.**
+
+### 33.2 The tid diff: counted, signalled, delivered, and the thread in between
+
+`[GCT]` (new, §33.5) walks Boehm's 256 `GC_threads` buckets with
+`GC_suspend_all`'s own filters and matches each entry to our PCB by TCB
+(`clear_child_tid - 0x2d0`, i.e. `&pd->tid`; `pthread_kill` reads
+`[pthread_t+0x2d0]`, disassembled in libpthread-2.31). For the run above:
+
+| Boehm entry (`GC_threads`) | flags `+0x28` | `scat +0x10` | in the live set? | SIGPWR planted | delivered to it | our PCB state |
+|---|---|---|---|---|---|---|
+| `id=pid 1` | `0x0` | `0` | yes | `[SGS] pid=1` rc=0 | `[SIGD] pid=1` | `st=8` FUTEX |
+| `id=pid 3` | `0x0` | `0` | yes | `[SGS] pid=3` rc=0 | `[SIGD] pid=3` | `st=8` FUTEX |
+| `id=pid 2` (main) | `0x0` | `0` | yes | `[SGS] pid=2` rc=0, `thr=0` | **none** | `st=8` FUTEX (`mono_thread_create_internal`'s wait) |
+| — no entry — | — | — | no | no | `[SIGD] pid=5` | `st=2` READY, clone 3 ms earlier, not registered with the GC |
+
+3 counted, 3 planted, **2 delivered**: the third `SIGPWR` was recorded in the
+group's *process-directed* set (the anchor's `sig_pending`) and pid 5 — a
+thread that was not in Boehm's set at all — claimed it at its first trap exit.
+
+### 33.3 Linux semantics: neither the exit nor the create rule was violated — the DIRECTION was
+
+The two candidates in the hand-off were:
+
+* **exit**: a thread that leaves must be dropped from a would-be suspend set
+  atomically with its exit. Our side already does this: `process_signal()`
+  refuses `FREE`/`EXITED`/`THREAD_DONE` and answers `-ESRCH`, and
+  `GC_suspend_all` counts `rc == 3` as "skip" (`cmp $0x3,%eax; je skip`).
+  Row: a `THREAD_DONE` pid answers `[SIGIN] miss ... -> ESRCH`, and the
+  unit test `test_p5_directed_signal_owner` pins it.
+* **create**: a thread must be registered with the runtime before it can run
+  managed code. That is Mono's contract (`GC_register_my_thread` is the first
+  thing a Mono thread does), and the kernel cannot check it — pid 5 running
+  before registering is legal Linux.
+
+What *is* a Linux rule, and what we violated, is the third thing: **a signal
+that names a tid is queued on that task and no other thread of the group may
+take it.** `tgkill(tgid, tid=main, SIGPWR)` while the main thread is blocked in
+a futex must stay pending on the main thread. Our `process_signal()` stored it
+in `sig_pending` on the group anchor — the same word process-directed signals
+use, which `linux_compat_signal_deliver()` merges into every member's candidate
+set (`pend |= grp->sig_pending`) — so the first thread to trap won it, and
+`GC_suspend_all`'s count (which includes the main thread) could never be
+satisfied. In the wedge that is the whole story: the collector waits for an ack
+the main thread can no longer give, the world stays stopped, and every worker
+that later enters `GC_suspend_handler_inner` parks in `sigsuspend` for the rest
+of the run.
+
+### 33.4 The fix
+
+`struct process` gains `uint64_t sig_pending_dir` — the thread-directed set.
+`process_signal_directed(pid, sig, directed)` records a bit there when the
+caller named a tid (`tgkill`/`tkill`, or a `kill(2)` whose pid is a thread),
+and in `sig_pending` otherwise; `process_signal()` is the `kill(2)`-shaped
+front door. Delivery, park-wake, `sigpending`, `rt_sigsuspend`'s pre-check and
+the trap-exit fast path all read both sets; only the addressed PCB can consume
+a directed bit. Native targets are untouched (`sig_pending_dir` is never set
+for them).
+
+### 33.5 Instrumentation: `[GCT]`, and what a steady state looks like
+
+`[GCST]` now also prints the ack semaphore's waiter word and the group's
+`live_threads`; a new `[GCT]` block walks `GC_threads` and prints one summary
+plus a row per unaccounted entry (`ent/live/pcb/unreg/norec/self/fin/b29/susp/
+epoch/anchor`). Two shapes, measured:
+
+```text
+# no stop in progress (desktop, steady state)
+[GCST] world_stopped=0 stop_count=44 ack_sem=0 ackw=0 grplive=25
+[GCT] sum ent=15 live=0 pcb=25 unreg=21 norec=11 self=1 ... epoch=3 anchor=8
+# during a stop (tp_starve, stop=16; anchor st=8 == the collector)
+[GCST] world_stopped=1 stop_count=16 ack_sem=0 ackw=0 grplive=12
+[GCT] sum ent=12 live=11 pcb=12 unreg=0 norec=1 ... epoch=0
+```
+
+`unreg=21` is correct and worth stating: Unity's "Background Job." threads are
+native pthreads that never call `GC_register_my_thread`, so they are in our PCB
+table and not in Boehm's set. `live=11` against 12 tasks (11 thread PCBs + the
+anchor) is the invariant: the collector is the anchor, which
+`GC_suspend_all` skips by design, so the plant set is `pcb - 1`.
+
+### 33.6 `tp_starve` on guest and host, 10 iterations
+
+Host reference (`mono_main_launcher` + the game's `libmonobdwgc`, native
+Linux): `STARVE-OK`. Guest, 10 consecutive boots:
+
+| run | result | outer rings | timeout | faults | stolen `[SIGD]` (no `[SGS]` for that pid) |
+|---|---|---|---|---|---|
+| 1-10 | `STARVE-OK` (10/10) | 8/8 each | 0 | 0 | **0** |
+
+"Stolen" is computed per log: the set of pids with a `[SIGD] ... sig=30` row
+minus the set with a `[SGS] ... sig=30` row. Before the fix that set was
+`{5}` and the process died; after it is empty in all ten.
+
+### 33.7 The desktop ladder, 3 runs
+
+| run | `world_stopped=1` dumps | `[GCT]` at the end | NFS bytes | Player.log | screen |
+|---|---|---|---|---|---|
+| r1 | 0 | `live=0 pcb=25` | `0x130B4C9` = 19,903,177 | `Loaded All Assemblies, in 11.298 s`, `RimWorld 1.6.4871 rev600` | loading art, animated |
+| r2 | 0 | `live=0 pcb=25` | 19,903,177 | `... in 11.557 s`, banner | loading art, animated |
+| r3 | 0 | `live=0 pcb=25` | 19,903,177 | `... in 14.479 s`, banner | loading art, animated (launcher exited before the last two shots) |
+
+The stop-the-world now completes in every run: `world_stopped=0` and `live=0`
+in every `[GCST]` row of all three runs, `stop_count` advancing to 44 and
+staying there, with `[FWK] ... why=sigsuspend` / `why=futex-sa-restart`
+pairs for every pid. `Loaded All Assemblies` fell from §32's 32.6 s to
+11.3-14.5 s, which is what a stop-the-world that actually restarts looks like.
+
+The frame is real and it is *moving*: `01..22_running.ppm` all differ
+(SHA-1 per frame; 4..56 pixels change between shots, the `...` box), and from
+shot 04 on every frame carries 1,044,712 non-black pixels over 1,280 coarse
+colours. `[XE] PUT 0;0;1280;720` is the present row; **`[XSW]` does not fire in
+this ladder** (0 rows in all three runs), which is its own open question —
+§32's r1 had `n=1 crc=0x9408…c95b`.
+
+### 33.8 Where it stops now
+
+Still 19,903,177 bytes, and it is the §32 park, not a stopped world: pid 4 is
+in `mono_os_cond_timedwait` -> `mono_w32handle_timedwait_signal_handle` ->
+`mono_w32handle_wait_one` -> `mono_join_uninterrupted` on a heap condvar with
+`waits=270 wakes=121` frozen, and the group has **no Thread Pool Worker left
+alive** (11 `[TEXIT]` rows, `live=32..26`; every remaining slot is `st=8`, and
+`Loading.Preload` still waits on Unity's private semaphore with `word=0`).
+Player.log's last rows are eleven `mono_thread_internal_set_priority` lines,
+i.e. workers being created at the deadline. So the next wall is the one §32
+named — a managed joiner whose signaller never runs — but it is no longer
+*inside* a stop-the-world, and `n_live == planted` holds while it happens.
+
+### 33.9 Regression
+
+`unit 414/0` (413 + the new `test_p5_directed_signal_owner`), `m2_mono`,
+`m2_tp` (work items, parking, clock), `m2_threads`, `m12`, `redzone`,
+`m3_window_probe`, `m4_gl_probe` all PASS at this tip.

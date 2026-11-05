@@ -2417,6 +2417,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
 static void l_sig_drop(struct process *cur, struct process *grp, int sig) {
   uint64_t bit = 1ull << (sig - 1);
   cur->sig_pending &= ~bit;
+  cur->sig_pending_dir &= ~bit;
   if (grp && grp != cur)
     grp->sig_pending &= ~bit;
 }
@@ -2436,7 +2437,7 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
   int slot = l_thr_slot_of(cur, 1);
   (void)slot;
 
-  uint64_t pend = cur->sig_pending;
+  uint64_t pend = cur->sig_pending | cur->sig_pending_dir;
   if (cur != grp)
     pend |= grp->sig_pending;
   if (!pend)
@@ -2524,6 +2525,7 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
      a nested trap cannot plant a second one. */
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   if (!(cur->sig_pending & (1ull << (sig - 1))) &&
+      !(cur->sig_pending_dir & (1ull << (sig - 1))) &&
       !(grp->sig_pending & (1ull << (sig - 1)))) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return 0;
@@ -2768,7 +2770,7 @@ int linux_compat_sig_deliverable(struct process *p) {
   if (!p)
     return 0;
   struct process *grp = process_group(p);
-  uint64_t pend = p->sig_pending;
+  uint64_t pend = p->sig_pending | p->sig_pending_dir;
   if (grp != p)
     pend |= grp->sig_pending;
   if (!pend)
@@ -3015,7 +3017,7 @@ int linux_compat_lost_wake_scan(void) {
         kl_s(&kl, " susp=");
         kl_i(&kl, t->sig_suspended);
         kl_s(&kl, " pend=");
-        kl_hex(&kl, (unsigned long)t->sig_pending);
+        kl_hex(&kl, (unsigned long)(t->sig_pending | t->sig_pending_dir));
         kl_s(&kl, " mask=");
         kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(t));
         kl_s(&kl, " -> re-wake\n");
