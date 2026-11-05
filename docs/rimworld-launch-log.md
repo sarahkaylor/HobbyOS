@@ -4407,3 +4407,239 @@ bash tools/rw/check-no-game-files.sh     OK   — no RimWorld artifacts in the t
   chunk table and the free-gap map at the moment of the first chunk (the
   measurement in §27.1).
 
+
+## 28. 2026-11-05 — M6/L39: the present path, named layer by layer; the first frame is kept and shown
+
+The L38 ladder ended with a black window and two candidate explanations that no
+row could separate: *Unity never draws again after the eighth flush* or *it
+draws and the pixels are dropped on the way to `/dev/fb0`*. This section adds
+the instrument that separates them (`[XSW]`, one row per `glXSwapBuffers`),
+fixes the first-present skip, bounds the `[XI]` storm, and names the layer the
+black rectangle is actually in.
+
+### 28.1 Where a present happens
+
+`libGL.so.1` in this tree is built from the **gallium xlib frontend**, not from
+`src/glx` — `obj/mesa/obj` has no `glxcmds` object at all, so a patch against
+`src/glx/glxcmds.c` builds green and changes nothing (rule 29's cousin, and it
+cost one build here). The real path is:
+
+```text
+Unity
+ └─ glXSwapBuffers                 src/gallium/frontends/glx/xlib/glx_api.c
+     └─ XMesaSwapBuffers           xm_api.c   (st_context_flush + fence wait)
+         └─ xmesa_swap_st_framebuffer          xm_st.c
+             └─ xmesa_st_framebuffer_display
+                 └─ swrastXPutImage -> XPutImage        compat libX11.so.6
+                     └─ shadow (B8G8R8A8, one static 1920x1080 buffer)
+                         └─ XFlush -> shadow_blit -> /dev/fb0
+                             └─ ESC ] F <x>;<y>;<w>;<h> ~   desktop presents the rect
+```
+
+Two facts about that path matter, and both were invisible from the outside:
+
+1. **Nothing in the swap path calls `XFlush`/`XSync`.** `XMesaFlush()` is the
+   only X flush in the frontend and the swap does not call it. A real Xlib
+   writes the `XPutImage` request to the server socket as it builds it; this
+   compat Xlib keeps the frame in its shadow until *something* flushes. So a
+   swap could succeed, return 0, and leave the desktop showing the previous
+   (black) frame. `XcPresentMark()` now flushes the shadow it just filled.
+2. **The client can swap before the surface exists.** `XMapWindow` used to send
+   `ESC ] X` and return; the desktop's `ESC ] G` arrived later, so
+   `content_ready` was still 0 when Unity swapped. Mesa asks `XGetGeometry`
+   for the drawable size, got the window's created size, and `XPutImage` was
+   called with `content_ready == 0` — the old code printed
+   `[XE] PUTSKIP 0;0;0;0` and dropped the frame.
+
+### 28.2 The `[XSW]` row
+
+`glXSwapBuffers` calls the shim's `XcPresentMark(dpy, swaps, glflush, drawable)`
+(weak symbol, so a host build against a real libX11 resolves it to NULL and the
+probe costs one branch). The shim owns the `XPutImage`/`XFlush` counters and
+the checksum, so the row exists even when the swap hands `XPutImage` nothing:
+
+```text
+[XSW] n=<marks> swap=<glXSwapBuffers> put=<XPutImage> putok=<copied>
+      flush=<XFlush> crc=<fnv64 of the surface> changed=<since the last row>
+      w=<drawable w> h=<drawable h> ready=<content_ready> nz=<visible pixels>/<total>
+      box=<x0,y0,x1,y1 of visible pixels> copy=<XCopyArea> glflush=<glFlush>
+```
+
+What each answer looks like:
+
+| question | row |
+|---|---|
+| the client never presents | `swap` frozen, `put`/`putok` frozen |
+| it presents but the image is empty | `putok` advances, `crc` constant, `nz` = 0 |
+| it presents real pixels and they do not reach the desktop | `crc` changes, `nz`/`box` non-zero, screenshot black |
+| it presents and the desktop shows it | all of the above plus a screenshot that matches `box` |
+
+`nz` counts pixels whose **B|G|R** is non-zero — alpha is `0xFF` on every
+opaque frame, so counting all four bytes says "all pixels" for a black frame
+(measured: `nz=921600/921600` on an opaque black buffer before the metric was
+fixed). Rows are emitted for the first 3 swaps, then every 10th, plus the first
+swap that carried pixels, so a 60 fps client pays one 7.8 MB scan every ten
+frames.
+
+### 28.3 The first frame is kept, and presented
+
+`XPutImage` no longer drops an image that arrives before the geometry: it is
+copied into a second static buffer (`g_defer_store`) at *its own* size, and
+`set_geometry` blits the overlap into the surface and sends the flush as soon as
+the desktop names the content rect. `XMapWindow` also reads that reply itself
+(bounded: 8 polls of 20 ms, `[XE] MAPGEOM ready=… polls=…`), so the surface is
+usually laid out before the client's first swap.
+
+Measured (`final4`-era run, `[XE]` rows in Player.log):
+
+```text
+[XE] PUT 0;0;1280;720                  the swap's image: 1280x720, before any geometry
+[XE] PUTDEFER 0;0;1280;720             kept at its own size (was: PUTSKIP, dropped)
+[XE] PUTLATE held=1 x=2 y=34 w=1916 h=1018 defer=1280x720
+                                       desktop laid the surface out; overlap blitted + flushed
+[XSW] n=1 swap=1 put=1 putok=1 flush=85 crc=0x9e42e911decedfdb changed=0
+      w=1280 h=720 ready=1 nz=921600/1950488 box=0,0,1279,719 copy=0 glflush=15
+```
+
+`nz=921600` out of a 1916x1018 surface with `box=0,0,1279,719` says the whole
+1280x720 frame is non-black and it is sitting in the top-left of the surface.
+**Unity draws; the frame is not black.** That retires the "draws black" half of
+the L38 question: what is missing is presents *after* the first one.
+
+### 28.4 The `[XI]` storm was a trace storm, and `Success` is not consumable
+
+The L38 log carried 40,360 / 40,736 / 43,198 `[XI] XIGrabTouchBegin` rows and
+the shim wrote one serial row per call — the measurement was throttling the loop
+it measured. The row is now bounded (first 4, then every 4096th, with the
+running count in it): **17 grab rows / 30 `[XI]` rows per 180 s run** against
+40k+, while the call rate itself is unchanged (~24k calls, every one a no-op).
+
+The negotiation answer matters more than the trace. What was tried:
+
+* `XIQueryVersion -> Success (2.x)` with `XIQueryDevice -> 0 devices`
+  (the shape a real server without a touchscreen has): the grab storm stops
+  (exactly **1** grab row), but Unity **never reaches the banner** — Player.log
+  ends at `Finished resetting the current domain`, the event pump runs 0 times
+  (`[XHB]` never appears) and the main thread sits in a condvar wait/signal
+  loop. 1 of 1 run.
+* `XIQueryVersion -> BadRequest` (what this DSO always answered) with the same
+  bounded rows: banner 3 of 3 in the ladder of §28.6, the pump loop runs,
+  `[XI]` is 9-83 rows per run instead of 40k.
+
+So hypothesis (A) is false as stated: the storm did not block presents, and
+"success + zero devices" is a state Unity cannot start from. BadRequest plus a
+bounded row is the configuration that keeps the ladder alive, and the honest
+finding is that **Unity re-asks for the touch grab on every input poll and there
+is nothing to grant** — no touch device is faked.
+
+### 28.5 What the black rectangle is: the window churn, not the renderer
+
+With the present path instrumented end to end, the remaining row is unambiguous:
+
+```text
+[XHB] pumps=240000 swaps=1 puts=1 putok=1 flush=120088 heals=13332 wins=13336 maps=13335 fs=0 grant=0 ready=1
+```
+
+* **one** `glXSwapBuffers` in the whole run (the splash frame of 28.3);
+* **13,336 `XCreateWindow` and 13,335 `XMapWindow` calls** in ~150 s — ~89
+  windows per second;
+* 13,332 desktop repair requests (`heals`), i.e. one per window, each answered
+  with a full-surface blit by this shim;
+* the final screenshot is **1,950,392 / 2,073,600 pixels `#000000` (94.1%)**,
+  and the only non-black pixels inside the content rect are a 9x13 patch at
+  (960,540) — the desktop's mouse pointer.
+
+The X-level trace (`RW_TRACE_X11=1`) shows what one iteration is:
+
+```text
+[XC] XCreateWindow   parent=1 geom=1920x1080 depth=24 evmask=0x0
+[XC] XSelectInput    id=<container> mask=0x20000 (StructureNotify)
+[XC] XMapWindow      id=<container>   -> ESC ] X 1920;1080 -> ESC ] G 2;34;1916;1018
+[XC] XReparentWindow win=<gl window> parent=<container>
+[XC] XIfEvent        matched type=19 (MapNotify) win=<gl window>
+[XC] XRaiseWindow / XSync / XFlush x several
+[XC] XReparentWindow win=<gl window> parent=1        <- reverted
+[XC] XUnmapWindow    id=<container>
+```
+
+That is Unity's borderless-fullscreen dance: it wants a 1920x1080 window, this
+desktop can only offer the 1916x1018 content rect of its frame, so the client
+creates a container, reparents into it, decides it is not fullscreen, reverts
+and retries. Each retry also re-enters `set_geometry`, which re-lays the
+surface whenever the reported rect changes — so the one frame that *was*
+presented is overwritten within milliseconds and the steady state is a black,
+freshly-initialised surface.
+
+Fixed on the way (kept, they are independently correct): `win_clear()` no
+longer destroys the live surface when an unrelated window is created or
+destroyed (`surf_reset()` does it when the *surface* goes), `XResizeWindow`/
+`XMoveResizeWindow` honour a client resize instead of returning 0, and
+`XSendEvent` answers the EWMH `_NET_WM_STATE` fullscreen ClientMessage the way a
+WM would. **They do not stop the churn**: Unity's check is on its own window's
+size after the reparent, which this desktop cannot satisfy without a real WM.
+
+So the named layer for the remaining black frame is **the window-system
+emulation (fullscreen), not the renderer and not the present plumbing**: the
+present path carries a real 1280x720 frame into the surface and flushes it
+(`crc`, `nz`, `box` above), and the client then throws its window away ~89 times
+a second before a second frame can be swapped.
+
+### 28.6 Ladder at this tip
+
+| run | banner | `[XSW]` (swap/put/putok/crc/changed) | surface content | `[XHB]` last row | `[XI]` rows | window |
+|---|---|---|---|---|---|---|
+| 1 | yes | `swap=1 put=1 putok=1 crc=0x940850f19945c95b changed=0` | `nz=921600/921600` (alpha metric, see below) | `pumps=60000 flush=30088 heals=3332 wins=3336` | 9 | 94.1% `#000000` |
+| 2 | yes | `swap=1 put=1 putok=1 crc=0x940850f19945c95b changed=0` | `nz=921600/921600` (alpha metric) | `pumps=60000 flush=30088 heals=3332 wins=3336` | 9 | 94.1% `#000000` |
+| 3 | yes | `swap=1 put=1 putok=1 crc=0x9e42e911decedfdb changed=0` | `nz=921600/1950488 box=0,0,1279,719` | `pumps=240000 flush=127150 heals=14075 wins=14120` | 83 | 94.1% `#000000` |
+
+Read the table with §28.5 in hand: every run presents **once**, the presented
+frame carries a full 1280x720 picture (`box` is the whole frame and every pixel
+in it has a non-zero colour channel), the run then creates 3,336-14,120 windows
+without swapping again, and the desktop is left with a black content rect.
+`nz` in runs 1-2 is the alpha-inclusive form of the metric; it was fixed to
+B|G|R after run 2 (`nz=921600/921600` on an opaque black buffer is why), so
+run 3 is the row to compare against.
+
+Three runs, one build each (run 3 of the ladder picked up the metric fix; the
+instrumented re-run `f5-1` reproduces run 3 exactly — `swap=1`, `
+crc=0x9e42e911decedfdb`, `nz=921600/1950488`, `box=0,0,1279,719`).
+
+A startup stall is still in the tree and is NOT understood: 1-2 of 3 runs stop
+right after `Initialize engine version` with no `[XHB]` row at all (the event
+pump runs fewer than 20 000 times), while the same build reaches the banner in
+the other runs. It is the next lane's first measurement; the rows to confirm it
+are `[XHB]` (absent = the pump never ran) and `[XE] MAPGEOM` (`polls`/`seq`).
+
+### 28.7 Gates at this tip
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   413/0 PASS
+bash tools/gate/t3_linux_probe.sh redzone PASS — redzone reached its done marker
+bash tools/gate/m2_mono.sh               PASS — Mono 6.12 threaded C# HELLO-OK
+python3 tools/gate/m3_window_probe.py    PASS — SDL XCreateWindow ladder + WM_DELETE ClientMessage
+python3 tools/gate/m4_gl_probe.py        PASS — GL 3.3 core triangle PRESENTED in the guest
+```
+
+`m4` found a real defect in the first version of patch 0008: its declaration
+block sat at the include section, which patch 0005 already owns, so on an
+already-patched tree 0005's reverse-dry-run idempotency probe failed and the
+build refused to apply it (`Reversed (or previously applied) patch detected`).
+The hunk now sits at `glXSwapBuffers` itself and a second consecutive build
+reports `patch already applied: 0005` and `0008` — that is the check to repeat
+after touching this patch.
+
+### 28.8 Evidence
+
+`obj/rw-desktop/evidence-l39/`:
+
+* `final-{1,2,3}.{serial,Player}.log` + `.summary` — the ladder of §28.6
+  (`tools/rw/l39-runs.sh <tag> <n> [run-timeout]` runs it; every row that the
+  tables quote is grepped out of these files, never typed);
+* `f5-1.*` — the instrumented re-run that reproduces run 3 exactly, including
+  the `nz`/`box` fields;
+* `final4-*`, `final2-*`, `xibad-1.*`, `trace1-1.*`, `fs1-1.*`, `resize1-1.*`,
+  `rep1-1.*` — the runs behind §28.4 and §28.5 (the `XIQueryVersion -> Success`
+  stall, the X-level trace of one fullscreen iteration, the `wins=` counter);
+* `tools/rw/l39-table.py` — regenerates the §28.6 table from the logs;
+* `tools/rw/l39-runs.sh` — the ladder runner (sequential by construction: two
+  desktop harnesses in one worktree fight over `disk.img`, rule 5).
