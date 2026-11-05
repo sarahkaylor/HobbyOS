@@ -150,6 +150,7 @@
 #define L_SYS_rt_sigaction 13
 #define L_SYS_rt_sigprocmask 14
 #define L_SYS_rt_sigreturn 15
+#define L_SYS_rt_sigpending 127
 #define L_SYS_futex 202
 #define L_SYS_sched_setaffinity 203
 #define L_SYS_sched_getaffinity 204
@@ -159,6 +160,7 @@
 #define L_SYS_fadvise64 221
 #define L_SYS_clock_gettime 228
 #define L_SYS_rt_sigtimedwait 128
+#define L_SYS_rt_sigsuspend 130
 #define L_SYS_statfs 137
 #define L_SYS_sched_get_priority_max 146
 #define L_SYS_sched_get_priority_min 147

@@ -62,6 +62,11 @@ struct futex_ev {
   uint8_t nwoke;     /* how many entries of woke_pids are valid */
   char pad[2];
   int32_t woke_pids[4]; /* up to four woken pids, for wake attribution */
+  /* M6/L33: the waiter's pending-signal mask at the instant it parked.  A
+     park row with pend!=0 is the "slept through a suspend" shape; the signal
+     index is in `woke_pid` for a SIGNAL wake (signo) and in `bitset`'s high
+     half for a park (see l_thr_futex). */
+  uint64_t pend;
 };
 
 void futex_trace_note(struct futex_ev *ev);

@@ -419,6 +419,23 @@ struct process {
   int sig_in_handler;
   uint64_t sig_frame;
 
+  /* --- M6/L33: parks a signal must interrupt ---------------------------- *
+   * A compat syscall that blocks tells the signal path how to end its park:
+   *   sig_park_kind 0 = not a signal-aware park (default)
+   *                 1 = the syscall is NOT rewound; on wake it must return
+   *                     -EINTR (nanosleep, clock_nanosleep, rt_sigsuspend)
+   *                 2 = the syscall WAS rewound by l_park() and re-executes,
+   *                     so its own entry check answers -EINTR (poll/read).
+   * sig_suspended/sig_saved_mask: rt_sigsuspend is parked with the argument
+   * mask installed; the pre-suspend mask is restored when the wait ends
+   * (Linux restores it before running the handler). */
+  int sig_park_kind;
+  int sig_suspended;
+  uint64_t sig_saved_mask;
+  /* The syscall number of the current park, used to restart it when the
+     interrupting handler carries SA_RESTART (Linux's -ERESTARTSYS). */
+  int sig_park_nr;
+
   /* --- W2-5 (selfhost, os-gap-audit.md §4): wait4 rusage ------------- *\
    * Set ONLY by the blocking path of process_wait4 (the caller's
    * validated rusage out-ptr); 0 for plain waitpid() blocking waits.

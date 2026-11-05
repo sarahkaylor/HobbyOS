@@ -72,12 +72,22 @@ static int l_ret(struct trap_frame *tf, int64_t v) {
  * tf->regs[0]: see the header comment — rax must still be the syscall
  * number when the guest re-executes the rewound instruction. */
 static int l_park(struct process *p, struct trap_frame *tf) {
+  /* M6/L33: Linux's syscall restart.  A signal that is pending and unblocked
+     NOW must end the wait with -EINTR instead of parking again: the syscall
+     entry re-runs after a wake, so this is also the check that answers EINTR
+     for the restarted instruction.  The handler itself is planted at this
+     trap exit, i.e. before the guest sees the return. */
+  if (linux_compat_sig_deliverable(p)) return l_ret(tf, -EINTR);
 #ifdef __x86_64__
   if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind over the 2-byte `syscall` */
 #else
   tf->elr -= 4; /* AArch64 `svc #0`; the compat layer is x64-only today, but
                    the kernel builds this TU for both arches */
 #endif
+  /* The syscall re-executes on wake, so a signal wake must not overwrite rax
+     with -EINTR here; the entry check above is what answers it. */
+  p->sig_park_kind = 2;
+  p->sig_park_nr = 0;
   save_context(p, tf);
   schedule(tf, 0);
   return 1;

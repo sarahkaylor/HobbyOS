@@ -885,7 +885,20 @@ static void sys_gettime(struct trap_frame *tf) {
   } else if (clk == 1) {        /* CLOCK_MONOTONIC */
     extern uint64_t timer_get_ms(void);
     ms = timer_get_ms();
+  } else if (clk == 4 || clk == 6 || clk == 7) {
+    /* M6/L33: CLOCK_MONOTONIC_RAW (4), CLOCK_MONOTONIC_COARSE (6) and
+       CLOCK_BOOTTIME (7).  All three are the monotonic clock in this kernel
+       (there is no NTP slew to distinguish RAW, no suspend time to add to
+       BOOTTIME, and COARSE differs only in resolution).  Measured: Mono's
+       GC timer asks for clock 6 at domain reset and ABORTS the process on
+       EINVAL ("clock_gettime(CLOCK_MONOTONIC*) failed; errno is 22"). */
+    extern uint64_t timer_get_ms(void);
+    ms = timer_get_ms();
+  } else if (clk == 5) {        /* CLOCK_REALTIME_COARSE */
+    ms = hb_clock_realtime_ms();
   } else {
+    /* 2/3 are PROCESS/THREAD_CPUTIME: answering them with wall time would be
+       a lie, and nothing in the target set uses them. */
     tf->regs[0] = -EINVAL;
     return;
   }

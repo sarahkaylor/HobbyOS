@@ -336,6 +336,10 @@ void process_init(void) {
     proc_table[i].sig_restorer = 0;
     proc_table[i].sig_in_handler = 0;
     proc_table[i].sig_frame = 0;
+    proc_table[i].sig_park_kind = 0;
+    proc_table[i].sig_suspended = 0;
+    proc_table[i].sig_saved_mask = 0;
+    proc_table[i].sig_park_nr = 0;
     for (int j = 0; j < HO_SIG_MAX; j++) {
       proc_table[i].sig_handler[j] = 0;
     }
@@ -3064,13 +3068,51 @@ static int sig_resume_defers(struct process *grp, struct trap_frame *tf) {
 }
 
 void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
-  if (!p || p->is_kernel_process || p->is_thread || !tf)
+  if (!p || p->is_kernel_process || !tf)
     return;
-  if (p->sig_in_handler || p->sig_pending == 0)
+  /* M6/L33: a Linux-ABI THREAD takes its own signals at its resume boundary.
+     This used to skip every is_thread PCB, which is why a worker woken from
+     futex_wait with -EINTR returned to glibc WITHOUT running Mono's SIGPWR
+     handler: glibc re-enters futex_wait before any trap exit can deliver, so
+     the suspend was never acked and the collector parked in
+     GC_suspend_ack_sem for ever (measured, section 23).  The compat engine
+     wants the group ANCHOR (handlers/restorer live there) and plants the
+     frame on the resumed thread's context.  Native threads keep the old rule. */
+  struct process *grp = process_group(p);
+  if (p->is_thread && !(grp->abi_flags & PROC_FLAG_LINUX_ABI))
     return;
-  if (sig_resume_defers(p, tf))
+  uint64_t pend = p->sig_pending;
+  if (p != grp)
+    pend |= grp->sig_pending;
+  if (p->sig_in_handler || pend == 0)
     return;
-  process_signal_deliver(p, tf);
+  /* A rewound syscall (l_park: poll/select/read) must NOT get the frame here:
+     the frame would consume the pending signal and the restarted syscall
+     would then sleep again instead of answering -EINTR.  Its own trap exit
+     delivers after the syscall returns -EINTR (Linux's order).
+     sig_park_kind 3 is the SA_RESTART case: the PC was deliberately rewound
+     over the `syscall`, so the frame MUST be planted here (with the syscall as
+     the interrupted PC) and sigreturn re-executes it. */
+  if (p->sig_park_kind != 3 && sig_resume_defers(grp, tf))
+    return;
+  int was_restart = (p->sig_park_kind == 3);
+  if (process_signal_deliver(grp, tf)) {
+    if (was_restart) p->sig_park_kind = 0;
+    static int sd_rows;
+    if (sd_rows < 24) {
+      sd_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGR] pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " grp=");
+      kl_i(&kl, grp->pid);
+      kl_s(&kl, " ipc=");
+      kl_hex(&kl, (unsigned long)tf->elr);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
 }
 
 /* The trap-exit hook the arch dispatchers call: a return to user mode.  No-op
