@@ -216,13 +216,93 @@ static int l_core_clock_nanosleep(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
-static const struct l_sysent l_tab_core[] = { {L_SYS_gettimeofday, l_core_gettimeofday, "gettimeofday"}, {L_SYS_nanosleep, l_core_nanosleep, "nanosleep"}, {L_SYS_clock_nanosleep, l_core_clock_nanosleep, "clock_nanosleep"}, {L_SYS_getpid, l_core_getpid, "getpid"}, {L_SYS_getppid, l_core_getppid, "getppid"}, {L_SYS_getuid, l_core_getuid, "getuid"}, {L_SYS_getgid, l_core_getuid, "getgid"}, {L_SYS_geteuid, l_core_getuid, "geteuid"}, {L_SYS_getegid, l_core_getuid, "getegid"}, {L_SYS_gettid, l_core_gettid, "gettid"}, {L_SYS_set_tid_address, l_core_set_tid, "set_tid_address"}, {L_SYS_sched_yield, l_core_yield, "sched_yield"},
+/* time(2): `time_t time(time_t *tloc)` — seconds since the epoch, and the
+   same value stored through tloc when it is not NULL.  Source of truth is the
+   kernel's boot-anchored RTC clock (hb_clock_realtime_ms), so the answer
+   matches gettimeofday's wall clock rather than uptime.  A write fault on
+   tloc must still deliver the value (Linux's copy_to_user failure is ignored
+   for time(2)?  no: it returns -EFAULT), so report -EFAULT without a value. */
+static int l_core_time(struct process *p, struct trap_frame *tf) {
+  extern uint64_t hb_clock_realtime_ms(void);
+  uint64_t tloc = l_arg(tf, 0);
+  uint64_t secs = hb_clock_realtime_ms() / 1000ULL;
+  if (tloc != 0) {
+    if (l_copy_to_user(p, tloc, &secs, sizeof secs) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+      return 1;
+    }
+  }
+  tf->regs[0] = secs;
+  return 1;
+}
+
+static const struct l_sysent l_tab_core[] = { {L_SYS_time, l_core_time, "time"}, {L_SYS_gettimeofday, l_core_gettimeofday, "gettimeofday"}, {L_SYS_nanosleep, l_core_nanosleep, "nanosleep"}, {L_SYS_clock_nanosleep, l_core_clock_nanosleep, "clock_nanosleep"}, {L_SYS_getpid, l_core_getpid, "getpid"}, {L_SYS_getppid, l_core_getppid, "getppid"}, {L_SYS_getuid, l_core_getuid, "getuid"}, {L_SYS_getgid, l_core_getuid, "getgid"}, {L_SYS_geteuid, l_core_getuid, "geteuid"}, {L_SYS_getegid, l_core_getuid, "getegid"}, {L_SYS_gettid, l_core_gettid, "gettid"}, {L_SYS_set_tid_address, l_core_set_tid, "set_tid_address"}, {L_SYS_sched_yield, l_core_yield, "sched_yield"},
   L_SYSENT_END
 };
 
 /* ---- dispatcher --------------------------------------------------------- */
 
+/* M6/L36: the generic stack-parity skew detector.
+ *
+ * A syscall site (the instruction after `syscall`) is a fixed point in code:
+ * a compiled function's frame puts RSP at a fixed distance from its entry, and
+ * every caller maintains the psABI invariant, so the PARITY of %rsp at that
+ * site is constant for the life of the process.  If the same (thread, site)
+ * pair is ever seen with the other parity, something moved %rsp by 8 bytes --
+ * exactly what Mono's trampoline check (`and $15; cmp $0`) dies on.  This
+ * catches the moment of the skew, with no knowledge of any layout. */
+struct l_skw_site {
+  uint64_t rip;
+  uint32_t pid;
+  uint8_t par;
+  uint8_t used;
+};
+static struct l_skw_site l_skw[512];
+static int l_skw_rows;
+
+static void l_skw_check(struct process *p, struct trap_frame *tf) {
+  uint64_t rip = tf->elr;
+  uint8_t par = (uint8_t)(tf->lr & 15);
+  if (!rip)
+    return;
+  struct l_skw_site *slot = 0;
+  for (int i = 0; i < 512; i++) {
+    if (l_skw[i].used && l_skw[i].pid == (uint32_t)p->pid &&
+        l_skw[i].rip == rip) {
+      if (l_skw[i].par != par && l_skw_rows < 12) {
+        l_skw_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[SKW] pid=");
+        kl_i(&kl, p->pid);
+        kl_s(&kl, " rip=0x");
+        kl_hex(&kl, (unsigned long)rip);
+        kl_s(&kl, " was=");
+        kl_i(&kl, (int)l_skw[i].par);
+        kl_s(&kl, " now=");
+        kl_i(&kl, (int)par);
+        kl_s(&kl, " rsp=0x");
+        kl_hex(&kl, (unsigned long)tf->lr);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+      l_skw[i].par = par;
+      return;
+    }
+    if (!l_skw[i].used && !slot)
+      slot = &l_skw[i];
+  }
+  if (slot) {
+    slot->used = 1;
+    slot->pid = (uint32_t)p->pid;
+    slot->rip = rip;
+    slot->par = par;
+  }
+}
+
 int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr) {
+  if (p && nr != L_SYS_rt_sigreturn)
+    l_skw_check(p, tf);
   const struct l_sysent *const tables[] = {
     l_tab_core,
     (const struct l_sysent *)l_tab_fd,

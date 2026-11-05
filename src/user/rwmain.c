@@ -1099,6 +1099,14 @@ static void preload_gl_deps(void) {
 
 int main(int argc, char **argv) {
   fprintf(stderr, "[RWMAIN] AD-9 PlayerMain launcher start argc=%d\n", argc);
+  /* M6/L36: make the managed runtime's stdout UNBUFFERED.  fd 1 is Player.log
+     (a regular file), so glibc block-buffers it and a printf issued just
+     before an abort never reaches the log.  Mono's trampoline guard prints the
+     MONO trampoline TYPE that tripped it (`printf("%d\n", tramp_type)` right
+     before g_assert_not_reached at tramp-amd64.c:641) -- that number is the one
+     datum that names the failing trampoline, and it is lost to buffering. */
+  setvbuf(stdout, NULL, _IONBF, 0);
+  setvbuf(stderr, NULL, _IONBF, 0);
   rw_sig_install();
   if (!next_dlopen) next_dlopen = (void *(*)(const char *, int))dlsym(RTLD_NEXT, "dlopen");
   preload_gl_deps();

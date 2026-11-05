@@ -142,6 +142,40 @@ static int l_mem_brk(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, (int64_t)g->heap_brk);
 }
 
+/* ---- JIT code windows (M6/L36 diagnostics) -----------------------------
+ * Mono's code manager gets its writable+executable JIT pages from these
+ * anonymous PROT_EXEC mmaps.  Keeping the first few windows lets a stack dump
+ * name a word as a JIT return address without any symbol table. */
+#define L_JIT_MAX 8
+static uint64_t l_jit_base[L_JIT_MAX];
+static uint64_t l_jit_len[L_JIT_MAX];
+static int l_jit_n;
+
+void l_jit_note(uint64_t base, uint64_t len) {
+  if (l_jit_n >= L_JIT_MAX)
+    return;
+  l_jit_base[l_jit_n] = base;
+  l_jit_len[l_jit_n] = len;
+  l_jit_n++;
+}
+
+/* ith known JIT window; 0 when there is none. */
+int l_jit_window(int i, uint64_t *base, uint64_t *len) {
+  if (i < 0 || i >= l_jit_n)
+    return 0;
+  *base = l_jit_base[i];
+  *len = l_jit_len[i];
+  return 1;
+}
+
+/* 1 = address is inside a known JIT window. */
+int l_jit_contains(uint64_t va) {
+  for (int i = 0; i < l_jit_n; i++)
+    if (va >= l_jit_base[i] && va < l_jit_base[i] + l_jit_len[i])
+      return 1;
+  return 0;
+}
+
 /* ---- mmap --------------------------------------------------------------- */
 
 static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
@@ -193,6 +227,29 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   int64_t r = sys_mmap6(addr, len, prot, (int64_t)hf, fd, off);
   if (r == -1 && as)
     r = -ENOMEM; /* v2 vm_mmap's only -1 is a caller-contract bug */
+  /* M6/L36: name every executable anonymous mapping.  Mono's code manager
+     allocates JIT code pages this way, so the [SFA]/[SFB] stack dumps can be
+     read against a known code range: a return address inside one of these
+     windows is a JIT frame, and the parity of the word that HOLDS it names
+     the %rsp a callee was entered with. */
+  if (r > 0 && (prot & L_PROT_EXEC) && (hf & L_MAP_ANONYMOUS)) {
+    extern void l_jit_note(uint64_t base, uint64_t len);
+    l_jit_note((uint64_t)r, len);
+    static int jit_rows;
+    if (jit_rows < 40) {
+      jit_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[JIT] pid=");
+      kl_i(&kl, p ? p->pid : -1);
+      kl_s(&kl, " base=0x");
+      kl_hex(&kl, (unsigned long)r);
+      kl_s(&kl, " len=0x");
+      kl_hex(&kl, (unsigned long)len);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   if (r < 0 && fd >= 0 && !(hf & L_MAP_ANONYMOUS)) {
     /* A file-backed mmap that failed: name the file and the reason.  This is
        the "first loader refusal" evidence for a DSO/assembly the caller
@@ -261,6 +318,13 @@ static int l_mem_mprotect(struct process *p, struct trap_frame *tf) {
   /* vm_mprotect answers -ENOMEM for an unmapped span -- which is Linux's
      answer too -- and -EINVAL for a range outside the user window. */
   int64_t r = sys_mprotect(addr, len, prot);
+  /* M6/L36: Mono's code manager commits its JIT pages with mprotect(RWX) on a
+     reserved PROT_NONE mapping (rule 30), NOT with a PROT_EXEC mmap, so this
+     is where a code window becomes executable. */
+  if (r == 0 && (prot & L_PROT_EXEC)) {
+    extern void l_jit_note(uint64_t, uint64_t);
+    l_jit_note(addr, len);
+  }
   return l_ret(tf, r == -1 ? -ENOMEM : r);
 }
 

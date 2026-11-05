@@ -1550,6 +1550,293 @@ static int l_thr_getcpu(struct process *p, struct trap_frame *tf) {
 
 #define L_SA_ONSTACK 0x08000000
 
+/* ---- M6/L36: signal-frame stack-alignment evidence ----------------------
+ *
+ * Mono's generic amd64 trampoline asserts `%rsp % 16 == 0` at ITS entry
+ * (`and $15,%r11; cmp $0` -> `call stack_unaligned(tramp_type)`,
+ * tramp-amd64.c:641), which is what a `call` into it from a JIT body gives.
+ * An 8-byte error anywhere in the compat frame round trip therefore aborts
+ * the runtime far from its cause, so every plant records the interrupted %rsp
+ * and the frame base, and rt_sigreturn compares the two.  `[SFX]` is the
+ * assertion: the restored rsp differs from the planted one by any amount.
+ *
+ * `kind` says where the frame came from:
+ *   0 = fault (linux_compat_fault), 1 = trap/syscall exit,
+ *   2 = resume boundary (a woken park), 3 = resume boundary after the PC was
+ *       rewound for an SA_RESTART restart.
+ */
+#define L_SF_RING 16
+struct l_sf_diag {
+  uint64_t sp;   /* tf->lr when planted: the interrupted user RSP */
+  uint64_t base; /* frame address == handler entry RSP */
+  uint64_t ip;   /* interrupted PC (tf->elr) */
+  uint32_t pid;
+  uint32_t gen;
+  int32_t sig;
+  uint8_t alt;
+  uint8_t kind;
+  uint8_t flags_hi;
+  uint8_t pad;
+};
+static struct l_sf_diag l_sf_ring[L_SF_RING];
+static uint32_t l_sf_ring_n;
+static struct l_sf_diag l_sf_last[MAX_PROCESSES];
+static uint32_t l_sf_gen;
+static int l_sf_rows, l_sf_xrows, l_sf_rrows;
+static volatile int l_sf_src; /* 0 trap exit, 1 resume, 2 restart-resume */
+
+void linux_compat_sf_src(int src) { l_sf_src = src; }
+
+/* Called by schedule() for a user-mode resume, right before enter_user_space:
+   `lr` is the frame's own RSP slot, `gsp` the value the resume tail actually
+   loads (arch_get_user_sp()).  They must be bit-identical. */
+int linux_compat_resume_check(int pid, uint64_t lr, uint64_t gsp) {
+  static int rows;
+  if (lr == gsp)
+    return 0;
+  if (rows < 12) {
+    rows++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[SFV] resume pid=");
+    kl_i(&kl, pid);
+    kl_s(&kl, " frame_lr=0x");
+    kl_hex(&kl, (unsigned long)lr);
+    kl_s(&kl, " gsp=0x");
+    kl_hex(&kl, (unsigned long)gsp);
+    kl_s(&kl, " d=");
+    kl_i(&kl, (int)(long)(gsp - lr));
+    kl_s(&kl, " l16=");
+    kl_i(&kl, (int)(lr & 15));
+    kl_s(&kl, " g16=");
+    kl_i(&kl, (int)(gsp & 15));
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  return 1;
+}
+
+static void l_sf_record(struct process *p, struct trap_frame *tf,
+                        uint64_t base, uint64_t sp, int sig, int alt,
+                        uint64_t ip) {
+  if (!p || p->pid < 0 || p->pid >= MAX_PROCESSES)
+    return;
+  struct l_sf_diag d;
+  (void)tf;
+  d.sp = sp; /* the INTERRUPTED user rsp, before the red-zone subtraction */
+
+  d.base = base;
+  d.ip = ip;
+  d.pid = (uint32_t)p->pid;
+  d.gen = ++l_sf_gen;
+  d.sig = sig;
+  d.alt = (uint8_t)(alt ? 1 : 0);
+  d.kind = (uint8_t)(l_sf_src & 3);
+  l_sf_src = 0; /* one shot: the next plant defaults to a trap-exit delivery */
+  d.flags_hi = (uint8_t)(((tf->spsr >> 8) & 0xff));
+  d.pad = 0;
+  l_sf_ring[l_sf_ring_n % L_SF_RING] = d;
+  l_sf_ring_n++;
+  l_sf_last[p->pid] = d;
+  if (l_sf_rows < 48) {
+    l_sf_rows++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[SFP] pid=");
+    kl_i(&kl, p->pid);
+    kl_s(&kl, " gen=");
+    kl_i(&kl, (int)d.gen);
+    kl_s(&kl, " sig=");
+    kl_i(&kl, sig);
+    kl_s(&kl, " kind=");
+    kl_i(&kl, (int)d.kind);
+    kl_s(&kl, " sp=0x");
+    kl_hex(&kl, (unsigned long)d.sp);
+    kl_s(&kl, " sp16=");
+    kl_i(&kl, (int)(d.sp & 15));
+    kl_s(&kl, " base=0x");
+    kl_hex(&kl, (unsigned long)base);
+    kl_s(&kl, " b16=");
+    kl_i(&kl, (int)(base & 15));
+    kl_s(&kl, " alt=");
+    kl_i(&kl, alt ? 1 : 0);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+}
+
+/* Called by rt_sigreturn once the frame's RSP slot has been read. */
+static void l_sf_check_restore(struct process *cur, uint64_t frame_rsp,
+                               uint64_t rip) {
+  if (!cur || cur->pid < 0 || cur->pid >= MAX_PROCESSES)
+    return;
+  struct l_sf_diag *d = &l_sf_last[cur->pid];
+  if (d->pid != (uint32_t)cur->pid || d->gen == 0)
+    return;
+  long delta = (long)(frame_rsp - d->sp);
+  if (l_sf_rrows < 64) {
+    l_sf_rrows++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[SFR] pid=");
+    kl_i(&kl, cur->pid);
+    kl_s(&kl, " gen=");
+    kl_i(&kl, (int)d->gen);
+    kl_s(&kl, " sig=");
+    kl_i(&kl, (int)d->sig);
+    kl_s(&kl, " kind=");
+    kl_i(&kl, (int)d->kind);
+    kl_s(&kl, " plant=0x");
+    kl_hex(&kl, (unsigned long)d->sp);
+    kl_s(&kl, " frame=0x");
+    kl_hex(&kl, (unsigned long)frame_rsp);
+    kl_s(&kl, " d=");
+    kl_i(&kl, (int)delta);
+    kl_s(&kl, " p16=");
+    kl_i(&kl, (int)(d->sp & 15));
+    kl_s(&kl, " f16=");
+    kl_i(&kl, (int)(frame_rsp & 15));
+    kl_s(&kl, " ret16=");
+    kl_i(&kl, (int)(rip & 15));
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  if (delta != 0 && l_sf_xrows < 8) {
+    l_sf_xrows++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[SFX] MISMATCH pid=");
+    kl_i(&kl, cur->pid);
+    kl_s(&kl, " gen=");
+    kl_i(&kl, (int)d->gen);
+    kl_s(&kl, " planted=0x");
+    kl_hex(&kl, (unsigned long)d->sp);
+    kl_s(&kl, " restored=0x");
+    kl_hex(&kl, (unsigned long)frame_rsp);
+    kl_s(&kl, " delta=");
+    kl_i(&kl, (int)delta);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+}
+
+/* SIGABRT is Mono's assertion exit: dump the frame ring so the last plants
+   and restores before the abort are on the record (they are the only events
+   that can have moved %rsp). */
+static void l_sf_dump_ring(struct process *p, const char *why,
+                          struct trap_frame *tf, int sig) {
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[SFA] ");
+  kl_s(&kl, why);
+  kl_s(&kl, " sig=");
+  kl_i(&kl, sig);
+  kl_s(&kl, " ipc=0x");
+  kl_hex(&kl, (unsigned long)(tf ? tf->elr : 0));
+  kl_s(&kl, " sp=0x");
+  kl_hex(&kl, (unsigned long)(tf ? tf->lr : 0));
+  kl_s(&kl, " sp16=");
+  kl_i(&kl, (int)((tf ? tf->lr : 0) & 15));
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+  /* The aborting thread's own stack: 256 words (2 KiB) from RSP, plus the
+     known JIT code windows.  For a `call`, the return-address word sits AT the
+     callee's entry RSP, so the word's own address parity IS the parity the
+     callee was entered with — 8 for a normal call from an aligned body, 0 for
+     a generic trampoline entered by the specific trampoline's `call`, and 8
+     again for a *specific* trampoline that a JIT body reached from a body
+     running 8 bytes low.  The JIT marker says which words are code. */
+  if (p && tf) {
+    extern int l_jit_contains(uint64_t);
+    for (int i = 0; i < 8; i++) {
+      extern int l_jit_window(int, uint64_t *, uint64_t *);
+      uint64_t b = 0, l = 0;
+      if (!l_jit_window(i, &b, &l))
+        break;
+      kl_init(&kl);
+      kl_s(&kl, "[SFA] jit base=0x");
+      kl_hex(&kl, (unsigned long)b);
+      kl_s(&kl, " len=0x");
+      kl_hex(&kl, (unsigned long)l);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+    /* glibc's _IO_2_1_stdout_ for this workload lives at libc+0x1ed6a0 (the
+       [SIGDUMP] chain rows name the same address).  stack_unaligned's
+       printf("%d\n", tramp_type) is still in that FILE's buffer when abort()
+       runs -- stdout is a regular file, so it is block buffered, and abort()
+       does not flush -- so the pending bytes ARE the trampoline type that
+       tripped the check.  Field offsets are glibc's _IO_FILE: _IO_write_base
+       0x20, _IO_write_ptr 0x28. */
+    {
+      uint64_t f = 0x10801ED6A0ULL;
+      uint64_t wb = 0, wp = 0;
+      if (l_copy_from_user(p, &wb, f + 0x20, 8) == 0 &&
+          l_copy_from_user(p, &wp, f + 0x28, 8) == 0 && wp > wb &&
+          wp - wb < 64 && wb > 0x10000000000ULL) {
+        kl_init(&kl);
+        kl_s(&kl, "[SFA] stdout pend=");
+        kl_i(&kl, (int)(wp - wb));
+        kl_s(&kl, " buf=\"");
+        uint64_t a;
+        for (a = wb; a < wp; a++) {
+          char ch = 0;
+          if (l_copy_from_user(p, &ch, a, 1) != 0)
+            break;
+          kl_c(&kl, (ch >= 32 && ch < 127) ? ch : '.');
+        }
+        kl_s(&kl, "\"\n");
+        kl_emit(&kl);
+      }
+    }
+    for (int k = 0; k < 256; k++) {
+      uint64_t v = 0;
+      if (l_copy_from_user(p, &v, tf->lr + (uint64_t)k * 8, 8) != 0)
+        break;
+      kl_init(&kl);
+      kl_s(&kl, "[SFA] s+");
+      kl_i(&kl, k * 8);
+      kl_s(&kl, "=0x");
+      kl_hex(&kl, (unsigned long)v);
+      if (l_jit_contains(v))
+        kl_s(&kl, " JIT");
+      else if (v >= 0x10000000000ULL && v < 0x20000000000ULL)
+        kl_s(&kl, " usr");
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  uint32_t n = l_sf_ring_n < L_SF_RING ? l_sf_ring_n : L_SF_RING;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t idx = (l_sf_ring_n - n + i) % L_SF_RING;
+    struct l_sf_diag *d = &l_sf_ring[idx];
+    if (d->gen == 0)
+      continue;
+    kl_init(&kl);
+    kl_s(&kl, "[SFA] #");
+    kl_i(&kl, (int)i);
+    kl_s(&kl, " pid=");
+    kl_i(&kl, (int)d->pid);
+    kl_s(&kl, " gen=");
+    kl_i(&kl, (int)d->gen);
+    kl_s(&kl, " sig=");
+    kl_i(&kl, (int)d->sig);
+    kl_s(&kl, " kind=");
+    kl_i(&kl, (int)d->kind);
+    kl_s(&kl, " sp=0x");
+    kl_hex(&kl, (unsigned long)d->sp);
+    kl_s(&kl, " b16=");
+    kl_i(&kl, (int)(d->base & 15));
+    kl_s(&kl, " s16=");
+    kl_i(&kl, (int)(d->sp & 15));
+    kl_s(&kl, " ip=0x");
+    kl_hex(&kl, (unsigned long)d->ip);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+}
+
+
 /* SEGV codes */
 #define L_SEGV_MAPERR 1
 #define L_SEGV_ACCERR 2
@@ -1629,6 +1916,8 @@ static int l_sf_plant(struct process *p, struct process *cur,
   uint64_t handler = grp->sig_handler[sig];
   uint64_t restorer = grp->sig_restorer;
   uint64_t sp = tf->lr;
+  uint64_t orig_sp = tf->lr; /* the interrupted rsp the ucontext must return */
+  uint64_t ipc = tf->elr;    /* interrupted PC, before the handler entry state */
   int flags = linux_compat_sigflags_get(p, sig);
   int on_altstack = 0;
 
@@ -1744,6 +2033,8 @@ static int l_sf_plant(struct process *p, struct process *cur,
       kl_emit(&kl);
     }
   }
+  /* M6/L36: record what this frame will have to give back at rt_sigreturn. */
+  l_sf_record(p, tf, base, orig_sp, sig, on_altstack, ipc);
   return 1;
 }
 
@@ -1817,6 +2108,13 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
     cur->sig_saved_mask = 0;
   }
 
+  if (sig == 6) { /* SIGABRT: Mono's assertion path.  One dump per boot. */
+    static int aborted;
+    if (!aborted) {
+      aborted = 1;
+      l_sf_dump_ring(cur, "abort", tf, sig);
+    }
+  }
   uint64_t handler = grp->sig_handler[sig];
   if (handler == HO_SIG_IGN) {
     l_sig_drop(cur, grp, sig);
@@ -1921,6 +2219,9 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
       base, L_SF_UC + L_UC_MCONTEXT + L_MC_GREGS);
   uint64_t rip = g[L_G_RIP];
   uint64_t rsp = g[L_G_RSP];
+  /* M6/L36: the round trip's second half.  `rsp` must be bit-identical to the
+     rsp l_sf_plant captured, independent of any alignment. */
+  l_sf_check_restore(cur, rsp, rip);
   /* M6/L32: a handler RETURN is the other half of a delivery.  If a wild
      fault shows up right after `last_syscall=15` (rt_sigreturn), these rows
      say which thread resumed where. */
@@ -2112,6 +2413,34 @@ static int l_sig_restart_park(struct process *t, int sig) {
 #endif
   t->sig_park_kind = 3; /* deliver at resume, then re-execute */
   t->sig_park_nr = 0;
+  /* M6/L36: the restart resumes user code AT the `syscall` with context[30]
+     as its rsp.  context[33] is what the resume tail actually loads into
+     gs:[24]; if the two disagree the resumed syscall runs on a different
+     stack than the one it was interrupted on. */
+  {
+    static int rs_rows;
+    if (rs_rows < 16) {
+      rs_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SFS] pid=");
+      kl_i(&kl, t->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " elr=0x");
+      kl_hex(&kl, (unsigned long)t->context[31]);
+      kl_s(&kl, " c30=0x");
+      kl_hex(&kl, (unsigned long)t->context[30]);
+      kl_s(&kl, " c33=0x");
+      kl_hex(&kl, (unsigned long)t->context[33]);
+      kl_s(&kl, " c30_16=");
+      kl_i(&kl, (int)(t->context[30] & 15));
+      kl_s(&kl, " d33=");
+      kl_i(&kl, (int)(long)(t->context[30] - t->context[33]));
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   return 1;
 }
 

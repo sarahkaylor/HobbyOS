@@ -437,6 +437,13 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   proc_table[pid].context[31] = elr;        // ELR (entry point)
   proc_table[pid].context[33] = sp;         // SP_EL0 (stack pointer)
+  /* M6/L36: context[30] is the frame's own user-RSP slot (restore_context
+     loads tf->lr from it).  It MUST agree with context[33]: a signal
+     delivered at this process's first resume plants its frame at tf->lr, so
+     a stale value here moves the handler -- and the rt_sigreturn that
+     follows -- onto another process's stack.  Fresh contexts are zeroed, so
+     without this the first resume carries lr=0. */
+  proc_table[pid].context[30] = sp;
 #if defined(__x86_64__)
   /* GB-014: on x64 this slot is RFLAGS, not ARM's SPSR. Zero is NOT a valid
    * set of flags to iretq with: bit 1 is architecturally reserved and MUST be
@@ -1249,6 +1256,7 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
      identity-map all RAM at supervisor level (and the block is also
      mapped at USER_VIRT_BASE while the task is current). */
   p->context[33] = p->user_phys_base + USER_REGION_SIZE - 0x1000;
+  p->context[30] = p->context[33]; /* M6/L36: frame lr == resumed SP */
 #ifdef __x86_64__
   p->context[32] = 0x202;                  // RFLAGS = IF (0x200) | Reserved (0x02)
   p->context[5] = (uint64_t)arg;           // rdi = first argument on x86_64
@@ -1783,6 +1791,20 @@ void schedule(struct trap_frame *tf, int is_yield) {
          in the right address space; a rewound blocked-park restart defers
          to its own trap exit (D8.4b). */
       process_signal_resume_deliver(&proc_table[next], &local_tf);
+
+      /* M6/L36: enter_user_space plants the user RSP from gs:[24] (the
+         per-CPU user_sp[] that restore_context just set from context[33]),
+         NOT from the frame's own lr slot.  A resumed frame whose lr and
+         context[33] disagree therefore re-enters user code on a different
+         stack than the one it was interrupted on -- the exact shape of an
+         8-byte skew at Mono's next trampoline.  Report the disagreement. */
+      if ((local_tf.cs & 3) == 3) {
+        extern int linux_compat_resume_check(int, uint64_t, uint64_t)
+            __attribute__((weak));
+        if (linux_compat_resume_check)
+          (void)linux_compat_resume_check(proc_table[next].pid, local_tf.lr,
+                                          arch_get_user_sp());
+      }
 
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       extern void resume_mark(int pid, uint64_t target_sp);
@@ -3096,6 +3118,12 @@ void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
   if (p->sig_park_kind != 3 && sig_resume_defers(grp, tf))
     return;
   int was_restart = (p->sig_park_kind == 3);
+  /* M6/L36: label the frame's provenance for the [SFP] row. */
+  {
+    extern void linux_compat_sf_src(int) __attribute__((weak));
+    if (linux_compat_sf_src)
+      linux_compat_sf_src(was_restart ? 2 : 1);
+  }
   if (process_signal_deliver(grp, tf)) {
     if (was_restart) p->sig_park_kind = 0;
     static int sd_rows;
@@ -4967,6 +4995,13 @@ int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
   save_context(t, tf);
   t->context[0] = 0;
   t->context[33] = stack;
+  /* M6/L36: save_context copied the CALLER's user RSP into context[30] (the
+     frame's lr slot).  The child runs on `stack`, so from its first resume
+     tf->lr pointed into the parent's frame: a signal delivered there plants
+     the handler around the PARENT's rsp and rt_sigreturn then resumes the
+     child on the parent's stack (measured: [SFV] resume pid=1
+     frame_lr=0x17FFFFFC58 gsp=0x1080022EF8). */
+  t->context[30] = stack;
 #ifdef __x86_64__
   t->context[34] = 0; /* classify user -> user selectors on resume */
   t->context[35] = 0;

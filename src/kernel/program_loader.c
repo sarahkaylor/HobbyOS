@@ -1566,6 +1566,10 @@ int process_exec_current(struct trap_frame *tf, const char *path,
 #else
     grp->context[33] = USER_MAIN_STK_TOP_V2;
 #endif
+    /* M6/L36: the frame's lr slot must name the NEW image's stack, not the
+       pre-exec stack (restore_context resumes from context[30]; a signal at
+       the first resume would otherwise plant around the old SP). */
+    grp->context[30] = grp->context[33];
     arch_set_user_sp(grp->context[33]);
 #ifdef __x86_64__
     /* GB-068 follow-on, exec flavour: the spawn loader pre-materializes the
