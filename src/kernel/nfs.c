@@ -507,6 +507,10 @@ int nfs_mount_add(const char *source, const char *point) {
   for (uint32_t i = 0; i < root.len; i++) m->root_fh[i] = root.data[i];
   m->root_fh_len = root.len;
   m->read_size = NFS_READ_RSIZE;
+  m->rd_sock = 0;
+  m->rd_busy = 0;
+  m->short_val = 0;
+  m->short_n = 0;
 
   uart_puts("[NFS] mounted ");
   uart_puts(m->source);
@@ -540,6 +544,16 @@ int nfs_mount_remove(const char *point) {
     }
 
     mounts[i].in_use = 0;
+    /* L35: the cached READ socket belongs to the mount — close it, or a
+     * later mount into this slot inherits a socket connected to the old
+     * server (and a stuck rd_busy). */
+    if (mounts[i].rd_sock) {
+      net_socket_close(mounts[i].rd_sock);
+      mounts[i].rd_sock = 0;
+    }
+    mounts[i].rd_busy = 0;
+    mounts[i].short_val = 0;
+    mounts[i].short_n = 0;
     dir_cache_invalidate_all();
     uart_puts("[NFS] unmounted ");
     uart_puts(point);
