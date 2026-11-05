@@ -545,6 +545,13 @@ endif
 ifneq ($(RW_TRACE_MEM),)
   CFLAGS += -DRW_TRACE_MEM=1
 endif
+# Diagnostic: the set/wake timeline for every futex key a process's MAIN thread
+# parks on ([FUTXW] WAIT/WAKE/KEY rows in src/kernel/linux_compat_thr.c).  It
+# answers "did the setter reach the futex, and did the wake find a waiter".
+#     make RW_FUTXW=1 ... disk.img
+ifneq ($(RW_FUTXW),)
+  CFLAGS += -DRW_FUTXW=1
+endif
 
 # Target and objects
 TARGET = hobbyos.elf

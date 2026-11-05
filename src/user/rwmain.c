@@ -256,8 +256,14 @@ static const char *rw_mod_of(unsigned long v, unsigned long *off) {
 static int rw_readable(unsigned long a) {
   unsigned char vec[8];
   unsigned long page = a & ~0xFFFul;
-  if (page < 0x10000ul) return 0;
-  return mincore((void *)page, 4096, vec) == 0;
+  if (page < 0x10000ul || page >= 0x1800000000ul) return 0; /* USER_VA_BASE..TOP */
+  /* mincore answers 0 when the RANGE IS COVERED BY A REGION, and bit 0 says
+     whether a leaf is installed.  A PROT_NONE guard region is covered but has
+     no leaf, so returning mincore's status alone made this say "readable" for
+     the page at the very top of the user window (0x10FFFFF000) and the stack
+     scan died reading 0x10FFFFFFFE, i.e. inside rwmain itself. */
+  if (mincore((void *)page, 4096, vec) != 0) return 0;
+  return (vec[0] & 1) != 0;
 }
 
 struct rb { char *start, *p, *e; };
@@ -482,6 +488,9 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *old) {
         dlvsym(RTLD_NEXT, "sigaction", "GLIBC_2.2.5");
   if (act && act->sa_sigaction == rw_sig_handler)
     return next_sigaction ? next_sigaction(sig, act, old) : -1; /* re-arming ours */
+  if (act && sig == SIGUSR2)
+    return 0; /* L49: the stack-dump signal stays ours; the client is told it
+                 was installed and never learns otherwise */
   if (act && (sig == SIGSEGV || sig == SIGBUS || sig == SIGILL) &&
       act->sa_handler != SIG_DFL && act->sa_handler != SIG_IGN) {
     fprintf(stderr, "[RWMAIN] sigaction sig=%d handler=%p flags=0x%x from=%p %s\n",
@@ -523,6 +532,45 @@ void (*signal(int sig, void (*h)(int)))(int) {
   return real_signal ? real_signal(sig, h) : SIG_ERR;
 }
 
+/* ---- L49: the managed stack of a PARKED thread -------------------------
+ *
+ * The wait site is a managed WaitHandle.WaitOne, and L48 could not name its
+ * caller: Mono's own SIGQUIT dump dies in its global-suspend handshake, and an
+ * icall hook on Wait_internal never binds because the JIT had already cached
+ * the call (the icall table holds our pointer -- verify=HOOK -- and the body
+ * still calls something else).
+ *
+ * So take the stack from the thread itself: SIGUSR2 is delivered to the
+ * parked thread, the handler (which is async-signal-safe: it copies words and
+ * sets a flag, nothing else) records [rsp, rsp+N) from the interrupted
+ * ucontext, and the watchdog thread resolves those words with
+ * mono_jit_info_table_find.  Frame names, not addresses.
+ */
+#define RW_STK_WORDS 2048
+static volatile int rw_stk_ready;
+static volatile int rw_stk_busy;
+static unsigned long rw_stk_base;
+static volatile int rw_stk_n;
+static unsigned long rw_stk_buf[RW_STK_WORDS];
+
+static void rw_stk_handler(int sig, siginfo_t *si, void *ucv) {
+  (void)sig;
+  (void)si;
+  ucontext_t *uc = (ucontext_t *)ucv;
+  unsigned long sp = (unsigned long)uc->uc_mcontext.gregs[REG_RSP];
+  rw_stk_base = sp;
+  int i = 0;
+  while (i < RW_STK_WORDS) {
+    unsigned long a = sp + (unsigned long)i * 8;
+    if (!rw_readable(a)) break;              /* per-page, mincore-backed */
+    rw_stk_buf[i] = *(volatile unsigned long *)a;
+    i++;
+  }
+  rw_stk_n = i;
+  rw_stk_busy = 0;
+  rw_stk_ready = 1;
+}
+
 static void rw_sig_install(void) {
   const char *v = getenv("RW_SIGDUMP");
   if (v && v[0] == '0') return;
@@ -539,6 +587,17 @@ static void rw_sig_install(void) {
   if (!next_sigaction)
     next_sigaction = (int (*)(int, const struct sigaction *, struct sigaction *))
         dlvsym(RTLD_NEXT, "sigaction", "GLIBC_2.2.5");
+  /* L49: our own stack-dump signal.  SA_RESTART must be CLEAR: the target is
+     parked in a futex/cond wait and the -EINTR resume is what runs the handler
+     on that thread's stack. */
+  {
+    struct sigaction sa2;
+    memset(&sa2, 0, sizeof sa2);
+    sa2.sa_sigaction = rw_stk_handler;
+    sa2.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&sa2.sa_mask);
+    if (next_sigaction) (void)next_sigaction(SIGUSR2, &sa2, 0);
+  }
   if (!next_sigaction || next_sigaction(SIGSEGV, &sa, 0) != 0 ||
       next_sigaction(SIGBUS, &sa, 0) != 0) {
     char e[96];
@@ -1179,12 +1238,13 @@ static struct {
   void *(*domain_get)(void);
   void *(*jit_find)(void *, void *);
   void *(*jit_method)(void *);
+  void *compile;
   void *(*m_get_class)(void *);
   const char *(*c_get_name)(void *);
   const char *(*m_get_name)(void *);
   void *orig_q, *orig_c, *orig_r;
   void *m_q, *m_c, *m_r;
-  long enq, comp, req, reqf, seq, wtn;
+  long enq, comp, req, reqf, seq, wtn, setn;
   volatile int wbt_inf;
 } tp;
 static struct tp_ev tp_ring[TPRING];
@@ -1227,14 +1287,25 @@ static int tp_hook_r(void *err);
 #define TPW_MAX 24
 static struct { void *ra1; long n; unsigned last_ms; int last_tid; } tp_waits[TPW_MAX];
 static volatile int tp_w_n;
-static int (*tp_orig_w)(long, unsigned, long, long, void *);
+/* L49: the REAL signature.  mscorlib declares
+ *   [MethodImpl(InternalCall)] static extern int Wait_internal(IntPtr* handles,
+ *                                       int numHandles, bool waitAll, int ms);
+ * so the first argument is a POINTER to an array of handles, not a handle.
+ * L48's hook declared (long handle, unsigned ms, long, long, void*) -- it read
+ * `h` as the handle and `ms` as numHandles, i.e. it would have printed garbage
+ * on the very first call.  This one is a pure pass-through: six registers in,
+ * rax out. */
+static long (*tp_orig_w)(void *h, long n, long all, long ms, void *a5, void *a6);
+static int (*tp_orig_s)(void *h);
+static long tp_w_ret, tp_w_fin;
+static volatile unsigned long tp_w_key;
 
 /* A poor man's managed stack: scan the raw stack for return addresses that
  * Mono's JIT info table resolves to a method, keeping only words preceded by
  * a `call rel32` (0xE8) -- the same filter that turned a page of stack
  * garbage into a real chain in §33/L46.  This is what the broken SIGQUIT dump
  * cannot give us: the managed caller of a wait, in-process, on demand. */
-static int tp_bt(const char *tag, int tid, long extra) {
+static int tp_bt_n(const char *tag, int tid, long extra, int depth) {
   unsigned long sp = 0;
   __asm__ volatile("mov %%rsp, %0" : "=r"(sp));
   if (!tp.jit_find || !tp.domain_get) return 0;
@@ -1242,13 +1313,16 @@ static int tp_bt(const char *tag, int tid, long extra) {
   if (!dom) return 0;
   int printed = 0;
   unsigned long *p = (unsigned long *)sp;
-  for (int i = 0; i < 1536 && printed < 6; i++) {
+  for (int i = 0; i < 1536 && printed < depth; i++) {
     if (!rw_readable((unsigned long)&p[i])) break;
     unsigned long v = p[i];
     if (v < 0x100000 || v > 0x7fffffffffffUL) continue;
-    if (!rw_readable(v - 1)) continue;
-    unsigned char prev = *(unsigned char *)(v - 1);
-    if (prev != 0xE8) continue;
+    /* The E8 filter is NOT enough here: this JIT reaches managed methods
+       through indirect calls (`call *%rax`, FF /2), so a real return address
+       is preceded by 0xD0..0xD7 or a disp8 form, and L48's E8-only scan found
+       0 frames on the game's own stack while it reported 7 enqueues.  The JIT
+       info table IS the filter: it answers only for addresses inside a JIT'd
+       method. */
     void *ji = tp.jit_find(dom, (void *)v);
     if (!ji) continue;
     void *m = tp.jit_method(ji);
@@ -1273,18 +1347,70 @@ static int tp_bt(const char *tag, int tid, long extra) {
   if (printed) { tp_w("\n"); return 1; }
   return 0;
 }
+static int tp_bt(const char *tag, int tid, long extra) __attribute__((unused));
+static int tp_bt(const char *tag, int tid, long extra) { return tp_bt_n(tag, tid, extra, 6); }
 
-static int tp_hook_w(long h, unsigned ms, long a3, long a4, void *err) {
-  int infinite = (ms == 0xFFFFFFFFu);
+static int tp_hook_w(void *h, long nh, long all, long ms, void *a5, void *a6) {
+  int tid = tp_tid();
   int n = (int)__sync_fetch_and_add(&tp.wtn, 1);
-  if (n == 0) tp_w("[TPQW] first Wait_internal through the hook\n");
+  /* Handles[0]: wait_one passes &waitableSafeHandle, i.e. a one-element array. */
+  void *h0 = 0;
+  if (h && rw_readable((unsigned long)h)) h0 = *(void **)h;
+  if (n == 0) {
+    tp_w("[TPQW] FIRST Wait_internal h=0x");
+    tp_wx((unsigned long)h0);
+    tp_w(" n=");
+    tp_wi(nh);
+    tp_w(" all=");
+    tp_wi(all);
+    tp_w(" ms=");
+    tp_wi(ms);
+    tp_w(" tid=");
+    tp_wi(tid);
+    tp_w(" key=0x");
+    tp_wx((unsigned long)h0 + 0x38);
+    tp_w("\n");
+  }
+  int infinite = (ms < 0 || ms == 0xFFFFFFFFL);
   /* Only the interesting waits pay for a stack walk: infinite ones (the
      stall) and the first few of everything else. */
-  if ((infinite && tp.wbt_inf < 6) || n < 3) {
-    if (infinite) tp.wbt_inf++;
-    tp_bt("[TPQW]", tp_tid(), infinite ? -1 : (long)ms);
+  if (infinite && tp.wbt_inf < 8) {
+    tp.wbt_inf++;
+    tp_w("[TPQW] park tid=");
+    tp_wi(tid);
+    tp_w(" n=");
+    tp_wi(nh);
+    tp_w(" h0=0x");
+    tp_wx((unsigned long)h0);
+    tp_w(" key=0x");
+    tp_wx((unsigned long)h0 + 0x38);
+    tp_w(" seq=");
+    tp_wi(n);
+    tp_w("\n");
+    tp_bt_n("[TPQW]", tid, -1, 12);
+  } else if (infinite) {
+    tp_w("[TPQW] park tid=");
+    tp_wi(tid);
+    tp_w(" h0=0x");
+    tp_wx((unsigned long)h0);
+    tp_w(" seq=");
+    tp_wi(n);
+    tp_w("\n");
   }
-  int r = tp_orig_w ? tp_orig_w(h, ms, a3, a4, err) : 0;
+  if (h0) tp_w_key = (unsigned long)h0 + 0x38;
+  long r = tp_orig_w ? tp_orig_w(h, nh, all, ms, a5, a6) : 0;
+  tp_w_ret++;
+  if (infinite) {
+    tp_w_fin++;
+    tp_w("[TPQW] woke tid=");
+    tp_wi(tid);
+    tp_w(" ms=");
+    tp_wi(ms);
+    tp_w(" r=");
+    tp_wi(r);
+    tp_w("\n");
+  }
+  /* One frame above the patched call site inside WaitHandle.WaitOne. */
   void *ra1 = __builtin_return_address(1);
   int slot = -1;
   for (int i = 0; i < tp_w_n && i < TPW_MAX; i++)
@@ -1292,10 +1418,141 @@ static int tp_hook_w(long h, unsigned ms, long a3, long a4, void *err) {
   if (slot < 0 && tp_w_n < TPW_MAX) { slot = tp_w_n; tp_w_n = slot + 1; tp_waits[slot].ra1 = ra1; tp_waits[slot].n = 0; }
   if (slot >= 0) {
     tp_waits[slot].n++;
-    tp_waits[slot].last_ms = ms;
-    tp_waits[slot].last_tid = tp_tid();
+    tp_waits[slot].last_ms = (unsigned)ms;
+    tp_waits[slot].last_tid = tid;
   }
   return r;
+}
+
+/* Every managed EventWaitHandle.Set() lands here (NativeEventCalls.SetEvent ->
+ * SetEvent_internal -> mono_w32handle_set).  This is the "did the completion
+ * signal get ISSUED at all" half of the question, in the waiter's own terms:
+ * the row carries the handle value, so it can be compared with the wait key
+ * (handle + 0x38) without decoding any native frame. */
+static int tp_hook_s(void *h) {
+  long n = __sync_fetch_and_add(&tp.setn, 1);
+  if (n < 32 || (n % 128) == 0) {
+    tp_w("[TPQS] Set h=0x");
+    tp_wx((unsigned long)h);
+    tp_w(" key=0x");
+    tp_wx((unsigned long)h + 0x38);
+    tp_w(" tid=");
+    tp_wi(tp_tid());
+    tp_w(" seq=");
+    tp_wi(n);
+    tp_w("\n");
+  }
+  return tp_orig_s ? tp_orig_s(h) : 1;
+}
+
+/* Rewrite every call site in `code` that targets `orig` so it targets `hook`.
+ * Mono's amd64 JIT reaches an icall either by `call rel32` (E8) or by
+ * `movabs $imm64,%r11; call *%r11`; both forms carry the address literally,
+ * which is why the JIT's cached binding is patchable even when it was made
+ * long before mono_add_internal_call().  Returns the number of sites. */
+static int tp_patch_sites(const char *tag, void *code, void *orig, void *hook) {
+  if (!code || !orig || !hook) return 0;
+  unsigned char *c = (unsigned char *)code;
+  int sites = 0;
+  for (int i = 0; i + 10 < 4096; i++) {
+    if (c[i] == 0xE8) {
+      int32_t rel;
+      memcpy(&rel, c + i + 1, 4);
+      unsigned long tgt = (unsigned long)(c + i + 5) + (long)rel;
+      if (tgt == (unsigned long)orig) {
+        int32_t nrel = (int32_t)((long)((unsigned char *)hook - (c + i + 5)));
+        memcpy(c + i + 1, &nrel, 4);
+        sites++;
+      }
+    } else if ((c[i] == 0x48 || c[i] == 0x49) && c[i + 1] >= 0xB8 && c[i + 1] <= 0xBF) {
+      unsigned long imm;
+      memcpy(&imm, c + i + 2, 8);
+      if (imm == (unsigned long)orig) {
+        memcpy(c + i + 2, &hook, 8);
+        sites++;
+      }
+    }
+  }
+  tp_w("[TPQP] tag=");
+  tp_w(tag);
+  tp_w(" code=0x");
+  tp_wx((unsigned long)code);
+  tp_w(" orig=0x");
+  tp_wx((unsigned long)orig);
+  tp_w(" hook=0x");
+  tp_wx((unsigned long)hook);
+  tp_w(" sites=");
+  tp_wi(sites);
+  tp_w(" calls=");
+  {
+    /* Every direct call in the body, so an icall reached by an encoding this
+       patcher does not know is still visible as "call -> 0x...". */
+    int shown = 0;
+    for (int i = 0; i + 5 <= 512 && shown < 8; i++) {
+      if (c[i] != 0xE8) continue;
+      int32_t rel;
+      memcpy(&rel, c + i + 1, 4);
+      tp_w("+");
+      tp_wi(i);
+      tp_w(":0x");
+      tp_wx((unsigned long)(c + i + 5) + (long)rel);
+      tp_w(" ");
+      shown++;
+    }
+  }
+  tp_w(" bytes=");
+  for (int i = 0; i < 64; i++) { tp_wx((unsigned long)c[i]); tp_w(" "); }
+  tp_w("\n");
+  return sites;
+}
+
+static void *tp_patch_method(void *klass, const char *name, int arity,
+                             void *orig, void *hook, const char *tag) {
+  if (!klass || !tp.compile) return 0;
+  void *m = tp.method_from_name(klass, name, arity);
+  if (!m) return 0;
+  void *code = ((void *(*)(void *))tp.compile)(m);
+  if (!code) return 0;
+  char full[64];
+  int i = 0;
+  for (const char *s = tag; *s && i < 40; s++) full[i++] = *s;
+  full[i++] = '/';
+  for (const char *s = name; *s && i < 58; s++) full[i++] = *s;
+  full[i++] = (char)('0' + (arity % 10));
+  full[i] = 0;
+  tp_patch_sites(full, code, orig, hook);
+  return code;
+}
+
+/* Resolve the words the SIGUSR2 handler copied out of the parked thread's
+ * stack.  Runs on the watchdog thread, i.e. outside any signal context. */
+static void tp_bt_words(const char *tag, unsigned long base, int n) {
+  if (!tp.jit_find || !tp.domain_get) return;
+  void *dom = tp.domain_get();
+  if (!dom) return;
+  int printed = 0;
+  for (int i = 0; i < n && printed < 24; i++) {
+    unsigned long v = rw_stk_buf[i];
+    if (v < 0x100000 || v > 0x7fffffffffffUL) continue;
+    void *ji = tp.jit_find(dom, (void *)v);
+    if (!ji) continue;
+    void *m = tp.jit_method(ji);
+    if (!m) continue;
+    void *k = tp.m_get_class(m);
+    const char *mn = tp.m_get_name(m);
+    const char *kn = k ? tp.c_get_name(k) : 0;
+    tp_w(printed ? " <- " : " bt=");
+    tp_w(kn ? kn : "?");
+    tp_w(".");
+    tp_w(mn ? mn : "?");
+    printed++;
+  }
+  if (printed) { tp_w("\n"); return; }
+  tp_w(" bt=(no JIT frame in ");
+  tp_wi(n);
+  tp_w(" words from 0x");
+  tp_wx(base);
+  tp_w(")\n");
 }
 
 static int tp_register_w(void) {
@@ -1304,41 +1561,60 @@ static int tp_register_w(void) {
   if (!img) { tp_w("[TPQW] no mscorlib image\n"); return 0; }
   void *k = tp.class_from_name(img, "System.Threading", "WaitHandle");
   if (!k) { tp_w("[TPQW] WaitHandle class lookup failed\n"); return 0; }
-  /* This runtime registers Wait_internal, not WaitOneNative: the mscorlib on
-     disk has WaitOneNative as a *managed* wrapper (DangerousAddRef/ExitContext)
-     around the icall, so the icall name that exists in libmonobdwgc's table is
-     the only one that can be hooked. */
-  static const char *names[] = {"Wait_internal", "WaitOneNative", "InternalWaitOne", 0};
-  int hooked = 0;
-  for (int ni = 0; names[ni]; ni++) {
-    void *m = 0;
-    int arity = 0;
-    for (arity = 4; arity >= 1; arity--) {
-      m = tp.method_from_name(k, names[ni], arity);
-      if (m) break;
-    }
-    if (!m) continue;
-    if (!tp_orig_w) tp_orig_w = (int (*)(long, unsigned, long, long, void *))tp.lookup_icall(m);
-    if (!tp_orig_w) continue;
-    char nm[64];
-    int i = 0;
-    for (const char *s = "System.Threading.WaitHandle::"; *s && i < 60; s++) nm[i++] = *s;
-    for (const char *s = names[ni]; *s && i < 62; s++) nm[i++] = *s;
-    nm[i] = 0;
-    tp.add_icall(nm, (const void *)tp_hook_w);
-    if (!hooked) {
-      tp_w("[TPQW] hooked ");
-      tp_w(nm);
-      tp_w(" arity=");
-      tp_wi(arity);
-      tp_w(" orig=");
-      tp_wx((unsigned long)tp_orig_w);
-      tp_w("\n");
-    }
-    hooked++;
+  /* Wait_internal(IntPtr*, int, bool, int) is the only handle wait in this
+   * mscorlib: WaitOne/WaitAny/WaitAll all funnel into it. */
+  void *m = 0;
+  int arity = 0;
+  for (arity = 5; arity >= 3; arity--) {
+    m = tp.method_from_name(k, "Wait_internal", arity);
+    if (m) break;
   }
-  if (!hooked) tp_w("[TPQW] no WaitHandle icall could be hooked\n");
-  return hooked;
+  if (!m) { tp_w("[TPQW] Wait_internal not found\n"); return 0; }
+  if (!tp_orig_w) tp_orig_w = (long (*)(void *, long, long, long, void *, void *))tp.lookup_icall(m);
+  if (!tp_orig_w) { tp_w("[TPQW] Wait_internal icall lookup failed\n"); return 0; }
+  tp.add_icall("System.Threading.WaitHandle::Wait_internal", (const void *)tp_hook_w);
+  /* Proof that the table now holds OUR pointer for the key the JIT will use. */
+  void *ver = tp.lookup_icall(m);
+  tp_w("[TPQW] bind arity=");
+  tp_wi(arity);
+  tp_w(" orig=0x");
+  tp_wx((unsigned long)tp_orig_w);
+  tp_w(" hook=0x");
+  tp_wx((unsigned long)tp_hook_w);
+  tp_w(" verify=");
+  tp_w(ver == (void *)tp_hook_w ? "HOOK" : ver == tp_orig_w ? "ORIG(unchanged)" : "OTHER");
+  tp_w("\n");
+  /* The JIT had already compiled WaitHandle.WaitOne before this registration
+   * (L48's hook never fired in 200 s), so the cached call site must be
+   * rewritten.  Compile-then-patch also covers a body compiled after us: the
+   * table entry alone would already bind our hook, and the patch finds 0
+   * sites -- either way the hook runs. */
+  /* The icall call site is NOT in WaitOne: WaitHandle.WaitOne/WaitAny/WaitAll
+   * all funnel through the private managed helpers WaitOneNative(SafeHandle,
+   * uint, bool, bool) and WaitMultiple(WaitHandle[], int, bool, bool), and
+   * THOSE are the bodies carrying the call.  Measured: WaitOne/0..2 and
+   * WaitAny/1 compile with sites=0. */
+  tp_patch_method(k, "WaitOneNative", 4, tp_orig_w, (void *)tp_hook_w, "WaitHandle");
+  tp_patch_method(k, "WaitMultiple", 4, tp_orig_w, (void *)tp_hook_w, "WaitHandle");
+  /* The set side, for the "signal issued vs wake dropped" question. */
+  void *k2 = tp.class_from_name(img, "System.Threading", "NativeEventCalls");
+  if (k2) {
+    void *ms = tp.method_from_name(k2, "SetEvent_internal", 1);
+    if (ms) {
+      if (!tp_orig_s) tp_orig_s = (int (*)(void *))tp.lookup_icall(ms);
+      if (tp_orig_s) {
+        tp.add_icall("System.Threading.NativeEventCalls::SetEvent_internal", (const void *)tp_hook_s);
+        void *v2 = tp.lookup_icall(ms);
+        tp_w("[TPQS] bind SetEvent orig=0x");
+        tp_wx((unsigned long)tp_orig_s);
+        tp_w(" verify=");
+        tp_w(v2 == (void *)tp_hook_s ? "HOOK" : "unchanged");
+        tp_w("\n");
+        tp_patch_method(k2, "SetEvent", 1, tp_orig_s, (void *)tp_hook_s, "NativeEventCalls");
+      }
+    }
+  }
+  return 1;
 }
 
 static int tp_register_cr(void) {
@@ -1373,6 +1649,10 @@ static void tp_hook_q(void *err) {
     tp_w("\n");
   }
   tp_note(0, __builtin_return_address(0), __builtin_return_address(1));
+  /* L49: the managed chain that CREATED the item.  L48 resolved only the icall's
+     own caller (ThreadPoolTaskScheduler.QueueTask); the game method that asked
+     for the task is two frames above that, and this walk names it in place. */
+  if (n <= 8) tp_bt_n("[TPQE]", tp_tid(), n, 12);
 }
 static int tp_hook_c(void *err) {
   int r = tp.orig_c ? ((int (*)(void *))tp.orig_c)(err) : 1;
@@ -1530,6 +1810,28 @@ static void *tp_watchdog(void *arg) {
       tp_wi(tp.reqf);
       tp_w("\n");
     }
+    /* L49: the wait site.  Ask the main thread for its own stack twice, well
+       after the loader's stall begins (~30 s), via a signal that the kernel
+       delivers to THAT thread (tgkill to the leader == the main thread). */
+    if (tp.on && (i == 900 || i == 1500) && tp.jit_find) {
+      rw_stk_ready = 0;
+      rw_stk_busy = 1;
+      long r = syscall(234 /* tgkill */, (long)getpid(), (long)getpid(),
+                       (long)SIGUSR2);
+      tp_w("[TPWS] tgkill SIGUSR2 t=");
+      tp_wi(i / 20);
+      tp_w("s rc=");
+      tp_wi(r);
+      tp_w("\n");
+    }
+    if (rw_stk_ready) {
+      rw_stk_ready = 0;
+      tp_w("[TPWS] stack sp=0x");
+      tp_wx(rw_stk_base);
+      tp_w(" words=");
+      tp_wi(rw_stk_n);
+      tp_bt_words("[TPWS]", rw_stk_base, rw_stk_n);
+    }
     /* 3 s without a single event, at least 10 s in: dump the tail.  Up to
        six times, because the first quiet window is often just the gap before
        the loader starts. */
@@ -1560,6 +1862,7 @@ static void rw_tp_maybe_start(void *handle, const char *name) {
   tp.add_icall = (void (*)(const char *, const void *))dlsym(handle, "mono_add_internal_call");
   tp.domain_get = (void *(*)(void))dlsym(handle, "mono_domain_get");
   tp.jit_find = (void *(*)(void *, void *))dlsym(handle, "mono_jit_info_table_find");
+  tp.compile = dlsym(handle, "mono_compile_method");
   tp.jit_method = (void *(*)(void *))dlsym(handle, "mono_jit_info_get_method");
   tp.m_get_class = (void *(*)(void *))dlsym(handle, "mono_method_get_class");
   tp.c_get_name = (const char *(*)(void *))dlsym(handle, "mono_class_get_name");

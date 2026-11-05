@@ -48,8 +48,25 @@
 #define L_SYS_madvise 28
 #define L_SYS_dup 32
 #define L_SYS_dup2 33
+#define L_SYS_pause 34
 #define L_SYS_nanosleep 35
 #define L_SYS_getitimer 36
+#define L_SYS_alarm 37
+#define L_SYS_setitimer 38
+
+/* --- POSIX timers and timerfd ---------------------------------------------
+ * Measured against the x86_64 ABI (tools/linux-abi + src/user/linux_probe_timers.c
+ * agrees with the host row for row): 222..226 are timer_create..timer_delete,
+ * 283/286/287 are timerfd_create/settime/gettime.  Nothing in the tree defined
+ * these before L49, so every one of them answered ENOSYS. */
+#define L_SYS_timer_create 222
+#define L_SYS_timer_settime 223
+#define L_SYS_timer_gettime 224
+#define L_SYS_timer_getoverrun 225
+#define L_SYS_timer_delete 226
+#define L_SYS_timerfd_create 283
+#define L_SYS_timerfd_settime 286
+#define L_SYS_timerfd_gettime 287
 
 /* --- sockets: the AF_UNIX transport an X11 client (libX11's Xtrans) talks
  * over.  The numbers are the x86_64 ones (probe-measured, docs/linux-abi.md

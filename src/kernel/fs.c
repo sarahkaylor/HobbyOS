@@ -1038,6 +1038,12 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
 
+  if (f->type == FILE_TYPE_TIMERFD) {
+    extern int lt_timerfd_pending(int slot);
+    if (lt_timerfd_pending(f->timerfd.slot)) *r = 1;
+    return 0;
+  }
+
   if (f->type == FILE_TYPE_PIPE) {
     struct pipe *pp = f->pipe.ptr;
     if (!pp) return -1;
@@ -1817,7 +1823,13 @@ int file_close(struct process *cur, int fd) {
   if (f->type == FILE_TYPE_MEMFD)
     vm_object_unref(f->memfd.obj); /* one instance ref goes away (S4) */
   if (f->ref_count == 0) {
-    if (f->type == FILE_TYPE_FAT16) {
+    if (f->type == FILE_TYPE_TIMERFD) {
+      extern void lt_timerfd_release(int slot);
+      lt_timerfd_release(f->timerfd.slot);
+    } else if (f->type == FILE_TYPE_EPOLL) {
+      extern void lt_epoll_release(int slot);
+      lt_epoll_release(f->epollfd.slot);
+    } else if (f->type == FILE_TYPE_FAT16) {
       fat16_close(f);
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
@@ -1971,6 +1983,34 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     return 0; /* /dev/null reads always yield EOF (0 bytes) */
   } else if (f->type == FILE_TYPE_CONSOLE) {
     return 0; /* /dev/console has no input source: EOF, like `< /dev/null` */
+  } else if (f->type == FILE_TYPE_TIMERFD) {
+    /* L49: an 8-byte u64 of accumulated expirations, drained by the read.
+       With none pending the read parks until the timer's next expiry (the
+       same timed-block contract pipe reads use) or fails EAGAIN when the fd
+       was created/opened non-blocking. */
+    extern int lt_timerfd_take(int slot, uint64_t *out);
+    extern uint64_t lt_timerfd_next(int slot);
+    if (size < 8) return -EINVAL;
+    uint64_t n = 0;
+    int r = lt_timerfd_take(f->timerfd.slot, &n);
+    if (r == -EAGAIN) {
+      if (f->open_flags & 0x800 /* O_NONBLOCK */) return -EAGAIN;
+      extern uint64_t timer_get_ms(void);
+      uint64_t next = lt_timerfd_next(f->timerfd.slot);
+      uint64_t now = timer_get_ms();
+      uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+      cur->wake_ms = next && next > now ? next : now + 50;
+      cur->state = PROC_STATE_BLOCKED;
+      spinlock_release_irqrestore(&proc_lock, flags);
+      return -2;
+    }
+    if (r != 0) return r;
+    /* buf is the caller's user pointer, already range-checked by sys_read. */
+    {
+      unsigned char *pb = (unsigned char *)buf;
+      for (int k = 0; k < 8; k++) pb[k] = (unsigned char)((n >> (k * 8)) & 0xFF);
+    }
+    return 8;
   } else if (f->type == FILE_TYPE_PROCMAPS) {
     return file_read_maps(cur, f, (char *)buf, size);
   } else if (f->type == FILE_TYPE_DEVURANDO) {
@@ -2283,6 +2323,74 @@ int file_pipe(struct process *cur, int fds[2]) {
  * increment/decrement sites below) and every region record holds one
  * more (vm.c), so the object is freed only at the last unref.
  * ------------------------------------------------------------------- */
+
+/* L49: a timerfd.  The fd table, its allocation and the global-file slot are
+   private to this file, so the create lives here and the timer state lives in
+   linux_compat_timers.c (which returns the slot). */
+int file_timerfd_create(struct process *cur, int clockid, int flags) {
+  extern int lt_timerfd_new(int clockid, int flags);
+  extern void lt_timerfd_release(int slot);
+  cur = process_group(cur);
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  int slot = lt_timerfd_new(clockid, flags);
+  if (slot < 0) return slot;
+  int ufd = -1;
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++)
+    if (cur->open_fds[i] == -1) { ufd = i; break; }
+  if (ufd < 0) { lt_timerfd_release(slot); return -EMFILE; }
+  struct file *f = file_alloc();
+  if (!f) { lt_timerfd_release(slot); return -ENFILE; }
+  f->type = FILE_TYPE_TIMERFD;
+  f->timerfd.slot = slot;
+  f->open_flags = (uint32_t)flags;
+  cur->open_fds[ufd] = get_global_fd(f);
+  cur->num_open_fds++;
+  if (flags & 0x80000) cur->fd_cloexec |= (1ull << ufd);
+  return ufd;
+}
+
+/* L49: an epoll instance's fd. */
+int file_epoll_create(struct process *cur, int flags) {
+  extern int lt_epoll_new(void);
+  extern void lt_epoll_release(int slot);
+  cur = process_group(cur);
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  int slot = lt_epoll_new();
+  if (slot < 0) return slot;
+  int ufd = -1;
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++)
+    if (cur->open_fds[i] == -1) { ufd = i; break; }
+  if (ufd < 0) { lt_epoll_release(slot); return -EMFILE; }
+  struct file *f = file_alloc();
+  if (!f) { lt_epoll_release(slot); return -ENFILE; }
+  f->type = FILE_TYPE_EPOLL;
+  f->epollfd.slot = slot;
+  f->open_flags = (uint32_t)flags;
+  cur->open_fds[ufd] = get_global_fd(f);
+  cur->num_open_fds++;
+  return ufd;
+}
+
+int file_epoll_slot(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  int g = p->open_fds[fd];
+  if (g < 0 || g >= MAX_GLOBAL_FILES) return -1;
+  struct file *f = &global_file_table[g];
+  if (f->type != FILE_TYPE_EPOLL) return -1;
+  return f->epollfd.slot;
+}
+
+/* L49: the timer slot behind a timerfd, for the timer syscalls. */
+int file_timerfd_slot(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  int g = p->open_fds[fd];
+  if (g < 0 || g >= MAX_GLOBAL_FILES) return -1;
+  struct file *f = &global_file_table[g];
+  if (f->type != FILE_TYPE_TIMERFD) return -1;
+  return f->timerfd.slot;
+}
 
 /* Resolve an fd to its FILE_TYPE_MEMFD global file; *err carries the
  * failure (-EBADF for a closed/absent fd, -EINVAL for another type). */
