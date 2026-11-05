@@ -94,6 +94,10 @@ stage "$MAN/mscorlib.dll" ::/usr/lib/mono/4.5/mscorlib.dll
 # LINQ/PLINQ probes need System.Core staged as an assembly, not just as a
 # reference inside the probe.
 stage "$MAN/System.Core.dll" ::/usr/lib/mono/4.5/System.Core.dll
+# System.Core's PLINQ sort helpers reference System.dll types, so a probe that
+# touches ParallelEnumerable needs it as a real staged assembly (missing ->
+# TypeLoadException on SortHelper`2._sharedBarriers, before any query runs).
+stage "$MAN/System.dll" ::/usr/lib/mono/4.5/System.dll
 stage "$EXE" ::/TP.EXE
 stage "$OUT/mono-launch" ::/MONO.EXE
 printf 'MONO.EXE --config /MONO.CONFIG /TP.EXE\n' >"$OUT/WAVE.CFG"

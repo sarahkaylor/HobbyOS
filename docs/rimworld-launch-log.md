@@ -6050,3 +6050,217 @@ target* of that worker (its `MonoThreadHandle`, one word on its stack) and print
 the target's pid/name, plus `Task.Status` for the task the main thread's
 `RunSynchronously` was given. Both are reads of state the two threads already
 carry; neither needs a new boot-time mechanism.
+
+## 37. 2026-11-05 — M6/L50: the awaited task is COMPLETE and its event IS set — the lost wake is inside `Monitor.Wait` itself
+
+§36 named the wait (`SpoolingTask.SpoolStopAndGo` → `Task.RunSynchronously` →
+`Task.SpinThenBlockingWait` on a completion `ManualResetEventSlim`) and left two
+candidates: the task was queued to a scheduler the blocked main thread must
+pump, or `AddTaskContinuation` lost the completion. **Both are refuted by rows
+here.** The task ran, the continuation ran, the event is signalled — and the
+main thread is still asleep inside `Monitor.Wait` on that event's lock.
+
+### 37.1 Reading the managed objects in place
+
+Private managed fields are read through Mono's own metadata API, not at guessed
+offsets: `mono_class_get_field_from_name` + `mono_field_get_value`
+(`mono_class_vtable` for the exact type test). `Task`'s inventory in this
+mscorlib is `m_taskId/m_stateFlags/m_taskScheduler/m_action/
+m_continuationObject/m_contingentProperties`, and `ContingentProperties` holds
+`m_completionEvent`/`m_completionCountdown` — printed once at arm time:
+
+```text
+[TPWI] Task id=0x104c9fdc50 flags=0x104c9fdcf0 sched=0x104c9fdcb0
+       cont=0x104c9fdf10 cp=0x104c9fdf70 action=0x104c9fdc70
+       CP.ev=0x104ca03ad0 CP.cd=0x104ca03b70 Thread.it=0x10400c1ff8
+       IT.tid=0x10400c11b8 vt_task=0x104ca149a0 vt_thr=0x10400b9970 ok=1
+```
+
+The objects are found **without unwinding**: the parked thread's own stack still
+points at `this` for `SpinThenBlockingWait` and at the `SetOnInvokeMres` local,
+so every 8-aligned word in the captured 16 KiB is tested with
+`*(void**)word == MonoVTable(Task)` (exact isinstance) and each deref is guarded
+by the same `rw_readable()` (mincore-backed) test the stack capture already uses.
+
+### 37.2 The awaited task, at the stall, four samples over 90 s
+
+`[TPWS]`'s own chain is unchanged (§36.1), and the object it waits for is:
+
+```text
+[TPWT] tid=4 task=0x11100e4960 id=0 flags=0x1830000
+       st=started|delegate|children|ran
+       sched=0x111ffc16a0(ThreadPoolTaskScheduler) action=0x0
+       cont=0x11100d03e0(Object) cp=0x11100e4820 cd=0 ev=0x0 set=0
+[TPWQ] tid=4 mres=0x11100e9210 combined=0x80000001 set=1 waiters=1
+```
+
+Decoded against this mscorlib's constants (`Task.cs`: `TASK_STATE_STARTED`
+0x10000, `DELEGATE_INVOKED` 0x20000, `WAITING_ON_CHILDREN` 0x800000,
+`RAN_TO_COMPLETION` 0x1000000; `ManualResetEventSlim`:
+`SignalledState_BitMask` **bit 31**, waiter count in bits 0..18):
+
+| fact | row | consequence |
+|---|---|---|
+| `m_taskScheduler` = `ThreadPoolTaskScheduler` | `sched=0x…(ThreadPoolTaskScheduler)` | **not** a `SynchronizationContextTaskScheduler` and not the game's; §36.6 candidate 1 (a scheduler only the blocked thread pumps) is eliminated |
+| `RAN_TO_COMPLETION` set, `m_action` null, `m_continuationObject` = the completion sentinel (class `Object`) | `st=…|ran action=0x0 cont=Object` | the task finished; `FinishStageThree` nulls the action and `FinishContinuations` consumed the continuation list |
+| `m_completionCountdown = 0`, `m_completionEvent = null` | `cd=0 ev=0x0` | no children outstanding, no separate event object |
+| `SetOnInvokeMres.m_combinedState = 0x80000001` | `set=1 waiters=1` | **the completion was signalled** (`SetOnInvokeMres.Invoke` → `Set()`) **and one waiter is still registered** |
+| same values at t=40/70/100/130 s | 4 samples | the state is frozen, not transitional |
+
+So: the completer did its job. `AddTaskContinuation` did not lose anything (its
+caller `AddCompletionAction` invokes the action inline when the task is already
+complete, and here the continuation was added *and* the task then completed, so
+`Set()` ran). There is **no thread to hand the awaited task to** — nothing is
+missing on the task-scheduler side. `[TPQT]`'s frozen `enq=7 comp=7` is a true
+but irrelevant row: the spooling task never needed the pool.
+
+### 37.3 What is actually stuck: `Monitor.Wait` on a set event
+
+`ManualResetEventSlim.Wait`'s blocking tail is
+
+```csharp
+lock (m_lock) { while (!IsSet) { Waiters = Waiters + 1;
+                                 if (IsSet) { Waiters--; return true; }
+                                 Monitor.Wait (m_lock, realMillisecondsTimeout); ... } }
+```
+
+and `Set()` is `IsSet = true; if (Waiters > 0) lock (m_lock) Monitor.PulseAll (m_lock);`.
+`IsSet` and `Waiters` live in the **same word** (`m_combinedState`, bit 31 and
+bits 0..18), and both sides use `Interlocked.CompareExchange` on it, so the
+"set then read waiters" / "bump waiters then re-read set" handshake is totally
+ordered. With `set=1` **and** `waiters=1` observed for 130 s, the waiter must
+have seen `IsSet == false` after its increment — i.e. `Set()` ran afterwards,
+read `Waiters == 1`, and took `lock (m_lock)` to `PulseAll`. **The pulse was
+issued. The waiter never returned.**
+
+Two independent interventions, both negative:
+
+| intervention | row | result |
+|---|---|---|
+| `Monitor.Enter(m_lock); Monitor.PulseAll(m_lock); Monitor.Exit(m_lock)` from the launcher watchdog, 10 times, through `mono_runtime_invoke` | `[TPWK] n=1..10 lock=0x1146c2ce80 exc=0x0 0x0 0x0` | no exception (the lock was free, so the setter was **not** stuck in `lock(m_lock)`), and the waiter stayed parked |
+| one spurious wake on **every** queued futex key, 12 rounds from t=31 s (`make RW_WAKEALL=1`) | `[FWAKE] t=31 keys=24 woke=24` … `t=181 keys=25 woke=25` | machine untouched: NFS bytes 19,996,505 → identical, `[XSW] n=1`, same CRC |
+
+The second row is *not* conclusive on its own — glibc's `pthread_cond_wait`
+re-checks its own sequence counter, so a bare `futex_wake` on a condvar word is
+absorbed. The first row is the interesting one: a genuine managed
+`PulseAll` on the very object, from a thread that provably took the lock,
+did not release the waiter.
+
+### 37.3a The object's own lock word says the monitor has no inflated sync
+
+`MonoObject` is `{ MonoVTable *vtable; MonoThreadsSync *synchronization; }`, so
+`m_lock+8` is the monitor's own word. Sampled at the stall, four times, same
+value (`/TPTRACE` only; `RW_FUTXW=1` for the kernel side):
+
+```text
+[TPWQ] tid=4 mres=0x111ffc4060 combined=0x80000001 set=1 waiters=1
+[TPWM] tid=4 lock=0x1146c2dec0 vtable=0x10400b93e0 sync=0x104d7e79a2 synccls=thin/tagged
+[PARK] pid=4 key=0x105B657AB8 val=0x0 to=-1 bitset=0xFFFFFFFF rip=0x1083503376
+```
+
+`0x104d7e79a2` is not 8-aligned: it is a **tagged thin-lock value** (the low
+bits carry the lock state), not a pointer to an inflated `MonoThreadsSync`.
+Meanwhile the waiter is queued on a condvar at `0x105B657AB8`, in Mono's own
+data area, and `MRES.Set`'s `lock (m_lock)` + `PulseAll` has already run and
+returned. So at the moment of sampling the object **has no inflated sync block
+to broadcast on**, while a waiter is still registered on a condvar inside one.
+That is the concrete shape of "the pulse was issued and reached nobody", and it
+is a *monitor* bookkeeping state, not a task, pool or futex state.
+
+The encoding needs Mono's `monitor.h` to decode exactly (which tag bit means
+"thin", and where `MonoThreadsSync::cond` sits), and that is the first step of
+the next lane — but the pair above already says the waiter and the pulser are
+not on the same sync block at the stall.
+
+### 37.4 What this rules out, and what it leaves
+
+Ruled out by rows:
+
+* **thread-pool starvation / missing worker** — the item the main thread waits
+  for was never a pool item; the task ran and completed;
+* **a scheduler only the main thread pumps** — `m_taskScheduler` is
+  `ThreadPoolTaskScheduler`;
+* **`AddTaskContinuation` losing the signal** — the continuation ran
+  (`m_continuationObject` is the sentinel, `m_combinedState` bit 31 set);
+* **our futex compare/park race** — `l_thr_futex` compares the word and parks
+  under `proc_lock`, and the wake path takes the same lock
+  (`src/kernel/linux_compat_thr.c`, "Compare under the lock: the waker cannot
+  slip between the compare and the park");
+* **a dropped kernel wake on that key** — a wake-all of all 24-26 queued keys
+  leaves the machine bit-identical, and the park itself is one `FUTEX_WAIT` on
+  one key with `val=0` (a condvar word, not a mutex word);
+* **§36.8's `Thread.Join` row being on the critical path** — in three sampled
+  runs no managed thread was in `Thread.Join` (`[TPWY]` empty; every non-main
+  stack resolves to native frames only), and it cannot be the completer anyway:
+  the awaited task had already completed.
+
+What is left is the monitor's own bookkeeping: the waiter is queued on a condvar
+(`[PARK] pid=4 key=0x105B657AB8 val=0x0 to=-1 rip=0x1083503376`) while the
+object's lock word is a tagged thin lock and not an inflated sync (§37.3a), so
+`mono_monitor_pulse_all` has nothing to broadcast on. The next steps, in order:
+
+1. **Decode the lock word and the sync layout from Mono's own headers**
+   (`monitor.h`: which tag bit means "thin", `MonoThreadsSync::cond`'s offset),
+   then print, in one sample, `lock+8`, the sync it points at, and `sync+off(cond)`
+   next to the kernel's `[FUTXW] NOW` key. §37.3a already shows the two do not
+   match; this makes the mismatch a byte-exact statement instead of a structural
+   one, and says whether the waiter is on a *stale, deflated* sync.
+2. **A second waiter.** Run the same PLINQ shape in a probe under the guest's
+   runtime (`tools/rw/mono-probe/plinq.cs` — seven of eight shapes pass in the
+   guest; `openmp-style-nested` hangs, and that hang is the cheapest reproducer
+   we have: `bash tools/rw/run-tp-probe.sh --exe obj/tp-probe/plinq.exe`).
+   Given a one-minute reproducer, the same `[TPWT]`/`[TPWQ]`/`[TPWM]` reads on a
+   *probe* thread would say whether the signalled-bit-with-live-waiter state is
+   reachable there too.
+
+No kernel fix is indicated by any row in this section, and inventing one would
+be guessing: the compat layer's futex, the pool, the scheduler and the monitor's
+*inputs* are all measured correct. The stall is one managed wait that the
+runtime cannot break.
+
+### 37.5 The ladder (unchanged, and that is the honest number)
+
+Three runs, `bash tools/rw/run-rimworld-desktop.sh --timeout 400-500
+--run-timeout 150-220`:
+
+| run | extras | NFS bytes at deadline | `[XSW]` | frame |
+|---|---|---|---|---|
+| 1 | `/TPTRACE` (first Task/Thread sample) | 19,996,505 | `n=1 … crc=0x940850f19945c95b changed=0` | `nz=921600/921600 box=0,0,1279,719` |
+| 2 | + `/TPPOKE` (10 managed PulseAll attempts) | 19,996,505 | identical | identical |
+| 3 | + `RW_WAKEALL=1` (12 spurious wake-all rounds) | 19,996,505 | identical | identical |
+| 4 | + `RW_FUTXW=1` (lock-word sample, §37.3a) | 20,003,673 | identical | identical |
+
+Run 4's 20,003,673 bytes is the same loader position read in a slightly different
+order (3 more RPCs); it is not progress — the frame, the CRC and the missing
+second swap are identical in all four.
+
+One present, one buffer checksum, no second swap, and the loading screen still
+on screen: there is no main menu, so no fps number is meaningful. The stall
+moved *no* distance, which is the point — the fix is not in the layers this lane
+can reach.
+
+### 37.6 Instruments added (all gated)
+
+* `src/user/rwmain.c`: `[TPWI]` field inventory, `[TPWT]` Task dump, `[TPWQ]`
+  `SetOnInvokeMres` dump, `[TPWY]` Thread dump, `[TPWA]` per-tid managed stack
+  (any live tid, `SIGUSR2`), `[TPWD]` raw-word fallback, and `/TPPOKE`'s
+  `[TPWK]` (one `Monitor.Enter/PulseAll/Exit` on the stalled lock). All of it
+  runs only under `/TPTRACE`; the poke needs `/TPPOKE` as well.
+* `src/kernel/linux_compat_thr.c` + `Makefile`: `RW_WAKEALL=1` →
+  `[FWAKE]` and one spurious wake of every queued futex every 8 s from t=30 s
+  (rule 24b). Compiled out unless asked for.
+* `tools/rw/mono-probe/taskinv.cs` (field/method inventory under the game's
+  runtime), `moninv.cs` (Monitor arity), `plinq.cs` (the PLINQ shapes, host and
+  guest).
+* `tools/rw/run-tp-probe.sh`: stage `System.dll` — without it every
+  `ParallelEnumerable` probe dies in `TypeLoadException` on
+  `SortHelper\`2._sharedBarriers` before the first query.
+* `tools/rw/run-rimworld-desktop.sh`: `RW_TPPOKE=1` stages `/TPPOKE`.
+
+### 37.7 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh` → **414 run, 0 failed**. Gates:
+`t3_linux_probe redzone` PASS, `m2_mono` PASS, `m2_tp` PASS (clock row
+included), `m2_threads` PASS, `m12_thread_ceiling` PASS, `m3_window_probe`
+PASS, `m4_gl_probe` PASS.
+
