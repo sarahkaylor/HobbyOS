@@ -140,6 +140,11 @@
 /* tkill(2): musl's raise() uses tkill(tid, sig), not tgkill — an ENOSYS here
    makes raise()/abort() silently do nothing. */
 #define L_SYS_tkill 200
+/* time(2): Mono's `mono_time_get`/DateTime fallbacks and glibc's __libc_start
+   call it; an ENOSYS here is survivable but poisons every wall-clock read the
+   managed layer makes (measured: one [LCOMPAT] ENOSYS nr=201 in the launch).
+   Answered from the kernel's boot-anchored RTC epoch (time.c), not uptime. */
+#define L_SYS_time 201
 /* set_tid_address(2): musl's __init_tp stores its result as the thread id and
    pthread_join/exit paths read it back.  ENOSYS is survivable for a
    single-threaded program but leaks a negative tid into musl's own TLS, so the

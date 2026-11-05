@@ -3704,3 +3704,221 @@ Evidence: `obj/rw-desktop/evidence-l35/` — `bench-after.serial` (the `[BENCH]`
 `run1.harness.log` (run 1's serial ladder + Player.log dump),
 `run2.{serial,Player.log}`, `run3.{serial,Player.log}`, `probe.serial`,
 `unit-l35.log`, `g-m2mono.log`, `g-m3.log`, `g-m4.log`, `shots/`.
+
+## 26. 2026-11-05 — M6/L36: the frame round trip is EXACT (0/46), two real defects fall out, `time(2)` lands
+
+**Verdict: the 8-byte skew the trampoline dies on does NOT enter through
+`rt_sigreturn`, the `ERESTARTSYS` restart or the altstack frame.** In a real
+launch every one of the **46** signal round trips restores `%rsp`
+bit-identically (`[SFR] ... d=0`), the host-vs-guest probe agrees row for row on
+all five alignment behaviours, and a new generic detector finds no syscall site
+whose `%rsp` parity ever changes (`[SKW]`: 0 rows). Two REAL defects fell out on
+the way and are fixed: the resume path used to write its iretq frame into the
+interrupted function's **128-byte psABI red zone**, and a freshly cloned
+thread's frame slot carried the **parent's** user RSP. `time(201)` is
+implemented. The launch now reaches `Initialize engine version` in 3 of 3 runs
+(vs 1 of 3 at L35) and the RimWorld banner in 2 of 3, and still aborts in Mono's
+trampoline guard — which is now provably NOT a frame-alignment defect of this
+compat layer (§26.6 names it and the one datum that pins it).
+
+### 26.1 The probe: host vs guest, five alignment behaviours
+
+`src/user/linux_probe_tramp_sig.c` runs unchanged on the workstation (reference
+kernel, glibc 2.39) and in the guest (`tools/gate/t3_linux_probe.sh tramp_sig`).
+It measures what a signal frame, an SA_RESTART syscall restart and an altstack
+frame hand back to compiled code, because Mono's JIT keeps `%rsp` 16-byte
+aligned inside a method body and enters every callee through a `call`
+(`%rsp % 16 == 8`). Every row is produced by a naked asm entry that records
+`%rsp` before any prologue can move it, so the number is the kernel's own
+product:
+
+| row | host (reference) | guest (HobbyOS) |
+|---|---|---|
+| T1 handler entry `%rsp%16` / ucontext%16 | **8 / 0** | **8 / 0** |
+| T1 a function CALLed from the handler | **8** | **8** |
+| T1 `call` immediately after the handler returned | **8** (`call_after_handler`) | **8** |
+| T1 body `%rsp%16`, `movdqa`-aligned local | **0 / 1** | **0 / 1** |
+| T2 futex interrupted + SA_RESTART: still parked, handler ran, `rsp_delta`, `call` after | **1 / 1 / 0 / 8** | **1 / 1 / 0 / 8** |
+| T3 altstack: entry%16 / on altstack / uc%16 / after | **8 / 1 / 0 / 8** | **8 / 1 / 0 / 8** |
+| T4 two signals (second delivered at the first `rt_sigreturn`) | **8 / 8** | **8 / 8** |
+| T5 SIGSEGV handler rewrites `uc_mcontext.REG_RIP`, returns | **8 / 0 / 8 / `rsp_delta=0`** | **8 / 0 / 8 / `rsp_delta=0`** |
+| `[LP] done rc=` | **0** | **0** |
+
+The three paths the launcher's death could plausibly come from are therefore
+identical to Linux, byte for byte: (a) a handler that calls a function and
+returns, then a `call` into a 16-aligned-sensitive sequence; (b) the same across
+a futex `EINTR` restart with `SA_RESTART` (T2 keeps the thread parked, so the
+restart really happened); (c) the same with `sigaltstack` + `SA_ONSTACK`.
+`T2`'s `rsp_delta` is measured between two `naked_rsp` calls around a raw
+`syscall`, with no compiler-inserted `sub $8,%rsp; push $0` in between (the
+first version of the probe measured -16 and it was GCC's own call-site
+realignment, not the kernel).
+
+### 26.2 The in-game sigreturn table: 46 round trips, 0 mismatches
+
+Instrumentation added to the compat delivery engine (`[SFP]` at every plant,
+`[SFR]` at every `rt_sigreturn`, `[SFX]` on any difference, `[SFV]` when a
+resumed frame's own RSP slot disagrees with the SP the resume tail loads,
+`[SFS]` at every SA_RESTART rewind, `[SFA]` ring dump on SIGABRT). One launch
+(run 2 of the ladder below) produces, deterministically, the same table in
+run 3:
+
+```text
+[SFP] pid=27 gen=31 sig=30 kind=2 sp=0x108FF6FD98 sp16=8 base=0x108FF6E8F8 b16=8 alt=0
+[SFR] pid=27 gen=31 sig=30 kind=2 plant=0x108FF6FD98 frame=0x108FF6FD98 d=0 p16=8 f16=8
+...
+47 plants, 46 returns, 0 x [SFX], 0 x [SFV], 0 x [SKW], 16 x [SFS]
+  pid=6  24 round trips at sp=0x1084D04CB0   d=0
+  pid=7  12 round trips at sp=0x1085509D78   d=0
+  pid=27 10 round trips at sp=0x108FF6FD98   d=0
+```
+
+`kind` records provenance — `0` fault, `1` trap/syscall exit, `2` resume
+boundary after an SA_RESTART rewind, `3` plain resume — so the table separates
+"a signal interrupted user code" from "a parked thread was woken and restarted".
+All 46 rows have `d=0`, i.e. the restored RSP is the planted RSP to the byte,
+which is exactly the property Mono's trampoline needs and cannot get from a
+frame that moved by 8. The SIGABRT itself is the 47th plant (`gen=47`,
+`kind=1`): the asserting thread had **no** signal delivered to it before the
+abort, which is why §26.6 rules the frame out as its cause.
+
+### 26.3 Fix 1 — the resume frame was written into the user's RED ZONE
+
+`enter_user_space`'s user-mode resume copied its 296-byte register frame plus
+the 5-word iretq frame to `[target_sp-320, target_sp)` in **user** memory, where
+`target_sp` is the interrupted process's own RSP. That window is exactly the
+x86-64 psABI's 128-byte **red zone** plus the head of the interrupted frame, so
+every preemptive resume overwrote live locals of a leaf function the 100 Hz
+timer happened to interrupt. The corruption is deterministic — the bytes
+written are one fixed trap frame — which is why the wild-pointer deaths always
+showed the same garbage register (`r15=0x75304090`, `UnityPlayer+0x19862ef`
+reading `0x8(%r15)`, a CRC32 loop) in run after run, and why "the death site
+varies" while the register does not.
+
+The iretq frame does not need to live in user memory at all: `iretq` loads RSP
+from the frame's own RSP slot. The scratch now goes on this CPU's kernel stack
+(`mov rax,rsp; sub rax,384; and rax,-16`), where `IF=0` already makes the copy
+interrupt-atomic. Effect measured on the ladder: the pre-banner wild-pointer
+class that killed 2 of 3 runs at L35 (and run 1 of this lane before the fix)
+disappeared — 3 of 3 runs now reach `Initialize engine version`, and 2 of 3
+reach the RimWorld banner.
+
+### 26.4 Fix 2 — a cloned/exec'd thread's frame slot held the PARENT's RSP
+
+`context[30]` is the frame's own user-RSP slot (`restore_context` loads
+`tf->lr` from it) and `context[33]` is what the resume tail actually installs.
+`process_clone` copied the caller's whole context and then set only
+`context[33] = child_stack`, so a signal delivered at the new thread's **first**
+resume planted its frame around the *parent's* RSP — and the `rt_sigreturn`
+after it would resume the child on the parent's stack. Measured before the fix
+(the probe's own T2 thread):
+
+```text
+[SFV] resume pid=1 frame_lr=0x17FFFFFC58 gsp=0x1080022EF8 d=-2147339616
+```
+
+`process_clone`, `process_set_entry`, the kernel-task creator and the exec path
+now all set `context[30]` with `context[33]`, and the `[SFV]` row is gone
+(0 in every run since). This is a latent defect rather than the trampoline's
+cause — the child's first resume normally carries no pending signal — but it is
+the same class (a frame that does not describe the thread it belongs to).
+
+### 26.5 `time(2)` (201) is implemented
+
+`[LCOMPAT] ENOSYS nr=201` appeared once per launch and is gone.
+`l_core_time` answers `time_t time(time_t *tloc)` from the kernel's
+boot-anchored RTC clock (`hb_clock_realtime_ms()/1000`, `src/kernel/time.c`),
+not from uptime, and stores the value through `tloc` when it is not NULL
+(`-EFAULT` if that write faults). Added: `L_SYS_time 201` in
+`src/include/linux_syscall.h`, the `l_tab_core` row, `X(time)` in
+`src/host/linux_abi_test.c`, and `tests/fixtures/abi/linux_syscalls.golden`
+regenerated (`time 201`; the errno/layout goldens are host-provenance and were
+reverted per rule 9).
+
+### 26.6 Ladder at this tip, and the next blocker's exact line
+
+Three desktop runs at this tip (`bash tools/rw/run-rimworld-desktop.sh
+--timeout 420 --run-timeout 600`), final tree:
+
+| run | reached | death (verbatim) | `[XE] PUT` | present |
+|---|---|---|---|---|
+| A | `Initialize engine version` + **`RimWorld 1.6.4871 rev600`** | `* Assertion: should not be reached at tramp-amd64.c:641` | 0 | no |
+| B | `Initialize engine version` | `* Assertion at ../../mono/arch/amd64/../x86/x86-codegen.h:410, condition 'offset == (gint32)offset' not met` | 0 | no |
+| C | `Initialize engine version` + **`RimWorld 1.6.4871 rev600`** | `* Assertion: should not be reached at tramp-amd64.c:641` | 0 | no |
+
+3 of 3 reach the engine, 2 of 3 reach the game's own banner (L35: 1 of 3), and
+0 of 3 present a frame. Signal evidence in all three: 47/47 `[SFP]`, 46/46
+`[SFR]` with `d=0`, 0 `[SFX]`, 0 `[SFV]`, 0 `[SKW]`, 16 `[SFS]` SA_RESTART
+rewinds — so the frame round trip that this lane was chartered to prove is
+**exact** and is not what the abort is about.
+
+**Next blocker 1, exact line: `tramp-amd64.c:641`** (2 of 3 runs) — Mono's
+generic-trampoline stack-alignment guard. The mechanism, from the sources:
+
+```c
+/* tramp-amd64.c, mono_arch_create_generic_trampoline: */
+amd64_pop_reg (code, AMD64_R11);        /* pop the encoded-argument RA   */
+amd64_push_reg (code, AMD64_RBP);       /* push rbp                      */
+amd64_mov_reg_reg (code, AMD64_RBP, AMD64_RSP, ...);
+amd64_alu_reg_imm (code, X86_SUB, AMD64_RSP, framesize);  /* 16-aligned  */
+/* Check that the stack is aligned */
+amd64_mov_reg_reg (code, AMD64_R11, AMD64_RSP, ...);
+amd64_alu_reg_imm (code, X86_AND, AMD64_R11, 15);
+amd64_alu_reg_imm (code, X86_CMP, AMD64_R11, 0);
+... call stack_unaligned (tramp_type) ...
+```
+
+with `framesize = ALIGN_TO (offset, MONO_ARCH_FRAME_ALIGNMENT)` and
+`MONO_ARCH_FRAME_ALIGNMENT` = **16** (`mini-amd64.h:177`), the guard requires
+**entry `%rsp % 16 == 0`**. A JIT body must be `%rsp % 16 == 0` (psABI: a
+method entered at 8 keeps 0 inside the body), so a *specific* trampoline is
+entered at 8 and its `call` reaches the generic one at 0. The abort therefore
+says a **JIT-compiled method was running with `%rsp` 8 bytes low**, and the
+compat layer cannot be its cause: the asserting thread (pid 4) received no
+signal before the abort (its only plant in the run is the SIGABRT itself,
+`gen=47`), and 46/46 round trips are byte-exact.
+
+The one datum that names it is `stack_unaligned`'s own
+`printf("%d\n", tramp_type)`; it is lost because fd 1 is `Player.log` and
+`abort()` does not flush. The launcher now sets `setvbuf(stdout,_IONBF,0)`, and
+the number is still not in the log — Unity ships its **own** Mono fork, so its
+`tramp-amd64.c:641` need not be mono-project 6.12.0.199's line 641, and the
+asserting site may be a different `g_assert_not_reached`. The decisive next
+probe is therefore a **DR0 breakpoint on the guard** (`src/kernel/rw_watch.c`
+already arms DR0 for data; the same machinery with an exec breakpoint reads the
+caller's return address and `%rdi` = `tramp_type`), which names both the
+trampoline flavour and the call site in one boot.
+
+**Next blocker 2, exact line: `x86-codegen.h:410`, `offset == (gint32)offset`**
+(1 of 3 runs) — `mono_x86_patch()` refusing to patch a branch whose target is
+more than ±2 GB from the instruction. This one has a root cause **in this
+tree**: the compat `mmap` scatters Mono's JIT code chunks over a **3.0 GB**
+span, `0x1084518000` … `0x1137096000` (`[JIT]` rows, identical in runs A and C),
+and Mono's amd64 codegen patches `rel32` call sites expecting every target
+inside ±2 GB. Linux's own mmap keeps anonymous executable mappings in one
+top-down arena; ours is first-fit over the whole user range. Fix direction:
+place anonymous `PROT_EXEC` mappings (and their `mprotect(RWX)` commits) in a
+dedicated contiguous arena within ±2 GB, then re-run this ladder — that also
+removes one plausible source of the "far" trampoline flavours that could make
+blocker 1's frame 8 bytes off.
+
+### 26.7 Gates at this tip
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   411/0 PASS
+bash tools/gate/m2_mono.sh               PASS — Mono 6.12 threaded C# HELLO-OK
+bash tools/gate/m2_threads.sh            PASS — 8 pthreads, mutex+condvar+TLS+join
+bash tools/gate/m12_thread_ceiling.sh    PASS — 150 threads + TLS + SIGCANCEL cancel
+python3 tools/gate/m3_window_probe.py    PASS — XCreateWindow ladder + display stamp
+python3 tools/gate/m4_gl_probe.py        PASS — GL 3.3 triangle PRESENTED
+bash tools/gate/t3_linux_probe.sh tramp_sig  PASS — [LP] done rc=0, host==guest
+bash tools/rw/run-rwnfs-probe.sh         15 PASS + the pre-existing by-design
+                                         `mmap(/NFS/...) -> -95` row (rule 14)
+```
+
+Evidence: `obj/l36/evidence-l36/` — `final{A,B,C}.{serial,Player.log}` (the
+ladder, the `[SFP]`/`[SFR]`/`[SFA]` tables, the trampoline aborts),
+`final{A,B,C}.harness.log`, `shots{A,B,C}/`, `run{1,2,3}.*` (the first ladder,
+before the launcher's `setvbuf`), `../l36/unit.log`, `m2mono.log`,
+`m2threads.log`, `m12.log`, `m3.log`, `m4.log`, `nfs.log`, and the probe's host
+and guest logs (`obj/linux_probe_tramp_sig.log` = guest).
