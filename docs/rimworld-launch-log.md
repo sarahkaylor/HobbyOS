@@ -3609,6 +3609,14 @@ Before, same bench, same guest, 1 MiB per phase: `seq1024` **6,507 ms**
 `seq65536` 10,736 ms — and over the full 9.9 MB, 107,919 ms (91.7 KB/s).
 The 9.9 MB target (< 2 s, >= 5 MB/s) lands at **0.255 s / 38.8 MB/s**.
 
+The MB/s figures above are host-load bound: the box was carrying a load
+average of 12-16 from other lanes, and a later 2 MiB re-run at a quieter
+moment measured the same 64 KiB path at **55.1 MB/s** (`file64k 2,097,152 B
+in 38 ms`, `[NFSRTT] wait_us=51`). Treat 38.8 MB/s as the conservative
+number and ~55 MB/s as what the transport does when the host is idle. The
+latency column is the honest one either way: `wait_us` 6,335 -> 51-79 us for
+the same 1 KiB RPC.
+
 ### 25.4 Byte-exactness
 
 `tools/rw/run-rwnfs-probe.sh`: the one-shot 64 KiB read of `UnityPlayer.so`
