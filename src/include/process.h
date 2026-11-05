@@ -419,6 +419,19 @@ struct process {
   char env[HO_ENV_LEN];
   int envc;
   uint64_t sig_pending;
+  /* M6/L46: THREAD-DIRECTED pending set.  Linux queues a signal sent with
+     tgkill(tid)/tkill(tid) on THAT task, and no other thread of the group can
+     take it.  sig_pending above is process-directed state (kill(2), faults,
+     SIGCHLD): it lives on the anchor and any member may consume it.  The two
+     cannot share one word, because the anchor is also a task: a SIGPWR that
+     Boehm sends to the main thread (pthread_kill(main_tid)) used to land in
+     sig_pending, and the first thread to trap -- including a thread created a
+     moment earlier that had not registered with the GC yet -- consumed it.
+     Measured: the thief entered GC_suspend_handler_inner with
+     GC_lookup_thread()==NULL and died on VA=0x20, while the main thread never
+     acked and the collector waited for ever (docs/rimworld-launch-log.md 33).
+     Only the addressed PCB may consume a bit from this word. */
+  uint64_t sig_pending_dir;
   uint64_t sig_handler[HO_SIG_MAX];
   uint64_t sig_restorer;
   int sig_in_handler;
@@ -838,6 +851,9 @@ int process_user_ok(struct process *p, uint64_t va, uint64_t len, int write);
  * uncatchable SIGKILL) kills the target group immediately with the signal
  * byte in the waitpid status.  Returns 0 or -errno (-ESRCH, -EINVAL). */
 int process_signal(int pid, int sig);
+/* M6/L46: `directed` != 0 for tgkill/tkill (the caller named a tid), 0 for
+ * kill(2).  A directed signal is queued on that task alone. */
+int process_signal_directed(int pid, int sig, int directed);
 
 /* Row 83 (D7): validate + store dispositions on the caller's group anchor.
  * act/oldact are kernel mirrors marshalled by the trap layer (NULL =

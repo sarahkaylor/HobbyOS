@@ -446,6 +446,139 @@ static void test_p5_compat_signal_range(void) {
   process_free(pid);
 }
 
+/* M6/L46: a THREAD-DIRECTED signal belongs to exactly one PCB -- and the
+ * count of PCBs a suspend is accepted for equals the count that hold the
+ * pending bit.
+ *
+ * GC_stop_world() sem_waits once per pthread_kill(SIGPWR) that returned 0, so
+ * a plant that lands on the wrong thread (or on a thread that cannot run a
+ * handler) keeps Boehm's world stopped for ever.  Measured: a SIGPWR aimed at
+ * the MAIN thread (tgkill(tid=main)) was recorded in the group's
+ * process-directed set on the anchor, a thread created moments earlier -- not
+ * yet registered with the GC -- consumed it at its trap exit, entered
+ * GC_suspend_handler_inner with GC_lookup_thread()==NULL and died at VA=0x20,
+ * while the collector waited for an ack the main thread could no longer give
+ * (tp_starve probe, docs/rimworld-launch-log.md 33).
+ *
+ * The invariant pinned here is the one GC_suspend_all depends on:
+ *   (a) a tid-directed signal sets the directed bit of THAT pcb and of no
+ *       other pcb, and the group's process-directed set stays clear;
+ *   (b) the number of accepted plants equals the number of pended pcbs;
+ *   (c) a pcb that has left the suspend set (THREAD_DONE) answers -ESRCH, so
+ *       the walk skips it exactly as Linux's tgkill to a dead task would.
+ */
+static void test_p5_directed_signal_owner(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_directed_signal_owner...\n");
+
+  int pid = process_create();
+  struct process *p = process_group(process_get_pcb(pid));
+  EXPECT_EQ((p != 0), 1);
+  if (!p)
+    return;
+  p->abi_flags |= PROC_FLAG_LINUX_ABI;
+  p->sig_handler[30] = USER_VIRT_BASE + 0x5000; /* SIGPWR, real handler */
+  p->sig_handler[3] = USER_VIRT_BASE + 0x6000;  /* SIGQUIT (group-directed) */
+  p->sig_pending = 0;
+  p->sig_pending_dir = 0;
+
+  /* Three members of the group, synthesized the way thread_alloc_common()
+     leaves them (pid == slot, tgid == anchor, handlers on the anchor). */
+  int th[3] = {-1, -1, -1};
+  int got = 0;
+  for (int i = 1; i < MAX_PROCESSES && got < 3; i++) {
+    struct process *q = process_get_pcb(i);
+    if (!q || q->state != PROC_STATE_FREE)
+      continue;
+    q->pid = i;
+    q->tgid = pid;
+    q->is_thread = 1;
+    q->state = PROC_STATE_BLOCKED;
+    q->abi_flags = p->abi_flags;
+    q->sig_pending = 0;
+    q->sig_pending_dir = 0;
+    th[got++] = i;
+  }
+  EXPECT_EQ(got, 3);
+
+  /* (a) thread-directed to a WORKER: only the worker holds it. */
+  EXPECT_EQ(process_signal(th[0], 30), 0);
+  EXPECT_EQ((p->sig_pending_dir & (1ull << 29)) != 0, 0);
+  EXPECT_EQ((p->sig_pending & (1ull << 29)) != 0, 0);
+  EXPECT_EQ((process_get_pcb(th[0])->sig_pending_dir & (1ull << 29)) != 0, 1);
+  EXPECT_EQ((p->sig_pending & (1ull << 29)) != 0, 0); /* never group-wide */
+
+  /* thread-directed to the MAIN thread (tgkill(main_tid)): the anchor's own
+     directed set, which no member may consume -- this is the shape that stole
+     the suspend.  Note the difference from process_signal(pid, ...) below:
+     kill(2) on the group pid is process-directed by definition. */
+  EXPECT_EQ(process_signal_directed(pid, 30, 1), 0);
+  EXPECT_EQ((p->sig_pending_dir & (1ull << 29)) != 0, 1);
+  EXPECT_EQ(p->sig_pending, 0);
+  EXPECT_EQ(process_get_pcb(th[1])->sig_pending, 0);
+  EXPECT_EQ(process_get_pcb(th[1])->sig_pending_dir, 0);
+  EXPECT_EQ(process_get_pcb(th[2])->sig_pending_dir, 0);
+
+  /* kill(2) on the group pid is process-directed: it stays on the anchor's
+     process set and any member may take it (Linux's own rule). */
+  EXPECT_EQ(process_signal(pid, 30), 0);
+  EXPECT_EQ((p->sig_pending & (1ull << 29)) != 0, 1);
+  p->sig_pending &= ~(1ull << 29);
+
+  /* (b) count(plants accepted) == count(pcbs holding the bit). */
+  int planted = 0, pended = 0;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = process_get_pcb(i);
+    if (!q || q->state == PROC_STATE_FREE)
+      continue;
+    if (q->tgid != pid && q->pid != pid)
+      continue;
+    if ((q->sig_pending_dir & (1ull << 29)) != 0)
+      pended++;
+  }
+  EXPECT_EQ(pended, 2); /* th[0] + the anchor: exactly the two plants above */
+  /* (and one plant each for the other two workers turns 2 into 4) */
+  planted += process_signal(th[1], 30) == 0;
+  planted += process_signal(th[2], 30) == 0;
+  EXPECT_EQ(planted, 2);
+  pended = 0;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = process_get_pcb(i);
+    if (!q || q->state == PROC_STATE_FREE)
+      continue;
+    if (q->tgid != pid && q->pid != pid)
+      continue;
+    if ((q->sig_pending_dir & (1ull << 29)) != 0)
+      pended++;
+  }
+  EXPECT_EQ(pended, 4); /* every accepted plant has exactly one owner */
+
+  /* A process-directed signal (kill(pid) on the group leader) still lives on
+     the anchor's process set -- that half of the contract must not move. */
+  EXPECT_EQ(process_signal(pid, 3), 0); /* SIGQUIT, process-directed */
+  EXPECT_EQ((p->sig_pending & (1ull << 2)) != 0, 1);
+  EXPECT_EQ((p->sig_pending_dir & (1ull << 2)) != 0, 0);
+
+  /* (c) out of the suspend set: -ESRCH, and no bit left behind. */
+  struct process *dead = process_get_pcb(th[2]);
+  dead->state = PROC_STATE_THREAD_DONE;
+  dead->sig_pending_dir = 0;
+  EXPECT_EQ(process_signal(th[2], 30), -ESRCH);
+
+  /* restore */
+  for (int i = 0; i < 3; i++) {
+    struct process *q = process_get_pcb(th[i]);
+    q->state = PROC_STATE_FREE;
+    q->is_thread = 0;
+    q->tgid = 0;
+    q->sig_pending = 0;
+    q->sig_pending_dir = 0;
+  }
+  p->sig_pending = 0;
+  p->sig_pending_dir = 0;
+  process_free(pid);
+}
+
 /* D10: the write-side SIGPIPE disposition matrix. */
 static void test_p5_sigpipe_semantics(void) {
   tests_run++;
@@ -1096,6 +1229,7 @@ void process_test_suite(void) {
   test_p5_sigaction_storage();
   test_p5_kill_semantics();
   test_p5_compat_signal_range();
+  test_p5_directed_signal_owner(); /* M6/L46: tid-directed signals */
   test_p5_sigpipe_semantics();
   test_fault_kill_status_nonzero(); /* w5 (ii) */
   test_p5_env_readback();

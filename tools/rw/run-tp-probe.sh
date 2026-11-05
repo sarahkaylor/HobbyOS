@@ -115,7 +115,7 @@ for _ in $(seq 1 "$TIMEOUT_S"); do
   # Stop as soon as the probe has said everything it is going to say: the
   # managed process may not exit (Mono's shutdown joins the finalizer), and a
   # gate that waits for "System halt" would add minutes per run for nothing.
-  grep -aq "TP-OK\|TP TIMEOUT\|System halt" "$LOG" && break
+  grep -aq "TP-OK\|TP TIMEOUT\|STARVE-OK\|STARVE outer TIMEOUT\|System halt" "$LOG" && break
   sleep 1
 done
 grep -aq "System halt" "$LOG" || {
@@ -124,6 +124,6 @@ grep -aq "System halt" "$LOG" || {
 }
 sleep 1
 echo "--- probe rows ---"
-grep -aE "TP |TP-OK|Exception|DllNotFound|memory fault|System halt|\[LCOMPAT\]" "$LOG" | head -60 || echo "(none)"
+grep -aE "TP |TP-OK|STARVE|Exception|DllNotFound|memory fault|System halt|\[LCOMPAT\]|\[GCT\]|\[GCST\]" "$LOG" | head -80 || echo "(none)"
 fuser -k "$IMG" >/dev/null 2>&1
 exit 0

@@ -616,7 +616,8 @@ static int l_proc_rt_sigpending(struct process *p, struct trap_frame *tf) {
   int slot = l_slot(p);
   if (slot < 0) return l_ret(tf, -EINVAL);
   struct process *grp = process_group(p);
-  uint64_t pend = p->sig_pending | (grp != p ? grp->sig_pending : 0);
+  uint64_t pend = p->sig_pending | p->sig_pending_dir |
+                  (grp != p ? grp->sig_pending : 0);
   uint64_t out = pend & l_sigmask[slot];
   if (l_copy_to_user(p, uset, &out, sizeof out) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
@@ -748,7 +749,10 @@ static int l_signal_one(struct trap_frame *tf, const char *op, int tgid,
     l_sig_row(op, tgid, pid, sig, tf, -EINVAL);
     return l_ret(tf, -EINVAL);
   }
-  int rc = process_signal(pid, sig);
+  /* M6/L46: tkill/tgkill name a TASK, kill names a process.  The direction
+     decides which pending set holds the bit (see process_signal_directed). */
+  int directed = (op[0] == 't'); /* "tkill" / "tgkill" vs "kill" */
+  int rc = process_signal_directed(pid, sig, directed);
   l_sig_row(op, tgid, pid, sig, tf, rc);
   struct process *cur = current_process();
   if (cur && process_group(cur)->state == PROC_STATE_EXITED) {
@@ -1392,7 +1396,7 @@ static int l_proc_sched_setscheduler(struct process *p, struct trap_frame *tf) {
  * the 8th SIGPWR planted, no [RT]). */
 static int l_pending_under(struct process *p, uint64_t mask) {
   struct process *grp = process_group(p);
-  uint64_t pend = p->sig_pending;
+  uint64_t pend = p->sig_pending | p->sig_pending_dir;
   if (grp != p) pend |= grp->sig_pending;
   for (int s = 1; s < HO_SIG_MAX; s++) {
     uint64_t bit = 1ull << (s - 1);

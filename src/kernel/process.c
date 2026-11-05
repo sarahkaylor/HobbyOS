@@ -333,6 +333,7 @@ void process_init(void) {
     proc_table[i].env[0] = '\0';
     proc_table[i].envc = 0;
     proc_table[i].sig_pending = 0;
+    proc_table[i].sig_pending_dir = 0;
     proc_table[i].sig_restorer = 0;
     proc_table[i].sig_in_handler = 0;
     proc_table[i].sig_frame = 0;
@@ -1142,6 +1143,7 @@ static int process_create_internal_ver(int ver) {
   p->env[0] = '\0';
   p->envc = 0;
   p->sig_pending = 0;
+  p->sig_pending_dir = 0;
   p->sig_restorer = 0;
   p->sig_in_handler = 0;
   p->sig_frame = 0;
@@ -2723,6 +2725,7 @@ void process_exec_apply(struct process *grp, const char *env, int envc) {
       grp->sig_handler[s] = HO_SIG_DFL;
   }
   grp->sig_pending = 0;
+  grp->sig_pending_dir = 0;
   grp->sig_in_handler = 0;
   grp->sig_frame = 0;
   grp->sig_restorer = 0;
@@ -2796,7 +2799,7 @@ void process_exec_terminate_siblings(struct process *grp,
 
 /* Row 16 completion (D9): process-directed targeting + disposition-based
  * action.  See process.h for the contract. */
-int process_signal(int pid, int sig) {
+int process_signal_directed(int pid, int sig, int directed) {
   /* M6/L32: Linux's own range check.  kill(2)/tgkill(2) answer EINVAL for a
    * number outside 1.._NSIG; within that range the number is VALID for a
    * Linux-ABI target whatever our native frozen set happens to cover.  The
@@ -2913,9 +2916,30 @@ int process_signal(int pid, int sig) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return 0;
   }
-  /* Real handler: record pending + wake a restartable-slice park (D8.3). */
-  struct process *pender = (task && task->is_thread) ? task : target;
-  pender->sig_pending |= (1ull << (sig - 1));
+  /* Real handler: record pending + wake a restartable-slice park (D8.3).
+   *
+   * M6/L46: a signal that names a tid (tgkill/tkill) is THREAD-DIRECTED, and
+   * Linux queues it on that task alone -- no other thread of the group can
+   * take it, and that includes the group anchor, which is also the main
+   * thread.  It therefore goes in sig_pending_dir, not in sig_pending: the
+   * latter is the process-directed set that every member may consume, and
+   * sharing one word meant a SIGPWR aimed at the main thread was stolen by
+   * whichever thread trapped first.  Measured in the tp_starve probe: Boehm
+   * planted SIGPWR on pids 1, 3 and 2 (the main thread), a thread created
+   * seconds earlier (pid 5, not yet registered with the GC) claimed pid 2's
+   * bit, entered GC_suspend_handler_inner with GC_lookup_thread() == NULL and
+   * died at VA=0x20; the collector waited for an ack that never came. */
+  struct process *pender;
+  /* `directed` is tgkill/tkill (the caller named a tid).  A kill(2) whose
+     pid happens to name a thread is directed too -- a tid selects one task. */
+  int thread_directed = (task && task->is_thread) || (directed && task);
+  if (thread_directed && (target->abi_flags & PROC_FLAG_LINUX_ABI)) {
+    pender = task;
+    pender->sig_pending_dir |= (1ull << (sig - 1));
+  } else {
+    pender = (task && task->is_thread) ? task : target;
+    pender->sig_pending |= (1ull << (sig - 1));
+  }
   /* M6/L45: per-target rows for the two Boehm stop-the-world signals.  The
      global [SIG] rows are capped at 400 and the interesting pids (the pool
      workers created last) never made it into them.  A SIGPWR/SIGXCPU that is
@@ -2965,7 +2989,9 @@ int process_signal(int pid, int sig) {
       kl_s(&kl, " inh=");
       kl_i(&kl, pender->sig_in_handler);
       kl_s(&kl, " pend=");
-      kl_hex(&kl, (unsigned long)pender->sig_pending);
+      kl_hex(&kl, (unsigned long)(pender->sig_pending | pender->sig_pending_dir));
+      kl_s(&kl, " dir=");
+      kl_hex(&kl, (unsigned long)pender->sig_pending_dir);
       kl_s(&kl, " mask=");
       kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(pender));
       kl_c(&kl, '\n');
@@ -3038,6 +3064,12 @@ int process_signal(int pid, int sig) {
   }
   spinlock_release_irqrestore(&proc_lock, flags);
   return 0;
+}
+
+/* kill(2)-shaped front door: process-directed unless the pid happens to name
+   a thread of the group (a tid is a legal kill target and selects that task). */
+int process_signal(int pid, int sig) {
+  return process_signal_directed(pid, sig, 0);
 }
 
 /* D10: SIGPIPE for a write to a closed peer.  Returns 1 when the writer's
@@ -3321,7 +3353,7 @@ void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
   struct process *grp = process_group(p);
   if (p->is_thread && !(grp->abi_flags & PROC_FLAG_LINUX_ABI))
     return;
-  uint64_t pend = p->sig_pending;
+  uint64_t pend = p->sig_pending | p->sig_pending_dir;
   if (p != grp)
     pend |= grp->sig_pending;
   if (p->sig_in_handler || pend == 0)
@@ -3383,7 +3415,8 @@ void process_signal_trap_exit(struct trap_frame *tf) {
   struct process *grp = process_group(cur);
   if (cur->is_thread && !(grp->abi_flags & PROC_FLAG_LINUX_ABI))
     return;
-  if (!cur->sig_pending && (cur == grp || !grp->sig_pending))
+  if (!cur->sig_pending && !cur->sig_pending_dir &&
+      (cur == grp || !grp->sig_pending))
     return; /* fast path: nothing to deliver on this thread */
   process_signal_deliver(grp, tf);
 }
@@ -4621,7 +4654,8 @@ void start_scheduler(void) {
              them.  pend is decimal (0x800000 = SIGXCPU 24, 0x20000000 =
              SIGPWR 30). */
           if (proc_table[k].state == PROC_STATE_BLOCKED ||
-              proc_table[k].sig_in_handler || proc_table[k].sig_pending) {
+              proc_table[k].sig_in_handler || proc_table[k].sig_pending ||
+              proc_table[k].sig_pending_dir) {
             uart_puts("[SIGST] slot=");
             print_int(k);
             uart_puts(" pid=");
@@ -4636,6 +4670,8 @@ void start_scheduler(void) {
             print_int(proc_table[k].sig_frame_sig);
             uart_puts(" pend=");
             print_int((int)proc_table[k].sig_pending);
+            uart_puts(" dir=");
+            print_int((int)proc_table[k].sig_pending_dir);
             uart_puts(" gpend=");
             print_int((int)(process_group(&proc_table[k])
                                 ? process_group(&proc_table[k])->sig_pending
@@ -4675,15 +4711,17 @@ void start_scheduler(void) {
         }
         if (g0 && g0->sig_handler[30] > 0x1000000) {
           uint64_t base = g0->sig_handler[30] - 0x27c6e7;
-          uint32_t stopped = 0, sc = 0, ack = 0;
+          uint32_t stopped = 0, sc = 0, ack = 0, ackw = 0;
           if (vm_user_read(g0, base + 0x5b9258, &stopped, 4) == 0 &&
               vm_user_read(g0, base + 0x5b9250, &sc, 4) == 0) {
-            /* GC_suspend_ack_sem is a glibc sem_t whose first word is the
-               count: the collector sem_waits once per suspended thread, so
-               a value that matches the number of threads parked in
-               GC_suspend_handler means every ack arrived and the collector
-               stopped somewhere AFTER the handshake. */
+            /* GC_suspend_ack_sem is a glibc sem_t (64-bit, new_sem): the LOW
+               word is the count and the HIGH word is the waiter count.  The
+               collector sem_waits once per suspended thread, so a count that
+               matches the number of threads parked in GC_suspend_handler
+               means every ack arrived and the collector stopped somewhere
+               AFTER the handshake. */
             (void)vm_user_read(g0, base + 0x5be728, &ack, 4);
+            (void)vm_user_read(g0, base + 0x5be728 + 4, &ackw, 4);
             uart_puts("[GCST] h30=0x");
             uart_print_hex(g0->sig_handler[30]);
             uart_puts(" base=0x");
@@ -4694,7 +4732,232 @@ void start_scheduler(void) {
             print_int((int)sc);
             uart_puts(" ack_sem=");
             print_int((int)ack);
+            uart_puts(" ackw=");
+            print_int((int)ackw);
+            uart_puts(" grplive=");
+            print_int(g0->live_threads);
             uart_puts("\n");
+            {
+              /* M6/L46: the Boehm-vs-PCB thread diff.
+                 GC_stop_world() (0x26f711) does stop_count += 2,
+                 world_is_stopped = 1, n = GC_suspend_all(), then sem_waits
+                 EXACTLY n times -- n being the number of
+                 pthread_kill(SIGPWR) calls that returned 0.  So a thread that
+                 Boehm counts but that our side cannot run a handler on keeps
+                 the world stopped for ever.  GC_suspend_all's predicate
+                 (0x27cc30) is: skip id == pthread_self(); skip flags & 1
+                 (+0x28, FINISHED); skip *(u8*)(p+0x29); skip
+                 *(u64*)(p+0x20) (single-thread suspend); skip
+                 (stop_count_at_suspend & ~1) == GC_stop_count (+0x10).  We
+                 walk the same 256 buckets with the same filters and match each
+                 entry to our PCB by TCB: glibc's clone() passes
+                 CLONE_CHILD_CLEARTID with ctid = &pd->tid, so
+                 clear_child_tid - 0x2d0 is the pthread_t Boehm stores at
+                 +0x08.  That is a KERNEL-side fact, so the diff never depends
+                 on reading another thread's TCB. */
+              int pcb_pid[40];
+              uint64_t pcb_tcb[40];
+              int n_pcbv = 0, n_pcb = 0, n_unreg = 0;
+              uint64_t main_tcb = g0->clear_child_tid ? g0->clear_child_tid - 0x2d0 : 0;
+              n_pcb = 1; /* the anchor is a task too: live counts it unless it
+                            is the collector, which GC_suspend_all skips */
+              for (int k = 1; k < MAX_PROCESSES && n_pcbv < 40; k++) {
+                struct process *t = &proc_table[k];
+                if (!t->is_thread || t->tgid != g0->pid)
+                  continue;
+                if (t->state == PROC_STATE_FREE || t->state == PROC_STATE_EXITED ||
+                    t->state == PROC_STATE_THREAD_DONE)
+                  continue;
+                pcb_pid[n_pcbv] = t->pid;
+                pcb_tcb[n_pcbv] = t->clear_child_tid ? t->clear_child_tid - 0x2d0 : 0;
+                n_pcbv++;
+                n_pcb++;
+              }
+              struct gct_ent {
+                uint64_t p, id, scat, sus;
+                int pid;
+                uint8_t fl, b29;
+              } ent[24];
+              int n_ent = 0, n_live = 0, n_self = 0, n_fin = 0, n_b29 = 0;
+              int n_susp = 0, n_epoch = 0, n_norec = 0, n_ent_total = 0;
+              static int gct_tables = 2;
+              int full_table = (gct_tables > 0);
+              if (full_table)
+                gct_tables--;
+              for (int gb = 0; gb < 256; gb++) {
+                uint64_t p = 0;
+                if (vm_user_read(g0, base + 0x5b92f0 + (uint64_t)gb * 8, &p, 8) != 0)
+                  continue;
+                int guard = 0;
+                while (p && guard++ < 48) {
+                  uint64_t next = 0, id = 0, scat = 0, sus = 0;
+                  uint8_t fl = 0, b29 = 0;
+                  if (vm_user_read(g0, p, &next, 8) != 0)
+                    break;
+                  (void)vm_user_read(g0, p + 8, &id, 8);
+                  (void)vm_user_read(g0, p + 0x10, &scat, 8);
+                  (void)vm_user_read(g0, p + 0x20, &sus, 8);
+                  (void)vm_user_read(g0, p + 0x28, &fl, 1);
+                  (void)vm_user_read(g0, p + 0x29, &b29, 1);
+                  int mpid = -1;
+                  if (id && main_tcb && id == main_tcb)
+                    mpid = g0->pid;
+                  if (id && mpid < 0) {
+                    /* The main thread was never cloned, so it has no
+                       clear_child_tid; its TCB's tid word still names it. */
+                    int32_t mtid = -1;
+                    if (vm_user_read(g0, id + 0x2d0, &mtid, 4) == 0 &&
+                        mtid == g0->pid)
+                      mpid = g0->pid;
+                  }
+                  for (int q = 0; q < n_pcbv && mpid < 0; q++)
+                    if (pcb_tcb[q] && id == pcb_tcb[q]) {
+                      mpid = pcb_pid[q];
+                      break;
+                    }
+                  n_ent_total++;
+                  if (n_ent < 24) {
+                    ent[n_ent].p = p;
+                    ent[n_ent].id = id;
+                    ent[n_ent].scat = scat;
+                    ent[n_ent].sus = sus;
+                    ent[n_ent].pid = mpid;
+                    ent[n_ent].fl = fl;
+                    ent[n_ent].b29 = b29;
+                    n_ent++;
+                  }
+                  if (mpid < 0)
+                    n_norec++;
+                  else if (mpid == g0->pid)
+                    n_self++;
+                  else if (fl & 1)
+                    n_fin++;
+                  else if (b29)
+                    n_b29++;
+                  else if (sus)
+                    n_susp++;
+                  else if ((scat & ~1ull) == (uint64_t)sc)
+                    n_epoch++;
+                  else
+                    n_live++;
+                  p = next;
+                }
+              }
+              for (int q = 0; q < n_pcbv; q++) {
+                int found = 0;
+                for (int e = 0; e < n_ent; e++)
+                  if (ent[e].pid == pcb_pid[q]) {
+                    found = 1;
+                    break;
+                  }
+                if (found)
+                  continue;
+                n_unreg++;
+                struct process *t = &proc_table[pcb_pid[q]];
+                struct kline ku;
+                kl_init(&ku);
+                kl_s(&ku, "[GCT] unreg pid=");
+                kl_i(&ku, pcb_pid[q]);
+                kl_s(&ku, " tcb=");
+                kl_hex(&ku, (unsigned long)pcb_tcb[q]);
+                kl_s(&ku, " st=");
+                kl_i(&ku, t->state);
+                kl_s(&ku, " sys=");
+                kl_i(&ku, (long)t->last_syscall);
+                kl_s(&ku, " inh=");
+                kl_i(&ku, t->sig_in_handler);
+                kl_s(&ku, " susp=");
+                kl_i(&ku, t->sig_suspended);
+                kl_s(&ku, " pend=");
+                kl_hex(&ku, (unsigned long)t->sig_pending);
+                kl_c(&ku, '\n');
+                kl_emit(&ku);
+              }
+              struct kline ks;
+              kl_init(&ks);
+              kl_s(&ks, "[GCT] sum ent=");
+              kl_i(&ks, n_ent_total);
+              kl_s(&ks, " live=");
+              kl_i(&ks, n_live);
+              kl_s(&ks, " pcb=");
+              kl_i(&ks, n_pcb);
+              kl_s(&ks, " unreg=");
+              kl_i(&ks, n_unreg);
+              kl_s(&ks, " norec=");
+              kl_i(&ks, n_norec);
+              kl_s(&ks, " self=");
+              kl_i(&ks, n_self);
+              kl_s(&ks, " fin=");
+              kl_i(&ks, n_fin);
+              kl_s(&ks, " b29=");
+              kl_i(&ks, n_b29);
+              kl_s(&ks, " susp=");
+              kl_i(&ks, n_susp);
+              kl_s(&ks, " epoch=");
+              kl_i(&ks, n_epoch);
+              kl_s(&ks, " anchor=");
+              kl_i(&ks, g0->state);
+              kl_c(&ks, '\n');
+              kl_emit(&ks);
+              {
+                static int gct_row_budget = 120;
+                for (int e = 0; e < n_ent && gct_row_budget > 0; e++) {
+                  struct process *t =
+                      (ent[e].pid > 0 && ent[e].pid < MAX_PROCESSES)
+                          ? &proc_table[ent[e].pid] : 0;
+                  /* Full tables for the first two dumps; afterwards only the
+                     rows that can explain a wedge: an entry with no live PCB,
+                     or one that passes the plant filter (an unacked plant). */
+                  int interesting = full_table || ent[e].pid < 0 || !t;
+                  if (!interesting && !(ent[e].fl & 1) && !ent[e].b29 &&
+                      !ent[e].sus && (ent[e].scat & ~1ull) != (uint64_t)sc)
+                    interesting = 1;
+                  if (!interesting)
+                    continue;
+                  gct_row_budget--;
+                  struct kline ke;
+                  kl_init(&ke);
+                  kl_s(&ke, "[GCT] e p=");
+                  kl_hex(&ke, (unsigned long)ent[e].p);
+                  kl_s(&ke, " pt=");
+                  kl_hex(&ke, (unsigned long)ent[e].id);
+                  kl_s(&ke, " pid=");
+                  kl_i(&ke, ent[e].pid);
+                  kl_s(&ke, " fl=");
+                  kl_hex(&ke, ent[e].fl);
+                  kl_s(&ke, " b29=");
+                  kl_i(&ke, ent[e].b29);
+                  kl_s(&ke, " sus=");
+                  kl_i(&ke, ent[e].sus ? 1 : 0);
+                  kl_s(&ke, " scat=");
+                  kl_hex(&ke, (unsigned long)ent[e].scat);
+                  kl_s(&ke, " stop=");
+                  kl_i(&ke, (int)sc);
+                  if (t) {
+                    kl_s(&ke, " st=");
+                    kl_i(&ke, t->state);
+                    kl_s(&ke, " th=");
+                    kl_i(&ke, t->is_thread);
+                    kl_s(&ke, " tg=");
+                    kl_i(&ke, t->tgid);
+                    kl_s(&ke, " inh=");
+                    kl_i(&ke, t->sig_in_handler);
+                    kl_s(&ke, " susp=");
+                    kl_i(&ke, t->sig_suspended);
+                    kl_s(&ke, " pend=");
+                    kl_hex(&ke, (unsigned long)t->sig_pending);
+                    kl_s(&ke, " sys=");
+                    kl_i(&ke, (long)t->last_syscall);
+                    kl_s(&ke, " rt=");
+                    kl_i(&ke, (long)t->last_ret);
+                  } else {
+                    kl_s(&ke, " norec=1");
+                  }
+                  kl_c(&ke, '\n');
+                  kl_emit(&ke);
+                }
+              }
+            }
           }
         }
       }
@@ -5178,6 +5441,7 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   /* P5 (D7): a recycled slot must not carry stale signal state (unread on
      threads — group state lives on the anchor — but keep it clean). */
   t->sig_pending = 0;
+  t->sig_pending_dir = 0;
   t->sig_restorer = 0;
   t->sig_in_handler = 0;
   t->sig_frame = 0;
