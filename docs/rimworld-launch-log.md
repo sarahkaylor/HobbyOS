@@ -2795,16 +2795,21 @@ a wild fault whose address is the address-space pointer plus 8
 |---|---|---|---|
 | 1 | `pthread_kill failed at suspend` | none — SIGABRT | 12 |
 | 2 | `pthread_kill failed at suspend` | none — SIGABRT | 42 |
-| 3 | `[RWMAIN] signal() sig=11 handler=(nil)` | VA=0x118 PC=UnityPlayer+0x1c78f52 | 45 |
+| 3 | `[RWMAIN] signal() sig=11 handler=(nil)` | VA=0x118, PC=UnityPlayer+0x1988f52 (`movzbl 0x1(%rax)`, a NULL table from `-0x8(%rsp)`) | 45 |
 | 4 | `pthread_kill failed at suspend` | none — SIGABRT | 39 |
-| 5 | `[RWMAIN] signal() sig=11 handler=(nil)` | VA=0x75304098 PC=UnityPlayer+0x1c862ef | 16 |
+| 5 | `[RWMAIN] signal() sig=11 handler=(nil)` | VA=0x75304098 (`as`+8), PC=UnityPlayer+0x19862ef (`xor 0x8(%r15)`), every register garbage | 16 |
 
-For comparison, the pre-fix ladder's last line was always a
-`Unable to find … [UnityEngine.CoreModule.dll]…` row (352 of them) with the
-fault moving between `libmonobdwgc` (`mono_class_get_image`, twice),
-`UnityPlayer+0x198b548` and one wild futex write — the table that motivated
-this lane. It was a deterministic missing input (the assembly list) whose NULL
-consequences surfaced at different call sites.
+The pre-fix ladder, for comparison (§20 plus this lane's first run):
+
+| source | last Player.log line | fault |
+|---|---|---|
+| §20, four instrumented runs | always a `Unable to find … [UnityEngine.CoreModule.dll]…` row (352 of them, ending at the `VideoCapture` block) | the four runs produced **two** VA=0x38 `libmonobdwgc+0x17eb92` (`mono_class_get_image`), **one** VA=0x6 `UnityPlayer+0x198b548`, **one** wild futex write VA=0x2882A10B78 |
+| this lane, first run | `Unable to find method InvokeOnVideoModeStoppedDelegate … VideoCapture` | VA=0x38, `libmonobdwgc+0x17eb92` (`mono_class_get_image`) |
+
+A stable last line with a moving fault is normally the signature of corrupted
+state. Here it was a deterministic missing input (the assembly list) whose NULL
+consequences surfaced at different call sites — the table alone could not tell
+those apart; the `[XREAD]` count did.
 
 No frame is claimed: `XPutImage` is resolved
 (`[RWMAIN] dlsym ok XPutImage`) but no content-flush row appears, and
