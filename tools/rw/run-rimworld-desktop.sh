@@ -195,6 +195,21 @@ for rel in UnityPlayer.so \
 done
 mdir -i "$IMG" ::/RWDSO | sed 's/^/  /'
 
+# Mono's etc/mono/config maps System.Native -> "$mono_libdir/libmono-native.so"
+# and this runtime's mono_libdir is /usr/lib/../lib, i.e. /usr/lib/libmono-native.so.
+# If that path does not exist, Mono's Interop.Sys type initializer throws
+# DllNotFoundException on the first managed File.* call: every File.ReadAllBytes
+# in the process fails, Unity cannot read ScriptingAssemblies.json, no engine
+# assembly is loaded, every [UnityEngine.CoreModule.dll] type lookup returns
+# NULL and Unity dies on mono_class_get_image(NULL).  Stage the player's own
+# copies at the path the dllmap names (NOT /RWDSO: Mono asks by absolute path,
+# and the AD-10 redirect only sees names that reach our dlopen).
+mmd -i "$IMG" ::/usr ::/usr/lib >/dev/null 2>&1 || true
+for so in libmono-native.so libMonoPosixHelper.so; do
+  stage "/srv/nfs/rimworld/RimWorldLinux_Data/MonoBleedingEdge/x86_64/$so" "::/usr/lib/$so"
+done
+echo "  staged: /usr/lib/libmono-native.so (System.Native dllmap target)"
+
 # libmonobdwgc / libMonoPosixHelper NEED libz.so.1 (skill rule 17).
 MZ="$ROOT/third_party/rw-mono/root/lib/libz.so.1"
 if [ ! -e "$MZ" ]; then

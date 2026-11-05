@@ -514,29 +514,48 @@ int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
                   uint32_t offset, void *buf, uint32_t len) {
   if (!m || !m->in_use || !fh || fh->len == 0) return -1;
 
-  uint32_t want = len;
-  if (want > m->read_size) want = m->read_size;
-  if (want > NFS_READ_CHUNK) want = NFS_READ_CHUNK;
+  /* A regular-file read() returns the whole count unless it hits EOF or an
+   * error; it does not stop at the transport's rsize.  One NFS READ RPC
+   * carries at most m->read_size (NFS_READ_CHUNK = 1024) bytes, so a larger
+   * request must be split into successive RPCs HERE.  Measured (M6/L31):
+   * Unity reads ScriptingAssemblies.json (2915 bytes) with a single 2915-byte
+   * read(), got 1024 back, treated the short read as a failed file load, and
+   * therefore never loaded a single engine assembly -- every
+   * [UnityEngine.CoreModule.dll] type lookup then returned NULL and the
+   * player died on mono_class_get_image(NULL).  Returning a short count for
+   * a non-EOF read is the bug, not the caller's loop. */
+  uint32_t done = 0;
+  while (done < len) {
+    uint32_t want = len - done;
+    if (want > m->read_size) want = m->read_size;
+    if (want > NFS_READ_CHUNK) want = NFS_READ_CHUNK;
 
-  uint8_t args[4 + NFS_FH_MAX + 4 + 8 + 4];
-  struct xdr_w w;
-  xdr_w_init(&w, args, sizeof args);
-  xdr_w_fh(&w, fh->data, fh->len);
-  xdr_w_u64(&w, offset);
-  xdr_w_u32(&w, want);
-  if (w.err) return -1;
+    uint8_t args[4 + NFS_FH_MAX + 4 + 8 + 4];
+    struct xdr_w w;
+    xdr_w_init(&w, args, sizeof args);
+    xdr_w_fh(&w, fh->data, fh->len);
+    xdr_w_u64(&w, (uint64_t)offset + done);
+    xdr_w_u32(&w, want);
+    if (w.err) return done ? (int)done : -1;
 
-  const uint8_t *body = 0;
-  int blen = 0;
-  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_READ, args, w.len, &body, &blen) != 0)
-    return -1;
+    const uint8_t *body = 0;
+    int blen = 0;
+    if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
+                 NFS_PROC_READ, args, w.len, &body, &blen) != 0)
+      return done ? (int)done : -1;
 
-  uint32_t count = 0;
-  int eof = 0;
-  if (nfs_parse_read_reply(body, blen, (uint8_t *)buf, (int)want, &count, &eof) != 0)
-    return -1;
-  return (int)count;
+    uint32_t count = 0;
+    int eof = 0;
+    if (nfs_parse_read_reply(body, blen, (uint8_t *)buf + done, (int)want,
+                             &count, &eof) != 0)
+      return done ? (int)done : -1;
+    if (count == 0)
+      break;
+    done += count;
+    if (eof)
+      break;
+  }
+  return (int)done;
 }
 
 int nfs_statfs(const struct nfs_mount *m, const char *rel,

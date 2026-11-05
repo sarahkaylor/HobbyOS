@@ -214,6 +214,13 @@ else
       stage "$src" "::/RWDSO/${rel##*/}"
     done
     mdir -i "$IMG" ::/RWDSO | sed 's/^/  /'
+    # System.Native dllmap target: "$mono_libdir/libmono-native.so" with
+    # mono_libdir = /usr/lib/../lib.  Missing it makes every managed File.*
+    # call throw (Interop.Sys type init), which is the M6 managed-layer wall.
+    mmd -i "$IMG" ::/usr ::/usr/lib >/dev/null 2>&1 || true
+    for so in libmono-native.so libMonoPosixHelper.so; do
+      stage "/srv/nfs/rimworld/RimWorldLinux_Data/MonoBleedingEdge/x86_64/$so" "::/usr/lib/$so"
+    done
     # libmonobdwgc / libMonoPosixHelper NEED libz.so.1, which /LIB64 does not
     # carry yet (the m2_mono gate stages it from the same Mono tree).  The
     # focal-era zlib from the Mono vendor tree matches the 2.31 pin.

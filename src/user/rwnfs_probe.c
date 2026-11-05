@@ -225,6 +225,30 @@ static void checksum_64k(const char *path, uint32_t expect_size) {
   check(got == 65536, "64 KiB read of UnityPlayer.so completed");
 }
 
+/* ---- 5b. one read() must return the whole count ----------------------- *
+ * A regular-file read(2) does not stop at the transport's rsize.  The NFS
+ * client used to issue one READ RPC per call and return 1024 bytes for any
+ * larger request; the loop above hides that (it just iterates), but Unity
+ * reads ScriptingAssemblies.json (2915 bytes) with a SINGLE read() and gives
+ * up when the count is short -- which empties the assembly list and kills the
+ * player on mono_class_get_image(NULL).  This check is the regression: it
+ * fails before the fix (got=1024) and passes after (got=2915). */
+static void oneshot_nfs(void) {
+  const char *path = RW_NFS_MNT "/RimWorldLinux_Data/ScriptingAssemblies.json";
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    check(0, "open ScriptingAssemblies.json over NFS");
+    return;
+  }
+  static uint8_t b[4096];
+  int n = (int)read(fd, b, 2915);
+  close(fd);
+  print("[RW] ONESHOT want=2915 got=");
+  print_dec(n);
+  print("\n");
+  check(n == 2915, "one read() of a 2915-byte NFS file returns 2915 bytes");
+}
+
 /* ---- 6. exec from NFS ------------------------------------------------- */
 
 static void exec_from_nfs(void) {
@@ -371,6 +395,7 @@ __attribute__((section(".text._start"))) void _start(void) {
 
   /* 4. 64 KiB checksum. */
   checksum_64k(RW_NFS_MNT "/UnityPlayer.so", 33010672u);
+  oneshot_nfs();
 
   /* 5. A >64-entry directory: the listing cache bound is visible here. */
   int managed = list_count(RW_NFS_MNT "/RimWorldLinux_Data/Managed", 512);

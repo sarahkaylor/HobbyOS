@@ -282,7 +282,19 @@ __attribute__((section(".text._start"))) void _start(void) {
     glx_env[k++] = on ? '1' : '0';
     glx_env[k] = 0;
   }
+  /* Mono's own assembly/image log.  `MONO_LOG_MASK=asm` + LEVEL=debug makes
+     the runtime print every image it opens and every assembly it loads --
+     the only way to tell "Mono never opened CoreModule" apart from "it
+     opened a fake image" when Unity's type lookups all return NULL. */
+  int mono_on;
+  {
+    int mk = open("/MONODBG", 0 /* O_RDONLY */);
+    mono_on = mk >= 0;
+    if (mk >= 0) close(mk);
+  }
   char *envp[] = {
+      (char *)(mono_on ? "MONO_LOG_LEVEL=debug" : "MONO_LOG_LEVEL=error"),
+      (char *)"MONO_LOG_MASK=asm", /* level=error silences it when off */
       (char *)"HOME=" RW_HOME,
       mtx_env,
       glx_env,

@@ -1580,6 +1580,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
   uint64_t restorer = grp->sig_restorer;
   uint64_t sp = tf->lr;
   int flags = linux_compat_sigflags_get(p, sig);
+  int on_altstack = 0;
 
   if (restorer == 0 || !l_user_ok(p, restorer, 4, 0))
     return 0;
@@ -1588,8 +1589,24 @@ static int l_sf_plant(struct process *p, struct process *cur,
     uint64_t asp = 0, asize = 0;
     int astate = 0;
     if (linux_compat_altstack_get(p, &asp, &asize, &astate) == 0 &&
-        astate == 0 && asp && asize > L_SF_SIZE + 64)
+        astate == 0 && asp && asize > L_SF_SIZE + 64) {
       sp = asp + asize;
+      on_altstack = 1;
+    }
+  }
+  /* Linux skips the interrupted function's 128-byte RED ZONE when the frame
+     goes on the normal stack (arch/x86/kernel/signal.c: `sp -= 128` for
+     x86-64 unless SA_ONSTACK).  The x86-64 psABI lets a leaf function keep
+     live data at [rsp-128, rsp); a frame planted at rsp-L_SF_SIZE overwrote
+     the top 112 bytes of it, so every signal delivery silently corrupted the
+     interrupted function's locals.  Measured (M6/L31): a local read at
+     -0x50(%rsp) came back as 0x2FFFF1A4E and the next `movdqu
+     %xmm0,(%rax,%rdi,8)` wrote to VA 0x2882A106F8 — a different address and
+     module each run.  An altstack has no red zone, so it is not skipped. */
+  if (!on_altstack) {
+    if (sp < 128)
+      return 0;
+    sp -= 128;
   }
   if (sp < (uint64_t)L_SF_SIZE + 64)
     return 0;

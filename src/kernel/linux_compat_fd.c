@@ -49,6 +49,7 @@
 #include "fb_mmap.h" /* GB-025 / M3: FBIOGET_* on /dev/fb0 */
 #include "file_obj.h" /* GB-025 / M3: file_is_devfb() */
 #include "fs.h"
+#include "kline.h"
 #include "ipc_proto.h"
 #include "linux_syscall.h"
 #include "process.h"
@@ -747,6 +748,27 @@ static int l_fd_openat(struct process *p, struct trap_frame *tf) {
   if (vfs_abs_path(path, abs, sizeof abs) != 0) return l_ret(tf, -ENAMETOOLONG);
 
   int fd = file_open(p, abs, flags & ~L_O_CLOEXEC);
+  /* M6/L31: the engine's ScriptingAssemblies.json read is a NATIVE Unity
+     path and its failure silently empties the assembly list.  One row here
+     says whether the open happened and with which flags. */
+  {
+    const char *tail = "ScriptingAssemblies.json";
+    int tl = 0, al = 0;
+    while (tail[tl]) tl++;
+    while (abs[al]) al++;
+    if (al >= tl) {
+      int k = al - tl, hit = 1;
+      for (int i = 0; i < tl; i++)
+        if (abs[k + i] != tail[i]) { hit = 0; break; }
+      if (hit) {
+        struct kline kl; kl_init(&kl);
+        kl_s(&kl, "[XOPEN] "); kl_s(&kl, abs);
+        kl_s(&kl, " flags="); kl_i(&kl, (long)flags);
+        kl_s(&kl, " -> "); kl_i(&kl, (long)fd); kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+  }
   if (fd == -ENOENT && (flags & L_O_DIRECTORY)) {
     struct k_stat ks;
     int err = 0;

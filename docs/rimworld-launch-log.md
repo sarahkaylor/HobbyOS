@@ -2613,3 +2613,213 @@ New kernel tests (`src/kernel/vm_test.c`):
   pattern above is visible at all.
 - `dlopen ok ... dev=<n> ino=<n> name=<path>` (`rwmain.c`): the loader identity
   table. Read it before believing a "same handle" row.
+
+## 21. 2026-11-04 — M6: the managed layer was never corrupted; it was a 1024-byte NFS short read
+
+Lane L31 (`rw-l31-managed`) started from §20's "the death site varies, so the
+managed layer is corrupt" and ended with three concrete, reproducible bugs and
+no memory corruption in the acceptance path. The variance was real but it was
+the *shape of a deterministic failure's aftermath*, not a corrupted heap.
+
+### 21.1 First: the assemblies are byte-exact through the bind
+
+Before any kernel instrument, an in-guest probe (`src/user/rwsha.c`, run as an
+app in the desktop session) read all 102 files under `/RWMANAGED` — the
+VFS-bound FAT16 copy the engine's `mmap`s are served from — and printed a
+SHA-256 per file:
+
+```text
+[SHA] Assembly-CSharp.dll 082db1dd4f7f1d0b72960d7e1beead8fbfe6957200e8627f65bda0dbbe1dd8f8
+[SHA] UnityEngine.CoreModule.dll 69d3dbc5867bbc3992f26a21d98a897ca3907771df1a1c5609435be95b357942
+... 100 more ...
+[SHA] done ok=102/102
+```
+
+Every digest equals the host's `sha256sum` of
+`/srv/nfs/rimworld/RimWorldLinux_Data/Managed/<name>` (102 files, 40,994,816
+bytes). The probe also hashed the *mapping* — `mmap(PROT_READ, MAP_PRIVATE)`
+length = the file size, the path Mono itself uses — and got the same digests
+(`[MMAP] UnityEngine.CoreModule.dll 69d3dbc…`), and re-read the largest
+assembly in 64 KiB chunks with an `lseek` before each chunk (`[SEEK]`), same
+digest again. A `MAP_PRIVATE` write test (`[COW]`) diverged in the mapping and
+left the file unchanged.
+
+**Data integrity is not the bug.** A wrong byte in CoreModule would have
+explained "Unable to find method … in [UnityEngine.CoreModule.dll]" outright;
+the bytes are right.
+
+### 21.2 The death is `mono_class_get_image(NULL)` called from UnityPlayer
+
+The fault PC resolves exactly:
+
+```text
+[SIGDUMP] uctx rip=0x1083ea8b92(libmonobdwgc-2.0.so+0x17eb92) rdi=0x0 rsi=0x10819b6500(UnityPlayer.so+0xeae500)
+[KERNEL]  memory fault VA=0x0000000000000038 PC=0x0000001083EA8B92 rw=r in=HOLE -> killed
+```
+
+```text
+000000000017eb92 <mono_class_get_image>:
+  17eb92: 48 8b 47 38    mov 0x38(%rdi),%rax
+  17eb93: c3             ret
+```
+
+and the return address on the stack is `UnityPlayer.so+0xde7e41`:
+
+```text
+de7e35: mov 0x568(%rax),%rdi     ; a MonoClass* field of a Unity object
+de7e3c: call df7960              ; import thunk -> mono_class_get_image
+de7e41: mov %rax,(%rbx)
+```
+
+So Unity held a `MonoClass*` that was **NULL**: its type lookup had failed. That
+is not a corrupted heap; it is a failed lookup whose result is used unguarded.
+
+### 21.3 Why every CoreModule lookup returned NULL: a 1024-byte short read
+
+Unity reads `<dataPath>/ScriptingAssemblies.json` (2,915 bytes) with **one**
+`read(2)` of the whole file, and treats a short count as a failed load:
+
+```text
+RuntimeInitializeOnLoadManagerInitializer: Failed reading 'ScriptingAssemblies.json'
+```
+
+`[XOPEN]`/`[XREAD]` rows in the compat openat and the NFS branch of
+`file_read()` named the cause on the first instrumented boot:
+
+```text
+[XSTAT] size=2915 type=1
+[XOPEN] /NFS/RimWorldLinux_Data/ScriptingAssemblies.json flags=0 -> 11
+[XREAD] want=2915 got=1024 cur=0 size=2915        <-- before
+```
+
+`nfs_read_file()` issued one NFS READ RPC per call and capped it at the
+mount's `rsize` (`NFS_READ_CHUNK` = 1024). A regular-file `read()` must return
+the whole count unless it hits EOF or an error; a 2915-byte request that
+returns 1024 is a contract violation, and Unity's reader does not loop.
+
+With no assembly list, Unity never loaded the engine assemblies, so **every**
+`mono_class_from_name(image, …)` on CoreModule returned NULL — the 352
+"Unable to find type/method [UnityEngine.CoreModule.dll]…" rows that §20 read
+as damage — and the first unguarded use of one of those NULLs killed the
+process. Which NULL was hit first depended on what ran next, which is exactly
+why the death site moved between runs.
+
+Fix (`src/kernel/nfs.c`): `nfs_read_file()` now loops over `rsize`-sized READ
+RPCs until `len` bytes, EOF or a zero count. One boot later:
+
+```text
+[XREAD] want=2915 got=2915 cur=0 size=2915        <-- after
+```
+
+### 21.4 The second bug: Mono's `System.Native` shim was never loadable
+
+`docs/rw-threads-design.md` §8 recorded "Mono requires /proc". This lane found
+the sibling: Mono's `etc/mono/config` maps
+
+```xml
+<dllmap dll="System.Native" target="$mono_libdir/libmono-native.so" os="!windows" />
+```
+
+and this runtime expands `$mono_libdir` to `/usr/lib/../lib`, i.e.
+`/usr/lib/libmono-native.so`. The image had no `/usr/lib` at all, so Mono's
+corefx `Interop.Sys` type initializer threw and **every managed `File.*` call
+in the process failed**. A five-line C# probe (`tools/rw/mono-probe/probe.cs`,
+compiled with the dotnet SDK's csc against Mono's own mscorlib and run under
+the guest's `MONO.EXE`) printed the inner exception:
+
+```text
+PROBE read UnityEngine.CoreModule.dll EX System.TypeInitializationException:
+      The type initializer for 'Sys' threw an exception.
+PROBE   inner[0] System.DllNotFoundException: /usr/lib/../lib/libmono-native.so
+```
+
+After staging the player's own `libmono-native.so` / `libMonoPosixHelper.so` at
+`/usr/lib` (the path the dllmap names; `vfs_clean()` folds the `..`):
+
+```text
+PROBE text /WAVE.CFG len=20
+PROBE read UnityEngine.CoreModule.dll bytes=1376768 mz=4d5a
+PROBE asm UnityEngine.CoreModule, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+```
+
+Both harnesses stage it now (`run-rimworld-desktop.sh`, `run-rimworld.sh`).
+Note the AD-10 `dlopen` redirect cannot fix this class of bug: Mono asks for an
+*absolute path* that does not exist, and no `dlopen` happens at all — there is
+no row to remap.
+
+### 21.5 The third bug: the signal frame overwrote the 128-byte red zone
+
+`l_sf_plant()` (rule 42) placed the frame at `sp - 1088`, i.e. `[sp-1088,
+sp-16)`. The x86-64 psABI lets a leaf function keep live data at `[rsp-128,
+rsp)`; Linux's `get_sigframe()` subtracts 128 for exactly this reason when the
+frame goes on the normal stack. 112 bytes of the interrupted function's red
+zone were overwritten on **every** signal delivery.
+
+Measured (the run that died writing to `VA=0x2882A106F8`):
+
+```text
+91b10e: mov -0x50(%rsp),%rdi      ; a local in the red zone
+91b113: add %esi,%edi             ; esi = 0xFFFFFFF3
+91b115: lea (%rdi,%rdi,2),%rdi
+91b119: movdqu %xmm0,(%rax,%rdi,8)   <-- VA 0x2882A106F8, in=HOLE
+```
+
+`-0x50(%rsp)` is inside the red zone and came back as `0x2FFFF1A4E`. Fix
+(`src/kernel/linux_compat_thr.c`): `sp -= 128` before placing a frame unless
+`SA_ONSTACK` (an altstack has no red zone). This is the mechanism behind §20's
+"the death site varies": every signal the runtime took could corrupt the
+interrupted function's locals, and Mono/Unity take signals during
+stop-the-world.
+
+### 21.6 After: the managed layer survives; the next wall is Mono's suspend
+
+```text
+[XREAD] want=2915 got=2915
+0 rows of "Unable to find type/method [UnityEngine.CoreModule.dll]…"
+[RWMAIN] dlopen FAILED …/UnityEngine.CoreModule.dll.so   (AOT probe, expected)
+… one such pair per assembly in the list …
+pthread_kill failed at suspend
+[KERNEL] Process 4: /NFS/RimWorldLinux exited (signal 6).
+```
+
+Unity now parses its assembly list and walks **all 102 assemblies** (the
+`*.dll.so` AOT probes are the proof the list was read). The player then aborts
+inside Mono's stop-the-world: `pthread_kill failed at suspend` (3 of 5 runs) or
+a wild fault whose address is the address-space pointer plus 8
+(`VA=0x75304098`; `as=0x75304090` in the futex rows) in the same suspend path
+(2 of 5). That is a threading/signal-delivery frontier, not data corruption.
+
+### 21.7 Determinism table (5 runs, this build)
+
+| run | last Player.log line | fault | alive PCBs |
+|---|---|---|---|
+| 1 | `pthread_kill failed at suspend` | none — SIGABRT | 12 |
+| 2 | `pthread_kill failed at suspend` | none — SIGABRT | 42 |
+| 3 | `[RWMAIN] signal() sig=11 handler=(nil)` | VA=0x118 PC=UnityPlayer+0x1c78f52 | 45 |
+| 4 | `pthread_kill failed at suspend` | none — SIGABRT | 39 |
+| 5 | `[RWMAIN] signal() sig=11 handler=(nil)` | VA=0x75304098 PC=UnityPlayer+0x1c862ef | 16 |
+
+For comparison, the pre-fix ladder's last line was always a
+`Unable to find … [UnityEngine.CoreModule.dll]…` row (352 of them) with the
+fault moving between `libmonobdwgc` (`mono_class_get_image`, twice),
+`UnityPlayer+0x198b548` and one wild futex write — the table that motivated
+this lane. It was a deterministic missing input (the assembly list) whose NULL
+consequences surfaced at different call sites.
+
+No frame is claimed: `XPutImage` is resolved
+(`[RWMAIN] dlsym ok XPutImage`) but no content-flush row appears, and
+`99_final.png` is the maximized empty window on the desktop, not a game frame.
+
+### 21.8 Instruments and tests added
+
+- `[XSTAT]`/`[XOPEN]`/`[XREAD]` (`fs.c`, `linux_compat_fd.c`): one row each for
+  the engine's `ScriptingAssemblies.json` stat/open/read. Bounded to that
+  filename; it is what turned "the managed layer is corrupt" into "got=1024".
+- `src/user/rwsha.c` + `tools/rw/run-guest-sha.sh`: per-file SHA-256 of a
+  directory read through the guest VFS, the mmap hash, a seek pass, a COW
+  write test and a `/proc/self/maps` dump.
+- `tools/rw/mono-probe/probe.cs` + `tools/rw/run-mono-probe.sh`: a C# probe
+  under the guest's own Mono that prints the *inner* exception of a managed
+  `File.*` call and then loads an assembly and enumerates its types.
+- `tools/rw/rw-runs-table.sh`: N archived desktop runs + the table above.
+- `tools/rw/rebuild-launcher.sh`: launcher-only rebuild for `RW_SKIP_BUILD=1`.
