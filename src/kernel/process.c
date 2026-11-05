@@ -2921,7 +2921,7 @@ int process_signal(int pid, int sig) {
        suspend that is never delivered leaves the suspended thread holding
        whatever locks it had.  Capped, because a spin on signals is noise. */
     static int sig_reports;
-    if (sig_reports < 40) {
+    if (sig_reports < 400) {
       sig_reports++;
       struct kline kl;
       kl_init(&kl);
@@ -2947,6 +2947,36 @@ int process_signal(int pid, int sig) {
       linux_compat_signal_interrupt(pender);
       if (pender != target)
         linux_compat_signal_interrupt(target);
+    }
+    /* L41: a signal that lands on a PARKED thread while that thread has it
+       BLOCKED cannot run its handler, and the thread will not park again
+       until something else wakes it — so the sender waits for ever.
+       Measured shape: Boehm's GC_suspend_thread pthread_kills a parked
+       worker with SIGPWR and blocks in sem_wait(&GC_suspend_ack_sem); if
+       the worker's mask still blocks SIGPWR, the main thread never returns
+       and the game stays stopped after its first frame.  This row names the
+       thread and the mask instead of leaving it to guesswork. */
+    {
+      extern uint64_t linux_compat_sigmask_get(struct process *);
+      static int blocked_rows;
+      if (blocked_rows < 24 &&
+          (pender->state == PROC_STATE_FUTEX ||
+           pender->state == PROC_STATE_BLOCKED) &&
+          (linux_compat_sigmask_get(pender) & (1ull << (sig - 1)))) {
+        blocked_rows++;
+        struct kline kb;
+        kl_init(&kb);
+        kl_s(&kb, "[SIG] blocked pid=");
+        kl_i(&kb, pender->pid);
+        kl_s(&kb, " sig=");
+        kl_i(&kb, sig);
+        kl_s(&kb, " st=");
+        kl_i(&kb, pender->state);
+        kl_s(&kb, " mask=");
+        kl_hex(&kb, (unsigned long)linux_compat_sigmask_get(pender));
+        kl_c(&kb, '\n');
+        kl_emit(&kb);
+      }
     }
   }
   spinlock_release_irqrestore(&proc_lock, flags);
@@ -4418,6 +4448,20 @@ void start_scheduler(void) {
          spam the acted path had to avoid. */
       last_quiet_div = sched_idle_rounds / 20000;
       dump_stuck = 1;
+    }
+    /* L41: a park may never look like an idle stretch -- the desktop's poll
+       loop resets sched_idle_rounds every few ms, so the 20000-round gate can
+       go a whole 240 s run without firing (measured: the e2 run had six
+       watchdog rows and zero thread tables).  The watchdog therefore REQUESTs
+       a dump when the console has been silent past its threshold, and any CPU
+       that reaches this point serves it.  The request is a counter, not a
+       lock: the timer IRQ only writes it. */
+    {
+      extern volatile int wd_dump_request;
+      if (__atomic_load_n(&wd_dump_request, __ATOMIC_RELAXED) != 0) {
+        __atomic_store_n(&wd_dump_request, 0, __ATOMIC_RELAXED);
+        dump_stuck = 1;
+      }
     }
     if (dump_stuck) {
       uart_puts("[IDLESTUCK] cpu=");

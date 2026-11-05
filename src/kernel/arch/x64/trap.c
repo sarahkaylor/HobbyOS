@@ -2743,6 +2743,11 @@ static volatile uint64_t wd_last_err[MAX_CPUS];
 static volatile uint64_t wd_last_cr2[MAX_CPUS];
 static volatile int wd_last_seen_pid[MAX_CPUS];
 static volatile uint64_t wd_next_report_ms = 0;
+/* L41: served by the scheduler's idle loop (process.c), which can take
+   proc_lock safely; the timer IRQ only increments this.  A park that never
+   produces a 20000-round idle stretch (the desktop polls and resets the
+   counter) still gets its thread table this way. */
+volatile int wd_dump_request = 0;
 /* Full last frame per core (copied at every tick) so the stall dump can
    show the register state + live stack pointer of every core, not just the
    interrupted RIP.  Key offsets (see save_context / the asm wrapper): the
@@ -2904,6 +2909,7 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   }
   wd_next_report_ms = now + WATCHDOG_COOLDOWN_MS;
   uart_puts_raw("[WATCHDOG] console silent for more than 20s\n");
+  wd_dump_request++;
   {   /* L34: is the launch making progress at all, and at what rate? */
     extern volatile uint64_t nfs_io_bytes, nfs_io_ops;
     uart_puts_raw("  [NFSIO] bytes=0x");

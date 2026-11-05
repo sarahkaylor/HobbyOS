@@ -46,6 +46,11 @@
 #include "timer.h"
 #include "vm.h"
 
+/* Boot-anchored CLOCK_REALTIME (src/kernel/time.c): the futex timeout
+   conversion needs the SAME clock the caller used, and for a realtime
+   FUTEX_WAIT_BITSET that is this one, not timer_get_ms(). */
+extern uint64_t hb_clock_realtime_ms(void);
+
 /* ---- futex constants (Linux uapi) -------------------------------------- */
 
 #define L_FUTEX_WAIT 0
@@ -384,6 +389,21 @@ void futex_trace_dump_locked(void) {
       kl_s(&kl, "/");
       kl_hex(&kl, (unsigned long)(g ? g->sig_pending : 0));
     }
+    /* L41: the thread's SIGNAL MASK.  Boehm's stop-the-world signals every
+       thread with SIGPWR and waits for its ack; a thread that parked with
+       SIGPWR blocked never runs the handler, so GC_suspend_thread's
+       sem_wait(&GC_suspend_ack_sem) never returns.  The mask is the only
+       field that distinguishes that thread from an identical parked one. */
+    {
+      extern uint64_t linux_compat_sigmask_get(struct process *);
+      kl_s(&kl, " mask=");
+      kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(p));
+    }
+    /* L41: the last syscall this thread ENTERED, from the dispatcher.  A park
+       row without it cannot distinguish "waiting in futex" from "the last
+       thing it did was write and the park is a different thread's". */
+    kl_s(&kl, " sc=");
+    kl_i(&kl, (long)p->last_syscall);
     kl_s(&kl, " ");
     kl_s(&kl, p->name);
     kl_c(&kl, '\n');
@@ -423,6 +443,152 @@ void futex_trace_dump_locked(void) {
       }
       kl_c(&kl2, '\n');
       kl_emit(&kl2);
+      /* L41: glibc's pthread_cond_wait builds its frame with six pushes plus
+         `sub $0x98`, so the RETURN ADDRESS INTO ITS CALLER sits at
+         rsp + 0xC8 (0x30 + 0x98) -- no frame pointer needed, and no guessing
+         from stale stack words.  Print the words around that slot so the
+         caller of every condvar park is one row. */
+      {
+        struct kline kc;
+        kl_init(&kc);
+        kl_s(&kc, "[FUTEX] ra pid=");
+        kl_i(&kc, p->pid);
+        for (int off = 0xF8; off <= 0x128; off += 8) {
+          uint64_t v = 0;
+          if (l_copy_from_user(p, &v, p->context[33] + (uint64_t)off, 8) != 0)
+            v = 0xDEAD;
+          kl_s(&kc, " ");
+          kl_hex(&kc, (unsigned long)v);
+        }
+        kl_c(&kc, '\n');
+        kl_emit(&kc);
+      }
+      /* The six words in `st` are libc's own frame; the CALLER that is
+         waiting is further up the stack.  Walk up to 2 KiB and print only
+         values that land in an executable region -- the same
+         vm_region_find the [FUTEX] maps row uses.  Without this, every park
+         inside pthread_cond_wait looks identical (rip = libpthread+0xf376)
+         no matter which Unity/Mono handshake it is: measured on the L40
+         park, whether the main thread waited for the render thread, a job
+         or the GC could not be told apart from the rip. */
+      {
+        struct kline kb;
+        kl_init(&kb);
+        kl_s(&kb, "[FUTEX] bt pid=");
+        kl_i(&kb, p->pid);
+        int hits = 0;
+        for (int w = 0; w < 256 && hits < 4; w++) {
+          uint64_t v = 0;
+          if (l_copy_from_user(p, &v, p->context[33] + (uint64_t)w * 8, 8) != 0)
+            continue;
+          if (v < 0x100000000ULL)
+            continue;
+          struct vm_region *rg = vm_region_find(p->as, v);
+          if (!rg || !(rg->prot & VM_PROT_EXEC))
+            continue;
+          /* A VALUE in an executable region is not a return address: libmono's
+             first LOAD is R+E over code AND rodata, so a data pointer passed
+             the old filter (measured: the "frames" were GC malloc return
+             sites and rodata).  Require the bytes BEFORE the candidate to be a
+             call: E8 (rel32), FF /2 (call r/m64) or FF 15 (call [rip+d32]). */
+          {
+            uint8_t b[6] = {0};
+            int is_call = 0;
+            if (l_copy_from_user(p, b, v - 5, 5) == 0 && b[0] == 0xE8)
+              is_call = 1;
+            if (!is_call && l_copy_from_user(p, b, v - 2, 2) == 0 &&
+                b[0] == 0xFF && (b[1] & 0x38) == 0x10)
+              is_call = 1;
+            if (!is_call && l_copy_from_user(p, b, v - 6, 6) == 0 &&
+                b[0] == 0xFF && b[1] == 0x15)
+              is_call = 1;
+            if (!is_call)
+              continue;
+          }
+          /* The DSO base, not the segment base: a DSO is several contiguous
+             LIB regions (r--, r-x, r--, rw-), and an offset from the r-x
+             segment cannot be looked up in any file.  Merge the contiguous
+             run and print base+offset/span so one row is a module+offset. */
+          int idx = (int)(rg - p->as->regions);
+          int lo = idx, hi = idx;
+          while (lo > 0) {
+            struct vm_region *pv = &p->as->regions[lo - 1];
+            if (pv->kind != rg->kind ||
+                pv->base + pv->len != p->as->regions[lo].base)
+              break;
+            lo--;
+          }
+          while (hi + 1 < p->as->nr) {
+            struct vm_region *nx = &p->as->regions[hi + 1];
+            if (nx->kind != rg->kind ||
+                p->as->regions[hi].base + p->as->regions[hi].len != nx->base)
+              break;
+            hi++;
+          }
+          uint64_t dbase = p->as->regions[lo].base;
+          (void)hi;
+          kl_s(&kb, " ");
+          kl_hex(&kb, (unsigned long)v);
+          kl_s(&kb, "@");
+          kl_hex(&kb, (unsigned long)rg->base);
+          kl_s(&kb, "+");
+          {
+            /* short offset: decimal-ish hex without the 0x16-digit padding */
+            char ob[24];
+            int oi = 0;
+            uint64_t off = v - rg->base;
+            do { ob[oi++] = "0123456789abcdef"[off & 15]; off >>= 4; } while (off);
+            kl_s(&kb, "0x");
+            while (oi) { char c[2] = { ob[--oi], 0 }; kl_s(&kb, c); }
+          }
+          (void)dbase;
+          hits++;
+        }
+        kl_c(&kb, '\n');
+        kl_emit(&kb);
+      }
+      /* L41: the frame-pointer chain.  The stack scan above also finds stale
+         return addresses (every thread's [sp] held the same UnityPlayer
+         trampoline address), so it cannot say WHO called pthread_cond_wait.
+         glibc's pthread_cond_wait builds a frame pointer, so [rbp] -> [rbp+8]
+         is the precise caller chain; print it as module+offset. */
+      {
+        struct kline kf;
+        kl_init(&kf);
+        kl_s(&kf, "[FUTEX] fp pid=");
+        kl_i(&kf, p->pid);
+        uint64_t rbp = p->context[6]; /* regs[6] == rbp (see the fault dump) */
+        int n = 0;
+        while (n < 8 && rbp) {
+          uint64_t prev = 0, ret = 0;
+          if (l_copy_from_user(p, &prev, rbp, 8) != 0) break;
+          if (l_copy_from_user(p, &ret, rbp + 8, 8) != 0) break;
+          if (!ret) break;
+          kl_s(&kf, " ");
+          kl_hex(&kf, (unsigned long)ret);
+          struct vm_region *rg = vm_region_find(p->as, ret);
+          if (rg && (rg->prot & VM_PROT_EXEC)) {
+            int idx = (int)(rg - p->as->regions);
+            int lo = idx, hi = idx;
+            while (lo > 0 && p->as->regions[lo - 1].kind == rg->kind &&
+                   p->as->regions[lo - 1].base + p->as->regions[lo - 1].len ==
+                       p->as->regions[lo].base)
+              lo--;
+            while (hi + 1 < p->as->nr && p->as->regions[hi + 1].kind == rg->kind &&
+                   p->as->regions[hi].base + p->as->regions[hi].len ==
+                       p->as->regions[hi + 1].base)
+              hi++;
+            uint64_t dbase = p->as->regions[lo].base;
+            kl_s(&kf, "@+");
+            kl_hex(&kf, (unsigned long)(ret - dbase));
+          }
+          if (prev <= rbp || prev - rbp > 0x200000ULL) break;
+          rbp = prev;
+          n++;
+        }
+        kl_c(&kf, '\n');
+        kl_emit(&kf);
+      }
       /* A glibc pthread_mutex_t is 40 bytes: __lock(4) __count(4) __owner(4)
          __nusers(4) __kind(4) ...  __owner is only meaningful for
          ERRORCHECK/RECURSIVE mutexes, but when it is set it NAMES THE OWNER
@@ -983,9 +1149,19 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
         return 1;
       }
       if (absolute) {
-        /* FUTEX_WAIT_BITSET takes an ABSOLUTE time (monotonic unless
-           FUTEX_CLOCK_REALTIME).  Convert to a relative deadline. */
-        int64_t now = (int64_t)timer_get_ms();
+        /* FUTEX_WAIT_BITSET takes an ABSOLUTE time.  WHICH clock is named by
+           FUTEX_CLOCK_REALTIME in the op word, and the two clocks are not the
+           same number here: CLOCK_REALTIME is boot-anchored to the RTC epoch
+           (hb_clock_realtime_ms, ~1.7e12 ms) while timer_get_ms() is uptime
+           (~1e5 ms).  Subtracting uptime from an absolute REALTIME deadline
+           produced ~1.7e12 ms, saturated by l_timespec_to_ms's 1e8 clamp -- a
+           10 ms sem_timedwait became 27.8 hours.  Measured: Boehm's
+           GC_suspend_all waits 10 ms for a stop-the-world ack and CONTINUES on
+           timeout; with the timeout inflated to 1e8 ms the collector never
+           resumes, so the world stays stopped and the game parks for ever on
+           GC_suspend_ack_sem. */
+        int64_t now = realtime ? (int64_t)hb_clock_realtime_ms()
+                               : (int64_t)timer_get_ms();
         ms -= now;
         if (ms < 0)
           ms = 0;
@@ -1124,6 +1300,32 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     ev.rip = tf->elr;
     int woke = l_futex_wake_locked(as, uaddr, val, bitset, &ev);
     spinlock_release_irqrestore(&proc_lock, flags);
+    /* L41: WHO wakes the main thread?  The park row says main is in
+       pthread_cond_wait on a word nobody ever sets; knowing which pid used to
+       wake it on that word separates "the signaler died" from "the signaler
+       is alive and stopped" in one row.  Bounded. */
+    {
+      static int w4_rows;
+      if (woke > 0 && w4_rows < 200) {
+        for (int i = 0; i < ev.nwoke; i++) {
+          if (ev.woke_pids[i] != 4) continue;
+          w4_rows++;
+          struct kline kw;
+          kl_init(&kw);
+          kl_s(&kw, "[FUTEX] wake4 by=");
+          kl_i(&kw, p->pid);
+          kl_s(&kw, " st=");
+          kl_i(&kw, p->state);
+          kl_s(&kw, " key=");
+          kl_hex(&kw, uaddr);
+          kl_s(&kw, " t=");
+          kl_i(&kw, (long)timer_get_ms());
+          kl_c(&kw, '\n');
+          kl_emit(&kw);
+          break;
+        }
+      }
+    }
     futex_trace_note(&ev);
     tf->regs[0] = (uint64_t)(int64_t)woke;
     return 1;

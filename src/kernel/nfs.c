@@ -923,6 +923,49 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
     int got = net_socket_recv_timeout(pcb, reply_raw, sizeof reply_raw,
                                       NFS_RPC_TIMEOUT_MS);
     if (got <= 0) {                     /* timeout / socket closed */
+      /* L41: a stall row, not a guess.  If the load freezes at a byte count,
+         the question is whether an issued READ is still unanswered at that
+         offset (a lost reply) or no READ is outstanding at all (the client is
+         not in NFS).  Print the in-flight xids and the oldest wait once per
+         stall, bounded to 8 rows so a dead server cannot turn the diagnosis
+         into the flood. */
+      static int stall_rows;
+      if (stall_rows < 8) {
+        stall_rows++;
+        char num[7][24];
+        nfs_put_dec(inflight, num[0]);
+        nfs_put_dec(issued, num[1]);
+        nfs_put_dec(replies, num[2]);
+        nfs_put_dec(contig, num[3]);
+        nfs_put_dec(end, num[4]);
+        nfs_put_dec((uint64_t)(timer_get_us() - t_start), num[5]);
+        uart_puts("[NFSPIPE] stall inflight=");
+        uart_puts(num[0]);
+        uart_puts(" issued=");
+        uart_puts(num[1]);
+        uart_puts(" replies=");
+        uart_puts(num[2]);
+        uart_puts(" contig=");
+        uart_puts(num[3]);
+        uart_puts(" end=");
+        uart_puts(num[4]);
+        uart_puts(" us=");
+        uart_puts(num[5]);
+        uart_puts(" xids=");
+        for (int i = 0; i < NFS_READ_DEPTH; i++) {
+          if (slot[i].state != 1)
+            continue;
+          char xb[16];
+          nfs_put_dec(slot[i].xid, xb);
+          uart_puts(xb);
+          uart_puts("/");
+          char ob[16];
+          nfs_put_dec(slot[i].off, ob);
+          uart_puts(ob);
+          uart_puts(" ");
+        }
+        uart_puts("\n");
+      }
       if (contig == offset) { rc = -1; goto out; }
       break;                            /* finish serially from contig */
     }
