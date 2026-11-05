@@ -648,13 +648,58 @@ static int l_proc_sigaltstack(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, 0);
 }
 
+/* M6/L32: what the compat kill/tkill/tgkill path ACTUALLY answered, and for
+   which occupant of the pid slot.  Mono's Boehm GC treats pthread_kill's
+   return as a tri-state: 0 = ack expected, ESRCH = "thread is gone, skip",
+   anything else = fatal (GC_suspend_all: `cmp $3,%eax; je skip` then
+   GC_log_printf("pthread_kill failed at suspend: errcode= %d") + abort()).
+   So a single row naming tid, state, generation and rc decides whether a
+   failed suspend is our errno or Mono's stale list.  Rate-limited: the game
+   sends hundreds of these, and the first ~60 around the first suspend are
+   the whole story. */
+static void l_sig_row(const char *op, int tgid, int pid, int sig,
+                      struct trap_frame *tf, int rc) {
+  static int rows;
+  if (rows >= 60)
+    return;
+  rows++;
+  struct process *t = process_get_pcb(pid);
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[TGTK] op=");
+  kl_s(&kl, op);
+  kl_s(&kl, " tgid=");
+  kl_i(&kl, tgid);
+  kl_s(&kl, " tid=");
+  kl_i(&kl, pid);
+  kl_s(&kl, " sig=");
+  kl_i(&kl, sig);
+  kl_s(&kl, " st=");
+  kl_i(&kl, t ? t->state : -1);
+  kl_s(&kl, " th=");
+  kl_i(&kl, t && t->is_thread ? 1 : 0);
+  kl_s(&kl, " ptgid=");
+  kl_i(&kl, t ? t->tgid : -1);
+  kl_s(&kl, " gen=");
+  kl_i(&kl, (long)process_slot_seq(pid));
+  kl_s(&kl, " fut=");
+  kl_hex(&kl, t ? (unsigned long)t->futex_uaddr : 0);
+  kl_s(&kl, " rc=");
+  kl_i(&kl, rc);
+  kl_s(&kl, " pc=");
+  kl_hex(&kl, (unsigned long)tf->elr);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
 /* kill(pid, sig) / tgkill(tgid, tid, sig).  sig == 0 is the existence probe
    (no signal); everything else goes through the native process_signal(), so
    dispositions and the default action are the same ones SIGTEST.BIN
    exercises.  If the default action just killed the CALLER's own group we must
    not return to a released image: schedule away (the native sys_kill does
    exactly this, and it never returns). */
-static int l_signal_one(struct trap_frame *tf, int pid, int sig) {
+static int l_signal_one(struct trap_frame *tf, const char *op, int tgid,
+                        int pid, int sig) {
   if (sig == 0) {
     /* The existence probe.  pid 0 means the caller's own group and a negative
        pid names the group -pid; neither sends anything, so resolve them to the
@@ -669,8 +714,12 @@ static int l_signal_one(struct trap_frame *tf, int pid, int sig) {
       return l_ret(tf, 0);
     return l_ret(tf, -ESRCH);
   }
-  if (sig < 0 || sig >= HO_SIG_MAX) return l_ret(tf, -EINVAL);
+  if (sig < 0 || sig >= HO_SIG_MAX) {
+    l_sig_row(op, tgid, pid, sig, tf, -EINVAL);
+    return l_ret(tf, -EINVAL);
+  }
   int rc = process_signal(pid, sig);
+  l_sig_row(op, tgid, pid, sig, tf, rc);
   struct process *cur = current_process();
   if (cur && process_group(cur)->state == PROC_STATE_EXITED) {
     tf->regs[0] = (uint64_t)(int64_t)rc;
@@ -682,7 +731,7 @@ static int l_signal_one(struct trap_frame *tf, int pid, int sig) {
 
 static int l_proc_kill(struct process *p, struct trap_frame *tf) {
   (void)p;
-  return l_signal_one(tf, (int)l_argi(tf, 0), (int)l_argi(tf, 1));
+  return l_signal_one(tf, "kill", 0, (int)l_argi(tf, 0), (int)l_argi(tf, 1));
 }
 
 /* tkill(tid, sig): the single-thread form musl's raise()/abort() actually
@@ -692,15 +741,16 @@ static int l_proc_tkill(struct process *p, struct trap_frame *tf) {
   int tid = (int)l_argi(tf, 0);
   int sig = (int)l_argi(tf, 1);
   if (tid <= 0) return l_ret(tf, -EINVAL);
-  return l_signal_one(tf, tid, sig);
+  return l_signal_one(tf, "tkill", 0, tid, sig);
 }
 
 static int l_proc_tgkill(struct process *p, struct trap_frame *tf) {
   (void)p;
+  int tgid = (int)l_argi(tf, 0);
   int tid = (int)l_argi(tf, 1);
   int sig = (int)l_argi(tf, 2);
   if (tid <= 0) return l_ret(tf, -EINVAL);
-  return l_signal_one(tf, tid, sig);
+  return l_signal_one(tf, "tgkill", tgid, tid, sig);
 }
 
 /* ---- resource limits --------------------------------------------------- */

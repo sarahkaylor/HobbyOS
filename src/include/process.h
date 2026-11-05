@@ -737,6 +737,10 @@ void process_wake_all_drain(void); /* tick only */
 
 // Get the PCB for a specific PID.
 struct process *process_get_pcb(int pid);
+/* M6/L32: the allocation generation of a pid slot (0 = never allocated).
+ * A signal instrument compares it against the sender's view to prove or
+ * disprove PCB reuse between the sender's list entry and the signal. */
+uint32_t process_slot_seq(int pid);
 
 extern spinlock_t proc_lock;
 extern int cpu_current_pids[];

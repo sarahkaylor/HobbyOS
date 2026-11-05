@@ -401,6 +401,51 @@ static void test_p5_kill_semantics(void) {
   process_free(pid);
 }
 
+/* M6/L32: the compat signal set is Linux's, not the native frozen set.  A
+ * Linux-ABI target must accept every number kill(2)/tgkill(2) accepts
+ * (1..HO_SIG_MAX-1); the native contract must not move.  This is the
+ * regression for `pthread_kill failed at suspend`: Boehm's GC suspends
+ * threads with pthread_kill(tid, SIGPWR=30), and -EINVAL for a live parked
+ * thread is a fatal error in GC_suspend_all (it only tolerates ESRCH). */
+static void test_p5_compat_signal_range(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_compat_signal_range...\n");
+
+  int pid = process_create();
+  struct process *p = process_get_pcb(pid);
+  EXPECT_EQ((p != 0), 1);
+
+  /* native target, native set: SIGPWR / SIGXCPU / SIGQUIT stay -EINVAL */
+  p->abi_flags = 0;
+  EXPECT_EQ(process_signal(pid, 30), -EINVAL); /* SIGPWR  */
+  EXPECT_EQ(process_signal(pid, 24), -EINVAL); /* SIGXCPU */
+  EXPECT_EQ(process_signal(pid, 3), -EINVAL);  /* SIGQUIT */
+
+  /* a Linux-ABI target accepts the SAME numbers (a real handler, so the
+     disposition is "record pending", never the default action) */
+  p->abi_flags |= PROC_FLAG_LINUX_ABI;
+  p->sig_handler[30] = USER_VIRT_BASE + 0x5000;
+  p->sig_handler[24] = USER_VIRT_BASE + 0x6000;
+  p->sig_handler[3] = USER_VIRT_BASE + 0x7000;
+  p->sig_pending = 0;
+  EXPECT_EQ(process_signal(pid, 30), 0);
+  EXPECT_EQ((p->sig_pending & (1ull << 29)) != 0, 1);
+  EXPECT_EQ(process_signal(pid, 24), 0);
+  EXPECT_EQ((p->sig_pending & (1ull << 23)) != 0, 1);
+  EXPECT_EQ(process_signal(pid, 3), 0);
+  EXPECT_EQ((p->sig_pending & (1ull << 2)) != 0, 1);
+
+  /* rt numbers were already accepted for compat; keep them accepted */
+  p->sig_handler[35] = USER_VIRT_BASE + 0x8000;
+  EXPECT_EQ(process_signal(pid, 35), 0);
+
+  /* out of range is EINVAL for every target, as Linux has it */
+  EXPECT_EQ(process_signal(pid, 0), -EINVAL);
+  EXPECT_EQ(process_signal(pid, HO_SIG_MAX), -EINVAL);
+
+  process_free(pid);
+}
+
 /* D10: the write-side SIGPIPE disposition matrix. */
 static void test_p5_sigpipe_semantics(void) {
   tests_run++;
@@ -1050,6 +1095,7 @@ void process_test_suite(void) {
   test_process_set_tls();
   test_p5_sigaction_storage();
   test_p5_kill_semantics();
+  test_p5_compat_signal_range();
   test_p5_sigpipe_semantics();
   test_fault_kill_status_nonzero(); /* w5 (ii) */
   test_p5_env_readback();

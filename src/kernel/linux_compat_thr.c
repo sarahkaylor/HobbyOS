@@ -1657,6 +1657,31 @@ static int l_sf_plant(struct process *p, struct process *cur,
   tf->elr = handler;
   tf->lr = base;
   tf->spsr &= ~(uint64_t)0x400;                   /* clear DF */
+  /* M6/L32: the exact frame extents.  At a crash the faulting rsp is known,
+     so `[base, base+L_SF_SIZE)` vs `[sp-128, sp)` settles in one row whether
+     OUR frame is the writer of a clobbered red-zone local. */
+  {
+    static int sp_rows;
+    if (sp_rows < 32) {
+      sp_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGP] pid=");
+      kl_i(&kl, p ? p->pid : -1);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " fsp=");
+      kl_hex(&kl, (unsigned long)sp);
+      kl_s(&kl, " base=");
+      kl_hex(&kl, (unsigned long)base);
+      kl_s(&kl, " top=");
+      kl_hex(&kl, (unsigned long)(base + L_SF_SIZE));
+      kl_s(&kl, " alt=");
+      kl_i(&kl, on_altstack);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   return 1;
 }
 
@@ -1700,8 +1725,26 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
     sig = s;
     break;
   }
-  if (!sig)
+  if (!sig) {
+    /* M6/L32: pending but every set bit is blocked in this thread's mask.
+       Without a row, "the suspend handler never ran" and "the signal was
+       masked" look identical in a log. */
+    static int b_rows;
+    if (b_rows < 16) {
+      b_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGB] pid=");
+      kl_i(&kl, cur->pid);
+      kl_s(&kl, " pend=");
+      kl_hex(&kl, (unsigned long)pend);
+      kl_s(&kl, " mask=");
+      kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(cur));
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
     return 0;
+  }
 
   uint64_t handler = grp->sig_handler[sig];
   if (handler == HO_SIG_IGN) {
@@ -1746,11 +1789,34 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
   l_sig_drop(cur, grp, sig);
   spinlock_release_irqrestore(&proc_lock, flags);
 
+  uint64_t interrupted_pc = tf->elr;
   if (!l_sf_plant(cur, cur, grp, tf, sig, code, fault_addr)) {
     cur->sig_in_handler = 0;
     uart_puts("[LCOMPAT] signal: no usable frame/restorer -> default action\n");
     process_kill_group_sig(grp, sig);
     return 0;
+  }
+  /* M6/L32: the positive half of "a suspend happened" — a handler frame was
+     planted on THIS thread for THIS signal, at this interrupted PC.  The
+     absence of an abort is not evidence; this row (followed by the handler's
+     own effect, e.g. a GC ack and a new Player.log row) is. */
+  {
+    static int sd_rows;
+    if (sd_rows < 48) {
+      sd_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGD] pid=");
+      kl_i(&kl, cur->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " h=0x");
+      kl_hex(&kl, (unsigned long)handler);
+      kl_s(&kl, " ipc=");
+      kl_hex(&kl, (unsigned long)interrupted_pc);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
   }
   return 1;
 }
@@ -1784,6 +1850,25 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
       base, L_SF_UC + L_UC_MCONTEXT + L_MC_GREGS);
   uint64_t rip = g[L_G_RIP];
   uint64_t rsp = g[L_G_RSP];
+  /* M6/L32: a handler RETURN is the other half of a delivery.  If a wild
+     fault shows up right after `last_syscall=15` (rt_sigreturn), these rows
+     say which thread resumed where. */
+  {
+    static int rt_rows;
+    if (rt_rows < 48) {
+      rt_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[RT] pid=");
+      kl_i(&kl, cur ? cur->pid : -1);
+      kl_s(&kl, " rip=");
+      kl_hex(&kl, (unsigned long)rip);
+      kl_s(&kl, " rsp=");
+      kl_hex(&kl, (unsigned long)rsp);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   if (!l_user_ok(p, rip, 1, 0) || !l_user_ok(p, rsp, 8, 1)) {
     /* A corrupt frame must not resume the kernel: force SIGSEGV. */
     uart_puts("[LCOMPAT] rt_sigreturn: bad rip/rsp -> SIGSEGV\n");

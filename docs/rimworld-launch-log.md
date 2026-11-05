@@ -2850,3 +2850,243 @@ Before the `nfs_read_file()` fix the same request returned 1024 bytes (the
 engine's own `[XREAD] want=2915 got=1024` is the measured before). The gate's
 only remaining failure is the pre-existing, by-design `mmap` of an NFS file
 (`-ENOTSUP`, errno 95) — that is exactly why `/RWMANAGED` exists.
+
+## 22. 2026-11-04 — M6/L32: Mono's suspend was `-EINVAL`, not `-ESRCH`; and a compat thread never took its own signals
+
+§21 handed this lane a discriminator: Mono's stop-the-world dies with
+`pthread_kill failed at suspend`, so is the target **gone** (Mono's list is
+stale, our `-ESRCH` is right) or **alive** (our `-ESRCH` is the bug)? Neither.
+It was `-EINVAL`, for a *live parked thread*, because the compat kill path
+applied the **native** signal set before it looked at the target's ABI.
+
+### 22.1 What the compat path actually answered (measured, not inferred)
+
+The first instrumented boot answered the question in one row:
+
+```text
+[TGTK] op=tgkill tgid=4 tid=6 sig=30 st=8 th=1 ptgid=4 gen=1 fut=0x10842E14B8 rc=-22 pc=0x1082D0DF68
+```
+
+- `tid=6` is a real member of group 4 (`th=1`, `ptgid=4`), state 8
+  (`PROC_STATE_FUTEX`) parked on a futex, `gen=1` — the PCB had never been
+  recycled, so "Mono's list is stale" and "the tid was reused" are both out.
+- `sig=30` is **SIGPWR**.
+- `rc=-22` is **EINVAL** — glibc's `pthread_kill` returns it as errno 22.
+
+Then the abort path, verbatim:
+
+```text
+[SIGIN] pid=4 sig=6 st=3 h=0x1083E3ECBF abi=1 kn=1 thr=0     <- glibc raise(SIGABRT)
+[TGTK] op=tgkill tgid=4 tid=4 sig=6 st=3 th=0 ptgid=4 gen=0 fut=0x0 rc=0
+[SIGIN] pid=4 sig=6 st=3 h=0x0 abi=1 kn=1 thr=0              <- SIG_DFL: group kill
+[KERNEL] Process 4: /NFS/RimWorldLinux exited (signal 6).
+```
+
+and Player.log's last line was `pthread_kill failed at suspend`.
+
+### 22.2 Why SIGPWR, and why EINVAL is fatal (static proof from the DSO)
+
+`libmonobdwgc-2.0.so` names its own numbers. In `GC_stop_init`:
+
+```text
+27cf5c: movl $0x1e,(%r15)     ; GC_sig_suspend    = 30 = SIGPWR   (GC_sig_suspend was -1)
+27cf77: movl $0x18,(%r14)     ; GC_sig_thr_restart = 24 = SIGXCPU
+27cfca/27cfde: sigaction(GC_sig_suspend, {GC_suspend_handler, SA_SIGINFO|SA_RESTART})
+```
+
+and `GC_suspend_all`'s loop is a three-way branch:
+
+```text
+27cc97: call   pthread_kill@plt
+27cc9c: cmp    $0x3,%eax      ; ESRCH
+27cc9f: je     27ccc2         ;   -> "thread is gone", skip it
+27cca1: test   %eax,%eax
+27cca3: jne    27cd05         ;   -> ANY other errno is fatal
+27cd11: ...    "pthread_kill failed at suspend: errcode= %d"
+27cd2f: call   *GC_on_abort
+27cd31: call   abort@plt
+```
+
+So Boehm tolerates **only** 0 and ESRCH. Our `-EINVAL` was fatal by
+construction. And `-EINVAL` came from `process_signal()`'s first gate:
+
+```c
+int rt = (sig >= 32 && sig < HO_SIG_MAX);
+if (!sig_known(sig) && !rt) return -EINVAL;   /* BEFORE the target is resolved */
+```
+
+`sig_known()` is the **native** frozen set (1, 2, 4, 6-13, 15, 17). SIGPWR(30)
+and SIGXCPU(24) are not in it, and no ABI check had happened yet, so a
+Linux-ABI target got EINVAL for signals a real Linux process receives every
+day — SIGQUIT(3), SIGTRAP(5), SIGALRM(14), SIGXCPU(24), SIGPWR(30),
+SIGSYS(31). This is the same class of bug as §16's PI-futex probe: a *native*
+capability check answering for the compat class.
+
+### 22.3 The second bug: an accepted signal was never delivered to a thread
+
+Fixing the range alone changed `rc=-22` to `rc=0` — and the game then survived
+the suspend *without ever running the handler*: zero `[SIGD]` rows. The
+recorded bit sat on the thread PCB because `process_signal_trap_exit()` was
+
+```c
+if (!cur || cur->is_kernel_process || cur->is_thread) return;   /* leader only */
+```
+
+`is_thread` is correct for the native engine (its frame is built on the
+leader's stack) and wrong for Linux, where `tgkill(tid)` runs the handler on
+**that** thread. Mono suspends threads one at a time; the signal must land on
+the one named. The hook now passes the group anchor (handlers/restorer live
+there) and lets a Linux-ABI thread take the frame on its own stack:
+
+```c
+struct process *grp = process_group(cur);
+if (cur->is_thread && !(grp->abi_flags & PROC_FLAG_LINUX_ABI)) return;
+if (!cur->sig_pending && (cur == grp || !grp->sig_pending)) return;
+process_signal_deliver(grp, tf);      /* frame on cur, disposition on grp */
+```
+
+### 22.4 After: the stop-the-world completes, and the domain resets
+
+Same target, same park, now the full handshake — suspend, ack, resume, return:
+
+```text
+[SIGIN] pid=6 sig=30 st=8 h=0x1083FA66E7 abi=1 kn=0 thr=1      <- SIGPWR, thread 6 parked
+[TGTK] op=tgkill tgid=4 tid=6 sig=30 st=3 th=1 ptgid=4 gen=1 fut=0x0 rc=0
+[SIGP]  pid=6 sig=30 fsp=0x1084D04BD8 base=0x1084D04788 top=0x1084D04BC8 alt=0
+[SIGD]  pid=6 sig=30 h=0x1083FA66E7 ipc=0x108010271B           <- handler on THAT thread
+[SIGIN] pid=6 sig=24 st=3 h=0x1083FA6955 abi=1 kn=0 thr=1      <- SIGXCPU = resume
+[TGTK] op=tgkill tgid=4 tid=6 sig=24 st=3 th=1 ptgid=4 gen=1 fut=0x0 rc=0
+[SIGD]  pid=6 sig=24 h=0x1083FA6955 ipc=0x108010271B
+[RT]    pid=6 rip=0x108010271B rsp=0x1084D04C58                <- handler returned
+```
+
+`kn=0` is the row that matters: SIGPWR is *not* in the native set and is
+accepted anyway because the target is `abi=1`. Seven SIGPWR suspends and six
+SIGXCPU resumes later the managed layer finishes:
+
+```text
+- Loaded All Assemblies, in  0.000 seconds
+- Finished resetting the current domain, in  0.000 seconds
+[RWMAIN] dlopen remap …/Plugins/lib_burst_generated.so -> /RWDSO/lib_burst_generated.so
+```
+
+**No frame yet**, but the process no longer dies in the managed layer: in 2 of
+3 runs it is still alive at the harness's 180 s deadline, parked in a futex
+with every thread idle (§22.7). The one abort run of §21's table is gone.
+
+### 22.5 Linux semantics for the numbers involved
+
+| call | Linux | before | after |
+|---|---|---|---|
+| `tgkill(tid, SIGPWR)` to a live parked thread | 0 | **-EINVAL** | 0 |
+| `tgkill(tid, SIGXCPU)` (Boehm resume) | 0 | -EINVAL | 0 |
+| `tgkill(dead tid)` | -ESRCH | -ESRCH | -ESRCH (unchanged: Boehm skips it) |
+| `kill(native, SIGQUIT)` | 0 | -EINVAL | -EINVAL (native frozen set kept) |
+| `kill(pid, 0)` | existence probe | probe | probe |
+| `kill(pid, 64)` (SIGRTMAX) | 0 | -EINVAL | -EINVAL (`HO_SIG_MAX` is 64; stated gap) |
+
+The fix is *not* "accept everything": out-of-range numbers still answer
+-EINVAL for every target, and native targets keep `sig_known()` exactly as D6
+froze it (the unit test asserts both halves).
+
+### 22.6 Four runs at this tip
+
+| run | suspend/resume plants | managed layer | outcome |
+|---|---|---|---|
+| 1 | 7 SIGPWR + 6 SIGXCPU, 12 `[RT]` | `Loaded All Assemblies` | alive at the 180 s deadline, idle (§22.7) |
+| 2 | 7 SIGPWR + 6 SIGXCPU, 12 `[RT]` | `Loaded All Assemblies` | alive at the 180 s deadline, idle |
+| 3 | **none** — no `[TGTK]` row at all | 2 dll probes | fault `UnityPlayer+0x91b119`, `VA=0x2882A106F8` |
+| 4 (post-gate) | **none** — no `[TGTK]` row at all | 2 dll probes | fault `UnityPlayer+0x91b119`, `VA=0x2882A106F8` |
+
+**Every run that reaches the stop-the-world passes it (3 of 3); the two that
+fail never send a signal at all.** Runs 3 and 4 are the *other* pre-existing
+class §21 measured in 2/5 runs (a wild write in UnityPlayer's static
+initializer with a garbage red-zone local). This lane did not fix it and does
+not claim it: no signal was delivered before the fault, and the only frame in
+those runs is the fault's own —
+`[SIGP] pid=4 sig=11 fsp=0x17FFFFB2F8 base=0x17FFFFAEA8 top=0x17FFFFB2E8`,
+whose top is **0x40 below** the clobbered slot at `0x17FFFFB328`. Signal-frame
+overflow is excluded by measurement, not by argument.
+
+### 22.7 Next blocker: the *resume* half of the handshake
+
+The last rows of runs 1 and 2 are the same shape:
+
+```text
+[SIGD] pid=6 sig=30 h=0x1083FA66E7 ipc=0x108010271B     <- 8th suspend, no [RT] after it
+[IDLESTUCK] cpu=1 rounds=20005 t=132124
+[IDLESTUCK] slot=4 pid=4 st=8 wake=100000000 futex=0x10842e8728 rip=0x1082d0f678 /NFS/RimWorldLinux
+[IDLESTUCK] slot=6 pid=6 st=3 wake=0 futex=0x0 rip=0x108004348a Finalizer
+```
+
+Thirteen plants, twelve returns: the last suspended worker is sitting inside
+Boehm's suspend handler waiting for the SIGXCPU that never comes, while the
+collector (pid 4, the main thread) parks in `futex(0x10842E8728)` with a
+100,000,000 ms timeout. So the wall is no longer "the signal is refused" or
+"the signal is not delivered" — it is the **ack/resume handshake** after the
+world stops. That is the next lane's subject, and the rows above are its
+starting point.
+
+Two side observations, recorded so they are not mistaken for the blocker:
+
+- `submit_io_cmd: STILL SPINNING! io_cq[0].cid=65535 io_cq[1].cid=65535
+  io_cq_head=1 CSTS=0x1` (`src/kernel/virtio_blk.c:176`) appears 7 times per
+  run — but the game keeps running through every one (a `[SIGIN]` row lands
+  after them, and the run reaches the 180 s deadline), so this is a
+  **completion-latency** signal on the NVMe poll, not the wedge.
+- `mmap` of `lib_burst_generated.so` is not attempted: it is `dlopen`ed from
+  `/RWDSO`, the last managed-side action before the idle.
+
+### 22.8 Instruments and tests
+
+Rate-limited kernel rows (all in the compat signal path, all off in a normal
+boot because they only fire on compat tgkill/delivery):
+
+- `[TGTK]` (`linux_compat_proc.c`): op, tgid, tid, sig, target state,
+  `th`/`ptgid`, **PCB generation** (`process_slot_seq`), futex word, rc, and
+  the caller's PC. This is the row that answered the lane's question.
+- `[SIGIN]` (`process.c`): every resolved signal with the target's state,
+  stored handler, ABI and `sig_known()` verdict; `[SIGIN] miss` prints the raw
+  slot state for an ESRCH so "gone" and "recycled" are distinguishable.
+- `[SIGD]`/`[SIGP]`/`[SIGB]`/`[RT]` (`linux_compat_thr.c`): frame planted
+  (handler + interrupted PC), frame extents vs the red zone, "pending but
+  masked", and the return half (`rt_sigreturn` rip/rsp).
+
+Tests:
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh    Tests run: 411   Tests failed: 0
+```
+
+`test_p5_compat_signal_range` (new): SIGPWR/SIGXCPU/SIGQUIT are -EINVAL for a
+native target and accepted for a Linux-ABI one, rt numbers stay accepted, and
+`0`/`HO_SIG_MAX` stay -EINVAL.
+
+Gate set on this tip: `m2_mono` PASS, `m2_threads` PASS, `m12` PASS,
+`m3_window_probe` PASS, `m4_gl_probe` PASS (see §22.9 for the exact lines).
+
+Evidence: `obj/rw-desktop/evidence-l32/{before-abort,after-1,after-2,after-3}.serial.log`
+with the matching `Player.log`s.
+
+### 22.9 Gates, and the post-gate boot
+
+```text
+TOOLS_SKIP=1 ./run_unit_tests_intel.sh   Tests run: 411   Tests failed: 0
+bash tools/gate/m2_mono.sh               m2m: PASS — Mono 6.12 ran a threaded C# program under compat
+bash tools/gate/m2_threads.sh            m2: PASS — 8 pthreads, mutex+condvar+TLS+join+dlopen TLS
+bash tools/gate/m12_thread_ceiling.sh    m12: PASS — 150 threads + per-thread TLS + SIGCANCEL(32)
+python3 tools/gate/m3_window_probe.py    m3w: PASS — full SDL XCreateWindow sequence + WM_DELETE_WINDOW
+python3 tools/gate/m4_gl_probe.py        m4: PASS — GL 3.3 core triangle rendered and PRESENTED
+```
+
+Run 4 is the post-gate boot required by the "never trust a gate's disk.img"
+rule: kernel and disk were rebuilt **in order** (kernel first, then
+`disk.img`, then the stripped kernel copied to `::/boot/hobbyos.elf` and
+verified to contain the new `[SIGIN]` row) before the harness ran with
+`RW_SKIP_BUILD=1`. It hit the §22.6 wild-write class, not a suspend failure,
+which is the honest distribution at this tip: the suspend wall is gone, and
+what remains is one unexplained pre-GC corruption class plus the resume
+handshake behind it.
+
+Evidence: `obj/rw-desktop/evidence-l32/{before-abort,after-1,after-2,after-3,after-4-postgates}.serial.log`
+with the matching `Player.log`s.

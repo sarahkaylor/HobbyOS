@@ -551,6 +551,19 @@ static int group_claims_pending(struct process *grp, struct process *self) {
   return pending;
 }
 
+/* M6/L32: every pid slot carries an allocation sequence number so a signal
+ * row can say whether the PCB the caller named is the SAME occupant the
+ * sender saw, or a slot that has been freed and handed to a new thread.
+ * Linux defers a numeric tid's reuse until the kernel's pid space wraps;
+ * this table is what proves whether the compat one does. */
+static uint32_t pid_alloc_seq[MAX_PROCESSES];
+
+uint32_t process_slot_seq(int pid) {
+  if (pid <= 0 || pid >= MAX_PROCESSES)
+    return 0;
+  return pid_alloc_seq[pid];
+}
+
 /* ---------------------------------------------------------------------------
  * P5 (D5.3/D5.4/D5.6): unified reap delivery + slot forensics.
  * ------------------------------------------------------------------------- */
@@ -2626,12 +2639,21 @@ void process_exec_terminate_siblings(struct process *grp,
 /* Row 16 completion (D9): process-directed targeting + disposition-based
  * action.  See process.h for the contract. */
 int process_signal(int pid, int sig) {
-  /* L12: the real-time range is a valid signal number (glibc SIGCANCEL=32,
-   * SIGSETXID=33, Mono SIGRTMIN=35); whether THIS target may receive it is
-   * decided below, once the target's ABI is known.  Numbers outside both
-   * sets stay -EINVAL, exactly as before. */
-  int rt = (sig >= 32 && sig < HO_SIG_MAX);
-  if (!sig_known(sig) && !rt)
+  /* M6/L32: Linux's own range check.  kill(2)/tgkill(2) answer EINVAL for a
+   * number outside 1.._NSIG; within that range the number is VALID for a
+   * Linux-ABI target whatever our native frozen set happens to cover.  The
+   * previous code applied sig_known() (the NATIVE set, 1/2/4/6..13/15/17)
+   * before it even knew the target's ABI, so the compat layer answered
+   * -EINVAL for signals a real Linux process receives every day:
+   * SIGQUIT(3), SIGTRAP(5), SIGALRM(14), SIGXCPU(24), SIGPWR(30), SIGSYS(31)
+   * and every rt number 32..63 unless the target was already known.  Measured
+   * consequence: Mono's Boehm GC suspends threads with
+   * pthread_kill(thread, SIGPWR=30) (GC_stop_init sets GC_sig_suspend=0x1e,
+   * GC_suspend_all aborts on any return other than 0 or ESRCH), so every
+   * stop-the-world died with `pthread_kill failed at suspend: errcode= 22`.
+   * The native contract is unchanged: sig_known() still gates native targets,
+   * below, once the target is resolved. */
+  if (sig < 1 || sig >= HO_SIG_MAX)
     return -EINVAL;
   struct process *target = 0;
   /* M2: the exact task, when the signal names one.  A Linux tgkill(tid) must
@@ -2661,12 +2683,64 @@ int process_signal(int pid, int sig) {
       target = process_group(p);
   }
   if (!target) {
+    /* M6/L32: the sender's tid does not resolve to a live PCB.  Print the RAW
+       slot state so "genuinely gone" (ESRCH is right, and Boehm treats ESRCH
+       as skip) is distinguishable from "the slot was recycled" (gen) and from
+       "we rejected a live thread". */
+    static int miss_rows;
+    if (miss_rows < 24) {
+      miss_rows++;
+      struct process *raw = (pid > 0 && pid < MAX_PROCESSES) ? &proc_table[pid] : 0;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGIN] miss tid=");
+      kl_i(&kl, pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " st=");
+      kl_i(&kl, raw ? raw->state : -1);
+      kl_s(&kl, " gen=");
+      kl_i(&kl, (long)process_slot_seq(pid));
+      kl_s(&kl, " -> ESRCH\n");
+      kl_emit(&kl);
+    }
     spinlock_release_irqrestore(&proc_lock, flags);
     return -ESRCH;
   }
-  /* L12: a real-time number only enters the pending/ disposition logic for
-   * a Linux-ABI target.  The native contract (sig_known's frozen set) is
-   * unchanged: a native target still answers -EINVAL for 32..63. */
+  /* M6/L32: every process-directed signal with a resolved target, with the
+     disposition the target actually has.  Boehm's GC treats pthread_kill's
+     return as a tri-state (0 / ESRCH / fatal), so the *sigaction* record and
+     the state at signal time are what decide whether a failed suspend is our
+     errno or Mono's stale list. */
+  {
+    static int in_rows;
+    if (in_rows < 60) {
+      in_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGIN] pid=");
+      kl_i(&kl, pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " st=");
+      kl_i(&kl, task ? task->state : target->state);
+      kl_s(&kl, " h=0x");
+      kl_hex(&kl, (unsigned long)target->sig_handler[sig]);
+      kl_s(&kl, " abi=");
+      kl_i(&kl, (target->abi_flags & PROC_FLAG_LINUX_ABI) ? 1 : 0);
+      kl_s(&kl, " kn=");
+      kl_i(&kl, sig_known(sig) ? 1 : 0);
+      kl_s(&kl, " thr=");
+      kl_i(&kl, (task && task->is_thread) ? 1 : 0);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  /* M6/L32: the NATIVE frozen set still decides for a native target (any
+   * number sig_known() does not name is -EINVAL, rt or not).  A Linux-ABI
+   * target accepts the whole 1..HO_SIG_MAX-1 range, exactly like Linux, which
+   * is what lets glibc/Mono receive SIGQUIT/SIGTRAP/SIGALRM/SIGPWR/SIGXCPU
+   * and the rt signals (SIGCANCEL 32, SIGSETXID 33, Mono's SIGRTMIN). */
   if (!sig_known(sig) && !(target->abi_flags & PROC_FLAG_LINUX_ABI)) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return -EINVAL;
@@ -2999,13 +3073,31 @@ void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
   process_signal_deliver(p, tf);
 }
 
-/* The trap-exit hook the arch dispatchers call: the leader's return to
- * user mode.  No-op for kernel tasks/threads/siblings. */
+/* The trap-exit hook the arch dispatchers call: a return to user mode.  No-op
+ * for kernel tasks.
+ *
+ * M6/L32: a Linux-ABI THREAD takes its own signals.  This hook used to skip
+ * every `is_thread` PCB, which is right for the native engine (its frame
+ * lives on the leader's stack, and handlers are recorded on the anchor) but
+ * wrong for the compat track: Linux delivers tgkill(tid) to THAT thread, and
+ * Mono's Boehm GC suspends one thread at a time with pthread_kill(tid,
+ * SIGPWR).  Measured: the signal was recorded pending on the thread and then
+ * never delivered, so the GC's suspend handler never ran and the collector
+ * proceeded without stopping the world (the same window that produces the
+ * wild writes).  The compat engine gets the group ANCHOR (handlers and
+ * restorer live there) and places the frame on the current thread — exactly
+ * the contract process_signal_deliver() documents.  Native threads keep the
+ * leader-only rule. */
 void process_signal_trap_exit(struct trap_frame *tf) {
   struct process *cur = current_process();
-  if (!cur || cur->is_kernel_process || cur->is_thread)
+  if (!cur || cur->is_kernel_process || !tf)
     return;
-  process_signal_deliver(cur, tf);
+  struct process *grp = process_group(cur);
+  if (cur->is_thread && !(grp->abi_flags & PROC_FLAG_LINUX_ABI))
+    return;
+  if (!cur->sig_pending && (cur == grp || !grp->sig_pending))
+    return; /* fast path: nothing to deliver on this thread */
+  process_signal_deliver(grp, tf);
 }
 
 /* Row 84 (D8.6): restore the interrupted context from the active signal
@@ -4646,6 +4738,7 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   }
   struct process *t = &proc_table[pid];
   t->state = PROC_STATE_ALLOCATED;
+  pid_alloc_seq[pid]++;
   t->tgid = grp->pid;
   t->is_thread = 1;
   t->live_threads = 0; /* "0 elsewhere" (design section 1) */
