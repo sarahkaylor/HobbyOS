@@ -1363,6 +1363,59 @@ void save_context(struct process *p, struct trap_frame *tf) {
   (void)0;
 }
 
+/* M6/L37: how far below the interrupted RSP the user-mode resume scratch
+ * window sits.  The psABI reserves [rsp-128, rsp) for a leaf function's live
+ * data, so a window that reaches above rsp-128 corrupts it.  This constant is
+ * the single source of truth for the [RESUME-RZ] row; the asm below uses
+ * `lea rdi, [r13 - 448]` == target_sp - (PROCESS_RESUME_RZ_SKIP + 320). */
+#define PROCESS_RESUME_RZ_SKIP 128ULL
+
+/* The last user-mode resumes: (pid, target_sp, frame RSP, uptime).  A fault
+ * dump asks this ring whether the faulting thread had just been resumed at
+ * (about) its faulting SP -- which is the fingerprint of the resume window
+ * having overwritten the qwords at [rsp-0x50 .. rsp-0x140] with the trap
+ * frame (tf->lr lands exactly at rsp-0x50). */
+#define RESUME_RING 256
+static struct {
+  int pid;
+  uint64_t target_sp;
+  uint64_t frame_lr;
+  uint64_t ms;
+} g_rring[RESUME_RING];
+static volatile unsigned g_rring_pos;
+
+void resume_ring_note(int pid, uint64_t target_sp, uint64_t frame_lr) {
+  unsigned i = __sync_fetch_and_add(&g_rring_pos, 1) % RESUME_RING;
+  g_rring[i].pid = pid;
+  g_rring[i].target_sp = target_sp;
+  g_rring[i].frame_lr = frame_lr;
+  g_rring[i].ms = (uint64_t)timer_get_ms();
+}
+
+/* 1 when `sp` is within 0x400 of a recorded resume of `pid` (the frame is
+ * still on that stack), 0 otherwise; *dist is the absolute difference and
+ * *ms the age of the winning row. */
+int resume_ring_probe(int pid, uint64_t sp, uint64_t *dist, uint64_t *ms) {
+  int hit = 0;
+  uint64_t best = ~(uint64_t)0, best_ms = 0;
+  uint64_t now = (uint64_t)timer_get_ms();
+  for (unsigned k = 0; k < RESUME_RING; k++) {
+    unsigned i = (g_rring_pos + RESUME_RING - 1 - k) % RESUME_RING;
+    if (g_rring[i].pid != pid || g_rring[i].target_sp == 0)
+      continue;
+    uint64_t d = (sp > g_rring[i].target_sp) ? sp - g_rring[i].target_sp
+                                            : g_rring[i].target_sp - sp;
+    if (d <= 0x400 && d < best) {
+      best = d;
+      best_ms = now - g_rring[i].ms;
+      hit = 1;
+    }
+  }
+  *dist = hit ? best : 0;
+  *ms = hit ? best_ms : 0;
+  return hit;
+}
+
 void wd_dump_proc_table(void) {
   extern void uart_puts_raw2(const char *s);
   extern void uart_print_hex_raw2(uint64_t v);
@@ -1809,6 +1862,84 @@ void schedule(struct trap_frame *tf, int is_yield) {
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       extern void resume_mark(int pid, uint64_t target_sp);
       resume_mark(proc_table[next].pid, target_sp);
+      /* M6/L37: the user-mode resume writes its 37-qword frame image onto the
+         TASK'S OWN USER STACK at [target_sp-320, target_sp-24).  That window
+         covers 104 of the 128 bytes the psABI reserves below RSP for a leaf
+         function's live data, so every timer preemption silently overwrote a
+         live red-zone local of the interrupted function -- the mechanism that
+         produced `mov -0x50(%rsp),%rdi -> 0x17FFFFB378` (the thread's own SP)
+         in UnityPlayer+0x91b10e.  Rule 51 fixed the signal frame's copy of
+         this bug; this is the resume path's copy of it, which rule 51 did not
+         touch.  The scratch region does NOT have to end at target_sp: iretq
+         takes the resumed RSP from the frame's own RSP slot, so the window can
+         sit below the red zone (see the `lea rdi, [r13 - 448]` note in
+         enter_user_space).  This row records the geometry for every user
+         resume and a counter, so "the writer is always active" is a number,
+         not an inference. */
+      if ((local_tf.cs & 3) == 3) {
+        extern void resume_ring_note(int pid, uint64_t target_sp,
+                                     uint64_t frame_lr);
+        resume_ring_note(proc_table[next].pid, target_sp, local_tf.lr);
+        {
+          static int rc_rows, rc_hits;
+          /* Geometry of the window enter_user_space is about to write.  Keep
+             RESUME_RZ_SKIP in sync with the `lea rdi, [r13 - 448]` below
+             (448 = RESUME_RZ_SKIP + 320). */
+          /* The copy is 296 bytes and the iretq stamping writes five more
+             slots up to [rsp+320) == target_sp(-skip), so the window really is
+             [tsp-skip-320, tsp-skip). */
+          uint64_t win_hi = target_sp - PROCESS_RESUME_RZ_SKIP;
+          int bad = (win_hi > target_sp - 128) ? 1 : 0;
+          rc_hits += bad;
+          rc_rows++;
+          if (rc_rows <= 8 || (rc_rows & 0xFFFF) == 0) {
+            extern void uart_puts(const char *s);
+            char cb[128];
+            int ci = 0;
+            const char *p1 = "[RESUME-RZ] pid=";
+            while (*p1) cb[ci++] = *p1++;
+            char td[12];
+            int ti = 0, v = proc_table[next].pid;
+            if (v == 0) td[ti++] = '0';
+            while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) cb[ci++] = td[--ti];
+            const char *p2 = " tsp=";
+            while (*p2) cb[ci++] = *p2++;
+            static const char hx3[] = "0123456789ABCDEF";
+            uint64_t u = target_sp;
+            for (int sh = 60; sh >= 0; sh -= 4)
+              cb[ci++] = hx3[(u >> sh) & 0xF];
+            const char *p3 = " win_lo=";
+            while (*p3) cb[ci++] = *p3++;
+            u = target_sp - PROCESS_RESUME_RZ_SKIP - 320;
+            for (int sh = 60; sh >= 0; sh -= 4)
+              cb[ci++] = hx3[(u >> sh) & 0xF];
+            const char *p4 = " win_hi=";
+            while (*p4) cb[ci++] = *p4++;
+            u = win_hi;
+            for (int sh = 60; sh >= 0; sh -= 4)
+              cb[ci++] = hx3[(u >> sh) & 0xF];
+            const char *p5 = " redzone_hit=";
+            while (*p5) cb[ci++] = *p5++;
+            cb[ci++] = bad ? '1' : '0';
+            const char *p6 = " bad_total=";
+            while (*p6) cb[ci++] = *p6++;
+            ti = 0; v = rc_hits;
+            if (v == 0) td[ti++] = '0';
+            while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) cb[ci++] = td[--ti];
+            const char *p7 = " resumes=";
+            while (*p7) cb[ci++] = *p7++;
+            ti = 0; v = rc_rows;
+            if (v == 0) td[ti++] = '0';
+            while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) cb[ci++] = td[--ti];
+            cb[ci++] = '\n';
+            cb[ci] = 0;
+            uart_puts(cb);
+          }
+        }
+      }
       /* GB-057: the parked cores were recorded with rflags=0x10046 -- IF (0x200)
          CLEAR -- in the frame that iretq restores.  A user process resumed with
          IF=0 can never be preempted by the timer: age_ms climbs for ever, the

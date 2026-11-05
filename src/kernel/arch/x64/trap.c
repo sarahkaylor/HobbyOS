@@ -3127,6 +3127,243 @@ static void fl_dec(struct fl_buf *f, int v) {
   while (k) fl_c(f, t[--k]);
 }
 
+/* M6/L37: the kill path used to print rbx/rdi/rsi/rbp only.  That set cannot
+ * tell "a pointer was computed from a clobbered STACK SLOT" from "a wild
+ * write": the source of a skewed index is a stack qword, so the record has to
+ * carry the stack.  This dump is the evidence format the launch log quotes:
+ * every GPR, the interrupted RSP/RIP, 48 qwords spanning
+ * [rsp-0x100, rsp+0x80), and the region rows for rsp / cr2 / the 0x2FF.. probe
+ * window.  Rate-limited to the first four faults of a boot; one uart_puts per
+ * line so SMP cannot shred it (rule: a fault record must be one write).
+ */
+static void fl_qwords(struct fl_buf *f, struct process *p, uint64_t va, int n) {
+  uint64_t q[16];
+  if (n > 16) n = 16;
+  if (vm_user_read(p, va, q, n * 8) != 0) {
+    fl_s(f, " <unreadable>");
+    return;
+  }
+  for (int i = 0; i < n; i++) {
+    fl_c(f, ' ');
+    fl_hex(f, q[i]);
+  }
+}
+
+static void compat_fault_dump(struct process *cur, struct trap_frame *tf,
+                              uint64_t cr2) {
+  static int fd_rows;
+  if (fd_rows >= 4)
+    return;
+  fd_rows++;
+  uint64_t rsp = tf->lr;
+  struct fl_buf f;
+  f.n = 0;
+  fl_s(&f, "[SIGDUMP] pid=");
+  fl_dec(&f, cur->pid);
+  fl_s(&f, " tgid=");
+  fl_dec(&f, cur->tgid);
+  fl_s(&f, " nm=");
+  fl_s(&f, cur->name);
+  fl_s(&f, " rip=");
+  fl_hex(&f, tf->elr);
+  fl_s(&f, " rsp=");
+  fl_hex(&f, rsp);
+  fl_s(&f, " cs=");
+  fl_hex(&f, tf->cs);
+  fl_s(&f, " vec=");
+  fl_dec(&f, (int)tf->vector);
+  fl_s(&f, " err=");
+  fl_hex(&f, tf->error_code);
+  fl_s(&f, " cr2=");
+  fl_hex(&f, cr2);
+  fl_c(&f, '\n');
+  f.b[f.n] = 0;
+  uart_puts(f.b);
+
+  f.n = 0;
+  fl_s(&f, "[SGPR]");
+  fl_s(&f, " rax="); fl_hex(&f, tf->regs[0]);
+  fl_s(&f, " rbx="); fl_hex(&f, tf->regs[1]);
+  fl_s(&f, " rcx="); fl_hex(&f, tf->regs[2]);
+  fl_s(&f, " rdx="); fl_hex(&f, tf->regs[3]);
+  fl_c(&f, '\n');
+  f.b[f.n] = 0;
+  uart_puts(f.b);
+
+  f.n = 0;
+  fl_s(&f, "[SGPR]");
+  fl_s(&f, " rsi="); fl_hex(&f, tf->regs[4]);
+  fl_s(&f, " rdi="); fl_hex(&f, tf->regs[5]);
+  fl_s(&f, " rbp="); fl_hex(&f, tf->regs[6]);
+  fl_s(&f, " r8="); fl_hex(&f, tf->regs[7]);
+  fl_c(&f, '\n');
+  f.b[f.n] = 0;
+  uart_puts(f.b);
+
+  f.n = 0;
+  fl_s(&f, "[SGPR]");
+  fl_s(&f, " r9="); fl_hex(&f, tf->regs[8]);
+  fl_s(&f, " r10="); fl_hex(&f, tf->regs[9]);
+  fl_s(&f, " r11="); fl_hex(&f, tf->regs[10]);
+  fl_s(&f, " r12="); fl_hex(&f, tf->regs[11]);
+  fl_c(&f, '\n');
+  f.b[f.n] = 0;
+  uart_puts(f.b);
+
+  f.n = 0;
+  fl_s(&f, "[SGPR]");
+  fl_s(&f, " r13="); fl_hex(&f, tf->regs[12]);
+  fl_s(&f, " r14="); fl_hex(&f, tf->regs[13]);
+  fl_s(&f, " r15="); fl_hex(&f, tf->regs[14]);
+  fl_c(&f, '\n');
+  f.b[f.n] = 0;
+  uart_puts(f.b);
+
+  if (rsp >= 0x200) {
+    f.n = 0;
+    fl_s(&f, "[STK-100]");
+    fl_qwords(&f, cur, rsp - 0x100, 16);
+    fl_c(&f, '\n');
+    f.b[f.n] = 0;
+    uart_puts(f.b);
+    f.n = 0;
+    fl_s(&f, "[STK-80]");
+    fl_qwords(&f, cur, rsp - 0x80, 16);
+    fl_c(&f, '\n');
+    f.b[f.n] = 0;
+    uart_puts(f.b);
+    /* The 0x50 slot is where UnityPlayer+0x91b10e loads its index; print it
+     * by name so the launch log's claim and this row are the same bytes. */
+    uint64_t q50 = 0;
+    if (vm_user_read(cur, rsp - 0x50, &q50, 8) == 0) {
+      f.n = 0;
+      fl_s(&f, "[SLOT-50] va=");
+      fl_hex(&f, rsp - 0x50);
+      fl_s(&f, " val=");
+      fl_hex(&f, q50);
+      fl_s(&f, " ==rsp=");
+      fl_dec(&f, q50 == rsp);
+      fl_s(&f, " off=");
+      if (q50 > rsp) fl_hex(&f, q50 - rsp);
+      else fl_hex(&f, rsp - q50);
+      fl_c(&f, '\n');
+      f.b[f.n] = 0;
+      uart_puts(f.b);
+    }
+  }
+  f.n = 0;
+  fl_s(&f, "[STK+00]");
+  fl_qwords(&f, cur, rsp, 16);
+  fl_c(&f, '\n');
+  f.b[f.n] = 0;
+  uart_puts(f.b);
+
+  /* Where does rsp live, and is the fault address inside any region at all?
+   * `region=NONE` for cr2 is the "in=HOLE" verdict in numbers. */
+  {
+    extern struct vm_region *vm_region_find(struct addr_space *, uint64_t);
+    /* VMK_* from src/include/vm.h: 1 IMG, 2 HEAP, 3 ANON, 4 SHARED,
+       5 STACK, 6 FB, 7 LIB. */
+    static const char *kinds[] = {"?", "img", "heap", "anon", "shared",
+                                  "stack", "fb", "lib"};
+    uint64_t probes[4] = {rsp, rsp - 0x100, rsp - 0x1000, cr2};
+    for (int i = 0; i < 4; i++) {
+      struct vm_region *r = cur->as ? vm_region_find(cur->as, probes[i]) : 0;
+      f.n = 0;
+      fl_s(&f, "[SREG] va=");
+      fl_hex(&f, probes[i]);
+      if (!r) {
+        fl_s(&f, " region=NONE");
+      } else {
+        fl_s(&f, " base=");
+        fl_hex(&f, r->base);
+        fl_s(&f, " len=");
+        fl_hex(&f, r->len);
+        fl_s(&f, " off=");
+        fl_hex(&f, probes[i] - r->base);
+        fl_s(&f, " prot=");
+        fl_dec(&f, (int)r->prot);
+        fl_s(&f, " kind=");
+        fl_s(&f, (r->kind < 8) ? kinds[r->kind] : "?");
+      }
+      fl_c(&f, '\n');
+      f.b[f.n] = 0;
+      uart_puts(f.b);
+    }
+    /* The 0x2FFF.. window the launch log calls "a stack VA": count how many
+     * 1 MiB probes in [0x2F000000, 0x30000000) are mapped.  0 means the
+     * decoded value is not an address in this process at all. */
+    int hits = 0;
+    for (uint64_t va = 0x2F000000ULL; va < 0x30000000ULL; va += 0x100000ULL)
+      if (cur->as && vm_region_find(cur->as, va))
+        hits++;
+    f.n = 0;
+    fl_s(&f, "[SREG2F] probes=256 mapped=");
+    fl_dec(&f, hits);
+    fl_s(&f, " (window 0x2F000000..0x30000000)");
+    fl_c(&f, '\n');
+    f.b[f.n] = 0;
+    uart_puts(f.b);
+  }
+  /* A user-mode resume leaves a fingerprint: the iretq stamping writes RIP at
+   * dest+280, CS=0x1B at dest+288, RFLAGS at dest+296, RSP at dest+304 and
+   * SS=0x23 at dest+312.  CS and SS are therefore THREE qwords apart, not
+   * adjacent (the first version of this scan looked for an adjacent pair and
+   * could never fire — a broken instrument reads exactly like "no image").
+   * cs_off is the CS slot's offset from rsp: for a resume at target_sp == rsp
+   * it is -(skip+0x20) and -0x120 pre-fix, where the image covered
+   * [rsp-0x140, rsp) and tf->lr landed at rsp-0x50. */
+  {
+    uint64_t q[0x100];
+    int n = 0, hits = 0, first = 0;
+    uint64_t lo = (rsp > 0x400) ? rsp - 0x400 : 0;
+    if (vm_user_read(cur, lo, q, (int)sizeof q) == 0) {
+      n = (int)(sizeof q / 8);
+      for (int i = 0; i + 3 < n; i++) {
+        if (q[i] == 0x1B && q[i + 3] == 0x23) {
+          if (!hits)
+            first = (int)((lo + (uint64_t)i * 8) - rsp);
+          hits++;
+        }
+      }
+    }
+    f.n = 0;
+    fl_s(&f, "[SIGSIG] trapframe_images=");
+    fl_dec(&f, hits);
+    fl_s(&f, " first_cs_off=");
+    if (hits < 0) fl_s(&f, "-");
+    else {
+      fl_s(&f, first < 0 ? "-" : "+");
+      fl_hex(&f, (uint64_t)(first < 0 ? -first : first));
+    }
+    fl_c(&f, '\n');
+    f.b[f.n] = 0;
+    uart_puts(f.b);
+  }
+  /* Was this thread resumed at (about) this SP?  The user-mode resume copies
+   * its 296-byte frame to [target_sp-320, target_sp-24) on the USER stack; if
+   * the fault rsp is the resume's target_sp, the copy wrote this thread's own
+   * SP over the qwords at [rsp-0x50 .. rsp-0x140]. */
+  {
+    extern int resume_ring_probe(int pid, uint64_t sp, uint64_t *dist,
+                                 uint64_t *ms);
+    uint64_t dist = 0, ms = 0;
+    int hit = resume_ring_probe(cur->pid, rsp, &dist, &ms);
+    f.n = 0;
+    fl_s(&f, "[SRESUME] pid=");
+    fl_dec(&f, cur->pid);
+    fl_s(&f, " hit=");
+    fl_dec(&f, hit);
+    fl_s(&f, " dist=");
+    fl_hex(&f, dist);
+    fl_s(&f, " age_ms=");
+    fl_dec(&f, (int)ms);
+    fl_c(&f, '\n');
+    f.b[f.n] = 0;
+    uart_puts(f.b);
+  }
+}
+
 /* SEC-OBS-B debug hook: rank checks do not apply inside IRQ dispatch (see
  * lock.h).  Wrapper keeps the asm-visible symbol; inner is the original
  * handler body unchanged. */
@@ -3377,7 +3614,10 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         fl.b[fl.n] = 0;
         uart_puts(fl.b);
       }
-
+      /* M6/L37: the full record, before the process dies (compat targets only;
+       * a native fault keeps the compact row). */
+      if (cur->abi_flags & PROC_FLAG_LINUX_ABI)
+        compat_fault_dump(cur, tf, cr2);
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
     }
