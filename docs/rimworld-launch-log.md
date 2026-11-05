@@ -5675,9 +5675,47 @@ the missing `work_item_count() > 0` monitor tick are the *pool being idle*, and
 an idle pool is not a bug. Any further theory that begins "the work item is in
 the pool" is refuted by 7/7.
 
-What the loader waits on is still unnamed. `Verse.GenThreading::ParallelForEach`
-is the only code in `Assembly-CSharp` that builds an `AutoResetEvent` and waits
-on it with an infinite timeout, and its IL is:
+### 35.3b Who enqueues them: `ThreadPoolTaskScheduler.QueueTask`, not `GenThreading`
+
+The ring dump resolves each event's managed caller (`from=`, the icall's
+second return address, resolved with `mono_jit_info_table_find`):
+
+```text
+[TPQR] kind=enq tid=4  icall=ThreadPool.NotifyWorkItemQueued  from=ThreadPoolTaskScheduler.QueueTask
+[TPQR] kind=req tid=4  icall=ThreadPool.RequestWorkerThread   from=ThreadPoolTaskScheduler.QueueTask
+[TPQR] kind=cmp tid=31 icall=ThreadPool.NotifyWorkItemComplete from=_ThreadPoolWaitCallback.PerformWaitCallback
+```
+
+Every one of the run's seven items is a **`System.Threading.Tasks.Task`**
+queued by Mono's `ThreadPoolTaskScheduler.QueueTask` from the main thread, and
+every completion is a pool worker leaving `_ThreadPoolWaitCallback`. Not one
+comes from `Verse.GenThreading.ParallelForEach`/`QueueUserWorkItem`, which was
+§32.2's model of the load. So the loader's parallelism is `Task`-based, and the
+wait the main thread sits in is a **Task completion wait**, not a
+`QueueUserWorkItem` done-event.
+
+That re-points the search at the wake path rather than at the queue: the seven
+tasks all ran to completion (`comp=7`), so a `Task.Wait()` that never returns
+means the *completion signalled nothing*, or signalled before the waiter
+registered. The row §34.2 kept — pid 4's wait key `waits=208 wakes=121`,
+frozen — is the shape of a lost wake, and the futex ring shows the same
+asymmetry elsewhere (`WAKE ... n=1 ... woke=0`). The key lives in an anonymous
+private region (`[FUTEX] rgn pid=4 key=0x105B69C708 base=0x1040000000 ... kind=2
+prot=3`), i.e. the managed heap, and the `[FUTEX] bt` chain is the same
+`mono_os_cond_timedwait` <- `mono_w32handle_timedwait_signal_naked` <-
+`mono_w32handle_wait_one` <- `mono_wait_uninterrupted` <- JIT (`0x1086005E28`,
+module `0x1086000000`) that §34.2 decoded.
+
+That is the next thing to test: whether a `mono_os_cond_signal` for that key is
+issued and our futex wake drops it (the `woke=0` rows are the candidate), or
+whether the signal is never issued at all.
+
+`Verse.GenThreading::ParallelForEach` is the only code in `Assembly-CSharp`
+that builds an `AutoResetEvent` and waits on it with an infinite timeout — and
+with the enqueuer now known to be `ThreadPoolTaskScheduler`, its
+`QueueUserWorkItem` would have shown up in the ring if it had run. Its IL is
+still worth recording, because a *nested* pool item (a Task that calls
+`ParallelForEach`) would look exactly like this stall:
 
 ```text
 foreach (var localBatch in SliceWork(list, maxDegree))
