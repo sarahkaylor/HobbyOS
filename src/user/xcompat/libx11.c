@@ -600,6 +600,29 @@ static void dbg(const char *tag, int a, int b, int c, int d2) {
 #define dbg(tag, a, b, c, d2) ((void)0)
 #endif
 
+/* L34: an ALWAYS-ON, bounded row writer.  dbg() is compiled out unless
+ * XCOMPAT_PROTO_DEBUG, and the shipped DSO is not built with it, so a
+ * diagnostic that must exist in the harness's bytes cannot use dbg.  Same
+ * "[XE] tag a;b;c;d" shape, same fd (2 = the serial console). */
+static void l34_row(const char *tag, int a, int b, int c, int d2) {
+  char buf[80];
+  int j = 0;
+  const char *p = "[XE] ";
+  while (*p) buf[j++] = *p++;
+  while (*tag && j < 20) buf[j++] = *tag++;
+  buf[j++] = ' ';
+  int v[4]; v[0] = a; v[1] = b; v[2] = c; v[3] = d2;
+  for (int i = 0; i < 4; i++) {
+    int x = v[i];
+    if (x < 0) { buf[j++] = '-'; x = -x; }
+    char t[8]; int n = 0;
+    do { t[n++] = (char)('0' + x % 10); x /= 10; } while (x);
+    while (n) buf[j++] = t[--n];
+    buf[j++] = (i == 3) ? '\n' : ';';
+  }
+  xs_write(2, buf, (unsigned long)j);
+}
+
 /* ---- shadow (client-side backing store) ------------------------------- *
  * Every drawing call lands here and extends the dirty bbox; XFlush blits the
  * bbox into the framebuffer and sends ESC ] F so the desktop presents and
@@ -642,6 +665,13 @@ static void shadow_blit(Display *d, int x, int y, int w, int h) {
 static void send_flush(Display *d, int x, int y, int w, int h) {
   if (x < 0) x = 0;
   if (y < 0) y = 0;
+  {   /* L34: did a present reach the desktop at all?  Bounded. */
+    static int flush_rows;
+    if (flush_rows < 8) {
+      flush_rows++;
+      l34_row("FLUSH", x, y, w, h);
+    }
+  }
   if (w <= 0 || h <= 0) {
     const char msg[] = { 27, ']', 'F', '~' };
     send_raw(msg, sizeof msg);
@@ -681,7 +711,20 @@ static void shadow_flush(Display *d) {
  * keymap instead of the native library's synthetic codes. */
 
 static void queue_event(Display *d, const XEvent *ev) {
-  xc_queue(&d->core, ev);
+  XEvent e = *ev;
+  /* Xlib stamps the Display* it read the event from into every event that has
+   * one (xany.display, offset 0x18 in every core event).  A client is allowed
+   * to read it back -- `ev.xconfigure.display`, `ev.xkey.display` -- and Unity
+   * does exactly that in its ConfigureNotify handler: it dereferences
+   * ev->xconfigure.display and died at NULL+0xe8 (UnityPlayer+0x1947cef,
+   * uctx rdi=0 addr=0xe8, launch log L34) because this shim left the field
+   * zero.  Same exceptions as xc_queue's serial stamp: XErrorEvent (type 0)
+   * has a different layout, and KeymapNotify has neither serial nor display. */
+#ifndef XCOMPAT_NO_EVENT_DISPLAY
+  if (e.type != 0 && e.type != KeymapNotify)
+    e.xany.display = d;
+#endif
+  xc_queue(&d->core, &e);
 }
 
 /* Input goes to the window that owns the visible surface (d->surface), not to
@@ -3103,7 +3146,25 @@ XAPI int XDestroyImage(XImage *img) { (void)img; return 0; }
 XAPI int XPutImage(Display *d, Drawable dr, GC gc, XImage *img, int sx, int sy,
                    int dx, int dy, unsigned w, unsigned h) {
   (void)dr; (void)gc;
-  if (!d || !img || !d->win.shadow || !d->win.content_ready) return 0;
+  /* L34: the present-side content row.  "No frame" is only meaningful if the
+   * client never reached a present; one bounded row per XPutImage says which
+   * side of the ladder is empty (client never swapped vs. swapped but the
+   * desktop never showed it).  Reuses the quiet-call rule: 8 rows, then off. */
+  {
+    static int put_rows;
+    if (put_rows < 8) {
+      put_rows++;
+      l34_row("PUT", dx, dy, (int)w, (int)h);
+    }
+  }
+  if (!d || !img || !d->win.shadow || !d->win.content_ready) {
+    static int put_skip_rows;
+    if (put_skip_rows < 8) {
+      put_skip_rows++;
+      l34_row("PUTSKIP", dx, dy, d ? (int)d->win.content_ready : -1, 0);
+    }
+    return 0;
+  }
   xc_ximage *im = (xc_ximage *)img;
   if (!im->data || im->bits_per_pixel != 32) return 0;   /* 32bpp only */
 

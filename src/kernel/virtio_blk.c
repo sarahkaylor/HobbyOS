@@ -169,6 +169,7 @@ static uint16_t submit_io_cmd(struct nvme_cmd* cmd) {
   *io_sq_db = io_sq_tail;
 
   int spin_count = 0;
+  int stall_windows = 0;
   while (io_cq[io_cq_head].cid != cid) {
     __asm__ volatile("pause");
     spin_count++;
@@ -183,6 +184,21 @@ static uint16_t submit_io_cmd(struct nvme_cmd* cmd) {
       uart_print_hex(nvme_regs[7]);
       uart_puts("\n");
       spin_count = 0;
+      /* L34: a completion that never arrives must not wedge the CPU for
+       * ever.  A page-in fault (file_obj_page) runs this loop with the
+       * fault frame live, so an unbounded wait shows up as a thread stuck
+       * on one instruction-fetch #PF -- measured in L33 run 2 at
+       * cr2=0x10823B1C00 (UnityPlayer text) with this loop printing
+       * thousands of rows.  After ~100 windows (tens of seconds) fail the
+       * request instead: the caller sees an I/O error, the fault becomes a
+       * named PROT kill, and the system stays diagnosable. */
+      if (++stall_windows >= 100) {
+        uart_puts("submit_io_cmd: BLKSTALL cid=");
+        print_int((int)cid);
+        uart_puts(" no completion after 100 windows -> I/O error\n");
+        io_cq[io_cq_head].cid = 0xFFFF;
+        return 0x7FFF; /* status with every error bit set */
+      }
     }
   }
 

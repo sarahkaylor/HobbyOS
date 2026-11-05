@@ -330,6 +330,15 @@ int main(int argc, char **argv) {
         cy = ev.xconfigure.y;
         cw = ev.xconfigure.width;
         ch = ev.xconfigure.height;
+        /* L34 regression: Xlib stamps the Display* into the event it read
+         * (xany.display); a client may use ev.xconfigure.display instead of
+         * the handle it passed to XNextEvent.  Unity's ConfigureNotify handler
+         * dereferences it -- a NULL there killed the game at NULL+0xe8. */
+        if (ev.xconfigure.display != d) {
+          say("[WP] FAIL: ConfigureNotify display=%p expected %p (xany.display "
+              "not stamped)\n", (void *)ev.xconfigure.display, (void *)d);
+          return 4;
+        }
         say("[WP] ConfigureNotify window=0x%lx %dx%d at %d,%d\n",
             (unsigned long)ev.xconfigure.window, cw, ch, cx, cy);
         break;

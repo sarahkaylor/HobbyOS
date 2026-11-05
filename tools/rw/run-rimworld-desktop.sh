@@ -146,7 +146,11 @@ if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
       -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none || {
     echo "AD-9 launcher link failed"; exit 2; }
   readelf -h "$OUT/RimWorldLinux.ad9" | awk '/Type:/{print "  ad9:",$2}'
-  readelf -sW "$OUT/RimWorldLinux.ad9" | grep -qw dlopen || {
+  # Capture first: `readelf -sW | grep -q` under `set -o pipefail` fails when
+  # grep exits early and readelf takes SIGPIPE (141) -- a correct launcher was
+  # rejected once with "does not export dlopen".
+  AD9_SYMS="$(readelf -sW "$OUT/RimWorldLinux.ad9")"
+  grep -qw dlopen <<<"$AD9_SYMS" || {
     echo "AD-9 launcher does not export dlopen"; exit 2; }
 fi
 

@@ -1292,6 +1292,42 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     return 0; /* the instruction retries (ELR/CR2 untouched) */
   }
 
+  /* L34: an instruction-fetch fault on a file-backed page is the shape the
+   * Mono/Unity JIT would produce if code were freed under a running thread.
+   * Before believing that, record what the region table and the page walk say
+   * at this instant: the same row distinguishes "never mapped" (HOLE, above),
+   * "mapped but the leaf is gone" (present=0 here, a legitimate demand fill or
+   * a missing shootdown) and "leaf present, hardware refused" (retry path). */
+  if (exec) {
+    static int pfe_rows;
+    if (pfe_rows < 24) {
+      pfe_rows++;
+      uart_puts("[PFE] rip=");
+      uart_print_hex(va);
+      uart_puts(" page=");
+      uart_print_hex(a);
+      uart_puts(" base=");
+      uart_print_hex(r->base);
+      uart_puts("+");
+      uart_print_hex(r->len);
+      uart_puts(" prot=");
+      print_int((int)r->prot);
+      uart_puts(" kind=");
+      print_int((int)r->kind);
+      uart_puts(" flags=");
+      print_int((int)r->flags);
+      uart_puts(" ooff=");
+      uart_print_hex(r->obj_off);
+      uart_puts(" obj=");
+      uart_print_hex((uint64_t)r->obj);
+      uart_puts(" objsz=");
+      uart_print_hex(r->obj ? r->obj->size : 0);
+      uart_puts(" present=");
+      print_int(vm_arch_walk(as, a, 0) == 0);
+      uart_puts("\n");
+    }
+  }
+
   /* so-vm lane A: an absent VM_OBJ_FILE page is read from the FAT16 file
      (disk I/O, so vm_lock must be dropped); the helper re-validates and
      maps, mapping the object's frame shared — read-only when the region is
