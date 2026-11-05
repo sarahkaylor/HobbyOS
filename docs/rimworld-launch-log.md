@@ -3624,8 +3624,17 @@ the §21/rule-14 limitation the `Managed` prefix bind exists to work around —
 
 ### 25.5 The ladder at this tip: NFS is no longer the wall
 
-One desktop run (`tools/rw/run-rimworld-desktop.sh --timeout 420
+Three desktop runs (`tools/rw/run-rimworld-desktop.sh --timeout 420
 --run-timeout 600`), host load average 12-16:
+
+| run | reached | NFS bytes read | death | present |
+|---|---|---|---|---|
+| 1 | **`RimWorld 1.6.4871 rev600`** + managed `Steamworks.NET` init | 4,712,187 (3,605 RPCs) | `tramp-amd64.c:641` assertion -> SIGABRT -> `VA=0xE` in=HOLE | no |
+| 2 | GLX/XI window setup, pre-banner | 0 | SIGSEGV `UnityPlayer+0x19862ef`, garbage regs (`r15=0x75304090`) | no |
+| 3 | pre-banner | 0 | SIGSEGV `PC=0x1081423119 rdi=0x2FFFF1A41 rw=w` — §22.6/rule 51 class | no |
+
+Run 1 is the one that matters for this lane: the launch now *loads*. Its
+`[NFSIO]` rows:
 
 ```text
 [NFSIO] bytes=0x15887   rpcs=0x49   uptime_ms=0x7530    (30,000 ms)
@@ -3635,19 +3644,27 @@ RimWorld 1.6.4871 rev600
 * Assertion: should not be reached at tramp-amd64.c:641
 ```
 
-4.62 MB in that 30 s window, and the banner at 60 s of uptime, against §24's
-193.5 s to read 6.29 MB. Player.log's own last lines are the game's managed
-Steamworks init (`[Steamworks.NET] SteamAPI.Init() failed ...` — non-fatal,
-the game logs and continues), so the managed layer is executing game code.
+4.62 MB in that 30 s window and the banner at 60 s of uptime, against §24's
+193.5 s to read 6.29 MB. Player.log's last real lines before the assertion are
+the game's own managed Steamworks init (`[Steamworks.NET] SteamAPI.Init()
+failed ...` — non-fatal, the game logs it and continues), so managed game code
+is running.
 
-**No frame.** `[XE] PUT` (XPutImage) has **0** rows; the only `[XE]` row is
-the pre-paint `[XE] FLUSH 0;0;1916;1018` from §24.5, and the screenshots show
-the launcher's stdout window, not game content.
+Runs 2 and 3 die *before* the banner in the pre-existing garbage-pointer class
+(§22.6, rule 51: `rdi=0x2FFFF1A41`, garbage `rbx/rbp/rsi`), which §24 saw in
+1 of 6 runs and this sample sees in 2 of 3 — a bad draw, not an NFS
+regression: neither run issued an NFS READ at all. Treat "does it load?" as
+**1 of 3**, and expect the next lane to fix the wild-write class before the
+ladder is stable.
+
+**No frame in any run.** `[XE] PUT` (XPutImage) has **0** rows in all three;
+the only `[XE]` row is the pre-paint `[XE] FLUSH 0;0;1916;1018` from §24.5,
+and the screenshots show the launcher's stdout window, not game content.
 
 **Next blocker, exact line: `* Assertion: should not be reached at
 tramp-amd64.c:641`** — Mono's `stack_unaligned()` trampoline guard, i.e. a
 Mono trampoline was entered with `%rsp` not 16-byte aligned. The death chain,
-verbatim from the serial, is:
+verbatim from run 1's serial, is:
 
 ```text
 [SIGD] pid=4 sig=6 h=0x0x1083E3ECBF ipc=0x108004300B        <- SIGABRT: the assertion
@@ -3656,12 +3673,12 @@ verbatim from the serial, is:
 [RW] rwlaunch: waitpid=4 status=11
 ```
 
-i.e. the assertion aborts the runtime, Mono's own crash handler runs, and then
-a read of `VA=0xE` lands in an unmapped hole and the kernel kills the process.
-That is a signal-frame/trampoline alignment question in the compat layer
-(rules 42/58 are its siblings), **not** I/O, and it is the next lane's first
-line. `[LCOMPAT] ENOSYS nr=201` (`time(2)`) also appears once, earlier, and is
-worth filling in the same pass.
+i.e. the assertion aborts the runtime, Mono's own crash reporter runs, and
+then a read of `VA=0xE` lands in an unmapped hole and the kernel kills the
+process. That is a signal-frame/trampoline alignment question in the compat
+layer (rules 42/58 are its siblings), **not** I/O, and it is the next lane's
+first line. `[LCOMPAT] ENOSYS nr=201` (`time(2)`) also appears once, earlier,
+and is worth filling in the same pass.
 
 ### 25.6 Gates at this tip
 
@@ -3675,6 +3692,7 @@ bash tools/rw/run-rwnfs-probe.sh         6 PASS, 1 pre-existing mmap-of-NFS FAIL
 ```
 
 Evidence: `obj/rw-desktop/evidence-l35/` — `bench-after.serial` (the `[BENCH]`,
-`[NFSRTT]` and `[NFSPIPE]` rows), `bench-before.log` (the A/B), `desktop.serial`,
-`Player.log`, `probe.serial`, `unit-l35.log`, `g-m2mono.log`, `g-m3.log`,
-`g-m4.log`, `shots/`.
+`[NFSRTT]` and `[NFSPIPE]` rows), `bench-before.log` (the A/B),
+`run1.harness.log` (run 1's serial ladder + Player.log dump),
+`run2.{serial,Player.log}`, `run3.{serial,Player.log}`, `probe.serial`,
+`unit-l35.log`, `g-m2mono.log`, `g-m3.log`, `g-m4.log`, `shots/`.
