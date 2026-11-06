@@ -9,6 +9,8 @@ screendumps so the playthrough is reproducible and verifiable.
 
   python3 tools/t5/replay.py --game XNIBBLER.BIN --replay tools/t5/replays/xnibbler.jsonl
        [--arch arm] [--root ...] [--shot-dir ...]
+  python3 tools/t5/replay.py --game STARDUST.BIN --replay tools/t5/replays/stardust.jsonl \
+       --probe 1030:1055:80,220,255     # GB-213: ship-band x-centroid, before/after
 
 Reuses the GB-040 evidence_rig QMP/boot/menu machinery. The parser (ReplayParser)
 is import-testable (T1).
@@ -147,6 +149,58 @@ def format_delta(tag, d):
             f"changed={d['changed']}/{d['total']} frame={d['w']}x{d['h']}")
 
 
+# --- GB-213: bounded-region probe --------------------------------------
+# The whole-frame MAD cannot answer "did the *ship* move": STARDUST animates a
+# starfield and falling meteors, so two frames always differ.  A probe over a
+# named row band and colour turns one game fact into a number
+# (`--probe 1030:1055:80,220,255` -> ship-band x-centroid), and the no-input
+# control (`--drop-in-game`) is what proves the number tracks input.
+PROBE_TOL = 24  # per-channel |d| counted as "that colour"
+
+
+def parse_probe(spec):
+    """'y0:y1:r,g,b' -> (y0, y1, (r, g, b)); raises ValueError on nonsense."""
+    try:
+        band, rgb = spec.rsplit(":", 1)
+        y0, y1 = (int(v) for v in band.split(":"))
+        r, g, b = (int(v) for v in rgb.split(","))
+    except (ValueError, TypeError):
+        raise ValueError(f"bad --probe {spec!r}; want y0:y1:r,g,b") from None
+    if not (0 <= y0 < y1):
+        raise ValueError(f"bad --probe band {y0}:{y1}; want 0 <= y0 < y1")
+    for c in (r, g, b):
+        if not 0 <= c <= 255:
+            raise ValueError(f"bad --probe colour component {c}")
+    return y0, y1, (r, g, b)
+
+
+def probe_band(path, y0, y1, rgb, tol=PROBE_TOL):
+    """Count pixels matching `rgb` (±tol per channel) in rows [y0, y1) and
+    return their x-centroid.  Rows past the frame bottom are clipped."""
+    w, h, px = read_ppm(path)
+    y1 = min(y1, h)
+    count = s = 0
+    for y in range(y0, y1):
+        row = y * w * 3
+        for x in range(w):
+            o = row + x * 3
+            if (abs(px[o] - rgb[0]) <= tol and abs(px[o + 1] - rgb[1]) <= tol
+                    and abs(px[o + 2] - rgb[2]) <= tol):
+                count += 1
+                s += x
+    return {"count": count,
+            "xcentroid": (s / count) if count else None,
+            "w": w, "h": h, "y0": y0, "y1": y1, "rgb": rgb}
+
+
+def format_probe(tag, p):
+    """The one marker line the gate greps (GB-213)."""
+    xc = "none" if p["xcentroid"] is None else f"{p['xcentroid']:.1f}"
+    return (f"[REPLAY-PROBE] {tag} y={p['y0']}-{p['y1']} "
+            f"rgb={p['rgb'][0]},{p['rgb'][1]},{p['rgb'][2]} "
+            f"count={p['count']} xcentroid={xc}")
+
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -169,6 +223,10 @@ def main():
     ap.add_argument("--drop-in-game", action="store_true",
                     help="GB-182 no-input control: replay only the launch, with "
                          "the in-game events removed")
+    ap.add_argument("--probe", default=None, metavar="Y0:Y1:R,G,B",
+                    help="GB-213: also report the x-centroid of pixels matching "
+                         "R,G,B in rows [Y0,Y1) of the before/after frames "
+                         "(e.g. 1030:1055:80,220,255 for STARDUST's ship)")
     args = ap.parse_args()
 
     parser = ReplayParser(args.replay)
@@ -207,7 +265,7 @@ def main():
     if args.settle > 0:
         time.sleep(args.settle)
     start_shot = os.path.join(path, "replay_start.ppm")
-    if args.delta:
+    if args.delta or args.probe:
         q.screendump(start_shot)
     print(f"[replay] replaying {len(in_game)} in-game events")
     driver = events_to_qmp(in_game)
@@ -219,6 +277,15 @@ def main():
     if args.delta:
         d = frame_delta(start_shot, shot)
         print(format_delta(args.game, d))
+    if args.probe:
+        y0, y1, rgb = parse_probe(args.probe)
+        before = probe_band(start_shot, y0, y1, rgb)
+        after = probe_band(shot, y0, y1, rgb)
+        print(format_probe(f"{args.game} before", before))
+        print(format_probe(f"{args.game} after", after))
+        if before["xcentroid"] is not None and after["xcentroid"] is not None:
+            print(f"[replay] band displacement: "
+                  f"{after['xcentroid'] - before['xcentroid']:+.1f} px")
     with open(os.path.join(path, "replay.replayed.jsonl"), "w") as f:
         for e in list(parser):
             f.write(json.dumps(e) + "\n")
