@@ -45,10 +45,15 @@
 #include <fcntl.h>
 #include <errno.h>
 #include "libc.h"
+#include "rwnfs_lane.h" /* M6/L63: /NFSEXPORT -- this run's per-lane export */
 
 #define RW_NFS_SERVER "10.0.2.2"      /* QEMU slirp host alias */
 #define RW_NFS_ALT    "192.168.0.123" /* host LAN address (fallback) */
+/* Compile-time default only: the harness stages /NFSEXPORT with the
+ * worktree's own export (/srv/nfs/rimworld-<lane>) and that wins. */
+#ifndef RW_NFS_EXPORT
 #define RW_NFS_EXPORT "/srv/nfs/rimworld"
+#endif
 #define RW_NFS_MNT    "/NFS"
 /* The default launch target.  A build may override it (-DRW_GAME=...) — the
  * stub mode of tools/rw/run-rimworld.sh uses that to point the SAME launcher
@@ -213,14 +218,36 @@ __attribute__((section(".text._start"))) void _start(void) {
     exit(1);
   }
 
-  const char *source = RW_NFS_SERVER ":" RW_NFS_EXPORT;
+  /* M6/L63: ONE EXPORT PER LANE.  The export path is not a compile-time
+   * constant any more: /NFSEXPORT names the directory this run owns, so a
+   * concurrent lane installing its own launcher into its own directory
+   * cannot swap the binary (or a data file) under this guest mid-boot. */
+  const char *exp = rw_nfs_export_path(RW_NFS_EXPORT);
+  static char srcbuf[128];
+  int sl = 0;
+  for (int i = 0; RW_NFS_SERVER[i] && sl < 100; i++)
+    srcbuf[sl++] = RW_NFS_SERVER[i];
+  srcbuf[sl++] = ':';
+  for (int i = 0; exp[i] && sl < 126; i++)
+    srcbuf[sl++] = exp[i];
+  srcbuf[sl] = 0;
+  const char *source = srcbuf;
   int rc = mount(source, RW_NFS_MNT);
   if (rc != 0) {
     say("mount via the slirp alias failed; trying the host LAN address");
-    source = RW_NFS_ALT ":" RW_NFS_EXPORT;
+    sl = 0;
+    for (int i = 0; RW_NFS_ALT[i] && sl < 100; i++)
+      srcbuf[sl++] = RW_NFS_ALT[i];
+    srcbuf[sl++] = ':';
+    for (int i = 0; exp[i] && sl < 126; i++)
+      srcbuf[sl++] = exp[i];
+    srcbuf[sl] = 0;
+    source = srcbuf;
     rc = mount(source, RW_NFS_MNT);
   }
-  pc("[RW] rwlaunch: mount ");
+  pc("[RW] rwlaunch: export ");
+  pc(exp);
+  pc(" mount ");
   pc(source);
   pc(" -> ");
   pc(RW_NFS_MNT);
@@ -258,8 +285,12 @@ __attribute__((section(".text._start"))) void _start(void) {
      was testing).  A private name in the same directory keeps this lane's
      binary, and exe_dir still resolves to /NFS, so the data tree, Mono path
      and managed bind are unchanged. */
+  /* L63: with a per-lane export the primary name is private to this run, so
+     it is the one that wins; `.l61` is only a fallback for an export left
+     over from the shared-export days (where it was the private alias). */
   const char *game = RW_GAME;
-  if (access(RW_NFS_MNT "/RimWorldLinux.l61", 1 /* X_OK */) == 0)
+  if (access(RW_NFS_MNT "/RimWorldLinux", 1 /* X_OK */) != 0 &&
+      access(RW_NFS_MNT "/RimWorldLinux.l61", 1 /* X_OK */) == 0)
     game = RW_NFS_MNT "/RimWorldLinux.l61";
 
   chdir_gamedir(game);

@@ -109,6 +109,7 @@ static void sha256_final(sha256_ctx *c, uint8_t out[32]) {
 
 /* ------------------------------------------------------------------- guest */
 #include "libc.h"
+#include "rwnfs_lane.h" /* M6/L63: /NFSEXPORT */
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -208,7 +209,15 @@ __attribute__((section(".text._start"))) void _start(void) {
    * has to do it itself.  DHCP may still be settling at first call. */
   int mrc = -1;
   for (int i = 0; i < 100; i++) {
-    mrc = mount("10.0.2.2:/srv/nfs/rimworld", "/NFS");
+    /* M6/L63: per-lane export from /NFSEXPORT (default if absent). */
+    static char rbuf[128];
+    int rl = 0;
+    const char *re = rw_nfs_export_path("/srv/nfs/rimworld");
+    for (int k = 0; "10.0.2.2"[k] && rl < 100; k++) rbuf[rl++] = "10.0.2.2"[k];
+    rbuf[rl++] = ':';
+    for (int k = 0; re[k] && rl < 126; k++) rbuf[rl++] = re[k];
+    rbuf[rl] = 0;
+    mrc = mount(rbuf, "/NFS");
     if (mrc == 0) break;
     usleep(200000);
   }

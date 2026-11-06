@@ -4,8 +4,14 @@
 # 10.0.2.2).
 #
 # The game is NEVER copied into the repository.  This script copies it to a
-# host directory outside the tree (default /srv/nfs/rimworld) and exports that
-# directory read-only.  Only this script and the probe reference it.
+# host directory outside the tree and exports that directory read-only.
+#
+# M6/L63: THE EXPORT IS PER LANE.  The directory is
+# /srv/nfs/rimworld-<worktree> (tools/rw/lane.sh), not the single shared
+# /srv/nfs/rimworld every lane used to race on.  Each harness installs its own
+# launcher and data overrides into the export, so one directory per worktree
+# is the only way two runs can boot at the same time.  The shared path is
+# refused unless RW_ALLOW_SHARED_EXPORT=1 is set deliberately.
 #
 # Usage:
 #   tools/rw/nfs-export.sh sync          refresh the copy + (re)export + verify
@@ -14,7 +20,11 @@
 #
 # Env:
 #   RW_SRC       source tree   (default /mnt/fast/games/steamapps/common/RimWorld)
-#   RW_DEST      exported dir  (default /srv/nfs/rimworld)
+#   RW_LANE      lane name     (default: the worktree's directory name)
+#   RW_EXPORT    exported dir  (OUTPUT of lane.sh: /srv/nfs/rimworld-<lane>)
+#   RW_EXPORT_OVERRIDE  a different export dir for this run
+#   RW_DEST      synonym for RW_EXPORT_OVERRIDE (wins over both)
+#   RW_ALLOW_SHARED_EXPORT=1   permit the legacy shared /srv/nfs/rimworld
 #   RW_GUEST_HOST  host as the GUEST sees it (default 10.0.2.2, the slirp alias)
 #   RW_FIXED_MOUNTD=1  pin rpc.mountd to UDP/TCP port 20048 via an
 #                      /etc/nfs.conf.d drop-in (needed only on hosts where
@@ -25,8 +35,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 SRC="${RW_SRC:-/mnt/fast/games/steamapps/common/RimWorld}"
-DEST="${RW_DEST:-/srv/nfs/rimworld}"
+DEST="${RW_DEST:-$RW_EXPORT}"
 GUEST_HOST="${RW_GUEST_HOST:-10.0.2.2}"
 EXPORT_OPTS="ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534"
 MOUNTD_PORT=20048
@@ -36,6 +48,13 @@ say() { printf '%s\n' "$*"; }
 die() { printf 'nfs-export: %s\n' "$*" >&2; exit 2; }
 
 [ -d "$SRC" ] || die "source tree not found: $SRC (set RW_SRC)"
+case "$DEST" in
+  /srv/nfs/rimworld|/srv/nfs/rimworld/)
+    [ "${RW_ALLOW_SHARED_EXPORT:-0}" = 1 ] || die \
+      "refusing the SHARED export $DEST (lanes overwrite each other: M6/L63);
+       use \$RW_EXPORT ($RW_EXPORT) or set RW_ALLOW_SHARED_EXPORT=1" ;;
+esac
+say "lane=$RW_LANE export=$DEST"
 [ "$(id -u)" -ne 0 ] || die "run as the invoking user, not root (the script sudo's only where it must)"
 
 have_sudo() { sudo -n true 2>/dev/null; }

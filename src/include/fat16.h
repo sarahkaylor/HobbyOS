@@ -46,6 +46,12 @@ int fat16_read_direct(struct file* f, uint64_t dest, int size);
 /* L9 (pagein): positional coalesced read for demand-paged v2 images. */
 int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
                           uint64_t dest, int size, uint32_t pos);
+#ifdef KERNEL_MODE_UNIT_TEST
+/* M6/L63 fault injection: mode 1 = short count, mode 2 = `size` bytes of
+ * zeros (a full-length read the device never really delivered); applies to
+ * reads starting at `off`, `times` times.  Unit tier only. */
+void fat16_test_inject(int mode, uint32_t off, int times);
+#endif
 
 // Writes bytes to a FAT16 file.
 int fat16_write(struct file* f, const void* buf, int size);

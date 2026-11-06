@@ -206,10 +206,21 @@ void vm_as_teardown(struct addr_space *as) {
   as->peak_frames = 0;
   as->table_frames = 0;
   as->img_active = 0;
+  uint64_t sums = as->img_sums;
+  uint32_t sums_pages = as->img_sums_pages;
+  as->img_sums = 0;
+  as->img_sums_pages = 0;
   as->retry_va = 0; /* w5 (iv): stale retry state must not survive teardown */
   as->retry_count = 0;
   as->img_epoch++; /* L9 (prefetch): abort any stale background task */
   spinlock_release_irqrestore(&vm_lock, flags);
+
+  /* M6/L63: the image's sum table is a contiguous frame run. */
+  if (sums) {
+    uint32_t run = (sums_pages * 4 + FRAME_SIZE - 1) / FRAME_SIZE;
+    for (uint32_t i = 0; i < run; i++)
+      frame_free(sums + (uint64_t)i * FRAME_SIZE);
+  }
 
   /* S4: every region record held one object reference; drop it while the
      array is still readable (before its frames are released). */
@@ -943,7 +954,290 @@ static int vm_cow_page_locked(struct addr_space *as, struct vm_region *r,
   as->resident_frames++;
   if (as->resident_frames > as->peak_frames)
     as->peak_frames = as->resident_frames;
+  /* M6/L63: a byte copy of a page that was already published; `copy` is
+     never a content publisher (no alarm possible). */
+  vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot,
+              (r->flags & VM_MAP_PRIVATE) != 0, VM_PUB_COPY, fr, 1, VM_PW_COW);
   return 0;
+}
+
+/* =====================================================================
+ * M6/L63: PUBLISH-TIME PROVENANCE — "who put this page here?"
+ *
+ * §48.3 could not decide whether the zero text page at 0x9AD000 was
+ * published by vm_file_obj_materialize's gate (which would have refused
+ * it) or by some other site, because the ladder had no row at the moment
+ * a page is installed in a mapping.  It named the only path that can
+ * publish an exec page without the gate — vm_touch's object-file branch,
+ * whose `cow` had no exec clause — and asked for evidence instead of a
+ * guess.  This is that evidence: one row per publish, carrying
+ *
+ *     va, offset, prot (R/RX/RW), private|shared, source
+ *     (file|zero|cache|copy), zero_bytes, verified(y/n), who
+ *
+ * Every site in the kernel that installs a page's BYTES into a mapping
+ * calls vm_pub_note() (the elf loader's staged-image path included;
+ * fork/COW byte copies are `copy` and are not content publishers).
+ *
+ * Emission policy: a page that is about to become CODE and was not read
+ * from the backing file (all-zero, or unverified) is ALWAYS printed — that
+ * is the tripwire, and it names its caller.  Everything else is sampled
+ * (first rows per site, then every 1024th) so 340k publishes of a 1.3 GiB
+ * load do not drown the serial log, and a periodic [PUBS] total keeps the
+ * counts quotable.
+ *
+ * `zero_bytes` is counted, not inferred: 4096 means the page the CPU is
+ * about to execute is literally all zeros.
+ * ===================================================================== */
+static const char *const vm_pw_name[VM_PW_NR] = {
+    "touch_obj", "touch_anon", "fault_obj", "fault_anon",
+    "img", "img_pf", "elf", "cow", "vmfix"};
+
+static uint32_t vm_pw_n[VM_PW_NR], vm_pw_exec[VM_PW_NR];
+static uint32_t vm_pw_xzero[VM_PW_NR], vm_pw_xunv[VM_PW_NR];
+static uint32_t vm_pub_total, vm_pub_exec, vm_pub_xzero, vm_pub_xunv;
+static uint32_t vm_pub_file_xzero, vm_pub_anon_xzero, vm_pub_rows_printed;
+
+/* Zero BYTES in a 4 KiB frame (kernel VA == phys on both arches). */
+static int vm_zero_bytes(uint64_t phys) {
+  const volatile uint64_t *w = (const volatile uint64_t *)phys;
+  int z = 0;
+  for (int i = 0; i < (int)(FRAME_SIZE / 8); i++) {
+    uint64_t v = w[i];
+    if (!v) {
+      z += 8;
+      continue;
+    }
+    for (int b = 0; b < 8; b++)
+      if (((v >> (8 * b)) & 0xFF) == 0)
+        z++;
+  }
+  return z;
+}
+
+void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot,
+                 int priv, int src, uint64_t phys, int verified, int who) {
+  (void)as;
+  if (who < 0 || who >= VM_PW_NR)
+    who = VM_PW_TOUCH_ANON;
+  int is_exec = (prot & VM_PROT_EXEC) != 0;
+  int zero = phys ? vm_zero_bytes(phys) : 0;
+  /* A zero-fill (`src=zero`) is the DEFINED content of anonymous memory --
+     `.bss`, a heap page, a JIT arena page whose bytes the writer will supply.
+     Anything else claiming to be an executable page must have been read from
+     the file and verified; that is the only alarm condition. */
+  int from_file = (src != VM_PUB_ZERO);
+  int alarm = is_exec && from_file && !verified;
+  /* Every executable page said to come from a file is printed (that is the
+     row set the ladder needs); zero-fill exec pages are legal and sampled. */
+  int emit = alarm || (is_exec && from_file) || (vm_pw_n[who] <= 6) ||
+             ((vm_pub_total % 1024) == 0);
+
+  vm_pub_total++;
+  vm_pw_n[who]++;
+  if (is_exec) {
+    vm_pub_exec++;
+    vm_pw_exec[who]++;
+    if (zero == (int)FRAME_SIZE) {
+      vm_pw_xzero[who]++;
+      if (from_file) {
+        vm_pub_xzero++;
+        vm_pub_file_xzero++;
+      } else {
+        vm_pub_anon_xzero++;
+      }
+    }
+    if (from_file && !verified) {
+      vm_pub_xunv++;
+      vm_pw_xunv[who]++;
+    }
+  }
+
+  /* The tripwire rows are never sampled — every occurrence is printed. */
+  if (emit) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, alarm ? "[PUB!] who=" : "[PUB] who=");
+    kl_s(&kl, vm_pw_name[who]);
+    kl_s(&kl, " va=");
+    kl_hex(&kl, (unsigned long)va);
+    kl_s(&kl, " off=");
+    kl_hex(&kl, (unsigned long)off);
+    kl_s(&kl, " prot=");
+    if (prot & VM_PROT_READ)
+      kl_c(&kl, 'R');
+    if (prot & VM_PROT_WRITE)
+      kl_c(&kl, 'W');
+    if (prot & VM_PROT_EXEC)
+      kl_c(&kl, 'X');
+    if (!(prot & (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC)))
+      kl_c(&kl, '-');
+    kl_s(&kl, priv ? " priv=1" : " priv=0");
+    kl_s(&kl, " src=");
+    kl_s(&kl, src == VM_PUB_FILE ? "file"
+              : src == VM_PUB_ZERO ? "zero"
+              : src == VM_PUB_CACHE ? "cache" : "copy");
+    kl_s(&kl, " zero=");
+    kl_i(&kl, zero);
+    kl_s(&kl, verified ? " ver=1" : " ver=0");
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    vm_pub_rows_printed++;
+  }
+
+  if ((vm_pub_total % 4096) == 0) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[PUBS] n=");
+    kl_i(&kl, (long)vm_pub_total);
+    kl_s(&kl, " exec=");
+    kl_i(&kl, (long)vm_pub_exec);
+    kl_s(&kl, " xzero=");
+    kl_i(&kl, (long)vm_pub_xzero);
+    kl_s(&kl, " file_xzero=");
+    kl_i(&kl, (long)vm_pub_file_xzero);
+    kl_s(&kl, " anon_xzero=");
+    kl_i(&kl, (long)vm_pub_anon_xzero);
+    kl_s(&kl, " xunv=");
+    kl_i(&kl, (long)vm_pub_xunv);
+    for (int i = 0; i < VM_PW_NR; i++) {
+      if (!vm_pw_xzero[i] && !vm_pw_xunv[i])
+        continue;
+      kl_s(&kl, " | ");
+      kl_s(&kl, vm_pw_name[i]);
+      kl_s(&kl, " xzero=");
+      kl_i(&kl, (long)vm_pw_xzero[i]);
+      kl_s(&kl, " xunv=");
+      kl_i(&kl, (long)vm_pw_xunv[i]);
+    }
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+}
+
+/* M6/L63: read one executable page from the object's BACKING FILE into
+ * `dst` and verify it, returning 0 only for bytes that two independent
+ * reads agree on (and, for a FAT16 DSO, that are not all zeros: measured
+ * 0 of 6 296 all-zero pages in UnityPlayer.so's text, so zeros there are
+ * the device failing to deliver, not the file).  `*zero_out` reports the
+ * all-zero case for the caller's row.
+ *
+ * This is L60's gate, lifted out of the COW branch so that EVERY exec
+ * publish can use it — the shared branch, the fault path and vm_touch's
+ * read-touch alike.  The caller passes a frame it owns; on success that
+ * frame holds the page.  No lock held (it reads the disk / the network). */
+static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
+                               int *zero_out) {
+  if (zero_out)
+    *zero_out = 0;
+  if (!o || !dst)
+    return -EIO;
+
+  uint64_t f[3] = {0, 0, 0};
+  int n[3] = {-1, -1, -1};
+  int got = 0, have = 0, saw_zero = 0;
+
+  for (int i = 0; i < 3 && !have; i++) {
+    f[i] = frame_alloc();
+    if (!f[i])
+      break;
+    if (o->kind == VM_OBJ_NFS) {
+      const struct nfs_mount *m = nfs_mount_at((int)o->nfs_mount_idx);
+      struct nfs_fh fh;
+      fh.len = o->nfs_fh_len;
+      if (!m || fh.len == 0 || fh.len > NFS_FH_MAX)
+        break;
+      for (uint32_t k = 0; k < fh.len; k++)
+        fh.data[k] = o->nfs_fh[k];
+      n[i] = nfs_read_file(m, &fh, (uint32_t)off, (void *)f[i], FRAME_SIZE);
+    } else {
+      if (!o->file_start_cluster)
+        break;
+      n[i] = fat16_read_direct_pos(o->file_start_cluster, (uint32_t)o->size,
+                                   f[i], FRAME_SIZE, (uint32_t)off);
+    }
+    got = i + 1;
+    if (n[i] != (int)FRAME_SIZE)
+      continue;
+    for (int j = 0; j < i; j++) {
+      if (n[j] != (int)FRAME_SIZE || !vm_page_eq(f[j], f[i]))
+        continue;
+      if (vm_page_zero(f[i])) {
+        /* Agreement on zeros is the device failing to deliver, not a page:
+           no executable page of a real DSO is all zeros.  (A native IMAGE
+           is different -- 107 zero pages in DESKTOP.BIN -- which is why its
+           path tests agreement only.) */
+        saw_zero = 1;
+        continue;
+      }
+      vm_frame_copy(dst, f[i], FRAME_SIZE);
+      have = 1;
+      break;
+    }
+  }
+
+  /* All-zero answers: prefer ANY non-zero page over an all-zero one, with
+     a short back-off so a transient post-reset state can clear.  A
+     wrong-but-nonzero page is caught by the next reader; an all-zero
+     executable page is a guaranteed crash. */
+  if (!have && saw_zero && f[0]) {
+    extern uint64_t timer_get_ms(void);
+    for (int k = 0; k < 3 && !have; k++) {
+      uint64_t t0 = timer_get_ms();
+      while (timer_get_ms() - t0 < 10)
+        __asm__ volatile("pause");
+      if (o->kind == VM_OBJ_NFS) {
+        const struct nfs_mount *m = nfs_mount_at((int)o->nfs_mount_idx);
+        struct nfs_fh fh;
+        fh.len = o->nfs_fh_len;
+        if (!m || fh.len == 0 || fh.len > NFS_FH_MAX)
+          break;
+        for (uint32_t q = 0; q < fh.len; q++)
+          fh.data[q] = o->nfs_fh[q];
+        n[0] = nfs_read_file(m, &fh, (uint32_t)off, (void *)f[0], FRAME_SIZE);
+      } else {
+        n[0] = fat16_read_direct_pos(o->file_start_cluster, (uint32_t)o->size,
+                                     f[0], FRAME_SIZE, (uint32_t)off);
+      }
+      if (n[0] == (int)FRAME_SIZE && !vm_page_zero(f[0])) {
+        vm_frame_copy(dst, f[0], FRAME_SIZE);
+        have = 1;
+      }
+    }
+  }
+
+  static int txt_n, txt_bad;
+  txt_n++;
+  if (!have) {
+    txt_bad++;
+    if (txt_bad <= 8) {
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, saw_zero ? "[TXT] ZERO off=" : "[TXT] UNVERIFIED off=");
+      kl_hex(&kl, (unsigned long)off);
+      kl_s(&kl, " reads=");
+      kl_i(&kl, got);
+      kl_s(&kl, " n0=");
+      kl_i(&kl, n[0]);
+      kl_s(&kl, " -> not published\n");
+      kl_emit(&kl);
+    }
+    if (zero_out)
+      *zero_out = saw_zero;
+  } else if ((txt_n % 512) == 0) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[TXT] n=");
+    kl_i(&kl, txt_n);
+    kl_s(&kl, " bad=");
+    kl_i(&kl, txt_bad);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  for (int i = 0; i < 3; i++)
+    if (f[i])
+      frame_free(f[i]);
+  return have ? 0 : -EIO;
 }
 
 /* Fill-and-map one page of a VM_OBJ_FILE-backed region.  MUST be called
@@ -955,7 +1249,7 @@ static int vm_cow_page_locked(struct addr_space *as, struct vm_region *r,
  * Returns 0 (mapped, or a peer already mapped it), -ENOMEM, -EIO,
  * -EFAULT (region gone / no longer file-backed), -ESRCH (AS torn down). */
 static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
-                                   int cow) {
+                                   int cow, int who) {
   struct vm_object *o = 0;
   uint64_t off = 0;
   uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
@@ -969,6 +1263,7 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   o = r->obj;
   off = (a - r->base) + r->obj_off;
   int is_exec = (r->prot & VM_PROT_EXEC) != 0;
+  int pub_priv = (r->flags & VM_MAP_PRIVATE) != 0; /* for the row */
   vm_object_ref_locked(o); /* hold it across the unlocked disk read */
   spinlock_release_irqrestore(&vm_lock, fl);
 
@@ -979,134 +1274,68 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
     return -EIO;
   }
 
+  /* M6/L63: AN EXECUTABLE PAGE MUST BE READ, NOT ASSUMED -- AND IT MUST BE
+   * VERIFIED ON EVERY PUBLISH PATH, NOT ONLY THE COW ONE.
+   *
+   * L60 put the two-read gate inside `if (cow)`.  L62 §48.3 then found the
+   * hole: vm_touch() computed `cow = write && PRIVATE`, so a READ-touch of a
+   * private executable text page took the shared branch and published the
+   * page-cache frame with no gate at all.  That is the only publisher that
+   * can install an unverified exec page, and the soak's zero page at
+   * 0x9AD000 is what it looks like from the outside.
+   *
+   * The rule now applies to every exec page this function publishes:
+   *   - private (the DSO text case): a private frame is required anyway
+   *     (the page must not be recycled under executing code), and the gate
+   *     fills it from the file;
+   *   - shared: the gate verifies the object's frame; if it agrees with the
+   *     file the shared frame is kept (no sharing lost), if it does not, the
+   *     verified private copy is published instead of executing zeros.
+   * A gate failure is -EIO: an I/O error at the faulting instruction, never
+   * a zero page.
+   *
+   * The verification itself: two independent reads that agree AND are not
+   * all-zero are the page (all-zero is never a DSO text page: measured 0 of
+   * 6 296 in UnityPlayer.so); a disagreement buys a third read; a short read
+   * is never zero-extended into code.  Cost: one extra 4 KiB read per
+   * executable page (UnityPlayer's text is 24.7 MiB of a 1.3 GiB load). */
+  int exec_backed = is_exec &&
+                    ((o->kind == VM_OBJ_FILE && o->file_start_cluster) ||
+                     o->kind == VM_OBJ_NFS);
   uint64_t priv = 0;
-  if (cow) {
+  int verified = 0;
+  int verify_zero = 0;
+  if (cow || exec_backed) {
     priv = frame_alloc_zeroed();
     if (!priv) {
       vm_object_unref(o);
       return -ENOMEM;
     }
     vm_frame_copy(priv, src, FRAME_SIZE);
-    /* M6/L60: AN EXECUTABLE PAGE MUST BE READ, NOT ASSUMED.
-     *
-     * §46.3 closed one hole in this rule ("a short read is not a short page"),
-     * and the L60 ladder found the next one: the faulting page is materialised
-     * for the first time at the instant the block layer wedges (`[BLKQ] stall
-     * ... CSTS=0` -> `controller reset #1`), and what lands in the executable
-     * frame is not the file's page -- the frame reads back all zeros while the
-     * staged DSO (md5-identical to the host export) holds `50 f3 0f 11 44 24 04
-     * e8 ...` at the page head and `50 e8 8a 14 ee 00 48 89` at the thunk the
-     * CPU jumped to.  The frame is still owned (alloc=1) and was never freed
-     * (wf=0), so this is not a lifetime bug: the fill itself published a page
-     * the device never delivered.
-     *
-     * So verify before publishing, for executable pages only (a wrong byte in
-     * data is a wrong value; in code it is a wrong instruction):
-     *   - read the page again into a second frame;
-     *   - two independent reads that agree AND are not all-zero are the page;
-     *   - a disagreement buys a third read and the value that appears twice
-     *     wins (one bad read is then self-healed instead of executed);
-     *   - all-zero is never published: no executable page of a real DSO is
-     *     all zeros (measured 0 of 6,296 pages in UnityPlayer.so), so an
-     *     all-zero answer is the block layer failing to deliver, and the
-     *     honest outcome is an I/O error at the faulting instruction, not
-     *     zeros executed as code.
-     * Cost: one extra 4 KiB read per executable page (UnityPlayer's text is
-     * 24.7 MiB of a 1.3 GiB load). */
-    if (o->kind == VM_OBJ_FILE && o->file_start_cluster && is_exec) {
-      uint64_t f[3] = {0, 0, 0};
-      int n[3] = {-1, -1, -1};
-      int got = 0, have = 0, saw_zero = 0;
-      for (int i = 0; i < 3 && !have; i++) {
-        f[i] = frame_alloc();
-        if (!f[i])
-          break;
-        n[i] = fat16_read_direct_pos(o->file_start_cluster,
-                                     (uint32_t)o->size, f[i], FRAME_SIZE,
-                                     (uint32_t)off);
-        got = i + 1;
-        if (n[i] != (int)FRAME_SIZE)
-          continue;
-        for (int j = 0; j < i; j++) {
-          if (n[j] != (int)FRAME_SIZE || !vm_page_eq(f[j], f[i]))
-            continue;
-          if (vm_page_zero(f[i])) {
-            /* A DSO's executable page is never all zeros (measured: 0 of
-               6 296 pages in UnityPlayer.so), so agreement on zeros is the
-               device failing to deliver, not a page.  A native IMAGE is
-               different -- DESKTOP.BIN has 107 all-zero pages -- which is why
-               that path tests agreement only. */
-            saw_zero = 1;
-            continue;
-          }
-          vm_frame_copy(priv, f[i], FRAME_SIZE);
-          have = 1;
-          break;
-        }
-      }
-      static int txt_n, txt_bad;
-      txt_n++;
-      /* All-zero answers are the block layer failing to deliver (measured:
-         three reads of the same LBA agree on zeros right after a controller
-         reset while the file holds code).  Prefer ANY non-zero page over an
-         all-zero one, with a short back-off so a transient post-reset state
-         can clear: a wrong-but-nonzero page is caught by the next reader,
-         an all-zero executable page is a guaranteed crash. */
-      if (!have && saw_zero) {
-        extern uint64_t timer_get_ms(void);
-        for (int k = 0; k < 3 && !have; k++) {
-          uint64_t t0 = timer_get_ms();
-          while (timer_get_ms() - t0 < 10)
-            __asm__ volatile("pause");
-          n[0] = fat16_read_direct_pos(o->file_start_cluster,
-                                       (uint32_t)o->size, f[0], FRAME_SIZE,
-                                       (uint32_t)off);
-          if (n[0] == (int)FRAME_SIZE && !vm_page_zero(f[0])) {
-            vm_frame_copy(priv, f[0], FRAME_SIZE);
-            have = 1;
-          }
-        }
-      }
-      if (!have) {
-        txt_bad++;
-        if (txt_bad <= 8) {
-          struct kline kl;
-          kl_init(&kl);
-          kl_s(&kl, saw_zero ? "[TXT] ZERO off=0x" : "[TXT] UNVERIFIED off=0x");
-          kl_hex(&kl, (unsigned long)off);
-          kl_s(&kl, " reads=");
-          kl_i(&kl, got);
-          kl_s(&kl, " n0=");
-          kl_i(&kl, n[0]);
-          kl_s(&kl, " -> not published\n");
-          kl_emit(&kl);
-        }
-      }
-      for (int i = 0; i < 3; i++)
-        if (f[i])
-          frame_free(f[i]);
-      if (!have) {
+    if (exec_backed) {
+      if (vm_exec_page_verify(o, off, priv, &verify_zero) != 0) {
         frame_free(priv);
         vm_object_unref(o);
         return -EIO;
       }
+      verified = 1;
       /* tripwire on the page the ladder always dies in (see frame.c) */
       if (off == 0x757000ULL && !frame_watch_count())
         frame_watch(priv);
-      if ((txt_n % 512) == 0) {
-        struct kline kl;
-        kl_init(&kl);
-        kl_s(&kl, "[TXT] n=");
-        kl_i(&kl, txt_n);
-        kl_s(&kl, " bad=");
-        kl_i(&kl, txt_bad);
-        kl_c(&kl, '\n');
-        kl_emit(&kl);
+      if (!cow && vm_page_eq(priv, src)) {
+        /* The cache page IS the file's page: keep the shared frame. */
+        frame_free(priv);
+        priv = 0;
       }
+      /* else: the cache page disagreed with the file.  For a private
+         mapping `priv` is the private copy we want; for a shared one the
+         verified bytes are still the only safe thing to execute. */
     }
   }
   uint64_t phys = priv ? priv : src;
   int rc = 0;
+  int pub_ok = 0;
+  uint16_t pub_prot = 0;
 
   fl = spinlock_acquire_irqsave(&vm_lock);
   struct vm_region *r2 = vm_region_find(as, a);
@@ -1133,6 +1362,8 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
       as->resident_frames++;
       if (as->resident_frames > as->peak_frames)
         as->peak_frames = as->resident_frames;
+      pub_ok = 1;
+      pub_prot = lp;
       if (priv)
         priv = 0; /* the AS owns it now */
       rc = 0;
@@ -1140,6 +1371,9 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   }
   spinlock_release_irqrestore(&vm_lock, fl);
 
+  if (pub_ok)
+    vm_pub_note(as, a, off, pub_prot, pub_priv,
+                verified ? VM_PUB_FILE : VM_PUB_CACHE, phys, verified, who);
   if (priv)
     frame_free(priv); /* only the failed-COW copy can reach here */
   vm_object_unref(o);
@@ -1192,9 +1426,14 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
          mapping materializes the page privately, straight into a copy. */
       if (r->obj && (r->obj->kind == VM_OBJ_FILE ||
                      r->obj->kind == VM_OBJ_NFS)) {
-        int cow = write && (r->flags & VM_MAP_PRIVATE);
+        /* M6/L63: the exec clause is the L62 fix.  A READ-touch of an
+           executable page is a publish for execution just as much as a
+           write is: without `is_exec` here the page took the shared branch
+           and skipped L60's verification entirely (the 0x9AD000 publish). */
+        int is_exec = (r->prot & VM_PROT_EXEC) != 0;
+        int cow = (write || is_exec) && (r->flags & VM_MAP_PRIVATE);
         spinlock_release_irqrestore(&vm_lock, fl);
-        int mrc = vm_file_obj_materialize(as, a, cow);
+        int mrc = vm_file_obj_materialize(as, a, cow, VM_PW_TOUCH_OBJ);
         if (mrc != 0)
           return (mrc == -ENOMEM) ? -2 : -1;
         continue;
@@ -1224,6 +1463,12 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       as->resident_frames++;
       if (as->resident_frames > as->peak_frames)
         as->peak_frames = as->resident_frames;
+      /* M6/L63: provenance.  This branch only ever publishes an ANONYMOUS
+         page (zero-fill) or an anonymous object's page: both are `src=zero`
+         by definition, so an executable page here is a JIT/anon page whose
+         bytes the writer supplies -- legal, counted, never alarmed. */
+      vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot, !shared,
+                  VM_PUB_ZERO, fr, 0, VM_PW_TOUCH_ANON);
     } else if (write && r->obj && (r->flags & VM_MAP_PRIVATE) &&
                vm_page_is_obj_frame_locked(as, r, a, 0)) {
       /* so-vm lane A: a kernel-side write into a MAP_PRIVATE file page must
@@ -1372,6 +1617,83 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
 /* P2.3 (S3, design sections 5.1-5.5): demand faults
  * ------------------------------------------------------------------- */
 
+/* M6/L63: a 32-bit sum of one page, and the image's per-page ground truth.
+ *
+ * Why a checksum at all: §48.2 measured the block layer delivering a FULL
+ * page of zeros and a second read agreeing with it.  Agreement between two
+ * reads is therefore not proof for an image whose file legitimately holds
+ * zero pages (DESKTOP.BIN has 107), which is exactly why that path used
+ * agreement only.  The L63 soak then caught a boot program executing a zero
+ * page that had been published with `zero=4096 ver=1` and #UD'd at
+ * 0x1000010EA0 while RWLAUNCH.BIN holds `55 48 89 e5` there: the device lied
+ * twice, consistently.  The image is ~250 KiB of a 1.3 GiB load, so it is
+ * read ONCE at exec and each page's sum is kept (4 B/page); a later fill
+ * must produce the same sum, which a zero-delivery cannot. */
+static uint32_t vm_page_sum(uint64_t phys) {
+  const volatile uint8_t *p = (const volatile uint8_t *)phys;
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < (int)FRAME_SIZE; i++)
+    h = (h ^ p[i]) * 16777619u;
+  return h;
+}
+
+/* Build the per-page sums for the image this AS is about to run.  One
+ * sequential read of the file (same positional helper the fill uses, but at
+ * exec time, before the device has had a chance to wedge).  Returns 0 or a
+ * negative errno; on failure the fill keeps the agreement gate and says so
+ * in a row, so an absent instrument never reads as a pass. */
+int vm_image_sums_build(struct addr_space *as) {
+  if (!as || as->ver != AS_V2 || !as->img_active || as->img_file_size == 0)
+    return -EINVAL;
+  uint32_t pages = (as->img_file_size + FRAME_SIZE - 1) / FRAME_SIZE;
+  if (pages == 0)
+    return -EINVAL;
+  int run = (int)((pages * 4 + FRAME_SIZE - 1) / FRAME_SIZE);
+  uint64_t sums = frame_alloc_contig(run);
+  if (!sums)
+    return -ENOMEM;
+  uint64_t scr = frame_alloc();
+  if (!scr) {
+    for (int i = 0; i < run; i++)
+      frame_free(sums + (uint64_t)i * FRAME_SIZE);
+    return -ENOMEM;
+  }
+  uint32_t *tab = (uint32_t *)sums;
+  for (uint32_t i = 0; i < pages; i++) {
+    uint32_t pos = i * (uint32_t)FRAME_SIZE;
+    uint32_t want = as->img_file_size - pos;
+    if (want > FRAME_SIZE)
+      want = FRAME_SIZE;
+    int n = fat16_read_direct_pos(as->img_start_cluster, as->img_file_size,
+                                  scr, (int)FRAME_SIZE, pos);
+    if (n != (int)want) {
+      frame_free(scr);
+      for (int k = 0; k < run; k++)
+        frame_free(sums + (uint64_t)k * FRAME_SIZE);
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[TXT] IMG NOSUM pos=");
+      kl_hex(&kl, (unsigned long)pos);
+      kl_s(&kl, " n=");
+      kl_i(&kl, n);
+      kl_s(&kl, " want=");
+      kl_i(&kl, want);
+      kl_s(&kl, " -> agreement gate only\n");
+      kl_emit(&kl);
+      return -EIO;
+    }
+    /* The bytes past EOF in the last page are zeros by definition. */
+    volatile uint8_t *sp = (volatile uint8_t *)scr;
+    for (uint32_t b = want; b < FRAME_SIZE; b++)
+      sp[b] = 0;
+    tab[i] = vm_page_sum(scr);
+  }
+  frame_free(scr);
+  as->img_sums = sums;
+  as->img_sums_pages = pages;
+  return 0;
+}
+
 /* L9 (pagein): materialize one lazy IMAGE page from the image file into
    `as` at page-aligned VA `a`.  Must be called WITHOUT vm_lock held (the
    fat16/virtio completion chain takes proc_lock, which sits ABOVE
@@ -1419,7 +1741,7 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
       zrows++;
       struct kline kl;
       kl_init(&kl);
-      kl_s(&kl, "[ZPFILL] image short read pos=0x");
+      kl_s(&kl, "[ZPFILL] image short read pos=");
       kl_hex(&kl, (unsigned long)pos);
       kl_s(&kl, " n=");
       kl_i(&kl, n);
@@ -1438,18 +1760,65 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
     fp[i] = 0;
   __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
 
-  /* Executable image pages: two independent reads must agree and must not be
-     all zero before the page becomes code.  One bad read is then re-read
-     instead of executed. */
+  /* Executable image pages: two independent reads must agree before the
+     page becomes code.  One bad read is then re-read instead of executed.
+     (Agreement, not non-zero: a native image legitimately has zero pages.)
+     With the load-time sum table (M6/L63) the sum IS the proof, and it also
+     catches a device that answers the same zeros twice. */
+  int img_exec = 0, img_verified = 0;
   {
-    int is_exec = 0;
-    {
-      uint64_t fl0 = spinlock_acquire_irqsave(&vm_lock);
-      struct vm_region *rr = vm_region_find(as, a);
-      is_exec = rr && (rr->prot & VM_PROT_EXEC) && n == (int)FRAME_SIZE &&
-                !past_eof;
-      spinlock_release_irqrestore(&vm_lock, fl0);
+    uint64_t fl0 = spinlock_acquire_irqsave(&vm_lock);
+    struct vm_region *rr = vm_region_find(as, a);
+    img_exec = rr && (rr->prot & VM_PROT_EXEC);
+    spinlock_release_irqrestore(&vm_lock, fl0);
+  }
+  /* M6/L63: a page entirely past the image has no file bytes to verify.  It
+     is legal for data (`.bss`), never for code.  The IMAGE region is sized
+     round_up(img_file_size), so this is a guard, not a live path. */
+  if (past_eof && img_exec) {
+    static int pe_rows;
+    if (pe_rows < 4) {
+      pe_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[TXT] IMG PAST-EOF EXEC pos=");
+      kl_hex(&kl, (unsigned long)pos);
+      kl_s(&kl, " -> not published\n");
+      kl_emit(&kl);
     }
+    frame_free(fr);
+    return -EIO;
+  }
+  if (img_exec && !past_eof) {
+    uint32_t pi = pos / (uint32_t)FRAME_SIZE;
+    if (as->img_sums && pi < as->img_sums_pages) {
+      uint32_t want = vm_page_sum(fr);
+      uint32_t have = ((const uint32_t *)as->img_sums)[pi];
+      if (want != have) {
+        static int srows;
+        if (srows < 8) {
+          srows++;
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[TXT] IMG SUM pos=");
+          kl_hex(&kl, (unsigned long)pos);
+          kl_s(&kl, " got=");
+          kl_hex(&kl, (unsigned long)want);
+          kl_s(&kl, " want=");
+          kl_hex(&kl, (unsigned long)have);
+          kl_s(&kl, " -> not published\n");
+          kl_emit(&kl);
+        }
+        frame_free(fr);
+        return -EIO;
+      }
+      img_verified = 1;
+    }
+  }
+  {
+    int is_exec = img_exec && n == (int)FRAME_SIZE && !past_eof &&
+                  !(as->img_sums && (uint32_t)(pos / FRAME_SIZE) <
+                                         as->img_sums_pages);
     if (is_exec) {
       uint64_t chk[2] = {0, 0};
       int ok = 0;
@@ -1489,7 +1858,7 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
           irows++;
           struct kline kl;
           kl_init(&kl);
-          kl_s(&kl, "[TXT] IMG UNVERIFIED pos=0x");
+          kl_s(&kl, "[TXT] IMG UNVERIFIED pos=");
           kl_hex(&kl, (unsigned long)pos);
           kl_s(&kl, " -> not published\n");
           kl_emit(&kl);
@@ -1497,6 +1866,7 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
         frame_free(fr);
         return -EIO;
       }
+      img_verified = 1;
     }
   }
 
@@ -1528,7 +1898,18 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
   as->resident_frames++;
   if (as->resident_frames > as->peak_frames)
     as->peak_frames = as->resident_frames;
+  int64_t pub_priv = (r2->flags & VM_MAP_PRIVATE) != 0;
+  uint16_t pub_prot = r2->prot;
   spinlock_release_irqrestore(&vm_lock, fl);
+  /* An exec image page that reached the map was either verified by the
+     two-read gate (full page) or IS the file's tail (n == want, the rest
+     defined-zero past EOF).  `verified` is about the bytes, not about the
+     page being non-zero: DESKTOP.BIN has real all-zero pages. */
+  if (img_exec && !past_eof)
+    img_verified = 1;
+  vm_pub_note(as, a, pos, pub_prot, pub_priv,
+              past_eof ? VM_PUB_ZERO : VM_PUB_FILE, fr, img_verified,
+              VM_PW_IMG);
   return 0;
 }
 
@@ -1813,6 +2194,9 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
             kl_emit(&kl);
           }
           rty_n[rslot] = 3; /* remapped once: go on to the budget if it repeats */
+          vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot,
+                      (r->flags & VM_MAP_PRIVATE) != 0, VM_PUB_COPY, nf, 1,
+                      VM_PW_VMFIX);
           spinlock_release_irqrestore(&vm_lock, fl);
           vm_arch_flush_va(as, a);
           return 0;
@@ -1914,7 +2298,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
               (is_text && (r->flags & VM_MAP_PRIVATE));
     uint64_t off_dbg = (a - r->base) + r->obj_off;
     spinlock_release_irqrestore(&vm_lock, fl);
-    int mrc = vm_file_obj_materialize(as, a, cow);
+    int mrc = vm_file_obj_materialize(as, a, cow, VM_PW_FAULT_OBJ);
     if (mrc != 0) {
       if (why)
         *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
@@ -1955,6 +2339,9 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   as->resident_frames++;
   if (as->resident_frames > as->peak_frames)
     as->peak_frames = as->resident_frames;
+  /* M6/L63: anonymous publish (zero-fill or an anonymous object's page). */
+  vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot, !shared,
+              VM_PUB_ZERO, fr, 0, VM_PW_FAULT_ANON);
   vm_fault_resolved(as);
   spinlock_release_irqrestore(&vm_lock, fl);
   return 0; /* the instruction retries (ELR/CR2 untouched) */
@@ -2133,11 +2520,45 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
         break;
       }
       int present = (vm_arch_walk(as, va, 0) == 0);
+      struct vm_region *rp = vm_region_find(as, va);
+      int page_exec = rp && (rp->prot & VM_PROT_EXEC);
       spinlock_release_irqrestore(&vm_lock, fl);
       if (present) {
         st->skipped++;
         st->processed++;
         continue;
+      }
+
+      /* M6/L63: an executable image page is CODE.  The batch path published
+         whatever one coalesced read delivered, with no verification -- the
+         same hole the demand path closed in L60.  Require a second,
+         independent read of that one page to agree with the batch's copy;
+         a disagreement (or a structural tail page) is left to the demand
+         path, which re-reads and verifies it.  Data pages keep the batch. */
+      uint64_t ppos = (page + i) * FRAME_SIZE;
+      if (page_exec) {
+        int vok = 0;
+        uint32_t pi = (uint32_t)(ppos / FRAME_SIZE);
+        if (as->img_sums && pi < as->img_sums_pages) {
+          /* M6/L63: the load-time sum is the witness -- no second read, and
+             a device that answers the same zeros twice cannot pass it. */
+          vok = (vm_page_sum(buf + i * FRAME_SIZE) ==
+                 ((const uint32_t *)as->img_sums)[pi]);
+        } else if (ppos + FRAME_SIZE <= (uint64_t)fsize) {
+          uint64_t chk = frame_alloc();
+          if (chk) {
+            int cn = fat16_read_direct_pos(cluster, fsize, chk, FRAME_SIZE,
+                                           (uint32_t)ppos);
+            vok = (cn == (int)FRAME_SIZE) &&
+                  vm_page_eq(chk, buf + i * FRAME_SIZE);
+            frame_free(chk);
+          }
+        }
+        if (!vok) {
+          st->skipped++;
+          st->processed++;
+          continue; /* demand path re-reads and verifies this page */
+        }
       }
 
       uint64_t fr = frame_alloc();
@@ -2155,6 +2576,8 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
          read -- the loser drops its frame. */
       fl = spinlock_acquire_irqsave(&vm_lock);
       int mapped = 0;
+      uint16_t pub_prot = 0;
+      int pub_priv = 0;
       int alive2 = v2_prefetch_alive_locked(as, epoch, cluster, fsize);
       if (alive2) {
         struct vm_region *r2 = vm_region_find(as, va);
@@ -2166,11 +2589,16 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
             if (as->resident_frames > as->peak_frames)
               as->peak_frames = as->resident_frames;
             mapped = 1;
+            pub_prot = r2->prot;
+            pub_priv = (r2->flags & VM_MAP_PRIVATE) != 0;
           }
         }
       }
       spinlock_release_irqrestore(&vm_lock, fl);
 
+      if (mapped)
+        vm_pub_note(as, va, ppos, pub_prot, pub_priv, VM_PUB_FILE, fr,
+                    page_exec ? 1 : 0, VM_PW_IMG_PF);
       if (!mapped)
         frame_free(fr);
       if (!alive2) {
@@ -3308,6 +3736,20 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   dst->img_active = src->img_active;
   dst->img_file_size = src->img_file_size;
   dst->img_start_cluster = src->img_start_cluster;
+  /* M6/L63: the child shares the image, so it shares the ground truth too
+     (a copy: the two ASs' tables are freed independently). */
+  if (src->img_sums && src->img_sums_pages) {
+    uint32_t run = (src->img_sums_pages * 4 + FRAME_SIZE - 1) / FRAME_SIZE;
+    uint64_t cp = frame_alloc_contig((int)run);
+    if (cp) {
+      const volatile uint8_t *from = (const volatile uint8_t *)src->img_sums;
+      volatile uint8_t *to = (volatile uint8_t *)cp;
+      for (uint32_t i = 0; i < run * FRAME_SIZE; i++)
+        to[i] = from[i];
+      dst->img_sums = cp;
+      dst->img_sums_pages = src->img_sums_pages;
+    }
+  }
 
   /* M6/L38: the child inherits the JIT arena's placement.  The placeholder
      region is copied with the rest of the list, so a child that re-derived

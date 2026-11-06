@@ -502,6 +502,20 @@ uint64_t nfs_obj_page(struct vm_object *o, uint64_t off) {
     frame_free(nf);
     return 0;
   }
+  /* M6/L63: a SHORT read is not a short page.  Only the file's real tail may
+     be shorter than a page; zero-extending anything else published zeros as
+     file content (the §48 shape, and NFS is a network read that can come
+     back truncated).  Refuse: the caller sees -EIO. */
+  int want = (int)FRAME_SIZE;
+  {
+    uint64_t left = (uint64_t)size - idx * (uint64_t)FRAME_SIZE;
+    if (left < (uint64_t)want)
+      want = (int)left;
+  }
+  if (n < want) {
+    frame_free(nf);
+    return 0;
+  }
   volatile uint8_t *p = (volatile uint8_t *)nf;
   for (int i = n; i < (int)FRAME_SIZE; i++)
     p[i] = 0;
