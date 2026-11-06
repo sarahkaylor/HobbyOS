@@ -8855,3 +8855,213 @@ bug and is now precisely located, but fixing it removes one of five sites.
    number can be taken from the game until the first swap happens.
 4. `slots` reached 89/191 at 430 s (§46.9 item 2) with 25 live threads — a
    900 s load still needs the tombstone reaper.
+
+## 49. 2026-11-06 — M6/L63: the zero text page has a name (`vm_touch`'s exec-less `cow`), every publish carries its provenance, and the image path needed a checksum
+
+§48.3 left one question open: `[TXT]` counted 3 584 executable pages and refused
+none, yet `0x9AD000` executed as zeros.  Was the page published by
+`vm_file_obj_materialize` (which would have refused it) or by something else?
+It named the only site that could bypass the gate — `vm_touch()`'s object-file
+branch, `cow = write && MAP_PRIVATE` with no exec clause — and asked for a row
+at publish time instead of another theory.  This lane built that row, and it
+answers the question in two parts: the `vm_touch` branch is real (and is now
+fixed and tested), and the rows then found a **second** publisher on the image
+path that two agreeing reads cannot catch.
+
+### 49.1 The provenance row: one per publish, naming the caller
+
+`vm_pub_note()` (vm.c) is called at every site that installs a page's BYTES
+into a user mapping:
+
+| `who=` | site | source |
+|---|---|---|
+| `touch_obj` | `vm_touch` -> `vm_file_obj_materialize` | file / cache |
+| `fault_obj` | `vm_handle_fault` -> same | file / cache |
+| `touch_anon` | `vm_touch` anonymous branch | zero |
+| `fault_anon` | `vm_handle_fault` anonymous branch | zero |
+| `img` | `v2_image_materialize` (demand + eager first page) | file / zero |
+| `img_pf` | `v2_image_prefetch_run` (batch) | file |
+| `elf` | `elf_loader`'s staged image | file (count-checked) |
+| `cow` | `vm_cow_page_locked` | copy |
+| `vmfix` | the present-but-faulting remap | copy |
+
+Each row is `va, off, prot (R/RW/RX), priv, src (file|zero|cache|copy),
+zero_bytes (counted from the frame, not inferred), ver, who`.  Executable
+pages from `src != zero` are printed unconditionally; everything else is
+sampled (first rows per site, then every 1024th), with a `[PUBS]` total every
+4 096 publishes.  `src=zero` is the DEFINED content of anonymous memory
+(`.bss`, heap, a JIT arena page the writer fills), so it is counted but never
+alarmed — that is the one place a zero page is legal.
+
+### 49.2 The publisher, and the fix
+
+`vm_touch`'s branch now reads:
+
+```c
+int is_exec = (r->prot & VM_PROT_EXEC) != 0;
+int cow = (write || is_exec) && (r->flags & VM_MAP_PRIVATE);
+```
+
+and `vm_file_obj_materialize` no longer puts the gate inside `if (cow)`:
+
+* `vm_exec_page_verify()` is the L60 two-read gate lifted out of the COW
+  branch.  It runs for every exec publish from a file-backed object — private
+  or shared, touch or fault — and fills the published frame from the file.
+  Two agreeing reads that are not all-zero are the page; a disagreement buys
+  a third; a short read is never zero-extended.  Failure is `-EIO`.
+* A private exec mapping always gets a private frame (L59's rule), so the
+  verified bytes cannot be recycled under executing code; a shared one keeps
+  the object's frame when it agrees with the file and publishes the verified
+  copy when it does not.
+* `nfs_obj_page()` no longer zero-extends a short NFS read: only the file's
+  real tail may be shorter than a page.
+
+### 49.3 The second publisher the rows found: the image path
+
+The soak's rows named a page the image path published with
+`zero=4096 ver=1` — verified, because two independent reads agreed — and the
+CPU then executed `0x1000010EA0` while `RWLAUNCH.BIN` holds
+`55 48 89 e5` (`push %rbp; mov %rsp,%rbp`) there.  Agreement is not proof when
+the device can answer the same zeros twice (§48.2 measured exactly that), and
+the image path could not use the DSO rule ("no text page is all zeros")
+because `DESKTOP.BIN` legitimately has 107 zero pages.
+
+So the image now has a witness instead of a second opinion: `v2_map_image`
+reads the file ONCE at exec (`vm_image_sums_build`) and keeps a sum32 per
+page (4 B/page, a contiguous frame run, freed at teardown, copied at fork).
+Every exec image fill — demand, eager first page, and the coalesced prefetch
+batch — must match its page's sum; a mismatch is `[TXT] IMG SUM ... -> not
+published` and `-EIO`.  An exec page entirely past the image is refused; a
+`.bss` tail page stays legal.
+
+### 49.4 The kernel test: a fault injected into the file object
+
+`test_vm_exec_page_eio` (vm_test.c) injects faults into
+`fat16_read_direct_pos()` (`fat16_test_inject`, unit tier only) and asserts
+the mapping gets an I/O error and stays ABSENT:
+
+1. short read -> `vm_touch` = -1, page absent;
+2. full-length zeros (the §48 delivery) -> -1, page absent;
+3. injection cleared -> the same page publishes the FILE's bytes (the gate
+   replaces the poisoned cache frame instead of publishing it);
+4. `vm_handle_fault` (exec=1) refuses the same shape and resolves when the
+   device is healthy;
+5. a fresh address space with a HEALTHY cache still gets a PRIVATE frame —
+   the publisher property itself.  **Negative control:** with the exec clause
+   removed, this assertion fails (`leaf == objfr`, `SHARED`) and the unit tier
+   reports 2 failures; with it, the leaf differs (`private`).
+
+`test_vm_img_page_eio` does the same for the image: build the sums, fill page
+1, unmap, inject a full page of zeros -> `[TXT] IMG SUM pos=0x1000
+got=0x76EFDDC5 want=0x106D33C5 -> not published`, absent; healthy -> bytes
+match `HO_BIGLOAD_30MB`.  Unit tier: **419/0** (was 417; the two new tests).
+
+### 49.5 Lane isolation: one export per worktree
+
+L61 measured a run booting with another lane's 96 432-byte launcher: every
+lane was served from `/srv/nfs/rimworld`, and each harness installs its own
+AD-9 launcher at `<export>/RimWorldLinux`, so a concurrent lane overwrote it
+mid-boot.
+
+`tools/rw/lane.sh` now derives `RW_LANE` (the worktree's dirname) and
+`RW_EXPORT=/srv/nfs/rimworld-<lane>`; `nfs-export.sh` exports that directory
+and REFUSES the shared path unless `RW_ALLOW_SHARED_EXPORT=1`; every harness
+uses `$RW_EXPORT`; and the guest is told which one by `/NFSEXPORT`
+(`src/user_include/rwnfs_lane.h`, read by rwlaunch and the NFS probes).  The
+serial log carries the proof: `[RW] rwlaunch: export
+/srv/nfs/rimworld-l64-zeropage mount 10.0.2.2:/srv/nfs/rimworld-l64-zeropage
+-> /NFS rc=0`.
+
+Two lanes mounted concurrently (loopback, TCP for the host client; the guest
+uses UDP):
+
+| lane | export | `LANE.TXT` | `RimWorldLinux` sha256 |
+|---|---|---|---|
+| l64-zeropage | `/srv/nfs/rimworld-l64-zeropage` | `lane=l64-zeropage ...` | `5b22a833...c017d68` |
+| l63-proof | `/srv/nfs/rimworld-l63-proof` | `lane=l63-proof ...` | `734e3221...c557b58` |
+
+With both mounted, lane B replaced its own `RimWorldLinux` (the L61 defect
+replayed): B's mount changed to `3469565e...d3682d`, **A's stayed
+`5b22a833...c017d68`**.  The `.l61` private-alias workaround is gone: with a
+per-lane export `/NFS/RimWorldLinux` is already this lane's binary.
+
+### 49.6 The soak
+
+`tools/rw/run-rimworld-desktop.sh --run-timeout 900` on this tree, counted by
+`tools/rw/l63-soak-check.py`: every `[PUB]` row is one publish, and the verdict
+columns are the ones §48.8 item 1 asked for.  Two runs are reported because
+they sample two different halves of the mechanism: run 3 (the final tree) never
+hit the block wedge, and run 2 (same code, before a cosmetic `off=` fix) hit it
+and is where the gate's refusal is visible.
+
+| measure | L62 (430 s) | L63 run 3 | L63 run 2 (wedge) |
+|---|---|---|---|
+| guest time in the window | 430 s (VM stop) | **902 s** (104 running shots) | 903 s (103 shots) |
+| `[PUB]` rows printed / alarm rows | n/a | 4 450 / **0** | 4 386 / **0** |
+| zero-byte exec publishes, file said non-zero | (unmeasurable) | **0** | **0** |
+| unverified exec publishes | (unmeasurable) | **0** | **0** |
+| `[UDX]` rows | 1 | **0** | **0** |
+| `#UD` in UnityPlayer text | 1 | **0** | **0** |
+| `[TXT]` exec pages verified (bad) | 3 584 (0) | 3 584 (0) | 3 584 (0) |
+| gate refusals (`... -> not published`) | 0 | 0 | **1** at `off=0x757000` |
+| `[BLKQ] stall` / `controller reset` | 1 / 1 | 0 / 0 | 1 / 1 |
+| `[SIGX]` delivered | 0 | 0 | 0 |
+| non-`#PF` user exceptions | 1 (vector 6) | 0 | 0 |
+| VM stops (KVM) | 1 | 0 | 1 (`fxsave`, delivery) |
+| NFS bytes | 277 457 914 | 277 583 480 (264.72 MiB) | 277 467 064 |
+| `[XSW]` presents | 0 | 0 | 0 |
+| resident peak | — | 1 353 MiB | 1 137 MiB |
+
+The provenance table from run 3 (rows printed / exec / exec-zero where the file
+says non-zero / exec-zero the file really holds / unverified / anon-zero /
+alarms):
+
+```text
+caller         rows   exec exec0bad exec0ok  unver  anon0  alarm
+cow               7      0        0       0      0      0      0
+elf              53     51        0       0      0      0      0
+fault_anon      345      1        0       0      0      1      0
+fault_obj      3978   3963        0       0      0      0      0
+img              48     48        0       9      0      0      0
+touch_anon       14      0        0       0      0      0      0
+touch_obj         5      2        0       0      0      0      0
+```
+
+`exec0ok=9` is the boot image's own all-zero pages (the sum table confirms
+them against the file); `anon0` is `.bss`/stack, which is legal by definition.
+Every DSO text page in the load (`fault_obj`, 3 963 publishes) was published
+`src=file ver=1`, i.e. from a verified read — zero of them from the cache.
+
+**Run 2 is the one that reproduces §48's tuple**, and it ends with the right
+outcome instead of an executed zero page:
+
+```text
+[BLKSLOW] pending cid=44171 ... ms=251
+[BLKQ] stall cid=44171 ... CSTS=0x0
+[BLKQ] controller reset #1
+[TXT] ZERO off=0x757000 reads=3 n0=4096 -> not published
+[KERNEL] pid=4 (/NFS/RimWorldLinux) memory fault VA=0x108228B570
+         ... in=PROT region=0x1082267000+0x17A4000 prot=5 kind=7 -> killed
+```
+
+`0x108228B570` is base+**0x757570**, the §47 thunk page — the page the L60 and
+L62 ladders died executing.  This time the gate read it three times, got a full
+page of zeros each time, refused to publish it, and the process took a real
+protection fault instead of executing zeros.  A guest `#UD` no longer happens
+on that path at all; what remains is the **FXSAVE delivery stop** (§48.4): the
+SIGSEGV is being delivered when `arch_fpu_save_to` reaches an address KVM must
+emulate.  That is the other lane's fix.  **When it lands, this soak must be
+re-run on the merged tree** — the page-in verdict stands on this tree, but a
+900 s window that contains a fault will only complete end-to-end once delivery
+is safe.
+
+### 49.7 What is left
+
+1. **The FXSAVE stop** (other lane): a guest fault still ends the whole VM, so
+   every long soak ends where the first fault lands.  On this tree that is now
+   the *refusal* of the zero page, not the zero page itself.
+2. **The block layer still wedges** (one `[BLKSLOW]` + `[BLKQ]` stall + reset
+   in run 2; none in run 3) — the page-in gates make it survivable, not
+   absent, and a wedge is still a 250 ms stall every time it happens.
+3. **No presents** (`[XSW] n=0`): the game still never swaps, so the fill-rate
+   wall of §48.5 is unchanged.

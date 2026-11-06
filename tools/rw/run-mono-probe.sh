@@ -11,6 +11,8 @@
 # Usage: tools/rw/run-mono-probe.sh [--timeout S]
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 cd "$ROOT" || exit 2
 TIMEOUT_S=300
 [ "${1:-}" = "--timeout" ] && TIMEOUT_S="$2"
@@ -58,14 +60,14 @@ stage "$M/usr/bin/mono-sgen" ::/MONO.EXE
 # player's own copies at the path the dllmap names.
 for d in ::/usr ::/usr/lib; do mkd "$d"; done
 for so in libmono-native.so libMonoPosixHelper.so libmonobdwgc-2.0.so; do
-  stage "/srv/nfs/rimworld/RimWorldLinux_Data/MonoBleedingEdge/x86_64/$so" "::/usr/lib/$so"
+  stage "$RW_EXPORT/RimWorldLinux_Data/MonoBleedingEdge/x86_64/$so" "::/usr/lib/$so"
 done
 for f in "$M/usr/lib/mono/4.5"/*.dll; do stage "$f" "::/usr/lib/mono/4.5/${f##*/}"; done
 [ -f "$M/etc/mono/config" ] && stage "$M/etc/mono/config" ::/etc/mono/config
 for f in "$M"/etc/mono/4.5/*.config; do [ -f "$f" ] && stage "$f" "::/etc/mono/4.5/${f##*/}"; done
 stage "$OUT/probe.exe" ::/PROBE.EXE
 for a in UnityEngine.CoreModule.dll Assembly-CSharp.dll; do
-  stage "/srv/nfs/rimworld/RimWorldLinux_Data/Managed/$a" "::/RWMANAGED/$a"
+  stage "$RW_EXPORT/RimWorldLinux_Data/Managed/$a" "::/RWMANAGED/$a"
 done
 printf 'MONO.EXE /PROBE.EXE\n' >"$OUT/WAVE.CFG"
 stage "$OUT/WAVE.CFG" ::/WAVE.CFG

@@ -21,16 +21,16 @@
 #      (src/user/xcompat/stage.sh) + libGL.so.1/libGLX.so.0
 #      (tools/mesa/stage.sh); /RWDSO: the game's own DSOs (AD-10);
 #      /RWMANAGED: the 102 managed assemblies (M5c); installs the AD-9
-#      launcher as /srv/nfs/rimworld/RimWorldLinux and RWLAUNCH.BIN in the
-#      image root;
+#      launcher as $RW_EXPORT/RimWorldLinux, stages /NFSEXPORT (this run's
+#      export path) and RWLAUNCH.BIN in the image root;
 #   4. boots with QMP and drives tools/rw/rw_desktop_drive.py: wait for the
 #      desktop's [MENU] dump, F1/End/Up*N/Enter onto RWLAUNCH.BIN, screendump
 #      the desktop while the game runs, print the raw ladder;
 #   5. extracts Player.log and the screenshots (ppm + png) for evidence.
 #
 # Nothing from the game directory enters the tree.  The data tree is read over
-# NFS from /srv/nfs/rimworld (tools/rw/nfs-export.sh sync); the DSOs and the
-# managed assemblies are staged on disk.img.
+# NFS from $RW_EXPORT (tools/rw/nfs-export.sh sync, one export per worktree);
+# the DSOs and the managed assemblies are staged on disk.img.
 #
 # Usage:
 #   tools/rw/run-rimworld-desktop.sh [--timeout S] [--run-timeout S]
@@ -41,6 +41,11 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 2
+# M6/L63: this worktree's own NFS export (/srv/nfs/rimworld-<lane>).  Two
+# lanes used to share one directory and overwrite each other's launcher
+# mid-boot; the per-lane export and the /NFSEXPORT marker end that.
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 
 TIMEOUT_S=420        # boot deadline
 RUN_TIMEOUT_S=300    # time the game is allowed to run after launch
@@ -183,8 +188,8 @@ if [ "${RW_SKIP_EXPORT:-0}" != 1 ]; then
     echo "EXPORT FAILED"; tail -20 "$OUT/export.log"; exit 2; }
   tail -3 "$OUT/export.log"
 fi
-[ -x /srv/nfs/rimworld/RimWorldLinux ] || {
-  echo "ENVIRONMENT: /srv/nfs/rimworld/RimWorldLinux missing"; exit 2; }
+[ -x "$RW_EXPORT/RimWorldLinux" ] || {
+  echo "ENVIRONMENT: $RW_EXPORT/RimWorldLinux missing"; exit 2; }
 
 echo "== stage: AD-10 DSOs locally under /RWDSO"
 mmd -i "$IMG" ::/RWDSO >/dev/null 2>&1 || true
@@ -194,7 +199,7 @@ for rel in UnityPlayer.so \
            RimWorldLinux_Data/MonoBleedingEdge/x86_64/libMonoPosixHelper.so \
            RimWorldLinux_Data/Plugins/lib_burst_generated.so \
            RimWorldLinux_Data/Plugins/libsteam_api.so; do
-  src="/srv/nfs/rimworld/$rel"
+  src="$RW_EXPORT/$rel"
   # L61: a probe build of the runtime (a byte-patched assert site) is staged
   # from RW_MONO_SO instead of the export, so the shared export is never
   # modified and the probe is named in the run's own output.
@@ -217,7 +222,7 @@ mdir -i "$IMG" ::/RWDSO | sed 's/^/  /'
 # and the AD-10 redirect only sees names that reach our dlopen).
 mmd -i "$IMG" ::/usr ::/usr/lib >/dev/null 2>&1 || true
 for so in libmono-native.so libMonoPosixHelper.so; do
-  stage "/srv/nfs/rimworld/RimWorldLinux_Data/MonoBleedingEdge/x86_64/$so" "::/usr/lib/$so"
+  stage "$RW_EXPORT/RimWorldLinux_Data/MonoBleedingEdge/x86_64/$so" "::/usr/lib/$so"
 done
 echo "  staged: /usr/lib/libmono-native.so (System.Native dllmap target)"
 
@@ -233,11 +238,11 @@ stage "$MZ" ::/lib/x86_64-linux-gnu/libz.so.1
 
 echo "== stage: M5c Managed/ locally under /RWMANAGED"
 mmd -i "$IMG" ::/RWMANAGED >/dev/null 2>&1 || true
-HOSTN=$(find /srv/nfs/rimworld/RimWorldLinux_Data/Managed -maxdepth 1 -type f | wc -l)
-HOSTB=$(find /srv/nfs/rimworld/RimWorldLinux_Data/Managed -maxdepth 1 -type f -printf '%s\n' \
+HOSTN=$(find "$RW_EXPORT"/RimWorldLinux_Data/Managed -maxdepth 1 -type f | wc -l)
+HOSTB=$(find "$RW_EXPORT"/RimWorldLinux_Data/Managed -maxdepth 1 -type f -printf '%s\n' \
         | awk '{s+=$1} END{print s+0}')
 [ "$HOSTN" -gt 0 ] || { echo "ENVIRONMENT: no Managed/ assemblies in the export"; exit 2; }
-mcopy -o -i "$IMG" /srv/nfs/rimworld/RimWorldLinux_Data/Managed/* ::/RWMANAGED/ || {
+mcopy -o -i "$IMG" "$RW_EXPORT"/RimWorldLinux_Data/Managed/* ::/RWMANAGED/ || {
   echo "mcopy of Managed/ failed"; exit 2; }
 GUESTN=$(mdir -b -i "$IMG" ::/RWMANAGED | wc -l)
 GUESTB=$(mdir -i "$IMG" ::/RWMANAGED | awk '
@@ -251,15 +256,21 @@ echo "  staged: ${GUESTN:-0}/$HOSTN assemblies, ${GUESTB:-0}/$HOSTB bytes"
 
 # AD-9: install the launcher AS the game's executable, in the game dir; the
 # 14,720-byte ET_EXEC stub is preserved beside it as RimWorldLinux.orig.
-if [ "$(stat -c %s /srv/nfs/rimworld/RimWorldLinux)" = 14720 ]; then
-  cp -f /srv/nfs/rimworld/RimWorldLinux /srv/nfs/rimworld/RimWorldLinux.orig
+if [ "$(stat -c %s "$RW_EXPORT/RimWorldLinux")" = 14720 ]; then
+  cp -f "$RW_EXPORT/RimWorldLinux" "$RW_EXPORT/RimWorldLinux.orig"
 fi
-cp -f "$OUT/RimWorldLinux.ad9" /srv/nfs/rimworld/RimWorldLinux
-# L61: the export is shared with other lanes, whose harnesses install their own
-# launcher over /NFS/RimWorldLinux.  This private name is what rwlaunch prefers,
-# so a concurrent lane cannot swap the binary under this run's guest.
-cp -f "$OUT/RimWorldLinux.ad9" /srv/nfs/rimworld/RimWorldLinux.l61
-echo "  installed: $(stat -c '%s bytes' /srv/nfs/rimworld/RimWorldLinux) -> RimWorldLinux (+ RimWorldLinux.l61)"
+rm -f "$RW_EXPORT/RimWorldLinux" # break any stale hardlink, then install
+cp -f "$OUT/RimWorldLinux.ad9" "$RW_EXPORT/RimWorldLinux"
+# L63: no private alias is needed any more.  The export itself belongs to this
+# worktree, so /NFS/RimWorldLinux is already this lane's binary (the .l61
+# alias existed only because lanes shared one directory).
+echo "  installed: $(stat -c '%s bytes' "$RW_EXPORT/RimWorldLinux") -> $RW_EXPORT/RimWorldLinux (lane $RW_LANE)"
+# L63: tell the guest WHICH export this run owns.  rwlaunch prefixes this with
+# the slirp host alias and mounts exactly that path
+# (src/user_include/rwnfs_lane.h), so two lanes boot into two directories.
+printf '%s\n' "$RW_EXPORT" >"$OUT/nfsexport"
+stage "$OUT/nfsexport" ::/NFSEXPORT
+echo "  staged: /NFSEXPORT -> $RW_EXPORT (lane $RW_LANE)"
 
 # The desktop's Apps menu launches root entries by name; this is the launcher.
 stage "$OUT/rwlaunch.bin" ::/RWLAUNCH.BIN
