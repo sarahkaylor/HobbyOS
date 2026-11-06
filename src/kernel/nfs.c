@@ -18,6 +18,7 @@
 
 #include "nfs.h"
 #include "net.h"
+#include "kline.h"
 
 struct socket_pcb;      /* net.h's PCB; nfs.h only carries a pointer to it */
 
@@ -292,6 +293,8 @@ int nfs_route(const char *abs_path, int *idx, const char **rel) {
  * BODY is copied into a buffer the caller owns, so its lifetime is the
  * caller's, not "until the next RPC anywhere in the system". */
 #define NFS_RPC_BUF 2048
+/* L57: READ RPCs that needed the one retry (see nfs_read_serial). */
+volatile uint32_t nfs_read_retries;
 static uint32_t next_xid = 0x484F424F;      /* "HOBO" + bumps per call */
 
 /* Send one already-built RPC on `pcb` and read its reply into `rbuf`.  On
@@ -338,7 +341,24 @@ static int rpc_call(uint32_t ip, uint16_t port, uint32_t prog, uint32_t vers,
   for (int attempt = 0; attempt < NFS_RPC_TRIES; attempt++) {
     uint64_t t0 = timer_get_us();
     struct socket_pcb *pcb = net_socket_create(IP_PROTO_UDP);
-    if (!pcb) return -1;
+    if (!pcb) {
+      extern int net_sockets_in_use(void);
+      static int nosock2_rows;
+      if (nosock2_rows < 16) {
+        nosock2_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[NFSNOSOCK] site=rpc_call inuse=");
+        kl_i(&kl, (long)net_sockets_in_use());
+        kl_s(&kl, " max=");
+        kl_i(&kl, (long)MAX_SOCKETS);
+        kl_s(&kl, " proc=");
+        kl_i(&kl, (long)proc);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+      return -1;
+    }
     if (net_socket_connect(pcb, ip, port) != 0) {
       net_socket_close(pcb);
       return -1;
@@ -716,7 +736,26 @@ static struct socket_pcb *rd_sock_get(struct nfs_mount *m, int *temp) {
   /* Another thread owns the cached socket: use a temporary one so the two
    * never interleave xids on one queue. */
   struct socket_pcb *p = net_socket_create(IP_PROTO_UDP);
-  if (!p) return 0;
+  if (!p) {
+    /* L57: MAX_SOCKETS (16) with one socket per concurrent reader is a real
+     * ceiling, and hitting it used to be completely silent: the READ returned
+     * -1, file_read mapped that to EBADF and Mono said "Invalid handle to
+     * path".  Name it. */
+    extern int net_sockets_in_use(void);
+    static int nosock_rows;
+    if (nosock_rows < 16) {
+      nosock_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[NFSNOSOCK] site=rd_sock_get inuse=");
+      kl_i(&kl, (long)net_sockets_in_use());
+      kl_s(&kl, " max=");
+      kl_i(&kl, (long)MAX_SOCKETS);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+    return 0;
+  }
   if (net_socket_connect(p, m->server_ip, m->nfs_port) != 0) {
     net_socket_close(p);
     return 0;
@@ -770,10 +809,47 @@ static int nfs_read_serial(const struct nfs_mount *m, const struct nfs_fh *fh,
     int blen = 0;
     int rc = pcb ? rpc_xfer(pcb, xid, cbuf, n, rbuf, sizeof rbuf, &body, &blen) : -1;
     uint64_t wait = timer_get_us() - t0;
+    /* L57: ONE retry on a fresh socket.  A single lost datagram -- the
+     * duplicate-ephemeral-port window in net_socket_create, a two-consumer
+     * RX ring, or slirp dropping one -- must not become a failed read():
+     * the caller saw -1, trap.c turned it into EBADF and Mono reported
+     * "Invalid handle to path" for a file that was never closed.  A READ is
+     * idempotent, so resending the same xid is safe. */
+    if (rc != 0) {
+      if (pcb) rd_sock_put(mw, pcb, temp, 1);
+      temp = 0;
+      pcb = rd_sock_get(mw, &temp);
+      if (pcb) {
+        uint64_t t1 = timer_get_us();
+        rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, sizeof rbuf, &body, &blen);
+        wait += timer_get_us() - t1;
+        nfs_read_retries++;
+      }
+    }
     if (rc != 0) {
       /* A timeout may leave a late reply in this socket's queue; a stale
        * xid is skipped by the next rpc_xfer, so keep the socket unless the
        * send side itself is broken. */
+      /* L57: one row per failed READ RPC — the wait says timeout vs bad
+       * reply, and `temp` says whether the cached socket was unavailable. */
+      static int rd_fail_rows;
+      if (rd_fail_rows < 24) {
+        rd_fail_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[NFSRD] fail off=");
+        kl_i(&kl, (long)(offset + done));
+        kl_s(&kl, " want=");
+        kl_i(&kl, (long)want);
+        kl_s(&kl, " wait_us=");
+        kl_i(&kl, (long)wait);
+        kl_s(&kl, " temp=");
+        kl_i(&kl, temp);
+        kl_s(&kl, " done=");
+        kl_i(&kl, (long)done);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
       broken = (rc != 0 && wait >= (uint64_t)NFS_RPC_TIMEOUT_MS);
       if (pcb) rd_sock_put(mw, pcb, temp, broken);
       return done ? (int)done : -1;
@@ -998,7 +1074,8 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
         }
         uart_puts("\n");
       }
-      if (contig == offset) { rc = -1; goto out; }
+      /* L57: do not fail read() on one lost reply.  Break out and finish the
+       * range serially, which retries each block on a fresh socket. */
       break;                            /* finish serially from contig */
     }
     uint32_t rxid = rd_be32(rbuf);
@@ -1290,6 +1367,34 @@ static int dir_cache_fill(const struct nfs_mount *m, int midx, const char *rel) 
   }
 
   dcache.valid = 1;
+  /* L57: the entry count per listing, bounded to 24 rows.  A directory whose
+   * count is short of the host's drops a whole def family with no error, so
+   * the number must be in the log rather than inferred from missing defs. */
+  {
+    static int ls_rows;
+    if (ls_rows < 40) {
+      ls_rows++;
+      int ndir = 0;
+      for (int i = 0; i < dcache.count; i++)
+        if (dcache.attrs[i] & 0x10) ndir++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[NFSLS] n=");
+      kl_i(&kl, dcache.count);
+      kl_s(&kl, " dirs=");
+      kl_i(&kl, ndir);
+      /* A directory the READDIRPLUS reply left without post-op attributes is
+       * cached as a FILE (attrs 0), and a recursive enumerator then never
+       * descends into it -- a whole def subtree disappears with no error.
+       * dirs= is the host's directory count if the reply carried attrs. */
+      kl_s(&kl, " complete=");
+      kl_i(&kl, dcache.complete);
+      kl_s(&kl, " rel=");
+      kl_s(&kl, rel);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   return 0;
 }
 
