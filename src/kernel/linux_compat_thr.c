@@ -2130,7 +2130,26 @@ static int l_thr_getcpu(struct process *p, struct trap_frame *tf) {
  * at `movaps %xmm0,0x30(%rsp)` with Vector 13, and Unity's own crash handler
  * died the same way.  So the frame starts 8 bytes BELOW a 16-byte boundary;
  * the ucontext then lands on frame+8 (16-aligned, as Linux has it) and the
- * FPSTATE moves to frame+568 to stay 16-aligned for FXSAVE/FXRSTOR.
+ * FPSTATE sits at frame+568, which with base ≡ 8 (mod 16) is ≡ 0 (mod 16) --
+ * the only offset in the range that a 512-byte FXSAVE may use.
+ *
+ * M6/L63: 568 is therefore *not* the bug, and 576 would be.  The offset is
+ * not a free constant: it is 568 because the base is 8 (mod 16).  Nudging it
+ * to 576 (arithmetically "16-byte aligned") would put the fpstate at 8
+ * (mod 16) for every frame this kernel plants and fault every delivery.
+ * Instead the offset is DERIVED from the base (l_sf_fp_off) so the fpstate
+ * pointer is absolutely aligned no matter what the frame arithmetic does,
+ * and the save itself no longer executes FXSAVE against a user address at
+ * all (arch_fpu_save_user).  Both halves are measured in the guest by
+ * src/user/linux_probe_fpu_sig.c P1: fxsave64 to (base16+568) faults, to
+ * (base16+576) works, to (base8+568) works, to (base8+576) faults.
+ *
+ *   frame+0    pretcode      the guest's sa_restorer (glibc: __restore_rt)
+ *   frame+8    ucontext     uc_flags, uc_link, uc_stack[24], mcontext[256],
+ *                           uc_sigmask[128]  (sizeof = 424)
+ *   frame+432  siginfo_t    128 bytes
+ *   frame+568  fpstate      512-byte FXSAVE image (576 when base ≡ 0 mod 16)
+ *   frame+1080 end
  *
  * %rdi = signo, %rsi = &siginfo, %rdx = &uc at entry.  The handler returns
  * to pretcode, which does `mov $15,%rax; syscall`; that reaches
@@ -2140,8 +2159,21 @@ static int l_thr_getcpu(struct process *p, struct trap_frame *tf) {
 #define L_SF_PRETCODE 0
 #define L_SF_UC 8
 #define L_SF_INFO 432
-#define L_SF_FP 568
+#define L_SF_FP 568      /* Linux's offset; legal for a frame base ≡ 8 mod 16 */
+#define L_SF_FP_MAX 576  /* base ≡ 0 mod 16 rounds up to here                  */
 #define L_SF_SIZE 1088
+
+/* The fpstate offset for THIS frame: Linux's layout fixed at 568 for the
+   8-mod-16 base this kernel plants, rounded up so that base+off is always
+   16-byte aligned.  Written as arithmetic (not a second constant) because
+   FXSAVE's alignment rule is about the ADDRESS, not the offset. */
+static uint32_t l_sf_fp_off(uint64_t base) {
+  uint64_t fp = (base + (uint64_t)L_SF_FP + 15u) & ~(uint64_t)15u;
+  return (uint32_t)(fp - base);
+}
+/* Layout lock: the aligned fpstate plus its image must still fit the frame. */
+typedef char l_sf_fp_fits_assert[(L_SF_FP_MAX + FPU_SIG_IMAGE_BYTES <=
+                                  L_SF_SIZE) ? 1 : -1];
 
 #define L_UC_FLAGS 0
 #define L_UC_LINK 8
@@ -2289,6 +2321,13 @@ static void l_sf_record(struct process *p, struct trap_frame *tf,
     kl_hex(&kl, (unsigned long)base);
     kl_s(&kl, " b16=");
     kl_i(&kl, (int)(base & 15));
+    /* M6/L63: the fpstate offset and the resulting absolute alignment.  With
+       base ≡ 8 (mod 16) the offset is 568 and base+off ≡ 0; the pair is the
+       arithmetic proof that FXSAVE's operand is legal for THIS frame. */
+    kl_s(&kl, " fp_off=");
+    kl_i(&kl, (int)l_sf_fp_off(base));
+    kl_s(&kl, " fp16=");
+    kl_i(&kl, (int)((base + (uint64_t)l_sf_fp_off(base)) & 15));
     kl_s(&kl, " alt=");
     kl_i(&kl, alt ? 1 : 0);
     kl_c(&kl, '\n');
@@ -2694,10 +2733,61 @@ static int l_sf_plant(struct process *p, struct process *cur,
   }
   l_sf_fill_gregs(base, tf, fault_addr);
   /* fpstate pointer + a real FXSAVE image, so rt_sigreturn can put the FP
-     registers back exactly as the interrupted code had them. */
-  *(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_MCONTEXT + L_MC_FPREG) =
-      base + L_SF_FP;
-  arch_fpu_save_to((void *)l_sf_addr(base, L_SF_FP));
+     registers back exactly as the interrupted code had them.
+     M6/L63: the image is now staged through a kernel buffer
+     (arch_fpu_save_user) — FXSAVE never runs against this user address, and a
+     misaligned/unbacked destination is -EFAULT here instead of a kernel #GP
+     that KVM turns into a whole-VM stop (§48.4). */
+  {
+    uint32_t fpoff = l_sf_fp_off(base);
+    uint64_t fpva = l_sf_addr(base, fpoff);
+    int frc;
+    *(volatile uint64_t *)
+        l_sf_addr(base, L_SF_UC + L_UC_MCONTEXT + L_MC_FPREG) = fpva;
+    frc = arch_fpu_save_user(p, (void *)fpva);
+    /* Evidence row: base, base%16, the derived offset and the resulting
+       address alignment for EVERY plant (bounded rows, unbounded counters), so
+       the arithmetic is measured on the machine that runs it. */
+    {
+      static int sfa_rows, sfa_bad;
+      int fp16 = (int)(fpva & 15);
+      sfa_rows++;
+      if (fp16 != 0 || frc != 0)
+        sfa_bad++;
+      if (sfa_rows <= 24 || fp16 != 0 || frc != 0) {
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[FPUA] pid=");
+        kl_i(&kl, p ? p->pid : -1);
+        kl_s(&kl, " sig=");
+        kl_i(&kl, sig);
+        kl_s(&kl, " base=0x");
+        kl_hex(&kl, (unsigned long)base);
+        kl_s(&kl, " b16=");
+        kl_i(&kl, (int)(base & 15));
+        kl_s(&kl, " off=");
+        kl_i(&kl, (int)fpoff);
+        kl_s(&kl, " fp=0x");
+        kl_hex(&kl, (unsigned long)fpva);
+        kl_s(&kl, " fp16=");
+        kl_i(&kl, fp16);
+        kl_s(&kl, " rc=");
+        kl_i(&kl, frc);
+        kl_s(&kl, " bad=");
+        kl_i(&kl, sfa_bad);
+        kl_s(&kl, " rows=");
+        kl_i(&kl, sfa_rows);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+    if (frc != 0) {
+      /* The frame is not usable: report and let the caller run the signal's
+         default action for this process.  Never a kernel fault. */
+      l_sf_fail(p, sig, tf, "fpu-image", fpva);
+      return 0;
+    }
+  }
   /* uc_sigmask = the caller's current kernel mask (8 bytes) */
   {
     uint64_t m = linux_compat_sigmask_get(p);
@@ -3084,14 +3174,38 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
   linux_compat_sigmask_set(p, *(volatile uint64_t *)l_sf_addr(
                                   base, L_SF_UC + L_UC_SIGMASK));
   /* FP: the frame's fpstate is a real FXSAVE image; put it back now (the
-     iretq path does not reload FP for a same-process resume). */
+     iretq path does not reload FP for a same-process resume).
+     M6/L63: staged through a kernel buffer — FXRSTOR never runs against a user
+     address.  A bad/absent pointer leaves the live state alone (the old code
+     fed whatever the frame said straight to FXRSTOR). */
   {
     uint64_t fp = *(volatile uint64_t *)l_sf_addr(
         base, L_SF_UC + L_UC_MCONTEXT + L_MC_FPREG);
-    if (fp && l_user_ok(p, fp, 512, 0))
-      arch_fpu_restore_from((const void *)fp);
-    else
-      arch_fpu_restore_from((const void *)l_sf_addr(base, L_SF_FP));
+    int frc = -EFAULT;
+    if (fp && (fp & 15u) == 0)
+      frc = arch_fpu_restore_user(p, (const void *)fp);
+    if (frc != 0)
+      frc = arch_fpu_restore_user(
+          p, (const void *)l_sf_addr(base, l_sf_fp_off(base)));
+    if (frc != 0) {
+      static int fx_rows;
+      if (fx_rows < 8) {
+        fx_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[FPUX] pid=");
+        kl_i(&kl, cur ? cur->pid : -1);
+        kl_s(&kl, " sig=");
+        kl_i(&kl, cur ? cur->sig_frame_sig : -1);
+        kl_s(&kl, " fp=0x");
+        kl_hex(&kl, (unsigned long)fp);
+        kl_s(&kl, " fp16=");
+        kl_i(&kl, (int)(fp & 15));
+        kl_s(&kl, " -> FPU state left live (no kernel fault)");
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
   }
   cur->sig_in_handler = 0;
   cur->sig_frame = 0;

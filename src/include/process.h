@@ -848,9 +848,38 @@ void fpu_restore(const uint64_t *area);
 /* P5 S3 (D8.7): destination-pointer FP/FPSIMD variants — the same image
  * formats as fpu_state (ARM 528 bytes: q0-q31 + FPCR + FPSR; x64 512 bytes:
  * the FXSAVE64 image), saved/restored to/from the signal frame on the user
- * stack.  The area must be 16-byte aligned on both arches. */
+ * stack.  The area must be 16-byte aligned on both arches.
+ *
+ * M6/L63: shared code must NOT pass a user address to these.  FXSAVE/FXRSTOR
+ * #GP on a misaligned operand and, worse, a fault on the instruction while it
+ * targets user memory is not recoverable under KVM (the whole vCPU stops:
+ * "KVM internal error, suberror 1").  Use the staged, -EFAULT-returning
+ * helpers below for anything user-resident; these two stay for kernel
+ * addresses only (the PCB image, the signal frame's kernel-side staging
+ * buffer). */
 void arch_fpu_save_to(void *dst);
 void arch_fpu_restore_from(const void *src);
+
+/* Size of the signal-frame FP image (FXSAVE64 image / FPSIMD image). */
+#ifdef __x86_64__
+#define FPU_SIG_IMAGE_BYTES 512
+#else
+#define FPU_SIG_IMAGE_BYTES 528
+#endif
+
+/* M6/L63: save/restore a signal frame's FP image WITHOUT ever executing an
+ * FXSAVE/FXRSTOR against a user address.  The image is staged through a
+ * 16-byte-aligned kernel buffer and moved with vm_kwrite/vm_user_read
+ * (vm_touch + direct-map copy), so a misaligned, unbacked or unmapped user
+ * destination is a plain -EFAULT the caller can turn into the signal's
+ * default action — never a kernel #GP, and never a VM stop.  Returns 0 or
+ * -EFAULT. */
+int arch_fpu_save_user(struct process *p, void *user_dst);
+int arch_fpu_restore_user(struct process *p, const void *user_src);
+
+/* The alignment/range rule those two enforce, exposed for the unit suite:
+ * 0 when `va` may hold a signal-frame FP image, -EFAULT otherwise. */
+int arch_fpu_user_image_ok(uint64_t va);
 
 /* --- P5 (docs/browser/p5-exec-signals-design.md): signals/kill/env ----
  * Rows: 16 kill (semantics completed, D9), 83 sigaction (D7), 84 sigreturn
