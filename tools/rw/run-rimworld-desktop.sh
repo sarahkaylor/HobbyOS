@@ -142,7 +142,7 @@ if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
       -o "$OUT/RimWorldLinux.ad9" src/user/rwmain.c \
       "$ROOT/tools/rw/mono-probe/condtrace.c" \
       "$DLIB/Scrt1.o" "$DLIB/crti.o" "$DLIB/libc_nonshared.a" \
-      "$LDIR/libc.so.6" "$LDIR/libdl-2.31.so" "$DLIB/crtn.o" \
+      "$LDIR/libc.so.6" "$LDIR/libpthread-2.31.so" "$LDIR/libdl-2.31.so" "$DLIB/crtn.o" \
       -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2 \
       -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none || {
     echo "AD-9 launcher link failed"; exit 2; }

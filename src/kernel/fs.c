@@ -847,6 +847,12 @@ int file_open(struct process *cur, const char *filename, int flags) {
       f->ref_count = 0;
       return -ENOENT;
     }
+    /* L59: fat16_open_ex defines open_flags = 0 on every handle it hands back
+       (a bare `struct file` on a test's stack would otherwise leak a random
+       O_APPEND bit).  The VFS's own word is authoritative, so re-apply it
+       here — one line, one place, immediately after the only call that can
+       reset it. */
+    f->open_flags = (uint32_t)flags;
     if (exists && (flags & O_TRUNC)) {
       (void)fat16_truncate(f);
     }

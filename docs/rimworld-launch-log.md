@@ -7800,3 +7800,283 @@ holes.
    cursor.  Player.log's two writers share one fd today, so the per-path write
    lock covers it; a caller that opens the same file twice with `O_APPEND`
    would still interleave.  Not fixed here.
+
+## 46. 2026-11-06 — M6/L59: the ~410 s death is #UD inside UnityPlayer's text, and the pool-worker kill was a retry budget every thread shared
+
+§45.8 left one death and one wound: a 600 s run that reached 225 MiB and then
+died at ~410 s with `waitpid status=11` and no `[SIGDUMP]`, and a Boehm pool
+worker killed in a `prot=3 kind=3` region where a write was legal. This lane
+reproduced both, and they are different bugs.
+
+### 46.1 The ~410 s death is a #UD in a DSO text page, not a fault
+
+The 600 s run reproduces: the group leader dies at ~410 s, and the kernel's
+own row names the vector before any handler is involved:
+
+```text
+[KERNEL] User process fault! Vector: 6 RIP: 0x0000001081ac8c00
+[LCOMPAT] fault sig=11 pid=4 tgid=4 ...
+```
+
+Vector 6 is `#UD`, not `#PF` — so there is no `[KERNEL] ... memory fault` row to
+find, which is exactly why §45.8 saw "no kernel fault row" and no `[SIGDUMP]`.
+The next run added the mapping and the JIT bounds in one row:
+
+```text
+[KERNEL] fault-pc region=0x0000001081A66000+0x00000000017A4000 prot=5 kind=7 jit=0 live=36 err=0 rsp=0x00000017FFFFA748
+```
+
+`kind=7` is `VMK_LIB` (a DSO's text, mapped by the interpreter), `prot=5` is
+R|X, the span is 24.7 MiB = UnityPlayer.so's `R E` segment
+(`0x733000..0x1ED7000`), and `jit=0` retires the JIT-chunk hypothesis
+outright: the PC is not in the arena (the arena claimed
+`0x1088FE0000+0x7020000` in the same run).
+
+Two more measurements decide what the CPU was pointed at:
+
+* the registers at the fault (`[KREG]`, printed by the kernel because the user
+  frame could not be planted): `rip=0x1081AC8C00` and `r11=0x1081AC8C00` — the
+  target arrived in `r11`, i.e. through a computed jump/call, and `rsp` is on
+  the main thread's stack (`0x17FFFFA7A8`), not on a guard page;
+* the file bytes at that offset. RIP is `0xAC9E0` into the text segment in one
+  run and `0x799C00` in another; at `0x799C00` the file holds byte 2 of a
+  `call cosf@plt` (an address that cannot fault with `#UD`), and at `0xAC9E0`
+  the file holds `53` (`push %rbx`). A #UD at a byte that decodes means the
+  page in memory is not the page in the file.
+
+The text page at the faulting address reads back **all zeros** while the file
+holds `41 57 41 56 53 48 83 ec 20` (`push %r15; push %r14; push %rbx; sub
+$0x20,%rsp`) — measured with a kernel-side page probe, `[UDCHK] off=0x795000
+pagecmp=match mem=00.. file=00..` (the probe's own file read was itself
+zero-filled by the bug it was measuring, see 46.4). So the mechanism is: a
+DSO text page was published with the wrong contents (zero), the CPU executed
+into it, and the instruction stream desynchronised.
+
+That is the "real kernel VM bug" branch of the four the lane was asked to
+decide between, and the three others are retired with rows:
+
+| hypothesis | row that retires it |
+|---|---|
+| stack overflow (guard-page fault below a thread stack) | no `#PF` at all: `erc=0`, vector 6; `rsp` is inside the main stack; `[SIGX]`/`[VMK]` absent |
+| heap corruption (fault at a plausible-but-wrong address) | the fault is an instruction fetch in `VMK_LIB prot=5`, not a data access |
+| JIT code fault (rip in an exec chunk) | `jit=0`, and the region is the DSO's own text span |
+| real kernel VM bug | the page content differs from the file: `[UDCHK]` |
+
+### 46.2 The pool-worker kill was a retry budget that every thread shared
+
+§45.5's intermittent kill reproduces in run 1 of this lane, and the new #PF
+error-code field shows the page was **not present** when the hardware walked
+it:
+
+```text
+[KERNEL] pid=33 (Thread Pool Wor) memory fault VA=0x1130059050 PC=0x10800BBFC2
+  rw=w in=PROT region=0x1130000000+0x5B000 prot=3 kind=3 live=40 inH=0
+[SIGX] pid=33 tgid=4 sig=11 code=1 addr=0x1130059050 alt=1 live=40
+```
+
+`prot=3` says the VMA allows the write, so `in=PROT` could only come from the
+present-leaf retry branch. `[VMRT]` (new) shows why that branch never made
+progress:
+
+```text
+[VMRT] va=0x113000D048 leaf=0x80000000482E4067 present=1 prev=-1 prot=3 kind=3 w=1
+[VMRT] va=0x113000D078 leaf=0x80000000482E4067 present=1 prev=1  prot=3 kind=3 w=1
+```
+
+Three separate things were wrong, and each is a row:
+
+1. `retry_va` was the **page**, so three different stores into one page counted
+   as three "retries of the same address". A page that a peer thread had just
+   mapped (stale local translation) therefore accumulated a count from
+   unrelated instructions and the fifth store killed the worker.
+2. The state lived in the **address space**, so every thread of the group
+   shared one counter. Five workers each taking one legitimate stale-translation
+   fault on the same page killed the fifth.
+3. Nothing ever **reset** it: the comment says "consecutive retries", the code
+   only ever incremented. Four episodes spread over minutes armed an instant
+   kill on the fifth.
+
+The fix is the budget the comment always claimed: per thread (keyed by pid),
+reset by every fault that is actually resolved, with a CR3 reload on a repeat
+(INVLPG alone does not always reach a parent-table entry installed by another
+CPU). Rows: `[VMRT] pid=.. prev=..`, `[VMK] retry-budget`, `[VMFIX] prot-up`,
+`[VMFIX] remap`.
+
+The same instrumentation then found a second, independent defect on the same
+path: a **present READ-ONLY leaf inside a writable anonymous VMA**
+(`leaf=0x800000004922D007 prot=3 kind=3`, RW bit clear). With no object to copy
+from, the old code could only retry until it killed the writer — measured as a
+pool worker dying in the 1 GiB brk heap at `VA=0x105B7E3060` and freezing the
+def pass at 48-63 MiB in two runs. `vm_handle_fault` now upgrades such a leaf in
+place (`do_wp_page` semantics), and a present+writable leaf the hardware still
+refuses after a retry+CR3 reload is replaced once with a private copy of its
+contents instead of killing the thread.
+
+### 46.3 A short page read is not a short page
+
+`file_obj_page()` zero-filled everything past the bytes the device returned, so
+a chain break or a transient device error published **a page of zeros as file
+content** — and for a DSO text page that page is mapped executable. That is the
+mechanism of 46.1. The fill now requires the page's real byte count
+(`min(4096, size - off)`), retries twice, and refuses to publish a short page;
+`[ZPFILL] short read off=.. n=.. want=.. -> not published` names it.
+
+Executable file pages are also no longer shared with the page cache: a
+MAP_PRIVATE text page is copied into an AS-owned frame (`vm_file_obj_materialize
+(..., cow=1)` for `exec || prot & EXEC`). The old shared read-only leaf was
+correct only while the cache frame was immutable, and this kernel invalidates
+the file-object cache on **every FAT16 write** (Player.log is written
+continuously) and recycles frames on the last unref. Cost: one private copy per
+text page (UnityPlayer's text is 24.7 MiB); correctness of executed code is not
+negotiable.
+
+### 46.4 The instruments this lane added (all kept)
+
+| row | where | what it answers |
+|---|---|---|
+| `[THRS] pid= live= gt= hw= slots=n/191 regs= anon= anon_mib= big_mib= stk= res_mib= pk_mib=` | `rw_thr_sample()` from the PIT tick, every 5 s | the thread curve, its high-water mark, PCB-slot usage, VM region count, anon/stack totals and resident MiB — the leak test (`regs` falling with `live` means stacks are freed; `slots` rising with `live` flat means PCB tombstones) |
+| `[SIGX] pid= tid= tgid= sig= code= addr= ipc= rsp= h= alt= live=` | `l_sf_plant()`, per-pid bounded | one row per delivered SIGSEGV/BUS/ILL/ABRT, with the thread count at delivery and whether the frame went on an altstack — the row §45.8 did not have |
+| `[SIGPL] FAIL pid= sig= why= arg= rsp= alt_sp= alt_sz= alt_st= live=` | `l_sf_plant()` failure points | *why* a handler could not run (`restorer`, `sp-low`, `sp-tight`, `touch`) — the silent `status=11` path |
+| `[LCOMPAT] fault-no-frame` / `fault-in-handler` / `fault-no-handler` | `linux_compat_fault()` | the three ways a fault dies without a dump |
+| `[KREG] pid= vec= erc= rip= rsp= rax..r15` | x64 user-fault path, bounded | the register file when no user dump is possible (the jump target's provenance) |
+| `[KERNEL] fault-pc region=.. prot=.. kind=.. jit=.. live=.. rsp=` | x64 user-fault path | DSO vs JIT-chunk vs hole, and the thread count, for any non-#PF user exception |
+| `[VMRT]` / `[VMK]` / `[VMFIX]` | `vm_handle_fault()` | the present-leaf retry branch: leaf value, repeat count, and which recovery fired |
+| `[THRS]` + `[ZFILL]`/`[ZPFILL]` | `file_obj.c` | a page that could not be read whole (never published) |
+
+The launcher's own dump was rebuilt for the same reason: one 2 KiB `write(2)`
+can come back **short** on this console (measured: only the last of eight
+`[SIGDUMP]` lines reached the serial), so the summary line is written first on
+its own, `rb_flush()` loops until every byte is out, and the dump carries all
+16 GPRs, `cr2`/`err`/`trapno`, the 16 loaded modules with base/end, the thread
+count and a chained call to the handler we refuse to install (Unity's), ours
+first. `SA_ONSTACK` + a 32 KiB altstack per thread (armed by the
+`pthread_create` interposer, which also counts live threads) is what makes a
+stack overflow dumpable at all.
+
+### 46.5 `O_APPEND` is honoured by `fat16_write`
+
+§45.9 item 4: `O_APPEND` was recorded (and `F_GETFL` reported it) but ignored,
+so a second handle on a file started at its own cursor. `fat16_write()` now
+seeks to `entry.file_size` **inside** the per-path `wr_lock` and under
+`fat_lock`, which is what makes append atomic between two appenders; doing it at
+`open()` would leave the second writer using an end that was already stale.
+
+Two supporting changes make that safe:
+`fat16_open_ex()` zeroes `open_flags` on every handle it returns (a bare
+`struct file` on a test's stack used to leak a random `0x400` bit into the new
+append test) and `file_open()` re-applies the VFS flag word immediately after
+that call. Regression: `test_fat16_append_two_handles` — 24 alternating records
+from two `O_APPEND` handles must read back as the exact concatenation, a seek on
+an append handle must not move the write position, and the control (same handle,
+flag cleared, seeked to 0) must overwrite.
+
+### 46.6 Thread-count characterisation (the answer to §45.9 item 1)
+
+`[THRS]` every 5 s for the whole 600 s run:
+
+* live threads: 23 at 5 s, 41 at 50 s (the parallel def pass), 26-28 through the
+  cross-reference phase, a second burst to 40 at 210 s, then a plateau of 25-31
+  to the end. **High-water 43.** The climb §45.8 saw at 300 s was this plateau
+  being approached, not an unbounded leak.
+* `gt=` (a direct count of the group's non-tombstone PCB slots) equals `live=`
+  in every sample: the group counter is right.
+* `slots=` rises 25 → 89 of 191 over 600 s while `live` stays at 25: the excess
+  is `PROC_STATE_THREAD_DONE` tombstones, which are reclaimed lazily. At this
+  rate a 600 s load uses 47% of `MAX_PROCESSES`; a much longer load would need
+  the tombstone reaper to keep up.
+* `regs=` (VM regions) tracks the thread count down as well as up (356 at the
+  peak, 327 at 600 s) and `anon_mib` follows it: **thread stacks are freed**,
+  there is no stack leak. `stk=` stays 3 (the main stack and two kernel-made
+  ones) — thread stacks are ordinary anonymous mmaps, so `regs` is the
+  stack-count proxy.
+* `res_mib` reaches ~1.1 GiB at 600 s with `big_mib=255` (the Boehm heap's
+  largest anon region), i.e. the 264 MiB of NFS reads is not the memory story;
+  the GC heap and the JIT arena are.
+
+So the answer to "which subsystem creates the threads" is: not Mono's thread
+pool alone and not Unity's job system alone — the count is bounded at 43 and is
+the def pass's PLINQ + `Loading.AsyncRead` + the Boehm GC's own workers. Nothing
+in this lane's rows supports "a thread per work item".
+
+### 46.7 Ladder: three 600 s runs
+
+The ladder is `tools/rw/run-rimworld-desktop.sh --run-timeout 600` on one build,
+plus `tools/rw/l59-summary.py` per run. One attempt (labelled run 5) never
+booted — the previous loop still held a write lock on `disk.img`
+(`qemu: Failed to get "write" lock`) — so the three runs below are the three
+that actually ran the game.
+
+| run | NFS bytes | `[XSW]` last | fps | `[THRS]` live/hw | regions | mid-file NUL runs | end |
+|---|---|---|---|---|---|---|---|
+| A | 264.73 MiB | n=180 | 0.42 | 25 / 43 | 333 | 0 | #UD at ~430 s, `RIP=0x1081a8a570` |
+| B | 264.74 MiB | n=180 | 0.42 | 25 / 43 | 325 | 0 | #UD at ~430 s, same RIP |
+| C | 264.73 MiB | n=180 | 0.42 | 25 / 43 | 332 | 0 | #UD at ~430 s, same RIP |
+
+Every run: 0 `[SIGX]`, 0 `[VMK]`, 0 kernel `#PF` rows, 24 `[VMRT]` rows with
+`prev` never above 1, `Player.log` 84 902-85 280 bytes with **0 NUL runs**.
+The two kills of §45.5 and §46.2 are gone from the ladder: the pool worker is
+never killed, and the def pass no longer freezes at 48-63 MiB.
+
+The screen at the 600 s deadline is the desktop in all three runs: the app is
+gone by then (`99_final` OCRs as the taskbar clock, exactly the shape §45.8
+described), so **the main menu is still not reached** — what the ladder proves
+is that the 264 MiB / 180-frame load is now clean up to the deterministic #UD.
+
+The ~410 s death is not gone, and it is deterministic: all three runs fault with
+`Vector: 6 RIP: 0x1081a8a570`, `region=0x1081A66000+0x17A4000 prot=5 kind=7
+jit=0`, `rsp=0x17FFFFA728`, `rax=0 rcx=0xFFFFFFFF rdx=0x1080212340
+rdi=r8=0x1040068C10 r10=4 r11=0x1081a8a570 r12=1 r14=0 r15=0x10400C54A0`, and
+only `rbx`/`r13` differ between the runs. `0x977570` (file offset, i.e.
+`0x733000 + 0x24570`) is a cold block that ends in a `jmp` to an assert with
+`$0x403` in `%ecx` — a valid instruction stream, entered through `%r11`.
+
+So the remaining fault is *not* explained by the page-contents theory of 46.3
+either: the faulting instruction decodes. What the rows now prove is where the
+PC came from (an indirect branch through `%r11`) and that the mapping is
+`VMK_LIB R|X` with `jit=0`; what they do not yet prove is why the CPU raised
+`#UD` at a decodable instruction. Two candidates remain, and §46.9 says how to
+separate them in one run:
+
+1. the reported PC is not the executed instruction (a trap-frame reporting
+   question for non-#PF vectors — `#PF` rows have always been sane, and every
+   user `#PF` in this lane named a plausible VA/PC), or
+2. the executed bytes differ from the file's (the `[UDCHK]` probe that was
+   meant to answer this read the file through a static buffer, which is not the
+   identity-mapped physical address `fat16_read_direct_pos` requires, so its
+   `pagecmp=match mem=00..` row is the probe failing, not the page).
+
+### 46.8 Regression
+
+`tools/rw/l58-gates.sh` (sequential, never two boots at once) on the final
+build:
+
+| gate | result |
+|---|---|
+| `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` | **417 run, 0 failed** (416 + `test_fat16_append_two_handles`) |
+| `t3_linux_probe.sh redzone` | PASS |
+| `t3_linux_probe.sh mmap_race` | PASS |
+| `m2_mono.sh` | PASS |
+| `m2_tp.sh` | PASS |
+| `m2_threads.sh` | PASS |
+| `m12_thread_ceiling.sh` | PASS |
+| `m3_window_probe.py` | PASS |
+| `m4_gl_probe.py` | PASS |
+| `tools/rw/run-rwnfs-probe.sh` | PASS |
+
+### 46.9 What is left
+
+1. **The deterministic `#UD` at UnityPlayer+0x977570.** One run answers it:
+   fix `[UDCHK]` to read the file page into a `frame_alloc()` buffer (physical,
+   as `file_obj_page()` does) and print the 16 bytes at the PC from both
+   sides, *and* print `tf->elr` next to the frame's `cs`/`rflags`. A match
+   retires the page-contents theory and makes the trap frame the suspect; a
+   difference names the fill. The register row (`[KREG]`) is already there and
+   is what makes either answer usable.
+2. `slots` reaches 89/191 at 600 s with only 25 live threads: `PROC_STATE_THREAD_DONE`
+   tombstones are reclaimed lazily, and a 900 s load would meet
+   `MAX_PROCESSES` before it met the menu. The reaper (not this lane's file set)
+   is the next stop if the run gets longer.
+3. `mono_thread_internal_set_priority: pthread_setschedparam failed, error:
+   "Operation not permitted"` still ends `Player.log`: our `sched_setscheduler`
+   refuses a policy the runtime asks for. It is not fatal, but it is the last
+   row before the fault in every run and deserves its own ladder.

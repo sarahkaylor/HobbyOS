@@ -3527,6 +3527,95 @@ void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
  * restorer live there) and places the frame on the current thread — exactly
  * the contract process_signal_deliver() documents.  Native threads keep the
  * leader-only rule. */
+/* ---- M6/L59: the 5 s thread census ---------------------------------------
+ * §45.8 (a 600 s RimWorld run) climbs in live threads and then dies at ~410 s
+ * with `waitpid status=11` and no kernel fault row.  Before theorising about
+ * that death, three numbers have to exist per sample: how many threads the
+ * game's group really has, the high-water mark, and how many VM regions the
+ * group owns.  Each pthread is one PCB slot (MAX_PROCESSES 192) plus an 8 MiB
+ * stack mmap split into region + guard, so `live` against `regions` and
+ * `anon` is the leak test: an exited thread that never frees its stack shows
+ * up as regions climbing while live stays flat.
+ *
+ * Emitted from the boot core's PIT tick (see trap.c) every 5 s, one line per
+ * live Linux-ABI group.  `slots` is the whole PCB table (the ceiling is
+ * MAX_PROCESSES-1 = 191 shared by every thread and process on the machine),
+ * and `hw` is the high-water mark since boot.  This is read-only; vm_as_census
+ * copies its numbers out under vm_lock so the scan cannot race a munmap.
+ */
+void rw_thr_sample(void) {
+  static int hw[MAX_PROCESSES];
+  static int rows;
+  int slots_used = 0;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (proc_table[i].state != PROC_STATE_FREE)
+      slots_used++;
+  }
+  for (int i = 1; i < MAX_PROCESSES && rows < 4000; i++) {
+    struct process *g = &proc_table[i];
+    if (g->is_thread || g->state == PROC_STATE_FREE ||
+        g->state == PROC_STATE_THREAD_DONE)
+      continue;
+    if (!(g->abi_flags & PROC_FLAG_LINUX_ABI))
+      continue;
+    int live = g->live_threads;
+    /* M6/L59: the AUTHORITATIVE count, straight out of the PCB table: slots
+       whose tgid is this group and which are neither free nor a tombstone.
+       `live` above is the group's own counter, and run 2 showed the two can
+       disagree by 4x (live=25 while the watchdog listed 99 game slots in
+       PROC_STATE_FUTEX) -- a disagreement that matters, because group teardown
+       is gated on live_threads reaching 0. */
+    int gthreads = 0;
+    for (int k = 1; k < MAX_PROCESSES; k++) {
+      struct process *q = &proc_table[k];
+      if (q->state == PROC_STATE_FREE || q->state == PROC_STATE_THREAD_DONE)
+        continue;
+      if (q->tgid == g->pid)
+        gthreads++;
+    }
+    if (live < 2 && gthreads < 2)
+      continue;
+    if (live > hw[i])
+      hw[i] = live;
+    int nr = 0, anon = 0, stack = 0;
+    uint64_t ab = 0, bg = 0, res = 0, pk = 0;
+    vm_as_census(g->as, &nr, &anon, &stack, &ab, &bg, &res, &pk);
+    rows++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[THRS] pid=");
+    kl_i(&kl, g->pid);
+    kl_s(&kl, " live=");
+    kl_i(&kl, live);
+    kl_s(&kl, " gt=");
+    kl_i(&kl, gthreads);
+    kl_s(&kl, " hw=");
+    kl_i(&kl, hw[i]);
+    kl_s(&kl, " slots=");
+    kl_i(&kl, slots_used);
+    kl_s(&kl, "/");
+    kl_i(&kl, MAX_PROCESSES - 1);
+    kl_s(&kl, " regs=");
+    kl_i(&kl, nr);
+    kl_s(&kl, " anon=");
+    kl_i(&kl, anon);
+    kl_s(&kl, " anon_mib=");
+    kl_i(&kl, (long)(ab >> 20));
+    kl_s(&kl, " big_mib=");
+    kl_i(&kl, (long)(bg >> 20));
+    kl_s(&kl, " stk=");
+    kl_i(&kl, stack);
+    kl_s(&kl, " res_mib=");
+    kl_i(&kl, (long)((res * 4) >> 10));
+    kl_s(&kl, " pk_mib=");
+    kl_i(&kl, (long)((pk * 4) >> 10));
+    kl_s(&kl, " ");
+    kl_s(&kl, g->name);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+}
+
 void process_signal_trap_exit(struct trap_frame *tf) {
   struct process *cur = current_process();
   if (!cur || cur->is_kernel_process || !tf)

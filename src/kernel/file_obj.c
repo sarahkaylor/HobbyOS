@@ -240,18 +240,62 @@ uint64_t file_obj_page(struct vm_object *o, uint64_t off) {
   }
   int n = fat16_read_direct_pos(cluster, size, nf, (int)FRAME_SIZE,
                                 (uint32_t)(idx * FRAME_SIZE));
+  /* M6/L59: how many bytes THIS page must carry.  Only the file's real tail
+     may be short; every other page must arrive whole. */
+  int want = (int)FRAME_SIZE;
+  {
+    uint64_t left = (uint64_t)size - idx * (uint64_t)FRAME_SIZE;
+    if (left < (uint64_t)want)
+      want = (int)left;
+  }
   if (pin_dbg) {
     uart_puts("[POK] off=");
     uart_print_hex(idx * FRAME_SIZE);
     uart_puts(" n=");
     uart_puts(n == (int)FRAME_SIZE ? "full\n" : "short\n");
   }
-  if (n < 0) {
+  /* A SHORT READ IS NOT A SHORT PAGE.  The old code zero-filled everything
+     past `n`, so a chain break or a transient device error published a page of
+     zeros as file content.  For a DSO text page that is fatal in the nastiest
+     way: the page is mapped executable and the first instruction fetched from
+     it (0x00 0x00 = `add %al,(%rax)`, or whatever the neighbouring bytes
+     desynchronise into) can be an invalid opcode -- RimWorld's main thread
+     died at ~410 s with #UD at a text offset whose page read back all zeros
+     while the file holds `push %r15; push %r14; push %rbx` (measured,
+     docs/rimworld-launch-log.md §46).  Retry a short page twice, and if it
+     still comes up short refuse to publish it: the faulting instruction then
+     takes a real I/O error instead of executing zeros. */
+  if (n < 0 || n < want) {
+    for (int attempt = 0; attempt < 2 && (n < 0 || n < want); attempt++) {
+      int rn = fat16_read_direct_pos(cluster, size, nf, (int)FRAME_SIZE,
+                                     (uint32_t)(idx * FRAME_SIZE));
+      if (rn > n)
+        n = rn;
+    }
+  }
+  if (n < 0 || n < want) {
+    static int zpf_rows;
+    if (zpf_rows < 12) {
+      zpf_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[ZPFILL] short read off=");
+      kl_hex(&kl, (unsigned long)(idx * FRAME_SIZE));
+      kl_s(&kl, " n=");
+      kl_i(&kl, n);
+      kl_s(&kl, " want=");
+      kl_i(&kl, want);
+      kl_s(&kl, " size=");
+      kl_i(&kl, (long)size);
+      kl_s(&kl, " chain=");
+      kl_i(&kl, (long)cluster);
+      kl_s(&kl, " -> not published (never map a zero page as file data)\n");
+      kl_emit(&kl);
+    }
     frame_free(nf);
     return 0;
   }
-  /* Short tail (last page of a file whose size is not page-multiple, or a
-   * read that hit EOF) reads as zeros past the file's end. */
+  /* Only the file's real tail is zero-padded past EOF. */
   volatile uint8_t *p = (volatile uint8_t *)nf;
   for (int i = n; i < (int)FRAME_SIZE; i++)
     p[i] = 0;

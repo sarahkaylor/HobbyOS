@@ -243,6 +243,18 @@ static void rw_mods_collect(void) {
   dl_iterate_phdr(rw_mods_cb, 0);
 }
 
+/* ---- L59: the live thread count, without the kernel ----------------------
+ * The SIGSEGV dump has to carry the thread count at the instant of the fault
+ * (§45.8's death followed a climb, and "how many were live" is what separates
+ * a pool burst from a leak).  The kernel's [THRS] row samples every 5 s and
+ * [SIGX] gives the exact value at delivery; this counter is the launcher's own
+ * view, incremented in the pthread_create interposer (inside the shadow block
+ * below) and decremented by a cleanup handler so pthread_exit is counted too.
+ * Both are plain atomics: a creator and an exiter race by design.
+ */
+static volatile int rw_live_threads;
+static volatile int rw_created_threads;
+
 /* `<module>` when v is inside a mapped object, with its offset. */
 static const char *rw_mod_of(unsigned long v, unsigned long *off) {
   for (int i = 0; i < rw_mod_n; i++)
@@ -291,9 +303,17 @@ static void rb_dec(struct rb *b, long v) {
   while (n) rb_c(b, t[--n]);
 }
 static void rb_flush(struct rb *b) {
-  if (b->p > b->start) {
-    ssize_t w = write(2, b->start, (size_t)(b->p - b->start));
-    (void)w;
+  size_t n = (size_t)(b->p - b->start);
+  size_t off = 0;
+  /* A console write can be SHORT: the crash dump is ~2 KiB and the previous
+     version dropped the write's return value, so a partial write silently lost
+     the head of the record (measured: only the last line of an 8-line dump
+     reached the serial).  Loop until every byte is out or the write fails. */
+  while (off < n) {
+    ssize_t w = write(2, b->start + off, n - off);
+    if (w <= 0)
+      break;
+    off += (size_t)w;
   }
   b->p = b->start;
 }
@@ -316,10 +336,33 @@ static void rb_reg(struct rb *b, const char *name, unsigned long v, int tag) {
   }
 }
 
-/* One dump per process; then the default action so the kernel's own
-   `memory fault` row (and the exit status) still happen exactly once. */
+/* One dump per process; then chain (L59) or default action.
+
+   M6/L59: §45.8's 600 s run died at ~410 s with `status=11` and NO dump at
+   all.  Two ways that happens, and both are answered here:
+     - the fault was a stack overflow: the kernel cannot push a signal frame
+       onto a stack pointer that is already below the mapping, so no handler
+       runs, whatever is installed.  `SA_ONSTACK` + a real sigaltstack is the
+       only way a handler can speak from there (measured: Unity's own SIGSEGV
+       install asks for SA_ONSTACK, ours did not);
+     - the fault happened inside a handler, where a second dump is impossible
+       (the kernel answers `default action`, and [LCOMPAT] fault-in-handler
+       now names it).
+   The dump is ONE write(2) of a fully-built record: per-line writes are what
+   the serial capture loses under load, and the crash moment is the one moment
+   the log must not lose.
+
+   Chaining: the interposer below records every handler it refuses to install
+   (Unity's and Mono's SIGSEGV/SIGBUS handlers, and the one septic case where
+   Unity's is the only thing that knows how to unwind).  After the dump,
+   Unity's is called with the same siginfo/ucontext, so its own crash report
+   and its own exit path still happen -- ours first, theirs second. */
+static void (*rw_chain_handler)(int, siginfo_t *, void *);
+
 static void rw_sig_handler(int sig, siginfo_t *si, void *ucv) {
   if (rw_sigdumped) {
+    /* A second fault: the first one's dump is out.  Default action, exactly
+       once, so the kernel's own exit record still happens. */
     signal(sig, SIG_DFL);
     return;
   }
@@ -327,7 +370,7 @@ static void rw_sig_handler(int sig, siginfo_t *si, void *ucv) {
   ucontext_t *uc = (ucontext_t *)ucv;
   greg_t *g = uc->uc_mcontext.gregs;
 
-  char buf[2048];
+  static char buf[4096];
   struct rb b = {buf, buf, buf + sizeof buf - 8};
 
   rb_s(&b, "[SIGDUMP] ");
@@ -336,25 +379,59 @@ static void rw_sig_handler(int sig, siginfo_t *si, void *ucv) {
   rb_dec(&b, si ? si->si_code : -1);
   rb_s(&b, " addr=0x");
   rb_hex(&b, (unsigned long)(si ? si->si_addr : 0));
+  rb_s(&b, " live=");
+  rb_dec(&b, (long)rw_live_threads);
+  rb_s(&b, " created=");
+  rb_dec(&b, (long)rw_created_threads);
+  rb_s(&b, " tid=");
+  rb_dec(&b, (long)gettid());
   rb_s(&b, "\n");
+  /* The summary line goes out FIRST and on its own: it carries every field the
+     verdict needs (signal, code, si_addr, live threads, tid), so a lossy
+     console can cost the detail but never the answer. */
   rb_flush(&b);
 
-  /* The four fields the ladder asked for first, each tagged with the module
-     it points into (a dispatch-table base shows up as `U+0x...`). */
-  rb_s(&b, "[SIGDUMP] uctx");
-  rb_reg(&b, "rip", (unsigned long)g[REG_RIP], 1);
-  rb_reg(&b, "rsp", (unsigned long)g[REG_RSP], 0);
-  rb_reg(&b, "rax", (unsigned long)g[REG_RAX], 1);
-  rb_reg(&b, "rdi", (unsigned long)g[REG_RDI], 1);
-  rb_reg(&b, "rsi", (unsigned long)g[REG_RSI], 1);
-  rb_reg(&b, "rdx", (unsigned long)g[REG_RDX], 1);
+  /* The complete interrupted context: every GPR plus the fault record.  A
+     managed JIT frame keeps arguments in r8-r15 as often as in rdi/rsi, and
+     `cr2` is the address the *hardware* refused while `addr` is what the
+     kernel chose to report (they differ for a non-fault-generated signal). */
+  rb_s(&b, "[SIGDUMP] rip=0x");
+  rb_hex(&b, (unsigned long)g[REG_RIP]);
+  {
+    unsigned long off = 0;
+    const char *m = rw_mod_of((unsigned long)g[REG_RIP], &off);
+    if (m) {
+      rb_s(&b, " (");
+      rb_s(&b, m);
+      rb_s(&b, "+0x");
+      rb_hex(&b, off);
+      rb_s(&b, ")");
+    } else {
+      rb_s(&b, " (no module: JIT chunk, stack, or freed mapping)");
+    }
+  }
+  rb_s(&b, " rsp=0x");
+  rb_hex(&b, (unsigned long)g[REG_RSP]);
+  rb_s(&b, " rbp=0x");
+  rb_hex(&b, (unsigned long)g[REG_RBP]);
+  rb_s(&b, " rflags=0x");
+  rb_hex(&b, (unsigned long)g[REG_EFL]);
+  rb_s(&b, " err=0x");
+  rb_hex(&b, (unsigned long)g[REG_ERR]);
+  rb_s(&b, " trapno=0x");
+  rb_hex(&b, (unsigned long)g[REG_TRAPNO]);
+  rb_s(&b, " cr2=0x");
+  rb_hex(&b, (unsigned long)g[REG_CR2]);
   rb_s(&b, "\n");
-  rb_flush(&b);
 
   rb_s(&b, "[SIGDUMP] greg");
+  rb_reg(&b, "rax", (unsigned long)g[REG_RAX], 1);
   rb_reg(&b, "rbx", (unsigned long)g[REG_RBX], 1);
   rb_reg(&b, "rcx", (unsigned long)g[REG_RCX], 1);
-  rb_reg(&b, "rbp", (unsigned long)g[REG_RBP], 1);
+  rb_reg(&b, "rdx", (unsigned long)g[REG_RDX], 1);
+  rb_reg(&b, "rsi", (unsigned long)g[REG_RSI], 1);
+  rb_reg(&b, "rdi", (unsigned long)g[REG_RDI], 1);
+  rb_s(&b, "\n[SIGDUMP] greg");
   rb_reg(&b, "r8", (unsigned long)g[REG_R8], 1);
   rb_reg(&b, "r9", (unsigned long)g[REG_R9], 1);
   rb_reg(&b, "r10", (unsigned long)g[REG_R10], 1);
@@ -364,7 +441,21 @@ static void rw_sig_handler(int sig, siginfo_t *si, void *ucv) {
   rb_reg(&b, "r14", (unsigned long)g[REG_R14], 1);
   rb_reg(&b, "r15", (unsigned long)g[REG_R15], 1);
   rb_s(&b, "\n");
-  rb_flush(&b);
+
+  /* The module map as of the last dlopen: the last 16 objects, with base and
+     end, so a rip/return address that is NOT in any of them is provably JIT
+     code or a freed mapping -- the JIT-vs-corruption verdict in one row. */
+  rb_s(&b, "[SIGDUMP] mods=");
+  rb_dec(&b, rw_mod_n);
+  for (int i = 0; i < rw_mod_n; i++) {
+    rb_s(&b, " ");
+    rb_s(&b, rw_mods[i].name);
+    rb_s(&b, "@0x");
+    rb_hex(&b, rw_mods[i].base);
+    rb_s(&b, "-0x");
+    rb_hex(&b, rw_mods[i].end);
+  }
+  rb_s(&b, "\n");
 
   /* The first four qwords behind each pointer-ish register: a dispatch table
      (`call *0x18(%r14)`) or a vtable, i.e. the slot that was NULL and the
@@ -376,10 +467,14 @@ static void rw_sig_handler(int sig, siginfo_t *si, void *ucv) {
       {"rsi", (unsigned long)g[REG_RSI]}, {"rdi", (unsigned long)g[REG_RDI]},
       {"r14", (unsigned long)g[REG_R14]}, {"r15", (unsigned long)g[REG_R15]},
     };
-    rb_s(&b, "[SIGDUMP] mem");
+    int any = 0;
     for (int i = 0; i < 8; i++) {
       unsigned long v = rv[i].v;
       if (!v || v >= 0x800000000000ul || !rw_readable(v)) continue;
+      if (!any) {
+        rb_s(&b, "[SIGDUMP] mem");
+        any = 1;
+      }
       rb_c(&b, ' ');
       rb_s(&b, rv[i].n);
       rb_c(&b, '=');
@@ -391,71 +486,71 @@ static void rw_sig_handler(int sig, siginfo_t *si, void *ucv) {
         rb_hex(&b, *(volatile unsigned long *)a);
       }
       rb_c(&b, ']');
-      if (b.p > b.e - 128) { rb_s(&b, "\n"); rb_flush(&b); rb_s(&b, "[SIGDUMP] mem"); }
     }
-    rb_s(&b, "\n");
-    rb_flush(&b);
+    if (any) rb_s(&b, "\n");
   }
 
   /* 24 qwords at the faulting RSP: a `call`-then-`jmp` leaves the caller's
      return address at [rsp] (or one frame up, if the callee built a frame). */
-  unsigned long sp = (unsigned long)g[REG_RSP];
-  for (int i = 0; i < 24; i++) {
-    unsigned long a = sp + (unsigned long)i * 8;
-    if (i == 0) {
-      rb_s(&b, "[SIGDUMP] stk");
+  {
+    unsigned long sp = (unsigned long)g[REG_RSP];
+    int printed = 0;
+    for (int i = 0; i < 24; i++) {
+      unsigned long a = sp + (unsigned long)i * 8;
+      if (!rw_readable(a)) {
+        if (i == 0) {
+          rb_s(&b, "[SIGDUMP] stk [+unmapped at rsp]\n");
+          printed = 1;
+        }
+        break;
+      }
+      if (i == 0) rb_s(&b, "[SIGDUMP] stk");
+      unsigned long v = *(volatile unsigned long *)a;
+      rb_c(&b, ' ');
+      rb_c(&b, '[');
+      rb_hex(&b, (unsigned long)i * 8);
+      rb_s(&b, "]=");
+      rb_hex(&b, v);
+      printed = 1;
     }
-    if (!rw_readable(a)) {
-      rb_s(&b, " [+unmapped]");
-      break;
-    }
-    unsigned long v = *(volatile unsigned long *)a;
-    rb_c(&b, ' ');
-    rb_c(&b, '[');
-    rb_hex(&b, (unsigned long)i * 8);
-    rb_s(&b, "]=0x");
-    rb_hex(&b, v);
-    unsigned long off = 0;
-    const char *m = rw_mod_of(v, &off);
-    if (m) {
-      rb_c(&b, '(');
-      rb_s(&b, m);
-      rb_s(&b, "+0x");
-      rb_hex(&b, off);
-      rb_c(&b, ')');
-    }
-    if ((i & 3) == 3) {
-      rb_s(&b, "\n");
-      rb_flush(&b);
-      rb_s(&b, "[SIGDUMP] stk");
-    }
+    if (printed) rb_s(&b, "\n");
   }
-  rb_s(&b, "\n");
-  rb_flush(&b);
 
   /* Every word of the first 2 KiB of stack that lands inside a module, in
      stack order (so frame order): the caller chain, with offsets that
      objdump -d resolves without the guest's missing /proc/self/maps. */
-  rb_s(&b, "[SIGDUMP] chain");
-  int hits = 0;
-  for (unsigned long i = 0; i < 0x800 && hits < 20; i += 8) {
-    unsigned long a = sp + i;
-    if (!rw_readable(a)) break;
-    unsigned long v = *(volatile unsigned long *)a;
-    unsigned long off = 0;
-    const char *m = rw_mod_of(v, &off);
-    if (!m) continue;
-    rb_s(&b, " [+0x");
-    rb_hex(&b, i);
-    rb_s(&b, "]->");
-    rb_s(&b, m);
-    rb_s(&b, "+0x");
-    rb_hex(&b, off);
-    hits++;
+  {
+    unsigned long sp = (unsigned long)g[REG_RSP];
+    int hits = 0;
+    rb_s(&b, "[SIGDUMP] chain");
+    for (unsigned long i = 0; i < 0x800 && hits < 20; i += 8) {
+      unsigned long a = sp + i;
+      if (!rw_readable(a)) break;
+      unsigned long v = *(volatile unsigned long *)a;
+      unsigned long off = 0;
+      const char *m = rw_mod_of(v, &off);
+      if (!m) continue;
+      rb_s(&b, " [+0x");
+      rb_hex(&b, i);
+      rb_s(&b, "]->");
+      rb_s(&b, m);
+      rb_s(&b, "+0x");
+      rb_hex(&b, off);
+      hits++;
+    }
+    rb_s(&b, "\n");
   }
-  rb_s(&b, "\n");
-  rb_flush(&b);
 
+  rb_flush(&b); /* ONE write(2) with the whole record */
+
+  /* Chain: Unity's handler runs second, with the untouched ucontext, so its
+     crash report/exit still happens.  If there is none, the instruction is
+     re-executed against SIG_DFL so the kernel's own record is produced. */
+  if (rw_chain_handler) {
+    void (*h)(int, siginfo_t *, void *) = rw_chain_handler;
+    rw_chain_handler = 0;
+    h(sig, si, ucv);
+  }
   signal(sig, SIG_DFL);
 }
 
@@ -497,6 +592,13 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *old) {
             sig, (void *)act->sa_handler, (unsigned)act->sa_flags,
             __builtin_return_address(0), rw_sig_keep() ? "KEEP-OURS" : "replaced");
     if (rw_sig_keep()) {
+      /* L59: remember who asked, so the dump can chain to it after printing
+         ours -- ours FIRST, Unity's second.  Last install wins, which is what
+         Linux would have done had we not refused it.  A SA_SIGINFO handler is
+         the only kind that can be called with our (sig, siginfo, ucontext). */
+      if ((act->sa_flags & SA_SIGINFO) && act->sa_sigaction &&
+          act->sa_sigaction != rw_sig_handler)
+        rw_chain_handler = act->sa_sigaction;
       if (old) {
         memset(old, 0, sizeof *old);
         old->sa_sigaction = rw_sig_handler;
@@ -585,10 +687,37 @@ static void rw_sig_install(void) {
   const char *v = getenv("RW_SIGDUMP");
   if (v && v[0] == '0') return;
   rw_mods_collect();
+  /* L59: our own alternate signal stack.  A stack overflow leaves rsp below
+     the mapping, and the kernel cannot push a signal frame there: the process
+     dies with status 11 and the handler never runs, whatever is installed.
+     SA_ONSTACK + this stack is the only way the dump can speak from an
+     overflowed thread.  Unity's own SIGSEGV install asks for SA_ONSTACK
+     (flags 0x8000004); ours did not, which is why §45.8's death had no row. */
+  {
+    static void *alt;
+    if (!alt)
+      alt = mmap(0, 64 * 1024, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (alt && alt != MAP_FAILED) {
+      stack_t ss;
+      ss.ss_sp = alt;
+      ss.ss_size = 64 * 1024;
+      ss.ss_flags = 0;
+      char line[128];
+      struct rb b = {line, line, line + sizeof line - 2};
+      int rc = sigaltstack(&ss, 0);
+      rb_s(&b, "[RWMAIN] sigaltstack sp=0x");
+      rb_hex(&b, (unsigned long)alt);
+      rb_s(&b, " size=65536 rc=");
+      rb_dec(&b, rc);
+      rb_s(&b, "\n");
+      rb_flush(&b);
+    }
+  }
   struct sigaction sa;
   memset(&sa, 0, sizeof sa);
   sa.sa_sigaction = rw_sig_handler;
-  sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+  sa.sa_flags = SA_SIGINFO | SA_NODEFER | SA_ONSTACK;
   sigemptyset(&sa.sa_mask);
   /* The interposed sigaction() above is this file's own definition, so
      calling it here would take the "KEEP-OURS" branch and never reach the
@@ -642,6 +771,116 @@ static void rw_sig_install(void) {
  * launcher.
  */
 #ifndef RW_NO_SHADOW_PTHREAD
+
+/* ---- L59: pthread_create, counted, with an altstack per thread -----------
+ * Two jobs, both in service of the SIGSEGV dump:
+ *   1. count live threads, so the dump carries `live=` at the fault instant
+ *      without asking the kernel (the kernel's [THRS]/[SIGX] rows are the
+ *      authoritative cross-check);
+ *   2. arm an alternate signal stack in every new thread.  A stack overflow
+ *      is the one fault a handler can only report from an altstack, and Linux
+ *      does not inherit the main thread's across pthread_create -- §45.8's
+ *      death at ~410 s is exactly the shape a thread-stack overflow takes
+ *      when it has none (no frame, so no handler, so no dump at all).
+ *
+ * The altstacks come from a fixed pool (64 x 32 KiB, BSS) with a free list, so
+ * a thread-pool that churns hundreds of workers costs a bounded 2 MiB rather
+ * than a leak per thread.  Everything fails open: if the wrapper or the stack
+ * cannot be had, the caller still gets its thread.
+ */
+#define RW_ALT_N 64
+#define RW_ALT_SZ (32 * 1024)
+static char rw_alt_mem[RW_ALT_N][RW_ALT_SZ] __attribute__((aligned(16)));
+static unsigned char rw_alt_used[RW_ALT_N];
+static volatile int rw_alt_lock;
+
+struct rw_thr_start { void *(*fn)(void *); void *arg; };
+
+static void *rw_alt_take(void) {
+  while (__atomic_exchange_n(&rw_alt_lock, 1, __ATOMIC_ACQUIRE)) { }
+  void *p = 0;
+  for (int i = 0; i < RW_ALT_N; i++)
+    if (!rw_alt_used[i]) { rw_alt_used[i] = 1; p = rw_alt_mem[i]; break; }
+  __atomic_store_n(&rw_alt_lock, 0, __ATOMIC_RELEASE);
+  return p;
+}
+
+static void rw_alt_give(void *p) {
+  if (!p) return;
+  int idx = (int)(((char *)p - (char *)rw_alt_mem) / RW_ALT_SZ);
+  if (idx < 0 || idx >= RW_ALT_N) return;
+  while (__atomic_exchange_n(&rw_alt_lock, 1, __ATOMIC_ACQUIRE)) { }
+  rw_alt_used[idx] = 0;
+  __atomic_store_n(&rw_alt_lock, 0, __ATOMIC_RELEASE);
+}
+
+static void rw_thr_cleanup(void *p) {
+  if (p) {
+    stack_t d;
+    d.ss_sp = 0;
+    d.ss_size = 0;
+    d.ss_flags = SS_DISABLE;
+    sigaltstack(&d, 0);
+    rw_alt_give(p);
+  }
+  __atomic_sub_fetch(&rw_live_threads, 1, __ATOMIC_SEQ_CST);
+}
+
+static void *rw_thr_tramp(void *v) {
+  struct rw_thr_start *s = (struct rw_thr_start *)v;
+  void *(*fn)(void *) = s->fn;
+  void *arg = s->arg;
+  free(s);
+  void *alt = rw_alt_take();
+  if (alt) {
+    stack_t ss;
+    ss.ss_sp = alt;
+    ss.ss_size = RW_ALT_SZ;
+    ss.ss_flags = 0;
+    sigaltstack(&ss, 0);
+  }
+  void *r = 0; /* declared outside the push block: the macro opens a scope */
+  pthread_cleanup_push(rw_thr_cleanup, alt);
+  r = fn(arg);
+  pthread_cleanup_pop(1); /* runs the cleanup: count + altstack back to pool */
+  return r;
+}
+int pthread_create(pthread_t *t, const pthread_attr_t *a,
+                   void *(*fn)(void *), void *arg) {
+  typedef int (*cr_t)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+  static cr_t real;
+  if (!real)
+    real = (cr_t)dlvsym(RTLD_NEXT, "pthread_create", "GLIBC_2.2.5");
+  if (!real) {
+    fprintf(stderr, "[RWMAIN] FATAL: pthread_create not resolvable via RTLD_NEXT\n");
+    return 11;
+  }
+  struct rw_thr_start *s = (struct rw_thr_start *)malloc(sizeof *s);
+  if (!s) return real(t, a, fn, arg); /* uncounted, but the thread still runs */
+  s->fn = fn;
+  s->arg = arg;
+  __atomic_add_fetch(&rw_live_threads, 1, __ATOMIC_SEQ_CST);
+  int created = __atomic_add_fetch(&rw_created_threads, 1, __ATOMIC_SEQ_CST);
+  int rc = real(t, a, rw_thr_tramp, s);
+  if (rc != 0) {
+    __atomic_sub_fetch(&rw_live_threads, 1, __ATOMIC_SEQ_CST);
+    free(s);
+    fprintf(stderr, "[RWMAIN] threads: pthread_create rc=%d live=%d created=%d\n",
+            rc, (int)rw_live_threads, created);
+    return rc;
+  }
+  /* One row every 8th live crossing: a 300+ thread climb is visible in the
+     serial without printing a line per create. */
+  int live = __atomic_load_n(&rw_live_threads, __ATOMIC_RELAXED);
+  {
+    static int last;
+    if (live != last && (live > 64 || (live & 7) == 0)) {
+      last = live;
+      fprintf(stderr, "[RWMAIN] threads live=%d created=%d\n", live, created);
+    }
+  }
+  return 0;
+}
 
 /* ---- mutex flight recorder ----------------------------------------------
  * Printing every sync call floods the console (the allocator loops over three
