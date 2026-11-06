@@ -1,0 +1,2 @@
+usage: sync_gaming_md.py [-h] [--check | --fix | --adopt-orphans] [-v]
+sync_gaming_md.py: error: argument --fix: not allowed with argument --check
