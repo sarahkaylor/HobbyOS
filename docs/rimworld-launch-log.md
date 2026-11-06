@@ -8374,3 +8374,240 @@ after the `.bss`/past-EOF correction:
    DSOs got in §19/§20 has not been done for `VMK_IMG`.
 4. `slots` still climbs and `pthread_setschedparam` still fails (§46.9 items 2
    and 3); neither changed here.
+
+## 48. 2026-11-06 — M6/L61: the wall is **not** the code generator — `:403` is `mono_x86_patch_inline`'s `default:`, the `VA=-1` is Boehm's free list, and the interpreter control dies before the menu
+
+§47.7 named `x86-codegen.h:403` as "the code generator asked for an operand size
+it does not implement".  This lane decoded the assert against the exact source
+line, disassembled the fault that §47 counts as its sibling, and ran the
+interpreter control.  The first two are now precise; the third does not give the
+clean answer the plan expected, and the rows below say why.
+
+### 48.1 `x86-codegen.h:403` is `default: g_assert (0)` in `mono_x86_patch_inline`
+
+The string `../../mono/arch/amd64/../x86/x86-codegen.h` appears at `.rodata`
+0x29ea39 and is referenced from exactly **six** sites in all 24.7 MiB of text,
+all inside one function at **libmonobdwgc+0xf5600**.  That function is
+`amd64_patch()` (`mono/mini/mini-amd64.c`), and it is identifiable from its own
+assert strings, which are line-for-line the 2020-02 source:
+
+```text
+libmonobdwgc+0xf5600  switch on code[0]; REX skip; b8-r / 8b modrm00 rm5 /
+                      ff 15|25 / else x86_patch(code,target)
+   f5650  assert file:380  "code [1] >= 0x80 && code [1] <= 0x8F"
+   f5670  assert file:403  "0"                    <- the row Player.log printed
+   f5695  (jcc rel8 patch)
+   f56c7  (e9)
+   f56ef  assert file:414  "offset == (gint8)offset"
+   f5707  assert file:397  "code [1] == 0x15 || code [1] == 0x25"
+   f571f  assert file:410  "offset == (gint32)offset"
+```
+
+and the two `mini-amd64.c` asserts next to it print `!1` (line 204, the
+`mov 0(%rip),%reg` case) and `!2` (line 212, `call *off(%rip)`), which is this
+build's `g_assert (!1)` / `g_assert (!2)` pair.  So the containing function is
+`amd64_patch`, not a code emitter and not `mono_x86_patch` itself.
+
+`x86-codegen.h:403` is the last line of the opcode switch:
+
+```c
+	switch (*code) {
+	case 0xe8: case 0xe9: ...            /* call/jmp rel32 */
+	case 0x0f: g_assert (code [1] >= 0x80 && code [1] <= 0x8F); ...
+	case 0xe0 ... 0xe2: case 0xeb: case 0x70 ... 0x7f: ...
+	case 0xFF: g_assert (code [1] == 0x15 || code [1] == 0x25);
+		   g_assert (0);
+	default:
+		g_assert (0);            /* <-- line 403, condition string "0" */
+	}
+```
+
+So the check is **not** a size dispatch and **not** the rel32 branch-range
+check of L38: it is the *default* arm, reached when `amd64_patch()` is asked to
+patch a code address whose first byte (after an optional REX) is none of
+`e8 e9 0f e0 e1 e2 eb 70-7f ff` and none of `amd64_patch`'s own `b8-r`,
+`REX 8b modrm00 rm5`, `ff 15/25`.  Its condition string is `"0"`, which is the
+exact text in `Player.log`.  Line 410 — `offset == (gint32)offset`, the check
+the L38 JIT arena was built for — is a different, *later* assert and did not
+fire.
+
+What value it saw was not captured: the abort is a userspace `abort()`, not a
+kernel fault, so there is no `[KREG]` row, and Mono's `g_assert` clobbers `rdi`
+before the message.  The register file is not recoverable from the SIGABRT
+path.  What the row does establish is the class: the byte at the patched address
+was not a branch/call opcode — i.e. the code buffer did not contain the
+instruction the emitter was patching.  (A probe build with the assert site
+replaced by `ud2` was staged — `RW_MONO_SO` — but the JIT-mode run to trigger
+it was pre-empted by the moving failures in 48.4.)
+
+### 48.2 The `VA=-1` is **not** in a JIT chunk; it is Boehm's `GC_malloc_kind_global`
+
+§47.6 lists run 1 as `#PF VA=0xFFFF... PC=0x1088A76564 (JIT arena)`.  The
+launcher's own SIGDUMP resolves that PC against its module list:
+
+```text
+[SIGDUMP] rip=0x1088a76564 (libmonobdwgc-2.0.so+0x275564) rsp=0x17ffffa8f0 ...
+[SIGDUMP] greg rax=0xffffffffffffffff rbx=0x2c rcx=0x1088dbf760 rdx=0x3
+          rsi=0x1088dc0020 rdi=0x2c
+```
+
+`libmonobdwgc` was mapped at 0x1088801000 in that run, so PC = base+0x275564,
+*15 MiB below* the arena the same run claimed (`[JITA] claim base=0x1088FE0000
+size=0x7020000`).  `jit=` was never true for this PC; §47.6's parenthetical is
+wrong and is corrected here.
+
+The instruction is `mov (%rax),%rdi` at +0x275564, inside
+**`GC_malloc_kind_global`** (the function starts at +0x275502):
+
+```text
+275536  lea   GC_arrays,%rcx
+27553d  mov   0x14d8(%rcx,%rbx,8),%rdx   ; rdx = GC_size_map[lb]  (lb=44 -> 3 granules)
+275550  lea   GC_obj_kinds,%rsi
+275557  mov   (%rsi,%rax,1),%rsi         ; rsi = ok->ok_freelist   (0x1088dc0020)
+27555b  mov   (%rsi,%rdx,8),%rax         ; rax = ok_freelist[3] == 0xFFFFFFFFFFFFFFFF
+27555f  test  %rax,%rax
+275562  je    2755b0                    ; (NULL would mean "refill", -1 does not)
+275564  mov   (%rax),%rdi                ; <-- fault, VA=-1
+```
+
+So the 48-byte free-list head was **0xFFFF_FFFF_FFFF_FFFF**: not NULL (the empty
+list), not a heap address.  That is corruption of Boehm's own freelist array
+(§48.4 says what kind).  No JITed method is involved: the frame chain in the
+same dump is entirely native Mono (`mono_jit_info_get_method+0x664`,
+`mono_gc_register_root+0x408`, `mono_string_new_size+0xd8`,
+`mono_object_get_virtual_method+0x1eb`, ...), which is what an allocation from
+runtime code (metadata/string/class setup) looks like.
+
+### 48.3 The interpreter control: the runtime ignores `MONO_ENV_OPTIONS`; the flag can be forced, and the interpreter has its own wall
+
+| run | how the interpreter was requested | `mono_use_interpreter` | outcome |
+|---|---|---|---|
+| L61-a | `MONO_ENV_OPTIONS=--interp` in the child env | **0** | JIT run; `tramp-amd64.c:641` right after the banner |
+| L61-b | same + `mono_jit_parse_options(2,{"mono","--interp"})` before `mono_jit_init` | **0** | JIT run; Unity's own `archive:/CAB-...` CRC failure + `Caught fatal signal signo:5` |
+| L61-c | `*(int *)mono_use_interpreter = 1` (exported global) before `mono_jit_init` | **1** | SIGSEGV at `libmonobdwgc+0x116e57` (interp frame setup) 30 s after launch, one line after `RimWorld 1.6.4871 rev600` |
+| L61-d | as c + the driver's second global (0x5b9cb8 = 0x100000000) | **1** | `Stack overflow in unmanaged` at the same point |
+
+Two things are established and one is not:
+
+1. **`MONO_ENV_OPTIONS` is inert in Unity's embedded Mono.**  The launcher
+   prints the runtime's own flag: `[RWMAIN] mono_use_interpreter=0
+   asked=--interp`.  `mono_jit_parse_options()` is the embedder's parser and its
+   own "Available options" list has no `interp` entry, so passing it there is
+   also inert.  Any future interpreter control must set the exported global (or
+   the driver's `-v`-style argv plumbing), not the environment.
+2. **With the interpreter actually on, the `x86-codegen.h:403` assert does not
+   occur.**  The process dies earlier and elsewhere: a NULL/foreign class
+   pointer read in interp frame setup (`movzwl (%rax)` with `rax` read from a
+   frame the native→interp transition had not built), i.e. a path this Unity
+   build never exercises.
+3. **The control therefore does not certify "game logic is correct".**  The
+   interpreter is not a working execution mode in this runtime, so a menu under
+   `--interp` is not available to prove the JIT is the only wall.
+
+What the control *does* settle is the negative: the failure is **not confined to
+the code generator**.  An execution mode with no amd64 code generation at all
+still dies in the same phase, in runtime code.
+
+### 48.4 Five runs, five sites: the ladder is a moving fault, not one codegen bug
+
+| run | end | where |
+|---|---|---|
+| L60-1 | `#PF VA=0xFFFFFFFFFFFFFFFF PC=libmonobdwgc+0x275564` | Boehm `GC_malloc_kind_global`, freelist head = -1 |
+| L60-2 | `fault-in-handler` + image `#UD 0x1000010970` | launcher image page |
+| L60-3 | `x86-codegen.h:403` | `amd64_patch` (a JIT code buffer) at ~405 s |
+| L61-a | `tramp-amd64.c:641` (`g_assert_not_reached`) | `mono_arch_create_specific_trampoline`, rel32 range |
+| L61-b | `The file 'archive:/CAB-...' is corrupted!` + `signo:5` | Unity asset archive read |
+
+The variance is not only in *where* a run dies but in *whether* it does: two
+L61 JIT-mode runs (same build, same image) were still alive at their boundaries
+(600 s and 900 s), resident 1138 and 1625 MiB with 26-37 threads, still in the
+def/asset load and with no fault row — the L60 runs died at 265 MiB at ~405 s.
+A deterministic codegen abort cannot produce that spread.
+
+A deterministic codegen bug produces one site.  Five sites in the same phase,
+with the same build and the same inputs, is the signature of **state-dependent
+corruption**, and two of the five (48.2, 48.3) are outside the code generator
+entirely.  §47.9 item 2 named the remaining candidate: a read that "succeeds"
+without delivering its bytes (the `[BLKQ] stall ... CSTS=0` → `controller reset
+#1` immediately before a page-in, and `[FATW] ZERORD` in the FAT16 write path)
+is still the one mechanism that can touch every one of these sites.  The next
+lane should treat that as the primary hypothesis, not the JIT.
+
+### 48.5 What this lane changed
+
+1. **`/INTERP` — a documented, real interpreter switch.**  `rwlaunch` exports
+   `RW_MONO_INTERP=1`; `rwmain` loads `libmonobdwgc` before UnityPlayer,
+   resolves `mono_use_interpreter`, sets it, and prints
+   `[RWMAIN] INTERP: handle=.. parse=.. mono_use_interpreter=1` so every run
+   says which engine it used.  This is the only way to run this runtime without
+   the amd64 JIT, and it is the control §48.3 is built on.  It is **not** a path
+   to the menu yet (the interpreter faults in its own entry path).
+2. **`RW_MONO_SO`** stages a byte-patched `libmonobdwgc` from a named file
+   instead of the shared export, so assert-site probes never modify
+   `/srv/nfs/rimworld` (`RW_MONO_SO=obj/l61/libmonobdwgc.ud2.so`).
+3. **`RimWorldLinux.l61`** — `rwlaunch` prefers this private name when present,
+   because the NFS export is shared with other lanes and a concurrent harness
+   installs its own AD-9 launcher over `/NFS/RimWorldLinux` while this guest is
+   booting (measured: one run started with the other lane's 96,432-byte build,
+   without the switch under test).
+4. `tools/rw/l61-gates.sh` — the §47.8 tier, unchanged, for a delta.
+
+### 48.6 Regression
+
+| gate | result |
+|---|---|
+| `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` | **417 run, 0 failed** |
+| `t3_linux_probe.sh redzone` | PASS |
+| `t3_linux_probe.sh mmap_race` | PASS |
+| `m2_mono.sh` | PASS |
+| `m2_tp.sh` | PASS |
+| `m2_threads.sh` | PASS |
+| `m12_thread_ceiling.sh` | PASS |
+| `m3_window_probe.py` | PASS |
+| `m4_gl_probe.py` | PASS |
+| `tools/rw/run-rwnfs-probe.sh` | PASS |
+
+### 48.7 What is left
+
+1. **The codegen row is precise but not the wall.**  `x86-codegen.h:403` is
+   `default: g_assert (0)` in `mono_x86_patch_inline`; it fires when
+   `amd64_patch()` finds a non-branch byte where the emitter expected one.  Its
+   exact byte and method are still unmeasured (the `ud2` probe build is staged
+   and ready: `RW_MONO_SO=obj/l61/libmonobdwgc.ud2.so`, which traps at both this
+   site and `tramp-amd64.c:641` and leaves the code pointer in `rdi`/`rax` for
+   `[KREG]`).
+2. **The interpreter is not a fallback.**  Setting `mono_use_interpreter`
+   starts the interpreter (`=1` verified) but its native→interp entry path
+   faults at `+0x116e57`; the driver's second global only converts that into an
+   unmanaged stack overflow.  Do not present `--interp` as a shipped mode until
+   that entry path is fixed.
+3. **The storage layer is the leading hypothesis for the moving ladder**
+   (§48.4): one bad page-in can produce a corrupted freelist, a JIT code buffer
+   with a wrong byte, a CAB that fails its own CRC, and a trampoline that is
+   4 GiB from its target.  The row to fix is still "never complete a request
+   whose DMA did not land"; the verification in §47.5 covers executable pages
+   only.
+
+### 48.8 Two JIT-mode runs that did not fail — and still did not reach the menu
+
+Because §48.4 makes "where it dies" a coin flip, the lane ran the same build for
+600 s and then 900 s with no `/INTERP`:
+
+| run | wall | resident | threads | `[XSW]` frames | NFS bytes | end |
+|---|---|---|---|---|---|---|
+| 600 s | 600 s (harness boundary) | 1138 MiB | 37 | **0** | 264.5 MiB | child still alive, no fault row |
+| 900 s | 900 s (launcher `RW_WAIT_SECS`) | 1625 MiB | 26 | **0** | 264.5 MiB | child still alive, no fault row |
+
+Both runs were still in the def/language load when the harness cut them (the
+last `[XO]` rows are Biotech/Royalty `Languages/English/Keyed/*.xml`), and
+neither ever opened a swap path: `[XSW] n=0` for the whole window.  So even when
+the corruption does not fire, the load does not converge on the menu inside
+15 minutes — 264.5 MiB of NFS reads and 1.6 GiB resident with no frame.  That
+is a second, independent blocker: the load is either re-walking the def tree or
+growing without bound, and it is not the code generator either.
+
+Conclusion for the plan: **the wall is not codegen-only, and a JIT bailout
+cannot reach the menu today.**  The two rows that settle it are 48.2 (the
+`VA=-1` is Boehm's freelist, not JIT code) and 48.3 (an execution mode with no
+codegen still dies in the same phase).  The codegen assert of 48.1 is a real
+bug and is now precisely located, but fixing it removes one of five sites.

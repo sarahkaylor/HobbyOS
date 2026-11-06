@@ -251,10 +251,21 @@ __attribute__((section(".text._start"))) void _start(void) {
   pd(brc);
   pc("\n");
 
-  chdir_gamedir(RW_GAME);
+  /* M6/L61: the NFS export is shared by every lane on this host, and a
+     concurrent lane's harness installs its own AD-9 launcher over
+     /NFS/RimWorldLinux while this guest is booting (measured: a run started
+     with the other lane's 96,432-byte build, i.e. without the switch this lane
+     was testing).  A private name in the same directory keeps this lane's
+     binary, and exe_dir still resolves to /NFS, so the data tree, Mono path
+     and managed bind are unchanged. */
+  const char *game = RW_GAME;
+  if (access(RW_NFS_MNT "/RimWorldLinux.l61", 1 /* X_OK */) == 0)
+    game = RW_NFS_MNT "/RimWorldLinux.l61";
+
+  chdir_gamedir(game);
 
   char *argv[] = {
-      (char *)RW_GAME,
+      (char *)game,
       (char *)"-force-glcore",
       (char *)"-screen-width", (char *)"1280",
       (char *)"-screen-height", (char *)"720",
@@ -319,6 +330,33 @@ __attribute__((section(".text._start"))) void _start(void) {
   char coop_env[40];
   char nogc_env[24];
   char tpcpu_env[40];
+  /* M6/L61 interpreter control: /INTERP makes Mono run managed code in its
+     interpreter instead of the amd64 JIT.  This is the control that separates
+     "the JIT is the wall" from "the runtime below the JIT is the wall": the
+     same binary, the same managed assemblies, no code generator.  Mono reads
+     MONO_ENV_OPTIONS inside mono_jit_init, which Unity calls after this
+     process has already exec'd, so the marker is the only way in from the
+     guest desktop (a host export never reaches the child). */
+  char interp_env[40];
+  char interp_env2[40];
+  {
+    int ik = open("/INTERP", 0 /* O_RDONLY */);
+    int on = ik >= 0;
+    if (ik >= 0) close(ik);
+    /* MONO_ENV_OPTIONS is the documented way and is kept for the record, but
+       Unity's embedded runtime never parses it (measured: the flag stayed 0).
+       RW_MONO_INTERP is the launcher's own switch: it makes rwmain load the
+       runtime first and call mono_jit_parse_options("--interp") before
+       UnityPlayer initialises Mono. */
+    const char *ie = on ? "MONO_ENV_OPTIONS=--interp" : "";
+    int k = 0;
+    while (ie[k]) { interp_env[k] = ie[k]; k++; }
+    interp_env[k] = 0;
+    const char *ie2 = on ? "RW_MONO_INTERP=1" : "";
+    k = 0;
+    while (ie2[k]) { interp_env2[k] = ie2[k]; k++; }
+    interp_env2[k] = 0;
+  }
   {
     const char *lvl = (mono_on || tp_on) ? "MONO_LOG_LEVEL=debug"
                                          : "MONO_LOG_LEVEL=error";
@@ -361,6 +399,8 @@ __attribute__((section(".text._start"))) void _start(void) {
       coop_env,
       nogc_env,
       tpcpu_env,
+      interp_env,
+      interp_env2,
       (char *)"HOME=" RW_HOME,
       mtx_env,
       glx_env,
