@@ -15,6 +15,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 cd "$ROOT" || exit 2
 TIMEOUT_S=420
 while [ $# -gt 0 ]; do
@@ -62,11 +64,12 @@ if [ "${RW_SKIP_EXPORT:-0}" != 1 ]; then
     echo "EXPORT FAILED"; tail -20 "$OUT/export.log"; exit 1; }
   tail -3 "$OUT/export.log"
 fi
-[ -d /srv/nfs/rimworld ] || { echo "ENVIRONMENT: /srv/nfs/rimworld missing"; exit 2; }
+[ -d "$RW_EXPORT" ] || { echo "ENVIRONMENT: $RW_EXPORT missing"; exit 2; }
 
 CFG="$OUT/wave.cfg"
 printf 'RWBENCH.BIN\n' >"$CFG"
-STAGE="mcopy -o -i $ROOT/disk.img $OUT/rwnfs_bench.bin ::/RWBENCH.BIN && mcopy -o -i $ROOT/disk.img $CFG ::/WAVE.CFG"
+printf '%s\n' "$RW_EXPORT" >"$OUT/nfsexport"
+STAGE="mcopy -o -i $ROOT/disk.img $OUT/rwnfs_bench.bin ::/RWBENCH.BIN && mcopy -o -i $ROOT/disk.img $OUT/nfsexport ::/NFSEXPORT && mcopy -o -i $ROOT/disk.img $CFG ::/WAVE.CFG"
 
 echo "== run: t3_tier intel (deadline ${TIMEOUT_S}s, log $LOG)"
 T3_TIMEOUT="$TIMEOUT_S" T3_STAGE="$STAGE" T3_MIN_LINES=1 TOOLS_SKIP=1 \

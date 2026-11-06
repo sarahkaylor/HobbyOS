@@ -167,6 +167,11 @@ static int el_map_region(struct addr_space *as, uint64_t va, uint64_t len,
       frame_free(fr);
       return -ENOMEM;
     }
+    /* M6/L63: provenance.  This path stages the image with ONE full-file
+       read that must match the file's size exactly (el_read_file), then
+       copies pages out of that stage: `verified` means the page's bytes
+       came from a read the loader count-checked, not a zero fill. */
+    vm_pub_note(as, a, base_off, prot, 1, VM_PUB_FILE, fr, 1, VM_PW_ELF);
   }
   return 0;
 }

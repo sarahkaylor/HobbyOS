@@ -23,6 +23,8 @@ run m2_mono     bash tools/gate/m2_mono.sh
 run m2_tp       bash tools/gate/m2_tp.sh
 run m2_threads  bash tools/gate/m2_threads.sh
 run m12         bash tools/gate/m12_thread_ceiling.sh
+
+run mmap_race   bash tools/gate/t3_linux_probe.sh mmap_race
 run m3_window   python3 tools/gate/m3_window_probe.py
 run m4_gl       python3 tools/gate/m4_gl_probe.py
 run rwnfs       bash tools/rw/run-rwnfs-probe.sh

@@ -27,6 +27,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include "libc.h"
+#include "rwnfs_lane.h" /* M6/L63: /NFSEXPORT */
 
 #ifndef RW_NFS_SERVER
 #define RW_NFS_SERVER "10.0.2.2"
@@ -34,7 +35,9 @@
 #ifndef RW_NFS_ALT
 #define RW_NFS_ALT "192.168.0.123"
 #endif
+#ifndef RW_NFS_EXPORT
 #define RW_NFS_EXPORT "/srv/nfs/rimworld"
+#endif
 #define RW_NFS_MNT "/NFS"
 
 #define ASSETS "/NFS/RimWorldLinux_Data/resources.assets"
@@ -177,11 +180,26 @@ int main(int argc, char **argv) {
   print("[BENCH] rwnfs_bench start\n");
 
   if (wait_for_ip() != 0) { print("[BENCH] FAIL no ip\n"); return 1; }
-  if (do_mount(RW_NFS_SERVER ":" RW_NFS_EXPORT) != 0) {
-    print("[BENCH] mount " RW_NFS_SERVER " failed, trying " RW_NFS_ALT "\n");
-    if (do_mount(RW_NFS_ALT ":" RW_NFS_EXPORT) != 0) {
-      print("[BENCH] FAIL mount\n");
-      return 1;
+  /* M6/L63: the per-lane export named by /NFSEXPORT (fallback: default). */
+  {
+    const char *exp = rw_nfs_export_path(RW_NFS_EXPORT);
+    static char mbuf[128];
+    int ml = 0;
+    for (int i = 0; RW_NFS_SERVER[i] && ml < 100; i++) mbuf[ml++] = RW_NFS_SERVER[i];
+    mbuf[ml++] = ':';
+    for (int i = 0; exp[i] && ml < 126; i++) mbuf[ml++] = exp[i];
+    mbuf[ml] = 0;
+    if (do_mount(mbuf) != 0) {
+      ml = 0;
+      for (int i = 0; RW_NFS_ALT[i] && ml < 100; i++) mbuf[ml++] = RW_NFS_ALT[i];
+      mbuf[ml++] = ':';
+      for (int i = 0; exp[i] && ml < 126; i++) mbuf[ml++] = exp[i];
+      mbuf[ml] = 0;
+      print("[BENCH] mount " RW_NFS_SERVER " failed, trying " RW_NFS_ALT "\n");
+      if (do_mount(mbuf) != 0) {
+        print("[BENCH] FAIL mount\n");
+        return 1;
+      }
     }
   }
   print("[BENCH] mounted\n");

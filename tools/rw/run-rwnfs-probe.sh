@@ -27,6 +27,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# M6/L63: this worktree's own export
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 SERVER="${RW_NFS_SERVER:-10.0.2.2}"
 ALT="${RW_NFS_ALT:-192.168.0.123}"
 OUT="$ROOT/obj/rwnfs_probe"
@@ -78,11 +82,11 @@ if [ "${RW_SKIP_EXPORT:-0}" != "1" ]; then
     echo "EXPORT FAILED"; tail -30 "$OUT/export.log"; exit 1; }
   tail -4 "$OUT/export.log"
 fi
-if [ ! -d /srv/nfs/rimworld ]; then echo "ENVIRONMENT: /srv/nfs/rimworld missing"; exit 2; fi
+if [ ! -d "$RW_EXPORT" ]; then echo "ENVIRONMENT: $RW_EXPORT missing"; exit 2; fi
 HDYN="$ROOT/obj/intel/HDYN.BIN"
 [ -f "$HDYN" ] || { echo "ENVIRONMENT: obj/intel/HDYN.BIN missing (make ARCH=intel obj/intel/HDYN.BIN)"; exit 2; }
-cp -f "$HDYN" /srv/nfs/rimworld/hdyn.bin
-ls -l /srv/nfs/rimworld/hdyn.bin
+cp -f "$HDYN" "$RW_EXPORT/hdyn.bin"
+ls -l "$RW_EXPORT/hdyn.bin"
 
 # Fixture for the FAT16 LFN half: a long mixed-case name written by mcopy
 # (i.e. a real VFAT long-name record + a short alias), which the probe opens
@@ -93,7 +97,9 @@ printf 'LFN-OK:RimWorldLinux_Data:0001\n' > "$LFN_SRC"
 CFG="$OUT/wave.cfg"
 printf 'RWNFS.BIN\n' > "$CFG"
 
+printf '%s\n' "$RW_EXPORT" >"$OUT/nfsexport"
 STAGE="mcopy -o -i $ROOT/disk.img $OUT/rwnfs_probe.bin ::/RWNFS.BIN && \
+mcopy -o -i $ROOT/disk.img $OUT/nfsexport ::/NFSEXPORT && \
 mcopy -o -i $ROOT/disk.img $LFN_SRC ::/RimWorldLinux_Data && \
 mcopy -o -i $ROOT/disk.img $CFG ::/WAVE.CFG"
 

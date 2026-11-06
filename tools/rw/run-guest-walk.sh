@@ -14,11 +14,13 @@
 # obj/rw-desktop/walk.out, and a host-side diff in obj/rw-desktop/walk-diff.txt.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 cd "$ROOT" || exit 2
 export HOME=/home/sarah
 OUT="$ROOT/obj/rw-desktop"
 IMG="$ROOT/disk.img"
-GAME="/srv/nfs/rimworld"
+GAME="$RW_EXPORT"
 [ -d "$GAME/Data" ] || { echo "no game tree at $GAME"; exit 2; }
 mkdir -p "$OUT"
 

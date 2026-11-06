@@ -19,10 +19,13 @@
 #      GLIBC231 / GLIBC231_DEV to reuse an extraction.
 #
 # Nothing from the game directory is copied into the tree: the guest reads it
-# over NFS from /srv/nfs/rimworld (tools/rw/nfs-export.sh sync).
+# over NFS from $RW_EXPORT (tools/rw/nfs-export.sh sync; one export per worktree).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 2
+# M6/L63: this worktree's own export (/srv/nfs/rimworld-<lane>).
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 
 MODE="${1:-game}"
 [ "$MODE" = probe ] || [ "$MODE" = launchprobe ] || [ "$MODE" = game ] || \
@@ -135,7 +138,7 @@ if [ "$MODE" = stub ] || [ "$MODE" = launchprobe ]; then
     # Same launcher, pointed at the stand-in; the stand-in carries the game's
     # NEEDED list and $ORIGIN rpath so ld.so must resolve UnityPlayer.so from
     # /NFS exactly as it would for the real binary.
-    [ -f /srv/nfs/rimworld/UnityPlayer.so ] || { echo "ENVIRONMENT: no UnityPlayer.so in export"; exit 2; }
+    [ -f "$RW_EXPORT/UnityPlayer.so" ] || { echo "ENVIRONMENT: no UnityPlayer.so in export"; exit 2; }
     clang "${UCFLAGS[@]}" -DRW_GAME='"/NFS/RWTEST.ELF"' -c src/user/rwlaunch.c -o "$OUT/rwstublaunch.o" || exit 2
     ld.lld -T src/user/linker.ld -e _start -o "$OUT/rwstublaunch.elf" "$OUT/rwstublaunch.o" obj/intel/libc.a || exit 2
     llvm-objcopy -O binary "$OUT/rwstublaunch.elf" "$OUT/rwstublaunch.bin"
@@ -144,7 +147,7 @@ if [ "$MODE" = stub ] || [ "$MODE" = launchprobe ]; then
         "$LDIR/libc.so.6" "$DLIB/crtn.o" \
         -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2 \
         -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none \
-        -Wl,--no-as-needed -Wl,-rpath,'$ORIGIN' -L/srv/nfs/rimworld -l:UnityPlayer.so \
+        -Wl,--no-as-needed -Wl,-rpath,'$ORIGIN' -L"$RW_EXPORT" -l:UnityPlayer.so \
         -Wl,--allow-shlib-undefined || { echo "stub link failed"; exit 2; }
     readelf -dW "$OUT/RWTEST.ELF" | grep -E 'NEEDED|RUNPATH' | sed 's/^/  stub: /'
   else
@@ -171,6 +174,10 @@ done
 stage "$LDIR/ld-2.31.so" ::/lib64/ld-linux-x86-64.so.2
 
 printf 'PROC-FIXTURE:0123456789abcdef\n' > "$OUT/PROBE.TXT"
+# M6/L63: the guest mounts what /NFSEXPORT names (rwlaunch -> rwnfs_lane.h).
+printf '%s\n' "$RW_EXPORT" >"$OUT/nfsexport"
+stage "$OUT/nfsexport" ::/NFSEXPORT
+echo "  staged: /NFSEXPORT -> $RW_EXPORT (lane $RW_LANE)"
 
 if [ "$MODE" = probe ]; then
   # A path LONGER than the 32-byte display name on purpose: /proc/self/exe
@@ -188,12 +195,12 @@ else
       echo "EXPORT FAILED"; tail -20 "$OUT/export.log"; exit 2; }
     tail -3 "$OUT/export.log"
   fi
-  [ -x /srv/nfs/rimworld/RimWorldLinux ] || { echo "ENVIRONMENT: /srv/nfs/rimworld/RimWorldLinux missing"; exit 2; }
+  [ -x "$RW_EXPORT/RimWorldLinux" ] || { echo "ENVIRONMENT: $RW_EXPORT/RimWorldLinux missing"; exit 2; }
   if [ "$MODE" = stub ]; then
-    cp -f "$OUT/RWTEST.ELF" /srv/nfs/rimworld/RWTEST.ELF
+    cp -f "$OUT/RWTEST.ELF" "$RW_EXPORT/RWTEST.ELF"
     stage "$OUT/rwstublaunch.bin" ::/RWLAUNCH.BIN
   elif [ "$MODE" = launchprobe ]; then
-    cp -f "$OUT/rw_procprobe" /srv/nfs/rimworld/RWPROBE.ELF
+    cp -f "$OUT/rw_procprobe" "$RW_EXPORT/RWPROBE.ELF"
     stage "$OUT/rwprobelaunch.bin" ::/RWLAUNCH.BIN
     stage "$OUT/PROBE.TXT" ::/PROBE.TXT
   elif [ "$MODE" = ad9 ]; then
@@ -209,7 +216,7 @@ else
                RimWorldLinux_Data/MonoBleedingEdge/x86_64/libMonoPosixHelper.so \
                RimWorldLinux_Data/Plugins/lib_burst_generated.so \
                RimWorldLinux_Data/Plugins/libsteam_api.so; do
-      src="/srv/nfs/rimworld/$rel"
+      src="$RW_EXPORT/$rel"
       [ -f "$src" ] || { echo "ENVIRONMENT: missing $src"; exit 2; }
       stage "$src" "::/RWDSO/${rel##*/}"
     done
@@ -219,7 +226,7 @@ else
     # call throw (Interop.Sys type init), which is the M6 managed-layer wall.
     mmd -i "$IMG" ::/usr ::/usr/lib >/dev/null 2>&1 || true
     for so in libmono-native.so libMonoPosixHelper.so; do
-      stage "/srv/nfs/rimworld/RimWorldLinux_Data/MonoBleedingEdge/x86_64/$so" "::/usr/lib/$so"
+      stage "$RW_EXPORT/RimWorldLinux_Data/MonoBleedingEdge/x86_64/$so" "::/usr/lib/$so"
     done
     # libmonobdwgc / libMonoPosixHelper NEED libz.so.1, which /LIB64 does not
     # carry yet (the m2_mono gate stages it from the same Mono tree).  The
@@ -241,11 +248,11 @@ else
     # (730 MiB) stays on NFS: only the assemblies need to be mmap-able.
     echo "== stage: M5c Managed/ locally under /RWMANAGED"
     mmd -i "$IMG" ::/RWMANAGED >/dev/null 2>&1 || true
-    HOSTN=$(find /srv/nfs/rimworld/RimWorldLinux_Data/Managed -maxdepth 1 -type f | wc -l)
-    HOSTB=$(find /srv/nfs/rimworld/RimWorldLinux_Data/Managed -maxdepth 1 -type f -printf '%s\n' \
+    HOSTN=$(find "$RW_EXPORT"/RimWorldLinux_Data/Managed -maxdepth 1 -type f | wc -l)
+    HOSTB=$(find "$RW_EXPORT"/RimWorldLinux_Data/Managed -maxdepth 1 -type f -printf '%s\n' \
             | awk '{s+=$1} END{print s+0}')
     [ "$HOSTN" -gt 0 ] || { echo "ENVIRONMENT: no Managed/ assemblies in the export"; exit 2; }
-    mcopy -o -i "$IMG" /srv/nfs/rimworld/RimWorldLinux_Data/Managed/* ::/RWMANAGED/ || {
+    mcopy -o -i "$IMG" "$RW_EXPORT"/RimWorldLinux_Data/Managed/* ::/RWMANAGED/ || {
       echo "mcopy of Managed/ failed"; exit 2; }
     # Verify by both counts and bytes: a silent truncation would show up as a
     # short byte total even with the right file count.  (mdir -b drops the
@@ -262,11 +269,12 @@ else
     # AD-9: install the launcher AS the game's executable, in the game dir; the
     # 14,720-byte ET_EXEC stub is preserved beside it as RimWorldLinux.orig.
     # A sync run above restores the stub, so this always re-installs.
-    if [ "$(stat -c %s /srv/nfs/rimworld/RimWorldLinux)" = 14720 ]; then
-      cp -f /srv/nfs/rimworld/RimWorldLinux /srv/nfs/rimworld/RimWorldLinux.orig
+    if [ "$(stat -c %s "$RW_EXPORT/RimWorldLinux")" = 14720 ]; then
+      cp -f "$RW_EXPORT/RimWorldLinux" "$RW_EXPORT/RimWorldLinux.orig"
     fi
-    cp -f "$OUT/RimWorldLinux.ad9" /srv/nfs/rimworld/RimWorldLinux
-    echo "  installed: $(stat -c '%s bytes' /srv/nfs/rimworld/RimWorldLinux) -> RimWorldLinux (stub: $(stat -c '%s' /srv/nfs/rimworld/RimWorldLinux.orig 2>/dev/null || echo '?') bytes)"
+    rm -f "$RW_EXPORT/RimWorldLinux"
+    cp -f "$OUT/RimWorldLinux.ad9" "$RW_EXPORT/RimWorldLinux"
+    echo "  installed: $(stat -c '%s bytes' "$RW_EXPORT/RimWorldLinux") -> $RW_EXPORT/RimWorldLinux (lane $RW_LANE, stub: $(stat -c '%s' "$RW_EXPORT/RimWorldLinux.orig" 2>/dev/null || echo '?') bytes)"
     stage "$OUT/rwlaunch.bin" ::/RWLAUNCH.BIN
   else
     stage "$OUT/rwlaunch.bin" ::/RWLAUNCH.BIN

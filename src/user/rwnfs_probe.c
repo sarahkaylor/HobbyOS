@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <sys/mman.h>
 #include "libc.h"
+#include "rwnfs_lane.h" /* M6/L63: /NFSEXPORT */
 
 #ifndef RW_NFS_SERVER
 #define RW_NFS_SERVER "10.0.2.2"     /* QEMU slirp host alias */
@@ -33,7 +34,9 @@
 #ifndef RW_NFS_ALT
 #define RW_NFS_ALT    "192.168.0.123" /* host LAN address (fallback) */
 #endif
+#ifndef RW_NFS_EXPORT
 #define RW_NFS_EXPORT "/srv/nfs/rimworld"
+#endif
 #define RW_NFS_MNT    "/NFS"
 
 #define RW_LFN_NAME    "/RimWorldLinux_Data"   /* mixed case, 12.3-incompatible */
@@ -342,11 +345,24 @@ __attribute__((section(".text._start"))) void _start(void) {
   }
   check(1, "network came up (DHCP)");
 
-  const char *source = RW_NFS_SERVER ":" RW_NFS_EXPORT;
+  /* M6/L63: the export this run owns, named by /NFSEXPORT. */
+  const char *exp = rw_nfs_export_path(RW_NFS_EXPORT);
+  static char srcbuf[128];
+  int sl = 0;
+  for (int i = 0; RW_NFS_SERVER[i] && sl < 100; i++) srcbuf[sl++] = RW_NFS_SERVER[i];
+  srcbuf[sl++] = ':';
+  for (int i = 0; exp[i] && sl < 126; i++) srcbuf[sl++] = exp[i];
+  srcbuf[sl] = 0;
+  const char *source = srcbuf;
   int rc = mount(source, RW_NFS_MNT);
   if (rc != 0) {
     note("mount via the slirp alias failed; trying the host LAN address");
-    source = RW_NFS_ALT ":" RW_NFS_EXPORT;
+    sl = 0;
+    for (int i = 0; RW_NFS_ALT[i] && sl < 100; i++) srcbuf[sl++] = RW_NFS_ALT[i];
+    srcbuf[sl++] = ':';
+    for (int i = 0; exp[i] && sl < 126; i++) srcbuf[sl++] = exp[i];
+    srcbuf[sl] = 0;
+    source = srcbuf;
     rc = mount(source, RW_NFS_MNT);
   }
   print("[RW] MOUNT source=");

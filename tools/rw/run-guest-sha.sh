@@ -5,7 +5,7 @@
 #
 # Output (serial): [SHA] <name> <sha256> <bytes> per file, [MMAP]/[SEEK]/[COW]
 # for the assemblies, then [MAPS] <one row per region>.  Compare the [SHA] rows
-# with `sha256sum /srv/nfs/rimworld/RimWorldLinux_Data/Managed/*`.
+# with `sha256sum $RW_EXPORT/RimWorldLinux_Data/Managed/*`.
 #
 # The probe is a native .BIN launched from the Apps menu (root scan), so the
 # disk image must already carry the desktop staging.  This script stages the
@@ -13,10 +13,12 @@
 # no unit tier in this worktree while it runs).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 cd "$ROOT" || exit 2
 OUT="$ROOT/obj/rw-desktop"
 IMG="$ROOT/disk.img"
-HOST="/srv/nfs/rimworld/RimWorldLinux_Data/Managed"
+HOST="$RW_EXPORT/RimWorldLinux_Data/Managed"
 [ -d "$HOST" ] || { echo "no Managed tree at $HOST"; exit 2; }
 [ -f "$IMG" ] || { echo "no disk.img — run tools/rw/run-rimworld-desktop.sh once"; exit 2; }
 

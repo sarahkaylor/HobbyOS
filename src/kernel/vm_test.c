@@ -1219,6 +1219,7 @@ static void test_vm_file_map_shared_frames(void) {
               1);
   }
 
+
 out:
   if (p1.as)
     vm_as_teardown(p1.as);
@@ -1636,6 +1637,279 @@ out:
   print_int(frame_free_count());
   uart_puts("\n");
   EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* =====================================================================
+ * M6/L63: an executable page whose read failed must NEVER be published.
+ *
+ * The L62 soak executed a page of zeros in UnityPlayer's text (0x9AD000)
+ * immediately after the block layer reset, and the row said the leaf was a
+ * private copy whose *fresh full-page read agreed with the zeros*
+ * (`rd=4096 same=1`): not a short read, a full-length page the device never
+ * delivered.  The publisher was vm_touch's object-file branch, which had no
+ * exec clause and so skipped L60's gate entirely.
+ *
+ * This test injects both faults into the file object's read path and asserts
+ * the mapping gets an I/O error and stays ABSENT -- never a zero page:
+ *
+ *   1. short read          -> vm_touch = -1, page absent
+ *   2. full-length zeros   -> vm_touch = -1, page absent   (the soak's shape)
+ *   3. injection cleared   -> vm_touch = 0, page holds the FILE's bytes
+ *      (the gate REPLACES the poisoned cache frame instead of publishing it)
+ *   4. the demand-fault path (exec) refuses the same page, same shape
+ * ===================================================================== */
+#define VM_EXEC_TAG 64
+static void test_vm_exec_page_eio(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_exec_page_eio...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+  /* The fixture write invalidates the cache; be explicit so the object this
+     test maps has NO pages and page 0 really is read (not a cached hit). */
+  file_obj_invalidate_all();
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_EXEC_TAG));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  if (fd < 0)
+    goto out;
+
+  /* TEXT, private: the DSO case.  A read-touch is a publish for execution. */
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (b <= 0)
+    goto out;
+  {
+    struct vm_region *r = vm_region_find(p.as, (uint64_t)b);
+    EXPECT_EQ((r && (r->prot & VM_PROT_EXEC)), 1);
+  }
+
+  uint64_t leaf = 0;
+  int bad = 0;
+  const char *why = 0;
+
+  /* (1) short read: vm_touch must refuse, page must stay absent. */
+  fat16_test_inject(1, 0, 64);
+  int rc1 = vm_touch(&p, (uint64_t)b, 8, 0);
+  fat16_test_inject(0, 0, 0);
+  EXPECT_EQ(rc1, -1);
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &leaf) != 0, 1);
+
+  /* (2) full-length zeros: the exact §48 delivery.  Still -1, still absent. */
+  fat16_test_inject(2, 0, 64);
+  int rc2 = vm_touch(&p, (uint64_t)b, 8, 0);
+  fat16_test_inject(0, 0, 0);
+  EXPECT_EQ(rc2, -1);
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &leaf) != 0, 1);
+
+  /* (3) injection off: the SAME page now publishes the FILE's bytes.  The
+     object's cache still holds the zero page from (2); the gate reads the
+     file and must publish the verified copy, not the cache frame. */
+  int rc3 = vm_touch(&p, (uint64_t)b, 8, 0);
+  EXPECT_EQ(rc3, 0);
+  if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    for (int i = 0; i < 64; i++)
+      if (((const volatile unsigned char *)ph)[i] !=
+          (unsigned char)((i * 7 + 3) & 0xFF))
+        bad++;
+    EXPECT_EQ(bad, 0); /* verified bytes, not zeros */
+    /* The repair publishes a private copy: the leaf is not the object's
+       (still zero) page-cache frame. */
+    struct vm_region *r3 = vm_region_find(p.as, (uint64_t)b);
+    uint64_t objfr = (r3 && r3->obj) ? vm_object_peek(r3->obj, 0) : 0;
+    EXPECT_EQ(objfr != 0, 1);
+    EXPECT_EQ((ph != objfr), 1);
+  } else {
+    EXPECT_EQ(1, 0);
+  }
+
+  /* (4) the demand-fault publisher (exec=1) takes the same gate. */
+  EXPECT_EQ(vm_unmap_page(p.as, (uint64_t)b), 0);
+  fat16_test_inject(2, 0, 64);
+  int frc = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+  fat16_test_inject(0, 0, 0);
+  EXPECT_EQ(frc, 1); /* kill: no zero page executed */
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &leaf) != 0, 1);
+  /* ... and with the device healthy the same fault resolves. */
+  int frc2 = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+  EXPECT_EQ(frc2, 0);
+  if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    int bad2 = 0;
+    for (int i = 0; i < 64; i++)
+      if (((const volatile unsigned char *)ph)[i] !=
+          (unsigned char)((i * 7 + 3) & 0xFF))
+        bad2++;
+    EXPECT_EQ(bad2, 0);
+  } else {
+    EXPECT_EQ(1, 0);
+  }
+
+  /* (5) THE PUBLISHER PROPERTY (L62 §48.3).  With a HEALTHY object cache the
+     page must still be published as a PRIVATE copy: that is the exec clause
+     in vm_touch, and without it the leaf here IS the object's frame (shared
+     with every other mapping of the same file -- the shape that made the
+     zero page visible at 0x9AD000).  A fresh address space + a fresh object
+     guarantees the cache page comes straight from the file. */
+  {
+    struct process p2;
+    vm_file_proc_init(&p2, vm_as_create(VM_EXEC_TAG + 1));
+    EXPECT_EQ((p2.as != 0), 1);
+    if (p2.as) {
+      /* Drop the slot so p2's mmap builds a NEW object whose page 0 is read
+         from the file, not the zero page steps (1)-(2) left in the old one. */
+      file_obj_invalidate_all();
+      int fd2 = file_open(&p2, VM_FILE_NAME, 0);
+      EXPECT_EQ((fd2 >= 0), 1);
+      if (fd2 >= 0) {
+        int64_t b2 = vm_mmap(&p2, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                             VM_MAP_PRIVATE, fd2, 0);
+        EXPECT_EQ((b2 > 0), 1);
+        if (b2 > 0) {
+          EXPECT_EQ(vm_touch(&p2, (uint64_t)b2, 8, 0), 0);
+          uint64_t l5 = 0;
+          if (vm_arch_walk(p2.as, (uint64_t)b2, &l5) == 0) {
+            struct vm_region *r5 = vm_region_find(p2.as, (uint64_t)b2);
+            uint64_t ofr = (r5 && r5->obj) ? vm_object_peek(r5->obj, 0) : 0;
+            uart_puts("  [VM-FILE] exec_eio p2 b=");
+            uart_print_hex((uint64_t)b2);
+            uart_puts(" leaf=");
+            uart_print_hex(vm_arch_leaf_phys(l5));
+            uart_puts(" objfr=");
+            uart_print_hex(ofr);
+            uart_puts(ofr && vm_arch_leaf_phys(l5) == ofr ? " SHARED\n" : " private\n");
+            EXPECT_EQ(ofr != 0, 1);
+            EXPECT_EQ((vm_arch_leaf_phys(l5) != ofr), 1);
+          } else {
+            EXPECT_EQ(1, 0);
+          }
+        }
+        file_close(&p2, fd2);
+      }
+      vm_as_teardown(p2.as);
+    }
+  }
+
+out:
+  if (p.as)
+    vm_as_teardown(p.as);
+  if (fd >= 0)
+    file_close(&p, fd);
+  file_obj_invalidate_all();
+  uart_puts("  [VM-FILE] exec_eio objects c0=");
+  print_int(c0);
+  uart_puts(" now=");
+  print_int(file_obj_count());
+  uart_puts(" frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L63: the same rule on the IMAGE path, with a stronger witness.
+ *
+ * Two agreeing reads are not proof (the soak caught the device answering the
+ * same zeros twice, and the boot program then executed 0x1000010EA0 while
+ * the file holds `55 48 89 e5` there).  vm_image_sums_build() reads the image
+ * once at exec and keeps a sum32 per page; a fill must match it.  This test
+ * injects a full-length zero delivery for one exec image page and asserts the
+ * page is refused, then that a healthy read publishes the FILE's bytes.
+ */
+#define VM_IMG2_TAG 65
+static void test_vm_img_page_eio(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_img_page_eio...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_IMG2_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  struct file f;
+  if (fat16_open("BIG.BIN", &f) != 0) {
+    uart_puts("ASSERTION FAILED: BIG.BIN missing from the boot disk\n");
+    vm_as_teardown(as);
+    return;
+  }
+  uint32_t fsize = f.fat16.entry.file_size;
+  uint16_t cluster = f.fat16.entry.start_cluster;
+  fat16_close(&f);
+
+  const uint64_t pages = 8;
+  EXPECT_EQ(vm_region_insert(as, USER_IMG_BASE, pages * FRAME_SIZE,
+                             VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                             VMK_IMG, VM_MAP_PRIVATE, 0, 0), 0);
+  as->img_active = 1;
+  as->img_file_size = fsize;
+  as->img_start_cluster = cluster;
+  EXPECT_EQ(vm_image_sums_build(as), 0);
+  EXPECT_EQ((as->img_sums != 0 && as->img_sums_pages >= pages), 1);
+
+  struct process p;
+  vm_file_proc_init(&p, as);
+  uint64_t va = USER_IMG_BASE + 0x1000;
+  uint64_t leaf = 0;
+  int bad = 0;
+
+  /* Healthy: page 1 publishes and carries the file's bytes. */
+  EXPECT_EQ(vm_touch(&p, va, 8, 0), 0);
+  if (vm_arch_walk(as, va, &leaf) == 0) {
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    for (int i = 0; i < 16; i++)
+      if (((const volatile unsigned char *)ph)[i] !=
+          (unsigned char)"HO_BIGLOAD_30MB\n"[i])
+        bad++;
+    EXPECT_EQ(bad, 0);
+  } else {
+    EXPECT_EQ(1, 0);
+  }
+
+  /* A full-length page of zeros must be refused: the sum table says the file
+     holds the pattern there. */
+  EXPECT_EQ(vm_unmap_page(as, va), 0);
+  fat16_test_inject(2, 0x1000, 64);
+  int rc = vm_touch(&p, va, 8, 0);
+  fat16_test_inject(0, 0, 0);
+  EXPECT_EQ(rc, -1);
+  EXPECT_EQ(vm_arch_walk(as, va, &leaf) != 0, 1);
+
+  /* Healthy again: the same page publishes, byte-exact. */
+  EXPECT_EQ(vm_touch(&p, va, 8, 0), 0);
+  if (vm_arch_walk(as, va, &leaf) == 0) {
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    int bad2 = 0;
+    for (int i = 0; i < 16; i++)
+      if (((const volatile unsigned char *)ph)[i] !=
+          (unsigned char)"HO_BIGLOAD_30MB\n"[i])
+        bad2++;
+    EXPECT_EQ(bad2, 0);
+  } else {
+    EXPECT_EQ(1, 0);
+  }
+
+  vm_as_teardown(as);
+  uart_puts("  [VM-FILE] img_eio frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
   EXPECT_EQ(frame_free_count(), free0);
 }
 
@@ -2101,6 +2375,10 @@ void vm_test_suite(void) {
   test_vm_file_map_fork();
   /* M6/L30: COW without the frame-identity gate; DSO base allocation */
   test_vm_file_cow_private_leaf();
+  /* M6/L63: a failed/short/zero-delivering read on an exec page => EIO */
+  test_vm_exec_page_eio();
+  /* M6/L63: the image path's sum table catches a consistent zero delivery */
+  test_vm_img_page_eio();
   test_vm_jit_arena(); /* M6/L38: exec mappings cluster in one +-2 GiB span */
   test_vm_jit_arena_gap_end(); /* M6/L38: the arena stops at the gap's end */
   test_vm_alloc_hole_atomic(); /* L56: find+reserve is one critical section */
