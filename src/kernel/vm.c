@@ -44,7 +44,18 @@ extern void kernel_exit(void);
 extern int process_create_kernel_nowait(void (*entry)(void *), void *arg);
 
 #define VM_REGION_INIT_CAP 16
-#define VM_REGION_MAX_CAP 1024
+/* L55: 1024 was not enough for RimWorld's def loader.  It maps ~1,209
+ * Data/**\/*.xml files, each `MemoryMappedFile.CreateViewAccessor` its own
+ * private region, on top of the heap, stacks, ~60 DSO segments and Mono's JIT
+ * chunks.  The 1025th insert made region_grow() refuse, vm_region_insert()
+ * return non-zero, and vm_mmap answer -ENOMEM: measured `[LCOMPAT] mmap fail
+ * ... -> -12` for 8 XMLs and 18-20 `IOException: Could not map file` per run.
+ * 2048 covers the whole tree with room for the second view per asset; the
+ * array is 2048 * sizeof(struct vm_region) = 80 KiB (20 contiguous frames at
+ * the last doubling), and a failed contiguous allocation degrades exactly as
+ * before — the mmap reports ENOMEM. */
+#define VM_REGION_MAX_CAP 2048
+#define VM_REGION_GROW_STEP 64
 
 static spinlock_t vm_lock;
 static struct addr_space vm_as_pool[MAX_PROCESSES];
@@ -87,7 +98,15 @@ static int region_frames_for(int cap) {
 }
 
 static int region_grow(struct addr_space *as) {
-  int newcap = as->cap * 2;
+  /* L55: grow by a SMALL step, not by doubling.  The array must be physically
+   * contiguous (it is dereferenced as a linear virtual range), and doubling
+   * asks frame_alloc_contig() for 20 frames at 1024->2048 — which fails under
+   * memory pressure.  Measured: a burst of 8 NFS XML mmaps answered -ENOMEM
+   * (`[LCOMPAT] mmap fail ... -> -12`, 24 `Could not map file`) mid-def-load,
+   * then recovery once frames were freed.  A 64-entry step is 2.5 KiB = ONE
+   * frame, so growth no longer depends on a large contiguous run; the extra
+   * copies are ~1.5 MiB across an entire boot. */
+  int newcap = as->cap + VM_REGION_GROW_STEP;
   if (newcap > VM_REGION_MAX_CAP)
     newcap = VM_REGION_MAX_CAP;
   if (newcap <= as->cap)

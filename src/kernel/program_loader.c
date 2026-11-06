@@ -597,21 +597,21 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
       child->num_open_fds++;
     }
   }
-  child->fd_cloexec = parent->fd_cloexec;
+  fd_cloexec_copy(child->fd_cloexec, parent->fd_cloexec);
   for (int k = 0; k < ex->fdmap_n; k++) {
     int src = ex->fdmap_src[k];
     int dst = ex->fdmap_dst[k];
     if (src == dst) {
       /* file_dup2's oldfd==newfd early return skips the CLOEXEC clear;
          dup2 semantics still clear it (D4.1 / D3.2). */
-      child->fd_cloexec &= ~(1ull << dst);
+      fd_cloexec_clear(child->fd_cloexec, dst);
       continue;
     }
     if (file_dup2(child, src, dst) < 0)
       return -EBADF; /* validated above; stay atomic if it still fails */
   }
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
-    if (child->open_fds[i] != -1 && (child->fd_cloexec & (1ull << i)))
+    if (child->open_fds[i] != -1 && fd_cloexec_test(child->fd_cloexec, i))
       file_close(child, i);
   }
   return 0;

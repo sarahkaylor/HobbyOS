@@ -99,6 +99,34 @@ static struct file *file_alloc(void) {
   return 0;
 }
 
+/* L55: local-fd allocation was a check-then-set on shared group state.  Two
+ * threads opening at once (RimWorld's four `DirectXmlLoader` threads each
+ * MemoryMappedFile a def) could take the SAME slot: one file object was
+ * orphaned, and the winner's fd number silently named the other file — the
+ * measured shape was `mmap fd=19 ... -> -95` for a path that had just been
+ * opened on /NFS, plus sporadic failed opens during the 1,209-XML load.
+ * One leaf lock makes the scan+install atomic; it is never held across any
+ * other lock or any I/O. */
+static spinlock_t fdtab_lock;
+
+static int get_global_fd(struct file *f);
+
+static int fd_install(struct process *p, struct file *f) {
+  if (!p || !f) return -1;
+  uint64_t fl = spinlock_acquire_irqsave(&fdtab_lock);
+  int fd = -1;
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+    if (p->open_fds[i] == -1) {
+      p->open_fds[i] = get_global_fd(f);
+      p->num_open_fds++;
+      fd = i;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&fdtab_lock, fl);
+  return fd;
+}
+
 /* SEC-6: invariant violated — an fd reached a slot whose type is not one of
  * the real file types.  UNINIT slots are unreachable through legitimate fds
  * (the fd only becomes visible after the creator sets the real type), so
@@ -335,14 +363,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
       return -ENOENT;
     }
     int dfd = -1;
-    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-      if (cur->open_fds[i] == -1) {
-        cur->open_fds[i] = get_global_fd(f);
-        cur->num_open_fds++;
-        dfd = i;
-        break;
-      }
-    }
+    dfd = fd_install(cur, f);
     if (dfd == -1) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
@@ -364,14 +385,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
     f->type = FILE_TYPE_PROCMAPS;
     f->maps_cursor = 0;
     int mpfd = -1;
-    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-      if (cur->open_fds[i] == -1) {
-        cur->open_fds[i] = get_global_fd(f);
-        cur->num_open_fds++;
-        mpfd = i;
-        break;
-      }
-    }
+    mpfd = fd_install(cur, f);
     if (mpfd == -1) { f->type = FILE_TYPE_EMPTY; f->ref_count = 0; return -EMFILE; }
     return mpfd;
   }
@@ -390,14 +404,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
     f->type = FILE_TYPE_PROCFD;
     f->fat16.cursor = 0;
     int pdfd = -1;
-    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-      if (cur->open_fds[i] == -1) {
-        cur->open_fds[i] = get_global_fd(f);
-        cur->num_open_fds++;
-        pdfd = i;
-        break;
-      }
-    }
+    pdfd = fd_install(cur, f);
     if (pdfd == -1) { f->type = FILE_TYPE_EMPTY; f->ref_count = 0; return -EMFILE; }
     return pdfd;
   }
@@ -464,14 +471,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
             f->nfs.is_dir = 1;
             f->nfs.mount_idx = nmidx;
             int ndfd = -1;
-            for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-              if (cur->open_fds[i] == -1) {
-                cur->open_fds[i] = get_global_fd(f);
-                cur->num_open_fds++;
-                ndfd = i;
-                break;
-              }
-            }
+            ndfd = fd_install(cur, f);
             if (ndfd == -1) {
               f->type = FILE_TYPE_EMPTY;
               f->ref_count = 0;
@@ -488,14 +488,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
       return -ENOENT;
     }
     int dfd = -1;
-    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-      if (cur->open_fds[i] == -1) {
-        cur->open_fds[i] = get_global_fd(f);
-        cur->num_open_fds++;
-        dfd = i;
-        break;
-      }
-    }
+    dfd = fd_install(cur, f);
     if (dfd == -1) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
@@ -563,14 +556,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
   }
 
   int fd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-    if (cur->open_fds[i] == -1) {
-      cur->open_fds[i] = get_global_fd(f);
-      cur->num_open_fds++;
-      fd = i;
-      break;
-    }
-  }
+  fd = fd_install(cur, f);
 
   if (fd == -1) {
     if (f->type == FILE_TYPE_FAT16) fat16_close(f);
@@ -606,14 +592,7 @@ int file_connect(struct process *cur, uint32_t ip, uint16_t port, int protocol) 
   f->socket.pcb = pcb;
 
   int fd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-    if (cur->open_fds[i] == -1) {
-      cur->open_fds[i] = get_global_fd(f);
-      cur->num_open_fds++;
-      fd = i;
-      break;
-    }
-  }
+  fd = fd_install(cur, f);
 
   if (fd == -1) {
     net_socket_close(pcb);
@@ -691,21 +670,14 @@ int file_socket(struct process *p, int domain, int type, int protocol) {
     f->usock.end = 0;
 
     int fd = -1;
-    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-      if (p->open_fds[i] == -1) {
-        p->open_fds[i] = get_global_fd(f);
-        p->num_open_fds++;
-        fd = i;
-        break;
-      }
-    }
+    fd = fd_install(p, f);
     if (fd == -1) {
       usock_close(u, 0);
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -EMFILE;
     }
-    if (type & K_SOCK_CLOEXEC) p->fd_cloexec |= 1ull << fd;
+    if (type & K_SOCK_CLOEXEC) fd_cloexec_set(p->fd_cloexec, fd);
     if (type & K_SOCK_NONBLOCK) usock_set_nonblock(u, 0, 1);
     return fd;
   }
@@ -740,14 +712,7 @@ int file_socket(struct process *p, int domain, int type, int protocol) {
   f->socket.pcb = pcb;
 
   int fd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-    if (p->open_fds[i] == -1) {
-      p->open_fds[i] = get_global_fd(f);
-      p->num_open_fds++;
-      fd = i;
-      break;
-    }
-  }
+  fd = fd_install(p, f);
 
   if (fd == -1) {
     net_socket_close(pcb);
@@ -1042,13 +1007,13 @@ int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
   struct process *pg = process_group(p);
   if (!pg) return -EINVAL;
   if (fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
-  if (cmd == K_F_GETFD) return (pg->fd_cloexec >> fd) & 1u ? K_FD_CLOEXEC : 0;
+  if (cmd == K_F_GETFD) return fd_cloexec_test(pg->fd_cloexec, fd) ? K_FD_CLOEXEC : 0;
   if (cmd == K_F_SETFD) {
     /* Replaces the whole flag word (only FD_CLOEXEC exists). */
     if (arg & K_FD_CLOEXEC)
-      pg->fd_cloexec |= 1ull << fd;
+      fd_cloexec_set(pg->fd_cloexec, fd);
     else
-      pg->fd_cloexec &= ~(1ull << fd);
+      fd_cloexec_clear(pg->fd_cloexec, fd);
     return 0;
   }
 
@@ -1957,7 +1922,7 @@ int file_close(struct process *cur, int fd) {
       return -1;
     }
     cur->open_fds[fd] = -1;
-    cur->fd_cloexec &= ~(1ull << fd); /* P5 (D3.2): closing discards fd flags */
+    fd_cloexec_clear(cur->fd_cloexec, fd); /* P5 (D3.2): closing discards fd flags */
     if (cur->num_open_fds > 0)
       cur->num_open_fds--;
     spinlock_release_irqrestore(&proc_lock, cflags);
@@ -2049,7 +2014,7 @@ int file_dup(struct process *cur, int fd) {
     usock_reopen(f->usock.ptr, f->usock.end); /* P4: same ref discipline */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
-  cur->fd_cloexec &= ~(1ull << newfd); /* P5 (D3.2): dup clears CLOEXEC */
+  fd_cloexec_clear(cur->fd_cloexec, newfd); /* P5 (D3.2): dup clears CLOEXEC */
   cur->num_open_fds++;
   return newfd;
 }
@@ -2081,7 +2046,7 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
     usock_reopen(f->usock.ptr, f->usock.end); /* P4 */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
-  cur->fd_cloexec &= ~(1ull << newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
+  fd_cloexec_clear(cur->fd_cloexec, newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
   cur->num_open_fds++;
   return newfd;
 }
@@ -2517,7 +2482,7 @@ int file_timerfd_create(struct process *cur, int clockid, int flags) {
   f->open_flags = (uint32_t)flags;
   cur->open_fds[ufd] = get_global_fd(f);
   cur->num_open_fds++;
-  if (flags & 0x80000) cur->fd_cloexec |= (1ull << ufd);
+  if (flags & 0x80000) fd_cloexec_set(cur->fd_cloexec, ufd);
   return ufd;
 }
 
@@ -2619,7 +2584,7 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
   cur->open_fds[ufd] = get_global_fd(f);
   cur->num_open_fds++;
   if (flags & K_MFD_CLOEXEC)
-    cur->fd_cloexec |= (1ull << ufd); /* recorded; P5's exec sweep consumes */
+    fd_cloexec_set(cur->fd_cloexec, ufd); /* recorded; P5's exec sweep consumes */
   return ufd;
 }
 
@@ -2873,7 +2838,7 @@ int file_socketpair(struct process *p, int domain, int type, int proto,
   p->open_fds[fd0] = get_global_fd(f0);
   p->open_fds[fd1] = get_global_fd(f1);
   p->num_open_fds += 2;
-  if (type & K_SOCK_CLOEXEC) p->fd_cloexec |= (1ull << fd0) | (1ull << fd1);
+  if (type & K_SOCK_CLOEXEC) { fd_cloexec_set(p->fd_cloexec, fd0); fd_cloexec_set(p->fd_cloexec, fd1); }
   if (type & K_SOCK_NONBLOCK) {
     usock_set_nonblock(u, 0, 1);
     usock_set_nonblock(u, 1, 1);
@@ -3171,8 +3136,8 @@ int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
   if (flags & K_SOCK_NONBLOCK) usock_set_nonblock(c, 1, 1);
   pg->open_fds[nfd] = get_global_fd(nf);
   pg->num_open_fds++;
-  if (flags & K_SOCK_CLOEXEC) pg->fd_cloexec |= 1ull << nfd;
-  else pg->fd_cloexec &= ~(1ull << nfd);
+  if (flags & K_SOCK_CLOEXEC) fd_cloexec_set(pg->fd_cloexec, nfd);
+  else fd_cloexec_clear(pg->fd_cloexec, nfd);
 
   if (sa_out && salen_out) {
     struct usock_name pn;

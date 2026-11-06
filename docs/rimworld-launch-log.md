@@ -6972,3 +6972,177 @@ investigated further here.  Both are named, not fixed, in this lane.
 ladder `redzone`, `m2_mono`, `m2_tp`, `m2_threads`, `m12`,
 `m3_window_probe`, `m4_gl_probe` re-run on this tree (raw rows in
 `obj/l54-gates.log`).
+
+## 42. 2026-11-06 — M6/L55: the "virtio-blk" wedge is an NVMe ring with two consumers; the fd ceiling; and the NFS RPC buffers were shared
+
+Two residual walls were named in §41.5.  Both are fixed, and each fix exposed
+the next wall rather than a new theory.
+
+### 42.1 There is no virtio-blk driver on x86 — it is the NVMe path
+
+`src/kernel/virtio_blk.c` compiles two different drivers.  The `#else` half is
+the virtio-MMIO one (AArch64); the `#ifdef __x86_64__` half finds a PCI device
+of class 01/08 and drives **NVMe**: admin SQ/CQ with opcodes 0x05/0x01 to
+create IO queue 1, `submit_io_cmd` filling a 2-entry SQ and polling
+`io_cq[io_cq_head].cid == cid`.  Every `STILL SPINNING!` row came from that
+function (`virtio_blk.c:177` at the merged tip), not from a virtqueue.
+
+### 42.2 Why a completion never arrived: the ring had two consumers
+
+The pre-fix request path held `blk_request_lock` **across the IRQ-off device
+wait**:
+
+```
+virtio_blk_read_raw:  flags = spinlock_acquire_irqsave(&blk_request_lock);
+                      ... submit_io_cmd(&cmd) ... 100 x 1e6-spin windows ...
+                      spinlock_release_irqrestore(&blk_request_lock, flags);
+```
+
+The waiter runs with IF=0, so it takes no timer interrupt; its
+`cpu_heartbeat_ms[]` therefore stops advancing.  `spinlock_acquire()`'s own
+stall breaker (`arch/x64/locks.c`, `lock_stallbreak_ok`) frees any lock whose
+owner has not taken an interrupt for `LOSTWAKE_DEAD_OWNER_MS` (2000 ms).
+Measured in the L54 r3 log, one second before the first wedge row:
+
+```text
+[STALLBREAK] lock=0x000000000745a2878 owner_cpu=5 stale_ms=2314 pc=0x0700eeee
+```
+
+From then on two CPUs were inside the driver at once, sharing `io_sq_tail`,
+`io_cq_head`, the cid counter and the (then single) `call`/completion slots.
+The rows say exactly that:
+
+| row | meaning |
+|---|---|
+| `io_cq[0].cid=65535 io_cq[1].cid=54432 io_cq_head=1` | a completion for another thread's cid is stranded in a slot nobody is waiting on |
+| `io_cq_head` alternating 0/1 across consecutive `STILL SPINNING` rows | something is still advancing the head — a second consumer |
+| `CSTS=0x1` | the controller is ready; the device is not the problem |
+| `[STALLBREAK] ... stale_ms=2314` | the lock was force-freed, which is how the second consumer got in |
+
+With a 2-entry ring, one consumer taking the other's CQE (`cid -> 0xFFFF`,
+head advanced) makes the victim wait for a cid that can never appear again.
+The old `BLKSTALL` safety net then returned an error **without restoring the
+ring**, so every later request inherited the desync.
+
+### 42.3 The mechanism now
+
+1. **A single-in-flight token outside any lock.** `blk_token_acquire()` is a
+   plain flag under `blk_request_lock` (held for a few instructions); waiters
+   `safe_wfi()`.  No lock is held across the device wait, so no stall breaker
+   can admit a second entrant.  `blk_inside` counts entrants and prints
+   `[BLKRACE]` if it ever exceeds 1.
+2. **Phase-tagged completions.** The CQ tracks `io_cq_phase`, the only valid
+   "this CQE is new" signal in NVMe; a stale/abandoned CQE is drained and
+   logged (`[BLKQ] drain stale cqe`) instead of blocking the ring.
+3. **A bounded wait that recovers.** At 2000 ms: one `[BLKQ] stall` row
+   (slot, sq_tail, cq_head, phase, both head CQEs' cid/status, `inside`,
+   CSTS/CC/INTMS/INTMC), then `nvme_reinit()` — CC.EN=0, wait RDY=0, rebuild
+   admin queues, zero BOTH IO rings, phase=1, recreate CQ/SQ — and the same
+   command is resubmitted once.  A completion the device really lost becomes a
+   completed transfer, and the ring is left consistent either way.
+4. **Depth 16, not 2**, so a completion can never find the CQ full behind one
+   in-flight command, and the poll refreshes this CPU's heartbeat (it *is*
+   alive — it is polling the device) so a peer's reaper cannot age it out.
+
+Recovery is provable without waiting for a natural stall: `RW_BLK_DROP_AT=N`
+silently loses submit #N's doorbell.  Measured (N=600, 90 s run):
+
+```text
+[BLKTEST] dropping doorbell for submit #600 (timeout-recovery self-test)
+[BLKSLOW] pending cid=699 slot=7 ms=251 sq_tail=8 cq_head=7 phase=0
+[BLKQ] stall cid=699 slot=7 sq_tail=8 cq_head=7 phase=0 cqe[cq_head].cid=65535
+       .status=0x1 next.cid=65535 next.status=0x1 inside=1 n=1
+       CSTS=0x1 CC=0x460001 INTMS=0x0 INTMC=0x0
+[BLKQ] controller reset #1
+```
+
+…and the loader kept running: the launcher spawned and the game reached
+`[XSW] n=1` after the reset.  In the shipped build `RW_BLK_DROP_AT` is 0 and
+the whole block compiles out.
+
+### 42.4 The fd ceiling: 64 -> 256, and the mask that pinned it
+
+`MAX_OPEN_FDS` was 64 because `struct process.fd_cloexec` was ONE `uint64_t`
+(with a `_Static_assert` to keep it honest).  It is now
+`fd_cloexec[FD_CLOEXEC_WORDS]` addressed only through
+`fd_cloexec_test/set/clear/reset/copy`, `MAX_OPEN_FDS` is **256** (which is
+exactly `K_FD_SETSIZE`, so select/poll agree), and `MAX_GLOBAL_FILES` went
+128 -> 512 so the wider per-process table is actually reachable.  Native
+processes use the same helpers, so nothing is special-cased.
+
+`LOCKDBG_REGISTRY` had to grow with it (`MAX_GLOBAL_FILES + 128`): it was a
+hard 256 covering `fs_lock + one lock per global file slot + test locks`, and
+at 512 file slots the registry filled up and `test_lock_order_debug`'s own
+locks were silently unregistered (0 violations where it wants 1).
+
+Local-fd allocation was also a check-then-set on shared group state
+(`open_fds[i] == -1` then assign, no lock).  Four `DirectXmlLoader` threads
+opening at once could take the same slot — one file object orphaned, and the
+winner's fd number naming the other file.  `fd_install()` now does scan+install
+under one leaf lock.
+
+### 42.5 What actually produced `Could not open file`: shared NFS RPC buffers
+
+The fd work did not change the exception count, and a new row made that plain:
+`[LOPENF]` printed **nothing** for `/NFS` and all 107 failing paths existed on
+the host export.  The failures were `nfs_lookup` returning -1, and `nfs.c` had:
+
+```c
+static uint8_t call_buf[2048];      /* request bytes  */
+static uint8_t reply_raw[2048];     /* reply datagram */
+```
+
+Both file-scope, shared by every caller — while the XML loader issues LOOKUPs
+from four threads and page-in faults issue READs from more.  One thread's
+request was overwritten between `rpc_build_call` and `net_socket_send`; one
+thread's reply was overwritten before another parsed it.  The loser sees a
+foreign xid, `rpc_xfer` skips it as stale, and the RPC times out:
+`[NFS] rpc: no reply from server` **x108** in one run, i.e. one per failing
+path.  `nfs_lookup` can only report that as ENOENT.
+
+Every RPC now builds and receives on its own kernel stack and the reply BODY is
+copied into a caller-owned buffer (`rpc_call(..., body_buf, body_cap, &body,
+&blen)`), so its lifetime is the caller's.  `nfs_read_serial`,
+`nfs_rd_issue` and `nfs_read_pipelined` got the same treatment.
+
+Result: **0 `Could not open file`, 0 `FileNotFoundException`, 0 `no reply from
+server`** in three consecutive 220 s runs (was 12 and 108).
+
+### 42.6 New wall: concurrent mmap base selection
+
+8 XMLs per run still fail, now as `System.IO.IOException: Could not map file`
+from `MemoryMapImpl.Map`, `[LCOMPAT] mmap fail ... -> -12`.  It is not the fd
+table (`nfd` is 4-20), not `nfs_obj_get` (its new `[NFSMAP] refuse` row never
+fires) and not the region-table capacity (raising `VM_REGION_MAX_CAP`
+1024->2048 changed nothing; growing by a 1-frame step instead of doubling
+changed nothing).  The failing set is **disjoint run to run** (0-1 common paths
+across four runs), i.e. a race: two threads' first-fit pick the same base,
+`region_overlaps()` (`vm.c:520`) rejects the second insert, and `vm_mmap`
+answers -ENOMEM (`vm.c:2266`).  It blocks 8 of 1,209 defs.  Fix direction:
+make base selection + `vm_region_insert` one `vm_lock` section (or retry at a
+fresh base), not a bigger table.
+
+### 42.7 Ladder, 220 s runs, final build
+
+| run | NFS bytes | `[XSW]` max | `Could not open file` | `Could not map file` | blk stalls | `no reply` |
+|---|---|---|---|---|---|---|
+| r3 | 45.04 MiB | 150 | 0 | 20 | 0 | 0 |
+| r4 | 44.93 MiB | 150 | 0 | 18 | 0 | 0 |
+| r5 | 45.21 MiB | 150 | 0 | 24 | 0 | 0 |
+| r6 | 44.46 MiB | 140 | 0 | 8 | 0 | 0 |
+
+All four are **past §41's 43.76 MB**, present continuously at 1920x1080
+(`nz=1950488/1950488`, `box=0,0,1915,1017`), and none wedge the block layer
+(`[BLKQ] stall` = 0, `STILL SPINNING` = 0).  The frame itself is **static**:
+two screenshots 10 s apart differ in **41 pixels** (bottom-right desktop
+chrome), 132,577 colours, 100 % non-black, and OCR at 2x over three crops
+finds no text at all — a full-bleed planet/starfield still, not an interactive
+menu.  So the loader finishes its def pass (NFS reads plateau at ~45 MiB after
+~90 s, then ~25 RPC/s of preload) and the game sits on its loading art at
+~0.7 fps; no menu buttons are on screen yet.
+
+### 42.8 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh` -> 414 run, 0 failed; `redzone`,
+`m2_mono`, `m2_tp`, `m2_threads`, `m12`, `m3_window_probe`, `m4_gl_probe`,
+`tools/rw/run-rwnfs-probe.sh` re-run on this tree.

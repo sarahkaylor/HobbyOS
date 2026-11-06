@@ -148,7 +148,12 @@ struct file {
   };
 };
 
-#define MAX_GLOBAL_FILES 128
+/* L55: 512, not 128.  MAX_OPEN_FDS is now 256 per process, and this table is
+ * the one every local fd indexes: leaving it at 128 would have made the wider
+ * per-process table unusable (a single process could still only reach 128
+ * distinct open files, and the desktop/launcher/socket slots share the rest).
+ * One slot is ~400 B, so the extra 384 slots cost ~150 KiB of BSS. */
+#define MAX_GLOBAL_FILES 512
 
 void fs_init(void);
 struct trap_frame;

@@ -360,12 +360,49 @@ struct vm_object *nfs_obj_get(int mount_idx, const struct nfs_fh *fh,
     }
   }
   if (free_slot < 0) {
+    /* L55: name the wall instead of returning a bare NULL that every caller
+       reports as ENOMEM.  `used` is how many share slots are live and
+       `recyclable` how many of them are cache-only (a live mapping pins its
+       object), so one row says whether the pool is full of live views or the
+       vm_object/frame side refused. */
+    static int refuse_rows;
+    if (refuse_rows < 4) {
+      refuse_rows++;
+      int used = 0, recyclable = 0;
+      for (int i = 0; i < VM_OBJ_MAX; i++) {
+        if (!nfs_obj_tab[i].used) continue;
+        used++;
+        if (nfs_obj_tab[i].obj && nfs_obj_tab[i].obj->refs == 1) recyclable++;
+      }
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[NFSMAP] refuse: nfs_slots_used=");
+      kl_i(&kl, (long)used);
+      kl_s(&kl, " recyclable=");
+      kl_i(&kl, (long)recyclable);
+      kl_s(&kl, " max=");
+      kl_i(&kl, (long)VM_OBJ_MAX);
+      kl_s(&kl, " size=");
+      kl_i(&kl, (long)size);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
     spinlock_release_irqrestore(&nfs_obj_lock, fl);
     return 0;
   }
 
   struct vm_object *o = vm_object_create(VM_OBJ_NFS, (uint64_t)size);
   if (!o) {
+    static int vmfail_rows;
+    if (vmfail_rows < 4) {
+      vmfail_rows++;
+      uart_puts("[NFSMAP] vm_object_create(VM_OBJ_NFS) failed size=");
+      {
+        extern void print_int(int val);
+        print_int((int)size);
+      }
+      uart_puts(" (object slot or frame array exhausted)\n");
+    }
     spinlock_release_irqrestore(&nfs_obj_lock, fl);
     return 0;
   }

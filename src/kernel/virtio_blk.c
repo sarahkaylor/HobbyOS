@@ -13,6 +13,9 @@
 #include "arch/cpu.h"
 
 extern void uart_puts(const char* s);
+extern uint64_t timer_get_ms(void);
+extern void uart_print_hex(uint64_t val);
+extern void print_int(int val);
 extern void *memcpy(void *dest, const void *src, size_t n);
 
 static spinlock_t blk_lock;
@@ -53,19 +56,59 @@ static volatile uint32_t* io_cq_db;
 
 static volatile struct nvme_cmd admin_sq[2] __attribute__((aligned(4096)));
 static volatile struct nvme_cqe admin_cq[2] __attribute__((aligned(4096)));
-static volatile struct nvme_cmd io_sq[2] __attribute__((aligned(4096)));
-static volatile struct nvme_cqe io_cq[2] __attribute__((aligned(4096)));
+/* L55: the x86_64 "virtio_blk" path is really the **NVMe** driver (PCI class
+ * 01/08, admin+IO queue creation, `submit_io_cmd`).  The completion wedge it
+ * used to hit was not a lost interrupt: with a 2-entry ring, a cid-keyed poll,
+ * and the whole request (submit + wait) inside an IRQ-off spinlock, a single
+ * slow completion aged the holder's heartbeat past LOSTWAKE_DEAD_OWNER_MS, the
+ * spinlock's stall breaker freed `blk_request_lock`, a second CPU entered the
+ * driver, and the two consumers desynchronized the ring: one consumed the
+ * other's CQE (slot -> 0xFFFF, head advanced), so the victim waited for a cid
+ * that could never appear again.  Evidence in docs/rimworld-launch-log.md §42.
+ *
+ * The mechanism now, in order of importance:
+ *   1. a single-in-flight TOKEN (`blk_in_use`) outside any lock, so no lock is
+ *      held across the device wait and no stall breaker can admit a second
+ *      driver entrant (`blk_inside` asserts that), and the poll refreshes this
+ *      CPU's heartbeat because it provably is alive;
+ *   2. a PHASE-TAGGED completion ring (`io_cq_phase`), which is the only
+ *      reliable "this CQE is new" signal in NVMe; a stale/abandoned CQE is
+ *      drained instead of mistaken for the current request;
+ *   3. a bounded wait that RESETS the controller, recreates the queues and
+ *      retries the request once — a lost completion becomes a completed
+ *      transfer and the ring is left consistent either way;
+ *   4. a 16-entry queue instead of 2, so a completion can never find the CQ
+ *      full behind one in-flight command.
+ */
+#define NVME_IOQ_DEPTH 16
+
+static volatile struct nvme_cmd io_sq[NVME_IOQ_DEPTH] __attribute__((aligned(4096)));
+static volatile struct nvme_cqe io_cq[NVME_IOQ_DEPTH] __attribute__((aligned(4096)));
 static uint8_t bounce_buf[4096] __attribute__((aligned(4096)));
 
 static uint16_t admin_sq_tail = 0;
 static uint16_t admin_cq_head = 0;
 static uint16_t io_sq_tail = 0;
 static uint16_t io_cq_head = 0;
+/* L55: expected CQE phase tag.  The device writes phase 1 into a fresh CQ and
+   flips it on every wraparound; host-side `cid = 0xFFFF` markers cannot
+   distinguish "not written yet" from "written with cid 0xFFFF" and, worse,
+   cannot tell an abandoned completion from the current one. */
+static uint16_t io_cq_phase = 1;
 /* Completion-queue slots use 0xFFFF as their free marker; a live command id
    must never collide with it, or the poll in submit_io_cmd() exits early on
    a stale slot and desynchronizes the completion queues.  next_io_cid()
    maintains that invariant. */
 static uint16_t io_cid = 100;
+
+/* L55 diagnostics: the shape of the wedge, countable in one run. */
+static volatile int blk_in_use;           /* single-in-flight token */
+static volatile uint32_t blk_inside;      /* concurrent driver entrants (must stay <= 1) */
+static volatile uint32_t blk_requests;    /* completed device commands */
+static volatile uint32_t blk_stalls;      /* bounded waits that expired */
+static volatile uint32_t blk_slow;        /* commands that took > 250 ms */
+static volatile uint32_t blk_stale;       /* abandoned CQEs drained */
+static volatile uint32_t blk_resets;      /* controller resets performed */
 
 static inline void outl(uint16_t port, uint32_t val) {
   __asm__ volatile("outl %0, %1" : : "a"(val), "Nd"(port));
@@ -98,6 +141,7 @@ static void pci_write_config(uint8_t bus, uint8_t slot, uint8_t func, uint8_t of
 
 static uint16_t submit_admin_cmd(struct nvme_cmd* cmd) {
   uint16_t cid = cmd->cid;
+  uint64_t t0 = timer_get_ms();
 
   admin_sq[admin_sq_tail].opcode = cmd->opcode;
   admin_sq[admin_sq_tail].flags = cmd->flags;
@@ -122,6 +166,18 @@ static uint16_t submit_admin_cmd(struct nvme_cmd* cmd) {
 
   while (admin_cq[admin_cq_head].cid != cid) {
     __asm__ volatile("pause");
+    /* L55: an admin wait must be bounded too — during a controller reset a
+       command the device never consumed would otherwise wedge the console
+       with no way back. */
+    if ((timer_get_ms() - t0) > 2000) {
+      uart_puts("[BLKQ] admin timeout cid=");
+      print_int((int)cid);
+      uart_puts(" CSTS=");
+      uart_print_hex(nvme_regs[7]);
+      uart_puts("\n");
+      admin_cq[admin_cq_head].cid = 0xFFFF;
+      return 0x7FFF;
+    }
   }
 
   __asm__ volatile("" : : : "memory");
@@ -144,71 +200,321 @@ static uint16_t next_io_cid(void) {
   return io_cid++;
 }
 
-static uint16_t submit_io_cmd(struct nvme_cmd* cmd) {
-  uint16_t cid = cmd->cid;
+/* ---------------------------------------------------------------------------
+ * L55: IO queue lifecycle.
+ *
+ * `nvme_io_queues_create()` is the single place that creates CQ/SQ 1, so the
+ * boot path and the reset path can never disagree about depth or doorbell
+ * layout.  `nvme_reinit()` is the recovery half of the completion timeout: it
+ * puts the controller back into a state where the *next* request is valid,
+ * which the old BLKSTALL path did not (it returned an error with the ring
+ * still desynchronized, so every later request inherited the wedge).
+ * ------------------------------------------------------------------------- */
+static int nvme_io_queues_create(void) {
+  struct nvme_cmd create_cq = {0};
+  create_cq.opcode = 0x05; /* Create I/O Completion Queue */
+  create_cq.cid = 1;
+  create_cq.prp1 = (uint64_t)&io_cq;
+  create_cq.cdw10 = ((NVME_IOQ_DEPTH - 1) << 16) | 0x01;
+  create_cq.cdw11 = 0x01; /* PC = 1, IEN = 0: polled completions */
+  uint16_t status_cq = submit_admin_cmd(&create_cq);
+  if (status_cq != 0) {
+    uart_puts("[BLKQ] create CQ failed status=");
+    uart_print_hex(status_cq);
+    uart_puts("\n");
+    return -1;
+  }
 
-  io_sq[io_sq_tail].opcode = cmd->opcode;
-  io_sq[io_sq_tail].flags = cmd->flags;
-  io_sq[io_sq_tail].cid = cmd->cid;
-  io_sq[io_sq_tail].nsid = cmd->nsid;
-  io_sq[io_sq_tail].rsvd2 = cmd->rsvd2;
-  io_sq[io_sq_tail].mptr = cmd->mptr;
-  io_sq[io_sq_tail].prp1 = cmd->prp1;
-  io_sq[io_sq_tail].prp2 = cmd->prp2;
-  io_sq[io_sq_tail].cdw10 = cmd->cdw10;
-  io_sq[io_sq_tail].cdw11 = cmd->cdw11;
-  io_sq[io_sq_tail].cdw12 = cmd->cdw12;
-  io_sq[io_sq_tail].cdw13 = cmd->cdw13;
-  io_sq[io_sq_tail].cdw14 = cmd->cdw14;
-  io_sq[io_sq_tail].cdw15 = cmd->cdw15;
+  struct nvme_cmd create_sq = {0};
+  create_sq.opcode = 0x01; /* Create I/O Submission Queue */
+  create_sq.cid = 2;
+  create_sq.prp1 = (uint64_t)&io_sq;
+  create_sq.cdw10 = ((NVME_IOQ_DEPTH - 1) << 16) | 0x01;
+  create_sq.cdw11 = (1 << 16) | 0x01; /* CQID = 1, PC = 1 */
+  uint16_t status_sq = submit_admin_cmd(&create_sq);
+  if (status_sq != 0) {
+    uart_puts("[BLKQ] create SQ failed status=");
+    uart_print_hex(status_sq);
+    uart_puts("\n");
+    return -1;
+  }
+  return 0;
+}
 
-  io_sq_tail = (io_sq_tail + 1) % 2;
+/* Reset the controller and rebuild both queues with an EMPTY, zeroed IO ring.
+   Called only with the request token held (single entrant) and after the
+   in-flight command has been abandoned. */
+static int nvme_reinit(void) {
+  blk_resets++;
+  uart_puts("[BLKQ] controller reset #");
+  print_int((int)blk_resets);
+  uart_puts("\n");
 
-  __asm__ volatile("" : : : "memory");
-
-  *io_sq_db = io_sq_tail;
-
-  int spin_count = 0;
-  int stall_windows = 0;
-  while (io_cq[io_cq_head].cid != cid) {
+  /* Disable, then wait (bounded) for the controller to acknowledge. */
+  nvme_regs[5] = 0;
+  uint64_t t0 = timer_get_ms();
+  while (nvme_regs[7] & 1) {
     __asm__ volatile("pause");
-    spin_count++;
-    if (spin_count == 1000000) {
-      uart_puts("submit_io_cmd: STILL SPINNING! io_cq[0].cid=");
-      print_int(io_cq[0].cid);
-      uart_puts(" io_cq[1].cid=");
-      print_int(io_cq[1].cid);
-      uart_puts(" io_cq_head=");
-      print_int(io_cq_head);
-      uart_puts(" CSTS=");
+    if ((timer_get_ms() - t0) > 2000) {
+      uart_puts("[BLKQ] reset: RDY never cleared, CSTS=");
       uart_print_hex(nvme_regs[7]);
       uart_puts("\n");
-      spin_count = 0;
-      /* L34: a completion that never arrives must not wedge the CPU for
-       * ever.  A page-in fault (file_obj_page) runs this loop with the
-       * fault frame live, so an unbounded wait shows up as a thread stuck
-       * on one instruction-fetch #PF -- measured in L33 run 2 at
-       * cr2=0x10823B1C00 (UnityPlayer text) with this loop printing
-       * thousands of rows.  After ~100 windows (tens of seconds) fail the
-       * request instead: the caller sees an I/O error, the fault becomes a
-       * named PROT kill, and the system stays diagnosable. */
-      if (++stall_windows >= 100) {
-        uart_puts("submit_io_cmd: BLKSTALL cid=");
-        print_int((int)cid);
-        uart_puts(" no completion after 100 windows -> I/O error\n");
-        io_cq[io_cq_head].cid = 0xFFFF;
-        return 0x7FFF; /* status with every error bit set */
-      }
+      break;
     }
   }
 
-  __asm__ volatile("" : : : "memory");
-  uint16_t status = io_cq[io_cq_head].status;
-  io_cq[io_cq_head].cid = 0xFFFF;
-  io_cq_head = (io_cq_head + 1) % 2;
-  *io_cq_db = io_cq_head;
+  /* AQA, admin queue addresses, CC — the same sequence as boot. */
+  nvme_regs[9] = 0x00010001;
+  for (int i = 0; i < 2; i++) {
+    admin_cq[i].cid = 0xFFFF;
+    admin_cq[i].status = 0;
+  }
+  admin_sq_tail = 0;
+  admin_cq_head = 0;
+  uint64_t admin_sq_phys = (uint64_t)&admin_sq;
+  nvme_regs[10] = (uint32_t)admin_sq_phys;
+  nvme_regs[11] = (uint32_t)(admin_sq_phys >> 32);
+  (void)nvme_regs[11];
+  uint64_t admin_cq_phys = (uint64_t)&admin_cq;
+  nvme_regs[12] = (uint32_t)admin_cq_phys;
+  nvme_regs[13] = (uint32_t)(admin_cq_phys >> 32);
+  (void)nvme_regs[13];
+  nvme_regs[5] = 0x00460001;
+  (void)nvme_regs[5];
 
-  return status >> 1;
+  t0 = timer_get_ms();
+  while (!(nvme_regs[7] & 1)) {
+    __asm__ volatile("pause");
+    if ((timer_get_ms() - t0) > 2000) {
+      uart_puts("[BLKQ] reset: RDY never set, CSTS=");
+      uart_print_hex(nvme_regs[7]);
+      uart_puts("\n");
+      return -1;
+    }
+  }
+
+  /* The device re-initialises the CQ from scratch: zero EVERY entry so no
+     pre-reset phase tag can ever validate a stale CQE, then rebuild. */
+  for (int i = 0; i < NVME_IOQ_DEPTH; i++) {
+    io_cq[i].result = 0;
+    io_cq[i].rsvd = 0;
+    io_cq[i].sq_head = 0;
+    io_cq[i].sq_id = 0;
+    io_cq[i].cid = 0xFFFF;
+    io_cq[i].status = 0;
+    io_sq[i].opcode = 0;
+    io_sq[i].cid = 0xFFFF;
+  }
+  io_sq_tail = 0;
+  io_cq_head = 0;
+  io_cq_phase = 1;
+  *io_cq_db = 0;
+
+  return nvme_io_queues_create();
+}
+
+/* Consume the CQE at the head (valid entry) and publish the new head. */
+static void nvme_cq_advance(void) {
+  io_cq[io_cq_head].cid = 0xFFFF;
+  io_cq_head = (uint16_t)((io_cq_head + 1) % NVME_IOQ_DEPTH);
+  if (io_cq_head == 0) io_cq_phase ^= 1;
+  __asm__ volatile("" : : : "memory");
+  *io_cq_db = io_cq_head;
+}
+
+/* Fill the SQ slot and ring the doorbell.  Returns the slot used. */
+#ifndef RW_BLK_DROP_AT
+#define RW_BLK_DROP_AT 0
+#endif
+static uint32_t blk_submits;
+
+static uint16_t nvme_sq_submit(struct nvme_cmd* cmd) {
+  uint16_t slot = io_sq_tail;
+
+  io_sq[slot].opcode = cmd->opcode;
+  io_sq[slot].flags = cmd->flags;
+  io_sq[slot].cid = cmd->cid;
+  io_sq[slot].nsid = cmd->nsid;
+  io_sq[slot].rsvd2 = cmd->rsvd2;
+  io_sq[slot].mptr = cmd->mptr;
+  io_sq[slot].prp1 = cmd->prp1;
+  io_sq[slot].prp2 = cmd->prp2;
+  io_sq[slot].cdw10 = cmd->cdw10;
+  io_sq[slot].cdw11 = cmd->cdw11;
+  io_sq[slot].cdw12 = cmd->cdw12;
+  io_sq[slot].cdw13 = cmd->cdw13;
+  io_sq[slot].cdw14 = cmd->cdw14;
+  io_sq[slot].cdw15 = cmd->cdw15;
+
+  __asm__ volatile("" : : : "memory");
+  io_sq_tail = (uint16_t)((slot + 1) % NVME_IOQ_DEPTH);
+  __asm__ volatile("" : : : "memory");
+  blk_submits++;
+#if RW_BLK_DROP_AT
+  /* L55 recovery self-test: silently lose ONE command's doorbell.  The device
+     never sees it, the bounded wait expires, the controller is reset and the
+     command is resubmitted — i.e. the old permanent `STILL SPINNING` becomes a
+     completed transfer.  Compiled out (RW_BLK_DROP_AT == 0) in the shipped
+     build; the value names which submission to drop. */
+  if (blk_submits == RW_BLK_DROP_AT) {
+    uart_puts("[BLKTEST] dropping doorbell for submit #");
+    print_int((int)blk_submits);
+    uart_puts(" (timeout-recovery self-test)\n");
+    return slot;
+  }
+#endif
+  *io_sq_db = io_sq_tail;
+  return slot;
+}
+
+/* Wait for `cid`'s completion.  Returns the NVMe status (0 = success) or
+   0x7FFF when the bounded wait expired twice (with a controller reset in
+   between).  The wait is time-bounded with the wall/monotonic millisecond
+   clock, refreshes this CPU's liveness heartbeat (it is provably alive: it is
+   polling the device), and never runs with a global lock held. */
+static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
+  uint16_t cid = cmd->cid;
+  uint64_t t0 = timer_get_ms();
+  int recovered = 0;
+  uint64_t spins = 0;
+  int printed_slow = 0;
+
+  for (;;) {
+    /* Publish liveness: an IRQ-off poll would otherwise age this CPU's
+       heartbeat past LOSTWAKE_DEAD_OWNER_MS and let a peer's lock breaker
+       free whatever lock the caller holds (fat_lock, blk_request_lock). */
+    if ((spins++ & 0x3FF) == 0) {
+      extern volatile uint64_t cpu_heartbeat_ms[];
+      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+    }
+
+    /* Drain every VALID completion at the head.  Validity is the phase tag,
+       not a cid marker: a CQE the device wrote for an abandoned request is
+       consumed (and logged) instead of blocking this one for ever. */
+    for (;;) {
+      uint16_t cqstat = io_cq[io_cq_head].status;
+      if ((cqstat & 1) != io_cq_phase) break; /* no new entry at the head */
+      uint16_t cqcid = io_cq[io_cq_head].cid;
+      uint16_t status = (uint16_t)(cqstat >> 1);
+      nvme_cq_advance();
+      if (cqcid == cid) {
+        blk_requests++;
+        uint64_t dt = timer_get_ms() - t0;
+        if (dt > 250 && printed_slow < 4) {
+          printed_slow++;
+          blk_slow++;
+          uart_puts("[BLKSLOW] cid=");
+          print_int((int)cid);
+          uart_puts(" slot=");
+          print_int((int)slot);
+          uart_puts(" ms=");
+          print_int((int)dt);
+          uart_puts(" status=");
+          uart_print_hex(status);
+          uart_puts(" n=");
+          print_int((int)blk_slow);
+          uart_puts("\n");
+        }
+        return status;
+      }
+      blk_stale++;
+      if (blk_stale <= 8 || (blk_stale & 0x3FF) == 0) {
+        uart_puts("[BLKQ] drain stale cqe cid=");
+        print_int((int)cqcid);
+        uart_puts(" want=");
+        print_int((int)cid);
+        uart_puts(" head=");
+        print_int((int)io_cq_head);
+        uart_puts(" n=");
+        print_int((int)blk_stale);
+        uart_puts("\n");
+      }
+    }
+
+    uint64_t dt = timer_get_ms() - t0;
+    if (dt > 250 && !printed_slow) {
+      printed_slow = 1;
+      uart_puts("[BLKSLOW] pending cid=");
+      print_int((int)cid);
+      uart_puts(" slot=");
+      print_int((int)slot);
+      uart_puts(" ms=");
+      print_int((int)dt);
+      uart_puts(" sq_tail=");
+      print_int((int)io_sq_tail);
+      uart_puts(" cq_head=");
+      print_int((int)io_cq_head);
+      uart_puts(" phase=");
+      print_int((int)io_cq_phase);
+      uart_puts("\n");
+    }
+
+    if (dt > 2000) {
+      blk_stalls++;
+      /* The row the wedge investigation needs: which ring slot, which cid,
+         where both indices are, whether the device is alive (CSTS), whether
+         an interrupt is armed at all (INTMS/INTMC are the NVMe interrupt
+         masks; this queue is created with IEN=0, i.e. polled), and what the
+         head slots hold.  One row per stall, bounded by the reset below. */
+      uart_puts("[BLKQ] stall cid=");
+      print_int((int)cid);
+      uart_puts(" slot=");
+      print_int((int)slot);
+      uart_puts(" sq_tail=");
+      print_int((int)io_sq_tail);
+      uart_puts(" cq_head=");
+      print_int((int)io_cq_head);
+      uart_puts(" phase=");
+      print_int((int)io_cq_phase);
+      uart_puts(" cqe[cq_head].cid=");
+      print_int((int)io_cq[io_cq_head].cid);
+      uart_puts(" .status=");
+      uart_print_hex(io_cq[io_cq_head].status);
+      uart_puts(" next.cid=");
+      print_int((int)io_cq[(io_cq_head + 1) % NVME_IOQ_DEPTH].cid);
+      uart_puts(" next.status=");
+      uart_print_hex(io_cq[(io_cq_head + 1) % NVME_IOQ_DEPTH].status);
+      uart_puts(" inside=");
+      print_int((int)blk_inside);
+      uart_puts(" n=");
+      print_int((int)blk_stalls);
+      uart_puts(" CSTS=");
+      uart_print_hex(nvme_regs[7]);
+      uart_puts(" CC=");
+      uart_print_hex(nvme_regs[5]);
+      uart_puts(" INTMS=");
+      uart_print_hex(nvme_regs[3]);
+      uart_puts(" INTMC=");
+      uart_print_hex(nvme_regs[4]);
+      uart_puts("\n");
+
+      if (recovered) {
+        uart_puts("[BLKQ] giving up cid=");
+        print_int((int)cid);
+        uart_puts(" -> I/O error (controller left freshly initialised)\n");
+        return 0x7FFF;
+      }
+      /* Recovery, not a symptom patch: put the controller and BOTH rings back
+         into a known-good state, then resubmit the same command once.  A
+         completion the device really did lose becomes a completed transfer. */
+      recovered = 1;
+      if (nvme_reinit() != 0) {
+        uart_puts("[BLKQ] reinit failed cid=");
+        print_int((int)cid);
+        uart_puts(" -> I/O error\n");
+        return 0x7FFF;
+      }
+      slot = nvme_sq_submit(cmd);
+      t0 = timer_get_ms();
+      printed_slow = 0;
+      continue;
+    }
+  }
+}
+
+static uint16_t submit_io_cmd(struct nvme_cmd* cmd) {
+  uint16_t slot = nvme_sq_submit(cmd);
+  return nvme_wait_cid(cmd, slot);
 }
 
 void virtio_blk_handle_irq(void) {
@@ -363,36 +669,76 @@ int virtio_blk_init(void) {
   io_sq_db    = &nvme_regs[1024 + 1 * 2 * stride_words];
   io_cq_db    = &nvme_regs[1024 + (1 * 2 + 1) * stride_words];
 
-  // Create IO Completion Queue 1
-  struct nvme_cmd create_cq = {0};
-  create_cq.opcode = 0x05; // Create I/O Completion Queue
-  create_cq.cid = 1;
-  create_cq.prp1 = (uint64_t)&io_cq;
-  create_cq.cdw10 = (1 << 16) | 0x01; // Size = 2 (1), ID = 1
-  create_cq.cdw11 = 0x01; // PC = 1
-  uint16_t status_cq = submit_admin_cmd(&create_cq);
-  uart_puts("Create IO CQ Status: ");
-  uart_print_hex(status_cq);
+  /* L55: one place creates CQ/SQ 1 (also used by the reset path).  The ring
+     is cleared first: a fresh controller's CQ phase starts at 1 and every
+     entry must read "not written" until the device posts into it. */
+  for (int i = 0; i < NVME_IOQ_DEPTH; i++) {
+    io_cq[i].result = 0;
+    io_cq[i].rsvd = 0;
+    io_cq[i].sq_head = 0;
+    io_cq[i].sq_id = 0;
+    io_cq[i].cid = 0xFFFF;
+    io_cq[i].status = 0;
+    io_sq[i].cid = 0xFFFF;
+  }
+  io_sq_tail = 0;
+  io_cq_head = 0;
+  io_cq_phase = 1;
+  int qcreat = nvme_io_queues_create();
+  uart_puts("[BLKI] nvme ioq depth=");
+  print_int(NVME_IOQ_DEPTH);
+  uart_puts(" sq_tail=");
+  print_int((int)io_sq_tail);
+  uart_puts(" cq_head=");
+  print_int((int)io_cq_head);
+  uart_puts(" phase=");
+  print_int((int)io_cq_phase);
+  uart_puts(" sq_db=");
+  uart_print_hex((uint64_t)io_sq_db);
+  uart_puts(" cq_db=");
+  uart_print_hex((uint64_t)io_cq_db);
+  uart_puts(" create=");
+  print_int(qcreat);
   uart_puts("\n");
-
-  // Create IO Submission Queue 1
-  struct nvme_cmd create_sq = {0};
-  create_sq.opcode = 0x01; // Create I/O Submission Queue
-  create_sq.cid = 2;
-  create_sq.prp1 = (uint64_t)&io_sq;
-  create_sq.cdw10 = (1 << 16) | 0x01; // Size = 2 (1), ID = 1
-  create_sq.cdw11 = (1 << 16) | 0x01; // CQID = 1, PC = 1
-  uint16_t status_sq = submit_admin_cmd(&create_sq);
-  uart_puts("Create IO SQ Status: ");
-  uart_print_hex(status_sq);
-  uart_puts("\n");
+  if (qcreat != 0) return -1;
 
   uart_puts("NVMe driver initialized successfully!\n");
   return 0;
 }
 
-int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
+/* L55: single-in-flight token.  It is a plain flag, not a lock: it is never
+ * held while a *lock* is held across the device wait, so the spinlock stall
+ * breaker (which frees a lock whose owner stopped taking timer interrupts)
+ * cannot admit a second driver entrant — the exact mechanism that used to
+ * desynchronize the completion ring.  A waiter sleeps with interrupts on. */
+static void blk_token_acquire(void) {
+  for (;;) {
+    uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+    if (!blk_in_use) {
+      blk_in_use = 1;
+      spinlock_release_irqrestore(&blk_request_lock, flags);
+      break;
+    }
+    spinlock_release_irqrestore(&blk_request_lock, flags);
+    safe_wfi();
+  }
+  if (__atomic_add_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST) > 1) {
+    uart_puts("[BLKRACE] two drivers inside the queue, inside=");
+    print_int((int)blk_inside);
+    uart_puts("\n");
+  }
+}
+
+static void blk_token_release(void) {
+  __atomic_sub_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST);
   uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+  blk_in_use = 0;
+  spinlock_release_irqrestore(&blk_request_lock, flags);
+}
+
+int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
+  if (count == 0) count = 1;
+  blk_token_acquire();
   int res = 0;
   for (uint32_t i = 0; i < count; i++) {
     struct nvme_cmd cmd = {0};
@@ -409,18 +755,15 @@ int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
       res = -1;
       break;
     }
-    /* L9 liveness: each sector is an IRQ-off NVMe poll; a peer reaper must
-       not age this core's claim stale across a long image read (the -smp 8
-       WebProcess wedge).  Refresh per sector — the core is provably alive.
-       Writes only; process.c owns the array. */
-    {
-      extern volatile uint64_t cpu_heartbeat_ms[];
-      extern uint64_t timer_get_ms(void);
-      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
-    }
     memcpy((uint8_t*)buf + (i * 512), (const void*)&bounce_buf[0], 512);
   }
-  spinlock_release_irqrestore(&blk_request_lock, flags);
+  /* L9 liveness: bound the IRQ-off refresh gap to ONE device request; this
+     core is provably alive right after a completed transfer. */
+  {
+    extern volatile uint64_t cpu_heartbeat_ms[];
+    cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+  }
+  blk_token_release();
   return res;
 }
 
@@ -439,7 +782,8 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
     }
     return -1;
   }
-  uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+  if (count == 0) count = 1;
+  blk_token_acquire();
   int res = 0;
   for (uint32_t i = 0; i < count; i++) {
     memcpy((void*)&bounce_buf[0], (const uint8_t*)buf + (i * 512), 512);
@@ -458,7 +802,7 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
       break;
     }
   }
-  spinlock_release_irqrestore(&blk_request_lock, flags);
+  blk_token_release();
   return res;
 }
 
