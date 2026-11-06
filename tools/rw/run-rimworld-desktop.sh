@@ -140,6 +140,7 @@ if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
       -isystem "$D/usr/include/x86_64-linux-gnu" \
       -isystem "$(gcc -print-file-name=include)" \
       -o "$OUT/RimWorldLinux.ad9" src/user/rwmain.c \
+      "$ROOT/tools/rw/mono-probe/condtrace.c" \
       "$DLIB/Scrt1.o" "$DLIB/crti.o" "$DLIB/libc_nonshared.a" \
       "$LDIR/libc.so.6" "$LDIR/libdl-2.31.so" "$DLIB/crtn.o" \
       -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2 \
@@ -279,6 +280,16 @@ if [ "${RW_TPTRACE:-0}" = 1 ]; then
   echo "  staged: /TPTRACE -> MONO_LOG_MASK=threadpool, level=debug"
 else
   mdel -i "$IMG" ::/TPTRACE >/dev/null 2>&1 || true
+fi
+# L54: condvar flight recorder.  condtrace.c is linked into the launcher, so
+# its pthread_cond_* wrappers win resolution for the game's DSOs; /CONDTRACE
+# turns counting on.  Without the marker the wrappers are pass-through.
+if [ "${RW_CONDTRACE:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/condtrace"
+  stage "$OUT/condtrace" ::/CONDTRACE
+  echo "  staged: /CONDTRACE -> condtrace counters + [CT2] park reports"
+else
+  mdel -i "$IMG" ::/CONDTRACE >/dev/null 2>&1 || true
 fi
 # L50: /TPPOKE makes the stall probe do ONE spurious Monitor.PulseAll on the
 # ManualResetEventSlim the main thread is parked on (rule 24b).  Diagnostic

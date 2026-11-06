@@ -404,8 +404,84 @@ int file_open(struct process *cur, const char *filename, int flags) {
 
   /* GB-020: O_DIRECTORY opens a directory fd (getdents64).  Route it before
    * the regular FAT16 file path so a directory never reaches the file open
-   * (which refuses dirs for boot-sector safety).  Missing target => ENOENT. */
+   * (which refuses dirs for boot-sector safety).  Missing target => ENOENT.
+   *
+   * L54: an NFS directory is a directory too.  This used to fall straight
+   * into fat16_open_dir(), whose resolve fails for /NFS/... and returns
+   * ENOENT — glibc/Mono turn that into DirectoryNotFoundException.  That is
+   * exactly what killed Verse.ModLister.RebuildModList() the moment the
+   * PLINQ stall was fixed.  Route NFS first, and only fall back to FAT16.
+   *
+   * The check runs whether or not O_DIRECTORY is set: Linux allows
+   * open("/dir", O_RDONLY) and only fails read(2) with EISDIR, so a runtime
+   * that opens the directory without the flag must get a directory fd too. */
   if (flags & O_DIRECTORY) {
+    {
+      int nmidx = -1;
+      const char *nrel = 0;
+      int routed = 0, lrc = -1, ltype = -1;
+      if (f->path[0]) {
+        routed = vfs_route(f->path, &nmidx, &nrel);
+        if (routed && nrel) {
+          const struct nfs_mount *nm = nfs_mount_at(nmidx);
+          struct nfs_attr na;
+          struct nfs_fh nfh;
+          nfh.len = 0;
+          if (nm) {
+            lrc = nfs_lookup(nm, nrel, &nfh, &na);
+            if (lrc == 0) ltype = (int)na.type;
+          }
+          /* One bounded row per O_DIRECTORY open.  "open() says ENOENT" is
+             four different bugs (not routed, lookup failed, not a dir, fd
+             table full) and they are indistinguishable from the caller. */
+          {
+            static int l54_rows;
+            if (l54_rows < 8) {
+              l54_rows++;
+              struct kline kl;
+              kl_init(&kl);
+              kl_s(&kl, "[LNFSD] path=");
+              kl_s(&kl, f->path);
+              kl_s(&kl, " routed=");
+              kl_i(&kl, routed);
+              kl_s(&kl, " midx=");
+              kl_i(&kl, nmidx);
+              kl_s(&kl, " rel=");
+              kl_s(&kl, nrel ? nrel : "(null)");
+              kl_s(&kl, " lrc=");
+              kl_i(&kl, lrc);
+              kl_s(&kl, " type=");
+              kl_i(&kl, ltype);
+              kl_c(&kl, '\n');
+              kl_emit(&kl);
+            }
+          }
+          if (lrc == 0 && ltype == NF3DIR) {
+            f->type = FILE_TYPE_NFSDIR;
+            f->nfs.fh = nfh;
+            f->nfs.size = 0;
+            f->nfs.cursor = 0;          /* getdents resume index */
+            f->nfs.is_dir = 1;
+            f->nfs.mount_idx = nmidx;
+            int ndfd = -1;
+            for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+              if (cur->open_fds[i] == -1) {
+                cur->open_fds[i] = get_global_fd(f);
+                cur->num_open_fds++;
+                ndfd = i;
+                break;
+              }
+            }
+            if (ndfd == -1) {
+              f->type = FILE_TYPE_EMPTY;
+              f->ref_count = 0;
+              return -EMFILE;
+            }
+            return ndfd;
+          }
+        }
+      }
+    }
     if (fat16_open_dir(filename, f) != 0) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
@@ -435,6 +511,15 @@ int file_open(struct process *cur, const char *filename, int flags) {
     f->type = FILE_TYPE_EMPTY;
     f->ref_count = 0;
     return -ENOENT;
+  }
+  if (routed == 1 && f->nfs.is_dir) {
+    /* A directory opened WITHOUT O_DIRECTORY.  Linux allows that open and
+       fails read(2) with EISDIR; keep the fd a directory so getdents64 works
+       and file_read refuses the data path.  No extra lookup: vfs_open_routed
+       already fetched fattr3. */
+    f->type = FILE_TYPE_NFSDIR;
+    f->nfs.size = 0;
+    f->nfs.cursor = 0;
   }
   if (routed == 0) {
     /* POSIX open(): a missing file only comes into existence with
@@ -1437,6 +1522,16 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   } else if (f->type == FILE_TYPE_NFS) {
     base = f->nfs.cursor;
     size = f->nfs.size;
+  } else if (f->type == FILE_TYPE_FAT16DIR || f->type == FILE_TYPE_PROCFD) {
+    /* L54: Linux allows lseek on a directory fd (SEEK_SET/CUR move the
+       getdents resume point, SEEK_END is 0).  .NET's enumerator probes the
+       directory with lseek; answering EINVAL made DirectoryInfo.GetDirectories
+       throw IOException("Invalid argument") on /NFS/Data. */
+    base = f->fat16.cursor;
+    size = 0;
+  } else if (f->type == FILE_TYPE_NFSDIR) {
+    base = f->nfs.cursor;
+    size = 0;
   } else {
     *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK ||
              f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL ||
@@ -1455,8 +1550,12 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   if (newpos < 0) { *errp = EINVAL; return -1; }
 
   uint64_t flags = spinlock_acquire_irqsave(&f->lock);
-  if (f->type == FILE_TYPE_FAT16) f->fat16.cursor = (uint32_t)newpos;
-  else                            f->nfs.cursor  = (uint32_t)newpos;
+  if (f->type == FILE_TYPE_FAT16)
+    f->fat16.cursor = (uint32_t)newpos;
+  else if (f->type == FILE_TYPE_FAT16DIR || f->type == FILE_TYPE_PROCFD)
+    f->fat16.cursor = (uint32_t)newpos;
+  else
+    f->nfs.cursor = (uint32_t)newpos;
   spinlock_release_irqrestore(&f->lock, flags);
   *errp = 0;
   return newpos;
@@ -1537,9 +1636,10 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     return 0;
   }
   case FILE_TYPE_NFS:
+  case FILE_TYPE_NFSDIR:
     k_stat_fill(st, K_DEV_NFS, nfs_synth_ino(&f->nfs.fh),
-                f->nfs.is_dir ? (K_S_IFDIR | 0755)
-                              : (K_S_IFREG | 0644),
+                (f->type == FILE_TYPE_NFSDIR || f->nfs.is_dir)
+                    ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
                 f->nfs.size);
     return 0;
   /* Anonymous objects: Linux gives each pipe/socket its own inode on its own
@@ -1613,9 +1713,81 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
-  if (f->type != FILE_TYPE_FAT16DIR && f->type != FILE_TYPE_PROCFD)
+  if (f->type != FILE_TYPE_FAT16DIR && f->type != FILE_TYPE_PROCFD &&
+      f->type != FILE_TYPE_NFSDIR)
     return -ENOTDIR;
   if (!ubuf || bufsize <= 0) return -EINVAL;
+
+  /* L54: NFS directory enumeration.  nfs_list_dir() owns a one-directory
+     cache and READDIRPLUS parsing; this loop only packs its entries into
+     Linux dirent64 records.  The resume index lives in f->nfs.cursor, the
+     same role f->fat16.cursor plays for a FAT directory. */
+  if (f->type == FILE_TYPE_NFSDIR) {
+    int midx = -1;
+    const char *rel = 0;
+    if (!f->path[0] || !vfs_route(f->path, &midx, &rel)) return -EIO;
+    const struct nfs_mount *m = nfs_mount_at(midx);
+    if (!m) return -EIO;
+    /* End of directory must be 0, not -EIO: nfs_list_dir() uses -1 for both
+       "past the end" and "RPC error", and .NET's FileSystemEnumerator reads
+       once more after the last entry.  Ask for the count explicitly. */
+    int total = nfs_dir_entries(m, rel);
+    if (total < 0) return -EIO;
+    if ((long)f->nfs.cursor >= total) return 0;
+    int used = 0;
+    uint32_t idx = f->nfs.cursor;
+    uint32_t start_idx = idx;
+    int first_rc = 7777;
+    for (;;) {
+      char nm[NFS_NAME_MAX];
+      uint8_t attr = 0;
+      uint32_t sz = 0;
+      int grc = nfs_list_dir(m, rel, (int)idx, nm, sizeof nm, &attr, &sz);
+      if (idx == start_idx) first_rc = grc;
+      if (grc != 0)
+        break;
+      int nlen = 0;
+      while (nm[nlen]) nlen++;
+      int reclen = (19 + nlen + 1 + 7) & ~7;
+      if (used + reclen > bufsize) break;
+      uint8_t *pb = (uint8_t *)ubuf + used;
+      uint64_t ino = 0x4E4600000000ULL + (uint64_t)idx + 1;
+      uint64_t off = (uint64_t)idx + 1;
+      for (int k = 0; k < 8; k++) pb[k] = (uint8_t)(ino >> (k * 8));
+      for (int k = 0; k < 8; k++) pb[8 + k] = (uint8_t)(off >> (k * 8));
+      pb[16] = (uint8_t)(reclen & 0xFF);
+      pb[17] = (uint8_t)((reclen >> 8) & 0xFF);
+      pb[18] = (attr & 0x10) ? 4 : 8;   /* DT_DIR / DT_REG */
+      for (int n = 0; n < nlen; n++) pb[19 + n] = (uint8_t)nm[n];
+      pb[19 + nlen] = 0;
+      used += reclen;
+      idx++;
+    }
+    f->nfs.cursor = idx;
+    {
+      static int lgd_rows;
+      if (lgd_rows < 4) {
+        lgd_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[LGD] path=");
+        kl_s(&kl, f->path);
+        kl_s(&kl, " rel=");
+        kl_s(&kl, rel);
+        kl_s(&kl, " from=");
+        kl_i(&kl, (long)start_idx);
+        kl_s(&kl, " first_rc=");
+        kl_i(&kl, first_rc);
+        kl_s(&kl, " n=");
+        kl_i(&kl, (long)(idx - start_idx));
+        kl_s(&kl, " used=");
+        kl_i(&kl, used);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+    return used > 0 ? used : -EIO;
+  }
 
   if (f->type == FILE_TYPE_PROCFD) {
     /* /proc/<pid>/fd: list this process's open user fds (0..n).  Reuses the
@@ -2539,6 +2711,30 @@ int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
     *cluster = f->fat16.entry.start_cluster;
   if (size)
     *size = f->fat16.entry.file_size;
+  return 0;
+}
+
+/* L54: the NFS sibling of file_fat16_ident.  A regular file on a mounted
+ * export is identified by (mount index, NFSv3 file handle); nfs_obj_get()
+ * keys the page cache on that pair, so every mapping of one file shares its
+ * frames.  Directories are refused (they have their own getdents path). */
+int file_nfs_ident(struct process *p, int fd, int *mount_idx,
+                   struct nfs_fh *fh, uint32_t *size) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return -EBADF;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return -EBADF;
+  struct file *f = &global_file_table[gfd];
+  if (f->type != FILE_TYPE_NFS || f->nfs.is_dir)
+    return -ENOTSUP;
+  if (mount_idx)
+    *mount_idx = f->nfs.mount_idx;
+  if (fh)
+    *fh = f->nfs.fh;
+  if (size)
+    *size = (uint32_t)f->nfs.size;
   return 0;
 }
 

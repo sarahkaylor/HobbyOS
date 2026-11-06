@@ -140,8 +140,12 @@
 /* --- P2.4 (S4): shared objects (memfd / MAP_SHARED anon) ------------- */
 
 /* Object slots and cap.  64 MiB per object is the S4 acceptance scope
- * (terabytes of sparse VA are fine; resident object pages are frames). */
-#define VM_OBJ_MAX 64
+ * (terabytes of sparse VA are fine; resident object pages are frames).
+ * L54: slots raised 64 -> 2048 because RimWorld's XML loader keeps one mapped
+ * view per LoadableXmlAsset while it parses the Core defs; the tree has 1,209
+ * XML files, and at 64 the pool was exhausted after 8 files so every later
+ * mmap returned ENOMEM ("Could not map file"). */
+#define VM_OBJ_MAX 2048
 #define VM_OBJ_MAX_BYTES 0x4000000ULL /* 64 MiB */
 #define VM_OBJ_MAX_FRAMES (VM_OBJ_MAX_BYTES / 0x1000)
 
@@ -153,6 +157,12 @@
  * MAP_PRIVATE writes copy-on-write.  Frames are filled from the file on
  * first touch by the demand fault, never eagerly at map time. */
 #define VM_OBJ_FILE 3
+/* L54: a read-only regular file on an NFS mount.  Mono's
+ * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+ * no FAT16 cluster chain, so the page source is nfs_read_file() keyed by
+ * (mount, file handle).  Same demand-fill/shared-frame contract as
+ * VM_OBJ_FILE. */
+#define VM_OBJ_NFS 4
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) subset (design section 4.3, Linux
  * numbers; SHRINK/GROW enforced at ftruncate, WRITE recorded advisory). */
@@ -177,6 +187,13 @@ struct vm_object {
      player's own log — permanently breaks page-in for every DSO currently
      mapped (measured: UnityPlayer.so faulted at its first new text page). */
   uint16_t file_start_cluster;
+  /* L54: VM_OBJ_NFS source identity.  Kept on the object (not only in the
+     share-cache slot) so a live mapping can still fill pages after its slot
+     is recycled for another file.  Mounts are read-only, so this identity
+     never goes stale. */
+  uint8_t nfs_mount_idx;
+  uint8_t nfs_fh_len;
+  uint8_t nfs_fh[64]; /* NFS_FH_MAX */
 };
 
 struct vm_region {  /* sorted by base; per AS, under proc_lock */

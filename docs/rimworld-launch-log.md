@@ -6812,3 +6812,163 @@ The browser and WebKit tiers were not touched; the only changed userspace file
 is `src/user/rwmain.c` (launcher instrumentation, `/TPTRACE`-gated) plus the
 host-only probes under `tools/rw/mono-probe/`.
 
+## 41. 2026-11-05 — M6/L54: the private-event condvar was never the one Mono signalled — our own `GLIBC_2.2.5` interposer built a second one
+
+The brief was the last hop of §40.6: the pulse woke *an* event, that event
+was `signalled=1`, and the thread was still in `pthread_cond_wait`. **The
+identity row says the thread was never parked on the event the pulse set.**
+The waiter's cond was a private 0x30-byte heap object created by glibc's
+`GLIBC_2.2.5` compat entry for `pthread_cond_wait`, which this launcher
+resolved from its own `-rdynamic` wrapper. Signal/broadcast were not
+interposed, so Mono lifted the handle's real cond while the thread slept on
+the compat copy.
+
+### 41.1 Handle→cond identity: the parked cond is a malloc'd 0x30-byte block
+
+The two offsets come from the binaries, not from source:
+
+* glibc 2.31 (pinned `/tmp/glibc231`), `pthread_cond_wait@@GLIBC_2.3.2` at
+  `f160`: `f1f5 lea 0x28(%rbp,%r9,1),%r15` and then the futex syscall with
+  `rdi=r15`.  The futex key is **`cond + 0x28 + 4*g`**.
+* Unity's `libmonobdwgc`, `mono_w32handle_wait_one` at `0x20de36`:
+  `20dec8 lea 0x38(%rbp),%rdi; add $0x10,%rbp; mov %rbp,%rsi; call
+  24f404`.  `signal_cond` is **`handle + 0x38`**, `signal_mutex`
+  `handle + 0x10`.
+
+So a w32handle event's key must be `handle + 0x60 + 4*g`, and the 16-byte
+header at `key - 0x60` must read `{type, ref, signalled, in_use}` with small
+sane values.  The L53 stall fails that test:
+
+| row | value | meaning |
+|---|---|---|
+| parked key | `0x105B68DB18` | from the kernel `[FUTEX] q slot=4` |
+| `key - 0x38` | `0x0 0x41` | glibc **malloc chunk header**: prev_size 0, size 0x41 = a 0x30-byte request + 8 + PREV_INUSE |
+| `key - 0x60` | `0x105B68DAB8` | not a handle: that address is 8 bytes before the chunk header, inside the previous allocation |
+| the signalled EVENT | `0x104005FDD8` `sig=1` `in_use=1` | a real, different handle; its cond would be `0x104005FE10` → key `0x104005FE38` |
+
+The `0x41` is the giveaway: `0x30` is exactly `sizeof(pthread_cond_t)`, and
+nothing in `MonoW32Handle` allocates its cond separately.  The thread was
+parked on a cond that lives in its own malloc block, while the handle's
+inline cond (at `handle+0x38`) was the one `mono_w32event_set` signalled.
+
+### 41.2 The mechanism: `pthread_cond_wait@GLIBC_2.2.5` allocates a private "2.0" cond
+
+`src/user/rwmain.c` used to define
+
+```c
+int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) {
+  real = dlvsym(RTLD_NEXT, "pthread_cond_wait", "GLIBC_2.2.5");
+  return real(c, m);
+}
+```
+
+libpthread 2.31's `pthread_cond_wait@GLIBC_2.2.5` (`0x10650`) is
+`__pthread_cond_wait_2_0`:
+
+```text
+1065b  mov (%rdi),%r12          ; r12 = *(void**)cond
+1065e  test %r12,%r12
+10661  je 10678                 ; zero -> allocate
+10678  calloc(1, 0x30)          ; the "2.0" cond
+10692  lock cmpxchg %rdi,(%rbx) ; store it into the REAL cond's first word
+106a9  jmp f160                 ; wait on the private copy
+```
+
+Every freshly `calloc`'d `MonoW32Handle` has a zeroed `signal_cond`, so the
+first wait takes the `calloc` path: the real cond's `__wseq` is overwritten
+with a pointer to a private 0x30-byte cond, and the thread parks on
+`private + 0x28`.  Mono's `pthread_cond_signal`/`broadcast` were **not**
+wrapped, so they act on the real cond (`handle+0x38`): different futex word,
+nobody queued there, permanent sleep.  An early pulse is equally fatal — the
+`signalled` flag is set, but the waiter is not on the cond the pulse wakes.
+
+This also explains why the whole pool was healthy: timed parks go through
+`pthread_cond_timedwait`, which already resolved `GLIBC_2.3.2`; only the
+infinite `Task.SpinThenBlockingWait` path uses plain `pthread_cond_wait`.
+
+Host proof with the same pinned libpthread (`fakecond.c`, cond at offset 0x38
+of a zeroed 0x70-byte block, signal on the real cond):
+
+| wrapper version | first word after park | signal wakes waiter? |
+|---|---|---|
+| `GLIBC_2.2.5` | heap pointer to private cond | **no** (`waiter_out=0`) |
+| `GLIBC_2.3.2` | `0x2` (a real `__wseq`) | yes (`waiter_out=1`) |
+
+### 41.3 The fix
+
+All four cond functions are now interposed by
+`tools/rw/mono-probe/condtrace.c`, which resolves `GLIBC_2.3.2` for
+`pthread_cond_wait` and `pthread_cond_timedwait` and the same version for
+signal/broadcast; rwmain's two broken wrappers are gone (rule 108's warning
+applied to `timedwait` only — `wait` had the same defect with a worse
+symptom).  `condtrace` also keeps per-cond counters and is linked into the AD-9
+launcher when `RW_CONDTRACE=1`.  The counters distinguish "no wait was ever
+entered on this object" from "a wait was entered and never woken": in the
+pre-fix run the cond under the kernel's parked key reported `waits=0`.  In
+the fixed run (ladder r3) one handle produced both halves of the same wait:
+
+```text
+[CT] S tid=34 cond=0x000000104005fe10 inwait=1 k0=0x104005fe38 k1=0x104005fe3c
+[CT] w tid=4  cond=0x000000104005fe10 mutex=0x000000104005fde8
+```
+
+`mutex + 0x10 = 0x104005fdd8` and `cond - 0x38 = 0x104005fdd8`: the wait and
+the signal are on the **same real MonoW32Handle** — the very handle §40 saw
+`signalled=1` while the thread stayed asleep — and the main thread's wait
+returned and the loader resumed.  That is the last hop closed, with rows.
+
+### 41.4 What the fix exposed: three NFS walls, in order
+
+The stall was hiding real work.  Each wall below reported the next one as
+soon as the previous was fixed; all three are new, and none is a condvar:
+
+1. **`open(O_DIRECTORY)` on `/NFS/Data` → ENOENT.**  `file_open` routed every
+   `O_DIRECTORY` to `fat16_open_dir`, so `Verse.ModLister.RebuildModList`
+   threw `DirectoryNotFoundException`.  Added `FILE_TYPE_NFSDIR`, a
+   getdents64 walk over the existing `nfs_list_dir` (READDIRPLUS) cache, and
+   `nfs_dir_entries()` so end-of-directory answers 0 instead of `nfs_list_dir`'s
+   -1 (which the .NET enumerator saw as EIO).  The `[LNFSD]`/`[LGD]` rows name
+   every open and every enumeration.
+2. **`lseek` on a directory fd → EINVAL.**  .NET's enumerator probes the
+   directory with `lseek`; Linux permits it (`SEEK_END` is 0).  `file_seek`
+   now moves the getdents cursor for FAT16DIR/PROCFD/NFSDIR.
+3. **`MemoryMappedFile` over `/NFS` → "Could not map file".**  RimWorld wraps
+   every `Data/**/*.xml` in a `MemoryMappedFile`; mmap of an NFS fd was
+   `-ENOTSUP` (M5b).  Added `VM_OBJ_NFS` (`nfs_obj_get`/`nfs_obj_page`):
+   one object per (mount, NFSv3 file handle), pages filled on first touch
+   with `nfs_read_file` outside every lock, sharing frames like
+   `VM_OBJ_FILE`.  `VM_OBJ_MAX` went 64 → 2048: the XML loader holds one
+   mapped view per `LoadableXmlAsset`, and the tree has 1,209 XML files; at
+   64 the pool died after 8 files and every later mmap returned `ENOMEM`.
+   The NFS share slots evict cache-only objects when full, and the source
+   identity lives on the object so a live mapping keeps filling afterwards.
+
+### 41.5 Ladder, 3 runs
+
+`RW_SKIP_BUILD=1 RW_SKIP_EXPORT=1 RW_CONDTRACE=1 RW_SHOT_EVERY=10 bash
+tools/rw/run-rimworld-desktop.sh --run-timeout 150`, three consecutive runs
+on this tree:
+
+| run | NFS bytes | `[XSW]` max | map exceptions | end |
+|---|---|---|---|---|
+| r1 | 43,754,953 (0x2AA1B1A) | 70 | 1 | virtio-blk `STILL SPINNING` after ~150 s |
+| r2 | 43,753,790 (0x2A6E674) | 80 | 2 | deadline kill; last rows a `[FUTEX] map` dump, no panic |
+| r3 | 43,761,745 (0x2A6981A) | 80 | 0 | virtio-blk `STILL SPINNING` after ~150 s |
+
+All three are **20.1 MB past §40's 23.65 MB**, and all render at 1920x1080
+(`[XSW] n` 70-80, the `changed=` flag toggling 0/1).  A longer run on the
+same build (`--run-timeout 220`) reached `[XSW] n=160` and a full-bleed
+1920x1080 scene: 100% non-black, **132,577 colours**, 95% different from the
+old loading art, with only a small per-frame delta — a static menu-style
+scene, not the old loading art.  The residual failures are **not** the
+condvar: two runs wedge the virtio-blk queue (`submit_io_cmd: STILL
+SPINNING`) after the def load, and every run also logs 9-12 `Could not open
+file` failures, consistent with fd exhaustion (`MAX_OPEN_FDS` 64) and not
+investigated further here.  Both are named, not fixed, in this lane.
+
+### 41.6 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh` → **414 run, 0 failed**.  Gate
+ladder `redzone`, `m2_mono`, `m2_tp`, `m2_threads`, `m12`,
+`m3_window_probe`, `m4_gl_probe` re-run on this tree (raw rows in
+`obj/l54-gates.log`).

@@ -281,11 +281,21 @@ static void l_futex_near_miss(const struct futex_ev *w) {
     if (!s->used || !s->owner)
       continue;
     struct process *p = s->owner;
-    if (p->state != PROC_STATE_FUTEX || p->futex_uaddr != w->uaddr)
+    if (p->state != PROC_STATE_FUTEX)
+      continue;
+    /* L54: a condvar's two group words are 4 bytes apart.  An exact-key match
+       is the classic near miss; a d of +-4 is the shape where the waiter and
+       the waker disagree about which group of the SAME condvar is being
+       signalled.  Both are worth a row; anything beyond 0x40 is another
+       object. */
+    long d = (long)(s->uaddr - w->uaddr);
+    if (!s->uaddr || d < -0x40 || d > 0x40)
       continue;
     const char *why;
     if ((uint64_t)(uintptr_t)s->as != w->as)
       why = "different-address-space";
+    else if (d != 0)
+      why = "key-offset";
     else if ((s->bitset & w->bitset) == 0)
       why = "disjoint-bitset";
     else
@@ -298,6 +308,10 @@ static void l_futex_near_miss(const struct futex_ev *w) {
     kl_i(&kl, p->pid);
     kl_s(&kl, " key=");
     kl_hex(&kl, (unsigned long)s->uaddr);
+    kl_s(&kl, " wkey=");
+    kl_hex(&kl, (unsigned long)w->uaddr);
+    kl_s(&kl, " d=");
+    kl_i(&kl, d);
     kl_s(&kl, " wait_bitset=");
     kl_hex(&kl, s->bitset);
     kl_s(&kl, " wake_bitset=");
@@ -423,27 +437,76 @@ void futex_trace_dump_locked(void) {
     kl_s(&kl, p->name);
     kl_c(&kl, '\n');
     kl_emit(&kl);
-    /* L42: raw words at the object the key belongs to.  Mono's wait handles
-       put a mutex/cond/signal-flag triple in one allocation; the flag is the
-       word that decides "the setter never ran" (0) from "the setter ran but
-       the wake was lost" (1).  Printing the block lets the layout be read
-       from the guest's own memory instead of guessed from source. */
-    if (s->uaddr >= 0x38 && p->as) {
+    /* L54: decode the MonoW32Handle the key belongs to.
+     *
+     * glibc 2.31's pthread_cond_wait waits on `cond + 0x28 + 4*g`
+     * (libpthread f1f5 `lea 0x28(%rbp,%r9,1),%r15`, then futex with rdi=r15),
+     * and Mono's MonoW32Handle places the cond at handle+0x38
+     * (libmonobdwgc 0x20dec8 `lea 0x38(%rbp),%rdi; add $0x10,%rbp`).  A key
+     * from a w32handle event therefore has
+     *
+     *     handle = key - 0x60 - 4*g
+     *
+     * and the header must read {int type; u32 ref; int signalled; int in_use}.
+     * Printing the HEADER is the identity the earlier key-0x38 word salad
+     * could not give: `sig=1` on the real handle means the pulse set exactly
+     * the event this thread is parked on.
+     */
+    if (s->uaddr >= 0x70 && p->as) {
       struct kline kh;
       kl_init(&kh);
       kl_s(&kh, "[FUTEX] h pid=");
       kl_i(&kh, p->pid);
-      kl_s(&kh, " at=");
-      kl_hex(&kh, (unsigned long)(s->uaddr - 0x38));
-      for (int w = 0; w < 12; w++) {
-        uint64_t v = 0;
-        if (l_copy_from_user(p, &v, s->uaddr - 0x38 + (uint64_t)w * 8, 8) != 0)
-          break;
-        kl_s(&kh, " ");
-        kl_hex(&kh, (unsigned long)v);
+      kl_s(&kh, " key=");
+      kl_hex(&kh, (unsigned long)s->uaddr);
+      for (int g = 0; g < 2; g++) {
+        uint64_t h = s->uaddr - 0x60 - 4 * g;
+        if (h & 7)
+          continue;
+        int32_t type = -1, sig = -1, inuse = -1;
+        uint32_t ref = 0;
+        int ok = 0;
+        if (l_copy_from_user(p, &type, h, 4) == 0 &&
+            l_copy_from_user(p, &ref, h + 4, 4) == 0 &&
+            l_copy_from_user(p, &sig, h + 8, 4) == 0 &&
+            l_copy_from_user(p, &inuse, h + 12, 4) == 0)
+          ok = (type >= 1 && type <= 16 && ref > 0 && ref <= 0x100000 &&
+                (sig == 0 || sig == 1) && (inuse == 0 || inuse == 1));
+        kl_s(&kh, g ? " h1=0x" : " h0=0x");
+        kl_hex(&kh, (unsigned long)h);
+        kl_s(&kh, " ok=");
+        kl_i(&kh, ok);
+        kl_s(&kh, " type=");
+        kl_i(&kh, type);
+        kl_s(&kh, " ref=");
+        kl_i(&kh, (long)ref);
+        kl_s(&kh, " sig=");
+        kl_i(&kh, sig);
+        kl_s(&kh, " in_use=");
+        kl_i(&kh, inuse);
       }
       kl_c(&kh, '\n');
       kl_emit(&kh);
+      /* Raw header + the cond itself, starting at the handle the first
+         candidate names.  A w32handle event's cond state (wseq/wrefs/gsig)
+         then sits in the same row as its signalled flag. */
+      {
+        struct kline kr;
+        kl_init(&kr);
+        kl_s(&kr, "[FUTEX] hr pid=");
+        kl_i(&kr, p->pid);
+        kl_s(&kr, " at=0x");
+        kl_hex(&kr, (unsigned long)(s->uaddr - 0x60));
+        for (int w = 0; w < 14; w++) {
+          uint64_t v = 0;
+          if (l_copy_from_user(p, &v, s->uaddr - 0x60 + (uint64_t)w * 8, 8) != 0)
+            break;
+          kl_s(&kr, " ");
+          kl_hex(&kr, (unsigned long)v);
+        }
+        kl_c(&kr, '\n');
+        kl_emit(&kr);
+      }
     }
     /* L42: the syscall path that led to the park.  Printed for the three
        threads of the Unity load pipeline (main, AsyncRead, PreloadManager);
@@ -1652,29 +1715,41 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     futxw_wake(p, uaddr, val, fx_parked, fx_pre, futxw_word(p, uaddr), woke,
                &ev, tf->elr);
 #endif
-    /* L41: WHO wakes the main thread?  The park row says main is in
-       pthread_cond_wait on a word nobody ever sets; knowing which pid used to
-       wake it on that word separates "the signaler died" from "the signaler
-       is alive and stopped" in one row.  Bounded. */
+    /* L54: every wake that lands within one condvar of the MAIN thread's park
+       key.  d=0 is the exact word the thread is queued on and `woke` is the
+       number this kernel actually dequeued; d=4 is the sibling group word
+       (glibc chooses cond+0x28 or cond+0x2c), which is the one aliasing shape
+       a key comparison at the handle cannot show.  Printed for wakes that
+       found nobody too, because "wake on the right handle, wrong group word"
+       is a defect, not a non-event. */
     {
       static int w4_rows;
-      if (woke > 0 && w4_rows < 200) {
-        for (int i = 0; i < ev.nwoke; i++) {
-          if (ev.woke_pids[i] != 4) continue;
+      struct l_thr_slot *s4 = &l_thr[4];
+      if (w4_rows < 300 && s4->used && s4->owner &&
+          s4->owner->state == PROC_STATE_FUTEX && s4->uaddr) {
+        long d = (long)(uaddr - s4->uaddr);
+        if (d >= -0x40 && d <= 0x40) {
           w4_rows++;
           struct kline kw;
           kl_init(&kw);
-          kl_s(&kw, "[FUTEX] wake4 by=");
+          kl_s(&kw, "[FUTEX] wmain by=");
           kl_i(&kw, p->pid);
-          kl_s(&kw, " st=");
-          kl_i(&kw, p->state);
+          kl_s(&kw, " op=");
+          kl_i(&kw, cmd);
           kl_s(&kw, " key=");
           kl_hex(&kw, uaddr);
+          kl_s(&kw, " main=");
+          kl_hex(&kw, s4->uaddr);
+          kl_s(&kw, " d=");
+          kl_i(&kw, d);
+          kl_s(&kw, " n=");
+          kl_i(&kw, (long)val);
+          kl_s(&kw, " woke=");
+          kl_i(&kw, woke);
           kl_s(&kw, " t=");
           kl_i(&kw, (long)timer_get_ms());
           kl_c(&kw, '\n');
           kl_emit(&kw);
-          break;
         }
       }
     }
