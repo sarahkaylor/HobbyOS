@@ -3603,6 +3603,12 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       // Broadcast rescheduling IPI (vector 0x81) to all other cores.
       // Bit 14 stays clear: it is defined for level-triggered delivery only.
       *(volatile uint32_t*)(0xFEE00300) = 0x000C0081;
+#ifdef PANIC_IPI_TEST
+      /* GB-207: fire the two-CPU panic injection once the wave is running
+         (a secondary sits in an IF=0 wait before there is a process). */
+      extern void gb207_tick(void);
+      gb207_tick();
+#endif
     }
 
     // Per-core LVT-timer ticks arrive here too; always release the LAPIC.
@@ -3674,6 +3680,14 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     lapic_send_eoi();
     extern void vm_x64_shootdown_handler(void);
     vm_x64_shootdown_handler();
+#ifdef PANIC_IPI_TEST
+  } else if (tf->vector == 0x83) {
+    // GB-207: test-only two-CPU panic injection.  EOI first (LAPIC-delivered),
+    // then the claim/record path in uart.c; absent from default kernels.
+    lapic_send_eoi();
+    extern void gb207_ipi_handler(void);
+    gb207_ipi_handler();
+#endif
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
@@ -4292,6 +4306,9 @@ EXCEPTION_NO_ERR(47);
 EXCEPTION_NO_ERR(129); // 0x81
 // P2.2 (S2/OQ5): TLB shootdown IPI
 EXCEPTION_NO_ERR(130); // 0x82
+#ifdef PANIC_IPI_TEST
+EXCEPTION_NO_ERR(131); // 0x83 (GB-207 two-CPU panic-injection vehicle)
+#endif
 
 __asm__(
 ".intel_syntax noprefix\n"
@@ -4656,4 +4673,8 @@ void trap_init(void) {
   idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);
   // P2.2 (S2): TLB shootdown IPI on vector 0x82 (kernel-only gate, 0x8E).
   idt_set_gate(130, (uint64_t)exception_130, 0x08, 0x8E);
+#ifdef PANIC_IPI_TEST
+  // GB-207: test vehicle vector 0x83 (kernel-only gate, 0x8E).
+  idt_set_gate(131, (uint64_t)exception_131, 0x08, 0x8E);
+#endif
 }
