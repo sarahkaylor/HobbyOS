@@ -608,7 +608,29 @@ to its main menu: `Mono path[0] = '<dir>/RimWorldLinux_Data/Managed'`,
 launcher must be named `RimWorldLinux` inside the game dir so `/proc/self/exe`
 resolves next to `RimWorldLinux_Data`. Nothing about the non-PIE stub matters.
 
-**Status 2026-11-04 — ENGINE UP, NO FRAME YET.** In a desktop session the game
+**Status 2026-11-06 — IT RUNS AND DRAWS; THE MENU IS ONE WALL AWAY.** In a
+desktop session RimWorld now loads all 1,209 defs (every XML opened), holds
+264.7 MiB of its 729 MiB asset set over NFS at 38-55 MB/s, and **presents
+frames continuously** — 180 presented frames in a 600 s run (0.42 fps at
+1916x1018 softpipe), a full-bleed 1920x1080 window titled `RIMWORLD` showing
+the loading artwork with real progress text (`Loading defs.`, `Initializing.`).
+It dies at ~405 s in **Mono's code generator**, three ways across three runs:
+`#PF VA=-1` in a JIT chunk, a `fault-in-handler`, and
+`Assertion at x86-codegen.h:403, condition '0' not met`. That is the last
+functional blocker to the main menu; playability then needs virgl (softpipe
+measures ~0.42-0.73 fps, and the fill-rate model is in `docs/rimworld-m7-perf.md`).
+
+Walls retired since the last status, each a measured defect: NFS read throughput
+(42 KB/s -> 38-55 MB/s), a 16-bit ephemeral-port counter that collided with the
+mount's READ socket, absolute-realtime futex deadlines clamped to zero, wakes
+that waited for the 100 Hz tick, `gettimeofday` returning uptime, a
+`pthread_cond_wait` interposer at GLIBC_2.2.5 that created a private cond (the
+loader's last 20 MB), an NVMe completion ring with two consumers, an mmap
+base/insert race, a 31-character dirent-name cap that silently dropped 62 XMLs,
+a FAT16 write-cursor race that punched NUL holes in the log, and a page-in that
+published zeros for an executable page while the block device stalled.
+
+**Historical status 2026-11-04 — ENGINE UP, NO FRAME YET.** In a desktop session the game
 now gets through window activation, GL context creation and audio, and creates
 its graphics device: `Forcing GfxDevice: OpenGL Core` →
 `GfxDevice: creating device client` → `OPENGL LOG: Creating OpenGL 3.3 graphics
