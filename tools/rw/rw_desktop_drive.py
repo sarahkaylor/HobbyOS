@@ -217,7 +217,12 @@ def main():
             if name not in milestones and needle in t:
                 milestones[name] = time.time()
                 print(f"[drive] milestone {name}", flush=True)
-        if "launcher-done" in milestones:
+        # M6/L63: the launcher exits when the GAME's process dies, so the
+        # default ends the run there.  RW_KEEP_RUNNING=1 keeps the window open
+        # to --run-timeout instead: a soak wants the rest of the window (the
+        # desktop and the machine must still be alive after a guest fault).
+        if "launcher-done" in milestones and os.environ.get(
+                "RW_KEEP_RUNNING", "0") != "1":
             break
         if time.time() - last >= args.shot_every:
             i += 1

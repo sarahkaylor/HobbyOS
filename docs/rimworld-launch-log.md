@@ -8855,3 +8855,177 @@ bug and is now precisely located, but fixing it removes one of five sites.
    number can be taken from the game until the first swap happens.
 4. `slots` reached 89/191 at 430 s (§46.9 item 2) with 25 live threads — a
    900 s load still needs the tombstone reaper.
+
+## 49. 2026-11-06 — M6/L63: the VM stop was `fxsave` against a **user** address, not the 568 offset; the frame's FP image is staged and a guest fault can no longer stop the machine
+
+§48.4 handed this lane a one-line mechanism: the `#UD` delivery died at
+`arch_fpu_save_to+4`, `fxsave (%rdi)`, `rdi=0x1083EB1DF0`, and QEMU stopped the
+vCPU (`KVM internal error. Suberror: 1`).  The brief's hypothesis was that
+`L_SF_FP 568` is `8 (mod 16)`, so a 16-aligned frame base makes the FXSAVE
+operand misaligned and the `#GP` kills the VM.  **The arithmetic half of that is
+wrong, and the measurement says so**: the frame base is *not* 16-aligned.  It is
+8 (mod 16) by construction (`base = ((sp - L_SF_SIZE) & ~15) - 8`, because the
+x86-64 psABI enters a handler with `%rsp % 16 == 8`), so `base + 568` is
+16-aligned — `0x1083EB1DF0` itself is `0 mod 16`.  Nudging the constant to 576
+would have put the fpstate at 8 (mod 16) on **every** delivery and turned a
+one-off stop into a guaranteed one.  What is real is the second half of the
+mechanism: **the kernel executed FXSAVE with a user operand**, and a fault on
+that instruction is unrecoverable.
+
+### 49.1 The alignment table, measured from ring 3
+
+The rule is about the *address*, not the offset, so the probe
+(`src/user/linux_probe_fpu_sig.c` P1) measures the four combinations with a
+`SIGSEGV` handler that skips the faulting instruction (`48 0f ae /r`).  Same
+binary, workstation and guest:
+
+| base | off | dst | dst % 16 | result (host) | result (guest) |
+|---|---|---|---|---|---|
+| `…1030` (0 mod 16) | 568 | `…1268` | 8 | **#GP** → SIGSEGV | **#GP** → SIGSEGV |
+| `…1030` (0 mod 16) | 576 | `…1270` | 0 | ok | ok |
+| `…1438` (8 mod 16) | 568 | `…1670` | 0 | ok | ok |
+| `…1438` (8 mod 16) | 576 | `…1678` | 8 | **#GP** → SIGSEGV | **#GP** → SIGSEGV |
+
+That is the whole argument in one table: 568 is correct *for the base this
+kernel plants*, 576 is correct only for a base it never plants, and the kernel
+side now derives the offset from the base (`l_sf_fp_off`) so the two can never
+drift apart.  Every plant also prints the arithmetic:
+
+```text
+[FPUA] pid=2 sig=11 base=0x0x17FFFFF878 b16=8 off=568 fp=0x0x17FFFFFAB0 fp16=0 rc=0 bad=0 rows=1
+[SFP]  pid=3 gen=2 sig=11 kind=0 sp=0x0x17FFFFFD50 sp16=0 base=0x0x1080000BB8 b16=8 fp_off=568 fp16=0 alt=1
+```
+
+`b16=8`, `off=568`, `fp16=0` in every row of both 900 s soaks (24 `[FPUA]`, 48
+`[SFP]`, `bad=0`): the operand was never misaligned, before the fix either.
+
+### 49.2 What actually went wrong
+
+`arch_fpu_save_to()` executed `fxsave64` with `%rdi` = a **user** VA, from ring
+0.  Two consequences follow, and only the second one is about the offset:
+
+1. FXSAVE takes an implicit 512-byte operand; any fault it takes is a
+   kernel-mode fault in the middle of signal delivery.  KVM cannot emulate the
+   instruction, answers `KVM_INTERNAL_ERROR_EMULATION`, and QEMU's handler for
+   that is `vm_stop(RUN_STATE_INTERNAL_ERROR)` — the vCPU is gone, so the guest
+   cannot run the handler, print a row, or die politely.  That is why §48 saw
+   `[SIGX] = 0` and a desktop frozen at 430 s.
+2. The destination page had already been written by the plant (pretcode,
+   ucontext, gregs — all in the same 4 KiB page as `base+568`), and the page was
+   mapped `prot=3 anon`, so a plain store there worked.  Why the *aligned*
+   FXSAVE then faulted is not fully explained by the rows this lane has: the
+   candidates are a per-core `CR4.OSFXSR=0`/`CR0.TS` (→ `#UD`, which KVM also
+   tries to emulate) or a translation the host could not back at that instant.
+   The fix does not depend on which it was, and that is the point: the kernel no
+   longer hands a user address to FXSAVE/FXRSTOR at all.
+
+### 49.3 The fix
+
+| site | before | after |
+|---|---|---|
+| `linux_compat_thr.c` plant | `arch_fpu_save_to(base + 568)` | `arch_fpu_save_user(p, base + l_sf_fp_off(base))` |
+| `linux_compat_thr.c` rt_sigreturn | `arch_fpu_restore_from(fpregs)` | `arch_fpu_restore_user(p, fpregs)` + fallback, logged `[FPUX]` |
+| `process.c` native plant | `arch_fpu_save_to(f->fpu)` (user VA) | `arch_fpu_save_user(grp, f->fpu)` |
+| `process.c` sigreturn | `arch_fpu_restore_from(f->fpu)` | `arch_fpu_restore_user(grp, f->fpu)` |
+
+`src/kernel/fpu_user.c` owns the staging: a 16-byte-aligned 512-byte **kernel**
+buffer (a stack local, so two CPUs taking signals cannot share it), `FXSAVE`
+into it, then `vm_kwrite` / `vm_user_read` — `vm_touch` + direct-map copy under
+`vm_lock`, the same path every other user-pointer write already uses.  The
+alignment/range check runs **before** the instruction, so a misaligned or
+unbacked destination is `-EFAULT`:
+
+```text
+[FPUA] … fp16=0 rc=0        a good plant
+[FPUA] … fp16=8 rc=-14      would now be an EFAULT, not a #GP        (guard)
+```
+
+A failed plant runs the signal's **default action** for that process (the compat
+engine kills the group with the signal, the native engine returns 0 → same), and
+a failed restore leaves the live FPU state alone instead of feeding garbage to
+FXRSTOR.  The v1 (statically mapped 32 MiB) window keeps working through a
+validate-then-byte-copy arm, so native programs' signals are unaffected.
+
+Kernel-side regression tests (`src/kernel/arch/x64/fpu_sig_test.c`) pin the
+offset arithmetic (568 for `base%16==8`, 576 for `base%16==0`) and the guard
+(4 misaligned/out-of-window addresses → `-EFAULT`; the misaligned call would
+`#GP` on the spot if the guard ever moved behind the instruction).  The unit
+tier went 417 → **421 run, 0 failed**.
+
+### 49.4 The frame now survives the address that killed it
+
+Soak A (tree at `e10f8ab3`), at the same wall as §48 — a `#UD` (vector 6) in
+UnityPlayer text, `[UDX] off=0xACB000`, page header all zeros — reached the
+delivery and this time it **completed**:
+
+```text
+[SIGX] pid=4 tid=4 tgid=4 sig=11 code=1 addr=0x0x0 ipc=0x0x10825FFF80
+       rsp=0x0x1083EB1BB8 h=0x0x100000D450 alt=1 live=41
+[KERNEL] pid=4 memory fault VA=0xFFFFFFFFFFFFFFFF … inH=1
+[LCOMPAT] fault-in-handler pid=4 sig=11 ipc=0x0xFFFFFFFFFFFFFFFF -> default action
+```
+
+`0x1083EB1BB8 + 568 = 0x1083EB1DF0` — **exactly** §48.4's faulting `RDI`.  The
+frame that used to stop the machine was planted, the handler at `0x100000D450`
+ran on the altstack (`alt=1`), it faulted itself on `-1`, and the *process* was
+killed.  The VM kept printing for the rest of the window.
+
+### 49.5 The 900 s soak
+
+Soak B (final tree, `RW_KEEP_RUNNING=1` so the window is the full 900 s even
+after the launcher exits), `tools/rw/run-rimworld-desktop.sh --run-timeout 900`,
+`tools/rw/l62-soak-check.py` over the 4.58 MB serial capture:
+
+| measure | value |
+|---|---|
+| serial capture | **4 582 706 bytes** (soak A: 3 633 810 at launcher exit) |
+| screenshots / window | 105 (103 running shots × 8 s ≈ the full 900 s) |
+| **KVM emulation failures / VM stops** | **0 / 0** |
+| NFS bytes | 277 643 386 (264.78 MiB) |
+| `[TXT]` exec pages verified | **3584, bad=0** |
+| `[XSW]` presents | 0 (unchanged: the game never swaps, §48.5) |
+| `[SIGX]` delivered | **1** (SIGABRT, `alt=0`) |
+| fault inside the handler | **1** (`VA=0xE`, `inH=1` → default action) |
+| `[FPUA]` plants / `fp16≠0` / `rc≠0` | 24 / **0** / **0** |
+| `[BLKQ]` stall + reset | 1 + 1 (unchanged from §48, separate defect) |
+| `[THRS]` live / high-water / slots | 26 / 44 / 91 of 191 |
+
+The game's own death moved to the SIGABRT path (`ipc=0x108004300B`, then a
+SIGSEGV at `0x108290F804` reading `VA=0xE` inside the handler) and happened at
+~450 s — but **the machine outlived it by ~380 s**: 47 more screenshots of a
+live desktop and 1.05 MB more console (the SIGX row sits at byte
+3 534 506 of 4 582 706).  That is the difference §48 could not
+show: a guest fault now costs one process.
+
+### 49.6 Gates
+
+`tools/rw/l63-gates.sh` (10/10):
+
+| gate | result |
+|---|---|
+| `run_unit_tests_intel.sh` | **421 run, 0 failed** (417 + 4 FPU) |
+| `t3_linux_probe.sh redzone` | PASS |
+| `t3_linux_probe.sh fpu_sig` (with `PROBE.ELF nest`) | PASS |
+| `m2_mono.sh` / `m2_tp.sh` / `m2_threads.sh` | PASS / PASS / PASS |
+| `m12_thread_ceiling.sh` | PASS |
+| `m3_window_probe.py` / `m4_gl_probe.py` | PASS / PASS |
+| `run-rwnfs-probe.sh` | PASS |
+
+The probe's own rows, identical on the workstation and in the guest: P1 the
+four-case alignment table, P2 a SIGUSR1 on the normal stack with xmm0..15 +
+MXCSR + the x87 file (ST0..ST7, FCW) **bit-identical** after a handler that
+clobbers all of them, P3 the same on a deliberately tight 4 KiB altstack plus
+`uc_mcontext.fpregs` non-NULL, 16-aligned, and usable by the guest's own
+`fxrstor64`, and P4 a fault *inside* the `SIGSEGV` handler (the §48 shape) which
+kills the second wave instance and leaves the graded one to print its marker.
+
+### 49.7 What is still open
+
+1. **The zero text page** (§48.3) is untouched and is what produces these
+   `#UD`s: `[UDX] off=0xACB000 … pghd` all zeros, `[TXT] bad=0`.  Killing the
+   process instead of the machine makes it debuggable, not fixed.
+2. **Why the aligned FXSAVE faulted at all** (§49.2) is still unexplained; a
+   per-core CR0/CR4 dump at the delivery site would settle it.  The staging
+   removes the exposure either way.
+3. The block-queue stall/reset at ~430 s is unchanged and still the first
+   tripwire to fire.
