@@ -37,7 +37,8 @@
 # Env: RW_SKIP_EXPORT=1, RW_SKIP_BUILD=1 (reuse the existing kernel/disk AND
 #      the already-built launcher binaries — staging still runs),
 #      GLIBC231 / GLIBC231_DEV, RW_SHOT_EVERY (default 8s),
-#      RW_APP (default RWLAUNCH.BIN).
+#      RW_WAIT_SECS (launcher's own wait, default 900; must exceed
+#      --run-timeout for a soak), RW_APP (default RWLAUNCH.BIN).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 2
@@ -128,7 +129,8 @@ if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
   RESINC="$(clang -print-resource-dir)/include"
   UCFLAGS=(-O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics
            -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding
-           -mno-red-zone -nostdinc -isystem "$RESINC" -mcmodel=large)
+           -mno-red-zone -nostdinc -isystem "$RESINC" -mcmodel=large
+           -DRW_WAIT_SECS="${RW_WAIT_SECS:-900}")
   clang "${UCFLAGS[@]}" -c src/user/rwlaunch.c -o "$OUT/rwlaunch.o" || exit 2
   ld.lld -T src/user/linker.ld -e _start -o "$OUT/rwlaunch.elf" "$OUT/rwlaunch.o" \
          obj/intel/libc.a || exit 2

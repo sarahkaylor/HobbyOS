@@ -9239,3 +9239,144 @@ is safe.
    absent, and a wedge is still a 250 ms stall every time it happens.
 3. **No presents** (`[XSW] n=0`): the game still never swaps, so the fill-rate
    wall of §48.5 is unchanged.
+
+## 50. 2026-11-06 — M6/L65: the 47.8 vs 264 MiB spread is a **sampling-time artifact**; all three 1800 s runs sit at 47.7 MiB with `Example_Traits.xml` last at t≈280 s
+
+§49 left one number unexplained: a soak that read **47.8 MiB** while an
+earlier run on the same code read **264 MiB**, with no menu in either.
+Was that a latent race or scheduling?  This lane ran three fresh **1800 s**
+windows with a 30 s sampler (`tools/rw/l65-soak-sample.py`) and a timeline
+builder (`tools/rw/l65-timeline.py`).  The answer is (b) **benign variance
+that the window absorbs** — 47.8 MiB is what every run has read at
+t≈240-330 s, and the artifact that carries the number is a **280 s** run.
+
+Full evidence: `docs/l65-variance-report.md`; the 30 s tables:
+`docs/l65-variance-timelines.md`.
+
+### 50.1 Method
+
+`RW_KEEP_RUNNING=1 RW_WAIT_SECS=1800 --run-timeout 1800` on this worktree's
+export (`/srv/nfs/rimworld-l65-variance`).  The launcher's wait was hard-coded
+900 s, i.e. below the new window, so `RW_WAIT_SECS` is now a compile-time
+override in `run-rimworld-desktop.sh` and the launcher (`#ifndef` guard); run 1
+prints `child still running after 1690s`, so the override took effect.  Every
+30 s the sampler records NFS bytes (last `[NFSRTT] periodic`), presents (last
+`[XSW] n=` from a live `mcopy` of `/RW_HOME/Player.log`), live threads and
+resident MiB (last `[THRS] pid=4`, 5 s cadence), the last `[XO]` open, and the
+tripwire counts (`wait_max_us>=500000`, `[BLKQ] stall`, `[NFSPIPE] stall`,
+`[NFSRD] fail`, `[TXT] ZERO`, `KVM internal error`).
+
+### 50.2 All three curves are the same curve
+
+Cumulative NFS MiB:
+
+| t (s) | run 1 | run 2 | run 3 | 47.8 artifact |
+|---:|---:|---:|---:|---:|
+| 210 | 46.7 | 46.7 | 46.7 | 46.7 |
+| 240 | 46.7 | 47.7 | 46.7 | **47.7** |
+| 270 | 47.7 | 47.7 | 47.7 | 47.7 |
+| 300 | 47.7 | 47.7 | 47.7 | 47.7 (ends 280) |
+| 330 | 47.7 | 48.7 | 47.7 | — |
+| 390 | 54.2 | 67.8 | 52.3 | — |
+| 450 | 129.0 | 179.8 | 126.2 | — |
+| 510 | 264.7 | 264.7 | 264.6 | — |
+| final | **264.72** | **264.74** | **264.65** | — |
+
+The completed totals are deterministic to 0.035 %: 277 577 677 / 277 598 238 /
+277 500 762 bytes.  Run 2 is the fastest (the burst starts ~30 s earlier) and
+runs 1/3 the slowest; that spread is the only run-to-run difference in the
+load.
+
+### 50.3 The 47.8 MiB artifact is a 280 s run
+
+`l66-virgl/obj/rw-desktop` (byte-identical to the l65 copy of the same run) has
+**34 running shots** at `RW_SHOT_EVERY=8` (12:13:21 → 12:18:09), a last row
+`child still running after 280s`, and `make: *** [Makefile:2828: run] Killed`.
+It is a **300 s** run.  Every artifact on record that lasted past 400 s read
+264.6-264.8 MiB (l59 410 s, l61 860 s, l63 470 s, l64 850 s, run 1 1690 s,
+run 2 490 s).  The §49.6 "900 s / 47.8 MiB" pairing is therefore most plausibly
+the 300 s verification run's byte count (its log overwrote the 900 s soak's at
+12:13) crossed with the longer run's resident figure.
+
+At its last sample the artifact is in the *same state* as the fresh runs at
+t≈281 s:
+
+| at t≈281 s | NFS MiB | `[XSW]` | live | res MiB | last `[XO]` |
+|---|---:|---:|---:|---:|---|
+| 47.8 artifact (t=280) | 47.7 | 230 | 30 | 752 | `Core/.../DefInjected/TraitDef/Example_Traits.xml` |
+| run 1 | 47.7 | 210 | 34 | 755 | same |
+| run 2 | 47.7 | 230 | 31 | 752 | same |
+| run 3 | 47.7 | 210 | 40 | 751 | same |
+
+### 50.4 There is no branch point before 330 s
+
+The first file a fast run opens after the common state is the mod language
+set; the artifact's window ends inside the gap:
+
+| run | last `Core/.../DefInjected` | first mod `Keyed` |
+|---|---|---|
+| 47.8 artifact (ends 280 s) | `Example_Traits.xml` at 240 s | never — window ends |
+| run 1 | `Example_Traits.xml` at 260 s | `Royalty/Keyed/Alerts.xml` at 320 s |
+| run 2 | `Example_Traits.xml` at 230 s | `Royalty/Keyed/Alerts.xml` at 300 s |
+| run 3 | `Example_Traits.xml` at 260 s | `Ideology/Keyed/Dialog_StatsReports.xml` at 330 s |
+
+The transport rows are *retries that work* in every run: the artifact has two
+`[NFSPIPE] stall` rows at 230 s (`issued=4 replies=2/3`, ~520 ms) and the retry
+returns the page (`got=4096`); run 1 has eight more between 250-350 s, run 2
+seven between 230-320, run 3 seven between 250-350 — every one recovers, and
+the burst follows.  A stall row before the burst is the normal shape, not the
+slow run's signature.
+
+### 50.5 Verdict
+
+**(b) benign, absorbed by the window.**  (1) 47.8 MiB is the loader's position
+at t≈240-330 s in every run; the 1800 s window carries it through the def-parse
+plateau into the asset burst (330-390 s) and to the deterministic total by
+491-541 s.  (2) The only 47.8 MiB artifact is 280 s long; no 900 s / 47.8 MiB
+artifact exists.  (3) It is not (c) load-order nondeterminism: the `[XO]` order
+after the first four files differs between every pair of runs, yet the byte
+total reproduces to 0.035 %.  (4) It is not (a) a race on this evidence: no run
+lost a wake at the plateau and no retry row is followed by a stop.  A future
+soak must quote its wall time and shot count with its byte count.
+
+### 50.6 The real bug in the window: the block wedge is deterministic
+
+Runs 2 and 3 died **after** the load, at 491 s and 511 s, at the **same** VA
+(`0x10824E1EA0`), after the **same** refusals:
+
+```text
+[BLKSLOW] pending cid=43767 ... ms=251
+[BLKQ] stall ... CSTS=0x0 ... inside=1 n=1
+[BLKQ] controller reset #1
+[TXT] ZERO off=0x9AD000 reads=3 n0=4096 -> not published
+[TXT] IMG SUM pos=0x10000 got=0x76EFDDC5 want=0xDC910CE7 -> not published
+[KERNEL] pid=4 ... memory fault VA=0x10824E1EA0 ... in=PROT ... -> killed
+[SIGX] pid=4 ... sig=11 ... alt=1 live=37
+[KERNEL] pid=4 ... memory fault VA=0x0 PC=0x0 ... inH=1 -> killed
+[KERNEL] pid=3 (RWLAUNCH.BIN) memory fault VA=0x1000010EA0 ... -> killed
+```
+
+The page-in gate turned silent zero execution into an I/O error (no `#UD`, no
+`KVM internal error`, no `vm_stop`), which is the L63 result holding on the
+merged tree.  But the wedge itself is reproducible and still kills the process
+tree — that, not the byte count, is what to fix next.  Run 1 never hit it: it
+parked after the load with 260 presents and grew resident to 1 899 MiB by the
+end of its window (launcher t=1690 s; the launcher's loop counter runs ~6 %
+behind wall time under load).
+
+### 50.7 No menu, no frame to quote
+
+All three runs present 260-290 frames at 1920×1080, `box=0,0,1915,1017`,
+`crc` alternating `0xcab88ca9/0x2e2650f4/0xbc23863d` (run 3 ends on
+`0xbb5ae76f`), `changed=1`; OCR of the best frame is loading art (132 577
+colours), no menu text.  Run 1's framebuffer drops to 8×1 at t≈500 (later
+screendumps are 8×1); runs 2/3 lose the game window at 504/491 s.  There is no
+menu evidence and no game fps.
+
+### 50.8 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh`: **423 run, 0 failed, UNIT TESTS
+PASSED**.  `m3_window`: **PASS** (`m3w: PASS — the shim served SDL's whole
+XCreateWindow sequence and delivered WM_DELETE_WINDOW`).  `m4_gl`: **PASS**
+(`m4: PASS — libGL.so.1 loaded in the guest, rendered a GL 3.3 core triangle,
+PRESENTED it to a window, and tore the stack down`).
