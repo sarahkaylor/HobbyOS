@@ -594,12 +594,71 @@ static int vm_region_insert_locked(struct addr_space *as, uint64_t base,
   return rc;
 }
 
+/* Forward: the locked removal is defined after vm_region_find, and the L56
+ * find-and-reserve helpers below need it. */
+static int vm_region_remove_locked(struct addr_space *as, uint64_t base,
+                                   uint64_t len);
+
 int vm_region_insert(struct addr_space *as, uint64_t base, uint64_t len,
                      uint16_t prot, uint16_t kind, uint32_t flags,
                      struct vm_object *obj, uint64_t obj_off) {
   uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   int rc = vm_region_insert_locked(as, base, len, prot, kind, flags, obj,
                                    obj_off);
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return rc;
+}
+
+/* L56: choose a free base in [start, limit) and RESERVE it in the SAME
+ * vm_lock critical section.  This is the structural fix for the mmap
+ * base-select race.
+ *
+ * vm_hole_find() is a lock-free reader and vm_region_insert() is the writer;
+ * any code that calls them as two steps has a window in which a second thread
+ * of the same group sees the same hole still free, picks the same base, and
+ * the loser's insert is refused -- vm_mmap then answers -ENOMEM for a request
+ * that has gigabytes of free space.  Measured on RimWorld's def loader:
+ * four DirectXmlLoader threads mmap 1,209 XMLs, 8 of them died as
+ * `IOException: Could not map file` and the failing set was disjoint run to
+ * run.  A chosen base is in the region list before the lock is dropped here,
+ * so no second caller can choose it.  Returns 0 / -ENOMEM. */
+int vm_region_alloc_hole(struct addr_space *as, uint64_t start, uint64_t limit,
+                         uint64_t len, uint16_t prot, uint16_t kind,
+                         uint32_t flags, struct vm_object *obj,
+                         uint64_t obj_off, uint64_t *out_base) {
+  if (!as || !out_base || len == 0)
+    return -EINVAL;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t base = vm_hole_find(as, start, limit, len);
+  int rc = 0;
+  if (!base)
+    rc = -ENOMEM;
+  else if (vm_region_insert_locked(as, base, len, prot, kind, flags, obj,
+                                   obj_off) != 0)
+    rc = -ENOMEM;
+  else
+    *out_base = base;
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return rc;
+}
+
+/* L56: MAP_FIXED / MREMAP_FIXED replacement as ONE critical section.  The
+ * remove-then-insert pair used to be two lock acquisitions, so a peer's
+ * mapping could land inside the range between them and make the insert fail
+ * (again a spurious -ENOMEM, and the old mapping already destroyed). */
+int vm_region_install_fixed(struct addr_space *as, uint64_t base,
+                            uint64_t len, uint16_t prot, uint16_t kind,
+                            uint32_t flags, struct vm_object *obj,
+                            uint64_t obj_off) {
+  if (!as || len == 0)
+    return -EINVAL;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  int rc = 0;
+  if (vm_region_remove_locked(as, base, len) != 0)
+    rc = -EINVAL;
+  else if (vm_region_insert_locked(as, base, len, prot, kind, flags, obj,
+                                   obj_off) != 0)
+    rc = -ENOMEM;
   spinlock_release_irqrestore(&vm_lock, fl);
   return rc;
 }
@@ -1936,11 +1995,26 @@ static int vm_jit_claim_locked(struct addr_space *as, uint64_t anchor,
  * The bump pointer, the free list and the placeholder carve all move under
  * vm_lock: two threads of one group can enter the compatible mmap path at the
  * same time, and an unlocked bump would hand both of them the same base (the
- * second insert then fails and its caller reads a spurious ENOMEM). */
-static int vm_jit_alloc(struct addr_space *as, uint64_t len, uint64_t *out) {
+ * second insert then fails and its caller reads a spurious ENOMEM).
+ *
+ * L56: this is the _locked form and the CALLER holds vm_lock, because the
+ * reservation it carves out of the placeholder must survive into the region
+ * insert that installs the real mapping.  It used to take the lock itself,
+ * drop it, and let vm_mmap insert much later -- the same window as the
+ * first-fit race, one layer down: between the placeholder carve and the
+ * insert the span is absent from the list, so a peer's first-fit can claim
+ * it.  The claim/full rows are emitted by the caller, outside the lock. */
+struct vm_jit_pick {
+  uint64_t base;
+  uint64_t bump, jend;
+  int claimed, full;
+  uint64_t cbase, csize, cgap, anchor;
+};
+
+static int vm_jit_alloc_locked(struct addr_space *as, uint64_t len,
+                               struct vm_jit_pick *pk) {
   uint64_t chosen = 0, cbase = 0, csize = 0, cgap = 0;
   int claimed = 0, full = 0;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   if (!as->jit_base) {
     uint64_t anchor = vm_hole_find(as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2,
                                    len);
@@ -1997,11 +2071,25 @@ static int vm_jit_alloc(struct addr_space *as, uint64_t len, uint64_t *out) {
     if (!chosen)
       full = 1;
   }
-  uint64_t bump = as->jit_bump, jend = as->jit_end;
-  spinlock_release_irqrestore(&vm_lock, fl);
-  if (claimed)
-    vm_jit_log_claim(cbase, csize, cgap, as->jit_anchor0);
-  if (full) {
+  pk->base = chosen;
+  pk->bump = as->jit_bump;
+  pk->jend = as->jit_end;
+  pk->claimed = claimed;
+  pk->full = full;
+  pk->cbase = cbase;
+  pk->csize = csize;
+  pk->cgap = cgap;
+  pk->anchor = as->jit_anchor0;
+  return chosen != 0;
+}
+
+/* Emit the arena's claim/exhaustion rows.  Outside vm_lock: a console write
+ * under a spinlock is a stall hazard, and the claim row must not lengthen the
+ * critical section that now spans base selection and the insert. */
+static void vm_jit_emit_pick(const struct vm_jit_pick *pk) {
+  if (pk->claimed)
+    vm_jit_log_claim(pk->cbase, pk->csize, pk->cgap, pk->anchor);
+  if (pk->full) {
     static int full_rows;
     if (full_rows < 3) {
       full_rows++;
@@ -2009,15 +2097,13 @@ static int vm_jit_alloc(struct addr_space *as, uint64_t len, uint64_t *out) {
       kl_init(&kl);
       kl_s(&kl, "[JITA] full: arena exhausted, exec mappings fall back to "
                 "first-fit (bump=");
-      kl_hex(&kl, (unsigned long)bump);
+      kl_hex(&kl, (unsigned long)pk->bump);
       kl_s(&kl, " end=");
-      kl_hex(&kl, (unsigned long)jend);
+      kl_hex(&kl, (unsigned long)pk->jend);
       kl_s(&kl, ")\n");
       kl_emit(&kl);
     }
   }
-  *out = chosen;
-  return chosen != 0;
 }
 
 /* Return a freed span to the arena.  Conservative: only a span entirely
@@ -2039,6 +2125,144 @@ static void vm_jit_release(struct addr_space *as, uint64_t addr, uint64_t len) {
   as->jit_free_off[as->jit_nfree] = addr - as->jit_base;
   as->jit_free_len[as->jit_nfree] = len;
   as->jit_nfree++;
+}
+
+/* ---------------------------------------------------------------------
+ * L56: the mmap base-select race probe.
+ *
+ * vm_hole_find() is a lock-free reader by convention and the insert happens
+ * under vm_lock much later, so two threads of one group can pick the same
+ * base; the loser's insert refuses the overlap and vm_mmap answers -ENOMEM
+ * with gigabytes free.  One [MR] row per chosen base (sequence number, PCB
+ * pid = the thread's own id, length, base, which selector) and, on a refused
+ * insert, the blocking region plus the peer that chose the same base.  The
+ * peer search is a 64-entry ring: enough that the two selections of one race
+ * are never evicted from each other's window.
+ * ------------------------------------------------------------------- */
+#define MR_RING 64
+struct mr_ent {
+  uint32_t seq;
+  int pid;
+  uint64_t base;
+  uint64_t len;
+};
+static struct mr_ent mr_ring[MR_RING];
+static volatile uint32_t mr_seq;
+static volatile int mr_rows;
+
+static void mr_sel(uint64_t base, uint64_t len, char where) {
+  if (__atomic_load_n(&mr_rows, __ATOMIC_RELAXED) >= 6000)
+    return;
+  __atomic_fetch_add(&mr_rows, 1, __ATOMIC_RELAXED);
+  struct process *cur = current_process();
+  int pid = cur ? cur->pid : -1;
+  struct process *g = cur ? process_group(cur) : 0;
+  int gpid = g ? g->pid : -1;
+  uint32_t s = __atomic_fetch_add(&mr_seq, 1, __ATOMIC_RELAXED);
+  if (where != 'F') { /* MAP_FIXED named its address: not a race candidate */
+    struct mr_ent *e = &mr_ring[s % MR_RING];
+    e->pid = pid;
+    e->base = base;
+    e->len = len;
+    __atomic_store_n(&e->seq, s + 1, __ATOMIC_RELEASE);
+  }
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[MR] s=");
+  kl_i(&kl, (long)(s + 1));
+  kl_s(&kl, " pid=");
+  kl_i(&kl, (long)pid);
+  kl_s(&kl, " g=");
+  kl_i(&kl, (long)gpid);
+  kl_s(&kl, " as=");
+  kl_hex(&kl, (unsigned long)(g ? (uint64_t)(uintptr_t)g->as : 0));
+  kl_s(&kl, " len=");
+  kl_hex(&kl, (unsigned long)len);
+  kl_s(&kl, " base=");
+  kl_hex(&kl, (unsigned long)base);
+  kl_s(&kl, " w=");
+  kl_c(&kl, where);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+/* The first region overlapping [base,base+len), read under vm_lock (the list
+ * can be reallocated and is mutated by other threads, so a lock-free scan
+ * could fault).  Returns 0 when the span is free. */
+static int mr_blocker(struct addr_space *as, uint64_t base, uint64_t len,
+                      uint64_t *bb, uint64_t *bl, int *bk) {
+  uint64_t end = base + len;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  int found = 0;
+  for (int i = 0; i < as->nr; i++) {
+    struct vm_region *r = &as->regions[i];
+    if (base < r->base + r->len && r->base < end) {
+      *bb = r->base;
+      *bl = r->len;
+      *bk = (int)r->kind;
+      found = 1;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return found;
+}
+
+/* A refused insert: name the blocker and, from the ring, the peer whose
+ * selection produced the same base.  This row IS the proof of the race —
+ * without it the failure is indistinguishable from genuine exhaustion. */
+static void mr_fail(struct addr_space *as, uint64_t base, uint64_t len) {
+  struct process *cur = current_process();
+  int pid = cur ? cur->pid : -1;
+  uint64_t bb = 0, bl = 0;
+  int bk = -1;
+  int have = mr_blocker(as, base, len, &bb, &bl, &bk);
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[MR] FAIL pid=");
+  kl_i(&kl, (long)pid);
+  kl_s(&kl, " len=");
+  kl_hex(&kl, (unsigned long)len);
+  kl_s(&kl, " base=");
+  kl_hex(&kl, (unsigned long)base);
+  kl_s(&kl, " blk=");
+  if (have) {
+    kl_hex(&kl, (unsigned long)bb);
+    kl_s(&kl, "+");
+    kl_hex(&kl, (unsigned long)bl);
+    kl_s(&kl, " kind=");
+    kl_i(&kl, (long)bk);
+  } else {
+    kl_s(&kl, "none");
+  }
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+  for (int i = 0; i < MR_RING; i++) {
+    struct mr_ent *e = &mr_ring[i];
+    uint32_t es = __atomic_load_n(&e->seq, __ATOMIC_ACQUIRE);
+    if (!es || e->pid == pid)
+      continue;
+    if (!(e->base < base + len && base < e->base + e->len))
+      continue;
+    struct kline p;
+    kl_init(&p);
+    kl_s(&p, "[MRACE] same-base chosen-by pid=");
+    kl_i(&p, (long)e->pid);
+    kl_s(&p, " s=");
+    kl_i(&p, (long)es);
+    kl_s(&p, " base=");
+    kl_hex(&p, (unsigned long)e->base);
+    kl_s(&p, " len=");
+    kl_hex(&p, (unsigned long)e->len);
+    kl_s(&p, " || refused pid=");
+    kl_i(&p, (long)pid);
+    kl_s(&p, " base=");
+    kl_hex(&p, (unsigned long)base);
+    kl_s(&p, " len=");
+    kl_hex(&p, (unsigned long)len);
+    kl_c(&p, '\n');
+    kl_emit(&p);
+  }
 }
 
 int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
@@ -2170,14 +2394,14 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
     return -EINVAL;
   }
 
-  uint64_t base;
-  int from_arena = 0;
-  if (fl2 & VM_MAP_FIXED) {
-    /* so-vm lane A: the DSO band (USER_LIB_BASE..LIMIT) is a legal
-       MAP_FIXED target — that is where the interpreter places each
-       library, one 16 MiB slot at a time (docs/shared-libs.md section 2).
-       The MMAP arena keeps its exact previous rule.  Both bounds are
-       written as "len <= limit - addr" so a wrapping addr+len cannot pass. */
+  /* MAP_FIXED argument checks before anything is allocated: a bad address is
+     EINVAL and never needs the region list.  so-vm lane A: the DSO band
+     (USER_LIB_BASE..LIMIT) is a legal MAP_FIXED target — that is where the
+     interpreter places each library, one 16 MiB slot at a time
+     (docs/shared-libs.md section 2).  Both bounds are written as
+     "len <= limit - addr" so a wrapping addr+len cannot pass. */
+  int is_fixed = (fl2 & VM_MAP_FIXED) != 0;
+  if (is_fixed) {
     const uint64_t mmap_lim = USER_VA_BASE + USER_MMAP_SIZE + USER_MMAP_OFF;
     int in_mmap = addr >= USER_VA_BASE && addr <= mmap_lim &&
                   len <= mmap_lim - addr;
@@ -2185,52 +2409,14 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
                  len <= USER_LIB_LIMIT - addr;
     if ((addr & 0xFFF) || (!in_mmap && !in_lib))
       return -EINVAL;
-    /* MAP_FIXED replaces whatever was mapped in range. */
-    base = addr;
-    if (vm_region_remove(as, base, len) != 0)
-      return -EINVAL;
-  } else {
-    /* M6/L38: executable anonymous mappings are clustered first, so mono's
-       rel32 branch targets stay inside +-2 GiB (see the arena comment above).
-       MAP_FIXED deliberately skips this: the caller named the address. */
-    if (fd < 0 && (p & VM_PROT_EXEC)) {
-      uint64_t jb;
-      if (vm_jit_alloc(as, len, &jb)) {
-        base = jb;
-        from_arena = 1;
-        goto have_base;
-      }
-    }
-    /* First-fit bottom-up from USER_MMAP_BASE; the hint is honored when
-       free and inside the arena. */
-    uint64_t start = USER_MMAP_BASE_V2;
-    if (addr && addr >= USER_MMAP_BASE_V2 && addr <= USER_MMAP_LIMIT_V2 &&
-        len <= USER_MMAP_LIMIT_V2 - addr) {
-      uint64_t hf = vm_hole_find(as, addr, USER_MMAP_LIMIT_V2, len);
-      if (hf == addr) {
-        base = hf;
-        goto have_base;
-      }
-    }
-    /* so-vm lane A: a hint inside the DSO band is honored the same way. */
-    if (addr && addr >= USER_LIB_BASE && addr <= USER_LIB_LIMIT &&
-        len <= USER_LIB_LIMIT - addr) {
-      uint64_t lh = vm_hole_find(as, addr, USER_LIB_LIMIT, len);
-      if (lh == addr) {
-        base = lh;
-        goto have_base;
-      }
-    }
-    base = vm_hole_find(as, start, USER_MMAP_LIMIT_V2, len);
-    if (!base)
-      return -ENOMEM;
   }
-have_base:
-  /* M6/L38: an executable anonymous mapping is JIT code (Mono's code
-     manager, or the mprotect-commit of one of its reservations when the
-     caller asks for exec up front).  Record it with its spread. */
-  if (fd < 0 && (p & VM_PROT_EXEC) && !(fl2 & VM_MAP_FIXED))
-    vm_jit_note(grp->pid, addr, base, len, from_arena);
+
+  /* L56: build the backing object BEFORE the critical section.  Object
+     creation allocates and takes vm_lock itself, and it does not depend on
+     the base; doing it first is what lets base selection, reservation and the
+     region insert run inside ONE vm_lock hold (vm_region_alloc_hole's
+     invariant).  Before this, the object was created between the selection
+     and the insert, so the window was hundreds of instructions wide. */
   if (anon_obj) {
     obj = vm_object_create(VM_OBJ_ANON, len);
     if (!obj)
@@ -2282,12 +2468,97 @@ have_base:
       }
     }
   }
-  if (vm_region_insert(as, base, len, p, kind, fl2, obj, obj_off) != 0) {
-    if (anon_obj || file_backed || nfs_backed)
-      vm_object_unref(obj);
-    return -ENOMEM;
+  int obj_owned = (anon_obj || file_backed || nfs_backed);
+
+  uint64_t base = 0;
+  int from_arena = 0;
+  char mr_w = '?'; /* L56 probe: which selector chose the base */
+  struct vm_jit_pick jp;
+  jp.claimed = 0;
+  jp.full = 0;
+  int rc = 0;
+
+  /* ---- ONE critical section: choose the base and RESERVE it ------------
+   * The selection (vm_hole_find / the JIT arena carve) and the insert that
+   * makes it real are inseparable: a base that is not in the region list when
+   * the lock drops can be chosen again by a peer, and the second insert is
+   * then refused as -ENOMEM.  Do not split this, and do not add an allocation
+   * or a console write here. */
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  if (is_fixed) {
+    /* MAP_FIXED replaces whatever was mapped in range, atomically. */
+    base = addr;
+    mr_w = 'F';
+    if (vm_region_remove_locked(as, base, len) != 0)
+      rc = -EINVAL;
+    else if (vm_region_insert_locked(as, base, len, p, kind, fl2, obj,
+                                     obj_off) != 0)
+      rc = -ENOMEM;
+  } else {
+    int picked = 0;
+    /* M6/L38: executable anonymous mappings are clustered first, so mono's
+       rel32 branch targets stay inside +-2 GiB (see the arena comment above).
+       MAP_FIXED deliberately skips this: the caller named the address. */
+    if (fd < 0 && (p & VM_PROT_EXEC)) {
+      if (vm_jit_alloc_locked(as, len, &jp)) {
+        base = jp.base;
+        mr_w = 'A';
+        from_arena = 1;
+        picked = 1;
+      }
+    }
+    /* First-fit bottom-up from USER_MMAP_BASE; the hint is honored when
+       free and inside the arena. */
+    if (!picked && addr && addr >= USER_MMAP_BASE_V2 &&
+        addr <= USER_MMAP_LIMIT_V2 && len <= USER_MMAP_LIMIT_V2 - addr) {
+      uint64_t hf = vm_hole_find(as, addr, USER_MMAP_LIMIT_V2, len);
+      if (hf == addr) {
+        base = hf;
+        mr_w = 'H';
+        picked = 1;
+      }
+    }
+    /* so-vm lane A: a hint inside the DSO band is honored the same way. */
+    if (!picked && addr && addr >= USER_LIB_BASE && addr <= USER_LIB_LIMIT &&
+        len <= USER_LIB_LIMIT - addr) {
+      uint64_t lh = vm_hole_find(as, addr, USER_LIB_LIMIT, len);
+      if (lh == addr) {
+        base = lh;
+        mr_w = 'L';
+        picked = 1;
+      }
+    }
+    if (!picked) {
+      uint64_t start = USER_MMAP_BASE_V2;
+      base = vm_hole_find(as, start, USER_MMAP_LIMIT_V2, len);
+      mr_w = '1';
+    }
+    if (!base)
+      rc = -ENOMEM;
+    else if (vm_region_insert_locked(as, base, len, p, kind, fl2, obj,
+                                     obj_off) != 0)
+      rc = -ENOMEM;
   }
-  if (anon_obj || file_backed || nfs_backed)
+  spinlock_release_irqrestore(&vm_lock, fl);
+  /* ---- end of the critical section ------------------------------------ */
+
+  if (rc == 0)
+    mr_sel(base, len, mr_w); /* L56 probe: one row per chosen base */
+  if (jp.claimed || jp.full)
+    vm_jit_emit_pick(&jp);
+  if (rc != 0) {
+    if (rc == -ENOMEM && base)
+      mr_fail(as, base, len); /* L56: name the blocker and the same-base peer */
+    if (obj_owned)
+      vm_object_unref(obj);
+    return rc;
+  }
+  /* M6/L38: an executable anonymous mapping is JIT code (Mono's code
+     manager, or the mprotect-commit of one of its reservations when the
+     caller asks for exec up front).  Record it with its spread. */
+  if (fd < 0 && (p & VM_PROT_EXEC) && !is_fixed)
+    vm_jit_note(grp->pid, addr, base, len, from_arena);
+  if (obj_owned)
     vm_object_unref(obj); /* the record holds its own reference */
   return (int64_t)base;
 }

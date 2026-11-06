@@ -1987,6 +1987,96 @@ static void test_fs_dso_identity_pair(void) {
   }
 }
 
+/* L56: the base-select race, at the primitive vm_mmap now uses.
+ *
+ * vm_mmap used to call vm_hole_find() (a lock-free reader) and then
+ * vm_region_insert() (a separate critical section) with object creation in
+ * between.  Two threads of one group could therefore choose the same base;
+ * the loser's insert was refused and vm_mmap answered -ENOMEM although the
+ * whole arena was free (measured on RimWorld's four DirectXmlLoader threads:
+ * 8 defs per run died as `Could not map file`, disjoint run to run).
+ *
+ * This test runs the production primitive, so its invariant is mechanical:
+ * after vm_region_alloc_hole() returns, the chosen base IS in the region list
+ * (a peer cannot pick it), and R repeats never collide and never report
+ * -ENOMEM while the window has room.  The true concurrency test lives in
+ * src/user/linux_probe_mmap_race.c because the unit tier runs before
+ * start_scheduler() — no kernel thread can run here.
+ */
+static void test_vm_alloc_hole_atomic(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_alloc_hole_atomic...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as) {
+    uart_puts("ASSERTION FAILED: vm_as_create returned NULL\n");
+    return;
+  }
+
+  enum { NR = 32 };
+  uint64_t bases[NR];
+  uint64_t len = 0x2000;
+  int bad = 0;
+  for (int i = 0; i < NR; i++) {
+    uint64_t b = 0;
+    int rc = vm_region_alloc_hole(as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2,
+                                  len, VM_PROT_READ | VM_PROT_WRITE,
+                                  VMK_ANON, VM_MAP_PRIVATE, 0, 0, &b);
+    if (rc != 0) {
+      bad++;
+      uart_puts("ASSERTION FAILED: alloc_hole refused a free arena\n");
+      break;
+    }
+    bases[i] = b;
+    /* The reservation must already be visible when the call returns: find
+       the region and require it to cover the whole request. */
+    struct vm_region *r = vm_region_find(as, b);
+    if (!r || b < r->base || b + len > r->base + r->len) {
+      bad++;
+      uart_puts("ASSERTION FAILED: returned base is not reserved\n");
+      break;
+    }
+  }
+  EXPECT_EQ(bad, 0);
+
+  /* No two bases may be equal (they cannot be, if each is reserved). */
+  int dups = 0;
+  for (int i = 0; i < NR; i++)
+    for (int j = i + 1; j < NR; j++)
+      if (bases[i] == bases[j])
+        dups++;
+  EXPECT_EQ(dups, 0);
+
+  /* The window is [bases[0], bases[0] + 3 pages): two 2-page requests fit
+     under the VM_HOLE_GAP rule only if alignment allows, and the third must
+     be refused.  Genuine exhaustion still answers -ENOMEM — the fix must not
+     turn a full arena into a silent success. */
+  {
+    uint64_t nb = 0;
+    int rc = vm_region_alloc_hole(as, bases[0], bases[0] + 0x3000, len,
+                                  VM_PROT_READ | VM_PROT_WRITE, VMK_ANON,
+                                  VM_MAP_PRIVATE, 0, 0, &nb);
+    EXPECT_EQ((rc != 0), 1);
+  }
+
+  /* MAP_FIXED-style replacement is one critical section too: installing over
+     a live mapping must replace it, never fail with an overlap. */
+  {
+    int rc = vm_region_install_fixed(as, bases[1], len, VM_PROT_READ,
+                                     VMK_ANON, VM_MAP_PRIVATE, 0, 0);
+    EXPECT_EQ(rc, 0);
+    struct vm_region *r = vm_region_find(as, bases[1]);
+    EXPECT_EQ((r != 0), 1);
+    if (r)
+      EXPECT_EQ((int)r->prot, (int)VM_PROT_READ);
+  }
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -2013,6 +2103,7 @@ void vm_test_suite(void) {
   test_vm_file_cow_private_leaf();
   test_vm_jit_arena(); /* M6/L38: exec mappings cluster in one +-2 GiB span */
   test_vm_jit_arena_gap_end(); /* M6/L38: the arena stops at the gap's end */
+  test_vm_alloc_hole_atomic(); /* L56: find+reserve is one critical section */
   test_vm_dso_bases_distinct();
   test_fs_dso_identity_pair();
 }
