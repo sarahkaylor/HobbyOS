@@ -380,7 +380,98 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
   return flags;
 }
 
+#ifdef GB206_RELSNAP
+/* GB-206: does spinlock_release_irqrestore's return slot change between entry
+   and the value `ret` reads?
+
+   Sample points.  ENTRY is taken before spinlock_release().  TAIL is taken
+   after the flags-restore asm; the compiler's only remaining instructions are
+   `pop %rbx; pop %r14; pop %rbp; ret` (objdump quoted in the PR), none of
+   which writes memory, so [rbp+8] at the tail is the value `ret` loads.  The
+   bound is per-CPU and atomic: CPU0 winning the race cannot starve CPU1's
+   samples, so "8" is a property of the instrument, not of the schedule.
+   The record is one buffered stream through uart_putc_dbg (lock-free): this
+   path can be reached with uart_lock already held, so the locked uart_puts
+   self-deadlocks (measured: LOCKFOREVER); panic_* stays reserved for
+   non-returning paths (GB-097). */
+#define RELSNAP_MAX 16
+static uint32_t relsnap_pairs[MAX_CPUS];
+extern void uart_putc_dbg(char c);
+
+static int relsnap_this(spinlock_t *lock) {
+  uint32_t cpu = get_cpuid();
+  if (cpu >= MAX_CPUS)
+    cpu = 0;
+  uint32_t n = __atomic_load_n(&relsnap_pairs[cpu], __ATOMIC_RELAXED);
+  if (n >= RELSNAP_MAX)
+    return 0;
+  if ((uint64_t)lock != 0x75303EE0ULL && n >= 8)
+    return 0; /* 8 for the first releases, then vm_lock only */
+  __atomic_store_n(&relsnap_pairs[cpu], n + 1, __ATOMIC_RELAXED);
+  return 1;
+}
+
+static void relsnap(const char *when, uint64_t lock, uint64_t retslot,
+                    uint64_t rbp, uint64_t rsp) {
+  /* One buffered uart_puts, not a sequence of calls: a peer CPU printing
+     between them would shred the record (GB-082).  uart_puts takes uart_lock,
+     which is safe here because this function holds no lock at either sample
+     point (spinlock_release has returned, or not been called yet). */
+  char b[192];
+  int n = 0;
+  const char *p;
+  static const char hx[] = "0123456789abcdef";
+  for (p = "[RELSNAP] "; *p; p++)
+    b[n++] = *p;
+  for (p = when; *p; p++)
+    b[n++] = *p;
+  for (p = " cpu="; *p; p++)
+    b[n++] = *p;
+  b[n++] = '0';
+  b[n++] = 'x';
+  for (int i = 60; i >= 0; i -= 4)
+    b[n++] = hx[((uint64_t)get_cpuid() >> i) & 0xF];
+  for (p = " lock="; *p; p++)
+    b[n++] = *p;
+  b[n++] = '0';
+  b[n++] = 'x';
+  for (int i = 60; i >= 0; i -= 4)
+    b[n++] = hx[(lock >> i) & 0xF];
+  for (p = " retslot="; *p; p++)
+    b[n++] = *p;
+  b[n++] = '0';
+  b[n++] = 'x';
+  for (int i = 60; i >= 0; i -= 4)
+    b[n++] = hx[(retslot >> i) & 0xF];
+  for (p = " rbp="; *p; p++)
+    b[n++] = *p;
+  b[n++] = '0';
+  b[n++] = 'x';
+  for (int i = 60; i >= 0; i -= 4)
+    b[n++] = hx[(rbp >> i) & 0xF];
+  for (p = " rsp="; *p; p++)
+    b[n++] = *p;
+  b[n++] = '0';
+  b[n++] = 'x';
+  for (int i = 60; i >= 0; i -= 4)
+    b[n++] = hx[(rsp >> i) & 0xF];
+  b[n++] = '\n';
+  b[n] = 0;
+  for (p = b; *p; p++)
+    uart_putc_dbg(*p);
+}
+#endif
+
 void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
+#ifdef GB206_RELSNAP
+  uint64_t rs_rbp = (uint64_t)__builtin_frame_address(0);
+  uint64_t rs_rsp = 0;
+  uint64_t rs_slot = *(volatile uint64_t *)(rs_rbp + 8);
+  __asm__ volatile("mov %%rsp, %0" : "=r"(rs_rsp));
+  int rs_snap = relsnap_this(lock);
+  if (rs_snap)
+    relsnap("entry", (uint64_t)lock, rs_slot, rs_rbp, rs_rsp);
+#endif
   spinlock_release(lock);
   __asm__ volatile(
       "push %0\n"
@@ -389,4 +480,27 @@ void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
       : "r"(flags)
       : "memory"
   );
+#ifdef GB206_RELSNAP
+  if (rs_snap) {
+    /* TAIL sample: after the flags restore, at the ret operand (see above). */
+    uint64_t rs2_slot;
+    uint64_t rs2_rsp = 0;
+#ifdef GB206_SENS
+    /* Sensitivity control (build with GB206_SENS): deliberately clobber the
+       slot once, then show the tail sample is NOT identical.  The following
+       `ret` goes to the corrupted address and faults this CPU — that fault is
+       the proof the control reached the ret operand. */
+    static int sens_done;
+    if (!sens_done) {
+      sens_done = 1;
+      *(volatile uint64_t *)(rs_rbp + 8) ^= 0x1ULL;
+      for (const char *q = "[RELSNAP-SENS] clobbered [rbp+8]\n"; *q; q++)
+        uart_putc_dbg(*q);
+    }
+#endif
+    rs2_slot = *(volatile uint64_t *)(rs_rbp + 8);
+    __asm__ volatile("mov %%rsp, %0" : "=r"(rs2_rsp));
+    relsnap("ret", (uint64_t)lock, rs2_slot, rs_rbp, rs2_rsp);
+  }
+#endif
 }
