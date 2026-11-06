@@ -1,0 +1,24 @@
+=== clause 2: row counts before adoption ===
+1
+GB-213 rc=0
+1
+GB-215 rc=0
+=== adopt run 1 ===
+ADOPTED 2 row(s):
+  | GB-212 | **plan sync: adopt the GB-145-V4/GB-207-V §8 rows, clear the 4 orphans, and implement the --adopt-orphans flag three cards already cite** | S | — | see board #517 |
+  | GB-214 | **a fresh worktree cannot build disk.img: the ICU host stage inherits the cross CC and configure dies at 'cannot run C compiled programs' (regression from 9f915d47)** | S | — (regression introduced by 9f915d47) | With `third_party/icu-78.3/build-host` absent (`obj/bin/genrb` missing), a run with the Makefile's environment (`CC=clang CXX=clang`) completes the host stage, reaches the target stage and writes `obj/intel/icu/MANIFEST.txt`. Quote the "host build start"/"host build done" lines and the new MANIFEST.; The falsifier run: with the same empty host stage and a *cross* CC exported (`CC="clang --target=x86_64-none-elf -ffreestanding -nostdinc -fuse-ld=lld -nostdlib"`), the host stage must still build with the host compiler — if the `env -u` is removed it fails with the `configure: exit 77` above. Quote both.; `make disk.img ARCH=intel` rc=0 from that fresh-host state, and `make host_tests` green.; No behaviour change where the host stage is already built (it is skipped, as before). |
+IN SYNC — 174 plan tickets, 219 board tickets, milestones ['M0-infra', 'M1-abi-core', 'M2-devices-sdl', 'M3-games', 'M4-acceptance']
+rc=0
+=== row counts after adopt 1 ===
+1
+GB-213 rc=0
+1
+GB-215 rc=0
+=== adopt run 2 (must add neither) ===
+IN SYNC — 174 plan tickets, 219 board tickets, milestones ['M0-infra', 'M1-abi-core', 'M2-devices-sdl', 'M3-games', 'M4-acceptance']
+rc=0
+=== row counts after adopt 2 ===
+1
+GB-213 rc=0
+1
+GB-215 rc=0

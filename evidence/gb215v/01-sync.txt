@@ -1,0 +1,5 @@
+DRIFT GB-212: on the board but NOT in gaming.md §8 (orphan #517) — add it to §8 or close it
+DRIFT GB-214: on the board but NOT in gaming.md §8 (orphan #521) — add it to §8 or close it
+
+2 drift item(s); run with --fix to push plan fields to the board
+rc=1

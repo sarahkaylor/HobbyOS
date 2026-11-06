@@ -1,0 +1,31 @@
+=== restore check: sync back to 2 drift ===
+DRIFT GB-212: on the board but NOT in gaming.md §8 (orphan #517) — add it to §8 or close it
+DRIFT GB-214: on the board but NOT in gaming.md §8 (orphan #521) — add it to §8 or close it
+
+2 drift item(s); run with --fix to push plan fields to the board
+rc=1
+
+=== falsifier A: delete GB-213 row ===
+618:| GB-213 | **STARDUST has no T5 replay: GB-059 deleted i
+DRIFT GB-212: on the board but NOT in gaming.md §8 (orphan #517) — add it to §8 or close it
+DRIFT GB-213: on the board but NOT in gaming.md §8 (orphan #520) — add it to §8 or close it
+DRIFT GB-214: on the board but NOT in gaming.md §8 (orphan #521) — add it to §8 or close it
+
+3 drift item(s); run with --fix to push plan fields to the board
+rc=1
+
+=== falsifier B: delete GB-215 row ===
+478:| GB-215 | **plan sync: GB-213 has no §8 row and neither
+DRIFT GB-212: on the board but NOT in gaming.md §8 (orphan #517) — add it to §8 or close it
+DRIFT GB-214: on the board but NOT in gaming.md §8 (orphan #521) — add it to §8 or close it
+DRIFT GB-215: on the board but NOT in gaming.md §8 (orphan #523) — add it to §8 or close it
+
+3 drift item(s); run with --fix to push plan fields to the board
+rc=1
+
+=== restored: sync ===
+DRIFT GB-212: on the board but NOT in gaming.md §8 (orphan #517) — add it to §8 or close it
+DRIFT GB-214: on the board but NOT in gaming.md §8 (orphan #521) — add it to §8 or close it
+
+2 drift item(s); run with --fix to push plan fields to the board
+rc=1
