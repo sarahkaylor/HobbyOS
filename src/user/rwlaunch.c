@@ -253,11 +253,48 @@ __attribute__((section(".text._start"))) void _start(void) {
 
   chdir_gamedir(RW_GAME);
 
+  /* L62: the pixel size the client asks the WM for.  The size is a marker
+   * file (/RWSCREEN, "WxH") for the same reason every other switch here is:
+   * the game is started from the guest desktop, so a host environment cannot
+   * reach it.  Absent, the historical 1280x720 stands.  Whether the WM
+   * honours it is a separate switch (/WMSIZE) -- this only changes what the
+   * client requests, which is also what Unity renders at when it is honoured. */
+  static char sw_req[16] = "1280", sh_req[16] = "720";
+  {
+    int rf = open("/RWSCREEN", 0 /* O_RDONLY */);
+    if (rf >= 0) {
+      char b[32];
+      int n = (int)read(rf, b, sizeof b - 1);
+      close(rf);
+      if (n > 0) {
+        int i = 0, j = 0, k = 0;
+        b[n] = 0;
+        while (b[i] >= '0' && b[i] <= '9' && j < 15) sw_req[j++] = b[i++];
+        sw_req[j] = 0;
+        if (b[i] == 'x' || b[i] == 'X') {
+          i++;
+          while (b[i] >= '0' && b[i] <= '9' && k < 15) sh_req[k++] = b[i++];
+          sh_req[k] = 0;
+        }
+        if (j == 0 || k == 0) {
+          sw_req[0] = '1'; sw_req[1] = '2'; sw_req[2] = '8'; sw_req[3] = '0';
+          sw_req[4] = 0;
+          sh_req[0] = '7'; sh_req[1] = '2'; sh_req[2] = '0'; sh_req[3] = 0;
+        }
+      }
+    }
+    pc("[RW] rwlaunch: screen request ");
+    pc(sw_req);
+    pc("x");
+    pc(sh_req);
+    pc("\n");
+  }
+
   char *argv[] = {
       (char *)RW_GAME,
       (char *)"-force-glcore",
-      (char *)"-screen-width", (char *)"1280",
-      (char *)"-screen-height", (char *)"720",
+      (char *)"-screen-width", sw_req,
+      (char *)"-screen-height", sh_req,
       (char *)"-screen-fullscreen", (char *)"0",
       (char *)"-logFile", (char *)RW_LOG,
       0,

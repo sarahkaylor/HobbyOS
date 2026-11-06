@@ -8374,3 +8374,250 @@ after the `.bss`/past-EOF correction:
    DSOs got in §19/§20 has not been done for `VMK_IMG`.
 4. `slots` still climbs and `pthread_setschedparam` still fails (§46.9 items 2
    and 3); neither changed here.
+
+## 48. 2026-11-06 — M6/L62: the 900 s soak fires the block-layer and zero-page tripwires at 430 s, the VM stops inside `fxsave`, and the present path measures 9.40 Mpx/s
+
+§47 closed the deterministic `#UD` at `UnityPlayer+0x757570` and handed the next
+lane a Mono JIT assert.  This lane was told to stop watching the loader and
+start watching the *machine*: one long soak with the page-in tripwires armed,
+plus a measured cost for a frame at each plausible window size.  Both answers
+are worse than hoped and sharper than expected: **the soak reproduced the §47.4
+mechanism on a different page (0x9AD000) at 430 s**, and the death that followed
+took the whole VM down inside `fxsave` — so the soak has 430 s of evidence, not
+900 s.  The performance half is clean: the present path is a fill-rate wall at
+**9.40 Mpx/s**, and 30 fps at 1920x1080 needs **62.2 Mpx/s**.
+
+### 48.1 The soak, and where it stopped
+
+`tools/rw/run-rimworld-desktop.sh --run-timeout 900`, disk image at the merged
+tip (`2ad691bf`), the launcher's default request (1280x720), no diagnostic
+markers.  Counted by `tools/rw/l62-soak-check.py` over the 3.47 MB serial
+capture and the 86 234-byte `Player.log`.
+
+| measure | value |
+|---|---|
+| guest time before the stop | **430 s** (of the 900 s window) |
+| `[XSW]` presents | **0** |
+| NFS bytes | 277 457 914 (264.60 MiB) |
+| `[TXT]` exec pages verified | **3584, bad=0** |
+| `[TXT] ZERO` / `UNVERIFIED` rows | **0** |
+| `[ZPFILL]` short reads refused | 0 |
+| `[BLKQ] stall` / `controller reset` | **1 / 1** |
+| `[BLKQ] giving up` / `reinit failed` | 0 |
+| `STILL SPINNING` | 0 |
+| `[BLKSLOW]` (>250 ms) | 1 |
+| `[VMRT]` present-leaf retries | 24 (every one `prev=-1`) |
+| `[VMK]` retry-budget kills / `[VMFIX]` | 0 / 0 |
+| `[SIGX]` delivered signals | **0** |
+| kernel `#PF` rows | 0 |
+| non-`#PF` user exception (vector row) | **1 (vector 6)** |
+| `Player.log` mid-file NUL runs ≥32 B | **0** |
+| `[THRS]` live / high-water / slots | 25 / **43** / 89 of 191 |
+| VM stops (KVM) | **1** |
+
+So of the six assertions this lane was given, **two fired**: the block layer
+wedged and a zero text page was executed; a third (the VM) died as a
+consequence.  The rest are zero on rows that can report presence — `[TXT]`
+counted 3584 pages, `[VMRT]` 24, `[THRS]` 93 samples.
+
+### 48.2 The tuple: the wedge, the page, the instruction
+
+```text
+[BLKSLOW] pending cid=43110 slot=1 ms=251 sq_tail=2 cq_head=1 phase=1
+[BLKQ] stall cid=43110 slot=1 sq_tail=2 cq_head=1 phase=1
+       cqe[cq_head].cid=65535 .status=0x0 next.cid=65535 next.status=0x0
+       inside=1 n=1 CSTS=0x0 CC=0x0 INTMS=0x0 INTMC=0x0
+[BLKQ] controller reset #1
+[KERNEL] User process fault! Vector: 6 RIP: 0x1081ce0ea0
+[KERNEL] fault-pc region=0x1081A66000+0x17A4000 prot=5 kind=7 jit=0 live=36
+         err=0x0 rsp=0x17FFFFA718
+[KREG]  pid=4 vec=6 erc=0x0 rip=0x1081CE0EA0 rsp=0x17FFFFA718
+        rax=0x10D089D5C0 rbx=0x10D14FDE20 rcx=0x108323F2C8 rdx=0x314 ...
+[UDX]   rip=0x1081CE0EA0 off=0x9AD000 rd=4096 leaf=0x8120D025
+        pa=0x8120D000 alloc=1 objfr=0x80D1F000 same=1 wf=0
+[UDX]   pghd=00 00 00 00 00 00 00 00 00 00 00 00
+[LCOMPAT] fault sig=11 pid=4 tgid=4 tls=0x108021D740
+KVM internal error. Suberror: 1   extra data[1]: 0x66c35d07ae0f480f
+```
+
+* the region is UnityPlayer's `R E` span (`base + 0x733000`, 24.7 MiB),
+  `prot=5`, `kind=7`, `jit=0` — the DSO's text, not the JIT arena;
+* `0x1081CE0EA0 - 0x1081333000 = 0x9ADD0EA0`, i.e. file offset **0x9AD000**
+  (`inpage 0xEA0`); the staged DSO holds `ff ff ff ff c7 40 18 ff ff ff ff`
+  there, so the page in memory is **not the file's**;
+* the leaf is present, user, read-only, executable, `pa=0x8120D000` still owned
+  by the allocator (`alloc=1`), and the one-frame watch counted **zero**
+  `frame_free()` calls (`wf=0`) — the same "not a lifetime bug, a fill bug"
+  shape as §47.4, at a page 2.3 MiB further into `.text`;
+* `same=1` with `rd=4096` means the *fresh full-page read agrees with the
+  zeros* — a read that returned a whole page of wrong bytes, which §47.9 item 2
+  named as the remaining hole;
+* and it happened on the fill that immediately follows `CSTS=0` + `reset #1`,
+  exactly the ordering §47.4 recorded.
+
+### 48.3 Why `[TXT] bad=0` while a zero page was executed
+
+The gate counted 3584 executable pages and refused none, and no `[TXT] ZERO`
+row exists.  `vm_file_obj_materialize` cannot publish an all-zero DSO text page
+(3 reads, back-off, `-EIO`); so either this page never entered that block, or
+it was published non-zero and the zeros arrived later.  Both are open, and the
+rows do not separate them: `pa != objfr` says only that the leaf is a private
+copy (expected since L59).
+
+The one path that *can* publish an exec page without the block is
+`vm_touch()`'s object-file branch, which computes
+`cow = write && (r->flags & VM_MAP_PRIVATE)` — no exec clause — while
+`vm_handle_fault()` computes `cow = (write && PRIVATE) || (is_text && PRIVATE)`
+(§46.3).  A read-touch prefault of a private text mapping therefore takes the
+shared path and never meets the gate.  One provenance row at publish time
+(`off=`, `cow=`, `zero=`, `src=share|copy`) decides it; do not "fix" the gate
+before that row exists.
+
+### 48.4 The VM stop: `fxsave` into a signal frame
+
+The `[LCOMPAT] fault sig=11` row is the *attempt* to deliver §48.2's `#UD`.
+The delivery died one instruction in:
+
+```text
+RIP=0x70090a44   code: 55 48 89 e5 <48> 0f ae 07 5d c3
+                  push %rbp; mov %rsp,%rbp; fxsave (%rdi); pop %rbp; ret
+RDI=0x1083eb1df0
+```
+
+`nm` on `hobbyos.elf` puts `0x70090a44` at `arch_fpu_save_to+4`; the operand is
+the `fpstate` area of the signal frame (`l_sf_addr(base, L_SF_FP)` in
+`l_sig_frame_plant`).  QEMU took an exit it could not emulate
+(`KVM internal error. Suberror: 1`, "emulation failure") and **stopped the
+vCPU**, so the guest froze: no handler ran, hence **0 `[SIGX]` rows** — the
+same absence §46 and §47 reported for this death, now with a mechanism.
+
+Two consequences worth keeping:
+
+1. a guest `#UD` escalates to a **whole-VM stop**, not one process death.  The
+   desktop's last frame stays on screen for the rest of the window, which is
+   why a 900 s run yields 430 s of evidence and why `99_final` looks like a
+   live desktop;
+2. `RDI` is a *user* VA (0x1083EB1DF0 is above `USER_VA_BASE` 0x1000000000),
+   i.e. the frame is on the per-thread altstack — so the write lands in a
+   mapping the guest's page tables describe but the host has no memslot for.
+   Either the altstack VMA is not what the PTE says, or the frame base is stale.
+   That is a real lead for the signal/altstack work; it is not this lane's fix.
+
+### 48.5 Window size: the WM ignores the request (row), and the cost of a frame
+
+The WM stores `pix_pref_w/h` from `ESC ] X` and never reads them: layout is a
+grid of tiles (`update_layout`), so a client gets `win->w-4 x win->h-36` of the
+tile it was given.  The row is gl_bench's own handshake line:
+
+```text
+[PB] window content rect 1916x1018 (requested 320x240) at 2,34
+```
+
+A 320x240 request is answered with 1916x1018 — **25.4x** the pixels asked for.  So
+`-screen-width/-screen-height` on the launcher changes **what the client
+renders into**, not what the WM gives it, whenever the WM is the desktop's.
+
+An opt-in switch (`/WMSIZE`, content-gated, staged only by the fps ladder)
+makes the same client get its request exactly:
+
+```text
+[PB] window content rect 320x240 (requested 320x240) at 2,34
+```
+
+Default behaviour is unchanged (`wm_honour_pixel_pref(0)` unless the marker
+says `on`), so every existing app and gate keeps the tiled layout.
+
+`-force-glcore` + `-screen-fullscreen 0` is stable at both grants.  No run wrote
+`_NET_WM_STATE`/FULLSCREEN (`FSREQ`/`FSGRANT`/`FSDECL`/`FSREV` = **0** in every
+log), one window id served the whole run, and the presented surface never
+changed size: 115 `[XSW]` rows at `w=320 h=240` with
+`n=1090 swap=1090 put=1090 putok=1090` — **no lost presents** at the honoured
+size, and the same shape at the tiled 1916x1018.  The game contributes no row to
+that check because it never swapped.
+
+**The game itself presented no frame** in either size configuration: 0 `[XSW]`
+rows in the 430 s soak (1916x1018) and 0 in a 440 s run at 960x540 with the WM
+honouring the request.  The render thread is alive and spinning, not deadlocked:
+
+```text
+[IDLESTUCK] slot=26 pid=26 st=8 wake=4294987342 futex=0x112000a460
+            rip=0x108011895d UnityGfxDeviceW
+[FUTEX] q slot=26 pid=26 ... key=0x112000A460 waits=14 wakes=13 UnityGfxDeviceW
+```
+
+so "fps at size X" cannot be read from the game today — it is 0 everywhere, and
+the number is a loader/render-init property, not a fill-rate one.  The fill-rate
+answer comes from the same DSO with RimWorld's measured scene shape
+(`gl_bench`: 110 textured, alpha-blended screen-space quads, ~2 screens of
+overdraw — `docs/rimworld-evidence.md` §6), guest softpipe, one boot:
+
+| surface | Mpx | raster only (FBO) | fps | via FBO + blit + swap | fps | Unity's path (direct) | fps |
+|---|---|---|---|---|---|---|---|
+| 640x480 | 0.307 | 49.0 ms | 20.41 | 149 ms | 6.71 | — | — |
+| 960x540 | 0.518 | 75.0 ms | 13.33 | 177 ms | 5.65 | — | — |
+| 1280x720 | 0.922 | 120.0 ms | 8.33 | 231 ms | 4.33 | — | — |
+| 1916x1018 | 1.951 | 225.0 ms | 4.44 | 366 ms | 2.73 | **221 ms** | **4.52** |
+| 320x240 | 0.077 | — | — | — | — | **20.0 ms** | **50.0** |
+
+The `present` column is the FBO→window copy path (a ~100-135 ms full-surface
+blit the *direct* path does not pay); Unity uses `direct`, where the swap and
+`XPutImage` cost only **2.28 ms** at 1916x1018.  The best measured configuration
+is therefore the smallest window: **50 fps at 320x240, 4.5 fps at 1916x1018**,
+and nothing in between reaches 30 fps until the surface is ≤ ~0.14 Mpx.
+
+### 48.6 The performance model — and the quantified virgl requirement
+
+Least squares over the four raster points (`tools/rw/l62-model.py`, R²=0.999):
+
+```text
+ms/frame = 19.0 + 106.4 * Mpx        (19.0 ms fixed = 110 draws at 197 us/draw)
+                                     (106.4 ms/Mpx = 9.40 Mpx/s sustained)
+```
+
+The fixed term is per-draw CPU (197.4 µs/draw measured at 1280x720, fill-free),
+the slope is softpipe fill.  Consequences, in the numbers a renderer has to beat:
+
+* **1920x1080 at 30 fps needs 62.2 Mpx/s of blended fill** plus ≤33.3 ms/frame
+  total.  Measured: **9.40 Mpx/s → 6.6x** short on fill; 4.52 fps at
+  1916x1018 → 6.6x short on frame rate (the two agree because both are the same
+  wall).
+* at today's cost the 33.3 ms budget buys **0.135 Mpx** (~367x367); measured
+  crossing: 320x240 → 50 fps, so 30 fps lands near 0.10-0.14 Mpx — the model is
+  confirmed at both ends.
+* the per-frame CPU floor is 19-20 ms even with zero pixels, i.e. **~48 fps is
+  the ceiling of the whole present path at any size** unless the per-draw cost
+  drops too.  A virgl port that only fixes fill gets to 30 fps at 1080p; it does
+  not get past ~48 fps anywhere.
+* the present-mode blit is a separate 100-135 ms tax (fixed 108.6 ms +
+  132.2 ms/Mpx, R²=1.0000).  Any path that renders to an FBO and then copies
+  pays it; the game's direct path does not.
+
+So "virgl is needed" is not a preference: the software rasteriser sustains
+**9.4 Mpx/s** and a playable 1080p frame needs **62.2 Mpx/s of blended,
+2x-overdraw fill with ≤14 ms of per-frame CPU**.  Anything less is a smaller
+window, not a faster game.
+
+### 48.7 Regression
+
+| gate | result |
+|---|---|
+| `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` | **417 run, 0 failed** |
+| `m3_window_probe.py` | PASS |
+| `m4_gl_probe.py` | PASS |
+
+### 48.8 What is left
+
+1. **The publisher of the zero text page.**  `[TXT]` saw 3584 pages and refused
+   none, yet `0x9AD000` executed as zeros.  Add the publish-time provenance row
+   (`off/cow/zero/src`) and re-run; the `vm_touch` `cow` clause is the suspect
+   (§48.3).  A gate that is not on every publish path is worse than no gate,
+   because it reports `bad=0`.
+2. **A guest `#UD` must not stop the VM.**  `fxsave` in `arch_fpu_save_to`
+   reached an address KVM had to emulate and the whole guest stopped (§48.4).
+   Until delivery is safe, every long soak ends where the first fault lands.
+3. **The game still presents nothing.**  0 frames at 1916x1018 and at 960x540,
+   with `UnityGfxDeviceW` spinning (`wake=4294987342`).  That is the JIT/loader
+   lane's wall (§47.9 item 1); this lane's rows only bound it: no fill-rate
+   number can be taken from the game until the first swap happens.
+4. `slots` reached 89/191 at 430 s (§46.9 item 2) with 25 live threads — a
+   900 s load still needs the tombstone reaper.
