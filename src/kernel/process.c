@@ -3411,7 +3411,22 @@ int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
   f->spsr = tf->spsr;
   f->sp = user_sp;
   f->restorer = restorer;
-  arch_fpu_save_to(f->fpu);
+  /* M6/L63: the frame is user-resident, so the FP image is staged through a
+     kernel buffer.  FXSAVE must never take a user operand: a fault on that
+     instruction is a kernel-mode #GP that KVM cannot emulate and QEMU answers
+     by stopping the whole vCPU (§48.4).  A failure here means the frame is not
+     usable -> fall back to the signal's default action. */
+  if (arch_fpu_save_user(grp, f->fpu) != 0) {
+    uart_puts("[KERNEL] signal delivery: FP image -> default action\n");
+    /* Undo the commit above: no frame was planted, so the group must not stay
+       flagged in-handler. */
+    uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
+    grp->sig_in_handler = 0;
+    grp->sig_frame = 0;
+    spinlock_release_irqrestore(&proc_lock, f2);
+    sig_force_default(grp, sig);
+    return 0;
+  }
 
   /* D8.2 handler entry state per arch ABI. */
 #ifdef __x86_64__
@@ -3656,7 +3671,7 @@ int process_sigreturn(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)(-EINVAL);
     return -EINVAL;
   }
-  arch_fpu_restore_from(f->fpu);
+  arch_fpu_restore_user(grp, f->fpu); /* M6/L63: staged; never FXRSTOR a user VA */
   for (int i = 0; i < 30; i++)
     tf->regs[i] = f->regs[i];
   tf->lr = f->lr;
