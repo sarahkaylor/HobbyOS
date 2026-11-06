@@ -27,6 +27,10 @@ extern void print_int(int val);
 #define BLOCK_COUNT ((int)(FRAME_TOTAL_FRAMES / FRAME_BLOCK_FRAMES))
 
 static uint64_t frame_bits[FRAME_WORDS];
+/* M6/L60 tripwire (see frame_watch below): declared here because frame_free()
+ * must be able to arm/observe them before their accessor functions appear. */
+static uint64_t frame_watch_phys;
+static int frame_watch_hits;
 static uint32_t frame_hint; /* rotating alloc hint: word index */
 static int frame_used;      /* count of set bits */
 static int frame_high;      /* high-water mark of frame_used */
@@ -216,6 +220,24 @@ void frame_free(uint64_t phys) {
   int idx = frame_index_of(phys, &ok);
   if (!ok)
     return;
+  /* The tripwire fires BEFORE the bit is cleared, so the row names a frame
+   * that was still owned at the moment of the free. */
+  extern uint64_t frame_watch_peek(void);
+  if (frame_watch_phys && phys == frame_watch_phys) {
+    extern int frame_watch_bump(void);
+    frame_watch_bump();
+    extern void uart_puts_raw(const char *s);
+    extern void uart_print_hex_raw(uint64_t v);
+    static int rows;
+    if (rows < 8) {
+      rows++;
+      uart_puts_raw("[FREEW] phys=");
+      uart_print_hex_raw(phys);
+      uart_puts_raw(" caller=");
+      uart_print_hex_raw((uint64_t)(uintptr_t)__builtin_return_address(0));
+      uart_puts_raw("\n");
+    }
+  }
   uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
   uint32_t w = (uint32_t)idx / 64;
   uint32_t bit = (uint32_t)idx % 64;
@@ -225,6 +247,33 @@ void frame_free(uint64_t phys) {
   }
   spinlock_release_irqrestore(&frame_lock, flags);
 }
+
+uint64_t frame_watch_peek(void) { return frame_watch_phys; }
+int frame_watch_bump(void) { return ++frame_watch_hits; }
+
+int frame_is_alloced(uint64_t phys) {
+  int ok = 0;
+  int idx = frame_index_of(phys, &ok);
+  if (!ok)
+    return 0;
+  uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
+  int used = (frame_bits[(uint32_t)idx / 64] & (1ULL << ((uint32_t)idx % 64))) != 0;
+  spinlock_release_irqrestore(&frame_lock, flags);
+  return used;
+}
+
+/* M6/L60: a one-frame tripwire.  `[UDX]` shows an executable text page whose
+ * leaf is present, read-only, NX-clear, owned (alloc=1) and yet reads back as
+ * zeros; the file it was copied from holds code.  Either something else wrote
+ * that physical frame after we published it, or it went back to the allocator
+ * and was handed out again.  Arming the frame at map time and printing every
+ * frame_free() that names it (with the caller's return address, so nm on
+ * hobbyos.elf names the site) separates those two with one row. */
+void frame_watch(uint64_t phys) {
+  frame_watch_phys = phys;
+  frame_watch_hits = 0;
+}
+int frame_watch_count(void) { return frame_watch_hits; }
 
 uint64_t frame_alloc_contig(int n) {
   if (n <= 0 || (uint64_t)n > FRAME_TOTAL_FRAMES)

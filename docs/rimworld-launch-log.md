@@ -8080,3 +8080,297 @@ build:
    "Operation not permitted"` still ends `Player.log`: our `sched_setscheduler`
    refuses a policy the runtime asks for. It is not fatal, but it is the last
    row before the fault in every run and deserves its own ladder.
+
+## 47. 2026-11-06 — M6/L60: 0x1081a8a570 is `push %rax` in a **relocated thunk table**, the page under it was never the file's, and the wall behind it is a Mono JIT assert
+
+§46 left two candidates for the deterministic `#UD`: "the reported PC is not
+the executed instruction" and "the executed bytes differ from the file's", with
+a one-run experiment to separate them.  This lane ran that experiment, and the
+first thing it found is that **§46's fault offset was off by 0x220000**: the
+address was decoded at `0x977570` instead of `0x757570`, so the "cold block that
+ends in a `jmp` to an assert" the lane described belongs to a different
+function.  The instruction at the real target is `push %rax`; there is no
+invalid opcode anywhere near it.  The page under it, however, was **not the
+file's page**, and the row that proves it also names the moment it happened:
+the fill of that page, immediately after the block layer wedged and reset.
+
+### 47.1 The address, and what is actually there
+
+The launcher prints the load bias itself, so nothing has to be inferred:
+
+```text
+[RWMAIN] dlopen ok /RWDSO/UnityPlayer.so -> 0x10400008d0 base=0x1081333000 ...
+```
+
+`0x1081a8a570 - 0x1081333000 = 0x757570`.  UnityPlayer's first `PT_LOAD` has
+`p_offset = p_vaddr = 0` and the text segment is `off/vaddr 0x733000`, so vaddr
+== file offset for every page and the target is file offset **0x757570**.
+§46.7/§46.9 wrote "`0x977570` (file offset, i.e. `0x733000 + 0x24570`)" — but
+`0x733000 + 0x24570 = 0x757570`, and 0x977570 is 2.2 MiB further into `.text`.
+The other ladder's RIP decodes the same way: `0x1081AC8C00` is file offset
+`0x795C00`, which holds `41 57 41 56 53 48 83 ec 20`
+(`push %r15; push %r14; push %rbx; sub $0x20,%rsp`) — exactly the prologue
+§46.1's probe printed as its "file" side.
+
+At 0x757570 the file holds:
+
+```text
+00757570: 50 e8 8a 14 ee 00 48 89 c7 58 e9 e1 18 ee 00 cc
+          push %rax
+          call 0x1638a00
+          mov  %rdi,%rax
+          pop  %rax
+          jmp  0x1638e60
+          int3
+```
+
+a 16-byte **adapter thunk**; the sibling at 0x757560 is byte-identical in shape,
+and both are 16-byte aligned entries.  What they call is a getter and a
+handler:
+
+```text
+1638a00: 50                push %rax
+1638a01: 31 ff             xor  %edi,%edi
+1638a03: e8 98 64 33 ff    call 0x96eea0
+1638a08: 59                pop  %rcx
+1638a09: c3                ret
+96eea0:  48 63 c7          movslq %edi,%rax
+96eea3:  48 8d 0d 06 c1 62 01  lea %rcx,[rip+0x162c106]   # 0x1f9afb0
+96eeaa:  48 8b 04 c1       mov  (%rcx,%rax,8),%rax
+96eeae:  c3                ret
+```
+
+i.e. "fetch slot 0 of the pointer table at 0x1f9afb0, pass it as the first
+argument, tail-call the handler at 0x1638e60".
+
+There is **no symbol** for it: the DSO is stripped to a single defined dynamic
+symbol (`_Z10PlayerMainiPPc` at 0xe638b0).  The identity is structural instead:
+`0x757570` is one of ~250 slots of a function-pointer table in `.data.rel.ro`
+(`0x1edff00 .. 0x1edffd8`), every slot filled at load time by an
+`R_X86_64_RELATIVE` relocation, and the slot that holds this thunk is
+`0x1edffc8` (`addend 0x757570`).  A scan of all 24.7 MiB of `.text` finds
+**zero** rip-relative references to that table, because its address only ever
+lives in data — which is why the target arrives in a register.
+
+So the answer to "ud2? a pure-virtual stub? an IFUNC resolver tail? padding?"
+is: **none of those.  It is a legitimate function entry reached through a
+relocated function pointer**, and its first byte is `0x50`.
+
+### 47.2 Why `r11 == rip`
+
+`r11 == rip` is the normal signature of `call *%r11`: the CPU pushed the return
+address and set RIP to the register's value, so the fault frame carries the
+target in both.  The register file also says where the *caller* was: the qword
+at the faulting `rsp` is in the JIT arena (`0x1089E9DA88`, `0x1089E9DF58` in
+two runs; the arena claims `0x1088FE0000+0x7020000`), not in UnityPlayer.  The
+call is emitted by **Mono-generated (JIT) code** that loaded the native entry
+point out of UnityPlayer's table — consistent with 47.1's "no code reference".
+
+`r11` held `base + 0x757570`, exactly what the table slot contains after
+relocation.  **The pointer was right; the bytes at the pointer were not.**
+
+### 47.3 IRELATIVE / IFUNC: audited, and not this
+
+The hypothesis "our loader never ran the resolver" is retired with a table
+(host oracle, `ifunc_audit.py`: `.dynsym` + `.rela.dyn` + `.rela.plt` parsed
+directly):
+
+| DSO | `STT_GNU_IFUNC` | `R_X86_64_IRELATIVE` | IFUNC `JUMP_SLOT`/`GLOB_DAT` |
+|---|---|---|---|
+| UnityPlayer.so | 0 | 0 | 0 |
+| libmonobdwgc-2.0.so | 0 | 0 | 0 |
+| libmono-native.so | 0 | 0 | 0 |
+| lib_burst_generated.so | 0 | 0 | 0 |
+| libpthread-2.31.so | 0 | 0 | 0 |
+| ld-2.31.so | 0 | 0 | 0 |
+| libc-2.31.so | **58** | 0 | 0 |
+
+There is no resolver in the game's own DSOs to run.  The one library that has
+them (glibc) is relocated by **glibc 2.31's own `ld.so`** — the AD-9 launcher
+names it as `PT_INTERP` — not by this kernel: `elf_apply_relocations()` accepts
+only `R_*_RELATIVE` (8 / 1027) and returns `ELF_ERR_RELOC` for anything else,
+and it never runs on the game's DSOs (they are `dlopen`ed by the launcher, so
+`ld.so` maps and relocates them in userspace).  Runtime confirmation, printed by
+the launcher after `dlopen`:
+
+```text
+[IFUNC] memcpy=0x... [IFUNC] strlen=0x... [IFUNC] memcmp=0x... [IFUNC] memmove=0x...
+```
+
+and the process executes memcpy/strlen for 180 frames, which an unresolved
+resolver could not survive.
+
+### 47.4 The page was not the file's — and the fill is when it happened
+
+Three probes, each of which had to be fixed before it could be believed:
+
+* the staged DSO is **byte-identical to the host export**
+  (`md5 45408fc19d21120d73e89d7bf81fbadd` both sides, 33 010 672 bytes), so the
+  file on `disk.img` is not the variable;
+* the host file has **no all-zero 4 KiB page anywhere in `.text`** (0 of 6 296
+  pages), and page 0x757000 begins `50 f3 0f 11 44 24 04 e8 04 92 ec 00`;
+* the fault-time probe reads the page **through the faulting page tables**
+  (`vm_arch_walk` on the faulting VA), asks the frame allocator whether the
+  frame is still owned, snapshots the executed bytes *before* allocating
+  anything (a probe that allocates first can be handed the very frame it is
+  inspecting), and reads the file into a **real frame** (a `.bss` array is not
+  a physical address, which is what made §46.9's `pagecmp=match` meaningless).
+
+Rows (identical in shape in all three ladder runs):
+
+```text
+[WATCH] armed off=0x757000 phys=0x81262000
+[KERNEL] User process fault! Vector: 6 RIP: 0x1081a8a570
+[UDX] rip=0x1081A8A570 off=0x757000 rd=4096 leaf=0x81262025 pa=0x81262000
+      alloc=1 objfr=0x81002000 same=1 wf=0
+[UDX] pghd=00 00 ... (12)  ripb=00 00 ... (12)  file=00 00 ... (12)
+```
+
+* `leaf=0x81262025` — present, user, **RW clear, NX clear** (executable), so the
+  mapping is a correct read-only text leaf;
+* `pa=0x81262000`, `alloc=1` — the frame is still owned by the allocator;
+* `wf=0` — the one-frame tripwire (`frame_watch`, armed on this page at map
+  time) counted **zero** `frame_free()` calls for it, so this is **not** a
+  use-after-free, not a recycled frame, and not a stale leaf;
+* `same=1` — the page and a fresh read of the same file offset agree... on
+  zeros.  The file holds code there.  So the *read* is what is wrong, and it is
+  wrong the same way twice.
+
+And the row above the fault names the moment:
+
+```text
+[BLKSLOW] pending cid=42982 slot=1 ms=251 ...
+[BLKQ] stall cid=42982 ... CSTS=0x0000000000000000 ...
+[BLKQ] controller reset #1
+[WATCH] armed off=0x757000 phys=0x81262000        <- this fill
+[KERNEL] User process fault! Vector: 6 RIP: 0x1081a8a570
+```
+
+The page is materialised **for the first time** at that instant (that is what
+`[WATCH] armed` means), with the controller reporting `CSTS=0` (RDY clear, i.e.
+the device had already fallen over) and the driver rebuilding its queues.  The
+page-in published a page the device never delivered, and the CPU executed it.
+
+That is the mechanism §46.3 only half-closed: it stopped *short* reads from
+being zero-filled, but a read that returns a **full 4 KiB of the wrong bytes**
+(or of zeros) is indistinguishable from a good one at the FAT16 layer, and for
+an executable page it is fatal.
+
+### 47.5 The fix
+
+1. **An executable page is verified before it is published**
+   (`vm_file_obj_materialize`).  For `exec` pages of a `VM_OBJ_FILE`: read the
+   page twice, publish only when two independent reads agree (and, for a DSO,
+   when the page is not all zero — a shared object's executable page never is:
+   0 of 6 296 in UnityPlayer), buy a third read on disagreement (majority wins,
+   so one bad read is re-read instead of executed), back off 3×10 ms and retry
+   when every answer was zero, and otherwise refuse with `-EIO` —
+   `[TXT] ZERO` / `[TXT] UNVERIFIED` name it.  Cost: one extra 4 KiB read per
+   executable page (24.7 MiB of a 1.3 GiB load).
+   The "not all zero" half is deliberately **DSO-only**: a native image
+   legitimately contains zero pages (`DESKTOP.BIN` has 107), so that path tests
+   agreement and nothing else.  Getting that wrong made the desktop unbootable
+   in one gate run — which is what the gate is for.
+2. **The image path gets the same rule** (`v2_image_materialize`), and it
+   needed it more: it accepted *any* short read and zero-filled the tail.  The
+   launcher's own `.text` is demand-paged through it, which is why the ladder
+   produced `#UD RIP=0x1000010970 region=0x1000000000+0x3C000 prot=7 kind=1`
+   (RWX image text) in 2 of 3 runs: the same class of bug in the other loader.
+   A page **entirely past** the image's EOF is not a short read — it is `.bss`
+   and the reserved tail of the IMG span, legitimately zeros, and must still be
+   published: getting that wrong made every native program with `.bss` beyond
+   its last file page die at its first bss touch (`m3_window` caught it in one
+   gate run, which is exactly what the gate is for).
+3. **`MAP_FIXED` replaces instead of inheriting** (`vm_mmap`): the old code
+   removed the region records and left the resident leaves, so the new mapping
+   silently served the previous occupant's frames (and, when the old object's
+   record was the last reference, frames that had already been freed).  It now
+   zaps the replaced span first, exactly like `vm_munmap_range`, and
+   `[MMF] replace base=.. len=.. resident=N -> zapped` records it (N = 0 for
+   every DSO segment map measured, which is the correct answer).
+4. **The launcher waits longer than the harness.**  `RW_WAIT_SECS` was 420
+   while the ladders run at 600, so the launcher exited mid-run, the child was
+   reparented and the game window vanished from the screen just when a 600 s
+   run needed it.  900 now.
+
+### 47.6 Ladder: three 600 s runs
+
+| run | `[XSW]` frames | NFS bytes | end | `[TXT]` |
+|---|---|---|---|---|
+| 1 | 180 | 271,405,137 (258.8 MiB) | `#PF VA=0xFFFFFFFFFFFFFFFF PC=0x1088A76564` (JIT arena) at ~405 s | 3 584 pages, 0 bad |
+| 2 | (not captured) | 277,598,968 (264.7 MiB) | `fault-in-handler sig=11 pc=0x108210E804` at ~410 s, then the launcher's own image `#UD 0x1000010970` | 3 584 pages, 0 bad |
+| 3 | 180 | (not captured) | same `fault-in-handler` + same image `#UD`, `Player.log` ends in the Mono assert | 3 584 pages, 0 bad |
+
+**The deterministic `#UD` at `UnityPlayer+0x757570` is gone: 0 occurrences in
+3/3 runs** (it was 3/3 before).  `[TXT] bad=0` on 3 584 materialised executable
+pages per run, and **no `[TXT] ZERO` row appeared**, so the gate itself never
+fired: the disappearance is *not* attributable to it.  What the ladder does
+establish is that the fault site moved — the three runs now end in the Mono
+assert below (and in the launcher's image-page `#UD` in 2 of 3, which the image
+gate in 47.5 addresses) — so the next lane inherits a named runtime abort
+instead of a mystery `#UD`.  Frames and I/O are unchanged (180 frames,
+0.42-0.44 fps, 259-265 MiB), so the verification cost is inside the noise.
+
+### 47.7 The wall behind it: Mono's JIT asserts at `x86-codegen.h:403`
+
+With the #UD gone, `Player.log` ends with a line that §46 could never see
+because the process died before flushing it:
+
+```text
+* Assertion at ../../mono/arch/amd64/../x86/x86-codegen.h:403, condition `0' not met
+```
+
+in 2 of 3 runs (the third dies in the same phase, at a `-1` pointer read in JIT
+code).  That is Mono's **code generator** calling `g_assert_not_reached()` —
+the `x86-codegen.h` size-dispatch family, i.e. the JIT was asked to emit a
+memory operand of a size it does not implement.  It is not a kernel fault: it
+is a managed-runtime abort, it happens at the same point in the load
+(~405-420 s, 180 frames, ~260 MiB), and it explains the `fault-in-handler`
+rows: the abort's signal is delivered, and the delivery itself faults.
+
+So the next lane's question is not VM at all: *which method makes Mono's amd64
+JIT ask for that operand size?*  The cheap first measurement is the managed
+stack at the assert (SIGQUIT to Mono, `/SIGQUITON` already exists), plus
+`MONO_LOG_LEVEL=debug` around the last assembly loaded.  §46.9 item 3's
+`pthread_setschedparam` rows are still the last thing written before it.
+
+### 47.8 Regression
+
+`tools/rw/l60-gates.sh` / `l60-gates2.sh`, sequential (never two boots at
+once).  The first four were run on the build that carries the exec page-in gate
+and the image-path gate; the last four (unit, `m3`, `m4`, `rwnfs` — the ones
+that exercise the image path this lane changed) were re-run on the final build
+after the `.bss`/past-EOF correction:
+
+| gate | result |
+|---|---|
+| `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` | **417 run, 0 failed** |
+| `t3_linux_probe.sh redzone` | PASS |
+| `t3_linux_probe.sh mmap_race` | PASS |
+| `m2_mono.sh` | PASS |
+| `m2_tp.sh` | PASS |
+| `m2_threads.sh` | PASS |
+| `m12_thread_ceiling.sh` | PASS |
+| `m3_window_probe.py` | PASS (final build) |
+| `m4_gl_probe.py` | PASS (final build) |
+| `tools/rw/run-rwnfs-probe.sh` | PASS (final build) |
+
+### 47.9 What is left
+
+1. **Mono's JIT assert** (`x86-codegen.h:403`) is now the wall that hides the
+   main menu, and it is a runtime question, not a VM one: the code generator is
+   asked to emit an operand size it does not implement.  The cheap first row is
+   the managed stack at the abort (`/SIGQUITON` already sends SIGQUIT to Mono at
+   60 s; it needs to fire at ~400 s instead, or on the assert itself), plus
+   `MONO_LOG_LEVEL=debug` around the last assembly loaded.
+2. **A read that "succeeds" without delivering its bytes** is still possible:
+   the verification above catches a read that disagrees with another read, and
+   refuses all-zero DSO code pages, but a *consistently* wrong read is
+   indistinguishable at this layer.  The row that names it is `[BLKQ] stall ...
+   CSTS=0` + `controller reset #1` immediately before a page-in; the fix
+   belongs in the block layer (never complete a request whose DMA did not land).
+3. **The launcher's own image text is RWX** (`prot=7 kind=1` in the 47.6
+   `#UD` row).  Native images are mapped writable+executable; the W^X work that
+   DSOs got in §19/§20 has not been done for `VMK_IMG`.
+4. `slots` still climbs and `pthread_setschedparam` still fails (§46.9 items 2
+   and 3); neither changed here.

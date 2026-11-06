@@ -881,6 +881,9 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a);
 
 /* Defined with the fork clone below; needed by the lane A file-cache fill. */
 static void vm_frame_copy(uint64_t dst, uint64_t src, uint64_t n);
+static void vm_zap_range(struct addr_space *as, uint64_t base, uint64_t len);
+static int vm_page_eq(uint64_t x, uint64_t y);
+static int vm_page_zero(uint64_t x);
 
 /* ---------------------------------------------------------------------
  * so-vm lane A (docs/shared-libs.md section 4): VM_OBJ_FILE fill + COW.
@@ -965,6 +968,7 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   }
   o = r->obj;
   off = (a - r->base) + r->obj_off;
+  int is_exec = (r->prot & VM_PROT_EXEC) != 0;
   vm_object_ref_locked(o); /* hold it across the unlocked disk read */
   spinlock_release_irqrestore(&vm_lock, fl);
 
@@ -983,6 +987,123 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
       return -ENOMEM;
     }
     vm_frame_copy(priv, src, FRAME_SIZE);
+    /* M6/L60: AN EXECUTABLE PAGE MUST BE READ, NOT ASSUMED.
+     *
+     * §46.3 closed one hole in this rule ("a short read is not a short page"),
+     * and the L60 ladder found the next one: the faulting page is materialised
+     * for the first time at the instant the block layer wedges (`[BLKQ] stall
+     * ... CSTS=0` -> `controller reset #1`), and what lands in the executable
+     * frame is not the file's page -- the frame reads back all zeros while the
+     * staged DSO (md5-identical to the host export) holds `50 f3 0f 11 44 24 04
+     * e8 ...` at the page head and `50 e8 8a 14 ee 00 48 89` at the thunk the
+     * CPU jumped to.  The frame is still owned (alloc=1) and was never freed
+     * (wf=0), so this is not a lifetime bug: the fill itself published a page
+     * the device never delivered.
+     *
+     * So verify before publishing, for executable pages only (a wrong byte in
+     * data is a wrong value; in code it is a wrong instruction):
+     *   - read the page again into a second frame;
+     *   - two independent reads that agree AND are not all-zero are the page;
+     *   - a disagreement buys a third read and the value that appears twice
+     *     wins (one bad read is then self-healed instead of executed);
+     *   - all-zero is never published: no executable page of a real DSO is
+     *     all zeros (measured 0 of 6,296 pages in UnityPlayer.so), so an
+     *     all-zero answer is the block layer failing to deliver, and the
+     *     honest outcome is an I/O error at the faulting instruction, not
+     *     zeros executed as code.
+     * Cost: one extra 4 KiB read per executable page (UnityPlayer's text is
+     * 24.7 MiB of a 1.3 GiB load). */
+    if (o->kind == VM_OBJ_FILE && o->file_start_cluster && is_exec) {
+      uint64_t f[3] = {0, 0, 0};
+      int n[3] = {-1, -1, -1};
+      int got = 0, have = 0, saw_zero = 0;
+      for (int i = 0; i < 3 && !have; i++) {
+        f[i] = frame_alloc();
+        if (!f[i])
+          break;
+        n[i] = fat16_read_direct_pos(o->file_start_cluster,
+                                     (uint32_t)o->size, f[i], FRAME_SIZE,
+                                     (uint32_t)off);
+        got = i + 1;
+        if (n[i] != (int)FRAME_SIZE)
+          continue;
+        for (int j = 0; j < i; j++) {
+          if (n[j] != (int)FRAME_SIZE || !vm_page_eq(f[j], f[i]))
+            continue;
+          if (vm_page_zero(f[i])) {
+            /* A DSO's executable page is never all zeros (measured: 0 of
+               6 296 pages in UnityPlayer.so), so agreement on zeros is the
+               device failing to deliver, not a page.  A native IMAGE is
+               different -- DESKTOP.BIN has 107 all-zero pages -- which is why
+               that path tests agreement only. */
+            saw_zero = 1;
+            continue;
+          }
+          vm_frame_copy(priv, f[i], FRAME_SIZE);
+          have = 1;
+          break;
+        }
+      }
+      static int txt_n, txt_bad;
+      txt_n++;
+      /* All-zero answers are the block layer failing to deliver (measured:
+         three reads of the same LBA agree on zeros right after a controller
+         reset while the file holds code).  Prefer ANY non-zero page over an
+         all-zero one, with a short back-off so a transient post-reset state
+         can clear: a wrong-but-nonzero page is caught by the next reader,
+         an all-zero executable page is a guaranteed crash. */
+      if (!have && saw_zero) {
+        extern uint64_t timer_get_ms(void);
+        for (int k = 0; k < 3 && !have; k++) {
+          uint64_t t0 = timer_get_ms();
+          while (timer_get_ms() - t0 < 10)
+            __asm__ volatile("pause");
+          n[0] = fat16_read_direct_pos(o->file_start_cluster,
+                                       (uint32_t)o->size, f[0], FRAME_SIZE,
+                                       (uint32_t)off);
+          if (n[0] == (int)FRAME_SIZE && !vm_page_zero(f[0])) {
+            vm_frame_copy(priv, f[0], FRAME_SIZE);
+            have = 1;
+          }
+        }
+      }
+      if (!have) {
+        txt_bad++;
+        if (txt_bad <= 8) {
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, saw_zero ? "[TXT] ZERO off=0x" : "[TXT] UNVERIFIED off=0x");
+          kl_hex(&kl, (unsigned long)off);
+          kl_s(&kl, " reads=");
+          kl_i(&kl, got);
+          kl_s(&kl, " n0=");
+          kl_i(&kl, n[0]);
+          kl_s(&kl, " -> not published\n");
+          kl_emit(&kl);
+        }
+      }
+      for (int i = 0; i < 3; i++)
+        if (f[i])
+          frame_free(f[i]);
+      if (!have) {
+        frame_free(priv);
+        vm_object_unref(o);
+        return -EIO;
+      }
+      /* tripwire on the page the ladder always dies in (see frame.c) */
+      if (off == 0x757000ULL && !frame_watch_count())
+        frame_watch(priv);
+      if ((txt_n % 512) == 0) {
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[TXT] n=");
+        kl_i(&kl, txt_n);
+        kl_s(&kl, " bad=");
+        kl_i(&kl, txt_bad);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
   }
   uint64_t phys = priv ? priv : src;
   int rc = 0;
@@ -1263,9 +1384,50 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
   if (!fr)
     return -ENOMEM;
   uint32_t pos = (uint32_t)(a - USER_IMG_BASE);
-  int n = fat16_read_direct_pos(as->img_start_cluster, as->img_file_size,
-                                fr, (int)FRAME_SIZE, pos);
-  if (n < 0) {
+  /* M6/L60: the image path has the same rule as the DSO path (and had the
+   * same hole, only wider: any short read was accepted and zero-filled).
+   * The launcher's own .text is demand-paged through here, so a page the
+   * device did not deliver becomes executable code: measured in the L60
+   * ladder as `#UD RIP=0x1000010970 region=0x1000000000+0x3C000 prot=7
+   * kind=1` -- RWX image text, zero bytes where the file holds a prologue.
+   * Require the page's real byte count, retry twice, and never publish a
+   * page that does not match a second read (all-zero is never a valid
+   * executable page). */
+  int want = (int)FRAME_SIZE;
+  int past_eof = (uint32_t)as->img_file_size <= pos;
+  if (past_eof) {
+    /* A page entirely past the image: `.bss` and the reserved tail of the
+       IMG span.  It is legitimately zeros (nothing was ever stored there),
+       and the old code's "zero the tail of the last page" covered it.  Must
+       not be treated as a short read — a boot program's .bss lives here. */
+    want = 0;
+  } else {
+    uint64_t left = (uint64_t)as->img_file_size - pos;
+    if (left < (uint64_t)want)
+      want = (int)left;
+  }
+  int n = past_eof ? 0
+                   : fat16_read_direct_pos(as->img_start_cluster,
+                                           as->img_file_size, fr,
+                                           (int)FRAME_SIZE, pos);
+  for (int k = 0; k < 2 && !past_eof && (n < 0 || n < want); k++)
+    n = fat16_read_direct_pos(as->img_start_cluster, as->img_file_size,
+                              fr, (int)FRAME_SIZE, pos);
+  if (!past_eof && (n < 0 || n < want)) {
+    static int zrows;
+    if (zrows < 8) {
+      zrows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[ZPFILL] image short read pos=0x");
+      kl_hex(&kl, (unsigned long)pos);
+      kl_s(&kl, " n=");
+      kl_i(&kl, n);
+      kl_s(&kl, " want=");
+      kl_i(&kl, want);
+      kl_s(&kl, " -> not published\n");
+      kl_emit(&kl);
+    }
     frame_free(fr);
     return -EIO;
   }
@@ -1275,6 +1437,68 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
   for (int i = n; i < (int)FRAME_SIZE; i++)
     fp[i] = 0;
   __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+
+  /* Executable image pages: two independent reads must agree and must not be
+     all zero before the page becomes code.  One bad read is then re-read
+     instead of executed. */
+  {
+    int is_exec = 0;
+    {
+      uint64_t fl0 = spinlock_acquire_irqsave(&vm_lock);
+      struct vm_region *rr = vm_region_find(as, a);
+      is_exec = rr && (rr->prot & VM_PROT_EXEC) && n == (int)FRAME_SIZE &&
+                !past_eof;
+      spinlock_release_irqrestore(&vm_lock, fl0);
+    }
+    if (is_exec) {
+      uint64_t chk[2] = {0, 0};
+      int ok = 0;
+      chk[0] = frame_alloc();
+      chk[1] = frame_alloc();
+      if (chk[0] && chk[1]) {
+        int n0 = fat16_read_direct_pos(as->img_start_cluster, as->img_file_size,
+                                       chk[0], (int)FRAME_SIZE, pos);
+        int n1 = fat16_read_direct_pos(as->img_start_cluster, as->img_file_size,
+                                       chk[1], (int)FRAME_SIZE, pos);
+        /* Agreement between INDEPENDENT reads is the test — never the value.
+           A native image legitimately contains all-zero pages (DESKTOP.BIN
+           has 107 of them), so "zero is suspicious" would refuse real code
+           and did: `[TXT] IMG UNVERIFIED pos=0x1F000` kept the desktop from
+           booting in one gate run.  What is never legitimate is one read
+           disagreeing with another for the same page. */
+        if (n0 == (int)FRAME_SIZE && n1 == (int)FRAME_SIZE &&
+            vm_page_eq(chk[0], chk[1]))
+          ok = 1; /* two independent reads agree */
+        else if (n0 == (int)FRAME_SIZE && vm_page_eq(chk[0], fr))
+          ok = 1; /* first re-read agrees with the page we hold */
+        else if (n1 == (int)FRAME_SIZE && vm_page_eq(chk[1], fr))
+          ok = 1; /* second re-read agrees */
+        else if (n0 == (int)FRAME_SIZE && n1 == (int)FRAME_SIZE &&
+                 vm_page_eq(chk[0], chk[1])) {
+          vm_frame_copy(fr, chk[0], FRAME_SIZE);
+          ok = 1;
+        }
+      }
+      if (chk[0])
+        frame_free(chk[0]);
+      if (chk[1])
+        frame_free(chk[1]);
+      if (!ok) {
+        static int irows;
+        if (irows < 8) {
+          irows++;
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[TXT] IMG UNVERIFIED pos=0x");
+          kl_hex(&kl, (unsigned long)pos);
+          kl_s(&kl, " -> not published\n");
+          kl_emit(&kl);
+        }
+        frame_free(fr);
+        return -EIO;
+      }
+    }
+  }
 
   uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   if (as->ver != AS_V2) {
@@ -2755,6 +2979,38 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
     /* MAP_FIXED replaces whatever was mapped in range, atomically. */
     base = addr;
     mr_w = 'F';
+    /* M6/L60: REPLACE, do not inherit.  Removing the region records alone
+     * leaves the old leaves resident, and every later path that checks for a
+     * present leaf (the fill path's "a peer mapped it", vm_touch, mprotect)
+     * then treats the previous occupant's page as the new mapping's page:
+     * the new region silently serves the OLD frames, and when the old
+     * object's record was the last reference its frames are freed while the
+     * leaves still name them.  That is how an executable page comes to hold
+     * bytes that are not its file's -- measured as a #UD at a UnityPlayer
+     * function entry whose page read back as zeros (§46).  Zap exactly like
+     * vm_munmap_range does (shared frames are dropped, not freed), then
+     * rewrite the records. */
+    int replaced = 0;
+    for (uint64_t za = base; za < base + len; za += FRAME_SIZE)
+      if (vm_arch_walk(as, za, 0) == 0)
+        replaced++;
+    if (replaced) {
+      static int mmf_rows;
+      if (mmf_rows < 12) {
+        mmf_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[MMF] replace base=0x");
+        kl_hex(&kl, (unsigned long)base);
+        kl_s(&kl, " len=0x");
+        kl_hex(&kl, (unsigned long)len);
+        kl_s(&kl, " resident=");
+        kl_i(&kl, replaced);
+        kl_s(&kl, " -> zapped\n");
+        kl_emit(&kl);
+      }
+      vm_zap_range(as, base, len);
+    }
     if (vm_region_remove_locked(as, base, len) != 0)
       rc = -EINVAL;
     else if (vm_region_insert_locked(as, base, len, p, kind, fl2, obj,
@@ -3020,6 +3276,24 @@ static void vm_frame_copy(uint64_t dst, uint64_t src, uint64_t n) {
   const unsigned char *s = (const unsigned char *)src;
   for (uint64_t i = 0; i < n; i++)
     d[i] = s[i];
+}
+
+/* M6/L60: page identity/emptiness tests for the executable page-in gate. */
+static int vm_page_eq(uint64_t x, uint64_t y) {
+  const volatile uint64_t *a = (const volatile uint64_t *)x;
+  const volatile uint64_t *b = (const volatile uint64_t *)y;
+  for (int i = 0; i < (int)(FRAME_SIZE / 8); i++)
+    if (a[i] != b[i])
+      return 0;
+  return 1;
+}
+
+static int vm_page_zero(uint64_t x) {
+  const volatile uint64_t *a = (const volatile uint64_t *)x;
+  for (int i = 0; i < (int)(FRAME_SIZE / 8); i++)
+    if (a[i])
+      return 0;
+  return 1;
 }
 
 int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {

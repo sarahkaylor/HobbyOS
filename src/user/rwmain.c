@@ -3486,6 +3486,25 @@ int main(int argc, char **argv) {
   }
   fprintf(stderr, "[RWMAIN] UnityPlayer.so handle=%p\n", h);
 
+  /* M6/L60: IFUNC provenance, measured instead of argued.  Nothing in the
+     game's own DSOs defines an IFUNC (audited: UnityPlayer, libmonobdwgc,
+     libmono-native, lib_burst = 0 symbols, 0 IRELATIVE relocations), but
+     glibc's libc does -- 58 of them, including memcpy/strlen/memcmp.  Their
+     GOT slots are resolved by the interpreter glibc's ld.so at load time;
+     this kernel's ELF loader only ever applies R_*_RELATIVE to the main PIE
+     and to the interpreter itself and REFUSES anything else, so "our loader
+     never ran the resolver" can only be true if one of these prints a libc
+     resolver's st_value (a `__memcpy_*` resolver entry) instead of the
+     selected implementation.  A `__memcpy_avx_unaligned_erms` /
+     `__strlen_avx2` / `__memcmp_avx2_movbe` target means it ran. */
+  {
+    static const char *const ifn[] = {"memcpy", "strlen", "memcmp", "memmove"};
+    for (unsigned i = 0; i < sizeof ifn / sizeof ifn[0]; i++) {
+      void *p = dlsym(RTLD_DEFAULT, ifn[i]);
+      fprintf(stderr, "[IFUNC] %s=%p\n", ifn[i], p);
+    }
+  }
+
   dlerror();
   void *sym = dlsym(h, RW_PLAYERMAIN);
   const char *err = dlerror();
