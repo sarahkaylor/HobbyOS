@@ -91,6 +91,14 @@ static void uart_putc_body(char c) {
   outb(COM1_PORT, c);
 }
 
+/* GB-206: lock-free writer for debug instruments that may be called with
+   uart_lock already held (the release path is reached from inside a console
+   print).  It takes no lock and does no panic accounting; a caller that wants
+   a whole record in one piece buffers it first. */
+void uart_putc_dbg(char c) {
+  uart_putc_body(c);
+}
+
 /* ---- GB-097: the raw sink is for NON-RETURNING paths only.
 
    The rename to panic_* makes a returning caller implausible; this makes it
