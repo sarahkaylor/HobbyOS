@@ -496,6 +496,13 @@ static int l_fd_close_range(struct process *p, struct trap_frame *tf) {
     return l_ret(tf, -EINVAL);
   if (first > last) return l_ret(tf, -EINVAL);
   if (last >= (uint32_t)MAX_OPEN_FDS) last = (uint32_t)MAX_OPEN_FDS - 1;
+  /* L57: record the call itself -- a whole-range close is exactly the kind of
+   * sweep that can kill a peer thread's live fd, and one row proves whether
+   * it happens at all. */
+  {
+    extern void fs_fd_ev_range(struct process *, int, int);
+    fs_fd_ev_range(p, (int)first, (int)last);
+  }
 
   for (uint32_t fd = first; fd <= last; fd++) {
     if (flags & L_CLOSE_RANGE_CLOEXEC)

@@ -1,4 +1,5 @@
 #include "net.h"
+#include "kline.h"
 #include "virtio_net.h"
 #include "lock.h"
 #include "timer.h"
@@ -766,6 +767,11 @@ void net_rx_packet(uint8_t* packet, uint32_t len) {
   }
 }
 
+/* L57: socket-allocation telemetry (see the port comment inside). */
+volatile uint32_t net_sock_created;
+volatile uint32_t net_port_dup;
+int net_sockets_in_use(void);
+
 struct socket_pcb* net_socket_create(int protocol) {
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
   for (int i = 0; i < MAX_SOCKETS; i++) {
@@ -774,10 +780,36 @@ struct socket_pcb* net_socket_create(int protocol) {
       sockets[i].protocol = protocol;
       sockets[i].local_ip = local_ip;
 
-      // Allocate an ephemeral port
-      static uint16_t next_port = 49152;
-      sockets[i].local_port = next_port++;
-      if (next_port == 0) next_port = 49152;
+      /* L57: the ephemeral port used to be a bare 16-bit counter starting at
+       * 49152, so after 16,384 socket creations it wrapped straight onto
+       * ports LIVE sockets still held.  UDP demux is first-match on
+       * local_port (handle_udp's loop breaks on the first in_use match), so
+       * two live sockets with one port share a receive queue: one of them
+       * waits out NFS_RPC_TIMEOUT_MS for a reply the other consumed, the NFS
+       * READ returns -1, and trap.c's `-1 -> -EBADF` turned that into Mono's
+       * "Invalid handle to path".  Allocate a port no live socket holds and
+       * count the skips, so the log can prove whether the wrap was reached. */
+      static uint32_t next_port = 49152;
+      uint16_t port = 0;
+      int port_skips = 0;
+      for (int guard = 0; guard < 16384; guard++) {
+        uint32_t cand = next_port++;
+        if (next_port > 65535u) next_port = 49152u;
+        if (cand < 49152u) cand = 49152u;
+        port = (uint16_t)cand;
+        int clash = 0;
+        for (int j = 0; j < MAX_SOCKETS; j++) {
+          if (j != i && sockets[j].in_use && sockets[j].local_port == port) {
+            clash = 1;
+            break;
+          }
+        }
+        if (!clash) break;
+        port_skips++;
+      }
+      sockets[i].local_port = port;
+      net_sock_created++;
+      if (port_skips) net_port_dup += (uint32_t)port_skips;
 
       sockets[i].state = SOCKET_CLOSED;
       sockets[i].rx_head = 0;
@@ -799,11 +831,55 @@ struct socket_pcb* net_socket_create(int protocol) {
       sockets[i].syn_retries = 0;
       sockets[i].syn_last_ms = 0;
       spinlock_release_irqrestore(&net_lock, flags);
+      /* L57: name a skipped (would-have-collided) port outside the lock, and
+       * summarise the allocation stream every 4096 sockets so one run says
+       * whether the counter ever reached the wrap at all. */
+      if (port_skips) {
+        static int skip_rows;
+        if (skip_rows < 16) {
+          skip_rows++;
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[NSPORT] skipped=");
+          kl_i(&kl, port_skips);
+          kl_s(&kl, " for port=");
+          kl_i(&kl, (long)port);
+          kl_s(&kl, " created=");
+          kl_i(&kl, (long)net_sock_created);
+          kl_c(&kl, '\n');
+          kl_emit(&kl);
+        }
+      }
+      if ((net_sock_created & 4095u) == 0) {
+        struct kline ks;
+        kl_init(&ks);
+        kl_s(&ks, "[NSOCK] created=");
+        kl_i(&ks, (long)net_sock_created);
+        kl_s(&ks, " port_dups_skipped=");
+        kl_i(&ks, (long)net_port_dup);
+        kl_s(&ks, " inuse=");
+        kl_i(&ks, (long)net_sockets_in_use());
+        kl_c(&ks, '\n');
+        kl_emit(&ks);
+      }
       return &sockets[i];
     }
   }
   spinlock_release_irqrestore(&net_lock, flags);
   return NULL;
+}
+
+/* L57: how many socket PCBs are live right now.  MAX_SOCKETS is 16 and the
+ * NFS READ path needs one socket per concurrent reader (one cached plus a
+ * temporary per extra thread), so "the reply never came" and "there was no
+ * socket to ask on" must be distinguishable from the log. */
+int net_sockets_in_use(void) {
+  uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+  int n = 0;
+  for (int i = 0; i < MAX_SOCKETS; i++)
+    if (sockets[i].in_use) n++;
+  spinlock_release_irqrestore(&net_lock, flags);
+  return n;
 }
 
 // Pseudo header for TCP/UDP checksum

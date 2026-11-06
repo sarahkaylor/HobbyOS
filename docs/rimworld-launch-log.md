@@ -7285,3 +7285,250 @@ mapping one.
 new test); `t3_linux_probe.sh redzone` 18/18 KEPT; `m2_mono`, `m2_tp`,
 `m2_threads`, `m12`, `m3_window_probe`, `m4_gl_probe`, `rwnfs_probe` and
 `t3_linux_probe.sh mmap_race` all PASS on this tree.
+
+
+## 44. 2026-11-06 — M6/L57: `Invalid handle to path` is a transport error wearing a descriptor's name
+
+§43.6 asked the next lane to instrument `read()`/`close()` and name the pair
+(closer tid, reader tid, fd, path) that produced `EBADF` on a Keyed XML.  The
+answer is that there is no such pair: **no fd was ever closed**.  Mono's
+message names a descriptor fault for what `file_read()` reports as a failed
+NFS READ, and two transport defects of ours — both now fixed — produced it.
+
+### 44.1 The message does not mean EBADF-on-a-closed-fd
+
+Three layers turn an I/O failure into that sentence:
+
+| layer | code | what it does |
+|---|---|---|
+| `src/kernel/arch/x64/trap.c:sys_read` | `regs[0] = (ret == -1) ? -EBADF : ret` | **every** `file_read()` failure that returns `-1` becomes `EBADF`; only `< -1` errnos pass through |
+| `mono/metadata/w32error-unix.c` | `case EBADF: case EIO: return ERROR_INVALID_HANDLE` | Mono maps **EBADF *and* EIO** to the same Win32 code |
+| `MonoIO.GetException` (`MonoIO.cs`) | `ERROR_INVALID_HANDLE` -> `"Invalid handle to path \"{0}\""` | the sentence in Player.log |
+
+`file_read()` returns `-1` on its NFS branch for a failed READ RPC
+(`nfs_read_file() < 0`) and for a mount that disappeared — neither involves
+the fd table.  So the exception's text cannot distinguish "someone closed my
+fd" from "the read timed out", and §43.6's EBADF reading was the wrong half of
+the fork.
+
+### 44.2 The fd table is not the cause (flight recorder, kept in the tree)
+
+`fs.c` now keeps a bounded in-kernel ring of every `open`/`close`/`dup`/
+`dup2`/`close_range` on a `/NFS/` fd — `(seq, kind, fd, global slot, slot
+generation, tid, tgid, path tail)` — and prints it only when a `/NFS` read
+fails (`[FDR] fail fd=.. why=..`, then that fd's history, then the group's last
+events).  It is the instrument §43.6 asked for: `[FDR]` rows carry the reader
+tid and every closer tid for the fd, and a slot reused under a live reader is
+a generation mismatch.  Cost is a few stores per open/close; rows only on
+failure (bounded to four dumps per boot).
+
+Ruled out by rows: `[FDR] close_range` never fires (nothing in the game closes
+by range), `[NFSNOSOCK]` never fires, and `[NSOCK] ... inuse=` stays at 2-9 of
+16, so the socket pool is not exhausted.  The failing read is named by the
+managed stack as `FilesystemFile.ReadAllText` -> `FileStream.ReadData`, i.e. a
+`read()` on the fd that same lambda opened; nothing else in the process holds
+that number (`[FDR]` prints a slot-reuse generation and would flag it).
+Ownership of this wall is therefore **ours**, not the game's: a real Linux
+kernel answers the same failed read with `EIO`, and a `close()` the game never
+issued cannot be the cause of a `read()` that its own stack frame owns.  The
+recorder stays in the tree so a future `Invalid handle` settles the question in
+one run: it prints the closer's tid and the slot generation.
+
+### 44.3 Mechanism 1 (measured): the ephemeral-port counter re-issued live ports
+
+`net_socket_create()` allocated `local_port = next_port++` from a **16-bit**
+counter starting at 49152 — 16,384 sockets and it wraps onto ports that live
+sockets still hold.  UDP demux is **first-match on `local_port`**
+(`net.c:handle_udp` `break`s at the first `in_use` socket with that port), so
+two live sockets share one receive queue: the reply one is waiting for is
+consumed by the other (and skipped as a stale xid), it waits out
+`NFS_RPC_TIMEOUT_MS` (500 ms), `nfs_read_serial()` returns `-1`, `file_read()`
+returns `-1`, and trap.c calls that `EBADF`.
+
+Reachability, measured by counting the skips a collision-free allocator has to
+make (one run, unmodified read path):
+
+```text
+[NSOCK] created=16384 port_dups_skipped=0 inuse=2
+[NSPORT] skipped=1 for port=49160 created=16392
+[NSOCK] created=20480 port_dups_skipped=1 inuse=2
+```
+
+That `[NSPORT]` row is the exact allocation at which the old code would have
+handed out **port 49160 a second time**; 49160 is one of the first ports of the
+boot, i.e. the NFS mount's cached READ socket, which lives for the whole
+session.  It lands at ~16.4k sockets in **every** run, and a 300 s load creates
+28k-30k sockets (`[NSOCK] created=28672`), so the wrap is steady state, not a
+corner case.
+
+Fix: allocate a port **no live socket holds** (scan the 16 PCBs, skip and
+count).  `[NSOCK]`/`[NSPORT]` stay in the tree: a future wrap is a skip count
+that keeps climbing.
+
+### 44.4 Mechanism 2 (measured): one lost READ reply failed the whole read
+
+`nfs_read_serial()` did **one** `rpc_xfer()` per block with no retry (unlike
+`rpc_call()`, which retries `NFS_RPC_TRIES` times), and `nfs_read_pipelined()`
+returned `-1` when the **first** block's reply did not arrive.  One lost or
+>500 ms-late datagram therefore became `EBADF` for a file whose fd was open
+the whole time.  The stalls are not rare: `[NFSPIPE] stall` fires 2-7 times per
+run, including in the pre-fix run that threw the exception:
+
+```text
+[NFSPIPE] stall inflight=1 issued=23 replies=22 contig=21440 end=31361 us=590266
+[NFSPIPE] stall inflight=1 issued=24 replies=23 contig=22176 end=32962 us=587052
+```
+
+Each row is a READ whose reply arrived after the 500 ms window or not at all.
+Fix: one retry on a **fresh** socket (a READ is idempotent; the xid is reused),
+and the pipelined path falls back to the serial path instead of failing when
+its first reply goes missing.  `[NFSRD] fail` remains as the row for a
+genuinely dead transport; it is 0 in every post-fix run while stalls still
+occur, i.e. the retry is doing the work.
+
+### 44.5 Honesty: `EIO`, not `EBADF`, for a transport failure
+
+`file_read()`'s NFS branch now answers `-EIO` when the transport fails and when
+the mount is gone.  trap.c passes `< -1` through unchanged, so a future
+transport failure reaches Mono as `EIO` — still "Invalid handle to path" per
+44.1, but the truthful errno in `[FDR]`/`[NFSRD]` and in any strace-class
+trace, instead of a descriptor fault that never happened.
+
+### 44.6 The NULL-deref was downstream of the EBADF (intervention proof)
+
+Pre-fix run (base-1, seeded kernel, no instrumentation): the early language
+load threw `AggregateException -> IOException: Invalid handle to path
+".../Keyed/Alerts.xml"`, RimWorld logged `Exception loading language data.
+Rethrowing.`, then `Exception from asynchronous event` (the second `LoadData`,
+from `PlayDataLoader.DoPlayLoad -> Translator.Translate`), and the next line
+was
+
+```text
+Tried to use an uninitialized DefOf of type ShaderTypeDefOf. DefOfs are
+initialized right after all defs all loaded. ...
+[SIGDUMP] SIGSEGV code=1 addr=0x0
+[SIGDUMP] uctx rip=0x1085a36022 ... rdi=0x0 rsi=0x1 rdx=0x8
+```
+
+so the managed load aborted before `DefOf` binding, `ShaderTypeDefOf` stayed
+null, and JIT code read `[null+8]`.  With the EBADF fixed, `Exception loading
+language data` is 0 in every run, and neither the `ShaderTypeDefOf` warning nor
+the VA=0 fault appears anywhere — same binary, same data, one wall removed,
+fault gone.  That is the intervention, not an inference from adjacency: the
+deref is a **consequence of the aborted load**, not a second bug.
+
+### 44.7 New wall behind it: a *different* SIGSEGV in implied-def generation
+
+With the language data loading, the def pass completes (577 `Could not resolve
+cross-reference: No Verse.SoundDef named ...`, one `XML error: Could not find
+parent node named "MusicalInstrumentBase"`), and the game dies at a different
+site while generating implied defs:
+
+```text
+Tried creating build blueprint for thing that has no blueprint class assigned!
+[KERNEL] pid=40 memory fault VA=0x338 PC=0x1085AA6C4B rw=r in=HOLE region=NONE
+[SIGDUMP] uctx rip=0x1085aa6c4b rcx=0x0 rdi=0x31a68 rdx=0x20000000000
+```
+
+`rcx=0` plus a `0x338` field read is a null object whose field is being read;
+the `Log.Error` string immediately before it is at `IL_02d0` of
+`RimWorld.ThingDefGenerator_Buildings.CreateBuildBlueprintDef` (decompiled from
+`Assembly-CSharp.dll`), i.e. a `ThingDef` that is null or missing when the
+blueprint/frame defs are generated.  This one is **not** a read or fd failure:
+the same runs have 0 `[NFSRD]`, 0 `[FDR]`, 0 `[NFSNOSOCK]`, and
+
+```text
+[NFSLS] n=93 dirs=93 complete=1 rel=/Data/Core/Defs
+```
+
+— 93 entries, 93 of them directories, matching the host exactly.  The def
+*files* are enumerable; what is absent is defs inside the database: the 577
+missing SoundDefs are defined in files that exist on the export (e.g.
+`Data/Core/Defs/SoundDefs/World_Oneshots_ProjectileImpacts.xml` defines
+`BulletImpact_Metal`).  The ladder build's `[NFSCHK]` self-check (hash of the
+first read of `World_Oneshots_ProjectileImpacts.xml`, a SoundDefs file) never
+fired in any run either — consistent with that subtree not being read, though
+one file is not proof.  The next lane should widen that trigger to *any* file
+under a `/SoundDefs/` directory (one line in `nfs_selfcheck()`) so one run
+answers it directly, and print the SoundDefs directory's `[NFSLS]` row by name
+rather than relying on the 40-row cap.  So the next
+lane's question is the loader's *file set* (which directories it recurses
+into) and the `MusicalInstrumentBase` parent, not the fd layer.
+
+One more, seen once in three ladder runs and unrelated to the above: a Thread
+Pool Worker took a **write** fault inside a writable anonymous region
+(`VA=0x11B8051020 PC=0x10846E9645 rw=w in=PROT region=0x11B8000000+0x53000
+prot=3 kind=3`) and was killed.  `vm_handle_fault` answered `PROT` for a write
+to a region whose `prot` includes write — worth a row of its own next time.
+
+### 44.7a Evidence hazard found while reading the wall: Player.log has 512-byte holes
+
+The `XML error: Could not find parent node ...` row in Player.log ended
+mid-word and was padded with NUL bytes.  That is not the XML read: the NUL run
+is **159 bytes starting at file offset 79360, exactly 512-aligned**, and the
+text resumes mid-word after it (`"...for tribal r" <159 NULs> "ituals and
+parties..."`).  A FAT16 write left a hole at a sector boundary, so Player.log
+itself can lose 1-511 bytes of a line.  Two consequences: (a) read Player.log
+with `\x00`-aware tooling (`grep -a`, or `strings`), and (b) a truncated-looking
+log line is not evidence about the guest's I/O — check the alignment before
+believing it.  The write path is not fixed here; it is recorded as a row of its
+own for the next lane (the same hole would corrupt saved games).
+
+### 44.8 Ladder
+
+Three 220 s runs on the final build (`[NMAP]` rows present, launcher rebuilt
+from `src/user/rwmain.c` + `condtrace.c`), plus two 300 s runs that go past the
+def pass:
+
+| run | s | NFS bytes | `[XSW]` max | `Invalid handle` | language exception | memory fault | `[NFSRD]` fail | `[NSPORT]` skip | shot colours |
+|---|---|---|---|---|---|---|---|---|---|
+| fix-1 | 220 | 47.26 MiB | 170 | 0 | 0 | 0 | 0 | 1 | 132,577 |
+| fix-2 | 220 | 47.26 MiB | 170 | 0 | 0 | 0 | 0 | 1 | 132,577 |
+| fix-3 | 220 | 47.23 MiB | 160 | 0 | 0 | 1 (44.7 note, `rw=w`) | 0 | 1 | 132,577 |
+| diag-1 | 300 | 47.52 MiB | 210 | 0 | 0 | 2 (0x338) | 0 | 1 | 132,577 |
+| diag-2 | 300 | 47.52 MiB | 220 | 0 | 0 | 2 (0x338) | 0 | 1 | 132,577 |
+
+Before the fix, the same harness (base-1, 420 s) produced 13 `Invalid handle`
+occurrences (one IOException echoed through the nested AggregateException
+stacks), one `Exception loading language data`, and the VA=0 fault, at
+47.72 MiB and `[XSW]` 170.  After it: **0 / 0 / no VA=0** in five runs, with the language
+phase reached and passed in both 300 s runs.
+
+Two facts the reader should not over-read.  (1) `[XSW]` is 160-170 at 220 s and
+210-220 at 300 s, i.e. ~0.73 fps.  The def pass had not reached its
+cross-reference phase at 220 s and had completed it by 300 s, so it needs
+somewhere in 230-300 s at that rate; a 220 s run therefore cannot show the
+language phase, and the 300 s runs are what show the EBADF is gone.  (2) The 132,577-colour screenshot is the planet/starfield
+loading art (§42's exact number), **not** the main menu: the run dies at 44.7
+before the menu exists, so "reaches the main menu" is not yet met — what is met
+is "0 EBADF, 0 Invalid handle, no VA=0 fault, defs and language data load".
+
+### 44.9 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh` -> **415 run, 0 failed** on this tree
+(run twice: once on the ladder build, once on the final one).
+
+### 44.10 Gates
+
+| gate | result |
+|---|---|
+| `t3_linux_probe.sh redzone` | PASS — every slot KEPT, `[LP] done rc=0` |
+| `t3_linux_probe.sh mmap_race` | PASS — `mapped=512 enomem=0`, `distinct-bases OK (512/512)` |
+| `m2_mono.sh` | PASS — official Mono 6.12 ran a threaded C# program |
+| `m2_tp.sh` | PASS — ThreadPool 7x parallel + join, workers PARK and wake |
+| `m2_threads.sh` | PASS — 8 pthreads, mutex+condvar+TLS+join |
+| `m12_thread_ceiling.sh` | PASS — 150 threads created + joined, TLS, futex, cancel |
+| `m3_window_probe.py` | PASS — full XCreateWindow sequence + WM_DELETE_WINDOW |
+| `m4_gl_probe.py` | PASS — GL 3.3 core triangle rendered and presented |
+| `tools/rw/run-rwnfs-probe.sh` | PASS — 20/20 rows incl. 2915-byte single read, 102-entry listing |
+
+### 44.11 What is left
+
+1. The 0x338 crash in implied-def generation (44.7): find why a def family that
+   exists on disk (SoundDefs) and a parent def that exists on disk
+   (`MusicalInstrumentBase`) are absent from the database.  The rows to start
+   from are `[NFSLS] n= dirs= complete=` (per directory; 93/93 already match
+   for `/Data/Core/Defs`), `[NFSCHK]` (digest of the first SoundDefs read) and
+   `[NFSRD]`.  This is a def-file-set question, not an fd or read question.
+2. The one-off write fault into a writable anon region (44.7 note) — a
+   `vm_handle_fault` PROT answer where `prot=3 kind=3` says the write is legal.

@@ -99,6 +99,240 @@ static struct file *file_alloc(void) {
   return 0;
 }
 
+
+/* ---- L57: NFS read-path self-check -------------------------------------
+ *
+ * "Some defs are missing and nothing was logged" is either a transport that
+ * returns bytes it never read, or a game-side enumeration/parse loss.  Hash
+ * one file the game definitely loads, through the SAME nfs_read_file() the
+ * file layer uses, and print (bytes, size, nul, fnv).  A digest equal to the
+ * host's FNV over the same bytes proves the transport is byte-exact, so a
+ * missing def is not a short/corrupt read.
+ */
+static void nfs_selfcheck(struct file *f) {
+  static int once;
+  if (once) return;
+  if (!f || f->type != FILE_TYPE_NFS || f->nfs.is_dir) return;
+  const char *p = f->path;
+  const char *want = "World_Oneshots_ProjectileImpacts.xml";
+  int hit = 0, pl = 0, wl = 0;
+  while (p[pl]) pl++;
+  while (want[wl]) wl++;
+  if (pl >= wl) {
+    hit = 1;
+    for (int i = 0; i < wl; i++)
+      if (p[pl - wl + i] != want[i]) { hit = 0; break; }
+  }
+  if (!hit) return;
+  once = 1;
+  const struct nfs_mount *m = nfs_mount_at(f->nfs.mount_idx);
+  if (!m) return;
+  static uint8_t b[16384];
+  unsigned long long h = 1469598103934665603ULL;
+  long tot = 0, nul = 0;
+  uint32_t off = 0;
+  while (off < f->nfs.size && tot < (long)sizeof b) {
+    uint32_t w = f->nfs.size - off;
+    if (w > 4096) w = 4096;
+    if ((long)w > (long)sizeof b - tot) w = (uint32_t)((long)sizeof b - tot);
+    int got = nfs_read_file(m, &f->nfs.fh, off, b + tot, w);
+    if (got <= 0) break;
+    for (int i = 0; i < got; i++) {
+      if (b[tot + i] == 0) nul++;
+      h ^= (unsigned long long)b[tot + i];
+      h *= 1099511628211ULL;
+    }
+    tot += got;
+    off += (uint32_t)got;
+  }
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[NFSCHK] bytes=");
+  kl_i(&kl, tot);
+  kl_s(&kl, " size=");
+  kl_i(&kl, (long)f->nfs.size);
+  kl_s(&kl, " nul=");
+  kl_i(&kl, nul);
+  kl_s(&kl, " fnv=0x");
+  kl_hex(&kl, (unsigned long)h);
+  kl_s(&kl, " ");
+  kl_s(&kl, p);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+/* ---- L57: fd-lifecycle flight recorder ---------------------------------
+ *
+ * The EBADF on a Keyed XML read arrives with no history: `read()` answers
+ * EBADF, Mono names one path, and nothing in the serial log says who closed
+ * that fd — or whether the fd was alive at all (fs.c's `return -1` for a
+ * failed NFS READ reaches Mono as EBADF too, because trap.c maps -1 to
+ * -EBADF).  Both halves of that question are the same row here.
+ *
+ * Every open/close/dup/dup2/close_range touching a `/NFS/` path is recorded
+ * in a small in-kernel ring (fd, global slot, generation, tid, tgid, path
+ * tail), and the ring is printed ONLY when a read on a /NFS file fails.  The
+ * hot path costs a handful of stores per event and the serial line stays
+ * silent until the failure the ring exists to explain, so the recorder does
+ * not change the timing it is measuring.
+ *
+ * Generation is bumped per install, so "the reader's fd now names a different
+ * file" (a slot reused under a live reader) is visible as a gen mismatch
+ * rather than inferred.
+ */
+#define FD_EV_MAX 1024
+#define FD_EV_TAIL 56
+#define FDEV_OPEN 1
+#define FDEV_CLOSE 2
+#define FDEV_DUP 3
+#define FDEV_DUP2 4
+#define FDEV_FAIL 5
+#define FDEV_RANGE 6
+
+struct fd_ev {
+  uint32_t seq;
+  uint32_t tid;
+  uint32_t tgid;
+  uint32_t gen;
+  int16_t fd;
+  int16_t gfd;
+  uint8_t kind;
+  uint8_t pad;
+  char tail[FD_EV_TAIL];
+};
+
+static struct fd_ev fd_ev_ring[FD_EV_MAX];
+static uint32_t fd_ev_seq;
+static uint32_t fd_slot_gen[MAX_OPEN_FDS];
+
+static int fs_has_nfs(const char *p) {
+  if (!p) return 0;
+  for (int i = 0; p[i]; i++)
+    if (p[i] == '/' && p[i + 1] == 'N' && p[i + 2] == 'F' && p[i + 3] == 'S' &&
+        p[i + 4] == '/')
+      return 1;
+  return 0;
+}
+
+/* The informative part of a path is its tail; keep it, mark a truncation. */
+static void fs_path_tail(char *dst, const char *src) {
+  int n = 0;
+  while (src && src[n]) n++;
+  int start = 0;
+  if (n > FD_EV_TAIL - 2) { start = n - (FD_EV_TAIL - 2); dst[0] = '~'; }
+  int w = (start ? 1 : 0);
+  for (int i = start; i < n && w < FD_EV_TAIL - 1; i++) dst[w++] = src[i];
+  if (w == 0) dst[w++] = '?';
+  dst[w] = '\0';
+}
+
+static void fd_ev_note(int kind, struct process *pg, int fd, int gfd,
+                       const char *path) {
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS || !fs_has_nfs(path)) return;
+  uint32_t s = fd_ev_seq++;
+  struct fd_ev *e = &fd_ev_ring[s % FD_EV_MAX];
+  struct process *cur = current_process();
+  e->seq = s;
+  e->tid = cur ? (uint32_t)cur->pid : 0;
+  e->tgid = (uint32_t)pg->pid;
+  e->gen = fd_slot_gen[fd];
+  e->fd = (int16_t)fd;
+  e->gfd = (int16_t)(gfd < 32767 ? gfd : 32767);
+  e->kind = (uint8_t)kind;
+  e->pad = 0;
+  fs_path_tail(e->tail, path);
+}
+
+static const char *fd_ev_kind_name(int k) {
+  switch (k) {
+  case FDEV_OPEN: return "open";
+  case FDEV_CLOSE: return "close";
+  case FDEV_DUP: return "dup";
+  case FDEV_DUP2: return "dup2";
+  case FDEV_FAIL: return "readfail";
+  case FDEV_RANGE: return "close_range";
+  default: return "?";
+  }
+}
+
+/* Print the last 22 events of THIS fd in this group, then the last 6 events
+ * of the group overall (an fd number reused for another file shows up there).
+ * Bounded to four dumps per boot: a real failure is one event, not a flood. */
+static void fd_ev_dump(struct process *pg, int fd, const char *why) {
+  static int dumps;
+  if (!pg || dumps >= 4) return;
+  dumps++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[FDR] fail fd=");
+  kl_i(&kl, (long)fd);
+  kl_s(&kl, " gen=");
+  kl_i(&kl, (long)((fd >= 0 && fd < MAX_OPEN_FDS) ? (int)fd_slot_gen[fd] : -1));
+  kl_s(&kl, " tgid=");
+  kl_i(&kl, (long)pg->pid);
+  kl_s(&kl, " cur=");
+  {
+    struct process *cur = current_process();
+    kl_i(&kl, cur ? (long)cur->pid : -1L);
+  }
+  kl_s(&kl, " why=");
+  kl_s(&kl, why);
+  kl_s(&kl, " open_fds=");
+  kl_i(&kl, (long)((fd >= 0 && fd < MAX_OPEN_FDS) ? pg->open_fds[fd] : -2));
+  kl_s(&kl, " nfd=");
+  kl_i(&kl, (long)pg->num_open_fds);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+
+  uint32_t first = fd_ev_seq > FD_EV_MAX ? fd_ev_seq - FD_EV_MAX : 0;
+  int shown = 0;
+  for (uint32_t s = fd_ev_seq; s > first && shown < 22; s--) {
+    struct fd_ev *e = &fd_ev_ring[(s - 1) % FD_EV_MAX];
+    if (e->fd != fd || e->tgid != (uint32_t)pg->pid) continue;
+    shown++;
+    struct kline kr;
+    kl_init(&kr);
+    kl_s(&kr, "[FDR]  #");
+    kl_i(&kr, (long)e->seq);
+    kl_s(&kr, " ");
+    kl_s(&kr, fd_ev_kind_name(e->kind));
+    kl_s(&kr, " fd=");
+    kl_i(&kr, (long)e->fd);
+    kl_s(&kr, " gfd=");
+    kl_i(&kr, (long)e->gfd);
+    kl_s(&kr, " gen=");
+    kl_i(&kr, (long)e->gen);
+    kl_s(&kr, " tid=");
+    kl_i(&kr, (long)e->tid);
+    kl_s(&kr, " ");
+    kl_s(&kr, e->tail);
+    kl_c(&kr, '\n');
+    kl_emit(&kr);
+  }
+  shown = 0;
+  for (uint32_t s = fd_ev_seq; s > first && shown < 6; s--) {
+    struct fd_ev *e = &fd_ev_ring[(s - 1) % FD_EV_MAX];
+    if (e->tgid != (uint32_t)pg->pid || e->fd == fd) continue;
+    shown++;
+    struct kline kx;
+    kl_init(&kx);
+    kl_s(&kx, "[FDR]  (other) #");
+    kl_i(&kx, (long)e->seq);
+    kl_s(&kx, " ");
+    kl_s(&kx, fd_ev_kind_name(e->kind));
+    kl_s(&kx, " fd=");
+    kl_i(&kx, (long)e->fd);
+    kl_s(&kx, " gfd=");
+    kl_i(&kx, (long)e->gfd);
+    kl_s(&kx, " tid=");
+    kl_i(&kx, (long)e->tid);
+    kl_s(&kx, " ");
+    kl_s(&kx, e->tail);
+    kl_c(&kx, '\n');
+    kl_emit(&kx);
+  }
+}
+
 /* L55: local-fd allocation was a check-then-set on shared group state.  Two
  * threads opening at once (RimWorld's four `DirectXmlLoader` threads each
  * MemoryMappedFile a def) could take the SAME slot: one file object was
@@ -119,12 +353,37 @@ static int fd_install(struct process *p, struct file *f) {
     if (p->open_fds[i] == -1) {
       p->open_fds[i] = get_global_fd(f);
       p->num_open_fds++;
+      fd_slot_gen[i]++;
       fd = i;
       break;
     }
   }
   spinlock_release_irqrestore(&fdtab_lock, fl);
+  /* L57: record outside the lock (the row goes to the UART). */
+  if (fd >= 0) fd_ev_note(FDEV_OPEN, p, fd, get_global_fd(f), f->path);
   return fd;
+}
+
+/* Public: close_range is rare, so one row per call is affordable and answers
+ * "does anything close a whole range, and over which slots" directly. */
+void fs_fd_ev_range(struct process *p, int first, int last) {
+  struct process *pg = process_group(p);
+  if (!pg) return;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[FDR] close_range first=");
+  kl_i(&kl, (long)first);
+  kl_s(&kl, " last=");
+  kl_i(&kl, (long)last);
+  kl_s(&kl, " nfd=");
+  kl_i(&kl, (long)pg->num_open_fds);
+  kl_s(&kl, " cur=");
+  {
+    struct process *cur = current_process();
+    kl_i(&kl, cur ? (long)cur->pid : -1L);
+  }
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
 }
 
 /* SEC-6: invariant violated — an fd reached a slot whose type is not one of
@@ -555,6 +814,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
     }
   }
 
+  if (routed == 1) nfs_selfcheck(f);
   int fd = -1;
   fd = fd_install(cur, f);
 
@@ -1930,6 +2190,8 @@ int file_close(struct process *cur, int fd) {
 
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
+  /* L57: who closed which fd, and which file description it named. */
+  fd_ev_note(FDEV_CLOSE, cur, fd, g_fd, f->path);
 
   /* P6.1: capture the record-lock identity before the type may be cleared;
    * closing ANY fd of a FAT16 file drops this process's locks on it. */
@@ -2016,6 +2278,7 @@ int file_dup(struct process *cur, int fd) {
   cur->open_fds[newfd] = g_fd;
   fd_cloexec_clear(cur->fd_cloexec, newfd); /* P5 (D3.2): dup clears CLOEXEC */
   cur->num_open_fds++;
+  fd_ev_note(FDEV_DUP, cur, newfd, g_fd, f->path);
   return newfd;
 }
 
@@ -2047,6 +2310,7 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
   fd_cloexec_clear(cur->fd_cloexec, newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
+  fd_ev_note(FDEV_DUP2, cur, newfd, g_fd, f->path);
   cur->num_open_fds++;
   return newfd;
 }
@@ -2109,13 +2373,24 @@ void fs_close_global(int g_fd) {
  */
 int file_read(struct process *cur, int fd, void *buf, int size, struct trap_frame *tf) {
   cur = process_group(cur); /* P1 (D7): the fd table is group state */
-  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) {
+    fd_ev_dump(cur, fd, "nofd");
+    return -1;
+  }
 
   int g_fd = cur->open_fds[fd];
-  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) {
+    /* L57: the slot was empty/invalid at read time -- this IS a closed fd. */
+    fd_ev_dump(cur, fd, "slot-empty");
+    return -1;
+  }
 
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
+  if (f->type == FILE_TYPE_EMPTY) {
+    fd_ev_dump(cur, fd, "type-empty");
+    return -1;
+  }
   if (f->type == FILE_TYPE_DEVNULL) {
     return 0; /* /dev/null reads always yield EOF (0 bytes) */
   } else if (f->type == FILE_TYPE_CONSOLE) {
@@ -2159,13 +2434,25 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     if (f->nfs.is_dir) return -1;               /* use read_dir for dirs */
     if (size <= 0) return 0;
     const struct nfs_mount *m = nfs_mount_at(f->nfs.mount_idx);
-    if (!m) return -1;
+    if (!m) {
+      fd_ev_dump(cur, fd, "nfs-nomount");
+      return -EIO;   /* L57: an I/O failure is not EBADF */
+    }
     uint64_t left = f->nfs.size > f->nfs.cursor
                         ? f->nfs.size - f->nfs.cursor : 0;
     uint32_t want = (uint32_t)size;
     if ((uint64_t)want > left) want = (uint32_t)left;
     if (want == 0) return 0;
     int got = nfs_read_file(m, &f->nfs.fh, f->nfs.cursor, buf, want);
+    if (got < 0) {
+      /* L57: the fd is ALIVE here (we just resolved it, and its type is NFS);
+         the failure is the transport's.  Reporting -1 made trap.c turn it
+         into EBADF, which Mono renders as "Invalid handle to path" -- a
+         transport failure wearing a descriptor fault's clothes. */
+      fd_ev_note(FDEV_FAIL, cur, fd, g_fd, f->path);
+      fd_ev_dump(cur, fd, "nfs-read");
+      return -EIO;
+    }
     /* M6/L31: the ScriptingAssemblies.json read, one row per call. */
     {
       const char *t = "ScriptingAssemblies.json";
@@ -2198,6 +2485,7 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   } else if (f->type == FILE_TYPE_SOCKET) {
     return net_socket_recv(f->socket.pcb, buf, size);
   }
+  fd_ev_dump(cur, fd, "type-unsupported");
   return -1;
 }
 
