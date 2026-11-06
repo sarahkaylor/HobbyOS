@@ -123,6 +123,18 @@ static int map_local(const char *name, char *out, size_t cap) {
   return 0;
 }
 
+/* M6/L61: the handle Unity dlopen()ed for libmonobdwgc.  The runtime is
+ * loaded RTLD_LOCAL (Unity's own load), so dlsym(RTLD_DEFAULT, ...) cannot see
+ * `mono_use_interpreter` -- measured: "undefined symbol".  The interposer is
+ * the only place that sees the handle, so it keeps it. */
+static void *rw_mono_handle;
+
+static void rw_note_mono_handle(void *h, const char *path) {
+  if (!h || !path) return;
+  const char *b = base_of(path);
+  if (strstr(b, "libmonobdwgc")) rw_mono_handle = h;
+}
+
 void *dlopen(const char *file, int mode) {
   char local[512];
   if (!next_dlopen) {
@@ -136,6 +148,7 @@ void *dlopen(const char *file, int mode) {
     fprintf(stderr, "[RWMAIN] dlopen remap %s -> %s\n", file, local);
     void *r = next_dlopen(local, mode);
     if (r) rw_mods_collect();
+    rw_note_mono_handle(r, local);
     if (!r) {
       /* Unity only says "Unable to load mono library"; the loader's reason
          (a missing NEEDED, an undefined symbol, a version) is the evidence. */
@@ -153,6 +166,7 @@ void *dlopen(const char *file, int mode) {
   int trace = getenv("RW_TRACE_DLOPEN") != 0;
   void *r = next_dlopen(file, mode);
   if (r) rw_mods_collect();
+  rw_note_mono_handle(r, file);
   if (r) rw_tp_maybe_start(r, file);
   if (!r) {
     const char *e = dlerror();
@@ -3428,6 +3442,33 @@ static void rw_tp_maybe_start(void *handle, const char *name) {
   }
 }
 
+/* ---- M6/L61: interpreter control evidence -------------------------------
+ * The launcher stages /INTERP -> MONO_ENV_OPTIONS=--interp, but Mono reads
+ * that inside mono_jit_init, i.e. after this process has started and long
+ * after any startup print.  The runtime exports `mono_use_interpreter` (int),
+ * so polling it is the difference between "we asked for the interpreter" and
+ * "the interpreter is what ran".  If the flag never becomes 1, the control is
+ * void and the run must be discarded, not interpreted.
+ */
+static void *rw_interp_watch(void *arg) {
+  (void)arg;
+  int last = -1;
+  const char *asked = getenv("MONO_ENV_OPTIONS");
+  for (int i = 0; i < 1200; i++) {
+    int *p = rw_mono_handle ? (int *)dlsym(rw_mono_handle, "mono_use_interpreter") : 0;
+    if (p) {
+      int v = __atomic_load_n(p, __ATOMIC_RELAXED);
+      if (v != last) {
+        last = v;
+        fprintf(stderr, "[RWMAIN] mono_use_interpreter=%d asked=%s\n", v,
+                asked && asked[0] ? asked : "(none)");
+      }
+    }
+    sleep(1);
+  }
+  return 0;
+}
+
 int main(int argc, char **argv) {
   fprintf(stderr, "[RWMAIN] AD-9 PlayerMain launcher start argc=%d\n", argc);
   /* M6/L36: make the managed runtime's stdout UNBUFFERED.  fd 1 is Player.log
@@ -3441,6 +3482,12 @@ int main(int argc, char **argv) {
   rw_sig_install();
   if (!next_dlopen) next_dlopen = (void *(*)(const char *, int))dlsym(RTLD_NEXT, "dlopen");
   preload_gl_deps();
+  {
+    int (*pc)(void *, void *, void *, void *) =
+        (int (*)(void *, void *, void *, void *))dlsym(RTLD_DEFAULT, "pthread_create");
+    void *th = 0;
+    if (pc) pc(&th, 0, (void *)rw_interp_watch, 0);
+  }
 #ifndef RW_NO_SHADOW_PTHREAD
   mtx_main_tid = (int)gettid();
   fprintf(stderr, "[MTX] enabled=%d main_tid=%d\n", mtx_on(), mtx_main_tid);
@@ -3479,6 +3526,52 @@ int main(int argc, char **argv) {
   }
 
   fprintf(stderr, "[RWMAIN] dlopen(%s, RTLD_NOW|RTLD_GLOBAL)\n", chosen);
+  /* M6/L61: interpreter control.  MONO_ENV_OPTIONS is not parsed by Unity's
+     embedded runtime (measured: mono_use_interpreter stayed 0 while the
+     variable was set), so the launcher loads libmonobdwgc itself and parses
+     --interp before UnityPlayer initialises Mono.  mono_jit_parse_options()
+     is the runtime's own option parser; mono_use_interpreter is read back
+     immediately, so a run that asked for the interpreter and got the JIT says
+     so in one row instead of being mistaken for a control. */
+  {
+    const char *mi = getenv("RW_MONO_INTERP");
+    if (mi && mi[0] == '1') {
+      void *mh = dlopen("/RWDSO/libmonobdwgc-2.0.so", RTLD_NOW | RTLD_GLOBAL);
+      if (!mh) {
+        fprintf(stderr, "[RWMAIN] INTERP: preload FAILED: %s\n",
+                dlerror() ? dlerror() : "(no dlerror)");
+      } else {
+        void (*po)(int, char **) =
+            (void (*)(int, char **))dlsym(mh, "mono_jit_parse_options");
+        int *flag = (int *)dlsym(mh, "mono_use_interpreter");
+        if (po) {
+          char *av[2];
+          av[0] = (char *)"mono";
+          av[1] = (char *)"--interp";
+          po(2, av);
+        }
+        /* mono_jit_parse_options() is the embedder's parser and it does NOT
+           accept --interp (measured: the flag stayed 0 and its own "Available
+           options" list has no interp entry); the standalone driver's mono_main
+           sets the global directly.  Do the same, before mono_jit_init, so
+           mono_init runs mono_ee_interp_init and every method is interpreted. */
+        if (flag && getenv("RW_MONO_INTERP") && getenv("RW_MONO_INTERP")[0] == '1') {
+          /* Flip the runtime's own global before mono_jit_init, so mono_init
+             runs mono_ee_interp_init and managed methods are interpreted.
+             Measured: with the flag alone the interpreter starts and then
+             faults in interp frame setup (libmonobdwgc+0x116e57, a class
+             pointer read out of a frame the native->interp transition had not
+             built); adding the driver's second global (0x5b9cb8) instead
+             overflows the unmanaged stack.  The switch is kept because it is
+             the only way to run this runtime without the amd64 JIT, but it is
+             NOT yet a path to the menu -- see docs §48. */
+          *flag = 1;
+        }
+        fprintf(stderr, "[RWMAIN] INTERP: handle=%p parse=%p mono_use_interpreter=%d\n",
+                mh, (void *)po, flag ? *flag : -1);
+      }
+    }
+  }
   void *h = dlopen(chosen, RTLD_NOW | RTLD_GLOBAL);
   if (!h) {
     fprintf(stderr, "[RWMAIN] FAIL dlopen: %s\n", dlerror());
