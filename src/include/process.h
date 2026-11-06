@@ -535,6 +535,11 @@ int process_create_v2(void);
  * shootdown send path scans it (design section 7.2). */
 int current_pid_of_cpu(uint32_t cpu);
 
+/* L52: poke one idle CPU with the reschedule IPI (0x81) after a wake has
+ * flipped a thread READY, so it is not left waiting for the 100 Hz tick.
+ * Safe to call without proc_lock; no-op when every other CPU is busy. */
+void sched_wake_idle_cpu(void);
+
 // Number of free physical blocks (advisory; see program_loader.c's
 // boot-wave headroom reserve).
 int phys_block_free_count(void);

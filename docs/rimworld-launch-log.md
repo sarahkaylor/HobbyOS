@@ -6437,3 +6437,131 @@ stops, and any ladder row taken with it must say so.
 `m4_gl_probe`). `RimWorldLinux.ad9` was rebuilt and the new rows verified in the
 binary (`strings ... | grep -E 'TPWH|nwl='`).
 
+
+## 39. 2026-11-05 — M6/L52: the monitor was never missing; a realtime-deadline clamp killed every pool park, and every wake waited for the tick
+
+The brief for this lane was "the pool never grows past 8 because its
+hill-climbing monitor thread is never created". **That premise does not
+survive Mono's own trace.** The monitor is created on the *first* worker
+request (`monitor_ensure_running()` -> `mono_thread_create_internal(...,
+MONO_THREAD_CREATE_FLAGS_THREADPOOL | MONO_THREAD_CREATE_FLAGS_SMALL_STACK)`),
+and `monitor_thread()` prints `monitor thread, started` from inside the new
+thread -- so a later `created`/`unparked` row is *growth*, not existence. The
+row is present in every archived run that had `/TPTRACE` (L44, L45) and in all
+three L52 runs:
+
+```text
+Mono: [0x1142fde700] monitor thread, started
+Mono: [0x1142fde700] monitor thread, finished      <- 60 s after the last item
+```
+
+`monitor_thread, created` is zero in the game because the 8-worker ceiling is
+never hit there (`try create worker, failed: maximum ... reached` = 0 in the L52
+runs), not because the monitor cannot grow. Driven past the minimum, the
+monitor does grow: `min9.cs` with eight workers held blocked logs
+`monitor thread, created` and `try create worker, created ... count = 9, 10` in
+the guest. So "creation attempted -> rc" is answered by `started`, and the
+growth path by `created`.
+
+### 39.1 The real defect: every absolute CLOCK_REALTIME futex deadline expired at once
+
+`mono_os_sem_timedwait()` builds `gettimeofday() + timeout_ms` and hands the
+absolute timespec to glibc's `sem_timedwait()`, which passes it to
+`futex(FUTEX_WAIT_BITSET | FUTEX_CLOCK_REALTIME)`. `l_timespec_to_ms()` clamped
+any `tv_sec > 1e8` to `1e8 ms` **before** the absolute subtraction. Every
+realtime deadline is ~1.79e9 s, i.e. always over that bound, so a 5..60 s pool
+park became `1e8 ms - 1.79e12 ms` -> negative -> 0, and the futex returned
+`-ETIMEDOUT` without ever parking. Measured in the guest, `min10.cs`:
+
+| row | before (L52, pre-fix) | after |
+|---|---|---|
+| `worker timed out` | 79 of 79 parks | **0** |
+| `worker unparking, timeout? no` | 0 | **186** |
+| `try create worker, created` | 80 (one per item) | 10 (startup only) |
+| `[FTMO] ... to=` | never printed (to was 0) | `to=45886 now=1793928074574` |
+
+The clamp now bounds at 1e10 s (so realtime deadlines survive) and the 27.8 h
+cap is applied *after* the absolute subtraction, where it belongs. The 5 s
+semaphore case was added to `linux_probe_clock.c` (`sem_mono_5s_waits_5000ms`
+PASS), and that probe also measures a two-thread semaphore ping-pong:
+**365 us per wake+switch** (200 rounds, 73 ms).
+
+### 39.2 A wake marked the thread READY but poked no CPU
+
+`l_futex_wake_locked()` only set `p->state = PROC_STATE_READY`. Every other CPU
+was halted in `safe_wfi()` and returned through `schedule()` only on the 100 Hz
+timer broadcast, so a queued work item started 10-30 ms later (host: 0 ms).
+`min10.cs` B (`QueueUserWorkItem` + busy-spin, no blocking wait at all) showed
+it was scheduling, not waiting: med 30 ms, max 898 ms.
+
+`sched_wake_idle_cpu()` (src/kernel/process.c) now sends one directed 0x81
+reschedule IPI to an idle CPU after a futex wake, a `process_wakeup`, a
+`process_wake_all`, `process_create` and `process_clone`. It pokes at most one
+CPU per wake and only when idle, so a busy machine is unchanged. Effect on the
+12,000-wait monitor storm: **16,054 ms -> 983 ms**; on the nested PLINQ oracle
+(`min7.cs`): **527 ms/query -> 132 ms/query** (host 1-2 ms).
+
+The residual ~12 ms per task round trip is *not* the futex wake (365 us
+measured); it lives in Mono's managed dispatch and is not yet named. It is the
+next lever, not a regression: the two fixes above took the guest from
+"workers cannot park at all" to "workers park and unpark in 0.2-1 ms".
+
+### 39.3 Ladder, 3 runs on this tree
+
+`RW_TPTRACE=1 bash tools/rw/run-rimworld-desktop.sh --run-timeout 240`, three
+consecutive runs, no `/TPCPU`, no `/RW_FUTXW`:
+
+| run | NFS bytes | `[XSW]` | Player.log | pool |
+|---|---|---|---|---|
+| r1 | 23,643,577 (0x168CDB9) | 0 | `Loaded All Assemblies, in 11.990 s`, `RimWorld 1.6.4871 rev600` | started 1, created 0, 14 workers, 58 unparks, 15 retire-timeouts |
+| r2 | 23,643,577 | 0 | `Loaded All Assemblies, in 11.001 s` | same shape |
+| r3 | 23,643,577 | 0 | `Loaded All Assemblies, in 11.025 s`, `RimWorld 1.6.4871 rev600` | same shape |
+
+The stop is deterministic and 3.7 MB *later* than §38's 19.9 MB, but it is the
+same barrier: the last `[NFSIO]` row is frozen for the final 60 s, `[XSW]` is
+0, and the screen is the static loading art (50.4% non-black, 75,883 colours,
+identical from shot 05 to `99_final` -- `[XSW]=0` is the honest row). No main
+menu, so no fps number exists.
+
+### 39.4 What the quiescent dump says now
+
+All three runs end with `[ALIVE-SET] no READY work` and:
+
+* every live Unity thread `st=8`, `pc=0x108011895d` (`UnityPlayer+0x11895d`) --
+  the job-system wait -- including `Loading.Preload`, `Loading.AsyncRe`,
+  `BatchDeleteObje`, `UnityGfxDeviceW` and 20 `Background Job.` threads;
+* the main thread `pid=4`, `st=8`, `pc=0x1083503376` = `libpthread+0xf376`
+  (`pthread_cond_wait`) -> `mono_wait_uninterrupted` on a WaitHandle;
+* the pool is **empty but healthy**: 14 `Thread Pool Wor` slots are `st=9`
+  (THREAD_DONE, retired after their 5..60 s park), zero `request worker,
+  failed`, and `[IDLESTUCK] claims: c0..c7 = -1/...` (every CPU idle).
+
+So the pool is no longer the suspect: it grew to 14, parked and unparked 58
+times, and retired normally. The remaining wait is one Unity job that is never
+handed work -- the main thread's `taskDoneEvent` waiter and the Unity job
+threads are all parked, and nothing in the process is READY. This is the
+"unfulfilled wait" of §38.4 with the pool exonerated by its own rows; naming
+the Unity-side owner of `0x108011895d` is the next instrument (that PC is not
+in `UnityPlayer.so`'s file-backed `.text` at the same offset, so the module
+base in the dump needs re-deriving first).
+
+### 39.5 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh` -> **414 run, 0 failed**; gate ladder
+`redzone`, `m2_mono`, `m2_tp`, `m2_threads`, `m12`, `m3_window_probe`,
+`m4_gl_probe` re-run on this tree (see obj/l52-gates.log for the raw rows).
+
+The exact rows, r3: `[IDLESTUCK] slot=4 pid=4 st=8 wake=0
+futex=0x105b762d28 rip=0x1083503376 /NFS/RimWorldLinux` (an infinite
+`pthread_cond_wait` on a heap MonoW32Handle+0x38 -- the managed WaitHandle
+path of §34.2), while the Unity job threads wait with
+`wake=0xFFFFFFFF+now` (49 days: `MONO_INFINITE_WAIT` passed as a relative
+timeout). Nothing in the process holds a runnable state, so this is an
+*unfulfilled* wait, not a dropped wake: the completer is either gone or was
+never queued. The next test is on the managed side, not the kernel: Mono's
+`ThreadPoolWorkQueue` keeps a work-stealing queue per worker thread, and a
+worker that exits after its 5..60 s park can orphan the continuations in that
+local queue -- no global request is made for them, which is what an empty pool
+with `request worker, failed = 0` looks like. Instrument
+`ThreadPoolWorkQueueThreadLocals` teardown (does it transfer the local queue to
+the global one?) before touching the scheduler again.

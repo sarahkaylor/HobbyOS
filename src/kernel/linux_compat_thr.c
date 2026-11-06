@@ -1440,12 +1440,36 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
         ms -= now;
         if (ms < 0)
           ms = 0;
+        if (ms > 100000000)
+          ms = 100000000; /* 27.8 h: a relative cap, after the subtraction */
       }
       timeout_ms = ms;
+      /* L52: a 5..60 s pool park that expires at once is a timeout-conversion
+         bug; print the computed value once so the arithmetic is in the log. */
+      if (timeout_ms > 1000) {
+        static int ftmo_rows;
+        if (ftmo_rows < 12) {
+          ftmo_rows++;
+          struct kline ktm;
+          kl_init(&ktm);
+          kl_s(&ktm, "[FTMO] pid=");
+          kl_i(&ktm, p->pid);
+          kl_s(&ktm, " cmd=");
+          kl_i(&ktm, cmd);
+          kl_s(&ktm, " abs=");
+          kl_i(&ktm, absolute);
+          kl_s(&ktm, " rt=");
+          kl_i(&ktm, realtime);
+          kl_s(&ktm, " to=");
+          kl_i(&ktm, (long)timeout_ms);
+          kl_s(&ktm, " now=");
+          kl_i(&ktm, (long)(realtime ? (int64_t)hb_clock_realtime_ms()
+                                    : (int64_t)timer_get_ms()));
+          kl_c(&ktm, '\n');
+          kl_emit(&ktm);
+        }
+      }
     }
-    /* Realtime waits are accepted as monotonic: the difference between the
-       two clocks here is the boot RTC offset, and a timeout that fires a
-       few seconds early is not a hang.  Recorded rather than refused. */
     (void)realtime;
 
     uint32_t word = 0;
@@ -1621,6 +1645,9 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
 #endif
     int woke = l_futex_wake_locked(as, uaddr, val, bitset, &ev);
     spinlock_release_irqrestore(&proc_lock, flags);
+    /* L52: do not leave the woken thread waiting for the next 100 Hz tick. */
+    if (woke > 0)
+      sched_wake_idle_cpu();
 #ifdef RW_FUTXW
     futxw_wake(p, uaddr, val, fx_parked, fx_pre, futxw_word(p, uaddr), woke,
                &ev, tf->elr);
@@ -1685,6 +1712,8 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     int moved = l_futex_requeue_locked(as, uaddr, uaddr2, val2);
     ev.res = moved;
     spinlock_release_irqrestore(&proc_lock, flags);
+    if (woke + moved > 0)
+      sched_wake_idle_cpu();
     futex_trace_note(&ev);
     tf->regs[0] = (uint64_t)(int64_t)(woke + moved);
     return 1;
