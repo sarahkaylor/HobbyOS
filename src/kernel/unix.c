@@ -658,7 +658,7 @@ static int usock_msg_recv(struct usock *u, int end, const struct k_iovec *io,
         fs_close_global(gdeliver[f]); /* capacity pre-checked; safety net */
         continue;
       }
-      if (cmsg_cloexec) grp->fd_cloexec |= (1ull << ufd);
+      if (cmsg_cloexec) fd_cloexec_set(grp->fd_cloexec, ufd);
       gfds_out[installed++] = ufd;
     }
     *nfds_out = installed;

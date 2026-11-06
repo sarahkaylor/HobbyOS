@@ -1146,7 +1146,7 @@ static int process_create_internal_ver(int ver) {
   p->teardown_done = 0;
   p->thread_ret = 0;
   p->as = 0;
-  p->fd_cloexec = 0;
+  fd_cloexec_reset(p->fd_cloexec);
   p->echild_logged = 0; /* fresh PCB: the ECHILD diagnostic speaks once */
   /* P5 (D7/D3.1): fresh signal/env state — a recycled slot must never
      leak the previous occupant's dispositions, pending bits or env. */
@@ -2843,12 +2843,19 @@ void process_exec_apply(struct process *grp, const char *env, int envc) {
 
   /* D3.2: the FD_CLOEXEC sweep -- close every fd whose mask bit is set,
      keeping the numbers of all others.  No proc_lock held (file_close
-     takes the file locks itself). */
-  if (grp->fd_cloexec) {
-    for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
-      if ((grp->fd_cloexec >> fd) & 1u) {
-        file_close(grp, fd); /* no-op -1 when the slot was already empty */
-        grp->fd_cloexec &= ~(1ull << fd);
+     takes the file locks itself).  L55: the mask is a word array, so scan
+     words and test bits through the helper (a raw `>> fd` is undefined for
+     fd >= 64 and silently lost every CLOEXEC bit past 63). */
+  {
+    int any = 0;
+    for (int w = 0; w < FD_CLOEXEC_WORDS; w++)
+      if (grp->fd_cloexec[w]) any = 1;
+    if (any) {
+      for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
+        if (fd_cloexec_test(grp->fd_cloexec, fd)) {
+          file_close(grp, fd); /* no-op -1 when the slot was already empty */
+          fd_cloexec_clear(grp->fd_cloexec, fd);
+        }
       }
     }
   }

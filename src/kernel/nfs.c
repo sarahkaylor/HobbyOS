@@ -279,42 +279,56 @@ int nfs_route(const char *abs_path, int *idx, const char **rel) {
 /* RPC transport                                                        */
 /* ==================================================================== */
 
-static uint8_t call_buf[2048];
-static uint8_t reply_raw[2048];
+/* L55: these two buffers used to be file-scope statics shared by every caller.
+ * RimWorld's four `DirectXmlLoader` threads (and page-in faults from several
+ * more) issue NFS RPCs concurrently, so one thread's request bytes were
+ * overwritten between `rpc_build_call` and `net_socket_send`, and one thread's
+ * reply datagram was overwritten before another parsed it.  The measured shape
+ * was 107 of 1,209 XMLs failing to open, each one a full RPC timeout
+ * (`[NFS] rpc: no reply from server` x108) that `nfs_lookup` can only report as
+ * ENOENT — i.e. `IOException: Could not open file` for a file that exists on
+ * the export.  Every RPC now uses its own buffers: the request and the reply
+ * datagram live on the caller's kernel stack (64 KiB per CPU), and the reply
+ * BODY is copied into a buffer the caller owns, so its lifetime is the
+ * caller's, not "until the next RPC anywhere in the system". */
+#define NFS_RPC_BUF 2048
 static uint32_t next_xid = 0x484F424F;      /* "HOBO" + bumps per call */
 
-/* Send one already-built RPC on `pcb` and read its reply.  On success the
- * reply body is *body/*body_len, valid until the next call (static buffer).
- * The caller owns the socket (see rpc_call for the create/close variant and
- * the READ path for the cached one). */
+/* Send one already-built RPC on `pcb` and read its reply into `rbuf`.  On
+ * success the reply body is a pointer INTO rbuf, valid for the caller's own
+ * frame.  The caller owns the socket (see rpc_call for the create/close
+ * variant and the READ path for the cached one). */
 static int rpc_xfer(struct socket_pcb *pcb, uint32_t xid, const uint8_t *call,
-                    int n, const uint8_t **body, int *body_len) {
+                    int n, uint8_t *rbuf, int rcap,
+                    const uint8_t **body, int *body_len) {
   if (net_socket_send(pcb, call, (uint32_t)n) < 0) return -1;
   for (;;) {
-    int got = net_socket_recv_timeout(pcb, reply_raw, sizeof reply_raw,
-                                      NFS_RPC_TIMEOUT_MS);
+    int got = net_socket_recv_timeout(pcb, rbuf, rcap, NFS_RPC_TIMEOUT_MS);
     if (got <= 0) return -1;
     int bo = 0, bl = 0;
-    int pr = rpc_parse_reply(reply_raw, got, xid, &bo, &bl);
+    int pr = rpc_parse_reply(rbuf, got, xid, &bo, &bl);
     if (pr == RPC_E_WRONG_XID) continue;    /* stale datagram */
     if (pr != RPC_OK) {
       if (pr == RPC_E_DENIED)
         uart_puts("[NFS] rpc: server denied the call\n");
       return -1;
     }
-    *body = reply_raw + bo;
+    *body = rbuf + bo;
     *body_len = bl;
     return 0;
   }
 }
 
-/* Send one RPC and read its reply.  On success the procedure's reply body
- * is *body/*body_len, valid until the next rpc_call (static buffer). */
+/* Send one RPC and copy its reply body into body_buf (caller-owned).  Returns
+ * 0 with *body == body_buf and *body_len = the copied length. */
 static int rpc_call(uint32_t ip, uint16_t port, uint32_t prog, uint32_t vers,
                     uint32_t proc, const uint8_t *args, int args_len,
+                    uint8_t *body_buf, int body_cap,
                     const uint8_t **body, int *body_len) {
+  uint8_t cbuf[NFS_RPC_BUF];
+  uint8_t rbuf[NFS_RPC_BUF];
   uint32_t xid = next_xid++;
-  int n = rpc_build_call(call_buf, sizeof call_buf, xid, prog, vers, proc,
+  int n = rpc_build_call(cbuf, sizeof cbuf, xid, prog, vers, proc,
                          args, args_len);
   if (n <= 0) {
     uart_puts("[NFS] rpc: request build failed\n");
@@ -330,12 +344,20 @@ static int rpc_call(uint32_t ip, uint16_t port, uint32_t prog, uint32_t vers,
       return -1;
     }
     uint64_t t1 = timer_get_us();
-    int rc = rpc_xfer(pcb, xid, call_buf, n, body, body_len);
+    int rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, sizeof rbuf, body, body_len);
     uint64_t t3 = timer_get_us();
     net_socket_close(pcb);
     if (rc == 0) {
       if (rpc_rtt_want)
         nfs_pf_record(rpc_rtt_want, t1 - t0, 0, t3 - t1);
+      int bl = *body_len;
+      const uint8_t *src = *body;
+      if (bl < 0 || bl > body_cap) {
+        uart_puts("[NFS] rpc: reply body too large\n");
+        return -1;
+      }
+      for (int i = 0; i < bl; i++) body_buf[i] = src[i];
+      *body = body_buf;
       return 0;
     }
   }
@@ -354,10 +376,11 @@ static int portmap_getport(uint32_t ip, uint32_t prog, uint32_t vers,
   xdr_w_u32(&w, 0);
   if (w.err) return -1;
 
+  uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
   if (rpc_call(ip, 111, PORTMAP_PROG, PORTMAP_VERS, PORTMAP_PROC_GETPORT,
-               args, w.len, &body, &blen) != 0)
+               args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   uint32_t port = 0;
   if (nfs_parse_getport_reply(body, blen, &port) != 0) return -1;
@@ -477,10 +500,11 @@ int nfs_mount_add(const char *source, const char *point) {
   xdr_w_string(&w, export);
   if (w.err) return -1;
 
+  uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
   if (rpc_call(ip, mount_port, MOUNT_PROG, MOUNT_VERS, MOUNT_PROC_MNT,
-               args, w.len, &body, &blen) != 0) {
+               args, w.len, rb, sizeof rb, &body, &blen) != 0) {
     uart_puts("[NFS] mount: MNT call failed\n");
     return -1;
   }
@@ -536,11 +560,12 @@ int nfs_mount_remove(const char *point) {
     if (mounts[i].source[k] == ':') export = mounts[i].source + k + 1;
     xdr_w_string(&w, export);
     if (!w.err) {
+      uint8_t rb[NFS_RPC_BUF];
       const uint8_t *body = 0;
       int blen = 0;
       (void)rpc_call(mounts[i].server_ip, mounts[i].mount_port,
                      MOUNT_PROG, MOUNT_VERS, MOUNT_PROC_UMNT,
-                     args, w.len, &body, &blen);
+                     args, w.len, rb, sizeof rb, &body, &blen);
     }
 
     mounts[i].in_use = 0;
@@ -575,10 +600,11 @@ static int getattr_fh(const struct nfs_mount *m, const uint8_t *fh,
   xdr_w_fh(&w, fh, fh_len);
   if (w.err) return -1;
 
+  uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
   if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_GETATTR, args, w.len, &body, &blen) != 0)
+               NFS_PROC_GETATTR, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_getattr_reply(body, blen, attr);
 }
@@ -593,10 +619,11 @@ static int lookup_one(const struct nfs_mount *m, const uint8_t *dir_fh,
   xdr_w_string(&w, name);
   if (w.err) return -1;
 
+  uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
   if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_LOOKUP, args, w.len, &body, &blen) != 0)
+               NFS_PROC_LOOKUP, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_lookup_reply(body, blen, out, attr, attr_ok);
 }
@@ -712,6 +739,8 @@ static void rd_sock_put(struct nfs_mount *m, struct socket_pcb *p, int temp,
  * transferred (0 at EOF), or -1 before anything was transferred. */
 static int nfs_read_serial(const struct nfs_mount *m, const struct nfs_fh *fh,
                            uint32_t offset, void *buf, uint32_t len) {
+  uint8_t cbuf[NFS_RPC_BUF];
+  uint8_t rbuf[NFS_RPC_BUF];
   uint32_t rs = m->read_size ? m->read_size : NFS_READ_RSIZE;
   if (rs > NFS_READ_RSIZE) rs = NFS_READ_RSIZE;
   struct nfs_mount *mw = (struct nfs_mount *)m;
@@ -732,14 +761,14 @@ static int nfs_read_serial(const struct nfs_mount *m, const struct nfs_fh *fh,
     if (w.err) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return done ? (int)done : -1; }
 
     uint32_t xid = next_xid++;
-    int n = rpc_build_call(call_buf, sizeof call_buf, xid, NFS_PROG, NFS_VERS,
+    int n = rpc_build_call(cbuf, sizeof cbuf, xid, NFS_PROG, NFS_VERS,
                            NFS_PROC_READ, args, w.len);
     if (n <= 0) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return done ? (int)done : -1; }
 
     uint64_t t0 = timer_get_us();
     const uint8_t *body = 0;
     int blen = 0;
-    int rc = pcb ? rpc_xfer(pcb, xid, call_buf, n, &body, &blen) : -1;
+    int rc = pcb ? rpc_xfer(pcb, xid, cbuf, n, rbuf, sizeof rbuf, &body, &blen) : -1;
     uint64_t wait = timer_get_us() - t0;
     if (rc != 0) {
       /* A timeout may leave a late reply in this socket's queue; a stale
@@ -802,10 +831,11 @@ static int nfs_read_serial_legacy(const struct nfs_mount *m,
     if (w.err) return done ? (int)done : -1;
 
     const uint8_t *body = 0;
+    uint8_t rb[NFS_RPC_BUF];
     int blen = 0;
     rpc_rtt_want = want;
     int rc = rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-                      NFS_PROC_READ, args, w.len, &body, &blen);
+                      NFS_PROC_READ, args, w.len, rb, sizeof rb, &body, &blen);
     rpc_rtt_want = 0;
     if (rc != 0) return done ? (int)done : -1;
 
@@ -852,11 +882,12 @@ static int nfs_rd_issue(const struct nfs_mount *m, struct socket_pcb *pcb,
   xdr_w_u32(&w, want);
   if (w.err) return -1;
 
+  uint8_t cbuf[NFS_RPC_BUF];
   uint32_t xid = next_xid++;
-  int n = rpc_build_call(call_buf, sizeof call_buf, xid, NFS_PROG, NFS_VERS,
+  int n = rpc_build_call(cbuf, sizeof cbuf, xid, NFS_PROG, NFS_VERS,
                          NFS_PROC_READ, args, w.len);
   if (n <= 0) return -1;
-  if (net_socket_send(pcb, call_buf, (uint32_t)n) < 0) return -1;
+  if (net_socket_send(pcb, cbuf, (uint32_t)n) < 0) return -1;
   s->xid = xid;
   s->off = off;
   s->want = want;
@@ -882,6 +913,7 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
                               const struct nfs_fh *fh, uint32_t offset,
                               void *buf, uint32_t len, uint32_t rs) {
   struct nfs_mount *mw = (struct nfs_mount *)m;
+  uint8_t rbuf[NFS_RPC_BUF];
   int temp = 0;
   struct socket_pcb *pcb = rd_sock_get(mw, &temp);
   if (!pcb) return nfs_read_serial(m, fh, offset, buf, len);
@@ -920,7 +952,7 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
 
     if (inflight == 0) break;
 
-    int got = net_socket_recv_timeout(pcb, reply_raw, sizeof reply_raw,
+    int got = net_socket_recv_timeout(pcb, rbuf, sizeof rbuf,
                                       NFS_RPC_TIMEOUT_MS);
     if (got <= 0) {                     /* timeout / socket closed */
       /* L41: a stall row, not a guess.  If the load freezes at a byte count,
@@ -969,19 +1001,19 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
       if (contig == offset) { rc = -1; goto out; }
       break;                            /* finish serially from contig */
     }
-    uint32_t rxid = rd_be32(reply_raw);
+    uint32_t rxid = rd_be32(rbuf);
     int idx = -1;
     for (int i = 0; i < NFS_READ_DEPTH; i++)
       if (slot[i].state == 1 && slot[i].xid == rxid) { idx = i; break; }
     if (idx < 0) continue;              /* stale or duplicate datagram */
 
     int bo = 0, bl = 0;
-    int pr = rpc_parse_reply(reply_raw, got, rxid, &bo, &bl);
+    int pr = rpc_parse_reply(rbuf, got, rxid, &bo, &bl);
     if (pr != RPC_OK) continue;
 
     uint32_t count = 0;
     int reply_eof = 0;
-    if (nfs_parse_read_reply(reply_raw + bo, bl,
+    if (nfs_parse_read_reply(rbuf + bo, bl,
                              (uint8_t *)buf + (slot[idx].off - offset),
                              (int)slot[idx].want, &count, &reply_eof) != 0) {
       bad++;
@@ -1132,10 +1164,11 @@ int nfs_statfs(const struct nfs_mount *m, const char *rel,
   xdr_w_fh(&w, fh.data, fh.len);
   if (w.err) return -1;
 
+  uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
   if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_FSSTAT, args, w.len, &body, &blen) != 0)
+               NFS_PROC_FSSTAT, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_fsstat_reply(body, blen, total, avail);
 }
@@ -1198,10 +1231,11 @@ static int dir_cache_fill(const struct nfs_mount *m, int midx, const char *rel) 
     xdr_w_u32(&w, NFS_READDIR_MAXC);
     if (w.err) return -1;
 
+    uint8_t rb[NFS_RPC_BUF];
     const uint8_t *body = 0;
     int blen = 0;
     if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-                 NFS_PROC_READDIRPLUS, args, w.len, &body, &blen) != 0)
+                 NFS_PROC_READDIRPLUS, args, w.len, rb, sizeof rb, &body, &blen) != 0)
       return -1;
 
     struct xdr_r r;

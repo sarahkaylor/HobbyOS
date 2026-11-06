@@ -786,6 +786,34 @@ static int l_fd_openat(struct process *p, struct trap_frame *tf) {
         (ks.st_mode & L_S_IFMT) != L_S_IFDIR)
       return l_ret(tf, -ENOTDIR);
   }
+  /* L55: name every failed open, with the errno and how full the process's fd
+     table was.  `Could not open file` inside a def load is either EMFILE (the
+     old MAX_OPEN_FDS 64 / MAX_GLOBAL_FILES 128) or a lookup error, and the two
+     have opposite fixes; a bounded row settles it in one run. */
+  if (fd < 0) {
+    static int ofail_rows;
+    /* L55: keep the boot's benign glibc probe ENOENTs (/LIB64/tls/...,
+     * /proc/stat) out of the record, but never hide a failed /NFS open or a
+     * non-ENOENT error — those are the def-load failures this row exists for. */
+    int is_nfs = abs[0] == '/' && abs[1] == 'N' && abs[2] == 'F' &&
+                 abs[3] == 'S' && abs[4] == '/';
+    if ((fd != -ENOENT || is_nfs) && ofail_rows < 256) {
+      ofail_rows++;
+      struct process *gp = process_group(p);
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LOPENF] err=");
+      kl_i(&kl, (long)fd);
+      kl_s(&kl, " nfd=");
+      kl_i(&kl, gp ? (long)gp->num_open_fds : -1L);
+      kl_s(&kl, " flags=");
+      kl_i(&kl, (long)flags);
+      kl_s(&kl, " ");
+      kl_s(&kl, abs);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   if (fd < 0) return l_ret(tf, fd);
   if (flags & L_O_CLOEXEC)
     (void)file_fcntl(p, fd, K_F_SETFD, K_FD_CLOEXEC);

@@ -154,13 +154,37 @@ uint32_t smp_init_count(void);
 #define GICC_BASE 0x08010000 // CPU Interface base address (v2)
 #define GICR_BASE 0x080A0000 // Redistributor base address (v3)
 
-#define MAX_OPEN_FDS 64 // IceWM M1: X server + clients (was 32); fd_cloexec is 64-bit
-/* L12: measured RimWorld fd high-water is 33 at the menu
- * (docs/rimworld-evidence.md §3.4), so 64 already clears it with room for
- * the /proc/self/fd re-opens.  fd_cloexec is ONE uint64_t, so this must
- * never grow past 64 without widening that field too — the assert makes a
- * silent shift-out-of-range a build error instead of a lost CLOEXEC bit. */
-_Static_assert(MAX_OPEN_FDS <= 64, "fd_cloexec is a single uint64_t");
+/* L55: 256, not 64.  RimWorld's def loader opens ~1,209 XML files through
+ * parallel `DirectXmlLoader` threads while the main thread holds Player.log,
+ * the config tree and the managed-assembly mappings; the old ceiling turned a
+ * handful of those opens into `IOException: Could not open file` and the
+ * affected defs were silently missing from the game.  The CLOEXEC mask used to
+ * be one uint64_t, which is what actually pinned this at 64; it is now a word
+ * array (fd_cloexec[FD_CLOEXEC_WORDS]) addressed only through the helpers
+ * below, so widening the table cannot silently lose a CLOEXEC bit past fd 63.
+ * Native processes are unaffected: they use the same table, and every access
+ * goes through the same helpers. */
+#define MAX_OPEN_FDS 256
+#define FD_CLOEXEC_WORDS ((MAX_OPEN_FDS + 63) / 64)
+
+static inline int fd_cloexec_test(const uint64_t *m, int fd) {
+  if (fd < 0 || fd >= MAX_OPEN_FDS) return 0;
+  return (int)((m[fd >> 6] >> (fd & 63)) & 1ull);
+}
+static inline void fd_cloexec_set(uint64_t *m, int fd) {
+  if (fd < 0 || fd >= MAX_OPEN_FDS) return;
+  m[fd >> 6] |= 1ull << (fd & 63);
+}
+static inline void fd_cloexec_clear(uint64_t *m, int fd) {
+  if (fd < 0 || fd >= MAX_OPEN_FDS) return;
+  m[fd >> 6] &= ~(1ull << (fd & 63));
+}
+static inline void fd_cloexec_reset(uint64_t *m) {
+  for (int i = 0; i < FD_CLOEXEC_WORDS; i++) m[i] = 0;
+}
+static inline void fd_cloexec_copy(uint64_t *dst, const uint64_t *src) {
+  for (int i = 0; i < FD_CLOEXEC_WORDS; i++) dst[i] = src[i];
+}
 
 /* P2.2: the address-space object (src/include/vm.h) — only ever a pointer
    here, so the kernel headers don't grow a hard include chain. */
@@ -407,7 +431,7 @@ struct process {
    * closed at exec.  fcntl F_GETFD/F_SETFD read/write bit 0; dup2/dup and
    * spawn2's 0/1/2 grants clear the bit on the new fd; P5's execve runs
    * the sweep.  Appended at the END so parallel lanes merge additively. */
-  uint64_t fd_cloexec; /* IceWM M1: 64 bits, one per fd (MAX_OPEN_FDS 64) */
+  uint64_t fd_cloexec[FD_CLOEXEC_WORDS]; /* L55: one bit per fd, word array (MAX_OPEN_FDS 256) */
 
   /* --- P5 (docs/browser/p5-exec-signals-design.md D7): exec + signals --- *
    * Appended at the END so parallel lanes merge additively.  All of this

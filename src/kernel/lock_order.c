@@ -21,6 +21,7 @@
 #include "lock.h"
 #include "kline.h"  /* one-record console output (kl_*) */
 #include "process.h" /* MAX_CPUS */
+#include "fs.h"      /* L55: MAX_GLOBAL_FILES sizes the registry below */
 
 extern uint32_t get_cpuid(void);
 /* Arch-provided (src/kernel/arch/<arch>/locks.c): mask local interrupts,
@@ -32,9 +33,15 @@ void lockdbg_irq_restore(uint64_t flags);
 
 extern void uart_puts(const char *s); /* same declaration as kline.h */
 
-#define LOCKDBG_REGISTRY 256 /* must cover every registered global lock:
-                              * fs_lock + MAX_GLOBAL_FILES f->locks + the
-                              * named subsystem locks + test locks */
+#define LOCKDBG_REGISTRY (MAX_GLOBAL_FILES + 128) /* must cover every registered
+                              * global lock: fs_lock + MAX_GLOBAL_FILES f->locks
+                              * + the named subsystem locks + test locks.
+                              * L55: this used to be a hard 256 while
+                              * MAX_GLOBAL_FILES was 128; widening the file
+                              * table to 512 made the file slots fill the
+                              * registry and the test's own locks silently
+                              * unregistered (test_lock_order_debug then
+                              * reported 0 violations where it wants 1). */
 #define LOCKDBG_STACK 16
 #define LOCKDBG_MEMO 16
 
