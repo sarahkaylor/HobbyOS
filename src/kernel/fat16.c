@@ -3,6 +3,7 @@
 #include "lock.h"
 #include "process.h"
 #include "errno.h"
+#include "kline.h"
 
 /* Wall-clock for dirent timestamps (selfhost w10-fstime): the kernel's
  * RTC-anchored REALTIME clock (kernel/time.c — the same clock sysinfo 6
@@ -2417,9 +2418,63 @@ int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
  * Returns:
  *   Number of bytes written.
  */
+/* L58: writes to one file must be one critical section.
+ *
+ * fat16_write() drops fat_lock across the sector read/write, which is right for
+ * the filesystem (a blocking device op must not freeze every FAT op) but wrong
+ * for the *file*: the cursor is file state, so two threads writing the same
+ * file interleave as
+ *      A: cur=100 -> patch sector -> (lock drops)
+ *      B: cur=100 -> patch sector -> write          (A's chunk lost)
+ *      A: write -> cur=100+len(A)
+ *      B:        -> cur=100+len(B)
+ * and the next write starts len(B) bytes past the data, leaving a NUL hole of
+ * exactly one chunk — the Player.log shape (19, 22, 102, 159-byte holes at
+ * non-sector-aligned offsets).  Player.log has two writers (Unity's log and
+ * the launcher's [XSW] rows) on one fd, so this is reachable.
+ *
+ * The fix is a small hashed per-path lock held across the whole call, outside
+ * fat_lock (order: wr_lock > fat_lock, nowhere reversed).  `[FATW] CONC` counts
+ * calls that arrived while another write to the same path was in flight — the
+ * race being real is a row, not a theory.
+ */
+static spinlock_t wr_locks[64];
+static volatile int wr_busy[64];
+
+static uint32_t wr_slot(const struct file *f) {
+  uint32_t h = 2166136261u;
+  const char *p = f->path;
+  for (int i = 0; p[i] && i < 96; i++) h = (h ^ (uint8_t)p[i]) * 16777619u;
+  return h & 63u;
+}
+
 int fat16_write(struct file* f, const void* buf, int size) {
+  uint32_t wslot = wr_slot(f);
+  /* Counted BEFORE the lock: the count is "writers that arrived while this
+   * file was being written", which is exactly the pre-fix race. */
+  int overlapped = ++wr_busy[wslot];
+  spinlock_acquire(&wr_locks[wslot]);
+  if (overlapped > 1) {
+    static int conc_rows;
+    if (conc_rows < 8) {
+      conc_rows++;
+      struct kline kc;
+      kl_init(&kc);
+      kl_s(&kc, "[FATW] CONC path=");
+      kl_s(&kc, f->path);
+      kl_s(&kc, " busy=");
+      kl_i(&kc, overlapped);
+      kl_s(&kc, " n=");
+      kl_i(&kc, size);
+      kl_c(&kc, '\n');
+      kl_emit(&kc);
+    }
+  }
+
   uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
   if (size == 0) {
+    wr_busy[wslot]--;
+    spinlock_release(&wr_locks[wslot]);
     spinlock_release_irqrestore(&fat_lock, flags);
     return 0;
   }
@@ -2430,6 +2485,10 @@ int fat16_write(struct file* f, const void* buf, int size) {
   if (f->fat16.entry.start_cluster == 0) {
     f->fat16.entry.start_cluster = alloc_cluster();
     if (f->fat16.entry.start_cluster == 0) {
+      /* Every exit must drop BOTH locks: wr_locks[wslot] is held for the
+       * whole call, and leaking it wedges every later write to this slot. */
+      wr_busy[wslot]--;
+      spinlock_release(&wr_locks[wslot]);
       spinlock_release_irqrestore(&fat_lock, flags);
       return 0;
     }
@@ -2467,10 +2526,74 @@ int fat16_write(struct file* f, const void* buf, int size) {
     uint32_t chunk = SECTOR_SIZE - offset_in_sector;
     if (chunk > bytes_to_write) chunk = bytes_to_write;
 
+    /* L58: a partial-sector write is a read-modify-write, and the read used to
+     * be unchecked.  A failed (or silently zero-filling) read left `sec_buf`
+     * as uninitialised stack, and the write-back then stamped those bytes over
+     * a sector that already held text: Player.log grew 159 NULs at offset
+     * 79360 (512-aligned) and resumed mid-word.  Rules:
+     *   - the buffer starts zeroed, so a failed read can never leak stack;
+     *   - a failed READ abandons the write (short count) instead of
+     *     publishing a hole;
+     *   - a failed WRITE is reported the same way, not ignored;
+     *   - `[FATW] ZERORD` names the exact defect if a sector that must hold
+     *     data reads back all-zero (the hole's precondition). */
+    int rmw_failed = 0;
     spinlock_release_irqrestore(&fat_lock, flags);
-    if (chunk < SECTOR_SIZE) virtio_blk_read_sector(sector_num, sec_buf, 1);
-    for (uint32_t i = 0; i < chunk; i++) sec_buf[offset_in_sector + i] = in[written_bytes++];
-    virtio_blk_write_sector(sector_num, sec_buf, 1);
+    if (chunk < SECTOR_SIZE) {
+      for (uint32_t z = 0; z < SECTOR_SIZE; z++) sec_buf[z] = 0;
+      if (virtio_blk_read_sector(sector_num, sec_buf, 1) != 0) {
+        rmw_failed = 1;
+      } else if (f->fat16.entry.file_size > f->fat16.cursor - offset_in_sector) {
+        /* Bytes before this write already live in this sector; an all-zero
+         * read means the device/cache handed us a hole. */
+        int all_zero = 1;
+        for (uint32_t z = 0; z < SECTOR_SIZE; z++)
+          if (sec_buf[z]) { all_zero = 0; break; }
+        if (all_zero) {
+          static int zw_rows;
+          if (zw_rows < 16) {
+            zw_rows++;
+            struct kline kz;
+            kl_init(&kz);
+            kl_s(&kz, "[FATW] ZERORD sector=");
+            kl_i(&kz, (long)sector_num);
+            kl_s(&kz, " off=");
+            kl_i(&kz, (long)(f->fat16.cursor - offset_in_sector));
+            kl_s(&kz, " size=");
+            kl_i(&kz, (long)f->fat16.entry.file_size);
+            kl_c(&kz, '\n');
+            kl_emit(&kz);
+          }
+        }
+      }
+    }
+    if (rmw_failed) {
+      static int rf_rows;
+      if (rf_rows < 8) {
+        rf_rows++;
+        struct kline kr;
+        kl_init(&kr);
+        kl_s(&kr, "[FATW] RMWREAD sector=");
+        kl_i(&kr, (long)sector_num);
+        kl_s(&kr, " off=");
+        kl_i(&kr, (long)f->fat16.cursor);
+        kl_c(&kr, '\n');
+        kl_emit(&kr);
+      }
+      flags = spinlock_acquire_irqsave(&fat_lock);
+      break;                        /* short write: never stamp a hole */
+    }
+    /* Count nothing until the sector is on disk: a failed write must leave
+     * written_bytes (and so the caller's offset) short, never "advanced past
+     * bytes that did not land" — that advance is what turns a transient
+     * failure into a NUL hole. */
+    for (uint32_t i = 0; i < chunk; i++)
+      sec_buf[offset_in_sector + i] = in[written_bytes + i];
+    if (virtio_blk_write_sector(sector_num, sec_buf, 1) != 0) {
+      flags = spinlock_acquire_irqsave(&fat_lock);
+      break;
+    }
+    written_bytes += (int)chunk;
     flags = spinlock_acquire_irqsave(&fat_lock);
 
     f->fat16.cursor += chunk;
@@ -2500,6 +2623,8 @@ int fat16_write(struct file* f, const void* buf, int size) {
     fat16_sync_entry(f);   /* keep the on-disk dir entry (size/clusters/time)
                               current so stat-by-path sees it immediately */
   }
+  wr_busy[wslot]--;
+  spinlock_release(&wr_locks[wslot]);
   return written_bytes;
 }
 

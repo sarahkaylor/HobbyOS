@@ -7532,3 +7532,271 @@ is "0 EBADF, 0 Invalid handle, no VA=0 fault, defs and language data load".
    `[NFSRD]`.  This is a def-file-set question, not an fd or read question.
 2. The one-off write fault into a writable anon region (44.7 note) — a
    `vm_handle_fault` PROT answer where `prot=3 kind=3` says the write is legal.
+
+## 45. 2026-11-06 — M6/L58: the missing defs were 31-char-truncated dirent names; the Player.log holes were two writers racing one file cursor
+
+§44.7 asked why a def family that exists on the export (`SoundDefs`) and a
+parent def that exists on the export (`MusicalInstrumentBase`) are absent from
+the database while `[NFSLS]` says every directory of `/Data/Core/Defs` matched
+the host.  The blocker is a **name-length cap in the NFS directory entry**, not a read, an
+fd or a load-order filter: `NFS_NAME_MAX` was 32, so the dirent64 name field
+held 31 characters while 62 XML files in `Data/` have longer names.  The game
+enumerated them, stat'ed the truncated name, got `ENOENT`, and dropped the file
+— silently, because a file that vanishes during enumeration is normal for
+`Directory.GetFiles`.  The missing parent is then exact: `MusicalInstrumentBase`
+lives in the one 32-character file in `ThingDefs_Buildings`, and the six
+long-named `SoundDefs` files hold 61 defs.  The 577 sound cross-reference rows
+are larger than those 61 defs' textual reference count (132) and smaller than
+every Core SoundDef's (1162), so the pre-fix loss was not limited to the
+truncated set; what is measured is that with the cap raised the database
+resolves **everything** (0 rows) in four runs.  The pre-fix `[XO]` trace that
+would have named the exact set does not exist.
+
+### 45.1 The instruments (both kept)
+
+| instrument | where | what it answers |
+|---|---|---|
+| `[W]` walker (`src/user/rwwalk.c`) | `tools/rw/run-guest-walk.sh` | every directory and **file** with its `stat()` size under `/NFS/Data`, over raw `getdents64` (the same kernel path the game's glibc `readdir` uses), then `Core/Defs/SoundDefs` re-listed at 64/128/4096/8192-byte buffers |
+| `[XO] <rel>` | `vfs_open_routed()` | every successful XML open, so "the walker saw it" and "the game opened it" are two lists that can be diffed |
+| `[GDT] rel= total=` | `file_getdents64()` | the entry count the kernel hands the game for each directory it starts reading |
+| `[RDP] rel= cin= got= last= eof= count=` | `dir_cache_fill()` | one row per READDIRPLUS page — a short listing is a short page, a bad continuation cookie, or a cache-full break, named |
+| `[NFSLS] n= dirs= complete=` | `nfs.c` | raised from 40 rows to 400 so every directory is in the log |
+
+The walker is a *native* program on purpose: it mounts the export itself and
+speaks `SYS_GETDENTS64` (95), so it cannot be accused of using the game's code
+path, and its `[W] f` rows diff directly against `find Data -type f`.
+
+### 45.2 The enumeration is correct; the names were not
+
+`[GDT]` from a game run settles the count question in one line each:
+
+```text
+[GDT] rel=/Data/Core/Defs total=93            (host: 93)
+[GDT] rel=/Data/Core/Defs/SoundDefs total=35  (host: 35)
+[GDT] rel=/Data/Core/Defs/ThingDefs_Buildings total=22 (host: 22)
+```
+
+so the *counts* were never wrong — the names inside them were.  The pre-fix
+`[W] f` rows show the truncation directly:
+
+```text
+[W] e /NFS/Data/Place official expansions here. nlen=31 type=8
+```
+
+(host: `Place official expansions here.txt`), and the pre-fix diff against
+`find` reported **truncated names** for the 62 affected files, including
+`World_Oneshots_ProjectileImpacts.xml` (36), `Building_Sustainers_Ambiences.xml`
+(33), `Interact_Oneshots_PickupDrop.xml` (32) and
+`Buildings_MusicalInstruments.xml` (32).
+
+The last one is the missing parent: `MusicalInstrumentBase` is defined in
+`Data/Core/Defs/ThingDefs_Buildings/Buildings_MusicalInstruments.xml`, and it is
+the **only** file in that directory whose name exceeds 31 characters.  With the
+file invisible, every `<ThingDef ParentName="MusicalInstrumentBase">` in Core,
+Royalty and Ideology lost its parent, the building defs that survive have no
+blueprint class, and `ThingDefGenerator_Buildings.CreateBuildBlueprintDef`
+dereferences the null def at `VA=0x338` — §44.7's SIGSEGV, now gone.
+
+`SoundDefs` had six long-named files (61 `SoundDef` defs) across Core, Biotech
+and Ideology.  A textual count of references to those 61 names is 132, not the
+577 §44.7 reported, so the pre-fix loss was larger than the truncation set
+alone; the pre-fix `[XO]` trace does not exist and cannot be reconstructed.  What
+*is* measured is the post-fix state: **1209 of 1209 XMLs opened**, 0 `Could not
+resolve cross-reference`, 0 `No Verse.SoundDef`, 0 `MusicalInstrumentBase` in
+four 300 s runs (§45.5).
+
+### 45.3 The fix
+
+`src/include/nfs.h`: `NFS_NAME_MAX` 32 → 64 (the dirent64 path is not bound by
+the native `struct sys_dirent.name[32]` cap, and the longest shipped XML name is
+47 characters).  Every XML now enumerates, stats and opens; the `[W]` walker's
+diff against the host is **1379/1379 files and 389/389 directories, 0 missing,
+0 truncated**.  Cost: `dir_cache.names[256][64]` is 16 KiB of BSS.
+
+`lookup_one()`'s request buffer is sized from `NFS_NAME_MAX`, so it grew with it
+(108 → 140 bytes); it was already large enough for the 47-char names, but the
+buffer is now consistent with the widest component `nfs_lookup` accepts.
+
+### 45.4 The FAT16 NUL holes: two writers, one file cursor
+
+§44.7a's 159-byte NUL run at a 512 boundary is real and reproducible: every long
+run's `Player.log` has 2-3 holes, always **chunk-sized and non-sector-aligned**
+(22, 19, 102, 159 bytes), each replacing the head of a log record.
+
+`fat16_write()` deliberately drops `fat_lock` across the sector read/write (a
+blocking device op must not freeze every FAT operation).  That is right for the
+filesystem and wrong for the *file*: the cursor is file state, so two threads
+writing one file interleave as
+
+```text
+A: cur=100 -> patch sector -> (lock drops)
+B: cur=100 -> patch sector -> write           <- A's chunk lost
+A: write   -> cur=100+len(A)
+B:         -> cur=100+len(B)                  <- cursor is now len(B) past the data
+```
+
+and the next write starts `len(B)` bytes past the data, leaving a NUL hole of
+exactly one chunk.  `Player.log` has exactly that shape: Unity's `-logFile`
+turns fd 1 into the log, and the launcher's `[XSW]` swap rows are written to the
+same fd from the rendering thread.  The instrument confirms it in every run:
+
+```text
+[FATW] CONC path=/RW_HOME/Player.log busy=2 n=22
+[FATW] CONC path=/RW_HOME/Player.log busy=2 n=44
+```
+
+`n=22` is literally one of the hole sizes measured before the fix.
+
+Fix (all in `fat16_write`):
+- a hashed per-path `wr_lock` held across the whole call (order `wr_lock >
+  fat_lock`, nowhere reversed) so one file's cursor + patch + device write are
+  one critical section;
+- the read-modify-write **read** is zero-initialised and checked — a failed read
+  can no longer publish uninitialised stack over a live sector;
+- the sector **write** is checked, and `written_bytes` is only advanced after it
+  lands — a transient failure is now a short write, never "advanced past bytes
+  that did not land";
+- `[FATW] RMWREAD` / `[FATW] ZERORD` / `[FATW] CONC` name the event instead of
+  leaving a hole.  Every exit path — including the `start_cluster == 0`
+  allocation failure — drops both locks; a leaked `wr_lock` would wedge that
+  hash slot for the rest of the boot.
+
+Result: three 300 s runs with **0 zero runs** in `Player.log` (86 168, 85 600
+and 83 773 bytes) where every pre-fix long run had 2-3.
+
+Regression: `test_fat16_partial_sector_no_holes` (`src/kernel/fat16_test.c`)
+writes an 8 KiB non-zero pattern in 137-byte chunks — each ending mid-sector —
+overwrites two bytes mid-sector, reads it back and fails on any byte mismatch,
+any all-zero 512-byte block and any 32-byte zero run.
+
+### 45.5 Ladder: three 300 s runs of one build, plus a fourth after a lock-release fix
+
+| run | NFS bytes | `[XSW]` max | fps | `Player.log` NUL holes | unresolved SoundDefs | `MusicalInstrumentBase` | `no blueprint class` | memory faults | `Invalid handle` | `[FATW] CONC` | `[XO]` rows |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 50,506,396 (48.17 MiB) | 220 | 0.73 | **0** | **0** | 0 | 0 | 1 | 0 | 2 | 1205 |
+| 2 | 53,990,935 (51.49 MiB) | 190 | 0.63 | **0** | **0** | 0 | 0 | 1 | 0 | 2 | 1197 |
+| 3 | 55,857,141 (53.27 MiB) | 180 | 0.60 | **0** | **0** | 0 | 0 | 0 | 0 | 2 | 1208 |
+| 4 | 57,075,004 (54.43 MiB) | 170 | 0.57 | **0** | **0** | 0 | 0 | 0 | 0 | 3 | **1209** |
+
+Run 4 is the same build plus one lock-release fix (the `alloc_cluster() == 0`
+path of `fat16_write` used to return without dropping `wr_lock`, which would
+wedge that hash slot on a full disk; it never fired in runs 1-3).  It is the
+cleanest run: **1209 of 1209** `[XO]` rows — every XML in the tree opened — with
+0 holes, 0 faults and 0 unresolved references.
+
+Before the fix, the same harness at 300 s produced 577 `Could not resolve
+cross-reference: No Verse.SoundDef named ...`, one `XML error: Could not find
+parent node named "MusicalInstrumentBase"`, the `VA=0x338` SIGSEGV and 2-3 NUL
+holes per `Player.log`.  After it: **0 / 0 / no fault of that shape / 0 holes**
+in three runs, at 48-53 MiB (the def pass now reads the six long-named SoundDefs
+files too).
+
+The screen at the 300 s deadline is the loading screen, OCR `Initializing.` in
+all three runs — **not** the main menu.  The def pass and its cross-reference
+phase are done by then (0 unresolved references proves the database resolved),
+so what remains is the phase after it: the thread pool is at 36-37 live workers
+with `[TEXIT]`/`[TEXIT]` churn and `[ALIVE-SET] no READY work` dumps, i.e. the
+PLINQ/`LoadedLanguage` cost of §39/§104, which 300 s does not cover.  A 220 s
+run cannot show the def pass at all (~0.7 fps), so the ladder is 3x300 s.
+
+One memory fault remains, and it is §44.7's one-off, not this lane's:
+`pid=32 (Thread Pool Wor) VA=0x11AC0910C0 PC=0x10846E9645 rw=w in=PROT
+region=0x11AC000000+0x93000 prot=3 kind=3 -> killed`.  A write to a region whose
+`prot` already includes write answered `PROT` by `vm_handle_fault`; it kills one
+pool worker and the load continues.  It appeared in 2 of 3 runs and 0 of 1
+before, so it is a real intermittent, still unfixed.
+
+### 45.6 The game's file set vs the walker's
+
+`[XO]` (every successful XML open) against `find Data -name '*.xml'`: 1205-1208
+of 1209 distinct paths per run, and **the missing set differs run to run and
+comes in contiguous directory runs** (`Buildings_Ancient_*` + `Concepts_*` +
+`Terrain_Water` + `Weathers` in one run; `BabyPlay.xml` + `Abilities.xml` +
+`RangedMechanoid_Medium.xml` + `Script_PawnLend.xml` in another).  A loader
+filter cannot move between runs; a dropped serial burst can, and the guest
+writes ~2.3 MB of serial per run.  Those rows are welded onto kernel rows
+(`[NFSRTT] ...[XO] /Data/...`) in the same log, i.e. the capture is lossy under
+load.  The functional answer is the def database: 0 unresolved cross-references
+in all three runs means every def file that matters was read.
+
+The walker's own totals, after the fix, are the host's totals exactly:
+
+```text
+[W] TOT dirs=389 files=1379 bytes=309174297 bad=0
+host:      389 dirs   1379 files   309174297 bytes
+```
+
+— every directory, every file, every size, and **0** `stat()` failures (a file
+whose name had been truncated shows up as `[W] e ... nlen=31`; there are none
+left).  The per-row diff still reports 3 files "missing" in one run, and it is
+the *capture*, not the walker: the same directory's own summary row says
+`[W] S .../Shuffled n=13 dirs=0 files=13` (host: 13), and the "extra" row is a
+path with a kernel row welded into its middle
+(`Offworld_Nonspecifi[cN_AFdSuIlOt]. xbmylt`).  QEMU's serial-to-file capture
+drops bursts under a ~1400-row walk; the per-directory counters are the
+authoritative count, which is why the walker prints them.
+
+### 45.7 Regression
+
+`tools/rw/l58-gates.sh` runs the whole set sequentially (never two boots at
+once) on the final build:
+
+| gate | result |
+|---|---|
+| `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` | **416 run, 0 failed** (415 + `test_fat16_partial_sector_no_holes`) |
+| `t3_linux_probe.sh redzone` | PASS |
+| `t3_linux_probe.sh mmap_race` | PASS |
+| `m2_mono.sh` | PASS |
+| `m2_tp.sh` | PASS |
+| `m2_threads.sh` | PASS |
+| `m12_thread_ceiling.sh` | PASS |
+| `m3_window_probe.py` | PASS |
+| `m4_gl_probe.py` | PASS |
+| `tools/rw/run-rwnfs-probe.sh` | PASS |
+
+### 45.8 A 600 s run: past the defs, past the language, then a managed SIGSEGV
+
+One 600 s run of the same build (after the three 300 s ones) goes much further
+and is the next frontier's evidence:
+
+| measure | 300 s ladder | 600 s run |
+|---|---|---|
+| NFS bytes | 48-53 MiB | **225.35 MiB** (0xE14Axxx, 47,794+ RPCs) |
+| unresolved SoundDefs | 0 | 0 |
+| `no blueprint class` | 0 | 0 |
+| kernel memory-fault rows | 0-1 | **0** |
+| mid-file NUL holes | 0 | 0 |
+| end | loading screen, `Initializing.` | `waitpid=4 status=11` at ~410 s |
+
+225 MiB means the load got well past the defs and the language data (the extra
+~170 MiB is the asset/audio phase), and then the child died at ~410 s with
+`status=11` — **SIGSEGV delivered to the process's own handler**, not a kernel
+fault: there is no `[KERNEL] ... memory fault` row and no `[SIGDUMP]`, because
+Unity's handler (`[RWMAIN] sigaction sig=11 ... KEEP-OURS`) took it and exited.
+`Player.log` ends in a long run of
+`mono_thread_internal_set_priority: pthread_setschedparam failed` rows (the
+thread count was 36-37 in the 300 s runs and still climbing), and the desktop is
+back on screen afterwards (the final screenshot is the Apps menu, OCR `Apps`).
+The last 272 bytes of `Player.log` are all zero and sit at the file's *end*
+(offset 84 480, a sector boundary) — the chunk that was in flight when the
+process died, not a mid-file hole; every run before the fix had 2-3 mid-file
+holes.
+
+### 45.9 What is left
+
+1. That ~410 s SIGSEGV after the asset phase: it is inside the managed runtime
+   (no kernel row, Unity's handler exits 11) and follows a thread-count climb
+   in `mono_thread_internal_set_priority`.  Next lane: `MONO_THREADS_PER_CPU`
+   A/B (marker `/TPCPU` already exists) and a managed thread dump at 380 s, so
+   "the pool is injecting a thread per work item" and "a worker dies in native
+   code" are different rows.
+2. The main menu is still not reached: the 600 s run died before it.  The
+   remaining work after the asset phase is unknown; a 900 s run with the same
+   instrumentation is the cheapest next measurement.
+3. The `vm_handle_fault` PROT answer for a write into a `prot=3 kind=3` region
+   (45.5) — a pool worker dies each time it happens.
+4. `O_APPEND` is recorded in `open_flags` (and `F_GETFL` reports it) but
+   `fat16_write()` ignores it: a second handle on a file starts at its own
+   cursor.  Player.log's two writers share one fd today, so the per-path write
+   lock covers it; a caller that opens the same file twice with `O_APPEND`
+   would still interleave.  Not fixed here.

@@ -12,6 +12,7 @@
 #include "fs.h"
 #include "fat16.h"
 #include "process.h"
+#include "kline.h"
 #include "errno.h"
 
 extern struct process *current_process(void);
@@ -318,6 +319,35 @@ int vfs_open_routed(const char *path, struct file *f) {
 
   struct nfs_attr attr;
   if (nfs_lookup(m, rel, &f->nfs.fh, &attr) != 0) return -1;
+
+  /* L58: the def-file-set question needs the game's own open list.  One row
+   * per successful XML open under an NFS mount, capped so a runaway caller
+   * cannot bury the ladder.  `[XO] CAPPED` says the list is incomplete. */
+  {
+    int rl = 0;
+    while (rel[rl]) rl++;
+    if (rl > 4 && rel[rl - 4] == '.' &&
+        (rel[rl - 3] == 'x' || rel[rl - 3] == 'X') &&
+        (rel[rl - 2] == 'm' || rel[rl - 2] == 'M') &&
+        (rel[rl - 1] == 'l' || rel[rl - 1] == 'L')) {
+      static int xo_rows;
+      if (xo_rows < 2400) {
+        xo_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[XO] ");
+        kl_s(&kl, rel);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      } else if (xo_rows == 2400) {
+        xo_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[XO] CAPPED at 2400\n");
+        kl_emit(&kl);
+      }
+    }
+  }
 
   f->type = FILE_TYPE_NFS;
   f->nfs.size = attr.size;
