@@ -6565,3 +6565,250 @@ local queue -- no global request is made for them, which is what an empty pool
 with `request worker, failed = 0` looks like. Instrument
 `ThreadPoolWorkQueueThreadLocals` teardown (does it transfer the local queue to
 the global one?) before touching the scheduler again.
+
+## 40. 2026-11-05 — M6/L53: there is no local-queue orphan; the PLINQ event WAS set when the waiter stopped
+
+The brief was §39.4's hypothesis: a Thread Pool worker exits after its 5..60 s
+park and orphans continuations in its managed `WorkStealingQueue`, so no global
+request is ever made for them. **That hypothesis is false on this tree, and the
+pool is exonerated by its own read state, not by its trace.**
+
+### 40.1 How the managed queue state is read
+
+The field names were measured on the *host* under the game's own runtime
+(`tools/rw/mono-probe/tpq.cs`, `tpq3.cs`, run through
+`mono_main_launcher.c` with the game's `libmonobdwgc` and `mscorlib`):
+
+```text
+ThreadPoolWorkQueue: queueHead, queueTail (QueueSegment, INSTANCE fields),
+                     allThreadQueues (SparseArray<WorkStealingQueue>, static),
+                     numOutstandingThreadRequests (instance)
+ThreadPoolWorkQueue+WorkStealingQueue:
+                     m_array, m_mask, m_headIndex, m_tailIndex
+ThreadPoolWorkQueue+QueueSegment:
+                     nodes, indexes (lo16 = head, hi16 = tail), Next
+SparseArray<T>:      m_array (16 slots, T[])
+ThreadPoolGlobals:   workQueue (static; the instance the three instance
+                     fields live on)
+```
+
+`tpq3.cs` validates the index semantics: three `Task` enqueues from a worker
+moved that worker's `tail 0 -> 3` and the steals moved `head 0 -> 3`. So
+`used = tail - head` is the deque depth, `m_headIndex` counts steals, and
+`m_tailIndex` is local pushes minus local pops.
+
+The launcher reads this with the same metadata API as the Task dump (rule 102,
+`mono_field_get_value` / `mono_field_static_get_value` with the class vtable,
+`mono_array_addr_with_size`), gated on `/TPTRACE`, and prints:
+
+* `[TPWP] why=… n=… nonempty=… items=… unowned_items=… glob=… outreq=…`
+* `[TPWL] i=… q=0x… head=… tail=… used=… cap=… owner=… dhead=… dtail=…`
+  (owner is the tid whose captured stack holds the matching
+  `ThreadPoolWorkQueueThreadLocals` object, exact-vtable test);
+* `[TPWG]` per QueueSegment (global chain), and one `[TPWO]` row per queue
+  found on a worker stack.
+
+### 40.2 The per-worker table at the stall
+
+Three runs on the L52 kernel, `/TPTRACE` only (no `RW_FUTXW`), sampled
+from t=35 s onward (r4 reached t=175 s; r3/r5 sampled fewer times and never
+showed a non-zero queue):
+
+| run | NFS bytes | `[XSW]` | queues `n` | nonempty | items | global | outreq | enq/comp/reqF/stranding |
+|---|---|---|---|---|---|---|---|---|
+| r3 | 23,653,953 (0x168EE41) | 1 | 7 | 0 | 0 | 0 | 0 | 14/14/0/0 |
+| r4 | 23,654,097 (0x168EED1) | 1 | 9 | 0 | 0 | 0 | 0 | 14/14/0/0 |
+| r5 | 23,654,097 (0x168EED1) | 1 | 8 | 0 | 0 | 0 | 0 | 14/14/0/0 |
+
+Every queue in every sample is `head=0 tail=0 used=0 cap=32`; `dhead=dtail=0`
+between consecutive samples. `head=0` means no steal ever touched these
+deques. `tail=0` is the deque's **net** local depth, not a cumulative push
+counter — `LocalPop` decrements `m_tailIndex` — so the indices cannot
+reconstruct how many items were ever pushed and locally popped; what they prove
+is that no item remains in any local queue at any sample and that no item was
+stolen. The global `QueueSegment` chain is empty and
+`numOutstandingThreadRequests` is 0, so `EnsureThreadRequested()` would ask for
+a worker if an item existed. Every row also reports `owner=-1`: the
+queue-to-tid match found no live thread whose captured stack still holds that
+`ThreadPoolWorkQueueThreadLocals` object (most pool workers are `st=9`
+THREAD_DONE by then, and a parked `Dispatch` may keep `tl` in a register). A
+retired worker that had exited with an item would still show it as `used>0` in
+its registered queue; none does.
+
+Consequences, in one line each:
+
+* no continuation is left in any local queue at the stall, so there is nothing
+  for a retired worker to have orphaned; and because every enqueued item
+  completed (`enq == comp`, `stranding=0`), no item was lost on a teardown
+  path either;
+* `enq == comp` (14/14) and `stranding=0` mean no work item is queued,
+  running, or unaccounted for;
+* the pool is empty because there is no work for it, not because it declined
+  to run work.
+
+### 40.3 What the waiter actually waits for
+
+The main thread's self-sample (`SIGUSR2`, rule 107) is identical in every
+sample of every run:
+
+```text
+Monitor.ObjWait <- Monitor.Monitor_wait <- Monitor.Wait <- Monitor.Wait
+<- ManualResetEventSlim.Wait <- Task.SpinThenBlockingWait
+<- Task.InternalRunSynchronously <- Task.RunSynchronously
+<- SpoolingTask.SpoolStopAndGo <- DefaultMergeHelper`2.Execute
+<- MergeExecutor`1.Execute
+```
+
+i.e. the same PLINQ merge site as §36/§37, not a Unity job wait. The awaited
+object is a `Task.SetOnInvokeMres` (ManualResetEventSlim subclass) at
+`0x…d3f9c0` with:
+
+```text
+combined=0x80000001   set=1 waiters=1
+m_lock=0x…42ca0  sync=0x…7c82 cls=inflated  mon=0x…7c80
+status=0x7fff0000 (ENTRY_COUNT_ZERO: owner 0, entry_count 0 = released)
+wait_list = 0 (at the CORRECT offset, see below)
+```
+
+The status is a released monitor, as it must be while its owner is inside
+`Monitor.Wait`. The bit decode is this mscorlib's own IL
+(`tools/rw/mono-probe/mresil.cs`): `get_IsSet` masks `0x80000000`,
+`get_Waiters` masks `0x7FFFF`. The `set=1` bit plus `waiters=1` is already
+decisive about the setter: this mscorlib's `ManualResetEventSlim.Set(bool)` IL is
+`set_IsSet(true)`; `if (Waiters > 0) lock (m_lock) Monitor.PulseAll(m_lock)`.
+A parked waiter with `waiters=1` can only have incremented its count (under
+`m_lock`) before `Set` read it, so `Set` saw a waiter and ran `PulseAll`.
+
+**Monitor layout correction (this build).** Unity's Mono 6.12 is compiled with
+`HAVE_MOVING_COLLECTOR`: `MonoThreadsSync` carries an extra `gint32 hash_code`
+at +8, so `wait_list` is at **+16**, `data` +24, `entry_mutex` +32,
+`entry_cond` +40; `GSList` is `{data at +0, next at +8}`. This is not a guess:
+the game's own `mono_monitor_wait` (the `Monitor.Monitor_wait` icall resolves to
+`libmonobdwgc+0x1ae0ee`, which calls `0x23c961`) does
+`mov 0x10(%rbx),%rdi; call g_slist_append; mov %rax,0x10(%rbx)` at
+`0x23c9fe..0x23ca53`, and the same function calls
+`mono_w32handle_wait_one(event, ms, TRUE)` at `0x23ca7b`. So:
+
+* rule 105's `wait_list = mon+8` is the **non-moving** layout; every earlier
+  `nwl=0` on this build (including §37/§38) was reading `hash_code`, not the
+  list. The launcher now prints `nwl` from +16.
+* `mono_monitor_pulse` sets the first wait_list event and removes its node.
+  `wait_list == NULL` at the stall therefore means **the pulse already ran and
+  dequeued this waiter's private event**. `mono_monitor_wait` only removes the
+  node itself on the failure path (no pulse), so an empty list with a parked
+  waiter is not "never signalled": it is "signalled and dequeued".
+
+So the wait graph has no missing producer and no cycle:
+
+```text
+main (pid 4)
+  SpoolingTask.SpoolStopAndGo
+    -> Task.RunSynchronously -> SpinThenBlockingWait
+       -> ManualResetEventSlim.Wait (set=1, waiters=1)
+          -> Monitor.Wait on m_lock (wait_list drained by PulseAll)
+             -> mono_w32handle_wait_one(private event)
+                -> pthread_cond_wait   [parked, st=8]
+```
+
+The event was set; the only thread that could consume it is the one that is
+parked on it. That is a lost wake **below** the managed event, not an orphaned
+continuation and not a missing signal.
+
+The in-guest handle scan corroborates the set state: a `MonoW32Handle` of
+`type=3` (`MONO_W32TYPE_EVENT`), `ref=3`, **`signalled=1`**, `in_use=1` is
+present at `0x104005fdd8` in five stack slots of the main thread in every
+sample. (Its `signal_cond` is `0x104005fe10`; the kernel's park key is a
+different heap address, so the exact handle↔key identity is the one row still
+to be pinned — see 40.6.)
+
+### 40.4 The Unity native threads are idle, and the "UnityPlayer+0x11895d" label was wrong
+
+`[ALIVE-SET]` prints `mod=<base>+<off>` on this kernel, and the module walk
+merges contiguous read-only file regions (rule 97's class). The real load bases
+from the launcher's own `dl_iterate_phdr` row are:
+
+```text
+libc.so.6          base=0x1080000000  end=0x10801f1660
+UnityPlayer.so     base=0x10812ff000  end=0x108337fc00
+libmonobdwgc-2.0   base=0x1084522000  end=0x1084cf3048
+libpthread.so.0    base=0x10834f4000
+```
+
+`0x108011895d` is **libc.so.6+0x11895d**, not `UnityPlayer+0x11895d`: it is the
+`cmp $0xfffffffffffff001,%rax` **immediately after `syscall`** in glibc's
+`syscall@@GLIBC_2.2.5` (0x118940..0x118976). All 25 Unity job/preload threads
+(`Job.Worker 0`, 20x `Background Job.`, `BatchDeleteObje`, `Loading.AsyncRe`,
+`UnityGfxDeviceW`, `Loading.Preload`) are parked in that same generic syscall
+wrapper — i.e. in raw futex/semaphore waits on their own per-thread heap keys
+(`0x10D0…`), not in a UnityPlayer wait loop. They are idle job consumers; none
+of them is a producer for the main thread's managed event, and none should have
+been woken: there is no job queued for them.
+
+`Loading.AsyncRe` (pid 26) has **no managed stack**: 2048 captured words
+resolve to zero JIT frames and its top words are the same libc `syscall()`
+return point. It is a native Unity thread, so "get its managed stack" has the
+answer "it has none".
+
+### 40.5 Ladder, 3 runs
+
+`RW_TPTRACE=1 RW_SHOT_EVERY=10 bash tools/rw/run-rimworld-desktop.sh
+--run-timeout 240`, three runs on the L52 kernel:
+
+| run | NFS bytes | `[XSW]` | assemblies | queues at stall | `set/waiters` | verdict |
+|---|---|---|---|---|---|---|
+| r3 | 23,653,953 | 1 | 10.851 s | 7, all empty | 1/1 | stall |
+| r4 | 23,654,097 | 1 | 10.841 s | 9, all empty | 1/1 | stall |
+| r5 | 23,654,097 | 1 | 8.930 s | 8, all empty | 1/1 | stall |
+
+All three: banner `RimWorld 1.6.4871 rev600`, one 1280x720 present
+(`[XSW] n=1 put=1 putok=1 nz=921600/921600 box=0,0,1279,719`), then NFS frozen
+and no second swap. The final PPM is byte-identical to shots 18..22:
+**1,044,712 / 2,073,600 non-black pixels (50.38%), 75,884 colours** — the
+static loading art, no main menu, so no fps number exists. (r5's watchdog
+sampler stops after its t=65 s sample; the game state it had printed is
+identical to r3/r4 and the run still stalled at the deadline, so the row is
+kept and the sampler limit noted.)
+
+### 40.6 The layer verdict and the next single instrument
+
+* **Local-queue orphan: no.** No local queue holds an item at any sample, no
+  queue was ever stolen from (`head=0`), and every enqueued item completed
+  (`enq == comp == 14`, `stranding=0`), so nothing was left behind by a
+  worker exit. Mono's `ThreadPoolWorkQueue` teardown is not implicated, and no
+  engine-side worker-exit change is warranted.
+* **Unwoken Unity native thread: no.** The 25 native threads are idle job
+  consumers in raw futex syscalls; the park PC that looked like UnityPlayer is
+  libc's `syscall()` return point, and the main thread's wait is the managed
+  PLINQ completion event.
+* **The waiter**: `SpoolingTask.SpoolStopAndGo` -> `Task.RunSynchronously` ->
+  `SpinThenBlockingWait` on a `Task.SetOnInvokeMres` whose event is
+  `set=1, waiters=1`, with its monitor's `wait_list` already drained by
+  `PulseAll`. The setter is the task-completion path
+  (`Task.SetOnInvokeMres.Invoke`), and it already ran.
+* **Remaining defect**: the private event's signal did not wake the thread
+  parked in `pthread_cond_wait` — one layer below the managed event. The next
+  instrument is the §38 condtrace on that event's `signal_cond` (count
+  `pthread_cond_signal`/`broadcast` calls after the wait began): signal count 1
+  proves a kernel condvar wake delivery loss; count 0 means the pulse walked an
+  event other than the parked one and the handle↔key identity must be resolved
+  first. Do not re-open the pool, the scheduler, or Unity's job threads.
+
+### 40.7 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh` -> **414 run, 0 failed**. Gate ladder
+on this tree, all PASS:
+
+| gate | row |
+|---|---|
+| `redzone` | PASS (32 `KEPT`, 0 `CLOBBERED`) |
+| `m2_mono` | PASS — official Mono 6.12 ran a threaded C# program |
+| `m2_tp` | PASS — clock and ThreadPool park/unpark |
+| `m2_threads` | PASS — 8 pthreads, mutex+condvar+TLS+join+dlopen TLS |
+| `m12` | PASS — 150 threads + TLS + shared futex + SIGCANCEL |
+| `m3_window_probe` | PASS — whole SDL XCreateWindow sequence |
+| `m4_gl_probe` | PASS — GL 3.3 core triangle presented and torn down |
+
+The browser and WebKit tiers were not touched; the only changed userspace file
+is `src/user/rwmain.c` (launcher instrumentation, `/TPTRACE`-gated) plus the
+host-only probes under `tools/rw/mono-probe/`.
+

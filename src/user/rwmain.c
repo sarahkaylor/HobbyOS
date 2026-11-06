@@ -1552,6 +1552,9 @@ static struct {
   void *(*class_vtable)(void *, void *);
   void *(*field_from_name)(void *, const char *);
   void (*field_get_value)(void *, void *, void *);
+  void (*field_static_get_value)(void *, void *, void *);
+  int (*array_length)(void *);
+  char *(*array_addr)(void *, int, unsigned long);
   void *(*obj_get_class)(void *);
   void *(*nested)(void *, void **);
   const char *(*class_namespace)(void *);
@@ -1689,6 +1692,498 @@ static int tp_cls_init(void) {
   return tpc.state > 0;
 }
 
+/* ---- L53: the managed ThreadPoolWorkQueue's OWN queues -------------------
+ *
+ * The L52 dump exonerated the pool by its trace rows (14 retired workers,
+ * 0 failed requests, all CPUs idle) but not by its *state*: Mono's pool is a
+ * per-thread work-stealing deque (WorkStealingQueue) plus one global
+ * QueueSegment chain, and a continuation that was LocalPush()ed into a
+ * worker's deque is only discoverable there.  A worker that exits without
+ * draining its deque orphans exactly those items -- no global request is
+ * made for them, which is what "empty pool, 0 failed requests" would look
+ * like.
+ *
+ * The classes are read with the same metadata API as the Task dump (rule 102)
+ * and the field names below are this mscorlib's own (measured on the host
+ * under the game's libmonobdwgc with tools/rw/mono-probe/tpq*.cs):
+ *
+ *   ThreadPoolWorkQueue: queueHead, queueTail (QueueSegment),
+ *                        allThreadQueues (SparseArray<WorkStealingQueue>),
+ *                        numOutstandingThreadRequests
+ *   ThreadPoolWorkQueue+WorkStealingQueue:
+ *                        m_array, m_mask, m_headIndex, m_tailIndex
+ *   ThreadPoolWorkQueue+QueueSegment:
+ *                        nodes, indexes (lo16=head, hi16=tail), Next
+ *
+ * Semantics (validated by tpq3.cs: three Task enqueues from a worker moved
+ * tail 0->3 and the steals moved head 0->3):
+ *   used = tail - head        items currently in that worker's deque
+ *   m_headIndex               cumulative STEALS (and TryDequeue) from it
+ *   m_tailIndex               LocalPush count minus LocalPop count
+ *
+ * A queue with used>0 and no live owner (owner=-1, matched by finding the
+ * ThreadPoolWorkQueueThreadLocals object on that worker's stack) is an
+ * orphan.  numOutstandingThreadRequests is the other half: a counter stuck
+ * above 0 means EnsureThreadRequested() will never ask for another worker.
+ */
+static struct {
+  void *wpq, *f_allq, *f_qhead, *f_qtail, *f_numout, *vt_wpq;
+  void *wsq, *f_arr, *f_mask, *f_head, *f_tail;
+  void *sa, *f_sa_arr;
+  void *seg, *f_nodes, *f_indexes, *f_next;
+  void *tl, *f_tl_wsq, *vt_tl;
+  void *globals, *f_workqueue, *vt_globals;
+  int state;
+  int nq;
+  void *q[16];
+  int own[16], qhead[16], qtail[16], qused[16], qcap[16];
+  int prev_ok[16], prev_head[16], prev_tail[16];
+  void *prev_q[16];
+} twq;
+
+static void *twq_arr_get(void *arr, int i) {
+  if (!arr || !mo.array_addr) return 0;
+  char *p = mo.array_addr(arr, 8, (unsigned long)i);
+  return p ? *(void **)p : 0;
+}
+
+static int twq_init(void) {
+  if (twq.state) return twq.state > 0;
+  twq.state = -1;
+  if (!tp.class_from_name || !tp.image_loaded || !mo.field_static_get_value ||
+      !mo.array_length || !mo.array_addr)
+    return 0;
+  void *img = tp.image_loaded("mscorlib");
+  if (!img) return 0;
+  void *wpq = tp.class_from_name(img, "System.Threading", "ThreadPoolWorkQueue");
+  if (!wpq) return 0;
+  twq.wpq = wpq;
+  twq.f_allq = mo.field_from_name(wpq, "allThreadQueues");
+  twq.f_qhead = mo.field_from_name(wpq, "queueHead");
+  twq.f_qtail = mo.field_from_name(wpq, "queueTail");
+  twq.f_numout = mo.field_from_name(wpq, "numOutstandingThreadRequests");
+  twq.wsq = tp_nested_cls(wpq, "WorkStealingQueue");
+  if (twq.wsq) {
+    twq.f_arr = mo.field_from_name(twq.wsq, "m_array");
+    twq.f_mask = mo.field_from_name(twq.wsq, "m_mask");
+    twq.f_head = mo.field_from_name(twq.wsq, "m_headIndex");
+    twq.f_tail = mo.field_from_name(twq.wsq, "m_tailIndex");
+  }
+  twq.seg = tp_nested_cls(wpq, "QueueSegment");
+  if (twq.seg) {
+    twq.f_nodes = mo.field_from_name(twq.seg, "nodes");
+    twq.f_indexes = mo.field_from_name(twq.seg, "indexes");
+    twq.f_next = mo.field_from_name(twq.seg, "Next");
+  }
+  twq.sa = tp_nested_cls(wpq, "SparseArray`1");
+  if (twq.sa) twq.f_sa_arr = mo.field_from_name(twq.sa, "m_array");
+  void *tl = tp.class_from_name(img, "System.Threading", "ThreadPoolWorkQueueThreadLocals");
+  if (tl) {
+    twq.tl = tl;
+    twq.f_tl_wsq = mo.field_from_name(tl, "workStealingQueue");
+    void *dom = tp.domain_get ? tp.domain_get() : 0;
+    if (dom && mo.class_vtable) twq.vt_tl = mo.class_vtable(dom, tl);
+  }
+  void *g = tp.class_from_name(img, "System.Threading", "ThreadPoolGlobals");
+  if (g) {
+    twq.globals = g;
+    twq.f_workqueue = mo.field_from_name(g, "workQueue");
+  }
+  twq.state = (twq.f_allq && twq.f_qhead && twq.f_qtail && twq.wsq && twq.f_arr &&
+               twq.f_head && twq.f_tail && twq.seg && twq.f_indexes && twq.f_next)
+                  ? 1 : -1;
+  void *dom = tp.domain_get ? tp.domain_get() : 0;
+  if (dom && mo.class_vtable && twq.state > 0) {
+    twq.vt_wpq = mo.class_vtable(dom, wpq);
+    if (g) twq.vt_globals = mo.class_vtable(dom, g);
+  }
+  if (twq.state > 0 && (!twq.vt_wpq || (g && !twq.vt_globals)))
+    twq.state = -1;
+  if (twq.state > 0) {
+    tp_w("[TPWP] inventory wpq=1 wsq=1 seg=1 allq=1 head/tail=1 tl=");
+    tp_wi(tl != 0);
+    tp_w(" globals=");
+    tp_wi(g != 0);
+    tp_w("\n");
+  } else {
+    tp_w("[TPWP] inventory INCOMPLETE (state=-1)\n");
+  }
+  return twq.state > 0;
+}
+
+/* One snapshot of every registered local deque.  Owner is filled later by
+ * twq_owner_scan() from each thread's captured stack. */
+static void twq_scan(void) {
+  twq.nq = 0;
+  if (!twq_init()) return;
+  void *sparse = 0;
+  mo.field_static_get_value(twq.vt_wpq, twq.f_allq, &sparse);
+  if (!sparse) { tp_w("[TPWP] allThreadQueues=null\n"); return; }
+  /* The field is declared on SparseArray<T>; ask the INSTANCE's class so the
+     generic instantiation resolves the field, not just the type definition. */
+  void *scls = mo.obj_get_class ? mo.obj_get_class(sparse) : 0;
+  void *farr = scls ? mo.field_from_name(scls, "m_array") : twq.f_sa_arr;
+  if (!farr) farr = twq.f_sa_arr;
+  void *arr = farr ? tp_f_p(farr, sparse) : 0;
+  int len = arr ? mo.array_length(arr) : 0;
+  if (len > 16) len = 16;
+  for (int i = 0; i < len; i++) {
+    void *q = twq_arr_get(arr, i);
+    if (!q) continue;
+    int k = twq.nq++;
+    twq.q[k] = q;
+    twq.own[k] = -1;
+    twq.qhead[k] = (int)tp_f_i4(twq.f_head, q);
+    twq.qtail[k] = (int)tp_f_i4(twq.f_tail, q);
+    twq.qused[k] = twq.qtail[k] - twq.qhead[k];
+    void *qa = tp_f_p(twq.f_arr, q);
+    twq.qcap[k] = qa ? mo.array_length(qa) : -1;
+  }
+}
+
+/* Map queue -> owner tid by finding the ThreadPoolWorkQueueThreadLocals object
+ * on the worker's own captured stack (exact vtable test, rule 102). */
+static void twq_owner_scan(int tid) {
+  if (!twq_init() || !twq.vt_tl || !twq.f_tl_wsq) return;
+  for (int i = 0; i < rw_stk_n; i++) {
+    unsigned long v = rw_stk_buf[i];
+    if (v < 0x10000000UL || v > 0x1800000000UL || (v & 7)) continue;
+    if (!rw_readable(v)) continue;
+    if (*(volatile void **)v != twq.vt_tl) continue;
+    void *w = tp_f_p(twq.f_tl_wsq, (void *)v);
+    if (!w) continue;
+    int hit = 0;
+    for (int k = 0; k < twq.nq; k++)
+      if (twq.q[k] == w) { twq.own[k] = tid; hit = 1; }
+    tp_w("[TPWO] tid=");
+    tp_wi(tid);
+    tp_w(" tloc=0x");
+    tp_wx(v);
+    tp_w(" q=0x");
+    tp_wx((unsigned long)w);
+    tp_w(" match=");
+    tp_wi(hit);
+    tp_w("\n");
+  }
+}
+
+static void twq_dump(const char *why) {
+  if (!twq_init()) return;
+  int nonempty = 0, items = 0, unowned_items = 0;
+  for (int k = 0; k < twq.nq; k++) {
+    if (twq.qused[k] > 0) {
+      nonempty++;
+      items += twq.qused[k];
+      if (twq.own[k] < 0) unowned_items += twq.qused[k];
+    }
+  }
+  /* Global QueueSegment chain.  queueHead/queueTail/numOutstandingThreadRequests
+     are INSTANCE fields of ThreadPoolWorkQueue; the instance is the static
+     ThreadPoolGlobals.workQueue (mono_field_static_get_value aborts on an
+     instance field -- measured object.c:3874). */
+  void *wq = 0;
+  if (twq.globals && twq.f_workqueue)
+    mo.field_static_get_value(twq.vt_globals, twq.f_workqueue, &wq);
+  int gdepth = 0, segs = 0;
+  void *s = wq ? tp_f_p(twq.f_qhead, wq) : 0;
+  for (int guard = 0; s && guard < 64; guard++) {
+    int idx = (int)tp_f_i4(twq.f_indexes, s);
+    int lo = idx & 0xffff, hi = (idx >> 16) & 0xffff;
+    int d = hi - lo;
+    if (d > 0) { gdepth += d; segs++; }
+    void *nodes = tp_f_p(twq.f_nodes, s);
+    tp_w("[TPWG] i=");
+    tp_wi(guard);
+    tp_w(" seg=0x");
+    tp_wx((unsigned long)s);
+    tp_w(" lo=");
+    tp_wi(lo);
+    tp_w(" hi=");
+    tp_wi(hi);
+    tp_w(" d=");
+    tp_wi(d);
+    tp_w(" nodes=");
+    tp_wx((unsigned long)nodes);
+    tp_w("\n");
+    s = tp_f_p(twq.f_next, s);
+  }
+  int outreq = -1;
+  if (wq && twq.f_numout) outreq = (int)tp_f_i4(twq.f_numout, wq);
+  tp_w("[TPWP] why=");
+  tp_w(why);
+  tp_w(" n=");
+  tp_wi(twq.nq);
+  tp_w(" nonempty=");
+  tp_wi(nonempty);
+  tp_w(" items=");
+  tp_wi(items);
+  tp_w(" unowned_items=");
+  tp_wi(unowned_items);
+  tp_w(" glob=");
+  tp_wi(gdepth);
+  tp_w(" outreq=");
+  tp_wi(outreq);
+  tp_w("\n");
+  for (int k = 0; k < twq.nq; k++) {
+    int dh = 0, dt = 0, have = 0;
+    for (int p = 0; p < 16; p++)
+      if (twq.prev_ok[p] && twq.prev_q[p] == twq.q[k]) {
+        dh = twq.qhead[k] - twq.prev_head[p];
+        dt = twq.qtail[k] - twq.prev_tail[p];
+        have = 1;
+      }
+    tp_w("[TPWL] i=");
+    tp_wi(k);
+    tp_w(" q=0x");
+    tp_wx((unsigned long)twq.q[k]);
+    tp_w(" head=");
+    tp_wi(twq.qhead[k]);
+    tp_w(" tail=");
+    tp_wi(twq.qtail[k]);
+    tp_w(" used=");
+    tp_wi(twq.qused[k]);
+    tp_w(" cap=");
+    tp_wi(twq.qcap[k]);
+    tp_w(" owner=");
+    tp_wi(twq.own[k]);
+    if (have) {
+      tp_w(" dhead=");
+      tp_wi(dh);
+      tp_w(" dtail=");
+      tp_wi(dt);
+    }
+    if (twq.qused[k] > 0) {
+      void *qa = tp_f_p(twq.f_arr, twq.q[k]);
+      int mask = (int)tp_f_i4(twq.f_mask, twq.q[k]);
+      int shown = 0;
+      tp_w(" itemcls=");
+      for (int i = twq.qhead[k]; i < twq.qtail[k] && shown < 4; i++) {
+        void *it = twq_arr_get(qa, i & mask);
+        const char *cn = it ? tp_obj_cls(it) : 0;
+        tp_w(shown ? "," : "");
+        tp_w(cn ? cn : (it ? "?" : "null"));
+        shown++;
+      }
+    }
+    tp_w("\n");
+  }
+  /* This snapshot becomes the baseline for the next [TPWL] dhead/dtail. */
+  for (int k = 0; k < 16; k++) twq.prev_ok[k] = 0;
+  for (int k = 0; k < twq.nq && k < 16; k++) {
+    twq.prev_ok[k] = 1;
+    twq.prev_q[k] = twq.q[k];
+    twq.prev_head[k] = twq.qhead[k];
+    twq.prev_tail[k] = twq.qtail[k];
+  }
+}
+
+/* ---- L53: the reverse monitor scan -------------------------------------
+ *
+ * [TPWM] dumps the monitor of the ManualResetEventSlim's m_lock, and at the
+ * stall that monitor has nwl=0 while the thread is plainly inside
+ * Monitor.ObjWait.  Either the waiter is on a DIFFERENT monitor (nested PLINQ
+ * has several) or the dumped object is not the waited-on one.  So find the
+ * monitor by its OWN wait_list: walk the captured stack, and for each word V
+ * that is a managed object with an INFLATED lock word, read its
+ * MonoThreadsSync and print it only when wait_list != NULL.  That is the
+ * monitor a parked thread is actually queued on -- no guessing which MRES is
+ * live.
+ *
+ * The same pass prints the native return addresses at the top of the stack
+ * ([TPWR]), which is what distinguishes mono_monitor_wait from
+ * mono_w32handle_wait_one/mono_wait_uninterrupted: both end in the same
+ * pthread_cond_wait, but their callers are different libmono offsets. */
+static void tp_native_first(int tid, int n) {
+  if (!rw_mod_n) rw_mods_collect();
+  int shown = 0;
+  for (int i = 0; i < rw_stk_n && i < n; i++) {
+    unsigned long v = rw_stk_buf[i];
+    if (v < 0x100000UL) continue;
+    unsigned long off = 0;
+    const char *m = rw_mod_of(v, &off);
+    if (!m) continue;
+    tp_w("[TPWR] tid=");
+    tp_wi(tid);
+    tp_w(" i=");
+    tp_wi(i);
+    tp_w(" ");
+    tp_w(m);
+    tp_w("+0x");
+    tp_wx(off);
+    tp_w("\n");
+    shown++;
+  }
+  if (!shown) {
+    tp_w("[TPWR] tid=");
+    tp_wi(tid);
+    tp_w(" no module address in the first ");
+    tp_wi(n);
+    tp_w(" words\n");
+  }
+}
+
+static void tp_scan_locks(int tid) {
+  if (!mo.obj_get_class || !tpc.state) return;
+  int shown = 0;
+  for (int i = 0; i < rw_stk_n && shown < 8; i++) {
+    unsigned long v = rw_stk_buf[i];
+    if (v < 0x10000000UL || v > 0x1800000000UL || (v & 7)) continue;
+    if (!rw_readable(v + 16)) continue;
+    unsigned long vt = *(volatile unsigned long *)v;
+    if (vt < 0x10000000UL || vt > 0x1800000000UL || !rw_readable(vt + 16)) continue;
+    unsigned long sy = *(volatile unsigned long *)(v + 8);
+    if ((sy & 3) != 2) continue;
+    unsigned long mon = sy & ~3UL;
+    if (!mon || !rw_readable(mon + 40)) continue;
+    unsigned long wl = *(volatile unsigned long *)((char *)mon + 16);
+    if (!wl || !rw_readable(wl + 16)) continue;
+    int nwl = 0;
+    unsigned long node = wl, ev = 0;
+    while (node && nwl < 8 && rw_readable(node + 16)) {
+      if (nwl == 0) ev = *(volatile unsigned long *)node;
+      node = *(volatile unsigned long *)((char *)node + 8);
+      nwl++;
+    }
+    if (nwl <= 0) continue;
+    unsigned int st = *(volatile unsigned int *)mon;
+    unsigned int nest = *(volatile unsigned int *)((char *)mon + 4);
+    tp_w("[TPWX] tid=");
+    tp_wi(tid);
+    tp_w(" obj=0x");
+    tp_wx(v);
+    tp_w(" vt=0x");
+    tp_wx(vt);
+    tp_w(" mon=0x");
+    tp_wx(mon);
+    tp_w(" status=0x");
+    tp_wx(st);
+    tp_w(" owner=");
+    tp_wi(st & 0xffff);
+    tp_w(" ent=");
+    tp_wi((st >> 16) & 0x7fff);
+    tp_w(" nest=");
+    tp_wi(nest);
+    tp_w(" wl=0x");
+    tp_wx(wl);
+    tp_w(" nwl=");
+    tp_wi(nwl);
+    if (ev && rw_readable(ev + 0x40)) {
+      tp_w(" ev=0x");
+      tp_wx(ev);
+      tp_w(" etype=");
+      tp_wi(*(volatile int *)ev);
+      tp_w(" sig=");
+      tp_wi(*(volatile int *)((char *)ev + 8));
+      tp_w(" cond=0x");
+      tp_wx(ev + 0x38);
+    }
+    tp_w("\n");
+    shown++;
+  }
+  if (!shown) {
+    tp_w("[TPWX] tid=");
+    tp_wi(tid);
+    tp_w(" no inflated monitor with a non-empty wait_list on the stack\n");
+  }
+}
+
+static void tp_mods_dump(void) {
+  if (!rw_mod_n) rw_mods_collect();
+  for (int i = 0; i < rw_mod_n; i++) {
+    tp_w("[RWMOD] ");
+    tp_w(rw_mods[i].name);
+    tp_w(" base=0x");
+    tp_wx(rw_mods[i].base);
+    tp_w(" end=0x");
+    tp_wx(rw_mods[i].end);
+    tp_w("\n");
+  }
+}
+
+/* ------------------------------------------------------------------------
+ * L53: read the MonoW32Handle a parked waiter is actually blocked on.
+ *
+ * The native loop at libmono+0x20dd00 is mono_w32handle_wait_one: it loads
+ * handle->type at +0, calls the type's wait op, then re-checks
+ * handle->signalled at +8 and loops while it is 0.  The handle pointer is a
+ * stack local (mov 0x8(%rsp),%rdi), so it is IN the captured stack.  A
+ * plausible MonoW32Handle is {int type; u32 ref; int signalled; int in_use;}
+ * with small values; print every candidate with its signalled flag.  This
+ * separates "the producer never set the event" (sig=0) from "the event was
+ * set and the wake was lost" (sig=1) below Mono.
+ */
+static void tp_scan_handles(int tid) {
+  int shown = 0;
+  for (int i = 0; i < rw_stk_n && i < 160 && shown < 8; i++) {
+    unsigned long v = rw_stk_buf[i];
+    if (v < 0x1000000000UL || v > 0x1400000000UL || (v & 7)) continue;
+    if (!rw_readable(v + 0x70)) continue;
+    int type = *(volatile int *)v;
+    unsigned int ref = *(volatile unsigned int *)((char *)v + 4);
+    int sig = *(volatile int *)((char *)v + 8);
+    int inuse = *(volatile int *)((char *)v + 12);
+    if (type < 1 || type > 16 || ref == 0 || ref > 0x100000) continue;
+    if (sig < 0 || sig > 1 || inuse < 0 || inuse > 1) continue;
+    tp_w("[TPWW] tid=");
+    tp_wi(tid);
+    tp_w(" i=");
+    tp_wi(i);
+    tp_w(" handle=0x");
+    tp_wx(v);
+    tp_w(" type=");
+    tp_wi(type);
+    tp_w(" ref=");
+    tp_wi((long)ref);
+    tp_w(" sig=");
+    tp_wi(sig);
+    tp_w(" in_use=");
+    tp_wi(inuse);
+    tp_w(" cond=0x");
+    tp_wx(v + 0x38);
+    tp_w("\n");
+    shown++;
+  }
+}
+
+/* Name the native target of a managed extern: lookup_icall is exactly what
+ * the JIT binds, and rw_mod_of turns it into a file offset we can disassemble
+ * offline.  This is how mono_monitor_wait vs mono_w32handle_wait_one stops
+ * being a guess. */
+static void tp_one_icall(void *img, const char *cls, const char *meth, int arity,
+                         const char *tag) {
+  void *k = tp.class_from_name(img, "System.Threading", cls);
+  void *m = 0;
+  int a = 0;
+  if (k) for (a = arity; a >= 2; a--) { m = tp.method_from_name(k, meth, a); if (m) break; }
+  void *f = (m && tp.lookup_icall) ? tp.lookup_icall(m) : 0;
+  unsigned long off = 0;
+  const char *mod = f ? rw_mod_of((unsigned long)f, &off) : 0;
+  tp_w("[TPIC] ");
+  tp_w(tag);
+  tp_w(" arity=");
+  tp_wi(a);
+  tp_w(" fn=0x");
+  tp_wx((unsigned long)f);
+  if (mod) {
+    tp_w(" ");
+    tp_w(mod);
+    tp_w("+0x");
+    tp_wx(off);
+  }
+  tp_w("\n");
+}
+
+static void tp_icall_rows(void) {
+  if (!tp.image_loaded || !tp.class_from_name || !tp.method_from_name || !tp.lookup_icall) return;
+  void *img = tp.image_loaded("mscorlib");
+  if (!img) return;
+  if (!rw_mod_n) rw_mods_collect();
+  tp_one_icall(img, "Monitor", "Monitor_wait", 3, "Monitor.Monitor_wait");
+  tp_one_icall(img, "Monitor", "ObjWait", 4, "Monitor.ObjWait");
+  tp_one_icall(img, "WaitHandle", "Wait_internal", 5, "WaitHandle.Wait_internal");
+  tp_one_icall(img, "NativeEventCalls", "SetEvent_internal", 1, "NativeEventCalls.SetEvent_internal");
+}
+
 /* TASK_STATE_* as this mscorlib defines them (Task.cs). */
 static void tp_state_words(long f) {
   int any = 0;
@@ -1757,7 +2252,9 @@ static void tp_task_row(int tid, void *t) {
   tp_w(" ev=0x");
   tp_wx((unsigned long)ev);
   tp_w(" set=");
-  tp_wi(comb & 1);
+  tp_wi((comb >> 31) & 1);
+  tp_w(" waiters=");
+  tp_wi(comb & 0x7ffff);
   tp_w("\n");
 }
 
@@ -1903,9 +2400,15 @@ static void tp_dump_sync(int tid, void *lockobj) {
   }
   unsigned int st = *(volatile unsigned int *)mon;
   unsigned int nest = *(volatile unsigned int *)((char *)mon + 4);
-  unsigned long wl = *(volatile unsigned long *)((char *)mon + 8);
-  unsigned long em = *(volatile unsigned long *)((char *)mon + 24);
-  unsigned long ec = *(volatile unsigned long *)((char *)mon + 32);
+  /* Unity's Mono 6.12 is built with HAVE_MOVING_COLLECTOR: an extra i32
+     hash_code sits between nest and wait_list, so wait_list is +16, data +24,
+     entry_mutex +32, entry_cond +40.  Measured: data held 0x14 (a small
+     MonoGCHandle) where a pointer would be -- the +8 "wait_list" of the
+     non-moving layout is always 0 here, which is why every earlier dump read
+     nwl=0 on a monitor that certainly had a waiter. */
+  unsigned long wl = *(volatile unsigned long *)((char *)mon + 16);
+  unsigned long em = *(volatile unsigned long *)((char *)mon + 32);
+  unsigned long ec = *(volatile unsigned long *)((char *)mon + 40);
   tp_w(" mon=0x");
   tp_wx(mon);
   tp_w(" status=0x");
@@ -1925,8 +2428,8 @@ static void tp_dump_sync(int tid, void *lockobj) {
   int nwl = 0;
   unsigned long node = wl, ev = 0;
   while (node && nwl < 8 && rw_readable(node + 16)) {
-    if (nwl == 0) ev = *(volatile unsigned long *)((char *)node + 8);
-    node = *(volatile unsigned long *)node;
+    if (nwl == 0) ev = *(volatile unsigned long *)node;   /* GSList.data */
+    node = *(volatile unsigned long *)((char *)node + 8); /* GSList.next */
     nwl++;
   }
   tp_w(" nwl=");
@@ -2046,6 +2549,10 @@ static int tp_capture_tid(int tid, int wait_ms) {
  * the main thread waits for. */
 static void tp_probe_stall(int at) {
   tp_cls_init();
+  {
+    static int icall_done;
+    if (!icall_done) { icall_done = 1; tp_icall_rows(); }
+  }
   int self = (int)gettid();
   tp_w("[TPWT] sample t=");
   tp_wi(at);
@@ -2059,12 +2566,19 @@ static void tp_probe_stall(int at) {
   tp_wx((unsigned long)tpc.vt_mres);
   tp_w("\n");
   int live = 0;
+  twq_scan();
   for (int tid = 1; tid <= 120; tid++) {
     if (tid == self) continue;
     int n = tp_capture_tid(tid, 400);
     if (n <= 0) continue;
     live++;
     tp_seen_n = 0;
+    twq_owner_scan(tid);
+    if (tid == (int)getpid()) {
+      tp_native_first(tid, 48);
+      tp_scan_locks(tid);
+      tp_scan_handles(tid);
+    }
     tp_w("[TPWA] tid=");
     tp_wi(tid);
     tp_w(" sp=0x");
@@ -2080,6 +2594,7 @@ static void tp_probe_stall(int at) {
   tp_w("[TPWT] sample done live=");
   tp_wi(live);
   tp_w("\n");
+  twq_dump("stall");
   if (tp_poke_on() && tp_poke_lock) tp_poke("stall");
 }
 
@@ -2438,6 +2953,9 @@ static void rw_tp_maybe_start(void *handle, const char *name) {
   mo.class_vtable = (void *(*)(void *, void *))dlsym(handle, "mono_class_vtable");
   mo.field_from_name = (void *(*)(void *, const char *))dlsym(handle, "mono_class_get_field_from_name");
   mo.field_get_value = (void (*)(void *, void *, void *))dlsym(handle, "mono_field_get_value");
+  mo.field_static_get_value = (void (*)(void *, void *, void *))dlsym(handle, "mono_field_static_get_value");
+  mo.array_length = (int (*)(void *))dlsym(handle, "mono_array_length");
+  mo.array_addr = (char *(*)(void *, int, unsigned long))dlsym(handle, "mono_array_addr_with_size");
   mo.obj_get_class = (void *(*)(void *))dlsym(handle, "mono_object_get_class");
   mo.nested = (void *(*)(void *, void **))dlsym(handle, "mono_class_get_nested_types");
   mo.class_namespace = (const char *(*)(void *))dlsym(handle, "mono_class_get_namespace");
@@ -2447,6 +2965,7 @@ static void rw_tp_maybe_start(void *handle, const char *name) {
   tp_w(" add_icall=");
   tp_wx((unsigned long)tp.add_icall);
   tp_w("\n");
+  tp_mods_dump();
   if (!tp.get_root_domain || !tp.add_icall || !tp.lookup_icall || !tp.image_loaded) {
     tp_w("[TPQ] probe OFF: a needed Mono API symbol is missing\n");
     tp.on = 0;
