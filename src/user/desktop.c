@@ -807,6 +807,10 @@ void wm_handle_app_escape(int win_id, char* seq) {
         windows[j].pixel_mode = 1;
         windows[j].pix_pref_w = pw < 0 ? 0 : pw;
         windows[j].pix_pref_h = ph < 0 ? 0 : ph;
+        /* L62: with /WMSIZE staged the request is honoured here (the window is
+         * its content rect + chrome); without it this is a no-op and the
+         * window keeps its tile, which is the shipped behaviour. */
+        wm_pixel_apply_pref(&windows[j]);
         windows[j].rendered_valid = 0;  /* the WM no longer paints it */
         wm_pixel_send_geometry(&windows[j]);
         wm_pixel_queue_expose_all(&windows[j]);
@@ -2045,6 +2049,24 @@ int main(void) {
     exit(0);
   }
   wm_init();
+  /* L62: /WMSIZE makes the WM honour a pixel-mode client's requested content
+   * size.  Staged only by the fps ladder (tools/rw/run-rimworld-desktop.sh
+   * RW_WM_HONOUR=1); absent, the WM tiles every window as it always has. */
+  {
+    int wf = open("/WMSIZE", 0 /* O_RDONLY */);
+    if (wf >= 0) {
+      char wb[8];
+      int wn = (int)read(wf, wb, sizeof wb - 1);
+      close(wf);
+      /* Content-gated ("1"/"on"), not presence-gated: the image has no
+       * mdel(1) in this environment, so a marker that is staged once cannot
+       * be removed -- it can only be rewritten. */
+      if (wn > 0 && (wb[0] == '1' || wb[0] == 'o' || wb[0] == 'y')) {
+        wm_honour_pixel_pref(1);
+        print("Desktop: /WMSIZE -> pixel-mode window sizes are honoured\n");
+      }
+    }
+  }
   load_menu();
 
   mouse_x = SCREEN_WIDTH / 2;

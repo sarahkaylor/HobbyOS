@@ -292,6 +292,12 @@ extern "C" {
    * menu, one piece at a time through wm_pixel_send_expose, because the
    * menus must stay above the app's pixels. */
   void wm_pixel_content_rect(const struct window *win, int *x, int *y, int *w, int *h);
+  /* L62: honour a pixel-mode client's requested content size (ESC ] X) instead
+   * of always handing it the full tile.  Off unless wm_honour_pixel_pref(1);
+   * the desktop turns it on when /WMSIZE is staged, so the shipped layout is
+   * unchanged for every other app and gate. */
+  void wm_honour_pixel_pref(int on);
+  void wm_pixel_apply_pref(struct window *win);
   int  wm_pixel_resize(struct window *win);
   void wm_pixel_send_geometry(struct window *win);
   void wm_pixel_queue_expose(struct window *win, int x, int y, int w, int h);
