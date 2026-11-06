@@ -177,8 +177,15 @@ static void sys_write_console(struct trap_frame *tf) {
 static void sys_exit(struct trap_frame *tf) {
   struct process *cur = current_process();
   /* GB-021: a musl pthread exits with exit(60), not SYS_THREAD_EXIT(74).
-     A clone(2) child must leave only its thread; the group stays alive. */
-  if (cur && cur->is_thread) {
+     A clone(2) child must leave only its thread; the group stays alive.
+     GB-216: that carve-out is for the LINUX-ABI clone(2) children only
+     (abi_flags carries PROC_FLAG_LINUX_ABI from the anchor).  A native
+     HobbyOS thread calling exit() must terminate the whole group, exactly
+     as process_exit's contract says ("SYS_EXIT keeps exit_group meaning
+     from ANY thread") -- and as ARM's SYS_EXIT already does.  Before this,
+     THRD_T's exit(7)-from-a-secondary-thread left the group alive and the
+     parent's waitpid() never returned. */
+  if (cur && cur->is_thread && (cur->abi_flags & PROC_FLAG_LINUX_ABI)) {
     process_thread_exit(tf, tf->regs[5]);
     return;
   }

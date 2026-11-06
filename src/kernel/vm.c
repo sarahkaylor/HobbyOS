@@ -19,6 +19,7 @@
 #include "file_obj.h" /* so-vm lane A: VM_OBJ_FILE page cache */
 #include "frame.h"
 #include "fs.h" /* P2.4 (S4): memfd object lookup for fd-backed mmap */
+#include "kline.h" /* GB-216: one-write [ASCLONE]/[AS-TD] records */
 #include "lock.h"
 #include "process.h"
 
@@ -156,6 +157,16 @@ struct addr_space *vm_as_create(uint64_t tgid) {
 void vm_as_teardown(struct addr_space *as) {
   if (!as || as->ver != AS_V2)
     return;
+  /* GB-216: a group AS can only die while its leader is still RUNNING if some
+     other path tore it down; the record names the space and its region count,
+     and its position in the serial says which step did it.  One write (kline):
+     a multi-put record shreds against a peer CPU (GB-068/GB-082). */
+  { static int td; if (td < 6) { td++;
+    struct kline k; kl_init(&k);
+    kl_s(&k, "[AS-TD] tgid="); kl_i(&k, (long)as->tgid);
+    kl_s(&k, " nr="); kl_i(&k, as->nr);
+    kl_s(&k, " res="); kl_i(&k, (long)as->resident_frames);
+    kl_s(&k, "\n"); kl_emit(&k); } }
   vm_lock_init_once();
   uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
   if (as->ver != AS_V2) {
@@ -1945,10 +1956,60 @@ static void vm_frame_copy(uint64_t dst, uint64_t src, uint64_t n) {
 }
 
 int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
-  if (!src || src->ver != AS_V2 || !dst || dst->ver != AS_V2)
+  /* GB-216: the caller prints one "[KERNEL] fork: AS clone failed" and the
+     four silent returns here were indistinguishable from each other -- the
+     threaded-fork defect could not be attributed past "it returned 1".  One
+     record per failure names the clause, the region index and the VA;
+     rate-limited to the first 3 per boot so a 47-start suite cannot flood
+     the UART (the GB-146 console-storm lesson). */
+  static int asclone_n;
+  static int asclone_begin_n;
+  #define ASCLONE(why, idx, va) do {                                  \
+    if (asclone_n < 3) {                                              \
+      asclone_n++;                                                    \
+      struct kline k; kl_init(&k);                                    \
+      kl_s(&k, "[ASCLONE] "); kl_s(&k, why);                          \
+      kl_s(&k, " i="); kl_i(&k, idx);                                 \
+      kl_s(&k, " va="); kl_hex(&k, (unsigned long)(va));              \
+      kl_s(&k, " free="); kl_i(&k, frame_free_count());               \
+      kl_s(&k, "\n"); kl_emit(&k);                                    \
+    }                                                                 \
+  } while (0)
+
+  if (!src || !dst) {
+    ASCLONE(src ? "dst-null" : "src-null", -1, 0);
     return -1;
-  if (dst->nr != 0)
-    return -1; /* only into a fresh AS */
+  }
+  if (src->ver != AS_V2 || dst->ver != AS_V2) {
+    if (asclone_n < 3) {
+      asclone_n++;
+      struct kline k; kl_init(&k);
+      kl_s(&k, "[ASCLONE] ver srcver="); kl_i(&k, src->ver);
+      kl_s(&k, " dstver="); kl_i(&k, dst->ver);
+      kl_s(&k, " srctgid="); kl_i(&k, (long)src->tgid);
+      kl_s(&k, " dsttgid="); kl_i(&k, (long)dst->tgid);
+      kl_s(&k, " srcnr="); kl_i(&k, src->nr);
+      kl_s(&k, " free="); kl_i(&k, frame_free_count());
+      kl_s(&k, "\n"); kl_emit(&k);
+    }
+    return -1;
+  }
+  if (dst->nr != 0) {
+    ASCLONE("dst-not-fresh", dst->nr, 0); /* only into a fresh AS */
+    return -1;
+  }
+
+  /* One census per boot: the clone's own inputs, so a frame-OOM verdict can
+     be read off the same record as the failure. */
+  if (asclone_begin_n < 1) {
+    asclone_begin_n++;
+    struct kline k; kl_init(&k);
+    kl_s(&k, "[ASCLONE] begin srcnr="); kl_i(&k, src->nr);
+    kl_s(&k, " srcres="); kl_i(&k, (long)src->resident_frames);
+    kl_s(&k, " dstnr="); kl_i(&k, dst->nr);
+    kl_s(&k, " free="); kl_i(&k, frame_free_count());
+    kl_s(&k, "\n"); kl_emit(&k);
+  }
 
   /* L9 (pagein): the image source is process-group state (the same flat
      file backs both share spaces); a child that faults a lazy IMAGE page
@@ -2022,8 +2083,10 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
         } else {
           /* Private (copy-on-write) page: copy frame-by-frame. */
           phys = frame_alloc_zeroed();
-          if (!phys)
+          if (!phys) {
+            ASCLONE("alloc-cow", i, a);
             goto fail;
+          }
           vm_frame_copy(phys, lphys, FRAME_SIZE);
         }
       } else if (r.kind == VMK_FB) {
@@ -2031,8 +2094,10 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
       } else {
         /* Private page: copy frame-by-frame (D10 resident-copy fork). */
         phys = frame_alloc_zeroed();
-        if (!phys)
+        if (!phys) {
+          ASCLONE("alloc-private", i, a);
           goto fail;
+        }
         vm_frame_copy(phys, vm_arch_leaf_phys(leaf), FRAME_SIZE);
       }
       if (vm_map_page(dst, a, phys, r.prot, mkind) != 0) {
@@ -2054,6 +2119,8 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
 
 fail:
   /* The caller tears `dst` down (it may be a process PCB's AS). */
+  ASCLONE("fail", i, 0);
+  #undef ASCLONE
   return -1;
 }
 
