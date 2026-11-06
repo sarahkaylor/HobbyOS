@@ -195,6 +195,12 @@ for rel in UnityPlayer.so \
            RimWorldLinux_Data/Plugins/lib_burst_generated.so \
            RimWorldLinux_Data/Plugins/libsteam_api.so; do
   src="/srv/nfs/rimworld/$rel"
+  # L61: a probe build of the runtime (a byte-patched assert site) is staged
+  # from RW_MONO_SO instead of the export, so the shared export is never
+  # modified and the probe is named in the run's own output.
+  case "$rel" in
+    *libmonobdwgc-2.0.so) [ -n "${RW_MONO_SO:-}" ] && src="$RW_MONO_SO" ;;
+  esac
   [ -f "$src" ] || { echo "ENVIRONMENT: missing $src"; exit 2; }
   stage "$src" "::/RWDSO/${rel##*/}"
 done
@@ -249,7 +255,11 @@ if [ "$(stat -c %s /srv/nfs/rimworld/RimWorldLinux)" = 14720 ]; then
   cp -f /srv/nfs/rimworld/RimWorldLinux /srv/nfs/rimworld/RimWorldLinux.orig
 fi
 cp -f "$OUT/RimWorldLinux.ad9" /srv/nfs/rimworld/RimWorldLinux
-echo "  installed: $(stat -c '%s bytes' /srv/nfs/rimworld/RimWorldLinux) -> RimWorldLinux"
+# L61: the export is shared with other lanes, whose harnesses install their own
+# launcher over /NFS/RimWorldLinux.  This private name is what rwlaunch prefers,
+# so a concurrent lane cannot swap the binary under this run's guest.
+cp -f "$OUT/RimWorldLinux.ad9" /srv/nfs/rimworld/RimWorldLinux.l61
+echo "  installed: $(stat -c '%s bytes' /srv/nfs/rimworld/RimWorldLinux) -> RimWorldLinux (+ RimWorldLinux.l61)"
 
 # The desktop's Apps menu launches root entries by name; this is the launcher.
 stage "$OUT/rwlaunch.bin" ::/RWLAUNCH.BIN
@@ -266,6 +276,15 @@ else
 fi
 # L42: /SIGQUITON makes rwlaunch send SIGQUIT to the game at 60 s, which is
 # Mono's own full managed thread dump ("Full thread dump:" in Player.log).
+# L61: /INTERP makes the launcher export MONO_ENV_OPTIONS=--interp, the
+# interpreter control (same binary, same assemblies, no JIT codegen).
+if [ "${RW_INTERP:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/interpon"
+  stage "$OUT/interpon" ::/INTERP
+  echo "  staged: /INTERP -> MONO_ENV_OPTIONS=--interp (interpreter control)"
+else
+  mdel -i "$IMG" ::/INTERP >/dev/null 2>&1 || true
+fi
 if [ "${RW_SIGQUIT:-0}" = 1 ]; then
   printf 'on\n' >"$OUT/sigquiton"
   stage "$OUT/sigquiton" ::/SIGQUITON
