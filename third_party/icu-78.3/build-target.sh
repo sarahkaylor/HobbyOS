@@ -213,7 +213,13 @@ fi
 # --- 2. host stage (tools for the cross buildroot) -------------------------
 if [ ! -x "${CROSS_ROOT}/bin/genrb" ]; then
   log "host tools missing in ${CROSS_ROOT}; running build-host.sh (JOBS=${JOBS})"
-  JOBS="${JOBS}" bash "${VENDOR_DIR}/build-host.sh"
+  # This stage is a HOST build: a host configure run through the bare-metal
+  # driver dies at "cannot run C compiled programs" (configure exit 77).
+  # CC/CXX arrive from the caller (the Makefile passes its own) and, because
+  # bash keeps the export attribute on an imported variable, our target CC
+  # below would leak into build-host.sh.  Scrub them; build-host.sh falls
+  # back to its `cc`/`c++` defaults (GB-214).
+  env -u CC -u CXX JOBS="${JOBS}" bash "${VENDOR_DIR}/build-host.sh"
 fi
 [ -x "${CROSS_ROOT}/bin/genrb" ]          || die "cross buildroot tool ${CROSS_ROOT}/bin/genrb missing"
 [ -f "${CROSS_ROOT}/config/icucross.mk" ] || die "cross buildroot ${CROSS_ROOT}/config/icucross.mk missing (run build-host.sh)"
