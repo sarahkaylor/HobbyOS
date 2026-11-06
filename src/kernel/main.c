@@ -520,6 +520,16 @@ void main(void) {
 #endif
   uart_puts("VirtIO Block successfully initialized.\n");
 
+#if defined(__x86_64__) && VGPU3D_SELFTEST
+  /* M1 (docs/rimworld-virgl-plan.md): the kernel-only 3D clear + readback
+   * gate.  Placed here, not in virtio_gpu_init(), because timer_get_ms()
+   * only becomes trustworthy after the first PIT tick has calibrated the
+   * TSC -- the probe's submit+readback timing row needs a real clock.
+   * virtio_gpu_3d_probe() is a no-op unless VIRTIO_GPU_F_VIRGL was
+   * negotiated, so 2D-only boots do not even enter it. */
+  virtio_gpu_3d_probe();
+#endif
+
   /* Block-level read cache (docs/blk-cache.md section 7): normal boots
      enable it right after the driver (and before fat16_init, so boot
      reads are cached).  Unit-test mode initializes it from unit_test.c

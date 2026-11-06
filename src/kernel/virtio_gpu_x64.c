@@ -277,6 +277,11 @@ static struct virtio_gpu_transfer_to_host_2d gpu_req_transfer;
 static struct virtio_gpu_resource_flush gpu_req_flush;
 static struct virtio_gpu_ctrl_hdr gpu_resp;
 
+/* M1: VIRTIO_GPU_F_VIRGL was offered by the device and is in our accepted
+ * driver-feature set.  virtio_gpu_3d.c reads these (the 2D path never does). */
+int virtio_gpu_x64_virgl_offered = 0;
+int virtio_gpu_x64_virgl_negotiated = 0;
+
 #if G2_VPCI_DBG
 static int gpu_dbg_cmds = 0;
 #endif
@@ -381,29 +386,42 @@ static uint64_t vpci_bar_phys(uint8_t bus, uint8_t slot, uint8_t bar) {
 
 /* --- control queue command submission -------------------------------- */
 
-static int gpu_transact(const void* req, uint32_t req_len, const void* data, uint32_t data_len) {
+/* M1: generic transaction with a caller-supplied response buffer.  The 3D
+ * commands need two things the 2D helper never did:
+ *   - a response larger than the 24-byte header (GET_CAPSET's capset blob),
+ *   - the used-ring length + the device's response type, so a rejected 3D
+ *     command can be reported verbatim instead of a bare "failed".
+ * `data` is an optional second readable descriptor (attach-backing entry
+ * list, command stream); when NULL the chain is req -> resp. */
+int virtio_gpu_x64_transact_ex(const void* req, uint32_t req_len,
+                               const void* data, uint32_t data_len,
+                               void* resp, uint32_t resp_cap,
+                               uint32_t* resp_len, uint32_t* resp_type) {
   if (gpu_failed || gpu_qsize == 0 || !gpu_cc) return -1;
+  if (!req || req_len == 0 || !resp || resp_cap < sizeof(struct virtio_gpu_ctrl_hdr))
+    return -1;
+  if (data_len && !data) return -1;
+  if (!data) data_len = 0;
 
   gpu_desc[0].addr = (uint64_t)req;
   gpu_desc[0].len = req_len;
   gpu_desc[0].flags = VQ_DESC_F_NEXT;
   gpu_desc[0].next = 1;
-  if (data) {
+
+  uint16_t last = 1;
+  if (data_len) {
     gpu_desc[1].addr = (uint64_t)data;
     gpu_desc[1].len = data_len;
     gpu_desc[1].flags = VQ_DESC_F_NEXT;
     gpu_desc[1].next = 2;
-    gpu_desc[2].addr = (uint64_t)&gpu_resp;
-    gpu_desc[2].len = sizeof(gpu_resp);
-    gpu_desc[2].flags = VQ_DESC_F_WRITE;
-    gpu_desc[2].next = 0;
-  } else {
-    gpu_desc[1].addr = (uint64_t)&gpu_resp;
-    gpu_desc[1].len = sizeof(gpu_resp);
-    gpu_desc[1].flags = VQ_DESC_F_WRITE;
-    gpu_desc[1].next = 0;
+    last = 2;
   }
-  gpu_resp.type = 0;
+
+  gpu_desc[last].addr = (uint64_t)resp;
+  gpu_desc[last].len = resp_cap;
+  gpu_desc[last].flags = VQ_DESC_F_WRITE;
+  gpu_desc[last].next = 0;
+  *(volatile uint32_t*)resp = 0; /* resp.type, cleared before the kick */
 
   gpu_avail.ring[gpu_avail_next % gpu_qsize] = 0; /* head descriptor */
   arch_memory_barrier();
@@ -439,14 +457,19 @@ static int gpu_transact(const void* req, uint32_t req_len, const void* data, uin
   }
   arch_memory_barrier();
   gpu_used_ack = *(volatile uint16_t*)&gpu_used.idx;
+  uint32_t used_len = gpu_used.ring[ack0 % gpu_qsize].len;
   arch_memory_barrier();
+
+  uint32_t rtype = *(volatile uint32_t*)resp;
+  if (resp_len) *resp_len = used_len;
+  if (resp_type) *resp_type = rtype;
 
 #if G2_VPCI_DBG
   if (gpu_dbg_cmds < 12) {
     uart_puts("G2DBG cmd ok spins=");
     print_int((int)(spins > 500000000ull ? 500000000 : (int)spins));
     uart_puts(" rt=");
-    uart_print_hex(gpu_resp.type);
+    uart_print_hex(rtype);
     uart_puts(" req=");
     uart_print_hex(*(volatile uint32_t*)req);
     uart_puts("\n");
@@ -454,9 +477,19 @@ static int gpu_transact(const void* req, uint32_t req_len, const void* data, uin
   gpu_dbg_cmds++;
 #endif
 
-  if (gpu_resp.type >= 0x1200) return -1; /* RESP_ERR_* */
+  if (rtype >= 0x1200) return -1; /* RESP_ERR_* */
   return 0;
 }
+
+static int gpu_transact(const void* req, uint32_t req_len, const void* data, uint32_t data_len) {
+  return virtio_gpu_x64_transact_ex(req, req_len, data, data_len, &gpu_resp,
+                                    sizeof(gpu_resp), 0, 0);
+}
+
+/* M1: the 3D layer shares this lock with the 2D present path, so a submit
+ * can never interleave with a scanout transfer on the one control queue. */
+uint64_t virtio_gpu_x64_lock(void) { return spinlock_acquire_irqsave(&gpu_lock); }
+void virtio_gpu_x64_unlock(uint64_t flags) { spinlock_release_irqrestore(&gpu_lock, flags); }
 
 /* Read the ISR (clearing any pending interrupt state).  INTx is disabled
  * in the PCI command register; this is ack hygiene only. */
@@ -581,7 +614,12 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   gpu_cc_w8(VPCI_CC_DEVICE_STATUS, VPCI_STATUS_ACK);
   gpu_cc_w8(VPCI_CC_DEVICE_STATUS, VPCI_STATUS_ACK | VPCI_STATUS_DRIVER);
 
-  /* Feature negotiation: accept VIRTIO_F_VERSION_1 only (2D-only driver). */
+  /* Feature negotiation: VIRTIO_F_VERSION_1 always; VIRTIO_GPU_F_VIRGL only
+   * when the device offers it (the GL device does, plain virtio-gpu-pci does
+   * not -- docs/rimworld-virgl-plan.md P2).  VIRTIO_GPU_F_CONTEXT_INIT is
+   * deliberately left un-negotiated in M1: the legacy CTX_CREATE layout and
+   * capset 1 (VIRGL) are all M1 needs, and declining it keeps the context
+   * command shape independent of the capset version. */
   gpu_cc_w32(VPCI_CC_DEV_FEAT_SEL, 0);
   uint32_t feat_lo = gpu_cc_r32(VPCI_CC_DEV_FEAT);
   gpu_cc_w32(VPCI_CC_DEV_FEAT_SEL, 1);
@@ -595,8 +633,13 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
 #endif
   if (!(feat_hi & VPCI_F_VERSION_1)) return -1;
 
+  virtio_gpu_x64_virgl_offered =
+      (feat_lo & (1u << VIRTIO_GPU_F_VIRGL)) ? 1 : 0;
+  uint32_t drv_lo = 0;
+  if (virtio_gpu_x64_virgl_offered) drv_lo |= (1u << VIRTIO_GPU_F_VIRGL);
+
   gpu_cc_w32(VPCI_CC_DRV_FEAT_SEL, 0);
-  gpu_cc_w32(VPCI_CC_DRV_FEAT, 0);
+  gpu_cc_w32(VPCI_CC_DRV_FEAT, drv_lo);
   gpu_cc_w32(VPCI_CC_DRV_FEAT_SEL, 1);
   gpu_cc_w32(VPCI_CC_DRV_FEAT, VPCI_F_VERSION_1);
 
@@ -604,6 +647,7 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
             VPCI_STATUS_ACK | VPCI_STATUS_DRIVER | VPCI_STATUS_FEATURES_OK);
   arch_memory_barrier();
   if (!(gpu_cc_r8(VPCI_CC_DEVICE_STATUS) & VPCI_STATUS_FEATURES_OK)) return -1;
+  virtio_gpu_x64_virgl_negotiated = virtio_gpu_x64_virgl_offered;
 
   /* Control queue (0): size, addresses, enable. */
   gpu_cc_w16(VPCI_CC_QUEUE_SEL, VGPU_QUEUE_ID);
@@ -632,8 +676,13 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   gpu_cc_w8(VPCI_CC_DEVICE_STATUS, VPCI_STATUS_ACK | VPCI_STATUS_DRIVER |
                                        VPCI_STATUS_FEATURES_OK | VPCI_STATUS_DRIVER_OK);
 
-  /* 2D resource + scanout. */
-  return vgpu_resource_setup();
+  /* 2D resource + scanout (the desktop's one hard dependency). */
+  if (vgpu_resource_setup() != 0) return -1;
+
+  /* M1: capset discovery.  Any 3D failure here is contained: the 2D path
+   * above already owns the scanout, so the desktop boots either way. */
+  if (virtio_gpu_x64_virgl_negotiated) virtio_gpu_3d_init();
+  return 0;
 }
 
 /* Probe the PCI bus for a modern virtio GPU and bring it up. */
@@ -739,6 +788,9 @@ int virtio_gpu_init(void) {
   if (vgpu_probe_and_bringup() == 0) {
     gpu_mode = VGPU_MODE_VIRTIO;
     uart_puts("VirtIO GPU: virtio-pci\n");
+    /* The M1 3D gate (virtio_gpu_3d_probe) is called from main() AFTER the
+     * timer is calibrated, so its timing rows carry a real clock.  It runs
+     * only when VIRTIO_GPU_F_VIRGL was negotiated. */
     virtio_gpu_flush();
     return 0;
   }

@@ -13,6 +13,7 @@
 #include "timer.h"
 #include "vm.h" /* P2.4 (S4): memfd objects */
 #include "frame.h" /* M5: fs_read_image contiguous image frames */
+#include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -625,6 +626,11 @@ int file_open(struct process *cur, const char *filename, int flags) {
     int isconsole = (rest[0] == '/' && rest[1] == 'c' && rest[2] == 'o' &&
                      rest[3] == 'n' && rest[4] == 's' && rest[5] == 'o' &&
                      rest[6] == 'l' && rest[7] == 'e' && rest[8] == '\0');
+    /* M1 (docs/gpu-abi.md): /dev/gpu -- the virtio-gpu 3D ABI node.  It owns
+       no data of its own; the ioctl half lives in gpu_abi.c and the close
+       half releases the client's context/resources. */
+    int isgpu = (rest[0] == '/' && rest[1] == 'g' && rest[2] == 'p' &&
+                 rest[3] == 'u' && rest[4] == '\0');
     if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
       f->open_flags = (uint32_t)flags;
@@ -636,6 +642,9 @@ int file_open(struct process *cur, const char *filename, int flags) {
       f->open_flags = (uint32_t)flags;
     } else if (isconsole) {
       f->type = FILE_TYPE_CONSOLE;
+      f->open_flags = (uint32_t)flags;
+    } else if (isgpu) {
+      f->type = FILE_TYPE_DEVGPU;
       f->open_flags = (uint32_t)flags;
     } else {
       f->type = FILE_TYPE_EMPTY;
@@ -1804,7 +1813,7 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   } else {
     *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK ||
              f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL ||
-             f->type == FILE_TYPE_DEVFB)
+             f->type == FILE_TYPE_DEVFB || f->type == FILE_TYPE_DEVGPU)
                 ? ESPIPE : EINVAL;
     return -1;
   }
@@ -1949,6 +1958,11 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     return 0;
   case FILE_TYPE_DEVFB:
     k_stat_fill(st, K_DEV_DEVFS, 4, K_S_IFCHR | 0644, 0);
+    return 0;
+  case FILE_TYPE_DEVGPU:
+    /* M1: the 3D ABI node -- character device, root-only in spirit but 0666
+       like the other device nodes (there is no uid model on this node). */
+    k_stat_fill(st, K_DEV_DEVFS, 5, K_S_IFCHR | 0666, 0);
     return 0;
   default:
     *errp = EBADF;
@@ -2260,6 +2274,7 @@ int file_close(struct process *cur, int fd) {
    * closing ANY fd of a FAT16 file drops this process's locks on it. */
   int lock_release = (f->type == FILE_TYPE_FAT16);
   uint64_t lock_id = lock_release ? file_lock_id(f) : 0;
+  int isgpu = (f->type == FILE_TYPE_DEVGPU); /* M1: released after f->lock */
 
   /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
    * blocked peers, which takes proc_lock — and the documented order is
@@ -2303,6 +2318,10 @@ int file_close(struct process *cur, int fd) {
 
   if (pp) pipe_close(pp, bend);
   else if (uu) usock_close(uu, bend);
+
+  /* M1 /dev/gpu: dropping the fd drops the client's context and resources.
+   * Outside f->lock (the release path sends control commands). */
+  if (isgpu) gpu_abi_release_fd(cur, fd);
 
   if (lock_release) file_locks_release(cur->pid, lock_id);
 
@@ -3106,6 +3125,18 @@ int file_is_devfb(struct process *p, int fd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return 0;
   return global_file_table[gfd].type == FILE_TYPE_DEVFB;
+}
+
+/* M1 (docs/gpu-abi.md): is `fd` the /dev/gpu node?  The compat ioctl route
+ * and the close hook share this predicate. */
+int file_is_devgpu(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return 0;
+  return global_file_table[gfd].type == FILE_TYPE_DEVGPU;
 }
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) for memfd (design 4.3, OQ7 minimal set:
