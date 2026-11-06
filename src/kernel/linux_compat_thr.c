@@ -2540,6 +2540,46 @@ static void l_sf_fill_siginfo(uint64_t base, int sig, int code,
   }
 }
 
+/* M6/L59: name the reason a signal frame could not be planted.  Before this
+ * row, `l_sf_plant` returned 0 and the caller either answered "default action"
+ * (a pending signal) or, on the FAULT path, silently let `process_fault_exit`
+ * kill the process -- which is exactly §45.8's `status=11` with no handler
+ * dump.  One row per (pid, reason), bounded.
+ */
+static void l_sf_fail(struct process *p, int sig, struct trap_frame *tf,
+                      const char *why, uint64_t extra) {
+  static uint8_t sf_rows[MAX_PROCESSES];
+  int i = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+  if (!i || sf_rows[i] >= 4)
+    return;
+  sf_rows[i]++;
+  uint64_t asp = 0, asize = 0;
+  int astate = -1;
+  (void)linux_compat_altstack_get(p, &asp, &asize, &astate);
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[SIGPL] FAIL pid=");
+  kl_i(&kl, p->pid);
+  kl_s(&kl, " sig=");
+  kl_i(&kl, sig);
+  kl_s(&kl, " why=");
+  kl_s(&kl, why);
+  kl_s(&kl, " arg=0x");
+  kl_hex(&kl, (unsigned long)extra);
+  kl_s(&kl, " rsp=0x");
+  kl_hex(&kl, (unsigned long)(tf ? tf->lr : 0));
+  kl_s(&kl, " alt_sp=0x");
+  kl_hex(&kl, (unsigned long)asp);
+  kl_s(&kl, " alt_sz=");
+  kl_i(&kl, (long)asize);
+  kl_s(&kl, " alt_st=");
+  kl_i(&kl, astate);
+  kl_s(&kl, " live=");
+  kl_i(&kl, process_group(p)->live_threads);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
 /* Plant the frame for `sig` on the current thread.  Returns 1 on success. */
 static int l_sf_plant(struct process *p, struct process *cur,
                       struct process *grp, struct trap_frame *tf, int sig,
@@ -2552,8 +2592,10 @@ static int l_sf_plant(struct process *p, struct process *cur,
   int flags = linux_compat_sigflags_get(p, sig);
   int on_altstack = 0;
 
-  if (restorer == 0 || !l_user_ok(p, restorer, 4, 0))
+  if (restorer == 0 || !l_user_ok(p, restorer, 4, 0)) {
+    l_sf_fail(p, sig, tf, "restorer", restorer);
     return 0;
+  }
 
   if ((flags & L_SA_ONSTACK) != 0) {
     uint64_t asp = 0, asize = 0;
@@ -2574,17 +2616,23 @@ static int l_sf_plant(struct process *p, struct process *cur,
      %xmm0,(%rax,%rdi,8)` wrote to VA 0x2882A106F8 — a different address and
      module each run.  An altstack has no red zone, so it is not skipped. */
   if (!on_altstack) {
-    if (sp < 128)
+    if (sp < 128) {
+      l_sf_fail(p, sig, tf, "sp-low", sp);
       return 0;
+    }
     sp -= 128;
   }
-  if (sp < (uint64_t)L_SF_SIZE + 64)
+  if (sp < (uint64_t)L_SF_SIZE + 64) {
+    l_sf_fail(p, sig, tf, "sp-tight", sp);
     return 0;
+  }
   /* Linux enters a signal handler with rsp ≡ 8 (mod 16); see the layout
      note above for why the frame must start 8 bytes below the boundary. */
   uint64_t base = ((sp - (uint64_t)L_SF_SIZE) & ~(uint64_t)15) - 8;
-  if (vm_touch(p, base, L_SF_SIZE, 1) != 0)
+  if (vm_touch(p, base, L_SF_SIZE, 1) != 0) {
+    l_sf_fail(p, sig, tf, "touch", base);
     return 0;
+  }
   /* M6/L37: an ASSERTION row per delivery, not an observation.  Linux's rule
      is exact: the frame must lie entirely outside the interrupted function's
      red zone, i.e. `base + L_SF_SIZE <= rsp0 - 128` (SA_ONSTACK: no red
@@ -2705,6 +2753,48 @@ static int l_sf_plant(struct process *p, struct process *cur,
   }
   /* M6/L36: record what this frame will have to give back at rt_sigreturn. */
   l_sf_record(p, tf, base, orig_sp, sig, on_altstack, ipc);
+  /* M6/L59: one row per fatal-family delivery, bounded PER PID.  §45.8's
+     410 s death was `status=11` with no row at all: [SIGD] is capped at 48
+     globally and Boehm's GC signals spend that before the asset phase, and a
+     fault-kill prints only if the kernel took the fault itself.  This row
+     names the delivery even when the signal came from the process's own
+     raise()/tgkill (which leaves no kernel fault row), and it carries the
+     thread count and the altstack flag that decide "stack overflow with no
+     altstack" (handler cannot run) from "handler ran and exited". */
+  if (sig == HO_SIGSEGV || sig == HO_SIGBUS || sig == HO_SIGILL ||
+      sig == HO_SIGABRT) {
+    static uint8_t sx_rows[MAX_PROCESSES];
+    int xi = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+    if (xi && sx_rows[xi] < 8) {
+      sx_rows[xi]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGX] pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " tid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " tgid=");
+      kl_i(&kl, p->tgid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " code=");
+      kl_i(&kl, code);
+      kl_s(&kl, " addr=0x");
+      kl_hex(&kl, (unsigned long)fault_addr);
+      kl_s(&kl, " ipc=0x");
+      kl_hex(&kl, (unsigned long)ipc);
+      kl_s(&kl, " rsp=0x");
+      kl_hex(&kl, (unsigned long)tf->lr);
+      kl_s(&kl, " h=0x");
+      kl_hex(&kl, (unsigned long)handler);
+      kl_s(&kl, " alt=");
+      kl_i(&kl, on_altstack);
+      kl_s(&kl, " live=");
+      kl_i(&kl, grp->live_threads);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   return 1;
 }
 
@@ -3057,12 +3147,59 @@ int linux_compat_fault(struct process *p, struct trap_frame *tf, int signo) {
     }
   }
   struct process *grp = process_group(p);
-  if (grp->sig_handler[signo] <= HO_SIG_IGN)
+  if (grp->sig_handler[signo] <= HO_SIG_IGN) {
+    /* M6/L59: a fault with NO handler installed is the shape §45.8's 410 s
+       death had (status=11, nothing else).  Name it, per pid bounded, with
+       the thread count at the instant: "no handler" must never be silence. */
+    static uint8_t nhr[MAX_PROCESSES];
+    int ni = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+    if (ni && nhr[ni] < 4) {
+      nhr[ni]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LCOMPAT] fault-no-handler pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, signo);
+      kl_s(&kl, " ipc=0x");
+      kl_hex(&kl, (unsigned long)tf->elr);
+      kl_s(&kl, " rsp=0x");
+      kl_hex(&kl, (unsigned long)tf->lr);
+      kl_s(&kl, " vec=");
+      kl_i(&kl, (int)tf->vector);
+      kl_s(&kl, " live=");
+      kl_i(&kl, grp->live_threads);
+      kl_s(&kl, " -> default action\n");
+      kl_emit(&kl);
+    }
     return 0;
+  }
   if ((tf->cs & 3) != 3)
     return 0;
-  if (p->sig_in_handler)
+  if (p->sig_in_handler) {
+    /* A fault inside a signal handler cannot be dumped into a second frame on
+       the same stack; the default action is right, but it is not silent. */
+    static uint8_t ihr[MAX_PROCESSES];
+    int hi = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+    if (hi && ihr[hi] < 4) {
+      ihr[hi]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LCOMPAT] fault-in-handler pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, signo);
+      kl_s(&kl, " ipc=0x");
+      kl_hex(&kl, (unsigned long)tf->elr);
+      kl_s(&kl, " rsp=0x");
+      kl_hex(&kl, (unsigned long)tf->lr);
+      kl_s(&kl, " live=");
+      kl_i(&kl, grp->live_threads);
+      kl_s(&kl, " -> default action\n");
+      kl_emit(&kl);
+    }
     return 0; /* a fault inside the handler: the default action is right */
+  }
   int code = L_SEGV_MAPERR;
   uint64_t fault_addr = 0;
   if (tf->vector == 14)
@@ -3076,6 +3213,28 @@ int linux_compat_fault(struct process *p, struct trap_frame *tf, int signo) {
   p->sig_in_handler = 1;
   if (!l_sf_plant(p, p, grp, tf, signo, code, fault_addr)) {
     p->sig_in_handler = 0;
+    /* l_sf_plant has already printed [SIGPL] FAIL with the reason; this row is
+       the consequence: the process is about to die with the fault's signal and
+       no handler ever ran. */
+    {
+      static uint8_t fph[MAX_PROCESSES];
+      int fi = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+      if (fi && fph[fi] < 4) {
+        fph[fi]++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[LCOMPAT] fault-no-frame pid=");
+        kl_i(&kl, p->pid);
+        kl_s(&kl, " sig=");
+        kl_i(&kl, signo);
+        kl_s(&kl, " ipc=0x");
+        kl_hex(&kl, (unsigned long)tf->elr);
+        kl_s(&kl, " live=");
+        kl_i(&kl, grp->live_threads);
+        kl_s(&kl, " -> process dies with the raw signal\n");
+        kl_emit(&kl);
+      }
+    }
     return 0;
   }
   return 1;

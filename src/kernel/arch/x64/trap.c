@@ -39,6 +39,7 @@
 #include "linux_compat.h"  /* compat handler-table dispatch + [LCOMPAT] tracer */
 #include "vfs.h"
 #include "vm.h"
+#include "frame.h"
 #include "rw_watch.h"
 #include "blk_cache.h"
 #include "fb_mmap.h"
@@ -3117,7 +3118,7 @@ void lapic_send_eoi(void) {
    the lock, so under 8 CPUs the record interleaved at every call boundary and
    ~43% of fault lines were unparseable -- which is how several wrong readings
    of this fault survived: the evidence itself was being shredded. */
-struct fl_buf { char b[448]; int n; };
+struct fl_buf { char b[704]; int n; };
 static void fl_s(struct fl_buf *f, const char *s2) {
   while (*s2 && f->n < (int)sizeof f->b - 1) f->b[f->n++] = *s2++;
 }
@@ -3469,6 +3470,18 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       // The PIT is the global time base and is wired to the boot core only.
       timer_reload();
 
+      /* M6/L59: 5 s thread census, [THRS] (docs/rimworld-launch-log.md §46).
+         The 600 s run climbs in live threads and dies at ~410 s; the curve is
+         the evidence, and 5 s costs one row per live compat group. */
+      {
+        extern void rw_thr_sample(void);
+        static uint32_t thr_ticks;
+        if (++thr_ticks >= 500) {
+          thr_ticks = 0;
+          rw_thr_sample();
+        }
+      }
+
       // Broadcast rescheduling IPI (vector 0x81) to all other cores.
       // Bit 14 stays clear: it is defined for level-triggered delivery only.
       *(volatile uint32_t*)(0xFEE00300) = 0x000C0081;
@@ -3587,6 +3600,28 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           fl_s(&fl, " region=");
           if (!fr) {
             fl_s(&fl, "NONE");
+            /* M6/L59: a hole with a mapped region just above it is a guard
+               page or a stack that walked past its bottom -- the stack-overflow
+               verdict.  `below` is the distance to that region's base, so a
+               value under 0x1000 with a writable anon/stack region is a
+               one-page overrun, not a wild pointer. */
+            {
+              extern struct vm_region *vm_region_above(struct addr_space *, uint64_t, uint64_t);
+              struct vm_region *nb =
+                  cur->as ? vm_region_above(cur->as, cr2, 0x200000) : 0;
+              if (nb) {
+                fl_s(&fl, " near=");
+                fl_hex(&fl, nb->base);
+                fl_s(&fl, "+");
+                fl_hex(&fl, nb->len);
+                fl_s(&fl, " below=");
+                fl_hex(&fl, nb->base - cr2);
+                fl_s(&fl, " nkind=");
+                fl_dec(&fl, (int)nb->kind);
+                fl_s(&fl, " nprot=");
+                fl_dec(&fl, (int)nb->prot);
+              }
+            }
           } else {
             fl_hex(&fl, fr->base);
             fl_c(&fl, '+');
@@ -3597,6 +3632,17 @@ static void general_interrupt_inner(struct trap_frame *tf) {
             fl_dec(&fl, (int)fr->kind);
           }
         }
+        /* M6/L59: the two numbers §45.8 lacked.  `live` is the group's thread
+           count at the fault instant (the [THRS] curve gives the shape, this
+           gives the value), `rsp` says whether the faulting stack pointer was
+           already outside any region, and `inH` says the fault happened inside
+           a signal handler (the one case where no handler dump is possible). */
+        fl_s(&fl, " rsp=");
+        fl_hex(&fl, tf->lr);
+        fl_s(&fl, " live=");
+        fl_dec(&fl, process_group(cur)->live_threads);
+        fl_s(&fl, " inH=");
+        fl_dec(&fl, cur->sig_in_handler);
         {
           uint64_t cur_cr3;
           __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
@@ -3664,6 +3710,137 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         fb[fi++] = '\n';
         fb[fi] = 0;
         uart_puts(fb);
+      }
+      /* M6/L59: WHICH mapping the faulting PC belongs to, and whether it is
+         the JIT arena.  §45.8's ~410 s death is a #UD (vector 6) at a PC that
+         is not in any DSO; a "#UD in executable anon memory" is a JIT code
+         fault (a freed/reused code chunk) and is a completely different fix
+         from "#UD in a DSO" (an unsupported instruction).  The region and the
+         arena bounds decide it in one row. */
+      {
+        extern void uart_puts_raw(const char *s);
+        extern void uart_print_hex_raw(uint64_t v);
+        extern void print_int_raw(int val);
+        struct vm_region *rg = cur->as ? vm_region_find(cur->as, tf->elr) : 0;
+        uart_puts_raw("[KERNEL] fault-pc region=");
+        if (!rg) {
+          uart_puts_raw("NONE");
+        } else {
+          uart_print_hex_raw(rg->base);
+          uart_puts_raw("+");
+          uart_print_hex_raw(rg->len);
+          uart_puts_raw(" prot=");
+          print_int_raw((int)rg->prot);
+          uart_puts_raw(" kind=");
+          print_int_raw((int)rg->kind);
+        }
+        uart_puts_raw(" jit=");
+        uart_puts_raw(cur->as && cur->as->jit_base &&
+                              tf->elr >= cur->as->jit_base &&
+                              tf->elr < cur->as->jit_end
+                          ? "1"
+                          : "0");
+        uart_puts_raw(" live=");
+        print_int_raw(process_group(cur)->live_threads);
+        uart_puts_raw(" err=");
+        uart_print_hex_raw((uint64_t)tf->error_code);
+        uart_puts_raw(" rsp=");
+        uart_print_hex_raw((uint64_t)tf->lr);
+        uart_puts_raw("\n");
+      }
+      /* M6/L59: the register file at the fault, printed by the KERNEL before
+         any delivery attempt.  §45.8's ~410 s death is a #UD (vector 6) whose
+         RIP is not on an instruction boundary of the file (measured: run 2
+         landed two bytes into a `call`, run 3 on a byte that decodes as
+         `push %rbx`), which is what a corrupted control-flow target looks
+         like: execution started in the middle of a function and desynchronised
+         into an invalid opcode.  The signal frame could not be planted for
+         that fault, so no user-space dump exists; this row is the only place
+         the jump target's provenance (a register or a stack slot) is visible. */
+      {
+        extern void uart_puts(const char *s);
+        extern void uart_print_hex(uint64_t v);
+        extern void print_int(int v);
+        static int kr_rows;
+        if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) && kr_rows < 12) {
+          kr_rows++;
+          struct fl_buf kr;
+          kr.n = 0;
+          fl_s(&kr, "[KREG] pid=");
+          fl_dec(&kr, cur->pid);
+          fl_s(&kr, " vec=");
+          fl_dec(&kr, (int)tf->vector);
+          fl_s(&kr, " erc=");
+          fl_hex(&kr, (uint64_t)tf->error_code);
+          fl_s(&kr, " rip=");
+          fl_hex(&kr, (uint64_t)tf->elr);
+          fl_s(&kr, " rsp=");
+          fl_hex(&kr, (uint64_t)tf->lr);
+          static const char *rn[16] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi",
+                                       "rbp", "r8",  "r9",  "r10", "r11", "r12",
+                                       "r13", "r14", "r15", "rsp0"};
+          for (int i = 0; i < 15; i++) {
+            fl_s(&kr, " ");
+            fl_s(&kr, rn[i]);
+            fl_s(&kr, "=");
+            fl_hex(&kr, (uint64_t)tf->regs[i]);
+          }
+          fl_s(&kr, "\n");
+          kr.b[kr.n] = 0;
+          uart_puts(kr.b);
+        }
+      }
+      /* M6/L59: when the fault is a #UD inside a file-backed executable
+         region, compare the bytes in memory with the bytes in the file.  A
+         match means the CPU was pointed at a valid-but-wrong instruction (a
+         corrupted control-flow target); a difference means this kernel served
+         a text page that does not hold the file's bytes (a VM/lifetime bug).
+         Those are different fixes, and this row is the only thing that
+         separates them. */
+      if (tf->vector == 6 && cur->as) {
+        struct vm_region *ur = vm_region_find(cur->as, tf->elr);
+        if (ur && ur->obj && ur->obj->kind == VM_OBJ_FILE &&
+            (ur->prot & VM_PROT_EXEC) && ur->obj->file_start_cluster) {
+          static uint8_t fpage[FRAME_SIZE];
+          uint64_t uoff = (tf->elr & ~0xFFFULL) - ur->base + ur->obj_off;
+          int fn = fat16_read_direct_pos(ur->obj->file_start_cluster,
+                                         (uint32_t)ur->obj->size,
+                                         (uint64_t)(uintptr_t)fpage,
+                                         FRAME_SIZE, (uint32_t)uoff);
+          const uint8_t *mem = (const uint8_t *)tf->elr;
+          int inpage = (int)(tf->elr & 0xFFF);
+          int same = 1;
+          if (fn != (int)FRAME_SIZE) {
+            same = 0;
+          } else {
+            for (int i = 0; i < 16; i++)
+              if (mem[i] != fpage[inpage + i]) {
+                same = 0;
+                break;
+              }
+          }
+          struct fl_buf uc;
+          uc.n = 0;
+          fl_s(&uc, "[UDCHK] off=");
+          fl_hex(&uc, uoff);
+          fl_s(&uc, " rd=");
+          fl_dec(&uc, fn);
+          fl_s(&uc, " pagecmp=");
+          fl_s(&uc, same ? "match" : "DIFF");
+          fl_s(&uc, " mem=");
+          for (int i = 0; i < 8; i++) {
+            fl_hex(&uc, (uint64_t)mem[i]);
+            fl_c(&uc, ' ');
+          }
+          fl_s(&uc, " file=");
+          for (int i = 0; i < 8 && fn == (int)FRAME_SIZE; i++) {
+            fl_hex(&uc, (uint64_t)fpage[inpage + i]);
+            fl_c(&uc, ' ');
+          }
+          fl_s(&uc, "\n");
+          uc.b[uc.n] = 0;
+          uart_puts(uc.b);
+        }
       }
       /* w5 (ii): a user-mode exception (BRK/#UD/#GP/...) kills with a
          signal status, never a stale-x0 exit code (rc=0 false pass). */
@@ -3847,6 +4024,14 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           }
           uart_puts_raw("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
           print_int_raw(cur->pid);
+          uart_puts_raw(" cr2=");
+          uart_print_hex_raw(kcr2);
+          uart_puts_raw(" rip=");
+          uart_print_hex_raw((uint64_t)tf->elr);
+          uart_puts_raw(" rsp=");
+          uart_print_hex_raw((uint64_t)tf->lr);
+          uart_puts_raw(" live=");
+          print_int_raw(process_group(cur)->live_threads);
           uart_puts_raw("\n");
           process_fault_exit(tf, 11); /* SIGSEGV status byte */
           /* process_fault_exit -> process_exit -> schedule() never

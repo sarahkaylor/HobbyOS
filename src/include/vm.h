@@ -278,6 +278,14 @@ int vm_region_insert(struct addr_space *as, uint64_t base, uint64_t len,
 /* Sorted lookup (binary search); NULL when `va` is not covered. */
 struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
 
+/* M6/L59: nearest region starting above `va` within `limit` bytes (a guard
+   page / stack-underflow classifier).  Diagnostics only. */
+struct vm_region *vm_region_above(struct addr_space *as, uint64_t va,
+                                  uint64_t limit);
+int vm_as_census(struct addr_space *as, int *nr, int *anon, int *stack,
+                 uint64_t *anon_bytes, uint64_t *biggest_anon,
+                 uint64_t *resident, uint64_t *peak);
+
 /* Split-aware removal of [base, base+len) (idempotent). */
 int vm_region_remove(struct addr_space *as, uint64_t base, uint64_t len);
 
@@ -518,6 +526,12 @@ void vm_arch_switch(struct addr_space *as);
    idle entry) and by vm_arch_teardown before freeing tables. */
 void vm_arch_restore_kernel(void);
 void vm_arch_flush_va(struct addr_space *as, uint64_t va);
+
+/* M6/L59: architecturally complete local flush of `as` (CR3 reload).  INVLPG
+ * is enough for a single 4 KiB leaf, but a *parent* table installed by another
+ * CPU is only guaranteed to be seen after a CR3 reload on every
+ * implementation; the retry path uses this once the cheap flush has failed. */
+void vm_arch_reload_cr3(struct addr_space *as);
 void vm_arch_shootdown(struct addr_space *as);
 
 #endif /* VM_H */

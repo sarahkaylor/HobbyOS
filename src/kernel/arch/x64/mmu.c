@@ -545,6 +545,16 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
   x64_invlpg(va);
 }
 
+/* M6/L59: the complete flush.  Same effect as the shootdown handler's reload
+ * (vector 0x82) but local and without an IPI: used by the present-leaf retry
+ * path after INVLPG alone has failed to change the hardware's mind. */
+void vm_arch_reload_cr3(struct addr_space *as) {
+  if (!as || !as->root_phys)
+    return;
+  uint64_t cr3 = as->root_phys;
+  __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+}
+
 /* Shootdown IPI (vector 0x82, OQ5): sent only when the AS is claimed on
  * another CPU (cpu_current_pids scan).  The handler reloads CR3 when this
  * CPU runs the target AS; the sender waits for acks with a bounded spin.

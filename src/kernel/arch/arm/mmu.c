@@ -643,6 +643,13 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
   arm_v2_flush_va(as->asid, va);
 }
 
+/* M6/L59: the x64 retry path reloads CR3 for a complete local flush.  On ARM
+ * the VA+ASID invalidation above is already complete; keep the symbol so the
+ * arch-independent fault path links on both targets. */
+void vm_arch_reload_cr3(struct addr_space *as) {
+  (void)as;
+}
+
 void vm_arch_shootdown(struct addr_space *as) {
   (void)as; /* ARM invalidations are already broadcast per VA/ASID */
 }

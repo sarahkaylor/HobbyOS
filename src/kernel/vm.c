@@ -663,6 +663,72 @@ int vm_region_install_fixed(struct addr_space *as, uint64_t base,
   return rc;
 }
 
+/* ---- M6/L59: read-only region census of one address space ----------------
+ * §45.8's 600 s run climbed in live threads and then died at ~410 s with no
+ * kernel fault row.  The census is what separates a thread leak (one 8 MiB
+ * stack mmap per live thread that never goes away) from a thread pool that is
+ * legitimately wide: `regions` includes every thread's stack + guard split,
+ * `anon` counts the VMK_ANON ones (user mmaps: thread stacks, malloc arenas),
+ * `stack` the VMK_STACK ones (main stack + kernel-made stacks).  Called from
+ * the PIT tick, so it must be short and must not allocate: it takes vm_lock
+ * and copies seven scalars out.
+ */
+int vm_as_census(struct addr_space *as, int *nr, int *anon, int *stack,
+                 uint64_t *anon_bytes, uint64_t *biggest_anon,
+                 uint64_t *resident, uint64_t *peak) {
+  if (!as || as->ver != AS_V2)
+    return -1;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  int n = as->nr;
+  int a = 0, s = 0;
+  uint64_t ab = 0, bg = 0;
+  for (int i = 0; i < n; i++) {
+    const struct vm_region *r = &as->regions[i];
+    if (r->kind == VMK_ANON) {
+      a++;
+      ab += r->len;
+      if (r->len > bg)
+        bg = r->len;
+    } else if (r->kind == VMK_STACK) {
+      s++;
+    }
+  }
+  uint64_t res = (uint64_t)as->resident_frames;
+  uint64_t pk = (uint64_t)as->peak_frames;
+  spinlock_release_irqrestore(&vm_lock, fl);
+  if (nr) *nr = n;
+  if (anon) *anon = a;
+  if (stack) *stack = s;
+  if (anon_bytes) *anon_bytes = ab;
+  if (biggest_anon) *biggest_anon = bg;
+  if (resident) *resident = res;
+  if (peak) *peak = pk;
+  return 0;
+}
+
+/* M6/L59: the region that begins at or above `va`, when it is within `limit`
+ * bytes.  A fault in the hole immediately below a mapped region is either a
+ * guard page or a stack that walked past its bottom, and the two numbers that
+ * decide which are this base and the distance.  Read-only; the returned
+ * pointer is used for a print and never dereferenced through the lock.
+ */
+struct vm_region *vm_region_above(struct addr_space *as, uint64_t va,
+                                  uint64_t limit) {
+  if (!as || as->ver != AS_V2)
+    return 0;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  struct vm_region *out = 0;
+  for (int i = 0; i < as->nr; i++) {
+    struct vm_region *r = &as->regions[i];
+    if (r->base >= va && r->base - va <= limit) {
+      out = r;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return out;
+}
+
 struct vm_region *vm_region_find(struct addr_space *as, uint64_t va) {
   if (!as || as->ver != AS_V2)
     return 0;
@@ -1276,6 +1342,45 @@ static void cow_diag(struct vm_region *r, uint64_t a, uint64_t leaf) {
                                             : " src=private\n");
 }
 
+/* M6/L59: a fault that was RESOLVED ends the retry episode.
+ *
+ * The budget below is documented as "FAULT_RETRY_MAX *consecutive* retries on
+ * the same VA", but twice it did not mean that:
+ *   - only the retry branch ever touched the state, so no successful fault
+ *     cleared it and four unrelated episodes over minutes armed an instant kill
+ *     on the fifth;
+ *   - the state lived in the ADDRESS SPACE, so every thread of the group shared
+ *     one counter.  A page that several Boehm GC threads touch at once then
+ *     accumulates one "retry" per THREAD: five workers each taking a single
+ *     legitimate stale-translation fault on the same page killed the fifth,
+ *     which is exactly the measured `[VMK] retry-budget` row (run 5: a pool
+ *     worker killed in the 1 GiB brk heap, `prot=3 kind=2`).
+ * The budget has to be per-thread ("THIS thread keeps refaulting with no
+ * progress"), because a peer's independent fault is not evidence about this
+ * one.  Keyed by pid: a reused pid starts clean because its VA never matches.
+ */
+#define RW_RTY_SLOTS (MAX_PROCESSES + 1)
+static uint64_t rty_va[RW_RTY_SLOTS];
+static uint8_t rty_n[RW_RTY_SLOTS];
+
+static int rty_slot(void) {
+  struct process *p = current_process();
+  if (p && p->pid > 0 && p->pid < MAX_PROCESSES)
+    return p->pid;
+  /* No PCB (unit tests, kernel context): one shared slot, so the budget still
+     bounds and still kills exactly as it did before this lane. */
+  return MAX_PROCESSES;
+}
+
+static void vm_fault_resolved(struct addr_space *as) {
+  (void)as;
+  int i = rty_slot();
+  if (i) {
+    rty_va[i] = 0;
+    rty_n[i] = 0;
+  }
+}
+
 int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why) {
   if (why)
@@ -1334,8 +1439,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
       }
       /* The mapping changed under this VA: the next fault here is a new
          event, not a repeat of this one. */
-      as->retry_va = a;
-      as->retry_count = 0;
+      vm_fault_resolved(as);
       spinlock_release_irqrestore(&vm_lock, fl);
       vm_arch_flush_va(as, a);
       return 0; /* retry the instruction against the private copy */
@@ -1351,19 +1455,161 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
        is a TLB flush + re-execute, never a kill.  A page that
        GENUINELY refaults is bounded -- FAULT_RETRY_MAX consecutive
        retries on the same VA and the slot is a real fault -> kill. */
-    if (as->retry_va != a) {
-      as->retry_va = a;
-      as->retry_count = 1;
-    } else if (as->retry_count >= FAULT_RETRY_MAX) {
+    /* M6/L59: the 600 s RimWorld run kills a Boehm pool worker here with
+       `in=PROT region=..prot=3 kind=3` and a #PF error code of 0x6 (NOT
+       PRESENT, write, user): the hardware says the page is absent while this
+       walk says it is there.  That combination has exactly two causes (a stale
+       translation the flush is not reaching, or a racing unmap that re-maps the
+       page between the hardware walk and this one), and the previous evidence
+       could not tell them apart because nothing recorded the branch, the leaf
+       or the repeat count.  [VMRT] does, and it is bounded: a healthy run has
+       none, this bug has a handful. */
+    uint64_t leaf = 0;
+    int have_leaf = (vm_arch_walk(as, a, &leaf) == 0);
+    int rslot = rty_slot();
+    int rc_now = (rslot && rty_va[rslot] == a) ? rty_n[rslot] : -1;
+    {
+      static int vrt_rows;
+      if (vrt_rows < 24) {
+        vrt_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[VMRT] pid=");
+        kl_i(&kl, grp ? grp->pid : -1);
+        kl_s(&kl, " va=0x");
+        kl_hex(&kl, (unsigned long)va);
+        kl_s(&kl, " leaf=");
+        kl_hex(&kl, (unsigned long)leaf);
+        kl_s(&kl, " present=");
+        kl_i(&kl, have_leaf ? 1 : 0);
+        kl_s(&kl, " prev=");
+        kl_i(&kl, rc_now);
+        kl_s(&kl, " prot=");
+        kl_i(&kl, (int)r->prot);
+        kl_s(&kl, " kind=");
+        kl_i(&kl, (int)r->kind);
+        kl_s(&kl, " w=");
+        kl_i(&kl, write ? 1 : 0);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+    if (rslot && rty_va[rslot] != a) {
+      rty_va[rslot] = a;
+      rty_n[rslot] = 1;
+    } else if (rslot && rty_n[rslot] >= FAULT_RETRY_MAX) {
+      {
+        static int vk_rows;
+        if (vk_rows < 16) {
+          vk_rows++;
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[VMK] retry-budget pid=");
+          kl_i(&kl, grp ? grp->pid : -1);
+          kl_s(&kl, " va=0x");
+          kl_hex(&kl, (unsigned long)va);
+          kl_s(&kl, " n=");
+          kl_i(&kl, rty_n[rslot]);
+          kl_s(&kl, " leaf=");
+          kl_hex(&kl, (unsigned long)leaf);
+          kl_s(&kl, " base=0x");
+          kl_hex(&kl, (unsigned long)r->base);
+          kl_s(&kl, " prot=");
+          kl_i(&kl, (int)r->prot);
+          kl_s(&kl, " kind=");
+          kl_i(&kl, (int)r->kind);
+          kl_c(&kl, '\n');
+          kl_emit(&kl);
+        }
+      }
       spinlock_release_irqrestore(&vm_lock, fl);
       if (why)
         *why = "PROT";
       return 1;
-    } else {
-      as->retry_count++;
+    } else if (write && !r->obj && have_leaf && !vm_arch_leaf_writable(leaf)) {
+      /* M6/L59: the VMA allows the write and the leaf is present but
+       * READ-ONLY, with no object to copy from — the page is private
+       * anonymous data (heap or thread stack).  Linux's answer is do_wp_page:
+       * hand back a writable private page.  Retrying the same instruction can
+       * never succeed (measured: `[VMRT] ... leaf=0x...007 prot=3 kind=3 w=1`
+       * — RW clear in a writable anon VMA), and the old code just counted
+       * retries until it killed the faulting thread, which is how a Boehm pool
+       * worker died in the 1 GiB brk heap and froze the def pass at 48-63 MiB.
+       * The frame is already this AS's private page, so upgrade it in place. */
+      vm_arch_prot(as, a, r->prot);
+      {
+        static int fx_rows;
+        if (fx_rows < 8) {
+          fx_rows++;
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[VMFIX] prot-up pid=");
+          kl_i(&kl, grp ? grp->pid : -1);
+          kl_s(&kl, " va=0x");
+          kl_hex(&kl, (unsigned long)va);
+          kl_s(&kl, " leaf=");
+          kl_hex(&kl, (unsigned long)leaf);
+          kl_c(&kl, '\n');
+          kl_emit(&kl);
+        }
+      }
+      rty_va[rslot] = 0;
+      rty_n[rslot] = 0;
+      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_arch_flush_va(as, a);
+      return 0;
+    } else if (rslot && write && rty_n[rslot] == 2 && !r->obj) {
+      /* The leaf IS present and writable and the hardware still refuses it
+       * after one retry + CR3 reload.  The translation cannot be trusted, and
+       * killing the thread is not a fix: replace the page with a fresh private
+       * copy of its contents (same bytes, new frame, new translation).  For
+       * private anonymous data that is semantically invisible.  Done once per
+       * episode; the counter keeps climbing so a page that STILL faults is
+       * killed on the ordinary budget instead of looping forever. */
+      uint64_t nf = frame_alloc_zeroed();
+      if (nf) {
+        const volatile uint64_t *oldp = (const volatile uint64_t *)a;
+        volatile uint64_t *dst = (volatile uint64_t *)nf;
+        for (int i = 0; i < FRAME_SIZE / 8; i++)
+          dst[i] = oldp[i];
+        vm_arch_unmap(as, a); /* frees the old private frame, flushes */
+        if (vm_arch_map(as, a, nf, r->prot, r->kind) == 0) {
+          static int rm_rows;
+          if (rm_rows < 8) {
+            rm_rows++;
+            struct kline kl;
+            kl_init(&kl);
+            kl_s(&kl, "[VMFIX] remap pid=");
+            kl_i(&kl, grp ? grp->pid : -1);
+            kl_s(&kl, " va=0x");
+            kl_hex(&kl, (unsigned long)va);
+            kl_s(&kl, " old=");
+            kl_hex(&kl, (unsigned long)leaf);
+            kl_c(&kl, '\n');
+            kl_emit(&kl);
+          }
+          rty_n[rslot] = 3; /* remapped once: go on to the budget if it repeats */
+          spinlock_release_irqrestore(&vm_lock, fl);
+          vm_arch_flush_va(as, a);
+          return 0;
+        }
+        frame_free(nf);
+      }
+      rty_n[rslot]++;
+    } else if (rslot) {
+      rty_n[rslot]++;
     }
     spinlock_release_irqrestore(&vm_lock, fl);
+    /* A stale *paging-structure* entry (a parent table installed by another
+       CPU) is not always covered by INVLPG on every microarchitecture; a CR3
+       reload is the architecturally complete flush.  Only worth it once the
+       first retry has already failed, so the common one-fault case keeps the
+       cheap invlpg. */
+    if (rc_now >= 1)
+      vm_arch_shootdown(as);
     vm_arch_flush_va(as, a);
+    if (rc_now >= 1)
+      vm_arch_reload_cr3(as);
     return 0; /* mapping is live: the trap layer eret re-executes */
   }
 
@@ -1379,6 +1625,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
         *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
       return 1;
     }
+    vm_fault_resolved(as);
     return 0; /* the instruction retries (ELR/CR2 untouched) */
   }
 
@@ -1423,7 +1670,24 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
      maps, mapping the object's frame shared — read-only when the region is
      MAP_PRIVATE — or a private copy for a MAP_PRIVATE write. */
   if (r->obj && (r->obj->kind == VM_OBJ_FILE || r->obj->kind == VM_OBJ_NFS)) {
-    int cow = write && (r->flags & VM_MAP_PRIVATE);
+    /* M6/L59: DSO TEXT IS PRIVATE TO THE ADDRESS SPACE.
+     *
+     * A MAP_PRIVATE text page used to be mapped from the page-cache frame
+     * read-only and shared with every other mapping of the same file.  That is
+     * normal Linux behaviour only while the cache frame is immutable; here the
+     * object can be invalidated by any FAT16 write, its frames are recycled on
+     * the last unref, and a leaf that outlives its frame then executes whatever
+     * now lives in that physical page (measured: RimWorld's main thread took
+     * #UD at ~410 s inside UnityPlayer.so's text at an address whose page read
+     * back as zeros while the file holds a real prologue).  Copying executable
+     * pages into AS-owned frames removes the whole class: the AS frees them at
+     * munmap, nothing else can write or reuse them, and a stale translation can
+     * only ever point at a page this AS still owns.  Cost is one private copy
+     * per text page (UnityPlayer ~25 MiB); correctness of executed code is not
+     * negotiable. */
+    int is_text = (exec || (r->prot & VM_PROT_EXEC)) != 0;
+    int cow = (write && (r->flags & VM_MAP_PRIVATE)) ||
+              (is_text && (r->flags & VM_MAP_PRIVATE));
     uint64_t off_dbg = (a - r->base) + r->obj_off;
     spinlock_release_irqrestore(&vm_lock, fl);
     int mrc = vm_file_obj_materialize(as, a, cow);
@@ -1432,6 +1696,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
         *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
       return 1;
     }
+    vm_fault_resolved(as);
     return 0; /* the instruction retries (ELR/CR2 untouched) */
   }
 
@@ -1466,6 +1731,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   as->resident_frames++;
   if (as->resident_frames > as->peak_frames)
     as->peak_frames = as->resident_frames;
+  vm_fault_resolved(as);
   spinlock_release_irqrestore(&vm_lock, fl);
   return 0; /* the instruction retries (ELR/CR2 untouched) */
 }

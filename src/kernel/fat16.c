@@ -1247,6 +1247,11 @@ int fat16_open_ex(const char* filename, struct file* f, int excl) {
       f->fat16.dir_offset = offset;
       f->fat16.cursor = 0;
       f->fat16.dirty = 0;
+      /* L59: define the word fat16_write reads for O_APPEND.  A direct caller
+         (the unit tests open a bare `struct file` on the stack) would otherwise
+         inherit whatever 0x400 bit the stack happened to hold; the VFS layer
+         re-applies its own flag word straight after this returns. */
+      f->open_flags = 0;
       return 0;
     }
 
@@ -1315,6 +1320,7 @@ int fat16_open_ex(const char* filename, struct file* f, int excl) {
     f->fat16.dir_offset = offset;
     f->fat16.cursor = 0;
     f->fat16.dirty = 0;
+    f->open_flags = 0; /* L59: see the open_existing path above */
     return 0;
   }
 }
@@ -2471,7 +2477,45 @@ int fat16_write(struct file* f, const void* buf, int size) {
     }
   }
 
+  /* L59: O_APPEND — refresh the handle's dirent snapshot BEFORE taking
+     fat_lock (fat16_resolve_path takes it itself; doing this under fat_lock
+     deadlocks the CPU, measured as [LOCKFOREVER] in the unit tier).  The
+     per-path wr_lock is already held, so no other writer of this path can
+     change the size between the refresh and the cursor assignment below. */
+  if (f->open_flags & K_O_APPEND) {
+    if (f->path[0]) {
+      struct fat16_dir_entry e;
+      uint32_t ds = 0, dof = 0;
+      if (fat16_resolve_path(f->path, &e, &ds, &dof) == 0) {
+        f->fat16.entry = e;
+        f->fat16.dir_sector = ds;
+        f->fat16.dir_offset = dof;
+        /* SEC-5: disk_seen is the snapshot the sync's clobber guard compares
+           against.  We just read the slot, so it IS what the slot holds —
+           leaving the open-time snapshot here makes the guard believe another
+           writer changed the dirent and refuse to write the new size, which
+           read back as a 9-byte file (measured). */
+        f->fat16.disk_seen = e;
+      }
+    }
+  }
+
   uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  /* L59: O_APPEND is a WRITE-TIME property, not an open-time one.  Linux
+     seeks every write on an O_APPEND file to the end of file and does it
+     atomically with respect to other writers, which is what makes two
+     appenders interleave whole records instead of overwriting each other
+     (§45.9 item 4: Player.log has two writers, and a second handle opening
+     the same file with O_APPEND used to start at its own cursor).  Setting
+     the cursor HERE, inside the per-path write lock and under fat_lock, is
+     what makes it atomic: doing it at open() would leave a second writer
+     using an end that was already stale.
+     The size comes from the refresh above, not from this handle's open-time
+     snapshot: a second handle opened before the first write still carries
+     size 0, so appending from a stale snapshot overwrites (measured: the
+     append test read back 9 bytes of 461). */
+  if (f->open_flags & K_O_APPEND)
+    f->fat16.cursor = f->fat16.entry.file_size;
   if (size == 0) {
     wr_busy[wslot]--;
     spinlock_release(&wr_locks[wslot]);
