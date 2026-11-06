@@ -336,6 +336,25 @@ if [ "${RW_TRACE_GLX:-0}" = 1 ]; then
 else
   mdel -i "$IMG" ::/GLXON >/dev/null 2>&1 || true
 fi
+# L62: /RWSCREEN makes the launcher ask the WM for a specific pixel size
+# ("WxH"), and /WMSIZE makes the WM honour that request instead of handing the
+# client the whole tile.  Both are measurement switches: absent/off, the
+# launcher asks 1280x720 and the WM tiles as it always has.  The "off" content
+# matters: this image has no mdel(1), so a marker is rewritten, never removed.
+if [ -n "${RW_SCREEN:-}" ]; then
+  printf '%s\n' "$RW_SCREEN" >"$OUT/rwscreen"
+  echo "  staged: /RWSCREEN -> -screen-width/-screen-height $RW_SCREEN"
+else
+  printf 'off\n' >"$OUT/rwscreen"
+fi
+stage "$OUT/rwscreen" ::/RWSCREEN
+if [ "${RW_WM_HONOUR:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/wmsize"
+  echo "  staged: /WMSIZE -> the WM honours the pixel-mode content size"
+else
+  printf 'off\n' >"$OUT/wmsize"
+fi
+stage "$OUT/wmsize" ::/WMSIZE
 # No WAVE.CFG: MODE=desktop has no boot-wave loader (KERNEL_MODE_TEST only),
 # and the game must be started from the desktop so it inherits the window
 # protocol pipes.
