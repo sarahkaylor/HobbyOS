@@ -1855,6 +1855,105 @@ static void tp_poke(const char *why) {
   tp_w("\n");
 }
 
+/* Decode the monitor of a managed object in place, with Mono 6.12's own
+ * encoding (mono/metadata/monitor.h):
+ *
+ *   MonoObject        = { MonoVTable *vtable; MonoThreadsSync *synchronisation; }
+ *   LockWord status    bits 0..1: 0 LOCK_WORD_FLAT, 1 HAS_HASH, 2 INFLATED
+ *   MonoThreadsSync   = { u32 status; u32 nest; GSList *wait_list; void *data;
+ *                         MonoCoopMutex *entry_mutex; MonoCoopCond *entry_cond; }
+ *   status             bits 0..15 owner small-id, 16..31 entry count,
+ *                      bit 31 ENTRY_COUNT_WAITERS
+ *   MonoW32Handle     = { int type; u32 ref; int signalled; int in_use;
+ *                         MonoCoopMutex signal_mutex;   // +0x10, 0x28 bytes
+ *                         MonoCoopCond signal_cond;     // +0x38
+ *                         void *specific; }
+ *
+ * A monitor wait creates one private auto-reset EVENT handle per wait, appends
+ * it to mon->wait_list and blocks on event->signal_cond; Pulse walks
+ * wait_list and calls mono_w32event_set(handle), i.e. pthread_cond_signal on
+ * that same cond.  So `sig` (the handle's signalled flag), `cond` and the
+ * kernel's parked futex key in the same log decide the lost wake in one row:
+ *
+ *   nwl=0                     -- the waiter was not on the pulser's list
+ *   nwl>0 sig=1               -- the event WAS set, and the waiter is still
+ *                                parked on a signalled event (the wake was
+ *                                lost below Mono)
+ *   nwl>0 sig=0, cond=PARKKEY -- the event was never set
+ *   cond != PARKKEY           -- the waiter is not on this sync block at all
+ */
+static void tp_dump_sync(int tid, void *lockobj) {
+  if (!lockobj || !rw_readable((unsigned long)lockobj + 16)) return;
+  unsigned long vt = *(volatile unsigned long *)lockobj;
+  unsigned long sy = *(volatile unsigned long *)((char *)lockobj + 8);
+  tp_w("[TPWM] tid=");
+  tp_wi(tid);
+  tp_w(" lock=0x");
+  tp_wx((unsigned long)lockobj);
+  tp_w(" vtable=0x");
+  tp_wx(vt);
+  tp_w(" sync=0x");
+  tp_wx(sy);
+  tp_w(" cls=");
+  tp_w((sy & 3) == 2 ? "inflated" : (sy & 3) == 0 ? (sy ? "flat" : "free") : "hash");
+  unsigned long mon = sy & ~3UL;
+  if ((sy & 3) != 2 || !mon || !rw_readable(mon + 40)) {
+    tp_w("\n");
+    return;
+  }
+  unsigned int st = *(volatile unsigned int *)mon;
+  unsigned int nest = *(volatile unsigned int *)((char *)mon + 4);
+  unsigned long wl = *(volatile unsigned long *)((char *)mon + 8);
+  unsigned long em = *(volatile unsigned long *)((char *)mon + 24);
+  unsigned long ec = *(volatile unsigned long *)((char *)mon + 32);
+  tp_w(" mon=0x");
+  tp_wx(mon);
+  tp_w(" status=0x");
+  tp_wx(st);
+  tp_w(" owner=");
+  tp_wi(st & 0xffff);
+  tp_w(" nest=");
+  tp_wi(nest);
+  tp_w(" ent=");
+  tp_wi((st >> 16) & 0x7fff);
+  tp_w(" wbit=");
+  tp_wi((st >> 31) & 1);
+  tp_w(" entcond=0x");
+  tp_wx(ec);
+  tp_w(" entmutex=0x");
+  tp_wx(em);
+  int nwl = 0;
+  unsigned long node = wl, ev = 0;
+  while (node && nwl < 8 && rw_readable(node + 16)) {
+    if (nwl == 0) ev = *(volatile unsigned long *)((char *)node + 8);
+    node = *(volatile unsigned long *)node;
+    nwl++;
+  }
+  tp_w(" nwl=");
+  tp_wi(nwl);
+  tp_w("\n");
+  if (ev && rw_readable(ev + 0x40)) {
+    int type = *(volatile int *)ev;
+    int ref = *(volatile int *)((char *)ev + 4);
+    int sig = *(volatile int *)((char *)ev + 8);
+    tp_w("[TPWH] tid=");
+    tp_wi(tid);
+    tp_w(" ev=0x");
+    tp_wx(ev);
+    tp_w(" type=");
+    tp_wi(type);
+    tp_w(" ref=");
+    tp_wi(ref);
+    tp_w(" sig=");
+    tp_wi(sig);
+    tp_w(" cond=0x");
+    tp_wx(ev + 0x38);
+    tp_w(" mutex=0x");
+    tp_wx(ev + 0x10);
+    tp_w("\n");
+  }
+}
+
 /* kind: 0 = Task, 1 = Thread, 2 = SetOnInvokeMres.  Deduped, because the same
  * `this` is spilled at several slots of one frame and the first three hits used
  * to be the same completed Task. */
@@ -1896,19 +1995,7 @@ static int tp_scan_obj(int tid, int kind, int maxout) {
            whether mono_monitor_pulse_all and mono_monitor_wait are on the same
            sync block. */
         if (tp_poke_lock && rw_readable((unsigned long)tp_poke_lock + 16)) {
-          unsigned long vt = *(volatile unsigned long *)tp_poke_lock;
-          unsigned long sy = *(volatile unsigned long *)((char *)tp_poke_lock + 8);
-          tp_w("[TPWM] tid=");
-          tp_wi(tid);
-          tp_w(" lock=0x");
-          tp_wx((unsigned long)tp_poke_lock);
-          tp_w(" vtable=0x");
-          tp_wx(vt);
-          tp_w(" sync=0x");
-          tp_wx(sy);
-          tp_w(" synccls=");
-          tp_w(sy && (sy & 7) == 0 ? "fat" : "thin/tagged");
-          tp_w("\n");
+          tp_dump_sync(tid, tp_poke_lock);
         }
       }
       tp_w("\n");
