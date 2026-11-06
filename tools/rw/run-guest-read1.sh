@@ -13,11 +13,13 @@
 # obj/rw-desktop/read1.out.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 cd "$ROOT" || exit 2
 export HOME=/home/sarah
 OUT="$ROOT/obj/rw-desktop"
 IMG="$ROOT/disk.img"
-GAME="/srv/nfs/rimworld"
+GAME="$RW_EXPORT"
 [ -d "$GAME/RimWorldLinux_Data" ] || { echo "no game tree at $GAME"; exit 2; }
 [ -f "$IMG" ] || { echo "no disk.img — run tools/rw/run-rimworld-desktop.sh once"; exit 2; }
 

@@ -16,6 +16,8 @@
 # Usage: tools/rw/run-tp-probe.sh [--timeout S] [--exe FILE] [--log NAME]
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
 cd "$ROOT" || exit 2
 TIMEOUT_S=180
 EXE="$ROOT/obj/tp-probe/tp.exe"
@@ -39,8 +41,8 @@ IMG="$ROOT/disk.img"
 LOG="$OUT/$LOGNAME"
 mkdir -p "$OUT"
 
-MB=/srv/nfs/rimworld/RimWorldLinux_Data/MonoBleedingEdge
-MAN=/srv/nfs/rimworld/RimWorldLinux_Data/Managed
+MB="$RW_EXPORT"/RimWorldLinux_Data/MonoBleedingEdge
+MAN="$RW_EXPORT"/RimWorldLinux_Data/Managed
 G="${GLIBC231:-/tmp/glibc231}"
 LDIR="$G/lib/x86_64-linux-gnu"
 DLIB2="${GLIBC231_DEV:-/tmp/glibc231-dev}/usr/lib/x86_64-linux-gnu"

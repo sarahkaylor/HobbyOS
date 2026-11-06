@@ -21,7 +21,9 @@
 # of /srv/nfs/rimworld/.../libmonobdwgc-2.0.so.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SRC="${RW_MONO_EXPORT:-/srv/nfs/rimworld/RimWorldLinux_Data/MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so}"
+# shellcheck source=tools/rw/lane.sh
+. "$ROOT/tools/rw/lane.sh"
+SRC="${RW_MONO_EXPORT:-$RW_EXPORT/RimWorldLinux_Data/MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so}"
 OUT="${1:-$ROOT/obj/l61/libmonobdwgc.ud2.so}"
 [ -f "$SRC" ] || { echo "missing $SRC"; exit 2; }
 mkdir -p "$(dirname "$OUT")"

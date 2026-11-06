@@ -524,6 +524,10 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
   as->img_active = 1;
   as->img_file_size = fsize;
   as->img_start_cluster = f->fat16.entry.start_cluster;
+  /* M6/L63: ground truth for executable pages while the device is healthy
+     (one sequential read of a few hundred KiB, before the process runs). */
+  if (vm_image_sums_build(as) != 0)
+    uart_puts("v2 loader: image sums unavailable (agreement gate only)\n");
 
   /* L9 (prefetch): page 0 is the entry page (process_set_entry uses
      USER_IMG_BASE), so pull it in eagerly.  Best-effort: a failure here

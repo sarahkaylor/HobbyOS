@@ -2404,6 +2404,18 @@ int fat16_read_direct(struct file* f, uint64_t dest, int size) {
  *
  * Returns the number of bytes read (0 when pos is at/after EOF).
  */
+#ifdef KERNEL_MODE_UNIT_TEST
+static int fat16_inj_mode;
+static uint32_t fat16_inj_off;
+static int fat16_inj_left;
+
+void fat16_test_inject(int mode, uint32_t off, int times) {
+  fat16_inj_mode = mode;
+  fat16_inj_off = off;
+  fat16_inj_left = times;
+}
+#endif
+
 int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
                           uint64_t dest, int size, uint32_t pos) {
   uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
@@ -2414,6 +2426,24 @@ int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
   tmp.fat16.cursor = pos;
   int read_bytes = fat16_read_direct_locked(&tmp, dest, size, flags);
   spinlock_release_irqrestore(&fat_lock, flags);
+#ifdef KERNEL_MODE_UNIT_TEST
+  /* M6/L63 test seam.  The zero page the L62 soak executed was delivered by
+     a device that answered with a FULL-length read of zeros, so the exec
+     gate cannot be tested by a theory about short reads alone.  `mode` 1
+     returns a short count, `mode` 2 returns `size` bytes of zeros, for
+     reads that start at `off`, `times` times. */
+  if (fat16_inj_mode && fat16_inj_left > 0 && pos == fat16_inj_off) {
+    fat16_inj_left--;
+    if (fat16_inj_mode == 1)
+      return 64;
+    if (fat16_inj_mode == 2) {
+      volatile uint8_t *p = (volatile uint8_t *)dest;
+      for (int i = 0; i < size; i++)
+        p[i] = 0;
+      return size;
+    }
+  }
+#endif
   return read_bytes;
 }
 

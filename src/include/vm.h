@@ -226,6 +226,16 @@ struct addr_space { /* one per group (leader PCB owned) */
   int img_active;
   uint32_t img_file_size;
   uint16_t img_start_cluster;
+  /* M6/L63: ground truth for executable image pages.  Two agreeing reads are
+     NOT proof: the L63 soak watched the block layer answer a full page of
+     zeros twice for a page the file holds code at, and the agreement gate
+     published it (zero=4096 ver=y) straight into execution.  At load time
+     the image is read once and a sum32 per page is kept here; a fill must
+     match its page's sum, so a device that lies consistently is caught.
+     A contiguous frame run (kernel VA == phys), 4 bytes per page, freed at
+     teardown; 0 means "not built" and the fill falls back to agreement. */
+  uint64_t img_sums;
+  uint32_t img_sums_pages;
   /* L9 (prefetch): generation counter, bumped on create and teardown.  A
      background prefetch task captures it at spawn and aborts when it no
      longer matches — pid reuse / exec must never let an old task adopt
@@ -316,6 +326,40 @@ int vm_region_install_fixed(struct addr_space *as, uint64_t base,
                             uint64_t obj_off);
 
 /* --- Resident-page plumbing (vm.c -> arch mmu) ----------------------- */
+
+/* M6/L63: publish-time provenance.  Every site that installs a page's BYTES
+ * into a user mapping calls this with what those bytes are, so the serial
+ * log names the publisher of any executable page instead of inferring it
+ * after a crash (docs/rimworld-launch-log.md §48.3).
+ *
+ *   va/off   where it landed and which file offset it came from
+ *   prot     the mapping's protection (R/RW/RX/RWX)
+ *   priv     MAP_PRIVATE (1) or MAP_SHARED (0)
+ *   src      VM_PUB_FILE (read from the backing file, verified),
+ *            VM_PUB_ZERO (anonymous zero fill: .bss/heap/JIT),
+ *            VM_PUB_CACHE (the file object's page-cache frame, unverified),
+ *            VM_PUB_COPY (byte copy of an already-published page)
+ *   phys     the frame being installed (zero_bytes is counted from it)
+ *   verified 1 only if two independent reads agreed on these bytes
+ *   who      VM_PW_* caller id
+ * Executable pages from src != ZERO that are unverified are printed
+ * unconditionally (the tripwire); the rest are sampled. */
+#define VM_PUB_FILE  0
+#define VM_PUB_ZERO  1
+#define VM_PUB_CACHE 2
+#define VM_PUB_COPY  3
+enum {
+  VM_PW_TOUCH_OBJ = 0, VM_PW_TOUCH_ANON, VM_PW_FAULT_OBJ, VM_PW_FAULT_ANON,
+  VM_PW_IMG, VM_PW_IMG_PF, VM_PW_ELF, VM_PW_COW, VM_PW_VMFIX, VM_PW_NR
+};
+void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot,
+                 int priv, int src, uint64_t phys, int verified, int who);
+
+/* M6/L63: read the image once at exec and keep a sum32 per page, so a later
+ * demand/prefault fill can be checked against the FILE's bytes instead of
+ * against another read that the block layer may also lie to.  Called by the
+ * v2 loader after img_* is set; failure is non-fatal (agreement gate). */
+int vm_image_sums_build(struct addr_space *as);
 
 /* Install `phys` at `va` with `prot` (region prot must already allow it;
  * called by the loader, demand faults and memfd fills).  The caller has
