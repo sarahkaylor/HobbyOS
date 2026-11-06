@@ -6264,3 +6264,176 @@ can reach.
 included), `m2_threads` PASS, `m12_thread_ceiling` PASS, `m3_window_probe`
 PASS, `m4_gl_probe` PASS.
 
+## 38. 2026-11-05 — M6/L51: the PLINQ "reproducer" is a 200× latency artefact, and Mono's monitor cannot lose a wake
+
+§37 left one lever: `openmp-style-nested` "hangs in the guest only", which would
+be a one-minute reproducer of the game's lost wake. **This lane measured that
+lever and it does not exist.** The probe shape completes; it is simply ~200×
+slower in the guest, and the probe's deadline expires first. The monitor path
+was then tested directly: an ordered `Monitor.Wait`/`PulseAll` storm loses no
+pulse in the guest, and the `ManualResetEventSlim` Dekker handshake -- the one
+place a *stray* wake could be dropped in managed code -- ran 1,000,000
+iterations in the guest with **zero** lost windows.
+
+### 38.1 `openmp-style-nested` is slow, not hung
+
+`min3.cs` runs each shape inside a `Task` and awaits it with a timeout, so one
+boot produces the whole table instead of stopping at the first failure. Guest
+(8 vCPU) rows, `--exe obj/tp-probe/min3.exe`:
+
+| row | guest | host |
+|---|---|---|
+| `seq-sum-64`, `flat-outer-dop8-300k`, `par-sum-300k/64/1024/16384/131072`, `par-toarray-64/4096` | **done=True** | done=True |
+| `nested-seq-body-64-dop8` (body uses sequential LINQ) | **done=True** | done=True |
+| `nested-par-body-64-dop8`, `-dop1`, `-4096-dop8` (body starts a PLINQ query) | done=False `status=Running` at 8 s | done=True |
+
+`Running` is not a deadlock: `min6.cs` counts nested-query completions and
+prints progress every second. With 40 nested queries and a 150 s budget:
+
+```text
+PROGRESS t=2754ms nested_done=1 status=Running
+PROGRESS t=9800ms nested_done=15 status=Running
+PROGRESS t=18915ms nested_done=35 status=Running
+PROGRESS finished at 21568 ms
+ROW nested40 done=True nested_done=40 ms=21569 status=RanToCompletion
+```
+
+Steady progress, and the outer task reaches `RanToCompletion`. The cost is
+**~500 ms per nested query**: `min7.cs` measures 527 ms/query in the guest and
+2 ms/query on the host, and it is **unchanged by `MONO_THREADS_PER_CPU=8`**
+(`/TPMIN8`, i.e. a 64-thread pool minimum: `per_query_ms=527`). So it is not
+thread-pool starvation and not thread-injection hill climbing either; every
+nested query pays the same fixed ~500 ms, and `openmp-style-nested` (which runs
+1000 of them) needs ~500 s -- longer than any probe deadline this track uses.
+
+**Consequence: `openmp-style-nested` cannot be used as a reproducer.** Its
+`SHAPE ... start` with no `OK` is a deadline expiry, and no task in it ever
+reaches §37's state (complete task + signalled event + parked waiter).
+
+### 38.2 §37.3a's "thin lock" is a misdecode: the monitor IS inflated
+
+`mono/metadata/monitor.h` defines the lock word by its **low two bits**, not by
+alignment:
+
+```text
+LOCK_WORD_FLAT = 0, LOCK_WORD_HAS_HASH = 1, LOCK_WORD_INFLATED = 2
+64-bit: LOCK_WORD_INFLATED = [sync:62 | status:2]
+```
+
+so `sync=0x104d7e79a2` is `0x…a2 & 3 == 2` = **inflated**, with
+`MonoThreadsSync *mon = 0x104d7e79a0`. §37.3a read it as "a tagged thin lock"
+because `(sync & 7) != 0`; the object in fact has exactly the fat monitor a
+queued waiter requires, and `mono_monitor_pulse_all` had a `wait_list` to walk.
+That premise -- "no inflated sync block for `PulseAll` to broadcast on" -- is
+withdrawn.
+
+### 38.3 The monitor has no lost-wake mechanism to lose
+
+Mono 6.12's `Monitor.Wait` is not a condvar broadcast on the monitor at all
+(`mono/metadata/monitor.c`, 6.12.0.122):
+
+* `mono_monitor_wait` creates a **private auto-reset `MonoW32Handle` event per
+  wait**, does `mon->wait_list = g_slist_append (mon->wait_list, event)` **while
+  it still owns the monitor**, *then* saves `nest`, releases, and blocks in
+  `mono_w32handle_wait_one (event, ms, alertable)`.
+* `mono_monitor_pulse` runs only while the caller owns the monitor, walks
+  `mon->wait_list` and calls `mono_w32event_set (node->data)` -- i.e. sets that
+  event's **sticky** `signalled` flag and signals its `signal_cond`.
+* `mono_w32handle_wait_one` loops `if (own_if_signalled (handle)) return SUCCESS;`
+  → `mono_w32handle_timedwait_signal_handle(...)` (a `pthread_cond_wait` on
+  `handle->signal_cond` under `handle->signal_mutex`) → re-check. Because the
+  flag is sticky and re-checked under the same mutex the signaller takes, an
+  early pulse, a late pulse and a lost `pthread_cond_signal` all end in
+  `SUCCESS`; the waiter cannot be stranded by a wake that went missing.
+
+The only remaining hole would be the managed handshake: if `Set()` read
+`Waiters == 0` it would skip `lock (m_lock) { PulseAll }` entirely. Mono's
+`ManualResetEventSlim` closes that with a CAS-then-read on both sides -- and the
+comment in its own source says so (`ManualResetEventSlim.cs:649-663`: "we must
+ensure there cannot be any reordering of the assignment to Waiters and the read
+from IsSet ... guaranteed as Waiters{set;} involves an
+Interlocked.CompareExchange"). **That guarantee holds in this guest**, measured
+two ways:
+
+| probe | guest | host |
+|---|---|---|
+| `min7` ordered `Monitor.Wait`/`PulseAll`, 3000 rounds × 4 waiters = 12,000 waits, a pulse only after the waiter published its phase | `STORM ... ms=16054 joined=True` (no `STORM-HANG`) | `ms=85 joined=True` |
+| `min8` the MRES handshake exactly: waiter `CAS(state, s\|1)` then read bit 31; setter `CAS(state, s\|0x80000000)` then read bits 0..18; both with CAS retry and plain reads | **1,000,000 iterations, `lost_windows=0`, `DEKKER-OK`** | 300,000 iterations, `lost_windows=0` |
+
+So neither the monitor's own bookkeeping, nor the managed CAS/read pairing that
+would drop a pulse, nor a condvar wake, can produce "pulse issued, waiter still
+asleep" here. What the guest *does* show is that everything is slow (the storm's
+12,000 waits take 16 s in the guest against 85 ms on the host) -- latency, not
+loss.
+
+### 38.4 What the stall actually looks like: a quiescent process
+
+The game run with `/TPTRACE` + `RW_FUTXW=1` stopped earlier than §37's runs (see
+38.6), and its scheduler dump is the useful part:
+
+```text
+[ALIVE-SET] no READY work, yet the scheduler counts live work ...
+  slot=28 pid=28 st=8 ... pc=0x108011895d Loading.Preload
+  slot=5  pid=5  st=8 ... pc=0x1083506454 SDLTimer
+  slot=7  pid=7  st=8 ... pc=0x1083506454 Finalizer
+  (25 live slots, every one st=8 = parked)
+```
+
+Every thread in the process is parked and the scheduler has no ready work. That
+is a **deadlock or an unfulfilled wait**, not a wake dropped in flight: a wake
+that was lost in the kernel would leave the waker runnable and the process
+otherwise busy. It also means the main thread's completer is either gone or
+parked, so the *next* question is not "did the pulse get lost" but "which wait is
+the main thread in, and is its event on that monitor's list at all".
+
+### 38.5 Instruments added
+
+* `src/user/rwmain.c`: `[TPWM]` now decodes the whole monitor from Mono's own
+  header -- `cls={free|flat|hash|inflated}`, `status`, `owner`, `nest`, `ent`,
+  `wbit`, `entcond`, `entmutex`, `nwl` (wait_list length) -- and `[TPWH]` prints
+  the first queued event's `type/ref/sig/cond/mutex`. With `RW_FUTXW=1`'s
+  `[PARK] key=` in the same log, the four cases are one row: `nwl=0` (the waiter
+  is not on the pulser's list), `sig=1` (the event was set and the waiter is
+  still parked → below Mono), `sig=0` (the pulse never ran), or `cond !=`
+  `[PARK] key` (a different wait entirely).
+* `tools/rw/mono-probe/condtrace.c` + `tools/rw/run-tp-probe.sh --condtrace`:
+  condvar flight recorder linked **into** the launcher (`-rdynamic` + a version
+  script, the rule-28 pattern). Two traps, both measured: a full `-rdynamic`
+  export breaks Boehm (`Wrong __data_start/_end pair`), and
+  `dlsym(RTLD_NEXT, "pthread_cond_timedwait")` resolves **libc's `GLIBC_2.0`
+  compat symbol**, whose pre-2.3.2 condvar layout makes every timed wait return
+  `ETIMEDOUT` at once (`Task.Wait(5000)` on a 100 ms task returned in 3 ms).
+  `dlvsym(..., "GLIBC_2.3.2")` is required.
+* `tools/rw/ct-analyze.py`: pairs every wait with its return and reports waits
+  that never returned, plus whether their cond was signalled after the wait
+  began.
+* `tools/rw/mono-probe/min.cs` … `min8.cs`: the ladder -- pool-free shapes,
+  nested-query latency, ordered storms, and the Dekker test.
+* `tools/rw/run-tp-probe.sh --tpmin8`: stages `/TPMIN8`, which makes
+  `mono_main_launcher.c` set `MONO_THREADS_PER_CPU=8` before `mono_main`, the
+  pool-minimum differential.
+
+### 38.6 Ladder and regression
+
+`/TPTRACE` + `RW_FUTXW=1` (`bash tools/rw/run-rimworld-desktop.sh --timeout 400
+--run-timeout 200`) reached **23,643,577 bytes** of 729 MiB and then the
+quiescent stall of 38.4, with `[XE] PUT` **0** and `[XE] FLUSH` 1 -- i.e. this
+run stalled *before* the first present, one step earlier than §37's one-frame
+runs. A second, **clean** run (no `/TPTRACE`, no `RW_FUTXW`) stopped in the same
+place: **19,999,577 bytes**, `[XSW]` rows **0**, and the same "no READY work"
+dump with every live slot `st=8`. So the earlier stop is not caused by the trace
+flags; whether the launcher rebuild (whose only behavioural change is a
+`/TPTRACE`-gated dump) moved the stop point is **not** separated here, and the
+integrator must re-run the ladder on its own tree before reading 20.0 MB as this
+lane's frontier.
+
+The screenshots show the loading screen (65,534 non-black pixels, 16,589
+colours) and there is no main menu, so no fps number exists. The per-futex
+instrumentation is therefore not free: `RW_FUTXW=1` alone changes where the run
+stops, and any ladder row taken with it must say so.
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh` → **414 run, 0 failed**, gates green
+(`redzone`, `m2_mono`, `m2_tp`, `m2_threads`, `m12`, `m3_window_probe`,
+`m4_gl_probe`). `RimWorldLinux.ad9` was rebuilt and the new rows verified in the
+binary (`strings ... | grep -E 'TPWH|nwl='`).
+

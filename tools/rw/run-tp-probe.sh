@@ -21,12 +21,16 @@ TIMEOUT_S=180
 EXE="$ROOT/obj/tp-probe/tp.exe"
 LOGNAME=serial-tp.log
 TPTRACE=0
+CONDTRACE=0
+TPMIN8=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --timeout) TIMEOUT_S="$2"; shift 2;;
     --exe) EXE="$2"; shift 2;;
     --log) LOGNAME="$2"; shift 2;;
     --tptrace) TPTRACE=1; shift 1;;
+    --condtrace) CONDTRACE=1; shift 1;;
+    --tpmin8) TPMIN8=1; shift 1;;
     *) echo "unknown arg $1"; exit 2;;
   esac
 done
@@ -45,10 +49,22 @@ DLIB2="${GLIBC231_DEV:-/tmp/glibc231-dev}/usr/lib/x86_64-linux-gnu"
 [ -f "$EXE" ] || { echo "no managed exe at $EXE"; exit 2; }
 
 echo "== build: launcher (pinned 2.31) + kernel/disk (MODE=test)"
+LAUNCH_SRC="$ROOT/tools/rw/mono-probe/mono_main_launcher.c"
+LAUNCH_EXTRA=""
+if [ "$CONDTRACE" = 1 ]; then
+  # condtrace.c interposes pthread_cond_* for the DSOs the launcher dlopens
+  # (rule 28: a -rdynamic launcher wins resolution).  A version script is
+  # mandatory: a full -rdynamic export makes Boehm's
+  # GC_init_linux_data_start die with "Wrong __data_start/_end pair".
+  printf '{ global: pthread_cond_wait; pthread_cond_timedwait; pthread_cond_signal; pthread_cond_broadcast; ct_init; local: *; };\n' >"$OUT/ct.ver"
+  LAUNCH_SRC="$LAUNCH_SRC $ROOT/tools/rw/mono-probe/condtrace.c"
+  LAUNCH_EXTRA="-rdynamic -Wl,--version-script=$OUT/ct.ver $LDIR/libpthread-2.31.so"
+fi
 gcc -O1 -fPIE -pie -nostdlib -nostartfiles -o "$OUT/mono-launch" \
-    "$ROOT/tools/rw/mono-probe/mono_main_launcher.c" \
+    $LAUNCH_SRC \
     "$DLIB2/Scrt1.o" "$DLIB2/crti.o" "$DLIB2/libc_nonshared.a" \
     "$LDIR/libc-2.31.so" "$LDIR/libdl-2.31.so" "$DLIB2/crtn.o" \
+    $LAUNCH_EXTRA \
     -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2 \
     -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none 2>"$OUT/launcher-build.log" || {
       echo "LAUNCHER BUILD FAILED"; tail -20 "$OUT/launcher-build.log"; exit 2; }
@@ -105,6 +121,8 @@ stage "$OUT/WAVE.CFG" ::/WAVE.CFG
 # /TPTRACE: the probe launcher turns on MONO_LOG_MASK=threadpool for it, so the
 # log carries worker starting/parking/unparking/timed-out rows.
 if [ "$TPTRACE" = 1 ]; then : >"$OUT/tptrace"; stage "$OUT/tptrace" ::/TPTRACE; fi
+if [ "$CONDTRACE" = 1 ]; then : >"$OUT/condtrace"; stage "$OUT/condtrace" ::/CONDTRACE; fi
+if [ "$TPMIN8" = 1 ]; then : >"$OUT/tpmin8"; stage "$OUT/tpmin8" ::/TPMIN8; fi
 
 OVMF_SRC=""
 for c in "$HOME/.local/share/OVMF/OVMF_CODE_4M.fd" /usr/share/OVMF/OVMF_CODE_4M.fd; do

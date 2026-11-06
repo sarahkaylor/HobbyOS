@@ -56,6 +56,17 @@ int main(int argc, char **argv) {
       setenv("MONO_LOG_MASK", "threadpool", 1);
     }
   }
+  /* /TPMIN8: raise the thread pool's minimum so a nested query does not have to
+     wait for the hill climber's thread injection.  This is the differential
+     for "nested PLINQ is slow because every nested query needs a new worker". */
+  {
+    FILE *mf = fopen("/TPMIN8", "r");
+    if (mf) {
+      fclose(mf);
+      setenv("MONO_THREADS_PER_CPU", "8", 1);
+      fprintf(stderr, "[LAUNCH] MONO_THREADS_PER_CPU=8 (from /TPMIN8)\n");
+    }
+  }
   if (sd && getenv("MONO_NO_SET_DIRS") == NULL) {
     const char *ad = getenv("MONO_ASSEMBLY_DIR");
     const char *cd = getenv("MONO_CONFIG_DIR");
