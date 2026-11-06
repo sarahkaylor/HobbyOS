@@ -135,6 +135,33 @@ static void case_sem_mono_deadline(void) {
   sem_destroy(&s);
 }
 
+/* ---- 2b: the pool's own timeout (5..60 s), same arithmetic ---- */
+static void case_sem_5s(void) {
+  sem_t s;
+  sem_init(&s, 0, 0);
+  struct timeval tv;
+  memset(&tv, 0x5a, sizeof tv);
+  syscall(SYS_gettimeofday, &tv, 0);
+  struct timespec ts;
+  ts.tv_sec = tv.tv_sec + 5;
+  ts.tv_nsec = tv.tv_usec * 1000L;
+  while (ts.tv_nsec >= 1000000000L) {
+    ts.tv_nsec -= 1000000000L;
+    ts.tv_sec++;
+  }
+  long ns0 = 0, ns1 = 0;
+  long t0 = mono_ms(&ns0);
+  int r = sem_timedwait(&s, &ts);
+  int e = errno;
+  long t1 = mono_ms(&ns1);
+  long got = (t0 < 0 || t1 < 0) ? -1 : t1 - t0;
+  row("sem_mono_5s rc=%d errno=%d ms0=%ld ms1=%ld elapsed_ms=%ld",
+      r, r ? e : 0, t0, t1, got);
+  verdict("sem_mono_5s_waits_5000ms",
+          r == -1 && e == ETIMEDOUT && got >= 4500 && got <= 6000);
+  sem_destroy(&s);
+}
+
 /* ---- 3: absolute deadline built from CLOCK_REALTIME (control) ---- */
 static void case_sem_realtime_deadline(void) {
   sem_t s;
@@ -216,14 +243,51 @@ static void case_cond_infinite(void) {
   verdict("cond_5s_waits", r == ETIMEDOUT && got >= 4900 && got <= 6000);
 }
 
+/* ---- 6: two-thread semaphore ping-pong: the floor for a wake+switch ---- */
+static sem_t pp_a, pp_b;
+static void *pp_thread(void *arg) {
+  (void)arg;
+  for (int i = 0; i < 200; i++) {
+    sem_wait(&pp_a);
+    sem_post(&pp_b);
+  }
+  return NULL;
+}
+static void case_sem_pingpong(void) {
+  sem_init(&pp_a, 0, 0);
+  sem_init(&pp_b, 0, 0);
+  pthread_t t;
+  if (pthread_create(&t, NULL, pp_thread, NULL) != 0) {
+    row("sem_pingpong pthread_create failed");
+    verdict("sem_pingpong_ok", 0);
+    return;
+  }
+  long ns0 = 0, ns1 = 0;
+  long t0 = mono_ms(&ns0);
+  for (int i = 0; i < 200; i++) {
+    sem_post(&pp_a);
+    sem_wait(&pp_b);
+  }
+  long t1 = mono_ms(&ns1);
+  pthread_join(t, NULL);
+  long el = (t0 < 0 || t1 < 0) ? -1 : t1 - t0;
+  long per_us = (el > 0) ? el * 1000 / 200 : -1;
+  row("sem_pingpong n=200 total_ms=%ld per_us=%ld", el, per_us);
+  verdict("sem_pingpong_under_1ms", el >= 0 && per_us >= 0 && per_us < 1000);
+  sem_destroy(&pp_a);
+  sem_destroy(&pp_b);
+}
+
 int main(void) {
   row("clock probe start pid=%d", (int)getpid());
   case_clocks();
   case_sem_mono_deadline();
+  case_sem_5s();
   case_sem_realtime_deadline();
   case_cond();
   case_nanosleep();
   case_cond_infinite();
+  case_sem_pingpong();
   row("done rc=%d", fails);
   return fails ? 1 : 0;
 }

@@ -85,9 +85,16 @@ int l_timespec_to_ms(struct process *p, uint64_t uts, int64_t *out_ms) {
   if (ts[0] < 0 || ts[1] < 0 || ts[1] >= 1000000000LL) return -EINVAL;
   /* Saturate rather than overflow: a 1e9-second sleep is a bug in the caller,
      not a reason to wrap into a negative delay (which the scheduler would
-     treat as "no wait"). */
+     treat as "no wait").  L52: the bound must NOT be 1e8 seconds.  An
+     ABSOLUTE CLOCK_REALTIME deadline is ~1.79e9 seconds (2026), so a 1e8 s
+     bound clamped every realtime futex deadline to 1e8 ms = 1970-01-02;
+     subtracting the current realtime then went negative, became 0, and every
+     glibc sem_timedwait with a 5..60 s timeout returned ETIMEDOUT at once
+     (Mono's pool workers never parked; each request created a new thread and
+     paid the 10-thread/s creation cap).  The cap for a *relative* wait lives
+     at the callers that turn this into a wake_ms. */
   int64_t ms = ts[0] * 1000 + (ts[1] + 999999) / 1000000;
-  if (ms < 0 || ts[0] > 100000000LL) ms = 100000000LL;
+  if (ms < 0 || ts[0] > 10000000000LL) ms = 100000000LL;
   *out_ms = ms;
   return 0;
 }
@@ -203,6 +210,7 @@ static int l_core_nanosleep(struct process *p, struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)r;
     return 1;
   }
+  if (ms > 100000000) ms = 100000000; /* int wake_ms; 27.8 h is "forever" */
   if (ms > 0) l_block_ms(tf, (int)ms, L_SYS_nanosleep);
   tf->regs[0] = 0;
   return 1;
@@ -223,6 +231,7 @@ static int l_core_clock_nanosleep(struct process *p, struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)r;
     return 1;
   }
+  if (ms > 100000000) ms = 100000000;
   if (ms > 0) l_block_ms(tf, (int)ms, L_SYS_clock_nanosleep);
   tf->regs[0] = 0;
   return 1;

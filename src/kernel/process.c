@@ -1278,6 +1278,8 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
   p->context[0] = (uint64_t)arg;           // x0 = first argument on ARM64
 #endif
   p->state = PROC_STATE_READY;
+  /* L52: a fresh process must not wait for the 100 Hz tick to get a CPU. */
+  sched_wake_idle_cpu();
 
   return pid;
 }
@@ -2568,6 +2570,51 @@ static void resched_cpu(uint32_t c) {
     if ((*icr_lo & (1u << 12)) == 0)
       break;
     __asm__ volatile("pause" ::: "memory");
+  }
+#endif
+}
+
+/* L52: a waker that flips a parked thread READY must not leave it waiting
+   for the next 100 Hz tick on a CPU that is idle in `sti; hlt`.  Measured
+   (min10, guest, 8 vCPU): a ThreadPool work item queued from a spinning
+   thread took 10-30 ms (median 30 ms) to start, and a plain
+   Task.Run().Wait() averaged 146 ms -- exactly the tick period times a few.
+   The same bytes on the host cost 0 ms.  The woken slot was READY but every
+   other CPU was in safe_wfi(), and only the timer's broadcast 0x81 pulled
+   them back through schedule().
+
+   Send one directed reschedule IPI to an idle CPU so the woken thread is
+   picked in microseconds.  At most one CPU is poked per wake (a wake only
+   needs one), and only when it is idle, so a wake storm cannot turn into an
+   IPI storm: a busy machine has no idle CPU to poke and behaves as before. */
+void sched_wake_idle_cpu(void) {
+#ifdef __x86_64__
+  if (!scheduler_started)
+    return;
+  uint32_t self = get_cpuid();
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    if (c == self)
+      continue;
+    if (current_pid_of_cpu(c) < 0) {
+      resched_cpu(c);
+      {
+        static int ipi_rows;
+        if (ipi_rows < 8) {
+          ipi_rows++;
+          struct kline ki;
+          kl_init(&ki);
+          kl_s(&ki, "[IPI] self=");
+          kl_i(&ki, (long)self);
+          kl_s(&ki, " to=");
+          kl_i(&ki, (long)c);
+          kl_s(&ki, " t=");
+          kl_i(&ki, (long)timer_get_ms());
+          kl_c(&ki, '\n');
+          kl_emit(&ki);
+        }
+      }
+      return;
+    }
   }
 #endif
 }
@@ -3902,6 +3949,9 @@ int process_fork(struct trap_frame *tf) {
 
   child->state = PROC_STATE_READY;
   spinlock_release_irqrestore(&proc_lock, flags);
+  /* L52: pthread_create's waiter blocks on a semaphore for this child's
+     first schedule; without a poke that is a full tick (measured 9 ms). */
+  sched_wake_idle_cpu();
   return child_pid;
 }
 
@@ -3931,10 +3981,14 @@ void process_wakeup(int pid) {
   if (pid < 0 || pid >= MAX_PROCESSES)
     return;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int woke = 0;
   if (proc_table[pid].state == PROC_STATE_BLOCKED) {
     proc_table[pid].state = PROC_STATE_READY;
+    woke = 1;
   }
   spinlock_release_irqrestore(&proc_lock, flags);
+  if (woke)
+    sched_wake_idle_cpu();
 }
 
 /**
@@ -3943,12 +3997,16 @@ void process_wakeup(int pid) {
  */
 void process_wake_all(void) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int woke = 0;
   for (int i = 0; i < MAX_PROCESSES; i++) {
     if (proc_table[i].state == PROC_STATE_BLOCKED && proc_table[i].wake_ms == 0) {
       proc_table[i].state = PROC_STATE_READY;
+      woke = 1;
     }
   }
   spinlock_release_irqrestore(&proc_lock, flags);
+  if (woke)
+    sched_wake_idle_cpu();
 }
 
 /* SEC-OBS-B: deferred lost-wakeup catch-all (see process.h).  The flag is
