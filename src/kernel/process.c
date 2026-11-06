@@ -374,10 +374,19 @@ int current_pid_of_cpu(uint32_t cpu) {
 static int proc_release_mem_locked(struct process *q) {
   int block = q->phys_block_idx;
   struct addr_space *as = q->as;
+  /* GB-216: a thread's `as` is BORROWED from its group (process_thread_create:
+     t->as = grp->as).  Releasing it here tore down a live group's address
+     space through a dead thread's PCB -- measured: the THRD_T suite's 20th
+     test forks, process_create_v2 reuses a freed thread slot, this function
+     tears down tgid=2's AS (nr=3 res=35), and vm_as_clone_into then sees
+     src->ver == 0.  Drop the pointer unconditionally; free the space only
+     when this PCB owns it. */
+  q->as = 0;
+  if (q->is_thread)
+    as = 0;
   if (block < 0 && !as)
     return 0;
   q->phys_block_idx = -1;
-  q->as = 0;
   if (block >= 0)
     frame_block_free(block);
   if (as)
