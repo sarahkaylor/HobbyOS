@@ -89,7 +89,9 @@
  * harness's turns every long run into an unobserved one; 900 keeps the
  * launcher alive past any --run-timeout used here, and the launcher's own
  * dump/exit is then governed by the harness. */
+#ifndef RW_WAIT_SECS
 #define RW_WAIT_SECS  900
+#endif
 
 /* Console-only output.  print()/print_dec() write fd 1, which in a
  * desktop-launched session is the window protocol pipe; every row this
