@@ -464,6 +464,17 @@ endif
 ifeq ($(GB199_NO_AUXV),1)
   CFLAGS += -DGB199_NO_AUXV
 endif
+# GB-207: PANIC_IPI_TEST=1 builds the opt-in two-CPU panic-injection vehicle
+# (test-only IPI vector 0x83 on top of GB-204's claim).  Never in a default
+# kernel; the default wave and its timing are untouched when the flag is off.
+ifeq ($(PANIC_IPI_TEST),1)
+  CFLAGS += -DPANIC_IPI_TEST
+endif
+# GB-207 pre-fix contrast only: builds the same vehicle with no claim, i.e.
+# the ef09aa9a behaviour, so the detector can be shown to fail (two records).
+ifeq ($(GB207_PREFIX_NO_CLAIM),1)
+  CFLAGS += -DGB207_PREFIX_NO_CLAIM
+endif
 
 ifneq ($(MODE),desktop)
   QEMU_ARGS += -display none
