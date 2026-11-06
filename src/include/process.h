@@ -468,6 +468,13 @@ int phys_block_free_count(void);
 // transient from a stuck full table so the famine wait stays bounded.
 int process_free_slots(void);
 
+/* GB-217: ownership query for a pid-indexed AS-pool entry.  1 = no PCB
+   points at an AS with this tgid and no CPU still claims the pid, so an
+   AS_V2 entry for it is an orphan left by a deferred release; 0 = live. */
+int proc_as_pool_reclaimable(uint64_t tgid);
+/* GB-217: one record naming the slot behind a pid-reuse AS collision. */
+void proc_as_collision_note(uint64_t pid, uint64_t epoch);
+
 // Free a previously created process.
 void process_free(int pid);
 

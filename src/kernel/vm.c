@@ -47,6 +47,13 @@ static spinlock_t vm_lock;
 static struct addr_space vm_as_pool[MAX_PROCESSES];
 static int vm_lock_ready;
 
+/* GB-217: counted AS-pool events, reported once at [HALT-CD]. */
+static int gb217_collisions;
+static int gb217_reclaims;
+
+int vm_as_collision_count(void) { return gb217_collisions; }
+int vm_as_reclaim_count(void) { return gb217_reclaims; }
+
 /* Same one-time-init hazard as file_obj_init_once(): two CPUs racing here
  * would both spinlock_init() the VM lock and the second reset would let both
  * into every critical section it protects.  Practically unreachable today
@@ -108,15 +115,37 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   vm_lock_init_once();
   if (tgid == 0 || tgid >= MAX_PROCESSES)
     return 0;
+  /* GB-217: a slot that went FREE without tearing its AS down (the deferred
+     release paths in process.c) leaves vm_as_pool[tgid].ver == AS_V2 with no
+     PCB pointing at it -- every later spawn of that pid then collides and
+     reports "no address space".  Reclaim such an orphan before the collision
+     check: teardown leaves the slot ver == 0, so the create proceeds.  A
+     genuinely owned entry (a live PCB or a borrowing thread still points at
+     it, or a CPU still claims the pid) is left alone and still collides. */
+  if (vm_as_pool[tgid].ver == AS_V2 && proc_as_pool_reclaimable(tgid)) {
+    uint64_t o_tgid = vm_as_pool[tgid].tgid;
+    uint64_t o_epoch = vm_as_pool[tgid].img_epoch;
+    vm_as_teardown(&vm_as_pool[tgid]);
+    gb217_reclaims++;
+    { static int rc; if (rc < 6) { rc++;
+      struct kline k; kl_init(&k);
+      kl_s(&k, "[GB124-AS] reclaimed orphan pid="); kl_i(&k, (long)tgid);
+      kl_s(&k, " orig_tgid="); kl_i(&k, (long)o_tgid);
+      kl_s(&k, " epoch="); kl_i(&k, (long)o_epoch);
+      kl_s(&k, "\n"); kl_emit(&k); } }
+  }
   uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
   struct addr_space *as = &vm_as_pool[tgid];
   if (as->ver == AS_V2) {
+    uint64_t owner_epoch = as->img_epoch;
     spinlock_release_irqrestore(&vm_lock, flags);
     /* GB-124: distinguish a pid-reuse AS collision from frame OOM — the idle
        reaper / slot reuse can hand us a pid whose AS pool entry is still
        AS_V2 (its teardown raced or never ran), which is a different defect
-       from running out of frames. */
-    { static int c_old; if (c_old<3){c_old++; uart_puts("[GB124-AS] fail: pid AS_V2 collision\n");} }
+       from running out of frames.  GB-217: counted, and the record names the
+       pid's slot state and the entry's epoch. */
+    gb217_collisions++;
+    proc_as_collision_note(tgid, owner_epoch);
     return 0;
   }
   uint64_t arr = frame_alloc_zeroed();
