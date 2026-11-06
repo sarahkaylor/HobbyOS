@@ -13,8 +13,9 @@ it. This checks, both directions:
 Exit 0 = in sync. Exit 1 = drift (the printed lines are the repair list). `--fix`
 re-runs import_seed.py to push plan-side fields back onto the board;
 `--adopt-orphans` appends a §8 row for each open board-only mint (GB-193).
+`--check` is the explicit form of the default report-only mode (GB-212).
 
-  sync_gaming_md.py [--fix | --adopt-orphans] [-v]
+  sync_gaming_md.py [--check | --fix | --adopt-orphans] [-v]
 """
 import argparse
 import re
@@ -246,8 +247,11 @@ def find_problems(plan, order, bd, text, verbose=False):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--fix", action="store_true", help="push plan-side fields back to the board")
-    p.add_argument("--adopt-orphans", action="store_true",
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--check", action="store_true",
+                   help="report drift only (the default; explicit for scripts)")
+    g.add_argument("--fix", action="store_true", help="push plan-side fields back to the board")
+    g.add_argument("--adopt-orphans", action="store_true",
                    help="append a §8 row for each open board-only mint")
     p.add_argument("-v", "--verbose", action="store_true")
     a = p.parse_args()
