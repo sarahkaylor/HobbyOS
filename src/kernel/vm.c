@@ -22,6 +22,7 @@
 #include "fs.h" /* P2.4 (S4): memfd object lookup for fd-backed mmap */
 #include "kline.h"
 #include "lock.h"
+#include "nfs.h" /* L54: VM_OBJ_NFS page source */
 #include "process.h"
 #include "virtio_gpu.h" /* GB-025 / M3: the scanout framebuffer address */
 
@@ -812,7 +813,8 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   uint64_t off = 0;
   uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   struct vm_region *r = vm_region_find(as, a);
-  if (as->ver != AS_V2 || !r || !r->obj || r->obj->kind != VM_OBJ_FILE ||
+  if (as->ver != AS_V2 || !r || !r->obj ||
+      (r->obj->kind != VM_OBJ_FILE && r->obj->kind != VM_OBJ_NFS) ||
       a < r->base || a + FRAME_SIZE > r->base + r->len) {
     spinlock_release_irqrestore(&vm_lock, fl);
     return -EFAULT;
@@ -822,7 +824,8 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   vm_object_ref_locked(o); /* hold it across the unlocked disk read */
   spinlock_release_irqrestore(&vm_lock, fl);
 
-  uint64_t src = file_obj_page(o, off); /* disk I/O: no lock held */
+  uint64_t src = (o->kind == VM_OBJ_NFS) ? nfs_obj_page(o, off)
+                                         : file_obj_page(o, off);
   if (!src) {
     vm_object_unref(o);
     return -EIO;
@@ -922,7 +925,8 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       /* so-vm lane A: a VM_OBJ_FILE page is read from the file, one page at
          a time, outside vm_lock (disk I/O).  A write into a MAP_PRIVATE
          mapping materializes the page privately, straight into a copy. */
-      if (r->obj && r->obj->kind == VM_OBJ_FILE) {
+      if (r->obj && (r->obj->kind == VM_OBJ_FILE ||
+                     r->obj->kind == VM_OBJ_NFS)) {
         int cow = write && (r->flags & VM_MAP_PRIVATE);
         spinlock_release_irqrestore(&vm_lock, fl);
         int mrc = vm_file_obj_materialize(as, a, cow);
@@ -1340,7 +1344,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
      (disk I/O, so vm_lock must be dropped); the helper re-validates and
      maps, mapping the object's frame shared — read-only when the region is
      MAP_PRIVATE — or a private copy for a MAP_PRIVATE write. */
-  if (r->obj && r->obj->kind == VM_OBJ_FILE) {
+  if (r->obj && (r->obj->kind == VM_OBJ_FILE || r->obj->kind == VM_OBJ_NFS)) {
     int cow = write && (r->flags & VM_MAP_PRIVATE);
     uint64_t off_dbg = (a - r->base) + r->obj_off;
     spinlock_release_irqrestore(&vm_lock, fl);
@@ -2044,8 +2048,13 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
   uint64_t obj_off = 0;
   int anon_obj = 0;
   int file_backed = 0; /* obj carries one reference for this call */
+  int nfs_backed = 0;  /* L54: VM_OBJ_NFS instead of VM_OBJ_FILE */
   uint16_t f_cluster = 0;
   uint32_t f_size = 0;
+  int n_mount = -1;
+  struct nfs_fh n_fh;
+  uint32_t n_size = 0;
+  n_fh.len = 0;
   uint16_t kind = VMK_ANON;
   if (fd >= 0) {
     if (fd >= MAX_OPEN_FDS)
@@ -2083,33 +2092,55 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       obj_off = offset;
       kind = VMK_SHARED;
     } else {
-      if (file_fat16_ident(grp, fd, &f_cluster, &f_size) != 0)
-        return -ENOTSUP; /* pipe/socket/NFS/dir/closed fd: unchanged */
+      int nmount = -1;
+      struct nfs_fh nfh;
+      uint32_t nsize = 0;
+      if (file_fat16_ident(grp, fd, &f_cluster, &f_size) != 0) {
+        /* L54: a regular NFS file maps through the NFS page cache.  Mono's
+           MemoryMappedFile (RimWorld's XML loader) maps Data/*.xml; refusing
+           them turned every def load into "Could not map file". */
+        if (file_nfs_ident(grp, fd, &nmount, &nfh, &nsize) != 0)
+          return -ENOTSUP; /* pipe/socket/dir/closed fd: unchanged */
+        nfs_backed = 1;
+        n_mount = nmount;
+        n_fh = nfh;
+        n_size = nsize;
+      }
       if (offset & 0xFFF)
         return -EINVAL;
       if (!(fl2 & (VM_MAP_SHARED | VM_MAP_PRIVATE)))
         return -EINVAL; /* a file mapping is private or shared, never neither */
-      /* VM_OBJ_MAX_BYTES is the per-object page-cache ceiling (S4 scope):
-         refuse a larger file rather than map it partially. */
-      if (f_size == 0 || f_size > VM_OBJ_MAX_BYTES)
-        return -ENOMEM;
-      uint64_t fcap = ((uint64_t)f_size + 0xFFF) & ~0xFFFULL;
-      /* Linux allows a file mapping LONGER than the file: mmap only installs
-       * the range, and a page past the object's page capacity is simply never
-       * backed (Linux SIGBUSes when it is touched).  Real glibc depends on
-       * this: for an ET_DYN it maps the whole segment span (maplength, which
-       * includes .bss past EOF) in ONE file mmap, then carves the individual
-       * segments with MAP_FIXED and replaces the bss tail anonymously
-       * (elf/dl-map-segments.h).  Refusing len > fcap - offset turned that
-       * into EINVAL and ld.so 2.31 reported "failed to map segment from
-       * shared object" for libc.so.6 — measured on the M1 compat boot
-       * (docs/rw-ldso-design.md §7).  The OFFSET must still be inside the
-       * file's page range: an offset past EOF has no first page to read. */
-      if (offset >= fcap)
-        return -EINVAL;
-      file_backed = 1;
-      obj_off = offset;
-      kind = VMK_LIB;
+      if (nfs_backed) {
+        if (n_size == 0 || n_size > VM_OBJ_MAX_BYTES)
+          return -ENOMEM;
+        uint64_t ncap = ((uint64_t)n_size + 0xFFF) & ~0xFFFULL;
+        if (offset >= ncap)
+          return -EINVAL;
+        obj_off = offset;
+        kind = VMK_LIB;
+      } else {
+        /* VM_OBJ_MAX_BYTES is the per-object page-cache ceiling (S4 scope):
+           refuse a larger file rather than map it partially. */
+        if (f_size == 0 || f_size > VM_OBJ_MAX_BYTES)
+          return -ENOMEM;
+        uint64_t fcap = ((uint64_t)f_size + 0xFFF) & ~0xFFFULL;
+        /* Linux allows a file mapping LONGER than the file: mmap only installs
+         * the range, and a page past the object's page capacity is simply never
+         * backed (Linux SIGBUSes when it is touched).  Real glibc depends on
+         * this: for an ET_DYN it maps the whole segment span (maplength, which
+         * includes .bss past EOF) in ONE file mmap, then carves the individual
+         * segments with MAP_FIXED and replaces the bss tail anonymously
+         * (elf/dl-map-segments.h).  Refusing len > fcap - offset turned that
+         * into EINVAL and ld.so 2.31 reported "failed to map segment from
+         * shared object" for libc.so.6 — measured on the M1 compat boot
+         * (docs/rw-ldso-design.md §7).  The OFFSET must still be inside the
+         * file's page range: an offset past EOF has no first page to read. */
+        if (offset >= fcap)
+          return -EINVAL;
+        file_backed = 1;
+        obj_off = offset;
+        kind = VMK_LIB;
+      }
     }
   } else if (fl2 & VM_MAP_SHARED) {
     if (!(fl2 & VM_MAP_ANONYMOUS))
@@ -2194,12 +2225,50 @@ have_base:
       return -ENOMEM; /* cache full / frame OOM: refuse, never evict */
     /* Same reference discipline as the anon object: this call owns one. */
   }
+  if (nfs_backed) {
+    obj = nfs_obj_get(n_mount, &n_fh, n_size);
+    if (!obj) {
+      static int nrows;
+      if (nrows < 6) {
+        nrows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[NMAP] fail fd=");
+        kl_i(&kl, (long)fd);
+        kl_s(&kl, " size=");
+        kl_i(&kl, (long)n_size);
+        kl_s(&kl, " fhlen=");
+        kl_i(&kl, (long)n_fh.len);
+        kl_s(&kl, " mount=");
+        kl_i(&kl, (long)n_mount);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+      return -ENOMEM;
+    }
+    {
+      static int nrows_ok;
+      if (nrows_ok < 4) {
+        nrows_ok++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[NMAP] ok fd=");
+        kl_i(&kl, (long)fd);
+        kl_s(&kl, " size=");
+        kl_i(&kl, (long)n_size);
+        kl_s(&kl, " fhlen=");
+        kl_i(&kl, (long)n_fh.len);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+  }
   if (vm_region_insert(as, base, len, p, kind, fl2, obj, obj_off) != 0) {
-    if (anon_obj || file_backed)
+    if (anon_obj || file_backed || nfs_backed)
       vm_object_unref(obj);
     return -ENOMEM;
   }
-  if (anon_obj || file_backed)
+  if (anon_obj || file_backed || nfs_backed)
     vm_object_unref(obj); /* the record holds its own reference */
   return (int64_t)base;
 }

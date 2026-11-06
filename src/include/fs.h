@@ -66,7 +66,14 @@ typedef enum {
      unread expirations; read(2) drains them as one u64. */
   FILE_TYPE_TIMERFD,
   /* L49: an epoll instance (src/kernel/linux_compat_timers.c). */
-  FILE_TYPE_EPOLL
+  FILE_TYPE_EPOLL,
+  /* L54: a DIRECTORY on a mounted NFS export.  Mono's
+     DirectoryInfo.GetDirectories() over /NFS used to reach fat16_open_dir()
+     and fail with ENOENT, so Verse.ModLister's type initializer threw
+     DirectoryNotFoundException and the main menu never appeared.  An NFSDIR
+     fd has no data path; getdents64 walks nfs_list_dir() and stat reports a
+     directory.  Appended last: no values shift. */
+  FILE_TYPE_NFSDIR
 } file_type_t;
 
 struct vm_object;

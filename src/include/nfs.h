@@ -247,6 +247,8 @@ int  nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
                    uint32_t offset, void *buf, uint32_t len);
 int  nfs_list_dir(const struct nfs_mount *m, const char *rel, int index,
                   char *name, int name_cap, uint8_t *attr_out, uint32_t *size_out);
+/* L54: entry count for a cached directory listing (fills the cache). */
+int  nfs_dir_entries(const struct nfs_mount *m, const char *rel);
 int  nfs_statfs(const struct nfs_mount *m, const char *rel,
                 uint64_t *total, uint64_t *avail);
 int  nfs_is_dir(const struct nfs_mount *m, const char *rel);

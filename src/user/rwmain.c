@@ -552,12 +552,22 @@ static volatile int rw_stk_busy;
 static unsigned long rw_stk_base;
 static volatile int rw_stk_n;
 static unsigned long rw_stk_buf[RW_STK_WORDS];
+/* L54: the interrupted thread's register file is the only place that carries
+ * the futex key the thread is ACTUALLY parked on (syscall arg 0 = rdi).  The
+ * stack alone can only offer handles that happen to be spilled in it, which is
+ * how the L53 scan came to blame a signalled EVENT that the thread was not
+ * waiting on.  Copy the whole greg set; the sampler reads it immediately. */
+static unsigned long rw_stk_regs[NGREG];
+static volatile int rw_stk_regs_ok;
 
 static void rw_stk_handler(int sig, siginfo_t *si, void *ucv) {
   (void)sig;
   (void)si;
   ucontext_t *uc = (ucontext_t *)ucv;
   unsigned long sp = (unsigned long)uc->uc_mcontext.gregs[REG_RSP];
+  for (int r = 0; r < NGREG; r++)
+    rw_stk_regs[r] = (unsigned long)uc->uc_mcontext.gregs[r];
+  rw_stk_regs_ok = 1;
   rw_stk_base = sp;
   int i = 0;
   while (i < RW_STK_WORDS) {
@@ -1086,30 +1096,18 @@ int sem_post(sem_t *s) {
   return real ? real(s) : -1;
 }
 
-int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) {
-  static int (*real)(pthread_cond_t *, pthread_mutex_t *);
-  if (!real)
-    real = (int (*)(pthread_cond_t *, pthread_mutex_t *))
-        dlvsym(RTLD_NEXT, "pthread_cond_wait", "GLIBC_2.2.5");
-  mtx_rec(6, c, __builtin_return_address(0));
-  if (mtx_on())
-    mtx_row("cond_wait", c, m ? *(volatile int *)m : -1,
-            __builtin_return_address(0));
-  return real ? real(c, m) : -1;
-}
-
-int pthread_cond_timedwait(pthread_cond_t *c, pthread_mutex_t *m,
-                           const struct timespec *t) {
-  static int (*real)(pthread_cond_t *, pthread_mutex_t *, const struct timespec *);
-  if (!real)
-    real = (int (*)(pthread_cond_t *, pthread_mutex_t *, const struct timespec *))
-        dlvsym(RTLD_NEXT, "pthread_cond_timedwait", "GLIBC_2.3.2");
-  mtx_rec(6, c, __builtin_return_address(0));
-  if (mtx_on())
-    mtx_row("cond_timedwait", c, m ? *(volatile int *)m : -1,
-            __builtin_return_address(0));
-  return real ? real(c, m, t) : -1;
-}
+/* L54: pthread_cond_wait/timedwait live in tools/rw/mono-probe/condtrace.c.
+ * The two definitions that used to be here resolved
+ *   dlvsym(RTLD_NEXT, "pthread_cond_wait", "GLIBC_2.2.5")
+ * which is libpthread's `__pthread_cond_wait_2_0` compat entry: it reads
+ * *(void**)cond and, when the first word is zero (every freshly calloc'd
+ * MonoW32Handle cond is), calloc()s a private 0x30-byte "2.0" cond, stores
+ * that pointer into the REAL cond's first word and parks on the private one.
+ * Mono's pthread_cond_signal/broadcast are not interposed, so they operate on
+ * the real cond -- the waiter and the waker end up on two different futex
+ * keys, and an infinite wait never returns.  condtrace uses GLIBC_2.3.2 (the
+ * ABI this pinned libpthread exports as default) for all four functions, so
+ * both sides see the same cond. */
 
 #endif /* !RW_NO_SHADOW_PTHREAD */
 
@@ -2112,18 +2110,215 @@ static void tp_mods_dump(void) {
  * separates "the producer never set the event" (sig=0) from "the event was
  * set and the wake was lost" (sig=1) below Mono.
  */
+/* ------------------------------------------------------------------------
+ * L54: the handle the parked thread is ACTUALLY blocked on.
+ *
+ * A glibc 2.31 pthread_cond_wait parks on the futex word
+ * `cond + 0x28 + 4*g` (disassembled from the pinned libpthread: f1f5
+ * `lea 0x28(%rbp,%r9,1),%r15` then the futex syscall with rdi=r15).  The
+ * thread's interrupted register file carries that key in rdi, so the key no
+ * longer has to be inferred from a stack scan.
+ *
+ * Mono's MonoW32Handle puts the cond at handle+0x38 and the mutex at
+ * handle+0x10 (libmonobdwgc mono_w32handle_wait_one, 0x20dec8:
+ * `lea 0x38(%rbp),%rdi; add $0x10,%rbp; mov %rbp,%rsi`).  Therefore a key
+ * that belongs to a w32handle event must satisfy
+ *
+ *     handle = key - 0x60 - 4*g        (g = 0 or 1)
+ *
+ * and the 16-byte header at `handle` must decode as
+ * {int type; u32 ref; int signalled; int in_use} with small sane values.
+ * That is the identity test; everything else on the stack is a candidate.
+ */
+static int tp_hdr(unsigned long h, int *type, unsigned int *ref, int *sig,
+                  int *inuse) {
+  if (h < 0x1000000000UL || h > 0x1400000000UL || (h & 7)) return 0;
+  if (!rw_readable(h + 0x6f)) return 0;
+  *type = *(volatile int *)h;
+  *ref = *(volatile unsigned int *)((char *)h + 4);
+  *sig = *(volatile int *)((char *)h + 8);
+  *inuse = *(volatile int *)((char *)h + 12);
+  return (*type >= 1 && *type <= 16 && *ref > 0 && *ref <= 0x100000 &&
+          (*sig == 0 || *sig == 1) && (*inuse == 0 || *inuse == 1));
+}
+
+static void tp_hdr_row(const char *tag, int tid, unsigned long key,
+                       unsigned long h, int g) {
+  int type = -1, sig = -1, inuse = -1;
+  unsigned int ref = 0;
+  int ok = tp_hdr(h, &type, &ref, &sig, &inuse);
+  tp_w(tag);
+  tp_w(" tid=");
+  tp_wi(tid);
+  tp_w(" key=0x");
+  tp_wx(key);
+  tp_w(" g=");
+  tp_wi(g);
+  tp_w(" h=0x");
+  tp_wx(h);
+  tp_w(" valid=");
+  tp_wi(ok);
+  tp_w(" type=");
+  tp_wi(type);
+  tp_w(" ref=");
+  tp_wi((long)ref);
+  tp_w(" sig=");
+  tp_wi(sig);
+  tp_w(" in_use=");
+  tp_wi(inuse);
+  if (ok) {
+    tp_w(" mutex=0x");
+    tp_wx(h + 0x10);
+    tp_w(" cond=0x");
+    tp_wx(h + 0x38);
+    tp_w(" hdr=");
+    for (int w = 0; w < 2; w++) {
+      tp_w(" 0x");
+      tp_wx(*(volatile unsigned long *)((char *)h + w * 8));
+    }
+  }
+  tp_w("\n");
+}
+
+/* Print the register-derived park identity, then every exact-handle candidate
+ * that the same thread's stack still points at.  `tid` is the sampled thread
+ * (pid 4 for the game's main thread). */
+static void tp_park_ident(int tid) {
+  if (!rw_stk_regs_ok) return;
+  unsigned long rip = rw_stk_regs[REG_RIP];
+  unsigned long rsp = rw_stk_regs[REG_RSP];
+  unsigned long rax = rw_stk_regs[REG_RAX];
+  unsigned long rdi = rw_stk_regs[REG_RDI];
+  unsigned long rsi = rw_stk_regs[REG_RSI];
+  unsigned long rdx = rw_stk_regs[REG_RDX];
+  unsigned long r10 = rw_stk_regs[REG_R10];
+  unsigned long rbp = rw_stk_regs[REG_RBP];
+  tp_w("[TPWF] tid=");
+  tp_wi(tid);
+  tp_w(" rip=0x");
+  tp_wx(rip);
+  tp_w(" rsp=0x");
+  tp_wx(rsp);
+  tp_w(" rax=0x");
+  tp_wx(rax);
+  tp_w(" rdi=0x");
+  tp_wx(rdi);
+  tp_w(" rsi=0x");
+  tp_wx(rsi);
+  tp_w(" rdx=0x");
+  tp_wx(rdx);
+  tp_w(" r10=0x");
+  tp_wx(r10);
+  tp_w(" rbp=0x");
+  tp_wx(rbp);
+  tp_w("\n");
+
+  /* The futex key is only rdi when the thread is inside the futex syscall.
+     rip == libpthread+0xf376 is the `cmp` right after `syscall` in
+     pthread_cond_wait's wait loop; the syscall args are still live there. */
+  unsigned long key = rdi;
+  if (key < 0x1000000000UL || key > 0x1400000000UL) return;
+  /* An idle thread's rdi is not a futex key.  Reading it unguarded would
+     fault the launcher itself, so the mincore-backed probe gates the row. */
+  if (!rw_readable(key)) return;
+  unsigned long cond = key - 0x28;
+  tp_w("[TPWFK] tid=");
+  tp_wi(tid);
+  tp_w(" key=0x");
+  tp_wx(key);
+  tp_w(" cond=0x");
+  tp_wx(cond);
+  tp_w(" word=0x");
+  tp_wx(*(volatile unsigned int *)key);
+  tp_w("\n");
+  tp_hdr_row("[TPWH0]", tid, key, key - 0x60, 0);   /* cond = h+0x38, key = cond+0x28 */
+  tp_hdr_row("[TPWH1]", tid, key, key - 0x64, 1);   /* group 1: key = cond+0x2c */
+  {
+    extern void ct_report(const void *cond, const char *tag) __attribute__((weak));
+    if (ct_report) {
+      ct_report((const void *)cond, "parked");
+      if (tp_hdr(key - 0x60, &(int){0}, &(unsigned int){0}, &(int){0}, &(int){0}))
+        ct_report((const void *)(key - 0x60 + 0x38), "parked-h");
+    }
+  }
+
+  /* Identity, part 2: is that handle pointer in THIS thread's captured frame?
+     And does any other plausible MonoW32Handle on the stack produce this same
+     key?  A second handle with the same key would be an aliasing bug. */
+  int h_hit = -1, m_hit = -1, c_hit = -1, k_hit = -1, n_same = 0;
+  unsigned long same = 0;
+  for (int i = 0; i < rw_stk_n; i++) {
+    unsigned long v = rw_stk_buf[i];
+    if (v == key - 0x60) h_hit = i;
+    if (v == key - 0x50) m_hit = i;       /* handle+0x10 */
+    if (v == cond) c_hit = i;
+    if (v == key) k_hit = i;
+    int t2, s2, u2; unsigned int r2;
+    if (v >= 0x1000000000UL && v <= 0x1400000000UL && !(v & 7) &&
+        tp_hdr(v, &t2, &r2, &s2, &u2)) {
+      if (v + 0x60 == key || v + 0x64 == key) { n_same++; same = v; }
+    }
+  }
+  tp_w("[TPWFS] tid=");
+  tp_wi(tid);
+  tp_w(" h_at=");
+  tp_wi(h_hit);
+  tp_w(" mutex_at=");
+  tp_wi(m_hit);
+  tp_w(" cond_at=");
+  tp_wi(c_hit);
+  tp_w(" key_at=");
+  tp_wi(k_hit);
+  tp_w(" same_key_handles=");
+  tp_wi(n_same);
+  if (n_same) {
+    tp_w(" other=0x");
+    tp_wx(same);
+  }
+  tp_w("\n");
+  /* The stack handle that L53 blamed: say where it is and what its own cond's
+     futex key would be, so "signalled event on the stack" and "event this
+     thread waits on" are different rows even when both exist. */
+  for (int i = 0; i < rw_stk_n && i < 256; i++) {
+    unsigned long v = rw_stk_buf[i];
+    int t2, s2, u2; unsigned int r2;
+    if (v < 0x1000000000UL || v > 0x1400000000UL || (v & 7)) continue;
+    if (!tp_hdr(v, &t2, &r2, &s2, &u2)) continue;
+    if (v == key - 0x60) continue;         /* the parked one, already printed */
+    tp_w("[TPWFC] tid=");
+    tp_wi(tid);
+    tp_w(" at=");
+    tp_wi(i);
+    tp_w(" h=0x");
+    tp_wx(v);
+    tp_w(" type=");
+    tp_wi(t2);
+    tp_w(" ref=");
+    tp_wi((long)r2);
+    tp_w(" sig=");
+    tp_wi(s2);
+    tp_w(" in_use=");
+    tp_wi(u2);
+    tp_w(" key0=0x");
+    tp_wx(v + 0x60);
+    tp_w(" key1=0x");
+    tp_wx(v + 0x64);
+    tp_w("\n");
+    break;
+  }
+}
+
+/* Every plausible MonoW32Handle in the captured stack, with the CORRECT
+ * handle-relative cond/mutex addresses (handle+0x38 / handle+0x10) and the
+ * futex key glibc would use for it.  L53's version printed `cond=handle+0x38`
+ * but never the key, and the reader had to guess which of these handles the
+ * thread was in. */
 static void tp_scan_handles(int tid) {
   int shown = 0;
-  for (int i = 0; i < rw_stk_n && i < 160 && shown < 8; i++) {
+  for (int i = 0; i < rw_stk_n && i < 160 && shown < 10; i++) {
     unsigned long v = rw_stk_buf[i];
-    if (v < 0x1000000000UL || v > 0x1400000000UL || (v & 7)) continue;
-    if (!rw_readable(v + 0x70)) continue;
-    int type = *(volatile int *)v;
-    unsigned int ref = *(volatile unsigned int *)((char *)v + 4);
-    int sig = *(volatile int *)((char *)v + 8);
-    int inuse = *(volatile int *)((char *)v + 12);
-    if (type < 1 || type > 16 || ref == 0 || ref > 0x100000) continue;
-    if (sig < 0 || sig > 1 || inuse < 0 || inuse > 1) continue;
+    int type, sig, inuse; unsigned int ref;
+    if (!tp_hdr(v, &type, &ref, &sig, &inuse)) continue;
     tp_w("[TPWW] tid=");
     tp_wi(tid);
     tp_w(" i=");
@@ -2140,6 +2335,10 @@ static void tp_scan_handles(int tid) {
     tp_wi(inuse);
     tp_w(" cond=0x");
     tp_wx(v + 0x38);
+    tp_w(" key0=0x");
+    tp_wx(v + 0x60);
+    tp_w(" key1=0x");
+    tp_wx(v + 0x64);
     tp_w("\n");
     shown++;
   }
@@ -2576,6 +2775,7 @@ static void tp_probe_stall(int at) {
     twq_owner_scan(tid);
     if (tid == (int)getpid()) {
       tp_native_first(tid, 48);
+      tp_park_ident(tid);
       tp_scan_locks(tid);
       tp_scan_handles(tid);
     }

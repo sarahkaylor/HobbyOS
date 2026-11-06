@@ -33,6 +33,15 @@ struct process;
 int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
                      uint32_t *size);
 
+/* L54: resolve an fd to a REGULAR NFS file's identity (mount index + NFSv3
+ * file handle + size).  This is what lets v2 mmap a file on /NFS: RimWorld's
+ * XML loader uses MemoryMappedFile on Data/*.xml, and answering -ENOTSUP
+ * turned every def load into "Could not map file".  Returns 0, or -EBADF /
+ * -ENOTSUP for a non-NFS (or directory) fd. */
+struct nfs_fh;
+int file_nfs_ident(struct process *p, int fd, int *mount_idx,
+                   struct nfs_fh *fh, uint32_t *size);
+
 /* --- /dev/fb0 (GB-025 / M3, implemented in fs.c) -----------------------
  * 1 when `fd` is the framebuffer node opened from /dev/fb0.  vm_mmap maps
  * it to the scanout smem (USER_FB_BASE_V2) instead of a vm_object, and the
@@ -58,6 +67,20 @@ struct vm_object *file_obj_get(uint16_t start_cluster, uint32_t file_size);
  * read as zeros.  MUST be called with NO lock held (it performs disk I/O).
  * Returns 0 on failure (invalidated object, I/O error, out of frames). */
 uint64_t file_obj_page(struct vm_object *o, uint64_t off);
+
+/* --- L54: the NFS half of the page cache ------------------------------- */
+/* Get-or-create the VM_OBJ_NFS object for (mount_idx, fh) with one reference
+ * for the caller; every mapping of the same file shares its frames.  Pages
+ * are read with nfs_read_file() on first touch.  Returns NULL on an empty or
+ * over-cap file, a full slot table, or frame exhaustion. */
+struct vm_object *nfs_obj_get(int mount_idx, const struct nfs_fh *fh,
+                              uint32_t size);
+
+/* The frame backing byte offset `off` of an NFS object, filled on first
+ * touch.  MUST be called with NO lock held (it performs an RPC).  Returns 0
+ * on failure.  Read-only: there is no invalidation path because NFS mounts
+ * are read-only in this VFS. */
+uint64_t nfs_obj_page(struct vm_object *o, uint64_t off);
 
 /* Invalidation (docs/shared-libs.md section 4 item 4): detach the cached
  * object so the next mmap re-reads the file.  Existing mappings keep the

@@ -1259,6 +1259,28 @@ static int dir_cache_fill(const struct nfs_mount *m, int midx, const char *rel) 
   return 0;
 }
 
+/* L54: number of entries the one-directory cache holds for `rel`, ensuring it
+ * is filled.  getdents64 must answer 0 at end-of-directory, but
+ * nfs_list_dir() uses -1 for BOTH "past the end" and "RPC failed"; without
+ * this count a .NET FileSystemEnumerator sees EIO on its last read. */
+int nfs_dir_entries(const struct nfs_mount *m, const char *rel) {
+  if (!m || !m->in_use || !rel) return -1;
+  int midx = -1;
+  for (int i = 0; i < NFS_MAX_MOUNTS; i++) {
+    if (&mounts[i] == m) {
+      midx = i;
+      break;
+    }
+  }
+  if (midx < 0) return -1;
+  int fresh = dcache.valid && dcache.mount_idx == midx &&
+              n_streq(dcache.path, rel);
+  if (!fresh) {
+    if (dir_cache_fill(m, midx, rel) != 0) return -1;
+  }
+  return dcache.count;
+}
+
 int nfs_list_dir(const struct nfs_mount *m, const char *rel, int index,
                  char *name, int name_cap, uint8_t *attr_out, uint32_t *size_out) {
   if (!m || !m->in_use || !rel || index < 0) return -1;
