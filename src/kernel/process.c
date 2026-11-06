@@ -197,6 +197,8 @@ extern void arch_fpu_reset(struct process *p);
 
 // Process table
 static struct process proc_table[MAX_PROCESSES];
+/* GB-217: counted "process_create_v2: no address space" failures. */
+static int gb217_noas;
 
 /* GB-057: bounded count for the [IDLECLAIM] report (a leaked per-CPU claim seen
    on idle entry).  Rare-event report, not a per-idle log. */
@@ -946,6 +948,51 @@ int process_free_slots(void) {
   return n;
 }
 
+/* GB-217: an AS-pool entry is reclaimable when the pid has no owner left:
+   no PCB (anchor or borrowing thread) points at an AS with this tgid, and no
+   CPU still claims the pid (a slot in its deferred-release exit tail must not
+   have its AS freed under it). */
+int proc_as_pool_reclaimable(uint64_t tgid) {
+  if (tgid == 0 || tgid >= MAX_PROCESSES)
+    return 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int ret = 1;
+  if (process_still_running((int)tgid))
+    ret = 0;
+  for (int i = 1; ret && i < MAX_PROCESSES; i++) {
+    struct process *p = &proc_table[i];
+    if (p->state == PROC_STATE_FREE || !p->as)
+      continue;
+    if (p->as->tgid == tgid) {
+      ret = 0; /* a live PCB still translates through this AS */
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return ret;
+}
+
+/* GB-217: name the slot whose pid was reused while its AS pool entry was
+   still AS_V2.  Diagnostic only; called from vm_as_create without proc_lock
+   (the create path does not hold it there). */
+void proc_as_collision_note(uint64_t pid, uint64_t epoch) {
+  if (pid >= MAX_PROCESSES)
+    return;
+  struct process *p = &proc_table[pid];
+  struct kline k;
+  kl_init(&k);
+  kl_s(&k, "[GB124-AS] collision pid="); kl_i(&k, (long)pid);
+  kl_s(&k, " state="); kl_i(&k, (long)p->state);
+  kl_s(&k, " thread="); kl_i(&k, p->is_thread);
+  kl_s(&k, " tgid="); kl_i(&k, (long)p->tgid);
+  kl_s(&k, " td="); kl_i(&k, p->teardown_done);
+  kl_s(&k, " as="); kl_hex(&k, (uint64_t)(uintptr_t)p->as);
+  kl_s(&k, " epoch="); kl_i(&k, (long)epoch);
+  kl_s(&k, " name="); kl_s(&k, p->name[0] ? p->name : "-");
+  kl_s(&k, "\n");
+  kl_emit(&k);
+}
+
 static int process_create_internal_ver(int ver) {
   /* P8.2 (soak famine class): the per-call trace prints below are
      unthrottled and every loader/spawn retry emits them — a slot shortage
@@ -1230,6 +1277,7 @@ static int process_create_internal_ver(int ver) {
   if (ver == AS_V2) {
     struct addr_space *as = vm_as_create((uint64_t)pid);
     if (!as) {
+      gb217_noas++;
       uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
       p->state = PROC_STATE_FREE;
       spinlock_release_irqrestore(&proc_lock, f2);
@@ -2152,6 +2200,9 @@ void schedule(struct trap_frame *tf, int is_yield) {
         db_s(&d2, " running=");db_i(&d2, n_run);
         db_s(&d2, " blocked=");db_i(&d2, n_blk);
         db_s(&d2, " other=");  db_i(&d2, n_other);
+        db_s(&d2, " as_col="); db_i(&d2, vm_as_collision_count());
+        db_s(&d2, " as_recl="); db_i(&d2, vm_as_reclaim_count());
+        db_s(&d2, " as_noas="); db_i(&d2, gb217_noas);
         db_s(&d2, "\n");
         db_emit(&d2);
       }

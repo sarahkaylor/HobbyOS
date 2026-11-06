@@ -213,6 +213,10 @@ struct addr_space *vm_as_create(uint64_t tgid);
  * table frames, the root, and the region array.  Idempotent. */
 void vm_as_teardown(struct addr_space *as);
 
+/* GB-217: AS-pool event counters, reported once at [HALT-CD]. */
+int vm_as_collision_count(void);
+int vm_as_reclaim_count(void);
+
 /* --- Region list (vm.c) ---------------------------------------------- */
 
 /* Sorted insert; rejects overlaps (-EINVAL) and merges exact adjacency
