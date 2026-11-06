@@ -47,6 +47,16 @@ uint64_t frame_alloc_zeroed(void);
  * in-pool address: clearing an already-clear bit is a no-op. */
 void frame_free(uint64_t phys);
 
+/* Is this physical frame currently owned by someone?  Diagnostic only (the
+ * fault dump asks whether the frame a live leaf points at has already gone
+ * back to the allocator, which is what a use-after-free looks like). */
+int frame_is_alloced(uint64_t phys);
+
+/* Watch one frame: every frame_free() naming it prints [FREEW] with the
+ * caller's return address, and frame_watch_count() counts the hits. */
+void frame_watch(uint64_t phys);
+int frame_watch_count(void);
+
 /* Reserve the physical range [lo, hi) (rounded outward to frames) so the
  * allocator never hands out frames over it.  Boot-time use: the kernel
  * image (text/rodata/data/bss + boot stacks) must be reserved, else the

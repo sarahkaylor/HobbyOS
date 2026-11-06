@@ -76,8 +76,15 @@
 /* L40: the run window is the HARNESS's call now (--run-timeout).  180 s was
  * the old hard cap and it cut every run off during the assembly load; the
  * harness kills the QEMU process at its own deadline, so this only has to be
- * longer than any budget the harness is given. */
-#define RW_WAIT_SECS  420
+ * longer than any budget the harness is given.
+ *
+ * M6/L60: it was 420 while the ladders run at 600, so the launcher exited
+ * mid-run, the child was reparented, and the app window disappeared from the
+ * screen exactly when the #UD ladder needed it.  A deadline BELOW the
+ * harness's turns every long run into an unobserved one; 900 keeps the
+ * launcher alive past any --run-timeout used here, and the launcher's own
+ * dump/exit is then governed by the harness. */
+#define RW_WAIT_SECS  900
 
 /* Console-only output.  print()/print_dec() write fd 1, which in a
  * desktop-launched session is the window protocol pipe; every row this

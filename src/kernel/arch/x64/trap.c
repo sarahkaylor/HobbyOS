@@ -3801,45 +3801,150 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         struct vm_region *ur = vm_region_find(cur->as, tf->elr);
         if (ur && ur->obj && ur->obj->kind == VM_OBJ_FILE &&
             (ur->prot & VM_PROT_EXEC) && ur->obj->file_start_cluster) {
-          static uint8_t fpage[FRAME_SIZE];
-          uint64_t uoff = (tf->elr & ~0xFFFULL) - ur->base + ur->obj_off;
-          int fn = fat16_read_direct_pos(ur->obj->file_start_cluster,
-                                         (uint32_t)ur->obj->size,
-                                         (uint64_t)(uintptr_t)fpage,
-                                         FRAME_SIZE, (uint32_t)uoff);
+          /* M6/L60: the L59 probe read the file into a .bss array and the page
+             into the faulting VA, and printed `pagecmp=DIFF mem=00..` — but
+             both halves were suspect (fat16_read_direct_pos wants a PHYSICAL
+             destination, and a compare against a page that another thread may
+             already have recycled says nothing about what the CPU fetched).
+             This probe allocates a real frame for the file read, walks the
+             FAULTING page tables for the leaf the CPU actually translates
+             through, asks the frame allocator whether that frame is still
+             owned, and asks the object which frame IT has cached for the page.
+             `alloc=0` is a use-after-free; `pa != objfr` with exec bytes is a
+             private copy (expected for text since L59); a `pg=` that is not
+             the file's page says the fill published the wrong bytes. */
+          uint64_t page_va = tf->elr & ~0xFFFULL;
+          uint64_t uoff = page_va - ur->base + ur->obj_off;
+          uint64_t leaf = 0;
+          int have_leaf = vm_arch_walk(cur->as, page_va, &leaf) == 0;
+          uint64_t pa = have_leaf ? vm_arch_leaf_phys(leaf) : 0;
+          /* Order matters: ask the allocator and snapshot the executed bytes
+             BEFORE frame_alloc() below.  If the leaf points at an already
+             freed frame, frame_alloc() can hand back THAT frame and the file
+             read would overwrite the evidence before it is read. */
+          int pa_alloc = pa ? frame_is_alloced(pa) : -1;
+          uint64_t objfr = vm_object_peek(ur->obj, uoff);
           const uint8_t *mem = (const uint8_t *)tf->elr;
+          const uint8_t *memp = (const uint8_t *)page_va;
           int inpage = (int)(tf->elr & 0xFFF);
+          uint8_t memsnap[16], pgsnap[12];
+          for (int i = 0; i < 16; i++)
+            memsnap[i] = mem[i];
+          for (int i = 0; i < 12; i++)
+            pgsnap[i] = memp[i];
+          uint64_t fpage = frame_alloc();
+          int fn = fpage ? fat16_read_direct_pos(ur->obj->file_start_cluster,
+                                                (uint32_t)ur->obj->size,
+                                                fpage, FRAME_SIZE,
+                                                (uint32_t)uoff)
+                         : -1;
+          /* Two controls, because a single wrong `file=` row cannot say
+             whether the FILE read failed or the PAGE failed:
+               ctl  = a fresh read of a page this file certainly has code in
+                      (obj_off+0, the .init prologue) through the same call;
+               objb = the bytes in the vm_object's own cached frame for THIS
+                      offset (the fill source), if it is still owned. */
+          uint64_t cpage = frame_alloc();
+          int cn = -1;
+          if (cpage)
+            cn = fat16_read_direct_pos(ur->obj->file_start_cluster,
+                                       (uint32_t)ur->obj->size, cpage,
+                                       FRAME_SIZE, (uint32_t)ur->obj_off);
+          const uint8_t *cbt = (const uint8_t *)cpage;
+          int obj_ok = objfr && frame_is_alloced(objfr);
+          const uint8_t *ob = (const uint8_t *)(obj_ok ? objfr : 0);
+          const uint8_t *fp = (const uint8_t *)fpage;
           int same = 1;
           if (fn != (int)FRAME_SIZE) {
             same = 0;
           } else {
             for (int i = 0; i < 16; i++)
-              if (mem[i] != fpage[inpage + i]) {
+              if (memsnap[i] != fp[inpage + i]) {
                 same = 0;
                 break;
               }
           }
-          struct fl_buf uc;
-          uc.n = 0;
-          fl_s(&uc, "[UDCHK] off=");
-          fl_hex(&uc, uoff);
-          fl_s(&uc, " rd=");
-          fl_dec(&uc, fn);
-          fl_s(&uc, " pagecmp=");
-          fl_s(&uc, same ? "match" : "DIFF");
-          fl_s(&uc, " mem=");
-          for (int i = 0; i < 8; i++) {
-            fl_hex(&uc, (uint64_t)mem[i]);
+          static int udx_rows;
+          if (udx_rows < 4) {
+            udx_rows++;
+            struct fl_buf uc;
+            uc.n = 0;
+            fl_s(&uc, "[UDX] rip=");
+            fl_hex(&uc, tf->elr);
+            fl_s(&uc, " off=");
+            fl_hex(&uc, uoff);
+            fl_s(&uc, " rd=");
+            fl_dec(&uc, fn);
+            fl_s(&uc, " leaf=");
+            fl_hex(&uc, leaf);
+            fl_s(&uc, " pa=");
+            fl_hex(&uc, pa);
+            fl_s(&uc, " alloc=");
+            fl_dec(&uc, pa_alloc);
+            fl_s(&uc, " objfr=");
+            fl_hex(&uc, objfr);
+            fl_s(&uc, " same=");
+            fl_s(&uc, same ? "1" : "0");
+            fl_s(&uc, " wf=");
+            fl_dec(&uc, frame_watch_count());
+            fl_c(&uc, '\n');
+            uc.b[uc.n] = 0;
+            uart_puts(uc.b);
+
+            uc.n = 0;
+            fl_s(&uc, "[UDX] objb=");
+            for (int i = 0; i < 8 && ob; i++) {
+              fl_hex(&uc, (uint64_t)ob[i]);
+              fl_c(&uc, ' ');
+            }
+            fl_s(&uc, " ctl=");
+            fl_dec(&uc, cn);
             fl_c(&uc, ' ');
+            for (int i = 0; i < 8; i++) {
+              fl_hex(&uc, (uint64_t)cbt[i]);
+              fl_c(&uc, ' ');
+            }
+            fl_s(&uc, " want=");
+            for (int i = 0; i < 8; i++) {
+              fl_hex(&uc, (uint64_t)fp[i]);
+              fl_c(&uc, ' ');
+            }
+
+            uc.n = 0;
+            fl_s(&uc, "[UDX] pghd=");
+            for (int i = 0; i < 12; i++) {
+              fl_hex(&uc, (uint64_t)pgsnap[i]);
+              fl_c(&uc, ' ');
+            }
+            fl_s(&uc, " ripb=");
+            for (int i = 0; i < 12; i++) {
+              fl_hex(&uc, (uint64_t)memsnap[i]);
+              fl_c(&uc, ' ');
+            }
+            fl_s(&uc, " file=");
+            for (int i = 0; i < 12 && fn == (int)FRAME_SIZE; i++) {
+              fl_hex(&uc, (uint64_t)fp[inpage + i]);
+              fl_c(&uc, ' ');
+            }
+            fl_c(&uc, '\n');
+            uc.b[uc.n] = 0;
+            uart_puts(uc.b);
+
+            uc.n = 0;
+            fl_s(&uc, "[UDX] stk=");
+            const volatile uint64_t *sp = (const volatile uint64_t *)tf->lr;
+            for (int i = 0; i < 8; i++) {
+              fl_hex(&uc, sp ? sp[i] : 0);
+              fl_c(&uc, ' ');
+            }
+            fl_c(&uc, '\n');
+            uc.b[uc.n] = 0;
+            uart_puts(uc.b);
           }
-          fl_s(&uc, " file=");
-          for (int i = 0; i < 8 && fn == (int)FRAME_SIZE; i++) {
-            fl_hex(&uc, (uint64_t)fpage[inpage + i]);
-            fl_c(&uc, ' ');
-          }
-          fl_s(&uc, "\n");
-          uc.b[uc.n] = 0;
-          uart_puts(uc.b);
+          if (fpage)
+            frame_free(fpage);
+          if (cpage)
+            frame_free(cpage);
         }
       }
       /* w5 (ii): a user-mode exception (BRK/#UD/#GP/...) kills with a
