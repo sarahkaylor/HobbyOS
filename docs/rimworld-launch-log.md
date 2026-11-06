@@ -7146,3 +7146,142 @@ menu.  So the loader finishes its def pass (NFS reads plateau at ~45 MiB after
 `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` -> 414 run, 0 failed; `redzone`,
 `m2_mono`, `m2_tp`, `m2_threads`, `m12`, `m3_window_probe`, `m4_gl_probe`,
 `tools/rw/run-rwnfs-probe.sh` re-run on this tree.
+
+## 43. 2026-11-06 — M6/L56: the mmap base-select race, proven with rows and closed with one critical section
+
+§42.6 named it correctly: 8 defs per run died as `IOException: Could not map
+file` from `MemoryMapImpl.Map`, `[LCOMPAT] mmap fail ... -> -12`, with a
+run-to-run-disjoint failing set.  This section proves the race with rows,
+closes it structurally, and reports the state it exposes behind it.
+
+### 43.1 First: the seeded launcher was five revisions stale
+
+Every run of the seeded lane reproduced a *different* state than §42's ladder:
+NFS reads stopped at 22.5 MiB, `[XSW] n=1` (one 1280x720 opaque frame), zero
+`[NMAP]` rows, `Loading.AsyncRe`/`Loading.Preload` threads parked, and the
+launcher then returned from `PlayerMain` by itself.  The cause is rule 99's
+trap, measured: `obj/rw-desktop/RimWorldLinux.ad9` was dated **Nov 5 01:23**
+while `src/user/rwmain.c` was Nov 6 00:08, i.e. the launcher predated L54's
+`pthread_cond_*` interposers.  `tools/rw/rebuild-launcher.sh` — the helper
+whose whole purpose is to rebuild *only* the launcher — carried the pre-L54
+link line and did not compile `tools/rw/mono-probe/condtrace.c` at all, so
+"rebuild the launcher" silently produced a launcher without the fix.  Fixed
+the helper (one line); the rebuilt AD-9 exports all four wrappers
+(`pthread_cond_wait/signal/broadcast/timedwait`, 43,368 -> 95,520 bytes).
+
+After that the same kernel reaches §42's state and beyond: NFS **47 MiB**,
+`[XSW] n=160-170`, `[NMAP] ok` rows (NFS XML mappings), and the def pass runs
+to its cross-reference phase.  A seeded lane must therefore rebuild the
+launcher before believing any loading-state result.
+
+### 43.2 The race, with rows
+
+Instrumented the pre-fix kernel (`[MR]` on every chosen base, `[MR]` FAIL with
+the blocking region, `[MRACE]` naming the peer from a 64-entry selection ring)
+and drove it with `src/user/linux_probe_mmap_race.c`: 8 threads x 64 rounds of
+the same 8 KiB `mmap`, every mapping held.
+
+```text
+[MR] s=9  pid=1 len=0x2000 base=0x1080118000 w=1
+[MR] s=10 pid=3 len=0x2000 base=0x1080118000 w=1
+[MR] FAIL pid=3 len=0x2000 base=0x1080118000 blk=0x10800F7000+0x23000 kind=3
+[MRACE] same-base chosen-by pid=1 s=9 base=0x1080118000 len=0x2000 || refused pid=3 base=0x1080118000 len=0x2000
+[MRACE] same-base chosen-by pid=3 s=10 base=0x1080118000 len=0x2000 || refused pid=4 base=0x1080118000 len=0x2000
+```
+
+`kind=3` is `VMK_ANON`: the winner's record merged into the adjacent anonymous
+region, which is what the loser then collided with.  Totals for that boot:
+**520 refusals, 546 same-base pairs, 252 spurious ENOMEM out of 512 requests**,
+and every surviving base distinct (260/260) — the arena was empty, so no
+refusal was genuine exhaustion.  The row proves both halves: the two threads
+chose the same base, and the base was taken by the time of the insert.
+
+### 43.3 The fix: selection and reservation in ONE `vm_lock` section
+
+`vm_hole_find()` is a reader and `vm_region_insert()` is the writer; the
+pre-fix `vm_mmap` called them as two steps with the backing-object creation in
+between (hundreds of instructions).  The invariant now is *a chosen base is in
+the region list before the lock drops*:
+
+1. **`vm_region_alloc_hole(as, start, limit, len, prot, kind, flags, obj, off,
+   &base)`** — find + insert under one `vm_lock` (`src/kernel/vm.c`).
+   `vm_mmap` uses it for the first-fit path and mremap for `MREMAP_MAYMOVE`.
+2. **`vm_region_install_fixed(...)`** — remove + insert under one lock for
+   `MAP_FIXED`/`MREMAP_FIXED`.  The old pair was two acquisitions: a peer
+   could take the range between them, so the remove destroyed a live mapping
+   and the caller saw `-ENOMEM`.
+3. **`vm_jit_alloc_locked()`** — the JIT arena's placeholder carve used to
+   take the lock, drop it, and let `vm_mmap` insert much later; between the two
+   the span was absent from the list, so first-fit could claim it (same bug one
+   layer down).  Now the carve and the insert share the caller's section; the
+   `[JITA]` rows are emitted after the lock is dropped.
+4. The backing object (`vm_object_create` / `file_obj_get` / `nfs_obj_get`) is
+   created **before** the section: all three take `vm_lock` themselves, and
+   none of them needs the base.  Any failure path unrefs it.
+
+### 43.4 Tests
+
+- Kernel unit tier: `test_vm_alloc_hole_atomic` (`src/kernel/vm_test.c`) runs
+  the production primitive 32 times: every returned base is already covered by
+  a region when the call returns, no two bases are equal, a window too small
+  for the request still answers `-ENOMEM` (the fix must not turn exhaustion
+  into a silent success), and `vm_region_install_fixed` replaces a live record.
+  Unit tier: **415 run, 0 failed**.
+- Linux-ABI probe: `src/user/linux_probe_mmap_race.c`, run as
+  `t3_linux_probe.sh mmap_race`.  Pre-fix: `mapped=260 enomem=252`, `done
+  rc=1`; post-fix: `mapped=512 enomem=0`, `distinct-bases OK (512/512)`,
+  `done rc=0`.
+- Gate hazard found while doing the A/B: when the tier's *build* fails, the
+  t3 gate reads the previous run's console (`T3_LOG` line) and a stale
+  `[LP] done rc=0` reads as PASS — it did exactly that once here.  Check the
+  gate log's head for the boot marker (`=== t3_linux_probe: ... ===` followed
+  by a fresh `T3_LOG=` and a this-run `Tests`/`[LP]` line) before believing a
+  PASS, and make the tree link before running the gate.
+
+### 43.5 Ladder, three 220 s runs (fixed kernel, rebuilt launcher)
+
+| run | NFS bytes | `[XSW]` max | `Could not map file` | insert FAIL | `[MRACE]` | SIGSEGV | shot colours |
+|---|---|---|---|---|---|---|---|
+| fix-1 | 47.27 MiB | 170 | 0 | 0 | 0 | 0 | 132,577 |
+| fix-2 | 47.25 MiB | 160 | 0 | 0 | 0 | 0 | 132,577 |
+| fix-3 | 47.26 MiB | 160 | 0 | 0 | 0 | 0 | 132,577 |
+
+All three are 1920x1080 full-bleed (`nz=1950488/1950488 box=0,0,1915,1017`),
+`changed=1` between rows, 8 `[XE] PUT` rows, `[NMAP] ok` = NFS XML maps, and
+**zero** `Could not map file`, `Could not open file`, `no reply from server`,
+`[BLKQ] stall`.  Present rate is ~0.75 fps (160-170 marks in 220 s), the same
+softpipe cost as §42.  The screenshot is the planet/starfield loading art with
+the `Loading defs.` overlay (OCR; 132,577 colours = §42's number exactly), i.e.
+**the mmap wall is gone and the def pass now maps all 1,209 XMLs** — the run
+simply does not finish the def pass inside 220 s (reads continue to the last
+sample instead of plateauing at 45 MiB).
+
+### 43.6 New wall: `LoadedLanguage`'s parallel read dies on `Invalid handle`
+
+A 360 s run goes past the def pass (99 "Could not resolve cross-reference"
+warnings, the last phase of def loading) and then dies in language loading:
+
+```text
+System.IO.IOException: Invalid handle to path "/NFS/Data/Ideology/Languages/English/Keyed/MainTabs.xml"
+  at System.IO.FileStream.ReadData ... at RimWorld.IO.FilesystemFile.ReadAllText
+  at Verse.LoadedLanguage+<>c.<LoadData>b__42_1 ... System.Linq.Parallel ...
+[KERNEL] pid=4 (/NFS/RimWorldLinux) memory fault VA=0x0000000000000000
+         PC=0x0000001085A28522 rw=r in=HOLE region=NONE
+```
+
+`LoadedLanguage.LoadData` reads every Keyed XML through PLINQ; the read comes
+back as `EBADF` (Mono maps it to "Invalid handle to path"), the exception
+propagates, and the main thread then takes a NULL dereference inside a
+just-created JIT chunk (`[JITV] ... base=0x1085A27000 len=0x10000` immediately
+before).  `MainTabs.xml`/`Menus_Main.xml` are the two paths in the first
+observation; whether they are the same two every run is not yet measured.  The
+next lane should instrument `read()`/`close()` (pid, tid, fd, global slot, and
+who cleared it) rather than the loader — this is an fd-lifetime question, not a
+mapping one.
+
+### 43.7 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh` -> **415 run, 0 failed** (414 + the
+new test); `t3_linux_probe.sh redzone` 18/18 KEPT; `m2_mono`, `m2_tp`,
+`m2_threads`, `m12`, `m3_window_probe`, `m4_gl_probe`, `rwnfs_probe` and
+`t3_linux_probe.sh mmap_race` all PASS on this tree.

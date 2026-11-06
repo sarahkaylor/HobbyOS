@@ -283,10 +283,29 @@ int vm_region_remove(struct addr_space *as, uint64_t base, uint64_t len);
 
 /* First-fit hole in [start, limit) of at least `len` bytes, 4 KiB-aligned
  * with a >=VM_HOLE_GAP raw gap between distinct regions (allocator
- * invariant, section 1.2).  Returns the chosen base (not allocated), or 0. */
+ * invariant, section 1.2).  Returns the chosen base (not allocated), or 0.
+ * L56: this function only FINDS.  Any caller that wants to own the hole must
+ * use vm_region_alloc_hole() instead — find-then-insert as two steps is a
+ * race (two threads pick the same base; the loser's insert is refused and a
+ * request with free space answers -ENOMEM). */
 #define VM_HOLE_GAP 0x10000ULL
 uint64_t vm_hole_find(struct addr_space *as, uint64_t start, uint64_t limit,
                       uint64_t len);
+
+/* L56: find AND reserve in one vm_lock critical section.  Returns 0 and sets
+ * *out_base, or -ENOMEM when no hole fits.  The base is in the region list
+ * before the lock drops, so no concurrent caller can choose it. */
+int vm_region_alloc_hole(struct addr_space *as, uint64_t start, uint64_t limit,
+                         uint64_t len, uint16_t prot, uint16_t kind,
+                         uint32_t flags, struct vm_object *obj,
+                         uint64_t obj_off, uint64_t *out_base);
+
+/* L56: remove-then-insert of a caller-named range as one critical section
+ * (MAP_FIXED / MREMAP_FIXED).  Returns 0, -EINVAL or -ENOMEM. */
+int vm_region_install_fixed(struct addr_space *as, uint64_t base,
+                            uint64_t len, uint16_t prot, uint16_t kind,
+                            uint32_t flags, struct vm_object *obj,
+                            uint64_t obj_off);
 
 /* --- Resident-page plumbing (vm.c -> arch mmu) ----------------------- */
 

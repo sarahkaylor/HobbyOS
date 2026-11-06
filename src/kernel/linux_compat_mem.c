@@ -401,21 +401,6 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
 
   if (!(flags & L_MREMAP_MAYMOVE)) return l_ret(tf, -ENOMEM);
 
-  uint64_t dst;
-  if (flags & L_MREMAP_FIXED) {
-    if (!new_addr || (new_addr & (LPG - 1))) return l_ret(tf, -EINVAL);
-    if (new_addr + new_len < new_addr) return l_ret(tf, -EINVAL);
-    if (new_addr < old_addr + old_len && old_addr < new_addr + new_len)
-      return l_ret(tf, -EINVAL); /* overlapping move: Linux refuses */
-    if (!l_fixed_ok(new_addr, new_len)) return l_ret(tf, -EINVAL);
-    l_zap_pages(as, new_addr, new_len);
-    if (vm_region_remove(as, new_addr, new_len) != 0) return l_ret(tf, -EINVAL);
-    dst = new_addr;
-  } else {
-    dst = vm_hole_find(as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2, new_len);
-    if (!dst) return l_ret(tf, -ENOMEM);
-  }
-
   /* The copy below runs through the kernel's user-write path, which honours the
      mapping's protection, so a moved READ-ONLY mapping is installed writable
      for the duration of the copy and its real protection is restored after --
@@ -427,9 +412,29 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
     ins_prot = (uint16_t)(prot | VM_PROT_WRITE);
     restore_prot = 1;
   }
-  if (vm_region_insert(as, dst, new_len, ins_prot, kind, rflags, obj, obj_off) !=
-      0)
-    return l_ret(tf, -ENOMEM);
+
+  /* L56: the destination is chosen and RESERVED in one vm_lock section.  The
+     old vm_hole_find + vm_region_insert pair was the same base-select race as
+     mmap's (another thread of the group could take the chosen base first and
+     this call then answered -ENOMEM with free space in the arena). */
+  uint64_t dst;
+  if (flags & L_MREMAP_FIXED) {
+    if (!new_addr || (new_addr & (LPG - 1))) return l_ret(tf, -EINVAL);
+    if (new_addr + new_len < new_addr) return l_ret(tf, -EINVAL);
+    if (new_addr < old_addr + old_len && old_addr < new_addr + new_len)
+      return l_ret(tf, -EINVAL); /* overlapping move: Linux refuses */
+    if (!l_fixed_ok(new_addr, new_len)) return l_ret(tf, -EINVAL);
+    l_zap_pages(as, new_addr, new_len);
+    int frc = vm_region_install_fixed(as, new_addr, new_len, ins_prot, kind,
+                                      rflags, obj, obj_off);
+    if (frc != 0) return l_ret(tf, frc);
+    dst = new_addr;
+  } else {
+    int hrc = vm_region_alloc_hole(as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2,
+                                   new_len, ins_prot, kind, rflags, obj,
+                                   obj_off, &dst);
+    if (hrc != 0) return l_ret(tf, hrc);
+  }
 
   if (!obj) {
     int cr = l_copy_span(p, dst, old_addr, old_len);
