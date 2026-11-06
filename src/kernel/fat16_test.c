@@ -1524,11 +1524,92 @@ static void test_fat16_sync_clobber_guard(void) {
   (void)fat16_unlink("/SECSYN.TXT");
 }
 
+
+/* L58: partial-sector write integrity (the Player.log NUL hole).
+ *
+ * A write that starts mid-sector is a read-modify-write.  Player.log grew 159
+ * NUL bytes at offset 79360 (512-aligned) with text resuming mid-word, which is
+ * exactly "a sector written back with its untouched prefix zeroed".  The RMW
+ * read result used to be ignored and its buffer uninitialised.  This test
+ * enforces the invariant the game's small-chunk log writes rely on: earlier
+ * bytes of a sector survive a later mid-sector write, and a pattern that
+ * contains no zero byte never reads back with a zero run. */
+static void test_fat16_partial_sector_no_holes(void) {
+  tests_run++;
+  uart_puts("  Running test_fat16_partial_sector_no_holes...\n");
+
+  enum { LEN = 8192 };          /* 16 sectors, crosses cluster boundaries */
+  static uint8_t want[LEN], got[LEN];
+  for (int i = 0; i < LEN; i++) want[i] = (uint8_t)(1 + ((i * 7 + 3) % 251));
+
+  (void)fat16_unlink("/SECHOLE.TXT");
+  struct file f;
+  EXPECT_EQ(fat16_open_ex("/SECHOLE.TXT", &f, 1), 0);
+
+  /* The game's shape: many small writes, each ending mid-sector.  137 is not a
+   * divisor of 512 (the field hole was a 159-byte partial-sector remainder). */
+  int off = 0;
+  while (off < LEN) {
+    int n = 137;
+    if (off + n > LEN) n = LEN - off;
+    EXPECT_EQ(fat16_write(&f, want + off, n), n);
+    off += n;
+  }
+
+  /* A later mid-sector overwrite (offset 3000 = sector 5, byte 440) must keep
+   * the rest of that sector.  Same value back, so content still equals want. */
+  EXPECT_EQ(fat16_seek(&f, 3000), 0);
+  EXPECT_EQ(fat16_write(&f, want + 3000, 2), 2);
+
+  struct file r;
+  EXPECT_EQ(fat16_open_ex("/SECHOLE.TXT", &r, 0), 0);
+  int got_n = 0;
+  while (got_n < LEN) {
+    int n = fat16_read(&r, got + got_n, LEN - got_n);
+    if (n <= 0) break;
+    got_n += n;
+  }
+  fat16_close(&r);
+  EXPECT_EQ(got_n, LEN);
+
+  int first_bad = -1;
+  for (int i = 0; i < LEN; i++)
+    if (got[i] != want[i]) { first_bad = i; break; }
+  EXPECT_EQ(first_bad, -1);
+
+  /* The hole signature: a whole 512-byte block of zeros (the pattern has no
+   * zero byte), which is what a zeroed RMW prefix produces. */
+  int zero_blocks = 0;
+  for (int s = 0; s + 512 <= LEN; s += 512) {
+    int all = 1;
+    for (int i = 0; i < 512; i++)
+      if (got[s + i]) { all = 0; break; }
+    if (all) zero_blocks++;
+  }
+  EXPECT_EQ(zero_blocks, 0);
+
+  /* And a 159-byte-style hole that does not cover a whole block: no 32-byte
+   * zero run anywhere. */
+  int zero_runs = 0, run = 0;
+  for (int i = 0; i < LEN; i++) {
+    if (got[i] == 0) {
+      if (++run == 32) { zero_runs++; run = 0; }
+    } else {
+      run = 0;
+    }
+  }
+  EXPECT_EQ(zero_runs, 0);
+
+  fat16_close(&f);
+  (void)fat16_unlink("/SECHOLE.TXT");
+}
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
   test_fat16_open_excl(); /* SEC-1: atomic O_CREAT|O_EXCL */
   test_fat16_mkdir_dup_atomic(); /* SEC-1: race-safe mkdir duplicate check */
   test_fat16_sync_clobber_guard(); /* SEC-5: guarded dirent write-back */
+  test_fat16_partial_sector_no_holes(); /* L58: RMW must not stamp a NUL hole */
   test_fat16_open_existing();
   test_fat16_open_nonexistent();
   test_fat16_created_entry_has_attr();

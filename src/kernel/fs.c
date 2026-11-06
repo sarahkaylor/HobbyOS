@@ -544,8 +544,29 @@ static int file_read_maps(struct process *p, struct file *f, char *ubuf,
 }
 
 int file_open(struct process *cur, const char *filename, int flags) {
-  cur = process_group(cur); /* P1 (D7): fd table + cwd are group state */
+  cur = process_group(cur); /* P1 (D7): the fd table + cwd are group state */
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+
+  /* L58 probe: the walker's directory opens failed with ENOENT while stat()
+   * on the same path succeeded.  One row per open of an /NFS path names the
+   * flags the kernel actually received and the fd count it started from. */
+  if (filename && filename[0] == '/' && filename[1] == 'N' &&
+      filename[2] == 'F' && filename[3] == 'S') {
+    static int opn_rows;
+    if (opn_rows < 40) {
+      opn_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[OPN] path=");
+      kl_s(&kl, filename);
+      kl_s(&kl, " flags=");
+      kl_i(&kl, flags);
+      kl_s(&kl, " nfds=");
+      kl_i(&kl, cur->num_open_fds);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
 
   /* M5c: a VFS bind may move this path onto another filesystem, so a native
    * absolute open() must see the same namespace a compat openat() does (that
@@ -688,6 +709,23 @@ int file_open(struct process *cur, const char *filename, int flags) {
       int routed = 0, lrc = -1, ltype = -1;
       if (f->path[0]) {
         routed = vfs_route(f->path, &nmidx, &nrel);
+        /* L58: name the routing result even when the lookup never runs. */
+        {
+          static int l58r;
+          if (l58r < 24) {
+            l58r++;
+            struct kline kr;
+            kl_init(&kr);
+            kl_s(&kr, "[LNR] path=");
+            kl_s(&kr, f->path);
+            kl_s(&kr, " routed=");
+            kl_i(&kr, routed);
+            kl_s(&kr, " rel=");
+            kl_s(&kr, nrel ? nrel : "(null)");
+            kl_c(&kr, '\n');
+            kl_emit(&kr);
+          }
+        }
         if (routed && nrel) {
           const struct nfs_mount *nm = nfs_mount_at(nmidx);
           struct nfs_attr na;
@@ -702,7 +740,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
              table full) and they are indistinguishable from the caller. */
           {
             static int l54_rows;
-            if (l54_rows < 8) {
+            if (l54_rows < 64) {
               l54_rows++;
               struct kline kl;
               kl_init(&kl);
@@ -1963,6 +2001,25 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
     uint32_t idx = f->nfs.cursor;
     uint32_t start_idx = idx;
     int first_rc = 7777;
+    /* L58: one row per directory the game starts reading (and per empty
+     * listing), so "the subtree was never entered" and "the subtree listed
+     * but returned nothing" are different rows. */
+    if (start_idx == 0) {
+      static int gdt_rows;
+      if (gdt_rows < 400) {
+        gdt_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[GDT] rel=");
+        kl_s(&kl, rel);
+        kl_s(&kl, " total=");
+        kl_i(&kl, total);
+        kl_s(&kl, " path=");
+        kl_s(&kl, f->path);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
     for (;;) {
       char nm[NFS_NAME_MAX];
       uint8_t attr = 0;
@@ -2643,6 +2700,46 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     return -EINVAL; /* writes to /dev/urandom are not supported (Linux EINVAL) */
   } else if (f->type == FILE_TYPE_FAT16) {
+    /* L58: Player.log grows NUL holes (159 bytes, and 22 in one run) that the
+     * text around them cannot explain.  Row every write to that one file with
+     * its file offset, length and whether the payload is all zero, so "a zero
+     * write was issued" and "the cursor jumped" are different rows. */
+    {
+      const char *pp = f->path;
+      int is_log = 0;
+      if (pp[0] == '/' && pp[1] == 'R' && pp[2] == 'W' && pp[3] == '_' &&
+          pp[4] == 'H' && pp[5] == 'O' && pp[6] == 'M' && pp[7] == 'E' &&
+          pp[8] == '/' && pp[9] == 'P' && pp[10] == 'l' && pp[11] == 'a' &&
+          pp[12] == 'y' && pp[13] == 'e' && pp[14] == 'r')
+        is_log = 1;
+      if (is_log) {
+        static int fl_rows;
+        if (fl_rows < 400) {
+          fl_rows++;
+          const uint8_t *b8 = (const uint8_t *)buf;
+          int allz = 1;
+          for (int i = 0; i < size; i++) if (b8[i]) { allz = 0; break; }
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[FLOG] off=");
+          kl_i(&kl, (long)f->fat16.cursor);
+          kl_s(&kl, " n=");
+          kl_i(&kl, size);
+          kl_s(&kl, " allzero=");
+          kl_i(&kl, allz);
+          kl_s(&kl, " head=");
+          for (int i = 0; i < 12 && i < size; i++) {
+            char hx[3];
+            const char *H = "0123456789abcdef";
+            uint8_t v = b8[i];
+            hx[0] = H[v >> 4]; hx[1] = H[v & 15]; hx[2] = 0;
+            kl_s(&kl, hx);
+          }
+          kl_c(&kl, '\n');
+          kl_emit(&kl);
+        }
+      }
+    }
     int wr = fat16_write(f, buf, size);
     /* so-vm lane A (CROSS-LANE, additive): an in-place write changes the
        bytes behind (start_cluster, file_size), so the VM_OBJ_FILE page

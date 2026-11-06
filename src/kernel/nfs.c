@@ -1353,6 +1353,31 @@ static int dir_cache_fill(const struct nfs_mount *m, int midx, const char *rel) 
       uint32_t eof_word = xdr_r_u32(&r);
       if (!xdr_r_ok(&r)) return -1;
       dcache.complete = eof_word != 0;
+      /* L58: one row per READDIRPLUS page.  A listing that stops short of
+       * the host's count is either a short page, a bad continuation cookie
+       * (server answers eof=1 with zero entries) or a cache-full break. */
+      if (dcache.count < NFS_DIR_CACHE_MAX) {
+        static int rdp_rows;
+        if (rdp_rows < 80) {
+          rdp_rows++;
+          struct kline kp;
+          kl_init(&kp);
+          kl_s(&kp, "[RDP] rel=");
+          kl_s(&kp, rel);
+          kl_s(&kp, " cin=");
+          kl_i(&kp, (long)cookie);
+          kl_s(&kp, " got=");
+          kl_i(&kp, got_any);
+          kl_s(&kp, " last=");
+          kl_i(&kp, (long)last_cookie);
+          kl_s(&kp, " eof=");
+          kl_i(&kp, (long)eof_word);
+          kl_s(&kp, " count=");
+          kl_i(&kp, dcache.count);
+          kl_c(&kp, '\n');
+          kl_emit(&kp);
+        }
+      }
     } else if (xdr_r_remain(&r) == 0) {
       dcache.complete = 1;
     } else {
@@ -1372,7 +1397,7 @@ static int dir_cache_fill(const struct nfs_mount *m, int midx, const char *rel) 
    * the number must be in the log rather than inferred from missing defs. */
   {
     static int ls_rows;
-    if (ls_rows < 40) {
+    if (ls_rows < 400) {
       ls_rows++;
       int ndir = 0;
       for (int i = 0; i < dcache.count; i++)

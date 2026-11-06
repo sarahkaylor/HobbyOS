@@ -31,7 +31,16 @@
 #define NFS_PATH_MAX        128    /* mount point and cwd paths */
 #define NFS_SRC_MAX         64     /* "a.b.c.d:/export" source string */
 #define NFS_FH_MAX          64     /* NFSv3 file handles are <= 64 bytes */
-#define NFS_NAME_MAX        32     /* matches struct sys_dirent.name */
+#define NFS_NAME_MAX        64     /* L58: was 32 ("matches struct sys_dirent.name").
+                                    * The dirent64 path is NOT bound by that
+                                    * 31-char native cap, and RimWorld ships
+                                    * XML names up to 47 chars:
+                                    * World_Oneshots_ProjectileImpacts.xml
+                                    * (36), Buildings_MusicalInstruments.xml
+                                    * (32).  A 32-byte buffer truncated them,
+                                    * the follow-up LOOKUP answered ENOENT and
+                                    * the file vanished from the def set with
+                                    * no error.  dcache cost: 256*64 = 16 KiB. */
 #define NFS_COMP_MAX        256    /* one PATH COMPONENT in LOOKUP (NFSv3
                                     * allows 255 bytes; readdir display is
                                     * narrower than the real names) */
