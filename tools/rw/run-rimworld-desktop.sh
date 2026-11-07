@@ -387,6 +387,18 @@ else
   printf 'off\n' >"$OUT/wmsize"
 fi
 stage "$OUT/wmsize" ::/WMSIZE
+# M3: which GL driver and which present path the game gets.  Both are files
+# because a desktop-menu launch cannot pass an environment: /GLMODE is read by
+# the DSO's xlib_create_screen() (the M2 switch) and /GLDMG by the virgl
+# winsys (M3: 0 = full-surface readback, 1 = damage-rect).  Content-gated and
+# rewritten every run -- this image has no mdel(1), so a marker is never
+# removed, only rewritten.  Defaults reproduce the pre-M3 behaviour
+# (softpipe, damage on for a virgl run).
+printf '%s\n' "${RW_GLMODE:-softpipe}" >"$OUT/glmode"
+stage "$OUT/glmode" ::/GLMODE
+printf '%s\n' "${RW_GLDMG:-1}" >"$OUT/gldmg"
+stage "$OUT/gldmg" ::/GLDMG
+echo "  staged: /GLMODE -> ${RW_GLMODE:-softpipe}, /GLDMG -> ${RW_GLDMG:-1}"
 # No WAVE.CFG: MODE=desktop has no boot-wave loader (KERNEL_MODE_TEST only),
 # and the game must be started from the desktop so it inherits the window
 # protocol pipes.
@@ -399,17 +411,50 @@ done
 OVMF="$OUT/OVMF_CODE_4M.fd"
 [ -f "$OVMF" ] || cp "$OVMF_SRC" "$OVMF"
 
+# M3: RW_QEMU_GL=1 boots the GL device (virtio-gpu-gl-pci + egl-headless,gl=on)
+# instead of the 2D one, which is what a virgl client needs.  The Makefile
+# emits the -display itself in that case (QEMU_GPU=gl), so QEMU_ARGS must not
+# carry a second `-display none` -- that override is what pins every other
+# mode to the 2D device.  QMP's screendump has no surface on egl-headless
+# (P9), so screenshots come from guest physical memory instead
+# (--fb-phys in rw_desktop_drive.py).
+GLVARS=""
+DISPARGS="-display none"
+if [ "${RW_QEMU_GL:-0}" = 1 ]; then
+  GLVARS="QEMU_GPU=gl QEMU_DISPLAY=egl-headless"
+  DISPARGS=""
+  echo "== boot: GL device (virtio-gpu-gl-pci, egl-headless,gl=on)"
+fi
+# The kernel lives INSIDE disk.img (::/boot/hobbyos.elf) and the boot below
+# passes `-o disk.img`, so a rebuilt hobbyos.elf would never reach the guest --
+# a kernel fix would look like a no-op in every run.  Re-stage it whenever it
+# is newer than the image.
+# Always: disk.img is rewritten by staging, so its mtime says nothing about
+# which kernel is inside it (measured: a kernel fix silently did not boot).
+llvm-objcopy --strip-debug "$ROOT/hobbyos.elf" "$OUT/hobbyos.boot.elf"
+mcopy -o -i "$IMG" "$OUT/hobbyos.boot.elf" ::/boot/hobbyos.elf
+echo "== kernel: staged $(stat -c %s "$OUT/hobbyos.boot.elf") bytes as ::/boot/hobbyos.elf"
 echo "== boot: MODE=desktop DESKTOP=hobby (deadline ${TIMEOUT_S}s, log $LOG)"
 : >"$LOG"
 ( make -o disk.img ARCH=intel MODE=desktop DESKTOP=hobby EDK2_X86_64="$OVMF" \
-       run QEMU_ARGS="-display none -enable-kvm -qmp unix:$QMP,server,nowait ${RW_QEMU_EXTRA:-}" \
+       $GLVARS run QEMU_ARGS="$DISPARGS -enable-kvm -qmp unix:$QMP,server,nowait ${RW_QEMU_EXTRA:-}" \
        >>"$LOG" 2>&1 & )
 
 RC=1
+FBARGS=""
+if [ "${RW_QEMU_GL:-0}" = 1 ]; then
+  # The framebuffer's guest-physical address: the kernel's 2 MB-aligned BSS
+  # array `framebuffer` (src/kernel/virtio_gpu.c), identity-mapped, so the
+  # ELF symbol's address is its physical address.
+  FBP=$(nm "$ROOT/hobbyos.elf" 2>/dev/null | awk '$3=="framebuffer"{print "0x"$1}')
+  [ -n "$FBP" ] || FBP="${RW_FB_PHYS:-0x74c00000}"
+  FBARGS="--fb-phys $FBP --fb-w 1920 --fb-h 1080"
+  echo "== screenshots: /dev/fb0 from guest physical memory at $FBP"
+fi
 if python3 tools/rw/rw_desktop_drive.py --log "$LOG" --qmp "$QMP" \
         --shot-dir "$SHOT_DIR" --app "${RW_APP:-RWLAUNCH.BIN}" \
         --boot-timeout "$TIMEOUT_S" --run-timeout "$RUN_TIMEOUT_S" \
-        --shot-every "${RW_SHOT_EVERY:-8}"; then
+        --shot-every "${RW_SHOT_EVERY:-8}" $FBARGS; then
   RC=0
 fi
 

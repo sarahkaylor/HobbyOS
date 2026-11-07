@@ -68,6 +68,20 @@ class Qmp:
     def shot(self, path):
         self.cmd("screendump", {"filename": path})
 
+    def pmem(self, pa, size, path):
+        """Dump guest physical memory (M3 screenshots).
+
+        QMP screendump answers "no surface" on the GL device
+        (egl-headless, P9), but the desktop's framebuffer is ordinary guest
+        RAM: the kernel's `framebuffer` BSS array, identity-mapped, so the
+        ELF symbol address is its physical address.  pmemsave is a monitor
+        command, reached through QMP's human-monitor-command."""
+        # HMP parses its arguments as expressions unless the filename is
+        # quoted: `pmemsave 0x.. N /tmp/x` answers "invalid char 't'".
+        r = self.cmd("human-monitor-command",
+                    {"command-line": f'pmemsave {pa} {size} "{path}"'})
+        return r
+
 
 def read_log(path):
     try:
@@ -94,6 +108,27 @@ def menu_map(text):
         if m:
             menu[int(m.group(1))] = m.group(2)
     return menu
+
+
+def bgra_to_ppm(raw, w, h, out):
+    """The kernel framebuffer is B8G8R8A8 (word 0xAARRGGBB), row 0 at the
+    top; PPM wants RGB, so this is a per-pixel byte shuffle."""
+    with open(raw, "rb") as f:
+        data = f.read()
+    if len(data) < w * h * 4:
+        return False
+    with open(out, "wb") as f:
+        f.write(b"P6\n%d %d\n255\n" % (w, h))
+        row = bytearray(w * 3)
+        for y in range(h):
+            base = y * w * 4
+            for x in range(w):
+                o = base + x * 4
+                row[x * 3] = data[o + 2]
+                row[x * 3 + 1] = data[o + 1]
+                row[x * 3 + 2] = data[o]
+            f.write(row)
+    return True
 
 
 def ppm_has_colors(path):
@@ -139,6 +174,9 @@ def main():
     ap.add_argument("--boot-timeout", type=int, default=300)
     ap.add_argument("--run-timeout", type=int, default=300)
     ap.add_argument("--shot-every", type=int, default=8)
+    ap.add_argument("--fb-phys", default="")
+    ap.add_argument("--fb-w", type=int, default=1920)
+    ap.add_argument("--fb-h", type=int, default=1080)
     args = ap.parse_args()
 
     os.makedirs(args.shot_dir, exist_ok=True)
@@ -146,7 +184,16 @@ def main():
 
     def grab(tag):
         p = os.path.join(args.shot_dir, tag + ".ppm")
-        q.shot(p)
+        if args.fb_phys:
+            raw = os.path.join(args.shot_dir, tag + ".raw")
+            q.pmem(args.fb_phys, args.fb_w * args.fb_h * 4, raw)
+            time.sleep(0.3)
+            if not bgra_to_ppm(raw, args.fb_w, args.fb_h, p):
+                print(f"[drive] shot {tag}: pmemsave failed", flush=True)
+                return None
+            os.remove(raw)
+        else:
+            q.shot(p)
         time.sleep(0.4)
         png = p[:-4] + ".png"
         subprocess.run(["convert", p, png], stderr=subprocess.DEVNULL)

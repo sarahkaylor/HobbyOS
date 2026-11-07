@@ -252,7 +252,12 @@ static void test_gpu_abi_res_ok(void) {
   bad = r; bad.depth = 0;  EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.array_size = 0; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.format = 0; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
-  bad = r; bad.bind = 0;   EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  /* M3: bind == 0 is legal (a buffer before its first bind -- Unity's
+   * glBufferData does exactly that).  M1/M2 rejected it and the game saw
+   * GL_OUT_OF_MEMORY two layers up. */
+  bad = r; bad.bind = 0;   EXPECT_EQ(gpu_abi_res_ok(&bad), 1);
+  bad = r; bad.target = 0; bad.width = 64; bad.height = 1; bad.bind = 0;
+  EXPECT_EQ(gpu_abi_res_ok(&bad), 1);   /* the M3 buffer that was refused */
   bad = r; bad.last_level = 32; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.nr_samples = 17; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.width = 16385; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);

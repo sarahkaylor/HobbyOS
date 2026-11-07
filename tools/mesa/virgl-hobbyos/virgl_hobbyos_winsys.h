@@ -52,6 +52,32 @@ struct virgl_hobbyos_winsys {
    uint64_t submit_us, readback_us, present_us;
    uint32_t max_cmd_dwords;
    int trace;
+
+   /* M3 damage-rect present.  dmg_mode: 0 = read the whole surface back on
+    * every present (M2's behaviour), 1 = band probe (the default).  With the
+    * probe on, a present reads back one row per band first, diffs it against
+    * the last presented frame, and only transfers the bands that changed --
+    * so F scales with the damage instead of the surface. */
+   int dmg_mode;                /* 0 full, 1 thumbnail (default), 2 band probe */
+   uint32_t dmg_bands;          /* band-probe bands (2..64), default 16 */
+   uint32_t dmg_resync;         /* full readback every N presents, 0 = never */
+   int dmg_seeded;              /* the first full frame has been presented */
+   struct virgl_hw_res *dmg_thumb;   /* 64x64 scaled copy of the surface */
+   uint8_t *dmg_thumb_prev;          /* the previous frame's thumbnail */
+   int dmg_thumb_failed;        /* the blit/thumbnail path is unavailable */
+   struct virgl_cmd_buf *dmg_cbuf;   /* reused buffer for the thumbnail blit */
+   uint64_t n_dmg_frame;        /* presents that took the damage path */
+   uint64_t n_dmg_idle;         /* presents with nothing changed at all */
+   uint64_t n_probe;            /* probe-row transfers */
+   uint64_t probe_us;
+   uint64_t n_dmg_rects;        /* damaged rects transferred */
+   uint64_t n_dmg_cells;        /* damaged thumbnail cells, summed */
+   uint64_t n_blit;             /* thumbnail blits submitted */
+   uint64_t dmg_bytes;          /* bytes read back by the damage path */
+   uint64_t full_bytes;         /* bytes a full-surface present would have read */
+   uint64_t thumb_us;           /* blit + 16 KiB thumbnail readback */
+   uint64_t copy_us;            /* guest -> displaytarget copy */
+   uint64_t display_us;         /* displaytarget_display (XPutImage) */
 };
 
 struct virgl_hw_res {
@@ -71,6 +97,14 @@ struct virgl_hw_res {
 
    struct sw_displaytarget *dt;
    void *mapped;
+
+   /* M3: the probe rows of the last presented frame (dmg_nb rows of dmg_bps
+    * bytes).  The resource's own backing holds the last presented frame
+    * everywhere else, because the damage path only ever overwrites the rects
+    * it transfers. */
+   uint8_t *dmg_prev;
+   uint32_t dmg_nb;
+   uint32_t dmg_bps;
 
    struct virgl_resource_cache_entry cache_entry;
 };
