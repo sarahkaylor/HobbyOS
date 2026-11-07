@@ -1520,10 +1520,15 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
                     ((o->kind == VM_OBJ_FILE && o->file_start_cluster) ||
                      o->kind == VM_OBJ_NFS);
   /* M6/L72: an all-zero DATA page is the one shape the exec gate never sees.
-     Ask the device before publishing zeros into a data mapping. */
+     A single raw read is NOT enough evidence for a data page: a torn or
+     wrong read published into .data corrupts a static pointer silently, and
+     three runs aborted at startup with `object.c:1939 klass` while this was
+     trusted.  The rescue is therefore diagnostic only: it RECORDS that the
+     cache holds zeros where the device has content, and never publishes. */
   uint64_t rescue = 0;
   if (!is_exec && vm_page_zero(src))
     rescue = vm_data_page_rescue(o, off);
+  if (rescue) { frame_free(rescue); rescue = 0; }
   uint64_t priv = 0;
   int verified = 0;
   int verify_zero = 0;
