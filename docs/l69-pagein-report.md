@@ -186,7 +186,7 @@ ladder reaching whatever comes after the load.
 | f1 | **1800 s** | 0 | **0 / 0** | none | **277 529 012** (264.67 MiB) | 260 (`0xa4d86f0c…`) | load complete; post-load frame-handshake park (§51.4): alive, 25 threads, `res_mib` climbing one anon page per iteration |
 | f2 | 510 s | 1 | 0 / 1 | none | 221 036 013 (210.80 MiB) | 240 (`0x2e2650f4…`) | SIGABRT from the runtime's own `g_assert` path (`ipc=0x108004300B`, the `x86-codegen.h:403` site; the message was lost to the NUL hole an aborted write left in Player.log — `[FATW] ZERORD sector=657286`) |
 | f3 | 470 s | 6 | 1 / 0 | none | 263 653 604 (251.44 MiB) | 190 (`0x8f48115d…`) | `[TXT] UNVERIFIED off=0x757000 reads=3 n0=0` after reset #1: a **0-byte** read (metadata/chain), EIO → SIGBUS → Mono's SIGBUS handler faulted at VA=0 |
-| f4 | see below | | | | | | |
+| f4 | 460 s | 1 | 0 / 1 | none | 229 367 841 (218.74 MiB) | 230 (`0xcfec9239…`) | `read_fat` now reads every FAT sector RAW and twice; the only refusal left is the launcher's exit-path image page (`pos=0x10000`, `raw n=4096 sum=0x76EFDDC5`: the device itself answers zeros, twice) — the file and its chain verify byte-perfect on the host, so whether the walk or the device is at fault is the next measurement |
 
 f1 is the window the task asks for and it is clean: 1800 s, the full deterministic
 load, zero refusals of any kind, zero deaths, 3 584 exec pages verified
@@ -202,8 +202,10 @@ own assert, f3 on a 0-byte read whose *chain walk* failed after six resets.
 f3's shape is the residual class §7 names: a reset can also corrupt a
 **metadata** read, and a wrong FAT entry turns a chain walk into another
 cluster (measured separately as `chain=-1` at a file offset the host verifies
-is inside a complete 2 015-cluster chain). `read_fat()` now verifies every FAT
-sector with two agreeing reads; f4 is the window that carries that change.
+is inside a complete 2 015-cluster chain). `read_fat()` now reads every FAT
+sector **raw** (never through the page cache) and requires two agreeing reads;
+f4 carries that change and its only remaining refusal is the launcher's
+exit-path image page, where the device itself returns zeros twice.
 
 ### Screenshot (f1, t≈480 s)
 
@@ -218,12 +220,17 @@ presenting — no menu is reached, so no menu is claimed.
 
 ## 6. What is left
 
-1. **Metadata reads after a reset (f3).** A reset can also abort a FAT sector
-   read, and one wrong entry sends the rest of a chain walk to another file's
-   clusters. `read_fat()` now reads each FAT sector twice and requires
-   agreement (a persistent failure is a chain break, not a guess), and the
-   gates' authoritative read is itself a two-read agreement. A reset-rich
-   window with that change is the next measurement.
+1. **Metadata reads after a reset (f3, f4).** A reset can also abort a FAT
+   sector read, and one wrong entry sends the rest of a chain walk to another
+   file's clusters — measured as `chain=-1` at an offset the host proves is
+   inside a complete 2 015-cluster chain, and as a page that reads back as
+   *consistent* zeros (f4's `raw sum=0x76EFDDC5`, the sum of 4096 zeros, for a
+   page of `RWLAUNCH.BIN` the host hashes byte-perfect). `read_fat()` and
+   `write_fat()` now read each FAT sector **raw** (never through the page
+   cache) and require two agreeing reads; a persistent failure is a chain
+   break, not a guess. f4 still shows the launcher's exit-path page refused,
+   so the next run must say whether the remaining zeros come from the walk or
+   from the device.
 2. **The post-load frame-handshake park (§51.4, f1).** With page-in clean the
    1800 s window now ends *alive* in the known park: presents freeze, no
    thread is in `READY`, and the main thread touches a fresh anonymous page
