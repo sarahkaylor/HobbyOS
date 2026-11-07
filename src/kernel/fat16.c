@@ -2609,8 +2609,14 @@ int fat16_read_direct_pos_raw(uint16_t start_cluster, uint32_t file_size,
 }
 
 int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
-                     uint32_t pos, uint8_t *out) {
+                     uint32_t pos, uint8_t *out, struct fat16_page_id *id) {
   static int rows;
+  if (id) {
+    id->buf = 0;
+    id->off = pos;
+    id->nz = 0;
+    id->sum = 0;
+  }
   if (rows >= 12)
     return 0;
   rows++;
@@ -2634,18 +2640,31 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
   /* (3) what the DEVICE says, bypassing the cache entirely.  Goes through the
      same authoritative helper the gate's repair uses, so this row means the
      same thing in the unit tier (where the delivery seam applies) as in the
-     field. */
-  /* L73: this buffer is shared by every caller on every CPU, and the copy to
-     `out` happens a whole read later.  Two concurrent probes (a controller
-     reset makes many pages fail at once) clobber each other, and the page that
-     reaches the gate is the OTHER probe's bytes — measured: `[TXT] REPLAY …
-     publishing read 1` followed by `[PUB] … zero=4096 ver=1`, i.e. a zero page
-     published as verified, then #UD in UnityPlayer's text at 0x108228B570.
-     Per-CPU, so two probes cannot share it. */
-  static uint8_t rawbuf[MAX_CPUS][PROBE_PAGE];
-  uint8_t *rb = rawbuf[get_cpuid() % MAX_CPUS];
+     field.  M6/L77: THE READ LANDS IN THE CALLER'S BUFFER.
+     This used to read into a static `rawbuf[MAX_CPUS][4096]` and copy to
+     `out` after the second read.  Two things were wrong with that, and
+     together they are exactly the `[PUB] … zero=4096 ver=1` shape this lane
+     was opened for:
+       * the section is PREEMPTIBLE -- the 4 KiB read is eight sector reads,
+         each entering blk_token_acquire -> safe_wfi, and the tick schedules
+         the thread out mid-lock (see lock_order.c).  A second probe on the
+         SAME CPU then writes that CPU's slot, and the bytes copied to `out`
+         are the other probe's page, not the one `raw_nz` was counted on;
+       * the verification read `a = rawbuf` (CPU 0's slot) while the publish
+         read `rb` (this CPU's), so on any CPU but 0 the two-read rule was
+         comparing two different buffers, and the `second_zero` replay escape
+         then accepted whatever `rb` happened to hold.
+     Reading read 1 into `out` removes the copy and every shared buffer: the
+     bytes verified ARE the bytes the caller holds.  A scratch frame is used
+     only when the caller passes no buffer (diagnostic row only). */
+  uint64_t scratch = 0;
+  uint8_t *rb = out;
+  if (!rb) {
+    scratch = frame_alloc();
+    rb = (uint8_t *)scratch;
+  }
   int raw_rc = -1;
-  if (len == PROBE_PAGE)
+  if (rb && len == PROBE_PAGE)
     raw_rc = fat16_read_direct_pos_raw(start_cluster, file_size,
                                        (uint64_t)rb, (int)len, pos) ==
                      (int)len
@@ -2722,14 +2741,14 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
    * that first answer, so it verifies it (a SECOND read must agree, non-zero)
    * and hands the page to the caller.  Same two-read rule, applied to the
    * read that actually succeeds; a torn page still cannot pass. */
-  if (out && len == PROBE_PAGE && raw_rc == 0 && raw_nz > 0) {
+  if (out && rb == out && len == PROBE_PAGE && raw_rc == 0 && raw_nz > 0) {
     uint64_t chk = frame_alloc();
     int ok = 0, second_zero = 0;
     if (chk) {
       int n2 = fat16_read_direct_pos_raw(start_cluster, file_size, chk,
                                          (int)len, pos);
       if (n2 == (int)len) {
-        const uint8_t *a = (const uint8_t *)rawbuf;
+        const uint8_t *a = rb;
         const uint8_t *b = (const uint8_t *)chk;
         ok = 1;
         second_zero = 1;
@@ -2751,8 +2770,15 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
       frame_free(chk);
     }
     if (ok) {
-      for (uint32_t i = 0; i < len; i++)
-        out[i] = rb[i];
+      /* M6/L77: THE ID DESCRIBES WHAT IS IN `out` NOW.
+         Re-measured after the verdict, from the same buffer the caller will
+         publish, so the publisher's identity check compares like with like
+         (there is no copy between the verdict and the caller). */
+      if (id) {
+        id->buf = (uint64_t)out;
+        id->off = pos;
+        id->nz = nz_bytes(out, len, &id->sum);
+      }
       if (second_zero) {
         static int rz;
         if (rz < 6) {
@@ -2766,12 +2792,16 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
           kl_emit(&kz);
         }
       }
+      if (scratch)
+        frame_free(scratch);
       return 1;
     }
   }
   /* 0/1 only: the caller treats 1 as "the page is in *out".  Returning the
      non-zero byte count here made a page with exactly one non-zero byte look
      like a successful publish of an unfilled buffer. */
+  if (scratch)
+    frame_free(scratch);
   return 0;
 }
 

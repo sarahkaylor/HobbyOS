@@ -1015,6 +1015,108 @@ static int vm_zero_bytes(uint64_t phys) {
   return z;
 }
 
+/* M6/L77: the publish-path identity assertion.
+ *
+ * The L76 lane ended with a page that was PUBLISHED as verified and held 4096
+ * zeros while the probe's own read of the same offset held 3547 non-zero bytes
+ * (`[PUB] … zero=4096 ver=1` then #UD).  The gap was between "verified" and
+ * "published", so this lane makes the gap itself assertable: the probe hands
+ * back the identity of what it verified (buffer pointer, file offset, byte
+ * count, byte sum), and every publisher that copies those bytes somewhere else
+ * re-measures the destination and refuses unless all four agree -- pointer,
+ * offset, source unchanged, destination equal.
+ *
+ * `[PBI]` is printed for the first rows and periodically; `[PBF]` is an alarm
+ * and is printed on every failure, plus the counters ride the `[PUBS]` row. */
+static uint32_t vm_id_checks, vm_id_fail, vm_id_rows;
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* M6/L77 test seam: corrupt the page between the probe's verdict and the
+ * publisher's identity check.  A test that only ever sees agreement proves
+ * nothing about the assertion; this makes the divergence happen on purpose and
+ * lets the test assert that the bytes were refused (and the alarm counted). */
+static int vm_test_corrupt_publish;
+void vm_test_corrupt_next_publish(int on) { vm_test_corrupt_publish = on; }
+uint32_t vm_test_id_fail(void) { return vm_id_fail; }
+uint32_t vm_test_id_checks(void) { return vm_id_checks; }
+#endif
+
+static uint32_t vm_page_nz_sum(uint64_t phys, uint32_t *sum) {
+  const volatile uint8_t *p = (const volatile uint8_t *)phys;
+  uint32_t nz = 0, s = 0;
+  for (uint32_t i = 0; i < (uint32_t)FRAME_SIZE; i++) {
+    uint8_t v = p[i];
+    if (v)
+      nz++;
+    s += v;
+  }
+  if (sum)
+    *sum = s;
+  return nz;
+}
+
+/* Returns 1 when the bytes about to be published are the bytes verified. */
+static int vm_pub_identity(const char *tag, uint64_t src, uint64_t dst,
+                           uint64_t off, const struct fat16_page_id *pid) {
+  uint32_t snz = 0, ssum = 0, dnz = 0, dsum = 0;
+  if (src)
+    snz = vm_page_nz_sum(src, &ssum);
+  if (dst)
+    dnz = vm_page_nz_sum(dst, &dsum);
+  int same_buf = pid && src && pid->buf == src;
+  int same_off = pid && (uint64_t)pid->off == off;
+  int same_ver = pid && pid->nz == snz && pid->sum == ssum;
+  int same_pub = pid && src && dst && pid->nz == dnz && pid->sum == dsum &&
+                 vm_page_eq(src, dst);
+  int ok = same_buf && same_off && same_ver && same_pub;
+
+  vm_id_checks++;
+  if (!ok)
+    vm_id_fail++;
+  if (!ok || vm_id_rows < 12 || (vm_id_checks % 2048) == 0) {
+    vm_id_rows++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, ok ? "[PBI] " : "[PBF] ");
+    kl_s(&kl, tag);
+    kl_s(&kl, " off=0x");
+    kl_hex(&kl, (unsigned long)off);
+    kl_s(&kl, " probe_buf=0x");
+    kl_hex(&kl, (unsigned long)(pid ? pid->buf : 0));
+    kl_s(&kl, " src=0x");
+    kl_hex(&kl, (unsigned long)src);
+    kl_s(&kl, " dst=0x");
+    kl_hex(&kl, (unsigned long)dst);
+    kl_s(&kl, " frame=");
+    kl_i(&kl, (long)(src >> 12));
+    kl_c(&kl, '/');
+    kl_i(&kl, (long)(dst >> 12));
+    kl_s(&kl, " ver_nz=");
+    kl_i(&kl, (long)(pid ? pid->nz : 0));
+    kl_s(&kl, " ver_sum=0x");
+    kl_hex(&kl, (unsigned long)(pid ? pid->sum : 0));
+    kl_s(&kl, " src_nz=");
+    kl_i(&kl, (long)snz);
+    kl_s(&kl, " dst_nz=");
+    kl_i(&kl, (long)dnz);
+    kl_s(&kl, " dst_sum=0x");
+    kl_hex(&kl, (unsigned long)dsum);
+    kl_s(&kl, " same=");
+    kl_i(&kl, ok ? 1 : 0);
+    kl_s(&kl, " buf=");
+    kl_i(&kl, same_buf ? 1 : 0);
+    kl_s(&kl, " off=");
+    kl_i(&kl, same_off ? 1 : 0);
+    kl_s(&kl, " ver=");
+    kl_i(&kl, same_ver ? 1 : 0);
+    kl_s(&kl, " pub=");
+    kl_i(&kl, same_pub ? 1 : 0);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  return ok;
+}
+
 void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot,
                  int priv, int src, uint64_t phys, int verified, int who) {
   (void)as;
@@ -1100,6 +1202,10 @@ void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot
     kl_i(&kl, (long)vm_pub_anon_xzero);
     kl_s(&kl, " xunv=");
     kl_i(&kl, (long)vm_pub_xunv);
+    kl_s(&kl, " idc=");
+    kl_i(&kl, (long)vm_id_checks);
+    kl_s(&kl, " idf=");
+    kl_i(&kl, (long)vm_id_fail);
     for (int i = 0; i < VM_PW_NR; i++) {
       if (!vm_pw_xzero[i] && !vm_pw_xunv[i])
         continue;
@@ -1192,6 +1298,13 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
   uint64_t f[3] = {0, 0, 0};
   int n[3] = {-1, -1, -1};
   int got = 0, have = 0, saw_zero = 0;
+  /* M6/L77: identity of the page copied into `dst` -- see vm_pub_identity. */
+  struct fat16_page_id vid;
+  int vid_set = 0;
+  vid.buf = 0;
+  vid.off = (uint32_t)off;
+  vid.nz = 0;
+  vid.sum = 0;
 
   for (int i = 0; i < 3 && !have; i++) {
     f[i] = frame_alloc();
@@ -1227,6 +1340,9 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
         continue;
       }
       vm_frame_copy(dst, f[i], FRAME_SIZE);
+      vid.buf = f[i];
+      vid.nz = vm_page_nz_sum(f[i], &vid.sum);
+      vid_set = 1;
       have = 1;
       break;
     }
@@ -1256,24 +1372,45 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
          over. */
       uint64_t pb = frame_alloc();
       if (pb) {
+        struct fat16_page_id pid;
         if (fat16_page_probe(o->file_start_cluster, (uint32_t)o->size,
-                             (uint32_t)off, (uint8_t *)pb) == 1) {
+                             (uint32_t)off, (uint8_t *)pb, &pid) == 1) {
           vm_frame_copy(dst, pb, FRAME_SIZE);
-          have = 1;
-          fat16_page_drop_cache(o->file_start_cluster, (uint32_t)o->size,
-                                (uint32_t)off, FRAME_SIZE);
-          {
-            static int pr_rows;
-            if (pr_rows < 12) {
-              pr_rows++;
-              struct kline kr;
-              kl_init(&kr);
-              kl_s(&kr, "[TXT] PROBEGET off=");
-              kl_hex(&kr, (unsigned long)off);
-              kl_s(&kr, " -> the probe's own cache-bypassed read (second"
-                        " read agreed or was the zero replay); cache frame"
-                        " was POISONED, published the device's bytes\n");
-              kl_emit(&kr);
+#ifdef KERNEL_MODE_UNIT_TEST
+          if (vm_test_corrupt_publish) {
+            vm_test_corrupt_publish = 0;
+            volatile uint8_t *cz = (volatile uint8_t *)dst;
+            for (int z = 0; z < 256; z++)
+              cz[z] = 0;
+          }
+#endif
+          /* M6/L77: verify(buf) == publish(buf).
+             The probe verified `pb` (pointer, offset, nz, sum).  This is the
+             copy that turned those bytes into the published page, so the two
+             must be the same page: same pointer, same offset, `pb` unchanged
+             since the verdict, `dst` byte-identical to `pb`.  If they are not,
+             the bytes are NOT published -- the caller falls through to the
+             device re-read below, which is an independent path to the same
+             page.  A divergence is therefore a refused publish plus a [PBF]
+             alarm, never a #UD at the faulting instruction. */
+          if (vm_pub_identity("probeget", pb, dst, off, &pid)) {
+            have = 1;
+            fat16_page_drop_cache(o->file_start_cluster, (uint32_t)o->size,
+                                  (uint32_t)off, FRAME_SIZE);
+            {
+              static int pr_rows;
+              if (pr_rows < 12) {
+                pr_rows++;
+                struct kline kr;
+                kl_init(&kr);
+                kl_s(&kr, "[TXT] PROBEGET off=");
+                kl_hex(&kr, (unsigned long)off);
+                kl_s(&kr, " -> the probe's own cache-bypassed read (second"
+                          " read agreed or was the zero replay); cache frame"
+                          " was POISONED, published the device's bytes"
+                          " (identity asserted)\n");
+                kl_emit(&kr);
+              }
             }
           }
         }
@@ -1341,6 +1478,9 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
       }
       if (n[0] == (int)FRAME_SIZE && !vm_page_zero(f[0])) {
         vm_frame_copy(dst, f[0], FRAME_SIZE);
+        vid.buf = f[0];
+        vid.nz = vm_page_nz_sum(f[0], &vid.sum);
+        vid_set = 1;
         have = 1;
         {
           static int refill_rows;
@@ -1386,6 +1526,16 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
     kl_i(&kl, txt_bad);
     kl_c(&kl, '\n');
     kl_emit(&kl);
+  }
+  /* M6/L77: the last gate before the caller publishes `dst`.  The bytes that
+     reach `dst` must be the bytes that were verified -- pointer, offset,
+     source unchanged, destination equal.  A failure is a refusal (-EIO), not
+     an executable zero page.  Checked BEFORE the source frames are freed: the
+     identity is about `f[i]` as it was when it was copied. */
+  if (have && vid_set && !vm_pub_identity("verify", vid.buf, dst, off, &vid)) {
+    have = 0;
+    if (zero_out)
+      *zero_out = 0;
   }
   for (int i = 0; i < 3; i++)
     if (f[i])

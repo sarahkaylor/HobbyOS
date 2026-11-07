@@ -66,8 +66,21 @@ int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
  * (a chain/LBA problem or a lying device — check the image on the host).
  * Read-only apart from the invalidation the last field performs.
  */
+/* M6/L77: what the probe VERIFIED, handed back so the publish path can assert
+ * that the bytes it publishes are the bytes that were verified.  `buf` is the
+ * caller's buffer (the probe reads into it directly); `nz`/`sum` are measured
+ * on it at the moment of the verdict.  A publisher that copies these bytes
+ * somewhere else recomputes the pair there and compares: same pointer, same
+ * offset, same content -- or no publish. */
+struct fat16_page_id {
+  uint64_t buf;   /* the buffer the verified bytes live in */
+  uint32_t off;   /* the file offset they are read from */
+  uint32_t nz;    /* non-zero bytes in `buf`, as verified */
+  uint32_t sum;   /* byte sum of `buf`, as verified */
+};
+
 int fat16_page_probe(uint16_t start_cluster, uint32_t file_size, uint32_t pos,
-                     uint8_t *out);
+                     uint8_t *out, struct fat16_page_id *id);
 
 /* M6/L69: drop the block cache's copies of one page's sectors, so the next
  * read re-fetches from the device instead of serving a frame that was filled

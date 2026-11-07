@@ -14,6 +14,12 @@
 extern void uart_puts(const char *s);
 extern void print_int(int v);
 extern void uart_print_hex(uint64_t v); /* so-vm lane A: physaddr evidence */
+#ifdef KERNEL_MODE_UNIT_TEST
+/* M6/L77: the publish-path identity assertion's seam and counters (vm.c). */
+extern void vm_test_corrupt_next_publish(int on);
+extern uint32_t vm_test_id_fail(void);
+extern uint32_t vm_test_id_checks(void);
+#endif
 
 /* P2.2 (S2) window/paging unit tests.  Everything here runs against the
  * real frame allocator and the real arch page-table code (the same paths
@@ -2501,12 +2507,197 @@ static void test_vm_alloc_hole_atomic(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* M6/L77: verify(buf) == publish(buf), asserted on the publish path.
+ *
+ * L76 ended with an executable page PUBLISHED as verified (`[PUB] … zero=4096
+ * ver=1`) although the probe's own read of that offset held 3547 non-zero
+ * bytes, and the process took #UD in UnityPlayer.so's text.  The probe's
+ * verdict and the bytes that reached the faulting instruction were not about
+ * the same memory.
+ *
+ * This test exercises the two halves of the fix:
+ *   1. the probe's identity describes the CALLER'S buffer (pointer, offset,
+ *      nz, sum) and that buffer holds the file's bytes -- verification and
+ *      publication are of one buffer;
+ *   2. when the published copy is made to diverge (test seam), the assertion
+ *      counts the failure and the diverged bytes are NOT published: the page
+ *      still ends up with the file's bytes, by the independent device re-read.
+ * A clean publish must count a check and no failure.
+ */
+static void pat_nz_sum(const unsigned char *p, int n, uint32_t *nz, uint32_t *sum) {
+  uint32_t z = 0, s = 0;
+  for (int i = 0; i < n; i++) {
+    if (p[i])
+      z++;
+    s += p[i];
+  }
+  if (nz)
+    *nz = z;
+  if (sum)
+    *sum = s;
+}
+
+static void test_vm_publish_identity(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_publish_identity...\n");
+
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  int free0 = frame_free_count();
+
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+  file_obj_invalidate_all();
+
+  /* 1. The probe verifies the caller's buffer, and its identity says so. */
+  {
+    uint64_t b1 = frame_alloc();
+    EXPECT_EQ((b1 != 0), 1);
+    if (b1) {
+      struct fat16_page_id id;
+      int r = fat16_page_probe(cluster, fsize, 0, (uint8_t *)b1, &id);
+      EXPECT_EQ(r, 1);
+      EXPECT_EQ((id.buf == b1), 1); /* pointer identity: same buffer */
+      EXPECT_EQ((long)id.off, 0);
+      uint32_t nz = 0, sum = 0;
+      pat_nz_sum((const unsigned char *)b1, 4096, &nz, &sum);
+      EXPECT_EQ((long)id.nz, (long)nz);
+      EXPECT_EQ((long)id.sum, (long)sum);
+      /* and the buffer really holds the file's bytes, not zeros */
+      int bad = 0;
+      for (int i = 0; i < 64; i++)
+        if (((const unsigned char *)b1)[i] !=
+            (unsigned char)(((0 + (uint32_t)i) * 7u + 3u) & 0xFFu))
+          bad++;
+      EXPECT_EQ(bad, 0);
+      EXPECT_EQ((nz > 0), 1);
+      frame_free(b1);
+    }
+  }
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_EXEC_TAG + 5));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  if (fd < 0) {
+    vm_as_teardown(p.as);
+    return;
+  }
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (b <= 0) {
+    file_close(&p, fd);
+    vm_as_teardown(p.as);
+    return;
+  }
+
+  static unsigned char zeros[4096];
+
+  /* 2. The poisoned cache sends the gate to the probe; the publisher's copy is
+     corrupted on purpose, and the assertion must refuse it. */
+  uint32_t lba0 = 0;
+  EXPECT_EQ(fat16_test_lba(cluster, 0, &lba0), 0);
+  EXPECT_EQ(blk_cache_test_poison(lba0, zeros, 4096), 0);
+  {
+    uint32_t f0 = vm_test_id_fail();
+    uint32_t c0 = vm_test_id_checks();
+    vm_test_corrupt_next_publish(1);
+    EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 0), 0);
+    /* The divergence was seen AND counted: this is the tripwire that replaces
+       a #UD one instruction later. */
+    EXPECT_EQ((long)(vm_test_id_fail() - f0), 1);
+    EXPECT_EQ((vm_test_id_checks() > c0), 1);
+    /* ... and the diverged bytes were not published: the page has the file's
+       bytes, published by the independent device re-read. */
+    uint64_t leaf = 0;
+    if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+      uint64_t ph = vm_arch_leaf_phys(leaf);
+      int bad = 0;
+      for (int i = 0; i < 64; i++)
+        if (((const volatile unsigned char *)ph)[i] !=
+            (unsigned char)(((0 + (uint32_t)i) * 7u + 3u) & 0xFFu))
+          bad++;
+      EXPECT_EQ(bad, 0);
+    } else {
+      EXPECT_EQ(1, 0);
+    }
+  }
+
+  /* 3. A clean probe publish counts a check and no failure: the same page, a
+     fresh mapping, the cache poisoned again and NO corruption.  (Page 1 of
+     this fixture is a 904-byte tail, which the exec gate refuses as a short
+     read -- pre-existing behaviour, not this lane's subject.) */
+  file_close(&p, fd);
+  vm_as_teardown(p.as);
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  {
+    struct process q;
+    vm_file_proc_init(&q, vm_as_create(VM_EXEC_TAG + 6));
+    EXPECT_EQ((q.as != 0), 1);
+    if (q.as) {
+      int fd2 = file_open(&q, VM_FILE_NAME, 0);
+      EXPECT_EQ((fd2 >= 0), 1);
+      if (fd2 >= 0) {
+        int64_t b2 = vm_mmap(&q, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                             VM_MAP_PRIVATE, fd2, 0);
+        EXPECT_EQ((b2 > 0), 1);
+        if (b2 > 0) {
+          uint32_t lbac = 0;
+          EXPECT_EQ(fat16_test_lba(cluster, 0, &lbac), 0);
+          EXPECT_EQ(blk_cache_test_poison(lbac, zeros, 4096), 0);
+          uint32_t f0 = vm_test_id_fail();
+          uint32_t c0 = vm_test_id_checks();
+          EXPECT_EQ(vm_touch(&q, (uint64_t)b2, 8, 0), 0);
+          EXPECT_EQ((long)(vm_test_id_fail() - f0), 0);
+          EXPECT_EQ((vm_test_id_checks() > c0), 1);
+          uint64_t leaf = 0;
+          if (vm_arch_walk(q.as, (uint64_t)b2, &leaf) == 0) {
+            uint64_t ph = vm_arch_leaf_phys(leaf);
+            int bad = 0;
+            for (int i = 0; i < 64; i++)
+              if (((const volatile unsigned char *)ph)[i] !=
+                  (unsigned char)(((0 + (uint32_t)i) * 7u + 3u) & 0xFFu))
+                bad++;
+            EXPECT_EQ(bad, 0);
+          } else {
+            EXPECT_EQ(1, 0);
+          }
+        }
+        file_close(&q, fd2);
+      }
+      vm_as_teardown(q.as);
+    }
+  }
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  uart_puts("  [VM-PBI] checks=");
+  print_int((int)vm_test_id_checks());
+  uart_puts(" fails=");
+  print_int((int)vm_test_id_fail());
+  uart_puts(" frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 /* M6/L69: the poisoned-cache regression needs blk_cache_init() to have run
  * (the vm suite itself runs before the cache is enabled so its exact frame
  * accounting holds).  unit_test.c calls this right after the blk-cache
  * suites. */
 void vm_test_post_cache_suite(void) {
   test_vm_poisoned_cache_page();
+  test_vm_publish_identity();
 }
 
 void vm_test_suite(void) {
