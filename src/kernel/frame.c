@@ -259,8 +259,10 @@ uint64_t frame_ram_probe(uint64_t phys) {
     p[0] = 0;
     ok = (p[0] == 0);
   }
+#ifdef __x86_64__
   if (phys == FRAME_EXT1_BASE)
     frame_ext1_is_ram = ok;
+#endif
   return ok ? 1 : 0;
 }
 
