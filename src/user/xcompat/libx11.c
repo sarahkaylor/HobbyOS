@@ -56,6 +56,12 @@
 #define SYS_mmap 9
 #define SYS_ioctl 16
 #define SYS_fstat 5
+/* clock_gettime: the LINUX number (228), not HobbyOS's 87.  The user-ABI
+ * dispatcher translates 228 -> SYS_GETTIME (src/kernel/arch/x64/trap.c:2386),
+ * which is the number a compat DSO has to use: 87 is SYS_GETTIME's *internal*
+ * row and is not accepted from userspace.  Measured: with 87 the call failed
+ * and every row printed t=0, i.e. a clock that says nothing. */
+#define SYS_clock_gettime 228
 
 static long xs_syscall6(long n, long a, long b, long c, long d, long e, long f) {
   long ret;
@@ -79,6 +85,24 @@ static long xs_write(int fd, const void *p, unsigned long n) {
 }
 static long xs_read(int fd, void *p, unsigned long n) {
   return xs_syscall6(SYS_read, fd, (long)p, (long)n, 0, 0, 0);
+}
+
+/* L74: the guest's own monotonic clock, in ms (SYS_GETTIME/CLOCK_MONOTONIC).
+ *
+ * Why the [XSW] row needs it: the fps ladder used to be timed by a host-side
+ * follower watching the serial log, and that clock is only as good as the
+ * host's polling of a file QEMU writes in bursts -- measured this lane: a 200 s
+ * run whose rows all arrived inside a 69.6 s window, i.e. a 2x error in the
+ * number quoted as fps.  A timestamp the guest writes itself makes the rate a
+ * property of the run, not of the harness.  Returns 0 if the syscall fails
+ * (then t= reads 0 and a reader must fall back to the old timing). */
+static unsigned long long xs_now_ms(void) {
+  struct { long sec, nsec; } ts;
+  if (xs_syscall6(SYS_clock_gettime, 1 /* CLOCK_MONOTONIC */, (long)&ts,
+                  0, 0, 0, 0) < 0)
+    return 0;
+  return (unsigned long long)ts.sec * 1000ull +
+         (unsigned long long)(ts.nsec / 1000000L);
 }
 static int xs_open(const char *path, int flags) {
   return (int)xs_syscall6(SYS_open, (long)path, flags, 0, 0, 0, 0);
@@ -717,6 +741,7 @@ static struct {
   unsigned long long crc_nz;    /* pixels with a non-zero B/G/R */
   unsigned long box[4];         /* their bounding box */
   unsigned long long crc_tot;   /* pixels hashed */
+  unsigned long long t0_ms;     /* L74: guest-monotonic ms of the first row */
   unsigned long long pumps;     /* event-pump iterations */
   unsigned long long wins;      /* XCreateWindow calls */
   unsigned long long maps;      /* XMapWindow calls (not repeats) */
@@ -818,6 +843,15 @@ static void pres_row(Display *d) {
    * shows a 1280x720 game presenting into a 1920x1080 desktop. */
   j = ap_s(b, j, " gx=");          j = ap_i(b, j, (d && d->win.content_ready) ? d->win.gx : -1);
   j = ap_s(b, j, " gy=");          j = ap_i(b, j, (d && d->win.content_ready) ? d->win.gy : -1);
+  /* L74: the guest's own clock, ms since this process's first present.  The
+   * fps ladder divides n= by this and stops depending on when the host
+   * happened to read the serial log (see xs_now_ms). */
+  {
+    unsigned long long now = xs_now_ms();
+    if (now && !g_pres.t0_ms) g_pres.t0_ms = now;
+    j = ap_s(b, j, " t=");
+    j = ap_d(b, j, (now && g_pres.t0_ms) ? now - g_pres.t0_ms : 0);
+  }
   j = ap_s(b, j, " ready=");
   b[j++] = (char)('0' + ((d && d->win.content_ready) ? 1 : 0));
   /* `nz` is the count of pixels whose B|G|R is not zero (alpha is 0xFF on
