@@ -3291,26 +3291,35 @@ static int process_wait_common(struct trap_frame *tf, int want_pid,
        carries every field a reader needs; repeats carry none. */
     if (!caller->echild_logged) {
       caller->echild_logged = 1;
-      uart_puts("[WAITPID] ECHILD caller=");
-      print_int(caller->pid);
-      uart_puts(" ");
-      uart_puts(caller->name);
-      uart_puts(" want=");
-      print_int(want_pid);
-      uart_puts(" children=0");
+      /* GB-082: one record, one lock hold.  This diagnostic used to be a
+         sequence of uart_puts/print_int calls; a peer CPU interleaved at a
+         call boundary and produced the measured glued line
+         `[WAITPID] ECHILD caller=39 PROCTEST.BIN want=[ARRIVED] NL.BIN rc>0`
+         (the wanted-slot text landed inside this record).  kline emits the
+         whole line in a single uart_puts, so the record cannot be split. */
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "[WAITPID] ECHILD caller=");
+      kl_i(&k, caller->pid);
+      kl_s(&k, " ");
+      kl_s(&k, caller->name);
+      kl_s(&k, " want=");
+      kl_i(&k, want_pid);
+      kl_s(&k, " children=0");
       if (want_pid > 0) {
         for (int i = 0; i < MAX_PROCESSES; i++) {
           if (proc_table[i].pid == want_pid) {
-            uart_puts(" slotstate=");
-            print_int((int)proc_table[i].state);
-            uart_puts(" slotparent=");
-            print_int(proc_table[i].parent_pid);
-            uart_puts(" slotexit=");
-            print_int(proc_table[i].exit_status);
+            kl_s(&k, " slotstate=");
+            kl_i(&k, (int)proc_table[i].state);
+            kl_s(&k, " slotparent=");
+            kl_i(&k, proc_table[i].parent_pid);
+            kl_s(&k, " slotexit=");
+            kl_i(&k, proc_table[i].exit_status);
           }
         }
       }
-      uart_puts(" (further ECHILD diagnostics for this process are suppressed)\n");
+      kl_s(&k, " (further ECHILD diagnostics for this process are suppressed)\n");
+      kl_emit(&k);
     }
     spinlock_release_irqrestore(&proc_lock, flags);
     return -ECHILD;
@@ -4621,15 +4630,18 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
         else if (proc_table[i].state != PROC_STATE_FREE)
           used++;
       }
-      uart_puts("[KERNEL] thread_create: no free slot (used=");
-      print_int(used);
-      uart_puts("/");
-      print_int(MAX_PROCESSES - 1);
-      uart_puts(" done=");
-      print_int(done);
-      uart_puts(") for pid=");
-      print_int(caller->pid);
-      uart_puts("\n");
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "[KERNEL] thread_create: no free slot (used=");
+      kl_i(&k, used);
+      kl_s(&k, "/");
+      kl_i(&k, MAX_PROCESSES - 1);
+      kl_s(&k, " done=");
+      kl_i(&k, done);
+      kl_s(&k, ") for pid=");
+      kl_i(&k, caller->pid);
+      kl_s(&k, "\n");
+      kl_emit(&k);
     }
     *err = -EAGAIN;
     /* GB-177: this path used to return with proc_lock still held.  The caller

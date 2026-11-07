@@ -2324,50 +2324,65 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       if (vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why) == 0) {
         return; /* mapping is live; eret re-executes the instruction */
       }
-      uart_puts("[KERNEL] pid=");
-      print_int(gcur->pid);
-      uart_puts(" (");
-      uart_puts(gcur->name);
-      uart_puts(") memory fault VA=");
-      uart_print_hex(far);
-      uart_puts(" PC=");
-      uart_print_hex(tf->elr);
-      uart_puts(" LR=");
-      uart_print_hex(tf->lr);
-      uart_puts(" FP=");
-      uart_print_hex(tf->regs[29]);
-      uart_puts(" rw=");
-      uart_puts(wnr ? "w" : "r");
-      uart_puts(is_exec ? "x" : " ");
-      uart_puts(" in=");
-      uart_puts(why);
-      uart_puts(" -> killed\n");
+      /* GB-082: one record, one lock hold.  This fault line was a sequence of
+         uart_puts/print_int calls, so a peer CPU's record could land inside it
+         (measured: `[KERNEL] pid=[WAVE-TRY] STAGE4K_T.BIN`).  kline emits the
+         whole line in a single uart_puts; the x64 path has used fl_buf for the
+         same reason. */
+      {
+        struct kline k;
+        kl_init(&k);
+        kl_s(&k, "[KERNEL] pid=");
+        kl_i(&k, gcur->pid);
+        kl_s(&k, " (");
+        kl_s(&k, gcur->name);
+        kl_s(&k, ") memory fault VA=");
+        kl_hex(&k, far);
+        kl_s(&k, " PC=");
+        kl_hex(&k, tf->elr);
+        kl_s(&k, " LR=");
+        kl_hex(&k, tf->lr);
+        kl_s(&k, " FP=");
+        kl_hex(&k, tf->regs[29]);
+        kl_s(&k, " rw=");
+        kl_c(&k, wnr ? 'w' : 'r');
+        kl_c(&k, is_exec ? 'x' : ' ');
+        kl_s(&k, " in=");
+        kl_s(&k, why);
+        kl_s(&k, " -> killed\n");
+        kl_emit(&k);
+      }
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
     }
 
-    // v1 (or no process): the pre-P2 fatal path, verbatim.
+    // v1 (or no process): the pre-P2 fatal path, verbatim shape, one record.
     if (gcur) {
-      uart_puts("[KERNEL] User process ");
-      print_int(gcur->pid);
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "[KERNEL] User process ");
+      kl_i(&k, gcur->pid);
       if (gcur->name[0] != '\0') {
-        uart_puts(" (");
-        uart_puts(gcur->name);
-        uart_puts(")");
+        kl_s(&k, " (");
+        kl_s(&k, gcur->name);
+        kl_s(&k, ")");
       }
-      uart_puts(" fault! EC: ");
-      uart_print_hex(ec);
-      uart_puts(" ELR: ");
-      uart_print_hex(tf->elr);
-      uart_puts("\n");
+      kl_s(&k, " fault! EC: ");
+      kl_hex(&k, ec);
+      kl_s(&k, " ELR: ");
+      kl_hex(&k, tf->elr);
+      kl_s(&k, "\n");
+      kl_emit(&k);
       process_fault_exit(tf, 11); /* SIGSEGV status byte (w5 ii) */
     } else {
-      uart_puts("\n[KERNEL] FATAL: EL0 Synchronous Exception with no running process!\n");
-      uart_puts("EC: ");
-      uart_print_hex(ec);
-      uart_puts("\nELR: ");
-      uart_print_hex(tf->elr);
-      uart_puts("\n");
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "\n[KERNEL] FATAL: EL0 Synchronous Exception with no running process!\nEC: ");
+      kl_hex(&k, ec);
+      kl_s(&k, "\nELR: ");
+      kl_hex(&k, tf->elr);
+      kl_s(&k, "\n");
+      kl_emit(&k);
       while (1) {
         safe_wfi();
       }
