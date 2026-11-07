@@ -153,6 +153,17 @@ int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize);
 // Returns 0 on success, -1 on error.
 int fat16_stats(uint64_t* out_total, uint64_t* out_free);
 
+/**
+ * L78: where the FAT entry for `lba` lives (block-stress write-verify guard).
+ * Returns 1 and fills *fat_sec / *off / *cluster when `lba` is inside the
+ * data area; 0 otherwise.  Pure arithmetic, no I/O, no lock: the caller reads
+ * the FAT sector raw under the device token it already holds and treats a
+ * 0x0000 entry as an unallocated cluster (safe to write back the bytes it
+ * just read).
+ */
+int fat16_lba_scratch_geom(uint64_t lba, uint64_t* fat_sec, uint32_t* off,
+                           uint64_t* cluster);
+
 // Resolves a path to its directory entry, sector, and offset.
 int fat16_resolve_path(const char* path, struct fat16_dir_entry* out_entry, uint32_t* out_sector, uint32_t* out_offset);
 
