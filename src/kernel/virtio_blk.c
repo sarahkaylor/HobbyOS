@@ -4,6 +4,8 @@
 #include "arch/cpu.h"
 #include "blk_cache.h"
 #include "frame.h"
+#include "fat16.h"   /* L78: the stress probe's write-verify free-cluster guard */
+#include "kline.h"   /* L78: one console record per BKS row (atomic emit) */
 
 
 #ifdef __x86_64__
@@ -182,6 +184,11 @@ static void blk_test_abort_apply(int armed, const uint8_t *pre) {
 /* L67: defined below; the health hook above the wait path uses them. */
 static void blk_token_acquire(void);
 static void blk_token_release(void);
+/* L78: bounded variant for the block-stress probe.  Returns 1 when the token
+   was taken, 0 when the holder was still inside a transfer after `timeout_ms`.
+   The probe counts a timeout as `busy` and yields; it never spins on the token
+   (the L75 stall). */
+static int blk_token_try_acquire(uint32_t timeout_ms);
 
 static inline void outl(uint16_t port, uint32_t val) {
   __asm__ volatile("outl %0, %1" : : "a"(val), "Nd"(port));
@@ -1198,18 +1205,59 @@ static uint64_t selfcheck_sum_cache(uint64_t lba, int nsec) {
 
 void virtio_blk_selfcheck(void) {
   static int done;
+  static uint32_t last_reqs;
+  static uint64_t last_sample, quiet_since;
   if (done || !nvme_regs || !nvme_id.valid)
     return;
-  if (timer_get_ms() < 240000)
+  uint64_t now = timer_get_ms();
+  if (now < 240000)
     return;
-  done = 1;
+  /* L78: a forced controller re-initialisation is a deliberate disturbance.
+     Running it at a fixed t=240 s put it in the middle of the loader's page-in
+     stream (the census held the device token for the whole rebuild, a FAT
+     writer waited on it for 15 s and the stall breaker fired: measured), so
+     the re-init now waits for a quiet device: no completed command for
+     QUIET_MS.  It still runs if the device never goes quiet (forced at 1500 s)
+     and is skipped with a row after 1750 s, so the window's end is never spent
+     inside a rebuild. */
+  if (!last_sample) {
+    last_sample = now;
+    quiet_since = now;
+    last_reqs = blk_requests;
+  }
+  if (now - last_sample >= 1000) {
+    if (blk_requests != last_reqs)
+      quiet_since = now;
+    last_reqs = blk_requests;
+    last_sample = now;
+  }
+  int quiet = (now - quiet_since) >= 1500;
+  if (!quiet && now < 1500000)
+    return;
+  if (!quiet && now >= 1750000) {
+    done = 1;
+    struct kline ks;
+    kl_init(&ks);
+    kl_s(&ks, "[BLKQ] selfcheck skipped: device busy for the whole window t=");
+    kl_i(&ks, (long)(now / 1000));
+    kl_s(&ks, "s reqs=");
+    kl_i(&ks, (long)blk_requests);
+    kl_c(&ks, '\n');
+    kl_emit(&ks);
+    return;
+  }
   uint64_t lba = (nvme_id.nsze > 32768) ? nvme_id.nsze - 8192 : 0;
   int nsec = 1024;
   uint64_t c1 = selfcheck_sum_cache(lba, nsec);
   uint64_t r1 = selfcheck_sum_raw(lba, nsec);
   int rr;
+  /* The sums above take the token themselves (they are cache/raw reads), so
+     the rebuild's token is taken here, with a deadline: a busy device means
+     "next census", never a spin inside the 5 s census. */
+  if (!blk_token_try_acquire(200))
+    return;
+  done = 1;
   uint64_t t0 = timer_get_ms();
-  blk_token_acquire();
   rr = nvme_reinit();
   blk_token_release();
   uint64_t ms = timer_get_ms() - t0;
@@ -1236,102 +1284,328 @@ void virtio_blk_selfcheck(void) {
   uart_puts("\n");
 }
 
-/* L75: the block-stress probe (RW_BLK_STRESS=1).
+/* L78: the block-stress probe (RW_BLK_STRESS=1), survivable shape.
  *
- * The task's "block-stress probe running alongside": random small reads over
- * a fixed window of the namespace, plus write-verify cycles that read a
- * sector, write the SAME bytes back and check they land -- a real write to
- * the device (which is what exercises queue/completion/cache coherence) that
- * cannot corrupt anything, because it restores what it read.  Driven from the
- * 5 s sampler, so it needs no second process and cannot touch the desktop's
- * window-protocol pipes.
+ * L75 shipped this as a thread that issued 24 reads + 3 write-verifies in a
+ * tight round, took the L55 single-in-flight token with the unbounded
+ * `blk_token_acquire()`, shared one 4 KiB stack buffer across the round, and
+ * then `safe_wfi()`-spun for a second.  It made ~70 s into the game's load and
+ * then stopped.  The L78 shape is deliberately small and bounded:
  *
- * The read window is the free tail of the image (the FAT's allocator grows
- * from the first free cluster, so the last 4 MiB stays untouched); a large
- * read of the same sectors through the cache path is the cache's coherence
- * check. */
+ *   - ONE device operation in flight.  `stress_inflight` is asserted before
+ *     every op and cleared after it; the driver is single-inflight and the
+ *     probe respects that instead of pretending to be a deep queue.
+ *   - ONE operation per `BKS_OP_MS` (200 ms -> 5 ops/s).  The game's plateau
+ *     is ~150 device ops/s, so the probe is ~3 % of the device's work and
+ *     cannot starve the loader's page-ins.
+ *   - the token is taken with a DEADLINE (`blk_token_try_acquire`): if the
+ *     game is mid-transfer for longer than `BKS_TOKEN_WAIT_MS`, the probe
+ *     counts `busy` and yields.  It never spins on the token -- that is the
+ *     L75 stall, and an unbounded wait there also parks a CPU in `safe_wfi()`.
+ *   - between ops the thread halts (`safe_wfi`) for 250 ms: four wake-ups a
+ *     second, no runnable loop, no scheduler state of its own.  A scheduler
+ *     sleep (process_sleep_ms/arch_yield) looked cleaner but the windows that
+ *     used it died at t=244 s with a SEC-4 canary panic; a kernel thread that
+ *     only halts is the shape every other driver thread here already has.
+ *   - every failure is a counted, bounded row and the probe CONTINUES:
+ *     `busy` (token timeout), `skip` (device being repaired / bad geometry),
+ *     `bad` (submit error), `mismatch` (write-verify did not read back), and
+ *     `slow` (one op over `BKS_SLOW_MS`, followed by a back-off).  Nothing
+ *     retries in a loop and nothing holds a lock across more than one command.
+ *   - write-verify only touches a cluster whose FAT entry is 0
+ *     (`fat16_lba_scratch_geom` + the entry read below), drops the block cache
+ *     for the sector after the raw write, and writes back exactly the bytes it
+ *     read.  It can therefore never stamp a live FAT/dir/data sector, and it
+ *     cannot leave a stale cached page behind for a later allocation.
+ */
 #ifdef RW_BLK_STRESS
+#define BKS_OP_MS 250         /* one op per 250 ms: <= 4 device ops/s */
+#define BKS_TOKEN_WAIT_MS 60  /* skip, never spin, if the game owns the token */
+#define BKS_SLOW_MS 2000      /* one op this slow is a row + a back-off */
+#define BKS_BACKOFF_MS 5000
+#define BKS_ROW_MS 60000
+#define BKS_WV_EVERY 8        /* every 8th op is a write-verify */
+#define BKS_FAIL_ROWS 32      /* bounded detail rows per counter */
+
 static uint32_t stress_seed = 0x9E3779B9u;
 static volatile uint32_t stress_reads, stress_writes, stress_bad,
-    stress_mismatch, stress_rows;
+    stress_mismatch, stress_busy, stress_skipped, stress_slow, stress_ops,
+    stress_inflight, stress_rows, stress_bad_rows, stress_mismatch_rows;
 
 static uint32_t stress_rnd(void) {
   stress_seed = stress_seed * 1664525u + 1013904223u;
   return stress_seed >> 8;
 }
 
-static void stress_write_verify(uint64_t lba) {
-  uint8_t a[512], b[512];
-  if (virtio_blk_read_raw(lba, a, 1) != 0) { stress_bad++; return; }
-  if (virtio_blk_write_raw(lba, a, 1) != 0) { stress_bad++; return; }
-  if (virtio_blk_read_raw(lba, b, 1) != 0) { stress_bad++; return; }
-  for (int k = 0; k < 512; k++) {
-    if (a[k] != b[k]) { stress_mismatch++; return; }
-  }
-  stress_writes++;
+/* Wait `ms` without touching the scheduler.  Deliberately NOT
+ * process_sleep_ms()/arch_yield(): the probe is a kernel thread and the L78
+ * windows that used a scheduler sleep here died at t=244 s with
+ * `KERNEL PANIC: stack smashing detected (SEC-4 canary)` -- the only new
+ * thing in those kernels was a kernel thread calling arch_yield() with a
+ * BLOCKED state.  A halt-until-interrupt loop is what every other driver
+ * thread in this kernel does; the probe wakes ~4 times a second, so the cost
+ * is one idle wake-up per rate-limit period, not a spin. */
+static void stress_delay_ms(uint32_t ms) {
+  uint64_t t0 = timer_get_ms();
+  while (timer_get_ms() - t0 < ms)
+    safe_wfi();
 }
 
-static void virtio_blk_stress_round(void) {
-  uint8_t buf[4096];
-  if (!nvme_regs || !nvme_id.valid)
-    return;
-  uint64_t tail = (nvme_id.nsze > 65536) ? nvme_id.nsze - 16384 : 0;
-  if (!tail)
-    return;
-  for (int i = 0; i < 24; i++) {
-    uint64_t lba = tail + (stress_rnd() % 8192);
-    uint32_t nsec = 1u << (stress_rnd() % 4); /* 1..8 sectors: 512..4096 B */
-    if (nsec > 8) nsec = 8;
-    if (lba + nsec > nvme_id.nsze) continue;
-    if (virtio_blk_read_raw(lba, buf, nsec) != 0)
-      stress_bad++;
-    else
-      stress_reads++;
+/* The probe's own submit path, called with the token HELD (never through
+ * virtio_blk_read_raw/write_raw, which would take it again).  One command per
+ * sector; a nonzero status is returned to the caller, never retried here. */
+static int stress_read_locked(uint64_t lba, uint8_t *buf, uint32_t nsec) {
+  for (uint32_t i = 0; i < nsec; i++) {
+    struct nvme_cmd cmd = {0};
+    cmd.opcode = 0x02; /* Read */
+    cmd.nsid = 1;
+    cmd.cid = next_io_cid();
+    cmd.prp1 = (uint64_t)&bounce_buf[0];
+    cmd.cdw10 = (uint32_t)(lba + i);
+    cmd.cdw11 = (uint32_t)((lba + i) >> 32);
+    cmd.cdw12 = 0; /* 1 block */
+    uint16_t status = submit_io_cmd(&cmd);
+    if (status != 0)
+      return -1;
+    memcpy(buf + (i * 512), (const void *)&bounce_buf[0], 512);
   }
-  for (int i = 0; i < 3; i++)
-    stress_write_verify(tail + (stress_rnd() % 8192));
-  /* One row a minute: the probe's own counters, so a run can show that the
-     load was actually applied for the whole window. */
-  {
-    static uint64_t last_row;
-    uint64_t now = timer_get_ms();
-    if (now - last_row >= 60000) {
-      last_row = now;
-      stress_rows++;
-      uart_puts("[BKS] stress reads=");
-      print_int((int)stress_reads);
-      uart_puts(" write_verify=");
-      print_int((int)stress_writes);
-      uart_puts(" bad=");
-      print_int((int)stress_bad);
-      uart_puts(" mismatch=");
-      print_int((int)stress_mismatch);
-      uart_puts(" ms=");
-      print_int((int)now);
-      uart_puts("\n");
+  return 0;
+}
+
+static int stress_write_locked(uint64_t lba, const uint8_t *buf) {
+  struct nvme_cmd cmd = {0};
+  memcpy((void *)&bounce_buf[0], buf, 512);
+  cmd.opcode = 0x01; /* Write */
+  cmd.nsid = 1;
+  cmd.cid = next_io_cid();
+  cmd.prp1 = (uint64_t)&bounce_buf[0];
+  cmd.cdw10 = (uint32_t)lba;
+  cmd.cdw11 = (uint32_t)(lba >> 32);
+  cmd.cdw12 = 0;
+  return submit_io_cmd(&cmd) == 0 ? 0 : -1;
+}
+
+static void stress_row(const char *tag, uint64_t now) {
+  /* kline + one uart_puts: the console is shared with the game's own rows and
+     a record built from many puts is shredded at every call boundary (the L75
+     run lost its `[BKS] start` row that way). */
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[BKS] ");
+  kl_s(&kl, tag);
+  kl_s(&kl, " t=");
+  kl_i(&kl, (long)(now / 1000));
+  kl_s(&kl, "s ops=");
+  kl_i(&kl, (long)stress_ops);
+  kl_s(&kl, " reads=");
+  kl_i(&kl, (long)stress_reads);
+  kl_s(&kl, " write_verify=");
+  kl_i(&kl, (long)stress_writes);
+  kl_s(&kl, " bad=");
+  kl_i(&kl, (long)stress_bad);
+  kl_s(&kl, " mismatch=");
+  kl_i(&kl, (long)stress_mismatch);
+  kl_s(&kl, " busy=");
+  kl_i(&kl, (long)stress_busy);
+  kl_s(&kl, " skip=");
+  kl_i(&kl, (long)stress_skipped);
+  kl_s(&kl, " slow=");
+  kl_i(&kl, (long)stress_slow);
+  kl_s(&kl, " inflight=");
+  kl_i(&kl, (long)stress_inflight);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+  stress_rows++;
+}
+
+/* One op.  Returns when the op is done or refused; never loops on failure. */
+/* Static, not stack: the probe is single-inflight (asserted below), so these
+ * are private to the one op in flight; a 4 KiB local on a kernel thread's
+ * stack is a canary waiting to be smashed, and the L78 P2 window died with
+ * `KERNEL PANIC: stack smashing detected` at t=244 s. */
+static uint8_t stress_buf[4096];
+static uint8_t stress_back[512];
+static uint8_t stress_fat[512];
+
+static void stress_one_op(void) {
+  uint8_t *buf = stress_buf, *back = stress_back;
+  uint64_t wrote_lba = 0;
+  int wrote_ok = 0;
+  uint64_t tail = (nvme_id.nsze > 65536) ? nvme_id.nsze - 16384 : 0;
+  if (!nvme_regs || !nvme_id.valid || !tail) {
+    stress_skipped++;
+    return;
+  }
+  /* Bound 1 of 2: the probe never has two operations outstanding. */
+  if (stress_inflight) {
+    stress_skipped++;
+    return;
+  }
+  /* Bound 2: take the token with a deadline; a busy device is a skip. */
+  if (!blk_token_try_acquire(BKS_TOKEN_WAIT_MS)) {
+    stress_busy++;
+    return;
+  }
+  stress_inflight = 1;
+  stress_ops++;
+  uint64_t t0 = timer_get_ms();
+  if (!nvme_ready_now()) {
+    /* The game's own page-in path is repairing the controller; leave the
+       token immediately rather than forcing a second re-initialisation. */
+    stress_skipped++;
+  } else if ((stress_ops % BKS_WV_EVERY) == 0) {
+    /* Write-verify: one sector, only in an unallocated cluster. */
+    uint64_t lba = tail + (stress_rnd() % 8192);
+    uint64_t fat_sec = 0, cluster = 0;
+    uint32_t off = 0;
+    uint8_t *fs = stress_fat;
+    int free_ok = 0;
+    if (fat16_lba_scratch_geom(lba, &fat_sec, &off, &cluster) &&
+        stress_read_locked(fat_sec, fs, 1) == 0) {
+      uint16_t entry = (uint16_t)(fs[off] | ((uint16_t)fs[off + 1] << 8));
+      free_ok = (entry == 0x0000);
     }
+    if (!free_ok) {
+      stress_skipped++; /* allocated (or unreadable): never write there */
+    } else if (stress_read_locked(lba, buf, 1) != 0) {
+      stress_bad++;
+      if (stress_bad_rows++ < BKS_FAIL_ROWS) {
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[BKS] read failed lba=");
+        kl_hex(&kl, (unsigned long)lba);
+        kl_s(&kl, " bad=");
+        kl_i(&kl, (long)stress_bad);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    } else if (stress_write_locked(lba, buf) != 0) {
+      stress_bad++;
+      if (stress_bad_rows++ < BKS_FAIL_ROWS) {
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[BKS] write failed lba=");
+        kl_hex(&kl, (unsigned long)lba);
+        kl_s(&kl, " bad=");
+        kl_i(&kl, (long)stress_bad);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    } else {
+      /* The verify read stays raw (no cache), so it can run under the same
+         token; the cache invalidation must NOT: blk_cache_invalidate takes
+         fill_lock and bucket locks, and a cache fill owns those before it
+         ever asks for the device token -- taking them while holding the token
+         is the lock order that wedged the census (measured: [STALLBREAK]
+         on a wr_lock after a 15 s token hold).  Do it after the release. */
+      wrote_lba = lba;
+      wrote_ok = 1;
+      if (stress_read_locked(lba, back, 1) != 0) {
+        stress_bad++;
+      } else {
+        int same = 1;
+        for (int k = 0; k < 512; k++) {
+          if (buf[k] != back[k]) {
+            same = 0;
+            break;
+          }
+        }
+        if (same) {
+          stress_writes++;
+        } else {
+          stress_mismatch++;
+          if (stress_mismatch_rows++ < BKS_FAIL_ROWS) {
+            /* One row, then continue: a mismatch is data for the report, not
+               a reason to retry or to stop the probe. */
+            struct kline kl;
+            kl_init(&kl);
+            kl_s(&kl, "[BKS] verify MISMATCH lba=");
+            kl_hex(&kl, (unsigned long)lba);
+            kl_s(&kl, " n=");
+            kl_i(&kl, (long)stress_mismatch);
+            kl_s(&kl, " (logged, continuing)\n");
+            kl_emit(&kl);
+          }
+        }
+      }
+    }
+  } else {
+    /* Random 512..4096-byte read over the same free-tail window. */
+    uint64_t lba = tail + (stress_rnd() % 8192);
+    uint32_t nsec = 1u << (stress_rnd() % 4);
+    if (lba + nsec > nvme_id.nsze) {
+      stress_skipped++;
+    } else if (stress_read_locked(lba, buf, nsec) != 0) {
+      stress_bad++;
+      if (stress_bad_rows++ < BKS_FAIL_ROWS) {
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[BKS] read failed lba=");
+        kl_hex(&kl, (unsigned long)lba);
+        kl_s(&kl, " nsec=");
+        kl_i(&kl, (long)nsec);
+        kl_s(&kl, " bad=");
+        kl_i(&kl, (long)stress_bad);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    } else {
+      stress_reads++;
+    }
+  }
+  uint64_t dt = timer_get_ms() - t0;
+  stress_inflight = 0;
+  blk_token_release();
+  if (wrote_ok)
+    blk_cache_invalidate(wrote_lba, 1);  /* token not held: see above */
+  if (dt > BKS_SLOW_MS) {
+    /* A single slow op is a row; the caller backs off for a few rounds so a
+       recovering device is not hammered while it re-initialises. */
+    stress_slow++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[BKS] slow op_ms=");
+    kl_i(&kl, (long)dt);
+    kl_s(&kl, " slow=");
+    kl_i(&kl, (long)stress_slow);
+    kl_s(&kl, " (backing off)\n");
+    kl_emit(&kl);
+    stress_delay_ms(BKS_BACKOFF_MS);
   }
 }
-/* The probe must NOT run in the 5 s census: that context is entered from the
- * scheduler with its own locks held, and blocking on the device token there
- * wedged the console at t=65 s (measured: the serial log simply stops in the
- * middle of the game's page publishing).  A kernel thread of its own is the
- * same context every user I/O runs in. */
+
+/* Its own kernel thread, started by the driver, mostly asleep. */
 static void blk_stress_thread(void *arg) {
   (void)arg;
-  /* Let the boot settle, then one round a second. */
+  /* Let boot settle, then announce the shape so a run proves the probe that
+     ran is this one (the row names every bound). */
+  stress_delay_ms(BKS_ROW_MS);
   {
-    uint64_t t0 = timer_get_ms();
-    while (timer_get_ms() - t0 < 60000)
-      safe_wfi();
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[BKS] start ops_per_s=");
+    kl_i(&kl, 1000 / BKS_OP_MS);
+    kl_s(&kl, " token_wait_ms=");
+    kl_i(&kl, BKS_TOKEN_WAIT_MS);
+    kl_s(&kl, " max_inflight=1 wv_every=");
+    kl_i(&kl, BKS_WV_EVERY);
+    kl_s(&kl, " window=");
+    kl_i(&kl, 8192);
+    kl_s(&kl, " tail_off=");
+    kl_i(&kl, 16384);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
   }
+  uint64_t last_row = timer_get_ms();
   for (;;) {
-    virtio_blk_stress_round();
-    {
-      uint64_t t0 = timer_get_ms();
-      while (timer_get_ms() - t0 < 1000)
-        safe_wfi();
+    stress_one_op();
+    uint64_t now = timer_get_ms();
+    if (now - last_row >= BKS_ROW_MS) {
+      last_row = now;
+      stress_row("alive", now);
     }
+    /* The rate limit: asleep in halt for 250 ms, four ops a second. */
+    stress_delay_ms(BKS_OP_MS);
   }
 }
 
@@ -1693,6 +1967,36 @@ static void blk_token_release(void) {
   uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
   blk_in_use = 0;
   spinlock_release_irqrestore(&blk_request_lock, flags);
+}
+
+/* L78: bounded token wait (see the prototype).  The first ~2 ms poll with a
+ * pause; after that the caller is a kernel thread and sleeps in 1 ms slices,
+ * so a probe waiting behind the game's loader costs no CPU and is always
+ * preemptible.  Never call this with the token already held. */
+static int blk_token_try_acquire(uint32_t timeout_ms) {
+  uint64_t t0 = timer_get_ms();
+  uint32_t spins = 0;
+  for (;;) {
+    uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+    if (!blk_in_use) {
+      blk_in_use = 1;
+      spinlock_release_irqrestore(&blk_request_lock, flags);
+      break;
+    }
+    spinlock_release_irqrestore(&blk_request_lock, flags);
+    if (timer_get_ms() - t0 >= timeout_ms)
+      return 0;
+    if (spins++ < 200)
+      __asm__ volatile("pause");
+    else
+      safe_wfi(); /* bounded: the deadline check above ends the wait */
+  }
+  if (__atomic_add_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST) > 1) {
+    uart_puts("[BLKRACE] two drivers inside the queue, inside=");
+    print_int((int)blk_inside);
+    uart_puts("\n");
+  }
+  return 1;
 }
 
 int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
