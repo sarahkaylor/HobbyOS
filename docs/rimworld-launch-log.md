@@ -9693,9 +9693,10 @@ managed `WaitHandle`.
 
 `[ANONF]` (new: sampled anonymous-fault publisher, with the faulting thread,
 instruction and region) names it: `tid=28 UnityGfxDeviceW`, a growing anonymous
-arena (`0x11D8000000`, 58 MB and climbing), `rip=0x10800BBE1F` = glibc
-`__bzero`'s SSE2 `memset` loop — **one 4 KiB managed buffer per handshake
-round** (171 pages/s = 5.85 ms/page in L65 run 1). The driver is visible in the
+arena (`0x11D8000000`, 58 MB and climbing), `rip=0x10800BBE1F` =
+`movntdq %xmm3,0x30(%rdi)`, glibc **`memcpy`**'s non-temporal store loop (other
+samples: `__bzero`, `memset`) — **one 4 KiB managed buffer allocated and
+copied per handshake round** (171 pages/s = 5.85 ms/page in L65 run 1). The driver is visible in the
 main thread's managed stack at t=380 s: `<GetAllInFolder>d__2.MoveNext →
 Resources.LoadAll → ResourcesAPI.LoadAll → ResourcesAPIInternal.LoadAll →
 String.wstrcpy`, i.e. RimWorld's `InitializingInterface` walking folders and
