@@ -137,9 +137,13 @@ _sv_xserver() {
   cp "$b/hw/hobbyos/Xhobby" "$HB_BUILD/sym/XHOBBY.elf"
   llvm-objcopy -O binary "$b/hw/hobbyos/Xhobby" "$out.tmp" && mv "$out.tmp" "$out"
   # The flat loader enters at the image base: _start must be there.
+  # NOTE: awk must drain its input (no early `exit`) -- the scripts run with
+  # `set -o pipefail`, so an exiting awk closes the pipe on a still-writing
+  # llvm-readelf/llvm-nm and the SIGPIPE (141) fails the assignment, killing
+  # build.sh with no message at all.
   local base start
-  base="$(llvm-readelf -l "$HB_BUILD/sym/XHOBBY.elf" | awk '$1=="LOAD"{print $3; exit}')"
-  start="$(llvm-nm "$HB_BUILD/sym/XHOBBY.elf" | awk '$3=="_start"{print "0x"$1; exit}')"
+  base="$(llvm-readelf -l "$HB_BUILD/sym/XHOBBY.elf" | awk '$1=="LOAD" && !f{print $3; f=1}')"
+  start="$(llvm-nm "$HB_BUILD/sym/XHOBBY.elf" | awk '$3=="_start" && !f{print "0x"$1; f=1}')"
   [ "$((base))" = "$((start))" ] || hb_die "$pkg: _start ($start) is not at the image base ($base)"
   printf '%s\n' "$key" > "$stamp"
   hb_log "$pkg: ok ($out, $(stat -c %s "$out") bytes)"

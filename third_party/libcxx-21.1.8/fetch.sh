@@ -66,6 +66,51 @@ sync_overlay() {
   cp "${VENDOR_DIR}/config/__assertion_handler" "${SRC}/libcxx/include/__assertion_handler"
 }
 
+# --- Concurrent-invocation guard ------------------------------------------
+# The Makefile has four call sites for this script (.fetched-ok, the libc++
+# header self-heal and two builtins self-heal guards), so one cold
+# `make -j32` starts several of them AT ONCE.  They all downloaded into the
+# same "${TARBALL}.part", so the first mv won and the others died with
+# "mv: cannot stat ...llvm-project-21.1.8.src.tar.xz.part" (which killed the
+# build at libcxx.a / the ICU manifest on a fresh checkout), and two
+# concurrent tar extractions into the same $SRC can corrupt the tree.
+# Serialize the whole body.  mkdir is atomic everywhere we build; macOS has
+# no flock(1) by default, so do not use it.
+LOCK_DIR="${VENDOR_DIR}/.fetch.lock.d"
+LOCKED=0
+WAITED=0
+while [ "$WAITED" -lt 600 ]; do
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    LOCKED=1
+    trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+    break
+  fi
+  # Only the first waiter says why it is slow; a warm racer exits in ~1s.
+  if [ "$WAITED" -eq 0 ]; then
+    log "another fetch.sh holds ${LOCK_DIR}; waiting for it to finish"
+  fi
+  sleep 1
+  WAITED=$((WAITED + 1))
+done
+if [ "$LOCKED" -ne 1 ]; then
+  # A killed build (SIGKILL skips the trap) leaves the lock.  Do not steal it
+  # blindly: if the tree the lock was protecting is complete, this run has
+  # nothing to do; otherwise fail loudly instead of racing an extractor.
+  if [ -f "$MARKER" ] && [ -d "$SRC/libcxx" ] && verify_anchors 2>/dev/null; then
+    log "stale lock ${LOCK_DIR} but the tree verifies; removing it"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+    sync_overlay
+    log "OK: ${SRC} ready (marker $(cat "$MARKER"))"
+    exit 0
+  fi
+  {
+    echo "[fetch] ERROR: ${LOCK_DIR} is stale and ${SRC} does not verify."
+    echo "  Another fetch may still be running; otherwise remove the lock"
+    echo "  directory and re-run."
+  } >&2
+  exit 1
+fi
+
 if [ -f "$MARKER" ] && [ -d "$SRC/libcxx" ] && verify_anchors 2>/dev/null; then
   log "tree present + anchors verified; re-syncing config overlay"
   sync_overlay
@@ -75,8 +120,11 @@ fi
 
 if [ ! -f "$TARBALL" ]; then
   log "downloading ${URL}"
-  curl -fL --retry 3 -o "${TARBALL}.part" "$URL"
-  mv "${TARBALL}.part" "$TARBALL"
+  # Unique temp name as well as the lock: a human may run fetch.sh by hand
+  # while a build is fetching, and a shared .part would repeat the clobber.
+  PART="${TARBALL}.part.$$"
+  curl -fL --retry 3 -o "$PART" "$URL"
+  mv -f "$PART" "$TARBALL"
 else
   log "reusing existing container ${TARBALL}"
 fi

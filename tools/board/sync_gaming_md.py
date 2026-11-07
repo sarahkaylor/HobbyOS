@@ -11,9 +11,11 @@ it. This checks, both directions:
                   a DoD cell, milestone ranges match the §7 timeline
 
 Exit 0 = in sync. Exit 1 = drift (the printed lines are the repair list). `--fix`
-re-runs import_seed.py to push plan-side fields back onto the board.
+re-runs import_seed.py to push plan-side fields back onto the board;
+`--adopt-orphans` appends a §8 row for each open board-only mint (GB-193).
+`--check` is the explicit form of the default report-only mode (GB-212).
 
-  sync_gaming_md.py [--fix] [-v]
+  sync_gaming_md.py [--check | --fix | --adopt-orphans] [-v]
 """
 import argparse
 import re
@@ -24,6 +26,44 @@ HERE = __file__.rsplit("/", 1)[0]
 sys.path.insert(0, HERE)
 import board            # noqa: E402
 import import_seed as S  # noqa: E402
+
+# The seed range imported from the original plan: GB-001..GB-147.  Ids above it
+# are mints and may be sparse — GB-148..GB-150 went to gate/scratch cards, never
+# plan rows — so contiguity is required ONLY inside the seed (GB-185).
+SEED_MAX = 147
+
+
+def plan_id_problems(order, seed_max=SEED_MAX):
+    """Validate the plan's GB id set: the seed range complete, no id repeated.
+
+    GB-185: the old check required set(ids) == 1..len(ids), so adding one row
+    for a card minted after GB-147 reported a false drift ("missing=[148]") and
+    froze §8.  A sparse id above the seed is legitimate; a gap inside it is not.
+    """
+    ids = [int(g.split("-")[1]) for g in order]
+    dups = sorted({i for i in ids if ids.count(i) > 1})
+    gaps = sorted(set(range(1, seed_max + 1)) - set(ids))
+    if not gaps and not dups:
+        return []
+    return [f"plan: GB id set is not a clean GB-001..GB-{seed_max:03d} seed "
+            f"(missing={gaps}, duplicated={dups})"]
+
+
+def plan_duplicate_ids(path=None):
+    """Ids with more than one §8 row (GB-202).
+
+    parse_plan() keeps the first row for an id and silently skips later ones, so
+    plan_id_problems() sees a clean id set even when the plan carries a doubled
+    row.  This scans the raw table rows instead; one row per id is the plan's
+    contract, so a duplicate is a defect even when the id set is perfect.
+    """
+    path = path or S.PLAN
+    counts = {}
+    for line in open(path, encoding="utf-8"):
+        m = re.match(r"^\|\s*(GB-\d{3})\s*\|", line)
+        if m:
+            counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    return sorted(g for g, n in counts.items() if n > 1)
 
 
 def board_snapshot():
@@ -36,6 +76,7 @@ def board_snapshot():
         out[m.group(1)] = {
             "number": it["number"],
             "title": it["title"],
+            "body": it.get("body") or "",
             "milestone": (it.get("milestone") or {}).get("title"),
             "labels": labs,
             "lane": board.lane_of(it),
@@ -53,27 +94,112 @@ def expected_labels(gid, weight):
     return set(labs)
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--fix", action="store_true", help="push plan-side fields back to the board")
-    p.add_argument("-v", "--verbose", action="store_true")
-    a = p.parse_args()
+def _flatten(s):
+    return re.sub(r"\s+", " ", s or "").strip()
 
-    plan, order = S.parse_plan(S.PLAN)
-    bd = board_snapshot()
+
+def _cell(s):
+    """A §8 table cell: one line, literal pipes escaped for _cells()."""
+    return _flatten(s).replace("|", "\\|")
+
+
+def row_from_issue(gid, issue):
+    """Build a §8 table row for a board-only mint from its own issue fields.
+
+    GB-193: every coordinator mint above GB-147 lands without a row, so the
+    sync check is red until someone hand-writes one.  The issue body already
+    carries the three fields a row needs (weight label, Depends on, DoD).
+    Returns None (and names the card) when a required field is missing.
+    """
+    labs = issue.get("labels") or []
+    wt = next((l[3] for l in labs if re.fullmatch(r"wt-[SML]", l)), None)
+    if wt is None:
+        print(f"CANNOT ADOPT {gid}: no wt-S/M/L label")
+        return None
+    title = re.sub(r"^GB-\d{3}\s+", "", issue.get("title") or "").strip()
+    body = issue.get("body") or ""
+
+    m = re.search(r"^\|\s*Depends on\s*\|\s*(.+?)\s*\|", body, re.M)
+    depends = _flatten(m.group(1)) if m else ""
+    depends = depends.replace("**", "").replace("`", "")
+    if not depends or depends in ("—", "-", "none", "None"):
+        depends = "—"
+
+    d = re.search(r"^###\s*DoD[^\n]*\n(.*?)(?=^###\s|\Z)", body, re.M | re.S)
+    items, cur = [], None
+    if d:
+        for line in d.group(1).splitlines():
+            s = line.strip()
+            if not s:
+                continue
+            if re.match(r"^(?:\d+[.)]|[-*])\s+", s):
+                if cur:
+                    items.append(cur)
+                cur = re.sub(r"^(?:\d+[.)]|[-*])\s+", "", s)
+            elif cur is not None:
+                # a wrapped continuation of the current item, not a new one
+                cur += " " + s
+            else:
+                cur = s
+        if cur:
+            items.append(cur)
+    dod = _flatten("; ".join(items)) or f"see board #{issue.get('number')}"
+    return f"| {gid} | **{_cell(title)}** | {wt} | {_cell(depends)} | {_cell(dod)} |"
+
+
+def insert_plan_row(text, milestone, row):
+    """Append `row` to the §8 table of section `milestone` (e.g. M4-acceptance)."""
+    key = next((k for k, v in S.MS_KEY.items() if v == milestone), None)
+    if key is None:
+        raise ValueError(f"unknown milestone {milestone!r}")
+    m = re.search(r"^### Milestone %s\b.*$" % re.escape(key), text, re.M)
+    if not m:
+        raise ValueError(f"no §8 section for {milestone}")
+    start = m.end()
+    nxt = re.search(r"^#{1,3} ", text[start:], re.M)
+    end = start + (nxt.start() if nxt else len(text) - start)
+    rows = list(re.finditer(r"^\|.*\|[ \t]*$", text[start:end], re.M))
+    if not rows:
+        raise ValueError(f"no table in §8 section {milestone}")
+    at = start + rows[-1].end()
+    return text[:at] + "\n" + row + text[at:]
+
+
+def adopt_orphans(bd, plan, path=None):
+    """Append a §8 row for every OPEN board mint missing from the plan."""
+    path = path or S.PLAN
+    text = open(path, encoding="utf-8").read()
+    adopted = []
+    for gid, b in sorted(bd.items()):
+        if gid in plan or b.get("state") == "closed":
+            continue
+        ms = b.get("milestone")
+        if ms not in S.MS_KEY.values():
+            print(f"CANNOT ADOPT {gid}: milestone {ms!r} is not a known MS_KEY")
+            continue
+        row = row_from_issue(gid, b)
+        if row is None:
+            continue
+        try:
+            text = insert_plan_row(text, ms, row)
+        except ValueError as e:
+            print(f"CANNOT ADOPT {gid}: {e}")
+            continue
+        adopted.append(row)
+    if adopted:
+        open(path, "w", encoding="utf-8").write(text)
+    return adopted
+
+
+def find_problems(plan, order, bd, text, verbose=False):
     problems = []
 
-    # plan shape. Integrity = "every id GB-001..GB-N present exactly once", NOT
-    # "sorted": §8 is organised by milestone, so a minted ticket belongs in the
-    # section it serves (e.g. an intel-tier defect in M1) even though its number
-    # is higher than the ids around it.
-    ids = [int(g.split("-")[1]) for g in order]
-    want = set(range(1, len(ids) + 1))
-    if set(ids) != want or len(ids) != len(set(ids)):
-        gaps = sorted(want - set(ids))
-        dups = sorted({i for i in ids if ids.count(i) > 1})
-        problems.append(f"plan: GB id set is not a clean GB-001..GB-{len(ids):03d} "
-                        f"(missing={gaps}, duplicated={dups})")
+    # plan shape. Integrity = the SEED range GB-001..GB-147 is complete and no
+    # id repeats.  §8 is organised by milestone, and mints above the seed are
+    # sparse by design — see plan_id_problems() (GB-185).
+    problems += plan_id_problems(order)
+    for gid in plan_duplicate_ids():
+        problems.append(f"plan: duplicate §8 rows for {gid} (one row per id)")
     for gid in order:
         t = plan[gid]
         if t["weight"] not in ("S", "M", "L"):
@@ -97,7 +223,7 @@ def main():
             problems.append(f"{gid}: missing labels {sorted(missing)}")
         if b["lane"] is None:
             problems.append(f"{gid}: no lane label")
-        if a.verbose:
+        if verbose:
             print(f"ok  {gid:8} #{b['number']:<3} {t['ms']:<15} lane={b['lane']:<12} wt={t['weight']}")
 
     # board -> plan
@@ -112,10 +238,37 @@ def main():
                             f"add it to §8 or close it")
 
     # §7 milestone table must name the same milestone ids the issues carry
-    text = open(S.PLAN, encoding="utf-8").read()
     for key, title in S.MS_KEY.items():
         if f"**{key} " not in text and f"**{key}" not in text:
             problems.append(f"plan §7: milestone {key} missing from the timeline table")
+
+    return problems
+
+
+def main():
+    p = argparse.ArgumentParser()
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--check", action="store_true",
+                   help="report drift only (the default; explicit for scripts)")
+    g.add_argument("--fix", action="store_true", help="push plan-side fields back to the board")
+    g.add_argument("--adopt-orphans", action="store_true",
+                   help="append a §8 row for each open board-only mint")
+    p.add_argument("-v", "--verbose", action="store_true")
+    a = p.parse_args()
+
+    plan, order = S.parse_plan(S.PLAN)
+    bd = board_snapshot()
+
+    if a.adopt_orphans:
+        adopted = adopt_orphans(bd, plan)
+        if adopted:
+            print(f"ADOPTED {len(adopted)} row(s):")
+            for row in adopted:
+                print("  " + row)
+            plan, order = S.parse_plan(S.PLAN)
+
+    text = open(S.PLAN, encoding="utf-8").read()
+    problems = find_problems(plan, order, bd, text, verbose=a.verbose)
 
     for pr in problems:
         print("DRIFT " + pr)

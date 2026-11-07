@@ -1,0 +1,62 @@
+### readelf -h (identity) — APP.BIN
+  Class:                             ELF64
+  Type:                              DYN (Position-Independent Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Entry point address:               0x1340
+
+### readelf -l (program headers) — APP.BIN
+Program Headers:
+  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
+  PHDR           0x000040 0x0000000000000040 0x0000000000000040 0x0001c0 0x0001c0 R   0x8
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x000308 0x000308 R   0x1000
+  LOAD           0x000310 0x0000000000001310 0x0000000000001310 0x000070 0x000070 R E 0x1000
+  LOAD           0x000380 0x0000000000002380 0x0000000000002380 0x000158 0x000c80 RW  0x1000
+  LOAD           0x0004e0 0x00000000000034e0 0x00000000000034e0 0x000020 0x000020 RW  0x1000
+  DYNAMIC        0x000380 0x0000000000002380 0x0000000000002380 0x000130 0x000130 RW  0x8
+  GNU_RELRO      0x000380 0x0000000000002380 0x0000000000002380 0x000158 0x000c80 R   0x1
+  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0
+ Section to Segment mapping:
+
+### readelf -d (dynamic section) — APP.BIN
+
+Dynamic section at offset 0x380 contains 19 entries:
+  Tag        Type                         Name/Value
+ 0x0000000000000001 (NEEDED)             Shared library: [LIBUSE.SO]
+ 0x000000000000001e (FLAGS)              BIND_NOW
+ 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE
+ 0x0000000000000015 (DEBUG)              0x0
+ 0x0000000000000007 (RELA)               0x2a8
+ 0x0000000000000008 (RELASZ)             72 (bytes)
+ 0x0000000000000009 (RELAENT)            24 (bytes)
+ 0x000000006ffffff9 (RELACOUNT)          2
+ 0x0000000000000017 (JMPREL)             0x2f0
+ 0x0000000000000002 (PLTRELSZ)           24 (bytes)
+ 0x0000000000000003 (PLTGOT)             0x24b8
+ 0x0000000000000014 (PLTREL)             RELA
+ 0x0000000000000006 (SYMTAB)             0x200
+ 0x000000000000000b (SYMENT)             24 (bytes)
+ 0x0000000000000005 (STRTAB)             0x284
+ 0x000000000000000a (STRSZ)              31 (bytes)
+ 0x000000006ffffef5 (GNU_HASH)           0x248
+ 0x0000000000000004 (HASH)               0x264
+ 0x0000000000000000 (NULL)               0x0
+
+### readelf -r (relocations) — APP.BIN
+
+Relocation section '.rela.dyn' at offset 0x2a8 contains 3 entries:
+    Offset             Info             Type               Symbol's Value  Symbol's Name + Addend
+00000000000034f0  0000000000000008 R_X86_64_RELATIVE                         34e0
+00000000000034f8  0000000000000008 R_X86_64_RELATIVE                         34e0
+00000000000024b0  0000000200000006 R_X86_64_GLOB_DAT      0000000000000000 use_localp + 0
+
+Relocation section '.rela.plt' at offset 0x2f0 contains 1 entry:
+    Offset             Info             Type               Symbol's Value  Symbol's Name + Addend
+00000000000024d0  0000000100000007 R_X86_64_JUMP_SLOT     0000000000000000 use_call + 0
+
+### readelf --dyn-syms (dynamic symbols) — APP.BIN
+
+Symbol table '.dynsym' contains 3 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND 
+     1: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND use_call
+     2: 0000000000000000     0 OBJECT  GLOBAL DEFAULT  UND use_localp

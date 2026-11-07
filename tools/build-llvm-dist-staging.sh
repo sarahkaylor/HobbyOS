@@ -14,10 +14,13 @@
 # + incremental ninja.  The result is cached at third_party/llvm-21.1.8/
 # dist-staging and reused by every later disk build.
 #
-# Status note (2026-10-15): the sequence below is transcribed from the
-# wave-2 receipts; the persistent staging already exists on the machines
-# that shipped it, so this script's full cold path has not been re-run
-# end-to-end since.  Run with --check first; failures print the log path.
+# Status note (2026-11-03): the sequence below is transcribed from the
+# wave-2 receipts.  The cold path (host tablegen -> clang+lld -> install-
+# distribution -> 227M staging) has now been re-run end-to-end from a FRESH
+# clone on Linux and is green — it is what caught the _missing.h vs
+# <sys/socket.h> declaration conflict in sysroot-headers.  Re-run it (not
+# just --check) when touching sysroot-headers/ or the sysroot closure.
+# Run with --check first; failures print the log path.
 #
 # Usage:
 #   bash tools/build-llvm-dist-staging.sh [--check]

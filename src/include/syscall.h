@@ -244,8 +244,15 @@
  *   SYS_VDISPLAY (op, a1, a2) -> >= 0 | -errno */
 #define SYS_VDISPLAY      (103)
 
+/* GB-173: deliver one key event to the process that owns /dev/input/event0.
+ * A static-musl game has no desktop window (it draws straight into /dev/fb0),
+ * so keys are routed by process: the desktop calls this for every key it
+ * handles, and the owner's read() drains the queue before the global ring.
+ *   SYS_EVDEV_PUSH (code, value) -> 0 | -ENODEV (no owner) | -EAGAIN (full) */
+#define SYS_EVDEV_PUSH    (104)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
  * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
-#define SYS_MAX           (103)
+#define SYS_MAX           (104)
 
 #endif /* SYSCALL_H */

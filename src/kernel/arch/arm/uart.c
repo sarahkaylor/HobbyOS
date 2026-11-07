@@ -23,7 +23,7 @@ void uart_init(void) {
 }
 
 /** Lock-free PL011 write body — the only code that touches the UART
-    registers.  Deadlock diagnostics use uart_putc_raw/uart_puts_raw and
+    registers.  Deadlock diagnostics use panic_putc/panic_puts and
     must not take uart_lock, which may itself be wedged. */
 static void uart_putc_body(char c) {
   if (c == '\n') {
@@ -37,12 +37,12 @@ static void uart_putc_body(char c) {
 }
 
 /** Raw single character — lock-free, for deadlock diagnostics only. */
-void uart_putc_raw(char c) {
+void panic_putc(char c) {
   uart_putc_body(c);
 }
 
 /** Raw string — lock-free, for deadlock diagnostics only. */
-void uart_puts_raw(const char *s) {
+void panic_puts(const char *s) {
   while (*s != '\0') {
     uart_putc_body(*s);
     s++;
@@ -51,34 +51,34 @@ void uart_puts_raw(const char *s) {
 
 /* *_raw2 family: the deadlock-diagnostic console surface that
  * wd_dump_proc_table() (process.c) calls on BOTH architectures. Lock-free
- * and exception-safe (raw MMIO only), like the x64 uart_putc_raw2 path. */
-static void uart_putc_raw2(char c) {
+ * and exception-safe (raw MMIO only), like the x64 panic_putc2 path. */
+static void panic_putc2(char c) {
   uart_putc_body(c);
 }
 
-void uart_puts_raw2(const char *s) {
+void panic_puts2(const char *s) {
   while (*s != '\0') {
-    uart_putc_raw2(*s);
+    panic_putc2(*s);
     s++;
   }
 }
 
-void uart_print_hex_raw2(uint64_t val) {
+void panic_print_hex2(uint64_t val) {
   static const char hex_chars[] = "0123456789ABCDEF";
-  uart_putc_raw2('0');
-  uart_putc_raw2('x');
+  panic_putc2('0');
+  panic_putc2('x');
   for (int i = 60; i >= 0; i -= 4) {
-    uart_putc_raw2(hex_chars[(val >> i) & 0xF]);
+    panic_putc2(hex_chars[(val >> i) & 0xF]);
   }
 }
 
 void print_int_raw2(int val) {
   if (val < 0) {
-    uart_putc_raw2('-');
+    panic_putc2('-');
     val = -val;
   }
   if (val == 0) {
-    uart_putc_raw2('0');
+    panic_putc2('0');
     return;
   }
   char buf[16];
@@ -88,7 +88,7 @@ void print_int_raw2(int val) {
     val /= 10;
   }
   while (idx > 0)
-    uart_putc_raw2(buf[--idx]);
+    panic_putc2(buf[--idx]);
 }
 
 /** Single character, serialized against all other console output. */

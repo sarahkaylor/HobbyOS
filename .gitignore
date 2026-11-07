@@ -5,6 +5,9 @@ obj/
 *.BIN_host
 *.BIN
 *.elf
+# ... except the committed SDLAPP fixture cache (third_party/sdl/README.md):
+# a musl static-PIE only Linux can build, staged on hosts without musl-gcc.
+!third_party/sdl/cache/*.elf
 *_test_host
 # Host parity harness run binaries (built in the repo root by host_tests)
 *_parity_run
@@ -121,8 +124,12 @@ third_party/libffi-3.4.8/.fetched-ok
 # fetch.sh, README.md, anchors.sha256, container.sha256, sources.txt,
 # build-target.sh, config/; fetched/extracted below is gitignored.
 third_party/libcxx-21.1.8/llvm-*.tar.xz
+third_party/libcxx-21.1.8/llvm-*.tar.xz.part*
 third_party/libcxx-21.1.8/src/
 third_party/libcxx-21.1.8/.fetched-ok
+# Transient serialization lock (fetch.sh); removed on exit, ignored so a
+# SIGKILLed build cannot dirty the tree.
+third_party/libcxx-21.1.8/.fetch.lock.d
 
 # LLVM 21.1.8 self-hosting toolchain vendor (docs/selfhost/llvm-bootstrap.md;
 # lane L1): committed = fetch.sh + README.md + anchors.sha256 +

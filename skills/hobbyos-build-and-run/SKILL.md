@@ -47,6 +47,19 @@ Non-`desktop` modes automatically append `-display none`. `desktop` uses `-displ
 
 ## Build matrix pitfalls
 
+**macOS host tooling: bash 5, keg-only llvm, and the SDL fixture.** A cold
+`make run` on the Mac needs `brew install bash` (Apple ships bash 3.2;
+`third_party/x11` uses `mapfile` and empty-array expansion under `set -u`) and
+`brew install meson xkbcomp xkeyboard-config`. The Makefile's macOS branch now
+exports `/opt/homebrew/bin` on PATH and `XKB_CONFIG_ROOT`, so no manual exports
+are needed. Two vendor paths were Linux-only until 2026-11-05 and are fixed:
+ICU's `configure` link tests go through `tools/cc-x86-none-elf.sh` (Apple clang
+hands `x86_64-none-elf` links to `/usr/bin/gcc` = Mach-O), and `SDLAPP.BIN`
+falls back to `third_party/sdl/cache/sdlapp-x86_64-musl.elf` because no
+Homebrew musl toolchain can link `-static-pie` (non-PIC libc.a; `zig cc` adds
+`PT_TLS`+`TPOFF` relocations the loader refuses). Icons: `[sdl] prebuilt musl
+static-PIE` is normal on macOS, `[icu-target] OK` means the ICU driver is right.
+
 **`ld.lld` is invoked unqualified (Makefile:190), so the LLVM bin dir must be
 on PATH.** Foreground shells in this environment have it; harness-spawned
 background jobs may not, and then `make` dies with `ld.lld: No such file or

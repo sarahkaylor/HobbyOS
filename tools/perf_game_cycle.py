@@ -168,6 +168,18 @@ def launch_seen(new_serial, spec):
             f"[LAUNCH] /GAMES/{spec}" in new_serial)
 
 
+def launched_name(new_serial):
+    """The last binary the desktop actually launched in `new_serial`, or None.
+
+    GB-046: the desktop kept launching after 8 visits — the wrong title
+    (SYSMON.BIN, MILLIPED.BIN) — because the menu cursor is not where the
+    gesture assumed.  A visit that launches the WRONG title is a different
+    failure from a no-op and must be reported as such, not as "no-op".
+    """
+    names = re.findall(r"\[LAUNCH\] (?:/GAMES/)?([A-Za-z0-9_.-]+)", new_serial)
+    return names[-1] if names else None
+
+
 def launch_retry_needed(launched, attempt, retries):
     """Keep retrying while the launch has not appeared and attempts remain.
     `retries` = total attempts allowed; GB-046-V: a persistent no-op (all
@@ -211,6 +223,9 @@ def main():
                     help="comma list NAME.BIN[:hold_s] to cycle (name-matched in menu)")
     ap.add_argument("--cycles", type=int, default=3)
     ap.add_argument("--hold", type=int, default=6, help="default hold seconds per game")
+    ap.add_argument("--settle", type=int, default=0,
+                    help="idle seconds after the last close, before teardown "
+                         "(GB-161: lets the serial show the post-close ALIVE-SET)")
     ap.add_argument("--freeze-window", type=int, default=4,
                     help="consecutive identical frames to call a freeze")
     ap.add_argument("--max-growth-mb", type=int, default=64,
@@ -225,6 +240,9 @@ def main():
                     help="seconds to wait after each launch attempt before "
                          "checking the serial for [LAUNCH]")
     ap.add_argument("--arch", default="arm", choices=["arm", "intel"])
+    ap.add_argument("--stage", default="",
+                    help="shell command run after disk.img is built and before "
+                         "QEMU starts (make RUN_STAGE contract); $ROOT is set")
     ap.add_argument("--root", default=os.getcwd())
     args = ap.parse_args()
     try:
@@ -241,6 +259,12 @@ def main():
 
     qemu_make = ["make", "run", "DESKTOP=hobby", f"ARCH={args.arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp_sock},server,nowait"]
+    if args.stage:
+        # Same contract as t3_tier.sh's T3_STAGE and evidence_rig --stage: the
+        # hook runs after disk.img is rebuilt and before QEMU starts, so a
+        # fixture survives the recipe (GB-118).  Without it, staging into
+        # disk.img before `make run` is wiped by the rebuild.
+        qemu_make.append(f"RUN_STAGE={args.stage}")
     print(f"[perf] booting {args.arch} once; cycling games; bundle -> {path}")
     q = boot(qemu_make, serial_log, qmp_sock, args.arch)
     serial_log_content = open(serial_log, errors="ignore").read()
@@ -276,7 +300,10 @@ def main():
             new_serial = ""
             for attempt in range(args.launch_retries):
                 if attempt > 0:
-                    q.key("esc", 0.4)      # close anything the prior attempt opened
+                    # GB-046: ESC is forwarded to the FOCUSED window (the
+                    # game), not the desktop — it cannot close a menu.  F4 is
+                    # the desktop's close-focused-window key (desktop.c:2200).
+                    q.key("f4", 0.4)
                     time.sleep(1.0)
                 launch_from_menu(q, slot)
                 time.sleep(args.launch_retry_delay)
@@ -309,9 +336,14 @@ def main():
             frozen = wd.frozen
 
             if not launched:
-                print(f"[perf] FAIL: {spec} (cycle {cyc}) never appeared in "
-                      f"serial (launch no-op) — new serial bytes "
-                      f"[{len(new_serial)}] do not contain [LAUNCH] {spec}")
+                actual = launched_name(new_serial)
+                if actual:
+                    print(f"[perf] FAIL: {spec} (cycle {cyc}) — the desktop "
+                          f"launched {actual} instead (menu cursor drifted)")
+                else:
+                    print(f"[perf] FAIL: {spec} (cycle {cyc}) never appeared in "
+                          f"serial (launch no-op) — new serial bytes "
+                          f"[{len(new_serial)}] do not contain [LAUNCH] {spec}")
             else:
                 print(f"[perf] cycle={cyc} game={spec} samples={samples} "
                       f"frozen={frozen} launched=True")
@@ -320,8 +352,15 @@ def main():
                            "launched": launched})
             if frozen or not launched:
                 ok = False
-            q.key("esc", 0.4)
+            # GB-159: F4 (keycode 62) is the desktop's close-window key
+            # (desktop.c:2200); ESC does not close a window (GB-091) and the
+            # six-cycle run therefore never exercised the kill/reap path.
+            q.key("f4", 0.4)
             time.sleep(1.0)
+
+    if args.settle:
+        print(f"[perf] settle {args.settle}s after the last close")
+        time.sleep(args.settle)
 
     floor_mb, peak_mb, growth_mb, mem_ok = \
         rss_floor_peak_growth(all_rss, args.max_growth_mb)

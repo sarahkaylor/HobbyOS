@@ -1,6 +1,12 @@
 #!/bin/bash
 
-# Unit-test tier: build first, run second.
+# Unit-test tier (ARM / aarch64): build first, run second.
+#
+# ARCH is pinned to arm on purpose.  The Makefile's default moved to intel
+# (`ARCH ?= intel`), so an unpinned script silently built and booted the x64
+# tree while being cited as the ARM half of the documented T2 pair.  An
+# instrument that reports a verdict for an arch it did not run is worse than
+# no instrument.  `ARCH=intel ./run_unit_tests.sh` still overrides.
 #
 # The 20-second pass/fail budget is the project's deadlock rule and applies
 # to the QEMU RUN, not the compile: on a cold checkout the cross-build
@@ -8,10 +14,13 @@
 # reported "timed out!" while the build was still compiling (false red on
 # fresh CI copies).  So: build with no deadline, then poll the run.
 
+: "${ARCH:=arm}"
+export ARCH
+
 rm -f qemu.log build.log
 
-echo "Building unit test image..."
-if ! make MODE=unit_tests hobbyos.elf disk.img > build.log 2>&1; then
+echo "Building unit test image (ARCH=$ARCH)..."
+if ! make ARCH="$ARCH" MODE=unit_tests hobbyos.elf disk.img > build.log 2>&1; then
     echo "Build failed!"
     tail -60 build.log
     exit 1
@@ -20,7 +29,7 @@ fi
 # The unit suites write to disk.img (fat16 create/move); a re-run in the
 # same tree must start from a fresh image or stateful failures appear.
 echo "Refreshing disk image..."
-if ! make MODE=unit_tests fresh_disk >> build.log 2>&1; then
+if ! make ARCH="$ARCH" MODE=unit_tests fresh_disk >> build.log 2>&1; then
     echo "Disk refresh failed!"
     tail -40 build.log
     exit 1
@@ -37,7 +46,7 @@ cleanup() {
 }
 
 echo "Running unit tests..."
-make MODE=unit_tests run QEMU_ARGS="-display none" > qemu.log 2>&1 &
+make ARCH="$ARCH" MODE=unit_tests run QEMU_ARGS="-display none" > qemu.log 2>&1 &
 QEMU_PID=$!
 
 # Wait for tests to finish or timeout (default 300 s; override with

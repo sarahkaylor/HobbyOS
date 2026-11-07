@@ -41,9 +41,9 @@ extern void uart_puts(const char *s);
    one lock (previously uart_puts used uart_lock while print_int used a
    second, print_lock — bytes interleaved under real SMP). */
 extern spinlock_t uart_lock;
-extern void uart_putc_raw(char c);
+extern void panic_putc(char c);
 void print_int_raw(int val);
-void uart_print_hex_raw(uint64_t val);
+void panic_print_hex(uint64_t val);
 
 /**
  * High-level handler for hardware interrupts (IRQs) occurring in the kernel
@@ -78,7 +78,7 @@ void irq_handler_c(struct trap_frame *tf) {
  * Takes the ONE console lock (uart_lock, shared with uart_puts/uart_putc)
  * for the whole write so multi-char output cannot interleave with other
  * console writers.  The per-char writes go through the lock-free
- * uart_putc_raw because we already hold the lock.
+ * panic_putc because we already hold the lock.
  */
 void print_int(int val) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
@@ -89,11 +89,11 @@ void print_int(int val) {
 /** Lock-free decimal print — deadlock diagnostics only. */
 void print_int_raw(int val) {
   if (val < 0) {
-    uart_putc_raw('-');
+    panic_putc('-');
     val = -val;
   }
   if (val == 0) {
-    uart_putc_raw('0');
+    panic_putc('0');
     return;
   }
   char buf[16];
@@ -103,7 +103,7 @@ void print_int_raw(int val) {
     val /= 10;
   }
   while (idx > 0)
-    uart_putc_raw(buf[--idx]);
+    panic_putc(buf[--idx]);
 }
 
 /**
@@ -111,17 +111,17 @@ void print_int_raw(int val) {
  */
 void uart_print_hex(uint64_t val) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  uart_print_hex_raw(val);
+  panic_print_hex(val);
   spinlock_release_irqrestore(&uart_lock, flags);
 }
 
 /** Lock-free hex print — deadlock diagnostics only. */
-void uart_print_hex_raw(uint64_t val) {
+void panic_print_hex(uint64_t val) {
   static const char hex_chars[] = "0123456789ABCDEF";
-  uart_putc_raw('0');
-  uart_putc_raw('x');
+  panic_putc('0');
+  panic_putc('x');
   for (int i = 60; i >= 0; i -= 4) {
-    uart_putc_raw(hex_chars[(val >> i) & 0xF]);
+    panic_putc(hex_chars[(val >> i) & 0xF]);
   }
 }
 
@@ -569,6 +569,41 @@ void main(void) {
             "open; app + static-PIE ELF props proven on host by "
             "sdl_test_app_test_host)\n");
 #endif
+#elif defined(KERNEL_MODE_DYN_TEST)
+  /* docs/shared-libs.md §10: boot every program tools/dyn-migrate.sh converted.
+   * One process each, no arguments: the smoke is "does it start, trap, and
+   * exit without a fault" — an argument-hungry tool prints usage or reads a
+   * closed stdin and exits, which is exactly the path we want exercised. */
+  uart_puts("Mode: DYN_TEST - booting converted userland\n");
+  {
+#include "dyn_list.h"
+    unsigned nd = (unsigned)(sizeof(dyn_smoke_names) / sizeof(dyn_smoke_names[0]));
+    for (unsigned i = 0; i < nd; i++) {
+      if (!dyn_smoke_names[i][0])
+        continue;
+      uart_puts("dyn_test: ");
+      uart_puts(dyn_smoke_names[i]);
+      uart_puts("\n");
+      load_and_run_program_in_scheduler(dyn_smoke_names[i], -1, -1, -1, -1);
+    }
+  }
+#elif defined(KERNEL_MODE_SO_TEST)
+  /* docs/shared-libs.md §5.5 pilot: boot ONLY HDYN.BIN, which is an ET_DYN
+     executable whose PT_INTERP is /LDHOBBY.SO.  The kernel maps the program,
+     maps the interpreter into USER_LIB slot 0, writes struct hb_start and
+     enters the interpreter; the interpreter maps LIBC.SO and jumps to the
+     program.  One program only, so the first failure is the first thing on
+     the serial log. */
+  uart_puts("Mode: SO_TEST - booting the dynamic-linking pilot HDYN.BIN\n");
+  load_and_run_program_in_scheduler("HDYN.BIN", -1, -1, -1, -1);
+  /* The first REAL conversion: `ls`, same source, no static libc (7 KB vs
+   * 46 KB).  Loading it alongside the pilot also makes the shared page cache
+   * observable end to end — two processes mapping the same LIBC.SO. */
+  load_and_run_program_in_scheduler("LSDYN.BIN", -1, -1, -1, -1);
+  /* cat, dynamically linked, reading a real file — and the third mapper of
+   * LIBC.SO, which is what makes the page-cache evidence (file_obj.c "so
+   * cache: ... refs=N") meaningful. */
+  load_and_run_program_in_scheduler_args("CATDYN.BIN", -1, -1, -1, -1, "E2E.TXT");
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);
@@ -677,6 +712,13 @@ void secondary_main(void) {
 
   // 4. Enable interrupts
   interrupts_enable();
+
+#if defined(__x86_64__) && defined(PANIC_IPI_TEST)
+  /* GB-207: tell the boot core this CPU can take the test IPI. */
+  extern volatile int gb207_cpu1_ready;
+  if (cpu == 1)
+    gb207_cpu1_ready = 1;
+#endif
 
   // 5. Enter scheduler
   start_scheduler();

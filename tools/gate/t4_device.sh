@@ -318,12 +318,17 @@ fi
 
 
 # Per-row diff of rc/errno/stdout against leg A.
+# GB-108: the serial console emits CRLF, so every guest row carried a trailing
+# \r and `grep -Fqx` never matched a clean leg-A line — the per-row diff failed
+# on EVERY row even when the values were identical (the row COUNT was the only
+# signal anyone could read).  Compare with CR stripped on both sides.
+guest_rows() { grep "^row=" "$SERIAL" | tr -d '\r'; }
 fail=0
-NA=$(grep -c "^row=" "$LEGA"); NB=$(grep -c "^row=" "$SERIAL")
+NA=$(grep -c "^row=" "$LEGA" | tr -d '\r'); NB=$(guest_rows | wc -l | tr -d ' ')
 echo "t4_device: row count A=$NA B=$NB"
 [ "$NA" = "$NB" ] || { echo "t4_device: FAIL — row count differs (A=$NA B=$NB)"; fail=1; }
 while IFS= read -r ra; do
-  if grep -Fqx "$ra" <(grep "^row=" "$SERIAL"); then
+  if grep -Fqx "$ra" <(guest_rows); then
     echo "  PASS $ra"
   else
     echo "  FAIL $ra  (not present in guest output; see B rows below)"

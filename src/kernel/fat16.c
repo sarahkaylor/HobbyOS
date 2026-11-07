@@ -1338,8 +1338,11 @@ int fat16_open_dir(const char* path, struct file* f) {
   uint32_t sector = 0, offset = 0;
   if (fat16_resolve_path(abs_path, &entry, &sector, &offset) != 0) return -1;
   if (!(entry.attr & 0x10)) return -1;      /* not a directory */
-  if (sector == 0) return -1;               /* synthetic root: no children fd */
-
+  /* GB-165: the synthetic root (sector 0) is a legitimate directory fd too.
+     fat16_getdents64() already walks the fixed root area when the entry's
+     start_cluster is 0, so refusing the open here left opendir("/") — and
+     every musl directory sweep, including DOOM's IWAD search — with nothing
+     to enumerate. */
   f->type = FILE_TYPE_FAT16DIR;
   f->fat16.entry = entry;                   /* the directory's own entry */
   f->fat16.dir_sector = sector;

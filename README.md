@@ -12,8 +12,32 @@ A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 seco
 | **Games** — PONG, STARDUST and XNIBBLER as user-space programs, each scaled into its own IceWM window | **The start menu** — Apps, Games and All programs, generated from the desktop's pinned lists at disk-build time |
 | ![The Games submenu](docs/screenshots/icewm-games-menu.png) | ![XCALC, ANTFARM and XEYES](docs/screenshots/icewm-x11.png) |
 | **Games menu** — the pinned games plus anything in `/GAMES`, launched into a window through `HBHOST.BIN` | **X11 clients** — XCALC computing through clicks on real Xlib, ANTFARM animating on the native graphics API, XEYES following the pointer |
+| ![Doom E1M1, shotgun firing](docs/screenshots/doom-elf-outdoors.png) | ![The native DOOM.BIN port in an IceWM window](docs/screenshots/doom-native.png) |
+| **Doom, as an unmodified Linux ELF** — id Software's [`linuxdoom-1.10`](https://github.com/id-software/doom) built for x86_64 Linux and run *unchanged* through the Linux-ABI compat layer: E1M1, shotgun mid-fire, HUD and all | **Doom, native** — the doomgeneric port as a HobbyOS program, hosted in an IceWM window by `HBHOST.BIN`. Both are in the Games menu |
+| ![The game's 320x200 window on the otherwise black 8-bit screen](docs/screenshots/doom-elf-screen.png) | ![E1M1: a dark corridor with a barrel, a corpse and the pistol](docs/screenshots/doom-elf-start.png) |
+| **The 8-bit game screen** — `linuxdoom-1.10` needs a depth-8 PseudoColor screen, which X cannot provide as a window under a 24-bit root; `XHOBBY.BIN` therefore carries a second screen (`:0.1`) and hands it the framebuffer while the game runs | **In the level** — E1M1's dark first corridor: barrel, corpse, pistol, `AMMO 50 / HEALTH 100% / ARMOR 0%`, read from the guest's framebuffer |
 
-*Captured from a live QEMU boot — [`capture_screenshots.py`](capture_screenshots.py) reproduces them.*
+*Captured from a live QEMU boot: the desktop shots come from
+[`capture_screenshots.py`](capture_screenshots.py), the Doom frames from
+`tools/doom_elf/run_doom_elf_test.py` (a QMP screendump of the guest framebuffer).*
+
+## Doom as an unmodified Linux ELF
+
+`make run`, then **Games → Doom (Linux ELF)**. Nothing in that binary knows
+HobbyOS exists: it is `linuxdoom-1.10` built for x86_64 Linux (static-PIE musl,
+zero `NEEDED`), loaded by the compat ELF loader, reading its IWAD from FAT16,
+talking X11 to `XHOBBY.BIN` over `/tmp/.X11-unix/X0` and drawing through the
+HobbyOS DDX. The work is a Linux-ABI syscall layer (`src/kernel/linux_compat*.c`,
+`docs/linux-abi.md`), a correct `argv`/`envp`/`auxv` startup block, and a
+depth-8 PseudoColor screen in the X server — see
+[`docs/doom-elf/REPORT.md`](docs/doom-elf/REPORT.md) for the whole account,
+including what is *not* done (no audio, no Linux-shaped signal frames for
+hardware faults, no scaling of the 8-bit screen).
+
+```sh
+make doom_elf_test        # id linuxdoom-1.10 at depth 8, screendump-graded
+make doom_elf_test_gen    # doomgeneric's stock X11 backend at depth 24
+```
 
 ## Setup
 
@@ -45,17 +69,27 @@ brew install llvm lld qemu dosfstools mtools
 # 3. host tools for the X11/IceWM desktop build, plus the harness helpers
 brew install meson ninja cmake xkbcomp xkeyboard-config
 brew install ccache xz socat python@3
+
+# 4. bash 5 — Apple ships bash 3.2 and the vendor build scripts use bash-4
+#    features (`mapfile`, empty-array expansion under `set -u`)
+brew install bash
 ```
 
 The Makefile points straight at `/opt/homebrew/opt/llvm/bin` and
-`/opt/homebrew/sbin/mkfs.fat`, so no PATH juggling is needed for `make`. Two
-things the IceWM build does look up through the environment on macOS (the X
-keyboard data lives under the Homebrew prefix, not `/usr/share/X11/xkb`):
+`/opt/homebrew/sbin/mkfs.fat`, and its macOS branch exports the two things the
+vendor scripts would otherwise need by hand: `/opt/homebrew/bin` on `PATH`
+(Homebrew `bash`, and the `llvm-*` tools that `third_party/x11` and
+`tools/build_libs.sh` invoke by name) and
+`XKB_CONFIG_ROOT=$(brew --prefix)/share/X11/xkb` (the IceWM/X-server keymap;
+the X keyboard data is not in `/usr/share/X11/xkb` on macOS). Nothing else
+needs exporting for `make`.
 
-```bash
-export XKB_CONFIG_ROOT="$(brew --prefix)/share/X11/xkb"   # for third_party/x11/build.sh
-export PATH="/opt/homebrew/opt/llvm/bin:$PATH"            # for scripts that call clang/llvm-* by name
-```
+`SDLAPP.BIN` (the GB-137 SDL test fixture) is built with `musl-gcc`, which
+macOS does not have, and no Homebrew musl cross toolchain can link
+`-static-pie` (all ship a non-PIC `libc.a`). On macOS the build therefore
+stages the committed musl static-PIE cache instead of failing; see
+`third_party/sdl/README.md`. Linux always builds it from source with
+`musl-tools`.
 
 Homebrew's `qemu` ships the EDK2 firmware the Makefile expects
 (`/opt/homebrew/share/qemu/edk2-aarch64-code.fd`,

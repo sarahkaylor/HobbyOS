@@ -639,8 +639,19 @@ static void sys_accept4(struct trap_frame *tf) {
 
 static void sys_connect_addr(struct trap_frame *tf) {
   struct process *caller = current_process();
-  int r = file_connect_user(caller, (int)tf->regs[0], tf->regs[1], (int)tf->regs[2]);
+  int r = file_connect_user(caller, (int)tf->regs[0], tf->regs[1], tf->regs[2]);
   if (r == -2) {
+    /* GB-181: -ENOENT is 2, so a connect() to a missing path name returns
+       exactly the park/restart sentinel.  usock_name_park() sets the caller
+       BLOCKED before returning -2, and a waker may already have flipped it
+       to READY; a caller in any other state got -ENOENT from
+       usock_name_lookup().  Treat that as the errno it is -- otherwise the
+       trap rewinds elr and re-executes the same connect() forever. */
+    if (!caller || (caller->state != PROC_STATE_BLOCKED &&
+                    caller->state != PROC_STATE_READY)) {
+      tf->regs[0] = (uint64_t)(int64_t)-ENOENT;
+      return;
+    }
     tf->elr -= 4; /* restart when woken (pipe park model) */
     schedule(tf, 0);
   } else {
@@ -2304,9 +2315,13 @@ void sync_lower_handler_c(struct trap_frame *tf) {
        zero-fill page; everything else is a kill with the exact reason. */
     if (gcur && gcur->as) {
       const char *why = "PROT";
-      int demand = ((dfsc & 0x3C) == 0x04);
-      if (demand &&
-          vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why) == 0) {
+      /* Not only translation faults are legal: a MAP_PRIVATE file page is
+       * installed read-only so the first write copies it (so-vm lane A), and
+       * that arrives here as a PERMISSION fault.  vm_handle_fault answers
+       * "PROT" for a genuine violation, so both classes go through it — the
+       * old demand-only gate killed every COW write.  (x64's #PF dispatch
+       * had the same gate; both were measured on the dynamic-link pilot.) */
+      if (vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why) == 0) {
         return; /* mapping is live; eret re-executes the instruction */
       }
       uart_puts("[KERNEL] pid=");
