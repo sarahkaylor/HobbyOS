@@ -222,6 +222,19 @@ fetch_mesa() {
       note "applied patch: $(basename "$p")"
     fi
   done
+
+  # M2: the virgl winsys lives in THIS tree (tools/mesa/virgl-hobbyos), not in
+  # the pin.  Copy it in, together with a copy of the /dev/gpu UAPI header, so
+  # the ioctl layouts the kernel and the winsys agree on have one source of
+  # truth (src/include/gpu_abi.h).  The overlay is refreshed on every run: a
+  # winsys edit must never need a manual `rm -rf` of the Mesa cache.
+  local ws="${SRC}/src/gallium/winsys/virgl/hobbyos"
+  rm -rf "$ws"; mkdir -p "$ws"
+  cp "${SCRIPT_DIR}"/virgl-hobbyos/*.c \
+     "${SCRIPT_DIR}"/virgl-hobbyos/*.h \
+     "${SCRIPT_DIR}"/virgl-hobbyos/meson.build "$ws"/
+  cp "${TREE}/src/include/gpu_abi.h" "$ws/gpu_abi.h"
+  note "overlay: virgl winsys ($(ls "$ws"/*.c "$ws"/*.h | wc -l) files) -> src/gallium/winsys/virgl/hobbyos"
 }
 
 # ---------------------------------------------------------------------------
@@ -286,9 +299,13 @@ ensure_glibc_pin() {
 # ---------------------------------------------------------------------------
 host_build() {
   say "2/6 host meson configure + build (runs every code generator)"
+  # M2: softpipe AND virgl.  Both end up in one DSO; xlib_create_screen()
+  # chooses at runtime (tools/mesa/patches/0010), so the software rasteriser
+  # stays available as the correctness reference and the CI renderer.
+  local drivers="softpipe,virgl"
   if [ ! -f "${HOSTBUILD}/build.ninja" ]; then
     CC=gcc CXX=g++ meson setup "$HOSTBUILD" "$SRC" \
-      -Dgallium-drivers=softpipe \
+      -Dgallium-drivers="$drivers" \
       -Dllvm=disabled \
       -Dplatforms=x11 \
       -Dglx=xlib \
@@ -298,12 +315,45 @@ host_build() {
       -Dopengl=true \
       -Dvulkan-drivers= -Dvideo-codecs= -Dgallium-va=disabled \
       -Dzstd=disabled -Dshader-cache=disabled \
+      -Dxmlconfig=disabled \
       -Dbuild-tests=false -Dtools= -Dhtml-docs=disabled \
       > "${WORK}/host-setup.log" 2>&1 || { tail -30 "${WORK}/host-setup.log"; die "meson setup failed"; }
+  fi
+  # Mesa options are cached in the build directory, so a change must be pushed
+  # explicitly -- otherwise adding virgl silently keeps building softpipe and
+  # the new archive never appears (the link then fails on a missing file), and
+  # a stale -Dxmlconfig drags expat into a DSO that must keep 0 DT_NEEDED.
+  local opts="$drivers|xmlconfig=disabled"
+  if [ ! -f "${HOSTBUILD}/build.ninja" ] || \
+     [ "$(cat "${HOSTBUILD}/.m2-opts" 2>/dev/null)" != "$opts" ]; then
+    note "reconfiguring mesa options: gallium-drivers=$drivers xmlconfig=disabled"
+    meson configure "$HOSTBUILD" -Dgallium-drivers="$drivers" \
+      -Dxmlconfig=disabled \
+      >> "${WORK}/host-setup.log" 2>&1 \
+      || { tail -30 "${WORK}/host-setup.log"; die "meson configure failed"; }
+    # The per-TU cache keys on mtimes, not on the compile command, so the one
+    # TU whose behaviour -Dxmlconfig changes must be dropped by hand (measured:
+    # the stale object kept the expat references and the DSO audit failed).
+    rm -f "${OBJ}"/src_util_libxmlconfig.a.p_*.o "${OBJ}"/src_util_libxmlconfig.a.p_*.o.log
+    echo "$opts" > "${HOSTBUILD}/.m2-opts"
   fi
   ninja -C "$HOSTBUILD" -j "$JOBS" > "${WORK}/host-ninja.log" 2>&1 \
     || { tail -30 "${WORK}/host-ninja.log"; die "host ninja failed"; }
   note "host build ok ($(grep -c '^\[[0-9]*/[0-9]*\]' "${WORK}/host-ninja.log" || true) edges logged)"
+  local a
+  for a in src/gallium/drivers/virgl/libvirgl.a \
+           src/gallium/winsys/virgl/hobbyos/libvirglhobbyos.a \
+           src/gallium/winsys/virgl/common/libvirglcommon.a \
+           src/gallium/drivers/softpipe/libsoftpipe.a; do
+    [ -f "${HOSTBUILD}/$a" ] || die "gallium driver archive missing: $a"
+    # Meson writes thin archives (members are paths), so the useful size is the
+    # objects', not the .a's.
+    local objdir="${HOSTBUILD}/${a%.a}.a.p"
+    local n b
+    n=$(ls "$objdir"/*.o 2>/dev/null | wc -l)
+    b=$(du -cb "$objdir"/*.o 2>/dev/null | tail -1 | cut -f1)
+    note "gallium: $(basename "$a")  $n TUs, $(( ${b:-0} / 1024 )) KiB of objects"
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -416,6 +466,17 @@ ARCHIVES = [
     "src/gallium/auxiliary/libgallium.a",
     "src/gallium/auxiliary/libgalliumvl_stub.a",
     "src/gallium/drivers/softpipe/libsoftpipe.a",
+    # M2: the accelerated driver and its /dev/gpu winsys.  Order matters for
+    # the static link: the driver's undefined symbols are resolved by the
+    # winsys after it, and both use the resource cache in libvirglcommon.
+    "src/gallium/drivers/virgl/libvirgl.a",
+    "src/gallium/winsys/virgl/common/libvirglcommon.a",
+    "src/gallium/winsys/virgl/hobbyos/libvirglhobbyos.a",
+    # virgl_screen.c names driParseConfigFiles/driQueryOption* unconditionally
+    # (guarded at run time by config != NULL).  With -Dxmlconfig=disabled these
+    # are expat-free no-ops, so the DSO keeps 0 DT_NEEDED and the symbol audit
+    # stays clean.
+    "src/util/libxmlconfig.a",
     "src/gallium/frontends/glx/xlib/libxlib.a",
     "src/gallium/winsys/sw/xlib/libws_xlib.a",
     "src/mesa/glapi/glapi/libglapi_bridge.a",
@@ -584,7 +645,7 @@ def main():
         # the pre-patch object (measured: 0004 added a `[GLX] context request`
         # string the DSO did not contain and the guest still got NULL).
         srcpath = src if os.path.isabs(src) else os.path.join(BUILD, src)
-        src_ok = (not os.path.exists(srcpath) or
+        src_ok = (not os.path.exists(out) or not os.path.exists(srcpath) or
                   os.path.getmtime(out) >= os.path.getmtime(srcpath))
         if os.path.exists(out) and os.path.exists(log) and \
            os.path.getmtime(out) >= os.path.getmtime(log) and src_ok:
@@ -970,7 +1031,9 @@ PY
   echo
   note "artifacts: ${LIBDIR}/{libGL.so.1,libGL.so.1.5.0,libGLX.so.0,libGL.a}"
   note "guest staging: copy libGL.so.1 + the libGLX.so.0 symlink to /LIB64"
-  note "guest env: XLIB_NO_SHM=1 LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=softpipe"
+  note "guest driver: HOBBYOS_GL=virgl|softpipe, or /GLMODE (softpipe default);"
+  note "              a virgl request without /dev/gpu falls back to softpipe"
+  note "guest env:    XLIB_NO_SHM=1 (the compat Xlib has no SHM)"
 }
 
 # ---------------------------------------------------------------------------
