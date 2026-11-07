@@ -229,11 +229,12 @@ ambition. Two caveats, stated rather than smoothed over:
 
 > **Correction (lane L74, `docs/rimworld-virgl-l74-surface.md`).** The first
 > caveat is wrong on both counts, and the 720p row above is **not a 720p
-> measurement**. The WM did honour the first request (that run's first swap
-> presents a 1280x720 drawable); what took the surface back to 1920x1080 was
-> Unity's own borderless-fullscreen call, made at the "native desktop
-> resolution" it reads from `XDisplayWidth/Height`. That run's `Player.log`
-> says so in three rows: `[XE] MAPGEOM … w=1916 h=1018`,
+> measurement**. The WM honoured exactly what it was asked for — but what it
+> was asked for was 1920x1080, because Unity's borderless-fullscreen call uses
+> the "native desktop resolution" it reads from `XDisplayWidth/Height`, and
+> that is the framebuffer. 1280x720 never reached the WM. That run's
+> `Player.log` says so in three rows: `[XE] MAPGEOM … w=1916 h=1018` (the `]X`
+> pref was 1920x1080, clamped to the tile),
 > `Using native desktop resolution 1920 x 1080` / `requesting fullscreen
 > 1920 x 1080`, and `[VGL] res_create … 1920x1080 … dt` for the surface. L74
 > makes the requested size the client's *screen*, after which the surface, the

@@ -45,18 +45,22 @@ The chain is:
 2. Unity then makes its own borderless-fullscreen call at the **native desktop
    resolution it read from `XDisplayWidth/Height`** — 1920x1080, because the
    compat Xlib reports the framebuffer.
-3. The X client creates a screen-sized container, reparents its GL window into
-   it, and reparent-into-a-screen-sized-container *is* the fullscreen request
-   (`fs_try_grant`). The grant lands at the **container's** requested size
-   (1920x1080), and the client's three checks pass (state, size == screen,
-   parent) — see `docs/rimworld-launch-log.md` 29.1.
-4. Mesa asks `XGetGeometry` for the drawable, gets 1920x1080, and the virgl
+3. The X client creates a screen-sized container (1920x1080) and maps it, so
+   the `]X` the desktop receives carries 1920x1080 — **that**, not 1280x720,
+   is the size the WM is asked for, and with `/WMSIZE` it grants it (clamped
+   to its tile: 1916x1018, the `MAPGEOM` row).
+4. The client reparents its GL window into that container; reparent-into-a-
+   screen-sized-container *is* the fullscreen request (`fs_try_grant`). The
+   grant lands at the **container's** requested size (1920x1080), and the
+   client's three checks pass (state, size == screen, parent) — see
+   `docs/rimworld-launch-log.md` 29.1.
+5. Mesa asks `XGetGeometry` for the drawable, gets 1920x1080, and the virgl
    surface, the GL viewport and the 7.8 MB present readback are 1920x1080.
 
-So `/WMSIZE` (the WM honouring a pixel-mode client's content size) was working
-in that run: the content rect was the tile because that is what the client
-asked for. Handing a 1280x720 window to a client whose *screen* says 1920x1080
-is the one thing that cannot work — Unity rejects it or overrides it.
+So M3's "the WM did not honour the request" is the wrong reading twice over:
+the WM honoured exactly what it was asked for, and 1280x720 never reached it.
+Handing a 1280x720 window to a client whose *screen* says 1920x1080 is the one
+thing that cannot work — Unity rejects it or overrides it.
 
 ## 2. The fix: the requested pixel size is the screen, not just the window
 
@@ -74,7 +78,7 @@ reports that size as the screen:
 | the fullscreen grant's size | container's request | min(request, screen) |
 | the clip bound for blits and resizes | **the framebuffer, always** | **the framebuffer, always** |
 
-With the client's whole world the requested size, the four things Unity checks
+With the client's whole world the requested size, the things Unity checks all
 agree by construction: container 1280x720, WM content 1280x720, grant
 1280x720, screen 1280x720. The desktop still has one 1920x1080 surface, so the
 game's frame lands at its content rect inside it.
@@ -99,8 +103,8 @@ One virgl boot per row, same binary, same present path
 | 1280x720 | 1280x720 | 2,34 1280x720 | 1280x720 stride 5120 | 1280x720 | 1280x720 | +2+34 | `Desktop is 1280 x 720` |
 | 960x540 | 960x540 | 2,34 960x540 | 960x540 stride 3840 | 960x540 | 960x540 | +2+34 | `Desktop is 960 x 540` |
 
-`[XSW] ... n=2 swap=2 put=1 putok=1 flush=95 crc=0xae0f1e8eed7cc84b changed=0
-w=1280 h=720 gx=2 gy=34 t=43590 ready=1 nz=921600/921600 box=0,0,1279,719`
+`[XSW] n=2 swap=2 put=1 putok=1 flush=95 crc=0xae0f1e8eed7cc84b changed=0
+w=1280 h=720 gx=2 gy=34 t=11335 ready=1 nz=921600/921600 box=0,0,1279,719`
 is the 720p row verbatim: 921 600 pixels presented, all non-black, into
 1920x1080+2+34.
 
@@ -108,11 +112,13 @@ Two rows were added for this (and only print when asked for):
 
 * `[XSW] ... gx= gy= t=` — the content rect's origin in fb0, and the
   **guest's own monotonic clock** (ms since the first present,
-  `clock_gettime(CLOCK_MONOTONIC)`). `t=` is what makes an fps number a
-  property of the run instead of the harness: the old ladder timed rows with a
-  host follower polling a log QEMU writes in bursts, and one 200 s run
-  produced all its rows inside a 69.6 s window — a 2x error in the number
-  headed "fps".
+  `clock_gettime(CLOCK_MONOTONIC)`). The host follower and this clock agree to
+  0.1 % in every clean run here (14.349 vs 14.36 fps on the same rows), so it
+  is redundancy rather than a correction — but it is redundancy that earns its
+  keep twice: one run in this lane published 519 frames as "69.6 s" while the
+  run itself lasted 200 s (a second harness was truncating the log under the
+  follower — a 2x error in the number headed "fps"), and a saved log can be
+  re-measured later without re-running the machine.
 * `[GL] viewport x= y= w= h=` — `tools/mesa/patches/0012`, opt-in through
   `/VPON` → `HOBBYOS_GL_VIEWPORT`, printed on the first four calls and on any
   change (64 rows max). It is deliberately *not* part of `HOBBYOS_GLX_TRACE`:
@@ -120,63 +126,75 @@ Two rows were added for this (and only print when asked for):
 
 ## 3. fps vs resolution, with the surface actually matching
 
-Three virgl boots, 200 s each, 120 s window, one binary; fps from the guest
-clock (`tools/rw/l74-sizes.py`). `F` is the winsys' own per-present cost from
-its `[VGL] dmg` rows (median over the run) — the fixed cost the model is
-about.
+Three virgl boots, 340 s each so the whole 120 s window exists, one binary;
+fps from the guest clock (`tools/rw/l74-sizes.py`). `F` is the winsys' own
+per-present cost from its `[VGL] dmg` rows (median over the run) — the present
+the model is about.
 
-| size | surface | frames | window | **fps** | ms/frame | Mpx/s | F (present) | F after the fit |
+| size | surface | frames | window | **fps** | ms/frame | Mpx/s | F (present, median) | idle presents |
 |---|---|---|---|---|---|---|---|---|
-| 1916x1018 | 1.950 Mpx | 789 | 96.5 s | **8.18** | 122.3 | 15.95 | 17.63 ms | 17.6 |
-| 1280x720 | 0.922 Mpx | 809 | 101.0 s | **8.01** | 124.8 | 7.38 | 13.80 ms | 13.8 |
-| 960x540 | 0.518 Mpx | 899 | 104.9 s | **8.57** | 116.7 | 4.44 | 21.08 ms (12.0–33.5) | 12.3 |
+| 1916x1018 | 1.950 Mpx | 1719 | 119.7 s | **14.36** | 69.6 | 28.01 | 11.44 ms | 3022/3072 |
+| 1280x720 | 0.922 Mpx | 1699 | 119.3 s | **14.24** | 70.2 | 13.12 | 11.65 ms | 3212/3264 |
+| 960x540 | 0.518 Mpx | 1589 | 119.8 s | **13.27** | 75.4 | 6.88 | 12.83 ms | 2960/3008 |
 
-Run conditions, stated because they matter: this host was shared with other
-lanes' boots during the ladder (load average 9–15 on 32 cores), and the same
-tree measured 41–73 fps for the synthetic M3 scenes in the gate below. The
-*comparison between the three rows* is sound — same tree, same binary, same
-host, sequential — but the absolute fps is a today's-host number, not M3's
-15.97 (which was measured on a quieter box and, for the 720p row, at the wrong
-size).
+**fps is flat in resolution**: a 3.8× pixel range moves it by 8 %, and the
+smallest size is the *slowest* of the three (its window caught more of the
+engine's first-load phase — bucket 1 is 0.00 against 10.30). Per-bucket, all
+three runs have the same shape: ~9–10 fps while the engine instantiates, ~20
+fps in the audio/assembly phase, then 12–17 fps.
 
-The size of that caveat, measured: the **same 1280x720 configuration** was run
-again later, under lighter load, in the softpipe/virgl pair (§5) and scored
-**11.86 fps / 84.3 ms/frame** against the ladder's 8.01 / 124.8. That is a 48 %
-spread on an identical configuration, so the ladder's between-size differences
-(8.01 ± 0.6) are **well inside the run-to-run noise** and must not be read as a
-size effect. The size-dependent quantity that *is* stable per frame is the
-present cost `F` below, and that is where the model comparison is made.
+The same ladder run earlier the same day, while other lanes had VMs up (load
+average 9–15 on 32 cores), gave 8.18 / 8.01 / 8.57 — **the same flat shape at
+a 43 % lower level**. That is the useful control: the absolute fps is a
+property of the host's load, and the *shape* (no size effect) reproduces at
+both levels.
+
+M3's 15.97 at 1916x1018 sits just above this run's 14.36, which is what a
+quieter box and a 117 s window would do; the 720p row it compared against was
+not a 720p workload at all (§1), so no comparison with it is meaningful.
 
 ### 3.1 Against the model
 
 The plan's model is `F = n_gpu_ops × 1.8 ms + bytes × 0.2 ms/MB`, and the
-naive reading of it — "F was 9.7 ms full-surface, so F should scale with
-pixels" — predicts 720p at roughly half of F. Measured, from two independent
-instruments:
+reading of it this lane was asked to test — "F was 9.7 ms full-surface, so F
+should scale with pixels" — predicts 720p at roughly half of F. It does not,
+and the two present paths have to be separated to say why:
 
-| instrument | F at 1.950 Mpx | F at 0.922 Mpx | slope | intercept |
+| path | 1.950 Mpx | 0.922 Mpx | 0.518 Mpx | does it scale? |
 |---|---|---|---|---|
-| the game's own presents (`[VGL] dmg`, median) | 17.63 ms | 13.80 ms | 3.73 ms/Mpx | 10.4 ms |
-| the M3 bench in `tools/gate/m3_virgl.py` (ui, full present) | 17.93 ms | 13.94 ms | 3.90 ms/Mpx | 10.3 ms |
+| **full readback** (M3 bench `ui`, `F_full`) | 17.93 ms | 13.94 ms | — | **yes**: slope 3.9 ms/Mpx (≈ 0.95 ms/MB), intercept 10.3 ms |
+| **the game's actual present** (damage/thumbnail, `[VGL] dmg`) | 11.44 ms | 11.65 ms | 12.83 ms | **no**: flat within noise |
 
-The two agree to 5 % without sharing a code path. So:
-
-* **F does scale with pixels — in its slope only.** 3.7–3.9 ms/Mpx ≈ **0.95
-  ms/MB**, i.e. five times the model's 0.2 ms/MB. That is what three
-  byte-proportional passes look like (thumbnail blit, guest copy, `XPutImage`)
-  rather than one.
-* **The fixed part is 10.3 ms, not 1.8 ms.** At today's ~5 ms per GPU round
-  trip under load, two operations are the intercept; M3 measured the same
-  shape at 1.8 ms/op on a quiet host (its fit would be ~4.2 + 2.8·Mpx).
-* So a 4× cut in pixels buys **≈ 5 ms** of a 122 ms frame (4 %) — which is
-  exactly what the fps column shows: 8.18 → 8.57, inside the run-to-run
-  spread.
+* The **full-readback** path does carry a byte term, and it is ~5× the model's
+  0.2 ms/MB, because three passes scale with bytes (thumbnail blit, guest
+  copy, `XPutImage`) rather than one. Its intercept is 10.3 ms, not
+  1.8 ms: at this host's ~5 ms per GPU round trip two operations are already
+  10 ms. (Both bench points are from one boot in the gate, so the slope is
+  internally consistent even though the absolute level was measured under
+  load.)
+* The **damage** path is what the game actually runs (98 % of its presents are
+  `idle`), and it pays *no* byte term: one 64×64 thumbnail blit plus a 16 KiB
+  read, 11.4–12.8 ms, **independent of the surface** — the blit's cost is the
+  round trip, not the fill. That is M3's "latency-bound, not
+  bandwidth-bound" result in its purest form, now measured across a 3.8× pixel
+  range at one sitting.
+* Therefore a 3.8× cut in pixels buys **0 ms** of the game's present, and the
+  frame is ~70 ms: fps cannot move. Measured: 14.36 / 14.24 / 13.27.
 
 **1280x720 does not beat 1080p on this workload, and the reason is
 quantitative, not mysterious:** the loading screen's frame time is set by
-Unity's loader (NFS reads + managed assembly load), 117–125 ms, of which the
-present is 14–18 ms. Resizing the surface cannot move a frame that is not
-waiting on the present.
+Unity's loader (NFS reads + managed assembly load), 70 ms per frame here, of
+which the present is 11–13 ms and 98 % of presents skip the readback entirely.
+Resizing the surface cannot move a frame that is not waiting on the present.
+
+Two things follow for M4/M5, and they are the actionable part:
+
+* the lever is the **number** of GPU round trips, not their size — which is
+  what M5's direct scanout removes (readback + copy + `XPutImage`), and what
+  batching the transfer into the frame's own submit removes (one round trip);
+* a smaller surface is still worth having — 2.1× less GPU work per frame and a
+  window that fits — but it will not show up as fps until the frame stops
+  being ~70 ms of loader.
 
 M3's floor still holds: 110 blended quads at 1916x1018 run at 51.4 fps in the
 gate, so the *present path* can carry 41–73 fps at every size here. The wall
@@ -216,6 +234,9 @@ same 20 s screenshot cadence, same crop (the content rect at fb0 +2+34):
 
 The softpipe run has **zero `[VGL]` rows** — it never touches `/dev/gpu` — so
 the two runs are the same code path above the rasteriser and nothing below it.
+(These two ran with other lanes active: the virgl half's 11.86 fps is against
+the quiet ladder's 14.24 for the same configuration. Load again — and the
+comparison here is structural, not a rate.)
 
 Structural comparison (`tools/rw/m3-frame-compare.py`, 32x24 luminance cells):
 
@@ -248,29 +269,29 @@ M3 recorded the same.
   960x540 the client's screen, the WM's content rect, the GL surface, the GL
   viewport, the drawable and the fb0 rect are all the requested size, and the
   full-desktop case still works (§2.1).
-* **fps does not follow the resolution on this workload** (task 2/4): 8.18 /
-  8.01 / 8.57 at 1.95 / 0.92 / 0.52 Mpx — and those three differ by less than
-  the run-to-run spread of one configuration (8.01 vs 11.86 for the same
-  1280x720, §3). **1280x720 does not beat 1080p here**, and the reason is
-  quantitative: the present is 14–18 ms of a 84–125 ms frame whose time is set
-  by Unity's loader, so shrinking the surface cannot move it.
-* **What the size does buy** is present cost: F 17.6 → 13.8 ms (−22 %) from
-  1080p to 720p, and 2.1× less GPU work per frame, measured per present (so it
-  is not masked by the loader). That becomes fps the moment the frame stops
-  being loader-bound, and it is the difference between M5's direct scanout
-  having something to win and nothing to win.
+* **fps does not follow the resolution on this workload** (task 2/4): 14.36 /
+  14.24 / 13.27 at 1.95 / 0.92 / 0.52 Mpx over full 120 s windows, with the
+  same flat shape reproduced under a 43 % heavier host load (8.18 / 8.01 /
+  8.57, §3). **1280x720 does not beat 1080p here**, and the reason is
+  quantitative: the present is 11–13 ms of a ~70 ms frame whose time is set by
+  Unity's loader, and 98 % of presents skip the readback entirely.
+* **What the size does buy** is GPU work per frame (2.1× less from 1080p to
+  720p) and, on the *full-readback* present, real time (17.9 → 13.9 ms). On
+  the damage path the game actually runs, F is flat (11.4 → 11.7 ms) because
+  it is one round trip and a 16 KiB read either way. So the size is not the
+  lever; the number of round trips is (§3.1).
 * **Best playable configuration today**: 1280x720 with the surface actually
-  1280x720 — the cheapest present that still fills a usable window area, at no
-  fps cost. 960x540 is ~1.5 ms cheaper in theory and measured no faster; it
-  only makes sense if a 960x540 window is wanted. Neither is *playable*: 8–12
-  fps is the loader, not the driver.
+  1280x720 — 2.1× less GPU work than the full desktop at no fps cost, and a
+  window that fits. 960x540 is no faster and no cheaper per present on the
+  damage path; it only makes sense if a 960x540 window is wanted. Neither is
+  *playable*: 13–14 fps here is the loader, not the driver.
 
 ## 7. Reproducing
 
 ```bash
 export HOME=/home/sarah
 cd ~/hobbyos-rw-lanes/l74-surface
-tools/rw/l74-fps-sizes.sh 200 1916x1018 1280x720 960x540   # fps ladder + rows
+tools/rw/l74-fps-sizes.sh 340 1916x1018 1280x720 960x540   # fps ladder + rows
 tools/rw/l74-sizes.py obj/l62/l74-virgl-1280x720/serial.log --window 120
 tools/rw/l74-pair.sh 1280x720 200                          # virgl + softpipe
 python3 tools/rw/m3-frame-compare.py <virgl.png> <softpipe.png> --rect 2,34,1280,720
