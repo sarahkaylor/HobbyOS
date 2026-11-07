@@ -28,6 +28,7 @@
 #include "virtio_gpu.h"
 #include "display_mode.h"
 #include "lock.h"
+#include "kline.h"
 #include "arch/cpu.h"
 
 extern void uart_puts(const char* s);
@@ -287,16 +288,24 @@ static void gpu_wait_completed(uint16_t ack_before) {
 
     slow_events++;
     if (slow_events <= 3 || (slow_events & 0x3FF) == 0) {
-      uart_puts("[GPUDIAG] gpu wait > ");
-      print_int((int)(now - t0));
-      uart_puts(" ms: ack=");
-      print_int((int)ack_before);
-      uart_puts(" used=");
-      print_int((int)(*(volatile uint16_t*)&gpu_vq.used.idx));
+      /* GB-082: one record, one lock hold.  The previous sequence printed
+         `[GPUDIAG] gpu wait > … ack=` across several uart_puts calls; a peer
+         CPU interleaved at a boundary and produced the measured glued line
+         `[GPUDIAG] gpu wait > 4 ms: ack=[KERNEL] sys_fork: …`.  kline emits
+         the whole record in one uart_puts. */
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "[GPUDIAG] gpu wait > ");
+      kl_i(&k, (int)(now - t0));
+      kl_s(&k, " ms: ack=");
+      kl_i(&k, (int)ack_before);
+      kl_s(&k, " used=");
+      kl_i(&k, (int)(*(volatile uint16_t*)&gpu_vq.used.idx));
       if (!gpu_wait_park_ok) {
-        uart_puts(" (park off)");
+        kl_s(&k, " (park off)");
       }
-      uart_puts("\n");
+      kl_s(&k, "\n");
+      kl_emit(&k);
     }
     if (!gpu_wait_park_ok) {
       continue; /* no local wake source yet: keep the bounded spin */
@@ -444,9 +453,12 @@ void virtio_gpu_handle_irq(void) {
     reg_write32(VIRTIO_INTERRUPT_ACK, status);
     if (first < 3) {
       first++;
-      uart_puts("[GPU] irq handled (status=");
-      print_int((int)status);
-      uart_puts(")\n");
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "[GPU] irq handled (status=");
+      kl_i(&k, (int)status);
+      kl_s(&k, ")\n");
+      kl_emit(&k);
     }
   }
 }
