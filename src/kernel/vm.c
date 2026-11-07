@@ -50,11 +50,18 @@ extern int process_create_kernel_nowait(void (*entry)(void *), void *arg);
  * chunks.  The 1025th insert made region_grow() refuse, vm_region_insert()
  * return non-zero, and vm_mmap answer -ENOMEM: measured `[LCOMPAT] mmap fail
  * ... -> -12` for 8 XMLs and 18-20 `IOException: Could not map file` per run.
- * 2048 covers the whole tree with room for the second view per asset; the
- * array is 2048 * sizeof(struct vm_region) = 80 KiB (20 contiguous frames at
- * the last doubling), and a failed contiguous allocation degrades exactly as
- * before — the mmap reports ENOMEM. */
-#define VM_REGION_MAX_CAP 2048
+ *
+ * L81: 2048 was not enough for WORLD GENERATION.  The game reaches 2003
+ * regions by the time its front-end is done (mostly Mono code-manager guard
+ * pages: a 3-page MAP_FIXED PROT_NONE per JIT chunk), and the first seconds
+ * of planet generation push it past 2048.  Measured: `[THRS] ... regs=2003`,
+ * then `[MR] FAIL pid=110 len=0x3000 base=0x114CA35000 blk=none` and the
+ * abort in Boehm's GC ("mmap(PROT_NONE) failed", SIGABRT).  16384 keeps the
+ * 3-page-per-chunk shape for ~14k more chunks; the array is allocated ONCE
+ * at the first growth (below), when the AS has 16 regions and memory is
+ * free, so the late-run contiguity that this array needs is not asked for
+ * after the heap has fragmented.  16384 * 40 B = 640 KiB (160 frames). */
+#define VM_REGION_MAX_CAP 16384
 #define VM_REGION_GROW_STEP 64
 
 static spinlock_t vm_lock;
@@ -105,23 +112,31 @@ static int region_frames_for(int cap) {
 }
 
 static int region_grow(struct addr_space *as) {
-  /* L55: grow by a SMALL step, not by doubling.  The array must be physically
-   * contiguous (it is dereferenced as a linear virtual range), and doubling
-   * asks frame_alloc_contig() for 20 frames at 1024->2048 — which fails under
-   * memory pressure.  Measured: a burst of 8 NFS XML mmaps answered -ENOMEM
-   * (`[LCOMPAT] mmap fail ... -> -12`, 24 `Could not map file`) mid-def-load,
-   * then recovery once frames were freed.  A 64-entry step is 2.5 KiB = ONE
-   * frame, so growth no longer depends on a large contiguous run; the extra
-   * copies are ~1.5 MiB across an entire boot. */
-  int newcap = as->cap + VM_REGION_GROW_STEP;
-  if (newcap > VM_REGION_MAX_CAP)
-    newcap = VM_REGION_MAX_CAP;
-  if (newcap <= as->cap)
+  /* L81: allocate the FULL table on the first growth.  The array must be
+   * physically contiguous (it is dereferenced as a linear virtual range),
+   * and the old "grow by 64, reallocate at the new size" shape asks for its
+   * largest run exactly when the process is old and the frame allocator is
+   * fragmented — the same failure class L55 measured with doubling.  The
+   * first growth happens when the AS has 16 regions (process start), so the
+   * one large request is made while memory is still free.  If it is refused,
+   * fall back to the old small step: the mapping still fails as before, but
+   * nothing is worse than L55's behaviour. */
+  if (as->cap >= VM_REGION_MAX_CAP)
     return -1;
+  int newcap = VM_REGION_MAX_CAP;
   int need = region_frames_for(newcap);
   uint64_t arr = frame_alloc_contig(need);
-  if (!arr)
-    return -1;
+  if (!arr) {
+    newcap = as->cap + VM_REGION_GROW_STEP;
+    if (newcap > VM_REGION_MAX_CAP)
+      newcap = VM_REGION_MAX_CAP;
+    if (newcap <= as->cap)
+      return -1;
+    need = region_frames_for(newcap);
+    arr = frame_alloc_contig(need);
+    if (!arr)
+      return -1;
+  }
   v2_memcpy_frames(arr, (uint64_t)as->regions,
                    (uint64_t)as->nr * sizeof(struct vm_region));
   int old = region_frames_for(as->cap);
@@ -3754,6 +3769,10 @@ static void mr_fail(struct addr_space *as, uint64_t base, uint64_t len) {
   kl_hex(&kl, (unsigned long)len);
   kl_s(&kl, " base=");
   kl_hex(&kl, (unsigned long)base);
+  kl_s(&kl, " nregs=");
+  kl_i(&kl, (long)as->nr);
+  kl_s(&kl, " cap=");
+  kl_i(&kl, (long)as->cap);
   kl_s(&kl, " blk=");
   if (have) {
     kl_hex(&kl, (unsigned long)bb);

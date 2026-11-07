@@ -317,6 +317,18 @@ def main():
         grab("01_no_launch")
         return 2
 
+    # L79/L81: a scripted front-end flow (wait for the menu, click New colony,
+    # follow the screens) takes over from the plain screenshot loop.
+    if os.environ.get("RW_FLOW", "0") == "1":
+        import rw_flow
+        rc = rw_flow.run(q, grab, args.log, args, shots, find_ignore_xy)
+        grab("99_final")
+        text = read_log(args.log)
+        print("\n[drive] --- flow final rows ---", flush=True)
+        for line in text.splitlines()[-60:]:
+            print("  " + line, flush=True)
+        return rc
+
     # Poll until the launcher is done; screendump on a cadence so a frame (or
     # a hung engine) is captured while it is still on screen.
     end = time.time() + args.run_timeout
