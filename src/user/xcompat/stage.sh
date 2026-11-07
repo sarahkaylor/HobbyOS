@@ -53,3 +53,24 @@ done
 
 echo "xcompat-stage: $IMG ::/LIB64"
 "$MDIR" -i "$IMG" ::/LIB64 | sed 's/^/  /'
+
+# L74: neutralise the two screen-size markers: /RWSCREEN (what the launcher
+# asks Unity for) and /WMSIZE (whether the WM honours a pixel-mode client's
+# content size).  Together they switch the compat Xlib's screen size (see
+# libx11.c:l74_screen_override), and markers live on disk.img with no mdel(1):
+# a value staged by one measurement run is still there for the next gate's
+# boot.  Measured: a ladder run left /RWSCREEN=1280x720 behind and the next
+# gate's 1916x1018 probe read a 1280x720 screen.  Every compat boot stages
+# these DSOs, so this is the one place that can make both off-by-default; a
+# harness that wants them re-stages them afterwards (the order in
+# tools/rw/run-rimworld-desktop.sh, and m3_virgl.py states both explicitly).
+if [ "${L74_KEEP_SCREEN_MARKERS:-0}" != 1 ]; then
+  for M in RWSCREEN WMSIZE; do
+    TMP_MARK="$(mktemp "${TMPDIR:-/tmp}/marker.XXXXXX")" || TMP_MARK=""
+    [ -n "$TMP_MARK" ] || continue
+    printf 'off\n' >"$TMP_MARK"
+    "$MCOPY" -o -i "$IMG" "$TMP_MARK" "::$M" || \
+      echo "  warn: could not reset ::/$M (marker semantics unchanged?)"
+    rm -f "$TMP_MARK"
+  done
+fi

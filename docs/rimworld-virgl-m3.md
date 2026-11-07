@@ -227,6 +227,21 @@ ambition. Two caveats, stated rather than smoothed over:
   which is why the 720p run's first 30 s bucket is 0: the game had not
   presented its first frame yet.
 
+> **Correction (lane L74, `docs/rimworld-virgl-l74-surface.md`).** The first
+> caveat is wrong on both counts, and the 720p row above is **not a 720p
+> measurement**. The WM honoured exactly what it was asked for — but what it
+> was asked for was 1920x1080, because Unity's borderless-fullscreen call uses
+> the "native desktop resolution" it reads from `XDisplayWidth/Height`, and
+> that is the framebuffer. 1280x720 never reached the WM. That run's
+> `Player.log` says so in three rows: `[XE] MAPGEOM … w=1916 h=1018` (the `]X`
+> pref was 1920x1080, clamped to the tile),
+> `Using native desktop resolution 1920 x 1080` / `requesting fullscreen
+> 1920 x 1080`, and `[VGL] res_create … 1920x1080 … dt` for the surface. L74
+> makes the requested size the client's *screen*, after which the surface, the
+> viewport and the present are the requested size at 1916x1018, 1280x720 and
+> 960x540. The `[XSW] w=/h=` field is the content rect the WM granted, not the
+> client's request.
+
 Per-present path (the game's own `[VGL] dmg n=…` rows, 1080p):
 
 ```

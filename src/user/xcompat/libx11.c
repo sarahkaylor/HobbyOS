@@ -56,6 +56,12 @@
 #define SYS_mmap 9
 #define SYS_ioctl 16
 #define SYS_fstat 5
+/* clock_gettime: the LINUX number (228), not HobbyOS's 87.  The user-ABI
+ * dispatcher translates 228 -> SYS_GETTIME (src/kernel/arch/x64/trap.c:2386),
+ * which is the number a compat DSO has to use: 87 is SYS_GETTIME's *internal*
+ * row and is not accepted from userspace.  Measured: with 87 the call failed
+ * and every row printed t=0, i.e. a clock that says nothing. */
+#define SYS_clock_gettime 228
 
 static long xs_syscall6(long n, long a, long b, long c, long d, long e, long f) {
   long ret;
@@ -79,6 +85,24 @@ static long xs_write(int fd, const void *p, unsigned long n) {
 }
 static long xs_read(int fd, void *p, unsigned long n) {
   return xs_syscall6(SYS_read, fd, (long)p, (long)n, 0, 0, 0);
+}
+
+/* L74: the guest's own monotonic clock, in ms (SYS_GETTIME/CLOCK_MONOTONIC).
+ *
+ * Why the [XSW] row needs it: the fps ladder used to be timed by a host-side
+ * follower watching the serial log, and that clock is only as good as the
+ * host's polling of a file QEMU writes in bursts -- measured this lane: a 200 s
+ * run whose rows all arrived inside a 69.6 s window, i.e. a 2x error in the
+ * number quoted as fps.  A timestamp the guest writes itself makes the rate a
+ * property of the run, not of the harness.  Returns 0 if the syscall fails
+ * (then t= reads 0 and a reader must fall back to the old timing). */
+static unsigned long long xs_now_ms(void) {
+  struct { long sec, nsec; } ts;
+  if (xs_syscall6(SYS_clock_gettime, 1 /* CLOCK_MONOTONIC */, (long)&ts,
+                  0, 0, 0, 0) < 0)
+    return 0;
+  return (unsigned long long)ts.sec * 1000ull +
+         (unsigned long long)(ts.nsec / 1000000L);
 }
 static int xs_open(const char *path, int flags) {
   return (int)xs_syscall6(SYS_open, (long)path, flags, 0, 0, 0, 0);
@@ -322,6 +346,18 @@ struct _XDisplay {
   int fb_fd;
   unsigned char *fb;
   int fb_w, fb_h, fb_stride, fb_bpp;
+
+  /* L74: the screen a CLIENT is told it has, in pixels.  `fb_w/fb_h` is the
+   * real framebuffer (the desktop's scan-out surface, 1920x1080) and stays the
+   * clip bound; `sw/sh` is what XDisplayWidth/Height, the root window and the
+   * fullscreen-size test report.  They are equal unless a measurement run
+   * staged BOTH /RWSCREEN (the pixel size the launcher asks Unity for) and
+   * /WMSIZE (the WM honours it): then the client's whole world is that size
+   * and the desktop gives it a window of exactly that content rect -- which is
+   * what makes Unity's borderless-fullscreen transition land on the requested
+   * resolution instead of the desktop's.  See l74_screen_override(). */
+  int sw, sh;
+  int vscr;               /* sw/sh came from /RWSCREEN (0 = the framebuffer) */
 
   struct xc_core core;
 
@@ -705,6 +741,7 @@ static struct {
   unsigned long long crc_nz;    /* pixels with a non-zero B/G/R */
   unsigned long box[4];         /* their bounding box */
   unsigned long long crc_tot;   /* pixels hashed */
+  unsigned long long t0_ms;     /* L74: guest-monotonic ms of the first row */
   unsigned long long pumps;     /* event-pump iterations */
   unsigned long long wins;      /* XCreateWindow calls */
   unsigned long long maps;      /* XMapWindow calls (not repeats) */
@@ -800,6 +837,21 @@ static void pres_row(Display *d) {
   j = ap_s(b, j, " changed=");     b[j++] = (char)('0' + (g_pres.changed ? 1 : 0));
   j = ap_s(b, j, " w=");           j = ap_i(b, j, g_pres.last_w);
   j = ap_s(b, j, " h=");           j = ap_i(b, j, g_pres.last_h);
+  /* L74: WHERE the frame lands in /dev/fb0.  `w/h` is the drawable (the GL
+   * surface); `gx/gy` is the content rect's origin in the framebuffer, so
+   * (gx,gy,w,h) is the fb0 rect this client's pixels occupy -- the row that
+   * shows a 1280x720 game presenting into a 1920x1080 desktop. */
+  j = ap_s(b, j, " gx=");          j = ap_i(b, j, (d && d->win.content_ready) ? d->win.gx : -1);
+  j = ap_s(b, j, " gy=");          j = ap_i(b, j, (d && d->win.content_ready) ? d->win.gy : -1);
+  /* L74: the guest's own clock, ms since this process's first present.  The
+   * fps ladder divides n= by this and stops depending on when the host
+   * happened to read the serial log (see xs_now_ms). */
+  {
+    unsigned long long now = xs_now_ms();
+    if (now && !g_pres.t0_ms) g_pres.t0_ms = now;
+    j = ap_s(b, j, " t=");
+    j = ap_d(b, j, (now && g_pres.t0_ms) ? now - g_pres.t0_ms : 0);
+  }
   j = ap_s(b, j, " ready=");
   b[j++] = (char)('0' + ((d && d->win.content_ready) ? 1 : 0));
   /* `nz` is the count of pixels whose B|G|R is not zero (alpha is 0xFF on
@@ -1454,6 +1506,77 @@ static int wait_event(Display *d) {
 
 XAPI GC XCreateGC(Display *d, Drawable dr, unsigned long mask, XGCValues *v);
 
+/* L74: read a one-line marker file staged on disk.img.  Returns the byte count
+ * (0 when absent).  Same convention as rwlaunch's own marker reads: the guest
+ * image has no mdel(1), so a marker is rewritten ("off"), never removed. */
+static int l74_marker(const char *path, char *out, int cap) {
+  int fd = xs_open(path, 0 /* O_RDONLY */);
+  if (fd < 0) return 0;
+  long n = xs_read(fd, out, (unsigned long)(cap - 1));
+  xs_close(fd);
+  if (n <= 0) return 0;
+  if (n > cap - 1) n = cap - 1;
+  out[n] = 0;
+  return (int)n;
+}
+
+/* L74: the requested pixel size IS the screen, when the run says so.
+ *
+ * Why the SCREEN and not just the window: Unity's borderless-fullscreen
+ * transition checks three things and needs all three to agree -- the
+ * _NET_WM_STATE property, its window's SIZE, and its window's parent
+ * (docs/rimworld-launch-log.md 29.1).  The size it compares against is the
+ * "native desktop resolution" it read at player init from XDisplayWidth/
+ * Height, so a window handed 1280x720 while the screen still says 1920x1080
+ * fails the check: the client reverts the reparent and retries at ~89 Hz, or
+ * (measured, M3) it keeps the fullscreen it was granted and renders 1920x1080.
+ * M3's 720p run is exactly that: the first swap was 1280x720, the WM's
+ * ESC ] G then handed back 1916x1018/1920x1080, and the GL surface, the
+ * viewport and the 7.8 MB present all stayed at desktop size.
+ *
+ * So when the harness stages BOTH /RWSCREEN ("WxH", what the launcher passes
+ * to -screen-width/-screen-height) AND /WMSIZE ("on", the WM honours that
+ * content size), the shim reports that size as the screen.  The client then
+ * creates its fullscreen container at WxH, the WM gives it exactly WxH of
+ * content, the grant passes the client's own size check, and Mesa asks
+ * XGetGeometry for a WxH drawable -- so the virgl surface, the GL viewport and
+ * the present readback are all WxH.
+ *
+ * Without either marker nothing changes: the screen is the framebuffer, which
+ * is what every earlier milestone measured.  The override can never exceed the
+ * real framebuffer (this desktop has one surface, and the app's pixels have to
+ * land inside it). */
+static void l74_screen_override(Display *d) {
+  d->sw = d->fb_w;
+  d->sh = d->fb_h;
+  d->vscr = 0;
+  char b[32];
+  if (l74_marker("/WMSIZE", b, sizeof b) <= 0) return;
+  if (!(b[0] == '1' || b[0] == 'o' || b[0] == 'y')) return;
+  if (l74_marker("/RWSCREEN", b, sizeof b) <= 0) return;
+  int w = 0, h = 0, i = 0;
+  while (b[i] >= '0' && b[i] <= '9') { w = w * 10 + (b[i] - '0'); i++; }
+  if (b[i] != 'x' && b[i] != 'X') return;
+  i++;
+  while (b[i] >= '0' && b[i] <= '9') { h = h * 10 + (b[i] - '0'); i++; }
+  if (w < 64 || h < 64) return;
+  if (w > d->fb_w || h > d->fb_h) return;
+  d->sw = w;
+  d->sh = h;
+  d->vscr = 1;
+  {
+    char r[96];
+    int j = 0;
+    j = ap_s(r, j, "[XE] VSCREEN w=");  j = ap_i(r, j, w);
+    j = ap_s(r, j, " h=");              j = ap_i(r, j, h);
+    j = ap_s(r, j, " fb=");             j = ap_i(r, j, d->fb_w);
+    r[j++] = 'x';
+    j = ap_i(r, j, d->fb_h);
+    j = ap_s(r, j, " src=/RWSCREEN+/WMSIZE\n");
+    xs_write(2, r, (unsigned long)j);
+  }
+}
+
 XAPI Display *XOpenDisplay(const char *name) {
   (void)name;                            /* exactly one display exists */
   xtr("[XC] XOpenDisplay enter\n");
@@ -1478,6 +1601,10 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->fb_h = (int)g.yres;
   d->fb_stride = (int)g.stride;
   d->fb_bpp = (int)g.bpp;
+  /* L74: what size the CLIENT is told the screen is (see l74_screen_override).
+   * It is the framebuffer unless the measurement run asked for a smaller
+   * pixel size; the clip bound stays fb_w/fb_h either way. */
+  l74_screen_override(d);
 
   d->screen = 0;
   d->root = 1;
@@ -1485,7 +1612,7 @@ XAPI Display *XOpenDisplay(const char *name) {
    * (or the m3 probe's observer) selects SubstructureNotifyMask on it. */
   {
     struct xwin *r = xw_alloc(d, d->root, None, 0, 0,
-                              (unsigned)d->fb_w, (unsigned)d->fb_h, 0);
+                              (unsigned)d->sw, (unsigned)d->sh, 0);
     if (r) r->mapped = 1;
   }
   /* The public Display prefix (see xabi.h): the fields a client's Xlib
@@ -1519,10 +1646,10 @@ XAPI Display *XOpenDisplay(const char *name) {
   d->screen_obj.ext_data = 0;
   d->screen_obj.display = d;
   d->screen_obj.root = d->root;
-  d->screen_obj.width = d->fb_w;
-  d->screen_obj.height = d->fb_h;
-  d->screen_obj.mwidth = d->fb_w * 254 / 960;   /* 96 dpi nominal */
-  d->screen_obj.mheight = d->fb_h * 254 / 960;
+  d->screen_obj.width = d->sw;
+  d->screen_obj.height = d->sh;
+  d->screen_obj.mwidth = d->sw * 254 / 960;   /* 96 dpi nominal */
+  d->screen_obj.mheight = d->sh * 254 / 960;
   d->screen_obj.ndepths = 0;
   d->screen_obj.depths = 0;
   d->screen_obj.root_depth = 24;
@@ -1607,8 +1734,8 @@ XAPI Display *XOpenDisplay(const char *name) {
       Atom wa[4];
       wa[0] = 0;
       wa[1] = 0;
-      wa[2] = (Atom)d->fb_w;
-      wa[3] = (Atom)d->fb_h;
+      wa[2] = (Atom)d->sw;
+      wa[3] = (Atom)d->sh;
       prop_set_atoms(d, d->root, xc_intern(&d->core, "_NET_WORKAREA", 0), wa, 4);
     }
     {
@@ -2733,8 +2860,13 @@ static int fs_try_grant(Display *d, struct xwin *child, struct xwin *cont) {
   /* The CONTAINER test uses req_w/req_h (what the client asked for), not the
    * laid-out content rect.  A client that wants the whole screen creates its
    * container at the screen size and only then learns the desktop's content
-   * rect; judging by the content rect rejected every real container. */
-  if ((int)cont->req_w < d->fb_w || (int)cont->req_h < d->fb_h) {
+   * rect; judging by the content rect rejected every real container.
+   * L74: "the screen" here is the size the CLIENT was told it has (d->sw/sh),
+   * which is the framebuffer unless /RWSCREEN+/WMSIZE made it the requested
+   * pixel size.  With the override on, the container is created at that size
+   * and the grant lands on it -- so the GL surface, the viewport and the
+   * present are the requested size instead of the desktop's. */
+  if ((int)cont->req_w < d->sw || (int)cont->req_h < d->sh) {
     fs_decline(4, d, child, cont); return 0;
   }
   if (child->parent != cont->id) { fs_decline(5, d, child, cont); return 0; }
@@ -2743,6 +2875,8 @@ static int fs_try_grant(Display *d, struct xwin *child, struct xwin *cont) {
    * shows it (n= keeps the total). */
   unsigned gw = cont->req_w ? cont->req_w : cont->w;
   unsigned gh = cont->req_h ? cont->req_h : cont->h;
+  if (gw > (unsigned)d->sw) gw = (unsigned)d->sw;
+  if (gh > (unsigned)d->sh) gh = (unsigned)d->sh;
   unsigned long long rep = (child->fs && child->w == gw &&
                             child->h == gh) ? 1u : 0u;
   child->fs = 1;
