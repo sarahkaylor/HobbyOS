@@ -227,6 +227,52 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   int64_t r = sys_mmap6(addr, len, prot, (int64_t)hf, fd, off);
   if (r == -1 && as)
     r = -ENOMEM; /* v2 vm_mmap's only -1 is a caller-contract bug */
+  /* L81: name a refused ANONYMOUS mmap and every large anonymous mapping.
+     Boehm's GC_unix_mmap_get_mem prints "mmap(PROT_NONE) failed" and aborts
+     when its heap extension is refused; the message names neither the length
+     nor the arena, so the driver's wall report can only guess.  Bounded: the
+     first 16 refusals and the first 24 mappings >= 32 MiB. */
+  if (r < 0 && fd < 0) {
+    static int anon_fail_rows;
+    if (anon_fail_rows < 16) {
+      anon_fail_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LMMAP] fail pid=");
+      kl_i(&kl, p ? p->pid : -1);
+      kl_s(&kl, " len=0x");
+      kl_hex(&kl, (unsigned long)len);
+      kl_s(&kl, " prot=");
+      kl_i(&kl, (long)prot);
+      kl_s(&kl, " flags=0x");
+      kl_hex(&kl, (unsigned long)f);
+      kl_s(&kl, " hint=0x");
+      kl_hex(&kl, (unsigned long)addr);
+      kl_s(&kl, " rc=");
+      kl_i(&kl, (long)r);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  } else if (r > 0 && fd < 0 && len >= (32u << 20)) {
+    static int anon_big_rows;
+    if (anon_big_rows < 24) {
+      anon_big_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LMMAP] big pid=");
+      kl_i(&kl, p ? p->pid : -1);
+      kl_s(&kl, " base=0x");
+      kl_hex(&kl, (unsigned long)r);
+      kl_s(&kl, " len=0x");
+      kl_hex(&kl, (unsigned long)len);
+      kl_s(&kl, " prot=");
+      kl_i(&kl, (long)prot);
+      kl_s(&kl, " flags=0x");
+      kl_hex(&kl, (unsigned long)f);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   /* M6/L36: name every executable anonymous mapping.  Mono's code manager
      allocates JIT code pages this way, so the [SFA]/[SFB] stack dumps can be
      read against a known code range: a return address inside one of these
