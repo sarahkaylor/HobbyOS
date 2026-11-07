@@ -73,7 +73,12 @@ typedef enum {
      DirectoryNotFoundException and the main menu never appeared.  An NFSDIR
      fd has no data path; getdents64 walks nfs_list_dir() and stat reports a
      directory.  Appended last: no values shift. */
-  FILE_TYPE_NFSDIR
+  FILE_TYPE_NFSDIR,
+  /* M1 (docs/gpu-abi.md): /dev/gpu -- the virtio-gpu 3D userspace ABI.
+     read/write refuse it; the compat ioctl(16) route answers the GPU_IOC_*
+     requests through gpu_abi.c.  mmap is refused in M1 (no blob resources).
+     Appended last: no values shift. */
+  FILE_TYPE_DEVGPU
 } file_type_t;
 
 struct vm_object;

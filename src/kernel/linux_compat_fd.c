@@ -47,7 +47,8 @@
 #include "arch/trap.h"
 #include "errno.h"
 #include "fb_mmap.h" /* GB-025 / M3: FBIOGET_* on /dev/fb0 */
-#include "file_obj.h" /* GB-025 / M3: file_is_devfb() */
+#include "file_obj.h" /* GB-025 / M3: file_is_devfb(); M1: file_is_devgpu() */
+#include "gpu_abi.h" /* M1: /dev/gpu GPU_IOC_* surface */
 #include "fs.h"
 #include "kline.h"
 #include "ipc_proto.h"
@@ -650,6 +651,12 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
     int cr = l_copy_to_user(p, arg, kbuf, sz);
     return l_ret(tf, cr != 0 ? cr : 0);
   }
+  /* M1 (docs/gpu-abi.md): the /dev/gpu request set.  Unlike the fb node the
+   * debugfs structs are read-modify-write (ctx/res ids out, submit fence out),
+   * so the handler owns the copy-in/copy-out: gpu_abi_ioctl() takes the user
+   * pointer and does every access through vm_user_read/vm_kwrite. */
+  if (file_is_devgpu(p, fd))
+    return l_ret(tf, gpu_abi_ioctl(p, fd, (unsigned long)req, arg));
   if (req == (uint32_t)L_F_GETFL) return l_ret(tf, file_fcntl(p, fd, K_F_GETFL, 0));
   if (req == (uint32_t)L_F_SETFL) return l_ret(tf, file_fcntl(p, fd, K_F_SETFL, arg));
   return l_ret(tf, -ENOTTY);
