@@ -183,18 +183,18 @@ the game now presents the menu instead of parking on `Initializing.`
 menu, and it stays there for the rest of a 1800 s window with the block layer
 clean. The next wall is the menu itself:
 
-* it presents at **1.00 fps** (one frame a second, static content), against
-  the 12-16 fps the loading animation gets on the same device (`docs/
-  rimworld-virgl-m3.md` §3.2). The engine is alive (`[FUTR]` 11 rounds/s at
-  the menu, 25 threads), so this is not a hang; it is the menu's render loop
-  costing ~1 s a frame.
+* it presents at **0.9-1.0 fps** (one frame a second, static content),
+  against the 12-16 fps the loading animation gets on the same device
+  (`docs/rimworld-virgl-m3.md` §3.2). The engine is alive (`[FUTR]` 9-11
+  rounds/s at the menu, 25 threads), so this is not a hang; it is the menu's
+  render loop costing ~1 s a frame.
 * the frame does not change on its own (CRC `changed=0`), so the next question
   is input: a click on `New colony` (or a hover) is the only way to tell a
   slow-but-live menu from one that has painted its last frame. The lane's
   click path (QMP `input-send-event`) is in the harness now, so that is a
   one-env-var experiment for the next lane.
-* the Steam modal is a startup event, not a wall: one click (or its timeout)
-  and the game continues.
+* the Steam modal is a startup event, not a wall: it clears by itself within
+  ~30 s (M2 shot 11 → shot 12, no input) and the game continues.
 
 The rows that would have been "the stop" if the game had stopped, taken at
 the menu instead (M2, t=1800 s):
