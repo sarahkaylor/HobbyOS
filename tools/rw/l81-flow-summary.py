@@ -64,10 +64,14 @@ def main():
     print("\n== CLICKS (target, then what changed) ==")
     print(f"{'stage':<12} {'phrase':<20} {'how':<12} {'click':<11} {'diffpx':>8} "
           f"{'bbox':<21} {'clock':>6} {'-> class':<12} {'crc':<17} note")
+    last_click = {}
     for r in recs:
+        if r.get("ev") == "click":
+            last_click[(r.get("stage"), r.get("phrase"))] = r.get("click")
         if r.get("ev") != "click_result":
             continue
-        cl = r.get("click") or ["?", "?"]
+        cl = r.get("click") or last_click.get(
+            (r.get("stage"), r.get("phrase"))) or ["?", "?"]
         print(f"{r.get('stage',''):<12} {str(r.get('phrase'))[:20]:<20} "
               f"{str(r.get('how',''))[:12]:<12} "
               f"{str(cl[0])+','+str(cl[1]):<11} {str(r.get('pixels')):>8} "

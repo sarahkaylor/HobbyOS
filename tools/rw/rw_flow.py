@@ -300,6 +300,45 @@ def brown_buttons(png):
     return footer + rest
 
 
+def land_point(png):
+    """A point on the planet's land, near the centre of the world view.
+
+    The site screen is a full-window globe with no footer button; the tile
+    has to be clicked.  Space and ocean are blue-dominant (B > R); land is
+    brown/green (R >= B).  A 9x9 window must be land in >= 90 % of its
+    pixels so the click never lands on a coastline, a faction icon or a
+    label.  Returns (x, y) or None.
+    """
+    try:
+        a = np.asarray(Image.open(png).convert("RGB")).astype(int)
+    except Exception:
+        return None
+    h, w, _ = a.shape
+    r, g, b = a[:, :, 0], a[:, :, 1], a[:, :, 2]
+    land = (r >= 75) & (r >= b - 8) & (g >= 40) & (r < 235) & (g < 225)
+    land[:130, :] = False
+    land[h - 75:, :] = False
+    land[:, :330] = False
+    land[:, w - 270:] = False
+    k = 9
+    ii = np.zeros((h + 1, w + 1), dtype=np.int32)
+    ii[1:, 1:] = np.cumsum(np.cumsum(land.astype(np.int32), 0), 1)
+    best = None
+    for y in range(140, h - 90, 20):
+        for x in range(340, w - 280, 20):
+            y0, x0 = y - k // 2, x - k // 2
+            s = (ii[y0 + k, x0 + k] - ii[y0, x0 + k]
+                 - ii[y0 + k, x0] + ii[y0, x0])
+            if s < int(k * k * 0.9):
+                continue
+            d = (x - w // 2) ** 2 + (y - (h // 2 + 20)) ** 2
+            if best is None or d < best[0]:
+                best = (d, x, y)
+    if not best:
+        return None
+    return (best[1], best[2])
+
+
 def diff_stats(a_png, b_png, thr=8):
     a = np.asarray(Image.open(a_png).convert("RGB")).astype(np.int16)
     b = np.asarray(Image.open(b_png).convert("RGB")).astype(np.int16)
@@ -416,9 +455,21 @@ class Flow:
 
     def serial(self):
         try:
-            return open(self.log_path, errors="replace").read()
+            t = open(self.log_path, errors="replace").read()
         except OSError:
             return ""
+        # RW_WAIT_SECS' log dump replays Player.log to the console, and
+        # Player.log itself contains a copy of the [XSW] rows.  A parser that
+        # walks the whole file then sees OLD present counters after the dump
+        # (measured: the flow read n=110/t=128 s while the live counter was
+        # n=320/t=422 s).  Everything after the dump marker is a replay.
+        cut = t.find("--- Player.log (")
+        return t[:cut] if cut > 0 else t
+
+    def game_exited(self):
+        """The launcher prints the child's wait status when the GAME dies."""
+        m = re.search(r"\[RW\] rwlaunch: waitpid=\d+ status=(-?\d+)", self.serial())
+        return m.group(0) if m else None
 
     def xsw_rows(self):
         rows = []
@@ -463,6 +514,10 @@ class Flow:
                 return {"fps": None, "span_s": 0,
                         "n": last["n"], "crc": last["crc"],
                         "changed": last["changed"]}
+        if last["t"] - ref["t"] > secs * 1000 * 2.5:
+            return {"fps": None, "span_s": round((last["t"] - ref["t"]) / 1000.0, 1),
+                    "n": last["n"], "crc": last["crc"],
+                    "changed": last["changed"]}
         dt = (last["t"] - ref["t"]) / 1000.0
         dn = last["n"] - ref["n"]
         return {"fps": round(dn / dt, 3) if dt > 0 else None,
@@ -570,6 +625,11 @@ class Flow:
                        "clock_frac": d.get("clock_frac")})
             if cls == "menu":
                 return png, txt
+            exited = self.game_exited()
+            if exited:
+                self.emit({"ev": "wall", "stage": "game-exited",
+                           "text": txt[:600], "note": exited})
+                return None, None
             low = txt.lower()
             if ("findnextentry" in low or "could not load defs" in low
                     or ("input/output error" in low and "defs" in low)):
@@ -596,9 +656,10 @@ class Flow:
         btns = brown_buttons(png)
         if btns and stage not in ("menu",):
             out.append((btns[0], "footer", "brown-button"))
-        for phrase in ("Next", "Start", "Generate"):
+        for phrase in ("Next", "Start", "Generate", "OK", "Confirm",
+                       "Accept", "Settle"):
             box = phrase_box(png, phrase)
-            if box and box[0] > 900:  # footer/right side only
+            if box and box[0] > (700 if stage == "site" else 900):
                 out.append((box, phrase, "ocr"))
         return out[:2]
 
@@ -652,8 +713,57 @@ class Flow:
                    "phrase": label})
         return png, stage, self.last_text, False
 
+    def drive_site(self, png, txt, deadline, secs):
+        """The site screen has no footer: click a land tile, then confirm.
+
+        'Select starting site' is a full-window globe.  The tile under the
+        click is the selection; the OK/Next panel only appears afterwards
+        (and its buttons are the rightmost brown band, which try_advance
+        already finds).
+        """
+        self.enter_stage("site", png, txt)
+        if secs > 0 and os.environ.get("RW_FLOW_SKIP_FPS", "0") != "1":
+            rec = self.measure_stage("site", png, secs)
+            if rec.get("shot"):
+                cand = os.path.join(self.args.shot_dir, rec["shot"])
+                if os.path.exists(cand):
+                    png = cand
+                    txt = rec.get("text", txt)
+        for attempt in range(1, 6):
+            if time.time() > deadline:
+                break
+            if "select starting site" in (txt or "").lower():
+                pt = land_point(png)
+                if not pt:
+                    self.emit({"ev": "skip", "stage": "site",
+                               "phrase": "land tile",
+                               "note": "no land pixel found"})
+                    return "site", png, txt
+                self.emit({"ev": "resolve", "stage": "site",
+                           "phrase": "land tile", "how": "pixel",
+                           "attempt": attempt, "click": [pt[0], pt[1]]})
+                png2 = self.click_xy(pt, "site", f"tile{attempt}", "land-pixel")
+                png2, cls2, txt2, d = self.verify_click(
+                    png, png2, "site", f"land tile {attempt}")
+                px = d.get("pixels")
+                self.emit({"ev": "selected" if isinstance(px, int) and px > 3000
+                           else "retry", "stage": "site",
+                           "phrase": "tile", "text": (txt2 or "")[:200],
+                           "pixels": px})
+                png, txt = png2 or png, txt2 or txt
+            # A tile is (or may be) selected: confirm it.
+            if "select starting site" not in (txt or "").lower() or brown_buttons(png):
+                p2, cls2, t2, moved = self.try_advance(png, "site", deadline)
+                if moved:
+                    return cls2, p2, t2
+                png, txt = p2, t2 or txt
+            time.sleep(2)
+        return "site", png, txt
+
     def drive_stage(self, stage, png, txt, deadline, secs):
         """Run one stage's action list, then return the next (stage, png, txt)."""
+        if stage == "site":
+            return self.drive_site(png, txt, deadline, secs)
         self.enter_stage(stage, png, txt)
         if secs > 0 and os.environ.get("RW_FLOW_SKIP_FPS", "0") != "1":
             rec = self.measure_stage(stage, png, secs)
@@ -730,6 +840,12 @@ class Flow:
                        "note": "changed" if changed else ("live" if live else "static")})
             if cls != stage and cls != "unknown":
                 return cls, p2, txt
+            exited = self.game_exited()
+            if exited:
+                self.emit({"ev": "wall", "stage": "game-exited",
+                           "text": txt[:600], "shot": os.path.basename(p2),
+                           "note": exited})
+                return None, p2, txt
             prev = p2
             if time.time() - last_change > (240 if gen else wall_secs):
                 self.emit({"ev": "wall", "stage": stage,
