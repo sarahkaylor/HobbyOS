@@ -16,14 +16,38 @@
  * Pool extents (design section 2.1, validated by the frame_init boot
  * log line):
  *   ARM  [0x70000000, 0x240000000)                        1,900,544 frames
- *   x64  [0x20000000, 0x70000000) + [0x80000000, 0x180000000)
- *                                                         1,376,256 frames
+ *   x64  [0x20000000, 0x70000000) + [0x100000000, 0x200000000)
+ *   (L75: extent 1 starts at 4 GiB, not 2 GiB -- 2-4 GiB is the 32-bit PCI
+ *   MMIO hole on this machine and the NVMe BAR lives at its base.  The
+ *   2 MiB identity shadow of each kernel MMIO window is reserved too.)
  * Both extents are identity-mapped kernel-side on both arches (ARM
  * L1[1..8], x64 PD0/PD1..PD7), so a frame's kernel VA equals its
  * physical address and table frames are usable with ordinary stores.
  */
 #define FRAME_SIZE  0x1000
 #define FRAME_SHIFT 12
+
+/* Pool extents (physical).  A frame's kernel VA equals its physical address
+ * on both arches, so these are also the identity-mapped VA ranges.  L75: x64
+ * extent 1 starts at 4 GiB -- 2-4 GiB is the 32-bit PCI MMIO hole on this
+ * machine and the NVMe BAR is placed at its base, so the old extent
+ * (0x80000000) handed out the controller's own register file as RAM. */
+#ifdef __x86_64__
+#define FRAME_EXT0_BASE 0x20000000ULL
+#define FRAME_EXT0_TOP  0x70000000ULL
+#define FRAME_EXT1_BASE 0x100000000ULL
+#define FRAME_EXT1_TOP  0x200000000ULL
+/* The two 2 MiB kernel MMIO windows sit at VA 0x1FC000000 (NVMe, PD7[480])
+ * and 0x1FE000000 (virtio-gpu, PD7[496..497]).  PD7 is an identity map, so
+ * installing a window there removes the identity mapping of the same
+ * physical 2 MiB: a frame allocated in that range would be reachable only
+ * through the window, i.e. it would BE the device.  Reserved by frame_init. */
+#define FRAME_MMIO_SHADOW_LO 0x1FC000000ULL
+#define FRAME_MMIO_SHADOW_HI 0x200000000ULL
+#else
+#define FRAME_EXT0_BASE 0x70000000ULL
+#define FRAME_EXT0_TOP  0x240000000ULL
+#endif
 
 #ifdef __x86_64__
 #define FRAME_POOL_EXTENTS 2
@@ -75,6 +99,16 @@ int frame_total_count(void);
 int frame_free_count(void);
 int frame_used_count(void);
 int frame_high_water(void);
+/* L75: frames handed out at a physical address that is not RAM (the 32-bit
+ * PCI hole).  Must stay 0 -- a nonzero value means a device page was handed
+ * to a caller, which is how the L65-L73 "zero page"/controller reset
+ * happened.  Printed by the 5 s device row. */
+int frame_hole_allocs(void);
+
+/* L75: bounds of pool extent `idx` (0-based, pool order).  Returns 0 on
+ * success, -1 for an index this arch does not have.  Exists so
+ * test_frame_pool_is_ram_only can pin "no extent intersects the PCI hole". */
+int frame_extent_bounds(int idx, uint64_t *lo, uint64_t *hi);
 
 /* --- 32 MiB block layer (v1 process regions) ------------------------- */
 

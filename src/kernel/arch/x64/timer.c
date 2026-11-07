@@ -235,6 +235,17 @@ void timer_reload(void) {
     extern void linux_compat_timer_tick(uint64_t now);
     linux_compat_timer_tick(timer_get_ms());
   }
+  /* L75: log every controller state change the MMIO registers show (CC,
+     CSTS, INTMS/INTMC, admin ring indices).  CPU 0 only: one tick per
+     machine, four MMIO reads, and a row only when something changed.  This
+     is the instrument that turns "the controller disappeared at t=730 s"
+     into a timestamped transition with both sides' register values. */
+  {
+    extern void virtio_blk_watch_mmio(void);
+    extern uint32_t get_cpuid(void);
+    if (get_cpuid() == 0)
+      virtio_blk_watch_mmio();
+  }
   // NOTE: We intentionally do NOT call virtio_net_handle_irq() here.
   // The provider_loop on CPU 0 polls the RX used ring directly via poll_rx.
   // Calling handle_irq from ANY CPU's timer ISR reads inb(ISR) which clears

@@ -838,6 +838,38 @@ static void phase6_churn(unsigned char *buf) {
 __attribute__((section(".text._start"))) void _start(void) {
   print_console("BLKTEST: block-cache in-OS integration test\n");
 
+  /* L75: the soak mode.  /CHURN.SOAK makes this process a *background* block
+     stressor: seed once, then run the P6 churn waves (4 readers streaming
+     small random read sizes over 6 x 256 KiB files, 3 writers rewriting a hot
+     window, one grower appending so clusters are allocated under the readers)
+     for ever.  rwlaunch spawns it next to the game, which is what "the block
+     stress probe alongside the window" means: one process issuing the game's
+     I/O, one issuing random small reads+writes, both through the same driver
+     and cache. */
+  {
+    int soak = open("/CHURN.SOAK", O_RDONLY);
+    if (soak >= 0) {
+      unsigned char *sbuf;
+      int wave = 0;
+      close(soak);
+      sbuf = (unsigned char *)malloc(BIG_READ);
+      if (!sbuf) {
+        print_console("BLKTEST SOAK: OOM\n");
+        exit(1);
+      }
+      pcon("BLKTEST SOAK: background churn (small random reads + writes)\n");
+      for (;;) {
+        wave++;
+        if (wave <= 3 || (wave % 20) == 0) {
+          pcon("BLKTEST SOAK wave ");
+          pnum(wave);
+          pcon("\n");
+        }
+        phase6_churn(sbuf);
+      }
+    }
+  }
+
   struct sys_blkcache_stats probe;
   have_cache = (sysinfo(9, &probe, (int)sizeof(probe)) == 0) ? 1 : 0;
   /* One atomic call so the "cache: present|absent" token survives wave
