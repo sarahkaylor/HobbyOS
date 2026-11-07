@@ -9380,3 +9380,175 @@ PASSED**.  `m3_window`: **PASS** (`m3w: PASS — the shim served SDL's whole
 XCreateWindow sequence and delivered WM_DELETE_WINDOW`).  `m4_gl`: **PASS**
 (`m4: PASS — libGL.so.1 loaded in the guest, rendered a GL 3.3 core triangle,
 PRESENTED it to a window, and tore the stack down`).
+
+## 51. 2026-11-06 — M6/L67: the block wedge is a **host-side controller reset**, and the page that killed the loader was an **aborted transfer**; run 1's 1 899 MiB was a livelock, not a load
+
+§50 named the block wedge as the real bug in the window and left the question
+the L55 row could not answer: *is the device not completing, or are we missing a
+completion?*  This lane instrumented the request, the ring **and the device's own
+registers**, traced the host side of the same device, and got a decisive answer.
+It is neither a lost completion nor a bookkeeping bug: **the controller is reset
+out from under the request, by QEMU, and the transfer that was in flight is
+aborted and later completes with success and no DMA — which is the page of zeros
+that kills pid 4.**
+
+Full evidence: `docs/l67-wedge-report.md`.
+
+### 51.1 The stalled-request tuple
+
+Run 1 (1800 s window, load complete at `bytes=277581512`), t≈590 s:
+
+```text
+[BLKQ] device off cid=44230 op=0x2 lba=0x7B41B since_ms=2
+       cc=0x460001 csts=0x0 cap=0xF0107FF/0x400820 vs=0x10400 cc0_writes=0
+[BLKQ] wedge-device-off cid=44230 op=0x2 lba=0x7B41B nlb=0 prp=0x748B6000
+       slot=1 sq_tail=2 cq_head=1 phase=1 cqe[cq_head].cid=65535 .status=0x0
+       at_slot.cid=65535 .status=0x0 last_cid=44229 last_sqhead=1
+       ms_since_done=8 inside=1 stalls=0 devoff=1 reqs=109665 cc0=0 cpu=3
+       CSTS=0x0 CC=0x0 CAP=0xF0107FF VS=0x10400 INTMS=0x0 INTMC=0x0
+[BLKQ] controller reset #1
+[BLKQ] admin timeout cid=2 CSTS=0x0
+[BLKQ] create SQ failed status=0x7FFF
+[BLKQ] reinit failed cid=44230 -> I/O error
+[BLKQ] device off cid=44231 op=0x2 lba=0x7B418 since_ms=2019 cc=0x0 csts=0x0 ... cc0_writes=1
+[BLKQ] controller reset #2
+[BLKQ] recovered cid=44231 us=5000 resets=2
+[TXT] ZERO off=0x757000 reads=3 n0=4096 -> not published
+[KERNEL] pid=4 memory fault VA=0x000000108228B570 ... -> killed
+```
+
+The row decides every candidate:
+
+* `cqe[cq_head].status=0x0` with `phase=1` — **no valid completion at the CQ
+  head**, and nothing at the command's own SQ slot either;
+* `last_sqhead=1` — the device's own SQ head (from the previous CQE) matches
+  ours, `ms_since_done=8` — it was completing normally 8 ms earlier;
+* `inside=1` — one driver entrant, so not the L55 two-consumer desync;
+* **`cc0=0`** — this kernel had not written CC=0 yet in the whole run;
+* `CC=0x460001` (EN=1) with `CSTS=0x0` (RDY=0) on the detection read, and
+  `CC=0x0` on the same row's later re-read — the controller was **inside**
+  QEMU's `nvme_ctrl_reset()` (which zeroes CSTS, INTMS and INTMC first, drains
+  the namespaces, and only then frees the queues and clears CC) and the reset
+  **finished two milliseconds later**;
+* `CAP`/`VS` read correctly at that instant, so the BAR mapping and
+  `cpu_pd7[480]` are not the explanation.
+
+So: **(A), and it is not even "slow" — the device was reset.**  The host trace
+agrees: `pci_nvme_pci_reset` (FLR) appears only at boot, and no
+`pci_nvme_mmio_stopped` (guest CC write) precedes the wedge; the only doorbell
+gap is the one our own resubmission makes.
+
+### 51.2 The death was an aborted transfer, not the reset itself
+
+L55's recovery was written for a *lost completion*: bound the wait, reset,
+resubmit.  Against a device that is **mid-reset** that sequence is exactly
+wrong, and the log shows it: reinit #1 writes CC=0 *into* QEMU's running reset,
+QEMU then finishes the reset and frees the queues we just created, so the admin
+`Create SQ` times out (`cid=2`, 2 s), `reinit failed`, and a good read is turned
+into `-EIO`.  Reinit #2, with no reset in flight any more, takes **5 ms**.
+
+The read that kills the process is the *retry*: QEMU aborts the requests that
+were in flight when it reset, and an aborted AIO can complete with **success and
+no DMA**, so `bounce_buf` still holds the previous command's bytes (here, zeros).
+The exec gate reads a full 4096 zeros three times (`[TXT] ZERO off=0x757000
+reads=3 n0=4096`) — the first from the device, the second and third from the
+block cache, which had published the zero frame as valid because the status was
+0 — refuses to publish, and the instruction fetch faults in `PROT` and kills
+pid 4.  That is why the VA is the same every run: it is the page the aborted
+read was for.
+
+### 51.3 The fix
+
+`src/kernel/virtio_blk.c`:
+
+1. **Detect, do not wait.** The wait loop polls `CC.EN`/`CSTS.RDY` once the
+   command has been outstanding for 20 ms; either clearing means the controller
+   was reset and the cid can never be posted.  No 2 s bound, no blind reset.
+2. **Repair without racing the host.** `nvme_reinit()` waits (≤500 ms) for a
+   half-reset device to finish, retries the whole sequence up to 4 times, and
+   re-checks CC/CSTS 20 ms after a successful enable.
+3. **Never trust the first transfer after a repair.** The completion that
+   arrives after a recovery is discarded and the same command is issued once
+   more (`[BLKQ] re-read after recovery`); only the second transfer is used, so
+   an aborted-AIO "success" cannot become data.  At most 3 repair+re-read cycles
+   per request, then `-EIO`.
+
+Cost: one extra command per repaired request (two in a run), and no MMIO in the
+fast path (`dt > 20 ms` gate).
+
+### 51.4 Run 1's 1 899 MiB was a livelock, not a load
+
+Run 1 of §50 never hit the block wedge at all: `0 [BLKQ] stall`, `0 [BLKSLOW]`,
+`0 [TXT] ZERO`, `0 [NFSRD] fail`.  Its rows (`obj/l65-run1.serial.log`):
+
+| t (s) | NFS bytes | `[XSW] n` | live | res MiB |
+|---:|---:|---:|---:|---:|
+| 421 | 77 809 096 | **260** | 26 | 879 |
+| 541 | **277 577 677** (final) | 260 | 26 | 1148 |
+| 1041 | 277 577 677 | 260 | 26 | 1476 |
+| 1690 | 277 577 677 | 260 | 25 | **1899** |
+
+* presents stop at **260** at t≈420 s, *before* the load finishes, and the
+  framebuffer is 8×1 by t≈500 (§50.7) — the same window loss runs 2/3 show at
+  491/504 s;
+* the load then reaches the deterministic total and stops dead (no NFS read
+  after 541 s);
+* `res_mib` climbs **linearly at 0.64 MiB/s** for 19 minutes, matched by the
+  publish counter: `[PUBS] n` 307 200 → 503 808 (+196 608 first-touch anon pages
+  = 768 MiB, one page per 6.1 ms);
+* the futex recorder's last-64 window (re-dumped by the idle hang report, up to
+  line 145 766) is a **three-thread WAIT/WAKE cycle** — pid 4 waits on
+  `0x1083B17624`, 26 wakes it and waits on `0x1100000334`, 4 wakes it and 27
+  waits on `0x113000A460`, 26 wakes it … all `to=-1`, `bitset=0xFFFFFFFF`; the
+  record index reached 190 182 in 1690 s ≈ **112 futex ops/s**;
+* the scheduler's verdict: `[ALIVE-SET] no READY work, yet the scheduler counts
+  live work ... so no halt`, 25 live slots — 24 in `PROC_STATE_FUTEX` and pid 4
+  `st=3` (RUNNING) at `pc=0x10B8043D72`, a JIT arena.
+
+So run 1 parked in a **post-load frame-handshake livelock with an unbounded
+per-iteration allocation**, not on a file, a dead thread, or the block layer.
+`1 899 MiB` must not be read as "still loading": the load is over at
+277 577 677 bytes / t=541 s.
+
+### 51.5 The fast reproducer
+
+`BLKTEST.BIN` gained an opt-in **P6 device-churn** phase (`/CHURN.ON` must
+exist, so the wave is untouched): 4 readers streaming 6 × 256 KiB files in
+random 512…4096 B chunks, 3 writers rewriting a random file's first sector each
+iteration, one grower appending 256 B × 400 under the readers, parent as a fifth
+reader.  [CHURN-RESULT]
+
+### 51.6 Ladder
+
+| run | window | `[BLKQ] stall` | host resets seen | repair | end state |
+|---|---:|---:|---:|---:|---|
+| instrumented (QEMU trace on) | 1800 s | **0** | 1 (cid 44230) | 5 ms after a 2 s failed repair | killed on a zero page, load complete (277 581 512 B) |
+| ladder 1 (fresh cid + drain) | 1800 s | **0** | 1 (cid 44202) | **56 ms**, no admin timeout, no `-EIO` | killed on a zero page, load complete (277 468 532 B) |
+| ladder 2 (same build) | 1800 s | **0** | **0** | - | killed on a zero page at t~270 s, load at 50 MB |
+
+The wedge itself is dead: no run produces a `[BLKQ] stall`, the controller is
+repaired in tens of milliseconds when the host resets it, and the L55 failure
+mode (`create SQ failed` -> `reinit failed` -> `-EIO` on a good read) is gone.
+
+But the **process still dies**, and ladder 2 is the run that separates the two
+bugs for good: it died at 50 MB of load with `devoff=0 resets=0 cc0=0` - the
+controller was enabled and ready the whole time - on
+
+```text
+[FATW] ZERORD sector=656610 off=82944 size=83099
+[TXT] ZERO off=0xBC000 reads=3 n0=4096 -> not published
+[KERNEL] pid=40 memory fault VA=0x00000010890BE00C ... in=PROT -> killed
+```
+
+So the page of zeros is **not** the wedge's aftershock: a healthy controller and
+a healthy ring still hand the exec gate a full 4 KiB of zeros for a page that
+must hold code (`n0=4096` means FAT16 did not clamp, so this is not an
+end-of-file short read).  That is a separate page-in defect, and it is the one
+between the loader and the menu.
+
+### 51.7 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh`: **423 run, 0 failed, UNIT TESTS
+PASSED**.  `tools/rw/l67-gates.sh`: **redzone, fpu_sig, m2_mono, m2_tp,
+m2_threads, m12, mmap_race, m3_window, m4_gl, rwnfs — 10 passed, 0 failed**
+(one tier at a time; the unit wave and a desktop boot never share `disk.img`).

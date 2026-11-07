@@ -587,6 +587,254 @@ static void phase4_pressure(void) {
 
 /* ---- entry -------------------------------------------------------------- */
 
+/* ---- P6: device churn (L67 wedge reproducer) ---------------------------
+ *
+ * The L65 soak's block wedge arrived after ~490 s of load.  To debug that
+ * without a 9-minute boot, this phase generates the same *shape* of I/O in
+ * seconds: many small random reads (512..4096 B at random 512-aligned
+ * offsets over a 2 MiB file) racing several writers that rewrite a hot
+ * 64 KiB window and periodically close/reopen (which forces the FAT
+ * metadata path, exactly the Player.log growth the game does), plus one
+ * grower that appends to a log file so clusters are allocated while the
+ * readers are walking chains.
+ *
+ * It is opt-in: P6 runs only when /CHURN.ON exists on the image, so the
+ * wave's BLKTEST stays exactly as it was.  Every 100 iterations each
+ * worker prints one line, so a stall is localised to the worker and the
+ * iteration it died on; the kernel prints [BLKD]/[BLKQ] rows independently.
+ */
+#define P6_FILE "/BLKTC.DAT"
+#define P6_LOG "/BLKTC.LOG"
+#define P6_SIZE (2 * 1024 * 1024)
+#define P6_READERS 4
+#define P6_WRITERS 3
+#define P6_ITERS 700
+#define P6_HOT 65536
+
+#ifndef SEEK_SET
+#define SEEK_SET 0
+#endif
+
+static unsigned p6_rand(unsigned *s) {
+  *s = (*s) * 1664525u + 1013904223u;
+  return (*s) >> 8;
+}
+
+static void p6_line(const char *who, int id, int it, unsigned long ok,
+                    unsigned long bad) {
+  char line[80];
+  int n = 0;
+  const char *p = "[BKS] ";
+  while (*p && n < 74) line[n++] = *p++;
+  p = who;
+  while (*p && n < 74) line[n++] = *p++;
+  line[n++] = (char)('0' + (id % 10));
+  p = " it=";
+  while (*p && n < 74) line[n++] = *p++;
+  {
+    char t[12];
+    int k = 0;
+    if (it == 0) t[k++] = '0';
+    while (it > 0 && k < 11) { t[k++] = (char)('0' + it % 10); it /= 10; }
+    while (k > 0 && n < 74) line[n++] = t[--k];
+  }
+  p = " ok=";
+  while (*p && n < 74) line[n++] = *p++;
+  {
+    char t[16];
+    int k = 0;
+    if (ok == 0) t[k++] = '0';
+    while (ok > 0 && k < 15) { t[k++] = (char)('0' + (int)(ok % 10)); ok /= 10; }
+    while (k > 0 && n < 74) line[n++] = t[--k];
+  }
+  p = " bad=";
+  while (*p && n < 74) line[n++] = *p++;
+  {
+    char t[16];
+    int k = 0;
+    if (bad == 0) t[k++] = '0';
+    while (bad > 0 && k < 15) { t[k++] = (char)('0' + (int)(bad % 10)); bad /= 10; }
+    while (k > 0 && n < 74) line[n++] = t[--k];
+  }
+  line[n++] = '\n';
+  line[n] = '\0';
+  pcon(line);
+}
+
+/* One churn worker.  Never returns.
+ *
+ * No lseek in the minimal user libc, so the shape is the game's own:
+ * readers read a file front-to-back in random-sized chunks (the loader
+ * reads 4 KiB pages sequentially too), and writers rewrite the first sector
+ * of one of several files — different clusters, so the device sees random
+ * small writes while the readers walk chains. */
+#define P6_FILES 6
+#define P6_FILE_BYTES (256 * 1024)
+
+static void p6_name(int k, char *out) {
+  const char *p = "/BLKTC";
+  int n = 0;
+  while (*p) out[n++] = *p++;
+  out[n++] = (char)('0' + k);
+  out[n++] = '.';
+  out[n++] = 'D';
+  out[n++] = 'A';
+  out[n++] = 'T';
+  out[n] = '\0';
+}
+
+static void p6_worker(int id, unsigned char *buf) {
+  unsigned seed = 0x9E3779B9u + (unsigned)id * 7919u;
+  unsigned long ok = 0, bad = 0;
+  int is_writer = (id >= P6_READERS);
+  int pressure = 0;
+  char path[16];
+  for (int it = 0; it < P6_ITERS; it++) {
+    unsigned r = p6_rand(&seed);
+    int k = (int)((r >> 5) % P6_FILES);
+    p6_name(k, path);
+    if (!is_writer) {
+      int fd = open_retry(path, O_RDONLY, &pressure);
+      if (fd < 0) { bad++; continue; }
+      int base = 0;
+      for (;;) {
+        int len = 512 << (p6_rand(&seed) % 4);
+        if (base + len > P6_FILE_BYTES) break;
+        int n = read(fd, buf, len);
+        if (n != len) { bad++; break; }
+        int mismatch = -1;
+        for (int i = 0; i < n; i++)
+          if (buf[i] != pat_byte((unsigned int)(base + i))) { mismatch = i; break; }
+        if (mismatch >= 0) {
+          bad++;
+          if (bad <= 4) {
+            p6_line("r-MISMATCH", id, it, ok, bad);
+            p6_line("r at off=", id, base + mismatch, buf[mismatch],
+                    pat_byte((unsigned int)(base + mismatch)));
+          }
+          break;
+        }
+        base += n;
+        ok++;
+      }
+      close(fd);
+    } else {
+      /* Rewrite the file's first sector with its own pattern: a random
+         small write into a different cluster every iteration. */
+      int fd = open_retry(path, O_WRONLY, &pressure);
+      if (fd < 0) { bad++; continue; }
+      for (int i = 0; i < 512; i++)
+        buf[i] = pat_byte((unsigned int)(k * 512 + i));
+      int n = write(fd, buf, 512);
+      close(fd);
+      if (n != 512) { bad++; if (bad <= 4) p6_line("w-short", id, it, ok, bad); continue; }
+      ok++;
+    }
+    if ((it % 100) == 99)
+      p6_line(is_writer ? "w" : "r", id, it, ok, bad);
+  }
+  p6_line(is_writer ? "w-DONE" : "r-DONE", id, P6_ITERS, ok, bad);
+  exit(bad ? 3 : 0);
+}
+
+/* Grower: allocates clusters while the readers walk chains (the Player.log
+ * shape).  One fd, sequential writes, so the FAT grows under the readers. */
+static void p6_grower(unsigned char *buf) {
+  unsigned seed = 0x1234567u;
+  unsigned long ok = 0, bad = 0;
+  int pressure = 0;
+  int fd = open_retry(P6_LOG, O_WRONLY | O_CREAT | O_TRUNC, &pressure);
+  if (fd < 0) { p6_line("g-open", 0, -1, 0, 1); exit(2); }
+  for (int it = 0; it < 400; it++) {
+    for (int i = 0; i < 256; i++)
+      buf[i] = pat_byte(p6_rand(&seed) & 0xFFFF);
+    int n = write(fd, buf, 256);
+    if (n != 256) { bad++; continue; }
+    ok++;
+  }
+  close(fd);
+  p6_line("g-DONE", 0, 400, ok, bad);
+  exit(bad ? 3 : 0);
+}
+
+static void phase6_churn(unsigned char *buf) {
+  int probe = open("/CHURN.ON", O_RDONLY);
+  if (probe < 0)
+    return;
+  close(probe);
+  pcon("BLKTEST P6: device churn (random small reads + concurrent writers)\n");
+  int pressure = 0;
+  unlink(P6_LOG);
+  char path[16];
+  for (int k = 0; k < P6_FILES; k++) {
+    p6_name(k, path);
+    unlink(path);
+    int fd = open_retry(path, O_WRONLY | O_CREAT | O_TRUNC, &pressure);
+    if (fd < 0) { check("P6 create churn file", 0); return; }
+    for (int off = 0; off < P6_FILE_BYTES; off += BIG_READ) {
+      int n = P6_FILE_BYTES - off;
+      if (n > BIG_READ) n = BIG_READ;
+      fill_pattern(buf, (unsigned int)off, n);
+      if (write(fd, buf, n) != n) { check("P6 seed file", 0); close(fd); return; }
+    }
+    close(fd);
+  }
+  pcon("  BLKTEST P6 seed ok (6 x 256 KiB)\n");
+
+  int pids[P6_READERS + P6_WRITERS + 1];
+  int npid = 0;
+  for (int w = 0; w < P6_READERS + P6_WRITERS; w++) {
+    int pid = fork();
+    if (pid == 0)
+      p6_worker(w, buf);
+    if (pid > 0)
+      pids[npid++] = pid;
+  }
+  {
+    int pid = fork();
+    if (pid == 0)
+      p6_grower(buf);
+    if (pid > 0)
+      pids[npid++] = pid;
+  }
+  /* The parent is a reader too: in the real workload the game's main thread
+     is one of the readers, not a bystander. */
+  unsigned long ok = 0, bad = 0;
+  unsigned seed = 0xABCDEF01u;
+  for (int it = 0; it < 200; it++) {
+    unsigned r = p6_rand(&seed);
+    int k = (int)((r >> 5) % P6_FILES);
+    p6_name(k, path);
+    int fd2 = open_retry(path, O_RDONLY, &pressure);
+    if (fd2 < 0) { bad++; continue; }
+    int base = 0;
+    int mismatch = 0;
+    for (;;) {
+      int len = 512 << (p6_rand(&seed) % 4);
+      if (base + len > P6_FILE_BYTES) break;
+      int n = read(fd2, buf, len);
+      if (n != len) { mismatch = 1; break; }
+      for (int i = 0; i < n; i++)
+        if (buf[i] != pat_byte((unsigned int)(base + i))) { mismatch = 1; break; }
+      if (mismatch) break;
+      base += n;
+    }
+    close(fd2);
+    if (mismatch) bad++; else ok++;
+  }
+  p6_line("p", 0, 200, ok, bad);
+
+  int st;
+  for (int i = 0; i < npid; i++)
+    waitpid(pids[i], &st, 0);
+  pcon("BLKTEST P6 churn complete (parent ok=");
+  pu64(ok);
+  pcon(" bad=");
+  pu64(bad);
+  pcon(")\n");
+}
+
+
 __attribute__((section(".text._start"))) void _start(void) {
   print_console("BLKTEST: block-cache in-OS integration test\n");
 
@@ -634,6 +882,8 @@ __attribute__((section(".text._start"))) void _start(void) {
   } else {
     pcon("BLKTEST P4: SKIP (no cache)\n");
   }
+
+  phase6_churn(buf);
 
   free(buf);
 

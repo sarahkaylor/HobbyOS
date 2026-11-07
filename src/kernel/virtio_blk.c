@@ -110,6 +110,35 @@ static volatile uint32_t blk_slow;        /* commands that took > 250 ms */
 static volatile uint32_t blk_stale;       /* abandoned CQEs drained */
 static volatile uint32_t blk_resets;      /* controller resets performed */
 
+/* L67: the stalled-request tuple.  The L55 row names the ring indices but
+ * not WHAT was in flight, so "the device is not completing" and "we lost the
+ * completion" could not be told apart.  These fields make one row answer it:
+ * the command (opcode/LBA/NLB/cid/slot), the ring (tail/head/phase), the
+ * device's own view (CAP/VS are read-only and survive a reset; the last
+ * completion's CQE.sq_head is where the device says our SQ head is), and the
+ * MMIO mapping that carries the doorbell (pd480 + the physical BAR). */
+static volatile struct {
+  uint16_t cid;
+  uint16_t slot;
+  uint8_t  opcode;
+  uint32_t nsid;
+  uint64_t lba;
+  uint32_t nlb;
+  uint64_t prp;
+} blk_cur;
+static volatile uint16_t blk_last_cid;
+static volatile uint16_t blk_last_sqhead;
+static volatile uint64_t blk_last_done_ms;
+static volatile uint32_t blk_dev_off;     /* waits that saw CC.EN/CSTS.RDY clear */
+static volatile uint32_t blk_cc_zero;     /* CC=0 writes this kernel issued */
+static volatile uint32_t blk_cc_en;       /* CC=enable writes this kernel issued */
+static volatile uint64_t blk_cc_zero_ms;  /* when the last CC=0 write happened */
+static volatile uint32_t blk_recover_us;  /* last recovery duration */
+
+/* L67: defined below; the health hook above the wait path uses them. */
+static void blk_token_acquire(void);
+static void blk_token_release(void);
+
 static inline void outl(uint16_t port, uint32_t val) {
   __asm__ volatile("outl %0, %1" : : "a"(val), "Nd"(port));
 }
@@ -243,14 +272,44 @@ static int nvme_io_queues_create(void) {
 
 /* Reset the controller and rebuild both queues with an EMPTY, zeroed IO ring.
    Called only with the request token held (single entrant) and after the
-   in-flight command has been abandoned. */
+   in-flight command has been abandoned.
+
+   L67: a host-side reset can still be IN PROGRESS when we get here.  QEMU's
+   nvme_ctrl_reset() writes CSTS=0 first and only tears the queues down and
+   clears CC after it has drained the namespaces, so a guest that "repairs"
+   in that window enables the controller and creates queues *inside* the
+   reset, and the reset then frees them: the admin Create SQ times out and a
+   good read is turned into -EIO.  Two defences:
+     1. if the device is in that half-reset state (CC.EN=1, CSTS.RDY=0) give
+        it a bounded moment to finish before touching it;
+     2. after creating the queues, re-read CC/CSTS a few ms later and redo
+        the whole sequence if the device fell out of ready again. */
 static int nvme_reinit(void) {
   blk_resets++;
   uart_puts("[BLKQ] controller reset #");
   print_int((int)blk_resets);
   uart_puts("\n");
 
+  /* (1) let a host reset that is already running finish (bounded). */
+  {
+    uint64_t t_settle = timer_get_ms();
+    while ((nvme_regs[5] & 1) && !(nvme_regs[7] & 1)) {
+      __asm__ volatile("pause");
+      if ((timer_get_ms() - t_settle) > 500) {
+        uart_puts("[BLKQ] reset: waiting out a host reset, CC=");
+        uart_print_hex(nvme_regs[5]);
+        uart_puts(" CSTS=");
+        uart_print_hex(nvme_regs[7]);
+        uart_puts("\n");
+        break;
+      }
+    }
+  }
+
+  for (int attempt = 0; attempt < 4; attempt++) {
   /* Disable, then wait (bounded) for the controller to acknowledge. */
+  blk_cc_zero++;
+  blk_cc_zero_ms = timer_get_ms();
   nvme_regs[5] = 0;
   uint64_t t0 = timer_get_ms();
   while (nvme_regs[7] & 1) {
@@ -280,6 +339,7 @@ static int nvme_reinit(void) {
   nvme_regs[13] = (uint32_t)(admin_cq_phys >> 32);
   (void)nvme_regs[13];
   nvme_regs[5] = 0x00460001;
+  blk_cc_en++;
   (void)nvme_regs[5];
 
   t0 = timer_get_ms();
@@ -289,7 +349,7 @@ static int nvme_reinit(void) {
       uart_puts("[BLKQ] reset: RDY never set, CSTS=");
       uart_print_hex(nvme_regs[7]);
       uart_puts("\n");
-      return -1;
+      continue; /* retry the whole sequence */
     }
   }
 
@@ -310,7 +370,32 @@ static int nvme_reinit(void) {
   io_cq_phase = 1;
   *io_cq_db = 0;
 
-  return nvme_io_queues_create();
+  if (nvme_io_queues_create() != 0)
+    continue; /* a host reset may have eaten the admin command; redo */
+
+  /* (2) settle check: the host reset can complete just after our enable and
+     free the queues we have only now created.  Give it a few ms and confirm
+     the controller is still enabled and ready before trusting the result. */
+  {
+    /* Require the device to STAY enabled for 50 ms: a host reset that is
+       still draining will clear CC a little later, and returning now would
+       hand the caller a disabled controller. */
+    int stable = 0;
+    uint64_t t_v = timer_get_ms();
+    while ((timer_get_ms() - t_v) < 50) {
+      if (!((nvme_regs[5] & 1) && (nvme_regs[7] & 1))) { stable = 0; break; }
+      stable = 1;
+      __asm__ volatile("pause");
+    }
+    if (stable)
+      return 0;
+    uart_puts("[BLKQ] reset: settled out of ready (attempt ");
+    print_int(attempt);
+    uart_puts("), retrying\n");
+  }
+  } /* for (attempt) */
+  uart_puts("[BLKQ] reset: gave up after 4 attempts\n");
+  return -1;
 }
 
 /* Consume the CQE at the head (valid entry) and publish the new head. */
@@ -330,6 +415,14 @@ static uint32_t blk_submits;
 
 static uint16_t nvme_sq_submit(struct nvme_cmd* cmd) {
   uint16_t slot = io_sq_tail;
+
+  blk_cur.cid = cmd->cid;
+  blk_cur.slot = slot;
+  blk_cur.opcode = cmd->opcode;
+  blk_cur.nsid = cmd->nsid;
+  blk_cur.lba = ((uint64_t)cmd->cdw11 << 32) | cmd->cdw10;
+  blk_cur.nlb = cmd->cdw12 & 0xFFFF;
+  blk_cur.prp = cmd->prp1;
 
   io_sq[slot].opcode = cmd->opcode;
   io_sq[slot].flags = cmd->flags;
@@ -375,7 +468,8 @@ static uint16_t nvme_sq_submit(struct nvme_cmd* cmd) {
 static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
   uint16_t cid = cmd->cid;
   uint64_t t0 = timer_get_ms();
-  int recovered = 0;
+  int repaired = 0;   /* recoveries performed for THIS request */
+  int reissue = 0;    /* the next completion comes from a repaired device */
   uint64_t spins = 0;
   int printed_slow = 0;
 
@@ -395,10 +489,58 @@ static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
       uint16_t cqstat = io_cq[io_cq_head].status;
       if ((cqstat & 1) != io_cq_phase) break; /* no new entry at the head */
       uint16_t cqcid = io_cq[io_cq_head].cid;
+      uint16_t cqsqh = io_cq[io_cq_head].sq_head;
       uint16_t status = (uint16_t)(cqstat >> 1);
       nvme_cq_advance();
       if (cqcid == cid) {
         blk_requests++;
+        blk_last_cid = cid;
+        blk_last_sqhead = cqsqh;
+        blk_last_done_ms = timer_get_ms();
+        /* L67: a completion that arrives after a controller reset is NOT
+           trustworthy.  QEMU aborts the requests that were in flight when it
+           reset the controller, and an aborted AIO can complete with success
+           and no DMA at all: the guest then reads whatever bounce_buf held
+           (a page of zeros), which is exactly the [TXT] ZERO that killed the
+           process after the L65/L67 wedge.  Discard that completion and
+           issue the same command once more into the freshly initialised
+           device; only the second transfer is used. */
+        if (reissue) {
+          reissue = 0;
+          /* QEMU completes the ABORTED request during the reset's namespace
+             drain, and it writes that CQE into the same queue memory we are
+             about to reuse: cid == the command's cid, status 0, no DMA.  That
+             is the page of zeros that killed the loader in L65, and the
+             reason a "re-read" alone did not fix it (L67 run 1: the re-read
+             matched the straggler and returned instantly).  Two defences:
+               1. give any straggler a moment to land and DRAIN it;
+               2. re-issue under a NEW cid, so a late entry can only ever be
+                  drained as stale, never mistaken for this transfer. */
+          for (int k = 0; k < 500; k++) {
+            if ((io_cq[io_cq_head].status & 1) == io_cq_phase) {
+              uart_puts("[BLKQ] drained post-reset straggler cid=");
+              print_int((int)io_cq[io_cq_head].cid);
+              uart_puts(" want=");
+              print_int((int)cid);
+              uart_puts("\n");
+              nvme_cq_advance();
+              blk_stale++;
+              k = 0;
+            }
+            __asm__ volatile("pause");
+          }
+          cmd->cid = next_io_cid();
+          cid = cmd->cid;
+          slot = nvme_sq_submit(cmd);
+          uart_puts("[BLKQ] re-read after recovery cid=");
+          print_int((int)cid);
+          uart_puts(" lba=");
+          uart_print_hex(blk_cur.lba);
+          uart_puts("\n");
+          t0 = timer_get_ms();
+          printed_slow = 0;
+          continue;
+        }
         uint64_t dt = timer_get_ms() - t0;
         if (dt > 250 && printed_slow < 4) {
           printed_slow++;
@@ -407,6 +549,10 @@ static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
           print_int((int)cid);
           uart_puts(" slot=");
           print_int((int)slot);
+          uart_puts(" op=");
+          uart_print_hex(blk_cur.opcode);
+          uart_puts(" lba=");
+          uart_print_hex(blk_cur.lba);
           uart_puts(" ms=");
           print_int((int)dt);
           uart_puts(" status=");
@@ -438,6 +584,10 @@ static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
       print_int((int)cid);
       uart_puts(" slot=");
       print_int((int)slot);
+      uart_puts(" op=");
+      uart_print_hex(blk_cur.opcode);
+      uart_puts(" lba=");
+      uart_print_hex(blk_cur.lba);
       uart_puts(" ms=");
       print_int((int)dt);
       uart_puts(" sq_tail=");
@@ -449,15 +599,63 @@ static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
       uart_puts("\n");
     }
 
-    if (dt > 2000) {
-      blk_stalls++;
-      /* The row the wedge investigation needs: which ring slot, which cid,
-         where both indices are, whether the device is alive (CSTS), whether
-         an interrupt is armed at all (INTMS/INTMC are the NVMe interrupt
-         masks; this queue is created with IEN=0, i.e. polled), and what the
-         head slots hold.  One row per stall, bounded by the reset below. */
-      uart_puts("[BLKQ] stall cid=");
+    /* L67: the controller can be taken out from under an outstanding
+       command.  CC.EN and CSTS.RDY are the device's own mirror of its
+       state; if either clears while THIS kernel has not disabled the
+       controller, the controller was reset by someone else and every
+       completion in flight was destroyed with its queues.  There is nothing
+       to wait for: the cid can never be posted again.  Detecting it here
+       turns a 2 s stall plus a blind reset into a sub-millisecond repair,
+       and (with the re-read above) a transfer that the reset aborted into a
+       correct one. */
+    int device_off = 0;
+    if (dt > 20 && (spins & 0x3F) == 0) {
+      uint32_t cc_now = nvme_regs[5];
+      uint32_t csts_now = nvme_regs[7];
+      if (!(cc_now & 1) || !(csts_now & 1)) {
+        device_off = 1;
+        blk_dev_off++;
+        if (blk_dev_off <= 6 || (blk_dev_off & 0x3F) == 0) {
+          uart_puts("[BLKQ] device off cid=");
+          print_int((int)cid);
+          uart_puts(" op=");
+          uart_print_hex(blk_cur.opcode);
+          uart_puts(" lba=");
+          uart_print_hex(blk_cur.lba);
+          uart_puts(" since_ms=");
+          print_int((int)(timer_get_ms() - blk_last_done_ms));
+          uart_puts(" cc=");
+          uart_print_hex(cc_now);
+          uart_puts(" csts=");
+          uart_print_hex(csts_now);
+          uart_puts(" cap=");
+          uart_print_hex(nvme_regs[0]);
+          uart_puts("/");
+          uart_print_hex(nvme_regs[1]);
+          uart_puts(" vs=");
+          uart_print_hex(nvme_regs[2]);
+          uart_puts(" cc0_writes=");
+          print_int((int)blk_cc_zero);
+          uart_puts(" cpu=");
+          print_int((int)get_cpuid());
+          uart_puts(" n=");
+          print_int((int)blk_dev_off);
+          uart_puts("\n");
+        }
+      }
+    }
+
+    if (dt > 2000 || device_off) {
+      uart_puts(device_off ? "[BLKQ] wedge-device-off cid=" : "[BLKQ] stall cid=");
       print_int((int)cid);
+      uart_puts(" op=");
+      uart_print_hex(blk_cur.opcode);
+      uart_puts(" lba=");
+      uart_print_hex(blk_cur.lba);
+      uart_puts(" nlb=");
+      print_int((int)blk_cur.nlb);
+      uart_puts(" prp=");
+      uart_print_hex(blk_cur.prp);
       uart_puts(" slot=");
       print_int((int)slot);
       uart_puts(" sq_tail=");
@@ -470,41 +668,76 @@ static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
       print_int((int)io_cq[io_cq_head].cid);
       uart_puts(" .status=");
       uart_print_hex(io_cq[io_cq_head].status);
-      uart_puts(" next.cid=");
-      print_int((int)io_cq[(io_cq_head + 1) % NVME_IOQ_DEPTH].cid);
-      uart_puts(" next.status=");
-      uart_print_hex(io_cq[(io_cq_head + 1) % NVME_IOQ_DEPTH].status);
+      uart_puts(" at_slot.cid=");
+      print_int((int)io_cq[slot].cid);
+      uart_puts(" .status=");
+      uart_print_hex(io_cq[slot].status);
+      uart_puts(" last_cid=");
+      print_int((int)blk_last_cid);
+      uart_puts(" last_sqhead=");
+      print_int((int)blk_last_sqhead);
+      uart_puts(" ms_since_done=");
+      print_int((int)(timer_get_ms() - blk_last_done_ms));
       uart_puts(" inside=");
       print_int((int)blk_inside);
-      uart_puts(" n=");
+      uart_puts(" stalls=");
       print_int((int)blk_stalls);
+      uart_puts(" devoff=");
+      print_int((int)blk_dev_off);
+      uart_puts(" reqs=");
+      print_int((int)blk_requests);
+      uart_puts(" cc0=");
+      print_int((int)blk_cc_zero);
+      uart_puts(" cpu=");
+      print_int((int)get_cpuid());
       uart_puts(" CSTS=");
       uart_print_hex(nvme_regs[7]);
       uart_puts(" CC=");
       uart_print_hex(nvme_regs[5]);
+      uart_puts(" CAP=");
+      uart_print_hex(nvme_regs[0]);
+      uart_puts(" VS=");
+      uart_print_hex(nvme_regs[2]);
       uart_puts(" INTMS=");
       uart_print_hex(nvme_regs[3]);
       uart_puts(" INTMC=");
       uart_print_hex(nvme_regs[4]);
       uart_puts("\n");
 
-      if (recovered) {
+      if (!device_off)
+        blk_stalls++;
+      if (repaired >= 3) {
         uart_puts("[BLKQ] giving up cid=");
         print_int((int)cid);
         uart_puts(" -> I/O error (controller left freshly initialised)\n");
         return 0x7FFF;
       }
       /* Recovery, not a symptom patch: put the controller and BOTH rings back
-         into a known-good state, then resubmit the same command once.  A
-         completion the device really did lose becomes a completed transfer. */
-      recovered = 1;
+         into a known-good state, then resubmit the same command.  A
+         completion the device really did lose becomes a completed transfer,
+         and a transfer the reset aborted is re-read (see `reissue`). */
+      repaired++;
+      reissue = 1;
+      uint64_t t_rec = timer_get_ms();
       if (nvme_reinit() != 0) {
         uart_puts("[BLKQ] reinit failed cid=");
         print_int((int)cid);
         uart_puts(" -> I/O error\n");
         return 0x7FFF;
       }
+      /* A fresh cid as well: the reset destroyed the old command, and any
+         completion QEMU still posts for it must never match this one. */
+      cmd->cid = next_io_cid();
+      cid = cmd->cid;
       slot = nvme_sq_submit(cmd);
+      blk_recover_us = (uint32_t)((timer_get_ms() - t_rec) * 1000);
+      uart_puts("[BLKQ] recovered cid=");
+      print_int((int)cid);
+      uart_puts(" us=");
+      print_int((int)blk_recover_us);
+      uart_puts(" resets=");
+      print_int((int)blk_resets);
+      uart_puts("\n");
       t0 = timer_get_ms();
       printed_slow = 0;
       continue;
@@ -518,6 +751,65 @@ static uint16_t submit_io_cmd(struct nvme_cmd* cmd) {
 }
 
 void virtio_blk_handle_irq(void) {
+}
+
+/* L67: repair hook for the page-in path.  A host-side controller reset can
+ * leave the device disabled between requests (CC.EN=0, CSTS.RDY=0) with no
+ * command outstanding, so nothing in the request path notices.  The exec-page
+ * gate calls this before each of its retry reads: if the controller is not
+ * enabled and ready, rebuild it.  Returns 1 when a repair was performed, 0
+ * when the device was already healthy, -1 when a repair was attempted and
+ * failed.  Takes the single-in-flight token, so it can never race a request. */
+int virtio_blk_health(void) {
+  if (!nvme_regs)
+    return 0;
+  if ((nvme_regs[5] & 1) && (nvme_regs[7] & 1))
+    return 0;
+  uart_puts("[BLKQ] health: controller not ready (cc=");
+  uart_print_hex(nvme_regs[5]);
+  uart_puts(" csts=");
+  uart_print_hex(nvme_regs[7]);
+  uart_puts("), repairing\n");
+  blk_token_acquire();
+  int rc = -1;
+  if (!((nvme_regs[5] & 1) && (nvme_regs[7] & 1)))
+    rc = nvme_reinit();
+  blk_token_release();
+  return (rc == 0) ? 1 : -1;
+}
+
+/* L67: the 5 s controller-state row (see the header).  Reads only. */
+void virtio_blk_diag_row(void) {
+  if (!nvme_regs)
+    return;
+  extern uint64_t cpu_pd7[512];
+  uart_puts("[BLKD] cc=");
+  uart_print_hex(nvme_regs[5]);
+  uart_puts(" csts=");
+  uart_print_hex(nvme_regs[7]);
+  uart_puts(" cap=");
+  uart_print_hex(nvme_regs[0]);
+  uart_puts("/");
+  uart_print_hex(nvme_regs[1]);
+  uart_puts(" vs=");
+  uart_print_hex(nvme_regs[2]);
+  uart_puts(" pd480=");
+  uart_print_hex(cpu_pd7[480]);
+  uart_puts(" reqs=");
+  print_int((int)blk_requests);
+  uart_puts(" stalls=");
+  print_int((int)blk_stalls);
+  uart_puts(" devoff=");
+  print_int((int)blk_dev_off);
+  uart_puts(" cc0=");
+  print_int((int)blk_cc_zero);
+  uart_puts(" cc0_ms=");
+  print_int((int)blk_cc_zero_ms);
+  uart_puts(" resets=");
+  print_int((int)blk_resets);
+  uart_puts(" recover_us=");
+  print_int((int)blk_recover_us);
+  uart_puts("\n");
 }
 
 int virtio_blk_init(void) {
@@ -912,6 +1204,14 @@ void virtio_blk_handle_irq(void) {
     reg_write32(VIRTIO_INTERRUPT_ACK, status);
   }
   spinlock_release_irqrestore(&blk_lock, flags);
+}
+
+/* L67: no NVMe controller state on the MMIO transport. */
+void virtio_blk_diag_row(void) {
+}
+
+int virtio_blk_health(void) {
+  return 0;
 }
 
 /**
