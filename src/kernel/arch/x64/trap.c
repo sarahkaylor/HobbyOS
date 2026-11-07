@@ -3479,6 +3479,15 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         if (++thr_ticks >= 500) {
           thr_ticks = 0;
           rw_thr_sample();
+          /* M6/L72: the display mode is the kernel's, and a lost mode is
+             silent from inside the guest (presents still "work").  Read the
+             dispi/CRTC state every 5 s and restore the shared desktop mode if
+             it was reset; one row only when the state changes. */
+          {
+            extern void virtio_gpu_health_tick(void);
+            if (virtio_gpu_health_tick)
+              virtio_gpu_health_tick();
+          }
         }
       }
 
@@ -3568,6 +3577,12 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       int pf_w = (int)(tf->error_code & 2);
       int pf_x = (int)((tf->error_code >> 4) & 1);
       const char *why = "PROT";
+      /* M6/L72: name the instruction that walked into a fresh anon page
+         ([ANONF] in vm.c).  Read by the kernel only; no behaviour change. */
+      {
+        extern uint64_t vm_dbg_fault_rip;
+        vm_dbg_fault_rip = tf->elr;
+      }
       /* A present page can still fault legally: a MAP_PRIVATE file page is
          installed read-only so the first write copies it (so-vm lane A), and
          a just-mapped page can race the TLB.  vm_handle_fault distinguishes
@@ -3842,6 +3857,51 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           fl_s(&kr, "\n");
           kr.b[kr.n] = 0;
           uart_puts(kr.b);
+        }
+      }
+      /* M6/L72: THE BYTE UNDER THE PATCH.
+       *
+       * `x86-codegen.h:403` is the `default: g_assert(0)` arm of the opcode
+       * switch in `mono_x86_patch_inline`, reached when the byte at `code` is
+       * not one the table knows.  In the ud2 probe build the assert's
+       * `lea file,%rdi` is replaced by `ud2`, so the #UD arrives with the
+       * function's live registers: rdi = the code pointer being patched and
+       * rdx's low byte = the opcode it read.  Printing the eight bytes AT rdi
+       * turns "the switch failed" into "this instruction byte, in this
+       * sequence": a clean `mov 0x..(%rip),%rax` means a legitimate opcode the
+       * table does not implement; random bytes sewn into a call's middle mean
+       * the code buffer was corrupted.  Same 12-row budget as [KREG]. */
+      if (tf->vector == 6 && cur->as) {
+        extern int l_copy_from_user(struct process *, void *, uint64_t, uint64_t);
+        static int udx_rows;
+        uint64_t cp = (uint64_t)tf->regs[5]; /* rdi */
+        if (cp && udx_rows < 12 && (cp & 0xFFF) <= 0xFF8) {
+          struct vm_region *cr = vm_region_find(cur->as, cp);
+          if (cr && (cr->prot & VM_PROT_EXEC)) {
+            unsigned char b[8];
+            if (l_copy_from_user(cur, b, cp, sizeof b) == 0) {
+              udx_rows++;
+              struct fl_buf kc;
+              kc.n = 0;
+              fl_s(&kc, "[UDX] code=");
+              fl_hex(&kc, cp);
+              for (int i = 0; i < 8; i++) {
+                fl_s(&kc, " ");
+                fl_hex(&kc, (uint64_t)b[i] & 0xFF);
+              }
+              fl_s(&kc, " op=");
+              fl_hex(&kc, (uint64_t)((uint64_t)tf->regs[3] & 0xFF)); /* dl */
+              fl_s(&kc, " rgn=");
+              fl_hex(&kc, (uint64_t)cr->base);
+              fl_s(&kc, "+");
+              fl_hex(&kc, (uint64_t)cr->len);
+              fl_s(&kc, " kind=");
+              fl_dec(&kc, (int)cr->kind);
+              fl_s(&kc, "\n");
+              kc.b[kc.n] = 0;
+              uart_puts(kc.b);
+            }
+          }
         }
       }
       /* M6/L59: when the fault is a #UD inside a file-backed executable

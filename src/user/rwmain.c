@@ -1448,10 +1448,12 @@ extern long syscall(long nr, ...);
 #define TP_O_RDONLY 0
 #define TP_SYS_gettid 186
 
+static int tp_ofd = 2; /* stderr; /TPLATE redirects to a file (see below) */
+static int tp_late_only; /* /TPLATE: minimal sampler, no Mono object walks */
 static void tp_w(const char *s) {
   size_t n = 0;
   while (s[n]) n++;
-  if (n) (void)!write(2, s, n);
+  if (n) (void)!write(tp_ofd, s, n);
 }
 static void tp_wi(long v) {
   char t[24], b[24];
@@ -1460,7 +1462,7 @@ static void tp_wi(long v) {
   if (!v) t[j++] = '0';
   while (v) { t[j++] = (char)('0' + (v % 10)); v /= 10; }
   while (j) b[i++] = t[--j];
-  (void)!write(2, b, (size_t)i);
+  (void)!write(tp_ofd, b, (size_t)i);
 }
 static void tp_wx(unsigned long v) {
   char t[20], b[22];
@@ -1469,7 +1471,25 @@ static void tp_wx(unsigned long v) {
   if (!v) t[j++] = '0';
   while (v) { int d = (int)(v & 15); t[j++] = (char)(d < 10 ? '0' + d : 'a' + d - 10); v >>= 4; }
   while (j) b[i++] = t[--j];
-  (void)!write(2, b, (size_t)i);
+  (void)!write(tp_ofd, b, (size_t)i);
+}
+
+/* M6/L72: THE PROBE'S OWN FILE.
+ *
+ * Everything the launcher writes to fd 2 lands in Player.log, and Player.log's
+ * tail is exactly where L69's leftover write defect bites: one FAT sector
+ * (657766 in this run) reads back as zeros on every RMW, so the log is a NUL
+ * hole after ~183 KiB and `[FATW] ZERORD` repeats once a second.  The park's
+ * stack samples are written at t>=400 s, i.e. always past the hole, and the
+ * only copy of the three-thread table was lost that way in two runs.  /TPLATE
+ * therefore redirects the probe to its own file, opened once, written with
+ * plain write() and never interleaved with Unity's buffered log writer. */
+static void tp_out_open(void) {
+  if (tp_ofd != 2)
+    return;
+  int f = open("/RW_HOME/l72.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (f >= 0)
+    tp_ofd = f;
 }
 
 #define TPRING 64
@@ -3284,12 +3304,50 @@ static int tp_register_q(void) {
   return 1;
 }
 
+/* M6/L72: /TPLATE uses THIS sampler only.
+ *
+ * The rich stall probe (twq_scan / tp_scan_obj / tp_dump) walks Mono's internal
+ * objects from a foreign thread and, measured in two consecutive runs, it
+ * stopped the watchdog between t=100 s and t=105 s: no heartbeat, no sample,
+ * nothing from that thread for the rest of the process's life.  The park
+ * samples live at t>=400 s, so the probe has to survive 400 s first.  This
+ * path touches exactly two Mono calls (`mono_jit_info_table_find` and
+ * `mono_domain_get`) on words the thread itself copied out of its own stack --
+ * the async-signal-safe SIGUSR2 capture -- and nothing else. */
+static void tp_late_sample(int at) {
+  tp_w("[TPWT] late t=");
+  tp_wi(at);
+  tp_w("s\n");
+  int self = (int)gettid();
+  int live = 0;
+  unsigned long t0 = (unsigned long)time(0);
+  for (int tid = 1; tid <= 96; tid++) {
+    if (tid == self) continue;
+    if ((unsigned long)time(0) - t0 > 20) break; /* bounded: never stall the loop */
+    int n = tp_capture_tid(tid, 300);
+    if (n <= 0) continue;
+    live++;
+    tp_w("[TPWA] tid=");
+    tp_wi(tid);
+    tp_w(" sp=0x");
+    tp_wx(rw_stk_base);
+    tp_w(" words=");
+    tp_wi(n);
+    tp_bt_words("[TPWA]", rw_stk_base, n);
+  }
+  tp_w("[TPWT] late done live=");
+  tp_wi(live);
+  tp_w("\n");
+}
+
 static void *tp_watchdog(void *arg) {
   (void)arg;
   long prev = -1;
   int quiet = 0;
   int late_attach_tried = 0;
-  for (int i = 0; i < 4800; i++) { /* <= 240 s at 50 ms */
+  for (int i = 0; i < 42000; i++) { /* <= 2100 s at 50 ms: the post-load
+                                       park arrives at ~420 s, so the old
+                                       240 s window ended before the wall */
     /* Phase 1 must not run during mono_init: a class lookup from this thread
        aborted the runtime (object.c:1939 `klass').  4 s after the DSO load
        the runtime is executing managed code, and mscorlib is on the loaded
@@ -3364,12 +3422,38 @@ static void *tp_watchdog(void *arg) {
        frames plus any Task / Thread object its stack still points at: the task
        the main thread awaits, its scheduler, and the target of any
        Thread.Join (36.8's one contradicting row). */
-    if (tp.on && i >= 700 && (i % 300) == 100 && tp.jit_find)
+    if (tp.on && i >= 700 && (i % 300) == 100 && tp.jit_find && !tp_late_only)
       tp_probe_stall(i / 20);
+    /* L72: a heartbeat, so "no sample at 480 s" is distinguishable from "the
+       sampler died at 125 s" (which is what happened while its output was
+       interleaved into Player.log's NUL hole). */
+    if (tp.on && (i % 1200) == 0) {
+      tp_w("[TPWL] beat t=");
+      tp_wi(i / 20);
+      tp_w("s dumps=");
+      tp_wi(tp.dumps);
+      tp_w(" enq=");
+      tp_wi(tp.enq);
+      tp_w(" comp=");
+      tp_wi(tp.comp);
+      tp_w("\n");
+    }
+    /* L72: THE POST-LOAD PARK.  Presents stop at ~420 s and the process then
+       ping-pongs three threads through futexes for the rest of the window, so
+       a 240 s sample window (above) ends before the wall exists.  Sample every
+       120 s from t=400 s: each sample is the whole wait graph (every live
+       thread's managed frames), which is what names the three threads in the
+       cyclic handshake and says which one should have completed. */
+    if (tp.on && i >= 7600 && (i % 1200) == 400 && tp.jit_find) {
+      if (tp_late_only)
+        tp_late_sample(i / 20);
+      else
+        tp_probe_stall(i / 20);
+    }
     /* 3 s without a single event, at least 10 s in: dump the tail.  Up to
        six times, because the first quiet window is often just the gap before
        the loader starts. */
-    if (quiet == 60 && i >= 200 && tp.dumps < 6) { tp.dumps++; tp_dump("quiet3s"); }
+    if (quiet == 60 && i >= 200 && tp.dumps < 6 && !tp_late_only) { tp.dumps++; tp_dump("quiet3s"); }
     usleep(50000);
   }
   tp_dump("exit");
@@ -3380,11 +3464,20 @@ static void rw_tp_maybe_start(void *handle, const char *name) {
   if (tp.on) return;
   if (!name || !strstr(name, "libmonobdwgc")) return;
   {
+    /* /TPTRACE also turns on Mono's threadpool trace in the child.  /TPLATE
+       turns on the launcher's OWN sampling only (no game-side logging): the
+       post-load park runs at ~112 futex ops/s, and a threadpool log line per
+       op would both drown the console and change the rate being measured. */
     int f = open("/TPTRACE", TP_O_RDONLY);
+    if (f < 0) {
+      f = open("/TPLATE", TP_O_RDONLY);
+      if (f >= 0) tp_late_only = 1;
+    }
     if (f < 0) { tp.on = 0; return; }
     close(f);
   }
   tp.on = 1;
+  tp_out_open(); /* /TPLATE: own file, see tp_out_open */
   tp.h = handle;
   tp.get_root_domain = (void *(*)(void))dlsym(handle, "mono_get_root_domain");
   tp.attach = (void *(*)(void *))dlsym(handle, "mono_thread_attach");
