@@ -17,7 +17,7 @@ thread's managed stack, and counted what the kernel is actually asked for.
 | what is actually stuck? | `LongEventHandler.ExecuteToExecuteWhenFinished` on the **main** thread, running the post-load queue: `ThingDef.PostLoad` → `GraphicData.Init` → `GraphicDatabase.Get` → `ContentFinder<Texture2D>.Get` → `Resources.Load` → `ResourcesAPIInternal.Load` (live sample, §2) |
 | is the folder enumeration endless? | **no.** 173 directories enumerated by the game, 173 match `find` on the host exactly, 0 duplicate names inside any listing (§3) |
 | is it frame-count/vsync paced? | **no.** In the same window the ring moves 24 rounds/s while the game presents 0.8 frames/s, and `Application.targetFrameRate` is set from a refresh rate we report as 0 (uncapped). A frame-paced contract cannot run 30× faster than frames (§4) |
-| what is ours? | the NFS read path pays one round trip per 4 KiB page and keeps no cache; the loader's texture queue is 30 k+ of them. Fixed with a sequential read-ahead window + a page cache (§5) |
+| what is ours? | two things, and only one is on the critical path: (a) a LOOKUP failure that is *transport*-shaped is reported as ENOENT, so a lost UDP reply becomes "Could not find file" for a file that exists — that is what kills runs (§6); (b) the NFS read path keeps no cache, so every 4 KiB page pays its own round trip — fixed and measured, but it is ~20 % of the plateau's round, not the wall (§5) |
 | result | see §6 |
 
 ## 1. The contract, from the game's own code
@@ -115,7 +115,7 @@ The present path is already synchronous — every `[XSW]` row has
 `put == putok == swap` — so "make glXSwapBuffers block until the buffer is
 flipped" is already true.
 
-## 5. What is ours: one round trip per 4 KiB page, and no cache
+## 5. The read path: one round trip per 4 KiB page, and no cache (a cost, not the wall)
 
 `[RDF]` (per-file NFS read census) shows the loader's reads are **4 KiB
 `read()`s** (`len=4096`), and `[NFSIO]` gives the aggregate: 49.6 MB in
@@ -124,7 +124,8 @@ flipped" is already true.
 nothing caches the page, so the texture queue pays a round trip per page, tens
 of thousands of times.
 
-Fix (`src/kernel/fs.c`):
+Fix (`src/kernel/fs.c`) — implemented and measured, but see the honest reading at
+the end of this section:
 
 * `l76_nfs_read()` — a **sequential read-ahead window**: when the fd's previous
   read ended exactly at this offset, fetch a 64 KiB window in one pipelined
@@ -134,6 +135,20 @@ Fix (`src/kernel/fs.c`):
   Unity re-reads per asset).
 * `[RAC] bc_hit= ra_hit= ra_fill= direct=` — the counters, printed with the
   `[RDF]` window, so "the cache helped" is a row, not a hope.
+
+Measured in R2's plateau: `[RAC] bc_hit=0 ra_hit=241 ra_fill=71 direct=2845`
+— the sequential window fires and serves 7.8 % of reads (3.4 reads per fill);
+the page cache never hits, because the bundle reads are not repeated whole
+pages.
+
+**The honest reading:** the plateau's round did not get measurably faster
+(S3 52.7 rounds/s pre-fix, R2 46 rounds/s post-fix, different windows and host
+load). `[RDF]` says why: the plateau moves ~23 KiB of reads per round
+(~1 MB/s at 46 rounds/s) while the transport can do ~5 MB/s — the read is
+roughly a fifth of the 21 ms round. The rest is Unity's own per-texture work
+(decode + upload on this guest), which is not ours to make faster. The cache
+is worth keeping — it removes a round trip per page for every sequential
+reader — but it is not the wall, and this lane does not claim it is.
 
 ## 6. The death that ends the run before the queue can drain
 
@@ -220,4 +235,31 @@ this lane.**
 
 ## 8. Regression
 
-(run in progress)
+| gate | result | log |
+|---|---|---|
+| `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` | **433 run, 0 failed — UNIT TESTS PASSED** | `obj/l76-units.log` |
+| `tools/gate/m3_window_probe.py` (`m3_window`) | **PASS** (27 s) | `obj/l73/gates/m3_window.log` |
+| `tools/gate/m4_gl_probe.py` (`m4_gl`) | **PASS** (71 s) | `obj/l73/gates/m4_gl.log` |
+| `tools/rw/run-rwnfs-probe.sh` (`rwnfs`) | **PASS** (17 s) | `obj/l73/gates/rwnfs.log` |
+
+Run with `bash tools/rw/l73-gates.sh m3_window m4_gl rwnfs`; the unit tier and
+the desktop harness were never run concurrently.
+
+## 9. Reproducing
+
+```bash
+export HOME=/home/sarah
+cd ~/hobbyos-rw-lanes/l76-handshake
+# the rows this lane is about
+tools/rw/l76-handshake.py obj/rw-desktop/serial-desktop.log   # FUTR / GDC / RDF / RAC
+tools/rw/l76-msample.py   obj/rw-desktop/l72.log              # managed stack per thread
+# a run with the managed sampler (it stops the watchdog after ~7 min: use it
+# for the t=380 s sample, not for a ladder)
+RW_TPLATE=1 RW_WAIT_SECS=1900 tools/rw/run-rimworld-desktop.sh --timeout 480 --run-timeout 1800
+# the ladder as measured
+tools/rw/run-rimworld-desktop.sh --timeout 480 --run-timeout 1800
+```
+
+The `[TPLATE]` sampler sends SIGUSR2 to every live thread and the process died
+in libmono at t≈440 s in that run (S1); the ladder rows use no sampler.
+
