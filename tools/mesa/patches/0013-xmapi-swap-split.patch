@@ -1,0 +1,167 @@
+tools/mesa: split XMesaSwapBuffers into its stages (L80)
+
+[XSWB] gives the frame period and the shim's own share, [VGLB] the virgl
+winsys' present.  Between them they leave the rest of XMesaSwapBuffers
+unattributed, and that residue measured ~90-120 ms per present on a frame
+that drew nothing -- so it is named here rather than assumed:
+
+  flush  st_context_flush(ST_FLUSH_FRONT) -- the driver's flush, i.e. the
+         frame's own submit, plus st's front-buffer display hook
+  fence  fence_finish(ST_FLUSH_FRONT's fence) -- M2's contract is a signalled
+         fence, so this has to be ~0 for every present
+  swap   xmesa_swap_st_framebuffer -- the frontend's present, which ends in the
+         winsys' flush_frontbuffer (the [VGLB] row)
+  inval  st_context_invalidate_state(FB_STATE)
+
+Rows are batched 32 presents at a time and written to fd 2 and /dev/console,
+because a row written inside the swap is itself a term in the number it
+reports (measured: the per-present form of this probe inflated the swap it was
+measuring).
+
+This patches xm_api.c rather than glx_api.c on purpose: glx_api.c already
+carries 0008, and a later hunk inside 0008's context makes 0008's
+reverse-dry-run idempotency check fail, which then refuses the whole series.
+
+--- a/src/gallium/frontends/glx/xlib/xm_api.c
++++ b/src/gallium/frontends/glx/xlib/xm_api.c
+@@ -68,6 +68,7 @@
+ #include "util/u_inlines.h"
+ #include "util/u_math.h"
+ #include "util/u_memory.h"
++#include "util/os_time.h"
+ 
+ #include "hud/hud_context.h"
+ 
+@@ -1331,6 +1332,91 @@
+  * If there's no front color buffer no swap actually occurs.
+  */
+ PUBLIC
++/* ---------------------------------------------------------------------- *
++ * HOBBYOS (lane L80): where a swap's time goes.
++ *
++ * [XSWB] (the compat libX11) reports the frame period and the shim's own
++ * share; [VGLB] (the virgl winsys) reports the present.  Between them they
++ * leave the rest of XMesaSwapBuffers unattributed, and L80 measured that
++ * residue at ~90-120 ms per present on a frame that drew nothing -- so it is
++ * split here rather than assumed:
++ *
++ *   flush   st_context_flush(ST_FLUSH_FRONT): the driver's flush (the frame's
++ *           own submit) and st's front-buffer display hook
++ *   fence   the fence_finish(ST_FLUSH_FRONT's fence) -- M2's contract is a
++ *           signalled fence, so this should be ~0
++ *   swap    xmesa_swap_st_framebuffer: the frontend's present, which ends in
++ *           the winsys' flush_frontbuffer (the [VGLB] present)
++ *   inval   st_context_invalidate_state(FB_STATE)
++ *
++ * Batched 32 presents per row: a row written inside the swap is a term in the
++ * number it reports (the per-present form of this probe was measured doing
++ * exactly that).
++ * ---------------------------------------------------------------------- */
++static int
++hobbyos_swap_prof(void)
++{
++   static int v = -1;
++   if (v < 0) {
++      FILE *f = fopen("/XPROF", "r");
++      v = 0;
++      if (f) {
++         /* The marker is content-gated and the staging writes "on" (the image
++          * has no mdel(1)); accept what the shim accepts. */
++         int c = fgetc(f);
++         if (c == '1' || c == 'o' || c == 'y')
++            v = 1;
++         fclose(f);
++      }
++   }
++   return v;
++}
++
++static unsigned long long hobbyos_b_flush, hobbyos_b_fence, hobbyos_b_swap;
++static unsigned long long hobbyos_b_inval, hobbyos_b_n, hobbyos_b_max;
++
++static void
++hobbyos_swap_row(unsigned long long flush_us, unsigned long long fence_us,
++                 unsigned long long swap_us, unsigned long long inval_us)
++{
++   hobbyos_b_n++;
++   hobbyos_b_flush += flush_us;
++   hobbyos_b_fence += fence_us;
++   hobbyos_b_swap += swap_us;
++   hobbyos_b_inval += inval_us;
++   {
++      unsigned long long tot = flush_us + fence_us + swap_us + inval_us;
++      if (tot > hobbyos_b_max)
++         hobbyos_b_max = tot;
++   }
++   if (hobbyos_b_n >= 32) {
++      char b[224];
++      int n = snprintf(b, sizeof b,
++                       "[XSWL] frames=%llu flush_avg=%llu fence_avg=%llu "
++                       "swap_avg=%llu inval_avg=%llu total_max=%llu\n",
++                       hobbyos_b_n, hobbyos_b_flush / hobbyos_b_n,
++                       hobbyos_b_fence / hobbyos_b_n,
++                       hobbyos_b_swap / hobbyos_b_n,
++                       hobbyos_b_inval / hobbyos_b_n, hobbyos_b_max);
++      static FILE *cons = NULL;
++      fputs(b, stderr);
++      fflush(stderr);
++      /* The serial console keeps the row after Unity sends fd 2 to
++       * Player.log -- the same rule the shim's rows follow. */
++      if (!cons) {
++         cons = fopen("/dev/console", "w");
++         if (!cons)
++            cons = (FILE *) -1;
++      }
++      if (cons && cons != (FILE *) -1 && n > 0) {
++         fputs(b, cons);
++         fflush(cons);
++      }
++      hobbyos_b_flush = hobbyos_b_fence = hobbyos_b_swap = 0;
++      hobbyos_b_inval = hobbyos_b_n = hobbyos_b_max = 0;
++   }
++}
++
+ void XMesaSwapBuffers( XMesaBuffer b )
+ {
+    XMesaContext xmctx = XMesaGetCurrentContext();
+@@ -1342,9 +1428,17 @@
+       hud_run(xmctx->hud, NULL, back);
+    }
+ 
++   {
++   int prof = hobbyos_swap_prof();
++   unsigned long long t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
++
++   if (prof)
++      t0 = os_time_get_nano();
+    if (xmctx && xmctx->xm_buffer == b) {
+       struct pipe_fence_handle *fence = NULL;
+       st_context_flush(xmctx->st, ST_FLUSH_FRONT, &fence, NULL, NULL);
++      if (prof)
++         t1 = os_time_get_nano();
+       /* Wait until all rendering is complete */
+       if (fence) {
+          XMesaDisplay xmdpy = xmesa_init_display(b->xm_visual->display);
+@@ -1354,11 +1448,22 @@
+          xmdpy->screen->fence_reference(screen, &fence, NULL);
+       }
+    }
++   if (prof && !t1)
++      t1 = os_time_get_nano();
+ 
+    xmesa_swap_st_framebuffer(b->drawable);
++   if (prof)
++      t2 = os_time_get_nano();
+ 
+    /* TODO: remove this if the framebuffer state doesn't change. */
+    st_context_invalidate_state(xmctx->st, ST_INVALIDATE_FB_STATE);
++   if (prof) {
++      t3 = os_time_get_nano();
++      hobbyos_swap_row((t1 - t0) / 1000, (t2 - t1) / 1000,
++                       (t3 - t2) / 1000, 0);
++   }
++   (void)t4;
++   }
+ }
+ 
+ 

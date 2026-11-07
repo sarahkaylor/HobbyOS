@@ -32,7 +32,13 @@
  * a 1080p render target) because a single ATTACH_BACKING sends one entry per
  * page and 16384 pages is the transport's per-attach ceiling. */
 #define GPU_ABI_MAX_CLIENTS 8
-#define GPU_ABI_MAX_RES_PER_CLIENT 1024
+/* L80: 1024 was M3's guess and the main menu is where it runs out.  Measured
+ * on the merged tree: nres=1024 with `res_create refused` from then on, every
+ * frame, for the rest of the run -- the engine cannot allocate the menu's
+ * textures/render targets and keeps asking.  4096 covers the 618 resources a
+ * scene creates (M3) with room for a menu's atlases and the swap chain, at
+ * ~96 bytes of kernel BSS each. */
+#define GPU_ABI_MAX_RES_PER_CLIENT 4096
 #define GPU_ABI_MAX_PAGES 16384          /* per resource == 64 MiB */
 #define GPU_ABI_MAX_BLOB 16384
 #define GPU_ABI_MAX_SUBMIT (128 * 1024)
@@ -506,13 +512,25 @@ static int gpu_do_res_create(struct process* p, int fd, uint64_t arg) {
       c->ctx_id != rc_struct.ctx_id || c->nres >= GPU_ABI_MAX_RES_PER_CLIENT) {
     int full = (c && c->nres >= GPU_ABI_MAX_RES_PER_CLIENT);
     spinlock_release_irqrestore(&gpu_abi_lock, fl);
-    gpu_abi_say("[GPU] res_create refused: client c=", c ? 1 : 0);
-    gpu_abi_say(" nres=", c ? c->nres : -1);
-    gpu_abi_say(" ctx_held=", c ? (int)c->ctx_id : -1);
-    gpu_abi_say(" ctx_req=", (int)rc_struct.ctx_id);
-    gpu_abi_say(" pid=", pid);
-    gpu_abi_say(" fd=", fd);
-    gpu_abi_say("\n", 0);
+    /* L80: bounded.  A full table is a per-frame event (the engine retries
+     * every create), and this row is six console writes; unbounded it became
+     * 2 298 rows in one 25-minute run and buried every other row in the log.
+     * The first four name the shape, then one per 1024 refusals names the
+     * rate, and the count is always in the row. */
+    {
+      static unsigned refused_n;
+      unsigned n = ++refused_n;
+      if (n <= 4 || (n % 1024) == 0) {
+        gpu_abi_say("[GPU] res_create refused: client c=", c ? 1 : 0);
+        gpu_abi_say(" nres=", c ? c->nres : -1);
+        gpu_abi_say(" ctx_held=", c ? (int)c->ctx_id : -1);
+        gpu_abi_say(" ctx_req=", (int)rc_struct.ctx_id);
+        gpu_abi_say(" pid=", pid);
+        gpu_abi_say(" fd=", fd);
+        gpu_abi_say(" refused=", (int)n);
+        gpu_abi_say("\n", 0);
+      }
+    }
     return full ? -ENOSPC : -EINVAL;
   }
   spinlock_release_irqrestore(&gpu_abi_lock, fl);

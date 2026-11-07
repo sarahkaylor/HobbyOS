@@ -68,6 +68,22 @@ now_us(void)
    return (uint64_t)os_time_get_nano() / 1000u;
 }
 
+/* L80: a one-line marker file staged on disk.img.  The image has no mdel(1),
+ * so a marker is rewritten, never removed -- every test is content-gated. */
+static int
+vgl_marker_on(const char *path)
+{
+   char b[8] = {0};
+   FILE *f = fopen(path, "r");
+   int on = 0;
+   if (!f)
+      return 0;
+   if (fgets(b, sizeof b, f) && (b[0] == '1' || b[0] == 'o' || b[0] == 'y'))
+      on = 1;
+   fclose(f);
+   return on;
+}
+
 /* ------------------------------------------------------------------------- */
 /* /dev/gpu primitives                                                       */
 /* ------------------------------------------------------------------------- */
@@ -319,6 +335,8 @@ virgl_hobbyos_winsys_resource_create(struct virgl_winsys *vws,
       return NULL;
    }
    res->res_handle = rc.res_id;
+   if (vhws->prof)
+      vhws->p_res++;
 
    memset(&ra, 0, sizeof ra);
    ra.res_id = res->res_handle;
@@ -477,6 +495,12 @@ virgl_hobbyos_transfer_put(struct virgl_winsys *vws, struct virgl_hw_res *res,
               res->res_handle, box->width, box->height, box->depth, box->x,
               box->y, buf_offset, stride, level);
    vhws->n_tput++;
+   if (vhws->prof) {
+      vhws->p_tputs++;
+      vhws->p_tput_bytes += (uint64_t)box->width * (uint64_t)box->height *
+                            util_format_get_blocksize(res->format) *
+                            (box->depth ? (uint64_t)box->depth : 1u);
+   }
    return vgl_transfer(vhws, res, box, stride, layer_stride, buf_offset, level,
                        0);
 }
@@ -493,6 +517,12 @@ virgl_hobbyos_transfer_get(struct virgl_winsys *vws, struct virgl_hw_res *res,
                          level, 1);
    vhws->readback_us += now_us() - t0;
    vhws->n_readback++;
+   if (vhws->prof) {
+      vhws->p_readbacks++;
+      vhws->p_readback_bytes += (uint64_t)box->width * (uint64_t)box->height *
+                                util_format_get_blocksize(res->format) *
+                                (box->depth ? (uint64_t)box->depth : 1u);
+   }
    return rc;
 }
 
@@ -628,18 +658,36 @@ vgl_submit_one(struct virgl_hobbyos_winsys *vhws, const uint32_t *buf,
       return -1;
    vhws->submit_us += now_us() - t0;
    vhws->n_submit++;
+   if (vhws->prof) {
+      vhws->p_submits++;
+      vhws->p_submit_bytes += sub.len;
+   }
    if (cdw > vhws->max_cmd_dwords)
       vhws->max_cmd_dwords = cdw;
 
-   /* A fence is honoured as "already signalled" (M2 contract).  See
-    * virgl_hobbyos_winsys.h. */
+   /* L80: no fence is handed back, and that is the fix for a real cost.
+    *
+    * M2 handed back a fabricated "already signalled" fence because
+    * `supports_fences = 0` and the present readback is the ordering point.
+    * Measured on this tree (instrumented XMesaSwapBuffers, run C): st asks
+    * `st_context_flush(ST_FLUSH_FRONT, &fence, ...)`, and XMesaSwapBuffers
+    * then calls `fence_finish(fence, OS_TIMEOUT_INFINITE)`.  virgl's
+    * fence_finish *flushes the context again before looking at the fence*
+    * (`virgl_fence_finish`: if (vctx && timeout) virgl_flush_eq(vctx, NULL,
+    * NULL)), so a fence that is already signalled still cost a whole extra
+    * GPU round trip: 20.9-24.5 ms per frame on a frame whose own submit was
+    * 34 ms, i.e. a fifth of the frame for a wait that cannot wait.
+    *
+    * Returning NULL is the honest form of the M2 contract: there is no
+    * fence, the client does not wait, and the ordering still comes from the
+    * host's per-context stream and the present readback (M1's
+    * unfenced_readback row).  Callers that ask for a fence (st_flush,
+    * glFinish) get "no fence" and skip fence_finish -- which is what
+    * `supports_fences = 0` always meant.
+    */
    if (fence) {
-      struct virgl_hobbyos_fence *f = CALLOC_STRUCT(virgl_hobbyos_fence);
-      if (f) {
-         pipe_reference_init(&f->reference, 1);
-         vhws->n_fence++;
-         *fence = (struct pipe_fence_handle *)f;
-      }
+      *fence = NULL;
+      vhws->n_fence++;
    }
    return 0;
 }
@@ -685,15 +733,11 @@ virgl_hobbyos_winsys_submit_cmd(struct virgl_winsys *vws,
    int ret;
 
    if (cbuf->base.cdw == 0) {
-      /* Still honour a requested fence so the driver never sees a NULL it
-       * asked for. */
-      if (fence) {
-         struct virgl_hobbyos_fence *f = CALLOC_STRUCT(virgl_hobbyos_fence);
-         if (f) {
-            pipe_reference_init(&f->reference, 1);
-            *fence = (struct pipe_fence_handle *)f;
-         }
-      }
+      /* An empty buffer has nothing to order, so there is no fence either
+       * (L80: see vgl_submit_one -- a signalled fence still costs a round
+       * trip in virgl_fence_finish). */
+      if (fence)
+         *fence = NULL;
       return 0;
    }
 
@@ -838,6 +882,10 @@ dmg_read(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res,
    rc = vgl_transfer(vhws, res, &box, res->stride, 0, offset, level, 1);
    vhws->readback_us += now_us() - t0;
    vhws->n_readback++;
+   if (vhws->prof) {
+      vhws->p_readbacks++;
+      vhws->p_readback_bytes += (uint64_t)w * (uint64_t)h * bpp;
+   }
    if (rc == 0) {
       vhws->n_dmg_rects++;
       vhws->dmg_bytes += (uint64_t)w * (uint64_t)h * bpp;
@@ -956,7 +1004,14 @@ dmg_thumb_grab(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res,
    if (vgl_transfer(vhws, th, &tb, th->stride, 0, 0, level, 1) < 0)
       return -1;
    vhws->n_readback++;
+   if (vhws->prof) {
+      vhws->p_readbacks++;
+      vhws->p_readback_bytes += (uint64_t)VGL_THUMB * VGL_THUMB *
+                                util_format_get_blocksize(th->format);
+   }
    vhws->thumb_us += now_us() - t0;
+   if (vhws->prof)
+      vhws->p_thumb_us += now_us() - t0;
    return 0;
 }
 
@@ -1213,6 +1268,99 @@ dmg_boxes(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res,
 /* Present (mode B)                                                          */
 /* ------------------------------------------------------------------------- */
 
+/* L80: the winsys' share of a present, one [VGLB] row per 32 presents when
+ * /GLPROF is staged.
+ *
+ * The question is a budget, not a rate: a 1 s frame whose present is 12 ms
+ * spends the second somewhere else, and a present that is 900 ms spends it
+ * here.  So each row carries this batch's own counters -- submits and their
+ * bytes, readbacks and their bytes, uploads, resource creations, the three
+ * timed stages and how often the damage path was idle -- plus `row_us`, the
+ * time the *previous* row's own write took, because that write is inside the
+ * swap it measures.
+ *
+ * One row per present was tried first: a 150-byte row written inside the swap
+ * (to Player.log and to the polled UART) is itself tens of milliseconds, and
+ * at that rate the instrument is a term in the number it reports.  Batching
+ * 32 presents makes its cost 1/32 of a row per frame.
+ */
+static void
+vgl_prof_row(struct virgl_hobbyos_winsys *vhws, UNUSED struct virgl_hw_res *res,
+             struct pipe_box *boxes, unsigned nboxes, uint64_t present_us)
+{
+   static FILE *cons = NULL;
+   uint64_t t = now_us();
+
+   vhws->b_n++;
+   vhws->b_pres += present_us;
+   if (present_us > vhws->b_pres_max)
+      vhws->b_pres_max = present_us;
+   vhws->b_sub += vhws->p_submits;
+   vhws->b_sub_b += vhws->p_submit_bytes;
+   vhws->b_rd += vhws->p_readbacks;
+   vhws->b_rd_b += vhws->p_readback_bytes;
+   vhws->b_up += vhws->p_tputs;
+   vhws->b_up_b += vhws->p_tput_bytes;
+   vhws->b_idle += vhws->p_idle;
+   vhws->b_thumb += vhws->p_thumb_us;
+   vhws->b_copy += vhws->p_copy_us;
+   vhws->b_disp += vhws->p_display_us;
+   if (vhws->b_n < 32 || !vhws->n_present)
+      return;
+
+   {
+      char b[384];
+      int n;
+      uint64_t k = vhws->b_n;
+      n = snprintf(b, sizeof b,
+                   "[VGLB] n=%llu t=%llu frames=%llu pres_avg=%llu "
+                   "pres_max=%llu sub_avg=%llu sub_b_avg=%llu rd_avg=%llu "
+                   "rd_b_avg=%llu up_avg=%llu up_b_avg=%llu idle=%llu "
+                   "thumb_avg=%llu copy_avg=%llu disp_avg=%llu boxes=%u "
+                   "box=%ux%u+%d+%d row_us=%llu\n",
+                   (unsigned long long)vhws->n_present, (unsigned long long)t,
+                   (unsigned long long)k,
+                   (unsigned long long)(vhws->b_pres / k),
+                   (unsigned long long)vhws->b_pres_max,
+                   (unsigned long long)(vhws->b_sub / k),
+                   (unsigned long long)(vhws->b_sub_b / k),
+                   (unsigned long long)(vhws->b_rd / k),
+                   (unsigned long long)(vhws->b_rd_b / k),
+                   (unsigned long long)(vhws->b_up / k),
+                   (unsigned long long)(vhws->b_up_b / k),
+                   (unsigned long long)vhws->b_idle,
+                   (unsigned long long)(vhws->b_thumb / k),
+                   (unsigned long long)(vhws->b_copy / k),
+                   (unsigned long long)(vhws->b_disp / k),
+                   nboxes, nboxes ? boxes[0].width : 0,
+                   nboxes ? boxes[0].height : 0, nboxes ? boxes[0].x : 0,
+                   nboxes ? boxes[0].y : 0,
+                   (unsigned long long)vhws->b_row_us);
+      if (n > 0) {
+         uint64_t t0 = now_us();
+         fwrite(b, 1, (size_t)n, stderr);
+         fflush(stderr);
+         /* Unity redirects fd 2 to Player.log before the first swap; the
+          * serial console is where the rest of the ladder is read. */
+         if (!cons) {
+            cons = fopen("/dev/console", "w");
+            if (!cons)
+               cons = (FILE *)-1;
+         }
+         if (cons && cons != (FILE *)-1) {
+            fwrite(b, 1, (size_t)n, cons);
+            fflush(cons);
+         }
+         vhws->b_row_us = now_us() - t0;
+      }
+   }
+   vhws->b_n = 0;
+   vhws->b_pres = vhws->b_pres_max = 0;
+   vhws->b_sub = vhws->b_sub_b = vhws->b_rd = vhws->b_rd_b = 0;
+   vhws->b_up = vhws->b_up_b = vhws->b_idle = 0;
+   vhws->b_thumb = vhws->b_copy = vhws->b_disp = 0;
+}
+
 static void
 virgl_hobbyos_flush_frontbuffer(struct virgl_winsys *vws,
                                 UNUSED struct virgl_cmd_buf *cmdbuf,
@@ -1229,6 +1377,22 @@ virgl_hobbyos_flush_frontbuffer(struct virgl_winsys *vws,
 
    if (!res->dt || !res->ptr)
       return;
+
+   if (vhws->prof) {
+      vhws->p_start_us = t0;
+      vhws->p_submits = 0;
+      vhws->p_submit_bytes = 0;
+      vhws->p_readbacks = 0;
+      vhws->p_readback_bytes = 0;
+      vhws->p_tputs = 0;
+      vhws->p_tput_bytes = 0;
+      vhws->p_res = 0;
+      vhws->p_boxes = 0;
+      vhws->p_idle = 0;
+      vhws->p_thumb_us = 0;
+      vhws->p_copy_us = 0;
+      vhws->p_display_us = 0;
+   }
 
    vhws->full_bytes += (uint64_t)res->width * res->height * bpp;
 
@@ -1248,6 +1412,10 @@ virgl_hobbyos_flush_frontbuffer(struct virgl_winsys *vws,
           * it as a present (the client did swap) but move no pixels. */
          vhws->n_present++;
          vhws->present_us += now_us() - t0;
+         if (vhws->prof) {
+            vhws->p_idle = 1;
+            vgl_prof_row(vhws, res, boxes, 0, now_us() - t0);
+         }
          return;
       }
       if (nboxes == 0) {
@@ -1306,6 +1474,8 @@ virgl_hobbyos_flush_frontbuffer(struct virgl_winsys *vws,
       vhws->sws->displaytarget_unmap(vhws->sws, res->dt);
    }
    vhws->copy_us += now_us() - t_copy;
+   if (vhws->prof)
+      vhws->p_copy_us += now_us() - t_copy;
 
    /* the frontend's own present funnel (XPutImage -> the [XSW] shadow).  One
     * box per damaged run: the compat Xlib copies exactly that rect into its
@@ -1315,9 +1485,14 @@ virgl_hobbyos_flush_frontbuffer(struct virgl_winsys *vws,
       vhws->sws->displaytarget_display(vhws->sws, res->dt,
                                        winsys_drawable_handle, nboxes, boxes);
       vhws->display_us += now_us() - t_disp;
+      if (vhws->prof)
+         vhws->p_display_us += now_us() - t_disp;
    }
    vhws->n_present++;
    vhws->present_us += now_us() - t0;
+   vhws->p_boxes = nboxes;
+   if (vhws->prof)
+      vgl_prof_row(vhws, res, boxes, nboxes, now_us() - t0);
    /* A periodic row as well as the destroy-time summary: a game killed by a
     * timeout never runs the winsys destructor, and the game run's own damage
     * ratio is evidence worth keeping. */
@@ -1474,6 +1649,11 @@ virgl_hobbyos_winsys_create(void *display)
    vhws->fd = fd;
    vhws->ctx_id = cc.ctx_id;
    vhws->trace = getenv("HOBBYOS_GL_TRACE") != NULL;
+   /* L80: per-present rows, staged like /GLDMG (a desktop-menu launch cannot
+    * pass an environment). */
+   vhws->prof = vgl_marker_on("/GLPROF");
+   if (vhws->prof)
+      fprintf(stderr, "[VGL] profile: one [VGLP] row per present (/GLPROF)\n");
 
    /* M3 present mode.  HOBBYOS_GL_DAMAGE wins over /GLDMG (the in-guest file,
     * because a desktop-menu launch cannot pass an environment), and the
