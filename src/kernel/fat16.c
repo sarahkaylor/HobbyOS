@@ -3069,6 +3069,39 @@ int fat16_stats(uint64_t *out_total, uint64_t *out_free) {
   return 0;
 }
 
+/* L78: geometry for the block-stress probe's write-verify guard.
+ *
+ * Returns 1 when `lba` lies in the volume's data area and its FAT entry is
+ * addressable; fills the sector that holds that entry, the byte offset in it,
+ * and the cluster number.  Reads nothing and takes no lock: the bpb fields are
+ * fixed at mount.  The caller reads `fat_sec` raw (under the device token it
+ * already holds) and treats a 0x0000 entry as "free" -- an unallocated cluster
+ * the probe may read, write back, and re-read without touching a live file.
+ * Conservative by construction: a torn or odd read can only make the guard say
+ * "no", never "yes" to an allocated cluster. */
+int fat16_lba_scratch_geom(uint64_t lba, uint64_t *fat_sec, uint32_t *off,
+                           uint64_t *cluster) {
+  if (!fat_sec || !off || !cluster)
+    return 0;
+  if (bpb_sectors_per_cluster == 0 || bpb_total_sectors == 0)
+    return 0;
+  if (lba < data_sector)
+    return 0;
+  uint32_t data_sectors =
+      bpb_total_sectors > data_sector ? bpb_total_sectors - data_sector : 0;
+  uint32_t total_clusters = data_sectors / bpb_sectors_per_cluster;
+  if (total_clusters > 0xFFF0u)
+    total_clusters = 0xFFF0u;
+  uint64_t cl = 2 + (lba - data_sector) / bpb_sectors_per_cluster;
+  if (cl >= 2 + (uint64_t)total_clusters)
+    return 0;
+  uint64_t byte_off = cl * 2;
+  *fat_sec = (uint64_t)fat_sector + byte_off / SECTOR_SIZE;
+  *off = (uint32_t)(byte_off % SECTOR_SIZE);
+  *cluster = cl;
+  return 1;
+}
+
 /* GB-020: getdents64 backend.  For an open directory fd, enumerate the
  * directory's children by cluster into linux_dirent64 records (x86_64 layout:
  * d_ino@0 u64, d_off@8 s64, d_reclen@16 u16, d_type@18 u8, d_name@19).  The

@@ -798,6 +798,15 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp);
 // Put the current process to sleep (blocked).
 void process_sleep(void);
 
+/**
+ * L78: block the current thread for `ms` and yield.  The timer tick's
+ * `process_check_sleeping()` re-READYs it at the deadline, so this is a real
+ * sleep (not a `safe_wfi()` spin): a kernel thread that uses it costs no CPU
+ * while it waits, which is what keeps a background prober out of the game's
+ * way.  A signal can wake it early (the wake clears wake_ms).
+ */
+void process_sleep_ms(uint32_t ms);
+
 // Wake up a specific process.
 void process_wakeup(int pid);
 
