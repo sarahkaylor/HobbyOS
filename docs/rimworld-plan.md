@@ -608,7 +608,25 @@ to its main menu: `Mono path[0] = '<dir>/RimWorldLinux_Data/Managed'`,
 launcher must be named `RimWorldLinux` inside the game dir so `/proc/self/exe`
 resolves next to `RimWorldLinux_Data`. Nothing about the non-PIE stub matters.
 
-**Status 2026-11-06 — IT RUNS AND DRAWS; THE MENU IS ONE WALL AWAY.** In a
+**Status 2026-11-07 — IT REACHES ITS MAIN MENU.** RimWorld now boots in
+HobbyOS, loads all 1,209 defs and its keyed strings, and presents **its own main
+menu** — Ludeon/RIMWORLD logo, `Version 1.6.4871 (64-bit)`, and the
+Tutorial / New colony / Options / Mods / Credits / Quit to OS buttons — at
+1920x1080 through virgl, confirmed by OCR and by inspection of the frame
+(318,766 distinct colours). Timing: ~533-549 s from launch to menu, and the menu
+currently renders at **~1 fps**; the loading phase measured 14.4 fps on the same
+build, so the menu's own draw path is the next performance question. Input has
+not yet been driven past the menu (QMP click path is in the harness).
+
+The wall that had been killing every long run turned out to be the frame pool
+aliasing MMIO: extent 1 began at physical `0x80000000`, which on `-M q35 -m
+12288M` is the base of the 32-bit PCI hole, and QEMU placed the NVMe BAR at
+`0x81000000` — so **pool frame #327,936 was the NVMe register file**, and the
+allocator reached it at ~770 s (212 frames/s). That single aliasing explains the
+~730 s controller resets, the zero/torn pages, and the `#UD` class that took a
+dozen waves to corner. The pool is now RAM-only with a `hole=` tripwire.
+
+**Historical status 2026-11-06 — IT RUNS AND DRAWS; THE MENU IS ONE WALL AWAY.** In a
 desktop session RimWorld now loads all 1,209 defs (every XML opened), holds
 264.7 MiB of its 729 MiB asset set over NFS at 38-55 MB/s, and **presents
 frames continuously** — 180 presented frames in a 600 s run (0.42 fps at
