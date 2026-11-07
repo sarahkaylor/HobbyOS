@@ -257,6 +257,7 @@ open row of this section.
 | diag3 (ud2 probe) | 900 s | — | 307 200 | — | libmono+0x1EB680 `mov rax,[rax+0x10]`, rdi=0x1040069380 → SIGSEGV |
 | pdz | 1200 s | — | 307 200 | — | `[TXT] ZERO off=0x757000` (raw `r_nz=3754`) → EIO → SIGBUS |
 | final1 (replay rule) | **1200 s** | **1** | 176 128 | **627 (flat)** | alive at the deadline; **no park growth**, no assert, no death; still in the def pass (`[XO] …RangedSpacer.xml`, 43.6 MiB NFS), main↔`UnityGfxDeviceW` ping-pong |
+| 1800c (replay rule, final) | 1700 s window | 1 | **307 200** | 1135 | **passes the old wall** (no EIO/assert there), then a **kernel-mode #PF in user address space** (`cr2=0x11CB280000`, rip=0x700AB808) kills pid 4 at t≈560 s |
 
 Reading of the ladder:
 
@@ -265,9 +266,14 @@ Reading of the ladder:
   wall with three secondary shapes; the park of L65 run 1 is the same moment
   *before* L69's gate existed (the zero page was published and executed, so
   the game livelocked instead of dying);
-* with the replay rule the process no longer dies there and **RSS is bounded**
-  (627 MiB, flat over the last 200 s of a 1200 s window): the 0.64 MiB/s /
-  one-page-per-6 ms growth of L65 does not appear;
+* with the replay rule the process no longer dies there — the 1800 s attempt
+  passes `[PUBS]=307200` intact (no EIO, no assert) and dies later, at t≈560 s,
+  on a **kernel-mode #PF in user address space** (`cr2=0x11CB280000`,
+  `[KPF-DIAG] … why=HOLE`), which is a separate kernel bug for the next lane;
+* **RSS is bounded** where the run survives (627 MiB, flat over the last 200 s
+  of the 1200 s window; 1135 MiB at t≈560 s in the 1800 s attempt, i.e. the
+  loader's own working set): the 0.64 MiB/s / one-page-per-6 ms growth of L65
+  does not appear in either;
 * the run still ends in the handshake, now at the **def-plateau**
   (43.6 MiB NFS) with main ping-ponging against `UnityGfxDeviceW` and
   `Loading.AsyncRead` idle. So the *page-in* wall is closed and the
