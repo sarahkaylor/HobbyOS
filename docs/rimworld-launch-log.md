@@ -9751,6 +9751,7 @@ when the second agrees **or is the all-zero replay** (`[TXT] PROBEGET`,
 | diag3 (ud2 probe) | 900 s | — | 307 200 | — | libmono+0x1EB680 NULL deref |
 | pdz | 1200 s | — | 307 200 | — | `[TXT] ZERO 0x757000` → SIGBUS |
 | final1 (replay rule) | 1200 s | 1 | 176 128 | **627 flat** | alive; no park growth, no assert, no death; still in the def pass |
+| 1800c (replay rule) | 1700 s | 1 | 307 200 | 1135 | passes the old wall; then a kernel-mode #PF in user space (`cr2=0x11CB280000`) kills pid 4 at t≈560 s |
 
 So the **page-in wall is closed** (RSS bounded at 627 MiB for the whole
 1200 s window, no 0.64 MiB/s climb) and the handshake wall remains, now at the
