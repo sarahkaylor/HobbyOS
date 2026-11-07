@@ -134,6 +134,49 @@ static volatile uint32_t blk_cc_zero;     /* CC=0 writes this kernel issued */
 static volatile uint32_t blk_cc_en;       /* CC=enable writes this kernel issued */
 static volatile uint64_t blk_cc_zero_ms;  /* when the last CC=0 write happened */
 static volatile uint32_t blk_recover_us;  /* last recovery duration */
+static volatile uint32_t blk_prerepair;   /* pre-submit repairs (nothing in flight) */
+
+/* M6/L69: the device generation (see virtio_blk.h).  Read by the block cache
+ * to refuse publishing a frame filled across a reset, and by the raw read path
+ * to re-issue a transfer whose completion overlapped one. */
+volatile uint64_t blk_dev_epoch = 1;
+volatile uint32_t blk_untrusted;         /* transfers discarded: epoch moved */
+static volatile uint32_t blk_untrusted_rows;
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* Aborted-transfer injection (see virtio_blk_test_abort in the header).
+ * `armed` snapshots the bounce buffer; `apply` restores it (no DMA happened)
+ * and moves the device generation — the exact aborted-AIO signature. */
+static int blk_test_abort_mode;
+static uint64_t blk_test_abort_sector;
+static int blk_test_abort_left;
+
+void virtio_blk_test_abort(int mode, uint64_t sector, int times) {
+  blk_test_abort_mode = mode;
+  blk_test_abort_sector = sector;
+  blk_test_abort_left = times;
+}
+
+static int blk_test_abort_armed(uint64_t sector, uint8_t *pre) {
+  if (blk_test_abort_mode && sector == blk_test_abort_sector &&
+      (blk_test_abort_mode == 2 || blk_test_abort_left > 0)) {
+    for (int k = 0; k < 512; k++)
+      pre[k] = bounce_buf[k];
+    return 1;
+  }
+  return 0;
+}
+
+static void blk_test_abort_apply(int armed, const uint8_t *pre) {
+  if (!armed)
+    return;
+  for (int k = 0; k < 512; k++)
+    bounce_buf[k] = pre[k];
+  __atomic_add_fetch(&blk_dev_epoch, 1, __ATOMIC_SEQ_CST);
+  if (blk_test_abort_mode == 1)
+    blk_test_abort_left--;
+}
+#endif
 
 /* L67: defined below; the health hook above the wait path uses them. */
 static void blk_token_acquire(void);
@@ -286,6 +329,13 @@ static int nvme_io_queues_create(void) {
         the whole sequence if the device fell out of ready again. */
 static int nvme_reinit(void) {
   blk_resets++;
+  /* M6/L69: from this instant on, no completion that was outstanding before
+     the reset can be trusted — QEMU destroys the requests it had in flight,
+     and the aborted AIO may still post a SUCCESS CQE with no DMA.  Bump the
+     device generation BEFORE touching the controller so a concurrent fill
+     (there is none: the token is held, but the cache reads the epoch without
+     it) can never publish a frame that straddled this reset. */
+  __atomic_add_fetch(&blk_dev_epoch, 1, __ATOMIC_SEQ_CST);
   uart_puts("[BLKQ] controller reset #");
   print_int((int)blk_resets);
   uart_puts("\n");
@@ -387,8 +437,26 @@ static int nvme_reinit(void) {
       stable = 1;
       __asm__ volatile("pause");
     }
-    if (stable)
+    if (stable) {
+      /* M6/L69: NOTHING FILLED AROUND A RESET MAY STAY CACHED.  The aborted
+         transfer's frame is only the one we can see; a completion that QEMU
+         posted for a recycled request can also carry the OLD request's (empty)
+         data with status 0, and it is indistinguishable from a real one.  Drop
+         every cached unit after a reset (entries owned by a live fill are
+         skipped by the cache), so the next read of any page comes from the
+         repaired device.  One flush per reset — resets are 1-2 per run. */
+      uint64_t dropped = blk_cache_flush_all();
+      {
+        static int fl_rows;
+        if (fl_rows < 8) {
+          fl_rows++;
+          uart_puts("[BLKC] post-reset flush dropped=");
+          print_int((int)dropped);
+          uart_puts(" cached units\n");
+        }
+      }
       return 0;
+    }
     uart_puts("[BLKQ] reset: settled out of ready (attempt ");
     print_int(attempt);
     uart_puts("), retrying\n");
@@ -615,6 +683,11 @@ static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
       if (!(cc_now & 1) || !(csts_now & 1)) {
         device_off = 1;
         blk_dev_off++;
+        /* M6/L69: we have just learned that someone reset the controller
+           under this command.  Bump the generation here as well as in
+           nvme_reinit(): the repair can be skipped (repaired >= 3) and the
+           cache must still know that this request's bytes are untrustworthy. */
+        __atomic_add_fetch(&blk_dev_epoch, 1, __ATOMIC_SEQ_CST);
         if (blk_dev_off <= 6 || (blk_dev_off & 0x3F) == 0) {
           uart_puts("[BLKQ] device off cid=");
           print_int((int)cid);
@@ -750,6 +823,27 @@ static uint16_t submit_io_cmd(struct nvme_cmd* cmd) {
   return nvme_wait_cid(cmd, slot);
 }
 
+/* M6/L69: is the controller enabled and ready RIGHT NOW?  Two MMIO reads.
+ *
+ * Why this is needed at both ends of every command: QEMU's controller reset
+ * aborts the request it had in flight and still posts a SUCCESS completion for
+ * it.  `nvme_wait_cid` only polls CC/CSTS once a command has been outstanding
+ * for 20 ms, so a reset that lands during a FAST command is invisible: the
+ * command's stale completion (success, no DMA, previous sector's bytes) is
+ * consumed as if it were data, and the *next* command then detects the reset
+ * and repairs.  The result is exactly one silently wrong sector per reset —
+ * measured L69: a wrong FAT entry (`chain=-1` mid-file on a chain the host
+ * verifies is complete), a torn page (`[TXT] IMG SUM … raw sum=0x7243B846`,
+ * matching no page of the file), and a poisoned zero frame.
+ *
+ * Checking before the submit means a reset that landed between commands is
+ * repaired with NOTHING in flight (so the repair cannot abort our own
+ * transfer); checking after the completion means a reset that landed during
+ * the command discards that completion instead of using it. */
+static inline int nvme_ready_now(void) {
+  return (nvme_regs[5] & 1) && (nvme_regs[7] & 1);
+}
+
 void virtio_blk_handle_irq(void) {
 }
 
@@ -807,6 +901,8 @@ void virtio_blk_diag_row(void) {
   print_int((int)blk_cc_zero_ms);
   uart_puts(" resets=");
   print_int((int)blk_resets);
+  uart_puts(" pre=");
+  print_int((int)blk_prerepair);
   uart_puts(" recover_us=");
   print_int((int)blk_recover_us);
   uart_puts("\n");
@@ -1042,7 +1138,68 @@ int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
     cmd.cdw11 = (uint32_t)((sector + i) >> 32);
     cmd.cdw12 = 0; // 1 block (0)
 
+#ifdef KERNEL_MODE_UNIT_TEST
+    /* M6/L69 test seam: reproduce QEMU's aborted transfer exactly — the
+       command completes with SUCCESS and no DMA, so the bounce buffer still
+       holds the previous command's sector, and the device generation moves
+       (that is how a reset announces itself).  `mode` 1 aborts `times` reads
+       of `sector`; mode 2 aborts every read of it (the driver must then fail
+       the read instead of returning stale bytes). */
+    uint8_t pre_bounce[512];
+    int abort_this = blk_test_abort_armed(sector + i, pre_bounce);
+#endif
+
+    /* M6/L69: NEVER HAND OUT BYTES FROM A TRANSFER THAT OVERLAPPED A DEVICE
+     * EVENT.  An aborted AIO can complete with status 0 and no DMA at all, so
+     * `status == 0` is not proof that `bounce_buf` was written: the buffer
+     * then holds the previous command's sector (often zeros, because a fresh
+     * frame from the allocator is virgin memory).  The epoch is bumped by
+     * every detection and every repair; a change across this submit means the
+     * completion is not evidence, so re-issue the sector once against the
+     * repaired device and only then copy out.  A second change is a hard I/O
+     * error — never stale data. */
+    uint64_t ep0 = blk_dev_epoch;
+    /* Pre-submit: a reset that landed between two commands leaves the
+       controller disabled; repair with NOTHING in flight before submitting. */
+    if (!nvme_ready_now()) {
+      nvme_reinit();
+      ep0 = blk_dev_epoch;
+      blk_prerepair++;
+    }
     uint16_t status = submit_io_cmd(&cmd);
+    /* Post-completion: a reset that landed DURING the command makes even a
+       SUCCESS status meaningless (aborted AIO, no DMA, previous sector's
+       bytes).  Learn about it now rather than at the next command's 20 ms
+       poll, and let the re-issue path below discard this completion. */
+    if (status == 0 && !nvme_ready_now())
+      __atomic_add_fetch(&blk_dev_epoch, 1, __ATOMIC_SEQ_CST);
+#ifdef KERNEL_MODE_UNIT_TEST
+    blk_test_abort_apply(abort_this, pre_bounce);
+#endif
+    if (status == 0 && blk_dev_epoch != ep0) {
+      ep0 = blk_dev_epoch;
+      cmd.cid = next_io_cid();
+#ifdef KERNEL_MODE_UNIT_TEST
+      abort_this = blk_test_abort_armed(sector + i, pre_bounce);
+#endif
+      status = submit_io_cmd(&cmd);
+#ifdef KERNEL_MODE_UNIT_TEST
+      blk_test_abort_apply(abort_this, pre_bounce);
+#endif
+      blk_untrusted++;
+      if (blk_untrusted_rows < 12 || (blk_untrusted & 0x3F) == 0) {
+        blk_untrusted_rows++;
+        uart_puts("[BLKQ] untrusted completion re-read lba=");
+        uart_print_hex(sector + i);
+        uart_puts(" n=");
+        print_int((int)blk_untrusted);
+        uart_puts(" status=");
+        uart_print_hex(status);
+        uart_puts("\n");
+      }
+      if (status == 0 && blk_dev_epoch != ep0)
+        status = 0x7FFF; /* the device moved again: do not trust the bytes */
+    }
     if (status != 0) {
       res = -1;
       break;
@@ -1088,7 +1245,28 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
     cmd.cdw11 = (uint32_t)((sector + i) >> 32);
     cmd.cdw12 = 0; // 1 block (0)
 
+    /* M6/L69: same rule as reads (see nvme_ready_now).  A write that was
+       aborted by a reset is counted as landed, which is how Player.log grew
+       NUL holes whose sector read back all zeros (`[FATW] ZERORD`). */
+    uint64_t ep0 = blk_dev_epoch;
+    if (!nvme_ready_now()) {
+      nvme_reinit();
+      ep0 = blk_dev_epoch;
+      blk_prerepair++;
+    }
     uint16_t status = submit_io_cmd(&cmd);
+    if (status == 0 && !nvme_ready_now())
+      __atomic_add_fetch(&blk_dev_epoch, 1, __ATOMIC_SEQ_CST);
+    if (status == 0 && blk_dev_epoch != ep0) {
+      /* The write may not have landed (aborted AIO).  Re-issue it once; a
+         second event is a hard error, never a silent hole. */
+      ep0 = blk_dev_epoch;
+      cmd.cid = next_io_cid();
+      status = submit_io_cmd(&cmd);
+      blk_untrusted++;
+      if (status == 0 && blk_dev_epoch != ep0)
+        status = 0x7FFF;
+    }
     if (status != 0) {
       res = -1;
       break;
@@ -1099,6 +1277,20 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
 }
 
 #else
+
+/* M6/L69: the MMIO transport has no controller reset to announce, so the
+ * generation never moves.  Defined here so the interface (and the block
+ * cache's publish gate) links on every architecture. */
+volatile uint64_t blk_dev_epoch = 1;
+volatile uint32_t blk_untrusted;
+
+#ifdef KERNEL_MODE_UNIT_TEST
+void virtio_blk_test_abort(int mode, uint64_t sector, int times) {
+  (void)mode;
+  (void)sector;
+  (void)times;
+}
+#endif
 
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000

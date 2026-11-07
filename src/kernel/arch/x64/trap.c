@@ -3575,8 +3575,62 @@ static void general_interrupt_inner(struct trap_frame *tf) {
          latter, so both classes go through it now — the old !pf_present gate
          sent every COW write straight to the kill path (measured: the
          interpreter's first relocation write to LIBC.SO). */
-      if (vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why) == 0) {
+      int frc = vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why);
+      if (frc == 0) {
         return; /* mapping is live; iretq re-executes the instruction */
+      }
+      /* M6/L69: a REFUSED PAGE IS AN I/O ERROR ON A MAPPING, NOT A
+       * PROTECTION VIOLATION.  vm_handle_fault returns 2 when the
+       * file-backed page could not be delivered (the exec gate refused a page
+       * of zeros, a short read never completed, the mapping is already marked
+       * VM_MAP_IOERR).  Linux answers that shape with SIGBUS/BUS_ADRERR, and
+       * it is the answer a compat program can act on: Mono installs a SIGSEGV
+       * handler for null checks, so delivering SIGSEGV here retries the
+       * instruction forever (measured: pid 40 looped until rt_sigreturn's own
+       * frame was corrupt, then died with status 11 and no diagnostic).
+       * SIGBUS runs the runtime's hardware-exception path, which aborts the
+       * failed file load — and the region stays marked, so no later fault
+       * re-reads the device. */
+      if (frc == 2) {
+        struct fl_buf fe;
+        fe.n = 0;
+        fl_s(&fe, "[EIO] pid=");
+        fl_dec(&fe, cur->pid);
+        fl_s(&fe, " (");
+        fl_s(&fe, cur->name);
+        fl_s(&fe, ") page-in failed VA=");
+        fl_hex(&fe, cr2);
+        fl_s(&fe, " PC=");
+        fl_hex(&fe, tf->elr);
+        fl_s(&fe, " rw=");
+        fl_c(&fe, pf_w ? 'w' : 'r');
+        fl_c(&fe, pf_x ? 'x' : ' ');
+        fl_s(&fe, " region=");
+        {
+          extern struct vm_region *vm_region_find(struct addr_space *as,
+                                                 uint64_t va);
+          struct vm_region *er = cur->as ? vm_region_find(cur->as, cr2) : 0;
+          if (!er) {
+            fl_s(&fe, "NONE");
+          } else {
+            fl_hex(&fe, er->base);
+            fl_c(&fe, '+');
+            fl_hex(&fe, er->len);
+            fl_s(&fe, " prot=");
+            fl_dec(&fe, (int)er->prot);
+            fl_s(&fe, " kind=");
+            fl_dec(&fe, (int)er->kind);
+            fl_s(&fe, " ooff=");
+            fl_hex(&fe, er->obj_off);
+          }
+        }
+        fl_s(&fe, " live=");
+        fl_dec(&fe, process_group(cur)->live_threads);
+        fl_s(&fe, " -> SIGBUS (EIO, not a protection fault)\n");
+        fe.b[fe.n] = 0;
+        uart_puts(fe.b);
+        process_fault_exit(tf, 7); /* SIGBUS: a failed file load, not SIGSEGV */
+        return;
       }
       {
         struct fl_buf fl;

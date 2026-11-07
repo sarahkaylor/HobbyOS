@@ -7,6 +7,8 @@
 #include "frame.h"
 #include "fs.h"
 #include "vm.h"
+#include "blk_cache.h"
+#include "virtio_blk.h"
 #include "process.h"
 
 extern void uart_puts(const char *s);
@@ -1737,14 +1739,39 @@ static void test_vm_exec_page_eio(void) {
     EXPECT_EQ(1, 0);
   }
 
-  /* (4) the demand-fault publisher (exec=1) takes the same gate. */
+  /* (4) the demand-fault publisher (exec=1) takes the same gate.  M6/L69: a
+     refused EXEC page is an I/O error on the MAPPING (2), not a protection
+     fault (1): the trap layer turns it into SIGBUS, and the region is marked
+     so a handler that returns cannot drive another device read. */
   EXPECT_EQ(vm_unmap_page(p.as, (uint64_t)b), 0);
   fat16_test_inject(2, 0, 64);
   int frc = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
   fat16_test_inject(0, 0, 0);
-  EXPECT_EQ(frc, 1); /* kill: no zero page executed */
+  EXPECT_EQ(frc, 2); /* EIO: a failed page-in, not a protection violation */
+  EXPECT_EQ(why != 0 && why[0] == 'E' && why[1] == 'I' && why[2] == 'O', 1);
   EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &leaf) != 0, 1);
-  /* ... and with the device healthy the same fault resolves. */
+  {
+    struct vm_region *r4 = vm_region_find(p.as, (uint64_t)b);
+    EXPECT_EQ((r4 && (r4->flags & VM_MAP_IOERR)), 1);
+  }
+  /* ... the SAME fault with the device healthy now answers 2 immediately and
+     WITHOUT a device read: the mapping is failed, and re-reading it page by
+     page is the storm this flag exists to stop. */
+  {
+    struct blk_cache_stats s0, s1;
+    blk_cache_get_stats(&s0);
+    int frc_again = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+    blk_cache_get_stats(&s1);
+    EXPECT_EQ(frc_again, 2);
+    EXPECT_EQ((s1.raw_sectors - s0.raw_sectors), 0);
+  }
+  /* Clear the marker (a test-only reset of the mapping's failure) and the
+     same fault resolves into the file's bytes. */
+  {
+    struct vm_region *r4 = vm_region_find(p.as, (uint64_t)b);
+    if (r4)
+      r4->flags &= ~(uint32_t)VM_MAP_IOERR;
+  }
   int frc2 = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
   EXPECT_EQ(frc2, 0);
   if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
@@ -1820,6 +1847,129 @@ out:
   print_int(frame_free_count());
   uart_puts("\n");
   EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* =====================================================================
+ * M6/L69: A POISONED CACHE FRAME MUST NOT DEFEAT THE EXEC GATE.
+ *
+ * The measured field failure (L69, UnityPlayer.so off 0x757000):
+ *
+ *   [BLKQ] device off cid=44153 op=R lba=0x7B6DE cc=0x0 csts=0x0
+ *   [BLKQ] controller reset #1 / recovered us=53000
+ *   [BLKC] distrust unit=63195 (reset during fill) -> frame dropped
+ *   [TXT] PROBE off=0x757000 ... cache found=1 fstate=0 valid=0xFF c_nz=0
+ *           | raw rc=0 r_nz=3754 r_sum=0x6A3B1
+ *   [TXT] ZERO off=0x757000 reads=3 n0=4096 -> not published   (x64 died)
+ *
+ * The device holds the page (3754 non-zero bytes); the CACHE held a page of
+ * zeros with every sector valid.  Every read the gate makes went through that
+ * frame, so its two-agreeing-reads test could only confirm the cache against
+ * itself.  The fix is that the gate treats the DEVICE as the truth: on an
+ * all-zero answer it reads the page once with the cache bypassed and, if the
+ * device has bytes, publishes those and drops the poisoned frame.
+ *
+ * This test builds that exact state — a fully valid, CLEAN, all-zero cache
+ * unit covering the page — and asserts the page still publishes the file's
+ * bytes, byte for byte, and that the poisoned unit is gone afterwards.
+ * ===================================================================== */
+static void test_vm_poisoned_cache_page(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_poisoned_cache_page...\n");
+
+  /* Start from a clean slate so the frame accounting at the end is exact. */
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  int free0 = frame_free_count();
+
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+  /* The fixture write invalidated the cache; make the object fresh too. */
+  file_obj_invalidate_all();
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_EXEC_TAG + 3));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  if (fd < 0) {
+    vm_as_teardown(p.as);
+    return;
+  }
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (b <= 0) {
+    file_close(&p, fd);
+    vm_as_teardown(p.as);
+    return;
+  }
+
+  /* Poison the exact unit page 0 will read: 4 KiB of zeros, valid, CLEAN. */
+  uint32_t lba = 0;
+  EXPECT_EQ(fat16_test_lba(cluster, 0, &lba), 0);
+  static uint8_t zeros[4096];
+  EXPECT_EQ(blk_cache_test_poison(lba, zeros, 4096), 0);
+
+  /* The cache really does answer zeros for that page now.  This is the
+     precondition: without it the test would pass on a healthy cache. */
+  {
+    static uint8_t chk[512];
+    EXPECT_EQ(virtio_blk_read_sector(lba, chk, 1), 0);
+    int allz = 1;
+    for (int i = 0; i < 512; i++)
+      if (chk[i]) { allz = 0; break; }
+    EXPECT_EQ(allz, 1);
+  }
+
+  /* The exec publish must NOT believe it: the device has the file's bytes. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 0), 0);
+  {
+    uint64_t leaf = 0;
+    if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+      uint64_t ph = vm_arch_leaf_phys(leaf);
+      int bad = 0;
+      for (int i = 0; i < 64; i++)
+        if (((const volatile unsigned char *)ph)[i] !=
+            (unsigned char)((i * 7 + 3) & 0xFF))
+          bad++;
+      EXPECT_EQ(bad, 0); /* the FILE's bytes, not the poisoned zeros */
+    } else {
+      EXPECT_EQ(1, 0);
+    }
+  }
+
+  /* The poisoned entry is dropped, not left to be served to the next reader. */
+  {
+    struct blk_cache_unit_info ci;
+    blk_cache_probe_unit(lba, &ci);
+    EXPECT_EQ(ci.found, 0);
+  }
+
+  /* And a cache-bypassing read agrees with the mapping (device == file). */
+  {
+    static uint8_t raw[512];
+    EXPECT_EQ(fat16_read_direct_pos_raw(cluster, fsize, (uint64_t)raw, 512, 0),
+              512);
+    EXPECT_EQ(raw[0], (uint8_t)((0 * 7 + 3) & 0xFF));
+    EXPECT_EQ(raw[5], (uint8_t)((5 * 7 + 3) & 0xFF));
+  }
+
+  file_close(&p, fd);
+  vm_as_teardown(p.as);
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  uart_puts("  [VM-FILE] poisoned_cache frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
   EXPECT_EQ(frame_free_count(), free0);
 }
 
@@ -2349,6 +2499,14 @@ static void test_vm_alloc_hole_atomic(void) {
 
   vm_as_teardown(as);
   EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L69: the poisoned-cache regression needs blk_cache_init() to have run
+ * (the vm suite itself runs before the cache is enabled so its exact frame
+ * accounting holds).  unit_test.c calls this right after the blk-cache
+ * suites. */
+void vm_test_post_cache_suite(void) {
+  test_vm_poisoned_cache_page();
 }
 
 void vm_test_suite(void) {

@@ -1,5 +1,7 @@
 #include "fs.h"
 #include "virtio_blk.h"
+#include "blk_cache.h"
+#include "frame.h"
 #include "lock.h"
 #include "process.h"
 #include "errno.h"
@@ -18,6 +20,7 @@ extern uint64_t rtc_make_epoch(int year, int month, int day,
                                int hour, int minute, int second);
 
 #define SECTOR_SIZE 512
+#define PROBE_PAGE 4096 /* one page: the unit the exec gate validates */
 
 static uint32_t bpb_bytes_per_sector;
 static uint32_t bpb_sectors_per_cluster;
@@ -34,6 +37,10 @@ static uint32_t cluster_size;
 static uint32_t bpb_total_sectors;
 
 static spinlock_t fat_lock;
+
+/* M6/L69: file offset -> LBA (defined with the page-in probes below). */
+static int fat16_lba_for_pos_locked(uint16_t start, uint32_t pos,
+                                    uint32_t *lba_out);
 
 /* One-sector cache for FAT table reads.  The read path walks cluster
    chains sequentially, so 256 consecutive clusters share one FAT sector;
@@ -249,8 +256,32 @@ static uint16_t read_fat(uint16_t cluster) {
   spinlock_acquire(&fat_cache_lock);
   if (!fat_cache_valid || fat_cache_sector != sector) {
     spinlock_release(&fat_cache_lock);
-    virtio_blk_read_sector(sector, fat_cache_fill, 1);
+    /* M6/L69: A METADATA SECTOR IS NEVER BELIEVED ON ONE READ.  A controller
+     * reset can abort a read and hand back the previous sector (status 0, no
+     * DMA), and ONE wrong FAT entry turns the rest of a chain walk into other
+     * files' clusters.  Measured: `chain=-1` in the middle of UnityPlayer.so
+     * (2 015/2 015 clusters, md5 identical when the host walks the same image),
+     * and an image page that read back as *consistent* zeros from a cluster
+     * the file does not own — which no exec gate can distinguish from a real
+     * zero page.  Read the sector twice and require agreement; retry a few
+     * times.  A persistent failure is a chain break, not a guess. */
+    uint8_t chk[SECTOR_SIZE];
+    int ok = 0;
+    for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+      if (virtio_blk_read_sector(sector, fat_cache_fill, 1) != 0)
+        continue;
+      if (virtio_blk_read_sector(sector, chk, 1) != 0)
+        continue;
+      ok = 1;
+      for (int i = 0; i < SECTOR_SIZE; i++)
+        if (fat_cache_fill[i] != chk[i]) { ok = 0; break; }
+    }
     spinlock_acquire(&fat_cache_lock);
+    if (!ok) {
+      fat_cache_valid = 0;
+      spinlock_release(&fat_cache_lock);
+      return 0xFFF8; /* chain break: callers short-circuit and can retry */
+    }
     for (int i = 0; i < SECTOR_SIZE; i++) fat_cache[i] = fat_cache_fill[i];
     fat_cache_sector = sector;
     fat_cache_valid = 1;
@@ -2414,6 +2445,18 @@ void fat16_test_inject(int mode, uint32_t off, int times) {
   fat16_inj_off = off;
   fat16_inj_left = times;
 }
+
+int fat16_test_lba(uint16_t start_cluster, uint32_t pos, uint32_t *lba) {
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  uint32_t out = 0;
+  int rc = fat16_lba_for_pos_locked(start_cluster, pos, &out);
+  spinlock_release_irqrestore(&fat_lock, flags);
+  if (rc < 0)
+    return -1;
+  if (lba)
+    *lba = out;
+  return 0;
+}
 #endif
 
 int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
@@ -2445,6 +2488,207 @@ int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
   }
 #endif
   return read_bytes;
+}
+
+/* ======================================================================
+ * M6/L69: the page-in forensics that separate a poisoned block-cache frame
+ * from a device that really answered zeros.
+ * ====================================================================== */
+
+/* LBA of file offset `pos`, walking the cluster chain.  fat_lock held. */
+static int fat16_lba_for_pos_locked(uint16_t start, uint32_t pos,
+                                    uint32_t *lba_out) {
+  uint16_t c = get_cluster_for_offset(start, pos);
+  if (c == 0 || c >= 0xFFF8)
+    return -1;
+  uint32_t offset_in_cluster = pos % cluster_size;
+  uint32_t lba = data_sector + (c - 2) * bpb_sectors_per_cluster +
+                 (offset_in_cluster / SECTOR_SIZE);
+  if (lba_out)
+    *lba_out = lba;
+  return (int)c;
+}
+
+int fat16_page_drop_cache(uint16_t start_cluster, uint32_t file_size,
+                          uint32_t pos, uint32_t len) {
+  (void)file_size;
+  uint32_t dropped = 0;
+  for (uint32_t off = 0; off < len; off += SECTOR_SIZE) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    uint32_t lba = 0;
+    int ok = fat16_lba_for_pos_locked(start_cluster, pos + off, &lba) >= 0;
+    spinlock_release_irqrestore(&fat_lock, flags);
+    if (!ok)
+      break;
+    blk_cache_invalidate(lba, 1);
+    dropped++;
+  }
+  return (int)dropped;
+}
+
+/* A cache-bypassing read of one page: per-sector raw device reads at the LBAs
+ * the chain gives.  Deliberately does NOT touch blk_cache: the whole point is
+ * to ask the device the same question the cache answered. */
+static int fat16_page_raw_read(uint16_t start_cluster, uint32_t pos,
+                               uint8_t *dst, uint32_t len) {
+  for (uint32_t off = 0; off < len; off += SECTOR_SIZE) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    uint32_t lba = 0;
+    int ok = fat16_lba_for_pos_locked(start_cluster, pos + off, &lba) >= 0;
+    spinlock_release_irqrestore(&fat_lock, flags);
+    if (!ok)
+      return -1;
+    if (virtio_blk_read_raw(lba, dst + off, 1) != 0)
+      return -1;
+  }
+  return 0;
+}
+
+static uint32_t nz_bytes(const uint8_t *p, uint32_t n, uint32_t *sum) {
+  uint32_t nz = 0, s = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    if (p[i])
+      nz++;
+    s += p[i];
+  }
+  if (sum)
+    *sum = s;
+  return nz;
+}
+
+/* M6/L69: the AUTHORITATIVE page read — the one the block cache cannot
+ * poison.  Reads straight from the device at the LBAs the cluster chain gives,
+ * bypassing blk_cache entirely.  Used by the exec gates when a cached read
+ * says "zeros": a frame published from an aborted transfer (status 0, no DMA)
+ * is served to every cache reader forever, so agreement between cache reads
+ * proves nothing, while the device still holds the file's bytes.
+ * Returns the byte count (== min(size, file_size - pos)) or -1. */
+int fat16_read_direct_pos_raw(uint16_t start_cluster, uint32_t file_size,
+                              uint64_t dest, int size, uint32_t pos) {
+  if (size <= 0 || pos >= file_size)
+    return 0;
+  uint32_t want = (uint32_t)size;
+  if ((uint64_t)pos + (uint64_t)want > (uint64_t)file_size)
+    want = file_size - pos;
+#ifdef KERNEL_MODE_UNIT_TEST
+  /* The same injected delivery applies here: the seam models the DEVICE
+     answering, and this read is the one that decides whether the device really
+     holds zeros.  Without this the EIO tests would pass for the wrong reason
+     (the raw re-read would return the real page). */
+  if (fat16_inj_mode && fat16_inj_left > 0 && pos == fat16_inj_off) {
+    fat16_inj_left--;
+    if (fat16_inj_mode == 1)
+      return (int)want > 64 ? 64 : (int)want;
+    if (fat16_inj_mode == 2) {
+      volatile uint8_t *p = (volatile uint8_t *)dest;
+      for (uint32_t i = 0; i < want; i++)
+        p[i] = 0;
+      return (int)want;
+    }
+  }
+#endif
+  if (fat16_page_raw_read(start_cluster, pos, (uint8_t *)dest, want) != 0)
+    return -1;
+  return (int)want;
+}
+
+int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
+                     uint32_t pos) {
+  static int rows;
+  if (rows >= 12)
+    return -1;
+  rows++;
+
+  uint32_t len = PROBE_PAGE;
+  if (file_size > pos && file_size - pos < len)
+    len = file_size - pos;
+
+  /* (1) what the chain says this page is. */
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  uint32_t lba0 = 0;
+  int cluster = fat16_lba_for_pos_locked(start_cluster, pos, &lba0);
+  uint32_t spc = bpb_sectors_per_cluster;
+  uint32_t dsec = data_sector;
+  spinlock_release_irqrestore(&fat_lock, flags);
+
+  /* (2) what the CACHE holds for that unit. */
+  struct blk_cache_unit_info ci;
+  blk_cache_probe_unit(lba0, &ci);
+
+  /* (3) what the DEVICE says, bypassing the cache entirely.  Goes through the
+     same authoritative helper the gate's repair uses, so this row means the
+     same thing in the unit tier (where the delivery seam applies) as in the
+     field. */
+  static uint8_t rawbuf[PROBE_PAGE];
+  int raw_rc = -1;
+  if (len == PROBE_PAGE)
+    raw_rc = fat16_read_direct_pos_raw(start_cluster, file_size,
+                                       (uint64_t)rawbuf, (int)len, pos) ==
+                     (int)len
+                 ? 0
+                 : -1;
+  uint32_t raw_sum = 0;
+  uint32_t raw_nz = (raw_rc == 0) ? nz_bytes(rawbuf, len, &raw_sum) : 0;
+
+  /* (4) drop the cache for those sectors and read normally again: if the
+     bytes change, the frame the cache served was the lie. */
+  int dropped = fat16_page_drop_cache(start_cluster, file_size, pos, len);
+  uint64_t rfbuf = frame_alloc();
+  int refill_n = -1, refill_nz = 0;
+  uint32_t refill_sum = 0;
+  if (rfbuf) {
+    refill_n = fat16_read_direct_pos(start_cluster, file_size, rfbuf, (int)len,
+                                     pos);
+    if (refill_n > 0)
+      refill_nz = nz_bytes((const uint8_t *)rfbuf, (uint32_t)refill_n,
+                           &refill_sum);
+  }
+
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[TXT] PROBE off=0x");
+  kl_hex(&kl, (unsigned long)pos);
+  kl_s(&kl, " size=");
+  kl_i(&kl, (long)file_size);
+  kl_s(&kl, " chain=");
+  kl_i(&kl, cluster);
+  kl_s(&kl, " spc=");
+  kl_i(&kl, (int)spc);
+  kl_s(&kl, " data=");
+  kl_i(&kl, (long)dsec);
+  kl_s(&kl, " lba=0x");
+  kl_hex(&kl, (unsigned long)lba0);
+  kl_s(&kl, " len=");
+  kl_i(&kl, (long)len);
+  kl_s(&kl, " | cache found=");
+  kl_i(&kl, ci.found);
+  kl_s(&kl, " fstate=");
+  kl_i(&kl, (int)ci.fstate);
+  kl_s(&kl, " valid=0x");
+  kl_hex(&kl, (unsigned long)ci.valid);
+  kl_s(&kl, " c_nz=");
+  kl_i(&kl, (long)ci.nz);
+  kl_s(&kl, " c_sum=0x");
+  kl_hex(&kl, (unsigned long)ci.sum);
+  kl_s(&kl, " | raw rc=");
+  kl_i(&kl, raw_rc);
+  kl_s(&kl, " r_nz=");
+  kl_i(&kl, (long)raw_nz);
+  kl_s(&kl, " r_sum=0x");
+  kl_hex(&kl, (unsigned long)raw_sum);
+  kl_s(&kl, " | dropped=");
+  kl_i(&kl, dropped);
+  kl_s(&kl, " refill n=");
+  kl_i(&kl, refill_n);
+  kl_s(&kl, " f_nz=");
+  kl_i(&kl, (long)refill_nz);
+  kl_s(&kl, " f_sum=0x");
+  kl_hex(&kl, (unsigned long)refill_sum);
+  kl_s(&kl, "\n");
+  kl_emit(&kl);
+  if (rfbuf)
+    frame_free(rfbuf);
+  return (int)raw_nz;
 }
 
 /**

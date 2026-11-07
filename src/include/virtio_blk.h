@@ -72,4 +72,44 @@ void virtio_blk_diag_row(void);
  */
 int virtio_blk_health(void);
 
+/**
+ * M6/L69: the block device's "generation".  Bumped on every event after which
+ * an outstanding transfer's completion cannot be trusted:
+ *
+ *   - a controller reset this kernel performs (`nvme_reinit`),
+ *   - a reset it DETECTS (CC.EN or CSTS.RDY cleared while a command was
+ *     outstanding, i.e. someone else reset the controller under us).
+ *
+ * QEMU aborts the requests that were in flight when it resets the controller,
+ * and an aborted AIO can complete with SUCCESS and no DMA at all: the guest
+ * then reads whatever the bounce buffer held (the previous command's bytes,
+ * often a page of zeros, because a frame from the allocator is virgin memory).
+ * A transfer that overlapped an epoch change is therefore never used: the
+ * driver re-issues it, and the block cache refuses to publish a frame it
+ * filled across the change.  This is the invariant "an aborted DMA must never
+ * publish a page", enforced at both layers.
+ */
+extern volatile uint64_t blk_dev_epoch;
+
+/* Number of transfers discarded because they overlapped a device event. */
+extern volatile uint32_t blk_untrusted;
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/**
+ * M6/L69 test seam (unit tier only): make the device reproduce QEMU's aborted
+ * transfer.  The command still succeeds but performs NO DMA — the bounce
+ * buffer keeps the previous command's 512 bytes — and the device generation
+ * moves, which is how a reset announces itself.
+ *
+ *   mode 1: abort the next `times` reads of `sector` once each.  The driver
+ *           must notice the generation change, re-issue, and return the
+ *           DEVICE's bytes (never the stale bounce buffer).
+ *   mode 2: abort every read of `sector`.  The driver must fail the read
+ *           (-1) rather than hand out bytes it cannot vouch for.
+ *
+ * mode 0 clears the injection.
+ */
+void virtio_blk_test_abort(int mode, uint64_t sector, int times);
+#endif
+
 #endif // VIRTIO_BLK_H

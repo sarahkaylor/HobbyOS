@@ -132,6 +132,17 @@
 #define VM_MAP_ANONYMOUS 0x20
 #define VM_MAP_NORESERVE 0x40
 
+/* M6/L69: this mapping's page-in failed with EIO.  Set the first time a
+ * file-backed page cannot be delivered (a refused exec page, a short read that
+ * never completes, a device that answers zeros for code).  From then on every
+ * fault on the region and every syscall-side touch returns the same EIO
+ * WITHOUT re-issuing device I/O: a mapping whose backing file cannot be read
+ * is a failed load, and retrying it page by page is what turned one bad page
+ * into a SIGSEGV storm that outlived the process's own error handling.  A
+ * private bit: mmap masks user flags to the ABI set, so it can never be
+ * injected from user space. */
+#define VM_MAP_IOERR 0x8000
+
 /* Address-space versions (D4): v1 = the legacy 32 MiB block layout
  * (as == NULL on the PCB), v2 = the sparse window above. */
 #define AS_V1 1
