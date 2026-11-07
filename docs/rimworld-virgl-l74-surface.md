@@ -139,9 +139,9 @@ the model is about.
 
 **fps is flat in resolution**: a 3.8× pixel range moves it by 8 %, and the
 smallest size is the *slowest* of the three (its window caught more of the
-engine's first-load phase — bucket 1 is 0.00 against 10.30). Per-bucket, all
-three runs have the same shape: ~9–10 fps while the engine instantiates, ~20
-fps in the audio/assembly phase, then 12–17 fps.
+engine's first-load phase — bucket 1 is 0.00 against 10.30). Per-bucket the three
+runs share a shape: the first 30 s are the engine coming up (0–10 fps,
+depending on when the first present lands), then 19–22 fps, 14–17, 12–13.
 
 The same ladder run earlier the same day, while other lanes had VMs up (load
 average 9–15 on 32 cores), gave 8.18 / 8.01 / 8.57 — **the same flat shape at
