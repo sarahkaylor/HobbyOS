@@ -1270,9 +1270,9 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
               kl_init(&kr);
               kl_s(&kr, "[TXT] PROBEGET off=");
               kl_hex(&kr, (unsigned long)off);
-              kl_s(&kr, " -> the probe's two cache-bypassed reads agreed;"
-                        " cache frame was POISONED, published the device's"
-                        " bytes\n");
+              kl_s(&kr, " -> the probe's own cache-bypassed read (second"
+                        " read agreed or was the zero replay); cache frame"
+                        " was POISONED, published the device's bytes\n");
               kl_emit(&kr);
             }
           }

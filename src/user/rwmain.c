@@ -3352,7 +3352,13 @@ static void *tp_watchdog(void *arg) {
        aborted the runtime (object.c:1939 `klass').  4 s after the DSO load
        the runtime is executing managed code, and mscorlib is on the loaded
        image list, so the name-only registration below is safe. */
-    if (i >= 40 && !tp.registered_q && tp.image_loaded && tp.add_icall) {
+    /* M6/L72: /TPLATE needs none of the pool bookkeeping, and every one of
+       these is a Mono class lookup from a foreign thread during/after init --
+       the exact shape that aborts the runtime at object.c:1939 (`klass`).
+       Measured: two runs with /TPLATE died at startup on it.  Late-only mode
+       touches nothing but mono_jit_info_table_find. */
+    if (!tp_late_only && i >= 40 && !tp.registered_q && tp.image_loaded &&
+        tp.add_icall) {
       void *img = tp.image_loaded("mscorlib");
       if (img) {
         tp.registered_q = 1;
@@ -3374,7 +3380,7 @@ static void *tp_watchdog(void *arg) {
     /* 10 s in: the runtime has been executing managed code for seconds, so a
        class lookup is safe here, and the loading wait starts before the pool's
        first enqueue. */
-    if (!tp.registered_w && tp.attached && i >= 50) {
+    if (!tp_late_only && !tp.registered_w && tp.attached && i >= 50) {
       tp.registered_w = tp_register_w();
       if (!tp.registered_w && i > 400) tp.registered_w = -1; /* give up, once */
     }

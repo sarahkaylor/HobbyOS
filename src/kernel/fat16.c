@@ -2761,7 +2761,10 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
       return 1;
     }
   }
-  return (int)raw_nz;
+  /* 0/1 only: the caller treats 1 as "the page is in *out".  Returning the
+     non-zero byte count here made a page with exactly one non-zero byte look
+     like a successful publish of an unfilled buffer. */
+  return 0;
 }
 
 /**

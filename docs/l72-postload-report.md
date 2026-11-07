@@ -13,7 +13,7 @@ the end of the load.
 |---|---|
 | who is in the park? | main (`/NFS/RimWorldLinux`), `Loading.AsyncRead`, `UnityGfxDeviceW` — a three-party completion handshake, every wake landing (`woke=1 of=<pid>`) |
 | is it a lost wake? | **no.** 190 182 futex ops in 1690 s, every WAKE found its waiter; it is a **protocol livelock**: each side re-arms instead of reporting completion |
-| what allocates? | `UnityGfxDeviceW` (tid 28), **one 4 KiB managed buffer per round**, zeroed by glibc `__bzero` (`memset`) into a monotonically growing anonymous arena; 196 608 pages = 768 MiB in L65 run 1 |
+| what allocates? | `UnityGfxDeviceW` (tid 28), **one 4 KiB managed buffer allocated and copied per round** (glibc `memcpy`'s `movntdq` loop / `__bzero` for the zeroed part) into a monotonically growing anonymous arena; 196 608 pages = 768 MiB in L65 run 1 |
 | why 8×1? | **QEMU's VGA text fallback**, not the WM, not Unity: with VBE off and the CRTC zeroed, `vga_get_text_resolution()` computes `(cr[1]+1)*8 × (cr[0x12]+1)` = 8×1. The guest's own mode never changed (`[BGA] xres=1920 yres=1080 bpp=32 en=0x41` for the whole run) |
 | the assert? | `x86-codegen.h:403` is the `default: g_assert (0)` arm of `mono_x86_patch_inline`'s opcode switch (L61); a byte that is not a call/branch arrives at the patch site. Instruments now capture the byte (`[KREG]`+`[UDX]`) |
 | what was killing the ladder? | the **device replay** on DSO text pages: read 1 = the file's bytes, read 2 = 4096 zeros, so L69's "two raw reads must agree" gate refused a page the device had answered correctly, and the process took SIGBUS at `[PUBS]=307200` in every run |
@@ -94,11 +94,13 @@ region:
   round; the job workers 43/46/48 show the same signature during the load).
 * **where:** a *growing* anonymous arena (`0x11D8000000`, 58 MB and climbing,
   then `0x11E0000000` after it). `kind=3`, `shared=0`: a plain `mmap`.
-* **what instruction:** `rip=0x10800BBE1F` / `…BDFD` = libc + `0xBBE1F`, which
-  is `__bzero`'s SSE2 zeroing loop (`movdqu %xmm0,(%rdi)` / `movdqa (%rcx)`).
-  The page is **zeroed by `memset`**, i.e. it is a freshly allocated managed
-  buffer (`new byte[4096]` / array init), not a stack growth and not a file
-  read.
+* **what instruction:** `rip=0x10800BBE1F` / `…BBDFD` = libc + `0xBBE1F`,
+  which disassembles to `movntdq %xmm3,0x30(%rdi)` — the non-temporal store
+  loop of glibc's **`memcpy`**. Other samples of the same arena land at
+  libc + `0xBBFDC`/`0xBC017`, the SSE2 loop of **`__bzero`**. So each round
+  *allocates* a 4 KiB managed buffer (zeroed by `memset`) and *copies* 4 KiB
+  into a growing destination (`memcpy`), touching one fresh page each time —
+  not a stack growth and not a file read.
 * **rate:** one page per round-trip. The round is 5.9-6.1 ms (171-164
   pages/s), and the futex cycle runs at 112 ops/s ≈ 6 ops per 53 ms — i.e.
   **one 4 KiB allocation per handshake iteration**.
