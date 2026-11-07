@@ -528,16 +528,23 @@ class Flow:
         """Dismiss the Steam modal only when OCR says it is the modal.
 
         L79 called find_ignore() on every poll, and the menu's own brown
-        buttons have the same fill.  Gate it on the text.
+        buttons have the same fill.  Gate it on the text.  find_ignore looks
+        for the button's RESTING fill only (106,81,46); after one click the
+        pointer rests on the button and it is painted in the HOVERED fill
+        (136,100,50), so the band is not found and the modal was left up for
+        the rest of the run (measured, run 5).  The known button position is
+        the fallback.
         """
         txt = ocr_text(png).lower()
         if "steam" not in txt and "could not initialize" not in txt:
             return False
         xy = self.find_ignore(png)
+        how = "brown-band"
         if not xy:
-            return False
+            xy = (805, 768)  # the Ignore button measured at 1920x1080
+            how = "known-position"
         self.emit({"ev": "modal", "where": where, "click": list(xy),
-                   "text": "Could not initialize Steam API"})
+                   "how": how, "text": "Could not initialize Steam API"})
         self.q.click(xy[0], xy[1], self.args.fb_w, self.args.fb_h)
         time.sleep(3)
         return True
