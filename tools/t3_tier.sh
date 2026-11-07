@@ -562,7 +562,11 @@ fi
 # differential as part of the intel tier; run t4_w0 over this wave's own serial
 # so arrival + (where the member emits it) the [W0] output marker are judged,
 # not a manual post-hoc step. Disable per-run with W0_GATE=0.
-if [ "$rc" -eq 0 ] && [ "x${W0_GATE:-1}" != "x0" ] && [ -f "$ROOT/tools/gate/t4_w0.sh" ]; then
+# GB-058: the corpus is INTEL-ONLY by construction — W0PIE is the x86_64
+# Linux-ABI static-PIE member and the ARM wave has no W0 member set. Running
+# t4_w0 on an ARM log made every otherwise-green ARM wave exit 1 on
+# "W0PIE not in the intel wave's exited-programs set"; gate the gate on ARCH.
+if [ "$ARCH" = "intel" ] && [ "$rc" -eq 0 ] && [ "x${W0_GATE:-1}" != "x0" ] && [ -f "$ROOT/tools/gate/t4_w0.sh" ]; then
   (cd "$ROOT" && bash tools/gate/t4_w0.sh --serial "$LOG") || { echo "T3_${ARCH}: FAIL - W0 corpus gate"; rc=1; }
 fi
 echo "T3_${ARCH} EXIT=$rc"
