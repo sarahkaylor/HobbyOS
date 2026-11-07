@@ -230,16 +230,22 @@ open row of this section.
    * back-off 2/10/30/60 ms (was 2/2/2), on the controller-repair timescale
      (L67: 50-63 ms).
 2. **A data page can be poisoned too** (`vm_data_page_rescue`, `[PDZ]`): an
-   all-zero cache page for a file object now asks the device once; if the
-   device holds content, the device's page is published and the unit dropped.
-   (No `[PDZ]` row fired in the runs — data-page poisoning is not what this
-   ladder hits, but the gate no longer trusts a zero data page blindly.)
+   all-zero cache page for a file object asks the device once and *records*
+   that the device holds content. It deliberately does **not** publish on that
+   single read: a torn or wrong read installed in `.data` corrupts a static
+   pointer silently. Three runs aborted at startup with `object.c:1939 klass`
+   (two with the ud2 probe build, one with the single-read rescue trusted).
+   No `[PDZ]` row fired in the clean runs — data-page poisoning is not what
+   this ladder hits; the row is there for the next lane.
 3. **A lost display mode is restored** (`virtio_gpu_health_tick`, `[BGA]`), so
    a VGA reset cannot leave the machine at 8×1 behind a live guest.
 4. **Two probe instruments** so the park and the assert are answerable in one
    run: `/TPLATE` (late stack sampler on its own file `/RW_HOME/l72.log`,
    bounded, no Mono object walks — the rich probe stopped the watchdog at
-   t≈100 s in two runs) and `/UDX`.
+   t≈100 s in two runs, and its early `mono_class_from_name`/`add_icall`
+   registration is the documented `object.c:1939 klass` abort shape, which
+   killed two late-only runs at startup; late-only now skips both and touches
+   nothing but `mono_jit_info_table_find`) and `/UDX`.
 
 ## 6. Ladder
 
