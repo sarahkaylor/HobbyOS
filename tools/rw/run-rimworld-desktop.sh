@@ -313,6 +313,16 @@ if [ "${RW_TPTRACE:-0}" = 1 ]; then
 else
   mdel -i "$IMG" ::/TPTRACE >/dev/null 2>&1 || true
 fi
+# L72: the launcher's own late-sampling probe (SIGUSR2 stack capture every
+# 120 s from t=400 s) WITHOUT Mono's threadpool log: at ~112 futex ops/s that
+# log would both drown the console and perturb the rate being measured.
+if [ "${RW_TPLATE:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/tplate"
+  stage "$OUT/tplate" ::/TPLATE
+  echo "  staged: /TPLATE -> late stack sampler (no game-side logging)"
+else
+  mdel -i "$IMG" ::/TPLATE >/dev/null 2>&1 || true
+fi
 # L54: condvar flight recorder.  condtrace.c is linked into the launcher, so
 # its pthread_cond_* wrappers win resolution for the game's DSOs; /CONDTRACE
 # turns counting on.  Without the marker the wrappers are pass-through.
@@ -430,6 +440,12 @@ mdir -i "$IMG" ::/RW_HOME >/dev/null 2>&1 && \
   mcopy -o -i "$IMG" ::/RW_HOME/mtx.log "$OUT/mtx.log" 2>/dev/null && {
     echo "  $OUT/mtx.log ($(stat -c %s "$OUT/mtx.log") bytes)"
   } || true
+
+echo
+echo "== the probe's own log (/TPLATE)"
+mdir -i "$IMG" ::/RW_HOME >/dev/null 2>&1 && \
+  mcopy -o -i "$IMG" ::/RW_HOME/l72.log "$OUT/l72.log" 2>/dev/null && \
+  echo "  $OUT/l72.log ($(stat -c %s "$OUT/l72.log") bytes)" || true
 
 echo
 echo "== ordered ladder (raw serial lines, in order)"

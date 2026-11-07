@@ -99,6 +99,22 @@ static inline uint32_t inl(uint16_t port) {
   return ret;
 }
 
+static inline void outb(uint16_t port, uint8_t val) {
+  __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline uint8_t inb(uint16_t port) {
+  uint8_t ret;
+  __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
+  return ret;
+}
+
+static inline uint16_t inw(uint16_t port) {
+  uint16_t ret;
+  __asm__ volatile("inw %1, %0" : "=a"(ret) : "Nd"(port));
+  return ret;
+}
+
 static uint32_t pci_read_config(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
   uint32_t address = ((uint32_t)1 << 31) |
                      ((uint32_t)bus << 16) |
@@ -135,6 +151,76 @@ static void pci_write_config(uint8_t bus, uint8_t slot, uint8_t func, uint8_t of
 static void bga_write(uint16_t index, uint16_t data) {
   outw(VBE_DISPI_IOPORT_INDEX, index);
   outw(VBE_DISPI_IOPORT_DATA, data);
+}
+
+static uint16_t bga_read(uint16_t index) {
+  outw(VBE_DISPI_IOPORT_INDEX, index);
+  return inw(VBE_DISPI_IOPORT_DATA);
+}
+
+/* M6/L72: THE 8x1 FRAMEBUFFER IS A MODE, NOT A WINDOW.
+ *
+ * A screendump that turns 8x1 mid-run is exactly what QEMU's
+ * `vga_get_text_resolution()` computes when the VGA CRTC registers are all
+ * zero: width = (cr[H_DISP]+1)*8 = 8 and height = cr[V_DISP_END]+1 = 1.  That
+ * is the device's state after a VGA reset with no mode set since -- no guest
+ * mode, no window, no Unity involvement.  So the first question is whether the
+ * guest's own mode survived: read the Bochs dispi registers (the values QEMU's
+ * `vga_get_resolution()` returns in VBE mode) and the two CRTC fields the text
+ * fallback uses, and print one row only when any of them changes.  If the
+ * dispi trio is still 1920/1080/32 and ENABLED, the guest never lost its mode
+ * and the 8x1 is the HOST's dump surface; if it is disabled or zeroed, the
+ * display is ours to restore, and we restore it (the framebuffer is the
+ * kernel's: a reset must not leave the machine blind). */
+void virtio_gpu_health_tick(void) {
+  if (gpu_mode != VGPU_MODE_BGA)
+    return;
+  static uint16_t l_xres, l_yres, l_bpp, l_en, l_hd, l_vd;
+  static int l_rows;
+  /* CRTC 0x01 (H display end) and 0x12 (V display end) are what QEMU reads in
+     text mode; 0x03C4/0x03D4 are the sequencer/CRTC index ports. */
+  outb(0x03D4, 0x01);
+  uint16_t hd = (uint16_t)inb(0x03D5);
+  outb(0x03D4, 0x12);
+  uint16_t vd = (uint16_t)inb(0x03D5);
+  uint16_t xres = bga_read(VBE_DISPI_INDEX_XRES);
+  uint16_t yres = bga_read(VBE_DISPI_INDEX_YRES);
+  uint16_t bpp = bga_read(VBE_DISPI_INDEX_BPP);
+  uint16_t en = bga_read(VBE_DISPI_INDEX_ENABLE);
+  int lost = (xres != GPU_SCREEN_W || yres != GPU_SCREEN_H || bpp != 32 ||
+              (en & VBE_DISPI_ENABLED) == 0);
+  if (!lost && xres == l_xres && yres == l_yres && bpp == l_bpp && en == l_en &&
+      hd == l_hd && vd == l_vd)
+    return; /* unchanged and healthy: no row */
+  l_xres = xres; l_yres = yres; l_bpp = bpp; l_en = en; l_hd = hd; l_vd = vd;
+  if (l_rows < 40) {
+    l_rows++;
+    uart_puts("[BGA] xres=");
+    print_int((int)xres);
+    uart_puts(" yres=");
+    print_int((int)yres);
+    uart_puts(" bpp=");
+    print_int((int)bpp);
+    uart_puts(" en=0x");
+    uart_print_hex((uint64_t)en);
+    uart_puts(" hdisp=");
+    print_int((int)hd);
+    uart_puts(" vdisp=");
+    print_int((int)vd);
+    uart_puts(lost ? " -> mode LOST\n" : " -> mode ok\n");
+  }
+  if (lost) {
+    /* Same sequence bga_setup uses; the resource/backing are unchanged, so a
+       mode restore is all a reset needs.  Count it (a repeat is a row, not a
+       repair loop). */
+    bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
+    bga_write(VBE_DISPI_INDEX_XRES, GPU_SCREEN_W);
+    bga_write(VBE_DISPI_INDEX_YRES, GPU_SCREEN_H);
+    bga_write(VBE_DISPI_INDEX_BPP, 32);
+    bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB);
+    virtio_gpu_flush();
+    uart_puts("[BGA] mode restored\n");
+  }
 }
 
 /* Probe + program the Bochs VGA (PCI 1234:1111) at the shared desktop
