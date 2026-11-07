@@ -4095,27 +4095,6 @@ void process_sleep(void) {
 }
 
 /**
- * L78: block the current thread until `now + ms` (see process.h).  The
- * deadline is serviced by process_check_sleeping() from the scheduler, so the
- * thread is genuinely not runnable in between; a signal wake clears wake_ms
- * and ends the sleep early, which is correct.
- */
-void process_sleep_ms(uint32_t ms) {
-  if (ms == 0)
-    return;
-  struct process *p = current_process();
-  if (!p) {
-    safe_wfi();
-    return;
-  }
-  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  p->state = PROC_STATE_BLOCKED;
-  p->wake_ms = timer_get_ms() + ms;
-  spinlock_release_irqrestore(&proc_lock, flags);
-  arch_yield();
-}
-
-/**
  * Wakes up a blocked process, marking it as READY.
  */
 void process_wakeup(int pid) {

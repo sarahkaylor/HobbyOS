@@ -65,6 +65,20 @@ class Qmp:
         self.cmd("send-key", {"keys": [{"type": "qcode", "data": qcode}]})
         time.sleep(pause)
 
+    def click(self, x, y, w, h):
+        """Absolute left click through QMP's input-send-event (PS/2/vmmouse)."""
+        ax = int(x * 32767 / max(1, w - 1))
+        ay = int(y * 32767 / max(1, h - 1))
+        self.cmd("input-send-event", {"events": [
+            {"type": "abs", "data": {"axis": "x", "value": ax}},
+            {"type": "abs", "data": {"axis": "y", "value": ay}}]})
+        time.sleep(0.15)
+        self.cmd("input-send-event", {"events": [
+            {"type": "btn", "data": {"down": True, "button": "left"}}]})
+        time.sleep(0.12)
+        self.cmd("input-send-event", {"events": [
+            {"type": "btn", "data": {"down": False, "button": "left"}}]})
+
     def shot(self, path):
         self.cmd("screendump", {"filename": path})
 
@@ -165,6 +179,62 @@ def ppm_has_colors(path):
     return (w, h, nonblack, len(colors))
 
 
+def find_ignore_xy(png):
+    """The Ignore button of RimWorld's Steam modal (same rule as
+    tools/rw/click-ignore.py: a flat brown 106,81,46 band with two wide
+    runs; the left run is Ignore).  Returns (x, y) or None."""
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+    BROWN, MIN_RUN, BAND_ROWS = (106, 81, 46), 220, 18
+    try:
+        im = Image.open(png).convert("RGB")
+    except Exception:
+        return None
+    W, H = im.size
+    if W < 100 or H < 100:
+        return None
+    px = im.load()
+    band = {}
+    for y in range(H // 2, H):
+        xs = [x for x in range(W) if px[x, y] == BROWN]
+        if len(xs) > 2 * MIN_RUN:
+            band[y] = xs
+    if not band:
+        return None
+    ys = sorted(band)
+    groups, cur = [], [ys[0]]
+    for y in ys[1:]:
+        if y - cur[-1] <= 2:
+            cur.append(y)
+        else:
+            groups.append(cur)
+            cur = [y]
+    groups.append(cur)
+    g = max(groups, key=len)
+    if len(g) < BAND_ROWS // 2:
+        return None
+    cols = [0] * W
+    for y in g:
+        for x in band[y]:
+            cols[x] += 1
+    runs, start = [], None
+    for x in range(W):
+        if cols[x] > len(g) // 3 and start is None:
+            start = x
+        elif cols[x] <= len(g) // 3 and start is not None:
+            runs.append((start, x - 1))
+            start = None
+    if start is not None:
+        runs.append((start, W - 1))
+    runs = [r for r in runs if r[1] - r[0] >= MIN_RUN]
+    if len(runs) < 2:
+        return None
+    left = runs[0]
+    return ((left[0] + left[1]) // 2, (g[0] + g[-1]) // 2)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", required=True)
@@ -253,6 +323,15 @@ def main():
     last = time.time()
     i = 0
     milestones = {}
+    # L78: RimWorld stops on a modal "Could not initialize Steam API" box
+    # (Ignore / Quit) before it reaches the menu.  RW_CLICK_IGNORE_AFTER=<s>
+    # clicks the brown Ignore button at that run time and re-checks every 30 s
+    # (bounded to 6 attempts) so a re-drawn modal is dismissed too.
+    click_after = float(os.environ.get("RW_CLICK_IGNORE_AFTER", "0") or 0)
+    t_start = time.time()
+    next_click = (t_start + click_after) if click_after > 0 else None
+    clicks = 0
+    checks = 0
     while time.time() < end:
         t = read_log(args.log)
         for needle, name in (
@@ -271,6 +350,21 @@ def main():
         if "launcher-done" in milestones and os.environ.get(
                 "RW_KEEP_RUNNING", "0") != "1":
             break
+        if next_click is not None and time.time() >= next_click and checks < 12:
+            checks += 1
+            i += 1
+            png = grab(f"{i:02d}_click{checks:02d}")
+            xy = find_ignore_xy(png) if png else None
+            if xy:
+                print(f"[drive] click Ignore at {xy[0]},{xy[1]} "
+                      f"(check {checks}, click {clicks + 1})", flush=True)
+                q.click(xy[0], xy[1], args.fb_w, args.fb_h)
+                clicks += 1
+            else:
+                print(f"[drive] check {checks}: no Steam modal on screen",
+                      flush=True)
+            next_click = time.time() + 30
+            last = time.time()
         if time.time() - last >= args.shot_every:
             i += 1
             grab(f"{i:02d}_running")

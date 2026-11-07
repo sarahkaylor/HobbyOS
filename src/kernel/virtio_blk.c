@@ -1302,11 +1302,11 @@ void virtio_blk_selfcheck(void) {
  *     game is mid-transfer for longer than `BKS_TOKEN_WAIT_MS`, the probe
  *     counts `busy` and yields.  It never spins on the token -- that is the
  *     L75 stall, and an unbounded wait there also parks a CPU in `safe_wfi()`.
- *   - between ops the thread is BLOCKED with a wake deadline
- *     (`process_sleep_ms`), not parked in a halt loop: it is not runnable, so
- *     it cannot take a CPU from the loader.  That is this kernel's "low
- *     priority": there is no priority field in the scheduler, there is a
- *     sleep.
+ *   - between ops the thread halts (`safe_wfi`) for 250 ms: four wake-ups a
+ *     second, no runnable loop, no scheduler state of its own.  A scheduler
+ *     sleep (process_sleep_ms/arch_yield) looked cleaner but the windows that
+ *     used it died at t=244 s with a SEC-4 canary panic; a kernel thread that
+ *     only halts is the shape every other driver thread here already has.
  *   - every failure is a counted, bounded row and the probe CONTINUES:
  *     `busy` (token timeout), `skip` (device being repaired / bad geometry),
  *     `bad` (submit error), `mismatch` (write-verify did not read back), and
@@ -1335,6 +1335,20 @@ static volatile uint32_t stress_reads, stress_writes, stress_bad,
 static uint32_t stress_rnd(void) {
   stress_seed = stress_seed * 1664525u + 1013904223u;
   return stress_seed >> 8;
+}
+
+/* Wait `ms` without touching the scheduler.  Deliberately NOT
+ * process_sleep_ms()/arch_yield(): the probe is a kernel thread and the L78
+ * windows that used a scheduler sleep here died at t=244 s with
+ * `KERNEL PANIC: stack smashing detected (SEC-4 canary)` -- the only new
+ * thing in those kernels was a kernel thread calling arch_yield() with a
+ * BLOCKED state.  A halt-until-interrupt loop is what every other driver
+ * thread in this kernel does; the probe wakes ~4 times a second, so the cost
+ * is one idle wake-up per rate-limit period, not a spin. */
+static void stress_delay_ms(uint32_t ms) {
+  uint64_t t0 = timer_get_ms();
+  while (timer_get_ms() - t0 < ms)
+    safe_wfi();
 }
 
 /* The probe's own submit path, called with the token HELD (never through
@@ -1556,7 +1570,7 @@ static void stress_one_op(void) {
     kl_i(&kl, (long)stress_slow);
     kl_s(&kl, " (backing off)\n");
     kl_emit(&kl);
-    process_sleep_ms(BKS_BACKOFF_MS);
+    stress_delay_ms(BKS_BACKOFF_MS);
   }
 }
 
@@ -1565,7 +1579,7 @@ static void blk_stress_thread(void *arg) {
   (void)arg;
   /* Let boot settle, then announce the shape so a run proves the probe that
      ran is this one (the row names every bound). */
-  process_sleep_ms(BKS_ROW_MS);
+  stress_delay_ms(BKS_ROW_MS);
   {
     struct kline kl;
     kl_init(&kl);
@@ -1590,8 +1604,8 @@ static void blk_stress_thread(void *arg) {
       last_row = now;
       stress_row("alive", now);
     }
-    /* The rate limit, and the "low priority": not runnable for 200 ms. */
-    process_sleep_ms(BKS_OP_MS);
+    /* The rate limit: asleep in halt for 250 ms, four ops a second. */
+    stress_delay_ms(BKS_OP_MS);
   }
 }
 
@@ -1975,7 +1989,7 @@ static int blk_token_try_acquire(uint32_t timeout_ms) {
     if (spins++ < 200)
       __asm__ volatile("pause");
     else
-      process_sleep_ms(1);
+      safe_wfi(); /* bounded: the deadline check above ends the wait */
   }
   if (__atomic_add_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST) > 1) {
     uart_puts("[BLKRACE] two drivers inside the queue, inside=");
