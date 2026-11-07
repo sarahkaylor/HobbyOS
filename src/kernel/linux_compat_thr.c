@@ -437,6 +437,37 @@ void futex_trace_dump_locked(void) {
     kl_s(&kl, p->name);
     kl_c(&kl, '\n');
     kl_emit(&kl);
+    /* M6/L72: WHICH REGION OWNS THE KEY?  The map list above is cut at 60
+       regions and starts at the lowest base, so a key in the mmap arena
+       (0x1100000000, 0x1130000000, ...) never got a row and the park's three
+       keys could not be classified.  One row per queued key resolves the key
+       itself: kind 3=ANON at offset 0x300 is a thread-control block, kind 5
+       near a stack top is a stack local, kind 7 is a DSO global, kind 2 a
+       malloc'd object.  Bounded, because a 25-thread park is the normal case. */
+    if (p->as) {
+      struct vm_region *kr = vm_region_find(p->as, s->uaddr);
+      if (kr) {
+        struct kline kg;
+        kl_init(&kg);
+        kl_s(&kg, "[FUTEX] rgn pid=");
+        kl_i(&kg, p->pid);
+        kl_s(&kg, " key=");
+        kl_hex(&kg, (unsigned long)s->uaddr);
+        kl_s(&kg, " base=");
+        kl_hex(&kg, (unsigned long)kr->base);
+        kl_s(&kg, " off=");
+        kl_hex(&kg, (unsigned long)(s->uaddr - kr->base));
+        kl_s(&kg, " len=");
+        kl_hex(&kg, (unsigned long)kr->len);
+        kl_s(&kg, " kind=");
+        kl_i(&kg, kr->kind);
+        kl_s(&kg, " prot=");
+        kl_i(&kg, kr->prot);
+        kl_c(&kg, '\n');
+        kl_emit(&kg);
+      }
+    }
+
     /* L54: decode the MonoW32Handle the key belongs to.
      *
      * glibc 2.31's pthread_cond_wait waits on `cond + 0x28 + 4*g`

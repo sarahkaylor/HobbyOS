@@ -9661,3 +9661,104 @@ screenshot at t≈480 s shows the game's own window ("RLAUNCH") drawing RimWorld
 loading artwork with an "Initializing." box — the first time the ladder has real
 game content on screen; no menu is reached, so none is claimed.
 
+
+## 53. 2026-11-06 — M6/L72: the park is a **three-party completion handshake that
+never terminates**, the 8×1 screen is QEMU's **text fallback after a VGA reset**,
+and the page that killed every run was the device **replaying zeros**
+
+Full evidence: `docs/l72-postload-report.md`. This lane instrumented the park,
+the allocator and the display mode, and found the wall that was actually
+killing the ladder: not the park, but a **device replay at the exec gate**.
+
+### 53.1 The park, named
+
+Three threads, their keys (from the flight recorder; `[FUTEX] rgn` is new and
+resolves each key against the process's own regions):
+
+| thread | pid | key(s) | region |
+|---|---:|---|---|
+| `/NFS/RimWorldLinux` (main) | 4 | `0x1083B17624` | `0x1083AAF000+0x106000` kind=3 |
+| `Loading.AsyncRe…` | 26 | `0x1100000334` | `0x1100000000+0x1000000` kind=3 |
+| `UnityGfxDeviceW…` | 27 | `0x113000A460`, `0x10E080EBB0` | `0x1130000000+0x1000000`, `0x10E0000000+0x3000000` |
+
+The ring repeats a six-op round (`WAIT 27 → WAKE 26→main → WAIT 4 → WAKE 26`)
+at 112 ops/s for 19 minutes, and **every wake lands** (`woke=1 of=<pid>`;
+`waits` and `wakes` grow in lockstep). It is a protocol livelock, not a lost
+wake: each side completes its half and re-arms, so `LongEventHandler` never
+observes “done”. The SIGUSR2 self-sample resolves **zero JIT frames in 2048
+words** for all three — they park in native `mono_os_cond_wait`, not in a
+managed `WaitHandle`.
+
+### 53.2 The allocation
+
+`[ANONF]` (new: sampled anonymous-fault publisher, with the faulting thread,
+instruction and region) names it: `tid=28 UnityGfxDeviceW`, a growing anonymous
+arena (`0x11D8000000`, 58 MB and climbing), `rip=0x10800BBE1F` =
+`movntdq %xmm3,0x30(%rdi)`, glibc **`memcpy`**'s non-temporal store loop (other
+samples: `__bzero`, `memset`) — **one 4 KiB managed buffer allocated and
+copied per handshake round** (171 pages/s = 5.85 ms/page in L65 run 1). The driver is visible in the
+main thread's managed stack at t=380 s: `<GetAllInFolder>d__2.MoveNext →
+Resources.LoadAll → ResourcesAPI.LoadAll → ResourcesAPIInternal.LoadAll →
+String.wstrcpy`, i.e. RimWorld's `InitializingInterface` walking folders and
+allocating a path/asset buffer per iteration.
+
+### 53.3 The 8×1 screen
+
+`[BGA]` (new, 5 s, change-triggered) reads the Bochs dispi registers and the
+two CRTC fields QEMU's text path uses:
+
+```text
+[BGA] xres=1920 yres=1080 bpp=32 en=0x0x41 hdisp=239 vdisp=55 -> mode ok
+```
+
+One row per boot, **no change** in three runs: the guest's mode never left
+1920×1080×32. QEMU computes 8×1 only when VBE is off and the CRTC is zeroed —
+`(cr[1]+1)*8 × (cr[0x12]+1)` — i.e. a VGA device reset with no mode set since,
+which is a *guest reboot* in this tree (the only 8×1 PPMs are the shots after a
+second `BdsDxe` in L65's rw-desktop log). Not the WM (1916×1018 content rect),
+not Unity minimising. `virtio_gpu_health_tick()` now restores the mode after a
+reset.
+
+### 53.4 What was killing every run: the device replay
+
+Three runs died at **exactly `[PUBS]=307200`**, the moment the game first
+executes `UnityPlayer.so`'s text page at off `0x757000`/`0x9AD000`:
+
+```text
+[TXT] PROBE off=0x0x757000 … lba=0x0x7B858 | cache c_nz=0 valid=0xFF
+       | raw rc=0 r_nz=3754 r_sum=0x6A3B1 | dropped=8 refill n=4096 f_nz=0
+[TXT] ZERO off=0x757000 reads=3 n0=4096 -> not published
+[EIO] … -> SIGBUS
+```
+
+The host's disk at that LBA holds **3754 non-zero bytes** — read 1 is the
+file. Read 2 and later return 4096 zeros. L69's gate requires two *agreeing*
+raw reads, so it refused a page the device had answered correctly and the
+process died with SIGBUS (and in the two runs where it did not die that way,
+the same point produced Mono's `x86-codegen.h:403` assert and a libmono NULL
+deref — one wall, three shapes). The gate now publishes the probe's first read
+when the second agrees **or is the all-zero replay** (`[TXT] PROBEGET`,
+`[TXT] REPLAY`); different non-zero content is still a torn page. Back-off is
+2/10/30/60 ms, on the controller-repair timescale.
+
+### 53.5 Ladder
+
+| run | window | presents | `[PUBS]` | res MiB | end |
+|---|---:|---:|---:|---:|---|
+| L65 run 1 | 1800 s | 260 | 503 808 | 1899 | park (112 ops/s, 19 min) |
+| diag | 780 s | — | — | 1133 | `[TXT] ZERO 0x9AD000` → SIGBUS, t≈135 s |
+| diag2 | 780 s | — | 307 200 | — | Mono `g_assert` (`:403`) |
+| diag3 (ud2 probe) | 900 s | — | 307 200 | — | libmono+0x1EB680 NULL deref |
+| pdz | 1200 s | — | 307 200 | — | `[TXT] ZERO 0x757000` → SIGBUS |
+| final1 (replay rule) | 1200 s | 1 | 176 128 | **627 flat** | alive; no park growth, no assert, no death; still in the def pass |
+| 1800c (replay rule) | 1700 s | 1 | 307 200 | 1135 | passes the old wall; then a kernel-mode #PF in user space (`cr2=0x11CB280000`) kills pid 4 at t≈560 s |
+
+So the **page-in wall is closed** (RSS bounded at 627 MiB for the whole
+1200 s window, no 0.64 MiB/s climb) and the handshake wall remains, now at the
+def-plateau (`[XO] …RangedSpacer.xml`, 43.6 MiB NFS) with main ↔
+`UnityGfxDeviceW` and `Loading.AsyncRead` idle. No menu, so none is claimed.
+
+### 53.6 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh`: **431 run, 0 failed**. Gates: see
+`docs/l72-postload-report.md` §7.

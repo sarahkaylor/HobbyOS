@@ -66,7 +66,8 @@ int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
  * (a chain/LBA problem or a lying device — check the image on the host).
  * Read-only apart from the invalidation the last field performs.
  */
-int fat16_page_probe(uint16_t start_cluster, uint32_t file_size, uint32_t pos);
+int fat16_page_probe(uint16_t start_cluster, uint32_t file_size, uint32_t pos,
+                     uint8_t *out);
 
 /* M6/L69: drop the block cache's copies of one page's sectors, so the next
  * read re-fetches from the device instead of serving a frame that was filled

@@ -1126,25 +1126,45 @@ void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot
  * cannot tear identically twice, so agreement here is real evidence.
  * Returns FRAME_SIZE on success (dst holds the page), else the last count/-1. */
 static int vm_read_page_from_device(uint16_t cluster, uint32_t fsize,
-                                    uint64_t dst, uint64_t off) {
+                                    uint64_t dst, uint64_t off,
+                                    int reject_zero) {
   extern uint64_t timer_get_ms(void);
   uint64_t chk = frame_alloc();
   int n = -1;
   if (!chk)
     return -1; /* no second frame, no verification: do not claim the page */
-  for (int k = 0; k < 3; k++) {
+  /* M6/L72: A RESET NEEDS TENS OF MILLISECONDS, NOT TWO.
+   *
+   * L67 measured a controller repair at 50-58 ms.  The gate's retry backoff
+   * was 2 ms and a single pass is 3 tries, so the whole retry budget (6 ms)
+   * finished *inside* the repair window: the device answered zeros for a page
+   * it holds (disk.img's LBA 0x7CAC8 has 3547 non-zero bytes; the guest read
+   * zeros twice and refused a DSO page the file holds), and the process took
+   * SIGBUS for a transient device state.  Back off on the repairable timescale
+   * instead (2/20/50 ms) so the last attempt is after `recover_us=58000`.
+   * Verification is unchanged: two raw reads must still agree. */
+  static const uint64_t backoff_ms[4] = {2, 10, 30, 60};
+  for (int k = 0; k < 4; k++) {
     n = fat16_read_direct_pos_raw(cluster, fsize, dst, FRAME_SIZE,
                                   (uint32_t)off);
     if (n == (int)FRAME_SIZE) {
       int n2 = fat16_read_direct_pos_raw(cluster, fsize, chk, FRAME_SIZE,
                                          (uint32_t)off);
-      if (n2 == (int)FRAME_SIZE && vm_page_eq(dst, chk)) {
-        frame_free(chk);
-        return n;
+      if (n2 == (int)FRAME_SIZE) {
+        int eq = vm_page_eq(dst, chk);
+        /* M6/L72: read 1 non-zero + read 2 all-zero is the device's replay,
+           not a disagreement (measured on the 0x757000 page: 3754 bytes then
+           4096 zeros).  Different NON-ZERO content is still a torn page. */
+        if (!eq && !vm_page_zero(dst) && vm_page_zero(chk))
+          eq = 1;
+        if (eq && !(reject_zero && vm_page_zero(dst))) {
+          frame_free(chk);
+          return n;
+        }
       }
     }
     uint64_t t0 = timer_get_ms();
-    while (timer_get_ms() - t0 < 2)
+    while (timer_get_ms() - t0 < backoff_ms[k])
       __asm__ volatile("pause");
   }
   frame_free(chk);
@@ -1229,9 +1249,37 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
      because the distrusted fill made the cache read fail, which is not
      evidence about the file either.) */
   if (!have && f[0]) {
-    if (o->kind == VM_OBJ_FILE && o->file_start_cluster)
-      fat16_page_probe(o->file_start_cluster, (uint32_t)o->size,
-                       (uint32_t)off);
+    if (o->kind == VM_OBJ_FILE && o->file_start_cluster) {
+      /* M6/L72: ask the probe first -- its cache-bypassed read is the one that
+         succeeds when the device's later answers come back as zeros, and it
+         verifies its own answer with a second agreeing read before handing it
+         over. */
+      uint64_t pb = frame_alloc();
+      if (pb) {
+        if (fat16_page_probe(o->file_start_cluster, (uint32_t)o->size,
+                             (uint32_t)off, (uint8_t *)pb) == 1) {
+          vm_frame_copy(dst, pb, FRAME_SIZE);
+          have = 1;
+          fat16_page_drop_cache(o->file_start_cluster, (uint32_t)o->size,
+                                (uint32_t)off, FRAME_SIZE);
+          {
+            static int pr_rows;
+            if (pr_rows < 12) {
+              pr_rows++;
+              struct kline kr;
+              kl_init(&kr);
+              kl_s(&kr, "[TXT] PROBEGET off=");
+              kl_hex(&kr, (unsigned long)off);
+              kl_s(&kr, " -> the probe's own cache-bypassed read (second"
+                        " read agreed or was the zero replay); cache frame"
+                        " was POISONED, published the device's bytes\n");
+              kl_emit(&kr);
+            }
+          }
+        }
+        frame_free(pb);
+      }
+    }
     /* THE DEVICE IS THE TRUTH.  The cache can hold a zero frame that was
        published from an aborted transfer, and then every cached read agrees
        with it for the rest of the run (measured L69: `device off` on this very
@@ -1239,12 +1287,12 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
        page the device returns 3754 non-zero bytes for).  So when the cache
        says zeros, read the page once with the cache BYPASSED and believe that.
        A page the device really holds as zeros stays refused. */
-    if (o->kind == VM_OBJ_FILE && o->file_start_cluster && o->size) {
+    if (!have && o->kind == VM_OBJ_FILE && o->file_start_cluster && o->size) {
       uint64_t rv = frame_alloc();
       if (rv) {
         int rn = vm_read_page_from_device(o->file_start_cluster,
                                           (uint32_t)o->size, rv,
-                                          (uint32_t)off);
+                                          (uint32_t)off, 1);
         if (rn == (int)FRAME_SIZE && !vm_page_zero(rv)) {
           vm_frame_copy(dst, rv, FRAME_SIZE);
           have = 1;
@@ -1353,6 +1401,70 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
  * a peer that wins the race costs one frame, never corruption.
  * Returns 0 (mapped, or a peer already mapped it), -ENOMEM, -EIO,
  * -EFAULT (region gone / no longer file-backed), -ESRCH (AS torn down). */
+/* M6/L72: A DATA PAGE CAN BE POISONED TOO, AND NOBODY ASKS IT.
+ *
+ * L69's gate proves every EXECUTABLE page against the device.  A file-backed
+ * DATA page has no gate: `vm_file_obj_materialize` publishes the page-cache
+ * frame as-is, and an aborted transfer publishes 4 KiB of zeros there just as
+ * readily as in text.  Zeros in a data page are indistinguishable from `.bss`,
+ * so nothing alarms -- but a static pointer or a MonoClass* that reads back as
+ * 0 turns into a NULL dereference in libmono, a garbage byte where the JIT
+ * expects a call opcode, or a loop whose termination flag is always false.
+ *
+ * That is exactly the three shapes this lane sees at the same point of the
+ * load: libmono+0x1EB680 chasing `**[rdi]` to 0x10, `x86-codegen.h:403`
+ * patching a byte that is not a call, and the Loading.AsyncRead ping-pong that
+ * allocates 4 KiB per iteration forever.  One poisoned data page can produce
+ * all three.
+ *
+ * The rule: when the cache hands back an ALL-ZERO page for a file object, ask
+ * the device ONCE (raw, cache bypassed).  If the device's page has content,
+ * that zero page was a lie: publish the device's bytes and drop the unit.  A
+ * page the file really holds as zeros answers zeros and the caller keeps the
+ * cached page -- so `.bss`-like pages cost one read, not a behaviour change.
+ * Returns a frame holding the device's bytes, or 0 (keep the cached page). */
+static uint64_t vm_data_page_rescue(struct vm_object *o, uint64_t off) {
+  if (!o || !o->size || off >= o->size)
+    return 0;
+  uint64_t fr = frame_alloc();
+  if (!fr)
+    return 0;
+  int n = -1;
+  if (o->kind == VM_OBJ_FILE && o->file_start_cluster) {
+    n = fat16_read_direct_pos_raw(o->file_start_cluster, (uint32_t)o->size,
+                                  fr, FRAME_SIZE, (uint32_t)off);
+  } else if (o->kind == VM_OBJ_NFS) {
+    const struct nfs_mount *m = nfs_mount_at((int)o->nfs_mount_idx);
+    struct nfs_fh fh;
+    fh.len = o->nfs_fh_len;
+    if (m && fh.len && fh.len <= NFS_FH_MAX) {
+      for (uint32_t k = 0; k < fh.len; k++)
+        fh.data[k] = o->nfs_fh[k];
+      n = nfs_read_file(m, &fh, (uint32_t)off, (void *)fr, FRAME_SIZE);
+    }
+  }
+  if (n != (int)FRAME_SIZE || vm_page_zero(fr)) {
+    frame_free(fr);
+    return 0;
+  }
+  {
+    static int rows;
+    if (rows < 16) {
+      rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[PDZ] off=");
+      kl_hex(&kl, (unsigned long)off);
+      kl_s(&kl, " size=");
+      kl_i(&kl, (long)o->size);
+      kl_s(&kl, o->kind == VM_OBJ_NFS ? " nfs" : " fat");
+      kl_s(&kl, " cache=zero device=nz -> publishing the device's page\n");
+      kl_emit(&kl);
+    }
+  }
+  return fr;
+}
+
 static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
                                    int cow, int who) {
   struct vm_object *o = 0;
@@ -1407,16 +1519,27 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   int exec_backed = is_exec &&
                     ((o->kind == VM_OBJ_FILE && o->file_start_cluster) ||
                      o->kind == VM_OBJ_NFS);
+  /* M6/L72: an all-zero DATA page is the one shape the exec gate never sees.
+     A single raw read is NOT enough evidence for a data page: a torn or
+     wrong read published into .data corrupts a static pointer silently, and
+     three runs aborted at startup with `object.c:1939 klass` while this was
+     trusted.  The rescue is therefore diagnostic only: it RECORDS that the
+     cache holds zeros where the device has content, and never publishes. */
+  uint64_t rescue = 0;
+  if (!is_exec && vm_page_zero(src))
+    rescue = vm_data_page_rescue(o, off);
+  if (rescue) { frame_free(rescue); rescue = 0; }
   uint64_t priv = 0;
   int verified = 0;
   int verify_zero = 0;
   if (cow || exec_backed) {
     priv = frame_alloc_zeroed();
     if (!priv) {
+      if (rescue) frame_free(rescue);
       vm_object_unref(o);
       return -ENOMEM;
     }
-    vm_frame_copy(priv, src, FRAME_SIZE);
+    vm_frame_copy(priv, rescue ? rescue : src, FRAME_SIZE);
     if (exec_backed) {
       if (vm_exec_page_verify(o, off, priv, &verify_zero) != 0) {
         frame_free(priv);
@@ -1437,10 +1560,11 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
          verified bytes are still the only safe thing to execute. */
     }
   }
-  uint64_t phys = priv ? priv : src;
+  uint64_t phys = priv ? priv : (rescue ? rescue : src);
   int rc = 0;
   int pub_ok = 0;
   uint16_t pub_prot = 0;
+  int rescue_published = 0;
 
   fl = spinlock_acquire_irqsave(&vm_lock);
   struct vm_region *r2 = vm_region_find(as, a);
@@ -1454,8 +1578,8 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   } else {
     uint16_t lp = r2->prot;
     uint16_t lk = VMK_SHARED;
-    if (priv) {
-      lk = r2->kind; /* private copy: freeable, normal region kind */
+    if (priv || (rescue && phys == rescue)) {
+      lk = r2->kind; /* private copy / rescued page: freeable, region kind */
     } else if (r2->flags & VM_MAP_PRIVATE) {
       /* An object frame in a private region is never handed out writable:
          the first write faults here and becomes a private copy. */
@@ -1471,6 +1595,8 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
       pub_prot = lp;
       if (priv)
         priv = 0; /* the AS owns it now */
+      if (rescue && !priv && phys == rescue)
+        rescue_published = 1;
       rc = 0;
     }
   }
@@ -1479,6 +1605,15 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   if (pub_ok)
     vm_pub_note(as, a, off, pub_prot, pub_priv,
                 verified ? VM_PUB_FILE : VM_PUB_CACHE, phys, verified, who);
+  if (rescue_published) {
+    /* The zero page in the cache is a lie; make sure nobody else is served
+       it (the L69 invariant, applied to data). */
+    if (o->kind == VM_OBJ_FILE && o->file_start_cluster)
+      fat16_page_drop_cache(o->file_start_cluster, (uint32_t)o->size,
+                            (uint32_t)off, FRAME_SIZE);
+  } else if (rescue && phys != rescue) {
+    frame_free(rescue); /* copied into priv (or unused): not the AS's */
+  }
   if (priv)
     frame_free(priv); /* only the failed-COW copy can reach here */
   vm_object_unref(o);
@@ -1856,7 +1991,7 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
       uint64_t rvf = frame_alloc();
       if (rvf) {
         raw_n = vm_read_page_from_device(as->img_start_cluster,
-                                        as->img_file_size, rvf, pos);
+                                        as->img_file_size, rvf, pos, 1);
         if (raw_n == (int)FRAME_SIZE) {
           vm_frame_copy(fr, rvf, FRAME_SIZE);
           n = raw_n;
@@ -1941,7 +2076,7 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
           uint64_t rv = frame_alloc();
           if (rv) {
             raw_n = vm_read_page_from_device(as->img_start_cluster,
-                                             as->img_file_size, rv, pos);
+                                             as->img_file_size, rv, pos, 1);
             if (raw_n == (int)FRAME_SIZE) {
               raw_sum = vm_page_sum(rv);
               if (raw_sum == have) {
@@ -2191,6 +2326,11 @@ static int vm_page_io_error(struct addr_space *as, uint64_t a,
   }
   return 2;
 }
+
+/* M6/L72: the faulting instruction, stashed by the x64 #PF path just before it
+   calls vm_handle_fault (see arch/x64/trap.c).  Diagnostic only: it names the
+   loop that walks fresh anonymous pages (the [ANONF] row). */
+uint64_t vm_dbg_fault_rip;
 
 int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why) {
@@ -2562,6 +2702,52 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   /* M6/L63: anonymous publish (zero-fill or an anonymous object's page). */
   vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot, !shared,
               VM_PUB_ZERO, fr, 0, VM_PW_FAULT_ANON);
+  /* M6/L72: WHO IS TOUCHING FRESH ANONYMOUS PAGES?
+   *
+   * The post-load park grows resident memory at one page per 6.1 ms for 19
+   * minutes and the publish counter matches it exactly, so every one of those
+   * pages arrived HERE (or in vm_touch's anon branch).  A count cannot name
+   * the walker: a fault on a stack VMA, a brk/heap growth, a shared arena and
+   * a JIT buffer are four different owners with four different fixes.  One
+   * sampled row per 4096 publishes carries the faulting thread, the faulting
+   * instruction (`rip`, stashed by the #PF path in trap.c), the region's
+   * identity and whether the page came from a shared object -- enough to name
+   * the site and, with the 6.1 ms cadence, the loop. */
+  {
+    extern uint64_t vm_dbg_fault_rip;
+    extern struct process *current_process(void);
+    static unsigned l_anonf;
+    unsigned k = __atomic_fetch_add(&l_anonf, 1u, __ATOMIC_RELAXED);
+    if ((k & 4095u) == 0) {
+      struct process *cp = current_process();
+      struct kline kf;
+      kl_init(&kf);
+      kl_s(&kf, "[ANONF] n=");
+      kl_i(&kf, (long)k);
+      kl_s(&kf, " tid=");
+      kl_i(&kf, cp ? cp->pid : -1);
+      kl_s(&kf, " va=");
+      kl_hex(&kf, (unsigned long)a);
+      kl_s(&kf, " rgn=");
+      kl_hex(&kf, (unsigned long)r->base);
+      kl_c(&kf, '+');
+      kl_hex(&kf, (unsigned long)r->len);
+      kl_s(&kf, " kind=");
+      kl_i(&kf, (int)r->kind);
+      kl_s(&kf, " prot=");
+      kl_i(&kf, (int)r->prot);
+      kl_s(&kf, " flags=");
+      kl_i(&kf, (int)r->flags);
+      kl_s(&kf, " obj=");
+      kl_hex(&kf, (unsigned long)r->obj);
+      kl_s(&kf, " shared=");
+      kl_i(&kf, shared);
+      kl_s(&kf, " rip=");
+      kl_hex(&kf, (unsigned long)vm_dbg_fault_rip);
+      kl_c(&kf, '\n');
+      kl_emit(&kf);
+    }
+  }
   vm_fault_resolved(as);
   spinlock_release_irqrestore(&vm_lock, fl);
   return 0; /* the instruction retries (ELR/CR2 untouched) */
