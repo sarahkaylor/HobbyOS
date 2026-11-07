@@ -134,6 +134,10 @@ static int g3d_res_attach(uint32_t res, const uint64_t* phys, uint32_t n, uint64
   (void)res; (void)phys; (void)n; (void)len;
   return -ENODEV;
 }
+static int g3d_ctx_attach(uint32_t ctx, uint32_t res) {
+  (void)ctx; (void)res;
+  return -ENODEV;
+}
 static int g3d_res_unref(uint32_t res) { (void)res; return -ENODEV; }
 static int g3d_submit(uint32_t ctx, const void* cmds, uint32_t len, uint32_t* fence) {
   (void)ctx; (void)cmds; (void)len; (void)fence;
