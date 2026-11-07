@@ -9552,3 +9552,112 @@ between the loader and the menu.
 PASSED**.  `tools/rw/l67-gates.sh`: **redzone, fpu_sig, m2_mono, m2_tp,
 m2_threads, m12, mmap_race, m3_window, m4_gl, rwnfs — 10 passed, 0 failed**
 (one tier at a time; the unit wave and a desktop boot never share `disk.img`).
+
+## 52. 2026-11-06 — M6/L69: the zero page is a **poisoned block-cache frame**; the gate now asks the device, and a refused page is a SIGBUS, not a protection fault
+
+Full evidence and the refuser inventory: `docs/l69-pagein-report.md`.
+
+§51 separated the page-in defect from the block wedge (ladder 2 died with
+`devoff=0 resets=0 cc0=0`) but could not say *which* of four delivery paths
+produced the zeros, because every read the exec gate makes goes through the
+block cache. This lane built the row that separates them, and the answer is the
+cache: **the device holds the page, the cache held a page of zeros, and the
+cache was right there in the middle of every "independent" read.**
+
+### 52.1 The refuser inventory
+
+Two gates refuse an executable page; both fired in the instrumented window:
+
+| row | file | off | VA | mapping |
+|---|---|---|---:|---|
+| `[TXT] ZERO off=0x757000 reads=3 n0=4096` | `/RWDSO/UnityPlayer.so` (33 010 672 B) | `0x757000` | `0x108228B570` | base `0x1082267000`+`0x17A4000`, `prot=5`, `kind=7` (`VMK_LIB`), `MAP_PRIVATE`, `obj_off=0x733000`, obj `VM_OBJ_FILE` |
+| `[TXT] IMG SUM pos=0x10000 got=0x76EFDDC5 want=0xDC910CE7` | `/RWLAUNCH.BIN` (246 520 B) | `0x10000` | `0x1000010EA0` | base `0x1000000000`+`0x3D000`, `prot=7`, `kind=1` (`VMK_IMG`), `MAP_PRIVATE` |
+
+### 52.2 The seed row
+
+```text
+[BLKQ] device off cid=44153 op=0x2 lba=0x7B6DE cc=0x0 csts=0x0 cc0_writes=0
+[BLKQ] controller reset #1 / recovered us=53000 resets=1
+[BLKQ] untrusted completion re-read lba=0x7B6DE status=0x0
+[BLKC] distrust unit=63195 (reset during fill) -> frame dropped, re-reading
+[TXT] PROBE off=0x757000 lba=0x7B6D8 len=4096
+       | cache found=1 fstate=0 valid=0xFF c_nz=0 c_sum=0x0
+       | raw rc=0 r_nz=3754 r_sum=0x6A3B1 | dropped=8 refill n=4096 f_nz=0
+[TXT] ZERO off=0x757000 reads=3 n0=4096 -> not published
+[EIO] pid=4 page-in failed VA=0x108228B570 -> SIGBUS
+```
+
+* LBA `0x7B6DE` is sector 6 of the page at `0x7B6D8` — the **same unit the gate
+  was validating**, i.e. the page that dies is the page the aborted transfer
+  was for (the §47 thunk page).
+* `c_nz=0`, `fstate=0`, `valid=0xFF`: the cache held a **fully valid, all-zero
+  frame**.
+* `r_nz=3754 r_sum=0x6A3B1` is the file's page (`/srv/nfs/.../UnityPlayer.so`
+  at `0x757000`: `nz=3754 sum=0x6A3B1`, head `50 f3 0f 11 44 24 04 e8` =
+  `movss %xmm0,0x4(%rsp); call`). The two agree byte-for-byte.
+
+So (a) sparse file, (b) NFS short read and (d) a mis-indexed image sum are all
+retired with numbers: the file is code, the read was full-length, and
+`want=0xDC910CE7` is the host-computed FNV-1a of `rwlaunch.bin[0x10000:0x11000]`.
+The failing delivery is (c): a frame published into the page cache from a
+transfer QEMU aborted with status 0 and no DMA, then served to every reader —
+including all three of the gate's "independent" reads, which is why they agreed.
+
+### 52.3 The fix, in three layers
+
+1. **Driver.** `blk_dev_epoch` is bumped by every reset performed or detected;
+   `virtio_blk_read_raw` re-issues a sector whose completion overlapped a bump
+   (fresh cid) and returns `-EIO` rather than stale bytes if it moves again.
+2. **Block cache.** A fill compares the epoch across its device I/O; a fill
+   that straddled a reset is **unlinked and its frame freed** instead of
+   published (`[BLKC] distrust …`), and `nvme_reinit` now flushes the whole
+   cache (`[BLKC] post-reset flush dropped=N`) so nothing filled around a reset
+   survives. This is the invariant "an aborted DMA never publishes a page, and
+   a page published before is invalidated".
+3. **Exec gates.** `fat16_read_direct_pos_raw()` reads a page straight from the
+   device. `vm_exec_page_verify` and `v2_image_materialize` use it — with two
+   raw reads that must agree — whenever their cached answer is zeros, short or
+   torn, and publish the device's bytes (dropping the poisoned unit). A page the
+   device really holds as zeros, or a page whose bytes do not match the
+   load-time sum, is still refused.
+
+`vm_handle_fault` now returns 2 for an `-EIO` page-in and marks an executable
+region `VM_MAP_IOERR`; the trap layer delivers **SIGBUS** (`[EIO] … -> SIGBUS`)
+instead of SIGSEGV, and every later fault/touch answers the same EIO without
+touching the device. SIGSEGV was the wrong signal: Mono installs a handler for
+it (null checks), so returning from the handler re-faulted the same page for
+ever — the §51 "process died on a protection fault at the same VA".
+
+### 52.4 Tests
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh`: **431 run, 0 failed**. New:
+`test_blk_cache_aborted_dma_not_published` (aborted transfer is re-issued; a
+persistent abort fails the read; a fill that straddled the event is not
+published) and `test_vm_poisoned_cache_page` (installs the exact poisoned frame
+over a mapped exec page and asserts the gate publishes the file's bytes and
+drops the unit). `test_vm_exec_page_eio` now asserts the EIO/SIGBUS answer, the
+sticky region, and that the retry costs **zero** device sectors.
+
+### 52.5 Ladder
+
+| run | window | host resets | final `[TXT] ZERO` / `IMG SUM` | page-fault death | NFS bytes | presents | end state |
+|---|---:|---:|---:|---|---:|---:|---|
+| f1 | **1800 s** | 0 | **0 / 0** | none | **277 529 012** (264.67 MiB) | 260 | load complete; the §51.4 post-load park (alive, `res_mib` 1 926) |
+| f2 | 510 s | 1 | 0 / 1 | none | 221 036 013 | 240 | runtime `g_assert` → SIGABRT (`x86-codegen.h:403`), message lost to a NUL hole `[FATW] ZERORD sector=657286` |
+| f3 | 470 s | 6 | 1 / 0 | none | 263 653 604 | 190 | `[TXT] UNVERIFIED off=0x757000 n0=0` (0-byte read, chain/metadata) after reset #1 → EIO → SIGBUS |
+| f4 | see the report | | | | | | carries the `read_fat` two-read verification |
+
+The windows that matter for this lane's question are f1 (nothing but time on the
+clock: 1800 s, the full 277.5 MB load, **zero** refusals of any kind, zero
+deaths, 3 584 exec pages verified, 260 presents with changing CRCs) and f3 (six
+host resets, and the DSO gate still refuses **nothing**: the one refusal is a
+0-byte read whose *chain walk* failed — a metadata victim of a reset, not a
+page of zeros, and not the defect this lane was chartered to fix).
+
+With page-in clean the 1800 s window now ends in the known §51.4 park rather
+than on a zero page: the load completes, presents freeze at 260, and the main
+thread allocates one anonymous page per ~6 ms while no thread is in READY. The
+screenshot at t≈480 s shows the game's own window ("RLAUNCH") drawing RimWorld's
+loading artwork with an "Initializing." box — the first time the ladder has real
+game content on screen; no menu is reached, so none is claimed.
+

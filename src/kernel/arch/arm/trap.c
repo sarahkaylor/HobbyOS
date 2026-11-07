@@ -2344,8 +2344,26 @@ void sync_lower_handler_c(struct trap_frame *tf) {
        * "PROT" for a genuine violation, so both classes go through it — the
        * old demand-only gate killed every COW write.  (x64's #PF dispatch
        * had the same gate; both were measured on the dynamic-link pilot.) */
-      if (vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why) == 0) {
+      int frc = vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why);
+      if (frc == 0) {
         return; /* mapping is live; eret re-executes the instruction */
+      }
+      /* M6/L69: a refused file-backed page is an I/O error on a MAPPING
+         (vm_handle_fault returns 2), not a protection violation.  Deliver
+         SIGBUS, Linux's answer, so a compat program can abort the failed file
+         load instead of looping in its SIGSEGV handler. */
+      if (frc == 2) {
+        uart_puts("[EIO] pid=");
+        print_int(gcur->pid);
+        uart_puts(" (");
+        uart_puts(gcur->name);
+        uart_puts(") page-in failed VA=");
+        uart_print_hex(far);
+        uart_puts(" PC=");
+        uart_print_hex(tf->elr);
+        uart_puts(" -> SIGBUS (EIO, not a protection fault)\n");
+        process_fault_exit(tf, 7); /* SIGBUS */
+        return;
       }
       uart_puts("[KERNEL] pid=");
       print_int(gcur->pid);

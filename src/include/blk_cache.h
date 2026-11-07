@@ -74,4 +74,32 @@ uint64_t blk_cache_flush_all(void);
 /* Fill `out` with a snapshot of the counters. */
 void blk_cache_get_stats(struct blk_cache_stats *out);
 
+/* M6/L69: per-unit forensics.  A page of zeros reached an executable mapping
+ * with the controller healthy, so the question "did the DEVICE return zeros
+ * or did the CACHE publish a zero frame" has to be answerable from the log.
+ * Reports, for the unit covering `sector`, the entry state and the content of
+ * the cached frame over `req`'s sectors: `nz` non-zero bytes and a sum32.
+ * found=0 means the unit is not cached (a fill would still go to the device).
+ * Read-only, safe to call from a diagnostic path. */
+struct blk_cache_unit_info {
+  int found;
+  uint32_t fstate;  /* 0 clean, 1 in flight, 2 deferred */
+  uint32_t valid;   /* per-sector valid mask */
+  uint32_t req;     /* sectors of the request inside this unit */
+  uint32_t nz;      /* non-zero bytes in the frame over those sectors */
+  uint32_t sum;     /* sum32 of the same bytes */
+  uint64_t frame;   /* cached frame (diagnostic) */
+};
+int blk_cache_probe_unit(uint64_t sector, struct blk_cache_unit_info *out);
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* M6/L69 test seam: install exactly the frame the field bug published — the
+ * unit covering `sector` holds a page of zeros and is marked fully valid and
+ * CLEAN.  That is what an aborted transfer (status 0, no DMA) produced on the
+ * real device, and it is what the exec gate's authoritative re-read must
+ * recover from.  Unit tier only. */
+int blk_cache_test_poison(uint64_t sector, const uint8_t *bytes,
+                          uint32_t len);
+#endif
+
 #endif /* BLK_CACHE_H */

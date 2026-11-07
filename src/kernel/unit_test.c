@@ -42,6 +42,7 @@ void run_all_unit_tests(void) {
      blk_cache_press_test.c (tests lane) and wins over the WEAK fallback
      defined here in blk_cache_test.c after the merge. */
   blk_cache_test_suite();
+  vm_test_post_cache_suite();
   blk_cache_press_suite();
   virtio_gpu_test_suite();
   virtio_input_test_suite();

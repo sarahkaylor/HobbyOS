@@ -44,6 +44,9 @@ void unix_test_suite(void);
 void fs_test_suite(void);
 void mmu_test_suite(void);
 void vm_test_suite(void);
+/* M6/L69: vm checks that need the block cache LIVE (a poisoned cache frame
+ * against the exec gate).  Called after blk_cache_test_suite(). */
+void vm_test_post_cache_suite(void);
 void process_test_suite(void);
 void program_loader_test_suite(void);
 void trap_test_suite(void);

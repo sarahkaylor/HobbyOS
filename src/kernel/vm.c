@@ -1115,6 +1115,42 @@ void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot
   }
 }
 
+/* M6/L69: read one page with the block cache BYPASSED, and accept it only if
+ * TWO independent device reads agree — the L60 rule applied where a cache can
+ * no longer defeat it.  A single read is not evidence right after a controller
+ * reset: QEMU aborts the request it had in flight, the aborted AIO completes
+ * with SUCCESS and no DMA, and the guest gets the previous sector's bytes, so
+ * one 4 KiB read can be a torn page that matches no page of the file (measured:
+ * `[TXT] IMG SUM … raw n=4096 sum=0x7243B846` for a page whose witness is
+ * 0xDC910CE7, matching no page of the file).  Two raw reads of the same page
+ * cannot tear identically twice, so agreement here is real evidence.
+ * Returns FRAME_SIZE on success (dst holds the page), else the last count/-1. */
+static int vm_read_page_from_device(uint16_t cluster, uint32_t fsize,
+                                    uint64_t dst, uint64_t off) {
+  extern uint64_t timer_get_ms(void);
+  uint64_t chk = frame_alloc();
+  int n = -1;
+  if (!chk)
+    return -1; /* no second frame, no verification: do not claim the page */
+  for (int k = 0; k < 3; k++) {
+    n = fat16_read_direct_pos_raw(cluster, fsize, dst, FRAME_SIZE,
+                                  (uint32_t)off);
+    if (n == (int)FRAME_SIZE) {
+      int n2 = fat16_read_direct_pos_raw(cluster, fsize, chk, FRAME_SIZE,
+                                         (uint32_t)off);
+      if (n2 == (int)FRAME_SIZE && vm_page_eq(dst, chk)) {
+        frame_free(chk);
+        return n;
+      }
+    }
+    uint64_t t0 = timer_get_ms();
+    while (timer_get_ms() - t0 < 2)
+      __asm__ volatile("pause");
+  }
+  frame_free(chk);
+  return n;
+}
+
 /* M6/L63: read one executable page from the object's BACKING FILE into
  * `dst` and verify it, returning 0 only for bytes that two independent
  * reads agree on (and, for a FAT16 DSO, that are not all zeros: measured
@@ -1177,15 +1213,71 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
   }
 
   /* All-zero answers: prefer ANY non-zero page over an all-zero one, with
-     a short back-off so a transient post-reset state can clear.  A
-     wrong-but-nonzero page is caught by the next reader; an all-zero
-     executable page is a guaranteed crash. */
-  if (!have && saw_zero && f[0]) {
+     a short back-off so a transient post-reset state can clear.
+     M6/L69: A RETRY MUST NOT ASK THE CACHE THE SAME QUESTION.  The gate's
+     reads all go through the block cache, so three agreeing all-zero answers
+     prove only that the cache is consistent with itself: a frame published
+     from a transfer that completed with status 0 and no DMA (the aborted-AIO
+     shape) is served to every later reader, forever.  Before each retry, drop
+     that page's cache entries so the bytes come from the device, and record
+     one row with the verdict (`[TXT] PROBE`) plus whether the refill changed
+     the answer.  A page the DEVICE really holds as zeros stays refused. */
+  /* A page the device cannot deliver is either all zeros, a short read, or a
+     torn page; ALL of them must ask the device once with the cache bypassed
+     before the gate refuses.  (Measured: right after a reset the first read
+     can come back 0 bytes — `[TXT] UNVERIFIED off=0x9AD000 reads=3 n0=0` —
+     because the distrusted fill made the cache read fail, which is not
+     evidence about the file either.) */
+  if (!have && f[0]) {
+    if (o->kind == VM_OBJ_FILE && o->file_start_cluster)
+      fat16_page_probe(o->file_start_cluster, (uint32_t)o->size,
+                       (uint32_t)off);
+    /* THE DEVICE IS THE TRUTH.  The cache can hold a zero frame that was
+       published from an aborted transfer, and then every cached read agrees
+       with it for the rest of the run (measured L69: `device off` on this very
+       LBA, `[BLKC] distrust ... frame dropped`, then `c_nz=0 valid=0xFF` for a
+       page the device returns 3754 non-zero bytes for).  So when the cache
+       says zeros, read the page once with the cache BYPASSED and believe that.
+       A page the device really holds as zeros stays refused. */
+    if (o->kind == VM_OBJ_FILE && o->file_start_cluster && o->size) {
+      uint64_t rv = frame_alloc();
+      if (rv) {
+        int rn = vm_read_page_from_device(o->file_start_cluster,
+                                          (uint32_t)o->size, rv,
+                                          (uint32_t)off);
+        if (rn == (int)FRAME_SIZE && !vm_page_zero(rv)) {
+          vm_frame_copy(dst, rv, FRAME_SIZE);
+          have = 1;
+          /* The cache frame is a lie: drop it so no other reader (data or
+             exec) is served it, and name the recovery. */
+          fat16_page_drop_cache(o->file_start_cluster, (uint32_t)o->size,
+                                (uint32_t)off, FRAME_SIZE);
+          {
+            static int raw_rows;
+            if (raw_rows < 12) {
+              raw_rows++;
+              struct kline kr;
+              kl_init(&kr);
+              kl_s(&kr, saw_zero ? "[TXT] ZERO off=" : "[TXT] UNVERIFIED off=");
+              kl_hex(&kr, (unsigned long)off);
+              kl_s(&kr, " -> the DEVICE holds this page: cache frame was"
+                        " POISONED (aborted transfer), dropped and published"
+                        " the device's bytes\n");
+              kl_emit(&kr);
+            }
+          }
+        }
+        frame_free(rv);
+      }
+    }
     extern uint64_t timer_get_ms(void);
     for (int k = 0; k < 3 && !have; k++) {
       uint64_t t0 = timer_get_ms();
       while (timer_get_ms() - t0 < 10)
         __asm__ volatile("pause");
+      if (o->kind == VM_OBJ_FILE && o->file_start_cluster)
+        fat16_page_drop_cache(o->file_start_cluster, (uint32_t)o->size,
+                              (uint32_t)off, FRAME_SIZE);
       if (o->kind == VM_OBJ_NFS) {
         const struct nfs_mount *m = nfs_mount_at((int)o->nfs_mount_idx);
         struct nfs_fh fh;
@@ -1202,6 +1294,19 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
       if (n[0] == (int)FRAME_SIZE && !vm_page_zero(f[0])) {
         vm_frame_copy(dst, f[0], FRAME_SIZE);
         have = 1;
+        {
+          static int refill_rows;
+          if (refill_rows < 12) {
+            refill_rows++;
+            struct kline kr;
+            kl_init(&kr);
+            kl_s(&kr, "[TXT] ZERO off=");
+            kl_hex(&kr, (unsigned long)off);
+            kl_s(&kr, " -> REFILLED from the device after dropping the cache"
+                      " (the zero frame was CACHED)\n");
+            kl_emit(&kr);
+          }
+        }
       }
     }
   }
@@ -1402,6 +1507,12 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       return -1; /* -EFAULT */
     }
     if (!write && !(r->prot & VM_PROT_READ)) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -1;
+    }
+    /* M6/L69: a mapping whose page-in already failed with EIO answers the
+       same error without another device read (see VM_MAP_IOERR). */
+    if (r->flags & VM_MAP_IOERR) {
       spinlock_release_irqrestore(&vm_lock, fl);
       return -1;
     }
@@ -1736,22 +1847,43 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
     n = fat16_read_direct_pos(as->img_start_cluster, as->img_file_size,
                               fr, (int)FRAME_SIZE, pos);
   if (!past_eof && (n < 0 || n < want)) {
-    static int zrows;
-    if (zrows < 8) {
-      zrows++;
-      struct kline kl;
-      kl_init(&kl);
-      kl_s(&kl, "[ZPFILL] image short read pos=");
-      kl_hex(&kl, (unsigned long)pos);
-      kl_s(&kl, " n=");
-      kl_i(&kl, n);
-      kl_s(&kl, " want=");
-      kl_i(&kl, want);
-      kl_s(&kl, " -> not published\n");
-      kl_emit(&kl);
+    /* M6/L69: the same rule as the sums below — a short/failed fill is not
+       evidence about the file.  A reset can make the cache read fail (the
+       distrusted fill aborts the merged op), so ask the device once, with the
+       cache bypassed, before refusing the page. */
+    int raw_n = -1;
+    if (as->img_start_cluster) {
+      uint64_t rvf = frame_alloc();
+      if (rvf) {
+        raw_n = vm_read_page_from_device(as->img_start_cluster,
+                                        as->img_file_size, rvf, pos);
+        if (raw_n == (int)FRAME_SIZE) {
+          vm_frame_copy(fr, rvf, FRAME_SIZE);
+          n = raw_n;
+        }
+        frame_free(rvf);
+      }
     }
-    frame_free(fr);
-    return -EIO;
+    if (n < 0 || n < want) {
+      static int zrows;
+      if (zrows < 8) {
+        zrows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[ZPFILL] image short read pos=");
+        kl_hex(&kl, (unsigned long)pos);
+        kl_s(&kl, " n=");
+        kl_i(&kl, n);
+        kl_s(&kl, " want=");
+        kl_i(&kl, want);
+        kl_s(&kl, " raw=");
+        kl_i(&kl, raw_n);
+        kl_s(&kl, " -> not published\n");
+        kl_emit(&kl);
+      }
+      frame_free(fr);
+      return -EIO;
+    }
   }
   /* Tail of a partial last page: zero it (the eager path delivered a
      zeroed frame, so the bytes past the image size were already zero). */
@@ -1795,22 +1927,67 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
       uint32_t want = vm_page_sum(fr);
       uint32_t have = ((const uint32_t *)as->img_sums)[pi];
       if (want != have) {
-        static int srows;
-        if (srows < 8) {
-          srows++;
-          struct kline kl;
-          kl_init(&kl);
-          kl_s(&kl, "[TXT] IMG SUM pos=");
-          kl_hex(&kl, (unsigned long)pos);
-          kl_s(&kl, " got=");
-          kl_hex(&kl, (unsigned long)want);
-          kl_s(&kl, " want=");
-          kl_hex(&kl, (unsigned long)have);
-          kl_s(&kl, " -> not published\n");
-          kl_emit(&kl);
+        /* M6/L69: THE SUM IS THE WITNESS; THE CACHE IS NOT.  A frame published
+           from an aborted transfer is all zeros, and every cache read of that
+           page then agrees with it — measured L69: the launcher's own text
+           page at pos=0x10000, `got=0x76EFDDC5` (the sum of 4096 zeros) while
+           the file holds a prologue.  Before refusing, read the page once with
+           the cache BYPASSED and believe the device: if its bytes match the
+           load-time sum, the frame was poisoned and the device has the page. */
+        int repaired = 0;
+        int raw_n = -1;
+        uint32_t raw_sum = 0;
+        if (as->img_start_cluster) {
+          uint64_t rv = frame_alloc();
+          if (rv) {
+            raw_n = vm_read_page_from_device(as->img_start_cluster,
+                                             as->img_file_size, rv, pos);
+            if (raw_n == (int)FRAME_SIZE) {
+              raw_sum = vm_page_sum(rv);
+              if (raw_sum == have) {
+                vm_frame_copy(fr, rv, FRAME_SIZE);
+                repaired = 1;
+                fat16_page_drop_cache(as->img_start_cluster, as->img_file_size,
+                                      pos, FRAME_SIZE);
+                static int imgr_rows;
+                if (imgr_rows < 8) {
+                  imgr_rows++;
+                  struct kline kr;
+                  kl_init(&kr);
+                  kl_s(&kr, "[TXT] IMG SUM pos=");
+                  kl_hex(&kr, (unsigned long)pos);
+                  kl_s(&kr, " -> the DEVICE matches the witness: cache frame"
+                            " was POISONED, dropped and published the device's"
+                            " bytes\n");
+                  kl_emit(&kr);
+                }
+              }
+            }
+            frame_free(rv);
+          }
         }
-        frame_free(fr);
-        return -EIO;
+        if (!repaired) {
+          static int srows;
+          if (srows < 8) {
+            srows++;
+            struct kline kl;
+            kl_init(&kl);
+            kl_s(&kl, "[TXT] IMG SUM pos=");
+            kl_hex(&kl, (unsigned long)pos);
+            kl_s(&kl, " got=");
+            kl_hex(&kl, (unsigned long)want);
+            kl_s(&kl, " want=");
+            kl_hex(&kl, (unsigned long)have);
+            kl_s(&kl, " raw n=");
+            kl_i(&kl, raw_n);
+            kl_s(&kl, " sum=0x");
+            kl_hex(&kl, (unsigned long)raw_sum);
+            kl_s(&kl, " -> not published\n");
+            kl_emit(&kl);
+          }
+          frame_free(fr);
+          return -EIO;
+        }
       }
       img_verified = 1;
     }
@@ -1986,6 +2163,35 @@ static void vm_fault_resolved(struct addr_space *as) {
   }
 }
 
+/* M6/L69: a refused page is an I/O ERROR ON A MAPPING, not a protection
+ * violation.  Two things follow:
+ *   - the region is marked VM_MAP_IOERR, so every later fault (and every
+ *     syscall-side touch) returns the same EIO immediately instead of asking
+ *     the device for a page it has already refused to deliver — a retry storm
+ *     is what turns one bad page into a SIGSEGV loop that outlives the
+ *     process's own error handling;
+ *   - the trap layer is told 2 (not 1): Linux's answer for a file-backed page
+ *     that cannot be read is SIGBUS/BUS_ADRERR, and a compat program can act
+ *     on that (Mono aborts the load) instead of seeing the SIGSEGV it uses for
+ *     null checks and retrying forever.
+ * Caller holds nothing; the region may have gone, which is fine.  Only an
+ * EXECUTABLE region is marked permanently: a text page that cannot be read
+ * means the library/program is not loadable, while a data page's error may be
+ * transient (a network read timeout) and must stay retryable. */
+static int vm_page_io_error(struct addr_space *as, uint64_t a,
+                            const char **why) {
+  if (why)
+    *why = "EIO";
+  if (as) {
+    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    struct vm_region *r = vm_region_find(as, a);
+    if (r && (r->prot & VM_PROT_EXEC))
+      r->flags |= VM_MAP_IOERR;
+    spinlock_release_irqrestore(&vm_lock, fl);
+  }
+  return 2;
+}
+
 int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why) {
   if (why)
@@ -2012,6 +2218,16 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     if (why)
       *why = "PROT";
     return 1;
+  }
+  /* M6/L69: this mapping already failed its page-in with an I/O error.  The
+     answer is the same EIO, immediately and without another device read: the
+     page the file cannot deliver will not start being deliverable because the
+     faulting instruction retried. */
+  if (r->flags & VM_MAP_IOERR) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    if (why)
+      *why = "EIO";
+    return 2;
   }
   /* so-vm lane A: a write fault into a MAP_PRIVATE object-backed region is
      a copy-on-write fault, and Linux does not require the kernel to prove
@@ -2229,6 +2445,8 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     spinlock_release_irqrestore(&vm_lock, fl);
     int mrc = v2_image_materialize(as, a);
     if (mrc != 0) {
+      if (mrc == -EIO)
+        return vm_page_io_error(as, a, why);
       if (why)
         *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
       return 1;
@@ -2300,6 +2518,8 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     spinlock_release_irqrestore(&vm_lock, fl);
     int mrc = vm_file_obj_materialize(as, a, cow, VM_PW_FAULT_OBJ);
     if (mrc != 0) {
+      if (mrc == -EIO)
+        return vm_page_io_error(as, a, why);
       if (why)
         *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
       return 1;
