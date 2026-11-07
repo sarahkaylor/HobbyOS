@@ -1,0 +1,21 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/.swarm/evidence/gb082v2/20261107T122845Z/intel_attempt3.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 27468 console lines, 9 FAIL lines, 15 user memory fault records across 13 processes, 88 programs exited, 2 shredded, glued=1, halted=1
+T3_intel: FAIL — 3 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 1 glued console line(s) (t4_glued.sh): a line carrying two records cannot be attributed
+T3_intel: FAIL — 9 FAIL line(s); first 20:
+7226:  TORTURE poll-many-fds: FAIL
+7245:TORTURE FAILED: 1
+9322:SHELLTEST WATCHDOG: protocol stalled 240 s; FAILING TEST. Process table:
+17193:  TORTURE poll-many-fds: FAIL
+17202:TORTURE FAILED: 1
+20755:  IPC_T self-transfer pipe: FAIL
+21978:IPC_T FAILED: 1
+22851:  TORTURE poll-many-fds: FAIL
+22902:TORTURE FAILED: 1
+T3_intel EXIT=1
+T3_LOG=/home/sarah/.swarm/evidence/gb082v2/20261107T122845Z/intel_attempt3.log
+T3_ARCH=intel
+T3_FAILS=9
+ATTEMPT3_RC=1

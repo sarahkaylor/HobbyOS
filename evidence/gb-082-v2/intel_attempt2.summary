@@ -1,0 +1,18 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/.swarm/evidence/gb082v2/20261107T122845Z/intel_attempt2.log) ===
+T3_intel: 10433 console lines, 7 FAIL lines, 4 user memory fault records across 4 processes, 87 programs exited, 3 shredded, glued=0, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 4 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 7 FAIL line(s); first 20:
+3095:  IPC_T named: blocking accept() returned the client: FAIL
+3121:  IPC_T named: accepted peer address is unnamed (family only): FAIL
+6820:[CMPTEST] FAIL identical files
+6996:[CMPTEST] FAILURES: 1
+7143:  TORTURE poll-many-fds: FAIL
+7180:FOLD.BINTORTURE FAILED: 1
+10183:SHELLTEST WATCHDOG: protocol stalled 240 s; FAILING TEST. Process table:
+T3_intel EXIT=1
+T3_LOG=/home/sarah/.swarm/evidence/gb082v2/20261107T122845Z/intel_attempt2.log
+T3_ARCH=intel
+T3_FAILS=7
+ATTEMPT2_RC=1

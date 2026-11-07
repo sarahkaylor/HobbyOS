@@ -1,0 +1,17 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/.swarm/evidence/gb082v2/20261107T122845Z/intel_attempt1.log) ===
+T3_intel: 10134 console lines, 7 FAIL lines, 4 user memory fault records across 4 processes, 86 programs exited, 1 shredded, glued=0, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 7 FAIL line(s); first 20:
+7828:  TORTURE poll-many-fds: FAIL
+7851:TORTURE FAILED: 1
+8794:[GREPTEST] FAIL tab_via_file (stdout)
+8798:[GREPTEST] FAIL tab_via_file (status) got 2, want 0
+8800:[GREPTEST] FAIL tab_via_file (file GRT.TPAT) missing
+8843:[GREPTEST] FAILURES: 1
+9906:SHELLTEST WATCHDOG: protocol stalled 240 s; FAILING TEST. Process table:
+T3_intel EXIT=1
+T3_LOG=/home/sarah/.swarm/evidence/gb082v2/20261107T122845Z/intel_attempt1.log
+T3_ARCH=intel
+T3_FAILS=7
+ATTEMPT1_RC=1
