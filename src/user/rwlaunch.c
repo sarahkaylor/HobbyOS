@@ -364,6 +364,11 @@ __attribute__((section(".text._start"))) void _start(void) {
      This is how a refused FBConfig or context is told apart from a missing
      visual: the trace prints the attrib list Unity sent. */
   char glx_env[40];
+  /* L74: HOBBYOS_GL_VIEWPORT -- the [GL] viewport rows (patches/0012).  A
+     separate switch from the GLX call trace on purpose: the trace prints one
+     row per glX call and would perturb the fps it is measuring, while the
+     viewport row prints at most 64 lines per run.  Same marker rule. */
+  char vp_env[40];
   {
     int gk = open("/GLXON", 0 /* O_RDONLY */);
     int on = gk >= 0;
@@ -373,6 +378,14 @@ __attribute__((section(".text._start"))) void _start(void) {
     while (nm[k]) { glx_env[k] = nm[k]; k++; }
     glx_env[k++] = on ? '1' : '0';
     glx_env[k] = 0;
+    int vk = open("/VPON", 0 /* O_RDONLY */);
+    int von = vk >= 0;
+    if (vk >= 0) close(vk);
+    const char *vn = "HOBBYOS_GL_VIEWPORT=";
+    k = 0;
+    while (vn[k]) { vp_env[k] = vn[k]; k++; }
+    vp_env[k++] = von ? '1' : '0';
+    vp_env[k] = 0;
   }
   /* Mono's own assembly/image log.  `MONO_LOG_MASK=asm` + LEVEL=debug makes
      the runtime print every image it opens and every assembly it loads --
@@ -474,6 +487,7 @@ __attribute__((section(".text._start"))) void _start(void) {
       (char *)"HOME=" RW_HOME,
       mtx_env,
       glx_env,
+      vp_env,
       (char *)"LC_ALL=C",
       (char *)"LANG=C",
       /* /LIB64: the glibc pin + compat libX11/libGL/libasound.  /RWDSO: the

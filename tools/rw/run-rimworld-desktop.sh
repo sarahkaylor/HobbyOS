@@ -378,6 +378,16 @@ if [ "${RW_TRACE_GLX:-0}" = 1 ]; then
 else
   mdel -i "$IMG" ::/GLXON >/dev/null 2>&1 || true
 fi
+# L74: /VPON -> HOBBYOS_GL_VIEWPORT=1, the [GL] viewport rows (patches/0012).
+# Independent of /GLXON because the GLX call trace prints a row per call and
+# would perturb the fps it is measuring; the viewport row is bounded.
+if [ "${RW_VIEWPORT:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/vpon"
+  stage "$OUT/vpon" ::/VPON
+  echo "  staged: /VPON -> HOBBYOS_GL_VIEWPORT=1 ([GL] viewport rows)"
+else
+  mdel -i "$IMG" ::/VPON >/dev/null 2>&1 || true
+fi
 # L62: /RWSCREEN makes the launcher ask the WM for a specific pixel size
 # ("WxH"), and /WMSIZE makes the WM honour that request instead of handing the
 # client the whole tile.  Both are measurement switches: absent/off, the
