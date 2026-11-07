@@ -471,8 +471,19 @@ MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG"
   | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
 PROGS_EXITED=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
   | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ' || true)
+# GB-097: byte-interleaved records.  Distinct from the glued count above: a
+# glued line carries TWO tags (record fusion), a shredded one carries ONE tag
+# whose body was overwritten character-by-character by another writer.  The
+# detector is in-tree (tools/gate/console_shred.py, --self-test) so any log can
+# be re-judged; a missing detector is reported as "?" and never as 0.
+SHREDDED="?"
+if [ -x "${ROOT:-.}/tools/gate/console_shred.py" ] || [ -f "${ROOT:-.}/tools/gate/console_shred.py" ]; then
+  SHREDDED=$(python3 "${ROOT:-.}/tools/gate/console_shred.py" "$LOG" 2>/dev/null \
+    | sed -nE 's/^console_shred: ([0-9]+) byte-interleaved.*/\1/p' | head -1 || true)
+  [ -n "$SHREDDED" ] || SHREDDED=0
+fi
 GLUED=$(glued_count "$LOG")
-echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory fault records across ${MEMFAULT_PROCS} processes, ${PROGS_EXITED} programs exited, glued=${GLUED}, halted=${halted}"
+echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory fault records across ${MEMFAULT_PROCS} processes, ${PROGS_EXITED} programs exited, ${SHREDDED} shredded, glued=${GLUED}, halted=${halted}"
 
 # GB-068 regression guard: the intel wave carries a documented, long-standing
 # baseline of user-mode fatal faults (in=PROT) from legacy v1 flat binaries
@@ -585,7 +596,11 @@ fi
 # differential as part of the intel tier; run t4_w0 over this wave's own serial
 # so arrival + (where the member emits it) the [W0] output marker are judged,
 # not a manual post-hoc step. Disable per-run with W0_GATE=0.
-if [ "$rc" -eq 0 ] && [ "x${W0_GATE:-1}" != "x0" ] && [ -f "$ROOT/tools/gate/t4_w0.sh" ]; then
+# GB-058: the corpus is INTEL-ONLY by construction — W0PIE is the x86_64
+# Linux-ABI static-PIE member and the ARM wave has no W0 member set. Running
+# t4_w0 on an ARM log made every otherwise-green ARM wave exit 1 on
+# "W0PIE not in the intel wave's exited-programs set"; gate the gate on ARCH.
+if [ "$ARCH" = "intel" ] && [ "$rc" -eq 0 ] && [ "x${W0_GATE:-1}" != "x0" ] && [ -f "$ROOT/tools/gate/t4_w0.sh" ]; then
   (cd "$ROOT" && bash tools/gate/t4_w0.sh --serial "$LOG") || { echo "T3_${ARCH}: FAIL - W0 corpus gate"; rc=1; }
 fi
 echo "T3_${ARCH} EXIT=$rc"

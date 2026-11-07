@@ -114,6 +114,10 @@ WORKSTREAM = {
     "GB-134": ["abi", "loader"],
     "GB-135": ["infra", "tests"],
     "GB-136": ["infra", "tests"],
+    "GB-182": ["game", "tests"],
+    "GB-183": ["abi", "elf-compat"],
+    "GB-184": ["tests", "game", "elf-compat"],
+    "GB-185": ["infra", "tests"],
 }
 # A ticket whose §8 row is missing from WORKSTREAM used to lose EVERY label it
 # carried, because the upsert replaced the label set with `expected`. On

@@ -107,6 +107,34 @@ case "$ARCH" in
     ;;
 esac
 
+# --- compiler selection ----------------------------------------------------
+# On macOS the `clang` on PATH is Apple clang, whose `-fuse-ld=lld` selects the
+# Mach-O driver (ld64.lld).  Every ELF link test then fails with the Darwin
+# flag set appended by that driver:
+#   ld.lld: error: unknown argument '-dynamic' / '-platform_version' / '-arch'
+#   ld.lld: error: cannot open macos: No such file or directory
+# -> "C compiler cannot create executables" (configure exit 77).  The repo
+# Makefile pins Homebrew LLVM for exactly this reason; this block gives a
+# direct `bash build-target.sh` run the same default, and routes the driver
+# through tools/cc-x86-none-elf.sh (clang compiles, ld.lld links) because even
+# Homebrew clang hands x86_64-none-elf links to /usr/bin/gcc on Darwin -- see
+# that script's header.  CC/CXX from the environment (the Makefile passes its
+# own down) always win, and on Linux, where `clang` is already an ELF driver,
+# nothing changes.
+if [ "$(uname -s)" = "Darwin" ]; then
+  CC_GIVEN=${CC:+1}
+  for p in /opt/homebrew/opt/llvm/bin/clang /usr/local/opt/llvm/bin/clang; do
+    [ -x "$p" ] || continue
+    [ -n "${CC:-}" ]  || CC="$p"
+    [ -n "${CXX:-}" ] || CXX="$p"
+    break
+  done
+  if [ "${CC_GIVEN:-0}" != 1 ] && [ -x "${REPO_ROOT}/tools/cc-x86-none-elf.sh" ]; then
+    CC="${REPO_ROOT}/tools/cc-x86-none-elf.sh"
+    CXX="$CC"
+  fi
+fi
+
 CXX="${CXX:-clang}"
 CLANG_RESOURCE_INCLUDE="$("${CXX}" -print-resource-dir 2>/dev/null)/include"
 [ -d "$CLANG_RESOURCE_INCLUDE" ] || die "cannot locate the clang resource include dir"
@@ -185,7 +213,13 @@ fi
 # --- 2. host stage (tools for the cross buildroot) -------------------------
 if [ ! -x "${CROSS_ROOT}/bin/genrb" ]; then
   log "host tools missing in ${CROSS_ROOT}; running build-host.sh (JOBS=${JOBS})"
-  JOBS="${JOBS}" bash "${VENDOR_DIR}/build-host.sh"
+  # This stage is a HOST build: a host configure run through the bare-metal
+  # driver dies at "cannot run C compiled programs" (configure exit 77).
+  # CC/CXX arrive from the caller (the Makefile passes its own) and, because
+  # bash keeps the export attribute on an imported variable, our target CC
+  # below would leak into build-host.sh.  Scrub them; build-host.sh falls
+  # back to its `cc`/`c++` defaults (GB-214).
+  env -u CC -u CXX JOBS="${JOBS}" bash "${VENDOR_DIR}/build-host.sh"
 fi
 [ -x "${CROSS_ROOT}/bin/genrb" ]          || die "cross buildroot tool ${CROSS_ROOT}/bin/genrb missing"
 [ -f "${CROSS_ROOT}/config/icucross.mk" ] || die "cross buildroot ${CROSS_ROOT}/config/icucross.mk missing (run build-host.sh)"

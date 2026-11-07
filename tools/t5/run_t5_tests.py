@@ -41,6 +41,15 @@ def discover():
     # tools-root T5 tests (stable, low churn); NOT run_selfhost_build_test.py
     # (a heavy standalone selfhost run, deliberately outside host_tests).
     scripts += ["tools/evidence_rig_test.py", "tools/perf_game_cycle_test.py"]
+    # GB-176: run_doom_elf_test.py matches the *_test.py glob but is not a unit
+    # test — it boots QEMU with a staged disk and grades screendumps, and it
+    # needs obj/doom-linux/doom10.elf, which is gitignored. Discovered on a
+    # fresh tree it fails at its first line ("no ELF at …"), turning T1 red for
+    # every clean machine; discovered on a box that has the artifact it boots a
+    # VM inside `make host_tests`. Both are wrong: the harness has its own
+    # target (`make doom_elf_test`). Same reasoning as run_selfhost_build_test.py.
+    excluded = {"tools/doom_elf/run_doom_elf_test.py"}
+    scripts = [s for s in scripts if s not in excluded]
     seen, out = set(), []
     for s in scripts:
         if s not in seen:

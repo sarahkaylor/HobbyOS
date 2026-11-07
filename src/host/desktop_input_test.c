@@ -566,6 +566,46 @@ static void run_input_v2_tests(void) {
 
 /* ---- main ---- */
 
+/* ---- 4. GB-186: windowed vs non-windowed key owner ---- */
+
+static void test_nonwindowed_owner(void) {
+  /* No window focused: the launched child's stdin pipe is the owner. */
+  int gp[2];
+  ho_pipe(gp);
+  fcntl(gp[0], F_SETFL, O_NONBLOCK);
+  wm_init();
+  num_windows = 0;
+  focused_window = -1;
+  start_menu_open = menu_open = app_menu_open = 0;
+  set_nonwindowed_key_owner(42, gp[1]);
+
+  char buf[32];
+  forward_key_to_focused(106, 0);            /* Right arrow */
+  int n = drain(gp[0], buf, sizeof buf);
+  check(n == 3 && buf[0] == 27 && buf[1] == '[' && buf[2] == 'C',
+        "no window: the key goes to the native game's stdin (ESC [ C)");
+
+  /* Windowed owner wins: the focused window gets the key, the fallback none. */
+  int rd, id = make_window_with_pipe(&rd);
+  forward_key_to_focused(106, 0);
+  n = drain(rd, buf, sizeof buf);
+  check(n == 3 && buf[2] == 'C', "focused window still owns the key");
+  check(drain(gp[0], buf, sizeof buf) == 0,
+        "window-first: the non-windowed fallback receives nothing");
+
+  /* Tearing down the owner clears the fallback (a stale fd must not survive). */
+  focused_window = -1;
+  clear_nonwindowed_key_owner(42);
+  forward_key_to_focused(106, 0);
+  check(drain(gp[0], buf, sizeof buf) == 0, "cleared owner: no write to the dead fd");
+
+  wm_remove_window(id);
+  ho_close(gp[0]);
+  ho_close(gp[1]);
+  nonwindowed_key_pid = -1;
+  nonwindowed_key_fd = -1;
+}
+
 int main(void) {
   setvbuf(stdout, NULL, _IONBF, 0);
   printf("=== Desktop input (Ctrl bytes + key auto-repeat) host tests ===\n");
@@ -575,6 +615,8 @@ int main(void) {
   test_repeat_delay_and_period();
   test_repeat_letter_and_up_arrow();
   test_repeat_quiet_contexts();
+  printf("\n=== GB-186: key owner routing ===\n");
+  test_nonwindowed_owner();
   printf("\n=== Desktop input v2 (K stamps, wheel, graceful close) ===\n");
   run_input_v2_tests();
 

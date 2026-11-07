@@ -52,6 +52,20 @@ if [ "$IS_X86" = 0 ]; then
   exec "$CLANG" "$@"
 fi
 
+# --- version/probe queries never reach the linker ---------------------------
+# configure and meson ask `cc --version` with the target flags attached.  With
+# no source and no -c that would fall through to the link path and fail with
+# "ld.lld: error: no input files", which the probe grades as a broken compiler
+# ("Unknown compiler(s)" from meson, "C compiler cannot create executables"
+# from configure).
+for a in "$@"; do
+  case "$a" in
+    --version|-dumpversion|-dumpmachine|-dumpspecs|--help|-print-*)
+      exec "$CLANG" "$@" ;;
+  esac
+done
+[ "$#" = 1 ] && [ "$1" = "-v" ] && exec "$CLANG" "$@"
+
 # --- first pass: detect compile-only mode (-c/-S/-E) -----------------------
 COMPILE=0
 for a in "$@"; do [ "$a" = "--" ] && break; case "$a" in -c|-S|-E) COMPILE=1;; esac; done

@@ -558,6 +558,23 @@ static void x64_send_ipi(uint32_t cpu, uint32_t vector) {
   *icr_lo = vector;    /* fixed delivery, physical destination, edge */
 }
 
+#ifdef PANIC_IPI_TEST
+/* GB-207: the test vehicle owns vector 0x83 and needs the same delivery path
+   as the shootdown IPI.  Test-only; the default kernel has no such symbol.
+   Wait for the ICR delivery-status bit to clear before writing: the periodic
+   0x81 broadcast can leave a write pending, and a write while busy is lost
+   (measured: the first injection never reached cpu1). */
+void x64_send_test_ipi(uint32_t cpu, uint32_t vector) {
+  volatile uint32_t *icr_lo = (volatile uint32_t *)(0xFEE00000 + 0x300);
+  for (volatile int spin = 0; spin < 1000000; spin++) {
+    if ((*icr_lo & (1u << 12)) == 0)
+      break;
+    __asm__ volatile("pause");
+  }
+  x64_send_ipi(cpu, vector);
+}
+#endif
+
 void vm_arch_shootdown(struct addr_space *as) {
   if (!as || !as->root_phys)
     return;
@@ -652,8 +669,8 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
      step is knowing whether this ever happens.  Lock-free printing on purpose:
      we may hold vm_lock here, and uart_puts can take a lock. */
   {
-    extern void uart_puts_raw(const char *s);
-    extern void uart_print_hex_raw(uint64_t v);
+    extern void panic_puts(const char *s);
+    extern void panic_print_hex(uint64_t v);
     static volatile uint64_t freerace_seen;
     uint32_t me = get_cpuid();
     for (uint32_t c = 0; c < MAX_CPUS; c++) {
@@ -662,11 +679,11 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
       if (freerace_seen >= 20)
         break;
       freerace_seen++;
-      uart_puts_raw("[FREERACE] freeing root=");
-      uart_print_hex_raw(root_phys);
-      uart_puts_raw(" while cpu=");
-      uart_print_hex_raw((uint64_t)c);
-      uart_puts_raw(" still translates through it\n");
+      panic_puts("[FREERACE] freeing root=");
+      panic_print_hex(root_phys);
+      panic_puts(" while cpu=");
+      panic_print_hex((uint64_t)c);
+      panic_puts(" still translates through it\n");
     }
   }
   uint64_t *p4 = (uint64_t *)root_phys;

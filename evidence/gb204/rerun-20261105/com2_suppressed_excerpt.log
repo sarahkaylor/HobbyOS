@@ -1,0 +1,35 @@
+# COM2 [PANIC-SINK] suppressed=N excerpt — GB-204 re-run 2026-11-05
+# Full log (5.3 MB): /home/sarah/.hermes/cache/scratch/com2_gb204.log (scratch host path)
+# Run: make MODE=test ARCH=intel disk.img; T3_QEMU_ARGS='-serial file:...' tools/t3_tier.sh intel
+# QEMU: default 8 CPUs (QEMU_SMP unset), intel
+count=158537
+first=1
+last=46230
+# The count resets on each guest reboot (GB-146's FATALs reset the machine);
+# the last boot's final value is 'last'. Past the COM1 cap of 3 the count still moves.
+--- first 12 ---
+[PANIC-SINK] suppressed=1
+[PANIC-SINK] suppressed=2
+[PANIC-SINK] suppressed=3
+[PANIC-SINK] suppressed=4
+[PANIC-SINK] suppressed=5
+[PANIC-SINK] suppressed=6
+[PANIC-SINK] suppressed=7
+[PANIC-SINK] suppressed=8
+[PANIC-SINK] suppressed=9
+[PANIC-SINK] suppressed=10
+[PANIC-SINK] suppressed=11
+[PANIC-SINK] suppressed=12
+--- last 12 ---
+[PANIC-SINK] suppressed=46219
+[PANIC-SINK] suppressed=46220
+[PANIC-SINK] suppressed=46221
+[PANIC-SINK] suppressed=46222
+[PANIC-SINK] suppressed=46223
+[PANIC-SINK] suppressed=46224
+[PANIC-SINK] suppressed=46225
+[PANIC-SINK] suppressed=46226
+[PANIC-SINK] suppressed=46227
+[PANIC-SINK] suppressed=46228
+[PANIC-SINK] suppressed=46229
+[PANIC-SINK] suppressed=46230

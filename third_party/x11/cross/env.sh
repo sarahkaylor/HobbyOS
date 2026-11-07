@@ -43,6 +43,16 @@ HB_TOOLS="$(cd "$HB_TOOLS" && pwd)"
 
 # Host llvm tools (llvm-ar etc. live only here on the workstation).
 case ":$PATH:" in *":/usr/lib/llvm-21/bin:"*) ;; *) [ -d /usr/lib/llvm-21/bin ] && PATH="$PATH:/usr/lib/llvm-21/bin";; esac
+# macOS: Homebrew's llvm is keg-only, so llvm-ar/llvm-readelf are not on PATH
+# and every recipe that calls them by name dies with "llvm-ar: command not
+# found".  Prepend it (the repo README asks the developer to do this by hand;
+# doing it here makes the build work without the export, and puts Homebrew
+# clang ahead of Apple's).
+for _hb_llvm in /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin; do
+  [ -d "$_hb_llvm" ] || continue
+  case ":$PATH:" in *":$_hb_llvm:"*) ;; *) PATH="$_hb_llvm:$PATH";; esac
+done
+unset _hb_llvm
 export PATH
 
 case "$HB_ARCH" in
@@ -55,7 +65,17 @@ esac
 
 HB_OBJ="$HB_REPO/obj/$HB_ARCH"
 HB_LSCRIPT="$HB_REPO/src/user/linker.ld"
-HB_CLANG_RES="$(clang -print-resource-dir)/include"
+# Driver used by the generated wrappers.  On Darwin, clang hands every
+# x86_64-none-elf link to /usr/bin/gcc -- Apple's clang shim -- which drives
+# the Mach-O linker and rejects the ELF flags ("ld.lld: unknown argument
+# '-syslibroot'", "cannot open macos"), so intel links go through the repo's
+# ld.lld driver, the same one the Makefile's userland build uses.  aarch64
+# needs no detour: clang links it with ELF ld.lld directly on both hosts.
+HB_CC_CLANG="${HB_CC_CLANG:-clang}"
+if [ "$(uname -s)" = "Darwin" ] && [ "$HB_ARCH" = "intel" ] && [ -x "$HB_REPO/tools/cc-x86-none-elf.sh" ]; then
+  HB_CC_CLANG="$HB_REPO/tools/cc-x86-none-elf.sh"
+fi
+HB_CLANG_RES="$("$HB_CC_CLANG" -print-resource-dir)/include"
 HB_LIBCXX_INC="$HB_REPO/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include"
 # Search order: the X11-only overlay (cross/include: POSIX limits the repo
 # libc deliberately lacks), then repo libc headers (they own stdint/limits/stdarg...),
@@ -88,11 +108,11 @@ for a in "\$@"; do
   case "\$a" in -c|-S|-E|-M|-MM|-fsyntax-only|--version|-v|-dumpversion|-dumpmachine|-print-*) link=0;; esac
 done
 if [ \$link = 1 ]; then
-  exec clang $HB_TARGET $cxx_lang $cxx_inc $HB_SYSINC \\
+  exec $HB_CC_CLANG $HB_TARGET $cxx_lang $cxx_inc $HB_SYSINC \\
     -nostdlib -static -fuse-ld=lld $HB_ARCH_LDFLAGS -Wl,--build-id=none -Wl,-T,$HB_LSCRIPT -Wl,-e,_start \\
     $HB_OBJ/crt0.o "\$@" -L$HB_TOOLS/lib -Wl,--start-group $closure -Wl,--end-group
 fi
-exec clang $HB_TARGET $cxx_lang $cxx_inc $HB_SYSINC "\$@"
+exec $HB_CC_CLANG $HB_TARGET $cxx_lang $cxx_inc $HB_SYSINC "\$@"
 EOF
   chmod +x "$1.tmp"; mv "$1.tmp" "$1"
 }

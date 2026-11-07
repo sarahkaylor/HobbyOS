@@ -192,6 +192,15 @@ _iw_hbhost() {
 # Host golden test of icewm/compat (fnmatch/wordexp/glob vs glibc).
 _iw_hosttest() {
   hb_want icewm-hosttest || return 0
+  # The oracle here is the HOST libc's fnmatch/wordexp/glob, i.e. glibc.  On a
+  # non-glibc host (macOS: Darwin's fnmatch, which differs on FNM_PATHNAME,
+  # '[!...]' and leading-period handling) the differential would grade the
+  # icewm implementation against the wrong reference -- 30 "diffs" on a good
+  # build.  The parity claim is a Linux gate; skip it elsewhere by name.
+  if ! ldd --version 2>&1 | grep -qiE 'glibc|GNU libc'; then
+    hb_log "icewm-hosttest: skipped (oracle is the host libc, this host is not glibc — glibc parity is gated on Linux)"
+    return 0
+  fi
   local t="$HB_OBJ_DIR/icewm-hosttest"; rm -rf "$t"; mkdir -p "$t"
   local inc="$HB_X11_DIR/icewm/include" c="$HB_X11_DIR/icewm/compat" hcc="${CC_FOR_BUILD:-cc}"
   : > "$HB_LOG_DIR/icewm-hosttest.log"

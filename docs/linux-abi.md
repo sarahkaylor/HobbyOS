@@ -598,3 +598,92 @@ Device-free, so the same route helper is locked by the host differential suite
 - Whether `uname.release` should mimic a specific kernel version for SDL's version gate.
 - `/proc/self/exe` implementation strategy (symlink in the FAT16-backed VFS vs. a compat-only
   read hook) — affects GB-020 and the launcher (GB-039).
+
+## 13. Implementation map (2026-11-02, the Doom-ELF bring-up)
+
+The contract above is unchanged; this section records WHERE it is implemented, so
+the next reader does not have to re-derive the shape from `trap.c`.
+
+| piece | file |
+|---|---|
+| dispatch contract (`struct l_sysent`, `l_arg`, user-copy helpers) | `src/include/linux_compat.h` |
+| dispatcher, `l_tab_core` (identity, sleep, gettimeofday), `[LCOMPAT]` tracer | `src/kernel/linux_compat.c` |
+| subsystem tables (weak symbols; absent = skipped) | `l_tab_fd` / `l_tab_mem` / `l_tab_proc` / `l_tab_misc` → `src/kernel/linux_compat_<sub>.c` |
+| entry point | `src/kernel/arch/x64/trap.c`: `linux_compat_dispatch(lp, tf, nr)` runs before the legacy number switch |
+| startup block (argc/argv/envp/auxv/AT_RANDOM/AT_EXECFN, `%rsp`) | `src/kernel/program_loader.c`: `compat_stack_block()` |
+| probe harness | `src/user/linux_probe_<name>.c` + `tools/gate/t3_linux_probe.sh <name>` |
+| session launch of a compat program | `/XSTART.TXT` (one program per line) + `XSESS_NO_WM=1`, both in `src/user/x11sess/xsession.c` |
+| end-to-end X evidence | `tools/doom_elf/run_doom_elf_test.py` (`make doom_elf_test`) |
+
+Rules the map encodes:
+
+- **A handler owns its number.** Return 1 after writing `tf->regs[0]`;
+  `>= 0` success, `-errno` failure in Linux numbering. Return 0 = "not mine".
+- **Unhandled numbers are named, once per boot**: `[LCOMPAT] ENOSYS nr=<n>
+  name=<prog> pid=<p> rip=<addr>`. Bring-up is driven by that record.
+- **A blocking handler stores its result BEFORE `schedule(tf, 0)`** — the
+  scheduler saves the frame and never returns into the handler's C frame.
+  Measured: storing after the call made `nanosleep` return `rax == 35`.
+- **The startup block carries the launcher's argv and envp** (up to 16/24
+  entries). Measured: with `argc` fixed at 1 and empty `envp`, Doom reported
+  "no IWAD file was found" and Xlib had no `DISPLAY`.
+- **Probes are ordinary Linux programs** (musl, no HobbyOS headers), so the same
+  source produces the reference behaviour on a Linux host.
+
+## 14. W5 — the Linux-dl ladder (GB-196 report, GB-199 entry)
+
+GB-196 made the compat track parse `PT_INTERP` with `ELF_PARSE_CAPTURE_INTERP` and name
+the interpreter + first dependency set.  GB-199 maps the closure and enters `ld.so`.  A
+glibc `-pie` hello (`PT_INTERP /lib64/ld-linux-x86-64.so.2`, `NEEDED libc.so.6`) staged
+with a one-member `::WAVE.CFG`, intel `MODE=test`:
+
+```
+elf loader: PT_INTERP /lib64/ld-linux-x86-64.so.2
+elf loader: interpreter LD64.SO mapped
+elf loader: DSO LIBC6.SO mapped
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 entry=0x1008023340
+auxv: AT_PAGESZ=0x1000
+auxv: AT_PHDR=0x1000000040
+auxv: AT_ENTRY=0x1000001060
+auxv: AT_BASE=0x1008000000
+[ARRIVED] LDHELLO.BIN rc>0
+LDHELLO.BIN: error while loading shared libraries: libc.so.6: failed to map segment from shared object
+[EXITPC] pid=2 last_user_pc=0x1008029C67 code=0x7F
+```
+
+- Names: `LD64.SO` = `ld-linux-x86-64.so.2`, `LIBC6.SO` = `libc.so.6`; the bounded
+  `el_compat_83[]` table in `src/kernel/elf_loader.c` translates the first, every other
+  name gets a real root/basename lookup, and a miss is named
+  (`elf loader: first missing DSO <name>`).
+- The closure is mapped depth-first (interpreter, then the executable's `DT_NEEDED`,
+  then each DSO's own), deduped by staged name.  No relocations are applied: `ld.so`
+  owns them.  `elf loader: DSO <name> mapped` is one line per DSO.
+- `auxv:` lines are the kernel's startup stack for the interpreter, one record per
+  entry; `AT_BASE` is the interpreter's USER_LIB base, `AT_ENTRY` the executable's.
+- The guest then executes `ld.so` (GB-199 stopped at ld.so's own named load error,
+  libc's mmap).
+- Falsifier: `make MODE=test ARCH=intel GB199_NO_AUXV=1 ...` omits the startup stack;
+  the same jump faults at `VA=0x1800000000 PC=0x1008021E18` (a HOLE just above the
+  stack top), which is what the auxv block prevents.
+
+### 14.1 The dependency open (GB-201)
+
+`ld.so` opens its dependency by SONAME, which FAT16 cannot name (two dots), so the compat
+`open`/`openat` path translates a **bounded** table (`src/kernel/arch/x64/trap.c`,
+`compat_sonames[]`: `libc.so.6` → `LIBC6.SO`, `ld-linux-x86-64.so.2` → `LD64.SO`) on the
+path's basename.  An unknown name keeps the ordinary `file_open` answer — the control
+`[GB201] nosuch.so.9 open fd=-1 errno=2 (ENOENT=2)` is in the same run as the hit.  The
+same image then continues:
+
+```
+open: /lib/x86_64-linux-gnu/libc.so.6 -> LIBC6.SO fd=3
+[LCOMPAT] ENOSYS nr=334 name=LDHELLO.BIN pid=3 rip=0x1008016F8E rdi=0x10802220A0
+hello from glibc pie
+[EXITPC] pid=3 last_user_pc=0x10800F7198 code=0x0
+```
+
+`334` is `rseq`, which glibc tolerates as ENOSYS; the program runs and exits 0.  `ld.so`
+maps a DSO's whole vaddr span (`p_memsz`, BSS included) in one file `mmap`, which is
+longer than the file; `vm_mmap` now allows that tail and `vm_file_obj_materialize` maps
+it as zero pages, while a short read *inside* the file stays `-EIO` (text is never
+silently zero-filled).

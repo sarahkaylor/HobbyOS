@@ -29,6 +29,21 @@ from datetime import datetime, timezone
 
 W, H = 1920, 1080
 
+# `[LAUNCH] NAME` is printed by launch_menu_item() the moment the kernel starts
+# a selected entry.  It is the only proof that the *intended* title was asked
+# to run: a dropped Down moves start_sel, and Enter then launches the next row.
+LAUNCH_RE = re.compile(r"\[LAUNCH\]\s+([A-Za-z0-9_.]+)")
+
+
+def launches(serial_log):
+    """Every `[LAUNCH]` target in the serial, in order."""
+    try:
+        txt = open(serial_log, errors="ignore").read()
+    except OSError:
+        return []
+    return LAUNCH_RE.findall(txt)
+
+
 
 def sha256(path):
     h = hashlib.sha256()
@@ -167,7 +182,8 @@ def resolve_launch_slot(serial_log, bin_name, provided=None):
     return found, warn
 
 
-def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="keys"):
+def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="keys",
+                     key_delay=0.06, drop_down=None):
     """Open the Apps menu and navigate down to the given slot, launching it.
 
     GB-116: on intel the pointer click below cannot work.  `src/user/desktop.c`
@@ -202,9 +218,49 @@ def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="keys"):
         # that is not in the log (GB-116-V2 clause 6).
         raise ValueError("launch_from_menu: unknown gesture %r (want 'keys' or 'click')" % (gesture,))
     q.key("home", 0.3)
-    for _ in range(slot):
-        q.key("down", 0.06)
+    for i in range(slot):
+        if drop_down is not None and i == drop_down:
+            continue          # test hook: simulate one lost Down
+        q.key("down", key_delay)
     q.key("ret", 0.3)
+
+
+def launch_verified(q, serial_log, name, slot, attempts=3, key_delay=0.06,
+                    drop_down=None, timeout_s=8.0, close_key="f4"):
+    """Launch `name` from the menu and prove from the serial that it started.
+
+    A dropped Down moves the highlight; Enter then launches the NEXT title, and
+    the acceptance table calls the intended one "never asked to run".  The
+    kernel's `[LAUNCH] NAME` line is the proof, not the gesture: compare the
+    launched name, and on a mismatch close the unwanted window (F4 is the
+    desktop close key) and retry once more with a slower key delay.
+
+    `drop_down` drops the Nth Down on the first attempt only, so the retry
+    path can be exercised deterministically.  Returns (ok, actual, tries).
+    """
+    actual = None
+    for attempt in range(1, attempts + 1):
+        before = len(launches(serial_log))
+        drop = drop_down if attempt == 1 else None
+        launch_from_menu(q, slot, key_delay=key_delay, drop_down=drop)
+        actual = None
+        t0 = time.time()
+        while time.time() - t0 < timeout_s:
+            got = launches(serial_log)
+            if len(got) > before:
+                actual = got[-1]
+                break
+            time.sleep(0.25)
+        if actual == name:
+            return True, actual, attempt
+        if actual:
+            q.key(close_key, 0.4)   # close the wrong window before retrying
+            time.sleep(1.2)
+        else:
+            q.key("esc", 0.3)       # a still-open menu must not eat the next F1
+            time.sleep(0.4)
+        key_delay = min(key_delay * 2, 0.24)   # TCG may need longer between keys
+    return False, actual, attempts
 
 
 def build_stage_cmd(host_src, guest_dest, root):
@@ -354,6 +410,12 @@ def main():
     # Optional scripted input (replay seed), captured to replay.jsonl.
     if args.input:
         for code in [c.strip() for c in args.input.split(",") if c.strip()]:
+            # GB-172: `wait:N` holds the script for N seconds — a game that
+            # needs ten seconds to load its WAD cannot be tested with keys
+            # fired off in the same 200 ms as the launch click.
+            if code.startswith("wait:"):
+                time.sleep(float(code[5:]))
+                continue
             q.key(code, 0.2)
     time.sleep(args.run_seconds)
     if "gameplay" in checkpoints:

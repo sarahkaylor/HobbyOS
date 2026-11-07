@@ -16,6 +16,16 @@
 set -u
 J=3
 D=/tmp/par-logs
+# Throttling reaps one finished job at a time.  `wait -n` is bash >= 4.3;
+# macOS ships bash 3.2 as /bin/bash, where it is an invalid option and this
+# loop would spin hot until every job had finished.  On old bash, block on
+# the oldest running job instead.
+if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] ||
+   { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+  reap_one() { wait -n; }
+else
+  reap_one() { set -- $(jobs -rp); [ $# -gt 0 ] && wait "$1"; return 0; }
+fi
 while getopts "j:d:" o; do
   case "$o" in
     j) J="$OPTARG" ;;
@@ -33,7 +43,7 @@ rm -f "$D"/*.rc 2>/dev/null
 echo "run_parallel: j=$J logs=$D"
 while [ $# -ge 2 ]; do
   name="$1"; cmd="$2"; shift 2
-  while [ "$(jobs -rp | wc -l)" -ge "$J" ]; do wait -n; done
+  while [ "$(jobs -rp | wc -l)" -ge "$J" ]; do reap_one || true; done
   ( bash -c "$cmd" >"$D/$name.log" 2>&1; echo "$?" >"$D/$name.rc" ) &
   echo "  started $name"
 done

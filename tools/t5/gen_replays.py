@@ -17,6 +17,10 @@ replays = {
     "NES.BIN":      (20, []),     # full-screen; launch is the playable proof
     "PONG.BIN":     (16, ["left", "left", "ret"]),
     "MILLIPED.BIN": (17, ["up", "up"]),
+    # GB-213: STARDUST had no replay at all after b1dbe01b deleted its
+    # hand-rolled harness.  Slot 19 is the [MENU] index measured on 58dbf59a
+    # (the runner still resolves the title by name; this is informational).
+    "STARDUST.BIN": (19, ["right", "right", "right", "right"]),
 }
 
 def nav(slot):

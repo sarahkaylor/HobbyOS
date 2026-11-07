@@ -36,6 +36,7 @@
 #endif
 #include "errno.h"
 #include "linux_uname.h"   /* GB-016: linux_fill_utsname + linux_utsname_t */
+#include "linux_compat.h"  /* compat handler-table dispatch + [LCOMPAT] tracer */
 #include "vfs.h"
 #include "vm.h"
 #include "blk_cache.h"
@@ -54,81 +55,12 @@ extern uint64_t hb_clock_realtime_ms(void);
    msghdr/iovec/cmsg blocks through the same arch helper. */
 static int sys_user_range(uint64_t ptr, uint64_t len, int write);
 int sys_user_range_ok(uint64_t ptr, uint64_t len);
+static int copy_user_path(const char *user, char *kbuf, int cap);
 
-struct cpu_local {
-  uint64_t kernel_stack;
-  uint64_t user_rsp;
-  uint64_t temp_rax;
-  uint64_t user_sp_temp;
-  uint64_t cpu_id;
-  struct process *current_proc;
-  /* GB-147: the frame the CPU pushed, copied by the FIRST instruction of
-     every exception stub (before any prologue).  The offsets are
-     load-bearing: FRAMESNAP_ASM addresses them as gs:[48]..gs:[104]. */
-  uint64_t snap_rip;     /* 48 */
-  uint64_t snap_cs;      /* 56 */
-  uint64_t snap_rflags;  /* 64 */
-  uint64_t snap_rsp;     /* 72  (CPL3 only; 0 for a kernel-mode entry) */
-  uint64_t snap_ss;      /* 80  (CPL3 only; 0 for a kernel-mode entry) */
-  uint64_t snap_valid;   /* 88 */
-  uint64_t snap_count;   /* 96 */
-  uint64_t fault_count;  /* 104 */
-} __attribute__((packed));
-
-/* The stub asm cannot see sizeof(): pin the offsets it uses. */
-extern void uart_puts_raw(const char *s);
-extern void uart_print_hex_raw(uint64_t v);
-extern void print_int_raw(int v);
-typedef char gb147_off48[(__builtin_offsetof(struct cpu_local, snap_rip) == 48) ? 1 : -1];
-typedef char gb147_off56[(__builtin_offsetof(struct cpu_local, snap_cs) == 56) ? 1 : -1];
-typedef char gb147_off64[(__builtin_offsetof(struct cpu_local, snap_rflags) == 64) ? 1 : -1];
-typedef char gb147_off72[(__builtin_offsetof(struct cpu_local, snap_rsp) == 72) ? 1 : -1];
-typedef char gb147_off80[(__builtin_offsetof(struct cpu_local, snap_ss) == 80) ? 1 : -1];
-typedef char gb147_off88[(__builtin_offsetof(struct cpu_local, snap_valid) == 88) ? 1 : -1];
-typedef char gb147_off96[(__builtin_offsetof(struct cpu_local, snap_count) == 96) ? 1 : -1];
-typedef char gb147_off104[(__builtin_offsetof(struct cpu_local, fault_count) == 104) ? 1 : -1];
+/* GB-152: struct cpu_local is declared once in process.h (the asm's fixed
+   gs: offsets are pinned by the typedefs below). */
 
 struct cpu_local cpu_locals[MAX_CPUS];
-
-/* GB-147: print the pushed frame beside the frame the handler read, so the
-   trap-frame family is decided by a comparison rather than an argument.
-   `is_fatal` only tags the line; the comparison is the same at both sites. */
-static void gb147_framesnap(struct trap_frame *tf, const char *tag) {
-  struct cpu_local *cl = &cpu_locals[get_cpuid()];
-  uint64_t read_rsp = (uint64_t)tf->lr;
-  int match;
-  match = (cl->snap_valid != 0) &&
-          (cl->snap_rip == (uint64_t)tf->elr) &&
-          (cl->snap_cs == (uint64_t)tf->cs) &&
-          (cl->snap_rflags == (uint64_t)tf->spsr) &&
-          (((tf->cs & 3u) != 3u) ||
-           (cl->snap_rsp == read_rsp && cl->snap_ss == (uint64_t)tf->ss));
-  uart_puts_raw("[FRAMESNAP] ");
-  uart_puts_raw(tag);
-  uart_puts_raw(" pushed rip=");
-  uart_print_hex_raw(cl->snap_rip);
-  uart_puts_raw(" cs=");
-  uart_print_hex_raw(cl->snap_cs);
-  uart_puts_raw(" rsp=");
-  uart_print_hex_raw(cl->snap_rsp);
-  uart_puts_raw(" ss=");
-  uart_print_hex_raw(cl->snap_ss);
-  uart_puts_raw(" | read rip=");
-  uart_print_hex_raw((uint64_t)tf->elr);
-  uart_puts_raw(" cs=");
-  uart_print_hex_raw((uint64_t)tf->cs);
-  uart_puts_raw(" rsp=");
-  uart_print_hex_raw(read_rsp);
-  uart_puts_raw(" ss=");
-  uart_print_hex_raw((uint64_t)tf->ss);
-  uart_puts_raw(" match=");
-  print_int_raw(match);
-  uart_puts_raw(" snaps=");
-  print_int_raw((int)cl->snap_count);
-  uart_puts_raw(" faults=");
-  print_int_raw((int)cl->fault_count);
-  uart_puts_raw("\n");
-}
 
 void save_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
@@ -169,8 +101,8 @@ static void dbg_resume(const char *tag, uint64_t v) {
    RPL==3 returns are user returns, and only those are judged. */
 void trap_exit_frame_check(uint64_t *frame) {
   extern volatile uint64_t trap_exit_bad_rip_seen;
-  extern void uart_puts_raw(const char *s);
-  extern void uart_print_hex_raw(uint64_t v);
+  extern void panic_puts(const char *s);
+  extern void panic_print_hex(uint64_t v);
   uint64_t rip = frame[0];
   uint64_t cs = frame[1];
   int implausible;
@@ -195,17 +127,17 @@ void trap_exit_frame_check(uint64_t *frame) {
   if (trap_exit_bad_rip_seen >= 20)
     return;
   trap_exit_bad_rip_seen++;
-  uart_puts_raw("[BADIRET] about to return to an implausible user RIP=");
-  uart_print_hex_raw(rip);
-  uart_puts_raw(" cs=");
-  uart_print_hex_raw(cs);
-  uart_puts_raw(" rsp=");
-  uart_print_hex_raw(frame[3]);
-  uart_puts_raw(" eflags=");
-  uart_print_hex_raw(frame[2]);
-  uart_puts_raw(" cpu=");
-  uart_print_hex_raw((uint64_t)get_cpuid());
-  uart_puts_raw("\n");
+  panic_puts("[BADIRET] about to return to an implausible user RIP=");
+  panic_print_hex(rip);
+  panic_puts(" cs=");
+  panic_print_hex(cs);
+  panic_puts(" rsp=");
+  panic_print_hex(frame[3]);
+  panic_puts(" eflags=");
+  panic_print_hex(frame[2]);
+  panic_puts(" cpu=");
+  panic_print_hex((uint64_t)get_cpuid());
+  panic_puts("\n");
 }
 
 /* GB-057: bounded count for the pre-iretq frame report (a rare event, not a
@@ -243,6 +175,20 @@ static void sys_write_console(struct trap_frame *tf) {
  * output-comparing suites ("status) got 2, want 0" everywhere) — GB-057.
  * Remap exactly the way sys_waitpid/sys_fork do. */
 static void sys_exit(struct trap_frame *tf) {
+  struct process *cur = current_process();
+  /* GB-021: a musl pthread exits with exit(60), not SYS_THREAD_EXIT(74).
+     A clone(2) child must leave only its thread; the group stays alive.
+     GB-216: that carve-out is for the LINUX-ABI clone(2) children only
+     (abi_flags carries PROC_FLAG_LINUX_ABI from the anchor).  A native
+     HobbyOS thread calling exit() must terminate the whole group, exactly
+     as process_exit's contract says ("SYS_EXIT keeps exit_group meaning
+     from ANY thread") -- and as ARM's SYS_EXIT already does.  Before this,
+     THRD_T's exit(7)-from-a-secondary-thread left the group alive and the
+     parent's waitpid() never returned. */
+  if (cur && cur->is_thread && (cur->abi_flags & PROC_FLAG_LINUX_ABI)) {
+    process_thread_exit(tf, tf->regs[5]);
+    return;
+  }
   tf->regs[0] = tf->regs[5]; /* rdi = the exit code */
   process_exit(tf);
 }
@@ -281,13 +227,78 @@ static void sys_open(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[5]; // rdi
   int flags = (int)tf->regs[4];                     // rsi (syscall arg 2)
   struct process *caller = current_process();
-  if (sys_user_range_ok((uint64_t)filename, 1)) {
-    /* file_open returns >= 0 (fd) or a negative errno it picked itself
-       (ENOENT/EEXIST/EMFILE), which errno_ret decodes in libc. */
-    tf->regs[0] = file_open(caller, filename, flags);
-  } else {
-    tf->regs[0] = -EFAULT;
+  char kpath[256];
+  int plen = copy_user_path(filename, kpath, sizeof kpath);
+  if (plen < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)plen;
+    return;
   }
+  /* file_open returns >= 0 (fd) or a negative errno it picked itself
+     (ENOENT/EEXIST/EMFILE), which errno_ret decodes in libc. */
+  tf->regs[0] = file_open(caller, kpath, flags);
+}
+
+/* GB-201: FAT16 cannot name a glibc SONAME (two dots), but ld.so opens its
+   dependencies by SONAME.  A compat open whose *basename* is one of the staged
+   SONAMEs resolves to the 8.3 name the loader staged.  The table is exact and
+   bounded: every other path, including an unknown .so name, keeps the ordinary
+   file_open result, so a miss is still ENOENT — never a wildcard. */
+static const struct {
+  const char *soname;
+  const char *staged;
+} compat_sonames[] = {
+  { "libc.so.6", "LIBC6.SO" },
+  { "ld-linux-x86-64.so.2", "LD64.SO" },
+};
+
+static int compat_name_eq_ci(const char *a, const char *b) {
+  while (*a && *b) {
+    char ca = *a, cb = *b;
+    if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+    if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+    if (ca != cb) return 0;
+    a++; b++;
+  }
+  return *a == '\0' && *b == '\0';
+}
+
+static const char *compat_soname_staged(const char *path) {
+  const char *base = path;
+  for (const char *p = path; *p; p++)
+    if (*p == '/') base = p + 1;
+  for (unsigned i = 0; i < sizeof compat_sonames / sizeof compat_sonames[0]; i++)
+    if (compat_name_eq_ci(base, compat_sonames[i].soname))
+      return compat_sonames[i].staged;
+  return 0;
+}
+
+static void compat_open(struct trap_frame *tf) {
+  const char *filename = (const char *)tf->regs[5]; /* rdi */
+  int flags = (int)tf->regs[4];                     /* rsi */
+  struct process *caller = current_process();
+  char kpath[256];
+  int plen = copy_user_path(filename, kpath, sizeof kpath);
+  if (plen < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)plen;
+    return;
+  }
+  const char *staged = compat_soname_staged(kpath);
+  int fd = file_open(caller, staged ? staged : kpath, flags);
+  if (staged) {
+    /* One record: the guest's SONAME, the file it resolved to, and the fd —
+       the evidence the open path (not a staged rename) did the work. */
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "open: ");
+    kl_s(&kl, kpath);
+    kl_s(&kl, " -> ");
+    kl_s(&kl, staged);
+    kl_s(&kl, " fd=");
+    kl_i(&kl, fd);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  tf->regs[0] = (uint64_t)(int64_t)fd;
 }
 
 static void sys_close(struct trap_frame *tf) {
@@ -544,13 +555,15 @@ static void sys_sysinfo(struct trap_frame *tf) {
 
 static void sys_unlink(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[5]; // rdi
-  if (sys_user_range_ok((uint64_t)filename, 1)) {
-    extern int vfs_unlink(const char *path);
-    int r = vfs_unlink(filename);
-    tf->regs[0] = r < 0 ? -ENOENT : r;
-  } else {
-    tf->regs[0] = -EFAULT;
+  char kpath[256];
+  int plen = copy_user_path(filename, kpath, sizeof kpath);
+  if (plen < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)plen;
+    return;
   }
+  extern int vfs_unlink(const char *path);
+  int r = vfs_unlink(kpath);
+  tf->regs[0] = r < 0 ? -ENOENT : r;
 }
 
 static void sys_rename(struct trap_frame *tf) {
@@ -612,6 +625,22 @@ static int sys_user_range(uint64_t ptr, uint64_t len, int write) {
  * same arch helper (extern in fs.c). */
 int sys_user_range_ok(uint64_t ptr, uint64_t len) {
   return sys_user_range(ptr, len, 0);
+}
+
+/* GB-178: copy a NUL-terminated user path byte by byte, validating each
+   byte's page before the load.  A one-byte guard at the syscall entry is
+   not enough: a string whose first byte is mapped and whose last byte is in
+   the next (unmapped) page faults at CPL0 inside vfs_clean.  Returns the
+   length on success, -EFAULT on an unmapped byte, -ENAMETOOLONG if no NUL
+   fits.  Kernel callers (string literals) do not use this helper. */
+static int copy_user_path(const char *user, char *kbuf, int cap) {
+  if (!user || !kbuf || cap <= 0) return -EINVAL;
+  for (int i = 0; i < cap; i++) {
+    if (!sys_user_range_ok((uint64_t)(uintptr_t)(user + i), 1)) return -EFAULT;
+    kbuf[i] = user[i];
+    if (kbuf[i] == '\0') return i;
+  }
+  return -ENAMETOOLONG;
 }
 
 static void sys_socket(struct trap_frame *tf) {
@@ -808,6 +837,70 @@ static void sys_set_tls(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)(int64_t)process_set_tls(caller, tf->regs[5]);
 }
 
+/* --- GB-021: Linux clone(56) / futex(202) for a static-PIE musl binary.
+ * The x64 syscall register map is rdi=r5, rsi=r4, rdx=r3, r10=r9, r8=r7,
+ * r9=r8.  musl's pthread_create calls clone directly; it needs the caller's
+ * frame copied (process_clone), not the native entry(arg) thread ABI. ---- */
+static void compat_clone(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  long r = (long)process_clone(caller, tf, tf->regs[5], tf->regs[4],
+                               tf->regs[3], tf->regs[9], tf->regs[7]);
+  {
+    static int clone_reports = 0;
+    if (clone_reports < 5) {
+      clone_reports++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[GB021-CLONE] r=");
+      kl_i(&kl, r);
+      kl_s(&kl, " flags=0x");
+      kl_hex(&kl, (unsigned long)tf->regs[5]);
+      kl_s(&kl, " stack=0x");
+      kl_hex(&kl, tf->regs[4]);
+      kl_s(&kl, " ptid=0x");
+      kl_hex(&kl, tf->regs[3]);
+      kl_s(&kl, " ctid=0x");
+      kl_hex(&kl, tf->regs[9]);
+      kl_s(&kl, "\n");
+      kl_emit(&kl);
+    }
+  }
+  tf->regs[0] = (uint64_t)(int64_t)r;
+}
+
+/* Linux futex ops carry FUTEX_PRIVATE_FLAG (0x80) / FUTEX_CLOCK_REALTIME
+ * (0x100) in the op word, and the timeout is a struct timespec*; the kernel
+ * futex takes a bare op and milliseconds.  WAIT/WAKE (0/1) is the surface
+ * musl's pthread mutex/join/condvar uses. */
+static void compat_futex(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int op = (int)tf->regs[4] & ~(0x80 | 0x100);
+  /* musl's timed waits (pthread_join/condvar) use FUTEX_WAIT_BITSET /
+     FUTEX_WAKE_BITSET (9/10); the kernel futex is a single-word wait/wake, so
+     map them onto 0/1.  Returning -ENOSYS here leaks ENOSYS into the caller's
+     errno even when the join succeeds (measured: tls_main_errno_untouched=38). */
+  if (op == 9) op = 0;
+  else if (op == 10) op = 1;
+  int64_t timeout_ms = -1;
+  if (op == 0 && tf->regs[9]) {
+    long ts[2];
+    if (sys_user_range(tf->regs[9], sizeof ts, 0) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+      return;
+    }
+    ts[0] = ((volatile long *)tf->regs[9])[0];
+    ts[1] = ((volatile long *)tf->regs[9])[1];
+    if (ts[0] < 0 || ts[1] < 0 || ts[1] >= 1000000000L) {
+      tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+      return;
+    }
+    timeout_ms = ts[0] * 1000 + ts[1] / 1000000;
+    if (timeout_ms == 0 && (ts[0] || ts[1])) timeout_ms = 1;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)process_futex(
+      caller, tf, tf->regs[5], op, (int)tf->regs[3], timeout_ms);
+}
+
 /* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX (96-102).  Thin
  * layer over fs.c, which validates every user range before changing any
  * state; -2 parks (blocking accept/connect) ride the pipe restart. ---- */
@@ -841,6 +934,18 @@ static void sys_connect_addr(struct trap_frame *tf) {
   struct process *caller = current_process();
   int r = file_connect_user(caller, (int)tf->regs[5], tf->regs[4], (int)tf->regs[3]);
   if (r == -2) {
+    /* GB-180: -ENOENT is 2, so a connect() to a missing path name returns
+       exactly the park/restart sentinel.  usock_name_park() sets the caller
+       BLOCKED before returning -2, and a waker may already have flipped it
+       to READY; a caller in any other state got -ENOENT from
+       usock_name_lookup().  Treat that as the errno it is -- otherwise the
+       trap rewinds elr and re-executes the same connect() forever (the
+       wave's pid-63 terminal stall). */
+    if (!caller || (caller->state != PROC_STATE_BLOCKED &&
+                    caller->state != PROC_STATE_READY)) {
+      tf->regs[0] = (uint64_t)(int64_t)-ENOENT;
+      return;
+    }
     if ((tf->cs & 3) == 3) {
       tf->elr -= 2; /* rewind over `syscall`: restart when woken */
     }
@@ -1065,6 +1170,44 @@ static void compat_writev(struct trap_frame *tf) {
     total += r;
     /* Short write: Linux stops here and returns the partial total, NOT the next
        segment (a reordered stream with a matching count would hide the loss). */
+    if ((uint64_t)r < len) { tf->regs[0] = (uint64_t)total; return; }
+  }
+  tf->regs[0] = (uint64_t)total;
+}
+
+/* GB-169: readv(19).  musl's stdio reads through readv(fd, iov, 2) — a buffered
+   file read is a two-segment iovec — so with no arm every fread() returned
+   -ENOSYS: DOOM opened doom1.wad and then rejected its magic ("doesn't have
+   IWAD or PWAD id") even though the same file read()s fine.  Mirrors
+   compat_writev's iovec walk and parked-pipe handling. */
+static void compat_readv(struct trap_frame *tf) {
+  struct process *c = current_process();
+  int fd = (int)tf->regs[5];
+  uint64_t iov = tf->regs[4];
+  long cnt = (long)tf->regs[3];
+  if (cnt < 0 || cnt > 1024) { tf->regs[0] = (uint64_t)(int64_t)-EINVAL; return; }
+  if (cnt == 0) { tf->regs[0] = 0; return; }
+  if (!sys_user_range_ok(iov, (uint64_t)cnt * 16)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+  int64_t total = 0;
+  for (long i = 0; i < cnt; i++) {
+    uint64_t base = 0, len = 0;
+    if (vm_user_read(c, iov + (uint64_t)i * 16, &base, 8) != 0 ||
+        vm_user_read(c, iov + (uint64_t)i * 16 + 8, &len, 8) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
+    }
+    if (len == 0) continue;
+    if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT;
+    if (!sys_user_range_ok(base, len)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+    int r = file_read(c, fd, (void *)(uintptr_t)base, (int)len, tf);
+    if (r == -2) {
+      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if ((tf->cs & 3) == 3) tf->elr -= 2;
+      save_context(c, tf);
+      schedule(tf, 0);
+      return;
+    }
+    if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : r); return; }
+    total += r;
     if ((uint64_t)r < len) { tf->regs[0] = (uint64_t)total; return; }
   }
   tf->regs[0] = (uint64_t)total;
@@ -1446,7 +1589,10 @@ static void sys_map_fb(struct trap_frame *tf) {
  * FBIOGET_VSCREENINFO/FSCREENINFO copy a Linux-layout struct OUT to arg
  * (validated first); FBIOBLANK takes a plain value (validated implicitly
  * by hb_fb_blank_ioctl).  Returns 0 | -1 (unknown request) | -EFAULT. */
-static void sys_fb_ioctl(struct trap_frame *tf) {
+/* GB-032: shared with the Linux-ABI ioctl arm in linux_compat_fd.c — that
+   dispatcher runs before this file's number-translation switch, so the FBIO
+   routing is called from both places. */
+void sys_fb_ioctl(struct trap_frame *tf) {
   unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
   void *arg = (void *)tf->regs[4];                    /* rsi */
   uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
@@ -1737,13 +1883,15 @@ static void sys_getdents64(struct trap_frame *tf) {
 static void sys_mkdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = current_process();
-  if (sys_user_range_ok((uint64_t)path, 1)) {
-    extern int file_mkdir(struct process *cur, const char *path);
-    int r = file_mkdir(caller, path);
-    tf->regs[0] = r < 0 ? -EEXIST : r;
-  } else {
-    tf->regs[0] = -EFAULT;
+  char kpath[256];
+  int plen = copy_user_path(path, kpath, sizeof kpath);
+  if (plen < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)plen;
+    return;
   }
+  extern int file_mkdir(struct process *cur, const char *path);
+  int r = file_mkdir(caller, kpath);
+  tf->regs[0] = r < 0 ? -EEXIST : r;
 }
 
 /* W2-14 (selfhost): SYS_RMDIR -- remove an EMPTY directory.  The kernel
@@ -1851,19 +1999,20 @@ static void sys_ftruncate(struct trap_frame *tf) {
 static void sys_stat(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5];  // rdi
   struct k_stat *st = (struct k_stat *)tf->regs[4];  // rsi
-  if (sys_user_range_ok((uint64_t)path, 1) &&
-      sys_user_range((uint64_t)st, sizeof(struct k_stat), 1)) {
-    struct process *caller = current_process();
-    int err = 0;
-    extern int file_stat_path(struct process *p, const char *path,
-                              struct k_stat *st, int *errp);
-    if (file_stat_path(caller, path, st, &err) == 0)
-      tf->regs[0] = 0;
-    else
-      tf->regs[0] = (uint64_t)(-err);
-  } else {
-    tf->regs[0] = -EFAULT;
+  char kpath[256];
+  int plen = copy_user_path(path, kpath, sizeof kpath);
+  if (plen < 0 || !sys_user_range((uint64_t)st, sizeof(struct k_stat), 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)(plen < 0 ? plen : -EFAULT);
+    return;
   }
+  struct process *caller = current_process();
+  int err = 0;
+  extern int file_stat_path(struct process *p, const char *path,
+                            struct k_stat *st, int *errp);
+  if (file_stat_path(caller, kpath, st, &err) == 0)
+    tf->regs[0] = 0;
+  else
+    tf->regs[0] = (uint64_t)(-err);
 }
 
 static void sys_fstat(struct trap_frame *tf) {
@@ -1883,13 +2032,121 @@ static void sys_fstat(struct trap_frame *tf) {
   }
 }
 
+/* GB-164: Linux-ABI stat family.  musl calls newfstatat(262) for stat()/lstat()
+   and fstat(5) for fstat(); the compat table had no arm for any of them, so a
+   musl program could open a file but never see its size (measured: DOOMW4's
+   IWAD search -> -ENOSYS -> "No IWAD file was found").  The kernel's k_stat is a
+   different, smaller shape than Linux x86_64's struct stat, so translate rather
+   than copy. */
+struct linux_stat_x64 {
+  uint64_t st_dev, st_ino, st_nlink;
+  uint32_t st_mode, st_uid, st_gid, __pad0;
+  uint64_t st_rdev, st_size, st_blksize, st_blocks;
+  int64_t st_atime_sec, st_atime_nsec;
+  int64_t st_mtime_sec, st_mtime_nsec;
+  int64_t st_ctime_sec, st_ctime_nsec;
+  int64_t __unused[3];
+};
+
+static void linux_stat_x64_fill(struct linux_stat_x64 *o, const struct k_stat *k) {
+  o->st_dev = k->st_dev;
+  o->st_ino = k->st_ino;
+  o->st_nlink = (uint64_t)k->st_nlink;
+  o->st_mode = k->st_mode;
+  o->st_uid = k->st_uid;
+  o->st_gid = k->st_gid;
+  o->__pad0 = 0;
+  o->st_rdev = k->st_rdev;
+  o->st_size = (uint64_t)k->st_size;
+  o->st_blksize = (uint64_t)k->st_blksize;
+  o->st_blocks = (uint64_t)k->st_blocks;
+  o->st_atime_sec = k->st_atime; o->st_atime_nsec = 0;
+  o->st_mtime_sec = k->st_mtime; o->st_mtime_nsec = 0;
+  o->st_ctime_sec = k->st_ctime; o->st_ctime_nsec = 0;
+  o->__unused[0] = o->__unused[1] = o->__unused[2] = 0;
+}
+
+static void compat_fstat(struct trap_frame *tf) {
+  int fd = (int)tf->regs[5];                                  /* rdi */
+  struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[4]; /* rsi */
+  if (!sys_user_range((uint64_t)out, sizeof *out, 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)(-EFAULT);
+    return;
+  }
+  struct k_stat k;
+  int err = 0;
+  extern int file_stat_fd(struct process *, int, struct k_stat *, int *);
+  if (file_stat_fd(current_process(), fd, &k, &err) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  linux_stat_x64_fill(out, &k);
+  tf->regs[0] = 0;
+}
+
+static void compat_stat_path(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[5];                /* rdi */
+  struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[4]; /* rsi */
+  char kpath[256];
+  int plen = copy_user_path(path, kpath, sizeof kpath);
+  if (plen < 0 || !sys_user_range((uint64_t)out, sizeof *out, 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)(plen < 0 ? plen : -EFAULT);
+    return;
+  }
+  struct k_stat k;
+  int err = 0;
+  extern int file_stat_path(struct process *, const char *, struct k_stat *, int *);
+  if (file_stat_path(current_process(), kpath, &k, &err) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  linux_stat_x64_fill(out, &k);
+  tf->regs[0] = 0;
+}
+
+/* newfstatat(dirfd, path, buf, flags): only AT_FDCWD (-100) is honoured; a
+   real dirfd is not used by musl's stat()/lstat()/fstatat() on a path string
+   here, and returning EBADF is honest for anything else. */
+static void compat_newfstatat(struct trap_frame *tf) {
+  int dirfd = (int)tf->regs[5];                                /* rdi */
+  const char *path = (const char *)tf->regs[4];                /* rsi */
+  struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[3]; /* rdx */
+  if (dirfd != -100) {                                         /* AT_FDCWD */
+    tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uintptr_t)path;
+  tf->regs[4] = (uint64_t)(uintptr_t)out;
+  compat_stat_path(tf);
+}
+
+/* GB-165: openat(dirfd, path, flags, mode).  The clang/musl-target build of
+   DOOMW4 reaches the kernel through openat(257), not open(2): 126 `mov $0x101`
+   sites in the ELF, none in a musl-gcc build of the same probe.  Only
+   AT_FDCWD is honoured (that is all musl's fopen passes); a real dirfd is
+   refused rather than silently resolved against the wrong directory. */
+static void compat_openat(struct trap_frame *tf) {
+  int dirfd = (int)tf->regs[5];                                  /* rdi */
+  const char *path = (const char *)tf->regs[4];                  /* rsi */
+  int flags = (int)tf->regs[3];                                  /* rdx */
+  if (dirfd != -100) {                                           /* AT_FDCWD */
+    tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uintptr_t)path;
+  tf->regs[4] = (uint64_t)(uintptr_t)(int64_t)flags;
+  compat_open(tf);
+}
+
 static void sys_chdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = process_group(current_process()); /* P1 (D7) */
-  if (caller && sys_user_range_ok((uint64_t)path, 1)) {
+  char kpath[256];
+  int plen = copy_user_path(path, kpath, sizeof kpath);
+  if (caller && plen >= 0) {
     extern int vfs_chdir(const char *path, char *out_new_cwd, int cap);
     char new_cwd[128];
-    if (vfs_chdir(path, new_cwd, sizeof new_cwd) == 0) {
+    if (vfs_chdir(kpath, new_cwd, sizeof new_cwd) == 0) {
       int k = 0;
       while (new_cwd[k] && k < 127) {
         caller->cwd[k] = new_cwd[k];
@@ -1901,7 +2158,7 @@ static void sys_chdir(struct trap_frame *tf) {
       tf->regs[0] = -ENOENT;
     }
   } else {
-    tf->regs[0] = -EFAULT;
+    tf->regs[0] = (uint64_t)(int64_t)(plen < 0 ? plen : -EFAULT);
   }
 }
 
@@ -2200,6 +2457,124 @@ static void sys_getenv(struct trap_frame *tf) {
  * addresses and calling them jumps to unloaded RAM — executing zeroes on
  * the first syscall).  Any added x64 syscall must append an else-if. */
 
+/* GB-018: Linux select(23) and pselect6(270) pass a struct timeval / struct
+ * timespec POINTER, while SYS_SELECT takes a millisecond count in r8.  Convert
+ * the pointer to milliseconds before handing the (unchanged) fd-set registers
+ * to sys_select().  A NULL pointer means "wait forever" (-1), matching Linux;
+ * a negative field is EINVAL; a usec/nsec field >= 1e6/1e9 is EINVAL; the
+ * timeout rounds UP to the next millisecond, as Linux does.
+ *
+ * pselect6's sixth argument (r9, a pointer to {sigmask, sigsetsize}) is not
+ * applied: the compat surface has no signal-mask swap, and the T4 probe passes
+ * an empty set.  That limitation is stated here rather than silently assumed. */
+static int compat_timeout_ms(uint64_t ptr, int is_timespec, int *err) {
+  struct process *c = current_process();
+  int64_t a = 0, b = 0;
+  *err = 0;
+  if (!ptr) return -1;
+  if (!c || !sys_user_range_ok(ptr, 16)) { *err = EFAULT; return 0; }
+  if (vm_user_read(c, ptr, &a, 8) != 0 ||
+      vm_user_read(c, ptr + 8, &b, 8) != 0) { *err = EFAULT; return 0; }
+  if (a < 0 || b < 0) { *err = EINVAL; return 0; }
+  if (is_timespec) {
+    if (b >= 1000000000LL) { *err = EINVAL; return 0; }
+    return (int)(a * 1000 + (b + 999999) / 1000000);
+  }
+  if (b >= 1000000LL) { *err = EINVAL; return 0; }
+  return (int)(a * 1000 + (b + 999) / 1000);
+}
+
+/* GB-168: musl's usleep() lands on nanosleep({sec,nsec}, rem).  The kernel's
+   sleep syscall (SYS_SLEEP) takes a millisecond count in rdi, so convert the
+   timespec and hand it over.  `rem` is left untouched: the call is not
+   restarted.  Without this arm usleep() returns -ENOSYS at once and the W4
+   tick loop busy-spins (DG_SleepMs was a no-op too). */
+static void compat_nanosleep(struct trap_frame *tf) {
+  uint64_t req = tf->regs[5];
+  int err = 0;
+  int ms = compat_timeout_ms(req, 1, &err);
+  if (err) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  if (ms <= 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uint32_t)ms;
+  tf->regs[0] = 0; /* Linux's nanosleep returns 0; sys_sleep's blocking path
+                      leaves rax holding the syscall number otherwise */
+  sys_sleep(tf);
+}
+
+/* GB-170: musl's nanosleep() — and therefore usleep() — does NOT use syscall
+   35.  Measured in the rebuilt musl DoomW4.elf: nanosleep() calls musl's
+   clock_nanosleep, whose body loads 0xe6 (230) into rax.  The compat table had
+   neither arm, so usleep() returned -ENOSYS instantly.  Convert the relative
+   form into the kernel's millisecond SYS_SLEEP; TIMER_ABSTIME is rejected
+   (SYS_SLEEP has no absolute deadline) and unknown clock ids are -EINVAL
+   rather than a silent wrong sleep. */
+static void compat_clock_nanosleep(struct trap_frame *tf) {
+  int clk = (int)tf->regs[5];        /* rdi: clockid */
+  int flags = (int)tf->regs[4];      /* rsi: flags   */
+  uint64_t req = tf->regs[3];        /* rdx: req     */
+  int err = 0;
+  if (flags & 1) { /* TIMER_ABSTIME */
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  /* CLOCK_REALTIME(0), CLOCK_MONOTONIC(1), CLOCK_BOOTTIME(4). */
+  if (clk != 0 && clk != 1 && clk != 4) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  int ms = compat_timeout_ms(req, 1, &err);
+  if (err) {
+    tf->regs[0] = (uint64_t)(int64_t)(-err);
+    return;
+  }
+  if (ms <= 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  tf->regs[5] = (uint64_t)(uint32_t)ms;
+  tf->regs[0] = 0; /* clock_nanosleep returns 0 on success (restart-safe) */
+  sys_sleep(tf);
+}
+
+static void compat_select(struct trap_frame *tf) {
+  int err = 0;
+  int ms = compat_timeout_ms(tf->regs[7], 0, &err);
+  if (err) { tf->regs[0] = (uint64_t)(int64_t)(-err); return; }
+  tf->regs[7] = (uint64_t)(int64_t)ms;
+  sys_select(tf);
+}
+
+static void compat_pselect6(struct trap_frame *tf) {
+  int err = 0;
+  int ms = compat_timeout_ms(tf->regs[7], 1, &err);
+  if (err) { tf->regs[0] = (uint64_t)(int64_t)(-err); return; }
+  tf->regs[7] = (uint64_t)(int64_t)ms;
+  sys_select(tf);
+}
+
+/* GB-148: musl's mkdir()/mkdirat() both use mkdirat(258) (dirfd, path, mode).
+ * HobbyOS SYS_MKDIR takes only (path) in rdi, so shift rsi -> rdi.  Only
+ * AT_FDCWD (-100) is supported: there is no per-directory fd resolution for
+ * mkdir on this surface, and a real dirfd answers -EBADF rather than silently
+ * creating the path relative to the process cwd.  mode is ignored by the FAT
+ * layer (existing behaviour of SYS_MKDIR). */
+static void compat_mkdirat(struct trap_frame *tf) {
+  int dirfd = (int)tf->regs[5];       /* rdi */
+  uint64_t path = tf->regs[4];        /* rsi */
+  if (dirfd != -100) {                /* AT_FDCWD */
+    tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
+    return;
+  }
+  tf->regs[5] = path;
+  sys_mkdir(tf);
+}
+
 /* Last syscall each core entered; 0 = not in a syscall.  A core wedged
    inside a syscall leaves this set, which the stall watchdog prints. */
 static volatile int core_in_syscall[MAX_CPUS];
@@ -2251,7 +2626,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     }
     pb[pi++] = '\n';
     pb[pi] = 0;
-    uart_puts_raw(pb);
+    panic_puts(pb);
     for (;;)
       ;
   }
@@ -2297,6 +2672,22 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   {
     struct process *lp = current_process();
     if (lp && (lp->abi_flags & PROC_FLAG_LINUX_ABI)) {
+      /* Compatibility-table dispatch (docs/linux-abi.md, src/include/
+         linux_compat.h): a subsystem handler that owns the number answers it
+         with LINUX semantics and writes tf->regs[0] itself.  The switch below
+         is the older number-translation path and stays as the fallback; a
+         handler that returns 0 means "not mine", not "fail". */
+      if (linux_compat_dispatch(lp, tf, syscall_num)) {
+        /* Linux delivers a signal raised BY a syscall at syscall exit, so the
+           frame the handler sees carries the syscall's return value in rax.
+           Returning straight to user mode skipped the leader's return-to-user
+           boundary below (the process_signal_trap_exit(tf) at the end of this
+           function), which deferred such a signal to the next 100 Hz tick --
+           measured by the proc lane as handler entry up to one tick late.  The
+           hook is a no-op unless a deliverable handler signal is pending. */
+        process_signal_trap_exit(tf);
+        return;
+      }
       switch (syscall_num) {
         case 0:  syscall_num = SYS_READ;  break;   /* read(fd, buf, n)   */
         case 1:  syscall_num = SYS_WRITE; break;   /* write(fd, buf, n)  */
@@ -2316,9 +2707,67 @@ void sync_lower_handler_c(struct trap_frame *tf) {
                             : (uint64_t)(int64_t)(-22);
           return;
         }
-        case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
+        case 2:  compat_open(tf);               return; /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
+        /* GB-165: lseek(8).  DOOM's W_AddFile seeks to the WAD directory; with
+           no arm the seek returned -ENOSYS and every lump lookup failed
+           ("W_GetNumForName: PNAMES not found!" at a WAD it had just opened).
+           Linux and HobbyOS agree on (fd, offset, whence). */
+        case 8:  syscall_num = SYS_LSEEK; break;   /* lseek(fd, off, wh) */
+        /* GB-169: fsync(74) on an /dev/fb0 fd presents the mapped surface — the
+           "commit" verb a framebuffer program needs, since the native path
+           (SYS_FLUSH_FB) is not reachable from a Linux-ABI process.  Any other
+           fd is a success no-op: there is no writeback cache to drain. */
+        case 74: {
+          extern int file_fd_is_devfb(struct process *, int);
+          if (file_fd_is_devfb(current_process(), (int)tf->regs[5]))
+            virtio_gpu_flush();
+          tf->regs[0] = 0;
+          return;
+        }
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
+        /* GB-021: musl pthread_create -> clone(2); pthread mutex/join ->
+           futex(2).  Both are Linux-shaped and handled directly (the clone
+           child must resume from the caller's frame, which no existing
+           kernel syscall number expresses). */
+        case 56:  compat_clone(tf); return;  /* clone(flags,stack,ptid,ctid,tls) */
+        case 202: compat_futex(tf); return;  /* futex(uaddr,op,val,ts*) */
+        /* GB-021: musl's pthread plumbing touches these; an ENOSYS return
+           pollutes the caller's errno even when the thread operation succeeds
+           (measured: tls_main_errno_untouched=38). */
+        case 186:                            /* gettid() -> this thread's pid */
+          tf->regs[0] = (uint64_t)(int64_t)(current_process() ? current_process()->pid : -1);
+          return;
+        case 228: syscall_num = SYS_GETTIME; break; /* clock_gettime(clk,ts) */
+        case 35:  compat_nanosleep(tf); return;    /* nanosleep(req, rem)   */
+        case 230: compat_clock_nanosleep(tf); return; /* clock_nanosleep(clk,fl,req,rem) */
+        case 100: {                          /* gettimeofday(timeval*, tz*) */
+          uint64_t tv = tf->regs[5];
+          uint32_t ms = (uint32_t)timer_get_ms();
+          if (!tv) { tf->regs[0] = 0; return; }
+          if (sys_user_range(tv, 16, 1) != 0) {
+            tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+            return;
+          }
+          ((volatile uint32_t *)tv)[0] = ms / 1000;
+          ((volatile uint32_t *)tv)[1] = (ms % 1000) * 1000;
+          tf->regs[0] = 0;
+          return;
+        }
+        case 24:  tf->regs[0] = 0; return;   /* sched_yield(): voluntary no-op */
+        case 273: tf->regs[0] = 0; return;   /* set_robust_list(): accepted, unused */
+        case 204: {                          /* sched_getaffinity(pid,len,mask) */
+          int len = (int)tf->regs[4];
+          uint64_t mask = tf->regs[3];
+          int n = len < 8 ? len : 8;
+          if (n > 0 && sys_user_range(mask, (uint64_t)n, 1) == 0) {
+            for (int i = 0; i < n; i++) ((volatile unsigned char *)mask)[i] = 0xFF;
+            tf->regs[0] = (uint64_t)n;
+          } else {
+            tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+          }
+          return;
+        }
         /* GB-141 (V evidence): musl's _Exit calls exit_group(231), not exit(60)
            when the program has a thread/group — the compat table had NO 231, so it
            fell to the default -ENOSYS and the probe "died inside _Exit" (GB-113
@@ -2328,6 +2777,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         /* GB-141 (V2 mechanism): musl stdio calls writev(20), not write — the compat
            table had no case 20, so every printf byte hit -ENOSYS. */
         case 20: compat_writev(tf); return;
+        /* GB-169: the read half — musl's fread() is readv(19) with a two-segment
+           iovec; without it a file opens but every buffered read fails, which is
+           how DOOM rejected a WAD it had just opened. */
+        case 19: compat_readv(tf); return;
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
         /* GB-019 clause 4: Linux fcntl(72)(fd, cmd, arg) SHARES file_fcntl with the
@@ -2340,6 +2793,74 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            from linux_fill_utsname() so the T2-pinned strings and the syscall
            can never drift apart. */
         case 63: sys_uname(tf); return;
+        /* GB-018: the pipe/poll/select/pselect6/socketpair block the T4 probe
+           measures.  Linux numbers: poll 7, pipe 22, select 23, socketpair 53,
+           pselect6 270, pipe2 293, getrandom 318.  poll/socketpair/pipe share
+           the HobbyOS argument order exactly (rdi/rsi/rdx/r10); select and
+           pselect6 need the timeout POINTER converted to the millisecond int
+           sys_select expects (compat_select/compat_pselect6).  pipe2 is mapped
+           for its flags=0 form (musl's pipe() always uses pipe2(fd, 0)); a
+           non-zero flags word is not applied yet and is recorded on GB-018. */
+        case 7:   syscall_num = SYS_POLL;       break;  /* poll(fds, n, ms) */
+        case 22:  syscall_num = SYS_PIPE;       break;  /* pipe(fds)        */
+        case 23:  compat_select(tf);            return; /* select(..., tv*) */
+        case 53:  syscall_num = SYS_SOCKETPAIR; break;  /* socketpair(...)  */
+        case 270: compat_pselect6(tf);          return; /* pselect6(..., ts*) */
+        case 293: syscall_num = SYS_PIPE;       break;  /* pipe2(fds, 0)    */
+        case 318: syscall_num = SYS_GETRANDOM;  break;  /* getrandom(...)   */
+        /* GB-183 (rebase of PR #255): the ten Linux-ABI numbers main still
+           lacked after GB-141/149/164/165/169/178 landed the rest.  Each
+           native handler already speaks this argument layout -- x64 syscall
+           args land rdi->regs[5], rsi->regs[4], rdx->regs[3], r10->regs[9] --
+           and returns -errno, so these are number translations, not shims.
+           The three that are not a bare register shuffle are called out:
+             fork(57): no args.  process_fork() returns the child pid in the
+               parent and 0 in the child (child->context[0] = 0), -EAGAIN on
+               failure -- exactly Linux fork semantics.
+             execve(59): rdi=path, rsi=argv, rdx=envp.  sys_exec() marshals
+               rdx into the group env blob (P5 D3.1/D3.5) before the load, so
+               the Linux layout maps 1:1; failure returns -errno.
+             wait4(61): rdi=pid, rsi=status, rdx=options, r10=rusage.
+               process_wait_args() takes all four (rusage in regs[9]) and
+               fills the 144-byte rusage on reap, so the order matches.
+           dup/dup2/getpid/getppid/kill/getcwd/chdir are the plain
+           (fd)/(old,new)/()/()/(pid,sig)/(buf,size)/(path) shapes. */
+        case 32:  syscall_num = SYS_DUP;       break;  /* dup(fd)              */
+        case 33:  syscall_num = SYS_DUP2;      break;  /* dup2(oldfd, newfd)   */
+        case 39:  syscall_num = SYS_GETPID;    break;  /* getpid()             */
+        case 57:  syscall_num = SYS_FORK;      break;  /* fork()               */
+        case 59:  syscall_num = SYS_EXEC;      break;  /* execve(path,argv,envp) */
+        case 61:  syscall_num = SYS_WAIT4;     break;  /* wait4(pid,st,opt,ru) */
+        case 62:  syscall_num = SYS_KILL;      break;  /* kill(pid, sig)       */
+        case 79:  syscall_num = SYS_GETCWD;    break;  /* getcwd(buf, size)    */
+        case 80:  syscall_num = SYS_CHDIR;     break;  /* chdir(path)          */
+        case 110: syscall_num = SYS_GETPPID;   break;  /* getppid()            */
+        /* GB-148: mkdir(83) is (path, mode) = rdi, rsi — SYS_MKDIR takes rdi.
+           mkdirat(258) is (dirfd, path, mode); musl uses it for BOTH mkdir and
+           mkdirat, so the dent block's mkdir() was -ENOSYS without this. */
+        case 83:  syscall_num = SYS_MKDIR;      break;  /* mkdir(path, mode) */
+        case 258: compat_mkdirat(tf);           return; /* mkdirat(dirfd, path, mode) */
+        /* GB-178: unlink(87) was not in the compat table at all, so the
+           bad-pointer probe saw -ENOSYS instead of -EFAULT.  rdi=path. */
+        case 87:  syscall_num = SYS_UNLINK;     break;  /* unlink(path)      */
+        /* GB-164: stat family.  musl's stat()/lstat() go through newfstatat(262)
+           with AT_FDCWD and fstat is 5; with no arm the caller gets -ENOSYS and
+           a file it can open still has no size (DOOMW4's IWAD search). */
+        case 4:   compat_stat_path(tf);         return; /* stat(path, buf)  */
+        case 6:   compat_stat_path(tf);         return; /* lstat (FAT: same) */
+        case 5:   compat_fstat(tf);             return; /* fstat(fd, buf)   */
+        case 262: compat_newfstatat(tf);        return; /* newfstatat(...)  */
+        /* GB-165: openat(257) — the clang/musl-target build of DOOMW4 uses it
+           for every fopen; without an arm its IWAD search could not open the
+           file that `open(2)` was happy to serve. */
+        case 257: compat_openat(tf);            return; /* openat(...)      */
+        /* GB-149: brk/mmap for the musl allocator.  SYS_MMAP is already the
+           6-arg Linux shape (sys_mmap6); SYS_BRK takes rdi.  Mapped here to
+           measure the guest's heap setup before committing to a fix. */
+        case 9:   syscall_num = SYS_MMAP;       break;  /* mmap(...)        */
+        case 11:  syscall_num = SYS_MUNMAP;     break;  /* munmap(addr,len) */
+        case 10:  syscall_num = SYS_MPROTECT;   break;  /* mprotect(...)    */
+        case 12:  syscall_num = SYS_BRK;        break;  /* brk(addr)        */
         /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
            =fd, regs[4]=rsi=request, regs[3]=rdx=arg.  This is a genuine dispatch on
            the request number, and every non-ENOTTY outcome is falsifiable:
@@ -2373,10 +2894,28 @@ void sync_lower_handler_c(struct trap_frame *tf) {
             tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY */
             return;
           }
+          /* GB-167: the FBIO family on /dev/fb0.  Only an fb node answers these;
+             any other fd keeps the honest ENOTTY.  sys_fb_ioctl() takes its
+             request/arg in rdi/rsi, so shuffle the Linux (fd, req, arg) into it. */
+          if (ireq == 0x4600 || ireq == 0x4601 || ireq == 0x4611) {
+            extern int file_fd_is_devfb(struct process *, int);
+            if (file_fd_is_devfb(c16, cfd)) {
+              tf->regs[5] = (uint64_t)(int64_t)ireq;
+              tf->regs[4] = iarg;
+              sys_fb_ioctl(tf);
+              return;
+            }
+            tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY: not an fb node */
+            return;
+          }
           tf->regs[0] = (uint64_t)(int64_t)(-25);       /* -ENOTTY: node lacks this request */
           return;
         }
         default:
+          /* Nothing owns this number: name it on the console once, then answer
+             -ENOSYS as Linux does.  Bring-up of a real Linux program is this
+             line plus the next handler, never a guess. */
+          linux_compat_unhandled(lp, syscall_num, tf->elr, tf->regs[5]);
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
       }
@@ -2422,6 +2961,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_input_ioctl(tf);
   } else if (syscall_num == SYS_INPUT_READ) {
     sys_input_read(tf);
+  } else if (syscall_num == SYS_EVDEV_PUSH) {
+    /* GB-173: desktop -> owner of /dev/input/event0 (rdi=code, rsi=value). */
+    extern int hb_evdev_push(unsigned short, int);
+    tf->regs[0] = (uint64_t)(int64_t)hb_evdev_push((unsigned short)tf->regs[5],
+                                                   (int)tf->regs[4]);
   } else if (syscall_num == SYS_AVAILABLE) {
     sys_available(tf);
   } else if (syscall_num == SYS_READ_DIR) {
@@ -2726,8 +3270,8 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   extern volatile uint64_t lock_wait_caller2[MAX_CPUS];
   /* Stall-watchdog prints must be able to diagnose a wedge in uart_lock
      itself, so they go out through the lock-free raw sink. */
-  extern void uart_puts_raw(const char *s);
-  extern void uart_print_hex_raw(uint64_t v);
+  extern void panic_puts(const char *s);
+  extern void panic_print_hex(uint64_t v);
   extern void print_int_raw(int val);
   extern volatile uint64_t cpu_heartbeat_ms[];
   struct process *cur = current_process();
@@ -2772,131 +3316,131 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     return;
   }
   wd_next_report_ms = now + WATCHDOG_COOLDOWN_MS;
-  uart_puts_raw("[WATCHDOG] console silent for more than 20s\n");
+  panic_puts("[WATCHDOG] console silent for more than 20s\n");
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
-    uart_puts_raw("  CPU");
+    panic_puts("  CPU");
     print_int_raw((int)c);
-    uart_puts_raw(" rip=");
-    uart_print_hex_raw(wd_last_seen_rip[c]);
-    uart_puts_raw(" rflags=");
-    uart_print_hex_raw(wd_last_seen_rflags[c]);
+    panic_puts(" rip=");
+    panic_print_hex(wd_last_seen_rip[c]);
+    panic_puts(" rflags=");
+    panic_print_hex(wd_last_seen_rflags[c]);
     if (wd_last_seen_pid[c] >= 0 && wd_last_vector[c] != 0) {
-      uart_puts_raw(" vec=");
+      panic_puts(" vec=");
       print_int_raw((int)wd_last_vector[c]);
-      uart_puts_raw(" err=");
-      uart_print_hex_raw(wd_last_err[c]);
+      panic_puts(" err=");
+      panic_print_hex(wd_last_err[c]);
       if (wd_last_cr2[c]) {
-        uart_puts_raw(" cr2=");
-        uart_print_hex_raw(wd_last_cr2[c]);
+        panic_puts(" cr2=");
+        panic_print_hex(wd_last_cr2[c]);
       }
     }
-    uart_puts_raw(" pid=");
+    panic_puts(" pid=");
     print_int_raw(wd_last_seen_pid[c]);
     /* GB-057: the resume mark the CPU itself wrote immediately before
        enter_user_space.  If this names a different pid than the watchdog's
        `pid=`, the RIP above is a stale trap frame and every "parked in the
        frame copy" conclusion drawn from it is an artefact. */
     if (resume_mark_pid[c] != 0) {
-      uart_puts_raw(" resume_pid=");
+      panic_puts(" resume_pid=");
       print_int_raw((int)resume_mark_pid[c]);
-      uart_puts_raw(" resume_sp=");
-      uart_print_hex_raw(resume_mark_sp[c]);
+      panic_puts(" resume_sp=");
+      panic_print_hex(resume_mark_sp[c]);
     }
-    uart_puts_raw(" age_ms=");
+    panic_puts(" age_ms=");
     print_int_raw((int)(now - wd_last_seen_ms[c]));
     if (core_in_syscall[c] != 0) {
-      uart_puts_raw(" syscall=");
+      panic_puts(" syscall=");
       print_int_raw(core_in_syscall[c]);
     }
     if (lock_wait_addr[c] != 0) {
-      uart_puts_raw(" wait_lock=");
-      uart_print_hex_raw(lock_wait_addr[c]);
-      uart_puts_raw(" caller=");
-      uart_print_hex_raw(lock_wait_caller[c]);
+      panic_puts(" wait_lock=");
+      panic_print_hex(lock_wait_addr[c]);
+      panic_puts(" caller=");
+      panic_print_hex(lock_wait_caller[c]);
       if (lock_wait_caller2[c] != 0) {
-        uart_puts_raw(" caller2=");
-        uart_print_hex_raw(lock_wait_caller2[c]);
+        panic_puts(" caller2=");
+        panic_print_hex(lock_wait_caller2[c]);
       }
     }
-    uart_puts_raw("\n");
+    panic_puts("\n");
   }
 
   /* Same dump on COM2 — a side-channel that never interleaves with the
      console, so the stall forensics come out byte-exact. */
-  extern void uart_puts_raw2(const char *s);
-  extern void uart_print_hex_raw2(uint64_t v);
+  extern void panic_puts2(const char *s);
+  extern void panic_print_hex2(uint64_t v);
   extern void print_int_raw2(int val);
   extern void wd_dump_proc_table(void);
-  uart_puts_raw2("[WD2] stall dump\n");
+  panic_puts2("[WD2] stall dump\n");
   wd_dump_proc_table();
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
-    uart_puts_raw2(" CPU");
+    panic_puts2(" CPU");
     print_int_raw2((int)c);
-    uart_puts_raw2(" rip=");
-    uart_print_hex_raw2(wd_last_seen_rip[c]);
-    uart_puts_raw2(" pid=");
+    panic_puts2(" rip=");
+    panic_print_hex2(wd_last_seen_rip[c]);
+    panic_puts2(" pid=");
     print_int_raw2(wd_last_seen_pid[c]);
-    uart_puts_raw2(" tks=");
+    panic_puts2(" tks=");
     print_int_raw2((int)wd_ticks[c]);
-    uart_puts_raw2(" cs=");
-    uart_print_hex_raw2(wd_last_frame[c].cs);
-    uart_puts_raw2(" fl=");
-    uart_print_hex_raw2(wd_last_frame[c].spsr);
-    uart_puts_raw2(" age=");
+    panic_puts2(" cs=");
+    panic_print_hex2(wd_last_frame[c].cs);
+    panic_puts2(" fl=");
+    panic_print_hex2(wd_last_frame[c].spsr);
+    panic_puts2(" age=");
     print_int_raw2((int)(now - wd_last_seen_ms[c]));
-    uart_puts_raw2(" vec=");
+    panic_puts2(" vec=");
     print_int_raw2((int)wd_last_frame[c].vector);
     if (lock_wait_addr[c] != 0) {
-      uart_puts_raw2(" wl=");
-      uart_print_hex_raw2(lock_wait_addr[c]);
-      uart_puts_raw2(" cl=");
-      uart_print_hex_raw2(lock_wait_caller[c]);
+      panic_puts2(" wl=");
+      panic_print_hex2(lock_wait_addr[c]);
+      panic_puts2(" cl=");
+      panic_print_hex2(lock_wait_caller[c]);
       if (lock_wait_caller2[c] != 0) {
-        uart_puts_raw2(" c2=");
-        uart_print_hex_raw2(lock_wait_caller2[c]);
+        panic_puts2(" c2=");
+        panic_print_hex2(lock_wait_caller2[c]);
       }
     }
-    uart_puts_raw2("\n");
+    panic_puts2("\n");
     /* Full frame regs from the stored last frame (the mapping of
        regs[0..9] := rax..r9 as pushed by the trap wrapper). */
-    uart_puts_raw2("   fr:");
+    panic_puts2("   fr:");
     for (int r = 0; r < 10; r++) {
-      uart_puts_raw2(" ");
-      uart_print_hex_raw2(wd_last_frame[c].regs[r]);
+      panic_puts2(" ");
+      panic_print_hex2(wd_last_frame[c].regs[r]);
     }
-    uart_puts_raw2("\n");
+    panic_puts2("\n");
     /* The last interrupt's kernel stack region (below the frame) — the
        caller chain of what the core was actually executing. */
     uint64_t frp = wd_last_tfp[c];
-    uart_puts_raw2("  deep:");
+    panic_puts2("  deep:");
     if (frp >= 0x70000000ULL && frp < 0x75000000ULL) {
       for (uint64_t a = frp + 8; a < frp + 8 + 96; a += 8) {
         uint64_t v = *(volatile uint64_t *)a;
-        uart_puts_raw2(" ");
-        uart_print_hex_raw2(v);
+        panic_puts2(" ");
+        panic_print_hex2(v);
       }
     }
-    uart_puts_raw2("\n");
+    panic_puts2("\n");
     /* Full stack chain: every .text return address, deepest first.
        Guard against cores that never powered on (kernel_stack == 0): the
        loop start (top - 8) would dereference negative addresses and fault
        the very watchdog that is supposed to report the stall. */
     uint64_t top = cpu_locals[c].kernel_stack;
     int hits = 0;
-    uart_puts_raw2("  stk");
+    panic_puts2("  stk");
     print_int_raw2((int)c);
-    uart_puts_raw2(":");
+    panic_puts2(":");
     if (watchdog_stack_scan_ok(top)) {
       for (uint64_t a = top - 8; a > (top - 24576) && hits < 20; a -= 8) {
         uint64_t v = *(volatile uint64_t *)a;
         if (v >= 0x70000000ULL && v < 0x70080000ULL) {
-          uart_puts_raw2(" ");
-          uart_print_hex_raw2(v);
+          panic_puts2(" ");
+          panic_print_hex2(v);
           hits++;
         }
       }
     }
-    uart_puts_raw2("\n");
+    panic_puts2("\n");
   }
 
   /* Deep-freeze forensics: for any core silent >60s, scan its kernel stack for
@@ -2908,37 +3452,37 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     /* Same guard as the WD2 stall dump: a core that never powered on has
        kernel_stack == 0, and the scan below would read (top - 8) = -8. */
     if (!watchdog_stack_scan_ok(top)) {
-      uart_puts_raw("  CSTK cpu");
+      panic_puts("  CSTK cpu");
       print_int_raw((int)c);
-      uart_puts_raw(": (uninitialized kstack, skip)\n");
+      panic_puts(": (uninitialized kstack, skip)\n");
       continue;
     }
     uint64_t last_hit = 0;
     int hits = 0;
-    uart_puts_raw("  CSTK cpu");
+    panic_puts("  CSTK cpu");
     print_int_raw((int)c);
-    uart_puts_raw(":");
+    panic_puts(":");
     for (uint64_t a = top - 8; a > (top - 24576) && hits < 16; a -= 8) {
       uint64_t v = *(volatile uint64_t *)a;
       if (v >= 0x70000000ULL && v < 0x70080000ULL) {
-        uart_puts_raw(" ");
-        uart_print_hex_raw(v);
+        panic_puts(" ");
+        panic_print_hex(v);
         last_hit = a;
         hits++;
       }
     }
-    uart_puts_raw("\n");
+    panic_puts("\n");
     if (last_hit) {
-      uart_puts_raw("  CDATA cpu");
+      panic_puts("  CDATA cpu");
       print_int_raw((int)c);
-      uart_puts_raw(" cur~=");
-      uart_print_hex_raw(last_hit);
-      uart_puts_raw(":");
+      panic_puts(" cur~=");
+      panic_print_hex(last_hit);
+      panic_puts(":");
       for (int q = 0; q < 12; q++) {
-        uart_puts_raw(" ");
-        uart_print_hex_raw(*(volatile uint64_t *)(last_hit + 8 * q));
+        panic_puts(" ");
+        panic_print_hex(*(volatile uint64_t *)(last_hit + 8 * q));
       }
-      uart_puts_raw("\n");
+      panic_puts("\n");
     }
   }
 }
@@ -2992,13 +3536,6 @@ static void fl_dec(struct fl_buf *f, int v) {
 static void general_interrupt_inner(struct trap_frame *tf);
 
 void general_interrupt_handler(struct trap_frame *tf) {
-  /* GB-147: count every entry that came through an exception stub.  The
-     syscall path (vector 0x80) builds its frame in syscall_entry and has no
-     stub snapshot, so it is excluded — every stub entry must have exactly
-     one snapshot, and snap_count == fault_count is the invariant the dump
-     reports. */
-  if (tf->vector != 0x80)
-    cpu_locals[get_cpuid()].fault_count++;
 #ifdef KERNEL_MODE_UNIT_TEST
   extern void lockdbg_irq_enter(void);
   extern void lockdbg_irq_exit(void);
@@ -3032,26 +3569,26 @@ static void general_interrupt_inner(struct trap_frame *tf) {
      CPU held is recoverable and other cores don't spin behind it forever), and
      stop THIS CPU rather than run an unknown-vector path on a bogus frame. */
   {
-    extern void uart_puts_raw(const char *s);
-    extern void uart_print_hex_raw(uint64_t v);
+    extern void panic_puts(const char *s);
+    extern void panic_print_hex(uint64_t v);
     extern void print_int_raw(int val);
     extern void cpu_halt_record(uint32_t cpu);
     uint64_t frame_cs = tf->cs;
     int bad_vec = ((uint64_t)tf->vector > 0xFFu);
     int bad_cs  = (frame_cs != 0x08u && frame_cs != 0x1Bu);
     if (bad_vec || bad_cs) {
-      uart_puts_raw("[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=");
+      panic_puts("[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=");
       print_int_raw((int)(uint64_t)tf->vector);
-      uart_puts_raw(" rip="); uart_print_hex_raw((uint64_t)tf->elr);
-      uart_puts_raw(" cs=");   uart_print_hex_raw(frame_cs);
-      uart_puts_raw(" (impossible vector="); print_int_raw((int)(uint64_t)tf->vector);
-      uart_puts_raw(" or invalid cs; a real gate entry pushes cs 0x08/0x1B\n");
-      uart_puts_raw("\n");
+      panic_puts(" rip="); panic_print_hex((uint64_t)tf->elr);
+      panic_puts(" cs=");   panic_print_hex(frame_cs);
+      panic_puts(" (impossible vector="); print_int_raw((int)(uint64_t)tf->vector);
+      panic_puts(" or invalid cs; a real gate entry pushes cs 0x08/0x1B\n");
+      panic_puts("\n");
       cpu_halt_record(cpu);
       extern int spinlock_release_if_held_by_me(spinlock_t *lock);
       extern spinlock_t proc_lock;
       if (spinlock_release_if_held_by_me(&proc_lock))
-        uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
+        panic_puts("[KERNEL] released proc_lock before halting (GB-060)\n");
       while (1);
     }
   }
@@ -3073,6 +3610,12 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       // Broadcast rescheduling IPI (vector 0x81) to all other cores.
       // Bit 14 stays clear: it is defined for level-triggered delivery only.
       *(volatile uint32_t*)(0xFEE00300) = 0x000C0081;
+#ifdef PANIC_IPI_TEST
+      /* GB-207: fire the two-CPU panic injection once the wave is running
+         (a secondary sits in an IF=0 wait before there is a process). */
+      extern void gb207_tick(void);
+      gb207_tick();
+#endif
     }
 
     // Per-core LVT-timer ticks arrive here too; always release the LAPIC.
@@ -3144,6 +3687,14 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     lapic_send_eoi();
     extern void vm_x64_shootdown_handler(void);
     vm_x64_shootdown_handler();
+#ifdef PANIC_IPI_TEST
+  } else if (tf->vector == 0x83) {
+    // GB-207: test-only two-CPU panic injection.  EOI first (LAPIC-delivered),
+    // then the claim/record path in uart.c; absent from default kernels.
+    lapic_send_eoi();
+    extern void gb207_ipi_handler(void);
+    gb207_ipi_handler();
+#endif
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
@@ -3155,10 +3706,15 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
       int pf_w = (int)(tf->error_code & 2);
       int pf_x = (int)((tf->error_code >> 4) & 1);
-      int pf_present = (int)(tf->error_code & 1);
       const char *why = "PROT";
-      if (!pf_present &&
-          vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why) == 0) {
+      /* A present page can still fault legally: a MAP_PRIVATE file page is
+         installed read-only so the first write copies it (so-vm lane A), and
+         a just-mapped page can race the TLB.  vm_handle_fault distinguishes
+         those from a real protection violation and answers "PROT" for the
+         latter, so both classes go through it now — the old !pf_present gate
+         sent every COW write straight to the kill path (measured: the
+         interpreter's first relocation write to LIBC.SO). */
+      if (vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why) == 0) {
         return; /* mapping is live; iretq re-executes the instruction */
       }
       {
@@ -3269,71 +3825,80 @@ static void general_interrupt_inner(struct trap_frame *tf) {
          may be garbage, so the stack window below is range-guarded: an
          unchecked dereference of tf[38] was itself faulting (#PF -> #DF
          -> CPU reset) before the dump could finish. */
-      extern void uart_puts_raw(const char *s);
-      extern void uart_print_hex_raw(uint64_t v);
+      extern void panic_puts(const char *s);
+      extern void panic_print_hex(uint64_t v);
       extern void print_int_raw(int val);
-      uart_puts_raw("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
+      extern int panic_claim(void);
+      extern void panic_leave(void);
+      if (!panic_claim()) {
+        /* GB-204: another CPU owns the fatal record.  Count the drop (done in
+           panic_claim), write nothing, and stop this CPU rather than
+           interleave fields into the one record. */
+        for (;;) __asm__ volatile("hlt");
+      }
+      panic_puts("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
       print_int_raw((int)tf->vector);
-      uart_puts_raw(" Error Code: ");
-      uart_print_hex_raw(tf->error_code);
-      uart_puts_raw("\n");
-      uart_puts_raw("  RIP: ");
-      uart_print_hex_raw(tf->elr);
-      uart_puts_raw("  RSP: ");
-      uart_print_hex_raw(((uint64_t*)tf)[38]);
-      uart_puts_raw("\n");
-      uart_puts_raw("  CS:  ");
-      uart_print_hex_raw(tf->cs);
-      uart_puts_raw("  SS:  ");
-      uart_print_hex_raw(tf->ss);
-      uart_puts_raw("  RFLAGS: ");
-      uart_print_hex_raw(tf->spsr);
-      uart_puts_raw("\n");
-      uart_puts_raw("  RAX: ");
-      uart_print_hex_raw(tf->regs[0]);
-      uart_puts_raw("  RBX: ");
-      uart_print_hex_raw(tf->regs[1]);
-      uart_puts_raw("  RCX: ");
-      uart_print_hex_raw(tf->regs[2]);
-      uart_puts_raw("  RDX: ");
-      uart_print_hex_raw(tf->regs[3]);
-      uart_puts_raw("\n");
-      uart_puts_raw("  RDI: ");
-      uart_print_hex_raw(tf->regs[5]);
-      uart_puts_raw("  RSI: ");
-      uart_print_hex_raw(tf->regs[4]);
-      uart_puts_raw("  RBP: ");
-      uart_print_hex_raw(tf->regs[6]);
-      uart_puts_raw("\n");
-      uart_puts_raw("  ERR: ");
-      uart_print_hex_raw(tf->error_code);
-      uart_puts_raw("  R8:  ");
-      uart_print_hex_raw(tf->regs[7]);
-      uart_puts_raw("  R9:  ");
-      uart_print_hex_raw(tf->regs[8]);
-      uart_puts_raw("  R10: ");
-      uart_print_hex_raw(tf->regs[9]);
-      uart_puts_raw("\n");
-      uart_puts_raw("  CPU: ");
+      panic_puts(" Error Code: ");
+      panic_print_hex(tf->error_code);
+      panic_puts("\n");
+      panic_puts("  RIP: ");
+      panic_print_hex(tf->elr);
+      panic_puts("  RSP: ");
+      panic_print_hex(((uint64_t*)tf)[38]);
+      panic_puts("\n");
+      panic_puts("  CS:  ");
+      panic_print_hex(tf->cs);
+      panic_puts("  SS:  ");
+      panic_print_hex(tf->ss);
+      panic_puts("  RFLAGS: ");
+      panic_print_hex(tf->spsr);
+      panic_puts("\n");
+      panic_puts("  RAX: ");
+      panic_print_hex(tf->regs[0]);
+      panic_puts("  RBX: ");
+      panic_print_hex(tf->regs[1]);
+      panic_puts("  RCX: ");
+      panic_print_hex(tf->regs[2]);
+      panic_puts("  RDX: ");
+      panic_print_hex(tf->regs[3]);
+      panic_puts("\n");
+      panic_puts("  RDI: ");
+      panic_print_hex(tf->regs[5]);
+      panic_puts("  RSI: ");
+      panic_print_hex(tf->regs[4]);
+      panic_puts("  RBP: ");
+      panic_print_hex(tf->regs[6]);
+      panic_puts("\n");
+      panic_puts("  ERR: ");
+      panic_print_hex(tf->error_code);
+      panic_puts("  R8:  ");
+      panic_print_hex(tf->regs[7]);
+      panic_puts("  R9:  ");
+      panic_print_hex(tf->regs[8]);
+      panic_puts("  R10: ");
+      panic_print_hex(tf->regs[9]);
+      panic_puts("\n");
+      panic_puts("  CPU: ");
       print_int_raw((int)get_cpuid());
       struct process *curproc = current_process();
-      uart_puts_raw("  pid: ");
+      panic_puts("  pid: ");
       print_int_raw(curproc ? curproc->pid : -1);
-      uart_puts_raw("\n");
+      panic_puts("\n");
       /* Raw stack window: even when RIP is garbage, the return addresses
          on the stack tell where the fault came from. */
       uint64_t fsp = ((uint64_t*)tf)[38];
       if (fsp >= 0x00000000ULL && fsp < 0x80000000ULL) {
         for (int si = 0; si < 16; si++) {
-          uart_puts_raw("  STACK[");
+          panic_puts("  STACK[");
           print_int_raw(si);
-          uart_puts_raw("]: ");
-          uart_print_hex_raw(((volatile uint64_t *)fsp)[si]);
-          uart_puts_raw("\n");
+          panic_puts("]: ");
+          panic_print_hex(((volatile uint64_t *)fsp)[si]);
+          panic_puts("\n");
         }
       } else {
-        uart_puts_raw("  STACK: skipped (RSP outside identity-mapped RAM)\n");
+        panic_puts("  STACK: skipped (RSP outside identity-mapped RAM)\n");
       }
+      panic_leave(); /* GB-097: the dump is over; anything after here returns */
       /* WK-3 (draft 0007, x64 mirror of the ARM EL1 fix): a kernel-mode
          #PF (vector 14) whose faulting address references USER address
          space while a process is current is normally the process's bug
@@ -3375,15 +3940,15 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           }
           int kpf_looping = (kpf_n > 8);
           if (kpf_n == 9) {
-            uart_puts_raw("[KPFLOOP] kernel-mode #PF repeating: cpu=");
+            panic_puts("[KPFLOOP] kernel-mode #PF repeating: cpu=");
             print_int_raw((int)kc);
-            uart_puts_raw(" cr2=");
-            uart_print_hex_raw(kcr2);
-            uart_puts_raw(" rip=");
-            uart_print_hex_raw(tf->elr);
-            uart_puts_raw(" pid=");
+            panic_puts(" cr2=");
+            panic_print_hex(kcr2);
+            panic_puts(" rip=");
+            panic_print_hex(tf->elr);
+            panic_puts(" pid=");
             print_int_raw(cur ? (int)cur->pid : -1);
-            uart_puts_raw(" -> killing, the mapping is not advancing\n");
+            panic_puts(" -> killing, the mapping is not advancing\n");
           }
           if (cur->as && !kpf_looping) {
             /* vm_handle_fault may do device I/O; the write-fallback to a
@@ -3438,10 +4003,9 @@ static void general_interrupt_inner(struct trap_frame *tf) {
               return; /* PTE live; iretq retries the faulting instruction */
             }
           }
-          uart_puts_raw("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
+          panic_puts("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
           print_int_raw(cur->pid);
-          uart_puts_raw("\n");
-          gb147_framesnap(tf, "user-pf");
+          panic_puts("\n");
           process_fault_exit(tf, 11); /* SIGSEGV status byte */
           /* process_fault_exit -> process_exit -> schedule() never
              returns (it resumes another process or idles forever). */
@@ -3457,17 +4021,17 @@ static void general_interrupt_inner(struct trap_frame *tf) {
          The raw sink takes no lock (it cannot deadlock the console it is
          reporting on), so this costs nothing on the happy path and names the
          fault for whoever reads the log next. */
-      uart_puts_raw("[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=");
+      panic_puts("[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=");
       print_int_raw((int)tf->vector);
-      uart_puts_raw(" rip=");
-      uart_print_hex_raw((uint64_t)tf->elr);
-      uart_puts_raw(" cr2=");
+      panic_puts(" rip=");
+      panic_print_hex((uint64_t)tf->elr);
+      panic_puts(" cr2=");
       {
         uint64_t fatal_cr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(fatal_cr2));
-        uart_print_hex_raw(fatal_cr2);
+        panic_print_hex(fatal_cr2);
       }
-      uart_puts_raw(" pid=");
+      panic_puts(" pid=");
       print_int_raw(cur ? cur->pid : -1);
       /* GB-069 discriminator: a #PF at cr2=0x1FC001008 lands INSIDE the 2 MiB page
          cpu_pd7[480] installs (0x9B = P|RW|PWT|PCD|PS, VA 0x1FC000000-0x1FDFFFFF), so
@@ -3475,21 +4039,20 @@ static void general_interrupt_inner(struct trap_frame *tf) {
          PD-entry reuse, a wrong CR3, and a protection fault; these fields name which.
          err bit0=P (0 = not present), bit1=W/R, bit2=U/S.  pd480 should still equal
          (phys|0x9B) for the BAR page to exist in this table. */
-      uart_puts_raw(" err=");
+      panic_puts(" err=");
       print_int_raw((int)(tf->error_code & 7));
-      uart_puts_raw(" cr3=");
+      panic_puts(" cr3=");
       {
         uint64_t fatal_cr3;
         __asm__ volatile("mov %%cr3, %0" : "=r"(fatal_cr3));
-        uart_print_hex_raw(fatal_cr3);
+        panic_print_hex(fatal_cr3);
       }
-      uart_puts_raw(" pd480=");
+      panic_puts(" pd480=");
       {
         extern uint64_t cpu_pd7[512];
-        uart_print_hex_raw(cpu_pd7[480]);
+        panic_print_hex(cpu_pd7[480]);
       }
-      uart_puts_raw("\n");
-      gb147_framesnap(tf, "fatal");
+      panic_puts("\n");
       /* GB-060: same rule as the resume-return halt -- if this CPU is holding
          proc_lock, give it back before stopping, so the survivors are not left
          spinning behind a CPU that will never run again.  Only if the lock
@@ -3499,7 +4062,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         extern int spinlock_release_if_held_by_me(spinlock_t *lock);
         extern spinlock_t proc_lock;
         if (spinlock_release_if_held_by_me(&proc_lock))
-          uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
+          panic_puts("[KERNEL] released proc_lock before halting (GB-060)\n");
       }
       /* GB-060: and record the halt, so a CPU waiting on any OTHER lock this one
          still holds can take it over rather than spinning behind a stopped core
@@ -3622,6 +4185,10 @@ void trap_init_core_with_id(uint32_t cpu) {
   cpu_locals[cpu].kernel_stack = (uint64_t)&__stack_top - (cpu * 64 * 1024) - 4096;
   cpu_locals[cpu].cpu_id = cpu;
   cpu_locals[cpu].current_proc = 0;
+  /* GB-152: mark this core as having run init, so the unit suite measures the
+     cores that exist instead of hardcoding four.  AP bring-up is sequential
+     (0, 1, 2, ...), so smp_init_count() also bounds the id range it asserts. */
+  cpu_locals[cpu].initialized = 1;
 
   /* F1.5: x87/SSE enable is per-core (CR0/CR4).  This runs on the boot core
      from mmu_init() and on every AP from secondary_main(), always before
@@ -3656,6 +4223,17 @@ void trap_init_core(void) {
   trap_init_core_with_id(get_cpuid());
 }
 
+/* GB-152: how many cores have actually run trap_init_core_with_id.  The T2
+ * suite runs before the scheduler, so on a 1-CPU run this is 1 — the old test
+ * hardcoded four and asserted cpu_id == i for cores that had not been brought
+ * up, which is the red baseline this card fixes. */
+uint32_t smp_init_count(void) {
+  uint32_t n = 0;
+  for (uint32_t i = 0; i < MAX_CPUS; i++)
+    if (cpu_locals[i].initialized) n++;
+  return n;
+}
+
 void syscall_init(void) {
   // 1. Enable SCE in EFER (bit 0)
   uint32_t low, high;
@@ -3680,45 +4258,12 @@ void syscall_init(void) {
 }
 
 // Exception assembly entries
-/* GB-147: at the first instruction of the stub, copy the CPU-pushed frame
-   (RIP, CS, RFLAGS, and RSP/SS when the CPU pushed them) into this CPU's
-   slot.  rax is the only register touched and it is restored before the
-   stub's own pushes.  base = distance from [rsp] to RIP after push rax:
-   8 for a no-error exception, 16 when the CPU pushed an error code. */
-#define FRAMESNAP_ASM(base) \
-        "    push rax\n" \
-        "    mov rax, [rsp + " #base "]\n" \
-        "    mov gs:[48], rax\n" \
-        "    mov rax, [rsp + " #base " + 8]\n" \
-        "    mov gs:[56], rax\n" \
-        "    mov rax, [rsp + " #base " + 16]\n" \
-        "    mov gs:[64], rax\n" \
-        "    mov rax, [rsp + " #base " + 8]\n" \
-        "    test rax, 3\n" \
-        "    jz 1f\n" \
-        "    mov rax, [rsp + " #base " + 24]\n" \
-        "    mov gs:[72], rax\n" \
-        "    mov rax, [rsp + " #base " + 32]\n" \
-        "    mov gs:[80], rax\n" \
-        "    jmp 2f\n" \
-        "1:\n" \
-        "    mov qword ptr gs:[72], 0\n" \
-        "    mov qword ptr gs:[80], 0\n" \
-        "2:\n" \
-        "    mov rax, 1\n" \
-        "    mov gs:[88], rax\n" \
-        "    mov rax, gs:[96]\n" \
-        "    inc rax\n" \
-        "    mov gs:[96], rax\n" \
-        "    pop rax\n"
-
 #define EXCEPTION_NO_ERR(num) \
     extern void exception_##num(void); \
     __asm__( \
         ".intel_syntax noprefix\n" \
         ".global exception_" #num "\n" \
         "exception_" #num ":\n" \
-        FRAMESNAP_ASM(8) \
         "    push 0\n" \
         "    push " #num "\n" \
         "    jmp common_trap_wrapper\n" \
@@ -3731,7 +4276,6 @@ void syscall_init(void) {
         ".intel_syntax noprefix\n" \
         ".global exception_" #num "\n" \
         "exception_" #num ":\n" \
-        FRAMESNAP_ASM(16) \
         "    push " #num "\n" \
         "    jmp common_trap_wrapper\n" \
         ".att_syntax prefix\n" \
@@ -3769,6 +4313,9 @@ EXCEPTION_NO_ERR(47);
 EXCEPTION_NO_ERR(129); // 0x81
 // P2.2 (S2/OQ5): TLB shootdown IPI
 EXCEPTION_NO_ERR(130); // 0x82
+#ifdef PANIC_IPI_TEST
+EXCEPTION_NO_ERR(131); // 0x83 (GB-207 two-CPU panic-injection vehicle)
+#endif
 
 __asm__(
 ".intel_syntax noprefix\n"
@@ -4133,4 +4680,8 @@ void trap_init(void) {
   idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);
   // P2.2 (S2): TLB shootdown IPI on vector 0x82 (kernel-only gate, 0x8E).
   idt_set_gate(130, (uint64_t)exception_130, 0x08, 0x8E);
+#ifdef PANIC_IPI_TEST
+  // GB-207: test vehicle vector 0x83 (kernel-only gate, 0x8E).
+  idt_set_gate(131, (uint64_t)exception_131, 0x08, 0x8E);
+#endif
 }

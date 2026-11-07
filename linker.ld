@@ -25,6 +25,17 @@ SECTIONS
     }
 
     /* Initialized data section */
+    /* Const tables of pointers need their relocations at load time.  Without
+     * these output sections the linker drops them and a PIE kernel reads a
+     * table of NULLs (measured: the DYN_TEST name list on aarch64). */
+    .data.rel.ro :
+    {
+        *(.data.rel.ro)
+        *(.data.rel.ro.*)
+        *(.data.rel.local)
+        *(.data.rel.local.*)
+    }
+
     .data :
     {
         *(.data)
