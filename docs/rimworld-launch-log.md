@@ -9645,7 +9645,7 @@ sticky region, and that the retry costs **zero** device sectors.
 | f1 | **1800 s** | 0 | **0 / 0** | none | **277 529 012** (264.67 MiB) | 260 | load complete; the §51.4 post-load park (alive, `res_mib` 1 926) |
 | f2 | 510 s | 1 | 0 / 1 | none | 221 036 013 | 240 | runtime `g_assert` → SIGABRT (`x86-codegen.h:403`), message lost to a NUL hole `[FATW] ZERORD sector=657286` |
 | f3 | 470 s | 6 | 1 / 0 | none | 263 653 604 | 190 | `[TXT] UNVERIFIED off=0x757000 n0=0` (0-byte read, chain/metadata) after reset #1 → EIO → SIGBUS |
-| f4 | see the report | | | | | | carries the `read_fat` two-read verification |
+| f4 | 460 s | 1 | 0 / 1 | none | 229 367 841 | 230 | `read_fat` reads every FAT sector raw and twice; the only refusal left is the launcher's exit-path image page, where the device itself returns zeros twice |
 
 The windows that matter for this lane's question are f1 (nothing but time on the
 clock: 1800 s, the full 277.5 MB load, **zero** refusals of any kind, zero

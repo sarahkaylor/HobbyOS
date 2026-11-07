@@ -268,9 +268,12 @@ static uint16_t read_fat(uint16_t cluster) {
     uint8_t chk[SECTOR_SIZE];
     int ok = 0;
     for (int attempt = 0; attempt < 3 && !ok; attempt++) {
-      if (virtio_blk_read_sector(sector, fat_cache_fill, 1) != 0)
+      /* RAW, not the block cache: a metadata read must never be served from a
+         frame an aborted DMA can poison, and a poisoned FAT sector is a wrong
+         cluster for the rest of the walk. */
+      if (virtio_blk_read_raw(sector, fat_cache_fill, 1) != 0)
         continue;
-      if (virtio_blk_read_sector(sector, chk, 1) != 0)
+      if (virtio_blk_read_raw(sector, chk, 1) != 0)
         continue;
       ok = 1;
       for (int i = 0; i < SECTOR_SIZE; i++)
@@ -305,7 +308,20 @@ static void write_fat(uint16_t cluster, uint16_t val) {
   }
   spinlock_release(&fat_cache_lock);
   if (!cached) {
-    virtio_blk_read_sector(sector, buf, 1);
+    /* Same rule as read_fat: metadata never comes from the page cache. */
+    uint8_t chk2[SECTOR_SIZE];
+    int ok2 = 0;
+    for (int attempt = 0; attempt < 3 && !ok2; attempt++) {
+      if (virtio_blk_read_raw(sector, buf, 1) != 0)
+        continue;
+      if (virtio_blk_read_raw(sector, chk2, 1) != 0)
+        continue;
+      ok2 = 1;
+      for (int i = 0; i < SECTOR_SIZE; i++)
+        if (buf[i] != chk2[i]) { ok2 = 0; break; }
+    }
+    if (!ok2)
+      return; /* never stamp a sector we could not read */
   }
 
   uint8_t* p = buf + (offset % SECTOR_SIZE);
