@@ -68,6 +68,10 @@ volatile uint32_t nfs_perf_pump_hits;    /* ... that produced a datagram    */
  * only flipped by hand for a measurement run. */
 volatile int nfs_perf_legacy = 0;   /* L35: fixed transport */
 
+/* L76: LOOKUP components retried after a transport-shaped failure. */
+uint32_t nfs_lookup_retries;
+static int nfs_lookup_rows;
+
 static void nfs_put_dec(uint64_t v, char *out) {
   char tmp[24];
   int n = 0;
@@ -687,8 +691,42 @@ int nfs_lookup(const struct nfs_mount *m, const char *rel,
     }
     int attr_ok = 0;
     struct nfs_fh next;
-    if (lookup_one(m, cur.data, cur.len, comp, &next, &last_attr, &attr_ok) != 0)
-      return -1;
+    int lrc = lookup_one(m, cur.data, cur.len, comp, &next, &last_attr, &attr_ok);
+    if (lrc != 0) {
+      /* L76: -2 is the SERVER saying "no such entry" -- definitive, return it.
+       * -1 is a transport or parse failure: a lost datagram, a reply stolen by
+       * a second socket that shares the ephemeral port, or a socket the pool
+       * could not hand out.  Mapping that to ENOENT is what produced
+       * "Could not find file /NFS/Data/Biotech/.../WITabs.xml" for a file the
+       * game had already opened in the same run, and the NullReferenceException
+       * in GraphicData.Init that followed it.  A LOOKUP is idempotent: retry
+       * the component before reporting a missing file. */
+      if (lrc != -2) {
+        int tries = 0;
+        while (lrc != 0 && tries < 3) {
+          tries++;
+          lrc = lookup_one(m, cur.data, cur.len, comp, &next, &last_attr, &attr_ok);
+        }
+        nfs_lookup_retries += (uint32_t)tries;
+        if (nfs_lookup_rows < 24) {
+          nfs_lookup_rows++;
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[NFLK] retry comp=");
+          kl_s(&kl, comp);
+          kl_s(&kl, " tries=");
+          kl_i(&kl, (long)tries);
+          kl_s(&kl, " rc=");
+          kl_i(&kl, (long)lrc);
+          kl_s(&kl, " total=");
+          kl_i(&kl, (long)nfs_lookup_retries);
+          kl_c(&kl, '\n');
+          kl_emit(&kl);
+        }
+      }
+      if (lrc != 0)
+        return -1;
+    }
     cur = next;
     have_attr = attr_ok;
     p += len;
