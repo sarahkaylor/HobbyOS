@@ -67,6 +67,9 @@ static int g3d_res_create(uint32_t ctx, const struct virtio_gpu_3d_res* d, uint3
 static int g3d_res_attach(uint32_t res, const uint64_t* phys, uint32_t n, uint64_t len) {
   return virtio_gpu_3d_res_attach(res, phys, n, len);
 }
+static int g3d_ctx_attach(uint32_t ctx, uint32_t res) {
+  return virtio_gpu_3d_ctx_attach(ctx, res);
+}
 static int g3d_res_unref(uint32_t res) { return virtio_gpu_3d_res_unref(res); }
 static int g3d_submit(uint32_t ctx, const void* cmds, uint32_t len, uint32_t* fence) {
   return virtio_gpu_3d_submit(ctx, cmds, len, fence);
@@ -154,15 +157,29 @@ int gpu_abi_res_ok(const struct gpu_res_create* r) {
   if (r->ctx_id == 0) return 0;
   if (r->width == 0 || r->height == 0 || r->depth == 0 || r->array_size == 0)
     return 0;
-  if (r->width > GPU_ABI_MAX_DIM || r->height > GPU_ABI_MAX_DIM) return 0;
+  /* target 0 is legal: it is PIPE_BUFFER == VIRGL_TEXTURE_TARGET_BUFFER, the
+   * target every vertex/constant/index buffer uses (M2 measured this as the
+   * first thing a real GL client creates).  1D/2D/3D/CUBE are 1..4. */
+  if (r->target > 4) return 0;
+  int is_buffer = (r->target == 0);
+  /* Gallium's width0 for a buffer is its size in bytes, so the texture
+   * dimension limit must not be applied to it -- a 1 MiB vertex buffer has
+   * width0 = 1048576.  Its ceiling is the backing cap instead. */
+  if (is_buffer) {
+    if ((uint64_t)r->width > GPU_ABI_MAX_BYTES) return 0;
+  } else {
+    if (r->width > GPU_ABI_MAX_DIM || r->height > GPU_ABI_MAX_DIM) return 0;
+  }
   if (r->depth > GPU_ABI_MAX_LAYERS || r->array_size > GPU_ABI_MAX_LAYERS) return 0;
   if (r->last_level > 31) return 0;
   if (r->nr_samples > 16) return 0;
-  if (r->target == 0 || r->format == 0 || r->bind == 0) return 0;
+  if (r->format == 0 || r->bind == 0) return 0;
   /* 4 bytes/texel is the floor for every format the game uses; the cap is
    * the transport's per-resource backing limit, so an oversized request
    * fails at the ioctl instead of at ATTACH_BACKING. */
-  uint64_t bytes = (uint64_t)r->width * r->height * r->depth * r->array_size * 4ull;
+  uint64_t bytes = is_buffer ? (uint64_t)r->width
+                             : (uint64_t)r->width * r->height * r->depth *
+                                  r->array_size * 4ull;
   if (bytes == 0 || bytes > GPU_ABI_MAX_BYTES) return 0;
   return 1;
 }
@@ -464,12 +481,19 @@ static int gpu_do_res_attach(struct process* p, int fd, uint64_t arg) {
   uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
   struct gpu_abi_client* c = gpu_client_find(pid, fd);
   int owns = c && gpu_client_owns_res(c, ra.res_id);
+  uint32_t ctx_id = owns ? c->ctx_id : 0;
   spinlock_release_irqrestore(&gpu_abi_lock, fl);
   if (!owns) return -EINVAL;
 
   uint32_t got = 0;
   int rc = gpu_resolve_pages(p, ra.va, ra.len, gpu_pages, GPU_ABI_MAX_PAGES, &got);
   if (rc == 0) rc = g3d_res_attach(ra.res_id, gpu_pages, got, ra.len);
+  /* M2 (docs/gpu-abi.md §2 said so, but M1's ioctl path did not do it): a 3D
+   * resource is not usable by a context until CTX_ATTACH_RESOURCE (0x0202)
+   * binds it.  M1's kernel probe called virtio_gpu_3d_ctx_attach() itself, so
+   * the gap never showed; Mesa's first submit was rejected by the host with
+   * "Illegal resource 4097" until this line existed. */
+  if (rc == 0 && ctx_id) rc = g3d_ctx_attach(ctx_id, ra.res_id);
   if (rc != 0) {
     if (rc == -ENOSPC) return -ENOSPC;
     return rc == -EFAULT ? -EFAULT : -EIO;
