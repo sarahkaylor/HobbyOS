@@ -5,6 +5,8 @@
 
 #include "arch/trap.h"
 
+struct process;
+
 /**
  * Handler for synchronous exceptions originating from user mode (EL0).
  * Dispatches system calls based on the SVC instruction's immediate value and handles memory faults.
@@ -31,6 +33,13 @@ int watchdog_stack_scan_ok(uint64_t top);
  * every byte atomically via vm_user_read — no validate-then-use window.
  * Returns 1 on success (dst NUL-terminated), 0 on bad/unmappable ptr. */
 int u_strcpy(const char *src, char *dst, int cap);
+
+/* L73: the only way a kernel *report* may read a user pointer.  A fault report
+ * exists because the process touched an address it must not, so every user
+ * value in it may be that address; a plain deref turns the report into a
+ * second, kernel-mode #PF on the same hole and the real record is never
+ * printed.  0 = two words delivered, -1 = not wholly readable. */
+int kpf_user_peek2(struct process *p, uint64_t va, uint64_t out[2]);
 
 /* SEC-10 (security-plan.md #10): kernel-stack exhaustion guard (defined in
  * process.c). kernel_stack_remaining() = bytes between current SP and this

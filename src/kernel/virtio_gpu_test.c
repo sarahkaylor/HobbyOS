@@ -3,6 +3,8 @@
 #include "unit_test.h"
 #include "virtio_gpu.h"
 #include "display_mode.h"
+#include "gpu_abi.h" /* M1: /dev/gpu ABI pure helpers */
+#include "errno.h"   /* M1: -ENOTTY/-EINVAL in the routing test */
 #include <stdint.h>
 
 static void test_virtio_gpu_get_framebuffer(void) {
@@ -157,6 +159,147 @@ static void test_virtio_gpu_flush_args_ok(void) {
   /* One bad rect poisons the whole batch (reject-before-handoff). */
   struct virtio_gpu_xrect mixed[] = {{0, 0, 4, 4}, {0, 0, -1, 4}};
   EXPECT_EQ(virtio_gpu_flush_args_ok(mixed, 2), 0);
+}
+
+/* M1 (docs/gpu-abi.md): the /dev/gpu request table and geometry validation
+ * are pure, so they are pinned here on both arches (the ioctl dispatch and
+ * the device path are covered by the [VIRGL3D] boot gate instead). */
+static void test_gpu_abi_req_size(void) {
+  uart_puts("  Running test_gpu_abi_req_size...\n");
+  tests_run++;
+
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_GET_CAPSET_INFO),
+            (int)sizeof(struct gpu_capset_info));
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_GET_CAPSET), (int)sizeof(struct gpu_capset));
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_CTX_CREATE), (int)sizeof(struct gpu_ctx_create));
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_CTX_DESTROY), (int)sizeof(struct gpu_ctx_destroy));
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_RES_CREATE), (int)sizeof(struct gpu_res_create));
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_RES_ATTACH), (int)sizeof(struct gpu_res_attach));
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_RES_UNREF), (int)sizeof(struct gpu_res_unref));
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_SUBMIT), (int)sizeof(struct gpu_submit));
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_FENCE_WAIT), (int)sizeof(struct gpu_fence_wait));
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_TRANSFER), (int)sizeof(struct gpu_transfer));
+
+  /* Unknown / foreign requests must not be routed as GPU commands. */
+  EXPECT_EQ(gpu_abi_req_size(0), -1);
+  EXPECT_EQ(gpu_abi_req_size(GPU_IOC_MAGIC), -1);
+  EXPECT_EQ(gpu_abi_req_size(0x4600 /* FBIOGET_VSCREENINFO */), -1);
+}
+
+/* The dispatch table itself: unknown requests are ENOTTY, known requests
+ * with no process/argument are EINVAL.  Neither path dereferences user
+ * memory, so this is safe in the kernel unit tier. */
+static void test_gpu_abi_ioctl_routing(void) {
+  uart_puts("  Running test_gpu_abi_ioctl_routing...\n");
+  tests_run++;
+  EXPECT_EQ(gpu_abi_ioctl(0, -1, 0xDEADBEEFul, 0), -ENOTTY);
+  EXPECT_EQ(gpu_abi_ioctl(0, -1, 0x4600ul /* FBIOGET_VSCREENINFO */, 0), -ENOTTY);
+  EXPECT_EQ(gpu_abi_ioctl(0, -1, GPU_IOC_RES_CREATE, 0), -EINVAL);
+  EXPECT_EQ(gpu_abi_ioctl(0, -1, GPU_IOC_SUBMIT, 0), -EINVAL);
+}
+
+static void test_gpu_abi_pages_for(void) {
+  uart_puts("  Running test_gpu_abi_pages_for...\n");
+  tests_run++;
+
+  EXPECT_EQ(gpu_abi_pages_for(0), 0);
+  EXPECT_EQ(gpu_abi_pages_for(1), 1);
+  EXPECT_EQ(gpu_abi_pages_for(4095), 1);
+  EXPECT_EQ(gpu_abi_pages_for(4096), 1);
+  EXPECT_EQ(gpu_abi_pages_for(4097), 2);
+  EXPECT_EQ(gpu_abi_pages_for(64 * 64 * 4), 4);        /* the M1 probe buffer */
+  EXPECT_EQ(gpu_abi_pages_for(64ull * 1024 * 1024), 16384);
+  /* Over the transport's per-attach cap: refuse rather than truncate. */
+  EXPECT_EQ(gpu_abi_pages_for(64ull * 1024 * 1024 + 1), 0);
+  EXPECT_EQ(gpu_abi_pages_for(0xFFFFFFFFFFFFFFFFull), 0);
+}
+
+static void test_gpu_abi_res_ok(void) {
+  uart_puts("  Running test_gpu_abi_res_ok...\n");
+  tests_run++;
+
+  struct gpu_res_create r;
+  r.ctx_id = 1; r.target = 2; r.format = 67; r.bind = 0xA;
+  r.width = 64; r.height = 64; r.depth = 1; r.array_size = 1;
+  r.last_level = 0; r.nr_samples = 0; r.flags = 0; r.res_id = 0;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 1);
+
+  /* A 1080p RGBA render target is inside the 64 MiB backing cap. */
+  r.width = 1920; r.height = 1080;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 1);
+
+  /* M2: target 0 is PIPE_BUFFER (= VIRGL_TEXTURE_TARGET_BUFFER), which is what
+   * a real GL client creates for every vertex/constant/index buffer.  The M1
+   * gate only ever made a 2D texture, so this case was missed here and cost a
+   * RES_CREATE -EINVAL in the first M2 boot. */
+  r.target = 0; r.format = 81; r.bind = 0x10; /* R8_UNORM, VERTEX_BUFFER */
+  r.width = 32; r.height = 1;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 1);
+  /* width0 of a buffer is its byte size, not a texel count: a 1 MiB vertex
+   * buffer is legal and must not trip the 16384 texel dimension limit. */
+  r.width = 1024 * 1024;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 1);
+  r.width = 65 * 1024 * 1024;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 0);
+  r = (struct gpu_res_create){ .ctx_id = 1, .target = 2, .format = 67,
+                               .bind = 0xA, .width = 1920, .height = 1080,
+                               .depth = 1, .array_size = 1 };
+
+  struct gpu_res_create bad = r;
+  bad.ctx_id = 0;       EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  bad = r; bad.width = 0;  EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  bad = r; bad.height = 0; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  bad = r; bad.depth = 0;  EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  bad = r; bad.array_size = 0; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  bad = r; bad.format = 0; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  /* M3: bind == 0 is legal (a buffer before its first bind -- Unity's
+   * glBufferData does exactly that).  M1/M2 rejected it and the game saw
+   * GL_OUT_OF_MEMORY two layers up. */
+  bad = r; bad.bind = 0;   EXPECT_EQ(gpu_abi_res_ok(&bad), 1);
+  bad = r; bad.target = 0; bad.width = 64; bad.height = 1; bad.bind = 0;
+  EXPECT_EQ(gpu_abi_res_ok(&bad), 1);   /* the M3 buffer that was refused */
+  bad = r; bad.last_level = 32; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  bad = r; bad.nr_samples = 17; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  bad = r; bad.width = 16385; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  bad = r; bad.width = 16384; bad.height = 16384; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
+  EXPECT_EQ(gpu_abi_res_ok(0), 0);
+}
+
+static void test_gpu_abi_submit_flags(void) {
+  uart_puts("  Running test_gpu_abi_submit_flags...\n");
+  tests_run++;
+  EXPECT_EQ(gpu_abi_submit_flags_ok(0), 1);                       /* fenced */
+  EXPECT_EQ(gpu_abi_submit_flags_ok(GPU_SUBMIT_F_UNFENCED), 1);   /* cheap  */
+  EXPECT_EQ(gpu_abi_submit_flags_ok(1u << 1), 0);                 /* unknown */
+  EXPECT_EQ(gpu_abi_submit_flags_ok(0xFFFFFFFFu), 0);
+}
+
+static void test_gpu_abi_transfer_ok(void) {
+  uart_puts("  Running test_gpu_abi_transfer_ok...\n");
+  tests_run++;
+
+  struct gpu_transfer t;
+  t.res_id = 2; t.to_host = 0; t.level = 0; t.stride = 256;
+  t.layer_stride = 0; t.padding = 0; t.offset = 0;
+  t.box.x = 0; t.box.y = 0; t.box.z = 0;
+  t.box.w = 64; t.box.h = 64; t.box.d = 1;
+  EXPECT_EQ(gpu_abi_transfer_ok(&t), 1);
+
+  /* Stride 0 means "host infers", which is a legal transfer. */
+  t.stride = 0;
+  EXPECT_EQ(gpu_abi_transfer_ok(&t), 1);
+  t.stride = 256;
+  t.to_host = 1; /* readback */
+  EXPECT_EQ(gpu_abi_transfer_ok(&t), 1);
+
+  struct gpu_transfer bad = t;
+  bad.res_id = 0;       EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
+  bad = t; bad.to_host = 2; EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
+  bad = t; bad.level = 32;  EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
+  bad = t; bad.box.w = 0;   EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
+  bad = t; bad.box.h = 0;   EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
+  bad = t; bad.box.d = 0;   EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
+  EXPECT_EQ(gpu_abi_transfer_ok(0), 0);
 }
 
 #ifdef __x86_64__
@@ -332,6 +475,12 @@ void virtio_gpu_test_suite(void) {
   uart_puts("virtio_gpu_test_suite:\n");
   test_virtio_gpu_get_framebuffer();
   test_virtio_gpu_flush_args_ok(); /* SEC-7: both arches */
+  test_gpu_abi_req_size();         /* M1 /dev/gpu ABI: both arches */
+  test_gpu_abi_ioctl_routing();
+  test_gpu_abi_pages_for();
+  test_gpu_abi_res_ok();
+  test_gpu_abi_submit_flags();
+  test_gpu_abi_transfer_ok();
 #ifndef __x86_64__
   test_virtio_gpu_rect_clamp();
   test_virtio_gpu_rect_transfer_offset();

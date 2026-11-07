@@ -1,4 +1,5 @@
 #include "fs.h"
+#include "kline.h"
 #include "process.h"
 #include "pipe.h"
 #include "unix.h"
@@ -6,12 +7,15 @@
 #include "net.h"
 #include "nfs.h"
 #include "vfs.h"
+#include "vfs_bind.h"
 #include "errno.h"
 #include "file_obj.h" /* so-vm lane A (CROSS-LANE): page-cache invalidation */
 #include "timer.h"
 #include "vm.h" /* P2.4 (S4): memfd objects */
 #include "input_node.h"   /* GB-171: evdev record fill for /dev/input/event0 */
 #include "virtio_input.h" /* GB-171: the key ring that node drains */
+#include "frame.h" /* M5: fs_read_image contiguous image frames */
+#include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -135,6 +139,293 @@ static struct file *file_alloc(void) {
   return 0;
 }
 
+
+/* ---- L57: NFS read-path self-check -------------------------------------
+ *
+ * "Some defs are missing and nothing was logged" is either a transport that
+ * returns bytes it never read, or a game-side enumeration/parse loss.  Hash
+ * one file the game definitely loads, through the SAME nfs_read_file() the
+ * file layer uses, and print (bytes, size, nul, fnv).  A digest equal to the
+ * host's FNV over the same bytes proves the transport is byte-exact, so a
+ * missing def is not a short/corrupt read.
+ */
+static void nfs_selfcheck(struct file *f) {
+  static int once;
+  if (once) return;
+  if (!f || f->type != FILE_TYPE_NFS || f->nfs.is_dir) return;
+  const char *p = f->path;
+  const char *want = "World_Oneshots_ProjectileImpacts.xml";
+  int hit = 0, pl = 0, wl = 0;
+  while (p[pl]) pl++;
+  while (want[wl]) wl++;
+  if (pl >= wl) {
+    hit = 1;
+    for (int i = 0; i < wl; i++)
+      if (p[pl - wl + i] != want[i]) { hit = 0; break; }
+  }
+  if (!hit) return;
+  once = 1;
+  const struct nfs_mount *m = nfs_mount_at(f->nfs.mount_idx);
+  if (!m) return;
+  static uint8_t b[16384];
+  unsigned long long h = 1469598103934665603ULL;
+  long tot = 0, nul = 0;
+  uint32_t off = 0;
+  while (off < f->nfs.size && tot < (long)sizeof b) {
+    uint32_t w = f->nfs.size - off;
+    if (w > 4096) w = 4096;
+    if ((long)w > (long)sizeof b - tot) w = (uint32_t)((long)sizeof b - tot);
+    int got = nfs_read_file(m, &f->nfs.fh, off, b + tot, w);
+    if (got <= 0) break;
+    for (int i = 0; i < got; i++) {
+      if (b[tot + i] == 0) nul++;
+      h ^= (unsigned long long)b[tot + i];
+      h *= 1099511628211ULL;
+    }
+    tot += got;
+    off += (uint32_t)got;
+  }
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[NFSCHK] bytes=");
+  kl_i(&kl, tot);
+  kl_s(&kl, " size=");
+  kl_i(&kl, (long)f->nfs.size);
+  kl_s(&kl, " nul=");
+  kl_i(&kl, nul);
+  kl_s(&kl, " fnv=0x");
+  kl_hex(&kl, (unsigned long)h);
+  kl_s(&kl, " ");
+  kl_s(&kl, p);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+/* ---- L57: fd-lifecycle flight recorder ---------------------------------
+ *
+ * The EBADF on a Keyed XML read arrives with no history: `read()` answers
+ * EBADF, Mono names one path, and nothing in the serial log says who closed
+ * that fd — or whether the fd was alive at all (fs.c's `return -1` for a
+ * failed NFS READ reaches Mono as EBADF too, because trap.c maps -1 to
+ * -EBADF).  Both halves of that question are the same row here.
+ *
+ * Every open/close/dup/dup2/close_range touching a `/NFS/` path is recorded
+ * in a small in-kernel ring (fd, global slot, generation, tid, tgid, path
+ * tail), and the ring is printed ONLY when a read on a /NFS file fails.  The
+ * hot path costs a handful of stores per event and the serial line stays
+ * silent until the failure the ring exists to explain, so the recorder does
+ * not change the timing it is measuring.
+ *
+ * Generation is bumped per install, so "the reader's fd now names a different
+ * file" (a slot reused under a live reader) is visible as a gen mismatch
+ * rather than inferred.
+ */
+#define FD_EV_MAX 1024
+#define FD_EV_TAIL 56
+#define FDEV_OPEN 1
+#define FDEV_CLOSE 2
+#define FDEV_DUP 3
+#define FDEV_DUP2 4
+#define FDEV_FAIL 5
+#define FDEV_RANGE 6
+
+struct fd_ev {
+  uint32_t seq;
+  uint32_t tid;
+  uint32_t tgid;
+  uint32_t gen;
+  int16_t fd;
+  int16_t gfd;
+  uint8_t kind;
+  uint8_t pad;
+  char tail[FD_EV_TAIL];
+};
+
+static struct fd_ev fd_ev_ring[FD_EV_MAX];
+static uint32_t fd_ev_seq;
+static uint32_t fd_slot_gen[MAX_OPEN_FDS];
+
+static int fs_has_nfs(const char *p) {
+  if (!p) return 0;
+  for (int i = 0; p[i]; i++)
+    if (p[i] == '/' && p[i + 1] == 'N' && p[i + 2] == 'F' && p[i + 3] == 'S' &&
+        p[i + 4] == '/')
+      return 1;
+  return 0;
+}
+
+/* The informative part of a path is its tail; keep it, mark a truncation. */
+static void fs_path_tail(char *dst, const char *src) {
+  int n = 0;
+  while (src && src[n]) n++;
+  int start = 0;
+  if (n > FD_EV_TAIL - 2) { start = n - (FD_EV_TAIL - 2); dst[0] = '~'; }
+  int w = (start ? 1 : 0);
+  for (int i = start; i < n && w < FD_EV_TAIL - 1; i++) dst[w++] = src[i];
+  if (w == 0) dst[w++] = '?';
+  dst[w] = '\0';
+}
+
+static void fd_ev_note(int kind, struct process *pg, int fd, int gfd,
+                       const char *path) {
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS || !fs_has_nfs(path)) return;
+  uint32_t s = fd_ev_seq++;
+  struct fd_ev *e = &fd_ev_ring[s % FD_EV_MAX];
+  struct process *cur = current_process();
+  e->seq = s;
+  e->tid = cur ? (uint32_t)cur->pid : 0;
+  e->tgid = (uint32_t)pg->pid;
+  e->gen = fd_slot_gen[fd];
+  e->fd = (int16_t)fd;
+  e->gfd = (int16_t)(gfd < 32767 ? gfd : 32767);
+  e->kind = (uint8_t)kind;
+  e->pad = 0;
+  fs_path_tail(e->tail, path);
+}
+
+static const char *fd_ev_kind_name(int k) {
+  switch (k) {
+  case FDEV_OPEN: return "open";
+  case FDEV_CLOSE: return "close";
+  case FDEV_DUP: return "dup";
+  case FDEV_DUP2: return "dup2";
+  case FDEV_FAIL: return "readfail";
+  case FDEV_RANGE: return "close_range";
+  default: return "?";
+  }
+}
+
+/* Print the last 22 events of THIS fd in this group, then the last 6 events
+ * of the group overall (an fd number reused for another file shows up there).
+ * Bounded to four dumps per boot: a real failure is one event, not a flood. */
+static void fd_ev_dump(struct process *pg, int fd, const char *why) {
+  static int dumps;
+  if (!pg || dumps >= 4) return;
+  dumps++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[FDR] fail fd=");
+  kl_i(&kl, (long)fd);
+  kl_s(&kl, " gen=");
+  kl_i(&kl, (long)((fd >= 0 && fd < MAX_OPEN_FDS) ? (int)fd_slot_gen[fd] : -1));
+  kl_s(&kl, " tgid=");
+  kl_i(&kl, (long)pg->pid);
+  kl_s(&kl, " cur=");
+  {
+    struct process *cur = current_process();
+    kl_i(&kl, cur ? (long)cur->pid : -1L);
+  }
+  kl_s(&kl, " why=");
+  kl_s(&kl, why);
+  kl_s(&kl, " open_fds=");
+  kl_i(&kl, (long)((fd >= 0 && fd < MAX_OPEN_FDS) ? pg->open_fds[fd] : -2));
+  kl_s(&kl, " nfd=");
+  kl_i(&kl, (long)pg->num_open_fds);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+
+  uint32_t first = fd_ev_seq > FD_EV_MAX ? fd_ev_seq - FD_EV_MAX : 0;
+  int shown = 0;
+  for (uint32_t s = fd_ev_seq; s > first && shown < 22; s--) {
+    struct fd_ev *e = &fd_ev_ring[(s - 1) % FD_EV_MAX];
+    if (e->fd != fd || e->tgid != (uint32_t)pg->pid) continue;
+    shown++;
+    struct kline kr;
+    kl_init(&kr);
+    kl_s(&kr, "[FDR]  #");
+    kl_i(&kr, (long)e->seq);
+    kl_s(&kr, " ");
+    kl_s(&kr, fd_ev_kind_name(e->kind));
+    kl_s(&kr, " fd=");
+    kl_i(&kr, (long)e->fd);
+    kl_s(&kr, " gfd=");
+    kl_i(&kr, (long)e->gfd);
+    kl_s(&kr, " gen=");
+    kl_i(&kr, (long)e->gen);
+    kl_s(&kr, " tid=");
+    kl_i(&kr, (long)e->tid);
+    kl_s(&kr, " ");
+    kl_s(&kr, e->tail);
+    kl_c(&kr, '\n');
+    kl_emit(&kr);
+  }
+  shown = 0;
+  for (uint32_t s = fd_ev_seq; s > first && shown < 6; s--) {
+    struct fd_ev *e = &fd_ev_ring[(s - 1) % FD_EV_MAX];
+    if (e->tgid != (uint32_t)pg->pid || e->fd == fd) continue;
+    shown++;
+    struct kline kx;
+    kl_init(&kx);
+    kl_s(&kx, "[FDR]  (other) #");
+    kl_i(&kx, (long)e->seq);
+    kl_s(&kx, " ");
+    kl_s(&kx, fd_ev_kind_name(e->kind));
+    kl_s(&kx, " fd=");
+    kl_i(&kx, (long)e->fd);
+    kl_s(&kx, " gfd=");
+    kl_i(&kx, (long)e->gfd);
+    kl_s(&kx, " tid=");
+    kl_i(&kx, (long)e->tid);
+    kl_s(&kx, " ");
+    kl_s(&kx, e->tail);
+    kl_c(&kx, '\n');
+    kl_emit(&kx);
+  }
+}
+
+/* L55: local-fd allocation was a check-then-set on shared group state.  Two
+ * threads opening at once (RimWorld's four `DirectXmlLoader` threads each
+ * MemoryMappedFile a def) could take the SAME slot: one file object was
+ * orphaned, and the winner's fd number silently named the other file — the
+ * measured shape was `mmap fd=19 ... -> -95` for a path that had just been
+ * opened on /NFS, plus sporadic failed opens during the 1,209-XML load.
+ * One leaf lock makes the scan+install atomic; it is never held across any
+ * other lock or any I/O. */
+static spinlock_t fdtab_lock;
+
+static int get_global_fd(struct file *f);
+
+static int fd_install(struct process *p, struct file *f) {
+  if (!p || !f) return -1;
+  uint64_t fl = spinlock_acquire_irqsave(&fdtab_lock);
+  int fd = -1;
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+    if (p->open_fds[i] == -1) {
+      p->open_fds[i] = get_global_fd(f);
+      p->num_open_fds++;
+      fd_slot_gen[i]++;
+      fd = i;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&fdtab_lock, fl);
+  /* L57: record outside the lock (the row goes to the UART). */
+  if (fd >= 0) fd_ev_note(FDEV_OPEN, p, fd, get_global_fd(f), f->path);
+  return fd;
+}
+
+/* Public: close_range is rare, so one row per call is affordable and answers
+ * "does anything close a whole range, and over which slots" directly. */
+void fs_fd_ev_range(struct process *p, int first, int last) {
+  struct process *pg = process_group(p);
+  if (!pg) return;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[FDR] close_range first=");
+  kl_i(&kl, (long)first);
+  kl_s(&kl, " last=");
+  kl_i(&kl, (long)last);
+  kl_s(&kl, " nfd=");
+  kl_i(&kl, (long)pg->num_open_fds);
+  kl_s(&kl, " cur=");
+  {
+    struct process *cur = current_process();
+    kl_i(&kl, cur ? (long)cur->pid : -1L);
+  }
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
 /* SEC-6: invariant violated — an fd reached a slot whose type is not one of
  * the real file types.  UNINIT slots are unreachable through legitimate fds
  * (the fd only becomes visible after the creator sets the real type), so
@@ -191,13 +482,160 @@ static int get_global_fd(struct file *f) {
 #define O_DIRECTORY 0x10000
 #endif
 
+/* ---- /proc/self/maps: a real rendering of this AS's region list ----------
+ *
+ * Mono opens /proc/self/maps at startup (measured on the host: 3 opens, then
+ * 1024-byte reads until EOF, plus one access(F_OK); fstat reports S_IFREG|
+ * 0444 with st_size 0 and the reader ignores the size).  The file is
+ * therefore a STREAM, not a stored object: every line below is one region
+ * this address space genuinely holds, rendered in Linux's
+ *   start-end perms offset dev inode pathname
+ * shape.  Nothing is invented: a region the AS does not have is not printed,
+ * and no synthetic heap/stack/vdso rows are added.  The IMAGE region is
+ * labelled with the executable path (the only mapping name the kernel
+ * actually knows); DSO and anonymous regions print an empty pathname, which
+ * is exactly how Linux renders an unnamed mapping.
+ *
+ * The read cursor is (region_index << 8) | byte_offset_in_line.  A rendered
+ * line is bounded by two 16-digit hex numbers plus a 159-byte path, well
+ * under 256, so 8 bits of line offset cannot overflow.
+ */
+
+static int fs_streq(const char *a, const char *b) {
+  if (!a || !b) return 0;
+  while (*a && *a == *b) { a++; b++; }
+  return *a == '\0' && *b == '\0';
+}
+
+static void fs_copy_path(char *dst, const char *src) {
+  int i = 0;
+  if (src)
+    for (; src[i] && i < VFS_PATH_MAX - 1; i++) dst[i] = src[i];
+  dst[i] = '\0';
+}
+
+static int maps_hex(char *out, uint64_t v) {
+  char tmp[16];
+  int n = 0;
+  if (v == 0) { out[0] = '0'; return 1; }
+  while (v && n < 16) { tmp[n++] = "0123456789abcdef"[v & 0xF]; v >>= 4; }
+  for (int i = 0; i < n; i++) out[i] = tmp[n - 1 - i];
+  return n;
+}
+
+/* One rendered line for region `idx`.  Returns the length (always > 0). */
+static int maps_line(struct process *p, struct addr_space *as, int idx,
+                     char *out, int cap) {
+  const struct vm_region *r = &as->regions[idx];
+  int n = 0;
+#define MPUT(ch) do { if (n < cap - 1) out[n++] = (ch); } while (0)
+  n += maps_hex(out + n, r->base);
+  MPUT('-');
+  n += maps_hex(out + n, r->base + r->len);
+  MPUT(' ');
+  MPUT((r->prot & VM_PROT_READ) ? 'r' : '-');
+  MPUT((r->prot & VM_PROT_WRITE) ? 'w' : '-');
+  MPUT((r->prot & VM_PROT_EXEC) ? 'x' : '-');
+  MPUT((r->flags & VM_MAP_SHARED) ? 's' : 'p');
+  MPUT(' ');
+  /* offset: 8 lowercase hex digits, zero-padded, like the kernel's %08llx.
+     A VMK_LIB region carries the interpreter's own file offset (ld.so sets
+     it); the kernel-loaded IMAGE is carved from the file start, so its
+     segment offset is base - USER_IMG_BASE. */
+  {
+    uint64_t off = (r->kind == VMK_IMG) ? (r->base - USER_IMG_BASE) : r->obj_off;
+    for (int sh = 28; sh >= 0; sh -= 4) MPUT("0123456789abcdef"[(off >> sh) & 0xF]);
+  }
+  MPUT(' ');
+  MPUT('0'); MPUT('0'); MPUT(':'); MPUT('0'); MPUT('0');
+  MPUT(' ');
+  MPUT('0'); /* inode: this VFS has no inode numbers for mapped objects */
+  if (r->kind == VMK_IMG && p && p->exe_path[0]) {
+    MPUT(' ');
+    for (int i = 0; p->exe_path[i] && n < cap - 2; i++) out[n++] = p->exe_path[i];
+  }
+  MPUT('\n');
+#undef MPUT
+  out[n] = '\0';
+  return n;
+}
+
+static int file_read_maps(struct process *p, struct file *f, char *ubuf,
+                          int size) {
+  struct addr_space *as = p ? p->as : 0;
+  if (!as || size <= 0) return 0;
+  int used = 0;
+  unsigned idx = f->maps_cursor >> 8;
+  unsigned off = f->maps_cursor & 0xFF;
+  char line[256];
+  while (used < size) {
+    if (idx >= (unsigned)as->nr) break;
+    int n = maps_line(p, as, (int)idx, line, (int)sizeof line);
+    if (off >= (unsigned)n) { idx++; off = 0; continue; }
+    int chunk = n - (int)off;
+    if (chunk > size - used) chunk = size - used;
+    for (int k = 0; k < chunk; k++) ubuf[used + k] = line[off + (unsigned)k];
+    used += chunk;
+    off += (unsigned)chunk;
+    if ((int)off >= n) { idx++; off = 0; }
+  }
+  f->maps_cursor = (idx << 8) | (off & 0xFF);
+  return used;
+}
+
 int file_open(struct process *cur, const char *filename, int flags) {
-  cur = process_group(cur); /* P1 (D7): fd table + cwd are group state */
+  cur = process_group(cur); /* P1 (D7): the fd table + cwd are group state */
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+
+  /* L58 probe: the walker's directory opens failed with ENOENT while stat()
+   * on the same path succeeded.  One row per open of an /NFS path names the
+   * flags the kernel actually received and the fd count it started from. */
+  if (filename && filename[0] == '/' && filename[1] == 'N' &&
+      filename[2] == 'F' && filename[3] == 'S') {
+    static int opn_rows;
+    if (opn_rows < 40) {
+      opn_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[OPN] path=");
+      kl_s(&kl, filename);
+      kl_s(&kl, " flags=");
+      kl_i(&kl, flags);
+      kl_s(&kl, " nfds=");
+      kl_i(&kl, cur->num_open_fds);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+
+  /* M5c: a VFS bind may move this path onto another filesystem, so a native
+   * absolute open() must see the same namespace a compat openat() does (that
+   * path canonicalises through vfs_abs_path before calling in here).  Only an
+   * actually-translated name is substituted; with no bind registered this is
+   * one table-length check and `filename` is untouched. */
+  char vpath[VFS_PATH_MAX];
+  if (filename && vfs_bind_count() != 0) {
+    char vabs[VFS_PATH_MAX];
+    if (vfs_abs_path(filename, vabs, sizeof vabs) == 0 &&
+        vfs_bind_translate(vabs, vpath, sizeof vpath) == 1)
+      filename = vpath;
+  }
 
   struct file *f = file_alloc();
   if (!f) return -EMFILE;
   f->open_flags = (uint32_t)flags;
+  /* Remember the name this fd was opened under: /proc/self/fd/N is a link to
+     it, and re-opening through that link must go back to the SAME file.  The
+     VFS-resolved absolute form is what Linux prints. */
+  f->path[0] = '\0';
+  if (filename) {
+    char absp[VFS_PATH_MAX];
+    if (vfs_abs_path(filename, absp, sizeof absp) == 0)
+      fs_copy_path(f->path, absp);
+    else
+      fs_copy_path(f->path, filename);
+  }
+  f->maps_cursor = 0;
 
   /* GB-017: /dev/null and /dev/urandom are virtual device nodes served by
    * the file layer (independent of GB-014's syscall-table routing, per the
@@ -214,19 +652,33 @@ int file_open(struct process *cur, const char *filename, int flags) {
     int isurand = (rest[0] == '/' && rest[1] == 'u' && rest[2] == 'r' &&
                    rest[3] == 'a' && rest[4] == 'n' && rest[5] == 'd' &&
                    rest[6] == 'o' && rest[7] == 'm' && rest[8] == '\0');
-    /* GB-171: /dev/input/event0 — the evdev node a Linux-ABI program polls for
-       keys.  GB-027 delivered the record format and the kernel's own
-       SYS_INPUT_READ; this is the name in the filesystem, nothing more. */
+    /* GB-171/GB-173: /dev/input/event0 — the evdev node a Linux-ABI program
+       polls for keys.  GB-027 delivered the record format and the kernel's own
+       SYS_INPUT_READ; this is the name in the filesystem, plus (GB-173) the
+       per-process key channel the desktop forwards into. */
     int isinput = (rest[0] == '/' && rest[1] == 'i' && rest[2] == 'n' &&
                    rest[3] == 'p' && rest[4] == 'u' && rest[5] == 't' &&
                    rest[6] == '/' && rest[7] == 'e' && rest[8] == 'v' &&
                    rest[9] == 'e' && rest[10] == 'n' && rest[11] == 't' &&
                    rest[12] == '0' && rest[13] == '\0');
-    /* GB-167: /dev/fb0 — the compat framebuffer node.  Opening it is free; the
-       mode comes from ioctl(FBIOGET_VSCREENINFO), which the Linux-ABI ioctl
-       arm routes to hb_fb_ioctl_route(). */
+    /* GB-025 / M3: /dev/fb0, the framebuffer device node (docs/linux-abi.md
+       §9).  Every compat X11 client opens it in XOpenDisplay() and mmaps the
+       scanout smem; SDL's fbcon driver does the same.  The node owns no
+       data of its own -- the mmap/ioctl halves live in vm_mmap and the
+       compat ioctl route. */
     int isfb = (rest[0] == '/' && rest[1] == 'f' && rest[2] == 'b' &&
                 rest[3] == '0' && rest[4] == '\0');
+    /* M2 stdio: /dev/console, the character device the loader installs on
+       stdio.  Same shape as /dev/null on read/write; distinct type so fstat
+       can answer S_IFCHR (Mono's FileStream ctor fstat()s each stdio fd). */
+    int isconsole = (rest[0] == '/' && rest[1] == 'c' && rest[2] == 'o' &&
+                     rest[3] == 'n' && rest[4] == 's' && rest[5] == 'o' &&
+                     rest[6] == 'l' && rest[7] == 'e' && rest[8] == '\0');
+    /* M1 (docs/gpu-abi.md): /dev/gpu -- the virtio-gpu 3D ABI node.  It owns
+       no data of its own; the ioctl half lives in gpu_abi.c and the close
+       half releases the client's context/resources. */
+    int isgpu = (rest[0] == '/' && rest[1] == 'g' && rest[2] == 'p' &&
+                 rest[3] == 'u' && rest[4] == '\0');
     if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
       f->open_flags = (uint32_t)flags;
@@ -245,26 +697,43 @@ int file_open(struct process *cur, const char *filename, int flags) {
     } else if (isfb) {
       f->type = FILE_TYPE_DEVFB;
       f->open_flags = (uint32_t)flags;
+    } else if (isconsole) {
+      f->type = FILE_TYPE_CONSOLE;
+      f->open_flags = (uint32_t)flags;
+    } else if (isgpu) {
+      f->type = FILE_TYPE_DEVGPU;
+      f->open_flags = (uint32_t)flags;
     } else {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -ENOENT;
     }
     int dfd = -1;
-    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-      if (cur->open_fds[i] == -1) {
-        cur->open_fds[i] = get_global_fd(f);
-        cur->num_open_fds++;
-        dfd = i;
-        break;
-      }
-    }
+    dfd = fd_install(cur, f);
     if (dfd == -1) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -EMFILE;
     }
     return dfd;
+  }
+
+  /* M6 launch plumbing: /proc/self/maps -- a virtual 0444 regular file whose
+     read() renders this process's region list (see file_read_maps).  Mono
+     opens it at start-up; the host trace shows O_RDONLY|O_CLOEXEC, no seek,
+     1024-byte reads to EOF. */
+  if (filename && fs_streq(filename, "/proc/self/maps")) {
+    if (flags & O_DIRECTORY) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -ENOTDIR;
+    }
+    f->type = FILE_TYPE_PROCMAPS;
+    f->maps_cursor = 0;
+    int mpfd = -1;
+    mpfd = fd_install(cur, f);
+    if (mpfd == -1) { f->type = FILE_TYPE_EMPTY; f->ref_count = 0; return -EMFILE; }
+    return mpfd;
   }
 
   /* GB-020: virtual /proc/self/fd.  `ls /proc/self/fd` / sh readdir over it
@@ -281,36 +750,108 @@ int file_open(struct process *cur, const char *filename, int flags) {
     f->type = FILE_TYPE_PROCFD;
     f->fat16.cursor = 0;
     int pdfd = -1;
-    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-      if (cur->open_fds[i] == -1) {
-        cur->open_fds[i] = get_global_fd(f);
-        cur->num_open_fds++;
-        pdfd = i;
-        break;
-      }
-    }
+    pdfd = fd_install(cur, f);
     if (pdfd == -1) { f->type = FILE_TYPE_EMPTY; f->ref_count = 0; return -EMFILE; }
     return pdfd;
   }
 
   /* GB-020: O_DIRECTORY opens a directory fd (getdents64).  Route it before
    * the regular FAT16 file path so a directory never reaches the file open
-   * (which refuses dirs for boot-sector safety).  Missing target => ENOENT. */
+   * (which refuses dirs for boot-sector safety).  Missing target => ENOENT.
+   *
+   * L54: an NFS directory is a directory too.  This used to fall straight
+   * into fat16_open_dir(), whose resolve fails for /NFS/... and returns
+   * ENOENT — glibc/Mono turn that into DirectoryNotFoundException.  That is
+   * exactly what killed Verse.ModLister.RebuildModList() the moment the
+   * PLINQ stall was fixed.  Route NFS first, and only fall back to FAT16.
+   *
+   * The check runs whether or not O_DIRECTORY is set: Linux allows
+   * open("/dir", O_RDONLY) and only fails read(2) with EISDIR, so a runtime
+   * that opens the directory without the flag must get a directory fd too. */
   if (flags & O_DIRECTORY) {
+    {
+      int nmidx = -1;
+      const char *nrel = 0;
+      int routed = 0, lrc = -1, ltype = -1;
+      if (f->path[0]) {
+        routed = vfs_route(f->path, &nmidx, &nrel);
+        /* L58: name the routing result even when the lookup never runs. */
+        {
+          static int l58r;
+          if (l58r < 24) {
+            l58r++;
+            struct kline kr;
+            kl_init(&kr);
+            kl_s(&kr, "[LNR] path=");
+            kl_s(&kr, f->path);
+            kl_s(&kr, " routed=");
+            kl_i(&kr, routed);
+            kl_s(&kr, " rel=");
+            kl_s(&kr, nrel ? nrel : "(null)");
+            kl_c(&kr, '\n');
+            kl_emit(&kr);
+          }
+        }
+        if (routed && nrel) {
+          const struct nfs_mount *nm = nfs_mount_at(nmidx);
+          struct nfs_attr na;
+          struct nfs_fh nfh;
+          nfh.len = 0;
+          if (nm) {
+            lrc = nfs_lookup(nm, nrel, &nfh, &na);
+            if (lrc == 0) ltype = (int)na.type;
+          }
+          /* One bounded row per O_DIRECTORY open.  "open() says ENOENT" is
+             four different bugs (not routed, lookup failed, not a dir, fd
+             table full) and they are indistinguishable from the caller. */
+          {
+            static int l54_rows;
+            if (l54_rows < 64) {
+              l54_rows++;
+              struct kline kl;
+              kl_init(&kl);
+              kl_s(&kl, "[LNFSD] path=");
+              kl_s(&kl, f->path);
+              kl_s(&kl, " routed=");
+              kl_i(&kl, routed);
+              kl_s(&kl, " midx=");
+              kl_i(&kl, nmidx);
+              kl_s(&kl, " rel=");
+              kl_s(&kl, nrel ? nrel : "(null)");
+              kl_s(&kl, " lrc=");
+              kl_i(&kl, lrc);
+              kl_s(&kl, " type=");
+              kl_i(&kl, ltype);
+              kl_c(&kl, '\n');
+              kl_emit(&kl);
+            }
+          }
+          if (lrc == 0 && ltype == NF3DIR) {
+            f->type = FILE_TYPE_NFSDIR;
+            f->nfs.fh = nfh;
+            f->nfs.size = 0;
+            f->nfs.cursor = 0;          /* getdents resume index */
+            f->nfs.is_dir = 1;
+            f->nfs.mount_idx = nmidx;
+            int ndfd = -1;
+            ndfd = fd_install(cur, f);
+            if (ndfd == -1) {
+              f->type = FILE_TYPE_EMPTY;
+              f->ref_count = 0;
+              return -EMFILE;
+            }
+            return ndfd;
+          }
+        }
+      }
+    }
     if (fat16_open_dir(filename, f) != 0) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -ENOENT;
     }
     int dfd = -1;
-    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-      if (cur->open_fds[i] == -1) {
-        cur->open_fds[i] = get_global_fd(f);
-        cur->num_open_fds++;
-        dfd = i;
-        break;
-      }
-    }
+    dfd = fd_install(cur, f);
     if (dfd == -1) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
@@ -326,6 +867,15 @@ int file_open(struct process *cur, const char *filename, int flags) {
     f->type = FILE_TYPE_EMPTY;
     f->ref_count = 0;
     return -ENOENT;
+  }
+  if (routed == 1 && f->nfs.is_dir) {
+    /* A directory opened WITHOUT O_DIRECTORY.  Linux allows that open and
+       fails read(2) with EISDIR; keep the fd a directory so getdents64 works
+       and file_read refuses the data path.  No extra lookup: vfs_open_routed
+       already fetched fattr3. */
+    f->type = FILE_TYPE_NFSDIR;
+    f->nfs.size = 0;
+    f->nfs.cursor = 0;
   }
   if (routed == 0) {
     /* POSIX open(): a missing file only comes into existence with
@@ -363,20 +913,20 @@ int file_open(struct process *cur, const char *filename, int flags) {
       f->ref_count = 0;
       return -ENOENT;
     }
+    /* L59: fat16_open_ex defines open_flags = 0 on every handle it hands back
+       (a bare `struct file` on a test's stack would otherwise leak a random
+       O_APPEND bit).  The VFS's own word is authoritative, so re-apply it
+       here — one line, one place, immediately after the only call that can
+       reset it. */
+    f->open_flags = (uint32_t)flags;
     if (exists && (flags & O_TRUNC)) {
       (void)fat16_truncate(f);
     }
   }
 
+  if (routed == 1) nfs_selfcheck(f);
   int fd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-    if (cur->open_fds[i] == -1) {
-      cur->open_fds[i] = get_global_fd(f);
-      cur->num_open_fds++;
-      fd = i;
-      break;
-    }
-  }
+  fd = fd_install(cur, f);
 
   if (fd == -1) {
     if (f->type == FILE_TYPE_FAT16) fat16_close(f);
@@ -412,14 +962,7 @@ int file_connect(struct process *cur, uint32_t ip, uint16_t port, int protocol) 
   f->socket.pcb = pcb;
 
   int fd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-    if (cur->open_fds[i] == -1) {
-      cur->open_fds[i] = get_global_fd(f);
-      cur->num_open_fds++;
-      fd = i;
-      break;
-    }
-  }
+  fd = fd_install(cur, f);
 
   if (fd == -1) {
     net_socket_close(pcb);
@@ -497,21 +1040,14 @@ int file_socket(struct process *p, int domain, int type, int protocol) {
     f->usock.end = 0;
 
     int fd = -1;
-    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-      if (p->open_fds[i] == -1) {
-        p->open_fds[i] = get_global_fd(f);
-        p->num_open_fds++;
-        fd = i;
-        break;
-      }
-    }
+    fd = fd_install(p, f);
     if (fd == -1) {
       usock_close(u, 0);
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -EMFILE;
     }
-    if (type & K_SOCK_CLOEXEC) p->fd_cloexec |= 1ull << fd;
+    if (type & K_SOCK_CLOEXEC) fd_cloexec_set(p->fd_cloexec, fd);
     if (type & K_SOCK_NONBLOCK) usock_set_nonblock(u, 0, 1);
     return fd;
   }
@@ -546,14 +1082,7 @@ int file_socket(struct process *p, int domain, int type, int protocol) {
   f->socket.pcb = pcb;
 
   int fd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
-    if (p->open_fds[i] == -1) {
-      p->open_fds[i] = get_global_fd(f);
-      p->num_open_fds++;
-      fd = i;
-      break;
-    }
-  }
+  fd = fd_install(p, f);
 
   if (fd == -1) {
     net_socket_close(pcb);
@@ -848,13 +1377,13 @@ int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
   struct process *pg = process_group(p);
   if (!pg) return -EINVAL;
   if (fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
-  if (cmd == K_F_GETFD) return (pg->fd_cloexec >> fd) & 1u ? K_FD_CLOEXEC : 0;
+  if (cmd == K_F_GETFD) return fd_cloexec_test(pg->fd_cloexec, fd) ? K_FD_CLOEXEC : 0;
   if (cmd == K_F_SETFD) {
     /* Replaces the whole flag word (only FD_CLOEXEC exists). */
     if (arg & K_FD_CLOEXEC)
-      pg->fd_cloexec |= 1ull << fd;
+      fd_cloexec_set(pg->fd_cloexec, fd);
     else
-      pg->fd_cloexec &= ~(1ull << fd);
+      fd_cloexec_clear(pg->fd_cloexec, fd);
     return 0;
   }
 
@@ -928,6 +1457,12 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
+
+  if (f->type == FILE_TYPE_TIMERFD) {
+    extern int lt_timerfd_pending(int slot);
+    if (lt_timerfd_pending(f->timerfd.slot)) *r = 1;
+    return 0;
+  }
 
   if (f->type == FILE_TYPE_PIPE) {
     struct pipe *pp = f->pipe.ptr;
@@ -1322,8 +1857,20 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   } else if (f->type == FILE_TYPE_NFS) {
     base = f->nfs.cursor;
     size = f->nfs.size;
+  } else if (f->type == FILE_TYPE_FAT16DIR || f->type == FILE_TYPE_PROCFD) {
+    /* L54: Linux allows lseek on a directory fd (SEEK_SET/CUR move the
+       getdents resume point, SEEK_END is 0).  .NET's enumerator probes the
+       directory with lseek; answering EINVAL made DirectoryInfo.GetDirectories
+       throw IOException("Invalid argument") on /NFS/Data. */
+    base = f->fat16.cursor;
+    size = 0;
+  } else if (f->type == FILE_TYPE_NFSDIR) {
+    base = f->nfs.cursor;
+    size = 0;
   } else {
-    *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK)
+    *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK ||
+             f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL ||
+             f->type == FILE_TYPE_DEVFB || f->type == FILE_TYPE_DEVGPU)
                 ? ESPIPE : EINVAL;
     return -1;
   }
@@ -1338,8 +1885,12 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   if (newpos < 0) { *errp = EINVAL; return -1; }
 
   uint64_t flags = spinlock_acquire_irqsave(&f->lock);
-  if (f->type == FILE_TYPE_FAT16) f->fat16.cursor = (uint32_t)newpos;
-  else                            f->nfs.cursor  = (uint32_t)newpos;
+  if (f->type == FILE_TYPE_FAT16)
+    f->fat16.cursor = (uint32_t)newpos;
+  else if (f->type == FILE_TYPE_FAT16DIR || f->type == FILE_TYPE_PROCFD)
+    f->fat16.cursor = (uint32_t)newpos;
+  else
+    f->nfs.cursor = (uint32_t)newpos;
   spinlock_release_irqrestore(&f->lock, flags);
   *errp = 0;
   return newpos;
@@ -1368,9 +1919,25 @@ static unsigned long nfs_synth_ino(const struct nfs_fh *fh) {
   return h;
 }
 
-static void k_stat_fill(struct k_stat *st, unsigned long ino,
-                        unsigned long mode, long size) {
-  st->st_dev = 0;
+/* Volume identity.  Linux's (st_dev, st_ino) pair is what a loader keys a
+ * "is this object already mapped?" lookup on: glibc's
+ * _dl_map_object_from_fd() compares l_ino/l_dev against fstat() and returns
+ * the EXISTING link map when both match, so two distinct files that report
+ * the same pair become ONE handle.  Reporting st_dev = 0 for every file type
+ * (the old behaviour) left the pair keyed on the synthetic inode alone, so a
+ * FAT16 file and an NFS file whose hashes collided — or any two files the
+ * inode synthesis could not separate — silently shared a handle.  Give each
+ * volume its own device number, exactly as Linux does for two mounts. */
+#define K_DEV_FAT16 0x00000101u
+#define K_DEV_NFS 0x00000202u
+#define K_DEV_PIPE 0x00000303u
+#define K_DEV_SOCK 0x00000404u
+#define K_DEV_PROCFS 0x00000505u
+#define K_DEV_DEVFS 0x00000606u
+
+static void k_stat_fill(struct k_stat *st, unsigned long dev,
+                        unsigned long ino, unsigned long mode, long size) {
+  st->st_dev = dev;
   st->st_ino = ino;
   st->st_mode = mode;
   st->st_nlink = 1;
@@ -1392,7 +1959,7 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
   FS_SLOT_CHECK(f);
   switch (f->type) {
   case FILE_TYPE_FAT16: {
-    k_stat_fill(st,
+    k_stat_fill(st, K_DEV_FAT16,
                 fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
                 (f->fat16.entry.attr & 0x10)
                     ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
@@ -1404,27 +1971,174 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     return 0;
   }
   case FILE_TYPE_NFS:
-    k_stat_fill(st, nfs_synth_ino(&f->nfs.fh),
-                f->nfs.is_dir ? (K_S_IFDIR | 0755)
-                              : (K_S_IFREG | 0644),
+  case FILE_TYPE_NFSDIR:
+    k_stat_fill(st, K_DEV_NFS, nfs_synth_ino(&f->nfs.fh),
+                (f->type == FILE_TYPE_NFSDIR || f->nfs.is_dir)
+                    ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
                 f->nfs.size);
     return 0;
+  /* Anonymous objects: Linux gives each pipe/socket its own inode on its own
+     pseudo-filesystem.  Deriving the inode from the global slot keeps two
+     distinct pipes from reporting the same (dev, ino) pair — the property a
+     caller comparing two fds relies on. */
   case FILE_TYPE_PIPE:
-    k_stat_fill(st, 0, K_S_IFIFO | 0600, 0);
+    k_stat_fill(st, K_DEV_PIPE, (unsigned long)g_fd + 1, K_S_IFIFO | 0600, 0);
     return 0;
   case FILE_TYPE_SOCKET:
-    k_stat_fill(st, 0, K_S_IFSOCK | 0600, 0);
+    k_stat_fill(st, K_DEV_SOCK, (unsigned long)g_fd + 1, K_S_IFSOCK | 0600, 0);
     return 0;
   case FILE_TYPE_UNIXSOCK: /* P4: F_GETFD-probing tools stat caches use this */
-    k_stat_fill(st, 0, K_S_IFSOCK | 0600, 0);
+    k_stat_fill(st, K_DEV_SOCK, (unsigned long)g_fd + 1, K_S_IFSOCK | 0600, 0);
     return 0;
   case FILE_TYPE_FAT16DIR: /* GB-020: a directory fd stats as a directory */
-    k_stat_fill(st, fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
+    k_stat_fill(st, K_DEV_FAT16,
+                fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
                 K_S_IFDIR | 0755, 0);
+    return 0;
+  case FILE_TYPE_PROCMAPS:
+    /* Linux reports the maps file as a 0444 regular file with st_size 0
+       (measured host-side); readers must not size-gate it. */
+    k_stat_fill(st, K_DEV_PROCFS, (unsigned long)g_fd + 1, K_S_IFREG | 0444, 0);
+    return 0;
+  case FILE_TYPE_CONSOLE:
+    /* M2 stdio: a character device, 0644, size 0.  Mono's FileStream ctor
+       fstat()s each stdio handle and refuses anything that is not a real
+       file object (ArgumentException "handle"/"Invalid"); a char device is
+       exactly what Linux reports for a redirected-console fd. */
+    k_stat_fill(st, K_DEV_DEVFS, 1, K_S_IFCHR | 0644, 0);
+    return 0;
+  case FILE_TYPE_DEVNULL:
+    k_stat_fill(st, K_DEV_DEVFS, 2, K_S_IFCHR | 0666, 0);
+    return 0;
+  case FILE_TYPE_DEVURANDO:
+    k_stat_fill(st, K_DEV_DEVFS, 3, K_S_IFCHR | 0666, 0);
+    return 0;
+  case FILE_TYPE_DEVFB:
+    k_stat_fill(st, K_DEV_DEVFS, 4, K_S_IFCHR | 0644, 0);
+    return 0;
+  case FILE_TYPE_DEVGPU:
+    /* M1: the 3D ABI node -- character device, root-only in spirit but 0666
+       like the other device nodes (there is no uid model on this node). */
+    k_stat_fill(st, K_DEV_DEVFS, 5, K_S_IFCHR | 0666, 0);
     return 0;
   default:
     *errp = EBADF;
     return -1;
+  }
+}
+
+/* M6 launch plumbing: the name an open fd was opened under.  This is what
+ * readlink("/proc/self/fd/N") prints and what opening that link re-opens. */
+int file_path_of(struct process *p, int fd, char *out, int cap) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS || !out || cap <= 0) return -EBADF;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
+  if (f->type == FILE_TYPE_EMPTY) return -EBADF;
+  if (!f->path[0]) return -ENOENT;
+  int i = 0;
+  for (; f->path[i] && i < cap - 1; i++) out[i] = f->path[i];
+  out[i] = '\0';
+  return 0;
+}
+
+/* ---- L76: per-directory getdents64 census ------------------------------
+ *
+ * Task: "count the entries the game enumerates per round and compare with a
+ * direct walk of the same folder".  A repeated folder walk is invisible in a
+ * per-call row once the console is 5 MB of loader output, and `[GDT]` is
+ * capped at 400 rows for the whole boot.  This table keeps one row per
+ * directory for the life of the process and prints a *window* (counters reset
+ * after each print) every time the futex rate row fires -- so the end state,
+ * not just the first 400 directories, is in the log.
+ *
+ *   fresh  = getdents64 calls with cursor 0, i.e. the game read the folder
+ *            from the start this many times (one per open/rewind)
+ *   calls  = every getdents64 call against the folder
+ *   ents   = entries returned in the window
+ *   total  = entries the directory holds (from the READDIRPLUS cache)
+ *   dup    = a name repeated inside one listing (a real enumeration loop)
+ */
+#define L76_DIRS 48
+struct l76_dir {
+  char rel[64];
+  unsigned fresh, calls, ents, dup;
+  int total;
+};
+static struct l76_dir l76_dirs[L76_DIRS];
+
+static struct l76_dir *l76_dir_slot(const char *rel) {
+  struct l76_dir *empty = 0;
+  struct l76_dir *lru = 0;
+  for (int i = 0; i < L76_DIRS; i++) {
+    if (l76_dirs[i].rel[0] && fs_streq(l76_dirs[i].rel, rel))
+      return &l76_dirs[i];
+    if (!l76_dirs[i].rel[0] && !empty)
+      empty = &l76_dirs[i];
+    /* The table fills during the load (one slot per def folder).  Without
+       eviction the *end state* -- the dirs that matter for this lane -- could
+       never get a slot.  Evict the least active entry of this window. */
+    if (!lru || (l76_dirs[i].calls + l76_dirs[i].fresh) <
+                    (lru->calls + lru->fresh))
+      lru = &l76_dirs[i];
+  }
+  if (!empty)
+    empty = lru;
+  if (empty) {
+    int i = 0;
+    while (rel[i] && i < (int)sizeof empty->rel - 1) {
+      empty->rel[i] = rel[i];
+      i++;
+    }
+    empty->rel[i] = 0;
+    empty->fresh = empty->calls = empty->ents = empty->dup = 0;
+    empty->total = 0;
+  }
+  return empty;
+}
+
+static void l76_dir_note(const char *rel, uint32_t from, uint32_t to,
+                         int total, unsigned dup) {
+  struct l76_dir *e = l76_dir_slot(rel);
+  if (!e)
+    return;
+  if (from == 0)
+    e->fresh++;
+  e->calls++;
+  e->ents += to - from;
+  e->total = total;
+  e->dup += dup;
+}
+
+/* Called from the futex rate row (any thread, no fs lock held): print the
+ * window and reset the counters.  A directory with no activity in the window
+ * prints nothing, so the steady state is a handful of rows. */
+void rw_gdc_dump(void) {
+  for (int i = 0; i < L76_DIRS; i++) {
+    struct l76_dir *e = &l76_dirs[i];
+    if (!e->rel[0] || (!e->calls && !e->fresh && !e->dup))
+      continue;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[GDC] rel=");
+    kl_s(&kl, e->rel);
+    kl_s(&kl, " fresh=");
+    kl_i(&kl, (long)e->fresh);
+    kl_s(&kl, " calls=");
+    kl_i(&kl, (long)e->calls);
+    kl_s(&kl, " ents=");
+    kl_i(&kl, (long)e->ents);
+    kl_s(&kl, " total=");
+    kl_i(&kl, (long)e->total);
+    if (e->dup) {
+      kl_s(&kl, " dup=");
+      kl_i(&kl, (long)e->dup);
+    }
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    e->fresh = e->calls = e->ents = e->dup = 0;
   }
 }
 
@@ -1437,9 +2151,135 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
-  if (f->type != FILE_TYPE_FAT16DIR && f->type != FILE_TYPE_PROCFD)
+  if (f->type != FILE_TYPE_FAT16DIR && f->type != FILE_TYPE_PROCFD &&
+      f->type != FILE_TYPE_NFSDIR)
     return -ENOTDIR;
   if (!ubuf || bufsize <= 0) return -EINVAL;
+
+  /* L54: NFS directory enumeration.  nfs_list_dir() owns a one-directory
+     cache and READDIRPLUS parsing; this loop only packs its entries into
+     Linux dirent64 records.  The resume index lives in f->nfs.cursor, the
+     same role f->fat16.cursor plays for a FAT directory. */
+  if (f->type == FILE_TYPE_NFSDIR) {
+    int midx = -1;
+    const char *rel = 0;
+    if (!f->path[0] || !vfs_route(f->path, &midx, &rel)) return -EIO;
+    const struct nfs_mount *m = nfs_mount_at(midx);
+    if (!m) return -EIO;
+    /* End of directory must be 0, not -EIO: nfs_list_dir() uses -1 for both
+       "past the end" and "RPC error", and .NET's FileSystemEnumerator reads
+       once more after the last entry.  Ask for the count explicitly. */
+    int total = nfs_dir_entries(m, rel);
+    if (total < 0) return -EIO;
+    if ((long)f->nfs.cursor >= total) return 0;
+    int used = 0;
+    uint32_t idx = f->nfs.cursor;
+    uint32_t start_idx = idx;
+    int first_rc = 7777;
+    /* L76: duplicates are detected inside ONE listing only (a name from the
+       previous directory is not a loop). */
+    unsigned dup_hits = 0;
+    char dup_last[4][NFS_NAME_MAX];
+    int dup_last_n = 0;
+    for (int q = 0; q < 4; q++) dup_last[q][0] = 0;
+    /* L58: one row per directory the game starts reading (and per empty
+     * listing), so "the subtree was never entered" and "the subtree listed
+     * but returned nothing" are different rows. */
+    if (start_idx == 0) {
+      static int gdt_rows;
+      if (gdt_rows < 400) {
+        gdt_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[GDT] rel=");
+        kl_s(&kl, rel);
+        kl_s(&kl, " total=");
+        kl_i(&kl, total);
+        kl_s(&kl, " path=");
+        kl_s(&kl, f->path);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+    for (;;) {
+      char nm[NFS_NAME_MAX];
+      uint8_t attr = 0;
+      uint32_t sz = 0;
+      int grc = nfs_list_dir(m, rel, (int)idx, nm, sizeof nm, &attr, &sz);
+      if (idx == start_idx) first_rc = grc;
+      if (grc != 0)
+        break;
+      int nlen = 0;
+      while (nm[nlen]) nlen++;
+      /* L76: a duplicate name inside one listing is an enumeration loop that
+         no counter above can see (the count is right, the set is wrong). */
+      for (int q = 0; q < dup_last_n; q++)
+        if (fs_streq(dup_last[q], nm)) dup_hits++;
+      if (dup_last_n < 4) {
+        int ci = 0;
+        while (nm[ci] && ci < NFS_NAME_MAX - 1) {
+          dup_last[dup_last_n][ci] = nm[ci];
+          ci++;
+        }
+        dup_last[dup_last_n][ci] = 0;
+        dup_last_n++;
+      } else {
+        for (int q = 0; q < 3; q++) {
+          int ci = 0;
+          while (dup_last[q + 1][ci] && ci < NFS_NAME_MAX - 1) {
+            dup_last[q][ci] = dup_last[q + 1][ci];
+            ci++;
+          }
+          dup_last[q][ci] = 0;
+        }
+        int ci = 0;
+        while (nm[ci] && ci < NFS_NAME_MAX - 1) {
+          dup_last[3][ci] = nm[ci];
+          ci++;
+        }
+        dup_last[3][ci] = 0;
+      }
+      int reclen = (19 + nlen + 1 + 7) & ~7;
+      if (used + reclen > bufsize) break;
+      uint8_t *pb = (uint8_t *)ubuf + used;
+      uint64_t ino = 0x4E4600000000ULL + (uint64_t)idx + 1;
+      uint64_t off = (uint64_t)idx + 1;
+      for (int k = 0; k < 8; k++) pb[k] = (uint8_t)(ino >> (k * 8));
+      for (int k = 0; k < 8; k++) pb[8 + k] = (uint8_t)(off >> (k * 8));
+      pb[16] = (uint8_t)(reclen & 0xFF);
+      pb[17] = (uint8_t)((reclen >> 8) & 0xFF);
+      pb[18] = (attr & 0x10) ? 4 : 8;   /* DT_DIR / DT_REG */
+      for (int n = 0; n < nlen; n++) pb[19 + n] = (uint8_t)nm[n];
+      pb[19 + nlen] = 0;
+      used += reclen;
+      idx++;
+    }
+    f->nfs.cursor = idx;
+    l76_dir_note(rel, start_idx, idx, total, dup_hits);
+    {
+      static int lgd_rows;
+      if (lgd_rows < 4) {
+        lgd_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[LGD] path=");
+        kl_s(&kl, f->path);
+        kl_s(&kl, " rel=");
+        kl_s(&kl, rel);
+        kl_s(&kl, " from=");
+        kl_i(&kl, (long)start_idx);
+        kl_s(&kl, " first_rc=");
+        kl_i(&kl, first_rc);
+        kl_s(&kl, " n=");
+        kl_i(&kl, (long)(idx - start_idx));
+        kl_s(&kl, " used=");
+        kl_i(&kl, used);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+    return used > 0 ? used : -EIO;
+  }
 
   if (f->type == FILE_TYPE_PROCFD) {
     /* /proc/<pid>/fd: list this process's open user fds (0..n).  Reuses the
@@ -1490,17 +2330,97 @@ int file_fd_is_devfb(struct process *p, int fd) {
 
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp) {
-  (void)p;
   if (!path) { *errp = EINVAL; return -1; }
+  /* M6 launch plumbing: the virtual maps file exists for access()/stat()
+     (the host trace shows access("/proc/self/maps", F_OK) before the open). */
+  if (fs_streq(path, "/proc/self/maps")) {
+    k_stat_fill(st, K_DEV_PROCFS, 1, K_S_IFREG | 0444, 0);
+    return 0;
+  }
+  /* M2 stdio: the device nodes exist to stat()/access() too, not only to
+     open().  Linux reports /dev/console and /dev/null as char devices. */
+  if (fs_streq(path, "/dev/console") || fs_streq(path, "/dev/null")) {
+    k_stat_fill(st, K_DEV_DEVFS, fs_streq(path, "/dev/null") ? 2 : 1,
+                K_S_IFCHR | 0644, 0);
+    return 0;
+  }
+  /* AD-9 (M6): Unity resolves its executable with
+       realpath("/proc/self/exe", buf)
+     and glibc's realpath lstat()s every component.  Without these entries it
+     fails at "/proc" with ENOENT and the player prints
+       "Error 2 encountered while resolving executable path".
+     /proc/self is presented as a directory (a procfs could; the kernel has no
+     per-pid directory to point a self->pid link at yet) and the links below it
+     are symlinks whose targets readlink() already answers. */
+  if (fs_streq(path, "/proc") || fs_streq(path, "/proc/self") ||
+      fs_streq(path, "/proc/self/fd")) {
+    k_stat_fill(st, K_DEV_PROCFS, 2, K_S_IFDIR | 0555, 0);
+    return 0;
+  }
+  if (fs_streq(path, "/proc/self/exe") || fs_streq(path, "/proc/self/cwd") ||
+      fs_streq(path, "/proc/self/root")) {
+    struct process *g = p ? process_group(p) : 0;
+    const char *tgt = "/";
+    if (fs_streq(path, "/proc/self/exe"))
+      tgt = (g && g->exe_path[0]) ? g->exe_path : "/";
+    else if (fs_streq(path, "/proc/self/cwd"))
+      tgt = (g && g->cwd[0]) ? g->cwd : "/";
+    long n = 0;
+    while (tgt[n]) n++;
+    k_stat_fill(st, K_DEV_PROCFS, 3, K_S_IFLNK | 0777, n);
+    return 0;
+  }
   char abs[256];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
+  /* Paths under an NFS mount: answer from the server's fattr3.  Before this,
+     stat()/lstat() of anything on /NFS was ENOENT because only FAT16 was
+     consulted — realpath() of the launcher's own path needs it (AD-9). */
+  int midx = -1;
+  const char *rel = 0;
+  if (vfs_route(abs, &midx, &rel)) {
+    const struct nfs_mount *m = nfs_mount_at(midx);
+    struct nfs_attr a;
+    struct nfs_fh fh;
+    fh.len = 0;
+    if (!m || nfs_lookup(m, rel, &fh, &a) != 0) {
+      *errp = ENOENT;
+      return -1;
+    }
+    /* The file handle is the server-side identity, and file_stat_fd() folds
+       the SAME handle for the same file — so stat(path) and fstat(fd) agree.
+       Leaving this at 0 made every NFS file report (dev=0, ino=0), which is
+       exactly the pair glibc's dlopen uses to decide "already loaded": two
+       different NFS DSOs answered the same link map. */
+    k_stat_fill(st, K_DEV_NFS, nfs_synth_ino(&fh),
+                (a.type == NF3DIR) ? (K_S_IFDIR | 0755)
+                                   : (K_S_IFREG | 0644),
+                (long)a.size);
+    /* M6/L31: the engine's JSON probe, as stat() sees it. */
+    {
+      const char *t = "ScriptingAssemblies.json";
+      int tl = 0, pl = 0, hit = 1;
+      while (t[tl]) tl++;
+      while (abs[pl]) pl++;
+      if (pl < tl) hit = 0;
+      for (int i = 0; hit && i < tl; i++)
+        if (abs[pl - tl + i] != t[i]) hit = 0;
+      if (hit) {
+        struct kline kl; kl_init(&kl);
+        kl_s(&kl, "[XSTAT] size="); kl_i(&kl, (long)a.size);
+        kl_s(&kl, " type="); kl_i(&kl, (long)a.type);
+        kl_c(&kl, '\n'); kl_emit(&kl);
+      }
+    }
+    st->st_atime = st->st_mtime = st->st_ctime = (long)a.mtime;
+    return 0;
+  }
   struct fat16_dir_entry entry;
   uint32_t sector = 0, offset = 0;
   if (fat16_resolve_path(abs, &entry, &sector, &offset) != 0) {
     *errp = ENOENT;
     return -1;
   }
-  k_stat_fill(st, fat16_synth_ino(sector, offset),
+  k_stat_fill(st, K_DEV_FAT16, fat16_synth_ino(sector, offset),
               (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
               entry.file_size);
   /* w10-fstime: real RTC timestamp from the dirent (UTC; no FAT atime). */
@@ -1541,7 +2461,7 @@ int file_close(struct process *cur, int fd) {
       return -1;
     }
     cur->open_fds[fd] = -1;
-    cur->fd_cloexec &= ~(1ull << fd); /* P5 (D3.2): closing discards fd flags */
+    fd_cloexec_clear(cur->fd_cloexec, fd); /* P5 (D3.2): closing discards fd flags */
     if (cur->num_open_fds > 0)
       cur->num_open_fds--;
     spinlock_release_irqrestore(&proc_lock, cflags);
@@ -1549,11 +2469,14 @@ int file_close(struct process *cur, int fd) {
 
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
+  /* L57: who closed which fd, and which file description it named. */
+  fd_ev_note(FDEV_CLOSE, cur, fd, g_fd, f->path);
 
   /* P6.1: capture the record-lock identity before the type may be cleared;
    * closing ANY fd of a FAT16 file drops this process's locks on it. */
   int lock_release = (f->type == FILE_TYPE_FAT16);
   uint64_t lock_id = lock_release ? file_lock_id(f) : 0;
+  int isgpu = (f->type == FILE_TYPE_DEVGPU); /* M1: released after f->lock */
 
   /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
    * blocked peers, which takes proc_lock — and the documented order is
@@ -1579,7 +2502,13 @@ int file_close(struct process *cur, int fd) {
   if (f->type == FILE_TYPE_MEMFD)
     vm_object_unref(f->memfd.obj); /* one instance ref goes away (S4) */
   if (f->ref_count == 0) {
-    if (f->type == FILE_TYPE_FAT16) {
+    if (f->type == FILE_TYPE_TIMERFD) {
+      extern void lt_timerfd_release(int slot);
+      lt_timerfd_release(f->timerfd.slot);
+    } else if (f->type == FILE_TYPE_EPOLL) {
+      extern void lt_epoll_release(int slot);
+      lt_epoll_release(f->epollfd.slot);
+    } else if (f->type == FILE_TYPE_FAT16) {
       fat16_close(f);
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
@@ -1591,6 +2520,10 @@ int file_close(struct process *cur, int fd) {
 
   if (pp) pipe_close(pp, bend);
   else if (uu) usock_close(uu, bend);
+
+  /* M1 /dev/gpu: dropping the fd drops the client's context and resources.
+   * Outside f->lock (the release path sends control commands). */
+  if (isgpu) gpu_abi_release_fd(cur, fd);
 
   if (lock_release) file_locks_release(cur->pid, lock_id);
 
@@ -1627,8 +2560,9 @@ int file_dup(struct process *cur, int fd) {
     usock_reopen(f->usock.ptr, f->usock.end); /* P4: same ref discipline */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
-  cur->fd_cloexec &= ~(1ull << newfd); /* P5 (D3.2): dup clears CLOEXEC */
+  fd_cloexec_clear(cur->fd_cloexec, newfd); /* P5 (D3.2): dup clears CLOEXEC */
   cur->num_open_fds++;
+  fd_ev_note(FDEV_DUP, cur, newfd, g_fd, f->path);
   return newfd;
 }
 
@@ -1659,7 +2593,8 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
     usock_reopen(f->usock.ptr, f->usock.end); /* P4 */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
-  cur->fd_cloexec &= ~(1ull << newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
+  fd_cloexec_clear(cur->fd_cloexec, newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
+  fd_ev_note(FDEV_DUP2, cur, newfd, g_fd, f->path);
   cur->num_open_fds++;
   return newfd;
 }
@@ -1720,15 +2655,273 @@ void fs_close_global(int g_fd) {
  * Returns:
  *   Number of bytes read, or -1 on failure.
  */
+/* ---- L76: per-file NFS read census ------------------------------------
+ *
+ * The plateau's shape (L76 §1) is one 4 KiB read per handshake round, and the
+ * only way to say WHICH file is to count reads per path.  A per-read row
+ * would be 36 rows/s for 20 minutes; a windowed table is a handful of rows.
+ */
+#define L76_RDF 24
+struct l76_rdf {
+  char path[56];
+  unsigned reads;
+  unsigned long long bytes;
+  uint32_t last_off, last_len;
+};
+static struct l76_rdf l76_rdf[L76_RDF];
+/* L76 read cache counters: bc_hit, ra_hit, ra_fill, direct (reset per row). */
+static unsigned l76_rc_stat[4];
+
+static void l76_rd_note(const char *path, uint32_t off, int len) {
+  struct l76_rdf *e = 0, *lru = 0;
+  for (int i = 0; i < L76_RDF; i++) {
+    if (l76_rdf[i].path[0] && fs_streq(l76_rdf[i].path, path)) { e = &l76_rdf[i]; break; }
+    if (!l76_rdf[i].path[0] && !e) e = &l76_rdf[i];
+    if (!lru || l76_rdf[i].reads < lru->reads) lru = &l76_rdf[i];
+  }
+  if (!e) {
+    e = lru;
+    if (!e) return;
+    e->path[0] = 0;
+    e->reads = 0;
+    e->bytes = 0;
+  }
+  if (!e->path[0]) {
+    int i = 0;
+    while (path[i] && i < (int)sizeof e->path - 1) { e->path[i] = path[i]; i++; }
+    e->path[i] = 0;
+  }
+  e->reads++;
+  e->bytes += (unsigned)len;
+  e->last_off = off;
+  e->last_len = (uint32_t)len;
+}
+
+void rw_rdf_dump(void) {
+  {
+    struct kline kc;
+    kl_init(&kc);
+    kl_s(&kc, "[RAC] bc_hit=");
+    kl_i(&kc, (long)l76_rc_stat[0]);
+    kl_s(&kc, " ra_hit=");
+    kl_i(&kc, (long)l76_rc_stat[1]);
+    kl_s(&kc, " ra_fill=");
+    kl_i(&kc, (long)l76_rc_stat[2]);
+    kl_s(&kc, " direct=");
+    kl_i(&kc, (long)l76_rc_stat[3]);
+    kl_c(&kc, '\n');
+    kl_emit(&kc);
+    for (int i = 0; i < 4; i++) l76_rc_stat[i] = 0;
+  }
+  for (int i = 0; i < L76_RDF; i++) {
+    struct l76_rdf *e = &l76_rdf[i];
+    if (!e->path[0] || !e->reads)
+      continue;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[RDF] path=");
+    kl_s(&kl, e->path);
+    kl_s(&kl, " reads=");
+    kl_i(&kl, (long)e->reads);
+    kl_s(&kl, " bytes=");
+    kl_i(&kl, (long)e->bytes);
+    kl_s(&kl, " off=");
+    kl_i(&kl, (long)e->last_off);
+    kl_s(&kl, " len=");
+    kl_i(&kl, (long)e->last_len);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    e->reads = 0;
+    e->bytes = 0;
+  }
+}
+
+/* ---- L76: NFS read-ahead window + page cache --------------------------
+ *
+ * Measured (L76 §1, S1): the plateau moves one 4 KiB page per handshake round
+ * and the whole run averages ~127 KiB/s of NFS READ traffic, while the same
+ * transport does ~5 MB/s when a read is large enough to keep the pipeline
+ * full.  The cost is therefore per-request latency: every 4 KiB read pays a
+ * round trip of its own (3 RPCs, one RTT), and the texture path does tens of
+ * thousands of them.
+ *
+ * Two mechanisms, both inside the read path and both invisible to the caller:
+ *
+ *   RA  a *sequential* read (the fd's previous read ended exactly here) pulls
+ *       a 64 KiB window in one pipelined nfs_read_file() (48 RPCs, 16 deep,
+ *       ~3 RTTs) and the following reads are memcpy from that window.  A
+ *       random-access file never trips it: seq is only incremented when the
+ *       previous read ended at this offset.
+ *   BC  a 32-slot page cache for whole aligned 4 KiB reads -- the bundle
+ *       header/index blocks Unity re-reads per asset.
+ *
+ * Correctness: the cache is keyed by (mount, file handle, offset), the data is
+ * written before `len`/`used` under the lock, and a slot being filled is
+ * marked `filling` so a reader never copies a half-filled window.
+ */
+#define L76_PAGE 4096
+#define L76_RA_SLOTS 4
+#define L76_RA_BYTES (64 * 1024)
+#define L76_BC_SLOTS 32
+
+struct l76_ra {
+  int used, filling, mount;
+  struct nfs_fh fh;
+  uint32_t base, len;
+  uint8_t data[L76_RA_BYTES];
+};
+static struct l76_ra l76_ra[L76_RA_SLOTS];
+struct l76_bc {
+  int used, mount;
+  struct nfs_fh fh;
+  uint32_t off;
+  uint8_t data[L76_PAGE];
+};
+static struct l76_bc l76_bc[L76_BC_SLOTS];
+static spinlock_t l76_rc_lock;
+static int l76_rc_inited;
+
+static int l76_fh_eq(const struct nfs_fh *a, const struct nfs_fh *b) {
+  if (a->len != b->len) return 0;
+  for (uint32_t i = 0; i < a->len; i++)
+    if (a->data[i] != b->data[i]) return 0;
+  return 1;
+}
+
+static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
+                        uint32_t off, void *buf, uint32_t want) {
+  uint8_t *dst = (uint8_t *)buf;
+  const int mnt = f->nfs.mount_idx;
+  if (!l76_rc_inited) {
+    spinlock_init(&l76_rc_lock);
+    l76_rc_inited = 1;
+  }
+  int got;
+  /* 1. page cache */
+  if (want == L76_PAGE && (off & (L76_PAGE - 1)) == 0) {
+    uint64_t fl = spinlock_acquire_irqsave(&l76_rc_lock);
+    for (int i = 0; i < L76_BC_SLOTS; i++) {
+      struct l76_bc *b = &l76_bc[i];
+      if (b->used && b->mount == mnt && b->off == off &&
+          l76_fh_eq(&b->fh, &f->nfs.fh)) {
+        for (uint32_t k = 0; k < want; k++) dst[k] = b->data[k];
+        spinlock_release_irqrestore(&l76_rc_lock, fl);
+        l76_rc_stat[0]++;
+        return (int)want;
+      }
+    }
+    spinlock_release_irqrestore(&l76_rc_lock, fl);
+  }
+  /* 2. read-ahead window */
+  {
+    uint64_t fl = spinlock_acquire_irqsave(&l76_rc_lock);
+    for (int i = 0; i < L76_RA_SLOTS; i++) {
+      struct l76_ra *r = &l76_ra[i];
+      if (r->used && !r->filling && r->mount == mnt &&
+          l76_fh_eq(&r->fh, &f->nfs.fh) && off >= r->base &&
+          off + want <= r->base + r->len) {
+        uint32_t at = off - r->base;
+        for (uint32_t k = 0; k < want; k++) dst[k] = r->data[at + k];
+        spinlock_release_irqrestore(&l76_rc_lock, fl);
+        l76_rc_stat[1]++;
+        return (int)want;
+      }
+    }
+    spinlock_release_irqrestore(&l76_rc_lock, fl);
+  }
+  /* 3. sequential: fill a window in one pipelined read */
+  if (f->nfs.ra_seq >= 1 && f->nfs.ra_next == off && want <= 16384) {
+    struct l76_ra *slot = 0;
+    uint64_t fl = spinlock_acquire_irqsave(&l76_rc_lock);
+    for (int i = 0; i < L76_RA_SLOTS; i++) {
+      if (!l76_ra[i].filling) {
+        slot = &l76_ra[i];
+        slot->filling = 1;
+        break;
+      }
+    }
+    spinlock_release_irqrestore(&l76_rc_lock, fl);
+    if (slot) {
+      uint32_t base = off & ~(uint32_t)(L76_PAGE - 1);
+      uint64_t remain = f->nfs.size > base ? f->nfs.size - base : 0;
+      uint32_t len = remain < L76_RA_BYTES ? (uint32_t)remain : L76_RA_BYTES;
+      if (len >= want) {
+        got = nfs_read_file(m, &f->nfs.fh, base, slot->data, len);
+        fl = spinlock_acquire_irqsave(&l76_rc_lock);
+        if (got > 0) {
+          slot->mount = mnt;
+          slot->fh = f->nfs.fh;
+          slot->base = base;
+          slot->len = (uint32_t)got;
+          slot->used = 1;
+        } else {
+          slot->used = 0;
+        }
+        /* Copy while the slot is still ours: releasing the lock first would
+           let another thread evict this slot mid-copy and hand the caller a
+           window from a different file. */
+        int served = got >= (int)want;
+        if (served) {
+          uint32_t at = off - base;
+          for (uint32_t k = 0; k < want; k++) dst[k] = slot->data[at + k];
+          l76_rc_stat[2]++;
+        }
+        slot->filling = 0;
+        spinlock_release_irqrestore(&l76_rc_lock, fl);
+        if (served)
+          return (int)want;
+      } else {
+        fl = spinlock_acquire_irqsave(&l76_rc_lock);
+        slot->filling = 0;
+        spinlock_release_irqrestore(&l76_rc_lock, fl);
+      }
+    }
+  }
+  /* 4. direct read */
+  l76_rc_stat[3]++;
+  got = nfs_read_file(m, &f->nfs.fh, off, buf, want);
+  if (got == L76_PAGE && (off & (L76_PAGE - 1)) == 0) {
+    uint64_t fl = spinlock_acquire_irqsave(&l76_rc_lock);
+    struct l76_bc *b = 0;
+    for (int i = 0; i < L76_BC_SLOTS; i++) {
+      if (!l76_bc[i].used) { b = &l76_bc[i]; break; }
+      if (l76_bc[i].mount == mnt && l76_bc[i].off == off &&
+          l76_fh_eq(&l76_bc[i].fh, &f->nfs.fh)) { b = &l76_bc[i]; break; }
+    }
+    if (!b) {
+      static unsigned bc_at;
+      b = &l76_bc[bc_at++ % L76_BC_SLOTS];
+    }
+    b->mount = mnt;
+    b->fh = f->nfs.fh;
+    b->off = off;
+    for (int k = 0; k < L76_PAGE; k++) b->data[k] = dst[k];
+    b->used = 1;
+    spinlock_release_irqrestore(&l76_rc_lock, fl);
+  }
+  return got;
+}
+
 int file_read(struct process *cur, int fd, void *buf, int size, struct trap_frame *tf) {
   cur = process_group(cur); /* P1 (D7): the fd table is group state */
-  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) {
+    fd_ev_dump(cur, fd, "nofd");
+    return -1;
+  }
 
   int g_fd = cur->open_fds[fd];
-  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) {
+    /* L57: the slot was empty/invalid at read time -- this IS a closed fd. */
+    fd_ev_dump(cur, fd, "slot-empty");
+    return -1;
+  }
 
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
+  if (f->type == FILE_TYPE_EMPTY) {
+    fd_ev_dump(cur, fd, "type-empty");
+    return -1;
+  }
   if (f->type == FILE_TYPE_DEVNULL) {
     return 0; /* /dev/null reads always yield EOF (0 bytes) */
   } else if (f->type == FILE_TYPE_DEVINPUT) {
@@ -1770,6 +2963,38 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     return got * (int)sizeof(struct hb_input_event);
   } else if (f->type == FILE_TYPE_DEVFB) {
     return 0; /* GB-167: no readback of the framebuffer (Linux EINVAL; EOF here) */
+  } else if (f->type == FILE_TYPE_CONSOLE) {
+    return 0; /* /dev/console has no input source: EOF, like `< /dev/null` */
+  } else if (f->type == FILE_TYPE_TIMERFD) {
+    /* L49: an 8-byte u64 of accumulated expirations, drained by the read.
+       With none pending the read parks until the timer's next expiry (the
+       same timed-block contract pipe reads use) or fails EAGAIN when the fd
+       was created/opened non-blocking. */
+    extern int lt_timerfd_take(int slot, uint64_t *out);
+    extern uint64_t lt_timerfd_next(int slot);
+    if (size < 8) return -EINVAL;
+    uint64_t n = 0;
+    int r = lt_timerfd_take(f->timerfd.slot, &n);
+    if (r == -EAGAIN) {
+      if (f->open_flags & 0x800 /* O_NONBLOCK */) return -EAGAIN;
+      extern uint64_t timer_get_ms(void);
+      uint64_t next = lt_timerfd_next(f->timerfd.slot);
+      uint64_t now = timer_get_ms();
+      uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+      cur->wake_ms = next && next > now ? next : now + 50;
+      cur->state = PROC_STATE_BLOCKED;
+      spinlock_release_irqrestore(&proc_lock, flags);
+      return -2;
+    }
+    if (r != 0) return r;
+    /* buf is the caller's user pointer, already range-checked by sys_read. */
+    {
+      unsigned char *pb = (unsigned char *)buf;
+      for (int k = 0; k < 8; k++) pb[k] = (unsigned char)((n >> (k * 8)) & 0xFF);
+    }
+    return 8;
+  } else if (f->type == FILE_TYPE_PROCMAPS) {
+    return file_read_maps(cur, f, (char *)buf, size);
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     if (size <= 0) return 0;
     return net_get_random_bytes(buf, (uint32_t)size); /* never short */
@@ -1779,14 +3004,55 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     if (f->nfs.is_dir) return -1;               /* use read_dir for dirs */
     if (size <= 0) return 0;
     const struct nfs_mount *m = nfs_mount_at(f->nfs.mount_idx);
-    if (!m) return -1;
+    if (!m) {
+      fd_ev_dump(cur, fd, "nfs-nomount");
+      return -EIO;   /* L57: an I/O failure is not EBADF */
+    }
     uint64_t left = f->nfs.size > f->nfs.cursor
                         ? f->nfs.size - f->nfs.cursor : 0;
     uint32_t want = (uint32_t)size;
     if ((uint64_t)want > left) want = (uint32_t)left;
     if (want == 0) return 0;
-    int got = nfs_read_file(m, &f->nfs.fh, f->nfs.cursor, buf, want);
+    /* L76: cache + sequential read-ahead live behind this call. */
+    int got = l76_nfs_read(m, f, f->nfs.cursor, buf, want);
+    if (got < 0) {
+      /* L57: the fd is ALIVE here (we just resolved it, and its type is NFS);
+         the failure is the transport's.  Reporting -1 made trap.c turn it
+         into EBADF, which Mono renders as "Invalid handle to path" -- a
+         transport failure wearing a descriptor fault's clothes. */
+      fd_ev_note(FDEV_FAIL, cur, fd, g_fd, f->path);
+      fd_ev_dump(cur, fd, "nfs-read");
+      return -EIO;
+    }
+    /* M6/L31: the ScriptingAssemblies.json read, one row per call. */
+    {
+      const char *t = "ScriptingAssemblies.json";
+      int hit = 1, tl = 0, pl = 0;
+      while (t[tl]) tl++;
+      while (f->path[pl]) pl++;
+      if (pl < tl) hit = 0;
+      for (int i = 0; hit && i < tl; i++)
+        if (f->path[pl - tl + i] != t[i]) hit = 0;
+      if (hit) {
+        struct kline kl; kl_init(&kl);
+        kl_s(&kl, "[XREAD] want="); kl_i(&kl, (long)want);
+        kl_s(&kl, " got="); kl_i(&kl, (long)got);
+        kl_s(&kl, " cur="); kl_i(&kl, (long)f->nfs.cursor);
+        kl_s(&kl, " size="); kl_i(&kl, (long)f->nfs.size);
+        kl_c(&kl, '\n'); kl_emit(&kl);
+      }
+    }
     if (got > 0) f->nfs.cursor += (uint32_t)got;
+    /* L76: sequential detection for the read-ahead window. */
+    if (got > 0) {
+      if (f->nfs.ra_next == (uint32_t)(f->nfs.cursor - (uint32_t)got) &&
+          f->nfs.ra_next != 0)
+        f->nfs.ra_seq++;
+      else
+        f->nfs.ra_seq = 0;
+      f->nfs.ra_next = f->nfs.cursor;
+      l76_rd_note(f->path, (uint32_t)(f->nfs.cursor - (uint32_t)got), got);
+    }
     return got;
   } else if (f->type == FILE_TYPE_PIPE) {
     if (f->pipe.end != 0) return -1; // Read end only
@@ -1800,6 +3066,7 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   } else if (f->type == FILE_TYPE_SOCKET) {
     return net_socket_recv(f->socket.pcb, buf, size);
   }
+  fd_ev_dump(cur, fd, "type-unsupported");
   return -1;
 }
 
@@ -1836,6 +3103,8 @@ int file_available(struct process *cur, int fd) {
     /* IceWM M1: FIONREAD on a unix socket (Xtrans BytesReadable). */
     int a = usock_available(f->usock.ptr, f->usock.end);
     return a < 0 ? 0 : a;
+  } else if (f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL) {
+    return 0; /* no input source: always at EOF */
   }
   return -1;
 }
@@ -1910,10 +3179,12 @@ int console_write_user(struct process *p, const void *buf, int size) {
     }
     {
       extern spinlock_t uart_lock;
-      extern void panic_putc(char c);
+      extern void uart_putc_dbg(char c);
       uint64_t uflags = spinlock_acquire_irqsave(&uart_lock);
       for (int i = 0; i < emit; i++)
-        panic_putc(stage[i]);   /* raw: uart_putc would re-take uart_lock */
+        uart_putc_dbg(stage[i]); /* GB-097: lock-free char sink; uart_lock is
+                                    already held and this is a RETURNING path,
+                                    so it must not be the panic sink */
       spinlock_release_irqrestore(&uart_lock, uflags);
     }
     /* Advance by the completed (emitted) bytes of this window.  A partial
@@ -1952,9 +3223,53 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
     /* GB-167: pixel writes are accepted and counted; compositing them onto a
        window is the next child (the node has no surface to own yet). */
     return size;
+  } else if (f->type == FILE_TYPE_CONSOLE) {
+    /* The same sink file_write's unassigned-fd 1/2 fallback uses, now behind
+       a real file object so fstat/dup/lseek on the fd behave like a device. */
+    return console_write_user(cur, buf, size);
   } else if (f->type == FILE_TYPE_DEVURANDO) {
     return -EINVAL; /* writes to /dev/urandom are not supported (Linux EINVAL) */
   } else if (f->type == FILE_TYPE_FAT16) {
+    /* L58: Player.log grows NUL holes (159 bytes, and 22 in one run) that the
+     * text around them cannot explain.  Row every write to that one file with
+     * its file offset, length and whether the payload is all zero, so "a zero
+     * write was issued" and "the cursor jumped" are different rows. */
+    {
+      const char *pp = f->path;
+      int is_log = 0;
+      if (pp[0] == '/' && pp[1] == 'R' && pp[2] == 'W' && pp[3] == '_' &&
+          pp[4] == 'H' && pp[5] == 'O' && pp[6] == 'M' && pp[7] == 'E' &&
+          pp[8] == '/' && pp[9] == 'P' && pp[10] == 'l' && pp[11] == 'a' &&
+          pp[12] == 'y' && pp[13] == 'e' && pp[14] == 'r')
+        is_log = 1;
+      if (is_log) {
+        static int fl_rows;
+        if (fl_rows < 400) {
+          fl_rows++;
+          const uint8_t *b8 = (const uint8_t *)buf;
+          int allz = 1;
+          for (int i = 0; i < size; i++) if (b8[i]) { allz = 0; break; }
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[FLOG] off=");
+          kl_i(&kl, (long)f->fat16.cursor);
+          kl_s(&kl, " n=");
+          kl_i(&kl, size);
+          kl_s(&kl, " allzero=");
+          kl_i(&kl, allz);
+          kl_s(&kl, " head=");
+          for (int i = 0; i < 12 && i < size; i++) {
+            char hx[3];
+            const char *H = "0123456789abcdef";
+            uint8_t v = b8[i];
+            hx[0] = H[v >> 4]; hx[1] = H[v & 15]; hx[2] = 0;
+            kl_s(&kl, hx);
+          }
+          kl_c(&kl, '\n');
+          kl_emit(&kl);
+        }
+      }
+    }
     int wr = fat16_write(f, buf, size);
     /* so-vm lane A (CROSS-LANE, additive): an in-place write changes the
        bytes behind (start_cluster, file_size), so the VM_OBJ_FILE page
@@ -2061,6 +3376,74 @@ int file_pipe(struct process *cur, int fds[2]) {
  * more (vm.c), so the object is freed only at the last unref.
  * ------------------------------------------------------------------- */
 
+/* L49: a timerfd.  The fd table, its allocation and the global-file slot are
+   private to this file, so the create lives here and the timer state lives in
+   linux_compat_timers.c (which returns the slot). */
+int file_timerfd_create(struct process *cur, int clockid, int flags) {
+  extern int lt_timerfd_new(int clockid, int flags);
+  extern void lt_timerfd_release(int slot);
+  cur = process_group(cur);
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  int slot = lt_timerfd_new(clockid, flags);
+  if (slot < 0) return slot;
+  int ufd = -1;
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++)
+    if (cur->open_fds[i] == -1) { ufd = i; break; }
+  if (ufd < 0) { lt_timerfd_release(slot); return -EMFILE; }
+  struct file *f = file_alloc();
+  if (!f) { lt_timerfd_release(slot); return -ENFILE; }
+  f->type = FILE_TYPE_TIMERFD;
+  f->timerfd.slot = slot;
+  f->open_flags = (uint32_t)flags;
+  cur->open_fds[ufd] = get_global_fd(f);
+  cur->num_open_fds++;
+  if (flags & 0x80000) fd_cloexec_set(cur->fd_cloexec, ufd);
+  return ufd;
+}
+
+/* L49: an epoll instance's fd. */
+int file_epoll_create(struct process *cur, int flags) {
+  extern int lt_epoll_new(void);
+  extern void lt_epoll_release(int slot);
+  cur = process_group(cur);
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  int slot = lt_epoll_new();
+  if (slot < 0) return slot;
+  int ufd = -1;
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++)
+    if (cur->open_fds[i] == -1) { ufd = i; break; }
+  if (ufd < 0) { lt_epoll_release(slot); return -EMFILE; }
+  struct file *f = file_alloc();
+  if (!f) { lt_epoll_release(slot); return -ENFILE; }
+  f->type = FILE_TYPE_EPOLL;
+  f->epollfd.slot = slot;
+  f->open_flags = (uint32_t)flags;
+  cur->open_fds[ufd] = get_global_fd(f);
+  cur->num_open_fds++;
+  return ufd;
+}
+
+int file_epoll_slot(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  int g = p->open_fds[fd];
+  if (g < 0 || g >= MAX_GLOBAL_FILES) return -1;
+  struct file *f = &global_file_table[g];
+  if (f->type != FILE_TYPE_EPOLL) return -1;
+  return f->epollfd.slot;
+}
+
+/* L49: the timer slot behind a timerfd, for the timer syscalls. */
+int file_timerfd_slot(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  int g = p->open_fds[fd];
+  if (g < 0 || g >= MAX_GLOBAL_FILES) return -1;
+  struct file *f = &global_file_table[g];
+  if (f->type != FILE_TYPE_TIMERFD) return -1;
+  return f->timerfd.slot;
+}
+
 /* Resolve an fd to its FILE_TYPE_MEMFD global file; *err carries the
  * failure (-EBADF for a closed/absent fd, -EINVAL for another type). */
 static struct file *f1_memfd(struct process *p, int fd, int *err) {
@@ -2116,8 +3499,65 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
   cur->open_fds[ufd] = get_global_fd(f);
   cur->num_open_fds++;
   if (flags & K_MFD_CLOEXEC)
-    cur->fd_cloexec |= (1ull << ufd); /* recorded; P5's exec sweep consumes */
+    fd_cloexec_set(cur->fd_cloexec, ufd); /* recorded; P5's exec sweep consumes */
   return ufd;
+}
+
+/* Read a whole program image into a contiguous frame range, choosing the
+ * filesystem the same way open() does (M5 exec-from-NFS).  The exec path has
+ * always gone through fat16_open(), which knows only FAT16 and CREATES a
+ * zero-length root entry on a miss — so an image under an NFS mount was
+ * reported as "Failed to open file" and left a ghost behind.
+ *
+ * Returns
+ *   1  the path routed to NFS; buf/size/pages are filled and the caller
+ *      owns the frames (frame_free each page when done),
+ *   0  the path is a FAT16 path; the caller keeps the legacy cluster loader,
+ *  <0  a real failure (empty/oversized image, NFS read error, no memory).
+ */
+int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
+                  uint32_t *pages_out) {
+  if (!path || !buf_out || !size_out || !pages_out) return -1;
+
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -1;
+  int midx = -1;
+  const char *rel = 0;
+  if (!vfs_route(abs, &midx, &rel)) return 0;    /* FAT16 handles it */
+
+  struct file f;
+  if (vfs_open_routed(abs, &f) != 1) return -1;
+  if (f.nfs.is_dir) return -1;
+
+  uint32_t size = f.nfs.size;
+  if (size == 0 || (uint64_t)size > USER_IMG_SIZE) return -1;
+  const struct nfs_mount *m = nfs_mount_at(midx);
+  if (!m) return -1;
+
+  uint32_t pages = (size + FRAME_SIZE - 1) / FRAME_SIZE;
+  uint64_t buf = frame_alloc_contig((int)pages);
+  if (!buf) return -1;
+
+  uint32_t off = 0;
+  while (off < size) {
+    /* L35: hand the rest of the image to nfs_read_file in one call — it
+     * splits the request into rsize-sized READs and pipelines them.  The old
+     * 1 KiB clamp here serialized every exec image read at one RPC per
+     * millisecond-plus. */
+    int got = nfs_read_file(m, &f.nfs.fh, off,
+                            (void *)(uintptr_t)(buf + off), size - off);
+    if (got <= 0) {
+      for (uint32_t i = 0; i < pages; i++)
+        frame_free(buf + (uint64_t)i * FRAME_SIZE);
+      return -1;
+    }
+    off += (uint32_t)got;
+  }
+
+  *buf_out = (uint8_t *)(uintptr_t)buf;
+  *size_out = size;
+  *pages_out = pages;
+  return 1;
 }
 
 struct vm_object *file_memfd_obj(struct process *p, int fd) {
@@ -2152,6 +3592,56 @@ int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
   if (size)
     *size = f->fat16.entry.file_size;
   return 0;
+}
+
+/* L54: the NFS sibling of file_fat16_ident.  A regular file on a mounted
+ * export is identified by (mount index, NFSv3 file handle); nfs_obj_get()
+ * keys the page cache on that pair, so every mapping of one file shares its
+ * frames.  Directories are refused (they have their own getdents path). */
+int file_nfs_ident(struct process *p, int fd, int *mount_idx,
+                   struct nfs_fh *fh, uint32_t *size) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return -EBADF;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return -EBADF;
+  struct file *f = &global_file_table[gfd];
+  if (f->type != FILE_TYPE_NFS || f->nfs.is_dir)
+    return -ENOTSUP;
+  if (mount_idx)
+    *mount_idx = f->nfs.mount_idx;
+  if (fh)
+    *fh = f->nfs.fh;
+  if (size)
+    *size = (uint32_t)f->nfs.size;
+  return 0;
+}
+
+/* GB-025 / M3: is `fd` the /dev/fb0 node?  The mmap half (vm_mmap) needs to
+ * recognise the fd before it reaches the memfd/FAT16 object paths, and the
+ * compat ioctl route needs the same test.  One predicate, so the two halves
+ * cannot disagree about what /dev/fb0 is. */
+int file_is_devfb(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return 0;
+  return global_file_table[gfd].type == FILE_TYPE_DEVFB;
+}
+
+/* M1 (docs/gpu-abi.md): is `fd` the /dev/gpu node?  The compat ioctl route
+ * and the close hook share this predicate. */
+int file_is_devgpu(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return 0;
+  return global_file_table[gfd].type == FILE_TYPE_DEVGPU;
 }
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) for memfd (design 4.3, OQ7 minimal set:
@@ -2275,7 +3765,7 @@ int file_socketpair(struct process *p, int domain, int type, int proto,
   p->open_fds[fd0] = get_global_fd(f0);
   p->open_fds[fd1] = get_global_fd(f1);
   p->num_open_fds += 2;
-  if (type & K_SOCK_CLOEXEC) p->fd_cloexec |= (1ull << fd0) | (1ull << fd1);
+  if (type & K_SOCK_CLOEXEC) { fd_cloexec_set(p->fd_cloexec, fd0); fd_cloexec_set(p->fd_cloexec, fd1); }
   if (type & K_SOCK_NONBLOCK) {
     usock_set_nonblock(u, 0, 1);
     usock_set_nonblock(u, 1, 1);
@@ -2573,8 +4063,8 @@ int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
   if (flags & K_SOCK_NONBLOCK) usock_set_nonblock(c, 1, 1);
   pg->open_fds[nfd] = get_global_fd(nf);
   pg->num_open_fds++;
-  if (flags & K_SOCK_CLOEXEC) pg->fd_cloexec |= 1ull << nfd;
-  else pg->fd_cloexec &= ~(1ull << nfd);
+  if (flags & K_SOCK_CLOEXEC) fd_cloexec_set(pg->fd_cloexec, nfd);
+  else fd_cloexec_clear(pg->fd_cloexec, nfd);
 
   if (sa_out && salen_out) {
     struct usock_name pn;

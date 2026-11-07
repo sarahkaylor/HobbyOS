@@ -1,8 +1,11 @@
 #include "fs.h"
 #include "virtio_blk.h"
+#include "blk_cache.h"
+#include "frame.h"
 #include "lock.h"
 #include "process.h"
 #include "errno.h"
+#include "kline.h"
 
 /* Wall-clock for dirent timestamps (selfhost w10-fstime): the kernel's
  * RTC-anchored REALTIME clock (kernel/time.c — the same clock sysinfo 6
@@ -17,6 +20,7 @@ extern uint64_t rtc_make_epoch(int year, int month, int day,
                                int hour, int minute, int second);
 
 #define SECTOR_SIZE 512
+#define PROBE_PAGE 4096 /* one page: the unit the exec gate validates */
 
 static uint32_t bpb_bytes_per_sector;
 static uint32_t bpb_sectors_per_cluster;
@@ -33,6 +37,10 @@ static uint32_t cluster_size;
 static uint32_t bpb_total_sectors;
 
 static spinlock_t fat_lock;
+
+/* M6/L69: file offset -> LBA (defined with the page-in probes below). */
+static int fat16_lba_for_pos_locked(uint16_t start, uint32_t pos,
+                                    uint32_t *lba_out);
 
 /* One-sector cache for FAT table reads.  The read path walks cluster
    chains sequentially, so 256 consecutive clusters share one FAT sector;
@@ -248,8 +256,35 @@ static uint16_t read_fat(uint16_t cluster) {
   spinlock_acquire(&fat_cache_lock);
   if (!fat_cache_valid || fat_cache_sector != sector) {
     spinlock_release(&fat_cache_lock);
-    virtio_blk_read_sector(sector, fat_cache_fill, 1);
+    /* M6/L69: A METADATA SECTOR IS NEVER BELIEVED ON ONE READ.  A controller
+     * reset can abort a read and hand back the previous sector (status 0, no
+     * DMA), and ONE wrong FAT entry turns the rest of a chain walk into other
+     * files' clusters.  Measured: `chain=-1` in the middle of UnityPlayer.so
+     * (2 015/2 015 clusters, md5 identical when the host walks the same image),
+     * and an image page that read back as *consistent* zeros from a cluster
+     * the file does not own — which no exec gate can distinguish from a real
+     * zero page.  Read the sector twice and require agreement; retry a few
+     * times.  A persistent failure is a chain break, not a guess. */
+    uint8_t chk[SECTOR_SIZE];
+    int ok = 0;
+    for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+      /* RAW, not the block cache: a metadata read must never be served from a
+         frame an aborted DMA can poison, and a poisoned FAT sector is a wrong
+         cluster for the rest of the walk. */
+      if (virtio_blk_read_raw(sector, fat_cache_fill, 1) != 0)
+        continue;
+      if (virtio_blk_read_raw(sector, chk, 1) != 0)
+        continue;
+      ok = 1;
+      for (int i = 0; i < SECTOR_SIZE; i++)
+        if (fat_cache_fill[i] != chk[i]) { ok = 0; break; }
+    }
     spinlock_acquire(&fat_cache_lock);
+    if (!ok) {
+      fat_cache_valid = 0;
+      spinlock_release(&fat_cache_lock);
+      return 0xFFF8; /* chain break: callers short-circuit and can retry */
+    }
     for (int i = 0; i < SECTOR_SIZE; i++) fat_cache[i] = fat_cache_fill[i];
     fat_cache_sector = sector;
     fat_cache_valid = 1;
@@ -273,7 +308,20 @@ static void write_fat(uint16_t cluster, uint16_t val) {
   }
   spinlock_release(&fat_cache_lock);
   if (!cached) {
-    virtio_blk_read_sector(sector, buf, 1);
+    /* Same rule as read_fat: metadata never comes from the page cache. */
+    uint8_t chk2[SECTOR_SIZE];
+    int ok2 = 0;
+    for (int attempt = 0; attempt < 3 && !ok2; attempt++) {
+      if (virtio_blk_read_raw(sector, buf, 1) != 0)
+        continue;
+      if (virtio_blk_read_raw(sector, chk2, 1) != 0)
+        continue;
+      ok2 = 1;
+      for (int i = 0; i < SECTOR_SIZE; i++)
+        if (buf[i] != chk2[i]) { ok2 = 0; break; }
+    }
+    if (!ok2)
+      return; /* never stamp a sector we could not read */
   }
 
   uint8_t* p = buf + (offset % SECTOR_SIZE);
@@ -1246,6 +1294,11 @@ int fat16_open_ex(const char* filename, struct file* f, int excl) {
       f->fat16.dir_offset = offset;
       f->fat16.cursor = 0;
       f->fat16.dirty = 0;
+      /* L59: define the word fat16_write reads for O_APPEND.  A direct caller
+         (the unit tests open a bare `struct file` on the stack) would otherwise
+         inherit whatever 0x400 bit the stack happened to hold; the VFS layer
+         re-applies its own flag word straight after this returns. */
+      f->open_flags = 0;
       return 0;
     }
 
@@ -1314,6 +1367,7 @@ int fat16_open_ex(const char* filename, struct file* f, int excl) {
     f->fat16.dir_offset = offset;
     f->fat16.cursor = 0;
     f->fat16.dirty = 0;
+    f->open_flags = 0; /* L59: see the open_existing path above */
     return 0;
   }
 }
@@ -2400,6 +2454,30 @@ int fat16_read_direct(struct file* f, uint64_t dest, int size) {
  *
  * Returns the number of bytes read (0 when pos is at/after EOF).
  */
+#ifdef KERNEL_MODE_UNIT_TEST
+static int fat16_inj_mode;
+static uint32_t fat16_inj_off;
+static int fat16_inj_left;
+
+void fat16_test_inject(int mode, uint32_t off, int times) {
+  fat16_inj_mode = mode;
+  fat16_inj_off = off;
+  fat16_inj_left = times;
+}
+
+int fat16_test_lba(uint16_t start_cluster, uint32_t pos, uint32_t *lba) {
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  uint32_t out = 0;
+  int rc = fat16_lba_for_pos_locked(start_cluster, pos, &out);
+  spinlock_release_irqrestore(&fat_lock, flags);
+  if (rc < 0)
+    return -1;
+  if (lba)
+    *lba = out;
+  return 0;
+}
+#endif
+
 int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
                           uint64_t dest, int size, uint32_t pos) {
   uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
@@ -2410,7 +2488,324 @@ int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
   tmp.fat16.cursor = pos;
   int read_bytes = fat16_read_direct_locked(&tmp, dest, size, flags);
   spinlock_release_irqrestore(&fat_lock, flags);
+#ifdef KERNEL_MODE_UNIT_TEST
+  /* M6/L63 test seam.  The zero page the L62 soak executed was delivered by
+     a device that answered with a FULL-length read of zeros, so the exec
+     gate cannot be tested by a theory about short reads alone.  `mode` 1
+     returns a short count, `mode` 2 returns `size` bytes of zeros, for
+     reads that start at `off`, `times` times. */
+  if (fat16_inj_mode && fat16_inj_left > 0 && pos == fat16_inj_off) {
+    fat16_inj_left--;
+    if (fat16_inj_mode == 1)
+      return 64;
+    if (fat16_inj_mode == 2) {
+      volatile uint8_t *p = (volatile uint8_t *)dest;
+      for (int i = 0; i < size; i++)
+        p[i] = 0;
+      return size;
+    }
+  }
+#endif
   return read_bytes;
+}
+
+/* ======================================================================
+ * M6/L69: the page-in forensics that separate a poisoned block-cache frame
+ * from a device that really answered zeros.
+ * ====================================================================== */
+
+/* LBA of file offset `pos`, walking the cluster chain.  fat_lock held. */
+static int fat16_lba_for_pos_locked(uint16_t start, uint32_t pos,
+                                    uint32_t *lba_out) {
+  uint16_t c = get_cluster_for_offset(start, pos);
+  if (c == 0 || c >= 0xFFF8)
+    return -1;
+  uint32_t offset_in_cluster = pos % cluster_size;
+  uint32_t lba = data_sector + (c - 2) * bpb_sectors_per_cluster +
+                 (offset_in_cluster / SECTOR_SIZE);
+  if (lba_out)
+    *lba_out = lba;
+  return (int)c;
+}
+
+int fat16_page_drop_cache(uint16_t start_cluster, uint32_t file_size,
+                          uint32_t pos, uint32_t len) {
+  (void)file_size;
+  uint32_t dropped = 0;
+  for (uint32_t off = 0; off < len; off += SECTOR_SIZE) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    uint32_t lba = 0;
+    int ok = fat16_lba_for_pos_locked(start_cluster, pos + off, &lba) >= 0;
+    spinlock_release_irqrestore(&fat_lock, flags);
+    if (!ok)
+      break;
+    blk_cache_invalidate(lba, 1);
+    dropped++;
+  }
+  return (int)dropped;
+}
+
+/* A cache-bypassing read of one page: per-sector raw device reads at the LBAs
+ * the chain gives.  Deliberately does NOT touch blk_cache: the whole point is
+ * to ask the device the same question the cache answered. */
+static int fat16_page_raw_read(uint16_t start_cluster, uint32_t pos,
+                               uint8_t *dst, uint32_t len) {
+  for (uint32_t off = 0; off < len; off += SECTOR_SIZE) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    uint32_t lba = 0;
+    int ok = fat16_lba_for_pos_locked(start_cluster, pos + off, &lba) >= 0;
+    spinlock_release_irqrestore(&fat_lock, flags);
+    if (!ok)
+      return -1;
+    if (virtio_blk_read_raw(lba, dst + off, 1) != 0)
+      return -1;
+  }
+  return 0;
+}
+
+static uint32_t nz_bytes(const uint8_t *p, uint32_t n, uint32_t *sum) {
+  uint32_t nz = 0, s = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    if (p[i])
+      nz++;
+    s += p[i];
+  }
+  if (sum)
+    *sum = s;
+  return nz;
+}
+
+/* M6/L69: the AUTHORITATIVE page read — the one the block cache cannot
+ * poison.  Reads straight from the device at the LBAs the cluster chain gives,
+ * bypassing blk_cache entirely.  Used by the exec gates when a cached read
+ * says "zeros": a frame published from an aborted transfer (status 0, no DMA)
+ * is served to every cache reader forever, so agreement between cache reads
+ * proves nothing, while the device still holds the file's bytes.
+ * Returns the byte count (== min(size, file_size - pos)) or -1. */
+int fat16_read_direct_pos_raw(uint16_t start_cluster, uint32_t file_size,
+                              uint64_t dest, int size, uint32_t pos) {
+  if (size <= 0 || pos >= file_size)
+    return 0;
+  uint32_t want = (uint32_t)size;
+  if ((uint64_t)pos + (uint64_t)want > (uint64_t)file_size)
+    want = file_size - pos;
+#ifdef KERNEL_MODE_UNIT_TEST
+  /* The same injected delivery applies here: the seam models the DEVICE
+     answering, and this read is the one that decides whether the device really
+     holds zeros.  Without this the EIO tests would pass for the wrong reason
+     (the raw re-read would return the real page). */
+  if (fat16_inj_mode && fat16_inj_left > 0 && pos == fat16_inj_off) {
+    fat16_inj_left--;
+    if (fat16_inj_mode == 1)
+      return (int)want > 64 ? 64 : (int)want;
+    if (fat16_inj_mode == 2) {
+      volatile uint8_t *p = (volatile uint8_t *)dest;
+      for (uint32_t i = 0; i < want; i++)
+        p[i] = 0;
+      return (int)want;
+    }
+  }
+#endif
+  if (fat16_page_raw_read(start_cluster, pos, (uint8_t *)dest, want) != 0)
+    return -1;
+  return (int)want;
+}
+
+int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
+                     uint32_t pos, uint8_t *out, struct fat16_page_id *id) {
+  static int rows;
+  if (id) {
+    id->buf = 0;
+    id->off = pos;
+    id->nz = 0;
+    id->sum = 0;
+  }
+  if (rows >= 12)
+    return 0;
+  rows++;
+
+  uint32_t len = PROBE_PAGE;
+  if (file_size > pos && file_size - pos < len)
+    len = file_size - pos;
+
+  /* (1) what the chain says this page is. */
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  uint32_t lba0 = 0;
+  int cluster = fat16_lba_for_pos_locked(start_cluster, pos, &lba0);
+  uint32_t spc = bpb_sectors_per_cluster;
+  uint32_t dsec = data_sector;
+  spinlock_release_irqrestore(&fat_lock, flags);
+
+  /* (2) what the CACHE holds for that unit. */
+  struct blk_cache_unit_info ci;
+  blk_cache_probe_unit(lba0, &ci);
+
+  /* (3) what the DEVICE says, bypassing the cache entirely.  Goes through the
+     same authoritative helper the gate's repair uses, so this row means the
+     same thing in the unit tier (where the delivery seam applies) as in the
+     field.  M6/L77: THE READ LANDS IN THE CALLER'S BUFFER.
+     This used to read into a static `rawbuf[MAX_CPUS][4096]` and copy to
+     `out` after the second read.  Two things were wrong with that, and
+     together they are exactly the `[PUB] … zero=4096 ver=1` shape this lane
+     was opened for:
+       * the section is PREEMPTIBLE -- the 4 KiB read is eight sector reads,
+         each entering blk_token_acquire -> safe_wfi, and the tick schedules
+         the thread out mid-lock (see lock_order.c).  A second probe on the
+         SAME CPU then writes that CPU's slot, and the bytes copied to `out`
+         are the other probe's page, not the one `raw_nz` was counted on;
+       * the verification read `a = rawbuf` (CPU 0's slot) while the publish
+         read `rb` (this CPU's), so on any CPU but 0 the two-read rule was
+         comparing two different buffers, and the `second_zero` replay escape
+         then accepted whatever `rb` happened to hold.
+     Reading read 1 into `out` removes the copy and every shared buffer: the
+     bytes verified ARE the bytes the caller holds.  A scratch frame is used
+     only when the caller passes no buffer (diagnostic row only). */
+  uint64_t scratch = 0;
+  uint8_t *rb = out;
+  if (!rb) {
+    scratch = frame_alloc();
+    rb = (uint8_t *)scratch;
+  }
+  int raw_rc = -1;
+  if (rb && len == PROBE_PAGE)
+    raw_rc = fat16_read_direct_pos_raw(start_cluster, file_size,
+                                       (uint64_t)rb, (int)len, pos) ==
+                     (int)len
+                 ? 0
+                 : -1;
+  uint32_t raw_sum = 0;
+  uint32_t raw_nz = (raw_rc == 0) ? nz_bytes(rb, len, &raw_sum) : 0;
+
+  /* (4) drop the cache for those sectors and read normally again: if the
+     bytes change, the frame the cache served was the lie. */
+  int dropped = fat16_page_drop_cache(start_cluster, file_size, pos, len);
+  uint64_t rfbuf = frame_alloc();
+  int refill_n = -1, refill_nz = 0;
+  uint32_t refill_sum = 0;
+  if (rfbuf) {
+    refill_n = fat16_read_direct_pos(start_cluster, file_size, rfbuf, (int)len,
+                                     pos);
+    if (refill_n > 0)
+      refill_nz = nz_bytes((const uint8_t *)rfbuf, (uint32_t)refill_n,
+                           &refill_sum);
+  }
+
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[TXT] PROBE off=0x");
+  kl_hex(&kl, (unsigned long)pos);
+  kl_s(&kl, " size=");
+  kl_i(&kl, (long)file_size);
+  kl_s(&kl, " chain=");
+  kl_i(&kl, cluster);
+  kl_s(&kl, " spc=");
+  kl_i(&kl, (int)spc);
+  kl_s(&kl, " data=");
+  kl_i(&kl, (long)dsec);
+  kl_s(&kl, " lba=0x");
+  kl_hex(&kl, (unsigned long)lba0);
+  kl_s(&kl, " len=");
+  kl_i(&kl, (long)len);
+  kl_s(&kl, " | cache found=");
+  kl_i(&kl, ci.found);
+  kl_s(&kl, " fstate=");
+  kl_i(&kl, (int)ci.fstate);
+  kl_s(&kl, " valid=0x");
+  kl_hex(&kl, (unsigned long)ci.valid);
+  kl_s(&kl, " c_nz=");
+  kl_i(&kl, (long)ci.nz);
+  kl_s(&kl, " c_sum=0x");
+  kl_hex(&kl, (unsigned long)ci.sum);
+  kl_s(&kl, " | raw rc=");
+  kl_i(&kl, raw_rc);
+  kl_s(&kl, " r_nz=");
+  kl_i(&kl, (long)raw_nz);
+  kl_s(&kl, " r_sum=0x");
+  kl_hex(&kl, (unsigned long)raw_sum);
+  kl_s(&kl, " | dropped=");
+  kl_i(&kl, dropped);
+  kl_s(&kl, " refill n=");
+  kl_i(&kl, refill_n);
+  kl_s(&kl, " f_nz=");
+  kl_i(&kl, (long)refill_nz);
+  kl_s(&kl, " f_sum=0x");
+  kl_hex(&kl, (unsigned long)refill_sum);
+  kl_s(&kl, "\n");
+  kl_emit(&kl);
+  if (rfbuf)
+    frame_free(rfbuf);
+  /* M6/L72: THE PROBE'S OWN READ IS THE GOOD ONE.
+   *
+   * Measured (twice, at the same page): the first cache-bypassed read of
+   * `/RWDSO/UnityPlayer.so` off 0x9AD000 returns the file's 3547 non-zero
+   * bytes; the reads that follow return 4096 zeros, so the gate's own
+   * "two raw reads must agree" loop never sees the truth and refuses a page
+   * the device answered correctly a moment earlier.  The probe already holds
+   * that first answer, so it verifies it (a SECOND read must agree, non-zero)
+   * and hands the page to the caller.  Same two-read rule, applied to the
+   * read that actually succeeds; a torn page still cannot pass. */
+  if (out && rb == out && len == PROBE_PAGE && raw_rc == 0 && raw_nz > 0) {
+    uint64_t chk = frame_alloc();
+    int ok = 0, second_zero = 0;
+    if (chk) {
+      int n2 = fat16_read_direct_pos_raw(start_cluster, file_size, chk,
+                                         (int)len, pos);
+      if (n2 == (int)len) {
+        const uint8_t *a = rb;
+        const uint8_t *b = (const uint8_t *)chk;
+        ok = 1;
+        second_zero = 1;
+        for (uint32_t i = 0; i < len; i++) {
+          if (a[i] != b[i]) ok = 0;
+          if (b[i]) second_zero = 0;
+        }
+        /* M6/L72: a SECOND READ OF ZEROS IS THE DEVICE'S KNOWN REPLAY, NOT A
+         * DISAGREEMENT.  Measured on this exact page: read 1 = the file's 3754
+         * non-zero bytes (host disk at the same LBA: 3754), read 2 = 4096
+         * zeros, read 3 = zeros.  Requiring two NON-ZERO reads therefore
+         * refuses a page the device answered correctly once, and the process
+         * dies with SIGBUS at the same VA in every run.  A torn page still
+         * cannot pass: a torn read is different NON-ZERO content, and that is
+         * still rejected.  The zero replay is accepted and counted. */
+        if (!ok && second_zero)
+          ok = 1;
+      }
+      frame_free(chk);
+    }
+    if (ok) {
+      /* M6/L77: THE ID DESCRIBES WHAT IS IN `out` NOW.
+         Re-measured after the verdict, from the same buffer the caller will
+         publish, so the publisher's identity check compares like with like
+         (there is no copy between the verdict and the caller). */
+      if (id) {
+        id->buf = (uint64_t)out;
+        id->off = pos;
+        id->nz = nz_bytes(out, len, &id->sum);
+      }
+      if (second_zero) {
+        static int rz;
+        if (rz < 6) {
+          rz++;
+          struct kline kz;
+          kl_init(&kz);
+          kl_s(&kz, "[TXT] REPLAY off=");
+          kl_hex(&kz, (unsigned long)pos);
+          kl_s(&kz, " -> read 1 non-zero, read 2 all-zero (device replay):"
+                    " publishing read 1\n");
+          kl_emit(&kz);
+        }
+      }
+      if (scratch)
+        frame_free(scratch);
+      return 1;
+    }
+  }
+  /* 0/1 only: the caller treats 1 as "the page is in *out".  Returning the
+     non-zero byte count here made a page with exactly one non-zero byte look
+     like a successful publish of an unfilled buffer. */
+  if (scratch)
+    frame_free(scratch);
+  return 0;
 }
 
 /**
@@ -2420,9 +2815,101 @@ int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
  * Returns:
  *   Number of bytes written.
  */
+/* L58: writes to one file must be one critical section.
+ *
+ * fat16_write() drops fat_lock across the sector read/write, which is right for
+ * the filesystem (a blocking device op must not freeze every FAT op) but wrong
+ * for the *file*: the cursor is file state, so two threads writing the same
+ * file interleave as
+ *      A: cur=100 -> patch sector -> (lock drops)
+ *      B: cur=100 -> patch sector -> write          (A's chunk lost)
+ *      A: write -> cur=100+len(A)
+ *      B:        -> cur=100+len(B)
+ * and the next write starts len(B) bytes past the data, leaving a NUL hole of
+ * exactly one chunk — the Player.log shape (19, 22, 102, 159-byte holes at
+ * non-sector-aligned offsets).  Player.log has two writers (Unity's log and
+ * the launcher's [XSW] rows) on one fd, so this is reachable.
+ *
+ * The fix is a small hashed per-path lock held across the whole call, outside
+ * fat_lock (order: wr_lock > fat_lock, nowhere reversed).  `[FATW] CONC` counts
+ * calls that arrived while another write to the same path was in flight — the
+ * race being real is a row, not a theory.
+ */
+static spinlock_t wr_locks[64];
+static volatile int wr_busy[64];
+
+static uint32_t wr_slot(const struct file *f) {
+  uint32_t h = 2166136261u;
+  const char *p = f->path;
+  for (int i = 0; p[i] && i < 96; i++) h = (h ^ (uint8_t)p[i]) * 16777619u;
+  return h & 63u;
+}
+
 int fat16_write(struct file* f, const void* buf, int size) {
+  uint32_t wslot = wr_slot(f);
+  /* Counted BEFORE the lock: the count is "writers that arrived while this
+   * file was being written", which is exactly the pre-fix race. */
+  int overlapped = ++wr_busy[wslot];
+  spinlock_acquire(&wr_locks[wslot]);
+  if (overlapped > 1) {
+    static int conc_rows;
+    if (conc_rows < 8) {
+      conc_rows++;
+      struct kline kc;
+      kl_init(&kc);
+      kl_s(&kc, "[FATW] CONC path=");
+      kl_s(&kc, f->path);
+      kl_s(&kc, " busy=");
+      kl_i(&kc, overlapped);
+      kl_s(&kc, " n=");
+      kl_i(&kc, size);
+      kl_c(&kc, '\n');
+      kl_emit(&kc);
+    }
+  }
+
+  /* L59: O_APPEND — refresh the handle's dirent snapshot BEFORE taking
+     fat_lock (fat16_resolve_path takes it itself; doing this under fat_lock
+     deadlocks the CPU, measured as [LOCKFOREVER] in the unit tier).  The
+     per-path wr_lock is already held, so no other writer of this path can
+     change the size between the refresh and the cursor assignment below. */
+  if (f->open_flags & K_O_APPEND) {
+    if (f->path[0]) {
+      struct fat16_dir_entry e;
+      uint32_t ds = 0, dof = 0;
+      if (fat16_resolve_path(f->path, &e, &ds, &dof) == 0) {
+        f->fat16.entry = e;
+        f->fat16.dir_sector = ds;
+        f->fat16.dir_offset = dof;
+        /* SEC-5: disk_seen is the snapshot the sync's clobber guard compares
+           against.  We just read the slot, so it IS what the slot holds —
+           leaving the open-time snapshot here makes the guard believe another
+           writer changed the dirent and refuse to write the new size, which
+           read back as a 9-byte file (measured). */
+        f->fat16.disk_seen = e;
+      }
+    }
+  }
+
   uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  /* L59: O_APPEND is a WRITE-TIME property, not an open-time one.  Linux
+     seeks every write on an O_APPEND file to the end of file and does it
+     atomically with respect to other writers, which is what makes two
+     appenders interleave whole records instead of overwriting each other
+     (§45.9 item 4: Player.log has two writers, and a second handle opening
+     the same file with O_APPEND used to start at its own cursor).  Setting
+     the cursor HERE, inside the per-path write lock and under fat_lock, is
+     what makes it atomic: doing it at open() would leave a second writer
+     using an end that was already stale.
+     The size comes from the refresh above, not from this handle's open-time
+     snapshot: a second handle opened before the first write still carries
+     size 0, so appending from a stale snapshot overwrites (measured: the
+     append test read back 9 bytes of 461). */
+  if (f->open_flags & K_O_APPEND)
+    f->fat16.cursor = f->fat16.entry.file_size;
   if (size == 0) {
+    wr_busy[wslot]--;
+    spinlock_release(&wr_locks[wslot]);
     spinlock_release_irqrestore(&fat_lock, flags);
     return 0;
   }
@@ -2433,6 +2920,10 @@ int fat16_write(struct file* f, const void* buf, int size) {
   if (f->fat16.entry.start_cluster == 0) {
     f->fat16.entry.start_cluster = alloc_cluster();
     if (f->fat16.entry.start_cluster == 0) {
+      /* Every exit must drop BOTH locks: wr_locks[wslot] is held for the
+       * whole call, and leaking it wedges every later write to this slot. */
+      wr_busy[wslot]--;
+      spinlock_release(&wr_locks[wslot]);
       spinlock_release_irqrestore(&fat_lock, flags);
       return 0;
     }
@@ -2470,10 +2961,74 @@ int fat16_write(struct file* f, const void* buf, int size) {
     uint32_t chunk = SECTOR_SIZE - offset_in_sector;
     if (chunk > bytes_to_write) chunk = bytes_to_write;
 
+    /* L58: a partial-sector write is a read-modify-write, and the read used to
+     * be unchecked.  A failed (or silently zero-filling) read left `sec_buf`
+     * as uninitialised stack, and the write-back then stamped those bytes over
+     * a sector that already held text: Player.log grew 159 NULs at offset
+     * 79360 (512-aligned) and resumed mid-word.  Rules:
+     *   - the buffer starts zeroed, so a failed read can never leak stack;
+     *   - a failed READ abandons the write (short count) instead of
+     *     publishing a hole;
+     *   - a failed WRITE is reported the same way, not ignored;
+     *   - `[FATW] ZERORD` names the exact defect if a sector that must hold
+     *     data reads back all-zero (the hole's precondition). */
+    int rmw_failed = 0;
     spinlock_release_irqrestore(&fat_lock, flags);
-    if (chunk < SECTOR_SIZE) virtio_blk_read_sector(sector_num, sec_buf, 1);
-    for (uint32_t i = 0; i < chunk; i++) sec_buf[offset_in_sector + i] = in[written_bytes++];
-    virtio_blk_write_sector(sector_num, sec_buf, 1);
+    if (chunk < SECTOR_SIZE) {
+      for (uint32_t z = 0; z < SECTOR_SIZE; z++) sec_buf[z] = 0;
+      if (virtio_blk_read_sector(sector_num, sec_buf, 1) != 0) {
+        rmw_failed = 1;
+      } else if (f->fat16.entry.file_size > f->fat16.cursor - offset_in_sector) {
+        /* Bytes before this write already live in this sector; an all-zero
+         * read means the device/cache handed us a hole. */
+        int all_zero = 1;
+        for (uint32_t z = 0; z < SECTOR_SIZE; z++)
+          if (sec_buf[z]) { all_zero = 0; break; }
+        if (all_zero) {
+          static int zw_rows;
+          if (zw_rows < 16) {
+            zw_rows++;
+            struct kline kz;
+            kl_init(&kz);
+            kl_s(&kz, "[FATW] ZERORD sector=");
+            kl_i(&kz, (long)sector_num);
+            kl_s(&kz, " off=");
+            kl_i(&kz, (long)(f->fat16.cursor - offset_in_sector));
+            kl_s(&kz, " size=");
+            kl_i(&kz, (long)f->fat16.entry.file_size);
+            kl_c(&kz, '\n');
+            kl_emit(&kz);
+          }
+        }
+      }
+    }
+    if (rmw_failed) {
+      static int rf_rows;
+      if (rf_rows < 8) {
+        rf_rows++;
+        struct kline kr;
+        kl_init(&kr);
+        kl_s(&kr, "[FATW] RMWREAD sector=");
+        kl_i(&kr, (long)sector_num);
+        kl_s(&kr, " off=");
+        kl_i(&kr, (long)f->fat16.cursor);
+        kl_c(&kr, '\n');
+        kl_emit(&kr);
+      }
+      flags = spinlock_acquire_irqsave(&fat_lock);
+      break;                        /* short write: never stamp a hole */
+    }
+    /* Count nothing until the sector is on disk: a failed write must leave
+     * written_bytes (and so the caller's offset) short, never "advanced past
+     * bytes that did not land" — that advance is what turns a transient
+     * failure into a NUL hole. */
+    for (uint32_t i = 0; i < chunk; i++)
+      sec_buf[offset_in_sector + i] = in[written_bytes + i];
+    if (virtio_blk_write_sector(sector_num, sec_buf, 1) != 0) {
+      flags = spinlock_acquire_irqsave(&fat_lock);
+      break;
+    }
+    written_bytes += (int)chunk;
     flags = spinlock_acquire_irqsave(&fat_lock);
 
     f->fat16.cursor += chunk;
@@ -2503,6 +3058,8 @@ int fat16_write(struct file* f, const void* buf, int size) {
     fat16_sync_entry(f);   /* keep the on-disk dir entry (size/clusters/time)
                               current so stat-by-path sees it immediately */
   }
+  wr_busy[wslot]--;
+  spinlock_release(&wr_locks[wslot]);
   return written_bytes;
 }
 
@@ -2543,6 +3100,39 @@ int fat16_stats(uint64_t *out_total, uint64_t *out_free) {
   *out_total = (uint64_t)total_clusters * cluster_size;
   *out_free = free_clusters * cluster_size;
   return 0;
+}
+
+/* L78: geometry for the block-stress probe's write-verify guard.
+ *
+ * Returns 1 when `lba` lies in the volume's data area and its FAT entry is
+ * addressable; fills the sector that holds that entry, the byte offset in it,
+ * and the cluster number.  Reads nothing and takes no lock: the bpb fields are
+ * fixed at mount.  The caller reads `fat_sec` raw (under the device token it
+ * already holds) and treats a 0x0000 entry as "free" -- an unallocated cluster
+ * the probe may read, write back, and re-read without touching a live file.
+ * Conservative by construction: a torn or odd read can only make the guard say
+ * "no", never "yes" to an allocated cluster. */
+int fat16_lba_scratch_geom(uint64_t lba, uint64_t *fat_sec, uint32_t *off,
+                           uint64_t *cluster) {
+  if (!fat_sec || !off || !cluster)
+    return 0;
+  if (bpb_sectors_per_cluster == 0 || bpb_total_sectors == 0)
+    return 0;
+  if (lba < data_sector)
+    return 0;
+  uint32_t data_sectors =
+      bpb_total_sectors > data_sector ? bpb_total_sectors - data_sector : 0;
+  uint32_t total_clusters = data_sectors / bpb_sectors_per_cluster;
+  if (total_clusters > 0xFFF0u)
+    total_clusters = 0xFFF0u;
+  uint64_t cl = 2 + (lba - data_sector) / bpb_sectors_per_cluster;
+  if (cl >= 2 + (uint64_t)total_clusters)
+    return 0;
+  uint64_t byte_off = cl * 2;
+  *fat_sec = (uint64_t)fat_sector + byte_off / SECTOR_SIZE;
+  *off = (uint32_t)(byte_off % SECTOR_SIZE);
+  *cluster = cl;
+  return 1;
 }
 
 /* GB-020: getdents64 backend.  For an open directory fd, enumerate the

@@ -60,6 +60,28 @@
  * translates that into the 144-byte Linux layout, so the two ABIs can never
  * disagree about a file's size — and Doom's WAD is opened, seeked and read by
  * size, while libX11 fstats its sockets and musl's stdio probes its files.
+ *
+ * JOB CONTROL / NICE / AFFINITY — WHAT IS MODELLED
+ * -----------------------------------------------
+ * The PCB has a pid, a parent_pid and a group anchor (tgid); it has no pgid,
+ * no session, no nice value and no CPU mask, and this lane may not add fields
+ * to process.h.  Each handler below therefore translates onto the anchor and
+ * reports what is TRUE of this kernel instead of inventing state:
+ *
+ *   getpgid/getsid     the group anchor's pid (sid == pgid here).
+ *   setpgid(0,0)       success — every process is already its own anchor.
+ *   setpgid(other)     -EPERM; joining a group is not expressible.
+ *   setsid             -EPERM; Linux's own refusal for a group leader.
+ *   getpriority        nice 0 (raw 20) for every target.
+ *   setpriority        non-negative nice accepted and ignored (a one-class
+ *                      scheduler cannot honour it and it can never be a
+ *                      correctness failure); negative nice is -EPERM.
+ *   sched_getaffinity  the online CPU set, 8 bytes written, the caller's whole
+ *                      128-byte buffer zeroed first (see the handler).
+ *   sched_setaffinity  accepted, not enforced: the scheduler has no per-process
+ *                      mask, and affinity is a hint.
+ *   prctl              PR_SET/GET_NAME, PR_SET/GET_DUMPABLE, PR_SET/GET_PDEATHSIG
+ *                      (see the handler for exactly how much each one does).
  */
 #include "linux_compat.h"
 
@@ -111,10 +133,15 @@ static int l_ret(struct trap_frame *tf, int rc) {
 
 /* ---- compat-only per-process state --------------------------------------
  * process.h has no room for these (it is another lane's file), so they live
- * here as pid-indexed tables: 64 entries, no allocation, no lock needed for a
- * naturally-aligned 64-bit store on this target.  See the header comment for
- * exactly how much of this the delivery engine honours today. */
+ * here as pid-indexed tables: MAX_PROCESSES entries, no allocation, no lock
+ * needed for a naturally-aligned 64-bit store on this target.  See the header
+ * comment for exactly how much of this the delivery engine honours today. */
 static uint64_t l_sigmask[MAX_PROCESSES];
+
+/* sa_flags per (pid, signal).  The native PCB stores handler/mask/restorer
+   but not the flag word, and the compat delivery engine needs SA_ONSTACK and
+   SA_SIGINFO to build a correct frame.  Keyed like everything else here. */
+static uint32_t l_sigflags[MAX_PROCESSES][HO_SIG_MAX];
 
 struct l_altstack_state {
   uint64_t ss_sp;
@@ -123,6 +150,39 @@ struct l_altstack_state {
   int32_t in_use;
 };
 static struct l_altstack_state l_altstack[MAX_PROCESSES];
+
+/* --- accessors for linux_compat_thr.c's frame engine ---------------------
+ * One file owns the state; the engine that builds Linux rt_sigframes asks. */
+uint64_t linux_compat_sigmask_get(struct process *p) {
+  int slot = l_slot(p);
+  return slot < 0 ? 0 : l_sigmask[slot];
+}
+
+void linux_compat_sigmask_set(struct process *p, uint64_t mask) {
+  int slot = l_slot(p);
+  if (slot < 0) return;
+  mask &= ~((1ull << (L_SIGKILL - 1)) | (1ull << (L_SIGSTOP - 1)));
+  l_sigmask[slot] = mask;
+}
+
+int linux_compat_altstack_get(struct process *p, uint64_t *sp, uint64_t *size,
+                              int *flags) {
+  int slot = l_slot(p);
+  if (slot < 0 || !l_altstack[slot].in_use) return -1;
+  if (sp) *sp = l_altstack[slot].ss_sp;
+  if (size) *size = l_altstack[slot].ss_size;
+  if (flags) *flags = l_altstack[slot].ss_flags;
+  return 0;
+}
+
+int linux_compat_sigflags_get(struct process *p, int sig) {
+  /* Dispositions (and therefore their flags) are group state: a handler
+     installed by one thread is entered by any thread, with that thread's
+     stack rules.  Resolve the anchor before the pid lookup. */
+  int slot = l_slot(process_group(p));
+  if (slot < 0 || sig <= 0 || sig >= HO_SIG_MAX) return 0;
+  return (int)l_sigflags[slot][sig];
+}
 
 /* The umask is process state in POSIX but a single kernel-wide value here:
  * every compat process is uid 0 and FAT16 carries no permission bits, so a
@@ -138,9 +198,12 @@ static int l_sa_diag;
 
 static void l_stat_fill(const struct k_stat *ks, linux_stat_t *o) {
   l_zero(o, sizeof *o);
-  /* One volume, mounted at /; the native ABI also reports 0.  A program that
-     compares st_dev between two paths still gets a stable answer. */
-  o->st_dev = 0;
+  /* M6/L30: the device comes from the volume (fs.c), not from a constant.
+     glibc's dlopen keys "is this object already loaded?" on (st_dev, st_ino);
+     reporting 0 for every volume left the pair keyed on the synthetic inode
+     alone, so files on two different filesystems with equal inode numbers
+     answered the same link map.  Linux reports one st_dev per mount. */
+  o->st_dev = (uint64_t)ks->st_dev;
   o->st_ino = ks->st_ino;
   o->st_nlink = ks->st_nlink > 0 ? (uint64_t)ks->st_nlink : 1;
   o->st_mode = ks->st_mode;
@@ -237,49 +300,95 @@ static int l_proc_newfstatat(struct process *p, struct trap_frame *tf) {
 
 /* ---- readlink / readlinkat --------------------------------------------- */
 
-/* The virtual symlinks a static binary actually reads.  /proc/self/exe is the
-   one the contract names (SDL and musl's dlsym-free paths read it); cwd and
-   root are one line each and cost nothing. */
+/* The virtual symlinks a compat program actually reads.
+ *
+ * MEASURED on the host against the real RimWorld binary (tools/rw/proc-usage.sh,
+ * 2026-11-02): readlinkat("/proc/self/exe") once with a 4096 buffer, then
+ * readlink("/proc/self/exe") 6x with 99-byte buffers from the startup and
+ * render threads; readlink("/proc/self") once (the kernel answers the pid as
+ * a decimal string); and NO readlink of /proc/self/fd/N (the fds there are
+ * re-opened by PATH, which is why the open path resolves that link, below).
+ *
+ * /proc/self/exe answers the executable the loader was asked to run, never
+ * the interpreter it entered and never the truncated display name in
+ * p->name.  That distinction is load-bearing: Unity's SDL derives its data
+ * directory from this link, and with ld.so there it reports "There is no data
+ * folder" (measured on the host; see docs/rimworld-launch-log.md).
+ *
+ * Return: > 0 length copied into `out` (never NUL-terminated, like
+ * readlink(2)); 0 = "not a virtual link, decide from the volume" (the
+ * caller's sentinel); < 0 = -errno.  (0 rather than 1 on purpose: a pid
+ * string for pid < 10 is one character long and used to be mistaken for the
+ * sentinel — measured on the first probe boot, /proc/self answered ENOENT.)
+ */
+static int l_streq(const char *a, const char *b) {
+  if (!a || !b) return 0;
+  while (*a && *a == *b) { a++; b++; }
+  return *a == '\0' && *b == '\0';
+}
+
+static int l_dec(char *out, unsigned v) {
+  char tmp[12];
+  int n = 0;
+  if (v == 0) { out[0] = '0'; return 1; }
+  while (v && n < 11) { tmp[n++] = (char)('0' + (v % 10)); v /= 10; }
+  for (int i = 0; i < n; i++) out[i] = tmp[n - 1 - i];
+  return n;
+}
+
+/* "/proc/self/fd/<decimal>" exactly. */
+static int l_self_fd_path(const char *path, int *fd_out) {
+  static const char pfx[] = "/proc/self/fd/";
+  int i = 0;
+  for (; pfx[i]; i++)
+    if (path[i] != pfx[i]) return 0;
+  const char *n = path + i;
+  if (!*n) return 0;
+  unsigned v = 0;
+  for (; *n; n++) {
+    if (*n < '0' || *n > '9') return 0;
+    v = v * 10 + (unsigned)(*n - '0');
+    if (v > 100000u) return 0;
+  }
+  *fd_out = (int)v;
+  return 1;
+}
+
 static int l_readlink_target(struct process *p, const char *path, char *out,
                              uint64_t cap) {
   if (path[0] != '/') return -ENOENT;
-  const char *q = path + 1;
-  int is_exe = 0, is_cwd = 0, is_root = 0;
-  const char *exe = "proc/self/exe", *cwd = "proc/self/cwd",
-             *root = "proc/self/root";
-  int i = 0;
-  while (exe[i] && q[i] == exe[i]) i++;
-  if (exe[i] == '\0' && q[i] == '\0') is_exe = 1;
-  for (i = 0; !is_exe && cwd[i] && q[i] == cwd[i]; i++)
-    ;
-  if (!is_exe && cwd[i] == '\0' && q[i] == '\0') is_cwd = 1;
-  for (i = 0; !is_exe && !is_cwd && root[i] && q[i] == root[i]; i++)
-    ;
-  if (!is_exe && !is_cwd && root[i] == '\0' && q[i] == '\0') is_root = 1;
-  if (!is_exe && !is_cwd && !is_root) return 1; /* not a virtual link */
+  struct process *g = p ? process_group(p) : 0;
+  const char *src = 0;
+  char buf[160];
+  int fd = -1;
 
-  const char *src;
-  char joined[160];
-  if (is_exe) {
-    /* The loader names the process after the staged image ("PROBE.ELF",
-       "DOOM.ELF"); present it as an absolute path, which is what a guest
-       that re-execs itself or prints its own path expects. */
-    src = p->name;
+  if (l_streq(path, "/proc/self")) {
+    int n = l_dec(buf, (unsigned)(g ? g->pid : 0));
+    buf[n] = '\0';
+    src = buf;
+  } else if (l_streq(path, "/proc/self/exe")) {
+    /* The loaded executable's path (absolute at load time).  Fall back to the
+       display name for a process that predates the field / a kernel thread. */
+    src = (g && g->exe_path[0]) ? g->exe_path : (p ? p->name : "/");
     if (src[0] != '/') {
       uint64_t n = 0;
-      joined[n++] = '/';
-      while (src[n - 1] && n < sizeof joined - 1) {
-        joined[n] = src[n - 1];
-        n++;
-      }
-      joined[n] = '\0';
-      src = joined;
+      buf[n++] = '/';
+      for (int i = 0; src[i] && n < sizeof buf - 1; i++) buf[n++] = src[i];
+      buf[n] = '\0';
+      src = buf;
     }
-  } else if (is_cwd) {
-    src = p->cwd[0] ? p->cwd : "/";
-  } else {
+  } else if (l_streq(path, "/proc/self/cwd")) {
+    src = (g && g->cwd[0]) ? g->cwd : "/";
+  } else if (l_streq(path, "/proc/self/root")) {
     src = "/";
+  } else if (l_self_fd_path(path, &fd)) {
+    int r = file_path_of(g, fd, buf, (int)sizeof buf);
+    if (r != 0) return r; /* -EBADF for a closed fd, -ENOENT for a nameless one */
+    src = buf;
+  } else {
+    return 0; /* not a virtual link */
   }
+
   uint64_t len = 0;
   while (src[len]) len++;
   uint64_t n = len < cap ? len : cap; /* truncated, but no NUL terminator */
@@ -295,7 +404,26 @@ static int l_readlink_common(struct process *p, uint64_t upath, uint64_t ubuf,
   if (r != 0) return r;
   char target[160];
   int n = l_readlink_target(p, path, target, sizeof target);
-  if (n == 1) {
+  if (l_streq(path, "/proc/self/exe")) {
+    /* M6/AD-9 diagnostic: Unity resolves its data folder through this link
+       from more than one thread; record which caller and what answer, so a
+       failure is attributable instead of guessed at. */
+    static int exe_reports;
+    if (exe_reports < 12) {
+      exe_reports++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LCOMPAT] readlink exe pid=");
+      kl_i(&kl, (long)(process_group(p) ? process_group(p)->pid : 0));
+      kl_s(&kl, " bufsz=");
+      kl_i(&kl, (long)bufsz);
+      kl_s(&kl, " -> ");
+      kl_i(&kl, n);
+      kl_s(&kl, "\n");
+      kl_emit(&kl);
+    }
+  }
+  if (n == 0) {
     /* A real FAT16 path: readlink(2) on a non-symlink is -EINVAL, and on a
        missing path -ENOENT.  Decide from the volume, not by guessing. */
     struct k_stat ks;
@@ -412,6 +540,13 @@ static int l_proc_rt_sigaction(struct process *p, struct trap_frame *tf) {
     }
     return l_ret(tf, rc);
   }
+  /* Record the flag word: the native PCB keeps handler/mask/restorer but not
+     flags, and the compat frame engine needs SA_ONSTACK/SA_SIGINFO. */
+  if (have_act) {
+    int slot = l_slot(process_group(p));
+    if (slot >= 0 && sig > 0 && sig < HO_SIG_MAX)
+      l_sigflags[slot][sig] = (uint32_t)ka.sa_flags;
+  }
   if (uold) {
     /* Exactly the 32 bytes the ABI defines — see the layout note above. */
     struct l_kernel_sigaction ko;
@@ -439,7 +574,15 @@ static int l_proc_rt_sigprocmask(struct process *p, struct trap_frame *tf) {
   if (uset) {
     uint64_t set;
     if (l_copy_from_user(p, &set, uset, sizeof set) != 0) return l_ret(tf, -EFAULT);
-    uint64_t old = l_sigmask[slot];
+    /* M6/L33: Linux writes the mask as it was BEFORE the change into oldset.
+       This used to write the POST-change mask, so musl's __block_all_sigs()
+       (SIG_BLOCK, all ones, oldset = &set) captured "all blocked" as the
+       thread's saved mask, and every musl thread then restored that mask in
+       start() — i.e. every thread ran with SIGPWR/SIGUSR1 blocked and no park
+       could be interrupted (measured by linux_probe_futex_sig).  Same shape
+       for glibc's pthread_sigmask. */
+    uint64_t before = l_sigmask[slot];
+    uint64_t old = before;
     if (how == L_SIG_BLOCK) old |= set;
     else if (how == L_SIG_UNBLOCK) old &= ~set;
     else if (how == L_SIG_SETMASK) old = set;
@@ -447,6 +590,11 @@ static int l_proc_rt_sigprocmask(struct process *p, struct trap_frame *tf) {
     /* bit (signo-1): SIGKILL 9, SIGSTOP 19 */
     old &= ~((1ull << (L_SIGKILL - 1)) | (1ull << (L_SIGSTOP - 1)));
     l_sigmask[slot] = old;
+    if (uold) {
+      if (l_copy_to_user(p, uold, &before, sizeof before) != 0)
+        return l_ret(tf, -EFAULT);
+    }
+    return l_ret(tf, 0);
   } else if (how != L_SIG_BLOCK && how != L_SIG_UNBLOCK && how != L_SIG_SETMASK) {
     return l_ret(tf, -EINVAL);
   }
@@ -454,6 +602,24 @@ static int l_proc_rt_sigprocmask(struct process *p, struct trap_frame *tf) {
     uint64_t cur = l_sigmask[slot];
     if (l_copy_to_user(p, uold, &cur, sizeof cur) != 0) return l_ret(tf, -EFAULT);
   }
+  return l_ret(tf, 0);
+}
+
+/* rt_sigpending(127): the set of signals that are both pending and blocked.
+ * musl's sigpending() and any program that polls its own pending set use it;
+ * before this the guest got -ENOSYS and could not tell "no signal" from "the
+ * call is missing". */
+static int l_proc_rt_sigpending(struct process *p, struct trap_frame *tf) {
+  uint64_t uset = l_arg(tf, 0);
+  uint64_t setsize = l_arg(tf, 1);
+  if (setsize != 8) return l_ret(tf, -EINVAL);
+  int slot = l_slot(p);
+  if (slot < 0) return l_ret(tf, -EINVAL);
+  struct process *grp = process_group(p);
+  uint64_t pend = p->sig_pending | p->sig_pending_dir |
+                  (grp != p ? grp->sig_pending : 0);
+  uint64_t out = pend & l_sigmask[slot];
+  if (l_copy_to_user(p, uset, &out, sizeof out) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
 }
 
@@ -465,9 +631,12 @@ static int l_proc_rt_sigprocmask(struct process *p, struct trap_frame *tf) {
    process_sigreturn() writes -EINVAL into regs[0] on a stale call and the
    process continues, which is the documented defensive behaviour. */
 static int l_proc_rt_sigreturn(struct process *p, struct trap_frame *tf) {
-  (void)p;
-  process_sigreturn(tf);
-  return 1;
+  /* Compat processes are entered through a Linux x86-64 rt_sigframe (built by
+     linux_compat_thr.c), not the native HOS3 frame: the guest's restorer is
+     glibc's __restore_rt and its handler reads a Linux ucontext_t.  The
+     native restore would read the Linux frame as an HOS3 one. */
+  extern int linux_compat_sigreturn(struct process *p, struct trap_frame *tf);
+  return linux_compat_sigreturn(p, tf);
 }
 
 /* sigaltstack(ss, old_ss).  Stored and reported faithfully; the delivery
@@ -510,13 +679,58 @@ static int l_proc_sigaltstack(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, 0);
 }
 
+/* M6/L32: what the compat kill/tkill/tgkill path ACTUALLY answered, and for
+   which occupant of the pid slot.  Mono's Boehm GC treats pthread_kill's
+   return as a tri-state: 0 = ack expected, ESRCH = "thread is gone, skip",
+   anything else = fatal (GC_suspend_all: `cmp $3,%eax; je skip` then
+   GC_log_printf("pthread_kill failed at suspend: errcode= %d") + abort()).
+   So a single row naming tid, state, generation and rc decides whether a
+   failed suspend is our errno or Mono's stale list.  Rate-limited: the game
+   sends hundreds of these, and the first ~60 around the first suspend are
+   the whole story. */
+static void l_sig_row(const char *op, int tgid, int pid, int sig,
+                      struct trap_frame *tf, int rc) {
+  static int rows;
+  if (rows >= 60)
+    return;
+  rows++;
+  struct process *t = process_get_pcb(pid);
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[TGTK] op=");
+  kl_s(&kl, op);
+  kl_s(&kl, " tgid=");
+  kl_i(&kl, tgid);
+  kl_s(&kl, " tid=");
+  kl_i(&kl, pid);
+  kl_s(&kl, " sig=");
+  kl_i(&kl, sig);
+  kl_s(&kl, " st=");
+  kl_i(&kl, t ? t->state : -1);
+  kl_s(&kl, " th=");
+  kl_i(&kl, t && t->is_thread ? 1 : 0);
+  kl_s(&kl, " ptgid=");
+  kl_i(&kl, t ? t->tgid : -1);
+  kl_s(&kl, " gen=");
+  kl_i(&kl, (long)process_slot_seq(pid));
+  kl_s(&kl, " fut=");
+  kl_hex(&kl, t ? (unsigned long)t->futex_uaddr : 0);
+  kl_s(&kl, " rc=");
+  kl_i(&kl, rc);
+  kl_s(&kl, " pc=");
+  kl_hex(&kl, (unsigned long)tf->elr);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
 /* kill(pid, sig) / tgkill(tgid, tid, sig).  sig == 0 is the existence probe
    (no signal); everything else goes through the native process_signal(), so
    dispositions and the default action are the same ones SIGTEST.BIN
    exercises.  If the default action just killed the CALLER's own group we must
    not return to a released image: schedule away (the native sys_kill does
    exactly this, and it never returns). */
-static int l_signal_one(struct trap_frame *tf, int pid, int sig) {
+static int l_signal_one(struct trap_frame *tf, const char *op, int tgid,
+                        int pid, int sig) {
   if (sig == 0) {
     /* The existence probe.  pid 0 means the caller's own group and a negative
        pid names the group -pid; neither sends anything, so resolve them to the
@@ -531,8 +745,15 @@ static int l_signal_one(struct trap_frame *tf, int pid, int sig) {
       return l_ret(tf, 0);
     return l_ret(tf, -ESRCH);
   }
-  if (sig < 0 || sig >= HO_SIG_MAX) return l_ret(tf, -EINVAL);
-  int rc = process_signal(pid, sig);
+  if (sig < 0 || sig >= HO_SIG_MAX) {
+    l_sig_row(op, tgid, pid, sig, tf, -EINVAL);
+    return l_ret(tf, -EINVAL);
+  }
+  /* M6/L46: tkill/tgkill name a TASK, kill names a process.  The direction
+     decides which pending set holds the bit (see process_signal_directed). */
+  int directed = (op[0] == 't'); /* "tkill" / "tgkill" vs "kill" */
+  int rc = process_signal_directed(pid, sig, directed);
+  l_sig_row(op, tgid, pid, sig, tf, rc);
   struct process *cur = current_process();
   if (cur && process_group(cur)->state == PROC_STATE_EXITED) {
     tf->regs[0] = (uint64_t)(int64_t)rc;
@@ -544,7 +765,7 @@ static int l_signal_one(struct trap_frame *tf, int pid, int sig) {
 
 static int l_proc_kill(struct process *p, struct trap_frame *tf) {
   (void)p;
-  return l_signal_one(tf, (int)l_argi(tf, 0), (int)l_argi(tf, 1));
+  return l_signal_one(tf, "kill", 0, (int)l_argi(tf, 0), (int)l_argi(tf, 1));
 }
 
 /* tkill(tid, sig): the single-thread form musl's raise()/abort() actually
@@ -554,15 +775,16 @@ static int l_proc_tkill(struct process *p, struct trap_frame *tf) {
   int tid = (int)l_argi(tf, 0);
   int sig = (int)l_argi(tf, 1);
   if (tid <= 0) return l_ret(tf, -EINVAL);
-  return l_signal_one(tf, tid, sig);
+  return l_signal_one(tf, "tkill", 0, tid, sig);
 }
 
 static int l_proc_tgkill(struct process *p, struct trap_frame *tf) {
   (void)p;
+  int tgid = (int)l_argi(tf, 0);
   int tid = (int)l_argi(tf, 1);
   int sig = (int)l_argi(tf, 2);
   if (tid <= 0) return l_ret(tf, -EINVAL);
-  return l_signal_one(tf, tid, sig);
+  return l_signal_one(tf, "tgkill", tgid, tid, sig);
 }
 
 /* ---- resource limits --------------------------------------------------- */
@@ -790,8 +1012,490 @@ static int l_proc_faccessat(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, l_access_check(p, upath, mode));
 }
 
+/* ---- identity: prctl, nice, job control, affinity ----------------------- */
+
+/* Resolve a pid argument the way Linux's getpgid/getsid/prlimit do: 0 is the
+ * caller, a pid that names no live process is -ESRCH. */
+static struct process *l_pcb_of(struct process *p, int pid, int *err) {
+  *err = 0;
+  if (pid == 0) return p;
+  if (p && pid == p->pid) return p;
+  struct process *t = process_get_pcb(pid);
+  if (!t || t->state == PROC_STATE_FREE || t->state == PROC_STATE_EXITED) {
+    *err = -ESRCH;
+    return 0;
+  }
+  return t;
+}
+
+/* prctl(option, a2, a3, a4, a5).  glibc's pthread_create sets the 16-byte comm
+ * (PR_SET_NAME) and reads it back for /proc/self/task/<tid>/comm-shaped
+ * diagnostics; Mono's crash reporter asks for dumpability.  The answered set is
+ * exactly the one the task/plan names:
+ *
+ *   PR_SET_NAME / PR_GET_NAME   round-trip through p->name, the native PCB's own
+ *                               32-byte name.  Linux TRUNCATES a longer comm to
+ *                               15 characters (16 bytes including NUL) rather
+ *                               than refusing it — copied faithfully.  NOTE:
+ *                               p->name is also what /proc/self/exe is
+ *                               synthesized from (l_readlink_target), so naming
+ *                               the MAIN process changes that path too; the
+ *                               common caller, pthread_setname_np on a worker,
+ *                               renames a thread PCB and leaves it alone.
+ *   PR_SET_DUMPABLE             0 (accepted, recorded nowhere).  HobbyOS has no
+ *                               core-dump path and no ptrace, so the flag has
+ *                               nothing to gate; PR_GET_DUMPABLE reports the
+ *                               default 1 a process that never set it reads.
+ *   PR_SET_PDEATHSIG            0 (clearing a hook that was never armed) is
+ *                               trivially true; a NON-ZERO signal is -ENOSYS,
+ *                               because the PCB has no field and the reaper is
+ *                               the parent's waitpid — promising a delivery
+ *                               that can never happen would be worse.
+ *   PR_GET_PDEATHSIG            writes 0 (nothing is ever armed).
+ *   anything else               -EINVAL, which is Linux's answer for an option
+ *                               the kernel does not know.
+ */
+static int l_proc_prctl(struct process *p, struct trap_frame *tf) {
+  int op = (int)l_argi(tf, 0);
+  uint64_t a2 = l_arg(tf, 1);
+
+  switch (op) {
+  case L_PR_SET_NAME: {
+      char name[L_PR_NAME_LEN];
+      int r = l_copy_cstr(p, name, a2, sizeof name);
+      if (r == -EFAULT) return l_ret(tf, r);
+      if (r != 0) {
+        /* No NUL inside 16 bytes: Linux's truncation case, not an error. Read
+           the 15 characters it would keep and terminate them here. */
+        if (l_copy_from_user(p, name, a2, L_PR_NAME_LEN - 1) != 0)
+          return l_ret(tf, -EFAULT);
+        name[L_PR_NAME_LEN - 1] = '\0';
+      }
+      if (!p) return l_ret(tf, -ESRCH);
+      for (int i = 0; i < (int)sizeof p->name; i++) p->name[i] = '\0';
+      for (int i = 0; i < L_PR_NAME_LEN - 1 && name[i]; i++) p->name[i] = name[i];
+      return l_ret(tf, 0);
+    }
+  case L_PR_GET_NAME: {
+      char out[L_PR_NAME_LEN];
+      l_zero(out, sizeof out);
+      if (p)
+        for (int i = 0; i < L_PR_NAME_LEN - 1 && p->name[i]; i++)
+          out[i] = p->name[i];
+      if (l_copy_to_user(p, a2, out, sizeof out) != 0) return l_ret(tf, -EFAULT);
+      return l_ret(tf, 0);
+    }
+  case L_PR_SET_DUMPABLE:
+    return l_ret(tf, 0);
+  case L_PR_GET_DUMPABLE:
+    return l_ret(tf, 1);
+  case L_PR_SET_PDEATHSIG:
+    return l_ret(tf, (int)l_argi(tf, 1) == 0 ? 0 : -ENOSYS);
+  case L_PR_GET_PDEATHSIG: {
+      int zero = 0;
+      if (l_copy_to_user(p, a2, &zero, sizeof zero) != 0)
+        return l_ret(tf, -EFAULT);
+      return l_ret(tf, 0);
+    }
+  default:
+    return l_ret(tf, -EINVAL);
+  }
+}
+
+/* getpriority(which, who) / setpriority(which, who, prio).
+ *
+ * The native scheduler has ONE priority class.  The truthful answers are:
+ *   - getpriority reports nice 0 for everything.  The RAW syscall returns
+ *     20 - nice (range 1..40) so that a -1 return stays unambiguous, and every
+ *     libc wrapper subtracts 20 again; L_PRIO_BASE is that 20.
+ *   - setpriority ACCEPTS a non-negative nice (a request to be scheduled less
+ *     aggressively): the one-class round-robin already treats every process
+ *     equally, so running at default priority is never a correctness failure,
+ *     and refusing would abort a program that only wanted to be polite.
+ *     A NEGATIVE nice (raise priority above default) is -EPERM, which is also
+ *     what unprivileged Linux answers: this kernel has no priority to raise
+ *     and no capability model to grant one.
+ * which/who are still validated (EINVAL / ESRCH) so a typo cannot read as a
+ * real answer. */
+static int l_proc_getpriority(struct process *p, struct trap_frame *tf) {
+  int which = (int)l_argi(tf, 0);
+  int who = (int)l_argi(tf, 1);
+  int err = 0;
+
+  if (which < L_PRIO_PROCESS || which > L_PRIO_USER) return l_ret(tf, -EINVAL);
+  if (which == L_PRIO_USER) {
+    /* Every compat process is uid 0; any other uid owns nothing here. */
+    if (who != 0) return l_ret(tf, -ESRCH);
+    return l_ret(tf, L_PRIO_BASE);
+  }
+  /* PRIO_PGRP's `who` is a PGID, and a pgid is the anchor's pid here, so the
+     same resolver answers both.  The value is identical for every target. */
+  (void)l_pcb_of(p, who, &err);
+  if (err != 0) return l_ret(tf, err);
+  return l_ret(tf, L_PRIO_BASE);
+}
+
+static int l_proc_setpriority(struct process *p, struct trap_frame *tf) {
+  int which = (int)l_argi(tf, 0);
+  int who = (int)l_argi(tf, 1);
+  int prio = (int)l_argi(tf, 2);
+  int err = 0;
+
+  if (which < L_PRIO_PROCESS || which > L_PRIO_USER) return l_ret(tf, -EINVAL);
+  if (prio < L_NICE_MIN) prio = L_NICE_MIN;
+  if (prio > L_NICE_MAX) prio = L_NICE_MAX;
+  if (which == L_PRIO_USER) {
+    if (who != 0) return l_ret(tf, -ESRCH);
+  } else {
+    (void)l_pcb_of(p, who, &err);
+    if (err != 0) return l_ret(tf, err);
+  }
+  if (prio < 0) return l_ret(tf, -EPERM);
+  return l_ret(tf, 0);
+}
+
+/* setpgid / getpgid / setsid / getsid.
+ *
+ * There is no pgid or session FIELD in the PCB, and this lane may not add one
+ * (process.h belongs to the process lane).  What exists is the group ANCHOR:
+ * process_group() maps a thread to its leader, and process.c sets tgid = pid at
+ * creation, so every process is its own anchor.  Translating onto that gives
+ * answers that are true of this kernel rather than invented:
+ *
+ *   getpgid / getsid   the anchor's pid (session == group here; documented).
+ *   setpgid(0,0)       "be your own group leader" — already true, success.
+ *   setpgid(_, other)  joining another group is not expressible: -EPERM, which
+ *                      is also what Linux answers for a cross-session join.
+ *   setsid             -EPERM: Linux refuses exactly when the caller is already
+ *                      a group leader, which every HobbyOS process is.
+ *
+ * A caller that needs real sessions (a daemon double-fork) will see the EPERM
+ * and the file header's note; nothing silently pretends the session changed. */
+static int l_proc_getpgid(struct process *p, struct trap_frame *tf) {
+  int err = 0;
+  struct process *t = l_pcb_of(p, (int)l_argi(tf, 0), &err);
+  if (err != 0 || !t) return l_ret(tf, err ? err : -ESRCH);
+  return l_ret(tf, process_group(t)->pid);
+}
+
+static int l_proc_getsid(struct process *p, struct trap_frame *tf) {
+  return l_proc_getpgid(p, tf); /* no session layer: sid == group anchor */
+}
+
+static int l_proc_setpgid(struct process *p, struct trap_frame *tf) {
+  int pgid = (int)l_argi(tf, 1);
+  int err = 0;
+  struct process *t = l_pcb_of(p, (int)l_argi(tf, 0), &err);
+  if (err != 0 || !t) return l_ret(tf, err ? err : -ESRCH);
+  if (pgid < 0) return l_ret(tf, -EINVAL);
+  if (t != p) return l_ret(tf, -EPERM);
+  if (pgid == 0 || pgid == p->pid) return l_ret(tf, 0);
+  return l_ret(tf, -EPERM);
+}
+
+static int l_proc_setsid(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  return l_ret(tf, -EPERM);
+}
+
+/* sched_getaffinity(pid, len, mask) / sched_setaffinity(pid, len, mask).
+ *
+ * THE SHAPE: a caller passes a 128-byte cpu_set_t (CPU_SETSIZE = 1024 bits),
+ * x86_64's kernel mask is one 8-byte word (nr_cpu_ids <= 64), and the syscall
+ * RETURNS THE NUMBER OF BYTES WRITTEN (8) — not 0.  len < 8 is -EINVAL, not a
+ * short write.
+ *
+ * DEVIATION, deliberate and measured against glibc: Linux leaves the guest
+ * bytes past the 8 it wrote UNTOUCHED, and glibc's sched_getaffinity does not
+ * zero the cpu_set_t first, so a caller that CPU_COUNTs its full 128-byte set
+ * counts its own stack garbage on a real kernel too.  We zero every byte the
+ * caller declared, which makes CPU_COUNT deterministic; the bits at and above
+ * the online CPU count stay 0 either way.
+ *
+ * setaffinity is ACCEPTED, NOT ENFORCED: the native scheduler runs any ready
+ * process on whichever CPU idles first and has no per-process mask (adding one
+ * is scheduler work outside this lane's files).  Success is safe because
+ * affinity is a performance hint; a caller that verifies with getaffinity sees
+ * the online set — the same thing it asked for in every program that pins to
+ * "all CPUs" and a superset for one that pins to a subset. */
+static int l_proc_sched_getaffinity(struct process *p, struct trap_frame *tf) {
+  int pid = (int)l_argi(tf, 0);
+  uint64_t len = l_arg(tf, 1);
+  uint64_t umask = l_arg(tf, 2);
+  int err = 0;
+
+  if (len < L_CPUMASK_KERNEL_BYTES) return l_ret(tf, -EINVAL);
+  if (!umask) return l_ret(tf, -EFAULT);
+  (void)l_pcb_of(p, pid, &err);
+  if (err != 0) return l_ret(tf, err);
+
+  uint8_t buf[L_CPUMASK_BYTES];
+  l_zero(buf, sizeof buf);
+  /* smp_init_count() is the boot-time truth ("cores that ran
+     trap_init_core_with_id", ids 0..n-1).  process_get_num_cpus() counts
+     cores that have entered the IDLE loop, which lags AP bring-up and made a
+     probe started early report a ONE-CPU machine; it is only the fallback. */
+  int ncpu = (int)smp_init_count();
+  if (ncpu <= 0) ncpu = process_get_num_cpus();
+  if (ncpu < 1) ncpu = 1;
+  if (ncpu > L_CPUMASK_MAX_CPUS) ncpu = L_CPUMASK_MAX_CPUS;
+  for (int i = 0; i < ncpu; i++) buf[i / 8] |= (uint8_t)(1u << (i % 8));
+
+  uint64_t n = len > sizeof buf ? (uint64_t)sizeof buf : len;
+  if (l_copy_to_user(p, umask, buf, n) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, L_CPUMASK_KERNEL_BYTES);
+}
+
+static int l_proc_sched_setaffinity(struct process *p, struct trap_frame *tf) {
+  int pid = (int)l_argi(tf, 0);
+  uint64_t len = l_arg(tf, 1);
+  uint64_t umask = l_arg(tf, 2);
+  int err = 0;
+
+  /* Linux wants len to be a multiple of sizeof(long); anything smaller than
+     the kernel mask is EINVAL. */
+  if (len < L_CPUMASK_KERNEL_BYTES || (len & (L_CPUMASK_KERNEL_BYTES - 1)) != 0)
+    return l_ret(tf, -EINVAL);
+  if (!umask) return l_ret(tf, -EFAULT);
+  uint64_t mask = 0;
+  if (l_copy_from_user(p, &mask, umask, sizeof mask) != 0)
+    return l_ret(tf, -EFAULT);
+  if (mask == 0) return l_ret(tf, -EINVAL); /* an empty mask is not a CPU set */
+
+  struct process *t = l_pcb_of(p, pid, &err);
+  if (err != 0) return l_ret(tf, err);
+  if (t != p) return l_ret(tf, -EPERM);
+  return l_ret(tf, 0);
+}
+
+/* statx(332) — deliberately -ENOSYS.  glibc 2.31's stat()/fstatat() TRY statx
+ * and, on ENOSYS, fall back to newfstatat (262), which this table implements
+ * against the real FAT16 metadata.  Implementing statx would mean a second,
+ * 256-byte layout and stx_mask/timestamp semantics to keep in sync with the
+ * 144-byte one, for callers that already have a working path. */
+static int l_proc_statx(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  return l_ret(tf, -ENOSYS);
+}
+
 /* ---- the table --------------------------------------------------------- */
 
-const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"},
+
+/* ---- timer resolution + scheduler queries + rt_sigtimedwait (Mono) ------- */
+
+/* clock_getres(229).  The kernel's tick is 100 Hz, so 10 ms is the honest
+ * answer for every clock; a NULL resolver only validates the clock id.
+ * Mono sizes its timer wheels from this. */
+static int l_proc_clock_getres(struct process *p, struct trap_frame *tf) {
+  int clockid = (int)l_argi(tf, 0);
+  uint64_t ures = l_arg(tf, 1);
+  if (clockid < 0 || clockid > 11) return l_ret(tf, -EINVAL);
+  if (!ures) return l_ret(tf, 0);
+  struct { int64_t sec; int64_t nsec; } ts = {0, 10000000};
+  if (l_copy_to_user(p, ures, &ts, sizeof ts) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, 0);
+}
+
+/* sched_getparam(143).  Every process is SCHED_OTHER, whose sched_priority is
+ * 0 on Linux — this is an exact answer, not a stub. */
+static int l_proc_sched_getparam(struct process *p, struct trap_frame *tf) {
+  uint64_t uparam = l_arg(tf, 1);
+  if (!uparam) return l_ret(tf, -EFAULT);
+  int prio = 0;
+  if (l_copy_to_user(p, uparam, &prio, sizeof prio) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, 0);
+}
+
+/* sched_getscheduler(145): SCHED_OTHER (0) for everyone. */
+static int l_proc_sched_getscheduler(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  return l_ret(tf, 0);
+}
+
+/* rt_sigtimedwait(137).  The compat class has no queued-signal model (the
+ * header of process.c says so), so a blocking wait would have nothing to wake
+ * it: report "nothing pending" with -EAGAIN and let the caller retry.  glibc's
+ * sigwait loops tolerate it; Mono reaches thread creation and the managed
+ * runtime with this answer (measured). */
+static int l_proc_rt_sigtimedwait(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  return l_ret(tf, -EAGAIN);
+}
+
+
+/* statfs(137).  The compat class's processes see one filesystem; report the
+ * FAT page size and Linux's 255-byte name limit with free space taken from a
+ * zeroed counter (Mono only asks to decide whether it can write a temp file).
+ * Layout is the 120-byte x86-64 struct statfs. */
+struct l_statfs {
+  int64_t f_type, f_bsize;
+  uint64_t f_blocks, f_bfree, f_bavail, f_files, f_ffree;
+  int32_t f_fsid[2];
+  int64_t f_namelen, f_frsize, f_flags, f_spare[4];
+};
+static int l_proc_statfs(struct process *p, struct trap_frame *tf) {
+  uint64_t upath = l_arg(tf, 0);
+  uint64_t uout = l_arg(tf, 1);
+  char path[VFS_PATH_MAX];
+  if (l_copy_cstr(p, path, upath, sizeof path) != 0) return l_ret(tf, -EFAULT);
+  if (!uout) return l_ret(tf, -EFAULT);
+  struct l_statfs st;
+  for (unsigned i = 0; i < sizeof st; i++) ((uint8_t *)&st)[i] = 0;
+  st.f_type = 0x4d44;          /* MSDOS_SUPER_MAGIC */
+  st.f_bsize = 4096;
+  st.f_namelen = 255;
+  st.f_frsize = 4096;
+  if (l_copy_to_user(p, uout, &st, sizeof st) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, 0);
+}
+
+/* sched_get_priority_max/min(146/147): SCHED_OTHER has the single priority 0,
+ * so Linux's answer for the default policy is 0 for both. */
+static int l_proc_sched_prio_max(struct process *p, struct trap_frame *tf) {
+  (void)p; (void)tf; return l_ret(tf, 0);
+}
+static int l_proc_sched_prio_min(struct process *p, struct trap_frame *tf) {
+  (void)p; (void)tf; return l_ret(tf, 0);
+}
+
+/* sched_rr_get_interval(148): no SCHED_RR class exists, so the interval is 0. */
+static int l_proc_sched_rr_interval(struct process *p, struct trap_frame *tf) {
+  uint64_t uout = l_arg(tf, 1);
+  struct { int64_t sec, nsec; } ts = {0, 0};
+  if (!uout) return l_ret(tf, -EFAULT);
+  if (l_copy_to_user(p, uout, &ts, sizeof ts) != 0) return l_ret(tf, -EFAULT);
+  return l_ret(tf, 0);
+}
+
+
+/* sched_setscheduler(144).  Only SCHED_OTHER is real here; accepting it for
+ * this process (or a thread of it) is exact, and anything else is refused
+ * with -EPERM rather than silently pretended. */
+static int l_proc_sched_setscheduler(struct process *p, struct trap_frame *tf) {
+  int policy = (int)l_argi(tf, 2);
+  if (policy != 0 /* SCHED_OTHER */) return l_ret(tf, -EPERM);
+  (void)p;
+  return l_ret(tf, 0);
+}
+
+/* rt_sigsuspend(130): atomically install `mask` and sleep until a signal is
+ * delivered.  Linux restores the pre-suspend mask BEFORE running the handler
+ * and the syscall returns -EINTR afterwards.
+ *
+ * This number is not optional for the RimWorld track: Boehm's GC suspend
+ * handler is exactly
+ *     sem_post(GC_suspend_ack_sem);
+ *     do { sigsuspend(&{restart signal only}); } while (GC_world_is_stopped);
+ * (libmonobdwgc GC_suspend_handler_inner, measured).  With the number missing
+ * the guest got -ENOSYS, so every "suspended" worker busy-spun in user space
+ * instead of parking: the world was never really stopped, the suspend acked
+ * late or not at all, and the handshake's timing became a race (section 23:
+ * the 8th SIGPWR planted, no [RT]). */
+static int l_pending_under(struct process *p, uint64_t mask) {
+  struct process *grp = process_group(p);
+  uint64_t pend = p->sig_pending | p->sig_pending_dir;
+  if (grp != p) pend |= grp->sig_pending;
+  for (int s = 1; s < HO_SIG_MAX; s++) {
+    uint64_t bit = 1ull << (s - 1);
+    if (!(pend & bit)) continue;
+    if (s == HO_SIGKILL || s == HO_SIGSTOP) continue;
+    if (mask & bit) continue;
+    if (grp->sig_handler[s] == HO_SIG_IGN) continue;
+    return s;
+  }
+  return 0;
+}
+
+static int l_proc_rt_sigsuspend(struct process *p, struct trap_frame *tf) {
+  uint64_t umask = l_arg(tf, 0);
+  uint64_t size = l_arg(tf, 1);
+  if (size != 8) return l_ret(tf, -EINVAL);
+  uint64_t nm = 0;
+  if (l_copy_from_user(p, &nm, umask, sizeof nm) != 0)
+    return l_ret(tf, -EFAULT);
+  /* SIGKILL/SIGSTOP cannot be blocked, exactly like rt_sigprocmask. */
+  nm &= ~((1ull << (L_SIGKILL - 1)) | (1ull << (L_SIGSTOP - 1)));
+
+  /* A signal already pending and permitted by the new mask delivers now. */
+  if (l_pending_under(p, nm)) return l_ret(tf, -EINTR);
+
+  p->sig_saved_mask = linux_compat_sigmask_get(p);
+  p->sig_suspended = 1;
+  linux_compat_sigmask_set(p, nm);
+  /* The result must be in the saved frame: schedule() saves tf, and the
+     guest resumes with rax from that copy (the l_block_ms rule). */
+  tf->regs[0] = (uint64_t)(int64_t)-EINTR;
+  {
+    /* M6/L45: the pending check and the block MUST be one critical section.
+       process_signal() holds proc_lock across "set the pending bit + wake any
+       park", so a check made outside the lock can lose the wake: the signal
+       lands after we saw "nothing pending" but before state=BLOCKED, the
+       sender finds the thread still READY and wakes nobody, and sigsuspend
+       then sleeps for ever with an unblocked signal pending on it.  That is
+       exactly Boehm's GC restart signal (SIGXCPU) against a thread sitting in
+       GC_suspend_handler_inner's sigsuspend: the world stop is never released,
+       the suspended worker keeps every lock it held, and Mono's ThreadPool can
+       never grow again.  Re-check under the same lock that the sender takes. */
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    int late = l_pending_under(p, nm);
+    if (late) {
+      /* The signal won the race: do not park.  Linux restores the
+         pre-suspend mask and returns -EINTR; the handler runs at this
+         syscall's trap exit. */
+      p->sig_suspended = 0;
+      linux_compat_sigmask_set(p, p->sig_saved_mask);
+      p->sig_saved_mask = 0;
+      spinlock_release_irqrestore(&proc_lock, flags);
+      return l_ret(tf, -EINTR);
+    }
+    p->wake_ms = 0;
+    p->sig_park_kind = 1;
+    p->park_since_ms = timer_get_ms();
+    p->state = PROC_STATE_BLOCKED;
+    spinlock_release_irqrestore(&proc_lock, flags);
+  }
+  {
+    /* One row per (thread) sigsuspend: the park this signal has to break.
+       A restart signal that never wakes one of these is the starvation. */
+    static uint8_t sp_rows[MAX_PROCESSES];
+    int sp = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+    if (sp && sp_rows[sp] < 3) {
+      sp_rows[sp]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGSP] pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " mask=");
+      kl_hex(&kl, (unsigned long)nm);
+      kl_s(&kl, " pend=");
+      kl_hex(&kl, (unsigned long)(p->sig_pending |
+                                  (process_group(p) != p
+                                       ? process_group(p)->sig_pending
+                                       : 0)));
+      kl_s(&kl, " inh=");
+      kl_i(&kl, p->sig_in_handler);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  schedule(tf, 0);
+  return 1;
+}
+
+const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"},
+  {L_SYS_clock_getres, l_proc_clock_getres, "clock_getres"},
+  {L_SYS_sched_getparam, l_proc_sched_getparam, "sched_getparam"},
+  {L_SYS_sched_getscheduler, l_proc_sched_getscheduler, "sched_getscheduler"},
+  {L_SYS_rt_sigtimedwait, l_proc_rt_sigtimedwait, "rt_sigtimedwait"},
+  {L_SYS_rt_sigpending, l_proc_rt_sigpending, "rt_sigpending"},
+  {L_SYS_rt_sigsuspend, l_proc_rt_sigsuspend, "rt_sigsuspend"},
+  {L_SYS_statfs, l_proc_statfs, "statfs"},
+  {L_SYS_sched_get_priority_max, l_proc_sched_prio_max, "sched_get_priority_max"},
+  {L_SYS_sched_get_priority_min, l_proc_sched_prio_min, "sched_get_priority_min"},
+  {L_SYS_sched_rr_get_interval, l_proc_sched_rr_interval, "sched_rr_get_interval"},
+  {L_SYS_sched_setscheduler, l_proc_sched_setscheduler, "sched_setscheduler"},
   L_SYSENT_END
 };

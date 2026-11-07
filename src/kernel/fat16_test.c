@@ -1524,11 +1524,216 @@ static void test_fat16_sync_clobber_guard(void) {
   (void)fat16_unlink("/SECSYN.TXT");
 }
 
+
+/* L58: partial-sector write integrity (the Player.log NUL hole).
+ *
+ * A write that starts mid-sector is a read-modify-write.  Player.log grew 159
+ * NUL bytes at offset 79360 (512-aligned) with text resuming mid-word, which is
+ * exactly "a sector written back with its untouched prefix zeroed".  The RMW
+ * read result used to be ignored and its buffer uninitialised.  This test
+ * enforces the invariant the game's small-chunk log writes rely on: earlier
+ * bytes of a sector survive a later mid-sector write, and a pattern that
+ * contains no zero byte never reads back with a zero run. */
+static void test_fat16_partial_sector_no_holes(void) {
+  tests_run++;
+  uart_puts("  Running test_fat16_partial_sector_no_holes...\n");
+
+  enum { LEN = 8192 };          /* 16 sectors, crosses cluster boundaries */
+  static uint8_t want[LEN], got[LEN];
+  for (int i = 0; i < LEN; i++) want[i] = (uint8_t)(1 + ((i * 7 + 3) % 251));
+
+  (void)fat16_unlink("/SECHOLE.TXT");
+  struct file f;
+  EXPECT_EQ(fat16_open_ex("/SECHOLE.TXT", &f, 1), 0);
+
+  /* The game's shape: many small writes, each ending mid-sector.  137 is not a
+   * divisor of 512 (the field hole was a 159-byte partial-sector remainder). */
+  int off = 0;
+  while (off < LEN) {
+    int n = 137;
+    if (off + n > LEN) n = LEN - off;
+    EXPECT_EQ(fat16_write(&f, want + off, n), n);
+    off += n;
+  }
+
+  /* A later mid-sector overwrite (offset 3000 = sector 5, byte 440) must keep
+   * the rest of that sector.  Same value back, so content still equals want. */
+  EXPECT_EQ(fat16_seek(&f, 3000), 0);
+  EXPECT_EQ(fat16_write(&f, want + 3000, 2), 2);
+
+  struct file r;
+  EXPECT_EQ(fat16_open_ex("/SECHOLE.TXT", &r, 0), 0);
+  int got_n = 0;
+  while (got_n < LEN) {
+    int n = fat16_read(&r, got + got_n, LEN - got_n);
+    if (n <= 0) break;
+    got_n += n;
+  }
+  fat16_close(&r);
+  EXPECT_EQ(got_n, LEN);
+
+  int first_bad = -1;
+  for (int i = 0; i < LEN; i++)
+    if (got[i] != want[i]) { first_bad = i; break; }
+  EXPECT_EQ(first_bad, -1);
+
+  /* The hole signature: a whole 512-byte block of zeros (the pattern has no
+   * zero byte), which is what a zeroed RMW prefix produces. */
+  int zero_blocks = 0;
+  for (int s = 0; s + 512 <= LEN; s += 512) {
+    int all = 1;
+    for (int i = 0; i < 512; i++)
+      if (got[s + i]) { all = 0; break; }
+    if (all) zero_blocks++;
+  }
+  EXPECT_EQ(zero_blocks, 0);
+
+  /* And a 159-byte-style hole that does not cover a whole block: no 32-byte
+   * zero run anywhere. */
+  int zero_runs = 0, run = 0;
+  for (int i = 0; i < LEN; i++) {
+    if (got[i] == 0) {
+      if (++run == 32) { zero_runs++; run = 0; }
+    } else {
+      run = 0;
+    }
+  }
+  EXPECT_EQ(zero_runs, 0);
+
+  fat16_close(&f);
+  (void)fat16_unlink("/SECHOLE.TXT");
+}
+
+/* L59: O_APPEND, with two handles on one path.
+ *
+ * §45.9 item 4: O_APPEND was recorded in open_flags (and F_GETFL reported it)
+ * but fat16_write ignored it, so a second handle on a file started at its own
+ * cursor and two appenders overwrote each other.  Player.log has two writers,
+ * and today they share one fd — the per-path write lock covers that case only.
+ *
+ * The test is a ladder, because "append works" alone is not a verdict:
+ *   1. two handles, both O_APPEND, alternating records -> the file is the exact
+ *      concatenation in write order (no overwrite, no hole);
+ *   2. a handle deliberately seeked to 0 still appends (the flag, not the
+ *      cursor, decides), and its cursor afterwards reads EOF;
+ *   3. control: the SAME handle with O_APPEND cleared and seeked to 0 DOES
+ *      overwrite — so the test can report absence as well as presence.
+ */
+static void test_fat16_append_two_handles(void) {
+  tests_run++;
+  uart_puts("  Running test_fat16_append_two_handles...\n");
+
+  enum { REC_A = 9, REC_B = 10, N_REC = 24 };
+  static uint8_t want[REC_A * N_REC + REC_B * N_REC + 8];
+  static uint8_t got[sizeof want];
+  int want_n = 0;
+
+  (void)fat16_unlink("/APPEND2.TXT");
+  {
+    struct file c;
+    __builtin_memset(&c, 0, sizeof c);
+    EXPECT_EQ(fat16_open_ex("/APPEND2.TXT", &c, 1), 0);
+    fat16_close(&c);
+  }
+
+  struct file a, b;
+  __builtin_memset(&a, 0, sizeof a);
+  __builtin_memset(&b, 0, sizeof b);
+  EXPECT_EQ(fat16_open_ex("/APPEND2.TXT", &a, 0), 0);
+  EXPECT_EQ(fat16_open_ex("/APPEND2.TXT", &b, 0), 0);
+  a.open_flags = K_O_APPEND;
+  b.open_flags = K_O_APPEND;
+  /* The VFS always fills f->path (that is what the per-path write lock and the
+     append refresh key on); a direct fat16_open_ex() caller does not, so the
+     test supplies it, exactly as file_open() would. */
+  __builtin_memcpy(a.path, "/APPEND2.TXT", 13);
+  __builtin_memcpy(b.path, "/APPEND2.TXT", 13);
+  /* A stale cursor is exactly the pre-fix bug: both handles start at 0. */
+  EXPECT_EQ(a.fat16.cursor, 0);
+  EXPECT_EQ(b.fat16.cursor, 0);
+
+  for (int i = 0; i < N_REC; i++) {
+    char ra[REC_A], rb[REC_B];
+    for (int k = 0; k < REC_A; k++) ra[k] = (char)('a' + (i % 26));
+    for (int k = 0; k < REC_B; k++) rb[k] = (char)('A' + (i % 26));
+    /* Both records end in '\n' so a hole or an overwrite is visible as a byte
+       mismatch, not as "some text is missing somewhere". */
+    ra[REC_A - 1] = '\n';
+    rb[REC_B - 1] = '\n';
+    EXPECT_EQ(fat16_write(&a, ra, REC_A), REC_A);
+    for (int k = 0; k < REC_A; k++) want[want_n++] = (uint8_t)ra[k];
+    EXPECT_EQ(fat16_write(&b, rb, REC_B), REC_B);
+    for (int k = 0; k < REC_B; k++) want[want_n++] = (uint8_t)rb[k];
+  }
+
+  /* Step 2: a seek on an append handle must not move the write position. */
+  EXPECT_EQ(fat16_seek(&a, 0), 0);
+  EXPECT_EQ(fat16_write(&a, "TAIL\n", 5), 5);
+  for (int k = 0; k < 5; k++) want[want_n++] = (uint8_t)"TAIL\n"[k];
+
+  struct file r;
+  __builtin_memset(&r, 0, sizeof r);
+  EXPECT_EQ(fat16_open_ex("/APPEND2.TXT", &r, 0), 0);
+  int got_n = 0;
+  while (got_n < want_n) {
+    int n = fat16_read(&r, got + got_n, want_n - got_n);
+    if (n <= 0) break;
+    got_n += n;
+  }
+  fat16_close(&r);
+  EXPECT_EQ(got_n, want_n);
+
+  int first_bad = -1;
+  for (int i = 0; i < want_n; i++)
+    if (got[i] != want[i]) { first_bad = i; break; }
+  EXPECT_EQ(first_bad, -1);
+  {
+    int zero_runs = 0, run = 0;
+    for (int i = 0; i < got_n; i++) {
+      if (got[i] == 0) {
+        if (++run == 16) { zero_runs++; run = 0; }
+      } else {
+        run = 0;
+      }
+    }
+    EXPECT_EQ(zero_runs, 0);
+  }
+
+  /* Step 3, the control: O_APPEND cleared, seeked to 0 -> a real overwrite.
+     Without this row a broken append path that silently ignores open_flags
+     would pass step 1 whenever the two handles happened to be in step. */
+  {
+    struct file w;
+    __builtin_memset(&w, 0, sizeof w);
+    EXPECT_EQ(fat16_open_ex("/APPEND2.TXT", &w, 0), 0);
+    w.open_flags = 0;
+    EXPECT_EQ(fat16_seek(&w, 0), 0);
+    EXPECT_EQ(fat16_write(&w, "CTL", 3), 3);
+    fat16_close(&w);
+    struct file v;
+    __builtin_memset(&v, 0, sizeof v);
+    EXPECT_EQ(fat16_open_ex("/APPEND2.TXT", &v, 0), 0);
+    uint8_t head[3] = {0, 0, 0};
+    EXPECT_EQ(fat16_read(&v, head, 3), 3);
+    EXPECT_EQ(head[0], 'C');
+    EXPECT_EQ(head[1], 'T');
+    EXPECT_EQ(head[2], 'L');
+    EXPECT_EQ(v.fat16.entry.file_size, (uint32_t)want_n); /* size unchanged */
+    fat16_close(&v);
+  }
+
+  fat16_close(&a);
+  fat16_close(&b);
+  (void)fat16_unlink("/APPEND2.TXT");
+}
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
   test_fat16_open_excl(); /* SEC-1: atomic O_CREAT|O_EXCL */
   test_fat16_mkdir_dup_atomic(); /* SEC-1: race-safe mkdir duplicate check */
   test_fat16_sync_clobber_guard(); /* SEC-5: guarded dirent write-back */
+  test_fat16_partial_sector_no_holes(); /* L58: RMW must not stamp a NUL hole */
+  test_fat16_append_two_handles();      /* L59: O_APPEND is honoured per write */
   test_fat16_open_existing();
   test_fat16_open_nonexistent();
   test_fat16_created_entry_has_attr();

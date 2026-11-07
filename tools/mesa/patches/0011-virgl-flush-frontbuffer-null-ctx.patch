@@ -1,0 +1,35 @@
+Mesa M2: flush_frontbuffer must tolerate a NULL context
+
+The gallium X11 frontend presents without a bound context:
+xmesa_swap_st_framebuffer() calls xmesa_st_framebuffer_display(drawable, NULL,
+...), so screen->flush_frontbuffer arrives with ctx == NULL.  virgl's
+implementation passed that straight to virgl_flush_eq(), which reads
+ctx->cbuf at offset 0x4e0 -- a NULL dereference on every swap (measured in the
+first M2 boot: rip at the top of virgl_flush_eq, rdi == 0).
+
+It is also unnecessary: XMesaSwapBuffers() runs
+st_context_flush(st, ST_FLUSH_FRONT, &fence, ...) *before* the display call, so
+the batch is already submitted.  Guard the flush and pass the (absent) command
+buffer through; every winsys that does not need it ignores it, and ours does.
+
+--- a/src/gallium/drivers/virgl/virgl_screen.c
++++ b/src/gallium/drivers/virgl/virgl_screen.c
+@@ -774,8 +774,16 @@
+    struct virgl_context *vctx = virgl_context(ctx);
+ 
+    if (vws->flush_frontbuffer) {
+-      virgl_flush_eq(vctx, vctx, NULL);
+-      vws->flush_frontbuffer(vws, vctx->cbuf, vres->hw_res, level, layer, winsys_drawable_handle,
++      /* The X11 frontend presents with ctx == NULL: xmesa_swap_st_framebuffer()
++       * calls xmesa_st_framebuffer_display(drawable, NULL, ...), so `ctx` here
++       * is NULL and virgl_flush_eq() dereferences it (measured: a NULL-context
++       * SIGSEGV at the top of virgl_flush_eq on every swap, M2).  Nothing needs
++       * flushing in that case anyway -- XMesaSwapBuffers() already submitted the
++       * batch through st_context_flush(st, ST_FLUSH_FRONT, ...). */
++      if (ctx)
++         virgl_flush_eq(vctx, vctx, NULL);
++      vws->flush_frontbuffer(vws, ctx ? vctx->cbuf : NULL, vres->hw_res, level,
++                             layer, winsys_drawable_handle,
+                              nboxes == 1 ? sub_box : NULL);
+    }
+ }

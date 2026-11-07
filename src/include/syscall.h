@@ -251,8 +251,20 @@
  *   SYS_EVDEV_PUSH (code, value) -> 0 | -ENODEV (no owner) | -EAGAIN (full) */
 #define SYS_EVDEV_PUSH    (104)
 
+/* M5c (RimWorld, docs/rimworld-m5-managed.md): bind a subtree of the VFS
+ * namespace to another absolute path, so a path under a read-only NFS mount
+ * can be served from the FAT volume (and therefore `mmap`ed -- the FAT16
+ * file-object path is the only file-backed VM object; NFS was -ENOTSUP
+ * before M5b).  Native row, appended after 104 (upstream GB-173 took 104
+ * while this branch was in flight; the row is 105 here and nothing outside
+ * this header may spell the number).
+ *   SYS_VFS_BIND (from*, to*) -> 0 | -EINVAL (malformed / would recurse /
+ *                table full) | -EFAULT (bad pointer)
+ * Both paths must be canonical absolute paths (see src/include/vfs_bind.h). */
+#define SYS_VFS_BIND      (105)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
  * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
-#define SYS_MAX           (104)
+#define SYS_MAX           (105)
 
 #endif /* SYSCALL_H */

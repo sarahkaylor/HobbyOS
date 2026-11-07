@@ -19,6 +19,25 @@ extern void uart_print_hex(uint64_t val);
 
 jmp_buf user_exit_context;
 
+/* M6 launch plumbing: /proc/self/exe must name the executable the loader was
+ * asked to run, not the interpreter it enters (glibc ld.so is the entry point
+ * for a compat image) and not the 32-byte display name in p->name (which is
+ * truncated and may be a bare 8.3 name).  Relative names resolve against the
+ * spawning/staying cwd, because Linux reports an absolute path here.  Called
+ * after cwd is established on spawn, and with the already-resolved absolute
+ * path on exec. */
+static void set_exe_path(struct process *p, const char *path) {
+  if (!p || !path) return;
+  int n = 0;
+  if (path[0] != '/') {
+    const char *cwd = p->cwd[0] ? p->cwd : "/";
+    for (int i = 0; cwd[i] && n < 158; i++) p->exe_path[n++] = cwd[i];
+    if (n == 0 || p->exe_path[n - 1] != '/') p->exe_path[n++] = '/';
+  }
+  for (int i = 0; path[i] && n < 159; i++) p->exe_path[n++] = path[i];
+  p->exe_path[n] = '\0';
+}
+
 /* Cap on the program image the loader copies into user memory.  A process
  * region is 32MB with its first USER_INITIAL_CLEAR_SIZE (1MB) bytes zeroed
  * at creation, so sizing the cap to match keeps "zeroed" and "loadable" the
@@ -122,12 +141,47 @@ int load_and_run_program(const char* filename) {
   return -1;
 }
 
+/* M2 stdio (docs/rimworld-plan.md §M2): give a freshly created child a real
+ * file object behind every unassigned stdio fd.  A bare fd NUMBER is not an
+ * fd: Mono's System.Console ctor wraps fd 0/1/2 in FileStream(IntPtr), whose
+ * ctor fstat()s the handle, and an unassigned slot answers EBADF -- surfacing
+ * as `ArgumentException: handle / Parameter name: Invalid` from
+ * System.Console..cctor before the first managed statement (measured on mono
+ * 6.12: OpenStandardOutput, fd 1).  /dev/console reads EOF (like `< /dev/null`)
+ * and writes through console_write_user(), so batch programs behave the same
+ * as before while the descriptor is now a real char device.
+ *
+ * MUST run with no `parent` in scope: boot-wave loads pass caller_pid = -1 and
+ * therefore have no parent at all -- the fd 1/2 assignment used to live inside
+ * `if (parent && child)` and the wave never got it. */
+static void child_ensure_console_stdio(struct process *child, int compat) {
+  if (!child) return;
+  /* Linux-ABI processes only.  A native program keeps the historical
+   * behaviour (fd 1/2 unassigned -> file_write's immediate console fallback)
+   * because its libc mixes SYS_WRITE_CONSOLE with write(1): routing fd 1
+   * through the /dev/console file object made those two paths reorder, and
+   * the desktop's menu printed `0[MENU] =CONSOLE.BIN` — digits before their
+   * own prefix — which broke the M4 gate's menu parse (measured on the
+   * wave-3 merge).  Compat programs (Mono's Console, Unity's Player.log) are
+   * the ones that fstat/dup their stdio and need real files. */
+  if (!compat) return;
+  for (int fd = 0; fd <= 2; fd++) {
+    if (child->open_fds[fd] != -1) continue;
+    int nf = file_open(child, "/dev/console", 2 /* O_RDWR */);
+    if (nf < 0) return; /* out of fds: fd 1/2 still fall back to the console */
+    /* file_open only allocates slots >= FD_STDIO_FIRST, so nf is never 0..2.
+       Move the reference (do NOT bump num_open_fds again: file_open already
+       counted it once for this slot). */
+    child->open_fds[fd] = child->open_fds[nf];
+    child->open_fds[nf] = -1;
+  }
+}
+
 /**
  * Loads a program from the FAT16 filesystem into a new process's memory and
- * registers it with the scheduler.
- *
- * Parameters:
- *   filename - The name of the binary to load.
+ * registers it with the scheduler.  Every unassigned stdio fd gets the
+ * /dev/console node (see child_ensure_console_stdio), including boot-wave
+ * loads, which have no parent.
  *
  * Returns:
  *   The PID of the new process, or -1 on failure.
@@ -368,6 +422,16 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
     }
   }
 
+  /* Every spawned program gets real stdio.  Without it, fd 0/1/2 stay
+     unassigned (-1) and Mono's System.Console ctor dies before running a
+     single managed statement: FileStream(IntPtr handle) calls fstat() on the
+     bare fd number, gets EBADF and throws ArgumentException ("handle",
+     "Invalid"), which surfaces as TypeInitializationException for
+     System.Console (measured on mono 6.12).  The console node reads EOF and
+     writes to the serial sink, so batch behavior is unchanged.  This v1 path
+     loads flat native images only, hence compat = 0. */
+  child_ensure_console_stdio(child, 0);
+
   /* SysV AMD64 ABI (browser.md F1.5): at the first instruction of a
      function RSP must be 16n+8 — the caller's return address occupies the
      8 bytes at 16n.  The user entry (_start) is compiled C whose prologue
@@ -460,6 +524,10 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
   as->img_active = 1;
   as->img_file_size = fsize;
   as->img_start_cluster = f->fat16.entry.start_cluster;
+  /* M6/L63: ground truth for executable pages while the device is healthy
+     (one sequential read of a few hundred KiB, before the process runs). */
+  if (vm_image_sums_build(as) != 0)
+    uart_puts("v2 loader: image sums unavailable (agreement gate only)\n");
 
   /* L9 (prefetch): page 0 is the entry page (process_set_entry uses
      USER_IMG_BASE), so pull it in eagerly.  Best-effort: a failure here
@@ -533,21 +601,21 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
       child->num_open_fds++;
     }
   }
-  child->fd_cloexec = parent->fd_cloexec;
+  fd_cloexec_copy(child->fd_cloexec, parent->fd_cloexec);
   for (int k = 0; k < ex->fdmap_n; k++) {
     int src = ex->fdmap_src[k];
     int dst = ex->fdmap_dst[k];
     if (src == dst) {
       /* file_dup2's oldfd==newfd early return skips the CLOEXEC clear;
          dup2 semantics still clear it (D4.1 / D3.2). */
-      child->fd_cloexec &= ~(1ull << dst);
+      fd_cloexec_clear(child->fd_cloexec, dst);
       continue;
     }
     if (file_dup2(child, src, dst) < 0)
       return -EBADF; /* validated above; stay atomic if it still fails */
   }
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
-    if (child->open_fds[i] != -1 && (child->fd_cloexec & (1ull << i)))
+    if (child->open_fds[i] != -1 && fd_cloexec_test(child->fd_cloexec, i))
       file_close(child, i);
   }
   return 0;
@@ -557,6 +625,19 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
 #define COMPAT_MAX_ENV 24
 #define COMPAT_STR_MAX 512
 
+/* Write `s` (with its NUL) at the descending stack cursor and report its
+ * address.  Small helper so the argv/envp and the auxv strings share one
+ * placement rule: bytes go down, the array slots point up at them. */
+static int compat_put_str(struct process *child, uint64_t *sp, const char *s,
+                          uint64_t *addr) {
+  int n = 0;
+  while (s[n]) n++;
+  *sp -= (uint64_t)n + 1;
+  if (vm_kwrite(child, *sp, s, n + 1) != 0) return -EFAULT;
+  *addr = *sp;
+  return 0;
+}
+
 /* Layer the SysV AMD64 process-initialization block on a COMPAT process's
  * stack and point its entry at it:
  *
@@ -565,6 +646,13 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
  * Both arrays come from the PCB blobs (sys_readargv / sys_readenv, the same
  * source SYS_GETARGV / SYS_GETENV serve to native programs), so a Linux program
  * sees exactly what its launcher passed.
+ *
+ * Two entry points share the block:
+ *   - static compat binary: start == entry == base + e_entry, AT_BASE == 0;
+ *   - interpreter pair:     start == ld.so's entry, entry == the EXECUTABLE's
+ *                           entry (AT_ENTRY), AT_BASE == the ld.so load base.
+ * Getting AT_ENTRY wrong here is silent: ld.so would happily relocate and
+ * then jump back into itself instead of main (docs/rw-ldso-design.md §2).
  *
  * Measured need (2026-11-02): the block used to hardcode argc = 1 and an empty
  * envp.  That is enough for `hello`, but a real program dies on it: Doom reads
@@ -576,9 +664,9 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
  * vm_kwrite validates every page it touches so a bad layout faults here with a
  * line instead of a triple fault later.
  */
-static int compat_stack_block(struct process *child, int pid, uint64_t entry,
-                              uint64_t at_entry, uint64_t interp_base,
-                              uint64_t phdr, uint32_t phnum) {
+static int compat_stack_block(struct process *child, int pid, uint64_t start,
+                              uint64_t entry, uint64_t phdr, uint32_t phnum,
+                              uint64_t interp_base, const char *execfn) {
   struct process *grp = process_group(child);
   char s[COMPAT_STR_MAX];
   uint64_t argp[COMPAT_MAX_ARGV + 1];
@@ -594,15 +682,42 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
 
   /* Strings first, highest address first, so the arrays below them can be laid
      down front-to-back without tracking each string's end. */
+  int have_ldpath = 0;
   for (int i = envc - 1; i >= 0; i--) {
     int n = sys_readenv(grp, i, s, (int)sizeof s);
     if (n < 0) {
       s[0] = '\0';
       n = 0;
     }
+    /* Does the parent already own the library path?  Compared byte-wise: the
+       kernel is freestanding (no strncmp). */
+    {
+      static const char kLd[] = "LD_LIBRARY_PATH=";
+      int is_ld = 1;
+      for (int j = 0; kLd[j]; j++) {
+        if (s[j] != kLd[j]) { is_ld = 0; break; }
+      }
+      if (is_ld) have_ldpath = 1;
+    }
     sp -= (uint64_t)n + 1;
     if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
     envp[i] = sp;
+  }
+  /* F3 (plan Appendix A, docs/rw-ldso-design.md): the frozen DSO resolution
+     order is DT_RUNPATH -> LD_LIBRARY_PATH -> /LIB64, and /LIB64 is where the
+     compat runtime stages its DSOs.  glibc's ld.so has no /LIB64 in its
+     compiled-in default search path, so without this entry "stage it in
+     /LIB64" only works for a parent that exports LD_LIBRARY_PATH itself --
+     and a program launched from the desktop has NO environment at all
+     (measured on the M3 gate: envc == 0, so every DSO lookup failed with
+     "cannot open shared object file").  Supply the fallback here, once, so
+     every Linux-ABI process gets the same library path regardless of who
+     launched it; a parent that sets its own value keeps it. */
+  if (!have_ldpath && envc < COMPAT_MAX_ENV) {
+    uint64_t ldpath_addr = 0;
+    if (compat_put_str(child, &sp, "LD_LIBRARY_PATH=/LIB64", &ldpath_addr) != 0)
+      return -EFAULT;
+    envp[envc++] = ldpath_addr;
   }
   for (int i = argc - 1; i >= 0; i--) {
     int n = sys_readargv(grp, i, s, (int)sizeof s);
@@ -613,6 +728,27 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
     sp -= (uint64_t)n + 1;
     if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
     argp[i] = sp;
+  }
+  {
+    static int argv_diag;
+    if (argv_diag < 4) {
+      argv_diag++;
+      struct kline ka;
+      kl_init(&ka);
+      kl_s(&ka, "[LCOMPAT] argv argc=");
+      kl_i(&ka, argc);
+      for (int i = 0; i < argc && i < 3; i++) {
+        int n = sys_readargv(grp, i, s, (int)sizeof s);
+        kl_s(&ka, " a");
+        kl_i(&ka, i);
+        kl_s(&ka, "=");
+        kl_s(&ka, n > 0 ? s : "?");
+      }
+      kl_s(&ka, " execfn=");
+      kl_s(&ka, execfn ? execfn : "?");
+      kl_s(&ka, "\n");
+      kl_emit(&ka);
+    }
   }
   uint64_t name_addr;
   if (argc > 0) {
@@ -632,6 +768,16 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
   argp[argc] = 0;
   envp[envc] = 0;
 
+  /* Auxiliary strings below the argv strings: AT_PLATFORM (glibc derives its
+     hwcaps subdirectory from it; "x86_64" is what Linux reports for this
+     class) and AT_EXECFN (the path the loader was asked to execute — Linux
+     puts the execve() argument here, not argv[0]). */
+  uint64_t platform_addr = 0, execfn_addr = 0;
+  if (compat_put_str(child, &sp, "x86_64", &platform_addr) != 0) return -EFAULT;
+  if (compat_put_str(child, &sp, (execfn && execfn[0]) ? execfn : "PROGRAM",
+                     &execfn_addr) != 0)
+    return -EFAULT;
+
   /* The fixed part of the block, laid out by ADDRESS rather than by luck:
    *
    *     rsp -> argc            (16-byte aligned, SysV)
@@ -649,36 +795,69 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
    * (argv and DISPLAY arrived); with argc=1 the guest read argv[0] == NULL and
    * an empty environment, and Doom then asked libXau for $HOME and died.
    * Computing argv_base first makes the layout independent of the counts. */
-  uint64_t w[20];
+  uint64_t w[40];                  /* 18 pairs + AT_NULL; see below */
   uint64_t rnd_addr = (sp - 16) & ~(uint64_t)0xF;
-  uint64_t auxv_addr = (rnd_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
   uint64_t arrays = (uint64_t)(argc + 1) * 8 + (uint64_t)(envc + 1) * 8;
-  uint64_t argv_addr = (auxv_addr - arrays) & ~(uint64_t)0x7;
+
+  /* The auxv set is the frozen compat contract (docs/rw-ldso-design.md §3,
+   * plan F1).  Every entry is required by real glibc ld.so 2.31:
+   *   AT_PHDR/AT_PHNUM/AT_PHENT  let it read the exe's dynamic section from
+   *                              the kernel's mapping (it never re-opens it);
+   *   AT_BASE                    where ld.so itself was mapped;
+   *   AT_ENTRY                   where to transfer after relocation;
+   *   AT_SECURE/AT_UID..EGID     credential/secure-mode queries;
+   *   AT_PLATFORM                hwcaps subdirectory name;
+   *   AT_HWCAP (0)               baseline x86_64 (SSE2) — never a guess at
+   *                              optional ISA bits the kernel has not probed;
+   *   AT_CLKTCK (100)            sysconf(_SC_CLK_TCK);
+   *   AT_RANDOM                  stack-guard seed (16 bytes);
+   *   AT_EXECFN                  the program path for diagnostics. */
+  int k = 0;
+  w[k++] = 3;  w[k++] = phdr;          /* AT_PHDR   */
+  w[k++] = 4;  w[k++] = 56;            /* AT_PHENT  */
+  w[k++] = 5;  w[k++] = (uint64_t)phnum; /* AT_PHNUM */
+  w[k++] = 6;  w[k++] = 4096;          /* AT_PAGESZ */
+  w[k++] = 7;  w[k++] = interp_base;   /* AT_BASE (0 for a static image) */
+  w[k++] = 8;  w[k++] = 0;             /* AT_FLAGS  */
+  w[k++] = 9;  w[k++] = entry;         /* AT_ENTRY: the EXECUTABLE's entry */
+  w[k++] = 11; w[k++] = 0;             /* AT_UID    */
+  w[k++] = 12; w[k++] = 0;             /* AT_EUID   */
+  w[k++] = 13; w[k++] = 0;             /* AT_GID    */
+  w[k++] = 14; w[k++] = 0;             /* AT_EGID   */
+  w[k++] = 15; w[k++] = platform_addr; /* AT_PLATFORM -> "x86_64" */
+  w[k++] = 16; w[k++] = 0;             /* AT_HWCAP  */
+  w[k++] = 17; w[k++] = 100;           /* AT_CLKTCK */
+  w[k++] = 23; w[k++] = 0;             /* AT_SECURE */
+  w[k++] = 25; w[k++] = rnd_addr;      /* AT_RANDOM */
+  w[k++] = 26; w[k++] = 0;             /* AT_HWCAP2 */
+  w[k++] = 31; w[k++] = execfn_addr;   /* AT_EXECFN */
+  w[k++] = 0;  w[k++] = 0;             /* AT_NULL   */
+
+  /* argv[0] must sit 8 mod 16 (so %rsp = &argc is 16-aligned).  The auxv is
+   * derived from envp's end below, so no alignment hole can separate it from
+   * the arrays.  Measured (M2/M3): the old code nudged only argv down, and
+   * whenever (argc+envc) made the arrays land 16-aligned the hole read as
+   * {0,0} = AT_NULL -- glibc saw no auxv, took its "invoked directly as ld.so"
+   * path (`mono --version` -> "--version: invalid ELF header") and printed its
+   * usage text instead of running the program. */
+  uint64_t auxv_top = (rnd_addr - (uint64_t)k * 8) & ~(uint64_t)0xF;
+  uint64_t argv_addr = (auxv_top - arrays) & ~(uint64_t)0x7;
   if ((argv_addr & 0xF) == 0) argv_addr -= 8; /* argv[0] must be 8 mod 16 */
   uint64_t envp_addr = argv_addr + (uint64_t)(argc + 1) * 8;
+  /* ld.so does NOT get an auxv pointer from the kernel: it walks argc ->
+   * argv -> envp and takes the auxv from the word after the envp NULL
+   * terminator.  So the auxv must start EXACTLY where the envp array ends --
+   * an alignment hole there reads as type AT_NULL and glibc's ld.so then
+   * concludes it was invoked directly (measured: the M1 hello printed ld.so's
+   * usage text as soon as one environment entry made the arrays land on a
+   * 16-byte boundary and the old code inserted its 8-byte nudge below them). */
+  uint64_t auxv_addr = envp_addr + (uint64_t)(envc + 1) * 8;
 
   uint8_t rnd[16];
   net_get_random_bytes(rnd, 16);
   if (vm_kwrite(child, rnd_addr, rnd, 16) != 0) return -EFAULT;
 
-  w[0] = 6;                        /* AT_PAGESZ */
-  w[1] = 4096;
-  w[2] = 3;                        /* AT_PHDR   */
-  w[3] = phdr;
-  w[4] = 5;                        /* AT_PHNUM  */
-  w[5] = (uint64_t)phnum;
-  w[6] = 9;                        /* AT_ENTRY  */
-  w[7] = at_entry;
-  w[8] = 7;                        /* AT_BASE: the interpreter, 0 if static */
-  w[9] = interp_base;
-  w[10] = 25;                      /* AT_RANDOM */
-  w[11] = rnd_addr;
-  w[12] = 31;                      /* AT_EXECFN: argv[0], what /proc/self/exe
-                                      answers for a static binary */
-  w[13] = name_addr;
-  w[14] = 0;                       /* AT_NULL */
-  w[15] = 0;
-  if (vm_kwrite(child, auxv_addr, w, 16 * 8) != 0) return -EFAULT;
+  if (vm_kwrite(child, auxv_addr, w, k * 8) != 0) return -EFAULT;
   if (vm_kwrite(child, argv_addr, argp, (int)((argc + 1) * 8)) != 0)
     return -EFAULT;
   if (vm_kwrite(child, envp_addr, envp, (int)((envc + 1) * 8)) != 0)
@@ -700,7 +879,7 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
     kl_emit(&k);
     kl_init(&k);
     kl_s(&k, "auxv: AT_ENTRY=");
-    kl_hex(&k, (unsigned long)at_entry);
+    kl_hex(&k, (unsigned long)entry); /* the EXECUTABLE's entry, not ld.so's */
     kl_c(&k, '\n');
     kl_emit(&k);
     kl_init(&k);
@@ -714,7 +893,11 @@ static int compat_stack_block(struct process *child, int pid, uint64_t entry,
   uint64_t argcw = (uint64_t)argc;
   if (vm_kwrite(child, sp, &argcw, 8) != 0) return -EFAULT;
 
-  process_set_entry(pid, entry, sp);
+  /* start != entry for an interpreter pair: enter ld.so, tell it about the
+   * executable.  All GPRs on a fresh PCB are zero (process_create_internal_v2
+   * clears context[0..35]), so ld.so's %rdx — the rtld_fini slot glibc
+   * ignores at _start and sets itself before calling the exe — is 0. */
+  process_set_entry(pid, start, sp);
   return 0;
 }
 
@@ -816,6 +999,10 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     child->cwd[0] = '/';
     child->cwd[1] = '\0';
   }
+  /* /proc/self/exe's answer, from the path the loader was handed (the cwd is
+     established above, so a relative name resolves the way the loader will
+     actually open it). */
+  set_exe_path(child, filename);
   if (ex) {
     /* D4.5/D3.1: envp as given (NULL marshalled to empty); argv[0] stored
        as given (WebKit's aux main parses argv[1..]).  Dispositions are
@@ -914,38 +1101,61 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
         gb095_n++;
       }
     }
+
   }
 
   struct file f;
-  if (fat16_open(filename, &f) != 0) {
+  uint8_t *vfs_img = 0;
+  uint32_t vfs_len = 0, vfs_pages = 0;
+  /* M5: an image under an NFS mount comes through the VFS, not fat16_open().
+   * fs_read_image() answers 1 for an NFS-routed path (whole image in kernel
+   * memory), 0 for a FAT16 path (legacy cluster loader below, unchanged) and
+   * < 0 for a real read failure. */
+  int vfs_rc = fs_read_image(filename, &vfs_img, &vfs_len, &vfs_pages);
+  if (vfs_rc < 0) {
     uart_puts("Failed to open file: ");
     uart_puts(filename);
     uart_puts("\n");
     process_free(pid);
     return -ENOENT;
   }
-  uint32_t fsize = f.fat16.entry.file_size;
-  if (fsize == 0) {
-    /* D4.4: a missing image surfaces as a zero-size entry (fat16_open
-       creates on miss), and an empty image can never be executed -- the
-       documented -ENOENT.  The spawn2 wrapper below folds it back to -1. */
-    fat16_close(&f);
-    process_free(pid);
-    return -ENOENT;
-  }
-  /* GB-013 (ELF loader, docs/elf-loader.md §2): dispatch on the first four
-     bytes.  0x7fELF -> the ELF mapper (x86_64 only; ARM never loads ELF);
-     anything else -> the existing flat .bin loader, unchanged.  Peek the
-     magic 4 bytes into a tiny scratch and branch. */
+
+  uint32_t fsize = 0;
   int is_elf = 0;
-  {
-    uint64_t magicw = 0;
-    /* dest is a physical address integer; &magicw is a stack VA == phys
-       (kernel direct map), so the read lands in the local. */
-    if (fat16_read_direct_pos(f.fat16.entry.start_cluster, fsize,
-                              (uint64_t)&magicw, 4, 0) == 4) {
-      uint8_t *mb = (uint8_t *)&magicw; /* little-endian: bytes 0..3 = magic */
-      is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
+  if (vfs_rc == 1) {
+    fsize = vfs_len;
+    is_elf = (fsize >= 4 && vfs_img[0] == 0x7f && vfs_img[1] == 'E' &&
+              vfs_img[2] == 'L' && vfs_img[3] == 'F');
+  } else {
+    if (fat16_open(filename, &f) != 0) {
+      uart_puts("Failed to open file: ");
+      uart_puts(filename);
+      uart_puts("\n");
+      process_free(pid);
+      return -ENOENT;
+    }
+    fsize = f.fat16.entry.file_size;
+    if (fsize == 0) {
+      /* D4.4: a missing image surfaces as a zero-size entry (fat16_open
+         creates on miss), and an empty image can never be executed -- the
+         documented -ENOENT.  The spawn2 wrapper below folds it back to -1. */
+      fat16_close(&f);
+      process_free(pid);
+      return -ENOENT;
+    }
+    /* GB-013 (ELF loader, docs/elf-loader.md §2): dispatch on the first four
+       bytes.  0x7fELF -> the ELF mapper (x86_64 only; ARM never loads ELF);
+       anything else -> the existing flat .bin loader, unchanged.  Peek the
+       magic 4 bytes into a tiny scratch and branch. */
+    {
+      uint64_t magicw = 0;
+      /* dest is a physical address integer; &magicw is a stack VA == phys
+         (kernel direct map), so the read lands in the local. */
+      if (fat16_read_direct_pos(f.fat16.entry.start_cluster, fsize,
+                                (uint64_t)&magicw, 4, 0) == 4) {
+        uint8_t *mb = (uint8_t *)&magicw; /* little-endian: bytes 0..3 = magic */
+        is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
+      }
     }
   }
   uint64_t elf_entry = 0;
@@ -964,20 +1174,52 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        message.  aarch64 has no compat track, so every ELF there is native. */
     uint32_t lflags = 0;
 #if defined(__x86_64__)
-    if (elf_loader_probe_native(f.fat16.entry.start_cluster, fsize) == 1)
+    /* Two tracks, and the probe decides: an image naming /LDHOBBY.SO is the
+       native dynamic track; everything else gets the explicit Linux-interp
+       opt-in, which is a no-op for a static compat binary and the whole
+       point for a glibc one (docs/rw-ldso-design.md).  An image read through
+       the VFS (NFS) is probed from its buffer, a FAT16 image from its cluster
+       chain — the same predicate on the same bytes. */
+    int native = (vfs_rc == 1)
+                     ? elf_loader_probe_native_buf(vfs_img, fsize)
+                     : elf_loader_probe_native(f.fat16.entry.start_cluster, fsize);
+    if (native == 1)
       lflags = ELF_LOAD_NATIVE;
+    else
+      lflags = ELF_LOAD_COMPAT_INTERP;
 #else
     lflags = ELF_LOAD_NATIVE;
 #endif
     struct elf_load_info elf_info;
-    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, lflags,
-                              &elf_info);
-    fat16_close(&f);
+    int erc = (vfs_rc == 1)
+                  ? elf_loader_load_image(as, vfs_img, fsize, lflags, &elf_info)
+                  : elf_loader_load(as, f.fat16.entry.start_cluster, fsize,
+                                    lflags, &elf_info);
+    if (vfs_rc == 1) {
+      for (uint32_t i = 0; i < vfs_pages; i++)
+        frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
+      vfs_img = 0;
+    } else {
+      fat16_close(&f);
+    }
     if (erc != 0) {
+      /* Name the refusal: a silent -ENOMEM here reads as "the program never
+         ran", which is the least diagnosable failure in the boot log. */
+      struct kline ke;
+      kl_init(&ke);
+      kl_s(&ke, "v2 loader: ELF load refused rc=");
+      kl_i(&ke, erc);
+      kl_s(&ke, " size=");
+      kl_i(&ke, (long)fsize);
+      kl_s(&ke, " file=");
+      kl_s(&ke, filename);
+      kl_s(&ke, "\n");
+      kl_emit(&ke);
       process_free(pid);
       return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC / -ENOENT */
     }
     elf_entry = elf_info.entry;
+    elf_exe_entry = elf_info.exe_entry;
     elf_phdr = elf_info.phdr;
     elf_phnum = elf_info.phnum;
     elf_sp = elf_info.sp;
@@ -993,11 +1235,21 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       kl_hex(&k, elf_info.interp_base);
       kl_s(&k, " exe_base=");
       kl_hex(&k, elf_info.base);
-      kl_s(&k, " entry=");
+      kl_s(&k, " exe_entry=");
+      kl_hex(&k, elf_exe_entry);
+      kl_s(&k, " start=");
       kl_hex(&k, elf_entry);
       kl_c(&k, '\n');
       kl_emit(&k);
     }
+  } else if (vfs_rc == 1) {
+    /* A flat .bin is mapped lazily by (start_cluster, size) identity, which
+     * only FAT16 has.  Say so instead of trying an uninitialised struct file. */
+    uart_puts("v2 loader: flat .bin images are FAT16-only (use an ELF on NFS)\n");
+    for (uint32_t i = 0; i < vfs_pages; i++)
+      frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
+    process_free(pid);
+    return -ENOEXEC;
   } else if (v2_map_image(as, &f, fsize) != 0) {
     fat16_close(&f);
     process_free(pid);
@@ -1030,6 +1282,17 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     process_free(pid);
     return -EBADF;
   }
+
+  /* M2 stdio: after ALL fd inheritance (spawn2's pipe wiring above and
+     spawn_ex's copy+map+sweep here), give every unassigned stdio slot a real
+     /dev/console file object.  This runs with caller_pid == -1 (boot wave, no
+     parent) too: the old fd-0-only /dev/null block was wiped by
+     spawn_ex_apply_fds, and fd 1/2 were never assigned at all when there was
+     no parent -- exactly the shape Mono's Console ctor rejects.  Compat
+     only: this function sets PROC_FLAG_LINUX_ABI further below, so the
+     decision is passed in (is_elf && !elf_native) rather than read off the
+     PCB. */
+  child_ensure_console_stdio(child, is_elf && !elf_native);
 
 #ifdef __x86_64__
   /* GB-068 follow-on: the stack is a DEMAND-ZERO region (VM_MAP_PRIVATE with
@@ -1093,8 +1356,8 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       process_set_entry(pid, elf_entry, USER_MAIN_STK_TOP_V2);
     } else
 #endif
-    if (compat_stack_block(child, pid, elf_entry, elf_exe_entry,
-                           elf_interp_base, elf_phdr, elf_phnum) != 0) {
+    if (compat_stack_block(child, pid, elf_entry, elf_exe_entry, elf_phdr,
+                           elf_phnum, elf_interp_base, filename) != 0) {
       uart_puts("v2 loader: startup block write failed\n");
       process_free(pid);
       return -EFAULT;
@@ -1312,6 +1575,11 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     for (vi = 0; new_name && new_name[vi] && vi < 31; vi++)
       cur->name[vi] = new_name[vi];
     cur->name[vi] = '\0';
+    /* The executable path /proc/self/exe answers: `abs` is already resolved
+       against the caller's cwd.  Set on the caller and the group anchor so a
+       thread that exec'd does not leave the leader with the old path. */
+    set_exe_path(cur, abs);
+    if (grp != cur) set_exe_path(grp, abs);
     for (vi = 0; args && args[vi] && vi < HO_FLAT_ARGS_LEN - 1; vi++)
       cur->args[vi] = args[vi];
     cur->args[vi] = '\0';
@@ -1338,6 +1606,10 @@ int process_exec_current(struct trap_frame *tf, const char *path,
 #else
     grp->context[33] = USER_MAIN_STK_TOP_V2;
 #endif
+    /* M6/L36: the frame's lr slot must name the NEW image's stack, not the
+       pre-exec stack (restore_context resumes from context[30]; a signal at
+       the first resume would otherwise plant around the old SP). */
+    grp->context[30] = grp->context[33];
     arch_set_user_sp(grp->context[33]);
 #ifdef __x86_64__
     /* GB-068 follow-on, exec flavour: the spawn loader pre-materializes the
@@ -1378,6 +1650,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   for (i = 0; new_name && new_name[i] && i < 31; i++)
     grp->name[i] = new_name[i];
   grp->name[i] = '\0';
+  set_exe_path(grp, abs);
   for (i = 0; args && args[i] && i < HO_FLAT_ARGS_LEN - 1; i++)
     grp->args[i] = args[i];
   grp->args[i] = '\0';

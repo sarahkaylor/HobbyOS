@@ -82,6 +82,15 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
 void linux_compat_unhandled(struct process *p, uint64_t nr, uint64_t rip,
                             uint64_t rdi);
 
+#ifdef RW_TRACE_MEM
+/* Diagnostic (make RW_TRACE_MEM=1): one compact row per memory syscall with the
+   six raw arguments and the return value.  Called from the dispatcher, so no
+   handler needs a second exit path.  Cap is inside the implementation. */
+void l_mem_trace(const char *name, struct process *p, uint64_t a0, uint64_t a1,
+                 uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5,
+                 int64_t ret);
+#endif
+
 /* --- user-memory helpers -------------------------------------------------
  * All return 0 on success, -EFAULT on a bad or unmapped user range.  They are
  * the ONLY sanctioned way for a compat handler to touch guest memory: the
@@ -98,5 +107,13 @@ int l_copy_cstr(struct process *p, char *kdst, uint64_t usrc, uint64_t cap);
 /* struct timespec (16 B: tv_sec, tv_nsec) -> milliseconds, rounded up.
    Returns -EINVAL for a negative or absurd timespec. */
 int l_timespec_to_ms(struct process *p, uint64_t uts, int64_t *out_ms);
+
+/* --- M6/L33: pending-signal query for a blocking compat syscall ---------
+ * Returns the first signal this thread would take right now: pending on the
+ * thread or its group anchor, not blocked by the thread's mask, and not
+ * SIG_IGN.  Returns 0 when none.  A blocking syscall uses it at entry
+ * (Linux's "signal_pending" check) so a signal that arrived while the
+ * program was still running never sleeps through the park. */
+int linux_compat_sig_deliverable(struct process *p);
 
 #endif /* LINUX_COMPAT_H */

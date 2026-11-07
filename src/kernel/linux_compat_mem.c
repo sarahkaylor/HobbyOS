@@ -63,6 +63,8 @@
 #include "arch/trap.h"
 #include "errno.h"
 #include "frame.h"
+#include "fs.h"
+#include "kline.h"
 #include "linux_syscall.h"
 #include "process.h"
 #include "vm.h"
@@ -140,6 +142,40 @@ static int l_mem_brk(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, (int64_t)g->heap_brk);
 }
 
+/* ---- JIT code windows (M6/L36 diagnostics) -----------------------------
+ * Mono's code manager gets its writable+executable JIT pages from these
+ * anonymous PROT_EXEC mmaps.  Keeping the first few windows lets a stack dump
+ * name a word as a JIT return address without any symbol table. */
+#define L_JIT_MAX 8
+static uint64_t l_jit_base[L_JIT_MAX];
+static uint64_t l_jit_len[L_JIT_MAX];
+static int l_jit_n;
+
+void l_jit_note(uint64_t base, uint64_t len) {
+  if (l_jit_n >= L_JIT_MAX)
+    return;
+  l_jit_base[l_jit_n] = base;
+  l_jit_len[l_jit_n] = len;
+  l_jit_n++;
+}
+
+/* ith known JIT window; 0 when there is none. */
+int l_jit_window(int i, uint64_t *base, uint64_t *len) {
+  if (i < 0 || i >= l_jit_n)
+    return 0;
+  *base = l_jit_base[i];
+  *len = l_jit_len[i];
+  return 1;
+}
+
+/* 1 = address is inside a known JIT window. */
+int l_jit_contains(uint64_t va) {
+  for (int i = 0; i < l_jit_n; i++)
+    if (va >= l_jit_base[i] && va < l_jit_base[i] + l_jit_len[i])
+      return 1;
+  return 0;
+}
+
 /* ---- mmap --------------------------------------------------------------- */
 
 static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
@@ -191,6 +227,57 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   int64_t r = sys_mmap6(addr, len, prot, (int64_t)hf, fd, off);
   if (r == -1 && as)
     r = -ENOMEM; /* v2 vm_mmap's only -1 is a caller-contract bug */
+  /* M6/L36: name every executable anonymous mapping.  Mono's code manager
+     allocates JIT code pages this way, so the [SFA]/[SFB] stack dumps can be
+     read against a known code range: a return address inside one of these
+     windows is a JIT frame, and the parity of the word that HOLDS it names
+     the %rsp a callee was entered with. */
+  if (r > 0 && (prot & L_PROT_EXEC) && (hf & L_MAP_ANONYMOUS)) {
+    extern void l_jit_note(uint64_t base, uint64_t len);
+    l_jit_note((uint64_t)r, len);
+    static int jit_rows;
+    if (jit_rows < 120) {
+      jit_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[JIT] pid=");
+      kl_i(&kl, p ? p->pid : -1);
+      kl_s(&kl, " hint=");
+      kl_hex(&kl, (unsigned long)addr);
+      kl_s(&kl, " base=0x");
+      kl_hex(&kl, (unsigned long)r);
+      kl_s(&kl, " len=0x");
+      kl_hex(&kl, (unsigned long)len);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  if (r < 0 && fd >= 0 && !(hf & L_MAP_ANONYMOUS)) {
+    /* A file-backed mmap that failed: name the file and the reason.  This is
+       the "first loader refusal" evidence for a DSO/assembly the caller
+       cannot map (NFS pages are -ENOTSUP until M5b). */
+    static int mmap_reports;
+    if (mmap_reports < 8) {
+      mmap_reports++;
+      char path[160];
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LCOMPAT] mmap fail fd=");
+      kl_i(&kl, (long)fd);
+      kl_s(&kl, " len=");
+      kl_i(&kl, (long)len);
+      kl_s(&kl, " off=");
+      kl_i(&kl, (long)off);
+      kl_s(&kl, " -> ");
+      kl_i(&kl, (long)r);
+      if (file_path_of(p, (int)fd, path, sizeof path) == 0) {
+        kl_s(&kl, " path=");
+        kl_s(&kl, path);
+      }
+      kl_s(&kl, "\n");
+      kl_emit(&kl);
+    }
+  }
   return l_ret(tf, r);
 }
 
@@ -233,6 +320,13 @@ static int l_mem_mprotect(struct process *p, struct trap_frame *tf) {
   /* vm_mprotect answers -ENOMEM for an unmapped span -- which is Linux's
      answer too -- and -EINVAL for a range outside the user window. */
   int64_t r = sys_mprotect(addr, len, prot);
+  /* M6/L36: Mono's code manager commits its JIT pages with mprotect(RWX) on a
+     reserved PROT_NONE mapping (rule 30), NOT with a PROT_EXEC mmap, so this
+     is where a code window becomes executable. */
+  if (r == 0 && (prot & L_PROT_EXEC)) {
+    extern void l_jit_note(uint64_t, uint64_t);
+    l_jit_note(addr, len);
+  }
   return l_ret(tf, r == -1 ? -ENOMEM : r);
 }
 
@@ -307,21 +401,6 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
 
   if (!(flags & L_MREMAP_MAYMOVE)) return l_ret(tf, -ENOMEM);
 
-  uint64_t dst;
-  if (flags & L_MREMAP_FIXED) {
-    if (!new_addr || (new_addr & (LPG - 1))) return l_ret(tf, -EINVAL);
-    if (new_addr + new_len < new_addr) return l_ret(tf, -EINVAL);
-    if (new_addr < old_addr + old_len && old_addr < new_addr + new_len)
-      return l_ret(tf, -EINVAL); /* overlapping move: Linux refuses */
-    if (!l_fixed_ok(new_addr, new_len)) return l_ret(tf, -EINVAL);
-    l_zap_pages(as, new_addr, new_len);
-    if (vm_region_remove(as, new_addr, new_len) != 0) return l_ret(tf, -EINVAL);
-    dst = new_addr;
-  } else {
-    dst = vm_hole_find(as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2, new_len);
-    if (!dst) return l_ret(tf, -ENOMEM);
-  }
-
   /* The copy below runs through the kernel's user-write path, which honours the
      mapping's protection, so a moved READ-ONLY mapping is installed writable
      for the duration of the copy and its real protection is restored after --
@@ -333,9 +412,29 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
     ins_prot = (uint16_t)(prot | VM_PROT_WRITE);
     restore_prot = 1;
   }
-  if (vm_region_insert(as, dst, new_len, ins_prot, kind, rflags, obj, obj_off) !=
-      0)
-    return l_ret(tf, -ENOMEM);
+
+  /* L56: the destination is chosen and RESERVED in one vm_lock section.  The
+     old vm_hole_find + vm_region_insert pair was the same base-select race as
+     mmap's (another thread of the group could take the chosen base first and
+     this call then answered -ENOMEM with free space in the arena). */
+  uint64_t dst;
+  if (flags & L_MREMAP_FIXED) {
+    if (!new_addr || (new_addr & (LPG - 1))) return l_ret(tf, -EINVAL);
+    if (new_addr + new_len < new_addr) return l_ret(tf, -EINVAL);
+    if (new_addr < old_addr + old_len && old_addr < new_addr + new_len)
+      return l_ret(tf, -EINVAL); /* overlapping move: Linux refuses */
+    if (!l_fixed_ok(new_addr, new_len)) return l_ret(tf, -EINVAL);
+    l_zap_pages(as, new_addr, new_len);
+    int frc = vm_region_install_fixed(as, new_addr, new_len, ins_prot, kind,
+                                      rflags, obj, obj_off);
+    if (frc != 0) return l_ret(tf, frc);
+    dst = new_addr;
+  } else {
+    int hrc = vm_region_alloc_hole(as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2,
+                                   new_len, ins_prot, kind, rflags, obj,
+                                   obj_off, &dst);
+    if (hrc != 0) return l_ret(tf, hrc);
+  }
 
   if (!obj) {
     int cr = l_copy_span(p, dst, old_addr, old_len);
@@ -460,6 +559,60 @@ static int l_mem_memfd_create(struct process *p, struct trap_frame *tf) {
      flags word is Linux's (MFD_CLOEXEC 1, MFD_ALLOW_SEALING 2). */
   return l_ret(tf, sys_memfd_create(name, flags));
 }
+
+/* ---- RW_TRACE_MEM: one row per memory syscall ----------------------------
+ *
+ * Diagnostic only (`make RW_TRACE_MEM=1`).  Naming the strategy an allocator
+ * uses to carve its arena is impossible from the callers' code (Unity's is not
+ * ours) and from a read (the region list is the *result*, not the request): the
+ * request stream is the missing observation.  Rows are ordered, so the window
+ * of interest is found by position (the last rows before the park) and by pid.
+ *
+ * Shape (one line per call, no second row):
+ *   [MM] #41 mmap pid=4 a=0x0 b=0x1000 c=0x3 d=0x22 e=-1 f=0x0 -> 0x1080000000
+ * `a..f` are the raw six arguments in Linux order (a0..a5), so the meaning of
+ * each column is fixed by the syscall name, not by this printer.
+ */
+#ifdef RW_TRACE_MEM
+#define RW_MEM_ROW_MAX 40000
+static int rw_mem_rows;
+
+void l_mem_trace(const char *name, struct process *p, uint64_t a0, uint64_t a1,
+                 uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5,
+                 int64_t ret) {
+  if (rw_mem_rows >= RW_MEM_ROW_MAX) return;
+  int n = rw_mem_rows++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[MM] #");
+  kl_i(&kl, n);
+  kl_c(&kl, ' ');
+  kl_s(&kl, name);
+  kl_s(&kl, " pid=");
+  kl_i(&kl, p ? (long)p->pid : -1);
+  kl_s(&kl, " a=");
+  kl_hex(&kl, (unsigned long)a0);
+  kl_s(&kl, " b=");
+  kl_hex(&kl, (unsigned long)a1);
+  kl_s(&kl, " c=");
+  kl_hex(&kl, (unsigned long)a2);
+  kl_s(&kl, " d=");
+  kl_hex(&kl, (unsigned long)a3);
+  kl_s(&kl, " e=");
+  kl_hex(&kl, (unsigned long)a4);
+  kl_s(&kl, " f=");
+  kl_hex(&kl, (unsigned long)a5);
+  kl_s(&kl, " -> ");
+  if (ret < 0) {
+    kl_c(&kl, '-');
+    kl_i(&kl, (long)(-ret));
+  } else {
+    kl_hex(&kl, (unsigned long)ret);
+  }
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+#endif /* RW_TRACE_MEM */
 
 /* ---- the table ---------------------------------------------------------- */
 

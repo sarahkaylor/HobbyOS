@@ -1,6 +1,7 @@
 #include "process.h"
 #include "vdisplay.h"
 #include "kline.h"
+#include "futex_trace.h"
 #include "frame.h"
 #include "vm.h"
 #include "fs.h"
@@ -11,6 +12,7 @@
 #include "timer.h"
 #include "errno.h"
 #include "syscall.h"
+#include "virtio_blk.h"
 #include <stdint.h>
 
 /* --- debugcon (0xE9) parking diagnostic: IRQ-safe port writes only --- */
@@ -86,6 +88,16 @@ static void db_i(struct db_buf *f, long v) {
   while (v > 0 && k < 23) { t[k++] = (char)('0' + (v % 10)); v /= 10; }
   if (neg) db_s(f, "-");
   while (k > 0) { char c2 = t[--k]; int n2 = f->n; if (n2 < (int)sizeof f->b - 1) f->b[n2] = c2; f->n = n2 + 1; }
+}
+static void db_x(struct db_buf *f, unsigned long v) {
+  char t[20]; int k = 0, i = 0;
+  char o[20];
+  o[i++] = '0'; o[i++] = 'x';
+  if (!v) t[k++] = '0';
+  while (v) { int d = (int)(v & 15); t[k++] = (char)(d < 10 ? '0' + d : 'a' + d - 10); v >>= 4; }
+  while (k) o[i++] = t[--k];
+  o[i] = 0;
+  db_s(f, o);
 }
 static void db_emit(struct db_buf *f) {
   if (f->n < (int)sizeof f->b) f->b[f->n] = 0; else f->b[sizeof f->b - 1] = 0;
@@ -334,9 +346,14 @@ void process_init(void) {
     proc_table[i].env[0] = '\0';
     proc_table[i].envc = 0;
     proc_table[i].sig_pending = 0;
+    proc_table[i].sig_pending_dir = 0;
     proc_table[i].sig_restorer = 0;
     proc_table[i].sig_in_handler = 0;
     proc_table[i].sig_frame = 0;
+    proc_table[i].sig_park_kind = 0;
+    proc_table[i].sig_suspended = 0;
+    proc_table[i].sig_saved_mask = 0;
+    proc_table[i].sig_park_nr = 0;
     for (int j = 0; j < HO_SIG_MAX; j++) {
       proc_table[i].sig_handler[j] = 0;
     }
@@ -443,6 +460,13 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   proc_table[pid].context[31] = elr;        // ELR (entry point)
   proc_table[pid].context[33] = sp;         // SP_EL0 (stack pointer)
+  /* M6/L36: context[30] is the frame's own user-RSP slot (restore_context
+     loads tf->lr from it).  It MUST agree with context[33]: a signal
+     delivered at this process's first resume plants its frame at tf->lr, so
+     a stale value here moves the handler -- and the rt_sigreturn that
+     follows -- onto another process's stack.  Fresh contexts are zeroed, so
+     without this the first resume carries lr=0. */
+  proc_table[pid].context[30] = sp;
 #if defined(__x86_64__)
   /* GB-014: on x64 this slot is RFLAGS, not ARM's SPSR. Zero is NOT a valid
    * set of flags to iretq with: bit 1 is architecturally reserved and MUST be
@@ -606,6 +630,19 @@ static int group_claims_pending(struct process *grp, struct process *self) {
   return pending;
 }
 
+/* M6/L32: every pid slot carries an allocation sequence number so a signal
+ * row can say whether the PCB the caller named is the SAME occupant the
+ * sender saw, or a slot that has been freed and handed to a new thread.
+ * Linux defers a numeric tid's reuse until the kernel's pid space wraps;
+ * this table is what proves whether the compat one does. */
+static uint32_t pid_alloc_seq[MAX_PROCESSES];
+
+uint32_t process_slot_seq(int pid) {
+  if (pid <= 0 || pid >= MAX_PROCESSES)
+    return 0;
+  return pid_alloc_seq[pid];
+}
+
 /* ---------------------------------------------------------------------------
  * P5 (D5.3/D5.4/D5.6): unified reap delivery + slot forensics.
  * ------------------------------------------------------------------------- */
@@ -687,12 +724,25 @@ static void user_rusage_store(struct process *p, uint64_t va,
  * accepted-and-recorded but never delivered to a handler, and SIGUSR1/
  * SIGUSR2 delivery is deliberately deferred (D13/OQ3) — a mis-delivered
  * suspend/resume signal must never let WTF's suspend() proceed.  Pending
- * bits for these accumulate harmlessly; everything else delivers. */
+ * bits for these accumulate harmlessly; everything else delivers.
+ *
+ * D6/L12: the real-time range 32..63 is now named explicitly.  glibc's
+ * pthread_cancel raises SIGCANCEL(32), pthread_setxid broadcasts
+ * SIGSETXID(33) and Mono suspends threads on SIGRTMIN(35).  Each carries a
+ * handler installed through rt_sigaction, so they are catchable, and
+ * without this branch they were stored and never delivered (the 32-slot
+ * mask and sig_known() were the other two walls).  The native set below is
+ * unchanged. */
 static int sig_deliverable(int sig) {
+  if (sig <= 0 || sig >= HO_SIG_MAX)
+    return 0;
+  if (sig >= 32)
+    return 1; /* real-time range: SIGCANCEL/SIGSETXID/SIGRTMIN */
   switch (sig) {
   case HO_SIGILL:
   case HO_SIGABRT:
   case HO_SIGBUS:
+  case HO_SIGFPE:
   case HO_SIGSEGV:
   case HO_SIGUSR1:
   case HO_SIGUSR2:
@@ -768,7 +818,7 @@ static void reap_deliver_locked(struct process *grp) {
   if (pp > 0 && pp < MAX_PROCESSES) {
     struct process *pgp = process_group(&proc_table[pp]);
     if (pgp->state != PROC_STATE_FREE) {
-      pgp->sig_pending |= (1u << (HO_SIGCHLD - 1));
+      pgp->sig_pending |= (1ull << (HO_SIGCHLD - 1));
       /* D8.2 minimal siginfo: si_pid = the dead child, si_status = the
          waitpid status word recorded by group_teardown. */
       pgp->sig_child_pid = grp->pid;
@@ -1030,6 +1080,7 @@ static int process_create_internal_ver(int ver) {
          the same shape) and was reverted. */
       proc_table[i].last_syscall = -1;
       proc_table[i].last_ret = 0;
+      proc_table[i].sys_ring_at = 0;
       break;
     }
   }
@@ -1201,13 +1252,14 @@ static int process_create_internal_ver(int ver) {
   p->teardown_done = 0;
   p->thread_ret = 0;
   p->as = 0;
-  p->fd_cloexec = 0;
+  fd_cloexec_reset(p->fd_cloexec);
   p->echild_logged = 0; /* fresh PCB: the ECHILD diagnostic speaks once */
   /* P5 (D7/D3.1): fresh signal/env state — a recycled slot must never
      leak the previous occupant's dispositions, pending bits or env. */
   p->env[0] = '\0';
   p->envc = 0;
   p->sig_pending = 0;
+  p->sig_pending_dir = 0;
   p->sig_restorer = 0;
   p->sig_in_handler = 0;
   p->sig_frame = 0;
@@ -1324,6 +1376,7 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
      identity-map all RAM at supervisor level (and the block is also
      mapped at USER_VIRT_BASE while the task is current). */
   p->context[33] = p->user_phys_base + USER_REGION_SIZE - 0x1000;
+  p->context[30] = p->context[33]; /* M6/L36: frame lr == resumed SP */
 #ifdef __x86_64__
   p->context[32] = 0x202;                  // RFLAGS = IF (0x200) | Reserved (0x02)
   p->context[5] = (uint64_t)arg;           // rdi = first argument on x86_64
@@ -1332,6 +1385,8 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
   p->context[0] = (uint64_t)arg;           // x0 = first argument on ARM64
 #endif
   p->state = PROC_STATE_READY;
+  /* L52: a fresh process must not wait for the 100 Hz tick to get a CPU. */
+  sched_wake_idle_cpu();
 
   return pid;
 }
@@ -1418,9 +1473,69 @@ void save_context(struct process *p, struct trap_frame *tf) {
      one deliberately SIMD-capable TU, src/kernel/arch/arm/fpu.s. */
   fpu_save(p->fpu_state);
 #endif
-  /* P1 (design section 4): the TLS register joins the switch as one per-PCB
-     word -- read the live value here, write it back in restore_context(). */
-  p->tls_base = tls_read_live();
+  /* P1 (design section 4): the TLS register is one per-PCB word, restored in
+     restore_context().  It is NOT re-read from the live MSR here: the only
+     writers of IA32_FS_BASE/TPIDR_EL0 are process_set_tls() (which updates
+     the PCB too) and restore_context() itself, so p->tls_base is already
+     authoritative -- while the live MSR belongs to whatever this CPU is
+     executing, which is not necessarily `p` when a stale cpu_current_pids
+     claim made us save another thread's frame.  Measured (M2): the old read
+     copied one worker's FS base into the main thread's PCB, main then ran
+     with a foreign TCB and died inside __free_tcb. */
+  (void)0;
+}
+
+/* M6/L37: how far below the interrupted RSP the user-mode resume scratch
+ * window sits.  The psABI reserves [rsp-128, rsp) for a leaf function's live
+ * data, so a window that reaches above rsp-128 corrupts it.  This constant is
+ * the single source of truth for the [RESUME-RZ] row; the asm below uses
+ * `lea rdi, [r13 - 448]` == target_sp - (PROCESS_RESUME_RZ_SKIP + 320). */
+#define PROCESS_RESUME_RZ_SKIP 128ULL
+
+/* The last user-mode resumes: (pid, target_sp, frame RSP, uptime).  A fault
+ * dump asks this ring whether the faulting thread had just been resumed at
+ * (about) its faulting SP -- which is the fingerprint of the resume window
+ * having overwritten the qwords at [rsp-0x50 .. rsp-0x140] with the trap
+ * frame (tf->lr lands exactly at rsp-0x50). */
+#define RESUME_RING 256
+static struct {
+  int pid;
+  uint64_t target_sp;
+  uint64_t frame_lr;
+  uint64_t ms;
+} g_rring[RESUME_RING];
+static volatile unsigned g_rring_pos;
+
+void resume_ring_note(int pid, uint64_t target_sp, uint64_t frame_lr) {
+  unsigned i = __sync_fetch_and_add(&g_rring_pos, 1) % RESUME_RING;
+  g_rring[i].pid = pid;
+  g_rring[i].target_sp = target_sp;
+  g_rring[i].frame_lr = frame_lr;
+  g_rring[i].ms = (uint64_t)timer_get_ms();
+}
+
+/* 1 when `sp` is within 0x400 of a recorded resume of `pid` (the frame is
+ * still on that stack), 0 otherwise; *dist is the absolute difference and
+ * *ms the age of the winning row. */
+int resume_ring_probe(int pid, uint64_t sp, uint64_t *dist, uint64_t *ms) {
+  int hit = 0;
+  uint64_t best = ~(uint64_t)0, best_ms = 0;
+  uint64_t now = (uint64_t)timer_get_ms();
+  for (unsigned k = 0; k < RESUME_RING; k++) {
+    unsigned i = (g_rring_pos + RESUME_RING - 1 - k) % RESUME_RING;
+    if (g_rring[i].pid != pid || g_rring[i].target_sp == 0)
+      continue;
+    uint64_t d = (sp > g_rring[i].target_sp) ? sp - g_rring[i].target_sp
+                                            : g_rring[i].target_sp - sp;
+    if (d <= 0x400 && d < best) {
+      best = d;
+      best_ms = now - g_rring[i].ms;
+      hit = 1;
+    }
+  }
+  *dist = hit ? best : 0;
+  *ms = hit ? best_ms : 0;
+  return hit;
 }
 
 void wd_dump_proc_table(void) {
@@ -1530,6 +1645,17 @@ static void process_check_sleeping(void) {
     if (proc_table[i].state == PROC_STATE_FUTEX && proc_table[i].wake_ms > 0 &&
         current_time >= proc_table[i].wake_ms) {
       proc_table[i].context[0] = (uint64_t)(int64_t)-ETIMEDOUT;
+      {
+        /* A timeout is a wake too: without a row here, "parked and then
+           nothing" cannot be distinguished from "parked, timed out, and the
+           program chose to park again on the same word". */
+        struct futex_ev ev = {0};
+        ev.op = FTR_TIMEOUT;
+        ev.pid = proc_table[i].pid;
+        ev.as = (uint64_t)(uintptr_t)proc_table[i].as;
+        ev.uaddr = proc_table[i].futex_uaddr;
+        futex_trace_note(&ev);
+      }
       proc_table[i].futex_uaddr = 0;
       proc_table[i].wake_ms = 0;
       proc_table[i].state = PROC_STATE_READY;
@@ -1870,9 +1996,101 @@ void schedule(struct trap_frame *tf, int is_yield) {
          to its own trap exit (D8.4b). */
       process_signal_resume_deliver(&proc_table[next], &local_tf);
 
+      /* M6/L36: enter_user_space plants the user RSP from gs:[24] (the
+         per-CPU user_sp[] that restore_context just set from context[33]),
+         NOT from the frame's own lr slot.  A resumed frame whose lr and
+         context[33] disagree therefore re-enters user code on a different
+         stack than the one it was interrupted on -- the exact shape of an
+         8-byte skew at Mono's next trampoline.  Report the disagreement. */
+      if ((local_tf.cs & 3) == 3) {
+        extern int linux_compat_resume_check(int, uint64_t, uint64_t)
+            __attribute__((weak));
+        if (linux_compat_resume_check)
+          (void)linux_compat_resume_check(proc_table[next].pid, local_tf.lr,
+                                          arch_get_user_sp());
+      }
+
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       extern void resume_mark(int pid, uint64_t target_sp);
       resume_mark(proc_table[next].pid, target_sp);
+      /* M6/L37: the user-mode resume writes its 37-qword frame image onto the
+         TASK'S OWN USER STACK at [target_sp-320, target_sp-24).  That window
+         covers 104 of the 128 bytes the psABI reserves below RSP for a leaf
+         function's live data, so every timer preemption silently overwrote a
+         live red-zone local of the interrupted function -- the mechanism that
+         produced `mov -0x50(%rsp),%rdi -> 0x17FFFFB378` (the thread's own SP)
+         in UnityPlayer+0x91b10e.  Rule 51 fixed the signal frame's copy of
+         this bug; this is the resume path's copy of it, which rule 51 did not
+         touch.  The scratch region does NOT have to end at target_sp: iretq
+         takes the resumed RSP from the frame's own RSP slot, so the window can
+         sit below the red zone (see the `lea rdi, [r13 - 448]` note in
+         enter_user_space).  This row records the geometry for every user
+         resume and a counter, so "the writer is always active" is a number,
+         not an inference. */
+      if ((local_tf.cs & 3) == 3) {
+        extern void resume_ring_note(int pid, uint64_t target_sp,
+                                     uint64_t frame_lr);
+        resume_ring_note(proc_table[next].pid, target_sp, local_tf.lr);
+        {
+          static int rc_rows, rc_hits;
+          /* Geometry of the window enter_user_space is about to write.  Keep
+             RESUME_RZ_SKIP in sync with the `lea rdi, [r13 - 448]` below
+             (448 = RESUME_RZ_SKIP + 320). */
+          /* The copy is 296 bytes and the iretq stamping writes five more
+             slots up to [rsp+320) == target_sp(-skip), so the window really is
+             [tsp-skip-320, tsp-skip). */
+          uint64_t win_hi = target_sp - PROCESS_RESUME_RZ_SKIP;
+          int bad = (win_hi > target_sp - 128) ? 1 : 0;
+          rc_hits += bad;
+          rc_rows++;
+          if (rc_rows <= 8 || (rc_rows & 0xFFFF) == 0) {
+            extern void uart_puts(const char *s);
+            char cb[128];
+            int ci = 0;
+            const char *p1 = "[RESUME-RZ] pid=";
+            while (*p1) cb[ci++] = *p1++;
+            char td[12];
+            int ti = 0, v = proc_table[next].pid;
+            if (v == 0) td[ti++] = '0';
+            while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) cb[ci++] = td[--ti];
+            const char *p2 = " tsp=";
+            while (*p2) cb[ci++] = *p2++;
+            static const char hx3[] = "0123456789ABCDEF";
+            uint64_t u = target_sp;
+            for (int sh = 60; sh >= 0; sh -= 4)
+              cb[ci++] = hx3[(u >> sh) & 0xF];
+            const char *p3 = " win_lo=";
+            while (*p3) cb[ci++] = *p3++;
+            u = target_sp - PROCESS_RESUME_RZ_SKIP - 320;
+            for (int sh = 60; sh >= 0; sh -= 4)
+              cb[ci++] = hx3[(u >> sh) & 0xF];
+            const char *p4 = " win_hi=";
+            while (*p4) cb[ci++] = *p4++;
+            u = win_hi;
+            for (int sh = 60; sh >= 0; sh -= 4)
+              cb[ci++] = hx3[(u >> sh) & 0xF];
+            const char *p5 = " redzone_hit=";
+            while (*p5) cb[ci++] = *p5++;
+            cb[ci++] = bad ? '1' : '0';
+            const char *p6 = " bad_total=";
+            while (*p6) cb[ci++] = *p6++;
+            ti = 0; v = rc_hits;
+            if (v == 0) td[ti++] = '0';
+            while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) cb[ci++] = td[--ti];
+            const char *p7 = " resumes=";
+            while (*p7) cb[ci++] = *p7++;
+            ti = 0; v = rc_rows;
+            if (v == 0) td[ti++] = '0';
+            while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) cb[ci++] = td[--ti];
+            cb[ci++] = '\n';
+            cb[ci] = 0;
+            uart_puts(cb);
+          }
+        }
+      }
       /* GB-057: the parked cores were recorded with rflags=0x10046 -- IF (0x200)
          CLEAR -- in the frame that iretq restores.  A user process resumed with
          IF=0 can never be preempted by the timer: age_ms climbs for ever, the
@@ -2138,6 +2356,33 @@ void schedule(struct trap_frame *tf, int is_yield) {
         db_i(&d, proc_table[i].parent_pid);
         db_s(&d, " claimed_by=");
         db_i(&d, claimer);
+        /* L48: where the thread actually is.  A dump that "stops after Full
+           thread dump:" leaves its own thread parked somewhere in libmono and
+           no row said where; the saved user PC plus a module+offset is the
+           one fact that names it (the [TEXIT] mod= walk, rule 97). */
+        {
+          uint64_t pc48 = proc_table[i].context[31];
+          db_s(&d, " pc=");
+          db_x(&d, (unsigned long)pc48);
+          if (proc_table[i].as && pc48) {
+            struct vm_region *rg48 = vm_region_find(proc_table[i].as, pc48);
+            if (rg48) {
+              int idx48 = (int)(rg48 - proc_table[i].as->regions);
+              int lo48 = idx48;
+              while (lo48 > 0) {
+                struct vm_region *pv48 = &proc_table[i].as->regions[lo48 - 1];
+                if (pv48->kind != rg48->kind || (pv48->prot & VM_PROT_WRITE) ||
+                    pv48->base + pv48->len != proc_table[i].as->regions[lo48].base)
+                  break;
+                lo48--;
+              }
+              db_s(&d, " mod=");
+              db_x(&d, (unsigned long)proc_table[i].as->regions[lo48].base);
+              db_s(&d, "+");
+              db_x(&d, (unsigned long)(pc48 - proc_table[i].as->regions[lo48].base));
+            }
+          }
+        }
         db_s(&d, " ");
         db_s(&d, proc_table[i].name);
         if (st == PROC_STATE_RUNNING && claimer < 0)
@@ -2168,6 +2413,12 @@ void schedule(struct trap_frame *tf, int is_yield) {
         db_s(&d, "\n");
         db_emit(&d);
       }
+#ifdef RW_FUTXW
+      /* L49: at the moment the scheduler finds no runnable work, say which
+         thread is parked on which futex key and what that key has seen.  The
+         per-event [FUTXW] rows are capped; this row is not. */
+      { extern void futxw_summary(void); futxw_summary(); }
+#endif
     }
   alive_dump_done:;
 
@@ -2435,6 +2686,7 @@ static int sig_known(int sig) {
   case HO_SIGABRT:
   case HO_SIGBUS:
   case HO_SIGKILL:
+  case HO_SIGFPE:
   case HO_SIGUSR1:
   case HO_SIGSEGV:
   case HO_SIGUSR2:
@@ -2466,6 +2718,51 @@ static void resched_cpu(uint32_t c) {
     if ((*icr_lo & (1u << 12)) == 0)
       break;
     __asm__ volatile("pause" ::: "memory");
+  }
+#endif
+}
+
+/* L52: a waker that flips a parked thread READY must not leave it waiting
+   for the next 100 Hz tick on a CPU that is idle in `sti; hlt`.  Measured
+   (min10, guest, 8 vCPU): a ThreadPool work item queued from a spinning
+   thread took 10-30 ms (median 30 ms) to start, and a plain
+   Task.Run().Wait() averaged 146 ms -- exactly the tick period times a few.
+   The same bytes on the host cost 0 ms.  The woken slot was READY but every
+   other CPU was in safe_wfi(), and only the timer's broadcast 0x81 pulled
+   them back through schedule().
+
+   Send one directed reschedule IPI to an idle CPU so the woken thread is
+   picked in microseconds.  At most one CPU is poked per wake (a wake only
+   needs one), and only when it is idle, so a wake storm cannot turn into an
+   IPI storm: a busy machine has no idle CPU to poke and behaves as before. */
+void sched_wake_idle_cpu(void) {
+#ifdef __x86_64__
+  if (!scheduler_started)
+    return;
+  uint32_t self = get_cpuid();
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    if (c == self)
+      continue;
+    if (current_pid_of_cpu(c) < 0) {
+      resched_cpu(c);
+      {
+        static int ipi_rows;
+        if (ipi_rows < 8) {
+          ipi_rows++;
+          struct kline ki;
+          kl_init(&ki);
+          kl_s(&ki, "[IPI] self=");
+          kl_i(&ki, (long)self);
+          kl_s(&ki, " to=");
+          kl_i(&ki, (long)c);
+          kl_s(&ki, " t=");
+          kl_i(&ki, (long)timer_get_ms());
+          kl_c(&ki, '\n');
+          kl_emit(&ki);
+        }
+      }
+      return;
+    }
   }
 #endif
 }
@@ -2666,6 +2963,7 @@ void process_exec_apply(struct process *grp, const char *env, int envc) {
       grp->sig_handler[s] = HO_SIG_DFL;
   }
   grp->sig_pending = 0;
+  grp->sig_pending_dir = 0;
   grp->sig_in_handler = 0;
   grp->sig_frame = 0;
   grp->sig_restorer = 0;
@@ -2693,12 +2991,19 @@ void process_exec_apply(struct process *grp, const char *env, int envc) {
 
   /* D3.2: the FD_CLOEXEC sweep -- close every fd whose mask bit is set,
      keeping the numbers of all others.  No proc_lock held (file_close
-     takes the file locks itself). */
-  if (grp->fd_cloexec) {
-    for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
-      if ((grp->fd_cloexec >> fd) & 1u) {
-        file_close(grp, fd); /* no-op -1 when the slot was already empty */
-        grp->fd_cloexec &= ~(1ull << fd);
+     takes the file locks itself).  L55: the mask is a word array, so scan
+     words and test bits through the helper (a raw `>> fd` is undefined for
+     fd >= 64 and silently lost every CLOEXEC bit past 63). */
+  {
+    int any = 0;
+    for (int w = 0; w < FD_CLOEXEC_WORDS; w++)
+      if (grp->fd_cloexec[w]) any = 1;
+    if (any) {
+      for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
+        if (fd_cloexec_test(grp->fd_cloexec, fd)) {
+          file_close(grp, fd); /* no-op -1 when the slot was already empty */
+          fd_cloexec_clear(grp->fd_cloexec, fd);
+        }
       }
     }
   }
@@ -2739,20 +3044,42 @@ void process_exec_terminate_siblings(struct process *grp,
 
 /* Row 16 completion (D9): process-directed targeting + disposition-based
  * action.  See process.h for the contract. */
-int process_signal(int pid, int sig) {
-  if (!sig_known(sig))
+int process_signal_directed(int pid, int sig, int directed) {
+  /* M6/L32: Linux's own range check.  kill(2)/tgkill(2) answer EINVAL for a
+   * number outside 1.._NSIG; within that range the number is VALID for a
+   * Linux-ABI target whatever our native frozen set happens to cover.  The
+   * previous code applied sig_known() (the NATIVE set, 1/2/4/6..13/15/17)
+   * before it even knew the target's ABI, so the compat layer answered
+   * -EINVAL for signals a real Linux process receives every day:
+   * SIGQUIT(3), SIGTRAP(5), SIGALRM(14), SIGXCPU(24), SIGPWR(30), SIGSYS(31)
+   * and every rt number 32..63 unless the target was already known.  Measured
+   * consequence: Mono's Boehm GC suspends threads with
+   * pthread_kill(thread, SIGPWR=30) (GC_stop_init sets GC_sig_suspend=0x1e,
+   * GC_suspend_all aborts on any return other than 0 or ESRCH), so every
+   * stop-the-world died with `pthread_kill failed at suspend: errcode= 22`.
+   * The native contract is unchanged: sig_known() still gates native targets,
+   * below, once the target is resolved. */
+  if (sig < 1 || sig >= HO_SIG_MAX)
     return -EINVAL;
   struct process *target = 0;
+  /* M2: the exact task, when the signal names one.  A Linux tgkill(tid) must
+     run the handler on THAT thread; recording the pending bit only on the
+     group anchor delivered it to whichever member trapped next. */
+  struct process *task = 0;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   if (pid > 0 && pid < MAX_PROCESSES) {
     struct process *p = &proc_table[pid];
     if (p->state != PROC_STATE_FREE && p->state != PROC_STATE_EXITED &&
-        p->state != PROC_STATE_THREAD_DONE)
+        p->state != PROC_STATE_THREAD_DONE) {
       target = process_group(p);
+      task = p;
+    }
   } else if (pid == 0) {
     struct process *cur = current_process();
-    if (cur)
+    if (cur) {
       target = process_group(cur);
+      task = cur;
+    }
   } else if (pid < -1 && -pid > 0 && -pid < MAX_PROCESSES) {
     /* Group leader -pid (D9.1; kill(-1) keeps "any process" meaning only
        in the existence-check path and is -ESRCH here). */
@@ -2762,8 +3089,67 @@ int process_signal(int pid, int sig) {
       target = process_group(p);
   }
   if (!target) {
+    /* M6/L32: the sender's tid does not resolve to a live PCB.  Print the RAW
+       slot state so "genuinely gone" (ESRCH is right, and Boehm treats ESRCH
+       as skip) is distinguishable from "the slot was recycled" (gen) and from
+       "we rejected a live thread". */
+    static int miss_rows;
+    if (miss_rows < 24) {
+      miss_rows++;
+      struct process *raw = (pid > 0 && pid < MAX_PROCESSES) ? &proc_table[pid] : 0;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGIN] miss tid=");
+      kl_i(&kl, pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " st=");
+      kl_i(&kl, raw ? raw->state : -1);
+      kl_s(&kl, " gen=");
+      kl_i(&kl, (long)process_slot_seq(pid));
+      kl_s(&kl, " -> ESRCH\n");
+      kl_emit(&kl);
+    }
     spinlock_release_irqrestore(&proc_lock, flags);
     return -ESRCH;
+  }
+  /* M6/L32: every process-directed signal with a resolved target, with the
+     disposition the target actually has.  Boehm's GC treats pthread_kill's
+     return as a tri-state (0 / ESRCH / fatal), so the *sigaction* record and
+     the state at signal time are what decide whether a failed suspend is our
+     errno or Mono's stale list. */
+  {
+    static int in_rows;
+    if (in_rows < 60) {
+      in_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGIN] pid=");
+      kl_i(&kl, pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " st=");
+      kl_i(&kl, task ? task->state : target->state);
+      kl_s(&kl, " h=0x");
+      kl_hex(&kl, (unsigned long)target->sig_handler[sig]);
+      kl_s(&kl, " abi=");
+      kl_i(&kl, (target->abi_flags & PROC_FLAG_LINUX_ABI) ? 1 : 0);
+      kl_s(&kl, " kn=");
+      kl_i(&kl, sig_known(sig) ? 1 : 0);
+      kl_s(&kl, " thr=");
+      kl_i(&kl, (task && task->is_thread) ? 1 : 0);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  /* M6/L32: the NATIVE frozen set still decides for a native target (any
+   * number sig_known() does not name is -EINVAL, rt or not).  A Linux-ABI
+   * target accepts the whole 1..HO_SIG_MAX-1 range, exactly like Linux, which
+   * is what lets glibc/Mono receive SIGQUIT/SIGTRAP/SIGALRM/SIGPWR/SIGXCPU
+   * and the rt signals (SIGCANCEL 32, SIGSETXID 33, Mono's SIGRTMIN). */
+  if (!sig_known(sig) && !(target->abi_flags & PROC_FLAG_LINUX_ABI)) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return -EINVAL;
   }
   uint64_t h = target->sig_handler[sig];
   if (sig == HO_SIGKILL || h == 0 /* SIG_DFL */) {
@@ -2775,11 +3161,182 @@ int process_signal(int pid, int sig) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return 0;
   }
-  /* Real handler: record pending + wake a restartable-slice park (D8.3). */
-  target->sig_pending |= (1u << (sig - 1));
+  /* Real handler: record pending + wake a restartable-slice park (D8.3).
+   *
+   * M6/L46: a signal that names a tid (tgkill/tkill) is THREAD-DIRECTED, and
+   * Linux queues it on that task alone -- no other thread of the group can
+   * take it, and that includes the group anchor, which is also the main
+   * thread.  It therefore goes in sig_pending_dir, not in sig_pending: the
+   * latter is the process-directed set that every member may consume, and
+   * sharing one word meant a SIGPWR aimed at the main thread was stolen by
+   * whichever thread trapped first.  Measured in the tp_starve probe: Boehm
+   * planted SIGPWR on pids 1, 3 and 2 (the main thread), a thread created
+   * seconds earlier (pid 5, not yet registered with the GC) claimed pid 2's
+   * bit, entered GC_suspend_handler_inner with GC_lookup_thread() == NULL and
+   * died at VA=0x20; the collector waited for an ack that never came. */
+  struct process *pender;
+  /* `directed` is tgkill/tkill (the caller named a tid).  A kill(2) whose
+     pid happens to name a thread is directed too -- a tid selects one task. */
+  int thread_directed = (task && task->is_thread) || (directed && task);
+  if (thread_directed && (target->abi_flags & PROC_FLAG_LINUX_ABI)) {
+    pender = task;
+    pender->sig_pending_dir |= (1ull << (sig - 1));
+  } else {
+    pender = (task && task->is_thread) ? task : target;
+    pender->sig_pending |= (1ull << (sig - 1));
+  }
+  /* M6/L45: per-target rows for the two Boehm stop-the-world signals.  The
+     global [SIG] rows are capped at 400 and the interesting pids (the pool
+     workers created last) never made it into them.  A SIGPWR/SIGXCPU that is
+     *sent* is the first half of the handshake; [SGPS]/[SGY] are the other
+     halves.  A worker that never appears here was never signalled at all --
+     that is Mono's GC list, not our delivery. */
+  if (sig == 24 || sig == 30) {
+    extern uint64_t linux_compat_sigmask_get(struct process *);
+    static uint8_t sgs_rows[MAX_PROCESSES];
+    int si = (pender->pid > 0 && pender->pid < MAX_PROCESSES) ? pender->pid : 0;
+    /* A stop-the-world signal that lands BLOCKED is never handled, so the
+       collector waits for an ack that cannot come: the world stays stopped
+       for ever.  Name the thread and its mask -- this is the one shape that
+       explains a permanent GC stop with every other row looking healthy. */
+    if (si && (linux_compat_sigmask_get(pender) & (1ull << (sig - 1)))) {
+      static uint8_t blk_rows[MAX_PROCESSES];
+      if (blk_rows[si] < 4) {
+        blk_rows[si]++;
+        struct kline kb;
+        kl_init(&kb);
+        kl_s(&kb, "[SIGBLK] pid=");
+        kl_i(&kb, pender->pid);
+        kl_s(&kb, " sig=");
+        kl_i(&kb, sig);
+        kl_s(&kb, " st=");
+        kl_i(&kb, pender->state);
+        kl_s(&kb, " inh=");
+        kl_i(&kb, pender->sig_in_handler);
+        kl_s(&kb, " mask=");
+        kl_hex(&kb, (unsigned long)linux_compat_sigmask_get(pender));
+        kl_s(&kb, " -> never handled\n");
+        kl_emit(&kb);
+      }
+    }
+    if (si && sgs_rows[si] < 12) {
+      sgs_rows[si]++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SGS] pid=");
+      kl_i(&kl, pender->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " st=");
+      kl_i(&kl, pender->state);
+      kl_s(&kl, " susp=");
+      kl_i(&kl, pender->sig_suspended);
+      kl_s(&kl, " inh=");
+      kl_i(&kl, pender->sig_in_handler);
+      kl_s(&kl, " pend=");
+      kl_hex(&kl, (unsigned long)(pender->sig_pending | pender->sig_pending_dir));
+      kl_s(&kl, " dir=");
+      kl_hex(&kl, (unsigned long)pender->sig_pending_dir);
+      kl_s(&kl, " mask=");
+      kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(pender));
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  {
+    /* Every signal a compat program sends or receives is a candidate for "the
+       waker never ran": Mono's stop-the-world is a tgkill plus a park, and a
+       suspend that is never delivered leaves the suspended thread holding
+       whatever locks it had.  Capped, because a spin on signals is noise. */
+    static int sig_reports;
+    if (sig_reports < 400) {
+      sig_reports++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIG] send pid=");
+      kl_i(&kl, pender->pid);
+      kl_s(&kl, " sig=");
+      kl_i(&kl, sig);
+      kl_s(&kl, " st=");
+      kl_i(&kl, pender->state);
+      kl_s(&kl, " futex=");
+      kl_hex(&kl, (unsigned long)pender->futex_uaddr);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  {
+    /* L48: a SIGQUIT that lands on a thread whose mask blocks it is never
+       delivered, and the dump then simply never starts.  One row at the
+       sender names that case instead of leaving it to a theory. */
+    if (sig == 3 || (sig >= 34 && sig <= 40)) {
+      static int b48_rows;
+      uint64_t m48 = linux_compat_sigmask_get(pender);
+      if ((m48 & (1ull << (sig - 1))) && b48_rows < 40) {
+        b48_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[SIGB] pid=");
+        kl_i(&kl, pender->pid);
+        kl_s(&kl, " sig=");
+        kl_i(&kl, sig);
+        kl_s(&kl, " blocked mask=");
+        kl_hex(&kl, (unsigned long)m48);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+  }
   sig_wake_leader_locked(target, sig);
+  /* M2: a compat thread parked in futex must see the signal as EINTR, or a
+     stop-the-world tgkill never reaches a parked worker. */
+  if (pender->abi_flags & PROC_FLAG_LINUX_ABI) {
+    extern void linux_compat_signal_interrupt(struct process *)
+        __attribute__((weak));
+    if (linux_compat_signal_interrupt) {
+      linux_compat_signal_interrupt(pender);
+      if (pender != target)
+        linux_compat_signal_interrupt(target);
+    }
+    /* L41: a signal that lands on a PARKED thread while that thread has it
+       BLOCKED cannot run its handler, and the thread will not park again
+       until something else wakes it — so the sender waits for ever.
+       Measured shape: Boehm's GC_suspend_thread pthread_kills a parked
+       worker with SIGPWR and blocks in sem_wait(&GC_suspend_ack_sem); if
+       the worker's mask still blocks SIGPWR, the main thread never returns
+       and the game stays stopped after its first frame.  This row names the
+       thread and the mask instead of leaving it to guesswork. */
+    {
+      extern uint64_t linux_compat_sigmask_get(struct process *);
+      static int blocked_rows;
+      if (blocked_rows < 24 &&
+          (pender->state == PROC_STATE_FUTEX ||
+           pender->state == PROC_STATE_BLOCKED) &&
+          (linux_compat_sigmask_get(pender) & (1ull << (sig - 1)))) {
+        blocked_rows++;
+        struct kline kb;
+        kl_init(&kb);
+        kl_s(&kb, "[SIG] blocked pid=");
+        kl_i(&kb, pender->pid);
+        kl_s(&kb, " sig=");
+        kl_i(&kb, sig);
+        kl_s(&kb, " st=");
+        kl_i(&kb, pender->state);
+        kl_s(&kb, " mask=");
+        kl_hex(&kb, (unsigned long)linux_compat_sigmask_get(pender));
+        kl_c(&kb, '\n');
+        kl_emit(&kb);
+      }
+    }
+  }
   spinlock_release_irqrestore(&proc_lock, flags);
   return 0;
+}
+
+/* kill(2)-shaped front door: process-directed unless the pid happens to name
+   a thread of the group (a tid is a legal kill target and selects that task). */
+int process_signal(int pid, int sig) {
+  return process_signal_directed(pid, sig, 0);
 }
 
 /* D10: SIGPIPE for a write to a closed peer.  Returns 1 when the writer's
@@ -2802,7 +3359,7 @@ int signal_epipe(struct process *grp) {
     return 1;
   }
   if (h != 1)
-    grp->sig_pending |= (1u << (HO_SIGPIPE - 1));
+    grp->sig_pending |= (1ull << (HO_SIGPIPE - 1));
   if (h != 1)
     sig_wake_leader_locked(grp, HO_SIGPIPE);
   spinlock_release_irqrestore(&proc_lock, flags);
@@ -2895,7 +3452,7 @@ static int sig_frame_range_ok(struct process *grp, uint64_t base, uint64_t top) 
 /* Drop one pending bit (used by the engines' disposition/bounds paths). */
 static void sig_drop_pending(struct process *grp, int sig) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  grp->sig_pending &= ~(1u << (sig - 1));
+  grp->sig_pending &= ~(1ull << (sig - 1));
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
@@ -2903,6 +3460,17 @@ static void sig_drop_pending(struct process *grp, int sig) {
  * Returns 1 when a handler frame was planted (the trap will enter the
  * handler instead of returning to the interrupted PC). */
 int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
+  /* M2: a Linux-ABI group gets a real x86-64 rt_sigframe instead of the HOS3
+     frame below, because the guest's restorer is glibc's __restore_rt and its
+     handler reads a Linux ucontext_t.  The hook is weak so a tree without
+     linux_compat_thr.c still links, and it is only consulted for compat
+     processes: the native engine is untouched. */
+  extern int linux_compat_signal_deliver(struct process *,
+                                         struct trap_frame *)
+      __attribute__((weak));
+  if (grp && linux_compat_signal_deliver &&
+      (grp->abi_flags & PROC_FLAG_LINUX_ABI))
+    return linux_compat_signal_deliver(grp, tf);
   if (!grp || grp->is_kernel_process || grp->is_thread || !tf)
     return 0;
 #ifdef __x86_64__
@@ -2922,7 +3490,7 @@ int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
   /* Pick the lowest deliverable pending signal (no nesting, D8.5). */
   int sig = 0;
   for (int s = 1; s < HO_SIG_MAX; s++) {
-    if ((grp->sig_pending & (1u << (s - 1))) && sig_deliverable(s)) {
+    if ((grp->sig_pending & (1ull << (s - 1))) && sig_deliverable(s)) {
       sig = s;
       break;
     }
@@ -2957,7 +3525,7 @@ int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
   /* Commit: only the leader delivers for its group, so no other deliverer
      races this state; pending-set racers lose harmlessly. */
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  if (!(grp->sig_pending & (1u << (sig - 1))) || grp->sig_in_handler ||
+  if (!(grp->sig_pending & (1ull << (sig - 1))) || grp->sig_in_handler ||
       grp->sig_handler[sig] <= HO_SIG_IGN) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return 0;
@@ -2970,7 +3538,7 @@ int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
     si_status = grp->sig_child_status;
     si_code = 1; /* CLD_EXITED (minimal; D11 keeps siginfo fidelity out) */
   }
-  grp->sig_pending &= ~(1u << (sig - 1));
+  grp->sig_pending &= ~(1ull << (sig - 1));
   grp->sig_in_handler = 1;
   grp->sig_frame = base;
   spinlock_release_irqrestore(&proc_lock, flags);
@@ -2991,7 +3559,22 @@ int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
   f->spsr = tf->spsr;
   f->sp = user_sp;
   f->restorer = restorer;
-  arch_fpu_save_to(f->fpu);
+  /* M6/L63: the frame is user-resident, so the FP image is staged through a
+     kernel buffer.  FXSAVE must never take a user operand: a fault on that
+     instruction is a kernel-mode #GP that KVM cannot emulate and QEMU answers
+     by stopping the whole vCPU (§48.4).  A failure here means the frame is not
+     usable -> fall back to the signal's default action. */
+  if (arch_fpu_save_user(grp, f->fpu) != 0) {
+    uart_puts("[KERNEL] signal delivery: FP image -> default action\n");
+    /* Undo the commit above: no frame was planted, so the group must not stay
+       flagged in-handler. */
+    uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
+    grp->sig_in_handler = 0;
+    grp->sig_frame = 0;
+    spinlock_release_irqrestore(&proc_lock, f2);
+    sig_force_default(grp, sig);
+    return 0;
+  }
 
   /* D8.2 handler entry state per arch ABI. */
 #ifdef __x86_64__
@@ -3039,22 +3622,182 @@ static int sig_resume_defers(struct process *grp, struct trap_frame *tf) {
 }
 
 void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
-  if (!p || p->is_kernel_process || p->is_thread || !tf)
+  if (!p || p->is_kernel_process || !tf)
     return;
-  if (p->sig_in_handler || p->sig_pending == 0)
+  /* M6/L33: a Linux-ABI THREAD takes its own signals at its resume boundary.
+     This used to skip every is_thread PCB, which is why a worker woken from
+     futex_wait with -EINTR returned to glibc WITHOUT running Mono's SIGPWR
+     handler: glibc re-enters futex_wait before any trap exit can deliver, so
+     the suspend was never acked and the collector parked in
+     GC_suspend_ack_sem for ever (measured, section 23).  The compat engine
+     wants the group ANCHOR (handlers/restorer live there) and plants the
+     frame on the resumed thread's context.  Native threads keep the old rule. */
+  struct process *grp = process_group(p);
+  if (p->is_thread && !(grp->abi_flags & PROC_FLAG_LINUX_ABI))
     return;
-  if (sig_resume_defers(p, tf))
+  uint64_t pend = p->sig_pending | p->sig_pending_dir;
+  if (p != grp)
+    pend |= grp->sig_pending;
+  if (p->sig_in_handler || pend == 0)
     return;
-  process_signal_deliver(p, tf);
+  /* A rewound syscall (l_park: poll/select/read) must NOT get the frame here:
+     the frame would consume the pending signal and the restarted syscall
+     would then sleep again instead of answering -EINTR.  Its own trap exit
+     delivers after the syscall returns -EINTR (Linux's order).
+     sig_park_kind 3 is the SA_RESTART case: the PC was deliberately rewound
+     over the `syscall`, so the frame MUST be planted here (with the syscall as
+     the interrupted PC) and sigreturn re-executes it. */
+  if (p->sig_park_kind != 3 && sig_resume_defers(grp, tf))
+    return;
+  int was_restart = (p->sig_park_kind == 3);
+  /* M6/L36: label the frame's provenance for the [SFP] row. */
+  {
+    extern void linux_compat_sf_src(int) __attribute__((weak));
+    if (linux_compat_sf_src)
+      linux_compat_sf_src(was_restart ? 2 : 1);
+  }
+  if (process_signal_deliver(grp, tf)) {
+    if (was_restart) p->sig_park_kind = 0;
+    static int sd_rows;
+    if (sd_rows < 24) {
+      sd_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGR] pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " grp=");
+      kl_i(&kl, grp->pid);
+      kl_s(&kl, " ipc=");
+      kl_hex(&kl, (unsigned long)tf->elr);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
 }
 
-/* The trap-exit hook the arch dispatchers call: the leader's return to
- * user mode.  No-op for kernel tasks/threads/siblings. */
+/* The trap-exit hook the arch dispatchers call: a return to user mode.  No-op
+ * for kernel tasks.
+ *
+ * M6/L32: a Linux-ABI THREAD takes its own signals.  This hook used to skip
+ * every `is_thread` PCB, which is right for the native engine (its frame
+ * lives on the leader's stack, and handlers are recorded on the anchor) but
+ * wrong for the compat track: Linux delivers tgkill(tid) to THAT thread, and
+ * Mono's Boehm GC suspends one thread at a time with pthread_kill(tid,
+ * SIGPWR).  Measured: the signal was recorded pending on the thread and then
+ * never delivered, so the GC's suspend handler never ran and the collector
+ * proceeded without stopping the world (the same window that produces the
+ * wild writes).  The compat engine gets the group ANCHOR (handlers and
+ * restorer live there) and places the frame on the current thread — exactly
+ * the contract process_signal_deliver() documents.  Native threads keep the
+ * leader-only rule. */
+/* ---- M6/L59: the 5 s thread census ---------------------------------------
+ * §45.8 (a 600 s RimWorld run) climbs in live threads and then dies at ~410 s
+ * with `waitpid status=11` and no kernel fault row.  Before theorising about
+ * that death, three numbers have to exist per sample: how many threads the
+ * game's group really has, the high-water mark, and how many VM regions the
+ * group owns.  Each pthread is one PCB slot (MAX_PROCESSES 192) plus an 8 MiB
+ * stack mmap split into region + guard, so `live` against `regions` and
+ * `anon` is the leak test: an exited thread that never frees its stack shows
+ * up as regions climbing while live stays flat.
+ *
+ * Emitted from the boot core's PIT tick (see trap.c) every 5 s, one line per
+ * live Linux-ABI group.  `slots` is the whole PCB table (the ceiling is
+ * MAX_PROCESSES-1 = 191 shared by every thread and process on the machine),
+ * and `hw` is the high-water mark since boot.  This is read-only; vm_as_census
+ * copies its numbers out under vm_lock so the scan cannot race a munmap.
+ */
+void rw_thr_sample(void) {
+  static int hw[MAX_PROCESSES];
+  static int rows;
+  int slots_used = 0;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (proc_table[i].state != PROC_STATE_FREE)
+      slots_used++;
+  }
+  for (int i = 1; i < MAX_PROCESSES && rows < 4000; i++) {
+    struct process *g = &proc_table[i];
+    if (g->is_thread || g->state == PROC_STATE_FREE ||
+        g->state == PROC_STATE_THREAD_DONE)
+      continue;
+    if (!(g->abi_flags & PROC_FLAG_LINUX_ABI))
+      continue;
+    int live = g->live_threads;
+    /* M6/L59: the AUTHORITATIVE count, straight out of the PCB table: slots
+       whose tgid is this group and which are neither free nor a tombstone.
+       `live` above is the group's own counter, and run 2 showed the two can
+       disagree by 4x (live=25 while the watchdog listed 99 game slots in
+       PROC_STATE_FUTEX) -- a disagreement that matters, because group teardown
+       is gated on live_threads reaching 0. */
+    int gthreads = 0;
+    for (int k = 1; k < MAX_PROCESSES; k++) {
+      struct process *q = &proc_table[k];
+      if (q->state == PROC_STATE_FREE || q->state == PROC_STATE_THREAD_DONE)
+        continue;
+      if (q->tgid == g->pid)
+        gthreads++;
+    }
+    if (live < 2 && gthreads < 2)
+      continue;
+    if (live > hw[i])
+      hw[i] = live;
+    int nr = 0, anon = 0, stack = 0;
+    uint64_t ab = 0, bg = 0, res = 0, pk = 0;
+    vm_as_census(g->as, &nr, &anon, &stack, &ab, &bg, &res, &pk);
+    rows++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[THRS] pid=");
+    kl_i(&kl, g->pid);
+    kl_s(&kl, " live=");
+    kl_i(&kl, live);
+    kl_s(&kl, " gt=");
+    kl_i(&kl, gthreads);
+    kl_s(&kl, " hw=");
+    kl_i(&kl, hw[i]);
+    kl_s(&kl, " slots=");
+    kl_i(&kl, slots_used);
+    kl_s(&kl, "/");
+    kl_i(&kl, MAX_PROCESSES - 1);
+    kl_s(&kl, " regs=");
+    kl_i(&kl, nr);
+    kl_s(&kl, " anon=");
+    kl_i(&kl, anon);
+    kl_s(&kl, " anon_mib=");
+    kl_i(&kl, (long)(ab >> 20));
+    kl_s(&kl, " big_mib=");
+    kl_i(&kl, (long)(bg >> 20));
+    kl_s(&kl, " stk=");
+    kl_i(&kl, stack);
+    kl_s(&kl, " res_mib=");
+    kl_i(&kl, (long)((res * 4) >> 10));
+    kl_s(&kl, " pk_mib=");
+    kl_i(&kl, (long)((pk * 4) >> 10));
+    kl_s(&kl, " ");
+    kl_s(&kl, g->name);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  /* L67: one device-state row per sample (not per process), so the block
+     layer's state has the same 5 s timeline as the process census. */
+  virtio_blk_diag_row();
+  /* L75: one forced full re-initialisation per boot with the four-sum
+     checksum around it (no-op after the first successful one). */
+  virtio_blk_selfcheck();
+  /* L75: the block-stress probe runs in its own kernel thread (see
+     virtio_blk_stress_start), never from this census. */
+}
+
 void process_signal_trap_exit(struct trap_frame *tf) {
   struct process *cur = current_process();
-  if (!cur || cur->is_kernel_process || cur->is_thread)
+  if (!cur || cur->is_kernel_process || !tf)
     return;
-  process_signal_deliver(cur, tf);
+  struct process *grp = process_group(cur);
+  if (cur->is_thread && !(grp->abi_flags & PROC_FLAG_LINUX_ABI))
+    return;
+  if (!cur->sig_pending && !cur->sig_pending_dir &&
+      (cur == grp || !grp->sig_pending))
+    return; /* fast path: nothing to deliver on this thread */
+  process_signal_deliver(grp, tf);
 }
 
 /* Row 84 (D8.6): restore the interrupted context from the active signal
@@ -3084,7 +3827,7 @@ int process_sigreturn(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)(-EINVAL);
     return -EINVAL;
   }
-  arch_fpu_restore_from(f->fpu);
+  arch_fpu_restore_user(grp, f->fpu); /* M6/L63: staged; never FXRSTOR a user VA */
   for (int i = 0; i < 30; i++)
     tf->regs[i] = f->regs[i];
   tf->lr = f->lr;
@@ -3419,6 +4162,8 @@ int process_fork(struct trap_frame *tf) {
   for (int i = 0; i < 32; i++) {
     child->name[i] = parent->name[i];
   }
+  for (int i = 0; i < (int)sizeof child->exe_path; i++)
+    child->exe_path[i] = parent->exe_path[i];
   for (int i = 0; i < 128; i++) {
     child->cwd[i] = group->cwd[i];
   }
@@ -3471,6 +4216,9 @@ int process_fork(struct trap_frame *tf) {
 
   child->state = PROC_STATE_READY;
   spinlock_release_irqrestore(&proc_lock, flags);
+  /* L52: pthread_create's waiter blocks on a semaphore for this child's
+     first schedule; without a poke that is a full tick (measured 9 ms). */
+  sched_wake_idle_cpu();
   return child_pid;
 }
 
@@ -3500,10 +4248,14 @@ void process_wakeup(int pid) {
   if (pid < 0 || pid >= MAX_PROCESSES)
     return;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int woke = 0;
   if (proc_table[pid].state == PROC_STATE_BLOCKED) {
     proc_table[pid].state = PROC_STATE_READY;
+    woke = 1;
   }
   spinlock_release_irqrestore(&proc_lock, flags);
+  if (woke)
+    sched_wake_idle_cpu();
 }
 
 /**
@@ -3512,12 +4264,16 @@ void process_wakeup(int pid) {
  */
 void process_wake_all(void) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int woke = 0;
   for (int i = 0; i < MAX_PROCESSES; i++) {
     if (proc_table[i].state == PROC_STATE_BLOCKED && proc_table[i].wake_ms == 0) {
       proc_table[i].state = PROC_STATE_READY;
+      woke = 1;
     }
   }
   spinlock_release_irqrestore(&proc_lock, flags);
+  if (woke)
+    sched_wake_idle_cpu();
 }
 
 /* SEC-OBS-B: deferred lost-wakeup catch-all (see process.h).  The flag is
@@ -3936,6 +4692,15 @@ void start_scheduler(void) {
        forever, so without the heartbeat the reaper would never reclaim
        its RUNNING process and every CPU would IDLESTUCK-cycle forever. */
     sched_idle_rounds++;
+    /* M6/L45: the whole machine is idle, so this is the one context that can
+       afford to look for a compat thread that is asleep on a signal it would
+       take (a lost suspend/restart wake).  It both reports ([LOSTW]) and
+       repairs; see linux_compat_lost_wake_scan(). */
+    if ((sched_idle_rounds % 500) == 0) {
+      extern int linux_compat_lost_wake_scan(void) __attribute__((weak));
+      if (linux_compat_lost_wake_scan)
+        (void)linux_compat_lost_wake_scan();
+    }
     { int _c = (int)get_cpuid(); if (_c >= 0 && _c < MAX_CPUS) sched_idle_rounds_cpu[_c]++; }
     int acted = 0;   /* w5 (v): this pass RECLAIMED or DISPOSED a slot */
     if (sched_idle_rounds >= 500) {
@@ -4173,6 +4938,20 @@ void start_scheduler(void) {
       last_quiet_div = sched_idle_rounds / 20000;
       dump_stuck = 1;
     }
+    /* L41: a park may never look like an idle stretch -- the desktop's poll
+       loop resets sched_idle_rounds every few ms, so the 20000-round gate can
+       go a whole 240 s run without firing (measured: the e2 run had six
+       watchdog rows and zero thread tables).  The watchdog therefore REQUESTs
+       a dump when the console has been silent past its threshold, and any CPU
+       that reaches this point serves it.  The request is a counter, not a
+       lock: the timer IRQ only writes it. */
+    {
+      extern volatile int wd_dump_request;
+      if (__atomic_load_n(&wd_dump_request, __ATOMIC_RELAXED) != 0) {
+        __atomic_store_n(&wd_dump_request, 0, __ATOMIC_RELAXED);
+        dump_stuck = 1;
+      }
+    }
     if (dump_stuck) {
       uart_puts("[IDLESTUCK] cpu=");
       print_int((int)get_cpuid());
@@ -4222,6 +5001,23 @@ void start_scheduler(void) {
             if (v == 0) tmp[ti++] = '0';
             while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
             while (ti > 0) lb[li++] = tmp[--ti];
+            const char *hf = " futex=0x";
+            while (*hf) lb[li++] = *hf++;
+            {
+              /* The parked word, in the SAME row as the rip: the rip says
+                 "inside libc", the key says which handshake it is waiting
+                 on, and [FUTEX] rows in this dump say who was supposed to
+                 wake it.  A st=8 row with futex=0x0 cannot be a futex park
+                 and is itself the finding. */
+              uint64_t fv = proc_table[k].futex_uaddr;
+              int st3 = 0;
+              for (int sh = 60; sh >= 0 && li < 140; sh -= 4) {
+                unsigned d = (unsigned)((fv >> sh) & 0xF);
+                if (!d && !st3 && sh) continue;
+                st3 = 1;
+                lb[li++] = "0123456789abcdef"[d];
+              }
+            }
             const char *h5 = " rip=0x";
             while (*h5) lb[li++] = *h5++;
             {
@@ -4240,6 +5036,318 @@ void start_scheduler(void) {
             lb[li++] = '\n';
             lb[li] = 0;
             uart_puts(lb);
+          }
+          /* M6/L45: a compat thread parked in a signal-aware wait, or one
+             sitting inside a handler, with its whole signal state in one row.
+             "st=5 for ever, no [LOSTW]" and "st=5, SIGXCPU pending but
+             blocked" look identical in every other record; this row separates
+             them.  pend is decimal (0x800000 = SIGXCPU 24, 0x20000000 =
+             SIGPWR 30). */
+          if (proc_table[k].state == PROC_STATE_BLOCKED ||
+              proc_table[k].sig_in_handler || proc_table[k].sig_pending ||
+              proc_table[k].sig_pending_dir) {
+            uart_puts("[SIGST] slot=");
+            print_int(k);
+            uart_puts(" pid=");
+            print_int(proc_table[k].pid);
+            uart_puts(" st=");
+            print_int(proc_table[k].state);
+            uart_puts(" inh=");
+            print_int(proc_table[k].sig_in_handler);
+            uart_puts(" susp=");
+            print_int(proc_table[k].sig_suspended);
+            uart_puts(" fsig=");
+            print_int(proc_table[k].sig_frame_sig);
+            uart_puts(" pend=");
+            print_int((int)proc_table[k].sig_pending);
+            uart_puts(" dir=");
+            print_int((int)proc_table[k].sig_pending_dir);
+            uart_puts(" gpend=");
+            print_int((int)(process_group(&proc_table[k])
+                                ? process_group(&proc_table[k])->sig_pending
+                                : 0));
+            uart_puts(" since=");
+            print_int((int)(proc_table[k].park_since_ms
+                                ? timer_get_ms() - proc_table[k].park_since_ms
+                                : 0));
+            uart_puts("\n");
+          }
+        }
+      }
+      /* The futex queue + flight recorder: which threads are still queued,
+         on which keys, and the last operations in order.  Called under
+         proc_lock (already held here), which is why the callee does not take
+         it again. */
+      {
+        extern void futex_trace_dump_locked(void) __attribute__((weak));
+        if (futex_trace_dump_locked)
+          futex_trace_dump_locked();
+      }
+      /* M6/L45: is Boehm's world still stopped?  A thread sitting in
+         GC_suspend_handler_inner's sigsuspend is only released when
+         GC_world_is_stopped clears (or GC_stop_count advances and the thread
+         gets the restart signal).  Reading the two globals turns "these
+         workers look suspended" into "the world was never restarted".
+         Offsets are properties of the shipped libmonobdwgc-2.0.so, verified
+         with nm: GC_suspend_handler 0x27c6e7, GC_stop_count 0x5b9250,
+         GC_world_is_stopped 0x5b9258.  Diagnostic only (read, never write). */
+      {
+        struct process *g0 = process_group(&proc_table[1]);
+        for (int k = 1; k < MAX_PROCESSES; k++) {
+          if (proc_table[k].pid == 4 && proc_table[k].is_thread == 0) {
+            g0 = &proc_table[k];
+            break;
+          }
+        }
+        if (g0 && g0->sig_handler[30] > 0x1000000) {
+          uint64_t base = g0->sig_handler[30] - 0x27c6e7;
+          uint32_t stopped = 0, sc = 0, ack = 0, ackw = 0;
+          if (vm_user_read(g0, base + 0x5b9258, &stopped, 4) == 0 &&
+              vm_user_read(g0, base + 0x5b9250, &sc, 4) == 0) {
+            /* GC_suspend_ack_sem is a glibc sem_t (64-bit, new_sem): the LOW
+               word is the count and the HIGH word is the waiter count.  The
+               collector sem_waits once per suspended thread, so a count that
+               matches the number of threads parked in GC_suspend_handler
+               means every ack arrived and the collector stopped somewhere
+               AFTER the handshake. */
+            (void)vm_user_read(g0, base + 0x5be728, &ack, 4);
+            (void)vm_user_read(g0, base + 0x5be728 + 4, &ackw, 4);
+            uart_puts("[GCST] h30=0x");
+            uart_print_hex(g0->sig_handler[30]);
+            uart_puts(" base=0x");
+            uart_print_hex(base);
+            uart_puts(" world_stopped=");
+            print_int((int)stopped);
+            uart_puts(" stop_count=");
+            print_int((int)sc);
+            uart_puts(" ack_sem=");
+            print_int((int)ack);
+            uart_puts(" ackw=");
+            print_int((int)ackw);
+            uart_puts(" grplive=");
+            print_int(g0->live_threads);
+            uart_puts("\n");
+            {
+              /* M6/L46: the Boehm-vs-PCB thread diff.
+                 GC_stop_world() (0x26f711) does stop_count += 2,
+                 world_is_stopped = 1, n = GC_suspend_all(), then sem_waits
+                 EXACTLY n times -- n being the number of
+                 pthread_kill(SIGPWR) calls that returned 0.  So a thread that
+                 Boehm counts but that our side cannot run a handler on keeps
+                 the world stopped for ever.  GC_suspend_all's predicate
+                 (0x27cc30) is: skip id == pthread_self(); skip flags & 1
+                 (+0x28, FINISHED); skip *(u8*)(p+0x29); skip
+                 *(u64*)(p+0x20) (single-thread suspend); skip
+                 (stop_count_at_suspend & ~1) == GC_stop_count (+0x10).  We
+                 walk the same 256 buckets with the same filters and match each
+                 entry to our PCB by TCB: glibc's clone() passes
+                 CLONE_CHILD_CLEARTID with ctid = &pd->tid, so
+                 clear_child_tid - 0x2d0 is the pthread_t Boehm stores at
+                 +0x08.  That is a KERNEL-side fact, so the diff never depends
+                 on reading another thread's TCB. */
+              int pcb_pid[40];
+              uint64_t pcb_tcb[40];
+              int n_pcbv = 0, n_pcb = 0, n_unreg = 0;
+              uint64_t main_tcb = g0->clear_child_tid ? g0->clear_child_tid - 0x2d0 : 0;
+              n_pcb = 1; /* the anchor is a task too: live counts it unless it
+                            is the collector, which GC_suspend_all skips */
+              for (int k = 1; k < MAX_PROCESSES && n_pcbv < 40; k++) {
+                struct process *t = &proc_table[k];
+                if (!t->is_thread || t->tgid != g0->pid)
+                  continue;
+                if (t->state == PROC_STATE_FREE || t->state == PROC_STATE_EXITED ||
+                    t->state == PROC_STATE_THREAD_DONE)
+                  continue;
+                pcb_pid[n_pcbv] = t->pid;
+                pcb_tcb[n_pcbv] = t->clear_child_tid ? t->clear_child_tid - 0x2d0 : 0;
+                n_pcbv++;
+                n_pcb++;
+              }
+              struct gct_ent {
+                uint64_t p, id, scat, sus;
+                int pid;
+                uint8_t fl, b29;
+              } ent[24];
+              int n_ent = 0, n_live = 0, n_self = 0, n_fin = 0, n_b29 = 0;
+              int n_susp = 0, n_epoch = 0, n_norec = 0, n_ent_total = 0;
+              static int gct_tables = 2;
+              int full_table = (gct_tables > 0);
+              if (full_table)
+                gct_tables--;
+              for (int gb = 0; gb < 256; gb++) {
+                uint64_t p = 0;
+                if (vm_user_read(g0, base + 0x5b92f0 + (uint64_t)gb * 8, &p, 8) != 0)
+                  continue;
+                int guard = 0;
+                while (p && guard++ < 48) {
+                  uint64_t next = 0, id = 0, scat = 0, sus = 0;
+                  uint8_t fl = 0, b29 = 0;
+                  if (vm_user_read(g0, p, &next, 8) != 0)
+                    break;
+                  (void)vm_user_read(g0, p + 8, &id, 8);
+                  (void)vm_user_read(g0, p + 0x10, &scat, 8);
+                  (void)vm_user_read(g0, p + 0x20, &sus, 8);
+                  (void)vm_user_read(g0, p + 0x28, &fl, 1);
+                  (void)vm_user_read(g0, p + 0x29, &b29, 1);
+                  int mpid = -1;
+                  if (id && main_tcb && id == main_tcb)
+                    mpid = g0->pid;
+                  if (id && mpid < 0) {
+                    /* The main thread was never cloned, so it has no
+                       clear_child_tid; its TCB's tid word still names it. */
+                    int32_t mtid = -1;
+                    if (vm_user_read(g0, id + 0x2d0, &mtid, 4) == 0 &&
+                        mtid == g0->pid)
+                      mpid = g0->pid;
+                  }
+                  for (int q = 0; q < n_pcbv && mpid < 0; q++)
+                    if (pcb_tcb[q] && id == pcb_tcb[q]) {
+                      mpid = pcb_pid[q];
+                      break;
+                    }
+                  n_ent_total++;
+                  if (n_ent < 24) {
+                    ent[n_ent].p = p;
+                    ent[n_ent].id = id;
+                    ent[n_ent].scat = scat;
+                    ent[n_ent].sus = sus;
+                    ent[n_ent].pid = mpid;
+                    ent[n_ent].fl = fl;
+                    ent[n_ent].b29 = b29;
+                    n_ent++;
+                  }
+                  if (mpid < 0)
+                    n_norec++;
+                  else if (mpid == g0->pid)
+                    n_self++;
+                  else if (fl & 1)
+                    n_fin++;
+                  else if (b29)
+                    n_b29++;
+                  else if (sus)
+                    n_susp++;
+                  else if ((scat & ~1ull) == (uint64_t)sc)
+                    n_epoch++;
+                  else
+                    n_live++;
+                  p = next;
+                }
+              }
+              for (int q = 0; q < n_pcbv; q++) {
+                int found = 0;
+                for (int e = 0; e < n_ent; e++)
+                  if (ent[e].pid == pcb_pid[q]) {
+                    found = 1;
+                    break;
+                  }
+                if (found)
+                  continue;
+                n_unreg++;
+                struct process *t = &proc_table[pcb_pid[q]];
+                struct kline ku;
+                kl_init(&ku);
+                kl_s(&ku, "[GCT] unreg pid=");
+                kl_i(&ku, pcb_pid[q]);
+                kl_s(&ku, " tcb=");
+                kl_hex(&ku, (unsigned long)pcb_tcb[q]);
+                kl_s(&ku, " st=");
+                kl_i(&ku, t->state);
+                kl_s(&ku, " sys=");
+                kl_i(&ku, (long)t->last_syscall);
+                kl_s(&ku, " inh=");
+                kl_i(&ku, t->sig_in_handler);
+                kl_s(&ku, " susp=");
+                kl_i(&ku, t->sig_suspended);
+                kl_s(&ku, " pend=");
+                kl_hex(&ku, (unsigned long)t->sig_pending);
+                kl_c(&ku, '\n');
+                kl_emit(&ku);
+              }
+              struct kline ks;
+              kl_init(&ks);
+              kl_s(&ks, "[GCT] sum ent=");
+              kl_i(&ks, n_ent_total);
+              kl_s(&ks, " live=");
+              kl_i(&ks, n_live);
+              kl_s(&ks, " pcb=");
+              kl_i(&ks, n_pcb);
+              kl_s(&ks, " unreg=");
+              kl_i(&ks, n_unreg);
+              kl_s(&ks, " norec=");
+              kl_i(&ks, n_norec);
+              kl_s(&ks, " self=");
+              kl_i(&ks, n_self);
+              kl_s(&ks, " fin=");
+              kl_i(&ks, n_fin);
+              kl_s(&ks, " b29=");
+              kl_i(&ks, n_b29);
+              kl_s(&ks, " susp=");
+              kl_i(&ks, n_susp);
+              kl_s(&ks, " epoch=");
+              kl_i(&ks, n_epoch);
+              kl_s(&ks, " anchor=");
+              kl_i(&ks, g0->state);
+              kl_c(&ks, '\n');
+              kl_emit(&ks);
+              {
+                static int gct_row_budget = 120;
+                for (int e = 0; e < n_ent && gct_row_budget > 0; e++) {
+                  struct process *t =
+                      (ent[e].pid > 0 && ent[e].pid < MAX_PROCESSES)
+                          ? &proc_table[ent[e].pid] : 0;
+                  /* Full tables for the first two dumps; afterwards only the
+                     rows that can explain a wedge: an entry with no live PCB,
+                     or one that passes the plant filter (an unacked plant). */
+                  int interesting = full_table || ent[e].pid < 0 || !t;
+                  if (!interesting && !(ent[e].fl & 1) && !ent[e].b29 &&
+                      !ent[e].sus && (ent[e].scat & ~1ull) != (uint64_t)sc)
+                    interesting = 1;
+                  if (!interesting)
+                    continue;
+                  gct_row_budget--;
+                  struct kline ke;
+                  kl_init(&ke);
+                  kl_s(&ke, "[GCT] e p=");
+                  kl_hex(&ke, (unsigned long)ent[e].p);
+                  kl_s(&ke, " pt=");
+                  kl_hex(&ke, (unsigned long)ent[e].id);
+                  kl_s(&ke, " pid=");
+                  kl_i(&ke, ent[e].pid);
+                  kl_s(&ke, " fl=");
+                  kl_hex(&ke, ent[e].fl);
+                  kl_s(&ke, " b29=");
+                  kl_i(&ke, ent[e].b29);
+                  kl_s(&ke, " sus=");
+                  kl_i(&ke, ent[e].sus ? 1 : 0);
+                  kl_s(&ke, " scat=");
+                  kl_hex(&ke, (unsigned long)ent[e].scat);
+                  kl_s(&ke, " stop=");
+                  kl_i(&ke, (int)sc);
+                  if (t) {
+                    kl_s(&ke, " st=");
+                    kl_i(&ke, t->state);
+                    kl_s(&ke, " th=");
+                    kl_i(&ke, t->is_thread);
+                    kl_s(&ke, " tg=");
+                    kl_i(&ke, t->tgid);
+                    kl_s(&ke, " inh=");
+                    kl_i(&ke, t->sig_in_handler);
+                    kl_s(&ke, " susp=");
+                    kl_i(&ke, t->sig_suspended);
+                    kl_s(&ke, " pend=");
+                    kl_hex(&ke, (unsigned long)t->sig_pending);
+                    kl_s(&ke, " sys=");
+                    kl_i(&ke, (long)t->last_syscall);
+                    kl_s(&ke, " rt=");
+                    kl_i(&ke, (long)t->last_ret);
+                  } else {
+                    kl_s(&ke, " norec=1");
+                  }
+                  kl_c(&ke, '\n');
+                  kl_emit(&ke);
+                }
+              }
+            }
           }
         }
       }
@@ -4364,20 +5472,41 @@ int64_t sys_brk(uint64_t addr) {
       uint64_t base = (old + 0xFFF) & ~0xFFFULL;
       uint64_t end = (addr + 0xFFF) & ~0xFFFULL;
       if (end > base) {
-        /* P2.5 (S5): the loader reserves the whole HEAP slot demand-zero,
-           so a grow that stays inside it is already backed -- and a
-           redundant insert would be rejected as an overlap.  Only an
-           uncovered span (no loader-created v2 AS looks like that) needs
-           its own region. */
-        struct vm_region *cov = vm_region_find(cur->as, base);
-        int covered = cov && cov->base <= base &&
-                      cov->base + cov->len >= end &&
-                      (cov->prot & VM_PROT_WRITE) && cov->kind == VMK_HEAP;
-        if (!covered &&
-            vm_region_insert(cur->as, base, end - base,
-                             VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
-                             VM_MAP_PRIVATE, 0, 0) != 0)
-          return -ENOMEM;
+        /* P2.5 (S5): the loader usually reserves the whole HEAP slot
+           demand-zero, so a grow inside it is already backed.  But the slot is
+           NOT always one region: a partial mprotect, a partial munmap or any
+           other split leaves several adjacent fragments, and every later grow
+           must still work (Linux's brk extends the data segment whatever its
+           VMA count).
+
+           The old single-region test (`one region must cover [base,end)`) then
+           fell through to an insert of the WHOLE span, which overlapped the
+           surviving fragment and answered -ENOMEM -- so one mprotect of one
+           heap page made every future brk grow fail for the life of the
+           process (measured: src/user/linux_probe_vmcommit.c "brk grow across
+           split heap" row: host ok / guest FAIL, grow returned the OLD break).
+           Walk the span instead: accept HEAP fragments, insert only the
+           uncovered tail, refuse only a FOREIGN region in the way. */
+        uint64_t cur_va = base;
+        while (cur_va < end) {
+          struct vm_region *r = vm_region_find(cur->as, cur_va);
+          if (!r) {
+            if (vm_region_insert(cur->as, cur_va, end - cur_va,
+                                 VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
+                                 VM_MAP_PRIVATE, 0, 0) != 0)
+              return -ENOMEM;
+            break; /* the insert either merged or covered the rest */
+          }
+          if (r->kind != VMK_HEAP)
+            return -ENOMEM; /* the break would swallow a foreign mapping */
+          /* A HEAP fragment counts whatever its protection: it is still the
+             data segment, and Linux's brk moves the break over a read-only
+             data page without complaint (only a *foreign* VMA is a conflict). */
+          uint64_t rend = r->base + r->len;
+          if (rend > end || rend <= cur_va)
+            break; /* this fragment (already) covers the rest */
+          cur_va = rend;
+        }
       }
     }
     cur->heap_brk = addr;
@@ -4574,6 +5703,16 @@ void process_fault_set_status(struct trap_frame *tf, int signo) {
     tf->regs[0] = (uint64_t)(PROCESS_STATUS_SIGNAL | (signo & 0x7f));
 }
 void process_fault_exit(struct trap_frame *tf, int signo) {
+  /* M2: a compat process with a handler for this fault resumes in the
+     handler (Linux frame, on the faulting thread's stack) instead of dying.
+     SIGSEGV/SIGBUS/SIGILL/SIGFPE were not deliverable at all before this. */
+  extern int linux_compat_fault(struct process *, struct trap_frame *, int)
+      __attribute__((weak));
+  struct process *cur = current_process();
+  if (cur && linux_compat_fault &&
+      (cur->abi_flags & PROC_FLAG_LINUX_ABI) &&
+      linux_compat_fault(cur, tf, signo))
+    return;
   process_fault_set_status(tf, signo);
   process_exit(tf);
 }
@@ -4644,6 +5783,9 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   }
   struct process *t = &proc_table[pid];
   t->state = PROC_STATE_ALLOCATED;
+  t->sys_ring_at = 0;
+  t->last_syscall = -1;
+  pid_alloc_seq[pid]++;
   t->tgid = grp->pid;
   t->is_thread = 1;
   t->live_threads = 0; /* "0 elsewhere" (design section 1) */
@@ -4656,6 +5798,8 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
     t->name[i] = 0;
   for (int i = 0; i < 31 && grp->name[i]; i++)
     t->name[i] = grp->name[i];
+  for (int i = 0; i < (int)sizeof t->exe_path; i++)
+    t->exe_path[i] = grp->exe_path[i];
   for (int i = 0; i < 256; i++)
     t->args[i] = 0;
   t->eargc = 0;
@@ -4695,6 +5839,7 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   /* P5 (D7): a recycled slot must not carry stale signal state (unread on
      threads — group state lives on the anchor — but keep it clean). */
   t->sig_pending = 0;
+  t->sig_pending_dir = 0;
   t->sig_restorer = 0;
   t->sig_in_handler = 0;
   t->sig_frame = 0;
@@ -4859,6 +6004,13 @@ int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
   save_context(t, tf);
   t->context[0] = 0;
   t->context[33] = stack;
+  /* M6/L36: save_context copied the CALLER's user RSP into context[30] (the
+     frame's lr slot).  The child runs on `stack`, so from its first resume
+     tf->lr pointed into the parent's frame: a signal delivered there plants
+     the handler around the PARENT's rsp and rt_sigreturn then resumes the
+     child on the parent's stack (measured: [SFV] resume pid=1
+     frame_lr=0x17FFFFFC58 gsp=0x1080022EF8). */
+  t->context[30] = stack;
 #ifdef __x86_64__
   t->context[34] = 0; /* classify user -> user selectors on resume */
   t->context[35] = 0;
@@ -4909,15 +6061,96 @@ void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
   struct process *grp = process_group(cur);
   cur->thread_ret = retval;
 
+  /* M2: walk the thread's robust list (mark OWNER_DIED + wake) and drop its
+     futex queue entry while the address space is still alive.  A thread that
+     dies holding a robust mutex would otherwise park its joiners forever. */
+  {
+    extern void linux_compat_thread_exit(struct process *)
+        __attribute__((weak));
+    if (linux_compat_thread_exit && (cur->abi_flags & PROC_FLAG_LINUX_ABI))
+      linux_compat_thread_exit(cur);
+  }
+
   /* GB-021 (Linux CLONE_CHILD_CLEARTID): a thread's last act is to zero its
      TCB tid word and wake a joiner parked on it.  Do it before the last-thread
      teardown can release the address space the word lives in. */
-  if (cur->clear_child_tid) {
-    uint64_t at = cur->clear_child_tid;
+  uint64_t ctid = cur->clear_child_tid;
+  uint32_t ctid_pre = 0;
+  int ctid_touch = -1;
+  int ctid_woke = -1;
+  if (ctid) {
+    /* L42: the joiner's whole contract is this word.  Record what it held
+       BEFORE the clear, whether the page was reachable at all, and how many
+       waiters the wake found -- a nonzero pre-value with woke=0 is a wake
+       that arrived before the joiner parked; pre=0 with woke=0 is a joiner
+       that was never on this word. */
+    ctid_touch = vm_touch(cur, ctid, 4, 0);
+    if (ctid_touch == 0 &&
+        vm_user_read(cur, ctid, &ctid_pre, sizeof ctid_pre) != 0)
+      ctid_touch = -1; /* L73: never deref the user word directly */
     cur->clear_child_tid = 0;
-    if (vm_touch(cur, at, 4, 1) == 0)
-      *(volatile uint32_t *)at = 0;
-    process_futex(cur, tf, at, 1, 1, -1);
+    if (vm_touch(cur, ctid, 4, 1) == 0) {
+      uint32_t zero = 0;
+      if (vm_kwrite(cur, ctid, &zero, sizeof zero) == 0)
+        ctid_touch = 0;
+    }
+    ctid_woke = process_futex(cur, tf, ctid, 1, 1, -1);
+  }
+  {
+    /* One row per exiting Linux-ABI thread, bounded.  `pc` is the userspace
+       instruction that entered exit(2); `mod` names the DSO span it belongs
+       to (base+offset) so an offline reader can tell glibc's start_thread
+       from Mono's own exit trampoline without a symbol server. */
+    static int texit_rows;
+    if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) && texit_rows < 96) {
+      texit_rows++;
+      struct kline kt;
+      kl_init(&kt);
+      kl_s(&kt, "[TEXIT] pid=");
+      kl_i(&kt, cur->pid);
+      kl_s(&kt, " pc=");
+      kl_hex(&kt, (unsigned long)(tf ? tf->elr : 0));
+      kl_s(&kt, " clear=");
+      kl_hex(&kt, (unsigned long)ctid);
+      kl_s(&kt, " pre=");
+      kl_hex(&kt, (unsigned long)ctid_pre);
+      kl_s(&kt, " touch=");
+      kl_i(&kt, ctid_touch);
+      kl_s(&kt, " woke=");
+      kl_i(&kt, ctid_woke);
+      kl_s(&kt, " live=");
+      kl_i(&kt, grp->live_threads);
+      if (cur->as && tf) {
+        struct vm_region *rg = vm_region_find(cur->as, tf->elr);
+        if (rg) {
+          int idx = (int)(rg - cur->as->regions);
+          int lo = idx;
+          while (lo > 0) {
+            struct vm_region *pv = &cur->as->regions[lo - 1];
+            /* L47: stop at a DSO boundary.  Adjacent DSOs are often laid out
+               back-to-back, so `kind` alone walks straight out of this module
+               and into the *previous* library: a pc in libpthread at
+               +0x86C6 was reported as base 0x1083380000+0x17C6C6 (a 1.6 MiB
+               span covering four libraries), which reads as one module.  A
+               module's first segment is never writable, so a writable
+               predecessor is another DSO's data segment. */
+            if (pv->kind != rg->kind ||
+                (pv->prot & VM_PROT_WRITE) ||
+                pv->base + pv->len != cur->as->regions[lo].base)
+              break;
+            lo--;
+          }
+          kl_s(&kt, " mod=");
+          kl_hex(&kt, (unsigned long)cur->as->regions[lo].base);
+          kl_s(&kt, "+");
+          kl_hex(&kt, (unsigned long)(tf->elr - cur->as->regions[lo].base));
+        }
+      }
+      kl_s(&kt, " ");
+      kl_s(&kt, cur->name);
+      kl_c(&kt, '\n');
+      kl_emit(&kt);
+    }
   }
   cur->exit_status = ((int)retval & 0xff) << 8;
 
@@ -5013,6 +6246,20 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
     caller->context[0] = 0;   /* resume value: 0 on wake */
     tf->regs[0] = 0;
     caller->state = PROC_STATE_FUTEX; /* save-set member: context is saved */
+    {
+      /* Same row shape as the compat path: one key, one waiter, one park. */
+      struct futex_ev ev = {0};
+      ev.op = FTR_WAIT;
+      ev.pid = caller->pid;
+      ev.as = (uint64_t)(uintptr_t)grp->as;
+      ev.uaddr = uaddr;
+      ev.val = (uint32_t)val;
+      ev.bitset = 0xffffffffu;
+      ev.timeout_ms = timeout_ms;
+      ev.res = 0;
+      ev.rip = tf ? tf->elr : 0;
+      futex_trace_note(&ev);
+    }
     spinlock_release_irqrestore(&proc_lock, flags);
     schedule(tf, 0);
     /* Not reached: the resume re-enters user space with context[0]. */
@@ -5028,6 +6275,12 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
       return 0;
     /* (2) wake up to `val` matching waiters (INT_MAX = all). */
     int woke = 0;
+    struct futex_ev ev = {0};
+    ev.op = FTR_WAKE;
+    ev.pid = caller->pid;
+    ev.rip = tf ? tf->elr : 0;
+    ev.val = (uint32_t)val;
+    ev.bitset = 0xffffffffu;
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     for (int i = 0; i < MAX_PROCESSES && woke < val; i++) {
       struct process *m = &proc_table[i];
@@ -5038,9 +6291,18 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
       m->wake_ms = 0;
       m->context[0] = 0; /* resume value: 0 on wake */
       m->state = PROC_STATE_READY;
+      if (woke < 4) {
+        ev.woke_pids[woke] = m->pid;
+        ev.nwoke = (uint8_t)(woke + 1);
+      }
       woke++;
     }
     spinlock_release_irqrestore(&proc_lock, flags);
+    ev.as = (uint64_t)(uintptr_t)grp->as;
+    ev.uaddr = uaddr;
+    ev.woke = woke;
+    ev.woke_pid = woke ? ev.woke_pids[0] : -1;
+    futex_trace_note(&ev);
     return woke;
   }
 

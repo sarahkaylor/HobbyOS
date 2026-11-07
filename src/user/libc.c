@@ -564,8 +564,8 @@ int setsockopt(int fd, int level, int optname, const void *val, unsigned int len
                                  (long)optname, (long)val, (long)len));
 }
 
-int getrandom(void *buf, size_t len, unsigned int flags) {
-  return (int)errno_ret(ho_syscall4(SYS_GETRANDOM, (long)buf, (long)len, (long)flags, 0));
+ssize_t getrandom(void *buf, size_t len, unsigned int flags) {
+  return (ssize_t)errno_ret(ho_syscall4(SYS_GETRANDOM, (long)buf, (long)len, (long)flags, 0));
 }
 
 /* P4 (docs/browser/p4-ipc-design.md §6.3): the AF_UNIX IPC surface —
@@ -835,6 +835,12 @@ int mount(const char *source, const char *target) {
 
 int umount(const char *target) {
   return (int)errno_ret(ho_syscall4(SYS_UMOUNT, (long)target, 0, 0, 0));
+}
+
+/* M5c: alias the VFS subtree `from` onto the path `to` (src/include/vfs_bind.h).
+ * Path resolution only: nothing is copied and no filesystem is mounted. */
+int vfs_bind(const char *from, const char *to) {
+  return (int)errno_ret(ho_syscall4(SYS_VFS_BIND, (long)from, (long)to, 0, 0));
 }
 
 char *getcwd(char *buf, size_t size) {

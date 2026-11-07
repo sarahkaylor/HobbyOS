@@ -41,6 +41,9 @@ static const struct { const char *name; long val; } rows[] = {
   R(EPOLLIN) R(EPOLLOUT) R(EPOLLET)
   R(DT_REG) R(DT_DIR) R(DT_CHR)
   R(RLIMIT_NOFILE)
+  R(PR_SET_PDEATHSIG) R(PR_GET_PDEATHSIG) R(PR_SET_DUMPABLE) R(PR_GET_DUMPABLE)
+  R(PR_SET_NAME) R(PR_GET_NAME)
+  R(PRIO_PROCESS) R(PRIO_PGRP) R(PRIO_USER)
 };
 #undef R
 

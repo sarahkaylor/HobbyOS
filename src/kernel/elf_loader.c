@@ -26,8 +26,13 @@
  *     and reports interp_base + e_entry as the runtime entry.  Everything after
  *     that is userspace: the kernel never reads a symbol table.
  *
- *   - The compat track still refuses PT_INTERP with ELF_ERR_INTERP and the same
- *     serial message: acceptance requires the explicit ELF_LOAD_NATIVE flag.
+ *   - The compat track refused PT_INTERP until the RimWorld lane: now an
+ *     explicit ELF_LOAD_COMPAT_INTERP accepts ANY absolute interpreter path
+ *     (a real glibc ld.so), maps it in a USER_LIB slot with its own p_flags
+ *     and NO kernel relocation pass, and reports the interpreter entry —
+ *     the Linux model (docs/rw-ldso-design.md).  flags == 0 keeps the
+ *     historical ELF_ERR_INTERP refusal, and elf_interp_is_native still
+ *     gates the native track, so LDHOBBY.SO semantics are untouched.
  *
  * Kernel constraints: freestanding (-ffreestanding, -mgeneral-regs-only), no
  * libc beyond the kernel's own helpers, byte-wise loops only, no FP/SIMD, no
@@ -237,165 +242,12 @@ static int el_vaddr_to_offset(const struct elf_image *img, uint64_t va,
   return -1;
 }
 
-/* A read-only view of an image's in-file dynamic section (GB-199 refactor of
- * the GB-196 walker): the dyn entries and the string table resolved to file
- * offsets, so DT_NEEDED names can be read without mapping anything. */
-struct el_dyn_view {
-  const uint8_t *file;
-  const uint8_t *d;
-  uint64_t size;
-  uint64_t str_off;
-  uint64_t strsz;
-  int have_str;
-};
+/* GB-199's DT_NEEDED walkers (el_dyn_view / el_dyn_next_needed / el_closure_seen)
+ * went with el_map_closure: on this tree the entered ld.so maps the closure. */
 
-static int el_dyn_view(const uint8_t *file, uint64_t flen,
-                       const struct elf_image *img, struct el_dyn_view *v) {
-  v->file = file;
-  v->d = 0;
-  v->size = 0;
-  v->str_off = 0;
-  v->strsz = 0;
-  v->have_str = 0;
-  if (img->dyn_vaddr == 0 || img->dyn_size < 16) return -1;
-  uint64_t dyn_off = 0;
-  if (el_vaddr_to_offset(img, img->dyn_vaddr, 16, &dyn_off) != 0 ||
-      dyn_off > flen || img->dyn_size > flen - dyn_off)
-    return -1;
-  v->d = file + dyn_off;
-  v->size = img->dyn_size;
-  uint64_t strtab_va = 0, strsz = 0;
-  for (uint64_t o = 0; o + 16 <= v->size; o += 16) {
-    uint64_t tag = rd64(v->d + o);
-    if (tag == 0) break;
-    if (tag == 5)  strtab_va = rd64(v->d + o + 8);  /* DT_STRTAB */
-    if (tag == 10) strsz = rd64(v->d + o + 8);      /* DT_STRSZ  */
-  }
-  if (strtab_va && strsz &&
-      el_vaddr_to_offset(img, strtab_va, 1, &v->str_off) == 0 &&
-      v->str_off <= flen && strsz <= flen - v->str_off) {
-    v->strsz = strsz;
-    v->have_str = 1;
-  }
-  return 0;
-}
-
-/* Next DT_NEEDED name at/after *cursor.  Returns 1 = filled, 0 = end. */
-static int el_dyn_next_needed(struct el_dyn_view *v, uint64_t *cursor,
-                              char *out, int cap) {
-  if (!v->d || !v->have_str || cap <= 0) return 0;
-  uint64_t o = *cursor;
-  for (; o + 16 <= v->size; o += 16) {
-    uint64_t tag = rd64(v->d + o);
-    if (tag == 0) {
-      *cursor = o + 16;
-      return 0;
-    }
-    if (tag != 1) continue;                       /* DT_NEEDED */
-    uint64_t noff = rd64(v->d + o + 8);
-    *cursor = o + 16;
-    if (noff >= v->strsz) continue;
-    const char *name = (const char *)(v->file + v->str_off + noff);
-    uint64_t max = v->strsz - noff;
-    int k = 0;
-    while ((uint64_t)k < max && k < cap - 1 && name[k]) {
-      out[k] = name[k];
-      k++;
-    }
-    out[k] = '\0';
-    if (out[0]) return 1;
-  }
-  *cursor = o;
-  return 0;
-}
-
-/* GB-199: map one image's DT_NEEDED closure into `as`, depth-first, deduped
- * by the staged root name.  Each mapped DSO prints one line.  No relocations:
- * the interpreter owns them. */
-static int el_map_stage(struct addr_space *as, uint64_t base,
-                        const struct elf_plan *plan, const uint8_t *stage,
-                        uint16_t kind);
-static int el_stage_build(const struct elf_image *img, const struct elf_plan *plan,
-                          const uint8_t *file, uint64_t flen, uint64_t base,
-                          const char *what, int apply_reloc,
-                          uint8_t **stage_out, uint64_t *pages_out);
-static uint64_t el_lib_slot_find(struct addr_space *as, uint64_t span);
-
-#define EL_CLOSURE_MAX 8
-struct el_closure {
-  char name[EL_CLOSURE_MAX][64];
-  int n;
-};
-
-static int el_closure_seen(struct el_closure *c, const char *name) {
-  for (int i = 0; i < c->n; i++)
-    if (el_streq_ci(c->name[i], name)) return 1;
-  return 0;
-}
-
-static int el_map_closure(struct addr_space *as, const uint8_t *file,
-                          uint64_t flen, const struct elf_image *img,
-                          struct el_closure *seen, int depth) {
-  if (depth > 4) return 0;
-  struct el_dyn_view v;
-  if (el_dyn_view(file, flen, img, &v) != 0) return 0;
-  char nm[64];
-  uint64_t cur = 0;
-  while (el_dyn_next_needed(&v, &cur, nm, sizeof nm)) {
-    char staged[64];
-    uint16_t cl = 0;
-    uint32_t sz = 0;
-    if (el_compat_resolve(nm, &cl, &sz, staged, sizeof staged) != 0) {
-      el_msg2("elf loader: first missing DSO ", staged);
-      return -ENOENT;
-    }
-    if (el_closure_seen(seen, staged)) continue;
-    if (seen->n < EL_CLOSURE_MAX)
-      el_copy_name(seen->name[seen->n++], 64, staged);
-    uint64_t pages = 0;
-    uint64_t buf = el_read_file(cl, sz, &pages);
-    if (!buf) return -ENOMEM;
-    struct elf_image dimg;
-    int prc = elf_parse_ex((const void *)buf, sz, &dimg, ELF_PARSE_DSO);
-    if (prc != ELF_OK || dimg.needs_low_window) {
-      el_msg2("elf loader: DSO ", staged);
-      uart_puts("elf loader: DSO parse failed: ");
-      uart_puts(prc != ELF_OK ? elf_strerror(prc) : "ET_EXEC below the window");
-      uart_puts("\n");
-      el_free_contig(buf, pages);
-      return -ENOEXEC;
-    }
-    struct elf_plan dplan;
-    if (elf_build_plan(&dimg, &dplan) != ELF_OK || dplan.nreg == 0 ||
-        dplan.span == 0 || dplan.span > USER_LIB_SLOT_SIZE) {
-      el_msg2("elf loader: DSO ", staged);
-      uart_puts("elf loader: DSO does not fit one USER_LIB slot\n");
-      el_free_contig(buf, pages);
-      return -ENOSPC;
-    }
-    uint64_t dbase = el_lib_slot_find(as, dplan.span);
-    if (!dbase) {
-      el_free_contig(buf, pages);
-      return -ENOSPC;
-    }
-    uint8_t *dstage = 0;
-    uint64_t dpages = 0;
-    int rc = el_stage_build(&dimg, &dplan, (const uint8_t *)buf, sz, dbase,
-                            "elf loader: DSO", 0, &dstage, &dpages);
-    if (rc == 0)
-      rc = el_map_stage(as, dbase, &dplan, dstage, VMK_LIB);
-    el_free_contig((uint64_t)dstage, dpages);
-    if (rc != 0) {
-      el_free_contig(buf, pages);
-      return rc;
-    }
-    el_msg3("elf loader: DSO ", staged, " mapped");
-    rc = el_map_closure(as, (const uint8_t *)buf, sz, &dimg, seen, depth + 1);
-    el_free_contig(buf, pages);
-    if (rc != 0) return rc;
-  }
-  return 0;
-}
+/* GB-199's DT_NEEDED walkers (el_dyn_view / el_dyn_next_needed /
+ * el_closure_seen) went with el_map_closure(): on this tree the entered ld.so
+ * maps the dependency closure itself. */
 
 /* Map one plan region [va, va+len) with `prot`: allocate one zeroed frame per
  * 4 KiB page, copy that page's span of `stage` (the laid-out image) into it,
@@ -425,6 +277,11 @@ static int el_map_region(struct addr_space *as, uint64_t va, uint64_t len,
       frame_free(fr);
       return -ENOMEM;
     }
+    /* M6/L63: provenance.  This path stages the image with ONE full-file
+       read that must match the file's size exactly (el_read_file), then
+       copies pages out of that stage: `verified` means the page's bytes
+       came from a read the loader count-checked, not a zero fill. */
+    vm_pub_note(as, a, base_off, prot, 1, VM_PUB_FILE, fr, 1, VM_PW_ELF);
   }
   return 0;
 }
@@ -607,8 +464,17 @@ static uint64_t el_native_sp(void) {
 /* Parse the executable and apply every refusal that does not need the
  * interpreter's bytes.  Prints the reason (the compat track's message is the
  * same string it always printed) and fills info->parse_rc. */
-static int el_admit_exe(const uint8_t *exe, uint64_t exe_len, uint32_t pflags,
+static int el_admit_exe(const uint8_t *exe, uint64_t exe_len, uint32_t flags,
                         struct elf_image *eimg, struct elf_load_info *info) {
+  /* The parse flags are the TRACK's policy: the native track and the Linux
+     track's explicit COMPAT_INTERP mode both let elf_parse_ex capture
+     PT_INTERP; a plain compat call (flags == 0) does not, which is the GB-013
+     refusal contract.  (Upstream's refactor passed pflags to this helper; the
+     policy below needs the track bits too, so the computation lives here
+     again -- callers keep passing `flags`.) */
+  uint32_t pflags = (flags & (ELF_LOAD_NATIVE | ELF_LOAD_COMPAT_INTERP))
+                        ? ELF_PARSE_ALLOW_INTERP
+                        : 0;
   int prc = elf_parse_ex((const void *)exe, exe_len, eimg, pflags);
   info->parse_rc = prc;
   if (prc != ELF_OK) {
@@ -624,25 +490,26 @@ static int el_admit_exe(const uint8_t *exe, uint64_t exe_len, uint32_t pflags,
               "build is required (docs/elf-loader.md §1)\n");
     return -ENOEXEC;
   }
-  /* PT_INTERP policy: the kernel knows how to start exactly one interpreter,
-     and it is named by docs/shared-libs.md §2.  Anything else keeps the compat
-     track's refusal — same ELF_ERR_INTERP, same message — with the path added
-     so a compat binary that slipped onto the native track says why.
-     GB-196: the compat track parses with ELF_PARSE_CAPTURE_INTERP, so it can
-     NAME the interpreter and its dependencies before the same refusal; the
-     capture flag never lets a non-native interpreter start. */
-  if (eimg->has_interp) {
-    if (pflags & ELF_PARSE_CAPTURE_INTERP) {
-      el_msg2("elf loader: PT_INTERP ", eimg->interp);
-    } else if (!elf_interp_is_native(eimg->interp, eimg->interp_len)) {
-      uart_puts("elf loader: ");
-      uart_puts(elf_strerror(ELF_ERR_INTERP));
-      uart_puts(" (interpreter '");
-      uart_puts(eimg->interp);
-      uart_puts("' is not the native /LDHOBBY.SO)\n");
-      info->parse_rc = ELF_ERR_INTERP;
-      return -ENOEXEC;
-    }
+  /* PT_INTERP policy.  The native track knows exactly one interpreter
+     (/LDHOBBY.SO, docs/shared-libs.md §2); a compat binary that slipped onto
+     it keeps that refusal, same ELF_ERR_INTERP and message, with the path
+     added.  The Linux track (ELF_LOAD_COMPAT_INTERP) accepts any absolute
+     interpreter path: glibc's ld.so is a real elf_parse-able ET_DYN and the
+     kernel's only job is to map it and jump to its e_entry
+     (docs/rw-ldso-design.md).  flags == 0 -- the historical compat call --
+     still refuses, so the GB-013 contract is unchanged.  Upstream's GB-196
+     capture mode only NAMED the interpreter and then refused it; on this
+     tree the compat track enters it (see elf_loader_load_image), so the
+     capture arm is gone and COMPAT_INTERP is the flag that says so. */
+  if (eimg->has_interp && !(flags & ELF_LOAD_COMPAT_INTERP) &&
+      !elf_interp_is_native(eimg->interp, eimg->interp_len)) {
+    uart_puts("elf loader: ");
+    uart_puts(elf_strerror(ELF_ERR_INTERP));
+    uart_puts(" (interpreter '");
+    uart_puts(eimg->interp);
+    uart_puts("' is not the native /LDHOBBY.SO)\n");
+    info->parse_rc = ELF_ERR_INTERP;
+    return -ENOEXEC;
   }
   return 0;
 }
@@ -692,6 +559,14 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
     uart_puts("elf loader: image span overlaps the heap slot\n");
     return -ENOSPC;
   }
+  /* An INTERPRETED image must stay out of the DSO band as well: the
+     interpreter is placed there, and so is every DSO a real ld.so maps for
+     the program.  Without this an image between 128 MiB and 1 GiB would be
+     accepted and then collide with the library slots. */
+  if (iimg && base + eplan.span > ELF_USER_LIB_BASE) {
+    uart_puts("elf loader: image span overlaps the DSO band\n");
+    return -ENOSPC;
+  }
   rc = el_stage_build(eimg, &eplan, exe, exe_len, base, "elf loader",
                       iimg ? 0 : 1, &stage, &stage_pages);
   if (rc != 0) goto done;
@@ -720,8 +595,18 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
       rc = -ENOSPC;
       goto done;
     }
+    /* Relocation policy: the NATIVE interpreter (LDHOBBY.SO) is a static-PIE
+     * whose contract is "the kernel applies R_*_RELATIVE and zeroes
+     * DT_RELASZ".  A LINUX interpreter is the opposite: glibc's ld.so
+     * self-relocates in _dl_start using DT_RELA/DT_RELASZ from its own
+     * dynamic section and computes its load bias from its PC.  Applying or
+     * clearing that table would corrupt it before its first instruction, so
+     * on the compat track the bytes are mapped exactly as the file has them
+     * (`native` == 0 -> no relocation pass), which is also what Linux's
+     * ELF loader does for the interpreter. */
     rc = el_stage_build(iimg, &iplan, ib, ilen, interp_base,
-                        "elf loader: interpreter", 1, &istage, &istage_pages);
+                        "elf loader: interpreter", native, &istage,
+                        &istage_pages);
     if (rc != 0) goto done;
     rc = el_map_stage(as, interp_base, &iplan, istage, VMK_LIB);
     if (rc != 0) goto done;
@@ -772,7 +657,8 @@ done:
  * synthetic images, on both arches, without a filesystem.
  *
  * `flags`: ELF_LOAD_NATIVE honours PT_INTERP + writes the startup block;
- * 0 is the compat (Linux-ABI) track, which refuses PT_INTERP. */
+ * ELF_LOAD_COMPAT_INTERP honours a Linux interpreter (mapped, not relocated);
+ * 0 is the historical compat (Linux-ABI) track, which refuses PT_INTERP. */
 int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
                            uint64_t exe_len, const uint8_t *interp,
                            uint64_t interp_len, uint32_t flags,
@@ -780,8 +666,7 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
   if (!as || !info || !exe || exe_len == 0) return -ENOEXEC;
   el_zero((uint8_t *)info, sizeof *info);
   struct elf_image eimg, iimg;
-  uint32_t pflags = (flags & ELF_LOAD_NATIVE) ? ELF_PARSE_ALLOW_INTERP : 0;
-  int rc = el_admit_exe(exe, exe_len, pflags, &eimg, info);
+  int rc = el_admit_exe(exe, exe_len, flags, &eimg, info);
   if (rc != 0) return rc;
   if (eimg.has_interp) {
     if (!interp || interp_len == 0) {
@@ -796,6 +681,73 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
   return el_map_pair(as, exe, exe_len, &eimg, 0, 0, 0, flags, info);
 }
 
+/* Load an ELF image ALREADY IN KERNEL MEMORY into `as` per the load plan.
+ * This is the entry point for a filesystem that is not FAT16 (the VFS/NFS
+ * exec path): the caller holds the bytes, so no cluster is involved.  The
+ * PT_INTERP image is still resolved from the FAT16 root — the native
+ * dynamic contract's /LDHOBBY.SO is a boot-image file, not a game file.
+ * On success fills *info and returns 0; negative errno on any refusal. */
+int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
+                          uint32_t fsize, uint32_t flags,
+                          struct elf_load_info *info) {
+  if (!as || !info) return -ENOEXEC;
+  el_zero((uint8_t *)info, sizeof *info);
+  info->parse_rc = ELF_OK;
+  if (!exe || fsize == 0 || fsize > USER_IMG_SIZE)
+    return -ENOEXEC;
+
+  struct elf_image eimg;
+  int rc = el_admit_exe(exe, fsize, flags, &eimg, info);
+  if (rc != 0)
+    return rc;
+
+  /* Interpreter: resolved from the FAT16 root by the PT_INTERP path.  A miss is
+   * a clear refusal, not a mysterious guest crash — the whole point of the
+   * native dynamic contract is that the kernel says what it could not find.
+   * el_compat_resolve (upstream GB-196) is the resolver: as written, then its
+   * basename, then the bounded 8.3 alias table, and it reports the name that
+   * actually resolved -- so a glibc PT_INTERP path still finds LD64.SO. */
+  uint64_t ibuf = 0, ipages = 0, ilen = 0;
+  struct elf_image iimg;
+  char istaged[64];
+  istaged[0] = '\0';
+  if (eimg.has_interp) {
+    uint16_t icl = 0;
+    uint32_t isz = 0;
+    if (el_compat_resolve(eimg.interp, &icl, &isz, istaged, sizeof istaged) != 0) {
+      if (!(flags & ELF_LOAD_NATIVE))
+        el_msg2("elf loader: first missing DSO ", istaged);
+      uart_puts("elf loader: interpreter '");
+      uart_puts(eimg.interp);
+      uart_puts("' not found on the FAT16 root\n");
+      return -ENOENT;
+    }
+    if (isz > USER_LIB_SLOT_SIZE) {
+      uart_puts("elf loader: interpreter '");
+      uart_puts(istaged);
+      uart_puts("' is larger than one USER_LIB slot\n");
+      return -ENOSPC;
+    }
+    ibuf = el_read_file(icl, isz, &ipages);
+    if (!ibuf)
+      return -ENOMEM;
+    ilen = isz;
+    rc = el_admit_interp((const uint8_t *)ibuf, ilen, &iimg, info);
+    if (rc != 0) {
+      el_free_contig(ibuf, ipages);
+      return rc;
+    }
+    if (!(flags & ELF_LOAD_NATIVE))
+      el_msg3("elf loader: interpreter ", istaged, " mapped");
+  }
+
+  rc = el_map_pair(as, exe, fsize, &eimg,
+                   (const uint8_t *)ibuf, ilen, eimg.has_interp ? &iimg : 0,
+                   flags, info);
+  if (ibuf) el_free_contig(ibuf, ipages);
+  return rc;
+}
+
 /* Load an ELF image (opened at `cluster`/`fsize`) into `as` per the load
  * plan.  On success fills *info (runtime entry, executable base/phdr, the
  * interpreter base when interpreted, the user sp to start with) and returns 0;
@@ -803,6 +755,9 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
  * image too large / no slot, -ENOENT missing interpreter) on any refusal — the
  * caller tears `as` down.
  *
+ * The FAT16 entry point: reads the image into a contiguous frame range, then
+ * hands it to elf_loader_load_image().  A caller that already holds the bytes
+ * (the VFS/NFS path in program_loader) calls elf_loader_load_image directly.
  * stage[span] is the laid-out image (segment bytes at vaddr_base-relative
  * offsets, holes untouched): a contiguous scratch of `span` frames.  For the
  * W0 corpus (a few hundred KiB) this eager copy is cheap and correct; it is
@@ -820,158 +775,17 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
   if (!exe_buf)
     return -ENOMEM;
 
-  struct elf_image eimg;
-  uint32_t pflags = (flags & ELF_LOAD_NATIVE) ? ELF_PARSE_ALLOW_INTERP
-                                              : ELF_PARSE_CAPTURE_INTERP;
-  int rc = el_admit_exe((const uint8_t *)exe_buf, fsize, pflags, &eimg, info);
-  if (rc != 0) {
-    el_free_contig(exe_buf, exe_pages);
-    return rc;
-  }
-
-  /* Interpreter: resolved from the FAT16 root by the PT_INTERP path.  A miss is
-   * a clear refusal, not a mysterious guest crash — the whole point of the
-   * native dynamic contract is that the kernel says what it could not find.
-   * GB-196: the compat track reaches here too (capture flag): it resolves the
-   * image, maps it for the report, names the dependency set, and then still
-   * refuses to enter a non-native interpreter. */
-  uint64_t ibuf = 0, ipages = 0, ilen = 0;
-  struct elf_image iimg;
-  int compat = (flags & ELF_LOAD_NATIVE) ? 0 : 1;
-  char istaged[64];
-  istaged[0] = '\0';
-  if (eimg.has_interp) {
-    uint16_t icl = 0;
-    uint32_t isz = 0;
-    if (el_compat_resolve(eimg.interp, &icl, &isz, istaged, sizeof istaged) != 0) {
-      if (compat) {
-        el_msg2("elf loader: first missing DSO ", istaged);
-        info->parse_rc = ELF_ERR_INTERP;
-        el_free_contig(exe_buf, exe_pages);
-        return -ENOEXEC;
-      }
-      uart_puts("elf loader: interpreter '");
-      uart_puts(eimg.interp);
-      uart_puts("' not found on the FAT16 root\n");
-      el_free_contig(exe_buf, exe_pages);
-      return -ENOENT;
-    }
-    if (isz > USER_LIB_SLOT_SIZE) {
-      uart_puts("elf loader: interpreter '");
-      uart_puts(istaged);
-      uart_puts("' is larger than one USER_LIB slot\n");
-      el_free_contig(exe_buf, exe_pages);
-      return -ENOSPC;
-    }
-    ibuf = el_read_file(icl, isz, &ipages);
-    if (!ibuf) {
-      el_free_contig(exe_buf, exe_pages);
-      return -ENOMEM;
-    }
-    ilen = isz;
-    rc = el_admit_interp((const uint8_t *)ibuf, ilen, &iimg, info);
-    if (rc != 0) {
-      el_free_contig(exe_buf, exe_pages);
-      el_free_contig(ibuf, ipages);
-      return rc;
-    }
-  }
-
-  if (compat && eimg.has_interp) {
-    /* GB-199: enter the interpreter.  The kernel maps the executable (ld.so
-       relocates it; the GB-196 named-report is now the closure-map evidence),
-       the interpreter, and the executable's DT_NEEDED closure; program_loader
-       then builds the Linux startup stack (AT_PHDR/AT_ENTRY/AT_BASE) and the
-       process starts at the interpreter's entry. */
-    struct elf_plan eplan;
-    int plc = elf_build_plan(&eimg, &eplan);
-    uint64_t exe_base = el_choose_base(&eimg);
-    if (plc != ELF_OK || eplan.nreg == 0 || eplan.span > USER_IMG_SIZE ||
-        exe_base + eplan.span > USER_HEAP_BASE_V2) {
-      uart_puts("elf loader: image span overlaps the heap slot\n");
-      el_free_contig(exe_buf, exe_pages);
-      el_free_contig(ibuf, ipages);
-      info->parse_rc = (plc != ELF_OK) ? plc : ELF_ERR_RELOC;
-      return -ENOSPC;
-    }
-    uint8_t *estage = 0;
-    uint64_t estage_pages = 0;
-    rc = el_stage_build(&eimg, &eplan, (const uint8_t *)exe_buf, fsize, exe_base,
-                        "elf loader", 0, &estage, &estage_pages);
-    if (rc == 0)
-      rc = el_map_stage(as, exe_base, &eplan, estage, VMK_IMG);
-    el_free_contig((uint64_t)estage, estage_pages);
-    if (rc != 0) {
-      el_free_contig(exe_buf, exe_pages);
-      el_free_contig(ibuf, ipages);
-      info->parse_rc = ELF_ERR_RELOC;
-      return rc;
-    }
-
-    struct elf_plan iplan;
-    int ipl = elf_build_plan(&iimg, &iplan);
-    if (ipl != ELF_OK || iplan.nreg == 0 || iplan.span == 0 ||
-        iplan.span > USER_LIB_SLOT_SIZE) {
-      uart_puts("elf loader: interpreter does not fit one USER_LIB slot\n");
-      el_free_contig(exe_buf, exe_pages);
-      el_free_contig(ibuf, ipages);
-      info->parse_rc = ELF_ERR_INTERP;
-      return -ENOSPC;
-    }
-    uint64_t ibase = el_lib_slot_find(as, iplan.span);
-    if (!ibase) {
-      uart_puts("elf loader: no free USER_LIB slot for the interpreter\n");
-      el_free_contig(exe_buf, exe_pages);
-      el_free_contig(ibuf, ipages);
-      info->parse_rc = ELF_ERR_INTERP;
-      return -ENOSPC;
-    }
-    uint8_t *istage = 0;
-    uint64_t istage_pages = 0;
-    rc = el_stage_build(&iimg, &iplan, (const uint8_t *)ibuf, ilen, ibase,
-                        "elf loader: interpreter", 0, &istage, &istage_pages);
-    if (rc == 0)
-      rc = el_map_stage(as, ibase, &iplan, istage, VMK_LIB);
-    el_free_contig((uint64_t)istage, istage_pages);
-    if (rc != 0) {
-      el_free_contig(exe_buf, exe_pages);
-      el_free_contig(ibuf, ipages);
-      info->parse_rc = ELF_ERR_INTERP;
-      return rc;
-    }
-    el_msg3("elf loader: interpreter ", istaged, " mapped");
-
-    struct el_closure seen;
-    seen.n = 0;
-    el_copy_name(seen.name[seen.n++], 64, istaged);   /* dedupe the interpreter */
-    rc = el_map_closure(as, (const uint8_t *)exe_buf, fsize, &eimg, &seen, 0);
-    if (rc != 0) {
-      el_free_contig(exe_buf, exe_pages);
-      el_free_contig(ibuf, ipages);
-      info->parse_rc = ELF_ERR_RELOC;
-      return rc;
-    }
-
-    info->base = exe_base;
-    info->exe_entry = exe_base + (eimg.entry - eimg.vaddr_base);
-    info->entry = ibase + (iimg.entry - iimg.vaddr_base);
-    info->phdr = el_phdr_va(&eimg, exe_base);
-    info->phnum = eimg.phnum;
-    info->phent = eimg.phent;
-    info->interp_base = ibase;
-    info->interpreted = 1;
-    info->native = 0;
-    info->sp = el_native_sp();
-    el_free_contig(exe_buf, exe_pages);
-    el_free_contig(ibuf, ipages);
-    return 0;
-  }
-
-  rc = el_map_pair(as, (const uint8_t *)exe_buf, fsize, &eimg,
-                   (const uint8_t *)ibuf, ilen, eimg.has_interp ? &iimg : 0,
-                   flags, info);
+  /* One loader for both filesystems: the FAT16 path reads the bytes here and
+     hands them to elf_loader_load_image(), exactly as the VFS/NFS exec path
+     does.  Upstream's GB-199 also grew an inline compat-interpreter arm here
+     (map the exe, the interpreter and the DT_NEEDED closure, then enter it);
+     that arm is superseded by load_image + el_map_pair, which map the
+     executable and the interpreter and let the real ld.so map its own
+     DT_NEEDED closure from /LIB64 -- the behaviour the M2/M3/M4 gate set
+     exercises, and the only shape that can also serve an exec from NFS. */
+  int rc = elf_loader_load_image(as, (const uint8_t *)exe_buf, fsize, flags,
+                                 info);
   el_free_contig(exe_buf, exe_pages);
-  if (ibuf) el_free_contig(ibuf, ipages);
   return rc;
 }
 
@@ -1018,6 +832,31 @@ int elf_loader_probe_native(uint16_t cluster, uint32_t fsize) {
                               (uint32_t)ioff) != (int)isz)
       return 0;
     return elf_interp_is_native(path, (uint32_t)(isz - 1));
+  }
+  return 0;
+}
+
+/* Buffer form of elf_loader_probe_native(), for an image the caller already
+ * holds (the VFS/NFS exec path).  Same answer, same refusal boundaries. */
+int elf_loader_probe_native_buf(const uint8_t *exe, uint32_t fsize) {
+  if (!exe || fsize < EL_PROBE_EHDR) return 0;
+  const uint8_t *eh = exe;
+  if (!(eh[0] == 0x7f && eh[1] == 'E' && eh[2] == 'L' && eh[3] == 'F')) return 0;
+  if (eh[4] != 2 /* ELFCLASS64 */) return 0;
+  if (eh[5] != 1 /* ELFDATA2LSB */) return 0;
+  const uint64_t phoff = rd64(eh + 32);
+  const uint16_t phent = rd16(eh + 54);
+  const uint16_t phnum = rd16(eh + 56);
+  if (phent != EL_PROBE_PHDR || phnum == 0 || phnum > EL_PROBE_MAX_PH) return 0;
+  if (phoff > fsize || (uint64_t)phnum * phent > fsize - phoff) return 0;
+  for (uint16_t i = 0; i < phnum; i++) {
+    const uint8_t *ph = exe + phoff + (uint64_t)i * phent;
+    if (rd32(ph + 0) != 3 /* PT_INTERP */) continue;
+    const uint64_t ioff = rd64(ph + 8);
+    const uint64_t isz = rd64(ph + 32);
+    if (isz < 2 || isz > ELF_INTERP_PATH_MAX) return 0;
+    if (ioff > fsize || isz > fsize - ioff) return 0;
+    return elf_interp_is_native((const char *)(exe + ioff), (uint32_t)(isz - 1));
   }
   return 0;
 }

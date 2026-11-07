@@ -1,0 +1,8 @@
+XIBarrierReleasePointer
+XIFreeDeviceInfo
+XIGetSelectedEvents
+XIGrabTouchBegin
+XIQueryDevice
+XIQueryVersion
+XISelectEvents
+XIUngrabTouchBegin

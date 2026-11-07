@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "lock.h"
+#include "pidmask.h"
 
 #define PIPE_SIZE 512
 
@@ -17,8 +18,8 @@ struct pipe {
   spinlock_t lock;            /**< Lock for atomic buffer access */
   uint32_t reader_count;      /**< Number of processes with read access */
   uint32_t writer_count;      /**< Number of processes with write access */
-  uint64_t reader_pid_mask;   /**< Bitmask of PIDs waiting to read */
-  uint64_t writer_pid_mask;   /**< Bitmask of PIDs waiting to write */
+  struct pid_mask reader_pid_mask; /**< PIDs waiting to read (L12: >64 pids) */
+  struct pid_mask writer_pid_mask; /**< PIDs waiting to write */
 };
 
 struct file; // Forward declaration

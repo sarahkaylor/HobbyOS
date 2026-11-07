@@ -1,0 +1,69 @@
+tools/mesa: the viewport row (L74) -- what size the client thinks it renders at
+
+Why: M3's 720p run reported "surface 1920x1080" while its `[XSW] w=` said
+1280x720, and nothing in the row set could say whether the *viewport* had also
+stayed at desktop size.  Three facts decide whether a resolution is real:
+
+  glViewport(x,y,w,h)                -- this row
+  the drawable the frontend hands the winsys ([VGL] res_create ... dt)
+  the rect the shim blits into /dev/fb0 ([XSW] ... w= h= gx= gy=)
+
+They are produced by three different layers, so they can disagree, and a
+"720p" number that is really a 1080p surface is exactly what M3 measured
+(15.97 fps at 1916x1018 vs 12.15 fps for a 720p request that was still
+rendering 1920x1080).
+
+Bounded and opt-in: four rows, then one per change, capped at 64, and only
+when HOBBYOS_GL_VIEWPORT is in the environment (rwlaunch exports it from the
+/VPON marker).  It is a switch of its own and not part of HOBBYOS_GLX_TRACE
+because that trace prints a row per glX call and would perturb the fps it is
+measuring.  The shipped DSO pays one predictable branch per glViewport.
+
+--- a/src/mesa/main/viewport.c
++++ b/src/mesa/main/viewport.c
+@@ -134,6 +134,37 @@
+    viewport(ctx, x, y, width, height);
+ }
+ 
++/* HOBBYOS (L74): the viewport row.
++ *
++ * The question "is the GL surface really the size the window asked for?" has
++ * three answers and they can disagree: what the client passed to glViewport,
++ * the drawable size the frontend hands the winsys (a pipe_resource of that
++ * size, logged as [VGL] res_create), and the rect the shim blits into
++ * /dev/fb0 ([XSW] w=/h=/gx=/gy=).  This is the first of the three.  Bounded:
++ * the first four calls, then only when the rect changes, capped at 64, and
++ * only when HOBBYOS_GL_VIEWPORT is set (rwlaunch exports it from /VPON).  It
++ * is a switch of its own, not part of HOBBYOS_GLX_TRACE, because that trace
++ * prints a row per glX call and would perturb a measured fps run.  The
++ * shipped DSO pays one predictable branch per call.
++ */
++static void
++hobbyos_viewport_row(GLint x, GLint y, GLsizei w, GLsizei h)
++{
++   static int on = -1;
++   static int nx = -1, ny = -1, nw = -1, nh = -1;
++   static unsigned rows;
++   if (on < 0)
++      on = getenv("HOBBYOS_GL_VIEWPORT") ? 1 : 0;
++   if (!on)
++      return;
++   if ((rows < 4 || x != nx || y != ny || w != nw || h != nh) && rows < 64) {
++      fprintf(stderr, "[GL] viewport x=%d y=%d w=%d h=%d\n",
++              (int)x, (int)y, (int)w, (int)h);
++      rows++;
++   }
++   nx = (int)x; ny = (int)y; nw = (int)w; nh = (int)h;
++}
++
+ void GLAPIENTRY
+ _mesa_Viewport(GLint x, GLint y, GLsizei width, GLsizei height)
+ {
+@@ -145,6 +176,7 @@
+       return;
+    }
+ 
++   hobbyos_viewport_row(x, y, width, height);
+    viewport(ctx, x, y, width, height);
+ }
+ 

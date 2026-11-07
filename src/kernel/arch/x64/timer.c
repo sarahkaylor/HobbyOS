@@ -226,6 +226,26 @@ void timer_init(void) {
 void timer_reload(void) {
   timer_ticks++;
   lapic_timer_calibration_tick();
+  /* L49: the Linux-ABI timer family's only clock.  A fixed 48-entry table and
+     no per-timer thread: an expiry raises the configured signal or bumps a
+     timerfd's counter (src/kernel/linux_compat_timers.c).  Called here because
+     this is the one periodic tick the kernel actually has, on CPU 0, with
+     interrupts off, and the work is lock-and-load only. */
+  {
+    extern void linux_compat_timer_tick(uint64_t now);
+    linux_compat_timer_tick(timer_get_ms());
+  }
+  /* L75: log every controller state change the MMIO registers show (CC,
+     CSTS, INTMS/INTMC, admin ring indices).  CPU 0 only: one tick per
+     machine, four MMIO reads, and a row only when something changed.  This
+     is the instrument that turns "the controller disappeared at t=730 s"
+     into a timestamped transition with both sides' register values. */
+  {
+    extern void virtio_blk_watch_mmio(void);
+    extern uint32_t get_cpuid(void);
+    if (get_cpuid() == 0)
+      virtio_blk_watch_mmio();
+  }
   // NOTE: We intentionally do NOT call virtio_net_handle_irq() here.
   // The provider_loop on CPU 0 polls the RX used ring directly via poll_rx.
   // Calling handle_irq from ANY CPU's timer ISR reads inb(ISR) which clears
@@ -245,4 +265,15 @@ uint64_t timer_get_ms(void) {
     return timer_ticks * 10;
   }
   return rdtsc() / tsc_per_ms;
+}
+
+/* Microsecond time base for the NFS RPC/latency instrumentation (L35).
+ * Same TSC as timer_get_ms(), so it advances with interrupts disabled and
+ * has sub-millisecond resolution.  Not for scheduling decisions: a caller
+ * that must not spin should use timer_get_ms(). */
+uint64_t timer_get_us(void) {
+  if (tsc_per_ms == 0) {
+    return timer_ticks * 10000;
+  }
+  return (rdtsc() * 1000) / tsc_per_ms;
 }

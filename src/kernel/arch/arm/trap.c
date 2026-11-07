@@ -246,6 +246,13 @@ struct sys_fsinfo {
   uint64_t free_bytes;
 };
 
+/* cmd 10 (L35): NFS READ traffic counters.  Mirrors struct sys_nfsio in
+ * src/user_include/libc.h. */
+struct sys_nfsio {
+  uint64_t bytes;
+  uint64_t ops;
+};
+
 static void sys_sysinfo(struct trap_frame *tf) {
   int cmd = (int)tf->regs[0];
   void *buf = (void *)tf->regs[1];
@@ -346,6 +353,16 @@ static void sys_sysinfo(struct trap_frame *tf) {
     } else if (cmd == 9) { // Block cache stats (docs/blk-cache.md)
       if (size >= (int)sizeof(struct blk_cache_stats)) {
         blk_cache_get_stats((struct blk_cache_stats *)buf);
+        tf->regs[0] = 0;
+      } else {
+        tf->regs[0] = -1;
+      }
+    } else if (cmd == 10) { // NFS READ traffic counters (L35 bench)
+      if (size >= (int)sizeof(struct sys_nfsio)) {
+        extern volatile uint64_t nfs_io_bytes, nfs_io_ops;
+        struct sys_nfsio *io = (struct sys_nfsio *)buf;
+        io->bytes = nfs_io_bytes;
+        io->ops = nfs_io_ops;
         tf->regs[0] = 0;
       } else {
         tf->regs[0] = -1;
@@ -1722,6 +1739,21 @@ static void sys_mount(struct trap_frame *tf) {
   }
 }
 
+/* vfs_bind(from, to): alias the subtree at `from` onto the path `to` (M5c).
+ * Same row/behaviour as x64; see src/include/vfs_bind.h. */
+static void sys_vfs_bind(struct trap_frame *tf) {
+  const char *from = (const char *)tf->regs[0];
+  const char *to = (const char *)tf->regs[1];
+  if (sys_user_range_ok((uint64_t)from, 1) &&
+      sys_user_range_ok((uint64_t)to, 1)) {
+    extern int vfs_bind_add(const char *from, const char *to);
+    int r = vfs_bind_add(from, to);
+    tf->regs[0] = r < 0 ? -EINVAL : r;
+  } else {
+    tf->regs[0] = -EFAULT;
+  }
+}
+
 /* umount(target): unmount the NFS export mounted exactly at `target`. */
 static void sys_umount(struct trap_frame *tf) {
   const char *target = (const char *)tf->regs[0];
@@ -2194,6 +2226,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_ftruncate(tf);
     } else if (syscall_num == SYS_MOUNT) {
       sys_mount(tf);
+    } else if (syscall_num == SYS_VFS_BIND) {
+      sys_vfs_bind(tf);
     } else if (syscall_num == SYS_UMOUNT) {
       sys_umount(tf);
     } else if (syscall_num == SYS_GETPID) {
@@ -2321,8 +2355,26 @@ void sync_lower_handler_c(struct trap_frame *tf) {
        * "PROT" for a genuine violation, so both classes go through it — the
        * old demand-only gate killed every COW write.  (x64's #PF dispatch
        * had the same gate; both were measured on the dynamic-link pilot.) */
-      if (vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why) == 0) {
+      int frc = vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why);
+      if (frc == 0) {
         return; /* mapping is live; eret re-executes the instruction */
+      }
+      /* M6/L69: a refused file-backed page is an I/O error on a MAPPING
+         (vm_handle_fault returns 2), not a protection violation.  Deliver
+         SIGBUS, Linux's answer, so a compat program can abort the failed file
+         load instead of looping in its SIGSEGV handler. */
+      if (frc == 2) {
+        uart_puts("[EIO] pid=");
+        print_int(gcur->pid);
+        uart_puts(" (");
+        uart_puts(gcur->name);
+        uart_puts(") page-in failed VA=");
+        uart_print_hex(far);
+        uart_puts(" PC=");
+        uart_print_hex(tf->elr);
+        uart_puts(" -> SIGBUS (EIO, not a protection fault)\n");
+        process_fault_exit(tf, 7); /* SIGBUS */
+        return;
       }
       uart_puts("[KERNEL] pid=");
       print_int(gcur->pid);

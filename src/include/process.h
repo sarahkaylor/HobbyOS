@@ -3,10 +3,23 @@
 
 #include "lock.h"
 #include "trap.h"
+#include "pidmask.h"
 #include <stdint.h>
 
-#define MAX_PROCESSES 64 // Maximum number of concurrent processes
+/* L12 (M2/M7): 64 slots could not hold the measured RimWorld process
+ * (106 threads at the menu, 145 peak, docs/rimworld-evidence.md §3.4), so
+ * thread_create() returned EAGAIN under real load.  192 gives 191 usable
+ * slots (slot 0 is reserved) -- 46 headroom over the measured peak -- and
+ * still fits the kernel BSS budget: the extra slots and the widened pid
+ * masks cost 1,834,496 B (~1.75 MiB) in total BSS, itemised in
+ * docs/rimworld-m2-thread-ceiling.md.  Keep this a multiple of 64: pid
+ * bitmaps are word arrays (src/include/pidmask.h) and slot allocation is a
+ * linear scan, so 192 keeps both cheap. */
+#define MAX_PROCESSES 192 // Maximum number of concurrent processes
 #define MAX_CPUS 8       // Maximum number of CPU cores supported
+
+_Static_assert(MAX_PROCESSES <= PID_MASK_BITS,
+               "MAX_PROCESSES outgrew struct pid_mask; widen PID_MASK_BITS");
 
 #ifdef __x86_64__
 /* GB-152: ONE declaration of the per-CPU GS block.  It used to be copied in
@@ -141,7 +154,37 @@ uint32_t smp_init_count(void);
 #define GICC_BASE 0x08010000 // CPU Interface base address (v2)
 #define GICR_BASE 0x080A0000 // Redistributor base address (v3)
 
-#define MAX_OPEN_FDS 64 // IceWM M1: X server + clients (was 32); fd_cloexec is 64-bit
+/* L55: 256, not 64.  RimWorld's def loader opens ~1,209 XML files through
+ * parallel `DirectXmlLoader` threads while the main thread holds Player.log,
+ * the config tree and the managed-assembly mappings; the old ceiling turned a
+ * handful of those opens into `IOException: Could not open file` and the
+ * affected defs were silently missing from the game.  The CLOEXEC mask used to
+ * be one uint64_t, which is what actually pinned this at 64; it is now a word
+ * array (fd_cloexec[FD_CLOEXEC_WORDS]) addressed only through the helpers
+ * below, so widening the table cannot silently lose a CLOEXEC bit past fd 63.
+ * Native processes are unaffected: they use the same table, and every access
+ * goes through the same helpers. */
+#define MAX_OPEN_FDS 256
+#define FD_CLOEXEC_WORDS ((MAX_OPEN_FDS + 63) / 64)
+
+static inline int fd_cloexec_test(const uint64_t *m, int fd) {
+  if (fd < 0 || fd >= MAX_OPEN_FDS) return 0;
+  return (int)((m[fd >> 6] >> (fd & 63)) & 1ull);
+}
+static inline void fd_cloexec_set(uint64_t *m, int fd) {
+  if (fd < 0 || fd >= MAX_OPEN_FDS) return;
+  m[fd >> 6] |= 1ull << (fd & 63);
+}
+static inline void fd_cloexec_clear(uint64_t *m, int fd) {
+  if (fd < 0 || fd >= MAX_OPEN_FDS) return;
+  m[fd >> 6] &= ~(1ull << (fd & 63));
+}
+static inline void fd_cloexec_reset(uint64_t *m) {
+  for (int i = 0; i < FD_CLOEXEC_WORDS; i++) m[i] = 0;
+}
+static inline void fd_cloexec_copy(uint64_t *dst, const uint64_t *src) {
+  for (int i = 0; i < FD_CLOEXEC_WORDS; i++) dst[i] = src[i];
+}
 
 /* P2.2: the address-space object (src/include/vm.h) — only ever a pointer
    here, so the kernel headers don't grow a hard include chain. */
@@ -172,9 +215,16 @@ struct addr_space;
 
 /* P5 (docs/browser/p5-exec-signals-design.md D7): env blob + signal
  * table sizes.  Numbers 1..HO_SIG_MAX-1 are the valid disposition range;
- * the signal set itself is frozen by the note's D6. */
+ * the signal set itself is frozen by the note's D6.
+ *
+ * HO_SIG_MAX is 64 because the Linux ABI's real-time signals start at 32:
+ * glibc's NPTL installs SIGCANCEL(32)/SIGSETXID(33) at pthread init and Mono
+ * installs its GC suspension handler on SIGRTMIN(35).  With a 32-entry range
+ * every one of those rt_sigaction calls answered -EINVAL (measured: Mono 6.12
+ * printed `[LCOMPAT] sigaction refused sig=32/33/35` and never reached managed
+ * code).  The pending set therefore had to widen from uint32_t to uint64_t. */
 #define HO_ENV_LEN 512
-#define HO_SIG_MAX 32
+#define HO_SIG_MAX 64
 
 /* P5 (D6): the frozen signal numbers (the Linux set the sysroot shares).
  * Kernel shorthand so process.c/pipe.c never leak magic numbers. */
@@ -183,6 +233,7 @@ struct addr_space;
 #define HO_SIGILL  4
 #define HO_SIGABRT 6
 #define HO_SIGBUS  7
+#define HO_SIGFPE  8
 #define HO_SIGKILL 9
 #define HO_SIGUSR1 10
 #define HO_SIGSEGV 11
@@ -211,6 +262,19 @@ struct process {
   char name[32];  /**< Name of the binary running in this process */
   char args[HO_FLAT_ARGS_LEN]; /**< Command line args (w5 vi: flat cap 1024) */
   char cwd[128];  /**< Current working directory */
+
+  /**
+   * The path the loader was asked to execute, resolved to an absolute path
+   * (relative names use the spawning cwd).  Distinct from `name`: name is the
+   * 32-byte display/LFN name that `ps`-style listings print, while this is
+   * what /proc/self/exe must answer.  M6 launch plumbing: for a Linux-ABI
+   * process the kernel maps an interpreter and enters IT, so "the process
+   * name" is ambiguous — Unity's SDL derives its data directory from
+   * readlink("/proc/self/exe"), and answering the interpreter (or a truncated
+   * display name) makes it report "There is no data folder".  Empty for a
+   * kernel process / before the first exec.
+   */
+  char exe_path[160];
 
   /**
    * Positional-parameter blob (SYS_GETARGV).  eargv holds argv[0..eargc-1]
@@ -275,6 +339,17 @@ struct process {
      fault records unreadable. */
   int64_t last_syscall;
   int64_t last_ret;
+  /* L42: the last 32 Linux syscall numbers this thread entered, oldest at
+     sys_ring_at.  A park row says where a thread stopped; this says what it
+     was doing on the way there (e.g. "pread, pread, futex" vs "write, futex"). */
+  uint16_t sys_ring[32];
+  uint8_t sys_ring_at;
+  /* L73: the entry state of the syscall this thread is INSIDE right now.
+     `last_syscall` says which one; these say with what.  A kernel-mode #PF on
+     a user address is named by the pair (nr, args) plus sc_rip -- the user PC
+     just past the `syscall` instruction, i.e. the wrapper that issued it. */
+  uint64_t sc_arg[6];
+  uint64_t sc_rip;
   /** Phase 4 (memory): anonymous mmap regions (first-fit carving from the
    *  pre-mapped region; entries are VAs into the anon area). */
   struct anon_region { uint64_t addr; uint64_t len; } anon_maps[8];
@@ -373,7 +448,7 @@ struct process {
    * closed at exec.  fcntl F_GETFD/F_SETFD read/write bit 0; dup2/dup and
    * spawn2's 0/1/2 grants clear the bit on the new fd; P5's execve runs
    * the sweep.  Appended at the END so parallel lanes merge additively. */
-  uint64_t fd_cloexec; /* IceWM M1: 64 bits, one per fd (MAX_OPEN_FDS 64) */
+  uint64_t fd_cloexec[FD_CLOEXEC_WORDS]; /* L55: one bit per fd, word array (MAX_OPEN_FDS 256) */
 
   /* --- P5 (docs/browser/p5-exec-signals-design.md D7): exec + signals --- *
    * Appended at the END so parallel lanes merge additively.  All of this
@@ -384,11 +459,41 @@ struct process {
    *  sig_pending: bit (signum - 1); delivery state is the leader's (D8). */
   char env[HO_ENV_LEN];
   int envc;
-  uint32_t sig_pending;
+  uint64_t sig_pending;
+  /* M6/L46: THREAD-DIRECTED pending set.  Linux queues a signal sent with
+     tgkill(tid)/tkill(tid) on THAT task, and no other thread of the group can
+     take it.  sig_pending above is process-directed state (kill(2), faults,
+     SIGCHLD): it lives on the anchor and any member may consume it.  The two
+     cannot share one word, because the anchor is also a task: a SIGPWR that
+     Boehm sends to the main thread (pthread_kill(main_tid)) used to land in
+     sig_pending, and the first thread to trap -- including a thread created a
+     moment earlier that had not registered with the GC yet -- consumed it.
+     Measured: the thief entered GC_suspend_handler_inner with
+     GC_lookup_thread()==NULL and died on VA=0x20, while the main thread never
+     acked and the collector waited for ever (docs/rimworld-launch-log.md 33).
+     Only the addressed PCB may consume a bit from this word. */
+  uint64_t sig_pending_dir;
   uint64_t sig_handler[HO_SIG_MAX];
   uint64_t sig_restorer;
   int sig_in_handler;
   uint64_t sig_frame;
+
+  /* --- M6/L33: parks a signal must interrupt ---------------------------- *
+   * A compat syscall that blocks tells the signal path how to end its park:
+   *   sig_park_kind 0 = not a signal-aware park (default)
+   *                 1 = the syscall is NOT rewound; on wake it must return
+   *                     -EINTR (nanosleep, clock_nanosleep, rt_sigsuspend)
+   *                 2 = the syscall WAS rewound by l_park() and re-executes,
+   *                     so its own entry check answers -EINTR (poll/read).
+   * sig_suspended/sig_saved_mask: rt_sigsuspend is parked with the argument
+   * mask installed; the pre-suspend mask is restored when the wait ends
+   * (Linux restores it before running the handler). */
+  int sig_park_kind;
+  int sig_suspended;
+  uint64_t sig_saved_mask;
+  /* The syscall number of the current park, used to restart it when the
+     interrupting handler carries SA_RESTART (Linux's -ERESTARTSYS). */
+  int sig_park_nr;
 
   /* --- W2-5 (selfhost, os-gap-audit.md §4): wait4 rusage ------------- *\
    * Set ONLY by the blocking path of process_wait4 (the caller's
@@ -436,6 +541,18 @@ struct process {
   uint32_t vdisp_gen;
   int vdisp_own;
   uint32_t vdisp_own_gen;
+
+  /* --- M6/L45: park + signal-frame bookkeeping for the starvation probe -- *
+   * park_since_ms: when this thread committed to BLOCKED/FUTEX.  The idle
+   *   lost-wake scanner uses it to name a thread that sits in a park while a
+   *   signal it would take is pending -- the exact shape of a lost
+   *   suspend/restart wakeup (Boehm's GC sigsuspend never returns and the
+   *   world stop is never released).
+   * sig_frame_sig: which signal the thread's active compat frame belongs to,
+   *   so [SIGY] rows and the stall dump can pair plant/return per signal.
+   * Both appended at the END so parallel lanes merge additively. */
+  uint64_t park_since_ms;
+  int sig_frame_sig;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
@@ -458,6 +575,11 @@ int process_create_v2(void);
 /* P2.2 (S2): which slot currently claims `cpu` (-1 = none); the x64
  * shootdown send path scans it (design section 7.2). */
 int current_pid_of_cpu(uint32_t cpu);
+
+/* L52: poke one idle CPU with the reschedule IPI (0x81) after a wake has
+ * flipped a thread READY, so it is not left waiting for the 100 Hz tick.
+ * Safe to call without proc_lock; no-op when every other CPU is busy. */
+void sched_wake_idle_cpu(void);
 
 // Number of free physical blocks (advisory; see program_loader.c's
 // boot-wave headroom reserve).
@@ -715,6 +837,10 @@ void process_wake_all_drain(void); /* tick only */
 
 // Get the PCB for a specific PID.
 struct process *process_get_pcb(int pid);
+/* M6/L32: the allocation generation of a pid slot (0 = never allocated).
+ * A signal instrument compares it against the sender's view to prove or
+ * disprove PCB reuse between the sender's list entry and the signal. */
+uint32_t process_slot_seq(int pid);
 
 extern spinlock_t proc_lock;
 extern int cpu_current_pids[];
@@ -746,9 +872,38 @@ void fpu_restore(const uint64_t *area);
 /* P5 S3 (D8.7): destination-pointer FP/FPSIMD variants — the same image
  * formats as fpu_state (ARM 528 bytes: q0-q31 + FPCR + FPSR; x64 512 bytes:
  * the FXSAVE64 image), saved/restored to/from the signal frame on the user
- * stack.  The area must be 16-byte aligned on both arches. */
+ * stack.  The area must be 16-byte aligned on both arches.
+ *
+ * M6/L63: shared code must NOT pass a user address to these.  FXSAVE/FXRSTOR
+ * #GP on a misaligned operand and, worse, a fault on the instruction while it
+ * targets user memory is not recoverable under KVM (the whole vCPU stops:
+ * "KVM internal error, suberror 1").  Use the staged, -EFAULT-returning
+ * helpers below for anything user-resident; these two stay for kernel
+ * addresses only (the PCB image, the signal frame's kernel-side staging
+ * buffer). */
 void arch_fpu_save_to(void *dst);
 void arch_fpu_restore_from(const void *src);
+
+/* Size of the signal-frame FP image (FXSAVE64 image / FPSIMD image). */
+#ifdef __x86_64__
+#define FPU_SIG_IMAGE_BYTES 512
+#else
+#define FPU_SIG_IMAGE_BYTES 528
+#endif
+
+/* M6/L63: save/restore a signal frame's FP image WITHOUT ever executing an
+ * FXSAVE/FXRSTOR against a user address.  The image is staged through a
+ * 16-byte-aligned kernel buffer and moved with vm_kwrite/vm_user_read
+ * (vm_touch + direct-map copy), so a misaligned, unbacked or unmapped user
+ * destination is a plain -EFAULT the caller can turn into the signal's
+ * default action — never a kernel #GP, and never a VM stop.  Returns 0 or
+ * -EFAULT. */
+int arch_fpu_save_user(struct process *p, void *user_dst);
+int arch_fpu_restore_user(struct process *p, const void *user_src);
+
+/* The alignment/range rule those two enforce, exposed for the unit suite:
+ * 0 when `va` may hold a signal-frame FP image, -EFAULT otherwise. */
+int arch_fpu_user_image_ok(uint64_t va);
 
 /* --- P5 (docs/browser/p5-exec-signals-design.md): signals/kill/env ----
  * Rows: 16 kill (semantics completed, D9), 83 sigaction (D7), 84 sigreturn
@@ -778,6 +933,9 @@ int process_user_ok(struct process *p, uint64_t va, uint64_t len, int write);
  * uncatchable SIGKILL) kills the target group immediately with the signal
  * byte in the waitpid status.  Returns 0 or -errno (-ESRCH, -EINVAL). */
 int process_signal(int pid, int sig);
+/* M6/L46: `directed` != 0 for tgkill/tkill (the caller named a tid), 0 for
+ * kill(2).  A directed signal is queued on that task alone. */
+int process_signal_directed(int pid, int sig, int directed);
 
 /* Row 83 (D7): validate + store dispositions on the caller's group anchor.
  * act/oldact are kernel mirrors marshalled by the trap layer (NULL =

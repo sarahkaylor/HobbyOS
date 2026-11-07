@@ -41,6 +41,13 @@ void panic_putc(char c) {
   uart_putc_body(c);
 }
 
+/** GB-097's lock-free NON-panic character sink (the x64 name): a returning
+    path that already holds uart_lock must write through this, not through
+    panic_putc(), which is reserved for non-returning callers. */
+void uart_putc_dbg(char c) {
+  uart_putc_body(c);
+}
+
 /** Raw string — lock-free, for deadlock diagnostics only. */
 void panic_puts(const char *s) {
   while (*s != '\0') {

@@ -127,6 +127,7 @@ endif
 DESKTOP_FILE = $(OBJ_DIR)/.desktop
 X11_BUILD_DIR ?= third_party/x11/build/$(ARCH)
 
+
 # Flat WebProcess binary (WK-5 windowed browser shell).  The browser SOURCE is
 # vendored in this repo since 2026-10-07 — third_party/webkit-hobbyos/
 # (sha-verified snapshot parts + extract.sh + build.sh; see its README.md).
@@ -451,6 +452,21 @@ else
   CFLAGS += -DKERNEL_MODE_DESKTOP
 endif
 
+# L75: the block-stress probe.  RW_BLK_STRESS=1 compiles the kernel-side
+# stressor (random small reads + writes through the NVMe driver, driven from
+# the 5 s sampler) so a window can be run with the probe alongside the game
+# without a second user process: "2 x 1800 s with the block-stress probe
+# running".  Off by default, so ordinary runs are unchanged.
+ifeq ($(RW_BLK_STRESS),1)
+  CFLAGS += -DRW_BLK_STRESS=1
+endif
+# L75: the one-off alias reproducer (never in a shipped build).  Writes a 4 KiB
+# zero page into the physical page the pool would hand out and reads the
+# controller registers back; see virtio_blk_init.
+ifeq ($(RW_ALIAS_PROBE),1)
+  CFLAGS += -DRW_ALIAS_PROBE=1
+endif
+
 # DESKTOP=icewm (icewm.md §4.5): main.c's default desktop branch launches
 # XSESSION.BIN.  Only src/kernel/main.c reads this macro, so only main.o
 # carries the stamp dependency (see the DESKTOP_FILE rule by XSESSION_BIN).
@@ -562,6 +578,45 @@ GX_X64_NOTE_SOFT :=
 ifeq ($(ARCH),intel)
   GX_X64_NOTE_GL := (x64: $(GX_X64_GPU_DEV))
   GX_X64_NOTE_SOFT := (x64: no GPU device -- std VGA)
+endif
+
+# Diagnostic: x86 DR0 data-write watchpoint on one user word
+# (src/kernel/rw_watch.c + src/include/rw_watch.h).  Empty = the module
+# compiles to nothing and the trap hooks are no-ops, so a normal build is
+# unchanged.  A diagnostic boot names the address it wants trapped:
+#     make RW_WATCH_ADDR=0x10C00964A0 ... disk.img
+# The append lives here, after every CFLAGS assignment above, because a plain
+# `CFLAGS +=` earlier in this file is overwritten by the per-arch `CFLAGS =`.
+ifneq ($(RW_WATCH_ADDR),)
+  CFLAGS += -DRW_WATCH_ADDR=$(RW_WATCH_ADDR)
+endif
+# Counterfactual probe for the same module: forge a successful acquisition of
+# an uninitialized mutex (zero the word + force ZF) to answer "is THIS the
+# blocker".  Diagnostic only; never a shipping behaviour.
+ifneq ($(RW_WATCH_FIXUP),)
+  CFLAGS += -DRW_WATCH_FIXUP=1
+endif
+# Diagnostic: one compact serial row per memory syscall (mmap/munmap/mremap/
+# mprotect/madvise/brk/msync/mincore/memfd), with the caller's six arguments and
+# the return value.  Empty = no row, no code growth.  Used to name the strategy
+# an allocator uses to carve its arena (L24):
+#     make RW_TRACE_MEM=1 ... disk.img
+ifneq ($(RW_TRACE_MEM),)
+  CFLAGS += -DRW_TRACE_MEM=1
+endif
+# Diagnostic: the set/wake timeline for every futex key a process's MAIN thread
+# parks on ([FUTXW] WAIT/WAKE/KEY rows in src/kernel/linux_compat_thr.c).  It
+# answers "did the setter reach the futex, and did the wake find a waiter".
+#     make RW_FUTXW=1 ... disk.img
+ifneq ($(RW_FUTXW),)
+  CFLAGS += -DRW_FUTXW=1
+endif
+# Diagnostic: one spurious futex wake on every queued waiter, every 8 s from
+# t=30 s (rule 24b).  If the game's stall is a lost wake, this un-sticks it and
+# the loader continues; if it is not, nothing changes.  Diagnostic only.
+#     make RW_WAKEALL=1 ... disk.img
+ifneq ($(RW_WAKEALL),)
+  CFLAGS += -DRW_WAKEALL=1
 endif
 
 # Target and objects
@@ -3026,6 +3081,8 @@ apps_test:
 HOST_CC = clang
 HOST_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST
 
+include src/user/xcompat/Makefile.inc
+
 # GB-085 make-dependency fix: every host test object and binary that links
 # compat (the shared filesystem-mock layer) must rebuild when compat.c or
 # the shared scratch-dir header changes -- a stale obj/host_compat.o was the
@@ -3257,6 +3314,16 @@ $(LOCKSTEAL_TEST): src/host/locksteal_test.c src/kernel/arch/x64/locks.c src/inc
 MEMFD_TEST = memfd_test_host
 $(MEMFD_TEST): src/host/memfd_test.c
 	$(HOST_CC) $(HOST_CFLAGS) src/host/memfd_test.c -o $@
+
+# M5c: the VFS prefix bind that serves Mono's managed assemblies from the FAT
+# volume (docs/rimworld-m5-managed.md).  Compiles the real kernel translation
+# unit, not a copy, and asserts the contract the game depends on: component
+# boundaries (so ManagedX is not captured), idempotence (paths cross vfs_abs_path
+# more than once), longest-prefix, the chain refusal that keeps idempotence
+# true, and no-truncation.
+VFS_BIND_TEST = vfs_bind_test_host
+$(VFS_BIND_TEST): src/host/vfs_bind_test.c src/kernel/vfs_bind.c src/include/vfs_bind.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/vfs_bind.c src/host/vfs_bind_test.c -o $@
 
 # Linux evdev / input ABI lock (GB-027): header-only T1/T4 golden test for
 # src/include/linux_input.h (struct input_event/input_absinfo layout, EV_*, BTN_*,
@@ -4179,7 +4246,7 @@ DIFF_RUN = python3 tools/differential/diff_harness_test.py
 test_diff_harness:
 	$(HOST_RUN) $(DIFF_RUN)
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
 	$(HOST_RUN) ./$(GFX_STATS_TEST)
@@ -4229,6 +4296,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAM
 	$(HOST_RUN) ./$(CLOCKABI_TEST)
 	$(HOST_RUN) ./$(LOCKSTEAL_TEST)
 	$(HOST_RUN) ./$(MEMFD_TEST)
+	$(HOST_RUN) ./$(VFS_BIND_TEST)
 	$(HOST_RUN) ./$(LINUX_INPUT_TEST)
 	$(HOST_RUN) ./$(INPUT_NODE_TEST)
 	$(HOST_RUN) ./$(AUDIO_STUB_TEST)

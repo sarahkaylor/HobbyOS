@@ -42,6 +42,7 @@ void run_all_unit_tests(void) {
      blk_cache_press_test.c (tests lane) and wins over the WEAK fallback
      defined here in blk_cache_test.c after the merge. */
   blk_cache_test_suite();
+  vm_test_post_cache_suite();
   blk_cache_press_suite();
   virtio_gpu_test_suite();
   virtio_input_test_suite();
@@ -60,6 +61,10 @@ void run_all_unit_tests(void) {
   time_test_suite();
   math_test_suite();
   elf_loader_test_suite(); /* docs/shared-libs.md lane B (empty until it lands) */
+  linux_compat_pi_test_suite(); /* PI futex word state machine (M6 park) */
+#ifdef __x86_64__
+  fpu_sig_test_suite(); /* M6/L63: signal-frame FP image: alignment guard */
+#endif
 
   uart_puts("==================================\n");
   uart_puts("Tests run:    "); print_int(tests_run); uart_puts("\n");
