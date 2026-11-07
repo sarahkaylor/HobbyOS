@@ -230,3 +230,29 @@ The 2D regression rows from the same gate run (`obj/m1_virgl/2d.serial.log`):
   `CONTEXT_INIT`, but declining it keeps `CTX_CREATE` on the legacy layout
   and capset 1 for M1. Revisit only if the caps blob shows a feature the
   game needs.
+
+## 8. M2 amendments (the first real consumer, lane `rw-l70-virglm2`)
+
+M2's Mesa client exercised three paths M1's kernel-only probe did not. All
+three are now fixed; they are recorded here because they change what this
+document promises. Full evidence: `docs/rimworld-virgl-m2.md` §2.
+
+1. **`GPU_IOC_RES_ATTACH` now also sends `CTX_ATTACH_RESOURCE` (0x0202)**, as
+   §2 always claimed. M1's ioctl path sent only `RESOURCE_ATTACH_BACKING`; the
+   kernel probe called `virtio_gpu_3d_ctx_attach()` itself, so the gap was
+   invisible until Mesa. Without it the host accepts the submit and drops the
+   whole batch (`vrend: Illegal resource <id>`), which reaches the guest as a
+   black window with no error.
+2. **`target == 0` is legal** — `PIPE_BUFFER` == `VIRGL_TEXTURE_TARGET_BUFFER`,
+   the target of every vertex/index/constant buffer. Valid targets are 0..4
+   (buffer, 1D, 2D, 3D, cube).
+3. **For a buffer, `width` is a byte count**, not a texel count: gallium sets
+   `width0` = size in bytes (a 1 MiB VBO is `width0 = 1048576`). The 16384
+   dimension limit therefore applies only to textures; a buffer's ceiling is
+   the 64 MiB backing cap, and its `bytes` estimate is `width`.
+
+Two limits are now the likeliest non-performance wall for the game (M3/M4):
+**32 resources per client** and **64 MiB of attached backing system-wide**.
+The M2 probe uses 3 resources / 15.6 MB; a UI with texture atlases and several
+render targets will not fit.
+

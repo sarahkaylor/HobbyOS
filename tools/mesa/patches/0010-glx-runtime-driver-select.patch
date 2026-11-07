@@ -1,0 +1,98 @@
+Mesa M2: select softpipe or virgl at runtime in xlib_create_screen()
+
+One DSO ships both drivers (docs/rimworld-virgl-plan.md §4.3).  The order is:
+
+  1. HOBBYOS_GL=virgl|softpipe   -- developer override, environment;
+  2. /GLMODE, first line         -- the in-guest switch, because a desktop
+                                    menu launch cannot pass an environment;
+  3. default: softpipe.
+
+virgl also requires virgl_hobbyos_probe() (a /dev/gpu open + capset query) to
+succeed.  Every failure path -- no /dev/gpu, no VIRGL feature, no capset, the
+context refused, virgl_create_screen returning NULL -- falls through to the
+unchanged softpipe construction, so a regression in the accelerated path can
+never take the desktop or an existing gate down.
+
+--- a/src/gallium/targets/libgl-xlib/xlib.c
++++ b/src/gallium/targets/libgl-xlib/xlib.c
+@@ -30,6 +30,10 @@
+  * Authors:
+  *   Keith Whitwell
+  */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
+ #include "util/compiler.h"
+ #include "util/u_debug.h"
+ #include "sw/xlib/xlib_sw_winsys.h"
+@@ -37,6 +41,42 @@
+ #include "target-helpers/inline_sw_helper.h"
+ #include "target-helpers/inline_debug_helper.h"
+ 
++/* HobbyOS M2: the same DSO ships the software rasteriser and virgl. */
++#include "virgl/virgl_public.h"
++#include "virgl/hobbyos/virgl_hobbyos_public.h"
++
++/* The runtime choice.  softpipe is the default: it is the correctness
++ * reference and the CI renderer, and every desktop gate boots through it.
++ * HOBBYOS_GL is the developer switch (a launcher, a shell); /GLMODE is the
++ * in-guest switch, because a program started from the desktop menu has no
++ * environment to pass. */
++static bool
++hobbyos_gl_wants_virgl(void)
++{
++   const char *want = getenv("HOBBYOS_GL");
++   char mode[32];
++   FILE *f;
++
++   if (want) {
++      if (strcmp(want, "virgl") == 0)
++         return virgl_hobbyos_probe() != 0;
++      if (strcmp(want, "softpipe") == 0 || strcmp(want, "sw") == 0)
++         return false;
++   }
++
++   f = fopen("/GLMODE", "r");
++   if (!f)
++      return false;
++   if (!fgets(mode, sizeof(mode), f)) {
++      fclose(f);
++      return false;
++   }
++   fclose(f);
++   if (strncmp(mode, "virgl", 5) != 0)
++      return false;
++   return virgl_hobbyos_probe() != 0;
++}
++
+ 
+ 
+ /* Helper function to build a subset of a driver stack consisting of
+@@ -52,6 +92,26 @@
+    struct sw_winsys *winsys;
+    struct pipe_screen *screen = NULL;
+ 
++   /* M2: try the accelerated path first when asked.  virgl_create_screen()
++    * owns the winsys on success; on any failure the winsys is destroyed and
++    * the software path below runs exactly as it always has. */
++   if (hobbyos_gl_wants_virgl()) {
++      struct virgl_winsys *vws = virgl_hobbyos_winsys_create( display );
++
++      if ( vws ) {
++         screen = virgl_create_screen( vws, NULL );
++         if ( screen )
++            return debug_screen_wrap( screen );
++
++         debug_printf( "HOBBYOS_GL=virgl: virgl_create_screen failed; "
++                       "falling back to softpipe\n" );
++         virgl_hobbyos_winsys_discard( vws );
++      } else {
++         debug_printf( "HOBBYOS_GL=virgl: no /dev/gpu virgl winsys; "
++                       "falling back to softpipe\n" );
++      }
++   }
++
+    /* Create the underlying winsys, which performs presents to Xlib
+     * drawables:
+     */

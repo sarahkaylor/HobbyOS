@@ -1,0 +1,63 @@
+HobbyOS M2: virgl over /dev/gpu
+
+Two meson hunks make the winsys the only virgl transport in this tree:
+
+  src/gallium/meson.build         -- build winsys/virgl/hobbyos instead of
+                                     winsys/virgl/{drm,vtest}
+  drivers/virgl/meson.build       -- virgl_deps links libvirglhobbyos
+
+Why not keep drm/vtest: both would be dead weight in a DSO that must keep
+0 DT_NEEDED (libdrm is a host library that does not exist in the guest, and
+the vtest socket has no peer).  They are also the only reason
+-Dgallium-drivers=softpipe,virgl would refuse to configure on a host without
+libdrm.
+
+The winsys sources themselves are copied into
+src/gallium/winsys/virgl/hobbyos/ by tools/mesa/build-hobbyos.sh from
+tools/mesa/virgl-hobbyos/ (they live in the HobbyOS tree, not in the pin).
+
+--- a/src/gallium/meson.build
++++ b/src/gallium/meson.build
+@@ -171,8 +171,10 @@
+ if with_gallium_virgl
+   subdir('winsys/virgl/common')
+   if not with_platform_windows
+-    subdir('winsys/virgl/drm')
+-    subdir('winsys/virgl/vtest')
++    # HobbyOS (M2): the guest has no DRM device and no vtest peer.  The only
++    # transport is the /dev/gpu ABI; libvirgldrm/libvirglvtest would drag
++    # libdrm and a socket into a DSO that must keep 0 DT_NEEDED.
++    subdir('winsys/virgl/hobbyos')
+   endif
+   subdir('drivers/virgl')
+ else
+--- a/src/gallium/drivers/virgl/meson.build
++++ b/src/gallium/drivers/virgl/meson.build
+@@ -26,8 +26,7 @@
+ 
+ virgl_deps = [libvirgl]
+ if not with_platform_windows
+-  virgl_deps += libvirgldrm
+-  virgl_deps += libvirglvtest
++  virgl_deps += libvirglhobbyos
+ endif
+ 
+ driver_virgl = declare_dependency(
+--- a/src/gallium/auxiliary/target-helpers/inline_sw_helper.h
++++ b/src/gallium/auxiliary/target-helpers/inline_sw_helper.h
+@@ -40,11 +40,10 @@
+ #endif
+ 
+ #if defined(GALLIUM_VIRGL)
+-   if (screen == NULL && strcmp(driver, "virpipe") == 0) {
+-      struct virgl_winsys *vws;
+-      vws = virgl_vtest_winsys_wrap(winsys);
+-      screen = virgl_create_screen(vws, NULL);
+-   }
++   /* HobbyOS (M2): "virpipe" was the vtest/socket path, which does not exist
++    * here.  The accelerated screen is built by xlib_create_screen() over
++    * /dev/gpu (tools/mesa/patches/0010), not by name from this helper -- so
++    * this branch, and the libvirglvtest symbol it needs, are gone. */
+ #endif
+ 
+ #if defined(GALLIUM_SOFTPIPE)
