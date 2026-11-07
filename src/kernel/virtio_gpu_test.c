@@ -228,13 +228,29 @@ static void test_gpu_abi_res_ok(void) {
   r.width = 1920; r.height = 1080;
   EXPECT_EQ(gpu_abi_res_ok(&r), 1);
 
+  /* M2: target 0 is PIPE_BUFFER (= VIRGL_TEXTURE_TARGET_BUFFER), which is what
+   * a real GL client creates for every vertex/constant/index buffer.  The M1
+   * gate only ever made a 2D texture, so this case was missed here and cost a
+   * RES_CREATE -EINVAL in the first M2 boot. */
+  r.target = 0; r.format = 81; r.bind = 0x10; /* R8_UNORM, VERTEX_BUFFER */
+  r.width = 32; r.height = 1;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 1);
+  /* width0 of a buffer is its byte size, not a texel count: a 1 MiB vertex
+   * buffer is legal and must not trip the 16384 texel dimension limit. */
+  r.width = 1024 * 1024;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 1);
+  r.width = 65 * 1024 * 1024;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 0);
+  r = (struct gpu_res_create){ .ctx_id = 1, .target = 2, .format = 67,
+                               .bind = 0xA, .width = 1920, .height = 1080,
+                               .depth = 1, .array_size = 1 };
+
   struct gpu_res_create bad = r;
   bad.ctx_id = 0;       EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.width = 0;  EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.height = 0; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.depth = 0;  EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.array_size = 0; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
-  bad = r; bad.target = 0; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.format = 0; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.bind = 0;   EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
   bad = r; bad.last_level = 32; EXPECT_EQ(gpu_abi_res_ok(&bad), 0);
