@@ -429,6 +429,22 @@ stage "$OUT/glmode" ::/GLMODE
 printf '%s\n' "${RW_GLDMG:-1}" >"$OUT/gldmg"
 stage "$OUT/gldmg" ::/GLDMG
 echo "  staged: /GLMODE -> ${RW_GLMODE:-softpipe}, /GLDMG -> ${RW_GLDMG:-1}"
+# L80: the per-present budget.  /XPROF makes the compat X libX11 print one
+# [XSWP] row per present (frame period, time inside glXSwapBuffers, and the
+# gap between swaps); /GLPROF makes the virgl winsys print one [VGLP] row per
+# present (submits/readbacks/uploads and their bytes, and the timed stages).
+# One row per present is a measurement switch like /GLDMG, so it is staged the
+# same way and off by default.
+if [ "${RW_PRESENT_PROF:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/xprof"
+  stage "$OUT/xprof" ::/XPROF
+  printf 'on\n' >"$OUT/glprof"
+  stage "$OUT/glprof" ::/GLPROF
+  echo "  staged: /XPROF + /GLPROF -> one [XSWP] and [VGLP] row per present"
+else
+  mdel -i "$IMG" ::/XPROF >/dev/null 2>&1 || true
+  mdel -i "$IMG" ::/GLPROF >/dev/null 2>&1 || true
+fi
 # L75: the block-stress probe ("2 x 1800 s with the probe running alongside").
 # RW_CHURN_SOAK=1 compiles the KERNEL-side stressor (RW_BLK_STRESS=1): random
 # 512..4096-byte reads over a fixed file region plus small writes to a scratch

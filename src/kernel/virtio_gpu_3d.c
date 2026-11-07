@@ -57,7 +57,11 @@ extern int virtio_gpu_x64_virgl_negotiated;
  * texture atlases, FBOs and VBOs does not, and the resource table -- not
  * performance -- was the likeliest non-performance wall. */
 #define GPU3D_MAX_CTX     16
-#define GPU3D_MAX_RES     1024
+/* L80: the transport's table is what a full client table hits next.  1024 was
+ * enough for M3's 618-resource scene and not for the main menu; both sides
+ * move together (GPU_ABI_MAX_RES_PER_CLIENT in gpu_abi.c).  4096 x ~72 B is
+ * ~290 KiB of kernel BSS. */
+#define GPU3D_MAX_RES     4096
 #define GPU3D_PAGE_POOL   (128 * 1024)   /* pages == 512 MiB of attached backing */
 #define GPU3D_MAX_ATTACH  16384          /* per resource == 64 MiB */
 #define GPU3D_CAPS_MAX    16384
