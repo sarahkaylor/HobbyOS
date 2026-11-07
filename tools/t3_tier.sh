@@ -110,6 +110,12 @@ kernel_fatal_count() {
 # missing/unreadable log is NOT a clean log.
 glued_count() {
   local out n
+  # GB-218: the instrument belongs to the tree the tier runs from. A copy of
+  # this script outside that tree (the GB-105 coupling test copies it to /tmp)
+  # has no tools/gate/t4_glued.sh; that is not an in-tree tier run, so the
+  # criterion is not applicable and counts 0. An in-tree run with a missing or
+  # unreadable LOG still yields -1 below (a missing serial is not a clean one).
+  [ -f "$ROOT/tools/gate/t4_glued.sh" ] || { echo 0; return 0; }
   out=$(bash "$ROOT/tools/gate/t4_glued.sh" "$1" 2>/dev/null) || true
   n=$(printf '%s\n' "$out" | sed -n 's/^t4_glued: \([0-9][0-9]*\) glued.*/\1/p' | tail -1)
   if [ -n "$n" ]; then echo "$n"; else echo -1; fi
@@ -128,6 +134,17 @@ if [ -n "$POLICE_ONLY" ]; then
     echo "T3_${ARCH} EXIT=4"
     exit 4
   fi
+  # GB-218: a MISSING log must reach the verdict, not die at the first grep or
+  # at `wc -l <"$LOG"` under `set -e`. glued_count() would return -1 for it, so
+  # print the same summary/gate shape here before any file read: a missing
+  # serial is not a clean serial.
+  if [ ! -f "$LOG" ]; then
+    echo "T3_${ARCH} (police ${LOG}): 0 lines, 0 FAIL lines, 0 fault records across 0 processes, halted=0, kfault=0, glued=-1, boots=0"
+    echo "T3_${ARCH}: FAIL — t4_glued.sh could not measure this log (missing/unreadable): a missing serial is not a clean serial"
+    echo "T3_${ARCH}: FAIL — only 0 console lines (floor ${T3_MIN_LINES:-1000}): too little work for a complete wave"
+    echo "T3_${ARCH} EXIT=1"
+    exit 1
+  fi
   # A log whose guest never booted must not be judged as a hang (see the run
   # path's guard): "a hang is a defect" only holds while an environment failure
   # cannot wear its clothes.
@@ -144,7 +161,10 @@ if [ -n "$POLICE_ONLY" ]; then
   MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
   MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG" 2>/dev/null \
     | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
-  LINES=$(wc -l <"$LOG")
+  LINES=$(wc -l <"$LOG" 2>/dev/null || echo 0)
+  # GB-218: a missing log must reach the verdict, not abort under `set -e`
+  # here. glued_count() returns -1 for it and the gate below prints the
+  # "could not measure" FAIL; LINES=0 also fails the completeness floor.
   # GB-068 follow-on: a guest that REBOOTS is not a guest that ran a long wave.
   # After the input/stack fixes the intel guest began triple-faulting in
   # vm_arch_teardown ~27 s into each boot and QEMU restarted it; the serial log
@@ -174,7 +194,7 @@ if [ -n "$POLICE_ONLY" ]; then
   [ "$LINES" -ge "${T3_MIN_LINES:-1000}" ] || { echo "T3_${ARCH}: FAIL — only ${LINES} console lines (floor ${T3_MIN_LINES:-1000}): too little work for a complete wave"; rc=1; }
   if [ "$FAIL_LINES" != "0" ]; then
     echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 5:"
-    grep -an "FAIL" "$LOG" | head -5
+    grep -an "FAIL" "$LOG" 2>/dev/null | head -5 || true
     rc=1
   fi
   # GB-068 regression guard (mirrors the run path): fail if user memory faults
