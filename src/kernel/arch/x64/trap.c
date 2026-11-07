@@ -4021,6 +4021,36 @@ static void general_interrupt_inner(struct trap_frame *tf) {
          The raw sink takes no lock (it cannot deadlock the console it is
          reporting on), so this costs nothing on the happy path and names the
          fault for whoever reads the log next. */
+      /* GB-146 probe: the last resume targets on this CPU, so the fault's
+         RBP/RSP can be compared with the pid/SP the CPU actually resumed.
+         Raw sink is correct here: this path halts. */
+      {
+        extern int gb146_resume_get(int cpu, int back, int *pid, uint64_t *sp,
+                                    uint64_t *elr, uint64_t *cs);
+        extern void gb146_resume_leave(uint32_t cpu);
+        int rcpu = (int)get_cpuid();
+        /* This CPU is halting: it no longer holds the context it last
+           resumed.  Clear the probe record so another CPU picking that pid
+           later is not reported as a share. */
+        gb146_resume_leave((uint32_t)rcpu);
+        panic_puts("[RESUME-RING] cpu=");
+        print_int_raw(rcpu);
+        for (int b = 0; b < 4; b++) {
+          int rpid = -1;
+          uint64_t rsp = 0, relr = 0, rcs = 0;
+          if (!gb146_resume_get(rcpu, b, &rpid, &rsp, &relr, &rcs))
+            break;
+          panic_puts(" | pid=");
+          print_int_raw(rpid);
+          panic_puts(" sp=");
+          panic_print_hex(rsp);
+          panic_puts(" elr=");
+          panic_print_hex(relr);
+          panic_puts(" cs=");
+          panic_print_hex(rcs);
+        }
+        panic_puts("\n");
+      }
       panic_puts("[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=");
       print_int_raw((int)tf->vector);
       panic_puts(" rip=");

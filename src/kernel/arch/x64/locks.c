@@ -257,6 +257,21 @@ void spinlock_acquire(spinlock_t *lock) {
         }
       }
     }
+    /* GB-146 probe: the CPU-id spill is sometimes overwritten during the wait
+       (measured: a text pointer / uart_lock pointer turns the cleanup stores
+       into an OOB write that faults). Record the bad value and substitute the
+       real CPU id so the wave survives and we count the event instead of
+       dying on the first one. Probe branch only, not for merge. */
+    {
+      uint32_t cpu_now = get_cpuid();
+      if (cpu >= MAX_CPUS) {
+        scream_hex("\n[BAD-CPU] val=", (uint64_t)cpu);
+        scream_dec(" cpu_now=", cpu_now);
+        scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
+        panic_putc('\n');
+        cpu = cpu_now;
+      }
+    }
     lock_wait_addr[cpu] = 0;
     lock_wait_caller[cpu] = 0;
     lock_wait_caller2[cpu] = 0;

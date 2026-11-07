@@ -197,6 +197,176 @@ extern void arch_fpu_reset(struct process *p);
 
 // Process table
 static struct process proc_table[MAX_PROCESSES];
+
+/* GB-146 probe (scratch, not for merge): per-CPU ring of the last resume
+   targets.  A fault's RBP/RSP can then be compared with the pid/SP that this
+   CPU actually resumed, which is the cross-context check the card's DoD asks
+   for ("a CPU executing on another context's stack").  Best-effort: fields are
+   written without a lock; the dump is a forensic record, not a verdict. */
+struct gb146_resume_rec {
+  int pid;
+  uint64_t sp;
+  uint64_t elr;
+  uint64_t cs;
+};
+static struct gb146_resume_rec gb146_ring[MAX_CPUS][8];
+static uint32_t gb146_seq[MAX_CPUS];
+static volatile uint64_t gb146_cur_sp[MAX_CPUS];
+static volatile uint32_t gb146_cur_pid[MAX_CPUS];
+
+void gb146_resume_note(int pid, uint64_t sp, uint64_t elr, uint64_t cs) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  uint32_t s = gb146_seq[c];
+  struct gb146_resume_rec *r = &gb146_ring[c][s & 7];
+  r->pid = pid;
+  r->sp = sp;
+  r->elr = elr;
+  r->cs = cs;
+  gb146_seq[c] = s + 1;
+
+  /* GB-146 probe: is another CPU's live context sitting in the same 64 KiB
+     stack region we are about to resume onto?  If two CPUs run on one stack,
+     their pushes interleave and a return address becomes a small integer
+     (the 0x7/0x93/0x97 jumps).  Record the pair; bounded. */
+  {
+    for (uint32_t x = 0; x < MAX_CPUS; x++) {
+      if (x == c || gb146_cur_sp[x] == 0)
+        continue;
+      /* User stacks are per-address-space: the same VA on two CPUs is not a
+         share.  Only kernel stacks (below 4 GiB here) are shared memory. */
+      if (sp >= 0x100000000ULL || gb146_cur_sp[x] >= 0x100000000ULL)
+        continue;
+      if (((gb146_cur_sp[x] ^ sp) & ~0xFFFFULL) == 0) {
+        static int share_n;
+        if (share_n < 8) {
+          extern void uart_putc_dbg(char c);
+          static const char hx[] = "0123456789abcdef";
+          char b[160];
+          int n = 0;
+          const char *p = "[STACK-SHARE] cpu=";
+          while (*p) b[n++] = *p++;
+          b[n++] = (char)('0' + c);
+          p = " pid=";
+          while (*p) b[n++] = *p++;
+          { int v = pid; char t[12]; int m = 0; if (v == 0) t[m++] = '0';
+            while (v > 0) { t[m++] = (char)('0' + v % 10); v /= 10; }
+            while (m) b[n++] = t[--m]; }
+          p = " other_cpu=";
+          while (*p) b[n++] = *p++;
+          b[n++] = (char)('0' + x);
+          p = " other_pid=";
+          while (*p) b[n++] = *p++;
+          { int v = (int)gb146_cur_pid[x]; char t[12]; int m = 0; if (v == 0) t[m++] = '0';
+            while (v > 0) { t[m++] = (char)('0' + v % 10); v /= 10; }
+            while (m) b[n++] = t[--m]; }
+          p = " sp=0x";
+          while (*p) b[n++] = *p++;
+          for (int i = 60; i >= 0; i -= 4) b[n++] = hx[(sp >> i) & 0xF];
+          p = " other_sp=0x";
+          while (*p) b[n++] = *p++;
+          for (int i = 60; i >= 0; i -= 4) b[n++] = hx[(gb146_cur_sp[x] >> i) & 0xF];
+          b[n++] = '\n';
+          b[n] = 0;
+          for (p = b; *p; p++) uart_putc_dbg(*p);
+          share_n++;
+        }
+      }
+    }
+    gb146_cur_sp[c] = sp;
+    gb146_cur_pid[c] = (uint32_t)pid;
+  }
+
+  /* GB-146 probe: a resume whose saved ELR is a small integer (0x7/0x93/0x97)
+     is about to iretq into nowhere; record it at the source so the writer is
+     distinguishable from the copy. */
+  if (elr < 0x1000) {
+    static int bel_n;
+    if (bel_n < 8) {
+      extern void uart_putc_dbg(char c);
+      static const char hx[] = "0123456789abcdef";
+      char b[128];
+      int n = 0;
+      const char *p = "[BAD-ELR] pid=";
+      while (*p) b[n++] = *p++;
+      { int v = pid; char t[12]; int m = 0; if (v == 0) t[m++] = '0';
+        while (v > 0) { t[m++] = (char)('0' + v % 10); v /= 10; }
+        while (m) b[n++] = t[--m]; }
+      p = " elr=0x";
+      while (*p) b[n++] = *p++;
+      for (int i = 60; i >= 0; i -= 4) b[n++] = hx[(elr >> i) & 0xF];
+      p = " cs=0x";
+      while (*p) b[n++] = *p++;
+      for (int i = 60; i >= 0; i -= 4) b[n++] = hx[(cs >> i) & 0xF];
+      b[n++] = '\n';
+      b[n] = 0;
+      for (p = b; *p; p++) uart_putc_dbg(*p);
+      bel_n++;
+    }
+  }
+
+  /* GB-146: a kernel-mode resume copies 320 bytes to [sp-320, sp) (see
+     enter_user_space's `mov rax, gs:[24]` branch).  If that window overlaps
+     the scheduler's live frame on this stack, the copy overwrites kernel
+     locals.  Record it once it happens; this is the candidate "slot that is
+     written with a foreign frame". */
+  if ((cs & 3) != 3) {
+    uint64_t cur_rsp;
+    __asm__ volatile("mov %%rsp, %0" : "=r"(cur_rsp));
+    uint64_t dest = sp - 320;
+    if (dest < cur_rsp + 64 && dest + 320 > cur_rsp - 2048) {
+      static int ovl_n;
+      if (ovl_n < 8) {
+        ovl_n++;
+        extern void uart_putc_dbg(char c);
+        static const char hx[] = "0123456789abcdef";
+        char b[160];
+        int n = 0;
+        const char *p = "[RESUME-OVERLAP] cpu=";
+        while (*p) b[n++] = *p++;
+        b[n++] = (char)('0' + c);
+        p = " pid=";
+        while (*p) b[n++] = *p++;
+        { int v = pid; char t[12]; int m = 0; if (v == 0) t[m++] = '0';
+          while (v > 0) { t[m++] = (char)('0' + v % 10); v /= 10; }
+          while (m) b[n++] = t[--m]; }
+        p = " sp=0x";
+        while (*p) b[n++] = *p++;
+        for (int i = 60; i >= 0; i -= 4) b[n++] = hx[(sp >> i) & 0xF];
+        p = " rsp=0x";
+        while (*p) b[n++] = *p++;
+        for (int i = 60; i >= 0; i -= 4) b[n++] = hx[(cur_rsp >> i) & 0xF];
+        b[n++] = '\n';
+        b[n] = 0;
+        for (p = b; *p; p++) uart_putc_dbg(*p);
+      }
+    }
+  }
+}
+
+int gb146_resume_get(int cpu, int back, int *pid, uint64_t *sp, uint64_t *elr,
+                     uint64_t *cs) {
+  if (cpu < 0 || cpu >= MAX_CPUS || back < 0 || back > 7)
+    return 0;
+  uint32_t s = gb146_seq[cpu];
+  if (s <= (uint32_t)back)
+    return 0;
+  struct gb146_resume_rec *r = &gb146_ring[cpu][(s - 1 - (uint32_t)back) & 7];
+  *pid = r->pid;
+  *sp = r->sp;
+  *elr = r->elr;
+  *cs = r->cs;
+  return 1;
+}
+
+/* This CPU has stopped running the context it last resumed: its stack is no
+   longer live here, so a later resume of the same stack elsewhere is not a
+   share.  Called from save_context for the current process only. */
+void gb146_resume_leave(uint32_t cpu) {
+  if (cpu < MAX_CPUS)
+    gb146_cur_sp[cpu] = 0;
+}
 /* GB-217: counted "process_create_v2: no address space" failures. */
 static int gb217_noas;
 
@@ -1346,6 +1516,8 @@ int process_create_kernel_nowait(void (*entry)(void*), void *arg) {
 }
 
 void save_context(struct process *p, struct trap_frame *tf) {
+  if (p == current_process())
+    gb146_resume_leave(get_cpuid());
   for (int i = 0; i < 30; i++) {
     p->context[i] = tf->regs[i];
   }
@@ -1873,6 +2045,12 @@ void schedule(struct trap_frame *tf, int is_yield) {
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       extern void resume_mark(int pid, uint64_t target_sp);
       resume_mark(proc_table[next].pid, target_sp);
+      {
+        extern void gb146_resume_note(int pid, uint64_t sp, uint64_t elr,
+                                      uint64_t cs);
+        gb146_resume_note(proc_table[next].pid, target_sp, local_tf.elr,
+                          local_tf.cs);
+      }
       /* GB-057: the parked cores were recorded with rflags=0x10046 -- IF (0x200)
          CLEAR -- in the frame that iretq restores.  A user process resumed with
          IF=0 can never be preempted by the timer: age_ms climbs for ever, the
@@ -3872,6 +4050,12 @@ void start_scheduler(void) {
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
         extern void resume_mark(int pid, uint64_t target_sp);
         resume_mark(proc_table[i].pid, target_sp);
+        {
+          extern void gb146_resume_note(int pid, uint64_t sp, uint64_t elr,
+                                        uint64_t cs);
+          gb146_resume_note(proc_table[i].pid, target_sp, local_tf.elr,
+                            local_tf.cs);
+        }
         enter_user_space(&local_tf, target_sp);
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
@@ -3912,6 +4096,11 @@ void start_scheduler(void) {
       }
     }
     set_current_process_pid(get_cpuid(), -1);
+    /* GB-146 probe: dropping the claim means this CPU no longer holds that
+       context; clear the probe record too, or a later legitimate pick of the
+       same pid on another CPU is reported as a share (the wave-11 false
+       positive: pid 1 released to READY here, re-picked by CPU2/CPU0). */
+    gb146_resume_leave(get_cpuid());
 
     /* P2.2 (S2): this core no longer runs any process; do not keep a
        (possibly torn-down) AS as its translation. */
