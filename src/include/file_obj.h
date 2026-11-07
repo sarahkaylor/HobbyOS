@@ -50,6 +50,13 @@ int file_nfs_ident(struct process *p, int fd, int *mount_idx,
  * no separate error path. */
 int file_is_devfb(struct process *p, int fd);
 
+/* --- /dev/gpu (M1, implemented in fs.c) --------------------------------
+ * 1 when `fd` is the node opened from /dev/gpu.  The compat ioctl route
+ * dispatches GPU_IOC_* through gpu_abi_ioctl() when this is true, and the
+ * close path calls gpu_abi_release_fd() so a client's context/resources die
+ * with its fd.  0 for every other fd (including an absent one). */
+int file_is_devgpu(struct process *p, int fd);
+
 /* --- the cache (file_obj.c) ------------------------------------------ */
 
 /* Get-or-create the page-cache object for this file and return it with ONE
