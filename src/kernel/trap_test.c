@@ -301,6 +301,147 @@ static void test_u_strcpy_atomic(void) {
   set_current_process_pid(get_cpuid(), -1);
 }
 
+/* L73: the fault-report path must never dereference a user pointer.
+ *
+ * The wall this lane chased: a user #PF whose faulting address WAS the frame
+ * pointer (cr2 == rbp == 0x11CB280000, one past the end of a 16 MiB anon
+ * region) made the report's `*(uint64_t *)rbp` a second, KERNEL-mode #PF on
+ * the same hole.  The process was killed with "[KERNEL] Kernel-mode #PF in
+ * user address space" and the row that would have said what the game did was
+ * never printed -- it is emitted after those reads.
+ *
+ * kpf_user_peek2 is the accessor the report uses now.  A fault inside this
+ * test would take the whole unit suite down, which is the strongest assertion
+ * available here: the negative cases must answer -1, not #PF.
+ */
+static void test_l73_user_peek_hole(void) {
+  tests_run++;
+  uart_puts("  Running test_l73_user_peek_hole...\n");
+
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0), 1);
+  if (pid < 0)
+    return;
+  struct process *p = process_get_pcb(pid);
+  p->is_kernel_process = 1;
+  set_current_process_pid(get_cpuid(), pid);
+
+  struct addr_space *as = vm_as_create(61);
+  EXPECT_EQ((as != 0), 1);
+  if (!as) {
+    set_current_process_pid(get_cpuid(), -1);
+    return;
+  }
+  p->as = as;
+
+  /* One RW anon region of two pages at the mmap arena base. */
+  EXPECT_EQ(vm_region_insert(as, USER_MMAP_BASE_V2, 0x2000,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_ANON,
+                             VM_MAP_PRIVATE, 0, 0),
+            0);
+
+  uint64_t base = USER_MMAP_BASE_V2, end = USER_MMAP_BASE_V2 + 0x2000;
+  uint64_t q[2];
+
+  /* (1) A hole: the first page past the region.  Refused, both words zero. */
+  EXPECT_EQ(kpf_user_peek2(p, end, q), -1);
+  EXPECT_EQ(q[0], 0);
+  EXPECT_EQ(q[1], 0);
+
+  /* (2) The straddle -- the exact wall shape: the FIRST word is the last 8
+     bytes of the region, the SECOND lands on the hole at `end`.  A
+     page-at-a-time accessor must refuse the whole read. */
+  EXPECT_EQ(kpf_user_peek2(p, end - 8, q), -1);
+
+  /* (3) NULL and a VA below the user window. */
+  EXPECT_EQ(kpf_user_peek2(p, 0, q), -1);
+  EXPECT_EQ(kpf_user_peek2(p, 0x1000, q), -1);
+
+  /* (4) A readable pointer: delivered word for word. */
+  uint64_t w[2] = {0x0123456789ABCDEFULL, 0xFEDCBA9876543210ULL};
+  EXPECT_EQ(vm_kwrite(p, base + 0x100, w, (int)sizeof w), 0);
+  EXPECT_EQ(kpf_user_peek2(p, base + 0x100, q), 0);
+  EXPECT_EQ(q[0], w[0]);
+  EXPECT_EQ(q[1], w[1]);
+
+  p->as = 0;
+  vm_as_teardown(as);
+  set_current_process_pid(get_cpuid(), -1);
+}
+
+/* L73: every path-taking entry point must answer -EFAULT for a pointer that
+ * is not wholly readable, including the nastier shape -- a string that ends
+ * flush with its region and has no NUL inside it (the old "validate 1 byte,
+ * then scan with raw loads" walked straight into the hole). */
+extern void l73_test_entry(struct trap_frame *tf, int which);
+
+static void test_l73_entry_points_reject_holes(void) {
+  tests_run++;
+  uart_puts("  Running test_l73_entry_points_reject_holes...\n");
+
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0), 1);
+  if (pid < 0)
+    return;
+  struct process *p = process_get_pcb(pid);
+  p->is_kernel_process = 1;
+  set_current_process_pid(get_cpuid(), pid);
+
+  struct addr_space *as = vm_as_create(61);
+  EXPECT_EQ((as != 0), 1);
+  if (!as) {
+    set_current_process_pid(get_cpuid(), -1);
+    return;
+  }
+  p->as = as;
+  EXPECT_EQ(vm_region_insert(as, USER_MMAP_BASE_V2, 0x2000,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_ANON,
+                             VM_MAP_PRIVATE, 0, 0),
+            0);
+  uint64_t end = USER_MMAP_BASE_V2 + 0x2000;
+
+  struct trap_frame tf;
+  for (unsigned i = 0; i < sizeof(tf) / sizeof(uint64_t); i++)
+    ((uint64_t *)&tf)[i] = 0;
+  tf.cs = 0x33; /* user mode frame */
+
+  /* (1) the path pointer is a hole */
+  for (int w = 0; w <= 5; w++) {
+    tf.regs[0] = 0;
+    tf.regs[4] = 0;   /* arg2: flags / index / newpath / args */
+    tf.regs[3] = 0;   /* arg3 */
+    tf.regs[5] = end; /* arg1: the path itself */
+    l73_test_entry(&tf, w);
+    EXPECT_EQ((int64_t)tf.regs[0], -EFAULT);
+  }
+  /* spawn(6) answers its own legacy -1 for a bad filename (its callers test
+     "negative", not a specific errno); the point here is that it REJECTS
+     instead of walking the hole. */
+  tf.regs[0] = 0;
+  tf.regs[4] = tf.regs[3] = tf.regs[9] = 0;
+  tf.regs[5] = end;
+  l73_test_entry(&tf, 6);
+  EXPECT_EQ(((int64_t)tf.regs[0] < 0), 1);
+
+  /* (2) the straddle: "ABC" in the last three bytes of the region, no NUL
+     anywhere inside it.  A byte-wise accessor stops at the hole and answers
+     -EFAULT; a raw strcpy would have read the hole in kernel mode. */
+  const char abc[3] = {'A', 'B', 'C'};
+  EXPECT_EQ(vm_kwrite(p, end - 3, abc, (int)sizeof abc), 0);
+  for (int w = 0; w <= 4; w++) {
+    tf.regs[0] = 0;
+    tf.regs[4] = 0;
+    tf.regs[3] = 0;
+    tf.regs[5] = end - 3;
+    l73_test_entry(&tf, w);
+    EXPECT_EQ((int64_t)tf.regs[0], -EFAULT);
+  }
+
+  p->as = 0;
+  vm_as_teardown(as);
+  set_current_process_pid(get_cpuid(), -1);
+}
+
 /* SEC-4 (security-plan.md #4): the stack canary must be seeded non-zero at
  * boot (a zero guard is invisible to memset-style smashes).  Detection
  * itself is compiler-generated; the build check that instrumented functions
@@ -357,6 +498,8 @@ void trap_test_suite(void) {
   test_trap_unknown_syscall();
   test_trap_sys_get_cpuid();
   test_u_strcpy_atomic(); /* SEC-3 */
+  test_l73_user_peek_hole(); /* L73: report path never derefs a user pointer */
+  test_l73_entry_points_reject_holes(); /* L73: hole/straddle -> -EFAULT */
   test_ssp_guard_seeded(); /* SEC-4 */
   test_kernel_stack_guard(); /* SEC-10 */
 #ifdef __x86_64__

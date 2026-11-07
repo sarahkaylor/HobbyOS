@@ -2635,16 +2635,24 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
      same authoritative helper the gate's repair uses, so this row means the
      same thing in the unit tier (where the delivery seam applies) as in the
      field. */
-  static uint8_t rawbuf[PROBE_PAGE];
+  /* L73: this buffer is shared by every caller on every CPU, and the copy to
+     `out` happens a whole read later.  Two concurrent probes (a controller
+     reset makes many pages fail at once) clobber each other, and the page that
+     reaches the gate is the OTHER probe's bytes — measured: `[TXT] REPLAY …
+     publishing read 1` followed by `[PUB] … zero=4096 ver=1`, i.e. a zero page
+     published as verified, then #UD in UnityPlayer's text at 0x108228B570.
+     Per-CPU, so two probes cannot share it. */
+  static uint8_t rawbuf[MAX_CPUS][PROBE_PAGE];
+  uint8_t *rb = rawbuf[get_cpuid() % MAX_CPUS];
   int raw_rc = -1;
   if (len == PROBE_PAGE)
     raw_rc = fat16_read_direct_pos_raw(start_cluster, file_size,
-                                       (uint64_t)rawbuf, (int)len, pos) ==
+                                       (uint64_t)rb, (int)len, pos) ==
                      (int)len
                  ? 0
                  : -1;
   uint32_t raw_sum = 0;
-  uint32_t raw_nz = (raw_rc == 0) ? nz_bytes(rawbuf, len, &raw_sum) : 0;
+  uint32_t raw_nz = (raw_rc == 0) ? nz_bytes(rb, len, &raw_sum) : 0;
 
   /* (4) drop the cache for those sectors and read normally again: if the
      bytes change, the frame the cache served was the lie. */
@@ -2744,7 +2752,7 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
     }
     if (ok) {
       for (uint32_t i = 0; i < len; i++)
-        out[i] = rawbuf[i];
+        out[i] = rb[i];
       if (second_zero) {
         static int rz;
         if (rz < 6) {
