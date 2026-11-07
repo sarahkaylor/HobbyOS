@@ -1987,6 +1987,104 @@ int file_path_of(struct process *p, int fd, char *out, int cap) {
   return 0;
 }
 
+/* ---- L76: per-directory getdents64 census ------------------------------
+ *
+ * Task: "count the entries the game enumerates per round and compare with a
+ * direct walk of the same folder".  A repeated folder walk is invisible in a
+ * per-call row once the console is 5 MB of loader output, and `[GDT]` is
+ * capped at 400 rows for the whole boot.  This table keeps one row per
+ * directory for the life of the process and prints a *window* (counters reset
+ * after each print) every time the futex rate row fires -- so the end state,
+ * not just the first 400 directories, is in the log.
+ *
+ *   fresh  = getdents64 calls with cursor 0, i.e. the game read the folder
+ *            from the start this many times (one per open/rewind)
+ *   calls  = every getdents64 call against the folder
+ *   ents   = entries returned in the window
+ *   total  = entries the directory holds (from the READDIRPLUS cache)
+ *   dup    = a name repeated inside one listing (a real enumeration loop)
+ */
+#define L76_DIRS 48
+struct l76_dir {
+  char rel[64];
+  unsigned fresh, calls, ents, dup;
+  int total;
+};
+static struct l76_dir l76_dirs[L76_DIRS];
+
+static struct l76_dir *l76_dir_slot(const char *rel) {
+  struct l76_dir *empty = 0;
+  struct l76_dir *lru = 0;
+  for (int i = 0; i < L76_DIRS; i++) {
+    if (l76_dirs[i].rel[0] && fs_streq(l76_dirs[i].rel, rel))
+      return &l76_dirs[i];
+    if (!l76_dirs[i].rel[0] && !empty)
+      empty = &l76_dirs[i];
+    /* The table fills during the load (one slot per def folder).  Without
+       eviction the *end state* -- the dirs that matter for this lane -- could
+       never get a slot.  Evict the least active entry of this window. */
+    if (!lru || (l76_dirs[i].calls + l76_dirs[i].fresh) <
+                    (lru->calls + lru->fresh))
+      lru = &l76_dirs[i];
+  }
+  if (!empty)
+    empty = lru;
+  if (empty) {
+    int i = 0;
+    while (rel[i] && i < (int)sizeof empty->rel - 1) {
+      empty->rel[i] = rel[i];
+      i++;
+    }
+    empty->rel[i] = 0;
+    empty->fresh = empty->calls = empty->ents = empty->dup = 0;
+    empty->total = 0;
+  }
+  return empty;
+}
+
+static void l76_dir_note(const char *rel, uint32_t from, uint32_t to,
+                         int total, unsigned dup) {
+  struct l76_dir *e = l76_dir_slot(rel);
+  if (!e)
+    return;
+  if (from == 0)
+    e->fresh++;
+  e->calls++;
+  e->ents += to - from;
+  e->total = total;
+  e->dup += dup;
+}
+
+/* Called from the futex rate row (any thread, no fs lock held): print the
+ * window and reset the counters.  A directory with no activity in the window
+ * prints nothing, so the steady state is a handful of rows. */
+void rw_gdc_dump(void) {
+  for (int i = 0; i < L76_DIRS; i++) {
+    struct l76_dir *e = &l76_dirs[i];
+    if (!e->rel[0] || (!e->calls && !e->fresh && !e->dup))
+      continue;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[GDC] rel=");
+    kl_s(&kl, e->rel);
+    kl_s(&kl, " fresh=");
+    kl_i(&kl, (long)e->fresh);
+    kl_s(&kl, " calls=");
+    kl_i(&kl, (long)e->calls);
+    kl_s(&kl, " ents=");
+    kl_i(&kl, (long)e->ents);
+    kl_s(&kl, " total=");
+    kl_i(&kl, (long)e->total);
+    if (e->dup) {
+      kl_s(&kl, " dup=");
+      kl_i(&kl, (long)e->dup);
+    }
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    e->fresh = e->calls = e->ents = e->dup = 0;
+  }
+}
+
 /* GB-020: getdents64 over an open directory fd (FILE_TYPE_FAT16DIR or
  * the virtual FILE_TYPE_PROCFD self-fd directory). */
 int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
@@ -2021,6 +2119,12 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
     uint32_t idx = f->nfs.cursor;
     uint32_t start_idx = idx;
     int first_rc = 7777;
+    /* L76: duplicates are detected inside ONE listing only (a name from the
+       previous directory is not a loop). */
+    unsigned dup_hits = 0;
+    char dup_last[4][NFS_NAME_MAX];
+    int dup_last_n = 0;
+    for (int q = 0; q < 4; q++) dup_last[q][0] = 0;
     /* L58: one row per directory the game starts reading (and per empty
      * listing), so "the subtree was never entered" and "the subtree listed
      * but returned nothing" are different rows. */
@@ -2050,6 +2154,34 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
         break;
       int nlen = 0;
       while (nm[nlen]) nlen++;
+      /* L76: a duplicate name inside one listing is an enumeration loop that
+         no counter above can see (the count is right, the set is wrong). */
+      for (int q = 0; q < dup_last_n; q++)
+        if (fs_streq(dup_last[q], nm)) dup_hits++;
+      if (dup_last_n < 4) {
+        int ci = 0;
+        while (nm[ci] && ci < NFS_NAME_MAX - 1) {
+          dup_last[dup_last_n][ci] = nm[ci];
+          ci++;
+        }
+        dup_last[dup_last_n][ci] = 0;
+        dup_last_n++;
+      } else {
+        for (int q = 0; q < 3; q++) {
+          int ci = 0;
+          while (dup_last[q + 1][ci] && ci < NFS_NAME_MAX - 1) {
+            dup_last[q][ci] = dup_last[q + 1][ci];
+            ci++;
+          }
+          dup_last[q][ci] = 0;
+        }
+        int ci = 0;
+        while (nm[ci] && ci < NFS_NAME_MAX - 1) {
+          dup_last[3][ci] = nm[ci];
+          ci++;
+        }
+        dup_last[3][ci] = 0;
+      }
       int reclen = (19 + nlen + 1 + 7) & ~7;
       if (used + reclen > bufsize) break;
       uint8_t *pb = (uint8_t *)ubuf + used;
@@ -2066,6 +2198,7 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
       idx++;
     }
     f->nfs.cursor = idx;
+    l76_dir_note(rel, start_idx, idx, total, dup_hits);
     {
       static int lgd_rows;
       if (lgd_rows < 4) {
@@ -2453,6 +2586,253 @@ void fs_close_global(int g_fd) {
  * Returns:
  *   Number of bytes read, or -1 on failure.
  */
+/* ---- L76: per-file NFS read census ------------------------------------
+ *
+ * The plateau's shape (L76 §1) is one 4 KiB read per handshake round, and the
+ * only way to say WHICH file is to count reads per path.  A per-read row
+ * would be 36 rows/s for 20 minutes; a windowed table is a handful of rows.
+ */
+#define L76_RDF 24
+struct l76_rdf {
+  char path[56];
+  unsigned reads;
+  unsigned long long bytes;
+  uint32_t last_off, last_len;
+};
+static struct l76_rdf l76_rdf[L76_RDF];
+/* L76 read cache counters: bc_hit, ra_hit, ra_fill, direct (reset per row). */
+static unsigned l76_rc_stat[4];
+
+static void l76_rd_note(const char *path, uint32_t off, int len) {
+  struct l76_rdf *e = 0, *lru = 0;
+  for (int i = 0; i < L76_RDF; i++) {
+    if (l76_rdf[i].path[0] && fs_streq(l76_rdf[i].path, path)) { e = &l76_rdf[i]; break; }
+    if (!l76_rdf[i].path[0] && !e) e = &l76_rdf[i];
+    if (!lru || l76_rdf[i].reads < lru->reads) lru = &l76_rdf[i];
+  }
+  if (!e) {
+    e = lru;
+    if (!e) return;
+    e->path[0] = 0;
+    e->reads = 0;
+    e->bytes = 0;
+  }
+  if (!e->path[0]) {
+    int i = 0;
+    while (path[i] && i < (int)sizeof e->path - 1) { e->path[i] = path[i]; i++; }
+    e->path[i] = 0;
+  }
+  e->reads++;
+  e->bytes += (unsigned)len;
+  e->last_off = off;
+  e->last_len = (uint32_t)len;
+}
+
+void rw_rdf_dump(void) {
+  {
+    struct kline kc;
+    kl_init(&kc);
+    kl_s(&kc, "[RAC] bc_hit=");
+    kl_i(&kc, (long)l76_rc_stat[0]);
+    kl_s(&kc, " ra_hit=");
+    kl_i(&kc, (long)l76_rc_stat[1]);
+    kl_s(&kc, " ra_fill=");
+    kl_i(&kc, (long)l76_rc_stat[2]);
+    kl_s(&kc, " direct=");
+    kl_i(&kc, (long)l76_rc_stat[3]);
+    kl_c(&kc, '\n');
+    kl_emit(&kc);
+    for (int i = 0; i < 4; i++) l76_rc_stat[i] = 0;
+  }
+  for (int i = 0; i < L76_RDF; i++) {
+    struct l76_rdf *e = &l76_rdf[i];
+    if (!e->path[0] || !e->reads)
+      continue;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[RDF] path=");
+    kl_s(&kl, e->path);
+    kl_s(&kl, " reads=");
+    kl_i(&kl, (long)e->reads);
+    kl_s(&kl, " bytes=");
+    kl_i(&kl, (long)e->bytes);
+    kl_s(&kl, " off=");
+    kl_i(&kl, (long)e->last_off);
+    kl_s(&kl, " len=");
+    kl_i(&kl, (long)e->last_len);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    e->reads = 0;
+    e->bytes = 0;
+  }
+}
+
+/* ---- L76: NFS read-ahead window + page cache --------------------------
+ *
+ * Measured (L76 §1, S1): the plateau moves one 4 KiB page per handshake round
+ * and the whole run averages ~127 KiB/s of NFS READ traffic, while the same
+ * transport does ~5 MB/s when a read is large enough to keep the pipeline
+ * full.  The cost is therefore per-request latency: every 4 KiB read pays a
+ * round trip of its own (3 RPCs, one RTT), and the texture path does tens of
+ * thousands of them.
+ *
+ * Two mechanisms, both inside the read path and both invisible to the caller:
+ *
+ *   RA  a *sequential* read (the fd's previous read ended exactly here) pulls
+ *       a 64 KiB window in one pipelined nfs_read_file() (48 RPCs, 16 deep,
+ *       ~3 RTTs) and the following reads are memcpy from that window.  A
+ *       random-access file never trips it: seq is only incremented when the
+ *       previous read ended at this offset.
+ *   BC  a 32-slot page cache for whole aligned 4 KiB reads -- the bundle
+ *       header/index blocks Unity re-reads per asset.
+ *
+ * Correctness: the cache is keyed by (mount, file handle, offset), the data is
+ * written before `len`/`used` under the lock, and a slot being filled is
+ * marked `filling` so a reader never copies a half-filled window.
+ */
+#define L76_PAGE 4096
+#define L76_RA_SLOTS 4
+#define L76_RA_BYTES (64 * 1024)
+#define L76_BC_SLOTS 32
+
+struct l76_ra {
+  int used, filling, mount;
+  struct nfs_fh fh;
+  uint32_t base, len;
+  uint8_t data[L76_RA_BYTES];
+};
+static struct l76_ra l76_ra[L76_RA_SLOTS];
+struct l76_bc {
+  int used, mount;
+  struct nfs_fh fh;
+  uint32_t off;
+  uint8_t data[L76_PAGE];
+};
+static struct l76_bc l76_bc[L76_BC_SLOTS];
+static spinlock_t l76_rc_lock;
+static int l76_rc_inited;
+
+static int l76_fh_eq(const struct nfs_fh *a, const struct nfs_fh *b) {
+  if (a->len != b->len) return 0;
+  for (uint32_t i = 0; i < a->len; i++)
+    if (a->data[i] != b->data[i]) return 0;
+  return 1;
+}
+
+static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
+                        uint32_t off, void *buf, uint32_t want) {
+  uint8_t *dst = (uint8_t *)buf;
+  const int mnt = f->nfs.mount_idx;
+  if (!l76_rc_inited) {
+    spinlock_init(&l76_rc_lock);
+    l76_rc_inited = 1;
+  }
+  int got;
+  /* 1. page cache */
+  if (want == L76_PAGE && (off & (L76_PAGE - 1)) == 0) {
+    uint64_t fl = spinlock_acquire_irqsave(&l76_rc_lock);
+    for (int i = 0; i < L76_BC_SLOTS; i++) {
+      struct l76_bc *b = &l76_bc[i];
+      if (b->used && b->mount == mnt && b->off == off &&
+          l76_fh_eq(&b->fh, &f->nfs.fh)) {
+        for (uint32_t k = 0; k < want; k++) dst[k] = b->data[k];
+        spinlock_release_irqrestore(&l76_rc_lock, fl);
+        l76_rc_stat[0]++;
+        return (int)want;
+      }
+    }
+    spinlock_release_irqrestore(&l76_rc_lock, fl);
+  }
+  /* 2. read-ahead window */
+  {
+    uint64_t fl = spinlock_acquire_irqsave(&l76_rc_lock);
+    for (int i = 0; i < L76_RA_SLOTS; i++) {
+      struct l76_ra *r = &l76_ra[i];
+      if (r->used && !r->filling && r->mount == mnt &&
+          l76_fh_eq(&r->fh, &f->nfs.fh) && off >= r->base &&
+          off + want <= r->base + r->len) {
+        uint32_t at = off - r->base;
+        for (uint32_t k = 0; k < want; k++) dst[k] = r->data[at + k];
+        spinlock_release_irqrestore(&l76_rc_lock, fl);
+        l76_rc_stat[1]++;
+        return (int)want;
+      }
+    }
+    spinlock_release_irqrestore(&l76_rc_lock, fl);
+  }
+  /* 3. sequential: fill a window in one pipelined read */
+  if (f->nfs.ra_seq >= 1 && f->nfs.ra_next == off && want <= 16384) {
+    struct l76_ra *slot = 0;
+    uint64_t fl = spinlock_acquire_irqsave(&l76_rc_lock);
+    for (int i = 0; i < L76_RA_SLOTS; i++) {
+      if (!l76_ra[i].filling) {
+        slot = &l76_ra[i];
+        slot->filling = 1;
+        break;
+      }
+    }
+    spinlock_release_irqrestore(&l76_rc_lock, fl);
+    if (slot) {
+      uint32_t base = off & ~(uint32_t)(L76_PAGE - 1);
+      uint64_t remain = f->nfs.size > base ? f->nfs.size - base : 0;
+      uint32_t len = remain < L76_RA_BYTES ? (uint32_t)remain : L76_RA_BYTES;
+      if (len >= want) {
+        got = nfs_read_file(m, &f->nfs.fh, base, slot->data, len);
+        fl = spinlock_acquire_irqsave(&l76_rc_lock);
+        if (got > 0) {
+          slot->mount = mnt;
+          slot->fh = f->nfs.fh;
+          slot->base = base;
+          slot->len = (uint32_t)got;
+          slot->used = 1;
+        } else {
+          slot->used = 0;
+        }
+        /* Copy while the slot is still ours: releasing the lock first would
+           let another thread evict this slot mid-copy and hand the caller a
+           window from a different file. */
+        int served = got >= (int)want;
+        if (served) {
+          uint32_t at = off - base;
+          for (uint32_t k = 0; k < want; k++) dst[k] = slot->data[at + k];
+          l76_rc_stat[2]++;
+        }
+        slot->filling = 0;
+        spinlock_release_irqrestore(&l76_rc_lock, fl);
+        if (served)
+          return (int)want;
+      } else {
+        fl = spinlock_acquire_irqsave(&l76_rc_lock);
+        slot->filling = 0;
+        spinlock_release_irqrestore(&l76_rc_lock, fl);
+      }
+    }
+  }
+  /* 4. direct read */
+  l76_rc_stat[3]++;
+  got = nfs_read_file(m, &f->nfs.fh, off, buf, want);
+  if (got == L76_PAGE && (off & (L76_PAGE - 1)) == 0) {
+    uint64_t fl = spinlock_acquire_irqsave(&l76_rc_lock);
+    struct l76_bc *b = 0;
+    for (int i = 0; i < L76_BC_SLOTS; i++) {
+      if (!l76_bc[i].used) { b = &l76_bc[i]; break; }
+      if (l76_bc[i].mount == mnt && l76_bc[i].off == off &&
+          l76_fh_eq(&l76_bc[i].fh, &f->nfs.fh)) { b = &l76_bc[i]; break; }
+    }
+    if (!b) {
+      static unsigned bc_at;
+      b = &l76_bc[bc_at++ % L76_BC_SLOTS];
+    }
+    b->mount = mnt;
+    b->fh = f->nfs.fh;
+    b->off = off;
+    for (int k = 0; k < L76_PAGE; k++) b->data[k] = dst[k];
+    b->used = 1;
+    spinlock_release_irqrestore(&l76_rc_lock, fl);
+  }
+  return got;
+}
+
 int file_read(struct process *cur, int fd, void *buf, int size, struct trap_frame *tf) {
   cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) {
@@ -2525,7 +2905,8 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     uint32_t want = (uint32_t)size;
     if ((uint64_t)want > left) want = (uint32_t)left;
     if (want == 0) return 0;
-    int got = nfs_read_file(m, &f->nfs.fh, f->nfs.cursor, buf, want);
+    /* L76: cache + sequential read-ahead live behind this call. */
+    int got = l76_nfs_read(m, f, f->nfs.cursor, buf, want);
     if (got < 0) {
       /* L57: the fd is ALIVE here (we just resolved it, and its type is NFS);
          the failure is the transport's.  Reporting -1 made trap.c turn it
@@ -2554,6 +2935,16 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
       }
     }
     if (got > 0) f->nfs.cursor += (uint32_t)got;
+    /* L76: sequential detection for the read-ahead window. */
+    if (got > 0) {
+      if (f->nfs.ra_next == (uint32_t)(f->nfs.cursor - (uint32_t)got) &&
+          f->nfs.ra_next != 0)
+        f->nfs.ra_seq++;
+      else
+        f->nfs.ra_seq = 0;
+      f->nfs.ra_next = f->nfs.cursor;
+      l76_rd_note(f->path, (uint32_t)(f->nfs.cursor - (uint32_t)got), got);
+    }
     return got;
   } else if (f->type == FILE_TYPE_PIPE) {
     if (f->pipe.end != 0) return -1; // Read end only
