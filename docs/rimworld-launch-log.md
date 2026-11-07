@@ -9862,3 +9862,80 @@ string that ends flush with its region and has no NUL → `-EFAULT`).
 new tests). Gates (`bash tools/rw/l73-gates.sh`): redzone, mmap_race, m2_mono,
 m2_tp, m2_threads, m12, m3_window, m4_gl, rwnfs — **9/9 PASS**, logs in
 `obj/l73/gates/`.
+
+## 55. 2026-11-07 — M6/L77: the zero page published as verified does not
+## survive L75; the publish path now asserts `verify(buf) == publish(buf)`,
+## and the game reaches the **main menu** (blocked by the Steam modal)
+
+L76 handed over a page published as verified with `zero=4096`, then `#UD`. L75
+had already explained how frames could hold device state (the pool overlapped
+the NVMe BAR); this lane asked whether the publish-time divergence survives that
+fix, and instrumented the gap between the probe's verdict and the published
+bytes.
+
+### 55.1 Verdict
+
+Two 1800 s windows on the merged tip (`e6fd3500`): **0** `[PUB] … zero=4096
+ver=1` for a file-backed exec page, **0** `[TXT] PROBE`/`REPLAY`/`PROBEGET`,
+**0** `[UDX]`, **0** user faults, `xunv=0`, `hole=0` on every `[BLKD]` row — and
+one of the two windows walked `fr_used` to **367 758**, past both old trigger
+frames (327 680, the old extent-1 base; 327 936, the BAR) with nothing
+happening. The old shape does not reproduce.
+
+It was *not* exercised either: nothing failed verification, so the probe path
+never ran in the field. The class is closed in the code and in a test, not by
+that absence:
+
+* `fat16_page_probe()` read into a static `rawbuf[MAX_CPUS][4096]` and copied to
+  the caller **after** a second, preemptible 4 KiB read; the comparison used
+  `a = rawbuf` (CPU 0's slot) while the copy used `rb` (this CPU's slot), so on
+  any CPU but 0 the two-read rule compared two different buffers and the
+  `second_zero` replay escape accepted whatever `rb` held at copy time.
+* It now reads read 1 **into the caller's buffer** and returns the identity of
+  what it verified (`struct fat16_page_id { buf, off, nz, sum }`); there is no
+  copy after the verdict.
+
+### 55.2 The assertion
+
+`vm_pub_identity()` on both exec publish paths (`probeget`, `verify`): the
+probe's buffer pointer, the file offset, the source unchanged since the verdict,
+and the destination byte-identical (`nz`, `sum`, `vm_page_eq`). A failure is a
+**refused publish**, a `[PBF]` alarm and the caller's independent device
+re-read — never a `#UD` later. `[PBI]` prints the first 12 checks and every
+2048th; `[PUBS]` carries `idc=`/`idf=`.
+
+`test_vm_publish_identity` corrupts the copy on purpose between the verdict and
+the assertion: `[PBF] probeget … dst_nz=3825 … same=0 buf=1 off=1 ver=1 pub=0`
+→ refused → the page still ends up with the file's bytes. 435/0 units.
+
+### 55.3 Ladder (4 x 1800 s)
+
+| run | tree | presents | max `fr_used` | res MiB | `idc`/`idf` | end |
+|---|---|---:|---:|---:|---|---|
+| L1 | merged | 120 | 209 932 | 667 | — | parked at `n=120`, threads parked, no fault |
+| L2 | merged | 1270 | 367 758 | 1329 | — | **main menu**, Steam modal, no fault |
+| L3 | L77 | 1180 | 465 513 | 1319 | 4032/0 | **main menu**, Steam modal, no fault |
+| L4 | L77 | 1260 | 367 598 | 1330 | 4028/0 | **main menu**, Steam modal, no fault |
+
+### 55.4 The next wall, and it is not the kernel
+
+L2/L3/L4 get past `Initializing.` (OCR on the splash) and then the screen
+changes to RimWorld's menu art with a modal:
+
+```text
+Could not initialize Steam API. Possible causes: … You can play anyway, but no
+Steam stats will be recorded …            [ Ignore ]   [ Quit ]
+```
+
+`[XSW] n=1270 … changed=0 crc=0x9bcb235cecf1c6d0` — one static frame per ~12 s,
+`[FUTR] rate=8/s` — the client is idle, waiting for a click. `Enter` does not
+dismiss the box, and the harness has no pointer injection
+(`rw_desktop_drive.py` sends keys through the launcher's console protocol);
+`tools/rw/click-ignore.py` already finds the Ignore button at **805,768**. That
+is the next lane's first job.
+
+### 55.5 Regression
+
+**435/0 units** (`obj/l77-units2.log`) + **9/9 gates**
+(`bash tools/rw/l77-gates.sh`, `obj/l77/gates/`). Full write-up:
+`docs/l77-pubdiv-report.md`.
