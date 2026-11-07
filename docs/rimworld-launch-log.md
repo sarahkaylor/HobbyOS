@@ -9855,3 +9855,10 @@ re-test. No menu frame, so none is claimed.
 take the suite down) and `test_l73_entry_points_reject_holes` (each path-taking
 entry point driven through a unit-test shim with a hole pointer and with a
 string that ends flush with its region and has no NUL → `-EFAULT`).
+
+### 54.6 Regression
+
+`TOOLS_SKIP=1 ./run_unit_tests_intel.sh`: **433 run, 0 failed** (431 + the two
+new tests). Gates (`bash tools/rw/l73-gates.sh`): redzone, mmap_race, m2_mono,
+m2_tp, m2_threads, m12, m3_window, m4_gl, rwnfs — **9/9 PASS**, logs in
+`obj/l73/gates/`.

@@ -233,7 +233,8 @@ Reading of the ladder:
   C loses the game first to its own SIGSEGV (then a fault inside its handler)
   and the block cascade follows.
 * the loader gets **much** further than L72: 1 205-1 207 `[XO]` rows, the last
-  ones `Core/…/Menus_Main.xml` and `Biotech/…/Keyed/Misc_Gameplay.xml` — the
+  ones `Core/…/Menus_Main.xml` (runs A/B) and
+  `Biotech/…/Keyed/Misc_Gameplay.xml` / `GameplayCommands.xml` (run C) — the
   main menu's own strings — where L72 stopped at the def plateau (43.6 MiB).
 * no menu: the loading screen keeps presenting its progress box (`Initializing.`
   plus a filling bar) at ~1.0 presents/s and the three-party handshake of L72
@@ -257,4 +258,23 @@ live (`nz=1950488/1950488`, `changed=1` on every tenth row).
 
 ## 7. Regression
 
-<!--REGRESSION-->
+* `TOOLS_SKIP=1 ./run_unit_tests_intel.sh`: **433 run, 0 failed — UNIT TESTS
+  PASSED** (431 before this lane + `test_l73_user_peek_hole` +
+  `test_l73_entry_points_reject_holes`).
+* gates (`tools/rw/l73-gates.sh`, one log per gate under `obj/l73/gates/`):
+
+  | gate | verdict | what it proves |
+  |---|---|---|
+  | redzone | **PASS** | all six psABI red-zone slots survive a 100 Hz preemption |
+  | mmap_race | **PASS** | two threads picking the same hole get distinct bases |
+  | m2_mono | **PASS** | the official Mono 6.12 runtime runs a threaded C# program |
+  | m2_tp | **PASS** | ThreadPool parks/wakes; `sem_timedwait` honours an ms deadline |
+  | m2_threads | **PASS** | 8 pthreads: mutex+condvar+TLS+join+dlopen TLS |
+  | m12 | **PASS** | 150 threads created+joined, per-thread TLS, `pthread_cancel` |
+  | m3_window | **PASS** | the X11 shim serves SDL's whole XCreateWindow sequence |
+  | m4_gl | **PASS** | libGL loads, renders a GL 3.3 core triangle, presents, tears down |
+  | rwnfs | **PASS** | exec-from-NFS (`HDYN.BIN` runs from `/NFS`) |
+
+  Run with `bash tools/rw/l73-gates.sh`; one log per gate in `obj/l73/gates/`.
+
+Net: **433/0 units + 9/9 gates**, with the two new tests included.
