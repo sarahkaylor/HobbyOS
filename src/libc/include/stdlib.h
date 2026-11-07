@@ -82,6 +82,23 @@ extern "C" {
    * matching glibc's extension). */
   void *aligned_alloc(size_t alignment, size_t size);
 
+  /* ---- POSIX aligned allocation (M4/L5).  Same semantics as
+   * aligned_alloc() above, but returns an errno value instead of NULL and
+   * requires alignment to be a power-of-two multiple of sizeof(void*).
+   * Mesa's src/util/os_memory_aligned.h is the only in-tree caller so far;
+   * the implementation lives in src/user/xcompat/gl_stubs.c, which libGL
+   * links, so the declaration is free for any program that supplies it. */
+  int posix_memalign(void **memptr, size_t alignment, size_t size);
+
+  /* ---- alloca (M4/L5) ---- glibc declares alloca() from <stdlib.h> under
+   * __USE_MISC, and Mesa's include/c99_alloca.h includes <stdlib.h> on every
+   * non-Windows, non-Solaris platform and expects it.  Without this, ~8
+   * compiler/nir TUs fail with "call to undeclared function 'alloca'".
+   * Identical to <alloca.h>'s definition, so including both is harmless. */
+#ifndef alloca
+#define alloca(size) __builtin_alloca(size)
+#endif
+
   /* ---- C11 quick exit (P3.2) ---- */
   int at_quick_exit(void (*function)(void));
   void quick_exit(int status) __attribute__((noreturn));
@@ -99,6 +116,13 @@ extern "C" {
 
   void qsort(void *base, size_t nmemb, size_t size,
              int (*compar)(const void *, const void *));
+  /* M4/L5: glibc's qsort_r (the 4-argument GNU form, not BSD's).  Mesa's
+   * src/util/u_qsort.h uses it to sort with a context pointer (nir.c,
+   * nir_opt_vectorize.c, nir_opt_reassociate.c, u_qsort.cpp).  There is no
+   * qsort_r in libc.a yet; gl_stubs.c supplies it on top of qsort's logic. */
+  void qsort_r(void *base, size_t nmemb, size_t size,
+               int (*compar)(const void *, const void *, void *),
+               void *arg);
   void *bsearch(const void *key, const void *base, size_t nmemb, size_t size,
                 int (*compar)(const void *, const void *));
 
@@ -109,6 +133,10 @@ extern "C" {
    * env to Phase 8). Copy strings so setenv/putenv own them. */
   extern char **environ;
   char *getenv(const char *name);
+  /* M4/L5: glibc's secure_getenv.  There is no setuid model in HobbyOS, so
+   * it is getenv() (see src/user/xcompat/gl_stubs.c). Mesa's
+   * src/util/os_misc.c uses it to gate debug/override env vars. */
+  char *secure_getenv(const char *name);
   int setenv(const char *name, const char *value, int overwrite);
   int putenv(char *string); /* gnu-style "NAME=VALUE", takes ownership */
   int unsetenv(const char *name);

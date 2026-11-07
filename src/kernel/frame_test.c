@@ -7,9 +7,12 @@ extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t val);
 
 /* Expected pool sizes (design section 2.1).  ARM: [0x70000000,
-   0x240000000); x64: [0x20000000, 0x70000000) + [0x80000000,
-   0x180000000).  These are the VMM constants the boot log line
-   validates; a mismatch here means a constant and the bitmap drifted. */
+   0x240000000); x64: [0x20000000, 0x70000000) + [0x100000000,
+   0x200000000).  These are the VMM constants the boot log line
+   validates; a mismatch here means a constant and the bitmap drifted.
+   L75: x64 extent 1 starts at 4 GiB -- 2-4 GiB is the 32-bit PCI MMIO hole
+   on this machine and the NVMe BAR lives there (see
+   test_frame_pool_is_ram_only). */
 #ifdef __x86_64__
 #define EXPECT_FRAMES 1376256
 /* x64: the kernel image lives inside ext0, so the reservation always
@@ -281,6 +284,37 @@ static void test_frame_image_reserved(void) {
   EXPECT_EQ(frame_free_count(), frame_total_count() - used0);
 }
 
+/* L75: the pool must be RAM and only RAM.
+ *
+ * Extent 1 used to start at 0x80000000, the base of the 32-bit PCI MMIO hole
+ * on `-M q35 -m 12288M`; QEMU put the NVMe BAR at 0x81000000, inside it.  A
+ * page-cache fill into the frame at that physical address wrote the
+ * controller's register file -- AQA/ASQ/ACQ/CC -- which is the "host reset"
+ * every L65-L73 window died on (measured: a 4 KiB zero fill disabled the
+ * controller, CC 0x460001 -> 0x0, with the driver's own CC-write counter
+ * still 0).  These are the invariants that make it impossible. */
+static void test_frame_pool_is_ram_only(void) {
+  uint64_t lo, hi;
+  tests_run++;
+  uart_puts("  Running test_frame_pool_is_ram_only...\n");
+#ifdef __x86_64__
+  EXPECT_EQ(frame_extent_bounds(0, &lo, &hi), 0);
+  EXPECT_EQ((hi <= 0x80000000ULL || lo >= 0x100000000ULL), 1);
+  EXPECT_EQ(frame_extent_bounds(1, &lo, &hi), 0);
+  EXPECT_EQ(lo, 0x100000000ULL);
+  EXPECT_EQ((hi <= 0x80000000ULL || lo >= 0x100000000ULL), 1);
+  /* Every frame the allocator can hand out is below the 64-bit window. */
+  EXPECT_EQ((hi <= 0x200000000ULL), 1);
+  /* The 2 MiB identity shadow of the NVMe (0x1FC000000) and virtio-gpu
+     (0x1FE000000) windows is reserved, so no frame can be the device. */
+  EXPECT_EQ(frame_is_alloced(0x1FC000000ULL), 1);
+  EXPECT_EQ(frame_is_alloced(0x1FE000000ULL), 1);
+  /* The page that was the NVMe BAR is not in the pool at all. */
+  EXPECT_EQ(frame_is_alloced(0x81000000ULL), 0);
+#endif
+  EXPECT_EQ(frame_hole_allocs(), 0);
+}
+
 void frame_test_suite(void) {
   uart_puts("frame_test_suite:\n");
   test_frame_counts();
@@ -290,6 +324,7 @@ void frame_test_suite(void) {
   test_frame_block_layer();
   test_frame_exhaustion_path();
   test_frame_image_reserved();
+  test_frame_pool_is_ram_only();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

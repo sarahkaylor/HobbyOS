@@ -224,6 +224,19 @@ static int unit_has_missing(uint64_t unit, uint64_t sector, uint32_t count) {
   return missing;
 }
 
+/* M6/L69: one bounded row per distrust event, so a poisoned fill is visible
+   in the log instead of silently re-read. */
+static void blk_cache_note_untrusted(uint64_t unit) {
+  extern void print_int(int val);
+  static int rows;
+  if (rows < 12) {
+    rows++;
+    uart_puts("[BLKC] distrust unit=");
+    print_int((int)(unit & 0x7FFFFFFF));
+    uart_puts(" (reset during fill) -> frame dropped, re-reading\n");
+  }
+}
+
 /* A pending merged device op over contiguous target frames. */
 struct fill_op {
   int active;
@@ -393,6 +406,11 @@ static void fill_run_contig(uint64_t u0, uint64_t run_units, uint64_t base,
        re-derived from the Phase-A plan (same contiguity rule: consecutive
        sectors + target-frame continuity, 1024-sector cap), so the ops are
        identical to what the pre-section design planned in one pass. */
+    /* M6/L69: the device generation this fill's bytes come from.  A reset
+       during the I/O invalidates every completion in flight (QEMU aborts the
+       request and can still post SUCCESS with no DMA), so Phase C compares
+       this and drops the unit instead of publishing the frame. */
+    uint64_t ep_io = blk_dev_epoch;
     struct fill_op op;
     op.active = 0;
     op.start_sector = 0;
@@ -448,6 +466,23 @@ static void fill_run_contig(uint64_t u0, uint64_t run_units, uint64_t base,
             frame_out = entries[e].frame;
             free_push(e);
             live_entries--;
+          } else if (blk_dev_epoch != ep_io) {
+            /* M6/L69: the device was reset while this frame was being filled.
+               Its bytes are NOT evidence (an aborted AIO completes with
+               SUCCESS and no DMA, leaving the previous command's sector in the
+               frame — a virgin frame is all zeros).  Never publish it: unlink
+               and free the unit, so the copy pass below re-reads the sectors
+               from the repaired device instead of caching a lie.  This is the
+               invariant "a failed/aborted DMA must never publish a page". */
+            uint32_t nx = entries[e].next;
+            if (prev == BLK_CACHE_NIL)
+              bucket_head[b] = nx;
+            else
+              entries[prev].next = nx;
+            frame_out = entries[e].frame;
+            free_push(e);
+            live_entries--;
+            blk_cache_note_untrusted(unit);
           } else {
             if (!*run_failed)
               entries[e].valid |= plan[i].req;
@@ -547,6 +582,7 @@ static void fill_run_fallback(uint64_t u0, uint64_t run_units,
     stat_misses += (uint64_t)popcount8(missing);
 
     /* Phase B -- device I/O with NO cache locks held */
+    uint64_t ep_io = blk_dev_epoch;
     struct fill_op op;
     op.active = 0;
     op.start_sector = 0;
@@ -590,6 +626,18 @@ static void fill_run_fallback(uint64_t u0, uint64_t run_units,
           frame_out = entries[e].frame;
           free_push(e);
           live_entries--;
+        } else if (blk_dev_epoch != ep_io) {
+          /* M6/L69: reset during this fill — its bytes are not evidence.
+             Drop the unit; the copy pass re-reads from the repaired device. */
+          uint32_t nx = entries[e].next;
+          if (prev == BLK_CACHE_NIL)
+            bucket_head[b] = nx;
+          else
+            entries[prev].next = nx;
+          frame_out = entries[e].frame;
+          free_push(e);
+          live_entries--;
+          blk_cache_note_untrusted(unit);
         } else {
           if (!*run_failed)
             entries[e].valid |= req;
@@ -873,3 +921,89 @@ void blk_cache_get_stats(struct blk_cache_stats *out) {
   out->bytes = live_entries * BLK_CACHE_UNIT_BYTES;
   out->passthrough = stat_passthrough;
 }
+
+/* M6/L69 forensics: what does the cache hold for the unit covering `sector`? */
+int blk_cache_probe_unit(uint64_t sector, struct blk_cache_unit_info *out) {
+  if (!out)
+    return -1;
+  out->found = 0;
+  out->fstate = 0;
+  out->valid = 0;
+  out->req = 0;
+  out->nz = 0;
+  out->sum = 0;
+  out->frame = 0;
+  if (!cache_ready)
+    return 0;
+  uint64_t unit = sector >> 3;
+  uint8_t req = unit_request_mask(unit, sector, 1);
+  uint32_t b = bucket_of(unit);
+  spinlock_acquire(&bucket_locks[b]);
+  uint32_t e = bucket_find(b, unit);
+  if (e != BLK_CACHE_NIL) {
+    out->found = 1;
+    out->fstate = entries[e].fstate;
+    out->valid = entries[e].valid;
+    out->req = req ? 8u : 0u; /* whole unit: the page is always 8 sectors */
+    out->frame = entries[e].frame;
+    const volatile uint8_t *p = (const volatile uint8_t *)entries[e].frame;
+    uint32_t nz = 0, sum = 0;
+    for (uint32_t i = 0; i < BLK_CACHE_UNIT_BYTES; i++) {
+      uint8_t v = p[i];
+      if (v)
+        nz++;
+      sum += v;
+    }
+    out->nz = nz;
+    out->sum = sum;
+    out->req = 8;
+  }
+  spinlock_release(&bucket_locks[b]);
+  return out->found;
+}
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* M6/L69: publish exactly the poisoned frame the field bug produced. */
+int blk_cache_test_poison(uint64_t sector, const uint8_t *bytes,
+                          uint32_t len) {
+  if (!cache_ready)
+    return -1;
+  uint64_t unit = sector >> 3;
+  uint32_t b = bucket_of(unit);
+  uint64_t fr = frame_alloc();
+  if (!fr)
+    return -1;
+  volatile uint8_t *p = (volatile uint8_t *)fr;
+  for (uint32_t i = 0; i < BLK_CACHE_UNIT_BYTES; i++)
+    p[i] = (i < len) ? bytes[i] : 0;
+  spinlock_acquire(&fill_lock);
+  spinlock_acquire(&bucket_locks[b]);
+  uint32_t e = bucket_find(b, unit);
+  if (e == BLK_CACHE_NIL) {
+    e = free_pop();
+    if (e == BLK_CACHE_NIL) {
+      spinlock_release(&bucket_locks[b]);
+      spinlock_release(&fill_lock);
+      frame_free(fr);
+      return -1;
+    }
+    entries[e].unit = unit;
+    entries[e].frame = fr;
+    entries[e].valid = 0;
+    entries[e].next = bucket_head[b];
+    bucket_head[b] = e;
+    live_entries++;
+  } else {
+    /* Replace the entry's frame with the poisoned one (its old frame is
+       dropped; nothing else may still reference it in the unit tier). */
+    frame_free(entries[e].frame);
+    entries[e].frame = fr;
+  }
+  entries[e].valid = 0xFF;
+  entries[e].fstate = BLK_CACHE_ST_CLEAN;
+  entries[e].ref = 1;
+  spinlock_release(&bucket_locks[b]);
+  spinlock_release(&fill_lock);
+  return 0;
+}
+#endif

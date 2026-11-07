@@ -16,8 +16,9 @@ struct addr_space;
 struct elf_load_info {
   uint64_t entry;       /* runtime entry to start at (interp_base + interp e_entry
                            when interpreted, else base + e_entry)              */
-  uint64_t exe_entry;   /* runtime entry of the EXECUTABLE (AT_ENTRY for the
-                           interpreter; equals entry when not interpreted)     */
+  uint64_t exe_entry;   /* runtime entry of the EXECUTABLE (base + e_entry), even
+                           when `entry` is the interpreter's: the compat auxv's
+                           AT_ENTRY is this value, never the interpreter's      */
   uint64_t base;        /* runtime base of the executable image                */
   uint64_t phdr;        /* runtime VA of the executable's program headers      */
   uint32_t phnum;       /* number of program headers                           */
@@ -32,11 +33,28 @@ struct elf_load_info {
 /* Loader flags.  ELF_LOAD_NATIVE is the native track: PT_INTERP is honoured
  * (only when it names /LDHOBBY.SO) and the startup block is written.  The
  * default (0) is the Linux-ABI compat track, which keeps GB-013's behaviour
- * byte for byte — including its ELF_ERR_INTERP refusal of dynamic binaries. */
+ * byte for byte — including its ELF_ERR_INTERP refusal of dynamic binaries.
+ *
+ * ELF_LOAD_COMPAT_INTERP is the explicit LINUX opt-in: PT_INTERP is honoured
+ * for ANY absolute path (glibc's /lib64/ld-linux-x86-64.so.2 included), the
+ * interpreter is mapped in a USER_LIB slot with its own p_flags and WITHOUT
+ * the kernel's relocation pass (a real ld.so relocates itself), and the
+ * caller is responsible for the Linux SysV startup stack
+ * (docs/rw-ldso-design.md).  flags == 0 still refuses PT_INTERP, so no
+ * existing caller changes behaviour by accident. */
 #define ELF_LOAD_NATIVE 0x1u
+#define ELF_LOAD_COMPAT_INTERP 0x2u
 
 int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
                     uint32_t flags, struct elf_load_info *info);
+
+/* The same load, for an image that is already in kernel memory (the VFS/NFS
+ * exec path: no FAT16 cluster exists for the file).  The PT_INTERP image is
+ * still resolved from the FAT16 root.  elf_loader_load is the FAT16 wrapper
+ * around this. */
+int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
+                          uint32_t fsize, uint32_t flags,
+                          struct elf_load_info *info);
 
 /* The mapping half without a filesystem: both images are already in kernel
  * memory.  Used by elf_loader_test.c to exercise the real mapper (plan,
@@ -51,6 +69,9 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
  * interpreter, 0 when it does not (or its header is unreadable), -1 when the
  * file cannot be read.  The x86_64 dispatch uses it to pick the track. */
 int elf_loader_probe_native(uint16_t cluster, uint32_t fsize);
+
+/* Buffer form of elf_loader_probe_native(), for the VFS exec path. */
+int elf_loader_probe_native_buf(const uint8_t *exe, uint32_t fsize);
 
 /**
  * Loads a user program from the disk and executes it in the current context.

@@ -35,6 +35,38 @@ void wm_init(void) {
   num_windows = 0;
 }
 
+/* L62: an opt-in size rule.  The shipped WM treats a window as a tile of the
+ * screen and *stores but ignores* the content size a pixel-mode client asks
+ * for on ESC ] X -- a Unity client that asks for 1280x720 is handed
+ * 1916x1018, i.e. 2.1x the pixels to fill.  That is the right default (every
+ * app here lays out against the tile), so honouring the request is a switch a
+ * measurement run turns on with /WMSIZE, never a silent behaviour change. */
+static int wm_honour_pref;
+
+void wm_honour_pixel_pref(int on) { wm_honour_pref = on ? 1 : 0; }
+
+/* Size a pixel-mode window to its requested CONTENT rect (the chrome is
+ * 2 px per side and a 34 px title bar, see wm_pixel_content_rect), clamped to
+ * a bound.  A preference larger than the bound is a no-op: the tile wins. */
+static void apply_pref_bounded(struct window *win, int bw, int bh) {
+  if (!wm_honour_pref || !win->pixel_mode)
+    return;
+  int pw = win->pix_pref_w, ph = win->pix_pref_h;
+  if (pw <= 0 || ph <= 0)
+    return;
+  int w = pw + 4, h = ph + 36;
+  if (w > bw) w = bw;
+  if (h > bh) h = bh;
+  if (w < 64 || h < 64)
+    return;                            /* a preference this small is a bug */
+  win->w = w;
+  win->h = h;
+}
+
+void wm_pixel_apply_pref(struct window *win) {
+  apply_pref_bounded(win, SCREEN_WIDTH, SCREEN_HEIGHT - TASKBAR_H);
+}
+
 static void update_layout(void) {
   if (num_windows == 0) return;
 
@@ -55,6 +87,7 @@ static void update_layout(void) {
     windows[i].y = (i / cols) * h;
     windows[i].w = w;
     windows[i].h = h;
+    apply_pref_bounded(&windows[i], w, h);
   }
 
   /* A reflow changes the content area: terminal-mode apps must be told

@@ -46,12 +46,17 @@
 
 #include "arch/trap.h"
 #include "errno.h"
-#include "fb_mmap.h"
+#include "fb_mmap.h" /* GB-025 / M3: FBIOGET_* on /dev/fb0 */
+#include "file_obj.h" /* GB-025 / M3: file_is_devfb(); M1: file_is_devgpu() */
+#include "gpu_abi.h" /* M1: /dev/gpu GPU_IOC_* surface */
 #include "fs.h"
+#include "kline.h"
 #include "ipc_proto.h"
 #include "linux_fb.h"
 #include "linux_syscall.h"
 #include "process.h"
+#include "vfs.h"
+#include "virtio_gpu.h" /* GB-025 / M3: the scanout address for FBIOGET_* */
 
 /* close_range(2) flags (Linux values; not syscall numbers, so local). */
 #define L_CLOSE_RANGE_UNSHARE 0x2u
@@ -69,12 +74,22 @@ static int l_ret(struct trap_frame *tf, int64_t v) {
  * tf->regs[0]: see the header comment — rax must still be the syscall
  * number when the guest re-executes the rewound instruction. */
 static int l_park(struct process *p, struct trap_frame *tf) {
+  /* M6/L33: Linux's syscall restart.  A signal that is pending and unblocked
+     NOW must end the wait with -EINTR instead of parking again: the syscall
+     entry re-runs after a wake, so this is also the check that answers EINTR
+     for the restarted instruction.  The handler itself is planted at this
+     trap exit, i.e. before the guest sees the return. */
+  if (linux_compat_sig_deliverable(p)) return l_ret(tf, -EINTR);
 #ifdef __x86_64__
   if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind over the 2-byte `syscall` */
 #else
   tf->elr -= 4; /* AArch64 `svc #0`; the compat layer is x64-only today, but
                    the kernel builds this TU for both arches */
 #endif
+  /* The syscall re-executes on wake, so a signal wake must not overwrite rax
+     with -EINTR here; the entry check above is what answers it. */
+  p->sig_park_kind = 2;
+  p->sig_park_nr = 0;
   save_context(p, tf);
   schedule(tf, 0);
   return 1;
@@ -483,6 +498,13 @@ static int l_fd_close_range(struct process *p, struct trap_frame *tf) {
     return l_ret(tf, -EINVAL);
   if (first > last) return l_ret(tf, -EINVAL);
   if (last >= (uint32_t)MAX_OPEN_FDS) last = (uint32_t)MAX_OPEN_FDS - 1;
+  /* L57: record the call itself -- a whole-range close is exactly the kind of
+   * sweep that can kill a peer thread's live fd, and one row proves whether
+   * it happens at all. */
+  {
+    extern void fs_fd_ev_range(struct process *, int, int);
+    fs_fd_ev_range(p, (int)first, (int)last);
+  }
 
   for (uint32_t fd = first; fd <= last; fd++) {
     if (flags & L_CLOSE_RANGE_CLOEXEC)
@@ -609,28 +631,33 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
   }
   if (req == L_TCGETS || req == L_TCSETS || req == L_TIOCGWINSZ)
     return l_ret(tf, -ENOTTY);
-  /* GB-032: the FBIO family on /dev/fb0.  linux_compat_dispatch() owns
-     ioctl(16), so the trap.c number-translation arm (which has the same
-     requests) never runs for a Linux-ABI process: a probe that opened and
-     mmap'd /dev/fb0 still got ENOTTY from FBIOGET_VSCREENINFO — measured
-     in the guest on GB-032 (2026-11-04) with `sdl test app: fb
-     unavailable (errno=25)`.  Route the requests the node actually
-     implements here, in sys_fb_ioctl()'s native (req, arg) register
-     shape, and keep ENOTTY for every other fd/request.
-     x86_64 only: the Linux-ABI layer is x64-only, and sys_fb_ioctl()'s
-     register convention above is the x86 one. */
-#ifdef __x86_64__
-  if (req == FBIOGET_VSCREENINFO || req == FBIOGET_FSCREENINFO ||
-      req == HB_FBIOBLANK) {
-    extern int file_fd_is_devfb(struct process *, int);
-    extern void sys_fb_ioctl(struct trap_frame *);
-    if (!file_fd_is_devfb(p, fd)) return l_ret(tf, -ENOTTY);
-    tf->regs[5] = (uint64_t)req;
-    tf->regs[4] = arg;
-    sys_fb_ioctl(tf);
-    return 1;
+  /* GB-025 / M3: the /dev/fb0 ioctl surface (docs/linux-abi.md §9).  A
+   * compat X11 client reads its geometry with FBIOGET_VSCREENINFO before
+   * mmap, and SDL's fbcon driver reads both structs.  The node answers the
+   * same Linux-layout fills the native SYS_FB_IOCTL returns, through the one
+   * device-free route helper (fb_mmap.c), so the two paths cannot drift.
+   * The fill is rendered into a kernel buffer and then range-checked into
+   * the guest by l_copy_to_user (the route helper itself never sees a user
+   * pointer). */
+  if (file_is_devfb(p, fd)) {
+    size_t sz = hb_fb_ioctl_arg_size((unsigned long)req);
+    if (sz == (size_t)-1) return l_ret(tf, -ENOTTY); /* not an fb request */
+    if (sz == 0) return l_ret(tf, 0);                /* FBIOBLANK: no-op */
+    if (sz > 160) return l_ret(tf, -EINVAL);
+    if (!arg) return l_ret(tf, -EFAULT);
+    unsigned char kbuf[160];
+    int rr = hb_fb_ioctl_route((unsigned long)req, kbuf,
+                               (uint64_t)virtio_gpu_get_framebuffer());
+    if (rr != 0) return l_ret(tf, rr);
+    int cr = l_copy_to_user(p, arg, kbuf, sz);
+    return l_ret(tf, cr != 0 ? cr : 0);
   }
-#endif
+  /* M1 (docs/gpu-abi.md): the /dev/gpu request set.  Unlike the fb node the
+   * debugfs structs are read-modify-write (ctx/res ids out, submit fence out),
+   * so the handler owns the copy-in/copy-out: gpu_abi_ioctl() takes the user
+   * pointer and does every access through vm_user_read/vm_kwrite. */
+  if (file_is_devgpu(p, fd))
+    return l_ret(tf, gpu_abi_ioctl(p, fd, (unsigned long)req, arg));
   if (req == (uint32_t)L_F_GETFL) return l_ret(tf, file_fcntl(p, fd, K_F_GETFL, 0));
   if (req == (uint32_t)L_F_SETFL) return l_ret(tf, file_fcntl(p, fd, K_F_SETFL, arg));
   return l_ret(tf, -ENOTTY);
@@ -650,9 +677,210 @@ static int l_fd_fcntl(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, file_fcntl(p, fd, cmd, arg));
 }
 
+/* ---- openat / fchmod / fchown ------------------------------------------- */
+
+/* "/proc/self/fd/<decimal>" exactly -- the path the host trace re-opens 639
+ * times in a 20 s Unity run (libudev/sysfs probes).  Linux resolves the link
+ * and opens the underlying file with a FRESH description: offset 0, its own
+ * status flags.  That is not dup() (which would share the offset): the
+ * caller re-opens precisely to read the file again from the start. */
+static int l_parse_self_fd(const char *path, int *fd_out) {
+  static const char pfx[] = "/proc/self/fd/";
+  int i = 0;
+  for (; pfx[i]; i++)
+    if (path[i] != pfx[i]) return 0;
+  const char *n = path + i;
+  if (!*n) return 0;
+  unsigned v = 0;
+  for (; *n; n++) {
+    if (*n < '0' || *n > '9') return 0;
+    v = v * 10 + (unsigned)(*n - '0');
+    if (v > 100000u) return 0;
+  }
+  *fd_out = (int)v;
+  return 1;
+}
+
+/* openat(dirfd, path, flags, mode).  glibc's ld.so opens every DSO candidate
+ * through openat(AT_FDCWD, ...), so this is the first call of the M1 startup
+ * gate.
+ *
+ * Translation, not a second open path: the path is made absolute through
+ * vfs_abs_path (the same cwd resolution the native file_open eventually does,
+ * applied HERE so a relative name is resolved before the O_DIRECTORY probe
+ * below), then handed to file_open — the one routine that owns FAT16 / NFS /
+ * device / /proc dispatch, O_CREAT|O_EXCL atomicity and the fd table.
+ *
+ * Flag handling:
+ *   O_CLOEXEC   is stripped from the word file_open records (Linux's F_GETFL
+ *               does not report it either) and applied afterwards through
+ *               file_fcntl(K_F_SETFD, K_FD_CLOEXEC) — the same mechanism dup3
+ *               and pipe2 already use.
+ *   O_DIRECTORY is passed through; fs.c routes it to fat16_open_dir.  A
+ *               regular file then answers ENOTDIR (Linux) instead of fs.c's
+ *               internal ENOENT, decided by one file_stat_path probe so the
+ *               two ABIs cannot disagree about what exists.
+ *   everything else (access mode, O_CREAT/O_EXCL/O_TRUNC/O_APPEND) keeps the
+ *               Linux bit values, which fs.c's K_O_* mirror.
+ *
+ * dirfd is compared as an int (low 32 bits): measured on the M1 gate, glibc's
+ * ld.so materialises AT_FDCWD with a 32-bit `mov`, leaving the upper half of
+ * %rdi zero, so a full-width -100 test read +4294967196 and every open
+ * answered -ENOTSUP (ld.so then reported "libc.so.6: cannot open shared
+ * object file: Error 95").
+ *
+ * A real dirfd (not AT_FDCWD) is refused with -ENOTSUP unless the path is
+ * absolute: an fd is a slot in the file table, not a node in a namespace, and
+ * this VFS has no way to name the directory an fd refers to.  That is the same
+ * answer newfstatat/readlinkat give for the same argument, and it is better
+ * than silently resolving the name against the cwd (which would open the WRONG
+ * file).
+ */
+static int l_fd_openat(struct process *p, struct trap_frame *tf) {
+  int dirfd = (int)l_argi(tf, 0);
+  uint64_t upath = l_arg(tf, 1);
+  int flags = (int)l_argi(tf, 2);
+  char path[256];
+
+  int r = l_copy_cstr(p, path, upath, sizeof path);
+  if (r != 0) return l_ret(tf, r);
+  if (path[0] == '\0') return l_ret(tf, -ENOENT);
+  if (dirfd != L_AT_FDCWD && path[0] != '/') return l_ret(tf, -ENOTSUP);
+
+  /* /proc/self/fd/N: re-open the file the fd names.  Measured shape:
+     openat(AT_FDCWD, "/proc/self/fd/13", O_RDONLY|O_NOCTTY|O_CLOEXEC) -> a
+     fresh fd on the same file, read from offset 0. */
+  int self_fd = -1;
+  if (l_parse_self_fd(path, &self_fd)) {
+    char target[VFS_PATH_MAX];
+    int rr = file_path_of(p, self_fd, target, sizeof target);
+    if (rr == -EBADF) return l_ret(tf, -ENOENT); /* Linux: no such fd */
+    if (rr != 0) return l_ret(tf, -ENXIO);       /* nameless fd: ENXIO */
+    int nfd = file_open(p, target, flags & ~L_O_CLOEXEC);
+    if (nfd < 0) return l_ret(tf, nfd);
+    if (flags & L_O_CLOEXEC)
+      (void)file_fcntl(p, nfd, K_F_SETFD, K_FD_CLOEXEC);
+    return l_ret(tf, nfd);
+  }
+
+  /* vfs_clean() truncates at 255 characters, so a longer name would silently
+     open a DIFFERENT file; refuse it instead. */
+  int len = 0;
+  while (path[len]) len++;
+  if (len >= 255) return l_ret(tf, -ENAMETOOLONG);
+
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return l_ret(tf, -ENAMETOOLONG);
+
+  int fd = file_open(p, abs, flags & ~L_O_CLOEXEC);
+  /* M6/L31: the engine's ScriptingAssemblies.json read is a NATIVE Unity
+     path and its failure silently empties the assembly list.  One row here
+     says whether the open happened and with which flags. */
+  {
+    const char *tail = "ScriptingAssemblies.json";
+    int tl = 0, al = 0;
+    while (tail[tl]) tl++;
+    while (abs[al]) al++;
+    if (al >= tl) {
+      int k = al - tl, hit = 1;
+      for (int i = 0; i < tl; i++)
+        if (abs[k + i] != tail[i]) { hit = 0; break; }
+      if (hit) {
+        struct kline kl; kl_init(&kl);
+        kl_s(&kl, "[XOPEN] "); kl_s(&kl, abs);
+        kl_s(&kl, " flags="); kl_i(&kl, (long)flags);
+        kl_s(&kl, " -> "); kl_i(&kl, (long)fd); kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+  }
+  if (fd == -ENOENT && (flags & L_O_DIRECTORY)) {
+    struct k_stat ks;
+    int err = 0;
+    if (file_stat_path(p, abs, &ks, &err) == 0 &&
+        (ks.st_mode & L_S_IFMT) != L_S_IFDIR)
+      return l_ret(tf, -ENOTDIR);
+  }
+  /* L55: name every failed open, with the errno and how full the process's fd
+     table was.  `Could not open file` inside a def load is either EMFILE (the
+     old MAX_OPEN_FDS 64 / MAX_GLOBAL_FILES 128) or a lookup error, and the two
+     have opposite fixes; a bounded row settles it in one run. */
+  if (fd < 0) {
+    static int ofail_rows;
+    /* L55: keep the boot's benign glibc probe ENOENTs (/LIB64/tls/...,
+     * /proc/stat) out of the record, but never hide a failed /NFS open or a
+     * non-ENOENT error — those are the def-load failures this row exists for. */
+    int is_nfs = abs[0] == '/' && abs[1] == 'N' && abs[2] == 'F' &&
+                 abs[3] == 'S' && abs[4] == '/';
+    if ((fd != -ENOENT || is_nfs) && ofail_rows < 256) {
+      ofail_rows++;
+      struct process *gp = process_group(p);
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[LOPENF] err=");
+      kl_i(&kl, (long)fd);
+      kl_s(&kl, " nfd=");
+      kl_i(&kl, gp ? (long)gp->num_open_fds : -1L);
+      kl_s(&kl, " flags=");
+      kl_i(&kl, (long)flags);
+      kl_s(&kl, " ");
+      kl_s(&kl, abs);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  if (fd < 0) return l_ret(tf, fd);
+  if (flags & L_O_CLOEXEC)
+    (void)file_fcntl(p, fd, K_F_SETFD, K_FD_CLOEXEC);
+  return l_ret(tf, fd);
+}
+
+/* fchmod(fd, mode) / fchown(fd, uid, gid).
+ *
+ * FAT16 has no permission bits and no owner: every node is synthesized as 0644
+ * (files) / 0755 (directories), owned by uid/gid 0, and there is no on-disk
+ * field to write even if the kernel wanted one.  The two honest translations:
+ *
+ *  - fchmod is a no-op that still VALIDATES the descriptor (EBADF for a closed
+ *    one) and masks the mode to 07777 as Linux does.  It succeeds because no
+ *    access decision on this volume consults the mode — a portable copier that
+ *    chmods after writing must not abort — and the header says plainly that a
+ *    caller which READS the mode back sees the synthesized one.
+ *  - fchown succeeds only when it asks for the owner every file already has
+ *    (0, with (uid_t)-1 meaning "leave alone"); a request for a foreign owner
+ *    is -EPERM rather than a success that the next stat() would contradict. */
+static int l_fd_valid(struct process *p, int fd) {
+  int fl = file_fcntl(p, fd, K_F_GETFL, 0);
+  if (fl < 0) return fl == -EINVAL ? -EBADF : fl;
+  return 0;
+}
+
+static int l_fd_fchmod(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  uint32_t mode = (uint32_t)l_arg(tf, 1) & 07777u;
+  (void)mode; /* recorded nowhere: see the header note above */
+  int rc = l_fd_valid(p, fd);
+  return l_ret(tf, rc);
+}
+
+static int l_fd_fchown(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  uint32_t uid = (uint32_t)l_arg(tf, 1);
+  uint32_t gid = (uint32_t)l_arg(tf, 2);
+  if ((uid != 0xFFFFFFFFu && uid != 0) ||
+      (gid != 0xFFFFFFFFu && gid != 0))
+    return l_ret(tf, -EPERM);
+  int rc = l_fd_valid(p, fd);
+  return l_ret(tf, rc);
+}
+
 /* ---- the table --------------------------------------------------------- */
 
 const struct l_sysent l_tab_fd[] = {
+  /* descriptors */
+  {L_SYS_openat, l_fd_openat, "openat"},
+  {L_SYS_fchmod, l_fd_fchmod, "fchmod"},
+  {L_SYS_fchown, l_fd_fchown, "fchown"},
   /* sockets: the X11 transport */
   {L_SYS_socket, l_fd_socket, "socket"},
   {L_SYS_socketpair, l_fd_socketpair, "socketpair"},

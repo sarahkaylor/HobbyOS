@@ -42,6 +42,7 @@ extern void uart_puts(const char *s);
    second, print_lock — bytes interleaved under real SMP). */
 extern spinlock_t uart_lock;
 extern void panic_putc(char c);
+extern void uart_putc_dbg(char c); /* GB-097: lock-free NON-panic sink */
 void print_int_raw(int val);
 void panic_print_hex(uint64_t val);
 
@@ -78,11 +79,33 @@ void irq_handler_c(struct trap_frame *tf) {
  * Takes the ONE console lock (uart_lock, shared with uart_puts/uart_putc)
  * for the whole write so multi-char output cannot interleave with other
  * console writers.  The per-char writes go through the lock-free
- * panic_putc because we already hold the lock.
+ * uart_putc_dbg because we already hold the lock -- and because this is a
+ * RETURNING path: GB-097 reserves the panic_* sink for non-returning
+ * callers and reports a [PANIC-SINK-VIOLATION] for any other user, which
+ * is what the old print_int_raw() delegation did on every call.
  */
+static void print_int_locked(int val) {
+  if (val < 0) {
+    uart_putc_dbg('-');
+    val = -val;
+  }
+  if (val == 0) {
+    uart_putc_dbg('0');
+    return;
+  }
+  char buf[16];
+  int idx = 0;
+  while (val > 0) {
+    buf[idx++] = (char)('0' + (val % 10));
+    val /= 10;
+  }
+  while (idx > 0)
+    uart_putc_dbg(buf[--idx]);
+}
+
 void print_int(int val) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  print_int_raw(val);
+  print_int_locked(val);
   spinlock_release_irqrestore(&uart_lock, flags);
 }
 
@@ -108,10 +131,20 @@ void print_int_raw(int val) {
 
 /**
  * Prints a 64-bit value to the UART in hexadecimal format (e.g., 0xABC123).
+ * Same rule as print_int(): the lock-free NON-panic sink while uart_lock is
+ * held, because this is a returning path.
  */
+static void print_hex_locked(uint64_t val) {
+  static const char hex_chars[] = "0123456789ABCDEF";
+  uart_putc_dbg('0');
+  uart_putc_dbg('x');
+  for (int i = 60; i >= 0; i -= 4)
+    uart_putc_dbg(hex_chars[(val >> i) & 0xF]);
+}
+
 void uart_print_hex(uint64_t val) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  panic_print_hex(val);
+  print_hex_locked(val);
   spinlock_release_irqrestore(&uart_lock, flags);
 }
 
@@ -169,13 +202,41 @@ static void test_wave_loader(void *arg) {
           while (len > 0 && (p[len - 1] == '\r' || p[len - 1] == ' ')) p[--len] = '\0';
           while (*p == ' ' || *p == '\t') { p++; len--; }
           if (len > 0 && *p != '#') {
+            /* M2: a manifest line may carry arguments after the first space
+               ("MONO.EXE /HELLO.EXE").  The program is argv[0] and the rest is
+               the kernel-marshalled argv blob, exactly like an XSTART line.
+               Without this a gate could only launch a program that needs no
+               arguments -- and the M6 launch needs -force-glcore. */
+            /* M2: a manifest line may carry arguments after the first space
+               ("MONO.EXE /HELLO.EXE").  Split a COPY, never the manifest
+               buffer in place: the filename pointer handed to the loader must
+               stay valid until the child is created, and mutating `p` in place
+               made the second line's name point into the first line's args
+               (measured: "Loading program ... --versionMONO.EXE"). */
+            static char line[256];
+            int li = 0;
+            for (; li < 255 && p[li]; li++) line[li] = p[li];
+            line[li] = '\0';
+            char *fn = line;
+            char *cargs = 0;
+            char *sp = line;
+            while (*sp && *sp != ' ' && *sp != '\t') sp++;
+            if (*sp) {
+              *sp++ = '\0';
+              while (*sp == ' ' || *sp == '\t') sp++;
+              if (*sp) cargs = sp;
+            }
             struct kline kl;
             kl_init(&kl);
             kl_s(&kl, "[WAVE-MANIFEST] ");
-            kl_s(&kl, p);
+            kl_s(&kl, fn);
+            if (cargs) {
+              kl_s(&kl, " ");
+              kl_s(&kl, cargs);
+            }
             kl_s(&kl, "\n");
             kl_emit(&kl);
-            load_and_run_program_in_scheduler(p, -1, -1, -1, -1);
+            load_and_run_program_in_scheduler_args(fn, -1, -1, -1, -1, cargs);
             dispatched++;
           }
           if (!nl) break;
@@ -244,8 +305,9 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("LKSTEST.BIN", -1, -1, -1, -1);
   /* WCTEST/HEDTEST spawn WC.BIN/HEDGNU.BIN through the real spawn2/pipe
      path; both run at the END so earlier processes have exited and freed
-     process-table slots (the pid masks are 64-bit, so MAX_PROCESSES
-     must stay <= 64). */
+     process-table slots (L12: MAX_PROCESSES is 192 and the parked-pid
+     masks are struct pid_mask word arrays, so the table can exceed 64;
+     this ordering is kept only to shorten the wave's slot high-water). */
   load_and_run_program_in_scheduler("HEDTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("TAILTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("PROCTEST.BIN", -1, -1, -1, -1);
@@ -490,6 +552,16 @@ void main(void) {
   }
 #endif
   uart_puts("VirtIO Block successfully initialized.\n");
+
+#if defined(__x86_64__) && VGPU3D_SELFTEST
+  /* M1 (docs/rimworld-virgl-plan.md): the kernel-only 3D clear + readback
+   * gate.  Placed here, not in virtio_gpu_init(), because timer_get_ms()
+   * only becomes trustworthy after the first PIT tick has calibrated the
+   * TSC -- the probe's submit+readback timing row needs a real clock.
+   * virtio_gpu_3d_probe() is a no-op unless VIRTIO_GPU_F_VIRGL was
+   * negotiated, so 2D-only boots do not even enter it. */
+  virtio_gpu_3d_probe();
+#endif
 
   /* Block-level read cache (docs/blk-cache.md section 7): normal boots
      enable it right after the driver (and before fat16_init, so boot

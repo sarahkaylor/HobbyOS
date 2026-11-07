@@ -7,20 +7,28 @@
 #include "frame.h"
 #include "fs.h"
 #include "vm.h"
+#include "blk_cache.h"
+#include "virtio_blk.h"
 #include "process.h"
 
 extern void uart_puts(const char *s);
 extern void print_int(int v);
 extern void uart_print_hex(uint64_t v); /* so-vm lane A: physaddr evidence */
+#ifdef KERNEL_MODE_UNIT_TEST
+/* M6/L77: the publish-path identity assertion's seam and counters (vm.c). */
+extern void vm_test_corrupt_next_publish(int on);
+extern uint32_t vm_test_id_fail(void);
+extern uint32_t vm_test_id_checks(void);
+#endif
 
 /* P2.2 (S2) window/paging unit tests.  Everything here runs against the
  * real frame allocator and the real arch page-table code (the same paths
  * the loader and the scheduler use), then restores the pool exactly.
  *
- * AS tags 60..63 are reserved for this suite (MAX_PROCESSES is 64, so
- * 60..63 is the free top range; no process holds them, and each test tears
- * its AS down before the next one starts, so a leaked table frame shows up
- * as a count mismatch). */
+ * AS tags 60..63 are reserved for this suite (L12 raised MAX_PROCESSES to
+ * 192, so 60..63 is inside the table but no process holds those slots at
+ * test time; each test tears its AS down before the next one starts, so a
+ * leaked table frame shows up as a count mismatch). */
 
 #define VM_TEST_TAG 60
 
@@ -44,8 +52,17 @@ static void test_vm_as_lifecycle(void) {
   EXPECT_EQ((as->table_frames >= 1), 1); /* at least the root */
   EXPECT_EQ((frame_free_count() < free0), 1);
 
-  /* A second create for the same tag is rejected while in use. */
+  /* A second create for the same tag is rejected while a live owner holds it.
+     GB-217 added the other half of this contract: an AS-pool entry that no
+     PCB and no CPU claim points at is an ORPHAN, and vm_as_create() reclaims
+     it rather than failing every future spawn of that pid.  The unit tier has
+     no process for tag 60, so without a planted claim this is the reclaim
+     path -- plant the claim the kernel's process_still_running() reads, as
+     process_test.c does for its own pid-claim cases. */
+  int saved_claim = cpu_current_pids[0];
+  cpu_current_pids[0] = (int)VM_TEST_TAG;
   EXPECT_EQ((vm_as_create(VM_TEST_TAG) == 0), 1);
+  cpu_current_pids[0] = saved_claim;
   /* Tag 0 is illegal. */
   EXPECT_EQ((vm_as_create(0) == 0), 1);
 
@@ -62,6 +79,27 @@ static void test_vm_as_lifecycle(void) {
   struct addr_space *as2 = vm_as_create(VM_TEST_TAG);
   EXPECT_EQ((as2 != 0), 1);
   vm_as_teardown(as2);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+static void test_vm_as_orphan_reclaim(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_as_orphan_reclaim...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  /* Abandon it exactly as a deferred-release race does: no teardown, no PCB,
+     no claim.  GB-217: the next create for that pid must RECLAIM the entry
+     (otherwise every later spawn of the pid reports "no address space"). */
+  uint32_t before = vm_as_reclaim_count();
+  struct addr_space *as2 = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as2 != 0), 1);
+  EXPECT_EQ(vm_as_reclaim_count() == before + 1, 1);
+  if (as2)
+    vm_as_teardown(as2);
   EXPECT_EQ(frame_free_count(), free0);
 }
 
@@ -1219,6 +1257,7 @@ static void test_vm_file_map_shared_frames(void) {
               1);
   }
 
+
 out:
   if (p1.as)
     vm_as_teardown(p1.as);
@@ -1506,9 +1545,1195 @@ out:
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* M6/L30 (a): the COW decision must not depend on the resident leaf being
+ * the region object's page.  Measured state from the RimWorld boot: the VMA
+ * permits the write, the PTE is read-only, and the leaf is NOT what the
+ * region's object would serve for that offset — the old test refused the
+ * copy, the "present but permissive" retry refaulted FAULT_RETRY_MAX times
+ * and the process was killed with in=PROT.  Build that state exactly (a
+ * private page a protection change left read-only under a writable VMA) and
+ * require: the write fault succeeds, the old page is untouched, and the new
+ * leaf is a writable private copy carrying the old bytes.
+ *
+ * (b) it also proves vm_arch_leaf_writable() and the fill path agree: the
+ * object's page-cache frame stays read-only and is never written. */
+static void test_vm_file_cow_private_leaf(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_file_cow_private_leaf...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_FILE_TAG1));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (fd < 0 || b <= 0)
+    goto out;
+
+  /* First touch is a READ fill: the object's frame, installed read-only. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 0), 0);
+  uint64_t l0 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &l0), 0);
+  uint64_t objfr = vm_arch_leaf_phys(l0);
+  EXPECT_EQ(vm_arch_leaf_writable(l0), 0); /* read-only: the COW setup */
+  struct vm_region *r = vm_region_find(p.as, (uint64_t)b);
+  EXPECT_EQ((r && r->obj && vm_object_peek(r->obj, 0) == objfr), 1);
+
+  /* The write fault breaks the copy: private, writable, same bytes. */
+  const char *why = 0;
+  EXPECT_EQ(vm_handle_fault(&p, (uint64_t)b, 1, 0, &why), 0);
+  uint64_t l1 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &l1), 0);
+  uint64_t priv = vm_arch_leaf_phys(l1);
+  EXPECT_EQ((priv != 0 && priv != objfr), 1);
+  EXPECT_EQ(vm_arch_leaf_writable(l1), 1);
+  EXPECT_EQ((int)(((const volatile unsigned char *)priv)[0]),
+            (int)((0u * 7u + 3u) & 0xFFu));
+
+  /* A protection change that leaves the PRIVATE page read-only while the VMA
+     still says read-write: exactly the disagreement the boot hit.  The leaf
+     is no longer the object's frame, so the old identity test said "not a
+     COW" and looped on the retry path until it killed the process. */
+  vm_arch_prot(p.as, (uint64_t)b, VM_PROT_READ);
+  uint64_t l2 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &l2), 0);
+  EXPECT_EQ(vm_arch_leaf_writable(l2), 0);
+  EXPECT_EQ(vm_arch_leaf_phys(l2), priv); /* still our private page */
+  struct vm_region *r2 = vm_region_find(p.as, (uint64_t)b);
+  EXPECT_EQ((r2 && (r2->prot & VM_PROT_WRITE) && r2->obj &&
+             vm_object_peek(r2->obj, 0) != priv),
+            1); /* VMA writable, leaf neither writable nor the object page */
+
+  ((volatile unsigned char *)priv)[0] = 0x5A; /* a private byte to carry */
+  EXPECT_EQ((int)(((const volatile unsigned char *)priv)[0]), 0x5A);
+  why = 0;
+  EXPECT_EQ(vm_handle_fault(&p, (uint64_t)b, 1, 0, &why), 0);
+  uint64_t l3 = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &l3), 0);
+  uint64_t priv2 = vm_arch_leaf_phys(l3);
+  EXPECT_EQ((priv2 != 0 && priv2 != priv), 1);   /* a NEW private copy */
+  EXPECT_EQ(vm_arch_leaf_writable(l3), 1);       /* and it is writable */
+  EXPECT_EQ((int)(((const volatile unsigned char *)priv2)[0]), 0x5A);
+  /* The object's page-cache frame still carries the file's byte: the copy
+     never touched the page every other mapping shares. */
+  EXPECT_EQ((int)(((const volatile unsigned char *)objfr)[0]),
+            (int)((0u * 7u + 3u) & 0xFFu));
+
+  /* REGRESSION (measured, docs/rimworld-launch-log.md §19.6/§20): a loader
+     that dlopen/dlcloses probe DSOs re-uses one base, so the SAME VA is
+     copy-on-write relocated once per load — five times in the RimWorld audio
+     probe.  Charging each correct COW to the "keeps refaulting" budget killed
+     the fifth with in=PROT.  Eight consecutive COWs on one VA must all
+     succeed and each must leave a writable private page. */
+  for (int i = 0; i < 8; i++) {
+    vm_arch_prot(p.as, (uint64_t)b, VM_PROT_READ); /* next load's RO fill */
+    const char *w2 = 0;
+    if (vm_handle_fault(&p, (uint64_t)b, 1, 0, &w2) != 0) {
+      uart_puts("ASSERTION FAILED: COW #");
+      print_int(i + 1);
+      uart_puts(" on the same VA was killed (in=");
+      uart_puts(w2 ? w2 : "?");
+      uart_puts(")\n");
+      EXPECT_EQ(1, 0);
+      break;
+    }
+    uint64_t lr = 0;
+    if (vm_arch_walk(p.as, (uint64_t)b, &lr) != 0 ||
+        !vm_arch_leaf_writable(lr)) {
+      EXPECT_EQ(1, 0); /* a COW must install a writable page */
+      break;
+    }
+  }
+
+out:
+  if (p.as)
+    vm_as_teardown(p.as);
+  if (fd >= 0)
+    file_close(&p, fd);
+  file_obj_invalidate_all();
+  uart_puts("  [VM-FILE] cow_private_leaf objects c0=");
+  print_int(c0);
+  uart_puts(" now=");
+  print_int(file_obj_count());
+  uart_puts(" frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* =====================================================================
+ * M6/L63: an executable page whose read failed must NEVER be published.
+ *
+ * The L62 soak executed a page of zeros in UnityPlayer's text (0x9AD000)
+ * immediately after the block layer reset, and the row said the leaf was a
+ * private copy whose *fresh full-page read agreed with the zeros*
+ * (`rd=4096 same=1`): not a short read, a full-length page the device never
+ * delivered.  The publisher was vm_touch's object-file branch, which had no
+ * exec clause and so skipped L60's gate entirely.
+ *
+ * This test injects both faults into the file object's read path and asserts
+ * the mapping gets an I/O error and stays ABSENT -- never a zero page:
+ *
+ *   1. short read          -> vm_touch = -1, page absent
+ *   2. full-length zeros   -> vm_touch = -1, page absent   (the soak's shape)
+ *   3. injection cleared   -> vm_touch = 0, page holds the FILE's bytes
+ *      (the gate REPLACES the poisoned cache frame instead of publishing it)
+ *   4. the demand-fault path (exec) refuses the same page, same shape
+ * ===================================================================== */
+#define VM_EXEC_TAG 64
+static void test_vm_exec_page_eio(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_exec_page_eio...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+  /* The fixture write invalidates the cache; be explicit so the object this
+     test maps has NO pages and page 0 really is read (not a cached hit). */
+  file_obj_invalidate_all();
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_EXEC_TAG));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  if (fd < 0)
+    goto out;
+
+  /* TEXT, private: the DSO case.  A read-touch is a publish for execution. */
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (b <= 0)
+    goto out;
+  {
+    struct vm_region *r = vm_region_find(p.as, (uint64_t)b);
+    EXPECT_EQ((r && (r->prot & VM_PROT_EXEC)), 1);
+  }
+
+  uint64_t leaf = 0;
+  int bad = 0;
+  const char *why = 0;
+
+  /* (1) short read: vm_touch must refuse, page must stay absent. */
+  fat16_test_inject(1, 0, 64);
+  int rc1 = vm_touch(&p, (uint64_t)b, 8, 0);
+  fat16_test_inject(0, 0, 0);
+  EXPECT_EQ(rc1, -1);
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &leaf) != 0, 1);
+
+  /* (2) full-length zeros: the exact §48 delivery.  Still -1, still absent. */
+  fat16_test_inject(2, 0, 64);
+  int rc2 = vm_touch(&p, (uint64_t)b, 8, 0);
+  fat16_test_inject(0, 0, 0);
+  EXPECT_EQ(rc2, -1);
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &leaf) != 0, 1);
+
+  /* (3) injection off: the SAME page now publishes the FILE's bytes.  The
+     object's cache still holds the zero page from (2); the gate reads the
+     file and must publish the verified copy, not the cache frame. */
+  int rc3 = vm_touch(&p, (uint64_t)b, 8, 0);
+  EXPECT_EQ(rc3, 0);
+  if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    for (int i = 0; i < 64; i++)
+      if (((const volatile unsigned char *)ph)[i] !=
+          (unsigned char)((i * 7 + 3) & 0xFF))
+        bad++;
+    EXPECT_EQ(bad, 0); /* verified bytes, not zeros */
+    /* The repair publishes a private copy: the leaf is not the object's
+       (still zero) page-cache frame. */
+    struct vm_region *r3 = vm_region_find(p.as, (uint64_t)b);
+    uint64_t objfr = (r3 && r3->obj) ? vm_object_peek(r3->obj, 0) : 0;
+    EXPECT_EQ(objfr != 0, 1);
+    EXPECT_EQ((ph != objfr), 1);
+  } else {
+    EXPECT_EQ(1, 0);
+  }
+
+  /* (4) the demand-fault publisher (exec=1) takes the same gate.  M6/L69: a
+     refused EXEC page is an I/O error on the MAPPING (2), not a protection
+     fault (1): the trap layer turns it into SIGBUS, and the region is marked
+     so a handler that returns cannot drive another device read. */
+  EXPECT_EQ(vm_unmap_page(p.as, (uint64_t)b), 0);
+  fat16_test_inject(2, 0, 64);
+  int frc = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+  fat16_test_inject(0, 0, 0);
+  EXPECT_EQ(frc, 2); /* EIO: a failed page-in, not a protection violation */
+  EXPECT_EQ(why != 0 && why[0] == 'E' && why[1] == 'I' && why[2] == 'O', 1);
+  EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &leaf) != 0, 1);
+  {
+    struct vm_region *r4 = vm_region_find(p.as, (uint64_t)b);
+    EXPECT_EQ((r4 && (r4->flags & VM_MAP_IOERR)), 1);
+  }
+  /* ... the SAME fault with the device healthy now answers 2 immediately and
+     WITHOUT a device read: the mapping is failed, and re-reading it page by
+     page is the storm this flag exists to stop. */
+  {
+    struct blk_cache_stats s0, s1;
+    blk_cache_get_stats(&s0);
+    int frc_again = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+    blk_cache_get_stats(&s1);
+    EXPECT_EQ(frc_again, 2);
+    EXPECT_EQ((s1.raw_sectors - s0.raw_sectors), 0);
+  }
+  /* Clear the marker (a test-only reset of the mapping's failure) and the
+     same fault resolves into the file's bytes. */
+  {
+    struct vm_region *r4 = vm_region_find(p.as, (uint64_t)b);
+    if (r4)
+      r4->flags &= ~(uint32_t)VM_MAP_IOERR;
+  }
+  int frc2 = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+  EXPECT_EQ(frc2, 0);
+  if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    int bad2 = 0;
+    for (int i = 0; i < 64; i++)
+      if (((const volatile unsigned char *)ph)[i] !=
+          (unsigned char)((i * 7 + 3) & 0xFF))
+        bad2++;
+    EXPECT_EQ(bad2, 0);
+  } else {
+    EXPECT_EQ(1, 0);
+  }
+
+  /* (5) THE PUBLISHER PROPERTY (L62 §48.3).  With a HEALTHY object cache the
+     page must still be published as a PRIVATE copy: that is the exec clause
+     in vm_touch, and without it the leaf here IS the object's frame (shared
+     with every other mapping of the same file -- the shape that made the
+     zero page visible at 0x9AD000).  A fresh address space + a fresh object
+     guarantees the cache page comes straight from the file. */
+  {
+    struct process p2;
+    vm_file_proc_init(&p2, vm_as_create(VM_EXEC_TAG + 1));
+    EXPECT_EQ((p2.as != 0), 1);
+    if (p2.as) {
+      /* Drop the slot so p2's mmap builds a NEW object whose page 0 is read
+         from the file, not the zero page steps (1)-(2) left in the old one. */
+      file_obj_invalidate_all();
+      int fd2 = file_open(&p2, VM_FILE_NAME, 0);
+      EXPECT_EQ((fd2 >= 0), 1);
+      if (fd2 >= 0) {
+        int64_t b2 = vm_mmap(&p2, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                             VM_MAP_PRIVATE, fd2, 0);
+        EXPECT_EQ((b2 > 0), 1);
+        if (b2 > 0) {
+          EXPECT_EQ(vm_touch(&p2, (uint64_t)b2, 8, 0), 0);
+          uint64_t l5 = 0;
+          if (vm_arch_walk(p2.as, (uint64_t)b2, &l5) == 0) {
+            struct vm_region *r5 = vm_region_find(p2.as, (uint64_t)b2);
+            uint64_t ofr = (r5 && r5->obj) ? vm_object_peek(r5->obj, 0) : 0;
+            uart_puts("  [VM-FILE] exec_eio p2 b=");
+            uart_print_hex((uint64_t)b2);
+            uart_puts(" leaf=");
+            uart_print_hex(vm_arch_leaf_phys(l5));
+            uart_puts(" objfr=");
+            uart_print_hex(ofr);
+            uart_puts(ofr && vm_arch_leaf_phys(l5) == ofr ? " SHARED\n" : " private\n");
+            EXPECT_EQ(ofr != 0, 1);
+            EXPECT_EQ((vm_arch_leaf_phys(l5) != ofr), 1);
+          } else {
+            EXPECT_EQ(1, 0);
+          }
+        }
+        file_close(&p2, fd2);
+      }
+      vm_as_teardown(p2.as);
+    }
+  }
+
+out:
+  if (p.as)
+    vm_as_teardown(p.as);
+  if (fd >= 0)
+    file_close(&p, fd);
+  file_obj_invalidate_all();
+  uart_puts("  [VM-FILE] exec_eio objects c0=");
+  print_int(c0);
+  uart_puts(" now=");
+  print_int(file_obj_count());
+  uart_puts(" frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* =====================================================================
+ * M6/L69: A POISONED CACHE FRAME MUST NOT DEFEAT THE EXEC GATE.
+ *
+ * The measured field failure (L69, UnityPlayer.so off 0x757000):
+ *
+ *   [BLKQ] device off cid=44153 op=R lba=0x7B6DE cc=0x0 csts=0x0
+ *   [BLKQ] controller reset #1 / recovered us=53000
+ *   [BLKC] distrust unit=63195 (reset during fill) -> frame dropped
+ *   [TXT] PROBE off=0x757000 ... cache found=1 fstate=0 valid=0xFF c_nz=0
+ *           | raw rc=0 r_nz=3754 r_sum=0x6A3B1
+ *   [TXT] ZERO off=0x757000 reads=3 n0=4096 -> not published   (x64 died)
+ *
+ * The device holds the page (3754 non-zero bytes); the CACHE held a page of
+ * zeros with every sector valid.  Every read the gate makes went through that
+ * frame, so its two-agreeing-reads test could only confirm the cache against
+ * itself.  The fix is that the gate treats the DEVICE as the truth: on an
+ * all-zero answer it reads the page once with the cache bypassed and, if the
+ * device has bytes, publishes those and drops the poisoned frame.
+ *
+ * This test builds that exact state — a fully valid, CLEAN, all-zero cache
+ * unit covering the page — and asserts the page still publishes the file's
+ * bytes, byte for byte, and that the poisoned unit is gone afterwards.
+ * ===================================================================== */
+static void test_vm_poisoned_cache_page(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_poisoned_cache_page...\n");
+
+  /* Start from a clean slate so the frame accounting at the end is exact. */
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  int free0 = frame_free_count();
+
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+  /* The fixture write invalidated the cache; make the object fresh too. */
+  file_obj_invalidate_all();
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_EXEC_TAG + 3));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  if (fd < 0) {
+    vm_as_teardown(p.as);
+    return;
+  }
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (b <= 0) {
+    file_close(&p, fd);
+    vm_as_teardown(p.as);
+    return;
+  }
+
+  /* Poison the exact unit page 0 will read: 4 KiB of zeros, valid, CLEAN. */
+  uint32_t lba = 0;
+  EXPECT_EQ(fat16_test_lba(cluster, 0, &lba), 0);
+  static uint8_t zeros[4096];
+  EXPECT_EQ(blk_cache_test_poison(lba, zeros, 4096), 0);
+
+  /* The cache really does answer zeros for that page now.  This is the
+     precondition: without it the test would pass on a healthy cache. */
+  {
+    static uint8_t chk[512];
+    EXPECT_EQ(virtio_blk_read_sector(lba, chk, 1), 0);
+    int allz = 1;
+    for (int i = 0; i < 512; i++)
+      if (chk[i]) { allz = 0; break; }
+    EXPECT_EQ(allz, 1);
+  }
+
+  /* The exec publish must NOT believe it: the device has the file's bytes. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 0), 0);
+  {
+    uint64_t leaf = 0;
+    if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+      uint64_t ph = vm_arch_leaf_phys(leaf);
+      int bad = 0;
+      for (int i = 0; i < 64; i++)
+        if (((const volatile unsigned char *)ph)[i] !=
+            (unsigned char)((i * 7 + 3) & 0xFF))
+          bad++;
+      EXPECT_EQ(bad, 0); /* the FILE's bytes, not the poisoned zeros */
+    } else {
+      EXPECT_EQ(1, 0);
+    }
+  }
+
+  /* The poisoned entry is dropped, not left to be served to the next reader. */
+  {
+    struct blk_cache_unit_info ci;
+    blk_cache_probe_unit(lba, &ci);
+    EXPECT_EQ(ci.found, 0);
+  }
+
+  /* And a cache-bypassing read agrees with the mapping (device == file). */
+  {
+    static uint8_t raw[512];
+    EXPECT_EQ(fat16_read_direct_pos_raw(cluster, fsize, (uint64_t)raw, 512, 0),
+              512);
+    EXPECT_EQ(raw[0], (uint8_t)((0 * 7 + 3) & 0xFF));
+    EXPECT_EQ(raw[5], (uint8_t)((5 * 7 + 3) & 0xFF));
+  }
+
+  file_close(&p, fd);
+  vm_as_teardown(p.as);
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  uart_puts("  [VM-FILE] poisoned_cache frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L63: the same rule on the IMAGE path, with a stronger witness.
+ *
+ * Two agreeing reads are not proof (the soak caught the device answering the
+ * same zeros twice, and the boot program then executed 0x1000010EA0 while
+ * the file holds `55 48 89 e5` there).  vm_image_sums_build() reads the image
+ * once at exec and keeps a sum32 per page; a fill must match it.  This test
+ * injects a full-length zero delivery for one exec image page and asserts the
+ * page is refused, then that a healthy read publishes the FILE's bytes.
+ */
+#define VM_IMG2_TAG 65
+static void test_vm_img_page_eio(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_img_page_eio...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_IMG2_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  struct file f;
+  if (fat16_open("BIG.BIN", &f) != 0) {
+    uart_puts("ASSERTION FAILED: BIG.BIN missing from the boot disk\n");
+    vm_as_teardown(as);
+    return;
+  }
+  uint32_t fsize = f.fat16.entry.file_size;
+  uint16_t cluster = f.fat16.entry.start_cluster;
+  fat16_close(&f);
+
+  const uint64_t pages = 8;
+  EXPECT_EQ(vm_region_insert(as, USER_IMG_BASE, pages * FRAME_SIZE,
+                             VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                             VMK_IMG, VM_MAP_PRIVATE, 0, 0), 0);
+  as->img_active = 1;
+  as->img_file_size = fsize;
+  as->img_start_cluster = cluster;
+  EXPECT_EQ(vm_image_sums_build(as), 0);
+  EXPECT_EQ((as->img_sums != 0 && as->img_sums_pages >= pages), 1);
+
+  struct process p;
+  vm_file_proc_init(&p, as);
+  uint64_t va = USER_IMG_BASE + 0x1000;
+  uint64_t leaf = 0;
+  int bad = 0;
+
+  /* Healthy: page 1 publishes and carries the file's bytes. */
+  EXPECT_EQ(vm_touch(&p, va, 8, 0), 0);
+  if (vm_arch_walk(as, va, &leaf) == 0) {
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    for (int i = 0; i < 16; i++)
+      if (((const volatile unsigned char *)ph)[i] !=
+          (unsigned char)"HO_BIGLOAD_30MB\n"[i])
+        bad++;
+    EXPECT_EQ(bad, 0);
+  } else {
+    EXPECT_EQ(1, 0);
+  }
+
+  /* A full-length page of zeros must be refused: the sum table says the file
+     holds the pattern there. */
+  EXPECT_EQ(vm_unmap_page(as, va), 0);
+  fat16_test_inject(2, 0x1000, 64);
+  int rc = vm_touch(&p, va, 8, 0);
+  fat16_test_inject(0, 0, 0);
+  EXPECT_EQ(rc, -1);
+  EXPECT_EQ(vm_arch_walk(as, va, &leaf) != 0, 1);
+
+  /* Healthy again: the same page publishes, byte-exact. */
+  EXPECT_EQ(vm_touch(&p, va, 8, 0), 0);
+  if (vm_arch_walk(as, va, &leaf) == 0) {
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    int bad2 = 0;
+    for (int i = 0; i < 16; i++)
+      if (((const volatile unsigned char *)ph)[i] !=
+          (unsigned char)"HO_BIGLOAD_30MB\n"[i])
+        bad2++;
+    EXPECT_EQ(bad2, 0);
+  } else {
+    EXPECT_EQ(1, 0);
+  }
+
+  vm_as_teardown(as);
+  uart_puts("  [VM-FILE] img_eio frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L38: the JIT code arena.
+ *
+ * The property under test is the one Mono's amd64 codegen needs: every
+ * executable anonymous mapping of one process lands inside ONE contiguous
+ * span of at most 2 GiB, so `mono_x86_patch` can encode a rel32 branch
+ * between any two of them.  Everything else about placement must be
+ * unchanged: non-exec mappings never enter the arena, and an exhausted
+ * arena degrades to ordinary first-fit instead of failing.
+ */
+#define VM_JIT_TAG 63 /* 60=vm suite, 61=file suite, 62=trap_test */
+static void test_vm_jit_arena(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_jit_arena...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_JIT_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  fake.as = as;
+
+  /* --- (1) N exec mappings land inside a 2 GiB span ------------------- */
+#define JIT_N 12
+  int64_t b[JIT_N];
+  int ok = 1;
+  for (int i = 0; i < JIT_N; i++) {
+    b[i] = vm_mmap(&fake, 0, 0x10000, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                   VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+    if (b[i] <= 0)
+      ok = 0;
+  }
+  EXPECT_EQ(ok, 1);
+  /* The arena was claimed, is a real contiguous span, and every mapping is
+     inside it. */
+  EXPECT_EQ((as->jit_base != 0), 1);
+  EXPECT_EQ((as->jit_end > as->jit_base), 1);
+  EXPECT_EQ((as->jit_end - as->jit_base >= 0x10000 * JIT_N), 1);
+  uint64_t lo = (uint64_t)-1, hi = 0;
+  for (int i = 0; ok && i < JIT_N; i++) {
+    uint64_t a = (uint64_t)b[i];
+    EXPECT_EQ((a >= as->jit_base && a + 0x10000 <= as->jit_end), 1);
+    if (a < lo)
+      lo = a;
+    if (a + 0x10000 > hi)
+      hi = a + 0x10000;
+    struct vm_region *r = vm_region_find(as, a);
+    EXPECT_EQ((r && (r->prot & VM_PROT_EXEC)), 1);
+  }
+  /* The rel32 property itself: the whole cluster fits in +-2 GiB (it is
+     actually one arena, so far tighter). */
+  EXPECT_EQ((hi - lo <= 0x80000000ULL), 1);
+  /* And it is monotone: successive chunks take successive addresses, which
+     is what makes the cluster contiguous rather than merely close. */
+  for (int i = 1; ok && i < JIT_N; i++)
+    EXPECT_EQ((uint64_t)b[i] > (uint64_t)b[i - 1], 1);
+
+  /* --- (2) the arena is skipped for non-exec mappings ----------------- */
+  int64_t rw = vm_mmap(&fake, 0, 0x2000, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((rw > 0), 1);
+  /* Not inside the arena ... */
+  EXPECT_EQ((uint64_t)rw < as->jit_base ||
+            (uint64_t)rw + 0x2000 > as->jit_end, 1);
+  /* ... and the arena itself is untouched by it. */
+  uint64_t bump_before = as->jit_bump;
+  int64_t rw2 = vm_mmap(&fake, 0, 0x1000, VM_PROT_READ,
+                        VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((rw2 > 0), 1);
+  EXPECT_EQ(as->jit_bump, bump_before);
+  /* A DSO-band mapping (MAP_FIXED in the library window) is not moved
+     either: the arena must not change the DSO placement rule. */
+  uint64_t fix = USER_LIB_BASE + 0x200000;
+  int64_t fx = vm_mmap(&fake, fix, 0x1000, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS | VM_MAP_FIXED, -1, 0);
+  EXPECT_EQ((fx == (int64_t)fix), 1);
+
+  /* --- (3) a freed arena chunk comes back ----------------------------- */
+  int64_t freed = b[JIT_N - 1];
+  EXPECT_EQ(vm_munmap_range(&fake, (uint64_t)freed, 0x10000), 0);
+  int64_t reuse = vm_mmap(&fake, 0, 0x10000, VM_PROT_READ | VM_PROT_EXEC,
+                          VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((reuse == freed), 1);
+
+  /* --- (4) exhaustion falls back cleanly ------------------------------ */
+  /* Fill the remaining arena with one request that cannot fit inside it. */
+  uint64_t left = (as->jit_end - as->jit_bump) & ~0xFFFULL;
+  if (left >= 0x1000) {
+    int64_t big = vm_mmap(&fake, 0, left, VM_PROT_READ | VM_PROT_EXEC,
+                          VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+    /* It may take the arena's tail exactly, or (if the tail is unaligned)
+       go to first-fit; either way the mapping must exist. */
+    EXPECT_EQ((big > 0), 1);
+  }
+  /* Any further exec mapping now needs the ordinary first-fit path; it must
+     succeed, and it must NOT be inside the arena. */
+  int64_t fb = vm_mmap(&fake, 0, 0x10000, VM_PROT_READ | VM_PROT_EXEC,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((fb > 0), 1);
+  EXPECT_EQ((uint64_t)fb < as->jit_base || (uint64_t)fb + 0x10000 > as->jit_end,
+            1);
+  EXPECT_EQ((vm_region_find(as, (uint64_t)fb) != 0), 1);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L30 (b): the DSO slot allocator.  A loader that maps several DSOs of
+ * colliding size/hash (our audio shims were byte-identical) must get a
+ * DISTINCT base for every live mapping, and a hint that names an occupied
+ * base must be skipped rather than honoured.  Also: one page-cache object
+ * per file no matter how many times it is mapped. */
+/* M6/L38 (b): the arena must end where the free gap ends.
+ *
+ * The claim aligns its base up to the code-chunk granularity.  Aligning the
+ * BASE without shrinking the SIZE by the same amount pushes the arena one
+ * chunk past the gap's end, `vm_region_insert` then refuses the placeholder
+ * and the claim silently fails -- which is exactly how the first version lost
+ * the cluster on every desktop run while its own test (an empty address
+ * space, where every gap ends on a 2 GiB boundary) passed.  This test builds a
+ * bounded, deliberately mis-aligned gap and pins both ends.
+ */
+static void test_vm_jit_arena_gap_end(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_jit_arena_gap_end...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_JIT_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  fake.as = as;
+
+  /* A 32 KiB mapping at the arena base leaves the next free span starting at
+     MMAP_BASE+0x8000 (not 64 KiB aligned), and one big ceiling mapping closes
+     the span -- and the whole +-2 GiB window -- exactly at its end. */
+  int64_t lo = vm_mmap(&fake, 0, 0x8000, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((lo == (int64_t)USER_MMAP_BASE_V2), 1);
+  uint64_t ceiling = USER_MMAP_BASE_V2 + 0x10008000;
+  int64_t cl = vm_mmap(&fake, ceiling, 0x70000000ULL, VM_PROT_READ,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS | VM_MAP_FIXED, -1, 0);
+  EXPECT_EQ((cl == (int64_t)ceiling), 1);
+
+  int64_t e = vm_mmap(&fake, 0, 0x10000, VM_PROT_READ | VM_PROT_EXEC,
+                      VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((e > 0), 1);
+  /* The arena exists, is 64 KiB aligned, and its END is the gap's end -- never
+     one byte into the ceiling. */
+  EXPECT_EQ((as->jit_base != 0), 1);
+  EXPECT_EQ((as->jit_base & (USER_JIT_ALIGN - 1)), 0);
+  EXPECT_EQ((as->jit_base >= (uint64_t)lo + 0x8000), 1);
+  EXPECT_EQ((as->jit_end == ceiling), 1);
+  EXPECT_EQ((e >= (int64_t)as->jit_base && (uint64_t)e + 0x10000 <= as->jit_end),
+            1);
+  struct vm_region *rc = vm_region_find(as, ceiling);
+  EXPECT_EQ((rc && rc->base == ceiling), 1);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+static void test_vm_dso_bases_distinct(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_dso_bases_distinct...\n");
+
+  int free0 = frame_free_count();
+  int c0 = file_obj_count();
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_FILE_TAG1));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  if (fd < 0)
+    goto out;
+
+#define DSO_N 6
+  int64_t b[DSO_N];
+  int ok = 1;
+  for (int i = 0; i < DSO_N; i++) {
+    b[i] = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
+                   VM_MAP_PRIVATE, fd, 0);
+    if (b[i] <= 0)
+      ok = 0;
+  }
+  EXPECT_EQ(ok, 1);
+  /* Every base is inside the mmap arena, distinct, and owned by the region
+     that was just created there. */
+  for (int i = 0; ok && i < DSO_N; i++) {
+    EXPECT_EQ((b[i] >= (int64_t)USER_MMAP_BASE_V2 &&
+               b[i] + (int64_t)fsize <= (int64_t)USER_MMAP_LIMIT_V2),
+              1);
+    struct vm_region *ri = vm_region_find(p.as, (uint64_t)b[i]);
+    EXPECT_EQ((ri && ri->base == (uint64_t)b[i]), 1);
+    for (int j = 0; j < i; j++) {
+      uint64_t lo1 = (uint64_t)b[i], lo2 = (uint64_t)b[j];
+      uint64_t end1 = lo1 + ((fsize + 0xFFFu) & ~0xFFFu);
+      uint64_t end2 = lo2 + ((fsize + 0xFFFu) & ~0xFFFu);
+      EXPECT_EQ((end1 <= lo2 || end2 <= lo1), 1); /* no overlap */
+      EXPECT_EQ((lo1 != lo2), 1);                /* distinct base */
+    }
+  }
+  /* Colliding size/hash still means ONE page-cache object.  (Region pointers
+     are re-fetched: the registry array can grow under an insert.) */
+  struct vm_object *ob0 = 0;
+  {
+    struct vm_region *r0 = vm_region_find(p.as, (uint64_t)b[0]);
+    ob0 = r0 ? r0->obj : 0;
+  }
+  EXPECT_EQ((ob0 != 0), 1);
+  for (int i = 1; ok && i < DSO_N; i++) {
+    struct vm_region *ri = vm_region_find(p.as, (uint64_t)b[i]);
+    EXPECT_EQ((ri && ri->obj == ob0), 1);
+  }
+  /* A hint that names an OCCUPIED base is not honoured: the allocator must
+     skip the live mapping, not land on top of it. */
+  int64_t hb = vm_mmap(&p, (uint64_t)b[0], fsize, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((hb > 0 && hb != b[0]), 1);
+  struct vm_region *rh = hb > 0 ? vm_region_find(p.as, (uint64_t)hb) : 0;
+  EXPECT_EQ((rh && rh->base == (uint64_t)hb && rh->obj == ob0), 1);
+
+  /* Independent private copies: a write fault in each mapping must not
+     disturb the others (no shared base means no shared leaves). */
+  for (int i = 0; ok && i < DSO_N; i++) {
+    const char *why = 0;
+    if (vm_handle_fault(&p, (uint64_t)b[i], 1, 0, &why) != 0) {
+      EXPECT_EQ(1, 0); /* a write fault must COW, never kill */
+      break;
+    }
+    uint64_t li = 0;
+    EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b[i], &li), 0);
+    ((volatile unsigned char *)vm_arch_leaf_phys(li))[0] =
+        (unsigned char)(0xA0 + i);
+  }
+  for (int i = 0; ok && i < DSO_N; i++) {
+    uint64_t li = 0;
+    EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b[i], &li), 0);
+    EXPECT_EQ((int)(((const volatile unsigned char *)
+                         vm_arch_leaf_phys(li))[0]),
+              (int)(0xA0 + i));
+  }
+  /* The file's page-cache page never saw any of those writes. */
+  EXPECT_EQ((int)(((const volatile unsigned char *)
+                       vm_object_peek(ob0, 0))[0]),
+            (int)((0u * 7u + 3u) & 0xFFu));
+#undef DSO_N
+
+out:
+  if (p.as)
+    vm_as_teardown(p.as);
+  if (fd >= 0)
+    file_close(&p, fd);
+  file_obj_invalidate_all();
+  EXPECT_EQ(file_obj_count(), c0);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L30 (c): file identity as a loader sees it.  Two DSOs with IDENTICAL
+ * contents under different names (the audio shims were byte-identical) must
+ * report distinct (st_dev, st_ino) pairs, and stat(path) must agree with
+ * fstat(fd) for the same file — otherwise glibc's dlopen "already loaded"
+ * test hands back the same link map for two different libraries. */
+static void test_fs_dso_identity_pair(void) {
+  tests_run++;
+  uart_puts("  Running test_fs_dso_identity_pair...\n");
+
+  static const char *names[2] = {"/VMSOID1.DAT", "/VMSOID2.DAT"};
+  struct file f;
+  for (int i = 0; i < 2; i++) {
+    for (unsigned k = 0; k < sizeof(f); k++)
+      ((unsigned char *)&f)[k] = 0;
+    if (fat16_open(names[i], &f) != 0) {
+      uart_puts("ASSERTION FAILED: identity fixture not creatable\n");
+      return;
+    }
+    fat16_truncate_to(&f, 0);
+    unsigned char buf[256];
+    for (int k = 0; k < 256; k++)
+      buf[k] = (unsigned char)(0x40 + k); /* identical contents */
+    int w = fat16_write(&f, buf, 256);
+    fat16_close(&f);
+    EXPECT_EQ(w, 256);
+  }
+
+  struct k_stat sp[2], sf[2];
+  int e = 0;
+  EXPECT_EQ(file_stat_path(0, names[0], &sp[0], &e), 0);
+  EXPECT_EQ(file_stat_path(0, names[1], &sp[1], &e), 0);
+
+  struct process p;
+  vm_file_proc_init(&p, 0); /* stat/fstat need only the fd table */
+  for (int i = 0; i < 2; i++) {
+    int fd = file_open(&p, names[i], 0);
+    EXPECT_EQ((fd >= 0), 1);
+    if (fd < 0)
+      return;
+    EXPECT_EQ(file_stat_fd(&p, fd, &sf[i], &e), 0);
+    file_close(&p, fd);
+  }
+
+  uart_puts("  [FS-ID] ");
+  uart_print_hex((uint64_t)sp[0].st_dev);
+  uart_puts(":");
+  uart_print_hex((uint64_t)sp[0].st_ino);
+  uart_puts(" ");
+  uart_print_hex((uint64_t)sp[1].st_dev);
+  uart_puts(":");
+  uart_print_hex((uint64_t)sp[1].st_ino);
+  uart_puts("\n");
+
+  /* Both are regular files on the same volume... */
+  EXPECT_EQ((sp[0].st_dev != 0 && sp[0].st_dev == sp[1].st_dev), 1);
+  /* ...with different directory entries, so different inodes... */
+  EXPECT_EQ((sp[0].st_ino != sp[1].st_ino), 1);
+  /* ...and the pair a loader compares is never equal. */
+  EXPECT_EQ((sp[0].st_dev != sp[1].st_dev || sp[0].st_ino != sp[1].st_ino), 1);
+  /* stat(path) and fstat(fd) name the same object. */
+  for (int i = 0; i < 2; i++) {
+    EXPECT_EQ((sp[i].st_dev == sf[i].st_dev), 1);
+    EXPECT_EQ((sp[i].st_ino == sf[i].st_ino), 1);
+  }
+  {
+    struct k_stat sd = {0};
+    int ep = 0;
+    if (file_stat_path(0, "/dev/console", &sd, &ep) == 0) {
+      /* A device on its own pseudo-volume is never "the same file" as a FAT
+         volume object, and never (0,0). */
+      EXPECT_EQ((sd.st_dev != 0), 1);
+      EXPECT_EQ((sd.st_dev != sp[0].st_dev), 1);
+    }
+  }
+}
+
+/* L56: the base-select race, at the primitive vm_mmap now uses.
+ *
+ * vm_mmap used to call vm_hole_find() (a lock-free reader) and then
+ * vm_region_insert() (a separate critical section) with object creation in
+ * between.  Two threads of one group could therefore choose the same base;
+ * the loser's insert was refused and vm_mmap answered -ENOMEM although the
+ * whole arena was free (measured on RimWorld's four DirectXmlLoader threads:
+ * 8 defs per run died as `Could not map file`, disjoint run to run).
+ *
+ * This test runs the production primitive, so its invariant is mechanical:
+ * after vm_region_alloc_hole() returns, the chosen base IS in the region list
+ * (a peer cannot pick it), and R repeats never collide and never report
+ * -ENOMEM while the window has room.  The true concurrency test lives in
+ * src/user/linux_probe_mmap_race.c because the unit tier runs before
+ * start_scheduler() — no kernel thread can run here.
+ */
+static void test_vm_alloc_hole_atomic(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_alloc_hole_atomic...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as) {
+    uart_puts("ASSERTION FAILED: vm_as_create returned NULL\n");
+    return;
+  }
+
+  enum { NR = 32 };
+  uint64_t bases[NR];
+  uint64_t len = 0x2000;
+  int bad = 0;
+  for (int i = 0; i < NR; i++) {
+    uint64_t b = 0;
+    int rc = vm_region_alloc_hole(as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2,
+                                  len, VM_PROT_READ | VM_PROT_WRITE,
+                                  VMK_ANON, VM_MAP_PRIVATE, 0, 0, &b);
+    if (rc != 0) {
+      bad++;
+      uart_puts("ASSERTION FAILED: alloc_hole refused a free arena\n");
+      break;
+    }
+    bases[i] = b;
+    /* The reservation must already be visible when the call returns: find
+       the region and require it to cover the whole request. */
+    struct vm_region *r = vm_region_find(as, b);
+    if (!r || b < r->base || b + len > r->base + r->len) {
+      bad++;
+      uart_puts("ASSERTION FAILED: returned base is not reserved\n");
+      break;
+    }
+  }
+  EXPECT_EQ(bad, 0);
+
+  /* No two bases may be equal (they cannot be, if each is reserved). */
+  int dups = 0;
+  for (int i = 0; i < NR; i++)
+    for (int j = i + 1; j < NR; j++)
+      if (bases[i] == bases[j])
+        dups++;
+  EXPECT_EQ(dups, 0);
+
+  /* The window is [bases[0], bases[0] + 3 pages): two 2-page requests fit
+     under the VM_HOLE_GAP rule only if alignment allows, and the third must
+     be refused.  Genuine exhaustion still answers -ENOMEM — the fix must not
+     turn a full arena into a silent success. */
+  {
+    uint64_t nb = 0;
+    int rc = vm_region_alloc_hole(as, bases[0], bases[0] + 0x3000, len,
+                                  VM_PROT_READ | VM_PROT_WRITE, VMK_ANON,
+                                  VM_MAP_PRIVATE, 0, 0, &nb);
+    EXPECT_EQ((rc != 0), 1);
+  }
+
+  /* MAP_FIXED-style replacement is one critical section too: installing over
+     a live mapping must replace it, never fail with an overlap. */
+  {
+    int rc = vm_region_install_fixed(as, bases[1], len, VM_PROT_READ,
+                                     VMK_ANON, VM_MAP_PRIVATE, 0, 0);
+    EXPECT_EQ(rc, 0);
+    struct vm_region *r = vm_region_find(as, bases[1]);
+    EXPECT_EQ((r != 0), 1);
+    if (r)
+      EXPECT_EQ((int)r->prot, (int)VM_PROT_READ);
+  }
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L77: verify(buf) == publish(buf), asserted on the publish path.
+ *
+ * L76 ended with an executable page PUBLISHED as verified (`[PUB] … zero=4096
+ * ver=1`) although the probe's own read of that offset held 3547 non-zero
+ * bytes, and the process took #UD in UnityPlayer.so's text.  The probe's
+ * verdict and the bytes that reached the faulting instruction were not about
+ * the same memory.
+ *
+ * This test exercises the two halves of the fix:
+ *   1. the probe's identity describes the CALLER'S buffer (pointer, offset,
+ *      nz, sum) and that buffer holds the file's bytes -- verification and
+ *      publication are of one buffer;
+ *   2. when the published copy is made to diverge (test seam), the assertion
+ *      counts the failure and the diverged bytes are NOT published: the page
+ *      still ends up with the file's bytes, by the independent device re-read.
+ * A clean publish must count a check and no failure.
+ */
+static void pat_nz_sum(const unsigned char *p, int n, uint32_t *nz, uint32_t *sum) {
+  uint32_t z = 0, s = 0;
+  for (int i = 0; i < n; i++) {
+    if (p[i])
+      z++;
+    s += p[i];
+  }
+  if (nz)
+    *nz = z;
+  if (sum)
+    *sum = s;
+}
+
+static void test_vm_publish_identity(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_publish_identity...\n");
+
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  int free0 = frame_free_count();
+
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+  file_obj_invalidate_all();
+
+  /* 1. The probe verifies the caller's buffer, and its identity says so. */
+  {
+    uint64_t b1 = frame_alloc();
+    EXPECT_EQ((b1 != 0), 1);
+    if (b1) {
+      struct fat16_page_id id;
+      int r = fat16_page_probe(cluster, fsize, 0, (uint8_t *)b1, &id);
+      EXPECT_EQ(r, 1);
+      EXPECT_EQ((id.buf == b1), 1); /* pointer identity: same buffer */
+      EXPECT_EQ((long)id.off, 0);
+      uint32_t nz = 0, sum = 0;
+      pat_nz_sum((const unsigned char *)b1, 4096, &nz, &sum);
+      EXPECT_EQ((long)id.nz, (long)nz);
+      EXPECT_EQ((long)id.sum, (long)sum);
+      /* and the buffer really holds the file's bytes, not zeros */
+      int bad = 0;
+      for (int i = 0; i < 64; i++)
+        if (((const unsigned char *)b1)[i] !=
+            (unsigned char)(((0 + (uint32_t)i) * 7u + 3u) & 0xFFu))
+          bad++;
+      EXPECT_EQ(bad, 0);
+      EXPECT_EQ((nz > 0), 1);
+      frame_free(b1);
+    }
+  }
+
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_EXEC_TAG + 5));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  EXPECT_EQ((fd >= 0), 1);
+  if (fd < 0) {
+    vm_as_teardown(p.as);
+    return;
+  }
+  int64_t b = vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                      VM_MAP_PRIVATE, fd, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (b <= 0) {
+    file_close(&p, fd);
+    vm_as_teardown(p.as);
+    return;
+  }
+
+  static unsigned char zeros[4096];
+
+  /* 2. The poisoned cache sends the gate to the probe; the publisher's copy is
+     corrupted on purpose, and the assertion must refuse it. */
+  uint32_t lba0 = 0;
+  EXPECT_EQ(fat16_test_lba(cluster, 0, &lba0), 0);
+  EXPECT_EQ(blk_cache_test_poison(lba0, zeros, 4096), 0);
+  {
+    uint32_t f0 = vm_test_id_fail();
+    uint32_t c0 = vm_test_id_checks();
+    vm_test_corrupt_next_publish(1);
+    EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 0), 0);
+    /* The divergence was seen AND counted: this is the tripwire that replaces
+       a #UD one instruction later. */
+    EXPECT_EQ((long)(vm_test_id_fail() - f0), 1);
+    EXPECT_EQ((vm_test_id_checks() > c0), 1);
+    /* ... and the diverged bytes were not published: the page has the file's
+       bytes, published by the independent device re-read. */
+    uint64_t leaf = 0;
+    if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+      uint64_t ph = vm_arch_leaf_phys(leaf);
+      int bad = 0;
+      for (int i = 0; i < 64; i++)
+        if (((const volatile unsigned char *)ph)[i] !=
+            (unsigned char)(((0 + (uint32_t)i) * 7u + 3u) & 0xFFu))
+          bad++;
+      EXPECT_EQ(bad, 0);
+    } else {
+      EXPECT_EQ(1, 0);
+    }
+  }
+
+  /* 3. A clean probe publish counts a check and no failure: the same page, a
+     fresh mapping, the cache poisoned again and NO corruption.  (Page 1 of
+     this fixture is a 904-byte tail, which the exec gate refuses as a short
+     read -- pre-existing behaviour, not this lane's subject.) */
+  file_close(&p, fd);
+  vm_as_teardown(p.as);
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  {
+    struct process q;
+    vm_file_proc_init(&q, vm_as_create(VM_EXEC_TAG + 6));
+    EXPECT_EQ((q.as != 0), 1);
+    if (q.as) {
+      int fd2 = file_open(&q, VM_FILE_NAME, 0);
+      EXPECT_EQ((fd2 >= 0), 1);
+      if (fd2 >= 0) {
+        int64_t b2 = vm_mmap(&q, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                             VM_MAP_PRIVATE, fd2, 0);
+        EXPECT_EQ((b2 > 0), 1);
+        if (b2 > 0) {
+          uint32_t lbac = 0;
+          EXPECT_EQ(fat16_test_lba(cluster, 0, &lbac), 0);
+          EXPECT_EQ(blk_cache_test_poison(lbac, zeros, 4096), 0);
+          uint32_t f0 = vm_test_id_fail();
+          uint32_t c0 = vm_test_id_checks();
+          EXPECT_EQ(vm_touch(&q, (uint64_t)b2, 8, 0), 0);
+          EXPECT_EQ((long)(vm_test_id_fail() - f0), 0);
+          EXPECT_EQ((vm_test_id_checks() > c0), 1);
+          uint64_t leaf = 0;
+          if (vm_arch_walk(q.as, (uint64_t)b2, &leaf) == 0) {
+            uint64_t ph = vm_arch_leaf_phys(leaf);
+            int bad = 0;
+            for (int i = 0; i < 64; i++)
+              if (((const volatile unsigned char *)ph)[i] !=
+                  (unsigned char)(((0 + (uint32_t)i) * 7u + 3u) & 0xFFu))
+                bad++;
+            EXPECT_EQ(bad, 0);
+          } else {
+            EXPECT_EQ(1, 0);
+          }
+        }
+        file_close(&q, fd2);
+      }
+      vm_as_teardown(q.as);
+    }
+  }
+  blk_cache_flush_all();
+  file_obj_invalidate_all();
+  uart_puts("  [VM-PBI] checks=");
+  print_int((int)vm_test_id_checks());
+  uart_puts(" fails=");
+  print_int((int)vm_test_id_fail());
+  uart_puts(" frames free0=");
+  print_int(free0);
+  uart_puts(" now=");
+  print_int(frame_free_count());
+  uart_puts("\n");
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* M6/L69: the poisoned-cache regression needs blk_cache_init() to have run
+ * (the vm suite itself runs before the cache is enabled so its exact frame
+ * accounting holds).  unit_test.c calls this right after the blk-cache
+ * suites. */
+void vm_test_post_cache_suite(void) {
+  test_vm_poisoned_cache_page();
+  test_vm_publish_identity();
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
+  test_vm_as_orphan_reclaim(); /* GB-217: no live owner -> reclaim, not collide */
   test_vm_region_list();
   test_vm_map_grow_commit();
   test_vm_windows_distinct();
@@ -1528,6 +2753,17 @@ void vm_test_suite(void) {
   test_vm_file_map_tail_wx();
   test_vm_file_map_accounting();
   test_vm_file_map_fork();
+  /* M6/L30: COW without the frame-identity gate; DSO base allocation */
+  test_vm_file_cow_private_leaf();
+  /* M6/L63: a failed/short/zero-delivering read on an exec page => EIO */
+  test_vm_exec_page_eio();
+  /* M6/L63: the image path's sum table catches a consistent zero delivery */
+  test_vm_img_page_eio();
+  test_vm_jit_arena(); /* M6/L38: exec mappings cluster in one +-2 GiB span */
+  test_vm_jit_arena_gap_end(); /* M6/L38: the arena stops at the gap's end */
+  test_vm_alloc_hole_atomic(); /* L56: find+reserve is one critical section */
+  test_vm_dso_bases_distinct();
+  test_fs_dso_identity_pair();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

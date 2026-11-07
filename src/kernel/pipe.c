@@ -49,8 +49,8 @@ int pipe_alloc(struct file **f0, struct file **f1) {
       pipes[i].head = 0;
       pipes[i].tail = 0;
       pipes[i].count = 0;
-      pipes[i].reader_pid_mask = 0;
-      pipes[i].writer_pid_mask = 0;
+      pipes[i].reader_pid_mask = (struct pid_mask){0};
+      pipes[i].writer_pid_mask = (struct pid_mask){0};
 
       (*f0)->type = FILE_TYPE_PIPE;
       (*f0)->pipe.ptr = &pipes[i];
@@ -92,17 +92,21 @@ void pipe_reopen(struct pipe *p, int end) {
  * file and pipe locks via fs_reopen).  A wakeup performed under p->lock
  * would add the p->lock -> proc_lock edge that closes the deadlock
  * cycle (observed live: 7 CPUs spinning on proc_lock, 1 on a pipe lock). */
-static void drain_wakeup_mask(uint64_t mask) {
-  while (mask) {
-    int pid = __builtin_ctzll(mask);
-    mask &= mask - 1;
-    process_wakeup(pid);
+static void drain_wakeup_mask(const struct pid_mask *mask) {
+  for (int wi = 0; wi < PID_MASK_WORDS; wi++) {
+    uint64_t x = mask->w[wi];
+    while (x) {
+      int pid = (wi << 6) + __builtin_ctzll(x);
+      x &= x - 1;
+      process_wakeup(pid);
+    }
   }
 }
 
 void pipe_close(struct pipe *p, int end) {
   uint64_t flags = spinlock_acquire_irqsave(&p->lock);
-  uint64_t wake_mask = 0;
+  struct pid_mask wake_mask;
+  pid_mask_zero(&wake_mask);
   if (end == 0) {
     if (p->reader_count > 0) p->reader_count--;
     if (p->reader_count == 0) {
@@ -110,18 +114,18 @@ void pipe_close(struct pipe *p, int end) {
       // we collect it: a stale bit left behind would make later closes
       // re-wake (or appear to hold) pids that are no longer waiting.
       wake_mask = p->writer_pid_mask;
-      p->writer_pid_mask = 0;
+      pid_mask_zero(&p->writer_pid_mask);
     }
   } else {
     if (p->writer_count > 0) p->writer_count--;
     if (p->writer_count == 0) {
       // Wake up readers (they will get 0 on read)
       wake_mask = p->reader_pid_mask;
-      p->reader_pid_mask = 0;
+      pid_mask_zero(&p->reader_pid_mask);
     }
   }
   spinlock_release_irqrestore(&p->lock, flags);
-  drain_wakeup_mask(wake_mask);
+  drain_wakeup_mask(&wake_mask);
 }
 
 /**
@@ -144,7 +148,8 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
 
   while (1) {
     int i = 0;
-    uint64_t wake_mask = 0;
+    struct pid_mask wake_mask;
+    pid_mask_zero(&wake_mask);
 
     uint64_t flags = spinlock_acquire_irqsave(&p->lock);
 
@@ -163,7 +168,7 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
 
     if (woke_writers) {
       wake_mask = p->writer_pid_mask;
-      p->writer_pid_mask = 0;
+      pid_mask_zero(&p->writer_pid_mask);
     }
 
     if (i == 0) {
@@ -181,7 +186,22 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
         uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
         uint64_t pflags = spinlock_acquire_irqsave(&p->lock);
         if (p->count == 0 && p->writer_count > 0) {
-          p->reader_pid_mask |= (1ULL << cur->pid);
+          /* M6/L33: Linux's pipe_read checks signal_pending() exactly here --
+             after "the pipe is empty" and before registering the waiter -- and
+             answers -ERESTARTSYS.  A compat reader that just resumed from a
+             signal wake must not silently sleep again (measured: the futex-sig
+             probe's read case re-parked forever).  Compat class only: the
+             native park/deliver contract is unchanged. */
+          extern int linux_compat_sig_deliverable(struct process *)
+              __attribute__((weak));
+          if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) &&
+              linux_compat_sig_deliverable &&
+              linux_compat_sig_deliverable(cur)) {
+            spinlock_release_irqrestore(&p->lock, pflags);
+            spinlock_release_irqrestore(&proc_lock, proc_flags);
+            return -EINTR;
+          }
+          pid_mask_set(&p->reader_pid_mask, cur->pid);
           cur->state = PROC_STATE_BLOCKED;
           spinlock_release_irqrestore(&p->lock, pflags);
           spinlock_release_irqrestore(&proc_lock, proc_flags);
@@ -196,7 +216,7 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
     }
 
     spinlock_release_irqrestore(&p->lock, flags);
-    drain_wakeup_mask(wake_mask);
+    drain_wakeup_mask(&wake_mask);
     return i;
   }
 }
@@ -221,7 +241,8 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
 
   while (1) {
     int i = 0;
-    uint64_t wake_mask = 0;
+    struct pid_mask wake_mask;
+    pid_mask_zero(&wake_mask);
 
     uint64_t flags = spinlock_acquire_irqsave(&p->lock);
     if (p->reader_count == 0) {
@@ -288,7 +309,7 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
 
     if (woke_readers) {
       wake_mask = p->reader_pid_mask;
-      p->reader_pid_mask = 0;
+      pid_mask_zero(&p->reader_pid_mask);
     }
 
     if (i == 0 && n > 0) {
@@ -301,7 +322,18 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
         uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
         uint64_t pflags = spinlock_acquire_irqsave(&p->lock);
         if (p->count >= PIPE_SIZE && p->reader_count > 0) {
-          p->writer_pid_mask |= (1ULL << cur->pid);
+          /* M6/L33: same Linux check on the write side: a compat writer with
+             a deliverable pending signal returns -EINTR instead of parking. */
+          extern int linux_compat_sig_deliverable(struct process *)
+              __attribute__((weak));
+          if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) &&
+              linux_compat_sig_deliverable &&
+              linux_compat_sig_deliverable(cur)) {
+            spinlock_release_irqrestore(&p->lock, pflags);
+            spinlock_release_irqrestore(&proc_lock, proc_flags);
+            return -EINTR;
+          }
+          pid_mask_set(&p->writer_pid_mask, cur->pid);
           cur->state = PROC_STATE_BLOCKED;
           spinlock_release_irqrestore(&p->lock, pflags);
           spinlock_release_irqrestore(&proc_lock, proc_flags);
@@ -317,7 +349,7 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
     }
 
     spinlock_release_irqrestore(&p->lock, flags);
-    drain_wakeup_mask(wake_mask);
+    drain_wakeup_mask(&wake_mask);
     return i;
   }
 }

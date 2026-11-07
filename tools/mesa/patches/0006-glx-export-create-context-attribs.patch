@@ -1,0 +1,18 @@
+--- a/src/gallium/frontends/glx/xlib/glx_api.c
++++ b/src/gallium/frontends/glx/xlib/glx_api.c
+@@ -2763,6 +2763,15 @@
+ }
+ 
+ 
++/* HobbyOS/compat (L28): this build compiles with -fvisibility=hidden and
++ * every other glX entry point carries a default-visibility declaration from
++ * its header.  glXCreateContextAttribsARB has none here, so it is the ONE
++ * hidden glX symbol -- measured with readelf in the guest object.  Unity
++ * resolves its GLX entry points with dlsym(libGL, "glX...") (glvnd's libGL on
++ * the host exports this one), so a hidden symbol leaves a NULL slot and the
++ * next call jumps to address 0: measured in the guest as PC=0 with
++ * rdi = &Display right after the window handshake.  Export it explicitly. */
++__attribute__((visibility("default")))
+ GLXContext
+ glXCreateContextAttribsARB(Display *dpy, GLXFBConfig config,
+                            GLXContext shareCtx, Bool direct,

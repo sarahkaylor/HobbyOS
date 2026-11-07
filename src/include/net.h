@@ -89,6 +89,9 @@ enum socket_state {
 };
 
 #define SOCKET_RX_BUF_SIZE (4 * 1048576)  // 4MB — absorbs burst fire-and-forget DMA sync
+/* Datagram boundary records per UDP socket.  256 covers a 256-deep NFS
+ * read-ahead window and every burst the stack has ever been asked for. */
+#define SOCKET_RX_DGRAM_MAX 256
 
 struct socket_pcb {
   int in_use;
@@ -112,6 +115,15 @@ struct socket_pcb {
   volatile uint8_t rx_buf[SOCKET_RX_BUF_SIZE];
   volatile uint32_t rx_head;
   volatile uint32_t rx_tail;
+  /* UDP datagram boundaries (L35).  handle_udp() pushes one entry per
+   * datagram; a UDP recv() then returns AT MOST ONE datagram instead of
+   * splicing two replies together.  Without this a pipelined NFS client
+   * that leaves N replies in the ring would read reply k's tail + reply
+   * k+1's head as one "message" and fail to parse either.  TCP leaves the
+   * FIFO empty and keeps byte-stream semantics. */
+  volatile uint32_t rx_dgram_len[SOCKET_RX_DGRAM_MAX];
+  volatile uint32_t rx_dgram_head;
+  volatile uint32_t rx_dgram_tail;
   // N3: RX flow-control diagnostics.  rx_drops counts payload bytes refused
   // because they were out-of-order (a retransmission hole) or would have
   // overflowed the ring; post-N3 this is the evidence the producer flow

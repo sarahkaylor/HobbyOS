@@ -270,6 +270,14 @@ extern "C" {
     uint64_t passthrough;   /* whole reads that bypassed the cache          */
   };
 
+  /* cmd 10 (L35): NFS READ traffic counters — bytes returned by READ RPCs
+   * and the number of READ RPCs issued, since boot.  Deltas across a read
+   * give the per-RPC payload and the RPC rate a throughput number needs. */
+  struct sys_nfsio {
+    uint64_t bytes;
+    uint64_t ops;
+  };
+
   int sysinfo(int cmd, void *buf, int size);
   int unlink(const char *filename);
   int rename(const char *oldname, const char *newname);
@@ -283,6 +291,16 @@ extern "C" {
 
   /* Unmount the NFS export mounted exactly at `target`. 0 on success. */
   int umount(const char *target);
+
+  /* M5c: serve the VFS subtree at `from` from the path `to`.  After this,
+     opening "/from/x" resolves to "/to/x", so a tree that has to be
+     mmap-able can live on the FAT volume while its callers keep using the
+     original (e.g. NFS) path.  Path resolution only: nothing is copied and
+     no filesystem is mounted, so `to` must already exist on a real
+     filesystem.  Both arguments must be canonical absolute paths.  Returns 0
+     on success, -1 with errno EINVAL (malformed, would recurse, or the
+     4-entry table is full). */
+  int vfs_bind(const char *from, const char *to);
 
   /* ---- Phase F1 (browser.md A.1a — frozen): sockets + select -------------
    * Device-only: these are declarations over syscalls 65-71; HOST_TEST builds
@@ -324,7 +342,7 @@ extern "C" {
                  unsigned int *len);
   int setsockopt(int fd, int level, int optname, const void *val,
                  unsigned int len);
-  int getrandom(void *buf, size_t len, unsigned int flags);
+  ssize_t getrandom(void *buf, size_t len, unsigned int flags);
 
   /* select() over the frozen syscall: masks are FD_SETSIZE (256) wide —
    * eight 32-bit words.  timeout_ms < 0 waits forever, 0 polls.  Returns the

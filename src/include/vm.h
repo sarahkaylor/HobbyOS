@@ -95,6 +95,22 @@
 #define USER_MAIN_STK_GUARD_LIMIT_V2 \
   (USER_MAIN_STK_LIMIT_V2 - USER_MAIN_STK_GUARD)
 
+/* JIT code arena (M6/L38, vm.c).  Mono's amd64 codegen patches `rel32`
+ * branches inside JIT code and refuses a target more than +-2 GiB away
+ * (x86-codegen.h:410 `offset == (gint32)offset`), so all of a process's
+ * executable anonymous mappings must stay in one cluster.  Linux gets that
+ * from a single bottom-up mmap arena; this kernel's first-fit is spread over
+ * an 18 GiB window the game also fills, so the arena is reserved explicitly:
+ * on the first PROT_EXEC anonymous mmap, the largest free span inside
+ * +-USER_JIT_REACH of where that mapping would have gone is claimed (capped
+ * at USER_JIT_ARENA_MAX) and later ones are bump-allocated from it.
+ * USER_JIT_MIN is the smallest span worth calling an arena. */
+#define USER_JIT_REACH 0x80000000ULL     /* +-2 GiB, mono's rel32 range */
+#define USER_JIT_ARENA_MAX 0x40000000ULL /* 1 GiB cap */
+#define USER_JIT_MIN 0x400000ULL         /* 4 MiB floor */
+#define USER_JIT_ALIGN 0x10000ULL        /* mono's code-chunk granularity */
+#define VM_JIT_FREE_MAX 16               /* freed arena spans kept for reuse */
+
 /* Region protection / kind (section 1.3).  Prot values are the MAP_*
  * PROT_* ABI values used by the syscall surface. */
 #define VM_PROT_READ 0x1
@@ -116,6 +132,17 @@
 #define VM_MAP_ANONYMOUS 0x20
 #define VM_MAP_NORESERVE 0x40
 
+/* M6/L69: this mapping's page-in failed with EIO.  Set the first time a
+ * file-backed page cannot be delivered (a refused exec page, a short read that
+ * never completes, a device that answers zeros for code).  From then on every
+ * fault on the region and every syscall-side touch returns the same EIO
+ * WITHOUT re-issuing device I/O: a mapping whose backing file cannot be read
+ * is a failed load, and retrying it page by page is what turned one bad page
+ * into a SIGSEGV storm that outlived the process's own error handling.  A
+ * private bit: mmap masks user flags to the ABI set, so it can never be
+ * injected from user space. */
+#define VM_MAP_IOERR 0x8000
+
 /* Address-space versions (D4): v1 = the legacy 32 MiB block layout
  * (as == NULL on the PCB), v2 = the sparse window above. */
 #define AS_V1 1
@@ -124,8 +151,12 @@
 /* --- P2.4 (S4): shared objects (memfd / MAP_SHARED anon) ------------- */
 
 /* Object slots and cap.  64 MiB per object is the S4 acceptance scope
- * (terabytes of sparse VA are fine; resident object pages are frames). */
-#define VM_OBJ_MAX 64
+ * (terabytes of sparse VA are fine; resident object pages are frames).
+ * L54: slots raised 64 -> 2048 because RimWorld's XML loader keeps one mapped
+ * view per LoadableXmlAsset while it parses the Core defs; the tree has 1,209
+ * XML files, and at 64 the pool was exhausted after 8 files so every later
+ * mmap returned ENOMEM ("Could not map file"). */
+#define VM_OBJ_MAX 2048
 #define VM_OBJ_MAX_BYTES 0x4000000ULL /* 64 MiB */
 #define VM_OBJ_MAX_FRAMES (VM_OBJ_MAX_BYTES / 0x1000)
 
@@ -137,6 +168,12 @@
  * MAP_PRIVATE writes copy-on-write.  Frames are filled from the file on
  * first touch by the demand fault, never eagerly at map time. */
 #define VM_OBJ_FILE 3
+/* L54: a read-only regular file on an NFS mount.  Mono's
+ * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+ * no FAT16 cluster chain, so the page source is nfs_read_file() keyed by
+ * (mount, file handle).  Same demand-fill/shared-frame contract as
+ * VM_OBJ_FILE. */
+#define VM_OBJ_NFS 4
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) subset (design section 4.3, Linux
  * numbers; SHRINK/GROW enforced at ftruncate, WRITE recorded advisory). */
@@ -154,6 +191,20 @@ struct vm_object {
   int nr_frames; /* frame-array capacity (pages) */
   int arr_frames;/* frames owned by the array itself */
   uint64_t *frames; /* frame-backed array; 0 = not materialized */
+  /* VM_OBJ_FILE source identity (start cluster of the mapped file).  Kept on
+     the object, not only in the file_obj slot table, so a live mapping can
+     still fill pages after an unrelated FAT write invalidates the slot
+     (file_obj_invalidate_all).  Without it, writing any file — e.g. the
+     player's own log — permanently breaks page-in for every DSO currently
+     mapped (measured: UnityPlayer.so faulted at its first new text page). */
+  uint16_t file_start_cluster;
+  /* L54: VM_OBJ_NFS source identity.  Kept on the object (not only in the
+     share-cache slot) so a live mapping can still fill pages after its slot
+     is recycled for another file.  Mounts are read-only, so this identity
+     never goes stale. */
+  uint8_t nfs_mount_idx;
+  uint8_t nfs_fh_len;
+  uint8_t nfs_fh[64]; /* NFS_FH_MAX */
 };
 
 struct vm_region {  /* sorted by base; per AS, under proc_lock */
@@ -186,6 +237,16 @@ struct addr_space { /* one per group (leader PCB owned) */
   int img_active;
   uint32_t img_file_size;
   uint16_t img_start_cluster;
+  /* M6/L63: ground truth for executable image pages.  Two agreeing reads are
+     NOT proof: the L63 soak watched the block layer answer a full page of
+     zeros twice for a page the file holds code at, and the agreement gate
+     published it (zero=4096 ver=y) straight into execution.  At load time
+     the image is read once and a sum32 per page is kept here; a fill must
+     match its page's sum, so a device that lies consistently is caught.
+     A contiguous frame run (kernel VA == phys), 4 bytes per page, freed at
+     teardown; 0 means "not built" and the fill falls back to agreement. */
+  uint64_t img_sums;
+  uint32_t img_sums_pages;
   /* L9 (prefetch): generation counter, bumped on create and teardown.  A
      background prefetch task captures it at spawn and aborts when it no
      longer matches — pid reuse / exec must never let an old task adopt
@@ -200,6 +261,20 @@ struct addr_space { /* one per group (leader PCB owned) */
      must die. */
   uint64_t retry_va;
   int retry_count;
+  /* M6/L38: the JIT code arena (vm.c).  jit_base == 0 means "not claimed
+     yet"; jit_end/jit_bump delimit the bump pointer; a span freed by munmap
+     goes on a small LIFO list so a code manager that frees a chunk can get
+     the same address back.  All of it is inherited by fork. */
+  uint64_t jit_base;
+  uint64_t jit_end;
+  uint64_t jit_bump;
+  /* The first address first-fit picked for an executable mapping: the arena
+   * window is pinned to it, so a claim that only becomes possible later can
+     never drift gigabytes away from the code it is meant to cluster. */
+  uint64_t jit_anchor0;
+  uint8_t jit_nfree;
+  uint64_t jit_free_off[VM_JIT_FREE_MAX];
+  uint64_t jit_free_len[VM_JIT_FREE_MAX];
 };
 
 /* --- AS lifecycle (vm.c) --------------------------------------------- */
@@ -228,17 +303,78 @@ int vm_region_insert(struct addr_space *as, uint64_t base, uint64_t len,
 /* Sorted lookup (binary search); NULL when `va` is not covered. */
 struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
 
+/* M6/L59: nearest region starting above `va` within `limit` bytes (a guard
+   page / stack-underflow classifier).  Diagnostics only. */
+struct vm_region *vm_region_above(struct addr_space *as, uint64_t va,
+                                  uint64_t limit);
+int vm_as_census(struct addr_space *as, int *nr, int *anon, int *stack,
+                 uint64_t *anon_bytes, uint64_t *biggest_anon,
+                 uint64_t *resident, uint64_t *peak);
+
 /* Split-aware removal of [base, base+len) (idempotent). */
 int vm_region_remove(struct addr_space *as, uint64_t base, uint64_t len);
 
 /* First-fit hole in [start, limit) of at least `len` bytes, 4 KiB-aligned
  * with a >=VM_HOLE_GAP raw gap between distinct regions (allocator
- * invariant, section 1.2).  Returns the chosen base (not allocated), or 0. */
+ * invariant, section 1.2).  Returns the chosen base (not allocated), or 0.
+ * L56: this function only FINDS.  Any caller that wants to own the hole must
+ * use vm_region_alloc_hole() instead — find-then-insert as two steps is a
+ * race (two threads pick the same base; the loser's insert is refused and a
+ * request with free space answers -ENOMEM). */
 #define VM_HOLE_GAP 0x10000ULL
 uint64_t vm_hole_find(struct addr_space *as, uint64_t start, uint64_t limit,
                       uint64_t len);
 
+/* L56: find AND reserve in one vm_lock critical section.  Returns 0 and sets
+ * *out_base, or -ENOMEM when no hole fits.  The base is in the region list
+ * before the lock drops, so no concurrent caller can choose it. */
+int vm_region_alloc_hole(struct addr_space *as, uint64_t start, uint64_t limit,
+                         uint64_t len, uint16_t prot, uint16_t kind,
+                         uint32_t flags, struct vm_object *obj,
+                         uint64_t obj_off, uint64_t *out_base);
+
+/* L56: remove-then-insert of a caller-named range as one critical section
+ * (MAP_FIXED / MREMAP_FIXED).  Returns 0, -EINVAL or -ENOMEM. */
+int vm_region_install_fixed(struct addr_space *as, uint64_t base,
+                            uint64_t len, uint16_t prot, uint16_t kind,
+                            uint32_t flags, struct vm_object *obj,
+                            uint64_t obj_off);
+
 /* --- Resident-page plumbing (vm.c -> arch mmu) ----------------------- */
+
+/* M6/L63: publish-time provenance.  Every site that installs a page's BYTES
+ * into a user mapping calls this with what those bytes are, so the serial
+ * log names the publisher of any executable page instead of inferring it
+ * after a crash (docs/rimworld-launch-log.md §48.3).
+ *
+ *   va/off   where it landed and which file offset it came from
+ *   prot     the mapping's protection (R/RW/RX/RWX)
+ *   priv     MAP_PRIVATE (1) or MAP_SHARED (0)
+ *   src      VM_PUB_FILE (read from the backing file, verified),
+ *            VM_PUB_ZERO (anonymous zero fill: .bss/heap/JIT),
+ *            VM_PUB_CACHE (the file object's page-cache frame, unverified),
+ *            VM_PUB_COPY (byte copy of an already-published page)
+ *   phys     the frame being installed (zero_bytes is counted from it)
+ *   verified 1 only if two independent reads agreed on these bytes
+ *   who      VM_PW_* caller id
+ * Executable pages from src != ZERO that are unverified are printed
+ * unconditionally (the tripwire); the rest are sampled. */
+#define VM_PUB_FILE  0
+#define VM_PUB_ZERO  1
+#define VM_PUB_CACHE 2
+#define VM_PUB_COPY  3
+enum {
+  VM_PW_TOUCH_OBJ = 0, VM_PW_TOUCH_ANON, VM_PW_FAULT_OBJ, VM_PW_FAULT_ANON,
+  VM_PW_IMG, VM_PW_IMG_PF, VM_PW_ELF, VM_PW_COW, VM_PW_VMFIX, VM_PW_NR
+};
+void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot,
+                 int priv, int src, uint64_t phys, int verified, int who);
+
+/* M6/L63: read the image once at exec and keep a sum32 per page, so a later
+ * demand/prefault fill can be checked against the FILE's bytes instead of
+ * against another read that the block layer may also lie to.  Called by the
+ * v2 loader after img_* is set; failure is non-fatal (agreement gate). */
+int vm_image_sums_build(struct addr_space *as);
 
 /* Install `phys` at `va` with `prot` (region prot must already allow it;
  * called by the loader, demand faults and memfd fills).  The caller has
@@ -437,6 +573,11 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
 /* P5 (D5.7): the physical address encoded in a vm_arch_walk leaf (OA
  * bits, both arches).  Used by vm_kwrite for cross-context writes. */
 uint64_t vm_arch_leaf_phys(uint64_t leaf);
+/* M6/L30 (COW): is the leaf's write permission set?  The fault path needs to
+ * tell "the hardware refused a write the VMA allows because the PTE is
+ * read-only" (a copy-on-write fault) from a stale TLB entry, and a kernel
+ * test wants to prove the copy it installed is writable. */
+int vm_arch_leaf_writable(uint64_t leaf);
 void vm_arch_teardown(uint64_t root_phys, uint16_t asid);
 void vm_arch_switch(struct addr_space *as);
 /* P2.2 (S2): hand the calling CPU back to the kernel table (no-op when
@@ -444,6 +585,12 @@ void vm_arch_switch(struct addr_space *as);
    idle entry) and by vm_arch_teardown before freeing tables. */
 void vm_arch_restore_kernel(void);
 void vm_arch_flush_va(struct addr_space *as, uint64_t va);
+
+/* M6/L59: architecturally complete local flush of `as` (CR3 reload).  INVLPG
+ * is enough for a single 4 KiB leaf, but a *parent* table installed by another
+ * CPU is only guaranteed to be seen after a CR3 reload on every
+ * implementation; the retry path uses this once the cheap flush has failed. */
+void vm_arch_reload_cr3(struct addr_space *as);
 void vm_arch_shootdown(struct addr_space *as);
 
 #endif /* VM_H */

@@ -182,3 +182,17 @@ third_party/llvm-21.1.8/dist-staging/
 
 # per-build ARCH marker (rewritten by every build)
 /.arch-stamp
+
+# --- RimWorld track (docs/rimworld-plan.md) ---------------------------------
+# The game is proprietary: no artifact from the user's copy may enter git.
+# These paths only ever hold fetched runtime packages, probe output, or a
+# staging copy of the game tree served over NFS.
+/third_party/rw-runtime/
+/third_party/rw-mono/
+/rimworld/
+/nfs-export/
+
+# RimWorld evidence lane (L1): the harness writes straces, apitrace captures
+# (hundreds of MB) and screenshots here; the committed artifact is
+# docs/rimworld-evidence.md plus tools/rw/x11-symbols.txt.
+tools/rw/out/

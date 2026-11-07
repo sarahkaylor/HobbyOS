@@ -54,6 +54,16 @@ extern "C" {
 #define SIGTSTP  20
 #define SIGTTIN  21
 #define SIGTTOU  22
+  /* M4/L5: SIGSYS (Linux 31) and NSIG.  Mesa's gallium HUD installs a
+   * handler table sized NSIG and src/util/u_thread.c references SIGSYS in
+   * its crash-signal list; neither has a HobbyOS delivery path, so they are
+   * compile-time completeness only.  NSIG includes RT signals (64) + 1. */
+#ifndef SIGSYS
+#define SIGSYS    31
+#endif
+#ifndef NSIG
+#define NSIG      65
+#endif
 
   sighandler_t signal(int signum, sighandler_t handler);
   /* KEEP THIS SIGNATURE IDENTICAL to <libc.h>'s kill() (implemented in

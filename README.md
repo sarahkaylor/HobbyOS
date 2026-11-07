@@ -370,6 +370,17 @@ The Files app integrates the same syscalls: its **Mount** menu mounts and
 unmounts exports, a Mounts view lists them, and browsing into a mount shows
 the `[NFS]` badge with the server's free space (`FSSTAT`).
 
+### One export per worktree (the RimWorld harness)
+
+`tools/rw/lane.sh` gives each worktree its own export,
+`/srv/nfs/rimworld-<worktree>`, and the harness stages `/NFSEXPORT` so the
+guest mounts exactly that path.  This is not cosmetic: several lanes run
+concurrently, each harness installs its own launcher as
+`<export>/RimWorldLinux`, and a single shared export let one lane overwrite
+another's binary mid-boot.  See [tools/rw/README.md](tools/rw/README.md);
+`tools/rw/nfs-export.sh` refuses the shared path unless
+`RW_ALLOW_SHARED_EXPORT=1`.
+
 New syscalls (both architectures): `SYS_MOUNT` (27) and `SYS_UMOUNT` (28);
 `sysinfo(8, ...)` returns a snapshot of the mount table and `sysinfo(7, ...)`
 reports the statistics of the filesystem holding the cwd (NFS `FSSTAT` when

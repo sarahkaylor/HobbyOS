@@ -852,6 +852,10 @@ void wm_handle_app_escape(int win_id, char* seq) {
         windows[j].pixel_mode = 1;
         windows[j].pix_pref_w = pw < 0 ? 0 : pw;
         windows[j].pix_pref_h = ph < 0 ? 0 : ph;
+        /* L62: with /WMSIZE staged the request is honoured here (the window is
+         * its content rect + chrome); without it this is a no-op and the
+         * window keeps its tile, which is the shipped behaviour. */
+        wm_pixel_apply_pref(&windows[j]);
         windows[j].rendered_valid = 0;  /* the WM no longer paints it */
         wm_pixel_send_geometry(&windows[j]);
         wm_pixel_queue_expose_all(&windows[j]);
@@ -860,10 +864,37 @@ void wm_handle_app_escape(int win_id, char* seq) {
     }
   } else if (seq[0] == ']' && seq[1] == 'F') {
     /* "Frame flushed": the app just painted framebuffer pixels; the
-     * pointer sprite may need re-stamping (see window.h). */
+     * pointer sprite may need re-stamping (see window.h).
+     *
+     * Optional parameters name the dirty CONTENT rectangle:
+     *   ESC ] F <x>;<y>;<w>;<h> ~
+     * A native app presents itself (SYS_FLUSH_FB right after its blit), so it
+     * sends the bare form.  A compat app (src/user/xcompat) has no HobbyOS
+     * syscall to present with, so it sends the rect and the desktop pushes it
+     * to the display in wm_pixel_service_frame(). */
+    int rx = 0, ry = 0, rw = 0, rh = 0;
+    {
+      const char *p = seq + 2;
+      while (*p == ' ') p++;
+      int i = 0;
+      rx = csi_param(p, &i);
+      if (p[i] == ';') i++;
+      ry = csi_param(p, &i);
+      if (p[i] == ';') i++;
+      rw = csi_param(p, &i);
+      if (p[i] == ';') i++;
+      rh = csi_param(p, &i);
+    }
     for (int j = 0; j < num_windows; j++) {
       if (windows[j].id == win_id) {
         windows[j].pix_restamp = 1;
+        if (rw > 0 && rh > 0) {
+          windows[j].pix_present.x = rx < 0 ? 0 : rx;
+          windows[j].pix_present.y = ry < 0 ? 0 : ry;
+          windows[j].pix_present.w = rw;
+          windows[j].pix_present.h = rh;
+          windows[j].pix_present_n = 1;
+        }
         break;
       }
     }
@@ -1779,6 +1810,20 @@ static void wm_pixel_service_frame(void) {
       wm_pixel_content_rect(win, &cx, &cy, &cw, &ch);
       struct fb_rect stamped[12];
       int sn = 0;
+      /* The app's pixels: a compat app cannot present for itself, so the rect
+       * it named on ESC ] F is presented here (clipped to the content area;
+       * native apps send no rect and present themselves). */
+      if (win->pix_present_n) {
+        win->pix_present_n = 0;
+        int px = win->pix_present.x, py = win->pix_present.y;
+        int pw = win->pix_present.w, ph = win->pix_present.h;
+        if (px < 0) { pw += px; px = 0; }
+        if (py < 0) { ph += py; py = 0; }
+        if (px + pw > cw) pw = cw - px;
+        if (py + ph > ch) ph = ch - py;
+        if (pw > 0 && ph > 0)
+          present_add(stamped, &sn, 12, cx + px, cy + py, pw, ph);
+      }
       /* Menus sit above the app's pixels: re-stamp the part of each open
        * menu that overlaps the content this flush may have painted. */
       for (int k = 0; k < 3; k++) {
@@ -2050,6 +2095,24 @@ int main(void) {
     exit(0);
   }
   wm_init();
+  /* L62: /WMSIZE makes the WM honour a pixel-mode client's requested content
+   * size.  Staged only by the fps ladder (tools/rw/run-rimworld-desktop.sh
+   * RW_WM_HONOUR=1); absent, the WM tiles every window as it always has. */
+  {
+    int wf = open("/WMSIZE", 0 /* O_RDONLY */);
+    if (wf >= 0) {
+      char wb[8];
+      int wn = (int)read(wf, wb, sizeof wb - 1);
+      close(wf);
+      /* Content-gated ("1"/"on"), not presence-gated: the image has no
+       * mdel(1) in this environment, so a marker that is staged once cannot
+       * be removed -- it can only be rewritten. */
+      if (wn > 0 && (wb[0] == '1' || wb[0] == 'o' || wb[0] == 'y')) {
+        wm_honour_pixel_pref(1);
+        print("Desktop: /WMSIZE -> pixel-mode window sizes are honoured\n");
+      }
+    }
+  }
   load_menu();
 
   mouse_x = SCREEN_WIDTH / 2;

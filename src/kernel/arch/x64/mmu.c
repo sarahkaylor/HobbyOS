@@ -538,10 +538,21 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {
 /* P5 (D5.7) / S4 (fork clone): OA bits of a leaf returned by
  * vm_arch_walk -- cross-context writes (vm_kwrite) and the v2 fork clone. */
 uint64_t vm_arch_leaf_phys(uint64_t leaf) { return leaf & X64_OA_MASK; }
+int vm_arch_leaf_writable(uint64_t leaf) { return (leaf & X64_PTE_RW) != 0; }
 
 void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
   (void)as;
   x64_invlpg(va);
+}
+
+/* M6/L59: the complete flush.  Same effect as the shootdown handler's reload
+ * (vector 0x82) but local and without an IPI: used by the present-leaf retry
+ * path after INVLPG alone has failed to change the hardware's mind. */
+void vm_arch_reload_cr3(struct addr_space *as) {
+  if (!as || !as->root_phys)
+    return;
+  uint64_t cr3 = as->root_phys;
+  __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
 }
 
 /* Shootdown IPI (vector 0x82, OQ5): sent only when the AS is claimed on

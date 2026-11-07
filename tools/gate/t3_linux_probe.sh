@@ -60,6 +60,12 @@ esac
 
 CFG="$(mktemp)"
 printf 'PROBE.ELF\n' > "$CFG"
+# LP_WAVE_EXTRA: extra manifest lines for the same wave, e.g.
+#   LP_WAVE_EXTRA="PROBE.ELF nest"
+# for a probe that needs a sacrificial second instance (a case that is expected
+# to kill its process -- the point being that the MACHINE survives it, which is
+# only observable if another program in the wave keeps running).
+if [ -n "${LP_WAVE_EXTRA:-}" ]; then printf '%s\n' "$LP_WAVE_EXTRA" >> "$CFG"; fi
 # TOOLS_SKIP=1: a fresh worktree has no self-host LLVM dist-staging, and the
 # disk target would otherwise try to BUILD llvm from source ("cold = hours").
 # Nothing in a compat probe needs /TOOLS.

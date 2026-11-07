@@ -7,6 +7,7 @@
 #include "process.h"
 #include "nfs.h"
 #include "ipc_proto.h"
+#include "vfs.h"
 
 struct socket_pcb;
 struct usock;
@@ -25,7 +26,13 @@ typedef enum {
   FILE_TYPE_DEVNULL,  /**< GB-017: /dev/null — write-sink, EOF-on-read */
   FILE_TYPE_DEVURANDO,/**< GB-017: /dev/urandom — entropy file (F1.4 pool) */
   FILE_TYPE_DEVINPUT, /**< GB-171: /dev/input/event0 — evdev key records */
-  FILE_TYPE_DEVFB,    /**< GB-167: /dev/fb0 — framebuffer info ioctls, write-sink */
+  FILE_TYPE_DEVFB,    /**< GB-167 / GB-025 M3: /dev/fb0 — framebuffer info
+                           ioctls, write-sink.  read/write refuse it; mmap maps
+                           the scanout smem at USER_FB_BASE_V2 (the same mapping
+                           SYS_MAP_FB installs) and the compat ioctl route
+                           answers FBIOGET_VSCREENINFO/FSCREENINFO + FBIOBLANK
+                           (docs/linux-abi.md §9).  One enumerator: upstream
+                           GB-167 and this branch's M3 both added the node. */
   /* SEC-6: freshly allocated slot whose real type the caller has not set
      yet.  Distinct from FILE_TYPE_EMPTY (= free): an abandoned UNINIT slot
      must never be mistaken for a usable FAT16 file with garbage fields.
@@ -40,7 +47,39 @@ typedef enum {
      process's open fds; read/write refuse it.  Distinct from FAT16DIR
      because there is no on-disk dir entry.  Appended last so the values
      above never shift. */
-  FILE_TYPE_PROCFD
+  FILE_TYPE_PROCFD,
+  /* M6 launch plumbing: the virtual /proc/self/maps text stream.  read()
+     renders this process's real vm_region list; fstat reports a 0444
+     regular file of size 0, which is what Linux reports (the content has
+     no stored length).  Appended last so existing values never shift. */
+  FILE_TYPE_PROCMAPS,
+  /* M2 stdio: /dev/console -- a character device for stdin/stdout/stderr.
+     read() is EOF (0); write() goes through console_write_user() (the same
+     serial sink file_write's fd-1/2 fallback uses); fstat reports
+     S_IFCHR|0644; mmap is refused.  Every compat spawn gets this node
+     installed on any of fds 0/1/2 that its parent left unassigned: Mono's
+     System.Console ctor wraps each stdio fd in a FileStream, and FileStream
+     fstat()s the handle -- a bare fd number with no file object behind it
+     throws ArgumentException ("handle"/"Invalid") before the first managed
+     statement.  Appended last: no values shift. */
+  FILE_TYPE_CONSOLE,
+  /* L49: a timerfd (src/kernel/linux_compat_timers.c).  Readable when it has
+     unread expirations; read(2) drains them as one u64. */
+  FILE_TYPE_TIMERFD,
+  /* L49: an epoll instance (src/kernel/linux_compat_timers.c). */
+  FILE_TYPE_EPOLL,
+  /* L54: a DIRECTORY on a mounted NFS export.  Mono's
+     DirectoryInfo.GetDirectories() over /NFS used to reach fat16_open_dir()
+     and fail with ENOENT, so Verse.ModLister's type initializer threw
+     DirectoryNotFoundException and the main menu never appeared.  An NFSDIR
+     fd has no data path; getdents64 walks nfs_list_dir() and stat reports a
+     directory.  Appended last: no values shift. */
+  FILE_TYPE_NFSDIR,
+  /* M1 (docs/gpu-abi.md): /dev/gpu -- the virtio-gpu 3D userspace ABI.
+     read/write refuse it; the compat ioctl(16) route answers the GPU_IOC_*
+     requests through gpu_abi.c.  mmap is refused in M1 (no blob resources).
+     Appended last: no values shift. */
+  FILE_TYPE_DEVGPU
 } file_type_t;
 
 struct vm_object;
@@ -58,6 +97,16 @@ struct file {
      just sockets; without it a regular file //dev/null answers -ENOTSOCK instead
      of its flags.  Set at open, read by file_fcntl F_GETFL, written by F_SETFL. */
   uint32_t open_flags;
+  /* M6 launch plumbing: the absolute path this fd was opened from, as the
+     VFS resolved it.  /proc/self/fd/N must answer exactly that string on
+     readlink, and opening /proc/self/fd/N re-opens the same file by path
+     (fresh open file description, offset 0 — NOT dup semantics).  Empty
+     when the open had no name (a memfd without one, an internal slot). */
+  char path[VFS_PATH_MAX];
+  /* /proc/self/maps streaming cursor: (region_index << 8) | byte offset
+     inside that region's rendered line.  A line is < 192 bytes by
+     construction, so 8 bits are enough. */
+  uint32_t maps_cursor;
   union {
     struct {
       struct fat16_dir_entry entry; /**< FAT16 directory entry copy */
@@ -86,6 +135,8 @@ struct file {
       struct nfs_fh fh;            /**< NFSv3 file handle */
       uint64_t size;               /**< Size from the open attributes */
       uint32_t cursor;             /**< Current read position */
+      uint32_t ra_next;            /**< L76: end of the previous read */
+      int ra_seq;                  /**< L76: consecutive sequential reads */
       int is_dir;                  /**< Opened entry is a directory */
       int mount_idx;               /**< Index of the mount serving it */
     } nfs;
@@ -94,14 +145,33 @@ struct file {
                                         holds one object ref per fd instance */
       int mfd_flags;               /**< MFD_* passed at create (recorded) */
     } memfd;
+    struct {
+      int slot;                    /**< L49: index into linux_compat_timers'
+                                        timer table */
+    } timerfd;
+    struct {
+      int slot;                    /**< L49: index into linux_compat_timers'
+                                        epoll table */
+    } epollfd;
   };
 };
 
-#define MAX_GLOBAL_FILES 128
+/* L55: 512, not 128.  MAX_OPEN_FDS is now 256 per process, and this table is
+ * the one every local fd indexes: leaving it at 128 would have made the wider
+ * per-process table unusable (a single process could still only reach 128
+ * distinct open files, and the desktop/launcher/socket slots share the rest).
+ * One slot is ~400 B, so the extra 384 slots cost ~150 KiB of BSS. */
+#define MAX_GLOBAL_FILES 512
 
 void fs_init(void);
 struct trap_frame;
 int file_open(struct process *p, const char *filename, int flags);
+/* M5 exec-from-NFS: read a whole program image into a contiguous frame range
+ * via the same VFS route open() uses.  1 = NFS (buf/size/pages filled, caller
+ * frees the frames), 0 = FAT16 path (use the legacy cluster loader), <0 = a
+ * real failure. */
+int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
+                  uint32_t *pages_out);
 int file_close(struct process *p, int fd);
 int file_dup(struct process *p, int fd);
 int file_dup2(struct process *p, int oldfd, int newfd);
@@ -172,8 +242,10 @@ struct k_stat {
 #define K_S_IFMT  0170000
 #define K_S_IFDIR 0040000
 #define K_S_IFREG 0100000
+#define K_S_IFLNK 0120000
 #define K_S_IFIFO 0010000
 #define K_S_IFSOCK 0140000
+#define K_S_IFCHR 0020000
 
 /* --- Phase F1 (browser.md A.1a — frozen): socket/select syscall support -- */
 
@@ -325,6 +397,10 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp);
 int file_fd_is_devfb(struct process *p, int fd);   /* GB-167: /dev/fb0 node? */
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp);
+/* M6 launch plumbing: the absolute path an open fd was opened from, for
+ * readlink("/proc/self/fd/N") and for re-opening through that link.
+ * Returns 0, or -EBADF (no such fd) / -ENOENT (fd has no name). */
+int file_path_of(struct process *p, int fd, char *out, int cap);
 
 /* GB-020: getdents64 over an open directory fd.  (p, fd, ubuf, bufsize) ->
  * bytes written (0 at end) | negative errno (-EBADF/-ENOTDIR/-EINVAL). */

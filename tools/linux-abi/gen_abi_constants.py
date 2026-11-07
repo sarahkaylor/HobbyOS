@@ -85,6 +85,18 @@ ROWS = [
     ("DT_CHR", "DT_CHR", "dirent.h"),
     # rlimit (sys/resource.h)
     ("RLIMIT_NOFILE", "RLIMIT_NOFILE", "sys/resource.h"),
+    # prctl options + nice `which` (M1 startup: PR_SET_NAME/PR_GET_NAME are the
+    # 16-byte comm glibc's pthreads round-trip, and PRIO_* is the getpriority
+    # namespace).  sys/prctl.h must come before linux/prctl.h on glibc hosts.
+    ("PR_SET_PDEATHSIG", "PR_SET_PDEATHSIG", "sys/prctl.h"),
+    ("PR_GET_PDEATHSIG", "PR_GET_PDEATHSIG", "sys/prctl.h"),
+    ("PR_GET_DUMPABLE", "PR_GET_DUMPABLE", "sys/prctl.h"),
+    ("PR_SET_DUMPABLE", "PR_SET_DUMPABLE", "sys/prctl.h"),
+    ("PR_SET_NAME", "PR_SET_NAME", "sys/prctl.h"),
+    ("PR_GET_NAME", "PR_GET_NAME", "sys/prctl.h"),
+    ("PRIO_PROCESS", "PRIO_PROCESS", "sys/resource.h"),
+    ("PRIO_PGRP", "PRIO_PGRP", "sys/resource.h"),
+    ("PRIO_USER", "PRIO_USER", "sys/resource.h"),
 ]
 # fmt: on
 

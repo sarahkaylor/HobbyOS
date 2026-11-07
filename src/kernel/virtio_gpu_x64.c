@@ -99,6 +99,22 @@ static inline uint32_t inl(uint16_t port) {
   return ret;
 }
 
+static inline void outb(uint16_t port, uint8_t val) {
+  __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline uint8_t inb(uint16_t port) {
+  uint8_t ret;
+  __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
+  return ret;
+}
+
+static inline uint16_t inw(uint16_t port) {
+  uint16_t ret;
+  __asm__ volatile("inw %1, %0" : "=a"(ret) : "Nd"(port));
+  return ret;
+}
+
 static uint32_t pci_read_config(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
   uint32_t address = ((uint32_t)1 << 31) |
                      ((uint32_t)bus << 16) |
@@ -135,6 +151,76 @@ static void pci_write_config(uint8_t bus, uint8_t slot, uint8_t func, uint8_t of
 static void bga_write(uint16_t index, uint16_t data) {
   outw(VBE_DISPI_IOPORT_INDEX, index);
   outw(VBE_DISPI_IOPORT_DATA, data);
+}
+
+static uint16_t bga_read(uint16_t index) {
+  outw(VBE_DISPI_IOPORT_INDEX, index);
+  return inw(VBE_DISPI_IOPORT_DATA);
+}
+
+/* M6/L72: THE 8x1 FRAMEBUFFER IS A MODE, NOT A WINDOW.
+ *
+ * A screendump that turns 8x1 mid-run is exactly what QEMU's
+ * `vga_get_text_resolution()` computes when the VGA CRTC registers are all
+ * zero: width = (cr[H_DISP]+1)*8 = 8 and height = cr[V_DISP_END]+1 = 1.  That
+ * is the device's state after a VGA reset with no mode set since -- no guest
+ * mode, no window, no Unity involvement.  So the first question is whether the
+ * guest's own mode survived: read the Bochs dispi registers (the values QEMU's
+ * `vga_get_resolution()` returns in VBE mode) and the two CRTC fields the text
+ * fallback uses, and print one row only when any of them changes.  If the
+ * dispi trio is still 1920/1080/32 and ENABLED, the guest never lost its mode
+ * and the 8x1 is the HOST's dump surface; if it is disabled or zeroed, the
+ * display is ours to restore, and we restore it (the framebuffer is the
+ * kernel's: a reset must not leave the machine blind). */
+void virtio_gpu_health_tick(void) {
+  if (gpu_mode != VGPU_MODE_BGA)
+    return;
+  static uint16_t l_xres, l_yres, l_bpp, l_en, l_hd, l_vd;
+  static int l_rows;
+  /* CRTC 0x01 (H display end) and 0x12 (V display end) are what QEMU reads in
+     text mode; 0x03C4/0x03D4 are the sequencer/CRTC index ports. */
+  outb(0x03D4, 0x01);
+  uint16_t hd = (uint16_t)inb(0x03D5);
+  outb(0x03D4, 0x12);
+  uint16_t vd = (uint16_t)inb(0x03D5);
+  uint16_t xres = bga_read(VBE_DISPI_INDEX_XRES);
+  uint16_t yres = bga_read(VBE_DISPI_INDEX_YRES);
+  uint16_t bpp = bga_read(VBE_DISPI_INDEX_BPP);
+  uint16_t en = bga_read(VBE_DISPI_INDEX_ENABLE);
+  int lost = (xres != GPU_SCREEN_W || yres != GPU_SCREEN_H || bpp != 32 ||
+              (en & VBE_DISPI_ENABLED) == 0);
+  if (!lost && xres == l_xres && yres == l_yres && bpp == l_bpp && en == l_en &&
+      hd == l_hd && vd == l_vd)
+    return; /* unchanged and healthy: no row */
+  l_xres = xres; l_yres = yres; l_bpp = bpp; l_en = en; l_hd = hd; l_vd = vd;
+  if (l_rows < 40) {
+    l_rows++;
+    uart_puts("[BGA] xres=");
+    print_int((int)xres);
+    uart_puts(" yres=");
+    print_int((int)yres);
+    uart_puts(" bpp=");
+    print_int((int)bpp);
+    uart_puts(" en=0x");
+    uart_print_hex((uint64_t)en);
+    uart_puts(" hdisp=");
+    print_int((int)hd);
+    uart_puts(" vdisp=");
+    print_int((int)vd);
+    uart_puts(lost ? " -> mode LOST\n" : " -> mode ok\n");
+  }
+  if (lost) {
+    /* Same sequence bga_setup uses; the resource/backing are unchanged, so a
+       mode restore is all a reset needs.  Count it (a repeat is a row, not a
+       repair loop). */
+    bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
+    bga_write(VBE_DISPI_INDEX_XRES, GPU_SCREEN_W);
+    bga_write(VBE_DISPI_INDEX_YRES, GPU_SCREEN_H);
+    bga_write(VBE_DISPI_INDEX_BPP, 32);
+    bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB);
+    virtio_gpu_flush();
+    uart_puts("[BGA] mode restored\n");
+  }
 }
 
 /* Probe + program the Bochs VGA (PCI 1234:1111) at the shared desktop
@@ -277,6 +363,11 @@ static struct virtio_gpu_transfer_to_host_2d gpu_req_transfer;
 static struct virtio_gpu_resource_flush gpu_req_flush;
 static struct virtio_gpu_ctrl_hdr gpu_resp;
 
+/* M1: VIRTIO_GPU_F_VIRGL was offered by the device and is in our accepted
+ * driver-feature set.  virtio_gpu_3d.c reads these (the 2D path never does). */
+int virtio_gpu_x64_virgl_offered = 0;
+int virtio_gpu_x64_virgl_negotiated = 0;
+
 #if G2_VPCI_DBG
 static int gpu_dbg_cmds = 0;
 #endif
@@ -381,29 +472,42 @@ static uint64_t vpci_bar_phys(uint8_t bus, uint8_t slot, uint8_t bar) {
 
 /* --- control queue command submission -------------------------------- */
 
-static int gpu_transact(const void* req, uint32_t req_len, const void* data, uint32_t data_len) {
+/* M1: generic transaction with a caller-supplied response buffer.  The 3D
+ * commands need two things the 2D helper never did:
+ *   - a response larger than the 24-byte header (GET_CAPSET's capset blob),
+ *   - the used-ring length + the device's response type, so a rejected 3D
+ *     command can be reported verbatim instead of a bare "failed".
+ * `data` is an optional second readable descriptor (attach-backing entry
+ * list, command stream); when NULL the chain is req -> resp. */
+int virtio_gpu_x64_transact_ex(const void* req, uint32_t req_len,
+                               const void* data, uint32_t data_len,
+                               void* resp, uint32_t resp_cap,
+                               uint32_t* resp_len, uint32_t* resp_type) {
   if (gpu_failed || gpu_qsize == 0 || !gpu_cc) return -1;
+  if (!req || req_len == 0 || !resp || resp_cap < sizeof(struct virtio_gpu_ctrl_hdr))
+    return -1;
+  if (data_len && !data) return -1;
+  if (!data) data_len = 0;
 
   gpu_desc[0].addr = (uint64_t)req;
   gpu_desc[0].len = req_len;
   gpu_desc[0].flags = VQ_DESC_F_NEXT;
   gpu_desc[0].next = 1;
-  if (data) {
+
+  uint16_t last = 1;
+  if (data_len) {
     gpu_desc[1].addr = (uint64_t)data;
     gpu_desc[1].len = data_len;
     gpu_desc[1].flags = VQ_DESC_F_NEXT;
     gpu_desc[1].next = 2;
-    gpu_desc[2].addr = (uint64_t)&gpu_resp;
-    gpu_desc[2].len = sizeof(gpu_resp);
-    gpu_desc[2].flags = VQ_DESC_F_WRITE;
-    gpu_desc[2].next = 0;
-  } else {
-    gpu_desc[1].addr = (uint64_t)&gpu_resp;
-    gpu_desc[1].len = sizeof(gpu_resp);
-    gpu_desc[1].flags = VQ_DESC_F_WRITE;
-    gpu_desc[1].next = 0;
+    last = 2;
   }
-  gpu_resp.type = 0;
+
+  gpu_desc[last].addr = (uint64_t)resp;
+  gpu_desc[last].len = resp_cap;
+  gpu_desc[last].flags = VQ_DESC_F_WRITE;
+  gpu_desc[last].next = 0;
+  *(volatile uint32_t*)resp = 0; /* resp.type, cleared before the kick */
 
   gpu_avail.ring[gpu_avail_next % gpu_qsize] = 0; /* head descriptor */
   arch_memory_barrier();
@@ -439,14 +543,19 @@ static int gpu_transact(const void* req, uint32_t req_len, const void* data, uin
   }
   arch_memory_barrier();
   gpu_used_ack = *(volatile uint16_t*)&gpu_used.idx;
+  uint32_t used_len = gpu_used.ring[ack0 % gpu_qsize].len;
   arch_memory_barrier();
+
+  uint32_t rtype = *(volatile uint32_t*)resp;
+  if (resp_len) *resp_len = used_len;
+  if (resp_type) *resp_type = rtype;
 
 #if G2_VPCI_DBG
   if (gpu_dbg_cmds < 12) {
     uart_puts("G2DBG cmd ok spins=");
     print_int((int)(spins > 500000000ull ? 500000000 : (int)spins));
     uart_puts(" rt=");
-    uart_print_hex(gpu_resp.type);
+    uart_print_hex(rtype);
     uart_puts(" req=");
     uart_print_hex(*(volatile uint32_t*)req);
     uart_puts("\n");
@@ -454,9 +563,19 @@ static int gpu_transact(const void* req, uint32_t req_len, const void* data, uin
   gpu_dbg_cmds++;
 #endif
 
-  if (gpu_resp.type >= 0x1200) return -1; /* RESP_ERR_* */
+  if (rtype >= 0x1200) return -1; /* RESP_ERR_* */
   return 0;
 }
+
+static int gpu_transact(const void* req, uint32_t req_len, const void* data, uint32_t data_len) {
+  return virtio_gpu_x64_transact_ex(req, req_len, data, data_len, &gpu_resp,
+                                    sizeof(gpu_resp), 0, 0);
+}
+
+/* M1: the 3D layer shares this lock with the 2D present path, so a submit
+ * can never interleave with a scanout transfer on the one control queue. */
+uint64_t virtio_gpu_x64_lock(void) { return spinlock_acquire_irqsave(&gpu_lock); }
+void virtio_gpu_x64_unlock(uint64_t flags) { spinlock_release_irqrestore(&gpu_lock, flags); }
 
 /* Read the ISR (clearing any pending interrupt state).  INTx is disabled
  * in the PCI command register; this is ack hygiene only. */
@@ -581,7 +700,12 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   gpu_cc_w8(VPCI_CC_DEVICE_STATUS, VPCI_STATUS_ACK);
   gpu_cc_w8(VPCI_CC_DEVICE_STATUS, VPCI_STATUS_ACK | VPCI_STATUS_DRIVER);
 
-  /* Feature negotiation: accept VIRTIO_F_VERSION_1 only (2D-only driver). */
+  /* Feature negotiation: VIRTIO_F_VERSION_1 always; VIRTIO_GPU_F_VIRGL only
+   * when the device offers it (the GL device does, plain virtio-gpu-pci does
+   * not -- docs/rimworld-virgl-plan.md P2).  VIRTIO_GPU_F_CONTEXT_INIT is
+   * deliberately left un-negotiated in M1: the legacy CTX_CREATE layout and
+   * capset 1 (VIRGL) are all M1 needs, and declining it keeps the context
+   * command shape independent of the capset version. */
   gpu_cc_w32(VPCI_CC_DEV_FEAT_SEL, 0);
   uint32_t feat_lo = gpu_cc_r32(VPCI_CC_DEV_FEAT);
   gpu_cc_w32(VPCI_CC_DEV_FEAT_SEL, 1);
@@ -595,8 +719,13 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
 #endif
   if (!(feat_hi & VPCI_F_VERSION_1)) return -1;
 
+  virtio_gpu_x64_virgl_offered =
+      (feat_lo & (1u << VIRTIO_GPU_F_VIRGL)) ? 1 : 0;
+  uint32_t drv_lo = 0;
+  if (virtio_gpu_x64_virgl_offered) drv_lo |= (1u << VIRTIO_GPU_F_VIRGL);
+
   gpu_cc_w32(VPCI_CC_DRV_FEAT_SEL, 0);
-  gpu_cc_w32(VPCI_CC_DRV_FEAT, 0);
+  gpu_cc_w32(VPCI_CC_DRV_FEAT, drv_lo);
   gpu_cc_w32(VPCI_CC_DRV_FEAT_SEL, 1);
   gpu_cc_w32(VPCI_CC_DRV_FEAT, VPCI_F_VERSION_1);
 
@@ -604,6 +733,7 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
             VPCI_STATUS_ACK | VPCI_STATUS_DRIVER | VPCI_STATUS_FEATURES_OK);
   arch_memory_barrier();
   if (!(gpu_cc_r8(VPCI_CC_DEVICE_STATUS) & VPCI_STATUS_FEATURES_OK)) return -1;
+  virtio_gpu_x64_virgl_negotiated = virtio_gpu_x64_virgl_offered;
 
   /* Control queue (0): size, addresses, enable. */
   gpu_cc_w16(VPCI_CC_QUEUE_SEL, VGPU_QUEUE_ID);
@@ -632,8 +762,13 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   gpu_cc_w8(VPCI_CC_DEVICE_STATUS, VPCI_STATUS_ACK | VPCI_STATUS_DRIVER |
                                        VPCI_STATUS_FEATURES_OK | VPCI_STATUS_DRIVER_OK);
 
-  /* 2D resource + scanout. */
-  return vgpu_resource_setup();
+  /* 2D resource + scanout (the desktop's one hard dependency). */
+  if (vgpu_resource_setup() != 0) return -1;
+
+  /* M1: capset discovery.  Any 3D failure here is contained: the 2D path
+   * above already owns the scanout, so the desktop boots either way. */
+  if (virtio_gpu_x64_virgl_negotiated) virtio_gpu_3d_init();
+  return 0;
 }
 
 /* Probe the PCI bus for a modern virtio GPU and bring it up. */
@@ -739,6 +874,9 @@ int virtio_gpu_init(void) {
   if (vgpu_probe_and_bringup() == 0) {
     gpu_mode = VGPU_MODE_VIRTIO;
     uart_puts("VirtIO GPU: virtio-pci\n");
+    /* The M1 3D gate (virtio_gpu_3d_probe) is called from main() AFTER the
+     * timer is calibrated, so its timing rows carry a real clock.  It runs
+     * only when VIRTIO_GPU_F_VIRGL was negotiated. */
     virtio_gpu_flush();
     return 0;
   }

@@ -44,6 +44,9 @@ void unix_test_suite(void);
 void fs_test_suite(void);
 void mmu_test_suite(void);
 void vm_test_suite(void);
+/* M6/L69: vm checks that need the block cache LIVE (a poisoned cache frame
+ * against the exec gate).  Called after blk_cache_test_suite(). */
+void vm_test_post_cache_suite(void);
 void process_test_suite(void);
 void program_loader_test_suite(void);
 void trap_test_suite(void);
@@ -58,6 +61,9 @@ void evdev_test_suite(void);
 void input_node_test_suite(void);
 void fb_mmap_test_suite(void);
 void abi_t2_test_suite(void);
+#ifdef __x86_64__
+void fpu_sig_test_suite(void); /* M6/L63: signal-frame FP image guard */
+#endif
 void timer_test_suite(void);
 void smp_test_suite(void);
 void time_test_suite(void);
@@ -67,5 +73,6 @@ void net_test_suite(void);
 void net_rdma_test_suite(void);
 void nfs_test_suite(void);
 void elf_loader_test_suite(void); /* docs/shared-libs.md lane B */
+void linux_compat_pi_test_suite(void); /* PI futex word state machine */
 
 #endif // UNIT_TEST_H
