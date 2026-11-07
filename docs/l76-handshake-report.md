@@ -263,3 +263,22 @@ tools/rw/run-rimworld-desktop.sh --timeout 480 --run-timeout 1800
 The `[TPLATE]` sampler sends SIGUSR2 to every live thread and the process died
 in libmono at t≈440 s in that run (S1); the ladder rows use no sampler.
 
+
+## 10. What the next lane should do first
+
+1. **The publish path, not the probe.** In R2 the probe's cache-bypassed read
+   held 3547 non-zero bytes of `UnityPlayer.so` at `off=0x9AD000`, the probe
+   answered 1, and the page that was published is 4096 zeros
+   (`[PUB] … zero=4096 ver=1`, `[UDX] pghd=0x0`). Read
+   `vm_read_page_from_device()` from the `[TXT] PROBEGET` branch to the
+   `[PUB]` row and find where `dst` stops being the frame the probe filled; the
+   `[UDX]` row already prints the leaf's physical page and `same=1`, so the
+   divergence is in the kernel, not in the device.
+2. **Do not let a transport failure become ENOENT anywhere else.** `nfs_lookup`
+   is fixed; `stat`/`open`/`readdir` have the same `-1` collapse in places
+   (`nfs_getattr`, `nfs_is_dir`, `dir_cache_fill`), and each one can surface as
+   "file does not exist".
+3. **The plateau is CPU, not I/O.** ~46 rounds/s, ~23 KiB of reads per round,
+   ~1 MB/s against a ~5 MB/s transport. Instrument Unity's texture path (or run
+   the plateau with `RW_QEMU_GL=1` and compare rounds/s) before optimising the
+   read path further.
