@@ -218,16 +218,20 @@ static void sys_fork(struct trap_frame *tf) {
 }
 
 static void sys_open(struct trap_frame *tf) {
-  const char *filename = (const char *)tf->regs[5]; // rdi
   int flags = (int)tf->regs[4];                     // rsi (syscall arg 2)
   struct process *caller = current_process();
-  if (sys_user_range_ok((uint64_t)filename, 1)) {
-    /* file_open returns >= 0 (fd) or a negative errno it picked itself
-       (ENOENT/EEXIST/EMFILE), which errno_ret decodes in libc. */
-    tf->regs[0] = file_open(caller, filename, flags);
-  } else {
+  /* L73: a path is a user string.  Validating ONE byte and then scanning for
+     the NUL with raw loads lets a string that ends on a region boundary walk
+     the kernel into the hole past it.  u_strcpy (SEC-3) reads every byte
+     through vm_user_read, so a hole answers -EFAULT here instead. */
+  char kpath[VFS_PATH_MAX];
+  if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) {
     tf->regs[0] = -EFAULT;
+    return;
   }
+  /* file_open returns >= 0 (fd) or a negative errno it picked itself
+     (ENOENT/EEXIST/EMFILE), which errno_ret decodes in libc. */
+  tf->regs[0] = file_open(caller, kpath, flags);
 }
 
 static void sys_close(struct trap_frame *tf) {
@@ -500,27 +504,27 @@ static void sys_sysinfo(struct trap_frame *tf) {
 }
 
 static void sys_unlink(struct trap_frame *tf) {
-  const char *filename = (const char *)tf->regs[5]; // rdi
-  if (sys_user_range_ok((uint64_t)filename, 1)) {
-    extern int vfs_unlink(const char *path);
-    int r = vfs_unlink(filename);
-    tf->regs[0] = r < 0 ? -ENOENT : r;
-  } else {
+  /* L73: copy the user path safely before any filesystem sees it. */
+  char kpath[VFS_PATH_MAX];
+  if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) {
     tf->regs[0] = -EFAULT;
+    return;
   }
+  extern int vfs_unlink(const char *path);
+  int r = vfs_unlink(kpath);
+  tf->regs[0] = r < 0 ? -ENOENT : r;
 }
 
 static void sys_rename(struct trap_frame *tf) {
-  const char *oldname = (const char *)tf->regs[5]; // rdi
-  const char *newname = (const char *)tf->regs[4]; // rsi
-  if (sys_user_range_ok((uint64_t)oldname, 1) &&
-      sys_user_range_ok((uint64_t)newname, 1)) {
-    extern int vfs_rename(const char *oldp, const char *newp);
-    int r = vfs_rename(oldname, newname);
-    tf->regs[0] = r < 0 ? -ENOENT : r;
-  } else {
+  char kold[VFS_PATH_MAX], knew[VFS_PATH_MAX];
+  if (!u_strcpy((const char *)tf->regs[5], kold, sizeof kold) ||
+      !u_strcpy((const char *)tf->regs[4], knew, sizeof knew)) {
     tf->regs[0] = -EFAULT;
+    return;
   }
+  extern int vfs_rename(const char *oldp, const char *newp);
+  int r = vfs_rename(kold, knew);
+  tf->regs[0] = r < 0 ? -ENOENT : r;
 }
 
 static void sys_connect(struct trap_frame *tf) {
@@ -1078,7 +1082,6 @@ static void sys_spawn_worker(void *arg) {
 }
 
 static void sys_spawn(struct trap_frame *tf) {
-  const char *filename = (const char *)tf->regs[5]; // rdi
   int stdin_fd = (int)tf->regs[4]; // rsi
   int stdout_fd = (int)tf->regs[3]; // rdx
   int stderr_fd = (int)tf->regs[9]; // r10 — the 4th syscall arg.  (regs[2] is
@@ -1092,7 +1095,8 @@ static void sys_spawn(struct trap_frame *tf) {
     return;
   }
 
-  if (sys_user_range_ok((uint64_t)filename, 1)) {
+  char kfile[32];
+  if (u_strcpy((const char *)tf->regs[5], kfile, sizeof kfile)) { /* L73 */
     /* SEC-OBS-A: pid indexes spawn_args_pool; refuse a corrupt/out-of-range
      * pid before writing through it. */
     if (caller->pid < 0 || caller->pid >= MAX_PROCESSES) {
@@ -1102,8 +1106,8 @@ static void sys_spawn(struct trap_frame *tf) {
 
     struct sys_spawn_args *args = &spawn_args_pool[caller->pid];
     int i = 0;
-    while (filename[i] && i < 31) {
-      args->filename[i] = filename[i];
+    while (kfile[i] && i < 31) {
+      args->filename[i] = kfile[i];
       i++;
     }
     args->filename[i] = '\0';
@@ -1112,10 +1116,13 @@ static void sys_spawn(struct trap_frame *tf) {
     args->stderr_fd = stderr_fd;
     args->caller_pid = caller->pid;
 
-    if (args_ptr && sys_user_range_ok((uint64_t)args_ptr, 1)) {
+    /* L73: same rule for the flat argument blob -- u_strcpy reads it through
+       vm_user_read, so a hole answers "no args" instead of faulting here. */
+    char kargs[HO_FLAT_ARGS_LEN];
+    if (args_ptr && u_strcpy((const char *)args_ptr, kargs, sizeof kargs)) {
       int k = 0;
-      while (args_ptr[k] && k < HO_FLAT_ARGS_LEN - 1) {
-        args->args[k] = args_ptr[k];
+      while (kargs[k] && k < HO_FLAT_ARGS_LEN - 1) {
+        args->args[k] = kargs[k];
         k++;
       }
       args->args[k] = '\0';
@@ -1229,7 +1236,6 @@ static void sys_spawn_ex_worker(void *arg) {
  * park in WAIT_SPAWN, run the spawn2 worker machinery, return pid |
  * -errno. */
 static void sys_spawn_ex(struct trap_frame *tf) {
-  const char *path = (const char *)tf->regs[5];
   char *const *argv = (char *const *)tf->regs[4];
   const char *envp = (const char *)tf->regs[3];
   const int *fdmap = (const int *)tf->regs[9];
@@ -1240,7 +1246,10 @@ static void sys_spawn_ex(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
     return;
   }
-  if (!path || !sys_user_range_ok((uint64_t)path, 1)) {
+  /* L73: the path is a user string; copy it through vm_user_read, never with
+     a raw NUL scan that can walk off the end of its region. */
+  char kpath[32];
+  if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) {
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
@@ -1264,8 +1273,8 @@ static void sys_spawn_ex(struct trap_frame *tf) {
 
   struct ho_spawn_ex *ex = &spawn_ex_pool[caller->pid];
   int i = 0;
-  while (path[i] && i < 31) {
-    ex->filename[i] = path[i];
+  while (kpath[i] && i < 31) {
+    ex->filename[i] = kpath[i];
     i++;
   }
   ex->filename[i] = '\0';
@@ -1281,8 +1290,16 @@ static void sys_spawn_ex(struct trap_frame *tf) {
     return;
   }
   for (int k = 0; k < n; k++) {
-    ex->fdmap_src[k] = fdmap[2 * k];
-    ex->fdmap_dst[k] = fdmap[2 * k + 1];
+    /* L73: read the pair through the safe accessor, not by dereferencing the
+       user's fdmap twice per entry. */
+    int pair[2] = {0, 0};
+    if (vm_user_read(caller, fdm_addr + (uint64_t)k * 2 * sizeof(int), pair,
+                     (int)sizeof pair) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+      return;
+    }
+    ex->fdmap_src[k] = pair[0];
+    ex->fdmap_dst[k] = pair[1];
   }
   ex->fdmap_n = n;
 
@@ -1705,15 +1722,15 @@ static void sys_getdents64(struct trap_frame *tf) {
 }
 
 static void sys_mkdir(struct trap_frame *tf) {
-  const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = current_process();
-  if (sys_user_range_ok((uint64_t)path, 1)) {
-    extern int file_mkdir(struct process *cur, const char *path);
-    int r = file_mkdir(caller, path);
-    tf->regs[0] = r < 0 ? -EEXIST : r;
-  } else {
+  char kpath[VFS_PATH_MAX];
+  if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) { /* L73 */
     tf->regs[0] = -EFAULT;
+    return;
   }
+  extern int file_mkdir(struct process *cur, const char *path);
+  int r = file_mkdir(caller, kpath);
+  tf->regs[0] = r < 0 ? -EEXIST : r;
 }
 
 /* W2-14 (selfhost): SYS_RMDIR -- remove an EMPTY directory.  The kernel
@@ -1721,57 +1738,55 @@ static void sys_mkdir(struct trap_frame *tf) {
  * -ENOTEMPTY/-EBUSY; vfs_rmdir maps a routed read-only mount to -EROFS),
  * passed through verbatim -- no coarse -ENOENT folding here. */
 static void sys_rmdir(struct trap_frame *tf) {
-  const char *path = (const char *)tf->regs[5]; // rdi
-  if (sys_user_range_ok((uint64_t)path, 1)) {
-    extern int vfs_rmdir(const char *path);
-    int r = vfs_rmdir(path);
-    tf->regs[0] = r < 0 ? (uint64_t)r : r;
-  } else {
+  char kpath[VFS_PATH_MAX];
+  if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) { /* L73 */
     tf->regs[0] = -EFAULT;
+    return;
   }
+  extern int vfs_rmdir(const char *path);
+  int r = vfs_rmdir(kpath);
+  tf->regs[0] = r < 0 ? (uint64_t)r : r;
 }
 
 /* mount(source, target): mount an NFS export ("A.B.C.D:/export") at a
  * directory of the FAT volume.  The mount point is created when missing. */
 static void sys_mount(struct trap_frame *tf) {
-  const char *source = (const char *)tf->regs[5]; // rdi
-  const char *target = (const char *)tf->regs[4]; // rsi
-  if (sys_user_range_ok((uint64_t)source, 1) &&
-      sys_user_range_ok((uint64_t)target, 1)) {
-    extern int vfs_mount(const char *source, const char *target);
-    int r = vfs_mount(source, target);
-    tf->regs[0] = r < 0 ? -EINVAL : r;
-  } else {
+  char ksrc[VFS_PATH_MAX], ktgt[VFS_PATH_MAX];
+  if (!u_strcpy((const char *)tf->regs[5], ksrc, sizeof ksrc) || /* L73 */
+      !u_strcpy((const char *)tf->regs[4], ktgt, sizeof ktgt)) {
     tf->regs[0] = -EFAULT;
+    return;
   }
+  extern int vfs_mount(const char *source, const char *target);
+  int r = vfs_mount(ksrc, ktgt);
+  tf->regs[0] = r < 0 ? -EINVAL : r;
 }
 
 /* vfs_bind(from, to): alias the subtree at `from` onto the path `to` (M5c).
  * Registers a prefix translation, not a second mount: only path resolution
  * changes, so mmap of a bound file uses the target filesystem's objects. */
 static void sys_vfs_bind(struct trap_frame *tf) {
-  const char *from = (const char *)tf->regs[5]; // rdi
-  const char *to = (const char *)tf->regs[4];   // rsi
-  if (sys_user_range_ok((uint64_t)from, 1) &&
-      sys_user_range_ok((uint64_t)to, 1)) {
-    extern int vfs_bind_add(const char *from, const char *to);
-    int r = vfs_bind_add(from, to);
-    tf->regs[0] = r < 0 ? -EINVAL : r;
-  } else {
+  char kfrom[VFS_PATH_MAX], kto[VFS_PATH_MAX];
+  if (!u_strcpy((const char *)tf->regs[5], kfrom, sizeof kfrom) || /* L73 */
+      !u_strcpy((const char *)tf->regs[4], kto, sizeof kto)) {
     tf->regs[0] = -EFAULT;
+    return;
   }
+  extern int vfs_bind_add(const char *from, const char *to);
+  int r = vfs_bind_add(kfrom, kto);
+  tf->regs[0] = r < 0 ? -EINVAL : r;
 }
 
 /* umount(target): unmount the NFS export mounted exactly at `target`. */
 static void sys_umount(struct trap_frame *tf) {
-  const char *target = (const char *)tf->regs[5]; // rdi
-  if (sys_user_range_ok((uint64_t)target, 1)) {
-    extern int vfs_umount(const char *target);
-    int r = vfs_umount(target);
-    tf->regs[0] = r < 0 ? -EINVAL : r;
-  } else {
+  char ktgt[VFS_PATH_MAX];
+  if (!u_strcpy((const char *)tf->regs[5], ktgt, sizeof ktgt)) { /* L73 */
     tf->regs[0] = -EFAULT;
+    return;
   }
+  extern int vfs_umount(const char *target);
+  int r = vfs_umount(ktgt);
+  tf->regs[0] = r < 0 ? -EINVAL : r;
 }
 
 static void sys_getcwd(struct trap_frame *tf) {
@@ -1870,12 +1885,20 @@ static void sys_fstat(struct trap_frame *tf) {
 }
 
 static void sys_chdir(struct trap_frame *tf) {
-  const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = process_group(current_process()); /* P1 (D7) */
-  if (caller && sys_user_range_ok((uint64_t)path, 1)) {
+  if (!caller) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  char kpath[VFS_PATH_MAX];
+  if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) { /* L73 */
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  {
     extern int vfs_chdir(const char *path, char *out_new_cwd, int cap);
     char new_cwd[128];
-    if (vfs_chdir(path, new_cwd, sizeof new_cwd) == 0) {
+    if (vfs_chdir(kpath, new_cwd, sizeof new_cwd) == 0) {
       int k = 0;
       while (new_cwd[k] && k < 127) {
         caller->cwd[k] = new_cwd[k];
@@ -1886,8 +1909,6 @@ static void sys_chdir(struct trap_frame *tf) {
     } else {
       tf->regs[0] = -ENOENT;
     }
-  } else {
-    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -2250,6 +2271,178 @@ static void compat_mkdirat(struct trap_frame *tf) {
    inside a syscall leaves this set, which the stall watchdog prints. */
 static volatile int core_in_syscall[MAX_CPUS];
 
+/* L73: name the kernel path that dereferenced a user VA.
+ *
+ * The L72 ladder died at t~560 s on a kernel-mode #PF with cr2=0x11CB280000 --
+ * exactly `base+len` of the 16 MiB mmap the log had just recorded -- and the
+ * register row (rax=0x14F, rcx=0x150, r8=0x13F ...) could not name a syscall
+ * because by fault time the argument registers are whatever the faulting code
+ * left in them.  So: latch the entry tuple at syscall entry (sc_arg/sc_rip)
+ * and print it here, with the kernel return addresses from this CPU's stack.
+ * Resolve rip and the frames offline against the exact `hobbyos.elf` of the
+ * run (tools/rw/l73-ksym.py) -- the kernel carries no symbol table.
+ *
+ * Two rules for this instrument:
+ *   - it must never allocate, take vm_lock, or call into anything that can
+ *     fault again: it runs on a stack that is about to be abandoned.
+ *   - when it reports absence, prove it can report presence: the [KPF-STK]
+ *     row is empty only if the scan found no kernel text address, which the
+ *     `frames=` counter states.
+ */
+/* L73: the only way a report may touch a user pointer.
+ *
+ * A fault report is produced for a process that is being killed for touching
+ * an address it must not touch, so every user value in it (the frame pointer
+ * above all) is a candidate for exactly that address.  Reading it with a plain
+ * `*(uint64_t *)va` turns the report into a second, KERNEL-mode #PF on the same
+ * hole: the process dies with "[KERNEL] Kernel-mode #PF in user address space"
+ * and the row that says what it actually did is never printed.
+ *
+ * 0 = both words delivered; -1 = the range is not wholly readable (hole,
+ * guard, or a straddle past the end of its region).  Unit test:
+ * test_l73_user_peek_hole.
+ */
+int kpf_user_peek2(struct process *p, uint64_t va, uint64_t out[2]) {
+  out[0] = 0;
+  out[1] = 0;
+  if (!p || !va)
+    return -1;
+  return vm_user_read(p, va, out, 2 * (int)sizeof(uint64_t)) == 0 ? 0 : -1;
+}
+
+static void kpf_user_report(struct trap_frame *tf, struct process *p,
+                            uint64_t cr2, const char *why) {
+  struct addr_space *as = p ? p->as : 0;
+  struct kline kl;
+
+  kl_init(&kl);
+  kl_s(&kl, "[KPF-SYS] cr2=");
+  kl_hex(&kl, (unsigned long)cr2);
+  kl_s(&kl, " err=");
+  kl_i(&kl, (long)(tf->error_code & 7));
+  kl_s(&kl, " why=");
+  kl_s(&kl, why ? why : "?");
+  kl_s(&kl, " rip=");
+  kl_hex(&kl, (unsigned long)tf->elr);
+  kl_s(&kl, " rsp=");
+  kl_hex(&kl, (unsigned long)tf->lr);
+  kl_s(&kl, " cpu=");
+  kl_i(&kl, (long)get_cpuid());
+  kl_s(&kl, " pid=");
+  kl_i(&kl, (long)(p ? p->pid : -1));
+  kl_s(&kl, " nr=");
+  kl_i(&kl, (long)(p ? p->last_syscall : -1));
+  kl_s(&kl, "\n");
+  kl_emit(&kl);
+
+  /* Which user code issued the syscall: sc_rip is the PC just past the
+     `syscall` instruction, and its containing region names the DSO. */
+  kl_init(&kl);
+  kl_s(&kl, "[KPF-ARG] upc=");
+  kl_hex(&kl, (unsigned long)(p ? p->sc_rip : 0));
+  if (as && p) {
+    struct vm_region *ur = vm_region_find(as, p->sc_rip);
+    kl_s(&kl, " umod=");
+    if (ur) {
+      kl_hex(&kl, (unsigned long)ur->base);
+      kl_s(&kl, "+");
+      kl_hex(&kl, (unsigned long)(p->sc_rip - ur->base));
+    } else {
+      kl_s(&kl, "none");
+    }
+  }
+  for (int i = 0; i < 3; i++) {
+    kl_s(&kl, " a");
+    kl_i(&kl, i);
+    kl_s(&kl, "=");
+    kl_hex(&kl, (unsigned long)(p ? p->sc_arg[i] : 0));
+  }
+  kl_s(&kl, "\n");
+  kl_emit(&kl);
+
+  kl_init(&kl);
+  kl_s(&kl, "[KPF-AR2]");
+  for (int i = 3; i < 6; i++) {
+    kl_s(&kl, " a");
+    kl_i(&kl, i);
+    kl_s(&kl, "=");
+    kl_hex(&kl, (unsigned long)(p ? p->sc_arg[i] : 0));
+  }
+  kl_s(&kl, " ring=");
+  if (p)
+    for (int i = 0; i < 8; i++) {
+      int ix = (p->sys_ring_at - 1 - i) & 31;
+      kl_i(&kl, (long)p->sys_ring[ix]);
+      kl_s(&kl, " ");
+    }
+  kl_s(&kl, "\n");
+  kl_emit(&kl);
+
+  /* The mapping the address fell out of: cr2 is a hole, so find the region
+     ENDING at or just below it.  base+len == cr2 is the "one past the end"
+     shape of an over-long copy; a gap names the guard. */
+  if (as) {
+    struct vm_region *r = cr2 ? vm_region_find(as, cr2 - 1) : 0;
+    kl_init(&kl);
+    kl_s(&kl, "[KPF-RGN] below=");
+    if (r) {
+      kl_hex(&kl, (unsigned long)r->base);
+      kl_s(&kl, "+");
+      kl_hex(&kl, (unsigned long)r->len);
+      kl_s(&kl, " end=");
+      kl_hex(&kl, (unsigned long)(r->base + r->len));
+      kl_s(&kl, " kind=");
+      kl_i(&kl, (long)r->kind);
+      kl_s(&kl, " prot=");
+      kl_i(&kl, (long)r->prot);
+      kl_s(&kl, " flags=");
+      kl_hex(&kl, (unsigned long)r->flags);
+    } else {
+      kl_s(&kl, "none");
+    }
+    r = vm_region_above(as, cr2, 0x40000000ULL);
+    kl_s(&kl, " above=");
+    if (r) {
+      kl_hex(&kl, (unsigned long)r->base);
+      kl_s(&kl, " gap=");
+      kl_hex(&kl, (unsigned long)(r->base - cr2));
+      kl_s(&kl, " kind=");
+      kl_i(&kl, (long)r->kind);
+    } else {
+      kl_s(&kl, "none");
+    }
+    kl_s(&kl, "\n");
+    kl_emit(&kl);
+  }
+
+  /* The top 8 kernel return addresses at or above the faulting RSP.  The
+     kernel text window is [0x70000000,0x70100000): the watchdog's older scan
+     stops at 0x70080000 and would report nothing for a fault above it, which
+     is where this kernel's .text actually ends. */
+  kl_init(&kl);
+  kl_s(&kl, "[KPF-STK]");
+  int frames = 0;
+  {
+    uint64_t cpu = get_cpuid();
+    uint64_t top = (cpu < MAX_CPUS) ? cpu_locals[cpu].kernel_stack : 0;
+    uint64_t start = (uint64_t)tf->lr;
+    if (top && start >= 0x70000000ULL && start < top) {
+      for (uint64_t a = start; a < top && frames < 8; a += 8) {
+        uint64_t v = *(volatile uint64_t *)a;
+        if (v >= 0x70000000ULL && v < 0x70100000ULL) {
+          kl_s(&kl, " ");
+          kl_hex(&kl, (unsigned long)v);
+          frames++;
+        }
+      }
+    }
+  }
+  kl_s(&kl, " frames=");
+  kl_i(&kl, (long)frames);
+  kl_s(&kl, "\n");
+  kl_emit(&kl);
+}
+
 void sync_lower_handler_c(struct trap_frame *tf) {
   /* GB-014: latch the user PC on every trap from user mode so the exit report
      can name where a program actually got to. A silently-stopping program
@@ -2321,6 +2514,16 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     struct process *sc = current_process();
     if (sc) {
       sc->last_syscall = (int64_t)syscall_num;
+      /* L73: the whole entry tuple, so a fault INSIDE this syscall can name
+         the call and its arguments instead of guessing from a clobbered
+         register set.  Same argument order as l_arg(): (rdi,rsi,rdx,r10,r8,r9)
+         = regs[5],[4],[3],[9],[7],[8]. */
+      {
+        static const unsigned char aidx[6] = {5, 4, 3, 9, 7, 8};
+        for (int ai = 0; ai < 6; ai++)
+          sc->sc_arg[ai] = tf->regs[aidx[ai]];
+        sc->sc_rip = tf->elr; /* user PC just past the `syscall` instruction */
+      }
       if (sc->abi_flags & PROC_FLAG_LINUX_ABI) {
         sc->sys_ring[sc->sys_ring_at & 31] = (uint16_t)syscall_num;
         sc->sys_ring_at = (uint8_t)((sc->sys_ring_at + 1) & 31);
@@ -3723,7 +3926,20 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           fl_dec(&fl, (int)cur->last_syscall);
           fl_s(&fl, " ret=");
           fl_hex(&fl, (uint64_t)cur->last_ret);
-          /* wk: essentials only */
+          /* wk: essentials only.
+           *
+           * L73: the frame pointer is a USER value and this is the dump for a
+           * user fault, so it is exactly the pointer most likely to be bad:
+           * measured, `mov (%rbp)` faulted at cr2 == rbp == 0x11CB280000 (one
+           * past the end of a 16 MiB anon region) and this block then read
+           * *(uint64_t*)rbp and *(uint64_t*)(rbp+8) straight -- a second,
+           * KERNEL-mode #PF on the same hole.  The process died with
+           * "[KERNEL] Kernel-mode #PF in user address space" and the row that
+           * would have said what the game actually did (this one) was never
+           * printed, because it is emitted after these reads.  Never
+           * dereference a user pointer in a report: vm_user_read is the
+           * accessor that validates and copies per page, and a hole answers
+           * <unreadable> instead of killing the kernel's own console path. */
           fl_s(&fl, " rbx=");
           fl_hex(&fl, tf->regs[1]);
           fl_s(&fl, " rdi=");
@@ -3733,11 +3949,15 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           fl_s(&fl, " rbp=");
           fl_hex(&fl, tf->regs[6]);
           {
-            volatile uint64_t *up = (volatile uint64_t *)tf->regs[6];
-            fl_s(&fl, " rbp0=");
-            fl_hex(&fl, up[0]);
-            fl_s(&fl, " ret=");
-            fl_hex(&fl, up[1]);
+            uint64_t uq[2];
+            if (kpf_user_peek2(cur, tf->regs[6], uq) == 0) {
+              fl_s(&fl, " rbp0=");
+              fl_hex(&fl, uq[0]);
+              fl_s(&fl, " ret=");
+              fl_hex(&fl, uq[1]);
+            } else {
+              fl_s(&fl, " rbp0=<unreadable>");
+            }
           }
         }
         fl_s(&fl, " -> killed");
@@ -4240,6 +4460,8 @@ static void general_interrupt_inner(struct trap_frame *tf) {
                                           &why) == 0)) {
               return; /* PTE live; iretq retries the faulting instruction */
             }
+            /* L73: unresolved.  Name the path before the process dies. */
+            kpf_user_report(tf, cur, kcr2, why);
           }
           uart_puts_raw("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
           print_int_raw(cur->pid);
@@ -4928,3 +5150,22 @@ void trap_init(void) {
   // P2.2 (S2): TLB shootdown IPI on vector 0x82 (kernel-only gate, 0x8E).
   idt_set_gate(130, (uint64_t)exception_130, 0x08, 0x8E);
 }
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* L73: the path-taking entry points are static (one handler per syscall, never
+ * a table).  The unit suite drives them through this shim so a hole or a
+ * straddling path can be asserted to answer -EFAULT instead of walking the
+ * kernel into the hole past the end of the caller's mapping. */
+void l73_test_entry(struct trap_frame *tf, int which) {
+  switch (which) {
+  case 0: sys_open(tf); break;
+  case 1: sys_mkdir(tf); break;
+  case 2: sys_chdir(tf); break;
+  case 3: sys_unlink(tf); break;
+  case 4: sys_rmdir(tf); break;
+  case 5: sys_rename(tf); break;
+  case 6: sys_spawn(tf); break;
+  default: tf->regs[0] = (uint64_t)(int64_t)-1; break;
+  }
+}
+#endif

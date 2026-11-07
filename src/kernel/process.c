@@ -5894,12 +5894,14 @@ void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
        that arrived before the joiner parked; pre=0 with woke=0 is a joiner
        that was never on this word. */
     ctid_touch = vm_touch(cur, ctid, 4, 0);
-    if (ctid_touch == 0)
-      ctid_pre = *(volatile uint32_t *)ctid;
+    if (ctid_touch == 0 &&
+        vm_user_read(cur, ctid, &ctid_pre, sizeof ctid_pre) != 0)
+      ctid_touch = -1; /* L73: never deref the user word directly */
     cur->clear_child_tid = 0;
     if (vm_touch(cur, ctid, 4, 1) == 0) {
-      *(volatile uint32_t *)ctid = 0;
-      ctid_touch = 0;
+      uint32_t zero = 0;
+      if (vm_kwrite(cur, ctid, &zero, sizeof zero) == 0)
+        ctid_touch = 0;
     }
     ctid_woke = process_futex(cur, tf, ctid, 1, 1, -1);
   }

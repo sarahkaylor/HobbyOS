@@ -9762,3 +9762,96 @@ def-plateau (`[XO] …RangedSpacer.xml`, 43.6 MiB NFS) with main ↔
 
 `TOOLS_SKIP=1 ./run_unit_tests_intel.sh`: **431 run, 0 failed**. Gates: see
 `docs/l72-postload-report.md` §7.
+
+## 54. 2026-11-07 — M6/L73: the kernel-mode #PF at `cr2=0x11CB280000` is the
+**fault report reading the user's frame pointer**, not a syscall
+
+Full evidence: `docs/l73-kpf-report.md`. Worktree `~/hobbyos-rw-lanes/l73-kpf`
+(branch `rw-l73-kpf`, seeded at `5bb5d015`).
+
+### 54.1 The tuple
+
+```text
+[MR] s=2404 pid=4 g=4 as=0x75504570 len=0x1000000 base=0x11CA280000 w=H
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0
+  RIP: 0x700AB808  RSP: 0x756501A0  CS: 0x8
+  RAX: 0x14F RBX: 0x11CB280000 RCX: 0x150 RDX: 0 RDI: 0x75650210 RSI: 0x14A
+[KPF-DIAG] cr2=0x11CB280000 pte_before=0 handled=0 pte_after=0 why=HOLE
+[KERNEL] Kernel-mode #PF in user address space -> killing pid=4 cr2=0x11CB280000
+[EXITPC] pid=4 last_user_pc=0x1080118B06
+```
+
+* `0x11CB280000` is **exactly** `0x11CA280000 + 0x1000000`, the end of the 16 MiB
+  region `[MR] s=2404` had just installed.
+* `last_user_pc=0x1080118B06` = `libc+0x118B06`, the instruction after `syscall`
+  inside glibc's **`mmap`** (`b8 09 00 00 00 / 0f 05`) — the *last syscall the
+  thread entered*, and `mmap` marshals no user pointer. `rax=0x14F` is not a
+  syscall number (335 is unassigned); the register row is the faulting kernel
+  code's, which is why L72 could not name a syscall from it.
+* the L72 ELF on disk is **not** the binary that ran (`addr2line` puts
+  `0x700ab808` in `unix_test.c:226`), so the RIP is recorded unresolved instead
+  of guessed. The instrument added here removes that dependence.
+
+### 54.2 What it is
+
+The game faulted in **user mode** on `0x11CB280000` (one past the buffer it had
+just been given). That is a hole; the kill path builds its record and, in the
+"wk: essentials only" block, reads the user's frame pointer with two plain
+dereferences:
+
+```c
+volatile uint64_t *up = (volatile uint64_t *)tf->regs[6]; /* USER rbp */
+fl_hex(&fl, up[0]);   /* kernel-mode #PF at cr2 == rbp */
+fl_hex(&fl, up[1]);   /* … and rbp+8 */
+```
+
+A fault report exists precisely because the process touched an address it must
+not, so `rbp` is the most likely holder of that address. The report faulted a
+second time, in kernel mode, on the same hole; the KPF path then killed pid 4 —
+**before** the `uart_puts` that would have printed
+`[KERNEL] pid=4 (…) memory fault VA=0x11CB280000 …`, which is why the L72 log
+has a kernel #PF row and no user-fault row for the same address. Every other
+reader on that path (`compat_fault_dump` → `fl_qwords`, the `[GCT]` Boehm
+census) already went through `vm_user_read`.
+
+### 54.3 The fix
+
+`kpf_user_peek2()` = validate + copy per page through `vm_user_read`; a hole or
+a straddle past the region answers `<unreadable>` and the process still dies of
+its own SIGSEGV. The same audit converted every path-taking entry point
+(`open/unlink/rename/mkdir/rmdir/chdir/mount/umount/vfs_bind/spawn/spawn_ex`)
+from "validate 1 byte, then scan with raw loads" to `u_strcpy` (SEC-3), the
+`clear_child_tid` word to `vm_user_read`/`vm_kwrite`, and `spawn_ex`'s fdmap to
+a `vm_user_read` of the pair.
+
+### 54.4 Ladder
+
+| run | game t | presents | `[XO]` | res MiB | end |
+|---|---:|---:|---:|---:|---|
+| L72 `1800c` | 560 s | 1 | — | 1135 | **kernel-mode #PF** (`cr2=0x11CB280000`) |
+| L73 run 1 (instrument only) | 640 s | 350 | 1167 | 756 | alive, no KPF |
+| L73 run A | 740 s | 360 | 1207 | 829 | no KPF; NVMe `device off` → reset → launcher's image page re-read as zeros → `[TXT] IMG SUM -> not published` → `[EIO] pid=3` |
+| L73 run B | 740 s | 330 | 1207 | 1120 | no KPF; same reset → exec gate published a **zero page as verified** (`[PUB] … zero=4096 ver=1`) → `#UD RIP=0x108228b570` in UnityPlayer's text, pid 4 dead |
+| L73 run C | 730 s | 350 | 1205 | 1130 | **no KPF**; the game faulted at `VA=0x2010` with `rbp=0xD8A000` (a hole) and the report printed **`rbp0=<unreadable>`** — the fix working live — then died in its own SIGSEGV handler; the block layer cascaded (resets #1-#7) and pid 3 died on the image gate |
+
+The kernel wall is closed: four full loads, **zero** kernel-mode #PF rows, and
+run C shows the exact shape that used to kill the kernel being handled safely
+(`rbp=0xD8A000 → rbp0=<unreadable>`). The
+loader now reaches the **main menu's own strings** (`Menus_Main.xml`,
+`Biotech/…/Misc_Gameplay.xml`; 1 207 `[XO]` rows) where L72 stopped at the def
+plateau, and the loading screen presents continuously (0.8-1.0 presents/s over
+450 s, `changed=1`, diff bbox = the progress bar, not the clock). Both 1800 s
+windows then end on the **block layer** at ~740 s: the emulated controller
+drops off the same LBA in both runs and the re-read replays zeros. Run B's
+variant is a real bug — `fat16_page_probe`'s replay buffer was one static page
+shared by every CPU, so two concurrent probes handed the gate the other probe's
+page (a zero page published as verified). It is per-CPU now; run C is the
+re-test. No menu frame, so none is claimed.
+
+### 54.5 Tests
+
+`trap_test.c`: `test_l73_user_peek_hole` (hole / straddle / null / valid through
+`kpf_user_peek2` — the negative cases must answer -1, and a fault here would
+take the suite down) and `test_l73_entry_points_reject_holes` (each path-taking
+entry point driven through a unit-test shim with a hole pointer and with a
+string that ends flush with its region and has no NUL → `-EFAULT`).

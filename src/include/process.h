@@ -333,6 +333,12 @@ struct process {
      was doing on the way there (e.g. "pread, pread, futex" vs "write, futex"). */
   uint16_t sys_ring[32];
   uint8_t sys_ring_at;
+  /* L73: the entry state of the syscall this thread is INSIDE right now.
+     `last_syscall` says which one; these say with what.  A kernel-mode #PF on
+     a user address is named by the pair (nr, args) plus sc_rip -- the user PC
+     just past the `syscall` instruction, i.e. the wrapper that issued it. */
+  uint64_t sc_arg[6];
+  uint64_t sc_rip;
   /** Phase 4 (memory): anonymous mmap regions (first-fit carving from the
    *  pre-mapped region; entries are VAs into the anon area). */
   struct anon_region { uint64_t addr; uint64_t len; } anon_maps[8];
