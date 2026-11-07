@@ -258,6 +258,115 @@ static void l_futex_emit(const struct futex_ev *ev, int idx, char tag) {
   kl_emit(&kl);
 }
 
+/* ---- L76: the handshake's RATE and its key mix, once per window --------
+ *
+ * The L72 live-proof problem: the ring proves the *shape* of a round but says
+ * nothing about how the rate moves over 20 minutes, and a run that ends with
+ * the same six ops proves nothing about whether the loop is one round per
+ * frame or 20.  This table counts WAIT/WAKE per key and prints one row per
+ * window, so "the handshake drains" is a row (`WAIT` only, every `WAKE`
+ * finding a waiter) and its rate is a number, not an inference from a ring.
+ *
+ * Cost: one 16-entry linear scan per futex op and one console row per 2048
+ * ops (~18 s at 112 ops/s).  No lock of its own; a torn read prints a wrong
+ * count, never a wrong key.
+ */
+#define L76_KEYS 16
+struct l76_keyc {
+  uint64_t key;
+  unsigned waits, wakes;
+};
+static struct l76_keyc l76_keyc[L76_KEYS];
+static unsigned l76_win_ops, l76_win_ms;
+
+extern void rw_gdc_dump(void); /* fs.c: per-directory getdents census */
+extern void rw_rdf_dump(void); /* fs.c: per-file NFS read census */
+
+static void l76_keyc_note(const struct futex_ev *ev) {
+  int is_wait = (ev->op == FTR_WAIT || ev->op == FTR_WAITBITSET);
+  int is_wake = (ev->op == FTR_WAKE || ev->op == FTR_REQUEUE);
+  if (!is_wait && !is_wake)
+    return;
+  int slot = -1;
+  for (int i = 0; i < L76_KEYS; i++) {
+    if (l76_keyc[i].key == ev->uaddr) {
+      slot = i;
+      break;
+    }
+    if (slot < 0 && l76_keyc[i].key == 0)
+      slot = i;
+  }
+  if (slot < 0)
+    return;
+  if (l76_keyc[slot].key != ev->uaddr)
+    l76_keyc[slot].key = ev->uaddr;
+  if (is_wait)
+    l76_keyc[slot].waits++;
+  else
+    l76_keyc[slot].wakes++;
+}
+
+static void l76_rate_row(unsigned total) {
+  int now = (int)timer_get_ms();
+  if (!l76_win_ms) { /* first row: start the window, print nothing */
+    l76_win_ms = now;
+    l76_win_ops = total;
+    return;
+  }
+  unsigned d = total - l76_win_ops;
+  l76_win_ops = total;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[FUTR] t=");
+  kl_i(&kl, now / 1000);
+  kl_s(&kl, "s ops=");
+  kl_i(&kl, (long)total);
+  kl_s(&kl, " d=");
+  kl_i(&kl, (long)d);
+  kl_s(&kl, " rate=");
+  int dt = now - l76_win_ms;
+  if (dt < 1) dt = 1;
+  l76_win_ms = now;
+  kl_i(&kl, (long)((d * 1000ull) / (unsigned long long)dt));
+  kl_s(&kl, "/s dt=");
+  kl_i(&kl, (long)dt);
+  kl_s(&kl, "ms keys=");
+  int printed = 0;
+  for (int i = 0; i < L76_KEYS && printed < 3; i++) {
+    if (!l76_keyc[i].key)
+      continue;
+    if (l76_keyc[i].waits < 4 && l76_keyc[i].wakes < 4) {
+      l76_keyc[i].waits = l76_keyc[i].wakes = 0;
+      l76_keyc[i].key = 0;
+      continue;
+    }
+    if (printed)
+      kl_c(&kl, ',');
+    printed++;
+    kl_hex(&kl, (unsigned long)l76_keyc[i].key);
+    kl_c(&kl, ':');
+    kl_i(&kl, (long)l76_keyc[i].waits);
+    kl_c(&kl, 'w');
+    kl_i(&kl, (long)l76_keyc[i].wakes);
+    kl_c(&kl, 'k');
+    l76_keyc[i].waits = l76_keyc[i].wakes = 0;
+  }
+  if (!printed)
+    kl_s(&kl, "none");
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+  /* The heavy tables (per-directory, per-file, cache counters) are 10-40 rows
+     each.  They are printed from the futex path, where a caller may hold
+     proc_lock, so they get one window in six (~2 min) instead of every row:
+     enough to see the plateau, not enough to turn the console into a lock
+     held open across dozens of UART writes. */
+  static unsigned l76_heavy;
+  if ((++l76_heavy % 6) == 0) {
+    rw_gdc_dump();
+    rw_rdf_dump();
+  }
+}
+
 void futex_trace_note(struct futex_ev *ev) {
   if (!ev)
     return;
@@ -267,6 +376,17 @@ void futex_trace_note(struct futex_ev *ev) {
   unsigned pr = __atomic_fetch_add(&l_futex_printed, 1u, __ATOMIC_RELAXED);
   if (pr < FUTEX_TRACE_OPS)
     l_futex_emit(ev, (int)at, '#');
+  l76_keyc_note(ev);
+  /* Every 2048 ops, and never twice inside 20 s (a burst must not flood the
+     console that also carries the loader rows). */
+  if ((at & 2047u) == 2047u) {
+    int now = (int)timer_get_ms();
+    static int l76_last_ms;
+    if (now - l76_last_ms >= 20000) {
+      l76_last_ms = now;
+      l76_rate_row(at + 1);
+    }
+  }
 }
 
 /* Why a wake that found nobody is still suspicious: a thread parked on the
