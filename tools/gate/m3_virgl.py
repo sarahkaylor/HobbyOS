@@ -188,6 +188,14 @@ def stage(probes):
     wmsize = os.path.join(BUILD, "wmsize")
     open(wmsize, "w").write("on\n")
     mc(wmsize, "::/WMSIZE")
+    # L74: /WMSIZE alone turns on the WM's honour path; the *screen* override
+    # needs /RWSCREEN too (libx11.c:l74_screen_override), and this gate's probe
+    # attaches at 1916x1018 as well as 1280x720 -- so it must be off here.  It
+    # is stated, not assumed: markers persist on disk.img (no mdel(1)), and a
+    # measurement run's "1280x720" left behind would shrink this boot's screen.
+    rws = os.path.join(BUILD, "rwscreen")
+    open(rws, "w").write("off\n")
+    mc(rws, "::/RWSCREEN")
     glm = os.path.join(BUILD, "glmode")
     open(glm, "w").write("virgl\n")
     mc(glm, "::/GLMODE")
