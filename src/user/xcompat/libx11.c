@@ -104,6 +104,16 @@ static unsigned long long xs_now_ms(void) {
   return (unsigned long long)ts.sec * 1000ull +
          (unsigned long long)(ts.nsec / 1000000L);
 }
+/* L80: the same clock in microseconds -- the per-present budget needs to
+ * resolve a 12 ms present, not just a 1000 ms frame. */
+static unsigned long long xs_now_us(void) {
+  struct { long sec, nsec; } ts;
+  if (xs_syscall6(SYS_clock_gettime, 1 /* CLOCK_MONOTONIC */, (long)&ts,
+                  0, 0, 0, 0) < 0)
+    return 0;
+  return (unsigned long long)ts.sec * 1000000ull +
+         (unsigned long long)(ts.nsec / 1000L);
+}
 static int xs_open(const char *path, int flags) {
   return (int)xs_syscall6(SYS_open, (long)path, flags, 0, 0, 0, 0);
 }
@@ -742,6 +752,20 @@ static struct {
   unsigned long box[4];         /* their bounding box */
   unsigned long long crc_tot;   /* pixels hashed */
   unsigned long long t0_ms;     /* L74: guest-monotonic ms of the first row */
+  /* L80: the per-present budget.  `swap_us` is the time inside
+   * glXSwapBuffers (the winsys' submit + readback + copy + XPutImage + this
+   * shim's shadow blit and flush message); `gap_us` is everything between one
+   * swap returning and the next beginning -- Unity's own CPU work plus any
+   * wait it does.  They sum to the frame period, so one row says whether the
+   * frame is ours or the engine's.  Enabled by a staged /XPROF marker. */
+  unsigned long long t_mark0, t_prev_mark;    /* XcPresentMark entry, k and k-1 */
+  unsigned long long put_us, flush_us;        /* inside this present */
+  unsigned long long p_put_n;                 /* XPutImage calls this present */
+  unsigned long long prof;                    /* /XPROF: 0 off, else on */
+  unsigned long long prof_rows;
+  /* L80: the 32-present batch the [XSWB] row reports. */
+  unsigned long long b_n, b_dt, b_dt_max, b_self, b_self_max;
+  unsigned long long b_put, b_flush, b_row_us;
   unsigned long long pumps;     /* event-pump iterations */
   unsigned long long wins;      /* XCreateWindow calls */
   unsigned long long maps;      /* XMapWindow calls (not repeats) */
@@ -957,12 +981,18 @@ static void send_flush(Display *d, int x, int y, int w, int h) {
 
 static void shadow_flush(Display *d) {
   struct xc_rect r;
+  unsigned long long t_f0 = g_pres.prof == 1 ? xs_now_us() : 0;
   if (!xc_dirty_take(&d->core, &r)) return;
   dbg("flush", r.x, r.y, r.w, r.h);
   shadow_blit(d, r.x, r.y, r.w, r.h);
   /* The desktop's frame loop presents what the app names (window.h); ESC ] F
    * also asks it to re-stamp the pointer over our pixels. */
   send_flush(d, r.x, r.y, r.w, r.h);
+  /* L80: the shim's share of a present -- the fb0 blit plus the flush message.
+   * It is inside glXSwapBuffers, so it lands in [XSWP] swap_us, and a 1 s
+   * frame that is not in the winsys has to be here or in XPutImage. */
+  if (g_pres.prof == 1 && t_f0)
+    g_pres.flush_us += xs_now_us() - t_f0;
 }
 
 /* ---- input decoder ---------------------------------------------------- *
@@ -3534,6 +3564,22 @@ XAPI int XcPresentMark(Display *dpy, unsigned long long swaps,
   unsigned long long put_before = g_pres.put_ok;
   int pushed = 0;
 
+  /* L80: the budget probe is staged like every other measurement switch:
+   * a /XPROF marker file, content-gated ("1"/"on"). */
+  if (!g_pres.prof) {
+    char m[8] = {0};
+    int pfd = xs_open("/XPROF", 0 /* O_RDONLY */);
+    g_pres.prof = 2;                    /* probed, off: do not reopen */
+    if (pfd >= 0) {
+      long rn = xs_read(pfd, m, sizeof m - 1);
+      xs_close(pfd);
+      if (rn > 0 && (m[0] == '1' || m[0] == 'o' || m[0] == 'y'))
+        g_pres.prof = 1;
+    }
+  }
+  if (g_pres.prof == 1)
+    g_pres.t_mark0 = xs_now_us();
+
   g_pres.swaps = swaps;
   g_pres.glflush = glflush;
   /* The size the frontend believes it has: its own XGetGeometry answer, which
@@ -3592,6 +3638,82 @@ XAPI int XcPresentMark(Display *dpy, unsigned long long swaps,
     g_pres.have_crc = 1;
     g_pres.rows++;
     pres_row(d);
+  }
+  /* L80: the frame budget, in batches.
+   *
+   * One row per present was tried first and measured its own cost: a
+   * 150-byte row goes to fd 2 (Player.log, a FAT file) and to /dev/console
+   * (a polled UART) *inside* the present, so the instrument's I/O lands in
+   * the number it reports.  A batch of 32 presents costs 1/32 of that and
+   * still shows every term:
+   *
+   *   dt    the period between two presents -- the frame
+   *   self  the time inside XcPresentMark (the surface checksum, the shadow
+   *         blit and the flush message)
+   *   put   XPutImage's copy into the shadow (0 when the damage path is idle)
+   *   flush shadow_flush: the fb0 blit and the ESC ] F flush message
+   *
+   * The swap itself (XMesaSwapBuffers and its sub-terms) is measured in libGL
+   * by [XSWL], and the winsys' own present by [VGLB]. */
+  if (g_pres.prof == 1) {
+    unsigned long long now = xs_now_us();
+    unsigned long long period = (g_pres.t_prev_mark && now > g_pres.t_prev_mark)
+                                  ? now - g_pres.t_prev_mark : 0;
+    unsigned long long self = (g_pres.t_mark0 && now > g_pres.t_mark0)
+                                ? now - g_pres.t_mark0 : 0;
+    /* put/flush were accumulated during the swap that just finished; take
+     * them here and clear, so the next frame's swap starts from zero. */
+    unsigned long long put_us = g_pres.put_us, flush_us = g_pres.flush_us;
+    g_pres.put_us = 0;
+    g_pres.flush_us = 0;
+    g_pres.p_put_n = 0;
+    g_pres.t_prev_mark = g_pres.t_mark0;
+    g_pres.b_n++;
+    g_pres.b_dt += period;
+    g_pres.b_self += self;
+    g_pres.b_put += put_us;
+    g_pres.b_flush += flush_us;
+    if (period > g_pres.b_dt_max) g_pres.b_dt_max = period;
+    if (self > g_pres.b_self_max) g_pres.b_self_max = self;
+    if (g_pres.b_n < 32)
+      return pushed;
+    {
+      char b[256];
+      int j = 0;
+      unsigned long long n = g_pres.b_n;
+      j = ap_s(b, j, "[XSWB] n=");        j = ap_d(b, j, g_pres.marks);
+      j = ap_s(b, j, " t=");              j = ap_d(b, j, now / 1000ull);
+      j = ap_s(b, j, " frames=");         j = ap_d(b, j, n);
+      j = ap_s(b, j, " dt_avg=");         j = ap_d(b, j, g_pres.b_dt / n);
+      j = ap_s(b, j, " dt_max=");         j = ap_d(b, j, g_pres.b_dt_max);
+      j = ap_s(b, j, " self_avg=");       j = ap_d(b, j, g_pres.b_self / n);
+      j = ap_s(b, j, " self_max=");       j = ap_d(b, j, g_pres.b_self_max);
+      j = ap_s(b, j, " put_avg=");        j = ap_d(b, j, g_pres.b_put / n);
+      j = ap_s(b, j, " flush_avg=");      j = ap_d(b, j, g_pres.b_flush / n);
+      j = ap_s(b, j, " row_us=");         j = ap_d(b, j, g_pres.b_row_us);
+      j = ap_s(b, j, " w=");              j = ap_i(b, j, g_pres.last_w);
+      j = ap_s(b, j, " h=");              j = ap_i(b, j, g_pres.last_h);
+      b[j++] = '\n';
+      {
+        unsigned long long t0w = xs_now_us();
+        xs_write(2, b, (unsigned long)j);
+        {
+          /* /dev/console too: Unity redirects fd 2 to Player.log before the
+           * first swap, and the serial log is where the ladder is read. */
+          static int cons80 = -2;
+          if (cons80 == -2) {
+            cons80 = xs_open("/dev/console", 2 /* O_RDWR */);
+            if (cons80 < 0) cons80 = -1;
+          }
+          if (cons80 >= 0) xs_write(cons80, b, (unsigned long)j);
+        }
+        g_pres.b_row_us = xs_now_us() - t0w;
+      }
+      g_pres.prof_rows++;
+      g_pres.b_n = 0;
+      g_pres.b_dt = g_pres.b_self = g_pres.b_put = g_pres.b_flush = 0;
+      g_pres.b_dt_max = g_pres.b_self_max = 0;
+    }
   }
   return pushed;
 }
@@ -4330,6 +4452,10 @@ XAPI int XPutImage(Display *d, Drawable dr, GC gc, XImage *img, int sx, int sy,
   if ((int)w <= 0 || (int)h <= 0) { g_pres.put_skip++; return 0; }
   if (sx < 0 || sy < 0) { g_pres.put_skip++; return 0; }
 
+  unsigned long long t_put0 = g_pres.prof == 1 ? xs_now_us() : 0;
+  if (g_pres.prof == 1)
+    g_pres.p_put_n++;
+
   for (unsigned row = 0; row < h; row++) {
     const unsigned char *src = (const unsigned char *)im->data +
                                (unsigned long)(sy + (int)row) * im->bytes_per_line +
@@ -4341,6 +4467,10 @@ XAPI int XPutImage(Display *d, Drawable dr, GC gc, XImage *img, int sx, int sy,
     const unsigned int *sp = (const unsigned int *)src;
     for (unsigned col = 0; col < w; col++) dp[col] = sp[col];   /* B8G8R8A8 */
   }
+  /* L80: this copy is the client-side half of a present; the [XSWP] row
+   * separates it from the GPU work and from the fb0 blit. */
+  if (g_pres.prof == 1)
+    g_pres.put_us += xs_now_us() - t_put0;
   /* The flush path (XFlush -> shadow_blit -> ESC ] F) presents the rect. */
   dirty_add(d, dx, dy, dx + (int)w, dy + (int)h);
   g_pres.put_ok++;

@@ -78,6 +78,21 @@ struct virgl_hobbyos_winsys {
    uint64_t thumb_us;           /* blit + 16 KiB thumbnail readback */
    uint64_t copy_us;            /* guest -> displaytarget copy */
    uint64_t display_us;         /* displaytarget_display (XPutImage) */
+
+   /* L80: per-present profile, enabled by a staged /GLPROF marker.  One
+    * [VGLP] row per present carries the deltas of every counter above plus
+    * the submit/readback/upload counts of that frame, so the present's cost
+    * can be attributed (N round trips? one big readback? resource churn?)
+    * instead of averaged over a run. */
+   int prof;
+   uint64_t p_start_us;         /* this present's start */
+   uint64_t p_last_us;          /* the previous present's start */
+   uint32_t p_submits, p_readbacks, p_tputs, p_res, p_boxes, p_idle;
+   uint64_t p_submit_bytes, p_readback_bytes, p_tput_bytes;
+   uint64_t p_thumb_us, p_copy_us, p_display_us;
+   /* The 32-present batch a [VGLB] row reports. */
+   uint64_t b_n, b_pres, b_pres_max, b_sub, b_sub_b, b_rd, b_rd_b;
+   uint64_t b_up, b_up_b, b_idle, b_thumb, b_copy, b_disp, b_row_us;
 };
 
 struct virgl_hw_res {
@@ -118,11 +133,17 @@ struct virgl_hobbyos_cmd_buf {
    struct virgl_hw_res **res_bo;
 };
 
-/* Fences in M2 are "always signalled": ordering is provided by the host
- * (QEMU executes one context's stream in order) and by the present readback,
- * which is a TRANSFER_FROM_HOST_3D issued after the submit -- the property
- * M1's unfenced_readback row proves.  A real fence costs ~10 ms per submit
- * on this host (QEMU's virgl fence poll), so M2 does not pay it. */
+/* L80: there is no fence, and the winsys returns NULL when one is asked for.
+ * Ordering is provided by the host (QEMU executes one context's stream in
+ * order) and by the present readback, which is a TRANSFER_FROM_HOST_3D issued
+ * after the submit -- the property M1's unfenced_readback row proves.
+ *
+ * M2 handed back a fabricated "already signalled" fence instead, which looked
+ * free and was not: virgl's fence_finish flushes the context again *before* it
+ * looks at the fence, so every swap paid an extra GPU round trip (measured
+ * 20.9-24.5 ms/frame, against a 34 ms frame submit and a 96 ms frame).  A real
+ * fence costs ~10 ms per submit on this host (QEMU's virgl fence poll); a fake
+ * one cost 21 ms.  Returning NULL is what `supports_fences = 0` means. */
 struct virgl_hobbyos_fence {
    struct pipe_reference reference;
 };
