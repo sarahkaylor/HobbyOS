@@ -119,8 +119,10 @@ Limits, all enforced with `-EINVAL`/`-ENOSPC`:
 | limit | value |
 |---|---|
 | concurrent clients | 8 |
-| resources per client | 32 |
-| pages per resource / system-wide pool | 16384 (64 MiB) |
+| resources per client | **1024** (M3; was 32) |
+| pages per resource | 16384 (64 MiB, unchanged: one `ATTACH_BACKING`) |
+| system-wide pool | **131072 pages = 512 MiB** (M3; was 16384/64 MiB) |
+| attached backing per client | **384 MiB** (M3, per-client accounting) |
 | capset blob | 16384 bytes |
 | command stream per submit | 128 KiB, dword-aligned |
 | texture dimensions | 16384 × 16384, ≤ 64 MiB estimated bytes |
@@ -255,4 +257,26 @@ Two limits are now the likeliest non-performance wall for the game (M3/M4):
 **32 resources per client** and **64 MiB of attached backing system-wide**.
 The M2 probe uses 3 resources / 15.6 MB; a UI with texture atlases and several
 render targets will not fit.
+
+## 9. M3 amendments (the first game client, lane `rw-l71-virglm3`)
+
+Both limits above were raised (1024 resources, 512 MiB pool, 384 MiB per
+client) and two more **acceptance rules** turned out to be wrong -- each one a
+value the ABI refused to accept and reported, two layers up, as
+`GL_OUT_OF_MEMORY`:
+
+1. **`bind == 0` is legal.** A buffer has `bind == 0` until it is first bound;
+   Unity's `glBufferData` creates one exactly like that
+   (`target=0 fmt=81 bind=0x0 64x1`). `gpu_abi_res_ok()` rejected it, and the
+   game's renderer never came up. This is M2's `target == 0` bug in another
+   field.
+2. **Gallium array targets are not virgl targets.** `PIPE_TEXTURE_2D_ARRAY`
+   (7) must arrive at the kernel as target 2 with `array_size = N`; the winsys
+   passed 7 and the kernel's `target > 4` check answered `-EINVAL`.
+
+Every refusal now prints the exact request on the serial console
+(`[GPU] res_create refused: geometry ...`, `[GPU] res_attach refused: ...`,
+`[VIRGL3D] res_create refused: table full ...`, `[VIRGL3D] attach refused ...
+reason=no_contiguous_run`), and `ctx_destroy` prints a demand row
+(`[VIRGL3D] stats peak_res=N peak_pages=M peak_mib=K caps=1024/131072`).
 

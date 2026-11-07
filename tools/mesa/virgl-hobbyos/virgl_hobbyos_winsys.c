@@ -45,6 +45,7 @@
 
 #include "virgl/virgl_winsys.h"
 #include "virgl_resource_cache.h"
+#include "virtio-gpu/virgl_protocol.h"
 
 #include "gpu_abi.h"
 #include "virgl_hobbyos_winsys.h"
@@ -56,6 +57,7 @@
 
 #define VGL_DEV "/dev/gpu"
 #define VGL_MODE_FILE "/GLMODE"
+#define VGL_DMG_FILE "/GLDMG"
 
 #define cache_entry_container_res(ptr) \
    (struct virgl_hw_res *)((char *)ptr - offsetof(struct virgl_hw_res, cache_entry))
@@ -160,6 +162,8 @@ virgl_hw_res_destroy(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res
    }
    if (res->dt)
       vhws->sws->displaytarget_destroy(vhws->sws, res->dt);
+   free(res->dmg_prev);
+   res->dmg_prev = NULL;
    if (res->ptr)
       align_free(res->ptr);
    FREE(res);
@@ -244,6 +248,26 @@ virgl_hobbyos_winsys_resource_create(struct virgl_winsys *vws,
    struct gpu_res_attach ra;
    uint32_t stride;
 
+   /* Gallium names array textures as their own targets; the virgl protocol
+    * does not -- it says "2D, array_size = N".  Passing PIPE_TEXTURE_2D_ARRAY
+    * (7) through raw is what made the kernel reject Unity's array textures as
+    * an invalid target (M3: "RES_CREATE failed: Invalid argument" for a 1x1
+    * texture, which is a 1x1 slice of an array). */
+   {
+      uint32_t vt = (uint32_t)target;
+      if (target == PIPE_TEXTURE_RECT)
+         vt = 2;                       /* VIRGL_TEXTURE_TARGET_2D */
+      else if (target == PIPE_TEXTURE_1D_ARRAY)
+         vt = 1;
+      else if (target == PIPE_TEXTURE_2D_ARRAY)
+         vt = 2;
+      else if (target == PIPE_TEXTURE_CUBE_ARRAY)
+         vt = 4;
+      else if ((uint32_t)target > 4u)
+         vt = 2;
+      target = (enum pipe_texture_target)vt;
+   }
+
    stride = util_format_get_stride(format, width ? width : 1);
    if (stride == 0)
       stride = 4;
@@ -285,8 +309,11 @@ virgl_hobbyos_winsys_resource_create(struct virgl_winsys *vws,
 
    if (vgl_ioctl_ck(vhws->fd, GPU_IOC_RES_CREATE, &rc, "resource_create") < 0 ||
        rc.res_id == 0) {
-      fprintf(stderr, "[VGL] resource_create: no res_id (fmt=%u bind=0x%x %ux%u "
-              "size=%u)\n", format, bind, width, height, size);
+      fprintf(stderr, "[VGL] resource_create: no res_id (ctx=%u target=%u fmt=%u "
+              "(virgl %u) bind=0x%x %ux%ux%u array=%u lvl=%u samples=%u "
+              "size=%u errno=%d)\n", rc.ctx_id, rc.target, format, rc.format,
+              bind, width, height, rc.depth, rc.array_size, rc.last_level,
+              rc.nr_samples, size, errno);
       align_free(res->ptr);
       FREE(res);
       return NULL;
@@ -750,6 +777,439 @@ virgl_hobbyos_fence_reference(UNUSED struct virgl_winsys *vws,
 }
 
 /* ------------------------------------------------------------------------- */
+/* Damage-rect present (M3)                                                   */
+/* ------------------------------------------------------------------------- */
+
+/* Two things had to be measured before this could be designed, and both came
+ * out opposite to the plan's estimate:
+ *
+ *  1. Mesa's X11 frontend presents with sub_box == NULL (xmesa_swap_st_
+ *     framebuffer passes none), and a Unity frame redraws the whole surface
+ *     anyway -- the client has no damage to report, so the winsys must find it.
+ *  2. A TRANSFER_FROM_HOST_3D costs ~0.25 ms per MiB of the *resource* almost
+ *     independently of the box: M3 measured 1.9 ms for one 1916-px row of a
+ *     7.8 MB surface and 6.0 ms for all 1018 rows, against 78 us for a 16 KiB
+ *     readback of a 64x64 resource (M1).  The host reads the texture back and
+ *     copies the box out, so *probing a big resource costs as much as reading
+ *     it*: the band probe tried first in this lane (16 one-row transfers per
+ *     frame) cost 30 ms/frame -- 3x worse than reading everything.
+ *
+ * So the damage question is put to a resource that is cheap to read: the host
+ * scales the whole surface into a 64x64 thumbnail (VIRGL_CCMD_BLIT), the guest
+ * reads back 16 KiB and diffs it against the previous frame's, and only the
+ * bounding box of the changed cells is then transferred from the display
+ * resource.  Cost per frame: one blit submit, a 16 KiB readback (~80 us) and
+ * one boxed readback of the damage.  With nothing changed, nothing is read and
+ * nothing is presented.
+ *
+ * What the thumbnail can miss: 64x64 over 1916x1018 is one sample per 30x16
+ * cell, so a change smaller than a cell may not move it.  dmg_resync re-reads
+ * the whole surface every N presents (default 64) to bound that, and the gate
+ * proves the damaged path presents the same pixels as the full one for the
+ * same frames (crc64 equality plus /dev/fb0).
+ *
+ * dmg_mode 2 keeps the band probe (16 single-row transfers, the first design)
+ * only as an A/B control for the cost model above.
+ */
+
+#define VGL_THUMB 64
+#define VGL_MAX_DAMAGE_RECTS 64
+
+/* Read one box of the resource back into its own guest backing.
+ * `offset` is the byte offset of the box's first texel: Mesa's own winsys
+ * folds y into it *and* carries the box's y, which is what the host's
+ * vrend_renderer_transfer_read_iov expects. */
+static int
+dmg_read(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res,
+         unsigned level, int x, int y, int w, int h)
+{
+   struct pipe_box box;
+   uint32_t bpp = util_format_get_blocksize(res->format);
+   uint32_t offset = (uint32_t)y * res->stride + (uint32_t)x * bpp;
+   uint64_t t0 = now_us();
+   int rc;
+
+   box.x = (int16_t)x;
+   box.y = (int16_t)y;
+   box.z = 0;
+   box.width = (int16_t)w;
+   box.height = (int16_t)h;
+   box.depth = 1;
+   rc = vgl_transfer(vhws, res, &box, res->stride, 0, offset, level, 1);
+   vhws->readback_us += now_us() - t0;
+   vhws->n_readback++;
+   if (rc == 0) {
+      vhws->n_dmg_rects++;
+      vhws->dmg_bytes += (uint64_t)w * (uint64_t)h * bpp;
+   }
+   return rc;
+}
+
+/* Read the whole surface back into the resource, which also refreshes every
+ * cached "what the last presented frame looked like" shadow. */
+static int
+dmg_full(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res,
+         unsigned level, struct pipe_box *box)
+{
+   if (dmg_read(vhws, res, level, 0, 0, res->width, res->height) < 0)
+      return -1;
+   box->x = 0;
+   box->y = 0;
+   box->z = 0;
+   box->width = (int16_t)res->width;
+   box->height = (int16_t)res->height;
+   box->depth = 1;
+   return 0;
+}
+
+/* ---- the 64x64 damage thumbnail ------------------------------------------ */
+
+static struct virgl_hw_res *
+dmg_thumb(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res)
+{
+   if (vhws->dmg_thumb)
+      return vhws->dmg_thumb;
+   if (vhws->dmg_thumb_failed)
+      return NULL;
+   vhws->dmg_thumb = virgl_hobbyos_winsys_resource_create(
+      &vhws->base, PIPE_TEXTURE_2D, NULL, res->format,
+      VIRGL_BIND_RENDER_TARGET | VIRGL_BIND_SAMPLER_VIEW,
+      VGL_THUMB, VGL_THUMB, 1, 1, 0, 0, 0, VGL_THUMB * VGL_THUMB * 4);
+   if (!vhws->dmg_thumb) {
+      vhws->dmg_thumb_failed = 1;
+      fprintf(stderr, "[VGL] damage: thumbnail create failed -- full readback\n");
+      return NULL;
+   }
+   fprintf(stderr, "[VGL] damage: thumbnail res=%u %dx%d fmt=%u stride=%u\n",
+           vhws->dmg_thumb->res_handle, VGL_THUMB, VGL_THUMB,
+           vhws->dmg_thumb->format, vhws->dmg_thumb->stride);
+   return vhws->dmg_thumb;
+}
+
+/* Emit VIRGL_CCMD_BLIT src[sx,sy,sw,sh] -> dst[dx,dy,dw,dh] and submit it
+ * unfenced, on the same context, so it is ordered after the client's frame. */
+static int
+dmg_blit(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *src,
+         struct virgl_hw_res *dst, int sx, int sy, int sw, int sh,
+         int dx, int dy, int dw, int dh)
+{
+   struct virgl_cmd_buf *cb = vhws->dmg_cbuf;
+
+   if (!cb) {
+      cb = vhws->base.cmd_buf_create(&vhws->base, 64);
+      if (!cb)
+         return -1;
+      vhws->dmg_cbuf = cb;
+   }
+   cb->buf[cb->cdw++] = VIRGL_CMD0(VIRGL_CCMD_BLIT, 0, VIRGL_CMD_BLIT_SIZE);
+   cb->buf[cb->cdw++] = VIRGL_CMD_BLIT_S0_MASK(0xf) |
+                        VIRGL_CMD_BLIT_S0_FILTER(0 /* PIPE_TEX_FILTER_NEAREST:
+                            a LINEAR downscale touches all 2 Mpx of the
+                            source and measured 3.5 ms; NEAREST samples 4096
+                            texels.  The one-cell margin below covers what a
+                            point sample can miss. */) |
+                        VIRGL_CMD_BLIT_S0_SCISSOR_ENABLE(0) |
+                        VIRGL_CMD_BLIT_S0_RENDER_CONDITION_ENABLE(0) |
+                        VIRGL_CMD_BLIT_S0_ALPHA_BLEND(0);
+   cb->buf[cb->cdw++] = 0; /* scissor min */
+   cb->buf[cb->cdw++] = 0; /* scissor max */
+   virgl_hobbyos_emit_res(&vhws->base, cb, dst, true);
+   cb->buf[cb->cdw++] = 0; /* dst level */
+   cb->buf[cb->cdw++] = pipe_to_virgl_format(dst->format);
+   cb->buf[cb->cdw++] = (uint32_t)dx;
+   cb->buf[cb->cdw++] = (uint32_t)dy;
+   cb->buf[cb->cdw++] = 0;
+   cb->buf[cb->cdw++] = (uint32_t)dw;
+   cb->buf[cb->cdw++] = (uint32_t)dh;
+   cb->buf[cb->cdw++] = 1;
+   virgl_hobbyos_emit_res(&vhws->base, cb, src, true);
+   cb->buf[cb->cdw++] = 0; /* src level */
+   cb->buf[cb->cdw++] = pipe_to_virgl_format(src->format);
+   cb->buf[cb->cdw++] = (uint32_t)sx;
+   cb->buf[cb->cdw++] = (uint32_t)sy;
+   cb->buf[cb->cdw++] = 0;
+   cb->buf[cb->cdw++] = (uint32_t)sw;
+   cb->buf[cb->cdw++] = (uint32_t)sh;
+   cb->buf[cb->cdw++] = 1;
+   vhws->n_blit++;
+   return vhws->base.submit_cmd(&vhws->base, cb, NULL) < 0 ? -1 : 0;
+}
+
+/* Scale the whole surface into the thumbnail and read the thumbnail back.
+ * Returns 0 when the thumbnail now holds this frame's pixels. */
+static int
+dmg_thumb_grab(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res,
+               struct virgl_hw_res *th, unsigned level)
+{
+   struct pipe_box tb;
+   uint64_t t0 = now_us();
+
+   if (dmg_blit(vhws, res, th, 0, 0, res->width, res->height, 0, 0,
+                VGL_THUMB, VGL_THUMB) < 0)
+      return -1;
+   tb.x = 0;
+   tb.y = 0;
+   tb.z = 0;
+   tb.width = VGL_THUMB;
+   tb.height = VGL_THUMB;
+   tb.depth = 1;
+   if (vgl_transfer(vhws, th, &tb, th->stride, 0, 0, level, 1) < 0)
+      return -1;
+   vhws->n_readback++;
+   vhws->thumb_us += now_us() - t0;
+   return 0;
+}
+
+/* The thumbnail path: returns the damaged rects (0 = idle, or "cannot" when
+ * *idle is 0). */
+static unsigned
+dmg_thumb_boxes(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res,
+                unsigned level, struct pipe_box *boxes, unsigned max,
+                int force_full, int *idle)
+{
+   const uint32_t bpp = util_format_get_blocksize(res->format);
+   const size_t thumb_bytes = (size_t)VGL_THUMB * VGL_THUMB * bpp;
+   struct virgl_hw_res *th;
+   uint32_t cell_w, cell_h, cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+   int any = 0;
+
+   *idle = 0;
+   th = dmg_thumb(vhws, res);
+   if (!th)
+      return 0;
+   if (!vhws->dmg_thumb_prev) {
+      vhws->dmg_thumb_prev = malloc(thumb_bytes);
+      if (!vhws->dmg_thumb_prev)
+         return 0;
+      force_full = 1;
+   }
+
+   if (!vhws->dmg_seeded || force_full) {
+      /* First damage present (or the periodic resync): everything, once. */
+      if (dmg_full(vhws, res, level, &boxes[0]) < 0)
+         return 0;
+      if (dmg_thumb_grab(vhws, res, th, level) == 0)
+         memcpy(vhws->dmg_thumb_prev, th->ptr, thumb_bytes);
+      else
+         vhws->dmg_thumb_failed = 1; /* the next frame falls back to full */
+      vhws->dmg_seeded = 1;
+      vhws->n_dmg_frame++;
+      return 1;
+   }
+
+   if (dmg_thumb_grab(vhws, res, th, level) < 0) {
+      vhws->dmg_thumb_failed = 1;
+      return 0;
+   }
+
+   cell_w = (res->width + VGL_THUMB - 1) / VGL_THUMB;
+   cell_h = (res->height + VGL_THUMB - 1) / VGL_THUMB;
+   if (cell_w == 0 || cell_h == 0)
+      return 0;
+   for (uint32_t ty = 0; ty < VGL_THUMB; ty++) {
+      const uint8_t *row = (const uint8_t *)th->ptr + (size_t)ty * th->stride;
+      const uint8_t *prev = vhws->dmg_thumb_prev + (size_t)ty * VGL_THUMB * bpp;
+      for (uint32_t tx = 0; tx < VGL_THUMB; tx++) {
+         if (memcmp(row + (size_t)tx * bpp, prev + (size_t)tx * bpp, bpp) == 0)
+            continue;
+         if (!any) {
+            cx0 = cx1 = tx;
+            cy0 = cy1 = ty;
+            any = 1;
+         } else {
+            if (tx < cx0) cx0 = tx;
+            if (tx > cx1) cx1 = tx;
+            if (ty < cy0) cy0 = ty;
+            if (ty > cy1) cy1 = ty;
+         }
+      }
+   }
+   memcpy(vhws->dmg_thumb_prev, th->ptr, thumb_bytes);
+   vhws->n_dmg_frame++;
+   if (!any) {
+      vhws->n_dmg_idle++;
+      *idle = 1;
+      return 0;
+   }
+
+   {
+      /* Inflate by one cell: a change whose edge falls inside a cell that the
+       * 64x64 sample did not move (a progress bar growing by 13 px, a glyph
+       * redrawn inside one cell) would otherwise be cropped out of the rect.
+       * One cell of margin is 30x16 px of extra readback. */
+      int x = (int)((cx0 > 0 ? cx0 - 1 : 0) * cell_w);
+      int y = (int)((cy0 > 0 ? cy0 - 1 : 0) * cell_h);
+      int w = (int)(((cx1 + 2) <= VGL_THUMB ? cx1 + 2 : VGL_THUMB) * cell_w) - x;
+      int h = (int)(((cy1 + 2) <= VGL_THUMB ? cy1 + 2 : VGL_THUMB) * cell_h) - y;
+      if (x + w > (int)res->width)
+         w = (int)res->width - x;
+      if (y + h > (int)res->height)
+         h = (int)res->height - y;
+      if (w <= 0 || h <= 0)
+         return 0;
+      if (dmg_read(vhws, res, level, x, y, w, h) < 0)
+         return 0;
+      boxes[0].x = (int16_t)x;
+      boxes[0].y = (int16_t)y;
+      boxes[0].z = 0;
+      boxes[0].width = (int16_t)w;
+      boxes[0].height = (int16_t)h;
+      boxes[0].depth = 1;
+      vhws->n_dmg_cells += (cx1 - cx0 + 1) * (cy1 - cy0 + 1);
+      (void)max;
+   }
+   return 1;
+}
+
+/* ---- the band probe (dmg_mode 2: the A/B control for the cost model) ----- */
+
+static uint32_t
+dmg_band_h(const struct virgl_hw_res *res, uint32_t nb)
+{
+   uint32_t h = res->height / nb;
+   return h ? h : 1;
+}
+
+/* Refresh the saved probe rows of bands [b0, b1] from the backing. */
+static void
+dmg_prev_save(struct virgl_hw_res *res, uint32_t nb, uint32_t b0, uint32_t b1)
+{
+   uint32_t bh = dmg_band_h(res, nb);
+   for (uint32_t b = b0; b <= b1 && b < nb; b++) {
+      uint32_t y = b * bh + bh / 2;
+      if (y >= res->height)
+         y = res->height - 1;
+      memcpy(res->dmg_prev + (size_t)b * res->dmg_bps,
+             (const uint8_t *)res->ptr + (size_t)y * res->stride, res->dmg_bps);
+   }
+}
+
+static unsigned
+dmg_band_boxes(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res,
+               unsigned level, struct pipe_box *boxes, unsigned max,
+               int force_full, int *idle)
+{
+   const uint32_t bpp = util_format_get_blocksize(res->format);
+   uint32_t nb = vhws->dmg_bands;
+   uint32_t bh, bps, ndirty = 0;
+   uint8_t *tmp;
+   unsigned n = 0;
+   int dirty[VGL_MAX_DAMAGE_RECTS];
+
+   *idle = 0;
+   if (nb > VGL_MAX_DAMAGE_RECTS)
+      nb = VGL_MAX_DAMAGE_RECTS;
+   if (res->height < nb * 8)
+      nb = res->height / 8;
+   if (nb < 2)
+      return 0;
+   bh = dmg_band_h(res, nb);
+   bps = res->width * bpp;
+   if (bh < 2 || bps == 0)
+      return 0;
+
+   if (!res->dmg_prev || res->dmg_nb != nb || res->dmg_bps != bps) {
+      free(res->dmg_prev);
+      res->dmg_prev = malloc((size_t)nb * bps);
+      res->dmg_nb = nb;
+      res->dmg_bps = bps;
+      if (!res->dmg_prev) {
+         res->dmg_nb = 0;
+         return 0;
+      }
+      force_full = 1;
+   }
+   if (force_full) {
+      if (dmg_full(vhws, res, level, &boxes[0]) < 0)
+         return 0;
+      dmg_prev_save(res, nb, 0, nb - 1);
+      vhws->n_dmg_frame++;
+      return 1;
+   }
+
+   tmp = malloc(bps);
+   if (!tmp)
+      return 0;
+   vhws->n_dmg_frame++;
+   for (uint32_t b = 0; b < nb; b++) {
+      uint32_t y = b * bh + bh / 2;
+      uint8_t *dst = (uint8_t *)res->ptr + (size_t)y * res->stride;
+      uint64_t t0 = now_us();
+      int rc;
+      dirty[b] = 0;
+      memcpy(tmp, dst, bps);
+      rc = vgl_transfer(vhws, res, &(struct pipe_box){.x = 0, .y = (int16_t)y,
+                                                      .z = 0,
+                                                      .width = (int16_t)res->width,
+                                                      .height = 1, .depth = 1},
+                        res->stride, 0, y * res->stride, level, 1);
+      vhws->n_probe++;
+      vhws->probe_us += now_us() - t0;
+      vhws->dmg_bytes += bps;
+      vhws->n_readback++;
+      if (rc < 0) {
+         free(tmp);
+         return 0;
+      }
+      if (memcmp(tmp, dst, bps)) {
+         dirty[b] = 1;
+         ndirty++;
+      } else {
+         memcpy(dst, tmp, bps);
+      }
+   }
+   free(tmp);
+   if (ndirty == 0) {
+      vhws->n_dmg_idle++;
+      *idle = 1;
+      return 0;
+   }
+   if (ndirty * 2 >= nb) {
+      if (dmg_full(vhws, res, level, &boxes[0]) < 0)
+         return 0;
+      dmg_prev_save(res, nb, 0, nb - 1);
+      return 1;
+   }
+   for (uint32_t b = 0; b < nb && n < max; b++) {
+      uint32_t b0 = b;
+      uint32_t y0, y1;
+      if (!dirty[b])
+         continue;
+      while (b + 1 < nb && dirty[b + 1])
+         b++;
+      y0 = b0 * bh;
+      y1 = (b + 1 == nb) ? res->height : (b + 1) * bh;
+      if (dmg_read(vhws, res, level, 0, (int)y0, res->width, (int)(y1 - y0)) < 0)
+         return 0;
+      dmg_prev_save(res, nb, b0, b);
+      boxes[n].x = 0;
+      boxes[n].y = (int16_t)y0;
+      boxes[n].z = 0;
+      boxes[n].width = (int16_t)res->width;
+      boxes[n].height = (int16_t)(y1 - y0);
+      boxes[n].depth = 1;
+      n++;
+   }
+   return n;
+}
+
+/* Dispatch: returns the number of boxes to present (0 with *idle set means
+ * "the frame is already on screen"; 0 with *idle clear means "fall back to a
+ * full readback"). */
+static unsigned
+dmg_boxes(struct virgl_hobbyos_winsys *vhws, struct virgl_hw_res *res,
+          unsigned level, struct pipe_box *boxes, unsigned max, int *idle)
+{
+   int force_full = 0;
+
+   if (vhws->dmg_resync && vhws->dmg_seeded &&
+       (vhws->n_present % vhws->dmg_resync) == vhws->dmg_resync - 1)
+      force_full = 1;
+   if (vhws->dmg_mode == 2)
+      return dmg_band_boxes(vhws, res, level, boxes, max, force_full, idle);
+   return dmg_thumb_boxes(vhws, res, level, boxes, max, force_full, idle);
+}
+
 /* Present (mode B)                                                          */
 /* ------------------------------------------------------------------------- */
 
@@ -761,70 +1221,125 @@ virgl_hobbyos_flush_frontbuffer(struct virgl_winsys *vws,
                                 struct pipe_box *sub_box)
 {
    struct virgl_hobbyos_winsys *vhws = virgl_hobbyos_winsys(vws);
-   struct pipe_box box;
-   uint32_t offset = 0;
+   struct pipe_box boxes[VGL_MAX_DAMAGE_RECTS];
+   const uint32_t bpp = util_format_get_blocksize(res->format);
+   unsigned nboxes = 0;
    uint64_t t0 = now_us();
    void *dt_map;
-   unsigned nboxes = 0;
 
    if (!res->dt || !res->ptr)
       return;
 
-   memset(&box, 0, sizeof box);
-   if (sub_box) {
-      box = *sub_box;
-      offset = box.y * res->stride +
-               box.x * util_format_get_blocksize(res->format);
-      nboxes = 1;
-   } else {
-      box.z = layer;
-      box.width = res->width;
-      box.height = res->height;
-      box.depth = 1;
-   }
+   vhws->full_bytes += (uint64_t)res->width * res->height * bpp;
 
-   /* 1. host -> guest, straight into the resource's attached pages. */
-   if (vgl_transfer(vhws, res, &box, res->stride, 0, offset, level, 1) < 0)
-      return;
-   vhws->n_readback++;
-   vhws->readback_us += now_us() - t0;
+   if (sub_box) {
+      /* The frontend knows the damage (nothing in the X11 path does today,
+       * but a future direct-scanout client will): trust it. */
+      boxes[0] = *sub_box;
+      nboxes = 1;
+      if (dmg_read(vhws, res, level, boxes[0].x, boxes[0].y, boxes[0].width,
+                   boxes[0].height) < 0)
+         return;
+   } else if (vhws->dmg_mode && res->height >= 16) {
+      int idle = 0;
+      nboxes = dmg_boxes(vhws, res, level, boxes, VGL_MAX_DAMAGE_RECTS, &idle);
+      if (nboxes == 0 && idle) {
+         /* Nothing changed anywhere: the frame is already on screen.  Count
+          * it as a present (the client did swap) but move no pixels. */
+         vhws->n_present++;
+         vhws->present_us += now_us() - t0;
+         return;
+      }
+      if (nboxes == 0) {
+         /* Damage state not available (first frame, allocation or ioctl
+          * failure): fall back to M2's full-surface present, which is always
+          * correct. */
+         if (dmg_read(vhws, res, level, 0, 0, res->width, res->height) < 0)
+            return;
+         boxes[0].x = 0;
+         boxes[0].y = 0;
+         boxes[0].z = layer;
+         boxes[0].width = res->width;
+         boxes[0].height = res->height;
+         boxes[0].depth = 1;
+         nboxes = 1;
+      }
+   } else {
+      if (dmg_read(vhws, res, level, 0, 0, res->width, res->height) < 0)
+         return;
+      boxes[0].x = 0;
+      boxes[0].y = 0;
+      boxes[0].z = layer;
+      boxes[0].width = res->width;
+      boxes[0].height = res->height;
+      boxes[0].depth = 1;
+      nboxes = 1;
+   }
 
    /* First present: say what the host actually put in the guest buffer.  All
     * zeros means the batch never reached the host (or drew nothing); a clear
     * colour means the readback is positioned wrong; the pattern means both
     * ends agree. */
-   if (vhws->n_present == 1) {
+   if (vhws->n_present == 0) {
       const uint32_t *px = (const uint32_t *)res->ptr;
       uint32_t nz = 0;
       for (uint32_t i = 0; i < 4096; i++)
          if (px[i]) nz++;
       fprintf(stderr, "[VGL] readback sample: first=%08x mid=%08x last=%08x "
-              "nonzero=%u/4096\n", px[0], px[(box.height / 2) * (res->stride / 4)],
-              px[(box.height - 1) * (res->stride / 4)], nz);
+              "nonzero=%u/4096\n", px[0], px[(boxes[0].height / 2) * (res->stride / 4)],
+              px[(boxes[0].height - 1) * (res->stride / 4)], nz);
    }
 
-   /* 2. guest -> the sw xlib winsys' shadow (the desktop's XPutImage source).
-    *    Only the damaged rect moves. */
+   /* guest -> the sw xlib winsys' shadow (the desktop's XPutImage source).
+    * Only the damaged rects move. */
+   uint64_t t_copy = now_us();
    dt_map = vhws->sws->displaytarget_map(vhws->sws, res->dt, 0);
    if (dt_map) {
-      uint32_t dt_stride = res->dt_stride;
-      uint8_t *src = (uint8_t *)res->ptr + offset;
-      util_copy_rect((uint8_t *)dt_map + (uint32_t)box.y * dt_stride +
-                        (uint32_t)box.x * util_format_get_blocksize(res->format),
-                     res->format, dt_stride, 0, 0, box.width, box.height, src,
-                     res->stride, 0, 0);
+      for (unsigned i = 0; i < nboxes; i++) {
+         uint8_t *src = (uint8_t *)res->ptr + (size_t)boxes[i].y * res->stride +
+                        (size_t)boxes[i].x * bpp;
+         util_copy_rect((uint8_t *)dt_map + (size_t)boxes[i].y * res->dt_stride +
+                           (size_t)boxes[i].x * bpp,
+                        res->format, res->dt_stride, 0, 0, boxes[i].width,
+                        boxes[i].height, src, res->stride, 0, 0);
+      }
       vhws->sws->displaytarget_unmap(vhws->sws, res->dt);
    }
+   vhws->copy_us += now_us() - t_copy;
 
-   /* 3. the frontend's own present funnel (XPutImage -> the [XSW] shadow). */
-   vhws->sws->displaytarget_display(vhws->sws, res->dt, winsys_drawable_handle,
-                                    nboxes, sub_box);
+   /* the frontend's own present funnel (XPutImage -> the [XSW] shadow).  One
+    * box per damaged run: the compat Xlib copies exactly that rect into its
+    * shadow, and the desktop unions the rects it is given. */
+   {
+      uint64_t t_disp = now_us();
+      vhws->sws->displaytarget_display(vhws->sws, res->dt,
+                                       winsys_drawable_handle, nboxes, boxes);
+      vhws->display_us += now_us() - t_disp;
+   }
    vhws->n_present++;
    vhws->present_us += now_us() - t0;
+   /* A periodic row as well as the destroy-time summary: a game killed by a
+    * timeout never runs the winsys destructor, and the game run's own damage
+    * ratio is evidence worth keeping. */
+   if (vhws->n_present % 64 == 0)
+      fprintf(stderr, "[VGL] dmg n=%llu boxes=%u box0=%ux%u+%u+%u dmg_kb=%llu "
+              "full_kb=%llu avg_readback_us=%llu avg_thumb_us=%llu "
+              "avg_copy_us=%llu avg_display_us=%llu idle=%llu cells=%llu\n",
+              (unsigned long long)vhws->n_present, nboxes,
+              boxes[0].width, boxes[0].height, boxes[0].x, boxes[0].y,
+              (unsigned long long)(vhws->dmg_bytes >> 10),
+              (unsigned long long)(vhws->full_bytes >> 10),
+              (unsigned long long)(vhws->readback_us / (vhws->n_present ? vhws->n_present : 1)),
+              (unsigned long long)(vhws->thumb_us / (vhws->n_present ? vhws->n_present : 1)),
+              (unsigned long long)(vhws->copy_us / (vhws->n_present ? vhws->n_present : 1)),
+              (unsigned long long)(vhws->display_us / (vhws->n_present ? vhws->n_present : 1)),
+              (unsigned long long)vhws->n_dmg_idle,
+              (unsigned long long)vhws->n_dmg_cells);
    if (vhws->n_present <= 3 || vhws->trace)
-      fprintf(stderr, "[VGL] present #%llu res=%u box=%ux%u+%u+%u readback=%llu us "
-              "dt_stride=%u stride=%u\n", (unsigned long long)vhws->n_present,
-              res->res_handle, box.width, box.height, box.x, box.y,
+      fprintf(stderr, "[VGL] present #%llu res=%u boxes=%u box0=%ux%u+%u+%u "
+              "readback=%llu us dt_stride=%u stride=%u\n",
+              (unsigned long long)vhws->n_present, res->res_handle, nboxes,
+              boxes[0].width, boxes[0].height, boxes[0].x, boxes[0].y,
               (unsigned long long)(now_us() - t0), res->dt_stride, res->stride);
 }
 
@@ -872,8 +1387,31 @@ virgl_hobbyos_winsys_destroy(struct virgl_winsys *vws)
               (unsigned long long)(vhws->n_readback ? vhws->readback_us / vhws->n_readback : 0),
               (unsigned long long)(vhws->n_present ? vhws->present_us / vhws->n_present : 0),
               vhws->max_cmd_dwords);
+      /* The damage path's own row: bytes actually transferred against the
+       * bytes a full-surface present would have moved, and what the probe
+       * cost.  This is the F decomposition the gate quotes. */
+      fprintf(stderr,
+              "[VGL] damage=%s frames=%llu idle=%llu rects=%llu cells=%llu "
+              "blit=%llu thumb_us=%llu probe=%llu probe_us=%llu dmg_mib=%llu "
+              "full_mib=%llu\n",
+              vhws->dmg_mode == 0 ? "off" : (vhws->dmg_mode == 2 ? "bands" : "thumb"),
+              (unsigned long long)vhws->n_dmg_frame,
+              (unsigned long long)vhws->n_dmg_idle,
+              (unsigned long long)vhws->n_dmg_rects,
+              (unsigned long long)vhws->n_dmg_cells,
+              (unsigned long long)vhws->n_blit,
+              (unsigned long long)vhws->thumb_us,
+              (unsigned long long)vhws->n_probe,
+              (unsigned long long)vhws->probe_us,
+              (unsigned long long)(vhws->dmg_bytes >> 20),
+              (unsigned long long)(vhws->full_bytes >> 20));
    }
 
+   if (vhws->dmg_cbuf)
+      vhws->base.cmd_buf_destroy(vhws->dmg_cbuf);
+   if (vhws->dmg_thumb)
+      virgl_hw_res_destroy(vhws, vhws->dmg_thumb);
+   free(vhws->dmg_thumb_prev);
    if (vhws->fd >= 0 && vhws->ctx_id) {
       memset(&cd, 0, sizeof cd);
       cd.ctx_id = vhws->ctx_id;
@@ -936,6 +1474,48 @@ virgl_hobbyos_winsys_create(void *display)
    vhws->fd = fd;
    vhws->ctx_id = cc.ctx_id;
    vhws->trace = getenv("HOBBYOS_GL_TRACE") != NULL;
+
+   /* M3 present mode.  HOBBYOS_GL_DAMAGE wins over /GLDMG (the in-guest file,
+    * because a desktop-menu launch cannot pass an environment), and the
+    * default is ON: the damage path is the M3 present path, and
+    * HOBBYOS_GL_DAMAGE=0 restores M2's full-surface readback for A/B numbers. */
+   {
+      const char *e = getenv("HOBBYOS_GL_DAMAGE");
+      char dm[8] = {0};
+      FILE *f = NULL;
+      if (!e && (f = fopen(VGL_DMG_FILE, "r"))) {
+         if (fgets(dm, sizeof dm, f)) {
+            dm[sizeof dm - 1] = '\0';
+            e = dm;
+         }
+         fclose(f);
+      }
+      vhws->dmg_mode = 1;
+      if (e && (e[0] == '0' || e[0] == 'f' || e[0] == 'F'))
+         vhws->dmg_mode = 0;
+      else if (e && e[0] == '2')
+         vhws->dmg_mode = 2;
+      vhws->dmg_bands = 16;
+      vhws->dmg_resync = 64;
+      {
+         const char *b = getenv("HOBBYOS_GL_BANDS");
+         if (b && *b) {
+            int v = atoi(b);
+            if (v >= 2 && v <= 64)
+               vhws->dmg_bands = (uint32_t)v;
+         }
+         b = getenv("HOBBYOS_GL_RESYNC");
+         if (b && *b) {
+            int v = atoi(b);
+            if (v >= 0 && v <= 100000)
+               vhws->dmg_resync = (uint32_t)v;
+         }
+      }
+      fprintf(stderr, "[VGL] present mode: %s (bands=%u resync=%u)\n",
+              vhws->dmg_mode == 0 ? "full-surface" :
+              (vhws->dmg_mode == 2 ? "damage-bands" : "damage-thumb"),
+              vhws->dmg_bands, vhws->dmg_resync);
+   }
 
    virgl_resource_cache_init(&vhws->cache, CACHE_TIMEOUT_USEC,
                              virgl_hobbyos_resource_cache_entry_is_busy,

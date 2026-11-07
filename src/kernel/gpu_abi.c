@@ -20,15 +20,26 @@
 #include "errno.h"
 #include "lock.h"
 
-/* M1 limits, mirrored in docs/gpu-abi.md. */
+/* Limits, mirrored in docs/gpu-abi.md.  M3 raised the two that a Unity frame
+ * actually reaches (docs/rimworld-virgl-m3.md §1): the per-client resource
+ * table was 32 and the system-wide attached-backing pool 64 MiB -- numbers
+ * sized for M1's kernel probe, not for a game with texture atlases, FBOs and
+ * a vertex buffer per mesh.
+ *
+ * The pool is now 512 MiB (the transport's GPU3D_PAGE_POOL) and each client
+ * may hold at most GPU_ABI_CLIENT_BYTES of it, so one process cannot starve
+ * the others; the per-resource cap stays 64 MiB (a 4096x4096 RGBA atlas, 8x
+ * a 1080p render target) because a single ATTACH_BACKING sends one entry per
+ * page and 16384 pages is the transport's per-attach ceiling. */
 #define GPU_ABI_MAX_CLIENTS 8
-#define GPU_ABI_MAX_RES_PER_CLIENT 32
-#define GPU_ABI_MAX_PAGES 16384          /* == the transport's page pool */
+#define GPU_ABI_MAX_RES_PER_CLIENT 1024
+#define GPU_ABI_MAX_PAGES 16384          /* per resource == 64 MiB */
 #define GPU_ABI_MAX_BLOB 16384
 #define GPU_ABI_MAX_SUBMIT (128 * 1024)
 #define GPU_ABI_MAX_DIM 16384
 #define GPU_ABI_MAX_LAYERS 2048
 #define GPU_ABI_MAX_BYTES (64ull * 1024 * 1024)
+#define GPU_ABI_CLIENT_BYTES (384ull * 1024 * 1024)  /* per-client share of the pool */
 
 struct gpu_abi_client {
   int used;
@@ -36,7 +47,10 @@ struct gpu_abi_client {
   int fd;
   uint32_t ctx_id;
   uint32_t res_ids[GPU_ABI_MAX_RES_PER_CLIENT];
+  uint32_t res_pages[GPU_ABI_MAX_RES_PER_CLIENT]; /* parallel: backing pages */
   int nres;
+  uint64_t pages; /* == sum(res_pages[0..nres)), kept for the ENOSPC row */
+  uint64_t bytes; /* attached backing in bytes */
 };
 
 static struct gpu_abi_client gpu_clients[GPU_ABI_MAX_CLIENTS];
@@ -44,6 +58,15 @@ static spinlock_t gpu_abi_lock; /* zero-initialised == unlocked */
 static uint64_t gpu_pages[GPU_ABI_MAX_PAGES] __attribute__((aligned(4096)));
 static uint8_t gpu_submit_buf[GPU_ABI_MAX_SUBMIT] __attribute__((aligned(4096)));
 static uint8_t gpu_blob_buf[GPU_ABI_MAX_BLOB] __attribute__((aligned(16)));
+
+/* Serial rows for refusals (M3): a limit that fires must print the exact
+ * request, or the lane cannot say what the ABI is missing. */
+extern void uart_puts(const char* s);
+extern void print_int(int v);
+static void gpu_abi_say(const char* s, int v) {
+  uart_puts(s);
+  print_int(v);
+}
 
 /* ------------------------------------------------------------------ */
 /* arch gate: the 3D transport exists on x64 only (M7 is x64-only).     */
@@ -173,7 +196,11 @@ int gpu_abi_res_ok(const struct gpu_res_create* r) {
   if (r->depth > GPU_ABI_MAX_LAYERS || r->array_size > GPU_ABI_MAX_LAYERS) return 0;
   if (r->last_level > 31) return 0;
   if (r->nr_samples > 16) return 0;
-  if (r->format == 0 || r->bind == 0) return 0;
+  /* format 0 is not a format.  bind == 0 IS legal: it is what a buffer has
+   * before it is first bound (M3 measured Unity's glBufferData doing exactly
+   * that -- 64x1, bind=0x0 -- and M1/M2 rejected it). */
+  if (r->format == 0) return 0;
+  (void)r->bind;
   /* 4 bytes/texel is the floor for every format the game uses; the cap is
    * the transport's per-resource backing limit, so an oversized request
    * fails at the ioctl instead of at ATTACH_BACKING. */
@@ -219,9 +246,31 @@ static int gpu_client_owns_res(struct gpu_abi_client* c, uint32_t res_id) {
 static void gpu_client_forget_res(struct gpu_abi_client* c, uint32_t res_id) {
   for (int i = 0; i < c->nres; i++) {
     if (c->res_ids[i] == res_id) {
+      uint64_t pages = c->res_pages[i];
       c->res_ids[i] = c->res_ids[c->nres - 1];
+      c->res_pages[i] = c->res_pages[c->nres - 1];
       c->res_ids[c->nres - 1] = 0;
+      c->res_pages[c->nres - 1] = 0;
       c->nres--;
+      /* Per-client accounting: the backing this resource held goes back to
+       * the client's share as well as to the pool (M3). */
+      c->pages = (c->pages >= pages) ? c->pages - pages : 0;
+      uint64_t b = pages * 4096ull;
+      c->bytes = (c->bytes >= b) ? c->bytes - b : 0;
+      return;
+    }
+  }
+}
+
+/* Record the backing a resource just attached, under the client lock. */
+static void gpu_client_note_pages(int pid, int fd, uint32_t res_id, uint32_t pages) {
+  struct gpu_abi_client* c = gpu_client_find(pid, fd);
+  if (!c) return;
+  for (int i = 0; i < c->nres; i++) {
+    if (c->res_ids[i] == res_id) {
+      c->res_pages[i] = pages;
+      c->pages += pages;
+      c->bytes += (uint64_t)pages * 4096ull;
       return;
     }
   }
@@ -232,6 +281,8 @@ static void gpu_client_forget_res(struct gpu_abi_client* c, uint32_t res_id) {
  * inside a table lock.  Safe on an already-cleared client. */
 static void gpu_client_teardown_unlocked(struct gpu_abi_client* c) {
   c->nres = 0; /* the 3D ctx_destroy reclaims every resource of the ctx */
+  c->pages = 0;
+  c->bytes = 0;
   if (c->ctx_id) {
     g3d_ctx_destroy(c->ctx_id);
     c->ctx_id = 0;
@@ -257,6 +308,8 @@ void gpu_abi_release_fd(struct process* p, int fd) {
     c->fd = -1;
     c->ctx_id = 0;
     c->nres = 0;
+    c->pages = 0;
+    c->bytes = 0;
   }
   spinlock_release_irqrestore(&gpu_abi_lock, fl);
   if (have) gpu_client_teardown_unlocked(&snapshot);
@@ -370,6 +423,8 @@ static int gpu_do_ctx_create(struct process* p, int fd, uint64_t arg) {
   c->fd = fd;
   c->ctx_id = GPU_CTX_RESERVED; /* creation in flight: a second call is EBUSY */
   c->nres = 0;
+  c->pages = 0;
+  c->bytes = 0;
   spinlock_release_irqrestore(&gpu_abi_lock, fl);
 
   int rc = g3d_ctx_create(cc.capset_id, cc.capset_version, cc.name, &id);
@@ -415,6 +470,8 @@ static int gpu_do_ctx_destroy(struct process* p, int fd, uint64_t arg) {
   ctx_id = c->ctx_id;
   c->ctx_id = 0;
   c->nres = 0;
+  c->pages = 0;
+  c->bytes = 0;
   c->used = 0;
   spinlock_release_irqrestore(&gpu_abi_lock, fl);
 
@@ -424,7 +481,22 @@ static int gpu_do_ctx_destroy(struct process* p, int fd, uint64_t arg) {
 static int gpu_do_res_create(struct process* p, int fd, uint64_t arg) {
   struct gpu_res_create rc_struct;
   if (vm_user_read(p, arg, &rc_struct, sizeof(rc_struct)) != 0) return -EFAULT;
-  if (!gpu_abi_res_ok(&rc_struct)) return -EINVAL;
+  if (!gpu_abi_res_ok(&rc_struct)) {
+    /* Name the refusal: a bare -EINVAL here reaches the client as
+     * GL_OUT_OF_MEMORY two layers up (M3). */
+    gpu_abi_say("[GPU] res_create refused: geometry ctx=", (int)rc_struct.ctx_id);
+    gpu_abi_say(" target=", (int)rc_struct.target);
+    gpu_abi_say(" fmt=", (int)rc_struct.format);
+    gpu_abi_say(" bind=", (int)rc_struct.bind);
+    gpu_abi_say(" w=", (int)rc_struct.width);
+    gpu_abi_say(" h=", (int)rc_struct.height);
+    gpu_abi_say(" d=", (int)rc_struct.depth);
+    gpu_abi_say(" arr=", (int)rc_struct.array_size);
+    gpu_abi_say(" lvl=", (int)rc_struct.last_level);
+    gpu_abi_say(" nsa=", (int)rc_struct.nr_samples);
+    gpu_abi_say("\n", 0);
+    return -EINVAL;
+  }
   struct process* g = process_group(p);
   int pid = g ? g->pid : p->pid;
 
@@ -434,6 +506,13 @@ static int gpu_do_res_create(struct process* p, int fd, uint64_t arg) {
       c->ctx_id != rc_struct.ctx_id || c->nres >= GPU_ABI_MAX_RES_PER_CLIENT) {
     int full = (c && c->nres >= GPU_ABI_MAX_RES_PER_CLIENT);
     spinlock_release_irqrestore(&gpu_abi_lock, fl);
+    gpu_abi_say("[GPU] res_create refused: client c=", c ? 1 : 0);
+    gpu_abi_say(" nres=", c ? c->nres : -1);
+    gpu_abi_say(" ctx_held=", c ? (int)c->ctx_id : -1);
+    gpu_abi_say(" ctx_req=", (int)rc_struct.ctx_id);
+    gpu_abi_say(" pid=", pid);
+    gpu_abi_say(" fd=", fd);
+    gpu_abi_say("\n", 0);
     return full ? -ENOSPC : -EINVAL;
   }
   spinlock_release_irqrestore(&gpu_abi_lock, fl);
@@ -482,8 +561,22 @@ static int gpu_do_res_attach(struct process* p, int fd, uint64_t arg) {
   struct gpu_abi_client* c = gpu_client_find(pid, fd);
   int owns = c && gpu_client_owns_res(c, ra.res_id);
   uint32_t ctx_id = owns ? c->ctx_id : 0;
+  int over = (owns && (c->bytes + ra.len > GPU_ABI_CLIENT_BYTES));
+  uint64_t held = over ? c->bytes : 0;
+  int nres_now = over ? c->nres : 0;
   spinlock_release_irqrestore(&gpu_abi_lock, fl);
   if (!owns) return -EINVAL;
+  if (over) {
+    /* Say the exact demand: a per-client refusal must name the resource, the
+     * bytes it wants and what the client already holds. */
+    gpu_abi_say("[GPU] res_attach refused: client backing full res=", (int)ra.res_id);
+    gpu_abi_say(" wants=", (int)ra.len);
+    gpu_abi_say(" held=", (int)held);
+    gpu_abi_say(" nres=", nres_now);
+    gpu_abi_say(" cap_bytes=", (int)GPU_ABI_CLIENT_BYTES);
+    gpu_abi_say("\n", 0);
+    return -ENOSPC;
+  }
 
   uint32_t got = 0;
   int rc = gpu_resolve_pages(p, ra.va, ra.len, gpu_pages, GPU_ABI_MAX_PAGES, &got);
@@ -498,6 +591,9 @@ static int gpu_do_res_attach(struct process* p, int fd, uint64_t arg) {
     if (rc == -ENOSPC) return -ENOSPC;
     return rc == -EFAULT ? -EFAULT : -EIO;
   }
+  fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  gpu_client_note_pages(pid, fd, ra.res_id, got);
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
   ra.nr_pages = got;
   return vm_kwrite(p, arg, &ra, sizeof(ra)) == 0 ? 0 : -EFAULT;
 }

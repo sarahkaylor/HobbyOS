@@ -47,12 +47,19 @@ extern uint64_t timer_get_ms(void);
 extern int virtio_gpu_x64_virgl_offered;
 extern int virtio_gpu_x64_virgl_negotiated;
 
-/* One resource's backing may cover 8 MiB per attach in M1 (enough for a
- * 1080p RGBA render target); the pool as a whole is 64 MiB. */
+/* One resource's backing may cover 64 MiB per attach (enough for a 4096x4096
+ * atlas, and 8x a 1080p RGBA render target); the pool as a whole is 512 MiB
+ * of attached backing, and the resource table is sized for a real Unity frame
+ * (M3 measured the game's own demand -- see docs/rimworld-virgl-m3.md §1).
+ *
+ * M1 sized these for the kernel probe alone (64 resources, 64 MiB pool); M2
+ * showed a Mesa client fits in 3 resources / 15.6 MB, but a Unity UI with
+ * texture atlases, FBOs and VBOs does not, and the resource table -- not
+ * performance -- was the likeliest non-performance wall. */
 #define GPU3D_MAX_CTX     16
-#define GPU3D_MAX_RES     64
-#define GPU3D_PAGE_POOL   16384
-#define GPU3D_MAX_ATTACH  GPU3D_PAGE_POOL
+#define GPU3D_MAX_RES     1024
+#define GPU3D_PAGE_POOL   (128 * 1024)   /* pages == 512 MiB of attached backing */
+#define GPU3D_MAX_ATTACH  16384          /* per resource == 64 MiB */
 #define GPU3D_CAPS_MAX    16384
 #define GPU3D_SUBMIT_MAX  (128 * 1024)
 
@@ -103,6 +110,30 @@ static int gpu3d_ready = 0;
 /* Suppresses the per-command rows inside a measurement loop (the probe's
  * timing pass would otherwise print two rows per iteration). */
 static int gpu3d_quiet = 0;
+/* Per-resource rows are capped: a Unity frame creates hundreds of resources,
+ * and every row is ~60 bytes down a 115200-baud serial console -- printing
+ * them all would cost seconds of the game's load time and distort the very
+ * numbers the lane measures.  The first 32 keep the M1/M2 trace shape; the
+ * rest are counted and reported in the ctx_destroy summary. */
+#define GPU3D_TRACE_RES_ROWS 32
+static int gpu3d_trace_res = 0;
+/* Demand counters: what the client actually asked for, reported on destroy. */
+static int gpu3d_res_in_use = 0;
+static int gpu3d_res_peak = 0;
+static int gpu3d_pages_in_use = 0;
+static int gpu3d_pages_peak = 0;
+
+static int gpu3d_trace_res_row(void) {
+  if (gpu3d_quiet) return 0;
+  if (gpu3d_trace_res > GPU3D_TRACE_RES_ROWS) return 0;
+  if (gpu3d_trace_res == GPU3D_TRACE_RES_ROWS) {
+    gpu3d_trace_res++;
+    uart_puts("[VIRGL3D] (per-resource rows past 32 suppressed)\n");
+    return 0;
+  }
+  gpu3d_trace_res++;
+  return 1;
+}
 static uint32_t gpu3d_capset_id = 0;
 static uint32_t gpu3d_capset_maxver = 0;
 static uint32_t gpu3d_capset_maxsize = 0;
@@ -455,7 +486,11 @@ int virtio_gpu_3d_ctx_destroy(uint32_t ctx_id) {
     gpu3d_req_unref.padding = 0;
     gpu3d_cmd(&gpu3d_req_unref, sizeof(gpu3d_req_unref), 0, 0, &gpu3d_resp,
               GPU3D_RESP_HDR_LEN, 0, 0);
-    gpu3d_pool_free(r->page_start, r->page_count);
+    if (r->attached) {
+      gpu3d_pool_free(r->page_start, r->page_count);
+      gpu3d_pages_in_use -= r->page_count;
+    }
+    if (gpu3d_res_in_use > 0) gpu3d_res_in_use--;
     gpu3d_zero(r, sizeof(*r));
   }
 
@@ -467,6 +502,24 @@ int virtio_gpu_3d_ctx_destroy(uint32_t ctx_id) {
   print_int((int)ctx_id);
   uart_puts(" resp=");
   uart_print_hex(rtype);
+  uart_puts("\n");
+  /* The demand row: what this client actually asked the ABI for.  It is the
+   * evidence for the M3 limits (docs/rimworld-virgl-m3.md §1) -- a refusal
+   * without these numbers would be a guess. */
+  uart_puts("[VIRGL3D] stats res_in_use=");
+  print_int(gpu3d_res_in_use);
+  uart_puts(" peak_res=");
+  print_int(gpu3d_res_peak);
+  uart_puts(" pages_in_use=");
+  print_int(gpu3d_pages_in_use);
+  uart_puts(" peak_pages=");
+  print_int(gpu3d_pages_peak);
+  uart_puts(" peak_mib=");
+  print_int(gpu3d_pages_peak / 256);
+  uart_puts(" caps=");
+  print_int(GPU3D_MAX_RES);
+  uart_puts("/");
+  print_int(GPU3D_PAGE_POOL);
   uart_puts("\n");
   gpu3d_zero(c, sizeof(*c));
   virtio_gpu_x64_unlock(fl);
@@ -525,6 +578,24 @@ int virtio_gpu_3d_res_create(uint32_t ctx_id, const struct virtio_gpu_3d_res* d,
     }
   if (!slot) {
     virtio_gpu_x64_unlock(fl);
+    /* The exact request, so a table-full refusal is explainable. */
+    uart_puts("[VIRGL3D] res_create refused: table full (max ");
+    print_int(GPU3D_MAX_RES);
+    uart_puts(") target=");
+    print_int((int)d->target);
+    uart_puts(" fmt=");
+    print_int((int)d->format);
+    uart_puts(" ");
+    print_int((int)d->width);
+    uart_puts("x");
+    print_int((int)d->height);
+    uart_puts("x");
+    print_int((int)d->depth);
+    uart_puts(" array=");
+    print_int((int)d->array_size);
+    uart_puts(" bind=");
+    uart_print_hex(d->bind);
+    uart_puts("\n");
     return -ENOSPC;
   }
 
@@ -545,6 +616,11 @@ int virtio_gpu_3d_res_create(uint32_t ctx_id, const struct virtio_gpu_3d_res* d,
   uint32_t rlen = 0, rtype = 0;
   int rc = gpu3d_cmd(&gpu3d_req_res3d, sizeof(gpu3d_req_res3d), 0, 0, &gpu3d_resp,
                      GPU3D_RESP_HDR_LEN, &rlen, &rtype);
+  if (rc == 0) {
+    gpu3d_res_in_use++;
+    if (gpu3d_res_in_use > gpu3d_res_peak) gpu3d_res_peak = gpu3d_res_in_use;
+  }
+  if (gpu3d_trace_res_row()) {
   uart_puts("[VIRGL3D] res_create res=");
   print_int((int)id);
   uart_puts(" ");
@@ -558,6 +634,7 @@ int virtio_gpu_3d_res_create(uint32_t ctx_id, const struct virtio_gpu_3d_res* d,
   uart_puts(" resp=");
   uart_print_hex(rtype);
   uart_puts("\n");
+  }
   if (rc != 0) {
     virtio_gpu_x64_unlock(fl);
     return -EIO;
@@ -599,6 +676,20 @@ int virtio_gpu_3d_res_attach(uint32_t res_id, const uint64_t* phys, uint32_t nr_
   }
   int start = gpu3d_pool_alloc((int)nr_pages);
   if (start < 0) {
+    int free_pages = 0;
+    for (int i = 0; i < GPU3D_PAGE_POOL; i++)
+      if (!(gpu3d_pool_used[i >> 3] & (1u << (i & 7)))) free_pages++;
+    /* Say the exact demand: a pool refusal is the one ABI failure the lane
+     * must be able to explain without guessing. */
+    uart_puts("[VIRGL3D] attach refused res=");
+    print_int((int)res_id);
+    uart_puts(" need_pages=");
+    print_int((int)nr_pages);
+    uart_puts(" free_pages=");
+    print_int(free_pages);
+    uart_puts(" pool_pages=");
+    print_int(GPU3D_PAGE_POOL);
+    uart_puts(" reason=no_contiguous_run\n");
     virtio_gpu_x64_unlock(fl);
     return -ENOSPC;
   }
@@ -623,6 +714,7 @@ int virtio_gpu_3d_res_attach(uint32_t res_id, const uint64_t* phys, uint32_t nr_
   int rc = gpu3d_cmd(&gpu3d_req_attach, sizeof(gpu3d_req_attach), gpu3d_ents,
                      (uint32_t)(nr_pages * sizeof(struct virtio_gpu_mem_entry)),
                      &gpu3d_resp, GPU3D_RESP_HDR_LEN, &rlen, &rtype);
+  if (gpu3d_trace_res_row()) {
   uart_puts("[VIRGL3D] attach res=");
   print_int((int)res_id);
   uart_puts(" pages=");
@@ -632,6 +724,7 @@ int virtio_gpu_3d_res_attach(uint32_t res_id, const uint64_t* phys, uint32_t nr_
   uart_puts(" resp=");
   uart_print_hex(rtype);
   uart_puts("\n");
+  }
   if (rc != 0) {
     gpu3d_pool_free(start, (int)nr_pages);
     virtio_gpu_x64_unlock(fl);
@@ -641,6 +734,8 @@ int virtio_gpu_3d_res_attach(uint32_t res_id, const uint64_t* phys, uint32_t nr_
   r->page_count = (int)nr_pages;
   r->len = len;
   r->attached = 1;
+  gpu3d_pages_in_use += (int)nr_pages;
+  if (gpu3d_pages_in_use > gpu3d_pages_peak) gpu3d_pages_peak = gpu3d_pages_in_use;
   virtio_gpu_x64_unlock(fl);
   return 0;
 }
@@ -660,12 +755,16 @@ int virtio_gpu_3d_res_unref(uint32_t res_id) {
   uint32_t rlen = 0, rtype = 0;
   int rc = gpu3d_cmd(&gpu3d_req_unref, sizeof(gpu3d_req_unref), 0, 0, &gpu3d_resp,
                      GPU3D_RESP_HDR_LEN, &rlen, &rtype);
+  if (gpu3d_trace_res_row()) {
   uart_puts("[VIRGL3D] unref res=");
   print_int((int)res_id);
   uart_puts(" resp=");
   uart_print_hex(rtype);
   uart_puts("\n");
+  }
   if (r->attached) gpu3d_pool_free(r->page_start, r->page_count);
+  if (r->attached) gpu3d_pages_in_use -= r->page_count;
+  if (gpu3d_res_in_use > 0) gpu3d_res_in_use--;
   gpu3d_zero(r, sizeof(*r));
   virtio_gpu_x64_unlock(fl);
   return rc;

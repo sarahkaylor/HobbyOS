@@ -817,6 +817,19 @@ static void pres_row(Display *d) {
   j = ap_s(b, j, " glflush=");     j = ap_d(b, j, g_pres.glflush);
   b[j++] = '\n';
   xs_write(2, b, (unsigned long)j);
+  /* M3: also on /dev/console.  Unity redirects fd 2 to Player.log before the
+   * first swap, so a present row written only to fd 2 never reaches the serial
+   * log -- and the fps harness (tools/rw/l62-xsw-follow.py) timestamps rows by
+   * watching that log, so it saw zero frames while the game was swapping at
+   * 20 fps.  Player.log keeps its copy; the console gets the measurement. */
+  {
+    static int cons = -2;
+    if (cons == -2) {
+      cons = xs_open("/dev/console", XO_RDWR);
+      if (cons < 0) cons = -1;
+    }
+    if (cons >= 0) xs_write(cons, b, (unsigned long)j);
+  }
 }
 
 /* ---- shadow (client-side backing store) ------------------------------- *
