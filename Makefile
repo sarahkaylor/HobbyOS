@@ -426,6 +426,21 @@ else
   CFLAGS += -DKERNEL_MODE_DESKTOP
 endif
 
+# L75: the block-stress probe.  RW_BLK_STRESS=1 compiles the kernel-side
+# stressor (random small reads + writes through the NVMe driver, driven from
+# the 5 s sampler) so a window can be run with the probe alongside the game
+# without a second user process: "2 x 1800 s with the block-stress probe
+# running".  Off by default, so ordinary runs are unchanged.
+ifeq ($(RW_BLK_STRESS),1)
+  CFLAGS += -DRW_BLK_STRESS=1
+endif
+# L75: the one-off alias reproducer (never in a shipped build).  Writes a 4 KiB
+# zero page into the physical page the pool would hand out and reads the
+# controller registers back; see virtio_blk_init.
+ifeq ($(RW_ALIAS_PROBE),1)
+  CFLAGS += -DRW_ALIAS_PROBE=1
+endif
+
 # DESKTOP=icewm (icewm.md §4.5): main.c's default desktop branch launches
 # XSESSION.BIN.  Only src/kernel/main.c reads this macro, so only main.o
 # carries the stamp dependency (see the DESKTOP_FILE rule by XSESSION_BIN).

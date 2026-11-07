@@ -67,6 +67,42 @@ int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count);
 void virtio_blk_diag_row(void);
 
 /**
+ * L75: log every observable controller state change.
+ *
+ * Samples CC, CSTS, INTMS/INTMC and the driver's admin ring indices and
+ * prints one `[BLKQ] mmio` row per transition.  Called from the 100 Hz timer
+ * tick on CPU 0 (four MMIO reads, so the cost is one row per change and
+ * nothing per tick otherwise).  A CC transition with no driver reset behind
+ * it is the signature of something else writing the register file.
+ */
+void virtio_blk_watch_mmio(void);
+
+/**
+ * L75: the data-path proof across a full controller re-initialisation.
+ *
+ * At 4 minutes uptime, once per boot: checksum a fixed, never-written 512 KiB
+ * region of the namespace through the block cache and raw, force the FULL
+ * re-initialisation (CAP/VS, CC, queues, Identify, cache flush), then
+ * checksum both ways again.  Prints one `[BLKQ] selfcheck` row whose
+ * `match=1` is the proof that a reset leaves the data path clean and no
+ * cache frame survived it.  No-op before the driver is up and on non-NVMe
+ * architectures.
+ */
+void virtio_blk_selfcheck(void);
+
+/**
+ * L75: the block-stress probe (random small reads + write-verify cycles over
+ * the free tail of the namespace), started as its own kernel thread right
+ * after the driver is up.  Compiled in only with `RW_BLK_STRESS=1`
+ * (make RW_BLK_STRESS=1 / harness RW_CHURN_SOAK=1); a no-op otherwise.
+ *
+ * It is a thread, not a call from the 5 s census: the census runs from the
+ * scheduler with its locks held and blocking on the device token there wedged
+ * the machine (measured).
+ */
+void virtio_blk_stress_start(void);
+
+/**
  * L67: put the controller back if a host-side reset left it disabled between
  * requests.  Returns 1 when repaired, 0 when already healthy, -1 on failure.
  */

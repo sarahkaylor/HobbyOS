@@ -3,6 +3,7 @@
 #include "process.h"
 #include "arch/cpu.h"
 #include "blk_cache.h"
+#include "frame.h"
 
 
 #ifdef __x86_64__
@@ -277,11 +278,193 @@ static uint16_t next_io_cid(void) {
  *
  * `nvme_io_queues_create()` is the single place that creates CQ/SQ 1, so the
  * boot path and the reset path can never disagree about depth or doorbell
- * layout.  `nvme_reinit()` is the recovery half of the completion timeout: it
- * puts the controller back into a state where the *next* request is valid,
- * which the old BLKSTALL path did not (it returned an error with the ring
- * still desynchronized, so every later request inherited the wedge).
+ * layout.  `nvme_reinit()` is the recovery half of a controller reset: it
+ * RE-INITIALISES the controller from the registers up (CAP/VS re-read, CC
+ * reprogrammed, admin + IO queues recreated, namespace revalidated) instead
+ * of re-issuing a command into a device whose queue addresses the reset just
+ * destroyed.
  * ------------------------------------------------------------------------- */
+
+/* L75: the live controller identity, re-read from the registers on every
+ * re-initialisation.  CAP/VS are read-only and survive a reset, so a reset
+ * that left the BAR pointing somewhere else (or a device that came back with
+ * a different queue geometry) is visible here. */
+static struct {
+  uint32_t cap_lo, cap_hi, vs;
+  uint32_t mqes;      /* CAP.MQES + 1: max queue entries */
+  uint32_t dstrd;     /* CAP.DSTRD: doorbell stride, log2(4 << dstrd) */
+  uint32_t mpsmin, mpsmax;
+  uint32_t nsid;
+  uint64_t nsze;      /* namespace size in LBAs, from Identify */
+  uint32_t lbads;     /* log2(LBA bytes) from the active LBA format */
+  uint32_t flbas;
+  int valid;
+} nvme_id;
+
+/* Re-read CAP/VS and derive the queue geometry from them.  Also re-derives
+ * the four doorbell pointers: DSTRD is a CAP field, and a re-initialisation
+ * that kept the boot-time pointers would be trusting a value the reset may
+ * have changed. */
+static void nvme_read_cap(void) {
+  nvme_id.cap_lo = nvme_regs[0];
+  nvme_id.cap_hi = nvme_regs[1];
+  nvme_id.vs = nvme_regs[2];
+  nvme_id.mqes = (nvme_id.cap_lo & 0xFFFF) + 1;
+  nvme_id.dstrd = (nvme_id.cap_hi >> 0) & 0xF;
+  /* CAP is 64-bit: MPSMIN is bits 51:48 and MPSMAX bits 55:52, i.e. in the
+     high word.  (Reading them from the low word yields CAP.CQR/TO and a
+     bogus 8 KiB page requirement, which makes nvme_start_ctrl fail with
+     CSTS.CFS after the queues it was handed are "misaligned".) */
+  nvme_id.mpsmin = (nvme_id.cap_hi >> 16) & 0xF;
+  nvme_id.mpsmax = (nvme_id.cap_hi >> 20) & 0xF;
+
+  uint32_t stride_words = (4u << nvme_id.dstrd) / 4u;
+  admin_sq_db = &nvme_regs[1024 + 0 * 2 * stride_words];
+  admin_cq_db = &nvme_regs[1024 + (0 * 2 + 1) * stride_words];
+  io_sq_db    = &nvme_regs[1024 + 1 * 2 * stride_words];
+  io_cq_db    = &nvme_regs[1024 + (1 * 2 + 1) * stride_words];
+}
+
+/* Prepare the admin queues and enable the controller: the same sequence the
+ * boot path runs, expressed once so a re-initialisation cannot drift from it.
+ * Returns 0 when CSTS.RDY set and CC read back exactly as written. */
+static int nvme_admin_enable(void) {
+  nvme_regs[9] = 0x00010001;            /* AQA: 2 admin SQ + 2 admin CQ entries */
+  for (int i = 0; i < 2; i++) {
+    admin_cq[i].cid = 0xFFFF;
+    admin_cq[i].status = 0;
+  }
+  admin_sq_tail = 0;
+  admin_cq_head = 0;
+  uint64_t asq = (uint64_t)&admin_sq;
+  nvme_regs[10] = (uint32_t)asq;
+  nvme_regs[11] = (uint32_t)(asq >> 32);
+  uint64_t acq = (uint64_t)&admin_cq;
+  nvme_regs[12] = (uint32_t)acq;
+  nvme_regs[13] = (uint32_t)(acq >> 32);
+  (void)nvme_regs[11];
+  (void)nvme_regs[13];
+
+  /* CC (NVMe 1.4 / QEMU's include/block/nvme.h): EN bit 0, CSS bits 6:4,
+     MPS bits 10:7, AMS bits 13:11, SHN bits 15:14, IOSQES bits 19:16,
+     IOCQES bits 23:20.  MPS = CAP.MPSMIN (0 here: 4 KiB pages), IOSQES=6
+     (64 B commands), IOCQES=4 (16 B completions) => 0x00460001, which is
+     also what the boot path uses. */
+  uint32_t mps = nvme_id.mpsmin;
+  uint32_t cc = 1u | ((mps & 0x7) << 7) | (6u << 16) | (4u << 20);
+  nvme_regs[5] = cc;
+  blk_cc_en++;
+  (void)nvme_regs[5];
+
+  uint64_t t0 = timer_get_ms();
+  while (!(nvme_regs[7] & 1)) {
+    __asm__ volatile("pause");
+    if ((timer_get_ms() - t0) > 2000) {
+      uart_puts("[BLKQ] reset: RDY never set, CSTS=");
+      uart_print_hex(nvme_regs[7]);
+      uart_puts(" CC=");
+      uart_print_hex(nvme_regs[5]);
+      uart_puts("\n");
+      return -1;
+    }
+  }
+  /* The device echoes CC; a mismatch means we are not talking to the
+     controller we initialised. */
+  if (nvme_regs[5] != cc) {
+    uart_puts("[BLKQ] reset: CC readback mismatch want=");
+    uart_print_hex(cc);
+    uart_puts(" got=");
+    uart_print_hex(nvme_regs[5]);
+    uart_puts("\n");
+    return -1;
+  }
+  return 0;
+}
+
+/* Identify (CNS=0) the namespace and record its geometry.  The controller is
+ * the only authority on what the namespace is; a re-initialisation that
+ * skipped this would keep using a size/lba-width the reset may have changed
+ * (and the driver's own read path is LBA-based, so a wrong nsze silently
+ * turns into reads past the end). */
+static uint8_t id_ns[4096] __attribute__((aligned(4096)));
+
+static uint16_t nvme_identify_ns(uint32_t nsid, uint8_t *buf) {
+  for (int i = 0; i < 4096; i++)
+    buf[i] = 0;
+  struct nvme_cmd id = {0};
+  id.opcode = 0x06;      /* Identify */
+  id.nsid = nsid;
+  id.cid = 3;
+  id.prp1 = (uint64_t)buf;
+  id.cdw10 = 0x00;       /* CNS = 0: identify namespace */
+  return submit_admin_cmd(&id);
+}
+
+static int nvme_ns_validate(int print_rows) {
+  uint16_t st = nvme_identify_ns(1, id_ns);
+  if (st != 0) {
+    uart_puts("[BLKQ] identify ns failed status=");
+    uart_print_hex(st);
+    uart_puts("\n");
+    return -1;
+  }
+  uint64_t nsze = 0;
+  for (int i = 7; i >= 0; i--)
+    nsze = (nsze << 8) | id_ns[i];
+  uint32_t nlbaf = id_ns[25];
+  uint32_t flbas = id_ns[26] & 0x0F;
+  uint32_t lbads = 0;
+  if (flbas <= nlbaf)
+    lbads = id_ns[128 + 4 * flbas + 2];
+  if (nsze == 0 || lbads == 0 || lbads > 16) {
+    uart_puts("[BLKQ] identify ns implausible nsze=");
+    uart_print_hex(nsze);
+    uart_puts(" lbads=");
+    print_int((int)lbads);
+    uart_puts("\n");
+    return -1;
+  }
+  /* Identify Controller (CNS=1) as well: it is the read that proves the
+   * admin queue we just created really carries admin commands. */
+  for (int i = 0; i < 4096; i++)
+    id_ns[i] = 0;
+  struct nvme_cmd idc = {0};
+  idc.opcode = 0x06;
+  idc.nsid = 0;
+  idc.cid = 4;
+  idc.prp1 = (uint64_t)id_ns;
+  idc.cdw10 = 0x01;      /* CNS = 1: identify controller */
+  uint16_t stc = submit_admin_cmd(&idc);
+  if (stc != 0) {
+    uart_puts("[BLKQ] identify ctrl failed status=");
+    uart_print_hex(stc);
+    uart_puts("\n");
+    return -1;
+  }
+  uint32_t vid = id_ns[0] | (id_ns[1] << 8);
+  uint32_t ssvid = id_ns[2] | (id_ns[3] << 8);
+
+  nvme_id.nsid = 1;
+  nvme_id.nsze = nsze;
+  nvme_id.lbads = lbads;
+  nvme_id.flbas = flbas;
+  nvme_id.valid = 1;
+  if (print_rows) {
+    uart_puts("[BLKQ] ns nsid=1 nsze=");
+    uart_print_hex(nsze);
+    uart_puts(" lbads=");
+    print_int((int)lbads);
+    uart_puts(" flbas=");
+    print_int((int)flbas);
+    uart_puts(" vid=0x");
+    uart_print_hex(vid);
+    uart_puts("/0x");
+    uart_print_hex(ssvid);
+    uart_puts("\n");
+  }
+  return 0;
+}
+
 static int nvme_io_queues_create(void) {
   struct nvme_cmd create_cq = {0};
   create_cq.opcode = 0x05; /* Create I/O Completion Queue */
@@ -313,20 +496,27 @@ static int nvme_io_queues_create(void) {
   return 0;
 }
 
-/* Reset the controller and rebuild both queues with an EMPTY, zeroed IO ring.
-   Called only with the request token held (single entrant) and after the
-   in-flight command has been abandoned.
+/* Reset the controller and rebuild it FROM THE REGISTERS UP.  Called only
+   with the request token held (single entrant) and after the in-flight
+   command has been abandoned.
 
-   L67: a host-side reset can still be IN PROGRESS when we get here.  QEMU's
-   nvme_ctrl_reset() writes CSTS=0 first and only tears the queues down and
-   clears CC after it has drained the namespaces, so a guest that "repairs"
-   in that window enables the controller and creates queues *inside* the
-   reset, and the reset then frees them: the admin Create SQ times out and a
-   good read is turned into -EIO.  Two defences:
-     1. if the device is in that half-reset state (CC.EN=1, CSTS.RDY=0) give
-        it a bounded moment to finish before touching it;
-     2. after creating the queues, re-read CC/CSTS a few ms later and redo
-        the whole sequence if the device fell out of ready again. */
+   L75: this is a full re-initialisation, not a re-enable:
+     1. wait out a host reset that is already running (CC.EN=1 && CSTS.RDY=0);
+     2. re-read CAP/VS and re-derive AQA sizing + the four doorbell
+        pointers from CAP.DSTRD;
+     3. CC=0, wait RDY=0, program AQA + ASQ/ACQ + CC (EN, IOSQES=6,
+        IOCQES=4, AMS=0, MPS=CAP.MPSMIN) and verify CC reads back;
+     4. zero both rings and create CQ 1 / SQ 1 again (the reset freed the
+        old queue objects, and the old doorbells now point at nothing);
+     5. revalidate the namespace (Identify CNS=0 + CNS=1: nsze, LBA format,
+        controller id) before any transfer is issued into it;
+     6. flush every cached unit (a frame filled across the reset is not
+        evidence) and confirm the device stays ready for 50 ms.
+
+   L67's half-reset defences stay: a host reset can still be in progress
+   when we get here, and QEMU's nvme_ctrl_reset() writes CSTS=0 first and
+   clears CC only after it has drained the namespaces, so enabling inside
+   that window creates queues the reset then frees. */
 static int nvme_reinit(void) {
   blk_resets++;
   /* M6/L69: from this instant on, no completion that was outstanding before
@@ -339,6 +529,21 @@ static int nvme_reinit(void) {
   uart_puts("[BLKQ] controller reset #");
   print_int((int)blk_resets);
   uart_puts("\n");
+
+  /* (0) A reset invalidates every cached unit, whether or not the rebuild
+     below succeeds: the frames were filled by a device that no longer
+     exists.  Flush first so no failure path can leave a poisoned frame
+     cached (L69's rule, now unconditional). */
+  {
+    uint64_t dropped = blk_cache_flush_all();
+    static int fl_rows;
+    if (fl_rows < 8) {
+      fl_rows++;
+      uart_puts("[BLKC] post-reset flush dropped=");
+      print_int((int)dropped);
+      uart_puts(" cached units\n");
+    }
+  }
 
   /* (1) let a host reset that is already running finish (bounded). */
   {
@@ -356,6 +561,29 @@ static int nvme_reinit(void) {
     }
   }
 
+  /* (2) CAP/VS are the device's identity; re-read them before programming
+     anything derived from them. */
+  nvme_read_cap();
+  uart_puts("[BLKQ] reinit cap=");
+  uart_print_hex(nvme_id.cap_lo);
+  uart_puts("/");
+  uart_print_hex(nvme_id.cap_hi);
+  uart_puts(" vs=");
+  uart_print_hex(nvme_id.vs);
+  uart_puts(" mqes=");
+  print_int((int)nvme_id.mqes);
+  uart_puts(" dstrd=");
+  print_int((int)nvme_id.dstrd);
+  uart_puts(" mps=");
+  print_int((int)nvme_id.mpsmin);
+  uart_puts("/");
+  print_int((int)nvme_id.mpsmax);
+  uart_puts(" sq_db=");
+  uart_print_hex((uint64_t)io_sq_db);
+  uart_puts(" cq_db=");
+  uart_print_hex((uint64_t)io_cq_db);
+  uart_puts("\n");
+
   for (int attempt = 0; attempt < 4; attempt++) {
   /* Disable, then wait (bounded) for the controller to acknowledge. */
   blk_cc_zero++;
@@ -372,39 +600,27 @@ static int nvme_reinit(void) {
     }
   }
 
-  /* AQA, admin queue addresses, CC — the same sequence as boot. */
-  nvme_regs[9] = 0x00010001;
-  for (int i = 0; i < 2; i++) {
-    admin_cq[i].cid = 0xFFFF;
-    admin_cq[i].status = 0;
+  /* (3) admin queues + CC. */
+  if (nvme_admin_enable() != 0) {
+    uart_puts("[BLKQ] reset: enable failed (attempt ");
+    print_int(attempt);
+    uart_puts(")\n");
+    continue;
   }
-  admin_sq_tail = 0;
-  admin_cq_head = 0;
-  uint64_t admin_sq_phys = (uint64_t)&admin_sq;
-  nvme_regs[10] = (uint32_t)admin_sq_phys;
-  nvme_regs[11] = (uint32_t)(admin_sq_phys >> 32);
-  (void)nvme_regs[11];
-  uint64_t admin_cq_phys = (uint64_t)&admin_cq;
-  nvme_regs[12] = (uint32_t)admin_cq_phys;
-  nvme_regs[13] = (uint32_t)(admin_cq_phys >> 32);
-  (void)nvme_regs[13];
-  nvme_regs[5] = 0x00460001;
-  blk_cc_en++;
-  (void)nvme_regs[5];
+  uart_puts("[BLKQ] reinit cc=");
+  uart_print_hex(nvme_regs[5]);
+  uart_puts(" csts=");
+  uart_print_hex(nvme_regs[7]);
+  uart_puts(" aqa=");
+  uart_print_hex(nvme_regs[9]);
+  uart_puts(" asq=");
+  uart_print_hex(((uint64_t)nvme_regs[11] << 32) | nvme_regs[10]);
+  uart_puts(" acq=");
+  uart_print_hex(((uint64_t)nvme_regs[13] << 32) | nvme_regs[12]);
+  uart_puts("\n");
 
-  t0 = timer_get_ms();
-  while (!(nvme_regs[7] & 1)) {
-    __asm__ volatile("pause");
-    if ((timer_get_ms() - t0) > 2000) {
-      uart_puts("[BLKQ] reset: RDY never set, CSTS=");
-      uart_print_hex(nvme_regs[7]);
-      uart_puts("\n");
-      continue; /* retry the whole sequence */
-    }
-  }
-
-  /* The device re-initialises the CQ from scratch: zero EVERY entry so no
-     pre-reset phase tag can ever validate a stale CQE, then rebuild. */
+  /* (4) The device re-initialises the CQ from scratch: zero EVERY entry so
+     no pre-reset phase tag can ever validate a stale CQE, then rebuild. */
   for (int i = 0; i < NVME_IOQ_DEPTH; i++) {
     io_cq[i].result = 0;
     io_cq[i].rsvd = 0;
@@ -423,6 +639,11 @@ static int nvme_reinit(void) {
   if (nvme_io_queues_create() != 0)
     continue; /* a host reset may have eaten the admin command; redo */
 
+  /* (4b) The IO queue objects exist again; revalidate the namespace through
+     them before the caller's transfer is re-issued. */
+  if (nvme_ns_validate(blk_resets <= 8) != 0)
+    continue;
+
   /* (2) settle check: the host reset can complete just after our enable and
      free the queues we have only now created.  Give it a few ms and confirm
      the controller is still enabled and ready before trusting the result. */
@@ -438,23 +659,15 @@ static int nvme_reinit(void) {
       __asm__ volatile("pause");
     }
     if (stable) {
-      /* M6/L69: NOTHING FILLED AROUND A RESET MAY STAY CACHED.  The aborted
-         transfer's frame is only the one we can see; a completion that QEMU
-         posted for a recycled request can also carry the OLD request's (empty)
-         data with status 0, and it is indistinguishable from a real one.  Drop
-         every cached unit after a reset (entries owned by a live fill are
-         skipped by the cache), so the next read of any page comes from the
-         repaired device.  One flush per reset — resets are 1-2 per run. */
-      uint64_t dropped = blk_cache_flush_all();
-      {
-        static int fl_rows;
-        if (fl_rows < 8) {
-          fl_rows++;
-          uart_puts("[BLKC] post-reset flush dropped=");
-          print_int((int)dropped);
-          uart_puts(" cached units\n");
-        }
-      }
+      uart_puts("[BLKQ] reinit ok resets=");
+      print_int((int)blk_resets);
+      uart_puts(" nsze=");
+      uart_print_hex(nvme_id.nsze);
+      uart_puts(" lbads=");
+      print_int((int)nvme_id.lbads);
+      uart_puts(" qd=");
+      print_int(NVME_IOQ_DEPTH);
+      uart_puts("\n");
       return 0;
     }
     uart_puts("[BLKQ] reset: settled out of ready (attempt ");
@@ -872,6 +1085,268 @@ int virtio_blk_health(void) {
   return (rc == 0) ? 1 : -1;
 }
 
+/* L75: every controller state change we can observe, logged.
+ *
+ * The task's instrument: CC, CSTS, INTMS/INTMC and the admin ring indices
+ * are sampled at the timer tick (100 Hz, CPU 0) and a row is printed for
+ * EVERY transition, so "the controller went away at t=NNN" is a timestamped
+ * event with the register values on both sides of it instead of a
+ * post-mortem inference.  Cheap: four MMIO reads per tick.
+ *
+ * A transition this log cannot explain (CC changing with no `[BLKQ]`
+ * controller reset and no blk_cc_zero increment) means something other than
+ * this driver wrote the register file -- which is exactly how the L65-L73
+ * resets happened (a page-cache frame aliasing the BAR). */
+static struct {
+  uint32_t cc, csts, intms, intmc;
+  uint16_t asq_tail, acq_head;
+} mmio_snap;
+static volatile uint32_t blk_mmio_changes;
+static volatile uint32_t blk_mmio_rows;
+
+void virtio_blk_watch_mmio(void) {
+  if (!nvme_regs)
+    return;
+  uint32_t cc = nvme_regs[5];
+  uint32_t csts = nvme_regs[7];
+  uint32_t intms = nvme_regs[3];
+  uint32_t intmc = nvme_regs[4];
+  uint16_t asqt = admin_sq_tail;
+  uint16_t acqh = admin_cq_head;
+  if (cc == mmio_snap.cc && csts == mmio_snap.csts &&
+      intms == mmio_snap.intms && intmc == mmio_snap.intmc &&
+      asqt == mmio_snap.asq_tail && acqh == mmio_snap.acq_head)
+    return;
+  blk_mmio_changes++;
+  if (blk_mmio_rows < 48 || (blk_mmio_changes & 0x3F) == 0) {
+    blk_mmio_rows++;
+    uart_puts("[BLKQ] mmio cc=");
+    uart_print_hex(cc);
+    uart_puts(" csts=");
+    uart_print_hex(csts);
+    uart_puts(" intms=");
+    uart_print_hex(intms);
+    uart_puts(" intmc=");
+    uart_print_hex(intmc);
+    uart_puts(" asqt=");
+    print_int((int)asqt);
+    uart_puts(" acqh=");
+    print_int((int)acqh);
+    uart_puts(" was_cc=");
+    uart_print_hex(mmio_snap.cc);
+    uart_puts(" was_csts=");
+    uart_print_hex(mmio_snap.csts);
+    uart_puts(" n=");
+    print_int((int)blk_mmio_changes);
+    uart_puts(" cpu=");
+    print_int((int)get_cpuid());
+    uart_puts(" ms=");
+    print_int((int)timer_get_ms());
+    uart_puts("\n");
+  }
+  mmio_snap.cc = cc;
+  mmio_snap.csts = csts;
+  mmio_snap.intms = intms;
+  mmio_snap.intmc = intmc;
+  mmio_snap.asq_tail = asqt;
+  mmio_snap.acq_head = acqh;
+}
+
+/* L75: the data-path proof across a full re-initialisation.
+ *
+ * Reads one fixed, never-written 512 KiB region of the namespace twice
+ * through the block cache and twice raw, in between forcing the FULL
+ * re-initialisation (CAP/VS re-read, CC reprogram, queues recreated,
+ * namespace revalidated) and the post-reset cache flush.  The four sums must
+ * be identical: a cache frame filled across the reset would show up as
+ * sum_c2 != sum_c1, an aborted DMA as sum_r2 != sum_r1, and a stale queue
+ * would make the second raw read fail outright.
+ *
+ * Runs once per boot, 4 minutes in (well into the game's load), from the 5 s
+ * sampler thread -- never from a fault path, and only with the request token
+ * held across the re-initialisation itself.
+ */
+static uint64_t selfcheck_sum_raw(uint64_t lba, int nsec) {
+  uint8_t buf[4096];
+  uint64_t h = 0xcbf29ce484222325ULL;
+  for (int i = 0; i < nsec; i += 8) {
+    int n = (nsec - i < 8) ? (nsec - i) : 8;
+    if (virtio_blk_read_raw(lba + i, buf, (uint32_t)n) != 0)
+      return 0;
+    for (int k = 0; k < n * 512; k++) {
+      h ^= buf[k];
+      h *= 0x100000001b3ULL;
+    }
+  }
+  return h;
+}
+
+static uint64_t selfcheck_sum_cache(uint64_t lba, int nsec) {
+  uint8_t buf[4096];
+  uint64_t h = 0xcbf29ce484222325ULL;
+  for (int i = 0; i < nsec; i += 8) {
+    int n = (nsec - i < 8) ? (nsec - i) : 8;
+    if (blk_cache_read(lba + i, buf, (uint32_t)n) != 0)
+      return 0;
+    for (int k = 0; k < n * 512; k++) {
+      h ^= buf[k];
+      h *= 0x100000001b3ULL;
+    }
+  }
+  return h;
+}
+
+void virtio_blk_selfcheck(void) {
+  static int done;
+  if (done || !nvme_regs || !nvme_id.valid)
+    return;
+  if (timer_get_ms() < 240000)
+    return;
+  done = 1;
+  uint64_t lba = (nvme_id.nsze > 32768) ? nvme_id.nsze - 8192 : 0;
+  int nsec = 1024;
+  uint64_t c1 = selfcheck_sum_cache(lba, nsec);
+  uint64_t r1 = selfcheck_sum_raw(lba, nsec);
+  int rr;
+  uint64_t t0 = timer_get_ms();
+  blk_token_acquire();
+  rr = nvme_reinit();
+  blk_token_release();
+  uint64_t ms = timer_get_ms() - t0;
+  uint64_t c2 = selfcheck_sum_cache(lba, nsec);
+  uint64_t r2 = selfcheck_sum_raw(lba, nsec);
+  uart_puts("[BLKQ] selfcheck lba=");
+  uart_print_hex(lba);
+  uart_puts(" n=");
+  print_int(nsec);
+  uart_puts(" cache1=");
+  uart_print_hex(c1);
+  uart_puts(" cache2=");
+  uart_print_hex(c2);
+  uart_puts(" raw1=");
+  uart_print_hex(r1);
+  uart_puts(" raw2=");
+  uart_print_hex(r2);
+  uart_puts(" reinit_rc=");
+  print_int(rr);
+  uart_puts(" ms=");
+  print_int((int)ms);
+  uart_puts(" match=");
+  print_int((c1 == c2 && r1 == r2 && r1 != 0) ? 1 : 0);
+  uart_puts("\n");
+}
+
+/* L75: the block-stress probe (RW_BLK_STRESS=1).
+ *
+ * The task's "block-stress probe running alongside": random small reads over
+ * a fixed window of the namespace, plus write-verify cycles that read a
+ * sector, write the SAME bytes back and check they land -- a real write to
+ * the device (which is what exercises queue/completion/cache coherence) that
+ * cannot corrupt anything, because it restores what it read.  Driven from the
+ * 5 s sampler, so it needs no second process and cannot touch the desktop's
+ * window-protocol pipes.
+ *
+ * The read window is the free tail of the image (the FAT's allocator grows
+ * from the first free cluster, so the last 4 MiB stays untouched); a large
+ * read of the same sectors through the cache path is the cache's coherence
+ * check. */
+#ifdef RW_BLK_STRESS
+static uint32_t stress_seed = 0x9E3779B9u;
+static volatile uint32_t stress_reads, stress_writes, stress_bad,
+    stress_mismatch, stress_rows;
+
+static uint32_t stress_rnd(void) {
+  stress_seed = stress_seed * 1664525u + 1013904223u;
+  return stress_seed >> 8;
+}
+
+static void stress_write_verify(uint64_t lba) {
+  uint8_t a[512], b[512];
+  if (virtio_blk_read_raw(lba, a, 1) != 0) { stress_bad++; return; }
+  if (virtio_blk_write_raw(lba, a, 1) != 0) { stress_bad++; return; }
+  if (virtio_blk_read_raw(lba, b, 1) != 0) { stress_bad++; return; }
+  for (int k = 0; k < 512; k++) {
+    if (a[k] != b[k]) { stress_mismatch++; return; }
+  }
+  stress_writes++;
+}
+
+static void virtio_blk_stress_round(void) {
+  uint8_t buf[4096];
+  if (!nvme_regs || !nvme_id.valid)
+    return;
+  uint64_t tail = (nvme_id.nsze > 65536) ? nvme_id.nsze - 16384 : 0;
+  if (!tail)
+    return;
+  for (int i = 0; i < 24; i++) {
+    uint64_t lba = tail + (stress_rnd() % 8192);
+    uint32_t nsec = 1u << (stress_rnd() % 4); /* 1..8 sectors: 512..4096 B */
+    if (nsec > 8) nsec = 8;
+    if (lba + nsec > nvme_id.nsze) continue;
+    if (virtio_blk_read_raw(lba, buf, nsec) != 0)
+      stress_bad++;
+    else
+      stress_reads++;
+  }
+  for (int i = 0; i < 3; i++)
+    stress_write_verify(tail + (stress_rnd() % 8192));
+  /* One row a minute: the probe's own counters, so a run can show that the
+     load was actually applied for the whole window. */
+  {
+    static uint64_t last_row;
+    uint64_t now = timer_get_ms();
+    if (now - last_row >= 60000) {
+      last_row = now;
+      stress_rows++;
+      uart_puts("[BKS] stress reads=");
+      print_int((int)stress_reads);
+      uart_puts(" write_verify=");
+      print_int((int)stress_writes);
+      uart_puts(" bad=");
+      print_int((int)stress_bad);
+      uart_puts(" mismatch=");
+      print_int((int)stress_mismatch);
+      uart_puts(" ms=");
+      print_int((int)now);
+      uart_puts("\n");
+    }
+  }
+}
+/* The probe must NOT run in the 5 s census: that context is entered from the
+ * scheduler with its own locks held, and blocking on the device token there
+ * wedged the console at t=65 s (measured: the serial log simply stops in the
+ * middle of the game's page publishing).  A kernel thread of its own is the
+ * same context every user I/O runs in. */
+static void blk_stress_thread(void *arg) {
+  (void)arg;
+  /* Let the boot settle, then one round a second. */
+  {
+    uint64_t t0 = timer_get_ms();
+    while (timer_get_ms() - t0 < 60000)
+      safe_wfi();
+  }
+  for (;;) {
+    virtio_blk_stress_round();
+    {
+      uint64_t t0 = timer_get_ms();
+      while (timer_get_ms() - t0 < 1000)
+        safe_wfi();
+    }
+  }
+}
+
+void virtio_blk_stress_start(void) {
+  extern int process_create_kernel(void (*entry)(void *), void *arg);
+  process_create_kernel(blk_stress_thread, 0);
+}
+#else
+void virtio_blk_stress_tick(void) {
+}
+
+void virtio_blk_stress_start(void) {
+}
+#endif
+
 /* L67: the 5 s controller-state row (see the header).  Reads only. */
 void virtio_blk_diag_row(void) {
   if (!nvme_regs)
@@ -905,6 +1380,18 @@ void virtio_blk_diag_row(void) {
   print_int((int)blk_prerepair);
   uart_puts(" recover_us=");
   print_int((int)blk_recover_us);
+  /* L75: the frame pool's own state, on the same 5 s timeline as the device.
+     used= crossing 327680 frames was when the old pool reached the PCI hole
+     (0x80000000); hole= must stay 0 and mmio= counts state changes the
+     driver did not make. */
+  uart_puts(" fr_used=");
+  print_int(frame_used_count());
+  uart_puts(" fr_high=");
+  print_int(frame_high_water());
+  uart_puts(" hole=");
+  print_int(frame_hole_allocs());
+  uart_puts(" mmio=");
+  print_int((int)blk_mmio_changes);
   uart_puts("\n");
 }
 
@@ -982,6 +1469,72 @@ int virtio_blk_init(void) {
   uart_print_hex((uint64_t)nvme_regs);
   uart_puts(")\n");
 
+  /* L75: the 2 MiB window at VA 0x1FC000000 shadows the identity mapping of
+     the same physical 2 MiB, so a frame allocated there would BE this
+     device.  Reserve the shadow range in the frame pool, and say out loud
+     whether the pool's own extent still covers the BAR (it must not: that is
+     the L65-L73 bug, where a page-cache frame was the controller's register
+     file). */
+  {
+    extern void frame_reserve_range(uint64_t lo, uint64_t hi);
+    extern int frame_hole_allocs(void);
+    uint64_t win = nvme_regs_phys & 0xFFFFFFFFFFE00000ULL;
+    frame_reserve_range(0x1FC000000ULL, 0x1FE000000ULL);
+    uart_puts("[BLKQ] mmio win=");
+    uart_print_hex(win);
+    uart_puts("-");
+    uart_print_hex(win + 0x200000);
+    uart_puts(" bar_in_pool=");
+    /* A BAR inside the frame pool is the whole bug; the extents put the pool
+       at 0x20000000-0x70000000 and 0x100000000-0x200000000 with the MMIO
+       shadow reserved, so this must read 0. */
+    print_int((win >= FRAME_EXT0_BASE && win < FRAME_EXT0_TOP) ||
+              (win >= FRAME_EXT1_BASE && win < FRAME_EXT1_TOP) ? 1 : 0);
+    /* And the physical page really is the controller: read CAP through the
+       identity map of the window's own physical address and compare with the
+       register file.  Equal means "this RAM frame would have been the NVMe
+       BAR", which is what the old pool (extent 1 = 0x80000000..) handed out. */
+    uart_puts(" alias_read=");
+    uart_print_hex(*(volatile uint32_t *)win);
+    uart_puts(" cap=");
+    uart_print_hex(nvme_regs[0]);
+    uart_puts(" hole_allocs=");
+    print_int(frame_hole_allocs());
+    uart_puts("\n");
+  }
+
+#ifdef RW_ALIAS_PROBE
+  /* L75 diagnostic (never in a shipped build): if the frame pool still
+     covers the BAR's physical page, a plain 4 KiB memory write into the
+     frame the allocator would hand out IS a write to AQA/ASQ/ACQ/CC.  This
+     is the direct reproducer for the L65-L73 resets: no MMIO instruction,
+     just a page write. */
+  {
+    uint64_t awin = nvme_regs_phys & 0xFFFFFFFFFFE00000ULL;
+    uart_puts("[BLKQ] alias-probe pa=");
+    uart_print_hex(awin);
+    uart_puts(" cc_before=");
+    uart_print_hex(nvme_regs[5]);
+    uart_puts(" csts_before=");
+    uart_print_hex(nvme_regs[7]);
+    uart_puts("\n");
+    /* 32-bit stores, exactly what a page-cache memcpy ends up doing. */
+    for (int i = 0; i < 1024; i++)
+      ((volatile uint32_t *)awin)[i] = 0;
+    uart_puts("[BLKQ] alias-probe wrote 4 KiB of zeros (32-bit stores) through the pool frame; cc_after=");
+    uart_print_hex(nvme_regs[5]);
+    uart_puts(" csts_after=");
+    uart_print_hex(nvme_regs[7]);
+    uart_puts(" pa_cc_read=");
+    uart_print_hex(*(volatile uint32_t *)(awin + 0x14));
+    uart_puts(" pa_cap_read=");
+    uart_print_hex(*(volatile uint32_t *)awin);
+    uart_puts(" bar_cc_read=");
+    uart_print_hex(nvme_regs[0]);
+    uart_puts("\n");
+  }
+#endif
+
   // Reset/Disable Controller
   nvme_regs[5] = 0; // CC = 0 (disables controller)
   uart_puts("Resetting controller, waiting for CSTS.RDY = 0...\n");
@@ -1022,9 +1575,18 @@ int virtio_blk_init(void) {
   nvme_regs[13] = (uint32_t)(admin_cq_phys >> 32);
   (void)nvme_regs[13]; // Flush write
 
-  // Configure CC: IOSQES=6 (64 bytes), IOCQES=4 (16 bytes), MPS=0, AMS=0, CSS=0, EN=1
-  nvme_regs[5] = 0x00460001;
-  (void)nvme_regs[5]; // Flush write
+  // Configure CC: EN=1, CSS=0 (NVM), MPS=CAP.MPSMIN, AMS=0,
+  // IOSQES=6 (64-byte commands, bits 19:16), IOCQES=4 (16-byte
+  // completions, bits 23:20).  L75: the fields are derived from CAP here and
+  // re-derived by nvme_admin_enable() on every re-initialisation, so the boot
+  // path and the recovery path cannot encode them differently.
+  nvme_read_cap();
+  {
+    uint32_t cc_boot = 1u | ((nvme_id.mpsmin & 0x7) << 7) |
+                       (6u << 16) | (4u << 20);
+    nvme_regs[5] = cc_boot;
+    (void)nvme_regs[5]; // Flush write
+  }
 
   // Wait for CSTS.RDY = 1
   uart_puts("Enabling controller... CC=");
@@ -1090,7 +1652,16 @@ int virtio_blk_init(void) {
   uart_puts("\n");
   if (qcreat != 0) return -1;
 
+  /* L75: the namespace geometry is the controller's answer, not a constant.
+     Record it once at boot (and again on every re-initialisation) so a read
+     past the end of the namespace is a driver bug, not a device surprise. */
+  if (nvme_ns_validate(1) != 0) {
+    uart_puts("NVMe namespace validation failed!\n");
+    return -1;
+  }
+
   uart_puts("NVMe driver initialized successfully!\n");
+  virtio_blk_stress_start();
   return 0;
 }
 
@@ -1283,6 +1854,17 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
  * cache's publish gate) links on every architecture. */
 volatile uint64_t blk_dev_epoch = 1;
 volatile uint32_t blk_untrusted;
+
+/* L75: the MMIO state-change watcher and the re-init self-check are x86-only
+ * (there is no NVMe controller here). */
+void virtio_blk_watch_mmio(void) {
+}
+
+void virtio_blk_selfcheck(void) {
+}
+
+void virtio_blk_stress_tick(void) {
+}
 
 #ifdef KERNEL_MODE_UNIT_TEST
 void virtio_blk_test_abort(int mode, uint64_t sector, int times) {

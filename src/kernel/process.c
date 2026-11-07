@@ -3633,6 +3633,11 @@ void rw_thr_sample(void) {
   /* L67: one device-state row per sample (not per process), so the block
      layer's state has the same 5 s timeline as the process census. */
   virtio_blk_diag_row();
+  /* L75: one forced full re-initialisation per boot with the four-sum
+     checksum around it (no-op after the first successful one). */
+  virtio_blk_selfcheck();
+  /* L75: the block-stress probe runs in its own kernel thread (see
+     virtio_blk_stress_start), never from this census. */
 }
 
 void process_signal_trap_exit(struct trap_frame *tf) {

@@ -109,6 +109,16 @@ if [ ! -f "$DLIB/Scrt1.o" ]; then
   dpkg-deb -x "$T/libc6-dev.deb" "$D"
 fi
 
+# L75: the kernel-side block-stress probe must be in the kernel the harness
+# *builds* (the build block below produces the ELF that is staged into the
+# image), so the flag is exported and the two objects that read it are touched
+# before that build -- make cannot see a CFLAGS change by itself.
+if [ "${RW_CHURN_SOAK:-0}" = 1 ]; then
+  export RW_BLK_STRESS=1
+  touch src/kernel/virtio_blk.c src/kernel/process.c
+  echo "== block-stress probe: kernel-side (RW_BLK_STRESS=1)"
+fi
+
 if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
   echo "== build: kernel + disk (MODE=desktop DESKTOP=hobby)"
   TOOLS_SKIP=1 make -j8 ARCH=intel MODE=desktop DESKTOP=hobby hobbyos.elf disk.img \
@@ -419,6 +429,16 @@ stage "$OUT/glmode" ::/GLMODE
 printf '%s\n' "${RW_GLDMG:-1}" >"$OUT/gldmg"
 stage "$OUT/gldmg" ::/GLDMG
 echo "  staged: /GLMODE -> ${RW_GLMODE:-softpipe}, /GLDMG -> ${RW_GLDMG:-1}"
+# L75: the block-stress probe ("2 x 1800 s with the probe running alongside").
+# RW_CHURN_SOAK=1 compiles the KERNEL-side stressor (RW_BLK_STRESS=1): random
+# 512..4096-byte reads over a fixed file region plus small writes to a scratch
+# LBA window, driven from the 5 s sampler, so it runs next to the game for the
+# whole window through the same driver and cache.  Kernel-side on purpose: a
+# second user process would have to share the desktop window-protocol pipes,
+# and that starves the game's own first window request (measured).
+if [ "${RW_CHURN_SOAK:-0}" = 1 ]; then
+  echo "  block-stress probe: kernel-side (RW_BLK_STRESS=1)"
+fi
 # No WAVE.CFG: MODE=desktop has no boot-wave loader (KERNEL_MODE_TEST only),
 # and the game must be started from the desktop so it inherits the window
 # protocol pipes.
@@ -456,8 +476,10 @@ mcopy -o -i "$IMG" "$OUT/hobbyos.boot.elf" ::/boot/hobbyos.elf
 echo "== kernel: staged $(stat -c %s "$OUT/hobbyos.boot.elf") bytes as ::/boot/hobbyos.elf"
 echo "== boot: MODE=desktop DESKTOP=hobby (deadline ${TIMEOUT_S}s, log $LOG)"
 : >"$LOG"
+MAKEEXTRA=""
+
 ( make -o disk.img ARCH=intel MODE=desktop DESKTOP=hobby EDK2_X86_64="$OVMF" \
-       $GLVARS run QEMU_ARGS="$DISPARGS -enable-kvm -qmp unix:$QMP,server,nowait ${RW_QEMU_EXTRA:-}" \
+       $GLVARS $MAKEEXTRA run QEMU_ARGS="$DISPARGS -enable-kvm -qmp unix:$QMP,server,nowait ${RW_QEMU_EXTRA:-}" \
        >>"$LOG" 2>&1 & )
 
 RC=1

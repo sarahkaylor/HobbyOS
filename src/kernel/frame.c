@@ -5,20 +5,29 @@
 
 extern void uart_puts(const char *s);
 extern void print_int(int val);
+extern void uart_print_hex(uint64_t v);
 
 /* Pool extents, per arch (design section 2.1).  The bitmap lays the
-   extents end to end: frame index 0 is the first frame of extent 0. */
+   extents end to end: frame index 0 is the first frame of extent 0.
+
+   L75: THE POOL MUST BE RAM AND ONLY RAM.  The x64 extents used to be
+   [0x80000000, 0x180000000), i.e. they started at 2 GiB -- which on this
+   machine (`-M q35 -m 12288M`) is the base of the 32-bit PCI MMIO hole, not
+   RAM.  QEMU's memory map is 0x100000-0x7FFFFFFF (RAM) then
+   0x100000000-0x37FFFFFFF (RAM), so [0x80000000, 0x100000000) is MMIO -- and
+   the NVMe BAR (BAR0) is placed at its base.  The allocator's forward walk
+   therefore handed out frames that are the controller's register file:
+   a page-cache fill that memcpy'd a 4 KiB file page into such a frame wrote
+   the page straight into AQA/ASQ/ACQ/CC (resetting the controller) and read
+   back register state instead of file bytes (the "zero"/"torn" pages of
+   L65-L73).  Extent 1 is now 4-8 GiB, all of it RAM and all of it
+   identity-mapped by PD4..PD7.  frame_init() proves each extent with a
+   write/read-back probe and refuses an extent that is not RAM. */
 #ifdef __x86_64__
-#define FRAME_EXT0_BASE 0x20000000ULL
-#define FRAME_EXT0_TOP  0x70000000ULL
-#define FRAME_EXT1_BASE 0x80000000ULL
-#define FRAME_EXT1_TOP  0x180000000ULL
 #define FRAME_EXT0_FRAMES ((FRAME_EXT0_TOP - FRAME_EXT0_BASE) / FRAME_SIZE)
 #define FRAME_TOTAL_FRAMES \
   ((FRAME_EXT0_FRAMES) + (FRAME_EXT1_TOP - FRAME_EXT1_BASE) / FRAME_SIZE)
 #else
-#define FRAME_EXT0_BASE 0x70000000ULL
-#define FRAME_EXT0_TOP  0x240000000ULL
 #define FRAME_EXT0_FRAMES ((FRAME_EXT0_TOP - FRAME_EXT0_BASE) / FRAME_SIZE)
 #define FRAME_TOTAL_FRAMES (FRAME_EXT0_FRAMES)
 #endif
@@ -34,6 +43,8 @@ static int frame_watch_hits;
 static uint32_t frame_hint; /* rotating alloc hint: word index */
 static int frame_used;      /* count of set bits */
 static int frame_high;      /* high-water mark of frame_used */
+static uint32_t frame_hole_allocs_n; /* L75: frames handed out in the PCI hole */
+int frame_ext1_is_ram;             /* L75: extent 1 passed the RAM probe */
 static int block_used;      /* blocks currently claimed as whole units */
 static spinlock_t frame_lock;
 
@@ -139,6 +150,48 @@ void frame_init(void) {
   frame_high = 0;
   block_used = 0;
 
+  /* L75: prove each extent is RAM before handing it out.  A frame must
+     accept a store and give it back; an MMIO hole answers with a device
+     register (or all-ones).  The old extent 1 base (0x80000000) is the NVMe
+     BAR on this machine, so this probe is also the tripwire that would have
+     named the L65-L73 block-layer bug at boot: it writes 8 bytes at 0x14 of
+     the frame -- the controller's CC register -- and reads back CAP/CC
+     instead of its own pattern.  It runs before anything is allocated, so it
+     marks no bits; on success the frame is simply left zeroed. */
+  {
+    extern uint64_t frame_ram_probe(uint64_t phys);
+    /* Three probes per extent (base / middle / last frame): a device scratch
+       register can echo one pattern, not three addresses across GiB. */
+    uint64_t e0_mid = (FRAME_EXT0_BASE + FRAME_EXT0_TOP) / 2;
+    int e0 = (int)(frame_ram_probe(FRAME_EXT0_BASE) &
+                   frame_ram_probe(e0_mid & ~0x1FFFFFULL) &
+                   frame_ram_probe(FRAME_EXT0_TOP - FRAME_SIZE));
+    uart_puts("[FRAME] ram ext0=");
+    print_int(e0);
+    if (!e0) {
+      uart_puts(" ext0=NOT-RAM -- reserved");
+      frame_reserve_range(FRAME_EXT0_BASE, FRAME_EXT0_TOP);
+    }
+#ifdef __x86_64__
+    uint64_t e1_mid = (FRAME_EXT1_BASE + FRAME_EXT1_TOP) / 2;
+    int e1 = (int)(frame_ram_probe(FRAME_EXT1_BASE) &
+                   frame_ram_probe(e1_mid & ~0x1FFFFFULL) &
+                   frame_ram_probe(FRAME_EXT1_TOP - FRAME_SIZE));
+    frame_ext1_is_ram = e1;
+    uart_puts(" ext1=");
+    print_int(e1);
+    /* Not RAM: refuse the whole extent rather than hand out device pages. */
+    if (!e1) {
+      uart_puts(" ext1=NOT-RAM(that is a device window, not memory) -- reserved");
+      frame_reserve_range(FRAME_EXT1_BASE, FRAME_EXT1_TOP);
+    }
+    /* The MMIO windows shadow the identity map of their own physical
+       2 MiB; a frame there would be the device.  Never hand those out. */
+    frame_reserve_range(FRAME_MMIO_SHADOW_LO, FRAME_MMIO_SHADOW_HI);
+#endif
+    uart_puts("\n");
+  }
+
   /* Keep the kernel image out of the pool: _start..__stack_top covers
      text/rodata/data/bss and the boot stacks; +64 KiB guard.  Without
      this the hint walk reaches the image after ~1.88M frames of churn
@@ -158,9 +211,40 @@ void frame_init(void) {
   print_int((int)FRAME_TOTAL_FRAMES);
   uart_puts(" total_mib=");
   print_int((int)((uint64_t)FRAME_TOTAL_FRAMES * FRAME_SIZE / 0x100000));
+  uart_puts(" ext0=0x");
+  uart_print_hex(FRAME_EXT0_BASE);
+  uart_puts("-0x");
+  uart_print_hex(FRAME_EXT0_TOP);
+#ifdef __x86_64__
+  uart_puts(" ext1=0x");
+  uart_print_hex(FRAME_EXT1_BASE);
+  uart_puts("-0x");
+  uart_print_hex(FRAME_EXT1_TOP);
+#endif
   uart_puts(" reserved=");
   print_int(frame_used);
   uart_puts("\n");
+}
+
+/* Write/read-back probe for one frame.  Returns 1 when the address behaves
+ * like RAM, 0 when it does not.  Leaves the frame zeroed and unallocated. */
+uint64_t frame_ram_probe(uint64_t phys) {
+  volatile uint64_t *p = (volatile uint64_t *)phys;
+  uint64_t a = 0x5A5A5A5A5A5A5A5AULL, b = 0xA5A5A5A5A5A5A5A5ULL;
+  int ok;
+  p[0] = a;
+  ok = (p[0] == a);
+  if (ok) {
+    p[0] = b;
+    ok = (p[0] == b);
+  }
+  if (ok) {
+    p[0] = 0;
+    ok = (p[0] == 0);
+  }
+  if (phys == FRAME_EXT1_BASE)
+    frame_ext1_is_ram = ok;
+  return ok ? 1 : 0;
 }
 
 uint64_t frame_alloc(void) {
@@ -188,6 +272,11 @@ uint64_t frame_alloc(void) {
         if (frame_used > frame_high)
           frame_high = frame_used;
         res = frame_phys_of((int)(w * 64 + (uint32_t)bit));
+        /* L75 tripwire: a frame outside RAM (the 32-bit PCI hole) would be
+           a device, not memory.  The extents make this impossible; counting
+           it means a future extent edit cannot do it silently. */
+        if (res >= 0x80000000ULL && res < 0x100000000ULL)
+          frame_hole_allocs_n++;
         break;
       }
     }
@@ -342,6 +431,27 @@ int frame_free_count(void) { return frame_total_count() - frame_used_count(); }
 int frame_high_water(void) {
   uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
   int h = frame_high;
+  spinlock_release_irqrestore(&frame_lock, flags);
+  return h;
+}
+
+/* L75: the pool's extents, for the invariant test (0 on success). */
+int frame_extent_bounds(int idx, uint64_t *lo, uint64_t *hi) {
+  if (!lo || !hi)
+    return -1;
+#ifdef __x86_64__
+  if (idx == 0) { *lo = FRAME_EXT0_BASE; *hi = FRAME_EXT0_TOP; return 0; }
+  if (idx == 1) { *lo = FRAME_EXT1_BASE; *hi = FRAME_EXT1_TOP; return 0; }
+#else
+  if (idx == 0) { *lo = FRAME_EXT0_BASE; *hi = FRAME_EXT0_TOP; return 0; }
+#endif
+  return -1;
+}
+
+/* L75: frames handed out outside RAM (must stay 0; see FRAME_EXT1_BASE). */
+int frame_hole_allocs(void) {
+  uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
+  int h = (int)frame_hole_allocs_n;
   spinlock_release_irqrestore(&frame_lock, flags);
   return h;
 }
