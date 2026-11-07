@@ -12,6 +12,7 @@
 #include "timer.h"
 #include "errno.h"
 #include "syscall.h"
+#include "virtio_blk.h"
 #include <stdint.h>
 
 /* --- debugcon (0xE9) parking diagnostic: IRQ-safe port writes only --- */
@@ -3629,6 +3630,9 @@ void rw_thr_sample(void) {
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
+  /* L67: one device-state row per sample (not per process), so the block
+     layer's state has the same 5 s timeline as the process census. */
+  virtio_blk_diag_row();
 }
 
 void process_signal_trap_exit(struct trap_frame *tf) {

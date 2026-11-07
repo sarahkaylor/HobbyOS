@@ -402,7 +402,7 @@ OVMF="$OUT/OVMF_CODE_4M.fd"
 echo "== boot: MODE=desktop DESKTOP=hobby (deadline ${TIMEOUT_S}s, log $LOG)"
 : >"$LOG"
 ( make -o disk.img ARCH=intel MODE=desktop DESKTOP=hobby EDK2_X86_64="$OVMF" \
-       run QEMU_ARGS="-display none -enable-kvm -qmp unix:$QMP,server,nowait" \
+       run QEMU_ARGS="-display none -enable-kvm -qmp unix:$QMP,server,nowait ${RW_QEMU_EXTRA:-}" \
        >>"$LOG" 2>&1 & )
 
 RC=1
