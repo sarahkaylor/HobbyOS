@@ -3878,6 +3878,14 @@ int linux_compat_sig_deliverable(struct process *p) {
 }
 void futex_trace_note(struct futex_ev *ev) { (void)ev; }
 
+/* linux_compat_proc.c:639 calls this unconditionally (l_proc_rt_sigreturn), so
+   the aarch64 kernel needs it to link: ARM has no Linux-ABI signal frames. */
+int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  return 0;
+}
+
 #ifdef KERNEL_MODE_UNIT_TEST
 /* The PI-futex suite drives x86-64 futex words (see unit_test.c guard). */
 int linux_compat_pi_test_acquire(uint32_t *word, uint32_t pid, int trylock) {
