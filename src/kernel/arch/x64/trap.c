@@ -4219,6 +4219,36 @@ struct badvec_eu_note {
 };
 static struct badvec_eu_note badvec_eu[MAX_CPUS];
 
+/* GB-146-A (bounce 2026-11-08T17:56Z): the entry stamp can only say "the
+   slot differs from entry"; it cannot name the writing instruction.  A
+   hardware write watchpoint on the vector slot can.  Armed in DR0 for frames
+   that live in USER address space (where the census frame is), it fires #DB on
+   the first write to that slot and the #DB frame's saved RIP names the
+   instruction after the write.  One shot per CPU: the #DB handler disarms. */
+static int badvec_watch_armed[MAX_CPUS];
+static uint64_t badvec_watch_slot[MAX_CPUS];
+
+static void badvec_watch_arm(uint64_t slot) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  __asm__ volatile("mov %0, %%dr0" ::"r"(slot));
+  __asm__ volatile("mov %0, %%dr6" ::"r"(0UL));
+  /* L0=1, RW0=01 (write), LEN0=10 (8 bytes) -- same encoding as rw_watch.c. */
+  __asm__ volatile("mov %0, %%dr7" ::"r"(0x00090001UL));
+  badvec_watch_armed[c] = 1;
+  badvec_watch_slot[c] = slot;
+}
+
+static void badvec_watch_disarm(void) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  __asm__ volatile("mov %0, %%dr7" ::"r"(0UL));
+  __asm__ volatile("mov %0, %%dr0" ::"r"(0UL));
+  badvec_watch_armed[c] = 0;
+}
+
 static int64_t badvec_pid(void) {
   extern struct process *current_process(void);
   struct process *p = current_process();
@@ -4260,6 +4290,11 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     badvec_at_entry[cpu].vector = tf->vector;
     badvec_at_entry[cpu].cs = tf->cs;
     badvec_at_entry[cpu].pid = badvec_pid();
+    /* GB-146-A: a frame in USER address space is the census case; watch its
+       vector slot for the first write and let #DB name the instruction. */
+    if (!badvec_watch_armed[cpu] && (uint64_t)tf >= 0x1000ULL &&
+        (uint64_t)tf < USER_VA_BASE)
+      badvec_watch_arm((uint64_t)&tf->vector);
   }
   /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
      (vectors 0-31 exceptions, 32-255 IRQ/syscall); a `vector` > 0xFF (measured:
@@ -4297,6 +4332,28 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       if (spinlock_release_if_held_by_me(&proc_lock))
         panic_puts("[KERNEL] released proc_lock before halting (GB-060)\n");
       while (1);
+    }
+  }
+  /* GB-146-A: our DR0 write watchpoint on a user-space frame's vector slot
+     fired.  Consume the #DB, name the instruction (saved RIP points just past
+     the write), and disarm; the handler returns into the interrupted path. */
+  if (tf->vector == 1) {
+    extern void panic_puts(const char *s);
+    extern void panic_print_hex(uint64_t v);
+    extern void print_int_raw(int val);
+    uint32_t wc = get_cpuid();
+    if (wc < MAX_CPUS && badvec_watch_armed[wc]) {
+      panic_puts("[BADVEC] writer rip_after=");
+      panic_print_hex(tf->elr);
+      panic_puts(" slot=");
+      panic_print_hex(badvec_watch_slot[wc]);
+      panic_puts(" pid=");
+      print_int_raw((int)badvec_pid());
+      panic_puts(" cpu=");
+      print_int_raw((int)wc);
+      panic_puts("\n");
+      badvec_watch_disarm();
+      return;
     }
   }
   gic_set_current_vector(cpu, tf->vector);
