@@ -289,6 +289,30 @@ char *strdup(const char *s) {
 #endif
 }
 
+/* POSIX strndup: strdup of at most n bytes, always NUL-terminated.  The
+ * declaration in include/string.h has been there since M4/L5, but the
+ * definition was missing, so the X build's os/ path failed to link with
+ * "undefined symbol: strndup". */
+char *strndup(const char *s, size_t n) {
+#ifdef HOST_TEST
+  extern void *malloc(unsigned long size);
+#endif
+  size_t len = 0;
+  char *copy;
+
+  if (s == 0)
+    return 0;
+  while (len < n && s[len])
+    len++;
+  copy = (char *)malloc(len + 1);
+  if (copy != 0) {
+    size_t i;
+    for (i = 0; i < len; i++) copy[i] = s[i];
+    copy[len] = '\0';
+  }
+  return copy;
+}
+
 /* Out-of-line helper so the HOST build can redirect malloc cleanly
  * (see the #ifdef in strdup). Never called on the bare-metal target. */
 #ifdef HOST_TEST
