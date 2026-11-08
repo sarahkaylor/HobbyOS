@@ -2,6 +2,11 @@
 #include <stdint.h>
 #include "arch/cpu.h"
 #include "process.h"
+#include "timer.h"
+
+/* proc_lock is the kernel's scheduler lock; the host locksteal test links this
+   file without process.c, where a weak reference resolves to 0 (GB-229). */
+extern spinlock_t proc_lock __attribute__((weak));
 
 /* Deadlock forensics: the last lock each core began spinning on, and who
    called it.  The stall watchdog in trap.c prints live entries when the
@@ -28,6 +33,32 @@ static volatile uint8_t held_lock_depth[MAX_CPUS];
 /* Coarse "what is this CPU doing" marker, for the same probe: 0 = normal,
  * 1 = inside the scheduler switch, 2 = parked in enter_user_space. */
 volatile uint8_t sched_stage[MAX_CPUS];
+
+/* GB-229: proc_lock acquire/release sequence per CPU.  Observation only; a
+   per-CPU counter written by the owning CPU needs no atomics. */
+static proclock_hold_t plh[MAX_CPUS];
+
+void proclock_hold_note(int op, uint64_t site) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  if (op == 1)
+    plh[c].acq++;
+  else if (op == 2)
+    plh[c].rel++;
+  else
+    return;
+  plh[c].last_op = op;
+  plh[c].site = site;
+  plh[c].last_ms = timer_get_ms();
+}
+
+int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out) {
+  if (cpu >= MAX_CPUS || !out)
+    return 0;
+  *out = plh[cpu];
+  return 1;
+}
 /* GB-060: a CPU that has taken a fatal fault and stopped.  Declared here (not in
    a header) to keep the mechanism reviewable in the two files that implement it:
    process.c records it at the halt, and this file reads it to decide whether a
@@ -342,6 +373,8 @@ void spinlock_acquire(spinlock_t *lock) {
      any use of the protected data, so a fatal path can ask "is this mine to
      give back?" without guessing. */
   lock->owner = get_cpuid() + 1;
+  if (lock == &proc_lock)
+    proclock_hold_note(1, (uint64_t)__builtin_return_address(0));
   /* GB-057: push onto this CPU's held-lock stack (observation only). */
   {
     uint32_t hcpu = get_cpuid();
@@ -414,6 +447,8 @@ void spinlock_release(spinlock_t *lock) {
      in the acquire loop -- see GB-057 there.) */
   lock->owner = 0;
   __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
+  if (lock == &proc_lock)
+    proclock_hold_note(2, (uint64_t)__builtin_return_address(0));
 }
 
 /* GB-060: release a lock ONLY if this CPU is recorded as its owner.
