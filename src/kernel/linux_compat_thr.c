@@ -136,6 +136,7 @@ struct l_thr_slot {
   uint32_t pi;              /* queued as a PI (LOCK_PI) waiter: hand off */
   uint32_t waits;           /* diagnostics: parks / wakes */
   uint32_t wakes;
+  uint32_t park_seq;        /* L87: [CWV] sequence of the last park */
 };
 
 static struct l_thr_slot l_thr[MAX_PROCESSES];
@@ -454,8 +455,20 @@ static void l_futex_near_miss(const struct futex_ev *w) {
   }
 }
 
+#ifdef RW_CWV
+void cwv_dump_locked(void); /* defined below; called at the end of the dump */
+#endif
+
 void futex_trace_dump_locked(void) {
   int used = 0, queued = 0;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (!l_thr[i].used)
+      continue;
+    used++;
+    if (l_thr[i].uaddr && l_thr[i].owner &&
+        l_thr[i].owner->state == PROC_STATE_FUTEX)
+      queued++;
+  }
   {
     struct kline kl;
     kl_init(&kl);
@@ -1004,7 +1017,211 @@ void futex_trace_dump_locked(void) {
     if (ev->op == FTR_WAKE && ev->woke == 0)
       l_futex_near_miss(ev);
   }
+#ifdef RW_CWV
+  cwv_dump_locked();
+#endif
 }
+
+#ifdef RW_CWV
+/* ---- L87: the per-key wait/wake ledger ([CWV]) --------------------------
+ *
+ * The [FUTEX] q row prints the WAITER's OWN counters, so a parked thread
+ * always reads waits=N wakes=N-1 -- true whether or not the wake it waits
+ * for ever arrives.  This ledger is keyed by (as,uaddr) and counts parks and
+ * dequeue events for the WORD.  It keeps the sequence number of the last
+ * park and of the last wake, plus the last few events of the key in a ring,
+ * so a stall answers the only question that separates the mechanisms:
+ *
+ *   lk < lw   no wake was issued after the last park -> the waker never ran
+ *             (it is itself parked: read the PARK rows)
+ *   lk > lw   a wake WAS issued after the last park  -> lost in the wake
+ *             path, or the thread was woken and re-parked (the ring shows
+ *             which, because it holds the intervening events)
+ *
+ * Sequence numbers are GLOBAL and monotonic, so an event on one key can be
+ * ordered against an event on another -- the handshake rotates across keys.
+ */
+#define CWV_KEYS 512
+#define CWV_RING 8
+struct cwv_ev {
+  unsigned seq;
+  int pid;             /* actor: parker for W, waker for K */
+  int woke;            /* K: waiters this wake dequeued */
+  unsigned char op;    /* 'W' park, 'K' wake */
+  uint32_t val;        /* W: expected word; K: word before the wake */
+};
+struct cwv_key {
+  struct addr_space *as;
+  uint64_t uaddr;
+  unsigned waits, wakes, parked;
+  unsigned lw, lk;     /* seq of last park / last wake */
+  int lwp, lkp;        /* pid of last parker / last waker */
+  unsigned ev_at;
+  struct cwv_ev ev[CWV_RING];
+};
+static struct cwv_key cwv_tab[CWV_KEYS];
+static unsigned cwv_seq;
+
+static struct cwv_key *cwv_key(struct addr_space *as, uint64_t uaddr,
+                               int create) {
+  struct cwv_key *spare = 0;
+  for (int i = 0; i < CWV_KEYS; i++) {
+    struct cwv_key *k = &cwv_tab[i];
+    if (k->uaddr && k->as == as && k->uaddr == uaddr)
+      return k;
+    if (!k->uaddr && !spare)
+      spare = k;
+  }
+  if (!create || !spare)
+    return 0;
+  spare->as = as;
+  spare->uaddr = uaddr;
+  return spare;
+}
+
+/* Returns the event's sequence number (0 when the key table is full). */
+static unsigned cwv_note(struct cwv_key *k, int op, int pid, uint32_t val,
+                         int woke) {
+  if (!k)
+    return 0;
+  unsigned s = ++cwv_seq;
+  struct cwv_ev *e = &k->ev[k->ev_at++ % CWV_RING];
+  e->seq = s;
+  e->pid = pid;
+  e->op = (unsigned char)op;
+  e->val = val;
+  e->woke = woke;
+  if (op == 'W') {
+    k->waits++;
+    k->parked++;
+    k->lw = s;
+    k->lwp = pid;
+  } else {
+    k->wakes += (unsigned)woke;
+    k->parked = (k->parked > (unsigned)woke) ? k->parked - (unsigned)woke : 0;
+    k->lk = s;
+    k->lkp = pid;
+  }
+  return s;
+}
+
+/* Called from futex_trace_dump_locked() with proc_lock held: first every key
+ * that still has a waiter (the deadlock set), then the most recently active
+ * keys (the trail that led there). */
+void cwv_dump_locked(void) {
+  struct kline kh;
+  kl_init(&kh);
+  kl_s(&kh, "[CWV] ledger seq=");
+  kl_i(&kh, (long)cwv_seq);
+  int nk = 0, np = 0;
+  for (int i = 0; i < CWV_KEYS; i++)
+    if (cwv_tab[i].uaddr) nk++;
+  for (int i = 1; i < MAX_PROCESSES; i++)
+    if (l_thr[i].park_seq) np++;
+  kl_s(&kh, " keys=");
+  kl_i(&kh, nk);
+  kl_s(&kh, " park_seq_live=");
+  kl_i(&kh, np);
+  kl_c(&kh, '\n');
+  kl_emit(&kh);
+
+  for (int pass = 0; pass < 2; pass++) {
+    int printed = 0;
+    unsigned last_recent = 0;
+    while (printed < (pass == 0 ? 24 : 10)) {
+      struct cwv_key *best = 0;
+      unsigned best_seq = 0;
+      for (int i = 0; i < CWV_KEYS; i++) {
+        struct cwv_key *k = &cwv_tab[i];
+        if (!k->uaddr)
+          continue;
+        if (pass == 0 ? k->parked == 0 : k->parked != 0)
+          continue;
+        unsigned s = (k->lw > k->lk) ? k->lw : k->lk;
+        if (s <= last_recent)
+          continue;
+        if (!best || s > best_seq) {
+          best = k;
+          best_seq = s;
+        }
+      }
+      if (!best)
+        break;
+      last_recent = best_seq;
+      printed++;
+      struct kline kk;
+      kl_init(&kk);
+      kl_s(&kk, "[CWV] KEY key=");
+      kl_hex(&kk, (unsigned long)best->uaddr);
+      kl_s(&kk, " w=");
+      kl_i(&kk, (long)best->waits);
+      kl_s(&kk, " k=");
+      kl_i(&kk, (long)best->wakes);
+      kl_s(&kk, " park=");
+      kl_i(&kk, (long)best->parked);
+      kl_s(&kk, " lw=");
+      kl_i(&kk, (long)best->lw);
+      kl_s(&kk, " lk=");
+      kl_i(&kk, (long)best->lk);
+      kl_s(&kk, " lwp=");
+      kl_i(&kk, best->lwp);
+      kl_s(&kk, " lkp=");
+      kl_i(&kk, best->lkp);
+      kl_s(&kk, " verdict=");
+      kl_s(&kk, best->parked ? (best->lk > best->lw ? "woke-after-park"
+                                                     : "NO-WAKE-AFTER-PARK")
+                             : "idle");
+      kl_c(&kk, '\n');
+      kl_emit(&kk);
+      unsigned n = best->ev_at < CWV_RING ? best->ev_at : CWV_RING;
+      for (unsigned j = 0; j < n; j++) {
+        const struct cwv_ev *e =
+            &best->ev[(best->ev_at - n + j) % CWV_RING];
+        struct kline ke;
+        kl_init(&ke);
+        kl_s(&ke, "[CWV] EV key=");
+        kl_hex(&ke, (unsigned long)best->uaddr);
+        kl_s(&ke, " seq=");
+        kl_i(&ke, (long)e->seq);
+        kl_s(&ke, e->op == 'W' ? " W pid=" : " K pid=");
+        kl_i(&ke, e->pid);
+        kl_s(&ke, " val=");
+        kl_hex(&ke, (unsigned long)e->val);
+        if (e->op == 'K') {
+          kl_s(&ke, " woke=");
+          kl_i(&ke, e->woke);
+        }
+        kl_c(&ke, '\n');
+        kl_emit(&ke);
+      }
+    }
+  }
+  /* Every thread still queued, with the sequence number of its last park. */
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (!l_thr[i].park_seq || !l_thr[i].owner)
+      continue;
+    struct process *p = l_thr[i].owner;
+    if (p->state != PROC_STATE_FUTEX)
+      continue;
+    struct kline kp;
+    kl_init(&kp);
+    kl_s(&kp, "[CWV] PARK pid=");
+    kl_i(&kp, p->pid);
+    kl_s(&kp, " key=");
+    kl_hex(&kp, (unsigned long)l_thr[i].uaddr);
+    kl_s(&kp, " seq=");
+    kl_i(&kp, (long)l_thr[i].park_seq);
+    kl_s(&kp, " waits=");
+    kl_i(&kp, (long)l_thr[i].waits);
+    kl_s(&kp, " wakes=");
+    kl_i(&kp, (long)l_thr[i].wakes);
+    kl_s(&kp, " ");
+    kl_s(&kp, p->name);
+    kl_c(&kp, '\n');
+    kl_emit(&kp);
+  }
+}
+#endif /* RW_CWV */
 
 /* Wake up to `val` waiters on (as,uaddr) whose bitset intersects `bitset`.
    Caller holds proc_lock.  Returns the number woken.  When `ev` is non-NULL
@@ -1814,6 +2031,12 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     l_thr[slot].uaddr = uaddr;
     l_thr[slot].bitset = bitset;
     l_thr[slot].waits++;
+#ifdef RW_CWV
+    {
+      struct cwv_key *ck = cwv_key(as, uaddr, 1);
+      l_thr[slot].park_seq = cwv_note(ck, 'W', p->pid, val, 0);
+    }
+#endif
     {
       /* The park itself: this row plus the absence of a later WAKE on the
          same key is the whole lost-wakeup diagnosis. */
@@ -1857,6 +2080,10 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
        vm lock, which must never nest inside the scheduler lock. */
     uint32_t fx_pre = futxw_word(p, uaddr);
 #endif
+#ifdef RW_CWV
+    uint32_t cwv_pre = 0;
+    l_copy_from_user(p, &cwv_pre, uaddr, 4);
+#endif
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     struct futex_ev ev = {0};
     ev.op = FTR_WAKE;
@@ -1866,6 +2093,12 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     int fx_parked = futxw_waiters(as, uaddr);
 #endif
     int woke = l_futex_wake_locked(as, uaddr, val, bitset, &ev);
+#ifdef RW_CWV
+    {
+      struct cwv_key *ck = cwv_key(as, uaddr, 1);
+      cwv_note(ck, 'K', p->pid, cwv_pre, woke);
+    }
+#endif
     spinlock_release_irqrestore(&proc_lock, flags);
     /* L52: do not leave the woken thread waiting for the next 100 Hz tick. */
     if (woke > 0)

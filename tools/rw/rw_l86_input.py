@@ -104,6 +104,24 @@ def norm(s):
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
+# ---------------------------------------------------------------- liveness
+def liveness_quiet(now, last_present_at, last_open_at):
+    """Seconds since the front end last showed progress.
+
+    L87: a frozen present counter is NOT a stall while the def loader is still
+    opening files.  The measured load has a 215 s window with no present at
+    all (L78 M2: n=280 at t=322 s, n=290 at t=537 s) while [XO] rows keep
+    arriving; the menu shows up at n~600 after ~650 s.  A present and a loader
+    open are both progress, so the quiet clock is the later of the two.
+    """
+    return now - max(last_present_at, last_open_at)
+
+
+def is_stalled(quiet_s, stall_s):
+    """True only after BOTH signals have been quiet for the whole budget."""
+    return quiet_s > stall_s
+
+
 def _box(ws):
     x0 = min(w["x"] for w in ws)
     y0 = min(w["y"] for w in ws)
@@ -595,12 +613,14 @@ class L86:
         still on its banner, and the modal turned up ~5 min later).  So the
         modal is handled here, in the loop that is already waiting."""
         if timeout is None:
-            timeout = int(os.environ.get("RW_L86_MENU_TIMEOUT", "900"))
+            timeout = int(os.environ.get("RW_L86_MENU_TIMEOUT", "1500"))
         end = time.time() + timeout
         png = None
         words = []
         dismissed = 0
         last_n, last_n_at = None, time.time()
+        last_opens, last_opens_at = None, time.time()
+        last_report = 0.0
         while time.time() < end:
             png = self.shot("menu_wait")
             words = self.ocr(png, tag="menu_wait")
@@ -618,21 +638,37 @@ class L86:
                     continue
             self.emit({"ev": "poll", "stage": "menu", "text": txt[:200],
                        "shot": os.path.basename(png) if png else None})
-            # A stalled guest: the present counter has not moved for 150 s and
-            # the kernel says no thread is runnable.  Report it and stop
-            # instead of burning the whole budget (this is a pre-existing
-            # intermittent def-load stall, not an input failure).
+            # L87: a boot is not "stalled" because presents stopped.  The
+            # measured front-end load has a 215 s window with no present at all
+            # (L78 M2: n=280 at t=322 s, n=290 at t=537 s) while the def loader
+            # is still opening files; the menu arrives at n~600 after ~650 s.
+            # The old 150 s present-only rule fired inside that window, returned
+            # control to the harness, and the harness killed QEMU -- which read
+            # as a guest freeze in L86.  Liveness is presents OR loader opens,
+            # and the quiet threshold is above the measured plateau.
             x = parse_xsw(self.serial())
             n = x["n"] if x else None
-            stall_s = int(os.environ.get("RW_L86_STALL_SECS", "150"))
+            opens = len(re.findall(r"^\[XO\] ", self.serial(), re.M))
+            now = time.time()
             if n is not None and n != last_n:
-                last_n, last_n_at = n, time.time()
-            elif n is not None and time.time() - last_n_at > stall_s:
+                last_n, last_n_at = n, now
+            if opens != last_opens:
+                last_opens, last_opens_at = opens, now
+            quiet = liveness_quiet(now, last_n_at, last_opens_at)
+            if now - last_report >= 60:
+                last_report = now
+                self.emit({"ev": "loading", "stage": "menu", "n": n,
+                           "opens": opens, "quiet": int(quiet)})
+                print("[L86] loading: n=%s opens=%d quiet=%ds"
+                      % (n, opens, int(quiet)), flush=True)
+            stall_s = int(os.environ.get("RW_L86_STALL_SECS", "900"))
+            if n is not None and is_stalled(quiet, stall_s):
                 self.emit({"ev": "stalled", "stage": "menu", "n": n,
-                           "note": "[XSW] n frozen for 150 s -- guest idle "
-                                   "stall, not an input failure"})
-                print("[L86] STALLED: [XSW] n=%s frozen for 150 s" % n,
-                      flush=True)
+                           "opens": opens, "quiet": int(quiet),
+                           "note": "no present and no loader open for %ds"
+                                   % int(quiet)})
+                print("[L86] STALLED: n=%s opens=%d quiet=%ds"
+                      % (n, opens, int(quiet)), flush=True)
                 return png, words, txt
             time.sleep(15)
         return png, words, self.text_of(words)

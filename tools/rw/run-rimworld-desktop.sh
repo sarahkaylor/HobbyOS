@@ -61,7 +61,13 @@ cd "$ROOT" || exit 2
 . "$ROOT/tools/rw/lane.sh"
 
 TIMEOUT_S=420        # boot deadline
-RUN_TIMEOUT_S=300    # time the game is allowed to run after launch
+# L87: the front end needs ~650 s of GAME time to reach the menu on this host
+# (L78 M2: menu at game t=548 s; L87 boot A: n=590 at ~650 s after launch),
+# including a measured 215 s window with NO present while the def loader is
+# still opening files.  A 900 s total window starts the kill during that
+# plateau and reads as a guest freeze (L86).  1800 s leaves the whole load plus
+# a comfortable margin; the driver also reports loader progress every 60 s.
+RUN_TIMEOUT_S=1800   # time the game is allowed to run after launch
 while [ $# -gt 0 ]; do
   case "$1" in
     --timeout) TIMEOUT_S="$2"; shift 2 ;;

@@ -619,6 +619,14 @@ endif
 ifneq ($(RW_FUTXW),)
   CFLAGS += -DRW_FUTXW=1
 endif
+# Diagnostic: the per-key wait/wake ledger ([CWV]) -- parks vs dequeue events
+# per (as,uaddr), last park/wake sequence numbers, and an 8-event ring per key,
+# printed at a stall.  Answers "was a wake issued after the last park, and did
+# it find the waiter", which the per-thread [FUTEX] q counters cannot.
+#     make RW_CWV=1 ... disk.img
+ifneq ($(RW_CWV),)
+  CFLAGS += -DRW_CWV=1
+endif
 # Diagnostic: one spurious futex wake on every queued waiter, every 8 s from
 # t=30 s (rule 24b).  If the game's stall is a lost wake, this un-sticks it and
 # the loader continues; if it is not, nothing changes.  Diagnostic only.
