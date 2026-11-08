@@ -4227,6 +4227,15 @@ static struct badvec_eu_note badvec_eu[MAX_CPUS];
    instruction after the write.  One shot per CPU: the #DB handler disarms. */
 static int badvec_watch_armed[MAX_CPUS];
 static uint64_t badvec_watch_slot[MAX_CPUS];
+static int badvec_writer_prints;
+
+/* Is this frame in the window the two census dumps used?  User stacks are at
+   0x25FFxxxx; the kernel image and its .bss live at 0x70000000+, which is also
+   below USER_VA_BASE (6 GiB), so the base alone is not a discriminator.  Only
+   arm/watch below the kernel image. */
+static int badvec_frame_window(uint64_t p) {
+  return p >= 0x1000ULL && p < 0x70000000ULL;
+}
 
 static void badvec_watch_arm(uint64_t slot) {
   uint32_t c = get_cpuid();
@@ -4290,10 +4299,11 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     badvec_at_entry[cpu].vector = tf->vector;
     badvec_at_entry[cpu].cs = tf->cs;
     badvec_at_entry[cpu].pid = badvec_pid();
-    /* GB-146-A: a frame in USER address space is the census case; watch its
-       vector slot for the first write and let #DB name the instruction. */
-    if (!badvec_watch_armed[cpu] && (uint64_t)tf >= 0x1000ULL &&
-        (uint64_t)tf < USER_VA_BASE)
+    /* GB-146-A: a frame below the kernel image is the census case; watch its
+       vector slot for the first write and let #DB name the instruction.  Cap
+       the number of records so a pathological re-arm cannot flood the sink. */
+    if (!badvec_watch_armed[cpu] && badvec_writer_prints < 8 &&
+        badvec_frame_window((uint64_t)tf))
       badvec_watch_arm((uint64_t)&tf->vector);
   }
   /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
@@ -4352,6 +4362,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       panic_puts(" cpu=");
       print_int_raw((int)wc);
       panic_puts("\n");
+      badvec_writer_prints++;
       badvec_watch_disarm();
       return;
     }
@@ -5048,7 +5059,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         struct badvec_stamp *st = 0;
         int st_cpu = -1;
         uint64_t tfu = (uint64_t)tf;
-        int frame_user = (tfu >= 0x1000ULL && tfu < USER_VA_BASE);
+        int frame_user = badvec_frame_window(tfu);
         for (uint32_t i = 0; i < MAX_CPUS; i++) {
           if (badvec_at_entry[i].frame == tfu) {
             st = &badvec_at_entry[i];
