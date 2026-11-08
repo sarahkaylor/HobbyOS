@@ -23,6 +23,7 @@ volatile uint64_t lock_wait_addr[MAX_CPUS];
 #define HELD_LOCK_SLOTS 8
 volatile uint64_t held_locks[MAX_CPUS][HELD_LOCK_SLOTS];
 volatile uint64_t held_lock_pc[MAX_CPUS][HELD_LOCK_SLOTS];
+volatile uint64_t held_lock_pc2[MAX_CPUS][HELD_LOCK_SLOTS];
 static volatile uint8_t held_lock_depth[MAX_CPUS];
 /* Coarse "what is this CPU doing" marker, for the same probe: 0 = normal,
  * 1 = inside the scheduler switch, 2 = parked in enter_user_space. */
@@ -114,6 +115,66 @@ int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms) {
 }
 volatile uint64_t lock_wait_caller[MAX_CPUS];
 volatile uint64_t lock_wait_caller2[MAX_CPUS];
+
+/* GB-146-B: the holder's acquisition site, read from the per-CPU held-lock
+   stack (observation only; a miss returns 0 rather than guessing). */
+static uint64_t lock_owner_site(uint32_t cpu, uint64_t lock_addr) {
+  if (cpu >= MAX_CPUS)
+    return 0;
+  uint32_t d = held_lock_depth[cpu];
+  for (uint32_t i = 0; i < d && i < HELD_LOCK_SLOTS; i++) {
+    if (held_locks[cpu][i] == lock_addr)
+      return held_lock_pc[cpu][i];
+  }
+  return 0;
+}
+
+static uint64_t lock_owner_site2(uint32_t cpu, uint64_t lock_addr) {
+  if (cpu >= MAX_CPUS)
+    return 0;
+  uint32_t d = held_lock_depth[cpu];
+  for (uint32_t i = 0; i < d && i < HELD_LOCK_SLOTS; i++) {
+    if (held_locks[cpu][i] == lock_addr)
+      return held_lock_pc2[cpu][i];
+  }
+  return 0;
+}
+
+/* GB-146-B: the last [STALLBREAK] row, captured at the break site so the
+   scheduler's end-of-wave [IDLESTUCK] dump can reprint it with the holder's
+   PID and acquisition site and the blocked transit, not just the lock word. */
+static volatile int last_sb_valid;
+static lockdiag_t last_sb;
+
+int lockdiag_snapshot(uint32_t cpu, lockdiag_t *out) {
+  if (!out || cpu >= MAX_CPUS)
+    return 0;
+  uint64_t la = lock_wait_addr[cpu];
+  if (!la)
+    return 0;
+  spinlock_t *l = (spinlock_t *)la;
+  uint32_t own = l->owner;
+  out->addr = la;
+  out->owner_cpu = (own >= 1 && own - 1 < MAX_CPUS) ? (int)(own - 1) : -1;
+  out->owner_site = out->owner_cpu >= 0 ? lock_owner_site((uint32_t)out->owner_cpu, la) : 0;
+  out->owner_site2 = out->owner_cpu >= 0 ? lock_owner_site2((uint32_t)out->owner_cpu, la) : 0;
+  out->wait_cpu = (int)cpu;
+  out->wait_stage = sched_stage[cpu];
+  out->wait_pc = lock_wait_caller[cpu];
+  out->wait_pc2 = lock_wait_caller2[cpu];
+  return 1;
+}
+
+int lockdiag_last_stallbreak(lockdiag_t *out) {
+  if (!out || !last_sb_valid)
+    return 0;
+  *out = last_sb;
+  return 1;
+}
+
+uint8_t lockdiag_stage(uint32_t cpu) {
+  return cpu < MAX_CPUS ? sched_stage[cpu] : 0;
+}
 
 /* Raw lock-free deadlock scream: a core spinning with IRQs disabled may be
    stuck because the lock's holder died mid-print, possibly while holding
@@ -245,6 +306,22 @@ void spinlock_acquire(spinlock_t *lock) {
           scream_hex(" lock=", (uint64_t)lock);
           scream_dec(" owner_cpu=", own - 1);
           scream_dec(" stale_ms=", age);
+          /* GB-146-B: name the holder's process and acquisition site, and the
+             blocked transit (this waiter's process and scheduler stage), not
+             just the CPU number.  All reads are of observation-only tables
+             that this path already owns; nothing here takes a lock. */
+          last_sb.addr = (uint64_t)lock;
+          last_sb.owner_cpu = (int)(own - 1);
+          last_sb.owner_site = lock_owner_site(own - 1, (uint64_t)lock);
+          last_sb.owner_site2 = lock_owner_site2(own - 1, (uint64_t)lock);
+          last_sb.wait_cpu = (int)cpu;
+          last_sb.wait_stage = sched_stage[cpu];
+          last_sb.wait_pc = (uint64_t)__builtin_return_address(0);
+          last_sb.wait_pc2 = (uint64_t)__builtin_return_address(1);
+          last_sb_valid = 1;
+          scream_hex(" owner_pc=", last_sb.owner_site);
+          scream_hex(" owner_pc2=", last_sb.owner_site2);
+          scream_dec(" waiter_stage=", last_sb.wait_stage);
           scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
           panic_putc('\n');
           lock_cnt_stallbreak++;
@@ -273,6 +350,7 @@ void spinlock_acquire(spinlock_t *lock) {
       if (d < HELD_LOCK_SLOTS) {
         held_locks[hcpu][d] = (uint64_t)lock;
         held_lock_pc[hcpu][d] = (uint64_t)__builtin_return_address(0);
+        held_lock_pc2[hcpu][d] = (uint64_t)__builtin_return_address(1);
         held_lock_depth[hcpu] = (uint8_t)(d + 1);
       }
     }
@@ -322,6 +400,7 @@ void spinlock_release(spinlock_t *lock) {
         if (held_locks[hcpu][d] == (uint64_t)lock) {
           held_locks[hcpu][d] = 0;
           held_lock_pc[hcpu][d] = 0;
+          held_lock_pc2[hcpu][d] = 0;
           held_lock_depth[hcpu] = (uint8_t)d;
           break;
         }
