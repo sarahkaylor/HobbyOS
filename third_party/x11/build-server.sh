@@ -146,7 +146,7 @@ _sv_xserver() {
   start="$(llvm-nm "$HB_BUILD/sym/XHOBBY.elf" | awk '$3=="_start" && !f{print "0x"$1; f=1}')"
   [ "$((base))" = "$((start))" ] || hb_die "$pkg: _start ($start) is not at the image base ($base)"
   printf '%s\n' "$key" > "$stamp"
-  hb_log "$pkg: ok ($out, $(stat -c %s "$out") bytes)"
+  hb_log "$pkg: ok ($out, $(hb_size_of "$out") bytes)"
 }
 
 # disk/X11/US.XKM: the evdev/pc105/us keymap compiled on the HOST (the
@@ -160,7 +160,7 @@ _sv_xkm() {
   mkdir -p "$HB_DISK_DIR/X11"
   hb_run xkm xkbcomp -xkm -w 0 -I"$xkbdir" "$HB_X11_DIR/ddx/keymap/us.xkb" "$out.tmp"
   mv "$out.tmp" "$out"
-  hb_log "xkm: $out ($(stat -c %s "$out") bytes)"
+  hb_log "xkm: $out ($(hb_size_of "$out") bytes)"
 }
 
 stage_server() {

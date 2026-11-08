@@ -30,7 +30,7 @@ stage_clients() {
       $("$PKG_CONFIG" --libs xft fontconfig x11)
 
     cp "$o/XFILES.BIN" "$HB_BIN_DIR/XFILES.BIN"
-    hb_log "clients: XFILES.BIN ($(stat -c %s "$HB_BIN_DIR/XFILES.BIN") bytes)"
+    hb_log "clients: XFILES.BIN ($(hb_size_of "$HB_BIN_DIR/XFILES.BIN") bytes)"
   else
     hb_log "xfiles: skipped (--only)"
   fi
@@ -52,7 +52,7 @@ stage_clients() {
       $("$PKG_CONFIG" --libs x11)
 
     cp "$o/XDEPTH8.BIN" "$HB_BIN_DIR/XDEPTH8.BIN"
-    hb_log "clients: XDEPTH8.BIN ($(stat -c %s "$HB_BIN_DIR/XDEPTH8.BIN") bytes)"
+    hb_log "clients: XDEPTH8.BIN ($(hb_size_of "$HB_BIN_DIR/XDEPTH8.BIN") bytes)"
   else
     hb_log "xdepth8: skipped (--only)"
   fi

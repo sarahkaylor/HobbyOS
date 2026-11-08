@@ -55,6 +55,36 @@ done
 unset _hb_llvm
 export PATH
 
+# macOS: the native (host) compiler is used for build-time generators
+# (freetype's build tools, libX11 makekeys, icewm's ...), and on macOS 27 the
+# default CLT SDK ships libSystem.B.tbd with `arm64e.x1-*` arch syntax the
+# installed clang cannot parse -- every native link then dies with
+# "ld: tapi error: malformed file ... unknown architecture", which autoconf
+# reports as the misleading "native C compiler is not working".  Probe once and
+# pin SDKROOT to the newest installed SDK that links (same self-heal as
+# third_party/icu-78.3/build-host.sh); no-op on hosts whose default links.
+if [ "$(uname -s)" = "Darwin" ] && [ -z "${SDKROOT:-}" ]; then
+  _hb_probe="$(mktemp "${TMPDIR:-/tmp}/hbx11-sdk-XXXXXX.c")"
+  printf 'int main(void){return 0;}\n' > "$_hb_probe"
+  if ! cc "$_hb_probe" -o "$_hb_probe.out" 2>/dev/null; then
+    for _hb_sdk_root in /Library/Developer/CommandLineTools/SDKs \
+                        /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs; do
+      [ -d "$_hb_sdk_root" ] || continue
+      for _hb_sdk in $(ls -1d "$_hb_sdk_root"/MacOSX*.sdk 2>/dev/null | sort -r); do
+        [ -L "$_hb_sdk" ] && continue
+        if SDKROOT="$_hb_sdk" cc "$_hb_probe" -o "$_hb_probe.out" 2>/dev/null; then
+          SDKROOT="$_hb_sdk"; export SDKROOT
+          echo "== x11 env: default macOS SDK unparseable by installed clang; using SDKROOT=$_hb_sdk ==" >&2
+          break 2
+        fi
+      done
+    done
+    [ -n "${SDKROOT:-}" ] || echo "== x11 env: WARNING no linkable macOS SDK found; host-tool stages will fail ==" >&2
+  fi
+  rm -f "$_hb_probe" "$_hb_probe.out"
+fi
+unset _hb_probe _hb_sdk _hb_sdk_root
+
 case "$HB_ARCH" in
   arm)   HB_TRIPLE=aarch64-none-elf; HB_CPU=aarch64
          HB_ARCH_CFLAGS="-mcpu=cortex-a53"; HB_ARCH_LDFLAGS="" ;;
