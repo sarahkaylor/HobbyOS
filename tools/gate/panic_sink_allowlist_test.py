@@ -32,22 +32,21 @@ SYMBOLS = re.compile(r"\b(panic_puts2?|panic_putc2?|panic_print_hex2?)\b")
 ALLOW = {
     # ---- the sink itself: definitions + the violation reporter ----
     "src/kernel/arch/x64/uart.c": (26, "definitions, panic_claim/enter/leave, violation + claim-loser + GB-204 suppressed reports + GB-209 COM2 record + one COM1 summary"),
-    "src/kernel/arch/arm/uart.c": (15, "arm definitions; arm has no COM2 violation channel"),
+    "src/kernel/arch/arm/uart.c": (16, "arm definitions; arm has no COM2 violation channel (15->16 in f89a8177: rsp=/live=/lr in the arm fault dump)"),
     "src/host/locksteal_test.c": (1, "host-test shim that stands in for the sink"),
 
     # ---- non-returning diagnostics: they end in halt/reboot by construction ----
-    "src/kernel/arch/x64/trap.c": (172, "fatal dump, stall watchdog, spinlock scream, KPFLOOP"),
+    "src/kernel/arch/x64/trap.c": (159, "fatal dump, stall watchdog, spinlock scream, KPFLOOP (172->159 in f89a8177: the x64 fault dump folded its per-field puts)"),
     "src/kernel/arch/x64/locks.c": (13, "spinlock scream paths: printed while the lock is wedged"),
     "src/kernel/arch/arm/locks.c": (36, "same, arm"),
 
     # ---- RETURNING paths: these are the GB-097 residue, not an endorsement ----
     "src/kernel/arch/x64/mmu.c": (7, "FREERACE diagnostic inside v2 free -- RETURNS (GB-097 residue)"),
-    "src/kernel/fs.c": (2, "fs diagnostic -- RETURNS (GB-097 residue)"),
-    "src/kernel/main.c": (11, "hex/decimal helpers -- RETURN (GB-097 residue)"),
+    "src/kernel/main.c": (9, "hex/decimal helpers -- RETURN (GB-097 residue; 11->9 in f89a8177)"),
     "src/kernel/process.c": (39, "resume-RETURNED / spawn diagnostics -- RETURN (GB-097 residue)"),
 }
 
-RESIDUE = {"src/kernel/arch/x64/mmu.c", "src/kernel/fs.c",
+RESIDUE = {"src/kernel/arch/x64/mmu.c",
            "src/kernel/main.c", "src/kernel/process.c"}
 
 
