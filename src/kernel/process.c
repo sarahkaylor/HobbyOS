@@ -5510,6 +5510,12 @@ void start_scheduler(void) {
           print_int((int)ph.last_ms);
           uart_puts(" site=");
           uart_print_hex(ph.site);
+          uart_puts(" rel_site=");
+          uart_print_hex(ph.rel_site);
+          uart_puts(" iretq_ms=");
+          print_int((int)ph.iretq_ms);
+          uart_puts(" locked_at_iretq=");
+          print_int(ph.locked_at_iretq);
           uart_puts("\n");
         }
       }
