@@ -617,6 +617,21 @@ def main():
                 grab("01_no_launch")
                 return 2
 
+    # L86: opt-in in-game input driver for the icewm/hosted path.  rw_flow.py
+    # is the DESKTOP.BIN driver (full-screen 1920x1080); the hosted window is a
+    # different frame of reference, so this one lives in rw_l86_input.py and is
+    # driven by RW_L86=1.  Default off: nothing else changes.
+    if os.environ.get("RW_L86", "0") == "1" and args.desktop == "icewm":
+        import rw_l86_input
+        rc = rw_l86_input.run(q, grab, args.log, args, shots)
+        grab("99_final")
+        text = read_log(args.log)
+        print("\n[drive] --- L86 input rows ---", flush=True)
+        for line in text.splitlines():
+            if line.startswith("[L86]") or "[HB] geometry" in line:
+                print("  " + line, flush=True)
+        return rc
+
     # L79/L81: a scripted front-end flow (wait for the menu, click New colony,
     # follow the screens) takes over from the plain screenshot loop.  It is a
     # DESKTOP.BIN-menu flow: icewm runs have no [MENU] dump to start from.
