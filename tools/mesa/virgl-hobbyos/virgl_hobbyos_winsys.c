@@ -1676,7 +1676,17 @@ virgl_hobbyos_winsys_create(void *display)
       else if (e && e[0] == '2')
          vhws->dmg_mode = 2;
       vhws->dmg_bands = 16;
-      vhws->dmg_resync = 64;
+      /* L82: 64 -> 256.  The resync is the safety net for a change smaller
+       * than a thumbnail cell; it costs one full-surface readback (8.3 MB,
+       * and a full present instead of an idle one).  Measured on the L80
+       * rows: 275 584 bytes/present of readback over a batch with 31/32 idle
+       * presents, i.e. ~0.03 ms/present of transfer at the winsys' own
+       * 0.25 ms/MiB -- the resync is not a term in the frame, and the
+       * dominant winsys cost is the thumbnail probe itself (see [VGLB]
+       * thumb_avg).  So this is a latency/correctness knob, not a perf one:
+       * 256 presents is 4.3 s at 60 fps and 4 min at 1 fps, and the primary
+       * detector still runs on every present. */
+      vhws->dmg_resync = 256;
       {
          const char *b = getenv("HOBBYOS_GL_BANDS");
          if (b && *b) {

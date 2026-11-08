@@ -735,7 +735,20 @@ static void l34_row(const char *tag, int a, int b, int c, int d2) {
  * and glFlush counters in through XcPresentMark -- see
  * tools/mesa/patches/0008-glx-present-mark.patch. */
 
+/* One [XSW] row per N presents.  L82 measured what N costs: the row goes to
+ * fd 2 (Player.log, a FAT file) and to /dev/console (a polled UART) inside the
+ * present it is measuring, and `row_us` in `[XSWB]` says what that is --
+ * 2.3 ms/present at N=10 on a quiet host, 20-50 ms/present when the game is
+ * logging heavily, and up to 1.6 s for a single row in the congested phase
+ * (measured: self_avg 163 750 us with flush_avg 0, i.e. all of it the row).
+ * `self_avg` includes this row (pres_row() runs before the batch's `now`), so
+ * a congested console inflates the very number that is supposed to describe
+ * the frame.  Raise this for a measurement run that does not need the CRC
+ * ladder (`-DPRES_ROW_EVERY=64`); the [XSWB]/[XSWL]/[VGLB] batch rows are
+ * unaffected either way. */
+#ifndef PRES_ROW_EVERY
 #define PRES_ROW_EVERY 10
+#endif
 
 static struct {
   unsigned long long swaps;     /* glXSwapBuffers calls (from libGL) */
@@ -766,6 +779,11 @@ static struct {
   /* L80: the 32-present batch the [XSWB] row reports. */
   unsigned long long b_n, b_dt, b_dt_max, b_self, b_self_max;
   unsigned long long b_put, b_flush, b_row_us;
+  /* L82: what the fb0 blit actually covered this batch.  `b_blit_px` is the
+   * sum of the blitted rects; divided by `b_n` it says whether the present
+   * path is copying the whole surface or only the damaged rect. */
+  unsigned long long b_blit_px, b_blit_n;
+  int last_blit[4];             /* x,y,w,h of the last fb0 blit */
   unsigned long long pumps;     /* event-pump iterations */
   unsigned long long wins;      /* XCreateWindow calls */
   unsigned long long maps;      /* XMapWindow calls (not repeats) */
@@ -791,39 +809,64 @@ static void prop_set_atoms(Display *d, Window w, Atom name,
 /* One pass: the checksum and the number of non-zero pixels.  A checksum answers
  * "did anything change"; this answers "is there anything there at all", which
  * is the question a 94%-black screenshot actually asks.  B8G8R8A8: a pixel is
- * counted when any of its four bytes is non-zero. */
+ * counted when any of its four bytes is non-zero, and the bounding box then
+ * says WHERE the visible pixels are (a splash logo is a small box, a black
+ * frame is no box at all).
+ *
+ * L82: SAMPLED, because the unsampled form was a term in the budget it
+ * reports.  Two passes over 7.8 MB (1 916x1 018) with a byte-at-a-time FNV and
+ * a per-pixel `%`/`/` cost 10-90 ms per call (measured: ~10 ms on a quiet
+ * guest, ~88 ms/frame-average-derived when the console and the host were
+ * busy), and the call happens on every row -- i.e. every 10th present -- so
+ * `self_avg` carried 6-7 ms of it (measured, runD: self_avg 5 812-7 343 us
+ * with flush_avg 0).  One row in XC_PRES_CRC_ROWS is now hashed, in the SAME
+ * pass as the visibility scan, and x/y are carried instead of divided.  At 8
+ * that is 1-11 ms per call and a change that touches any sampled row still
+ * flips `changed`.
+ *
+ * XC_PRES_CRC_ROWS=1 is the old full scan; =0 compiles the checksum out
+ * entirely (the row then prints crc=0 / nz=0/0 and changed=0 -- the other
+ * fields, which are counters, are unaffected). */
+#ifndef XC_PRES_CRC_ROWS
+#define XC_PRES_CRC_ROWS 8
+#endif
+
+#if XC_PRES_CRC_ROWS > 0
 static unsigned long long pres_fnv64_vis(const unsigned char *p,
                                          unsigned long w, unsigned long h,
                                          unsigned long *vis,
-                                         unsigned long *bbox) {
-  unsigned long npix = w * h;
+                                         unsigned long *bbox,
+                                         unsigned long *examined) {
+  const unsigned long step = XC_PRES_CRC_ROWS > 0 ? (unsigned long)XC_PRES_CRC_ROWS : 1;
   unsigned long long hh = 1469598103934665603ull;
   unsigned long c = 0;
   unsigned long x0 = 0xfffffffful, y0 = 0xfffffffful, x1 = 0, y1 = 0;
-  for (unsigned long i = 0; i < npix * 4ul; i++) {
-    hh ^= (unsigned long long)p[i];
-    hh *= 1099511628211ull;
-  }
-  /* B8G8R8A8: alpha is the 4th byte and is 0xFF for any opaque frame, so the
-   * "is there anything to see" test must look at B|G|R only.  The bounding
-   * box then says WHERE it is (a splash logo is a small box, a black frame is
-   * no box at all). */
-  for (unsigned long i = 0; i < npix; i++) {
-    const unsigned char *q = p + i * 4ul;
-    if (q[0] | q[1] | q[2]) {
-      unsigned long x = i % w, y = i / w;
-      c++;
-      if (x < x0) x0 = x;
-      if (y < y0) y0 = y;
-      if (x > x1) x1 = x;
-      if (y > y1) y1 = y;
+  unsigned long n = 0;
+  for (unsigned long y = 0; y < h; y += step) {
+    const unsigned char *row = p + y * w * 4ul;
+    for (unsigned long x = 0; x < w; x++) {
+      const unsigned char *q = row + x * 4ul;
+      hh ^= (unsigned long long)q[0]; hh *= 1099511628211ull;
+      hh ^= (unsigned long long)q[1]; hh *= 1099511628211ull;
+      hh ^= (unsigned long long)q[2]; hh *= 1099511628211ull;
+      hh ^= (unsigned long long)q[3]; hh *= 1099511628211ull;
+      if (q[0] | q[1] | q[2]) {
+        c++;
+        if (x < x0) x0 = x;
+        if (y < y0) y0 = y;
+        if (x > x1) x1 = x;
+        if (y > y1) y1 = y;
+      }
     }
+    n += w;
   }
   *vis = c;
+  *examined = n;
   bbox[0] = c ? x0 : 0; bbox[1] = c ? y0 : 0;
   bbox[2] = c ? x1 : 0; bbox[3] = c ? y1 : 0;
   return hh;
 }
+#endif /* XC_PRES_CRC_ROWS > 0 */
 
 static int ap_s(char *b, int j, const char *s) {
   while (*s) b[j++] = *s++;
@@ -929,6 +972,13 @@ static void shadow_blit(Display *d, int x, int y, int w, int h) {
   struct xc_rect sr = cr;
   if (!xc_content_to_screen(&content, &sr, d->fb_w, d->fb_h)) return;
   dbg("blit", sr.x, sr.y, sr.w, sr.h);
+  if (g_pres.prof == 1) {
+    /* L82: prove the fb0 blit is the damaged rect, not the content rect. */
+    g_pres.b_blit_px += (unsigned long long)sr.w * (unsigned long long)sr.h;
+    g_pres.b_blit_n++;
+    g_pres.last_blit[0] = sr.x; g_pres.last_blit[1] = sr.y;
+    g_pres.last_blit[2] = sr.w; g_pres.last_blit[3] = sr.h;
+  }
   unsigned char *dst = d->fb + (unsigned long)sr.y * d->fb_stride +
                        (unsigned long)sr.x * 4;
   const unsigned char *src = d->win.shadow +
@@ -3616,22 +3666,29 @@ XAPI int XcPresentMark(Display *dpy, unsigned long long swaps,
      * frame has been deferred (see XPutImage) and this checksum is the only
      * record of what Unity actually drew -- all-zero pixels hash to
      * 0x10cb11dbf9255803 at 1916x1018, so "draws black" and "draws something"
-     * are different numbers. */
-    unsigned long nz = 0;
+     * are different numbers.
+     *
+     * L82: sampled (one row in XC_PRES_CRC_ROWS) so the probe is not a term in
+     * its own budget; `nz`/`crc_tot` then describe the rows actually examined.
+     * The hash covers those rows only, so the absolute CRC values differ from
+     * an L78/L80 build's for the same frame -- `changed` still means "this row's
+     * sample differs from the previous row's sample". */
+    unsigned long nz = 0, examined = 0;
     g_pres.box[0] = g_pres.box[1] = g_pres.box[2] = g_pres.box[3] = 0;
+#if XC_PRES_CRC_ROWS > 0
     if (!d->win.content_ready && d->win.defer && d->win.defer_w > 0 &&
         d->win.defer_h > 0) {
       extern unsigned char g_defer_store[];
-      g_pres.crc_tot = (unsigned long)d->win.defer_w * (unsigned long)d->win.defer_h;
       crc = pres_fnv64_vis(g_defer_store, (unsigned long)d->win.defer_w,
-                           (unsigned long)d->win.defer_h, &nz, g_pres.box);
+                           (unsigned long)d->win.defer_h, &nz, g_pres.box,
+                           &examined);
     } else if (d->win.shadow && d->win.cw > 0 && d->win.ch > 0) {
-      g_pres.crc_tot = (unsigned long)d->win.cw * (unsigned long)d->win.ch;
       crc = pres_fnv64_vis(d->win.shadow, (unsigned long)d->win.cw,
-                           (unsigned long)d->win.ch, &nz, g_pres.box);
-    } else {
-      g_pres.crc_tot = 0;
+                           (unsigned long)d->win.ch, &nz, g_pres.box,
+                           &examined);
     }
+#endif
+    g_pres.crc_tot = examined;
     g_pres.crc_nz = nz;
     g_pres.changed = (g_pres.have_crc && crc != g_pres.crc) ? 1 : 0;
     g_pres.crc = crc;
@@ -3678,7 +3735,7 @@ XAPI int XcPresentMark(Display *dpy, unsigned long long swaps,
     if (g_pres.b_n < 32)
       return pushed;
     {
-      char b[256];
+      char b[384];
       int j = 0;
       unsigned long long n = g_pres.b_n;
       j = ap_s(b, j, "[XSWB] n=");        j = ap_d(b, j, g_pres.marks);
@@ -3690,6 +3747,15 @@ XAPI int XcPresentMark(Display *dpy, unsigned long long swaps,
       j = ap_s(b, j, " self_max=");       j = ap_d(b, j, g_pres.b_self_max);
       j = ap_s(b, j, " put_avg=");        j = ap_d(b, j, g_pres.b_put / n);
       j = ap_s(b, j, " flush_avg=");      j = ap_d(b, j, g_pres.b_flush / n);
+      /* L82: the fb0 blit, per present (pixels) and the last rect it covered.
+       * A full 1916x1018 content rect is 1 950 488 px; a damaged strip is not. */
+      j = ap_s(b, j, " blit_px=");        j = ap_d(b, j, g_pres.b_blit_px / n);
+      j = ap_s(b, j, " blit_n=");         j = ap_d(b, j, g_pres.b_blit_n);
+      j = ap_s(b, j, " blit=");
+      j = ap_i(b, j, g_pres.last_blit[2]); b[j++] = 'x';
+      j = ap_i(b, j, g_pres.last_blit[3]); b[j++] = '+';
+      j = ap_i(b, j, g_pres.last_blit[0]); b[j++] = '+';
+      j = ap_i(b, j, g_pres.last_blit[1]);
       j = ap_s(b, j, " row_us=");         j = ap_d(b, j, g_pres.b_row_us);
       j = ap_s(b, j, " w=");              j = ap_i(b, j, g_pres.last_w);
       j = ap_s(b, j, " h=");              j = ap_i(b, j, g_pres.last_h);
@@ -3713,6 +3779,7 @@ XAPI int XcPresentMark(Display *dpy, unsigned long long swaps,
       g_pres.b_n = 0;
       g_pres.b_dt = g_pres.b_self = g_pres.b_put = g_pres.b_flush = 0;
       g_pres.b_dt_max = g_pres.b_self_max = 0;
+      g_pres.b_blit_px = g_pres.b_blit_n = 0;
     }
   }
   return pushed;
