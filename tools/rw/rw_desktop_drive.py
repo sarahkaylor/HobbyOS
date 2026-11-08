@@ -65,8 +65,16 @@ class Qmp:
         self.cmd("send-key", {"keys": [{"type": "qcode", "data": qcode}]})
         time.sleep(pause)
 
-    def click(self, x, y, w, h):
-        """Absolute left click through QMP's input-send-event (PS/2/vmmouse)."""
+    def click(self, x, y, w, h, hold=0.12):
+        """Absolute left click through QMP's input-send-event (PS/2/vmmouse).
+
+        `hold` is how long the button stays down.  IMGUI buttons process a
+        queued press+release, so 0.12 s is enough for the front-end; the
+        world map polls Input.GetMouseButtonDown once per frame, and at the
+        0.7-1.0 fps this host measures a 0.12 s press falls between two
+        frames and is never seen (measured: a land-tile click changed 235 px
+        of highlight and selected nothing).  Site clicks hold for 2 s.
+        """
         ax = int(x * 32767 / max(1, w - 1))
         ay = int(y * 32767 / max(1, h - 1))
         self.cmd("input-send-event", {"events": [
@@ -75,7 +83,7 @@ class Qmp:
         time.sleep(0.15)
         self.cmd("input-send-event", {"events": [
             {"type": "btn", "data": {"down": True, "button": "left"}}]})
-        time.sleep(0.12)
+        time.sleep(hold)
         self.cmd("input-send-event", {"events": [
             {"type": "btn", "data": {"down": False, "button": "left"}}]})
 
