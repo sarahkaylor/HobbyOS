@@ -50,10 +50,14 @@ typedef struct {
   uint64_t rel;
   uint64_t last_ms;
   uint64_t site;
+  uint64_t rel_site;   /**< GB-230: return address of the last release, 0 = none */
+  uint64_t iretq_ms;   /**< GB-230: time of the last enter_user_space entry */
+  int locked_at_iretq; /**< GB-230: proc_lock.locked sampled there */
   int last_op; /**< 1 acquire, 2 release, 0 never */
 } proclock_hold_t;
 void proclock_hold_note(int op, uint64_t site);
 int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out);
+void proclock_iretq_note(void);
 
 /**
  * Initializes a spinlock to the unlocked state.
