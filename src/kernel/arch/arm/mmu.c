@@ -678,6 +678,17 @@ void vm_arch_switch(struct addr_space *as) {
   v2_live[cpu] = 1;
 }
 
+/* L85: which CPU still has `root_phys` loaded as its user translation (see
+   vm.h).  Same contract and same unlocked-read argument as the x64 copy. */
+int vm_arch_root_cpu(uint64_t root_phys) {
+  if (!root_phys)
+    return -1;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (v2_active_root[c] == root_phys)
+      return (int)c;
+  return -1;
+}
+
 /* P2.2 (S2): hand this CPU back to the kernel table.  Cheap no-op when
    already there.  Required (a) when a CPU stops running a v2 AS (v1
    switch, idle entry) and (b) before an AS's table frames are freed --

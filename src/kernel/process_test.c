@@ -974,6 +974,82 @@ static void test_loader_fail_fast_full_table(void) {
 }
 
 /* ---------------------------------------------------------------------
+ * L85: the address-space guard on the same decision.  A stale heartbeat is
+ * an INFERENCE about time; a group AS still loaded on a live CPU is a FACT
+ * about that CPU's translation.  The RimWorld IceWM lane measured what
+ * happens when the reaper trusts the inference: [LOSTWAKE] disposing +
+ * reclaiming pid=30 Loading.AsyncRead one line before the thread died
+ * executing its own stack (PC=0x112B806700, the bytes of its thread name).
+ * This test drives the new `as_on_live_cpu` input directly (it is a parameter
+ * precisely so it can be driven), plus the torn-down case.
+ * ------------------------------------------------------------------- */
+static void test_lostwake_as_live_blocks_reclaim(void) {
+  tests_run++;
+  uart_puts("  Running test_lostwake_as_live_blocks_reclaim...\n");
+
+  extern int cpu_current_pids[MAX_CPUS];
+  extern volatile uint64_t cpu_heartbeat_ms[MAX_CPUS];
+  extern spinlock_t proc_lock;
+
+  int saved_state[MAX_PROCESSES];
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *q = process_get_pcb(i);
+    saved_state[i] = q ? q->state : PROC_STATE_FREE;
+  }
+  int saved_claims[MAX_CPUS];
+  uint64_t saved_hb[MAX_CPUS];
+  for (int c = 0; c < MAX_CPUS; c++) {
+    saved_claims[c] = cpu_current_pids[c];
+    saved_hb[c] = cpu_heartbeat_ms[c];
+  }
+
+  const int k = 9;
+  const int c2 = 2;
+  const uint64_t now_ms = 1000000;
+  const uint64_t stale_hb = now_ms - LOSTWAKE_DEAD_OWNER_MS - 1;
+
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    if (i == k)
+      continue;
+    struct process *q = process_get_pcb(i);
+    if (q)
+      q->state = PROC_STATE_THREAD_DONE;
+  }
+
+  uint64_t f = spinlock_acquire_irqsave(&proc_lock);
+  process_get_pcb(k)->state = PROC_STATE_RUNNING;
+  process_get_pcb(k)->teardown_done = 0;
+  cpu_current_pids[c2] = k;
+  cpu_heartbeat_ms[c2] = stale_hb;
+
+  /* Control: stale claim, no AS on any CPU, table drained -> the recovery
+     still works (this is the frozen-soak case it exists for). */
+  EXPECT_EQ(lostwake_stale_claim_decide_at(k, now_ms, 0), 1);
+
+  /* The measured defect: the same slot with its AS still loaded on a CPU is
+     executing; no requeue, no dispose. */
+  EXPECT_EQ(lostwake_stale_claim_decide_at(k, now_ms, 1), 0);
+
+  /* A slot already torn down is never a requeue candidate either: its group's
+     AS/frames are on their way out, so resuming it runs into freed memory. */
+  process_get_pcb(k)->teardown_done = 1;
+  EXPECT_EQ(lostwake_stale_claim_decide_at(k, now_ms, 0), 0);
+  process_get_pcb(k)->teardown_done = 0;
+
+  spinlock_release_irqrestore(&proc_lock, f);
+
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *q = process_get_pcb(i);
+    if (q)
+      q->state = saved_state[i];
+  }
+  for (int c = 0; c < MAX_CPUS; c++) {
+    cpu_current_pids[c] = saved_claims[c];
+    cpu_heartbeat_ms[c] = saved_hb[c];
+  }
+}
+
+/* ---------------------------------------------------------------------
  * P8.2 class-B idle-fix regression: the lostwake stale-claim reclaim
  * decision.  Covers the frozen-soak signature — a RUNNING slot whose
  * every claimer has a stale heartbeat (a CPU that consumed the wake but
@@ -1026,6 +1102,18 @@ static void test_lostwake_stale_claim_reclaim(void) {
 
   uint64_t f = spinlock_acquire_irqsave(&proc_lock);
 
+  /* L85: this fixture fabricates a scheduler table, so it must state the
+     premise it wants.  A slot left `teardown_done` by an earlier suite is not
+     a requeue candidate any more (that is the new rule under test in
+     test_lostwake_as_live_blocks_reclaim), and inheriting the flag here would
+     make the frozen-soak case read as "already disposed". */
+  int saved_td = process_get_pcb(k)->teardown_done;
+  process_get_pcb(k)->teardown_done = 0;
+  /* ...and the world is "every claimer stale": k may only be claimed by c3. */
+  for (int c = 0; c < MAX_CPUS; c++)
+    if (c != c3 && cpu_current_pids[c] == k)
+      cpu_current_pids[c] = -1;
+
   /* Case 1: the frozen-soak signature — RUNNING, stale claim, drained:
      must reclaim. */
   process_get_pcb(k)->state = PROC_STATE_RUNNING;
@@ -1070,6 +1158,7 @@ static void test_lostwake_stale_claim_reclaim(void) {
   spinlock_release_irqrestore(&proc_lock, f);
 
   /* Restore the snapshot. */
+  process_get_pcb(k)->teardown_done = saved_td;
   for (int i = 0; i < MAX_PROCESSES; i++) {
     struct process *q = process_get_pcb(i);
     if (q)
@@ -1223,6 +1312,7 @@ void process_test_suite(void) {
   test_process_thread_slot_reclaim();
   test_loader_fail_fast_full_table();
   test_lostwake_stale_claim_reclaim();
+  test_lostwake_as_live_blocks_reclaim(); /* L85 */
   test_halted_claimer_is_not_live_work(); /* GB-057 */
   test_process_futex_machine();
   test_process_set_tls();

@@ -405,6 +405,21 @@ static int proc_release_mem_locked(struct process *q) {
     as = 0;
   if (block < 0 && !as)
     return 0;
+  /* L85: never free an address space another CPU still translates through.
+     process_still_running() answers from cpu_current_pids, which is a
+     scheduling record -- and group ASes are shared by up to 26 threads, so a
+     group whose LEADER slot looks idle can still be the live translation of a
+     worker on another CPU.  mmu.c already reports that shape as [FREERACE]
+     ("freeing root=... while cpu=N still translates through it"); this turns
+     the report into the refusal it always deserved.  Keeping `q->as` attached
+     makes the caller skip the slot/block reuse and retry on a later pass.
+     The CALLING cpu is excluded: it is tearing down its own AS and
+     vm_arch_teardown() already leaves v2 mode for that case. */
+  if (as) {
+    int c = vm_arch_root_cpu(as->root_phys);
+    if (c >= 0 && c != (int)get_cpuid())
+      return 0;
+  }
   q->phys_block_idx = -1;
   if (block >= 0)
     frame_block_free(block);
@@ -1081,6 +1096,9 @@ static int process_create_internal_ver(int ver) {
       proc_table[i].last_syscall = -1;
       proc_table[i].last_ret = 0;
       proc_table[i].sys_ring_at = 0;
+#ifdef RW_SC_RING
+      proc_table[i].sc_hist_at = 0;
+#endif
       break;
     }
   }
@@ -4408,6 +4426,19 @@ static int slot_has_live_claim(int pid, uint64_t now_ms) {
   return 0;
 }
 
+/* L85: is any CPU still translating through this slot's group address space?
+   That is the address-space ground truth for "the slot is executing right
+   now".  A halted CPU is excluded: cpu_halt_record() proves it will never run
+   the slot again, and that claim (unlike a heartbeat) is dead by construction,
+   so the poisoned-resume recovery must keep working across it. */
+static int slot_as_on_live_cpu(int k) {
+  struct process *grp = process_group(&proc_table[k]);
+  if (!grp || !grp->as)
+    return 0;
+  int c = vm_arch_root_cpu(grp->as->root_phys);
+  return (c >= 0 && !cpu_is_halted((uint32_t)c));
+}
+
 /* True when every slot except `k` is parked or dead: nothing READY, and no
    RUNNING slot with a live claimer.  A slot in this state guarantees no live
    core is mid-resume of any other process, so re-READYing `k` is safe. */
@@ -4428,12 +4459,28 @@ static int table_drained_except(int k, uint64_t now_ms) {
    reaper reclaim RUNNING slot `k`, whose every claimer has gone stale
    (heartbeat older than LOSTWAKE_DEAD_OWNER_MS at `now_ms`)?  Requires the
    world else-drained (see table_drained_except) so the requeue cannot
-   double-run a live process.  Caller holds proc_lock. */
-int lostwake_stale_claim_reclaimable_at(int k, uint64_t now_ms) {
+   double-run a live process.  Caller holds proc_lock.
+
+   `as_on_live_cpu` is the ADDRESS-SPACE ground truth (vm_arch_root_cpu): a CPU
+   that still translates through the group's root is executing this slot's own
+   code, whatever its heartbeat says.  Passed in, not sampled here, so the unit
+   test can drive both answers deterministically. */
+int lostwake_stale_claim_decide_at(int k, uint64_t now_ms, int as_on_live_cpu) {
   if (k < 1 || k >= MAX_PROCESSES)
     return 0;
   if (proc_table[k].state != PROC_STATE_RUNNING)
     return 0;
+  /* L85: measured on the RimWorld IceWM lane -- a core starved IRQ-off on
+     uart_lock for > LOSTWAKE_DEAD_OWNER_MS looks exactly like a dead one, and
+     disposing (or requeueing) its slot then handed the same thread to a second
+     CPU: `ret` popped the thread-name string off the shared stack
+     (PC=0x112B806700 = "Loading.AsyncRead"'s own bytes) and the killer row was
+     [LOSTWAKE] disposing / reclaiming pid=30.  The AS is loaded on that CPU
+     until it actually switches away, so it is the one signal that cannot lie. */
+  if (as_on_live_cpu)
+    return 0;
+  if (proc_table[k].teardown_done)
+    return 0; /* torn down: never a requeue candidate (L85) */
   int claimers = 0;
   for (int c = 0; c < MAX_CPUS; c++) {
     if (cpu_current_pids[c] != k)
@@ -4445,6 +4492,13 @@ int lostwake_stale_claim_reclaimable_at(int k, uint64_t now_ms) {
   if (!claimers)
     return 0; /* the no-claimer path owns this case */
   return table_drained_except(k, now_ms);
+}
+
+int lostwake_stale_claim_reclaimable_at(int k, uint64_t now_ms) {
+  /* Pure scheduling decision: no AS ground truth.  The reaper's call site adds
+     slot_as_on_live_cpu(k) (L85) so this stays unit-testable without a live
+     address space. */
+  return lostwake_stale_claim_decide_at(k, now_ms, 0);
 }
 
 /* The reaper's now-sample: the LOSTWAKE pass always samples the clock once
@@ -4741,6 +4795,29 @@ void start_scheduler(void) {
             }
           }
           if (!claimers) {
+            /* L85: "no claim" is NOT "executes nowhere".  The claim is cleared
+               by this very reaper's dispose path and by nothing else, so a slot
+               whose group AS is still loaded on a live CPU is a thread that is
+               running (its CPU was just starved past the heartbeat window).
+               Re-READYing it there double-runs it -- measured: the second CPU
+               resumed the same thread from a stale context and its stack frame
+               died mid-call (PC=0x112B806700, a stack address holding
+               "Loading.AsyncRead").  A torn-down slot is likewise never a
+               requeue candidate. */
+            if (proc_table[k].teardown_done || slot_as_on_live_cpu(k)) {
+              static int l85_skip_rows;
+              if (l85_skip_rows < 6) {
+                l85_skip_rows++;
+                uart_puts("[LWK] not reclaiming pid=");
+                print_int(proc_table[k].pid);
+                uart_puts(" ");
+                uart_puts(proc_table[k].name);
+                uart_puts(proc_table[k].teardown_done ? " why=torn-down"
+                                                      : " why=as-live-on-cpu");
+                uart_puts("\n");
+              }
+              continue;
+            }
             acted = 1; /* w5 (v): real reclaim this pass */
             uart_puts("[LOSTWAKE] reclaiming pid=");
             print_int(proc_table[k].pid);
@@ -4748,7 +4825,8 @@ void start_scheduler(void) {
             uart_puts(proc_table[k].name);
             uart_puts(" from RUNNING with no claiming CPU\n");
             proc_table[k].state = PROC_STATE_READY;
-          } else if (lostwake_stale_claim_reclaimable(k)) {
+          } else if (!slot_as_on_live_cpu(k) &&
+                     lostwake_stale_claim_reclaimable(k)) {
             /* L9 arm-and-confirm: a single stale sample cannot prove the
                owner dead — under MTTCG a live claimer's vCPU is regularly
                host-starved past LOSTWAKE_DEAD_OWNER_MS (its clock freezes,
@@ -4792,8 +4870,22 @@ void start_scheduler(void) {
               uart_puts(proc_table[k].name);
               uart_puts(" (stale dead-owner claim, poisoned resume)\n");
               acted = 1; /* w5 (v): real disposal this pass */
+              /* L85: do NOT clear the claimers' claims here.  That loop used to
+                 manufacture the "no claiming CPU" answer the rest of this file
+                 tests for: it made process_still_running() false for a thread a
+                 starved CPU was still executing, so (a) the next idle pass
+                 re-READYed the slot and a second CPU resumed it, and (b)
+                 proc_release_mem_locked() freed the group AS under the first
+                 CPU (mmu.c prints [FREERACE] for exactly this).  A stale claim
+                 is an inference; leaving it in place keeps every consumer --
+                 the reclaim path, the slot-reuse gate, the AS free -- on the
+                 conservative side.  group_teardown still runs, so a genuinely
+                 wedged slot still gets its 97/reap handling. */
+              /* A HALTED claimant is the one case where releasing the claim is
+                 provably safe: cpu_halt_record() ran immediately before that
+                 CPU stopped, so it will never execute the slot again. */
               for (int c = 0; c < MAX_CPUS; c++) {
-                if (cpu_current_pids[c] == k)
+                if (cpu_current_pids[c] == k && cpu_is_halted((uint32_t)c))
                   set_current_process_pid(c, -1);
               }
               dispose_slot = k;
@@ -5796,6 +5888,9 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   struct process *t = &proc_table[pid];
   t->state = PROC_STATE_ALLOCATED;
   t->sys_ring_at = 0;
+#ifdef RW_SC_RING
+  t->sc_hist_at = 0;
+#endif
   t->last_syscall = -1;
   pid_alloc_seq[pid]++;
   t->tgid = grp->pid;

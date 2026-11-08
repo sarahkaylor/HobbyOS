@@ -324,6 +324,34 @@ static void l_skw_check(struct process *p, struct trap_frame *tf) {
 int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr) {
   if (p && nr != L_SYS_rt_sigreturn)
     l_skw_check(p, tf);
+#ifdef RW_SC_RING
+  /* L85: open a history slot BEFORE the handler runs, so a fault inside the
+     handler (or in its copy_to_user/copy_from_user) still names the call and
+     the arguments it was given; the return value is filled on the way out. */
+  int sh_ix = -1;
+  if (p) {
+    sh_ix = p->sc_hist_at & (SC_HIST_N - 1);
+    p->sc_hist[sh_ix].nr = (uint16_t)nr;
+    p->sc_hist[sh_ix].done = 0;
+    p->sc_hist[sh_ix].arg[0] = l_arg(tf, 0);
+    p->sc_hist[sh_ix].arg[1] = l_arg(tf, 1);
+    p->sc_hist[sh_ix].arg[2] = l_arg(tf, 2);
+    p->sc_hist[sh_ix].arg[3] = l_arg(tf, 3);
+    p->sc_hist[sh_ix].ret = 0;
+    p->sc_hist[sh_ix].rip = tf->elr;
+    p->sc_hist_at = (uint8_t)((sh_ix + 1) & (SC_HIST_N - 1));
+  }
+#define L_DISPATCH_RET(v)                                                     \
+  do {                                                                        \
+    if (sh_ix >= 0) {                                                         \
+      p->sc_hist[sh_ix].ret = (int64_t)tf->regs[0];                           \
+      p->sc_hist[sh_ix].done = 1;                                             \
+    }                                                                         \
+    return (v);                                                               \
+  } while (0)
+#else
+#define L_DISPATCH_RET(v) return (v)
+#endif
   const struct l_sysent *const tables[] = {
     l_tab_core,
     (const struct l_sysent *)l_tab_fd,
@@ -349,14 +377,16 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
           int64_t r = tab[i].fn(p, tf);
           l_mem_trace(tab[i].name, p, a0, a1, a2, a3, a4, a5,
                       (int64_t)tf->regs[0]);
-          return (int)r;
+          L_DISPATCH_RET((int)r);
         }
 #endif
-        return tab[i].fn(p, tf);
+        int _r = tab[i].fn(p, tf);
+        L_DISPATCH_RET(_r);
       }
     }
   }
-  return 0;
+  L_DISPATCH_RET(0);
+#undef L_DISPATCH_RET
 }
 
 /* ---- [LCOMPAT] tracer --------------------------------------------------- */

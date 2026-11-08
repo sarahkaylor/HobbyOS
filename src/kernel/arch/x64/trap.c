@@ -3800,12 +3800,187 @@ static void fl_qwords(struct fl_buf *f, struct process *p, uint64_t va, int n) {
   }
 }
 
+#ifdef RW_SC_RING
+/* L85: print the last SC_HIST_N complete compat syscalls of the faulting
+ * thread, oldest first.  One line per call so a single uart_puts (and one
+ * uart_lock hold) carries the record: a fault record must never interleave.
+ *
+ * `mod=` resolves the issuing user PC against the process's own regions, so a
+ * call made from libc's read wrapper reads `mod=<libc base>+off` and one made
+ * from UnityPlayer reads `mod=<UnityPlayer base>+off`.  The bases are the same
+ * ones [SIGDUMP] mods= lists in the launcher's dump.
+ */
+static void sc_hist_dump(struct process *cur) {
+  if (!cur)
+    return;
+  struct fl_buf f;
+  f.n = 0;
+  fl_s(&f, "[SCH] pid=");
+  fl_dec(&f, cur->pid);
+  fl_s(&f, " tgid=");
+  fl_dec(&f, cur->tgid);
+  fl_s(&f, " nm=");
+  fl_s(&f, cur->name);
+  fl_s(&f, " ring=");
+  fl_dec(&f, SC_HIST_N);
+  fl_c(&f, '\n');
+  f.b[f.n] = 0;
+  uart_puts(f.b);
+  for (int i = 0; i < SC_HIST_N; i++) {
+    int ix = (cur->sc_hist_at - SC_HIST_N + i) & (SC_HIST_N - 1);
+    struct sc_hist_ent *h = &cur->sc_hist[ix];
+    if (h->nr == 0 && h->rip == 0)
+      continue; /* never written */
+    f.n = 0;
+    fl_s(&f, "[SCH] ");
+    fl_dec(&f, i - (SC_HIST_N - 1)); /* -23 .. 0, 0 = the newest */
+    fl_s(&f, " nr=");
+    fl_dec(&f, (int)h->nr);
+    fl_s(&f, h->done ? " done" : " INFLIGHT");
+    for (int a = 0; a < 4; a++) {
+      fl_s(&f, " a");
+      fl_dec(&f, a);
+      fl_c(&f, '=');
+      fl_hex(&f, h->arg[a]);
+    }
+    fl_s(&f, " -> ");
+    fl_hex(&f, (uint64_t)h->ret);
+    if (h->ret < 0) {
+      fl_s(&f, "(");
+      fl_dec(&f, (int)(-h->ret));
+      fl_c(&f, ')');
+    }
+    fl_s(&f, " rip=");
+    fl_hex(&f, h->rip);
+    if (cur->as) {
+      extern struct vm_region *vm_region_find(struct addr_space *as,
+                                             uint64_t va);
+      struct vm_region *r = vm_region_find(cur->as, h->rip);
+      if (r) {
+        fl_s(&f, " mod=");
+        fl_hex(&f, r->base);
+        fl_c(&f, '+');
+        fl_hex(&f, h->rip - r->base);
+      } else {
+        fl_s(&f, " mod=NONE");
+      }
+    }
+    fl_c(&f, '\n');
+    f.b[f.n] = 0;
+    uart_puts(f.b);
+  }
+}
+#endif
+
 static void compat_fault_dump(struct process *cur, struct trap_frame *tf,
                               uint64_t cr2) {
   static int fd_rows;
   if (fd_rows >= 4)
     return;
   fd_rows++;
+#ifdef RW_SC_RING
+  /* L85: two rows that name a small-integer fault address.
+   *
+   * (1) [SLEAF] asks the page tables whether cr2 is present.  The fault row's
+   *     `err` bits are the hardware's answer; region=NONE is the region
+   *     table's.  `present=1` with `region=NONE` means a live translation with
+   *     no mapping behind it (unmap raced a running thread, or the address
+   *     space was torn down under it), while `present=0` means the program
+   *     simply computed an address nothing ever mapped.
+   *
+   * (2) [SALIAS] tests the truncation hypothesis directly: for every region,
+   *     compare cr2 with the low 32 bits of [base, base+len).  A hit prints
+   *     the region and the offset, i.e. "cr2 IS the low half of an address
+   *     inside this mapping" -- the measured shape of a 32-bit truncation of
+   *     a valid heap pointer (0x11502F992F -> 0x2F992F).
+   *
+   * (3) [SRGN] lists the regions (bounded) so the dump can be read offline
+   *     without the address space.
+   */
+  {
+    uint64_t leaf = 0;
+    int have = (cur->as && vm_arch_walk(cur->as, cr2, &leaf) == 0);
+    struct fl_buf f2;
+    f2.n = 0;
+    fl_s(&f2, "[SLEAF] cr2=");
+    fl_hex(&f2, cr2);
+    fl_s(&f2, " present=");
+    fl_dec(&f2, have ? 1 : 0);
+    fl_s(&f2, " leaf=");
+    fl_hex(&f2, leaf);
+    fl_c(&f2, '\n');
+    f2.b[f2.n] = 0;
+    uart_puts(f2.b);
+  }
+  if (cr2 && cr2 < 0x100000000ULL && cur->as) {
+    int ahits = 0;
+    for (int i = 0; i < cur->as->nr && ahits < 4; i++) {
+      struct vm_region *r = &cur->as->regions[i];
+      uint64_t lo = r->base & 0xFFFFFFFFULL;
+      uint64_t hi = (r->base + r->len) & 0xFFFFFFFFULL;
+      if (hi <= lo)
+        continue; /* the region's low half wrapped: not comparable */
+      if (cr2 >= lo && cr2 < hi) {
+        struct fl_buf f3;
+        f3.n = 0;
+        fl_s(&f3, "[SALIAS] cr2=");
+        fl_hex(&f3, cr2);
+        fl_s(&f3, " region=");
+        fl_hex(&f3, r->base);
+        fl_c(&f3, '+');
+        fl_hex(&f3, r->len);
+        fl_s(&f3, " off=");
+        fl_hex(&f3, cr2 - lo);
+        fl_s(&f3, " prot=");
+        fl_dec(&f3, (int)r->prot);
+        fl_s(&f3, " kind=");
+        fl_dec(&f3, (int)r->kind);
+        fl_s(&f3, " -> cr2 IS the low 32 bits of an address in this region\n");
+        f3.b[f3.n] = 0;
+        uart_puts(f3.b);
+        ahits++;
+      }
+    }
+    if (!ahits) {
+      struct fl_buf f3;
+      f3.n = 0;
+      fl_s(&f3, "[SALIAS] cr2=");
+      fl_hex(&f3, cr2);
+      fl_s(&f3, " no region's low-32 window contains it (n=");
+      fl_dec(&f3, cur->as->nr);
+      fl_s(&f3, ")\n");
+      f3.b[f3.n] = 0;
+      uart_puts(f3.b);
+    }
+  }
+  if (cur->as) {
+    int n = cur->as->nr;
+    struct fl_buf f4;
+    for (int i = 0; i < n && i < 48; i++) {
+      struct vm_region *r = &cur->as->regions[i];
+      f4.n = 0;
+      fl_s(&f4, "[SRGN] i=");
+      fl_dec(&f4, i);
+      fl_s(&f4, " base=");
+      fl_hex(&f4, r->base);
+      fl_s(&f4, " len=");
+      fl_hex(&f4, r->len);
+      fl_s(&f4, " prot=");
+      fl_dec(&f4, (int)r->prot);
+      fl_s(&f4, " kind=");
+      fl_dec(&f4, (int)r->kind);
+      fl_c(&f4, '\n');
+      f4.b[f4.n] = 0;
+      uart_puts(f4.b);
+    }
+    f4.n = 0;
+    fl_s(&f4, "[SRGN] total=");
+    fl_dec(&f4, n);
+    fl_c(&f4, '\n');
+    f4.b[f4.n] = 0;
+    uart_puts(f4.b);
+  }
+#endif
   uint64_t rsp = tf->lr;
   struct fl_buf f;
   f.n = 0;
@@ -4412,8 +4587,15 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       }
       /* M6/L37: the full record, before the process dies (compat targets only;
        * a native fault keeps the compact row). */
-      if (cur->abi_flags & PROC_FLAG_LINUX_ABI)
+      if (cur->abi_flags & PROC_FLAG_LINUX_ABI) {
+#ifdef RW_SC_RING
+        /* L85: what this thread was doing on the way in, with arguments and
+           return values -- the provenance row for a bogus pointer the game
+           may have been handed by a syscall. */
+        sc_hist_dump(cur);
+#endif
         compat_fault_dump(cur, tf, cr2);
+      }
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
     }

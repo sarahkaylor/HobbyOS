@@ -604,6 +604,14 @@ endif
 ifneq ($(RW_TRACE_MEM),)
   CFLAGS += -DRW_TRACE_MEM=1
 endif
+# Diagnostic: the last 24 compat syscalls of every thread with their arguments
+# and return values ([SCH] rows, printed by the fault path).  Answers "did a
+# syscall hand the program the bogus value it just dereferenced".  Empty = no
+# ring, no code, no BSS growth.
+#     make RW_SC_RING=1 ... disk.img
+ifneq ($(RW_SC_RING),)
+  CFLAGS += -DRW_SC_RING=1
+endif
 # Diagnostic: the set/wake timeline for every futex key a process's MAIN thread
 # parks on ([FUTXW] WAIT/WAKE/KEY rows in src/kernel/linux_compat_thr.c).  It
 # answers "did the setter reach the futex, and did the wake find a waiter".

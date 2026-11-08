@@ -350,6 +350,26 @@ struct process {
      just past the `syscall` instruction, i.e. the wrapper that issued it. */
   uint64_t sc_arg[6];
   uint64_t sc_rip;
+#ifdef RW_SC_RING
+  /* L85: the last SC_HIST_N COMPLETE syscalls of this thread, with arguments
+     and the return value.  `sys_ring` above keeps only numbers, which names a
+     shape ("pread, pread, futex") but cannot prove what a call was handed or
+     what it answered -- and a bogus pointer the game got from a syscall
+     return is exactly what a fault row needs to convict.  Written at dispatch
+     entry and completed when the handler returns; a slot with done==0 is the
+     call that was in flight at the fault.  Diagnostic only
+     (make RW_SC_RING=1); the field costs 64 bytes per thread. */
+#define SC_HIST_N 24
+  struct sc_hist_ent {
+    uint16_t nr;
+    uint8_t done;
+    uint8_t pad;
+    uint64_t arg[4];
+    int64_t ret;
+    uint64_t rip;
+  } sc_hist[SC_HIST_N];
+  uint8_t sc_hist_at;
+#endif
   /** Phase 4 (memory): anonymous mmap regions (first-fit carving from the
    *  pre-mapped region; entries are VAs into the anon area). */
   struct anon_region { uint64_t addr; uint64_t len; } anon_maps[8];
@@ -778,6 +798,12 @@ void save_context(struct process *p, struct trap_frame *tf);
 // double-run a live process.  `now_ms` is injected for deterministic unit
 // tests.  Caller holds proc_lock.  Unit-tested in process_test.c.
 int lostwake_stale_claim_reclaimable_at(int k, uint64_t now_ms);
+/* L85: the same decision with the address-space ground truth passed in
+   (`as_on_live_cpu` = some non-halted CPU still translates through the slot's
+   group AS, i.e. the slot is executing NOW whatever the heartbeat says, or the
+   slot is already torn down).  Both answers block the reclaim; the parameter
+   exists so the unit test drives them deterministically. */
+int lostwake_stale_claim_decide_at(int k, uint64_t now_ms, int as_on_live_cpu);
 /* GB-057 (2026-10-26): RUNNING slot `k` whose only claimers are CPUs that
    recorded their own halt -- dead by construction, not live work. */
 int slot_claimed_only_by_halted_cpus(int k);
