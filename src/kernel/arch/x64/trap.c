@@ -4205,6 +4205,23 @@ static void compat_fault_dump(struct process *cur, struct trap_frame *tf,
  * handler body unchanged. */
 static void general_interrupt_inner(struct trap_frame *tf);
 
+/* GB-233: the frame the CPU handed this handler at entry.  The torn-frame
+   stop runs before the fatal dump, so it carries its own copy of the entry
+   values; the dump's [BADVEC] record is not reached for that shape. */
+struct torn_stamp {
+  uint64_t frame;
+  uint64_t vector;
+  uint64_t cs;
+  int64_t pid;
+};
+static struct torn_stamp torn_at_entry[MAX_CPUS];
+
+static int64_t torn_pid(void) {
+  extern struct process *current_process(void);
+  struct process *p = current_process();
+  return p ? (int64_t)p->pid : -1;
+}
+
 void general_interrupt_handler(struct trap_frame *tf) {
 #ifdef KERNEL_MODE_UNIT_TEST
   extern void lockdbg_irq_enter(void);
@@ -4224,6 +4241,12 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern int virtio_net_irq;
 
   uint32_t cpu = get_cpuid();
+  if (cpu < MAX_CPUS) {
+    torn_at_entry[cpu].frame = (uint64_t)tf;
+    torn_at_entry[cpu].vector = tf->vector;
+    torn_at_entry[cpu].cs = tf->cs;
+    torn_at_entry[cpu].pid = torn_pid();
+  }
   /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
      (vectors 0-31 exceptions, 32-255 IRQ/syscall); a `vector` > 0xFF (measured:
      vector=20000, rip=0x97) cannot have been pushed by the CPU, so the frame is
@@ -4254,6 +4277,61 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       panic_puts(" (impossible vector="); print_int_raw((int)(uint64_t)tf->vector);
       panic_puts(" or invalid cs; a real gate entry pushes cs 0x08/0x1B\n");
       panic_puts("\n");
+      /* GB-233: the [BADVEC] fatal dump below never runs for this shape.
+         Print the entry stamp here: same frame + pid means the slots were
+         already foreign when the CPU handed us the frame; a VA-only match is
+         another pid's stale stamp and says so. */
+      {
+        int64_t now_pid = torn_pid();
+        struct torn_stamp *st = 0;
+        int st_cpu = -1;
+        int stale_cpu = -1;
+        int64_t stale_pid = -1;
+        for (uint32_t i = 0; i < MAX_CPUS; i++) {
+          if (torn_at_entry[i].frame == (uint64_t)tf) {
+            if (torn_at_entry[i].pid == now_pid) {
+              st = &torn_at_entry[i];
+              st_cpu = (int)i;
+              break;
+            }
+            stale_cpu = (int)i;
+            stale_pid = torn_at_entry[i].pid;
+          }
+        }
+        panic_puts("[TORNFRAME-STAMP] frame=");
+        panic_print_hex((uint64_t)tf);
+        panic_puts(" vector_slot=");
+        panic_print_hex((uint64_t)&tf->vector);
+        panic_puts(" cs_slot=");
+        panic_print_hex((uint64_t)&tf->cs);
+        panic_puts(" pid=");
+        print_int_raw((int)now_pid);
+        panic_puts(" cpu=");
+        print_int_raw((int)cpu);
+        if (st) {
+          panic_puts(" entry_v=");
+          print_int_raw((int)st->vector);
+          panic_puts(" entry_cs=");
+          panic_print_hex(st->cs);
+          panic_puts(" entry_cpu=");
+          print_int_raw(st_cpu);
+          panic_puts(" entry_pid=");
+          print_int_raw((int)st->pid);
+          panic_puts(" (slots already foreign at entry)\n");
+        } else if (stale_cpu >= 0) {
+          panic_puts(" no entry stamp for pid=");
+          print_int_raw((int)now_pid);
+          panic_puts(" (stale stamp pid=");
+          print_int_raw((int)stale_pid);
+          panic_puts(" cpu=");
+          print_int_raw(stale_cpu);
+          panic_puts(")\n");
+        } else {
+          panic_puts(" no entry stamp for pid=");
+          print_int_raw((int)now_pid);
+          panic_puts("\n");
+        }
+      }
       cpu_halt_record(cpu);
       extern int spinlock_release_if_held_by_me(spinlock_t *lock);
       extern spinlock_t proc_lock;
