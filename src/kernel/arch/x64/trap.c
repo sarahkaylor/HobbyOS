@@ -3387,6 +3387,16 @@ static volatile uint64_t wd_last_vector[MAX_CPUS];
 static volatile uint64_t wd_last_err[MAX_CPUS];
 static volatile uint64_t wd_last_cr2[MAX_CPUS];
 static volatile int wd_last_seen_pid[MAX_CPUS];
+
+/* GB-229: the owner CPU's last-seen context, read by the scheduler's
+   [LOCKDIAG]/[PROCLOCK-HOLD] rows so "the owner is idle/user" is printed from
+   the watchdog record rather than inferred from a missing pid. */
+uint64_t watchdog_cpu_rip(uint32_t cpu) {
+  return cpu < MAX_CPUS ? wd_last_seen_rip[cpu] : 0;
+}
+int watchdog_cpu_pid(uint32_t cpu) {
+  return cpu < MAX_CPUS ? wd_last_seen_pid[cpu] : -1;
+}
 static volatile uint64_t wd_next_report_ms = 0;
 /* L41: served by the scheduler's idle loop (process.c), which can take
    proc_lock safely; the timer IRQ only increments this.  A park that never

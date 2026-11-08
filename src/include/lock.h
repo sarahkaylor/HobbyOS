@@ -41,6 +41,20 @@ typedef struct {
   volatile uint32_t owner;  /**< cpu+1 of the holder, 0 = unowned (GB-060) */
 } spinlock_t;
 
+/* GB-229: per-CPU acquire/release sequence for proc_lock (observation only).
+   A wedge that shows last_op=release with locked=1 names a lost unlock; one
+   that shows last_op=acquire with the owner idle names a resume path that left
+   the lock held. */
+typedef struct {
+  uint64_t acq;
+  uint64_t rel;
+  uint64_t last_ms;
+  uint64_t site;
+  int last_op; /**< 1 acquire, 2 release, 0 never */
+} proclock_hold_t;
+void proclock_hold_note(int op, uint64_t site);
+int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out);
+
 /**
  * Initializes a spinlock to the unlocked state.
  */
