@@ -75,6 +75,31 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock);
  */
 void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags);
 
+/* GB-146-B: one lock-diagnostic row.  The platform lock implementations fill
+ * it from the owner/park instrumentation they already keep (x64: owner word,
+ * held-lock stack, per-CPU wait record, sched_stage); ARM has no such tables
+ * and reports "no row".  The scheduler's [IDLESTUCK] dump prints one row per
+ * parked/spinning CPU and one for the last [STALLBREAK], so a wedged serial
+ * names the lock, the holder and the blocked transit instead of `lock_owner=6`
+ * alone.  Observation only: nothing here feeds a scheduling decision. */
+typedef struct {
+  uint64_t addr;      /* the lock address */
+  int owner_cpu;      /* holder CPU, -1 when unowned */
+  uint64_t owner_site;/* holder's acquisition PC (0 when unknown) */
+  uint64_t owner_site2;/* holder's caller's PC (0 when unknown) */
+  int wait_cpu;       /* CPU observed waiting/claiming, -1 when none */
+  uint8_t wait_stage; /* sched_stage: 0 normal, 1 schedule switch, 2 enter_user */
+  uint64_t wait_pc;   /* waiter's acquire-site PC */
+  uint64_t wait_pc2;  /* waiter's caller's PC */
+} lockdiag_t;
+
+/* Fill `out` when `cpu` is currently spinning on a lock; 1 = row printed. */
+int lockdiag_snapshot(uint32_t cpu, lockdiag_t *out);
+/* Fill `out` with the last [STALLBREAK] record; 1 = one recorded. */
+int lockdiag_last_stallbreak(lockdiag_t *out);
+/* sched_stage for `cpu` (0 on platforms without the marker). */
+uint8_t lockdiag_stage(uint32_t cpu);
+
 /* GB-060 gate: print the end-of-run lock-strand counter summary (STALLBREAK /
  * STOLEN / LOCKFOREVER / UNOWNED-FREED). Called from the CPU-0 halt path so the
  * tier can read the real marker counts instead of hand-grepping the console. */

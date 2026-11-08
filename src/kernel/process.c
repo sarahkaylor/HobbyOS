@@ -5464,7 +5464,10 @@ void start_scheduler(void) {
       /* GB-057: `c<N>=<pid>/<idle_rounds>`.  The second field is this CPU's own
          idle-round count, so a claim held by a CPU that never returns to idle
          is visible at a glance: a small count beside a live pid means that CPU
-         stopped idling, i.e. it is spinning somewhere with the claim pinned. */
+         stopped idling, i.e. it is spinning somewhere with the claim pinned.
+         GB-146-B adds `<stage>`: where the CPU last parked (0 normal, 1 in the
+         scheduler switch, 2 entering user space), so a claim that never returns
+         to idle also says WHERE it is parked. */
       for (int c = 0; c < MAX_CPUS; c++) {
         uart_puts(" c");
         print_int(c);
@@ -5472,12 +5475,72 @@ void start_scheduler(void) {
         print_int(cpu_current_pids[c]);
         uart_puts("/");
         print_int(sched_idle_rounds_cpu[c]);
+        uart_puts("/");
+        print_int(lockdiag_stage((uint32_t)c));
       }
       uart_puts(" lock_owner=");
       print_int((int)proc_lock.owner);
       uart_puts(" park_returns=");
       print_int(poll_park_returns);
+      uart_puts(" lock_addr=");
+      uart_print_hex((uint64_t)&proc_lock);
       uart_puts("\n");
+      /* GB-146-B: a wedge must name the lock, its holder (pid + acquisition
+         site) and the blocked transit (waiter pid + scheduler stage + sites),
+         not just `lock_owner=6`.  lockdiag_snapshot reads the per-CPU wait
+         record and held-lock stack the arch lock code already keeps; on ARM it
+         returns 0 and this prints nothing extra. */
+      {
+        lockdiag_t ld;
+        for (int c = 0; c < MAX_CPUS; c++) {
+          if (!lockdiag_snapshot((uint32_t)c, &ld))
+            continue;
+          uart_puts("[LOCKDIAG] wait_cpu=");
+          print_int(ld.wait_cpu);
+          uart_puts(" lock=");
+          uart_print_hex(ld.addr);
+          uart_puts(" owner_cpu=");
+          print_int(ld.owner_cpu);
+          uart_puts(" owner_pid=");
+          print_int(ld.owner_cpu >= 0 ? cpu_current_pids[ld.owner_cpu] : -1);
+          uart_puts(" owner_site=");
+          uart_print_hex(ld.owner_site);
+          uart_puts(" owner_site2=");
+          uart_print_hex(ld.owner_site2);
+          uart_puts(" wait_pid=");
+          print_int(ld.wait_cpu >= 0 ? cpu_current_pids[ld.wait_cpu] : -1);
+          uart_puts(" wait_stage=");
+          print_int((int)ld.wait_stage);
+          uart_puts(" wait_pc=");
+          uart_print_hex(ld.wait_pc);
+          uart_puts(" wait_pc2=");
+          uart_print_hex(ld.wait_pc2);
+          uart_puts("\n");
+        }
+        if (lockdiag_last_stallbreak(&ld)) {
+          uart_puts("[STALLBREAK-DIAG] lock=");
+          uart_print_hex(ld.addr);
+          uart_puts(" owner_cpu=");
+          print_int(ld.owner_cpu);
+          uart_puts(" owner_pid=");
+          print_int(ld.owner_cpu >= 0 ? cpu_current_pids[ld.owner_cpu] : -1);
+          uart_puts(" owner_site=");
+          uart_print_hex(ld.owner_site);
+          uart_puts(" owner_site2=");
+          uart_print_hex(ld.owner_site2);
+          uart_puts(" wait_cpu=");
+          print_int(ld.wait_cpu);
+          uart_puts(" wait_pid=");
+          print_int(ld.wait_cpu >= 0 ? cpu_current_pids[ld.wait_cpu] : -1);
+          uart_puts(" wait_stage=");
+          print_int((int)ld.wait_stage);
+          uart_puts(" wait_pc=");
+          uart_print_hex(ld.wait_pc);
+          uart_puts(" wait_pc2=");
+          uart_print_hex(ld.wait_pc2);
+          uart_puts("\n");
+        }
+      }
       spinlock_release_irqrestore(&proc_lock, dflags);
     }
 
