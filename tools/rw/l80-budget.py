@@ -30,9 +30,14 @@ NUMS = r"([\d]+)"
 
 def parse(path):
     xswb, xswl, vglb = [], [], []
+    # L82: key=value extraction instead of one positional pattern, so a field
+    # added to [XSWB] (blit_px/blit_n/blit) does not silently stop the parse --
+    # that is exactly what a captured pattern does when a row grows.
     rx = re.compile(r"\[XSWB\] n=(\d+) t=(\d+) frames=(\d+) dt_avg=(\d+) "
                     r"dt_max=(\d+) self_avg=(\d+) self_max=(\d+) put_avg=(\d+) "
-                    r"flush_avg=(\d+) row_us=(\d+) w=(-?\d+) h=(-?\d+)")
+                    r"flush_avg=(\d+)")
+    rblit = re.compile(r"blit_px=(\d+) blit_n=(\d+) blit=(-?\d+x-?\d+\+?-?\d*\+?-?\d*)")
+    rtail = re.compile(r"row_us=(\d+) w=(-?\d+) h=(-?\d+)")
     rl = re.compile(r"\[XSWL\] frames=(\d+) flush_avg=(\d+) fence_avg=(\d+) "
                     r"swap_avg=(\d+) inval_avg=(\d+) total_max=(\d+)")
     rv = re.compile(r"\[VGLB\] n=(\d+) t=(\d+) frames=(\d+) pres_avg=(\d+) "
@@ -45,9 +50,18 @@ def parse(path):
             m = rx.search(s)
             if m:
                 g = [int(x) for x in m.groups()]
-                xswb.append(dict(n=g[0], t=g[1], frames=g[2], dt=g[3], dt_max=g[4],
-                                 self_us=g[5], self_max=g[6], put=g[7],
-                                 flush=g[8], row_us=g[9], w=g[10], h=g[11]))
+                mb, mt = rblit.search(s), rtail.search(s)
+                d = dict(n=g[0], t=g[1], frames=g[2], dt=g[3], dt_max=g[4],
+                         self_us=g[5], self_max=g[6], put=g[7], flush=g[8],
+                         row_us=0, w=0, h=0,
+                         blit_px=0, blit_n=0, blit="")
+                if mb:
+                    d["blit_px"], d["blit_n"], d["blit"] = (
+                        int(mb.group(1)), int(mb.group(2)), mb.group(3))
+                if mt:
+                    d["row_us"], d["w"], d["h"] = (
+                        int(mt.group(1)), int(mt.group(2)), int(mt.group(3)))
+                xswb.append(d)
                 continue
             m = rl.search(s)
             if m:
@@ -97,6 +111,11 @@ def table(label, xs, xl, vg):
           f"(the shim: checksum + shadow blit + flush msg)")
     print(f"    put     median {f(med([r['put'] for r in xs])):8.2f} ms   "
           f"flush   {f(med([r['flush'] for r in xs])):8.2f} ms")
+    # L82: the fb0 blit's coverage.  A full 1916x1018 content rect is 1 950 488
+    # px; `blit_n` is how many presents in the batch blitted at all.
+    print(f"    blit    median {med([r['blit_px'] for r in xs]):9.0f} px/present  "
+          f"n median {med([r['blit_n'] for r in xs]):.0f}/batch   "
+          f"last {xs[-1]['blit'] or '-'}")
     if vg:
         m = min(len(vg), len(xs))
         print(f"    present median {f(med([r['pres'] for r in vg])):8.2f} ms   "
@@ -127,6 +146,10 @@ def main():
     ap.add_argument("log")
     ap.add_argument("--window", type=float, default=0,
                     help="only the last N seconds of the run")
+    ap.add_argument("--from-t", type=float, default=None,
+                    help="only batches at/after this guest time (seconds)")
+    ap.add_argument("--to-t", type=float, default=None,
+                    help="only batches before this guest time (seconds)")
     ap.add_argument("--all", action="store_true", help="print every batch")
     a = ap.parse_args()
 
@@ -135,6 +158,17 @@ def main():
         print(f"{a.log}: no [XSWB] rows -- was /XPROF staged?")
         return 1
     print(f"{a.log}\n  [XSWB] {len(xs)}  [XSWL] {len(xl)}  [VGLB] {len(vg)} rows")
+    if a.from_t is not None or a.to_t is not None:
+        lo = int((a.from_t or 0) * 1000)
+        hi = int(a.to_t * 1000) if a.to_t is not None else 1 << 62
+        keep = [r for r in xs if lo <= r["t"] < hi]
+        if keep:
+            n0, n1 = keep[0]["n"], keep[-1]["n"]
+            xs = keep
+            vg = [r for r in vg if n0 <= r["n"] <= n1]
+            xl = xl[-len(xs):] if len(xl) >= len(xs) else xl
+            print(f"  window: t={a.from_t or 0:.0f}-{a.to_t or 'end'} s "
+                  f"(presents {n0}-{n1})")
     if a.window and xs:
         t_end = xs[-1]["t"]
         cut = t_end - int(a.window * 1000)
