@@ -103,6 +103,7 @@
     chmod;
     clearerr;
     clock;
+    clock_getres;
     clock_gettime;
     close;
     closedir;
@@ -539,6 +540,7 @@
     strcpy;
     strcspn;
     strdup;
+    strndup;
     strerror;
     strerror_r;
     strftime;

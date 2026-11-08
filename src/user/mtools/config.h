@@ -149,6 +149,9 @@
 #define HAVE_STRCHR 1
 #define HAVE_STRCSPN 1
 #define HAVE_STRDUP 1
+/* libc provides strndup now (it always declared it in <string.h>); without
+ * this the mtools shim in missFuncs.c collides at link time. */
+#define HAVE_STRNDUP 1
 #define HAVE_STRERROR 1
 #define HAVE_STRINGS_H 1
 #define HAVE_STRNCASECMP 1

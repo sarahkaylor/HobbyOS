@@ -91,6 +91,13 @@ extern "C" {
    * fails with -1/EINVAL. */
   int clock_gettime(clockid_t clk_id, struct timespec *tp);
 
+  /* Resolution of a clock: REALTIME 1 ms (sysinfo 6 reports milliseconds),
+   * MONOTONIC 10 ms (100 Hz scheduler tick).  A NULL res is legal POSIX and
+   * answers only "is this clock valid?".  Present because the X server's
+   * os/utils.c calls it (a cold DESKTOP=icewm build failed on the missing
+   * declaration).  Any other clk_id fails with -1/EINVAL. */
+  int clock_getres(clockid_t clk_id, struct timespec *res);
+
   /* ---- P3.2 (browser.md §6): names <ctime>/libc++ need ---- */
 
   /* difftime: (time1 - time0) as double (userland may use FP since F1.5;

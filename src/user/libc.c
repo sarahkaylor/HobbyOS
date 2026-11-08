@@ -1044,6 +1044,31 @@ int clock_gettime(clockid_t clk_id, struct timespec *tp) {
   }
 }
 
+int clock_getres(clockid_t clk_id, struct timespec *res) {
+  /* POSIX: a NULL res is legal and asks only "is this clock valid?". */
+  if (!res) {
+    if (clk_id == CLOCK_REALTIME || clk_id == CLOCK_MONOTONIC)
+      return 0;
+    errno = EINVAL;
+    return -1;
+  }
+  /* Honest resolutions: sysinfo(6) reports the RTC in milliseconds, and the
+   * kernel's scheduler tick is 100 Hz, so MONOTONIC advances in 10 ms steps.
+   * Reporting anything finer would be a lie a caller could time against. */
+  if (clk_id == CLOCK_REALTIME) {
+    res->tv_sec = 0;
+    res->tv_nsec = 1000000L; /* 1 ms */
+    return 0;
+  }
+  if (clk_id == CLOCK_MONOTONIC) {
+    res->tv_sec = 0;
+    res->tv_nsec = 10000000L; /* 10 ms: 100 Hz tick */
+    return 0;
+  }
+  errno = EINVAL;
+  return -1;
+}
+
 int gettimeofday(struct timeval *tv, void *tz) {
   struct timespec ts;
 

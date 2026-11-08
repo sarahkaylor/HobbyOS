@@ -47,8 +47,9 @@ int nice(int inc);
 #define PRIO_PGRP    1
 #define PRIO_USER    2
 #endif
-int getpriority(int which, int who);
-int setpriority(int which, int who, int prio);
+/* getpriority()/setpriority() come from <sys/resource.h> above.  Declaring
+ * them here again drifted (int who vs id_t who) and broke the IceWM build;
+ * one source of truth is the libc header. */
 void *memmem(const void *hay, size_t hl, const void *needle, size_t nl);
 long fpathconf(int fd, int name);
 long pathconf(const char *path, int name);
