@@ -4308,12 +4308,16 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     badvec_at_entry[cpu].cs = tf->cs;
     badvec_at_entry[cpu].pid = badvec_pid();
     /* GB-146-A: a frame below the kernel image is the census case; watch its
-       vector slot for the first write and let #DB name the instruction.  Do
-       not watch pid 1's boot frames (they consumed the whole cap in wave7
-       before any test process ran) and skip the #DB itself so its entry does
-       not overwrite the interrupted frame's stamp. */
+       vector slot for the first write and let #DB name the instruction.  Arm
+       only for an exception frame (vector <= 31) of a test process: wave9
+       measured IRQ-frame rows (v=129/v=32) filling 63 of the 64 rows before
+       the fatal at line 735, and the changed-slot frames the DoD names all
+       entered as v=13.  Do not watch pid 1's boot frames either, and skip the
+       #DB itself so its entry does not overwrite the interrupted frame's
+       stamp. */
     if (!badvec_watch_armed[cpu] && badvec_writer_prints < 64 &&
-        badvec_pid() > 1 && badvec_frame_window((uint64_t)tf))
+        badvec_pid() > 1 && tf->vector <= 31 &&
+        badvec_frame_window((uint64_t)tf))
       badvec_watch_arm((uint64_t)&tf->vector, (uint64_t)tf, tf->vector);
   }
   /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
