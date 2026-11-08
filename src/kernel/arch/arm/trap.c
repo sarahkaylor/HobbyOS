@@ -55,6 +55,9 @@ int sys_user_range_ok(uint64_t ptr, uint64_t len);
    stub): it emits the SAME record shape as x64 (per-CPU pid/sp), so GB-057's
    ARM resume diagnosis is not blinded.  Observation only. */
 volatile int64_t resume_mark_pid[MAX_CPUS];
+/* Shared schedule() polls this x64 watchdog hook; the ARM port has no watchdog
+   dump yet, so the flag exists and stays 0 (it must still link). */
+volatile int wd_dump_request = 0;
 volatile uint64_t resume_mark_sp[MAX_CPUS];
 
 void resume_mark(int pid, uint64_t target_sp) {
