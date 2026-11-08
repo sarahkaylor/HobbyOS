@@ -660,6 +660,7 @@ def main():
     next_click = (t_start + click_after) if click_after > 0 else None
     clicks = 0
     checks = 0
+    modal_clicks = 0
     while time.time() < end:
         t = read_log(args.log)
         for needle, name in (
@@ -696,8 +697,26 @@ def main():
             last = time.time()
         if time.time() - last >= args.shot_every:
             i += 1
-            grab(f"{i:02d}_running")
+            png = grab(f"{i:02d}_running")
             last = time.time()
+            # L87: name the plateau instead of leaving "no presents" to be read
+            # as a hang.  The def loader stops presenting for ~215 s while it
+            # keeps opening files; the menu arrives at n~600 after ~650 s.
+            xsw = re.findall(r"\[XSW\] n=(\d+)", t)
+            opens = len(re.findall(r"^\[XO\] ", t, re.M))
+            print(f"[drive] progress n={xsw[-1] if xsw else '?'} "
+                  f"opens={opens}", flush=True)
+            # L87: the Steam modal is drawn OVER the loaded menu and can stay
+            # there for the rest of the window (measured: boot C, n=790, modal
+            # still up).  Dismiss it when it is on screen, independent of
+            # RW_CLICK_IGNORE_AFTER, so "menu loaded" is observable.
+            if modal_clicks < 6 and png:
+                xy = find_ignore_xy(png)
+                if xy:
+                    modal_clicks += 1
+                    print(f"[drive] click Ignore at {xy[0]},{xy[1]} "
+                          f"(automatic, {modal_clicks})", flush=True)
+                    q.click(xy[0], xy[1], args.fb_w, args.fb_h)
         time.sleep(1.0)
 
     grab("99_final")
