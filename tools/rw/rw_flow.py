@@ -763,6 +763,32 @@ class Flow:
                            "phrase": "tile", "text": (txt2 or "")[:200],
                            "pixels": px})
                 png, txt = png2 or png, txt2 or txt
+                if cls2 != "site":
+                    return cls2, png, txt
+                # The tile info panel is up but the screen has not advanced.
+                # RimWorld's map may want the press to land on a frame AND a
+                # separate confirm; try a second click (double-click), then
+                # the keyboard's confirm keys.
+                for how2 in ("double-click", "ret", "spc"):
+                    if time.time() > deadline:
+                        break
+                    if how2 == "double-click":
+                        p3 = self.click_xy(pt, "site", f"tile{attempt}b",
+                                           "double-click", hold=2.0)
+                    else:
+                        self.emit({"ev": "key", "stage": "site",
+                                   "phrase": how2})
+                        self.q.key(how2)
+                        time.sleep(6)
+                        p3 = self.shot(f"site_after_{how2}")
+                    txt3 = ocr_text(p3) if p3 else ""
+                    cls3 = classifier(txt3)
+                    self.emit({"ev": "confirm_try", "stage": "site",
+                               "phrase": how2, "classes": cls3,
+                               "text": txt3[:300]})
+                    if cls3 != "site":
+                        return cls3, p3, txt3
+                    png, txt = p3 or png, txt3 or txt
             # A tile is (or may be) selected: confirm it.
             if "select starting site" not in (txt or "").lower() or brown_buttons(png):
                 p2, cls2, t2, moved = self.try_advance(png, "site", deadline)
