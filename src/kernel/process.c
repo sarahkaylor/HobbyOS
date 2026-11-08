@@ -2020,6 +2020,9 @@ void schedule(struct trap_frame *tf, int is_yield) {
          context[33] disagree therefore re-enters user code on a different
          stack than the one it was interrupted on -- the exact shape of an
          8-byte skew at Mono's next trampoline.  Report the disagreement. */
+      /* x64-only: reads the frame's cs, a field only the x86_64 trap_frame
+         has (the aarch64 resume path has no iretq frame to compare). */
+#if defined(__x86_64__)
       if ((local_tf.cs & 3) == 3) {
         extern int linux_compat_resume_check(int, uint64_t, uint64_t)
             __attribute__((weak));
@@ -2027,6 +2030,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
           (void)linux_compat_resume_check(proc_table[next].pid, local_tf.lr,
                                           arch_get_user_sp());
       }
+#endif /* __x86_64__ */
 
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       extern void resume_mark(int pid, uint64_t target_sp);
@@ -2045,6 +2049,9 @@ void schedule(struct trap_frame *tf, int is_yield) {
          enter_user_space).  This row records the geometry for every user
          resume and a counter, so "the writer is always active" is a number,
          not an inference. */
+      /* x64-only for the same reason: the resume ring window is the iretq
+         frame image enter_user_space writes. */
+#if defined(__x86_64__)
       if ((local_tf.cs & 3) == 3) {
         extern void resume_ring_note(int pid, uint64_t target_sp,
                                      uint64_t frame_lr);
@@ -2109,6 +2116,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
           }
         }
       }
+#endif /* __x86_64__ */
       /* GB-057: the parked cores were recorded with rflags=0x10046 -- IF (0x200)
          CLEAR -- in the frame that iretq restores.  A user process resumed with
          IF=0 can never be preempted by the timer: age_ms climbs for ever, the

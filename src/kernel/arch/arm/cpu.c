@@ -120,3 +120,25 @@ void arch_enter_user_mode(uint64_t entry_point, uint64_t stack_pointer) {
 void arch_memory_barrier(void) {
   __asm__ volatile("dmb sy" ::: "memory");
 }
+
+/* The kernel is freestanding: clang lowers large struct zeroing and copies in
+   shared code (fat16.c) to memset/memcpy, and only the x64 tree defined them
+   (arch/x64/cpu.c:172).  Same semantics, byte loops. */
+#include <stddef.h>
+
+void *memset(void *s, int c, size_t n) {
+  unsigned char *p = s;
+  while (n--) {
+    *p++ = (unsigned char)c;
+  }
+  return s;
+}
+
+void *memcpy(void *dest, const void *src, size_t n) {
+  unsigned char *d = dest;
+  const unsigned char *s = src;
+  while (n--) {
+    *d++ = *s++;
+  }
+  return dest;
+}
