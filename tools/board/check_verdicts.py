@@ -36,7 +36,12 @@ BASE = "http://192.168.0.234:3000/api/v1/repos/sarah/gaming-program"
 TOKEN = os.environ.get("FORGEJO_TOKEN", "")
 LANE_LABELS = ("Backlog", "Ready", "In Progress", "In Review", "Merge Gate",
                "Done", "Icebox")
-GATE_RE = re.compile(r"^(GB-\d+)-V(\d*)$")
+# GB-231: split cards are the normal shape for the M1 wall (WORK POLICY §3), and
+# their gates are `GB-146-A-V2` / `GB-146-B-V`.  A gate id is `<parent>-V<k>` where
+# `<parent>` is `GB-<n>` or the split form `GB-<n>-<letter>`; the group is the
+# PARENT so a split gate is checked against `GB-146-A`, not a phantom `GB-146`.
+GATE_RE = re.compile(r"^(GB-\d+(?:-[A-Z])?)-V(\d*)$")
+SPLIT_RE = re.compile(r"^GB-\d+-[A-Z]$")
 
 
 def api(path):
@@ -178,10 +183,19 @@ def gate_sha(line):
     return m.group(0) if m else None
 
 
-def classify(verdict, parent_lane):
-    """The rule, isolated so a self-test can exercise it without the API."""
+def classify(verdict, parent_lane, split=False):
+    """The rule, isolated so a self-test can exercise it without the API.
+
+    GB-231: a RED on a SPLIT card may legitimately sit in `In Review` — WORK
+    POLICY §2 says a card with an open PR never moves back to `In Progress`, and
+    `GB-146-A` (PR #410 open) is exactly that shape.  The exemption is scoped to
+    split cards so the GB-010/GB-070 defect (a non-split card reading "awaiting
+    review" with a failed gate) is still reported.
+    """
     if verdict == "GREEN":
         return parent_lane in ("Merge Gate", "Done"), "Merge Gate"
+    if split and parent_lane == "In Review":
+        return True, "In Progress or In Review (open PR, §2)"
     return parent_lane in ("In Progress", "Backlog", "Ready"), "In Progress"
 
 
@@ -236,6 +250,17 @@ def self_test():
             bad += 1
         print(f"  [{mark}] verdict={verdict:<5} parent in {lane!r:<13} "
               f"-> ok={ok} (expected {want_ok}, want-lane {want!r})")
+
+    # GB-231: split-card gates.  A RED on a split card is allowed to stay in
+    # `In Review` (§2: an open PR never moves back to In Progress); everywhere
+    # else the rule is unchanged, including In Review for a NON-split card.
+    for lane, split, want_ok in (("In Review", True, True), ("In Review", False, False),
+                                 ("Done", True, False), ("In Progress", True, True)):
+        ok, want = classify("RED", lane, split=split)
+        if ok != want_ok:
+            bad += 1
+        print(f"  [{'OK  ' if ok == want_ok else 'FAIL'}] GB-231 split={split} "
+              f"verdict=RED parent in {lane!r} -> ok={ok} (expected {want_ok}, want-lane {want!r})")
 
     # GB-136 supersession — both directions.
     # Direction 1: an EARLIER gate's RED with a LATER gate's GREEN is superseded,
@@ -379,7 +404,7 @@ def main():
                 lines.append(f"  SUPERSEDED {gid}#{gnum} = RED, overtaken by {gov_gid} "
                              f"(successor sha {gate_sha(succ_line)}) for {parent}#{parent_it['number']}")
         pl = lane_of(parent_it)
-        okv, want = classify(gov_v, pl)
+        okv, want = classify(gov_v, pl, split=bool(SPLIT_RE.match(parent)))
         if not okv:
             mismatched += 1
             lines.append(f"  MISMATCH {gov_gid} = {gov_v} "
