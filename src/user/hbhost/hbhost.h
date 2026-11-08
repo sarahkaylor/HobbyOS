@@ -39,6 +39,10 @@ int hd_term_mode(void);
 int hd_mouse_events(void);
 int hd_take_restamp(void);         /* app sent ESC ] F since the last call */
 void hd_pref_size(int *w, int *h); /* ESC ] X preference (0 = any) */
+/* Size the surface window to that preference, clamped so the WM (IceWM:
+ * title bar + borders + taskbar) cannot shrink it afterwards; re-sends the
+ * app's content rect.  Returns 1 and the X window size in *w,*h. */
+int hd_fit_pref(int *w, int *h);
 void hd_content_rect(int *x, int *y, int *w, int *h);
 
 /* input, in surface coordinates */

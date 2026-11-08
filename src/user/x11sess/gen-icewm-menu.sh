@@ -5,7 +5,8 @@
 # for a DESKTOP=icewm disk so they mirror the default HobbyOS desktop's
 # Apps menu (icewm.md §9):
 #
-#   Apps          the desktop's pinned_apps[], in order (read out of
+#   Apps          RimWorld (when RWLAUNCH.BIN is on the disk) first, then the
+#                 desktop's pinned_apps[], in order (read out of
 #                 src/user/desktop.c itself -- the single source of truth,
 #                 so the two menus cannot drift)
 #   Games         pinned_games[] (in order) + every .BIN/ELF in /GAMES
@@ -57,6 +58,11 @@ M="$OUT/menu"
   on_disk XFILES.BIN && echo 'prog "Files (X11)" folder /XFILES.BIN'
   echo 'separator'
   echo 'menu "Apps" folder {'
+  # RimWorld first, and through HBHOST like every other native entry: the
+  # launcher asks for a pixel window (ESC ] X <w>;<h>~ on stdout) and only the
+  # host answers it -- `app RWLAUNCH.BIN` raw would run with no display at all.
+  # It is excluded from "All programs" below for the same reason.
+  on_disk RWLAUNCH.BIN && echo '    prog "RimWorld" app HBHOST.BIN RWLAUNCH.BIN'
   for a in $APPS; do
     on_disk "$a" && echo "    prog \"$(label "$a")\" app HBHOST.BIN $a"
   done
@@ -84,6 +90,9 @@ M="$OUT/menu"
     case "$f" in *.BIN) ;; *) continue;; esac
     in_list "$f" "$APPS" && continue
     in_list "$f" "$GAMES" && continue
+    # RimWorld has its own hosted entry at the top of Apps; a raw
+    # `app RWLAUNCH.BIN` has no window (it needs HBHOST's ESC ] X answer).
+    [ "$f" = RWLAUNCH.BIN ] && continue
     skipped "$f" && continue
     rest="$rest $f"
   done

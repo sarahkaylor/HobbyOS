@@ -474,10 +474,13 @@ int main(int argc, char **argv) {
       }
     } else {
       if (hd_pixel_mode() && !pref_done) {
-        int pw, ph;
-        hd_pref_size(&pw, &ph);
+        int ww, wh;
         pref_done = 1;
-        if (pw > 0 && ph > 0) resize_window(pw, ph + HD_MENUBAR_H);
+        /* Content size from ESC ] X, clamped to what IceWM will actually
+         * show (title bar + borders + taskbar).  Resizing the X window to the
+         * raw request made the WM shrink it afterwards and the bottom of the
+         * game fell off; hd_fit_pref also re-sends the app its content rect. */
+        if (hd_fit_pref(&ww, &wh) && ww > 0 && wh > 0) resize_window(ww, wh);
       }
       int x, y, w, h;
       int painted = hd_paint(&x, &y, &w, &h);
