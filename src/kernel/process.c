@@ -4595,7 +4595,9 @@ void start_scheduler(void) {
 
   while (1) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    lockdiag_set_stage(5); /* GB-232: inside process_check_sleeping() */
     process_check_sleeping();
+    lockdiag_set_stage(3); /* GB-232: scan stage, after the sleeping check */
     for (int i = 0; i < MAX_PROCESSES; i++) {
       if (proc_table[i].state != PROC_STATE_READY)
         continue;
@@ -4710,7 +4712,9 @@ void start_scheduler(void) {
         resume_returned_halt(proc_table[i].pid, &local_tf);
       }
     }
+    lockdiag_set_stage(4); /* GB-232: reached the loop's release */
     spinlock_release_irqrestore(&proc_lock, flags);
+    lockdiag_set_stage(0);
 
     /* This core is going idle: it no longer runs any process.  Clear the
        claim so a stale cpu_current_pids can't make a later timer tick on
@@ -5563,6 +5567,25 @@ void start_scheduler(void) {
           print_int(ld.owner_cpu >= 0
                         ? watchdog_cpu_pid((uint32_t)ld.owner_cpu)
                         : -1);
+          /* GB-232: which start_scheduler loop stage the owner reached, and
+             the exact lock_stallbreak_ok inputs that kept it from breaking. */
+          uart_puts(" owner_stage=");
+          print_int(ld.owner_cpu >= 0
+                        ? (int)lockdiag_stage((uint32_t)ld.owner_cpu)
+                        : -1);
+          {
+            uint64_t sb_age = ~0ULL;
+            int sb_stopped = 0, sb_wedged = 0;
+            if (ld.owner_cpu >= 0)
+              lock_stallbreak_inputs((uint32_t)ld.owner_cpu, timer_get_ms(),
+                                     &sb_age, &sb_stopped, &sb_wedged);
+            uart_puts(" sb_hb_age=");
+            print_int(sb_age == ~0ULL ? -1 : (int)sb_age);
+            uart_puts(" sb_stopped=");
+            print_int(sb_stopped);
+            uart_puts(" sb_wedged=");
+            print_int(sb_wedged);
+          }
           uart_puts("\n");
         }
         if (lockdiag_last_stallbreak(&ld)) {

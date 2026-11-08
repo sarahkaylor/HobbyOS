@@ -222,6 +222,35 @@ uint8_t lockdiag_stage(uint32_t cpu) {
   return cpu < MAX_CPUS ? sched_stage[cpu] : 0;
 }
 
+/* GB-232: the scheduler stamps its loop stage here (observation only). */
+void lockdiag_set_stage(uint8_t stage) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS)
+    sched_stage[c] = stage;
+}
+
+/* GB-232: the exact inputs lock_stallbreak_ok() used, for the dump.  The
+   `cpu` argument is deliberately out of range so the self-lock arm cannot
+   fire; this reports the owner's liveness, not a waiter's decision. */
+void lock_stallbreak_inputs(uint32_t owner_cpu, uint64_t now_ms,
+                            uint64_t *hb_age, int *stopped, int *wedged) {
+  if (hb_age)
+    *hb_age = ~0ULL;
+  if (stopped)
+    *stopped = 0;
+  if (wedged)
+    *wedged = 0;
+  if (owner_cpu >= MAX_CPUS)
+    return;
+  uint64_t hb = cpu_heartbeat_ms[owner_cpu];
+  if (hb && hb_age)
+    *hb_age = now_ms >= hb ? now_ms - hb : 0;
+  if (stopped)
+    *stopped = cpu_is_halted(owner_cpu) ? 1 : 0;
+  if (wedged)
+    *wedged = lock_stallbreak_ok(owner_cpu + 1, 0xFFFFFFFFu, now_ms) ? 1 : 0;
+}
+
 /* Raw lock-free deadlock scream: a core spinning with IRQs disabled may be
    stuck because the lock's holder died mid-print, possibly while holding
    uart_lock itself.  This path must therefore never touch uart_lock (or any

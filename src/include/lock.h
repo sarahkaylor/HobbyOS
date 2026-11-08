@@ -117,6 +117,12 @@ int lockdiag_snapshot(uint32_t cpu, lockdiag_t *out);
 int lockdiag_last_stallbreak(lockdiag_t *out);
 /* sched_stage for `cpu` (0 on platforms without the marker). */
 uint8_t lockdiag_stage(uint32_t cpu);
+/* GB-232: stamp this CPU's sched_stage so a wedge names the loop stage. */
+void lockdiag_set_stage(uint8_t stage);
+/* GB-232: lock_stallbreak_ok's inputs for an owner CPU, so the refusal is
+ * explained in the same dump that prints the held lock. */
+void lock_stallbreak_inputs(uint32_t owner_cpu, uint64_t now_ms,
+                            uint64_t *hb_age, int *stopped, int *wedged);
 
 /* GB-060 gate: print the end-of-run lock-strand counter summary (STALLBREAK /
  * STOLEN / LOCKFOREVER / UNOWNED-FREED). Called from the CPU-0 halt path so the
