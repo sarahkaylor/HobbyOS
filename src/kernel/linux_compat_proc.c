@@ -1236,7 +1236,11 @@ static int l_proc_sched_getaffinity(struct process *p, struct trap_frame *tf) {
      trap_init_core_with_id", ids 0..n-1).  process_get_num_cpus() counts
      cores that have entered the IDLE loop, which lags AP bring-up and made a
      probe started early report a ONE-CPU machine; it is only the fallback. */
+#if defined(__x86_64__)
   int ncpu = (int)smp_init_count();
+#else
+  int ncpu = 0; /* smp_init_count() is x64-only; the fallback below counts IDLE cores */
+#endif
   if (ncpu <= 0) ncpu = process_get_num_cpus();
   if (ncpu < 1) ncpu = 1;
   if (ncpu > L_CPUMASK_MAX_CPUS) ncpu = L_CPUMASK_MAX_CPUS;
