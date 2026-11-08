@@ -5080,11 +5080,22 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         int st_cpu = -1;
         uint64_t tfu = (uint64_t)tf;
         int frame_user = badvec_frame_window(tfu);
+        int64_t now_pid = badvec_pid();
+        int stale_cpu = -1;
+        int64_t stale_pid = -1;
+        /* GB-146-A (V2 RED): two processes' user stacks share the same VA
+           range, so a frame VA alone can match another pid's stale stamp and
+           manufacture a false "unchanged" (or a false "changed") block.  A
+           stamp belongs to this dump only when the pid also matches. */
         for (uint32_t i = 0; i < MAX_CPUS; i++) {
           if (badvec_at_entry[i].frame == tfu) {
-            st = &badvec_at_entry[i];
-            st_cpu = (int)i;
-            break;
+            if (badvec_at_entry[i].pid == now_pid) {
+              st = &badvec_at_entry[i];
+              st_cpu = (int)i;
+              break;
+            }
+            stale_cpu = (int)i;
+            stale_pid = badvec_at_entry[i].pid;
           }
         }
         panic_puts("[BADVEC] fatal frame=");
@@ -5097,7 +5108,17 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         panic_print_hex((uint64_t)&tf->cs);
         panic_puts("\n");
         if (!st) {
-          panic_puts("[BADVEC] fatal dump has no entry stamp: frame=");
+          if (stale_cpu >= 0) {
+            panic_puts("[BADVEC] fatal dump has no entry stamp for pid=");
+            print_int_raw((int)now_pid);
+            panic_puts(" (stale stamp pid=");
+            print_int_raw((int)stale_pid);
+            panic_puts(" cpu=");
+            print_int_raw(stale_cpu);
+            panic_puts("): frame=");
+          } else {
+            panic_puts("[BADVEC] fatal dump has no entry stamp: frame=");
+          }
           panic_print_hex((uint64_t)tf);
           panic_puts(" now_v=");
           print_int_raw((int)tf->vector);
