@@ -46,6 +46,14 @@
 #include "timer.h"
 #include "vm.h"
 
+/*
+ * This translation unit is the x86-64 Linux ABI: rt_sigframe layout, MSR/CR2
+ * asm and the x86 trap_frame members it reads exist only on that port.  The
+ * aarch64 kernel still compiles the file because src/kernel/*.c is one glob;
+ * the two weak hooks shared code calls are defined at the bottom instead.
+ */
+#if defined(__x86_64__)
+
 /* Boot-anchored CLOCK_REALTIME (src/kernel/time.c): the futex timeout
    conversion needs the SAME clock the caller used, and for a realtime
    FUTEX_WAIT_BITSET that is this one, not timer_get_ms(). */
@@ -3856,3 +3864,39 @@ uint32_t linux_compat_pi_test_cas(uint32_t *word, uint32_t expect,
   return l_pi_cas((uint64_t)(uintptr_t)word, expect, desire);
 }
 #endif
+#else /* !__x86_64__ */
+/*
+ * aarch64: no Linux ABI, so no signal frames and no futex queue.  Shared code
+ * (pipe.c and the compat callers) checks these weak hooks, and the unit tier
+ * links the PI-futex suite; keep both resolving so an ARM build is not
+ * undefined-symbol-clean by accident.  linux_compat_sig_deliverable() is 0
+ * because ARM has no Linux-ABI signal delivery; the trace is x64-only.
+ */
+int linux_compat_sig_deliverable(struct process *p) {
+  (void)p;
+  return 0;
+}
+void futex_trace_note(struct futex_ev *ev) { (void)ev; }
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* The PI-futex suite drives x86-64 futex words (see unit_test.c guard). */
+int linux_compat_pi_test_acquire(uint32_t *word, uint32_t pid, int trylock) {
+  (void)word;
+  (void)pid;
+  (void)trylock;
+  return 0;
+}
+int linux_compat_pi_test_release(uint32_t *word, uint32_t pid) {
+  (void)word;
+  (void)pid;
+  return 0;
+}
+uint32_t linux_compat_pi_test_cas(uint32_t *word, uint32_t expect,
+                                  uint32_t desire) {
+  (void)word;
+  (void)expect;
+  (void)desire;
+  return 0;
+}
+#endif
+#endif /* __x86_64__ */

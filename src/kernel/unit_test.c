@@ -61,8 +61,8 @@ void run_all_unit_tests(void) {
   time_test_suite();
   math_test_suite();
   elf_loader_test_suite(); /* docs/shared-libs.md lane B (empty until it lands) */
-  linux_compat_pi_test_suite(); /* PI futex word state machine (M6 park) */
 #ifdef __x86_64__
+  linux_compat_pi_test_suite(); /* PI futex word state machine (M6 park) */
   fpu_sig_test_suite(); /* M6/L63: signal-frame FP image: alignment guard */
 #endif
 
