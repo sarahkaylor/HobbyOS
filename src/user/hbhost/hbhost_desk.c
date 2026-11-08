@@ -80,8 +80,11 @@ int hd_create(int pid, int out_fd, int in_fd, const char *title) {
   return 0;
 }
 
+static void pixel_clear_content(void);
+
 void hd_set_size(int w, int h) {
   if (!hw) return;
+  int old_w = hw->w, old_h = hw->h;
   if (w < 32) w = 32;
   if (h < HD_MENUBAR_H + 16) h = HD_MENUBAR_H + 16;
   /* The surface window is what HBHOST's X window becomes, so the bound is
@@ -103,13 +106,55 @@ void hd_set_size(int w, int h) {
   hw->y = -18;
   hw->w = w + 4;
   hw->h = h + 20;
+  {
+    int cx, cy, cw, ch;
+    wm_pixel_content_rect(hw, &cx, &cy, &cw, &ch);
+    fprintf(stderr, "[HB] hd_set_size win=%dx%d hw=%d,%d,%dx%d content=%d,%d,%dx%d pix=%d\n",
+            w, h, hw->x, hw->y, hw->w, hw->h, cx, cy, cw, ch, hw->pixel_mode);
+  }
   wm_window_invalidate(hw);
   if (hw->term_mode) wm_term_resize(hw);
-  if (hw->pixel_mode) wm_pixel_resize(hw);
+  if (hw->pixel_mode) {
+    wm_pixel_resize(hw);
+    /* A content rect that moved or changed size has no valid pixels in the
+     * part the app never painted; the old text tail is not a background. */
+    if (hw->w != old_w || hw->h != old_h) pixel_clear_content();
+  }
   hd_full = 1;
 }
 
 void hd_invalidate(void) { hd_full = 1; }
+
+/* L84: a pixel window owns its content pixels, and the desktop paints none of
+ * them (wm_draw_window_rows stops at the menu bar for pixel_mode).  Anything
+ * still in the content rect is therefore the *text tail* the window had before
+ * the app asked for pixels -- and an app only repaints what it is asked to, so
+ * it would sit there forever (measured: the Unity memory dump stayed in the
+ * window's top-left corner while the game's loading art filled the rest).
+ * Clear it and ask for a full repaint; the app's own frames then own the
+ * whole rect.  Called on the pixel-mode switch and on a content resize. */
+static void pixel_clear_content(void) {
+  if (!hw || !hw->pixel_mode) return;
+  uint32_t *fb = graphics_fb();
+  if (!fb) return;
+  int cx, cy, cw, ch;
+  wm_pixel_content_rect(hw, &cx, &cy, &cw, &ch);
+  if (cx < 0) { cw += cx; cx = 0; }
+  if (cy < 0) { ch += cy; cy = 0; }
+  if (cx + cw > SCREEN_WIDTH) cw = SCREEN_WIDTH - cx;
+  if (cy + ch > SCREEN_HEIGHT) ch = SCREEN_HEIGHT - cy;
+  if (cw <= 0 || ch <= 0) return;
+  for (int r = cy; r < cy + ch; r++) {
+    uint32_t *row = fb + (size_t)r * SCREEN_WIDTH + cx;
+    for (int i = 0; i < cw; i++) row[i] = 0;
+  }
+  wm_pixel_queue_expose_all(hw);
+}
+
+void hd_pixel_enter(void) {
+  pixel_clear_content();
+  hd_full = 1;            /* the chrome (menu bar) is ours again */
+}
 
 /* ---- output: ESC ] R pre-filter, then the desktop's parser ---- */
 static char pf_buf[200];
@@ -155,6 +200,19 @@ void hd_feed(const char *buf, int n) {
           pf_state = 0;
         } else {
           pf_buf[pf_len++] = c;
+          /* L84: the app's own present message (ESC ] F [x;y;w;h] ~).  A
+           * compat X client has no SYS_FLUSH_FB, so this IS its present; log
+           * it (rate-limited) so "app did not present" is a row, not a guess. */
+          if (pf_len >= 3 && pf_buf[2] == 'F') {
+            static unsigned n_f, last_ms;
+            n_f++;
+            int t = sysinfo(1, 0, 0);
+            if (n_f <= 10 || t - (int)last_ms >= 1000) {
+              last_ms = (unsigned)t;
+              if (pf_len < (int)sizeof pf_buf) pf_buf[pf_len] = '\0';
+              fprintf(stderr, "[HB] flush-in n=%u seq=%s\n", n_f, pf_buf + 1);
+            }
+          }
           pf_flush();
         }
       } else {
@@ -173,6 +231,7 @@ int hd_paint(int *x, int *y, int *w, int *h) {
     hd_full = 0;
     *x = 0; *y = 0; *w = vis_w; *h = vis_h;
     painted = 1;
+    fprintf(stderr, "[HB] paint full win=%dx%d pix=%d\n", vis_w, vis_h, hw->pixel_mode);
   } else if (!hw->pixel_mode && wm_draw_window_rows(hw)) {
     if (hw->row_damage.w > 0) {
       *x = hw->row_damage.x; *y = hw->row_damage.y;
@@ -182,7 +241,20 @@ int hd_paint(int *x, int *y, int *w, int *h) {
     }
     painted = 1;
   }
-  if (hw->pixel_mode) wm_pixel_flush_exposes(hw);
+  if (hw->pixel_mode) {
+    /* A repair request is the only thing that makes a compat client repaint;
+     * count what goes out so "the app never flushed" and "we never asked" are
+     * different rows. */
+    static unsigned reqs;
+    int had = hw->pix_expose_full || hw->pix_expose_n;
+    if (had) {
+      reqs++;
+      if (reqs <= 10 || (reqs % 200) == 0)
+        fprintf(stderr, "[HB] expose-out n=%u full=%d rects=%d\n",
+                reqs, hw->pix_expose_full, hw->pix_expose_n);
+    }
+    wm_pixel_flush_exposes(hw);
+  }
   return painted;
 }
 
