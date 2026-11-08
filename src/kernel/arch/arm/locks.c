@@ -14,6 +14,23 @@ volatile uint64_t lock_cnt_unownedfreed = 0;  /* [UNOWNED-FREED] locked=1,o=0 */
 volatile uint64_t lock_cnt_stolen = 0;        /* [STOLEN]       halted owner  */
 volatile uint64_t lock_cnt_stallbreak = 0;    /* [STALLBREAK]   wedged owner  */
 
+/* GB-146-B: ARM has no owner/held-lock/wait table (the diagnostics live in
+   arch/x64/locks.c); the scheduler's shared [IDLESTUCK] dump asks for rows and
+   gets none, so the x64-only instrumentation does not bend the ARM build. */
+int lockdiag_snapshot(uint32_t cpu, lockdiag_t *out) {
+  (void)cpu;
+  (void)out;
+  return 0;
+}
+int lockdiag_last_stallbreak(lockdiag_t *out) {
+  (void)out;
+  return 0;
+}
+uint8_t lockdiag_stage(uint32_t cpu) {
+  (void)cpu;
+  return 0;
+}
+
 /**
  * Initializes a spinlock structure to the unlocked state.
  */
