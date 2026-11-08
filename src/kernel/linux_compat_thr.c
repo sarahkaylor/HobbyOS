@@ -3877,6 +3877,15 @@ int linux_compat_sig_deliverable(struct process *p) {
   return 0;
 }
 void futex_trace_note(struct futex_ev *ev) { (void)ev; }
+/* linux_compat_proc.c's rt_sigreturn handler calls this unconditionally; on
+   ARM there is no Linux-ABI frame to return from, so report EINVAL exactly
+   like the native restore does for a stale call (the handler is unreachable
+   in practice: compat syscalls are only dispatched for PROC_FLAG_LINUX_ABI). */
+int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  return -EINVAL;
+}
 
 #ifdef KERNEL_MODE_UNIT_TEST
 /* The PI-futex suite drives x86-64 futex words (see unit_test.c guard). */
