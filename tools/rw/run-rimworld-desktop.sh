@@ -5,18 +5,19 @@
 #
 # Why a separate mode from tools/rw/run-rimworld.sh:
 #   run-rimworld.sh boots MODE=test, which starts no desktop.  The game's
-#   video init needs the desktop's window protocol — the compat libX11 has no
-#   X server; it writes ESC ] X <w>;<h> ~ to stdout and reads ESC ] G ... from
-#   stdin, and the *desktop* is what creates that window for the child it
-#   spawned.  So the game can only get a display when the launcher itself is
-#   launched from the desktop's Apps menu (MODE=desktop, DESKTOP=hobby — the
-#   same session tools/gate/m3_x11_client.py and the M4 GL gate use).
+#   video init needs a window host — the compat libX11 has no X server; it
+#   writes ESC ] X <w>;<h> ~ to stdout and reads ESC ] G ... from stdin, and
+#   something must answer that for the child it spawned.  On the shipped
+#   desktop that answer comes from HBHOST.BIN, which IceWM's Start menu runs
+#   for every native app: `prog "RimWorld" app HBHOST.BIN RWLAUNCH.BIN`.  So
+#   the game gets a display when the launcher is started from the Start menu
+#   (MODE=desktop, DESKTOP=icewm — the default).
 #
 # What it does, in order:
 #   1. pinned glibc 2.31 (sha256-checked, the M1 pins);
-#   2. builds kernel + disk for MODE=desktop DESKTOP=hobby, rebuilds the
-#      xcompat DSOs (rule: rebuild before any libGL work), builds the AD-9
-#      PlayerMain launcher as a glibc-2.31 PIE and the native rwlaunch;
+#   2. builds kernel + disk for MODE=desktop DESKTOP=icewm (RW_DESKTOP),
+#      rebuilds the xcompat DSOs (rule: rebuild before any libGL work), builds
+#      the AD-9 PlayerMain launcher as a glibc-2.31 PIE and the native rwlaunch;
 #   3. stages /LIB64: glibc pin + libz + libX11.so.6/libasound.so.2/libudev.so.1
 #      (src/user/xcompat/stage.sh) + libGL.so.1/libGLX.so.0
 #      (tools/mesa/stage.sh); /RWDSO: the game's own DSOs (AD-10);
@@ -39,6 +40,17 @@
 #      GLIBC231 / GLIBC231_DEV, RW_SHOT_EVERY (default 8s),
 #      RW_WAIT_SECS (launcher's own wait, default 900; must exceed
 #      --run-timeout for a soak), RW_APP (default RWLAUNCH.BIN).
+#
+#      RW_DESKTOP=icewm|hobby (default icewm).  icewm boots XSESSION.BIN +
+#      ICEWM.BIN and starts the game from IceWM's Start menu: the launcher is
+#      the Apps > RimWorld entry (gen-icewm-menu.sh, routed through
+#      HBHOST.BIN), and rw_desktop_drive.py finds the taskbar in a screenshot,
+#      clicks Start, opens Apps and clicks the entry.  RW_DESKTOP=hobby is a
+#      compatibility shim for reproducing old evidence (the native
+#      DESKTOP.BIN [MENU] walk); that desktop is being removed.
+#      RW_LAUNCH_VIA=icewm-menu|hobby-menu|none (default per desktop);
+#      RW_ICEWM_LAUNCH=<label> is the Start-menu entry to click (RimWorld).
+#      RW_X11_BUILD_DIR=<dir> points the icewm build at a prebuilt X stack.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 2
@@ -65,6 +77,38 @@ SHOT_DIR="$OUT/shots"
 QMP="$ROOT/qmp-sock-rw-desktop"
 mkdir -p "$OUT" "$SHOT_DIR"
 rm -f "$QMP"
+
+# RV/L83: the desktop this disk boots.  icewm is the default and the only
+# supported target: XSESSION.BIN + ICEWM.BIN, and the launcher is the Start
+# menu's Apps > RimWorld entry (gen-icewm-menu.sh, routed through HBHOST.BIN).
+# RW_DESKTOP=hobby still selects the native DESKTOP.BIN session (the [MENU]/F1
+# walk) but is a compatibility shim for reproducing old evidence only -- that
+# desktop is being deleted.
+RW_DESKTOP="${RW_DESKTOP:-icewm}"
+case "$RW_DESKTOP" in
+  hobby|icewm) ;;
+  *) echo "RW_DESKTOP must be 'icewm' or 'hobby' (got '$RW_DESKTOP')" >&2; exit 2 ;;
+esac
+# How the app is started.  icewm-menu: click Start -> Apps -> <RW_ICEWM_LAUNCH>
+# (default RimWorld).  hobby-menu: the old [MENU] index + F1/End/Up*N/Enter.
+# none: boot and screenshot only (an operator drives the Start menu).
+if [ "$RW_DESKTOP" = icewm ]; then
+  RW_LAUNCH_VIA="${RW_LAUNCH_VIA:-icewm-menu}"
+else
+  RW_LAUNCH_VIA="${RW_LAUNCH_VIA:-hobby-menu}"
+fi
+case "$RW_LAUNCH_VIA" in
+  icewm-menu) [ "$RW_DESKTOP" = icewm ] || { echo "RW_LAUNCH_VIA=icewm-menu needs RW_DESKTOP=icewm" >&2; exit 2; } ;;
+  hobby-menu) [ "$RW_DESKTOP" = hobby ] || { echo "RW_LAUNCH_VIA=hobby-menu needs RW_DESKTOP=hobby" >&2; exit 2; } ;;
+  none) ;;
+  *) echo "RW_LAUNCH_VIA must be icewm-menu, hobby-menu or none (got '$RW_LAUNCH_VIA')" >&2; exit 2 ;;
+esac
+echo "== desktop: $RW_DESKTOP (launch via $RW_LAUNCH_VIA)"
+X11VAR=""
+if [ -n "${RW_X11_BUILD_DIR:-}" ]; then
+  X11VAR="X11_BUILD_DIR=$RW_X11_BUILD_DIR"
+  [ "$RW_DESKTOP" = icewm ] || echo "  (RW_X11_BUILD_DIR ignored: DESKTOP=$RW_DESKTOP)"
+fi
 
 if [ ! -f "$HOME/.local/share/OVMF/OVMF_CODE_4M.fd" ] && \
    [ -f "/home/$(id -un)/.local/share/OVMF/OVMF_CODE_4M.fd" ]; then
@@ -120,8 +164,8 @@ if [ "${RW_CHURN_SOAK:-0}" = 1 ]; then
 fi
 
 if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
-  echo "== build: kernel + disk (MODE=desktop DESKTOP=hobby)"
-  TOOLS_SKIP=1 make -j8 ARCH=intel MODE=desktop DESKTOP=hobby hobbyos.elf disk.img \
+  echo "== build: kernel + disk (MODE=desktop DESKTOP=$RW_DESKTOP)"
+  TOOLS_SKIP=1 make -j8 ARCH=intel MODE=desktop DESKTOP="$RW_DESKTOP" $X11VAR hobbyos.elf disk.img \
     >"$OUT/build.log" 2>&1 || { echo "BUILD FAILED"; tail -30 "$OUT/build.log"; exit 2; }
 
   echo "== build: xcompat DSOs (must predate any libGL audit/stage)"
@@ -286,6 +330,28 @@ echo "  staged: /NFSEXPORT -> $RW_EXPORT (lane $RW_LANE)"
 
 # The desktop's Apps menu launches root entries by name; this is the launcher.
 stage "$OUT/rwlaunch.bin" ::/RWLAUNCH.BIN
+
+# L83: an icewm disk's /ICEWM/menu was generated by stage-disk.sh while the
+# disk was BUILT -- before this harness staged RWLAUNCH.BIN -- so it has no
+# RimWorld entry yet.  Regenerate it now, from this disk's own file listing:
+# the launcher then sits at the top of Apps as `HBHOST.BIN RWLAUNCH.BIN`
+# (hosted: it asks for a pixel window and only HBHOST answers) and is
+# excluded from All programs.  Also kept in $OUT/icewm-menu for the driver.
+if [ "$RW_DESKTOP" = icewm ]; then
+  echo "== stage: icewm Start menu (/ICEWM/menu) with the RimWorld entry"
+  MDIR_OUT="$OUT/icewm-menu"
+  rm -rf "$MDIR_OUT" && mkdir -p "$MDIR_OUT"
+  sh src/user/x11sess/gen-icewm-menu.sh "$IMG" src/user/desktop.c "$MDIR_OUT" \
+    || { echo "icewm menu generation failed"; exit 2; }
+  mdir -i "$IMG" ::/ICEWM >/dev/null 2>&1 || mmd -i "$IMG" ::/ICEWM
+  stage "$MDIR_OUT/menu" ::/ICEWM/menu
+  stage "$MDIR_OUT/toolbar" ::/ICEWM/toolbar
+  if grep -q 'prog "RimWorld" app HBHOST.BIN RWLAUNCH.BIN' "$MDIR_OUT/menu"; then
+    echo "  $(grep -n 'RimWorld' "$MDIR_OUT/menu" | head -1 | sed 's/^/menu:/')"
+  else
+    echo "STAGE FAILED: no RimWorld entry in the generated menu"; exit 2
+  fi
+fi
 # Opt-in mutex lifetime tracer: the guest desktop starts the game, so no host
 # environment reaches it.  rwlaunch reads this marker and emits
 # RW_TRACE_MUTEX=1 in the child's env (0 otherwise).  Staged here, and REMOVED
@@ -490,11 +556,11 @@ fi
 llvm-objcopy --strip-debug "$ROOT/hobbyos.elf" "$OUT/hobbyos.boot.elf"
 mcopy -o -i "$IMG" "$OUT/hobbyos.boot.elf" ::/boot/hobbyos.elf
 echo "== kernel: staged $(stat -c %s "$OUT/hobbyos.boot.elf") bytes as ::/boot/hobbyos.elf"
-echo "== boot: MODE=desktop DESKTOP=hobby (deadline ${TIMEOUT_S}s, log $LOG)"
+echo "== boot: MODE=desktop DESKTOP=$RW_DESKTOP (deadline ${TIMEOUT_S}s, log $LOG)"
 : >"$LOG"
 MAKEEXTRA=""
 
-( make -o disk.img ARCH=intel MODE=desktop DESKTOP=hobby EDK2_X86_64="$OVMF" \
+( make -o disk.img ARCH=intel MODE=desktop DESKTOP="$RW_DESKTOP" $X11VAR EDK2_X86_64="$OVMF" \
        $GLVARS $MAKEEXTRA run QEMU_ARGS="$DISPARGS -enable-kvm -qmp unix:$QMP,server,nowait ${RW_QEMU_EXTRA:-}" \
        >>"$LOG" 2>&1 & )
 
@@ -509,8 +575,18 @@ if [ "${RW_QEMU_GL:-0}" = 1 ]; then
   FBARGS="--fb-phys $FBP --fb-w 1920 --fb-h 1080"
   echo "== screenshots: /dev/fb0 from guest physical memory at $FBP"
 fi
+if [ "$RW_DESKTOP" = icewm ]; then
+  # No DESKTOP.BIN menu and no [MENU] dump: the driver waits for XSESSION,
+  # finds the taskbar in a screenshot, then clicks Start -> Apps -> <label>.
+  DRIVE_ARGS=(--desktop icewm --launch-via "$RW_LAUNCH_VIA"
+              --icewm-launch "${RW_ICEWM_LAUNCH:-RimWorld}"
+              --menu-file "$OUT/icewm-menu/menu")
+else
+  DRIVE_ARGS=(--desktop hobby --launch-via "$RW_LAUNCH_VIA"
+              --app "${RW_APP:-RWLAUNCH.BIN}")
+fi
 if python3 tools/rw/rw_desktop_drive.py --log "$LOG" --qmp "$QMP" \
-        --shot-dir "$SHOT_DIR" --app "${RW_APP:-RWLAUNCH.BIN}" \
+        --shot-dir "$SHOT_DIR" "${DRIVE_ARGS[@]}" \
         --boot-timeout "$TIMEOUT_S" --run-timeout "$RUN_TIMEOUT_S" \
         --shot-every "${RW_SHOT_EVERY:-8}" $FBARGS; then
   RC=0
@@ -542,7 +618,7 @@ mdir -i "$IMG" ::/RW_HOME >/dev/null 2>&1 && \
 
 echo
 echo "== ordered ladder (raw serial lines, in order)"
-grep -anE '\[RW\]|\[RWMAIN\]|\[LCOMPAT\]|Loading program|PT_INTERP|Initialize engine|GfxDevice|GL_VERSION|GL_RENDERER|Mono path|Mono config|error while loading|failed to map|cannot open shared|undefined symbol|Video subsystem|Unable to load|Failed to load|mono library|\[LAUNCH\]|memory fault|FATAL|\[ALIVE-SET\]|\[IDLESTUCK\]|System halt' \
+grep -anE '\[RW\]|\[RWMAIN\]|\[HBHOST\]|\[XSESS\]|\[LCOMPAT\]|Loading program|PT_INTERP|Initialize engine|GfxDevice|GL_VERSION|GL_RENDERER|Mono path|Mono config|error while loading|failed to map|cannot open shared|undefined symbol|Video subsystem|Unable to load|Failed to load|mono library|\[LAUNCH\]|memory fault|FATAL|\[ALIVE-SET\]|\[IDLESTUCK\]|System halt' \
      "$LOG" || true
 
 echo

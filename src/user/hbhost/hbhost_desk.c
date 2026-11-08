@@ -27,6 +27,14 @@
 #include "vdisplay.h"
 #include "hbhost.h"
 
+/* What IceWM takes out of the screen for one client (measured on the shipped
+ * theme at 1920x1080): a 16-24 px title bar, a 2 px border per side, and the
+ * 26 px taskbar along the bottom.  HBHOST sizes the surface window so that
+ * window + frame fits the work area -- see hd_set_size(). */
+#define HD_WM_TITLE_H 24
+#define HD_WM_BORDER  2
+#define HD_TASKBAR_H  26
+
 /* ---- virtual display syscalls ---- */
 int hd_vd_attach(int memfd) {
   return (int)my_syscall(SYS_VDISPLAY, VDISP_OP_ATTACH, memfd, 0, 0);
@@ -76,8 +84,18 @@ void hd_set_size(int w, int h) {
   if (!hw) return;
   if (w < 32) w = 32;
   if (h < HD_MENUBAR_H + 16) h = HD_MENUBAR_H + 16;
-  if (w > SCREEN_WIDTH - 4) w = SCREEN_WIDTH - 4;
-  if (h > SCREEN_HEIGHT - 20) h = SCREEN_HEIGHT - 20;
+  /* The surface window is what HBHOST's X window becomes, so the bound is
+   * the WORK AREA, not the screen: IceWM frames the client (a title bar above
+   * and a border on each side) and keeps its taskbar at the bottom.  A window
+   * sized to the raw screen made the WM shrink it after the fact -- measured
+   * with Unity's 1920x1080 borderless container: 1916x1078 requested,
+   * 1916x1054 granted, and the last 24 rows of the game fell off the bottom.
+   * Sizing to this bound means the WM has nothing left to shrink. */
+  if (w > SCREEN_WIDTH - 2 * HD_WM_BORDER) w = SCREEN_WIDTH - 2 * HD_WM_BORDER;
+  {
+    int maxh = SCREEN_HEIGHT - HD_TASKBAR_H - HD_WM_TITLE_H - 2 * HD_WM_BORDER;
+    if (h > maxh) h = maxh;
+  }
   vis_w = w; vis_h = h;
   /* Frame/title off-surface: content x = hw->x + 2 = 0, menu bar rows
    * hw->y + 18 .. + 34 = 0 .. 16, content y = 16, content h = h - 16. */
@@ -180,6 +198,27 @@ int hd_take_restamp(void) {
 void hd_pref_size(int *w, int *h) {
   *w = hw ? hw->pix_pref_w : 0;
   *h = hw ? hw->pix_pref_h : 0;
+}
+
+int hd_fit_pref(int *w, int *h) {
+  int pw, ph;
+  if (!hw || !hw->pixel_mode) return 0;
+  hd_pref_size(&pw, &ph);
+  if (pw <= 0 || ph <= 0) return 0;
+  /* The window INCLUDES HBHOST's 18 px menu bar, so the content bound is
+   * the work area minus that bar (see hd_set_size). */
+  if (pw > SCREEN_WIDTH - 2 * HD_WM_BORDER) pw = SCREEN_WIDTH - 2 * HD_WM_BORDER;
+  {
+    int maxh = SCREEN_HEIGHT - HD_TASKBAR_H - HD_WM_TITLE_H - 2 * HD_WM_BORDER
+               - HD_MENUBAR_H;
+    if (ph > maxh) ph = maxh;
+  }
+  /* hd_set_size re-sends the app's content rect (ESC ] G) and repaints, so
+   * the client renders at exactly what the WM will show. */
+  hd_set_size(pw, ph + HD_MENUBAR_H);
+  *w = vis_w;
+  *h = vis_h;
+  return 1;
 }
 void hd_content_rect(int *x, int *y, int *w, int *h) {
   if (!hw) { *x = *y = *w = *h = 0; return; }
