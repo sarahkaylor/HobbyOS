@@ -11,6 +11,7 @@ obj/
 *_test_host
 # Host parity harness run binaries (built in the repo root by host_tests)
 *_parity_run
+uname_parity_host
 
 # Compiled output
 hobbyos
