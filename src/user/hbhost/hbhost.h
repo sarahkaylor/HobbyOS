@@ -38,6 +38,10 @@ int hd_pixel_mode(void);
 int hd_term_mode(void);
 int hd_mouse_events(void);
 int hd_take_restamp(void);         /* app sent ESC ] F since the last call */
+/* L88: as hd_take_restamp, plus the content rect the app named on ESC ] F
+ * (0s when it named none).  The rect is the bbox the app wrote into the
+ * shared surface, so a host blits exactly that and leaves the rest alone. */
+int hd_take_present(int *x, int *y, int *w, int *h);
 /* A pixel window owns its content: clear the text tail the window had before
  * pixel mode (and after a content resize) and ask the app to repaint it all.
  * See hbhost_desk.c -- the desktop stops painting at the menu bar for
