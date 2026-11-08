@@ -4195,6 +4195,47 @@ static void compat_fault_dump(struct process *cur, struct trap_frame *tf,
  * handler body unchanged. */
 static void general_interrupt_inner(struct trap_frame *tf);
 
+/* GB-146-A: the fatal dump can print a frame whose vector/CS slots already
+   hold data (measured census: vector=4096 rip=0x97).  Remember the frame the
+   CPU actually handed the handler at entry, and remember the last
+   enter_user_space frame copy per CPU (its destination window is where a
+   parked task's live frame sits).  At the fatal dump the record can then say
+   either "the slot was already foreign at entry" or "it changed after entry,
+   in this pid's handler window", and can name a concurrent frame copy whose
+   window covers the slot -- pid + VA, the two things the card asks for. */
+struct badvec_stamp {
+  uint64_t frame;
+  uint64_t vector;
+  uint64_t cs;
+  int64_t pid;
+};
+static struct badvec_stamp badvec_at_entry[MAX_CPUS];
+
+struct badvec_eu_note {
+  uint64_t src;
+  uint64_t dst;
+  uint64_t pc;
+  int64_t pid;
+};
+static struct badvec_eu_note badvec_eu[MAX_CPUS];
+
+static int64_t badvec_pid(void) {
+  extern struct process *current_process(void);
+  struct process *p = current_process();
+  return p ? (int64_t)p->pid : -1;
+}
+
+/* Called from enter_user_space (asm) with rdi=source frame, rsi=target SP. */
+void enter_user_space_note(uint64_t src, uint64_t dst) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  badvec_eu[c].src = src;
+  badvec_eu[c].dst = dst;
+  badvec_eu[c].pc = (uint64_t)__builtin_return_address(0);
+  badvec_eu[c].pid = badvec_pid();
+}
+
 void general_interrupt_handler(struct trap_frame *tf) {
 #ifdef KERNEL_MODE_UNIT_TEST
   extern void lockdbg_irq_enter(void);
@@ -4214,6 +4255,12 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern int virtio_net_irq;
 
   uint32_t cpu = get_cpuid();
+  if (cpu < MAX_CPUS) {
+    badvec_at_entry[cpu].frame = (uint64_t)tf;
+    badvec_at_entry[cpu].vector = tf->vector;
+    badvec_at_entry[cpu].cs = tf->cs;
+    badvec_at_entry[cpu].pid = badvec_pid();
+  }
   /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
      (vectors 0-31 exceptions, 32-255 IRQ/syscall); a `vector` > 0xFF (measured:
      vector=20000, rip=0x97) cannot have been pushed by the CPU, so the frame is
@@ -4930,6 +4977,103 @@ static void general_interrupt_inner(struct trap_frame *tf) {
            interleave fields into the one record. */
         for (;;) __asm__ volatile("hlt");
       }
+      /* GB-146-A: find the entry stamp for the frame the dump is about to
+         print.  Scan the stamps rather than trusting the current CPU index:
+         get_cpuid() itself reads GS, and a GS mix-up is one of the ways a
+         frame arrives torn, so the dump must still find (or miss) its entry
+         frame when the CPU index is what broke.  Same frame + different
+         vector/CS slots means the word was written AFTER entry, inside a
+         handler window; no stamp at all says the dump frame was never handed
+         to any entry (and prints the frames that were).  Both forms name the
+         slot VA and the pid, and a concurrent enter_user_space copy whose
+         window covers the slot is printed with its pid and src/dst VA. */
+      {
+        struct badvec_stamp *st = 0;
+        int st_cpu = -1;
+        uint64_t tfu = (uint64_t)tf;
+        int frame_user = (tfu >= 0x1000ULL && tfu < USER_VA_BASE);
+        for (uint32_t i = 0; i < MAX_CPUS; i++) {
+          if (badvec_at_entry[i].frame == tfu) {
+            st = &badvec_at_entry[i];
+            st_cpu = (int)i;
+            break;
+          }
+        }
+        panic_puts("[BADVEC] fatal frame=");
+        panic_print_hex(tfu);
+        panic_puts(" in_user=");
+        print_int_raw(frame_user);
+        panic_puts(" vector_slot=");
+        panic_print_hex((uint64_t)&tf->vector);
+        panic_puts(" cs_slot=");
+        panic_print_hex((uint64_t)&tf->cs);
+        panic_puts("\n");
+        if (!st) {
+          panic_puts("[BADVEC] fatal dump has no entry stamp: frame=");
+          panic_print_hex((uint64_t)tf);
+          panic_puts(" now_v=");
+          print_int_raw((int)tf->vector);
+          panic_puts(" now_cs=");
+          panic_print_hex(tf->cs);
+          panic_puts(" now_pid=");
+          print_int_raw((int)badvec_pid());
+          panic_puts("\n");
+        } else if (st->vector != tf->vector || st->cs != tf->cs) {
+          panic_puts("[BADVEC] frame slots changed after entry: frame=");
+          panic_print_hex((uint64_t)tf);
+          panic_puts(" entry_frame=");
+          panic_print_hex(st->frame);
+          panic_puts("\n  vector_slot=");
+          panic_print_hex((uint64_t)&tf->vector);
+          panic_puts(" entry=");
+          print_int_raw((int)st->vector);
+          panic_puts(" now=");
+          print_int_raw((int)tf->vector);
+          panic_puts("\n  cs_slot=");
+          panic_print_hex((uint64_t)&tf->cs);
+          panic_puts(" entry=");
+          panic_print_hex(st->cs);
+          panic_puts(" now=");
+          panic_print_hex(tf->cs);
+          panic_puts(" cpu=");
+          print_int_raw(st_cpu);
+          panic_puts(" entry_pid=");
+          print_int_raw((int)st->pid);
+          panic_puts(" now_pid=");
+          print_int_raw((int)badvec_pid());
+          panic_puts("\n");
+          for (uint32_t oc = 0; oc < MAX_CPUS; oc++) {
+            uint64_t slot = (uint64_t)&tf->vector;
+            uint64_t dst = badvec_eu[oc].dst;
+            if (badvec_eu[oc].pid >= 0 && dst && slot + 8 >= dst - 320 &&
+                slot <= dst + 320) {
+              panic_puts("  [BADVEC] enter_user_space copy cpu=");
+              print_int_raw((int)oc);
+              panic_puts(" pid=");
+              print_int_raw((int)badvec_eu[oc].pid);
+              panic_puts(" src=");
+              panic_print_hex(badvec_eu[oc].src);
+              panic_puts(" dst=");
+              panic_print_hex(dst);
+              panic_puts(" pc=");
+              panic_print_hex(badvec_eu[oc].pc);
+              panic_puts("\n");
+            }
+          }
+        } else {
+          panic_puts("[BADVEC] entry slots unchanged: frame=");
+          panic_print_hex((uint64_t)tf);
+          panic_puts(" v=");
+          print_int_raw((int)tf->vector);
+          panic_puts(" cs=");
+          panic_print_hex(tf->cs);
+          panic_puts(" entry_pid=");
+          print_int_raw((int)st->pid);
+          panic_puts(" cpu=");
+          print_int_raw(st_cpu);
+          panic_puts("\n");
+        }
+      }
       panic_puts("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
       print_int_raw((int)tf->vector);
       panic_puts(" Error Code: ");
@@ -5621,6 +5765,11 @@ __asm__(
 "       clobber caller-saved registers. */\n"
 "    mov r12, rdi\n"
 "    mov r13, rsi\n"
+"    /* GB-146-A: record the frame-copy window (source frame, target SP) for\n"
+"       the fatal frame dump before any C call clobbers rdi/rsi. */\n"
+"    mov rdi, r12\n"
+"    mov rsi, r13\n"
+"    call enter_user_space_note\n"
 "    call restore_user_sp_helper\n"
 "    /* Same-privilege (kernel-mode) resume: common_trap_exit's iretq\n"
 "       would pop only three words and leave RSP on this CPU's scratch\n"
