@@ -36,7 +36,7 @@ ALLOW = {
     "src/host/locksteal_test.c": (1, "host-test shim that stands in for the sink"),
 
     # ---- non-returning diagnostics: they end in halt/reboot by construction ----
-    "src/kernel/arch/x64/trap.c": (159, "fatal dump, stall watchdog, spinlock scream, KPFLOOP (172->159 in f89a8177: the x64 fault dump folded its per-field puts)"),
+    "src/kernel/arch/x64/trap.c": (209, "fatal dump, stall watchdog, spinlock scream, KPFLOOP, GB-146-A [BADVEC] record (159->209: entry stamp, frame address, in_user flag, slot VAs)"),
     "src/kernel/arch/x64/locks.c": (13, "spinlock scream paths: printed while the lock is wedged"),
     "src/kernel/arch/arm/locks.c": (36, "same, arm"),
 
