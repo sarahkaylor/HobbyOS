@@ -5480,17 +5480,47 @@ void start_scheduler(void) {
       }
       uart_puts(" lock_owner=");
       print_int((int)proc_lock.owner);
+      uart_puts(" locked=");
+      print_int((int)proc_lock.locked);
       uart_puts(" park_returns=");
       print_int(poll_park_returns);
       uart_puts(" lock_addr=");
       uart_print_hex((uint64_t)&proc_lock);
       uart_puts("\n");
+      /* GB-229: per-CPU proc_lock acquire/release sequence in the same dump as
+         the locked/owner words: last_op=release with locked=1 names a lost
+         unlock; last_op=acquire with the owner's wd_rip outside proc_lock names
+         a resume path that left it held. */
+      {
+        extern int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out);
+        proclock_hold_t ph;
+        for (int c = 0; c < MAX_CPUS; c++) {
+          if (!proclock_hold_snapshot((uint32_t)c, &ph))
+            continue;
+          uart_puts("[PROCLOCK-HOLD] cpu=");
+          print_int(c);
+          uart_puts(" acq=");
+          print_int((int)ph.acq);
+          uart_puts(" rel=");
+          print_int((int)ph.rel);
+          uart_puts(" last=");
+          uart_puts(ph.last_op == 2 ? "release"
+                                    : ph.last_op == 1 ? "acquire" : "none");
+          uart_puts(" last_ms=");
+          print_int((int)ph.last_ms);
+          uart_puts(" site=");
+          uart_print_hex(ph.site);
+          uart_puts("\n");
+        }
+      }
       /* GB-146-B: a wedge must name the lock, its holder (pid + acquisition
          site) and the blocked transit (waiter pid + scheduler stage + sites),
          not just `lock_owner=6`.  lockdiag_snapshot reads the per-CPU wait
          record and held-lock stack the arch lock code already keeps; on ARM it
          returns 0 and this prints nothing extra. */
       {
+        extern uint64_t watchdog_cpu_rip(uint32_t cpu);
+        extern int watchdog_cpu_pid(uint32_t cpu);
         lockdiag_t ld;
         for (int c = 0; c < MAX_CPUS; c++) {
           if (!lockdiag_snapshot((uint32_t)c, &ld))
@@ -5515,6 +5545,14 @@ void start_scheduler(void) {
           uart_print_hex(ld.wait_pc);
           uart_puts(" wait_pc2=");
           uart_print_hex(ld.wait_pc2);
+          uart_puts(" owner_wd_rip=");
+          uart_print_hex(ld.owner_cpu >= 0
+                             ? watchdog_cpu_rip((uint32_t)ld.owner_cpu)
+                             : 0);
+          uart_puts(" owner_wd_pid=");
+          print_int(ld.owner_cpu >= 0
+                        ? watchdog_cpu_pid((uint32_t)ld.owner_cpu)
+                        : -1);
           uart_puts("\n");
         }
         if (lockdiag_last_stallbreak(&ld)) {
