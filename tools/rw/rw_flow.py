@@ -300,14 +300,16 @@ def brown_buttons(png):
     return footer + rest
 
 
-def land_point(png):
-    """A point on the planet's land, near the centre of the world view.
+def land_point(png, rank=0):
+    """A point on the planet's land, `rank`-th nearest the world view centre.
 
     The site screen is a full-window globe with no footer button; the tile
     has to be clicked.  Space and ocean are blue-dominant (B > R); land is
     brown/green (R >= B).  A 9x9 window must be land in >= 90 % of its
     pixels so the click never lands on a coastline, a faction icon or a
-    label.  Returns (x, y) or None.
+    label.  `rank` lets a caller try a different tile when the first is
+    refused (too close to a settlement, invalid biome, ...).
+    Returns (x, y) or None.
     """
     try:
         a = np.asarray(Image.open(png).convert("RGB")).astype(int)
@@ -323,7 +325,7 @@ def land_point(png):
     k = 9
     ii = np.zeros((h + 1, w + 1), dtype=np.int32)
     ii[1:, 1:] = np.cumsum(np.cumsum(land.astype(np.int32), 0), 1)
-    best = None
+    cands = []
     for y in range(140, h - 90, 20):
         for x in range(340, w - 280, 20):
             y0, x0 = y - k // 2, x - k // 2
@@ -332,11 +334,12 @@ def land_point(png):
             if s < int(k * k * 0.9):
                 continue
             d = (x - w // 2) ** 2 + (y - (h // 2 + 20)) ** 2
-            if best is None or d < best[0]:
-                best = (d, x, y)
-    if not best:
+            cands.append((d, x, y))
+    if not cands:
         return None
-    return (best[1], best[2])
+    cands.sort()
+    pick = cands[min(rank, len(cands) - 1)]
+    return (pick[1], pick[2])
 
 
 def diff_stats(a_png, b_png, thr=8):
@@ -549,11 +552,12 @@ class Flow:
         time.sleep(3)
         return True
 
-    def click_xy(self, xy, stage, phrase, how):
+    def click_xy(self, xy, stage, phrase, how, hold=0.12):
         before = self.xsw()
         self.emit({"ev": "click", "stage": stage, "phrase": phrase,
-                   "how": how, "click": [xy[0], xy[1]], "before": before})
-        self.q.click(xy[0], xy[1], self.args.fb_w, self.args.fb_h)
+                   "how": how, "click": [xy[0], xy[1]], "hold": hold,
+                   "before": before})
+        self.q.click(xy[0], xy[1], self.args.fb_w, self.args.fb_h, hold=hold)
         time.sleep(CLICK_WAIT)
         return self.shot(f"{stage}_after_{re.sub(r'[^A-Za-z0-9]+', '_', phrase)}")
 
@@ -740,7 +744,7 @@ class Flow:
             if time.time() > deadline:
                 break
             if "select starting site" in (txt or "").lower():
-                pt = land_point(png)
+                pt = land_point(png, attempt - 1)
                 if not pt:
                     self.emit({"ev": "skip", "stage": "site",
                                "phrase": "land tile",
@@ -749,7 +753,8 @@ class Flow:
                 self.emit({"ev": "resolve", "stage": "site",
                            "phrase": "land tile", "how": "pixel",
                            "attempt": attempt, "click": [pt[0], pt[1]]})
-                png2 = self.click_xy(pt, "site", f"tile{attempt}", "land-pixel")
+                png2 = self.click_xy(pt, "site", f"tile{attempt}", "land-pixel",
+                                     hold=2.0)
                 png2, cls2, txt2, d = self.verify_click(
                     png, png2, "site", f"land tile {attempt}")
                 px = d.get("pixels")
