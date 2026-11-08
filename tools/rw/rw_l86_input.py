@@ -68,8 +68,39 @@ def parse_xsw(text):
     return {"n": int(last.group(1)), "crc": crc.group(1) if crc else None,
             "gx": g("gx"), "gy": g("gy"), "w": g("w"), "h": g("h"), "t": g("t")}
 
+def parse_xsw_rows(text):
+    """Every [XSW] row -> list of dicts (n, t, changed, crc, put, putok)."""
+    out = []
+    for m in re.finditer(r"\[XSW\] n=(\d+)([^\n]*)", text):
+        line = m.group(0)
+        def g(name):
+            mm = re.search(r"\b%s=(-?\d+)" % name, line)
+            return int(mm.group(1)) if mm else None
+        out.append({"n": int(m.group(1)), "t": g("t"),
+                    "changed": g("changed"), "put": g("put"),
+                    "putok": g("putok"), "flush": g("flush"),
+                    "swap": g("swap"), "w": g("w"), "h": g("h"),
+                    "box": (re.search(r"\bbox=([-\d,]+)", line) or [None, None])[1]})
+    return out
 
-# --------------------------------------------------------------------- OCR
+
+def parse_rows(text, tag, keys):
+    """Last `[TAG]` row -> {key: int} for the named numeric keys."""
+    last = None
+    for m in re.finditer(r"\[%s\]([^\n]*)" % tag, text):
+        last = m
+    if not last:
+        return None
+    line = last.group(1)
+    out = {}
+    for k in keys:
+        mm = re.search(r"\b%s=(-?\d+)" % re.escape(k), line)
+        if mm:
+            out[k] = int(mm.group(1))
+    return out
+
+
+
 def tsv_words(png, psm=6):
     """tesseract TSV on `png` -> [dict(t,x,y,w,h,conf,line)] in PNG pixels.
 
@@ -625,7 +656,13 @@ class L86:
             png = self.shot("menu_wait")
             words = self.ocr(png, tag="menu_wait")
             txt = self.text_of(words)
-            if self.find(words, "New colony"):
+            # L88: the menu's acceptance test was an exact `New colony`, and
+            # at 1920x1080 the 2x OCR reads that button as "newcoeny" -- the
+            # menu was up for 200 s while the driver kept polling.  Two more
+            # unambiguous strings from the same page accept it.
+            if (self.find(words, "New colony") or
+                    self.find(words, "story generator") or
+                    self.find(words, "Official wiki")):
                 self.emit({"ev": "stage", "stage": "menu", "text": txt[:400],
                            "shot": os.path.basename(png) if png else None})
                 return png, words, txt
@@ -676,6 +713,39 @@ class L86:
     FOOTER_WORDS = ("Next", "Generate", "Start", "OK", "Accept", "Select",
                     "Confirm", "Continue", "Settle")
 
+    def find_footer(self, png, label=None, upscale=4, tag="footer"):
+        """Locate a footer button by OCR-ing the footer BAND at 4x.
+
+        L87 could not read `Generate` at 1280x720: RimWorld's footer is one
+        full-width brown strip with the labels drawn on it, so a 2x OCR of the
+        whole 1280x720 client area merges the 12 px label into the strip.  The
+        band alone, cropped to the bottom 56 rows and upscaled 4x, reads it.
+        Tries the right half first (the affirmative is always the right-most
+        footer control in every RimWorld page), then the whole band.
+        """
+        if not self.crop_box:
+            return None
+        x0, y0, x1, y1 = self.crop_box
+        band = (x0, max(y0, y1 - 56), x1, y1)
+        half = (x0 + (x1 - x0) // 2, band[1], x1, y1)
+        for i, box in enumerate((half, band)):
+            words = self.ocr(png, tag="%s_%d" % (tag, i), psm=6,
+                             upscale=upscale, box=box)
+            hits = self.find(words, label) if label else []
+            if not hits:
+                cands = []
+                for w in self.FOOTER_WORDS:
+                    for hh in self.find(words, w):
+                        cands.append(hh)
+                if cands:
+                    cands.sort(key=lambda k: (-k["y"], -k["x"]))
+                    hits = [cands[0]]
+            if hits:
+                h = sorted(hits, key=lambda k: (-k["y"], -k["x"]))[0]
+                return (h["x"] + h["w"] // 2, h["y"] + h["h"] // 2,
+                        "ocr4:%s:%s" % (h["t"], "half" if i == 0 else "band"))
+        return None
+
     def find_advance(self, png, words, label):
         """Where to click to move on, as (screen_x, screen_y, how).
 
@@ -683,8 +753,9 @@ class L86:
         single full-width brown strip with the labels drawn on it (measured:
         `Back` at (536,736) and `Next` at (1373,736) on the scenario page), so
         the 1920x1080 "rightmost flat-brown band" rule cannot find it -- one
-        band spans the window.  The band rule survives as the fallback for
-        dialogs whose labels OCR cannot read.
+        band spans the window.  L88 adds a 4x OCR of the footer band alone when
+        the page-wide 2x pass misses (it missed `Generate`).  The band rule
+        survives as the fallback for dialogs whose labels OCR cannot read.
         """
         if label:
             hits = self.find(words, label)
@@ -693,6 +764,9 @@ class L86:
                 # the bottom-most/right-most occurrence is the footer button
                 h = sorted(hits, key=lambda k: (-k["y"], -k["x"]))[0]
                 return (h["x"] + h["w"] // 2, h["y"] + h["h"] // 2, "ocr:" + h["t"])
+            f = self.find_footer(png, label, tag="footer_%s" % label)
+            if f:
+                return f
             return (None, None, "none")
         cands = []
         for w in self.FOOTER_WORDS:
@@ -703,6 +777,9 @@ class L86:
             h = cands[0][2]
             return (h["x"] + h["w"] // 2, h["y"] + h["h"] // 2,
                     "ocr-footer:" + h["t"])
+        f = self.find_footer(png, None, tag="footer_any")
+        if f:
+            return f
         bufs = brown_buttons(png, (self.crop_box[0], self.crop_box[1],
                                    self.crop_box[2] - self.crop_box[0],
                                    self.crop_box[3] - self.crop_box[1]))
@@ -726,6 +803,9 @@ class L86:
             return False, png, words
         self.emit({"ev": "target", "stage": stage, "label": label,
                    "screen": [sx, sy], "note": why})
+        if label:
+            print("[L88] click %s=(%d,%d) how=%s"
+                  % (label.lower().replace(" ", "_"), sx, sy, why), flush=True)
         _, after, d = self.click(label, sx, sy, stage, hold=hold)
         # prove the transition by OCR, polling while the frame settles.  A
         # first click that changes nothing gets ONE more click at the same
@@ -867,6 +947,72 @@ class L86:
         return d
 
     # -- world gen / site --------------------------------------------------
+    def measure(self, seconds=60, tag="fps"):
+        """Frames per second over a window, from the app's own counters.
+
+        `[XSW] n=` counts present attempts (XcPresentMark, one per
+        glXSwapBuffers) and every row carries the guest's own ms clock, so the
+        rate is (n1-n0)/(t1-t0) with no dependence on when the host read the
+        log.  `changed=1` on the rows says consecutive frames DIFFER: a window
+        whose rows all say changed=0 is a still image and its "fps" means
+        nothing, so the count is reported next to the rate and a window with
+        no changed frame is refused.
+        """
+        t0txt = self.serial()
+        rows0 = parse_xsw_rows(t0txt)
+        if not rows0:
+            self.emit({"ev": "measure", "stage": tag, "ok": False,
+                       "note": "no [XSW] row"})
+            return None
+        a = rows0[-1]
+        k0 = len(rows0)
+        hb0 = parse_rows(t0txt, "HBTS", ["blits", "busy_permille", "put_avg_us"])
+        time.sleep(seconds)
+        t1txt = self.serial()
+        rows1 = parse_xsw_rows(t1txt)
+        if len(rows1) <= k0:
+            self.emit({"ev": "measure", "stage": tag, "ok": False,
+                       "note": "no new [XSW] row in %ds" % seconds})
+            return None
+        b = rows1[-1]
+        win = rows1[k0:]
+        changed = sum(1 for r in win if r["changed"] == 1)
+        same = sum(1 for r in win if r["changed"] == 0)
+        dt = ((b["t"] or 0) - (a["t"] or 0)) / 1000.0
+        dn = b["n"] - a["n"]
+        fps = dn / dt if dt > 0 else 0.0
+        ms = 1000.0 / fps if fps > 0 else 0.0
+        hb1 = parse_rows(t1txt, "HBTS", ["blits", "busy_permille", "put_avg_us",
+                                         "bps", "Mpx_s", "copy_us", "dms"])
+        xswb = parse_rows(t1txt, "XSWB", ["dt_avg", "self_avg", "put_avg",
+                                          "flush_avg", "blit_px", "row_us",
+                                          "frames"])
+        hbt = parse_rows(t1txt, "HBT", ["put_us", "px"])
+        rec = {"ev": "measure", "stage": tag, "ok": fps > 0,
+               "window_s": round(dt, 1), "n": [a["n"], b["n"]],
+               "fps": round(fps, 2), "ms_frame": round(ms, 1),
+               "changed": changed, "same": same,
+               "put": [a.get("put"), b.get("put")],
+               "host": hb1, "app": xswb, "last_blit": hbt,
+               "still": (changed == 0)}
+        self.emit(rec)
+        print("[L88] fps %-10s n=%d->%d over %.1fs = %.2f fps (%.1f ms/frame) "
+              "changed=%d same=%d" % (tag, a["n"], b["n"], dt, fps, ms,
+                                      changed, same), flush=True)
+        if hb1:
+            print("[L88] host %-9s blits=%s busy=%s permille put_avg_us=%s "
+                  "copy_us=%s Mpx_s=%s" %
+                  (tag, hb1.get("blits"), hb1.get("busy_permille"),
+                   hb1.get("put_avg_us"), hb1.get("copy_us"),
+                   hb1.get("Mpx_s")), flush=True)
+        if xswb:
+            print("[L88] app  %-9s dt_avg_us=%s self_avg=%s put_avg=%s "
+                  "flush_avg=%s blit_px=%s row_us=%s" %
+                  (tag, xswb.get("dt_avg"), xswb.get("self_avg"),
+                   xswb.get("put_avg"), xswb.get("flush_avg"),
+                   xswb.get("blit_px"), xswb.get("row_us")), flush=True)
+        return rec
+
     def wait_generating(self, timeout=420):
         end = time.time() + timeout
         png = None
@@ -953,6 +1099,19 @@ def run(q, grab, log_path, args, shots):
                                     "Globe coverage", "Generate", "Seed"], 120)
     got_site = False
     if ok:
+        # L88: a static-frame control on the world-options page: two shots 4 s
+        # apart must be identical (0 differing pixels) or "the image" is not
+        # stable enough to compare across builds.
+        s1 = d.shot("static_worldopts_a")
+        time.sleep(4)
+        s2 = d.shot("static_worldopts_b")
+        ds = diff_stats(s1, s2) if s1 and s2 else {}
+        d.emit({"ev": "static_frame", "stage": "worldopts",
+                "pixels": ds.get("pixels"), "bbox": ds.get("bbox"),
+                "shot": os.path.basename(s2) if s2 else None,
+                "note": "two shots 4 s apart on the world-options page"})
+        print("[L88] static worldopts: %s px differ over 4 s (bbox=%s)"
+              % (ds.get("pixels"), ds.get("bbox")), flush=True)
         # 3. keyboard: the seed field
         d.type_seed("12345")
         d.tab_probe()
@@ -963,6 +1122,14 @@ def run(q, grab, log_path, args, shots):
         # wait_generating() below.
         d.advance("worldopts", "Generate", ["Select starting site"], 5,
                   must_change=False)
+        if os.environ.get("RW_L88_MEASURE", "0") == "1":
+            # L88's workload: world generation's rotating planet.  Two windows
+            # so a stalled or finished screen shows up as a changed-count drop
+            # instead of being averaged into one number.
+            window = int(os.environ.get("RW_L88_WINDOW", "45"))
+            time.sleep(6)
+            d.measure(window, "worldgen")
+            d.measure(window, "worldgen2")
         png, words, got_site = d.wait_generating(480)
     if got_site:
         lp = d.land_point(png) if png else None

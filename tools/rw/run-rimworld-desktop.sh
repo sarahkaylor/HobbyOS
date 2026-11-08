@@ -517,6 +517,16 @@ else
   mdel -i "$IMG" ::/XPROF >/dev/null 2>&1 || true
   mdel -i "$IMG" ::/GLPROF >/dev/null 2>&1 || true
 fi
+# L88: HBHOST's static-frame probe (the [HBT] present budget is always on;
+# this marker adds a one-shot surface/window dump + pixel compare on a frame
+# that has stopped changing, so "the image did not change" is a pixel count).
+if [ "${RW_HB_PROBE:-0}" = 1 ]; then
+  printf 'on\n' >"$OUT/hbprobe"
+  stage "$OUT/hbprobe" ::/HBTPROBE
+  echo "  staged: /HBTPROBE -> [HBT] probe: surface/window dump + diff"
+else
+  mdel -i "$IMG" ::/HBTPROBE >/dev/null 2>&1 || true
+fi
 # L75: the block-stress probe ("2 x 1800 s with the probe running alongside").
 # RW_CHURN_SOAK=1 compiles the KERNEL-side stressor (RW_BLK_STRESS=1): random
 # 512..4096-byte reads over a fixed file region plus small writes to a scratch
