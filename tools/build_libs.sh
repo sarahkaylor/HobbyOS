@@ -103,8 +103,17 @@ pick_tool() {
 fsize() { wc -c < "$1" | tr -d ' '; }
 CC=${CC:-clang}
 LD=${LD:-$(pick_tool ld.lld ld.lld-21)}
-NM=${NM:-$(pick_tool llvm-nm nm)}
-READELF=${READELF:-$(pick_tool llvm-readelf readelf)}
+# Versioned LLVM names are the norm on Debian/Ubuntu packaging (llvm-nm-21 with
+# no bare `llvm-nm`), and GNU `nm` is not a substitute: the evidence gates parse
+# llvm-nm's output and count 0 globals against GNU's format.
+NM=${NM:-$(pick_tool llvm-nm llvm-nm-21 llvm-nm-20 llvm-nm-19 llvm-nm-18 nm)}
+READELF=${READELF:-$(pick_tool llvm-readelf llvm-readelf-21 llvm-readelf-20 llvm-readelf-19 llvm-readelf-18 readelf)}
+# A caller (the Makefile) may pass a bare name that is not installed - e.g.
+# LLVM_NM=llvm-nm on a distro that only ships llvm-nm-21.  Validate whatever we
+# were handed instead of trusting it, or the evidence gates silently read
+# nothing and fail with a misleading "0 defined globals".
+command -v "$NM" >/dev/null 2>&1 || NM=$(pick_tool llvm-nm llvm-nm-21 llvm-nm-20 llvm-nm-19 llvm-nm-18 nm)
+command -v "$READELF" >/dev/null 2>&1 || READELF=$(pick_tool llvm-readelf llvm-readelf-21 llvm-readelf-20 llvm-readelf-19 llvm-readelf-18 readelf)
 JOBS=${JOBS:-16}
 
 LIBC_MAP=src/libc/libc.map
