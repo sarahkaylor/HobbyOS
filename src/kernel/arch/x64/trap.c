@@ -4227,6 +4227,9 @@ static struct badvec_eu_note badvec_eu[MAX_CPUS];
    instruction after the write.  One shot per CPU: the #DB handler disarms. */
 static int badvec_watch_armed[MAX_CPUS];
 static uint64_t badvec_watch_slot[MAX_CPUS];
+static uint64_t badvec_watch_frame[MAX_CPUS];
+static int64_t badvec_watch_pid[MAX_CPUS];
+static uint64_t badvec_watch_vect[MAX_CPUS];
 static int badvec_writer_prints;
 
 /* Is this frame in the window the two census dumps used?  User stacks are at
@@ -4237,7 +4240,9 @@ static int badvec_frame_window(uint64_t p) {
   return p >= 0x1000ULL && p < 0x70000000ULL;
 }
 
-static void badvec_watch_arm(uint64_t slot) {
+static int64_t badvec_pid(void);
+
+static void badvec_watch_arm(uint64_t slot, uint64_t frame, uint64_t vect) {
   uint32_t c = get_cpuid();
   if (c >= MAX_CPUS)
     return;
@@ -4247,6 +4252,9 @@ static void badvec_watch_arm(uint64_t slot) {
   __asm__ volatile("mov %0, %%dr7" ::"r"(0x00090001UL));
   badvec_watch_armed[c] = 1;
   badvec_watch_slot[c] = slot;
+  badvec_watch_frame[c] = frame;
+  badvec_watch_pid[c] = badvec_pid();
+  badvec_watch_vect[c] = vect;
 }
 
 static void badvec_watch_disarm(void) {
@@ -4294,17 +4302,19 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern int virtio_net_irq;
 
   uint32_t cpu = get_cpuid();
-  if (cpu < MAX_CPUS) {
+  if (cpu < MAX_CPUS && tf->vector != 1) {
     badvec_at_entry[cpu].frame = (uint64_t)tf;
     badvec_at_entry[cpu].vector = tf->vector;
     badvec_at_entry[cpu].cs = tf->cs;
     badvec_at_entry[cpu].pid = badvec_pid();
     /* GB-146-A: a frame below the kernel image is the census case; watch its
-       vector slot for the first write and let #DB name the instruction.  Cap
-       the number of records so a pathological re-arm cannot flood the sink. */
-    if (!badvec_watch_armed[cpu] && badvec_writer_prints < 8 &&
-        badvec_frame_window((uint64_t)tf))
-      badvec_watch_arm((uint64_t)&tf->vector);
+       vector slot for the first write and let #DB name the instruction.  Do
+       not watch pid 1's boot frames (they consumed the whole cap in wave7
+       before any test process ran) and skip the #DB itself so its entry does
+       not overwrite the interrupted frame's stamp. */
+    if (!badvec_watch_armed[cpu] && badvec_writer_prints < 64 &&
+        badvec_pid() > 1 && badvec_frame_window((uint64_t)tf))
+      badvec_watch_arm((uint64_t)&tf->vector, (uint64_t)tf, tf->vector);
   }
   /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
      (vectors 0-31 exceptions, 32-255 IRQ/syscall); a `vector` > 0xFF (measured:
@@ -4357,6 +4367,12 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       panic_print_hex(tf->elr);
       panic_puts(" slot=");
       panic_print_hex(badvec_watch_slot[wc]);
+      panic_puts(" frame=");
+      panic_print_hex(badvec_watch_frame[wc]);
+      panic_puts(" frame_pid=");
+      print_int_raw((int)badvec_watch_pid[wc]);
+      panic_puts(" v=");
+      print_int_raw((int)badvec_watch_vect[wc]);
       panic_puts(" pid=");
       print_int_raw((int)badvec_pid());
       panic_puts(" cpu=");
