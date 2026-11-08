@@ -580,6 +580,15 @@ uint64_t vm_arch_leaf_phys(uint64_t leaf);
 int vm_arch_leaf_writable(uint64_t leaf);
 void vm_arch_teardown(uint64_t root_phys, uint16_t asid);
 void vm_arch_switch(struct addr_space *as);
+/* L85: which CPU still has `root_phys` loaded as its USER translation, or -1
+   when none does.  This is GROUND TRUTH, unlike cpu_current_pids: the claim is
+   a scheduling record that the LOSTWAKE reaper itself clears, while a CPU that
+   is executing a thread's user code cannot do so without this root in CR3.
+   The scheduler's "this slot executes nowhere" decisions must consult it
+   before re-READYing or tearing down a slot, because a stale heartbeat is an
+   inference about time (a core starved IRQ-off on uart_lock looks identical
+   to a dead one) and a wrong answer there double-runs a live thread. */
+int vm_arch_root_cpu(uint64_t root_phys);
 /* P2.2 (S2): hand the calling CPU back to the kernel table (no-op when
    already there).  Called when a CPU stops running a v2 AS (v1 switch,
    idle entry) and by vm_arch_teardown before freeing tables. */

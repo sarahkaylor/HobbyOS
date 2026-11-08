@@ -657,6 +657,23 @@ void vm_arch_switch(struct addr_space *as) {
   __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
 }
 
+/* L85: ground truth for "is this address space still loaded on a CPU?".
+   A CPU running user code of that AS has its root in CR3 and this array is the
+   bookkeeping copy of it (written by vm_arch_switch, cleared by
+   vm_arch_restore_kernel at idle entry / teardown).  Returns the lowest CPU
+   index holding it, or -1.  Read without a lock: the answer can go stale in
+   either direction, and the callers only use it to REFUSE an action (never to
+   perform one), so a stale "in use" costs a retry and a stale "free" costs a
+   double-run -- the asymmetry is why it is safe to read it unlocked. */
+int vm_arch_root_cpu(uint64_t root_phys) {
+  if (!root_phys)
+    return -1;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (v2_active_root[c] == root_phys)
+      return (int)c;
+  return -1;
+}
+
 void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
   (void)asid; /* unused on x64 */
   if (!root_phys)
