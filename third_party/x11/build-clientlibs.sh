@@ -87,7 +87,7 @@ _cl_smoke() {
   # shellcheck disable=SC2046
   hb_run smoke hb_link_flat "$HB_BUILD/smoke/XSMOKE.BIN" "$o/xsmoke.o" \
     $("$PKG_CONFIG" --libs x11 xext xrender xfixes)
-  hb_log "smoke: $HB_BUILD/smoke/XSMOKE.BIN ($(stat -c %s "$HB_BUILD/smoke/XSMOKE.BIN") bytes)"
+  hb_log "smoke: $HB_BUILD/smoke/XSMOKE.BIN ($(hb_size_of "$HB_BUILD/smoke/XSMOKE.BIN") bytes)"
 }
 
 stage_clientlibs() {
