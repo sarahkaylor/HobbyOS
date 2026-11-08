@@ -594,7 +594,9 @@ static int l_tmr_epoll_ctl(struct process *p, struct trap_frame *tf) {
 
 static int lt_epoll_park(struct process *p, struct trap_frame *tf) {
   if (linux_compat_sig_deliverable(p)) return l_ret(tf, -EINTR);
-  if ((tf->cs & 3) == 3) tf->elr -= 2;
+#if defined(__x86_64__)
+  if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind the x64 2-byte syscall */
+#endif
   save_context(p, tf);
   schedule(tf, 0);
   return 1;

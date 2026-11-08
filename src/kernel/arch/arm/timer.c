@@ -57,3 +57,16 @@ uint64_t timer_get_ms(void) {
 
   return (count * 1000) / freq;
 }
+
+/**
+ * Microsecond uptime from the same counter, for callers that measure RTT
+ * (nfs.c rpc_call does).  x64 has had timer_get_us for that reason; ARM only
+ * had the millisecond form, which left the symbol undefined at link.
+ */
+uint64_t timer_get_us(void) {
+  uint64_t count, freq;
+  __asm__ volatile("mrs %0, cntpct_el0" : "=r"(count));
+  __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+  if (freq == 0) return 0;
+  return (count * 1000000) / freq;
+}

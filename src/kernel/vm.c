@@ -11,6 +11,7 @@
  * proc_lock so a caller may hold it.
  */
 #include "vm.h"
+#include "arch/cpu.h" /* cpu_relax(): pause on x64, yield on arm */
 
 #include <stdint.h>
 
@@ -1326,7 +1327,7 @@ static int vm_read_page_from_device(uint16_t cluster, uint32_t fsize,
     }
     uint64_t t0 = timer_get_ms();
     while (timer_get_ms() - t0 < backoff_ms[k])
-      __asm__ volatile("pause");
+      cpu_relax();
   }
   frame_free(chk);
   return n;
@@ -1514,7 +1515,7 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
     for (int k = 0; k < 3 && !have; k++) {
       uint64_t t0 = timer_get_ms();
       while (timer_get_ms() - t0 < 10)
-        __asm__ volatile("pause");
+        cpu_relax();
       if (o->kind == VM_OBJ_FILE && o->file_start_cluster)
         fat16_page_drop_cache(o->file_start_cluster, (uint32_t)o->size,
                               (uint32_t)off, FRAME_SIZE);
