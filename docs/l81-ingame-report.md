@@ -12,11 +12,11 @@ anytime mode → Next → Create world → Generate**, and the world generated: 
 game reached **Select starting site**, the planet view, with **0 exceptions in
 Player.log**.  The wall that stopped the first attempt was a kernel one — the
 per-address-space region table (2 048 entries) — and fixing it is what let the
-world generate at all.  The second stop was the driver's own: the planet view
-has no footer button, so a script that only clicks buttons cannot choose a
-tile.  That is now implemented (a land pixel is clicked, then the confirm
-button), but the confirming run is not part of this record: two other attempts
-died in the def load at the ladder's known SIGSEGV (§5).
+world generate at all.  The next stop is the driver's: the planet has no
+footer button, and its tile panel draws but exposes no confirm control that
+this lane found.  A 2 s-hold click does reach the map and select a tile's
+information (`Temperate forest …`); the click/confirm that finalises the site
+is the next wall (§2.2).
 
 ---
 
@@ -30,7 +30,8 @@ died in the def load at the ladder's known SIGSEGV (§5).
 | what stopped run 1? | **the kernel's region table.** `[THRS] regs=2003` (cap 2 048), then world generation's Mono code-manager guard page (`len=0x3000`, MAP_FIXED PROT_NONE at `0x114CA35000`) was refused: `[MR] FAIL … blk=none`, `[LMMAP] fail … rc=-12`; Boehm printed `mmap(PROT_NONE) failed` and the game took SIGABRT |
 | the fix | `VM_REGION_MAX_CAP` 2 048 → **16 384**, allocated on the first growth (process start), `[MR] FAIL` now carries `nregs=`/`cap=` |
 | does it hold? | **yes.** Run 3: `regs=3321` during world generation, the planet on screen, 0 exceptions, 0 GPU refusals |
-| what stopped run 3? | the **driver**: `Select starting site` is a full-window globe with no footer button; `[flow] no_advance site`, then 92 s static → wall. Fixed after the run (land-pixel click + confirm) |
+| what stopped run 3? | the **driver**: `Select starting site` is a full-window globe with no footer button; `[flow] no_advance site`, then 92 s static → wall |
+| can a tile be picked? | **partly.** A 0.12 s press changes 235 px and selects nothing (the world map polls the mouse once per frame; at 0.7-1.0 fps the press falls between frames). A **2 s hold** at `(920,560)` changed **21 995 px** and drew the tile panel (`Temperate forest … Terrain Flat, Movement difficulty 1, Slate/granite/sandstone, 11.0C`), but the screen did not advance and the panel has no OK/Select button; Return, Space and a double-click did not confirm it |
 | what stops runs 2 and 4? | a pre-existing **SIGSEGV during the def load** at `addr=0x3A0` (JIT code, `regs≈342`, `res_mib=893`). L80 recorded the same window as "run D stalled at t=466 s"; it is not the region table and not the menu |
 
 ---
@@ -43,7 +44,10 @@ died in the def load at the ladder's known SIGSEGV (§5).
 * **waits** for the main menu by OCR (`Tutorial` + `New colony` + `Quit to
   OS`), dismissing the Steam modal only when the OCR says it is the modal
   (L79 called the brown-button finder on every poll; the menu's own buttons
-  have the same fill);
+  have the same fill).  The finder knows only the button's resting fill, so
+  after the first click — pointer resting on it — the button is painted in the
+  hovered fill and the band is missed (run 5 sat on the modal for the rest of
+  its budget); the measured `(805,768)` is the fallback;
 * **clicks by evidence**, not by label alone.  An advancing click is the
   **rightmost flat-brown footer button** — the affirmative on every RimWorld
   dialog.  This is the L79 bug that had to die: L79's OCR matched "Generate"
@@ -132,10 +136,47 @@ the Create-world screen.
 The 92 s wall after this is the driver's: `[flow] skip site phrase="Select
 random site" note="not on screen"`, `[flow] no_advance site`, then polls that
 only see the clock.  The planet does not repaint unless it is rotated or a
-tile is clicked.  Fixed after the run: `land_point()` finds a 9x9 all-land
-window nearest the globe centre (the centre pixel is `(104,99,52)`), clicks
-it, and then confirms with the rightmost footer button (`OK`/`Next` are in
-the OCR candidates for this stage).
+tile is clicked.
+
+### 2.2 Picking a tile: a press shorter than a frame does not exist
+
+Run 6 (same driver, first land-click implementation) clicked a land pixel
+with the harness's 0.12 s press: **235 px** changed — a highlight, no
+selection, no panel.  The front-end's IMGUI buttons process the queued
+press+release, which is why the same 0.12 s press worked on every dialog; the
+world map reads the mouse once per frame, and at 0.7-1.0 fps a 120 ms press
+falls between two frames.  `Qmp.click()` gained a `hold` parameter; the site
+click holds **2 s**.
+
+Run 7, with the 2 s hold, clicked `(920,560)`: **21 995 px** changed
+(bbox `(12,540)-(1894,1068)`, 0.15 % clock) and the tile panel appeared —
+`Temperate forest / Forests of deciduous trees … / Terrain Flat / Movement
+difficulty 1 / Slate, granite and sandstone / Average temperature 11.0C`.
+The screen did **not** advance: there is no OK/Select/Next button on the map
+or in the panel, and a second click, Return and Space all left the stage
+`site`.  Run 8 repeated the sequence at `(960,560)` and got 241 px — the
+pixel matters (an icon or a label under the cursor does not open the panel).
+
+So the next wall is **the site's confirm affordance**: a synthetic click can
+move the map's selection state (the panel is drawn), but this lane did not
+find the control that finalises the site.  The candidates are a click on the
+tile panel's own tab row (`Planet`/`Terrain` are drawn there) or the world
+map's context menu.  That is driver knowledge, not a game or kernel wall: the
+process stays alive at 0.70 fps with the panel up, `[XSW]` advancing, and no
+exception in Player.log.
+
+## 2.3 Run table
+
+| run | front-end | world gen | furthest | stop |
+|---|---|---|---|---|
+| 1 | all clicks OK | **aborted** | Create world → Generate | AS region table (2048) → `mmap(PROT_NONE) failed` |
+| 2 | — | — | def load | SIGSEGV `addr=0x3A0`, `waitpid status=11` |
+| 3 | all clicks OK | **30 s** | **Select starting site** | driver: no footer on the map |
+| 4 | — | — | def load | SIGSEGV `addr=0x3A0`, `waitpid status=11` |
+| 5 | modal re-shown, not dismissed | — | Steam modal | driver: `find_ignore` missed the hovered fill |
+| 6 | all clicks OK | OK | world map | 0.12 s press invisible to the map |
+| 7 | all clicks OK | OK | **tile panel up** (`Temperate forest`) | no confirm control found |
+| 8 | all clicks OK | OK | world map | stopped for the regression run |
 
 ---
 
@@ -184,10 +225,14 @@ one 640 KiB contiguous allocation per address space, taken at process start.
 
 | gate | result | log |
 |---|---|---|
-| `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` | _filled at the end of the lane_ | `obj/l81/units.log` |
-| `m3_window` | _filled_ | `obj/l81/gates/` |
-| `m4_gl` | _filled_ | |
-| `rwnfs` | _filled_ | |
+| `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` | **435 run, 0 failed — UNIT TESTS PASSED** | `obj/l81/units.log` |
+| `m3_window` | **PASS** (26 s) | `obj/l75/gates/m3_window.log` |
+| `m4_gl` | **PASS** (66 s) | `obj/l75/gates/m4_gl.log` |
+| `rwnfs` | **PASS** (14 s) | `obj/l75/gates/rwnfs.log` |
+
+Run after the last desktop harness had exited (`fuser disk.img` empty); the
+unit tier and the desktop harness were never concurrent.  `bash
+tools/rw/l75-gates.sh m3_window m4_gl rwnfs`, `obj/l81/gates.log`.
 
 ---
 
