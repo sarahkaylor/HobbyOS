@@ -2217,6 +2217,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
           }
         }
       }
+      extern void proclock_iretq_note(void);
+      proclock_iretq_note();
       enter_user_space(&local_tf, target_sp);
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
@@ -4699,6 +4701,8 @@ void start_scheduler(void) {
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
         extern void resume_mark(int pid, uint64_t target_sp);
         resume_mark(proc_table[i].pid, target_sp);
+        extern void proclock_iretq_note(void);
+        proclock_iretq_note();
         enter_user_space(&local_tf, target_sp);
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
@@ -5510,6 +5514,12 @@ void start_scheduler(void) {
           print_int((int)ph.last_ms);
           uart_puts(" site=");
           uart_print_hex(ph.site);
+          uart_puts(" rel_site=");
+          uart_print_hex(ph.rel_site);
+          uart_puts(" iretq_ms=");
+          print_int((int)ph.iretq_ms);
+          uart_puts(" locked_at_iretq=");
+          print_int(ph.locked_at_iretq);
           uart_puts("\n");
         }
       }

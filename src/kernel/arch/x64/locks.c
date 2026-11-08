@@ -48,9 +48,24 @@ void proclock_hold_note(int op, uint64_t site) {
     plh[c].rel++;
   else
     return;
+  if (op == 2)
+    plh[c].rel_site = site;
   plh[c].last_op = op;
   plh[c].site = site;
   plh[c].last_ms = timer_get_ms();
+}
+
+/* GB-230: sampled inside enter_user_space, immediately before the iretq frame
+   is built.  Observation only: a plain word read, no lock.  `locked_at_iretq=1`
+   on the owner CPU whose last op is acquire names a resume tail that reached
+   the iretq without releasing proc_lock; `rel_site` says which release was the
+   last one this CPU actually ran (0 = it never released). */
+void proclock_iretq_note(void) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  plh[c].iretq_ms = timer_get_ms();
+  plh[c].locked_at_iretq = (&proc_lock != 0) ? (int)proc_lock.locked : -1;
 }
 
 int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out) {
