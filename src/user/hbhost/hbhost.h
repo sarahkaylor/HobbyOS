@@ -38,6 +38,11 @@ int hd_pixel_mode(void);
 int hd_term_mode(void);
 int hd_mouse_events(void);
 int hd_take_restamp(void);         /* app sent ESC ] F since the last call */
+/* A pixel window owns its content: clear the text tail the window had before
+ * pixel mode (and after a content resize) and ask the app to repaint it all.
+ * See hbhost_desk.c -- the desktop stops painting at the menu bar for
+ * pixel_mode, so anything left there is stale. */
+void hd_pixel_enter(void);
 void hd_pref_size(int *w, int *h); /* ESC ] X preference (0 = any) */
 /* Size the surface window to that preference, clamped so the WM (IceWM:
  * title bar + borders + taskbar) cannot shrink it afterwards; re-sends the

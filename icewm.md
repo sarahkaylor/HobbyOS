@@ -204,6 +204,12 @@ FBIOBLANK is a no-op, and SYS_GET_EVENTS/SYS_INPUT_READ read the private queue, 
 host fills with `VDISP_OP_INJECT`; `VDISP_OP_STATUS` returns damage/flush/map/read
 counters.  A display dies with its owner (generation check; slot reclaimed on the next
 attach) or on DETACH.  Unattached processes -- XHOBBY, the default desktop -- are untouched.
+
+The compat class does not call SYS_MAP_FB: a Linux-ABI client reaches the framebuffer by
+`mmap`ing `/dev/fb0` (`docs/linux-abi.md` §9), so that mmap is virtualized too -- for an
+attached process it returns the same private-surface mapping `sys_map_fb` installs
+(`vdisp_map_fb`, `vm.c`).  Without it a hosted Unity client painted the X server's scanout
+while HBHOST blitted a surface the app never touched (L84, `docs/l84-blit-report.md`).
 Tests: kernel `vdisplay_test_suite`, host `vdisplay_test_run`.
 
 **HBHOST.BIN** (`src/user/hbhost/`, real libX11; built by build.sh's icewm `hbhost`

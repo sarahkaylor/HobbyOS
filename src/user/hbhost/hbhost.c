@@ -92,15 +92,98 @@ static void logmsg(const char *a, const char *b) {
   fprintf(stderr, "[HBHOST] %s%s\n", a, b ? b : "");
 }
 
+/* ---- L84: blit accounting ------------------------------------------------
+ * "the window never repaints" is four different bugs and only one of them is
+ * in the app: (a) the app never flushes, (b) it flushes but the surface
+ * damage is empty or already consumed, (c) HBHOST decides to blit and clips
+ * the rect to nothing, (d) HBHOST blits and the X window is showing something
+ * else.  Every decision below bumps a counter and the counters reach the
+ * serial log, so the pixel evidence can be read against a row instead of a
+ * guess.  Row classes:
+ *
+ *   [HB]  one line per decision that put pixels (rate-limited) -- the kind of
+ *         blit, its rect, and the state that produced it.
+ *   [HBS] one line every 2 s with the totals; a steady state with
+ *         blit advancing and dmg=0 is the app presenting into its own shadow
+ *         without telling anyone, and blit=0 with flush advancing is HBHOST
+ *         dropping the damage.
+ */
+struct hb_stats {
+  unsigned vd, flush, dmg, restamp, paint;
+  unsigned blit, blit_empty, px;
+  unsigned b_full, b_dmg, b_restamp, b_paint;
+  unsigned game_enter;
+  int last_row_ms;
+};
+static struct hb_stats hb;
+
+static void hb_summary(int t) {
+  fprintf(stderr, "[HBS] t=%d vd=%u flush=%u dmg=%u restamp=%u paint=%u "
+                  "blit=%u empty=%u px=%u full=%u dmgblit=%u restampblit=%u "
+                  "paintblit=%u game=%d pix=%d win=%dx%d\n",
+          t, hb.vd, hb.flush, hb.dmg, hb.restamp, hb.paint, hb.blit,
+          hb.blit_empty, hb.px, hb.b_full, hb.b_dmg, hb.b_restamp,
+          hb.b_paint, game_mode, hd_pixel_mode(), win_w, win_h);
+}
+
+/* Sampled checksum of a surface rect: every 8th row, FNV-1a over the pixels.
+ * Cheap enough to run on a rate-limited row, and it is what separates "we
+ * blitted" from "we blitted something new": an unchanged window shows the
+ * same crc every row, the app's own frames do not. */
+static unsigned long long surf_crc(int x, int y, int w, int h, unsigned *nz) {
+  unsigned long long c = 1469598103934665603ull;
+  unsigned n = 0;
+  int step = h > 8 ? 8 : 1;
+  for (int r = y; r < y + h; r += step) {
+    const unsigned *p = surf + (size_t)r * SURF_W + x;
+    for (int i = 0; i < w; i++) {
+      unsigned v = p[i];
+      if (v & 0xFFFFFF) n++;
+      c = (c ^ (v & 0xFF)) * 1099511628211ull;
+      c = (c ^ ((v >> 8) & 0xFF)) * 1099511628211ull;
+      c = (c ^ ((v >> 16) & 0xFF)) * 1099511628211ull;
+    }
+  }
+  if (nz) *nz = n;
+  return c;
+}
+
 /* ---- blits ---- */
-static void blit_rect(int x, int y, int w, int h) {
+static void blit_rect(const char *kind, int x, int y, int w, int h) {
   if (game_mode) return;
+  int rw = w, rh = h;
   if (x < 0) { w += x; x = 0; }
   if (y < 0) { h += y; y = 0; }
   if (x + w > win_w) w = win_w - x;
   if (y + h > win_h) h = win_h - y;
-  if (w <= 0 || h <= 0) return;
+  if (w <= 0 || h <= 0) {
+    hb.blit_empty++;
+    fprintf(stderr, "[HB] blit kind=%s DROPPED rect=%d,%d,%d,%d win=%dx%d\n",
+            kind, x, y, rw, rh, win_w, win_h);
+    return;
+  }
+  /* Rate-limit the decision rows: the first three, then one a second.  A
+   * pixel defect that needs frame-by-frame rows is a different lane; what has
+   * to be provable here is that the decision is taken on changing pixels. */
+  int t = now_ms();
+  int row = (t - hb.last_row_ms >= 1000 || hb.blit <= 3);
+  unsigned long long crc = 0;
+  unsigned nz = 0;
+  if (row) crc = surf_crc(x, y, w, h, &nz);
   XPutImage(dpy, win, gc, surf_img, x, y, x, y, (unsigned)w, (unsigned)h);
+  hb.blit++;
+  hb.px += (unsigned)w * (unsigned)h;
+  if (kind[0] == 'f') hb.b_full++;
+  else if (kind[0] == 'd') hb.b_dmg++;
+  else if (kind[0] == 'r') hb.b_restamp++;
+  else hb.b_paint++;
+  if (row) {
+    hb.last_row_ms = t;
+    fprintf(stderr, "[HB] blit kind=%s rect=%d,%d,%d,%d win=%dx%d pix=%d "
+                    "game=%d flush=%u dmg=%u restamp=%u crc=0x%llx nz=%u\n",
+            kind, x, y, w, h, win_w, win_h, hd_pixel_mode(), game_mode,
+            hb.flush, hb.dmg, hb.restamp, crc, nz);
+  }
 }
 
 static void draw_menu(void);
@@ -133,7 +216,7 @@ static void blit_game(void) {
 
 static void redraw_all(void) {
   if (game_mode) blit_game();
-  else blit_rect(0, 0, win_w, win_h);
+  else blit_rect("full", 0, 0, win_w, win_h);
   draw_menu();
 }
 
@@ -156,7 +239,7 @@ static void close_menu(void) {
   if (menu_open < 0) return;
   int n = hd_menu_items(menu_open);
   menu_open = -1;
-  blit_rect(menu_x0, HD_MENUBAR_H, MENU_W, n * MENU_ITEM_H);
+  blit_rect("menu", menu_x0, HD_MENUBAR_H, MENU_W, n * MENU_ITEM_H);
 }
 
 /* ---- title ---- */
@@ -169,6 +252,17 @@ static void set_title(const char *t) {
   XSetIconName(dpy, win, last_title);
   XChangeProperty(dpy, win, net_wm_name, utf8_string, 8, PropModeReplace,
                   (const unsigned char *)last_title, (int)strlen(last_title));
+}
+
+/* Absolute position of the client area on the X screen -- evidence needs the
+ * window rect, and the WM (not HBHOST) owns the frame offset. */
+static void log_geometry(void) {
+  Window r, child;
+  int rx = 0, ry = 0;
+  if (XTranslateCoordinates(dpy, win, DefaultRootWindow(dpy), 0, 0, &rx, &ry, &child))
+    fprintf(stderr, "[HB] geometry client=%d,%d,%dx%d screen=%dx%d\n",
+            rx, ry, win_w, win_h, DisplayWidth(dpy, DefaultScreen(dpy)),
+            DisplayHeight(dpy, DefaultScreen(dpy)));
 }
 
 static void resize_window(int w, int h) {
@@ -283,15 +377,19 @@ static int handle_x_event(XEvent *ev) {
   switch (ev->type) {
   case Expose:
     if (game_mode) blit_game();
-    else blit_rect(ev->xexpose.x, ev->xexpose.y, ev->xexpose.width, ev->xexpose.height);
+    else blit_rect("expose", ev->xexpose.x, ev->xexpose.y, ev->xexpose.width, ev->xexpose.height);
     draw_menu();
     break;
   case ConfigureNotify:
     if (ev->xconfigure.width != win_w || ev->xconfigure.height != win_h) {
+      int ow = win_w, oh = win_h;
       win_w = ev->xconfigure.width;
       win_h = ev->xconfigure.height;
+      fprintf(stderr, "[HB] configure %dx%d -> %dx%d pix=%d game=%d\n",
+              ow, oh, win_w, win_h, hd_pixel_mode(), game_mode);
       if (!game_mode) hd_set_size(win_w, win_h);
       else blit_game();
+      if (win_w > 200 && win_h > 200) log_geometry();
     }
     break;
   case KeyPress: handle_key(&ev->xkey, 1); break;
@@ -419,6 +517,8 @@ int main(int argc, char **argv) {
   int pref_done = 0;
   int last_hover_ms = 0;
   int last_game_blit = 0;
+  int last_sum_ms = 0;
+  int last_pix = 0;
   int child_gone = 0;
   int kill_sent_ms = -1;
   struct pollfd pfd[2];
@@ -447,9 +547,27 @@ int main(int argc, char **argv) {
     int t = now_ms();
     struct hd_vstatus st;
     hd_vd_status(&st);
+    hb.vd++;
     note_raw_reader(&st);
     int flushed = st.flush_seq != last_seq;
     last_seq = st.flush_seq;
+    if (flushed) hb.flush++;
+    if (st.dw > 0) hb.dmg++;
+    if (hd_pixel_mode() != last_pix) {
+      last_pix = hd_pixel_mode();
+      fprintf(stderr, "[HB] pixel mode -> %d t=%d win=%dx%d mapped=%u "
+                      "flushed=%d menu=%d\n",
+              last_pix, t, win_w, win_h, st.mapped, flushed, menu_open);
+      if (last_pix) {
+        /* The window shows the text tail until the app's own pixels replace
+         * it, and the app only repaints what it is asked to.  Drop the tail
+         * and ask for the whole content. */
+        hd_pixel_enter();
+        int cx, cy, cw, chh;
+        hd_content_rect(&cx, &cy, &cw, &chh);
+        blit_rect("clear", cx, cy, cw, chh);
+      }
+    }
 
     /* A fullscreen game: the app maps + flushes the framebuffer but never
      * asked for a pixel window (ESC ] X). */
@@ -458,11 +576,15 @@ int main(int argc, char **argv) {
       flushes_seen++;
       if (flushes_seen >= 3 || t - first_flush_ms >= 400) {
         game_mode = 1;
+        hb.game_enter++;
         close_menu();
         /* drop what the text window painted: the game repaints its own
            area every frame, the rest of the screen stays black */
         memset(surf, 0, SURF_BYTES);
-        fprintf(stderr, "[HBHOST] %s: fullscreen framebuffer app -> game view\n", prog);
+        fprintf(stderr, "[HB] fullscreen fb app -> game view t=%d pix=%d "
+                        "mapped=%u host_maps=%u flushes=%d win=%dx%d\n",
+                t, hd_pixel_mode(), st.mapped, host_maps, flushes_seen,
+                win_w, win_h);
         resize_window(GAME_W, GAME_H);
       }
     }
@@ -480,18 +602,33 @@ int main(int argc, char **argv) {
          * show (title bar + borders + taskbar).  Resizing the X window to the
          * raw request made the WM shrink it afterwards and the bottom of the
          * game fell off; hd_fit_pref also re-sends the app its content rect. */
-        if (hd_fit_pref(&ww, &wh) && ww > 0 && wh > 0) resize_window(ww, wh);
+        if (hd_fit_pref(&ww, &wh) && ww > 0 && wh > 0) {
+          int pw, ph;
+          hd_pref_size(&pw, &ph);
+          fprintf(stderr, "[HB] window pref=%dx%d -> win=%dx%d\n", pw, ph, ww, wh);
+          resize_window(ww, wh);
+        }
       }
       int x, y, w, h;
       int painted = hd_paint(&x, &y, &w, &h);
-      if (painted) blit_rect(x, y, w, h);
+      if (painted) {
+        hb.paint++;
+        blit_rect("paint", x, y, w, h);
+      }
       if (hd_pixel_mode()) {
-        if (hd_take_restamp() && st.dw <= 0) {
+        int restamped = hd_take_restamp();
+        if (restamped) hb.restamp++;
+        /* st.dw is this iteration's surface damage (the vdisplay consumes it
+         * on read, so it is read exactly once per loop).  A compat X client
+         * does not flush the surface at all: it writes into the mapped fb and
+         * tells the desktop with ESC ] F, which lands here as a restamp. */
+        if (st.dw > 0) {
+          blit_rect("dmg", st.dx, st.dy, st.dw, st.dh);
+        } else if (restamped) {
           int cx, cy, cw, chh;
           hd_content_rect(&cx, &cy, &cw, &chh);
-          blit_rect(cx, cy, cw, chh);
+          blit_rect("restamp", cx, cy, cw, chh);
         }
-        if (st.dw > 0) blit_rect(st.dx, st.dy, st.dw, st.dh);
         /* Pointer tracking (ESC [ T): the desktop reports the pointer
          * wherever it is; poll it so it keeps flowing outside the window. */
         if (hd_mouse_events() && t - last_hover_ms >= 40) {
@@ -516,6 +653,7 @@ int main(int argc, char **argv) {
     if (kill_sent_ms >= 0 && t - kill_sent_ms > 2000) break;
 
     reap_run_children();
+    if (t - last_sum_ms >= 2000) { hb_summary(t); last_sum_ms = t; }
     XFlush(dpy);
     pfd[0].fd = ConnectionNumber(dpy);
     pfd[0].events = POLLIN;
