@@ -186,13 +186,36 @@ TLS:         40 bytes, static (fits glibc's 1664-byte surplus)
 df_1:        NODELETE size: 20,194,088 bytes stripped
 ```
 
-`obj/mesa/lib/{libGL.so.1,libGLX.so.0,libGL.a}` (43 s incremental). That is a
-**build-level** result: the DSO is linked against the pinned glibc 2.31 headers
-and every undefined symbol is accounted for against the runtime set the compat
-process provides. It has **not** yet been exercised in the guest (stage it with
-`bash tools/mesa/stage.sh` and run the M4 gate — the gate hardcodes
-`-enable-kvm` and `DESKTOP=hobby`, so it needs the same host-abstraction the
-desktop runner does before it can run here).
+`obj/mesa/lib/{libGL.so.1,libGLX.so.0,libGL.a}` (43 s incremental): the DSO is
+linked against the pinned glibc 2.31 headers and every undefined symbol is
+accounted for against what the compat process provides.
+
+**And it renders here.** `python3 tools/gate/m4_gl_probe.py` passes on this host
+under TCG:
+
+```
+[GL] GL_VERSION  : 3.3 (Core Profile) Mesa 26.2.6
+[GL] GL_RENDERER : softpipe
+[GL] px blue-vertex (160,211): gl=0607f1ff desktop[rowflip]=ff0607f1
+m4: PASS — libGL.so.1 loaded in the guest, rendered a GL 3.3 core triangle,
+    PRESENTED it to a window, and tore the stack down
+```
+
+So the guest GL stack is no longer a hypothesis on macOS: it is the same result
+the Linux farm produced, from a different host OS and CPU architecture.
+
+The gate needed the same host abstraction the runners use. `tools/host/hostcaps.sh`
+is now the single answer to "what can this machine do" (`--json` for the Python
+runners): acceleration (`-enable-kvm` only where /dev/kvm exists), the x86_64
+firmware path (Homebrew ships `edk2-x86_64-code.fd`, not `OVMF_CODE_4M.fd`), the
+llvm keg, and a portable image-lock release. Everything the gate got wrong was a
+host fact baked in as a constant: `-enable-kvm`, `fuser -k`, `readelf`, bare
+`gcc` for the probe, `/usr/bin/python3` forced onto PATH for mako, and a second
+glibc sysroot that lacked the kernel UAPI headers the DSO had.
+
+The xcompat DSOs needed one Makefile line too: `--target=x86_64-linux-gnu` and
+`-fuse-ld=lld`. Without them a macOS host compiles arm64 Darwin objects and
+hands them to `ld64.lld` ("unknown argument '-z'").
 
 Five more host leaks had to be closed after the first pass, all in the
 host→target translation:

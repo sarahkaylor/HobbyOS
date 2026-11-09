@@ -519,8 +519,13 @@ PY
     [ -d "$hb_d" ] && { hb_x11="$hb_d"; break; }
   done
   [ -n "$hb_x11" ] || die "missing X11 headers (apt install libx11-dev / brew install libx11)"
+  # A GL root must carry gl.h, not just the GLX protocol headers: Homebrew's
+  # include/GL exists but holds glxint.h/glxproto.h (&co) from xorgproto and no
+  # gl.h at all, so "the directory exists" is the wrong test and the client
+  # headers end up missing.  Mesa's own include/GL is the authoritative set and
+  # matches the DSO that was just built.
   for hb_d in /usr/include/GL "${HOMEBREW_PREFIX:-/opt/homebrew}/include/GL" "$SRC/include/GL"; do
-    [ -d "$hb_d" ] && { hb_gl="$hb_d"; break; }
+    [ -f "$hb_d/gl.h" ] && { hb_gl="$hb_d"; break; }
   done
   [ -n "$hb_gl" ] || die "missing GL headers (apt install libgl1-mesa-dev)"
   # -L, not -a: Homebrew's include/X11 and include/GL are *symlink trees* into
@@ -530,6 +535,11 @@ PY
   # with a directory full of broken links.  Dereference so the stage is real.
   cp -RL "$hb_x11" "${STAGE}/x11-include/"
   cp -RL "$hb_gl" "${STAGE}/x11-include/"
+  # gl.h pulls in <KHR/khrplatform.h>, which a macOS host has only inside the
+  # Mesa source tree (Homebrew's khronos headers are keg-only).
+  if [ ! -f "${STAGE}/x11-include/KHR/khrplatform.h" ] && [ -f "$SRC/include/KHR/khrplatform.h" ]; then
+    cp -RL "$SRC/include/KHR" "${STAGE}/x11-include/"
+  fi
   note "X11 from $hb_x11, GL from $hb_gl"
   note "staged $(find -L "${STAGE}/x11-include" -type f | wc -l | tr -d ' ') headers"
 }
