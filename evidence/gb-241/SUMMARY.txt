@@ -1,0 +1,131 @@
+GB-241 — tag the [IDLESTUCK] dump's own proc_lock acquisition
+=============================================================
+
+Head: de8335a6 (GB-240) + the GB-241 commit, branch ticket/241-dumpself-owner.
+Worktree: /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb241
+SW-VM: swarm-farm-3 (verifier, debug reserve — gaming.md §5.1).
+
+Card: the [IDLESTUCK] dump holds proc_lock while printing its rows, so the
+dumper's own acquire is definitionally acq=rel+1 in every dump.  Tag it
+(dump_self=1) or snapshot+release, print it, exclude it, and name the real
+owner — or return the negative if no real imbalanced row remains.
+
+What this branch adds
+---------------------
+- src/include/lock.h: proclock_hold_t gains `dump_self`; declares
+  proclock_dump_note(int on).
+- src/kernel/arch/x64/locks.c: per-CPU `plh_dump_self_pending[]`.  The dump
+  calls proclock_dump_note(1) before its acquire and (0) after its release;
+  proclock_hold_note() copies the flag into `dump_self` at the ACQUIRE, so the
+  tag travels with the exact acquisition (not with whichever CPU later prints).
+- src/kernel/arch/arm/locks.c: no-op stub.
+- src/kernel/process.c [IDLESTUCK] dump: proclock_dump_note(1) before the
+  dflags acquire, proclock_dump_note(0) after the release; [PROCLOCK-HOLD]
+  prints `dump_self=` per CPU; the owner [LOCKDIAG] row prints `dump_self=`
+  and `owner_in_user=` (owner_in_user = the watchdog's owner RIP is outside
+  the kernel image: < 0x70000000 or >= USER_VA_BASE; the definition is in the
+  code comment).
+Dump content is unchanged otherwise; observation only.
+
+The two 600 s default intel runs
+--------------------------------
+RUN 1 — 540 console lines, 6 programs, 0 [IDLESTUCK], 0 [PROCLOCK-HOLD],
+halted=0: the guest wedged in the shell pipe test before the idle detector
+ever ran, so the instrument was not exercised.  This is not a gate run for
+the DoD; run 2 was started (same 600 s, same build).
+
+RUN 2 (graded run):
+```
+T3_intel: 1490 console lines, 2 FAIL lines, 12 user memory fault records across 5 processes, 7 programs exited, 0 shredded, glued=2, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 2 glued console line(s) (t4_glued.sh): a line carrying two records cannot be attributed
+T3_intel EXIT=1
+```
+112 [PROCLOCK-HOLD] rows, 45 parsed [LOCKDIAG] rows.  **14 imbalanced**
+(acq != rel):
+
+```
+imbalanced: 14 | dump_self=1: 14 | dump_self=0: 0
+distinct site3 on imbalanced: {0x7007BCE7: 14}
+stage counts on imbalanced: {4: 14}
+completed det pairs among imbalanced: 14
+```
+
+All 14 rows (evidence/gb-241/01-parser.txt):
+```
+cpu=0 acq=9157 rel=9156  site3=0x7007BCE7 det=(30208,30208,4)   dump_self=1
+cpu=0 acq=13976 rel=13975 site3=0x7007BCE7 det=(54263,54263,4)  dump_self=1
+cpu=0 acq=15119 rel=15118 site3=0x7007BCE7 det=(60204,60204,4)  dump_self=1
+cpu=5 acq=22285 rel=22284 site3=0x7007BCE7 det=(87605,87605,4)  dump_self=1
+cpu=0 acq=21102 rel=21101 site3=0x7007BCE7 det=(90237,90237,4)  dump_self=1
+cpu=0 acq=27066 rel=27065 site3=0x7007BCE7 det=(120242,120242,4) dump_self=1
+cpu=3 acq=34591 rel=34590 site3=0x7007BCE7 det=(121007,121007,4) dump_self=1
+cpu=1 acq=44219 rel=44218 site3=0x7007BCE7 det=(150243,150243,4) dump_self=1
+cpu=5 acq=42335 rel=42334 site3=0x7007BCE7 det=(154360,154360,4) dump_self=1
+cpu=3 acq=52322 rel=52321 site3=0x7007BCE7 det=(180256,180256,4) dump_self=1
+cpu=0 acq=40540 rel=40539 site3=0x7007BCE7 det=(187712,187712,4) dump_self=1
+cpu=0 acq=45003 rel=45002 site3=0x7007BCE7 det=(210262,210262,4) dump_self=1
+cpu=5 acq=62370 rel=62369 site3=0x7007BCE7 det=(221064,221064,4) dump_self=1
+cpu=0 acq=50977 rel=50976 site3=0x7007BCE7 det=(240270,240270,4) dump_self=1
+```
+
+Representative dump block (byte-verbatim):
+```
+[PROCLOCK-HOLD] cpu=0 acq=50977 rel=50976 last=acquire last_ms=240273 site=0x00000000700B2A4E owner_site3=0x000000007007BCE7 rel_site=0x000000007007BB82 iretq_ms=20061 locked_at_iretq=1 det_entry=240270 det_exit=240270 det_stage=4 dump_self=1
+[PROCLOCK-HOLD] cpu=1 acq=71259 rel=71259 last=release last_ms=240273 site=0x000000007007BB82 owner_site3=0x000000007007B4B5 rel_site=0x000000007007BB82 iretq_ms=21226 locked_at_iretq=0 det_entry=240273 det_exit=240273 det_stage=4 dump_self=0
+[PROCLOCK-HOLD] cpu=2 acq=68492 rel=68492 last=release last_ms=240273 site=0x000000007007BB82 owner_site3=0x000000007007B4B5 rel_site=0x000000007007BB82 iretq_ms=19861 locked_at_iretq=0 det_entry=240273 det_exit=240273 det_stage=4 dump_self=0
+[PROCLOCK-HOLD] cpu=3 acq=70339 rel=70339 last=release last_ms=240273 site=0x000000007007B3AD owner_site3=0x000000007007B0A2 rel_site=0x000000007007B3AD iretq_ms=18822 locked_at_iretq=0 det_entry=240272 det_exit=240272 det_stage=4 dump_self=0
+```
+
+Address resolution (this build):
+```
+0x7007BCE7 -> the dump's proc_lock acquire, process.c:5094 (call at 0x7007BCE2,
+              immediately after `call proclock_dump_note`)
+0x7007B4B5 -> the detector's acquire, process.c:4782
+0x7007BB82 -> the detector's release, process.c:5025
+```
+Disassembly at 0x7007BCD3: `movl $1,%edi; call proclock_dump_note; movl
+$0x746e5088,%edi; call spinlock_acquire_irqsave` — the dump's own acquire is
+tagged before it is taken.
+
+RESULT: the tag is exact and the falsifier's negative is the answer.
+- 14/14 imbalanced rows are the dumper's own acquisition (`dump_self=1`);
+  every one's detector pair is completed and its site is the dump's acquire.
+- After excluding `dump_self=1` there are **0** imbalanced rows.
+- No real owner appears: 0 [LOCKDIAG] rows with `dump_self=0 && owner_cpu>=0`;
+  `owner_in_user=1` appears 0 times over the 45 parsed rows (14 samples show
+  `owner_cpu=-1`, i.e. the lock was unowned when sampled).  The GB-240 wave's
+  user-VA owner (`owner_wd_rip=0x1000005C84`, pid 5) did not reproduce in this
+  run.
+Per the card's falsifier: after excluding the dumper's row there is no
+imbalanced row, so the owner signal was the dump's own acquisition; the wedge
+is elsewhere.  No fix is claimed.
+
+Next split (Coordinator; not minted here)
+-----------------------------------------
+The wave's halt-miss here is not a proc_lock owner strand: the guest wedged
+after 7 programs with 12 user memory faults and one kernel FATAL
+(`vector=1879777880`, a garbage vector — the torn-frame family), i.e. the
+wedge/death is in the process/frame path, not in the idle detector's lock.
+That is the next card's measurement, not a force-fit on this one.
+
+Gates (verbatim)
+----------------
+```
+$ make -j24 host_tests
+Checks run:    482
+Checks failed: 0
+TEST EXIT: 0
+$ make -j24 ARCH=intel MODE=test hobbyos.elf
+BUILD_EXIT=0
+```
+
+Files
+-----
+evidence/gb-241/t3-intel-run1-shell-wedge.log / .stdout   (unexercised run)
+evidence/gb-241/t3-intel-run2-graded.log / .stdout        (graded run)
+evidence/gb-241/01-parser.txt
+evidence/gb-241/02-address-resolution.txt
+evidence/gb-241/host-tests.log
+evidence/gb-241/intel-build.log
