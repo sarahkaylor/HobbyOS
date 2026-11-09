@@ -322,7 +322,14 @@ ifeq ($(ARCH),intel)
   # (src/kernel/virtio_input.c), so the GTK window needs no pointer grab and
   # the guest cursor sits exactly under the host pointer; the PS/2 mouse
   # (IntelliMouse, wheel) remains the fallback when vmport is off.
-  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
+
+  # virtio-tablet-pci: an ABSOLUTE pointing device.  Without one, QMP
+  # input-send-event with abs axes delivers nothing -- the cursor never moves and
+  # every synthetic click is silently dropped (measured: hours of "clicks do
+  # nothing" on the icewm desktop, while the keyboard path worked fine because
+  # keys are not routed through a pointer device).  tools/rw/rw_desktop_drive.py
+  # and the GUI gates all drive the desktop through absolute events.
+  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
