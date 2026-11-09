@@ -4241,6 +4241,9 @@ static uint64_t badvec_watch_frame[MAX_CPUS];
 static int64_t badvec_watch_pid[MAX_CPUS];
 static uint64_t badvec_watch_vect[MAX_CPUS];
 static int badvec_writer_prints;
+/* GB-244: the pid-1 allowance below needs its own budget, so boot frames and
+   mid-wave frames cannot starve each other's rows. */
+static int badvec_pid1_prints;
 
 /* GB-238: the GB-234-V wave armed DR0 on the exact changed slot and printed
    no writer row, so the #DB either never arrived or was never printed.  These
@@ -4283,6 +4286,26 @@ static inline uint64_t badvec_rd_dr7(void) {
    arm/watch below the kernel image. */
 static int badvec_frame_window(uint64_t p) {
   return p >= 0x1000ULL && p < 0x70000000ULL;
+}
+
+/* GB-244: the pure arming decision, split out so a unit test can prove it.
+   GB-146-A excluded pid 1 because its *boot* frames armed the watch before
+   any test process ran; GB-101-V7 then measured the frame this card exists
+   for: pid 1, kernel CS, vector slot overwritten after entry (13 ->
+   1879777880) at 9.3 s -- one the pid>1 rule silently skipped.  Admit a
+   pid-1 frame only when it is a kernel-CS exception frame in the census
+   window, the boot phase is over (>= 3000 ms), and the pid-1 budget has
+   room; a false writer row is worse than none, so every other pid-1 frame
+   stays out. */
+int badvec_should_arm(uint64_t frame, uint64_t cs, uint64_t vector, int64_t pid,
+                      uint64_t now_ms, int armed, int prints, int pid1_prints) {
+  if (armed || prints >= 64)
+    return 0;
+  if (!badvec_frame_window(frame) || vector > 31)
+    return 0;
+  if (pid > 1)
+    return 1;
+  return pid == 1 && cs == 0x08 && now_ms >= 3000 && pid1_prints < 8;
 }
 
 static int64_t badvec_pid(void);
@@ -4440,10 +4463,13 @@ static void general_interrupt_inner(struct trap_frame *tf) {
        entered as v=13.  Do not watch pid 1's boot frames either, and skip the
        #DB itself so its entry does not overwrite the interrupted frame's
        stamp. */
-    if (!badvec_watch_armed[cpu] && badvec_writer_prints < 64 &&
-        badvec_pid() > 1 && tf->vector <= 31 &&
-        badvec_frame_window((uint64_t)tf))
+    if (badvec_should_arm((uint64_t)tf, tf->cs, tf->vector, badvec_pid(),
+                          timer_get_ms(), badvec_watch_armed[cpu],
+                          badvec_writer_prints, badvec_pid1_prints)) {
+      if (badvec_pid() == 1)
+        badvec_pid1_prints++;
       badvec_watch_arm((uint64_t)&tf->vector, (uint64_t)tf, tf->vector);
+    }
   }
   /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
      (vectors 0-31 exceptions, 32-255 IRQ/syscall); a `vector` > 0xFF (measured:
