@@ -231,6 +231,55 @@ mmd -i "$IMG" "${DEST}" >/dev/null 2>&1 || true
 # FAT long names; the tree keeps the exact case Unity expects.
 mcopy -s -m -o -Q -i "$IMG" "$STAGE"/* "${DEST}"/ || die "mcopy failed"
 
+# --- launcher + menu --------------------------------------------------------
+# The desktop's RimWorld entry is GENERATED at disk-build time: gen-icewm-menu.sh
+# emits `prog "RimWorld" app HBHOST.BIN RWLAUNCH.BIN` only if RWLAUNCH.BIN is
+# already on the disk.  Staging the launcher after the build therefore produced a
+# menu without the entry (measured: /ICEWM/menu read back from the image had no
+# RimWorld row), so the launcher goes in first and the menu is regenerated.
+say "launcher + menu"
+LAUNCHER=$ROOT/obj/rw/rwlaunch.bin
+if [ ! -f "$LAUNCHER" ]; then
+  note "building rwlaunch.bin"
+  make -s -C "$ROOT" ARCH="$ARCH" "obj/$ARCH/libc.a" >/dev/null 2>&1 \
+    || die "libc.a build failed"
+  RESINC="$(clang -print-resource-dir)/include"
+  mkdir -p "$(dirname "$LAUNCHER")"
+  clang -O2 -w -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include \
+        -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone \
+        -nostdinc -isystem "$RESINC" -mcmodel=large -DRW_WAIT_SECS=900 \
+        -c src/user/rwlaunch.c -o "$(dirname "$LAUNCHER")/rwlaunch.o" \
+    || die "rwlaunch.c did not compile"
+  ld.lld -T src/user/linker.ld -e _start -o "$(dirname "$LAUNCHER")/rwlaunch.elf" \
+        "$(dirname "$LAUNCHER")/rwlaunch.o" "obj/$ARCH/libc.a" || die "rwlaunch link failed"
+  OBJCOPY=$(command -v llvm-objcopy || ls /opt/homebrew/opt/llvm/bin/llvm-objcopy 2>/dev/null)
+  [ -n "$OBJCOPY" ] || die "llvm-objcopy not found (brew install llvm)"
+  "$OBJCOPY" -O binary "$(dirname "$LAUNCHER")/rwlaunch.elf" "$LAUNCHER"
+fi
+mcopy -o -i "$IMG" "$LAUNCHER" ::/RWLAUNCH.BIN || die "could not stage RWLAUNCH.BIN"
+note "RWLAUNCH.BIN: $(wc -c < "$LAUNCHER" | tr -d ' ') bytes"
+
+# The launcher reads /GAMEDIR and, when it holds an absolute path, skips the NFS
+# mount entirely and runs the tree in place.
+printf '%s\n' "${DEST#::}" > "$CACHE/gamedir"
+mcopy -o -i "$IMG" "$CACHE/gamedir" ::/GAMEDIR || die "could not stage /GAMEDIR"
+note "/GAMEDIR = ${DEST#::}"
+
+GEN=$(mktemp -d)
+sh "$ROOT/src/user/x11sess/gen-icewm-menu.sh" "$IMG" "$ROOT/src/user/desktop.c" "$GEN" \
+  || die "menu generation failed"
+mcopy -o -i "$IMG" "$GEN/menu" ::/ICEWM/menu || die "could not install /ICEWM/menu"
+[ -f "$GEN/toolbar" ] && mcopy -o -i "$IMG" "$GEN/toolbar" ::/ICEWM/toolbar || true
+rm -rf "$GEN"
+MENU=$(mtype -i "$IMG" ::/ICEWM/menu 2>/dev/null || true)
+# Herestring again: `grep -q` exits early and the writer takes SIGPIPE, which
+# `set -euo pipefail` would report as a failure of a successful check.
+if grep -qi 'RIMWORLD' <<<"$MENU"; then
+  note "menu entry present: $(grep -i rimworld <<<"$MENU" | head -1 | sed 's/^ *//')"
+else
+  die "the regenerated /ICEWM/menu has no RimWorld entry"
+fi
+
 # --- verify from the image, not from the staging tree -----------------------
 say "verify (read back out of disk.img)"
 set +e
