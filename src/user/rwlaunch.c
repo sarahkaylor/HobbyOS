@@ -318,10 +318,20 @@ __attribute__((section(".text._start"))) void _start(void) {
     for (int i = 0; suf[i] && gl < (int)sizeof localgame - 1; i++)
       localgame[gl++] = suf[i];
     localgame[gl] = 0;
-    if (access(localgame, 1 /* X_OK */) == 0)
+    /* open(), not access(): FAT carries no execute bit, and access() on this
+     * volume answered -1 for a binary that is definitely there (measured: the
+     * launcher logged "local game dir /GAMES/RIMWORLD" and then exec'd the
+     * compiled-in /NFS/RimWorldLinux).  A successful open is the strongest
+     * statement the filesystem can make; whether the image loads is the ELF
+     * loader's business. */
+    int gfd = open(localgame, 0 /* O_RDONLY */);
+    if (gfd >= 0) {
+      close(gfd);
       game = localgame;
-    else
+    } else {
+      pc("[RW] rwlaunch: cannot open "); pc(localgame); pc("\n");
       say("local game binary missing; falling back to the compiled-in target");
+    }
   } else if (access(RW_NFS_MNT "/RimWorldLinux", 1 /* X_OK */) != 0 &&
       access(RW_NFS_MNT "/RimWorldLinux.l61", 1 /* X_OK */) == 0)
     game = RW_NFS_MNT "/RimWorldLinux.l61";
@@ -575,7 +585,11 @@ __attribute__((section(".text._start"))) void _start(void) {
   pd(protofd);
   pc("\n");
 
-  int pid = spawn_ex(RW_GAME, argv, envp, (const int (*)[2])fdmap,
+  /* `game`, not RW_GAME: the resolved target is what chdir_gamedir() used, and
+   * in local mode /GAMEDIR's binary is the whole point.  Passing the compiled-in
+   * constant here made the local game dir cosmetic -- the launcher logged
+   * "local game dir /GAMES/RIMWORLD" and then exec'd /NFS/RimWorldLinux. */
+  int pid = spawn_ex(game, argv, envp, (const int (*)[2])fdmap,
                      cfd >= 0 ? 1 : 0);
   pc("[RW] rwlaunch: spawn_ex -> ");
   pd(pid);
