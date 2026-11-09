@@ -5169,6 +5169,35 @@ static void general_interrupt_inner(struct trap_frame *tf) {
               panic_puts("\n");
             }
           }
+          /* GB-234 (shape b): make the watch's coverage visible next to the
+             changed slot.  badvec_watch_slot[] survives disarm, so this is the
+             set of slots the DR0 pair ever covered on each CPU, with the live
+             armed bit.  If the changed vector_slot was never in this set, the
+             writer row for it cannot exist and the miss is stated rather than
+             inferred. */
+          {
+            int any_watch = 0;
+            for (uint32_t oc = 0; oc < MAX_CPUS; oc++) {
+              if (!badvec_watch_slot[oc])
+                continue;
+              any_watch = 1;
+              panic_puts("  [BADVEC] dr0 cpu=");
+              print_int_raw((int)oc);
+              panic_puts(" armed=");
+              print_int_raw(badvec_watch_armed[oc]);
+              panic_puts(" slot=");
+              panic_print_hex(badvec_watch_slot[oc]);
+              panic_puts(" frame=");
+              panic_print_hex(badvec_watch_frame[oc]);
+              panic_puts(" pid=");
+              print_int_raw((int)badvec_watch_pid[oc]);
+              panic_puts(" v=");
+              print_int_raw((int)badvec_watch_vect[oc]);
+              panic_puts("\n");
+            }
+            if (!any_watch)
+              panic_puts("  [BADVEC] dr0 slots: none\n");
+          }
         } else {
           panic_puts("[BADVEC] entry slots unchanged: frame=");
           panic_print_hex((uint64_t)tf);
