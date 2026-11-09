@@ -940,6 +940,13 @@ int arch_fpu_user_image_ok(uint64_t va);
  * union at 0, sigset_t sa_mask at 8, sa_flags at 24, sa_restorer at 32;
  * size 40).  The trap layer marshals it field-wise; process.c never reads
  * the user struct directly. */
+#if defined(__APPLE__)
+/* Darwin's <sys/signal.h> defines these as member accessors; without this the
+ * struct below parses as "uint64_t __sigaction_u.__sa_handler;" and a host TU
+ * stops with "expected ';' at end of declaration list". */
+# undef sa_handler
+# undef sa_sigaction
+#endif
 struct ho_sigaction {
   uint64_t sa_handler; /* union { sa_handler; sa_sigaction; } */
   uint64_t sa_mask[2];

@@ -33,7 +33,13 @@
 
 extern int dup(int oldfd);
 extern int dup2(int oldfd, int newfd);
+#if defined(__APPLE__)
+/* Darwin's libc already declares syscall() (int syscall(int, ...)); redeclaring
+ * it as long-returning is a hard error there, and the host test only needs the
+ * one chdir call. */
+#else
 extern long syscall(long number, ...);   /* used for a real chdir() */
+#endif
 
 #define SCRATCH_DIR  ho_scratch_path("notes_host_e2e")
 #define SCRATCH_FILE ho_scratch_path("notes_host_e2e/NOTES.TXT")
