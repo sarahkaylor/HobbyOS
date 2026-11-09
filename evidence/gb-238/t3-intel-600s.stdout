@@ -1,0 +1,31 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb238/obj/t3_gb238_intel.log) ===
+T3_intel: 4494 console lines, 22 FAIL lines, 5 user memory fault records across 4 processes, 36 programs exited, 9 shredded, glued=27, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 27 glued console line(s) (t4_glued.sh): a line carrying two records cannot be attributed
+T3_intel: FAIL — 22 FAIL line(s); first 20:
+804:shell_test: FAILED pipe validation. Buffer: user@hobbyos:/home$ 
+1071:  BLKTEST read-back bytes match the written pattern: FAIL
+1074:  BLKTEST P1 chunk 4096: FAIL
+1138:shell_test2: FAILED uptime validation
+1177:  BLKTEST read-back bytes match the written pattern: FAIL
+1178:  BLKTEST P1 chunk 3333: FAIL
+1191:  BLKTEST read-back bytes match the written pattern: FAIL
+1192:  BLKTEST P1 chunk 65536: FAIL
+1239:  BLKTEST read-back bytes match the written pattern: FAIL
+1243:Loading program for scheduler (v2 AS): /UPTIME.BINFORKTEST.BIN  BLKTEST P2 warm verified read: FAIL
+1357:  BLKTEST P3 [child 0] FAILED: 1
+1413:  BLKTEST read-back bytes match the written pattern: FAIL
+1425:  BLKTEST P3 child exited cleanly (0): FAIL
+1450:  BLKTEST P3 [child 1] FAILED: 1
+1452:  BLKTEST P3 [child 2] FAILED: 1
+1457:/BLKT2.TXT[BLKD] cc=  BLKTEST P3 child exited cleanly (1): FAIL
+1462:0x0000000000000001 cap=  BLKTEST P3 child exited cleanly (2): FAIL
+1704:[LFN] FAIL rename: new long name resolves with content
+1911:[LFN] FAILED: 0x0000000000000001
+2445:[FATBIG] FAIL reopen size == 2 MiB (got=0x00000000000F8000 want=0x0000000000200000)
+T3_intel EXIT=1
+T3_LOG=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb238/obj/t3_gb238_intel.log
+T3_ARCH=intel
+T3_FAILS=22
+T3_EXIT=1
