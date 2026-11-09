@@ -212,7 +212,11 @@ void spinlock_acquire(spinlock_t *lock) {
     uint64_t spins = 0;
     while (__atomic_test_and_set(&lock->locked, __ATOMIC_ACQUIRE)) {
       __builtin_ia32_pause();
-      if ((++spins & 0x3FFFFFFull) == 0) {
+      /* DIAG (temporary): 67M pause iterations is minutes under TCG, so a real
+       * stall is reported by STALLBREAK-DIAG first with owner_pid=-1 and no
+       * owner PC.  16M still cannot be reached by a lock held across one
+       * legitimate device read, but does land inside a genuine wedge. */
+      if ((++spins & 0xFFFFFFull) == 0) {
         /* ~every 67M pause iterations.  Shout, lock-free, so a total
            IRQs-off pileup is still visible on the console. */
         scream_dec("\n[LOCKFOREVER] cpu=", cpu);
@@ -236,6 +240,21 @@ void spinlock_acquire(spinlock_t *lock) {
             if (hb != 0) hb_age = (int)(timer_get_ms() - hb);
           }
           scream_dec(" owner_hb_age=", hb_age);
+          /* Name what the OWNER is holding.  A wedge where the owner is itself
+           * inside spinlock_acquire is a lock-order inversion, and the second
+           * lock is only visible in the holder's held-lock stack.  Bounded to
+           * the first three reports per boot so a flood cannot bury the log. */
+          static int held_reports;
+          if (own_cpu >= 1 && own_cpu - 1 < MAX_CPUS && held_reports < 3) {
+            uint32_t oc = own_cpu - 1;
+            uint32_t d = held_lock_depth[oc];
+            held_reports++;
+            scream_dec(" held_n=", (int)d);
+            for (uint32_t i = 0; i < d && i < HELD_LOCK_SLOTS; i++) {
+              scream_hex(" h", (uint64_t)held_locks[oc][i]);
+              scream_hex("@", (uint64_t)held_lock_pc[oc][i]);
+            }
+          }
         }
         scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
