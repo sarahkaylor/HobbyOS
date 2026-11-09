@@ -1,0 +1,14 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb241/obj/t3_gb241_intel_run2.log) ===
+T3_intel: 1490 console lines, 2 FAIL lines, 12 user memory fault records across 5 processes, 7 programs exited, 0 shredded, glued=2, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 2 glued console line(s) (t4_glued.sh): a line carrying two records cannot be attributed
+T3_intel: FAIL — 2 FAIL line(s); first 20:
+1055:shell_test: FAILED pipe validation. Buffer: cat SHTEST.TXT | grep line
+1071:shell_test2: FAILED uniq validation
+T3_intel EXIT=1
+T3_LOG=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb241/obj/t3_gb241_intel_run2.log
+T3_ARCH=intel
+T3_FAILS=2
+T3_EXIT=1

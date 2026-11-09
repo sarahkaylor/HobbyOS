@@ -64,6 +64,11 @@ typedef struct {
   uint64_t det_entry_ms;
   uint64_t det_exit_ms;
   int det_stage;
+  /* GB-241: 1 when the LAST acquire was made by the [IDLESTUCK] dump itself.
+     The dump holds proc_lock while printing the rows, so its own acquisition
+     is definitionally acq=rel+1 in that dump; this bit lets the row be
+     excluded instead of read as a strand. */
+  int dump_self;
 } proclock_hold_t;
 void proclock_hold_note(int op, uint64_t site);
 int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out);
@@ -71,6 +76,9 @@ void proclock_iretq_note(void);
 /* GB-240: op 1 = entry (stage = starting branch), 2 = stage update,
    3 = exit (stage = where it left the section).  Per-CPU, observation only. */
 void proclock_det_note(int op, int stage);
+/* GB-241: set (1) before the [IDLESTUCK] dump acquires proc_lock and clear (0)
+   after it releases, so proclock_hold_note can record dump_self at the acquire. */
+void proclock_dump_note(int on);
 
 /**
  * Initializes a spinlock to the unlocked state.
