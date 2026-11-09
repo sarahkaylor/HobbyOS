@@ -44,6 +44,30 @@ typedef struct {
 /**
  * Initializes a spinlock to the unlocked state.
  */
+/**
+ * A lock for critical sections that may BLOCK.
+ *
+ * Same layout as spinlock_t on purpose: the existing diagnostics (lockdbg
+ * registration, lock ranks) can keep referring to the same address without
+ * knowing the difference.  The difference is behavioural and it is the whole
+ * point: a waiter does not spin with interrupts off.  It yields the CPU and
+ * retries, so the holder -- which may be asleep in a device read -- gets to run
+ * and finish.  A thread that sleeps while holding an irqsave spinlock never
+ * releases it; that is the fault this type exists to remove.
+ *
+ * Only for callers in process context whose critical section does device I/O.
+ * It does NOT disable interrupts, so it must never guard state that an
+ * interrupt handler also touches.
+ */
+typedef struct {
+  volatile uint32_t locked; /**< 1 if locked, 0 if free */
+  volatile uint32_t owner;  /**< cpu+1 of the holder, 0 = unowned */
+} ylock_t;
+
+void ylock_init(ylock_t *lock);
+void ylock_acquire(ylock_t *lock);
+void ylock_release(ylock_t *lock);
+
 void spinlock_init(spinlock_t *lock);
 
 /**

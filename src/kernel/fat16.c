@@ -36,7 +36,10 @@ static uint32_t data_sector;
 static uint32_t cluster_size;
 static uint32_t bpb_total_sectors;
 
-static spinlock_t fat_lock;
+/* A yield-lock, not a spinlock: every critical section under it performs
+   device I/O, so a waiter must never spin with interrupts disabled --
+   the holder is asleep and can only release by being scheduled. */
+static ylock_t fat_lock;
 
 /* M6/L69: file offset -> LBA (defined with the page-in probes below). */
 static int fat16_lba_for_pos_locked(uint16_t start, uint32_t pos,
@@ -214,9 +217,9 @@ static void lfn_entry_display(const struct lfn_state *st,
  *   0 on success, -1 on failure.
  */
 int fat16_init(void) {
-  spinlock_init(&fat_lock);
+  ylock_init(&fat_lock);
 #ifdef KERNEL_MODE_UNIT_TEST
-  lockdbg_register(&fat_lock, "fat_lock", LOCK_RANK_FAT); /* SEC-OBS-B */
+  lockdbg_register((const spinlock_t *)&fat_lock, "fat_lock", LOCK_RANK_FAT); /* SEC-OBS-B */
 #endif
   spinlock_init(&fat_cache_lock);
   fat_cache_valid = 0;
@@ -563,11 +566,11 @@ static int find_entry_in_root(const char *name, struct fat16_dir_entry *out_entr
     if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
       return -1;
     }
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
     for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
       if (entries[j].name[0] == 0x00) {
-        spinlock_release_irqrestore(&fat_lock, flags);
+        ylock_release(&fat_lock);
         goto done_scan;
       }
       if (entries[j].name[0] == (char)0xE5) {
@@ -594,7 +597,7 @@ static int find_entry_in_root(const char *name, struct fat16_dir_entry *out_entr
       }
       lfn_reset(&st);
     }
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
   }
 done_scan:
   {
@@ -637,11 +640,11 @@ static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct f
       if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
         return -1;
       }
-      uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
       for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
         if (entries[j].name[0] == 0x00) {
-          spinlock_release_irqrestore(&fat_lock, flags);
+          ylock_release(&fat_lock);
           goto done_scan;
         }
         if (entries[j].name[0] == (char)0xE5) {
@@ -670,7 +673,7 @@ static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct f
         }
         lfn_reset(&st);
       }
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
     }
     /* read_fat() is cache-locked internally and reads the device on a miss;
        fat_lock must not be held across it. */
@@ -875,7 +878,7 @@ static int alloc_entry_in_dir_locked(uint16_t dir_cluster, const struct fat16_di
    O_CREAT|O_EXCL (and mkdir) get create-if-absent atomically; a collision
    returns -2 so callers can map it to EEXIST. */
 static int alloc_entry_in_dir(uint16_t dir_cluster, const struct fat16_dir_entry *new_entry, uint32_t *out_sector, uint32_t *out_offset, int check_dup) {
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   int rc;
   if (check_dup) {
     int taken = dir_name_taken_locked(dir_cluster, new_entry->name);
@@ -885,7 +888,7 @@ static int alloc_entry_in_dir(uint16_t dir_cluster, const struct fat16_dir_entry
   } else {
     rc = alloc_entry_in_dir_locked(dir_cluster, new_entry, out_sector, out_offset);
   }
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   return rc;
 }
 
@@ -1091,7 +1094,7 @@ static int alloc_lfn_run(uint16_t dir_cluster, const char *longname,
                          const struct fat16_dir_entry *short_entry,
                          uint32_t *out_sector, uint32_t *out_offset,
                          int check_dup, char *out_short83) {
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   int rc = -1;
   if (check_dup) {
     int st = lfn_create_state_locked(dir_cluster, longname, short83);
@@ -1137,7 +1140,7 @@ static int alloc_lfn_run(uint16_t dir_cluster, const char *longname,
     if (rc == 0 && out_short83)
       for (int i = 0; i < 11; i++) out_short83[i] = short83[i];
   }
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   return rc;
 }
 
@@ -1462,7 +1465,7 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
     return -1;
   }
 
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   uint16_t cluster = dir_entry.start_cluster;
   uint8_t buf[SECTOR_SIZE];
   int current_idx = 0;
@@ -1476,16 +1479,16 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
     struct lfn_state st;
     lfn_reset(&st);
     for (uint32_t i = 0; i < root_dir_sectors; i++) {
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
         return -1;
       }
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
 
       struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
       for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
         if (entries[j].name[0] == 0x00) {
-          spinlock_release_irqrestore(&fat_lock, flags);
+          ylock_release(&fat_lock);
           return -1;
         }
         if (entries[j].name[0] == (char)0xE5) {
@@ -1506,7 +1509,7 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
           if (out_attr) *out_attr = entries[j].attr;
           if (out_size) *out_size = entries[j].file_size;
 
-          spinlock_release_irqrestore(&fat_lock, flags);
+          ylock_release(&fat_lock);
           return 0;
         }
         lfn_reset(&st);
@@ -1522,16 +1525,16 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
     while (cluster != 0 && cluster < 0xFFF0) {
       for (uint32_t s = 0; s < bpb_sectors_per_cluster; s++) {
         uint32_t sector_num = data_sector + (cluster - 2) * bpb_sectors_per_cluster + s;
-        spinlock_release_irqrestore(&fat_lock, flags);
+        ylock_release(&fat_lock);
         if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
           return -1;
         }
-        flags = spinlock_acquire_irqsave(&fat_lock);
+        ylock_acquire(&fat_lock);
 
         struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
         for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
           if (entries[j].name[0] == 0x00) {
-            spinlock_release_irqrestore(&fat_lock, flags);
+            ylock_release(&fat_lock);
             return -1;
           }
           if (entries[j].name[0] == (char)0xE5) {
@@ -1548,7 +1551,7 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
             if (out_attr) *out_attr = entries[j].attr;
             if (out_size) *out_size = entries[j].file_size;
 
-            spinlock_release_irqrestore(&fat_lock, flags);
+            ylock_release(&fat_lock);
             return 0;
           }
           lfn_reset(&st);
@@ -1559,7 +1562,7 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
     }
   }
 
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   return -1;
 }
 
@@ -1607,27 +1610,27 @@ int fat16_unlink(const char* filename) {
     return -1;
   }
 
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   uint16_t cluster = entry.start_cluster;
   while (cluster != 0 && cluster < 0xFFF0) {
     /* Two device operations per link; neither may run under fat_lock. */
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     uint16_t next = read_fat(cluster);
     write_fat(cluster, 0x0000);
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     cluster = next;
   }
 
-  spinlock_release_irqrestore(&fat_lock, flags);
-  flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_release(&fat_lock);
+  ylock_acquire(&fat_lock);
   /* Free the short entry AND its 0x0F long-name records (same sector plus
      any that spill into the previous sector) — the records belong to it
      and would otherwise leak slots. */
   if (lfn_del_entry(sector, offset) != 0) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return -1;
   }
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   return 0;
 }
 
@@ -1718,14 +1721,14 @@ int fat16_rmdir(const char *path) {
        (entry.name[1] == '.' && entry.name[2] == ' ')))
     return -EBUSY;
 
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   int empty = fat16_dir_empty(entry.start_cluster);
   if (empty < 0) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return -EIO;
   }
   if (!empty) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return -ENOTEMPTY;
   }
 
@@ -1733,17 +1736,17 @@ int fat16_rmdir(const char *path) {
   uint16_t cluster = entry.start_cluster;
   while (cluster != 0 && cluster < 0xFFF0) {
     /* Two device operations per link; neither may run under fat_lock. */
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     uint16_t next = read_fat(cluster);
     write_fat(cluster, 0x0000);
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     cluster = next;
   }
 
   /* Free the short entry AND its 0x0F long-name records (same sector
      plus any that spill into the previous sector). */
   int r = lfn_del_entry(sector, offset);
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   return r == 0 ? 0 : -EIO;
 }
 
@@ -1795,28 +1798,28 @@ static int update_dotdot(uint16_t dir_cluster, uint16_t new_parent_cluster) {
   if (dir_cluster < 2) return -1;
   uint32_t sector = data_sector + (uint32_t)(dir_cluster - 2) * bpb_sectors_per_cluster;
   uint8_t buf[SECTOR_SIZE];
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   if (virtio_blk_read_sector(sector, buf, 1) != 0) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return -1;
   }
   struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
   for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
     if (entries[j].name[0] == 0x00) {
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -1;
     }
     if (entries[j].name[0] != '.') continue;
     if (!(entries[j].name[1] == '.' && entries[j].name[2] == ' ')) continue;
     entries[j].start_cluster = new_parent_cluster;
     if (virtio_blk_write_sector(sector, buf, 1) != 0) {
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -1;
     }
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return 0;
   }
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   return -1;
 }
 
@@ -1875,10 +1878,10 @@ int fat16_rename(const char* oldname, const char* newname) {
        allocated carrying the entry's data, then the old slot and its
        records are freed — otherwise the long name is silently lost. */
     uint8_t buf[SECTOR_SIZE];
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     int old_has_lfn = 0;
     if (virtio_blk_read_sector(sector, buf, 1) != 0) {
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -1;
     }
     struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
@@ -1888,13 +1891,13 @@ int fat16_rename(const char* oldname, const char* newname) {
         entries[offset].name[k] = formatted_name[k];
       }
       if (virtio_blk_write_sector(sector, buf, 1) != 0) {
-        spinlock_release_irqrestore(&fat_lock, flags);
+        ylock_release(&fat_lock);
         return -1;
       }
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return 0;
     }
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
 
     struct fat16_dir_entry moved = entry;
     for (int k = 0; k < 11; k++) moved.name[k] = formatted_name[k];
@@ -1916,19 +1919,19 @@ int fat16_rename(const char* oldname, const char* newname) {
         return -1;
       }
     }
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     int del = lfn_del_entry(sector, offset);
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     if (del != 0) {
       /* Roll the new entry back so no duplicate is left behind. */
       uint8_t nbuf[SECTOR_SIZE];
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       if (virtio_blk_read_sector(new_sector, nbuf, 1) == 0) {
         struct fat16_dir_entry *es = (struct fat16_dir_entry *)nbuf;
         es[new_offset].name[0] = (char)0xE5;
         (void)virtio_blk_write_sector(new_sector, nbuf, 1);
       }
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -1;
     }
     return 0;
@@ -1970,7 +1973,7 @@ int fat16_rename(const char* oldname, const char* newname) {
   }
 
   uint8_t buf[SECTOR_SIZE];
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   if (virtio_blk_read_sector(sector, buf, 1) != 0) {
     /* Roll the new entry back so no duplicate is left behind. */
     uint8_t nbuf[SECTOR_SIZE];
@@ -1979,15 +1982,15 @@ int fat16_rename(const char* oldname, const char* newname) {
       es[new_offset].name[0] = (char)0xE5;
       (void)virtio_blk_write_sector(new_sector, nbuf, 1);
     }
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return -1;
   }
   /* Free the old slot AND its 0x0F long-name records (they belong to it). */
   if (lfn_del_entry(sector, offset) != 0) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return -1;
   }
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
 
   if (is_dir) {
     (void)update_dotdot(entry.start_cluster, new_parent.start_cluster);
@@ -2019,7 +2022,7 @@ int fat16_mkdir(const char *path) {
        never lets go.  It reserves the cluster atomically in RAM, so the choice
        is still exclusive. */
   uint16_t new_cluster = alloc_cluster();
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   if (new_cluster == 0) {
     return -1;
   }
@@ -2043,9 +2046,9 @@ int fat16_mkdir(const char *path) {
 
   uint32_t new_dir_sector = data_sector + (new_cluster - 2) * bpb_sectors_per_cluster;
   if (virtio_blk_write_sector(new_dir_sector, sector_buf, 1) != 0) {
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     write_fat(new_cluster, 0x0000);
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return -1;
   }
 
@@ -2063,9 +2066,9 @@ int fat16_mkdir(const char *path) {
 
   if (name_is_83(last_comp)) {
     if (alloc_entry_in_dir(parent_entry.start_cluster, &new_dir_entry, 0, 0, 1) != 0) {
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       write_fat(new_cluster, 0x0000);
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -1;
     }
   } else {
@@ -2077,9 +2080,9 @@ int fat16_mkdir(const char *path) {
     if (nchunks < 1) nchunks = 1;
     if (alloc_lfn_run(parent_entry.start_cluster, last_comp, formatted_name,
                       nchunks, &new_dir_entry, 0, 0, 1, 0) != 0) {
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       write_fat(new_cluster, 0x0000);
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -1;
     }
   }
@@ -2137,28 +2140,28 @@ static int fat16_sync_entry(struct file* f) {
 
   uint8_t buf[SECTOR_SIZE];
   for (int attempt = 0; attempt < 4; attempt++) {
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     if (virtio_blk_read_sector(f->fat16.dir_sector, buf, 1) != 0) {
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -EIO;
     }
     struct fat16_dir_entry *on =
         &((struct fat16_dir_entry *)buf)[f->fat16.dir_offset];
     unsigned char b0 = (unsigned char)on->name[0];
     if (b0 == 0x00 || b0 == (char)0xE5) {
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -EIO; /* the entry was deleted under this open handle */
     }
     if (!fat16_entry_eq(on, &f->fat16.disk_seen)) {
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -EIO; /* someone else renamed/recreated the slot: skip */
     }
     *on = entry;
     if (virtio_blk_write_sector(f->fat16.dir_sector, buf, 1) != 0) {
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return -EIO;
     }
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     /* Belt-and-braces verify (mirrors the old dir_entry_write): with the
        lock held across the RMW this passes first try. */
     if (virtio_blk_read_sector(f->fat16.dir_sector, buf, 1) != 0) return -EIO;
@@ -2189,20 +2192,20 @@ int fat16_truncate(struct file* f) {
      is the belt for any already-crafted one. */
   if (f->fat16.dir_sector == 0) return -1;
 
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   uint16_t c = f->fat16.entry.start_cluster;
   while (c >= 2 && c < 0xFFF8) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     uint16_t next = read_fat(c);
     write_fat(c, 0);
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     c = next;
   }
   f->fat16.entry.start_cluster = 0;
   f->fat16.entry.file_size = 0;
   f->fat16.cursor = 0;
   fat16_stamp_entry(&f->fat16.entry);  /* O_TRUNC is a modification */
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   f->fat16.dirty = 1;
 
   fat16_sync_entry(f);
@@ -2237,13 +2240,13 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
        fat16_write.  Every fully-fresh cluster is already zeroed by
        alloc_cluster, so the bulk needs no content write and reads back as
        all zeros (POSIX ftruncate extension semantics). */
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     if (f->fat16.entry.start_cluster == 0) {
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       uint16_t first = alloc_cluster();
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       if (first == 0) {
-        spinlock_release_irqrestore(&fat_lock, flags);
+        ylock_release(&fat_lock);
         return -1;
       }
       f->fat16.entry.start_cluster = first;
@@ -2253,7 +2256,7 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
     for (uint32_t i = 0; i < target_idx; i++) {
       uint16_t nxt = read_fat(c);
       if (nxt == 0) { /* broken chain (a shrink would have rejected it) */
-        spinlock_release_irqrestore(&fat_lock, flags);
+        ylock_release(&fat_lock);
         return -1;
       }
       if (nxt >= 0xFFF8) {
@@ -2261,18 +2264,18 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
        with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
        never lets go.  It reserves the cluster atomically in RAM, so the choice
        is still exclusive. */
-        spinlock_release_irqrestore(&fat_lock, flags);
+        ylock_release(&fat_lock);
         nxt = alloc_cluster();
-        flags = spinlock_acquire_irqsave(&fat_lock);
+        ylock_acquire(&fat_lock);
         if (nxt == 0) {
-          spinlock_release_irqrestore(&fat_lock, flags);
+          ylock_release(&fat_lock);
           return -1; /* disk full */
         }
         write_fat(c, nxt);
       }
       c = nxt;
     }
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
 
     /* Zero the partial tail: the bytes from old_size to the end of its
        cluster may hold stale pre-shrink data; full clusters beyond are
@@ -2302,20 +2305,20 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
   }
 
   /* Shrink: walk to the last cluster to keep, then free the rest. */
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   uint32_t keep = (new_size + cluster_size - 1) / cluster_size;
   uint16_t c = f->fat16.entry.start_cluster;
   for (uint32_t i = 1; i < keep && c >= 2 && c < 0xFFF8; i++) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     c = read_fat(c);
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
   }
   if (c < 2 || c >= 0xFFF8) {
     /* No cluster chain covers the kept range: collapsed chain. */
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return -1;
   }
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   uint16_t rest = read_fat(c);
   write_fat(c, 0xFFFF); /* re-terminate the last kept cluster */
   while (rest >= 2 && rest < 0xFFF8) {
@@ -2323,8 +2326,8 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
     write_fat(rest, 0);
     rest = next;
   }
-  flags = spinlock_acquire_irqsave(&fat_lock);
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_acquire(&fat_lock);
+  ylock_release(&fat_lock);
 
   f->fat16.entry.file_size = new_size;
   if (f->fat16.cursor > new_size) f->fat16.cursor = new_size;
@@ -2361,18 +2364,18 @@ int fat16_seek(struct file* f, int offset) {
  *   Number of bytes read.
  */
 int fat16_read(struct file* f, void* buf, int size) {
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
 
   if (f->fat16.cursor >= f->fat16.entry.file_size) {
     /* past EOF: return 0, not wrapped-around-garbage (the offset
        clamp below underflows in uint32 when cursor > size) */
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return 0;
   }
   uint32_t remaining = f->fat16.entry.file_size - f->fat16.cursor;
   if ((uint32_t)size > remaining) size = remaining;
   if (size == 0) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return 0;
   }
 
@@ -2394,9 +2397,9 @@ int fat16_read(struct file* f, void* buf, int size) {
     uint32_t offset_in_sector = offset_in_cluster % SECTOR_SIZE;
 
     uint8_t sec_buf[SECTOR_SIZE];
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     virtio_blk_read_sector(sector_num, sec_buf, 1);
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
 
     uint32_t chunk = SECTOR_SIZE - offset_in_sector;
     if (chunk > bytes_to_read) chunk = bytes_to_read;
@@ -2407,12 +2410,12 @@ int fat16_read(struct file* f, void* buf, int size) {
     size -= chunk;
     if ((f->fat16.cursor % cluster_size) == 0) {
       /* Crossing into the next cluster: read_fat can hit the device. */
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       c = read_fat(c);
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
     }
   }
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   return read_bytes;
 }
 
@@ -2446,9 +2449,9 @@ static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
      * fire.  Snapshot the cursor across the window so this iteration walks a
      * consistent position. */
     uint32_t walk_cursor = f->fat16.cursor;
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     uint16_t c = get_cluster_for_offset(f->fat16.entry.start_cluster, walk_cursor);
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     if (c == 0 || c >= 0xFFF8) break;
 
     uint32_t offset_in_cluster = walk_cursor % cluster_size;
@@ -2460,9 +2463,9 @@ static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
       uint32_t sector_num = data_sector + (c - 2) * bpb_sectors_per_cluster
       + (offset_in_cluster / SECTOR_SIZE);
       uint8_t sec_buf[SECTOR_SIZE];
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       int res = virtio_blk_read_sector(sector_num, sec_buf, 1);
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       if (res != 0) break;
 
       uint32_t chunk = SECTOR_SIZE - offset_in_sector;
@@ -2491,9 +2494,9 @@ static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
 
     uint32_t lba = data_sector + (c - 2) * bpb_sectors_per_cluster
     + (offset_in_cluster / SECTOR_SIZE);
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     int res = virtio_blk_read_sector(lba, (void*)out, sectors);
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     if (res != 0) break;
 
     uint32_t bytes = sectors * SECTOR_SIZE;
@@ -2517,9 +2520,9 @@ static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
  * Returns the number of bytes read.
  */
 int fat16_read_direct(struct file* f, uint64_t dest, int size) {
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
-  int read_bytes = fat16_read_direct_locked(f, dest, size, flags);
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_acquire(&fat_lock);
+  int read_bytes = fat16_read_direct_locked(f, dest, size, 0);
+  ylock_release(&fat_lock);
   return read_bytes;
 }
 
@@ -2546,10 +2549,10 @@ void fat16_test_inject(int mode, uint32_t off, int times) {
 }
 
 int fat16_test_lba(uint16_t start_cluster, uint32_t pos, uint32_t *lba) {
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   uint32_t out = 0;
   int rc = fat16_lba_for_pos_locked(start_cluster, pos, &out);
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   if (rc < 0)
     return -1;
   if (lba)
@@ -2560,14 +2563,14 @@ int fat16_test_lba(uint16_t start_cluster, uint32_t pos, uint32_t *lba) {
 
 int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
                           uint64_t dest, int size, uint32_t pos) {
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   struct file tmp;
   __builtin_memset(&tmp, 0, sizeof(tmp));
   tmp.fat16.entry.start_cluster = start_cluster;
   tmp.fat16.entry.file_size = file_size;
   tmp.fat16.cursor = pos;
-  int read_bytes = fat16_read_direct_locked(&tmp, dest, size, flags);
-  spinlock_release_irqrestore(&fat_lock, flags);
+  int read_bytes = fat16_read_direct_locked(&tmp, dest, size, 0);
+  ylock_release(&fat_lock);
 #ifdef KERNEL_MODE_UNIT_TEST
   /* M6/L63 test seam.  The zero page the L62 soak executed was delivered by
      a device that answered with a FULL-length read of zeros, so the exec
@@ -2613,10 +2616,10 @@ int fat16_page_drop_cache(uint16_t start_cluster, uint32_t file_size,
   (void)file_size;
   uint32_t dropped = 0;
   for (uint32_t off = 0; off < len; off += SECTOR_SIZE) {
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     uint32_t lba = 0;
     int ok = fat16_lba_for_pos_locked(start_cluster, pos + off, &lba) >= 0;
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     if (!ok)
       break;
     blk_cache_invalidate(lba, 1);
@@ -2631,10 +2634,10 @@ int fat16_page_drop_cache(uint16_t start_cluster, uint32_t file_size,
 static int fat16_page_raw_read(uint16_t start_cluster, uint32_t pos,
                                uint8_t *dst, uint32_t len) {
   for (uint32_t off = 0; off < len; off += SECTOR_SIZE) {
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     uint32_t lba = 0;
     int ok = fat16_lba_for_pos_locked(start_cluster, pos + off, &lba) >= 0;
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     if (!ok)
       return -1;
     if (virtio_blk_read_raw(lba, dst + off, 1) != 0)
@@ -2709,12 +2712,12 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
     len = file_size - pos;
 
   /* (1) what the chain says this page is. */
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   uint32_t lba0 = 0;
   int cluster = fat16_lba_for_pos_locked(start_cluster, pos, &lba0);
   uint32_t spc = bpb_sectors_per_cluster;
   uint32_t dsec = data_sector;
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
 
   /* (2) what the CACHE holds for that unit. */
   struct blk_cache_unit_info ci;
@@ -2971,7 +2974,7 @@ int fat16_write(struct file* f, const void* buf, int size) {
     }
   }
 
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   /* L59: O_APPEND is a WRITE-TIME property, not an open-time one.  Linux
      seeks every write on an O_APPEND file to the end of file and does it
      atomically with respect to other writers, which is what makes two
@@ -2990,7 +2993,7 @@ int fat16_write(struct file* f, const void* buf, int size) {
   if (size == 0) {
     wr_busy[wslot]--;
     spinlock_release(&wr_locks[wslot]);
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     return 0;
   }
 
@@ -3002,16 +3005,16 @@ int fat16_write(struct file* f, const void* buf, int size) {
        with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
        never lets go.  It reserves the cluster atomically in RAM, so the choice
        is still exclusive. */
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     uint16_t first_c = alloc_cluster();
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
     f->fat16.entry.start_cluster = first_c;
     if (f->fat16.entry.start_cluster == 0) {
       /* Every exit must drop BOTH locks: wr_locks[wslot] is held for the
        * whole call, and leaking it wedges every later write to this slot. */
       wr_busy[wslot]--;
       spinlock_release(&wr_locks[wslot]);
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       return 0;
     }
   }
@@ -3031,9 +3034,9 @@ int fat16_write(struct file* f, const void* buf, int size) {
        with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
        never lets go.  It reserves the cluster atomically in RAM, so the choice
        is still exclusive. */
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       nxt = alloc_cluster();
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       if (nxt == 0) break;
       write_fat(c, nxt);
     }
@@ -3066,7 +3069,7 @@ int fat16_write(struct file* f, const void* buf, int size) {
      *   - `[FATW] ZERORD` names the exact defect if a sector that must hold
      *     data reads back all-zero (the hole's precondition). */
     int rmw_failed = 0;
-    spinlock_release_irqrestore(&fat_lock, flags);
+    ylock_release(&fat_lock);
     if (chunk < SECTOR_SIZE) {
       for (uint32_t z = 0; z < SECTOR_SIZE; z++) sec_buf[z] = 0;
       if (virtio_blk_read_sector(sector_num, sec_buf, 1) != 0) {
@@ -3108,7 +3111,7 @@ int fat16_write(struct file* f, const void* buf, int size) {
         kl_c(&kr, '\n');
         kl_emit(&kr);
       }
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       break;                        /* short write: never stamp a hole */
     }
     /* Count nothing until the sector is on disk: a failed write must leave
@@ -3118,11 +3121,11 @@ int fat16_write(struct file* f, const void* buf, int size) {
     for (uint32_t i = 0; i < chunk; i++)
       sec_buf[offset_in_sector + i] = in[written_bytes + i];
     if (virtio_blk_write_sector(sector_num, sec_buf, 1) != 0) {
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       break;
     }
     written_bytes += (int)chunk;
-    flags = spinlock_acquire_irqsave(&fat_lock);
+    ylock_acquire(&fat_lock);
 
     f->fat16.cursor += chunk;
     if (f->fat16.cursor > f->fat16.entry.file_size) {
@@ -3138,26 +3141,26 @@ int fat16_write(struct file* f, const void* buf, int size) {
       /* read_fat() is a device read on a cache miss: outside the lock, like
          every other I/O in this driver.  Holding an irqsave spinlock across it
          is what turned a log write into a machine-wide stall. */
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       uint16_t nxt = read_fat(c);
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       if (nxt >= 0xFFF8) {
     /* alloc_cluster() does device I/O (FAT write + cluster zeroing); it must run
        with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
        never lets go.  It reserves the cluster atomically in RAM, so the choice
        is still exclusive. */
-        spinlock_release_irqrestore(&fat_lock, flags);
+        ylock_release(&fat_lock);
         nxt = alloc_cluster();
-        flags = spinlock_acquire_irqsave(&fat_lock);
+        ylock_acquire(&fat_lock);
         if (nxt == 0) break;
-        spinlock_release_irqrestore(&fat_lock, flags);
+        ylock_release(&fat_lock);
         write_fat(c, nxt);      /* FAT write: device I/O, lock released */
-        flags = spinlock_acquire_irqsave(&fat_lock);
+        ylock_acquire(&fat_lock);
       }
       c = nxt;
     }
   }
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   if (written_bytes > 0) {
     fat16_stamp_entry(&f->fat16.entry);  /* last-write time (FAT mtime) */
     f->fat16.dirty = 1;
@@ -3251,7 +3254,7 @@ int fat16_lba_scratch_geom(uint64_t lba, uint64_t *fat_sec, uint32_t *off,
 int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize) {
   if (!f || !ubuf || bufsize <= 0) return -1;
 
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  ylock_acquire(&fat_lock);
   uint16_t cluster = f->fat16.entry.start_cluster;
   uint8_t buf[SECTOR_SIZE];
   struct lfn_state st;
@@ -3292,12 +3295,12 @@ int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize) {
     /* root directory: fixed region of root_dir_sectors sectors */
     for (uint32_t i = 0; i < root_dir_sectors && !stopped; i++) {
       uint32_t sector_num = root_dir_sector + i;
-      spinlock_release_irqrestore(&fat_lock, flags);
+      ylock_release(&fat_lock);
       if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
-        spinlock_acquire_irqsave(&fat_lock);
+        ylock_acquire(&fat_lock);
         return used > 0 ? used : -1;
       }
-      flags = spinlock_acquire_irqsave(&fat_lock);
+      ylock_acquire(&fat_lock);
       struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
       for (unsigned int j = 0; j < SECTOR_SIZE / 32 && !stopped; j++) {
         if (entries[j].name[0] == 0x00) { stopped = 1; break; }
@@ -3330,12 +3333,12 @@ int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize) {
     while (c != 0 && c < 0xFFF0 && !stopped) {
       for (uint32_t s = 0; s < bpb_sectors_per_cluster && !stopped; s++) {
         uint32_t sector_num = data_sector + (c - 2) * bpb_sectors_per_cluster + s;
-        spinlock_release_irqrestore(&fat_lock, flags);
+        ylock_release(&fat_lock);
         if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
-          spinlock_acquire_irqsave(&fat_lock);
+          ylock_acquire(&fat_lock);
           return used > 0 ? used : -1;
         }
-        flags = spinlock_acquire_irqsave(&fat_lock);
+        ylock_acquire(&fat_lock);
         struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
         for (unsigned int j = 0; j < SECTOR_SIZE / 32 && !stopped; j++) {
           if (entries[j].name[0] == 0x00) { stopped = 1; break; }
@@ -3366,7 +3369,7 @@ int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize) {
     }
   }
 
-  spinlock_release_irqrestore(&fat_lock, flags);
+  ylock_release(&fat_lock);
   f->fat16.cursor = current_idx; /* resume position for a subsequent call */
   return used;
 }
