@@ -40,6 +40,7 @@ DEST=${RW_DEST:-::/GAMES/RIMWORLD}
 DISK_MB=${DISK_MB:-1536}
 BUILD=1
 RUN_QEMU=0
+RUNTIME_ONLY=0
 PAYLOAD=${RW_SRC:-}
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/hobbyos-rimworld
 
@@ -53,6 +54,7 @@ while [ $# -gt 0 ]; do
     --dest)    DEST=${2:?--dest needs a path}; shift 2 ;;
     --no-build) BUILD=0; shift ;;
     --run) RUN_QEMU=1; shift ;;
+    --runtime-only) RUNTIME_ONLY=1; shift ;;
     -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (try --help)" ;;
   esac
@@ -74,6 +76,37 @@ qemu_cmd() {
     -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
     -action shutdown=poweroff -qmp unix:/tmp/hb-qmp.sock,server,nowait"
 }
+
+# The payload's RimWorldLinux is a normal Linux executable: its PT_INTERP is
+# /lib64/ld-linux-x86-64.so.2 and it needs glibc 2.31, libX11 and libGL.  None of
+# that is in the base image, so an image holding only the game tree fails at the
+# first exec (measured: spawn_ex -> -1 with no /LIB64 and no /lib64 on the disk).
+# These are the same three inputs the NFS harness stages, from the same helpers.
+stage_runtime() {
+  local G=${GLIBC231:-/tmp/glibc231}
+  local LDIR="$G/lib/x86_64-linux-gnu"
+  [ -f "$LDIR/ld-2.31.so" ] || die "glibc 2.31 not found under ${G} (set GLIBC231=)"
+  say "runtime (glibc 2.31 + compat DSOs + Mesa)"
+  mmd -i "$IMG" ::/LIB64 ::/lib ::/lib64 ::/lib/x86_64-linux-gnu >/dev/null 2>&1 || true
+  local f src dst
+  for f in ld-2.31.so:ld-linux-x86-64.so.2 libc-2.31.so:libc.so.6 \
+           libm-2.31.so:libm.so.6 libpthread-2.31.so:libpthread.so.0 \
+           libdl-2.31.so:libdl.so.2 librt-2.31.so:librt.so.1 \
+           libgcc_s.so.1:libgcc_s.so.1; do
+    src=${f%%:*}; dst=${f##*:}
+    mcopy -o -i "$IMG" "$LDIR/$src" "::/LIB64/$dst" || die "could not stage $dst"
+    mcopy -o -i "$IMG" "$LDIR/$src" "::/lib/x86_64-linux-gnu/$dst" || die "could not stage $dst"
+  done
+  mcopy -o -i "$IMG" "$LDIR/ld-2.31.so" ::/lib64/ld-linux-x86-64.so.2 \
+    || die "could not stage the interpreter"
+  note "glibc 2.31 under /LIB64 + /lib64/ld-linux-x86-64.so.2"
+
+  bash "$ROOT/src/user/xcompat/stage.sh" "$IMG" | sed 's/^/    /' \
+    || die "compat DSO staging failed"
+  bash "$ROOT/tools/mesa/stage.sh" "$IMG" | sed 's/^/    /' \
+    || die "Mesa staging failed"
+}
+
 
 MTOOLS_PREFIX=""
 for t in mcopy mmd mdir mkfs.fat; do
@@ -133,6 +166,12 @@ inside_repo() {
   esac
   return 1
 }
+
+if [ "$RUNTIME_ONLY" = 1 ]; then
+  [ -f "$IMG" ] || die "--runtime-only but $IMG does not exist"
+  stage_runtime
+  exit 0
+fi
 
 say "payload"
 SRC=$(find_payload) || die "no RimWorld payload found.
@@ -204,6 +243,7 @@ BYTES=$(du -sk "$STAGE" | awk '{print $1}')
 NFILES=$(find "$STAGE" -type f | wc -l | tr -d ' ')
 note "$NFILES files, $(echo "$BYTES" | awk '{printf "%.0f MB", $1/1024}')"
 
+
 # --- build the image --------------------------------------------------------
 if [ "$BUILD" = 1 ]; then
   say "build disk image ($ARCH, $DESKTOP)"
@@ -249,6 +289,9 @@ mmd -i "$IMG" "${DEST}" >/dev/null 2>&1 || true
 # -s recursive, -m keep mtimes, -o overwrite, -Q quit-on-error.  mtools handles
 # FAT long names; the tree keeps the exact case Unity expects.
 mcopy -s -m -o -Q -i "$IMG" "$STAGE"/* "${DEST}"/ || die "mcopy failed"
+
+# --- runtime the payload needs ----------------------------------------------
+stage_runtime
 
 # --- launcher + menu --------------------------------------------------------
 # The desktop's RimWorld entry is GENERATED at disk-build time: gen-icewm-menu.sh
