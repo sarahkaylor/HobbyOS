@@ -74,6 +74,15 @@ int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out) {
   *out = plh[cpu];
   return 1;
 }
+
+/* GB-239: sampled inside spinlock_acquire_irqsave after the acquire; this is
+   the instruction after the wrapper's call site in its caller, i.e. the line
+   inside start_scheduler (GB-235's site3 lands one frame too high). */
+void proclock_hold_caller(uint64_t caller) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS)
+    plh[c].caller = caller;
+}
 /* GB-060: a CPU that has taken a fatal fault and stopped.  Declared here (not in
    a header) to keep the mechanism reviewable in the two files that implement it:
    process.c records it at the halt, and this file reads it to decide whether a
@@ -515,6 +524,8 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
       : "memory"
   );
   spinlock_acquire(lock);
+  if (lock == &proc_lock)
+    proclock_hold_caller((uint64_t)__builtin_return_address(0));
   return flags;
 }
 

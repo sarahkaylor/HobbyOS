@@ -51,6 +51,7 @@ typedef struct {
   uint64_t last_ms;
   uint64_t site;
   uint64_t site3;      /**< GB-235: caller-caller of the last proc_lock acquire */
+  uint64_t caller;     /**< GB-239: immediate caller of spinlock_acquire_irqsave */
   uint64_t rel_site;   /**< GB-230: return address of the last release, 0 = none */
   uint64_t iretq_ms;   /**< GB-230: time of the last enter_user_space entry */
   int locked_at_iretq; /**< GB-230: proc_lock.locked sampled there */
@@ -58,6 +59,8 @@ typedef struct {
 } proclock_hold_t;
 void proclock_hold_note(int op, uint64_t site);
 int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out);
+/* GB-239: the instruction after the wrapper's call site in its caller. */
+void proclock_hold_caller(uint64_t caller);
 void proclock_iretq_note(void);
 
 /**

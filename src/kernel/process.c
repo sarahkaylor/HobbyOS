@@ -5518,6 +5518,8 @@ void start_scheduler(void) {
              acquire wrapper.  `site` names the wrapper itself. */
           uart_puts(" owner_site3=");
           uart_print_hex(ph.site3);
+          uart_puts(" caller=");
+          uart_print_hex(ph.caller);
           uart_puts(" rel_site=");
           uart_print_hex(ph.rel_site);
           uart_puts(" iretq_ms=");
@@ -5567,6 +5569,18 @@ void start_scheduler(void) {
           print_int(ld.owner_cpu >= 0
                         ? watchdog_cpu_pid((uint32_t)ld.owner_cpu)
                         : -1);
+          /* GB-239: the owner's immediate caller of the acquire wrapper —
+             the line inside start_scheduler, not site3's frame above it. */
+          {
+            extern int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out);
+            proclock_hold_t oph;
+            uint64_t ocaller = 0;
+            if (ld.owner_cpu >= 0 &&
+                proclock_hold_snapshot((uint32_t)ld.owner_cpu, &oph))
+              ocaller = oph.caller;
+            uart_puts(" owner_caller=");
+            uart_print_hex(ocaller);
+          }
           uart_puts("\n");
         }
         if (lockdiag_last_stallbreak(&ld)) {
