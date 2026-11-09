@@ -4412,6 +4412,14 @@ void general_interrupt_handler(struct trap_frame *tf) {
 #endif
 }
 
+/* GB-101/GB-243: the user-mode classifier decision, isolated so the kernel
+   unit suite can exercise it without reaching the stop path.  True when the
+   frame is a user-mode exception and this CPU has no user process to deliver
+   it to (GB-147 measured #PF cs=0x1B, pid=-1 reaching the fatal record). */
+int trap_user_cs_no_process(struct trap_frame *tf, struct process *cur) {
+  return tf != 0 && (tf->cs & 3u) == 3u && (!cur || cur->is_kernel_process);
+}
+
 static void general_interrupt_inner(struct trap_frame *tf) {
   extern void gic_set_current_vector(uint32_t cpu, uint32_t vector);
   extern uint32_t gic_acknowledge_interrupt(void);
@@ -5271,7 +5279,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       /* w5 (ii): a user-mode exception (BRK/#UD/#GP/...) kills with a
          signal status, never a stale-x0 exit code (rc=0 false pass). */
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
-    } else if ((tf->cs & 3) == 3) {
+    } else if (trap_user_cs_no_process(tf, cur)) {
       /* GB-101 (classifier clause): a user-mode frame whose CPU has no
          current process is still a user-mode fault.  GB-147 measured one:
          #PF with cs=0x1B and pid=-1 reached the kernel-mode fatal record.
