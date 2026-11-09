@@ -388,8 +388,17 @@ void spinlock_acquire(spinlock_t *lock) {
      any use of the protected data, so a fatal path can ask "is this mine to
      give back?" without guessing. */
   lock->owner = get_cpuid() + 1;
-  if (lock == &proc_lock)
+  if (lock == &proc_lock) {
     proclock_hold_note(1, (uint64_t)__builtin_return_address(0));
+    /* GB-235: the acquire's caller-caller.  The note above records the direct
+       caller (the `spinlock_acquire_irqsave` wrapper); this is the site that
+       called the wrapper, which is what names the real acquire line. */
+    {
+      uint32_t cc = get_cpuid();
+      if (cc < MAX_CPUS)
+        plh[cc].site3 = (uint64_t)__builtin_return_address(1);
+    }
+  }
   /* GB-057: push onto this CPU's held-lock stack (observation only). */
   {
     uint32_t hcpu = get_cpuid();

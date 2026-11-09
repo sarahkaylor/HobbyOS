@@ -50,6 +50,7 @@ typedef struct {
   uint64_t rel;
   uint64_t last_ms;
   uint64_t site;
+  uint64_t site3;      /**< GB-235: caller-caller of the last proc_lock acquire */
   uint64_t rel_site;   /**< GB-230: return address of the last release, 0 = none */
   uint64_t iretq_ms;   /**< GB-230: time of the last enter_user_space entry */
   int locked_at_iretq; /**< GB-230: proc_lock.locked sampled there */
