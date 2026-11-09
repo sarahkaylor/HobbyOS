@@ -55,10 +55,22 @@ typedef struct {
   uint64_t iretq_ms;   /**< GB-230: time of the last enter_user_space entry */
   int locked_at_iretq; /**< GB-230: proc_lock.locked sampled there */
   int last_op; /**< 1 acquire, 2 release, 0 never */
+  /* GB-240: the idle-stuck detector's proc_lock section (process.c:4782).
+     set by proclock_det_note(): entry on the acquire, exit on the matching
+     release, and det_stage at the section's branches (1 slot scan, 2 dispose,
+     3 group_teardown, 4 release).  A row with det_exit=0 and det_stage=n names
+     a section that did not return; det_exit>det_entry says it released and the
+     owner word is stale. */
+  uint64_t det_entry_ms;
+  uint64_t det_exit_ms;
+  int det_stage;
 } proclock_hold_t;
 void proclock_hold_note(int op, uint64_t site);
 int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out);
 void proclock_iretq_note(void);
+/* GB-240: op 1 = entry (stage = starting branch), 2 = stage update,
+   3 = exit (stage = where it left the section).  Per-CPU, observation only. */
+void proclock_det_note(int op, int stage);
 
 /**
  * Initializes a spinlock to the unlocked state.
