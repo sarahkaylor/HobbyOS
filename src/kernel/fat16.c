@@ -2406,7 +2406,10 @@ int fat16_read(struct file* f, void* buf, int size) {
     f->fat16.cursor += chunk;
     size -= chunk;
     if ((f->fat16.cursor % cluster_size) == 0) {
-      c = read_fat(c); /* crossing into the next cluster of the chain */
+      /* Crossing into the next cluster: read_fat can hit the device. */
+      spinlock_release_irqrestore(&fat_lock, flags);
+      c = read_fat(c);
+      flags = spinlock_acquire_irqsave(&fat_lock);
     }
   }
   spinlock_release_irqrestore(&fat_lock, flags);
@@ -3180,13 +3183,14 @@ int fat16_stats(uint64_t *out_total, uint64_t *out_free) {
   uint32_t total_clusters = data_sectors / bpb_sectors_per_cluster;
   if (total_clusters > 0xFFF0u) total_clusters = 0xFFF0u; /* FAT16 limit */
 
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  /* Read-only scan of the FAT.  Taking fat_lock here put one device read per
+     FAT sector under an irqsave spinlock and protected nothing: the BPB is
+     fixed at mount and the count is advisory. */
   uint64_t free_clusters = 0;
   uint8_t buf[SECTOR_SIZE];
   uint32_t cluster = 2;
   for (uint32_t s = 0; s < bpb_sectors_per_fat && cluster <= total_clusters + 1; s++) {
     if (virtio_blk_read_sector(fat_sector + s, buf, 1) != 0) {
-      spinlock_release_irqrestore(&fat_lock, flags);
       return -1;
     }
     volatile uint8_t *p = (volatile uint8_t *)buf;
@@ -3198,7 +3202,6 @@ int fat16_stats(uint64_t *out_total, uint64_t *out_free) {
       cluster = idx + 1;
     }
   }
-  spinlock_release_irqrestore(&fat_lock, flags);
 
   *out_total = (uint64_t)total_clusters * cluster_size;
   *out_free = free_clusters * cluster_size;
