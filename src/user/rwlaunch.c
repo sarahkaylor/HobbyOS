@@ -224,6 +224,9 @@ __attribute__((section(".text._start"))) void _start(void) {
    * constant any more: /NFSEXPORT names the directory this run owns, so a
    * concurrent lane installing its own launcher into its own directory
    * cannot swap the binary (or a data file) under this guest mid-boot. */
+  /* M7 LOCAL MODE: a game staged into the image has nothing to mount.  /GAMEDIR
+   * names it; every step below then runs against the FAT volume directly. */
+  const char *localdir = rw_local_gamedir(0);
   const char *exp = rw_nfs_export_path(RW_NFS_EXPORT);
   static char srcbuf[128];
   int sl = 0;
@@ -234,8 +237,8 @@ __attribute__((section(".text._start"))) void _start(void) {
     srcbuf[sl++] = exp[i];
   srcbuf[sl] = 0;
   const char *source = srcbuf;
-  int rc = mount(source, RW_NFS_MNT);
-  if (rc != 0) {
+  int rc = localdir ? 0 : mount(source, RW_NFS_MNT);
+  if (rc != 0 && !localdir) {
     say("mount via the slirp alias failed; trying the host LAN address");
     sl = 0;
     for (int i = 0; RW_NFS_ALT[i] && sl < 100; i++)
@@ -247,6 +250,11 @@ __attribute__((section(".text._start"))) void _start(void) {
     source = srcbuf;
     rc = mount(source, RW_NFS_MNT);
   }
+  if (localdir) {
+    pc("[RW] rwlaunch: local game dir ");
+    pc(localdir);
+    pc(" (no NFS mount)\n");
+  } else {
   pc("[RW] rwlaunch: export ");
   pc(exp);
   pc(" mount ");
@@ -260,6 +268,7 @@ __attribute__((section(".text._start"))) void _start(void) {
     say("NFS mount failed — the launch ladder cannot start");
     exit(2);
   }
+  }
 
   /* HOME must exist and be writable: Unity writes Player.log, Config/ and
      Saves/ below it.  mkdir(2) is idempotent here (EEXIST is fine). */
@@ -271,7 +280,12 @@ __attribute__((section(".text._start"))) void _start(void) {
    * it must succeed: without it Mono's first assembly mmap is refused with
    * -ENOTSUP (an NFS file) and the engine dies before any window.  A failure is
    * printed, not fatal -- the run then reproduces the old wall with evidence. */
-  int brc = vfs_bind(RW_MANAGED_NFS, RW_MANAGED_FAT);
+  /* In local mode the tree is already FAT, so the bind has nothing to do --
+   * rebinding Managed/ onto itself would only add a failure mode. */
+  int brc = localdir ? 0 : vfs_bind(RW_MANAGED_NFS, RW_MANAGED_FAT);
+  if (localdir) {
+    pc("[RW] rwlaunch: bind skipped (image is FAT)\n");
+  } else {
   pc("[RW] rwlaunch: bind ");
   pc(RW_MANAGED_NFS);
   pc(" -> ");
@@ -279,6 +293,7 @@ __attribute__((section(".text._start"))) void _start(void) {
   pc(" rc=");
   pd(brc);
   pc("\n");
+  }
 
   /* M6/L61: the NFS export is shared by every lane on this host, and a
      concurrent lane's harness installs its own AD-9 launcher over
@@ -291,7 +306,23 @@ __attribute__((section(".text._start"))) void _start(void) {
      it is the one that wins; `.l61` is only a fallback for an export left
      over from the shared-export days (where it was the private alias). */
   const char *game = RW_GAME;
-  if (access(RW_NFS_MNT "/RimWorldLinux", 1 /* X_OK */) != 0 &&
+  static char localgame[160];
+  if (localdir) {
+    /* Unity derives its data folder from /proc/self/exe's directory, so the stub
+     * has to be spawned from inside the game dir -- which is why the tree is
+     * staged as <dir>/RimWorldLinux + <dir>/RimWorldLinux_Data. */
+    int gl = 0;
+    for (int i = 0; localdir[i] && gl < (int)sizeof localgame - 20; i++)
+      localgame[gl++] = localdir[i];
+    const char *suf = "/RimWorldLinux";
+    for (int i = 0; suf[i] && gl < (int)sizeof localgame - 1; i++)
+      localgame[gl++] = suf[i];
+    localgame[gl] = 0;
+    if (access(localgame, 1 /* X_OK */) == 0)
+      game = localgame;
+    else
+      say("local game binary missing; falling back to the compiled-in target");
+  } else if (access(RW_NFS_MNT "/RimWorldLinux", 1 /* X_OK */) != 0 &&
       access(RW_NFS_MNT "/RimWorldLinux.l61", 1 /* X_OK */) == 0)
     game = RW_NFS_MNT "/RimWorldLinux.l61";
 
