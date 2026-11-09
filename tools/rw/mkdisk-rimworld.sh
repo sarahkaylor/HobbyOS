@@ -74,6 +74,7 @@ qemu_cmd() {
     -drive file=disk.img,format=raw,id=disk0,if=none \
     -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu \
     -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
+    -device virtio-tablet-pci \
     -action shutdown=poweroff -qmp unix:/tmp/hb-qmp.sock,server,nowait"
 }
 
