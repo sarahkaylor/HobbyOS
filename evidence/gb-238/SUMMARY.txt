@@ -1,0 +1,113 @@
+GB-238 — DR0/DR7 + last-#DB instrument for the shape-(b) miss
+============================================================
+
+Head: 9ba0a72dafc3249f1bee2d3766dbda956248163b (GB-234 head, stacked on
+      ticket/146a-badvec 90e5d3a7) + the GB-238 commit on this branch.
+Worktree: /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb238
+SW-VM: swarm-farm-3 (verifier, debug reserve — gaming.md §5.1).
+
+Card question (GB-238 #591): GB-234-V (#587) measured the DR0 watch armed on
+the exact changed slot (`slot=0x25FFB748`, `armed=1`) with zero `[BADVEC] writer`
+rows. This card asks why the #DB never reported, with three named hypotheses:
+(1) DR0/DR7 clobbered before the write, (2) the #DB fired but its record was
+suppressed, (3) the write happened where DR7's L0 was clear.
+
+What this branch adds (src/kernel/arch/x64/trap.c)
+--------------------------------------------------
+1. Every fatal `[BADVEC]` dump now prints the LIVE debug registers of the CPU
+   taking the dump and the owner CPU the entry stamp named:
+
+     [BADVEC] drstate cpu=<dumper> owner_cpu=<stamp cpu> dr0=<live> dr7=<live>
+              dr6=<live> now_ms=<timer_get_ms>
+
+   followed by one `[BADVEC] lastdb` row per CPU that ever armed a watch or took
+   a #DB: arm_ms, db_ms, db_pc, db_dr6, result, disarms, disarm_ms, disarm_pc,
+   slot, armed.
+2. Every #DB (`tf->vector == 1`) records its time, RIP, DR6 and how it was
+   treated, and prints one bounded `[BADVEC] dbg` row (max 16):
+   `printed=yes|no` and `why=dr0-hit | dr6-no-dr0-bit | no-armed-watch-on-this-cpu`.
+3. Arm/disarm record their own timestamps; disarm records the #DB RIP. The
+   existing writer/consume behaviour is unchanged (observation only).
+4. tools/gate/panic_sink_allowlist_test.py: trap.c 236 -> 294 references.
+
+Interpretation of the new row (printed by the dump, not inferred):
+- DR7 bit 0 (L0) = 1 and DR0 == the changed vector_slot at the fatal dump:
+  the hardware watch was still armed; a clobber is excluded for that epoch.
+- db_ms == 0 with arm_ms set and disarms == 0: no #DB was ever delivered on
+  that CPU after the arm.
+- db_ms > arm_ms: a #DB was delivered; `result` says whether it was printed
+  (1) or consumed without DR6.B0 (2).
+- disarms > 0 with disarm_pc: the watch was consumed at that RIP.
+
+Build / host gates (all on this head)
+-------------------------------------
+$ python3 tools/gate/panic_sink_allowlist_test.py
+panic_sink_allowlist: PASS — every reference is accounted for
+   (294 reference(s) in 9 file(s); 55 from RETURNING paths)
+$ python3 tools/gate/panic_sink_allowlist_test.py --self-test
+self-test: OK
+$ make -j24 host_tests
+Checks run:    482
+Checks failed: 0
+TEST EXIT: 0
+$ make -j24 ARCH=intel MODE=test hobbyos.elf
+BUILD_EXIT=0
+$ strings hobbyos.elf | grep -c 'BADVEC] drstate'
+1
+
+The one 600 s default intel wave
+-------------------------------
+Command: T3_TIMEOUT=600 T3_LOG=$PWD/obj/t3_gb238_intel.log tools/t3_tier.sh intel
+(-smp 8, the tier's default intel configuration.)
+
+T3_intel: 4494 console lines, 22 FAIL lines, 5 user memory fault records across
+          4 processes, 36 programs exited, 9 shredded, glued=27, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the
+          600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 27 glued console line(s) (t4_glued.sh): a line carrying two
+          records cannot be attributed
+T3_intel EXIT=1
+
+Record counts over that serial:
+  frame slots changed after entry = 0
+  [BADVEC] writer                = 0
+  [BADVEC] drstate               = 0
+  [BADVEC] lastdb                = 0
+  Exception in Kernel Mode       = 0
+  memory fault records           = 5 (user-mode, handled)
+  Controller reset complete      = 1 (one boot)
+  System halt                    = 0 (deadline hit)
+
+The wave did not take shape (b): there was no changed-slot block and no
+kernel-mode fatal to carry the new record. Per the card's falsifier this is
+INCONCLUSIVE for clause 2, not a GREEN and not a RED. The wave wedged after 36
+programs (the known GB-232/GB-146 wedge class); that is not this card's
+instrument.
+
+Instrument validation (not the gate wave)
+-----------------------------------------
+A separate 120 s boot at the same head took two kernel-mode vector=13 fatals
+whose slots were UNCHANGED, and printed the new rows verbatim:
+
+  [BADVEC] fatal frame=0x0000000023FFB6B0 in_user=1 vector_slot=0x0000000023FFB7B8 cs_slot=0x0000000023FFB7C8
+  [BADVEC] entry slots unchanged: frame=0x0000000023FFB6B0 v=13 cs=0x0000000000000008 entry_pid=15 cpu=6
+    [BADVEC] drstate cpu=6 owner_cpu=6 dr0=0x0000000023FFB7B8 dr7=0x0000000000090401 dr6=0x00000000FFFF0FF0 now_ms=0x0000000000002401
+    [BADVEC] lastdb cpu=4 arm_ms=0x00000000000023F8 db_ms=0x0000000000000000 db_pc=0x0000000000000000 db_dr6=0x0000000000000000 result=0 disarms=0 disarm_ms=0x0000000000000000 disarm_pc=0x0000000000000000 slot=0x0000000023FFB6D8 armed=1
+    [BADVEC] lastdb cpu=6 arm_ms=0x00000000000023F8 db_ms=0x0000000000000000 db_pc=0x0000000000000000 db_dr6=0x0000000000000000 result=0 disarms=0 disarm_ms=0x0000000000000000 disarm_pc=0x0000000000000000 slot=0x0000000023FFB7B8 armed=1
+  [KERNEL] FATAL: Exception in Kernel Mode! Vector: 13 Error Code: 0x0000000000000000
+
+DR7=0x0000000000090401 decodes as L0=1 (bit 0), RW0=01 write (bit 16),
+LEN0=10 8-byte (bit 19), plus the mandatory reserved bit 10 (0x400): the watch
+was armed and DR0 equals the frame's vector slot. DR6=0xFFFF0FF0 has bit 0
+clear (no DR0 hit), db_ms=0 and disarms=0 — the record states "never delivered
+on this CPU" exactly as the card's falsifier requires. Because these frames'
+slots were unchanged, this validates the instrument path, not the GB-234 miss.
+
+Files
+-----
+evidence/gb-238/t3-intel-600s.log          — serial, 600 s wave
+evidence/gb-238/t3-intel-600s.stdout       — T3 summary
+evidence/gb-238/smoke3-instrument-validation.log / .stdout
+evidence/gb-238/host-tests.log
+evidence/gb-238/intel-modetest-build.log
+evidence/gb-238/panic-sink-allowlist.log / panic-sink-self-test.log
