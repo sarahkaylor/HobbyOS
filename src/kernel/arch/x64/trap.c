@@ -6162,10 +6162,69 @@ __asm__(
 ".att_syntax prefix\n"
 );
 
+/* GB-245: called from enter_user_space (asm) with rdi = the source frame,
+   after restore_user_sp_helper and before the frame is relocated.  Returns 0
+   when the target must not be entered; the caller then quarantines the slot
+   and keeps scheduling.  A returned 0 is not a resume failure: it is the
+   pre-flight refusing a hole (GB-100's two-shape poison). */
+__attribute__((used))
+int resume_preflight_c(struct trap_frame *tf) {
+  extern int vm_arch_resume_va_ok(struct addr_space *as, uint64_t va,
+                                  uint64_t cs);
+  struct process *p = current_process();
+  if (!tf || !p)
+    return 1;
+  if (vm_arch_resume_va_ok(p->as, tf->elr, tf->cs))
+    return 1;
+  {
+    static int reported;
+    if (reported < 8) {
+      static const char hx[] = "0123456789ABCDEF";
+      char b[128];
+      int i = 0;
+      const char *s = "[RESUME-PREFLIGHT] pid=";
+      while (*s && i < 30) b[i++] = *s++;
+      {
+        int v = p->pid;
+        char d[12];
+        int n = 0;
+        if (v < 0) { b[i++] = '-'; v = -v; }
+        if (v == 0) d[n++] = '0';
+        while (v > 0 && n < 11) { d[n++] = (char)('0' + v % 10); v /= 10; }
+        while (n > 0) b[i++] = d[--n];
+      }
+      const char *s2 = " cs=0x";
+      while (*s2 && i < 40) b[i++] = *s2++;
+      for (int sh = 60; sh >= 0 && i < 56; sh -= 4)
+        b[i++] = hx[(tf->cs >> sh) & 0xF];
+      const char *s3 = " rip=0x";
+      while (*s3 && i < 64) b[i++] = *s3++;
+      for (int sh = 60; sh >= 0 && i < 80; sh -= 4)
+        b[i++] = hx[(tf->elr >> sh) & 0xF];
+      const char *s4 = " as=0x";
+      while (*s4 && i < 87) b[i++] = *s4++;
+      uint64_t a = (uint64_t)(uintptr_t)p->as;
+      for (int sh = 60; sh >= 0 && i < 103; sh -= 4)
+        b[i++] = hx[(a >> sh) & 0xF];
+      const char *s5 = " -> QUARANTINE\n";
+      while (*s5 && i < 120) b[i++] = *s5++;
+      b[i] = 0;
+      reported++;
+      uart_puts(b);
+    }
+  }
+  return 0;
+}
+
 __asm__(
 ".intel_syntax noprefix\n"
 ".global enter_user_space\n"
 "enter_user_space:\n"
+"    /* GB-245: the refusal path returns to C, so the callee-saved registers\n"
+"       this asm uses must survive it.  The normal path never returns, so\n"
+"       these pushes are simply abandoned at the iretq. */\n"
+"    push r12\n"
+"    push r13\n"
 "    /* rdi = tf (source frame), rsi = target_sp.  Stash both in\n"
 "       callee-saved registers: restore_user_sp_helper is C and may\n"
 "       clobber caller-saved registers. */\n"
@@ -6177,6 +6236,14 @@ __asm__(
 "    mov rsi, r13\n"
 "    call enter_user_space_note\n"
 "    call restore_user_sp_helper\n"
+"    /* GB-245: pre-flight the final frame before it is relocated.  r12 is\n"
+"       the source frame; the check sees any poison that rewrote the frame\n"
+"       slots above (GB-100's vehicle).  Refusal returns rax=0 to the C\n"
+"       caller, which quarantines the slot and keeps scheduling. */\n"
+"    mov rdi, r12\n"
+"    call resume_preflight_c\n"
+"    test eax, eax\n"
+"    jz 8f\n"
 "    /* Same-privilege (kernel-mode) resume: common_trap_exit's iretq\n"
 "       would pop only three words and leave RSP on this CPU's scratch\n"
 "       buffer, severing the task from its live stack frames.  Relocate\n"
@@ -6294,6 +6361,10 @@ __asm__(
 "       faults at the trap frame's own RIP slot (0x755xDBxx). */\n"\
 "    mov rdi, [rsp - 240]\n"
 "    iretq\n"
+"8:  pop r13\n"
+"    pop r12\n"
+"    xor eax, eax\n"
+"    ret\n"
 ".att_syntax prefix\n"
 );
 
