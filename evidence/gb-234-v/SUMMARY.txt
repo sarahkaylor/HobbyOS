@@ -1,0 +1,24 @@
+=== git rev-parse HEAD ===
+9ba0a72dafc3249f1bee2d3766dbda956248163b
+
+=== git diff --stat 90e5d3a7...HEAD ===
+ src/kernel/arch/x64/trap.c              | 29 +++++++++++++++++++++++++++++
+ tools/gate/panic_sink_allowlist_test.py |  2 +-
+ 2 files changed, 30 insertions(+), 1 deletion(-)
+
+=== panic_sink_allowlist ===
+panic_sink_allowlist: 383 reference(s) in 9 file(s); 55 from RETURNING paths (GB-097 residue)
+
+=== addr2line: fatal RIPs (not kernel addresses) ===
+??
+??:0
+??
+??:0
+
+=== the changed-slot block (verbatim) ===
+0000000025FFB758
+[BADVEC] frame slots changed after entry: frame=0x0000000025FFB640 entry_frame=0x0000000025FFB640
+  vector_slot=0x0000000025FFB748 entry=13 now=151
+  cs_slot=0x0000000025FFB758 entry=0x0000000000000008 now=0x00000017FFFFF307 cpu=3 entry_pid=4 now_pid=4
+  [BADVEC] dr0 cpu=1 armed=1 slot=0x0000000023FFDDA8 frame=0x0000000023FFDCA0 pid=11 v=13
+  [BADVEC] dr0 cpu=3 armed=1 slot=0x0000000025FFB748 frame=0x0000000025FFB640 pid=4 v=13

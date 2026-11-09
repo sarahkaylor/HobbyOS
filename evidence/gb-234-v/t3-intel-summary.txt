@@ -1,0 +1,10 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/.swarm/evidence/gb-234-v/t3_intel.log) ===
+T3_intel: 814 console lines, 0 FAIL lines, 1 user memory fault records across 1 processes, 3 programs exited, 0 shredded, glued=0, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 4 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel EXIT=1
+T3_LOG=/home/sarah/.swarm/evidence/gb-234-v/t3_intel.log
+T3_ARCH=intel
+T3_FAILS=0
+rc=1
