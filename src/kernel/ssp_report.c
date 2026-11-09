@@ -101,7 +101,12 @@ int ssp_format_report(char *out, int cap, uint64_t pc, uint64_t sp, uint64_t fp,
   n = puts_buf(out, cap, n, "KERNEL PANIC: stack smashing detected (SEC-4 canary)\n");
   n = puts_buf(out, cap, n, "  smasher pc=");
   n = puthex_buf(out, cap, n, pc);
-  n = puts_buf(out, cap, n, " (resolve: llvm-addr2line -e hobbyos.elf <pc>)\n");
+  /* GB-246-V RED: pc is the return address after `call __stack_chk_fail`
+     (E8 rel32, five bytes), so addr2line on pc lands one past the function.
+     Print the call site too; resolving that address names the smasher. */
+  n = puts_buf(out, cap, n, " call_site=");
+  n = puthex_buf(out, cap, n, pc >= 5 ? pc - 5 : pc);
+  n = puts_buf(out, cap, n, " (resolve: llvm-addr2line -e hobbyos.elf <call_site>)\n");
   n = puts_buf(out, cap, n, "  rsp=");
   n = puthex_buf(out, cap, n, sp);
   n = puts_buf(out, cap, n, " rbp=");
