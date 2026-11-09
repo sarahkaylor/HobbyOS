@@ -4308,6 +4308,33 @@ int badvec_should_arm(uint64_t frame, uint64_t cs, uint64_t vector, int64_t pid,
   return pid == 1 && cs == 0x08 && now_ms >= 3000 && pid1_prints < 8;
 }
 
+/* GB-244: the writer row, split out of the #DB handler so the unit suite can
+   force a kernel-CS frame through the same row and print it.  The row alone
+   does not prove DR0 fired -- it proves that a watch armed for a kernel-CS
+   pid-1 frame reports the same fields the #DB path prints, which is the
+   falsifier half the card asks for. */
+void badvec_print_writer_row(uint64_t rip_after, uint64_t slot, uint64_t frame,
+                             int frame_pid, int vect, int pid, int cpu) {
+  extern void panic_puts(const char *s);
+  extern void panic_print_hex(uint64_t v);
+  extern void print_int_raw(int val);
+  panic_puts("[BADVEC] writer rip_after=");
+  panic_print_hex(rip_after);
+  panic_puts(" slot=");
+  panic_print_hex(slot);
+  panic_puts(" frame=");
+  panic_print_hex(frame);
+  panic_puts(" frame_pid=");
+  print_int_raw(frame_pid);
+  panic_puts(" v=");
+  print_int_raw(vect);
+  panic_puts(" pid=");
+  print_int_raw(pid);
+  panic_puts(" cpu=");
+  print_int_raw(cpu);
+  panic_puts("\n");
+}
+
 static int64_t badvec_pid(void);
 
 static void badvec_watch_arm(uint64_t slot, uint64_t frame, uint64_t vect) {
@@ -4583,21 +4610,11 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       badvec_db_result[wc] = 0;
     }
     if (wc < MAX_CPUS && badvec_watch_armed[wc]) {
-      panic_puts("[BADVEC] writer rip_after=");
-      panic_print_hex(tf->elr);
-      panic_puts(" slot=");
-      panic_print_hex(badvec_watch_slot[wc]);
-      panic_puts(" frame=");
-      panic_print_hex(badvec_watch_frame[wc]);
-      panic_puts(" frame_pid=");
-      print_int_raw((int)badvec_watch_pid[wc]);
-      panic_puts(" v=");
-      print_int_raw((int)badvec_watch_vect[wc]);
-      panic_puts(" pid=");
-      print_int_raw((int)badvec_pid());
-      panic_puts(" cpu=");
-      print_int_raw((int)wc);
-      panic_puts("\n");
+      badvec_print_writer_row(tf->elr, badvec_watch_slot[wc],
+                              badvec_watch_frame[wc],
+                              (int)badvec_watch_pid[wc],
+                              (int)badvec_watch_vect[wc], (int)badvec_pid(),
+                              (int)wc);
       badvec_writer_prints++;
       /* GB-238: one bounded row saying what this #DB was and how it was
          treated.  DR6.B0 clear with an armed watch is the case the old
