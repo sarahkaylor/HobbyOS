@@ -155,8 +155,13 @@ stage_payload_extras() {
   # already has them staged can still run.
   local libdirs="${RW_LIBS:-$ROOT/third_party/rw-mono/root/lib} /tmp/rwlibs/lib/x86_64-linux-gnu /tmp/rwlibs/cxx/usr/lib/x86_64-linux-gnu"
   local z std
-  z=$(ls $libdirs/libz.so.1* 2>/dev/null | head -1)
-  std=$(ls $libdirs/libstdc++.so.6.0.* 2>/dev/null | head -1)
+  # `|| true`: ls exits 2 for the directories that do not exist, and under
+  # `set -euo pipefail` that failure propagated through the pipeline into the
+  # assignment -- the step exited 1 silently BEFORE reporting anything, even
+  # though it had already found the file (measured: EXIT=1 right after the AD-9
+  # line, with libz present in /tmp/rwlibs).
+  z=$(ls $libdirs/libz.so.1* 2>/dev/null | head -1 || true)
+  std=$(ls $libdirs/libstdc++.so.6.0.* 2>/dev/null | head -1 || true)
   if [ -n "$z" ]; then
     mcopy -o -i "$IMG" "$z" ::/LIB64/libz.so.1 || die "could not stage libz"
     note "libz.so.1 <- $z"
