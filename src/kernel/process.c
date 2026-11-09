@@ -5086,6 +5086,11 @@ void start_scheduler(void) {
       uart_puts(" t=");
       print_int((int)timer_get_ms());
       uart_puts("\n");
+      /* GB-241: this acquire is the dump's own.  Set the tag before the
+         acquire so proclock_hold_note records dump_self=1 with this exact
+         acquisition; the row is then excluded from owner inference and the
+         other CPUs' rows still name a real strand if one exists. */
+      proclock_dump_note(1);
       uint64_t dflags = spinlock_acquire_irqsave(&proc_lock);
       for (int k = 0; k < MAX_PROCESSES; k++) {
         if (proc_table[k].state != PROC_STATE_FREE) {
@@ -5544,6 +5549,8 @@ void start_scheduler(void) {
           print_int((int)ph.det_exit_ms);
           uart_puts(" det_stage=");
           print_int(ph.det_stage);
+          uart_puts(" dump_self=");
+          print_int(ph.dump_self);
           uart_puts("\n");
         }
       }
@@ -5598,6 +5605,18 @@ void start_scheduler(void) {
               print_int((int)oph.det_exit_ms);
               uart_puts(" det_stage=");
               print_int(oph.det_stage);
+              uart_puts(" dump_self=");
+              print_int(oph.dump_self);
+              /* GB-241: is the watched owner executing a USER VA?  The
+                 watchdog records its last RIP; the kernel image is at
+                 0x70000000 and user windows are below it (user stacks) or at
+                 USER_VA_BASE+ (images/heaps).  Stated as the definition used. */
+              {
+                uint64_t orip = watchdog_cpu_rip((uint32_t)ld.owner_cpu);
+                uart_puts(" owner_in_user=");
+                print_int(orip != 0 &&
+                          (orip < 0x70000000ULL || orip >= USER_VA_BASE));
+              }
             }
           }
           uart_puts("\n");
@@ -5627,6 +5646,7 @@ void start_scheduler(void) {
         }
       }
       spinlock_release_irqrestore(&proc_lock, dflags);
+      proclock_dump_note(0); /* GB-241: dump no longer holds proc_lock */
     }
 
     /* GB-057: any idle entry must not still hold a claim -- see

@@ -37,6 +37,18 @@ volatile uint8_t sched_stage[MAX_CPUS];
 /* GB-229: proc_lock acquire/release sequence per CPU.  Observation only; a
    per-CPU counter written by the owning CPU needs no atomics. */
 static proclock_hold_t plh[MAX_CPUS];
+/* GB-241: per-CPU "the next/current proc_lock acquisition is the [IDLESTUCK]
+   dump's own" flag, set before the dump acquires and cleared after it
+   releases.  Read by proclock_hold_note at the acquire so dump_self travels
+   with the exact acquisition, not with the CPU that later prints the row. */
+static volatile int plh_dump_self_pending[MAX_CPUS];
+
+void proclock_dump_note(int on) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  plh_dump_self_pending[c] = on;
+}
 
 void proclock_hold_note(int op, uint64_t site) {
   uint32_t c = get_cpuid();
@@ -48,6 +60,8 @@ void proclock_hold_note(int op, uint64_t site) {
     plh[c].rel++;
   else
     return;
+  if (op == 1)
+    plh[c].dump_self = plh_dump_self_pending[c];
   if (op == 2)
     plh[c].rel_site = site;
   plh[c].last_op = op;

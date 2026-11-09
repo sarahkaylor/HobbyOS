@@ -1,0 +1,35 @@
+=== addr2line (this build) ===
+start_scheduler
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb241/src/kernel/process.c:5094
+start_scheduler
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb241/src/kernel/process.c:4782
+start_scheduler
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb241/src/kernel/process.c:5025
+
+=== disassembly: dump acquire with GB-241 tag ===
+
+hobbyos.elf:	file format elf32-i386
+
+Disassembly of section .text:
+
+7007af50 <start_scheduler>:
+7007bcd3: bf 01 00 00 00               	movl	$0x1, %edi
+7007bcd8: e8 93 4f 03 00               	calll	0x700b0c70 <proclock_dump_note>
+7007bcdd: bf 88 50 6e 74               	movl	$0x746e5088, %edi       # imm = 0x746E5088
+7007bce2: e8 59 6d 03 00               	calll	0x700b2a40 <spinlock_acquire_irqsave>
+7007bce7: bb a1 50 6e 74               	movl	$0x746e50a1, %ebx       # imm = 0x746E50A1
+
+=== disassembly: detector acquire ===
+
+hobbyos.elf:	file format elf32-i386
+
+Disassembly of section .text:
+
+7007af50 <start_scheduler>:
+7007b4ab: bf 88 50 6e 74               	movl	$0x746e5088, %edi       # imm = 0x746E5088
+7007b4b0: e8 8b 75 03 00               	calll	0x700b2a40 <spinlock_acquire_irqsave>
+7007b4b5: 48                           	decl	%eax
+7007b4b6: 89 85 10 f7 ff ff            	movl	%eax, -0x8f0(%ebp)
+7007b4bc: bf 01 00 00 00               	movl	$0x1, %edi
+7007b4c1: 89 fe                        	movl	%edi, %esi
+7007b4c3: e8 e8 58 03 00               	calll	0x700b0db0 <proclock_det_note>
