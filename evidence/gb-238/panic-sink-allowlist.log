@@ -1,0 +1,11 @@
+panic_sink_allowlist: 441 reference(s) in 9 file(s); 55 from RETURNING paths (GB-097 residue)
+     1  src/host/locksteal_test.c  [ok]
+    36  src/kernel/arch/arm/locks.c  [ok]
+    16  src/kernel/arch/arm/uart.c  [ok]
+    13  src/kernel/arch/x64/locks.c  [ok]
+     7  src/kernel/arch/x64/mmu.c  [RESIDUE]
+   294  src/kernel/arch/x64/trap.c  [ok]
+    26  src/kernel/arch/x64/uart.c  [ok]
+     9  src/kernel/main.c  [RESIDUE]
+    39  src/kernel/process.c  [RESIDUE]
+panic_sink_allowlist: PASS — every reference is accounted for
