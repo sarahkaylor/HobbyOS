@@ -36,7 +36,7 @@ ALLOW = {
     "src/host/locksteal_test.c": (1, "host-test shim that stands in for the sink"),
 
     # ---- non-returning diagnostics: they end in halt/reboot by construction ----
-    "src/kernel/arch/x64/trap.c": (236, "fatal dump, stall watchdog, spinlock scream, KPFLOOP, GB-146-A [BADVEC] record + DR0 writer watchpoint + pid-keyed stamp lookup, GB-234 armed-slot set (159->226->236)"),
+    "src/kernel/arch/x64/trap.c": (294, "fatal dump, stall watchdog, spinlock scream, KPFLOOP, GB-146-A [BADVEC] record + DR0 writer watchpoint + pid-keyed stamp lookup, GB-234 armed-slot set, GB-238 live DR0/DR7 + per-CPU last-#DB timeline (236->294)"),
     "src/kernel/arch/x64/locks.c": (13, "spinlock scream paths: printed while the lock is wedged"),
     "src/kernel/arch/arm/locks.c": (36, "same, arm"),
 
