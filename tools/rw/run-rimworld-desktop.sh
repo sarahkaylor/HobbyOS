@@ -115,8 +115,14 @@ if [ ! -f "$HOME/.local/share/OVMF/OVMF_CODE_4M.fd" ] && \
   HOME="/home/$(id -un)"; export HOME
 fi
 PATH="/usr/sbin:/sbin:$PATH"; export PATH
+# Host facts (acceleration, firmware, llvm keg, image lock) come from one place.
+# Baking them in here is what made this launcher Linux-only: a QEMU built without
+# KVM rejects -enable-kvm outright, Homebrew's llvm is keg-only so llvm-objcopy
+# is not on PATH, and the firmware is not named OVMF_CODE_4M.fd everywhere.
+HB_SELF=$(cd "$(dirname "$0")/../.." && pwd)
+. "$HB_SELF/tools/host/hostcaps.sh"
 for t in clang ld.lld llvm-objcopy mcopy mmd mdir mkfs.fat gcc \
-         qemu-system-x86_64 convert python3; do
+         qemu-system-x86_64 python3; do
   command -v "$t" >/dev/null 2>&1 || { echo "ENVIRONMENT: missing $t"; exit 2; }
 done
 
@@ -195,11 +201,16 @@ if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
   # own pthread_*/sem_* definitions, so DSOs bind libpthread's entry points.
   SHADOW_CFLAGS=()
   if [ "${RW_NO_SHADOW:-0}" = 1 ]; then SHADOW_CFLAGS=(-DRW_NO_SHADOW_PTHREAD); fi
-  gcc -O2 -Wall -Wextra -fPIE -pie -nostdlib -nostartfiles -rdynamic \
+  # Not bare gcc and not a host triple: the launcher is a glibc 2.31 x86_64 PIE.
+  # On a macOS/arm64 host `gcc` is Apple clang targeting arm64, so __x86_64__ is
+  # undefined and glibc's features.h takes the 32-bit branch ("gnu/stubs-32.h not
+  # found"); the objects then cannot link against the pin either way.
+  clang --target=x86_64-linux-gnu -fuse-ld=lld \
+      -O2 -Wall -Wextra -fPIE -pie -nostdlib -nostartfiles -rdynamic \
       "${SHADOW_CFLAGS[@]}" \
       -nostdinc -isystem "$D/usr/include" \
       -isystem "$D/usr/include/x86_64-linux-gnu" \
-      -isystem "$(gcc -print-file-name=include)" \
+      -isystem "$(clang --target=x86_64-linux-gnu -print-resource-dir)/include" \
       -o "$OUT/RimWorldLinux.ad9" src/user/rwmain.c \
       "$ROOT/tools/rw/mono-probe/condtrace.c" \
       "$DLIB/Scrt1.o" "$DLIB/crti.o" "$DLIB/libc_nonshared.a" \
@@ -207,11 +218,11 @@ if [ "${RW_SKIP_BUILD:-0}" != 1 ]; then
       -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2 \
       -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none || {
     echo "AD-9 launcher link failed"; exit 2; }
-  readelf -h "$OUT/RimWorldLinux.ad9" | awk '/Type:/{print "  ad9:",$2}'
+  "$HB_READELF" -h "$OUT/RimWorldLinux.ad9" | awk '/Type:/{print "  ad9:",$2}'
   # Capture first: `readelf -sW | grep -q` under `set -o pipefail` fails when
   # grep exits early and readelf takes SIGPIPE (141) -- a correct launcher was
   # rejected once with "does not export dlopen".
-  AD9_SYMS="$(readelf -sW "$OUT/RimWorldLinux.ad9")"
+  AD9_SYMS="$("$HB_READELF" -sW "$OUT/RimWorldLinux.ad9")"
   grep -qw dlopen <<<"$AD9_SYMS" || {
     echo "AD-9 launcher does not export dlopen"; exit 2; }
 fi
@@ -525,11 +536,9 @@ fi
 # and the game must be started from the desktop so it inherits the window
 # protocol pipes.
 
-OVMF_SRC=""
-for c in "$HOME/.local/share/OVMF/OVMF_CODE_4M.fd" /usr/share/OVMF/OVMF_CODE_4M.fd; do
-  [ -f "$c" ] && { OVMF_SRC="$c"; break; }
-done
-[ -n "$OVMF_SRC" ] || { echo "ENVIRONMENT: no OVMF_CODE_4M.fd"; exit 2; }
+OVMF_SRC="${HB_OVMF:-}"
+[ -n "$OVMF_SRC" ] && [ -f "$OVMF_SRC" ] || { echo "ENVIRONMENT: no x86_64 firmware (set HB_OVMF)"; exit 2; }
+echo "== host: ${HB_HOST_OS}/${HB_HOST_ARCH}, accel=${HB_ACCEL}${HB_QEMU_ACCEL:+, $HB_QEMU_ACCEL}"
 OVMF="$OUT/OVMF_CODE_4M.fd"
 [ -f "$OVMF" ] || cp "$OVMF_SRC" "$OVMF"
 
@@ -555,13 +564,13 @@ fi
 # which kernel is inside it (measured: a kernel fix silently did not boot).
 llvm-objcopy --strip-debug "$ROOT/hobbyos.elf" "$OUT/hobbyos.boot.elf"
 mcopy -o -i "$IMG" "$OUT/hobbyos.boot.elf" ::/boot/hobbyos.elf
-echo "== kernel: staged $(stat -c %s "$OUT/hobbyos.boot.elf") bytes as ::/boot/hobbyos.elf"
+echo "== kernel: staged $(hb_size_of "$OUT/hobbyos.boot.elf") bytes as ::/boot/hobbyos.elf"
 echo "== boot: MODE=desktop DESKTOP=$RW_DESKTOP (deadline ${TIMEOUT_S}s, log $LOG)"
 : >"$LOG"
 MAKEEXTRA=""
 
 ( make -o disk.img ARCH=intel MODE=desktop DESKTOP="$RW_DESKTOP" $X11VAR EDK2_X86_64="$OVMF" \
-       $GLVARS $MAKEEXTRA run QEMU_ARGS="$DISPARGS -enable-kvm -qmp unix:$QMP,server,nowait ${RW_QEMU_EXTRA:-}" \
+       $GLVARS $MAKEEXTRA run QEMU_ARGS="$DISPARGS $HB_QEMU_ACCEL -qmp unix:$QMP,server,nowait ${RW_QEMU_EXTRA:-}" \
        >>"$LOG" 2>&1 & )
 
 RC=1
@@ -570,7 +579,7 @@ if [ "${RW_QEMU_GL:-0}" = 1 ]; then
   # The framebuffer's guest-physical address: the kernel's 2 MB-aligned BSS
   # array `framebuffer` (src/kernel/virtio_gpu.c), identity-mapped, so the
   # ELF symbol's address is its physical address.
-  FBP=$(nm "$ROOT/hobbyos.elf" 2>/dev/null | awk '$3=="framebuffer"{print "0x"$1}')
+  FBP=$(llvm-nm "$ROOT/hobbyos.elf" 2>/dev/null | awk '$3=="framebuffer"{print "0x"$1}')
   [ -n "$FBP" ] || FBP="${RW_FB_PHYS:-0x74c00000}"
   FBARGS="--fb-phys $FBP --fb-w 1920 --fb-h 1080"
   echo "== screenshots: /dev/fb0 from guest physical memory at $FBP"
