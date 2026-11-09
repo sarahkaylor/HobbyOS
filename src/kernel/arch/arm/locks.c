@@ -30,6 +30,12 @@ uint8_t lockdiag_stage(uint32_t cpu) {
   (void)cpu;
   return 0;
 }
+/* GB-240: the detector stamp is x64-only state (plh[]); ARM keeps the shared
+   process.c call site compiling and records nothing. */
+void proclock_det_note(int op, int stage) {
+  (void)op;
+  (void)stage;
+}
 
 /**
  * Initializes a spinlock structure to the unlocked state.
