@@ -503,10 +503,15 @@ PY
     [ -d "$hb_d" ] && { hb_gl="$hb_d"; break; }
   done
   [ -n "$hb_gl" ] || die "missing GL headers (apt install libgl1-mesa-dev)"
-  cp -a "$hb_x11" "${STAGE}/x11-include/"
-  cp -a "$hb_gl" "${STAGE}/x11-include/"
+  # -L, not -a: Homebrew's include/X11 and include/GL are *symlink trees* into
+  # the Cellar, and copying the links preserves them as relative paths
+  # ("GL -> ../Cellar/xorgproto/…/include/GL") which are dangling once the tree
+  # sits under obj/mesa/stage/x11-include -- measured as "staged 0 headers"
+  # with a directory full of broken links.  Dereference so the stage is real.
+  cp -RL "$hb_x11" "${STAGE}/x11-include/"
+  cp -RL "$hb_gl" "${STAGE}/x11-include/"
   note "X11 from $hb_x11, GL from $hb_gl"
-  note "staged $(find "${STAGE}/x11-include" -type f | wc -l) headers"
+  note "staged $(find -L "${STAGE}/x11-include" -type f | wc -l | tr -d ' ') headers"
 }
 
 # ---------------------------------------------------------------------------
