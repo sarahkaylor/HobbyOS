@@ -63,6 +63,7 @@ void fb_mmap_test_suite(void);
 void abi_t2_test_suite(void);
 #ifdef __x86_64__
 void fpu_sig_test_suite(void); /* M6/L63: signal-frame FP image guard */
+void trap_user_class_test_suite(void); /* GB-243: GB-101 user-CS classifier */
 #endif
 void timer_test_suite(void);
 void smp_test_suite(void);

@@ -64,6 +64,7 @@ void run_all_unit_tests(void) {
 #ifdef __x86_64__
   linux_compat_pi_test_suite(); /* PI futex word state machine (M6 park) */
   fpu_sig_test_suite(); /* M6/L63: signal-frame FP image: alignment guard */
+  trap_user_class_test_suite(); /* GB-243: GB-101 user-CS classifier decision */
 #endif
 
   uart_puts("==================================\n");
