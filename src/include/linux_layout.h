@@ -96,7 +96,17 @@ typedef struct {
 } linux_sigset_t;
 
 /* struct sigaction, x86_64 (152 B): handler union @0, sa_mask @8,
- * sa_flags @136, sa_restorer @144 (docs/linux-abi.md §6/§8). */
+ * sa_flags @136, sa_restorer @144 (docs/linux-abi.md §6/§8).
+ *
+ * <sys/signal.h> on Darwin #defines sa_handler and sa_sigaction as member
+ * accessors, so a HOST_TEST TU sees "void (*(__sigaction_u.__sa_handler))(int)"
+ * and the parser stops at "expected ')'".  The member names are the Linux ABI
+ * we are describing, so clear the host macros (both are re-defined by any
+ * header the host TU includes afterwards). */
+#if defined(__APPLE__)
+# undef sa_handler
+# undef sa_sigaction
+#endif
 typedef union {
   void (*sa_handler)(int);
   void (*sa_sigaction)(int, void *, void *);

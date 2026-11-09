@@ -4267,7 +4267,10 @@ DIFF_RUN = python3 tools/differential/diff_harness_test.py
 test_diff_harness:
 	$(HOST_RUN) $(DIFF_RUN)
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
+# The suite as one list, so a host-portable subset can be derived from it
+# without maintaining a second copy (see host_tests_portable).
+HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
+host_tests: $(HOST_TESTS_TARGETS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
 	$(HOST_RUN) ./$(GFX_STATS_TEST)
@@ -4530,3 +4533,64 @@ doom_elf_test_gen:
 	    --elf $(DOOM_GEN) --wad $(DOOM_WAD) --start-line "/DOOM.ELF -iwad /DOOM1.WAD"
 .PHONY: doom_elf_test doom_elf_test_gen
 
+
+# --- host-portable subset ---------------------------------------------------
+#
+# `make host_tests` is written for the Linux farm: it builds the intel target,
+# dlopens x86_64 ELF DSOs into the test process, and races our libc against the
+# HOST's glibc/coreutils.  None of that can work on a macOS/arm64 host, and none
+# of it is a bug -- so the portable subset excludes those *by category* rather
+# than skipping failures one at a time:
+#
+#   glibc/coreutils parity .... WIDE_PARITY WC_PARITY (host has no glibc _l,
+#                               no struct re_registers, no GNU coreutils bytes)
+#   cross-ABI dlopen .......... xcompat_test_run, x11_libc_test_run (an ELF
+#                               DSO cannot be dlopen()ed by a Mach-O process)
+#   x86_64-host-only .......... LOCKSTEAL_TEST (pushfq/popfq), T4 probes,
+#                               w4_doom (musl cross), diffutils_cmp_ref
+#   musl toolchain ............ every T4_* self-test and SDL_TEST_APP_HOST build
+#                               static-musl x86_64 probes with musl-gcc, which is
+#                               Debian/Ubuntu musl-tools; no Homebrew equivalent
+#                               produces a static-PIE the loader accepts
+#
+# Everything else builds and runs on any POSIX host; that is the set this target
+# proves.  Add to HOST_TESTS_HOSTBOUND only with the reason it cannot work.
+# %parity% is the whole family by construction: every one of them compares
+# HobbyOS's implementation against the HOST's glibc or GNU coreutils bytes
+# (head/tail/cut/tr/.../wc, uname, scanf/printf, math transcendentals, the wide
+# set).  Off Linux there is nothing on the other side of that comparison.
+# Enumerated, not pattern-matched: macOS ships GNU Make 3.81, where $(filter)
+# only honours a TRAILING % -- "$(filter %parity%,...)" matches nothing there
+# while matching fine under make 4.x on the farm, so a pattern here would mean
+# "everything runs" on one host and "nothing does" on the other (measured).
+HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) \
+                       $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) \
+                       $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) \
+                       $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) \
+                       $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) \
+                       $(TAC_PARITY) $(CMP_PARITY_STRICT) $(T4_COMPAT_PARITY) \
+                       $(UNAME_PARITY) $(LOCKSTEAL_TEST) $(REGEX_TEST) \
+                       $(LANGINFO_TEST) x11_libc_test_run xcompat_test_run \
+                       t4_compat_selftest w4_doom_test \
+                       $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) \
+                       $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) \
+                       $(SDL_TEST_APP_HOST)
+
+host_tests_portable: $(filter-out $(HOST_TESTS_HOSTBOUND),$(HOST_TESTS_TARGETS))
+	@printf '== host-portable suite: %s targets (%s excluded)\n' \
+	  "$(words $^)" "$(words $(HOST_TESTS_HOSTBOUND))"
+	@fail=0; pass=0; skip=0; \
+	if command -v timeout >/dev/null 2>&1; then RUN="timeout 40"; else RUN=""; fi; \
+	for t in $^; do \
+	  if [ ! -x "$$t" ]; then skip=$$((skip+1)); continue; fi; \
+	  if $$RUN ./"$$t" >"$$t.log" 2>&1; then \
+	    pass=$$((pass+1)); \
+	  else \
+	    printf '  FAIL %s\n' "$$t"; sed -n '1,25p' "$$t.log"; fail=$$((fail+1)); \
+	  fi; \
+	done; \
+	printf '== host-portable: %s passed, %s failed, %s non-binary targets\n' \
+	  "$$pass" "$$fail" "$$skip"; \
+	[ "$$fail" -eq 0 ]
+
+.PHONY: host_tests_portable
