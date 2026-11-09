@@ -108,6 +108,68 @@ stage_runtime() {
 }
 
 
+
+# Three things the payload needs that are not "the game tree":
+#   * UnityPlayer.so, which the AD-9 launcher dlopens from /RWDSO (Unity's own
+#     stub finds it beside the exe, but the launcher does not) -- 31 MB, so it is
+#     copied rather than linked;
+#   * an AD-9 launcher IN PLACE OF the shipped RimWorldLinux, because that stub
+#     is an ET_EXEC linked at 0x200000 and the kernel refuses it (measured:
+#     spawn_ex errno=8 ENOEXEC).  The real stub is kept as RimWorldLinux.orig,
+#     which is what the NFS harness does too;
+#   * libz.so.1 and libstdc++.so.6 from a glibc-2.31-era distro: Mono's NEEDED
+#     list names them and this host has no x86-64 Linux copy (measured: Mono
+#     refused to load libmonobdwgc-2.0.so until libz appeared).
+stage_payload_extras() {
+  local tree=$1
+  say "payload extras (UnityPlayer.so, AD-9 launcher, libz/libstdc++)"
+  mmd -i "$IMG" ::/RWDSO >/dev/null 2>&1 || true
+  mcopy -o -i "$IMG" "$tree/UnityPlayer.so" ::/RWDSO/UnityPlayer.so \
+    || die "could not stage UnityPlayer.so"
+  note "UnityPlayer.so -> /RWDSO ($(wc -c < "$tree/UnityPlayer.so" | tr -d ' ') bytes)"
+
+  local G=${GLIBC231:-/tmp/glibc231} D=${GLIBC231_DEV:-/tmp/glibc231-dev}
+  local LDIR="$G/lib/x86_64-linux-gnu" DLIB="$D/usr/lib/x86_64-linux-gnu"
+  local ad9=$ROOT/obj/rw/RimWorldLinux.ad9
+  mkdir -p "$ROOT/obj/rw"
+  clang --target=x86_64-linux-gnu -fuse-ld=lld -O2 -w -fPIE -pie -nostdlib \
+        -nostartfiles -rdynamic -nostdinc -isystem "$D/usr/include" \
+        -isystem "$D/usr/include/x86_64-linux-gnu" \
+        -isystem "$(clang --target=x86_64-linux-gnu -print-resource-dir)/include" \
+        -o "$ad9" "$ROOT/src/user/rwmain.c" "$ROOT/tools/rw/mono-probe/condtrace.c" \
+        "$DLIB/Scrt1.o" "$DLIB/crti.o" "$DLIB/libc_nonshared.a" \
+        "$LDIR/libc.so.6" "$LDIR/libpthread-2.31.so" "$LDIR/libdl-2.31.so" \
+        "$DLIB/crtn.o" -Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2 \
+        -Wl,-rpath-link,"$LDIR" -Wl,--build-id=none \
+    || die "AD-9 launcher link failed"
+  # Keep the shipped stub, install the launcher over it (see above).
+  mtype -i "$IMG" "${DEST}/RimWorldLinux" > "$CACHE/RimWorldLinux.orig" 2>/dev/null || true
+  [ -s "$CACHE/RimWorldLinux.orig" ] \
+    && mcopy -o -i "$IMG" "$CACHE/RimWorldLinux.orig" "${DEST}/RimWorldLinux.orig" || true
+  mcopy -o -i "$IMG" "$ad9" "${DEST}/RimWorldLinux" || die "could not install the AD-9 launcher"
+  note "AD-9 launcher installed as ${DEST}/RimWorldLinux ($(wc -c < "$ad9" | tr -d ' ') bytes)"
+
+  # libz/libstdc++ come from the mono fetch (third_party/rw-mono/root/lib) or a
+  # local drop in $RW_LIBS; absence is reported, not fatal, so a host that
+  # already has them staged can still run.
+  local libdirs="${RW_LIBS:-$ROOT/third_party/rw-mono/root/lib} /tmp/rwlibs/lib/x86_64-linux-gnu /tmp/rwlibs/cxx/usr/lib/x86_64-linux-gnu"
+  local z std
+  z=$(ls $libdirs/libz.so.1* 2>/dev/null | head -1)
+  std=$(ls $libdirs/libstdc++.so.6.0.* 2>/dev/null | head -1)
+  if [ -n "$z" ]; then
+    mcopy -o -i "$IMG" "$z" ::/LIB64/libz.so.1 || die "could not stage libz"
+    note "libz.so.1 <- $z"
+  else
+    say "WARNING: no x86-64 libz.so.1 found (set RW_LIBS=); Mono will fail to load"
+  fi
+  if [ -n "$std" ]; then
+    mcopy -o -i "$IMG" "$std" ::/LIB64/libstdc++.so.6 || die "could not stage libstdc++"
+    note "libstdc++.so.6 <- $std"
+  else
+    say "WARNING: no libstdc++.so.6 found (set RW_LIBS=)"
+  fi
+}
+
 MTOOLS_PREFIX=""
 for t in mcopy mmd mdir mkfs.fat; do
   command -v "$t" >/dev/null 2>&1 || die "missing $t (brew install mtools dosfstools)"
@@ -290,7 +352,8 @@ mmd -i "$IMG" "${DEST}" >/dev/null 2>&1 || true
 # FAT long names; the tree keeps the exact case Unity expects.
 mcopy -s -m -o -Q -i "$IMG" "$STAGE"/* "${DEST}"/ || die "mcopy failed"
 
-# --- runtime the payload needs ----------------------------------------------
+# --- payload extras, then the runtime they need -----------------------------
+stage_payload_extras "$STAGE"
 stage_runtime
 
 # --- launcher + menu --------------------------------------------------------
