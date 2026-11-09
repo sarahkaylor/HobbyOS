@@ -59,6 +59,13 @@
 
 set -euo pipefail
 
+# Native host toolchain: on macOS 27 the default CLT SDK cannot be parsed by the
+# installed clang, so every host link (Mesa's sanitity check, its code
+# generators) dies with "ld: tapi error".  One probe, newest linkable SDK.
+SCRIPT_DIR_HOST="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../host/macos-sdk.sh
+[ -f "$SCRIPT_DIR_HOST/../host/macos-sdk.sh" ] && . "$SCRIPT_DIR_HOST/../host/macos-sdk.sh"
+
 # ---------------------------------------------------------------------------
 # Pin (docs/rimworld-plan.md §2, MESA-NOTES.md §1)
 # ---------------------------------------------------------------------------
@@ -81,6 +88,15 @@ GLIBC_RT_URL=http://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_${GLIBC_VE
 GLIBC_RT_SHA256=1b2281aac4935dfea1f89dfc19e445fdbb45303202af60679ccb8bf035f081a0
 GLIBC_DEV_URL=http://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6-dev_${GLIBC_VERSION}_amd64.deb
 GLIBC_DEV_SHA256=11029900f2315b93ce487792ae1bf15f0927e5e50880c091e6a440b14d4e164a
+# The Linux kernel UAPI headers (linux/errno.h, linux/limits.h, ...).  glibc
+# 2.31's own bits/ headers #include them, and neither libc6-dev nor libc6
+# carries them: on a Linux host they come from linux-libc-dev in /usr/include.
+# macOS has no /usr/include/linux at all, so the pin is fetched and extracted
+# into the same sysroot.  Version pinned to the focal 5.4 series (the era of the
+# 2.31 pin); sha256 recorded when this was added for the macOS port.
+GLIBC_UAPI_VERSION=5.4.0-218.238
+GLIBC_UAPI_URL=http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-libc-dev_${GLIBC_UAPI_VERSION}_amd64.deb
+GLIBC_UAPI_SHA256=0aa210458df2ab7bc4536e8edf0f9423a7018e74e2eac0b5777fd2a36f170c2f
 
 # Bumped whenever the flag vector changes in a way the object cache cannot
 # see (it keys on mtimes): r2 = -ftls-model=global-dynamic + the 2.31 header pin.
@@ -159,11 +175,53 @@ except Exception as exc:  # pragma: no cover - the message is the point
     sys.exit(1)
 print(f"    python3 {sys.version.split()[0]} at {sys.executable}: mako {mako.__version__}, pyyaml ok")
 EOF
+  # meson resolves python3 with find_program(), i.e. through PATH -- not through
+  # MESA_PYTHON -- so an interpreter outside PATH passes this preflight and then
+  # dies in configure with "Python (3.x) mako module >= 0.8.0 required".  Put
+  # the chosen interpreter's directory first (measured on macOS, where the venv
+  # is not on PATH by default).
+  if [ -n "${MESA_PYTHON:-}" ]; then
+    PATH="$(cd "$(dirname "$py")" && pwd):$PATH"; export PATH
+  fi
   for t in meson ninja flex bison curl; do
     command -v "$t" >/dev/null || die "missing host tool: $t"
   done
-  [ -d /usr/include/X11 ] || die "missing /usr/include/X11 (apt install libx11-dev)"
-  [ -d /usr/include/GL ] || die "missing /usr/include/GL (apt install libx11-dev)"
+  # Mesa's .y grammars need bison >= 3.  macOS ships GNU Bison 2.3 from 2006 on
+  # PATH, which does not fail loudly -- it reports a syntax error inside
+  # glcpp-parse.y ("unexpected identifier, expecting string") and the build dies
+  # looking like a Mesa checkout problem.  Prefer a modern keg when present.
+  local hb_bison="${HOMEBREW_PREFIX:-/opt/homebrew}/opt/bison/bin"
+  if [ -x "$hb_bison/bison" ]; then
+    case "$(bison --version 2>/dev/null | head -1)" in
+      *" 3."*|*" 4."*|*" 5."*) ;;
+      *) PATH="$hb_bison:$PATH"; export PATH
+         note "bison $(bison --version | head -1 | awk '{print $NF}') from $hb_bison (Mesa needs >= 3)" ;;
+    esac
+  fi
+  # X11/GL headers: /usr/include on Linux; Homebrew's prefix on macOS.  The GL
+  # ones are optional -- Mesa builds GL/glx.h itself and the xlib platform does
+  # not link the host's GL -- so only X11 is fatal.
+  local hb_inc
+  for hb_inc in /usr/include /usr/local/include "${HOMEBREW_PREFIX:-/opt/homebrew}/include"; do
+    [ -d "$hb_inc/X11" ] && HB_X11_HOST_INC="$hb_inc" && break
+  done
+  [ -n "${HB_X11_HOST_INC:-}" ] || die "missing X11 headers (apt install libx11-dev / brew install libx11)"
+  [ -d "$HB_X11_HOST_INC/GL" ] || note "no system GL headers; using Mesa's own include/GL ($HB_X11_HOST_INC)"
+
+  # macOS: two include dirs the host build needs that must NOT enter the
+  # recorded flag vector (step 4 replays those lines for the x86_64 target, and
+  # a Homebrew include dir there would leak host headers into the guest DSO):
+  #   libsync.h   -- libdrm's header; macOS has no libdrm package, but the repo
+  #                  already ships a declaration-only shim for the target.
+  #   X11/        -- Homebrew's X11 headers (no /usr/include/X11 on macOS).
+  # CPATH is read by the host compiler without touching build.ninja.
+  if [ "$(uname -s)" = Darwin ]; then
+    mkdir -p "${WORK}/host-compat"
+    [ -f "${WORK}/host-compat/libsync.h" ] || \
+      cp "${TREE}/tools/mesa/include/libsync.h" "${WORK}/host-compat/libsync.h"
+    CPATH="${WORK}/host-compat:${HOMEBREW_PREFIX:-/opt/homebrew}/include${CPATH:+:$CPATH}"
+    export CPATH
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -265,6 +323,21 @@ ensure_glibc_pin() {
     dpkg-deb -x "$deb" "$GLIBC231_DEV" || die "cannot extract $deb"
   fi
 
+  # Kernel UAPI headers: present on a Linux host in /usr/include, absent on
+  # macOS.  Extract the pinned linux-libc-dev into the same sysroot so the
+  # `-isystem /usr/include` fallback below is not load-bearing.
+  if [ ! -d "${GLIBC231_DEV}/usr/include/linux" ]; then
+    local udeb=${CACHE}/linux-libc-dev_${GLIBC_UAPI_VERSION}_amd64.deb
+    if [ ! -f "$udeb" ]; then
+      note "fetching $(basename "$udeb") (kernel UAPI headers)"
+      curl -fsSL -o "$udeb" "$GLIBC_UAPI_URL" || die "cannot fetch $GLIBC_UAPI_URL"
+    fi
+    local ugot; ugot=$(sha256sum "$udeb" | cut -d' ' -f1)
+    [ "$ugot" = "$GLIBC_UAPI_SHA256" ] || die "linux-libc-dev sha256 mismatch: got $ugot"
+    note "linux-libc-dev sha256 ok (${GLIBC_UAPI_VERSION})"
+    dpkg-deb -x "$udeb" "$GLIBC231_DEV" || die "cannot extract $udeb"
+  fi
+
   if [ -z "${GLIBC231_RT:-}" ]; then
     GLIBC231_RT=${CACHE}/glibc231-rt
   fi
@@ -303,9 +376,19 @@ host_build() {
   # chooses at runtime (tools/mesa/patches/0010), so the software rasteriser
   # stays available as the correctness reference and the CI renderer.
   local drivers="softpipe,virgl"
+  # The host artifacts exist for their *side effects*: generated sources, and
+  # the per-TU flag vector that step 4 replays.  The host libGL itself is never
+  # used, and on macOS it cannot link: Mesa's xlib target references
+  # XcPresentMark, a symbol HobbyOS's patched Xlib adds (the same patch set the
+  # guest's libX11 is built from), which the system libX11 does not have.
+  # dynamic_lookup keeps `ninja all` green without pretending the host dylib
+  # is a usable library.
+  local mac_link=""
+  [ "$(uname -s)" = Darwin ] && mac_link="-Dcpp_link_args=-Wl,-undefined,dynamic_lookup"
   if [ ! -f "${HOSTBUILD}/build.ninja" ]; then
     CC=gcc CXX=g++ meson setup "$HOSTBUILD" "$SRC" \
       -Dgallium-drivers="$drivers" \
+      $mac_link \
       -Dllvm=disabled \
       -Dplatforms=x11 \
       -Dglx=xlib \
@@ -351,8 +434,10 @@ host_build() {
     local objdir="${HOSTBUILD}/${a%.a}.a.p"
     local n b
     n=$(ls "$objdir"/*.o 2>/dev/null | wc -l)
-    b=$(du -cb "$objdir"/*.o 2>/dev/null | tail -1 | cut -f1)
-    note "gallium: $(basename "$a")  $n TUs, $(( ${b:-0} / 1024 )) KiB of objects"
+    # GNU `du -b` does not exist on BSD/macOS (it exits 64 and kills the build
+    # under set -e); the apparent byte count is just the bytes themselves.
+    b=$(cat "$objdir"/*.o 2>/dev/null | wc -c)
+    note "gallium: $(basename "$a")  $((n)) TUs, $(( ${b:-0} / 1024 )) KiB of objects"
   done
 }
 
@@ -406,10 +491,21 @@ PY
   # only - nothing is linked from the host.
   say "   staging X11/GL headers (libx11-dev, build data only)"
   rm -rf "${STAGE}/x11-include"; mkdir -p "${STAGE}/x11-include"
-  for d in /usr/include/X11 /usr/include/GL; do
-    [ -d "$d" ] || die "missing $d (apt install libx11-dev)"
-    cp -a "$d" "${STAGE}/x11-include/"
+  # Header roots: /usr/include on Linux, Homebrew's prefix on macOS (there is no
+  # /usr/include/X11 there).  GL interface headers ship with Mesa itself, so the
+  # tree is the fallback when the host has no libgl1-mesa-dev.
+  local hb_x11="" hb_gl="" hb_d
+  for hb_d in /usr/include/X11 /usr/local/include/X11 "${HOMEBREW_PREFIX:-/opt/homebrew}/include/X11"; do
+    [ -d "$hb_d" ] && { hb_x11="$hb_d"; break; }
   done
+  [ -n "$hb_x11" ] || die "missing X11 headers (apt install libx11-dev / brew install libx11)"
+  for hb_d in /usr/include/GL "${HOMEBREW_PREFIX:-/opt/homebrew}/include/GL" "$SRC/include/GL"; do
+    [ -d "$hb_d" ] && { hb_gl="$hb_d"; break; }
+  done
+  [ -n "$hb_gl" ] || die "missing GL headers (apt install libgl1-mesa-dev)"
+  cp -a "$hb_x11" "${STAGE}/x11-include/"
+  cp -a "$hb_gl" "${STAGE}/x11-include/"
+  note "X11 from $hb_x11, GL from $hb_gl"
   note "staged $(find "${STAGE}/x11-include" -type f | wc -l) headers"
 }
 
@@ -494,8 +590,18 @@ LINK_WHOLE = {"src/gallium/frontends/glx/xlib/libxlib.a",
 
 
 def ninja_inputs(target):
-    out = subprocess.check_output(["ninja", "-C", BUILD, "-t", "query", target],
-                                  text=True)
+    try:
+        out = subprocess.check_output(["ninja", "-C", BUILD, "-t", "query", target],
+                                      text=True, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        # Not every archive exists in every host build: Mesa emits the SSE4.1
+        # variant of libmesa only when the *host* is x86_64, so an arm64 macOS
+        # host has no src/mesa/libmesa_sse41.a to ask about.  The variant is a
+        # runtime-dispatched optimisation of the same code, so dropping it
+        # costs the guest the SSE4.1 fast path and nothing else -- say so
+        # instead of dying on a target that was never built.
+        print(f"      no host target for {target} (host arch variant); skipped")
+        return []
     objs, in_inputs = [], False
     for line in out.splitlines()[1:]:
         s = line.strip()
@@ -575,6 +681,17 @@ def rewrite(args, kind):
                "--target=x86_64-linux-gnu", "-D__linux__=1",
                "-D_FILE_OFFSET_BITS=64", "-mno-red-zone",
                "-fno-stack-protector", "-fno-exceptions", "-fno-rtti",
+               # Mesa's u_endian.h refuses to guess: it wants both macros from
+               # the build system, and falls back to <sys/param.h>/<endian.h>
+               # only where the host has them (its meson does not pass them for
+               # a native build).  Target endianness is a property of the ABI,
+               # not of the build host: x86_64-linux-gnu is little-endian.
+               "-DUTIL_ARCH_LITTLE_ENDIAN=1", "-DUTIL_ARCH_BIG_ENDIAN=0",
+               # glibc's <features.h> hides clock_gettime/PTHREAD_MUTEX_RECURSIVE
+               # behind _GNU_SOURCE when a strict language mode is requested
+               # (mesa is built with -std=c11 / --std=c++23); the Linux compute
+               # farm gets the same visible declarations from its own headers.
+               "-D_GNU_SOURCE=1",
                # Measured: this DSO is dlopen()ed, so its PT_TLS must fit in
                # glibc's 1664-byte static-TLS surplus (a DT_FLAGS STATIC_TLS
                # object that does not fit fails with "cannot allocate memory in
@@ -619,11 +736,19 @@ def main():
     objs = []
     for a in ARCHIVES:
         objs += ninja_inputs(a)
+    table = parse_build_ninja()
     # The shared-library target's own frontend object is named directly on
     # Meson's link line (it defines xlib_create_screen and is in no archive).
-    objs.append("src/gallium/targets/libgl-xlib/libGL.so.1.5.0.p/xlib.c.o")
+    # Its object path carries the library's *file name*, which is platform
+    # dependent -- libGL.so.1.5.0.p/ on ELF hosts, libGL.1.dylib.p/ on macOS --
+    # so find it by the source it compiles rather than by soname.
+    frontend = [o for o, (src, _kind, _args) in table.items()
+                if src.replace("\\", "/").endswith("src/gallium/targets/libgl-xlib/xlib.c")]
+    if not frontend:
+        print("!! no compile command for the libGL frontend (xlib.c)")
+        sys.exit(1)
+    objs += frontend
     objs = sorted(set(objs))
-    table = parse_build_ninja()
 
     missing = [o for o in objs if o not in table]
     if missing:
