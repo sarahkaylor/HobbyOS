@@ -1,0 +1,24 @@
+PROCLOCK-HOLD rows: 112 | LOCKDIAG rows: 45
+imbalanced: 14 | dump_self=1: 14 | dump_self=0: 0
+distinct site3 on imbalanced: Counter({'000000007007BCE7': 14})
+stage counts: Counter({4: 14})
+completed det pairs among imbalanced: 14
+  cpu=0 acq=9157 rel=9156 last=acquire last_ms=30210 site3=0x000000007007BCE7 det_entry=30208 det_exit=30208 det_stage=4 dump_self=1
+  cpu=0 acq=13976 rel=13975 last=acquire last_ms=54264 site3=0x000000007007BCE7 det_entry=54263 det_exit=54263 det_stage=4 dump_self=1
+  cpu=0 acq=15119 rel=15118 last=acquire last_ms=60206 site3=0x000000007007BCE7 det_entry=60204 det_exit=60204 det_stage=4 dump_self=1
+  cpu=5 acq=22285 rel=22284 last=acquire last_ms=87607 site3=0x000000007007BCE7 det_entry=87605 det_exit=87605 det_stage=4 dump_self=1
+  cpu=0 acq=21102 rel=21101 last=acquire last_ms=90240 site3=0x000000007007BCE7 det_entry=90237 det_exit=90237 det_stage=4 dump_self=1
+  cpu=0 acq=27066 rel=27065 last=acquire last_ms=120245 site3=0x000000007007BCE7 det_entry=120242 det_exit=120242 det_stage=4 dump_self=1
+  cpu=3 acq=34591 rel=34590 last=acquire last_ms=121009 site3=0x000000007007BCE7 det_entry=121007 det_exit=121007 det_stage=4 dump_self=1
+  cpu=1 acq=44219 rel=44218 last=acquire last_ms=150246 site3=0x000000007007BCE7 det_entry=150243 det_exit=150243 det_stage=4 dump_self=1
+  cpu=5 acq=42335 rel=42334 last=acquire last_ms=154362 site3=0x000000007007BCE7 det_entry=154360 det_exit=154360 det_stage=4 dump_self=1
+  cpu=3 acq=52322 rel=52321 last=acquire last_ms=180258 site3=0x000000007007BCE7 det_entry=180256 det_exit=180256 det_stage=4 dump_self=1
+  cpu=0 acq=40540 rel=40539 last=acquire last_ms=187714 site3=0x000000007007BCE7 det_entry=187712 det_exit=187712 det_stage=4 dump_self=1
+  cpu=0 acq=45003 rel=45002 last=acquire last_ms=210264 site3=0x000000007007BCE7 det_entry=210262 det_exit=210262 det_stage=4 dump_self=1
+  cpu=5 acq=62370 rel=62369 last=acquire last_ms=221066 site3=0x000000007007BCE7 det_entry=221064 det_exit=221064 det_stage=4 dump_self=1
+  cpu=0 acq=50977 rel=50976 last=acquire last_ms=240273 site3=0x000000007007BCE7 det_entry=240270 det_exit=240270 det_stage=4 dump_self=1
+
+LOCKDIAG real-owner candidates (dump_self=0, owner_cpu>=0):
+  count: 0
+
+owner_in_user counts over all LOCKDIAG rows: Counter({0: 45})
