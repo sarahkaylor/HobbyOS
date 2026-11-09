@@ -36,6 +36,10 @@ void proclock_det_note(int op, int stage) {
   (void)op;
   (void)stage;
 }
+/* GB-241: the dump_self tag is x64-only state (plh[]); ARM records nothing. */
+void proclock_dump_note(int on) {
+  (void)on;
+}
 
 /**
  * Initializes a spinlock structure to the unlocked state.
