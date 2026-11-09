@@ -5271,6 +5271,37 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       /* w5 (ii): a user-mode exception (BRK/#UD/#GP/...) kills with a
          signal status, never a stale-x0 exit code (rc=0 false pass). */
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
+    } else if ((tf->cs & 3) == 3) {
+      /* GB-101 (classifier clause): a user-mode frame whose CPU has no
+         current process is still a user-mode fault.  GB-147 measured one:
+         #PF with cs=0x1B and pid=-1 reached the kernel-mode fatal record.
+         The user branch above is keyed on `cur`, so with no process it fell
+         through to "Exception in Kernel Mode" and the kernel halted under a
+         label that was not the fault's mode.  Name the mode and the frame;
+         there is no process to signal and no stack to resume, so stop this
+         CPU as before, but never claim kernel mode for a user-CS frame. */
+      extern void panic_puts(const char *s);
+      extern void panic_print_hex(uint64_t v);
+      extern void print_int_raw(int val);
+      extern int panic_claim(void);
+      extern void panic_leave(void);
+      extern void cpu_halt_record(uint32_t cpu);
+      if (panic_claim()) {
+        panic_puts("[USERFAULT] user-mode exception with no current process: vector=");
+        print_int_raw((int)tf->vector);
+        panic_puts(" rip=");
+        panic_print_hex((uint64_t)tf->elr);
+        panic_puts(" cs=");
+        panic_print_hex(tf->cs);
+        panic_puts(" err=");
+        panic_print_hex((uint64_t)tf->error_code);
+        panic_puts(" rsp=");
+        panic_print_hex((uint64_t)tf->lr);
+        panic_puts("\n");
+        panic_leave();
+      }
+      cpu_halt_record(get_cpuid());
+      while (1);
     } else {
       /* Kernel-mode fault.  ALL of this dump goes to COM1 via the
          lock-free raw sink (NOT the 0xE9 debugcon, which QEMU usually
