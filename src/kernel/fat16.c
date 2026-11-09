@@ -2368,10 +2368,22 @@ static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
   int read_bytes = 0;
 
   while (size > 0) {
-    uint16_t c = get_cluster_for_offset(f->fat16.entry.start_cluster, f->fat16.cursor);
+    /* read_fat() does DEVICE I/O on a cache miss (two verified raw reads), so
+     * the chain walk must never run under fat_lock.  An irqsave spinlock put to
+     * sleep is never released, and every other reader then spins behind it with
+     * interrupts off.  Measured on x64: [LOCKFOREVER] on fat_lock whose holder's
+     * held-lock stack had exactly ONE entry (fat_lock itself) and whose
+     * heartbeat was 1.8 s stale -- that CPU was asleep in virtio_blk_read_raw,
+     * not running, which is why owner_pid read as -1 and no [STALLBREAK] could
+     * fire.  Snapshot the cursor across the window so this iteration walks a
+     * consistent position. */
+    uint32_t walk_cursor = f->fat16.cursor;
+    spinlock_release_irqrestore(&fat_lock, flags);
+    uint16_t c = get_cluster_for_offset(f->fat16.entry.start_cluster, walk_cursor);
+    flags = spinlock_acquire_irqsave(&fat_lock);
     if (c == 0 || c >= 0xFFF8) break;
 
-    uint32_t offset_in_cluster = f->fat16.cursor % cluster_size;
+    uint32_t offset_in_cluster = walk_cursor % cluster_size;
     uint32_t offset_in_sector = offset_in_cluster % SECTOR_SIZE;
     uint32_t max_sectors = (uint32_t)size / SECTOR_SIZE;
 
