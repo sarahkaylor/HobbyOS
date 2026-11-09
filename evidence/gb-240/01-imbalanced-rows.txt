@@ -1,0 +1,20 @@
+parsed 87 PROCLOCK-HOLD rows
+imbalanced (acq != rel): 11
+cpu=4 acq=1539 rel=1538 last=acquire last_ms=30645 site3=0x000000007007BCDD det_entry=27323 det_exit=27323 det_stage=4 pair=COMPLETED
+cpu=5 acq=1647 rel=1646 last=acquire last_ms=91251 site3=0x000000007007BCDD det_entry=5170 det_exit=5170 det_stage=4 pair=COMPLETED
+cpu=5 acq=2003 rel=2002 last=acquire last_ms=98470 site3=0x000000007007BCDD det_entry=5170 det_exit=5170 det_stage=4 pair=COMPLETED
+cpu=7 acq=5170 rel=5169 last=acquire last_ms=125155 site3=0x000000007007BCDD det_entry=31137 det_exit=31137 det_stage=4 pair=COMPLETED
+cpu=4 acq=3705 rel=3704 last=acquire last_ms=155166 site3=0x000000007007BCDD det_entry=155151 det_exit=155151 det_stage=4 pair=COMPLETED
+cpu=1 acq=7894 rel=7893 last=acquire last_ms=186079 site3=0x000000007007BCDD det_entry=186075 det_exit=186075 det_stage=4 pair=COMPLETED
+cpu=4 acq=9449 rel=9448 last=acquire last_ms=217003 site3=0x000000007007BCDD det_entry=216991 det_exit=216991 det_stage=4 pair=COMPLETED
+cpu=7 acq=23068 rel=23067 last=acquire last_ms=247973 site3=0x000000007007BCDD det_entry=247971 det_exit=247971 det_stage=4 pair=COMPLETED
+cpu=7 acq=29089 rel=29088 last=acquire last_ms=280265 site3=0x000000007007BCDD det_entry=280257 det_exit=280257 det_stage=4 pair=COMPLETED
+cpu=7 acq=37504 rel=37503 last=acquire last_ms=310947 site3=0x000000007007BCDD det_entry=310945 det_exit=310945 det_stage=4 pair=COMPLETED
+cpu=4 acq=22525 rel=22524 last=acquire last_ms=348442 site3=0x000000007007BCDD det_entry=338465 det_exit=338465 det_stage=4 pair=COMPLETED
+
+distinct site3 on imbalanced rows:
+Counter({'000000007007BCDD': 11})
+
+stage counts on imbalanced rows: Counter({4: 11})
+rows with det_entry>0 and det_exit==0: 0
+rows with det_entry==0: 0

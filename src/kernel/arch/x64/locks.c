@@ -74,6 +74,26 @@ int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out) {
   *out = plh[cpu];
   return 1;
 }
+
+/* GB-240: bracket the idle-stuck detector's proc_lock section (process.c:4782).
+   Entry resets the exit stamp so a row can never pair a new entry with an old
+   exit; the exit stamp is written after the release returns.  Observation
+   only -- no scheduling decision reads these. */
+void proclock_det_note(int op, int stage) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  if (op == 1) {
+    plh[c].det_entry_ms = timer_get_ms();
+    plh[c].det_exit_ms = 0;
+    plh[c].det_stage = stage;
+  } else if (op == 2) {
+    plh[c].det_stage = stage;
+  } else if (op == 3) {
+    plh[c].det_exit_ms = timer_get_ms();
+    plh[c].det_stage = stage;
+  }
+}
 /* GB-060: a CPU that has taken a fatal fault and stopped.  Declared here (not in
    a header) to keep the mechanism reviewable in the two files that implement it:
    process.c records it at the halt, and this file reads it to decide whether a

@@ -4780,6 +4780,12 @@ void start_scheduler(void) {
     int acted = 0;   /* w5 (v): this pass RECLAIMED or DISPOSED a slot */
     if (sched_idle_rounds >= 500) {
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
+      /* GB-240: bracket this detector's proc_lock section.  The imbalanced
+         [PROCLOCK-HOLD] row attributed here (owner_site3 0x7007BC9D) is this
+         acquire; entry_ms is written after the acquire returns, so a row with
+         det_exit=0 names a section that never released.  Stage 1 = the slot
+         scan below. */
+      proclock_det_note(1, 1);
       int dispose_slot = 0;
       int lw_candidate = 0; /* stale-claim slot this pass (0 = none) */
       for (int k = 1; k < MAX_PROCESSES; k++) {
@@ -4901,6 +4907,7 @@ void start_scheduler(void) {
                   set_current_process_pid(c, -1);
               }
               dispose_slot = k;
+              proclock_det_note(2, 2); /* GB-240: dispose selected */
               break;
             }
             lw_disp_arm_slot[cpu] = k;
@@ -5011,7 +5018,11 @@ void start_scheduler(void) {
         }
       }
 
+      proclock_det_note(2, 4); /* GB-240: at the release */
       spinlock_release_irqrestore(&proc_lock, wflags);
+      /* GB-240: exit stamp AFTER the release returns; a row with det_exit=0
+         and det_stage=4 means the release itself did not return. */
+      proclock_det_note(3, 4);
 
       /* Dispose a lost-owner slot OUTSIDE proc_lock (group_teardown takes
          it again for the teardown + reap).  group_teardown's phys_block/as
@@ -5021,8 +5032,10 @@ void start_scheduler(void) {
          exec (tolerated, exec_rejected) and reforks a fresh child, so the
          soak continues with zero violations; the parent's waitpid
          completion then reaps the EXITED slot. */
-      if (dispose_slot > 0)
+      if (dispose_slot > 0) {
+        proclock_det_note(2, 3); /* GB-240: in group_teardown (lock released) */
         group_teardown(process_group(&proc_table[dispose_slot]), 97);
+      }
     }
 
     /* Diagnostic dump: name the stuck set ONLY when this pass actually
@@ -5524,6 +5537,13 @@ void start_scheduler(void) {
           print_int((int)ph.iretq_ms);
           uart_puts(" locked_at_iretq=");
           print_int(ph.locked_at_iretq);
+          /* GB-240: the detector section's entry/exit/stage for this CPU. */
+          uart_puts(" det_entry=");
+          print_int((int)ph.det_entry_ms);
+          uart_puts(" det_exit=");
+          print_int((int)ph.det_exit_ms);
+          uart_puts(" det_stage=");
+          print_int(ph.det_stage);
           uart_puts("\n");
         }
       }
@@ -5567,6 +5587,19 @@ void start_scheduler(void) {
           print_int(ld.owner_cpu >= 0
                         ? watchdog_cpu_pid((uint32_t)ld.owner_cpu)
                         : -1);
+          /* GB-240: the OWNER CPU's detector stamp on the LOCKDIAG row. */
+          {
+            proclock_hold_t oph;
+            if (ld.owner_cpu >= 0 && ld.owner_cpu < MAX_CPUS &&
+                proclock_hold_snapshot((uint32_t)ld.owner_cpu, &oph)) {
+              uart_puts(" det_entry=");
+              print_int((int)oph.det_entry_ms);
+              uart_puts(" det_exit=");
+              print_int((int)oph.det_exit_ms);
+              uart_puts(" det_stage=");
+              print_int(oph.det_stage);
+            }
+          }
           uart_puts("\n");
         }
         if (lockdiag_last_stallbreak(&ld)) {
