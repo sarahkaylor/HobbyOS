@@ -197,3 +197,6 @@ third_party/llvm-21.1.8/dist-staging/
 # (hundreds of MB) and screenshots here; the committed artifact is
 # docs/rimworld-evidence.md plus tools/rw/x11-symbols.txt.
 tools/rw/out/
+
+# macOS debug bundles from the host tests (*_host binaries)
+*.dSYM/
