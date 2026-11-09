@@ -5514,6 +5514,10 @@ void start_scheduler(void) {
           print_int((int)ph.last_ms);
           uart_puts(" site=");
           uart_print_hex(ph.site);
+          /* GB-235: the acquire's caller-caller — the line that called the
+             acquire wrapper.  `site` names the wrapper itself. */
+          uart_puts(" owner_site3=");
+          uart_print_hex(ph.site3);
           uart_puts(" rel_site=");
           uart_print_hex(ph.rel_site);
           uart_puts(" iretq_ms=");
