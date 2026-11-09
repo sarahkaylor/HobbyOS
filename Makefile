@@ -4572,6 +4572,10 @@ HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) 
                        $(UNAME_PARITY) $(LOCKSTEAL_TEST) $(REGEX_TEST) \
                        $(LANGINFO_TEST) x11_libc_test_run xcompat_test_run \
                        t4_compat_selftest w4_doom_test \
+                       $(EDITOR_HOST) $(RESOLV_TEST) $(TIME_MATH_TEST) \
+                       $(LINUX_ABI_TEST) $(IPC_PROTO_TEST) $(TORTURE_TEST_HOST) \
+                       $(CTYPE_TEST) $(STDLIB_TEST) $(PRINTF_TEST) \
+                       $(CLOCKABI_TEST) $(MEMFD_TEST) \
                        $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) \
                        $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) \
                        $(SDL_TEST_APP_HOST)
