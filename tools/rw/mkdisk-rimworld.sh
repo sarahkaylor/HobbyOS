@@ -39,6 +39,7 @@ DEST=${RW_DEST:-::/GAMES/RIMWORLD}
 # clusters, i.e. <= ~1.5 GiB.
 DISK_MB=${DISK_MB:-1536}
 BUILD=1
+RUN_QEMU=0
 PAYLOAD=${RW_SRC:-}
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/hobbyos-rimworld
 
@@ -51,10 +52,28 @@ while [ $# -gt 0 ]; do
     --payload) PAYLOAD=${2:?--payload needs a path}; shift 2 ;;
     --dest)    DEST=${2:?--dest needs a path}; shift 2 ;;
     --no-build) BUILD=0; shift ;;
+    --run) RUN_QEMU=1; shift ;;
     -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (try --help)" ;;
   esac
 done
+
+
+# The exact x86_64 commandline the Makefile's QEMU_CMD builds (minus the
+# make-time plumbing), so the image can be booted WITHOUT re-running the recipe
+# that would recreate it.
+qemu_cmd() {
+  local edk2
+  edk2=$(ls "${HOMEBREW_PREFIX:-/opt/homebrew}"/share/qemu/edk2-x86_64-code.fd 2>/dev/null | head -1)
+  edk2=${edk2:-/opt/homebrew/share/qemu/edk2-x86_64-code.fd}
+  printf '%s\n' "qemu-system-x86_64 -M q35,vmport=on -smp ${QEMU_SMP:-8} -m 12288M \
+    -pflash $edk2 -display none -serial stdio \
+    -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 \
+    -drive file=disk.img,format=raw,id=disk0,if=none \
+    -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu \
+    -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
+    -action shutdown=poweroff -qmp unix:/tmp/hb-qmp.sock,server,nowait"
+}
 
 MTOOLS_PREFIX=""
 for t in mcopy mmd mdir mkfs.fat; do
@@ -303,7 +322,21 @@ cat <<EOF
    payload: $DEST (from $SRC, staged via $STAGE)
    never committed: the game lives only in disk.img and $CACHE
 
-   Play it on this host:
-     TOOLS_SKIP=1 make run ARCH=$ARCH MODE=desktop DESKTOP=$DESKTOP \\
-       QEMU_DISPLAY=none QEMU_ARGS="-qmp unix:/tmp/hb-qmp.sock,server,nowait"
+   BOOT IT WITH QEMU DIRECTLY -- not with 'make run'.
+   'make run' depends on disk.img, and disk.img depends on the PHONY target
+   x11-staged, so every 'make run' re-runs the disk recipe: it recreates a
+   ${DISK_MB} MB image from dd and mcopies the base files over it, silently
+   throwing the staged game away (measured: a 1.5 GiB image with the payload came
+   back as 1 GiB and empty after one 'make run').
+
+     bash $0 --run
+
+   which is:
+     $(qemu_cmd | sed 's/^/     /')
 EOF
+
+if [ "$RUN_QEMU" = 1 ]; then
+  say "booting (direct qemu -- the image is NOT rebuilt)"
+  rm -f /tmp/hb-qmp.sock
+  exec bash -c "$(qemu_cmd)"
+fi
