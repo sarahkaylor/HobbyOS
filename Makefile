@@ -3086,7 +3086,7 @@ apps_test:
 	python3 ./run_apps_test.py
 
 # --- Host Compatibility Build Targets ---
-HOST_CC = clang
+HOST_CC = tools/host/host-cc.sh
 HOST_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST
 
 include src/user/xcompat/Makefile.inc
@@ -3634,6 +3634,14 @@ $(GETOPT_TEST): obj/host_libc_getopt_test.o obj/host_hb_getopt.o
 # (see src/host/libc_regex_test.c).  Needs -Isrc/libc/include so the
 # sysroot's regex.h/intprops.h/verify.h win over system copies.
 REGEX_TEST = libc_regex_test_host
+# glibc-ABI-only: the test links src/host/glibc_regex_layout.c, which asserts the
+# layout of glibc's `struct re_registers`.  macOS has no glibc and no such
+# struct, so the object does not compile there at all — empty the variable on
+# Darwin so the (huge) suite list drops it and the run line skips instead of
+# invoking "./".
+ifeq ($(shell uname -s),Darwin)
+REGEX_TEST :=
+endif
 obj/host_hb_regex.o: src/libc/src/regex.c src/libc/include/*.h src/libc/src/*.h
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
 obj/host_libc_regex_test.o: src/host/libc_regex_test.c src/user/regex_test_cases.h src/libc/include/*.h
@@ -3901,7 +3909,12 @@ $(HEADERS_TEST): obj/host_libc_headers_test.o
 # link — cxxrt's delete now calls free(ptr) with the RAW pointer, a contract
 # defined over the HobbyOS allocator's BLOCK_MAGIC check, not glibc's free.
 # (See the test TU's header note; the hb_* wrappers shadow libc's malloc.)
-CXX_TEST_FLAGS = -std=c++17 -fno-exceptions -fno-rtti
+# -fsized-deallocation: the test exercises the sized operator delete[]/delete
+# overloads that this libc's cxxrt provides.  GCC enables sized deallocation at
+# -std=c++14 and later by itself; clang does NOT for Darwin targets (it keeps
+# them off for libc++ ABI reasons), so the same source that compiles on the Linux
+# farm fails here with "no matching function for call to 'operator delete[]'".
+CXX_TEST_FLAGS = -std=c++17 -fno-exceptions -fno-rtti -fsized-deallocation
 CXXRT_TEST = cxxrt_test_host
 obj/host_cxxrt_test.o: src/host/cxxrt_test.cpp src/libc/include/cxxrt.h
 	@mkdir -p obj
@@ -4323,7 +4336,11 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAM
 	$(HOST_RUN) ./$(CXX_HEADERS_TEST)
 	$(HOST_RUN) ./$(RTTI_TEST)
 	$(HOST_RUN) ./$(GETOPT_TEST)
+ifneq ($(REGEX_TEST),)
 	$(HOST_RUN) ./$(REGEX_TEST)
+else
+	@echo "  SKIP: regex layout (glibc-ABI only; this host has no struct re_registers)"
+endif
 	$(HOST_RUN) ./$(LANGINFO_TEST)
 	$(HOST_RUN) ./$(SCANFW_PARITY)
 	$(HOST_RUN) ./$(NUM_PARITY)

@@ -27,13 +27,15 @@ extern "C" {
   /* xlocale/P3.2 variants (C locale: the locale argument is ignored). */
   int strcoll_l(const char *s1, const char *s2, locale_t loc);
   size_t strxfrm_l(char *dst, const char *src, size_t n, locale_t loc);
-  /* Also declared by glibc's <strings.h>, which the HOST_TEST build pulls
-   * in via include_next.  glibc marks these __THROW (= noexcept(true) in
-   * C++), so the C++ declarations here must carry the same exception
+  /* Also declared by the host's <strings.h>, which the HOST_TEST build pulls
+   * in via include_next.  glibc marks these __THROW (= noexcept(true) in C++),
+   * so on Linux the C++ declarations here must carry the same exception
    * specification or a host C++ TU sees "exception specification in
-   * declaration does not match previous declaration".  On the device the
-   * spec is equally true: the C++ runtime is built with -fno-exceptions. */
-#ifdef __cplusplus
+   * declaration does not match previous declaration".  macOS's <_strings.h>
+   * does NOT mark them, so the opposite is required there -- the host SDK owns
+   * the spec for a host TU.  On the device the spec is equally true: the C++
+   * runtime is built with -fno-exceptions. */
+#if defined(__cplusplus) && !(defined(HOST_TEST) && defined(__APPLE__))
   int strcasecmp(const char *s1, const char *s2) noexcept;
   int strncasecmp(const char *s1, const char *s2, size_t n) noexcept;
 #else
