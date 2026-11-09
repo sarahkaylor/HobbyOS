@@ -353,21 +353,57 @@ static void write_fat(uint16_t cluster, uint16_t val) {
  * scan wraps — valid FAT behavior, standard in production FAT drivers. */
 static uint16_t alloc_hint = 2;
 
+/* Pending reservations.  alloc_cluster() is NOT called with fat_lock held any
+ * more (it cannot be: read_fat/write_fat do device I/O, and a thread that sleeps
+ * holding an irqsave spinlock never releases it -- measured as [LOCKFOREVER] on
+ * fat_lock with the holder's heartbeat 1.8 s stale).  Dropping the lock leaves
+ * two allocators free to pick the same free cluster, so the decision is made
+ * atomically here instead: a bit is claimed with a compare-exchange before the
+ * on-disk FAT is consulted, and released if the cluster turns out to be taken.
+ * 8 KiB covers FAT16's full 65536-cluster space. */
+#define ALLOC_MAP_WORDS 1024u
+static volatile uint64_t alloc_pending[ALLOC_MAP_WORDS];
+
+static int alloc_try_reserve(uint16_t c) {
+  if (c >= 0xFFF0) return 0;
+  uint64_t bit = 1ull << (c & 63);
+  uint64_t *w = (uint64_t *)&alloc_pending[c >> 6];
+  uint64_t cur = __atomic_load_n(w, __ATOMIC_RELAXED);
+  while (!(cur & bit)) {
+    if (__atomic_compare_exchange_n(w, &cur, cur | bit, 0,
+                                    __ATOMIC_ACQ_REL, __ATOMIC_RELAXED))
+      return 1;
+  }
+  return 0;
+}
+
+static void alloc_unreserve(uint16_t c) {
+  if (c >= 0xFFF0) return;
+  __atomic_fetch_and((uint64_t *)&alloc_pending[c >> 6], ~(1ull << (c & 63)),
+                     __ATOMIC_RELEASE);
+}
+
+/* MUST be called with fat_lock RELEASED (see the note above).  It performs
+ * device I/O on the FAT and on the zeroed cluster. */
 static uint16_t alloc_cluster(void) {
   uint16_t start = alloc_hint;
   uint16_t c = start;
   for (;;) {
-    if (read_fat(c) == 0x0000) {
-      write_fat(c, 0xFFFF);
-      uint8_t zero[SECTOR_SIZE];
-      for (int i = 0; i < SECTOR_SIZE; i++) zero[i] = 0;
-      uint32_t s = data_sector + (c - 2) * bpb_sectors_per_cluster;
-      for (uint32_t i = 0; i < bpb_sectors_per_cluster; i++) {
-        virtio_blk_write_sector(s + i, zero, 1);
+    if (alloc_try_reserve(c)) {
+      if (read_fat(c) == 0x0000) {
+        write_fat(c, 0xFFFF);
+        uint8_t zero[SECTOR_SIZE];
+        for (int i = 0; i < SECTOR_SIZE; i++) zero[i] = 0;
+        uint32_t s = data_sector + (c - 2) * bpb_sectors_per_cluster;
+        for (uint32_t i = 0; i < bpb_sectors_per_cluster; i++) {
+          virtio_blk_write_sector(s + i, zero, 1);
+        }
+        /* Advance the hint past the cluster we just took (wrap to 2). */
+        alloc_hint = (c + 1 >= 0xFFF0) ? 2 : (uint16_t)(c + 1);
+        alloc_unreserve(c);   /* committed: the on-disk FAT now owns it */
+        return c;
       }
-      /* Advance the hint past the cluster we just took (wrap to 2). */
-      alloc_hint = (c + 1 >= 0xFFF0) ? 2 : (uint16_t)(c + 1);
-      return c;
+      alloc_unreserve(c);
     }
     c++;
     if (c >= 0xFFF0) c = 2;      /* wrap to the bottom of the FAT */
@@ -1024,6 +1060,11 @@ static int alloc_lfn_run_locked(uint16_t dir_cluster, const char *longname,
   /* No run of free slots: extend the directory with a fresh cluster and
      place the run at its start, mirroring alloc_entry_in_dir(). */
   if (prev_cluster != 0) {
+    /* NOTE: the caller holds fat_lock and this frame has no flags of its own,
+       so alloc_cluster's device I/O still runs under the lock on the
+       directory-EXTEND path (only when a directory needs a new cluster,
+       i.e. at file creation).  Every other allocation site drops the lock
+       first; this one stays a known defect rather than a half-fix. */
     uint16_t new_c = alloc_cluster();
     if (new_c == 0) return -1;
     write_fat(prev_cluster, new_c);
@@ -1967,9 +2008,12 @@ int fat16_mkdir(const char *path) {
     return -1;
   }
 
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    /* alloc_cluster() does device I/O (FAT write + cluster zeroing); it must run
+       with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
+       never lets go.  It reserves the cluster atomically in RAM, so the choice
+       is still exclusive. */
   uint16_t new_cluster = alloc_cluster();
-  spinlock_release_irqrestore(&fat_lock, flags);
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
   if (new_cluster == 0) {
     return -1;
   }
@@ -2187,7 +2231,9 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
        all zeros (POSIX ftruncate extension semantics). */
     uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     if (f->fat16.entry.start_cluster == 0) {
+      spinlock_release_irqrestore(&fat_lock, flags);
       uint16_t first = alloc_cluster();
+      flags = spinlock_acquire_irqsave(&fat_lock);
       if (first == 0) {
         spinlock_release_irqrestore(&fat_lock, flags);
         return -1;
@@ -2203,7 +2249,13 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
         return -1;
       }
       if (nxt >= 0xFFF8) {
+    /* alloc_cluster() does device I/O (FAT write + cluster zeroing); it must run
+       with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
+       never lets go.  It reserves the cluster atomically in RAM, so the choice
+       is still exclusive. */
+        spinlock_release_irqrestore(&fat_lock, flags);
         nxt = alloc_cluster();
+        flags = spinlock_acquire_irqsave(&fat_lock);
         if (nxt == 0) {
           spinlock_release_irqrestore(&fat_lock, flags);
           return -1; /* disk full */
@@ -2930,7 +2982,14 @@ int fat16_write(struct file* f, const void* buf, int size) {
   int written_bytes = 0;
 
   if (f->fat16.entry.start_cluster == 0) {
-    f->fat16.entry.start_cluster = alloc_cluster();
+    /* alloc_cluster() does device I/O (FAT write + cluster zeroing); it must run
+       with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
+       never lets go.  It reserves the cluster atomically in RAM, so the choice
+       is still exclusive. */
+    spinlock_release_irqrestore(&fat_lock, flags);
+    uint16_t first_c = alloc_cluster();
+    flags = spinlock_acquire_irqsave(&fat_lock);
+    f->fat16.entry.start_cluster = first_c;
     if (f->fat16.entry.start_cluster == 0) {
       /* Every exit must drop BOTH locks: wr_locks[wslot] is held for the
        * whole call, and leaking it wedges every later write to this slot. */
@@ -2952,7 +3011,13 @@ int fat16_write(struct file* f, const void* buf, int size) {
   for (uint32_t i = 0; i < target_cluster_idx; i++) {
     uint16_t nxt = read_fat(c);
     if (nxt >= 0xFFF8) {
+    /* alloc_cluster() does device I/O (FAT write + cluster zeroing); it must run
+       with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
+       never lets go.  It reserves the cluster atomically in RAM, so the choice
+       is still exclusive. */
+      spinlock_release_irqrestore(&fat_lock, flags);
       nxt = alloc_cluster();
+      flags = spinlock_acquire_irqsave(&fat_lock);
       if (nxt == 0) break;
       write_fat(c, nxt);
     }
@@ -3056,7 +3121,13 @@ int fat16_write(struct file* f, const void* buf, int size) {
     if (size > 0 && (f->fat16.cursor % cluster_size) == 0) {
       uint16_t nxt = read_fat(c);
       if (nxt >= 0xFFF8) {
+    /* alloc_cluster() does device I/O (FAT write + cluster zeroing); it must run
+       with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
+       never lets go.  It reserves the cluster atomically in RAM, so the choice
+       is still exclusive. */
+        spinlock_release_irqrestore(&fat_lock, flags);
         nxt = alloc_cluster();
+        flags = spinlock_acquire_irqsave(&fat_lock);
         if (nxt == 0) break;
         write_fat(c, nxt);
       }
