@@ -100,7 +100,7 @@ GLIBC_UAPI_SHA256=0aa210458df2ab7bc4536e8edf0f9423a7018e74e2eac0b5777fd2a36f170c
 
 # Bumped whenever the flag vector changes in a way the object cache cannot
 # see (it keys on mtimes): r2 = -ftls-model=global-dynamic + the 2.31 header pin.
-CROSS_FLAGS_REV=4
+CROSS_FLAGS_REV=6
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -117,12 +117,32 @@ OBJ=${WORK}/obj
 LIBDIR=${WORK}/lib
 LIBCXX_SRC=${LIBCXX_SRC:-${TREE}/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src}
 
+# Host LLVM tools: on Linux they are in /usr/lib/llvm-21/bin (or on PATH); on
+# macOS Homebrew's llvm is keg-only, so llvm-ar/llvm-nm/llvm-strip are NOT on
+# PATH and the `command -v llvm-ar || command -v ar` fallback below silently
+# picks Apple's ar -- which drops every non-Mach-O member instead of failing,
+# producing 96-byte "empty" archives that only show up as version-script
+# failures at link time.  Prepend the keg, mirroring third_party/x11/cross/env.sh.
+for _hb_llvm in /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin; do
+  [ -d "$_hb_llvm" ] || continue
+  case ":$PATH:" in *":$_hb_llvm:"*) ;; *) PATH="$_hb_llvm:$PATH";; esac
+done
+unset _hb_llvm
+export PATH
+
 CC=${CC:-clang}
 CXX_DRIVER=${CXX_DRIVER:-clang}
 LD=${LD:-ld.lld}
-AR=${AR:-$(command -v llvm-ar || command -v ar)}
-STRIP=${STRIP:-$(command -v llvm-strip || command -v strip)}
+AR=${AR:-$(command -v llvm-ar)}
+STRIP=${STRIP:-$(command -v llvm-strip)}
+# No silent fallback: Apple's ar on PATH is a trap for an ELF link.
+[ -n "$AR" ] || { echo "build-hobbyos: llvm-ar not found (brew install llvm)" >&2; exit 2; }
 CLANG_RES=$(${CC} -print-resource-dir)/include
+# ELF inspection and file size: GNU spellings (readelf, stat -c%s) do not exist
+# on macOS.  llvm-readelf reads ELF on every host; Homebrew's keg is on PATH now.
+READELF=${READELF:-$(command -v llvm-readelf || command -v readelf)}
+[ -n "$READELF" ] || { echo "build-hobbyos: no readelf/llvm-readelf (brew install llvm)" >&2; exit 2; }
+size_of() { if [ "$(uname -s)" = Darwin ]; then stat -f%z "$1"; else stat -c%s "$1"; fi; }
 
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
 SELF_CONTAINED=0
@@ -659,6 +679,28 @@ DROP_EXACT = {
     "-DHAVE_ZLIB", "-DHAVE_COMPRESSION", "-DHAVE_ZSTD",
 }
 
+# Host *capability* macros that must not be inherited by the target: Meson
+# probes the machine it runs on, so an Apple host stamps BSD/macOS answers onto
+# a glibc target.  The glibc flavour below sets the GNU answer explicitly.
+# Present-or-absent matters (#ifdef), so these are dropped, not set to 0.
+HOST_CAP_DEFINES = {
+    "-DHAVE_BSD_QSORT_R", "-DHAVE_GNU_QSORT_R", "-DHAVE_QSORT_S",
+    "-DHAVE_LIBUNWIND",
+    # macOS has <xlocale.h>; glibc dropped it in 2.26, so the 2.31 pin does not
+    # (measured: strtod.c is the one TU that includes it, and it is the last
+    # failure standing between this host and a linked libGL).
+    "-DHAVE_XLOCALE_H",
+}
+
+# Architecture-specific TUs the *host* build emits for its own architecture.
+# Replaying them at another target is nonsense (measured: an arm64 host emits
+# blake3_neon.c and cache_ops_aarch64.c, and clang rejects them at x86_64 with
+# "<arm_neon.h> is intended only for ARM" / "invalid operand in inline asm").
+ARCH_TU_MARKERS = {
+    "x86_64": ("_neon.", "_aarch64.", "_arm.", "_sve."),
+    "aarch64": ("_avx", "_sse", "_clflush"),
+}
+
 
 def rewrite(args, kind):
     out, skip = [], False
@@ -676,6 +718,11 @@ def rewrite(args, kind):
         out.append(a)
 
     if ABI == "glibc":
+        # Host capability macros the Apple host answered for itself; the target
+        # is glibc/x86_64, so state the GNU answers instead of inheriting BSD's.
+        # (Mesa keys on #ifdef, hence drop-then-add.)
+        out = [a for a in out if a not in HOST_CAP_DEFINES]
+        HW_CAPS = ["-DHAVE_GNU_QSORT_R"]
         # The compat class is a glibc process: compile against *the pinned
         # glibc 2.31's* headers so every by-value libc type (pthread_mutex_t,
         # struct stat, FILE, ...) has the layout the runtime will use AND
@@ -685,6 +732,11 @@ def rewrite(args, kind):
         pre = shlex.split(E["GLIBC_INC"]) + [
                "--target=x86_64-linux-gnu", "-D__linux__=1",
                "-D_FILE_OFFSET_BITS=64", "-mno-red-zone",
+               # -fPIC is not optional here: the object goes into a shared DSO,
+               # and without it clang's default TLS model for a plain `__thread`
+               # becomes local-exec, whose R_X86_64_TPOFF32 relocation ld.lld
+               # rejects in `-shared` output ("cannot be used with -shared").
+               "-fPIC",
                "-fno-stack-protector", "-fno-exceptions", "-fno-rtti",
                # Mesa's u_endian.h refuses to guess: it wants both macros from
                # the build system, and falls back to <sys/param.h>/<endian.h>
@@ -697,6 +749,15 @@ def rewrite(args, kind):
                # (mesa is built with -std=c11 / --std=c++23); the Linux compute
                # farm gets the same visible declarations from its own headers.
                "-D_GNU_SOURCE=1",
+               # blake3's dispatch table references one implementation per
+               # instruction set that Mesa's *meson* selected -- and that
+               # selection follows the build host.  An arm64 host never compiles
+               # blake3_{avx2,avx512,sse2,sse41}.c, so an x86_64 target that
+               # still lists them ends up with 11 undefined symbols the guest
+               # cannot resolve (the script's own audit catches it).  Keep the
+               # portable path: same output, ~1 hash function slower.
+               "-DBLAKE3_NO_AVX512", "-DBLAKE3_NO_AVX2",
+               "-DBLAKE3_NO_SSE2", "-DBLAKE3_NO_SSE41",
                # Measured: this DSO is dlopen()ed, so its PT_TLS must fit in
                # glibc's 1664-byte static-TLS surplus (a DT_FLAGS STATIC_TLS
                # object that does not fit fails with "cannot allocate memory in
@@ -710,8 +771,11 @@ def rewrite(args, kind):
                "-Wno-error", "-g0"]
         if kind == "cpp_COMPILER":
             pre += ["-I", E["LIBCXX_INC"], "-nostdinc++", "--std=c++23"]
-        return pre + out
+        return pre + out + HW_CAPS
 
+    # Freestanding flavour: no libunwind, no libc qsort_r at all, so the host's
+    # capability answers are dropped here too (Mesa falls back to its own).
+    out = [a for a in out if a not in HOST_CAP_DEFINES]
     pre = [
         "--target=x86_64-none-elf", "-ffreestanding", "-nostdinc",
         # HobbyOS's compat class speaks the Linux ABI: Mesa's
@@ -719,6 +783,7 @@ def rewrite(args, kind):
         # __linux__, and os_misc.c/os_time.c hard-error without it.
         "-D__linux__=1", "-D__unix__=1",
         "-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE_SOURCE",
+        "-fPIC",
         "-mno-red-zone", "-fno-stack-protector", "-fno-exceptions", "-fno-rtti",
     ]
     if kind == "cpp_COMPILER":
@@ -759,6 +824,22 @@ def main():
     if missing:
         print("!! objects with no compile command:", missing[:5])
         sys.exit(1)
+
+    # Drop architecture-specific TUs the host build emitted for its own CPU.
+    # The target is fixed (x86_64); an arm64 host's blake3_neon.c and
+    # cache_ops_aarch64.c are runtime-dispatched variants of code that also has
+    # a portable path, so skipping them costs the guest an optimisation, not a
+    # function -- while compiling them fails outright ("<arm_neon.h> is intended
+    # only for ARM and AArch64 targets").
+    markers = ARCH_TU_MARKERS.get("x86_64", ())
+    dropped = []
+    for o in list(objs):
+        src = table[o][0].replace("\\", "/")
+        if any(m in src for m in markers):
+            objs.remove(o)
+            dropped.append(o)
+    for o in dropped:
+        print(f"      host-arch TU skipped: {o}")
 
     os.makedirs(os.path.join(OBJ, "ar"), exist_ok=True)
     os.makedirs(LOGDIR, exist_ok=True)
@@ -952,6 +1033,21 @@ link_libgl() {
   mapfile -t rest < "${OBJ}/ar/ORDER.txt"
   mapfile -t extra < "${OBJ}/ar/EXTRA.txt"
 
+  # ORDER.txt is Meson's static link order and names every archive in Mesa's
+  # list, including host-arch variants this host never built (an arm64 host has
+  # no libmesa_util_clflush.a -- those are x86 SIMD fast paths).  The portable
+  # objects behind them are in the tree, so skipping the missing archive costs
+  # an optimisation, not a symbol; ld.lld would otherwise stop the link.
+  local _have=()
+  for a in "${rest[@]}"; do
+    if [ -f "$a" ]; then
+      _have+=("$a")
+    else
+      echo "    skipping unbuilt archive: $(basename "$a")"
+    fi
+  done
+  rest=("${_have[@]}")
+
   # link_whole first (Meson: link_whole: [libxlib, libglapi_bridge]).
   local a
   for a in "${rest[@]}"; do
@@ -1056,21 +1152,21 @@ link_libgl() {
   # pipeline would trip `set -o pipefail` on SIGPIPE).
   nm -D --defined-only "${LIBDIR}/libGL.so.1" > "${LIBDIR}/exports.txt"
   nm -D -u "${LIBDIR}/libGL.so.1" > "${LIBDIR}/undefined.txt"
-  needed=$(readelf -d "${LIBDIR}/libGL.so.1" | grep -c NEEDED || true)
+  needed=$("$READELF" -d "${LIBDIR}/libGL.so.1" | grep -c NEEDED || true)
   exports=$(awk '$2 ~ /^[TWiDB]$/' "${LIBDIR}/exports.txt" | wc -l)
   undef=$(wc -l < "${LIBDIR}/undefined.txt")
   note "DT_NEEDED:   ${needed}  (must be 0: the compat loader resolves libc from its own scope)"
   note "exports:     ${exports}"
   note "undefined:   ${undef} (all from glibc/libX11/libgcc_s/ld.so - see the report)"
-  note "size:        $(stat -c%s "${LIBDIR}/libGL.so.1") bytes stripped"
+  note "size:        $(size_of "${LIBDIR}/libGL.so.1") bytes stripped"
   [ "$needed" = 0 ] || die "libGL.so.1 grew a DT_NEEDED"
   # A dlopen()ed DSO that asks for static TLS must fit glibc's 1664-byte
   # surplus (measured: 4400 bytes -> "cannot allocate memory in static TLS
   # block"; dynamic TLS for that block then hung in the guest's first dispatch
   # call).  So: either no STATIC_TLS at all, or a PT_TLS under the surplus.
   local tls_bytes tls_flags
-  tls_flags=$(readelf -d "${LIBDIR}/libGL.so.1" | grep -c STATIC_TLS || true)
-  tls_bytes=$(readelf -lW "${LIBDIR}/libGL.so.1" | awk '/^  TLS/{print $6}')
+  tls_flags=$("$READELF" -d "${LIBDIR}/libGL.so.1" | grep -c STATIC_TLS || true)
+  tls_bytes=$("$READELF" -lW "${LIBDIR}/libGL.so.1" | awk '/^  TLS/{print $6}')
   tls_bytes=$(( ${tls_bytes:-0} ))     # hex from readelf; bash arithmetic is fine
   if [ "${tls_flags:-0}" != 0 ]; then
     [ "${tls_bytes:-999999}" -le 1664 ] \
@@ -1089,7 +1185,7 @@ link_libgl() {
   # (see the -z nodelete note in link_libgl): without DF_1_NODELETE a client's
   # dlclose() unmaps the text, and its exit() then jumps into the hole.
   local nodelete
-  nodelete=$(readelf -d "${LIBDIR}/libGL.so.1" | grep -c NODELETE || true)
+  nodelete=$("$READELF" -d "${LIBDIR}/libGL.so.1" | grep -c NODELETE || true)
   [ "${nodelete:-0}" != 0 ] \
     || die "libGL.so.1 lost DF_1_NODELETE: a client that dlclose()s it will crash in exit()"
   note "df_1:        NODELETE (dlclose keeps the DSO mapped; its atexit() handlers stay valid)"

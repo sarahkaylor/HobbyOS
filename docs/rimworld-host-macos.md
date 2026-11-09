@@ -176,25 +176,35 @@ is host-side only (Mesa configured natively to run its code generators, then
 every TU replayed against `clang --target=x86_64-linux-gnu` against the pinned
 glibc 2.31 headers), so it is not affected by the missing virgl.
 
-**Status on macOS: does not link yet — 10 of ~530 TUs fail.** The pipeline now
-runs end to end (fetch → glibc pin → host codegen → generated-source export →
-cross-compile) and stops at three causes, all host-OS leaks rather than kernel
-or guest problems:
+**Status on macOS: builds, and the script's own audit passes.**
 
-| # | symptom | cause |
+```
+RESULT 840/840 TUs compiled, 0 failed
+DT_NEEDED:   0        exports: 1379
+undefined:  253       audit: 4103 glibc-2.31 symbols; 29 from libX11; 0 unaccounted
+TLS:         40 bytes, static (fits glibc's 1664-byte surplus)
+df_1:        NODELETE size: 20,194,088 bytes stripped
+```
+
+`obj/mesa/lib/{libGL.so.1,libGLX.so.0,libGL.a}` (43 s incremental). That is a
+**build-level** result: the DSO is linked against the pinned glibc 2.31 headers
+and every undefined symbol is accounted for against the runtime set the compat
+process provides. It has **not** yet been exercised in the guest (stage it with
+`bash tools/mesa/stage.sh` and run the M4 gate — the gate hardcodes
+`-enable-kvm` and `DESKTOP=hobby`, so it needs the same host-abstraction the
+desktop runner does before it can run here).
+
+Five more host leaks had to be closed after the first pass, all in the
+host→target translation:
+
+| symptom | cause | fix |
 |---|---|---|
-| 1 | `qsort_r`: "no matching function" / incompatible pointer types (5 TUs: `u_qsort.cpp`, `nir*.c`, `pb_bufmgr_debug.c`) | glibc's `qsort_r` takes `(base, nmemb, size, cmp, arg)`; the BSD/macOS one takes `(base, nmemb, size, arg, cmp)`. Mesa picks its wrapper from a Meson probe of the **host**, so an Apple host stamps the BSD shape onto a glibc target |
-| 2 | `libunwind.h: file not found` (3 TUs: `u_debug_memory.c`, `u_debug_stack.c`, `mesa_cache_db.c`) | the host configure detected `HAVE_LIBUNWIND` (meson finds one), but macOS ships no `libunwind.h`; the flag rides into the target compile |
-| 3 | `mrs ${0:x}, ctr_el0` / NEON codegen (2 TUs: `blake3_neon.c`, `cache_ops_aarch64.c`) | the host build is **arm64**, so it emits the NEON/AArch64 dispatch variants; replaying them at x86_64 is meaningless. Same class as `libmesa_sse41.a` (already skipped, see below) |
-
-Each is a "host arch/OS leaked into the target flag vector" defect, and the fix
-belongs in the host→target flag translation (drop host-arch TUs and host-only
-`HAVE_*` caps; define the target's `qsort_r` shape from the ABI, as was already
-done for endianness). None of it changes the guest: the guest's libGL still
-comes from the same Mesa sources and the same pin.
-
-So on macOS the honest target is: Unity on softpipe at whatever rate the
-emulated CPU manages — not the virgl fps quoted in `docs/l80-menu-fps.md`.
+| 10 TUs failing (`qsort_r`, `libunwind.h`, NEON) | Meson probes the **host**; the target is glibc/x86_64 | drop the inherited capability macros (`HAVE_{BSD,GNU}_QSORT_R`, `HAVE_QSORT_S`, `HAVE_LIBUNWIND`, `HAVE_XLOCALE_H`) and set the GNU `qsort_r` answer explicitly; skip host-arch TUs (`*_neon.c`, `*_aarch64.c`) |
+| 21 archives of 96 bytes, then `version script ... symbol not defined` | Homebrew's `llvm-ar` is keg-only, so `command -v llvm-ar \|\| command -v ar` fell through to **Apple's `ar`**, which silently drops non-Mach-O members | put `/opt/homebrew/opt/llvm/bin` on PATH and fail loudly if `llvm-ar` is absent |
+| `relocation R_X86_64_TPOFF32 ... cannot be used with -shared` | target TUs were compiled without **-fPIC**, so `__thread` defaulted to local-exec (only the C++ runtime was PIC) | `-fPIC` for both flavours (required for any DSO), cache rev bumped |
+| 11 undefined `blake3_*{avx2,avx512,sse2,sse41}` | blake3's dispatch lists one impl per ISA, selected from the **host** arch; an arm64 host never compiles the x86 ones | `-DBLAKE3_NO_{AVX2,AVX512,SSE2,SSE41}` on the target: portable path, same output |
+| `staged 0 headers` | Homebrew's `include/X11`/`include/GL` are symlink trees; `cp -a` kept them relative and dangling | `cp -RL` |
+| verifier `readelf: command not found`, `stat -c%s` | GNU tools | `llvm-readelf` + portable `size_of` |
 
 ### What was already fixed on the way in (macOS host)
 
