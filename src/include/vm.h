@@ -570,6 +570,13 @@ void vm_arch_unmap(struct addr_space *as, uint64_t va);
 void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot);
 /* 0 + *leaf when a page mapping is present; -1 when absent. */
 int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
+/* GB-245: is `va` a legitimate resume target at CPL `cs` (0x08 kernel /
+ * 0x1B user) for this AS?  Present leaves are checked for user/NX; an
+ * absent user leaf is allowed only when an executable region covers it
+ * (the #PF fills it from the image).  Kernel VAs are validated against the
+ * static identity map.  Caller holds no lock; the region read is done under
+ * proc_lock inside the implementation. */
+int vm_arch_resume_va_ok(struct addr_space *as, uint64_t va, uint64_t cs);
 /* P5 (D5.7): the physical address encoded in a vm_arch_walk leaf (OA
  * bits, both arches).  Used by vm_kwrite for cross-context writes. */
 uint64_t vm_arch_leaf_phys(uint64_t leaf);

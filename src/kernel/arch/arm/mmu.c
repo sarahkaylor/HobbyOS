@@ -631,6 +631,13 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {
   return 0;
 }
 
+/* GB-245: the x64 pre-flight's ARM counterpart is a no-op for now; the
+   poison vehicle and the identity-map bound are x64-specific (GB-100). */
+int vm_arch_resume_va_ok(struct addr_space *as, uint64_t va, uint64_t cs) {
+  (void)as; (void)va; (void)cs;
+  return 1;
+}
+
 /* P5 (D5.7) / S4 (fork clone): OA bits of a leaf returned by vm_arch_walk
  * -- physical address for cross-context writes (vm_kwrite) and the v2
  * fork clone. */
