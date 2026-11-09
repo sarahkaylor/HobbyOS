@@ -2032,7 +2032,11 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
 #endif /* __x86_64__ */
 
+#ifdef __x86_64__
+      extern uint64_t enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+#else
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+#endif
       extern void resume_mark(int pid, uint64_t target_sp);
       resume_mark(proc_table[next].pid, target_sp);
       /* M6/L37: the user-mode resume writes its 37-qword frame image onto the
@@ -2219,7 +2223,21 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
       extern void proclock_iretq_note(void);
       proclock_iretq_note();
+#ifdef __x86_64__
+      uint64_t enter_rv = enter_user_space(&local_tf, target_sp);
+      if (enter_rv == 0) {
+        /* GB-245: the in-asm pre-flight refused this resume target (a hole
+           for the frame's CS).  Quarantine the slot and let schedule() pick
+           the next one; the CPU must not iretq into the hole.  proc_lock was
+           released at the resume boundary, so re-take it before continuing. */
+        spinlock_acquire(&proc_lock);
+        proc_table[next].state = PROC_STATE_EXITED;
+        set_current_process_pid(cpu, -1);
+        continue;
+      }
+#else
       enter_user_space(&local_tf, target_sp);
+#endif
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
          bare `while (1);` that used to be here lost a CPU with no trace at all,
@@ -4698,12 +4716,27 @@ void start_scheduler(void) {
         /* P5 S3 (D8.4a/b): same resume-boundary delivery as schedule(). */
         process_signal_resume_deliver(&proc_table[i], &local_tf);
 
+#ifdef __x86_64__
+        extern uint64_t enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+#else
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+#endif
         extern void resume_mark(int pid, uint64_t target_sp);
         resume_mark(proc_table[i].pid, target_sp);
         extern void proclock_iretq_note(void);
         proclock_iretq_note();
+#ifdef __x86_64__
+        uint64_t enter_rv = enter_user_space(&local_tf, target_sp);
+        if (enter_rv == 0) {
+          /* GB-245: pre-flight refused; quarantine and keep the CPU. */
+          spinlock_acquire(&proc_lock);
+          proc_table[i].state = PROC_STATE_EXITED;
+          set_current_process_pid(cpu, -1);
+          continue;
+        }
+#else
         enter_user_space(&local_tf, target_sp);
+#endif
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
            is lost, so say so before going quiet. */
