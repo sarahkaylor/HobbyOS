@@ -32,6 +32,7 @@ shape of the M1 wall, so every split PR inherited the wrong parent.
 
 Usage:
     python3 tools/board/pr_sync.py --digest-only   # print PR -> card, move nothing
+    python3 tools/board/pr_sync.py --apply         # the timer's form (apply is the default)
     python3 tools/board/pr_sync.py                 # move mapped open-PR cards to In Review
 """
 import argparse
@@ -226,6 +227,12 @@ def sync(digest_only=False):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="map open PRs to board cards (§4.2 step 2)")
+    # `--apply` is the deployed timer's spelling (hobbyos-pr-sync.service runs
+    # `ExecStart=... --apply`).  Applying is already the default, so the flag is
+    # a no-op alias: without it the versioned copy cannot replace the stopgap
+    # the unit runs (it exits 2 on "unrecognized arguments: --apply").
+    p.add_argument("--apply", action="store_true",
+                   help="move mapped cards (the default; the timer passes this)")
     p.add_argument("--digest-only", action="store_true",
                    help="print the PR -> card mapping and move nothing")
     a = p.parse_args(argv)

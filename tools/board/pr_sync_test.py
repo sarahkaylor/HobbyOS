@@ -11,8 +11,11 @@ umbrella #345 instead of the split card #563.  This test pins the five required
 mappings, the no-id negative, and the falsifier: if the old collapse ever comes
 back, the test fails.
 
-Evidence marker: 'PR_SYNC_TEST: PASS — 5 mappings + no-id negative'
+Evidence markers: 'PR_SYNC_TEST: PASS — 5 mappings + no-id negative'
+                  'PR_SYNC_CLI: PASS — --apply and --digest-only accepted'
 """
+import contextlib
+import io
 import re
 import sys
 
@@ -63,7 +66,62 @@ ok(pr_sync.ticket_of("GB-1460: unrelated card") == "GB-1460",
 ok(pr_sync.ticket_of("GB-146-LOCKDIAG: report") == "GB-146",
    "a non-split tag (GB-146-LOCKDIAG) is not read as split L")
 
+# CLI wiring (GB-237 bounce).  The deployed timer runs
+#   ExecStart=... /opt/swarm-lease/pr_sync.py --apply
+# and the first head accepted only --digest-only, so `--apply` exited 2 with
+# "unrecognized arguments: --apply" and the versioned copy could not replace
+# the stopgap.  These call main() with sync() stubbed: the CLI is under test,
+# not the network, so no token and no board/GitHub call is needed.
+_orig_sync = pr_sync.sync
+_orig_tokens = (pr_sync.TOKEN, pr_sync.GH_TOKEN)
+seen = []
+
+
+def _fake_sync(digest_only=False):
+    seen.append(digest_only)
+    return 0
+
+
+pr_sync.sync = _fake_sync
+pr_sync.TOKEN = pr_sync.GH_TOKEN = "test-token"
+
+
+def _main(argv):
+    """main(), turning argparse's exit into a value so a FAIL prints cleanly."""
+    try:
+        return pr_sync.main(argv)
+    except SystemExit as e:
+        return "SystemExit(%r)" % (e.code,)
+
+
+try:
+    rc = _main(["--apply"])
+    ok(rc == 0 and seen == [False],
+       "--apply accepted; apply is the default (rc=%r, digest_only=%r)" % (rc, seen))
+    rc = _main(["--digest-only"])
+    ok(rc == 0 and seen == [False, True],
+       "--digest-only accepted and sets digest_only (rc=%r, digest_only=%r)" % (rc, seen))
+    rc = _main([])
+    ok(rc == 0 and seen == [False, True, False],
+       "no flag is still apply (rc=%r)" % (rc,))
+finally:
+    pr_sync.sync = _orig_sync
+    pr_sync.TOKEN, pr_sync.GH_TOKEN = _orig_tokens
+
+# Negative: an unknown flag still exits 2, so a typo cannot silently apply.
+# argparse prints its usage to stderr; that is the expected output here, so it
+# is swallowed to keep the test's evidence block readable.
+try:
+    with contextlib.redirect_stderr(io.StringIO()):
+        pr_sync.main(["--not-a-flag"])
+except SystemExit as e:
+    ok(e.code == 2, "unknown flag exits 2 (got %r)" % (e.code,))
+else:
+    ok(False, "unknown flag exits 2 (it did not exit)")
+
 print("pr_sync_test: " + ("ALL PASSED" if fails == 0 else "FAILED"))
 print("PR_SYNC_TEST: PASS — 5 mappings + no-id negative" if fails == 0
       else "PR_SYNC_TEST: FAILED")
+print("PR_SYNC_CLI: PASS — --apply and --digest-only accepted" if fails == 0
+      else "PR_SYNC_CLI: FAILED")
 sys.exit(0 if fails == 0 else 1)
