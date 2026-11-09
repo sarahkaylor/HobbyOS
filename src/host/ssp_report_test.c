@@ -57,6 +57,8 @@ int main(void) {
         "format: panic line");
   check(strstr(buf, "smasher pc=0x0000000070002e6b") != NULL,
         "format: faulting return address printed");
+  check(strstr(buf, "call_site=0x0000000070002e66") != NULL,
+        "format: call-site address printed (pc - 5)");
   check(strstr(buf, "guard=0x123456789abcdef0") != NULL,
         "format: expected canary printed");
   check(strstr(buf, "found=0x9090909090909090") != NULL,
