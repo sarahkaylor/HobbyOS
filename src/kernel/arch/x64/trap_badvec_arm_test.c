@@ -18,6 +18,8 @@
 /* Defined in trap.c; declared here because the suite is the second caller. */
 int badvec_should_arm(uint64_t frame, uint64_t cs, uint64_t vector, int64_t pid,
                       uint64_t now_ms, int armed, int prints, int pid1_prints);
+void badvec_print_writer_row(uint64_t rip_after, uint64_t slot, uint64_t frame,
+                             int frame_pid, int vect, int pid, int cpu);
 
 static void test_badvec_should_arm_pid1(void) {
   tests_run++;
@@ -41,6 +43,19 @@ static void test_badvec_should_arm_pid1(void) {
   EXPECT_EQ(badvec_should_arm(0x25FFB640ull, 0x1B, 13, 7, 500, 0, 0, 0), 1);
 }
 
-void trap_badvec_arm_test_suite(void) { test_badvec_should_arm_pid1(); }
+/* GB-244 clause 3: force the GB-101-V7 kernel-CS frame through the same row
+   the #DB handler prints.  The row appears in the unit serial; the assert is
+   that the same frame arms. */
+static void test_badvec_writer_row_kernel_cs(void) {
+  tests_run++;
+  uart_puts("  Running test_badvec_writer_row_kernel_cs...\n");
+  EXPECT_EQ(badvec_should_arm(0x23FFE280ull, 0x08, 13, 1, 55247, 0, 0, 0), 1);
+  badvec_print_writer_row(0x7008A3FEull, 0x23FFE388ull, 0x23FFE280ull, 1, 13,
+                          1, 7);
+}
 
+void trap_badvec_arm_test_suite(void) {
+  test_badvec_should_arm_pid1();
+  test_badvec_writer_row_kernel_cs();
+}
 #endif /* KERNEL_MODE_UNIT_TEST */
