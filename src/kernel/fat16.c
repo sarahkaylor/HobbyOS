@@ -3119,7 +3119,12 @@ int fat16_write(struct file* f, const void* buf, int size) {
        sectors, so crossing early would skip the rest of the current cluster
        (the tail-checksum test in fat16_test.c catches exactly this). */
     if (size > 0 && (f->fat16.cursor % cluster_size) == 0) {
+      /* read_fat() is a device read on a cache miss: outside the lock, like
+         every other I/O in this driver.  Holding an irqsave spinlock across it
+         is what turned a log write into a machine-wide stall. */
+      spinlock_release_irqrestore(&fat_lock, flags);
       uint16_t nxt = read_fat(c);
+      flags = spinlock_acquire_irqsave(&fat_lock);
       if (nxt >= 0xFFF8) {
     /* alloc_cluster() does device I/O (FAT write + cluster zeroing); it must run
        with fat_lock RELEASED -- a thread that sleeps holding an irqsave spinlock
@@ -3129,7 +3134,9 @@ int fat16_write(struct file* f, const void* buf, int size) {
         nxt = alloc_cluster();
         flags = spinlock_acquire_irqsave(&fat_lock);
         if (nxt == 0) break;
-        write_fat(c, nxt);
+        spinlock_release_irqrestore(&fat_lock, flags);
+        write_fat(c, nxt);      /* FAT write: device I/O, lock released */
+        flags = spinlock_acquire_irqsave(&fat_lock);
       }
       c = nxt;
     }
