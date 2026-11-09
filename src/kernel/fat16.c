@@ -672,9 +672,9 @@ static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct f
       }
       spinlock_release_irqrestore(&fat_lock, flags);
     }
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    /* read_fat() is cache-locked internally and reads the device on a miss;
+       fat_lock must not be held across it. */
     cluster = read_fat(cluster);
-    spinlock_release_irqrestore(&fat_lock, flags);
   }
 done_scan:
   {
@@ -1610,8 +1610,11 @@ int fat16_unlink(const char* filename) {
   uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
   uint16_t cluster = entry.start_cluster;
   while (cluster != 0 && cluster < 0xFFF0) {
+    /* Two device operations per link; neither may run under fat_lock. */
+    spinlock_release_irqrestore(&fat_lock, flags);
     uint16_t next = read_fat(cluster);
     write_fat(cluster, 0x0000);
+    flags = spinlock_acquire_irqsave(&fat_lock);
     cluster = next;
   }
 
@@ -1729,8 +1732,11 @@ int fat16_rmdir(const char *path) {
   /* Free the directory's cluster chain (mirrors fat16_unlink). */
   uint16_t cluster = entry.start_cluster;
   while (cluster != 0 && cluster < 0xFFF0) {
+    /* Two device operations per link; neither may run under fat_lock. */
+    spinlock_release_irqrestore(&fat_lock, flags);
     uint16_t next = read_fat(cluster);
     write_fat(cluster, 0x0000);
+    flags = spinlock_acquire_irqsave(&fat_lock);
     cluster = next;
   }
 
@@ -2186,8 +2192,10 @@ int fat16_truncate(struct file* f) {
   uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
   uint16_t c = f->fat16.entry.start_cluster;
   while (c >= 2 && c < 0xFFF8) {
+    spinlock_release_irqrestore(&fat_lock, flags);
     uint16_t next = read_fat(c);
     write_fat(c, 0);
+    flags = spinlock_acquire_irqsave(&fat_lock);
     c = next;
   }
   f->fat16.entry.start_cluster = 0;
@@ -2297,13 +2305,17 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
   uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
   uint32_t keep = (new_size + cluster_size - 1) / cluster_size;
   uint16_t c = f->fat16.entry.start_cluster;
-  for (uint32_t i = 1; i < keep && c >= 2 && c < 0xFFF8; i++)
+  for (uint32_t i = 1; i < keep && c >= 2 && c < 0xFFF8; i++) {
+    spinlock_release_irqrestore(&fat_lock, flags);
     c = read_fat(c);
+    flags = spinlock_acquire_irqsave(&fat_lock);
+  }
   if (c < 2 || c >= 0xFFF8) {
     /* No cluster chain covers the kept range: collapsed chain. */
     spinlock_release_irqrestore(&fat_lock, flags);
     return -1;
   }
+  spinlock_release_irqrestore(&fat_lock, flags);
   uint16_t rest = read_fat(c);
   write_fat(c, 0xFFFF); /* re-terminate the last kept cluster */
   while (rest >= 2 && rest < 0xFFF8) {
@@ -2311,6 +2323,7 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
     write_fat(rest, 0);
     rest = next;
   }
+  flags = spinlock_acquire_irqsave(&fat_lock);
   spinlock_release_irqrestore(&fat_lock, flags);
 
   f->fat16.entry.file_size = new_size;
