@@ -4232,6 +4232,41 @@ static int64_t badvec_watch_pid[MAX_CPUS];
 static uint64_t badvec_watch_vect[MAX_CPUS];
 static int badvec_writer_prints;
 
+/* GB-238: the GB-234-V wave armed DR0 on the exact changed slot and printed
+   no writer row, so the #DB either never arrived or was never printed.  These
+   fields make that answerable at the fatal dump without guessing:
+     - arm_ms/disarm_ms + disarms: was L0 ever cleared after the arm, and when?
+     - db_ms/db_pc/db_dr6/result: the last #DB this CPU took, the instruction
+       that caused it and how the handler treated it (1 = writer printed,
+       2 = consumed without DR6.B0, 3 = unarmed/fall-through).
+   Observation only: the writer/consume behaviour below is unchanged. */
+static uint64_t badvec_arm_ms[MAX_CPUS];
+static uint64_t badvec_disarm_ms[MAX_CPUS];
+static uint64_t badvec_disarm_pc[MAX_CPUS];
+static unsigned badvec_disarm_count[MAX_CPUS];
+static uint64_t badvec_db_ms[MAX_CPUS];
+static uint64_t badvec_db_pc[MAX_CPUS];
+static uint64_t badvec_db_dr6[MAX_CPUS];
+static int badvec_db_result[MAX_CPUS]; /* 0 none, 1 writer, 2 consumed, 3 unarmed */
+#define BADVEC_DBG_ROWS 16
+static int badvec_dbg_rows;
+
+static inline uint64_t badvec_rd_dr0(void) {
+  uint64_t v;
+  __asm__ volatile("mov %%dr0, %0" : "=r"(v));
+  return v;
+}
+static inline uint64_t badvec_rd_dr6(void) {
+  uint64_t v;
+  __asm__ volatile("mov %%dr6, %0" : "=r"(v));
+  return v;
+}
+static inline uint64_t badvec_rd_dr7(void) {
+  uint64_t v;
+  __asm__ volatile("mov %%dr7, %0" : "=r"(v));
+  return v;
+}
+
 /* Is this frame in the window the two census dumps used?  User stacks are at
    0x25FFxxxx; the kernel image and its .bss live at 0x70000000+, which is also
    below USER_VA_BASE (6 GiB), so the base alone is not a discriminator.  Only
@@ -4255,21 +4290,93 @@ static void badvec_watch_arm(uint64_t slot, uint64_t frame, uint64_t vect) {
   badvec_watch_frame[c] = frame;
   badvec_watch_pid[c] = badvec_pid();
   badvec_watch_vect[c] = vect;
+  badvec_arm_ms[c] = timer_get_ms();
+  badvec_disarm_count[c] = 0;
+  badvec_disarm_ms[c] = 0;
+  badvec_disarm_pc[c] = 0;
+  badvec_db_ms[c] = 0;
+  badvec_db_pc[c] = 0;
+  badvec_db_dr6[c] = 0;
+  badvec_db_result[c] = 0;
 }
 
-static void badvec_watch_disarm(void) {
+/* pc = the RIP that caused the disarm (the #DB frame's saved RIP, i.e. the
+   instruction after the watched write).  Recording it makes "was this watch
+   ever consumed, and where?" a stated fact rather than an inference from a
+   missing row. */
+static void badvec_watch_disarm(uint64_t pc) {
   uint32_t c = get_cpuid();
   if (c >= MAX_CPUS)
     return;
   __asm__ volatile("mov %0, %%dr7" ::"r"(0UL));
   __asm__ volatile("mov %0, %%dr0" ::"r"(0UL));
   badvec_watch_armed[c] = 0;
+  badvec_disarm_count[c]++;
+  badvec_disarm_ms[c] = timer_get_ms();
+  badvec_disarm_pc[c] = pc;
 }
 
 static int64_t badvec_pid(void) {
   extern struct process *current_process(void);
   struct process *p = current_process();
   return p ? (int64_t)p->pid : -1;
+}
+
+/* GB-238: dump the DR state for a fatal [BADVEC] record.  Called once per
+   fatal dump, whether or not the slots changed: the card's question is why a
+   watched slot produced no writer row, and the answer is the live DR0/DR7/DR6
+   of the CPU taking the dump beside the stored arm/#DB timeline.  It separates
+   the card's three mechanisms by name: DR7 L0=0 (or DR0 != slot) is a clobbered
+   pair; db_ms after arm_ms is a delivered #DB (result says printed or
+   suppressed); L0=1, disarms=0 and db_ms=0 since the arm is a write that never
+   trapped on this CPU (foreign or pre-arm). */
+static void badvec_dump_drstate(int owner_cpu) {
+  extern void panic_puts(const char *s);
+  extern void panic_print_hex(uint64_t v);
+  extern void print_int_raw(int val);
+  extern uint64_t timer_get_ms(void);
+  uint32_t dc = get_cpuid();
+  uint64_t now_ms = timer_get_ms();
+  panic_puts("  [BADVEC] drstate cpu=");
+  print_int_raw((int)dc);
+  panic_puts(" owner_cpu=");
+  print_int_raw(owner_cpu);
+  panic_puts(" dr0=");
+  panic_print_hex(badvec_rd_dr0());
+  panic_puts(" dr7=");
+  panic_print_hex(badvec_rd_dr7());
+  panic_puts(" dr6=");
+  panic_print_hex(badvec_rd_dr6());
+  panic_puts(" now_ms=");
+  panic_print_hex(now_ms);
+  panic_puts("\n");
+  for (uint32_t oc = 0; oc < MAX_CPUS; oc++) {
+    if (!badvec_watch_slot[oc] && !badvec_db_ms[oc])
+      continue;
+    panic_puts("  [BADVEC] lastdb cpu=");
+    print_int_raw((int)oc);
+    panic_puts(" arm_ms=");
+    panic_print_hex(badvec_arm_ms[oc]);
+    panic_puts(" db_ms=");
+    panic_print_hex(badvec_db_ms[oc]);
+    panic_puts(" db_pc=");
+    panic_print_hex(badvec_db_pc[oc]);
+    panic_puts(" db_dr6=");
+    panic_print_hex(badvec_db_dr6[oc]);
+    panic_puts(" result=");
+    print_int_raw(badvec_db_result[oc]);
+    panic_puts(" disarms=");
+    print_int_raw((int)badvec_disarm_count[oc]);
+    panic_puts(" disarm_ms=");
+    panic_print_hex(badvec_disarm_ms[oc]);
+    panic_puts(" disarm_pc=");
+    panic_print_hex(badvec_disarm_pc[oc]);
+    panic_puts(" slot=");
+    panic_print_hex(badvec_watch_slot[oc]);
+    panic_puts(" armed=");
+    print_int_raw(badvec_watch_armed[oc]);
+    panic_puts("\n");
+  }
 }
 
 /* Called from enter_user_space (asm) with rdi=source frame, rsi=target SP. */
@@ -4366,6 +4473,15 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     extern void panic_print_hex(uint64_t v);
     extern void print_int_raw(int val);
     uint32_t wc = get_cpuid();
+    uint64_t db_dr6 = badvec_rd_dr6();
+    uint64_t db_dr7 = badvec_rd_dr7();
+    uint64_t db_dr0 = badvec_rd_dr0();
+    if (wc < MAX_CPUS) {
+      badvec_db_ms[wc] = timer_get_ms();
+      badvec_db_pc[wc] = tf->elr;
+      badvec_db_dr6[wc] = db_dr6;
+      badvec_db_result[wc] = 0;
+    }
     if (wc < MAX_CPUS && badvec_watch_armed[wc]) {
       panic_puts("[BADVEC] writer rip_after=");
       panic_print_hex(tf->elr);
@@ -4383,8 +4499,51 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       print_int_raw((int)wc);
       panic_puts("\n");
       badvec_writer_prints++;
-      badvec_watch_disarm();
+      /* GB-238: one bounded row saying what this #DB was and how it was
+         treated.  DR6.B0 clear with an armed watch is the case the old
+         consume path could not distinguish from a real DR0 hit. */
+      badvec_db_result[wc] = (db_dr6 & 1u) ? 1 : 2;
+      if (badvec_dbg_rows < BADVEC_DBG_ROWS) {
+        badvec_dbg_rows++;
+        panic_puts("[BADVEC] dbg cpu=");
+        print_int_raw((int)wc);
+        panic_puts(" rip_after=");
+        panic_print_hex(tf->elr);
+        panic_puts(" slot=");
+        panic_print_hex(badvec_watch_slot[wc]);
+        panic_puts(" dr6=");
+        panic_print_hex(db_dr6);
+        panic_puts(" dr7=");
+        panic_print_hex(db_dr7);
+        panic_puts(" dr0=");
+        panic_print_hex(db_dr0);
+        panic_puts(" printed=");
+        panic_puts((db_dr6 & 1u) ? "yes" : "no");
+        panic_puts(" why=");
+        panic_puts((db_dr6 & 1u) ? "dr0-hit" : "dr6-no-dr0-bit");
+        panic_puts("\n");
+      }
+      badvec_watch_disarm(tf->elr);
       return;
+    }
+    /* GB-238: a #DB on a CPU with no armed watch.  Record it and say so once
+       (bounded); the generic path then handles it exactly as before. */
+    if (wc < MAX_CPUS) {
+      badvec_db_result[wc] = 3;
+      if (badvec_dbg_rows < BADVEC_DBG_ROWS) {
+        badvec_dbg_rows++;
+        panic_puts("[BADVEC] dbg cpu=");
+        print_int_raw((int)wc);
+        panic_puts(" rip_after=");
+        panic_print_hex(tf->elr);
+        panic_puts(" slot=none dr6=");
+        panic_print_hex(db_dr6);
+        panic_puts(" dr7=");
+        panic_print_hex(db_dr7);
+        panic_puts(" dr0=");
+        panic_print_hex(db_dr0);
+        panic_puts(" printed=no why=no-armed-watch-on-this-cpu\n");
+      }
     }
   }
   gic_set_current_vector(cpu, tf->vector);
@@ -5211,6 +5370,10 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           print_int_raw(st_cpu);
           panic_puts("\n");
         }
+        /* GB-238: the DR state belongs to every fatal [BADVEC] dump, not only
+           the changed-slot one — the card asks what the watch was doing when
+           the fatal frame was read. */
+        badvec_dump_drstate(st ? st_cpu : -1);
       }
       panic_puts("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
       print_int_raw((int)tf->vector);

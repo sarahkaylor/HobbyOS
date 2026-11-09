@@ -1,0 +1,5 @@
+  PASS: clean tree grades clean
+  PASS: a new caller in a new file fails
+  PASS: an 8th call in an allowlisted file fails
+  PASS: a deleted call fails (the table is stale)
+self-test: OK
