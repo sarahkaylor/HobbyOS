@@ -602,3 +602,30 @@ void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
   }
 #endif
 }
+
+/* Yield-lock (see lock.h).  Same layout as spinlock_t, so lockdbg/rank
+ * diagnostics keep working; different wait behaviour, which is the point: the
+ * critical sections that use it do device I/O, and a waiter that spins with
+ * interrupts disabled starves the holder forever.  Yielding keeps IRQs on and
+ * lets the holder run, including on this CPU. */
+void ylock_init(ylock_t *lock) {
+  lock->locked = 0;
+  lock->owner = 0;
+}
+
+void ylock_acquire(ylock_t *lock) {
+  for (;;) {
+    uint32_t expected = 0;
+    if (__atomic_compare_exchange_n(&lock->locked, &expected, 1, 0,
+                                    __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+      lock->owner = get_cpuid() + 1;
+      return;
+    }
+    arch_yield();   /* give the CPU away; IRQs stay enabled */
+  }
+}
+
+void ylock_release(ylock_t *lock) {
+  lock->owner = 0;
+  __atomic_store_n(&lock->locked, 0, __ATOMIC_RELEASE);
+}
