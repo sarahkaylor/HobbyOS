@@ -596,7 +596,18 @@ __attribute__((section(".text._start"))) void _start(void) {
   pc("\n");
   if (cfd >= 0) close(cfd);
   if (pid < 0) {
-    say("spawn_ex failed (see the kernel's loader line above)");
+    /* Say WHY.  The generic message sent me looking at the loader for a failure
+     * that never reached it (no "v2 loader" line for the game at all). */
+    pc("[RW] rwlaunch: spawn_ex errno=");
+    pd(errno);
+    pc(" (");
+    pc(errno == 2 ? "ENOENT: target or interpreter missing"
+      : errno == 8 ? "ENOEXEC: loader refused the image"
+      : errno == 13 ? "EACCES: not executable"
+      : errno == 12 ? "ENOMEM"
+      : "see errno.h");
+    pc(")\n");
+    say("spawn_ex failed");
     exit(3);
   }
 
