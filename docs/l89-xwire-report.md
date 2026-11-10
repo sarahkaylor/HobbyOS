@@ -142,7 +142,7 @@ Design, for that pass:
 | `src/include/unix.h` | `struct usock_chan` gains `own` (a resized block) and `cap` (bytes available); `K_UNIX_RING_MAX` = 16 MiB. Default stays `K_UNIX_RING` = 512 KiB. |
 | `src/kernel/unix.c` | every ring bound (`chan_full`, both STREAM loops, both message-arena loops) uses `c->cap` instead of the constant. `usock_set_ring()` grows one direction: allocate the block **before** taking `u->lock` (the frame allocator must not nest), then under the lock copy any queued bytes in order and swap `ring`/`own`/`cap`. `usock_close()` frees a resized block with the pair block. |
 | `src/kernel/fs.c` | `setsockopt(SO_SNDBUF/SO_RCVBUF)` is no longer a no-op: it sizes the direction that fd writes (SNDBUF) or reads (RCVBUF); `getsockopt` reports the real capacity. |
-| `src/user/hbhost/hbhost.c` | asks for `SURF_BYTES + 256 KiB` on the X connection at startup and prints the receipt (`[HB] xring fd=3 want=8998912 got=... rc=0`). |
+| `src/user/hbhost/hbhost.c` | asks for `SURF_BYTES + 256 KiB` on the X connection at startup and prints the receipt. Landed and exercised — on today's kernel it reports the request being ignored: `[HB] xring fd=9 want=8556544 got=524288 rc=0`. |
 
 Why this shape rather than raising `K_UNIX_RING` globally: the unit tier's
 pool-exhaustion case allocates **exactly `MAX_UNIX_PAIRS` (128) pairs**, and
