@@ -190,12 +190,20 @@ mid-update, and several paths already drop `fat_lock` deliberately mid-operation
 (`fat16: read loop releases at cluster crossing`, `stats scans without fat_lock`).
 A preemptible holder makes any such window observable by another thread.
 
-Next experiments, in order:
-1. Give `ylock_acquire` a preempt reference for **metadata** sections only, and
-   leave device-I/O sections preemptible -- if the mismatch disappears, the
-   window is confirmed as "holder switched out mid-update".
-2. If it survives, the write-back path is the suspect: two files' directory
-   entries share a sector, and a lost update there is exactly this symptom.
+The second witness is `src/user/stress_test.c` (`STRESS.BIN`), which is
+pre-existing: its `[WORKER 0] ERROR: data mismatch on TEST1.TXT` appears only in
+runs that carry the new soak, i.e. once the wave has enough concurrent writers.
+The race is therefore older than this work; the soak is what makes it reachable.
+
+Experiment 1 already run and **falsified**: giving `ylock_acquire` a preempt
+reference (holder cannot be switched out mid-section, interrupts still on) left
+the `STRESS.BIN` mismatch in place and changed nothing measurable, so it was
+reverted rather than kept as unexplained cost.  That rules out "holder
+preempted mid-update" as the mechanism.
+
+Experiment 2 is now the leading one: the write-back path. Two files' directory
+entries and FAT chains share a sector, and a lost update there produces exactly
+this symptom (a read returning bytes nobody wrote to that file).
 
 Until then the integration tier is red on this, which is the correct state for a
 gate to be in when a real data race is reachable.
