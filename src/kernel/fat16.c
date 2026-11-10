@@ -218,9 +218,9 @@ static void lfn_entry_display(const struct lfn_state *st,
  */
 int fat16_init(void) {
   ylock_init(&fat_lock);
-#ifdef KERNEL_MODE_UNIT_TEST
-  lockdbg_register((const spinlock_t *)&fat_lock, "fat_lock", LOCK_RANK_FAT); /* SEC-OBS-B */
-#endif
+/* PROCESS class + ylock_t: FAT entry points are syscall-side only and the
+   critical sections do device I/O, so this lock must never mask IRQs. */
+  lock_register(&fat_lock, "fat_lock", LOCK_RANK_FAT, LOCK_CLASS_PROCESS);
   spinlock_init(&fat_cache_lock);
   fat_cache_valid = 0;
   uint8_t buf[SECTOR_SIZE];
@@ -2022,10 +2022,17 @@ int fat16_mkdir(const char *path) {
        never lets go.  It reserves the cluster atomically in RAM, so the choice
        is still exclusive. */
   uint16_t new_cluster = alloc_cluster();
-  ylock_acquire(&fat_lock);
   if (new_cluster == 0) {
-    return -1;
+    return -1; /* disk full: nothing was taken, nothing to release */
   }
+  /* NOTHING in this function runs under fat_lock.  The conversion to ylock_t
+   * left an acquire here with no matching release on the success path, an
+   * early return that dropped the lock on the floor, and three error paths
+   * that acquired it a second time -- a self-deadlock the ARM unit suite
+   * wedged on until [MUTEX-SELF] named it.  Every section that genuinely needs
+   * the lock takes it inside the helper that needs it
+   * (alloc_entry_in_dir / alloc_lfn_run), which is where the directory claim
+   * is supposed to be atomic. */
 
   uint8_t sector_buf[SECTOR_SIZE];
   for (int i = 0; i < SECTOR_SIZE; i++) sector_buf[i] = 0;
@@ -2046,9 +2053,7 @@ int fat16_mkdir(const char *path) {
 
   uint32_t new_dir_sector = data_sector + (new_cluster - 2) * bpb_sectors_per_cluster;
   if (virtio_blk_write_sector(new_dir_sector, sector_buf, 1) != 0) {
-    ylock_acquire(&fat_lock);
-    write_fat(new_cluster, 0x0000);
-    ylock_release(&fat_lock);
+    write_fat(new_cluster, 0x0000); /* give the reservation back; no lock held */
     return -1;
   }
 
@@ -2066,9 +2071,7 @@ int fat16_mkdir(const char *path) {
 
   if (name_is_83(last_comp)) {
     if (alloc_entry_in_dir(parent_entry.start_cluster, &new_dir_entry, 0, 0, 1) != 0) {
-      ylock_acquire(&fat_lock);
       write_fat(new_cluster, 0x0000);
-      ylock_release(&fat_lock);
       return -1;
     }
   } else {
@@ -2080,9 +2083,7 @@ int fat16_mkdir(const char *path) {
     if (nchunks < 1) nchunks = 1;
     if (alloc_lfn_run(parent_entry.start_cluster, last_comp, formatted_name,
                       nchunks, &new_dir_entry, 0, 0, 1, 0) != 0) {
-      ylock_acquire(&fat_lock);
       write_fat(new_cluster, 0x0000);
-      ylock_release(&fat_lock);
       return -1;
     }
   }

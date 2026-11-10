@@ -200,7 +200,7 @@ void spinlock_init(spinlock_t *lock) {
   lock->locked = 0;
 }
 
-void spinlock_acquire(spinlock_t *lock) {
+static void spin_acquire_raw(spinlock_t *lock) {
 #ifdef KERNEL_MODE_UNIT_TEST
   lockdbg_precheck(lock); /* SEC-OBS-B: report inversion before we spin */
 #endif
@@ -361,6 +361,11 @@ void spinlock_acquire(spinlock_t *lock) {
      any use of the protected data, so a fatal path can ask "is this mine to
      give back?" without guessing. */
   lock->owner = get_cpuid() + 1;
+  /* Lock-scope audit (src/kernel/lockscale.c): the always-on view of which
+   * registered locks this CPU holds, independent of the x64-only probe tables
+   * above.  Kept separate on purpose -- the audit must work identically on
+   * both arches. */
+  lock_audit_held_push(lock, (uint64_t)__builtin_return_address(0));
   /* GB-057: push onto this CPU's held-lock stack (observation only). */
   {
     uint32_t hcpu = get_cpuid();
@@ -403,10 +408,21 @@ void lockdbg_irq_restore(uint64_t flags) {
       : "memory");
 }
 
-void spinlock_release(spinlock_t *lock) {
+/* Plain acquire: takes a preempt reference so the tick cannot switch this
+ * thread out while a lock it holds is still held (see lock.h, and the ARM twin).
+ * spinlock_acquire_irqsave() deliberately does NOT count: proc_lock is held
+ * ACROSS the context switch by design, so counting it would leak a permanent
+ * preempt-disabled state into whatever that switch resumed. */
+void spinlock_acquire(spinlock_t *lock) {
+  kernel_preempt_disable();
+  spin_acquire_raw(lock);
+}
+
+static void spin_release_raw(spinlock_t *lock) {
 #ifdef KERNEL_MODE_UNIT_TEST
   lockdbg_note_releasing(lock); /* SEC-OBS-B: pop before the HW clear */
 #endif
+  lock_audit_held_pop(lock); /* lock-scope audit: no longer held */
   /* GB-057: pop this CPU's held-lock stack (observation only).  Pop by
      searching for the lock rather than assuming strict LIFO: a fatal path may
      release out of order, and a table that lies is worse than no table. */
@@ -433,6 +449,12 @@ void spinlock_release(spinlock_t *lock) {
      in the acquire loop -- see GB-057 there.) */
   lock->owner = 0;
   __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
+}
+
+/* Plain release: pairs with spinlock_acquire()'s preempt reference. */
+void spinlock_release(spinlock_t *lock) {
+  spin_release_raw(lock);
+  kernel_preempt_enable();
 }
 
 /* GB-060: release a lock ONLY if this CPU is recorded as its owner.
@@ -474,7 +496,10 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
       :
       : "memory"
   );
-  spinlock_acquire(lock);
+  /* Lock-scope audit: RFLAGS bit 9 is IF (1 = interrupts enabled). */
+  lock_audit_irqoff_begin((flags & 0x200) != 0);
+  spin_acquire_raw(lock); /* no preempt reference (see spinlock_acquire) */
+  lock_audit_note_irqsave_acquire(lock, (uint64_t)__builtin_return_address(0));
   return flags;
 }
 
@@ -570,7 +595,10 @@ void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
   if (rs_snap)
     relsnap("entry", (uint64_t)lock, rs_slot, rs_rbp, rs_rsp);
 #endif
-  spinlock_release(lock);
+  /* Close the IRQ-off window BEFORE the release pops the held-lock stack, so
+   * the blame names the lock that was actually held (see the ARM twin). */
+  lock_audit_irqoff_end((flags & 0x200) != 0);
+  spin_release_raw(lock); /* pairs with the raw acquire in irqsave */
   __asm__ volatile(
       "push %0\n"
       "popfq\n"
@@ -601,31 +629,4 @@ void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
     relsnap("ret", (uint64_t)lock, rs2_slot, rs_rbp, rs2_rsp);
   }
 #endif
-}
-
-/* Yield-lock (see lock.h).  Same layout as spinlock_t, so lockdbg/rank
- * diagnostics keep working; different wait behaviour, which is the point: the
- * critical sections that use it do device I/O, and a waiter that spins with
- * interrupts disabled starves the holder forever.  Yielding keeps IRQs on and
- * lets the holder run, including on this CPU. */
-void ylock_init(ylock_t *lock) {
-  lock->locked = 0;
-  lock->owner = 0;
-}
-
-void ylock_acquire(ylock_t *lock) {
-  for (;;) {
-    uint32_t expected = 0;
-    if (__atomic_compare_exchange_n(&lock->locked, &expected, 1, 0,
-                                    __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
-      lock->owner = get_cpuid() + 1;
-      return;
-    }
-    arch_yield();   /* give the CPU away; IRQs stay enabled */
-  }
-}
-
-void ylock_release(ylock_t *lock) {
-  lock->owner = 0;
-  __atomic_store_n(&lock->locked, 0, __ATOMIC_RELEASE);
 }

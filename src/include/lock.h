@@ -47,25 +47,44 @@ typedef struct {
 /**
  * A lock for critical sections that may BLOCK.
  *
- * Same layout as spinlock_t on purpose: the existing diagnostics (lockdbg
- * registration, lock ranks) can keep referring to the same address without
- * knowing the difference.  The difference is behavioural and it is the whole
- * point: a waiter does not spin with interrupts off.  It yields the CPU and
- * retries, so the holder -- which may be asleep in a device read -- gets to run
- * and finish.  A thread that sleeps while holding an irqsave spinlock never
- * releases it; that is the fault this type exists to remove.
+ * Same layout family as spinlock_t on purpose, so the existing diagnostics
+ * keep referring to the same address without knowing the difference.  The
+ * difference is behavioural and it is the whole point: a waiter does not spin
+ * with interrupts off and does not burn a full timeslice either.  It parks
+ * (PROC_STATE_BLOCKED) on the lock's own wait ring, so the holder -- which may
+ * be asleep in a device read -- gets the CPU and finishes, and the waiting
+ * CPU is free to run somebody else's user code.
  *
- * Only for callers in process context whose critical section does device I/O.
- * It does NOT disable interrupts, so it must never guard state that an
- * interrupt handler also touches.
+ * INTERRUPTS ARE NOT DISABLED.  That is the property this type exists to
+ * provide: a thread inside the kernel keeps taking device interrupts, so a
+ * second thread can enter the kernel on the same core.
+ *
+ * Only for callers in process context.  It must NEVER guard state an
+ * interrupt handler also touches (an IRQ handler cannot block; acquiring this
+ * from one is reported as [LOCKERR] MUTEX-IN-IRQ and never parks).
+ *
+ * Wake protocol (the lost-wakeup argument, in full):
+ *   waiter:  under proc_lock: nwait++ ; then re-check `locked`
+ *            (still held -> state=BLOCKED, drop proc_lock, yield)
+ *   holder:  locked=0 (release store) ; then read nwait
+ *            (nonzero -> take proc_lock, pop one pid, set READY)
+ * Every interleaving either lets the waiter win the re-check or leaves nwait
+ * nonzero for the releaser, so no wake can be lost, and the releaser only
+ * pays for proc_lock when somebody is actually parked.
  */
 typedef struct {
-  volatile uint32_t locked; /**< 1 if locked, 0 if free */
+  volatile uint32_t locked; /**< 1 if held, 0 if free */
   volatile uint32_t owner;  /**< cpu+1 of the holder, 0 = unowned */
+  volatile int32_t nwait;   /**< parked waiters (pid ring below) */
+  volatile uint8_t whead;   /**< ring write cursor (under proc_lock) */
+  volatile uint8_t wtail;   /**< ring read cursor (under proc_lock) */
+  volatile uint8_t wlost;   /**< ring overflowed: releaser must wake-scan */
+  int32_t wait_pid[12];     /**< parked pids, FIFO */
 } ylock_t;
 
 void ylock_init(ylock_t *lock);
 void ylock_acquire(ylock_t *lock);
+int ylock_tryacquire(ylock_t *lock); /* 1 = acquired, 0 = held elsewhere */
 void ylock_release(ylock_t *lock);
 
 void spinlock_init(spinlock_t *lock);
@@ -129,6 +148,113 @@ uint8_t lockdiag_stage(uint32_t cpu);
  * tier can read the real marker counts instead of hand-grepping the console. */
 void lock_print_counters(void);
 
+/* ===========================================================================
+ * Lock-scope audit ("the kernel must not need to mask IRQs").
+ *
+ * This is the measurement and the guard rail that keeps the kernel from
+ * drifting back to "every lock is an irqsave spinlock".  It is ALWAYS ON (not
+ * a debug-build extra): the whole point is that a later change cannot quietly
+ * reintroduce the pattern without the test tiers seeing it.
+ *
+ * What it measures, per CPU:
+ *   - how long interrupts were masked by spinlock_acquire_irqsave, total and
+ *     worst-case, and which lock caused the worst window;
+ *   - the stack of registered locks currently held, so a fault or a stall can
+ *     name them;
+ *   - whether the kernel ever reaches a BLOCKING point while holding a
+ *     spinlock (the defect behind every "owner sleep inside a spinlock"
+ *     wedge: a holder that parks never releases);
+ *   - whether a lock is ever taken in the wrong context for its class.
+ *
+ * Cost: a handful of per-CPU stores plus one timer read (only when the
+ * outermost irqsave is taken), and a two-probe hash lookup for class checks.
+ * =========================================================================== */
+
+/* Declared in the registry so the audit knows which context may take it. */
+enum {
+  LOCK_CLASS_IRQ = 0,    /* an interrupt handler may take it (irqsave only) */
+  LOCK_CLASS_PROCESS = 1 /* process context only (spinlock or ylock_t) */
+};
+
+void lock_register(const void *lock, const char *name, int rank, int cls);
+const char *lock_name(const void *lock); /* "?" when unregistered */
+int lock_rank(const void *lock);         /* -1 when unregistered */
+int lock_class(const void *lock);        /* -1 when unregistered */
+
+/* Arch IRQ dispatch entry/exit (arm irq_lower_handler_c, x64
+ * general_interrupt_handler).  Makes `lock_audit_in_irq()` truthful, which is
+ * what turns "blocked in an IRQ handler" from a wedge into a report. */
+void lock_audit_irq_enter(void);
+void lock_audit_irq_exit(void);
+int lock_audit_in_irq(void);
+
+/* Called by the arch irqsave/irqrestore primitives.  `we_masked` is true when
+ * this acquisition is the one that actually turned IRQs off; `we_unmask` when
+ * the matching restore turns them back on.  Both are derived from the saved
+ * DAIF/RFLAGS word, so nested irqsave pairs account exactly once. */
+void lock_audit_irqoff_begin(int we_masked);
+void lock_audit_irqoff_end(int we_unmask);
+
+/* Held-lock stack (registered locks only): push after a successful acquire,
+ * pop before the release.  Used by [BLOCKHOLD] and by stall dumps. */
+void lock_audit_held_push(const void *lock, uint64_t pc);
+void lock_audit_held_pop(const void *lock);
+int lock_audit_held_depth(void);
+const char *lock_audit_held_outermost(void);
+
+/* Called by the arch irqsave primitive after a successful acquire: counts (and
+ * names once) an irqsave acquisition of a PROCESS-class lock, which is the
+ * pattern this work removes.  The target state is 0. */
+void lock_audit_note_irqsave_acquire(const void *lock, uint64_t pc);
+
+/* ---------------------------------------------------------------------------
+ * Kernel preemption control (the reason short locks no longer mask IRQs).
+ *
+ * The timer tick reschedules unconditionally -- including when it interrupted
+ * EL1 -- so a lock held with interrupts enabled can have its holder switched
+ * out mid-section.  Masking IRQs was the old way to prevent that, and it is
+ * what forced every lock in the kernel to pay interrupt latency and to block
+ * device interrupts from entering the kernel on that core.
+ *
+ * The standard answer, and the one this kernel now uses: a short critical
+ * section disables PREEMPTION, not interrupts.  The tick still runs, device
+ * interrupts still enter the kernel, and the switch is deferred until the last
+ * preempt_disable() unwinds.  Every spinlock acquisition takes one reference,
+ * so a plain spinlock_acquire() is safe on a lock no interrupt handler takes.
+ *
+ * Rule of thumb when choosing a lock (enforced/counted by the audit):
+ *   IRQ-class state          -> spinlock_acquire_irqsave (masks IRQs; required)
+ *   process, short           -> spinlock_acquire       (disables preemption only)
+ *   process, does I/O/blocks -> ylock_t                (parks the waiter)
+ * ------------------------------------------------------------------------- */
+void lock_audit_dump_ylocks(void); /* wedge report: name held/wanted ylocks */
+void lock_audit_dump_locks(void);  /* wedge report: name held plain spinlocks */
+uint32_t lock_audit_ylock_stalls(void); /* count of reported ylock stalls */
+
+void kernel_preempt_disable(void);
+void kernel_preempt_enable(void);
+int kernel_preempt_count(void);
+void kernel_preempt_reset(void);
+
+/* Call at every point the kernel is about to stop running this thread (park,
+ * schedule switch, voluntary yield inside a lock wait).  Reports -- once per
+ * (cpu, lock) -- when a spinlock is held across it.  `what` names the site. */
+void lock_audit_block_point(const char *what);
+
+/* Aggregate counters for the test tiers. */
+uint32_t lock_audit_blockholds(void);   /* blocking under a spinlock */
+uint32_t lock_audit_selflocks(void);    /* self-deadlock detections */
+uint32_t lock_audit_classerrs(void);    /* wrong context for the class */
+uint32_t lock_audit_irqmask_calls(void);/* irqsave acquisitions on PROCESS locks */
+void lock_audit_forgive_irqmask(uint32_t n); /* unit tier: forgive its own probe */
+uint32_t lock_audit_reg_dropped(void);  /* locks the registry could not hold */
+uint64_t lock_audit_irqoff_max_us(void);
+uint64_t lock_audit_irqoff_total_us(void);
+void lock_audit_reset_counters(void);
+
+/* One machine-readable console record; the test tiers grep and assert on it. */
+void lock_print_report(void);
+
 #include "arch/cpu.h"
 
 /* Canonical lock ranks (SEC-OBS-B): acquiring a lock while holding one of
@@ -147,8 +273,9 @@ enum {
 /* Debug-only lock-order tracker (src/kernel/lock_order.c), hooked from the
  * arch spinner implementations under src/kernel/arch/<arch>/locks.c.
  * Unregistered locks are ignored entirely, so partial registration is always
- * safe. */
-void lockdbg_register(const spinlock_t *lock, const char *name, int rank);
+ * safe.  Registration itself lives in lock_register() (lockscale.c), which is
+ * always compiled: the tracker reads its names and ranks from there, so a lock
+ * cannot be known to one instrument and unknown to the other. */
 uint32_t lockdbg_violations(void); /* count of reported order violations */
 void lockdbg_reset_violations(void);
 void lockdbg_precheck(const spinlock_t *lock);   /* before acquire attempt */

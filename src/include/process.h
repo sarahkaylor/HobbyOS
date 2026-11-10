@@ -870,6 +870,13 @@ uint32_t process_slot_seq(int pid);
 
 extern spinlock_t proc_lock;
 extern int cpu_current_pids[];
+
+/* Scheduler-state access for lock wait queues (src/kernel/lockscale.c).
+ * Caller MUST hold proc_lock.  These are plain table reads/writes on purpose:
+ * a lock's wait queue is exactly the place where a nested acquisition would
+ * create the proc_lock <-> filesystem inversion this kernel forbids. */
+int process_state_locked(int pid);
+int process_try_wake_locked(int pid); /* 1 = was BLOCKED, now READY */
 void set_current_process_pid(uint32_t cpu, int pid);
 
 struct sys_procinfo {

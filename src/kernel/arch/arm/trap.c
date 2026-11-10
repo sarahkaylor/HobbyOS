@@ -2518,15 +2518,18 @@ void sync_lower_handler_c(struct trap_frame *tf) {
 static void irq_dispatch_inner(struct trap_frame *tf);
 
 void irq_lower_handler_c(struct trap_frame *tf) {
+  /* Always-on lock audit: an IRQ handler must never try to park on a ylock_t,
+   * and rank rules do not govern acquisitions from exception context (see
+   * lock.h).  Both instruments are told, in every build. */
+  lock_audit_irq_enter();
 #ifdef KERNEL_MODE_UNIT_TEST
-  extern void lockdbg_irq_enter(void);
-  extern void lockdbg_irq_exit(void);
   lockdbg_irq_enter();
-  irq_dispatch_inner(tf);
-  lockdbg_irq_exit();
-#else
-  irq_dispatch_inner(tf);
 #endif
+  irq_dispatch_inner(tf);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_irq_exit();
+#endif
+  lock_audit_irq_exit();
 }
 
 static void irq_dispatch_inner(struct trap_frame *tf) {
@@ -2552,6 +2555,19 @@ static void irq_dispatch_inner(struct trap_frame *tf) {
     if (cur) {
       timer_reload();
       gic_end_interrupt(intid);
+      /* Preemption deferral (see lock.h): a short kernel critical section
+       * holds a preempt reference.  The tick is still taken, the device
+       * interrupt is still reported, and signals are still delivered -- only
+       * the CONTEXT SWITCH waits for the section to end, because switching a
+       * thread out while it holds a spinlock strands the lock.  Interrupts
+       * stay enabled throughout, which is the whole point. */
+      /* Safety net for the blocking locks: see ylock_watchdog().  Runs every
+       * 64th tick, costs a pointer walk, and turns a lost wakeup into one tick
+       * of latency instead of a dead machine. */
+      if (kernel_preempt_count() != 0) {
+        process_signal_trap_exit(tf);
+        return;
+      }
       schedule(tf, 0);
       /* P5 S3 (D8.4a): schedule() returns only when this process kept the
          CPU; a switch never returns (it resumes via enter_user_space's own
