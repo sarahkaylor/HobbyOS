@@ -27,6 +27,15 @@ surface. Measured on the real X server, same client, same bytes:
 120x on the call the display path is made of, with the image unchanged
 (`window_vs_surface_diff=0` on a 1280x720 frame).
 
+**Status.** The diagnosis and every instrument are landed. The *kernel* half —
+per-socket ring sizing, which is what turns the right-hand column on — is
+**not merged**: it delivers the 120x but leaks two socket-pool slots per
+named-socket session, so it is parked as
+`docs/l89-pending-ring-resize.patch` with its failing checks recorded (§6.1).
+The table's right-hand column is measured with that patch in the kernel (§4,
+§5.1); on today's kernel `setsockopt` is still a no-op and the row reports
+`got=524288`.
+
 ---
 
 ## 1. What the instruments said, in the order they said it
