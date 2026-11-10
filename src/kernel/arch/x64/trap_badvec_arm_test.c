@@ -20,6 +20,8 @@ int badvec_should_arm(uint64_t frame, uint64_t cs, uint64_t vector, int64_t pid,
                       uint64_t now_ms, int armed, int prints, int pid1_prints);
 void badvec_print_writer_row(uint64_t rip_after, uint64_t slot, uint64_t frame,
                              int frame_pid, int vect, int pid, int cpu);
+int badvec_frame_window(uint64_t p);
+void badvec_print_not_a_frame(uint64_t tfu);
 
 static void test_badvec_should_arm_pid1(void) {
   tests_run++;
@@ -54,8 +56,32 @@ static void test_badvec_writer_row_kernel_cs(void) {
                           1, 7);
 }
 
+/* GB-247: the fatal [BADVEC] dump must never read a slot through a pointer
+   that is not a frame.  The GB-146-V2 record read 0x1F36 (unaligned, so not a
+   uint64 frame on any CPU) and then printed a slot VA from a different
+   pointer; this case proves the window rejects it and that the dump's
+   not-a-frame line is the one row that comes out. */
+static void test_badvec_fatal_frame_window(void) {
+  tests_run++;
+  uart_puts("  Running test_badvec_fatal_frame_window...\n");
+
+  /* The 0x1F36 pointer from GB-146-V2's run 1: not 8-byte aligned, so it
+     cannot be a trap frame on any CPU's stack. */
+  EXPECT_EQ(badvec_frame_window(0x1F36ull), 0);
+  /* The entry stamps from the same record (0x23FFE2A0) and the earlier
+     census (0x25FFB640) are aligned frames and still pass. */
+  EXPECT_EQ(badvec_frame_window(0x23FFE2A0ull), 1);
+  EXPECT_EQ(badvec_frame_window(0x25FFB640ull), 1);
+  /* Kernel text is never a frame. */
+  EXPECT_EQ(badvec_frame_window(0x7008A3FEull), 0);
+  /* The exact line the fatal dump prints for the 0x1F36 pointer; no
+     vector_slot=/now_v=/now_cs= row is emitted through it. */
+  badvec_print_not_a_frame(0x1F36ull);
+}
+
 void trap_badvec_arm_test_suite(void) {
   test_badvec_should_arm_pid1();
   test_badvec_writer_row_kernel_cs();
+  test_badvec_fatal_frame_window();
 }
 #endif /* KERNEL_MODE_UNIT_TEST */
