@@ -97,6 +97,29 @@ Same unit suite, same host:
 | Self-deadlock detections | 1 (`fat16_mkdir`, fixed) | **0** |
 | Locks the registry could not hold | silent | **0**, counted |
 
+### Measured against an unmodified HEAD tree
+
+Same host, same tier command, same `-smp 8` QEMU command line; the HEAD side is
+a clean `git worktree` at HEAD with its own `MODE=test` image:
+
+| | HEAD | this tree |
+| --- | --- | --- |
+| Run 1 | 18,191 console lines, **no halt** (died mid-wave) | 21,920 lines, **halt**, 21x "ALL TESTS PASSED" |
+| Run 2 | 240 lines, **`[IDLESTUCK]`**, 7 of 8 CPUs idle, wedged right after the shell started | same as run 1 |
+
+So the tier this work is measured on was not green before it: HEAD never
+completed a clean wave in two attempts, and the wedge it hits is the one this
+document is about.  This tree completed it twice, back to back.
+
+That also reframes the two test failures the completed wave reports
+(`[SIGTEST] spawn_ex illegal dst` and `SQLTEST cross-process-BUSY`): HEAD never
+reached those programs, so they are not "previously green, now red".  Both fail
+on the async-spawn / process-table-pressure path, upstream of the fdmap
+validation and of any lock this work touches (a positive pid is impossible from
+the synchronous path, which returns `process_free(pid); return -EBADF;`).  They
+are now *reachable* tests that need their own fix; they are not evidence of a
+locking regression.
+
 The remaining 4.9 ms is `vm_lock`: a page-table walk over a large region, still
 `LOCK_CLASS_IRQ` because the fault path takes it.  It is bounded and measured,
 not hidden — the table above is the number to improve next.
@@ -142,6 +165,40 @@ ships.
 6. Never block while holding a plain spinlock.  The audit reports
    `[BLOCKHOLD]` with the lock name; the scheduler also resets the per-CPU
    preempt count at a switch so one such bug cannot pin a core forever.
+
+## 6a. Open defect the soak found (not fixed, on purpose)
+
+The `[CSTEST]` soak surfaces an **intermittent concurrent-FAT16 data-integrity
+race** that nothing was testing before it existed.  Evidence, two runs of the
+same binary:
+
+| Run | Soak result | Other programs in the same wave |
+| --- | --- | --- |
+| 1 | phase 2 (4 workers): `worker=0 data mismatch`, stopped at ops=3 | — |
+| 2 | all four phases PASS | `[WORKER 0] ERROR: data mismatch on TEST1.TXT. Expected: WORKER0_DATA` |
+
+So it is not the soak's own bug: a second, independent test read back wrong
+contents in the run where the soak was clean.  Each soak worker touches a
+**private** file (`/CSTEST<w>.TMP`), so a mismatch is not two writers fighting
+over one file -- it is a read returning bytes that were never written there.
+
+Leading hypothesis, and why this work may have widened the window: a `ylock_t`
+holder **can be preempted** (the lock keeps interrupts on and does not disable
+preemption; that is what lets the device IRQ land during filesystem work).  The
+FAT16 code was written under `irqsave`, where a holder could not be switched out
+mid-update, and several paths already drop `fat_lock` deliberately mid-operation
+(`fat16: read loop releases at cluster crossing`, `stats scans without fat_lock`).
+A preemptible holder makes any such window observable by another thread.
+
+Next experiments, in order:
+1. Give `ylock_acquire` a preempt reference for **metadata** sections only, and
+   leave device-I/O sections preemptible -- if the mismatch disappears, the
+   window is confirmed as "holder switched out mid-update".
+2. If it survives, the write-back path is the suspect: two files' directory
+   entries share a sector, and a lost update there is exactly this symptom.
+
+Until then the integration tier is red on this, which is the correct state for a
+gate to be in when a real data race is reachable.
 
 ## 7. Debugging a wedge
 
