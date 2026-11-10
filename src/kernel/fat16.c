@@ -52,6 +52,13 @@ static int fat16_lba_for_pos_locked(uint16_t start, uint32_t pos,
    test wave's program loads).  Guarded by its own small lock so it is
    safe on every call path (including pre-scheduler boot). */
 static spinlock_t fat_cache_lock;
+/* One FAT sector's read->modify->write, and the cache install that goes with
+ * it, must be atomic with respect to every other FAT sector update.  fat_lock
+ * cannot do this job: alloc_cluster() calls write_fat() with fat_lock RELEASED
+ * (the write is device I/O), which is exactly where two allocations used to
+ * interleave read/read/modify/modify/write/write and lose the first entry.
+ * Ordering: fat_lock (50) -> fat_io_lock (55) -> fat_cache_lock. */
+static ylock_t fat_io_lock;
 static uint8_t fat_cache[SECTOR_SIZE];
 static uint8_t fat_cache_fill[SECTOR_SIZE];
 static uint32_t fat_cache_sector;
@@ -221,6 +228,8 @@ int fat16_init(void) {
 /* PROCESS class + ylock_t: FAT entry points are syscall-side only and the
    critical sections do device I/O, so this lock must never mask IRQs. */
   lock_register(&fat_lock, "fat_lock", LOCK_RANK_FAT, LOCK_CLASS_PROCESS);
+  ylock_init(&fat_io_lock);
+  lock_register(&fat_io_lock, "fat_io_lock", LOCK_RANK_FATIO, LOCK_CLASS_PROCESS);
   spinlock_init(&fat_cache_lock);
   fat_cache_valid = 0;
   uint8_t buf[SECTOR_SIZE];
@@ -256,6 +265,10 @@ int fat16_init(void) {
 static uint16_t read_fat(uint16_t cluster) {
   uint32_t offset = cluster * 2;
   uint32_t sector = fat_sector + (offset / SECTOR_SIZE);
+  /* A reader that fetches the sector, then installs it AFTER a writer has
+   * already installed the newer copy, silently resurrects the old FAT.  Same
+   * lock as the writer, so a read can never straddle an update. */
+  ylock_acquire(&fat_io_lock);
   spinlock_acquire(&fat_cache_lock);
   if (!fat_cache_valid || fat_cache_sector != sector) {
     spinlock_release(&fat_cache_lock);
@@ -286,6 +299,7 @@ static uint16_t read_fat(uint16_t cluster) {
     if (!ok) {
       fat_cache_valid = 0;
       spinlock_release(&fat_cache_lock);
+      ylock_release(&fat_io_lock);
       return 0xFFF8; /* chain break: callers short-circuit and can retry */
     }
     for (int i = 0; i < SECTOR_SIZE; i++) fat_cache[i] = fat_cache_fill[i];
@@ -295,6 +309,7 @@ static uint16_t read_fat(uint16_t cluster) {
   uint8_t* p = fat_cache + (offset % SECTOR_SIZE);
   uint16_t v = (uint16_t)(p[0] | (p[1] << 8));
   spinlock_release(&fat_cache_lock);
+  ylock_release(&fat_io_lock);
   return v;
 }
 
@@ -302,6 +317,16 @@ static void write_fat(uint16_t cluster, uint16_t val) {
   uint8_t buf[SECTOR_SIZE];
   uint32_t offset = cluster * 2;
   uint32_t sector = fat_sector + (offset / SECTOR_SIZE);
+
+  /* THE LOST UPDATE THIS FIXES: read S, patch one entry, write S.  With two
+   * threads allocating at once the sequence interleaves
+   * read/read/modify/modify/write/write, and the first thread's FAT entry is
+   * gone -- a cluster chain that points into another file's clusters, which a
+   * reader sees as "bytes nobody wrote to this file".  fat_cache_lock only
+   * ever covered the cache copy at each end, never the device RMW, and
+   * alloc_cluster() runs this with fat_lock released.  Held across
+   * read->modify->write AND the cache install: the lock is the update. */
+  ylock_acquire(&fat_io_lock);
 
   /* Reuse the cache when it holds this sector; otherwise fetch it. */
   spinlock_acquire(&fat_cache_lock);
@@ -323,8 +348,10 @@ static void write_fat(uint16_t cluster, uint16_t val) {
       for (int i = 0; i < SECTOR_SIZE; i++)
         if (buf[i] != chk2[i]) { ok2 = 0; break; }
     }
-    if (!ok2)
+    if (!ok2) {
+      ylock_release(&fat_io_lock);
       return; /* never stamp a sector we could not read */
+    }
   }
 
   uint8_t* p = buf + (offset % SECTOR_SIZE);
@@ -342,6 +369,7 @@ static void write_fat(uint16_t cluster, uint16_t val) {
   fat_cache_sector = sector;
   fat_cache_valid = 1;
   spinlock_release(&fat_cache_lock);
+  ylock_release(&fat_io_lock);
 }
 
 /* W4-kernel (selfhost): free-cluster hint.  alloc_cluster() used to scan

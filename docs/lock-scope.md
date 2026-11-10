@@ -234,10 +234,28 @@ A lost FAT entry means a cluster chain that points into another file's clusters,
 which is exactly the reported symptom: a read returning bytes nobody wrote to
 that file. The in-RAM reservation is exclusive; the on-disk FAT update is not.
 
-Fix (not yet applied): give the FAT sector RMW its own blocking lock taken
-across read -> modify -> write, ordered strictly below `fat_lock`, or make the
-in-RAM FAT image authoritative and flush sectors from it. The second is the
-better long-term shape and is a larger change than this one.
+**FIXED** -- `fat_io_lock` (a `ylock_t`, rank 55, `fat_lock` 50 -> it -> 55
+`fat_cache_lock`), taken across the whole read -> modify -> write **and** the
+cache install, in both `write_fat()` and `read_fat()`.  `read_fat` needed it
+too: a reader that fetches a sector and installs it *after* a writer has already
+installed the newer copy silently resurrects the old FAT, which is the same lost
+update arriving through the other door.
+
+The lock is scoped to one FAT sector's update, not to the filesystem -- data
+writes, cluster reservations and directory work in other clusters still run
+concurrently, and interrupts stay enabled throughout.  Concurrency is preserved
+by narrowing the critical section to the thing that actually races.
+
+Evidence, same binary, four consecutive waves:
+
+| | before | after |
+| --- | --- | --- |
+| `[CSTEST]` soak | failed at phase 2 (`worker=0 data mismatch`) in 1 of 3 waves | PASS in 4 of 4 (1/2/4/8-way) |
+| `STRESS.BIN` mismatch | present in 2 of 2 waves carrying the soak | 0 in 4 of 4 |
+| clean halt | intermittent | 4 of 4 |
+
+The soak and `STRESS.BIN` are the regression guard: they fail on the unlocked
+RMW and pass on the locked one.
 
 Until then the integration tier is red on this, which is the correct state for a
 gate to be in when a real data race is reachable.

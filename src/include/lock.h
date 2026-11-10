@@ -266,6 +266,7 @@ enum {
   LOCK_RANK_FILE = 30,    /* per-file f->lock in global_file_table[] */
   LOCK_RANK_BACKEND = 40, /* pipes_lock / unix_pool_lock / net_lock */
   LOCK_RANK_FAT = 50,     /* fat_lock (held across virtio-blk I/O) */
+  LOCK_RANK_FATIO = 55,   /* fat_io_lock: one FAT sector's read-modify-write */
   LOCK_RANK_VM = 60       /* vm_lock (page tables; finest registered lock) */
 };
 
