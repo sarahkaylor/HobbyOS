@@ -1,0 +1,344 @@
+diff --git a/src/include/unix.h b/src/include/unix.h
+index d13a8b5b..2c6b6561 100644
+--- a/src/include/unix.h
++++ b/src/include/unix.h
+@@ -15,7 +15,8 @@
+ #define K_UNIX_STREAM     1  /* byte ring per direction                */
+ #define K_UNIX_SEQPACKET  2  /* message queue per direction            */
+ #define K_UNIX_DGRAM      3  /* message queue per direction            */
+-#define K_UNIX_RING       524288 /* STREAM bytes per direction          */
++#define K_UNIX_RING       524288 /* default STREAM bytes per direction */
++#define K_UNIX_RING_MAX   (16 * 1024 * 1024) /* ceiling for a resized ring */
+ #define K_UNIX_MSG_MAX    8192  /* max bytes per message                */
+ #define K_UNIX_MSGS       8     /* queued messages per direction        */
+ #define K_UNIX_MAX_FDS    K_IPC_MAX_FDS   /* fds per message            */
+@@ -40,8 +41,11 @@
+  * rwait/wwait are pid masks of parked readers/writers, exactly like
+  * struct pipe's (wakes are drained only after the lock is dropped). */
+ struct usock_chan {
+-  uint8_t *ring; /* K_UNIX_RING bytes in the frame pool (NULL until the
+-                    pair is connected; see usock.ring_base) */
++  uint8_t *ring; /* this direction's bytes: the pair block, or `own` once
++                    resized (NULL until the pair is connected) */
++  uint8_t *own;  /* L89: non-NULL when this direction was resized; the block
++                    ring points into, freed with `cap` on close */
++  uint32_t cap;  /* bytes available at ring: K_UNIX_RING unless resized */
+   uint16_t msg_len[K_UNIX_MSGS];
+   int16_t msg_fds[K_UNIX_MSGS][K_UNIX_MAX_FDS]; /* global fd indices, -1 */
+   uint8_t msg_nfds[K_UNIX_MSGS];
+@@ -108,6 +112,12 @@ int usock_available(struct usock *u, int end);
+ void usock_set_nonblock(struct usock *u, int end, int on);
+ int usock_get_nonblock(struct usock *u, int end);
+ int usock_type(struct usock *u);
++/* L89: per-direction ring sizing (default K_UNIX_RING, ceiling
++ * K_UNIX_RING_MAX).  A client that writes megabyte buffers per call asks for
++ * a ring that holds one, so its writes never fill the ring and never park. */
++int usock_set_ring(struct usock *u, int end, int bytes);
++int usock_ring_cap(struct usock *u, int end);
++int usock_pool_in_use(void); /* L89 diagnostic */
+ 
+ /* --- I/O engines (the pipe park model, per direction) ------------------- */
+ 
+diff --git a/src/kernel/fs.c b/src/kernel/fs.c
+index f6d631eb..e0763a66 100755
+--- a/src/kernel/fs.c
++++ b/src/kernel/fs.c
+@@ -1690,7 +1690,11 @@ int file_socket_getopt(struct process *p, int fd, int level, int optname,
+           break;
+         case K_SO_SNDBUF: /* IceWM M1: the per-direction ring */
+         case K_SO_RCVBUF:
+-          value = K_UNIX_RING;
++          /* L89: report the direction's real capacity, which a client can
++           * raise with setsockopt (grow only). */
++          value = usock_ring_cap(uf->usock.ptr,
++                                 optname == K_SO_SNDBUF ? uf->usock.end
++                                                        : 1 - uf->usock.end);
+           break;
+         case K_SO_ACCEPTCONN:
+           value = usock_is_listening(uf->usock.ptr) ? 1 : 0;
+@@ -1750,17 +1754,32 @@ int file_socket_setopt(struct process *p, int fd, int level, int optname,
+   (void)val;
+   (void)len;
+   /* IceWM M1: unix endpoints accept the buffer/credential knobs X
+-   * transports set (Xtrans raises SO_SNDBUF) as no-ops. */
++   * transports set.  L89: SO_SNDBUF/SO_RCVBUF are no longer no-ops -- they
++   * size this direction's ring (grow only, capped at K_UNIX_RING_MAX), which
++   * is how a client that puts a whole frame per call stops parking ~13 times
++   * per frame in the socket.  A transport that only asks for 64 KiB keeps
++   * the 512 KiB default. */
+   {
+     struct process *pg = process_group(p);
+     if (pg && fd >= 0 && fd < MAX_OPEN_FDS) {
+       int g = pg->open_fds[fd];
+       if (g >= 0 && g < MAX_GLOBAL_FILES &&
+           global_file_table[g].type == FILE_TYPE_UNIXSOCK) {
++        struct file *uf = &global_file_table[g];
+         if (level != K_SOL_SOCKET) return -ENOPROTOOPT;
+         switch (optname) {
+         case K_SO_SNDBUF:
+-        case K_SO_RCVBUF:
++        case K_SO_RCVBUF: {
++          int n = (int)sizeof(int);
++          if (!val) return -EINVAL;
++          if (len < n) return -EINVAL;
++          int want;
++          __builtin_memcpy(&want, val, sizeof want);
++          /* SO_SNDBUF names the ring this fd writes into, SO_RCVBUF the one
++           * it reads from: those are opposite directions of the pair. */
++          int dir = (optname == K_SO_SNDBUF) ? uf->usock.end : 1 - uf->usock.end;
++          return usock_set_ring(uf->usock.ptr, dir, want);
++        }
+         case K_SO_PASSCRED:
+         case K_SO_REUSEADDR:
+         case K_SO_KEEPALIVE:
+diff --git a/src/kernel/unix.c b/src/kernel/unix.c
+index 7fdd7d4b..9ede2b11 100644
+--- a/src/kernel/unix.c
++++ b/src/kernel/unix.c
+@@ -4,6 +4,8 @@
+ #include "lock.h"
+ #include "errno.h"
+ #include "frame.h"
++extern void uart_puts(const char *s);
++extern int print_int(int v);
+ 
+ /* P4 (docs/browser/p4-ipc-design.md sections 2-4): the AF_UNIX pair object.
+  * Blocking is the pipe park model: a reader/writer with nothing to do sets
+@@ -50,10 +52,30 @@ static void unix_ring_free(uint8_t *base) {
+     frame_free((uint64_t)(uintptr_t)base + (uint64_t)i * FRAME_SIZE);
+ }
+ 
++/* L89: a resized direction owns a block of its own, sized in frames. */
++static int unix_ring_frames(uint32_t bytes) {
++  return (int)((bytes + FRAME_SIZE - 1) / FRAME_SIZE);
++}
++
++static uint8_t *unix_ring_alloc_bytes(uint32_t bytes) {
++  return (uint8_t *)(uintptr_t)frame_alloc_contig(unix_ring_frames(bytes));
++}
++
++static void unix_ring_free_bytes(uint8_t *base, uint32_t bytes) {
++  if (!base) return;
++  int frames = unix_ring_frames(bytes);
++  for (int i = 0; i < frames; i++)
++    frame_free((uint64_t)(uintptr_t)base + (uint64_t)i * FRAME_SIZE);
++}
++
+ static void usock_attach_rings(struct usock *u, uint8_t *base) {
+   u->ring_base = base;
+   u->chan[0].ring = base;
+   u->chan[1].ring = base ? base + K_UNIX_RING : 0;
++  u->chan[0].cap = K_UNIX_RING;
++  u->chan[1].cap = K_UNIX_RING;
++  u->chan[0].own = 0;
++  u->chan[1].own = 0;
+ }
+ 
+ /* Wakes every pid in the mask.  MUST be called with no spinlock held:
+@@ -83,6 +105,10 @@ static struct usock *usock_alloc_common(int type, int connected) {
+     struct usock *u = &unix_pool[i];
+     if (u->in_use) continue;
+     u->in_use = 1;
++    uart_puts("[U] a="); print_int(i);
++    uart_puts(" t="); print_int(type);
++    uart_puts(" c="); print_int(connected);
++    uart_puts("\n");
+     usock_attach_rings(u, rings);
+     u->name[0].len = 0;
+     u->name[1].len = 0;
+@@ -161,6 +187,8 @@ void usock_close(struct usock *u, int end) {
+   struct usock *pending[K_UNIX_BACKLOG];
+   int npending = 0;
+   uint8_t *free_rings = 0;
++  uint8_t *free_own[2] = { 0, 0 };
++  uint32_t free_own_cap[2] = { 0, 0 };
+ 
+   /* IceWM M1: a bound / listening end 0 owns namespace state that is
+    * guarded by unix_name_lock (taken first: name -> usock order).  The
+@@ -175,6 +203,12 @@ void usock_close(struct usock *u, int end) {
+     if (named) spinlock_release_irqrestore(&unix_name_lock, nflags);
+     return;
+   }
++  uart_puts("[C] s="); print_int((int)(u - unix_pool));
++  uart_puts(" e="); print_int(end);
++  uart_puts(" r0="); print_int(u->refs[0]);
++  uart_puts(" r1="); print_int(u->refs[1]);
++  uart_puts(" in="); print_int(u->in_use);
++  uart_puts("\n");
+   u->refs[end]--;
+   if (u->refs[end] == 0) {
+     int peer = 1 - end;
+@@ -209,6 +243,12 @@ void usock_close(struct usock *u, int end) {
+       pid_mask_zero(&u->chan[end].wwait);
+       pid_mask_zero(&u->chan[peer].rwait);
+       free_rings = u->ring_base;
++      for (int d = 0; d < 2; d++) {
++        free_own[d] = u->chan[d].own;
++        free_own_cap[d] = u->chan[d].cap;
++      }
++      uart_puts("[U] f="); print_int((int)(u - unix_pool));
++      uart_puts("\n");
+       usock_attach_rings(u, 0);
+       u->in_use = 0;
+       u->connected = 0;
+@@ -222,10 +262,77 @@ void usock_close(struct usock *u, int end) {
+   /* Never-accepted connections: drop the queue's end-1 reference. */
+   for (int i = 0; i < npending; i++) usock_close(pending[i], 1);
+   unix_ring_free(free_rings);
++  for (int d = 0; d < 2; d++) unix_ring_free_bytes(free_own[d], free_own_cap[d]);
+ }
+ 
+ int usock_type(struct usock *u) { return u ? u->type : -1; }
+ 
++/* L89 diagnostic: how many pool slots are in use (test-only reader). */
++int usock_pool_in_use(void) {
++  int n = 0;
++  uint64_t f = spinlock_acquire_irqsave(&unix_pool_lock);
++  for (int i = 0; i < MAX_UNIX_PAIRS; i++) if (unix_pool[i].in_use) n++;
++  spinlock_release_irqrestore(&unix_pool_lock, f);
++  return n;
++}
++
++/* L89: size one direction's ring.  The default (K_UNIX_RING) is what every
++ * socket has always had; a client that moves megabyte buffers per call -- an
++ * X server's PutImage of a full frame -- asks for a ring that holds the whole
++ * buffer, so the writer never fills it and never parks.  On this kernel a
++ * park costs a scheduler wake (~10 ms), so a 3.7 MB frame crossing a 512 KiB
++ * ring parks ~13 times; that is the whole of the "135 ms XPutImage".
++ *
++ * Grows only, never shrinks, and the copy of any queued bytes happens under
++ * u->lock (the same lock the reader holds while it copies out), so a resize
++ * can never race a transfer.  The new block is allocated BEFORE the lock:
++ * the frame allocator takes its own locks and must not nest inside this one. */
++int usock_set_ring(struct usock *u, int end, int bytes) {
++  if (!u || end < 0 || end > 1) return -EINVAL;
++  if (bytes <= 0) return -EINVAL;
++  if ((uint32_t)bytes < K_UNIX_RING) bytes = K_UNIX_RING;
++  if ((uint32_t)bytes > K_UNIX_RING_MAX) bytes = K_UNIX_RING_MAX;
++  uint32_t want = (uint32_t)((bytes + FRAME_SIZE - 1) & ~(FRAME_SIZE - 1));
++  uint64_t f = spinlock_acquire_irqsave(&u->lock);
++  int need = u->in_use && want > u->chan[end].cap;
++  spinlock_release_irqrestore(&u->lock, f);
++  if (!need) return 0;
++
++  uint8_t *nb = unix_ring_alloc_bytes(want);
++  if (!nb) return -ENOMEM;
++
++  f = spinlock_acquire_irqsave(&u->lock);
++  struct usock_chan *c = &u->chan[end];
++  if (!u->in_use || want <= c->cap) {  /* raced or already big enough */
++    spinlock_release_irqrestore(&u->lock, f);
++    unix_ring_free_bytes(nb, want);
++    return 0;
++  }
++  uint32_t n = c->used;
++  uint32_t first = c->cap - c->tail;
++  if (first > n) first = n;
++  for (uint32_t i = 0; i < first; i++) nb[i] = c->ring[c->tail + i];
++  for (uint32_t i = first; i < n; i++) nb[i] = c->ring[i - first];
++  uint8_t *old_own = c->own;
++  uint32_t old_cap = c->cap;
++  c->own = nb;
++  c->ring = nb;
++  c->cap = want;
++  c->tail = 0;
++  c->head = n % want;
++  spinlock_release_irqrestore(&u->lock, f);
++  unix_ring_free_bytes(old_own, old_cap);
++  return 0;
++}
++
++int usock_ring_cap(struct usock *u, int end) {
++  if (!u || end < 0 || end > 1) return 0;
++  uint64_t f = spinlock_acquire_irqsave(&u->lock);
++  int cap = (int)u->chan[end].cap;
++  spinlock_release_irqrestore(&u->lock, f);
++  return cap;
++}
++
+ void usock_set_nonblock(struct usock *u, int end, int on) {
+   if (!u || end < 0 || end > 1) return;
+   uint64_t flags = spinlock_acquire_irqsave(&u->lock);
+@@ -272,7 +379,7 @@ static int chan_empty(const struct usock *u, const struct usock_chan *c) {
+ 
+ /* Is the write side full?  Caller holds u->lock. */
+ static int chan_full(const struct usock *u, const struct usock_chan *c) {
+-  if (u->type == K_UNIX_STREAM) return c->used >= K_UNIX_RING;
++  if (u->type == K_UNIX_STREAM) return c->used >= c->cap;
+   return c->mcount >= K_UNIX_MSGS;
+ }
+ 
+@@ -469,15 +576,15 @@ static int usock_stream_send(struct usock *u, int end, const struct k_iovec *io,
+     }
+     struct usock_chan *c = &u->chan[end];
+     int i = 0;
+-    while (i < total && c->used < K_UNIX_RING) {
+-      uint32_t free_bytes = K_UNIX_RING - c->used;
++    while (i < total && c->used < c->cap) {
++      uint32_t free_bytes = c->cap - c->used;
+       int take = total - i;
+       if ((uint32_t)take > free_bytes) take = (int)free_bytes;
+       uint32_t head = c->head;
+-      uint32_t contig = K_UNIX_RING - head;
++      uint32_t contig = c->cap - head;
+       if ((uint32_t)take > contig) take = (int)contig;
+       iov_load(io, niov, i, &c->ring[head], take);
+-      c->head = (head + (uint32_t)take) % K_UNIX_RING;
++      c->head = (head + (uint32_t)take) % c->cap;
+       c->used += (uint32_t)take;
+       i += take;
+     }
+@@ -516,10 +623,10 @@ static int usock_stream_recv(struct usock *u, int end, const struct k_iovec *io,
+       int take = cap - i;
+       if ((uint32_t)take > c->used) take = (int)c->used;
+       uint32_t tail = c->tail;
+-      uint32_t contig = K_UNIX_RING - tail;
++      uint32_t contig = c->cap - tail;
+       if ((uint32_t)take > contig) take = (int)contig;
+       iov_store(io, niov, i, &c->ring[tail], take);
+-      c->tail = (tail + (uint32_t)take) % K_UNIX_RING;
++      c->tail = (tail + (uint32_t)take) % c->cap;
+       c->used -= (uint32_t)take;
+       i += take;
+     }
+@@ -559,7 +666,7 @@ static int usock_msg_send(struct usock *u, int end, const struct k_iovec *io,
+       return -EPIPE;
+     }
+     struct usock_chan *c = &u->chan[end];
+-    if (chan_full(u, c) || c->used + (uint32_t)total > K_UNIX_RING) {
++    if (chan_full(u, c) || c->used + (uint32_t)total > c->cap) {
+       spinlock_release_irqrestore(&u->lock, flags);
+       int r = usock_park(u, end, 0, nonblock);
+       if (r == 1) continue;
+@@ -570,10 +677,10 @@ static int usock_msg_send(struct usock *u, int end, const struct k_iovec *io,
+     while (i < total) {
+       int take = total - i;
+       uint32_t head = c->head;
+-      uint32_t contig = K_UNIX_RING - head;
++      uint32_t contig = c->cap - head;
+       if ((uint32_t)take > contig) take = (int)contig;
+       iov_load(io, niov, i, &c->ring[head], take);
+-      c->head = (head + (uint32_t)take) % K_UNIX_RING;
++      c->head = (head + (uint32_t)take) % c->cap;
+       i += take;
+     }
+     c->used += (uint32_t)total;
+@@ -627,15 +734,15 @@ static int usock_msg_recv(struct usock *u, int end, const struct k_iovec *io,
+       while (done < copy) {
+         int take = copy - done;
+         uint32_t tail = c->tail;
+-        uint32_t contig = K_UNIX_RING - tail;
++        uint32_t contig = c->cap - tail;
+         if ((uint32_t)take > contig) take = (int)contig;
+         iov_store(io, niov, done, &c->ring[tail], take);
+-        c->tail = (tail + (uint32_t)take) % K_UNIX_RING;
++        c->tail = (tail + (uint32_t)take) % c->cap;
+         c->used -= (uint32_t)take;
+         done += take;
+       }
+     } else {
+-      c->tail = (c->tail + (uint32_t)mlen) % K_UNIX_RING;
++      c->tail = (c->tail + (uint32_t)mlen) % c->cap;
+       c->used -= (uint32_t)mlen;
+     }
+     int gdeliver[K_UNIX_MAX_FDS];

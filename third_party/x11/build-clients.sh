@@ -56,4 +56,28 @@ stage_clients() {
   else
     hb_log "xdepth8: skipped (--only)"
   fi
+
+  # XPUTBENCH.BIN: one XPutImage, measured in pieces (lane l89-xwire).  The
+  # hosted RimWorld window's whole display cost is one XPutImage per presented
+  # frame; this client prices the client call, the following XSync and a bare
+  # round trip separately, so "the wire is slow" and "the server is slow" stop
+  # being the same sentence.
+  if hb_want xputbench; then
+    local srcp="$HB_REPO/src/user/x11/apps/xputbench/main.c"
+    [ -f "$srcp" ] || hb_die "xputbench: missing $srcp"
+
+    # shellcheck disable=SC2046,SC2086
+    hb_run clients "$CC" $CFLAGS \
+      $("$PKG_CONFIG" --cflags x11) \
+      -c "$srcp" -o "$o/xputbench.o"
+
+    # shellcheck disable=SC2046
+    hb_run clients hb_link_flat "$o/XPUTBENCH.BIN" "$o/xputbench.o" \
+      $("$PKG_CONFIG" --libs x11)
+
+    cp "$o/XPUTBENCH.BIN" "$HB_BIN_DIR/XPUTBENCH.BIN"
+    hb_log "clients: XPUTBENCH.BIN ($(stat -c %s "$HB_BIN_DIR/XPUTBENCH.BIN") bytes)"
+  else
+    hb_log "xputbench: skipped (--only)"
+  fi
 }

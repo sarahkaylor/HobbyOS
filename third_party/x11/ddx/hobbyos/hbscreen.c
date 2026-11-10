@@ -76,6 +76,10 @@ extern void *map_fb(void);
 extern int fb_ioctl(unsigned long req, void *arg);
 extern int flush_fb_rects(const struct hb_fb_rect32 *rects, int count);
 extern void flush_fb(void);
+extern int sysinfo(int cmd, void *buf, int size);
+
+/* L89: the server's own millisecond clock (kernel uptime). */
+static int hbNowMs(void) { return sysinfo(1, 0, 0); }
 
 #define HB_FBIOGET_VSCREENINFO 0x4600
 #define HB_FBIOGET_FSCREENINFO 0x4602
@@ -299,6 +303,27 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
         return;
     if (scr->depth == 8)
         hbLoadPalette(pScreen);
+
+    /* L89: price the present.  The shadow->fb copy is cheap per byte; what
+     * is not cheap is the number of damage boxes, because each one is a row
+     * loop and every 32 of them is another SYS_FLUSH_FB_RECTS batch, and the
+     * kernel turns each rect into a synchronous TRANSFER_TO_HOST_2D +
+     * RESOURCE_FLUSH.  HB_PRESPROF=1 in the server's environment prints one
+     * [HBX] row per 16 presents: mean ms, mean damage boxes, mean pixels
+     * copied and the batches issued, which is the split between "the copy"
+     * and "the present commands". */
+    static int presprof = -1;
+    static unsigned long long hbx_n, hbx_ms, hbx_boxes, hbx_px, hbx_batches;
+    int hbx_t0 = 0;
+    unsigned long long hbx_px_frame = 0;
+    unsigned hbx_batches_frame = 0;
+    if (presprof < 0) {
+        const char *e = getenv("HB_PRESPROF");
+        presprof = (e && e[0] == '1') ? 1 : 0;
+    }
+    if (presprof)
+        hbx_t0 = hbNowMs();
+
     /* Many tiny boxes: present their extents instead (one copy, one rect). */
     if (nbox > 4 * HB_FLUSH_MAX_RECTS) {
         box = RegionExtents(damage);
@@ -315,6 +340,7 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
         if (y2 > scr->height) y2 = scr->height;
         if (x1 >= x2 || y1 >= y2)
             continue;
+        hbx_px_frame += (unsigned long long) (x2 - x1) * (unsigned long long) (y2 - y1);
         for (y = y1; y < y2; y++) {
             uint32_t *dst = scr->fb + (size_t) y * scr->fbStride + x1;
 
@@ -334,12 +360,28 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
         rects[n].y = y1;
         rects[n].w = x2 - x1;
         rects[n].h = y2 - y1;
+        hbx_batches_frame++;
         if (++n == HB_FLUSH_MAX_RECTS) {
             hbFlushBatch(rects, n);
             n = 0;
         }
     }
     hbFlushBatch(rects, n);
+
+    if (presprof) {
+        hbx_n++;
+        hbx_ms += (unsigned long long) (hbNowMs() - hbx_t0);
+        hbx_boxes += (unsigned long long) nbox;
+        hbx_px += hbx_px_frame;
+        hbx_batches += hbx_batches_frame;
+        if (hbx_n >= 16) {
+            fprintf(stderr, "[HBX] upd n=%llu ms=%llu boxes=%llu px=%llu "
+                    "batches=%llu\n",
+                    hbx_n, hbx_ms / hbx_n, hbx_boxes / hbx_n, hbx_px / hbx_n,
+                    hbx_batches / hbx_n);
+            hbx_n = hbx_ms = hbx_boxes = hbx_px = hbx_batches = 0;
+        }
+    }
 }
 
 static Bool
