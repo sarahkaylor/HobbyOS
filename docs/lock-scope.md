@@ -257,6 +257,13 @@ Evidence, same binary, four consecutive waves:
 The soak and `STRESS.BIN` are the regression guard: they fail on the unlocked
 RMW and pass on the locked one.
 
+`fat16.c` is shared code, so x64 was re-verified against the same binary pair
+rather than assumed: `run_desktop_test.py` PASS (`desktop=0`, screenshot
+validation non-blank) and `run_games_test.py` PASS on every check -- menu
+pinning, full-screen launch, key input, quit and desktop restore for both PONG
+and MILLIPED, including the ship-movement measurement (120 px for 6 keys) that
+used to flake.
+
 Until then the integration tier is red on this, which is the correct state for a
 gate to be in when a real data race is reachable.
 
