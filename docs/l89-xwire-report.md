@@ -70,7 +70,7 @@ chunk sizes.
 `linux_probe xwire`, 1280x720x4 = 3 686 400 bytes per cell, 4 cells each:
 
 ```
-[LP] copy memcpy 3.7MB                 0.00 ms ( 0.0 MB/s)  [reference, no kernel]
+[LP] copy memcpy 3.7MB                 -nan ms (   0.0 MB/s)  [reference, below the 1 ms clock]
 [LP] xfer w64k/r16k putimage       w= 65536 r= 16384     4.50 ms/frame ( 781.3 MB/s)
 [LP] xfer w64k/r64k                w= 65536 r= 65536     0.75 ms/frame (4687.5 MB/s)
 [LP] xfer w256k/r16k               w=262144 r= 16384     1.75 ms/frame (2008.9 MB/s)
@@ -78,6 +78,11 @@ chunk sizes.
 [LP] xfer w512k/r512k              w=524288 r=524288     1.00 ms/frame (3515.6 MB/s)
 [LP] xfer w1m/r512k                w=1048576 r=524288     1.00 ms/frame (3515.6 MB/s)
 ```
+
+The reference cell reads `-nan` because one 3.7 MB copy finished inside the
+guest's 1 ms `CLOCK_MONOTONIC` tick: the copy is sub-millisecond, which is the
+point. The same memcpy measured in the game run (HBHOST's `[HBTS] copy_us`,
+§5) is **359-442 us**.
 
 The same 3.7 MB that L88 costed at 33 MB/s moves at **0.75-4.5 ms** between
 threads. So the per-byte term in L88's model was never per-byte, and the
