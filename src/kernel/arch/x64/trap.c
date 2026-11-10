@@ -4283,9 +4283,15 @@ static inline uint64_t badvec_rd_dr7(void) {
 /* Is this frame in the window the two census dumps used?  User stacks are at
    0x25FFxxxx; the kernel image and its .bss live at 0x70000000+, which is also
    below USER_VA_BASE (6 GiB), so the base alone is not a discriminator.  Only
-   arm/watch below the kernel image. */
-static int badvec_frame_window(uint64_t p) {
-  return p >= 0x1000ULL && p < 0x70000000ULL;
+   arm/watch below the kernel image.
+
+   GB-247: a trap frame is a uint64 array, so a real frame pointer is 8-byte
+   aligned.  The fatal dump's `0x1F36` pointer is not (0x1F36 & 7 == 6), which
+   is the one check that says "not a frame on ANY CPU's stack" without needing
+   each CPU's stack bounds; every entry-stamped frame measured so far
+   (0x23FFE2A0, 0x25FFB640) is aligned.  Exported for the unit proof. */
+int badvec_frame_window(uint64_t p) {
+  return (p & 7ULL) == 0 && p >= 0x1000ULL && p < 0x70000000ULL;
 }
 
 /* GB-244: the pure arming decision, split out so a unit test can prove it.
@@ -4333,6 +4339,17 @@ void badvec_print_writer_row(uint64_t rip_after, uint64_t slot, uint64_t frame,
   panic_puts(" cpu=");
   print_int_raw(cpu);
   panic_puts("\n");
+}
+
+/* GB-247: the one line the fatal dump prints for a pointer that is not a
+   frame.  Split out so the unit case exercises the same text the field dump
+   emits; nothing else may be read through `tfu` after this. */
+void badvec_print_not_a_frame(uint64_t tfu) {
+  extern void panic_puts(const char *s);
+  extern void panic_print_hex(uint64_t v);
+  panic_puts("[BADVEC] fatal frame=");
+  panic_print_hex(tfu);
+  panic_puts(" not-a-frame (outside every per-CPU frame window)\n");
 }
 
 static int64_t badvec_pid(void);
@@ -5372,6 +5389,24 @@ static void general_interrupt_inner(struct trap_frame *tf) {
            interleave fields into the one record. */
         for (;;) __asm__ volatile("hlt");
       }
+      /* GB-247: capture the frame pointer ONCE and read every slot through
+         this value only.  The GB-146-V2 record printed `fatal frame=0x1F36`
+         and then a slot VA computed from a different pointer (0x700BEF3C),
+         i.e. a second load of `tf` reached the print; one more load like that
+         dereferences a non-frame and is a #PF inside the dump -> #DF/reset.
+         `tfu` is the only value this branch may dereference.  The shadowing
+         local makes the rule structural: every `tf->` below is `tfu`. */
+      uint64_t tfu = (uint64_t)tf;
+      struct trap_frame *tf = (struct trap_frame *)(uintptr_t)tfu;
+      if (!badvec_frame_window(tfu)) {
+        /* Not a frame on any CPU: report it and read nothing through it.
+           panic_claim is held here, so leave it before halting. */
+        extern void cpu_halt_record(uint32_t cpu);
+        badvec_print_not_a_frame(tfu);
+        panic_leave();
+        cpu_halt_record(get_cpuid());
+        for (;;) __asm__ volatile("hlt");
+      }
       /* GB-146-A: find the entry stamp for the frame the dump is about to
          print.  Scan the stamps rather than trusting the current CPU index:
          get_cpuid() itself reads GS, and a GS mix-up is one of the ways a
@@ -5385,7 +5420,6 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       {
         struct badvec_stamp *st = 0;
         int st_cpu = -1;
-        uint64_t tfu = (uint64_t)tf;
         int frame_user = badvec_frame_window(tfu);
         int64_t now_pid = badvec_pid();
         int stale_cpu = -1;
