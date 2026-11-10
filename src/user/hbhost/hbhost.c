@@ -38,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -660,6 +661,27 @@ int main(int argc, char **argv) {
   if (!dpy) {
     logmsg("cannot open X display for ", prog);
     return 1;
+  }
+
+  /* L89: make the X connection's ring hold a whole surface.  Every presented
+   * frame reaches XHOBBY as one XPutImage of the damaged rect, and Xlib sends
+   * it as ~256 KiB sub-requests; with the default 512 KiB ring the writer
+   * fills it and parks ~13 times per frame, and one park costs a scheduler
+   * wake (~10 ms) -- that was the whole 135 ms "XPutImage" in L88.  Asking
+   * for a ring that holds the surface makes the put async: measured 1280x720
+   * 120 ms -> 1 ms, and a full-screen present ~1 ms of server work.
+   * setsockopt is grow-only and capped (K_UNIX_RING_MAX, 16 MiB). */
+  {
+    int fd = ConnectionNumber(dpy);
+    int want = SURF_BYTES + (256 << 10);
+    if (want > (16 << 20))
+      want = 16 << 20;
+    int rc = setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &want, (int)sizeof want);
+    int got = 0, glen = (int)sizeof got;
+    if (getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &got, &glen) != 0)
+      got = -1;
+    fprintf(stderr, "[HB] xring fd=%d want=%d got=%d rc=%d\n",
+            fd, want, got, rc);
   }
 
   /* 1. the virtual display */
