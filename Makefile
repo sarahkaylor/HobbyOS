@@ -2945,16 +2945,16 @@ gpu-check:
 	  echo "-- ARM (qemu-system-aarch64) --"; \
 	  if command -v qemu-system-aarch64 >/dev/null 2>&1; then \
 	    probe "gtk,gl=on + virtio-gpu-gl-device (the GL config)" \
-	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 1 -m 512M -accel tcg \
+	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 512M -accel tcg \
 	      -display gtk,gl=on -device virtio-gpu-gl-device -S -monitor none -serial none -nodefaults && GLARM=1; \
 	    probe "egl-headless,gl=on + virtio-gpu-gl-device (why it is excluded)" \
-	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 1 -m 512M -accel tcg \
+	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 512M -accel tcg \
 	      -display egl-headless,gl=on -device virtio-gpu-gl-device -S -monitor none -serial none -nodefaults || true; \
 	    probe "-display none + virtio-gpu-gl-device (why headless stays soft)" \
-	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 1 -m 512M -accel tcg \
+	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 512M -accel tcg \
 	      -display none -device virtio-gpu-gl-device -S -monitor none -serial none -nodefaults || true; \
 	    probe "gtk + virtio-gpu-device (soft fallback)" \
-	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 1 -m 512M -accel tcg \
+	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 512M -accel tcg \
 	      -display gtk -device virtio-gpu-device -S -monitor none -serial none -nodefaults || true; \
 	  else echo "  (qemu-system-aarch64 not on PATH)"; fi; \
 	  if [ "$$GLARM" = "1" ]; then \

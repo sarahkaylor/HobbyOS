@@ -89,9 +89,8 @@ static void vm_lock_init_once(void) {
   if (__atomic_compare_exchange_n(&init_state, &expect, 1, 0,
                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
     spinlock_init(&vm_lock);
-#ifdef KERNEL_MODE_UNIT_TEST
-    lockdbg_register(&vm_lock, "vm_lock", LOCK_RANK_VM); /* SEC-OBS-B */
-#endif
+/* IRQ class: page-fault / exception paths take it, so irqsave is required. */
+    lock_register(&vm_lock, "vm_lock", LOCK_RANK_VM, LOCK_CLASS_IRQ);
     __atomic_store_n(&vm_lock_ready, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&init_state, 2, __ATOMIC_RELEASE);
     return;
