@@ -2,6 +2,13 @@
 
 #include "unit_test.h"
 #include "blk_cache.h"
+#include "lock.h" /* lock-scope gate: see the end of run_all_unit_tests */
+
+/* Longest single IRQ-off window the unit tier tolerates.  4x the measured
+ * worst case (vm_lock, ~4.9 ms during the bulk page-table tests), and 90x
+ * below the 435 ms the filesystem used to spend masked -- so it catches the
+ * regression class without being flaky about a slow host. */
+#define LOCK_IRQOFF_BUDGET_US 50000
 
 int tests_run = 0;
 int tests_failed = 0;
@@ -65,6 +72,39 @@ void run_all_unit_tests(void) {
   linux_compat_pi_test_suite(); /* PI futex word state machine (M6 park) */
   fpu_sig_test_suite(); /* M6/L63: signal-frame FP image: alignment guard */
 #endif
+
+  /* -----------------------------------------------------------------------
+   * Lock-scope gate (see src/kernel/lockscale.c).  This is the part that has
+   * to survive future sessions: the kernel is only allowed to mask interrupts
+   * where it must, and it may never reach a blocking point holding a
+   * spinlock.  A regression here is a hard test failure, not a warning.
+   * --------------------------------------------------------------------- */
+  lock_print_report();
+  tests_run++;
+  if (lock_audit_blockholds() != 0) {
+    uart_puts("FAIL: [BLOCKHOLD] a thread blocked while holding a spinlock\n");
+    tests_failed++;
+  }
+  if (lock_audit_selflocks() != 0) {
+    uart_puts("FAIL: [MUTEX-SELF] a lock was re-acquired by its own holder\n");
+    tests_failed++;
+  }
+  if (lock_audit_reg_dropped() != 0) {
+    uart_puts("FAIL: lock registry overflowed (some locks are unaudited)\n");
+    tests_failed++;
+  }
+  if (lock_audit_irqmask_calls() != 0) {
+    /* The kernel must not mask interrupts to protect a lock that only process
+     * context takes: use spinlock_acquire (preemption only) or ylock_t.  This
+     * is the invariant the whole lock-scope pass exists to keep. */
+    uart_puts("FAIL: a PROCESS-class lock was taken with interrupts masked\n");
+    tests_failed++;
+  }
+  if (lock_audit_irqoff_max_us() > LOCK_IRQOFF_BUDGET_US) {
+    uart_puts("FAIL: interrupts stayed masked longer than the budget (see\n"
+              "      the [LOCKHEALTH-IRQOFF] line for the lock and PC)\n");
+    tests_failed++;
+  }
 
   uart_puts("==================================\n");
   uart_puts("Tests run:    "); print_int(tests_run); uart_puts("\n");

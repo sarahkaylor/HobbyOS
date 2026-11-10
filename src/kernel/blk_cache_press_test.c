@@ -49,17 +49,9 @@ extern int frame_reclaim_to_free_frames(int want);
  * it nowhere — provide the ARM-side definition here (same pattern as
  * trap_test.c's memset shim), guarded off x64 to avoid a duplicate-
  * symbol conflict with cpu.c's memcpy. */
-#ifndef __x86_64__
-void *memcpy(void *dest, const void *src, unsigned long n) {
-  /* Volatile byte copy: the optimizer must not rewrite the loop back into
-     a call to memcpy (self-recursion at -O2). */
-  const volatile unsigned char *s = (const volatile unsigned char *)src;
-  volatile unsigned char *d = (volatile unsigned char *)dest;
-  while (n--)
-    *d++ = *s++;
-  return dest;
-}
-#endif
+/* memcpy: arch/<arch>/cpu.c defines it for both arches now (this shim was
+ * ARM-only to work around the x64 tree owning the symbol).  Keeping it
+ * duplicates the definition and breaks the ARM unit_tests link. */
 
 /* 1 GiB recipe image: exactly 2097152 sectors, indices 0 .. 2097151.  The
  * cache has NO capacity API (docs sections 1/3 — reads past its 2 GiB

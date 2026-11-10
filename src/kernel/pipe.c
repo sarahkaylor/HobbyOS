@@ -19,9 +19,8 @@ extern spinlock_t proc_lock;
  */
 void pipes_init(void) {
   spinlock_init(&pipes_lock);
-#ifdef KERNEL_MODE_UNIT_TEST
-  lockdbg_register(&pipes_lock, "pipes_lock", LOCK_RANK_BACKEND); /* SEC-OBS-B */
-#endif
+/* PROCESS class: pipe syscalls only; the IRQ side never touches the pool. */
+  lock_register(&pipes_lock, "pipes_lock", LOCK_RANK_BACKEND, LOCK_CLASS_PROCESS);
   for (int i = 0; i < MAX_GLOBAL_FILES / 2; i++) {
     pipes[i].reader_count = 0;
     pipes[i].writer_count = 0;
@@ -41,7 +40,7 @@ void pipes_init(void) {
  *   0 on success, -1 if no pipes are available.
  */
 int pipe_alloc(struct file **f0, struct file **f1) {
-  uint64_t flags = spinlock_acquire_irqsave(&pipes_lock);
+  spinlock_acquire(&pipes_lock);
   for (int i = 0; i < MAX_GLOBAL_FILES / 2; i++) {
     if (pipes[i].reader_count == 0 && pipes[i].writer_count == 0) {
       pipes[i].reader_count = 1;
@@ -60,11 +59,11 @@ int pipe_alloc(struct file **f0, struct file **f1) {
       (*f1)->pipe.ptr = &pipes[i];
       (*f1)->pipe.end = 1; // Write end
 
-      spinlock_release_irqrestore(&pipes_lock, flags);
+      spinlock_release(&pipes_lock);
       return 0;
     }
   }
-  spinlock_release_irqrestore(&pipes_lock, flags);
+  spinlock_release(&pipes_lock);
   return -1;
 }
 
@@ -73,13 +72,13 @@ int pipe_alloc(struct file **f0, struct file **f1) {
  * Used during process fork to share the pipe end with a child process.
  */
 void pipe_reopen(struct pipe *p, int end) {
-  uint64_t flags = spinlock_acquire_irqsave(&p->lock);
+  spinlock_acquire(&p->lock);
   if (end == 0) {
     p->reader_count++;
   } else {
     p->writer_count++;
   }
-  spinlock_release_irqrestore(&p->lock, flags);
+  spinlock_release(&p->lock);
 }
 
 /**
@@ -104,7 +103,7 @@ static void drain_wakeup_mask(const struct pid_mask *mask) {
 }
 
 void pipe_close(struct pipe *p, int end) {
-  uint64_t flags = spinlock_acquire_irqsave(&p->lock);
+  spinlock_acquire(&p->lock);
   struct pid_mask wake_mask;
   pid_mask_zero(&wake_mask);
   if (end == 0) {
@@ -124,7 +123,7 @@ void pipe_close(struct pipe *p, int end) {
       pid_mask_zero(&p->reader_pid_mask);
     }
   }
-  spinlock_release_irqrestore(&p->lock, flags);
+  spinlock_release(&p->lock);
   drain_wakeup_mask(&wake_mask);
 }
 
@@ -151,7 +150,7 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
     struct pid_mask wake_mask;
     pid_mask_zero(&wake_mask);
 
-    uint64_t flags = spinlock_acquire_irqsave(&p->lock);
+    spinlock_acquire(&p->lock);
 
     int woke_writers = 0;
     while (i < n && p->count > 0) {
@@ -175,16 +174,16 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
       // Empty pipe
       if (p->writer_count == 0) {
         // No writers left, EOF
-        spinlock_release_irqrestore(&p->lock, flags);
+        spinlock_release(&p->lock);
         return 0;
       }
       // Block until data available.  Lock order is proc_lock BEFORE the
       // pipe lock (fork holds proc_lock while taking file/pipe locks via
       // fs_reopen), so drop p->lock, retake both in order, and re-check.
       if (cur) {
-        spinlock_release_irqrestore(&p->lock, flags);
+        spinlock_release(&p->lock);
         uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
-        uint64_t pflags = spinlock_acquire_irqsave(&p->lock);
+        spinlock_acquire(&p->lock);
         if (p->count == 0 && p->writer_count > 0) {
           /* M6/L33: Linux's pipe_read checks signal_pending() exactly here --
              after "the pipe is empty" and before registering the waiter -- and
@@ -197,25 +196,25 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
           if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) &&
               linux_compat_sig_deliverable &&
               linux_compat_sig_deliverable(cur)) {
-            spinlock_release_irqrestore(&p->lock, pflags);
+            spinlock_release(&p->lock);
             spinlock_release_irqrestore(&proc_lock, proc_flags);
             return -EINTR;
           }
           pid_mask_set(&p->reader_pid_mask, cur->pid);
           cur->state = PROC_STATE_BLOCKED;
-          spinlock_release_irqrestore(&p->lock, pflags);
+          spinlock_release(&p->lock);
           spinlock_release_irqrestore(&proc_lock, proc_flags);
           return -2; // EAGAIN, handled by trap.c
         }
-        spinlock_release_irqrestore(&p->lock, pflags);
+        spinlock_release(&p->lock);
         spinlock_release_irqrestore(&proc_lock, proc_flags);
         continue; // state changed while locking; re-evaluate
       }
-      spinlock_release_irqrestore(&p->lock, flags);
+      spinlock_release(&p->lock);
       return 0;
     }
 
-    spinlock_release_irqrestore(&p->lock, flags);
+    spinlock_release(&p->lock);
     drain_wakeup_mask(&wake_mask);
     return i;
   }
@@ -244,7 +243,7 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
     struct pid_mask wake_mask;
     pid_mask_zero(&wake_mask);
 
-    uint64_t flags = spinlock_acquire_irqsave(&p->lock);
+    spinlock_acquire(&p->lock);
     if (p->reader_count == 0) {
       // No readers left.  P5 (D10): the write fails -EPIPE and SIGPIPE is
       // raised against the writer's group -- SIG_IGN survives (the WebKit
@@ -252,7 +251,7 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
       // action kills the writing group with WTERMSIG 13.  The diagnostic
       // is rate-limited: the ignore case is legitimate and the old
       // once-per-write print was noisy.
-      spinlock_release_irqrestore(&p->lock, flags);
+      spinlock_release(&p->lock);
       static int epipe_reports = 0;
       if (epipe_reports < 5) {
         epipe_reports++;
@@ -318,9 +317,9 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
       // Full pipe, block until space available.  Lock order: proc_lock
       // BEFORE the pipe lock (see pipe_read).
       if (cur) {
-        spinlock_release_irqrestore(&p->lock, flags);
+        spinlock_release(&p->lock);
         uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
-        uint64_t pflags = spinlock_acquire_irqsave(&p->lock);
+        spinlock_acquire(&p->lock);
         if (p->count >= PIPE_SIZE && p->reader_count > 0) {
           /* M6/L33: same Linux check on the write side: a compat writer with
              a deliverable pending signal returns -EINTR instead of parking. */
@@ -329,26 +328,26 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
           if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) &&
               linux_compat_sig_deliverable &&
               linux_compat_sig_deliverable(cur)) {
-            spinlock_release_irqrestore(&p->lock, pflags);
+            spinlock_release(&p->lock);
             spinlock_release_irqrestore(&proc_lock, proc_flags);
             return -EINTR;
           }
           pid_mask_set(&p->writer_pid_mask, cur->pid);
           cur->state = PROC_STATE_BLOCKED;
-          spinlock_release_irqrestore(&p->lock, pflags);
+          spinlock_release(&p->lock);
           spinlock_release_irqrestore(&proc_lock, proc_flags);
           return -2; // EAGAIN, handled by trap.c
         }
-        spinlock_release_irqrestore(&p->lock, pflags);
+        spinlock_release(&p->lock);
         spinlock_release_irqrestore(&proc_lock, proc_flags);
         continue; // state changed while locking; re-evaluate
       } else {
-        spinlock_release_irqrestore(&p->lock, flags);
+        spinlock_release(&p->lock);
         return 0;
       }
     }
 
-    spinlock_release_irqrestore(&p->lock, flags);
+    spinlock_release(&p->lock);
     drain_wakeup_mask(&wake_mask);
     return i;
   }
@@ -360,11 +359,11 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
  */
 int pipe_available(struct pipe *p) {
   if (!p) return -1;
-  uint64_t flags = spinlock_acquire_irqsave(&p->lock);
+  spinlock_acquire(&p->lock);
   int avail = p->count;
   if (avail == 0 && p->writer_count == 0) {
     avail = -1; // EOF
   }
-  spinlock_release_irqrestore(&p->lock, flags);
+  spinlock_release(&p->lock);
   return avail;
 }

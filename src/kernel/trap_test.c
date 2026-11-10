@@ -10,13 +10,10 @@
 extern void sync_lower_handler_c(struct trap_frame *tf);
 extern jmp_buf user_exit_context;
 
-#ifndef __x86_64__
-void *memset(void *s, int c, unsigned long n) {
-  char *p = s;
-  while (n--) *p++ = c;
-  return s;
-}
-#endif
+/* memset/memcpy: arch/<arch>/cpu.c defines both (ARM since the shared-code
+ * pass, x64 from the start).  This file used to carry an ARM-only shim; it
+ * became a duplicate symbol the moment the ARM side grew its own, breaking
+ * the whole ARM unit_tests link.  Use the arch definitions; do not re-add. */
 
 extern int cpu_current_pids[];
 extern uint32_t get_cpuid(void);
@@ -314,6 +311,11 @@ static void test_u_strcpy_atomic(void) {
  * test would take the whole unit suite down, which is the strongest assertion
  * available here: the negative cases must answer -1, not #PF.
  */
+/* Both L73 tests below drive `kpf_user_peek2` and `l73_test_entry`, which
+ * live in arch/x64/trap.c.  They are x64 coverage; the ARM tier gets stubs
+ * that assert nothing rather than an undefined symbol at link time (the
+ * whole ARM unit suite failed to link because of this). */
+#ifdef __x86_64__
 static void test_l73_user_peek_hole(void) {
   tests_run++;
   uart_puts("  Running test_l73_user_peek_hole...\n");
@@ -403,7 +405,11 @@ static void test_l73_entry_points_reject_holes(void) {
   struct trap_frame tf;
   for (unsigned i = 0; i < sizeof(tf) / sizeof(uint64_t); i++)
     ((uint64_t *)&tf)[i] = 0;
+#ifdef __x86_64__
   tf.cs = 0x33; /* user mode frame */
+#else
+  tf.spsr = 0; /* SPSR = EL0t: user mode frame (no `cs` selector on ARM) */
+#endif
 
   /* (1) the path pointer is a hole */
   for (int w = 0; w <= 5; w++) {
@@ -441,6 +447,10 @@ static void test_l73_entry_points_reject_holes(void) {
   vm_as_teardown(as);
   set_current_process_pid(get_cpuid(), -1);
 }
+#else /* !__x86_64__: the accessor + entry hook are x64-only */
+static void test_l73_user_peek_hole(void) {}
+static void test_l73_entry_points_reject_holes(void) {}
+#endif
 
 /* SEC-4 (security-plan.md #4): the stack canary must be seeded non-zero at
  * boot (a zero guard is invisible to memset-style smashes).  Detection

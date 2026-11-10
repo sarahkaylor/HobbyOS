@@ -319,9 +319,9 @@ static void kmemset(void *dst, uint8_t val, uint64_t n) {
  */
 void process_init(void) {
   spinlock_init(&proc_lock);
-#ifdef KERNEL_MODE_UNIT_TEST
-  lockdbg_register(&proc_lock, "proc_lock", LOCK_RANK_PROC); /* SEC-OBS-B */
-#endif
+/* IRQ class: the timer tick takes it from the scheduler (see lock.h).  This
+   is exactly the lock that must stay an irqsave spinlock. */
+  lock_register(&proc_lock, "proc_lock", LOCK_RANK_PROC, LOCK_CLASS_IRQ);
   /* P2.2 (design section 2): the frame bitmap is the single source of
      truth for pool state; the 32 MiB block layer is layered on it. */
   frame_init();
@@ -1693,6 +1693,11 @@ volatile int scheduler_started = 0;
 void schedule(struct trap_frame *tf, int is_yield) {
   if (!scheduler_started) return;
 
+  /* Lock-scope audit: this is the point where the thread stops running.  A
+   * spinlock held here is the wedge -- the holder may park and never release,
+   * and every other CPU then queues behind it.  Diagnostic only. */
+  lock_audit_block_point("schedule");
+
   uint32_t cpu = get_cpuid();
   if (cpu >= MAX_CPUS)
     return;
@@ -2217,6 +2222,15 @@ void schedule(struct trap_frame *tf, int is_yield) {
           }
         }
       }
+      /* The incoming context is NOT inside the interrupt handler that may
+      * have called us: that frame belongs to the thread we switch away from.
+      * Clear the per-CPU IRQ-context flag, or the new thread runs with
+      * "in IRQ" stuck on and an ordinary blocking lock looks like a
+      * MUTEX-IN-IRQ defect (observed: a false hit on fat_lock wedged the
+      * integration tier).  The outgoing thread's epilogue clears it again. */
+      lock_audit_irq_exit();
+      /* per-CPU: never hand an open section to the next context */
+      kernel_preempt_reset();
       enter_user_space(&local_tf, target_sp);
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
@@ -2495,6 +2509,10 @@ void schedule(struct trap_frame *tf, int is_yield) {
            console output the tier greps (not a hand-derived zero). */
         extern void lock_print_counters(void);
         lock_print_counters();
+        /* Lock-scope audit summary: the test tiers assert BLOCKHOLD/SELF/
+         * CLASSERR are 0 and bound the worst IRQ-off window.  Printed here, on
+         * CPU 0 before the halt, so it is real console output. */
+        lock_print_report();
         scheduler_finished();
       } else {
         uart_puts("System halt from CPU ");
@@ -4230,12 +4248,20 @@ int process_fork(struct trap_frame *tf) {
   child->context[33] = arch_get_user_sp();
 #endif
 
+  /* Inherit the fd table.  SNAPSHOT under proc_lock, but take the per-file
+   * lock OUTSIDE it: fs_reopen() acquires f->lock, which is now a blocking
+   * lock (it guards device I/O in close/truncate), so calling it here would
+   * park a proc_lock holder -- the documented proc_lock -> file inversion,
+   * and the exact cycle this kernel forbids.  The child is not READY yet, so
+   * no other core can observe it, and a concurrent close in the group is
+   * still serialised by the snapshot taken under the lock. */
+  int inherited_fds[MAX_OPEN_FDS];
+  int inherited_n = 0;
   child->num_open_fds = group->num_open_fds;
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
     child->open_fds[i] = group->open_fds[i];
-    if (child->open_fds[i] != -1) {
-      fs_reopen(child->open_fds[i]);
-    }
+    if (child->open_fds[i] != -1 && inherited_n < MAX_OPEN_FDS)
+      inherited_fds[inherited_n++] = child->open_fds[i];
   }
 
   /* Child inherits the parent's heap top and anonymous mappings (like the
@@ -4249,6 +4275,15 @@ int process_fork(struct trap_frame *tf) {
     child->anon_maps[i].len = group->anon_maps[i].len;
   }
 
+  spinlock_release_irqrestore(&proc_lock, flags);
+
+  /* Now the per-file references, with no proc_lock held (see above). */
+  for (int i = 0; i < inherited_n; i++)
+    fs_reopen(inherited_fds[i]);
+
+  /* Last transition under proc_lock so the scheduler cannot pick the child up
+   * before its fd references exist. */
+  flags = spinlock_acquire_irqsave(&proc_lock);
   child->state = PROC_STATE_READY;
   spinlock_release_irqrestore(&proc_lock, flags);
   /* L52: pthread_create's waiter blocks on a semaphore for this child's
@@ -4261,6 +4296,7 @@ int process_fork(struct trap_frame *tf) {
  * Puts the current process into a BLOCKED state and yields the CPU.
  */
 void process_sleep(void) {
+  lock_audit_block_point("process_sleep");
   uint32_t cpu = get_cpuid();
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   int pid = cpu_current_pids[cpu];
@@ -4291,6 +4327,24 @@ void process_wakeup(int pid) {
   spinlock_release_irqrestore(&proc_lock, flags);
   if (woke)
     sched_wake_idle_cpu();
+}
+
+/* Scheduler-state access for the blocking lock (see process.h).  Caller holds
+ * proc_lock; deliberately lock-free so a wait queue can be inspected and
+ * updated without nesting another registered lock under proc_lock. */
+int process_state_locked(int pid) {
+  if (pid < 0 || pid >= MAX_PROCESSES)
+    return -1;
+  return (int)proc_table[pid].state;
+}
+
+int process_try_wake_locked(int pid) {
+  if (pid < 0 || pid >= MAX_PROCESSES)
+    return 0;
+  if (proc_table[pid].state != PROC_STATE_BLOCKED)
+    return 0;
+  proc_table[pid].state = PROC_STATE_READY;
+  return 1;
 }
 
 /**
@@ -4699,6 +4753,15 @@ void start_scheduler(void) {
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
         extern void resume_mark(int pid, uint64_t target_sp);
         resume_mark(proc_table[i].pid, target_sp);
+        /* The incoming context is NOT inside the interrupt handler that may
+        * have called us: that frame belongs to the thread we switch away from.
+        * Clear the per-CPU IRQ-context flag, or the new thread runs with
+        * "in IRQ" stuck on and an ordinary blocking lock looks like a
+        * MUTEX-IN-IRQ defect (observed: a false hit on fat_lock wedged the
+        * integration tier).  The outgoing thread's epilogue clears it again. */
+        lock_audit_irq_exit();
+        /* per-CPU: never hand an open section to the next context */
+        kernel_preempt_reset();
         enter_user_space(&local_tf, target_sp);
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
@@ -5460,6 +5523,12 @@ void start_scheduler(void) {
           }
         }
       }
+      /* A wedge must name the contention, not just the CPU states: a ylock
+       * held by a parked thread and the pids queued behind it is the whole
+       * story of a filesystem deadlock, and printing it costs nothing when the
+       * machine is already stuck. */
+      lock_audit_dump_ylocks();
+      lock_audit_dump_locks();
       uart_puts("[IDLESTUCK] claims:");
       /* GB-057: `c<N>=<pid>/<idle_rounds>`.  The second field is this CPU's own
          idle-round count, so a claim held by a CPU that never returns to idle

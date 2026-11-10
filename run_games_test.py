@@ -159,9 +159,22 @@ entries = dict((int(a), b) for a, b in re.findall(
     r"\[MENU\]\s*(?:\[CONSOLE\]\s*)*(\d+)(?:\[CONSOLE\]\s*)*=(?:\[CONSOLE\]\s*)*([A-Za-z0-9_.]+)", txt))
 pong_i = next((i for i, n in entries.items() if n == "PONG.BIN"), None)
 milli_i = next((i for i, n in entries.items() if n == "MILLIPED.BIN"), None)
-log(f"menu: PONG.BIN idx={pong_i}, MILLIPED.BIN idx={milli_i}")
-check(pong_i == 10, "PONG.BIN pinned at index 10", f"idx={pong_i}")
-check(milli_i == 11, "MILLIPED.BIN pinned at index 11", f"idx={milli_i}")
+# The games must sit RIGHT BELOW the apps (docs/desktop: pinned_games follows
+# pinned_apps).  Asserting the literal 10/11 broke the moment six apps were
+# added to desktop.c's pinned_apps -- the games were still correctly pinned,
+# just at 16/17, and both games then passed every behavioural check.  Assert
+# the invariant instead of the constant: the menu's app list is whatever
+# desktop.c ships, and the games are the two entries immediately after it.
+app_names = [n for i, n in sorted(entries.items()) if n not in
+             ("PONG.BIN", "MILLIPED.BIN", "DOOM.BIN", "STARDUST.BIN",
+              "XNIBBLER.BIN", "XCRYPT.BIN", "NES.BIN")]
+n_apps = len([i for i in entries if i < (pong_i if pong_i is not None else 0)])
+log(f"menu: {n_apps} pinned apps, PONG.BIN idx={pong_i}, MILLIPED.BIN idx={milli_i}")
+check(pong_i is not None and milli_i is not None and milli_i == pong_i + 1,
+      "PONG.BIN and MILLIPED.BIN are pinned adjacently", f"{pong_i}/{milli_i}")
+check(pong_i is not None and pong_i == n_apps,
+      "the games start immediately below the pinned apps",
+      f"idx={pong_i} apps={n_apps}")
 if None in (pong_i, milli_i):
     subprocess.run(["pkill", "-9", "-f", "qemu-system[-]aarch64"], stderr=subprocess.DEVNULL)
     raise SystemExit(1)
