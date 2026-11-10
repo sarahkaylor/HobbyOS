@@ -201,9 +201,43 @@ the `STRESS.BIN` mismatch in place and changed nothing measurable, so it was
 reverted rather than kept as unexplained cost.  That rules out "holder
 preempted mid-update" as the mechanism.
 
-Experiment 2 is now the leading one: the write-back path. Two files' directory
-entries and FAT chains share a sector, and a lost update there produces exactly
-this symptom (a read returning bytes nobody wrote to that file).
+Experiment 2 found the mechanism: **`write_fat()` is an unserialized
+read-modify-write of a FAT sector.**
+
+```c
+static void write_fat(uint16_t cluster, uint16_t val) {
+  ...
+  spinlock_acquire(&fat_cache_lock);
+  int cached = (fat_cache_valid && fat_cache_sector == sector);
+  if (cached) memcpy(buf, fat_cache, SECTOR_SIZE);   /* snapshot */
+  spinlock_release(&fat_cache_lock);
+  if (!cached) virtio_blk_read_raw(sector, buf, 1);  /* read  */
+  buf[offset % SECTOR_SIZE] = val;                   /* modify */
+  virtio_blk_write_sector(sector, buf, 1);           /* write */
+  ...
+}
+```
+
+`fat_cache_lock` covers only the cache copy at each end, never the
+read -> modify -> write to the device, and the *write itself* is device I/O, so
+`alloc_cluster()` deliberately calls this with `fat_lock` **released** (the
+comment above `alloc_cluster` says so explicitly). Two threads allocating at the
+same time therefore interleave:
+
+```
+T1: read sector S -> buf1          T2: read sector S -> buf2
+T1: buf1[cluster A] = next         T2: buf2[cluster B] = next
+T1: write S  (contains A)          T2: write S  (contains B, A is gone)
+```
+
+A lost FAT entry means a cluster chain that points into another file's clusters,
+which is exactly the reported symptom: a read returning bytes nobody wrote to
+that file. The in-RAM reservation is exclusive; the on-disk FAT update is not.
+
+Fix (not yet applied): give the FAT sector RMW its own blocking lock taken
+across read -> modify -> write, ordered strictly below `fat_lock`, or make the
+in-RAM FAT image authoritative and flush sectors from it. The second is the
+better long-term shape and is a larger change than this one.
 
 Until then the integration tier is red on this, which is the correct state for a
 gate to be in when a real data race is reachable.
