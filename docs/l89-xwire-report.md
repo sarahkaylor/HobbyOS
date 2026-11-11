@@ -252,9 +252,22 @@ seeded from this lane:
 * `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` — **Tests run 448, Tests failed 0**
   (main carries 12 more than the rimworld line's 436).
 * `python3 tools/rw/l89-xputbench.py --no-build` — the finding reproduces on
-  main's tree, with the same default ring:
-  `[XPB] xring fd=3 want=0 got=524288`, `put-whole ... put=119666 us`,
-  `[XPB] put-subrect ... put=100000 us`.
+  main's tree, with the same default ring and a complete run:
+
+  ```
+  [XPB] xring fd=3 want=0 got=524288
+  [XPB] put-whole      n=3   put=126000 us  sync=20000 us
+  [XPB] put-subrect    n=3   put=126666 us  sync=16666 us
+  [XPB] put-scanline   n=21  put=0 us       sync=19523 us
+  [XPB] roundtrip      n=30  put=0 us       sync=13333 us
+  [XPB] put-pixmap     n=11  put=23727 us   sync=14636 us
+  [XPB] copy-present   n=21  put=0 us       sync=19952 us
+  [XPB] done rc=0
+  ```
+
+  (`put-pixmap` is the noisy cell — 0.7 ms to 23 ms across runs — because it
+  is the same payload into a drawable with no present, so it rides the
+  server's wake schedule; the window puts are the stable ones.)
 
 So the diagnosis and the instruments are main-compatible; only the kernel half
 (§3) is line-specific, and it needs a rebase onto main's process-context lock
