@@ -3344,8 +3344,8 @@ $(CLOCKABI_TEST): src/host/clockabi_test.c
 # owner is a recorded-halted CPU is freed and re-acquired normally, and a CPU
 # never frees its own lock.
 LOCKSTEAL_TEST = locksteal_test_host
-$(LOCKSTEAL_TEST): src/host/locksteal_test.c src/kernel/arch/x64/locks.c src/include/lock.h
-	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/arch/x64/locks.c src/host/locksteal_test.c -o $@
+$(LOCKSTEAL_TEST): src/host/locksteal_test.c src/kernel/arch/x64/locks.c src/kernel/lockscale.c src/include/lock.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/arch/x64/locks.c src/kernel/lockscale.c src/host/locksteal_test.c -o $@
 
 # GB-246 SEC-4 panic report: the prologue -> canary-slot rule and the
 # expected/found formatter are unit-tested on the host (the panic path itself

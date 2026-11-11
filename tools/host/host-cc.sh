@@ -13,9 +13,19 @@
 # vendored cross stages but not by the host tests, so `make host_tests` failed on
 # a defect the tree had already solved elsewhere.
 #
-# Off Darwin the probe is a no-op and this is just `cc`.
+# Off Darwin this used to be just `cc`, which is gcc on the linuxci runner.  That
+# is wrong for this layer: the host-test rules and the xcompat DSO stages are
+# written against CLANG's interface — `--target=x86_64-linux-gnu`,
+# `-nostdlib++`, `-nostdinc++`, `-fuse-ld=lld` — so a gcc `cc` fails them with
+# "unrecognized command-line option" before any test runs.  The project pins
+# LLVM 21 everywhere (third_party/llvm-21.1.8, the CI PATH), so pick clang when
+# it exists and fall back to cc only where it does not.  Apple's `cc` IS clang,
+# so Darwin keeps its path (and its SDKROOT pinning) unchanged.
 set -eu
 _root=$(cd "$(dirname "$0")/../.." && pwd)
 # shellcheck source=/dev/null
 . "$_root/tools/host/macos-sdk.sh"
+if [ -z "${HB_SDK_CC:-}" ] && [ "$(uname -s)" != Darwin ] && command -v clang >/dev/null 2>&1; then
+  HB_SDK_CC=clang
+fi
 exec "${HB_SDK_CC:-cc}" "$@"

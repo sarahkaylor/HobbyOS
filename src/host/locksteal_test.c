@@ -46,6 +46,19 @@ uint32_t get_cpuid(void) { return (uint32_t)host_cpu; }
 int cpu_is_halted(uint32_t cpu) { return cpu < 16 ? host_halted[cpu] : 0; }
 uint64_t timer_get_ms(void) { return host_now_ms; }
 
+/* The real x64 acquisition path also calls the lock-scope audit and the
+   preemption counter, both defined in src/kernel/lockscale.c -- so that TU is
+   linked in as well (it is the thing that owns lock_audit_* and
+   kernel_preempt_*; stubbing them here would leave the units under test half
+   fake).  lockscale.c compiles clean under -DHOST_TEST and needs only these
+   six kernel symbols, which is all this section has to supply. */
+int cpu_current_pids[16];               /* lockscale: "who runs on this CPU" */
+void uart_puts(const char *s) { (void)s; }  /* its dumps: not exercised here */
+void print_int(int v) { (void)v; }
+struct process *process_get_pcb(int pid) { (void)pid; return 0; }
+uint64_t timer_get_us(void) { return host_now_ms * 1000; }
+
+
 /* Capture the console: the steal must be announced, never silent. */
 static char con[4096];
 static size_t con_n;
