@@ -3440,6 +3440,18 @@ int linux_compat_fault(struct process *p, struct trap_frame *tf, int signo) {
       kl_hex(&kl, (unsigned long)tf->lr);
       kl_s(&kl, " vec=");
       kl_i(&kl, (int)tf->vector);
+      /* The faulting address is what classifies the crash: a wild pointer into
+         unmapped memory reads very differently from a protection fault on a
+         page that IS mapped (JIT arena, guard page).  CR2 is only valid in the
+         fault context, which is here. */
+      if (tf->vector == 14) {
+#if defined(__x86_64__)
+        uint64_t cr2 = 0;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+        kl_s(&kl, " cr2=0x");
+        kl_hex(&kl, (unsigned long)cr2);
+#endif
+      }
       kl_s(&kl, " live=");
       kl_i(&kl, grp->live_threads);
       kl_s(&kl, " -> default action\n");
