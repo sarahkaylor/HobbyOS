@@ -30,8 +30,23 @@ Don't use for: choosing build ARCH/MODE mechanics (→ [[hobbyos-build-and-run]]
 Userland programs are compiled natively on macOS with `-DHOST_TEST` against a mock libc/framebuffer (`src/host/compat.c`), then run directly. This is the fast baseline for game/app/logic bugs.
 
 ```bash
-make host_tests    # builds + runs the editor and pong host tests
+make host_tests_portable   # macOS gate: 71 targets, 65 passed, 0 failed, 6 non-binary
+make host_tests            # Linux gate (linuxci): 40/40 — the %parity% family needs glibc
 ```
+
+**Two gates, not one.** `host_tests` runs the `%parity%` targets, which compare
+against glibc/GNU coreutils — they cannot pass on macOS. Use
+`host_tests_portable` there and `host_tests` on linuxci (the split linux-ci's arm
+job uses). `-k` on linuxci surfaces every broken target in one pass instead of
+one per six-minute CI round.
+
+The host layer is written against **clang's** interface (`--target=x86_64-linux-gnu`,
+`-nostdlib++`, `-nostdinc++`, `-fuse-ld=lld`), so `tools/host/host-cc.sh` must
+resolve to clang off Darwin too — a gcc `cc` fails the xcompat DSO stages with
+"unrecognized command-line option". If a host target is red on Linux but green on
+macOS, suspect the C standard first: gcc 15 defaults to C23, where `()` means
+`(void)` (unprototyped typedefs break) and pointer-type mismatches are hard
+errors (e.g. glibc's `locale_t` vs this tree's).
 
 Pattern (see `src/host/pong_test.c`): the test `#include`s the userland `.c` with `#define main <name>_main`, then unit-tests its pure functions (ball physics, collision, scoring…) with `ASSERT`s, printing `PASS`/`FAIL` and a summary, returning non-zero on any failure. Add a new one by writing `src/host/<prog>_test.c`, adding a `*_host` link rule in the Makefile's host section, and listing it under the `host_tests` target. **Prefer this tier for any logic that doesn't need real kernel services** — it's the fastest signal by far.
 
