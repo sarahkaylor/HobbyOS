@@ -2592,3 +2592,18 @@ static void irq_dispatch_inner(struct trap_frame *tf) {
 
   gic_end_interrupt(intid);
 }
+
+/* GB-229: the per-CPU watchdog record (last-seen rip/pid of the context each
+   CPU was in) is x64-only state -- src/kernel/arch/x64/trap.c keeps it.  The
+   shared [LOCKDIAG] / [PROCLOCK-HOLD] rows in process.c ask for it on both
+   arches, so ARM answers "nothing sampled" (rip 0, pid -1) instead of leaving
+   the two symbols undefined at link time.  Callers already treat 0/-1 as "no
+   record": owner_wd_rip prints 0x0 and owner_in_user is suppressed. */
+uint64_t watchdog_cpu_rip(uint32_t cpu) {
+  (void)cpu;
+  return 0;
+}
+int watchdog_cpu_pid(uint32_t cpu) {
+  (void)cpu;
+  return -1;
+}

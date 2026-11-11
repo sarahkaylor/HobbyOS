@@ -51,6 +51,13 @@ extern void print_int(int v);
  * more than the lock.  Re-registration overwrites in place.
  * ------------------------------------------------------------------------- */
 #define LS_REG_SLOTS 4096 /* power of two */
+/* Open addressing needs a probe budget deeper than the worst run in the table.
+ * With the file-table's 512 stride-walked locks the 4-probe original dropped a
+ * registration once the merge brought the lock count up (measured: 1 drop,
+ * reg_used well under LS_REG_SLOTS -- a cluster, not a full table).  A cluster
+ * is exactly what the "never fail silently" rule must not turn into a lost
+ * audit row: probe 16 before declaring the table unable to hold the lock. */
+#define LS_REG_PROBES 16
 
 struct ls_reg {
   const void *lk;
@@ -64,6 +71,8 @@ static struct ls_reg ls_reg[LS_REG_SLOTS];
  * lock whose class check and BLOCKHOLD coverage quietly do not exist.  Counted
  * and printed in [LOCKHEALTH] so a table too small is a visible defect. */
 static volatile uint32_t ls_reg_dropped;
+/* Filled slots, so "the table is 90% full" is visible before it starts dropping. */
+static volatile uint32_t ls_reg_used;
 
 static uint32_t ls_hash(const void *p) {
   /* Fibonacci (multiplicative) hashing on the ADDRESS, taking the TOP bits.
@@ -82,7 +91,7 @@ void lock_register(const void *lock, const char *name, int rank, int cls) {
   if (!lock || !name)
     return;
   uint32_t h = ls_hash(lock);
-  for (uint32_t i = 0; i < 4; i++) {
+  for (uint32_t i = 0; i < LS_REG_PROBES; i++) {
     struct ls_reg *e = &ls_reg[(h + i) & (LS_REG_SLOTS - 1)];
     if (e->lk == lock) { /* re-registration: update in place */
       e->name = name;
@@ -95,6 +104,7 @@ void lock_register(const void *lock, const char *name, int rank, int cls) {
       e->name = name;
       e->rank = rank;
       e->cls = cls;
+      ls_reg_used++;
       return;
     }
   }
@@ -106,7 +116,7 @@ static const struct ls_reg *ls_lookup(const void *lock) {
   if (!lock)
     return 0;
   uint32_t h = ls_hash(lock);
-  for (uint32_t i = 0; i < 4; i++) {
+  for (uint32_t i = 0; i < LS_REG_PROBES; i++) {
     const struct ls_reg *e = &ls_reg[(h + i) & (LS_REG_SLOTS - 1)];
     if (e->lk == lock)
       return e;
@@ -405,6 +415,7 @@ void lock_audit_forgive_irqmask(uint32_t n) {
     ls_irqmask_calls--;
 }
 uint32_t lock_audit_reg_dropped(void) { return ls_reg_dropped; }
+uint32_t lock_audit_reg_used(void) { return ls_reg_used; }
 
 void lock_audit_note_irqsave_acquire(const void *lock, uint64_t pc) {
   if (lock_class(lock) != LOCK_CLASS_PROCESS)
@@ -463,6 +474,8 @@ void lock_print_report(void) {
   kl_i(&k, (long)lock_audit_irqoff_max_us());
   kl_s(&k, " irqoff_total_us=");
   kl_i(&k, (long)lock_audit_irqoff_total_us());
+  kl_s(&k, " reg_used=");
+  kl_i(&k, (long)ls_reg_used);
   kl_s(&k, " reg_dropped=");
   kl_i(&k, (long)ls_reg_dropped);
   kl_s(&k, "\n");

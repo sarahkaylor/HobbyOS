@@ -626,6 +626,14 @@ endif
 ifneq ($(RW_FUTXW),)
   CFLAGS += -DRW_FUTXW=1
 endif
+# Diagnostic: the per-key wait/wake ledger ([CWV]) -- parks vs dequeue events
+# per (as,uaddr), last park/wake sequence numbers, and an 8-event ring per key,
+# printed at a stall.  Answers "was a wake issued after the last park, and did
+# it find the waiter", which the per-thread [FUTEX] q counters cannot.
+#     make RW_CWV=1 ... disk.img
+ifneq ($(RW_CWV),)
+  CFLAGS += -DRW_CWV=1
+endif
 # Diagnostic: one spurious futex wake on every queued waiter, every 8 s from
 # t=30 s (rule 24b).  If the game's stall is a lost wake, this un-sticks it and
 # the loader continues; if it is not, nothing changes.  Diagnostic only.
@@ -3339,6 +3347,22 @@ LOCKSTEAL_TEST = locksteal_test_host
 $(LOCKSTEAL_TEST): src/host/locksteal_test.c src/kernel/arch/x64/locks.c src/include/lock.h
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/arch/x64/locks.c src/host/locksteal_test.c -o $@
 
+# GB-246 SEC-4 panic report: the prologue -> canary-slot rule and the
+# expected/found formatter are unit-tested on the host (the panic path itself
+# halts, so a synthetic smashed frame is the falsifier: found != guard must
+# print pc, guard, found and delta rather than crashing silently).
+#
+# The two decoders in ssp_report.c are `#ifdef __x86_64__` so the ARM kernel TU
+# compiles them away -- but they are pure byte-pattern logic over a synthetic
+# prologue (no asm, no arch types, only <stdint.h>), so a host test that ran
+# without them would assert nothing on an arm64 Mac: the stub returns 0 and the
+# two prologue checks fail.  Compile the host leg with the x86_64 lane forced on
+# and the decoder is exercised on every host.  Do NOT copy this flag onto the
+# kernel build (obj/$(ARCH)/ssp_report.o) -- there it must follow the arch.
+SSP_REPORT_TEST = ssp_report_test_host
+$(SSP_REPORT_TEST): src/host/ssp_report_test.c src/kernel/ssp_report.c src/include/ssp.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) -D__x86_64__ src/kernel/ssp_report.c src/host/ssp_report_test.c -o $@
+
 # memfd_create + shared-memory ABI surface (GB-030): T4 differential test that
 # RUNS the real Linux memfd_create/fcntl(F_ADD_SEALS)/mmap(MAP_SHARED) on the
 # host and proves the concrete behaviour + numeric ABI the compat layer must
@@ -4293,9 +4317,15 @@ DIFF_RUN = python3 tools/differential/diff_harness_test.py
 test_diff_harness:
 	$(HOST_RUN) $(DIFF_RUN)
 
+# GB-237: split-aware PR -> card mapping (tools/board/pr_sync.py).  A PR titled
+# `GB-146-A` must resolve to the split card, not to the umbrella `GB-146`.
+PR_SYNC_TEST = python3 tools/board/pr_sync_test.py
+test_pr_sync:
+	$(HOST_RUN) $(PR_SYNC_TEST)
+
 # The suite as one list, so a host-portable subset can be derived from it
 # without maintaining a second copy (see host_tests_portable).
-HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
+HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(SSP_REPORT_TEST)
 host_tests: $(HOST_TESTS_TARGETS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
@@ -4382,6 +4412,7 @@ endif
 	$(HOST_RUN) ./hex_test_host
 	$(HOST_RUN) ./tasks_test_host
 	$(HOST_RUN) ./find_test_host
+	$(HOST_RUN) ./$(SSP_REPORT_TEST)
 	$(HOST_RUN) ./diff_test_host
 	$(HOST_RUN) ./notes_test_host
 	$(HOST_RUN) ./unit_test_host
@@ -4496,7 +4527,7 @@ test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
 .PHONY: icewm_test
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan uname_parity_host t3_pollbrk t3_nullentry t3_resume_page_selftest
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness test_pr_sync bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan uname_parity_host t3_pollbrk t3_nullentry t3_resume_page_selftest
 
 # icewm.md §9 (lane apps): virtual-display core host golden test
 # (src/kernel/vdisplay.c with the kernel glue compiled out).

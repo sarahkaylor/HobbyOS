@@ -540,6 +540,32 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {
 uint64_t vm_arch_leaf_phys(uint64_t leaf) { return leaf & X64_OA_MASK; }
 int vm_arch_leaf_writable(uint64_t leaf) { return (leaf & X64_PTE_RW) != 0; }
 
+/* GB-245: pre-flight the resume target.  A kernel RIP outside the static
+   0..8 GiB identity map is a hole (the GB-100 kernel-shape poison lands at
+   exactly 8 GiB).  A user RIP is enterable when its leaf is present with
+   US=1 and NX=0, or when an executable region covers it (a demand-faulted
+   image/stack page).  The region scan is deliberately lock-free: this runs
+   after the resume callers released proc_lock with IF=0, and taking the
+   lock here is the deadlock class the card names.  The AS is the current
+   one (vm_arch_root_cpu pins it), so its region array cannot be torn down
+   under us; a concurrent munmap from another thread can only race the
+   array pointer, and the walk above already answered the common case. */
+int vm_arch_resume_va_ok(struct addr_space *as, uint64_t va, uint64_t cs) {
+  if (!(cs & 3))
+    return va < 0x200000000ULL; /* 8 GiB: the static identity map */
+  uint64_t leaf = 0;
+  if (as && vm_arch_walk(as, va, &leaf) == 0)
+    return (leaf & X64_PTE_US) && !(leaf & X64_PTE_NX);
+  if (!as)
+    return 1; /* v1 user slot: no AS to walk; its overlay path owns the mapping */
+  for (int i = 0; i < as->nr; i++) {
+    struct vm_region *r = &as->regions[i];
+    if (va >= r->base && va - r->base < r->len)
+      return (r->prot & VM_PROT_EXEC) != 0;
+  }
+  return 0;
+}
+
 void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
   (void)as;
   x64_invlpg(va);

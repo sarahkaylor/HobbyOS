@@ -41,6 +41,45 @@ typedef struct {
   volatile uint32_t owner;  /**< cpu+1 of the holder, 0 = unowned (GB-060) */
 } spinlock_t;
 
+/* GB-229: per-CPU acquire/release sequence for proc_lock (observation only).
+   A wedge that shows last_op=release with locked=1 names a lost unlock; one
+   that shows last_op=acquire with the owner idle names a resume path that left
+   the lock held. */
+typedef struct {
+  uint64_t acq;
+  uint64_t rel;
+  uint64_t last_ms;
+  uint64_t site;
+  uint64_t site3;      /**< GB-235: caller-caller of the last proc_lock acquire */
+  uint64_t rel_site;   /**< GB-230: return address of the last release, 0 = none */
+  uint64_t iretq_ms;   /**< GB-230: time of the last enter_user_space entry */
+  int locked_at_iretq; /**< GB-230: proc_lock.locked sampled there */
+  int last_op; /**< 1 acquire, 2 release, 0 never */
+  /* GB-240: the idle-stuck detector's proc_lock section (process.c:4782).
+     set by proclock_det_note(): entry on the acquire, exit on the matching
+     release, and det_stage at the section's branches (1 slot scan, 2 dispose,
+     3 group_teardown, 4 release).  A row with det_exit=0 and det_stage=n names
+     a section that did not return; det_exit>det_entry says it released and the
+     owner word is stale. */
+  uint64_t det_entry_ms;
+  uint64_t det_exit_ms;
+  int det_stage;
+  /* GB-241: 1 when the LAST acquire was made by the [IDLESTUCK] dump itself.
+     The dump holds proc_lock while printing the rows, so its own acquisition
+     is definitionally acq=rel+1 in that dump; this bit lets the row be
+     excluded instead of read as a strand. */
+  int dump_self;
+} proclock_hold_t;
+void proclock_hold_note(int op, uint64_t site);
+int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out);
+void proclock_iretq_note(void);
+/* GB-240: op 1 = entry (stage = starting branch), 2 = stage update,
+   3 = exit (stage = where it left the section).  Per-CPU, observation only. */
+void proclock_det_note(int op, int stage);
+/* GB-241: set (1) before the [IDLESTUCK] dump acquires proc_lock and clear (0)
+   after it releases, so proclock_hold_note can record dump_self at the acquire. */
+void proclock_dump_note(int on);
+
 /**
  * Initializes a spinlock to the unlocked state.
  */
@@ -259,6 +298,7 @@ uint32_t lock_audit_classerrs(void);    /* wrong context for the class */
 uint32_t lock_audit_irqmask_calls(void);/* irqsave acquisitions on PROCESS locks */
 void lock_audit_forgive_irqmask(uint32_t n); /* unit tier: forgive its own probe */
 uint32_t lock_audit_reg_dropped(void);  /* locks the registry could not hold */
+uint32_t lock_audit_reg_used(void);     /* slots filled (occupancy, not a defect) */
 uint64_t lock_audit_irqoff_max_us(void);
 uint64_t lock_audit_irqoff_total_us(void);
 void lock_audit_reset_counters(void);

@@ -15,7 +15,7 @@
 #define K_UNIX_STREAM     1  /* byte ring per direction                */
 #define K_UNIX_SEQPACKET  2  /* message queue per direction            */
 #define K_UNIX_DGRAM      3  /* message queue per direction            */
-#define K_UNIX_RING       65536 /* STREAM bytes per direction          */
+#define K_UNIX_RING       524288 /* STREAM bytes per direction          */
 #define K_UNIX_MSG_MAX    8192  /* max bytes per message                */
 #define K_UNIX_MSGS       8     /* queued messages per direction        */
 #define K_UNIX_MAX_FDS    K_IPC_MAX_FDS   /* fds per message            */

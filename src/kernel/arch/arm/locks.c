@@ -31,6 +31,32 @@ uint8_t lockdiag_stage(uint32_t cpu) {
   (void)cpu;
   return 0;
 }
+/* GB-240: the detector stamp is x64-only state (plh[]); ARM keeps the shared
+   process.c call site compiling and records nothing. */
+void proclock_det_note(int op, int stage) {
+  (void)op;
+  (void)stage;
+}
+/* GB-241: the dump_self tag is x64-only state (plh[]); ARM records nothing. */
+void proclock_dump_note(int on) {
+  (void)on;
+}
+
+/* GB-230/GB-235: the iretq stamp and the caller-caller site are x64-only
+   state (plh[]).  process.c's shared resume boundary calls this on both
+   arches, so ARM answers with a no-op rather than dropping out of the link. */
+void proclock_iretq_note(void) {
+}
+
+/* GB-229/GB-231: the per-CPU proc_lock holder row (acq/rel counts, iretq
+   stamp, det stage) lives in plh[] on x64.  ARM has no such row: return 0 =
+   "no data", which is exactly how the shared [PROCLOCK-HOLD] / [IDLESTUCK]
+   dump treats a CPU that never recorded one. */
+int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out) {
+  (void)cpu;
+  (void)out;
+  return 0;
+}
 
 /**
  * Initializes a spinlock structure to the unlocked state.

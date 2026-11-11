@@ -247,28 +247,51 @@ static void t_stream_fork(void) {
 
 static void t_stream_ring(void) {
 #ifdef IPC_HOST_DARWIN
-  /* A 70 000-byte blocking write() returns a partial count because
-     Linux's unix sockets expose a fixed 64 KiB ring.  Darwin's send
-     buffer is larger, so the same write completes or blocks until the
+  /* A blocking write() past the ring returns a partial count only because the
+     socket has a FIXED ring (Linux's unix sockets: 64 KiB).  Darwin's send
+     buffer is larger and grows, so the same write completes or blocks until the
      peer drains -- on the host that is a hang, not a measurement. */
-  print_console("  IPC_T STREAM ring: SKIP (no fixed 64 KiB ring on this host)\n");
+  print_console("  IPC_T STREAM ring: SKIP (no fixed ring on this host)\n");
 #else
   int sv[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) {
     check("stream ring socketpair", 0);
     return;
   }
-  static char big[70000];
-  memset(big, 'r', sizeof big);
-  int r = (int)write(sv[0], big, sizeof big);
-  check("STREAM fill write returns a positive partial count",
-        r > 0 && r <= (int)sizeof big);
+  /* Ask the kernel for the ring it implements instead of restating it:
+     getsockopt(SO_SNDBUF) is the per-direction STREAM ring (K_UNIX_RING).  The
+     hardcoded 65536 this check used to carry red-flagged a CORRECT ring once
+     the constant was raised to 512 KiB for the X transport's present path --
+     the cap is the kernel's number, so the test must read it. */
+  size_t want = 70000;
+  int ring = 0;
 #ifndef HOST_TEST
-  check("STREAM partial write capped at the 64 KiB ring (65536)",
-        r == 65536);
+  {
+    socklen_t rl = sizeof ring;
+    if (getsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &ring, &rl) == 0 && ring > 0)
+      want = (size_t)ring + 16;   /* one byte past the ring: forces the cap */
+    else
+      ring = 0;                   /* unknown: keep the 70000-byte probe */
+  }
 #endif
+  char *big = malloc(want);
+  char *out = malloc(want);
+  if (!big || !out) {
+    check("stream ring buffer alloc", 0);
+    free(big);
+    free(out);
+    close(sv[0]);
+    close(sv[1]);
+    return;
+  }
+  memset(big, 'r', want);
+  int r = (int)write(sv[0], big, want);
+  check("STREAM fill write returns a positive partial count",
+        r > 0 && (size_t)r <= want);
+  if (ring > 0)
+    check("STREAM partial write capped at the kernel's ring (SO_SNDBUF)",
+          r == ring);
   /* Drain exactly what was queued, then EOF. */
-  static char out[70000];
   int total = 0;
   while (total < r) {
     int n = (int)read(sv[1], out + total, r - total);
@@ -278,9 +301,11 @@ static void t_stream_ring(void) {
   check("STREAM ring drains fully", total == r);
   check("STREAM ring bytes intact", out[0] == 'r' && out[r - 1] == 'r');
   close(sv[0]);
-  int n2 = (int)read(sv[1], out, sizeof out);
+  int n2 = (int)read(sv[1], out, (int)want);
   check("STREAM EOF after sender close", n2 == 0);
   close(sv[1]);
+  free(big);
+  free(out);
 #endif
 }
 

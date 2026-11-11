@@ -267,6 +267,25 @@ int hd_take_restamp(void) {
   hw->pix_restamp = 0;
   return 1;
 }
+
+/* L88: the restamp flag AND the content rect the app named on ESC ] F.
+ * The app's rect is the bbox it actually wrote into the shared surface, so a
+ * host can blit exactly that instead of the whole content.  Returns 1 when a
+ * present was pending; *x..*h are 0 when it carried no rect (a native app
+ * presents itself, and the caller blits the whole content then). */
+int hd_take_present(int *x, int *y, int *w, int *h) {
+  *x = *y = *w = *h = 0;
+  if (!hw || !hw->pix_restamp) return 0;
+  hw->pix_restamp = 0;
+  if (hw->pix_present_n) {
+    hw->pix_present_n = 0;
+    *x = hw->pix_present.x;
+    *y = hw->pix_present.y;
+    *w = hw->pix_present.w;
+    *h = hw->pix_present.h;
+  }
+  return 1;
+}
 void hd_pref_size(int *w, int *h) {
   *w = hw ? hw->pix_pref_w : 0;
   *h = hw ? hw->pix_pref_h : 0;
