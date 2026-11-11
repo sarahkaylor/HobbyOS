@@ -10,6 +10,10 @@
  * leaves the explanation on the console for the bounded-spin diagnostics
  * to accompany.
  *
+ * The registry (name + rank + class) lives in src/kernel/lockscale.c and is
+ * always compiled; this file only implements the rank RULE, so a lock cannot
+ * be named by one instrument and unknown to the other.
+ *
  * Compiled only into unit-test builds: every hook is guarded by
  * KERNEL_MODE_UNIT_TEST at its call sites in the arch spinners, and this
  * file compiles to nothing otherwise.  Unregistered locks (the majority:
@@ -21,7 +25,6 @@
 #include "lock.h"
 #include "kline.h"  /* one-record console output (kl_*) */
 #include "process.h" /* MAX_CPUS */
-#include "fs.h"      /* L55: MAX_GLOBAL_FILES sizes the registry below */
 
 extern uint32_t get_cpuid(void);
 /* Arch-provided (src/kernel/arch/<arch>/locks.c): mask local interrupts,
@@ -33,27 +36,8 @@ void lockdbg_irq_restore(uint64_t flags);
 
 extern void uart_puts(const char *s); /* same declaration as kline.h */
 
-#define LOCKDBG_REGISTRY (MAX_GLOBAL_FILES + 128) /* must cover every registered
-                              * global lock: fs_lock + MAX_GLOBAL_FILES f->locks
-                              * + the named subsystem locks + test locks.
-                              * L55: this used to be a hard 256 while
-                              * MAX_GLOBAL_FILES was 128; widening the file
-                              * table to 512 made the file slots fill the
-                              * registry and the test's own locks silently
-                              * unregistered (test_lock_order_debug then
-                              * reported 0 violations where it wants 1). */
 #define LOCKDBG_STACK 16
 #define LOCKDBG_MEMO 16
-
-struct lockdbg_entry {
-  const spinlock_t *lk;
-  const char *name;
-  int rank;
-};
-
-/* Static zero-init: lk == 0 marks a free slot (rank is meaningless until an
- * entry carries a lock pointer). */
-static struct lockdbg_entry reg[LOCKDBG_REGISTRY];
 
 /* Per-CPU stack of registered locks this CPU holds (acquire order). */
 static struct {
@@ -84,59 +68,31 @@ void lockdbg_irq_exit(void) {
     irq_ctx[cpu] = 0;
 }
 
-/* One report per (holder, acquiree) pair: a violating path that runs in a
- * loop must not flood the console. */
+/* One report per (holder, acquiree) NAME pair: a violating path that runs in a
+ * loop must not flood the console, and 128 file slots share one name string. */
 static struct {
-  const void *a, *b;
+  const char *a, *b;
 } memo[LOCKDBG_MEMO];
-static int memo_n;
 
 static volatile uint32_t violations;
-
-void lockdbg_register(const spinlock_t *lock, const char *name, int rank) {
-  if (!lock || !name)
-    return;
-  for (int i = 0; i < LOCKDBG_REGISTRY; i++) {
-    if (reg[i].lk == lock) /* re-registration: update in place */
-      return;
-    if (reg[i].lk == 0) {
-      reg[i].lk = lock;
-      reg[i].name = name;
-      reg[i].rank = rank;
-      return;
-    }
-  }
-}
-
-static const struct lockdbg_entry *lookup(const spinlock_t *lock) {
-  for (int i = 0; i < LOCKDBG_REGISTRY; i++)
-    if (reg[i].lk == lock && reg[i].lk != 0)
-      return &reg[i];
-  return 0;
-}
 
 uint32_t lockdbg_violations(void) { return violations; }
 
 void lockdbg_reset_violations(void) {
   violations = 0;
-  memo_n = 0;
   for (int i = 0; i < LOCKDBG_MEMO; i++) {
     memo[i].a = 0;
     memo[i].b = 0;
   }
 }
 
-static void report(const struct lockdbg_entry *holder,
-                   const struct lockdbg_entry *want) {
-  /* Dedupe on the NAME pair, not pointer pairs: 128 file slots share one
-   * name string, and per-pointer pairs overflow the memo and flood. */
+static void report(const char *holder_name, const char *want_name, int rank_or_neg) {
   for (int i = 0; i < LOCKDBG_MEMO; i++) {
-    if (memo[i].a == holder->name && memo[i].b == want->name)
+    if (memo[i].a == holder_name && memo[i].b == want_name)
       return; /* already reported this pair */
-    if (!memo[i].a && memo_n < LOCKDBG_MEMO) {
-      memo[i].a = holder->name;
-      memo[i].b = want->name;
-      memo_n++;
+    if (!memo[i].a) {
+      memo[i].a = holder_name;
+      memo[i].b = want_name;
       break; /* else every empty slot gets refilled with this pair */
     }
   }
@@ -145,9 +101,9 @@ static void report(const struct lockdbg_entry *holder,
   struct kline k;
   kl_init(&k);
   kl_s(&k, "LOCK-ORDER VIOLATION: holding ");
-  kl_s(&k, holder->name);
+  kl_s(&k, holder_name);
   kl_s(&k, " acquiring ");
-  kl_s(&k, want->name);
+  kl_s(&k, want_name);
   uint32_t cpu = get_cpuid();
   if (cpu < MAX_CPUS) {
     kl_s(&k, " [cpu ");
@@ -155,19 +111,15 @@ static void report(const struct lockdbg_entry *holder,
     kl_s(&k, " depth ");
     kl_i(&k, held[cpu].top);
     kl_s(&k, "]");
-    for (int i = 0; i < held[cpu].top; i++) { /* outermost first */
-      const struct lockdbg_entry *e = lookup(held[cpu].lk[i]);
-      kl_c(&k, ' ');
-      kl_s(&k, e ? e->name : "?");
-    }
   }
+  (void)rank_or_neg;
   kl_s(&k, "\n");
   kl_emit(&k);
 }
 
 void lockdbg_precheck(const spinlock_t *lock) {
-  const struct lockdbg_entry *want = lookup(lock);
-  if (!want)
+  int want = lock_rank(lock);
+  if (want < 0)
     return; /* unregistered: order not tracked */
   uint32_t cpu = get_cpuid();
   if (cpu >= MAX_CPUS)
@@ -175,16 +127,16 @@ void lockdbg_precheck(const spinlock_t *lock) {
   if (irq_ctx[cpu])
     return; /* exception context: rank rules do not apply (see lock.h) */
   for (int i = 0; i < held[cpu].top; i++) {
-    const struct lockdbg_entry *h = lookup(held[cpu].lk[i]);
-    if (!h)
+    int h = lock_rank(held[cpu].lk[i]);
+    if (h < 0)
       continue; /* embedded lock we do not track: cannot judge */
-    if (want->rank <= h->rank) /* equal rank nests too -> violation */
-      report(h, want);
+    if (want <= h) /* equal rank nests too -> violation */
+      report(lock_name(held[cpu].lk[i]), lock_name(lock), want);
   }
 }
 
 void lockdbg_note_acquired(const spinlock_t *lock) {
-  if (!lookup(lock))
+  if (lock_rank(lock) < 0)
     return;
   uint32_t cpu = get_cpuid();
   if (cpu >= MAX_CPUS)
@@ -200,7 +152,7 @@ void lockdbg_note_acquired(const spinlock_t *lock) {
 }
 
 void lockdbg_note_releasing(const spinlock_t *lock) {
-  if (!lookup(lock))
+  if (lock_rank(lock) < 0)
     return;
   uint32_t cpu = get_cpuid();
   if (cpu >= MAX_CPUS)
@@ -235,11 +187,10 @@ void lockdbg_note_releasing(const spinlock_t *lock) {
   }
   /* LIFO discipline: releasing a lock that is not the innermost held
    * registered one breaks the documented order too. */
-  if (found != top - 1 && lookup(held[cpu].lk[top - 1])) {
-    const struct lockdbg_entry *h = lookup(lock);
-    const struct lockdbg_entry *inner = lookup(held[cpu].lk[top - 1]);
-    if (h && inner)
-      report(inner, h); /* printed as "holding INNER releasing OUTER" */
+  if (found != top - 1) {
+    int inner = lock_rank(held[cpu].lk[top - 1]);
+    if (inner >= 0)
+      report(lock_name(held[cpu].lk[top - 1]), lock_name(lock), inner);
   }
   held[cpu].top = found;
   lockdbg_irq_restore(f);

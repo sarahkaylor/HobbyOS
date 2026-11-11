@@ -108,6 +108,50 @@ kernel_fatal_count() {
 # was a number quoted by hand from a run that may never have taken a fault.
 # Returns the count, or -1 when the instrument cannot measure the log — a
 # missing/unreadable log is NOT a clean log.
+# Lock-scope health (docs/lock-scope.md).  This tier is where a concurrency
+# regression actually SHOWS UP -- a lock taken with interrupts masked, a thread
+# that blocks holding a lock, a filesystem lock whose waiter was stranded -- and
+# none of it says "FAIL" on the console by itself, so a green wave could carry a
+# deadlocking kernel.  Every pattern below is emitted by the kernel's own lock
+# audit (src/kernel/lockscale.c) with the lock name and the PC, so a failure
+# here comes with its cause attached.
+#
+# Echoes one line per violation (each begins with "FAIL" so it also lands in the
+# FAIL count) and returns the violation count.
+lock_health_fails() { # $1 = log
+  local log="$1" n rc=0
+  _lk() { # _lk <pattern> <what it means>
+    n=$(grep -ac "$1" "$log" 2>/dev/null || true)
+    n=${n:-0}
+    if [ "$n" != "0" ]; then
+      echo "FAIL (lock scope) ${n}x $1: $2"
+      grep -a "$1" "$log" 2>/dev/null | head -3 | sed 's/^/    /'
+      rc=$((rc + n))
+    fi
+  }
+  _lk "\[LOCKERR\]" "lock class misused (irqsave on a process lock, ylock under proc_lock, lock taken in an IRQ handler)"
+  _lk "\[BLOCKHOLD\]" "a thread reached a blocking point while still holding a lock"
+  _lk "\[MUTEX-SELF\]" "a lock was re-acquired by its own holder (guaranteed deadlock)"
+  # NOT "[BADELR]": an UNMODIFIED HEAD tree prints it for the legacy v1 flat
+  # binaries (SUBPRB.BIN) on every wave -- verified against a clean HEAD
+  # worktree.  It is a "picking a user slot" observation about EL1 frames, not
+  # a corruption signal by itself; real corruption shows up as a FATAL fault.
+  _lk "\[IDLESTUCK\]" "the guest wedged: a CPU could not return to idle"
+  _lk "\[ALIVE-SET\] no READY work" "every runnable thread was parked: lost wakeup or deadlock"
+  # The unit tier prints the summary; when a wave carries one, police it too.
+  if grep -aq "\[LOCKHEALTH\]" "$log"; then
+    for f in blockhold selflock classerr irqsave_proc reg_dropped; do
+      n=$(grep -a "\[LOCKHEALTH\]" "$log" | grep -o "$f=[0-9]*" | head -1 | cut -d= -f2)
+      n=${n:-0}
+      if [ "$n" != "0" ]; then
+        echo "FAIL (lock scope) LOCKHEALTH $f=$n: must be 0 (see docs/lock-scope.md)"
+        rc=$((rc + n))
+      fi
+    done
+  fi
+  return "$rc"
+}
+
 glued_count() {
   local out n
   # GB-218: the instrument belongs to the tree the tier runs from. A copy of
@@ -192,6 +236,7 @@ if [ -n "$POLICE_ONLY" ]; then
     rc=1
   fi
   [ "$LINES" -ge "${T3_MIN_LINES:-1000}" ] || { echo "T3_${ARCH}: FAIL — only ${LINES} console lines (floor ${T3_MIN_LINES:-1000}): too little work for a complete wave"; rc=1; }
+  lock_health_fails "$LOG" || rc=1
   if [ "$FAIL_LINES" != "0" ]; then
     echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 5:"
     grep -an "FAIL" "$LOG" 2>/dev/null | head -5 || true
@@ -591,6 +636,7 @@ if [ "$FAIL_LINES" != "0" ]; then
   grep -an "FAIL" "$LOG" | head -20
   rc=1
 fi
+lock_health_fails "$LOG" || rc=1
 [ "$MEMREG" = "1" ] && rc=1
 # Diagnostic/force hook: T3_FORCE_INSTRUMENT_FAIL=1 lets a test/verifier force the
 # instrument-failure outcome deterministically (GB-103 three-outcome table).

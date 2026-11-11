@@ -66,6 +66,14 @@ HB_ENV_KEY="$(cd "$HB_X11_DIR/cross" && find . -type f | LC_ALL=C sort | xargs c
 hb_log() { printf '[x11:%s] %s\n' "$HB_ARCH" "$*"; }
 hb_die() { printf '[x11:%s] ERROR: %s\n' "$HB_ARCH" "$*" >&2; exit 1; }
 
+# hb_size_of <file>: byte size, GNU ("stat -c%s") and BSD/macOS ("stat -f%z")
+# spell it differently; an empty value under set -e used to fail a %d printf.
+if [ "$(uname -s)" = Darwin ]; then
+  hb_size_of() { stat -f%z "$1"; }
+else
+  hb_size_of() { stat -c%s "$1"; }
+fi
+
 # hb_want <pkg>: honour --only.
 hb_want() { [ -z "$HB_ONLY" ] && return 0; case ",$HB_ONLY," in *",$1,"*) return 0;; esac; return 1; }
 

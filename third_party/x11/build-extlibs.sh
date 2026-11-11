@@ -160,7 +160,7 @@ _ex_smoke() {
   # shellcheck disable=SC2046
   hb_run smoke hb_link_flat "$HB_BUILD/smoke/XFTSMOKE.BIN" "$o/xftsmoke.o" \
     $("$PKG_CONFIG" --libs $mods)
-  hb_log "smoke: $HB_BUILD/smoke/XFTSMOKE.BIN ($(stat -c %s "$HB_BUILD/smoke/XFTSMOKE.BIN") bytes)"
+  hb_log "smoke: $HB_BUILD/smoke/XFTSMOKE.BIN ($(hb_size_of "$HB_BUILD/smoke/XFTSMOKE.BIN") bytes)"
 }
 
 stage_extlibs() {

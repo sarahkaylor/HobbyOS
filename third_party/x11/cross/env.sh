@@ -55,6 +55,16 @@ done
 unset _hb_llvm
 export PATH
 
+# macOS: the native compiler used for build-time generators (freetype's build
+# tools, libX11 makekeys, ...) cannot link at all on macOS 27 (CLT SDK arch
+# syntax the installed clang rejects -> "ld: tapi error: malformed file"),
+# which autoconf reports as "native C compiler is not working".  Shared probe:
+# tools/host/macos-sdk.sh (no-op on hosts that link by default).
+if [ -f "$HB_REPO/tools/host/macos-sdk.sh" ]; then
+  # shellcheck source=../../../tools/host/macos-sdk.sh
+  . "$HB_REPO/tools/host/macos-sdk.sh"
+fi
+
 case "$HB_ARCH" in
   arm)   HB_TRIPLE=aarch64-none-elf; HB_CPU=aarch64
          HB_ARCH_CFLAGS="-mcpu=cortex-a53"; HB_ARCH_LDFLAGS="" ;;

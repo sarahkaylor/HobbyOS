@@ -43,3 +43,15 @@ extern "C" void __cxa_bad_cast(void) {
 }
 
 void operator delete(void *ptr, std::size_t) noexcept { free(ptr); }
+
+// The unsized forms.  The Linux link picks these up from the platform C++
+// runtime that survives -nostdlib++ (libstdc++ is still on the link line when
+// the driver is gcc-compatible); a Darwin link has no such runtime, so every
+// non-virtual destructor in the test TUs fails to resolve "operator
+// delete(void*)".  Guarded to Darwin so the Linux link keeps its current
+// provider and this shim cannot shadow it.
+#if defined(__APPLE__)
+void operator delete(void *ptr) noexcept { free(ptr); }
+void operator delete[](void *ptr) noexcept { free(ptr); }
+void operator delete[](void *ptr, std::size_t) noexcept { free(ptr); }
+#endif

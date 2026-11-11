@@ -29,6 +29,7 @@
 #include "kline.h"
 #include "lock.h"
 #include "linux_syscall.h"
+#include "fat16.h"
 #include "process.h"
 #include "timer.h"
 #include "vm.h"
@@ -347,10 +348,13 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
       p->sc_hist[sh_ix].ret = (int64_t)tf->regs[0];                           \
       p->sc_hist[sh_ix].done = 1;                                             \
     }                                                                         \
+    /* FAT flushes land here, on the way OUT of a syscall: no filesystem lock */\
+    /* is held at this point, so a device write can never run under fat_lock. */\
+    fat16_flush_pending();                                                    \
     return (v);                                                               \
   } while (0)
 #else
-#define L_DISPATCH_RET(v) return (v)
+#define L_DISPATCH_RET(v) do { fat16_flush_pending(); return (v); } while (0)
 #endif
   const struct l_sysent *const tables[] = {
     l_tab_core,

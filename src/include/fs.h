@@ -91,7 +91,12 @@ struct vm_object;
 struct file {
   file_type_t type;   /**< Type of the file */
   int ref_count;      /**< Number of processes currently using this file */
-  spinlock_t lock;    /**< Lock for atomic access to file state */
+  ylock_t lock;       /**< Per-slot lock.  ylock_t, NOT a spinlock: the
+                       *   critical sections under it do device I/O (close's
+                       *   fat16 write-back, truncate, read/write), and it was
+                       *   measured holding interrupts off for 435 ms in one
+                       *   window -- the worst in the kernel.  Process context
+                       *   only; no IRQ handler touches a file slot. */
   /* GB-019: the O_* flags this file was opened with (access mode + status bits).
      Linux F_GETFL (and compat ioctl F_GETFL) must return these on ANY fd, not
      just sockets; without it a regular file //dev/null answers -ENOTSOCK instead

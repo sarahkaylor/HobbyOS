@@ -11,6 +11,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p build
 CC="${CC:-cc}"
+# Native leg: this host's cc may not be able to link at all (macOS 27's CLT SDK
+# ships libSystem.B.tbd with `arm64e.x1-*`, which its own clang cannot parse ->
+# "ld: tapi error: malformed file").  The probe is a no-op on a healthy host and
+# on Linux; without it the differential harness fails before it tests anything.
+# shellcheck source=/dev/null
+. "$(cd ../.. && pwd)/tools/host/macos-sdk.sh"
 if ! command -v "$CC" >/dev/null 2>&1; then
   echo "build_hello.sh: cross compiler '$CC' not found; set CC (native 'cc' is the default)" >&2
   exit 2

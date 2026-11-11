@@ -245,6 +245,7 @@ static void test_blk_cache_write_coherence(void) {
  */
 #define BC_ABORT_SEC_A (BC_TEST_BASE_SECTOR + 4096)
 #define BC_ABORT_SEC_B (BC_TEST_BASE_SECTOR + 4104) /* a different unit */
+#ifdef __x86_64__
 static void test_blk_cache_aborted_dma_not_published(void) {
   uart_puts("  Running test_blk_cache_aborted_dma_not_published...\n");
   tests_run++;
@@ -323,6 +324,15 @@ static void test_blk_cache_aborted_dma_not_published(void) {
 
   blk_cache_flush_all();
 }
+#else
+/* MMIO transport (ARM): there is no controller reset to announce, so
+ * blk_dev_epoch never moves and virtio_blk_test_abort() is a no-op by design
+ * (virtio_blk.c defines the epoch constant for the MMIO branch).  Asserting
+ * the aborted-AIO signature here could only ever fail; this coverage is x64
+ * (NVMe) only. */
+static void test_blk_cache_aborted_dma_not_published(void) {}
+#endif
+
 
 void blk_cache_test_suite(void) {
   uart_puts("blk_cache_test_suite:\n");

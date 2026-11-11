@@ -67,6 +67,25 @@ BOOT_TIMEOUT = int(os.environ.get("M4_BOOT_TIMEOUT", "240"))
 RUN_TIMEOUT = int(os.environ.get("M4_RUN_TIMEOUT", "120"))
 SKIP_BUILD = os.environ.get("M4_SKIP_BUILD", "0") == "1"
 
+
+def host_caps():
+    """Ask tools/host/hostcaps.sh -- the one place host facts are decided.
+
+    Re-deriving them here is how "-enable-kvm" ended up in a runner that has to
+    work on a Mac: QEMU rejects that flag outright when it was built without
+    KVM, and the firmware/llvm paths differ per host too.
+    """
+    out = subprocess.run(
+        ["bash", os.path.join(ROOT, "tools/host/hostcaps.sh"), "--json"],
+        capture_output=True, text=True, check=True).stdout
+    return json.loads(out)
+
+
+CAPS = host_caps()
+READELF = CAPS.get("readelf") or "readelf"
+QEMU_ACCEL = CAPS.get("qemu_accel", "")
+HOST_ACCEL = CAPS.get("accel", "")
+
 LIBC6_SHA = "1b2281aac4935dfea1f89dfc19e445fdbb45303202af60679ccb8bf035f081a0"
 LIBGCC_SHA = "4aa7b9c9f3225df65a750ae0ff5c890fc6108c82a609b3c5abd45d211838bf3c"
 LIBC6DEV_SHA = "11029900f2315b93ce487792ae1bf15f0927e5e50880c091e6a440b14d4e164a"
@@ -114,6 +133,28 @@ def ensure_pins():
         run(["dpkg-deb", "-x", os.path.join(t, "libc6-dev.deb"), DPIN], check=True)
 
 
+def mesa_python():
+    """A python that can run Mesa's generators (mako + yaml).
+
+    This used to be solved by prepending /usr/bin to PATH, which works on a
+    Linux box (apt installs mako into /usr/bin/python3) and breaks on macOS,
+    where /usr/bin/python3 is Xcode's 3.9 with an empty site-packages and it
+    shadows the venv that does have mako.  Ask the interpreter instead, and pass
+    it through the knob build-hobbyos.sh already honours.
+    """
+    if os.environ.get("MESA_PYTHON"):
+        return os.environ["MESA_PYTHON"]
+    for cand in (os.path.join(ROOT, "venv/bin/python3"),
+                 os.path.join(ROOT, ".venv/bin/python3"),
+                 "/usr/bin/python3", sys.executable):
+        if not os.path.exists(cand):
+            continue
+        r = subprocess.run([cand, "-c", "import mako, yaml"], capture_output=True)
+        if r.returncode == 0:
+            return cand
+    raise SystemExit("m4: no python3 with mako+yaml (pip install mako pyyaml)")
+
+
 def build_libgl():
     out = os.path.join(ROOT, "obj", "mesa", "lib", "libGL.so.1")
     # libGL has no DT_NEEDED: its libX11/libXext symbols must exist in the
@@ -131,8 +172,15 @@ def build_libgl():
         log("m4: building libGL.so.1 (tools/mesa/build-hobbyos.sh)")
         env = dict(os.environ)
         env["HOME"] = os.environ.get("HOME", "/home/sarah")
-        # The Hermes venv's python3 has no mako; Mesa's generators need it.
-        env["PATH"] = "/usr/bin:" + env.get("PATH", "")
+        env["MESA_PYTHON"] = mesa_python()
+        # One pin, not two.  Left alone, build-hobbyos.sh extracts into its own
+        # cache sysroot while this gate extracted a second copy into /tmp; the
+        # DSO was then built against headers that carry the kernel UAPI (linux/
+        # falloc.h &co) and the probe against a set that does not, so the probe
+        # failed on a header the DSO never missed.  Point the build at the gate's
+        # pin so both see identical glibc.
+        env["GLIBC231"] = GPIN
+        env["GLIBC231_DEV"] = DPIN
         b = os.path.join(ROOT, "obj", "m4_libgl_build.log")
         with open(b, "w") as f:
             r = run(["bash", os.path.join(ROOT, "tools/mesa/build-hobbyos.sh"),
@@ -154,11 +202,35 @@ def build_probe():
     ldir = os.path.join(GPIN, "lib/x86_64-linux-gnu")
     dlib = os.path.join(DPIN, "usr/lib/x86_64-linux-gnu")
     out = os.path.join(BUILD, "glprobe")
+    # Not "gcc": on a macOS host that is Apple clang with a Darwin triple, and
+    # it cannot link x86_64 ELF against the pinned glibc objects.  clang with an
+    # explicit linux triple + lld builds the same probe on every host.
+    # Headers and the libX11 to link: on Linux a distro libx11-dev is assumed, but
+    # a macOS host has neither /usr/include/X11 nor an ELF libX11 (Homebrew's is
+    # Mach-O and cannot enter this link).  Both are build products of this tree:
+    # build-hobbyos.sh stages the exact headers libGL was compiled against, and
+    # src/user/xcompat builds the libX11.so.6 the guest will actually load -- which
+    # is the better link target anyway (same soname, same compat implementation).
+    x11_inc = next((d for d in (os.path.join(ROOT, "obj/mesa/stage/x11-include"),
+                                "/opt/homebrew/include", "/usr/include")
+                    if os.path.exists(os.path.join(d, "X11/Xlib.h"))), None)
+    if not x11_inc:
+        raise SystemExit("m4: no X11 headers (X11/Xlib.h)")
+    xlib = os.path.join(ROOT, "obj/xcompat/libX11.so.6")
     cmd = [
-        "gcc", "-O2", "-std=gnu11", "-fPIE", "-pie", "-nostdlib", "-nostartfiles",
+        "clang", f"--target={os.environ.get('M4_PROBE_TARGET', 'x86_64-linux-gnu')}",
+        "-fuse-ld=lld",
+        # Explicit triple + -nostdlib means clang has no sysroot: on Linux the
+        # host's own /usr/include is the 2.31 header set and is found implicitly,
+        # but a macOS host has no glibc at all, so the pin supplies sys/types.h
+        # and friends.  Same headers libGL was compiled against, by construction.
+        "-isystem", os.path.join(DPIN, "usr/include"),
+        "-isystem", os.path.join(DPIN, "usr/include/x86_64-linux-gnu"),
+        "-isystem", x11_inc,
+        "-O2", "-std=gnu11", "-fPIE", "-pie", "-nostdlib", "-nostartfiles",
         "-o", out, os.path.join(ROOT, "src/user/gl_probe.c"),
         os.path.join(dlib, "Scrt1.o"), os.path.join(dlib, "crti.o"),
-        "-lX11",
+        xlib if os.path.exists(xlib) else "-lX11",
         # --no-as-needed: the probe does not itself call libm/libpthread, but
         # libGL's 252 undefined symbols include 36 from libm and 21 from
         # libpthread (measured), and a real glibc consumer of libGL --
@@ -179,7 +251,7 @@ def build_probe():
     ]
     log("m4: building the probe (glibc 2.31 PIE)")
     run(cmd, check=True)
-    needed = run(["readelf", "-dW", out], capture_output=True, text=True).stdout
+    needed = run([READELF, "-dW", out], capture_output=True, text=True).stdout
     log("m4: probe DT_NEEDED: " + ", ".join(
         re.findall(r"Shared library: \[([^\]]+)\]", needed)))
     return out
@@ -301,25 +373,27 @@ def main():
     stage(probe)
 
     log(f"m4: booting (log {LOG})")
-    ovmf = None
-    for c in (os.path.expanduser("~/.local/share/OVMF/OVMF_CODE_4M.fd"),
-              "/usr/share/OVMF/OVMF_CODE_4M.fd"):
-        if os.path.exists(c):
-            ovmf = os.path.join(BUILD, "OVMF_CODE_4M.fd")
-            if not os.path.exists(ovmf):
-                shutil.copy(c, ovmf)
-            break
-    if not ovmf:
-        raise SystemExit("m4: no OVMF_CODE_4M.fd found")
+    # The Makefile wants a file named OVMF_CODE_4M.fd; the host probe knows where
+    # this host keeps its x86_64 firmware (Homebrew ships edk2-x86_64-code.fd).
+    src_ovmf = CAPS.get("ovmf") or ""
+    if not src_ovmf:
+        raise SystemExit("m4: no x86_64 firmware found (set HB_OVMF?)")
+    ovmf = os.path.join(BUILD, "OVMF_CODE_4M.fd")
+    if not os.path.exists(ovmf):
+        shutil.copy(src_ovmf, ovmf)
+    log(f"m4: firmware {src_ovmf}")
 
     if os.path.exists(LOG):
         os.remove(LOG)
     # A QEMU from an earlier run can still hold the image's write lock for a
     # second after its process is gone; give it a beat and clear any holder.
-    subprocess.run(["fuser", "-k", IMG], stdout=subprocess.DEVNULL,
+    subprocess.run(["bash", "-c", '. "$1/tools/host/hostcaps.sh"; hb_release_image "$2"',
+                    "_", ROOT, IMG], stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL)
     time.sleep(2)
-    qemu_args = f"-display none -enable-kvm -qmp unix:{QMP_SOCK},server,nowait"
+    accel = f"{QEMU_ACCEL} " if QEMU_ACCEL else ""
+    log(f"m4: host accel={HOST_ACCEL or 'default'}")
+    qemu_args = f"-display none {accel}-qmp unix:{QMP_SOCK},server,nowait"
     env = dict(os.environ)
     env["HOME"] = os.environ.get("HOME", "/home/sarah")
     logf = open(LOG, "w")
@@ -416,12 +490,20 @@ def main():
         except Exception:
             pass
         time.sleep(1)
-        subprocess.run(["fuser", "-k", IMG], stdout=subprocess.DEVNULL,
+        subprocess.run(["bash", "-c", '. "$1/tools/host/hostcaps.sh"; hb_release_image "$2"',
+                        "_", ROOT, IMG], stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
         logf.close()
+        # The PPM is the evidence; the PNG is a convenience for viewers.  Do not
+        # let a missing ImageMagick turn a passing gate into a traceback (a Linux
+        # box usually has convert; a stock macOS host does not).
+        convert = shutil.which("convert")
         for name, p in shots.items():
+            if not convert:
+                log(f"m4: screenshot {name}: {p} (no ImageMagick: kept as PPM)")
+                continue
             png = p[:-4] + ".png"
-            subprocess.run(["convert", p, png], stderr=subprocess.DEVNULL)
+            subprocess.run([convert, p, png], stderr=subprocess.DEVNULL)
             log(f"m4: screenshot {name}: {png}")
         # Pull the probe's own PPM off the image: the frame, not a screenshot.
         for name, dst in (("GLPROBE.PPM", "glprobe.ppm"),
@@ -435,9 +517,10 @@ def main():
                 log(f"m4: guest image {name}: {ppm} "
                     f"({os.path.getsize(ppm)} bytes)")
                 png = ppm[:-4] + ".png"
-                subprocess.run(["convert", ppm, png], stderr=subprocess.DEVNULL)
-                if os.path.exists(png):
-                    log(f"m4: guest image png: {png}")
+                if convert:
+                    subprocess.run([convert, ppm, png], stderr=subprocess.DEVNULL)
+                    if os.path.exists(png):
+                        log(f"m4: guest image png: {png}")
             else:
                 log(f"m4: note: /{name} was not on the image "
                     "(root not writable, or the probe did not reach the write)")

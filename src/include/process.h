@@ -870,6 +870,13 @@ uint32_t process_slot_seq(int pid);
 
 extern spinlock_t proc_lock;
 extern int cpu_current_pids[];
+
+/* Scheduler-state access for lock wait queues (src/kernel/lockscale.c).
+ * Caller MUST hold proc_lock.  These are plain table reads/writes on purpose:
+ * a lock's wait queue is exactly the place where a nested acquisition would
+ * create the proc_lock <-> filesystem inversion this kernel forbids. */
+int process_state_locked(int pid);
+int process_try_wake_locked(int pid); /* 1 = was BLOCKED, now READY */
 void set_current_process_pid(uint32_t cpu, int pid);
 
 struct sys_procinfo {
@@ -940,6 +947,13 @@ int arch_fpu_user_image_ok(uint64_t va);
  * union at 0, sigset_t sa_mask at 8, sa_flags at 24, sa_restorer at 32;
  * size 40).  The trap layer marshals it field-wise; process.c never reads
  * the user struct directly. */
+#if defined(__APPLE__)
+/* Darwin's <sys/signal.h> defines these as member accessors; without this the
+ * struct below parses as "uint64_t __sigaction_u.__sa_handler;" and a host TU
+ * stops with "expected ';' at end of declaration list". */
+# undef sa_handler
+# undef sa_sigaction
+#endif
 struct ho_sigaction {
   uint64_t sa_handler; /* union { sa_handler; sa_sigaction; } */
   uint64_t sa_mask[2];

@@ -173,9 +173,8 @@ int net_get_random_bytes(void* buf, uint32_t len) {
 void net_init(void) {
   // Initialize global network spinlock to serialize accesses to the socket table
   spinlock_init(&net_lock);
-#ifdef KERNEL_MODE_UNIT_TEST
-  lockdbg_register(&net_lock, "net_lock", LOCK_RANK_BACKEND); /* SEC-OBS-B */
-#endif
+/* IRQ class: the receive path runs from the device interrupt. */
+  lock_register(&net_lock, "net_lock", LOCK_RANK_BACKEND, LOCK_CLASS_IRQ);
 
   // Clear all socket Control Blocks
   for (int i = 0; i < MAX_SOCKETS; i++) {

@@ -897,7 +897,7 @@ void wm_handle_app_escape(int win_id, char* seq) {
              * the pending rect would leave the first frame's pixels stale --
              * a host that blits "the rect the app named" must be given the
              * union of everything named since the last service. */
-            struct desktop_rect *pp = &windows[j].pix_present;
+            struct wm_rect *pp = &windows[j].pix_present;
             int x0 = px < pp->x ? px : pp->x;
             int y0 = py < pp->y ? py : pp->y;
             int x1 = px + rw, y1 = py + rh;
