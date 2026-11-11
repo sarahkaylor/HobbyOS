@@ -152,7 +152,13 @@ def main():
         done = False
         while time.time() - t0 < args.timeout:
             txt = read_serial(serial)
-            rows = [ln for ln in txt.splitlines() if ln.startswith("[XPB]")]
+            # The session relays a child's stdout through the X server, so a
+            # row arrives as "[X] [XPB] ..." -- normalize the relay tag away.
+            # startswith("[XPB]") never matched, which made a completed run
+            # read as "no done row" (measured: a full table plus "done rc=0"
+            # in the serial, and a FAIL from the runner).
+            rows = ["[XPB]" + ln.split("[XPB]", 1)[1]
+                    for ln in txt.splitlines() if "[XPB]" in ln]
             if any("done rc=" in r for r in rows):
                 done = True
                 break
