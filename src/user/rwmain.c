@@ -3704,6 +3704,35 @@ int main(int argc, char **argv) {
     fprintf(stderr, "[RWMAIN] FAIL dlsym(" RW_PLAYERMAIN "): %s\n", err ? err : "?");
     return 3;
   }
+  /* Extra Unity switches without rebuilding this launcher: /GAMEARGS holds one
+   * argument per line (blank lines and # comments ignored).  Experiments such as
+   * -force-gfx-direct or -job-worker-count 0 then cost an mcopy, not a rebuild. */
+  static char extra[32][128];
+  static char *xargv[64];
+  int xargc = 0;
+  for (int i = 0; i < argc && xargc < 40; i++) xargv[xargc++] = argv[i];
+  FILE *af = fopen("/GAMEARGS", "r");
+  if (af) {
+    char line[128];
+    int n = 0;
+    while (fgets(line, sizeof line, af) && n < 30) {
+      char *p = line;
+      while (*p == ' ' || *p == '\t') p++;
+      size_t len = strlen(p);
+      while (len && (p[len-1] == '\n' || p[len-1] == '\r' ||
+                     p[len-1] == ' '  || p[len-1] == '\t')) p[--len] = 0;
+      if (!len || *p == '#') continue;
+      snprintf(extra[n], sizeof extra[0], "%s", p);
+      xargv[xargc++] = extra[n++];
+    }
+    fclose(af);
+    fprintf(stderr, "[RWMAIN] /GAMEARGS adds %d arg(s), argc=%d\n", n, xargc);
+    for (int i = 0; i < xargc; i++) fprintf(stderr, "[RWMAIN]   argv[%d]=%s\n", i, xargv[i]);
+  }
+  xargv[xargc] = NULL;
+  argc = xargc;
+  argv = xargv;
+
   fprintf(stderr, "[RWMAIN] PlayerMain=%p argc=%d — calling\n", sym, argc);
 
   int rc = ((int (*)(int, char **))sym)(argc, argv);
