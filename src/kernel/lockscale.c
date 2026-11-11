@@ -153,7 +153,9 @@ static volatile uint32_t ls_selflock;
 static volatile uint32_t ls_classerr;
 static volatile uint32_t ls_irqmask_calls;
 static volatile uint32_t ls_ylock_spins;
+static volatile uint32_t ls_ylock_steals;
 uint32_t lock_audit_ylock_stalls(void) { return ls_ylock_spins; }
+uint32_t lock_audit_ylock_steals(void) { return ls_ylock_steals; }
 
 /* Report memo: one line per (site, lock) pair is enough to name a bug once. */
 #define LS_MEMO 24
@@ -210,16 +212,25 @@ static void ls_report(const char *tag, const char *what, const void *lk,
  * interrupts still enter the kernel; it only defers the context switch. */
 static volatile int32_t ls_preempt[MAX_CPUS];
 
+static volatile uint64_t ls_preempt_site[MAX_CPUS];
+
 static inline uint32_t ls_cpu(void);
 
-void kernel_preempt_disable(void) { ls_preempt[ls_cpu()]++; }
+void kernel_preempt_disable(void) {
+  uint32_t c = ls_cpu();
+  if (ls_preempt[c]++ == 0)
+    ls_preempt_site[c] = (uint64_t)(uintptr_t)__builtin_return_address(0);
+}
 
 void kernel_preempt_enable(void) {
   uint32_t c = ls_cpu();
-  if (ls_preempt[c] > 0)
-    ls_preempt[c]--;
-  else
+  if (ls_preempt[c] > 0) {
+    if (--ls_preempt[c] == 0)
+      ls_preempt_site[c] = 0;
+  } else {
     ls_preempt[c] = 0; /* unbalanced enable: clamp rather than go negative */
+    ls_preempt_site[c] = 0;
+  }
 }
 
 int kernel_preempt_count(void) { return ls_preempt[ls_cpu()]; }
@@ -354,13 +365,16 @@ void lock_audit_block_point(const char *what) {
   if (pc > 0) {
     ls_blockhold++;
     if (ls_memo_new("preempt", (void *)0x9E11)) {
-      /* Name the lock(s) still on this CPU's held stack -- "schedule was
-       * entered with a lock held" is only actionable once it says which. */
       uint32_t hc = ls_cpu();
       uint8_t hn = ls_held_n[hc];
+      /* hn == 0 is the interesting case: the held stack is empty, so the
+         reference belongs to an acquisition that has already popped (or
+         never pushed) -- report the recorded 0->1 site, which is the only
+         thing that names the leak. */
       ls_report("[BLOCKHOLD]", what,
                 hn ? (const void *)(uintptr_t)ls_held[hc][hn - 1] : (const void *)0,
-                (uint64_t)ls_held_pc[hc][hn ? hn - 1 : 0], (uint64_t)hn);
+                hn ? ls_held_pc[hc][hn - 1] : ls_preempt_site[hc],
+                (uint64_t)pc);
     }
     kernel_preempt_reset();
   }
@@ -496,6 +510,7 @@ static volatile int ls_ylock_n;
 void ylock_init(ylock_t *lock) {
   lock->locked = 0;
   lock->owner = 0;
+  lock->owner_pid = 0;
   lock->nwait = 0;
   lock->whead = 0;
   lock->wtail = 0;
@@ -569,6 +584,12 @@ int ylock_tryacquire(ylock_t *lock) {
   if (!ls_cas_word(&lock->locked, 0, 1))
     return 0;
   lock->owner = get_cpuid() + 1;
+  {
+    uint32_t c = get_cpuid();
+    /* The holding THREAD, not just its CPU: a thread that dies inside the
+     * critical section otherwise leaves the lock held by a live-looking CPU. */
+    lock->owner_pid = (c < MAX_CPUS) ? cpu_current_pids[c] : 0;
+  }
   return 1;
 }
 
@@ -580,6 +601,57 @@ static inline void spin_pause(void) {
 #else
   __builtin_ia32_pause();
 #endif
+}
+
+/* Is the thread that holds this ylock gone?
+ *
+ * A ylock records its owner as a CPU (`owner = cpuid+1`), and a CPU outlives
+ * the threads it runs.  If the holder dies inside the critical section -- a
+ * thread killed while inside a FAT read, an exited process, a reaped thread --
+ * the lock stays held by a live-looking CPU for ever and every later waiter
+ * spins on a lock nobody will ever release.  Measured: RimWorld wedges on
+ * fat_io_lock within 30 s of the click, with the owner CPU idle and no lock
+ * named by [BLOCKHOLD].  `owner_pid` is what makes the leak visible.
+ *
+ * Conservative by construction: an unrecorded owner (pid <= 0) is NEVER
+ * treated as dead, because guessing there would free a lock that is genuinely
+ * in use and corrupt the FAT.
+ */
+int ylock_owner_dead(ylock_t *lock) {
+  if (!lock->locked)
+    return 0;
+  int32_t pid = lock->owner_pid;
+  if (pid <= 0 || pid >= MAX_PROCESSES)
+    return 0;
+  struct process *p = process_get_pcb((int)pid);
+  if (!p)
+    return 1;
+  int st = p->state;
+  return (st == PROC_STATE_FREE || st == PROC_STATE_EXITED ||
+          st == PROC_STATE_THREAD_DONE) ? 1 : 0;
+}
+
+/* Reclaim a lock whose owning thread no longer exists.  Returns 1 when this
+ * caller performed the reclaim, 0 when the lock was left alone.
+ *
+ * The reclaim is a CAS 1->0, so of several waiters noticing the same dead owner
+ * exactly one clears it and the rest simply re-enter the normal acquire race.
+ * Nothing is "handed" the lock: after the CAS every waiter competes for it as
+ * usual, which is what keeps this from being a second, subtly different
+ * ownership protocol. */
+int ylock_reclaim_if_owner_dead(ylock_t *lock) {
+  if (!ylock_owner_dead(lock))
+    return 0;
+  if (!ls_cas_word(&lock->locked, 1, 0))
+    return 0;                     /* someone else reclaimed it first */
+  int32_t dead = lock->owner_pid;
+  lock->owner = 0;
+  lock->owner_pid = 0;
+  __atomic_add_fetch(&ls_ylock_steals, 1, __ATOMIC_SEQ_CST);
+  if (ls_memo_new("steal", lock))
+    ls_report("[YLOCK-STEAL]", lock_name(lock), lock,
+              (uint64_t)(uint32_t)dead, 0);
+  return 1;
 }
 
 void ylock_acquire(ylock_t *lock) {
@@ -624,6 +696,12 @@ void ylock_acquire(ylock_t *lock) {
     if (ylock_tryacquire(lock))
       break;
     spin_pause();
+    /* A dead owner is the wedge this lock cannot survive: nothing will ever
+     * release it.  Checked cheaply (a table lookup) rather than only at the
+     * stall threshold, so a leaked lock is reclaimed in microseconds instead
+     * of after a second of spinning. */
+    if ((spins & 0x3FF) == 0 && ylock_reclaim_if_owner_dead(lock))
+      continue;
     if ((++spins & 0xFFFFF) == 0) {
       /* ~1M iterations: report, but keep waiting -- the holder may be polling
        * a slow device.  Named, so a real wedge is actionable. */
@@ -631,6 +709,31 @@ void ylock_acquire(ylock_t *lock) {
       if (ls_memo_new("stall", lock))
         ls_report("[YLOCK-STALL]", lock_name(lock), lock,
                   (uint64_t)lock->owner - 1, spins);
+    }
+    /* A wedge here is invisible to the idle-stuck dump: every CPU is SPINNING
+     * on this lock rather than going idle, so the watchdog never fires and one
+     * stall line is all the machine ever says.  Measured: RimWorld wedges with
+     * exactly one [YLOCK-STALL] and no dump at all.  Past a threshold that no
+     * honest device wait reaches, print the contention from the waiter. */
+    if (spins >= (64ull << 20) && ls_memo_new("wedge", lock)) {
+      ls_report("[YLOCK-WEDGE]", lock_name(lock), lock,
+                (uint64_t)lock->owner - 1, lock->nwait);
+      {
+        struct kline ko;
+        kl_init(&ko);
+        kl_s(&ko, "[YLOCK-OWNER] ");
+        kl_s(&ko, lock_name(lock));
+        kl_s(&ko, " pid=");
+        kl_i(&ko, (long)lock->owner_pid);
+        kl_s(&ko, " cpu=");
+        kl_i(&ko, (long)lock->owner - 1);
+        kl_s(&ko, " pcb_live=");
+        kl_i(&ko, (lock->owner_pid > 0 &&
+                   process_get_pcb((int)lock->owner_pid) != 0) ? 1 : 0);
+        kl_c(&ko, '\n');
+        kl_emit(&ko);
+      }
+      lock_audit_dump_ylocks();
     }
   }
   lock->nwait--;
@@ -644,6 +747,7 @@ void ylock_release(ylock_t *lock) {
   lockdbg_note_releasing((const spinlock_t *)lock);
 #endif
   lock->owner = 0;
+  lock->owner_pid = 0;
   __atomic_store_n(&lock->locked, 0, __ATOMIC_RELEASE);
   /* No waiters to wake: a ylock waiter spins with interrupts enabled (see
    * ylock_acquire).  If parking is ever restored, the wake edge belongs HERE

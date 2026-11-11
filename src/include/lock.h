@@ -75,6 +75,12 @@ typedef struct {
 typedef struct {
   volatile uint32_t locked; /**< 1 if held, 0 if free */
   volatile uint32_t owner;  /**< cpu+1 of the holder, 0 = unowned */
+  /** pid of the holding thread.  `owner` is a CPU, and a CPU outlives the
+   *  thread that held the lock: if that thread dies inside the critical
+   *  section, the lock stays held by a plausible-looking CPU id for ever and
+   *  every later waiter spins on a lock nobody will ever release.  The pid is
+   *  what makes the leak attributable. */
+  volatile int32_t owner_pid;
   volatile int32_t nwait;   /**< parked waiters (pid ring below) */
   volatile uint8_t whead;   /**< ring write cursor (under proc_lock) */
   volatile uint8_t wtail;   /**< ring read cursor (under proc_lock) */
@@ -85,6 +91,10 @@ typedef struct {
 void ylock_init(ylock_t *lock);
 void ylock_acquire(ylock_t *lock);
 int ylock_tryacquire(ylock_t *lock); /* 1 = acquired, 0 = held elsewhere */
+/** 1 when the holding thread no longer exists (the lock will never be released). */
+int ylock_owner_dead(ylock_t *lock);
+/** Reclaim a lock whose owning thread is gone.  1 = this caller reclaimed it. */
+int ylock_reclaim_if_owner_dead(ylock_t *lock);
 void ylock_release(ylock_t *lock);
 
 void spinlock_init(spinlock_t *lock);
@@ -230,6 +240,7 @@ void lock_audit_note_irqsave_acquire(const void *lock, uint64_t pc);
 void lock_audit_dump_ylocks(void); /* wedge report: name held/wanted ylocks */
 void lock_audit_dump_locks(void);  /* wedge report: name held plain spinlocks */
 uint32_t lock_audit_ylock_stalls(void); /* count of reported ylock stalls */
+uint32_t lock_audit_ylock_steals(void); /* ylocks reclaimed from dead owners */
 
 void kernel_preempt_disable(void);
 void kernel_preempt_enable(void);
