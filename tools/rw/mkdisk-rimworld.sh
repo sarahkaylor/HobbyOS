@@ -160,16 +160,36 @@ stage_payload_extras() {
   # assignment -- the step exited 1 silently BEFORE reporting anything, even
   # though it had already found the file (measured: EXIT=1 right after the AD-9
   # line, with libz present in /tmp/rwlibs).
-  z=$(ls $libdirs/libz.so.1* 2>/dev/null | head -1 || true)
-  std=$(ls $libdirs/libstdc++.so.6.0.* 2>/dev/null | head -1 || true)
+  # /LIB64 is created by stage_runtime, which runs AFTER this function; mcopy to a
+  # missing directory reports "no match for target", which reads like a name or
+  # case problem and is neither (measured twice).
+  mmd -i "$IMG" ::/LIB64 >/dev/null 2>&1 || true
+  # `ls` given several DIRECTORY arguments prints "dir:" header lines, and the
+  # trailing colon makes mtools read the path as another drive (measured:
+  # "/tmp/rwlibs/lib/x86_64-linux-gnu:: No such file or directory").  Glob in the
+  # shell instead, one directory at a time.
+  find_lib() {
+    local pat=$1 d f
+    for d in $libdirs; do
+      for f in "$d"/$pat; do
+        [ -f "$f" ] && { printf '%s\n' "$f"; return 0; }
+      done
+    done
+    return 1
+  }
+  z=$(find_lib 'libz.so.1*' || true)
+  std=$(find_lib 'libstdc++.so.6.0.*' || true)
+  # mtools refuses a lowercase LFN on this image ("::/LIB64/libz.so.1: no match
+  # for target"); the guest resolves FAT names case-insensitively, so an 8.3
+  # uppercase target is equivalent and actually stages.
   if [ -n "$z" ]; then
-    mcopy -o -i "$IMG" "$z" ::/LIB64/libz.so.1 || die "could not stage libz"
+    mcopy -o -i "$IMG" "$z" ::/LIB64/LIBZ.SO.1 || die "could not stage libz"
     note "libz.so.1 <- $z"
   else
     say "WARNING: no x86-64 libz.so.1 found (set RW_LIBS=); Mono will fail to load"
   fi
   if [ -n "$std" ]; then
-    mcopy -o -i "$IMG" "$std" ::/LIB64/libstdc++.so.6 || die "could not stage libstdc++"
+    mcopy -o -i "$IMG" "$std" ::/LIB64/LIBSTDC++.SO.6 || die "could not stage libstdc++"
     note "libstdc++.so.6 <- $std"
   else
     say "WARNING: no libstdc++.so.6 found (set RW_LIBS=)"
@@ -356,7 +376,12 @@ mmd -i "$IMG" ::/GAMES >/dev/null 2>&1 || true
 mmd -i "$IMG" "${DEST}" >/dev/null 2>&1 || true
 # -s recursive, -m keep mtimes, -o overwrite, -Q quit-on-error.  mtools handles
 # FAT long names; the tree keeps the exact case Unity expects.
-mcopy -s -m -o -Q -i "$IMG" "$STAGE"/* "${DEST}"/ || die "mcopy failed"
+if [ "${RW_FORCE_PAYLOAD:-0}" != "1" ] && \
+   mtype -i "$IMG" "${DEST}/RimWorldLinux" >/dev/null 2>&1; then
+  say "payload already in ${DEST} (RW_FORCE_PAYLOAD=1 re-copies)"
+else
+  mcopy -s -m -o -Q -i "$IMG" "$STAGE"/* "${DEST}"/ || die "mcopy failed"
+fi
 
 # --- payload extras, then the runtime they need -----------------------------
 stage_payload_extras "$STAGE"
