@@ -198,6 +198,12 @@ fi
 # File list = git's view of "current code": tracked + untracked-but-not-ignored.
 # That picks up uncommitted edits while still honoring .gitignore (obj/, *.bin,
 # disk.img, logs, venv — none of which belong in a source transfer).
+# docs/ is dropped (137 MB) because an x64 kernel/disk build never reads it --
+# but note the cost: the host-tier doc gates (tools/t5/game_docs_test.py,
+# tools/t5/retro_skill_test.py) PASS only when docs/ is present, so in a
+# --reuse workspace they fail for a missing file, not for a bad tree.  Ship
+# docs/ (rsync -a docs/ <ws>/src/docs/) before quoting a host-test verdict
+# from the remote tree, or run those gates on a real checkout.
 EXCLUDES="--exclude=third_party/webkit-hobbyos/src/*
 --exclude=third_party/webkit-hobbyos/src-wk2/*
 --exclude=third_party/webkit-hobbyos/build/*
