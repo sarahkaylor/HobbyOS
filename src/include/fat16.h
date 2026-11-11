@@ -155,6 +155,8 @@ int fat16_stats(uint64_t* out_total, uint64_t* out_free);
 /* Count of device I/O calls observed while fat_io_lock was held.  Must be 0:
  * a lock held across a device command has an UNBOUNDED hold time. */
 uint32_t fat16_io_under_lock(void);
+/* Write dirty FAT sectors to the device.  Call with NO filesystem lock held. */
+void fat16_flush_pending(void);
 
 /**
  * L78: where the FAT entry for `lba` lives (block-stress write-verify guard).

@@ -61,16 +61,38 @@ static spinlock_t fat_cache_lock;
  * fat_io_lock guards ONLY the in-memory cache install (never device I/O);
  * fat_wr_lock serialises a writer's read-modify-write of one FAT sector. */
 static ylock_t fat_io_lock;
-/* Writers serialize their read-modify-write on this one, NOT on fat_io_lock: a
-   stalled write must cost other writers a wait, never every reader. */
+/* Writers serialise a SECTOR FLUSH on this one, never on fat_lock: a stalled
+   write then costs other flushers a wait, not every filesystem operation. */
 static ylock_t fat_wr_lock;
-/* Bumped by every FAT sector write (under fat_cache_lock).  A reader that
-   fetched a sector outside the lock compares this before installing, so it can
-   never resurrect a FAT a writer has already replaced. */
-static volatile uint32_t fat_ver;
-static uint8_t fat_cache[SECTOR_SIZE];
-static uint32_t fat_cache_sector;
-static int fat_cache_valid;
+
+/* ---- THE FAT LIVES IN RAM ------------------------------------------------
+ * Every FAT operation reads metadata: a chain walk is one entry per cluster,
+ * and RimWorld's 86-assembly load walks thousands of them.  While the table
+ * lived on the device, each of those reads was a device command taken under
+ * fat_lock -- a critical section whose duration belongs to the device, not to
+ * us.  That is the measured wedge: the holder ALIVE and RUNNING inside the
+ * critical section (osys=6 lstat, osys=0 read), 239 threads queued behind it,
+ * no recovery.  Moving the lock around cannot fix a critical section that
+ * contains a device command; the command has to leave.
+ *
+ * So the table is read once at mount and is authoritative from then on:
+ *   - readers (read_fat) touch memory only -- no lock, no device, no wedge;
+ *   - writers (write_fat) update RAM, mark the sector dirty, and the flush
+ *     happens at a point where no filesystem lock is held.
+ *
+ * FAT16 caps at 65,524 clusters, so the largest valid table is
+ * 2 B * (65524 + 2) = 131,052 B -- 128 KiB holds every valid FAT16 volume.
+ */
+#define FAT_RAM_MAX (128u * 1024u)
+static uint8_t fat_ram[FAT_RAM_MAX];
+static uint32_t fat_ram_bytes;
+static int fat_ram_ready;
+/* One dirty flag per FAT sector (<= 256 sectors for a 128 KiB table). */
+#define FAT_MAX_SECTORS 256
+static uint8_t fat_dirty[FAT_MAX_SECTORS];
+static volatile uint32_t fat_dirty_count;
+
+static int fat_ram_load(void);
 
 /* Helper: match an 8.3 filename.  A query that cannot be represented in
    8.3 (a base longer than 8 chars or an extension longer than 3) never
@@ -241,7 +263,6 @@ int fat16_init(void) {
   lock_register(&fat_wr_lock, "fat_wr_lock", LOCK_RANK_FATIO, LOCK_CLASS_PROCESS);
   lock_register(&fat_io_lock, "fat_io_lock", LOCK_RANK_FATIO, LOCK_CLASS_PROCESS);
   spinlock_init(&fat_cache_lock);
-  fat_cache_valid = 0;
   uint8_t buf[SECTOR_SIZE];
   if (virtio_blk_read_sector(0, buf, 1) != 0) {
     return -1;
@@ -268,6 +289,9 @@ int fat16_init(void) {
   root_dir_sectors = (bpb_root_dir_entries * 32 + (SECTOR_SIZE - 1)) / SECTOR_SIZE;
   data_sector = root_dir_sector + root_dir_sectors;
   cluster_size = bpb_sectors_per_cluster * SECTOR_SIZE;
+
+  if (fat_ram_load() != 0)
+    return -1;
 
   return 0;
 }
@@ -296,136 +320,121 @@ static void fat_io_scope_check(const char *what) {
 }
 
 static uint16_t read_fat(uint16_t cluster) {
-  uint32_t offset = cluster * 2;
-  uint32_t sector = fat_sector + (offset / SECTOR_SIZE);
-
-  /* Fast path: a cache hit costs one short spinlock and no device traffic. */
-  spinlock_acquire(&fat_cache_lock);
-  if (fat_cache_valid && fat_cache_sector == sector) {
-    uint8_t* p = fat_cache + (offset % SECTOR_SIZE);
-    uint16_t v = (uint16_t)(p[0] | (p[1] << 8));
-    spinlock_release(&fat_cache_lock);
-    return v;
-  }
-  spinlock_release(&fat_cache_lock);
-
-  /* Miss: FETCH WITH NO LOCK HELD.
-   *
-   * LOCK SCOPE (measured wedge): this device read used to run under
-   * fat_io_lock.  A critical section whose body is a device command has an
-   * UNBOUNDED hold time, and RimWorld wedged on exactly that: the holder was
-   * alive and RUNNING inside this read, 239 threads queued behind the lock, and
-   * the machine never recovered.  The read is now taken outside every lock;
-   * the lock is used only to INSTALL the fetched sector, which never touches
-   * the device.  fat16_io_under_lock() counts any regression of this rule.
-   *
-   * M6/L69: A METADATA SECTOR IS NEVER BELIEVED ON ONE READ.  A controller
-   * reset can abort a read and hand back the previous sector (status 0, no
-   * DMA), and ONE wrong FAT entry turns the rest of a chain walk into other
-   * files' clusters.  Read the sector twice and require agreement; retry a few
-   * times.  A persistent failure is a chain break, not a guess. */
-  uint8_t local[SECTOR_SIZE];
-  uint8_t chk[SECTOR_SIZE];
-  int ok = 0;
-  fat_io_scope_check("read_fat");
-  for (int attempt = 0; attempt < 3 && !ok; attempt++) {
-    if (virtio_blk_read_raw(sector, local, 1) != 0)
-      continue;
-    if (virtio_blk_read_raw(sector, chk, 1) != 0)
-      continue;
-    ok = 1;
-    for (int i = 0; i < SECTOR_SIZE; i++)
-      if (local[i] != chk[i]) { ok = 0; break; }
-  }
-  if (!ok) {
-    spinlock_acquire(&fat_cache_lock);
-    fat_cache_valid = 0;
-    spinlock_release(&fat_cache_lock);
+  uint32_t off = (uint32_t)cluster * 2u;
+  if (!fat_ram_ready || off + 2u > fat_ram_bytes)
     return 0xFFF8; /* chain break: callers short-circuit and can retry */
-  }
-
-  uint32_t ver0 = fat_ver;
-  ylock_acquire(&fat_io_lock);
-  spinlock_acquire(&fat_cache_lock);
-  if (fat_cache_valid && fat_cache_sector == sector && fat_ver != ver0) {
-    /* A writer installed newer bytes while we were reading: installing ours
-     * would resurrect the pre-write FAT, so use what the writer installed. */
-  } else {
-    for (int i = 0; i < SECTOR_SIZE; i++) fat_cache[i] = local[i];
-    fat_cache_sector = sector;
-    fat_cache_valid = 1;
-  }
-  uint8_t* p = fat_cache + (offset % SECTOR_SIZE);
-  uint16_t v = (uint16_t)(p[0] | (p[1] << 8));
-  spinlock_release(&fat_cache_lock);
-  ylock_release(&fat_io_lock);
-  return v;
+  /* An entry never straddles a sector (2 divides 512) and is 2-byte aligned,
+     so an aligned 16-bit load cannot tear against a writer's aligned store. */
+  return __atomic_load_n((uint16_t*)(void*)(fat_ram + off), __ATOMIC_ACQUIRE);
 }
 
+
 static void write_fat(uint16_t cluster, uint16_t val) {
-  uint8_t buf[SECTOR_SIZE];
-  uint32_t offset = cluster * 2;
-  uint32_t sector = fat_sector + (offset / SECTOR_SIZE);
+  uint32_t off = (uint32_t)cluster * 2u;
+  if (!fat_ram_ready || off + 2u > fat_ram_bytes)
+    return;
+  uint32_t idx = off / SECTOR_SIZE;
 
-  /* THE LOST UPDATE THIS FIXES: read S, patch one entry, write S.  With two
-   * threads allocating at once the sequence interleaves
-   * read/read/modify/modify/write/write, and the first thread's FAT entry is
-   * gone -- a cluster chain that points into another file's clusters, which a
-   * reader sees as "bytes nobody wrote to this file".  Held across
-   * read->modify->write AND the cache install: the lock is the update.
-   *
-   * Writers serialize on their OWN lock, never on fat_io_lock: a stalled write
-   * then costs the other WRITERS a wait, instead of every reader in the
-   * machine.  Readers are unaffected because their device reads take no lock
-   * at all and fat_ver tells them when an install is stale. */
-  ylock_acquire(&fat_wr_lock);
-
-  /* Reuse the cache when it holds this sector; otherwise fetch it. */
   spinlock_acquire(&fat_cache_lock);
-  int cached = (fat_cache_valid && fat_cache_sector == sector);
-  if (cached) {
-    for (int i = 0; i < SECTOR_SIZE; i++) buf[i] = fat_cache[i];
+  __atomic_store_n((uint16_t*)(void*)(fat_ram + off), val, __ATOMIC_RELEASE);
+  if (idx < FAT_MAX_SECTORS && !fat_dirty[idx]) {
+    fat_dirty[idx] = 1;
+    __atomic_add_fetch(&fat_dirty_count, 1, __ATOMIC_SEQ_CST);
   }
   spinlock_release(&fat_cache_lock);
-  if (!cached) {
-    /* Same rule as read_fat: metadata never comes from the page cache. */
-    uint8_t chk2[SECTOR_SIZE];
-    int ok2 = 0;
-    fat_io_scope_check("write_fat(read)");
-    for (int attempt = 0; attempt < 3 && !ok2; attempt++) {
-      if (virtio_blk_read_raw(sector, buf, 1) != 0)
-        continue;
-      if (virtio_blk_read_raw(sector, chk2, 1) != 0)
-        continue;
-      ok2 = 1;
+
+  /* Flush inline ONLY when no filesystem lock is held by this call: that is
+     the alloc_cluster() path, which already releases fat_lock for exactly this
+     reason.  Everywhere else (write_fat called under fat_lock) the sector is
+     flushed at syscall exit, where no lock is held -- see the dispatcher hook.
+     A device command must never run under fat_lock. */
+  if (!fat_lock.locked)
+    fat16_flush_pending();
+}
+
+/* Write dirty FAT sectors to the device.  MUST be called with no filesystem
+ * lock held: that is the entire point of the split. */
+void fat16_flush_pending(void) {
+  if (!fat_ram_ready || !fat_dirty_count)
+    return;
+  for (uint32_t idx = 0; idx < FAT_MAX_SECTORS; idx++) {
+    if (idx >= (uint32_t)bpb_sectors_per_fat)
+      break;
+    if (!fat_dirty[idx])
+      continue;
+    uint8_t buf[SECTOR_SIZE];
+    int need = 0;
+    /* Snapshot under the short spinlock, write the device under the writer
+       lock only.  Taking fat_wr_lock BEFORE the snapshot is what keeps two
+       flushes of one sector in order: the second flusher cannot snapshot until
+       the first write has landed, so the device always ends with newer bytes. */
+    ylock_acquire(&fat_wr_lock);
+    spinlock_acquire(&fat_cache_lock);
+    if (fat_dirty[idx]) {
+      fat_dirty[idx] = 0;
+      __atomic_sub_fetch(&fat_dirty_count, 1, __ATOMIC_SEQ_CST);
       for (int i = 0; i < SECTOR_SIZE; i++)
-        if (buf[i] != chk2[i]) { ok2 = 0; break; }
+        buf[i] = fat_ram[idx * SECTOR_SIZE + i];
+      need = 1;
     }
-    if (!ok2) {
-      ylock_release(&fat_wr_lock);
-      return; /* never stamp a sector we could not read */
+    spinlock_release(&fat_cache_lock);
+    if (need) {
+      fat_io_scope_check("fat_flush");
+      uint32_t sector = fat_sector + idx;
+      virtio_blk_write_sector(sector, buf, 1);
+      if (bpb_fat_count > 1)
+        virtio_blk_write_sector(sector + bpb_sectors_per_fat, buf, 1);
     }
+    ylock_release(&fat_wr_lock);
   }
+}
 
-  uint8_t* p = buf + (offset % SECTOR_SIZE);
-  p[0] = val & 0xFF;
-  p[1] = (val >> 8) & 0xFF;
-  fat_io_scope_check("write_fat(write)");
-  virtio_blk_write_sector(sector, buf, 1);
-
-  if (bpb_fat_count > 1) {
-    virtio_blk_write_sector(sector + bpb_sectors_per_fat, buf, 1);
+/* Load the whole FAT once, at mount.  Same rule as the old sector reader: a
+ * metadata sector is never believed on one read (a controller reset can abort a
+ * read and hand back the previous sector with status 0). */
+static int fat_ram_load(void) {
+  fat_ram_ready = 0;
+  fat_ram_bytes = (uint32_t)bpb_sectors_per_fat * SECTOR_SIZE;
+  if (fat_ram_bytes == 0 || fat_ram_bytes > FAT_RAM_MAX) {
+    uart_puts("[FAT16] FAT does not fit in RAM (");
+    char nb[12];
+    int k = 0;
+    uint32_t v = fat_ram_bytes;
+    if (!v) nb[k++] = '0';
+    while (v) { nb[k++] = (char)('0' + (v % 10)); v /= 10; }
+    char out[16];
+    int o = 0;
+    while (k) out[o++] = nb[--k];
+    out[o] = 0;
+    uart_puts(out);
+    uart_puts(")\n");
+    return -1;
   }
-
-  /* Refresh/install the cache with the modified sector, and bump fat_ver so a
-   * reader that is installing an older copy of this sector backs off. */
-  spinlock_acquire(&fat_cache_lock);
-  for (int i = 0; i < SECTOR_SIZE; i++) fat_cache[i] = buf[i];
-  fat_cache_sector = sector;
-  fat_cache_valid = 1;
-  fat_ver++;
-  spinlock_release(&fat_cache_lock);
-  ylock_release(&fat_wr_lock);
+  for (uint32_t i = 0; i < (uint32_t)bpb_sectors_per_fat; i++) {
+    uint8_t tmp[SECTOR_SIZE], chk[SECTOR_SIZE];
+    int ok = 0;
+    for (int a = 0; a < 3 && !ok; a++) {
+      if (virtio_blk_read_raw(fat_sector + i, tmp, 1) != 0)
+        continue;
+      if (virtio_blk_read_raw(fat_sector + i, chk, 1) != 0)
+        continue;
+      ok = 1;
+      for (int j = 0; j < SECTOR_SIZE; j++)
+        if (tmp[j] != chk[j]) { ok = 0; break; }
+    }
+    if (!ok) {
+      uart_puts("[FAT16] FAT load failed\n");
+      return -1;
+    }
+    for (int j = 0; j < SECTOR_SIZE; j++)
+      fat_ram[i * SECTOR_SIZE + j] = tmp[j];
+  }
+  for (uint32_t i = 0; i < FAT_MAX_SECTORS; i++)
+    fat_dirty[i] = 0;
+  fat_dirty_count = 0;
+  fat_ram_ready = 1;
+  uart_puts("[FAT16] FAT resident in RAM\n");
+  return 0;
 }
 
 /* W4-kernel (selfhost): free-cluster hint.  alloc_cluster() used to scan
