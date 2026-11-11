@@ -61,6 +61,9 @@ def stage(disk, work, x11_build_dir, sndbuf=0):
                    check=True)
 
     envp = os.path.join(work, "XSESSION.ENV")
+    # The image does not always carry XSESSION.ENV (main's desktop image does
+    # not; the rimworld line's did), so read it if it is there and never fail
+    # on its absence -- we write the file back either way.
     subprocess.run(["mcopy", "-o", "-i", disk, "::/X11/XSESSION.ENV", envp],
                    check=False, capture_output=True)
     keep = []
@@ -74,6 +77,8 @@ def stage(disk, work, x11_build_dir, sndbuf=0):
         f.write("HB_PRESPROF=1\n")        # [HBX] present-cost rows
         if sndbuf:
             f.write(f"XPB_SNDBUF={sndbuf}\n")
+    subprocess.run(["mmd", "-i", disk, "::/X11"], check=False,
+                   capture_output=True)
     subprocess.run(["mcopy", "-o", "-i", disk, envp, "::/X11/XSESSION.ENV"],
                    check=True)
     log(f"staged /{BIN} as /XSTART.TXT, XSESS_NO_WM=1")
