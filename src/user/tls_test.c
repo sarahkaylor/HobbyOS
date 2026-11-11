@@ -212,11 +212,21 @@ static void test_fresh_after_death(void) {
 /* ---- 5. TLS pointers stay inside each thread's own region ---------------- */
 
 static volatile uintptr_t self_ptrs[3];
+/* A thread's TLS block lives only as long as the thread does: on a host libc
+   the block of an exited thread is freed and the NEXT pthread_create can be
+   handed the same address, so three threads created back to back can report
+   one address twice and the check reads as "TLS is shared" when nothing is.
+   Hold every thread until all three have recorded, then release them: the
+   property under test ("while N threads are alive, each has its own block")
+   is what the barrier makes true, on both legs. */
+static volatile int arrived;
+static volatile int release_all;
 
 static void *addr_fn(void *arg) {
   long id = (long)arg;
   self_ptrs[id - 1] = (uintptr_t)&t_int;
-  for (int i = 0; i < 20; i++)
+  __atomic_add_fetch(&arrived, 1, __ATOMIC_SEQ_CST);
+  while (!__atomic_load_n(&release_all, __ATOMIC_SEQ_CST))
     sched_yield();
   if (self_ptrs[id - 1] != (uintptr_t)&t_int)
     __atomic_store_n(&errno_bad, 1, __ATOMIC_RELAXED);
@@ -226,11 +236,24 @@ static void *addr_fn(void *arg) {
 static void test_address_stability(void) {
   pthread_t th[3];
   int ok = 1;
+  arrived = 0;
+  release_all = 0;
   for (int i = 0; i < 3; i++) {
     self_ptrs[i] = 0;
     if (create_retry(&th[i], addr_fn, (void *)(long)(i + 1)) != 0)
       ok = 0;
   }
+  /* wait for all three to be alive AND to have recorded, then release */
+  if (ok) {
+    for (int spin = 0; spin < 100000; spin++) {
+      if (__atomic_load_n(&arrived, __ATOMIC_SEQ_CST) == 3)
+        break;
+      sched_yield();
+    }
+    if (__atomic_load_n(&arrived, __ATOMIC_SEQ_CST) != 3)
+      ok = 0;
+  }
+  __atomic_store_n(&release_all, 1, __ATOMIC_SEQ_CST);
   for (int i = 0; i < 3 && ok; i++) {
     void *r;
     if (pthread_join(th[i], &r) != 0)

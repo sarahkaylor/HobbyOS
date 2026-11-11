@@ -80,7 +80,11 @@ static int worker_body(int w) {
       path[n++] = *ext++;
     path[n] = '\0';
 
-    int fd = open(path, O_CREAT | O_RDWR | O_TRUNC);
+    /* GB-084: O_CREAT takes the mode as a THIRD argument.  open() is vararg, so
+       a 2-arg call leaves the mode to whatever register happens to be there --
+       tools/gate/open_mode_scan.py gates exactly this (and red-flagged this
+       line when the branch met main's scanner). */
+    int fd = open(path, O_CREAT | O_RDWR | O_TRUNC, 0644);
     if (fd < 0)
       break;
     if (write(fd, buf, BUFLEN) != BUFLEN) {

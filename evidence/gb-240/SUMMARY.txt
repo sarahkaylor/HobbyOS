@@ -1,0 +1,141 @@
+GB-240 — bracket the idle-stuck detector's proc_lock section
+============================================================
+
+Head: 8bdd2fefc484aa5e5627a3acf5fa3244b0f1c7f9 (origin/main) + the GB-240 commit.
+Worktree: /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb240
+SW-VM: swarm-farm-3 (verifier, debug reserve — gaming.md §5.1).
+
+The card's premise
+------------------
+GB-232's disassembly attributed the imbalanced `[PROCLOCK-HOLD]` acquire
+(`owner_site3=0x7007BC9D`) to the idle-stuck detector's `proc_lock` section at
+process.c:4782. GB-240 asked for a per-CPU bracket of that section:
+det_entry_ms on acquire, det_exit_ms on the release, det_stage at the branches
+(1 slot scan, 2 dispose, 3 group_teardown, 4 release), printed on the
+[PROCLOCK-HOLD]/[LOCKDIAG] row for the owner CPU.
+
+What this branch adds
+---------------------
+- src/include/lock.h: proclock_hold_t gains det_entry_ms/det_exit_ms/det_stage;
+  proclock_det_note(op, stage) is declared (op 1 entry, 2 stage, 3 exit).
+- src/kernel/arch/x64/locks.c: proclock_det_note() writes the per-CPU stamp.
+- src/kernel/arch/arm/locks.c: no-op stub (the shared process.c call site must
+  still compile on ARM; ARM has no plh[] table).
+- src/kernel/process.c:
+  * after the detector's `spinlock_acquire_irqsave(&proc_lock)` (4782):
+    proclock_det_note(1, 1);
+  * stage 2 when a dispose slot is selected; stage 4 immediately at the
+    release; exit stamp after the release returns; stage 3 before group_teardown;
+  * [PROCLOCK-HOLD] prints det_entry/det_exit/det_stage for that CPU;
+  * [LOCKDIAG] prints the OWNER CPU's det_entry/det_exit/det_stage.
+  Existing scheduling behaviour is unchanged (observation only).
+
+Measured: one 600 s default intel wave
+--------------------------------------
+T3_intel: 5013 console lines, 5 FAIL lines, 1 user memory fault records across
+          1 processes, 33 programs exited, 10 shredded, glued=31, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the
+          600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 4 FATAL kernel-mode fault line(s)
+T3_intel: FAIL — 31 glued console line(s)
+T3_intel EXIT=1
+
+The wave wedged (halted=0, 33 programs) with 87 [PROCLOCK-HOLD] rows, 29
+[LOCKDIAG] rows and 174 [IDLESTUCK] lines, so the detector stamps printed.
+
+RESULT: the card's premise is FALSIFIED — every imbalanced row carries a
+completed detector pair, and the unpaired acquire is the [IDLESTUCK] dump's
+OWN proc_lock acquire, not the detector section.
+
+All 11 imbalanced rows in the serial (acq != rel), parsed:
+
+```
+cpu=4 acq=1539 rel=1538 last=acquire last_ms=30645 site3=0x7007BCDD det_entry=27323 det_exit=27323 det_stage=4 pair=COMPLETED
+cpu=5 acq=1647 rel=1646 last=acquire last_ms=91251 site3=0x7007BCDD det_entry=5170 det_exit=5170 det_stage=4 pair=COMPLETED
+cpu=5 acq=2003 rel=2002 last=acquire last_ms=98470 site3=0x7007BCDD det_entry=5170 det_exit=5170 det_stage=4 pair=COMPLETED
+cpu=7 acq=5170 rel=5169 last=acquire last_ms=125155 site3=0x7007BCDD det_entry=31137 det_exit=31137 det_stage=4 pair=COMPLETED
+cpu=4 acq=3705 rel=3704 last=acquire last_ms=155166 site3=0x7007BCDD det_entry=155151 det_exit=155151 det_stage=4 pair=COMPLETED
+cpu=1 acq=7894 rel=7893 last=acquire last_ms=186079 site3=0x7007BCDD det_entry=186075 det_exit=186075 det_stage=4 pair=COMPLETED
+cpu=4 acq=9449 rel=9448 last=acquire last_ms=217003 site3=0x7007BCDD det_entry=216991 det_exit=216991 det_stage=4 pair=COMPLETED
+cpu=7 acq=23068 rel=23067 last=acquire last_ms=247973 site3=0x7007BCDD det_entry=247971 det_exit=247971 det_stage=4 pair=COMPLETED
+cpu=7 acq=29089 rel=29088 last=acquire last_ms=280265 site3=0x7007BCDD det_entry=280257 det_exit=280257 det_stage=4 pair=COMPLETED
+cpu=7 acq=37504 rel=37503 last=acquire last_ms=310947 site3=0x7007BCDD det_entry=310945 det_exit=310945 det_stage=4 pair=COMPLETED
+cpu=4 acq=22525 rel=22524 last=acquire last_ms=348442 site3=0x7007BCDD det_entry=338465 det_exit=338465 det_stage=4 pair=COMPLETED
+```
+
+distinct site3 on imbalanced rows: {0x7007BCDD: 11}
+stage counts on imbalanced rows: {4: 11}
+rows with det_entry>0 and det_exit==0: 0
+rows with det_entry==0: 0
+
+Address resolution (llvm-addr2line on this build's hobbyos.elf):
+```
+0x7007BCDD -> start_scheduler process.c:5089   (the [IDLESTUCK] dump's
+                                                `uint64_t dflags =
+                                                 spinlock_acquire_irqsave(&proc_lock);`)
+0x7007B4B5 -> start_scheduler process.c:4782   (the detector's acquire)
+0x7007BB82 -> start_scheduler process.c:5022   (the detector's release)
+```
+The disassembly confirms the shape: at 0x7007BCC9-0x7007BCDD the dump prints
+" rounds=" / " t=" / timer_get_ms then acquires 0x746E5088 (proc_lock); at
+0x7007B4AB-0x7007B4C3 the detector acquires the same lock and immediately calls
+proclock_det_note(1,1). The card's older `0x7007BC9D` is the same dump acquire
+in the pre-instrument binary (the GB-240 additions shift it to 0x7007BCDD).
+
+Representative dump block (byte-verbatim; the [PROCLOCK-HOLD]/[LOCKDIAG] rows
+are printed while the dumping CPU holds proc_lock):
+```
+[PROCLOCK-HOLD] cpu=5 acq=37204 rel=37204 last=release last_ms=310947 site=0x000000007007BB82 owner_site3=0x000000007007B4B5 rel_site=0x000000007007BB82 iretq_ms=310945 locked_at_iretq=1 det_entry=310947 det_exit=310947 det_stage=4
+[PROCLOCK-HOLD] cpu=7 acq=37504 rel=37503 last=acquire last_ms=310947 site=0x00000000700B298E owner_site3=0x000000007007BCDD rel_site=0x000000007007BB82 iretq_ms=310945 locked_at_iretq=1 det_entry=310945 det_exit=310945 det_stage=4
+[LOCKDIAG] wait_cpu=0 lock=0x00000000746E5088 owner_cpu=7 owner_pid=-1 owner_site=0x00000000700B298E owner_site2=0x000000007007BCDD wait_pid=1 wait_stage=0 wait_pc=0x00000000700B298E wait_pc2=0x0000000070069086 owner_wd_rip=0x0000001000005C84 owner_wd_pid=5 det_entry=310945 det_exit=310945 det_stage=4
+```
+CPU 5's last detector pass completed at 310947 (last=release). CPU 7's last
+detector pass completed at 310945 (det_entry=det_exit); at 310947 it acquired
+proc_lock for the [IDLESTUCK] dump itself — that is the `acq=rel+1` row. The
+[LOCKDIAG] rows then show the other CPUs waiting on the dump's lock
+(wait_pc=spinlock_acquire_irqsave), not on a detector section.
+
+Decision per the card
+---------------------
+The falsifier says: "if every imbalanced row shows a completed entry/exit pair,
+this card's premise dies — return with the record and the next split, do not
+guess." That is what the record shows (11/11 completed, 0 with det_exit=0), so
+GB-240 returns with the record rather than a fix.
+
+Next split (for the Coordinator; not minted here)
+-------------------------------------------------
+1. The [IDLESTUCK] dump holds proc_lock while it prints 87 [PROCLOCK-HOLD] rows
+   over the UART; its own acquire is definitionally `acq=rel+1` in that dump.
+   Either mark/skip the dumper's own row (`dump_self=1`) or snapshot the table
+   under the lock and release before printing, so the row cannot be mistaken
+   for a strand.
+2. The real owner signal in this wave is the LOCKDIAG owner while the dump
+   prints: `owner_cpu=7 owner_pid=-1 owner_wd_rip=0x1000005C84 owner_wd_pid=5`
+   — a user VA on pid 5, i.e. the owner CPU was in user space while the dump
+   held the lock. That, not the detector section, is the next candidate.
+3. GB-232's attribution of the same site to the detector (4782) is not
+   supported by this build: the unpaired acquire resolves to 5089.
+
+Gates (verbatim)
+----------------
+```
+$ make -j24 host_tests
+Checks run:    482
+Checks failed: 0
+TEST EXIT: 0
+$ make -j24 ARCH=intel MODE=test hobbyos.elf
+BUILD_EXIT=0
+```
+Not counted against this card: the wave's 5 FAIL lines, 31 glued records, and
+the halt-miss are the wave's own known defects; none is the detector stamp.
+The T3 counter's "4 FATAL kernel-mode fault line(s)" is 2 fault events, each
+printing both the banner and the halting summary line: vector=13 at line 632
+(pid=3) and vector=0 at line 4155 (pid=17).
+
+Files
+-----
+evidence/gb-240/t3-intel-600s.log / .stdout
+evidence/gb-240/01-imbalanced-rows.txt
+evidence/gb-240/02-address-resolution.txt
+evidence/gb-240/host-tests.log
+evidence/gb-240/intel-build.log

@@ -889,11 +889,29 @@ void wm_handle_app_escape(int win_id, char* seq) {
       if (windows[j].id == win_id) {
         windows[j].pix_restamp = 1;
         if (rw > 0 && rh > 0) {
-          windows[j].pix_present.x = rx < 0 ? 0 : rx;
-          windows[j].pix_present.y = ry < 0 ? 0 : ry;
-          windows[j].pix_present.w = rw;
-          windows[j].pix_present.h = rh;
-          windows[j].pix_present_n = 1;
+          int px = rx < 0 ? 0 : rx;
+          int py = ry < 0 ? 0 : ry;
+          if (windows[j].pix_present_n) {
+            /* L88: two presents can land between two services of this window
+             * (the host's loop, or a frame that presents twice).  Replacing
+             * the pending rect would leave the first frame's pixels stale --
+             * a host that blits "the rect the app named" must be given the
+             * union of everything named since the last service. */
+            struct wm_rect *pp = &windows[j].pix_present;
+            int x0 = px < pp->x ? px : pp->x;
+            int y0 = py < pp->y ? py : pp->y;
+            int x1 = px + rw, y1 = py + rh;
+            if (pp->x + pp->w > x1) x1 = pp->x + pp->w;
+            if (pp->y + pp->h > y1) y1 = pp->y + pp->h;
+            pp->x = x0; pp->y = y0;
+            pp->w = x1 - x0; pp->h = y1 - y0;
+          } else {
+            windows[j].pix_present.x = px;
+            windows[j].pix_present.y = py;
+            windows[j].pix_present.w = rw;
+            windows[j].pix_present.h = rh;
+            windows[j].pix_present_n = 1;
+          }
         }
         break;
       }

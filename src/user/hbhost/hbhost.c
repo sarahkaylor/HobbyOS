@@ -107,7 +107,89 @@ static void logmsg(const char *a, const char *b) {
  *         blit advancing and dmg=0 is the app presenting into its own shadow
  *         without telling anyone, and blit=0 with flush advancing is HBHOST
  *         dropping the damage.
+ *
+ * L88 adds the present *budget*, because "HBHOST is the bottleneck" has to be
+ * a measurement:
+ *
+ *   [HBT]  one row per HBT_EVERY blits (and the first four): the rect and the
+ *          time inside XPutImage (and inside the sampled checksum, when this
+ *          blit took one).
+ *   [HBTS] every 2 s: blits, blits/s, mean and max XPutImage time, Mpx/s and
+ *          `busy` -- the permille of the window spent inside XPutImage.  A
+ *          busy near 0 says the host's blit is not the frame; busy 500 says
+ *          it is half of it.  `copy_us` is a reference memcpy of the same
+ *          rect in the same process: XPutImage minus copy is the wire to
+ *          XHOBBY plus what the server does with it.
+ *
+ * The guest's CLOCK_MONOTONIC ticks at 1 ms (rule 33), so the timing base is
+ * the TSC, calibrated against sysinfo(1) once per process -- the clock the
+ * kernel's own timer_get_us() divides down.  Everything prints in us.
  */
+#define HBT_EVERY 16
+
+static inline unsigned long long tsc_now(void) {
+  unsigned lo, hi;
+  __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+  return ((unsigned long long)hi << 32) | lo;
+}
+
+struct hbt_stats {
+  int t0_ms;
+  unsigned long long tsc0;
+  unsigned long long cpm;      /* cycles per ms; 0 until calibrated */
+  int tsc_dead;
+  unsigned long long blits, px;
+  unsigned long long put_cyc, put_cyc_max, crc_cyc;
+  /* this window */
+  int w_ms;
+  unsigned long long w_tsc;
+  unsigned long long w_blits, w_px, w_put_cyc, w_put_cyc_max, w_crc_cyc;
+  /* static-frame probe */
+  unsigned probes;
+  int have_probe_crc, last_probe_ms;
+  unsigned long long probe_crc;
+};
+static struct hbt_stats hbt;
+
+static unsigned long long cyc_us(unsigned long long c) {
+  return hbt.cpm ? (c * 1000ull) / hbt.cpm : 0;
+}
+
+static void hbt_calibrate(int t) {
+  if (hbt.cpm || hbt.tsc_dead) return;
+  int d = t - hbt.t0_ms;
+  if (d < 1000) return;
+  unsigned long long c = tsc_now() - hbt.tsc0;
+  if (c < 1000000ull) {
+    hbt.tsc_dead = 1;
+    fprintf(stderr, "[HBT] clock: rdtsc reads %llu over %d ms -- ms timing only\n",
+            c, d);
+    return;
+  }
+  hbt.cpm = c / (unsigned long long)d;
+  fprintf(stderr, "[HBT] clock cyc_per_ms=%llu (%llu MHz) over %d ms\n",
+          hbt.cpm, hbt.cpm / 1000ull, d);
+}
+
+/* One reference copy of `w x h` from the surface into a scratch buffer: the
+ * guest's own bandwidth for exactly this rect, so `put_us - copy_us` is what
+ * the X connection costs on top of the copy. */
+static unsigned *hbt_scratch;
+static unsigned long long hbt_copy_ref(int w, int h) {
+  if (!hbt_scratch) {
+    hbt_scratch = (unsigned *)malloc((size_t)SURF_W * SURF_H * 4);
+    if (!hbt_scratch) return 0;
+  }
+  if (w <= 0 || h <= 0 || w > SURF_W || h > SURF_H) return 0;
+  unsigned long long c0 = tsc_now();
+  for (int r = 0; r < h; r++) {
+    unsigned *d = hbt_scratch + (size_t)r * w;
+    const unsigned *s = surf + (size_t)r * SURF_W;
+    for (int i = 0; i < w; i++) d[i] = s[i];
+  }
+  return tsc_now() - c0;
+}
+
 struct hb_stats {
   unsigned vd, flush, dmg, restamp, paint;
   unsigned blit, blit_empty, px;
@@ -117,6 +199,8 @@ struct hb_stats {
 };
 static struct hb_stats hb;
 
+static unsigned long long surf_crc(int x, int y, int w, int h, unsigned *nz);
+
 static void hb_summary(int t) {
   fprintf(stderr, "[HBS] t=%d vd=%u flush=%u dmg=%u restamp=%u paint=%u "
                   "blit=%u empty=%u px=%u full=%u dmgblit=%u restampblit=%u "
@@ -124,6 +208,122 @@ static void hb_summary(int t) {
           t, hb.vd, hb.flush, hb.dmg, hb.restamp, hb.paint, hb.blit,
           hb.blit_empty, hb.px, hb.b_full, hb.b_dmg, hb.b_restamp,
           hb.b_paint, game_mode, hd_pixel_mode(), win_w, win_h);
+}
+
+static void hbt_summary(int t) {
+  hbt_calibrate(t);
+  int dms = t - hbt.w_ms;
+  unsigned long long wall = hbt.w_tsc ? (tsc_now() - hbt.w_tsc) : 0;
+  unsigned long long busy = wall ? (1000ull * hbt.w_put_cyc) / wall : 0;
+  unsigned long long bps = dms > 0 ? (hbt.w_blits * 1000ull) / (unsigned)dms : 0;
+  unsigned long long mpx_s = dms > 0 ? (hbt.w_px / 1000ull) * 1000ull /
+                                      (unsigned long long)dms : 0;
+  unsigned long long put_avg = hbt.w_blits ? hbt.w_put_cyc / hbt.w_blits : 0;
+  int cx, cy, cw, ch;
+  unsigned long long copy = 0;
+  hd_content_rect(&cx, &cy, &cw, &ch);
+  if (cw > 0 && ch > 0 && cw <= SURF_W && ch <= SURF_H) copy = hbt_copy_ref(cw, ch);
+  fprintf(stderr, "[HBTS] t=%d dms=%d blits=%llu bps=%llu put_avg_us=%llu "
+                  "put_max_us=%llu crc_avg_us=%llu copy_us=%llu px=%llu "
+                  "Mpx_s=%llu busy_permille=%llu full_px=%d cpm=%llu\n",
+          t, dms, hbt.w_blits, bps, cyc_us(put_avg), cyc_us(hbt.w_put_cyc_max),
+          hbt.w_blits ? cyc_us(hbt.w_crc_cyc / hbt.w_blits) : 0,
+          cyc_us(copy), hbt.w_px, mpx_s, busy, cw * ch, hbt.cpm);
+  hbt.w_ms = t;
+  hbt.w_tsc = tsc_now();
+  hbt.w_blits = hbt.w_px = hbt.w_put_cyc = hbt.w_put_cyc_max = hbt.w_crc_cyc = 0;
+}
+
+/* A marker file, the same idiom as /XPROF: /HBTPROBE content "1" or "on"
+ * turns the static-frame probe on. */
+static int probe_on(void) {
+  static int on = -1;
+  if (on < 0) {
+    char b[8];
+    int n = 0;
+    int fd = open("/HBTPROBE", O_RDONLY);
+    on = 0;
+    if (fd >= 0) {
+      n = (int)read(fd, b, sizeof b - 1);
+      close(fd);
+      if (n > 0 && (b[0] == '1' || b[0] == 'o')) on = 1;
+    }
+  }
+  return on;
+}
+
+static int probe_dump(const char *path, const unsigned char *base, int stride,
+                      int w, int h) {
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0) return -1;
+  for (int y = 0; y < h; y++) {
+    const char *p = (const char *)base + (size_t)y * (size_t)stride;
+    unsigned long n = (unsigned long)w * 4, off = 0;
+    while (off < n) {
+      int k = (int)write(fd, p + off, n - off);
+      if (k <= 0) { close(fd); return -1; }
+      off += (unsigned long)k;
+    }
+  }
+  close(fd);
+  return 0;
+}
+
+/* Static-frame record: what the surface holds and what the X server shows for
+ * the same rect, compared in-guest and written out for a cross-build compare.
+ * "The optimisation did not change the image" is then two numbers: the diff
+ * inside one build, and the byte compare of the two builds' dumps. */
+static void hbt_probe(int t) {
+  /* Only the game's own window: the text-mode window (800x560) is not the
+   * thing under test and would consume both probes before the game starts. */
+  if (hbt.probes >= 6 || !probe_on() || !hd_pixel_mode()) return;
+  if (hbt.last_probe_ms && t - hbt.last_probe_ms < 150) return;
+  int cx, cy, cw, ch;
+  hd_content_rect(&cx, &cy, &cw, &ch);
+  if ((long)cw * (long)ch < 400000) return;   /* not the game's content yet */
+  unsigned nz = 0;
+  unsigned long long crc = surf_crc(cx, cy, cw, ch, &nz);
+  /* `nz` counts only the rows the checksum samples (every 8th), so compare it
+   * with the sampled maximum, not with the rect's pixel count. */
+  if (nz < (unsigned)((long)cw * (ch / 8 + 1) / 2)) {
+    /* A black or nearly-black frame is not the image under test. */
+    hbt.last_probe_ms = t;
+    return;
+  }
+  if (!hbt.have_probe_crc || crc != hbt.probe_crc) {
+    /* Not static yet: remember it and look again in a few seconds. */
+    hbt.probe_crc = crc;
+    hbt.have_probe_crc = 1;
+    hbt.last_probe_ms = t;
+    return;
+  }
+  XImage *im = XGetImage(dpy, win, cx, cy, (unsigned)cw, (unsigned)ch,
+                         AllPlanes, ZPixmap);
+  if (!im) {
+    fprintf(stderr, "[HBT] probe: XGetImage %dx%d failed\n", cw, ch);
+    return;
+  }
+  long diff = 0;
+  for (int y = 0; y < ch; y++) {
+    const unsigned *a = (const unsigned *)(im->data + (size_t)y * im->bytes_per_line);
+    const unsigned *b = surf + (size_t)(cy + y) * SURF_W + cx;
+    for (int x = 0; x < cw; x++)
+      if (((a[x] ^ b[x]) & 0xFFFFFFu) != 0) diff++;
+  }
+  hbt.probes++;
+  char ps[32], pw[32];
+  snprintf(ps, sizeof ps, "/HBTSURF%u.raw", hbt.probes);
+  snprintf(pw, sizeof pw, "/HBTWIN%u.raw", hbt.probes);
+  int es = probe_dump(ps, (const unsigned char *)(surf + (size_t)cy * SURF_W + cx),
+                      SURF_W * 4, cw, ch);
+  int ew = probe_dump(pw, (const unsigned char *)im->data, im->bytes_per_line,
+                      cw, ch);
+  fprintf(stderr, "[HBT] probe n=%u t=%d rect=%d,%d,%dx%d px=%d "
+                  "window_vs_surface_diff=%ld crc=0x%llx surf=%s(%d) win=%s(%d)\n",
+          hbt.probes, t, cx, cy, cw, ch, cw * ch, diff, crc, ps, es, pw, ew);
+  im->data = 0;
+  XDestroyImage(im);
+  hbt.last_probe_ms = t;
 }
 
 /* Sampled checksum of a surface rect: every 8th row, FNV-1a over the pixels.
@@ -169,14 +369,33 @@ static void blit_rect(const char *kind, int x, int y, int w, int h) {
   int row = (t - hb.last_row_ms >= 1000 || hb.blit <= 3);
   unsigned long long crc = 0;
   unsigned nz = 0;
+  unsigned long long c0 = tsc_now();
   if (row) crc = surf_crc(x, y, w, h, &nz);
+  unsigned long long c1 = tsc_now();
   XPutImage(dpy, win, gc, surf_img, x, y, x, y, (unsigned)w, (unsigned)h);
+  unsigned long long c2 = tsc_now();
+  hbt.blits++;
+  hbt.w_blits++;
+  hbt.put_cyc += c2 - c1;
+  hbt.w_put_cyc += c2 - c1;
+  hbt.crc_cyc += c1 - c0;
+  hbt.w_crc_cyc += c1 - c0;
+  if (c2 - c1 > hbt.put_cyc_max) hbt.put_cyc_max = c2 - c1;
+  if (c2 - c1 > hbt.w_put_cyc_max) hbt.w_put_cyc_max = c2 - c1;
+  hbt.px += (unsigned long long)w * (unsigned long long)h;
+  hbt.w_px += (unsigned long long)w * (unsigned long long)h;
   hb.blit++;
   hb.px += (unsigned)w * (unsigned)h;
   if (kind[0] == 'f') hb.b_full++;
   else if (kind[0] == 'd') hb.b_dmg++;
   else if (kind[0] == 'r') hb.b_restamp++;
   else hb.b_paint++;
+  if (hbt.blits <= 4 || (hbt.blits % HBT_EVERY) == 0) {
+    fprintf(stderr, "[HBT] n=%llu kind=%s rect=%d,%d,%d,%d px=%d put_us=%llu "
+                    "crc_us=%llu win=%dx%d\n",
+            hbt.blits, kind, x, y, w, h, w * h, cyc_us(c2 - c1),
+            cyc_us(c1 - c0), win_w, win_h);
+  }
   if (row) {
     hb.last_row_ms = t;
     fprintf(stderr, "[HB] blit kind=%s rect=%d,%d,%d,%d win=%dx%d pix=%d "
@@ -521,6 +740,12 @@ int main(int argc, char **argv) {
   int last_pix = 0;
   int child_gone = 0;
   int kill_sent_ms = -1;
+  /* L88: the present budget's clock base.  Calibrated on the first 2 s
+   * summary against sysinfo(1), so no boot-time stall. */
+  hbt.t0_ms = now_ms();
+  hbt.tsc0 = tsc_now();
+  hbt.w_ms = hbt.t0_ms;
+  hbt.w_tsc = hbt.tsc0;
   struct pollfd pfd[2];
 
   while (!child_gone) {
@@ -616,7 +841,8 @@ int main(int argc, char **argv) {
         blit_rect("paint", x, y, w, h);
       }
       if (hd_pixel_mode()) {
-        int restamped = hd_take_restamp();
+        int px, py, pw, ph;
+        int restamped = hd_take_present(&px, &py, &pw, &ph);
         if (restamped) hb.restamp++;
         /* st.dw is this iteration's surface damage (the vdisplay consumes it
          * on read, so it is read exactly once per loop).  A compat X client
@@ -627,7 +853,20 @@ int main(int argc, char **argv) {
         } else if (restamped) {
           int cx, cy, cw, chh;
           hd_content_rect(&cx, &cy, &cw, &chh);
-          blit_rect("restamp", cx, cy, cw, chh);
+          /* L88: blit the rect the app actually presented instead of the
+           * whole content.  The surface is shared memory, so every pixel
+           * outside that rect is byte-for-byte what the last blit put in the
+           * window; the image is the same and the bytes on the X connection
+           * are only the ones that changed. */
+          if (pw > 0 && ph > 0) {
+            int bx = cx + (px < 0 ? 0 : px), by = cy + (py < 0 ? 0 : py);
+            int bw = px < 0 ? pw + px : pw, bh = py < 0 ? ph + py : ph;
+            if (bx + bw > cx + cw) bw = cx + cw - bx;
+            if (by + bh > cy + chh) bh = cy + chh - by;
+            blit_rect("restamp", bx, by, bw, bh);
+          } else {
+            blit_rect("restamp", cx, cy, cw, chh);
+          }
         }
         /* Pointer tracking (ESC [ T): the desktop reports the pointer
          * wherever it is; poll it so it keeps flowing outside the window. */
@@ -653,7 +892,12 @@ int main(int argc, char **argv) {
     if (kill_sent_ms >= 0 && t - kill_sent_ms > 2000) break;
 
     reap_run_children();
-    if (t - last_sum_ms >= 2000) { hb_summary(t); last_sum_ms = t; }
+    if (t - last_sum_ms >= 2000) {
+      hb_summary(t);
+      hbt_summary(t);
+      hbt_probe(t);
+      last_sum_ms = t;
+    }
     XFlush(dpy);
     pfd[0].fd = ConnectionNumber(dpy);
     pfd[0].events = POLLIN;

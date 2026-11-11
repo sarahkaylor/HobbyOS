@@ -2,6 +2,11 @@
 #include <stdint.h>
 #include "arch/cpu.h"
 #include "process.h"
+#include "timer.h"
+
+/* proc_lock is the kernel's scheduler lock; the host locksteal test links this
+   file without process.c, where a weak reference resolves to 0 (GB-229). */
+extern spinlock_t proc_lock __attribute__((weak));
 
 /* Deadlock forensics: the last lock each core began spinning on, and who
    called it.  The stall watchdog in trap.c prints live entries when the
@@ -28,6 +33,81 @@ static volatile uint8_t held_lock_depth[MAX_CPUS];
 /* Coarse "what is this CPU doing" marker, for the same probe: 0 = normal,
  * 1 = inside the scheduler switch, 2 = parked in enter_user_space. */
 volatile uint8_t sched_stage[MAX_CPUS];
+
+/* GB-229: proc_lock acquire/release sequence per CPU.  Observation only; a
+   per-CPU counter written by the owning CPU needs no atomics. */
+static proclock_hold_t plh[MAX_CPUS];
+/* GB-241: per-CPU "the next/current proc_lock acquisition is the [IDLESTUCK]
+   dump's own" flag, set before the dump acquires and cleared after it
+   releases.  Read by proclock_hold_note at the acquire so dump_self travels
+   with the exact acquisition, not with the CPU that later prints the row. */
+static volatile int plh_dump_self_pending[MAX_CPUS];
+
+void proclock_dump_note(int on) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  plh_dump_self_pending[c] = on;
+}
+
+void proclock_hold_note(int op, uint64_t site) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  if (op == 1)
+    plh[c].acq++;
+  else if (op == 2)
+    plh[c].rel++;
+  else
+    return;
+  if (op == 1)
+    plh[c].dump_self = plh_dump_self_pending[c];
+  if (op == 2)
+    plh[c].rel_site = site;
+  plh[c].last_op = op;
+  plh[c].site = site;
+  plh[c].last_ms = timer_get_ms();
+}
+
+/* GB-230: sampled inside enter_user_space, immediately before the iretq frame
+   is built.  Observation only: a plain word read, no lock.  `locked_at_iretq=1`
+   on the owner CPU whose last op is acquire names a resume tail that reached
+   the iretq without releasing proc_lock; `rel_site` says which release was the
+   last one this CPU actually ran (0 = it never released). */
+void proclock_iretq_note(void) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  plh[c].iretq_ms = timer_get_ms();
+  plh[c].locked_at_iretq = (&proc_lock != 0) ? (int)proc_lock.locked : -1;
+}
+
+int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out) {
+  if (cpu >= MAX_CPUS || !out)
+    return 0;
+  *out = plh[cpu];
+  return 1;
+}
+
+/* GB-240: bracket the idle-stuck detector's proc_lock section (process.c:4782).
+   Entry resets the exit stamp so a row can never pair a new entry with an old
+   exit; the exit stamp is written after the release returns.  Observation
+   only -- no scheduling decision reads these. */
+void proclock_det_note(int op, int stage) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS)
+    return;
+  if (op == 1) {
+    plh[c].det_entry_ms = timer_get_ms();
+    plh[c].det_exit_ms = 0;
+    plh[c].det_stage = stage;
+  } else if (op == 2) {
+    plh[c].det_stage = stage;
+  } else if (op == 3) {
+    plh[c].det_exit_ms = timer_get_ms();
+    plh[c].det_stage = stage;
+  }
+}
 /* GB-060: a CPU that has taken a fatal fault and stopped.  Declared here (not in
    a header) to keep the mechanism reviewable in the two files that implement it:
    process.c records it at the halt, and this file reads it to decide whether a
@@ -366,6 +446,17 @@ static void spin_acquire_raw(spinlock_t *lock) {
    * above.  Kept separate on purpose -- the audit must work identically on
    * both arches. */
   lock_audit_held_push(lock, (uint64_t)__builtin_return_address(0));
+  if (lock == &proc_lock) {
+    proclock_hold_note(1, (uint64_t)__builtin_return_address(0));
+    /* GB-235: the acquire's caller-caller.  The note above records the direct
+       caller (the `spinlock_acquire_irqsave` wrapper); this is the site that
+       called the wrapper, which is what names the real acquire line. */
+    {
+      uint32_t cc = get_cpuid();
+      if (cc < MAX_CPUS)
+        plh[cc].site3 = (uint64_t)__builtin_return_address(1);
+    }
+  }
   /* GB-057: push onto this CPU's held-lock stack (observation only). */
   {
     uint32_t hcpu = get_cpuid();
@@ -449,6 +540,8 @@ static void spin_release_raw(spinlock_t *lock) {
      in the acquire loop -- see GB-057 there.) */
   lock->owner = 0;
   __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
+  if (lock == &proc_lock)
+    proclock_hold_note(2, (uint64_t)__builtin_return_address(0));
 }
 
 /* Plain release: pairs with spinlock_acquire()'s preempt reference. */

@@ -1,0 +1,49 @@
+=== addr2line: the dump acquire vs the detector acquire ===
+start_scheduler
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb240/src/kernel/process.c:5089
+start_scheduler
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb240/src/kernel/process.c:0
+start_scheduler
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb240/src/kernel/process.c:4782
+start_scheduler
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb240/src/kernel/process.c:0
+start_scheduler
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb240/src/kernel/process.c:5022
+
+=== disassembly: [IDLESTUCK] dump acquire (process.c:5089) ===
+
+hobbyos.elf:	file format elf32-i386
+
+Disassembly of section .text:
+
+7007af50 <start_scheduler>:
+7007bcc9: bf a0 0e 0d 70               	movl	$0x700d0ea0, %edi       # imm = 0x700D0EA0
+7007bcce: e8 8d d8 04 00               	calll	0x700c9560 <uart_puts>
+7007bcd3: bf 88 50 6e 74               	movl	$0x746e5088, %edi       # imm = 0x746E5088
+7007bcd8: e8 a3 6c 03 00               	calll	0x700b2980 <spinlock_acquire_irqsave>
+7007bcdd: bb a1 50 6e 74               	movl	$0x746e50a1, %ebx       # imm = 0x746E50A1
+7007bce2: 31 c9                        	xorl	%ecx, %ecx
+7007bce4: 41                           	incl	%ecx
+7007bce5: 89 ce                        	movl	%ecx, %esi
+7007bce7: 48                           	decl	%eax
+7007bce8: 89 85 08 f7 ff ff            	movl	%eax, -0x8f8(%ebp)
+7007bcee: eb 57                        	jmp	0x7007bd47 <start_scheduler+0xdf7>
+
+=== disassembly: detector acquire (process.c:4782) + GB-240 entry call ===
+
+hobbyos.elf:	file format elf32-i386
+
+Disassembly of section .text:
+
+7007af50 <start_scheduler>:
+7007b4a5: 0f 8c b3 07 00 00            	jl	0x7007bc5e <start_scheduler+0xd0e>
+7007b4ab: bf 88 50 6e 74               	movl	$0x746e5088, %edi       # imm = 0x746E5088
+7007b4b0: e8 cb 74 03 00               	calll	0x700b2980 <spinlock_acquire_irqsave>
+7007b4b5: 48                           	decl	%eax
+7007b4b6: 89 85 10 f7 ff ff            	movl	%eax, -0x8f0(%ebp)
+7007b4bc: bf 01 00 00 00               	movl	$0x1, %edi
+7007b4c1: 89 fe                        	movl	%edi, %esi
+7007b4c3: e8 38 58 03 00               	calll	0x700b0d00 <proclock_det_note>
+7007b4c8: 45                           	incl	%ebp
+7007b4c9: 31 e4                        	xorl	%esp, %esp
+7007b4cb: bb 01 00 00 00               	movl	$0x1, %ebx

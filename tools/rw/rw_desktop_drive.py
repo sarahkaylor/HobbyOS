@@ -617,6 +617,21 @@ def main():
                 grab("01_no_launch")
                 return 2
 
+    # L86: opt-in in-game input driver for the icewm/hosted path.  rw_flow.py
+    # is the DESKTOP.BIN driver (full-screen 1920x1080); the hosted window is a
+    # different frame of reference, so this one lives in rw_l86_input.py and is
+    # driven by RW_L86=1.  Default off: nothing else changes.
+    if os.environ.get("RW_L86", "0") == "1" and args.desktop == "icewm":
+        import rw_l86_input
+        rc = rw_l86_input.run(q, grab, args.log, args, shots)
+        grab("99_final")
+        text = read_log(args.log)
+        print("\n[drive] --- L86 input rows ---", flush=True)
+        for line in text.splitlines():
+            if line.startswith("[L86]") or "[HB] geometry" in line:
+                print("  " + line, flush=True)
+        return rc
+
     # L79/L81: a scripted front-end flow (wait for the menu, click New colony,
     # follow the screens) takes over from the plain screenshot loop.  It is a
     # DESKTOP.BIN-menu flow: icewm runs have no [MENU] dump to start from.
@@ -645,6 +660,7 @@ def main():
     next_click = (t_start + click_after) if click_after > 0 else None
     clicks = 0
     checks = 0
+    modal_clicks = 0
     while time.time() < end:
         t = read_log(args.log)
         for needle, name in (
@@ -681,8 +697,26 @@ def main():
             last = time.time()
         if time.time() - last >= args.shot_every:
             i += 1
-            grab(f"{i:02d}_running")
+            png = grab(f"{i:02d}_running")
             last = time.time()
+            # L87: name the plateau instead of leaving "no presents" to be read
+            # as a hang.  The def loader stops presenting for ~215 s while it
+            # keeps opening files; the menu arrives at n~600 after ~650 s.
+            xsw = re.findall(r"\[XSW\] n=(\d+)", t)
+            opens = len(re.findall(r"^\[XO\] ", t, re.M))
+            print(f"[drive] progress n={xsw[-1] if xsw else '?'} "
+                  f"opens={opens}", flush=True)
+            # L87: the Steam modal is drawn OVER the loaded menu and can stay
+            # there for the rest of the window (measured: boot C, n=790, modal
+            # still up).  Dismiss it when it is on screen, independent of
+            # RW_CLICK_IGNORE_AFTER, so "menu loaded" is observable.
+            if modal_clicks < 6 and png:
+                xy = find_ignore_xy(png)
+                if xy:
+                    modal_clicks += 1
+                    print(f"[drive] click Ignore at {xy[0]},{xy[1]} "
+                          f"(automatic, {modal_clicks})", flush=True)
+                    q.click(xy[0], xy[1], args.fb_w, args.fb_h)
         time.sleep(1.0)
 
     grab("99_final")

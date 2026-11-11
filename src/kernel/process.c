@@ -2037,7 +2037,11 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
 #endif /* __x86_64__ */
 
+#ifdef __x86_64__
+      extern uint64_t enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+#else
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+#endif
       extern void resume_mark(int pid, uint64_t target_sp);
       resume_mark(proc_table[next].pid, target_sp);
       /* M6/L37: the user-mode resume writes its 37-qword frame image onto the
@@ -2231,7 +2235,23 @@ void schedule(struct trap_frame *tf, int is_yield) {
       lock_audit_irq_exit();
       /* per-CPU: never hand an open section to the next context */
       kernel_preempt_reset();
+      extern void proclock_iretq_note(void);
+      proclock_iretq_note();
+#ifdef __x86_64__
+      uint64_t enter_rv = enter_user_space(&local_tf, target_sp);
+      if (enter_rv == 0) {
+        /* GB-245: the in-asm pre-flight refused this resume target (a hole
+           for the frame's CS).  Quarantine the slot and let schedule() pick
+           the next one; the CPU must not iretq into the hole.  proc_lock was
+           released at the resume boundary, so re-take it before continuing. */
+        spinlock_acquire(&proc_lock);
+        proc_table[next].state = PROC_STATE_EXITED;
+        set_current_process_pid(cpu, -1);
+        continue;
+      }
+#else
       enter_user_space(&local_tf, target_sp);
+#endif
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
          bare `while (1);` that used to be here lost a CPU with no trace at all,
@@ -4264,6 +4284,17 @@ int process_fork(struct trap_frame *tf) {
       inherited_fds[inherited_n++] = child->open_fds[i];
   }
 
+  /* P1: the child RESUMES in user mode with the caller's TLS register.  The
+     design (see the OQ5 note above: "keeps the caller's TLS register value")
+     needs this assignment: process_create_v2() zeroes tls_base, and every
+     resume path installs p->tls_base into TPIDR_EL0/IA32_FS_BASE
+     (restore_context).  Without it the child resumes with a NULL TLS base and
+     the FIRST __thread access faults at a tiny VA -- measured: SQLTEST's
+     forked child died in libc pthread_self() reading tp_self at VA=0x18, so
+     the cross-process record-lock check saw SIGSEGV instead of SQLITE_BUSY.
+     exec re-zeroes it (program_loader), which is right: crt0 re-installs. */
+  child->tls_base = parent->tls_base;
+
   /* Child inherits the parent's heap top and anonymous mappings (like the
      data segment: fork shares the address-space layout, exec re-sets it). */
   child->heap_brk = group->heap_brk;
@@ -4750,7 +4781,11 @@ void start_scheduler(void) {
         /* P5 S3 (D8.4a/b): same resume-boundary delivery as schedule(). */
         process_signal_resume_deliver(&proc_table[i], &local_tf);
 
+#ifdef __x86_64__
+        extern uint64_t enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+#else
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+#endif
         extern void resume_mark(int pid, uint64_t target_sp);
         resume_mark(proc_table[i].pid, target_sp);
         /* The incoming context is NOT inside the interrupt handler that may
@@ -4762,7 +4797,20 @@ void start_scheduler(void) {
         lock_audit_irq_exit();
         /* per-CPU: never hand an open section to the next context */
         kernel_preempt_reset();
+        extern void proclock_iretq_note(void);
+        proclock_iretq_note();
+#ifdef __x86_64__
+        uint64_t enter_rv = enter_user_space(&local_tf, target_sp);
+        if (enter_rv == 0) {
+          /* GB-245: pre-flight refused; quarantine and keep the CPU. */
+          spinlock_acquire(&proc_lock);
+          proc_table[i].state = PROC_STATE_EXITED;
+          set_current_process_pid(cpu, -1);
+          continue;
+        }
+#else
         enter_user_space(&local_tf, target_sp);
+#endif
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
            is lost, so say so before going quiet. */
@@ -4839,6 +4887,12 @@ void start_scheduler(void) {
     int acted = 0;   /* w5 (v): this pass RECLAIMED or DISPOSED a slot */
     if (sched_idle_rounds >= 500) {
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
+      /* GB-240: bracket this detector's proc_lock section.  The imbalanced
+         [PROCLOCK-HOLD] row attributed here (owner_site3 0x7007BC9D) is this
+         acquire; entry_ms is written after the acquire returns, so a row with
+         det_exit=0 names a section that never released.  Stage 1 = the slot
+         scan below. */
+      proclock_det_note(1, 1);
       int dispose_slot = 0;
       int lw_candidate = 0; /* stale-claim slot this pass (0 = none) */
       for (int k = 1; k < MAX_PROCESSES; k++) {
@@ -4960,6 +5014,7 @@ void start_scheduler(void) {
                   set_current_process_pid(c, -1);
               }
               dispose_slot = k;
+              proclock_det_note(2, 2); /* GB-240: dispose selected */
               break;
             }
             lw_disp_arm_slot[cpu] = k;
@@ -5070,7 +5125,11 @@ void start_scheduler(void) {
         }
       }
 
+      proclock_det_note(2, 4); /* GB-240: at the release */
       spinlock_release_irqrestore(&proc_lock, wflags);
+      /* GB-240: exit stamp AFTER the release returns; a row with det_exit=0
+         and det_stage=4 means the release itself did not return. */
+      proclock_det_note(3, 4);
 
       /* Dispose a lost-owner slot OUTSIDE proc_lock (group_teardown takes
          it again for the teardown + reap).  group_teardown's phys_block/as
@@ -5080,8 +5139,10 @@ void start_scheduler(void) {
          exec (tolerated, exec_rejected) and reforks a fresh child, so the
          soak continues with zero violations; the parent's waitpid
          completion then reaps the EXITED slot. */
-      if (dispose_slot > 0)
+      if (dispose_slot > 0) {
+        proclock_det_note(2, 3); /* GB-240: in group_teardown (lock released) */
         group_teardown(process_group(&proc_table[dispose_slot]), 97);
+      }
     }
 
     /* Diagnostic dump: name the stuck set ONLY when this pass actually
@@ -5132,6 +5193,11 @@ void start_scheduler(void) {
       uart_puts(" t=");
       print_int((int)timer_get_ms());
       uart_puts("\n");
+      /* GB-241: this acquire is the dump's own.  Set the tag before the
+         acquire so proclock_hold_note records dump_self=1 with this exact
+         acquisition; the row is then excluded from owner inference and the
+         other CPUs' rows still name a real strand if one exists. */
+      proclock_dump_note(1);
       uint64_t dflags = spinlock_acquire_irqsave(&proc_lock);
       for (int k = 0; k < MAX_PROCESSES; k++) {
         if (proc_table[k].state != PROC_STATE_FREE) {
@@ -5549,17 +5615,66 @@ void start_scheduler(void) {
       }
       uart_puts(" lock_owner=");
       print_int((int)proc_lock.owner);
+      uart_puts(" locked=");
+      print_int((int)proc_lock.locked);
       uart_puts(" park_returns=");
       print_int(poll_park_returns);
       uart_puts(" lock_addr=");
       uart_print_hex((uint64_t)&proc_lock);
       uart_puts("\n");
+      /* GB-229: per-CPU proc_lock acquire/release sequence in the same dump as
+         the locked/owner words: last_op=release with locked=1 names a lost
+         unlock; last_op=acquire with the owner's wd_rip outside proc_lock names
+         a resume path that left it held. */
+      {
+        extern int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out);
+        proclock_hold_t ph;
+        for (int c = 0; c < MAX_CPUS; c++) {
+          if (!proclock_hold_snapshot((uint32_t)c, &ph))
+            continue;
+          uart_puts("[PROCLOCK-HOLD] cpu=");
+          print_int(c);
+          uart_puts(" acq=");
+          print_int((int)ph.acq);
+          uart_puts(" rel=");
+          print_int((int)ph.rel);
+          uart_puts(" last=");
+          uart_puts(ph.last_op == 2 ? "release"
+                                    : ph.last_op == 1 ? "acquire" : "none");
+          uart_puts(" last_ms=");
+          print_int((int)ph.last_ms);
+          uart_puts(" site=");
+          uart_print_hex(ph.site);
+          /* GB-235: the acquire's caller-caller — the line that called the
+             acquire wrapper.  `site` names the wrapper itself. */
+          uart_puts(" owner_site3=");
+          uart_print_hex(ph.site3);
+          uart_puts(" rel_site=");
+          uart_print_hex(ph.rel_site);
+          uart_puts(" iretq_ms=");
+          print_int((int)ph.iretq_ms);
+          uart_puts(" locked_at_iretq=");
+          print_int(ph.locked_at_iretq);
+          /* GB-240: the detector section's entry/exit/stage for this CPU. */
+          uart_puts(" det_entry=");
+          print_int((int)ph.det_entry_ms);
+          uart_puts(" det_exit=");
+          print_int((int)ph.det_exit_ms);
+          uart_puts(" det_stage=");
+          print_int(ph.det_stage);
+          uart_puts(" dump_self=");
+          print_int(ph.dump_self);
+          uart_puts("\n");
+        }
+      }
       /* GB-146-B: a wedge must name the lock, its holder (pid + acquisition
          site) and the blocked transit (waiter pid + scheduler stage + sites),
          not just `lock_owner=6`.  lockdiag_snapshot reads the per-CPU wait
          record and held-lock stack the arch lock code already keeps; on ARM it
          returns 0 and this prints nothing extra. */
       {
+        extern uint64_t watchdog_cpu_rip(uint32_t cpu);
+        extern int watchdog_cpu_pid(uint32_t cpu);
         lockdiag_t ld;
         for (int c = 0; c < MAX_CPUS; c++) {
           if (!lockdiag_snapshot((uint32_t)c, &ld))
@@ -5584,6 +5699,39 @@ void start_scheduler(void) {
           uart_print_hex(ld.wait_pc);
           uart_puts(" wait_pc2=");
           uart_print_hex(ld.wait_pc2);
+          uart_puts(" owner_wd_rip=");
+          uart_print_hex(ld.owner_cpu >= 0
+                             ? watchdog_cpu_rip((uint32_t)ld.owner_cpu)
+                             : 0);
+          uart_puts(" owner_wd_pid=");
+          print_int(ld.owner_cpu >= 0
+                        ? watchdog_cpu_pid((uint32_t)ld.owner_cpu)
+                        : -1);
+          /* GB-240: the OWNER CPU's detector stamp on the LOCKDIAG row. */
+          {
+            proclock_hold_t oph;
+            if (ld.owner_cpu >= 0 && ld.owner_cpu < MAX_CPUS &&
+                proclock_hold_snapshot((uint32_t)ld.owner_cpu, &oph)) {
+              uart_puts(" det_entry=");
+              print_int((int)oph.det_entry_ms);
+              uart_puts(" det_exit=");
+              print_int((int)oph.det_exit_ms);
+              uart_puts(" det_stage=");
+              print_int(oph.det_stage);
+              uart_puts(" dump_self=");
+              print_int(oph.dump_self);
+              /* GB-241: is the watched owner executing a USER VA?  The
+                 watchdog records its last RIP; the kernel image is at
+                 0x70000000 and user windows are below it (user stacks) or at
+                 USER_VA_BASE+ (images/heaps).  Stated as the definition used. */
+              {
+                uint64_t orip = watchdog_cpu_rip((uint32_t)ld.owner_cpu);
+                uart_puts(" owner_in_user=");
+                print_int(orip != 0 &&
+                          (orip < 0x70000000ULL || orip >= USER_VA_BASE));
+              }
+            }
+          }
           uart_puts("\n");
         }
         if (lockdiag_last_stallbreak(&ld)) {
@@ -5611,6 +5759,7 @@ void start_scheduler(void) {
         }
       }
       spinlock_release_irqrestore(&proc_lock, dflags);
+      proclock_dump_note(0); /* GB-241: dump no longer holds proc_lock */
     }
 
     /* GB-057: any idle entry must not still hold a claim -- see

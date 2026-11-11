@@ -36,7 +36,21 @@ BASE = "http://192.168.0.234:3000/api/v1/repos/sarah/gaming-program"
 TOKEN = os.environ.get("FORGEJO_TOKEN", "")
 LANE_LABELS = ("Backlog", "Ready", "In Progress", "In Review", "Merge Gate",
                "Done", "Icebox")
-GATE_RE = re.compile(r"^(GB-\d+)-V(\d*)$")
+# GB-231: split cards are the normal shape for the M1 wall (WORK POLICY §3), and
+# their gates are `GB-146-A-V2` / `GB-146-B-V`.  A gate id is `<parent>-V<k>` where
+# `<parent>` is `GB-<n>` or the split form `GB-<n>-<letter>`; the group is the
+# PARENT so a split gate is checked against `GB-146-A`, not a phantom `GB-146`.
+GATE_RE = re.compile(r"^(GB-\d+(?:-[A-Z])?)-V(\d*)$")
+SPLIT_RE = re.compile(r"^GB-\d+-[A-Z]$")
+
+# GB-236: a RED on a parent that is `In Review` is not a mismatch when the parent
+# has an OPEN PR — WORK POLICY §2: a card with an open PR never moves back to
+# `In Progress`, and pr_sync.py would revert such a move within the hour.  The
+# fact must be OBSERVED (the GitHub open-PR list, or an explicit --open-pr), never
+# inferred from the lane: the GB-231 split exemption is kept for compatibility,
+# but a non-split In-Review parent needs the PR evidence.
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "sarahkaylor/HobbyOS")
+PR_ID_RE = re.compile(r"^(GB-\d+(?:-[A-Z])?)\b")
 
 
 def api(path):
@@ -59,6 +73,40 @@ def all_issues():
 def lane_of(issue):
     names = {l["name"] for l in issue["labels"]}
     return next((x for x in LANE_LABELS if x in names), None)
+
+
+def open_pr_ids():
+    """`GB-nnn` / `GB-nnn-X` ids named by OPEN GitHub PR titles (GB-236).
+
+    The mapping is pr_sync.py's: the first `GB-…` token of the PR title is the
+    card the PR implements, with a split suffix kept (`GB-146-A`).  Raises
+    RuntimeError carrying the environment fact when the lookup is impossible so
+    the caller can exit 2 — never "assume no PR" and never "accept every
+    In-Review parent" (§2 needs evidence, not a lane-shaped guess).
+    """
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise RuntimeError("GITHUB_TOKEN not set (cannot read open PRs; pass --open-pr GB-nnn)")
+    ids, page = set(), 1
+    while True:
+        url = (f"https://api.github.com/repos/{GITHUB_REPO}/pulls"
+               f"?state=open&per_page=100&page={page}")
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"token {token}",
+            "User-Agent": "hobbyos-check-verdicts",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                batch = json.load(r)
+        except Exception as e:                                # noqa: BLE001
+            raise RuntimeError(f"cannot read GitHub open PRs: {e}") from e
+        if not batch:
+            return ids
+        for pr in batch:
+            m = PR_ID_RE.match(pr.get("title") or "")
+            if m:
+                ids.add(m.group(1))
+        page += 1
 
 
 def base_id(title):
@@ -178,10 +226,29 @@ def gate_sha(line):
     return m.group(0) if m else None
 
 
-def classify(verdict, parent_lane):
-    """The rule, isolated so a self-test can exercise it without the API."""
+def classify(verdict, parent_lane, split=False, has_open_pr=False):
+    """The rule, isolated so a self-test can exercise it without the API.
+
+    GB-231: a RED on a SPLIT card may legitimately sit in `In Review` — WORK
+    POLICY §2 says a card with an open PR never moves back to `In Progress`, and
+    `GB-146-A` (PR #410 open) is exactly that shape.  The exemption is scoped to
+    split cards so the GB-010/GB-070 defect (a non-split card reading "awaiting
+    review" with a failed gate) is still reported.
+
+    GB-236: the general form of the same rule — a RED on ANY parent in `In
+    Review` is accepted when that parent has an OBSERVED open PR.  `has_open_pr`
+    comes from the GitHub open-PR list (or explicit `--open-pr`), never from the
+    lane; without it a non-split In-Review parent stays a mismatch.
+
+    Scope note: a RED parent in `Backlog`/`Ready` is accepted exactly as before
+    GB-236 (three such parents exist on the live board); tightening those lanes
+    would manufacture new findings the card explicitly forbids reclassifying.
+    Only `Merge Gate`/`Done` reject a RED, and neither changed here.
+    """
     if verdict == "GREEN":
         return parent_lane in ("Merge Gate", "Done"), "Merge Gate"
+    if parent_lane == "In Review" and (has_open_pr or split):
+        return True, "In Progress or In Review (open PR, §2)"
     return parent_lane in ("In Progress", "Backlog", "Ready"), "In Progress"
 
 
@@ -236,6 +303,25 @@ def self_test():
             bad += 1
         print(f"  [{mark}] verdict={verdict:<5} parent in {lane!r:<13} "
               f"-> ok={ok} (expected {want_ok}, want-lane {want!r})")
+
+    # GB-231: split-card gates.  A RED on a split card is allowed to stay in
+    # `In Review` (§2: an open PR never moves back to In Progress); everywhere
+    # else the rule is unchanged, including In Review for a NON-split card.
+    # GB-236: the same lane is also clean for a non-split parent when an open PR
+    # has been observed — and only then; `Done` never accepts a RED.
+    for lane, split, has_pr, want_ok in (
+            ("In Review", True, True, True),
+            ("In Review", False, False, False),
+            ("In Review", False, True, True),
+            ("Done", False, True, False),
+            ("Done", True, False, False),
+            ("In Progress", True, False, True)):
+        ok, want = classify("RED", lane, split=split, has_open_pr=has_pr)
+        if ok != want_ok:
+            bad += 1
+        print(f"  [{'OK  ' if ok == want_ok else 'FAIL'}] GB-231/236 split={split} "
+              f"open_pr={has_pr} verdict=RED parent in {lane!r} -> ok={ok} "
+              f"(expected {want_ok}, want-lane {want!r})")
 
     # GB-136 supersession — both directions.
     # Direction 1: an EARLIER gate's RED with a LATER gate's GREEN is superseded,
@@ -318,9 +404,32 @@ def self_test():
     return 0 if bad == 0 else 1
 
 
+def parse_open_pr_args(argv):
+    """`--open-pr GB-nnn` (repeatable): the fallback when GITHUB_TOKEN is absent."""
+    ids, i = set(), 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--open-pr":
+            if i + 1 >= len(argv):
+                raise RuntimeError("--open-pr needs a GB-nnn argument")
+            ids.add(argv[i + 1].upper())
+            i += 2
+        elif a.startswith("--open-pr="):
+            ids.add(a.split("=", 1)[1].upper())
+            i += 1
+        else:
+            raise RuntimeError(f"unknown argument: {a}")
+    return ids or None
+
+
 def main():
     if "--self-test" in sys.argv:
         return self_test()
+    try:
+        explicit_prs = parse_open_pr_args([a for a in sys.argv[1:] if a != "--self-test"])
+    except RuntimeError as e:
+        print(f"check_verdicts: {e}")
+        return 2
     if not TOKEN:
         print("check_verdicts: FORGEJO_TOKEN not set (source ~/.hermes/.env)")
         return 2
@@ -346,6 +455,7 @@ def main():
 
     checked = mismatched = orphan = superseded = 0
     lines = []
+    rows = []                                 # deferred until the open-PR fact is known
     for parent in sorted(chain):
         parent_it = by_id.get(parent)
         gates = []
@@ -378,13 +488,29 @@ def main():
                 succ_line = next((g[4] for g in gates if g[1] == gov_gid), "")
                 lines.append(f"  SUPERSEDED {gid}#{gnum} = RED, overtaken by {gov_gid} "
                              f"(successor sha {gate_sha(succ_line)}) for {parent}#{parent_it['number']}")
-        pl = lane_of(parent_it)
-        okv, want = classify(gov_v, pl)
+        rows.append((parent, parent_it, gov_gid, gov_v, lane_of(parent_it),
+                     next((g[4] for g in gates if g[1] == gov_gid), "")))
+
+    # GB-236: only an OBSERVED open PR exempts a RED on an `In Review` parent.
+    # Read the PR list once, and only when some parent actually needs the fact;
+    # an unavailable lookup is exit 2 with the reason, never a silent acceptance.
+    need_pr = {r[0] for r in rows if r[3] == "RED" and r[4] == "In Review"}
+    pr_exempt = set()
+    if need_pr:
+        try:
+            pr_exempt = explicit_prs if explicit_prs is not None else open_pr_ids()
+        except RuntimeError as e:
+            print(f"check_verdicts: {e}")
+            return 2
+
+    for parent, parent_it, gov_gid, gov_v, pl, gov_line in rows:
+        okv, want = classify(gov_v, pl, split=bool(SPLIT_RE.match(parent)),
+                             has_open_pr=(parent in pr_exempt))
         if not okv:
             mismatched += 1
             lines.append(f"  MISMATCH {gov_gid} = {gov_v} "
                          f"but {parent}#{parent_it['number']} is in {pl!r} (want {want!r})")
-            lines.append(f"           verdict line: {next((g[4] for g in gates if g[1]==gov_gid), '')}")
+            lines.append(f"           verdict line: {gov_line}")
 
     # gates without a matching parent issue are still surfaced.
     for parent in sorted(set(chain) - set(by_id)):

@@ -10,10 +10,24 @@
  * frame would sail through a zero canary untouched.  ssp_init() mixes the
  * physical counter with the guard's own address through splitmix64 so the
  * value varies between boots; it runs right after uart_init() in main().
+ *
+ * GB-246: the panic used to name nothing — five of ten intel waves died at
+ * this line with no function, no canary delta, no stack range, so every wave
+ * was another guess.  The hook now captures the return address INSIDE the
+ * faulting function (resolve it with `llvm-addr2line -e hobbyos.elf <pc>`),
+ * %rsp, the caller's %rbp, the guard, and the canary slot decoded from the
+ * function's prologue (see ssp_report.c), and prints expected-vs-found with
+ * the arithmetic delta before halting.
  */
 #include <stdint.h>
 
-extern void uart_puts(const char *s);
+#include <ssp.h>
+
+extern void panic_puts(const char *s);
+#if defined(__x86_64__)
+extern int panic_claim(void);
+extern void panic_leave(void);
+#endif
 
 /* Referenced by every instrumented function (-mstack-protector-guard=global). */
 uint64_t __stack_chk_guard;
@@ -47,11 +61,55 @@ void ssp_init(void) {
   __stack_chk_guard = seed;
 }
 
-/* A smashed canary: print and halt.  Returning would resume execution with
- * a corrupted frame — exactly what the check exists to prevent.  Must not
- * itself be instrumented (recursion on failure). */
-__attribute__((noreturn, no_stack_protector)) void __stack_chk_fail(void) {
-  uart_puts("KERNEL PANIC: stack smashing detected (SEC-4 canary)\n");
+/* Shared body of the panic: `fp` is the faulting function's frame base and
+ * `sp` points at the return address the call pushed.  Must not itself be
+ * instrumented (a canary failure inside the canary reporter would recurse). */
+__attribute__((used, noreturn, noinline, no_stack_protector))
+void ssp_fail_c(uint64_t fp, uint64_t sp) {
+  uint64_t pc = *(const uint64_t *)sp; /* return address inside the smasher */
+  uint64_t guard = __stack_chk_guard;
+  uint64_t found = 0;
+  int have_found = 0;
+  uint64_t off = ssp_pc_canary_offset(pc);
+
+  if (off && fp) {
+    found = *(const volatile uint64_t *)(fp - off);
+    have_found = 1;
+  }
+
+  char buf[384];
+  ssp_format_report(buf, (int)sizeof buf, pc, sp, fp, guard, found, have_found);
+#if defined(__x86_64__)
+  /* Enter panic mode and claim the record: the sink is lock-free for exactly
+   * this path (a smasher may hold uart_lock, and a reporter that deadlocks on
+   * the console loses the fact it exists to record). */
+  if (panic_claim()) {
+    panic_puts(buf);
+    panic_leave();
+  }
+#else
+  panic_puts(buf);
+#endif
   for (;;)
     ;
+}
+
+/* A smashed canary: name it, print expected-vs-found, and halt.  Returning
+ * would resume execution with a corrupted frame — exactly what the check
+ * exists to prevent.  Naked so %rbp still holds the caller's frame base and
+ * %rsp points at the return address: a compiler prologue here would replace
+ * both before we could read them. */
+__attribute__((naked, noreturn, no_stack_protector)) void __stack_chk_fail(void) {
+#if defined(__x86_64__)
+  __asm__ volatile("movq %rbp, %rdi\n\t"
+                   "movq %rsp, %rsi\n\t"
+                   "callq ssp_fail_c\n\t");
+#elif defined(__aarch64__)
+  __asm__ volatile("mov x0, x29\n\t"
+                   "mov x1, sp\n\t"
+                   "bl ssp_fail_c\n\t");
+#else
+  for (;;)
+    ;
+#endif
 }
