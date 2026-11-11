@@ -1727,8 +1727,48 @@ static void test_fat16_append_two_handles(void) {
   (void)fat16_unlink("/APPEND2.TXT");
 }
 
+/* Device I/O must never happen while fat_io_lock is held.
+ *
+ * This is the invariant whose violation wedges the machine (measured: RimWorld,
+ * holder alive and RUNNING inside the critical section, 239 threads queued
+ * behind it, no recovery).  A lock held across a device command has an
+ * UNBOUNDED hold time, so no timeout in the lock itself can save it.
+ *
+ * A read/write of a multi-cluster file walks and extends FAT chains, which is
+ * exactly the traffic that hits read_fat()/write_fat().  Today this FAILS; it
+ * is the red test the fix has to turn green.
+ */
+static void test_fat16_no_device_io_under_fat_lock(void) {
+  uart_puts("  Running test_fat16_no_device_io_under_fat_lock...\n");
+  tests_run++;
+
+  /* Start from a known-clean count so earlier tests cannot mask a violation. */
+  uint32_t before = fat16_io_under_lock();
+
+  struct file wf;
+  EXPECT_EQ(fat16_open("/IOSCOPE.BIN", &wf), 0);
+  static uint8_t buf[8192];
+  for (int i = 0; i < (int)sizeof buf; i++)
+    buf[i] = (uint8_t)(i * 7 + 3);
+  int wrote = fat16_write(&wf, buf, (int)sizeof buf);   /* extends the chain */
+  EXPECT_EQ(wrote, (int)sizeof buf);
+  fat16_close(&wf);
+
+  struct file rf;
+  EXPECT_EQ(fat16_open("/IOSCOPE.BIN", &rf), 0);
+  static uint8_t back[8192];
+  int got = fat16_read(&rf, back, (int)sizeof back);    /* walks the chain */
+  EXPECT_EQ(got, (int)sizeof buf);
+  EXPECT_EQ(back[0], buf[0]);
+  EXPECT_EQ(back[sizeof back - 1], buf[sizeof buf - 1]);
+  fat16_close(&rf);
+
+  EXPECT_EQ(fat16_io_under_lock(), before);
+}
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
+  test_fat16_no_device_io_under_fat_lock();
   test_fat16_open_excl(); /* SEC-1: atomic O_CREAT|O_EXCL */
   test_fat16_mkdir_dup_atomic(); /* SEC-1: race-safe mkdir duplicate check */
   test_fat16_sync_clobber_guard(); /* SEC-5: guarded dirent write-back */
