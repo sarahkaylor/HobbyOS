@@ -242,6 +242,24 @@ On the tree as it stands (kernel patch out, instruments + client call in):
 * The real-game run of §5: three full-frame `[HBT]` puts at 774-848 us,
   `[HBTS] put_avg` 848/1123 us, and `window_vs_surface_diff=0`.
 
+### 6.0 The same instruments on `main` after the host-port merge
+
+L89 is a lane of the `rimworld` line; `main` is where it lands. Cherry-picked
+onto `main` (`0b450b13`, after the macOS/arm64 host port merged), in a worktree
+seeded from this lane:
+
+* `make ARCH=intel MODE=desktop DESKTOP=icewm disk.img` — builds.
+* `TOOLS_SKIP=1 ./run_unit_tests_intel.sh` — **Tests run 448, Tests failed 0**
+  (main carries 12 more than the rimworld line's 436).
+* `python3 tools/rw/l89-xputbench.py --no-build` — the finding reproduces on
+  main's tree, with the same default ring:
+  `[XPB] xring fd=3 want=0 got=524288`, `put-whole ... put=119666 us`,
+  `[XPB] put-subrect ... put=100000 us`.
+
+So the diagnosis and the instruments are main-compatible; only the kernel half
+(§3) is line-specific, and it needs a rebase onto main's process-context lock
+(`spinlock_acquire`, not `spinlock_acquire_irqsave`) before it can be retried.
+
 ### 6.1 The patch's own gate — RED, and exactly where
 
 The §3 patch, run through the same tier: **436 run, 3 failed**:
