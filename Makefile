@@ -1457,7 +1457,18 @@ $(OBJ_DIR)/libc.a: $(LIBC_X11EXT_BUILTIN_OBJS)
 .SECONDARY: $(addprefix $(LIBCXX_ROOT)/compiler-rt/lib/builtins/,$(LIBC_X11EXT_BUILTIN_SRCS))
 
 $(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(OBJ_DIR)/libc_pwd.o $(OBJ_DIR)/libc_setjmp.o $(OBJ_DIR)/libc_dlfcn.o $(OBJ_DIR)/libc_resource.o $(OBJ_DIR)/libc_statvfs.o $(OBJ_DIR)/libc_syscall.o $(OBJ_DIR)/libc_ioctl.o $(OBJ_DIR)/libc_socket.o $(LIBC_BUILTIN_OBJS)
-	$(AR) rcs $@ $^
+	$(AR) rcs $@.$$$$ $^ && mv -f $@.$$$$ $@
+# ^ Publishes the archive ATOMICALLY (build to a pid-suffixed temp, then rename).
+#   `ar rcs $@ $^` updates in place, which is only safe while nobody reads the
+#   archive.  Cold parallel builds break that assumption: third_party/icu-78.3/
+#   build-target.sh:201 runs a NESTED `make obj/$(ARCH)/libc.a` when the archive
+#   does not exist yet, so the outer `make -jN` and that inner make write the
+#   same file at once and every concurrent ld.lld reports
+#     "obj/intel/libc.a: Archive::children failed: truncated or malformed
+#      archive (offset to next archive member past the end ...)"
+#   (measured on linuxci, 48-core -j32 cold build, 2026-11-10).  With rename, a
+#   reader sees either the previous complete archive or the new complete one.
+#   Same number of archive builds, no ordering assumption on ICU's recursion.
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
 # crt0.o + libc.a, proving the sysroot link path end to end. -e _start is
