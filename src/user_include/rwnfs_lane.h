@@ -49,4 +49,39 @@ static const char *rw_nfs_export_path(const char *dflt) {
   return dflt;
 }
 
+/* M7 LOCAL MODE: where the game lives when it is staged into disk.img itself.
+ * Returns 0 unless /GAMEDIR holds an absolute path.  The RimWorld-inside-the-
+ * image path (tools/rw/mkdisk-rimworld.sh) writes /GAMEDIR=/GAMES/RIMWORLD, so
+ * the launcher mounts nothing: the tree is already on the FAT volume, which is
+ * what the Managed bind exists to imitate. */
+static char rw_local_dir_buf[104] __attribute__((unused));
+
+static const char *rw_local_gamedir(int unused) __attribute__((unused));
+static const char *rw_local_gamedir(int unused) {
+  (void)unused;
+  int fd = open("/GAMEDIR", O_RDONLY);
+  if (fd >= 0) {
+    int n = (int)read(fd, rw_local_dir_buf, (int)sizeof rw_local_dir_buf - 1);
+    close(fd);
+    if (n > 0) {
+      int i = 0, j = 0;
+      while (i < n && (rw_local_dir_buf[i] == ' ' || rw_local_dir_buf[i] == '\t'))
+        i++;
+      if (rw_local_dir_buf[i] == '/') {
+        while (i < n && j < (int)sizeof rw_local_dir_buf - 1) {
+          char c = rw_local_dir_buf[i];
+          if (c == '\n' || c == '\r' || c == ' ' || c == '\t')
+            break;
+          rw_local_dir_buf[j++] = c;
+          i++;
+        }
+        rw_local_dir_buf[j] = 0;
+        if (j > 1)
+          return rw_local_dir_buf;
+      }
+    }
+  }
+  return 0;
+}
+
 #endif /* RWNFS_LANE_H */

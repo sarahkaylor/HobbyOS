@@ -4468,15 +4468,18 @@ void enter_user_space_note(uint64_t src, uint64_t dst) {
 }
 
 void general_interrupt_handler(struct trap_frame *tf) {
+  /* Always-on lock audit: an IRQ handler must never try to park on a ylock_t,
+   * and rank rules do not govern acquisitions from exception context (see
+   * lock.h).  Both instruments are told, in every build. */
+  lock_audit_irq_enter();
 #ifdef KERNEL_MODE_UNIT_TEST
-  extern void lockdbg_irq_enter(void);
-  extern void lockdbg_irq_exit(void);
   lockdbg_irq_enter();
-  general_interrupt_inner(tf);
-  lockdbg_irq_exit();
-#else
-  general_interrupt_inner(tf);
 #endif
+  general_interrupt_inner(tf);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_irq_exit();
+#endif
+  lock_audit_irq_exit();
 }
 
 /* GB-101/GB-243: the user-mode classifier decision, isolated so the kernel
@@ -4755,7 +4758,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
        and the wave's block-waiting loader then stalls silently.  CPU0's
        PIT tick + the broadcast 0x81 IPI (also 100 Hz) are what actually
        schedule user processes around. */
-    if (cur && (tf->cs & 3) == 3 && cpu == 0) {
+    if (cur && (tf->cs & 3) == 3 && cpu == 0 && kernel_preempt_count() == 0) {
       if (cpu == 0) {
         gic_end_interrupt(intid);
       }

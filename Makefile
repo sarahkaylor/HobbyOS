@@ -322,7 +322,14 @@ ifeq ($(ARCH),intel)
   # (src/kernel/virtio_input.c), so the GTK window needs no pointer grab and
   # the guest cursor sits exactly under the host pointer; the PS/2 mouse
   # (IntelliMouse, wheel) remains the fallback when vmport is off.
-  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
+
+  # virtio-tablet-pci: an ABSOLUTE pointing device.  Without one, QMP
+  # input-send-event with abs axes delivers nothing -- the cursor never moves and
+  # every synthetic click is silently dropped (measured: hours of "clicks do
+  # nothing" on the icewm desktop, while the keyboard path worked fine because
+  # keys are not routed through a pointer device).  tools/rw/rw_desktop_drive.py
+  # and the GUI gates all drive the desktop through absolute events.
+  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
@@ -1458,7 +1465,18 @@ $(OBJ_DIR)/libc.a: $(LIBC_X11EXT_BUILTIN_OBJS)
 .SECONDARY: $(addprefix $(LIBCXX_ROOT)/compiler-rt/lib/builtins/,$(LIBC_X11EXT_BUILTIN_SRCS))
 
 $(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(OBJ_DIR)/libc_pwd.o $(OBJ_DIR)/libc_setjmp.o $(OBJ_DIR)/libc_dlfcn.o $(OBJ_DIR)/libc_resource.o $(OBJ_DIR)/libc_statvfs.o $(OBJ_DIR)/libc_syscall.o $(OBJ_DIR)/libc_ioctl.o $(OBJ_DIR)/libc_socket.o $(LIBC_BUILTIN_OBJS)
-	$(AR) rcs $@ $^
+	$(AR) rcs $@.$$$$ $^ && mv -f $@.$$$$ $@
+# ^ Publishes the archive ATOMICALLY (build to a pid-suffixed temp, then rename).
+#   `ar rcs $@ $^` updates in place, which is only safe while nobody reads the
+#   archive.  Cold parallel builds break that assumption: third_party/icu-78.3/
+#   build-target.sh:201 runs a NESTED `make obj/$(ARCH)/libc.a` when the archive
+#   does not exist yet, so the outer `make -jN` and that inner make write the
+#   same file at once and every concurrent ld.lld reports
+#     "obj/intel/libc.a: Archive::children failed: truncated or malformed
+#      archive (offset to next archive member past the end ...)"
+#   (measured on linuxci, 48-core -j32 cold build, 2026-11-10).  With rename, a
+#   reader sees either the previous complete archive or the new complete one.
+#   Same number of archive builds, no ordering assumption on ICU's recursion.
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
 # crt0.o + libc.a, proving the sysroot link path end to end. -e _start is
@@ -2517,11 +2535,16 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BI
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(POLLTSTBRK_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(STAGE4K_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MCOPY_BIN) $(MDEL_BIN) $(MMD_BIN) $(MODE_FILE) $(XCRYPT_BIN) # w2-mtools deps (union: MAKE_BIN + SELFHOST_BIN ride their own lines above)
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(POLLTSTBRK_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(STAGE4K_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(MKFSFAT_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE) $(XCRYPT_BIN) # w2-mkfs deps
 
-	# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
-	# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
-	# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
-	# no driver change is needed for the larger disk/clusters.
-	dd if=/dev/zero of=disk.img bs=1M count=1024
+	# Startup disk: 1 GiB by default (user-requested floor; FAT16 tops out near
+	# 2 GiB).  DISK_MB allows a bigger image without editing this recipe -- the
+	# RimWorld staging script needs ~1.5 GiB because the game is 806 MB of
+	# apparent size.  mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB);
+	# the kernel fat16.c layout math is BPB data-driven
+	# (bpb_sectors_per_cluster), so no driver change is needed for a larger
+	# disk.  Stay at or below ~1.5 GiB: past that mkfs.fat has to leave 32 KiB
+	# clusters to stay inside FAT16's 65524-cluster limit, which the guest's
+	# FAT driver does not describe.
+	dd if=/dev/zero of=disk.img bs=1M count=$(DISK_MB)
 	$(MKFS_FAT) -F 16 disk.img
 	$(MMD) -i disk.img ::/EFI
 	$(MMD) -i disk.img ::/EFI/BOOT
@@ -2941,16 +2964,16 @@ gpu-check:
 	  echo "-- ARM (qemu-system-aarch64) --"; \
 	  if command -v qemu-system-aarch64 >/dev/null 2>&1; then \
 	    probe "gtk,gl=on + virtio-gpu-gl-device (the GL config)" \
-	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 1 -m 512M -accel tcg \
+	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 512M -accel tcg \
 	      -display gtk,gl=on -device virtio-gpu-gl-device -S -monitor none -serial none -nodefaults && GLARM=1; \
 	    probe "egl-headless,gl=on + virtio-gpu-gl-device (why it is excluded)" \
-	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 1 -m 512M -accel tcg \
+	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 512M -accel tcg \
 	      -display egl-headless,gl=on -device virtio-gpu-gl-device -S -monitor none -serial none -nodefaults || true; \
 	    probe "-display none + virtio-gpu-gl-device (why headless stays soft)" \
-	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 1 -m 512M -accel tcg \
+	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 512M -accel tcg \
 	      -display none -device virtio-gpu-gl-device -S -monitor none -serial none -nodefaults || true; \
 	    probe "gtk + virtio-gpu-device (soft fallback)" \
-	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 1 -m 512M -accel tcg \
+	      qemu-system-aarch64 -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 512M -accel tcg \
 	      -display gtk -device virtio-gpu-device -S -monitor none -serial none -nodefaults || true; \
 	  else echo "  (qemu-system-aarch64 not on PATH)"; fi; \
 	  if [ "$$GLARM" = "1" ]; then \
@@ -3093,8 +3116,11 @@ apps_test_run:
 apps_test:
 	python3 ./run_apps_test.py
 
+# Image size in MiB (see the disk.img recipe).  1024 is the historical default.
+DISK_MB ?= 1024
+
 # --- Host Compatibility Build Targets ---
-HOST_CC = clang
+HOST_CC = tools/host/host-cc.sh
 HOST_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST
 
 include src/user/xcompat/Makefile.inc
@@ -3318,16 +3344,24 @@ $(CLOCKABI_TEST): src/host/clockabi_test.c
 # owner is a recorded-halted CPU is freed and re-acquired normally, and a CPU
 # never frees its own lock.
 LOCKSTEAL_TEST = locksteal_test_host
-$(LOCKSTEAL_TEST): src/host/locksteal_test.c src/kernel/arch/x64/locks.c src/include/lock.h
-	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/arch/x64/locks.c src/host/locksteal_test.c -o $@
+$(LOCKSTEAL_TEST): src/host/locksteal_test.c src/kernel/arch/x64/locks.c src/kernel/lockscale.c src/include/lock.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/arch/x64/locks.c src/kernel/lockscale.c src/host/locksteal_test.c -o $@
 
 # GB-246 SEC-4 panic report: the prologue -> canary-slot rule and the
 # expected/found formatter are unit-tested on the host (the panic path itself
 # halts, so a synthetic smashed frame is the falsifier: found != guard must
 # print pc, guard, found and delta rather than crashing silently).
+#
+# The two decoders in ssp_report.c are `#ifdef __x86_64__` so the ARM kernel TU
+# compiles them away -- but they are pure byte-pattern logic over a synthetic
+# prologue (no asm, no arch types, only <stdint.h>), so a host test that ran
+# without them would assert nothing on an arm64 Mac: the stub returns 0 and the
+# two prologue checks fail.  Compile the host leg with the x86_64 lane forced on
+# and the decoder is exercised on every host.  Do NOT copy this flag onto the
+# kernel build (obj/$(ARCH)/ssp_report.o) -- there it must follow the arch.
 SSP_REPORT_TEST = ssp_report_test_host
 $(SSP_REPORT_TEST): src/host/ssp_report_test.c src/kernel/ssp_report.c src/include/ssp.h
-	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/ssp_report.c src/host/ssp_report_test.c -o $@
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) -D__x86_64__ src/kernel/ssp_report.c src/host/ssp_report_test.c -o $@
 
 # memfd_create + shared-memory ABI surface (GB-030): T4 differential test that
 # RUNS the real Linux memfd_create/fcntl(F_ADD_SEALS)/mmap(MAP_SHARED) on the
@@ -3650,6 +3684,14 @@ $(GETOPT_TEST): obj/host_libc_getopt_test.o obj/host_hb_getopt.o
 # (see src/host/libc_regex_test.c).  Needs -Isrc/libc/include so the
 # sysroot's regex.h/intprops.h/verify.h win over system copies.
 REGEX_TEST = libc_regex_test_host
+# glibc-ABI-only: the test links src/host/glibc_regex_layout.c, which asserts the
+# layout of glibc's `struct re_registers`.  macOS has no glibc and no such
+# struct, so the object does not compile there at all — empty the variable on
+# Darwin so the (huge) suite list drops it and the run line skips instead of
+# invoking "./".
+ifeq ($(shell uname -s),Darwin)
+REGEX_TEST :=
+endif
 obj/host_hb_regex.o: src/libc/src/regex.c src/libc/include/*.h src/libc/src/*.h
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
 obj/host_libc_regex_test.o: src/host/libc_regex_test.c src/user/regex_test_cases.h src/libc/include/*.h
@@ -3917,7 +3959,12 @@ $(HEADERS_TEST): obj/host_libc_headers_test.o
 # link — cxxrt's delete now calls free(ptr) with the RAW pointer, a contract
 # defined over the HobbyOS allocator's BLOCK_MAGIC check, not glibc's free.
 # (See the test TU's header note; the hb_* wrappers shadow libc's malloc.)
-CXX_TEST_FLAGS = -std=c++17 -fno-exceptions -fno-rtti
+# -fsized-deallocation: the test exercises the sized operator delete[]/delete
+# overloads that this libc's cxxrt provides.  GCC enables sized deallocation at
+# -std=c++14 and later by itself; clang does NOT for Darwin targets (it keeps
+# them off for libc++ ABI reasons), so the same source that compiles on the Linux
+# farm fails here with "no matching function for call to 'operator delete[]'".
+CXX_TEST_FLAGS = -std=c++17 -fno-exceptions -fno-rtti -fsized-deallocation
 CXXRT_TEST = cxxrt_test_host
 obj/host_cxxrt_test.o: src/host/cxxrt_test.cpp src/libc/include/cxxrt.h
 	@mkdir -p obj
@@ -3953,6 +4000,22 @@ VENDOR_HOST_CXXFLAGS = -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ \
   -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES \
   -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY
 RTTI_TEST = rtti_test_host
+# The link must NOT drag in a host C++ standard library: the four vendored
+# objects + the shim ARE the runtime under test, so ldd() has to show libc only.
+# clang spells that -nostdlib++; gcc does not know the flag and needs
+# -nodefaultlibs plus the C runtime the driver would otherwise add.  Ask the
+# compiler instead of assuming: HOST_CC is clang on the macOS dev box and gcc's
+# `cc` on linuxci, where the hard-coded flag failed the whole host tier
+# ("cc: error: unrecognized command-line option '-nostdlib++'").  Measured on
+# linuxci/gcc 15: the fallback links, runs 17/17, ldd = libc only.
+HOST_RTTI_HAS_NOSTDLIBPP := $(shell $(HOST_CC) -nostdlib++ -x c++ -E - </dev/null >/dev/null 2>&1 && echo yes)
+ifeq ($(HOST_RTTI_HAS_NOSTDLIBPP),yes)
+HOST_RTTI_NOSTDCPP := -nostdlib++
+HOST_RTTI_TRAILING_LIBS :=
+else
+HOST_RTTI_NOSTDCPP := -nodefaultlibs
+HOST_RTTI_TRAILING_LIBS := -lc -lgcc
+endif
 # GB-157: the TU includes <typeinfo> from the fetched libc++ tree; without this
 # prerequisite a fresh worktree compiles it before any fetch guard can run and
 # dies with "'typeinfo' file not found" (the same guard cxx_t.o carries at :1145).
@@ -3972,7 +4035,7 @@ obj/host_rtti_test_support.o: src/host/rtti_test_support.cpp
 	@mkdir -p obj
 	$(HOST_CC) -Wall -Wextra -g $(VENDOR_HOST_CXXFLAGS) -c $< -o $@
 $(RTTI_TEST): obj/host_rtti_test.o obj/host_rtti_private_typeinfo.o obj/host_rtti_stdlib_typeinfo.o obj/host_rtti_stdlib_exception.o obj/host_rtti_test_support.o
-	$(HOST_CC) -nostdlib++ -o $@ $^
+	$(HOST_CC) $(HOST_RTTI_NOSTDCPP) -o $@ $^ $(HOST_RTTI_TRAILING_LIBS)
 
 # WM damage bookkeeping: line-level window repair + the base (damage) clip
 # (window.c + graphics.c are included into the test's single TU).
@@ -4276,7 +4339,10 @@ PR_SYNC_TEST = python3 tools/board/pr_sync_test.py
 test_pr_sync:
 	$(HOST_RUN) $(PR_SYNC_TEST)
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(SSP_REPORT_TEST)
+# The suite as one list, so a host-portable subset can be derived from it
+# without maintaining a second copy (see host_tests_portable).
+HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(SSP_REPORT_TEST)
+host_tests: $(HOST_TESTS_TARGETS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
 	$(HOST_RUN) ./$(GFX_STATS_TEST)
@@ -4345,7 +4411,11 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_
 	$(HOST_RUN) ./$(CXX_HEADERS_TEST)
 	$(HOST_RUN) ./$(RTTI_TEST)
 	$(HOST_RUN) ./$(GETOPT_TEST)
+ifneq ($(REGEX_TEST),)
 	$(HOST_RUN) ./$(REGEX_TEST)
+else
+	@echo "  SKIP: regex layout (glibc-ABI only; this host has no struct re_registers)"
+endif
 	$(HOST_RUN) ./$(LANGINFO_TEST)
 	$(HOST_RUN) ./$(SCANFW_PARITY)
 	$(HOST_RUN) ./$(NUM_PARITY)
@@ -4536,3 +4606,68 @@ doom_elf_test_gen:
 	    --elf $(DOOM_GEN) --wad $(DOOM_WAD) --start-line "/DOOM.ELF -iwad /DOOM1.WAD"
 .PHONY: doom_elf_test doom_elf_test_gen
 
+
+# --- host-portable subset ---------------------------------------------------
+#
+# `make host_tests` is written for the Linux farm: it builds the intel target,
+# dlopens x86_64 ELF DSOs into the test process, and races our libc against the
+# HOST's glibc/coreutils.  None of that can work on a macOS/arm64 host, and none
+# of it is a bug -- so the portable subset excludes those *by category* rather
+# than skipping failures one at a time:
+#
+#   glibc/coreutils parity .... WIDE_PARITY WC_PARITY (host has no glibc _l,
+#                               no struct re_registers, no GNU coreutils bytes)
+#   cross-ABI dlopen .......... xcompat_test_run, x11_libc_test_run (an ELF
+#                               DSO cannot be dlopen()ed by a Mach-O process)
+#   x86_64-host-only .......... LOCKSTEAL_TEST (pushfq/popfq), T4 probes,
+#                               w4_doom (musl cross), diffutils_cmp_ref
+#   musl toolchain ............ every T4_* self-test and SDL_TEST_APP_HOST build
+#                               static-musl x86_64 probes with musl-gcc, which is
+#                               Debian/Ubuntu musl-tools; no Homebrew equivalent
+#                               produces a static-PIE the loader accepts
+#
+# Everything else builds and runs on any POSIX host; that is the set this target
+# proves.  Add to HOST_TESTS_HOSTBOUND only with the reason it cannot work.
+# %parity% is the whole family by construction: every one of them compares
+# HobbyOS's implementation against the HOST's glibc or GNU coreutils bytes
+# (head/tail/cut/tr/.../wc, uname, scanf/printf, math transcendentals, the wide
+# set).  Off Linux there is nothing on the other side of that comparison.
+# Enumerated, not pattern-matched: macOS ships GNU Make 3.81, where $(filter)
+# only honours a TRAILING % -- "$(filter %parity%,...)" matches nothing there
+# while matching fine under make 4.x on the farm, so a pattern here would mean
+# "everything runs" on one host and "nothing does" on the other (measured).
+HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) \
+                       $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) \
+                       $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) \
+                       $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) \
+                       $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) \
+                       $(TAC_PARITY) $(CMP_PARITY_STRICT) $(T4_COMPAT_PARITY) \
+                       $(UNAME_PARITY) $(LOCKSTEAL_TEST) $(REGEX_TEST) \
+                       $(LANGINFO_TEST) x11_libc_test_run xcompat_test_run \
+                       t4_compat_selftest w4_doom_test \
+                       $(EDITOR_HOST) $(RESOLV_TEST) $(TIME_MATH_TEST) \
+                       $(LINUX_ABI_TEST) $(IPC_PROTO_TEST) $(TORTURE_TEST_HOST) \
+                       $(CTYPE_TEST) $(STDLIB_TEST) $(PRINTF_TEST) \
+                       $(CLOCKABI_TEST) $(MEMFD_TEST) \
+                       $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) \
+                       $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) \
+                       $(SDL_TEST_APP_HOST)
+
+host_tests_portable: $(filter-out $(HOST_TESTS_HOSTBOUND),$(HOST_TESTS_TARGETS))
+	@printf '== host-portable suite: %s targets (%s excluded)\n' \
+	  "$(words $^)" "$(words $(HOST_TESTS_HOSTBOUND))"
+	@fail=0; pass=0; skip=0; \
+	if command -v timeout >/dev/null 2>&1; then RUN="timeout 40"; else RUN=""; fi; \
+	for t in $^; do \
+	  if [ ! -x "$$t" ]; then skip=$$((skip+1)); continue; fi; \
+	  if $$RUN ./"$$t" >"$$t.log" 2>&1; then \
+	    pass=$$((pass+1)); \
+	  else \
+	    printf '  FAIL %s\n' "$$t"; sed -n '1,25p' "$$t.log"; fail=$$((fail+1)); \
+	  fi; \
+	done; \
+	printf '== host-portable: %s passed, %s failed, %s non-binary targets\n' \
+	  "$$pass" "$$fail" "$$skip"; \
+	[ "$$fail" -eq 0 ]
+
+.PHONY: host_tests_portable

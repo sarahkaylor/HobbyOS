@@ -194,6 +194,17 @@ static void test_relocations(void) {
 int main(void) {
   printf("=== ELF image parser (GB-013) host tests ===\n");
 
+  /* The parser accepts only ELF_MACHINE_NATIVE, and the fixtures here are
+   * x86_64 ELFs (the guest's architecture).  On a non-x86_64 host every parse
+   * returns ELF_ERR_MACHINE, `span` stays 0, and the copy block then memsets a
+   * zero-byte malloc -- a SIGSEGV inside _platform_memset rather than a test
+   * verdict (measured on Apple silicon).  Say so and stop. */
+#if !defined(__x86_64__)
+  printf("SKIP: fixtures are x86_64 ELF; this host is not x86_64 "
+         "(elf_parse would return ELF_ERR_MACHINE by design)\n");
+  return 0;
+#endif
+
   /* --- argument hygiene ------------------------------------------------- */
   struct elf_image img;
   CHECK_EQ(elf_parse(NULL, 0, &img), ELF_ERR_ARGS, "elf_parse(NULL) -> ARGS");

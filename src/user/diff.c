@@ -30,7 +30,8 @@
 #define DIFF_MAX_LINES    400    /* at most 400 lines kept per file       */
 #define DIFF_MAX_ROWS     600    /* at most 600 diff rows stored          */
 #define DIFF_VIEW_ROWS    18     /* diff rows shown on screen             */
-#define DIFF_NAME_MAX     64     /* filename buffer size                  */
+#define DIFF_NAME_MAX    256     /* filename buffer size.  See hex.c: 64 is
+                                  * shorter than a real macOS temp path. */
 #define DIFF_NAME_SHOW    18     /* filename chars shown in the header    */
 #define DIFF_SLOT_MAX     80     /* buffer for one "A: name (n lines)"    */
 #define DIFF_LINE2_MAX    69     /* max columns for header line 2         */
@@ -271,6 +272,12 @@ static int diff_load_slot(int slot, const char *name) {
     w.len = 0;
     f->name[0] = '\0';
     bw_nchars(&w, name, DIFF_NAME_MAX - 1);
+    /* Terminate explicitly.  bw_nchars copies up to cap bytes and does not
+     * guarantee a NUL, so a slot reused after a LONGER name keeps its stale
+     * tail and the header shows "oldname/newtail" (measured on macOS, where a
+     * scratch path is 67 chars: on Linux the short /tmp paths never left a
+     * tail, so this never showed up there). */
+    f->name[w.len < DIFF_NAME_MAX ? w.len : DIFF_NAME_MAX - 1] = '\0';
   }
   f->size_cap = size_cap;
   diff_split_lines(file_buf, n, f);

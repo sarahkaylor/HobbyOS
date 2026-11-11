@@ -59,6 +59,13 @@
 
 set -euo pipefail
 
+# Native host toolchain: on macOS 27 the default CLT SDK cannot be parsed by the
+# installed clang, so every host link (Mesa's sanitity check, its code
+# generators) dies with "ld: tapi error".  One probe, newest linkable SDK.
+SCRIPT_DIR_HOST="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../host/macos-sdk.sh
+[ -f "$SCRIPT_DIR_HOST/../host/macos-sdk.sh" ] && . "$SCRIPT_DIR_HOST/../host/macos-sdk.sh"
+
 # ---------------------------------------------------------------------------
 # Pin (docs/rimworld-plan.md §2, MESA-NOTES.md §1)
 # ---------------------------------------------------------------------------
@@ -81,10 +88,19 @@ GLIBC_RT_URL=http://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_${GLIBC_VE
 GLIBC_RT_SHA256=1b2281aac4935dfea1f89dfc19e445fdbb45303202af60679ccb8bf035f081a0
 GLIBC_DEV_URL=http://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6-dev_${GLIBC_VERSION}_amd64.deb
 GLIBC_DEV_SHA256=11029900f2315b93ce487792ae1bf15f0927e5e50880c091e6a440b14d4e164a
+# The Linux kernel UAPI headers (linux/errno.h, linux/limits.h, ...).  glibc
+# 2.31's own bits/ headers #include them, and neither libc6-dev nor libc6
+# carries them: on a Linux host they come from linux-libc-dev in /usr/include.
+# macOS has no /usr/include/linux at all, so the pin is fetched and extracted
+# into the same sysroot.  Version pinned to the focal 5.4 series (the era of the
+# 2.31 pin); sha256 recorded when this was added for the macOS port.
+GLIBC_UAPI_VERSION=5.4.0-218.238
+GLIBC_UAPI_URL=http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-libc-dev_${GLIBC_UAPI_VERSION}_amd64.deb
+GLIBC_UAPI_SHA256=0aa210458df2ab7bc4536e8edf0f9423a7018e74e2eac0b5777fd2a36f170c2f
 
 # Bumped whenever the flag vector changes in a way the object cache cannot
 # see (it keys on mtimes): r2 = -ftls-model=global-dynamic + the 2.31 header pin.
-CROSS_FLAGS_REV=4
+CROSS_FLAGS_REV=6
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -101,12 +117,32 @@ OBJ=${WORK}/obj
 LIBDIR=${WORK}/lib
 LIBCXX_SRC=${LIBCXX_SRC:-${TREE}/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src}
 
+# Host LLVM tools: on Linux they are in /usr/lib/llvm-21/bin (or on PATH); on
+# macOS Homebrew's llvm is keg-only, so llvm-ar/llvm-nm/llvm-strip are NOT on
+# PATH and the `command -v llvm-ar || command -v ar` fallback below silently
+# picks Apple's ar -- which drops every non-Mach-O member instead of failing,
+# producing 96-byte "empty" archives that only show up as version-script
+# failures at link time.  Prepend the keg, mirroring third_party/x11/cross/env.sh.
+for _hb_llvm in /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin; do
+  [ -d "$_hb_llvm" ] || continue
+  case ":$PATH:" in *":$_hb_llvm:"*) ;; *) PATH="$_hb_llvm:$PATH";; esac
+done
+unset _hb_llvm
+export PATH
+
 CC=${CC:-clang}
 CXX_DRIVER=${CXX_DRIVER:-clang}
 LD=${LD:-ld.lld}
-AR=${AR:-$(command -v llvm-ar || command -v ar)}
-STRIP=${STRIP:-$(command -v llvm-strip || command -v strip)}
+AR=${AR:-$(command -v llvm-ar)}
+STRIP=${STRIP:-$(command -v llvm-strip)}
+# No silent fallback: Apple's ar on PATH is a trap for an ELF link.
+[ -n "$AR" ] || { echo "build-hobbyos: llvm-ar not found (brew install llvm)" >&2; exit 2; }
 CLANG_RES=$(${CC} -print-resource-dir)/include
+# ELF inspection and file size: GNU spellings (readelf, stat -c%s) do not exist
+# on macOS.  llvm-readelf reads ELF on every host; Homebrew's keg is on PATH now.
+READELF=${READELF:-$(command -v llvm-readelf || command -v readelf)}
+[ -n "$READELF" ] || { echo "build-hobbyos: no readelf/llvm-readelf (brew install llvm)" >&2; exit 2; }
+size_of() { if [ "$(uname -s)" = Darwin ]; then stat -f%z "$1"; else stat -c%s "$1"; fi; }
 
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
 SELF_CONTAINED=0
@@ -159,11 +195,53 @@ except Exception as exc:  # pragma: no cover - the message is the point
     sys.exit(1)
 print(f"    python3 {sys.version.split()[0]} at {sys.executable}: mako {mako.__version__}, pyyaml ok")
 EOF
+  # meson resolves python3 with find_program(), i.e. through PATH -- not through
+  # MESA_PYTHON -- so an interpreter outside PATH passes this preflight and then
+  # dies in configure with "Python (3.x) mako module >= 0.8.0 required".  Put
+  # the chosen interpreter's directory first (measured on macOS, where the venv
+  # is not on PATH by default).
+  if [ -n "${MESA_PYTHON:-}" ]; then
+    PATH="$(cd "$(dirname "$py")" && pwd):$PATH"; export PATH
+  fi
   for t in meson ninja flex bison curl; do
     command -v "$t" >/dev/null || die "missing host tool: $t"
   done
-  [ -d /usr/include/X11 ] || die "missing /usr/include/X11 (apt install libx11-dev)"
-  [ -d /usr/include/GL ] || die "missing /usr/include/GL (apt install libx11-dev)"
+  # Mesa's .y grammars need bison >= 3.  macOS ships GNU Bison 2.3 from 2006 on
+  # PATH, which does not fail loudly -- it reports a syntax error inside
+  # glcpp-parse.y ("unexpected identifier, expecting string") and the build dies
+  # looking like a Mesa checkout problem.  Prefer a modern keg when present.
+  local hb_bison="${HOMEBREW_PREFIX:-/opt/homebrew}/opt/bison/bin"
+  if [ -x "$hb_bison/bison" ]; then
+    case "$(bison --version 2>/dev/null | head -1)" in
+      *" 3."*|*" 4."*|*" 5."*) ;;
+      *) PATH="$hb_bison:$PATH"; export PATH
+         note "bison $(bison --version | head -1 | awk '{print $NF}') from $hb_bison (Mesa needs >= 3)" ;;
+    esac
+  fi
+  # X11/GL headers: /usr/include on Linux; Homebrew's prefix on macOS.  The GL
+  # ones are optional -- Mesa builds GL/glx.h itself and the xlib platform does
+  # not link the host's GL -- so only X11 is fatal.
+  local hb_inc
+  for hb_inc in /usr/include /usr/local/include "${HOMEBREW_PREFIX:-/opt/homebrew}/include"; do
+    [ -d "$hb_inc/X11" ] && HB_X11_HOST_INC="$hb_inc" && break
+  done
+  [ -n "${HB_X11_HOST_INC:-}" ] || die "missing X11 headers (apt install libx11-dev / brew install libx11)"
+  [ -d "$HB_X11_HOST_INC/GL" ] || note "no system GL headers; using Mesa's own include/GL ($HB_X11_HOST_INC)"
+
+  # macOS: two include dirs the host build needs that must NOT enter the
+  # recorded flag vector (step 4 replays those lines for the x86_64 target, and
+  # a Homebrew include dir there would leak host headers into the guest DSO):
+  #   libsync.h   -- libdrm's header; macOS has no libdrm package, but the repo
+  #                  already ships a declaration-only shim for the target.
+  #   X11/        -- Homebrew's X11 headers (no /usr/include/X11 on macOS).
+  # CPATH is read by the host compiler without touching build.ninja.
+  if [ "$(uname -s)" = Darwin ]; then
+    mkdir -p "${WORK}/host-compat"
+    [ -f "${WORK}/host-compat/libsync.h" ] || \
+      cp "${TREE}/tools/mesa/include/libsync.h" "${WORK}/host-compat/libsync.h"
+    CPATH="${WORK}/host-compat:${HOMEBREW_PREFIX:-/opt/homebrew}/include${CPATH:+:$CPATH}"
+    export CPATH
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -265,6 +343,21 @@ ensure_glibc_pin() {
     dpkg-deb -x "$deb" "$GLIBC231_DEV" || die "cannot extract $deb"
   fi
 
+  # Kernel UAPI headers: present on a Linux host in /usr/include, absent on
+  # macOS.  Extract the pinned linux-libc-dev into the same sysroot so the
+  # `-isystem /usr/include` fallback below is not load-bearing.
+  if [ ! -d "${GLIBC231_DEV}/usr/include/linux" ]; then
+    local udeb=${CACHE}/linux-libc-dev_${GLIBC_UAPI_VERSION}_amd64.deb
+    if [ ! -f "$udeb" ]; then
+      note "fetching $(basename "$udeb") (kernel UAPI headers)"
+      curl -fsSL -o "$udeb" "$GLIBC_UAPI_URL" || die "cannot fetch $GLIBC_UAPI_URL"
+    fi
+    local ugot; ugot=$(sha256sum "$udeb" | cut -d' ' -f1)
+    [ "$ugot" = "$GLIBC_UAPI_SHA256" ] || die "linux-libc-dev sha256 mismatch: got $ugot"
+    note "linux-libc-dev sha256 ok (${GLIBC_UAPI_VERSION})"
+    dpkg-deb -x "$udeb" "$GLIBC231_DEV" || die "cannot extract $udeb"
+  fi
+
   if [ -z "${GLIBC231_RT:-}" ]; then
     GLIBC231_RT=${CACHE}/glibc231-rt
   fi
@@ -303,9 +396,19 @@ host_build() {
   # chooses at runtime (tools/mesa/patches/0010), so the software rasteriser
   # stays available as the correctness reference and the CI renderer.
   local drivers="softpipe,virgl"
+  # The host artifacts exist for their *side effects*: generated sources, and
+  # the per-TU flag vector that step 4 replays.  The host libGL itself is never
+  # used, and on macOS it cannot link: Mesa's xlib target references
+  # XcPresentMark, a symbol HobbyOS's patched Xlib adds (the same patch set the
+  # guest's libX11 is built from), which the system libX11 does not have.
+  # dynamic_lookup keeps `ninja all` green without pretending the host dylib
+  # is a usable library.
+  local mac_link=""
+  [ "$(uname -s)" = Darwin ] && mac_link="-Dcpp_link_args=-Wl,-undefined,dynamic_lookup"
   if [ ! -f "${HOSTBUILD}/build.ninja" ]; then
     CC=gcc CXX=g++ meson setup "$HOSTBUILD" "$SRC" \
       -Dgallium-drivers="$drivers" \
+      $mac_link \
       -Dllvm=disabled \
       -Dplatforms=x11 \
       -Dglx=xlib \
@@ -351,8 +454,10 @@ host_build() {
     local objdir="${HOSTBUILD}/${a%.a}.a.p"
     local n b
     n=$(ls "$objdir"/*.o 2>/dev/null | wc -l)
-    b=$(du -cb "$objdir"/*.o 2>/dev/null | tail -1 | cut -f1)
-    note "gallium: $(basename "$a")  $n TUs, $(( ${b:-0} / 1024 )) KiB of objects"
+    # GNU `du -b` does not exist on BSD/macOS (it exits 64 and kills the build
+    # under set -e); the apparent byte count is just the bytes themselves.
+    b=$(cat "$objdir"/*.o 2>/dev/null | wc -c)
+    note "gallium: $(basename "$a")  $((n)) TUs, $(( ${b:-0} / 1024 )) KiB of objects"
   done
 }
 
@@ -406,11 +511,37 @@ PY
   # only - nothing is linked from the host.
   say "   staging X11/GL headers (libx11-dev, build data only)"
   rm -rf "${STAGE}/x11-include"; mkdir -p "${STAGE}/x11-include"
-  for d in /usr/include/X11 /usr/include/GL; do
-    [ -d "$d" ] || die "missing $d (apt install libx11-dev)"
-    cp -a "$d" "${STAGE}/x11-include/"
+  # Header roots: /usr/include on Linux, Homebrew's prefix on macOS (there is no
+  # /usr/include/X11 there).  GL interface headers ship with Mesa itself, so the
+  # tree is the fallback when the host has no libgl1-mesa-dev.
+  local hb_x11="" hb_gl="" hb_d
+  for hb_d in /usr/include/X11 /usr/local/include/X11 "${HOMEBREW_PREFIX:-/opt/homebrew}/include/X11"; do
+    [ -d "$hb_d" ] && { hb_x11="$hb_d"; break; }
   done
-  note "staged $(find "${STAGE}/x11-include" -type f | wc -l) headers"
+  [ -n "$hb_x11" ] || die "missing X11 headers (apt install libx11-dev / brew install libx11)"
+  # A GL root must carry gl.h, not just the GLX protocol headers: Homebrew's
+  # include/GL exists but holds glxint.h/glxproto.h (&co) from xorgproto and no
+  # gl.h at all, so "the directory exists" is the wrong test and the client
+  # headers end up missing.  Mesa's own include/GL is the authoritative set and
+  # matches the DSO that was just built.
+  for hb_d in /usr/include/GL "${HOMEBREW_PREFIX:-/opt/homebrew}/include/GL" "$SRC/include/GL"; do
+    [ -f "$hb_d/gl.h" ] && { hb_gl="$hb_d"; break; }
+  done
+  [ -n "$hb_gl" ] || die "missing GL headers (apt install libgl1-mesa-dev)"
+  # -L, not -a: Homebrew's include/X11 and include/GL are *symlink trees* into
+  # the Cellar, and copying the links preserves them as relative paths
+  # ("GL -> ../Cellar/xorgproto/…/include/GL") which are dangling once the tree
+  # sits under obj/mesa/stage/x11-include -- measured as "staged 0 headers"
+  # with a directory full of broken links.  Dereference so the stage is real.
+  cp -RL "$hb_x11" "${STAGE}/x11-include/"
+  cp -RL "$hb_gl" "${STAGE}/x11-include/"
+  # gl.h pulls in <KHR/khrplatform.h>, which a macOS host has only inside the
+  # Mesa source tree (Homebrew's khronos headers are keg-only).
+  if [ ! -f "${STAGE}/x11-include/KHR/khrplatform.h" ] && [ -f "$SRC/include/KHR/khrplatform.h" ]; then
+    cp -RL "$SRC/include/KHR" "${STAGE}/x11-include/"
+  fi
+  note "X11 from $hb_x11, GL from $hb_gl"
+  note "staged $(find -L "${STAGE}/x11-include" -type f | wc -l | tr -d ' ') headers"
 }
 
 # ---------------------------------------------------------------------------
@@ -494,8 +625,18 @@ LINK_WHOLE = {"src/gallium/frontends/glx/xlib/libxlib.a",
 
 
 def ninja_inputs(target):
-    out = subprocess.check_output(["ninja", "-C", BUILD, "-t", "query", target],
-                                  text=True)
+    try:
+        out = subprocess.check_output(["ninja", "-C", BUILD, "-t", "query", target],
+                                      text=True, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        # Not every archive exists in every host build: Mesa emits the SSE4.1
+        # variant of libmesa only when the *host* is x86_64, so an arm64 macOS
+        # host has no src/mesa/libmesa_sse41.a to ask about.  The variant is a
+        # runtime-dispatched optimisation of the same code, so dropping it
+        # costs the guest the SSE4.1 fast path and nothing else -- say so
+        # instead of dying on a target that was never built.
+        print(f"      no host target for {target} (host arch variant); skipped")
+        return []
     objs, in_inputs = [], False
     for line in out.splitlines()[1:]:
         s = line.strip()
@@ -548,6 +689,28 @@ DROP_EXACT = {
     "-DHAVE_ZLIB", "-DHAVE_COMPRESSION", "-DHAVE_ZSTD",
 }
 
+# Host *capability* macros that must not be inherited by the target: Meson
+# probes the machine it runs on, so an Apple host stamps BSD/macOS answers onto
+# a glibc target.  The glibc flavour below sets the GNU answer explicitly.
+# Present-or-absent matters (#ifdef), so these are dropped, not set to 0.
+HOST_CAP_DEFINES = {
+    "-DHAVE_BSD_QSORT_R", "-DHAVE_GNU_QSORT_R", "-DHAVE_QSORT_S",
+    "-DHAVE_LIBUNWIND",
+    # macOS has <xlocale.h>; glibc dropped it in 2.26, so the 2.31 pin does not
+    # (measured: strtod.c is the one TU that includes it, and it is the last
+    # failure standing between this host and a linked libGL).
+    "-DHAVE_XLOCALE_H",
+}
+
+# Architecture-specific TUs the *host* build emits for its own architecture.
+# Replaying them at another target is nonsense (measured: an arm64 host emits
+# blake3_neon.c and cache_ops_aarch64.c, and clang rejects them at x86_64 with
+# "<arm_neon.h> is intended only for ARM" / "invalid operand in inline asm").
+ARCH_TU_MARKERS = {
+    "x86_64": ("_neon.", "_aarch64.", "_arm.", "_sve."),
+    "aarch64": ("_avx", "_sse", "_clflush"),
+}
+
 
 def rewrite(args, kind):
     out, skip = [], False
@@ -565,6 +728,11 @@ def rewrite(args, kind):
         out.append(a)
 
     if ABI == "glibc":
+        # Host capability macros the Apple host answered for itself; the target
+        # is glibc/x86_64, so state the GNU answers instead of inheriting BSD's.
+        # (Mesa keys on #ifdef, hence drop-then-add.)
+        out = [a for a in out if a not in HOST_CAP_DEFINES]
+        HW_CAPS = ["-DHAVE_GNU_QSORT_R"]
         # The compat class is a glibc process: compile against *the pinned
         # glibc 2.31's* headers so every by-value libc type (pthread_mutex_t,
         # struct stat, FILE, ...) has the layout the runtime will use AND
@@ -574,7 +742,32 @@ def rewrite(args, kind):
         pre = shlex.split(E["GLIBC_INC"]) + [
                "--target=x86_64-linux-gnu", "-D__linux__=1",
                "-D_FILE_OFFSET_BITS=64", "-mno-red-zone",
+               # -fPIC is not optional here: the object goes into a shared DSO,
+               # and without it clang's default TLS model for a plain `__thread`
+               # becomes local-exec, whose R_X86_64_TPOFF32 relocation ld.lld
+               # rejects in `-shared` output ("cannot be used with -shared").
+               "-fPIC",
                "-fno-stack-protector", "-fno-exceptions", "-fno-rtti",
+               # Mesa's u_endian.h refuses to guess: it wants both macros from
+               # the build system, and falls back to <sys/param.h>/<endian.h>
+               # only where the host has them (its meson does not pass them for
+               # a native build).  Target endianness is a property of the ABI,
+               # not of the build host: x86_64-linux-gnu is little-endian.
+               "-DUTIL_ARCH_LITTLE_ENDIAN=1", "-DUTIL_ARCH_BIG_ENDIAN=0",
+               # glibc's <features.h> hides clock_gettime/PTHREAD_MUTEX_RECURSIVE
+               # behind _GNU_SOURCE when a strict language mode is requested
+               # (mesa is built with -std=c11 / --std=c++23); the Linux compute
+               # farm gets the same visible declarations from its own headers.
+               "-D_GNU_SOURCE=1",
+               # blake3's dispatch table references one implementation per
+               # instruction set that Mesa's *meson* selected -- and that
+               # selection follows the build host.  An arm64 host never compiles
+               # blake3_{avx2,avx512,sse2,sse41}.c, so an x86_64 target that
+               # still lists them ends up with 11 undefined symbols the guest
+               # cannot resolve (the script's own audit catches it).  Keep the
+               # portable path: same output, ~1 hash function slower.
+               "-DBLAKE3_NO_AVX512", "-DBLAKE3_NO_AVX2",
+               "-DBLAKE3_NO_SSE2", "-DBLAKE3_NO_SSE41",
                # Measured: this DSO is dlopen()ed, so its PT_TLS must fit in
                # glibc's 1664-byte static-TLS surplus (a DT_FLAGS STATIC_TLS
                # object that does not fit fails with "cannot allocate memory in
@@ -588,8 +781,11 @@ def rewrite(args, kind):
                "-Wno-error", "-g0"]
         if kind == "cpp_COMPILER":
             pre += ["-I", E["LIBCXX_INC"], "-nostdinc++", "--std=c++23"]
-        return pre + out
+        return pre + out + HW_CAPS
 
+    # Freestanding flavour: no libunwind, no libc qsort_r at all, so the host's
+    # capability answers are dropped here too (Mesa falls back to its own).
+    out = [a for a in out if a not in HOST_CAP_DEFINES]
     pre = [
         "--target=x86_64-none-elf", "-ffreestanding", "-nostdinc",
         # HobbyOS's compat class speaks the Linux ABI: Mesa's
@@ -597,6 +793,7 @@ def rewrite(args, kind):
         # __linux__, and os_misc.c/os_time.c hard-error without it.
         "-D__linux__=1", "-D__unix__=1",
         "-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE_SOURCE",
+        "-fPIC",
         "-mno-red-zone", "-fno-stack-protector", "-fno-exceptions", "-fno-rtti",
     ]
     if kind == "cpp_COMPILER":
@@ -619,16 +816,40 @@ def main():
     objs = []
     for a in ARCHIVES:
         objs += ninja_inputs(a)
+    table = parse_build_ninja()
     # The shared-library target's own frontend object is named directly on
     # Meson's link line (it defines xlib_create_screen and is in no archive).
-    objs.append("src/gallium/targets/libgl-xlib/libGL.so.1.5.0.p/xlib.c.o")
+    # Its object path carries the library's *file name*, which is platform
+    # dependent -- libGL.so.1.5.0.p/ on ELF hosts, libGL.1.dylib.p/ on macOS --
+    # so find it by the source it compiles rather than by soname.
+    frontend = [o for o, (src, _kind, _args) in table.items()
+                if src.replace("\\", "/").endswith("src/gallium/targets/libgl-xlib/xlib.c")]
+    if not frontend:
+        print("!! no compile command for the libGL frontend (xlib.c)")
+        sys.exit(1)
+    objs += frontend
     objs = sorted(set(objs))
-    table = parse_build_ninja()
 
     missing = [o for o in objs if o not in table]
     if missing:
         print("!! objects with no compile command:", missing[:5])
         sys.exit(1)
+
+    # Drop architecture-specific TUs the host build emitted for its own CPU.
+    # The target is fixed (x86_64); an arm64 host's blake3_neon.c and
+    # cache_ops_aarch64.c are runtime-dispatched variants of code that also has
+    # a portable path, so skipping them costs the guest an optimisation, not a
+    # function -- while compiling them fails outright ("<arm_neon.h> is intended
+    # only for ARM and AArch64 targets").
+    markers = ARCH_TU_MARKERS.get("x86_64", ())
+    dropped = []
+    for o in list(objs):
+        src = table[o][0].replace("\\", "/")
+        if any(m in src for m in markers):
+            objs.remove(o)
+            dropped.append(o)
+    for o in dropped:
+        print(f"      host-arch TU skipped: {o}")
 
     os.makedirs(os.path.join(OBJ, "ar"), exist_ok=True)
     os.makedirs(LOGDIR, exist_ok=True)
@@ -822,6 +1043,21 @@ link_libgl() {
   mapfile -t rest < "${OBJ}/ar/ORDER.txt"
   mapfile -t extra < "${OBJ}/ar/EXTRA.txt"
 
+  # ORDER.txt is Meson's static link order and names every archive in Mesa's
+  # list, including host-arch variants this host never built (an arm64 host has
+  # no libmesa_util_clflush.a -- those are x86 SIMD fast paths).  The portable
+  # objects behind them are in the tree, so skipping the missing archive costs
+  # an optimisation, not a symbol; ld.lld would otherwise stop the link.
+  local _have=()
+  for a in "${rest[@]}"; do
+    if [ -f "$a" ]; then
+      _have+=("$a")
+    else
+      echo "    skipping unbuilt archive: $(basename "$a")"
+    fi
+  done
+  rest=("${_have[@]}")
+
   # link_whole first (Meson: link_whole: [libxlib, libglapi_bridge]).
   local a
   for a in "${rest[@]}"; do
@@ -926,21 +1162,21 @@ link_libgl() {
   # pipeline would trip `set -o pipefail` on SIGPIPE).
   nm -D --defined-only "${LIBDIR}/libGL.so.1" > "${LIBDIR}/exports.txt"
   nm -D -u "${LIBDIR}/libGL.so.1" > "${LIBDIR}/undefined.txt"
-  needed=$(readelf -d "${LIBDIR}/libGL.so.1" | grep -c NEEDED || true)
+  needed=$("$READELF" -d "${LIBDIR}/libGL.so.1" | grep -c NEEDED || true)
   exports=$(awk '$2 ~ /^[TWiDB]$/' "${LIBDIR}/exports.txt" | wc -l)
   undef=$(wc -l < "${LIBDIR}/undefined.txt")
   note "DT_NEEDED:   ${needed}  (must be 0: the compat loader resolves libc from its own scope)"
   note "exports:     ${exports}"
   note "undefined:   ${undef} (all from glibc/libX11/libgcc_s/ld.so - see the report)"
-  note "size:        $(stat -c%s "${LIBDIR}/libGL.so.1") bytes stripped"
+  note "size:        $(size_of "${LIBDIR}/libGL.so.1") bytes stripped"
   [ "$needed" = 0 ] || die "libGL.so.1 grew a DT_NEEDED"
   # A dlopen()ed DSO that asks for static TLS must fit glibc's 1664-byte
   # surplus (measured: 4400 bytes -> "cannot allocate memory in static TLS
   # block"; dynamic TLS for that block then hung in the guest's first dispatch
   # call).  So: either no STATIC_TLS at all, or a PT_TLS under the surplus.
   local tls_bytes tls_flags
-  tls_flags=$(readelf -d "${LIBDIR}/libGL.so.1" | grep -c STATIC_TLS || true)
-  tls_bytes=$(readelf -lW "${LIBDIR}/libGL.so.1" | awk '/^  TLS/{print $6}')
+  tls_flags=$("$READELF" -d "${LIBDIR}/libGL.so.1" | grep -c STATIC_TLS || true)
+  tls_bytes=$("$READELF" -lW "${LIBDIR}/libGL.so.1" | awk '/^  TLS/{print $6}')
   tls_bytes=$(( ${tls_bytes:-0} ))     # hex from readelf; bash arithmetic is fine
   if [ "${tls_flags:-0}" != 0 ]; then
     [ "${tls_bytes:-999999}" -le 1664 ] \
@@ -959,7 +1195,7 @@ link_libgl() {
   # (see the -z nodelete note in link_libgl): without DF_1_NODELETE a client's
   # dlclose() unmaps the text, and its exit() then jumps into the hole.
   local nodelete
-  nodelete=$(readelf -d "${LIBDIR}/libGL.so.1" | grep -c NODELETE || true)
+  nodelete=$("$READELF" -d "${LIBDIR}/libGL.so.1" | grep -c NODELETE || true)
   [ "${nodelete:-0}" != 0 ] \
     || die "libGL.so.1 lost DF_1_NODELETE: a client that dlclose()s it will crash in exit()"
   note "df_1:        NODELETE (dlclose keeps the DSO mapped; its atexit() handlers stay valid)"

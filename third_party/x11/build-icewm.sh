@@ -109,7 +109,7 @@ _iw_build() {
     n="${t##*:}"
     # The ELF (symbols) stays in obj/: bin/ is copied wholesale to the disk.
     llvm-objcopy -O binary "$b/${t%%:*}" "$HB_BIN_DIR/$n.BIN"
-    hb_log "icewm: $n.BIN ($(stat -c %s "$HB_BIN_DIR/$n.BIN") bytes)"
+    hb_log "icewm: $n.BIN ($(hb_size_of "$HB_BIN_DIR/$n.BIN") bytes)"
   done
   printf '%s\n' "$key" > "$stamp"
 }
@@ -161,7 +161,7 @@ _iw_clients() {
     # shellcheck disable=SC2046
     hb_run clients hb_link_flat "$o/$bin.BIN" "$o/$app.o" $("$PKG_CONFIG" --libs x11)
     cp "$o/$bin.BIN" "$HB_BIN_DIR/$bin.BIN"
-    hb_log "clients: $bin.BIN ($(stat -c %s "$HB_BIN_DIR/$bin.BIN") bytes)"
+    hb_log "clients: $bin.BIN ($(hb_size_of "$HB_BIN_DIR/$bin.BIN") bytes)"
   done
 }
 
@@ -186,7 +186,7 @@ _iw_hbhost() {
   # shellcheck disable=SC2046,SC2086
   hb_run hbhost hb_link_flat "$o/HBHOST.BIN" $objs $("$PKG_CONFIG" --libs x11)
   cp "$o/HBHOST.BIN" "$HB_BIN_DIR/HBHOST.BIN"
-  hb_log "hbhost: HBHOST.BIN ($(stat -c %s "$HB_BIN_DIR/HBHOST.BIN") bytes)"
+  hb_log "hbhost: HBHOST.BIN ($(hb_size_of "$HB_BIN_DIR/HBHOST.BIN") bytes)"
 }
 
 # Host golden test of icewm/compat (fnmatch/wordexp/glob vs glibc).

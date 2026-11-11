@@ -280,7 +280,7 @@ void spinlock_init(spinlock_t *lock) {
   lock->locked = 0;
 }
 
-void spinlock_acquire(spinlock_t *lock) {
+static void spin_acquire_raw(spinlock_t *lock) {
 #ifdef KERNEL_MODE_UNIT_TEST
   lockdbg_precheck(lock); /* SEC-OBS-B: report inversion before we spin */
 #endif
@@ -292,7 +292,11 @@ void spinlock_acquire(spinlock_t *lock) {
     uint64_t spins = 0;
     while (__atomic_test_and_set(&lock->locked, __ATOMIC_ACQUIRE)) {
       __builtin_ia32_pause();
-      if ((++spins & 0x3FFFFFFull) == 0) {
+      /* DIAG (temporary): 67M pause iterations is minutes under TCG, so a real
+       * stall is reported by STALLBREAK-DIAG first with owner_pid=-1 and no
+       * owner PC.  16M still cannot be reached by a lock held across one
+       * legitimate device read, but does land inside a genuine wedge. */
+      if ((++spins & 0xFFFFFFull) == 0) {
         /* ~every 67M pause iterations.  Shout, lock-free, so a total
            IRQs-off pileup is still visible on the console. */
         scream_dec("\n[LOCKFOREVER] cpu=", cpu);
@@ -316,6 +320,21 @@ void spinlock_acquire(spinlock_t *lock) {
             if (hb != 0) hb_age = (int)(timer_get_ms() - hb);
           }
           scream_dec(" owner_hb_age=", hb_age);
+          /* Name what the OWNER is holding.  A wedge where the owner is itself
+           * inside spinlock_acquire is a lock-order inversion, and the second
+           * lock is only visible in the holder's held-lock stack.  Bounded to
+           * the first three reports per boot so a flood cannot bury the log. */
+          static int held_reports;
+          if (own_cpu >= 1 && own_cpu - 1 < MAX_CPUS && held_reports < 3) {
+            uint32_t oc = own_cpu - 1;
+            uint32_t d = held_lock_depth[oc];
+            held_reports++;
+            scream_dec(" held_n=", (int)d);
+            for (uint32_t i = 0; i < d && i < HELD_LOCK_SLOTS; i++) {
+              scream_hex(" h", (uint64_t)held_locks[oc][i]);
+              scream_hex("@", (uint64_t)held_lock_pc[oc][i]);
+            }
+          }
         }
         scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
@@ -422,6 +441,11 @@ void spinlock_acquire(spinlock_t *lock) {
      any use of the protected data, so a fatal path can ask "is this mine to
      give back?" without guessing. */
   lock->owner = get_cpuid() + 1;
+  /* Lock-scope audit (src/kernel/lockscale.c): the always-on view of which
+   * registered locks this CPU holds, independent of the x64-only probe tables
+   * above.  Kept separate on purpose -- the audit must work identically on
+   * both arches. */
+  lock_audit_held_push(lock, (uint64_t)__builtin_return_address(0));
   if (lock == &proc_lock) {
     proclock_hold_note(1, (uint64_t)__builtin_return_address(0));
     /* GB-235: the acquire's caller-caller.  The note above records the direct
@@ -475,10 +499,21 @@ void lockdbg_irq_restore(uint64_t flags) {
       : "memory");
 }
 
-void spinlock_release(spinlock_t *lock) {
+/* Plain acquire: takes a preempt reference so the tick cannot switch this
+ * thread out while a lock it holds is still held (see lock.h, and the ARM twin).
+ * spinlock_acquire_irqsave() deliberately does NOT count: proc_lock is held
+ * ACROSS the context switch by design, so counting it would leak a permanent
+ * preempt-disabled state into whatever that switch resumed. */
+void spinlock_acquire(spinlock_t *lock) {
+  kernel_preempt_disable();
+  spin_acquire_raw(lock);
+}
+
+static void spin_release_raw(spinlock_t *lock) {
 #ifdef KERNEL_MODE_UNIT_TEST
   lockdbg_note_releasing(lock); /* SEC-OBS-B: pop before the HW clear */
 #endif
+  lock_audit_held_pop(lock); /* lock-scope audit: no longer held */
   /* GB-057: pop this CPU's held-lock stack (observation only).  Pop by
      searching for the lock rather than assuming strict LIFO: a fatal path may
      release out of order, and a table that lies is worse than no table. */
@@ -507,6 +542,12 @@ void spinlock_release(spinlock_t *lock) {
   __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
   if (lock == &proc_lock)
     proclock_hold_note(2, (uint64_t)__builtin_return_address(0));
+}
+
+/* Plain release: pairs with spinlock_acquire()'s preempt reference. */
+void spinlock_release(spinlock_t *lock) {
+  spin_release_raw(lock);
+  kernel_preempt_enable();
 }
 
 /* GB-060: release a lock ONLY if this CPU is recorded as its owner.
@@ -548,7 +589,10 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
       :
       : "memory"
   );
-  spinlock_acquire(lock);
+  /* Lock-scope audit: RFLAGS bit 9 is IF (1 = interrupts enabled). */
+  lock_audit_irqoff_begin((flags & 0x200) != 0);
+  spin_acquire_raw(lock); /* no preempt reference (see spinlock_acquire) */
+  lock_audit_note_irqsave_acquire(lock, (uint64_t)__builtin_return_address(0));
   return flags;
 }
 
@@ -644,7 +688,10 @@ void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
   if (rs_snap)
     relsnap("entry", (uint64_t)lock, rs_slot, rs_rbp, rs_rsp);
 #endif
-  spinlock_release(lock);
+  /* Close the IRQ-off window BEFORE the release pops the held-lock stack, so
+   * the blame names the lock that was actually held (see the ARM twin). */
+  lock_audit_irqoff_end((flags & 0x200) != 0);
+  spin_release_raw(lock); /* pairs with the raw acquire in irqsave */
   __asm__ volatile(
       "push %0\n"
       "popfq\n"

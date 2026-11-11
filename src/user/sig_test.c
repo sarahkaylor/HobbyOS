@@ -419,10 +419,20 @@ int main(void) {
   /* Illegal fdmap: dst out of range -> -1/EBADF, atomic (no child).
      Under the wave slot-pressure window the loader can bail with a
      starve error BEFORE argument validation, so the errno contract is
-     only testable with table headroom. */
+     only testable with table headroom.
+
+     "Out of range" must not be restated as a number either: this check used
+     dst = 99, which was illegal while the kernel's table was 64 fds and became
+     perfectly legal when MAX_OPEN_FDS went to 256 (L55) -- the check then
+     spawned a child and read the returned pid as a failure.  MAX_OPEN_FDS is a
+     kernel constant (src/include/process.h) with no user-space query, and its
+     header cannot be included here (it redefines struct sys_procinfo and
+     get_cpuid against libc.h), so the probe uses a dst no table can hold: the
+     kernel's rejection is the one comparison `dst >= MAX_OPEN_FDS`, and this
+     value is on the rejecting side of it for any table size. */
   int badmap[2][2];
   badmap[0][0] = keepfd;
-  badmap[0][1] = 99;
+  badmap[0][1] = 1 << 20; /* far past any MAX_OPEN_FDS */
   badmap[1][0] = keepfd;
   badmap[1][1] = 8;
   errno = 0;

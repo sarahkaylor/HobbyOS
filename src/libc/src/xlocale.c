@@ -67,6 +67,22 @@
 #define towlower_l hb_towlower_l
 #endif
 
+/* The handle type differs per build: HobbyOS's own `locale_t` IS our struct,
+   while a HOST_TEST build uses the host's <locale.h>, where locale_t names a
+   completely different object (glibc: struct __locale_struct *, macOS:
+   struct _locale_t *).  This implementation only ever stores its own tiny
+   object behind the handle and never dereferences the host's, so the two
+   crossings below need an explicit conversion.  Written out because on gcc 14+
+   the implicit one is a hard error ("incompatible return type locale_t"), which
+   is what failed linux-ci's host tier; clang only warned. */
+#ifdef HOST_TEST
+#define HB_LOCALE_HANDLE(p) ((locale_t)(void *)(p))
+#define HB_LOCALE_OBJECT(p) ((struct __hb_locale *)(void *)(p))
+#else
+#define HB_LOCALE_HANDLE(p) (p)
+#define HB_LOCALE_OBJECT(p) (p)
+#endif
+
 struct __hb_locale {
   unsigned long __category_mask;
 };
@@ -106,14 +122,14 @@ locale_t newlocale(int category_mask, const char *locale, locale_t base) {
     return NULL;
   }
   loc->__category_mask = (unsigned long)category_mask;
-  return loc;
+  return HB_LOCALE_HANDLE(loc);
 }
 
 locale_t duplocale(locale_t loc) {
   struct __hb_locale *copy;
 
   if (loc == LC_GLOBAL_LOCALE)
-    loc = &c_locale_object;
+    loc = HB_LOCALE_HANDLE(&c_locale_object);
   if (loc == NULL) {
     errno = EINVAL;
     return NULL;
@@ -130,7 +146,7 @@ locale_t duplocale(locale_t loc) {
 #else
   *copy = *loc;
 #endif
-  return copy;
+  return HB_LOCALE_HANDLE(copy);
 }
 
 void freelocale(locale_t loc) {

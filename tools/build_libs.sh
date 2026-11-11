@@ -476,7 +476,7 @@ build_libc() {
   # --- guard: a DSO must not contain a program entry point
   local bad=""
   for o in "${objs[@]}"; do
-    if "$NM" --defined-only "$o" 2>/dev/null | awk '{print $NF}' | grep -qx '_start'; then
+    if grep -qx '_start' <<<"$("$NM" --defined-only "$o" 2>/dev/null | awk '{print $NF}')"; then
       bad="$bad ${o#$OBJ_PIC/}"
     fi
   done
@@ -529,7 +529,7 @@ emit_evidence() {
   dyn_total=$("$READELF" --dyn-syms -W "$so" | grep -cE '^ +[0-9]+: [0-9a-f]+' || true)
   undefs=$("$READELF" --dyn-syms -W "$so" | awk '$7=="UND" {print $8}' | grep -v '^$' | LC_ALL=C sort -u)
   soname=$("$READELF" -d -W "$so" | sed -n 's/.*SONAME.*\[\(.*\)\].*/\1/p')
-  if "$READELF" -d -W "$so" | grep -q 'TEXTREL'; then textrel=YES; else textrel=no; fi
+  if grep -q 'TEXTREL' <<<"$("$READELF" -d -W "$so")"; then textrel=YES; else textrel=no; fi
 
   {
     echo "# libc.so evidence — arch=$arch target=$TARGET"
@@ -776,7 +776,13 @@ build_interp() {
   # description: lld labels a -pie output "DYN (Position-Independent
   # Executable file)" and a -shared one "DYN (Shared object file)", and the
   # interpreter is legitimately either.
-  "$READELF" -h -W "$interp" | grep -q 'Type:[[:space:]]*DYN' || { say "$arch: FAIL LDHOBBY.SO is not ET_DYN"; rc=1; }
+  # Herestring, not a pipe: same trap as line ~632.  `grep -q` exits on the
+  # match and readelf then dies of SIGPIPE, which `set -o pipefail` reports as
+  # 141 -- so this assert failed on a correctly linked ET_DYN interpreter
+  # (measured on macOS under make, while passing when run by hand: it is a race
+  # on readelf's exit, not on the file).
+  grep -q 'Type:[[:space:]]*DYN' <<<"$("$READELF" -h -W "$interp")" \
+    || { say "$arch: FAIL LDHOBBY.SO is not ET_DYN"; rc=1; }
   [ "$rc" -eq 0 ] || die "$arch: LDHOBBY.SO contract violated"
 
   {

@@ -102,15 +102,17 @@ void fs_init(void) {
   for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
     global_file_table[i].type = FILE_TYPE_EMPTY;
     global_file_table[i].ref_count = 0;
-    spinlock_init(&global_file_table[i].lock);
-#ifdef KERNEL_MODE_UNIT_TEST
-    /* SEC-OBS-B: register the documented order (see lock.h) for the debug
-     * tracker.  file_locks_lock stays unregistered: it is a leaf taken only
-     * after f->lock drops, never nesting anything above. */
-    lockdbg_register(&fs_lock, "fs_lock", LOCK_RANK_FS);
-    lockdbg_register(&global_file_table[i].lock, "f->lock", LOCK_RANK_FILE);
-#endif
+    ylock_init(&global_file_table[i].lock);
+    /* Registration is ALWAYS ON (not unit-test only): the class is what tells
+     * the audit that an irqsave acquisition of this lock is the defect being
+     * removed, and the rank is what the debug tracker orders.  Registering
+     * only in test builds is how the first version lost both properties.
+     * file_locks_lock stays unregistered: it is a leaf taken only after
+     * f->lock drops, never nesting anything above. */
+    lock_register(&global_file_table[i].lock, "f->lock", LOCK_RANK_FILE,
+                  LOCK_CLASS_PROCESS);
   }
+  lock_register(&fs_lock, "fs_lock", LOCK_RANK_FS, LOCK_CLASS_PROCESS);
 }
 
 /**
@@ -120,7 +122,7 @@ void fs_init(void) {
  *   Pointer to the allocated struct file, or 0 if no slots are available.
  */
 static struct file *file_alloc(void) {
-  uint64_t flags = spinlock_acquire_irqsave(&fs_lock);
+  spinlock_acquire(&fs_lock);
   for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
     if (global_file_table[i].type == FILE_TYPE_EMPTY) {
       global_file_table[i].ref_count = 1;
@@ -131,11 +133,11 @@ static struct file *file_alloc(void) {
          invariants in file_read/file_write/file_close/stat, so an abandoned
          slot can only ever halt loudly, never corrupt. */
       global_file_table[i].type = FILE_TYPE_UNINIT;
-      spinlock_release_irqrestore(&fs_lock, flags);
+      spinlock_release(&fs_lock);
       return &global_file_table[i];
     }
   }
-  spinlock_release_irqrestore(&fs_lock, flags);
+  spinlock_release(&fs_lock);
   return 0;
 }
 
@@ -1361,9 +1363,9 @@ int file_ftruncate(struct process *p, int fd, int64_t length) {
   }
   if (f->type != FILE_TYPE_FAT16) return -EINVAL;
   if (length < 0 || length > 0xFFFFFFFFLL) return -EINVAL;
-  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  ylock_acquire(&f->lock);
   int r = fat16_truncate_to(f, (uint32_t)length);
-  spinlock_release_irqrestore(&f->lock, flags);
+  ylock_release(&f->lock);
   return r == 0 ? 0 : -EIO;
 }
 
@@ -1884,14 +1886,14 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   }
   if (newpos < 0) { *errp = EINVAL; return -1; }
 
-  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  ylock_acquire(&f->lock);
   if (f->type == FILE_TYPE_FAT16)
     f->fat16.cursor = (uint32_t)newpos;
   else if (f->type == FILE_TYPE_FAT16DIR || f->type == FILE_TYPE_PROCFD)
     f->fat16.cursor = (uint32_t)newpos;
   else
     f->nfs.cursor = (uint32_t)newpos;
-  spinlock_release_irqrestore(&f->lock, flags);
+  ylock_release(&f->lock);
   *errp = 0;
   return newpos;
 }
@@ -2488,7 +2490,7 @@ int file_close(struct process *cur, int fd) {
   struct usock *uu = 0;
   int bend = 0;
 
-  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  ylock_acquire(&f->lock);
 
   if (f->type == FILE_TYPE_PIPE) {
     pp = f->pipe.ptr;
@@ -2516,7 +2518,7 @@ int file_close(struct process *cur, int fd) {
     /* FILE_TYPE_NFS keeps no backend state: nothing to release. */
     f->type = FILE_TYPE_EMPTY;
   }
-  spinlock_release_irqrestore(&f->lock, flags);
+  ylock_release(&f->lock);
 
   if (pp) pipe_close(pp, bend);
   else if (uu) usock_close(uu, bend);
@@ -2548,7 +2550,7 @@ int file_dup(struct process *cur, int fd) {
     }
   }
   if (newfd < 0) return -EMFILE;
-  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  ylock_acquire(&f->lock);
   f->ref_count++;
   if (f->type == FILE_TYPE_MEMFD)
     vm_object_ref(f->memfd.obj); /* one more instance ref (S4) */
@@ -2558,7 +2560,7 @@ int file_dup(struct process *cur, int fd) {
         or closing the duplicate makes readers see EOF while refs remain */
   else if (f->type == FILE_TYPE_UNIXSOCK)
     usock_reopen(f->usock.ptr, f->usock.end); /* P4: same ref discipline */
-  spinlock_release_irqrestore(&f->lock, flags);
+  ylock_release(&f->lock);
   cur->open_fds[newfd] = g_fd;
   fd_cloexec_clear(cur->fd_cloexec, newfd); /* P5 (D3.2): dup clears CLOEXEC */
   cur->num_open_fds++;
@@ -2582,7 +2584,7 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
     int r = file_close(cur, newfd);
     if (r != 0) return -EBADF;
   }
-  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  ylock_acquire(&f->lock);
   f->ref_count++;
   if (f->type == FILE_TYPE_MEMFD)
     vm_object_ref(f->memfd.obj); /* one more instance ref (S4) */
@@ -2591,7 +2593,7 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
         end's per-fd count aligned with ref_count */
   else if (f->type == FILE_TYPE_UNIXSOCK)
     usock_reopen(f->usock.ptr, f->usock.end); /* P4 */
-  spinlock_release_irqrestore(&f->lock, flags);
+  ylock_release(&f->lock);
   cur->open_fds[newfd] = g_fd;
   fd_cloexec_clear(cur->fd_cloexec, newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
   fd_ev_note(FDEV_DUP2, cur, newfd, g_fd, f->path);
@@ -2611,9 +2613,9 @@ void fs_close_global(int g_fd) {
   struct usock *uu = 0;
   int bend = 0;
 
-  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  ylock_acquire(&f->lock);
   if (f->type == FILE_TYPE_EMPTY) {
-    spinlock_release_irqrestore(&f->lock, flags);
+    ylock_release(&f->lock);
     return;
   }
 
@@ -2636,7 +2638,7 @@ void fs_close_global(int g_fd) {
     }
     f->type = FILE_TYPE_EMPTY;
   }
-  spinlock_release_irqrestore(&f->lock, flags);
+  ylock_release(&f->lock);
 
   if (pp) pipe_close(pp, bend);
   else if (uu) usock_close(uu, bend);
@@ -3668,7 +3670,7 @@ int file_memfd_seals(struct process *p, int fd, int cmd, int arg) {
 void fs_reopen(int global_fd) {
   if (global_fd < 0 || global_fd >= MAX_GLOBAL_FILES) return;
   struct file *f = &global_file_table[global_fd];
-  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  ylock_acquire(&f->lock);
   if (f->type != FILE_TYPE_EMPTY) {
     f->ref_count++;
     if (f->type == FILE_TYPE_MEMFD)
@@ -3679,7 +3681,7 @@ void fs_reopen(int global_fd) {
       usock_reopen(f->usock.ptr, f->usock.end); /* P4: fork's fd copies */
     }
   }
-  spinlock_release_irqrestore(&f->lock, flags);
+  ylock_release(&f->lock);
 }
 
 int file_mkdir(struct process *cur, const char *path) {
@@ -3790,9 +3792,9 @@ int file_gfd_is_ipc_endpoint(int gfd) {
 int fs_msg_ref_gfd(int gfd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -EBADF;
   struct file *f = &global_file_table[gfd];
-  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  ylock_acquire(&f->lock);
   if (f->type == FILE_TYPE_EMPTY) {
-    spinlock_release_irqrestore(&f->lock, flags);
+    ylock_release(&f->lock);
     return -EBADF;
   }
   f->ref_count++;
@@ -3801,7 +3803,7 @@ int fs_msg_ref_gfd(int gfd) {
   } else if (f->type == FILE_TYPE_UNIXSOCK) {
     usock_reopen(f->usock.ptr, f->usock.end);
   }
-  spinlock_release_irqrestore(&f->lock, flags);
+  ylock_release(&f->lock);
   return 0;
 }
 

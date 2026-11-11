@@ -207,8 +207,17 @@ static enum strtol_error xstrtoul (const char *s, char **ptr, int strtol_base, u
 
 #define N_CHARS (UCHAR_MAX + 1)
 
-/* A pointer to a filtering function.  */
-typedef size_t (*Filter) (/* unsigned char *, size_t, Filter */);
+/* A pointer to a filtering function.
+ *
+ * The GNU original leaves the parameter list EMPTY, which was "unprototyped"
+ * in C89 and became "(void)" in C23: with a C23-default compiler (gcc 15 on
+ * linuxci, and -std=c23 anywhere) this type takes no arguments, so every
+ * `(*reader)(buf, size, NULL)` is "too many arguments to function" and every
+ * call site mismatches.  Spell the parameters out.  The third one is the
+ * original's self-referential placeholder; every caller passes NULL and both
+ * readers only assert on it, so it is declared `void *` (spelling the same
+ * Filter type here would need a forward-named struct for no gain). */
+typedef size_t (*Filter) (unsigned char *buf, size_t size, void *not_used);
 
 /* Convert from character C to its index in the collating
    sequence array.  Just cast to an unsigned int to avoid
@@ -1693,7 +1702,7 @@ static void squeeze_filter (unsigned char *buf, size_t size, Filter reader) {
    in the delete set, and return the number of characters saved
    or 0 upon EOF.  */
 
-static size_t read_and_delete (unsigned char *buf, size_t size, Filter not_used) {
+static size_t read_and_delete (unsigned char *buf, size_t size, void *not_used) {
   size_t n_saved;
   static int hit_eof = 0;
 
@@ -1737,7 +1746,7 @@ static size_t read_and_delete (unsigned char *buf, size_t size, Filter not_used)
    perform the in-place and one-to-one mapping specified by the global
    array `xlate'.  Return the number of characters read, or 0 upon EOF.  */
 
-static size_t read_and_xlate (unsigned char *buf, size_t size, Filter not_used) {
+static size_t read_and_xlate (unsigned char *buf, size_t size, void *not_used) {
   ssize_t chars_read = 0;
   static int hit_eof = 0;
   size_t i;

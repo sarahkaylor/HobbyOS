@@ -41,14 +41,27 @@ XCOMPAT_OBJ   = obj/xcompat
 # it may call into libc for anything it does not inline (xrt.c supplies the
 # byte primitives it emits anyway, so the DSO ends up with zero undefined
 # symbols -- see the comment at the top of xrt.c).
-XCOMPAT_CFLAGS = -O2 -Wall -Wextra -Wno-unused-parameter -std=c11 -ffreestanding
+# The compat ABI is x86_64 SysV ELF no matter what the build host is, so the
+# triple is stated rather than inherited: on a macOS/arm64 host the default is
+# an arm64 Darwin target, which compiles arm64 objects and then hands them to
+# ld64.lld ("unknown argument '-z'").
+XCOMPAT_TARGET = --target=x86_64-linux-gnu
+XCOMPAT_CFLAGS = -O2 -Wall -Wextra -Wno-unused-parameter -std=c11 -ffreestanding \
+                 $(XCOMPAT_TARGET)
 # A/B knob for the L34 event-display stamp: `make XCOMPAT_NO_EVENT_DISPLAY=1
 # xcompat_dsos` builds the pre-fix behaviour so m3_window_probe's regression
 # row can be shown failing on the old bytes and passing on the new ones.
 XCOMPAT_NOSTAMP_DEF = $(if $(XCOMPAT_NO_EVENT_DISPLAY),-DXCOMPAT_NO_EVENT_DISPLAY,)
 XCOMPAT_DSOFLAGS = -shared -fPIC -fvisibility=hidden -nostdlib \
                    -fno-stack-protector -fno-asynchronous-unwind-tables \
-                   -Wl,-z,now -Wl,--hash-style=gnu
+                   -Wl,-z,now -Wl,--hash-style=gnu \
+                   $(XCOMPAT_TARGET) -fuse-ld=lld
+
+# -fuse-ld=lld is not decoration: these are x86_64 SysV ELF DSOs built from a
+# host that may be macOS, where clang's default linker is Apple's ld -- which
+# answers "-z now" with "ld: unknown options: -z --hash-style=gnu -soname" and
+# links nothing.  lld is already a hard requirement of this tree (the kernel is
+# linked with it), so naming it here costs a Linux host nothing.
 
 XCOMPAT_LIBX11    = $(XCOMPAT_OBJ)/libX11.so.6
 XCOMPAT_LIBASOUND = $(XCOMPAT_OBJ)/libasound.so.2

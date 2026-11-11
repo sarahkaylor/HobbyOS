@@ -25,7 +25,10 @@
 #define HEX_ROW_BYTES     16   /* Bytes per dump row                    */
 #define HEX_VIS_ROWS      18   /* Dump rows visible on one screen       */
 #define HEX_PAGE_ROWS     16   /* Rows moved by Left/Right (page step)  */
-#define HEX_NAME_MAX      64   /* Filename buffer size (incl. NUL)      */
+#define HEX_NAME_MAX     256   /* Filename buffer size (incl. NUL).  64 was
+                                * smaller than a real macOS temp path
+                                * (/var/folders/.../T/ = 67 chars measured),
+                                * so the header showed a truncated name. */
 #define HEX_ROW_LINE      96   /* One formatted row (77 chars) + NUL    */
 #define HEX_SCREEN_MAX  2048   /* Window text buffer size               */
 
