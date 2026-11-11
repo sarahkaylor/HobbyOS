@@ -730,6 +730,16 @@ void ylock_acquire(ylock_t *lock) {
         kl_s(&ko, " pcb_live=");
         kl_i(&ko, (lock->owner_pid > 0 &&
                    process_get_pcb((int)lock->owner_pid) != 0) ? 1 : 0);
+        /* WHERE the holder is: an alive owner that never releases is either
+         * inside a syscall (last_syscall names it) or not scheduled at all. */
+        struct process *op = lock->owner_pid > 0
+                                 ? process_get_pcb((int)lock->owner_pid) : 0;
+        if (op) {
+          kl_s(&ko, " ost=");
+          kl_i(&ko, (long)op->state);
+          kl_s(&ko, " osys=");
+          kl_i(&ko, (long)op->last_syscall);
+        }
         kl_c(&ko, '\n');
         kl_emit(&ko);
       }
