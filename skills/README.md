@@ -19,6 +19,7 @@ remote GPU-over-RDMA setup.
 | [`hobbyos-graphics-acceleration`](hobbyos-graphics-acceleration/SKILL.md) | GPU acceleration program: virtio-gpu flush/FB path, `SYS_FLUSH_FB_RECTS` (89), `virtio_gpu_flush_rects`, driver split, `GFXBENCH.BIN`, QEMU GL launchers. See `references/graphics-pipe-map.md`. |
 | [`hobbyos-port-planning`](hobbyos-port-planning/SKILL.md) | Plan docs (browser.md / gnu-ports.md house style): survey→audit→pin-provenance→decompose; multi-lane execution design, frozen interfaces, gates. See `templates/plan-doc.md`. |
 | [`hobbyos-proxmox-gpu`](hobbyos-proxmox-gpu/SKILL.md) | Remote Intel/GPU-over-RDMA deploy + serial/screenshot debugging on `192.168.10.174`; current Xid-79/MSI-X blocker. |
+| [`hobbyos-x64-remote-build`](hobbyos-x64-remote-build/SKILL.md) | Trustworthy x86_64 builds from a macOS box: tar → scp to `linuxci` (192.168.0.25) → `make ARCH=intel disk.img` → pull back → verify ELF arch → KVM boot check. |
 
 ## Deploy to local Hermes
 
