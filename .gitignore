@@ -26,6 +26,11 @@ build.log
 # Disk images
 disk.img
 guest.img
+
+# Local x64 remote-build artifacts (skills/hobbyos-x64-remote-build): tarballs,
+# pulled hobbyos.elf/disk.img/boot.log and manifests.  Never ship these in the
+# next tarball.
+/build/
 # lane-run evidence (logs/screenshots/copy-backs; regenerable)
 evidence/
 
