@@ -7,6 +7,12 @@
 #   bash tools/rw/mkdisk-rimworld.sh --no-build      # reuse an existing disk.img
 #   bash tools/rw/mkdisk-rimworld.sh --payload /path/to/RimWorld
 #
+# BOOT-WHILE-WRITING: never start QEMU against $IMG while this script is still
+# staging.  The guest then reads a half-written FAT and behaves like a machine
+# with a broken filesystem: measured, a run that normally reaches Unity engine
+# init in 131 s showed no engine init in 13 minutes, and disk.img was absent to
+# `ls` mid-run because the write was still in flight.  Wait for EXIT=0, then boot.
+#
 # Why a script and not a Makefile rule: the game is third-party software. It must
 # never enter this repository, never be committed, and never be required for a
 # normal build -- but staging it is a real build step with a payload to locate, an
