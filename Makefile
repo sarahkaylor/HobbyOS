@@ -4000,6 +4000,22 @@ VENDOR_HOST_CXXFLAGS = -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ \
   -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES \
   -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY
 RTTI_TEST = rtti_test_host
+# The link must NOT drag in a host C++ standard library: the four vendored
+# objects + the shim ARE the runtime under test, so ldd() has to show libc only.
+# clang spells that -nostdlib++; gcc does not know the flag and needs
+# -nodefaultlibs plus the C runtime the driver would otherwise add.  Ask the
+# compiler instead of assuming: HOST_CC is clang on the macOS dev box and gcc's
+# `cc` on linuxci, where the hard-coded flag failed the whole host tier
+# ("cc: error: unrecognized command-line option '-nostdlib++'").  Measured on
+# linuxci/gcc 15: the fallback links, runs 17/17, ldd = libc only.
+HOST_RTTI_HAS_NOSTDLIBPP := $(shell $(HOST_CC) -nostdlib++ -x c++ -E - </dev/null >/dev/null 2>&1 && echo yes)
+ifeq ($(HOST_RTTI_HAS_NOSTDLIBPP),yes)
+HOST_RTTI_NOSTDCPP := -nostdlib++
+HOST_RTTI_TRAILING_LIBS :=
+else
+HOST_RTTI_NOSTDCPP := -nodefaultlibs
+HOST_RTTI_TRAILING_LIBS := -lc -lgcc
+endif
 # GB-157: the TU includes <typeinfo> from the fetched libc++ tree; without this
 # prerequisite a fresh worktree compiles it before any fetch guard can run and
 # dies with "'typeinfo' file not found" (the same guard cxx_t.o carries at :1145).
@@ -4019,7 +4035,7 @@ obj/host_rtti_test_support.o: src/host/rtti_test_support.cpp
 	@mkdir -p obj
 	$(HOST_CC) -Wall -Wextra -g $(VENDOR_HOST_CXXFLAGS) -c $< -o $@
 $(RTTI_TEST): obj/host_rtti_test.o obj/host_rtti_private_typeinfo.o obj/host_rtti_stdlib_typeinfo.o obj/host_rtti_stdlib_exception.o obj/host_rtti_test_support.o
-	$(HOST_CC) -nostdlib++ -o $@ $^
+	$(HOST_CC) $(HOST_RTTI_NOSTDCPP) -o $@ $^ $(HOST_RTTI_TRAILING_LIBS)
 
 # WM damage bookkeeping: line-level window repair + the base (damage) clip
 # (window.c + graphics.c are included into the test's single TU).
