@@ -646,6 +646,7 @@ class L86:
         if timeout is None:
             timeout = int(os.environ.get("RW_L86_MENU_TIMEOUT", "1500"))
         end = time.time() + timeout
+        t_start = time.time()
         png = None
         words = []
         dismissed = 0
@@ -671,6 +672,24 @@ class L86:
                     dismissed += 1
                     self.emit({"ev": "modal_seen", "stage": "menu",
                                "text": txt[:200], "note": "dismissing"})
+                    self.dismiss_modal(png)
+                    continue
+            # The Steam modal's two buttons are readable but its *body* is not:
+            # on this tree the label inside the dialog is never drawn (measured
+            # on the desktop lane at 1280x720: body pixels all black, buttons
+            # `Ignore`/`Quit` legible).  OCR therefore finds no "Ignore" while a
+            # dialog is plainly on screen, and this loop sat on it until the
+            # budget ran out.  A brown button pair in the client crop is the
+            # dialog's own signature -- the main menu has no brown buttons at
+            # all -- so treat the pair as the modal and click its left button.
+            if dismissed < 4 and time.time() - t_start > 120:
+                pair = find_brown_pair(png, self.crop_box)
+                if pair:
+                    dismissed += 1
+                    self.emit({"ev": "modal_seen", "stage": "menu",
+                               "screen": [int(pair[0]), int(pair[1])],
+                               "text": txt[:200],
+                               "note": "brown button pair, OCR blind"})
                     self.dismiss_modal(png)
                     continue
             self.emit({"ev": "poll", "stage": "menu", "text": txt[:200],
@@ -1014,6 +1033,12 @@ class L86:
         return rec
 
     def wait_generating(self, timeout=420):
+        """RimWorld's world generator spreads its work across frames, and on
+        this host a frame is ~1.4 s (measured: [XSWB] dt_avg=1.3-1.6 s while
+        the globe spins), so a planet takes ~10 min of wall time.  The old
+        480 s budget expired at the same point every run and reported
+        `reached_site=False` on a generation that was still progressing."""
+        timeout = int(os.environ.get("RW_L86_GEN_SECS", timeout))
         end = time.time() + timeout
         png = None
         words = []
@@ -1064,6 +1089,163 @@ class L86:
         return (self.crop_box[0] + best[1], self.crop_box[1] + best[2])
 
 
+    def wait_page(self, anchors, timeout, tag, first_png=None):
+        """Poll until one of `anchors` is on screen.  Returns (png, words, ok).
+
+        Every poll is logged, and a progress row goes out every 45 s with the
+        present counter, so a slow screen (map generation on this host is
+        minutes, not seconds) is distinguishable from a wrong anchor."""
+        end = time.time() + timeout
+        png = first_png
+        words = []
+        txt = ""
+        last = 0.0
+        while time.time() < end:
+            if png is None:
+                png = self.shot(tag)
+            if png:
+                words = self.ocr(png, tag=tag)
+                txt = self.text_of(words)
+                if any(self.find(words, a) for a in anchors):
+                    self.emit({"ev": "page", "stage": tag, "ok": True,
+                               "text": txt[:400],
+                               "shot": os.path.basename(png) if png else None})
+                    print("[L86] page %-8s FOUND %r" % (tag, txt[:100]), flush=True)
+                    return png, words, True
+            if time.time() - last >= 45:
+                last = time.time()
+                x = parse_xsw(self.serial())
+                n = x["n"] if x else None
+                self.emit({"ev": "page_wait", "stage": tag, "n": n,
+                           "text": txt[:200],
+                           "shot": os.path.basename(png) if png else None})
+                print("[L86] page %-8s waiting n=%s %r"
+                      % (tag, n, txt[:90]), flush=True)
+            time.sleep(4)
+            png, words = None, []
+        png = png or self.shot(tag + "_timeout")
+        words = self.ocr(png, tag=tag + "_timeout") if png else []
+        self.emit({"ev": "page", "stage": tag, "ok": False,
+                   "text": self.text_of(words)[:400],
+                   "shot": os.path.basename(png) if png else None})
+        print("[L86] page %-8s TIMEOUT after %ds" % (tag, timeout), flush=True)
+        return png, words, False
+
+    def dismiss_character_pages(self, timeout=420):
+        """Site -> select characters -> (ideoligion) -> colony, one screen at a
+        time.  The affirmative control is OCR'd as `Next` and, when that fails,
+        the footer's rightmost brown band -- the same rule the dialogs use.
+
+        RimWorld 1.6.4871 (Royalty + Ideology + Biotech installed) puts an
+        *ideoligion* page between the characters page and map generation, so
+        `Next` is pressed up to three times and each press must show a new
+        screen: a press that changes nothing is not repeated blindly, it is
+        reported."""
+        png, words, _ok = self.wait_page(
+            ["Create characters", "Select characters", "Randomize",
+             "Backstory", "Choose ideoligion", "Ideoligion"], timeout, "chars")
+        pressed = 0
+        seen = []
+        while pressed < 3:
+            txt = self.text_of(words)
+            seen.append(txt[:120])
+            # The characters/ideoligion pages are static UI: a frame-rate
+            # reading here is a fair sample of a *drawing* screen.
+            self.measure(20, "chars%d" % pressed)
+            ok, png2, w2 = self.advance(
+                "chars%d" % pressed, "Next",
+                ["Choose ideoligion", "Ideoligion", "Architect", "Work",
+                 "Assign", "Research", "Loading map", "Generating map",
+                 "Select characters"], 150)
+            pressed += 1
+            png, words = png2, w2
+            if not ok:
+                # footer affirmative fallback: rightmost brown band
+                xy = None
+                bb = brown_buttons(png2, self.crop_box) if png2 else []
+                if bb:
+                    xy = (bb[0][0], bb[0][1])
+                if not xy:
+                    self.emit({"ev": "chars_next", "stage": "chars",
+                               "ok": False, "pressed": pressed,
+                               "text": self.text_of(w2)[:400],
+                               "note": "no Next label and no brown footer band"})
+                    print("[L86] chars: no Next and no footer band", flush=True)
+                    return png, words, False
+                self.emit({"ev": "chars_next", "stage": "chars", "ok": True,
+                           "how": "brown-band", "screen": list(xy),
+                           "pressed": pressed})
+                _, png, d = self.click("Next", xy[0], xy[1], "chars%d" % pressed,
+                                       hold=0.2, settle=6.0)
+                words = self.ocr(png, tag="chars%d_band" % pressed) if png else []
+            t2 = self.text_of(words)
+            if any(self.find(words, k) for k in
+                   ("Architect", "Work", "Assign", "Research", "Colonists")):
+                self.emit({"ev": "chars_done", "stage": "chars", "ok": True,
+                           "pressed": pressed, "seen": seen, "text": t2[:300]})
+                print("[L86] chars: colony HUD is up after %d Next" % pressed,
+                      flush=True)
+                return png, words, True
+            if not any(self.find(words, k) for k in
+                       ("Create characters", "Select characters", "Ideoligion",
+                        "ideoligion", "Backstory", "Randomize")):
+                break
+        self.emit({"ev": "chars_done", "stage": "chars", "ok": False,
+                   "pressed": pressed, "seen": seen,
+                   "text": self.text_of(words)[:400]})
+        return png, words, False
+
+    def wait_colony(self, timeout=1500):
+        """Map generation -> the colony HUD.  Anchors are the bottom-left main
+        buttons (Architect/Work/Assign/Research) and the colonist bar."""
+        return self.wait_page(
+            ["Architect", "Work", "Assign", "Research", "Colonists",
+             "Wildlife", "Beauty", "This is a warning"], timeout, "colony")
+
+    def clock_crop(self):
+        """The date/time widget's rect in screen coords (top-right of the
+        window), used as the proof that game time is advancing."""
+        if not self.geom:
+            return None
+        x0 = self.geom[0] + self.geom[2] - 300
+        return (max(self.geom[0], x0), self.geom[1] + 4,
+                self.geom[0] + self.geom[2], self.geom[1] + 52)
+
+    def gameplay(self, seconds=120, tag="colony"):
+        """Unpause and prove the colony is *running*: present rate, and the
+        date widget changing over the window.  Then open the Architect menu so
+        an input-driven in-game screen exists in the evidence."""
+        x = None
+        self.q.key("spc", pause=0.6)    # a new colony starts paused
+        time.sleep(2)
+        cc = self.clock_crop()
+        a = self.shot(tag + "_clock_a")
+        rec = self.measure(seconds, tag)
+        b = self.shot(tag + "_clock_b")
+        clock = None
+        if a and b and cc:
+            na = np.asarray(Image.open(a).convert("L").crop(cc))
+            nb = np.asarray(Image.open(b).convert("L").crop(cc))
+            clock = int((np.abs(na.astype(int) - nb.astype(int)) > 24).sum())
+        self.emit({"ev": "gameplay", "stage": tag, "ok": bool(rec and rec.get("fps")),
+                   "fps": (rec or {}).get("fps"), "ms_frame": (rec or {}).get("ms_frame"),
+                   "changed": (rec or {}).get("changed"),
+                   "clock_px": clock,
+                   "note": "space unpauses; clock_px is the date widget's diff "
+                           "over the window (0 would mean time is frozen)",
+                   "shot": os.path.basename(b) if b else None})
+        print("[L86] gameplay %s fps=%s clock_px=%s"
+              % (tag, (rec or {}).get("fps"), clock), flush=True)
+        # an in-game screen that only input can produce
+        ok, png2, w2 = self.advance(tag, "Architect",
+                                    ["Structure", "Furniture", "Orders",
+                                     "Production", "Zone"], 60, must_change=False)
+        self.emit({"ev": "architect", "stage": tag, "ok": ok,
+                   "text": self.text_of(w2)[:300],
+                   "shot": os.path.basename(png2) if png2 else None})
+        return rec
+
+
 def run(q, grab, log_path, args, shots):
     d = L86(q, grab, log_path, args, shots)
     os.makedirs(d.out_dir, exist_ok=True)
@@ -1078,6 +1260,7 @@ def run(q, grab, log_path, args, shots):
     # 1. the Steam modal arrives with the menu, so main_menu() below owns it.
     # 2. menu -> scenario -> storyteller -> worldopts, every click OCR-located
     png, words, txt = d.main_menu()
+    d.measure(int(os.environ.get("RW_L86_MENU_MEASURE", "20")), "menu")
     ok, png, words = d.advance("menu", "New colony",
                                ["Choose scenario", "Crashlanded",
                                 "Rich explorer", "Scenario"], 120)
@@ -1122,6 +1305,7 @@ def run(q, grab, log_path, args, shots):
         # wait_generating() below.
         d.advance("worldopts", "Generate", ["Select starting site"], 5,
                   must_change=False)
+        d.measure(25, "worldgen")
         if os.environ.get("RW_L88_MEASURE", "0") == "1":
             # L88's workload: world generation's rotating planet.  Two windows
             # so a stalled or finished screen shows up as a changed-count drop
@@ -1130,7 +1314,7 @@ def run(q, grab, log_path, args, shots):
             time.sleep(6)
             d.measure(window, "worldgen")
             d.measure(window, "worldgen2")
-        png, words, got_site = d.wait_generating(480)
+        png, words, got_site = d.wait_generating(1200)
     if got_site:
         lp = d.land_point(png) if png else None
         if lp:
@@ -1179,9 +1363,19 @@ def run(q, grab, log_path, args, shots):
             d.emit({"ev": "site_double", "stage": "site",
                     "pixels": dk.get("pixels"), "bbox": dk.get("bbox"),
                     "text": d.text_of(d.ocr(after3, tag="site_dclick"))[:300]})
+    # 5. characters -> (ideoligion) -> colony, then a running colony.
+    got_colony = False
+    if got_site:
+        png_c, words_c, ok_c = d.dismiss_character_pages(420)
+        if ok_c:
+            png_c, words_c, got_colony = d.wait_colony(1500)
+            if got_colony:
+                d.gameplay(120, "colony")
+                d.gameplay(90, "colony2")
     d.shot("final")
     d.emit({"ev": "done", "stage": "end",
-            "note": "reached_site=%s" % got_site})
+            "note": "reached_site=%s reached_colony=%s"
+                    % (got_site, got_colony)})
     with open(os.path.join(d.out_dir, "l86-rows.json"), "w") as f:
         json.dump(d.rows, f, indent=1)
     return 0
