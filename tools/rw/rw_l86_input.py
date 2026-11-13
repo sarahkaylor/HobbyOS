@@ -744,7 +744,8 @@ class L86:
                     # is the *launcher's* 800x560 once the geometry was read
                     # before the game window existed -- so it found nothing and
                     # never clicked, and run14 dismissed 24 times in a row.
-                    self.click(float(pair[0]), float(pair[1]))
+                    self.click("modal", float(pair[0]), float(pair[1]),
+                               "modal", why="brown button pair")
                     time.sleep(1.5)
                     continue
             # The Steam modal's two buttons are readable but its *body* is not:
