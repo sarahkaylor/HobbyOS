@@ -1254,8 +1254,9 @@ class L86:
         # an anchor: fuzzy matching hits `Select starting site` on the site
         # page itself, which made this function declare the character page
         # present while the site page was still up.
-        chars_anchors = ["Create characters", "Randomize", "Backstory",
-                         "Ideoligion"]
+        chars_anchors = ["Create characters", "Choose your ideoligion",
+                         "What should your starting colonists believe",
+                         "Randomize"]
         for _round in range(3):
             png, words, _ok = self.wait_page(
                 chars_anchors + ["Settle here", "anyway", "Select starting site"],
@@ -1477,8 +1478,12 @@ def run(q, grab, log_path, args, shots):
         # site".  The driver's single guessed point (970,428) had been in space.
         # Sweep the land area instead, pressing Next after each pick, and stop at
         # the first screen that is no longer the site page.
-        chars_anchors2 = ["Create characters", "Randomize", "Backstory",
-                          "Ideoligion"]
+        # NOT "Ideoligion": the site page itself carries "Ideology"/"ueology"
+        # in its tile panel and faction text, and fuzzy matching made run22
+        # declare the character page present while the site page was still up.
+        chars_anchors2 = ["Create characters", "Choose your ideoligion",
+                          "What should your starting colonists believe",
+                          "Randomize"]
         cb = d.crop_box or (98, 40, 1378, 776)
         cw, ch = cb[2] - cb[0], cb[3] - cb[1]
         for fx, fy in ((0.42, 0.58), (0.50, 0.64), (0.58, 0.60),
@@ -1493,7 +1498,10 @@ def run(q, grab, log_path, args, shots):
                     "text": t_t[:160]})
             if ok_t:
                 break
-            ok_n, pn, wn = d.advance("site", "Next", chars_anchors2, 20)
+            # A picked tile can raise "Settle here anyway?" before Next does
+            # anything, so press the footer affirmative once, then Next.
+            d.advance("site", None, chars_anchors2, 12)
+            ok_n, pn, wn = d.advance("site", "Next", chars_anchors2, 25)
             if ok_n:
                 d.emit({"ev": "site_tile_next", "stage": "site", "ok": True,
                         "screen": [px_s, py_s]})
