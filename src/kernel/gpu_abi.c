@@ -38,13 +38,19 @@
  * textures/render targets and keeps asking.  4096 covers the 618 resources a
  * scene creates (M3) with room for a menu's atlases and the swap chain, at
  * ~96 bytes of kernel BSS each. */
-#define GPU_ABI_MAX_RES_PER_CLIENT 4096
-#define GPU_ABI_MAX_PAGES 16384          /* per resource == 64 MiB */
+#define GPU_ABI_MAX_RES_PER_CLIENT 16384
+#define GPU_ABI_MAX_PAGES 131072         /* per resource == 512 MiB */
 #define GPU_ABI_MAX_BLOB 16384
 #define GPU_ABI_MAX_SUBMIT (128 * 1024)
 #define GPU_ABI_MAX_DIM 16384
 #define GPU_ABI_MAX_LAYERS 2048
-#define GPU_ABI_MAX_BYTES (64ull * 1024 * 1024)
+/* 64 MiB was chosen against the M3 workload and it refuses the thing a real
+ * planet needs: RimWorld's world-gen builds an 8192x4096 RGBA ramp (134 MB,
+ * 178 MB with its mip pyramid) and, on the merged tree, every one of those
+ * creates was refused as "geometry" and reached the game as
+ * GL_OUT_OF_MEMORY.  512 MiB admits the 8192-wide family; GPU_ABI_MAX_PAGES
+ * moved with it so ATTACH_BACKING can cover one. */
+#define GPU_ABI_MAX_BYTES (512ull * 1024 * 1024)
 /* Per-client share of the attached-backing pool.  384 MiB was M3's estimate
  * ("a Unity scene creates 618 resources"); on the merged tree a real RimWorld
  * def load reaches it: `res_attach refused: client backing full ... held=
@@ -53,8 +59,15 @@
  * texture it is loading and the loading screen never advances.  1.5 GiB is the
  * ceiling one client may hold now; the transport's pool (GPU3D_PAGE_POOL) is
  * raised with it.  These are policy numbers, not memory: every attached page
- * is the client's own page. */
-#define GPU_ABI_CLIENT_BYTES (1536ull * 1024 * 1024)
+ * is the client's own page.
+ *
+ * 1.5 GiB still ran out during world generation: RimWorld's process holds
+ * 4096 live resources at that point (the per-client table, not the bytes) and
+ * the buffers it needs for the globe mesh were refused with ENOSPC, which
+ * leaves a GL buffer object with no backing -- `index_bo->buffer == NULL`, so
+ * core Mesa skips every draw and the progress bar never moves.  Both ceilings
+ * are raised together: 4 GiB and 16384 resources. */
+#define GPU_ABI_CLIENT_BYTES (4096ull * 1024 * 1024)
 
 struct gpu_abi_client {
   int used;
