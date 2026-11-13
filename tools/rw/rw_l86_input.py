@@ -632,14 +632,18 @@ class L86:
             modal_box = None
         if mx is None:
             how = "brown-band"
-            xy = find_brown_pair(png, self.crop_box)
+            xy = (find_brown_pair(png, self.crop_box) or
+                  find_brown_pair(png, None))
             if not xy:
                 self.emit({"ev": "modal", "stage": "modal", "ok": False,
                            "text": txt[:300],
                            "note": "no Ignore label and no brown button pair"})
                 return png, words
             mx, my = xy
-            modal_box = [self.crop_box[0], my - 90, self.crop_box[2], my + 40]
+            c0 = self.crop_box[0] if self.crop_box else 0
+            c2 = (self.crop_box[2] if self.crop_box
+                  else int(getattr(self.args, "fb_w", 1920) or 1920))
+            modal_box = [c0, my - 90, c2, my + 40]
         self.emit({"ev": "modal", "stage": "modal", "ok": True, "how": how,
                    "screen": [mx, my], "bbox": modal_box,
                    "text": txt[:300], "note": "Ignore located"})
@@ -680,6 +684,17 @@ class L86:
         last_opens, last_opens_at = None, time.time()
         last_report = 0.0
         while time.time() < end:
+            # establish_geometry() runs at boot, when the only window on screen
+            # may be the launcher's 800x560; re-read it until the app's own
+            # 1280x736 row exists, so every later crop covers the game.
+            if self.crop_box and (self.crop_box[2] - self.crop_box[0]) < 1000:
+                g = parse_geometry(self.serial())
+                if g and g[2] > (self.crop_box[2] - self.crop_box[0]):
+                    self.geom = g
+                    self.crop_box = (g[0], g[1], g[0] + g[2], g[1] + g[3])
+                    self.refresh_content()
+                    print("[L86] crop re-read: client=%d,%d %dx%d"
+                          % (g[0], g[1], g[2], g[3]), flush=True)
             png = self.shot("menu_wait")
             words = self.ocr(png, tag="menu_wait")
             txt = self.text_of(words)
@@ -724,7 +739,13 @@ class L86:
                                "note": "brown button pair"})
                     print("[L86] modal pair at (%d,%d) -- dismissing (%d)"
                           % (int(pair[0]), int(pair[1]), dismissed), flush=True)
-                    self.dismiss_modal(png)
+                    # Click the button we just located: re-running detection
+                    # inside dismiss_modal only re-tested self.crop_box, which
+                    # is the *launcher's* 800x560 once the geometry was read
+                    # before the game window existed -- so it found nothing and
+                    # never clicked, and run14 dismissed 24 times in a row.
+                    self.click(float(pair[0]), float(pair[1]))
+                    time.sleep(1.5)
                     continue
             # The Steam modal's two buttons are readable but its *body* is not:
             # on this tree the label inside the dialog is never drawn (measured
