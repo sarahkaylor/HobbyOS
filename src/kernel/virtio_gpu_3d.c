@@ -682,13 +682,55 @@ int virtio_gpu_3d_res_create(uint32_t ctx_id, const struct virtio_gpu_3d_res* d,
 int virtio_gpu_3d_res_attach(uint32_t res_id, const uint64_t* phys, uint32_t nr_pages,
                              uint64_t len) {
   if (!gpu3d_ready) return -ENODEV;
-  if (!phys || nr_pages == 0 || nr_pages > GPU3D_MAX_ATTACH || len == 0)
+  /* An EIO at the winsys is EINVAL here, and four different refusals collapse
+   * into it.  Name the branch once per kind: a 64 MiB render target that
+   * cannot attach leaves an incomplete framebuffer, and every draw into it is
+   * dropped -- that is the blank map, so guessing which branch fired costs a
+   * 35 minute run each time. */
+  static int attach_dbg[4];
+  if (!phys || nr_pages == 0 || nr_pages > GPU3D_MAX_ATTACH || len == 0) {
+    if (attach_dbg[0]++ < 4) {
+      uart_puts("[VIRGL3D] attach bad_args res=");
+      print_int((int)res_id);
+      uart_puts(" npages=");
+      print_int((int)nr_pages);
+      uart_puts(" cap=");
+      print_int(GPU3D_MAX_ATTACH);
+      uart_puts(" len=");
+      print_int((int)len);
+      uart_puts(" phys=");
+      uart_puts(phys ? "ok" : "null");
+      uart_puts("\n");
+    }
     return -EINVAL;
-  if ((len + 4095) / 4096 != nr_pages) return -EINVAL;
+  }
+  if ((len + 4095) / 4096 != nr_pages) {
+    if (attach_dbg[1]++ < 4) {
+      uart_puts("[VIRGL3D] attach len_pages res=");
+      print_int((int)res_id);
+      uart_puts(" len=");
+      print_int((int)len);
+      uart_puts(" npages=");
+      print_int((int)nr_pages);
+      uart_puts("\n");
+    }
+    return -EINVAL;
+  }
 
   uint64_t fl = virtio_gpu_x64_lock();
   struct gpu3d_res* r = gpu3d_find_res(res_id);
   if (!r || r->attached) {
+    if (attach_dbg[2]++ < 4) {
+      uart_puts("[VIRGL3D] attach no_res res=");
+      print_int((int)res_id);
+      uart_puts(" found=");
+      uart_puts(r ? "yes" : "no");
+      uart_puts(" already_attached=");
+      uart_puts(r && r->attached ? "yes" : "no");
+      uart_puts(" len=");
+      print_int((int)len);
+      uart_puts("\n");
+    }
     virtio_gpu_x64_unlock(fl);
     return -EINVAL;
   }
