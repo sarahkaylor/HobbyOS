@@ -843,8 +843,20 @@ class L86:
         the page-wide 2x pass misses (it missed `Generate`).  The band rule
         survives as the fallback for dialogs whose labels OCR cannot read.
         """
+        # OCR spells the footer button "Nqxt" about as often as "Next"
+        # (measured: run21's site page read `Back Select random site Factions
+        # Nqxt`, and the identical click succeeded in run18 where the same
+        # frame OCR'd as "Next").  A one-letter miss must not stall the flow, so
+        # a known-affirmative label also accepts its measured misreadings.
+        OCR_ALIASES = {"Next": ("Nqxt", "Naxt", "Nexl", "Next>"),
+                       "Select random site": ("random", "Select random"),
+                       "Generate": ("Generale", "Generate>")}
         if label:
             hits = self.find(words, label)
+            for alias in OCR_ALIASES.get(label, ()):
+                if hits:
+                    break
+                hits = self.find(words, alias)
             if hits:
                 h = hits[-1] if len(hits) > 1 else hits[0]
                 # the bottom-most/right-most occurrence is the footer button
