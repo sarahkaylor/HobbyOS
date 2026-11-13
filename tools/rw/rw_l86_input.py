@@ -681,11 +681,30 @@ class L86:
                 self.emit({"ev": "stage", "stage": "menu", "text": txt[:400],
                            "shot": os.path.basename(png) if png else None})
                 return png, words, txt
+            # L91: the Steam modal re-appears whenever the game retries the
+            # Steam API, and its detection was gated behind "no menu anchor for
+            # 120 s" plus a four-dismissal cap: run12 sat on it for 2100 s with
+            # the pair plainly on screen -- find_brown_pair returned (815,594)
+            # on the very shot the loop kept polling, while every earlier check
+            # had already failed and the cap was spent.  Anchors are still
+            # tested first (a menu that is up must win); the pair test is now
+            # unconditional after them, and the dismissal has no cap.
             if self.find(words, "Ignore") or "could not initialize" in txt.lower():
-                if dismissed < 4:
+                dismissed += 1
+                self.emit({"ev": "modal_seen", "stage": "menu",
+                           "text": txt[:200], "note": "dismissing"})
+                self.dismiss_modal(png)
+                continue
+            if png:
+                pair = find_brown_pair(png, self.crop_box)
+                if pair:
                     dismissed += 1
                     self.emit({"ev": "modal_seen", "stage": "menu",
-                               "text": txt[:200], "note": "dismissing"})
+                               "screen": [int(pair[0]), int(pair[1])],
+                               "text": txt[:200], "n": dismissed,
+                               "note": "brown button pair"})
+                    print("[L86] modal pair at (%d,%d) -- dismissing (%d)"
+                          % (int(pair[0]), int(pair[1]), dismissed), flush=True)
                     self.dismiss_modal(png)
                     continue
             # The Steam modal's two buttons are readable but its *body* is not:
@@ -696,16 +715,9 @@ class L86:
             # budget ran out.  A brown button pair in the client crop is the
             # dialog's own signature -- the main menu has no brown buttons at
             # all -- so treat the pair as the modal and click its left button.
-            if dismissed < 4 and time.time() - t_start > 120:
-                pair = find_brown_pair(png, self.crop_box)
-                if pair:
-                    dismissed += 1
-                    self.emit({"ev": "modal_seen", "stage": "menu",
-                               "screen": [int(pair[0]), int(pair[1])],
-                               "text": txt[:200],
-                               "note": "brown button pair, OCR blind"})
-                    self.dismiss_modal(png)
-                    continue
+            # (Superseded by the unconditional pair test above, which run12
+            # proved was needed: this branch's 120 s gate and four-dismissal cap
+            # are what let the dialog sit on screen for 2100 s.)
             self.emit({"ev": "poll", "stage": "menu", "text": txt[:200],
                        "shot": os.path.basename(png) if png else None})
             # L87: a boot is not "stalled" because presents stopped.  The
