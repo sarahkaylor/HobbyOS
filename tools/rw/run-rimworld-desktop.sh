@@ -568,9 +568,15 @@ OVMF="$OUT/OVMF_CODE_4M.fd"
 GLVARS=""
 DISPARGS="-display none"
 if [ "${RW_QEMU_GL:-0}" = 1 ]; then
-  GLVARS="QEMU_GPU=gl QEMU_DISPLAY=egl-headless"
+  # RW_QEMU_DISPLAY names the display backend that carries the GL context.
+  # `egl-headless` is the historical default, but it needs a DRM render node on
+  # the host; a host with no GPU can still get virgl through a GTK GL context on
+  # an X server backed by llvmpipe (the host then rasterises on its own cores,
+  # not on the guest's 8 vCPUs).  Screenshots do not change either way: this
+  # mode always takes them from guest physical memory (--fb-phys).
+  GLVARS="QEMU_GPU=gl QEMU_DISPLAY=${RW_QEMU_DISPLAY:-egl-headless}"
   DISPARGS=""
-  echo "== boot: GL device (virtio-gpu-gl-pci, egl-headless,gl=on)"
+  echo "== boot: GL device (virtio-gpu-gl-pci, ${RW_QEMU_DISPLAY:-egl-headless},gl=on)"
 fi
 # The kernel lives INSIDE disk.img (::/boot/hobbyos.elf) and the boot below
 # passes `-o disk.img`, so a rebuilt hobbyos.elf would never reach the guest --

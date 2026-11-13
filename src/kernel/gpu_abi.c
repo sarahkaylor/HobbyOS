@@ -45,7 +45,16 @@
 #define GPU_ABI_MAX_DIM 16384
 #define GPU_ABI_MAX_LAYERS 2048
 #define GPU_ABI_MAX_BYTES (64ull * 1024 * 1024)
-#define GPU_ABI_CLIENT_BYTES (384ull * 1024 * 1024)  /* per-client share of the pool */
+/* Per-client share of the attached-backing pool.  384 MiB was M3's estimate
+ * ("a Unity scene creates 618 resources"); on the merged tree a real RimWorld
+ * def load reaches it: `res_attach refused: client backing full ... held=
+ * 402653184 nres=1421 cap_bytes=402653184` and then asks ~1900 more times,
+ * 4-64 KiB at a time, for the rest of the run -- the engine cannot upload the
+ * texture it is loading and the loading screen never advances.  1.5 GiB is the
+ * ceiling one client may hold now; the transport's pool (GPU3D_PAGE_POOL) is
+ * raised with it.  These are policy numbers, not memory: every attached page
+ * is the client's own page. */
+#define GPU_ABI_CLIENT_BYTES (1536ull * 1024 * 1024)
 
 struct gpu_abi_client {
   int used;

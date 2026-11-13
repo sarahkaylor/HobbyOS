@@ -19,11 +19,13 @@
 #include "nfs.h"
 #include "net.h"
 #include "kline.h"
+#include "lock.h"
 
 struct socket_pcb;      /* net.h's PCB; nfs.h only carries a pointer to it */
 
 extern void uart_puts(const char *s);
 extern void print_int(int val);
+extern void *memcpy(void *dest, const void *src, unsigned long n);
 
 /* L34: bytes actually transferred by READ RPCs, and how many RPCs did it.
  * The launch's speed wall is visible in these two counters (the watchdog
@@ -32,6 +34,36 @@ extern void print_int(int val);
  * all a progress line needs. */
 volatile uint64_t nfs_io_bytes;
 volatile uint64_t nfs_io_ops;
+
+/* ------------------------------------------------------------------ */
+/* readahead window                                                     */
+/* ------------------------------------------------------------------ */
+/* The front end reads its asset files 512 bytes at a time: every [NFSRTT]
+ * row of a 320 MiB def load reads want=512, and each of those was its own
+ * READ RPC at ~1.3 ms -- ~640 000 round trips for one def pass, which is
+ * most of a 20-minute boot.  A window filled with the pipelined reader turns
+ * the reads that follow into a memcpy: one 64 KiB fill is ~49 RPCs in three
+ * batches (~5 ms), so 320 MiB costs ~25 s of transport instead of ~14 min.
+ *
+ * The access pattern this exploits is Unity's own: sequential within a file.
+ * A backwards seek, a different file, or a window that does not cover the
+ * request simply refills.  Two threads reading different files at once would
+ * thrash one window, so a `busy` fill makes the second reader go direct
+ * instead of queueing behind a fill it will invalidate.  Files are read-only
+ * here (the mount is exported ro), so nothing invalidates a window. */
+#define NFS_RA_BYTES (64 * 1024)
+static uint8_t nfs_ra_buf[NFS_RA_BYTES] __attribute__((aligned(64)));
+static struct {
+  int valid;
+  int busy;
+  const struct nfs_mount *m;
+  struct nfs_fh fh;
+  uint32_t base;        /* file offset of nfs_ra_buf[0] */
+  uint32_t len;         /* bytes valid */
+  uint64_t hits, fills, saved;
+} nfs_ra;
+static spinlock_t nfs_ra_lock;
+
 
 /* L35: where does a READ RPC's wall time go?  Every READ RPC is bucketed by
  * the number of bytes it asked the server for, and its life is split into
@@ -129,6 +161,19 @@ void nfs_perf_dump(const char *why) {
     uart_puts("[NFSRTT] pump_calls=");
     uart_puts(a);
     uart_puts(" pump_hits=");
+    uart_puts(c);
+    uart_puts("\n");
+  }
+  if (nfs_ra.hits | nfs_ra.fills) {
+    char a[24], b[24], c[24];
+    nfs_put_dec((int)(nfs_ra.hits & 0x7fffffff), a);
+    nfs_put_dec((int)(nfs_ra.fills & 0x7fffffff), b);
+    nfs_put_dec((int)(nfs_ra.saved >> 10), c);   /* KiB served from the window */
+    uart_puts("[NFSRA] hits=");
+    uart_puts(a);
+    uart_puts(" fills=");
+    uart_puts(b);
+    uart_puts(" saved_kib=");
     uart_puts(c);
     uart_puts("\n");
   }
@@ -1241,6 +1286,64 @@ out:
   return contig > offset ? (int)(contig - offset) : -1;
 }
 
+static int nfs_ra_same(const struct nfs_mount *m, const struct nfs_fh *fh) {
+  if (!nfs_ra.valid || nfs_ra.m != m ||
+      (uint32_t)nfs_ra.fh.len != fh->len)
+    return 0;
+  for (uint32_t i = 0; i < fh->len; i++)
+    if (nfs_ra.fh.data[i] != fh->data[i]) return 0;
+  return 1;
+}
+
+/* Serves `len` bytes at `offset` from the window, refilling it when needed.
+ * Returns 1 and sets *got when the read was served, 0 when the caller must
+ * do the READ itself (a fill is already in progress). */
+static int nfs_ra_try(const struct nfs_mount *m, const struct nfs_fh *fh,
+                      uint32_t offset, void *buf, uint32_t len, int *got) {
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ra_lock);
+  if (nfs_ra_same(m, fh) && offset >= nfs_ra.base &&
+      offset + len <= nfs_ra.base + nfs_ra.len) {
+    memcpy(buf, nfs_ra_buf + (offset - nfs_ra.base), len);
+    nfs_ra.hits++;
+    nfs_ra.saved += len;
+    spinlock_release_irqrestore(&nfs_ra_lock, fl);
+    *got = (int)len;
+    return 1;
+  }
+  if (nfs_ra.busy) {
+    spinlock_release_irqrestore(&nfs_ra_lock, fl);
+    return 0;
+  }
+  nfs_ra.busy = 1;
+  spinlock_release_irqrestore(&nfs_ra_lock, fl);
+
+  uint32_t base = offset & ~(uint32_t)4095;
+  int n = nfs_read_pipelined(m, fh, base, nfs_ra_buf, NFS_RA_BYTES,
+                             NFS_READ_RSIZE);
+  fl = spinlock_acquire_irqsave(&nfs_ra_lock);
+  nfs_ra.busy = 0;
+  if (n > 0) {
+    nfs_ra.valid = 1;
+    nfs_ra.m = m;
+    nfs_ra.fh = *fh;
+    nfs_ra.base = base;
+    nfs_ra.len = (uint32_t)n;
+    nfs_ra.fills++;
+    if (offset + len <= base + (uint32_t)n) {
+      memcpy(buf, nfs_ra_buf + (offset - base), len);
+      nfs_ra.hits++;
+      nfs_ra.saved += len;
+      spinlock_release_irqrestore(&nfs_ra_lock, fl);
+      *got = (int)len;
+      return 1;
+    }
+  } else {
+    nfs_ra.valid = 0;
+  }
+  spinlock_release_irqrestore(&nfs_ra_lock, fl);
+  return 0;
+}
+
 int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
                   uint32_t offset, void *buf, uint32_t len) {
   if (!m || !m->in_use || !fh || fh->len == 0) return -1;
@@ -1264,7 +1367,13 @@ int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
   uint32_t rs = m->read_size ? m->read_size : NFS_READ_RSIZE;
   if (rs > NFS_READ_RSIZE) rs = NFS_READ_RSIZE;
   if (nfs_perf_legacy) return nfs_read_serial_legacy(m, fh, offset, buf, len);
-  if (len <= rs) return nfs_read_serial(m, fh, offset, buf, len);
+  if (len <= rs) {
+    /* Small reads (Unity's 512-byte asset reads) come from the readahead
+     * window; a miss there is the same serial READ it always was. */
+    int got = 0;
+    if (nfs_ra_try(m, fh, offset, buf, len, &got)) return got;
+    return nfs_read_serial(m, fh, offset, buf, len);
+  }
   return nfs_read_pipelined(m, fh, offset, buf, len, rs);
 }
 

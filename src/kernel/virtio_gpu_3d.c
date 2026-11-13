@@ -62,7 +62,13 @@ extern int virtio_gpu_x64_virgl_negotiated;
  * move together (GPU_ABI_MAX_RES_PER_CLIENT in gpu_abi.c).  4096 x ~72 B is
  * ~290 KiB of kernel BSS. */
 #define GPU3D_MAX_RES     4096
-#define GPU3D_PAGE_POOL   (128 * 1024)   /* pages == 512 MiB of attached backing */
+/* Attached-backing page pool.  512 MiB was M3's ceiling; a real RimWorld def
+ * load asks for more than the old 384 MiB per-client cap before it finishes
+ * (see GPU_ABI_CLIENT_BYTES in gpu_abi.c), so the pool is raised to 2.5 GiB --
+ * one client can hold 1.5 GiB of it and the window/2D resources the rest.
+ * Each slot is one 4 KiB guest page registered with the host, so this costs
+ * 8 bytes of kernel BSS per page (5 MiB here), not guest memory. */
+#define GPU3D_PAGE_POOL   (640 * 1024)   /* pages == 2.5 GiB of attached backing */
 #define GPU3D_MAX_ATTACH  16384          /* per resource == 64 MiB */
 #define GPU3D_CAPS_MAX    16384
 #define GPU3D_SUBMIT_MAX  (128 * 1024)
