@@ -47,9 +47,23 @@ def parse_geometry(text):
     m = None
     for m2 in re.finditer(r"\[HB\] geometry client=(-?\d+),(-?\d+),(\d+)x(\d+)", text):
         m = m2
-    if not m:
-        return None
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)))
+    if m:
+        return (int(m.group(1)), int(m.group(2)),
+                int(m.group(3)), int(m.group(4)))
+    # The `[HB] geometry client=` row is not printed on every boot (run11 came
+    # up presenting -- 103 [HBS] rows, a 1280x736 window, RimWorld loading defs
+    # -- without ever printing it, and the driver aborted a healthy run).  The
+    # row that IS printed, `[HB] hd_set_size win=WxH ... content=x,y,cw,ch`,
+    # carries the same answer: the client area is the whole window, with
+    # content origin (0,16) for HBHOST's 16 px menu bar -- which is exactly
+    # what establish_geometry derives from (client 0,0 and win_w x win_h).
+    last = None
+    for m2 in re.finditer(r"\[HB\] hd_set_size win=(\d+)x(\d+)", text):
+        last = m2
+    if last:
+        return (0, 0, int(last.group(1)), int(last.group(2)))
+    return None
+
 
 
 def parse_xsw(text):
