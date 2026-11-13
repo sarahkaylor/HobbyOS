@@ -57,11 +57,17 @@ def parse_geometry(text):
     # carries the same answer: the client area is the whole window, with
     # content origin (0,16) for HBHOST's 16 px menu bar -- which is exactly
     # what establish_geometry derives from (client 0,0 and win_w x win_h).
-    last = None
+    # The *largest* window wins, not the last one: the launcher's 800x560 row
+    # is printed first and the game's 1280x736 follows, and taking the last one
+    # that happened to be written before the app mapped gave a crop 34 px short
+    # of the dialog (run13).
+    best = None
     for m2 in re.finditer(r"\[HB\] hd_set_size win=(\d+)x(\d+)", text):
-        last = m2
-    if last:
-        return (0, 0, int(last.group(1)), int(last.group(2)))
+        w, h = int(m2.group(1)), int(m2.group(2))
+        if best is None or w * h > best[0] * best[1]:
+            best = (w, h)
+    if best:
+        return (0, 0, best[0], best[1])
     return None
 
 
@@ -371,7 +377,13 @@ def find_brown_pair(png, box, min_run=80):
         im = Image.open(png).convert("RGB")
     except Exception:
         return None
-    im = im.crop(box)
+    # box is None for "the whole frame": the pair is unambiguous on the menu
+    # screen, and the game's client crop can still be the launcher's rect when
+    # the app has not printed its own hd_set_size row yet.
+    off_x, off_y = 0, 0
+    if box:
+        off_x, off_y = box[0], box[1]
+        im = im.crop(box)
     px = im.load()
     W, H = im.size
     band = {}
@@ -410,7 +422,7 @@ def find_brown_pair(png, box, min_run=80):
     if len(runs) < 2:
         return None
     left = runs[0]
-    return (box[0] + (left[0] + left[1]) // 2, box[1] + (g[0] + g[-1]) // 2)
+    return (off_x + (left[0] + left[1]) // 2, off_y + (g[0] + g[-1]) // 2)
 
 
 class L86:
@@ -696,7 +708,14 @@ class L86:
                 self.dismiss_modal(png)
                 continue
             if png:
-                pair = find_brown_pair(png, self.crop_box)
+                # The crop can be the *launcher's* 800x560 rect when the game
+                # window has not printed its own hd_set_size yet (run13:
+                # geometry=client=0,0 800x560, dialog buttons at y=594 -- 34 px
+                # below the crop, so the pair was never found).  The main menu
+                # has no brown pair anywhere, so falling back to the whole
+                # frame is safe.
+                pair = (find_brown_pair(png, self.crop_box) or
+                        find_brown_pair(png, None))
                 if pair:
                     dismissed += 1
                     self.emit({"ev": "modal_seen", "stage": "menu",
