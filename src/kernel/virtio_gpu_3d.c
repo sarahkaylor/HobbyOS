@@ -754,25 +754,36 @@ int virtio_gpu_3d_res_attach(uint32_t res_id, const uint64_t* phys, uint32_t nr_
     return -ENOSPC;
   }
 
-  /* Build the sg list.  Each entry is at most one page; the last entry is
-   * short when `len` does not end on a page boundary. */
+  /* Build the sg list, coalescing physically contiguous pages into one entry.
+   * One entry per page is legal but makes a 64 MiB render target a 16384-entry,
+   * 256 KiB scatter list, and the host answers that attach with an error -- so
+   * the render target never gets backing, Mesa reports glTexStorage2D
+   * out-of-memory, the framebuffer is incomplete, and every draw into it is
+   * dropped.  The last entry is short when `len` does not end on a page
+   * boundary. */
   uint64_t left = len;
+  uint32_t nents = 0;
   for (uint32_t i = 0; i < nr_pages; i++) {
     uint64_t chunk = left > 4096 ? 4096 : left;
     gpu3d_pool[start + i] = phys[i];
-    gpu3d_ents[i].addr = phys[i];
-    gpu3d_ents[i].length = (uint32_t)chunk;
-    gpu3d_ents[i].padding = 0;
+    if (nents && gpu3d_ents[nents - 1].addr + gpu3d_ents[nents - 1].length == phys[i]) {
+      gpu3d_ents[nents - 1].length += (uint32_t)chunk;
+    } else {
+      gpu3d_ents[nents].addr = phys[i];
+      gpu3d_ents[nents].length = (uint32_t)chunk;
+      gpu3d_ents[nents].padding = 0;
+      nents++;
+    }
     left -= chunk;
   }
 
   hdr_init(&gpu3d_req_attach.hdr, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING, 0, 0, 0);
   gpu3d_req_attach.resource_id = res_id;
-  gpu3d_req_attach.nr_entries = nr_pages;
+  gpu3d_req_attach.nr_entries = nents;
 
   uint32_t rlen = 0, rtype = 0;
   int rc = gpu3d_cmd(&gpu3d_req_attach, sizeof(gpu3d_req_attach), gpu3d_ents,
-                     (uint32_t)(nr_pages * sizeof(struct virtio_gpu_mem_entry)),
+                     (uint32_t)(nents * sizeof(struct virtio_gpu_mem_entry)),
                      &gpu3d_resp, GPU3D_RESP_HDR_LEN, &rlen, &rtype);
   if (gpu3d_trace_res_row()) {
   uart_puts("[VIRGL3D] attach res=");
@@ -786,6 +797,20 @@ int virtio_gpu_3d_res_attach(uint32_t res_id, const uint64_t* phys, uint32_t nr_
   uart_puts("\n");
   }
   if (rc != 0) {
+    /* The host's verdict, which is the only one that matters here. */
+    if (attach_dbg[3]++ < 6) {
+      uart_puts("[VIRGL3D] attach host_err res=");
+      print_int((int)res_id);
+      uart_puts(" pages=");
+      print_int((int)nr_pages);
+      uart_puts(" entries=");
+      print_int((int)nents);
+      uart_puts(" len=");
+      print_int((int)len);
+      uart_puts(" resp=");
+      uart_print_hex(rtype);
+      uart_puts("\n");
+    }
     gpu3d_pool_free(start, (int)nr_pages);
     virtio_gpu_x64_unlock(fl);
     return -EIO;
