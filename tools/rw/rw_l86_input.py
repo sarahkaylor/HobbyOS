@@ -1458,6 +1458,25 @@ def run(q, grab, log_path, args, shots):
             d.emit({"ev": "site_next_error", "stage": "site", "text": str(e)[:200]})
         d.emit({"ev": "site_next_done", "stage": "site", "ok": bool(w_ok),
                 "text": (w_txt or "")[:300]})
+        # A tile on ice sheet / polluted ground raises "Settle here anyway?",
+        # which run16 photographed in full and never answered -- the panel read
+        # `Planet Ice sheet`, `80.39N 1.70W`, `Movement difficulty: 3.5`, `-27.2C`
+        # under the question, and the run timed out waiting for characters.
+        pg2, wd2, ok2 = d.wait_page(
+            ["Create characters", "Randomize", "Backstory", "Ideoligion"],
+            25, "chars")
+        if not ok2:
+            t2c = d.text_of(wd2 or [])
+            if ("anyway" in t2c.lower() or "settle here" in t2c.lower()):
+                d.emit({"ev": "site_anyway", "stage": "site", "ok": True,
+                        "text": t2c[:200]})
+                print("[L86] 'Settle here anyway?' -- confirming", flush=True)
+                d.advance("site", None,
+                          ["Create characters", "Randomize", "Backstory",
+                           "Ideoligion"], 45)
+                d.advance("site", None,
+                          ["Create characters", "Randomize", "Backstory",
+                           "Ideoligion"], 45)
         lp = d.land_point(png) if png else None
         if lp:
             d.emit({"ev": "site_point", "stage": "site", "screen": list(lp)})
