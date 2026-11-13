@@ -69,7 +69,15 @@ extern int virtio_gpu_x64_virgl_negotiated;
  * Each slot is one 4 KiB guest page registered with the host, so this costs
  * 8 bytes of kernel BSS per page (5 MiB here), not guest memory. */
 #define GPU3D_PAGE_POOL   (1024 * 1024)  /* pages == 4 GiB of attached backing */
-#define GPU3D_MAX_ATTACH  16384          /* per resource == 64 MiB */
+/* 16384 pages == 64 MiB per resource, and that is the third place the old
+ * 64 MiB ceiling lived: RimWorld's planet ramp is an 8192x4096 RGBA surface
+ * (134 MB, 178 MB with mips), so RES_ATTACH_BACKING for it needs 32768 pages,
+ * gpu_abi returns EIO, the winsys' resource_create returns NULL, Mesa reports
+ * GL_OUT_OF_MEMORY in glTexStorage2D, and every draw into that render target
+ * is dropped as "incomplete framebuffer" -- which is what the black, red and
+ * missing regions on the colony map are.  131072 pages == 512 MiB per
+ * resource, matching GPU_ABI_MAX_PAGES; the entry array is 2 MiB of BSS. */
+#define GPU3D_MAX_ATTACH  131072
 #define GPU3D_CAPS_MAX    16384
 #define GPU3D_SUBMIT_MAX  (128 * 1024)
 
