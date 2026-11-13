@@ -1257,7 +1257,12 @@ class L86:
         chars_anchors = ["Create characters", "Choose your ideoligion",
                          "What should your starting colonists believe",
                          "Randomize"]
-        for _round in range(3):
+        # Three rounds reached the ideoligion page and stopped there, leaving
+        # the run parked on "Create characters" with Next never pressed again
+        # (run27: ideoligion at 1830 s, then `no_target label=Architect` on the
+        # character page).  The setup chain is site -> ideoligion -> characters
+        # -> map, so press until the frame stops being a setup page.
+        for _round in range(8):
             png, words, _ok = self.wait_page(
                 chars_anchors + ["Settle here", "anyway", "Select starting site"],
                 timeout if _round == 0 else 240, "chars")
@@ -1330,9 +1335,13 @@ class L86:
     def wait_colony(self, timeout=1500):
         """Map generation -> the colony HUD.  Anchors are the bottom-left main
         buttons (Architect/Work/Assign/Research) and the colonist bar."""
+        # "Work"/"Assign"/"Research"/"Colonists" all appear on the set-up
+        # pages too ("World view camera movement", the colonist list, ...), and
+        # run25/27 both declared the colony present while the screen still said
+        # "Create characters"/"Choose your ideoligion".  Only the colony HUD
+        # carries Architect *and* Wildlife *and* Quests together.
         return self.wait_page(
-            ["Architect", "Work", "Assign", "Research", "Colonists",
-             "Wildlife", "Beauty", "This is a warning"], timeout, "colony")
+            ["Architect", "Wildlife", "Quests", "Schedule"], timeout, "colony")
 
     def clock_crop(self):
         """The date/time widget's rect in screen coords (top-right of the
