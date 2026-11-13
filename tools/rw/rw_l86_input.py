@@ -1439,6 +1439,25 @@ def run(q, grab, log_path, args, shots):
             d.measure(window, "worldgen2")
         png, words, got_site = d.wait_generating(1200)
     if got_site:
+        # The site page's footer is Back / Select random site / Factions / Next.
+        # run16 clicked "Start" -- a label that page does not have -- the page
+        # did not move, and the run ended with reached_site=True and no colony.
+        # Deterministic path instead: let the game choose the tile (the default
+        # landing spot can sit on sea ice, which RimWorld will not settle), then
+        # Next.  The block below still runs and simply finds nothing.
+        d.advance("site", "Select random site", [], 15, must_change=False)
+        w_ok, w_png, w_words, w_txt = (False, None, [], "")
+        try:
+            res = d.advance("site", "Next",
+                            ["Create characters", "characters", "Backstory",
+                             "Ideoligion"], 45)
+            if isinstance(res, tuple) and len(res) == 3:
+                w_ok, w_png, w_words = res
+                w_txt = d.text_of(w_words) if w_words else ""
+        except Exception as e:  # never let a driver bug end a 28-minute run
+            d.emit({"ev": "site_next_error", "stage": "site", "text": str(e)[:200]})
+        d.emit({"ev": "site_next_done", "stage": "site", "ok": bool(w_ok),
+                "text": (w_txt or "")[:300]})
         lp = d.land_point(png) if png else None
         if lp:
             d.emit({"ev": "site_point", "stage": "site", "screen": list(lp)})
