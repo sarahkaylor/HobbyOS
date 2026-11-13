@@ -816,6 +816,25 @@ class L86:
         png = self.shot("adv_%s_probe" % stage)
         words = self.ocr(png, tag="adv_%s" % stage)
         sx, sy, why = self.find_advance(png, words, label)
+        # A page that is still painting reads as nearly empty: measured on the
+        # storyteller page at ~9 fps, OCR came back "Te Back Ngxt" when the
+        # stage looked just after the previous click, and this function gave up
+        # on the whole run (the caller's `if ok:` chain then skipped every
+        # later stage).  Re-read instead of giving up: three more looks, 4 s
+        # apart, each logged.
+        for _try in range(1, 4):
+            if sx is not None:
+                break
+            time.sleep(4)
+            png = self.shot("adv_%s_probe%d" % (stage, _try))
+            words = self.ocr(png, tag="adv_%s_%d" % (stage, _try))
+            sx, sy, why = self.find_advance(png, words, label)
+            self.emit({"ev": "probe_retry", "stage": stage, "label": label,
+                       "try": _try, "found": sx is not None,
+                       "text": self.text_of(words)[:200]})
+            print("[L86] probe %-10s %-20s try %d -> %s"
+                  % (stage, str(label), _try, "found" if sx else "not yet"),
+                  flush=True)
         if sx is None:
             self.emit({"ev": "no_target", "stage": stage, "label": label,
                        "text": self.text_of(words)[:400]})
@@ -1163,7 +1182,8 @@ class L86:
                 chars_anchors + ["Settle here", "anyway", "Select starting site"],
                 timeout if _round == 0 else 240, "chars")
             txt0 = self.text_of(words).lower()
-            if ("anyway" in txt0 or "settle here" in txt0) and not any(
+            if ("anyway" in txt0 or "settle here" in txt0 or
+                    "select starting site" in txt0) and not any(
                     self.find(words, a) for a in chars_anchors):
                 self.emit({"ev": "settle_dialog", "stage": "chars",
                            "text": txt0[:300],
