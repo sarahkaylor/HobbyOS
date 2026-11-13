@@ -1528,11 +1528,17 @@ def run(q, grab, log_path, args, shots):
     got_colony = False
     if got_site:
         png_c, words_c, ok_c = d.dismiss_character_pages(420)
-        if ok_c:
-            png_c, words_c, got_colony = d.wait_colony(1500)
-            if got_colony:
-                d.gameplay(120, "colony")
-                d.gameplay(90, "colony2")
+        # Unconditional: run18 reached "Generating map ..." -- the colony was
+        # being built -- but dismiss_character_pages reported ok=False because
+        # the page it expected never appeared, and `if ok_c:` then skipped the
+        # entire colony wait.  wait_colony has its own 1500 s budget; if the
+        # pages really are still up it simply times out.
+        d.emit({"ev": "chars_pages", "stage": "chars", "ok": bool(ok_c),
+                "note": "proceeding to the colony wait regardless"})
+        png_c, words_c, got_colony = d.wait_colony(1500)
+        if got_colony:
+            d.gameplay(120, "colony")
+            d.gameplay(90, "colony2")
     d.shot("final")
     d.emit({"ev": "done", "stage": "end",
             "note": "reached_site=%s reached_colony=%s"
