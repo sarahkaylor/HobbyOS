@@ -1458,6 +1458,34 @@ def run(q, grab, log_path, args, shots):
             d.emit({"ev": "site_next_error", "stage": "site", "text": str(e)[:200]})
         d.emit({"ev": "site_next_done", "stage": "site", "ok": bool(w_ok),
                 "text": (w_txt or "")[:300]})
+        # "Next" alone does not advance this page: RimWorld only enables it once
+        # a tile has actually been *chosen*, and run20 proved the difference --
+        # the click landed (target "Next" at (1210,726), pixels=3332 = the
+        # button's own press animation) but the page stayed on "Select starting
+        # site".  The driver's single guessed point (970,428) had been in space.
+        # Sweep the land area instead, pressing Next after each pick, and stop at
+        # the first screen that is no longer the site page.
+        chars_anchors2 = ["Create characters", "Randomize", "Backstory",
+                          "Ideoligion"]
+        cb = d.crop_box or (98, 40, 1378, 776)
+        cw, ch = cb[2] - cb[0], cb[3] - cb[1]
+        for fx, fy in ((0.42, 0.58), (0.50, 0.64), (0.58, 0.60),
+                       (0.46, 0.70), (0.54, 0.52), (0.38, 0.66)):
+            px_s, py_s = int(cb[0] + fx * cw), int(cb[1] + fy * ch)
+            d.q.click(px_s, py_s, args.fb_w, args.fb_h, hold=2.0)
+            time.sleep(3)
+            pg, wd, ok_t = d.wait_page(chars_anchors2, 12, "chars")
+            t_t = d.text_of(wd or [])
+            d.emit({"ev": "site_tile", "stage": "site",
+                    "screen": [px_s, py_s], "ok": bool(ok_t),
+                    "text": t_t[:160]})
+            if ok_t:
+                break
+            ok_n, pn, wn = d.advance("site", "Next", chars_anchors2, 20)
+            if ok_n:
+                d.emit({"ev": "site_tile_next", "stage": "site", "ok": True,
+                        "screen": [px_s, py_s]})
+                break
         # A tile on ice sheet / polluted ground raises "Settle here anyway?",
         # which run16 photographed in full and never answered -- the panel read
         # `Planet Ice sheet`, `80.39N 1.70W`, `Movement difficulty: 3.5`, `-27.2C`
