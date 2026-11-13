@@ -936,6 +936,14 @@ class L86:
             if after else ""
         self.emit({"ev": "seed_focus", "stage": "seed", "field_before": clicked_txt,
                    "pixels": d.get("pixels"), "bbox": d.get("bbox")})
+        # clear first: the field arrives with a random word in it, and typing
+        # without clearing produced `salamander` -> `salan{ynder` -- a planet
+        # from whatever seed that happened to be.  End puts the caret at the
+        # end; Backspace then deletes leftward.
+        self.q.key("end", pause=0.2)
+        for _ in range(16):
+            self.q.key("backspace", pause=0.08)
+        time.sleep(0.8)
         # type the digits: QMP qcodes '1'..'9'
         for ch in digits:
             self.q.key(ch, pause=0.35)
@@ -1141,9 +1149,33 @@ class L86:
         `Next` is pressed up to three times and each press must show a new
         screen: a press that changes nothing is not repeated blindly, it is
         reported."""
-        png, words, _ok = self.wait_page(
-            ["Create characters", "Select characters", "Randomize",
-             "Backstory", "Choose ideoligion", "Ideoligion"], timeout, "chars")
+        # The site page can pop a "Settle here anyway?" confirmation before
+        # the character page exists (measured: `This tile is near polluted
+        # tiles ... Settle here anyway?`).  Its footer's rightmost brown band
+        # is the affirmative, so press that first.  `Select characters` is NOT
+        # an anchor: fuzzy matching hits `Select starting site` on the site
+        # page itself, which made this function declare the character page
+        # present while the site page was still up.
+        chars_anchors = ["Create characters", "Randomize", "Backstory",
+                         "Ideoligion"]
+        for _round in range(3):
+            png, words, _ok = self.wait_page(
+                chars_anchors + ["Settle here", "anyway", "Select starting site"],
+                timeout if _round == 0 else 240, "chars")
+            txt0 = self.text_of(words).lower()
+            if ("anyway" in txt0 or "settle here" in txt0) and not any(
+                    self.find(words, a) for a in chars_anchors):
+                self.emit({"ev": "settle_dialog", "stage": "chars",
+                           "text": txt0[:300],
+                           "note": "site confirmation -- pressing the footer's "
+                                   "rightmost brown band"})
+                print("[L86] chars: settling on the tile (dialog)", flush=True)
+                self.advance("chars", None, ["Create characters", "Randomize",
+                                             "Backstory", "Ideoligion"], 240)
+                continue
+            break
+        png, words, _ok = self.wait_page(chars_anchors, 240, "chars")
+        words = self.ocr(png, tag="chars") if png else words
         pressed = 0
         seen = []
         while pressed < 3:
@@ -1220,8 +1252,12 @@ class L86:
         time.sleep(2)
         cc = self.clock_crop()
         a = self.shot(tag + "_clock_a")
+        clock_a = self.text_of(self.ocr(a, tag=tag + "_clock_a", upscale=3,
+                                        box=cc))[:60] if (a and cc) else ""
         rec = self.measure(seconds, tag)
         b = self.shot(tag + "_clock_b")
+        clock_b = self.text_of(self.ocr(b, tag=tag + "_clock_b", upscale=3,
+                                        box=cc))[:60] if (b and cc) else ""
         clock = None
         if a and b and cc:
             na = np.asarray(Image.open(a).convert("L").crop(cc))
@@ -1230,12 +1266,12 @@ class L86:
         self.emit({"ev": "gameplay", "stage": tag, "ok": bool(rec and rec.get("fps")),
                    "fps": (rec or {}).get("fps"), "ms_frame": (rec or {}).get("ms_frame"),
                    "changed": (rec or {}).get("changed"),
-                   "clock_px": clock,
+                   "clock_px": clock, "clock_text": [clock_a, clock_b],
                    "note": "space unpauses; clock_px is the date widget's diff "
                            "over the window (0 would mean time is frozen)",
                    "shot": os.path.basename(b) if b else None})
-        print("[L86] gameplay %s fps=%s clock_px=%s"
-              % (tag, (rec or {}).get("fps"), clock), flush=True)
+        print("[L86] gameplay %s fps=%s clock_px=%s clock=%r -> %r"
+              % (tag, (rec or {}).get("fps"), clock, clock_a, clock_b), flush=True)
         # an in-game screen that only input can produce
         ok, png2, w2 = self.advance(tag, "Architect",
                                     ["Structure", "Furniture", "Orders",

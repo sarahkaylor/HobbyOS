@@ -1,4 +1,6 @@
 #include "unix.h"
+
+extern void *memcpy(void *dest, const void *src, unsigned long n);
 #include "fs.h"
 #include "process.h"
 #include "lock.h"
@@ -341,8 +343,11 @@ int usock_available(struct usock *u, int end) {
   return avail;
 }
 
-/* --- iovec copy helpers (byte-wise; `base` is a user VA the syscall layer
- * has already range-checked) ------------------------------------------- */
+/* --- iovec copy helpers (`base` is a user VA the syscall layer has already
+ * range-checked).  They copy with memcpy because they are the hot path: a
+ * 3.7 MB frame per presented present goes through the stream ring, and a
+ * byte-at-a-time loop here measured 33 MB/s (HBHOST [HBT] put_us=90-210 ms
+ * for 921 600 px), which alone caps the display at 6-10 fps. */
 
 /* Copy `n` bytes from `src` into the iovec set at iov-relative offset
  * `off`. */
@@ -358,7 +363,7 @@ static void iov_store(const struct k_iovec *io, int niov, int off,
     uint8_t *dst = (uint8_t *)io[v].base + off;
     int take = (int)(len - (uint64_t)off);
     if (take > n - k) take = n - k;
-    for (int i = 0; i < take; i++) dst[i] = src[k + i];
+    memcpy(dst, src + k, (unsigned long)take);
     k += take;
     off = 0;
   }
@@ -378,7 +383,9 @@ static void iov_load(const struct k_iovec *io, int niov, int off, uint8_t *dst,
     const uint8_t *src = (const uint8_t *)io[v].base + off;
     int take = (int)(len - (uint64_t)off);
     if (take > n - k) take = n - k;
-    for (int i = 0; i < take; i++) dst[k + i] = src[i];
+    /* memcpy, not a byte loop: this is the display transit (a 3.7 MB frame
+     * per present) and the pipe path.  The kernel's memcpy is `rep movsb`. */
+    memcpy(dst + k, src, (unsigned long)take);
     k += take;
     off = 0;
   }

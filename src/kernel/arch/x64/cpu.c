@@ -169,19 +169,30 @@ void arch_memory_barrier(void) {
 
 #include <stddef.h>
 
+/* Bulk copies are the kernel's hot path: the X display transit moves a
+ * 1280x720 frame (3.7 MB) per presented frame through the unix-socket ring,
+ * the block cache and the NFS window copy whole clusters, and the frame
+ * buffer is memset per clear.  A byte-at-a-time C loop costs ~33 MB/s here
+ * (measured from HBHOST's own [HBT] put_us: 90-210 ms for 921 600 px), which
+ * caps the display at ~6-10 fps on its own.
+ *
+ * `rep movsb`/`rep stosb` are one instruction each and run at memory speed
+ * (ERMSB on a host CPU, ~1-4 bytes/cycle even without it).  They are written
+ * as inline asm because the optimiser turns an obvious 8-byte loop back into
+ * a call to memcpy -- which is this function. */
 void *memset(void *s, int c, size_t n) {
-  unsigned char *p = s;
-  while (n--) {
-    *p++ = (unsigned char)c;
-  }
-  return s;
+  void *ret = s;
+  size_t k = n;
+  __asm__ volatile("rep stosb" : "+D"(s), "+c"(k) : "a"(c) : "memory");
+  return ret;
 }
 
 void *memcpy(void *dest, const void *src, size_t n) {
-  unsigned char *d = dest;
-  const unsigned char *s = src;
-  while (n--) {
-    *d++ = *s++;
-  }
-  return dest;
+  void *ret = dest;
+  size_t k = n;
+  __asm__ volatile("rep movsb"
+                   : "+D"(dest), "+S"(src), "+c"(k)
+                   :
+                   : "memory");
+  return ret;
 }
