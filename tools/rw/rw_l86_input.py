@@ -1410,7 +1410,24 @@ class L86:
                 # window is placed identically every boot, so fall back to the
                 # measured footer point (OCR found `Next` at 1210,726 on this
                 # same page in run20).
-                bx = [(1210, 726), (1300, 726), (1120, 726)][min(i, 2)]
+                # Measured on the Create characters footer: Back at
+                # (537,736), Xenotype editor at (922,739) -- so the footer row
+                # is y~737, not 726, and Start is the button at the right end,
+                # near x=1330.  Take the row's y from the frame itself when the
+                # word is readable, so a re-laid-out page does not need a new
+                # constant.
+                # NEVER a bare screen constant: the game window is not always
+                # at the same origin.  This boot placed it at client=(332,24)
+                # 1280x736 (serial: `[HB] geometry client=332,24,1280x736`),
+                # so every fixed (1210,726)-style point was ~350 px into empty
+                # desktop -- which is why ten presses changed nothing.  Derive
+                # the footer from the client rect the driver already parsed,
+                # and take the row's y from "Back" when it is readable.
+                gx, gy, gw, gh = (self.geom or (98, 40, 1280, 736))
+                hit = self.find(words, "Back")
+                fy = hit[0][1] if hit else (gy + gh - 22)
+                bx = [(gx + gw - 48, fy), (gx + gw - 80, fy),
+                      (gx + gw - 24, fy)][min(i, 2)]
             self.emit({"ev": "setup_press", "stage": "setup", "n": i,
                        "screen": [bx[0], bx[1]], "text": txt[:220]})
             print("[L86] setup: press rightmost footer band at (%d,%d) [%s]"
