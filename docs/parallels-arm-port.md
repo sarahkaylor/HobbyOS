@@ -4,7 +4,7 @@ Status: **measured, not ported.** Everything below was produced on this machine
 (MacBook Pro M5 Max, macOS 27.2.1, Parallels Desktop 26.4.1) on 2026-11-13 by
 booting `tools/probe/` as an aarch64 UEFI app inside a Parallels ARM VM and
 reading its report back over a raw-sector channel. Nothing here is inferred
-from documentation. Raw transcript: `evidence/parallels-arm/probe-parallels-arm.txt`.
+from documentation. Raw transcript: `docs/parallels-arm-probe.txt`.
 
 ## 1. The two questions that decide everything
 
@@ -73,8 +73,8 @@ make run ARCH=arm DESKTOP=hobby MODE=desktop QEMU_ARGS="-qmp unix:/tmp/hb-qmp.so
 stage then builds `HBHOST.BIN` from `src/user/hbhost/hbhost.c`, which uses
 `rdtsc` (`invalid output constraint '=a'`) and cannot compile for ARM.
 
-Evidence in this directory: `desktop-aarch64-qemu.png` (1920×1080 desktop),
-`doom-aarch64-qemu.png` (native `DOOM.BIN`, Freedoom IWAD, gameplay/demo loop,
+Evidence: `docs/parallels-arm-desktop.png` (1920×1080 desktop),
+`docs/parallels-arm-doom.png` (native `DOOM.BIN`, Freedoom IWAD, gameplay/demo loop,
 pid 3 alive with no faults).
 
 Launching a game on the native desktop needs keyboard navigation: the Apps menu
