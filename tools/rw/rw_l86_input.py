@@ -1291,8 +1291,26 @@ class L86:
             self.measure(20, "chars%d" % pressed)
             # The character page's affirmative is **Start**, not Next: its
             # footer reads `Back . Xenotype editor . Start` (measured on
-            # run28's frame), which is why `Next` was never found there and the
-            # run sat on this page until the 1500 s colony wait expired.
+            # run28's frame), and the label sits flush against the window's
+            # right edge where OCR reads it as a fragment ("S", "Star!") or
+            # misses it.  Two runs parked here because of that.  So on this
+            # page, click the *rightmost* footer band geometrically -- Start is
+            # right-aligned, Back is not -- instead of trusting the text.
+            if self.find(words, "Create characters"):
+                bb = brown_buttons(png, self.crop_box) if png else []
+                if bb:
+                    bx = max(bb, key=lambda b: b[0])
+                    self.emit({"ev": "chars_start", "stage": "chars",
+                               "how": "rightmost-brown-band",
+                               "screen": [bx[0], bx[1]], "pressed": pressed,
+                               "text": self.text_of(words)[:200]})
+                    print("[L86] chars: Start via rightmost footer band at (%d,%d)"
+                          % (bx[0], bx[1]), flush=True)
+                    _, png, words = self.click(
+                        "Start", bx[0], bx[1], "chars%d" % pressed,
+                        hold=0.2, settle=8.0)
+                    pressed += 1
+                    continue
             lbl = ("Start" if self.find(words, "Create characters") else "Next")
             ok, png2, w2 = self.advance(
                 "chars%d" % pressed, lbl,
