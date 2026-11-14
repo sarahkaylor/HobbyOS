@@ -1289,11 +1289,16 @@ class L86:
             # The characters/ideoligion pages are static UI: a frame-rate
             # reading here is a fair sample of a *drawing* screen.
             self.measure(20, "chars%d" % pressed)
+            # The character page's affirmative is **Start**, not Next: its
+            # footer reads `Back . Xenotype editor . Start` (measured on
+            # run28's frame), which is why `Next` was never found there and the
+            # run sat on this page until the 1500 s colony wait expired.
+            lbl = ("Start" if self.find(words, "Create characters") else "Next")
             ok, png2, w2 = self.advance(
-                "chars%d" % pressed, "Next",
+                "chars%d" % pressed, lbl,
                 ["Choose ideoligion", "Ideoligion", "Architect", "Work",
                  "Assign", "Research", "Loading map", "Generating map",
-                 "Select characters"], 150)
+                 "Select characters", "Start"], 150)
             pressed += 1
             png, words = png2, w2
             if not ok:
