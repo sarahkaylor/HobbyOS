@@ -1355,6 +1355,40 @@ class L86:
                    "text": self.text_of(words)[:400]})
         return png, words, False
 
+    def advance_setup_chain(self, rounds=10):
+        """Leave the whole new-colony setup chain, whatever page it is on.
+
+        Every page between site selection and the map -- site, the polluted /
+        ice "Settle here anyway?" confirmation, ideoligion, characters -- puts
+        its affirmative at the footer's *right end*, and OCR cannot read those
+        labels reliably because they sit flush against the window edge (measured:
+        `Next` -> "Nqxt", `Start` -> "S" or "Star!").  Three runs died on
+        per-page label rules, each on a different page; one geometric rule
+        covers all of them.  Stops when the colony HUD is up.
+        """
+        for i in range(rounds):
+            png = self.shot("setup%d" % i)
+            words = self.ocr(png, tag="setup%d" % i) if png else []
+            txt = self.text_of(words).lower()
+            if "architect" in txt and "wildlife" in txt:
+                return png, words, True
+            bb = brown_buttons(png, self.crop_box) if png else []
+            if not bb:
+                self.emit({"ev": "setup_wait", "stage": "setup", "n": i,
+                           "text": txt[:200],
+                           "note": "no footer band found; waiting"})
+                time.sleep(12)
+                continue
+            bx = max(bb, key=lambda b: b[0])
+            self.emit({"ev": "setup_press", "stage": "setup", "n": i,
+                       "screen": [bx[0], bx[1]], "text": txt[:220]})
+            print("[L86] setup: press rightmost footer band at (%d,%d) [%s]"
+                  % (bx[0], bx[1], txt[:40].replace("\n", " ")), flush=True)
+            self.click("affirm", bx[0], bx[1], "setup%d" % i,
+                       hold=0.2, settle=8.0)
+            time.sleep(4)
+        return None, None, False
+
     def wait_colony(self, timeout=1500):
         """Map generation -> the colony HUD.  Anchors are the bottom-left main
         buttons (Architect/Work/Assign/Research) and the colonist bar."""
@@ -1615,6 +1649,12 @@ def run(q, grab, log_path, args, shots):
         # pages really are still up it simply times out.
         d.emit({"ev": "chars_pages", "stage": "chars", "ok": bool(ok_c),
                 "note": "proceeding to the colony wait regardless"})
+        # Whatever page the setup chain stalled on, press through it
+        # geometrically before waiting for the HUD.
+        try:
+            d.advance_setup_chain(10)
+        except Exception as _e:
+            print('[L86] setup chain: %r' % (_e,), flush=True)
         png_c, words_c, got_colony = d.wait_colony(1500)
         if got_colony:
             d.gameplay(120, "colony")
