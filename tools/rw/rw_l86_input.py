@@ -1372,6 +1372,25 @@ class L86:
             txt = self.text_of(words).lower()
             if "architect" in txt and "wildlife" in txt:
                 return png, words, True
+            # On "Select starting site", Next stays disabled until a tile is
+            # really chosen, and the tile sweep's map clicks only *hover* (the
+            # info panel updates, the selection never sticks), so pressing the
+            # footer does nothing at all -- run34 logged ten setup_press rows
+            # and stayed on the page.  "Select random site" is the footer
+            # button that *does* commit a tile, and the run that reached the
+            # colony (run23) went through exactly that path.
+            if "select starting site" in txt:
+                self.emit({"ev": "setup_random_site", "stage": "setup", "n": i,
+                           "screen": [760, 726],
+                           "text": txt[:200]})
+                print("[L86] setup: click 'Select random site' at (760,726)",
+                      flush=True)
+                self.click("Select random site", 760, 726, "setup%d" % i,
+                           hold=0.2, settle=8.0)
+                time.sleep(3)
+                png = self.shot("setup%d_r" % i)
+                words = self.ocr(png, tag="setup%d_r" % i) if png else words
+                txt = self.text_of(words).lower()
             bb = brown_buttons(png, self.crop_box) if png else []
             if bb:
                 bx = max(bb, key=lambda b: b[0])
