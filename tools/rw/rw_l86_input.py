@@ -1373,13 +1373,17 @@ class L86:
             if "architect" in txt and "wildlife" in txt:
                 return png, words, True
             bb = brown_buttons(png, self.crop_box) if png else []
-            if not bb:
-                self.emit({"ev": "setup_wait", "stage": "setup", "n": i,
-                           "text": txt[:200],
-                           "note": "no footer band found; waiting"})
-                time.sleep(12)
-                continue
-            bx = max(bb, key=lambda b: b[0])
+            if bb:
+                bx = max(bb, key=lambda b: b[0])
+            else:
+                # Run33 emitted ten setup_wait rows and zero presses: the site
+                # page's footer buttons are not brown, so the band detector
+                # found nothing and the run sat on `Select starting site`.
+                # These pages all use the same footer geometry, and the game
+                # window is placed identically every boot, so fall back to the
+                # measured footer point (OCR found `Next` at 1210,726 on this
+                # same page in run20).
+                bx = [(1210, 726), (1300, 726), (1120, 726)][min(i, 2)]
             self.emit({"ev": "setup_press", "stage": "setup", "n": i,
                        "screen": [bx[0], bx[1]], "text": txt[:220]})
             print("[L86] setup: press rightmost footer band at (%d,%d) [%s]"
