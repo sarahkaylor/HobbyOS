@@ -1380,17 +1380,25 @@ class L86:
             # button that *does* commit a tile, and the run that reached the
             # colony (run23) went through exactly that path.
             if "select starting site" in txt:
+                # Use the driver's OCR path (word box + aliases + retries)
+                # rather than a guessed pixel: run35 clicked (760,726) ten
+                # times and the page never moved, because that point is not the
+                # `Select random site` button.  This is also how run23 -- the
+                # only run that reached a colony -- got past this page.
                 self.emit({"ev": "setup_random_site", "stage": "setup", "n": i,
-                           "screen": [760, 726],
                            "text": txt[:200]})
-                print("[L86] setup: click 'Select random site' at (760,726)",
+                print("[L86] setup: OCR 'Select random site', then Next",
                       flush=True)
-                self.click("Select random site", 760, 726, "setup%d" % i,
-                           hold=0.2, settle=8.0)
-                time.sleep(3)
-                png = self.shot("setup%d_r" % i)
-                words = self.ocr(png, tag="setup%d_r" % i) if png else words
+                self.advance("setup%d_r" % i, "Select random site", [], 25,
+                             must_change=False)
+                self.advance("setup%d_n" % i, "Next", [], 25)
+                png = self.shot("setup%d_after" % i)
+                words = self.ocr(png, tag="setup%d_after" % i) if png else words
                 txt = self.text_of(words).lower()
+                if "architect" in txt and "wildlife" in txt:
+                    return png, words, True
+                if "select starting site" not in txt:
+                    continue
             bb = brown_buttons(png, self.crop_box) if png else []
             if bb:
                 bx = max(bb, key=lambda b: b[0])
