@@ -293,8 +293,28 @@ virgl_hobbyos_winsys_resource_create(struct virgl_winsys *vws,
    if (size < stride)
       size = stride;
    {
-      uint64_t need = (uint64_t)stride * MAX2(height, 1u) *
-                      MAX2(depth ? depth : 1u, 1u);
+      /* The backing must hold every mip level of every array slice, not just
+       * level 0 of one slice: RimWorld's planet ramp is an 8192x4096 texture
+       * with last_level=4, so level 0 alone is 64 MiB while the resource is
+       * ~85 MiB, and any texture array multiplies that again.  A short shadow
+       * means the mip uploads have nowhere to land, the host keeps whatever
+       * garbage it had for levels 1..n, and sampling with mips is what paints
+       * the black wedges and grey bands across the world map. */
+      uint64_t need = 0;
+      uint32_t lw = MAX2(width, 1u), lh = MAX2(height, 1u);
+      uint32_t ld = MAX2(depth ? depth : 1u, 1u);
+      uint32_t lv = 0;
+      for (;;) {
+         uint64_t s = util_format_get_stride(format, lw) * (uint64_t)lh * ld;
+         need += s;
+         if (lv >= last_level || (lw == 1 && lh == 1 && ld == 1))
+            break;
+         lw = MAX2(lw >> 1, 1u);
+         lh = MAX2(lh >> 1, 1u);
+         ld = MAX2(ld >> 1, 1u);
+         lv++;
+      }
+      need *= MAX2(array_size, 1u);
       if (need > size && need <= UINT32_MAX)
          size = (uint32_t)need;
    }
