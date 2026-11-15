@@ -79,7 +79,14 @@ typedef enum {
      read/write refuse it; the compat ioctl(16) route answers the GPU_IOC_*
      requests through gpu_abi.c.  mmap is refused in M1 (no blob resources).
      Appended last: no values shift. */
-  FILE_TYPE_DEVGPU
+  FILE_TYPE_DEVGPU,
+  /* cp/ext2 (docs/cp-ext2.md): a regular file / a directory on the ext2 data
+     disk mounted at /EXT (src/kernel/ext2_vfs.c).  The file keeps the inode
+     number and a 64-bit cursor; the inode is referenced (ext2_iget) for the
+     life of the description, so an unlinked-while-open file survives until
+     its last close.  Appended last: no values shift. */
+  FILE_TYPE_EXT2,
+  FILE_TYPE_EXT2DIR
 } file_type_t;
 
 struct vm_object;
@@ -151,6 +158,10 @@ struct file {
       int mfd_flags;               /**< MFD_* passed at create (recorded) */
     } memfd;
     struct {
+      uint32_t ino;                /**< cp/ext2: inode number */
+      uint64_t cursor;             /**< file offset / getdents byte position */
+    } ext2;
+    struct {
       int slot;                    /**< L49: index into linux_compat_timers'
                                         timer table */
     } timerfd;
@@ -171,6 +182,10 @@ struct file {
 void fs_init(void);
 struct trap_frame;
 int file_open(struct process *p, const char *filename, int flags);
+/* cp/ext2: open(2) with its mode argument (stored only by the ext2 volume;
+ * file_open() passes 0666, the umask 022 then applies). */
+int file_open_mode(struct process *p, const char *filename, int flags,
+                   int mode);
 /* M5 exec-from-NFS: read a whole program image into a contiguous frame range
  * via the same VFS route open() uses.  1 = NFS (buf/size/pages filled, caller
  * frees the frames), 0 = FAT16 path (use the legacy cluster loader), <0 = a
@@ -400,6 +415,7 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
  * set (EBADF/ENOENT/EINVAL). */
 int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp);
 int file_fd_is_devfb(struct process *p, int fd);   /* GB-167: /dev/fb0 node? */
+int file_fd_is_ext2(struct process *p, int fd);    /* cp/ext2: 1/0, -1 = bad fd */
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp);
 /* M6 launch plumbing: the absolute path an open fd was opened from, for

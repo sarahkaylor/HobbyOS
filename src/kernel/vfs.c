@@ -14,11 +14,14 @@
 #include "process.h"
 #include "kline.h"
 #include "errno.h"
+#include "ext2_vfs.h"
 
 extern struct process *current_process(void);
 
 void vfs_init(void) {
   nfs_init();
+  /* cp/ext2: mount the optional data disk at /EXT (a no-op without one). */
+  ext2v_init();
 }
 
 /* ==================================================================== */
@@ -34,7 +37,9 @@ static void vfs_clean(const char *path, char *out, int cap) {
   }
   temp[len] = '\0';
 
-  char *stack[16];
+  /* cp/ext2: 64 components, was 16 -- a deeper path used to lose its tail
+     components silently (Wine prefixes nest deeper than 16). */
+  char *stack[64];
   int top = 0;
   char *p = temp;
   while (*p == '/') p++;
@@ -51,7 +56,7 @@ static void vfs_clean(const char *path, char *out, int cap) {
       if (top > 0) top--;
       continue;
     }
-    if (top < 16) stack[top++] = comp;
+    if (top < 64) stack[top++] = comp;
   }
 
   if (cap <= 0) return;
@@ -129,6 +134,7 @@ int vfs_mount(const char *source, const char *target) {
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) return -1;
   if (abs[1] == '\0') return -1;               /* never mount over "/" */
+  if (ext2v_owns(abs)) return -1;              /* cp/ext2: /EXT is taken */
 
   /* Make the mount point visible in FAT listings: create it if needed
    * (an already existing directory is fine). */
@@ -201,6 +207,20 @@ int vfs_chdir(const char *path, char *out_new_cwd, int cap) {
   char abs[VFS_PATH_MAX];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) return -1;
 
+  if (ext2v_owns(abs)) { /* cp/ext2 */
+    int r = ext2v_chdir(abs);
+    if (r == 0) {
+      int i = 0;
+      while (abs[i] && i < cap - 1) {
+        out_new_cwd[i] = abs[i];
+        i++;
+      }
+      out_new_cwd[i] = '\0';
+      return abs[i] ? -1 : 0; /* a cwd that does not fit is refused */
+    }
+    if (r != EXT2_EXTERNAL) return -1;
+  }
+
   int midx = -1;
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) {
@@ -226,6 +246,11 @@ int vfs_read_dir(const char *path, int index, char *name, int ncap,
   char abs[VFS_PATH_MAX];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) return -1;
 
+  if (ext2v_owns(abs)) { /* cp/ext2 */
+    int r = ext2v_read_dir(abs, index, name, ncap, attr, size);
+    if (r != EXT2_EXTERNAL) return r < 0 ? -1 : r;
+  }
+
   int midx = -1;
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) {
@@ -240,6 +265,10 @@ int vfs_read_dir(const char *path, int index, char *name, int ncap,
 int vfs_unlink(const char *path) {
   char abs[VFS_PATH_MAX];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) return -1;
+  if (ext2v_owns(abs)) { /* cp/ext2 */
+    int r = ext2v_unlink(abs);
+    if (r != EXT2_EXTERNAL) return r;
+  }
   int midx = -1;
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) return -1;      /* NFS: read-only */
@@ -252,6 +281,11 @@ int vfs_rename(const char *oldp, const char *newp) {
   char abs_new[VFS_PATH_MAX];
   if (vfs_abs_path(oldp, abs_old, sizeof abs_old) != 0) return -1;
   if (vfs_abs_path(newp, abs_new, sizeof abs_new) != 0) return -1;
+  /* cp/ext2: both ends on ext2, or -EXDEV (no cross-volume moves). */
+  if (ext2v_owns(abs_old) || ext2v_owns(abs_new)) {
+    if (!ext2v_owns(abs_old) || !ext2v_owns(abs_new)) return -EXDEV;
+    return ext2v_rename(abs_old, abs_new, 0);
+  }
 
   int midx = -1;
   const char *rel = 0;
@@ -263,6 +297,10 @@ int vfs_rename(const char *oldp, const char *newp) {
 int vfs_mkdir(const char *path) {
   char abs[VFS_PATH_MAX];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) return -1;
+  if (ext2v_owns(abs)) { /* cp/ext2 */
+    int r = ext2v_mkdir(abs, 0777);
+    if (r != EXT2_EXTERNAL) return r;
+  }
   int midx = -1;
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) return -1;       /* NFS: read-only */
@@ -276,6 +314,10 @@ int vfs_mkdir(const char *path) {
 int vfs_rmdir(const char *path) {
   char abs[VFS_PATH_MAX];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENOENT;
+  if (ext2v_owns(abs)) { /* cp/ext2 */
+    int r = ext2v_rmdir(abs);
+    if (r != EXT2_EXTERNAL) return r;
+  }
   int midx = -1;
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) return -EROFS;   /* NFS: read-only */
@@ -287,6 +329,7 @@ int vfs_cwd_writable(void) {
   const char *cwd = (cur && cur->cwd[0]) ? cur->cwd : "/";
   int midx = -1;
   const char *rel = 0;
+  if (ext2v_owns(cwd)) return !ext2v_readonly(); /* cp/ext2 */
   return vfs_route(cwd, &midx, &rel) ? 0 : 1;
 }
 
@@ -296,6 +339,13 @@ int vfs_stats(uint64_t *total, uint64_t *free_bytes) {
 
   int midx = -1;
   const char *rel = 0;
+  if (ext2v_owns(cwd)) { /* cp/ext2 */
+    struct ext2_statfs sf;
+    if (ext2v_statfs(&sf) != 0) return -1;
+    *total = sf.blocks * sf.bsize;
+    *free_bytes = sf.bavail * sf.bsize;
+    return 0;
+  }
   if (vfs_route(cwd, &midx, &rel)) {
     const struct nfs_mount *m = nfs_mount_at(midx);
     if (!m) return -1;
