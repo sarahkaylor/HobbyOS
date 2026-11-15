@@ -525,6 +525,42 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, (int64_t)dst);
 }
 
+/* ---- GB-308: fsync(fd) flushes the MAPPING's pages ---------------------- */
+/* Flush the pages a process has mapped from one FAT16 file, identified by
+ * (cluster, size).  It must walk the REGIONS, not the page-cache object: writing
+ * through fat16_write invalidates the cache (an in-place write changes the bytes
+ * behind the object), so after one flush file_obj_get() builds a fresh object and
+ * file_obj_page() refills from disk -- and writing THOSE pages back puts stale
+ * bytes on the file.  Measured: fsync() wrote the mapping's 'N' correctly, then
+ * fdatasync() wrote the pre-change 'A' over the next byte
+ * (obj/jdk/fsync.log: disk[0]=N ok, disk[1]=A want X).  A live mapping keeps its
+ * own frames across invalidation, and those frames are the truth.
+ * Returns 0, or the last write error. */
+int l_mem_fsync_file(struct process *p, uint16_t cl, uint32_t sz,
+                     struct trap_frame *tf) {
+  struct addr_space *as = l_as(p);
+  if (!as || !as->regions) return 0;
+  int bad = 0;
+  for (int i = 0; i < as->nr; i++) {
+    struct vm_region *r = &as->regions[i];
+    if (!r->obj || r->obj->kind != VM_OBJ_FILE) continue;
+    if (r->obj->file_start_cluster != cl || (uint32_t)r->obj->size != sz) continue;
+    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) continue;
+    for (uint64_t a = r->base; a < r->base + r->len; a += LPG) {
+      uint64_t off = r->obj_off + (a - r->base);
+      uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
+      uint64_t fr = file_obj_page(r->obj, pg);
+      if (!fr) continue;
+      uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
+                                                             : (uint64_t)LPG);
+      if (off + n > r->obj->size) n = (uint32_t)(r->obj->size - off);
+      int wr = file_writeback_fat16(p, cl, sz, (uint32_t)off, (const void *)fr, n, tf);
+      if (wr != 0) bad = wr;
+    }
+  }
+  return bad;
+}
+
 /* ---- msync -------------------------------------------------------------- */
 
 static int l_mem_msync(struct process *p, struct trap_frame *tf) {
