@@ -41,17 +41,31 @@ FAT (`VM_OBJ_FILE`), NFS (`VM_OBJ_NFS`) and ext2 (`VM_OBJ_EXT2`) already had
 private COW through `vm_file_obj_materialize`; they do not share the new fill
 path.  ext2 is re-verified here (probe rows C14).
 
-**Known limits (pre-existing, not introduced here):**
-- shrinking an object (`ftruncate`) frees frames that other mappings may still
-  map (shared or private); there is no reverse map to zap them.  Wine never
-  shrinks a mapped section (the server refuses with
-  `STATUS_USER_MAPPED_FILE`).
-- `mremap` of a private object mapping re-resolves the object at the new
-  address: COW dirt is not carried (`linux_compat_mem.c` header).
+**Two original known limits, fixed after the first merge (625add68):**
+- **`ftruncate` shrink under live mappings** used to free object frames that
+  `MAP_SHARED` views and read-through private pages still mapped — a
+  use-after-free once a frame was reused.  `vm_object_truncate` now shrinks
+  in two phases: under `vm_lock` it drops every leaf, in every v2 address
+  space (`vm_as_pool`), that maps a cut-off object frame — plus, in private
+  regions, the COW copies of those pages, as Linux's `truncate_pagecache`
+  does (`even_cows`) — and shrinks the object, leaving the frames *parked*
+  past `nr_frames`; then it shoots down the touched address spaces and frees
+  what is still parked.  A regrow over a parked frame zeroes it; object free
+  covers parked frames.  A touch past the new end faults (HobbyOS kills with
+  SIGSEGV; Linux sends SIGBUS).  Private COW copies freed in phase 1 follow
+  the munmap rule (local flush, then the shootdown).
+- **`mremap(MREMAP_MAYMOVE)` of a private object mapping** carries its COW
+  copies (`vm_mremap_carry_private`); pages still reading through refault
+  from the object at the new address.  Also: `MREMAP_FIXED` always moves (it
+  returned the old address when the size did not grow).
+
+**Known limits still open:**
 - FAT private mappings do not see later `write()`s (every FAT write
   invalidates the page-cache object); tmpfs/memfd/ext2 do.
+- `munmap` (pre-existing) flushes only the local TLB; other CPUs running
+  threads of the same group are not shot down.
 
-**Evidence:** `src/user/linux_probe_cow.c` (C1–C14) passes on the Linux host
+**Evidence:** `src/user/linux_probe_cow.c` (C1–C16) passes on the Linux host
 (strix, reference) and in HobbyOS; base fails 11 rows (all the `-95`s plus the
 `EPERM`→`ENOMEM` rewrite).  Unit test `test_vm_memfd_private_cow`
 (`vm_test.c`) checks frames exactly (object frame identity, writability, fork,

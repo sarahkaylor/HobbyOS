@@ -454,6 +454,30 @@ static void c16_mremap(void) {
   close(fd);
 }
 
+/* C16b: grow with MREMAP_MAYMOVE only, blocked in place: the kernel picks
+   the new address. */
+static void c16b_mremap_grow(void) {
+  int fd = mfd("cowg", 0);
+  if (fd < 0 || fill_obj(fd, 3) != 0) { ck(0, "C16 grow memfd", errno); return; }
+  /* reserve 4 pages, put the 2-page file view in the first half: the
+     reservation's tail blocks an in-place grow */
+  char *res = mmap(0, 4 * PG, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  volatile char *g = res == MAP_FAILED ? MAP_FAILED
+      : mmap(res, 2 * PG, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, fd, 0);
+  if (g == MAP_FAILED) { ck(0, "C16 grow setup", errno); close(fd); return; }
+  void *blk = res + 2 * PG;
+  g[PG + 5] = 'G';
+  volatile char *h = mremap((void *)g, 2 * PG, 3 * PG, MREMAP_MAYMOVE);
+  ck(h != MAP_FAILED && h != g, "C16 blocked grow moves", h == MAP_FAILED ? errno : 0);
+  if (h != MAP_FAILED && h != g) {
+    ck(h[PG + 5] == 'G' && h[2 * PG] == 'c' && obj_byte(fd, PG + 5) == 'b',
+       "C16 moved grow carries the COW copy, new page reads the object", h[PG + 5]);
+    munmap((void *)h, 3 * PG);
+  }
+  munmap(blk, 2 * PG);
+  close(fd);
+}
+
 int main(int argc, char **argv) {
   c1_c4_memfd();
   c5_exec();
@@ -467,6 +491,7 @@ int main(int argc, char **argv) {
   c13_unmap_churn();
   c15_truncate();
   c16_mremap();
+  c16b_mremap_grow();
   c14_ext2(argc > 1 ? argv[1] : "/EXT");
   char d[64];
   snprintf(d, sizeof d, "/tmp/cowp-%d", (int)getpid());

@@ -1,5 +1,5 @@
 t3_linux_probe: building /home/sarah/cp/lanes/wine2/obj/intel/probe_cow.elf
-=== t3_linux_probe: cow (deadline 300s, log /tmp/w2/lane-cow2.tier) ===
+=== t3_linux_probe: cow (deadline 300s, log /tmp/w2/wine2-cow6.tier) ===
 [LP] PASS C1 memfd 4 pages (0)
 [LP] PASS C1 mmap memfd MAP_PRIVATE RW (0)
 [LP] PASS C1 mmap memfd MAP_SHARED alongside (0)
@@ -49,6 +49,20 @@ t3_linux_probe: building /home/sarah/cp/lanes/wine2/obj/intel/probe_cow.elf
 [LP] PASS C12 child's MAP_SHARED stores visible in parent's private view (65)
 [LP] PASS C13 256 x 64-page private map/write/unmap (1)
 [LP] PASS C13 object pages intact after the churn (97)
+[LP] PASS C15 touch past the shrunk end is a fatal signal (11)
+[LP] PASS C15 views resident before the shrink (98)
+[LP] PASS C15 shrink to 1 page, regrow to 3 (1)
+[LP] PASS C15 shared view reads the regrown hole as zeros (0)
+[LP] PASS C15 private read-through page reads zeros (0)
+[LP] PASS C15 private COW copy past the cut is discarded (Linux even_cows) (0)
+[LP] PASS C15 below the cut: object and COW copy untouched (81)
+[LP] PASS C15 regrown page shared again by both views (78)
+[LP] PASS C16 mremap MAYMOVE|FIXED (0)
+[LP] PASS C16 COW copy carried to the new address (80)
+[LP] PASS C16 other pages read through at the new address (89)
+[LP] PASS C16 object unchanged (97)
+[LP] PASS C16 blocked grow moves (0)
+[LP] PASS C16 moved grow carries the COW copy, new page reads the object (71)
 [LP] PASS C14 ext2 file 2 pages (0)
 [LP] PASS C14 ext2 MAP_PRIVATE RW (0)
 [LP] PASS C14 private reads file bytes (97)
