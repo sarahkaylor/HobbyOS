@@ -34,7 +34,15 @@ public class FileDurability {
             System.out.println("DUR plain.txt reread=" + back.length
                 + " first=" + (back.length > 0 ? (char) back[0] : '?'));
         }
-        System.out.println("DUR VERDICT mmap=" + (Files.size(Paths.get("/JDKTMP/mm.txt")) > 0 ? "landed" : "LOST")
+        /* "size > 0" was the wrong test and printed "mmap=landed" for a file whose
+           mapped bytes were gone -- the file landed, the writes did not.  The only
+           verdict worth printing is whether the MAPPED bytes are on disk. */
+        byte[] mm = Files.exists(Paths.get("/JDKTMP/mm.txt"))
+            ? Files.readAllBytes(Paths.get("/JDKTMP/mm.txt")) : new byte[0];
+        boolean mappedBytesPresent = mm.length >= 4096
+            && mm[0] == (byte) 'Z' && mm[4095] == (byte) 'Q';
+        System.out.println("DUR VERDICT mapped-bytes="
+            + (mappedBytesPresent ? "PRESENT" : "ABSENT (write-through missing)")
             + " plain=" + (Files.size(plain) == 4096 ? "ok" : "BROKEN"));
     }
 }
