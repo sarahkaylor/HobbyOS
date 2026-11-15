@@ -1,0 +1,43 @@
+cp-int-exec @ 978a0844 (merge of cp-exec onto cyberpunk d36ced39 + the integration vfork fix + 978a0844),
+strix ~/cp/lanes/int-exec, MAKEFLAGS=-j16, every boot under flock /tmp/cp-qemu.lock.
+Batch: obj/int-exec-gates.sh (mirror of ~/cp/integ-gates2.sh + tools/cp/exec/exec_gate.sh + ARM).
+Parity reference: ~/cp/integ-gates2.txt (d36ced39 alone): the same 23 probes all rc=0.
+
+build rc=0
+avx rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+unit rc=1 Tests failed! Tests run:    451 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244 
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 360 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+ALLDONE
+
+[HOST] ok   /lpx/out/dyn.txt: ok dyn pid=5 libc=2.31 libcpath=/EXT/lpx/glibc/libc.so.6 argv0=/EXT/lpx/bin/hd
+[HOST] ok   /lpx/out/static.txt: ok static pid=4 libc=2.31 libcpath=static argv0=/EXT/lpx/bin/hs (glibc static-pie, 914592 bytes, from ext2)
+[LP] ok   execve glibc static-pie (/XHS.ELF) exit=23
+[LP] ok   execve glibc dynamic (/XHD.ELF) exit=23
+[LP] ok   execve glibc dynamic-from-tmpfs (/tmp/lpexec_xhd) exit=23
