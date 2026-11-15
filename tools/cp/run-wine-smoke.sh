@@ -9,7 +9,9 @@
 # territory and is expected to fault; this records exactly where.
 #
 # Env: CP_WINE_STAGE (default ~/cp/wine-build/stage/CP/WINE),
-#      WINE_EXPORT (default /srv/nfs/wine-smoke), TIMEOUT_S (default 240),
+#      WINE_EXPORT (default /srv/nfs/wine-smoke; exported to 127.0.0.1 only --
+#      QEMU user networking reaches the host from localhost; removed on exit),
+#      TIMEOUT_S (default 240),
 #      GLIBC231 (default /tmp/glibc231; run-rimworld.sh populates it).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -31,6 +33,8 @@ done
 [ -f "$LDIR/libc-2.31.so" ] || die "no glibc 2.31 at $LDIR (run tools/rw/run-rimworld.sh once, or set GLIBC231)"
 
 echo "== export: $EXPORT (CP/WINE copy)"
+MADE_EXPORT_DIR=""
+[ -e "$EXPORT" ] || MADE_EXPORT_DIR=1
 sudo -n mkdir -p "$EXPORT/WINE"
 sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/"
 sudo -n chmod -R a+rX "$EXPORT"
@@ -48,11 +52,18 @@ restore_exports() {
     echo "== WARNING: /etc/exports differs from $EXP_BAK"
   fi
 }
-trap restore_exports EXIT
+# The export copy is removed again too, so nothing is left on the host.
+cleanup() {
+  restore_exports
+  if [ -n "$MADE_EXPORT_DIR" ]; then
+    sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
+  fi
+}
+trap cleanup EXIT
 if ! grep -qsE "^[[:space:]]*${EXPORT//./\\.}[[:space:]]" /etc/exports; then
   EXP_BAK="/etc/exports.cp-sys-backup.$(date +%Y%m%d%H%M%S)"
   sudo -n cp -a /etc/exports "$EXP_BAK"
-  printf '%s *(%s)\n' "$EXPORT" "$OPTS" | sudo -n tee -a /etc/exports >/dev/null
+  printf '%s 127.0.0.1(%s)\n' "$EXPORT" "$OPTS" | sudo -n tee -a /etc/exports >/dev/null
 fi
 sudo -n exportfs -ra
 
