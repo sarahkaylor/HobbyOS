@@ -29,15 +29,17 @@
 # Exit 0 only when G1, G2 and G3 all pass.
 # Env: CP_WINE_STAGE (default ~/cp/wine-build/stage/CP/WINE),
 #      GLIBC231_LIB (default ~/cp/wine-build/glibc231/lib/x86_64-linux-gnu),
-#      WINE_EXPORT (default /srv/nfs/cp-wine2-p2), TIMEOUT_S (default 2400),
-#      P2_WINEDEBUG (default err+all,fixme-all), QEMU_MEM (default unset).
+#      WINE_EXPORT (default /srv/nfs/cp-wine2-p2), TIMEOUT_S (default 7200),
+#      P2_WINEDEBUG (default err+all,fixme-all), QEMU_MEM (default unset),
+#      P2_BOOT_ONLY=1 (iteration aid: only wineboot -i, then wineserver -k;
+#      never a gate result).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 2
 STAGE="${CP_WINE_STAGE:-$HOME/cp/wine-build/stage/CP/WINE}"
 LDIR="${GLIBC231_LIB:-$HOME/cp/wine-build/glibc231/lib/x86_64-linux-gnu}"
 EXPORT="${WINE_EXPORT:-/srv/nfs/cp-wine2-p2}"
-TIMEOUT_S="${TIMEOUT_S:-2400}"
+TIMEOUT_S="${TIMEOUT_S:-7200}"
 WDBG="${P2_WINEDEBUG:-err+all,fixme-all}"
 OUT="$ROOT/obj/wine-p2"; mkdir -p "$OUT"
 LOG="$OUT/serial.log"
@@ -93,6 +95,7 @@ UCFLAGS=(-O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics
          -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding
          -mno-red-zone -nostdinc -isystem "$RESINC" -mcmodel=large)
 clang "${UCFLAGS[@]}" -DWINE_EXPORT="\"$EXPORT\"" -DP2_WINEDEBUG="\"$WDBG\"" \
+  ${P2_BOOT_ONLY:+-DP2_BOOT_ONLY=1} \
   -c src/user/winep2.c -o "$OUT/winep2.o" || die "winep2.c"
 ld.lld -T src/user/linker.ld -e _start -o "$OUT/winep2.elf" "$OUT/winep2.o" obj/intel/libc.a || die "ld winep2"
 llvm-objcopy -O binary "$OUT/winep2.elf" "$OUT/winep2.bin"
@@ -132,9 +135,11 @@ QA="-display none -enable-kvm${QEMU_MEM:+ -m $QEMU_MEM}"
 flock /tmp/cp-qemu.lock bash -c '
   ( make -o disk.img ARCH=intel MODE=test EDK2_X86_64='"$OVMF"' run \
          QEMU_ARGS="'"$QA"'" >>'"$LOG"' 2>&1 & )
-  for _ in $(seq 1 '"$TIMEOUT_S"'); do
+  for i in $(seq 1 '"$TIMEOUT_S"'); do
     grep -aq "System halt" '"$LOG"' && break
     grep -aq "\[P2\] done" '"$LOG"' && sleep 3 && break
+    # QEMU gone (crashed or stopped by hand): nothing more will arrive.
+    [ $i -gt 30 ] && ! fuser '"$IMG"' >/dev/null 2>&1 && break
     sleep 1
   done
   # Only the QEMU holding THIS tree'"'"'s disk.img: other lanes share the box.

@@ -33,6 +33,9 @@
 #define P2_WINEDEBUG "err+all,fixme-all"
 #endif
 #define MNT "/CP"
+#ifndef P2_BOOT_QUIESCE_S
+#define P2_BOOT_QUIESCE_S 3600
+#endif
 
 static void pc(const char *s) { print_console(s); }
 static void pd(long v) {
@@ -144,8 +147,15 @@ int main(void) {
      run the wine binary with argv[0] = "wineboot". */
   char *a_boot[] = { (char *)"wineboot", (char *)"-i", 0 };
   step("wineboot", "/CP/WINE/bin/wine", a_boot, 900);
-  quiesce("wineboot", 30);
+  /* wineboot -i outlives its launcher here: the prefix's DefaultInstall
+     reads ~150 MB of builtin DLLs over NFS (1.3 KiB per RPC on this client),
+     which takes longer than the 5 minutes Wine's run_wineboot waits for the
+     boot event ("boot event wait timed out", the launcher then exits 53).
+     The work itself carries on in wineboot.exe/rundll32.exe, so wait for the
+     whole tree to finish before the next step uses the prefix. */
+  quiesce("wineboot", P2_BOOT_QUIESCE_S);
 
+#ifndef P2_BOOT_ONLY
   char *a_echo[] = { (char *)"wine", (char *)"cmd", (char *)"/c", (char *)"echo", (char *)"hello", 0 };
   step("echo", "/CP/WINE/bin/wine", a_echo, 300);
   quiesce("echo", 30);
@@ -160,6 +170,7 @@ int main(void) {
     step("winprobe-c", "/CP/WINE/bin/wine", a_wpc, 300);
   }
 
+#endif
   char *a_k[] = { (char *)"wineserver", (char *)"-k", 0 };
   step("kill", "/CP/WINE/bin/wineserver", a_k, 60);
 
