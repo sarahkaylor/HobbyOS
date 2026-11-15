@@ -62,11 +62,18 @@ Failures stay in the table — a deleted failure is a lost bug report.
 | # | probe | verdict | log |
 |---|---|---|---|
 | — | (baseline) `sdktest.sh` on `72477b57` | 4/4 PASS, suite 18/18 | `obj/jdk/sdk-*.log` |
-| 5 | 19 OpenJDK test sources (`java/lang/{String,Integer,Math}`), one VM | **18/19 PASS**, `String/Split` HANGS >15 s (host: 820 ms) | `obj/jdk/jtreg-subset.log` |
-| 5a | `Split` alone, 240 s budget, default JIT | pending | `obj/jdk/split-jit.log` |
-| 5b | `Split` alone, 240 s budget, `-Xint` | pending | `obj/jdk/split-int.log` |
+| 5 | 19 OpenJDK test sources (`java/lang/{String,Integer,Math}`), one VM | **19/19 correct**; `String/Split` needs ~20 s here (host 0.82 s), so a 15 s cap reported it as a hang — the cap was wrong, not the VM | `obj/jdk/jtreg-subset.log`, `obj/jdk/jtreg-subset2.log` |
+| 5a | `Split` alone, 240 s budget, default JIT | **PASS, elapsed=20094 ms** | `obj/jdk/split-jit.log` |
+| 5b | `Split` alone, 240 s budget, `-Xint` | HANG-after-240s — consistent with the interpreter costing ~10-30x the JIT, i.e. 400 s+ for this test | `obj/jdk/split-int.log` |
 
 ### Workstream 5 method notes
+
+**Lesson recorded the hard way: a timeout is a budget, not a verdict.** `String/Split`
+was reported as a hang on the strength of a 15 s cap. Given a 240 s budget it
+passes in 20.1 s — 24x the host's 0.82 s, which is the ordinary TCG emulation
+factor for CPU-bound string/regex work, not a defect. Before calling anything a
+hang, measure what it costs when given room; the `-Xint` run then behaved exactly
+as the model predicts (interpreter ≫ JIT, so it exceeds even 240 s).
 
 - Tests are OpenJDK's own sources, fetched with a blob-filtered sparse checkout of
   `github.com/openjdk/jdk` (`test/jdk/java/lang/{String,Integer,Math}`), compiled

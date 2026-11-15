@@ -15,7 +15,7 @@ import java.util.*;
  *     would die with them). */
 public class OpenJdkTests {
     static final String[] TESTS = { "Chars", "ContentEquals", "EqualsIgnoreCase", "HashCode", "Indent", "IsBlank", "Lines", "Split", "Strip", "Transform", "Decode", "ParsingTest", "Unsigned", "ValueOf", "AbsPositiveZero", "Clamp", "MinMax", "PowTests", "RoundTests" };
-    static final int TIMEOUT_MS = 15000;
+    static final int TIMEOUT_MS = 90000;  // TCG: String/Split needs ~20 s here vs 0.8 s native
 
     public static void main(String[] args) {
         int pass = 0, fail = 0;
