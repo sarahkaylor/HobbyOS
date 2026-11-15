@@ -1164,6 +1164,9 @@ static void compat_writev(struct trap_frame *tf) {
     }
     if (len == 0) continue;
     if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT; /* clamp one write() */
+    /* P1: validate (and demand-fill, file-backed pages included) the segment
+       before file_write copies from it in kernel mode (C4-x noprefault hang). */
+    if (!sys_user_range(base, len, 0)) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : -EFAULT); return; }
     int r = file_write(c, fd, (const void *)(uintptr_t)base, (int)len, tf);
     if (r == -2) {
       /* A parked write (full pipe / unix socket).  Mirror sys_write: rewind the
@@ -1207,7 +1210,9 @@ static void compat_readv(struct trap_frame *tf) {
     }
     if (len == 0) continue;
     if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT;
-    if (!sys_user_range_ok(base, len)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+    /* P1: write=1 -- the kernel stores into it, so a MAP_PRIVATE file page
+       must be copied-on-write here, not materialised read-only. */
+    if (!sys_user_range(base, len, 1)) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : -EFAULT); return; }
     int r = file_read(c, fd, (void *)(uintptr_t)base, (int)len, tf);
     if (r == -2) {
       if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
@@ -4827,6 +4832,34 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
+    /* P1 (D11 + the C4-x noprefault hang): a kernel-mode #PF on a valid user
+       address of the current address space is a demand fault exactly like a
+       user one -- anonymous, file-backed (FAT/NFS page cache, COW) and object
+       pages alike -- so any syscall that copies straight from/to user memory
+       is safe, whatever the VA (compat processes live below USER_VA_BASE).
+       It runs BEFORE the fatal-dump machinery (panic_claim/record): that path
+       is for faults nothing can resolve.  Unresolved (hole, protection, I/O
+       error) or repeating at one page falls through to it, which kills the
+       process (SIGSEGV) instead of halting. */
+    if (tf->vector == 14 && cur && (tf->cs & 3) != 3) {
+      uint64_t kcr2;
+      __asm__ volatile("mov %%cr2, %0" : "=r"(kcr2));
+      struct process *kg = process_group(cur);
+      if (kg && kg->as && vm_va_is_user(kg->as, kcr2)) {
+        static uint64_t kdf_last[MAX_CPUS];
+        static uint32_t kdf_rep[MAX_CPUS];
+        uint32_t kc = get_cpuid();
+        if (kc >= MAX_CPUS) kc = 0;
+        if (kdf_last[kc] == (kcr2 & ~0xFFFULL)) kdf_rep[kc]++;
+        else { kdf_last[kc] = kcr2 & ~0xFFFULL; kdf_rep[kc] = 0; }
+        if (kdf_rep[kc] < 4) {
+          const char *why = "PROT";
+          int pf_w = (int)((tf->error_code >> 1) & 1);
+          if (vm_handle_fault(kg, kcr2, pf_w, 0, &why) == 0)
+            return; /* PTE live; iretq retries the kernel access */
+        }
+      }
+    }
     /* P2.3 (S3, design section 5.2): a v2 process's user #PF is either a
        demand fault (materialize + retry) or a kill with an exact reason.
        Error code: bit0 P (0 = not-present), bit1 W/R, bit4 I/D. */
@@ -5673,7 +5706,8 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       if (tf->vector == 14 && cur) {
         uint64_t kcr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(kcr2));
-        if (kcr2 >= USER_VA_BASE) {
+        if (kcr2 >= USER_VA_BASE ||
+            (process_group(cur)->as && vm_va_is_user(process_group(cur)->as, kcr2))) {
           /* GB-057: a kernel-mode #PF at the SAME address that keeps being
              "handled" is a retry loop, not a fix: measured live, a CPU sat on
              the `rep movsq` inside enter_user_space (RIP 0x7003B1CF) for 14
