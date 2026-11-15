@@ -17,6 +17,7 @@
 #include "frame.h" /* M5: fs_read_image contiguous image frames */
 #include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
 #include "ext2_vfs.h" /* cp/ext2: the /EXT data disk */
+#include "tmpfs.h" /* cp/sys: the compat /tmp */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -782,6 +783,32 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
    * symlink in it that leads off the volume (Wine's dosdevices/z: -> /)
    * hands back the redirected path, which then takes the normal FAT16/NFS
    * route below. */
+  /* cp/sys: /tmp for a compat process is the tmpfs (tmpfs.h).  A symlink in
+   * it that leaves /tmp hands back the redirected path, which then takes the
+   * ext2 / FAT16 / NFS routes below. */
+  char tredir[VFS_PATH_MAX];
+  if (f->path[0] && tmpfs_owns(f->path)) {
+    fs_copy_path(tredir, f->path);
+    int tr = tmpfs_open(tredir, flags, mode, f);
+    if (tr == 0) {
+      int tfd = fd_install(cur, f);
+      if (tfd == -1) {
+        tmpfs_close(f);
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -EMFILE;
+      }
+      return tfd;
+    }
+    if (tr != TMPFS_EXTERNAL) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return tr < 0 ? tr : -EIO;
+    }
+    fs_copy_path(f->path, tredir);
+    filename = f->path;
+  }
+
   char e2redir[VFS_PATH_MAX];
   if (f->path[0] && ext2v_owns(f->path)) {
     fs_copy_path(e2redir, f->path);
@@ -1301,7 +1328,11 @@ void file_locks_release_pid(int pid) {
  * user pointer whose range + alignment the trap layer has validated. */
 static int file_lock_fcntl(struct process *pg, struct file *f, int cmd,
                            uint64_t uarg) {
-  if (f->type != FILE_TYPE_FAT16) return -EINVAL;
+  /* cp/sys: tmpfs files carry real inode numbers; the identity is the
+     (K_DEV_TMPFS, ino) pair folded with the top bit set, so it can never
+     collide with a FAT16 directory-entry location (< 2^48). */
+  int is_tmpfs = (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR);
+  if (f->type != FILE_TYPE_FAT16 && !is_tmpfs) return -EINVAL;
   if (!uarg) return -EFAULT;
   const uint8_t *u = (const uint8_t *)uarg;
   int type = (int)(int16_t)((uint16_t)u[K_FLOCK_OFF_TYPE] |
@@ -1317,15 +1348,16 @@ static int file_lock_fcntl(struct process *pg, struct file *f, int cmd,
   /* Resolve whence against the open handle's cursor / size (SQLite uses
    * SEEK_SET; CUR/END are supported for completeness). */
   if (whence == 1) /* SEEK_CUR */
-    start += (int64_t)f->fat16.cursor;
+    start += is_tmpfs ? (int64_t)f->tmpfs.cursor : (int64_t)f->fat16.cursor;
   else if (whence == 2) /* SEEK_END */
-    start += (int64_t)f->fat16.entry.file_size;
+    start += is_tmpfs ? tmpfs_size(f) : (int64_t)f->fat16.entry.file_size;
   else if (whence != 0) /* SEEK_SET */
     return -EINVAL;
   if (start < 0) return -EINVAL;
 
   int pid = pg->pid;
-  uint64_t id = file_lock_id(f);
+  uint64_t id = is_tmpfs ? (0x8000000000000000ULL | tmpfs_file_ino(f))
+                         : file_lock_id(f);
   uint64_t flags = spinlock_acquire_irqsave(&file_locks_lock);
   file_locks_sweep_dead();
 
@@ -1395,8 +1427,11 @@ int file_ftruncate(struct process *p, int fd, int64_t length) {
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_MEMFD) {
     if (length < 0 || (uint64_t)length > VM_OBJ_MAX_BYTES) return -EINVAL;
-    return vm_object_truncate(f->memfd.obj, (uint64_t)length);
+    /* cp/sys: serialised against memfd read/write (tmpfs object I/O). */
+    return tmpfs_obj_truncate(f->memfd.obj, (uint64_t)length);
   }
+  if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR)
+    return tmpfs_ftruncate(f, length); /* cp/sys */
   if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR)
     return ext2v_ftruncate(f, length); /* cp/ext2 */
   if (f->type != FILE_TYPE_FAT16) return -EINVAL;
@@ -1562,6 +1597,18 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
   if (f->type == FILE_TYPE_FAT16 || f->type == FILE_TYPE_NFS) {
     /* Regular files are always readable (a read may return 0 at EOF). */
     *r = 1;
+    return 0;
+  }
+  /* cp/sys: tmpfs files and memfds are regular files (read + write ready). */
+  if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR ||
+      f->type == FILE_TYPE_MEMFD) {
+    *r = 1;
+    *w = 1;
+    return 0;
+  }
+  if (f->type == FILE_TYPE_EVENTFD) {
+    extern void l_eventfd_probe(int slot, int *r, int *w);
+    l_eventfd_probe(f->eventfd.slot, r, w);
     return 0;
   }
   return -1;
@@ -1913,6 +1960,13 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
     base = (int64_t)f->ext2.cursor;
     size = ext2v_size(f);
     if (size < 0) { *errp = EIO; return -1; }
+  } else if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR) {
+    base = (int64_t)f->tmpfs.cursor; /* cp/sys */
+    size = tmpfs_size(f);
+    if (size < 0) { *errp = EBADF; return -1; }
+  } else if (f->type == FILE_TYPE_MEMFD) {
+    base = (int64_t)f->memfd.cursor; /* cp/sys: memfds are seekable files */
+    size = (int64_t)vm_object_size(f->memfd.obj);
   } else {
     *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK ||
              f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL ||
@@ -1937,6 +1991,10 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
     f->fat16.cursor = (uint32_t)newpos;
   else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR)
     f->ext2.cursor = (uint64_t)newpos;
+  else if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR)
+    f->tmpfs.cursor = (uint64_t)newpos;
+  else if (f->type == FILE_TYPE_MEMFD)
+    f->memfd.cursor = (uint64_t)newpos;
   else
     f->nfs.cursor = (uint32_t)newpos;
   ylock_release(&f->lock);
@@ -2075,6 +2133,20 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     if (r) { *errp = -r; return -1; }
     return 0;
   }
+  case FILE_TYPE_TMPFS:
+  case FILE_TYPE_TMPFSDIR: { /* cp/sys */
+    int r = tmpfs_fstat(f, st);
+    if (r) { *errp = -r; return -1; }
+    return 0;
+  }
+  case FILE_TYPE_MEMFD:
+    /* cp/sys: Linux reports a memfd as a 0777 regular file of its size. */
+    k_stat_fill(st, K_DEV_TMPFS, (unsigned long)g_fd + 0x100000,
+                K_S_IFREG | 0777, (long)vm_object_size(f->memfd.obj));
+    return 0;
+  case FILE_TYPE_EVENTFD:
+    k_stat_fill(st, K_DEV_DEVFS, (unsigned long)g_fd + 0x200000, 0600, 0);
+    return 0;
   default:
     *errp = EBADF;
     return -1;
@@ -2211,6 +2283,13 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
     int er = ext2v_getdents64(f, ubuf, bufsize);
     ylock_release(&f->lock);
     return er;
+  }
+  if (f->type == FILE_TYPE_TMPFSDIR) { /* cp/sys */
+    if (!ubuf || bufsize <= 0) return -EINVAL;
+    ylock_acquire(&f->lock);
+    int tr = tmpfs_getdents64(f, ubuf, bufsize);
+    ylock_release(&f->lock);
+    return tr;
   }
   if (f->type != FILE_TYPE_FAT16DIR && f->type != FILE_TYPE_PROCFD &&
       f->type != FILE_TYPE_NFSDIR)
@@ -2389,6 +2468,19 @@ int file_fd_is_ext2(struct process *p, int fd) {
   return f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR;
 }
 
+/* cp/sys: fchdir(2)'s question.  1 for an open directory on any volume. */
+int file_fd_is_dir(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_EMPTY) return -EBADF;
+  return f->type == FILE_TYPE_FAT16DIR || f->type == FILE_TYPE_NFSDIR ||
+         f->type == FILE_TYPE_EXT2DIR || f->type == FILE_TYPE_TMPFSDIR ||
+         f->type == FILE_TYPE_PROCFD;
+}
+
 /* GB-167: is this fd the /dev/fb0 node?  The Linux-ABI ioctl arm needs it to
    route FBIO* requests to the framebuffer machinery instead of ENOTTY. */
 int file_fd_is_devfb(struct process *p, int fd) {
@@ -2443,8 +2535,17 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
     k_stat_fill(st, K_DEV_PROCFS, 3, K_S_IFLNK | 0777, n);
     return 0;
   }
-  char abs[256];
+  char abs[VFS_PATH_MAX];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
+  /* cp/sys: the compat /tmp (follows symlinks; one that leaves /tmp
+     continues with the redirected path). */
+  if (tmpfs_owns(abs)) {
+    int r = tmpfs_stat(abs, 1, st);
+    if (r != TMPFS_EXTERNAL) {
+      if (r) { *errp = -r; return -1; }
+      return 0;
+    }
+  }
   /* cp/ext2: stat(2) follows symlinks; one that leaves the volume continues
      with the redirected path below. */
   if (ext2v_owns(abs)) {
@@ -2558,6 +2659,10 @@ int file_close(struct process *cur, int fd) {
    * closing ANY fd of a FAT16 file drops this process's locks on it. */
   int lock_release = (f->type == FILE_TYPE_FAT16);
   uint64_t lock_id = lock_release ? file_lock_id(f) : 0;
+  if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR) {
+    lock_release = 1; /* cp/sys: same identity file_lock_fcntl uses */
+    lock_id = 0x8000000000000000ULL | tmpfs_file_ino(f);
+  }
   int isgpu = (f->type == FILE_TYPE_DEVGPU); /* M1: released after f->lock */
 
   /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
@@ -2594,6 +2699,11 @@ int file_close(struct process *cur, int fd) {
       fat16_close(f);
     } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
       ext2v_close(f); /* cp/ext2: drops the inode ref (frees an orphan) */
+    } else if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR) {
+      tmpfs_close(f); /* cp/sys: frees an unlinked node at its last close */
+    } else if (f->type == FILE_TYPE_EVENTFD) {
+      extern void l_eventfd_release(int slot);
+      l_eventfd_release(f->eventfd.slot);
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
     }
@@ -2717,6 +2827,11 @@ void fs_close_global(int g_fd) {
       fat16_close(f);
     } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
       ext2v_close(f); /* cp/ext2 */
+    } else if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR) {
+      tmpfs_close(f); /* cp/sys */
+    } else if (f->type == FILE_TYPE_EVENTFD) {
+      extern void l_eventfd_release(int slot);
+      l_eventfd_release(f->eventfd.slot);
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
     }
@@ -3093,6 +3208,21 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     int er = ext2v_read(f, buf, size);
     ylock_release(&f->lock);
     return er;
+  } else if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR) {
+    ylock_acquire(&f->lock); /* cp/sys: per-description cursor */
+    int tr = tmpfs_read(f, buf, size);
+    ylock_release(&f->lock);
+    return tr;
+  } else if (f->type == FILE_TYPE_MEMFD) {
+    /* cp/sys: a memfd reads its object exactly as a tmpfs file does. */
+    ylock_acquire(&f->lock);
+    int mr = tmpfs_obj_read(f->memfd.obj, f->memfd.cursor, buf, size);
+    if (mr > 0) f->memfd.cursor += (uint64_t)mr;
+    ylock_release(&f->lock);
+    return mr;
+  } else if (f->type == FILE_TYPE_EVENTFD) {
+    extern int l_eventfd_read(struct file *f, void *buf, int size);
+    return l_eventfd_read(f, buf, size);
   } else if (f->type == FILE_TYPE_NFS) {
     if (f->nfs.is_dir) return -1;               /* use read_dir for dirs */
     if (size <= 0) return 0;
@@ -3378,6 +3508,20 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
     int ew = ext2v_write(f, buf, size);
     ylock_release(&f->lock);
     return ew;
+  } else if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR) {
+    ylock_acquire(&f->lock); /* cp/sys */
+    int tw = tmpfs_write(f, buf, size);
+    ylock_release(&f->lock);
+    return tw;
+  } else if (f->type == FILE_TYPE_MEMFD) {
+    ylock_acquire(&f->lock); /* cp/sys: memfd write grows its object */
+    int mw = tmpfs_obj_write(f->memfd.obj, f->memfd.cursor, buf, size);
+    if (mw > 0) f->memfd.cursor += (uint64_t)mw;
+    ylock_release(&f->lock);
+    return mw;
+  } else if (f->type == FILE_TYPE_EVENTFD) {
+    extern int l_eventfd_write(struct file *f, const void *buf, int size);
+    return l_eventfd_write(f, buf, size);
   } else if (f->type == FILE_TYPE_NFS) {
     return -1;      /* NFS mounts are read-only */
   } else if (f->type == FILE_TYPE_PIPE) {
@@ -3499,6 +3643,31 @@ int file_timerfd_create(struct process *cur, int clockid, int flags) {
   return ufd;
 }
 
+/* cp/sys: an eventfd.  The counter state lives in linux_compat_fd.c (slot
+   table, read/write/poll semantics); the fd and the global slot are here. */
+int file_eventfd_create(struct process *cur, unsigned int initval, int flags) {
+  extern int l_eventfd_new(unsigned int initval, int flags);
+  extern void l_eventfd_release(int slot);
+  cur = process_group(cur);
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  int slot = l_eventfd_new(initval, flags);
+  if (slot < 0) return slot;
+  int ufd = -1;
+  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++)
+    if (cur->open_fds[i] == -1) { ufd = i; break; }
+  if (ufd < 0) { l_eventfd_release(slot); return -EMFILE; }
+  struct file *f = file_alloc();
+  if (!f) { l_eventfd_release(slot); return -ENFILE; }
+  f->type = FILE_TYPE_EVENTFD;
+  f->eventfd.slot = slot;
+  f->open_flags = 0x2 | ((uint32_t)flags & 0x800); /* O_RDWR [| O_NONBLOCK] */
+  f->path[0] = '\0';
+  cur->open_fds[ufd] = get_global_fd(f);
+  cur->num_open_fds++;
+  if (flags & 0x80000) fd_cloexec_set(cur->fd_cloexec, ufd);
+  return ufd;
+}
+
 /* L49: an epoll instance's fd. */
 int file_epoll_create(struct process *cur, int flags) {
   extern int lt_epoll_new(void);
@@ -3593,6 +3762,8 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
   f->type = FILE_TYPE_MEMFD;
   f->memfd.obj = o; /* this fd instance's object reference */
   f->memfd.mfd_flags = flags & (K_MFD_CLOEXEC | K_MFD_ALLOW_SEALING);
+  f->memfd.cursor = 0; /* cp/sys: memfds read/write/seek like files */
+  f->open_flags = 0x2; /* O_RDWR: Linux memfds are opened read-write */
 
   cur->open_fds[ufd] = get_global_fd(f);
   cur->num_open_fds++;
@@ -3661,7 +3832,19 @@ int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
 struct vm_object *file_memfd_obj(struct process *p, int fd) {
   int err = 0;
   struct file *f = f1_memfd(p, fd, &err);
-  if (!f || !f->memfd.obj)
+  if (!f) {
+    /* cp/sys: a tmpfs regular file maps its data object, the same frames
+       read()/write() use -- MAP_SHARED pages are coherent across every
+       process that maps the file (KUSER_SHARED_DATA, Wine's sections). */
+    struct process *g = process_group(p);
+    if (!g || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
+    int gfd = g->open_fds[fd];
+    if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
+    struct file *tf = &global_file_table[gfd];
+    if (tf->type != FILE_TYPE_TMPFS) return 0;
+    return tmpfs_file_obj(tf);
+  }
+  if (!f->memfd.obj)
     return 0;
   return f->memfd.obj;
 }

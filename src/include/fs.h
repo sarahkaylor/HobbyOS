@@ -86,7 +86,16 @@ typedef enum {
      life of the description, so an unlinked-while-open file survives until
      its last close.  Appended last: no values shift. */
   FILE_TYPE_EXT2,
-  FILE_TYPE_EXT2DIR
+  FILE_TYPE_EXT2DIR,
+  /* cp/sys (docs/cp-sys.md): a regular file / a directory on the compat
+     /tmp tmpfs (src/kernel/tmpfs.c).  The description references its node
+     (unlinked-while-open survives to the last close); a regular file's data
+     is a vm_object shared with every MAP_SHARED mapping of it.  Appended
+     last: no values shift. */
+  FILE_TYPE_TMPFS,
+  FILE_TYPE_TMPFSDIR,
+  /* cp/sys: an eventfd counter (linux_compat_fd.c owns the slot table). */
+  FILE_TYPE_EVENTFD
 } file_type_t;
 
 struct vm_object;
@@ -156,7 +165,16 @@ struct file {
       struct vm_object *obj;       /**< P2.4 (S4): memfd backing object;
                                         holds one object ref per fd instance */
       int mfd_flags;               /**< MFD_* passed at create (recorded) */
+      uint64_t cursor;             /**< cp/sys: read/write/lseek offset */
     } memfd;
+    struct {
+      int node;                    /**< cp/sys: tmpfs node index */
+      uint64_t ino;                /**< its inode number (reuse guard) */
+      uint64_t cursor;             /**< offset / getdents position */
+    } tmpfs;
+    struct {
+      int slot;                    /**< cp/sys: eventfd counter slot */
+    } eventfd;
     struct {
       uint32_t ino;                /**< cp/ext2: inode number */
       uint64_t cursor;             /**< file offset / getdents byte position */
@@ -212,6 +230,11 @@ int file_available(struct process *p, int fd);
 int file_memfd_create(struct process *p, const char *name, int flags);
 struct vm_object *file_memfd_obj(struct process *p, int fd);
 int file_memfd_seals(struct process *p, int fd, int cmd, int arg);
+/* cp/sys: an eventfd fd over linux_compat_fd.c's counter slots. */
+int file_eventfd_create(struct process *p, unsigned int initval, int flags);
+/* cp/sys: 1 when `fd` is an open directory (any filesystem), 0 when it is
+ * some other open fd, -EBADF when it is not open.  fchdir(2) uses it. */
+int file_fd_is_dir(struct process *p, int fd);
 int file_connect(struct process *p, uint32_t ip, uint16_t port, int protocol);
 int file_mkdir(struct process *p, const char *path);
 

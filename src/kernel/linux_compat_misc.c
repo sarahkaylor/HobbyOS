@@ -36,6 +36,7 @@
 #include "linux_syscall.h"
 #include "process.h"
 #include "vfs.h"
+#include "tmpfs.h" /* cp/sys */
 
 /* vfs.h does not declare rmdir (the native handler declares it locally); keep
    the same shape here rather than growing a shared header for one call. */
@@ -188,6 +189,19 @@ static int l_misc_rmdir(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, rc);
 }
 
+/* cp/sys: store an absolute directory path as the group's cwd.  The cwd
+   buffer is 128 bytes (process.h); a longer path is refused rather than
+   truncated (a truncated cwd names a different directory). */
+static int l_misc_set_cwd(struct process *p, const char *abs) {
+  struct process *grp = process_group(p);
+  if (!grp) return -EINVAL;
+  int n = 0;
+  while (abs[n]) n++;
+  if (n >= (int)sizeof grp->cwd) return -ENAMETOOLONG;
+  for (int i = 0; i <= n; i++) grp->cwd[i] = abs[i];
+  return 0;
+}
+
 static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
   char path[256];
   int r = l_misc_path(p, l_arg(tf, 0), path, sizeof path);
@@ -195,6 +209,26 @@ static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
   struct process *grp = process_group(p);
   char new_cwd[128];
   if (!grp) return l_misc_ret(tf, -EINVAL);
+  /* cp/sys: the compat /tmp.  A symlink there that leaves /tmp continues
+     with the redirected path through the VFS below. */
+  {
+    char abs[VFS_PATH_MAX];
+    if (path[0] == '\0') return l_misc_ret(tf, -ENOENT);
+    if (vfs_abs_path(path, abs, sizeof abs) != 0)
+      return l_misc_ret(tf, -ENAMETOOLONG);
+    if (tmpfs_owns(abs)) {
+      int tr = tmpfs_chdir(abs);
+      if (tr != TMPFS_EXTERNAL) {
+        if (tr != 0) return l_misc_ret(tf, tr);
+        return l_misc_ret(tf, l_misc_set_cwd(p, abs));
+      }
+      for (int i = 0; i < (int)sizeof path; i++) {
+        path[i] = abs[i];
+        if (!abs[i]) break;
+      }
+      path[sizeof path - 1] = '\0';
+    }
+  }
   if (vfs_chdir(path, new_cwd, sizeof new_cwd) != 0) return l_misc_ret(tf, -ENOENT);
   int k = 0;
   while (new_cwd[k] && k < 127) {

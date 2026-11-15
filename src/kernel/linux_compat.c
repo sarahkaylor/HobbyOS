@@ -47,6 +47,10 @@ extern const struct l_sysent l_tab_tmr[] __attribute__((weak));
    DECLINE (return 0) a number another table owns when the path/fd is not on
    the ext2 volume -- the search then continues below as if it were absent. */
 extern const struct l_sysent l_tab_ext2[] __attribute__((weak));
+/* cp/sys (src/kernel/tmpfs_compat.c): the compat /tmp.  Consulted before
+   l_tab_ext2 with the same DECLINE contract: a row answers only for a path
+   (or fd) on the tmpfs and returns 0 for everything else. */
+extern const struct l_sysent l_tab_tmpfs[] __attribute__((weak));
 
 /* ---- user-memory helpers ------------------------------------------------ */
 
@@ -360,6 +364,15 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
 #else
 #define L_DISPATCH_RET(v) do { fat16_flush_pending(); return (v); } while (0)
 #endif
+  if (l_tab_tmpfs) {
+    for (unsigned i = 0; l_tab_tmpfs[i].fn; i++) {
+      if ((uint64_t)(int64_t)l_tab_tmpfs[i].nr == nr) {
+        int _t = l_tab_tmpfs[i].fn(p, tf);
+        if (_t) L_DISPATCH_RET(_t);
+        break;
+      }
+    }
+  }
   if (l_tab_ext2) {
     for (unsigned i = 0; l_tab_ext2[i].fn; i++) {
       if ((uint64_t)(int64_t)l_tab_ext2[i].nr == nr) {

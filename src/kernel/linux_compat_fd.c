@@ -57,6 +57,10 @@
 #include "process.h"
 #include "vfs.h"
 #include "virtio_gpu.h" /* GB-025 / M3: the scanout address for FBIOGET_* */
+#include "timer.h"
+#include "tmpfs.h" /* cp/sys: bind(2) socket inodes in the compat /tmp */
+#include "unix.h"  /* cp/sys: K_UNIX_SUN_LEN / K_UNIX_PATH_MAX */
+
 
 /* close_range(2) flags (Linux values; not syscall numbers, so local). */
 #define L_CLOSE_RANGE_UNSHARE 0x2u
@@ -874,6 +878,136 @@ static int l_fd_fchown(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, rc);
 }
 
+/* ---- cp/sys: eventfd ------------------------------------------------------
+ *
+ * A real counter (Linux eventfd(2)): write adds a u64, read returns and
+ * clears it (or returns 1 and decrements it with EFD_SEMAPHORE); readable
+ * while the counter is non-zero, writable while another 1 fits below
+ * 0xfffffffffffffffe.  A blocking read/write parks in 10 ms slices through
+ * the scheduler (the timerfd model: the condition is re-polled on the
+ * restarted syscall), never spins.  Upstream Wine 11.0 does not call it
+ * (no eventfd in server/ or dlls/ntdll/unix/); the host Proton run shows 4
+ * calls (docs/cp-p0-host.md §4), so it is implemented, not refused. */
+#define L_EFD_SEMAPHORE 0x1
+#define L_EFD_NONBLOCK 0x800
+#define L_EFD_CLOEXEC 0x80000
+#define L_EVENTFD_SLOTS 256
+#define L_EVENTFD_MAX 0xfffffffffffffffeULL
+
+static struct {
+  int used;
+  int sem;
+  uint64_t count;
+} l_efd[L_EVENTFD_SLOTS];
+static spinlock_t l_efd_lock;
+
+int l_eventfd_new(unsigned int initval, int flags) {
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  int slot = -ENFILE;
+  for (int i = 0; i < L_EVENTFD_SLOTS; i++) {
+    if (!l_efd[i].used) {
+      l_efd[i].used = 1;
+      l_efd[i].sem = (flags & L_EFD_SEMAPHORE) != 0;
+      l_efd[i].count = initval;
+      slot = i;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  return slot;
+}
+
+void l_eventfd_release(int slot) {
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  l_efd[slot].used = 0;
+  l_efd[slot].count = 0;
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+}
+
+void l_eventfd_probe(int slot, int *r, int *w) {
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  uint64_t c = l_efd[slot].count;
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  if (c > 0) *r = 1;
+  if (c < L_EVENTFD_MAX) *w = 1;
+}
+
+/* Park the calling THREAD for one slice; the syscall restarts. */
+static int l_efd_park(void) {
+  struct process *cur = current_process();
+  if (!cur) return -EAGAIN;
+  if (linux_compat_sig_deliverable(cur)) return -EINTR;
+  uint64_t fl = spinlock_acquire_irqsave(&proc_lock);
+  cur->wake_ms = timer_get_ms() + 10;
+  cur->state = PROC_STATE_BLOCKED;
+  spinlock_release_irqrestore(&proc_lock, fl);
+  return -2;
+}
+
+int l_eventfd_read(struct file *f, void *buf, int size) {
+  if (size < 8) return -EINVAL;
+  int slot = f->eventfd.slot;
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return -EBADF;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  uint64_t c = l_efd[slot].count;
+  uint64_t v = 0;
+  if (c > 0) {
+    v = l_efd[slot].sem ? 1 : c;
+    l_efd[slot].count = c - v;
+  }
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  if (c == 0) {
+    if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
+    return l_efd_park();
+  }
+  if (l_copy_to_user(current_process(), (uint64_t)(uintptr_t)buf, &v, 8) != 0) {
+    /* Put the value back: the read did not happen. */
+    fl = spinlock_acquire_irqsave(&l_efd_lock);
+    l_efd[slot].count += v;
+    spinlock_release_irqrestore(&l_efd_lock, fl);
+    return -EFAULT;
+  }
+  return 8;
+}
+
+int l_eventfd_write(struct file *f, const void *buf, int size) {
+  if (size < 8) return -EINVAL;
+  int slot = f->eventfd.slot;
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return -EBADF;
+  uint64_t v = 0;
+  if (l_copy_from_user(current_process(), &v, (uint64_t)(uintptr_t)buf, 8) != 0)
+    return -EFAULT;
+  if (v == 0xffffffffffffffffULL) return -EINVAL;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  uint64_t c = l_efd[slot].count;
+  int fits = v <= L_EVENTFD_MAX - c;
+  if (fits) l_efd[slot].count = c + v;
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  if (!fits) {
+    if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
+    return l_efd_park();
+  }
+  return 8;
+}
+
+static int l_fd_eventfd_common(struct process *p, struct trap_frame *tf,
+                               unsigned int initval, int flags) {
+  if (flags & ~(L_EFD_SEMAPHORE | L_EFD_NONBLOCK | L_EFD_CLOEXEC))
+    return l_ret(tf, -EINVAL);
+  return l_ret(tf, file_eventfd_create(p, initval, flags));
+}
+
+static int l_fd_eventfd(struct process *p, struct trap_frame *tf) {
+  return l_fd_eventfd_common(p, tf, (unsigned int)l_arg(tf, 0), 0);
+}
+
+static int l_fd_eventfd2(struct process *p, struct trap_frame *tf) {
+  return l_fd_eventfd_common(p, tf, (unsigned int)l_arg(tf, 0),
+                             (int)l_argi(tf, 1));
+}
+
 /* ---- the table --------------------------------------------------------- */
 
 const struct l_sysent l_tab_fd[] = {
@@ -910,5 +1044,8 @@ const struct l_sysent l_tab_fd[] = {
   {L_SYS_pselect6, l_fd_pselect6, "pselect6"},
   {L_SYS_ioctl, l_fd_ioctl, "ioctl"},
   {L_SYS_fcntl, l_fd_fcntl, "fcntl"},
+  /* cp/sys (docs/cp-sys.md): rows Wine reaches */
+  {L_SYS_eventfd, l_fd_eventfd, "eventfd"},
+  {L_SYS_eventfd2, l_fd_eventfd2, "eventfd2"},
   L_SYSENT_END
 };

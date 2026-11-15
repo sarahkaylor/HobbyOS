@@ -189,6 +189,9 @@ int linux_compat_sigflags_get(struct process *p, int sig) {
  * shared value changes no observable answer — it only has to round-trip. */
 static uint32_t l_umask = 022;
 
+/* cp/sys: the creation mask the compat /tmp applies (tmpfs.c). */
+uint32_t linux_compat_umask(void) { return l_umask; }
+
 /* Console budget for the "refused a handler install" diagnostic (below): one
    line per distinct refusal is evidence, an unbounded stream is a flood.  The
    record rides the [LCOMPAT] prefix so the probe gate prints it. */
