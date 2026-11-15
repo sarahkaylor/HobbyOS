@@ -62,3 +62,23 @@ Failures stay in the table — a deleted failure is a lost bug report.
 | # | probe | verdict | log |
 |---|---|---|---|
 | — | (baseline) `sdktest.sh` on `72477b57` | 4/4 PASS, suite 18/18 | `obj/jdk/sdk-*.log` |
+| 5 | 19 OpenJDK test sources (`java/lang/{String,Integer,Math}`), one VM | **18/19 PASS**, `String/Split` HANGS >15 s (host: 820 ms) | `obj/jdk/jtreg-subset.log` |
+| 5a | `Split` alone, 240 s budget, default JIT | pending | `obj/jdk/split-jit.log` |
+| 5b | `Split` alone, 240 s budget, `-Xint` | pending | `obj/jdk/split-int.log` |
+
+### Workstream 5 method notes
+
+- Tests are OpenJDK's own sources, fetched with a blob-filtered sparse checkout of
+  `github.com/openjdk/jdk` (`test/jdk/java/lang/{String,Integer,Math}`), compiled
+  with the host JDK and run in-guest. They are the real assertions, not rewrites.
+- Three adaptations, all recorded because they change what a PASS means:
+  `Tests.java` needed the `jdk.internal.math.DoubleConsts/FloatConsts` imports that
+  jtreg injects via `@modules` (logic untouched); `Encodings` was dropped because it
+  uses `String.encodedLength(Charset)`, a JDK 27 API the host javac 26 cannot
+  resolve; the runner needs `--add-exports java.base/jdk.internal.math=ALL-UNNAMED`
+  at both compile and run time.
+- One VM for all 19 tests (the one-program-per-boot rule), each test on a daemon
+  thread with a timeout. A test that calls `System.exit` would take the runner with
+  it, so those are excluded — jtreg forks per test and this does not.
+- The host baseline is run first, always: 19/19 on the host, so a guest failure is
+  the guest's.
