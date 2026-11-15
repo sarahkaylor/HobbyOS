@@ -1264,6 +1264,10 @@ static int process_create_internal_ver(int ver) {
   /* P1 (design section 1): a fresh process is its own group's only member. */
   p->tgid = pid;
   p->is_thread = 0;
+  /* P1 (found by linux_probe_lowva): abi_flags is per-slot state that was
+     never reset, so a new process inherited whatever the slot's previous
+     owner was; the loader (compat track) and fork set it explicitly. */
+  p->abi_flags = 0;
   p->live_threads = 1;
   p->tls_base = 0;
   p->futex_uaddr = 0;
@@ -4236,6 +4240,11 @@ int process_fork(struct trap_frame *tf) {
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   child->parent_pid = group->pid;
+  /* P1: a fork of a Linux-ABI process is a Linux-ABI process.  It used to
+     inherit the slot's stale abi_flags instead, so a child that landed on a
+     slot last used by a native/kernel task had every Linux syscall routed to
+     the native table (measured: exit_group/exit "Unknown System Call" loop). */
+  child->abi_flags = group->abi_flags;
 
   for (int i = 0; i < 32; i++) {
     child->name[i] = parent->name[i];
