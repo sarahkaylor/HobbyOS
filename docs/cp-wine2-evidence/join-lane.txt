@@ -1,0 +1,8 @@
+[LP] join probe start[RESUME-SPSR] pid=1 spsr=0x00000293 IF=1
+[LP] [FUTEX] ##2 WAKE pid=1 as=0x75D04260 key=0x1080022F70 rip=0x1000004E3B n=1 bitset=0xFFFFFFFF woke=0 of=none
+[LP] B wake-before-look wait=0 flag=1
+[LP] C join-park-first rc=0 us=139000 ran=1
+[LP] D join-after-exit rc=0 us=0
+[LP] E clone failed errno=22
+[LP] done rc=2
+t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1)

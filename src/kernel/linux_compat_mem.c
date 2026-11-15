@@ -248,8 +248,10 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   }
 
   int64_t r = sys_mmap6(addr, len, prot, (int64_t)hf, fd, off);
-  if (r == -1 && as)
-    r = -ENOMEM; /* v2 vm_mmap's only -1 is a caller-contract bug */
+  /* cp/wine2: no -1 -> -ENOMEM rewrite.  vm_mmap's "-1 = no v2 AS" cannot
+     happen once sys_mmap6 found the group's AS, so with an AS a -1 IS -EPERM
+     (EPERM == 1): the memfd F_SEAL_WRITE refusal of MAP_SHARED|PROT_WRITE.
+     The rewrite turned Linux's EPERM into ENOMEM (linux_probe_cow C11). */
   /* L81: name a refused ANONYMOUS mmap and every large anonymous mapping.
      Boehm's GC_unix_mmap_get_mem prints "mmap(PROT_NONE) failed" and aborts
      when its heap extension is refused; the message names neither the length

@@ -1,0 +1,41 @@
+W1 %gs:[0x30] non-null
+W1 %gs:[0x30] == NtCurrentTeb()
+W1 TEB->Self == TEB
+W1 TEB ClientId.UniqueProcess
+W1 TEB ClientId.UniqueThread
+W1 TEB->ProcessEnvironmentBlock
+W1 TIB stack bounds contain the stack
+W3 TlsAlloc
+W2 CreateThread x4
+W2 WaitForMultipleObjects(all)
+W2 thread exit codes
+W2 InterlockedIncrement 4x1000
+W1 each thread has its own TEB via %gs
+W3 TLS isolated per thread (+ TEB TlsSlots)
+W3 main thread TLS value kept
+W3 TlsFree
+W4 __try/__except catches an access violation
+W4 __try/__except catches an integer divide by zero
+W4 AddVectoredExceptionHandler
+W4 vectored handler resumes after AV
+W4 vectored handler resumes after #DE
+W4 RemoveVectoredExceptionHandler
+W4 __except again after VEH removal
+W5 QueryPerformanceFrequency
+W5 QueryPerformanceCounter monotonic x10000
+W5 QPC advances ~200 ms across Sleep(200)
+W6 GetTickCount64 advances across Sleep(200)
+W6 KUSER TickCountMultiplier readable at 0x7ffe0004
+W6 KUSER NtMajorVersion
+W6 KUSER TickCount moves (server-written page seen live)
+W6 KUSER InterruptTime moves
+W6 GetTickCount64 agrees with KUSER TickCount
+W7 CreateFile C:\winprobe.tmp
+W7 WriteFile
+W7 FlushFileBuffers
+W7 reopen for read
+W7 GetFileSize
+W7 ReadFile returns the bytes written
+W7 FindFirstFile C:\* lists it
+W7 DeleteFile
+W7 gone after delete
