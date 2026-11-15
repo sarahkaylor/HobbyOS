@@ -699,6 +699,113 @@ static void test_vm_teardown_leak_cycles(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* cp/wine2: MAP_PRIVATE copy-on-write over a memfd / tmpfs object.
+ *   (a) a read fault maps the object's OWN frame, read-only;
+ *   (b) a later store into the object is visible through it (read-through);
+ *   (c) a write fault copies: new writable frame, object untouched;
+ *   (d) a write to a page the object never materialized is a private zero
+ *       page and does not materialize the object's page;
+ *   (e) vm_touch's kernel-side write breaks the copy the same way;
+ *   (f) fork: an object-frame leaf stays the object's frame AND read-only in
+ *       the child, a COW copy is copied again (isolated);
+ *   (g) teardown frees every private copy and never the object's frames. */
+static void test_vm_memfd_private_cow(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_memfd_private_cow...\n");
+
+  int free0 = frame_free_count();
+  struct vm_object *o = vm_object_create(VM_OBJ_MEMFD, 0x4000);
+  EXPECT_EQ((o != 0), 1);
+  if (!o)
+    return;
+  uint64_t of0 = vm_object_page_locked(o, 0);
+  uint64_t of3 = vm_object_page_locked(o, 0x3000);
+  EXPECT_EQ((of0 != 0 && of3 != 0), 1);
+  if (!of0 || !of3) {
+    vm_object_unref(o);
+    return;
+  }
+  *(volatile uint64_t *)phys_to_virt(of0) = 0x1111ULL;
+  *(volatile uint64_t *)phys_to_virt(of3) = 0x4444ULL;
+
+  struct process p;
+  for (unsigned i = 0; i < sizeof(p); i++)
+    ((unsigned char *)&p)[i] = 0;
+  p.as = vm_as_create(VM_TEST_TAG + 1);
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as) {
+    vm_object_unref(o);
+    return;
+  }
+  uint64_t b = USER_MMAP_BASE_V2;
+  EXPECT_EQ(vm_region_insert(p.as, b, 0x4000, VM_PROT_READ | VM_PROT_WRITE,
+                             VMK_LIB, VM_MAP_PRIVATE, o, 0),
+            0);
+  const char *why = 0;
+  uint64_t lf = 0;
+
+  /* (a) */
+  EXPECT_EQ(vm_handle_fault(&p, b, 0, 0, &why), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b, &lf), 0);
+  EXPECT_EQ((vm_arch_leaf_phys(lf) == of0), 1);
+  EXPECT_EQ(vm_arch_leaf_writable(lf), 0);
+  /* (b) */
+  *(volatile uint64_t *)phys_to_virt(of0) = 0x2222ULL;
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(vm_arch_leaf_phys(lf)), 0x2222ULL);
+  /* (c) */
+  EXPECT_EQ(vm_handle_fault(&p, b, 1, 0, &why), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b, &lf), 0);
+  uint64_t c0 = vm_arch_leaf_phys(lf);
+  EXPECT_EQ((c0 != 0 && c0 != of0), 1);
+  EXPECT_EQ((vm_arch_leaf_writable(lf) != 0), 1);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(c0), 0x2222ULL);
+  *(volatile uint64_t *)phys_to_virt(c0) = 0x3333ULL;
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(of0), 0x2222ULL);
+  EXPECT_EQ((vm_object_peek(o, 0) == of0), 1);
+  /* (d) */
+  EXPECT_EQ(vm_handle_fault(&p, b + 0x1000, 1, 0, &why), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b + 0x1000, &lf), 0);
+  EXPECT_EQ((vm_arch_leaf_writable(lf) != 0), 1);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(vm_arch_leaf_phys(lf)), 0ULL);
+  EXPECT_EQ(vm_object_peek(o, 0x1000), 0ULL);
+  /* (e) read touch -> object frame; write touch -> private copy */
+  EXPECT_EQ(vm_touch(&p, b + 0x2000, 8, 0), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b + 0x2000, &lf), 0);
+  uint64_t of2 = vm_object_peek(o, 0x2000);
+  EXPECT_EQ((of2 != 0 && vm_arch_leaf_phys(lf) == of2), 1);
+  EXPECT_EQ(vm_arch_leaf_writable(lf), 0);
+  EXPECT_EQ(vm_touch(&p, b + 0x2000, 8, 1), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b + 0x2000, &lf), 0);
+  EXPECT_EQ((vm_arch_leaf_phys(lf) != of2), 1);
+  EXPECT_EQ((vm_arch_leaf_writable(lf) != 0), 1);
+  /* page 3 stays the object's frame (read-only) for the fork check */
+  EXPECT_EQ(vm_handle_fault(&p, b + 0x3000, 0, 0, &why), 0);
+
+  /* (f) */
+  struct addr_space *c = vm_as_clone(p.as, VM_TEST_TAG + 2);
+  EXPECT_EQ((c != 0), 1);
+  if (c) {
+    uint64_t cl = 0;
+    EXPECT_EQ(vm_arch_walk(c, b + 0x3000, &cl), 0);
+    EXPECT_EQ((vm_arch_leaf_phys(cl) == of3), 1);
+    EXPECT_EQ(vm_arch_leaf_writable(cl), 0);
+    EXPECT_EQ(vm_arch_walk(c, b, &cl), 0);
+    uint64_t cc0 = vm_arch_leaf_phys(cl);
+    EXPECT_EQ((cc0 != c0 && cc0 != of0), 1);
+    EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(cc0), 0x3333ULL);
+    *(volatile uint64_t *)phys_to_virt(cc0) = 0x5555ULL;
+    EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(c0), 0x3333ULL);
+    vm_as_teardown(c);
+  }
+
+  /* (g) */
+  vm_as_teardown(p.as);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(of0), 0x2222ULL);
+  EXPECT_EQ((vm_object_peek(o, 0) == of0 && vm_object_peek(o, 0x3000) == of3), 1);
+  vm_object_unref(o);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 /* L9 (prefetch): the eager first page — the entry page is resident right
  * after the loader mapped the image, everything else stays lazy. */
 static void test_v2_image_first_page(void) {
@@ -2746,6 +2853,7 @@ void vm_test_suite(void) {
   test_vm_shared_objects();
   test_vm_as_clone_fork();
   test_vm_teardown_leak_cycles();
+  test_vm_memfd_private_cow();
   test_vm_user_read(); /* SEC-2 */
   test_vm_kwrite();    /* SEC-8 */
   /* so-vm lane A: file-backed shared mappings (docs/shared-libs.md §4) */
