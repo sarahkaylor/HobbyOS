@@ -390,7 +390,8 @@ static int l_fd_recvfrom(struct process *p, struct trap_frame *tf) {
     saved = l_nonblock_push(p, fd);
     if (saved < 0) return l_ret(tf, saved);
   }
-  int r = file_read(p, fd, (void *)ubuf, (int)len, tf);
+  /* GB-308: recv target is a user VA too — bounce it like every read. */
+  int r = file_read_user(p, fd, ubuf, len, tf);
   l_nonblock_pop(p, fd, saved);
   if (r == -2) return l_park(p, tf);
   if (r == -1) return l_ret(tf, -EBADF);

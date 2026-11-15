@@ -85,7 +85,8 @@ static int l_misc_readv(struct process *p, struct trap_frame *tf) {
     /* One segment is one read; the kernel's file_read takes an int size. */
     while (len > 0) {
       int chunk = len > 0x10000000ULL ? 0x10000000 : (int)len;
-      int r = file_read(p, fd, (void *)(uintptr_t)base, chunk, tf);
+      /* GB-308: into the caller's range via the bounce helper (fs.c). */
+      int r = file_read_user(p, fd, base, chunk, tf);
       if (r == -2) {
         if (total > 0) return l_misc_ret(tf, total);
         if ((tf->cs & 3) == 3) tf->elr -= 2;
@@ -117,7 +118,8 @@ static int l_misc_pread64(struct process *p, struct trap_frame *tf) {
   if (saved < 0) return l_misc_ret(tf, -err);
   if (file_seek(p, fd, off, 0 /* SEEK_SET */, &err) < 0)
     return l_misc_ret(tf, -err);
-  int r = file_read(p, fd, (void *)(uintptr_t)buf, (int)n, tf);
+  /* GB-308: bounce, so an unbacked destination page cannot fault here. */
+  int r = file_read_user(p, fd, buf, n, tf);
   if (r == -2) {
     /* Parked: let the restart redo the whole positioned read from `off`. */
     file_seek(p, fd, off, 0, &err);
@@ -205,8 +207,16 @@ static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, 0);
 }
 
-/* getcwd(2) returns the buffer (glibc/musl both expect a non-NULL return on
-   success); DOOMWADDIR's fallback "." never calls it, but SDL-era clients do. */
+/* getcwd(2): the kernel ABI is `long getcwd(char *buf, unsigned long size)` and
+   Linux returns the LENGTH of the path INCLUDING the terminating NUL
+   (fs/d_path.c: do_getcwd() ends `return len;`, not `return buf;`).  It happens
+   to be >= 0 either way, so "the buffer pointer" looked like success — until
+   glibc compared it against `size`, decided the path was longer than the
+   buffer, and fell into its ERANGE/ENAMETOOLONG retry, which cannot succeed
+   either: measured, `getcwd()` returned NULL with a perfectly good "/" in the
+   buffer, and OpenJDK died at startup with
+   "java.lang.Error: Properties init: Could not determine current working
+   directory".  libjava's java_props_md.c is the only caller that matters here. */
 static int l_misc_getcwd(struct process *p, struct trap_frame *tf) {
   uint64_t ubuf = l_arg(tf, 0);
   int64_t size = l_argi(tf, 1);
@@ -217,7 +227,7 @@ static int l_misc_getcwd(struct process *p, struct trap_frame *tf) {
   if (size < (int64_t)len + 1) return l_misc_ret(tf, -ERANGE);
   if (l_copy_to_user(p, ubuf, grp->cwd, (uint64_t)len + 1) != 0)
     return l_misc_ret(tf, -EFAULT);
-  return l_misc_ret(tf, (int64_t)ubuf);
+  return l_misc_ret(tf, (int64_t)len + 1);
 }
 
 /* No write-back cache to flush: the FAT writer goes straight to the block

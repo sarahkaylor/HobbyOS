@@ -16,6 +16,7 @@
 #include "virtio_input.h" /* GB-171: the key ring that node drains */
 #include "frame.h" /* M5: fs_read_image contiguous image frames */
 #include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
+#include "arch/cpu.h" /* GB-308: get_cpuid() picks the per-CPU read bounce */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -903,6 +904,29 @@ int file_open(struct process *cur, const char *filename, int flags) {
        creators, so it is enforced inside fat16_open_ex (one fat_lock
        critical section covers existence check + slot claim), not by this
        probe.  The probe above stays as the cheap ENOENT fast path only. */
+    /* GB-308: open(dir, O_RDONLY) is legal POSIX and Linux honours it —
+       read(2) then answers EISDIR, and a caller that only wants a dirfd for
+       getdents64 works.  The JDK's Files.list() opens the directory with
+       plain O_RDONLY and enumerates it, and this VFS answered ENOENT for an
+       entry the probe had just resolved as a directory, so EVERY listing
+       failed with NoSuchFileException (measured: "/", "/JDK", "/C", "/JDKTMP",
+       all of them).  Only O_DIRECTORY reached fat16_open_dir before. */
+    if (exists && (probe_entry.attr & 0x10)) {
+      /* A directory cannot be created-then-opened, truncated, or written
+         through; Linux says EISDIR for each of those. */
+      if ((flags & 3) || (flags & (O_CREAT | O_EXCL | O_TRUNC))) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -EISDIR;
+      }
+      if (fat16_open_dir(filename, f) != 0) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -ENOENT;
+      }
+      f->open_flags = (uint32_t)flags;
+      goto opened; /* same tail as a regular open: install the fd */
+    }
     int orc = fat16_open_ex(filename, f,
                             (flags & O_CREAT) && (flags & O_EXCL) ? 1 : 0);
     if (orc == -2) {
@@ -926,6 +950,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
     }
   }
 
+opened:
   if (routed == 1) nfs_selfcheck(f);
   int fd = -1;
   fd = fd_install(cur, f);
@@ -2902,6 +2927,56 @@ static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
     spinlock_release_irqrestore(&l76_rc_lock, fl);
   }
   return got;
+}
+
+/* ---- reads into a USER buffer -------------------------------------------
+ *
+ * file_read() writes its bytes straight into the pointer it is handed, and
+ * every syscall hands it a user VA (sys_read's own comment says so: "buf is
+ * the caller's user pointer, already range-checked").  Range-checked is not
+ * backed: a destination page that is not materialized yet faults with the
+ * kernel's own CS, and the x64 trap path then dies on a frame it cannot
+ * account for.  Measured on a 4 MiB pread64 into a fresh malloc'd buffer:
+ *
+ *     [BADVEC] fatal frame=0x0000000075C61030 not-a-frame
+ *
+ * one CPU halted, the wave never ended.  The same 140 MiB read into a
+ * pre-touched buffer ran at a flat 12.6 MiB/s with per-block latency flat out
+ * to the last block, so neither FAT's cluster walk nor the device was at
+ * fault; only the unbacked destination was.
+ *
+ * So a syscall-side read goes through a kernel bounce buffer and vm_kwrite() —
+ * the sanctioned copy the rest of the ABI uses, which materializes demand-zero
+ * pages and re-validates each page, turning a hole into -EFAULT instead of a
+ * kernel-mode fault.  32 KiB per CPU keeps the copy overhead under the
+ * sector-paced FAT read it wraps and costs 256 KiB of BSS across 8 CPUs.
+ *
+ * Returns what file_read() returns, including -2 ("would block, park") when
+ * nothing was transferred; a partial transfer that then blocks reports the
+ * bytes already delivered, the same contract a short read has.
+ */
+#define FS_RD_BOUNCE (32 * 1024)
+static uint8_t fs_rd_bounce[MAX_CPUS][FS_RD_BOUNCE];
+
+int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
+                   struct trap_frame *tf) {
+  if (size <= 0) return 0;
+  if (!cur) return -EINVAL;
+  uint32_t cpu = get_cpuid();
+  uint8_t *b = fs_rd_bounce[cpu < MAX_CPUS ? cpu : 0];
+  int64_t done = 0;
+  while (done < size) {
+    int chunk = (size - done) > FS_RD_BOUNCE ? FS_RD_BOUNCE : (int)(size - done);
+    int r = file_read(cur, fd, b, chunk, tf);
+    if (r == -2) return done > 0 ? (int)done : -2;
+    if (r < 0) return done > 0 ? (int)done : r;
+    if (r == 0) break;
+    if (vm_kwrite(cur, ubuf + (uint64_t)done, b, r) != 0)
+      return done > 0 ? (int)done : -EFAULT;
+    done += r;
+    if (r < chunk) break;
+  }
+  return (int)done;
 }
 
 int file_read(struct process *cur, int fd, void *buf, int size, struct trap_frame *tf) {
