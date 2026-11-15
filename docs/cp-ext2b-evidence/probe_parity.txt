@@ -1,0 +1,25 @@
+== lane (cp-ext2b) ==
+clock rc=0 t3_linux_probe: PASS — clock reached its done marker
+fd rc=0 t3_linux_probe: PASS — fd reached its done marker
+fpu_sig rc=0 t3_linux_probe: PASS — fpu_sig reached its done marker
+futex_sig rc=0 t3_linux_probe: PASS — futex_sig reached its done marker
+glibc rc=0 t3_linux_probe: PASS — glibc reached its done marker
+hello rc=0 t3_linux_probe: PASS — hello reached its done marker
+join rc=1 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1)
+mem rc=0 t3_linux_probe: PASS — mem reached its done marker
+mmap_race rc=0 t3_linux_probe: PASS — mmap_race reached its done marker
+proc rc=0 t3_linux_probe: PASS — proc reached its done marker
+redzone rc=0 t3_linux_probe: PASS — redzone reached its done marker
+timers rc=0 t3_linux_probe: PASS — timers reached its done marker
+tramp_sig rc=0 t3_linux_probe: PASS — tramp_sig reached its done marker
+vmcommit rc=0 t3_linux_probe: PASS — vmcommit reached its done marker
+wad rc=0 t3_linux_probe: PASS — wad reached its done marker
+x11 rc=1 (no [LP] rows — see /home/sarah/cp/lanes/ext2b/obj/parity-lane/x11.console.log)
+xwire rc=0 t3_linux_probe: PASS — xwire reached its done marker
+== base (~/cp/base, failures only) ==
+join rc=1 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1)
+x11 rc=1 (no [LP] rows — see /home/sarah/cp/lanes/ext2b/obj/parity-base/x11.console.log)
+parity-lane/join.gate.log:[LP] E clone failed errno=22
+parity-base/join.gate.log:[LP] E clone failed errno=22
+parity-lane/x11.console.log:third_party/x11/build.sh: line 138: cmake: command not found
+parity-base/x11.console.log:third_party/x11/build.sh: line 138: cmake: command not found

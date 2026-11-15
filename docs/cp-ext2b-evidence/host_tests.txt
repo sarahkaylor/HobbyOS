@@ -1,0 +1,25 @@
+ext2_test: tools /usr/sbin/mke2fs /usr/sbin/e2fsck /usr/sbin/debugfs, scratch /tmp/cp-ext2-host-UCFvUy
+ext2_test: 714 checks, 0 failures
+ext2_test: PASS
+  FAIL  tools/board/sync_gaming_md_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+  FAIL  tools/t5/roadmap_doc_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+[host-tests] done: 38/40 passed
+
+scenario read bs=1024 
+scenario read bs=2048 
+scenario read bs=4096 -O ^dir_index
+scenario write bs=1024  cache=64
+scenario write bs=2048 -O ^dir_index cache=16
+scenario write bs=4096 -O ^dir_index cache=512
+scenario write bs=4096  cache=8
+scenario htree: /hdir flags=0x1000 (INDEX_FL=0x1000)
+scenario setattr bs=1024 inode=128
+  debugfs /sa/f: Mode 0751 User 70000 Group 1001 atime 0x3b9aca00 mtime 0x499602d2
+  debugfs /sa/d: Mode 03775 mtime 0xfffeae80
+scenario setattr bs=4096 inode=256
+  debugfs /sa/f: Mode 0751 User 70000 Group 1001 atime 0x3b9aca00 mtime 0x499602d2
+  debugfs /sa/d: Mode 03775 mtime 0xfffeae80
+scenario longpath (EXT2_PATH_MAX=1024)
+  long path length 637
+scenario large-file bs=1024 (large_file initially off)
+scenario corrupt

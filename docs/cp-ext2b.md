@@ -230,7 +230,7 @@ path rows' 256-byte copies (`linux_compat_fd.c`, `_misc.c`, `_proc.c`,
 trap.c helpers) — ext2 paths never reach them (`l_tab_ext2` answers first,
 now including access/faccessat), but a tmpfs or FAT path does.
 
-## 7. Evidence (strix, 2026-11-15; raw logs in `docs/cp-ext2b-evidence/`)
+## 7. Evidence (strix, 2026-11-15; raw logs in `docs/cp-ext2b-evidence/*.txt`)
 
 linuxci's disk failed mid-run (root fs read-only at 08:23, then on-disk
 corruption), so every result below was re-produced on strix (interim gate
