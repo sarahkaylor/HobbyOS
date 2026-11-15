@@ -230,7 +230,25 @@ path rows' 256-byte copies (`linux_compat_fd.c`, `_misc.c`, `_proc.c`,
 trap.c helpers) — ext2 paths never reach them (`l_tab_ext2` answers first,
 now including access/faccessat), but a tmpfs or FAT path does.
 
-## 7. Evidence
+## 7. Evidence (strix, 2026-11-15; raw logs in `docs/cp-ext2b-evidence/`)
 
-See the lane report (raw tails): `make ext2_test_run`, `tools/cp/ext2_gate.sh`
-boot 3, unit/host/ARM parity.
+linuxci's disk failed mid-run (root fs read-only at 08:23, then on-disk
+corruption), so every result below was re-produced on strix (interim gate
+host).  Base = `~/cp/base`, integrator `cyberpunk` @ 6e73e34e.  The glibc 2.31
+sysroot was built into `obj/sysroot-glibc231` from the pinned focal debs (all
+five sha256 equal `tools/cp/fetch-runtime.sh`'s pins).  T3 wave: known base
+wedge, not run.
+
+| Gate | Command | Result |
+|---|---|---|
+| host golden | `make ext2_test_run` | `ext2_test: 714 checks, 0 failures` (setattr bs 1K/4K, inode 128/256: debugfs `Mode 0751 User 70000 Group 1001 atime 0x3b9aca00 mtime 0x499602d2`, dir `03775`, mtime `0xfffeae80`; 637-byte path) |
+| ext2 gate | `MAKEFLAGS=-j16 GLIBC_SYSROOT=obj/sysroot-glibc231 LP_TIMEOUT=600 TOOLS_SKIP=1 bash tools/cp/ext2_gate.sh` | **`ext2_gate: PASS`**: boot 1 75 ok rows, boot 2 14 ok rows (wave-1 ext2 probe, unchanged), boot 3 124 main + 9 helper ok rows, `[LP] done rc=0`; `e2fsck -fn rc=0` after every boot; debugfs: attr.f `0751 1234:5678 atime 0x3b9aca00 mtime 0x499602d2`, attr.l `4242:4444 mtime 0x378`, attr.d `02775 7:8`; m.bin sha256 == m.expect (12388 bytes, all three MAPPED-STORE records); unl.bin gone, no orphan; `ok dyn pid=4 libc=2.31 libcpath=/EXT/lpx/glibc/libc.so.6`; static-pie: all 914592 bytes read from ext2, loader refusal (open item, section 5) |
+| Linux reference | same probe on a loop-mounted fresh image at /EXT (linuxci, before its failure) | main 120 ok rows, helper rc=0, `[LP] done rc=0`, e2fsck rc=0 |
+| unit tier | `TOOLS_SKIP=1 flock /tmp/cp-qemu.lock ./run_unit_tests_intel.sh` | `Tests run: 448, Tests failed: 2` -- `virtio_gpu_test.c:213`, `:243`, both known base reds (the interrupt-masking budget test passed on strix) |
+| probe parity | `bash tools/cp/ext2b/probe_parity.sh . obj/parity-lane`, failures re-run on base | lane: 15 PASS; `join` FAIL (`E clone failed errno=22`) and `x11` FAIL (strix has no `cmake`: `third_party/x11/build.sh: cmake: command not found`) -- base fails both identically |
+| host_tests | `make -k host_tests` | `38/40 passed`; the two known `gaming.md` board tests |
+| ARM | `make ARCH=arm TOOLS_SKIP=1 hobbyos.elf` | links; 0 FP/SIMD-operand instructions in ext2, ext2_vfs, ext2_obj, ext2_compat, vfs, vfs_lock, vfs_compat, fs, vm, elf_loader (control: libc_math 1269) |
+
+Found and fixed by these runs: `ext2_obj_get` refused growth mappings
+(early break), the gate's name-set sort was locale-dependent, and
+`vfs_abs_path` with a 1-byte buffer must leave "" (nfs_test).
