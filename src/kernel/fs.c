@@ -15,6 +15,7 @@
 #include "input_node.h"   /* GB-171: evdev record fill for /dev/input/event0 */
 #include "virtio_input.h" /* GB-171: the key ring that node drains */
 #include "frame.h" /* M5: fs_read_image contiguous image frames */
+#include "vfs_lock.h" /* cp/ext2b: the generic lock manager */
 #include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
 #include "ext2_vfs.h" /* cp/ext2: the /EXT data disk */
 #include "tmpfs.h" /* cp/sys: the compat /tmp */
@@ -71,21 +72,9 @@ void hb_evdev_owner_clear(struct process *p) {
  * error at all.  Linux reserves 0-2 for every process; so does this. */
 #define FD_STDIO_FIRST 3
 
-/* P6.1: advisory record-lock table (the engine lives further down with
- * the fcntl commands; declared up here so fs_init initializes its lock). */
-#define MAX_FILE_LOCKS 64
-
-struct file_lock_entry {
-  int used;
-  int pid;          /* owning process-group pid */
-  uint64_t file_id; /* FAT16 dir-entry identity */
-  int64_t start;
-  int64_t len;      /* 0 = to EOF */
-  int type;         /* K_F_RDLCK / K_F_WRLCK */
-};
-
-static struct file_lock_entry file_locks[MAX_FILE_LOCKS];
-static spinlock_t file_locks_lock;
+/* P6.1 / cp/ext2b: advisory record locks live in the generic lock manager
+ * (src/kernel/vfs_lock.c, src/include/vfs_lock.h); this file only gives every
+ * open file its key (file_lock_key) and calls the release hooks on close. */
 
 extern void uart_puts(const char *s);
 extern void print_int(int val);
@@ -100,7 +89,6 @@ extern int sys_user_range_ok(uint64_t ptr, uint64_t len);
  */
 void fs_init(void) {
   spinlock_init(&fs_lock);
-  spinlock_init(&file_locks_lock);
   for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
     global_file_table[i].type = FILE_TYPE_EMPTY;
     global_file_table[i].ref_count = 0;
@@ -110,7 +98,8 @@ void fs_init(void) {
      * removed, and the rank is what the debug tracker orders.  Registering
      * only in test builds is how the first version lost both properties.
      * file_locks_lock stays unregistered: it is a leaf taken only after
-     * f->lock drops, never nesting anything above. */
+     * f->lock drops, never nesting anything above (cp/ext2b: that lock is
+     * now vfs_lock.c's lk_lock, with the same leaf discipline). */
     lock_register(&global_file_table[i].lock, "f->lock", LOCK_RANK_FILE,
                   LOCK_CLASS_PROCESS);
   }
@@ -951,7 +940,7 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
        open of an existing file in a subdirectory fail with
        ENOENT. */
     struct fat16_dir_entry probe_entry;
-    char abs[256];
+    char abs[VFS_PATH_MAX]; /* cp/ext2b: was 256 */
     int exists = 0;
     if (vfs_abs_path(filename, abs, sizeof abs) == 0) {
       exists = (fat16_resolve_path(abs, &probe_entry, 0, 0) == 0);
@@ -1226,34 +1215,64 @@ int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
 
 /* ---- P6.1 (browser.md section 6): advisory record locks -----------------
  *
- * A small fixed table of region locks over regular FAT16 files, serving
- * fcntl(F_GETLK/F_SETLK/F_SETLKW) -- the lock surface SQLite's unix-style
- * VFS consumes.  Semantics that matter for SQLite:
- *   - locks belong to the PROCESS: the owner is the process-group pid, so
- *     every thread and fd of one process shares them;
- *   - a process never conflicts with its own locks (an overlapping
- *     F_SETLK from the same owner replaces the owner's earlier entry);
- *   - closing an fd referring to the file drops that process's locks on
- *     it (POSIX), and a sweep drops entries whose owning process has
- *     exited (the fs_close_global teardown path carries no pid);
- *   - len == 0 means "to EOF", as in POSIX.
+ * cp/ext2b: the lock table moved to the generic manager (vfs_lock.c), keyed
+ * by (filesystem id, inode) so every filesystem -- not only FAT16 -- and both
+ * the native and the compat syscall faces share one namespace.  What SQLite
+ * relies on is unchanged: locks belong to the PROCESS (process-group pid); a
+ * process never conflicts with itself (its overlapping request replaces its
+ * own range); closing any fd of the file drops that process's locks on it;
+ * len == 0 means "to EOF".
  *
- * Identity: the directory-entry location, unique per file on FAT16 --
- * stable across separate opens of one file and distinct for empty files
- * (whose start_cluster is 0 for all of them).  NFS/pipe/socket fds have no
- * record locks here (-EINVAL; SQLite runs off FAT16 for P6).
- *
- * The kernel never blocks on a lock: F_SETLKW behaves like F_SETLK (one
- * attempt, -EAGAIN on conflict).  The libc wrapper supplies the bounded
- * blocking loop with real sleeps -- the same shape as SQLite's own
- * non-blocking + busy-retry consumption.  Parking the syscall instead
- * would need the -2 restart plumbing select() uses, which buys nothing
- * here.
+ * FAT16 identity: the directory-entry location, unique per file -- stable
+ * across separate opens of one file and distinct for empty files (whose
+ * start_cluster is 0 for all of them).
  */
 
 static uint64_t file_lock_id(const struct file *f) {
   return ((uint64_t)f->fat16.dir_sector << 16) |
          ((uint64_t)f->fat16.dir_offset & 0xFFFFu);
+}
+
+/* cp/ext2b: the lock key of an open file (vfs_lock.h).  A key names the FILE,
+ * not the open: two opens of one file must see each other's locks.  Types
+ * with no inode identity (pipes, sockets, /dev nodes, memfd) get a key unique
+ * to their open file description, which is what Linux's per-inode locks
+ * amount to for an object that has exactly one description family. */
+void file_lock_key(const struct file *f, struct vfs_lock_key *key) {
+  key->fsid = VFS_LKFS_ANON;
+  key->ino = (uint64_t)(f - global_file_table) + 1;
+  switch (f->type) {
+  case FILE_TYPE_FAT16:
+    key->fsid = VFS_LKFS_FAT16;
+    key->ino = file_lock_id(f);
+    break;
+  case FILE_TYPE_EXT2:
+  case FILE_TYPE_EXT2DIR:
+    key->fsid = VFS_LKFS_EXT2;
+    key->ino = f->ext2.ino;
+    break;
+  case FILE_TYPE_NFS:
+  case FILE_TYPE_NFSDIR: {
+    /* FNV-1a over the file handle: stable for the file across opens. */
+    uint64_t h = 1469598103934665603ULL;
+    uint32_t n = f->nfs.fh.len <= NFS_FH_MAX ? f->nfs.fh.len : 0;
+    for (uint32_t i = 0; i < n; i++) {
+      h ^= f->nfs.fh.data[i];
+      h *= 1099511628211ULL;
+    }
+    key->fsid = VFS_LKFS_NFS | ((uint32_t)f->nfs.mount_idx & 0xFFu);
+    key->ino = h;
+    break;
+  }
+  case FILE_TYPE_TMPFS:
+  case FILE_TYPE_TMPFSDIR:
+    /* cp/sys's identity, unchanged: (K_DEV_TMPFS, ino) with the top bit set */
+    key->fsid = VFS_LKFS_TMPFS;
+    key->ino = VFS_LK_TMPFS_ID_BIT | tmpfs_file_ino(f);
+    break;
+  default:
+    break;
+  }
 }
 
 /* User-ABI struct flock (LP64: 2 + 2 + 8 + 8 + 4 bytes + 4 pad = 32,
@@ -1284,81 +1303,33 @@ static void fs_st32(uint8_t *p, int v) {
   p[3] = (uint8_t)(u >> 24);
 }
 
-static int64_t file_lock_end(int64_t start, int64_t len) {
-  if (len == 0) return 0x7FFFFFFFFFFFFFFFLL; /* to EOF */
-  return start + len;                        /* len > 0 (caller checked) */
-}
-
-static int file_lock_overlap(int64_t a_start, int64_t a_len,
-                             int64_t b_start, int64_t b_len) {
-  int64_t a_end = file_lock_end(a_start, a_len);
-  int64_t b_end = file_lock_end(b_start, b_len);
-  return a_start < b_end && b_start < a_end;
-}
-
-/* First lock conflicting with (pid, range, type), or -1.  Same-pid locks
- * never conflict: a process's own locks merge/replace. */
-static int file_lock_find_conflict(int pid, uint64_t id, int64_t start,
-                                   int64_t len, int type) {
-  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
-    struct file_lock_entry *e = &file_locks[i];
-    if (!e->used || e->file_id != id || e->pid == pid) continue;
-    if (!file_lock_overlap(e->start, e->len, start, len)) continue;
-    if (e->type == K_F_WRLCK || type == K_F_WRLCK) return i;
-  }
-  return -1;
-}
-
-/* Drop the owner's entries overlapping (start, len). */
-static void file_lock_drop_own(int pid, uint64_t id, int64_t start,
-                               int64_t len) {
-  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
-    struct file_lock_entry *e = &file_locks[i];
-    if (!e->used || e->file_id != id || e->pid != pid) continue;
-    if (!file_lock_overlap(e->start, e->len, start, len)) continue;
-    e->used = 0;
-  }
-}
-
-/* Drop entries whose owning process no longer exists (state read is a
- * benign race: a live owner is never FREE/EXITED at the same instant). */
-static void file_locks_sweep_dead(void) {
-  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
-    if (!file_locks[i].used) continue;
-    struct process *o = process_get_pcb(file_locks[i].pid);
-    if (!o || o->state == PROC_STATE_FREE || o->state == PROC_STATE_EXITED)
-      file_locks[i].used = 0;
-  }
-}
-
+/* The pre-manager single-id API: a FAT16 dir-entry id, or (cp-sys) a tmpfs
+ * id with the top bit set.  Kept so callers written against it still release
+ * the right locks. */
 void file_locks_release(int pid, uint64_t file_id) {
-  uint64_t flags = spinlock_acquire_irqsave(&file_locks_lock);
-  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
-    if (file_locks[i].used && file_locks[i].pid == pid &&
-        file_locks[i].file_id == file_id)
-      file_locks[i].used = 0;
-  }
-  spinlock_release_irqrestore(&file_locks_lock, flags);
+  struct vfs_lock_key k;
+  k.fsid = (file_id & VFS_LK_TMPFS_ID_BIT) ? VFS_LKFS_TMPFS : VFS_LKFS_FAT16;
+  k.ino = file_id;
+  vfs_lock_release_posix(pid, &k);
 }
 
-void file_locks_release_pid(int pid) {
-  uint64_t flags = spinlock_acquire_irqsave(&file_locks_lock);
-  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
-    if (file_locks[i].used && file_locks[i].pid == pid)
-      file_locks[i].used = 0;
-  }
-  spinlock_release_irqrestore(&file_locks_lock, flags);
-}
+void file_locks_release_pid(int pid) { vfs_lock_release_tgid(pid); }
 
-/* The F_GETLK/F_SETLK/F_SETLKW engine for one open FAT16 file.  `uarg` is a
- * user pointer whose range + alignment the trap layer has validated. */
+/* The NATIVE F_GETLK/F_SETLK/F_SETLKW face (SYS_FCNTL 68, SQLite's unix
+ * VFS), now on the generic manager so native and compat processes share one
+ * lock namespace.  Its documented native contract is kept: the kernel never
+ * blocks (F_SETLKW is one attempt; the libc wrapper supplies the bounded
+ * retry), the descriptor's access mode is not checked, len == 0 means "to
+ * EOF", and `uarg` is a user pointer whose range + alignment the trap layer
+ * has validated.  The compat rows (vfs_compat.c) implement the full Linux
+ * semantics (blocking, EBADF on access mode, negative l_len, OFD locks). */
 static int file_lock_fcntl(struct process *pg, struct file *f, int cmd,
                            uint64_t uarg) {
-  /* cp/sys: tmpfs files carry real inode numbers; the identity is the
-     (K_DEV_TMPFS, ino) pair folded with the top bit set, so it can never
-     collide with a FAT16 directory-entry location (< 2^48). */
+  /* cp/sys + cp/ext2b: FAT16, ext2 and tmpfs files take native record locks
+     (the key is file_lock_key's: tmpfs keeps cp-sys's identity). */
   int is_tmpfs = (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR);
-  if (f->type != FILE_TYPE_FAT16 && !is_tmpfs) return -EINVAL;
+  if (f->type != FILE_TYPE_FAT16 && f->type != FILE_TYPE_EXT2 && !is_tmpfs)
+    return -EINVAL;
   if (!uarg) return -EFAULT;
   const uint8_t *u = (const uint8_t *)uarg;
   int type = (int)(int16_t)((uint16_t)u[K_FLOCK_OFF_TYPE] |
@@ -1373,32 +1344,39 @@ static int file_lock_fcntl(struct process *pg, struct file *f, int cmd,
 
   /* Resolve whence against the open handle's cursor / size (SQLite uses
    * SEEK_SET; CUR/END are supported for completeness). */
-  if (whence == 1) /* SEEK_CUR */
-    start += is_tmpfs ? (int64_t)f->tmpfs.cursor : (int64_t)f->fat16.cursor;
-  else if (whence == 2) /* SEEK_END */
-    start += is_tmpfs ? tmpfs_size(f) : (int64_t)f->fat16.entry.file_size;
-  else if (whence != 0) /* SEEK_SET */
+  if (whence == 1) { /* SEEK_CUR */
+    start += f->type == FILE_TYPE_EXT2 ? (int64_t)f->ext2.cursor
+             : is_tmpfs                ? (int64_t)f->tmpfs.cursor
+                                       : (int64_t)f->fat16.cursor;
+  } else if (whence == 2) { /* SEEK_END */
+    start += f->type == FILE_TYPE_EXT2 ? ext2v_size(f)
+             : is_tmpfs                ? tmpfs_size(f)
+                                       : (int64_t)f->fat16.entry.file_size;
+  } else if (whence != 0) {
     return -EINVAL;
+  }
   if (start < 0) return -EINVAL;
 
-  int pid = pg->pid;
-  uint64_t id = is_tmpfs ? (0x8000000000000000ULL | tmpfs_file_ino(f))
-                         : file_lock_id(f);
-  uint64_t flags = spinlock_acquire_irqsave(&file_locks_lock);
-  file_locks_sweep_dead();
+  struct vfs_lock_req rq;
+  file_lock_key(f, &rq.key);
+  rq.kind = VFS_LK_POSIX;
+  rq.owner = pg->pid;
+  rq.pid = pg->pid;
+  rq.type = type;
+  rq.start = start;
+  rq.end = len == 0 ? VFS_LK_EOF : start + len - 1;
 
   if (cmd == K_F_GETLK) {
-    int ci = file_lock_find_conflict(pid, id, start, len, type);
+    struct vfs_lock_info bi;
     int rtype = K_F_UNLCK;
     int64_t rstart = 0, rlen = 0;
     int rpid = 0;
-    if (ci >= 0) {
-      rtype = file_locks[ci].type;
-      rstart = file_locks[ci].start;
-      rlen = file_locks[ci].len;
-      rpid = file_locks[ci].pid;
+    if (vfs_lock_test(&rq, &bi)) {
+      rtype = bi.type;
+      rstart = bi.start;
+      rlen = bi.end == VFS_LK_EOF ? 0 : bi.end - bi.start + 1;
+      rpid = bi.pid;
     }
-    spinlock_release_irqrestore(&file_locks_lock, flags);
     uint8_t *w = (uint8_t *)uarg;
     w[K_FLOCK_OFF_TYPE] = (uint8_t)rtype;
     w[K_FLOCK_OFF_TYPE + 1] = 0;
@@ -1409,36 +1387,8 @@ static int file_lock_fcntl(struct process *pg, struct file *f, int cmd,
     fs_st32(w + K_FLOCK_OFF_PID, rpid);
     return 0;
   }
-
-  /* F_SETLK / F_SETLKW: replace the owner's overlapping locks, then add the
-   * new one unless this is an unlock.  Kernel-side this is one attempt for
-   * both commands (see the block comment above). */
-  if (type != K_F_UNLCK &&
-      file_lock_find_conflict(pid, id, start, len, type) >= 0) {
-    spinlock_release_irqrestore(&file_locks_lock, flags);
-    return -EAGAIN;
-  }
-  file_lock_drop_own(pid, id, start, len);
-  if (type != K_F_UNLCK) {
-    int slot = -1;
-    for (int i = 0; i < MAX_FILE_LOCKS; i++)
-      if (!file_locks[i].used) {
-        slot = i;
-        break;
-      }
-    if (slot < 0) {
-      spinlock_release_irqrestore(&file_locks_lock, flags);
-      return -EAGAIN; /* table exhausted: transient contention */
-    }
-    file_locks[slot].used = 1;
-    file_locks[slot].pid = pid;
-    file_locks[slot].file_id = id;
-    file_locks[slot].start = start;
-    file_locks[slot].len = len;
-    file_locks[slot].type = type;
-  }
-  spinlock_release_irqrestore(&file_locks_lock, flags);
-  return 0;
+  int r = vfs_lock_set(&rq, 0, 0);
+  return r == -ENOLCK ? -EAGAIN : r; /* table exhausted: transient (P6.1) */
 }
 
 /* SYS_FTRUNCATE (row 33): resize an open fd.  FAT16 gets cluster-granular
@@ -2507,6 +2457,35 @@ int file_fd_is_dir(struct process *p, int fd) {
          f->type == FILE_TYPE_PROCFD;
 }
 
+/* cp/ext2b: fchmod/fchown/futimens -- the open-file form of the vfs.h
+ * setattr contract.  -EBADF for a closed fd. */
+int file_setattr_fd(struct process *p, int fd, const struct vfs_setattr *sa) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_EMPTY || f->type == FILE_TYPE_UNINIT) return -EBADF;
+  return vfs_setattr_file(f, sa);
+}
+
+/* cp/ext2b: what the compat lock rows need from an fd -- its lock key, its
+ * open file description (the OFD/flock owner, slot + 1) and its access mode.
+ * 0 or -EBADF. */
+int file_lock_target(struct process *p, int fd, struct vfs_lock_key *key,
+                     int *desc, uint32_t *open_flags) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_EMPTY || f->type == FILE_TYPE_UNINIT) return -EBADF;
+  file_lock_key(f, key);
+  *desc = g_fd + 1;
+  *open_flags = f->open_flags;
+  return 0;
+}
+
 /* GB-167: is this fd the /dev/fb0 node?  The Linux-ABI ioctl arm needs it to
    route FBIO* requests to the framebuffer machinery instead of ENOTTY. */
 int file_fd_is_devfb(struct process *p, int fd) {
@@ -2561,8 +2540,10 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
     k_stat_fill(st, K_DEV_PROCFS, 3, K_S_IFLNK | 0777, n);
     return 0;
   }
+  /* cp/ext2b: VFS_PATH_MAX, not 256 -- ext2v_stat() rewrites this buffer with
+     the resolved path and assumes VFS_PATH_MAX bytes (ext2_vfs.h). */
   char abs[VFS_PATH_MAX];
-  if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = ENAMETOOLONG; return -1; }
   /* cp/sys: the compat /tmp (follows symlinks; one that leaves /tmp
      continues with the redirected path). */
   if (tmpfs_owns(abs)) {
@@ -2681,14 +2662,13 @@ int file_close(struct process *cur, int fd) {
   /* L57: who closed which fd, and which file description it named. */
   fd_ev_note(FDEV_CLOSE, cur, fd, g_fd, f->path);
 
-  /* P6.1: capture the record-lock identity before the type may be cleared;
-   * closing ANY fd of a FAT16 file drops this process's locks on it. */
-  int lock_release = (f->type == FILE_TYPE_FAT16);
-  uint64_t lock_id = lock_release ? file_lock_id(f) : 0;
-  if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR) {
-    lock_release = 1; /* cp/sys: same identity file_lock_fcntl uses */
-    lock_id = 0x8000000000000000ULL | tmpfs_file_ino(f);
-  }
+  /* P6.1 / cp/ext2b: capture the lock key before the type may be cleared;
+   * closing ANY fd of a file drops this process's POSIX locks on it (tmpfs
+   * included: file_lock_key gives it cp-sys's identity), and the last close
+   * of the open file description drops its OFD and flock locks. */
+  struct vfs_lock_key lock_key;
+  file_lock_key(f, &lock_key);
+  int desc_last = 0;
   int isgpu = (f->type == FILE_TYPE_DEVGPU); /* M1: released after f->lock */
 
   /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
@@ -2715,6 +2695,7 @@ int file_close(struct process *cur, int fd) {
   if (f->type == FILE_TYPE_MEMFD)
     vm_object_unref(f->memfd.obj); /* one instance ref goes away (S4) */
   if (f->ref_count == 0) {
+    desc_last = 1;
     if (f->type == FILE_TYPE_TIMERFD) {
       extern void lt_timerfd_release(int slot);
       lt_timerfd_release(f->timerfd.slot);
@@ -2745,7 +2726,8 @@ int file_close(struct process *cur, int fd) {
    * Outside f->lock (the release path sends control commands). */
   if (isgpu) gpu_abi_release_fd(cur, fd);
 
-  if (lock_release) file_locks_release(cur->pid, lock_id);
+  vfs_lock_release_posix(cur->pid, &lock_key);
+  if (desc_last) vfs_lock_release_desc(g_fd + 1);
 
   return 0;
 }
@@ -2848,7 +2830,9 @@ void fs_close_global(int g_fd) {
   f->ref_count--;
   if (f->type == FILE_TYPE_MEMFD)
     vm_object_unref(f->memfd.obj); /* one instance ref goes away (S4) */
+  int desc_last = 0;
   if (f->ref_count == 0) {
+    desc_last = 1;
     if (f->type == FILE_TYPE_FAT16) {
       fat16_close(f);
     } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
@@ -2864,6 +2848,8 @@ void fs_close_global(int g_fd) {
     f->type = FILE_TYPE_EMPTY;
   }
   ylock_release(&f->lock);
+  /* cp/ext2b: the description's OFD / flock locks die with it. */
+  if (desc_last) vfs_lock_release_desc(g_fd + 1);
 
   if (pp) pipe_close(pp, bend);
   else if (uu) usock_close(uu, bend);
@@ -3816,6 +3802,38 @@ int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
 
   char abs[VFS_PATH_MAX];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) return -1;
+  /* cp/ext2b: exec from /EXT.  An image reached through a symlink that leaves
+     the volume continues below with the redirected path; a FAT16 target is
+     read here too (the caller's FAT16 loader would reopen the ORIGINAL name,
+     which is not a FAT16 path). */
+  if (ext2v_owns(abs)) {
+    int er = ext2v_read_image(abs, buf_out, size_out, pages_out,
+                              (uint32_t)USER_IMG_SIZE);
+    if (er == 0) return 1;
+    if (er != EXT2_EXTERNAL) return er < 0 ? er : -1;
+    int emidx = -1;
+    const char *erel = 0;
+    if (!vfs_route(abs, &emidx, &erel)) {
+      struct fat16_dir_entry e;
+      uint32_t sec = 0, eoff = 0;
+      if (fat16_resolve_path(abs, &e, &sec, &eoff) != 0 || sec == 0 ||
+          (e.attr & 0x10) || e.file_size == 0 ||
+          (uint64_t)e.file_size > USER_IMG_SIZE)
+        return -ENOENT;
+      uint32_t pg = (e.file_size + FRAME_SIZE - 1) / FRAME_SIZE;
+      uint64_t b = frame_alloc_contig((int)pg);
+      if (!b) return -ENOMEM;
+      if (fat16_read_direct_pos(e.start_cluster, e.file_size, b,
+                                (int)e.file_size, 0) != (int)e.file_size) {
+        for (uint32_t i = 0; i < pg; i++) frame_free(b + (uint64_t)i * FRAME_SIZE);
+        return -EIO;
+      }
+      *buf_out = (uint8_t *)(uintptr_t)b;
+      *size_out = e.file_size;
+      *pages_out = pg;
+      return 1;
+    }
+  }
   int midx = -1;
   const char *rel = 0;
   if (!vfs_route(abs, &midx, &rel)) return 0;    /* FAT16 handles it */
@@ -3853,6 +3871,21 @@ int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
   *size_out = size;
   *pages_out = pages;
   return 1;
+}
+
+/* cp/ext2b: an ELF interpreter (PT_INTERP) stored on /EXT.  1 = read (the
+ * caller frees `pages` frames), 0 = the path is not an ext2 file (the caller
+ * keeps its FAT16 resolver), < 0 = it is on /EXT but cannot be used. */
+int fs_read_ext2_file(const char *path, uint8_t **buf_out, uint32_t *size_out,
+                      uint32_t *pages_out, uint32_t max) {
+  if (!path || path[0] != '/') return 0;
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return 0;
+  if (!ext2v_owns(abs)) return 0;
+  int er = ext2v_read_image(abs, buf_out, size_out, pages_out, max);
+  if (er == 0) return 1;
+  if (er == EXT2_EXTERNAL) return 0;
+  return er < 0 ? er : -1;
 }
 
 struct vm_object *file_memfd_obj(struct process *p, int fd) {
@@ -3922,6 +3955,32 @@ int file_nfs_ident(struct process *p, int fd, int *mount_idx,
     *fh = f->nfs.fh;
   if (size)
     *size = (uint32_t)f->nfs.size;
+  return 0;
+}
+
+/* cp/ext2b: the ext2 sibling of file_nfs_ident -- a REGULAR file on /EXT is
+ * identified by its inode; ext2_obj_get() keys the VM_OBJ_EXT2 page cache on
+ * it.  `oflags` carries the access mode for mmap's EACCES rules. */
+int file_ext2_ident(struct process *p, int fd, uint32_t *ino, uint64_t *size,
+                    uint32_t *oflags) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return -EBADF;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return -EBADF;
+  struct file *f = &global_file_table[gfd];
+  if (f->type != FILE_TYPE_EXT2)
+    return -ENOTSUP; /* a directory (EXT2DIR) has no data to map */
+  int64_t sz = ext2v_size(f);
+  if (sz < 0)
+    return (int)sz;
+  if (ino)
+    *ino = f->ext2.ino;
+  if (size)
+    *size = (uint64_t)sz;
+  if (oflags)
+    *oflags = f->open_flags;
   return 0;
 }
 

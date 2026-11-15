@@ -180,6 +180,12 @@
  * (mount, file handle).  Same demand-fill/shared-frame contract as
  * VM_OBJ_FILE. */
 #define VM_OBJ_NFS 4
+/* cp/ext2b (docs/cp-ext2b.md section 4): a regular file on the /EXT ext2
+ * volume.  Page source: ext2_obj_page() (src/kernel/ext2_obj.c), keyed by the
+ * inode; writable (MAP_SHARED through an O_RDWR fd: written back on msync/
+ * munmap/fsync/close), coherent with write()/truncate().  Same demand-fill
+ * and exec-gate contract as VM_OBJ_FILE / VM_OBJ_NFS. */
+#define VM_OBJ_EXT2 5
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) subset (design section 4.3, Linux
  * numbers; SHRINK/GROW enforced at ftruncate, WRITE recorded advisory). */
@@ -211,6 +217,9 @@ struct vm_object {
   uint8_t nfs_mount_idx;
   uint8_t nfs_fh_len;
   uint8_t nfs_fh[64]; /* NFS_FH_MAX */
+  /* cp/ext2b: VM_OBJ_EXT2 source identity (the inode; the cache entry holds
+     an ext2 open reference on it for the object's whole life). */
+  uint32_t ext2_ino;
 };
 
 struct vm_region {  /* sorted by base; per AS, under proc_lock */

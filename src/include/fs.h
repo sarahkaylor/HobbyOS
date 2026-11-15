@@ -210,6 +210,10 @@ int file_open_mode(struct process *p, const char *filename, int flags,
  * real failure. */
 int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
                   uint32_t *pages_out);
+/* cp/ext2b: read an ELF interpreter that lives on /EXT (1 read / 0 not an
+ * ext2 path / <0 error); see fs.c. */
+int fs_read_ext2_file(const char *path, uint8_t **buf_out, uint32_t *size_out,
+                      uint32_t *pages_out, uint32_t max);
 int file_close(struct process *p, int fd);
 int file_dup(struct process *p, int fd);
 int file_dup2(struct process *p, int oldfd, int newfd);
@@ -439,6 +443,14 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
 int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp);
 int file_fd_is_devfb(struct process *p, int fd);   /* GB-167: /dev/fb0 node? */
 int file_fd_is_ext2(struct process *p, int fd);    /* cp/ext2: 1/0, -1 = bad fd */
+/* cp/ext2b: fchmod/fchown/futimens (vfs.h setattr contract); 0 / -errno. */
+struct vfs_setattr;
+int file_setattr_fd(struct process *p, int fd, const struct vfs_setattr *sa);
+/* cp/ext2b: lock key, open-description owner (slot + 1) and O_* flags of an
+ * fd, for the compat fcntl/flock rows (vfs_lock.h).  0 / -EBADF. */
+struct vfs_lock_key;
+int file_lock_target(struct process *p, int fd, struct vfs_lock_key *key,
+                     int *desc, uint32_t *open_flags);
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp);
 /* M6 launch plumbing: the absolute path an open fd was opened from, for

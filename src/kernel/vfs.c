@@ -15,6 +15,7 @@
 #include "kline.h"
 #include "errno.h"
 #include "ext2_vfs.h"
+#include "tmpfs.h" /* cp/sys: tmpfs_setattr behind the setattr op */
 
 extern struct process *current_process(void);
 
@@ -28,46 +29,55 @@ void vfs_init(void) {
 /* path canonicalisation                                                */
 /* ==================================================================== */
 
-static void vfs_clean(const char *path, char *out, int cap) {
-  char temp[256];
-  int len = 0;
-  while (path[len] && len < 255) {
-    temp[len] = path[len];
-    len++;
-  }
-  temp[len] = '\0';
-
-  /* cp/ext2: 64 components, was 16 -- a deeper path used to lose its tail
-     components silently (Wine prefixes nest deeper than 16). */
-  char *stack[64];
+/* Canonicalise `path` ("//", "." and ".." collapsed, ".." at the root stays
+ * at the root, no trailing '/') into out[cap].  Same result FAT16's
+ * clean_path() gives for the paths it can hold.
+ *
+ * cp/ext2b: built in place, with no intermediate copy and no component cap.
+ * The old version copied at most 255 bytes and kept at most 64 components and
+ * then truncated the OUTPUT at cap -- every limit silently produced a
+ * different, shorter path (a deep Wine prefix path named its own ancestor).
+ * Now a result that does not fit `cap` is an error (-1), never a prefix. */
+static int vfs_clean_into(const char *path, char *out, int cap) {
+  /* starts[i] = output length before component i (the ".." pop target).  A
+     component costs at least two output bytes ("/x"), so cap/2 slots can
+     never overflow before `out` itself does. */
+  uint16_t starts[VFS_PATH_MAX / 2];
   int top = 0;
-  char *p = temp;
-  while (*p == '/') p++;
-  while (*p) {
-    char *comp = p;
-    while (*p && *p != '/') p++;
-    if (*p == '/') {
-      *p = '\0';
-      p++;
-    }
+  int pos = 1;
+  if (cap < 2) return -1;
+  if (cap > VFS_PATH_MAX) cap = VFS_PATH_MAX;
+  out[0] = '/';
+  const char *p = path;
+  for (;;) {
     while (*p == '/') p++;
-    if (comp[0] == '.' && comp[1] == '\0') continue;
-    if (comp[0] == '.' && comp[1] == '.' && comp[2] == '\0') {
-      if (top > 0) top--;
+    if (!*p) break;
+    const char *c = p;
+    while (*p && *p != '/') p++;
+    int n = (int)(p - c);
+    if (n == 1 && c[0] == '.') continue;
+    if (n == 2 && c[0] == '.' && c[1] == '.') {
+      if (top > 0) pos = starts[--top];
       continue;
     }
-    if (top < 64) stack[top++] = comp;
-  }
-
-  if (cap <= 0) return;
-  int pos = 0;
-  if (pos < cap - 1) out[pos++] = '/';
-  for (int i = 0; i < top; i++) {
-    if (i > 0 && pos < cap - 1) out[pos++] = '/';
-    for (int j = 0; stack[i][j] && pos < cap - 1; j++)
-      out[pos++] = stack[i][j];
+    if (top >= (int)(sizeof starts / sizeof starts[0])) return -1;
+    starts[top++] = (uint16_t)pos;
+    if (pos > 1) {
+      if (pos >= cap - 1) return -1;
+      out[pos++] = '/';
+    }
+    if (n >= cap - pos) return -1; /* the name plus the terminator */
+    for (int i = 0; i < n; i++) out[pos++] = c[i];
   }
   out[pos] = '\0';
+  return 0;
+}
+
+/* A failed canonicalisation leaves an EMPTY string, never a partial path. */
+static int vfs_clean(const char *path, char *out, int cap) {
+  int r = vfs_clean_into(path, out, cap);
+  if (r != 0 && cap > 0) out[0] = '\0';
+  return r;
 }
 
 /* M5c: a bind may redirect this canonical path to another filesystem.  Applied
@@ -90,26 +100,30 @@ static int vfs_bind_apply(char *path, int cap) {
 int vfs_abs_path(const char *path, char *out, int cap) {
   if (!path || cap <= 0) return -1;
   if (path[0] == '/') {
-    vfs_clean(path, out, cap);
+    if (vfs_clean(path, out, cap) != 0) return -1;
     return vfs_bind_apply(out, cap);
   }
 
+  /* cp/ext2b: cwd + '/' + path, refused (not cut) when it does not fit.  The
+     old join stopped copying the cwd at 200 bytes and the path at 250, so a
+     long relative name silently became a different file.  The raw join may be
+     longer than the canonical result ("a/../b"), hence the doubled buffer. */
   struct process *cur = process_group(current_process()); /* P1 (D7) */
   const char *cwd = (cur && cur->cwd[0]) ? cur->cwd : "/";
-  char raw[256];
+  char raw[2 * VFS_PATH_MAX];
   int pos = 0;
-  while (cwd[pos] && pos < 200) {
+  while (cwd[pos]) {
+    if (pos >= (int)sizeof raw - 2) return -1;
     raw[pos] = cwd[pos];
     pos++;
   }
   if (pos > 0 && raw[pos - 1] != '/') raw[pos++] = '/';
-  int k = 0;
-  while (path[k] && pos + k < 250) {
-    raw[pos + k] = path[k];
-    k++;
+  for (int k = 0; path[k]; k++) {
+    if (pos >= (int)sizeof raw - 1) return -1;
+    raw[pos++] = path[k];
   }
-  raw[pos + k] = '\0';
-  vfs_clean(raw, out, cap);
+  raw[pos] = '\0';
+  if (vfs_clean(raw, out, cap) != 0) return -1;
   return vfs_bind_apply(out, cap);
 }
 
@@ -405,4 +419,123 @@ int vfs_open_routed(const char *path, struct file *f) {
   f->nfs.is_dir = (attr.type == NF3DIR);
   f->nfs.mount_idx = midx;
   return 1;
+}
+
+/* ==================================================================== */
+/* cp/ext2b: setattr (chmod / chown / utimensat), the vfs.h contract     */
+/* ==================================================================== */
+
+/* A filesystem with no mode/owner/time storage (FAT16, pipes, sockets, the
+ * /dev nodes, memfd here).  The FAT16 answer is Linux vfat's behaviour when
+ * mounted with `quiet`, except for chown:
+ *   - chmod: success, nothing stored (vfat without `quiet` refuses a mode it
+ *     cannot represent with EPERM; a portable copier that chmods after write
+ *     must not abort, and stat() keeps reporting the synthesized 0644/0755 --
+ *     linux_probe_glibc's fchmod row depends on this);
+ *   - chown: success only for the owner every node already reports (uid/gid
+ *     0); a foreign owner is -EPERM (vfat without `quiet`), never a success
+ *     that the next stat() would contradict;
+ *   - utimensat: success, not stored (vfat would store the mtime at 2 s
+ *     granularity; this driver keeps the last-write clock).  */
+static int vfs_setattr_unstored(const struct vfs_setattr *sa) {
+  if ((sa->valid & VFS_SA_UID) && sa->uid != 0) return -EPERM;
+  if ((sa->valid & VFS_SA_GID) && sa->gid != 0) return -EPERM;
+  return 0;
+}
+
+extern uint64_t hb_clock_realtime_ms(void);
+
+/* The vfs.h setattr contract on top of cp-sys's tmpfs_setattr/fsetattr
+ * (docs/cp-ext2b.md 2.3).  `cur` is the node's current stat: rule 3 (a
+ * UID/GID change on a non-directory clears S_ISUID, and S_ISGID with S_IXGRP)
+ * is applied here as a MODE change, since tmpfs only stores what it is given.
+ * *_NOW becomes the clock in seconds (tmpfs's granularity).  Returns the
+ * TMPFS_SET_* mask; 0 = nothing to do (the caller does not call tmpfs, which
+ * would still bump ctime). */
+static int vfs_sa_to_tmpfs(const struct vfs_setattr *sa, const struct k_stat *cur,
+                           uint32_t *mode, int64_t *at, int64_t *mt) {
+  int64_t now = (int64_t)(hb_clock_realtime_ms() / 1000ull);
+  int m = 0;
+  *mode = sa->mode & 07777u;
+  if (sa->valid & VFS_SA_MODE) m |= TMPFS_SET_MODE;
+  if (sa->valid & VFS_SA_UID) m |= TMPFS_SET_UID;
+  if (sa->valid & VFS_SA_GID) m |= TMPFS_SET_GID;
+  if ((sa->valid & (VFS_SA_UID | VFS_SA_GID)) &&
+      (cur->st_mode & K_S_IFMT) != K_S_IFDIR) {
+    uint32_t base = (m & TMPFS_SET_MODE) ? *mode : (cur->st_mode & 07777u);
+    uint32_t kill = base & ~(uint32_t)04000;
+    if (kill & 00010) kill &= ~(uint32_t)02000;
+    if (kill != base || (m & TMPFS_SET_MODE)) {
+      *mode = kill;
+      m |= TMPFS_SET_MODE;
+    }
+  }
+  if (sa->valid & (VFS_SA_ATIME | VFS_SA_ATIME_NOW)) m |= TMPFS_SET_ATIME;
+  if (sa->valid & (VFS_SA_MTIME | VFS_SA_MTIME_NOW)) m |= TMPFS_SET_MTIME;
+  *at = (sa->valid & VFS_SA_ATIME_NOW) ? now : sa->atime_sec;
+  *mt = (sa->valid & VFS_SA_MTIME_NOW) ? now : sa->mtime_sec;
+  return m;
+}
+
+int vfs_setattr_path(const char *path, int follow, const struct vfs_setattr *sa) {
+  if (!path || !sa) return -EFAULT;
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENAMETOOLONG;
+  if (ext2v_owns(abs)) {
+    int r = ext2v_setattr(abs, follow, sa);
+    if (r != EXT2_EXTERNAL) return r;
+    /* a symlink led off the volume: abs is the redirected path */
+  }
+  /* cp/sys: the compat /tmp (docs/cp-ext2b.md 2.3).  A symlink that leaves
+     /tmp continues with the redirected path. */
+  if (tmpfs_owns(abs)) {
+    struct k_stat cur;
+    int r = tmpfs_stat(abs, follow, &cur);
+    if (r == 0) {
+      uint32_t mode;
+      int64_t at, mt;
+      int m = vfs_sa_to_tmpfs(sa, &cur, &mode, &at, &mt);
+      if (m == 0) return 0;
+      r = tmpfs_setattr(abs, follow, m, mode, sa->uid, sa->gid, at, mt);
+    }
+    if (r != TMPFS_EXTERNAL) return r;
+  }
+  /* The path must exist on whatever serves it (Linux resolves before it
+     looks at the filesystem's write policy). */
+  struct k_stat ks;
+  int err = 0;
+  if (file_stat_path(current_process(), abs, &ks, &err) != 0)
+    return -(err ? err : ENOENT);
+  int midx = -1;
+  const char *rel = 0;
+  if (vfs_route(abs, &midx, &rel)) return -EROFS; /* NFS: read-only mounts */
+  return vfs_setattr_unstored(sa);
+}
+
+int vfs_setattr_file(struct file *f, const struct vfs_setattr *sa) {
+  if (!f || !sa) return -EBADF;
+  switch (f->type) {
+  case FILE_TYPE_EMPTY:
+  case FILE_TYPE_UNINIT:
+    return -EBADF;
+  case FILE_TYPE_EXT2:
+  case FILE_TYPE_EXT2DIR:
+    return ext2v_fsetattr(f, sa);
+  case FILE_TYPE_NFS:
+  case FILE_TYPE_NFSDIR:
+    return -EROFS;
+  case FILE_TYPE_TMPFS:
+  case FILE_TYPE_TMPFSDIR: { /* cp/sys */
+    struct k_stat cur;
+    int r = tmpfs_fstat(f, &cur);
+    if (r) return r;
+    uint32_t mode;
+    int64_t at, mt;
+    int m = vfs_sa_to_tmpfs(sa, &cur, &mode, &at, &mt);
+    if (m == 0) return 0;
+    return tmpfs_fsetattr(f, m, mode, sa->uid, sa->gid, at, mt);
+  }
+  default:
+    return vfs_setattr_unstored(sa);
+  }
 }

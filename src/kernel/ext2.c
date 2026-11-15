@@ -76,7 +76,10 @@ static uint8_t mode_to_ft(uint32_t mode) {
  * root stays at the root), but without its 16-component limit.  Returns the
  * length or -ENAMETOOLONG. */
 static int e2_canon(const char *in, char *out, int cap) {
-  int starts[128];
+  /* cp/ext2b: one slot per possible component of an EXT2_PATH_MAX path
+     ("a/" pairs), so the depth check below can only fire on a path that is
+     too long anyway. */
+  uint16_t starts[EXT2_PATH_MAX / 2];
   int top = 0, pos = 1;
   if (cap < 2) return -ENAMETOOLONG;
   out[0] = '/';
@@ -92,13 +95,13 @@ static int e2_canon(const char *in, char *out, int cap) {
       if (top > 0) pos = starts[--top];
       continue;
     }
-    if (top >= 128) return -ENAMETOOLONG;
+    if (top >= (int)(sizeof starts / sizeof starts[0])) return -ENAMETOOLONG;
     int at = pos;
     if (pos > 1) {
       if (pos >= cap - 1) return -ENAMETOOLONG;
       out[pos++] = '/';
     }
-    starts[top++] = at;
+    starts[top++] = (uint16_t)at;
     if (pos + n >= cap) return -ENAMETOOLONG;
     for (int i = 0; i < n; i++) out[pos++] = c[i];
   }
@@ -1731,6 +1734,38 @@ int ext2_stat(struct ext2_fs *fs, uint32_t ino, struct ext2_stat *st) {
   st->ctime = in.ctime;
   st->blksize = fs->bs;
   return 0;
+}
+
+static uint32_t clamp_time(int64_t t) {
+  if (t > 0x7FFFFFFFLL) t = 0x7FFFFFFFLL;
+  if (t < -0x80000000LL) t = -0x80000000LL;
+  return (uint32_t)(int32_t)t;
+}
+
+int ext2_setattr(struct ext2_fs *fs, uint32_t ino, const struct ext2_attr *a) {
+  if (!a) return -EINVAL;
+  if (a->valid == 0) return 0;
+  if (fs->ro) return -EROFS;
+  struct e2i in;
+  int err = iread(fs, ino, &in);
+  if (err) return err;
+  uint32_t now = e2_now(fs);
+  if (a->valid & EXT2_ATTR_MODE)
+    in.mode = (in.mode & EXT2_S_IFMT) | (a->mode & 07777);
+  if (a->valid & (EXT2_ATTR_UID | EXT2_ATTR_GID)) {
+    if (a->valid & EXT2_ATTR_UID) in.uid = a->uid;
+    if (a->valid & EXT2_ATTR_GID) in.gid = a->gid;
+    if (!S_ISDIR_(in.mode)) {
+      in.mode &= ~(uint32_t)04000;                      /* S_ISUID */
+      if (in.mode & 00010) in.mode &= ~(uint32_t)02000; /* S_ISGID w/ S_IXGRP */
+    }
+  }
+  if (a->valid & EXT2_ATTR_ATIME_NOW) in.atime = now;
+  else if (a->valid & EXT2_ATTR_ATIME) in.atime = clamp_time(a->atime);
+  if (a->valid & EXT2_ATTR_MTIME_NOW) in.mtime = now;
+  else if (a->valid & EXT2_ATTR_MTIME) in.mtime = clamp_time(a->mtime);
+  in.ctime = now;
+  return iwrite(fs, ino, &in);
 }
 
 int ext2_resolve(struct ext2_fs *fs, const char *mnt, const char *abs,

@@ -48,6 +48,7 @@
 #include "errno.h"
 #include "startup.h"
 #include "program_loader.h" /* struct elf_load_info + ELF_LOAD_* (lane B) */
+#include "fs.h" /* cp/ext2b: fs_read_ext2_file (PT_INTERP on /EXT) */
 
 extern void uart_puts(const char *s);
 
@@ -711,7 +712,31 @@ int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
   struct elf_image iimg;
   char istaged[64];
   istaged[0] = '\0';
+  /* cp/ext2b: an interpreter path on the /EXT ext2 volume is read from there
+   * first (a glibc ld.so staged with the program); every other name keeps the
+   * FAT16 resolver below, alias table included. */
+  int iext2 = 0;
   if (eimg.has_interp) {
+    uint8_t *eb = 0;
+    uint32_t esz = 0, epg = 0;
+    int er = fs_read_ext2_file(eimg.interp, &eb, &esz, &epg,
+                               (uint32_t)USER_LIB_SLOT_SIZE);
+    if (er < 0) {
+      uart_puts("elf loader: interpreter '");
+      uart_puts(eimg.interp);
+      uart_puts(er == -ENOEXEC ? "' on /EXT is empty or larger than one USER_LIB slot\n"
+                               : "' on /EXT cannot be read\n");
+      return er == -ENOEXEC ? -ENOSPC : er;
+    }
+    if (er == 1) {
+      iext2 = 1;
+      ibuf = (uint64_t)(uintptr_t)eb;
+      ipages = epg;
+      ilen = esz;
+      el_copy_name(istaged, sizeof istaged, eimg.interp);
+    }
+  }
+  if (eimg.has_interp && !iext2) {
     uint16_t icl = 0;
     uint32_t isz = 0;
     if (el_compat_resolve(eimg.interp, &icl, &isz, istaged, sizeof istaged) != 0) {
@@ -732,6 +757,8 @@ int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
     if (!ibuf)
       return -ENOMEM;
     ilen = isz;
+  }
+  if (eimg.has_interp) {
     rc = el_admit_interp((const uint8_t *)ibuf, ilen, &iimg, info);
     if (rc != 0) {
       el_free_contig(ibuf, ipages);

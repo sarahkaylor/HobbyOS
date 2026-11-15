@@ -795,6 +795,174 @@ static void scenario_htree(void) {
         flags);
 }
 
+/* ---- scenario: setattr (cp/ext2b: chmod/chown/utimensat) ---------------- */
+
+/* debugfs `stat <path>` field -> number.  `key` like "Mode:" / "User:" /
+   "atime: 0x" (hex). */
+static long dbg_field(const char *img, const char *path, const char *key,
+                      int hex) {
+  char out[8192];
+  capture(out, sizeof out, "%s -R 'stat %s' %s 2>/dev/null", debugfs_bin, path,
+          img);
+  char *p = strstr(out, key);
+  if (!p) return -1;
+  p += strlen(key);
+  while (*p == ' ') p++;
+  return strtol(p, 0, hex ? 16 : (key[0] == 'M' ? 8 : 10));
+}
+
+static void scenario_setattr(int bs, int isize) {
+  char img[300];
+  snprintf(img, sizeof img, "%s/sa%d.img", tmpdir, bs);
+  run("rm -f %s && truncate -s 32M %s", img, img);
+  CHECK(run("%s -q -F -t ext2 -b %d -I %d -O ^dir_index %s >/dev/null 2>&1",
+            mke2fs_bin, bs, isize, img) == 0,
+        "mke2fs setattr bs=%d", bs);
+  printf("scenario setattr bs=%d inode=%d\n", bs, isize);
+  CHECK(mount_img(img, 0, 32) == 0, "mount setattr");
+  CHECK(mkdir_p("/EXT/sa") == 0, "mkdir sa");
+  CHECK(put("/EXT/sa/f", 0, (const uint8_t *)"data", 4) == 0, "put f");
+  CHECK(mkdir_p("/EXT/sa/d") == 0, "mkdir d");
+  CHECK(symlink_at("/EXT/sa/l", "f") == 0, "symlink l");
+  uint32_t fi = ino_of("/EXT/sa/f"), di = ino_of("/EXT/sa/d");
+  struct ext2_res lr;
+  CHECK(res("/EXT/sa/l", 0, &lr) == 0, "resolve l nofollow");
+  uint32_t li = lr.ino;
+  struct ext2_stat st;
+  struct ext2_attr a;
+
+  /* chmod: permission bits replaced, type kept, ctime = now */
+  memset(&a, 0, sizeof a);
+  a.valid = EXT2_ATTR_MODE;
+  a.mode = 0104751; /* type bits in the request are ignored */
+  CHECK(ext2_setattr(&FS, fi, &a) == 0, "chmod f");
+  CHECK(ext2_stat(&FS, fi, &st) == 0 && st.mode == (EXT2_S_IFREG | 04751),
+        "mode 0%o", st.mode);
+  CHECK(st.ctime == host_now(), "ctime now %u", st.ctime);
+  /* chown of a regular file: S_ISUID dropped; S_ISGID dropped with S_IXGRP */
+  a.valid = EXT2_ATTR_MODE;
+  a.mode = 06751;
+  CHECK(ext2_setattr(&FS, fi, &a) == 0, "chmod 06751");
+  memset(&a, 0, sizeof a);
+  a.valid = EXT2_ATTR_UID | EXT2_ATTR_GID;
+  a.uid = 70000; /* > 16 bits: needs the osd2 high half */
+  a.gid = 1001;
+  CHECK(ext2_setattr(&FS, fi, &a) == 0, "chown f");
+  CHECK(ext2_stat(&FS, fi, &st) == 0 && st.uid == 70000 && st.gid == 1001 &&
+            st.mode == (EXT2_S_IFREG | 0751),
+        "chown f uid=%u gid=%u mode=0%o", st.uid, st.gid, st.mode);
+  /* a directory keeps S_ISGID/sticky across chown */
+  a.valid = EXT2_ATTR_MODE;
+  a.mode = 03775;
+  CHECK(ext2_setattr(&FS, di, &a) == 0, "chmod d");
+  a.valid = EXT2_ATTR_GID;
+  a.gid = 50;
+  CHECK(ext2_setattr(&FS, di, &a) == 0, "chgrp d");
+  CHECK(ext2_stat(&FS, di, &st) == 0 && st.mode == (EXT2_S_IFDIR | 03775) &&
+            st.gid == 50,
+        "dir mode 0%o gid %u", st.mode, st.gid);
+  /* lchown changes the link inode, not its target */
+  a.valid = EXT2_ATTR_UID;
+  a.uid = 5;
+  CHECK(ext2_setattr(&FS, li, &a) == 0, "lchown l");
+  CHECK(ext2_stat(&FS, li, &st) == 0 && st.uid == 5, "link uid %u", st.uid);
+  CHECK(ext2_stat(&FS, fi, &st) == 0 && st.uid == 70000, "target uid kept");
+  /* times: explicit, negative (pre-1970), clamped, now; omitted keeps */
+  memset(&a, 0, sizeof a);
+  a.valid = EXT2_ATTR_ATIME | EXT2_ATTR_MTIME;
+  a.atime = 1000000000;
+  a.mtime = 1234567890;
+  CHECK(ext2_setattr(&FS, fi, &a) == 0, "utimes f");
+  CHECK(ext2_stat(&FS, fi, &st) == 0 && st.atime == 1000000000u &&
+            st.mtime == 1234567890u,
+        "times %u %u", st.atime, st.mtime);
+  a.valid = EXT2_ATTR_MTIME;
+  a.mtime = -86400;
+  CHECK(ext2_setattr(&FS, di, &a) == 0, "negative mtime d");
+  CHECK(ext2_stat(&FS, di, &st) == 0 && (int32_t)st.mtime == -86400,
+        "negative mtime %d", (int32_t)st.mtime);
+  a.valid = EXT2_ATTR_ATIME_NOW;
+  a.atime = 0;
+  CHECK(ext2_setattr(&FS, di, &a) == 0 && ext2_stat(&FS, di, &st) == 0 &&
+            st.atime == host_now() && (int32_t)st.mtime == -86400,
+        "atime now, mtime kept");
+  a.valid = EXT2_ATTR_ATIME;
+  a.atime = (int64_t)1 << 40;
+  CHECK(ext2_setattr(&FS, li, &a) == 0 && ext2_stat(&FS, li, &st) == 0 &&
+            st.atime == 0x7FFFFFFFu,
+        "clamped atime 0x%x", st.atime);
+  a.valid = 0;
+  CHECK(ext2_setattr(&FS, fi, &a) == 0, "empty setattr is a no-op");
+  umount_img();
+  CHECK(fsck(img, "setattr") == 0, "e2fsck clean after setattr");
+  /* the oracle: debugfs reads the same values back from the image */
+  long m = dbg_field(img, "/sa/f", "Mode:", 0);
+  long u = dbg_field(img, "/sa/f", "User:", 0);
+  long g = dbg_field(img, "/sa/f", "Group:", 0);
+  long at = dbg_field(img, "/sa/f", "atime: 0x", 1);
+  long mt = dbg_field(img, "/sa/f", "mtime: 0x", 1);
+  printf("  debugfs /sa/f: Mode 0%lo User %ld Group %ld atime 0x%lx mtime 0x%lx\n",
+         m, u, g, at, mt);
+  CHECK(m == 0751 && u == 70000 && g == 1001, "debugfs f mode/owner");
+  CHECK(at == 1000000000L && mt == 1234567890L, "debugfs f times");
+  long dm = dbg_field(img, "/sa/d", "Mode:", 0);
+  long dmt = dbg_field(img, "/sa/d", "mtime: 0x", 1);
+  printf("  debugfs /sa/d: Mode 0%lo mtime 0x%lx\n", dm, dmt);
+  CHECK(dm == 03775 && dmt == 0xFFFEAE80L, "debugfs d mode/mtime");
+  CHECK(dbg_field(img, "/sa/l", "User:", 0) == 5, "debugfs link owner");
+  /* read-only mount refuses */
+  CHECK(mount_img(img, 1, 32) == 0, "mount ro");
+  a.valid = EXT2_ATTR_MODE;
+  a.mode = 0600;
+  CHECK(ext2_setattr(&FS, ino_of("/EXT/sa/f"), &a) == -EROFS, "ro EROFS");
+  umount_img();
+}
+
+/* ---- scenario: paths longer than the old 256-byte VFS_PATH_MAX ---------- */
+
+static void scenario_longpath(void) {
+  char img[300];
+  snprintf(img, sizeof img, "%s/lp.img", tmpdir);
+  run("rm -f %s && truncate -s 16M %s", img, img);
+  CHECK(run("%s -q -F -t ext2 -b 4096 %s >/dev/null 2>&1", mke2fs_bin, img) == 0,
+        "mke2fs longpath");
+  printf("scenario longpath (EXT2_PATH_MAX=%d)\n", EXT2_PATH_MAX);
+  CHECK(mount_img(img, 0, 32) == 0, "mount longpath");
+  /* 12 components of 50 bytes: a ~620-byte path */
+  char path[EXT2_PATH_MAX + 64];
+  int n = snprintf(path, sizeof path, "/EXT");
+  for (int i = 0; i < 12; i++) {
+    n += snprintf(path + n, sizeof path - (size_t)n,
+                  "/d%02d_abcdefghijklmnopqrstuvwxyz_0123456789_ABCDEFGHI", i);
+    CHECK(mkdir_p(path) == 0, "mkdir depth %d", i);
+  }
+  n += snprintf(path + n, sizeof path - (size_t)n, "/leaf.txt");
+  printf("  long path length %d\n", n);
+  CHECK(n > 600, "path is > 600 bytes");
+  CHECK(put(path, 0, (const uint8_t *)"deep", 4) == 0, "put long-path file");
+  struct ext2_res r;
+  CHECK(res(path, 1, &r) == 0 && strcmp(r.path, path) == 0,
+        "resolve long path (canonical form round-trips)");
+  /* a ".." inside a long path */
+  char dd[EXT2_PATH_MAX + 64];
+  snprintf(dd, sizeof dd, "%s/../leaf.txt", path);
+  CHECK(res(dd, 1, &r) == 0 && strcmp(r.path, path) == 0, "long path with ..");
+  /* past EXT2_PATH_MAX: refused, never truncated */
+  char toolong[EXT2_PATH_MAX + 200];
+  int k = snprintf(toolong, sizeof toolong, "%s", path);
+  while (k < EXT2_PATH_MAX + 20) toolong[k++] = 'x';
+  toolong[k] = '\0';
+  CHECK(res(toolong, 1, &r) == -ENAMETOOLONG, "over-long path ENAMETOOLONG");
+  umount_img();
+  CHECK(fsck(img, "longpath") == 0, "e2fsck clean after long paths");
+  char out[4096];
+  char dpath[EXT2_PATH_MAX + 64];
+  snprintf(dpath, sizeof dpath, "%s", path + 4); /* strip /EXT */
+  capture(out, sizeof out, "%s -R 'cat %s' %s 2>/dev/null", debugfs_bin, dpath,
+          img);
+  CHECK(strcmp(out, "deep") == 0, "debugfs cat long path = '%s'", out);
+}
+
 /* ---- scenario 4: corrupted / unsupported images must fail cleanly ------- */
 
 static uint32_t dbg_first_block(const char *img, const char *path) {
@@ -1038,6 +1206,9 @@ int main(void) {
   scenario_write(4096, "-O ^dir_index", 512);
   scenario_write(4096, "", 8); /* default ext2 features, tiny cache: eviction */
   scenario_htree();
+  scenario_setattr(1024, 128);
+  scenario_setattr(4096, 256);
+  scenario_longpath();
   scenario_large_1k();
   scenario_corrupt();
   if (failures && getenv("EXT2_TEST_KEEP"))

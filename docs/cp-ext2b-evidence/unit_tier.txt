@@ -1,0 +1,11 @@
+[LOCKHEALTH] blockhold=0 selflock=0 classerr=0 irqsave_proc=0 irqoff_max_us=3452 irqoff_total_us=1214304 reg_used=530 reg_dropped=0
+[LOCKHEALTH-IRQOFF] cpu=0 max_us=3452 total_us=1216036 worst_lock=vm_lock pc=0x70101FC4
+==================================
+Tests run:    448
+Tests failed: 2
+UNIT TESTS FAILED
+==================================
+EXIT=1
+1611:EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:213
+1615:EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:243
+1813:UNIT TESTS FAILED
