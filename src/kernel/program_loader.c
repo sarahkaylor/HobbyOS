@@ -1614,6 +1614,13 @@ int process_exec_current(struct trap_frame *tf, const char *path,
        the new image (observed: mkdir killed writing errno=EEXIST at
        0x100002C3D0 after fork+exec from the shell). */
     grp->tls_base = 0;
+#ifdef __x86_64__
+    /* cp P1: and the user GS base (Linux exec starts the image with gsbase
+       0).  The caller is the running thread, so clear the live
+       KERNEL_GS_BASE as well -- the image is entered from this trap. */
+    grp->gs_base = 0;
+    (void)process_set_user_gs(cur, 0);
+#endif
     /* P5 (D3.1-D3.3): the same success-path apply as the v1 tail --
        environment, signal-state reset, FD_CLOEXEC sweep. */
     process_exec_apply(grp, env, envc);
@@ -1679,6 +1686,9 @@ int process_exec_current(struct trap_frame *tf, const char *path,
      register: a fork-inherited foreign TP would defeat the new image's
      lazy/crt0 TLS install (same 0x2C3D0-class errno-hole as the v2 path). */
   grp->tls_base = 0;
+#ifdef __x86_64__
+  grp->gs_base = 0; /* cp P1: v1 images are native; never a user GS */
+#endif
   grp->heap_brk = USER_HEAP_BASE;
   grp->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {

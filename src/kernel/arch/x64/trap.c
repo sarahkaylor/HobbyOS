@@ -90,6 +90,9 @@ static int copy_user_path(const char *user, char *kbuf, int cap);
    gs: offsets are pinned by the typedefs below). */
 
 struct cpu_local cpu_locals[MAX_CPUS];
+/* cp P1: the byte span of cpu_locals[], read by trap_gs_fixup (asm cannot see
+   sizeof) and by process_set_user_gs(). */
+const uint64_t cpu_locals_span = sizeof(cpu_locals);
 
 void save_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
@@ -5931,14 +5934,23 @@ void trap_init_core_with_id(uint32_t cpu) {
   extern void arch_fpu_enable_core(void);
   arch_fpu_enable_core();
 
-  // Write &cpu_locals[cpu] to Kernel GS base MSR (0xC0000102)
+  /* cp P1: swapgs discipline.  In ring 0, GS_BASE (0xC0000101) is this
+     core's cpu_locals block (every gs:[n] in the entry asm and
+     current_process()/get_cpuid() depend on it).  IA32_KERNEL_GS_BASE
+     (0xC0000102) holds the user GS base of the thread that will run next in
+     ring 3: restore_context() writes it from p->gs_base, and the
+     return-to-user paths swapgs so that value is live in ring 3 while this
+     block waits in KERNEL_GS_BASE.  Entry from ring 3 swaps back
+     (syscall_entry unconditionally, the exception stubs via trap_gs_fixup).
+     Before this, both MSRs held cpu_locals and no swapgs ran anywhere, so
+     ring 3 could read the kernel's per-CPU block through %gs and no user GS
+     base could exist.  Start KERNEL_GS_BASE at 0: a user entry before any
+     restore_context() then sees GS_BASE = 0, the native default. */
   uint64_t gs_base = (uint64_t)&cpu_locals[cpu];
   uint32_t low = (uint32_t)gs_base;
   uint32_t high = (uint32_t)(gs_base >> 32);
-  __asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(0xC0000102));
-
-  // Also write it to Active GS base MSR (0xC0000101) so we are safe
   __asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(0xC0000101));
+  __asm__ volatile("wrmsr" : : "a"(0u), "d"(0u), "c"(0xC0000102));
 
   // Load IDT for this CPU
   struct idt_ptr ptr;
@@ -5991,6 +6003,46 @@ void syscall_init(void) {
   __asm__ volatile("wrmsr" : : "a"(0x200), "d"(0), "c"(0xC0000084));
 }
 
+/* cp P1: make GS_BASE the kernel's on every exception/IRQ entry.
+ *
+ * The decision is made from the GS base itself, not from the interrupted CS:
+ * if GS_BASE already points into cpu_locals[] we are on the kernel GS (an
+ * entry from ring 0), otherwise the CPU is still on a ring-3 GS base and
+ * swapgs brings the kernel's back.  Linux's paranoid_entry uses the same
+ * idea for the same reason: a CS-based test is wrong in the one window that
+ * matters, a fault on the return-to-user `iretq` after its swapgs (#GP on a
+ * bad frame), which arrives with CS = kernel but GS = user and would then run
+ * the whole handler on the user's GS.  The exit paths need no mirror of this
+ * test: they swapgs exactly when the iretq frame returns to ring 3, with
+ * interrupts disabled, and restore_context()/the entry swapgs keep
+ * KERNEL_GS_BASE holding the right user value for that.
+ * ARCH_SET_GS refuses user values inside cpu_locals[] (process_set_user_gs),
+ * so the range test cannot be fooled.  Preserves every register (flags are
+ * already in the hardware frame). */
+__asm__(
+".intel_syntax noprefix\n"
+".global trap_gs_fixup\n"
+"trap_gs_fixup:\n"
+"    push rax\n"
+"    push rcx\n"
+"    push rdx\n"
+"    mov ecx, 0xC0000101\n"
+"    rdmsr\n"
+"    shl rdx, 32\n"
+"    or rax, rdx\n"
+"    lea rcx, [rip + cpu_locals]\n"
+"    sub rax, rcx\n"
+"    cmp rax, qword ptr [rip + cpu_locals_span]\n"
+"    jb 1f\n"
+"    swapgs\n"
+"1:\n"
+"    pop rdx\n"
+"    pop rcx\n"
+"    pop rax\n"
+"    ret\n"
+".att_syntax prefix\n"
+);
+
 // Exception assembly entries
 #define EXCEPTION_NO_ERR(num) \
     extern void exception_##num(void); \
@@ -6000,6 +6052,7 @@ void syscall_init(void) {
         "exception_" #num ":\n" \
         "    push 0\n" \
         "    push " #num "\n" \
+        "    call trap_gs_fixup\n" \
         "    jmp common_trap_wrapper\n" \
         ".att_syntax prefix\n" \
     )
@@ -6011,6 +6064,7 @@ void syscall_init(void) {
         ".global exception_" #num "\n" \
         "exception_" #num ":\n" \
         "    push " #num "\n" \
+        "    call trap_gs_fixup\n" \
         "    jmp common_trap_wrapper\n" \
         ".att_syntax prefix\n" \
     )
@@ -6055,6 +6109,7 @@ __asm__(
 ".intel_syntax noprefix\n"
 ".global syscall_entry\n"
 "syscall_entry:\n"
+"    swapgs\n"               /* cp P1: ring 3 -> kernel GS (always from CPL3) */
 "    mov gs:[8], rsp\n"       /* Save User RSP */
 "    mov rsp, gs:[0]\n"       /* Load Kernel Stack Pointer */
 "    \n"
@@ -6238,6 +6293,17 @@ __asm__(
 "       kernel-frame address (kstack_top-0x28) unless reloaded -> user\n"\
 "       faults at the trap frame's own RIP slot (0x755xDBxx). */\n"\
 "    mov rdi, [rsp - 240]\n"
+"    /* cp P1: returning to ring 3 -> swapgs, so the thread's user GS base\n"
+"       (KERNEL_GS_BASE, installed by restore_context/ARCH_SET_GS) is live\n"
+"       and cpu_locals waits in KERNEL_GS_BASE for the next entry.  cli\n"
+"       first: a handler may have left IF=1 (safe_wfi), and an interrupt\n"
+"       between the swapgs and the iretq would run on the user GS (iretq\n"
+"       reloads IF from the frame).  [rsp + 8] is the frame's CS. */\n"
+"    cli\n"
+"    test byte ptr [rsp + 8], 3\n"
+"    jz 4f\n"
+"    swapgs\n"
+"4:\n"
 "    iretq\n"
 ".att_syntax prefix\n"
 );
@@ -6440,6 +6506,17 @@ __asm__(
 "       kernel-frame address (kstack_top-0x28) unless reloaded -> user\n"\
 "       faults at the trap frame's own RIP slot (0x755xDBxx). */\n"\
 "    mov rdi, [rsp - 240]\n"
+"    /* cp P1: returning to ring 3 -> swapgs, so the thread's user GS base\n"
+"       (KERNEL_GS_BASE, installed by restore_context/ARCH_SET_GS) is live\n"
+"       and cpu_locals waits in KERNEL_GS_BASE for the next entry.  cli\n"
+"       first: a handler may have left IF=1 (safe_wfi), and an interrupt\n"
+"       between the swapgs and the iretq would run on the user GS (iretq\n"
+"       reloads IF from the frame).  [rsp + 8] is the frame's CS. */\n"
+"    cli\n"
+"    test byte ptr [rsp + 8], 3\n"
+"    jz 4f\n"
+"    swapgs\n"
+"4:\n"
 "    iretq\n"
 "8:  pop r13\n"
 "    pop r12\n"

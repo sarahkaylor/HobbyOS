@@ -2459,6 +2459,23 @@ static int l_thr_arch_prctl(struct process *p, struct trap_frame *tf) {
                                           : -EFAULT);
     return 1;
   }
+  /* cp P1: the user GS base (Windows x64 reaches its TEB through %gs; Wine
+     installs it with ARCH_SET_GS).  Per-thread, held in the calling
+     thread's PCB (`p`, as for ARCH_SET_FS) and made live through
+     KERNEL_GS_BASE + the return-to-user swapgs (process_set_user_gs,
+     trap.c).  GET answers from the PCB, which is
+     authoritative exactly as tls_base is. */
+  if (code == L_ARCH_SET_GS) {
+    tf->regs[0] = (uint64_t)(int64_t)process_set_user_gs(p, addr);
+    return 1;
+  }
+  if (code == L_ARCH_GET_GS) {
+    uint64_t cur = p->gs_base;
+    tf->regs[0] = (uint64_t)(int64_t)(l_copy_to_user(p, addr, &cur, 8) == 0
+                                          ? 0
+                                          : -EFAULT);
+    return 1;
+  }
   if (code == L_ARCH_GET_CPUID || code == 0x1012 /* ARCH_SET_CPUID */) {
     /* glibc's CPUID feature probe.  SET_CPUID(1) means "enable the CPUID
        fault emulation", which this kernel does not do: Linux's answer for a

@@ -583,6 +583,18 @@ struct process {
    * Both appended at the END so parallel lanes merge additively. */
   uint64_t park_since_ms;
   int sig_frame_sig;
+
+  /* --- cp P1 (docs/cyberpunk.md AD-4 / P1): user GS base -------------- *
+   * The thread's IA32_GS_BASE while it runs in ring 3 (arch_prctl
+   * ARCH_SET_GS; Windows x64 code reaches its TEB through %gs).  The x86_64
+   * entry/exit paths keep the kernel's per-CPU block in GS_BASE while in
+   * ring 0 and the user's value in IA32_KERNEL_GS_BASE (swapgs), so this
+   * word is what restore_context() installs into KERNEL_GS_BASE and what the
+   * return-to-user swapgs then makes live.  Authoritative per PCB, exactly
+   * like tls_base: never re-read from the MSR.  fork/clone copy it (Linux
+   * semantics), exec zeroes it.  0 on ARM and for native processes.
+   * Appended at the END so parallel lanes merge additively. */
+  uint64_t gs_base;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
