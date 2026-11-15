@@ -16,6 +16,7 @@ quoted in the lane report; the commands are below so anyone can re-run them.
 | `kernel-mode #PF on a valid user address is a demand fault …` | D11 + C4-x | Kernel #PF on a user VA of the current AS → `vm_handle_fault` with the real R/W bit before the fatal-dump path. writev/readv/l_misc_readv/pread64/pwrite64 validate (readv with write=1 → COW). |
 | `S6+S7 — the compat address space …` | S6, S7, D4, D7, D12 | `addr_space.layout/va_lo/va_hi`; `vm_va_is_user` / `vm_range_is_user` everywhere a user range is checked; compat roots (per-AS PD for the image leaves, 4-level walker over PML4[0..255], full teardown); `MAP_FIXED_NOREPLACE`; compat placement; low `ET_EXEC`; every Linux-ABI process gets the compat layout; floor 8 GiB. |
 | `S8 — compat user VA starts at 0x10000 …` | S8 | `CP_COMPAT_FLOOR = 0x10000`; `src/user/linux_probe_lowva.c`. |
+| `a fork of a Linux-ABI process stays Linux-ABI …` | (found by lowva) | `process_fork` copies `abi_flags`; a new slot starts at 0. Before, a forked child inherited the slot's stale flags. |
 
 ## Helper API (for other lanes)
 
@@ -68,7 +69,7 @@ keeps the native window first (so existing Linux-ABI programs keep their
 placement) and only goes top-down for what does not fit; ET_DYN / stack / brk
 stay at their native addresses.
 
-## Gates (linuxci, KVM, every boot under `flock /tmp/cp-qemu.lock`)
+## Gates (strix, KVM, every boot under `flock /tmp/cp-qemu.lock`)
 
 ```
 bash tools/gate/t3_linux_probe.sh lowva
@@ -81,13 +82,55 @@ bash tools/cp/mmu/castscan_check.sh
 make ARCH=arm TOOLS_SKIP=1 hobbyos.elf     # in a separate tree (shared hobbyos.elf)
 ```
 
-Results: see the lane report.
+Results (host **strix**, Zen 5 / AVX-512, KVM; linuxci results are void —
+its filesystem failed mid-run): see the "Results on strix" section below.
+
+## Results on strix (2026-11-15)
+
+Host: strix (Ryzen AI MAX+ 395 = Zen 5 with AVX-512, KVM, QEMU 10.2.1). Base =
+a copy of `~/cp/base` (`cyberpunk` @ 6e73e34e). Raw output in
+`evidence/cp-mmu/` (`summary.strix.txt`, `lowva-gate.strix.txt`,
+`probes-gate.strix.txt`, `lowva-16g-gate.strix.txt`). Earlier linuxci runs are
+void (its filesystem failed); only one finding from them is used, the
+kernel-task-stack triple-fault loop, and that fix is re-verified here.
+
+| gate | lane | base |
+|---|---|---|
+| `t3_linux_probe.sh lowva` | **PASS** (`[LP] done rc=0`, every row ok) | probe does not exist on base |
+| probes hello timers futex_sig fpu_sig tramp_sig mem mmap_race vmcommit redzone proc fd clock | all **PASS** | — (base hello/fpu_sig/futex_sig PASS per the integrator) |
+| probe join | FAIL `E clone failed errno=22` | same FAIL, same line (known base defect) |
+| lowva at `-m 16G` | **PASS**; `[FRAME] frames=3997696 total_mib=15616 … hi_mib=10240` | base pool is fixed at 5376 MiB |
+| lowva at `-m 12288M` | `[FRAME] frames=2949120 total_mib=11520 … hi_mib=6144` (was 5376) | 5376 |
+| frames handed out above 8 GiB | `fr_hi=3181`, `hole=0` (clock boot, 5 s row) | — |
+| `[IDMAP-TRIP]` / `[KMEM-BADVA]` rows, all 15 boots | 0 | — |
+| unit tier (`run_unit_tests_intel.sh`) | 448 run, 2 fail: `virtio_gpu_test.c:214`, `:244` | 448 run, 2 fail: `virtio_gpu_test.c:213`, `:243` (same tests; +1 line from one include) |
+| `make -k host_tests` | 38/40 (2 × missing `gaming.md`) | 38/40, same two |
+| `castscan_check.sh` | 348 sites, 0 outside the allowlist | — |
+| ARM `make ARCH=arm TOOLS_SKIP=1 hobbyos.elf` | EXIT=0 (aarch64 ELF) | — |
+
+Every tier log (lane and base alike) also carries t3_tier's
+`FAIL (lock scope) … [ALIVE-SET]` police row; the probe gates grade only on
+`[LP] done rc=0`. The 2026-11-15 linuxci unit run's third failure (the
+interrupt-masking budget) did not reproduce on strix in either tree.
+
+Defects found and fixed on the way (all in the lane's commits):
+- kernel tasks ran on identity-mapped stacks, so an interrupt taken in one
+  followed by `schedule()` loading a native root triple-faulted. They now run on
+  direct-map stacks (`phys_to_kva`).
+- `fat16_page_id.buf` is compared against physical frames, so it must record
+  `virt_to_phys(out)`.
+- `vm_arch_restore_kernel` trusted bookkeeping, not CR3, so a stale v2 root
+  survived into v1 unit tests and tripped `[IDMAP-TRIP]`; it now checks the
+  real CR3.
+- fork never copied `abi_flags` (and new slots never reset them), so a compat
+  child on a reused native slot sent every syscall to the native table.
+- lowva blocks SIGCHLD: SIGCHLD still kills on this kernel; C1-cpu fixes that.
 
 ## Not done / open
 
 - Wine itself, RimWorld to its menu, Doom ELF, icewm on the new MMU were not
   run in this lane (no Wine runtime staged in a HobbyOS image yet; `doom10.elf`
-  absent on linuxci; RimWorld needs the NFS share). The probe set is the soak.
+  absent; RimWorld needs the NFS share). The probe set is the soak.
 - No low `ET_EXEC` probe: Linux `execve` of an ELF is not implemented, and the
   probe harness stages one ELF; the loader path is code-reviewed only.
 - No-hint compat placement is "native window, then top-down", not pure

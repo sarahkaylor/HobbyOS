@@ -1,0 +1,63 @@
+# host: strix (Ryzen AI MAX+ 395, Zen 5, AVX-512), KVM, QEMU 10.2.1; lane tree = cp-mmu (Mac worktree synced), base = ~/cp/base copy (cyberpunk 6e73e34e Merge branch 'cp-vk' into cyberpunk)
+## lane unit (./run_unit_tests_intel.sh, TOOLS_SKIP=1)
+    RUNNING KERNEL UNIT TESTS     
+EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:214
+EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:244
+Tests run:    448
+Tests failed: 2
+UNIT TESTS FAILED
+## base unit (same command, copy of ~/cp/base)
+    RUNNING KERNEL UNIT TESTS     
+EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:213
+EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:243
+Tests run:    448
+Tests failed: 2
+UNIT TESTS FAILED
+## base join (t3_linux_probe.sh join)
+[LP] E clone failed errno=22
+t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1)
+## lane join
+[LP] E clone failed errno=22
+## host_tests (make -k host_tests): lane / base
+  FAIL  tools/board/sync_gaming_md_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+  FAIL  tools/t5/roadmap_doc_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+[host-tests] done: 38/40 passed
+  FAIL  tools/board/sync_gaming_md_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+  FAIL  tools/t5/roadmap_doc_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+[host-tests] done: 38/40 passed
+## ARM build (make ARCH=arm TOOLS_SKIP=1 hobbyos.elf, separate tree)
+EXIT=0
+ ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, with debug_info, not stripped
+## tripwire / reset / pool counters per probe console (lane)
+clock idmap_trip+badva=0 fatal=0 boots=1 hole=0 fr_hi=3181
+fd idmap_trip+badva=0 fatal=0 boots=1 
+fpu_sig idmap_trip+badva=0 fatal=0 boots=1 
+futex_sig idmap_trip+badva=0 fatal=0 boots=1 
+hello idmap_trip+badva=0 fatal=0 boots=1 
+join idmap_trip+badva=0 fatal=0 boots=1 
+lowva16g idmap_trip+badva=0 fatal=0 boots=1 
+lowva idmap_trip+badva=0 fatal=0 boots=1 
+mem idmap_trip+badva=0 fatal=0 boots=1 
+mmap_race idmap_trip+badva=0 fatal=0 boots=1 
+proc idmap_trip+badva=0 fatal=0 boots=1 
+redzone idmap_trip+badva=0 fatal=0 boots=1 
+timers idmap_trip+badva=0 fatal=0 boots=1 
+tramp_sig idmap_trip+badva=0 fatal=0 boots=1 
+vmcommit idmap_trip+badva=0 fatal=0 boots=1 
+## boot rows, -m 12288M (lowva console)
+[DMAP] base=0xFFFF800000000000 ioremap=0xFFFF808000000000 alias=ok
+[MEMMAP] src=multiboot multiboot_rc=0 entries=22 e820_rc=0 e820_entries=4 e820_ram_in_map=0
+[DMAP] ram above 8 GiB mapped_mib=6144 ranges=1
+[FRAME] hi ext=0x0x0000000200000000-0x0x0000000380000000 ram=1
+[FRAME] ram ext0=1 ext1=1
+[FRAME] frames=2949120 total_mib=11520 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=6144 reserved=0
+## boot rows, -m 16G (lowva16g console)
+[MEMMAP] src=multiboot multiboot_rc=0 entries=21 e820_rc=0 e820_entries=3 e820_ram_in_map=0
+[MEMMAP]   0x0000000100000000-0x0000000480000000 type=1
+[MEMMAP]   e820 0x0000000100000000-0x0000000480000000 type=1
+[DMAP] ram above 8 GiB mapped_mib=10240 ranges=1
+[FRAME] hi ext=0x0x0000000200000000-0x0x0000000480000000 ram=1
+[FRAME] ram ext0=1 ext1=1
+[FRAME] frames=3997696 total_mib=15616 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=10240 reserved=0
+## castscan_check.sh
+castscan: 348 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
