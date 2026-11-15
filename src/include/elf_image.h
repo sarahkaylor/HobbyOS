@@ -198,6 +198,17 @@ int elf_copy_into(const struct elf_image *img, const void *buf, uint64_t len,
 int elf_apply_relocations(const struct elf_image *img, uint8_t *stage,
                           uint64_t span, uint64_t base);
 
+/* cp/exec: elf_apply_relocations with a policy.  ELF_RELOC_DEFER_IRELATIVE
+ * (x86_64 images only): R_X86_64_IRELATIVE entries are validated (slot and
+ * resolver inside the span), left untouched and counted in *deferred (may be
+ * NULL); the caller must then keep the image's DT_RELA table intact so its own
+ * startup (glibc _dl_relocate_static_pie) applies them, as on Linux.  flags 0
+ * == elf_apply_relocations. */
+#define ELF_RELOC_DEFER_IRELATIVE 0x1u
+int elf_apply_relocations_ex(const struct elf_image *img, uint8_t *stage,
+                             uint64_t span, uint64_t base, uint32_t flags,
+                             uint32_t *deferred);
+
 /* Human-readable name for an ELF_ERR_* (for serial logs; never NULL). */
 const char *elf_strerror(int err);
 

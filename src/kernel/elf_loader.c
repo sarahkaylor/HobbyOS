@@ -335,6 +335,10 @@ static void el_clear_reloc_counts(const struct elf_image *img, uint8_t *stage,
  * vaddr_base-relative offsets, page holes untouched) and apply its RELATIVE
  * relocations for `base`.  On success *stage_out holds exactly what will be
  * mapped and belongs to the caller.  Returns 0 / -ENOMEM / -ENOEXEC. */
+/* apply_reloc: 0 = map the bytes as the file has them (an interpreted
+ * executable, a Linux ld.so); 1 = the kernel's RELATIVE pass (static-PIE);
+ * 2 = the same on the Linux track with R_X86_64_IRELATIVE left to the program
+ * (cp/exec: a glibc -static-pie; see elf_apply_relocations_ex). */
 static int el_stage_build(const struct elf_image *img, const struct elf_plan *plan,
                           const uint8_t *file, uint64_t flen, uint64_t base,
                           const char *what, int apply_reloc,
@@ -362,7 +366,10 @@ static int el_stage_build(const struct elf_image *img, const struct elf_plan *pl
      because the interpreter walks it.  The interpreter ITSELF is static-PIE and
      still takes the kernel's RELATIVE pass. */
   if (apply_reloc) {
-    rc = elf_apply_relocations(img, (uint8_t *)phys_to_virt(stage), span, base);
+    uint32_t ndefer = 0;
+    rc = elf_apply_relocations_ex(img, (uint8_t *)phys_to_virt(stage), span, base,
+                                  apply_reloc == 2 ? ELF_RELOC_DEFER_IRELATIVE : 0,
+                                  &ndefer);
     if (rc != ELF_OK) {
       uart_puts(what);
       uart_puts(": relocations: ");
@@ -371,7 +378,21 @@ static int el_stage_build(const struct elf_image *img, const struct elf_plan *pl
       el_free_contig(stage, pages);
       return -ENOEXEC;
     }
-    el_clear_reloc_counts(img, (uint8_t *)phys_to_virt(stage), span);
+    /* cp/exec: an image with IRELATIVE entries relocates itself (glibc's
+       _dl_relocate_static_pie walks DT_RELA, exactly as on Linux where the
+       kernel applies nothing): its table must stay intact or the IFUNC slots
+       stay zero -- measured, __libc_setup_tls called .got.plt 0xce278 == 0.
+       Its RELATIVE entries were applied above as well; re-applying a RELA
+       RELATIVE stores the same value. */
+    if (ndefer == 0) {
+      el_clear_reloc_counts(img, (uint8_t *)phys_to_virt(stage), span);
+    } else {
+      static int ndefer_rows;
+      if (ndefer_rows < 8) {
+        ndefer_rows++;
+        el_msg2(what, ": R_X86_64_IRELATIVE left to the image's own startup; DT_RELA kept");
+      }
+    }
   }
   *stage_out = (uint8_t *)phys_to_virt(stage);
   *pages_out = pages;
@@ -582,7 +603,8 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
     return -ENOSPC;
   }
   rc = el_stage_build(eimg, &eplan, exe, exe_len, base, "elf loader",
-                      iimg ? 0 : 1, &stage, &stage_pages);
+                      iimg ? 0 : ((flags & ELF_LOAD_COMPAT_INTERP) && !native ? 2 : 1),
+                      &stage, &stage_pages);
   if (rc != 0) goto done;
   exe_entry = base + (eimg->entry - eimg->vaddr_base);
   rc = el_map_stage(as, base, &eplan, stage, VMK_IMG);
