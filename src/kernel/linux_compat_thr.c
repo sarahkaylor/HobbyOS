@@ -3434,9 +3434,14 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
   }
   if (handler == HO_SIG_DFL) {
     /* Default action is the native one (kill with the signal); the compat
-       layer only changes how a HANDLER is entered. */
+       layer only changes how a HANDLER is entered.  Except the signals whose
+       Linux default is IGNORE (signal(7): SIGCHLD 17, SIGURG 23, SIGWINCH
+       28) -- the native engine already ignores SIGCHLD (sig_force_default);
+       here a fork()ed child's exit killed its parent with "signal 17"
+       (measured by linux_probe_gs G2: the parent died inside waitpid). */
     l_sig_drop(cur, grp, sig);
-    process_kill_group_sig(grp, sig);
+    if (sig != 17 && sig != 23 && sig != 28)
+      process_kill_group_sig(grp, sig);
     return 0;
   }
 
