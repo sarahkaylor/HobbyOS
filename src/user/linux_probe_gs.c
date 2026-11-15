@@ -17,6 +17,10 @@
  *       the CPUs (forced preemption).  Each also takes a self-sent signal
  *       whose handler must see the thread's own %gs.
  *   G2  fork(): the child sees the parent's base (%gs:8 and ARCH_GET_GS).
+ *   G3  the default-IGNORE signals (SIGCHLD, SIGCONT, SIGURG, SIGWINCH) sent
+ *       to ourselves with SIG_DFL must not kill us.  G2's fork found the
+ *       first (the parent died of its child's SIGCHLD); Wine found SIGCONT
+ *       (`wineserver -k`).  A kill shows up as no done marker.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -247,6 +251,21 @@ int main(void) {
     row("[LP] G2 %s fork child inherits the base (pid=%d status=0x%x)\n",
         ok ? "PASS" : "FAIL", (int)c, st);
     if (!ok) fails++;
+  }
+
+  /* G3 */
+  {
+    static const int ign[] = {SIGCHLD, SIGCONT, SIGURG, SIGWINCH};
+    char names[64] = "";
+    for (unsigned i = 0; i < sizeof ign / sizeof ign[0]; i++) {
+      signal(ign[i], SIG_DFL);
+      syscall(SYS_tgkill, getpid(), syscall(SYS_gettid), ign[i]);
+      /* delivered on that syscall's return: still here means ignored */
+      char b[8];
+      snprintf(b, sizeof b, "%s%d", i ? "," : "", ign[i]);
+      strncat(names, b, sizeof names - strlen(names) - 1);
+    }
+    row("[LP] G3 PASS SIG_DFL default-ignore signals survived: %s\n", names);
   }
 
   row("[LP] done rc=%d\n", fails);

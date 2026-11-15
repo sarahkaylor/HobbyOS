@@ -243,6 +243,17 @@ struct addr_space;
 #define HO_SIGCHLD 17
 #define HO_SIGSTOP 19
 
+/* cp P1: signals whose LINUX default action is "ignore" for a process that is
+ * not stopped (signal(7): SIGCHLD 17, SIGCONT 18 -- "continue", and compat
+ * processes have no job-control stop -- SIGURG 23, SIGWINCH 28).  A Linux-ABI
+ * target with SIG_DFL for one of these must not be killed, neither when the
+ * signal is sent (process_signal_directed) nor when it is delivered
+ * (linux_compat_signal_deliver).  Measured: a fork()ed child's SIGCHLD killed
+ * its parent, and `wineserver -k`'s SIGCONT killed wineserver. */
+static inline int ho_linux_sig_dfl_ignored(int sig) {
+  return sig == 17 || sig == 18 || sig == 23 || sig == 28;
+}
+
 /* Disposition sentinels stored in sig_handler[]: everything else is a user
  * handler address. */
 #define HO_SIG_DFL 0

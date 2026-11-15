@@ -3397,9 +3397,13 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
        Linux default is IGNORE (signal(7): SIGCHLD 17, SIGURG 23, SIGWINCH
        28) -- the native engine already ignores SIGCHLD (sig_force_default);
        here a fork()ed child's exit killed its parent with "signal 17"
-       (measured by linux_probe_gs G2: the parent died inside waitpid). */
+       (measured by linux_probe_gs G2: the parent died inside waitpid).
+       SIGCONT (18) too: its default is "continue", i.e. nothing for a
+       process that is not stopped, and compat processes have no job-control
+       stop here.  Measured: `wineserver -k` sends SIGINT then SIGCONT, and
+       the SIGCONT killed wineserver ("exited (signal 18)"). */
     l_sig_drop(cur, grp, sig);
-    if (sig != 17 && sig != 23 && sig != 28)
+    if (!ho_linux_sig_dfl_ignored(sig))
       process_kill_group_sig(grp, sig);
     return 0;
   }

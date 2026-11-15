@@ -3235,6 +3235,13 @@ int process_signal_directed(int pid, int sig, int directed) {
     return -EINVAL;
   }
   uint64_t h = target->sig_handler[sig];
+  /* cp P1: a Linux-ABI target's SIG_DFL for SIGCHLD/SIGCONT/SIGURG/SIGWINCH
+     is "ignore" (see ho_linux_sig_dfl_ignored), not the kill below. */
+  if (h == 0 && (target->abi_flags & PROC_FLAG_LINUX_ABI) &&
+      ho_linux_sig_dfl_ignored(sig)) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return 0;
+  }
   if (sig == HO_SIGKILL || h == 0 /* SIG_DFL */) {
     spinlock_release_irqrestore(&proc_lock, flags);
     process_kill_group_sig(target, sig);
