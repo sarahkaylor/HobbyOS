@@ -50,3 +50,8 @@ SECTIONS
     . = . + 0x80000; /* Allocate 512KB stack (64KB per core for 8 cores) */
     __stack_top = .;
 }
+
+/* P1 / F1 (docs/cp-address-space.md section 5): the image is the compat
+   layout's supervisor-only hole [0x70000000, CP_KHOLE_HI = 0x78000000).
+   It must never grow into user-mappable VA (src/include/kmem.h). */
+ASSERT(__stack_top + 0x10000 <= 0x78000000, "x64 kernel image exceeds CP_KHOLE_HI (0x78000000)")

@@ -13,6 +13,7 @@
 #include "errno.h"
 #include "fat16.h"
 #include "frame.h"
+#include "kmem.h"
 #include "fs.h"
 #include "kline.h"
 #include "lock.h"
@@ -59,7 +60,7 @@ static int dd_write(void *ctx, uint64_t sector, const void *buf, uint32_t n) {
 static void *dd_alloc(uint32_t n) {
   (void)n; /* always 4096 == FRAME_SIZE */
   uint64_t fr = frame_alloc();
-  return fr ? (void *)(uintptr_t)fr : 0;
+  return fr ? phys_to_virt(fr) : 0;
 }
 
 static uint32_t dd_now(void) {
@@ -100,11 +101,14 @@ struct ext2_fs *ext2v_fs(void) { return &g_fs; }
    already pre-touch; pread64/pwrite64 and the kernel's own callers do not. */
 static int user_prefault(const void *buf, int size, int write) {
   uint64_t a = (uint64_t)(uintptr_t)buf;
-  if (size <= 0 || a < USER_VA_BASE || a >= USER_VA_TOP) return 0;
+  if (size <= 0) return 0;
   struct process *cur = current_process();
   if (!cur) return 0;
   struct process *g = process_group(cur);
   if (!g || !g->as) return 0;
+  /* P1: a user buffer is any user VA of the caller's address space (compat
+     processes live below USER_VA_BASE); a kernel buffer needs no prefault. */
+  if (!vm_va_is_user(g->as, a)) return 0;
   return vm_touch(g, a, (uint64_t)size, write) == 0 ? 0 : -EFAULT;
 }
 
@@ -707,7 +711,7 @@ int ext2v_read_image(char *abs, uint8_t **buf_out, uint32_t *size_out,
     if (!buf) rc = -ENOMEM;
   }
   if (rc == 0) {
-    int64_t n = ext2_read(&g_fs, r.ino, 0, (void *)(uintptr_t)buf, size);
+    int64_t n = ext2_read(&g_fs, r.ino, 0, phys_to_virt(buf), size);
     if (n != (int64_t)size) rc = -EIO;
   }
   unlock();
@@ -716,7 +720,7 @@ int ext2v_read_image(char *abs, uint8_t **buf_out, uint32_t *size_out,
       frame_free(buf + (uint64_t)i * FRAME_SIZE);
     return rc;
   }
-  *buf_out = (uint8_t *)(uintptr_t)buf;
+  *buf_out = (uint8_t *)phys_to_virt(buf);
   *size_out = (uint32_t)size;
   *pages_out = pages;
   return 0;

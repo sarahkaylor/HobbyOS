@@ -2564,7 +2564,7 @@ static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
 
       uint32_t chunk = SECTOR_SIZE - offset_in_sector;
       if (chunk > (uint32_t)size) chunk = size;
-      uint8_t* o = (uint8_t*)out;
+      uint8_t* o = (uint8_t*)phys_to_virt(out);
       for (uint32_t i = 0; i < chunk; i++) o[i] = sec_buf[offset_in_sector + i];
       out += chunk;
       read_bytes += chunk;
@@ -2589,7 +2589,7 @@ static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
     uint32_t lba = data_sector + (c - 2) * bpb_sectors_per_cluster
     + (offset_in_cluster / SECTOR_SIZE);
     ylock_release(&fat_lock);
-    int res = virtio_blk_read_sector(lba, (void*)out, sectors);
+    int res = virtio_blk_read_sector(lba, phys_to_virt(out), sectors);
     ylock_acquire(&fat_lock);
     if (res != 0) break;
 
@@ -2676,7 +2676,7 @@ int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
     if (fat16_inj_mode == 1)
       return 64;
     if (fat16_inj_mode == 2) {
-      volatile uint8_t *p = (volatile uint8_t *)dest;
+      volatile uint8_t *p = (volatile uint8_t *)phys_to_virt(dest);
       for (int i = 0; i < size; i++)
         p[i] = 0;
       return size;
@@ -2776,14 +2776,14 @@ int fat16_read_direct_pos_raw(uint16_t start_cluster, uint32_t file_size,
     if (fat16_inj_mode == 1)
       return (int)want > 64 ? 64 : (int)want;
     if (fat16_inj_mode == 2) {
-      volatile uint8_t *p = (volatile uint8_t *)dest;
+      volatile uint8_t *p = (volatile uint8_t *)phys_to_virt(dest);
       for (uint32_t i = 0; i < want; i++)
         p[i] = 0;
       return (int)want;
     }
   }
 #endif
-  if (fat16_page_raw_read(start_cluster, pos, (uint8_t *)dest, want) != 0)
+  if (fat16_page_raw_read(start_cluster, pos, (uint8_t *)phys_to_virt(dest), want) != 0)
     return -1;
   return (int)want;
 }
@@ -2841,12 +2841,12 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
   uint8_t *rb = out;
   if (!rb) {
     scratch = frame_alloc();
-    rb = (uint8_t *)scratch;
+    rb = scratch ? (uint8_t *)phys_to_virt(scratch) : 0;
   }
   int raw_rc = -1;
   if (rb && len == PROBE_PAGE)
     raw_rc = fat16_read_direct_pos_raw(start_cluster, file_size,
-                                       (uint64_t)rb, (int)len, pos) ==
+                                       virt_to_phys(rb), (int)len, pos) ==
                      (int)len
                  ? 0
                  : -1;
@@ -2863,7 +2863,7 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
     refill_n = fat16_read_direct_pos(start_cluster, file_size, rfbuf, (int)len,
                                      pos);
     if (refill_n > 0)
-      refill_nz = nz_bytes((const uint8_t *)rfbuf, (uint32_t)refill_n,
+      refill_nz = nz_bytes((const uint8_t *)phys_to_virt(rfbuf), (uint32_t)refill_n,
                            &refill_sum);
   }
 
@@ -2929,7 +2929,7 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
                                          (int)len, pos);
       if (n2 == (int)len) {
         const uint8_t *a = rb;
-        const uint8_t *b = (const uint8_t *)chk;
+        const uint8_t *b = (const uint8_t *)phys_to_virt(chk);
         ok = 1;
         second_zero = 1;
         for (uint32_t i = 0; i < len; i++) {
@@ -2955,7 +2955,7 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
          publish, so the publisher's identity check compares like with like
          (there is no copy between the verdict and the caller). */
       if (id) {
-        id->buf = (uint64_t)out;
+        id->buf = virt_to_phys(out); /* the page's physical identity (vm.c compares frames) */
         id->off = pos;
         id->nz = nz_bytes(out, len, &id->sum);
       }

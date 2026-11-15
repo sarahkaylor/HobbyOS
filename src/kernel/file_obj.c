@@ -296,12 +296,12 @@ uint64_t file_obj_page(struct vm_object *o, uint64_t off) {
     return 0;
   }
   /* Only the file's real tail is zero-padded past EOF. */
-  volatile uint8_t *p = (volatile uint8_t *)nf;
+  volatile uint8_t *p = (volatile uint8_t *)phys_to_virt(nf);
   for (int i = n; i < (int)FRAME_SIZE; i++)
     p[i] = 0;
   /* DSO text lives in these frames: publish the filled page to the
    * instruction side (same barrier the IMAGE fill uses). */
-  __builtin___clear_cache((char *)nf, (char *)nf + FRAME_SIZE);
+  __builtin___clear_cache((char *)phys_to_virt(nf), (char *)phys_to_virt(nf) + FRAME_SIZE);
 
   /* Publish into the object.  A peer CPU that faulted the same page while
      we read wins; install frees our frame and hands back its own. */
@@ -497,7 +497,7 @@ uint64_t nfs_obj_page(struct vm_object *o, uint64_t off) {
   if (!nf)
     return 0;
   int n = nfs_read_file(m, &fh, (uint32_t)(idx * FRAME_SIZE),
-                        (void *)nf, FRAME_SIZE);
+                        phys_to_virt(nf), FRAME_SIZE);
   if (n < 0) {
     frame_free(nf);
     return 0;
@@ -516,9 +516,9 @@ uint64_t nfs_obj_page(struct vm_object *o, uint64_t off) {
     frame_free(nf);
     return 0;
   }
-  volatile uint8_t *p = (volatile uint8_t *)nf;
+  volatile uint8_t *p = (volatile uint8_t *)phys_to_virt(nf);
   for (int i = n; i < (int)FRAME_SIZE; i++)
     p[i] = 0;
-  __builtin___clear_cache((char *)nf, (char *)nf + FRAME_SIZE);
+  __builtin___clear_cache((char *)phys_to_virt(nf), (char *)phys_to_virt(nf) + FRAME_SIZE);
   return vm_object_install_page(o, off, nf);
 }

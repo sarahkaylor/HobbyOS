@@ -86,6 +86,8 @@ static int l_misc_readv(struct process *p, struct trap_frame *tf) {
     /* One segment is one read; the kernel's file_read takes an int size. */
     while (len > 0) {
       int chunk = len > 0x10000000ULL ? 0x10000000 : (int)len;
+      if (!l_user_ok(p, base, (uint64_t)chunk, 1)) /* P1: materialise writable */
+        return l_misc_ret(tf, total > 0 ? total : -EFAULT);
       int r = file_read(p, fd, (void *)(uintptr_t)base, chunk, tf);
       if (r == -2) {
         if (total > 0) return l_misc_ret(tf, total);
@@ -118,6 +120,10 @@ static int l_misc_pread64(struct process *p, struct trap_frame *tf) {
   if (saved < 0) return l_misc_ret(tf, -err);
   if (file_seek(p, fd, off, 0 /* SEEK_SET */, &err) < 0)
     return l_misc_ret(tf, -err);
+  if (n > 0 && !l_user_ok(p, buf, (uint64_t)n, 1)) { /* P1 */
+    file_seek(p, fd, saved, 0, &err);
+    return l_misc_ret(tf, -EFAULT);
+  }
   int r = file_read(p, fd, (void *)(uintptr_t)buf, (int)n, tf);
   if (r == -2) {
     /* Parked: let the restart redo the whole positioned read from `off`. */
@@ -141,6 +147,10 @@ static int l_misc_pwrite64(struct process *p, struct trap_frame *tf) {
   int64_t saved = file_seek(p, fd, 0, 1, &err);
   if (saved < 0) return l_misc_ret(tf, -err);
   if (file_seek(p, fd, off, 0, &err) < 0) return l_misc_ret(tf, -err);
+  if (n > 0 && !l_user_ok(p, buf, (uint64_t)n, 0)) { /* P1 */
+    file_seek(p, fd, saved, 0, &err);
+    return l_misc_ret(tf, -EFAULT);
+  }
   int r = file_write(p, fd, (const void *)(uintptr_t)buf, (int)n, tf);
   if (r == -2) {
     file_seek(p, fd, off, 0, &err);

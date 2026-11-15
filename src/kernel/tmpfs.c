@@ -52,7 +52,7 @@ extern uint64_t hb_clock_realtime_ms(void);
 
 /* Frame physical address -> kernel pointer.  Identity on both arches today
  * (kernel VA == PA); C1-mmu's phys_to_virt() replaces this one macro. */
-#define T_KVA(pa) ((uint8_t *)(uintptr_t)(pa))
+#define T_KVA(pa) ((uint8_t *)phys_to_virt(pa)) /* P1: the direct map (frames may be above 8 GiB) */
 
 #define TMPFS_MAX_NODES 8192
 #define TMPFS_HASH 2048
@@ -225,7 +225,7 @@ static int t_set_name(struct tnode *n, const char *s, int len) {
 }
 
 static void t_drop_name(struct tnode *n) {
-  if (n->lname) frame_free((uint64_t)(uintptr_t)n->lname);
+  if (n->lname) frame_free(virt_to_phys(n->lname));
   n->lname = 0;
   n->namelen = 0;
   n->name[0] = 0;
@@ -254,7 +254,7 @@ static int t_alloc(int type, uint32_t mode) {
 static void t_free(int idx) {
   struct tnode *n = &T[idx];
   if (n->obj) vm_object_unref(n->obj); /* mappings keep their own refs */
-  if (n->target) frame_free((uint64_t)(uintptr_t)n->target);
+  if (n->target) frame_free(virt_to_phys(n->target));
   t_drop_name(n);
   t_bzero(n, sizeof *n);
   t_live--;

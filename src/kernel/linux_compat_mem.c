@@ -97,6 +97,11 @@ static uint64_t l_up(uint64_t n) { return (n + LPG - 1) & ~(LPG - 1); }
    the region lookup just skips spans with nothing mapped. */
 static void l_zap_pages(struct addr_space *as, uint64_t base, uint64_t len) {
   for (uint64_t a = base; a < base + len; a += LPG) {
+    uint64_t nx = vm_arch_skip_absent(as, a); /* P1: skip absent tables */
+    if (nx != a) {
+      a = nx - LPG;
+      continue;
+    }
     if (vm_region_find(as, a)) vm_unmap_page(as, a);
   }
 }
@@ -104,7 +109,11 @@ static void l_zap_pages(struct addr_space *as, uint64_t base, uint64_t len) {
 /* Is [base, base+len) inside the MMAP arena or the DSO band -- the only two
    ranges vm_mmap accepts a MAP_FIXED target in (vm.c's rule, restated here so
    a rejected mapping cannot leave the old one half-destroyed). */
-static int l_fixed_ok(uint64_t base, uint64_t len) {
+static int l_fixed_ok(struct addr_space *as, uint64_t base, uint64_t len) {
+  /* P1 (F1): a compat address space accepts any user range (the kernel hole
+     excluded); only the native layout keeps the two fixed-placement bands. */
+  if (as && as->layout == VM_LAYOUT_COMPAT)
+    return vm_range_is_user(as, base, len);
   int in_mmap = base >= USER_MMAP_BASE_V2 && base <= USER_MMAP_LIMIT_V2 &&
                 len <= USER_MMAP_LIMIT_V2 - base;
   int in_lib = base >= USER_LIB_BASE && base <= USER_LIB_LIMIT &&
@@ -192,8 +201,12 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   uint32_t f = (uint32_t)flags;
   if ((f & L_MAP_SHARED) && (f & L_MAP_PRIVATE)) return l_ret(tf, -EINVAL);
   if (!(f & (L_MAP_SHARED | L_MAP_PRIVATE))) return l_ret(tf, -EINVAL);
-  if (f & L_MAP_FIXED_NOREPLACE)
-    return l_ret(tf, -EINVAL); /* not implemented: refuse, never report success */
+  /* P1: MAP_FIXED_NOREPLACE (Wine virtual.c probes the whole address space
+     with it): a fixed placement that answers -EEXIST over an existing
+     mapping or the kernel hole instead of replacing (vm_mmap decides,
+     atomically under vm_lock).  It used to be refused with -EINVAL, which
+     Wine read as "the address space ends here". */
+  int noreplace = (f & L_MAP_FIXED_NOREPLACE) && !(f & L_MAP_FIXED);
 
   /* Recorded region flags: translate Linux's MAP_NORESERVE (0x4000) onto
      vm.h's VM_MAP_NORESERVE.  Reservation itself is meaningless here (every
@@ -202,6 +215,7 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   if (hf & L_MAP_NORESERVE) hf = (hf & ~L_MAP_NORESERVE) | VM_MAP_NORESERVE;
   hf &= (uint32_t)(L_MAP_SHARED | L_MAP_PRIVATE | L_MAP_FIXED |
                    L_MAP_ANONYMOUS | VM_MAP_NORESERVE);
+  if (noreplace) hf |= VM_MAP_NOREPLACE;
 
   if (hf & L_MAP_ANONYMOUS) {
     /* Linux ignores fd and offset for an anonymous mapping. */
@@ -216,9 +230,18 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   if (rlen < len || addr + rlen < addr) return l_ret(tf, -ENOMEM);
 
   struct addr_space *as = l_as(p);
+  if (noreplace) {
+    if (addr & (LPG - 1)) return l_ret(tf, -EINVAL);
+    if (!addr) return l_ret(tf, -EPERM); /* below mmap_min_addr, as Linux */
+    if (!as) return l_ret(tf, -EINVAL);
+  }
   if (hf & L_MAP_FIXED) {
     if (!addr || (addr & (LPG - 1))) return l_ret(tf, -EINVAL);
-    if (!as || !l_fixed_ok(addr, rlen)) return l_ret(tf, -EINVAL);
+    if (!as) return l_ret(tf, -EINVAL);
+    if (!l_fixed_ok(as, addr, rlen))
+      /* F1: MAP_FIXED into the kernel hole / past the ceiling is ENOMEM on
+         compat; the native bands keep their historical EINVAL. */
+      return l_ret(tf, as->layout == VM_LAYOUT_COMPAT ? -ENOMEM : -EINVAL);
     /* Replace, don't overlay: vm_mmap rewrites the region records only, so the
        old leaves would survive the swap with their old protection. */
     l_zap_pages(as, addr, rlen);
@@ -339,15 +362,19 @@ static int l_mem_munmap(struct process *p, struct trap_frame *tf) {
 
   struct addr_space *as = l_as(p);
   if (!as) return l_ret(tf, sys_munmap(addr, len)); /* v1 legacy path */
-  if (addr < USER_VA_BASE || addr + rlen > USER_VA_TOP)
+  if (!vm_range_is_user(as, addr, rlen))
     return l_ret(tf, -EINVAL);
 
   /* Linux: "it is not an error if the range contains no mapped pages".  Start
      at the first mapped page and let the range-remove take everything from
-     there -- it is split-aware and tolerant of holes inside the span. */
+     there -- it is split-aware and tolerant of holes inside the span.  P1:
+     found by region, not by walking a (possibly 64 GiB) hole page by page. */
   uint64_t start = addr;
-  while (start < addr + rlen && !vm_region_find(as, start)) start += LPG;
-  if (start >= addr + rlen) return l_ret(tf, 0);
+  if (!vm_region_find(as, start)) {
+    struct vm_region *nr = vm_region_above(as, addr, rlen);
+    if (!nr || nr->base >= addr + rlen) return l_ret(tf, 0);
+    start = nr->base;
+  }
   int rc = sys_munmap(start, addr + rlen - start);
   return l_ret(tf, rc == 0 ? 0 : rc);
 }
@@ -408,7 +435,7 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
   uint64_t old_len = l_up(old_size);
   uint64_t new_len = l_up(new_size);
   if (old_len < old_size || new_len < new_size) return l_ret(tf, -ENOMEM);
-  if (old_addr < USER_VA_BASE || old_addr + old_len > USER_VA_TOP)
+  if (!vm_range_is_user(as, old_addr, old_len))
     return l_ret(tf, -EFAULT);
 
   struct vm_region *r = vm_region_find(as, old_addr);
@@ -469,7 +496,7 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
     if (new_addr + new_len < new_addr) return l_ret(tf, -EINVAL);
     if (new_addr < old_addr + old_len && old_addr < new_addr + new_len)
       return l_ret(tf, -EINVAL); /* overlapping move: Linux refuses */
-    if (!l_fixed_ok(new_addr, new_len)) return l_ret(tf, -EINVAL);
+    if (!l_fixed_ok(as, new_addr, new_len)) return l_ret(tf, -EINVAL);
     l_zap_pages(as, new_addr, new_len);
     int frc = vm_region_install_fixed(as, new_addr, new_len, ins_prot, kind,
                                       rflags, obj, obj_off);
@@ -510,7 +537,7 @@ static int l_mem_msync(struct process *p, struct trap_frame *tf) {
   struct addr_space *as = l_as(p);
   if (as) {
     uint64_t rlen = l_up(len);
-    if (rlen < len || addr < USER_VA_BASE || addr + rlen > USER_VA_TOP)
+    if (rlen < len || !vm_range_is_user(as, addr, rlen))
       return l_ret(tf, -ENOMEM);
     for (uint64_t a = addr; a < addr + rlen; a += LPG) {
       if (!vm_region_find(as, a)) return l_ret(tf, -ENOMEM);
@@ -532,7 +559,7 @@ static int l_mem_mincore(struct process *p, struct trap_frame *tf) {
   struct addr_space *as = l_as(p);
   if (!as) return l_ret(tf, -ENOMEM);
   uint64_t rlen = l_up(len);
-  if (rlen < len || addr < USER_VA_BASE || addr + rlen > USER_VA_TOP)
+  if (rlen < len || !vm_range_is_user(as, addr, rlen))
     return l_ret(tf, -ENOMEM);
   if (!l_user_ok(p, vec, rlen / LPG, 1)) return l_ret(tf, -EFAULT);
   for (uint64_t a = addr; a < addr + rlen; a += LPG) {

@@ -25,6 +25,11 @@ multiboot_header:
 _start:
     cli
 
+    /* P1 (S3a): keep the multiboot1 handoff (EAX = magic, EBX = physical
+       address of the multiboot info) for the memory-map parser in mmu.c. */
+    mov [mb_boot_magic], eax
+    mov [mb_boot_info], ebx
+
     /* Initialize stack for early booting */
     lea esp, early_stack_top
 
@@ -309,6 +314,13 @@ gdt_desc:
 .global smp_temp_stack
 smp_temp_stack:
     .quad 0
+
+.global mb_boot_magic
+mb_boot_magic:
+    .long 0
+.global mb_boot_info
+mb_boot_info:
+    .long 0
 
 .global smp_temp_cpu
 smp_temp_cpu:

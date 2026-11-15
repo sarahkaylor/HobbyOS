@@ -1,0 +1,360 @@
+# castscan allowlist (tools/cp/mmu/castscan_check.sh --update); file<TAB>kind<TAB>normalised line
+src/kernel/arch/x64/fpu_sig_test.c	I2P	EXPECT_EQ(arch_fpu_restore_user(0, (const void *)0x1083EB1DF8ull), -EFAULT);
+src/kernel/arch/x64/fpu_sig_test.c	I2P	EXPECT_EQ(arch_fpu_save_user(0, (void *)0x1083EB1DF0ull), -EFAULT);
+src/kernel/arch/x64/fpu_sig_test.c	I2P	EXPECT_EQ(arch_fpu_save_user(0, (void *)0x1083EB1DF8ull), -EFAULT);
+src/kernel/arch/x64/locks.c	I2P	spinlock_t *l = (spinlock_t *)la;
+src/kernel/arch/x64/locks.c	P2I	held_lock_pc2[hcpu][d] = (uint64_t)__builtin_return_address(1);
+src/kernel/arch/x64/locks.c	P2I	held_lock_pc[hcpu][d] = (uint64_t)__builtin_return_address(0);
+src/kernel/arch/x64/locks.c	P2I	held_locks[hcpu][d] = (uint64_t)lock;
+src/kernel/arch/x64/locks.c	P2I	if (held_locks[hcpu][d] == (uint64_t)lock) {
+src/kernel/arch/x64/locks.c	P2I	last_sb.addr = (uint64_t)lock;
+src/kernel/arch/x64/locks.c	P2I	last_sb.owner_site = lock_owner_site(own - 1, (uint64_t)lock);
+src/kernel/arch/x64/locks.c	P2I	last_sb.owner_site2 = lock_owner_site2(own - 1, (uint64_t)lock);
+src/kernel/arch/x64/locks.c	P2I	last_sb.wait_pc = (uint64_t)__builtin_return_address(0);
+src/kernel/arch/x64/locks.c	P2I	last_sb.wait_pc2 = (uint64_t)__builtin_return_address(1);
+src/kernel/arch/x64/locks.c	P2I	lock_audit_held_push(lock, (uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/locks.c	P2I	lock_audit_note_irqsave_acquire(lock, (uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/locks.c	P2I	lock_wait_addr[cpu] = (uint64_t)lock;
+src/kernel/arch/x64/locks.c	P2I	lock_wait_caller2[cpu] = (uint64_t)__builtin_return_address(1);
+src/kernel/arch/x64/locks.c	P2I	lock_wait_caller[cpu] = (uint64_t)__builtin_return_address(0);
+src/kernel/arch/x64/locks.c	P2I	plh[cc].site3 = (uint64_t)__builtin_return_address(1);
+src/kernel/arch/x64/locks.c	P2I	proclock_hold_note(1, (uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/locks.c	P2I	proclock_hold_note(2, (uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/locks.c	P2I	scream_hex(" lock=", (uint64_t)lock);
+src/kernel/arch/x64/locks.c	P2I	scream_hex(" lock=", (uint64_t)lock);
+src/kernel/arch/x64/locks.c	P2I	scream_hex(" lock=", (uint64_t)lock);
+src/kernel/arch/x64/locks.c	P2I	scream_hex(" lock=", (uint64_t)lock);
+src/kernel/arch/x64/locks.c	P2I	scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
+src/kernel/arch/x64/locks.c	P2I	scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/locks.c	P2I	scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/locks.c	P2I	scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/locks.c	P2I	scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/mmu.c	I2P	return (volatile void *)(uintptr_t)(IOREMAP_BASE + off + (pa - lo));
+src/kernel/arch/x64/mmu.c	I2P	return (volatile void *)(uintptr_t)va;
+src/kernel/arch/x64/mmu.c	P2I	mmu_raw_hex((uint64_t)(uintptr_t)caller);
+src/kernel/arch/x64/smp.c	P2I	smp_temp_stack = (uint64_t)&__stack_top - (i * 65536);
+src/kernel/arch/x64/trap.c	I2P	!u_strcpy((const char *)tf->regs[4], knew, sizeof knew)) {
+src/kernel/arch/x64/trap.c	I2P	!u_strcpy((const char *)tf->regs[4], ktgt, sizeof ktgt)) {
+src/kernel/arch/x64/trap.c	I2P	!u_strcpy((const char *)tf->regs[4], kto, sizeof kto)) {
+src/kernel/arch/x64/trap.c	I2P	((volatile uint64_t *)tv)[0] = ms / 1000;
+src/kernel/arch/x64/trap.c	I2P	((volatile uint64_t *)tv)[1] = (ms % 1000) * 1000;
+src/kernel/arch/x64/trap.c	I2P	(uint64_t)(p ? console_write_user(p, (const void *)ptr, len) : -EFAULT);
+src/kernel/arch/x64/trap.c	I2P	char *avbuf = (char *)tf->regs[4]; /* rsi: buf */
+src/kernel/arch/x64/trap.c	I2P	char *buf = (char *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	char *buf = (char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	char *buf = (char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	char *buf = (char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	char *const *argv = (char *const *)tf->regs[4];
+src/kernel/arch/x64/trap.c	I2P	char *const *argv = (char *const *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	char *dst = (char *)(uintptr_t)up;
+src/kernel/arch/x64/trap.c	I2P	const char *args_ptr = (const char *)tf->regs[7]; // r8
+src/kernel/arch/x64/trap.c	I2P	const char *envp = (const char *)tf->regs[3];
+src/kernel/arch/x64/trap.c	I2P	const char *filename = (const char *)tf->regs[5]; /* rdi */
+src/kernel/arch/x64/trap.c	I2P	const char *filename = (const char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	const char *filename = (const char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	const char *path = (const char *)tf->regs[4]; /* rsi */
+src/kernel/arch/x64/trap.c	I2P	const char *path = (const char *)tf->regs[4]; /* rsi */
+src/kernel/arch/x64/trap.c	I2P	const char *path = (const char *)tf->regs[5]; /* rdi */
+src/kernel/arch/x64/trap.c	I2P	const char *path = (const char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	const char *path = (const char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	const char *path = (const char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	const char *path = (const char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	const char *path = (const char *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	const int *fdmap = (const int *)tf->regs[9];
+src/kernel/arch/x64/trap.c	I2P	const struct virtio_gpu_xrect *urects = (const struct virtio_gpu_xrect *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	const uint8_t *mem = (const uint8_t *)tf->elr;
+src/kernel/arch/x64/trap.c	I2P	const uint8_t *memp = (const uint8_t *)page_va;
+src/kernel/arch/x64/trap.c	I2P	const uint8_t *uact = (const uint8_t *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	const void *buf = (const void *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	const void *val = (const void *)tf->regs[9]; // r10
+src/kernel/arch/x64/trap.c	I2P	const volatile uint64_t *sp = (const volatile uint64_t *)tf->lr;
+src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], kfrom, sizeof kfrom) || /* L73 */
+src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], kold, sizeof kold) ||
+src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) {
+src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) { /* L73 */
+src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], ksrc, sizeof ksrc) || /* L73 */
+src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], ktgt, sizeof ktgt)) { /* L73 */
+src/kernel/arch/x64/trap.c	I2P	if (process_read_envp(cur, (const char *const *)tf->regs[3], envbuf,
+src/kernel/arch/x64/trap.c	I2P	if (u_strcpy((const char *)tf->regs[5], kfile, sizeof kfile)) { /* L73 */
+src/kernel/arch/x64/trap.c	I2P	int *fds = (int *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	int *len = (int *)tf->regs[7]; // r8
+src/kernel/arch/x64/trap.c	I2P	int *ufds = (int *)tf->regs[9]; // r10
+src/kernel/arch/x64/trap.c	I2P	int r = file_read(c, fd, (void *)(uintptr_t)base, (int)len, tf);
+src/kernel/arch/x64/trap.c	I2P	int r = file_write(c, fd, (const void *)(uintptr_t)base, (int)len, tf);
+src/kernel/arch/x64/trap.c	I2P	panic_print_hex(((volatile uint64_t *)fsp)[si]);
+src/kernel/arch/x64/trap.c	I2P	struct fd_set_k *ex = (struct fd_set_k *)tf->regs[9]; // r10
+src/kernel/arch/x64/trap.c	I2P	struct fd_set_k *rd = (struct fd_set_k *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	struct fd_set_k *wr = (struct fd_set_k *)tf->regs[3]; // rdx
+src/kernel/arch/x64/trap.c	I2P	struct hb_input_event *ubuf = (struct hb_input_event *)tf->regs[5]; /* rdi */
+src/kernel/arch/x64/trap.c	I2P	struct k_pollfd *fds = (struct k_pollfd *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	struct k_stat *st = (struct k_stat *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	struct k_stat *st = (struct k_stat *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[3]; /* rdx */
+src/kernel/arch/x64/trap.c	I2P	struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[4]; /* rsi */
+src/kernel/arch/x64/trap.c	I2P	struct linux_stat_x64 *out = (struct linux_stat_x64 *)tf->regs[4]; /* rsi */
+src/kernel/arch/x64/trap.c	I2P	struct local_dirent *ud = (struct local_dirent *)tf->regs[3]; // rdx
+src/kernel/arch/x64/trap.c	I2P	struct trap_frame *tf = (struct trap_frame *)(uintptr_t)tfu;
+src/kernel/arch/x64/trap.c	I2P	struct vdisp_status *u = (struct vdisp_status *)a1;
+src/kernel/arch/x64/trap.c	I2P	tf, (int)tf->regs[5], (int *)tf->regs[4], (int)tf->regs[3],
+src/kernel/arch/x64/trap.c	I2P	tf, (int)tf->regs[5], (int *)tf->regs[4], (int)tf->regs[3], 0);
+src/kernel/arch/x64/trap.c	I2P	uint64_t v = *(volatile uint64_t *)a;
+src/kernel/arch/x64/trap.c	I2P	uint64_t v = *(volatile uint64_t *)a;
+src/kernel/arch/x64/trap.c	I2P	uint64_t v = *(volatile uint64_t *)a;
+src/kernel/arch/x64/trap.c	I2P	uint64_t v = *(volatile uint64_t *)a;
+src/kernel/arch/x64/trap.c	I2P	uint8_t *uold = (uint8_t *)tf->regs[3]; // rdx
+src/kernel/arch/x64/trap.c	I2P	void *arg = (void *)tf->regs[4]; /* rsi */
+src/kernel/arch/x64/trap.c	I2P	void *arg = (void *)tf->regs[4]; /* rsi */
+src/kernel/arch/x64/trap.c	I2P	void *buf = (void *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	void *buf = (void *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	void *buf = (void *)tf->regs[4]; // rsi = dirp
+src/kernel/arch/x64/trap.c	I2P	void *buf = (void *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	void *buf = (void *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	void *out = (void *)tf->regs[5]; // rdi
+src/kernel/arch/x64/trap.c	I2P	void *tp = (void *)tf->regs[4]; // rsi
+src/kernel/arch/x64/trap.c	I2P	void *val = (void *)tf->regs[9]; // r10
+src/kernel/arch/x64/trap.c	I2P	wd_hex(*(volatile uint64_t *)(last_hit + 8 * q));
+src/kernel/arch/x64/trap.c	P2I	!sys_user_range((uint64_t)len, sizeof(int), 1)) {
+src/kernel/arch/x64/trap.c	P2I	!sys_user_range((uint64_t)val, (uint64_t)(*len > 64 ? 64 : *len), 1)) {
+src/kernel/arch/x64/trap.c	P2I	!sys_user_range_ok((uint64_t)fds, (uint64_t)nfds * sizeof(struct k_pollfd)))) {
+src/kernel/arch/x64/trap.c	P2I	!sys_user_range_ok((uint64_t)ufds, 2 * sizeof(int))) {
+src/kernel/arch/x64/trap.c	P2I	!sys_user_range_ok((uint64_t)urects, (uint64_t)count * sizeof(struct virtio_gpu_xrect))) {
+src/kernel/arch/x64/trap.c	P2I	#define SET_EXCEPTION(num) idt_set_gate(num, (uint64_t)exception_##num, 0x08, 0x8E)
+src/kernel/arch/x64/trap.c	P2I	(!av || process_user_ok(av, (uint64_t)avbuf, (uint64_t)avsz, 1) != 0)) {
+src/kernel/arch/x64/trap.c	P2I	(!fds || ((uint64_t)fds & 3) != 0 ||
+src/kernel/arch/x64/trap.c	P2I	(ex && !sys_user_range_ok((uint64_t)ex, sizeof(struct fd_set_k)))) {
+src/kernel/arch/x64/trap.c	P2I	(wr && !sys_user_range_ok((uint64_t)wr, sizeof(struct fd_set_k))) ||
+src/kernel/arch/x64/trap.c	P2I	badvec_at_entry[cpu].frame = (uint64_t)tf;
+src/kernel/arch/x64/trap.c	P2I	badvec_eu[c].pc = (uint64_t)__builtin_return_address(0);
+src/kernel/arch/x64/trap.c	P2I	badvec_watch_arm((uint64_t)&tf->vector, (uint64_t)tf, tf->vector);
+src/kernel/arch/x64/trap.c	P2I	cpu_locals[cpu].kernel_stack = (uint64_t)&__stack_top - (cpu * 64 * 1024) - 4096;
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(130, (uint64_t)exception_130, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(32, (uint64_t)exception_32, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(33, (uint64_t)exception_33, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(34, (uint64_t)exception_34, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(35, (uint64_t)exception_35, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(36, (uint64_t)exception_36, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(37, (uint64_t)exception_37, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(38, (uint64_t)exception_38, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(39, (uint64_t)exception_39, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(40, (uint64_t)exception_40, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(41, (uint64_t)exception_41, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(42, (uint64_t)exception_42, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(43, (uint64_t)exception_43, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(44, (uint64_t)exception_44, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(45, (uint64_t)exception_45, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(46, (uint64_t)exception_46, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(47, (uint64_t)exception_47, 0x08, 0x8E);
+src/kernel/arch/x64/trap.c	P2I	if (!cur || process_user_ok(cur, (uint64_t)buf, (uint64_t)size, 1) != 0) {
+src/kernel/arch/x64/trap.c	P2I	if (!out || !sys_user_range((uint64_t)out, 16, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (!sys_user_range((uint64_t)buf, len, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (!sys_user_range((uint64_t)out, sizeof *out, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (!sys_user_range((uint64_t)ubuf, /* returns 1 when the range is OK */
+src/kernel/arch/x64/trap.c	P2I	if (!tp || !sys_user_range((uint64_t)tp, 16, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (!ufds || ((uint64_t)ufds & 3) != 0 ||
+src/kernel/arch/x64/trap.c	P2I	if (!urects || ((uint64_t)urects & 3) != 0 ||
+src/kernel/arch/x64/trap.c	P2I	if (!val || !len || !sys_user_range((uint64_t)val, sizeof(int), 1) ||
+src/kernel/arch/x64/trap.c	P2I	if ((rd && !sys_user_range_ok((uint64_t)rd, sizeof(struct fd_set_k))) ||
+src/kernel/arch/x64/trap.c	P2I	if (argv && sys_user_range_ok((uint64_t)argv, sizeof(char *)) &&
+src/kernel/arch/x64/trap.c	P2I	if (badvec_should_arm((uint64_t)tf, tf->cs, tf->vector, badvec_pid(),
+src/kernel/arch/x64/trap.c	P2I	if (caller && sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (cur && buf && sys_user_range((uint64_t)buf, (uint64_t)size, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (plen < 0 || !sys_user_range((uint64_t)out, sizeof *out, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (plen < 0 || !sys_user_range((uint64_t)st, sizeof(struct k_stat), 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (process_user_ok(cur, (uint64_t)uact, P5_SIGACTION_SIZE, 0) != 0) {
+src/kernel/arch/x64/trap.c	P2I	if (process_user_ok(cur, (uint64_t)uold, P5_SIGACTION_SIZE, 1) != 0) {
+src/kernel/arch/x64/trap.c	P2I	if (sys_user_range((uint64_t)buf,
+src/kernel/arch/x64/trap.c	P2I	if (sys_user_range((uint64_t)buf, count > 0 ? (uint64_t)count : 0, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 0)) {
+src/kernel/arch/x64/trap.c	P2I	if (sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (sys_user_range((uint64_t)st, sizeof(struct k_stat), 1)) {
+src/kernel/arch/x64/trap.c	P2I	if (sys_user_range_ok((uint64_t)path, 1) &&
+src/kernel/arch/x64/trap.c	P2I	if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
+src/kernel/arch/x64/trap.c	P2I	if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
+src/kernel/arch/x64/trap.c	P2I	if (val && len > 0 && !sys_user_range_ok((uint64_t)val, (uint64_t)len)) {
+src/kernel/arch/x64/trap.c	P2I	if (vm_user_read(current_process(), (uint64_t)urects, krects,
+src/kernel/arch/x64/trap.c	P2I	if (vm_user_read(p, ((uint64_t)&src[i]), &c, 1) != 0)
+src/kernel/arch/x64/trap.c	P2I	if (vm_user_read(p, (uint64_t)(uintptr_t)(user + i), &c, 1) != 0)
+src/kernel/arch/x64/trap.c	P2I	panic_print_hex((uint64_t)&tf->cs);
+src/kernel/arch/x64/trap.c	P2I	panic_print_hex((uint64_t)&tf->cs);
+src/kernel/arch/x64/trap.c	P2I	panic_print_hex((uint64_t)&tf->cs);
+src/kernel/arch/x64/trap.c	P2I	panic_print_hex((uint64_t)&tf->vector);
+src/kernel/arch/x64/trap.c	P2I	panic_print_hex((uint64_t)&tf->vector);
+src/kernel/arch/x64/trap.c	P2I	panic_print_hex((uint64_t)&tf->vector);
+src/kernel/arch/x64/trap.c	P2I	panic_print_hex((uint64_t)tf);
+src/kernel/arch/x64/trap.c	P2I	panic_print_hex((uint64_t)tf);
+src/kernel/arch/x64/trap.c	P2I	panic_print_hex((uint64_t)tf);
+src/kernel/arch/x64/trap.c	P2I	ptr.base = (uint64_t)&idt;
+src/kernel/arch/x64/trap.c	P2I	sys_user_range((uint64_t)ud, sizeof(struct local_dirent), 1)) {
+src/kernel/arch/x64/trap.c	P2I	sys_user_range_ok((uint64_t)(argv + ai), sizeof(char *)) &&
+src/kernel/arch/x64/trap.c	P2I	tf->regs[0] = (long)buf;
+src/kernel/arch/x64/trap.c	P2I	tf->regs[4] = (uint64_t)(uintptr_t)out;
+src/kernel/arch/x64/trap.c	P2I	tf->regs[5] = (uint64_t)(uintptr_t)path;
+src/kernel/arch/x64/trap.c	P2I	tf->regs[5] = (uint64_t)(uintptr_t)path;
+src/kernel/arch/x64/trap.c	P2I	uint64_t a = (uint64_t)(uintptr_t)p->as;
+src/kernel/arch/x64/trap.c	P2I	uint64_t fdm_addr = (uint64_t)fdmap;
+src/kernel/arch/x64/trap.c	P2I	uint64_t fds_addr = (uint64_t)fds;
+src/kernel/arch/x64/trap.c	P2I	uint64_t gs_base = (uint64_t)&cpu_locals[cpu];
+src/kernel/arch/x64/trap.c	P2I	uint64_t handler_addr = (uint64_t)syscall_entry;
+src/kernel/arch/x64/trap.c	P2I	uint64_t kstack = (uint64_t)&__stack_top - (cpu * 64 * 1024) - 4096;
+src/kernel/arch/x64/trap.c	P2I	uint64_t slot = (uint64_t)&tf->vector;
+src/kernel/arch/x64/trap.c	P2I	uint64_t tfu = (uint64_t)tf;
+src/kernel/arch/x64/trap.c	P2I	uint64_t tfu = (uint64_t)tf;
+src/kernel/arch/x64/trap.c	P2I	uint64_t top = (uint64_t)&__stack_top;
+src/kernel/arch/x64/trap.c	P2I	uint64_t tss_addr = (uint64_t)&tss_entries[cpu];
+src/kernel/arch/x64/trap.c	P2I	wd_last_tfp[cpu] = (uint64_t)tf;
+src/kernel/arch/x64/trap.c	P2I	} else if (buf && sys_user_range((uint64_t)buf, (uint64_t)size, 1)) {
+src/kernel/arch/x64/uart.c	P2I	uint64_t v = (uint64_t)&uart_lock;
+src/kernel/ext2_vfs.c	P2I	uint64_t a = (uint64_t)(uintptr_t)buf;
+src/kernel/fb_mmap.c	P2I	return hb_fb_blank_ioctl((unsigned long)arg);
+src/kernel/fb_mmap_test.c	I2P	EXPECT_EQ(hb_fb_ioctl_route(HB_FBIOBLANK, (void *)HB_VESA_NO_BLANK, 0), 0);
+src/kernel/fpu_user.c	I2P	const volatile uint8_t *s = (const volatile uint8_t *)(uintptr_t)src;
+src/kernel/fpu_user.c	I2P	return arch_fpu_restore_user(p, (const void *)(uintptr_t)src);
+src/kernel/fpu_user.c	I2P	return arch_fpu_save_user(p, (void *)(uintptr_t)dst);
+src/kernel/fpu_user.c	I2P	volatile uint8_t *d = (volatile uint8_t *)(uintptr_t)dst;
+src/kernel/fpu_user.c	P2I	uint64_t dst = (uint64_t)(uintptr_t)user_dst;
+src/kernel/fpu_user.c	P2I	uint64_t src = (uint64_t)(uintptr_t)user_src;
+src/kernel/frame.c	P2I	frame_raw_hex((uint64_t)(uintptr_t)__builtin_return_address(0));
+src/kernel/fs.c	I2P	const uint8_t *s = (const uint8_t *)src;
+src/kernel/fs.c	I2P	const uint8_t *u = (const uint8_t *)uarg;
+src/kernel/fs.c	I2P	uint8_t *d = (uint8_t *)dst;
+src/kernel/fs.c	I2P	uint8_t *w = (uint8_t *)uarg;
+src/kernel/fs.c	P2I	if (vm_user_read(p, (uint64_t)(s + done), stage, n) != 0)
+src/kernel/fs_test.c	P2I	return file_fcntl(p, fd, cmd, (uint64_t)flock_buf);
+src/kernel/linux_compat_fd.c	I2P	int r = file_poll(p, (struct k_pollfd *)ufds, (int)nfds, timeout);
+src/kernel/linux_compat_fd.c	I2P	int r = file_read(p, fd, (void *)ubuf, (int)len, tf);
+src/kernel/linux_compat_fd.c	I2P	int r = file_write(p, fd, (const void *)ubuf, (int)len, tf);
+src/kernel/linux_compat_fd.c	I2P	r = file_write(p, fd, (const void *)(uintptr_t)io[0], (int)io[1], tf);
+src/kernel/linux_compat_fd.c	P2I	if (l_copy_from_user(current_process(), &v, (uint64_t)(uintptr_t)buf, 8) != 0)
+src/kernel/linux_compat_fd.c	P2I	if (l_copy_to_user(current_process(), (uint64_t)(uintptr_t)buf, &v, 8) != 0) {
+src/kernel/linux_compat_misc.c	I2P	int r = file_read(p, fd, (void *)(uintptr_t)base, chunk, tf);
+src/kernel/linux_compat_misc.c	I2P	int r = file_read(p, fd, (void *)(uintptr_t)buf, (int)n, tf);
+src/kernel/linux_compat_misc.c	I2P	int r = file_write(p, fd, (const void *)(uintptr_t)buf, (int)n, tf);
+src/kernel/linux_compat_proc.c	I2P	st.ss_sp = (void *)(uintptr_t)l_altstack[slot].ss_sp;
+src/kernel/linux_compat_proc.c	P2I	l_altstack[slot].ss_sp = (uint64_t)(uintptr_t)st.ss_sp;
+src/kernel/linux_compat_thr.c	I2P	(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_STACK);
+src/kernel/linux_compat_thr.c	I2P	*(volatile int32_t *)l_sf_addr(base, L_SF_INFO + 16) = si_pid;
+src/kernel/linux_compat_thr.c	I2P	*(volatile uint32_t *)l_sf_addr(base, L_SF_INFO + 20) = 0;
+src/kernel/linux_compat_thr.c	I2P	*(volatile uint64_t *)
+src/kernel/linux_compat_thr.c	I2P	*(volatile uint64_t *)l_sf_addr(base, L_SF_INFO + 16) = fault_addr;
+src/kernel/linux_compat_thr.c	I2P	*(volatile uint64_t *)l_sf_addr(base, L_SF_PRETCODE) = restorer;
+src/kernel/linux_compat_thr.c	I2P	*(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_FLAGS) =
+src/kernel/linux_compat_thr.c	I2P	*(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_LINK) = 0;
+src/kernel/linux_compat_thr.c	I2P	*(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_SIGMASK) = m;
+src/kernel/linux_compat_thr.c	I2P	*out = *(volatile uint32_t *)uaddr;
+src/kernel/linux_compat_thr.c	I2P	: "r"(desire), "m"(*(volatile uint32_t *)(uintptr_t)uaddr),
+src/kernel/linux_compat_thr.c	I2P	if (*(volatile uint32_t *)uaddr != val) {
+src/kernel/linux_compat_thr.c	I2P	if (cmd == L_FUTEX_CMP_REQUEUE && *(volatile uint32_t *)uaddr != val3) {
+src/kernel/linux_compat_thr.c	I2P	linux_compat_sigmask_set(p, *(volatile uint64_t *)l_sf_addr(
+src/kernel/linux_compat_thr.c	I2P	uint32_t w = *(volatile uint32_t *)(uintptr_t)uaddr;
+src/kernel/linux_compat_thr.c	I2P	uint32_t w = *(volatile uint32_t *)(uintptr_t)uaddr;
+src/kernel/linux_compat_thr.c	I2P	uint64_t fp = *(volatile uint64_t *)l_sf_addr(
+src/kernel/linux_compat_thr.c	I2P	volatile int32_t *si = (volatile int32_t *)l_sf_addr(base, L_SF_INFO);
+src/kernel/linux_compat_thr.c	I2P	volatile uint64_t *g = (volatile uint64_t *)l_sf_addr(
+src/kernel/linux_compat_thr.c	I2P	volatile uint64_t *g = (volatile uint64_t *)l_sf_addr(
+src/kernel/linux_compat_thr.c	I2P	volatile uint8_t *uc = (volatile uint8_t *)l_sf_addr(base, L_SF_UC);
+src/kernel/linux_compat_thr.c	I2P	w = *(volatile uint32_t *)uaddr;
+src/kernel/linux_compat_thr.c	I2P	w = *(volatile uint32_t *)uaddr;
+src/kernel/linux_compat_thr.c	P2I	ev->as = (uint64_t)(uintptr_t)as;
+src/kernel/linux_compat_thr.c	P2I	ev->as = (uint64_t)(uintptr_t)as;
+src/kernel/linux_compat_thr.c	P2I	ev.as = (uint64_t)(uintptr_t)as;
+src/kernel/linux_compat_thr.c	P2I	ev.as = (uint64_t)(uintptr_t)as;
+src/kernel/linux_compat_thr.c	P2I	ev.as = (uint64_t)(uintptr_t)as;
+src/kernel/linux_compat_thr.c	P2I	ev.as = (uint64_t)(uintptr_t)l_thr[slot].as;
+src/kernel/linux_compat_thr.c	P2I	ev.as = (uint64_t)(uintptr_t)t->as;
+src/kernel/linux_compat_thr.c	P2I	if ((uint64_t)(uintptr_t)s->as != w->as)
+src/kernel/linux_compat_thr.c	P2I	kl_hex(&kl, (unsigned long)(uintptr_t)s->as);
+src/kernel/linux_compat_thr.c	P2I	return l_pi_acquire_word((uint64_t)(uintptr_t)word, pid, trylock);
+src/kernel/linux_compat_thr.c	P2I	return l_pi_cas((uint64_t)(uintptr_t)word, expect, desire);
+src/kernel/linux_compat_thr.c	P2I	return l_pi_release_word((uint64_t)(uintptr_t)word, pid);
+src/kernel/lockscale.c	I2P	const void *lk = (const void *)(uintptr_t)ls_held[c][i];
+src/kernel/lockscale.c	I2P	const void *lw = (const void *)(uintptr_t)ls_irqoff_max_lock[c];
+src/kernel/lockscale.c	I2P	hn ? (const void *)(uintptr_t)ls_held[hc][hn - 1] : (const void *)0,
+src/kernel/lockscale.c	I2P	if (ls_memo_new("preempt", (void *)0x9E11)) {
+src/kernel/lockscale.c	I2P	return lock_name((const void *)(uintptr_t)ls_held[c][0]);
+src/kernel/lockscale.c	P2I	kl_hex(&k, (uint64_t)(uintptr_t)lk);
+src/kernel/lockscale.c	P2I	ls_held[c][n] = (uint64_t)(uintptr_t)lock;
+src/kernel/lockscale.c	P2I	ls_preempt_site[c] = (uint64_t)(uintptr_t)__builtin_return_address(0);
+src/kernel/lockscale.c	P2I	uint64_t a = (uint64_t)(uintptr_t)lock;
+src/kernel/lockscale.c	P2I	uint64_t site = (uint64_t)(uintptr_t)__builtin_return_address(0);
+src/kernel/lockscale.c	P2I	uint64_t v = (uint64_t)(uintptr_t)p;
+src/kernel/pipe.c	P2I	uint64_t v = (uint64_t)p;
+src/kernel/process.c	I2P	*(volatile uint32_t *)ctid = (uint32_t)t->pid;
+src/kernel/process.c	I2P	*(volatile uint32_t *)ptid = (uint32_t)t->pid;
+src/kernel/process.c	I2P	*(volatile uint64_t *)entry_sp = restorer; /* handler return address */
+src/kernel/process.c	I2P	char c = (char)(*(volatile uint8_t *)(va + (uint64_t)n));
+src/kernel/process.c	I2P	const struct ho_sigframe *f = (const struct ho_sigframe *)base;
+src/kernel/process.c	I2P	const volatile uint8_t *q = (const volatile uint8_t *)at;
+src/kernel/process.c	I2P	return file_memfd_create(cur, (const char *)name, (int)flags);
+src/kernel/process.c	I2P	return process_wait_common(tf, (int)tf->regs[0], (int *)tf->regs[1],
+src/kernel/process.c	I2P	return process_wait_common(tf, (int)tf->regs[0], (int *)tf->regs[1],
+src/kernel/process.c	I2P	sp |= ((uint64_t)(*(volatile uint8_t *)(slot + (uint64_t)k))) << (8 * k);
+src/kernel/process.c	I2P	struct ho_sigframe *f = (struct ho_sigframe *)base;
+src/kernel/process.c	I2P	word = (volatile uint32_t *)uaddr;
+src/kernel/process.c	P2I	(uint64_t)&__stack_top - (uint64_t)(cpu + 1) * KERNEL_STACK_BYTES;
+src/kernel/process.c	P2I	caller->wait_status_va = (uint64_t)status;
+src/kernel/process.c	P2I	ev.as = (uint64_t)(uintptr_t)grp->as;
+src/kernel/process.c	P2I	ev.as = (uint64_t)(uintptr_t)grp->as;
+src/kernel/process.c	P2I	ev.as = (uint64_t)(uintptr_t)proc_table[i].as;
+src/kernel/process.c	P2I	if (status && process_user_ok(grp, (uint64_t)status, 4, 1) != 0)
+src/kernel/process.c	P2I	kl_s(&k, " as="); kl_hex(&k, (uint64_t)(uintptr_t)p->as);
+src/kernel/process.c	P2I	p->context[31] = (uint64_t)entry; // ELR (entry point)
+src/kernel/process.c	P2I	p->context[5] = (uint64_t)arg; // rdi = first argument on x86_64
+src/kernel/process.c	P2I	uart_print_hex((uint64_t)&proc_lock);
+src/kernel/process.c	P2I	uint64_t lo = (uint64_t)(uintptr_t)&cpu_locals[0];
+src/kernel/process.c	P2I	uint64_t slot = (uint64_t)envp + (uint64_t)i * 8;
+src/kernel/process.c	P2I	uint64_t sp = (uint64_t)__builtin_frame_address(0);
+src/kernel/process.c	P2I	uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
+src/kernel/process.c	P2I	uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
+src/kernel/process_test.c	I2P	EXPECT_EQ(*(int *)(uint64_t)st_va, 7 << 8);
+src/kernel/process_test.c	I2P	EXPECT_EQ(process_read_envp(p, (const char *const *)0x1000, blob,
+src/kernel/program_loader.c	I2P	__builtin___clear_cache((char*)USER_VIRT_BASE, (char*)USER_VIRT_BASE + bytes_read);
+src/kernel/program_loader.c	I2P	int bytes_read = fat16_read(&f, (void*)USER_VIRT_BASE, MAX_PROGRAM_SIZE);
+src/kernel/program_loader.c	P2I	if (!pl_user_ok(p, ((uint64_t)&src[i]) & ~0xFFFULL, 1, 0))
+src/kernel/program_loader.c	P2I	if (!pl_user_ok(p, (uint64_t)(argv + ai), sizeof(char *), 0))
+src/kernel/ssp.c	I2P	found = *(const volatile uint64_t *)(fp - off);
+src/kernel/ssp.c	I2P	uint64_t pc = *(const uint64_t *)sp; /* return address inside the smasher */
+src/kernel/ssp.c	P2I	uint64_t seed = (uint64_t)(uintptr_t)&__stack_chk_guard;
+src/kernel/ssp_report.c	I2P	const unsigned char *p = (const unsigned char *)a;
+src/kernel/test_fw_cfg.c	I2P	volatile uint16_t* selector = (volatile uint16_t*)0x09020008;
+src/kernel/test_fw_cfg.c	I2P	volatile uint8_t* data = (volatile uint8_t*)0x09020000;
+src/kernel/tmpfs.c	I2P	const volatile uint8_t *s = (const volatile uint8_t *)(uintptr_t)uva;
+src/kernel/tmpfs.c	I2P	volatile uint8_t *d = (volatile uint8_t *)(uintptr_t)uva;
+src/kernel/tmpfs.c	P2I	(uint64_t)(uintptr_t)ubuf, size);
+src/kernel/tmpfs.c	P2I	if (r == 0) r = t_obj_write_locked(n->obj, off, (uint64_t)(uintptr_t)ubuf, size);
+src/kernel/tmpfs.c	P2I	int r = t_obj_read_locked(o, vm_object_size(o), off, (uint64_t)(uintptr_t)ubuf, n);
+src/kernel/tmpfs.c	P2I	int r = t_obj_write_locked(o, off, (uint64_t)(uintptr_t)ubuf, n);
+src/kernel/tmpfs.c	P2I	uint64_t uva = (uint64_t)(uintptr_t)ubuf;
+src/kernel/trap_test.c	I2P	EXPECT_EQ(u_strcpy((const char *)(USER_MMAP_BASE_V2 + 0x2FFC), dst, 64), 1);
+src/kernel/trap_test.c	I2P	EXPECT_EQ(u_strcpy((const char *)(USER_MMAP_BASE_V2 + 0x8000), dst, 8), 0);
+src/kernel/trap_test.c	I2P	EXPECT_EQ(u_strcpy((const char *)USER_MMAP_BASE_V2, dst, 4), 1);
+src/kernel/trap_test.c	I2P	EXPECT_EQ(u_strcpy((const char *)USER_MMAP_BASE_V2, dst, sizeof(dst)), 1);
+src/kernel/trap_test.c	I2P	char* filename = (char*)USER_VIRT_BASE;
+src/kernel/trap_test.c	I2P	char* str = (char*)USER_VIRT_BASE;
+src/kernel/trap_test.c	I2P	int* fds = (int*)USER_VIRT_BASE;
+src/kernel/trap_test.c	P2I	tf.regs[0] = (uint64_t)fds;
+src/kernel/unix.c	I2P	const uint8_t *src = (const uint8_t *)io[v].base + off;
+src/kernel/unix.c	I2P	uint8_t *dst = (uint8_t *)io[v].base + off;
+src/kernel/unix.c	P2I	io.base = (uint64_t)buf;
+src/kernel/unix.c	P2I	io.base = (uint64_t)buf;
+src/kernel/unix_test.c	P2I	#define RT_ADDR(p) ((uint64_t)(uintptr_t)(p) ^ test_addr_salt)
+src/kernel/unix_test.c	P2I	struct k_iovec io = {(uint64_t)buf, 8};
+src/kernel/unix_test.c	P2I	struct k_iovec io = {(uint64_t)data, 3};
+src/kernel/unix_test.c	P2I	struct k_iovec rio = {(uint64_t)out, 16};
+src/kernel/virtio_blk.c	I2P	return ns2_rw(sector, (uint8_t *)(uintptr_t)buf, count, 1);
+src/kernel/virtio_blk.c	P2I	return ns2_rw(sector, (uint8_t *)(uintptr_t)buf, count, 1);
+src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)(uintptr_t)nvme_regs);
+src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)__builtin_return_address(0));
+src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)io_cq_db);
+src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)io_cq_db);
+src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)io_sq_db);
+src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)io_sq_db);
+src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)nvme_regs);
+src/kernel/virtio_net.c	P2I	uart_print_hex((uint32_t)((uint64_t)&tx_vq / 4096));
+src/kernel/virtio_net.c	P2I	uart_print_hex((uint64_t)&tx_vq);
+src/kernel/vm.c	I2P	const volatile uint64_t *oldp = (const volatile uint64_t *)a;
+src/kernel/vm.c	I2P	d[i] = *(volatile unsigned char *)(va + (uint64_t)i);
+src/kernel/vm.c	P2I	kl_hex(&kf, (unsigned long)r->obj);
+src/kernel/vm.c	P2I	kl_hex(&kl, (unsigned long)(g ? (uint64_t)(uintptr_t)g->as : 0));
+src/kernel/vm.c	P2I	uart_print_hex((uint64_t)r->obj);

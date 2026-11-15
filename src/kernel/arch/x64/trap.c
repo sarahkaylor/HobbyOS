@@ -43,6 +43,7 @@
 #include "rw_watch.h"
 #include "blk_cache.h"
 #include "fb_mmap.h"
+#include "kmem.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -1166,6 +1167,9 @@ static void compat_writev(struct trap_frame *tf) {
     }
     if (len == 0) continue;
     if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT; /* clamp one write() */
+    /* P1: validate (and demand-fill, file-backed pages included) the segment
+       before file_write copies from it in kernel mode (C4-x noprefault hang). */
+    if (!sys_user_range(base, len, 0)) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : -EFAULT); return; }
     int r = file_write(c, fd, (const void *)(uintptr_t)base, (int)len, tf);
     if (r == -2) {
       /* A parked write (full pipe / unix socket).  Mirror sys_write: rewind the
@@ -1209,7 +1213,9 @@ static void compat_readv(struct trap_frame *tf) {
     }
     if (len == 0) continue;
     if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT;
-    if (!sys_user_range_ok(base, len)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+    /* P1: write=1 -- the kernel stores into it, so a MAP_PRIVATE file page
+       must be copied-on-write here, not materialised read-only. */
+    if (!sys_user_range(base, len, 1)) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : -EFAULT); return; }
     int r = file_read(c, fd, (void *)(uintptr_t)base, (int)len, tf);
     if (r == -2) {
       if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
@@ -1572,7 +1578,7 @@ extern int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects,
                                     int count); /* SEC-7 */
 
 static void sys_map_fb(struct trap_frame *tf) {
-  uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
+  uint64_t phys_addr = kimg_pa(virtio_gpu_get_framebuffer());
   {
     /* icewm.md §9: an attached process maps its private surface. */
     int vd = vdisp_attached(current_process());
@@ -1620,7 +1626,7 @@ static void sys_map_fb(struct trap_frame *tf) {
 void sys_fb_ioctl(struct trap_frame *tf) {
   unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
   void *arg = (void *)tf->regs[4];                    /* rsi */
-  uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
+  uint64_t smem_start = kimg_pa(virtio_gpu_get_framebuffer());
 
   size_t sz = hb_fb_ioctl_arg_size(req);
   if (sz == (size_t)-1) {
@@ -3473,23 +3479,23 @@ void watchdog_stack_arena(uint64_t *lo, uint64_t *hi) {
 int kpml_present(uint64_t va) {
   uint64_t cr3;
   __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-  uint64_t *pml4 = (uint64_t *)(cr3 & ~0xFFFULL);
+  uint64_t *pml4 = (uint64_t *)phys_to_virt(cr3 & ~0xFFFULL);
   uint64_t e = pml4[(va >> 39) & 511];
   if (!(e & 1))
     return 0;
-  uint64_t *pdpt = (uint64_t *)(e & ~0xFFFULL);
+  uint64_t *pdpt = (uint64_t *)phys_to_virt(e & 0x000FFFFFFFFFF000ULL);
   e = pdpt[(va >> 30) & 511];
   if (!(e & 1))
     return 0;
   if (e & (1ULL << 7))
     return 1; /* 1 GiB page */
-  uint64_t *pd = (uint64_t *)(e & ~0xFFFULL);
+  uint64_t *pd = (uint64_t *)phys_to_virt(e & 0x000FFFFFFFFFF000ULL);
   e = pd[(va >> 21) & 511];
   if (!(e & 1))
     return 0;
   if (e & (1ULL << 7))
     return 1; /* 2 MiB page */
-  uint64_t *pt = (uint64_t *)(e & ~0xFFFULL);
+  uint64_t *pt = (uint64_t *)phys_to_virt(e & 0x000FFFFFFFFFF000ULL);
   e = pt[(va >> 12) & 511];
   return (e & 1) ? 1 : 0;
 }
@@ -3755,7 +3761,7 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
  * every further interrupt of that priority class.
  */
 void lapic_send_eoi(void) {
-  *(volatile uint32_t *)0xFEE000B0 = 0;
+  *(volatile uint32_t *)phys_to_virt(0xFEE000B0) = 0;
 }
 
 /* GB-068 (2026-10-19): a fault record must be ONE write.
@@ -4294,6 +4300,10 @@ static inline uint64_t badvec_rd_dr7(void) {
    each CPU's stack bounds; every entry-stamped frame measured so far
    (0x23FFE2A0, 0x25FFB640) is aligned.  Exported for the unit proof. */
 int badvec_frame_window(uint64_t p) {
+  /* P1 (S5): kernel-task stacks are reached through the direct map now; the
+     window is the same physical range, seen through either alias. */
+  if (p - DMAP_BASE < DMAP_SIZE)
+    p -= DMAP_BASE;
   return (p & 7ULL) == 0 && p >= 0x1000ULL && p < 0x70000000ULL;
 }
 
@@ -4736,7 +4746,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
 
       // Broadcast rescheduling IPI (vector 0x81) to all other cores.
       // Bit 14 stays clear: it is defined for level-triggered delivery only.
-      *(volatile uint32_t*)(0xFEE00300) = 0x000C0081;
+      *(volatile uint32_t*)phys_to_virt(0xFEE00300) = 0x000C0081;
 #ifdef PANIC_IPI_TEST
       /* GB-207: fire the two-CPU panic injection once the wave is running
          (a secondary sits in an IF=0 wait before there is a process). */
@@ -4825,6 +4835,34 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
+    /* P1 (D11 + the C4-x noprefault hang): a kernel-mode #PF on a valid user
+       address of the current address space is a demand fault exactly like a
+       user one -- anonymous, file-backed (FAT/NFS page cache, COW) and object
+       pages alike -- so any syscall that copies straight from/to user memory
+       is safe, whatever the VA (compat processes live below USER_VA_BASE).
+       It runs BEFORE the fatal-dump machinery (panic_claim/record): that path
+       is for faults nothing can resolve.  Unresolved (hole, protection, I/O
+       error) or repeating at one page falls through to it, which kills the
+       process (SIGSEGV) instead of halting. */
+    if (tf->vector == 14 && cur && (tf->cs & 3) != 3) {
+      uint64_t kcr2;
+      __asm__ volatile("mov %%cr2, %0" : "=r"(kcr2));
+      struct process *kg = process_group(cur);
+      if (kg && kg->as && vm_va_is_user(kg->as, kcr2)) {
+        static uint64_t kdf_last[MAX_CPUS];
+        static uint32_t kdf_rep[MAX_CPUS];
+        uint32_t kc = get_cpuid();
+        if (kc >= MAX_CPUS) kc = 0;
+        if (kdf_last[kc] == (kcr2 & ~0xFFFULL)) kdf_rep[kc]++;
+        else { kdf_last[kc] = kcr2 & ~0xFFFULL; kdf_rep[kc] = 0; }
+        if (kdf_rep[kc] < 4) {
+          const char *why = "PROT";
+          int pf_w = (int)((tf->error_code >> 1) & 1);
+          if (vm_handle_fault(kg, kcr2, pf_w, 0, &why) == 0)
+            return; /* PTE live; iretq retries the kernel access */
+        }
+      }
+    }
     /* P2.3 (S3, design section 5.2): a v2 process's user #PF is either a
        demand fault (materialize + retry) or a kill with an exact reason.
        Error code: bit0 P (0 = not-present), bit1 W/R, bit4 I/D. */
@@ -5245,10 +5283,10 @@ static void general_interrupt_inner(struct trap_frame *tf) {
             cn = fat16_read_direct_pos(ur->obj->file_start_cluster,
                                        (uint32_t)ur->obj->size, cpage,
                                        FRAME_SIZE, (uint32_t)ur->obj_off);
-          const uint8_t *cbt = (const uint8_t *)cpage;
+          const uint8_t *cbt = cpage ? (const uint8_t *)phys_to_virt(cpage) : 0;
           int obj_ok = objfr && frame_is_alloced(objfr);
-          const uint8_t *ob = (const uint8_t *)(obj_ok ? objfr : 0);
-          const uint8_t *fp = (const uint8_t *)fpage;
+          const uint8_t *ob = obj_ok ? (const uint8_t *)phys_to_virt(objfr) : 0;
+          const uint8_t *fp = fpage ? (const uint8_t *)phys_to_virt(fpage) : 0;
           int same = 1;
           if (fn != (int)FRAME_SIZE) {
             same = 0;
@@ -5394,6 +5432,31 @@ static void general_interrupt_inner(struct trap_frame *tf) {
            panic_claim), write nothing, and stop this CPU rather than
            interleave fields into the one record. */
         for (;;) __asm__ volatile("hlt");
+      }
+      /* P1 (S5, docs/cp-address-space.md section 3.8): the identity tripwire.
+         Native v2 roots map nothing below 8 GiB except the kernel-image hole,
+         so a kernel-mode #PF there that is not a user VA of the current
+         address space is a leftover identity dereference (a physical address
+         used as a pointer): tag it so the gates can count it.  The dump and
+         the halt below are unchanged. */
+      if (tf->vector == 14) {
+        uint64_t tcr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(tcr2));
+        struct addr_space *tas = cur ? process_group(cur)->as : 0;
+        if (tcr2 < 0x200000000ULL && (tcr2 < KIMG_BASE || tcr2 >= CP_KHOLE_HI) &&
+            !(tas && vm_va_is_user(tas, tcr2))) {
+          uint64_t tcr3;
+          __asm__ volatile("mov %%cr3, %0" : "=r"(tcr3));
+          panic_puts("[IDMAP-TRIP] cr2=");
+          panic_print_hex(tcr2);
+          panic_puts(" rip=");
+          panic_print_hex((uint64_t)tf->elr);
+          panic_puts(" cr3=");
+          panic_print_hex(tcr3);
+          panic_puts(" pid=");
+          print_int_raw(cur ? (int)cur->pid : -1);
+          panic_puts("\n");
+        }
       }
       /* GB-247: capture the frame pointer ONCE and read every slot through
          this value only.  The GB-146-V2 record printed `fatal frame=0x1F36`
@@ -5646,7 +5709,8 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       if (tf->vector == 14 && cur) {
         uint64_t kcr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(kcr2));
-        if (kcr2 >= USER_VA_BASE) {
+        if (kcr2 >= USER_VA_BASE ||
+            (process_group(cur)->as && vm_va_is_user(process_group(cur)->as, kcr2))) {
           /* GB-057: a kernel-mode #PF at the SAME address that keeps being
              "handled" is a retry loop, not a fix: measured live, a CPU sat on
              the `rep movsq` inside enter_user_space (RIP 0x7003B1CF) for 14

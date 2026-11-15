@@ -1,6 +1,8 @@
 #ifdef KERNEL_MODE_UNIT_TEST
 
 #include "unit_test.h"
+#include "kmem.h"
+#include "vm.h"
 #include "process.h"
 #include "errno.h"
 #include "fs.h"
@@ -251,7 +253,7 @@ static void test_process_futex_machine(void) {
   /* A real word inside the leader's physical region; the kernel reads it
      through the caller's physical translation. */
   uint64_t uaddr = USER_VIRT_BASE + 0x40;
-  *(volatile uint32_t *)(leader->user_phys_base + 0x40) = 7;
+  *(volatile uint32_t *)phys_to_virt(leader->user_phys_base + 0x40) = 7;
 
   /* WAIT: value mismatch -> -EAGAIN; timeout 0 with a match -> -ETIMEDOUT;
      misaligned -> -EINVAL; out of region -> -EFAULT. */
@@ -681,7 +683,7 @@ static void test_p5_reap_delivery_on_kill(void) {
   EXPECT_EQ(parent->state, PROC_STATE_READY);
   EXPECT_EQ((int)parent->context[0], cpid);
   EXPECT_EQ(child->state, PROC_STATE_FREE);
-  EXPECT_EQ(*(int *)(parent->user_phys_base + 0x120), HO_SIGTERM);
+  EXPECT_EQ(*(int *)phys_to_virt(parent->user_phys_base + 0x120), HO_SIGTERM);
   EXPECT_EQ((parent->sig_pending & (1ull << (HO_SIGCHLD - 1))) != 0, 1);
 
   /* Parent #2 was waiting for a different pid: still parked. */
@@ -760,6 +762,12 @@ static void test_p5_waitpid_validation(void) {
 static void test_p5_wait4_rusage(void) {
   tests_run++;
   uart_puts("  Running test_p5_wait4_rusage...\n");
+  /* P1 (S5): the v1 status/rusage VAs below are only live on the kernel
+     table (the v1 window); an earlier suite can leave a v2 root loaded, and a
+     native v2 root no longer carries the identity map that used to absorb
+     these stores (they landed in pool frame 0x44000400).  A v1 process always
+     runs on the kernel table, so put this context there. */
+  vm_arch_restore_kernel();
 
   int ppid = process_create();
   int old_pid = cpu_current_pids[0];
@@ -806,7 +814,7 @@ static void test_p5_wait4_rusage(void) {
   /* The rusage blob landed at ru_va: everything zero except the 8-byte
      ru_maxrss at byte offset 32 (USER_REGION_SIZE/1024 = 0x8000 -> one
      non-zero byte). */
-  uint8_t *ru = (uint8_t *)(par->user_phys_base + (ru_va - USER_VIRT_BASE));
+  uint8_t *ru = (uint8_t *)phys_to_virt(par->user_phys_base + (ru_va - USER_VIRT_BASE));
   int nonzero = 0;
   for (int k = 0; k < (int)HO_RUSAGE_SIZE; k++)
     if (ru[k]) nonzero++;
@@ -1306,6 +1314,7 @@ static void test_pid_slot_invariant(void) {
 
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
+  vm_arch_restore_kernel(); /* P1 (S5): v1-context tests run on the kernel table */
   test_process_init_and_create();
   test_pid_slot_invariant(); /* SEC-OBS-A: pid == bounded slot index */
   test_process_set_entry();

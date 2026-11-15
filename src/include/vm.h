@@ -23,6 +23,7 @@
  */
 
 #include <stdint.h>
+#include "kmem.h" /* P1: phys_to_virt()/virt_to_phys() for frame-backed state */
 
 #define USER_VA_BASE 0x1000000000ULL /* 64 GiB */
 #define USER_WINDOW_SIZE 0x800000000ULL /* 32 GiB */
@@ -131,6 +132,9 @@
 #define VM_MAP_FIXED 0x10
 #define VM_MAP_ANONYMOUS 0x20
 #define VM_MAP_NORESERVE 0x40
+/* P1: MAP_FIXED_NOREPLACE, as a vm_mmap request flag only (never recorded
+ * on a region): fixed placement that fails -EEXIST instead of replacing. */
+#define VM_MAP_NOREPLACE 0x100
 
 /* M6/L69: this mapping's page-in failed with EIO.  Set the first time a
  * file-backed page cannot be delivered (a refused exec page, a short read that
@@ -147,6 +151,27 @@
  * (as == NULL on the PCB), v2 = the sparse window above. */
 #define AS_V1 1
 #define AS_V2 2
+
+/* P1 (F1 v1, x86_64 only): the compat address space for Linux-ABI processes.
+ *   user VA     [CP_VA_LO, CP_VA_HI) minus [KIMG_BASE, CP_KHOLE_HI) (kmem.h)
+ *   no-hint mmap: the native MMAP window first-fit (unchanged placement),
+ *               then top-down from CP_MMAP_TOP for what does not fit there
+ *   MAP_FIXED / hints: anywhere in user VA; into the hole -> -ENOMEM
+ *   MAP_FIXED_NOREPLACE over a mapping or the hole -> -EEXIST
+ * CP_COMPAT_AS=0 keeps every process native (A/B vehicle).  CP_COMPAT_FLOOR
+ * is the lowest mappable compat VA (8 GiB = the guard floor of migration
+ * step S6, 0x10000 = F1 final, S8). */
+#define VM_LAYOUT_NATIVE 0
+#define VM_LAYOUT_COMPAT 1
+#define CP_VA_LO 0x10000ULL
+#define CP_VA_HI 0x7ffffffff000ULL
+#define CP_MMAP_TOP 0x7ffff7fff000ULL
+#ifndef CP_COMPAT_AS
+#define CP_COMPAT_AS 1
+#endif
+#ifndef CP_COMPAT_FLOOR
+#define CP_COMPAT_FLOOR CP_VA_LO /* S8: the F1 floor (S6/S7 shipped 8 GiB) */
+#endif
 
 /* --- P2.4 (S4): shared objects (memfd / MAP_SHARED anon) ------------- */
 
@@ -290,7 +315,63 @@ struct addr_space { /* one per group (leader PCB owned) */
   uint8_t jit_nfree;
   uint64_t jit_free_off[VM_JIT_FREE_MAX];
   uint64_t jit_free_len[VM_JIT_FREE_MAX];
+  /* P1 (F1, docs/cp-address-space.md section 3.5): the layout and its user
+     bounds.  Native: [USER_VA_BASE, USER_VA_TOP).  Compat: [CP_VA_LO or the
+     guard floor, CP_VA_HI) minus the supervisor-only kernel hole
+     [KIMG_BASE, CP_KHOLE_HI).  Set by vm_as_create / vm_as_set_layout. */
+  uint8_t layout;
+  uint64_t va_lo, va_hi;
 };
+
+/* P1 (docs/cp-address-space.md section 2.6): THE predicate for "is `va` a
+ * user address of this address space?" -- every functional user-range check
+ * goes through it instead of comparing against USER_VA_BASE/USER_VA_TOP. */
+static inline int vm_va_is_user(const struct addr_space *as, uint64_t va) {
+  if (!as || !as->va_hi)
+    return va >= USER_VA_BASE && va < USER_VA_TOP;
+  if (va < as->va_lo || va >= as->va_hi)
+    return 0;
+#ifdef __x86_64__
+  if (as->layout == VM_LAYOUT_COMPAT && va >= KIMG_BASE && va < CP_KHOLE_HI)
+    return 0; /* the kernel image: never a user address, never validatable */
+#endif
+  return 1;
+}
+
+/* Does [va, va+len) touch the compat kernel hole? */
+static inline int vm_range_hits_hole(const struct addr_space *as, uint64_t va,
+                                     uint64_t len) {
+#ifdef __x86_64__
+  if (as && as->layout == VM_LAYOUT_COMPAT && len &&
+      va < CP_KHOLE_HI && va + len > KIMG_BASE)
+    return 1;
+#else
+  (void)as; (void)va; (void)len;
+#endif
+  return 0;
+}
+
+/* Is all of [va, va+len) user VA of `as` (len 0 = the single byte va)? */
+static inline int vm_range_is_user(const struct addr_space *as, uint64_t va,
+                                   uint64_t len) {
+  if (len == 0)
+    return vm_va_is_user(as, va);
+  if (va + len < va)
+    return 0;
+  uint64_t lo = (as && as->va_hi) ? as->va_lo : USER_VA_BASE;
+  uint64_t hi = (as && as->va_hi) ? as->va_hi : USER_VA_TOP;
+  if (va < lo || va + len > hi)
+    return 0;
+  return !vm_range_hits_hole(as, va, len);
+}
+
+/* Switch a freshly created AS (no user pages yet) to `layout`.  Returns 0,
+ * or -1 when the arch cannot (ARM, or the A/B identity vehicle). */
+int vm_as_set_layout(struct addr_space *as, int layout);
+/* Arch half of the switch (mmu.c): per-AS PD for the image leaves. */
+int vm_arch_set_compat(struct addr_space *as);
+/* First VA >= va whose leaf might exist (skips absent tables). */
+uint64_t vm_arch_skip_absent(struct addr_space *as, uint64_t va);
 
 /* --- AS lifecycle (vm.c) --------------------------------------------- */
 
@@ -589,7 +670,7 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
  * 0x1B user) for this AS?  Present leaves are checked for user/NX; an
  * absent user leaf is allowed only when an executable region covers it
  * (the #PF fills it from the image).  Kernel VAs are validated against the
- * static identity map.  Caller holds no lock; the region read is done under
+ * kernel image [KIMG_BASE, CP_KHOLE_HI) (P1, D6).  Caller holds no lock; the region read is done under
  * proc_lock inside the implementation. */
 int vm_arch_resume_va_ok(struct addr_space *as, uint64_t va, uint64_t cs);
 /* P5 (D5.7): the physical address encoded in a vm_arch_walk leaf (OA

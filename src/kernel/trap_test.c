@@ -259,7 +259,7 @@ static void test_u_strcpy_atomic(void) {
   EXPECT_EQ(vm_touch(p, USER_MMAP_BASE_V2, 1, 1), 0);
   uint64_t leaf = 0;
   EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2, &leaf), 0);
-  unsigned char *pa = (unsigned char *)vm_arch_leaf_phys(leaf);
+  unsigned char *pa = (unsigned char *)phys_to_virt(vm_arch_leaf_phys(leaf));
   pa[0] = 'h';
   pa[1] = 'i';
   pa[2] = 0;
@@ -274,7 +274,7 @@ static void test_u_strcpy_atomic(void) {
      it.  The copy stops at the NUL and never validates beyond — success. */
   EXPECT_EQ(vm_touch(p, USER_MMAP_BASE_V2 + 0x2000, 1, 1), 0);
   EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2 + 0x2000, &leaf), 0);
-  unsigned char *pa3 = (unsigned char *)vm_arch_leaf_phys(leaf);
+  unsigned char *pa3 = (unsigned char *)phys_to_virt(vm_arch_leaf_phys(leaf));
   pa3[0xFFC] = 'e';
   pa3[0xFFD] = 'n';
   pa3[0xFFE] = 'd';
@@ -505,6 +505,7 @@ static void test_kernel_stack_guard(void) {
 
 void trap_test_suite(void) {
   uart_puts("trap_test_suite:\n");
+  vm_arch_restore_kernel(); /* P1 (S5): the USER_VIRT_BASE (v1) tests need the kernel table */
   test_trap_unknown_syscall();
   test_trap_sys_get_cpuid();
   test_u_strcpy_atomic(); /* SEC-3 */

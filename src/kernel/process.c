@@ -13,6 +13,7 @@
 #include "errno.h"
 #include "syscall.h"
 #include "virtio_blk.h"
+#include "kmem.h"
 #include <stdint.h>
 
 /* --- debugcon (0xE9) parking diagnostic: IRQ-safe port writes only --- */
@@ -705,7 +706,7 @@ static void reap_status_write(struct process *parent, uint64_t va, int st) {
   }
   uint64_t off = va - USER_VIRT_BASE;
   if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base)
-    *(int *)(parent->user_phys_base + off) = st;
+    *(int *)phys_to_virt(parent->user_phys_base + off) = st;
 }
 
 /* --- W2-5 (selfhost): wait4 rusage ----------------------------------- *\
@@ -740,7 +741,7 @@ static void user_rusage_store(struct process *p, uint64_t va,
   uint64_t off = va - USER_VIRT_BASE;
   if (off + sizeof(*ru) <= USER_REGION_SIZE && p->user_phys_base) {
     const uint8_t *src = (const uint8_t *)ru;
-    uint8_t *dst = (uint8_t *)(p->user_phys_base + off);
+    uint8_t *dst = (uint8_t *)phys_to_virt(p->user_phys_base + off);
     for (int k = 0; k < (int)sizeof(*ru); k++)
       dst[k] = src[k];
   }
@@ -1276,6 +1277,10 @@ static int process_create_internal_ver(int ver) {
   /* P1 (design section 1): a fresh process is its own group's only member. */
   p->tgid = pid;
   p->is_thread = 0;
+  /* P1 (found by linux_probe_lowva): abi_flags is per-slot state that was
+     never reset, so a new process inherited whatever the slot's previous
+     owner was; the loader (compat track) and fork set it explicitly. */
+  p->abi_flags = 0;
   p->live_threads = 1;
   p->tls_base = 0;
   p->gs_base = 0;
@@ -1316,8 +1321,8 @@ static int process_create_internal_ver(int ver) {
       uart_print_hex(p->user_phys_base);
       uart_puts("\n");
     }
-    kmemset((void *)p->user_phys_base, 0, USER_INITIAL_CLEAR_SIZE);
-    kmemset((void *)(p->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE), 0, USER_STACK_CLEAR_SIZE);
+    kmemset(phys_to_virt(p->user_phys_base), 0, USER_INITIAL_CLEAR_SIZE);
+    kmemset(phys_to_virt(p->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE), 0, USER_STACK_CLEAR_SIZE);
     if (trace)
       uart_puts("Inside process_create: kmemset done.\n");
   }
@@ -1407,7 +1412,11 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
      address is directly usable from the kernel: PD0/PD2..PD7
      identity-map all RAM at supervisor level (and the block is also
      mapped at USER_VIRT_BASE while the task is current). */
-  p->context[33] = p->user_phys_base + USER_REGION_SIZE - 0x1000;
+  /* P1 (S5): through the direct map.  The kernel task's stack must be
+     reachable in EVERY root: an interrupt taken in the task pushes onto it,
+     and schedule() can load a v2 root (no identity map) before it leaves
+     that stack -- measured as a silent triple-fault reboot loop. */
+  p->context[33] = phys_to_kva(p->user_phys_base + USER_REGION_SIZE - 0x1000);
   p->context[30] = p->context[33]; /* M6/L36: frame lr == resumed SP */
 #ifdef __x86_64__
   p->context[32] = 0x202;                  // RFLAGS = IF (0x200) | Reserved (0x02)
@@ -1606,9 +1615,9 @@ void wd_dump_proc_table(void) {
     if (!proc_table[i].is_kernel_process && proc_table[i].user_phys_base) {
       uint64_t pb = proc_table[i].user_phys_base;
       panic_puts2(" img=");
-      panic_print_hex2(*(volatile uint64_t *)pb);
+      panic_print_hex2(*(volatile uint64_t *)phys_to_virt(pb));
       panic_puts2("/");
-      panic_print_hex2(*(volatile uint64_t *)(pb + 8));
+      panic_print_hex2(*(volatile uint64_t *)phys_to_virt(pb + 8));
     }
     panic_puts2("\n");
   }
@@ -2025,7 +2034,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
          (vm_touch takes vm_lock; it never sleeps for a stack page).
          Observed: IceWM fork()+exec of HBHOST.BIN reset the VM (icewm.md §9). */
       if (proc_table[next].as && !proc_table[next].is_kernel_process &&
-          target_sp > USER_VA_BASE + 0x1000 && target_sp <= USER_VA_TOP) {
+          vm_range_is_user(proc_table[next].as, target_sp - 0x1000, 0x1000)) {
         uint64_t lo = (target_sp - 0x1000) & ~0xFFFULL;
         (void)vm_touch(&proc_table[next], lo, target_sp - lo, /*write=*/1);
       }
@@ -2793,8 +2802,8 @@ static void resched_cpu(uint32_t c) {
     __asm__ volatile("int $0x81" ::: "memory");
     return;
   }
-  volatile uint32_t *icr_hi = (volatile uint32_t *)0xFEE00310;
-  volatile uint32_t *icr_lo = (volatile uint32_t *)0xFEE00300;
+  volatile uint32_t *icr_hi = (volatile uint32_t *)phys_to_virt(0xFEE00310);
+  volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00300);
   *icr_hi = (uint32_t)(c << 24);
   *icr_lo = 0x00002081u; /* fixed delivery, vector 0x81, level assert, edge */
   for (int i = 0; i < 200000; i++) {
@@ -4258,15 +4267,20 @@ int process_fork(struct trap_frame *tf) {
       return -1;
     }
   } else {
-    kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
+    kmemcpy(phys_to_virt(child->user_phys_base), phys_to_virt(group->user_phys_base),
             USER_INITIAL_CLEAR_SIZE);
-    kmemcpy((void *)(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
-            (void *)(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+    kmemcpy(phys_to_virt(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+            phys_to_virt(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
             USER_STACK_CLEAR_SIZE);
   }
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   child->parent_pid = group->pid;
+  /* P1: a fork of a Linux-ABI process is a Linux-ABI process.  It used to
+     inherit the slot's stale abi_flags instead, so a child that landed on a
+     slot last used by a native/kernel task had every Linux syscall routed to
+     the native table (measured: exit_group/exit "Unknown System Call" loop). */
+  child->abi_flags = group->abi_flags;
 
   for (int i = 0; i < 32; i++) {
     child->name[i] = parent->name[i];
@@ -6328,7 +6342,7 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
      validates against its AS -- entry mapped readable, stack top mapped
      writable (the mmap+guard stack from libpthread). */
   if (caller->as) {
-    if (stack < USER_VA_BASE + 16 || stack > USER_VA_TOP)
+    if (!vm_range_is_user(process_group(caller)->as, stack - 16, 16))
       return -EINVAL;
     if (stack & 15)
       return -EINVAL;
@@ -6424,7 +6438,7 @@ int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
   if (!stack)
     return -EINVAL;
   if (caller->as) {
-    if (stack < USER_VA_BASE || stack > USER_VA_TOP)
+    if (!vm_range_is_user(process_group(caller)->as, stack - 16, 16))
       return -EINVAL;
     if (vm_touch(caller, stack - 16, 16, 1) != 0)
       return -EINVAL;
@@ -6700,7 +6714,7 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
         return -EFAULT;
       if (!grp->user_phys_base)
         return -EFAULT;
-      word = (volatile uint32_t *)(grp->user_phys_base + (uaddr - USER_VIRT_BASE));
+      word = (volatile uint32_t *)phys_to_virt(grp->user_phys_base + (uaddr - USER_VIRT_BASE));
     }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     /* (2) compare under proc_lock: no lost wakeups (see process.h). */

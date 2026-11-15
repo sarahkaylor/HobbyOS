@@ -51,13 +51,13 @@ static void e2o_init_once(void) {
 }
 
 static void zero_bytes(uint64_t fr, uint32_t from, uint32_t to) {
-  volatile uint8_t *p = (volatile uint8_t *)fr;
+  volatile uint8_t *p = (volatile uint8_t *)phys_to_virt(fr);
   for (uint32_t i = from; i < to; i++) p[i] = 0;
 }
 
 static int pages_differ(uint64_t a, uint64_t b, uint32_t n) {
-  const volatile uint8_t *x = (const volatile uint8_t *)a;
-  const volatile uint8_t *y = (const volatile uint8_t *)b;
+  const volatile uint8_t *x = (const volatile uint8_t *)phys_to_virt(a);
+  const volatile uint8_t *y = (const volatile uint8_t *)phys_to_virt(b);
   for (uint32_t i = 0; i < n; i++)
     if (x[i] != y[i]) return 1;
   return 0;
@@ -95,13 +95,13 @@ static int writeback_obj(struct ext2_fs *fs, struct vm_object *o,
     uint64_t fr = vm_object_peek(o, off);
     if (!fr) continue;
     uint32_t n = (size - off) < FRAME_SIZE ? (uint32_t)(size - off) : FRAME_SIZE;
-    int64_t r = ext2_read(fs, ino, off, (void *)(uintptr_t)scratch, n);
+    int64_t r = ext2_read(fs, ino, off, phys_to_virt(scratch), n);
     if (r == (int64_t)n && !pages_differ(fr, scratch, n)) continue;
     /* Copy first: the user may store into `fr` while ext2_write reads it. */
-    volatile uint8_t *d = (volatile uint8_t *)scratch;
-    const volatile uint8_t *s = (const volatile uint8_t *)fr;
+    volatile uint8_t *d = (volatile uint8_t *)phys_to_virt(scratch);
+    const volatile uint8_t *s = (const volatile uint8_t *)phys_to_virt(fr);
     for (uint32_t i = 0; i < n; i++) d[i] = s[i];
-    if (ext2_write(fs, ino, off, (const void *)(uintptr_t)scratch, n) ==
+    if (ext2_write(fs, ino, off, phys_to_virt(scratch), n) ==
         (int64_t)n)
       wrote++;
   }
@@ -193,11 +193,11 @@ uint64_t ext2_obj_page(struct vm_object *o, uint64_t off) {
      the same lock). */
   ext2v_lock();
   int64_t n = ext2_read(ext2v_fs(), o->ext2_ino, idx * FRAME_SIZE,
-                        (void *)(uintptr_t)nf, FRAME_SIZE);
+                        phys_to_virt(nf), FRAME_SIZE);
   uint64_t res = 0;
   if (n >= 0) {
     zero_bytes(nf, (uint32_t)n, FRAME_SIZE);
-    __builtin___clear_cache((char *)nf, (char *)nf + FRAME_SIZE);
+    __builtin___clear_cache((char *)phys_to_virt(nf), (char *)phys_to_virt(nf) + FRAME_SIZE);
     res = vm_object_install_page(o, idx * FRAME_SIZE, nf); /* frees a loser */
     nf = 0;
   }
@@ -213,7 +213,7 @@ int ext2_obj_read(struct vm_object *o, uint64_t off, uint64_t dst) {
   int rc = ext2_file_size(ext2v_fs(), o->ext2_ino, &size);
   int64_t n = rc ? rc
                  : ext2_read(ext2v_fs(), o->ext2_ino, off,
-                             (void *)(uintptr_t)dst, FRAME_SIZE);
+                             phys_to_virt(dst), FRAME_SIZE);
   ext2v_unlock(0);
   if (n < 0) return -EIO;
   zero_bytes(dst, (uint32_t)n, FRAME_SIZE);
@@ -252,7 +252,7 @@ void ext2_obj_note_write_locked(uint32_t ino, uint64_t off, uint64_t len,
       uint64_t b = end < p + FRAME_SIZE ? end : p + FRAME_SIZE;
       /* only the written bytes: the rest of a write-back page may hold
          mapped stores that have not reached the file yet */
-      (void)ext2_read(fs, ino, a, (void *)(uintptr_t)(fr + (a - p)), b - a);
+      (void)ext2_read(fs, ino, a, phys_to_virt(fr + (a - p)), b - a);
     }
   }
   for (int k = 0; k < n; k++) vm_object_unref(objs[k]);

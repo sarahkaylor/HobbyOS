@@ -15,11 +15,12 @@
 
 #include "iommu_vtd.h"
 #include "arch/cpu.h"
+#include "kmem.h"
 
 extern void uart_puts(const char *s);
 extern void print_int(int val);
 extern void uart_print_hex(uint64_t val);
-extern void mmu_map_mmio_range(uint64_t phys_addr, uint64_t size);
+extern volatile void *mmu_map_mmio_range(uint64_t phys_addr, uint64_t size);
 extern void arch_memory_barrier(void);
 
 /* ---------------------------------------------------------------------------
@@ -122,7 +123,7 @@ static struct acpi_rsdp *find_rsdp(void) {
 
   /* RSDP must be aligned on a 16-byte boundary */
   for (uint64_t addr = RSDP_SCAN_START; addr < RSDP_SCAN_END; addr += 16) {
-    volatile uint8_t *ptr = (volatile uint8_t *)addr;
+    volatile uint8_t *ptr = (volatile uint8_t *)phys_to_virt(addr);
 
     if (str_match((const char *)ptr, RSDP_SIGNATURE, 8)) {
       /* Validate checksum over first 20 bytes */
@@ -134,7 +135,7 @@ static struct acpi_rsdp *find_rsdp(void) {
         uart_puts("[VT-d] RSDP found at ");
         uart_print_hex(addr);
         uart_puts("\n");
-        return (struct acpi_rsdp *)addr;
+        return (struct acpi_rsdp *)phys_to_virt(addr);
       }
     }
   }
@@ -165,7 +166,7 @@ static struct acpi_sdt_header *find_acpi_table(struct acpi_rsdp *rsdp,
     /* Map the XSDT region */
     mmu_map_mmio_range(xsdt_phys, 0x1000);
 
-    struct acpi_sdt_header *xsdt = (struct acpi_sdt_header *)xsdt_phys;
+    struct acpi_sdt_header *xsdt = (struct acpi_sdt_header *)phys_to_virt(xsdt_phys);
     uint32_t num_entries = (xsdt->length - sizeof(struct acpi_sdt_header))
     / sizeof(uint64_t);
 
@@ -184,7 +185,7 @@ static struct acpi_sdt_header *find_acpi_table(struct acpi_rsdp *rsdp,
       mmu_map_mmio_range(table_phys, 0x1000);
 
       struct acpi_sdt_header *hdr =
-          (struct acpi_sdt_header *)table_phys;
+          (struct acpi_sdt_header *)phys_to_virt(table_phys);
 
       if (str_match(hdr->signature, sig, 4)) {
         uart_puts("[VT-d] Found '");
@@ -209,7 +210,7 @@ static struct acpi_sdt_header *find_acpi_table(struct acpi_rsdp *rsdp,
 
     mmu_map_mmio_range(rsdt_phys, 0x1000);
 
-    struct acpi_sdt_header *rsdt = (struct acpi_sdt_header *)rsdt_phys;
+    struct acpi_sdt_header *rsdt = (struct acpi_sdt_header *)phys_to_virt(rsdt_phys);
     uint32_t num_entries = (rsdt->length - sizeof(struct acpi_sdt_header))
     / sizeof(uint32_t);
 
@@ -227,7 +228,7 @@ static struct acpi_sdt_header *find_acpi_table(struct acpi_rsdp *rsdp,
       mmu_map_mmio_range(table_phys, 0x1000);
 
       struct acpi_sdt_header *hdr =
-          (struct acpi_sdt_header *)table_phys;
+          (struct acpi_sdt_header *)phys_to_virt(table_phys);
 
       if (str_match(hdr->signature, sig, 4)) {
         uart_puts("[VT-d] Found '");
@@ -507,8 +508,7 @@ int iommu_vtd_init(void) {
   uart_print_hex(dmar_phys_base);
   uart_puts(" (4KB)\n");
 
-  mmu_map_mmio_range(dmar_phys_base, 0x1000);
-  dmar_base = (volatile uint8_t *)dmar_phys_base;
+  dmar_base = (volatile uint8_t *)mmu_map_mmio_range(dmar_phys_base, 0x1000);
 
   /* --- Step 4: Read and log capability registers --- */
   uint32_t ver = vtd_read32(VTD_VER_REG);
@@ -566,7 +566,7 @@ int iommu_vtd_init(void) {
   uart_puts("[VT-d] 39-bit AGAW (3-level) supported ✓\n");
 
   /* --- Step 5: Set up Root Table --- */
-  uint64_t root_table_phys = (uint64_t)&root_table[0];
+  uint64_t root_table_phys = kimg_pa(&root_table[0]);
   uart_puts("[VT-d] Root table at phys ");
   uart_print_hex(root_table_phys);
   uart_puts("\n");
@@ -685,7 +685,7 @@ int iommu_vtd_set_passthrough(uint8_t bus, uint8_t devfn) {
 
   /* Install root table entry for this bus */
   if (!(root_table[bus * 2] & VTD_ROOT_PRESENT)) {
-    uint64_t ctx_phys = (uint64_t)ctx_table;
+    uint64_t ctx_phys = kimg_pa(ctx_table);
     root_table[bus * 2] = ctx_phys | VTD_ROOT_PRESENT;
     root_table[bus * 2 + 1] = 0;
   }
@@ -806,14 +806,14 @@ static uint64_t *get_or_alloc_next_table(uint64_t *parent, int index) {
   if (parent[index] & VTD_PTE_PRESENT) {
     /* Table already exists; extract its physical address */
     uint64_t phys = parent[index] & VTD_PTE_ADDR_MASK;
-    return (uint64_t *)phys;
+    return (uint64_t *)phys_to_virt(phys);
   }
 
   /* Allocate a new table from the L1 pool (same size/alignment) */
   uint64_t *tbl = alloc_l1_table();
   if (!tbl) return 0;
 
-  uint64_t phys = (uint64_t)tbl;
+  uint64_t phys = kimg_pa(tbl);
   parent[index] = phys | VTD_PTE_PRESENT | VTD_PTE_WRITE;
   return tbl;
 }
@@ -844,7 +844,7 @@ int iommu_vtd_map(uint8_t bus, uint8_t devfn,
    * root_table[bus*2]   = low qword: present + context table pointer
    * root_table[bus*2+1] = high qword: reserved (0) */
   if (!(root_table[bus * 2] & VTD_ROOT_PRESENT)) {
-    uint64_t ctx_phys = (uint64_t)ctx_table;
+    uint64_t ctx_phys = kimg_pa(ctx_table);
     root_table[bus * 2] = ctx_phys | VTD_ROOT_PRESENT;
     root_table[bus * 2 + 1] = 0;
 
@@ -861,7 +861,7 @@ int iommu_vtd_map(uint8_t bus, uint8_t devfn,
     uint64_t *l3_table = alloc_l2_table();
     if (!l3_table) return -1;
 
-    l3_phys = (uint64_t)l3_table;
+    l3_phys = kimg_pa(l3_table);
     ctx_table[devfn * 2] = l3_phys | VTD_CTX_PRESENT | VTD_CTX_TT_TRANSLATED;
 
     /* High qword: AW=1 (39-bit, 3-level), Domain ID = devfn for now */
@@ -874,7 +874,7 @@ int iommu_vtd_map(uint8_t bus, uint8_t devfn,
   }
 
   /* Get L3 table pointer from context entry */
-  uint64_t *l3_table = (uint64_t *)l3_phys;
+  uint64_t *l3_table = (uint64_t *)phys_to_virt(l3_phys);
 
   /* --- 3. Fill page table entries for each 4KB page --- */
   uint64_t offset = 0;
@@ -953,7 +953,7 @@ int iommu_vtd_unmap(uint8_t bus, uint8_t devfn,
 
   /* Get context table */
   uint64_t ctx_phys = root_table[bus * 2] & VTD_PTE_ADDR_MASK;
-  uint64_t *ctx_table = (uint64_t *)ctx_phys;
+  uint64_t *ctx_table = (uint64_t *)phys_to_virt(ctx_phys);
 
   /* Verify context entry exists */
   if (!(ctx_table[devfn * 2] & VTD_CTX_PRESENT)) {
@@ -967,7 +967,7 @@ int iommu_vtd_unmap(uint8_t bus, uint8_t devfn,
   uint64_t l3_phys = ctx_table[devfn * 2] & VTD_PTE_ADDR_MASK;
   if (l3_phys == 0) return 0; // Nothing to unmap
 
-  uint64_t *l3_table = (uint64_t *)l3_phys;
+  uint64_t *l3_table = (uint64_t *)phys_to_virt(l3_phys);
 
   /* Clear page table entries */
   uint64_t offset = 0;
@@ -980,10 +980,10 @@ int iommu_vtd_unmap(uint8_t bus, uint8_t devfn,
 
     /* Walk L3 → L2 (don't allocate, just follow existing entries) */
     if (l3_table[l3_idx] & VTD_PTE_PRESENT) {
-      uint64_t *l2_table = (uint64_t *)(l3_table[l3_idx]
+      uint64_t *l2_table = (uint64_t *)phys_to_virt(l3_table[l3_idx]
                                         & VTD_PTE_ADDR_MASK);
       if (l2_table[l2_idx] & VTD_PTE_PRESENT) {
-        uint64_t *l1_table = (uint64_t *)(l2_table[l2_idx]
+        uint64_t *l1_table = (uint64_t *)phys_to_virt(l2_table[l2_idx]
                                           & VTD_PTE_ADDR_MASK);
         /* Clear the L1 PTE */
         l1_table[l1_idx] = 0;

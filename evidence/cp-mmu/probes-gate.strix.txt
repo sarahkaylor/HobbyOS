@@ -1,0 +1,28 @@
+GATE hello PASS
+    hello: [LP] done rc=0
+GATE timers PASS
+    timers: [LP] done rc=0
+GATE futex_sig PASS
+    futex_sig: [LP] done rc=0
+GATE fpu_sig PASS
+    fpu_sig: [LP] done rc=0
+GATE tramp_sig PASS
+    tramp_sig: [LP] done rc=0
+GATE join FAIL rc=1
+    join: [LP] done rc=1
+GATE mem PASS
+    mem: [LP] done rc=0
+GATE mmap_race PASS
+    mmap_race: [LP] done rc=0
+GATE vmcommit PASS
+    vmcommit: [LP] done rc=0
+GATE redzone PASS
+    redzone: [LP] done rc=0
+GATE proc PASS
+    proc: [LP] done rc=0
+GATE fd PASS
+    fd: [LP] done rc=0
+GATE clock PASS
+    clock: [LP] done rc=0
+GATE lowva PASS
+    lowva: [LP] done rc=0

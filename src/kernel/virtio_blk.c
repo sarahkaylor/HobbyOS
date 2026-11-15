@@ -344,10 +344,10 @@ static int nvme_admin_enable(void) {
   }
   admin_sq_tail = 0;
   admin_cq_head = 0;
-  uint64_t asq = (uint64_t)&admin_sq;
+  uint64_t asq = kimg_pa(&admin_sq);
   nvme_regs[10] = (uint32_t)asq;
   nvme_regs[11] = (uint32_t)(asq >> 32);
-  uint64_t acq = (uint64_t)&admin_cq;
+  uint64_t acq = kimg_pa(&admin_cq);
   nvme_regs[12] = (uint32_t)acq;
   nvme_regs[13] = (uint32_t)(acq >> 32);
   (void)nvme_regs[11];
@@ -403,7 +403,7 @@ static uint16_t nvme_identify_ns(uint32_t nsid, uint8_t *buf) {
   id.opcode = 0x06;      /* Identify */
   id.nsid = nsid;
   id.cid = 3;
-  id.prp1 = (uint64_t)buf;
+  id.prp1 = virt_to_phys(buf);
   id.cdw10 = 0x00;       /* CNS = 0: identify namespace */
   return submit_admin_cmd(&id);
 }
@@ -440,7 +440,7 @@ static int nvme_ns_validate(int print_rows) {
   idc.opcode = 0x06;
   idc.nsid = 0;
   idc.cid = 4;
-  idc.prp1 = (uint64_t)id_ns;
+  idc.prp1 = virt_to_phys(id_ns);
   idc.cdw10 = 0x01;      /* CNS = 1: identify controller */
   uint16_t stc = submit_admin_cmd(&idc);
   if (stc != 0) {
@@ -477,7 +477,7 @@ static int nvme_io_queues_create(void) {
   struct nvme_cmd create_cq = {0};
   create_cq.opcode = 0x05; /* Create I/O Completion Queue */
   create_cq.cid = 1;
-  create_cq.prp1 = (uint64_t)&io_cq;
+  create_cq.prp1 = kimg_pa(&io_cq);
   create_cq.cdw10 = ((NVME_IOQ_DEPTH - 1) << 16) | 0x01;
   create_cq.cdw11 = 0x01; /* PC = 1, IEN = 0: polled completions */
   uint16_t status_cq = submit_admin_cmd(&create_cq);
@@ -491,7 +491,7 @@ static int nvme_io_queues_create(void) {
   struct nvme_cmd create_sq = {0};
   create_sq.opcode = 0x01; /* Create I/O Submission Queue */
   create_sq.cid = 2;
-  create_sq.prp1 = (uint64_t)&io_sq;
+  create_sq.prp1 = kimg_pa(&io_sq);
   create_sq.cdw10 = ((NVME_IOQ_DEPTH - 1) << 16) | 0x01;
   create_sq.cdw11 = (1 << 16) | 0x01; /* CQID = 1, PC = 1 */
   uint16_t status_sq = submit_admin_cmd(&create_sq);
@@ -1361,7 +1361,7 @@ static int stress_read_locked(uint64_t lba, uint8_t *buf, uint32_t nsec) {
     cmd.opcode = 0x02; /* Read */
     cmd.nsid = 1;
     cmd.cid = next_io_cid();
-    cmd.prp1 = (uint64_t)&bounce_buf[0];
+    cmd.prp1 = kimg_pa(&bounce_buf[0]);
     cmd.cdw10 = (uint32_t)(lba + i);
     cmd.cdw11 = (uint32_t)((lba + i) >> 32);
     cmd.cdw12 = 0; /* 1 block */
@@ -1379,7 +1379,7 @@ static int stress_write_locked(uint64_t lba, const uint8_t *buf) {
   cmd.opcode = 0x01; /* Write */
   cmd.nsid = 1;
   cmd.cid = next_io_cid();
-  cmd.prp1 = (uint64_t)&bounce_buf[0];
+  cmd.prp1 = kimg_pa(&bounce_buf[0]);
   cmd.cdw10 = (uint32_t)lba;
   cmd.cdw11 = (uint32_t)(lba >> 32);
   cmd.cdw12 = 0;
@@ -1626,7 +1626,6 @@ void virtio_blk_stress_start(void) {
 void virtio_blk_diag_row(void) {
   if (!nvme_regs)
     return;
-  extern uint64_t cpu_pd7[512];
   uart_puts("[BLKD] cc=");
   uart_print_hex(nvme_regs[5]);
   uart_puts(" csts=");
@@ -1637,8 +1636,8 @@ void virtio_blk_diag_row(void) {
   uart_print_hex(nvme_regs[1]);
   uart_puts(" vs=");
   uart_print_hex(nvme_regs[2]);
-  uart_puts(" pd480=");
-  uart_print_hex(cpu_pd7[480]);
+  uart_puts(" regs=");
+  uart_print_hex((uint64_t)(uintptr_t)nvme_regs);
   uart_puts(" reqs=");
   print_int((int)blk_requests);
   uart_puts(" stalls=");
@@ -1665,6 +1664,8 @@ void virtio_blk_diag_row(void) {
   print_int(frame_high_water());
   uart_puts(" hole=");
   print_int(frame_hole_allocs());
+  uart_puts(" fr_hi=");
+  print_int((int)frame_hi_allocs());
   uart_puts(" mmio=");
   print_int((int)blk_mmio_changes);
   uart_puts("\n");
@@ -1722,21 +1723,11 @@ int virtio_blk_init(void) {
   uint32_t bar0_high = pci_read_config(nvme_bus, nvme_slot, 0, 0x14);
   uint64_t nvme_regs_phys = (bar0_low & 0xFFFFFFF0) | ((uint64_t)bar0_high << 32);
 
-  // Setup register pointer (dynamically map BAR using index 480 of cpu_pd7)
-  extern uint64_t cpu_pd7[512];
-  cpu_pd7[480] = (nvme_regs_phys & 0xFFFFFFFFFFE00000ULL) | 0x9B;
-
-  // Flush TLB
-  uint64_t cr3_val;
-  __asm__ volatile(
-      "mov %%cr3, %0\n"
-      "mov %0, %%cr3\n"
-      : "=r"(cr3_val)
-      :
-      : "memory"
-  );
-
-  nvme_regs = (volatile uint32_t*)(0x1FC000000ULL + (nvme_regs_phys & 0x1FFFFF));
+  /* P1 (S4): the register file is an uncached ioremap window (PML4[257],
+     shared by every root).  It used to re-point identity PD7[480] at VA
+     0x1FC000000, which hid the RAM at that physical 2 MiB and was not
+     reachable from a root without the identity map. */
+  nvme_regs = (volatile uint32_t *)ioremap(nvme_regs_phys, 0x4000);
 
   uart_puts("NVMe BAR0 Phys: ");
   uart_print_hex(nvme_regs_phys);
@@ -1744,17 +1735,13 @@ int virtio_blk_init(void) {
   uart_print_hex((uint64_t)nvme_regs);
   uart_puts(")\n");
 
-  /* L75: the 2 MiB window at VA 0x1FC000000 shadows the identity mapping of
-     the same physical 2 MiB, so a frame allocated there would BE this
-     device.  Reserve the shadow range in the frame pool, and say out loud
-     whether the pool's own extent still covers the BAR (it must not: that is
-     the L65-L73 bug, where a page-cache frame was the controller's register
-     file). */
+  /* L75: say out loud whether the pool's own extent covers the BAR (it must
+     not: that is the L65-L73 bug, where a page-cache frame was the
+     controller's register file).  P1 (S4): the window no longer shadows any
+     RAM (ioremap area), so there is no shadow range to reserve. */
   {
-    extern void frame_reserve_range(uint64_t lo, uint64_t hi);
     extern int frame_hole_allocs(void);
     uint64_t win = nvme_regs_phys & 0xFFFFFFFFFFE00000ULL;
-    frame_reserve_range(0x1FC000000ULL, 0x1FE000000ULL);
     uart_puts("[BLKQ] mmio win=");
     uart_print_hex(win);
     uart_puts("-");
@@ -1763,14 +1750,13 @@ int virtio_blk_init(void) {
     /* A BAR inside the frame pool is the whole bug; the extents put the pool
        at 0x20000000-0x70000000 and 0x100000000-0x200000000 with the MMIO
        shadow reserved, so this must read 0. */
-    print_int((win >= FRAME_EXT0_BASE && win < FRAME_EXT0_TOP) ||
-              (win >= FRAME_EXT1_BASE && win < FRAME_EXT1_TOP) ? 1 : 0);
+    print_int(frame_phys_in_pool(win));
     /* And the physical page really is the controller: read CAP through the
        identity map of the window's own physical address and compare with the
        register file.  Equal means "this RAM frame would have been the NVMe
        BAR", which is what the old pool (extent 1 = 0x80000000..) handed out. */
     uart_puts(" alias_read=");
-    uart_print_hex(*(volatile uint32_t *)win);
+    uart_print_hex(*(volatile uint32_t *)phys_to_virt(win));
     uart_puts(" cap=");
     uart_print_hex(nvme_regs[0]);
     uart_puts(" hole_allocs=");
@@ -1795,15 +1781,15 @@ int virtio_blk_init(void) {
     uart_puts("\n");
     /* 32-bit stores, exactly what a page-cache memcpy ends up doing. */
     for (int i = 0; i < 1024; i++)
-      ((volatile uint32_t *)awin)[i] = 0;
+      ((volatile uint32_t *)phys_to_virt(awin))[i] = 0;
     uart_puts("[BLKQ] alias-probe wrote 4 KiB of zeros (32-bit stores) through the pool frame; cc_after=");
     uart_print_hex(nvme_regs[5]);
     uart_puts(" csts_after=");
     uart_print_hex(nvme_regs[7]);
     uart_puts(" pa_cc_read=");
-    uart_print_hex(*(volatile uint32_t *)(awin + 0x14));
+    uart_print_hex(*(volatile uint32_t *)phys_to_virt(awin + 0x14));
     uart_puts(" pa_cap_read=");
-    uart_print_hex(*(volatile uint32_t *)awin);
+    uart_print_hex(*(volatile uint32_t *)phys_to_virt(awin));
     uart_puts(" bar_cc_read=");
     uart_print_hex(nvme_regs[0]);
     uart_puts("\n");
@@ -1839,13 +1825,13 @@ int virtio_blk_init(void) {
   }
 
   // ASQ
-  uint64_t admin_sq_phys = (uint64_t)&admin_sq;
+  uint64_t admin_sq_phys = kimg_pa(&admin_sq);
   nvme_regs[10] = (uint32_t)admin_sq_phys;
   nvme_regs[11] = (uint32_t)(admin_sq_phys >> 32);
   (void)nvme_regs[11]; // Flush write
 
   // ACQ
-  uint64_t admin_cq_phys = (uint64_t)&admin_cq;
+  uint64_t admin_cq_phys = kimg_pa(&admin_cq);
   nvme_regs[12] = (uint32_t)admin_cq_phys;
   nvme_regs[13] = (uint32_t)(admin_cq_phys >> 32);
   (void)nvme_regs[13]; // Flush write
@@ -2010,7 +1996,7 @@ int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
     cmd.opcode = 0x02; // Read
     cmd.nsid = 1;      // Namespace 1
     cmd.cid = next_io_cid();
-    cmd.prp1 = (uint64_t)&bounce_buf[0];
+    cmd.prp1 = kimg_pa(&bounce_buf[0]);
     cmd.cdw10 = (uint32_t)(sector + i);
     cmd.cdw11 = (uint32_t)((sector + i) >> 32);
     cmd.cdw12 = 0; // 1 block (0)
@@ -2117,7 +2103,7 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
     cmd.opcode = 0x01; // Write
     cmd.nsid = 1;      // Namespace 1
     cmd.cid = next_io_cid();
-    cmd.prp1 = (uint64_t)&bounce_buf[0];
+    cmd.prp1 = kimg_pa(&bounce_buf[0]);
     cmd.cdw10 = (uint32_t)(sector + i);
     cmd.cdw11 = (uint32_t)((sector + i) >> 32);
     cmd.cdw12 = 0; // 1 block (0)
@@ -2210,7 +2196,7 @@ static int ns2_xfer_locked(uint64_t lba, uint8_t *buf, uint32_t nsec, int wr) {
   cmd.opcode = wr ? 0x01 : 0x02;
   cmd.nsid = 2;
   cmd.cid = next_io_cid();
-  cmd.prp1 = (uint64_t)&bounce_buf[0];
+  cmd.prp1 = kimg_pa(&bounce_buf[0]);
   cmd.cdw10 = (uint32_t)lba;
   cmd.cdw11 = (uint32_t)(lba >> 32);
   cmd.cdw12 = nsec - 1;

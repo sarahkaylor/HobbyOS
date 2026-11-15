@@ -1,0 +1,41 @@
+t3_linux_probe: building /home/sarah/cp/lanes/int-mmu/obj/intel/probe_lowva.elf
+make: Entering directory '/home/sarah/cp/lanes/int-mmu'
+make: 'obj/intel/probe_lowva.elf' is up to date.
+make: Leaving directory '/home/sarah/cp/lanes/int-mmu'
+=== t3_linux_probe: lowva (deadline 300s, log obj/cpmmu/lowva16g.out) ===
+--- probe rows ---
+[LP] lowva probe start pid=2
+[LP] map fixed rw 0x10000                     ok detail=0
+[LP] map fixed rw 0x7ffe0000                  ok detail=0
+[LP] map fixed rw 0x110000                    ok detail=0
+[LP] map fixed rw 0x67fff000                  ok detail=0
+[LP] map fixed rw 0x78000000 (above hole)     ok detail=0
+[LP] map fixed rw 0x140000000 (exe base)      ok detail=0
+[LP] map fixed rw 0x7fffffffe000 (last page)  ok detail=0
+[LP] NOREPLACE over a mapping -> EEXIST       ok detail=0
+[LP] NOREPLACE into the kernel hole -> EEXIST ok detail=17
+[LP] NOREPLACE mid-hole -> EEXIST             ok detail=17
+[LP] NOREPLACE straddling hole start -> EEXIST ok detail=17
+[LP] MAP_FIXED into the kernel hole -> ENOMEM ok detail=12
+[LP] MAP_FIXED at 0x7ffffffff000 -> ENOMEM    ok detail=12
+[LP] NOREPLACE into free low VA               ok detail=0
+[LP] hint in the hole lands outside it        ok detail=67584
+[LP] write() from the hole -> EFAULT          ok detail=-1
+[LP] memfd 0x7ffe0000 coherent parent<->child ok detail=0
+[LP] reserve  64 GiB at 0x7feff7fff000
+[LP] reserve  64 GiB at 0x7fdff7fef000
+[LP] reserve  16 GiB at 0x1080001000
+[LP] reserve 64+64+16 GiB PROT_NONE           ok detail=144
+[LP] reserved total >= 141 GiB                ok detail=144
+[LP] mprotect+touch 3 pages of 64 GiB         ok detail=0
+[LP] munmap 8 GiB inside, tail intact         ok detail=0
+[LP] writev from untouched file pages         ok detail=128
+[LP] readv into untouched file pages (COW)    ok detail=96
+[LP] done rc=0
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+[LCOMPAT] readlink exe pid=2 bufsz=255 -> 10
+--- faults / exits ---
+[EXITPC] pid=1 last_user_pc=0x1000003B3E code=0x0
+[EXITPC] pid=2 last_user_pc=0x1000003B3E code=0x0
+t3_linux_probe: PASS — lowva reached its done marker
