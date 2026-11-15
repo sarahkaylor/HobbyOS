@@ -170,7 +170,7 @@
 #define CP_COMPAT_AS 1
 #endif
 #ifndef CP_COMPAT_FLOOR
-#define CP_COMPAT_FLOOR 0x200000000ULL
+#define CP_COMPAT_FLOOR CP_VA_LO /* S8: the F1 floor (S6/S7 shipped 8 GiB) */
 #endif
 
 /* --- P2.4 (S4): shared objects (memfd / MAP_SHARED anon) ------------- */
