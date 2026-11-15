@@ -61,7 +61,6 @@
 #include "tmpfs.h" /* cp/sys: bind(2) socket inodes in the compat /tmp */
 #include "unix.h"  /* cp/sys: K_UNIX_SUN_LEN / K_UNIX_PATH_MAX */
 
-
 /* close_range(2) flags (Linux values; not syscall numbers, so local). */
 #define L_CLOSE_RANGE_UNSHARE 0x2u
 #define L_CLOSE_RANGE_CLOEXEC 0x4u
@@ -961,6 +960,162 @@ static int l_fd_fchown(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, rc);
 }
 
+/* ---- cp/sys: sendmmsg ---------------------------------------------------
+ *
+ * Not Wine's own call: glibc 2.31's resolver (res_send.c send_dg) sends the
+ * A and AAAA queries of one getaddrinfo() in a single sendmmsg on a
+ * CONNECTED UDP socket (Wine reaches it from wineboot.exe's host-name
+ * lookup, docs/cyberpunk-evidence.md §3.1 rank 6).  Each struct mmsghdr is a
+ * msghdr (56 bytes) followed by msg_len (u32) + 4 bytes of padding.
+ *   AF_UNIX  -> one file_sendmsg per entry (fds and all);
+ *   AF_INET  -> one datagram per entry through the connected-socket write
+ *               path (a single iovec, no msg_name: the resolver's shape).
+ * Linux semantics: the count of messages sent; an error only when the FIRST
+ * message fails; a would-block on the first parks the whole call. */
+#define L_SYS_sendmmsg 307
+#define L_MMSG_SIZE 64
+
+static int l_fd_sendmmsg(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  uint64_t uvec = l_arg(tf, 1);
+  int64_t vlen = l_argi(tf, 2);
+  int flags = (int)l_argi(tf, 3);
+  if (vlen < 0) return l_ret(tf, -EINVAL);
+  if (vlen > 1024) vlen = 1024; /* UIO_MAXIOV, as Linux clamps */
+  if (vlen == 0) return l_ret(tf, 0);
+  int issock = l_is_socket(p, fd);
+  if (issock < 0) return l_ret(tf, -EBADF);
+  if (issock == 0) return l_ret(tf, -ENOTSOCK);
+  if (!l_user_ok(p, uvec, (uint64_t)vlen * L_MMSG_SIZE, 1))
+    return l_ret(tf, -EFAULT);
+  int64_t sent = 0;
+  for (int64_t i = 0; i < vlen; i++) {
+    uint64_t um = uvec + (uint64_t)i * L_MMSG_SIZE;
+    int r = file_sendmsg(p, fd, um, flags);
+    if (r == -EOPNOTSUPP) {
+      /* INET: the connected-datagram write path. */
+      struct k_msghdr m;
+      if (l_copy_from_user(p, &m, um, sizeof m) != 0) {
+        r = -EFAULT;
+      } else if (m.name != 0 && m.namelen != 0) {
+        r = -EOPNOTSUPP; /* directed send: no sendto-with-address engine */
+      } else if (m.iovlen != 1) {
+        r = -EOPNOTSUPP;
+      } else {
+        uint64_t io[2];
+        if (l_copy_from_user(p, io, m.iov, sizeof io) != 0) r = -EFAULT;
+        else if (io[1] > 0x10000) r = -EMSGSIZE;
+        else if (io[1] > 0 && !l_user_ok(p, io[0], io[1], 0)) r = -EFAULT;
+        else {
+          int saved = -1;
+          if (flags & K_MSG_DONTWAIT) saved = l_nonblock_push(p, fd);
+          r = file_write(p, fd, (const void *)(uintptr_t)io[0], (int)io[1], tf);
+          l_nonblock_pop(p, fd, saved);
+          if (r == -1) r = -EIO;
+        }
+      }
+    }
+    if (r == -2) {
+      if (sent == 0) return l_park(p, tf);
+      break;
+    }
+    if (r < 0) {
+      if (sent == 0) return l_ret(tf, r);
+      break;
+    }
+    uint32_t mlen = (uint32_t)r;
+    if (l_copy_to_user(p, um + 56, &mlen, sizeof mlen) != 0) {
+      if (sent == 0) return l_ret(tf, -EFAULT);
+      break;
+    }
+    sent++;
+  }
+  return l_ret(tf, sent);
+}
+
+/* ---- cp/sys: extended attributes -----------------------------------------
+ *
+ * No volume here stores xattrs, so every one answers as a Linux filesystem
+ * without xattr support does: get/set/remove are -EOPNOTSUPP (== ENOTSUP,
+ * 95) and list is an empty list (0).  That is the errno Wine tolerates on
+ * EVERY path that uses them:
+ *   get  (DOS attributes, reparse tag): dlls/ntdll/unix/file.c:1704-1712
+ *        and :1820-1830 return quietly on ENOTSUP (also ENODATA/ENOATTR);
+ *   set/remove (fd_set_dos_attrib):     file.c:1764 ignores ENOTSUP;
+ *   the reparse-point READ (file.c:4060) fails the one operation that
+ *        needs a reparse point, which cannot exist on these volumes.
+ * The arguments are still validated the way Linux validates them before it
+ * reaches the filesystem: a path that does not exist is -ENOENT, a closed fd
+ * is -EBADF, a NULL name is -EFAULT. */
+#define L_SYS_setxattr 188
+#define L_SYS_lsetxattr 189
+#define L_SYS_fsetxattr 190
+#define L_SYS_getxattr 191
+#define L_SYS_lgetxattr 192
+#define L_SYS_fgetxattr 193
+#define L_SYS_listxattr 194
+#define L_SYS_llistxattr 195
+#define L_SYS_flistxattr 196
+#define L_SYS_removexattr 197
+#define L_SYS_lremovexattr 198
+#define L_SYS_fremovexattr 199
+
+/* 0 when the target exists, -errno otherwise.  by_fd: arg0 is an fd. */
+static int l_xattr_target(struct process *p, struct trap_frame *tf, int by_fd,
+                          int follow) {
+  if (by_fd) {
+    struct k_stat ks;
+    int err = 0;
+    return file_stat_fd(p, (int)l_argi(tf, 0), &ks, &err) == 0 ? 0 : -EBADF;
+  }
+  char path[VFS_PATH_MAX];
+  int r = l_copy_cstr(p, path, l_arg(tf, 0), sizeof path);
+  if (r) return r;
+  if (path[0] == '\0') return -ENOENT;
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENAMETOOLONG;
+  struct k_stat ks;
+  if (!follow && tmpfs_owns(abs)) {
+    int tr = tmpfs_stat(abs, 0, &ks);
+    if (tr != TMPFS_EXTERNAL) return tr;
+  }
+  int err = 0;
+  return file_stat_path(p, abs, &ks, &err) == 0 ? 0 : -(err ? err : ENOENT);
+}
+
+static int l_xattr_name(struct process *p, uint64_t uname) {
+  if (!uname) return -EFAULT;
+  char nm[256];
+  int r = l_copy_cstr(p, nm, uname, sizeof nm);
+  if (r == -ENAMETOOLONG) return -ERANGE; /* XATTR_NAME_MAX exceeded */
+  if (r) return r;
+  if (nm[0] == '\0') return -ERANGE;
+  return 0;
+}
+
+static int l_xattr_common(struct process *p, struct trap_frame *tf, int by_fd,
+                          int follow, int is_list) {
+  int r = l_xattr_target(p, tf, by_fd, follow);
+  if (r) return l_ret(tf, r);
+  if (is_list) return l_ret(tf, 0); /* an empty list */
+  r = l_xattr_name(p, l_arg(tf, 1));
+  if (r) return l_ret(tf, r);
+  return l_ret(tf, -EOPNOTSUPP);
+}
+
+static int l_fd_setxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 0); }
+static int l_fd_lsetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 0); }
+static int l_fd_fsetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 0); }
+static int l_fd_getxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 0); }
+static int l_fd_lgetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 0); }
+static int l_fd_fgetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 0); }
+static int l_fd_listxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 1); }
+static int l_fd_llistxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 1); }
+static int l_fd_flistxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 1); }
+static int l_fd_removexattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 0); }
+static int l_fd_lremovexattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 0); }
+static int l_fd_fremovexattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 0); }
+
 /* ---- cp/sys: eventfd ------------------------------------------------------
  *
  * A real counter (Linux eventfd(2)): write adds a u64, read returns and
@@ -1091,6 +1246,30 @@ static int l_fd_eventfd2(struct process *p, struct trap_frame *tf) {
                              (int)l_argi(tf, 1));
 }
 
+/* ---- cp/sys: inotify ------------------------------------------------------
+ *
+ * Refused as a kernel built without CONFIG_INOTIFY_USER refuses it: init and
+ * init1 are -ENOSYS, and since no inotify fd can therefore exist, add_watch /
+ * rm_watch answer -EBADF for a closed fd and -EINVAL ("not an inotify
+ * instance") for any other.  Every Wine caller treats a failed init as "no
+ * change notification" and carries on:
+ *   server/change.c:925-927   create_inotify_fd(): `if (unix_fd<0) return NULL`
+ *                             (and our build has no HAVE_SYS_INOTIFY_H at all);
+ *   dlls/winebus.sys/bus_udev.c:1492-1496  WARN and return the error, the
+ *                             udev bus then runs without hot-plug watches. */
+#define L_SYS_inotify_init 253
+#define L_SYS_inotify_add_watch 254
+#define L_SYS_inotify_rm_watch 255
+
+static int l_fd_inotify_init(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  return l_ret(tf, -ENOSYS);
+}
+
+static int l_fd_inotify_watch(struct process *p, struct trap_frame *tf) {
+  return l_ret(tf, l_fd_valid(p, (int)l_argi(tf, 0)) ? -EBADF : -EINVAL);
+}
+
 /* ---- the table --------------------------------------------------------- */
 
 const struct l_sysent l_tab_fd[] = {
@@ -1128,7 +1307,24 @@ const struct l_sysent l_tab_fd[] = {
   {L_SYS_ioctl, l_fd_ioctl, "ioctl"},
   {L_SYS_fcntl, l_fd_fcntl, "fcntl"},
   /* cp/sys (docs/cp-sys.md): rows Wine reaches */
+  {L_SYS_sendmmsg, l_fd_sendmmsg, "sendmmsg"},
+  {L_SYS_setxattr, l_fd_setxattr, "setxattr"},
+  {L_SYS_lsetxattr, l_fd_lsetxattr, "lsetxattr"},
+  {L_SYS_fsetxattr, l_fd_fsetxattr, "fsetxattr"},
+  {L_SYS_getxattr, l_fd_getxattr, "getxattr"},
+  {L_SYS_lgetxattr, l_fd_lgetxattr, "lgetxattr"},
+  {L_SYS_fgetxattr, l_fd_fgetxattr, "fgetxattr"},
+  {L_SYS_listxattr, l_fd_listxattr, "listxattr"},
+  {L_SYS_llistxattr, l_fd_llistxattr, "llistxattr"},
+  {L_SYS_flistxattr, l_fd_flistxattr, "flistxattr"},
+  {L_SYS_removexattr, l_fd_removexattr, "removexattr"},
+  {L_SYS_lremovexattr, l_fd_lremovexattr, "lremovexattr"},
+  {L_SYS_fremovexattr, l_fd_fremovexattr, "fremovexattr"},
   {L_SYS_eventfd, l_fd_eventfd, "eventfd"},
   {L_SYS_eventfd2, l_fd_eventfd2, "eventfd2"},
+  {L_SYS_inotify_init, l_fd_inotify_init, "inotify_init"},
+  {L_SYS_inotify_init1, l_fd_inotify_init, "inotify_init1"},
+  {L_SYS_inotify_add_watch, l_fd_inotify_watch, "inotify_add_watch"},
+  {L_SYS_inotify_rm_watch, l_fd_inotify_watch, "inotify_rm_watch"},
   L_SYSENT_END
 };

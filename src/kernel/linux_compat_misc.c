@@ -254,6 +254,26 @@ static int l_misc_getcwd(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, (int64_t)ubuf);
 }
 
+/* fchdir(2) (cp/sys).  Wine's NtQueryDirectoryFile brackets every directory
+   read with fchdir(dir) ... fchdir(cwd) and fails the whole query with
+   errno_to_status() when the first fchdir fails
+   (dlls/ntdll/unix/file.c:2914-2934); the server also fchdir()s between its
+   server and config directories to place temp files
+   (server/mapping.c:374-378).  The VFS keeps the cwd as a path, and every
+   open description records the path it was opened under (file_path_of), so
+   fchdir is "make that path the cwd" after checking it is a directory:
+   EBADF for a closed fd, ENOTDIR for a non-directory (Linux). */
+static int l_misc_fchdir(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  int d = file_fd_is_dir(p, fd);
+  if (d < 0) return l_misc_ret(tf, -EBADF);
+  if (d == 0) return l_misc_ret(tf, -ENOTDIR);
+  char abs[VFS_PATH_MAX];
+  int r = file_path_of(p, fd, abs, sizeof abs);
+  if (r != 0) return l_misc_ret(tf, r == -EBADF ? -EBADF : -ENOENT);
+  return l_misc_ret(tf, l_misc_set_cwd(p, abs));
+}
+
 /* No write-back cache to flush: the FAT writer goes straight to the block
    device, so fsync on a regular file is honestly a successful no-op.
    GB-032: on /dev/fb0 it is the present verb — the same arm trap.c's number
@@ -309,6 +329,7 @@ static int l_misc_rseq(struct process *p, struct trap_frame *tf) {
 }
 
 const struct l_sysent l_tab_misc[] = { {L_SYS_lseek, l_misc_lseek, "lseek"}, {L_SYS_readv, l_misc_readv, "readv"}, {L_SYS_pread64, l_misc_pread64, "pread64"}, {L_SYS_pwrite64, l_misc_pwrite64, "pwrite64"}, {L_SYS_unlink, l_misc_unlink, "unlink"}, {L_SYS_unlinkat, l_misc_unlinkat, "unlinkat"}, {L_SYS_rename, l_misc_rename, "rename"}, {L_SYS_rmdir, l_misc_rmdir, "rmdir"}, {L_SYS_chdir, l_misc_chdir, "chdir"}, {L_SYS_getcwd, l_misc_getcwd, "getcwd"}, {L_SYS_fsync, l_misc_fsync, "fsync"}, {L_SYS_membarrier, l_misc_membarrier, "membarrier"}, {L_SYS_rseq, l_misc_rseq, "rseq"},
+  {81 /* fchdir */, l_misc_fchdir, "fchdir"},
   L_SYSENT_END
 };
 
