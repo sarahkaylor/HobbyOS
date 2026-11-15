@@ -227,6 +227,10 @@ every result from it after 08:23 is void; all results below are from
 | Wine build (`build-wine.sh all`, JOBS=16) | 202 MiB staged, 873 files, static-pie preloader, max `GLIBC_2.29` | — |
 | Wine smoke | §8 | — |
 
+The probe sweep above ran at `d0511cab`; after the FAT `open(dir, O_RDONLY)`
+fix (`8a4d07eb`) the six lane probes were re-run at HEAD and all pass again
+(`head-rerun.txt`): tmpfs, wsys, fd, mem, proc, timers `[LP] done rc=0`.
+
 `join` row A ("park-first") is swallowed in the console by a spliced kernel
 `[FUTEX]` trace line in both trees and fails intermittently in both: a
 pre-existing defect (with row E) for the owner of `process_clone()` / the

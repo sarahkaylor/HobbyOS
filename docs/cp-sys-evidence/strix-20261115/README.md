@@ -10,6 +10,7 @@ the raw consoles, which stay on strix under `obj/`):
 - `join-repeat.txt` — three more join runs per tree (flake check)
 - `unit-tests.txt` — the failing assertions of `run_unit_tests_intel.sh`, lane and base
 - `wine-smoke-ladder.txt` — the Wine smoke's serial ladder (final run)
+- `head-rerun.txt` — the six lane probes re-run at HEAD after `8a4d07eb`
 - `wine-build-and-host.txt` — `build-wine.sh all` summary lines + host identity
 
 Commands: docs/cp-sys.md §9.
