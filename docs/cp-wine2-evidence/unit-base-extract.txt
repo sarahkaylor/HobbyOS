@@ -1,0 +1,6 @@
+Tests failed!
+virtio_gpu_test_suite:
+EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:214
+EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:244
+Tests run:    450
+Tests failed: 2
