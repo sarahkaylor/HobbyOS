@@ -222,6 +222,14 @@ static void sys_exit(struct trap_frame *tf) {
   process_exit(tf);
 }
 
+/* exit_group(code): end the whole thread group, from ANY thread.  Shares
+ * process_exit with SYS_EXIT; the difference is only that it never takes the
+ * clone(2) child carve-out above. */
+static void sys_exit_group(struct trap_frame *tf) {
+  tf->regs[0] = tf->regs[5]; /* rdi = the exit code */
+  process_exit(tf);
+}
+
 static void sys_fork(struct trap_frame *tf) {
   int pid = process_fork(tf);
   tf->regs[0] = pid < 0 ? (uint64_t)-EAGAIN : (uint64_t)pid;
@@ -2987,7 +2995,16 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            fell to the default -ENOSYS and the probe "died inside _Exit" (GB-113
            signature: exit-0 observed as a signal death, last_user_pc in _Exit),
            rows never flushed to write(1).  exit_group(code) with code in rdi. */
-        case 231: syscall_num = SYS_EXIT;  break;  /* exit_group(code)  */
+        /* GB-308: NOT SYS_EXIT.  SYS_EXIT's handler ends only the calling
+           thread when the caller is a clone(2) child (GB-021/GB-216), which is
+           right for exit(60) and wrong for exit_group(231): every thread of
+           the group must die.  Measured: the JVM's System.exit()/Runtime.halt()
+           runs on a clone child, so exit_group killed that one thread and left
+           13 parked ones -- the process never exited (no "[KERNEL] Process ...
+           exited" row, all threads st=8, the wave never ended), while a
+           program that simply returns from main (the launcher thread is the
+           group anchor, so SYS_EXIT takes the whole group) exited fine. */
+        case 231: syscall_num = SYS_EXIT_GROUP; break; /* exit_group(code) */
         /* GB-141 (V2 mechanism): musl stdio calls writev(20), not write — the compat
            table had no case 20, so every printf byte hit -ENOSYS. */
         case 20: compat_writev(tf); return;
@@ -3139,6 +3156,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_write_console(tf);
   } else if (syscall_num == SYS_EXIT) {
     sys_exit(tf);
+  } else if (syscall_num == SYS_EXIT_GROUP) {
+    sys_exit_group(tf);
   } else if (syscall_num == SYS_FORK) {
     sys_fork(tf);
   } else if (syscall_num == SYS_OPEN) {
