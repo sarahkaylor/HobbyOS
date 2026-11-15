@@ -329,7 +329,7 @@ ifeq ($(ARCH),intel)
   # nothing" on the icewm desktop, while the keyboard path worked fine because
   # keys are not routed through a pointer device).  tools/rw/rw_desktop_drive.py
   # and the GUI gates all drive the desktop through absolute events.
-  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M q35,vmport=on $(X64_CPU_ARGS) -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
@@ -545,6 +545,22 @@ ifeq ($(ARCH),intel)
     endif
   endif
 endif
+
+# cp P1 (docs/cyberpunk.md AD-4): the guest CPU model under KVM.  With no
+# -cpu, QEMU gives a KVM guest its `qemu64` model, which has no XSAVE and no
+# AVX, so the kernel's XSAVE path (src/kernel/arch/x64/fpu.c) could never run
+# and AVX code would #UD.  So whenever the final QEMU_ARGS asks for KVM and
+# names no -cpu of its own, the x64 QEMU_CMD adds $(X64_KVM_CPU) (default
+# `-cpu host`).  Recursive (=) on purpose: it is evaluated when QEMU_CMD is
+# expanded, so it sees QEMU_ARGS whether it came from this file or from a
+# wrapper's command line (t3_tier.sh, run_unit_tests_intel.sh).  An explicit
+# -cpu always wins -- `-cpu qemu64` is how the FXSAVE fallback is tested --
+# and TCG runs are untouched.  AVX-512 needs no masking here: the kernel's
+# XCR0 never enables its state, so user code that checks XGETBV (glibc, Wine,
+# MSVC's runtime) never selects it; pass X64_KVM_CPU='-cpu host,-avx512f' to
+# hide it from CPUID as well.
+X64_KVM_CPU ?= -cpu host
+X64_CPU_ARGS = $(if $(findstring -cpu ,$(QEMU_ARGS) ),,$(if $(findstring -enable-kvm,$(QEMU_ARGS)),$(X64_KVM_CPU)))
 
 # --- GX (docs/graphics-accel.md §3-D5): resolve QEMU_GPU to the concrete
 # display/device pair referenced by the per-arch QEMU_CMD lines above.
@@ -3571,6 +3587,17 @@ obj/host_linux_layout_test.o: src/host/linux_layout_test.c src/include/linux_lay
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
 
+# cp P1 / F2 (docs/cyberpunk.md 7.3): the x86_64 signal frame's FP/XSAVE shape
+# (src/include/linux_sigframe.h) against tests/fixtures/abi/linux_sigframe.golden,
+# measured from the Linux UAPI headers by tools/linux-abi/gen_sigframe_golden.py,
+# plus a sweep of the kernel's frame-placement arithmetic.
+LINUX_SIGFRAME_TEST = linux_sigframe_test_host
+$(LINUX_SIGFRAME_TEST): obj/host_linux_sigframe_test.o
+	$(HOST_CC) -o $@ $^
+obj/host_linux_sigframe_test.o: src/host/linux_sigframe_test.c src/include/linux_sigframe.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
+
 LINUX_ABI_CONSTANTS_TEST = linux_abi_constants_test_host
 $(LINUX_ABI_CONSTANTS_TEST): obj/host_linux_abi_constants_test.o
 	$(HOST_CC) -o $@ $^
@@ -4365,7 +4392,7 @@ test_pr_sync:
 
 # The suite as one list, so a host-portable subset can be derived from it
 # without maintaining a second copy (see host_tests_portable).
-HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(SSP_REPORT_TEST)
+HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_SIGFRAME_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(SSP_REPORT_TEST)
 host_tests: $(HOST_TESTS_TARGETS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
@@ -4399,6 +4426,7 @@ host_tests: $(HOST_TESTS_TARGETS)
 	$(HOST_RUN) ./$(LINUX_ABI_TEST)
 	$(HOST_RUN) ./$(UNAME_PARITY)
 	$(HOST_RUN) ./$(LINUX_LAYOUT_TEST)
+	$(HOST_RUN) ./$(LINUX_SIGFRAME_TEST)
 	$(HOST_RUN) ./$(LINUX_ABI_CONSTANTS_TEST)
 	$(HOST_RUN) ./$(THRD_TEST_HOST)
 	$(HOST_RUN) ./$(TLS_TEST_HOST)

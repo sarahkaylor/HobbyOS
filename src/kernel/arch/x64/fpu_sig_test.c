@@ -79,9 +79,74 @@ static void test_fpu_pcb_image_alignment(void) {
   uart_puts("  Running test_fpu_pcb_image_alignment...\n");
 
   /* The PCB copy is a plain kernel address; the struct must keep it aligned
-     for the same reason (FXSAVE64/FXRSTOR64 #GP on a misaligned operand). */
+     for the same reason (XSAVE/XRSTOR #GP on an operand that is not 64-byte
+     aligned, FXSAVE64/FXRSTOR64 on one that is not 16-byte aligned). */
   EXPECT_EQ((int)FPU_SIG_IMAGE_BYTES, 512);
-  EXPECT_EQ((int)__alignof__(((struct process *)0)->fpu_state), 16);
+  EXPECT_EQ((int)__alignof__(((struct process *)0)->fpu_state), 64);
+  EXPECT_EQ((int)sizeof(((struct process *)0)->fpu_state),
+            (int)FPU_PCB_IMAGE_BYTES);
+}
+
+/* cp P1 / AD-4: the machine decision is internally consistent and matches
+   what the CPU itself reports from ring 0. */
+static void test_fpu_xsave_decision(void) {
+  tests_run++;
+  uart_puts("  Running test_fpu_xsave_decision...\n");
+
+  uint32_t a = 1, b = 0, c = 0, d = 0;
+  __asm__ volatile("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
+  uint64_t cr4;
+  __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+  int osxsave = (int)((c >> 27) & 1u);
+
+  if (arch_fpu_xsave_enabled()) {
+    uint32_t lo, hi;
+    __asm__ volatile(".byte 0x0f, 0x01, 0xd0" : "=a"(lo), "=d"(hi) : "c"(0u));
+    uint64_t xcr0 = ((uint64_t)hi << 32) | lo;
+    EXPECT_EQ(osxsave, 1);
+    EXPECT_EQ((int)((cr4 >> 18) & 1u), 1);
+    EXPECT_EQ((xcr0 == arch_fpu_xcr0()), 1);
+    /* never anything beyond x87|SSE|AVX (AD-4), always x87|SSE */
+    EXPECT_EQ((int)(xcr0 & ~0x7ull), 0);
+    EXPECT_EQ((int)(xcr0 & 0x3ull), 3);
+    EXPECT_EQ((arch_fpu_xsave_size() >= 576 &&
+               arch_fpu_xsave_size() <= FPU_PCB_IMAGE_BYTES), 1);
+    if (xcr0 & 4)
+      EXPECT_EQ((int)arch_fpu_xsave_size(), 832);
+    EXPECT_EQ((int)arch_fpu_sig_image_bytes(),
+              (int)arch_fpu_xsave_size() + 4);
+  } else {
+    EXPECT_EQ(osxsave, 0);
+    EXPECT_EQ((int)((cr4 >> 18) & 1u), 0);
+    EXPECT_EQ((int)arch_fpu_xsave_size(), 512);
+    EXPECT_EQ((int)arch_fpu_sig_image_bytes(), 512);
+  }
+  EXPECT_EQ((arch_fpu_mxcsr_mask() & 0xFFBFu) == 0xFFBFu, 1);
+}
+
+/* The kernel-side save/restore pair round-trips the live state through a
+   kernel buffer (XSAVE twice gives the same legacy region, header and AVX
+   area).  Non-destructive: restore what was saved. */
+static void test_fpu_xsave_roundtrip(void) {
+  static uint8_t a1[FPU_PCB_IMAGE_BYTES] __attribute__((aligned(64)));
+  static uint8_t a2[FPU_PCB_IMAGE_BYTES] __attribute__((aligned(64)));
+  tests_run++;
+  uart_puts("  Running test_fpu_xsave_roundtrip...\n");
+  if (!arch_fpu_xsave_enabled()) {
+    uart_puts("    (no XSAVE on this CPU: FXSAVE path, skipped)\n");
+    return;
+  }
+  for (int i = 0; i < FPU_PCB_IMAGE_BYTES; i++)
+    a1[i] = a2[i] = 0;
+  arch_fpu_xsave_to(a1);
+  arch_fpu_xrstor_from(a1);
+  arch_fpu_xsave_to(a2);
+  int same = 1;
+  for (uint32_t i = 0; i < arch_fpu_xsave_size(); i++)
+    if (i < 464 || i >= 512) /* 464..511 are software-available */
+      if (a1[i] != a2[i])
+        same = 0;
+  EXPECT_EQ(same, 1);
 }
 
 void fpu_sig_test_suite(void) {
@@ -89,6 +154,8 @@ void fpu_sig_test_suite(void) {
   test_fpu_user_image_guard();
   test_fpu_save_user_rejects_without_faulting();
   test_fpu_pcb_image_alignment();
+  test_fpu_xsave_decision();
+  test_fpu_xsave_roundtrip();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

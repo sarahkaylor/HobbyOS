@@ -339,6 +339,7 @@ void process_init(void) {
     proc_table[i].is_thread = 0;
     proc_table[i].live_threads = 0;
     proc_table[i].tls_base = 0;
+    proc_table[i].gs_base = 0;
     proc_table[i].futex_uaddr = 0;
     proc_table[i].thread_ret = 0;
     /* P5 (D7): signal/env state on every slot ("" env = empty set, no
@@ -624,6 +625,18 @@ static void tls_write_live(uint64_t v) {
   __asm__ volatile("msr tpidr_el0, %0" : : "r"(v));
 #endif
 }
+
+#ifdef __x86_64__
+/* cp P1: the user GS base.  In ring 0 GS_BASE (0xC0000101) is this CPU's
+ * cpu_locals block and the RUNNING thread's user value waits in
+ * IA32_KERNEL_GS_BASE (0xC0000102); every return to ring 3 executes swapgs
+ * (src/kernel/arch/x64/trap.c), which makes it live.  So "install the user
+ * GS base" is a write of KERNEL_GS_BASE while in the kernel. */
+static void user_gs_write_live(uint64_t v) {
+  __asm__ volatile("wrmsr" : : "a"((uint32_t)v), "d"((uint32_t)(v >> 32)),
+                   "c"(0xC0000102));
+}
+#endif
 
 /* True while any OTHER dead member of `grp` is still claimed by a CPU.  The
  * exit_group wait is tick-granular (design section 1): each RUNNING member is
@@ -1265,6 +1278,7 @@ static int process_create_internal_ver(int ver) {
   p->is_thread = 0;
   p->live_threads = 1;
   p->tls_base = 0;
+  p->gs_base = 0;
   p->futex_uaddr = 0;
   p->clear_child_tid = 0;
   p->teardown_done = 0;
@@ -1645,6 +1659,11 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
   /* P1 (design section 4): install the target's TLS register.  Kernel tasks
      keep tls_base = 0. */
   tls_write_live(p->tls_base);
+#ifdef __x86_64__
+  /* cp P1: and its user GS base, into KERNEL_GS_BASE -- the return-to-user
+     swapgs makes it live.  Kernel tasks and native processes carry 0. */
+  user_gs_write_live(p->gs_base);
+#endif
 }
 
 static void process_check_sleeping(void) {
@@ -3216,6 +3235,13 @@ int process_signal_directed(int pid, int sig, int directed) {
     return -EINVAL;
   }
   uint64_t h = target->sig_handler[sig];
+  /* cp P1: a Linux-ABI target's SIG_DFL for SIGCHLD/SIGCONT/SIGURG/SIGWINCH
+     is "ignore" (see ho_linux_sig_dfl_ignored), not the kill below. */
+  if (h == 0 && (target->abi_flags & PROC_FLAG_LINUX_ABI) &&
+      ho_linux_sig_dfl_ignored(sig)) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return 0;
+  }
   if (sig == HO_SIGKILL || h == 0 /* SIG_DFL */) {
     spinlock_release_irqrestore(&proc_lock, flags);
     process_kill_group_sig(target, sig);
@@ -3394,6 +3420,16 @@ int process_signal_directed(int pid, int sig, int directed) {
     }
   }
   spinlock_release_irqrestore(&proc_lock, flags);
+  /* cp P1: linux_compat_signal_interrupt() above may have turned a parked
+     compat thread READY (futex/sleep/suspend park ended by the signal).  Do
+     what the futex wake does (L52): poke one idle CPU so it is picked in
+     microseconds, not at whatever reschedule happens next.  Measured without
+     it (linux_probe tramp_sig T2 + a timing variant): a pthread_kill'd parked
+     thread ran its handler ~150 ms after the kill, on base and cp-cpu alike,
+     which turned T2's SA_RESTART check into a race against the sender's next
+     wake-up.  No-op on a busy machine (no idle CPU to poke). */
+  if (pender->abi_flags & PROC_FLAG_LINUX_ABI)
+    sched_wake_idle_cpu();
   return 0;
 }
 
@@ -4294,6 +4330,8 @@ int process_fork(struct trap_frame *tf) {
      the cross-process record-lock check saw SIGSEGV instead of SQLITE_BUSY.
      exec re-zeroes it (program_loader), which is right: crt0 re-installs. */
   child->tls_base = parent->tls_base;
+  /* cp P1: Linux fork copies the caller's GS base too (copy_thread). */
+  child->gs_base = parent->gs_base;
 
   /* Child inherits the parent's heap top and anonymous mappings (like the
      data segment: fork shares the address-space layout, exec re-sets it). */
@@ -6256,6 +6294,9 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
      trampoline's SYS_SET_TLS installs the thread's own image -- never a
      fault either way. */
   t->tls_base = tls_read_live();
+  /* cp P1: a new thread inherits its creator's user GS base (Linux clone
+     copies thread.gsbase); the creator is the caller of this syscall. */
+  t->gs_base = caller ? caller->gs_base : 0;
 
   *err = 0;
   return t;
@@ -6441,6 +6482,28 @@ int process_set_tls(struct process *caller, uint64_t tls) {
   tls_write_live(tls);
   return 0;
 }
+
+#ifdef __x86_64__
+/* cp P1: arch_prctl(ARCH_SET_GS).  Linux accepts any address below
+ * TASK_SIZE_MAX (it need not be mapped) and answers -EPERM above it; a
+ * non-canonical value would also #GP the WRMSR in ring 0.  One more rule is
+ * ours: the trap-entry GS check (trap.c, trap_gs_fixup) recognises "already
+ * the kernel GS" by GS_BASE lying inside cpu_locals[], so a user value there
+ * would be mistaken for it -- refuse it the same way. */
+int process_set_user_gs(struct process *caller, uint64_t base) {
+  extern const uint64_t cpu_locals_span;
+  uint64_t lo = (uint64_t)(uintptr_t)&cpu_locals[0];
+  if (!caller || caller->is_kernel_process)
+    return -EPERM;
+  if (base >= 0x0000800000000000ull) /* not canonical-low: TASK_SIZE_MAX */
+    return -EPERM;
+  if (base >= lo && base - lo < cpu_locals_span)
+    return -EPERM;
+  caller->gs_base = base;
+  user_gs_write_live(base);
+  return 0;
+}
+#endif
 
 /* SYS_THREAD_EXIT (74) (design sections 1/2): exit only the calling thread.
  * retval is recorded in the PCB for diagnostics (the authoritative value

@@ -125,6 +125,14 @@ void arch_kernel_thread_exit_handler(void) {
  * Transitions into user space (Ring 3) via structured iretq.
  */
 void arch_enter_user_mode(uint64_t entry_point, uint64_t stack_pointer) {
+  /* cp P1: every ring-3 entry swaps GS (trap.c's swapgs discipline); this
+     legacy v1 entry carries no user GS base, so make the value it swaps in
+     0 rather than whatever KERNEL_GS_BASE last held. */
+  __asm__ volatile("cli\n"
+                   "wrmsr"
+                   :
+                   : "a"(0u), "d"(0u), "c"(0xC0000102u)
+                   : "memory");
   __asm__ volatile(
       "cli\n"
       "mov $0x23, %%ax\n"
@@ -151,6 +159,7 @@ void arch_enter_user_mode(uint64_t entry_point, uint64_t stack_pointer) {
       "xor %%r13, %%r13\n"
       "xor %%r14, %%r14\n"
       "xor %%r15, %%r15\n"
+      "swapgs\n"
       "iretq\n"
       :
       : [entry] "r" (entry_point),
