@@ -670,6 +670,23 @@ endif
 ifneq ($(RW_WAKEALL),)
   CFLAGS += -DRW_WAKEALL=1
 endif
+# Diagnostic: print the first 48 futex operations ([FUTEX] ##n rows) and the
+# first 8 idle-CPU kicks ([IPI] rows) on the console.  Off by default: they are
+# emitted from inside the futex/wake syscalls of the program under test, so
+# they interleave with its own console output (docs/cp-thr.md §5).  The
+# futex flight-recorder ring and the hang dump are unaffected.
+#     make FUTEX_TRACE=1 ... disk.img
+ifneq ($(FUTEX_TRACE),)
+  CFLAGS += -DFUTEX_TRACE_CONSOLE=1
+endif
+# Diagnostic: the per-signal rows on the send / park-interrupt / frame-plant /
+# sigreturn path ([SIGIN], [SIG] send, [TGTK], [FWK], [SFP], [SIGD], [RT],
+# [TEXIT], ...).  Off by default: each is a synchronous UART record, and the
+# ~2 KB one signal printed WAS its delivery latency (src/include/sig_trace.h).
+#     make SIG_TRACE=1 ... disk.img
+ifneq ($(SIG_TRACE),)
+  CFLAGS += -DSIG_TRACE_CONSOLE=1
+endif
 
 # Target and objects
 TARGET = hobbyos.elf

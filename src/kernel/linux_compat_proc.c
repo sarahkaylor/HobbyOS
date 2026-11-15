@@ -84,6 +84,7 @@
  *                      (see the handler for exactly how much each one does).
  */
 #include "linux_compat.h"
+#include "sig_trace.h"
 
 #include <stdint.h>
 
@@ -143,6 +144,14 @@ static uint64_t l_sigmask[MAX_PROCESSES];
    SA_SIGINFO to build a correct frame.  Keyed like everything else here. */
 static uint32_t l_sigflags[MAX_PROCESSES][HO_SIG_MAX];
 
+/* C1-thr: sa_mask per (group anchor, signal).  The native PCB never stored
+   it (process_sigaction reports 0 for it), so a handler ran with only the
+   interrupted mask: Wine's SIGUSR1 handler (sa_mask = the server block set)
+   was protected only by the engine's old no-nesting rule, and a handler
+   could not see its own signal blocked.  linux_compat_signal_deliver() ORs
+   it (and the signal itself, unless SA_NODEFER) into the thread's mask. */
+static uint64_t l_samask[MAX_PROCESSES][HO_SIG_MAX];
+
 struct l_altstack_state {
   uint64_t ss_sp;
   uint64_t ss_size;
@@ -175,6 +184,31 @@ int linux_compat_altstack_get(struct process *p, uint64_t *sp, uint64_t *size,
   return 0;
 }
 
+uint64_t linux_compat_samask_get(struct process *p, int sig) {
+  int slot = l_slot(process_group(p));
+  if (slot < 0 || sig <= 0 || sig >= HO_SIG_MAX) return 0;
+  return l_samask[slot][sig];
+}
+
+/* C1-thr: a new THREAD (clone CLONE_THREAD) starts with its creator's signal
+   mask -- Linux copies `blocked` in copy_process, and glibc 2.31's
+   pthread_create relies on it (start_thread sets no mask).  It used to start
+   with whatever the pid slot's previous occupant left: musl's pthread_exit
+   blocks every signal before it exits, so a raw clone landing on that slot
+   began with 0xFFFFFFFC7FFBFEFF and never took a tgkill (linux_probe_thr S5).
+   Its sigaltstack is cleared (CLONE_VM without CLONE_VFORK, as Linux does).
+   Called before the thread is READY. */
+void linux_compat_sig_clone(struct process *creator, struct process *thr);
+void linux_compat_sig_clone(struct process *creator, struct process *thr) {
+  int ps = l_slot(creator), cs = l_slot(thr);
+  if (ps < 0 || cs < 0) return;
+  l_sigmask[cs] = l_sigmask[ps];
+  l_altstack[cs].ss_sp = 0;
+  l_altstack[cs].ss_size = 0;
+  l_altstack[cs].ss_flags = 0;
+  l_altstack[cs].in_use = 0;
+}
+
 int linux_compat_sigflags_get(struct process *p, int sig) {
   /* Dispositions (and therefore their flags) are group state: a handler
      installed by one thread is entered by any thread, with that thread's
@@ -200,6 +234,7 @@ void linux_compat_sig_fork(struct process *parent, struct process *child) {
   if (ps < 0 || cs < 0 || gs < 0) return;
   l_sigmask[cs] = l_sigmask[ps];
   for (int i = 0; i < HO_SIG_MAX; i++) l_sigflags[cs][i] = l_sigflags[gs][i];
+  for (int i = 0; i < HO_SIG_MAX; i++) l_samask[cs][i] = l_samask[gs][i];
   l_altstack[cs] = l_altstack[ps];
 }
 
@@ -559,19 +594,29 @@ static int l_proc_rt_sigaction(struct process *p, struct trap_frame *tf) {
   }
   /* Record the flag word: the native PCB keeps handler/mask/restorer but not
      flags, and the compat frame engine needs SA_ONSTACK/SA_SIGINFO. */
-  if (have_act) {
+  uint64_t old_samask = 0;
+  uint32_t old_flags = 0;
+  {
     int slot = l_slot(process_group(p));
-    if (slot >= 0 && sig > 0 && sig < HO_SIG_MAX)
-      l_sigflags[slot][sig] = (uint32_t)ka.sa_flags;
+    if (slot >= 0 && sig > 0 && sig < HO_SIG_MAX) {
+      old_samask = l_samask[slot][sig];
+      old_flags = l_sigflags[slot][sig];
+      if (have_act) {
+        l_sigflags[slot][sig] = (uint32_t)ka.sa_flags;
+        /* SIGKILL/SIGSTOP can never be blocked (Linux sigdelsetmask). */
+        l_samask[slot][sig] = ka.sa_mask & ~((1ull << (L_SIGKILL - 1)) |
+                                             (1ull << (L_SIGSTOP - 1)));
+      }
+    }
   }
   if (uold) {
     /* Exactly the 32 bytes the ABI defines — see the layout note above. */
     struct l_kernel_sigaction ko;
     l_zero(&ko, sizeof ko);
     ko.sa_handler = ho.sa_handler;
-    ko.sa_flags = (uint64_t)(uint32_t)ho.sa_flags;
+    ko.sa_flags = (uint64_t)old_flags; /* C1-thr: as sa_mask below */
     ko.sa_restorer = ho.sa_restorer;
-    ko.sa_mask = ho.sa_mask[0];
+    ko.sa_mask = old_samask; /* C1-thr: the native mirror never kept it */
     if (l_copy_to_user(p, uold, &ko, sizeof ko) != 0) return l_ret(tf, -EFAULT);
   }
   return l_ret(tf, 0);
@@ -713,7 +758,7 @@ static int l_proc_sigaltstack(struct process *p, struct trap_frame *tf) {
 static void l_sig_row(const char *op, int tgid, int pid, int sig,
                       struct trap_frame *tf, int rc) {
   static int rows;
-  if (rows >= 60)
+  if (rows >= SIGTR(60))
     return;
   rows++;
   struct process *t = process_get_pcb(pid);

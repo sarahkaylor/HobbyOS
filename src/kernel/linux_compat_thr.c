@@ -39,6 +39,7 @@
 #include "arch/trap.h"
 #include "errno.h"
 #include "futex_trace.h"
+#include "sig_trace.h"
 #include "kline.h"
 #include "linux_sigframe.h"
 #include "linux_syscall.h"
@@ -184,7 +185,9 @@ static int l_futex_queued_locked(int i, struct addr_space *as,
 
 static struct futex_ev l_futex_ring[FUTEX_TRACE_RING];
 static unsigned l_futex_ring_at; /* total operations recorded this boot */
+#if FUTEX_TRACE_OPS > 0
 static unsigned l_futex_printed; /* operations printed to the console */
+#endif
 
 static const char *l_futex_opname(int op) {
   switch (op) {
@@ -383,9 +386,11 @@ void futex_trace_note(struct futex_ev *ev) {
   ev->ms = timer_get_ms();
   unsigned at = __atomic_fetch_add(&l_futex_ring_at, 1u, __ATOMIC_RELAXED);
   l_futex_ring[at % FUTEX_TRACE_RING] = *ev;
+#if FUTEX_TRACE_OPS > 0
   unsigned pr = __atomic_fetch_add(&l_futex_printed, 1u, __ATOMIC_RELAXED);
   if (pr < FUTEX_TRACE_OPS)
     l_futex_emit(ev, (int)at, '#');
+#endif
   l76_keyc_note(ev);
   /* Every 2048 ops, and never twice inside 20 s (a burst must not flood the
      console that also carries the loader rows). */
@@ -1797,8 +1802,6 @@ void linux_compat_fork_child(struct process *parent, struct process *child) {
   if (fl & CLONE_CHILD_CLEARTID) child->clear_child_tid = ctid;
 }
 
-#define L_CLONE_FORK_OK                                                        \
-  (0xffULL | CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | CLONE_PARENT_SETTID)
 #define L_SIGCHLD 17
 
 static int l_thr_fork(struct process *p, struct trap_frame *tf, uint64_t flags,
@@ -1825,58 +1828,241 @@ static int l_thr_fork(struct process *p, struct trap_frame *tf, uint64_t flags,
   return 1;
 }
 
-/* ---- fork-free thread creation ----------------------------------------- */
+/* ---- clone(2): Linux's flag rules, then one of four routes --------------
+ *
+ * C1-thr (docs/cp-thr.md §1).  The flag words the target userland passes:
+ *
+ *   glibc 2.31 pthread_create   0x003D0F00  VM|FS|FILES|SIGHAND|THREAD|SYSVSEM|
+ *                                           SETTLS|PARENT_SETTID|CHILD_CLEARTID
+ *                                           (libpthread-2.31.so: mov $0x3d0f00,%edx)
+ *   musl 1.2.5 pthread_create   0x007D0F00  the same + DETACHED
+ *   glibc 2.31 fork()           0x01200011  CHILD_SETTID|CHILD_CLEARTID|SIGCHLD
+ *   glibc 2.31 posix_spawn      0x00004111  VM|VFORK|SIGCHLD, own stack
+ *                                           (libc-2.31.so: mov $0x4111,%edx)
+ *   vfork(2) = syscall 58       == VM|VFORK|SIGCHLD on the caller's stack
+ *
+ * Wine 11.0 creates threads with pthread_create, processes with fork()
+ * (server/request.c, ntdll/unix/process.c) and posix_spawn (ntdll/unix/
+ * loader.c build_path_and_exec, which relies on posix_spawn's ENOENT to try
+ * the next wineserver path -- so posix_spawn must report the child's exec
+ * failure, which glibc does through memory the child SHARES).
+ *
+ * Linux's refusals come first, in copy_process()'s order, so the errno is
+ * Linux's; then the shapes this kernel cannot express get EINVAL with an
+ * [LCOMPAT] row (docs/cp-thr.md lists them; Linux would accept them). */
+#define L_CLONE_CSIGNAL 0xffULL
+#define L_CLONE_PIDFD 0x00001000ULL
+#define L_CLONE_PTRACE 0x00002000ULL
+#define L_CLONE_VFORK 0x00004000ULL
+#define L_CLONE_PARENT 0x00008000ULL
+#define L_CLONE_NEWNS 0x00020000ULL
+#define L_CLONE_UNTRACED 0x00800000ULL
+#define L_CLONE_NEWCGROUP 0x02000000ULL
+#define L_CLONE_NEWUTS 0x04000000ULL
+#define L_CLONE_NEWIPC 0x08000000ULL
+#define L_CLONE_NEWUSER 0x10000000ULL
+#define L_CLONE_NEWPID 0x20000000ULL
+#define L_CLONE_NEWNET 0x40000000ULL
+#define L_CLONE_IO 0x80000000ULL
+#define L_CLONE_NS_ANY                                                         \
+  (L_CLONE_NEWNS | L_CLONE_NEWCGROUP | L_CLONE_NEWUTS | L_CLONE_NEWIPC |       \
+   L_CLONE_NEWUSER | L_CLONE_NEWPID | L_CLONE_NEWNET)
+#define L_TASK_SIZE_MAX 0x00007FFFFFFFF000ULL
+
+/* Linux's own EINVAL/EPERM rules (kernel/fork.c copy_process + kernel_clone,
+   arch/x86 copy_thread's CLONE_SETTLS).  0 = Linux would go on. */
+static int l_clone_linux_check(uint64_t flags, uint64_t tls) {
+  if ((flags & (L_CLONE_NEWNS | CLONE_FS)) == (L_CLONE_NEWNS | CLONE_FS))
+    return -EINVAL;
+  if ((flags & (L_CLONE_NEWUSER | CLONE_FS)) == (L_CLONE_NEWUSER | CLONE_FS))
+    return -EINVAL;
+  if ((flags & CLONE_THREAD) && !(flags & CLONE_SIGHAND))
+    return -EINVAL;
+  if ((flags & CLONE_SIGHAND) && !(flags & CLONE_VM))
+    return -EINVAL;
+  if ((flags & CLONE_THREAD) && (flags & (L_CLONE_NEWUSER | L_CLONE_NEWPID)))
+    return -EINVAL;
+  /* legacy clone stores the pidfd through parent_tid */
+  if ((flags & L_CLONE_PIDFD) &&
+      (flags & (CLONE_PARENT_SETTID | CLONE_DETACHED)))
+    return -EINVAL;
+  if ((flags & CLONE_SETTLS) && tls >= L_TASK_SIZE_MAX)
+    return -EPERM;
+  return 0;
+}
+
+static void l_clone_refuse_row(uint64_t flags, const char *why) {
+  static int rows;
+  if (rows >= 8)
+    return;
+  rows++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[LCOMPAT] clone refused flags=");
+  kl_hex(&kl, (unsigned long)flags);
+  kl_s(&kl, " (");
+  kl_s(&kl, why);
+  kl_s(&kl, ")\n");
+  kl_emit(&kl);
+}
+
+/* The parent half of CLONE_VFORK: park the CALLING thread until the child
+ * execs or exits (process_vfork_release).  The park is a REWOUND syscall: the
+ * thread re-executes its `syscall` with rax = this private number, so a
+ * spurious wake (process_wake_all, a signal ending the park) simply parks it
+ * again -- it can never return to user code while the child still runs in
+ * its memory.  Linux likewise holds handlers off until the vfork completes.
+ * Once released, the re-executed syscall answers the child's pid, the value
+ * clone/vfork return in the parent.  A user program calling the number
+ * itself gets -ENOSYS (vfork_ret is 0 outside a vfork). */
+#define L_SYS_HOS_VFORK_WAIT 0x7F00
+
+static int l_thr_vfork_wait(struct process *p, struct trap_frame *tf) {
+  uint64_t f = spinlock_acquire_irqsave(&proc_lock);
+  if (p->vfork_ret <= 0) {
+    spinlock_release_irqrestore(&proc_lock, f);
+    tf->regs[0] = (uint64_t)(int64_t)-ENOSYS;
+    return 1;
+  }
+  if (p->vfork_child == 0) {
+    int r = p->vfork_ret;
+    p->vfork_ret = 0;
+    spinlock_release_irqrestore(&proc_lock, f);
+    tf->regs[0] = (uint64_t)r;
+    return 1;
+  }
+  tf->regs[0] = L_SYS_HOS_VFORK_WAIT;
+  if ((tf->cs & 3) == 3)
+    tf->elr -= 2; /* back onto the 2-byte `syscall` */
+  p->sig_park_kind = 2; /* rewound: a signal wake re-executes, never EINTR */
+  p->sig_park_nr = 0;
+  p->wake_ms = 0;
+  p->park_since_ms = timer_get_ms();
+  p->state = PROC_STATE_BLOCKED;
+  spinlock_release_irqrestore(&proc_lock, f);
+  save_context(p, tf);
+  schedule(tf, 0);
+  return 1;
+}
+
+extern int process_fork_vfork_copy(struct trap_frame *tf);
+
+static int l_thr_vfork(struct process *p, struct trap_frame *tf, uint64_t flags,
+                       uint64_t stack, uint64_t ptid, uint64_t ctid) {
+  int slot = (p && p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : -1;
+  if (slot >= 0) {
+    l_fork_args[slot].flags = flags;
+    l_fork_args[slot].ctid = ctid;
+  }
+  uint64_t saved_sp = tf->lr; /* x64: the frame-carried user %rsp */
+  if (stack) tf->lr = stack;  /* 0 = vfork(2): the child shares this stack */
+  int pid = (flags & CLONE_VM) ? process_fork_vm(tf) : process_fork_vfork_copy(tf);
+  tf->lr = saved_sp;
+  if (slot >= 0) l_fork_args[slot].flags = 0;
+  if (pid < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EAGAIN;
+    return 1;
+  }
+  if ((flags & CLONE_PARENT_SETTID) && ptid) {
+    uint32_t v = (uint32_t)pid;
+    (void)l_copy_to_user(p, ptid, &v, 4);
+  }
+  return l_thr_vfork_wait(p, tf);
+}
+
+/* vfork(58) is clone(CLONE_VM|CLONE_VFORK|SIGCHLD, 0): glibc's vfork() pops
+   its return address before the syscall exactly because the child runs on
+   this same stack while the parent waits. */
+static int l_thr_vfork58(struct process *p, struct trap_frame *tf) {
+  return l_thr_vfork(p, tf, CLONE_VM | L_CLONE_VFORK | L_SIGCHLD, 0, 0, 0);
+}
 
 static int l_thr_clone(struct process *p, struct trap_frame *tf) {
-  uint64_t flags = l_arg(tf, 0);
+  /* Linux's legacy clone reads the low 32 bits only (lower_32_bits()). */
+  uint64_t flags = l_arg(tf, 0) & 0xffffffffULL;
   uint64_t stack = l_arg(tf, 1);
   uint64_t ptid = l_arg(tf, 2);
   uint64_t ctid = l_arg(tf, 3);
   uint64_t tls = l_arg(tf, 4); /* r8 -- Linux's 5th clone argument */
 
-  /* process_clone() owns the accepted mask (CLONE_VM|FS|FILES|SIGHAND|
-     THREAD|SYSVSEM|SETTLS|PARENT_SETTID|CHILD_SETTID|CHILD_CLEARTID|
-     DETACHED) and refuses namespaces, a new AS and a new fd table.  Do the
-     cheap shape check here so the refusal is attributable in the log. */
-  /* cp/sys: a fork-shaped clone (glibc fork()) is a fork. */
-  if ((flags & (CLONE_VM | CLONE_THREAD)) == 0 &&
-      (flags & ~L_CLONE_FORK_OK) == 0 && (flags & 0xff) == L_SIGCHLD)
-    return l_thr_fork(p, tf, flags, stack, ptid, ctid);
-  if ((flags & (CLONE_VM | CLONE_THREAD)) != (CLONE_VM | CLONE_THREAD)) {
-    static int fork_reports;
-    if (fork_reports < 4) {
-      fork_reports++;
-      struct kline kl;
-      kl_init(&kl);
-      kl_s(&kl, "[LCOMPAT] clone refused flags=0x");
-      kl_hex(&kl, (unsigned long)flags);
-      kl_s(&kl, " (no CLONE_VM|CLONE_THREAD: no fork/COW in this kernel)\n");
-      kl_emit(&kl);
-    }
-    tf->regs[0] = (uint64_t)(int64_t)-ENOSYS;
+  int lr = l_clone_linux_check(flags, tls);
+  if (lr) {
+    tf->regs[0] = (uint64_t)(int64_t)lr;
     return 1;
   }
-  long r = (long)process_clone(p, tf, flags, stack, ptid, ctid, tls);
-  {
-    static int clone_reports;
-    if (clone_reports < 5) {
-      clone_reports++;
-      struct kline kl;
-      kl_init(&kl);
-      kl_s(&kl, "[LCOMPAT] clone flags=");
-      kl_hex(&kl, (unsigned long)flags);
-      kl_s(&kl, " stack=");
-      kl_hex(&kl, stack);
-      kl_s(&kl, " tls=");
-      kl_hex(&kl, tls);
-      kl_s(&kl, " -> ");
-      kl_i(&kl, r);
-      kl_s(&kl, "\n");
-      kl_emit(&kl);
-    }
+  /* Accepted as no-ops: ptrace bookkeeping and the io context have no
+     meaning here; SYSVSEM's semundo list does not exist (no SysV sems). */
+  uint64_t f = flags & ~(L_CLONE_PTRACE | L_CLONE_UNTRACED | L_CLONE_IO);
+  if (f & (L_CLONE_NS_ANY | L_CLONE_PIDFD | L_CLONE_PARENT)) {
+    l_clone_refuse_row(flags, "namespaces/pidfd/CLONE_PARENT not supported");
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return 1;
   }
-  tf->regs[0] = (uint64_t)(int64_t)r;
-  return 1;
+
+  if (f & CLONE_THREAD) {
+    /* A thread shares the group's cwd and fd table (both are group state
+       here), so a thread asking for its own copies cannot be expressed. */
+    if ((f & (CLONE_FS | CLONE_FILES)) != (CLONE_FS | CLONE_FILES)) {
+      l_clone_refuse_row(flags, "thread without CLONE_FS|CLONE_FILES");
+      tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+      return 1;
+    }
+    long r = (long)process_clone(p, tf, f, stack, ptid, ctid, tls);
+    {
+      static int clone_reports;
+      if (clone_reports < SIGTR(5)) {
+        clone_reports++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[LCOMPAT] clone flags=");
+        kl_hex(&kl, (unsigned long)flags);
+        kl_s(&kl, " stack=");
+        kl_hex(&kl, stack);
+        kl_s(&kl, " tls=");
+        kl_hex(&kl, tls);
+        kl_s(&kl, " -> ");
+        kl_i(&kl, r);
+        kl_s(&kl, "\n");
+        kl_emit(&kl);
+      }
+    }
+    tf->regs[0] = (uint64_t)(int64_t)r;
+    return 1;
+  }
+  if (f & CLONE_SIGHAND) {
+    /* VM|SIGHAND without THREAD (LinuxThreads): handlers live on the group
+       anchor, so two processes cannot share one table. */
+    l_clone_refuse_row(flags, "CLONE_SIGHAND without CLONE_THREAD");
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return 1;
+  }
+  uint64_t procbits = CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID |
+                      CLONE_PARENT_SETTID | CLONE_DETACHED | CLONE_SYSVSEM;
+  if ((f & L_CLONE_CSIGNAL) != L_SIGCHLD ||
+      (f & ~(L_CLONE_CSIGNAL | procbits | CLONE_VM | L_CLONE_VFORK | CLONE_FS |
+             CLONE_FILES | CLONE_SETTLS))) {
+    l_clone_refuse_row(flags, "process clone needs exit signal SIGCHLD");
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return 1;
+  }
+  if (f & (CLONE_FS | CLONE_FILES | CLONE_SETTLS)) {
+    /* A separate process sharing cwd/fd table, or a new TLS for a process
+       copy: neither is something glibc/Wine asks for. */
+    l_clone_refuse_row(flags, "process clone with FS/FILES/SETTLS");
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return 1;
+  }
+  if (f & L_CLONE_VFORK)
+    return l_thr_vfork(p, tf, f, stack, ptid, ctid);
+  if (f & CLONE_VM) {
+    /* CLONE_VM without VFORK: a process running concurrently in our memory.
+       Only the vfork form (caller suspended) can borrow an AS safely. */
+    l_clone_refuse_row(flags, "CLONE_VM process without CLONE_VFORK");
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return 1;
+  }
+  /* cp/sys: a fork-shaped clone (glibc fork()) is a fork. */
+  return l_thr_fork(p, tf, f, stack, ptid, ctid);
 }
 
 /* exit(60) is THREAD exit, not process exit: glibc's start_thread ends with
@@ -1885,6 +2071,19 @@ static int l_thr_clone(struct process *p, struct trap_frame *tf) {
    keeps the group meaning and stays on the legacy path.) */
 static int l_thr_exit(struct process *p, struct trap_frame *tf) {
   process_thread_exit(tf, l_arg(tf, 0));
+  return 1; /* not reached */
+}
+
+/* exit_group(231): the WHOLE group, from any thread.  C1-thr: it used to
+   fall through to the native SYS_EXIT, whose GB-021 carve-out treats exit
+   from a Linux-ABI *thread* as a thread exit (for musl's exit(60)) -- so a
+   worker's exit_group(42) ended only the worker and the group lived on
+   (linux_probe_thr G1: the leader stayed parked; the parent's waitpid
+   timed out).  exit(60) keeps its thread meaning via l_thr_exit above. */
+static int l_thr_exit_group(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  tf->regs[0] = (uint64_t)(int64_t)(int)l_arg(tf, 0);
+  process_exit(tf);
   return 1; /* not reached */
 }
 
@@ -2367,13 +2566,68 @@ static int l_thr_get_robust_list(struct process *p, struct trap_frame *tf) {
    holding a robust mutex parks its joiners forever (the hang looks like a
    pthread_join bug, not a kernel bug).  Called from process_thread_exit()
    BEFORE the address space is torn down. */
+/* Linux handle_futex_death() (kernel/futex/core.c) for one robust word of a
+   dying thread `p`:
+     - pending, non-PI, word 0: the thread died between unlock and dequeue,
+       so a waiter may be parked with nobody to wake it -> wake one;
+     - a word whose TID is not the dying thread's is left alone;
+     - else the word becomes (old & WAITERS) | OWNER_DIED -- the TID goes,
+       which is what makes the next locker see EOWNERDEAD -- by CAS against
+       a waiter concurrently setting WAITERS, then ONE waiter is woken (a PI
+       word is handed to its first waiter instead).
+   Runs on the dying thread's own CPU, so its CR3 is the AS the word is in. */
+static void l_robust_death(struct process *p, uint64_t word_va, int pi,
+                           int pending) {
+  if (word_va & 3)
+    return;
+  if (vm_touch(p, word_va, 4, 1) != 0)
+    return;
+  for (int tries = 0; tries < 16; tries++) {
+    uint32_t w = *(volatile uint32_t *)(uintptr_t)word_va;
+    if (pending && !pi && w == 0) {
+      uint64_t f = spinlock_acquire_irqsave(&proc_lock);
+      struct futex_ev ev = {0};
+      ev.op = FTR_WAKE;
+      ev.pid = p->pid;
+      ev.rip = p->context[31];
+      l_futex_wake_locked(p->as, word_va, 1, L_FUTEX_BITSET_MATCH_ANY, &ev);
+      spinlock_release_irqrestore(&proc_lock, f);
+      futex_trace_note(&ev);
+      return;
+    }
+    if ((w & L_FUTEX_TID_MASK) != (uint32_t)p->pid)
+      return;
+    uint32_t nw = (w & L_FUTEX_WAITERS) | L_FUTEX_OWNER_DIED;
+    if (l_pi_cas(word_va, w, nw) != w)
+      continue; /* a waiter set WAITERS meanwhile: recompute */
+    if (!(nw & L_FUTEX_WAITERS))
+      return;
+    uint64_t f = spinlock_acquire_irqsave(&proc_lock);
+    /* A PI waiter must be given the word, not merely woken: see the PI
+       note above.  l_pi_handoff_locked() preserves OWNER_DIED in the new
+       owner's word so glibc returns EOWNERDEAD to it. */
+    int ho = pi ? l_pi_handoff_locked(p->as, word_va, nw, 1) : -1;
+    struct futex_ev ev = {0};
+    if (ho < 0) {
+      ev.op = FTR_WAKE;
+      ev.pid = p->pid; /* the dying owner is the waker here */
+      ev.rip = p->context[31];
+      l_futex_wake_locked(p->as, word_va, 1, L_FUTEX_BITSET_MATCH_ANY, &ev);
+    }
+    spinlock_release_irqrestore(&proc_lock, f);
+    if (ho < 0)
+      futex_trace_note(&ev);
+    return;
+  }
+}
+
 void linux_compat_thread_exit(struct process *p) {
   {
     /* A thread that exits while holding a NON-robust mutex leaves it locked
        forever and Linux cannot clean it up either -- so "did any thread exit
        before the hang" is a fact worth recording, not an inference. */
     static int exit_reports;
-    if (exit_reports < 40) {
+    if (exit_reports < SIGTR(40)) {
       exit_reports++;
       struct kline kl;
       kl_init(&kl);
@@ -2431,7 +2685,7 @@ void linux_compat_thread_exit(struct process *p) {
        "the kernel never marked the mutex" and "glibc never enqueued it" look
        identical from the serial. */
     static int rr;
-    if (rr < 32) {
+    if (rr < SIGTR(32)) {
       rr++;
       struct kline kl;
       kl_init(&kl);
@@ -2470,40 +2724,24 @@ void linux_compat_thread_exit(struct process *p) {
     uint64_t entry = list & ~(uint64_t)1;
     if (!entry || entry == head)
       break;
-    uint64_t word_va = entry + (uint64_t)off;
-    uint32_t w = 0;
-    if (l_copy_from_user(p, &w, word_va, 4) != 0)
-      break;
-    if (w != 0 && (w & L_FUTEX_OWNER_DIED) == 0) {
-      uint32_t nw = (w & L_FUTEX_TID_MASK) | L_FUTEX_OWNER_DIED;
-      if (w & L_FUTEX_WAITERS)
-        nw |= L_FUTEX_WAITERS;
-      if (l_copy_to_user(p, word_va, &nw, 4) == 0 && (nw & L_FUTEX_WAITERS)) {
-        uint64_t f = spinlock_acquire_irqsave(&proc_lock);
-        /* A PI waiter must be given the word, not merely woken: see the PI
-           note above.  l_pi_handoff_locked() preserves OWNER_DIED in the new
-           owner's word so glibc returns EOWNERDEAD to it. */
-        int ho = l_pi_handoff_locked(p->as, word_va, nw, 1);
-        if (ho < 0) {
-          struct futex_ev ev = {0};
-          ev.op = FTR_WAKE;
-          ev.pid = p->pid; /* the dying owner is the waker here */
-          ev.rip = p->context[31];
-          l_futex_wake_locked(p->as, word_va, 0x7fffffff,
-                              L_FUTEX_BITSET_MATCH_ANY, &ev);
-          futex_trace_note(&ev);
-        }
-        spinlock_release_irqrestore(&proc_lock, f);
-      }
-    }
+    /* Read the link BEFORE the word is released: once a waiter owns the
+       mutex it may unlink and reuse the node (Linux's order too). */
     uint64_t next = 0;
-    if (l_copy_from_user(p, &next, entry, 8) != 0)
+    int have_next = l_copy_from_user(p, &next, entry, 8) == 0;
+    if (entry != (pending & ~(uint64_t)1))
+      l_robust_death(p, entry + (uint64_t)off, (int)(list & 1), 0);
+    if (!have_next)
       break;
     if ((next & ~(uint64_t)1) == entry)
       break; /* self node: an empty list (defensive) */
     list = next;
   }
-  (void)pending; /* list_op_pending: the node above was already visited */
+  /* list_op_pending: the entry the thread was locking or unlocking when it
+     died (glibc sets it around both).  Linux handles it last, with the
+     extra "unlocked already, wake one" rule for non-PI. */
+  if (pending & ~(uint64_t)1)
+    l_robust_death(p, (pending & ~(uint64_t)1) + (uint64_t)off,
+                   (int)(pending & 1), 1);
 }
 
 /* ---- arch_prctl / sched_getcpu ----------------------------------------- */
@@ -2786,7 +3024,7 @@ static void l_sf_record(struct process *p, struct trap_frame *tf,
   l_sf_ring[l_sf_ring_n % L_SF_RING] = d;
   l_sf_ring_n++;
   l_sf_last[p->pid] = d;
-  if (l_sf_rows < 48) {
+  if (l_sf_rows < SIGTR(48)) {
     l_sf_rows++;
     struct kline kl;
     kl_init(&kl);
@@ -2829,7 +3067,7 @@ static void l_sf_check_restore(struct process *cur, uint64_t frame_rsp,
   if (d->pid != (uint32_t)cur->pid || d->gen == 0)
     return;
   long delta = (long)(frame_rsp - d->sp);
-  if (l_sf_rrows < 64) {
+  if (l_sf_rrows < SIGTR(64)) {
     l_sf_rrows++;
     struct kline kl;
     kl_init(&kl);
@@ -3175,7 +3413,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
     if (rz == 0)
       rz_bad++;
     rz_rows++;
-    if (rz == 0 || rz_rows <= 24) {
+    if (rz == 0 || rz_rows <= SIGTR(24)) {
       struct kline kl;
       kl_init(&kl);
       kl_s(&kl, "[SIGRZ] pid=");
@@ -3243,7 +3481,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
       sfa_rows++;
       if (fp16 != 0 || frc != 0)
         sfa_bad++;
-      if (sfa_rows <= 24 || fp16 != 0 || frc != 0) {
+      if (sfa_rows <= SIGTR(24) || fp16 != 0 || frc != 0) {
         struct kline kl;
         kl_init(&kl);
         kl_s(&kl, "[FPUA] pid=");
@@ -3310,7 +3548,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
      OUR frame is the writer of a clobbered red-zone local. */
   {
     static int sp_rows;
-    if (sp_rows < 32) {
+    if (sp_rows < SIGTR(32)) {
       sp_rows++;
       struct kline kl;
       kl_init(&kl);
@@ -3390,14 +3628,30 @@ static void l_sig_drop(struct process *cur, struct process *grp, int sig) {
    engine when the group is a Linux-ABI process.  `grp` is the group anchor;
    the frame belongs to the CURRENT thread (that is what makes a fault signal
    run on the thread that faulted). */
+/* C1-thr: Linux's signal_setup_done(): once the frame (which saved the
+   interrupted mask in uc_sigmask) is planted, the handler runs with
+   mask | sa_mask | the signal itself (unless SA_NODEFER).  rt_sigreturn puts
+   uc_sigmask back. */
+#define L_SA_NODEFER 0x40000000
+extern uint64_t linux_compat_samask_get(struct process *p, int sig);
+static void l_sig_enter_mask(struct process *cur, int sig) {
+  uint64_t m = linux_compat_sigmask_get(cur) |
+               linux_compat_samask_get(process_group(cur), sig);
+  if (!(linux_compat_sigflags_get(process_group(cur), sig) & L_SA_NODEFER))
+    m |= 1ull << (sig - 1);
+  linux_compat_sigmask_set(cur, m);
+}
+
 int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
   struct process *cur = current_process();
   if (!cur || !grp || cur->is_kernel_process || !tf)
     return 0;
   if ((tf->cs & 3) != 3)
     return 0;
-  if (cur->sig_in_handler)
-    return 0; /* no nesting; a further signal stays pending */
+  /* C1-thr: handlers NEST, as on Linux.  The old "no nesting" rule held
+     every signal off while any handler ran; the thread's mask (the
+     interrupted mask | sa_mask | the signal itself, applied below) is what
+     decides now, and sig_in_handler is a depth. */
   int slot = l_thr_slot_of(cur, 1);
   (void)slot;
 
@@ -3423,7 +3677,7 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
        Without a row, "the suspend handler never ran" and "the signal was
        masked" look identical in a log. */
     static int b_rows;
-    if (b_rows < 16) {
+    if (b_rows < SIGTR(16)) {
       b_rows++;
       struct kline kl;
       kl_init(&kl);
@@ -3503,7 +3757,7 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return 0;
   }
-  cur->sig_in_handler = 1;
+  cur->sig_in_handler++;
   cur->sig_frame = 0;
   cur->sig_frame_sig = sig;
   l_sig_drop(cur, grp, sig);
@@ -3537,18 +3791,19 @@ int linux_compat_signal_deliver(struct process *grp, struct trap_frame *tf) {
 
   uint64_t interrupted_pc = tf->elr;
   if (!l_sf_plant(cur, cur, grp, tf, sig, code, fault_addr)) {
-    cur->sig_in_handler = 0;
+    if (cur->sig_in_handler > 0) cur->sig_in_handler--;
     uart_puts("[LCOMPAT] signal: no usable frame/restorer -> default action\n");
     process_kill_group_sig(grp, sig);
     return 0;
   }
+  l_sig_enter_mask(cur, sig);
   /* M6/L32: the positive half of "a suspend happened" — a handler frame was
      planted on THIS thread for THIS signal, at this interrupted PC.  The
      absence of an abort is not evidence; this row (followed by the handler's
      own effect, e.g. a GC ack and a new Player.log row) is. */
   {
     static int sd_rows;
-    if (sd_rows < 48) {
+    if (sd_rows < SIGTR(48)) {
       sd_rows++;
       struct kline kl;
       kl_init(&kl);
@@ -3630,7 +3885,7 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
      say which thread resumed where. */
   {
     static int rt_rows;
-    if (rt_rows < 48) {
+    if (rt_rows < SIGTR(48)) {
       rt_rows++;
       struct kline kl;
       kl_init(&kl);
@@ -3709,7 +3964,7 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
       }
     }
   }
-  cur->sig_in_handler = 0;
+  if (cur->sig_in_handler > 0) cur->sig_in_handler--;
   cur->sig_frame = 0;
   /* M6/L45: pair the plant with its return, per pid.  A SIGPWR/SIGXCPU plant
      with no [SIGY] is a handler that never returned -- the suspended thread
@@ -3804,9 +4059,11 @@ int linux_compat_fault(struct process *p, struct trap_frame *tf, int signo) {
   }
   if ((tf->cs & 3) != 3)
     return 0;
-  if (p->sig_in_handler) {
-    /* A fault inside a signal handler cannot be dumped into a second frame on
-       the same stack; the default action is right, but it is not silent. */
+  if (p->sig_in_handler &&
+      (linux_compat_sigmask_get(p) & (1ull << (signo - 1)))) {
+    /* C1-thr: Linux force_sig_fault(): a fault whose signal the thread has
+       BLOCKED (inside its own handler, no SA_NODEFER) takes the default
+       action.  An unblocked one nests a frame like any other signal. */
     static uint8_t ihr[MAX_PROCESSES];
     int hi = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
     if (hi && ihr[hi] < 4) {
@@ -3838,9 +4095,9 @@ int linux_compat_fault(struct process *p, struct trap_frame *tf, int signo) {
     code = L_FPE_INTDIV;
   else if (signo == HO_SIGBUS)
     code = L_BUS_ADRALN;
-  p->sig_in_handler = 1;
+  p->sig_in_handler++;
   if (!l_sf_plant(p, p, grp, tf, signo, code, fault_addr)) {
-    p->sig_in_handler = 0;
+    if (p->sig_in_handler > 0) p->sig_in_handler--;
     /* l_sf_plant has already printed [SIGPL] FAIL with the reason; this row is
        the consequence: the process is about to die with the fault's signal and
        no handler ever ran. */
@@ -3865,6 +4122,7 @@ int linux_compat_fault(struct process *p, struct trap_frame *tf, int signo) {
     }
     return 0;
   }
+  l_sig_enter_mask(p, signo);
   return 1;
 }
 
@@ -3899,6 +4157,16 @@ int linux_compat_sig_deliverable(struct process *p) {
   return 0;
 }
 
+/* C1-thr: would member `m` take process-directed `sig` (not blocked in its
+   own mask)?  process_signal_directed() uses it to pick the thread Linux's
+   complete_signal() would wake. */
+int linux_compat_sig_member_wants(struct process *m, int sig);
+int linux_compat_sig_member_wants(struct process *m, int sig) {
+  if (!m || sig < 1 || sig >= HO_SIG_MAX)
+    return 0;
+  return (linux_compat_sigmask_get(m) & (1ull << (sig - 1))) == 0;
+}
+
 /* [FWK] why a parked compat wait ended.  The futex ring already records
    WAKE/TIMEOUT rows (key match / deadline); this row is the third reason and
    names the syscall family, so a log can never show "parked and then
@@ -3906,7 +4174,7 @@ int linux_compat_sig_deliverable(struct process *p) {
 static void l_sig_wake_row(struct process *t, int sig, const char *why,
                            uint64_t key) {
   static int rows;
-  if (rows >= 24)
+  if (rows >= SIGTR(24))
     return;
   rows++;
   struct kline kl;
@@ -3952,7 +4220,7 @@ static int l_sig_restart_park(struct process *t, int sig) {
      stack than the one it was interrupted on. */
   {
     static int rs_rows;
-    if (rs_rows < 16) {
+    if (rs_rows < SIGTR(16)) {
       rs_rows++;
       struct kline kl;
       kl_init(&kl);
@@ -3975,6 +4243,34 @@ static int l_sig_restart_park(struct process *t, int sig) {
     }
   }
   return 1;
+}
+
+/* C1-thr: was this BLOCKED park rewound onto its `syscall`?  Every compat
+   syscall records its return PC at entry (linux_compat_dispatch ->
+   sys_entry_pc); a park that rewound the frame (l_park, the native -2
+   restart) left the saved PC exactly two bytes before it. */
+static int l_park_is_rewound(struct process *t) {
+  if (t->sig_park_kind == 2)
+    return 1;
+  return t->sys_entry_pc >= 2 && t->context[31] + 2 == t->sys_entry_pc;
+}
+
+/* Linux's -ERESTARTNOHAND / -ERESTART_RESTARTBLOCK calls: EINTR even under
+   SA_RESTART.  Everything else that parks rewound is -ERESTARTSYS. */
+static int l_rewound_restartable(struct process *t) {
+  switch ((int)t->context[0]) {
+  case 7:   /* poll */
+  case 23:  /* select */
+  case 34:  /* pause */
+  case 232: /* epoll_wait */
+  case 270: /* pselect6 */
+  case 271: /* ppoll */
+  case 281: /* epoll_pwait */
+  case 441: /* epoll_pwait2 */
+    return 0;
+  default:
+    return 1;
+  }
 }
 
 /* process_signal() hook: a signal aimed at a compat thread must end any
@@ -4007,7 +4303,10 @@ void linux_compat_signal_interrupt(struct process *t) {
     if (slot >= 0 && l_thr[slot].pi)
       return;
     t->context[0] = (uint64_t)(int64_t)-EINTR;
-    int restarting = l_sig_restart_park(t, sig);
+    /* Linux: an untimed FUTEX_WAIT answers -ERESTARTSYS (restarted under
+       SA_RESTART); a timed one -ERESTART_RESTARTBLOCK, which a handler
+       always turns into -EINTR. */
+    int restarting = t->wake_ms == 0 && l_sig_restart_park(t, sig);
     {
       struct futex_ev ev = {0};
       ev.op = FTR_SIGNAL;
@@ -4060,19 +4359,43 @@ void linux_compat_signal_interrupt(struct process *t) {
         }
       }
     } else if (t->sig_park_kind == 1) {
-      /* nanosleep / clock_nanosleep: the syscall is not rewound. */
-      if (!l_sig_restart_park(t, sig)) {
-        t->context[0] = (uint64_t)(int64_t)-EINTR;
-        t->sig_park_kind = 0;
-        l_sig_wake_row(t, sig, "sleep", 0);
+      /* nanosleep / clock_nanosleep: the syscall is not rewound.  C1-thr:
+         Linux never restarts them when a handler runs, SA_RESTART or not
+         (-ERESTART_RESTARTBLOCK -> -EINTR in handle_signal), and the
+         reference kernel answers EINTR (linux_probe_thr L-nanosleep). */
+      t->context[0] = (uint64_t)(int64_t)-EINTR;
+      t->sig_park_kind = 0;
+      t->sig_park_nr = 0;
+      l_sig_wake_row(t, sig, "sleep", 0);
+    } else if ((int)t->context[0] == L_SYS_HOS_VFORK_WAIT &&
+               t->vfork_child) {
+      /* The vfork parent: its memory is the child's until exec/exit, so no
+         handler may run in it yet (Linux holds the signal the same way). */
+      return;
+    } else if (l_park_is_rewound(t)) {
+      /* A rewound park (l_park, the native -2 restart of read/write/
+         recv/accept/connect/poll/select): rax is still the syscall number
+         and the PC is the `syscall`.  C1-thr: under SA_RESTART Linux runs
+         the handler and then RE-EXECUTES read/write/... (-ERESTARTSYS);
+         poll/select/epoll_wait are -ERESTARTNOHAND, i.e. -EINTR whatever
+         the flags.  Restart = plant the frame at resume with the `syscall`
+         as the interrupted PC (kind 3, no further rewind); otherwise the
+         re-executed syscall's own entry check answers -EINTR. */
+      if (l_rewound_restartable(t) &&
+          (linux_compat_sigflags_get(process_group(t), sig) & L_SA_RESTART)) {
+        t->sig_park_kind = 3;
+        l_sig_wake_row(t, sig, "restart-sa-restart", 0);
       } else {
-        l_sig_wake_row(t, sig, "sleep-sa-restart", 0);
+        l_sig_wake_row(t, sig, "restart", 0);
       }
       t->sig_park_nr = 0;
     } else {
-      /* A rewound park: leave the saved frame alone (rax must stay the
-         syscall number) and let the re-executed syscall answer -EINTR. */
-      l_sig_wake_row(t, sig, "restart", 0);
+      /* C1-thr: a park that is neither signal-aware nor rewound (a native
+         blocking call whose result is written into the saved frame, e.g.
+         wait4's reap delivery).  Waking it would return whatever rax holds;
+         the signal stays pending and runs when the park ends. */
+      l_sig_wake_row(t, sig, "unaware-park-left", 0);
+      return;
     }
     t->wake_ms = 0;
     t->state = PROC_STATE_READY;
@@ -4196,8 +4519,11 @@ int linux_compat_lost_wake_scan(void) {
 
 const struct l_sysent l_tab_thr[] = {
     {L_SYS_clone, l_thr_clone, "clone"},
+    {L_SYS_vfork, l_thr_vfork58, "vfork"},
+    {L_SYS_HOS_VFORK_WAIT, l_thr_vfork_wait, "hos_vfork_wait"},
     {L_SYS_futex, l_thr_futex, "futex"},
     {L_SYS_exit, l_thr_exit, "exit"},
+    {L_SYS_exit_group, l_thr_exit_group, "exit_group"},
     {L_SYS_arch_prctl, l_thr_arch_prctl, "arch_prctl"},
     {L_SYS_set_robust_list, l_thr_set_robust_list, "set_robust_list"},
     {L_SYS_get_robust_list, l_thr_get_robust_list, "get_robust_list"},

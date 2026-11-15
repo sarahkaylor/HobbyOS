@@ -338,6 +338,18 @@ static void l_skw_check(struct process *p, struct trap_frame *tf) {
 int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr) {
   if (p && nr != L_SYS_rt_sigreturn)
     l_skw_check(p, tf);
+  if (p) {
+    /* C1-thr: a park's signal bookkeeping belongs to ONE syscall.  It used
+       to outlive it: a nanosleep that ended by timeout left sig_park_kind=1
+       and sig_park_nr=35, a later read(2) parked through the native -2
+       restart, and the next SA_RESTART signal "restarted" that read as a
+       nanosleep -- rewinding the already-rewound PC two more bytes into the
+       middle of an instruction (measured: linux_probe_thr L-read, SIGSEGV at
+       a PC on the thread's stack).  Each park sets its own kind. */
+    p->sig_park_kind = 0;
+    p->sig_park_nr = 0;
+    p->sys_entry_pc = tf->elr;
+  }
 #ifdef RW_SC_RING
   /* L85: open a history slot BEFORE the handler runs, so a fault inside the
      handler (or in its copy_to_user/copy_from_user) still names the call and
