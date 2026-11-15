@@ -1268,7 +1268,7 @@ void file_lock_key(const struct file *f, struct vfs_lock_key *key) {
   case FILE_TYPE_TMPFSDIR:
     /* cp/sys's identity, unchanged: (K_DEV_TMPFS, ino) with the top bit set */
     key->fsid = VFS_LKFS_TMPFS;
-    key->ino = VFS_LK_TMPFS_ID_BIT | tmpfs_file_ino(f);
+    key->ino = VFS_LK_TMPFS_ID_BIT | tmpfs_file_ino((struct file *)f);
     break;
   default:
     break;
