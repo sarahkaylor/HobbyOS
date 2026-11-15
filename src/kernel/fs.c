@@ -962,6 +962,32 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
       f->ref_count = 0;
       return -ENOENT;
     }
+    /* cp/sys: a FAT directory opened WITHOUT O_DIRECTORY (the NFS branch
+       above already does this).  Linux allows open(dir, O_RDONLY) and only
+       read(2) fails; Wine's server does exactly that to pin its config dir,
+       `config_dir_fd = open(".", O_RDONLY)` (server/request.c:634), and later
+       fchdir()s back to it.  A write-mode open of a directory is EISDIR.
+       Linux-ABI processes only: native callers keep their exact behaviour. */
+    if (exists && (probe_entry.attr & 0x10) /* ATTR_DIRECTORY */ &&
+        !(flags & O_CREAT) && (cur->abi_flags & PROC_FLAG_LINUX_ABI)) {
+      if ((flags & 0x3) != 0) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -EISDIR;
+      }
+      if (fat16_open_dir(filename, f) != 0) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -ENOENT;
+      }
+      int ddfd = fd_install(cur, f);
+      if (ddfd == -1) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -EMFILE;
+      }
+      return ddfd;
+    }
     /* SEC-1: O_CREAT|O_EXCL must be decided atomically against concurrent
        creators, so it is enforced inside fat16_open_ex (one fat_lock
        critical section covers existence check + slot claim), not by this
