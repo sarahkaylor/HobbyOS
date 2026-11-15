@@ -41,6 +41,13 @@ collide. Shared read-only inputs: the JDK at
 | 4 | JDK tooling and attach | `keytool`/`jar`/`jlink`/`javadoc`/`javap`/`jshell` and `jcmd`/`jstack` exercise crypto, zip, module images, `javax.tools` and the attach mechanism | each tool produces its documented artifact; attach either works or fails with a precise, explainable reason |
 | 5 | jtreg tier1 subset | the honest meaning of "standard tests": OpenJDK's own suite, not our 18 checks | a bounded, named subset of tier1 runs in the guest with a pass/fail/skip count and every failure classified |
 
+## Blockers found (missing primitives, not bugs)
+
+| Primitive | Evidence | Consequence |
+|---|---|---|
+| `fork` / `execve` in the Linux-ABI layer | `java.io.IOException: Cannot run program "/JDK/bin/java": fork failed, error: 38 (Function not implemented)` (`obj/jdk/B7-p1spawn-fork.log`, worktree `HobbyOS-jdk-exec`) | `ProcessBuilder`/`Runtime.exec` can never start a child process until the ABI grows fork+exec. The kernel can spawn its own `.BIN` programs (`SYS_SPAWN`); the Linux-ABI syscall surface has no equivalent |
+| executable bit on FAT16 | same probe: `/JDK/bin/java -> exists size=16296 exec=false` | Even with fork available, a Java caller sees every binary as non-executable; worth knowing before implementing exec |
+
 ## Known pre-existing blocker (not this port)
 
 `tools/t3_tier.sh intel` is RED on this host **with and without** the port work:
