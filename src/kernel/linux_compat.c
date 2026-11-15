@@ -208,6 +208,12 @@ static void l_block_ms(struct trap_frame *tf, int ms, int nr) {
       return;
     }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    if (cur->state == PROC_STATE_EXITED || cur->state == PROC_STATE_THREAD_DONE) {
+      /* C1-thr: killed while inside the syscall; never re-park the dead. */
+      spinlock_release_irqrestore(&proc_lock, flags);
+      tf->regs[0] = (uint64_t)(int64_t)-EINTR;
+      return;
+    }
     cur->wake_ms = timer_get_ms() + (uint64_t)ms;
     cur->sig_park_kind = 1; /* not rewound: a signal wake returns -EINTR */
     cur->sig_park_nr = nr;  /* identity for the SA_RESTART restart */

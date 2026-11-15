@@ -1955,7 +1955,8 @@ static int l_thr_vfork_wait(struct process *p, struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-ENOSYS;
     return 1;
   }
-  if (p->vfork_child == 0) {
+  if (p->vfork_child == 0 || (p->state == PROC_STATE_EXITED || p->state == PROC_STATE_THREAD_DONE)) {
+    /* released -- or killed meanwhile: never re-park a dead task */
     int r = p->vfork_ret;
     p->vfork_ret = 0;
     spinlock_release_irqrestore(&proc_lock, f);
@@ -2224,6 +2225,18 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     }
 
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    /* C1-thr: a kill (process_kill_group_sig / exit_group) that lands while
+       this thread is still inside the syscall has already made it EXITED or
+       THREAD_DONE.  Parking would overwrite that with FUTEX and resurrect a
+       dead task: measured, linux_probe_thr R3 -- a SIGKILLed child parked
+       again, its exit was never reaped and waitpid timed out.  Leave the
+       state alone; the trap exit's schedule() drops the dead task. */
+    if (p->state == PROC_STATE_EXITED || p->state == PROC_STATE_THREAD_DONE ||
+        p->state == PROC_STATE_FREE) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      tf->regs[0] = (uint64_t)(int64_t)-EINTR;
+      return 1;
+    }
     /* Compare under the lock: the waker cannot slip between the compare and
        the park, so no wakeup is lost. */
     if (*(volatile uint32_t *)uaddr != val) {

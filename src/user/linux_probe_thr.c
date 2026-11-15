@@ -337,11 +337,14 @@ static void x_reject(const char *name, unsigned long flags, unsigned long tls,
 }
 
 /* ---- F/V: fork and vfork shapes ---------------------------------------- */
+static int reap_ret, reap_errno; /* the last waitpid() answer reap() saw */
 static int reap(int pid, int ms) {
   long long dl = now_us() + (long long)ms * 1000;
   int st = 0;
   for (;;) {
     int r = waitpid(pid, &st, WNOHANG);
+    reap_ret = r;
+    reap_errno = r < 0 ? errno : 0;
     if (r == pid) return st;
     if (r < 0) return -2;
     if (now_us() > dl) return -1;
@@ -549,6 +552,7 @@ static void r3_robust_pid_reuse(void) {
   (void)!read(sync[0], dead, sizeof dead);
   kill(pid, SIGKILL);
   int st = reap(pid, 3000);
+  int wret = reap_ret, werr = reap_errno;
   msleep(50);
   /* R3_N live threads take the lowest free pids, the dead ones among them. */
   r3_go = 0;
@@ -577,9 +581,9 @@ static void r3_robust_pid_reuse(void) {
   close(sync[0]);
   close(sync[1]);
   int ok = st >= 0 && seen == R3_N && bad == 0;
-  row("R3 robust-pid-reuse killed=%d,%d status=0x%x threads=%d reused_dead_pid=%d "
-      "stale_heads=%d %s",
-      dead[0], dead[1], st, seen, reused, bad, ok ? "ok" : "FAIL");
+  row("R3 robust-pid-reuse killed=%d,%d status=0x%x waitpid=%d errno=%d threads=%d "
+      "reused_dead_pid=%d stale_heads=%d %s",
+      dead[0], dead[1], st, wret, werr, seen, reused, bad, ok ? "ok" : "FAIL");
   grade(ok);
 }
 
@@ -1094,6 +1098,12 @@ int main(int argc, char **argv) {
   (void)argv;
   setvbuf(stdout, NULL, _IONBF, 0);
   row("thr probe start pid=%d", getpid());
+#ifdef THR_R3_LOOP
+  /* src/user/linux_probe_r3loop.c (not committed): R3 alone, many times */
+  for (int i = 0; i < THR_R3_LOOP; i++) r3_robust_pid_reuse();
+  row("done rc=%d", fails);
+  return fails ? 1 : 0;
+#endif
   slot_tid[0] = gettid_();
   set_handler(SIGUSR1, on_sig, SA_RESTART, 0);
   set_handler(SIGUSR2, on_sig, SA_RESTART, 0);
