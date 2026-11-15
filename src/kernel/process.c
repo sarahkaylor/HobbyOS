@@ -3413,6 +3413,16 @@ int process_signal_directed(int pid, int sig, int directed) {
     }
   }
   spinlock_release_irqrestore(&proc_lock, flags);
+  /* cp P1: linux_compat_signal_interrupt() above may have turned a parked
+     compat thread READY (futex/sleep/suspend park ended by the signal).  Do
+     what the futex wake does (L52): poke one idle CPU so it is picked in
+     microseconds, not at whatever reschedule happens next.  Measured without
+     it (linux_probe tramp_sig T2 + a timing variant): a pthread_kill'd parked
+     thread ran its handler ~150 ms after the kill, on base and cp-cpu alike,
+     which turned T2's SA_RESTART check into a race against the sender's next
+     wake-up.  No-op on a busy machine (no idle CPU to poke). */
+  if (pender->abi_flags & PROC_FLAG_LINUX_ABI)
+    sched_wake_idle_cpu();
   return 0;
 }
 
