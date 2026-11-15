@@ -1,0 +1,17 @@
+# guest cpmenu 2026-11-14T22:49:07-06:00 host=sarahpc cpu=avx-on cpu=host shim=1 vkfilter=order
+# waiting for ~/cp/measure.lock
+# lock acquired 2026-11-14T22:51:02-06:00
+settings: /graphics/presets QuickPresets = 'Low'
+settings: /graphics/presets ResolutionScaling = 'FSR2'
+settings: /graphics/presets FSR2 = 'Auto'
+settings: /graphics/presets DynamicResolutionScaling = False
+settings: /graphics/presets TextureQuality = 'Low'
+settings: /graphics/raytracing RayTracing = False
+settings: /graphics/raytracing RayTracedPathTracing = False
+settings: /video/display VSync = 'UI-Settings-Video-QualitySetting-Off'
+settings: /video/display MaximumFPS_OnOff = False
+settings: /video/display WindowMode = 'BorderlessWindowed'
+settings: /video/display Resolution = '1280x720'
+walk TIMEOUT at 400.6s
+cpmenu tag=menu-1280x720-avx-045104 geom=1280x720 walk rc=2 (no menu) after 400.7 s
+# done 2026-11-14T22:57:47-06:00

@@ -1,0 +1,22 @@
+# guest cpmenu 2026-11-14T23:08:04-06:00 host=sarahpc cpu=avx-on cpu=host shim=1 vkfilter=order
+# waiting for ~/cp/measure.lock
+# lock acquired 2026-11-14T23:12:51-06:00
+settings: /graphics/presets QuickPresets = 'Low'
+settings: /graphics/presets ResolutionScaling = 'FSR2'
+settings: /graphics/presets FSR2 = 'Auto'
+settings: /graphics/presets DynamicResolutionScaling = False
+settings: /graphics/presets TextureQuality = 'Low'
+settings: /graphics/raytracing RayTracing = False
+settings: /graphics/raytracing RayTracedPathTracing = False
+settings: /video/display VSync = 'UI-Settings-Video-QualitySetting-Off'
+settings: /video/display MaximumFPS_OnOff = False
+settings: /video/display WindowMode = 'BorderlessWindowed'
+settings: /video/display Resolution = '1280x720'
+walk MENU at 40.1s: £00 PROJEKT RED ACCOUNT ~~  NEW GAME LOAD GAME SETTINGS MODS CREDITS QUIT GAME 
+cpmenu tag=menu-1280x720-avx-051252 geom=1280x720 launch_to_menu_s=41.3 (OCR poll, ~3-4 s granularity)
+cpmenu hold_s=60.9 peak_rss_mib=2142 peak_threads=68 (5 s samples of Cyberpunk2077.exe)
+mango file=/home/cp/runs/menu-1280x720-avx-051252/Cyberpunk2077_2026-11-15_05-13-43.csv skip_s=0.0 frames=6804 span_s=60.7 avg_fps=112.2 median_ms=6.93 fps_median=144.4 p90_ms=18.06 fps_p90=55.4 p99_ms=32.73
+guest_mem_used_mib=2949
+settings-video OCR: ‘Maximum FPS|Windowed Mode|Resolution|<q Windowed Borderless D|
+settings-graphics OCR: RUN BENCHMARK Quick Preset|Quick Preset a tow D|Resolution Scaling <__ AMD FidelityFx Super Resolution 21. [>|Texture Quality d _low D|Ray Tracing|Path Tracing -|Path Tracing in Photo Mode or )|
+# done 2026-11-14T23:15:24-06:00

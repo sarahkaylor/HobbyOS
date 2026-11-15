@@ -10,7 +10,7 @@ mkdir -p "$ROOT/results"
 where=$1 what=$2
 out=$ROOT/results/$(date +%Y%m%d-%H%M%S)-$where-$what.txt
 {
-    echo "# $where $what $(date -Is) host=$(hostname) cpu=$(cat "$ROOT/run/cpu.txt" 2>/dev/null || echo -)"
+    echo "# $where $what GEOM=${GEOM:-1280x720} $(date -Is) host=$(hostname) cpu=$(cat "$ROOT/run/cpu.txt" 2>/dev/null || echo -)"
     echo "# waiting for ~/cp/measure.lock"
 } | tee "$out"
 exec 9>"$HOME/cp/measure.lock"
@@ -18,7 +18,8 @@ flock 9
 echo "# lock acquired $(date -Is)" | tee -a "$out"
 case "$where" in
 guest)
-    bash "$ROOT/tools/host-venus.sh" ssh "SECS=$SECS bash tools/guest-ladder.sh $what" 2>&1 | tee -a "$out" ;;
+    # GEOM / MENU_SECS must be forwarded explicitly: ssh does not carry the env.
+    bash "$ROOT/tools/host-venus.sh" ssh "SECS=$SECS GEOM=${GEOM:-1280x720} MENU_SECS=${MENU_SECS:-60} bash tools/guest-ladder.sh $what" 2>&1 | tee -a "$out" ;;
 host)
     p() { echo "### host-radv $* d3d12probe"; bash "$ROOT/tools/host-d3d12probe.sh" "$@" 2>/dev/null | grep -E '^(START|RESULT|FAIL|ADAPTER)'; }
     case "$what" in

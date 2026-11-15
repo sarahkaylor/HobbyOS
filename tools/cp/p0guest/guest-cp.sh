@@ -23,7 +23,13 @@ launch)
         export MANGOHUD=1
         # MangoHud 0.8.2~rc2 writes no CSV with no_display, so the HUD is drawn
         # fully transparent instead (fps_only, alpha 0).
-        export MANGOHUD_CONFIG="fps_only,alpha=0.0,background_alpha=0.0,log_interval=0,output_folder=$d,autostart_log=${CP_MANGO_DELAY:-1}${CP_MANGO_SECS:+,log_duration=$CP_MANGO_SECS}"
+        # CP_MANGO_HOTKEY=1: no autostart; logging is toggled with MangoHud's
+        # default Shift_L+F2 (the file is written when logging stops).
+        if [ "${CP_MANGO_HOTKEY:-0}" = 1 ]; then
+            export MANGOHUD_CONFIG="fps_only,alpha=0.0,background_alpha=0.0,log_interval=0,output_folder=$d"
+        else
+            export MANGOHUD_CONFIG="fps_only,alpha=0.0,background_alpha=0.0,log_interval=0,output_folder=$d,autostart_log=${CP_MANGO_DELAY:-1}${CP_MANGO_SECS:+,log_duration=$CP_MANGO_SECS}"
+        fi
     fi
     date +%s.%N > "$d/t-launch.txt"
     cd /opt/cp2077/bin/x64
