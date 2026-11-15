@@ -394,7 +394,11 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
 /* Free every materialized page and the frame array; caller holds vm_lock
  * and the object's refs are already 0. */
 static void vm_object_free_locked(struct vm_object *o) {
-  for (int i = 0; i < o->nr_frames; i++) {
+  /* cp/wine2: the whole array, not only [0, nr_frames): a shrink parks the
+     frames it cut off past nr_frames until remote TLBs are flushed
+     (vm_object_truncate), and they are the object's until then. */
+  uint64_t cap = o->frames ? (uint64_t)o->arr_frames * (FRAME_SIZE / sizeof(uint64_t)) : 0;
+  for (uint64_t i = 0; i < cap; i++) {
     if (o->frames[i])
       frame_free(o->frames[i]);
   }
@@ -505,6 +509,58 @@ uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr) 
   return fr;
 }
 
+/* cp/wine2: the reverse map vm_object_truncate needs.  Drop every leaf, in
+ * every v2 address space, that maps one of `o`'s frames at object page index
+ * [lo, hi): the object's own frames (SHARED-marked, so vm_arch_unmap never
+ * frees them) and, in MAP_PRIVATE regions, the COW copies of those pages
+ * (freed with their leaf, as Linux's truncate discards them).
+ * Sets the bit of each address space it touched.  Caller holds vm_lock.
+ * Returns the number of leaves dropped. */
+static int vm_obj_unmap_cut_locked(struct vm_object *o, uint64_t lo, uint64_t hi,
+                                   uint64_t *touched) {
+  int n = 0;
+  for (int t = 0; t < MAX_PROCESSES; t++) {
+    struct addr_space *as = &vm_as_pool[t];
+    if (as->ver != AS_V2 || !as->regions)
+      continue;
+    for (int k = 0; k < as->nr; k++) {
+      struct vm_region *r = &as->regions[k];
+      if (r->obj != o)
+        continue;
+      uint64_t rlo = r->obj_off / FRAME_SIZE;
+      uint64_t rhi = (r->obj_off + r->len) / FRAME_SIZE;
+      uint64_t a0 = rlo > lo ? rlo : lo;
+      uint64_t a1 = rhi < hi ? rhi : hi;
+      int priv = (r->flags & VM_MAP_PRIVATE) != 0;
+      for (uint64_t idx = a0; idx < a1; idx++) {
+        uint64_t fr = o->frames[idx];
+        if (!fr && !priv)
+          continue;
+        uint64_t va = r->base + idx * FRAME_SIZE - r->obj_off;
+        uint64_t nx = vm_arch_skip_absent(as, va);
+        if (nx != va) { /* absent table: skip the whole span */
+          uint64_t skip = (nx - va) / FRAME_SIZE;
+          idx += skip ? skip - 1 : 0;
+          continue;
+        }
+        uint64_t leaf = 0;
+        if (vm_arch_walk(as, va, &leaf) != 0)
+          continue;
+        /* the object's frame (SHARED-marked: dropped, not freed), or in a
+           private region a COW copy past the cut, which Linux discards too
+           (truncate_pagecache unmaps even COWed pages): freed with the leaf */
+        if (!(fr && vm_arch_leaf_phys(leaf) == fr) && !priv)
+          continue;
+        vm_arch_unmap(as, va);
+        as->resident_frames--;
+        touched[t / 64] |= 1ULL << (t % 64);
+        n++;
+      }
+    }
+  }
+  return n;
+}
+
 int vm_object_truncate(struct vm_object *o, uint64_t size) {
   if (!o)
     return -EINVAL;
@@ -545,7 +601,8 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
     }
     vm_obj_zero(na, (uint64_t)naf * FRAME_SIZE);
     uint64_t *narr = (uint64_t *)phys_to_virt(na);
-    for (int i = 0; i < o->nr_frames; i++)
+    /* every old entry, parked ones included (see the shrink below) */
+    for (uint64_t i = 0; o->frames && i < cap_entries; i++)
       narr[i] = o->frames[i];
     if (o->frames) {
       for (int i = 0; i < o->arr_frames; i++)
@@ -554,14 +611,52 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
     o->frames = narr;
     o->arr_frames = naf;
   }
-  for (int i = nnf; i < o->nr_frames; i++) {
-    if (o->frames[i]) {
+  int old_nf = o->nr_frames;
+  if (nnf >= old_nf) {
+    /* Grow.  A frame still parked by a shrink whose second phase has not
+       run yet becomes the object's page again: it must read as zeros
+       (Linux: the regrown range is a hole). */
+    for (int i = old_nf; i < nnf; i++)
+      if (o->frames[i])
+        vm_obj_zero(o->frames[i], FRAME_SIZE);
+    o->nr_frames = nnf;
+    o->size = size;
+    spinlock_release_irqrestore(&vm_lock, flags);
+    return 0;
+  }
+  /* cp/wine2: SHRINK.  The pages past the new end used to be freed while
+     other mappings (MAP_SHARED, or a MAP_PRIVATE page still reading through)
+     kept leaves on them -- a use-after-free once the frame was reused.
+     Linux unmaps them (truncate_pagecache) and a later touch is SIGBUS.
+     Phase 1, under vm_lock: drop every leaf, in every address space, that
+     maps one of the cut-off object frames, and shrink the object, so a new
+     fault past the end refuses (the fill paths check nr_frames).  The frames
+     stay PARKED in the array past nr_frames.  Phase 2: flush the touched
+     address spaces on the other CPUs, then free what is still parked.  The
+     object reference held across the gap keeps the slot from being freed
+     and reused in between.  Private COW copies of the cut pages are dropped
+     too (Linux truncate_pagecache, even_cows); copies below the cut stay. */
+  uint64_t touched[(MAX_PROCESSES + 63) / 64];
+  for (unsigned k = 0; k < sizeof touched / sizeof touched[0]; k++)
+    touched[k] = 0;
+  int zapped = vm_obj_unmap_cut_locked(o, (uint64_t)nnf, (uint64_t)old_nf, touched);
+  o->nr_frames = nnf;
+  o->size = size;
+  vm_object_ref_locked(o);
+  spinlock_release_irqrestore(&vm_lock, flags);
+  if (zapped) {
+    for (int t = 0; t < MAX_PROCESSES; t++)
+      if (touched[t / 64] & (1ULL << (t % 64)))
+        vm_arch_shootdown(&vm_as_pool[t]);
+  }
+  flags = spinlock_acquire_irqsave(&vm_lock);
+  for (int i = nnf; i < old_nf; i++) {
+    if (i >= o->nr_frames && o->frames[i]) { /* not regrown meanwhile */
       frame_free(o->frames[i]);
       o->frames[i] = 0;
     }
   }
-  o->nr_frames = nnf;
-  o->size = size;
+  vm_object_unref_locked(o);
   spinlock_release_irqrestore(&vm_lock, flags);
   return 0;
 }
@@ -4469,6 +4564,61 @@ int vm_munmap_range(struct process *grp, uint64_t addr, uint64_t len) {
     vm_jit_release(as, addr, len); /* a freed code chunk is reusable */
   spinlock_release_irqrestore(&vm_lock, fl);
   return rc == 0 ? 0 : -EINVAL;
+}
+
+/* cp/wine2: mremap(MREMAP_MAYMOVE) of a MAP_PRIVATE object mapping.  The
+ * destination region re-resolves the object, which is right for a page still
+ * reading through but loses every private COW copy.  Copy each resident page
+ * of [src, src+len) that is NOT the object's own frame (i.e. a private copy)
+ * to the same offset at `dst`, mapped with the destination region's
+ * protection and kind; pages that still read through stay absent at `dst`
+ * and refault from the object.  The destination region must already exist
+ * (same object, same offset) and its range must be empty of leaves.  Returns
+ * the number of pages carried, or -ENOMEM. */
+int vm_mremap_carry_private(struct process *grp, uint64_t src, uint64_t dst,
+                            uint64_t len) {
+  if (!grp || !grp->as)
+    return 0;
+  struct addr_space *as = grp->as;
+  int n = 0;
+  for (uint64_t off = 0; off < len; off += FRAME_SIZE) {
+    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    struct vm_region *rs = vm_region_find(as, src + off);
+    struct vm_region *rd = vm_region_find(as, dst + off);
+    uint64_t leaf = 0;
+    if (!rs || !rd || !rs->obj || !(rs->flags & VM_MAP_PRIVATE) ||
+        vm_arch_walk(as, src + off, &leaf) != 0 ||
+        vm_arch_walk(as, dst + off, 0) == 0) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      continue;
+    }
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    uint64_t objfr =
+        vm_object_peek_locked(rs->obj, (src + off - rs->base) + rs->obj_off);
+    if (objfr && ph == objfr) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      continue; /* still reading through: refaults from the object */
+    }
+    uint64_t fr = frame_alloc_zeroed();
+    if (!fr) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -ENOMEM;
+    }
+    vm_frame_copy(fr, ph, FRAME_SIZE);
+    if (vm_arch_map(as, dst + off, fr, rd->prot, rd->kind) != 0) {
+      frame_free(fr);
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -ENOMEM;
+    }
+    as->resident_frames++;
+    if (as->resident_frames > as->peak_frames)
+      as->peak_frames = as->resident_frames;
+    vm_pub_note(as, dst + off, (dst + off - rd->base) + rd->obj_off, rd->prot, 1,
+                VM_PUB_COPY, fr, 1, VM_PW_COW);
+    n++;
+    spinlock_release_irqrestore(&vm_lock, fl);
+  }
+  return n;
 }
 
 /* Set the protection of exactly [addr, addr+len) to `p`, splitting and

@@ -26,6 +26,12 @@
  *   C13 munmap of a private view keeps the object's pages; churn
  *   C14 ext2 file (argv[1], default /EXT): COW isolation + read-through
  *       (rows skipped when the directory is absent, e.g. on a Linux host)
+ *   C15 ftruncate shrink under live mappings: a touch past the new end is a
+ *       fatal signal (Linux SIGBUS), never the freed frame; shrink + regrow
+ *       reads zeros through shared and private views, COW copies past the
+ *       cut are discarded (Linux truncate_pagecache), copies below it stay
+ *   C16 mremap(MAYMOVE|FIXED) of a private view carries its COW copies;
+ *       untouched pages keep reading through at the new address
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -34,6 +40,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -386,6 +393,91 @@ static void c14_ext2(const char *root) {
   unlink(f);
 }
 
+/* C15: shrink a mapped object. */
+static void c15_truncate(void) {
+  int fd = mfd("cowt", 0);
+  if (fd < 0 || fill_obj(fd, 3) != 0) { ck(0, "C15 setup", errno); return; }
+  /* (a) a child touches a shared page past the new end: must die */
+  pid_t k = fork();
+  if (k == 0) {
+    volatile char *s = mmap(0, 3 * PG, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (s == MAP_FAILED) _exit(3);
+    char c = s[2 * PG]; /* resident */
+    (void)c;
+    if (ftruncate(fd, PG) != 0) _exit(4);
+    char d = s[2 * PG]; /* past EOF now: SIGBUS on Linux */
+    _exit(d == 'c' ? 5 : 6); /* 5: read the old (freed) page */
+  }
+  int st = 0;
+  waitpid(k, &st, 0);
+  ck(k > 0 && WIFSIGNALED(st), "C15 touch past the shrunk end is a fatal signal",
+     WIFSIGNALED(st) ? WTERMSIG(st) : 1000 + WEXITSTATUS(st));
+  /* (b) shrink + regrow under shared and private views reads zeros */
+  if (ftruncate(fd, 0) != 0 || fill_obj(fd, 3) != 0) { ck(0, "C15 refill", errno); close(fd); return; }
+  volatile char *s = mmap(0, 3 * PG, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  volatile char *p = mmap(0, 3 * PG, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+  if (s == MAP_FAILED || p == MAP_FAILED) { ck(0, "C15 mmap", errno); close(fd); return; }
+  char c1 = p[PG], c2 = s[2 * PG];  /* page 1: private reads through; page 2: shared */
+  p[2 * PG] = 'P';                  /* page 2: private COW copy (cut off) */
+  p[0] = 'Q';                       /* page 0: private COW copy (kept) */
+  ck(c1 == 'b' && c2 == 'c', "C15 views resident before the shrink", c1);
+  ck(ftruncate(fd, PG) == 0 && ftruncate(fd, 3 * PG) == 0, "C15 shrink to 1 page, regrow to 3", errno);
+  ck(s[PG] == 0 && s[2 * PG] == 0 && obj_byte(fd, 2 * PG) == 0, "C15 shared view reads the regrown hole as zeros", s[PG]);
+  ck(p[PG] == 0, "C15 private read-through page reads zeros", p[PG]);
+  ck(p[2 * PG] == 0, "C15 private COW copy past the cut is discarded (Linux even_cows)", p[2 * PG]);
+  ck(s[0] == 'a' && p[0] == 'Q', "C15 below the cut: object and COW copy untouched", p[0]);
+  s[PG] = 'N';
+  ck(p[PG] == 'N', "C15 regrown page shared again by both views", p[PG]);
+  munmap((void *)s, 3 * PG);
+  munmap((void *)p, 3 * PG);
+  close(fd);
+}
+
+/* C16: mremap a private view to a new address. */
+static void c16_mremap(void) {
+  int fd = mfd("cowm", 0);
+  if (fd < 0 || fill_obj(fd, 3) != 0) { ck(0, "C16 setup", errno); return; }
+  volatile char *p = mmap(0, 3 * PG, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+  void *tgt = mmap(0, 3 * PG, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (p == MAP_FAILED || tgt == MAP_FAILED) { ck(0, "C16 mmap", errno); close(fd); return; }
+  p[0] = 'P';           /* COW copy */
+  char c = p[PG];       /* reading through */
+  (void)c;
+  volatile char *q = mremap((void *)p, 3 * PG, 3 * PG, MREMAP_MAYMOVE | MREMAP_FIXED, tgt);
+  ck(q == (volatile char *)tgt, "C16 mremap MAYMOVE|FIXED", q == MAP_FAILED ? errno : 0);
+  if (q != (volatile char *)tgt) { close(fd); return; }
+  ck(q[0] == 'P', "C16 COW copy carried to the new address", q[0]);
+  (void)!pwrite(fd, "Y", 1, PG);
+  ck(q[PG] == 'Y' && q[2 * PG] == 'c', "C16 other pages read through at the new address", q[PG]);
+  ck(obj_byte(fd, 0) == 'a', "C16 object unchanged", obj_byte(fd, 0));
+  munmap((void *)q, 3 * PG);
+  close(fd);
+}
+
+/* C16b: grow with MREMAP_MAYMOVE only, blocked in place: the kernel picks
+   the new address. */
+static void c16b_mremap_grow(void) {
+  int fd = mfd("cowg", 0);
+  if (fd < 0 || fill_obj(fd, 3) != 0) { ck(0, "C16 grow memfd", errno); return; }
+  /* reserve 4 pages, put the 2-page file view in the first half: the
+     reservation's tail blocks an in-place grow */
+  char *res = mmap(0, 4 * PG, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  volatile char *g = res == MAP_FAILED ? MAP_FAILED
+      : mmap(res, 2 * PG, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, fd, 0);
+  if (g == MAP_FAILED) { ck(0, "C16 grow setup", errno); close(fd); return; }
+  void *blk = res + 2 * PG;
+  g[PG + 5] = 'G';
+  volatile char *h = mremap((void *)g, 2 * PG, 3 * PG, MREMAP_MAYMOVE);
+  ck(h != MAP_FAILED && h != g, "C16 blocked grow moves", h == MAP_FAILED ? errno : 0);
+  if (h != MAP_FAILED && h != g) {
+    ck(h[PG + 5] == 'G' && h[2 * PG] == 'c' && obj_byte(fd, PG + 5) == 'b',
+       "C16 moved grow carries the COW copy, new page reads the object", h[PG + 5]);
+    munmap((void *)h, 3 * PG);
+  }
+  munmap(blk, 2 * PG);
+  close(fd);
+}
+
 int main(int argc, char **argv) {
   c1_c4_memfd();
   c5_exec();
@@ -397,6 +489,9 @@ int main(int argc, char **argv) {
   c11_seal();
   c12_cross_process();
   c13_unmap_churn();
+  c15_truncate();
+  c16_mremap();
+  c16b_mremap_grow();
   c14_ext2(argc > 1 ? argv[1] : "/EXT");
   char d[64];
   snprintf(d, sizeof d, "/tmp/cowp-%d", (int)getpid());

@@ -49,8 +49,8 @@
  *     objects); a MAP_SHARED *regular file* mapping is write-through to the
  *     page cache, not a distinct shared segment with another process's private
  *     view.
- *   - mremap of a MAP_PRIVATE file mapping re-reads the object at the new
- *     address: private COW dirt is not carried across a move.
+ *   - (cp/wine2: mremap of a MAP_PRIVATE object mapping now carries its COW
+ *     copies to the new address; pages still reading through refault.)
  *
  * Kernel constraints: freestanding, no libc, -mgeneral-regs-only, byte-wise
  * copies only.
@@ -453,7 +453,10 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
   uint64_t obj_off = r->obj_off + (old_addr - r->base);
   uint64_t covered_end = r->base + r->len;
 
-  if (new_len <= old_len) {
+  /* cp/wine2: MREMAP_FIXED always moves (Linux), even at the same or a
+     smaller size; only the non-FIXED call may shrink or grow in place. */
+  int fixed = (flags & L_MREMAP_FIXED) != 0;
+  if (!fixed && new_len <= old_len) {
     if (new_len < old_len) {
       l_zap_pages(as, old_addr + new_len, old_len - new_len);
       if (vm_region_remove(as, old_addr + new_len, old_len - new_len) != 0)
@@ -465,13 +468,13 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
   /* Grow: already inside the region (a merged neighbour), or extend into the
      adjacent free span.  vm_region_insert refuses any overlap, so a failed
      insert IS the "no room here" answer -- no separate probe needed. */
-  if (old_addr + new_len <= covered_end) return l_ret(tf, (int64_t)old_addr);
+  if (!fixed && old_addr + new_len <= covered_end) return l_ret(tf, (int64_t)old_addr);
   uint64_t ext = old_addr + new_len;
   uint64_t ins = (covered_end > old_addr + old_len) ? covered_end
                                                     : old_addr + old_len;
   int64_t ext_off = obj ? (int64_t)(obj_off + (ins - old_addr)) : 0;
-  if (vm_region_insert(as, ins, ext - ins, prot, kind, rflags, obj,
-                       (uint64_t)ext_off) == 0)
+  if (!fixed && vm_region_insert(as, ins, ext - ins, prot, kind, rflags, obj,
+                                 (uint64_t)ext_off) == 0)
     return l_ret(tf, (int64_t)old_addr);
 
   if (!(flags & L_MREMAP_MAYMOVE)) return l_ret(tf, -ENOMEM);
@@ -511,12 +514,21 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
     if (hrc != 0) return l_ret(tf, hrc);
   }
 
+  uint64_t mv_len = old_len < new_len ? old_len : new_len; /* what moves */
   if (!obj) {
-    int cr = l_copy_span(p, dst, old_addr, old_len);
+    int cr = l_copy_span(p, dst, old_addr, mv_len);
     if (cr != 0) { /* undo, so a failed move never eats the source */
       l_zap_pages(as, dst, new_len);
       vm_region_remove(as, dst, new_len);
       return l_ret(tf, cr);
+    }
+  } else if (rflags & VM_MAP_PRIVATE) {
+    /* cp/wine2: a private object mapping carries its COW copies; pages that
+       still read through refault from the object at the new address. */
+    if (vm_mremap_carry_private(process_group(p), old_addr, dst, mv_len) < 0) {
+      l_zap_pages(as, dst, new_len);
+      vm_region_remove(as, dst, new_len);
+      return l_ret(tf, -ENOMEM);
     }
   }
   if (restore_prot) (void)sys_mprotect(dst, new_len, prot);

@@ -1,0 +1,61 @@
+== export: /srv/nfs/cp-wine2-p2 (Wine stage + winprobe.exe), 127.0.0.1 only, ro
+== build: kernel + disk (intel, test), winep2.bin, winprobe.exe
+== exported: /srv/nfs/cp-wine2-p2
+== stage: glibc 2.31 under /LIB64 + /lib64/ld + WINEP2.BIN + WAVE.CFG
+== boot (deadline 900s, under the shared QEMU lock)
+
+== the P2 rows
+[P2] winep2 launcher (C2-wine2)
+[P2] mount 10.0.2.2:/srv/nfs/cp-wine2-p2 -> /CP ok
+[P2] begin wineboot : wineboot -i
+[P2] end wineboot status=256 ms=458
+[P2] begin echo : wine cmd /c echo hello
+[P2] end echo status=256 ms=190
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+[P2] end winprobe status=256 ms=196
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+[P2] end copy status=256 ms=190
+[P2] begin kill : wineserver -k
+[P2] end kill status=256 ms=232
+[P2] done
+
+G1 wine cmd /c echo hello prints hello : FAIL   ([P2] end echo status=256 ms=190)
+G2 winprobe.exe every marker + exit 0  : FAIL   ([P2] end winprobe status=256 ms=196; 41 markers, 41 missing/failed)
+G3 wineserver -k leaves no processes   : FAIL   ([P2] end kill status=256 ms=232; [P2] ps-extra count=0)
+extra: winprobe from C:\ (tmpfs)       :  ()
+
+== ps before / after
+[P2] ps-before count=1
+[P2] ps-after count=1
+
+raw serial: /home/sarah/cp/lanes/wine2/obj/wine-p2/serial.log
+== /etc/exports restored (cmp identical to the pre-run copy)
+== removed /srv/nfs/cp-wine2-p2
+
+== serial [P2]/loader rows
+[P2] winep2 launcher (C2-wine2)
+[P2] ps-before count=1
+[P2] ps-before pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] mount 10.0.2.2:/srv/nfs/cp-wine2-p2 -> /CP ok
+[P2] begin wineboot : wineboot -i
+[LCOMPAT] argv argc=2 a0=wineboot a1=-i execfn=/CP/WINE/bin/wine
+could not exec the wine loader
+[P2] end wineboot status=256 ms=458
+[P2] begin echo : wine cmd /c echo hello
+[LCOMPAT] argv argc=5 a0=wine a1=cmd a2=/c execfn=/CP/WINE/bin/wine
+could not exec the wine loader
+[P2] end echo status=256 ms=190
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+[LCOMPAT] argv argc=2 a0=wine a1=Z:\CP\WPROBE\winprobe.exe execfn=/CP/WINE/bin/wine
+could not exec the wine loader
+[P2] end winprobe status=256 ms=196
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+[LCOMPAT] argv argc=7 a0=wine a1=cmd a2=/c execfn=/CP/WINE/bin/wine
+could not exec the wine loader
+[P2] end copy status=256 ms=190
+[P2] begin kill : wineserver -k
+[P2] end kill status=256 ms=232
+[P2] ps-after count=1
+[P2] ps-after pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-extra count=0
+[P2] done
