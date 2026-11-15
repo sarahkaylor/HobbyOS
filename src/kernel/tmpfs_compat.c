@@ -215,8 +215,10 @@ static int readlink_common(struct process *p, struct trap_frame *tf, int dirfd,
   if (bufsz <= 0) return ret(tf, -EINVAL);
   char t[1024];
   int cap = bufsz < (int64_t)sizeof t ? (int)bufsz : (int)sizeof t;
-  int n = tmpfs_readlink(abs, t, cap);
-  if (n == TMPFS_EXTERNAL) {
+  int tl = 0;
+  int n = tmpfs_readlink(abs, t, cap, &tl);
+  if (n == 0) n = tl;
+  else if (n == TMPFS_EXTERNAL) {
     if (ext2v_owns(abs)) {
       n = ext2v_readlink(abs, t, cap);
     } else {

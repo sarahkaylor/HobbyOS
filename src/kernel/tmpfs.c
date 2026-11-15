@@ -1035,7 +1035,8 @@ int tmpfs_symlink(const char *target, char *linkpath) {
   return rc;
 }
 
-int tmpfs_readlink(char *abs, char *buf, int cap) {
+int tmpfs_readlink(char *abs, char *buf, int cap, int *len) {
+  *len = 0;
   if (t_init_once() != 0) return -ENOMEM;
   if (cap <= 0) return -EINVAL;
   t_lock_acquire();
@@ -1049,7 +1050,8 @@ int tmpfs_readlink(char *abs, char *buf, int cap) {
       if (n > cap) n = cap; /* readlink(2) truncates silently */
       for (int i = 0; i < n; i++) buf[i] = T[r.node].target[i];
       T[r.node].atime = t_now();
-      rc = n;
+      *len = n;
+      rc = 0;
     }
   }
   t_lock_release();

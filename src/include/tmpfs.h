@@ -84,7 +84,10 @@ int tmpfs_unlink(char *abs);
 /* flags: 1 = RENAME_NOREPLACE.  Both paths must be tmpfs-owned. */
 int tmpfs_rename(char *from, char *to, int flags);
 int tmpfs_symlink(const char *target, char *linkpath);
-int tmpfs_readlink(char *abs, char *buf, int cap);
+/* readlink: 0 with *len = bytes copied (never NUL-terminated), -errno, or
+ * TMPFS_EXTERNAL.  The count is an out-parameter because a 1-byte target
+ * would otherwise be indistinguishable from TMPFS_EXTERNAL (== 1). */
+int tmpfs_readlink(char *abs, char *buf, int cap, int *len);
 int tmpfs_truncate(char *abs, int64_t len);
 /* 0 when a directory (abs rewritten to its physical path), -errno, or
  * TMPFS_EXTERNAL. */
