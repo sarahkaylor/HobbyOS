@@ -12,6 +12,7 @@
 #include "vm.h"
 #include "linux_sigframe.h"
 #include "kmem.h"
+#include "vfs.h" /* cp/exec: VFS_PATH_MAX */
 
 
 extern struct process *process_get_pcb(int pid);
@@ -28,15 +29,19 @@ jmp_buf user_exit_context;
  * spawning/staying cwd, because Linux reports an absolute path here.  Called
  * after cwd is established on spawn, and with the already-resolved absolute
  * path on exec. */
-static void set_exe_path(struct process *p, const char *path) {
+_Static_assert(PROC_PATH_MAX == VFS_PATH_MAX,
+               "struct process cwd/exe_path must hold a whole VFS path");
+
+void set_exe_path(struct process *p, const char *path) {
   if (!p || !path) return;
+  const int cap = (int)sizeof p->exe_path;
   int n = 0;
   if (path[0] != '/') {
     const char *cwd = p->cwd[0] ? p->cwd : "/";
-    for (int i = 0; cwd[i] && n < 158; i++) p->exe_path[n++] = cwd[i];
+    for (int i = 0; cwd[i] && n < cap - 2; i++) p->exe_path[n++] = cwd[i];
     if (n == 0 || p->exe_path[n - 1] != '/') p->exe_path[n++] = '/';
   }
-  for (int i = 0; path[i] && n < 159; i++) p->exe_path[n++] = path[i];
+  for (int i = 0; path[i] && n < cap - 1; i++) p->exe_path[n++] = path[i];
   p->exe_path[n] = '\0';
 }
 
@@ -640,6 +645,46 @@ static int compat_put_str(struct process *child, uint64_t *sp, const char *s,
   return 0;
 }
 
+/* cp/exec: the compat auxv, shared by the spawn loader's startup block
+ * (compat_stack_block) and execve(2) (linux_exec.c) so the frozen contract
+ * (docs/rw-ldso-design.md section 3) has exactly one writer.  Fills `w` (at
+ * least COMPAT_AUXV_WORDS) and returns the number of words written, AT_NULL
+ * pair included.  The set and its order are unchanged from GB-164. */
+int compat_auxv_fill(uint64_t *w, uint64_t phdr, uint32_t phnum,
+                     uint64_t interp_base, uint64_t entry,
+                     uint64_t platform_addr, uint64_t rnd_addr,
+                     uint64_t execfn_addr) {
+  int k = 0;
+  w[k++] = 3;  w[k++] = phdr;          /* AT_PHDR   */
+  w[k++] = 4;  w[k++] = 56;            /* AT_PHENT  */
+  w[k++] = 5;  w[k++] = (uint64_t)phnum; /* AT_PHNUM */
+  w[k++] = 6;  w[k++] = 4096;          /* AT_PAGESZ */
+  w[k++] = 7;  w[k++] = interp_base;   /* AT_BASE (0 for a static image) */
+  w[k++] = 8;  w[k++] = 0;             /* AT_FLAGS  */
+  w[k++] = 9;  w[k++] = entry;         /* AT_ENTRY: the EXECUTABLE's entry */
+  w[k++] = 11; w[k++] = 0;             /* AT_UID    */
+  w[k++] = 12; w[k++] = 0;             /* AT_EUID   */
+  w[k++] = 13; w[k++] = 0;             /* AT_GID    */
+  w[k++] = 14; w[k++] = 0;             /* AT_EGID   */
+  w[k++] = 15; w[k++] = platform_addr; /* AT_PLATFORM -> "x86_64" */
+#ifdef __x86_64__
+  w[k++] = 16; w[k++] = arch_linux_hwcap(); /* AT_HWCAP: CPUID.1:EDX */
+#else
+  w[k++] = 16; w[k++] = 0;             /* AT_HWCAP  */
+#endif
+  w[k++] = 17; w[k++] = 100;           /* AT_CLKTCK */
+  w[k++] = 23; w[k++] = 0;             /* AT_SECURE */
+  w[k++] = 25; w[k++] = rnd_addr;      /* AT_RANDOM */
+  w[k++] = 26; w[k++] = 0;             /* AT_HWCAP2 */
+  w[k++] = 31; w[k++] = execfn_addr;   /* AT_EXECFN */
+#ifdef __x86_64__
+  w[k++] = LSF_AT_MINSIGSTKSZ;         /* AT_MINSIGSTKSZ (51) */
+  w[k++] = lsf_min_sigstksz(arch_fpu_sig_image_bytes());
+#endif
+  w[k++] = 0;  w[k++] = 0;             /* AT_NULL   */
+  return k;
+}
+
 /* Layer the SysV AMD64 process-initialization block on a COMPAT process's
  * stack and point its entry at it:
  *
@@ -824,34 +869,8 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
    *                              reports it -- glibc 2.34+ sysconf(
    *                              _SC_MINSIGSTKSZ) and Wine size altstacks by
    *                              it. */
-  int k = 0;
-  w[k++] = 3;  w[k++] = phdr;          /* AT_PHDR   */
-  w[k++] = 4;  w[k++] = 56;            /* AT_PHENT  */
-  w[k++] = 5;  w[k++] = (uint64_t)phnum; /* AT_PHNUM */
-  w[k++] = 6;  w[k++] = 4096;          /* AT_PAGESZ */
-  w[k++] = 7;  w[k++] = interp_base;   /* AT_BASE (0 for a static image) */
-  w[k++] = 8;  w[k++] = 0;             /* AT_FLAGS  */
-  w[k++] = 9;  w[k++] = entry;         /* AT_ENTRY: the EXECUTABLE's entry */
-  w[k++] = 11; w[k++] = 0;             /* AT_UID    */
-  w[k++] = 12; w[k++] = 0;             /* AT_EUID   */
-  w[k++] = 13; w[k++] = 0;             /* AT_GID    */
-  w[k++] = 14; w[k++] = 0;             /* AT_EGID   */
-  w[k++] = 15; w[k++] = platform_addr; /* AT_PLATFORM -> "x86_64" */
-#ifdef __x86_64__
-  w[k++] = 16; w[k++] = arch_linux_hwcap(); /* AT_HWCAP: CPUID.1:EDX */
-#else
-  w[k++] = 16; w[k++] = 0;             /* AT_HWCAP  */
-#endif
-  w[k++] = 17; w[k++] = 100;           /* AT_CLKTCK */
-  w[k++] = 23; w[k++] = 0;             /* AT_SECURE */
-  w[k++] = 25; w[k++] = rnd_addr;      /* AT_RANDOM */
-  w[k++] = 26; w[k++] = 0;             /* AT_HWCAP2 */
-  w[k++] = 31; w[k++] = execfn_addr;   /* AT_EXECFN */
-#ifdef __x86_64__
-  w[k++] = LSF_AT_MINSIGSTKSZ;         /* AT_MINSIGSTKSZ (51) */
-  w[k++] = lsf_min_sigstksz(arch_fpu_sig_image_bytes());
-#endif
-  w[k++] = 0;  w[k++] = 0;             /* AT_NULL   */
+  int k = compat_auxv_fill(w, phdr, phnum, interp_base, entry, platform_addr,
+                            rnd_addr, execfn_addr);
 
   /* argv[0] must sit 8 mod 16 (so %rsp = &argc is 16-aligned).  The auxv is
    * derived from envp's end below, so no alignment hole can separate it from
@@ -999,7 +1018,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     parent = process_group(parent);
   if (parent) {
     child->parent_pid = parent->pid;
-    for (int i = 0; i < 128; i++)
+    for (int i = 0; i < (int)sizeof child->cwd; i++)
       child->cwd[i] = parent->cwd[i];
     vdisp_inherit(child, parent); /* icewm.md §9 */
     /* P6.3: a spawned child inherits the group's environment blob (set

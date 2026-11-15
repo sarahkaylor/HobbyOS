@@ -99,6 +99,8 @@
 #include "process.h"
 #include "timer.h"
 #include "vm.h"
+#include "vfs.h" /* cp/exec: VFS_PATH_MAX */
+#include "linux_exec.h"
 
 /* The layouts this file writes into guest memory.  A drift here corrupts a
    struct the guest then trusts, so lock them at compile time (docs §6, and the
@@ -236,6 +238,23 @@ void linux_compat_sig_fork(struct process *parent, struct process *child) {
   for (int i = 0; i < HO_SIG_MAX; i++) l_sigflags[cs][i] = l_sigflags[gs][i];
   for (int i = 0; i < HO_SIG_MAX; i++) l_samask[cs][i] = l_samask[gs][i];
   l_altstack[cs] = l_altstack[ps];
+}
+
+/* cp/exec: the signal state execve(2) resets (Linux flush_signal_handlers +
+   the altstack clear in exec): every disposition's flag word goes to 0 for
+   the group (the handlers themselves are reset by process_exec_apply), and the
+   exec'ing thread's alternate stack is disabled.  The mask is kept. */
+void linux_compat_sig_exec(struct process *p);
+void linux_compat_sig_exec(struct process *p) {
+  int s = l_slot(p), gs = l_slot(process_group(p));
+  if (gs >= 0)
+    for (int i = 0; i < HO_SIG_MAX; i++) l_sigflags[gs][i] = 0;
+  if (s >= 0) {
+    l_altstack[s].ss_sp = 0;
+    l_altstack[s].ss_size = 0;
+    l_altstack[s].ss_flags = 0;
+    l_altstack[s].in_use = 0;
+  }
 }
 
 /* cp/sys: the creation mask the compat /tmp applies (tmpfs.c). */
@@ -411,7 +430,7 @@ static int l_readlink_target(struct process *p, const char *path, char *out,
   if (path[0] != '/') return -ENOENT;
   struct process *g = p ? process_group(p) : 0;
   const char *src = 0;
-  char buf[160];
+  char buf[VFS_PATH_MAX]; /* cp/exec: an fd's path is a whole VFS path */
   int fd = -1;
 
   if (l_streq(path, "/proc/self")) {
@@ -1660,7 +1679,31 @@ static int l_proc_rt_sigsuspend(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
-const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"},
+/* ---- execve / execveat (cp/exec) -----------------------------------------
+ * linux_execve() (src/kernel/linux_exec.c) either installs the new image and
+ * leaves the trap frame entering it (every GPR, rax included, already 0), or
+ * returns -errno with the caller untouched, or -- past the point of no
+ * return -- has killed the process and rescheduled, in which case `tf` now
+ * belongs to another context and must not be written. */
+static int l_proc_execve_common(struct process *p, struct trap_frame *tf,
+                                int dirfd, uint64_t path, uint64_t argv,
+                                uint64_t envp, int flags) {
+  int rc = linux_execve(p, tf, dirfd, path, argv, envp, flags);
+  if (rc == LX_EXEC_DONE || rc == LX_EXEC_GONE) return 1;
+  return l_ret(tf, rc);
+}
+
+static int l_proc_execve(struct process *p, struct trap_frame *tf) {
+  return l_proc_execve_common(p, tf, L_AT_FDCWD, l_arg(tf, 0), l_arg(tf, 1),
+                              l_arg(tf, 2), 0);
+}
+
+static int l_proc_execveat(struct process *p, struct trap_frame *tf) {
+  return l_proc_execve_common(p, tf, (int)l_argi(tf, 0), l_arg(tf, 1),
+                              l_arg(tf, 2), l_arg(tf, 3), (int)l_argi(tf, 4));
+}
+
+const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"}, {L_SYS_execve, l_proc_execve, "execve"}, {L_SYS_execveat, l_proc_execveat, "execveat"},
   {L_SYS_clock_getres, l_proc_clock_getres, "clock_getres"},
   {L_SYS_sched_getparam, l_proc_sched_getparam, "sched_getparam"},
   {L_SYS_sched_getscheduler, l_proc_sched_getscheduler, "sched_getscheduler"},

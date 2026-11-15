@@ -200,18 +200,20 @@ dbg "stat /lpx/unl.bin" 2>&1 | grep -q 'Inode:' && bad "unl.bin still linked" ||
 dbg "dump /lpx/out/dyn.txt $X2/dyn.txt" >/dev/null
 l="$(head -1 "$X2/dyn.txt" 2>/dev/null)"
 case "$l" in "ok dyn "*"libcpath=/EXT/lpx/glibc/libc.so.6"*) good "/lpx/out/dyn.txt: $l" ;; *) bad "/lpx/out/dyn.txt: '$l'" ;; esac
-# glibc static-pie: OPEN ITEM (docs/cp-ext2b.md section 5).  The compat loader
-# refuses it on every filesystem (R_X86_64_IRELATIVE); what this lane owns is
-# that the image is read from ext2 whole, which the loader's own refusal row
-# proves (it names the file and the byte count it parsed).
+# glibc static-pie (cp/exec, docs/cp-exec.md section 3): the loader defers its
+# R_X86_64_IRELATIVE entries to the image's own _dl_relocate_static_pie (DT_RELA
+# kept intact), so the program runs from ext2 and writes its marker.  The old
+# loader refusal row ("ELF load refused rc=-8") is now a failure.
 hsz="$(stat -c %s "$X2/hs" 2>/dev/null)"
+dbg "dump /lpx/out/static.txt $X2/static.txt" >/dev/null
+l="$(head -1 "$X2/static.txt" 2>/dev/null)"
 if grep -aq "ELF load refused rc=-8 size=$hsz file=/EXT/lpx/bin/hs" "$D/boot3.console.log"; then
-  good "static-pie /EXT/lpx/bin/hs: all $hsz bytes read from ext2 and parsed; refused by the loader (open item: IRELATIVE)"
-elif [ -s "$X2/static.txt" ] || { dbg "dump /lpx/out/static.txt $X2/static.txt" >/dev/null; [ -s "$X2/static.txt" ]; }; then
-  good "/lpx/out/static.txt: $(head -1 "$X2/static.txt")"
-else
-  bad "static-pie /EXT/lpx/bin/hs: neither the loader's refusal row nor a marker"
+  bad "static-pie /EXT/lpx/bin/hs: refused by the loader (IRELATIVE regression)"
 fi
+case "$l" in
+  "ok static "*"libc=2.31 libcpath=static"*) good "/lpx/out/static.txt: $l (glibc static-pie, $hsz bytes, from ext2)" ;;
+  *) bad "static-pie /EXT/lpx/bin/hs: /lpx/out/static.txt = '$l'" ;;
+esac
 
 if [ "$fails" = 0 ]; then
   say "ext2_gate: PASS"

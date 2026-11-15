@@ -1169,3 +1169,54 @@ void tmpfs_statfs(struct tmpfs_statfs *out) {
 }
 
 int tmpfs_live_nodes(void) { return t_live; }
+
+/* cp/exec: execve(2) of a /tmp file.  Reads the whole regular file named by
+ * `abs` (symlinks followed) into a fresh contiguous frame run: *buf_out is its
+ * direct-map VA and the caller frees *pages_out frames.  Linux's exec answers
+ * for uid 0: a directory or any non-regular node is -EACCES, a file without
+ * any x bit is -EACCES, an empty file (or one larger than `max`) -ENOEXEC.
+ * TMPFS_EXTERNAL: a symlink left /tmp and `abs` now names the target.  On
+ * success `abs` is rewritten to the file's physical path (what
+ * /proc/self/exe answers on Linux: the link target, not the link). */
+int tmpfs_read_image(char *abs, uint8_t **buf_out, uint32_t *size_out,
+                     uint32_t *pages_out, uint32_t max) {
+  if (t_init_once() != 0) return -ENOMEM;
+  t_lock_acquire();
+  struct tres r;
+  int rc = t_walk(abs, 1, &r);
+  uint64_t size = 0, buf = 0;
+  uint32_t pages = 0;
+  if (rc == 0 && r.node < 0) rc = -ENOENT;
+  if (rc == 0) {
+    const struct tnode *n = &T[r.node];
+    if (n->type != TMPFS_T_REG) rc = -EACCES;
+    else if (!(n->mode & 0111)) rc = -EACCES;
+    else {
+      size = n->size;
+      if (size == 0 || size > max) rc = -ENOEXEC;
+    }
+  }
+  if (rc == 0) {
+    pages = (uint32_t)((size + FRAME_SIZE - 1) / FRAME_SIZE);
+    buf = frame_alloc_contig((int)pages);
+    if (!buf) rc = -ENOMEM;
+  }
+  if (rc == 0) {
+    const struct tnode *n = &T[r.node];
+    for (uint32_t i = 0; i < pages; i++) {
+      uint8_t *d = T_KVA(buf + (uint64_t)i * FRAME_SIZE);
+      uint64_t fr = n->obj ? vm_object_peek(n->obj, (uint64_t)i * FRAME_SIZE) : 0;
+      const uint8_t *s = fr ? T_KVA(fr) : 0;
+      for (int k = 0; k < FRAME_SIZE; k++) d[k] = s ? s[k] : 0;
+    }
+    int i = 0;
+    for (; r.phys[i] && i < VFS_PATH_MAX - 1; i++) abs[i] = r.phys[i];
+    abs[i] = 0;
+  }
+  t_lock_release();
+  if (rc) return rc;
+  *buf_out = T_KVA(buf);
+  *size_out = (uint32_t)size;
+  *pages_out = pages;
+  return 0;
+}

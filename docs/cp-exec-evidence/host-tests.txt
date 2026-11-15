@@ -1,0 +1,18 @@
+-- cp/exec: READLINK3 parse + symlink path join
+  PASS: READLINK reply encodes
+  PASS: READLINK target is 'wine'
+  PASS: READLINK status error -> -2
+  PASS: join relative: /bin/wineboot + wine
+  PASS: join absolute: /c/d
+  PASS: join ..//. folds to /x/z/w
+  PASS: join .. above root clamps
+  PASS: join at root: /wineboot + wine
+
+  PASS IRELATIVE without DEFER: ELF_ERR_RELOC
+  PASS IRELATIVE with DEFER: ELF_OK
+  PASS IRELATIVE with DEFER: one deferred
+  PASS IRELATIVE with DEFER: slot left as the file has it
+  PASS IRELATIVE with DEFER: the RELATIVE beside it applied
+  PASS IRELATIVE resolver outside the span: ELF_ERR_RELOC
+  PASS type 37 on an aarch64 image: ELF_ERR_RELOC
+=== 98 checks, 0 failed ===

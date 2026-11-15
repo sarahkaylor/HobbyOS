@@ -4430,7 +4430,7 @@ static int process_fork_common(struct trap_frame *tf, int mode) {
   }
   for (int i = 0; i < (int)sizeof child->exe_path; i++)
     child->exe_path[i] = parent->exe_path[i];
-  for (int i = 0; i < 128; i++) {
+  for (int i = 0; i < (int)sizeof child->cwd; i++) {
     child->cwd[i] = group->cwd[i];
   }
   vdisp_inherit(child, group); /* fork keeps the virtual display */
@@ -4476,6 +4476,12 @@ static int process_fork_common(struct trap_frame *tf, int mode) {
     if (child->open_fds[i] != -1 && inherited_n < MAX_OPEN_FDS)
       inherited_fds[inherited_n++] = child->open_fds[i];
   }
+  /* cp/exec (CROSS-LANE, minimal: fork fd inheritance, not the clone/thread
+     path C1-thr owns): fork(2) copies the FD_CLOEXEC flags, so a child that
+     then execve()s closes exactly the fds the parent marked -- Wine's forking
+     wineserver depends on it.  Without this the mask was reset to empty here
+     and every post-fork exec kept its CLOEXEC fds open. */
+  fd_cloexec_copy(child->fd_cloexec, group->fd_cloexec);
 
   /* P1: the child RESUMES in user mode with the caller's TLS register.  The
      design (see the OQ5 note above: "keeps the caller's TLS register value")
@@ -6422,7 +6428,7 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
      process_group().  open_fds[] is deliberately NOT mirrored (kept all
      -1): a missed call site then fails closed with EBADF instead of
      double-closing the group's table. */
-  for (int i = 0; i < 128; i++)
+  for (int i = 0; i < (int)sizeof t->cwd; i++)
     t->cwd[i] = grp->cwd[i];
   vdisp_pcb_init(t); /* threads use the anchor's (process_group) */
   t->heap_brk = grp->heap_brk;

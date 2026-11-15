@@ -335,6 +335,10 @@ static void el_clear_reloc_counts(const struct elf_image *img, uint8_t *stage,
  * vaddr_base-relative offsets, page holes untouched) and apply its RELATIVE
  * relocations for `base`.  On success *stage_out holds exactly what will be
  * mapped and belongs to the caller.  Returns 0 / -ENOMEM / -ENOEXEC. */
+/* apply_reloc: 0 = map the bytes as the file has them (an interpreted
+ * executable, a Linux ld.so); 1 = the kernel's RELATIVE pass (static-PIE);
+ * 2 = the same on the Linux track with R_X86_64_IRELATIVE left to the program
+ * (cp/exec: a glibc -static-pie; see elf_apply_relocations_ex). */
 static int el_stage_build(const struct elf_image *img, const struct elf_plan *plan,
                           const uint8_t *file, uint64_t flen, uint64_t base,
                           const char *what, int apply_reloc,
@@ -362,7 +366,10 @@ static int el_stage_build(const struct elf_image *img, const struct elf_plan *pl
      because the interpreter walks it.  The interpreter ITSELF is static-PIE and
      still takes the kernel's RELATIVE pass. */
   if (apply_reloc) {
-    rc = elf_apply_relocations(img, (uint8_t *)phys_to_virt(stage), span, base);
+    uint32_t ndefer = 0;
+    rc = elf_apply_relocations_ex(img, (uint8_t *)phys_to_virt(stage), span, base,
+                                  apply_reloc == 2 ? ELF_RELOC_DEFER_IRELATIVE : 0,
+                                  &ndefer);
     if (rc != ELF_OK) {
       uart_puts(what);
       uart_puts(": relocations: ");
@@ -371,7 +378,21 @@ static int el_stage_build(const struct elf_image *img, const struct elf_plan *pl
       el_free_contig(stage, pages);
       return -ENOEXEC;
     }
-    el_clear_reloc_counts(img, (uint8_t *)phys_to_virt(stage), span);
+    /* cp/exec: an image with IRELATIVE entries relocates itself (glibc's
+       _dl_relocate_static_pie walks DT_RELA, exactly as on Linux where the
+       kernel applies nothing): its table must stay intact or the IFUNC slots
+       stay zero -- measured, __libc_setup_tls called .got.plt 0xce278 == 0.
+       Its RELATIVE entries were applied above as well; re-applying a RELA
+       RELATIVE stores the same value. */
+    if (ndefer == 0) {
+      el_clear_reloc_counts(img, (uint8_t *)phys_to_virt(stage), span);
+    } else {
+      static int ndefer_rows;
+      if (ndefer_rows < 8) {
+        ndefer_rows++;
+        el_msg2(what, ": R_X86_64_IRELATIVE left to the image's own startup; DT_RELA kept");
+      }
+    }
   }
   *stage_out = (uint8_t *)phys_to_virt(stage);
   *pages_out = pages;
@@ -582,7 +603,8 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
     return -ENOSPC;
   }
   rc = el_stage_build(eimg, &eplan, exe, exe_len, base, "elf loader",
-                      iimg ? 0 : 1, &stage, &stage_pages);
+                      iimg ? 0 : ((flags & ELF_LOAD_COMPAT_INTERP) && !native ? 2 : 1),
+                      &stage, &stage_pages);
   if (rc != 0) goto done;
   exe_entry = base + (eimg->entry - eimg->vaddr_base);
   rc = el_map_stage(as, base, &eplan, stage, VMK_IMG);
@@ -695,6 +717,63 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
   return el_map_pair(as, exe, exe_len, &eimg, 0, 0, 0, flags, info);
 }
 
+int elf_loader_read_interp(const char *interp, uint8_t **buf, uint64_t *len,
+                           uint64_t *pages, char *staged, int cap,
+                           int quiet_missing) {
+  if (!interp || !buf || !len || !pages) return -ENOENT;
+  if (staged && cap > 0) staged[0] = '\0';
+  /* cp/ext2b: an interpreter path on the /EXT ext2 volume is read from there
+   * first (a glibc ld.so staged with the program); every other name keeps the
+   * FAT16 resolver below, alias table included. */
+  {
+    uint8_t *eb = 0;
+    uint32_t esz = 0, epg = 0;
+    int er = fs_read_ext2_file(interp, &eb, &esz, &epg,
+                               (uint32_t)USER_LIB_SLOT_SIZE);
+    if (er < 0) {
+      uart_puts("elf loader: interpreter '");
+      uart_puts(interp);
+      uart_puts(er == -ENOEXEC ? "' on /EXT is empty or larger than one USER_LIB slot\n"
+                               : "' on /EXT cannot be read\n");
+      return er == -ENOEXEC ? -ENOSPC : er;
+    }
+    if (er == 1) {
+      *buf = eb; /* frame run (fs_read_ext2_file) */
+      *pages = epg;
+      *len = esz;
+      if (staged) el_copy_name(staged, cap, interp);
+      return 0;
+    }
+  }
+  char tmp[64];
+  char *st = (staged && cap > 0) ? staged : tmp;
+  int stcap = (staged && cap > 0) ? cap : (int)sizeof tmp;
+  uint16_t icl = 0;
+  uint32_t isz = 0;
+  if (el_compat_resolve(interp, &icl, &isz, st, stcap) != 0) {
+    if (!quiet_missing)
+      el_msg2("elf loader: first missing DSO ", st);
+    uart_puts("elf loader: interpreter '");
+    uart_puts(interp);
+    uart_puts("' not found on the FAT16 root\n");
+    return -ENOENT;
+  }
+  if (isz > USER_LIB_SLOT_SIZE) {
+    uart_puts("elf loader: interpreter '");
+    uart_puts(st);
+    uart_puts("' is larger than one USER_LIB slot\n");
+    return -ENOSPC;
+  }
+  uint64_t pg = 0;
+  uint64_t b = el_read_file(icl, isz, &pg);
+  if (!b)
+    return -ENOMEM;
+  *buf = (uint8_t *)phys_to_virt(b);
+  *pages = pg;
+  *len = isz;
+  return 0;
+}
+
 /* Load an ELF image ALREADY IN KERNEL MEMORY into `as` per the load plan.
  * This is the entry point for a filesystem that is not FAT16 (the VFS/NFS
  * exec path): the caller holds the bytes, so no cluster is involved.  The
@@ -720,56 +799,21 @@ int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
    * native dynamic contract is that the kernel says what it could not find.
    * el_compat_resolve (upstream GB-196) is the resolver: as written, then its
    * basename, then the bounded 8.3 alias table, and it reports the name that
-   * actually resolved -- so a glibc PT_INTERP path still finds LD64.SO. */
+   * actually resolved -- so a glibc PT_INTERP path still finds LD64.SO.
+   * cp/ext2b: a path on /EXT is read from the ext2 volume first.  cp/exec: the
+   * body is elf_loader_read_interp(), shared with execve(2). */
   uint64_t ibuf = 0, ipages = 0, ilen = 0;
   struct elf_image iimg;
   char istaged[64];
   istaged[0] = '\0';
-  /* cp/ext2b: an interpreter path on the /EXT ext2 volume is read from there
-   * first (a glibc ld.so staged with the program); every other name keeps the
-   * FAT16 resolver below, alias table included. */
-  int iext2 = 0;
   if (eimg.has_interp) {
-    uint8_t *eb = 0;
-    uint32_t esz = 0, epg = 0;
-    int er = fs_read_ext2_file(eimg.interp, &eb, &esz, &epg,
-                               (uint32_t)USER_LIB_SLOT_SIZE);
-    if (er < 0) {
-      uart_puts("elf loader: interpreter '");
-      uart_puts(eimg.interp);
-      uart_puts(er == -ENOEXEC ? "' on /EXT is empty or larger than one USER_LIB slot\n"
-                               : "' on /EXT cannot be read\n");
-      return er == -ENOEXEC ? -ENOSPC : er;
-    }
-    if (er == 1) {
-      iext2 = 1;
-      ibuf = virt_to_phys(eb); /* frame run (fs_read_ext2_file) */
-      ipages = epg;
-      ilen = esz;
-      el_copy_name(istaged, sizeof istaged, eimg.interp);
-    }
-  }
-  if (eimg.has_interp && !iext2) {
-    uint16_t icl = 0;
-    uint32_t isz = 0;
-    if (el_compat_resolve(eimg.interp, &icl, &isz, istaged, sizeof istaged) != 0) {
-      if (!(flags & ELF_LOAD_NATIVE))
-        el_msg2("elf loader: first missing DSO ", istaged);
-      uart_puts("elf loader: interpreter '");
-      uart_puts(eimg.interp);
-      uart_puts("' not found on the FAT16 root\n");
-      return -ENOENT;
-    }
-    if (isz > USER_LIB_SLOT_SIZE) {
-      uart_puts("elf loader: interpreter '");
-      uart_puts(istaged);
-      uart_puts("' is larger than one USER_LIB slot\n");
-      return -ENOSPC;
-    }
-    ibuf = el_read_file(icl, isz, &ipages);
-    if (!ibuf)
-      return -ENOMEM;
-    ilen = isz;
+    uint8_t *ib = 0;
+    rc = elf_loader_read_interp(eimg.interp, &ib, &ilen, &ipages, istaged,
+                                (int)sizeof istaged,
+                                (flags & ELF_LOAD_NATIVE) ? 1 : 0);
+    if (rc != 0)
+      return rc;
+    ibuf = virt_to_phys(ib);
   }
   if (eimg.has_interp) {
     rc = el_admit_interp((const uint8_t *)phys_to_virt(ibuf), ilen, &iimg, info);

@@ -97,6 +97,7 @@
 #define L_SYS_fork 57
 #define L_SYS_vfork 58
 #define L_SYS_execve 59
+#define L_SYS_execveat 322 /* cp/exec */
 #define L_SYS_exit 60
 #define L_SYS_wait4 61
 #define L_SYS_kill 62

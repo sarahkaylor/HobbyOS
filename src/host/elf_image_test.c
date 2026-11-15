@@ -189,6 +189,50 @@ static void test_relocations(void) {
   /* 8. null arguments are mistakes, not no-ops */
   CHECK_EQ(elf_apply_relocations(NULL, stage, R_SPAN, R_BASE), ELF_ERR_ARGS,
            "null image: ELF_ERR_ARGS");
+
+  /* 9. cp/exec: R_X86_64_IRELATIVE (37), a glibc -static-pie's IFUNC slots.
+        Without the policy flag it is refused like any unknown type (GB-013). */
+  reloc_case_setup(stage, &img, 37, 0x40, R_VB + R_RELA, 24, 24);
+  img.machine = ELF_EM_X86_64;
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_ERR_RELOC,
+           "IRELATIVE without DEFER: ELF_ERR_RELOC");
+
+  /* 10. with ELF_RELOC_DEFER_IRELATIVE: counted, slot untouched (the program's
+         own _dl_relocate_static_pie calls the resolver), RELATIVE still applied */
+  reloc_case_setup(stage, &img, 37, R_VB + 0x40, R_VB + R_RELA, 48, 24);
+  img.machine = ELF_EM_X86_64;
+  {
+    uint8_t *r2 = stage + R_RELA + 24;   /* a RELATIVE after the IRELATIVE */
+    w64(r2 + 0, R_VB + R_SLOT + 8);
+    w64(r2 + 8, 8);
+    w64(r2 + 16, 0x55);
+    w64(stage + R_SLOT, 0xabcdefULL);    /* the file's own bytes in the slot */
+  }
+  uint32_t ndef = 99;
+  CHECK_EQ(elf_apply_relocations_ex(&img, stage, R_SPAN, R_BASE,
+                                    ELF_RELOC_DEFER_IRELATIVE, &ndef), ELF_OK,
+           "IRELATIVE with DEFER: ELF_OK");
+  CHECK_EQ(ndef, 1, "IRELATIVE with DEFER: one deferred");
+  slot = 0;
+  for (int i = 0; i < 8; i++) slot |= (uint64_t)stage[R_SLOT + i] << (8 * i);
+  CHECK_EQ(slot, 0xabcdefULL, "IRELATIVE with DEFER: slot left as the file has it");
+  slot = 0;
+  for (int i = 0; i < 8; i++) slot |= (uint64_t)stage[R_SLOT + 8 + i] << (8 * i);
+  CHECK_EQ(slot, R_BASE + 0x55, "IRELATIVE with DEFER: the RELATIVE beside it applied");
+
+  /* 11. a resolver outside the image is refused even when deferring */
+  reloc_case_setup(stage, &img, 37, R_VB + R_SPAN + 0x10, R_VB + R_RELA, 24, 24);
+  img.machine = ELF_EM_X86_64;
+  CHECK_EQ(elf_apply_relocations_ex(&img, stage, R_SPAN, R_BASE,
+                                    ELF_RELOC_DEFER_IRELATIVE, &ndef), ELF_ERR_RELOC,
+           "IRELATIVE resolver outside the span: ELF_ERR_RELOC");
+
+  /* 12. the policy is x86_64-only: type 37 on an aarch64 image stays refused */
+  reloc_case_setup(stage, &img, 37, R_VB + 0x40, R_VB + R_RELA, 24, 24);
+  img.machine = ELF_EM_AARCH64;
+  CHECK_EQ(elf_apply_relocations_ex(&img, stage, R_SPAN, R_BASE,
+                                    ELF_RELOC_DEFER_IRELATIVE, &ndef), ELF_ERR_RELOC,
+           "type 37 on an aarch64 image: ELF_ERR_RELOC");
 }
 
 int main(void) {

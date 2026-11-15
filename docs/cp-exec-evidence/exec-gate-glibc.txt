@@ -1,0 +1,64 @@
+cp/exec: tools/cp/exec/exec_gate.sh console (strix, KVM): linux_probe_exec with glibc 2.31 children
+  /XHS.ELF (-static-pie, IRELATIVE) and /XHD.ELF (dynamic, PT_INTERP /lib64/ld-linux-x86-64.so.2) staged on FAT16.
+Command: MAKEFLAGS=-j16 LP_TIMEOUT=420 bash tools/cp/exec/exec_gate.sh
+
+[LP] exec probe start
+[LP] self=/PROBE.ELF
+[EXEC] load pid=1 /PROBE.ELF 4 1
+[EXEC] enter pid=1 /PROBE.ELF 0 4199
+[LP] child echo argc=4 [from] [echo:FAT16] MARK=hello
+[LP] ok   exec static-pie from FAT16 (/PROBE.ELF) exit=0
+[EXEC] load pid=1 /tmp/lpexec_child 4 1
+[EXEC] enter pid=1 /tmp/lpexec_child 0 4199
+[LP] child echo argc=4 [from] [echo:tmpfs] MARK=hello
+[LP] ok   exec static-pie from tmpfs (/tmp/lpexec_child) exit=0
+[LP] n/a  ext2 /EXT not present (run under the ext2 gate for this row)
+[EXEC] load pid=1 /NFS/lpexec_child 4 1
+[EXEC] enter pid=1 /NFS/lpexec_child 0 4199
+[LP] child echo argc=4 [from] [echo:NFS-or-FAT subdir] MARK=hello
+[LP] ok   exec static-pie from NFS-or-FAT subdir (/NFS/lpexec_child) exit=0
+[EXEC] load pid=1 /tmp/lpexec_tgt 4 1
+[EXEC] enter pid=1 /tmp/lpexec_tgt 0 4199
+[LP] child echo argc=4 [from] [echo:tmpfs symlink] MARK=hello
+[LP] ok   exec static-pie from tmpfs symlink (/tmp/lpexec_link) exit=0
+[LP] n/a  ext2 symlink row: /EXT not present (ext2 gate only)
+[LP] n/a  no NFS symlink staged (wine smoke exercises this row)
+[EXEC] load pid=1 /XHS.ELF 3 2
+[EXEC] enter pid=1 /XHS.ELF 0 203088
+[LP] child glibc static-pie libc=2.31 pid=1 MARK=glibc exe=/XHS.ELF
+[LP] ok   execve glibc static-pie (/XHS.ELF) exit=23
+[EXEC] load pid=1 /XHD.ELF 3 2
+[EXEC] enter pid=1 /XHD.ELF 68853694464 134222080
+[LP] child glibc dynamic libc=2.31 pid=1 MARK=glibc exe=/XHD.ELF
+[LP] ok   execve glibc dynamic (/XHD.ELF) exit=23
+[EXEC] load pid=1 /tmp/lpexec_xhd 3 2
+[EXEC] enter pid=1 /tmp/lpexec_xhd 68853694464 134222080
+[LP] child glibc dynamic-from-tmpfs libc=2.31 pid=1 MARK=glibc exe=/tmp/lpexec_xhd
+[LP] ok   execve glibc dynamic-from-tmpfs (/tmp/lpexec_xhd) exit=23
+[EXEC] load pid=1 /PROBE.ELF 5 2
+[EXEC] enter pid=1 /PROBE.ELF 0 4199
+[LP] child echo argc=5 [one] [two three] [four] MARK=round-trip
+[LP] ok   argv/envp round trip exit=0
+[EXEC] load pid=1 /PROBE.ELF 2 0
+[EXEC] enter pid=1 /PROBE.ELF 0 4199
+[LP] child cloexec fd3=closed fd4=open
+[LP] ok   O_CLOEXEC fd closed, plain fd kept across exec (code=0)
+[EXEC] load pid=1 /PROBE.ELF 2 0
+[EXEC] enter pid=1 /PROBE.ELF 0 4199
+[LP] child disp USR1=DFL USR2=IGN
+[LP] ok   dispositions reset at exec (USR1->DFL, USR2 kept IGN) code=0
+[EXEC] load pid=1 /PROBE.ELF 2 0
+[EXEC] enter pid=1 /PROBE.ELF 0 4199
+[LP] ok   fork+exec+waitpid propagates exit(42) got=42
+[EXEC] load pid=1 /PROBE.ELF 2 0
+[EXEC] enter pid=1 /PROBE.ELF 0 4199
+[LP] ok   exec from a multithreaded process, exit=0
+[LP] ok   execve(missing) -> ENOENT (errno=2)
+[LP] ok   execve(non-ELF) -> ENOEXEC (errno=8)
+[LP] ok   execve(no x bit) -> EACCES (errno=13)
+[LP] ok   execve(huge argv) -> E2BIG (errno=7)
+[EXEC] load pid=1 /PROBE.ELF 2 0
+[EXEC] enter pid=1 /PROBE.ELF 0 4199
+[LP] ok   execveat(AT_FDCWD) propagates exit(7) got=7
+[LP] done rc=0
+exec_gate: PASS

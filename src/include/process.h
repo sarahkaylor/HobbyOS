@@ -224,6 +224,10 @@ struct addr_space;
  * printed `[LCOMPAT] sigaction refused sig=32/33/35` and never reached managed
  * code).  The pending set therefore had to widen from uint32_t to uint64_t. */
 #define HO_ENV_LEN 512
+
+/* cp/exec: the cwd and the /proc/self/exe path hold a full VFS path
+ * (VFS_PATH_MAX in vfs.h; equality asserted where both headers meet). */
+#define PROC_PATH_MAX 1024
 #define HO_SIG_MAX 64
 
 /* P5 (D6): the frozen signal numbers (the Linux set the sysroot shares).
@@ -272,7 +276,10 @@ struct process {
   int is_kernel_process; /**< Flag indicating if this is a kernel-only thread */
   char name[32];  /**< Name of the binary running in this process */
   char args[HO_FLAT_ARGS_LEN]; /**< Command line args (w5 vi: flat cap 1024) */
-  char cwd[128];  /**< Current working directory */
+  /** Current working directory.  cp/exec: VFS_PATH_MAX (vfs.h, 1024) bytes,
+   *  checked in program_loader.c -- a cwd that does not fit is refused by the
+   *  chdir rows, never truncated (a truncated cwd names another directory). */
+  char cwd[PROC_PATH_MAX];
 
   /**
    * The path the loader was asked to execute, resolved to an absolute path
@@ -285,7 +292,7 @@ struct process {
    * display name) makes it report "There is no data folder".  Empty for a
    * kernel process / before the first exec.
    */
-  char exe_path[160];
+  char exe_path[PROC_PATH_MAX]; /* cp/exec: VFS_PATH_MAX, was 160 */
 
   /**
    * Positional-parameter blob (SYS_GETARGV).  eargv holds argv[0..eargc-1]
