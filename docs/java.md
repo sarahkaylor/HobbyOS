@@ -301,3 +301,25 @@ today; to test the no-sync arm, drop that call and rebuild the probe. Until it i
 fixed, any test whose verdict depends on a file written by an earlier process in
 the same boot is unreliable -- which is why every durability claim in this lane is
 cross-boot.
+
+### Where the directory flake is NOT, and the next experiment
+
+Checked and ruled out: `virtio_blk_write_sector()` already invalidates the written
+range in the block cache (`blk_cache.h:11`, with its own `invalidations` counter),
+and the create path in `fat16.c` (alloc_entry_in_dir, ~910-985) writes directory
+sectors through exactly that call -- both the root-directory run and the
+subdirectory run.  So this is not "the writer bypassed the cache and a reader kept
+a stale copy", which was my first guess.
+
+That leaves the two views of a name that a lookup can consult:
+
+* a directory **scan** (`getdents`-style walk of the sector), and
+* **path resolution** (`fat16_resolve_path`) for `open()`, which may keep its own
+  view of the directory.
+
+The experiment that separates them, one boot: the reader prints BOTH -- the result
+of listing `/` and the result of `open("/FL0.TXT")`.  If the scan sees the six
+files while `open` says ENOENT, the defect is in path resolution (a cached name
+map or an entry snapshot, the same family as the `disk_seen` clobber guard).
+If both are empty, look at the write itself and at the device's completion, since
+the cache is not the explanation.
