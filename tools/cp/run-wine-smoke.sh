@@ -48,6 +48,7 @@ restore_exports() {
   sudo -n cp -a "$EXP_BAK" /etc/exports && sudo -n exportfs -ra
   if sudo -n cmp -s "$EXP_BAK" /etc/exports; then
     echo "== /etc/exports restored (cmp identical to $EXP_BAK)"
+    sudo -n rm -f "$EXP_BAK" && echo "== removed backup $EXP_BAK"
   else
     echo "== WARNING: /etc/exports differs from $EXP_BAK"
   fi

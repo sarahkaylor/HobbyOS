@@ -129,10 +129,12 @@ writes the pid in the parent.  `process_fork()` now:
   dispositions, signal mask, `sa_flags` and `sigaltstack` are inherited as
   Linux `fork()` inherits them.
 
-`CLONE_VM|CLONE_VFORK|SIGCHLD` (posix_spawn) is still refused. This also fixes
-the pre-existing `linux_probe_join` row E (`clone failed errno=22`) — that
-probe's case E is actually a thread clone, but the join probe as a whole was
-listed as a base defect; see §7.
+`CLONE_VM|CLONE_VFORK|SIGCHLD` (posix_spawn) is still refused.
+
+This does **not** touch `linux_probe_join` row E: that case is a THREAD clone
+(`CLONE_VM|...|CLONE_THREAD|CLONE_CHILD_SETTID`, `linux_probe_join.c:181-196`)
+whose `EINVAL` comes from `process_clone()`.  It fails identically on base
+(§9), i.e. a base defect, not this lane's.
 
 ## 6. `VM_OBJ_MAX_BYTES` 64 MiB → 1 GiB (C1-mmu's `vm.h`)
 
@@ -169,12 +171,63 @@ copy the whole array on every page (quadratic once files exceed 64 MiB).
   `wineserver`, two-dot `.so` names) do not fit FAT 8.3, and ext2 mmap/exec is
   P3.  NFS exec+mmap already work (RimWorld runs from NFS).
 
-## 8. Where the Wine smoke stops
+## 8. Where the Wine smoke stops (measured on strix, §9)
 
-`wineserver`/`wine` re-exec themselves by path through
-`/lib64/ld-linux-x86-64.so.2` and then issue `arch_prctl(ARCH_SET_GS, teb)`
-per thread and map `KUSER_SHARED_DATA` at `0x7ffe0000`.  Both are below
-`USER_VA_BASE` and are **C1-mmu's** work (F1 low VA, `ARCH_SET_GS`): until
-they land, the first `%gs:` access faults and the first fixed low mapping is
-refused, so `wine cmd /c echo` cannot run.  This lane removes every **non**
-address-space wall in front of that point.
+`tools/cp/run-wine-smoke.sh` stages the strix-built `/CP/WINE` over NFS
+(export `127.0.0.1(ro,...,insecure,...)` only; `/etc/exports` backed up and
+restored byte-for-byte, the export dir and the backup removed on exit) and
+runs `src/user/wineprobe.c` (native) in the intel guest:
+
+| step | result in HobbyOS |
+|---|---|
+| `wineserver --version` | prints `Wine 11.0`, exit 0 |
+| `wine --version` | prints `wine-11.0`, exit 0 |
+| `wineserver -f -p5` (WINEPREFIX `/CPPFX` on FAT) | starts; creates `/tmp/.wine-0/server-101-22c8/` on the tmpfs, binds its socket, takes the lock; alive after 4 s |
+| `wineserver -k` (a second compat process) | finds the server through the lock file (`F_GETLK` -> owner pid), sends SIGINT (delivered to Wine's handler) then SIGCONT; exits 0 |
+| server shutdown | **killed by SIGCONT** (`exited (signal 18)`): the compat SIG_DFL path terminates on SIGCONT, whose Linux default is "continue" — the same class as cp-cpu `fd52f2b0` (CHLD/URG/WINCH); SIGCONT (and SIGSTOP/SIGTSTP semantics) belongs on that list (C1-cpu) |
+
+Two further findings, both recorded as the next lanes' input:
+
+- **`MAP_PRIVATE` of a tmpfs file is refused** (`[LCOMPAT] mmap fail ... -> -95
+  path=/tmp/.wine-0/server-101-22c8/tmpmap-…`).  Wine's
+  `check_current_dir_for_exec()` (`server/mapping.c:340-354`) then moves its
+  section temp files to the config dir (`:368-381`), i.e. onto FAT
+  (`/CPPFX/tmpmap-…`).  For KUSER_SHARED_DATA and every anonymous section to
+  stay on the coherent tmpfs object path, `vm_mmap` must accept MAP_PRIVATE
+  (copy-on-write) over a memfd/tmpfs object — the vm.c mmap/fault path
+  (C1-mmu).
+- `chmod` (nr 90) is ENOSYS (`chmod("socket", 0600)`, result ignored,
+  `server/request.c:831`) — C3-ext2b's setattr work.
+- A compat `open(dir, O_RDONLY)` on FAT16 used to be ENOENT; Wine pins its
+  config dir that way (`server/request.c:634`).  Fixed in this lane
+  (Linux-ABI processes only).
+
+`wine cmd /c echo` is not attempted: it needs `ARCH_SET_GS` and
+KUSER at `0x7ffe0000` (low VA), C1-mmu.
+
+## 9. Gate results on strix (2026-11-15)
+
+linuxci's root filesystem failed (journal aborted on a disk I/O error) and
+every result from it after 08:23 is void; all results below are from
+**strix** (AMD RYZEN AI MAX+ 395, Zen 5, **AVX-512**, KVM, kernel
+7.0.0-43-generic — linuxci was an AVX2-only EPYC), lane `cp-sys` vs base
+`~/cp/base` = `cyberpunk` @ 6e73e34e.  Raw extracts:
+`docs/cp-sys-evidence/strix-20261115/`.
+
+| gate | lane | base |
+|---|---|---|
+| `linux_probe_tmpfs` | **PASS** rc=0 | (new) |
+| `linux_probe_wsys` | **PASS** rc=0 | (new) |
+| `linux_probe_join` | FAIL rc=2,2,1,2 (row E every run, row A intermittent) | FAIL rc=1,2,1,2 (same rows) — **parity, base defect** |
+| `linux_probe_fd` | PASS | PASS |
+| `linux_probe_mem` | PASS | PASS |
+| `linux_probe_proc` | PASS | PASS |
+| `linux_probe_timers` | PASS | PASS |
+| `run_unit_tests_intel.sh` (TOOLS_SKIP=1) | 448 run, 2 failed (`virtio_gpu_test.c:213`, `:243`) | 448 run, the same 2 — **parity** |
+| Wine build (`build-wine.sh all`, JOBS=16) | 202 MiB staged, 873 files, static-pie preloader, max `GLIBC_2.29` | — |
+| Wine smoke | §8 | — |
+
+`join` row A ("park-first") is swallowed in the console by a spliced kernel
+`[FUTEX]` trace line in both trees and fails intermittently in both: a
+pre-existing defect (with row E) for the owner of `process_clone()` / the
+futex trace.

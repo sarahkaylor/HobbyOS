@@ -1,0 +1,15 @@
+LANE tmpfs gate_rc=0 [LP] done rc=0
+LANE wsys gate_rc=0 [LP] done rc=0
+LANE join gate_rc=1 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1)
+LANE fd gate_rc=0 [LP] done rc=0
+LANE mem gate_rc=0 [LP] done rc=0
+LANE proc gate_rc=0 [LP] done rc=0
+LANE timers gate_rc=0 [LP] done rc=0
+BASE join gate_rc=1 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1)
+BASE fd gate_rc=0 [LP] done rc=0
+BASE mem gate_rc=0 [LP] done rc=0
+BASE proc gate_rc=0 [LP] done rc=0
+BASE timers gate_rc=0 [LP] done rc=0
+LANE unit rc=1
+BASE unit rc=1
+ALLDONE
