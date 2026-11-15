@@ -164,6 +164,37 @@ static int l_thr_slot_of(struct process *p, int create) {
   return i;
 }
 
+/* C1-thr: a pid slot starts clean.  l_thr[] is pid-indexed and only
+   linux_compat_thread_exit() used to drop its state, so a pid whose last
+   occupant died WITHOUT that path (SIGKILL / group teardown, exit_group's
+   siblings, exec's terminated siblings) handed its robust_head -- and owner,
+   as, uaddr, pi -- to the next thread or process that got the pid: measured,
+   linux_probe_thr R3 (both reused pids reported the dead process's head).
+   Linux gives every clone child a NULL robust list, and C2-exec's execve
+   walks the list of a vfork child that still runs in its PARENT's memory, so
+   a stale head would mark OWNER_DIED in the parent.  process.c calls this
+   whenever a slot is handed to a new process (create, fork, vfork) or
+   thread (clone), before it can run.  Takes proc_lock (the wake/PI scans
+   read the table under it); the caller must not hold it. */
+void linux_compat_thr_slot_reset(struct process *p);
+void linux_compat_thr_slot_reset(struct process *p) {
+  if (!p || p->pid <= 0 || p->pid >= MAX_PROCESSES)
+    return;
+  uint64_t f = spinlock_acquire_irqsave(&proc_lock);
+  struct l_thr_slot *s = &l_thr[p->pid];
+  s->used = 0;
+  s->owner = 0;
+  s->as = 0;
+  s->uaddr = 0;
+  s->bitset = 0;
+  s->robust_head = 0;
+  s->pi = 0;
+  s->waits = 0;
+  s->wakes = 0;
+  s->park_seq = 0;
+  spinlock_release_irqrestore(&proc_lock, f);
+}
+
 /* Is slot `i` parked on (as,uaddr) right now?  Caller holds proc_lock. */
 static int l_futex_queued_locked(int i, struct addr_space *as,
                                  uint64_t uaddr) {
