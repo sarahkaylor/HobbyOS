@@ -28,46 +28,48 @@ void vfs_init(void) {
 /* path canonicalisation                                                */
 /* ==================================================================== */
 
-static void vfs_clean(const char *path, char *out, int cap) {
-  char temp[256];
-  int len = 0;
-  while (path[len] && len < 255) {
-    temp[len] = path[len];
-    len++;
-  }
-  temp[len] = '\0';
-
-  /* cp/ext2: 64 components, was 16 -- a deeper path used to lose its tail
-     components silently (Wine prefixes nest deeper than 16). */
-  char *stack[64];
+/* Canonicalise `path` ("//", "." and ".." collapsed, ".." at the root stays
+ * at the root, no trailing '/') into out[cap].  Same result FAT16's
+ * clean_path() gives for the paths it can hold.
+ *
+ * cp/ext2b: built in place, with no intermediate copy and no component cap.
+ * The old version copied at most 255 bytes and kept at most 64 components and
+ * then truncated the OUTPUT at cap -- every limit silently produced a
+ * different, shorter path (a deep Wine prefix path named its own ancestor).
+ * Now a result that does not fit `cap` is an error (-1), never a prefix. */
+static int vfs_clean(const char *path, char *out, int cap) {
+  /* starts[i] = output length before component i (the ".." pop target).  A
+     component costs at least two output bytes ("/x"), so cap/2 slots can
+     never overflow before `out` itself does. */
+  uint16_t starts[VFS_PATH_MAX / 2];
   int top = 0;
-  char *p = temp;
-  while (*p == '/') p++;
-  while (*p) {
-    char *comp = p;
-    while (*p && *p != '/') p++;
-    if (*p == '/') {
-      *p = '\0';
-      p++;
-    }
+  int pos = 1;
+  if (cap < 2) return -1;
+  if (cap > VFS_PATH_MAX) cap = VFS_PATH_MAX;
+  out[0] = '/';
+  const char *p = path;
+  for (;;) {
     while (*p == '/') p++;
-    if (comp[0] == '.' && comp[1] == '\0') continue;
-    if (comp[0] == '.' && comp[1] == '.' && comp[2] == '\0') {
-      if (top > 0) top--;
+    if (!*p) break;
+    const char *c = p;
+    while (*p && *p != '/') p++;
+    int n = (int)(p - c);
+    if (n == 1 && c[0] == '.') continue;
+    if (n == 2 && c[0] == '.' && c[1] == '.') {
+      if (top > 0) pos = starts[--top];
       continue;
     }
-    if (top < 64) stack[top++] = comp;
-  }
-
-  if (cap <= 0) return;
-  int pos = 0;
-  if (pos < cap - 1) out[pos++] = '/';
-  for (int i = 0; i < top; i++) {
-    if (i > 0 && pos < cap - 1) out[pos++] = '/';
-    for (int j = 0; stack[i][j] && pos < cap - 1; j++)
-      out[pos++] = stack[i][j];
+    if (top >= (int)(sizeof starts / sizeof starts[0])) return -1;
+    starts[top++] = (uint16_t)pos;
+    if (pos > 1) {
+      if (pos >= cap - 1) return -1;
+      out[pos++] = '/';
+    }
+    if (n >= cap - pos) return -1; /* the name plus the terminator */
+    for (int i = 0; i < n; i++) out[pos++] = c[i];
   }
   out[pos] = '\0';
+  return 0;
 }
 
 /* M5c: a bind may redirect this canonical path to another filesystem.  Applied
@@ -90,26 +92,30 @@ static int vfs_bind_apply(char *path, int cap) {
 int vfs_abs_path(const char *path, char *out, int cap) {
   if (!path || cap <= 0) return -1;
   if (path[0] == '/') {
-    vfs_clean(path, out, cap);
+    if (vfs_clean(path, out, cap) != 0) return -1;
     return vfs_bind_apply(out, cap);
   }
 
+  /* cp/ext2b: cwd + '/' + path, refused (not cut) when it does not fit.  The
+     old join stopped copying the cwd at 200 bytes and the path at 250, so a
+     long relative name silently became a different file.  The raw join may be
+     longer than the canonical result ("a/../b"), hence the doubled buffer. */
   struct process *cur = process_group(current_process()); /* P1 (D7) */
   const char *cwd = (cur && cur->cwd[0]) ? cur->cwd : "/";
-  char raw[256];
+  char raw[2 * VFS_PATH_MAX];
   int pos = 0;
-  while (cwd[pos] && pos < 200) {
+  while (cwd[pos]) {
+    if (pos >= (int)sizeof raw - 2) return -1;
     raw[pos] = cwd[pos];
     pos++;
   }
   if (pos > 0 && raw[pos - 1] != '/') raw[pos++] = '/';
-  int k = 0;
-  while (path[k] && pos + k < 250) {
-    raw[pos + k] = path[k];
-    k++;
+  for (int k = 0; path[k]; k++) {
+    if (pos >= (int)sizeof raw - 1) return -1;
+    raw[pos++] = path[k];
   }
-  raw[pos + k] = '\0';
-  vfs_clean(raw, out, cap);
+  raw[pos] = '\0';
+  if (vfs_clean(raw, out, cap) != 0) return -1;
   return vfs_bind_apply(out, cap);
 }
 

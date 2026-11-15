@@ -33,7 +33,7 @@
 
 #define EXT2_ROOT_INO 2
 #define EXT2_NAME_MAX 255
-#define EXT2_PATH_MAX 256       /* == VFS_PATH_MAX */
+#define EXT2_PATH_MAX 1024      /* == VFS_PATH_MAX (cp/ext2b: was 256) */
 #define EXT2_SYMLINK_MAX 4095   /* additionally < block size */
 #define EXT2_CACHE_MAX 1024     /* cache slots (one block each) */
 #define EXT2_HASH_N 1024

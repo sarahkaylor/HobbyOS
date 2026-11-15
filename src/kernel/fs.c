@@ -924,7 +924,7 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
        open of an existing file in a subdirectory fail with
        ENOENT. */
     struct fat16_dir_entry probe_entry;
-    char abs[256];
+    char abs[VFS_PATH_MAX]; /* cp/ext2b: was 256 */
     int exists = 0;
     if (vfs_abs_path(filename, abs, sizeof abs) == 0) {
       exists = (fat16_resolve_path(abs, &probe_entry, 0, 0) == 0);
@@ -2443,8 +2443,10 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
     k_stat_fill(st, K_DEV_PROCFS, 3, K_S_IFLNK | 0777, n);
     return 0;
   }
-  char abs[256];
-  if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
+  /* cp/ext2b: VFS_PATH_MAX, not 256 -- ext2v_stat() rewrites this buffer with
+     the resolved path and assumes VFS_PATH_MAX bytes (ext2_vfs.h). */
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = ENAMETOOLONG; return -1; }
   /* cp/ext2: stat(2) follows symlinks; one that leaves the volume continues
      with the redirected path below. */
   if (ext2v_owns(abs)) {

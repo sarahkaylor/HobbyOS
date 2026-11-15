@@ -19,7 +19,15 @@
  * Only read operations are routed to NFS: mutations there fail with -1.
  */
 
-#define VFS_PATH_MAX 256
+/* cp/ext2b: 1024 (was 256).  Wine prefix paths (Windows MAX_PATH 260 below
+ * /EXT/<prefix>/drive_c) do not fit 256.  This is the size of every kernel
+ * path buffer that holds a canonical absolute path (struct file.path, the
+ * ext2 resolver, the compat path rows); a path that does not fit is refused
+ * (-1 / -ENAMETOOLONG), never truncated.  Not raised further: several of these
+ * buffers live on the 64 KiB kernel stack at once (a rename holds five).
+ * The process cwd (struct process.cwd, 128 bytes) is a separate, smaller
+ * limit: docs/cp-ext2b.md section 5. */
+#define VFS_PATH_MAX 1024
 
 /* Kernel-facing mount info for sysinfo(8). */
 struct vfs_mountinfo {

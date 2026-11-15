@@ -76,7 +76,10 @@ static uint8_t mode_to_ft(uint32_t mode) {
  * root stays at the root), but without its 16-component limit.  Returns the
  * length or -ENAMETOOLONG. */
 static int e2_canon(const char *in, char *out, int cap) {
-  int starts[128];
+  /* cp/ext2b: one slot per possible component of an EXT2_PATH_MAX path
+     ("a/" pairs), so the depth check below can only fire on a path that is
+     too long anyway. */
+  uint16_t starts[EXT2_PATH_MAX / 2];
   int top = 0, pos = 1;
   if (cap < 2) return -ENAMETOOLONG;
   out[0] = '/';
@@ -92,13 +95,13 @@ static int e2_canon(const char *in, char *out, int cap) {
       if (top > 0) pos = starts[--top];
       continue;
     }
-    if (top >= 128) return -ENAMETOOLONG;
+    if (top >= (int)(sizeof starts / sizeof starts[0])) return -ENAMETOOLONG;
     int at = pos;
     if (pos > 1) {
       if (pos >= cap - 1) return -ENAMETOOLONG;
       out[pos++] = '/';
     }
-    starts[top++] = at;
+    starts[top++] = (uint16_t)at;
     if (pos + n >= cap) return -ENAMETOOLONG;
     for (int i = 0; i < n; i++) out[pos++] = c[i];
   }
