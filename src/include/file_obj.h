@@ -33,6 +33,15 @@ struct process;
 int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
                      uint32_t *size);
 
+/* GB-308: write MAP_SHARED pages back through an fd the process still holds on
+ * that file (the object cannot carry a path -- this kernel has no kmalloc).  0,
+ * or -EBADF when no such fd exists, in which case the caller must not claim
+ * durability. */
+struct trap_frame;
+int file_writeback_fat16(struct process *p, uint16_t cluster, uint32_t size,
+                         uint32_t off, const void *kbuf, uint32_t len,
+                         struct trap_frame *tf);
+
 /* L54: resolve an fd to a REGULAR NFS file's identity (mount index + NFSv3
  * file handle + size).  This is what lets v2 mmap a file on /NFS: RimWorld's
  * XML loader uses MemoryMappedFile on Data/*.xml, and answering -ENOTSUP

@@ -68,6 +68,7 @@
 #include "linux_syscall.h"
 #include "process.h"
 #include "vm.h"
+#include "file_obj.h" /* GB-308: MAP_SHARED write-back */
 
 #define LPG ((uint64_t)FRAME_SIZE) /* 4 KiB: the Linux page size musl assumes */
 
@@ -516,8 +517,40 @@ static int l_mem_msync(struct process *p, struct trap_frame *tf) {
       if (!vm_region_find(as, a)) return l_ret(tf, -ENOMEM);
     }
   }
-  /* Every page is RAM, and a MAP_SHARED object frame is the page cache itself:
-     there is no dirty write-back buffer to flush, so success is the truth. */
+  /* GB-308: a MAP_SHARED file page must reach the file.  "Every page is RAM and
+     the frame is the page cache, so success is the truth" was wrong, and
+     measurably so: a mapping wrote 'Z' at offset 0, force() returned 0, and a
+     plain read() in the same process returned 'A' (obj/jdk/mmaptouch.log).
+     Frames are identity-mapped, so the page-cache frame is a valid kernel
+     pointer and the bytes go straight through an fd the process still holds.
+     Private and read-only regions have nothing to flush.  Over-approximate: we
+     write every present page of the region, not only modified ones -- there is
+     no dirty tracking (file_obj.c has none), and rewriting an unmodified page
+     writes the same bytes.  The cache is then invalidated so the ordinary read
+     path re-reads from disk and sees what the mapping wrote. */
+  int wrote = 0, failed = 0;
+  struct addr_space *as2 = l_as(p);
+  uint64_t rlen2 = l_up(len);
+  for (uint64_t a = addr; as2 && a < addr + rlen2; a += LPG) {
+    struct vm_region *r = vm_region_find(as2, a);
+    if (!r || !r->obj || r->obj->kind != VM_OBJ_FILE) continue;
+    if (!r->obj->file_start_cluster || !r->obj->size) continue;
+    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) continue;
+    uint64_t off = r->obj_off + (a - r->base);
+    uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
+    uint64_t fr = file_obj_page(r->obj, pg);
+    if (!fr) continue;
+    uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
+                                                           : (uint64_t)LPG);
+    if ((uint64_t)off + n > r->obj->size)
+      n = (uint32_t)(r->obj->size - off);
+    int wr = file_writeback_fat16(p, r->obj->file_start_cluster,
+                                 (uint32_t)r->obj->size, (uint32_t)off,
+                                 (const void *)fr, n, tf);
+    if (wr == 0) wrote++; else failed++;
+  }
+  if (wrote) file_obj_invalidate_all();
+  if (failed) return l_ret(tf, -EBADF);
   return l_ret(tf, 0);
 }
 

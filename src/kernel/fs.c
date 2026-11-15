@@ -3790,6 +3790,41 @@ int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
   return 0;
 }
 
+/* GB-308 MAP_SHARED write-back.  Write `len` bytes at file offset `off` into
+ * the FAT16 file identified by (start_cluster, file_size), through an fd this
+ * process already holds on it.  Why an fd and not the object: there is no
+ * kmalloc in this kernel, so the page-cache object cannot carry the file's
+ * path, and a mapping outlives the fd that created it.  The fd is the only
+ * handle available at msync time; when the process has none (channel closed
+ * before force()), the caller gets -EBADF and must not report durability.
+ *
+ * The cursor is saved and restored: the JDK preads its jimage from several
+ * class-loader threads, and a moved cursor is what produced "ClassFormatError:
+ * Unknown constant tag 47" earlier in this port. */
+int file_writeback_fat16(struct process *p, uint16_t cluster, uint32_t size,
+                         uint32_t off, const void *kbuf, uint32_t len,
+                         struct trap_frame *tf) {
+  p = process_group(p);
+  if (!p) return -EBADF;
+  for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
+    int gfd = p->open_fds[fd];
+    if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) continue;
+    struct file *f = &global_file_table[gfd];
+    if (f->type != FILE_TYPE_FAT16) continue;
+    if (f->fat16.entry.start_cluster != cluster) continue;
+    if (f->fat16.entry.file_size != size) continue;
+    int err = 0;
+    int64_t cur = file_seek(p, fd, 0, 1 /*SEEK_CUR*/, &err);
+    if (cur < 0) return (int)cur;
+    int64_t at = file_seek(p, fd, off, 0 /*SEEK_SET*/, &err);
+    if (at < 0) return (int)at;
+    int w = file_write(p, fd, kbuf, (int)len, tf);
+    file_seek(p, fd, cur, 0 /*SEEK_SET*/, &err); /* restore, ignore failure */
+    return w == (int)len ? 0 : (w < 0 ? w : -EIO);
+  }
+  return -EBADF;
+}
+
 /* L54: the NFS sibling of file_fat16_ident.  A regular file on a mounted
  * export is identified by (mount index, NFSv3 file handle); nfs_obj_get()
  * keys the page cache on that pair, so every mapping of one file shares its
