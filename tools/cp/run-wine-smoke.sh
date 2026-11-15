@@ -35,8 +35,23 @@ sudo -n mkdir -p "$EXPORT/WINE"
 sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/"
 sudo -n chmod -R a+rX "$EXPORT"
 OPTS="ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534"
+# /etc/exports is the host's own config: back it up, add one line, and put it
+# back BYTE-FOR-BYTE on every exit path (trap), then re-export, so the host's
+# export set is exactly what it was before this script ran.
+EXP_BAK=""
+restore_exports() {
+  [ -n "$EXP_BAK" ] || return 0
+  sudo -n cp -a "$EXP_BAK" /etc/exports && sudo -n exportfs -ra
+  if sudo -n cmp -s "$EXP_BAK" /etc/exports; then
+    echo "== /etc/exports restored (cmp identical to $EXP_BAK)"
+  else
+    echo "== WARNING: /etc/exports differs from $EXP_BAK"
+  fi
+}
+trap restore_exports EXIT
 if ! grep -qsE "^[[:space:]]*${EXPORT//./\\.}[[:space:]]" /etc/exports; then
-  sudo -n cp -a /etc/exports "/etc/exports.cp-sys-backup.$(date +%Y%m%d%H%M%S)"
+  EXP_BAK="/etc/exports.cp-sys-backup.$(date +%Y%m%d%H%M%S)"
+  sudo -n cp -a /etc/exports "$EXP_BAK"
   printf '%s *(%s)\n' "$EXPORT" "$OPTS" | sudo -n tee -a /etc/exports >/dev/null
 fi
 sudo -n exportfs -ra
