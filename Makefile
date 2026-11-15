@@ -329,7 +329,7 @@ ifeq ($(ARCH),intel)
   # nothing" on the icewm desktop, while the keyboard path worked fine because
   # keys are not routed through a pointer device).  tools/rw/rw_desktop_drive.py
   # and the GUI gates all drive the desktop through absolute events.
-  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M q35,vmport=on $(X64_CPU_ARGS) -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
@@ -533,6 +533,21 @@ ifeq ($(ARCH),intel)
   endif
 endif
 
+# cp P1 (docs/cyberpunk.md AD-4): the guest CPU model under KVM.  With no
+# -cpu, QEMU gives a KVM guest its `qemu64` model, which has no XSAVE and no
+# AVX, so the kernel's XSAVE path (src/kernel/arch/x64/fpu.c) could never run
+# and AVX code would #UD.  So whenever the final QEMU_ARGS asks for KVM and
+# names no -cpu of its own, the x64 QEMU_CMD adds $(X64_KVM_CPU) (default
+# `-cpu host`).  Recursive (=) on purpose: it is evaluated when QEMU_CMD is
+# expanded, so it sees QEMU_ARGS whether it came from this file or from a
+# wrapper's command line (t3_tier.sh, run_unit_tests_intel.sh).  An explicit
+# -cpu always wins -- `-cpu qemu64` is how the FXSAVE fallback is tested --
+# and TCG runs are untouched.  AVX-512 needs no masking here: the kernel's
+# XCR0 never enables its state, so user code that checks XGETBV (glibc, Wine,
+# MSVC's runtime) never selects it; pass X64_KVM_CPU='-cpu host,-avx512f' to
+# hide it from CPUID as well.
+X64_KVM_CPU ?= -cpu host
+X64_CPU_ARGS = $(if $(findstring -cpu ,$(QEMU_ARGS) ),,$(if $(findstring -enable-kvm,$(QEMU_ARGS)),$(X64_KVM_CPU)))
 
 # --- GX (docs/graphics-accel.md §3-D5): resolve QEMU_GPU to the concrete
 # display/device pair referenced by the per-arch QEMU_CMD lines above.
