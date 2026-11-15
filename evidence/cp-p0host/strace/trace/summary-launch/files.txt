@@ -1,0 +1,96 @@
+# game-dir files touched: opens, bytes read (read/pread64/readv), calls
+archive/pc/content/audio_1_general.archive	size=198012928	opens=0	bytes_read=1582212	reads={'read': 12}	mmaps=0	mmap_bytes=0
+archive/pc/content/audio_2_soundbanks.archive	size=8898625536	opens=0	bytes_read=97738060	reads={'read': 790}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_1_engine.archive	size=1733124096	opens=0	bytes_read=205944876	reads={'read': 1252}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_2_mainmenu.archive	size=307200	opens=0	bytes_read=315380	reads={'read': 35}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_3_nightcity.archive	size=9015320576	opens=0	bytes_read=191021284	reads={'read': 501}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_3_nightcity_gi.archive	size=11869745152	opens=0	bytes_read=1968548	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_3_nightcity_terrain.archive	size=3028979712	opens=0	bytes_read=3611516	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_4_animation.archive	size=1094791168	opens=0	bytes_read=8687436	reads={'read': 152}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_4_appearance.archive	size=7053127680	opens=0	bytes_read=79098220	reads={'read': 226}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_4_gamedata.archive	size=3626225664	opens=0	bytes_read=31511276	reads={'read': 156}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_5_video.archive	size=13422956544	opens=0	bytes_read=40196	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_ar_text.archive	size=8790016	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_cs_text.archive	size=8265728	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_de_text.archive	size=8122368	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_en_text.archive	size=7786496	opens=0	bytes_read=11489244	reads={'read': 1201}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_en_voice.archive	size=5121163264	opens=0	bytes_read=8527804	reads={'read': 6}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_es-es_text.archive	size=7954432	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_es-mx_text.archive	size=7921664	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_fr_text.archive	size=8208384	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_hu_text.archive	size=8249344	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_it_text.archive	size=7823360	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_ja_text.archive	size=8167424	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_ko_text.archive	size=8232960	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_pl_text.archive	size=8024064	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_pt_text.archive	size=7913472	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_ru_text.archive	size=8687616	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_th_text.archive	size=8855552	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_tr_text.archive	size=7974912	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_ua_text.archive	size=8904704	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_zh-cn_text.archive	size=8028160	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/lang_zh-tw_text.archive	size=7901184	opens=0	bytes_read=229340	reads={'read': 2}	mmaps=0	mmap_bytes=0
+archive/pc/content/memoryresident_1_general.archive	size=15126528	opens=0	bytes_read=15127036	reads={'read': 3}	mmaps=0	mmap_bytes=0
+bin/x64/CChromaEditorLibrary64.dll	size=437136	opens=0	bytes_read=407384	reads={'pread64': 5}	mmaps=2	mmap_bytes=24576
+bin/x64/Cyberpunk2077.exe	size=66704848	opens=1	bytes_read=190578516	reads={'pread64': 6, 'read': 3}	mmaps=6	mmap_bytes=9510912
+bin/x64/GFSDK_Aftermath_Lib.x64.dll	size=1249232	opens=0	bytes_read=1232736	reads={'pread64': 5}	mmaps=2	mmap_bytes=8192
+bin/x64/GameServicesSteam.dll	size=47568	opens=0	bytes_read=32664	reads={'pread64': 6}	mmaps=1	mmap_bytes=4096
+bin/x64/GfnRuntimeSdk.dll	size=3745848	opens=0	bytes_read=7494042	reads={'read': 38, 'pread64': 9}	mmaps=2	mmap_bytes=8192
+bin/x64/PhysX3CharacterKinematic_x64.dll	size=580560	opens=0	bytes_read=564056	reads={'pread64': 5}	mmaps=2	mmap_bytes=8192
+bin/x64/PhysX3Common_x64.dll	size=2045904	opens=0	bytes_read=2030976	reads={'pread64': 7}	mmaps=1	mmap_bytes=4096
+bin/x64/PhysX3Cooking_x64.dll	size=667088	opens=0	bytes_read=652160	reads={'pread64': 7}	mmaps=1	mmap_bytes=4096
+bin/x64/PhysX3_x64.dll	size=2601936	opens=0	bytes_read=2587008	reads={'pread64': 7}	mmaps=1	mmap_bytes=4096
+bin/x64/PxFoundation_x64.dll	size=561616	opens=0	bytes_read=546728	reads={'pread64': 8}	mmaps=1	mmap_bytes=4096
+bin/x64/REDEngineErrorReporter.exe	size=288720	opens=0	bytes_read=531040	reads={'pread64': 5}	mmaps=4	mmap_bytes=32768
+bin/x64/REDGalaxy64.dll	size=7988176	opens=0	bytes_read=7896632	reads={'pread64': 8}	mmaps=3	mmap_bytes=86016
+bin/x64/amd_ags_x64.dll	size=181200	opens=0	bytes_read=182056	reads={'pread64': 4, 'read': 5}	mmaps=0	mmap_bytes=0
+bin/x64/amd_fidelityfx_framegeneration_dx12.dll	size=40085776	opens=0	bytes_read=40072600	reads={'pread64': 5}	mmaps=2	mmap_bytes=8192
+bin/x64/amd_fidelityfx_loader_dx12.dll	size=26376	opens=0	bytes_read=14744	reads={'pread64': 6}	mmaps=1	mmap_bytes=4096
+bin/x64/amd_fidelityfx_upscaler_dx12.dll	size=28761864	opens=0	bytes_read=28750232	reads={'pread64': 6}	mmaps=1	mmap_bytes=4096
+bin/x64/bink2w64.dll	size=394960	opens=0	bytes_read=341672	reads={'pread64': 7}	mmaps=2	mmap_bytes=49152
+bin/x64/dbghelp.dll	size=1868736	opens=0	bytes_read=1920	reads={'pread64': 8}	mmaps=0	mmap_bytes=0
+bin/x64/icudt.dll	size=17872	opens=0	bytes_read=2488	reads={'pread64': 2}	mmaps=1	mmap_bytes=4096
+bin/x64/icuin.dll	size=2647504	opens=0	bytes_read=2621272	reads={'pread64': 5}	mmaps=2	mmap_bytes=16384
+bin/x64/icuuc.dll	size=1905616	opens=0	bytes_read=1879896	reads={'pread64': 5}	mmaps=2	mmap_bytes=16384
+bin/x64/libcurl.dll	size=434128	opens=0	bytes_read=417556	reads={'pread64': 6}	mmaps=2	mmap_bytes=8192
+bin/x64/libxell.dll	size=346984	opens=0	bytes_read=333360	reads={'pread64': 9}	mmaps=2	mmap_bytes=8192
+bin/x64/libxess.dll	size=77771112	opens=0	bytes_read=77650008	reads={'pread64': 8}	mmaps=4	mmap_bytes=122880
+bin/x64/libxess_fg.dll	size=45557608	opens=0	bytes_read=45514328	reads={'pread64': 9}	mmaps=3	mmap_bytes=40960
+bin/x64/oo2ext_7_win64.dll	size=1238480	opens=0	bytes_read=1222856	reads={'pread64': 5}	mmaps=2	mmap_bytes=8192
+bin/x64/redlexer_native.dll	size=136656	opens=0	bytes_read=121744	reads={'pread64': 6}	mmaps=1	mmap_bytes=4096
+bin/x64/sl.common.dll	size=843392	opens=0	bytes_read=3380996	reads={'read': 70, 'pread64': 12}	mmaps=2	mmap_bytes=8192
+bin/x64/sl.dlss.dll	size=422016	opens=0	bytes_read=1695492	reads={'read': 70, 'pread64': 12}	mmaps=2	mmap_bytes=8192
+bin/x64/sl.dlss_d.dll	size=437376	opens=0	bytes_read=1754884	reads={'read': 70, 'pread64': 10}	mmaps=4	mmap_bytes=16384
+bin/x64/sl.dlss_g.dll	size=636032	opens=0	bytes_read=2548484	reads={'read': 70, 'pread64': 10}	mmaps=4	mmap_bytes=16384
+bin/x64/sl.interposer.dll	size=652928	opens=0	bytes_read=1308034	reads={'pread64': 5, 'read': 35}	mmaps=2	mmap_bytes=8192
+bin/x64/sl.nis.dll	size=1155712	opens=0	bytes_read=4602628	reads={'read': 72, 'pread64': 8}	mmaps=6	mmap_bytes=40960
+bin/x64/sl.pcl.dll	size=360064	opens=0	bytes_read=1425156	reads={'read': 70, 'pread64': 10}	mmaps=4	mmap_bytes=32768
+bin/x64/sl.reflex.dll	size=388736	opens=0	bytes_read=1427204	reads={'read': 70, 'pread64': 10}	mmaps=4	mmap_bytes=147456
+bin/x64/steam_api64.dll	size=301928	opens=0	bytes_read=290232	reads={'pread64': 7}	mmaps=1	mmap_bytes=4096
+engine/config/base/animation.ini	size=582	opens=0	bytes_read=582	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/config/base/general.ini	size=61	opens=0	bytes_read=61	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/config/base/multiplayer.ini	size=374	opens=0	bytes_read=374	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/config/base/rendering.ini	size=42	opens=0	bytes_read=42	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/config/base/resources.ini	size=46	opens=0	bytes_read=46	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/config/base/scenesystem.ini	size=886	opens=0	bytes_read=886	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/config/base/smartobjects.ini	size=98	opens=0	bytes_read=98	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/config/giweights.json	size=131	opens=0	bytes_read=131	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/config/platform/pc/platformgameplay.ini	size=125	opens=0	bytes_read=125	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/config/platform/pc/rendering.ini	size=44	opens=0	bytes_read=44	reads={'read': 1}	mmaps=0	mmap_bytes=0
+engine/shader_final.cache	size=176912852	opens=0	bytes_read=176912852	reads={'read': 6}	mmaps=0	mmap_bytes=0
+engine/staticshader_final.cache	size=16192446	opens=0	bytes_read=16192478	reads={'read': 211}	mmaps=0	mmap_bytes=0
+r6/cache/final.redscripts	size=19280419	opens=0	bytes_read=19280419	reads={'read': 155}	mmaps=0	mmap_bytes=0
+r6/cache/tweakdb.bin	size=44143434	opens=0	bytes_read=44143434	reads={'read': 1}	mmaps=0	mmap_bytes=0
+r6/config/bumpersSettings.json	size=74	opens=0	bytes_read=74	reads={'read': 1}	mmaps=0	mmap_bytes=0
+r6/config/inputContexts.xml	size=122987	opens=0	bytes_read=245974	reads={'read': 2}	mmaps=0	mmap_bytes=0
+r6/config/inputDeadzones.xml	size=1375	opens=0	bytes_read=1375	reads={'read': 1}	mmaps=0	mmap_bytes=0
+r6/config/inputUserMappings.xml	size=102074	opens=0	bytes_read=102074	reads={'read': 1}	mmaps=0	mmap_bytes=0
+r6/config/settings/options.json	size=94960	opens=0	bytes_read=94960	reads={'read': 1}	mmaps=0	mmap_bytes=0
+r6/config/settings/platform/pc/options.json	size=117829	opens=0	bytes_read=117829	reads={'read': 1}	mmaps=0	mmap_bytes=0
+r6/config/uiInputActions.xml	size=963	opens=0	bytes_read=963	reads={'read': 1}	mmaps=0	mmap_bytes=0
+r6/publishing/x64/steam/additional-content/addonDescriptions.xml	size=527	opens=0	bytes_read=527	reads={'read': 1}	mmaps=0	mmap_bytes=0
+# TOTAL bytes read from game dir: 1350000340
+# bytes read by Cyberpunk2077.exe: 1222640316
+# bytes read by REDEngineErrorReporter.exe: 263680
+# bytes read by steam.exe: 127048012
+# bytes read by wineserver(daemon): 48332

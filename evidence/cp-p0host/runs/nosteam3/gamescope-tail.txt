@@ -1,0 +1,60 @@
+[gamescope] [[0;34mInfo[0m]  [0;37mvulkan:[0m   AB4H (0x48344241)
+[gamescope] [[0;34mInfo[0m]  [0;37mvulkan:[0m   XB4H (0x48344258)
+[gamescope] [[0;34mInfo[0m]  [0;37mvulkan:[0m   AB48 (0x38344241)
+[gamescope] [[0;34mInfo[0m]  [0;37mvulkan:[0m   XB48 (0x38344258)
+[gamescope] [[0;34mInfo[0m]  [0;37mvulkan:[0m   AB30 (0x30334241)
+[gamescope] [[0;34mInfo[0m]  [0;37mvulkan:[0m   XB30 (0x30334258)
+[gamescope] [[0;34mInfo[0m]  [0;37mvulkan:[0m   AR30 (0x30335241)
+[gamescope] [[0;34mInfo[0m]  [0;37mvulkan:[0m   XR30 (0x30335258)
+[gamescope] [[0;34mInfo[0m]  [0;37mwlserver:[0m Using explicit sync when available
+[gamescope] [[0;34mInfo[0m]  [0;37mwlserver:[0m Running compositor on wayland display 'gamescope-0'
+[gamescope] [[0;34mInfo[0m]  [0;37mwlserver:[0m [backend/headless/backend.c:17] Starting headless backend
+[gamescope] [[0;34mInfo[0m]  [0;37mwlserver:[0m Successfully initialized libei for input emulation!
+[gamescope] [[0;34mInfo[0m]  [0;37mwlserver:[0m [xwayland/server.c:107] Starting Xwayland on :1
+[gamescope] [[0;34mInfo[0m]  [0;37mpipewire:[0m stream state changed: connecting
+[gamescope] [[0;34mInfo[0m]  [0;37mpipewire:[0m stream state changed: paused
+[gamescope] [[0;34mInfo[0m]  [0;37mpipewire:[0m stream available on node ID: 71
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Embedded, no cursor set. Using left_ptr by default.
+[gamescope] [[0;34mInfo[0m]  [0;37mvblank:[0m Using timerfd.
+[gamescope] [[0;33mWarn[0m]  [0;37mlaunch:[0m Failed to open systemd message bus, there will be no cgroup protection for focused windows.
+
+The XKEYBOARD keymap compiler (xkbcomp) reports:
+> Warning:          Unsupported maximum keycode 708, clipping.
+>                   X11 cannot support keycodes above 255.
+> Warning:          Virtual modifier Hyper multiply defined
+>                   Using 0, ignoring 0
+> Warning:          Virtual modifier ScrollLock multiply defined
+>                   Using 0, ignoring 0
+Errors from xkbcomp are not fatal to the X server
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;33mWarn[0m]  [0;37mxwm:[0m got the same buffer committed twice, ignoring.
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;31mError[0m] [0;37mgamescope_ei:[0m Unhandled libei event!
+[xwayland ei] Unhandled event EI_EVENT_SYNC (91)
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mlaunch:[0m Primary child shut down!
+ 23:27:07 | INFO | Disconnected by EIS
+(EE) failed to write to Xwayland fd: Broken pipe

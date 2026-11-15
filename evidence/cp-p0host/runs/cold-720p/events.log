@@ -1,0 +1,11 @@
+1794716130751137389 waiting for /home/sarah/cp/measure.lock
+1794716130762188314 lock held=1
+1794716130766016684 pre-hook: python3 /home/sarah/cp/p0host/tools/evict.py '/mnt/fast/games/steamapps/common/Cyberpunk 2077' '/mnt/fast/games/steamapps/common/Proton - Experimental'
+evicted 7678 files, 64.4 GiB
+1794716146816529826 nav start
+1794716179005971804 press-to-continue seen (n0022)
+1794716220482609496 press-to-continue seen (n0048)
+1794716224512143311 main menu seen (n0050)
+1794716234787041468 snapshot menu pid=58056 threads=87 fds=432 run_processes=15 run_threads=177
+1794716234787082024 nav done (menu)
+1794716243069298285 run end rc=0

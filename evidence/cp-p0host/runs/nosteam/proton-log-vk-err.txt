@@ -1,0 +1,7 @@
+      2 err:openxr:get_vulkan_extensions Could not create key, status 0x2.
+      1 trace:loaddll:build_module Loaded L"C:\\windows\\system32\\openvr_api_dxvk.dll" at 00006FFFFC6C0000: native
+      1 info:  DXVK: v3.1.1-209-g1039f682058fa71
+      1 err:steamclient:steamclient_init unable to load native steamclient library
+      1 err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c0000142
+      1 err:msvcrt:_wassert (L"!status",L"../src-lsteamclient/steamclient_main.c",375)
+      1   pEngineName: DXVK

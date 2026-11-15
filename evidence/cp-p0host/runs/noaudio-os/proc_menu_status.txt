@@ -1,0 +1,61 @@
+Name:	GameThread
+Umask:	0022
+State:	R (running)
+Tgid:	62320
+Ngid:	0
+Pid:	62320
+PPid:	62209
+TracerPid:	0
+Uid:	1000	1000	1000	1000
+Gid:	1000	1000	1000	1000
+FDSize:	512
+Groups:	4 24 27 30 46 115 122 986 1000 
+NStgid:	62320
+NSpid:	62320
+NSpgid:	62320
+NSsid:	62320
+Kthread:	0
+VmPeak:	148059568 kB
+VmSize:	147991056 kB
+VmLck:	     144 kB
+VmPin:	       0 kB
+VmHWM:	 2317304 kB
+VmRSS:	 2275816 kB
+RssAnon:	 2146124 kB
+RssFile:	  124524 kB
+RssShmem:	    5168 kB
+VmData:	 3063464 kB
+VmStk:	     136 kB
+VmExe:	       8 kB
+VmLib:	  237668 kB
+VmPTE:	    7584 kB
+VmSwap:	       0 kB
+HugetlbPages:	       0 kB
+CoreDumping:	0
+THP_enabled:	1
+untag_mask:	0xffffffffffffffff
+Threads:	90
+SigQ:	3/355963
+SigPnd:	0000000000000000
+ShdPnd:	0000000000000000
+SigBlk:	0000000000000000
+SigIgn:	0000000000001000
+SigCgt:	00000001400006fe
+CapInh:	0000000000000000
+CapPrm:	0000000000000000
+CapEff:	0000000000000000
+CapBnd:	000001ffffffffff
+CapAmb:	0000000000000000
+NoNewPrivs:	0
+Seccomp:	0
+Seccomp_filters:	0
+Speculation_Store_Bypass:	thread vulnerable
+SpeculationIndirectBranch:	conditional enabled
+Cpus_allowed:	ffffffff
+Cpus_allowed_list:	0-31
+Mems_allowed:	00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001
+Mems_allowed_list:	0
+voluntary_ctxt_switches:	490436
+nonvoluntary_ctxt_switches:	15225
+x86_Thread_features:	
+x86_Thread_features_locked:	

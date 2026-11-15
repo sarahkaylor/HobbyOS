@@ -1,0 +1,20 @@
+count	proc	fd	request	result
+4368	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_IVPU_SUBMIT	ok
+1794	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT	ok
+693	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_TRANSFER	ok
+403	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_CS	ok
+399	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_RESET	ok
+396	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD	ok
+297	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_CREATE	ok
+297	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_DESTROY	ok
+198	Cyberpunk2077.exe	anon_inode:sync_file	SYNC_IOC_MERGE	ok
+198	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE	ok
+198	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_WAIT	ok
+104	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_QUERY	ok
+99	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT	ERR
+5	Cyberpunk2077.exe	/dev/dri/renderD129	_IOC	ok
+4	winedevice.exe	socket	SIOCGIFFLAGS	ok
+4	winedevice.exe	socket	SIOCGIFMTU	ok
+3	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_GEM_CLOSE	ok
+2	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_GEM_CREATE	ok
+2	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_GEM_MMAP or DRM_IOCTL_AMDXDNA_DESTROY_HWCTX	ok

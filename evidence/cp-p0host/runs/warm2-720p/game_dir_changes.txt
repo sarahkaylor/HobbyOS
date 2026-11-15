@@ -1,0 +1,3 @@
+/mnt/fast/games/steamapps
+/mnt/fast/games/steamapps/appmanifest_1091500.acf
+/mnt/fast/games/steamapps/workshop

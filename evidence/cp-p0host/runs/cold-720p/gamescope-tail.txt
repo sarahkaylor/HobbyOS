@@ -1,0 +1,60 @@
+
+[gamescope] [[0;33mWarn[0m]  [0;37mxwm:[0m got the same buffer committed twice, ignoring.
+[gamescope] [[0;33mWarn[0m]  [0;37mxwm:[0m D-Bus call to get unit corresponding to pid 58009 failed!
+
+[gamescope] [[0;33mWarn[0m]  [0;37mxwm:[0m D-Bus call to get unit corresponding to pid 58009 failed!
+
+[gamescope] [[0;33mWarn[0m]  [0;37mxwm:[0m D-Bus call to get unit corresponding to pid 58056 failed!
+
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;31mError[0m] [0;37mgamescope_ei:[0m Unhandled libei event!
+[xwayland ei] Unhandled event EI_EVENT_SYNC (91)
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;34mInfo[0m]  [0;37mxwm:[0m Screenshot saved to /tmp/gamescope.png
+[gamescope] [[0;33mWarn[0m]  [0;37mxwm:[0m D-Bus call to get unit corresponding to pid 58056 failed!
+
+[gamescope] [[0;34mInfo[0m]  [0;37mlaunch:[0m Primary child shut down!
+ 22:17:14 | INFO | Disconnected by EIS
+(EE) failed to write to Xwayland fd: Broken pipe

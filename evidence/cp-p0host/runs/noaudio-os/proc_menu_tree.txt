@@ -1,0 +1,17 @@
+pid	threads	rss	comm	argv0
+62211	1	27068 kB	python3	python3
+62213	3	57472 kB	steam.exe	c:\windows\system32\steam.exe
+62215	1	18588 kB	wineserver	/mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/../../bin/wineserver
+62219	10	11232 kB	services.exe	C:\windows\system32\services.exe
+62222	9	12536 kB	winedevice.exe	C:\windows\system32\winedevice.exe
+62232	9	18032 kB	plugplay.exe	C:\windows\system32\plugplay.exe
+62238	3	8596 kB	svchost.exe	C:\windows\system32\svchost.exe
+62253	10	27656 kB	winedevice.exe	C:\windows\system32\winedevice.exe
+62274	15	96644 kB	explorer.exe	C:\windows\system32\explorer.exe
+62302	6	9252 kB	rpcss.exe	C:\windows\system32\rpcss.exe
+62312	3	30072 kB	tabtip.exe	C:\windows\system32\tabtip.exe
+62314	17	130916 kB	xalia.exe	\\?\Z:\mnt\fast\games\steamapps\common\Proton - Experimental\files\share\wine/../xalia/xalia.exe
+62320	90	2275816 kB	GameThread	Z:\mnt\fast\games\steamapps\common\Cyberpunk 2077\bin\x64\Cyberpunk2077.exe
+62345	1	18720 kB	REDEngineErrorR	REDEngineErrorReporter.exe
+62363	1	27932 kB	conhost.exe	C:\windows\system32\conhost.exe
+# processes=15 threads=179

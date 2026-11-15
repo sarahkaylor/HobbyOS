@@ -1,0 +1,73 @@
+top - 23:29:20 up  6:08,  2 users,  load average: 14.64, 13.67, 11.61
+Tasks: 631 total,   3 running, 628 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  8.1 us,  7.2 sy,  0.0 ni, 84.6 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  96187.0 total,  44459.7 free,   9372.1 used,  43470.5 buff/cache     
+MiB Swap: 131072.0 total, 131071.9 free,      0.1 used.  86814.9 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+ 108244 sarah     20   0  141.4g   2.2g 130376 R 436.4   2.3   4:36.91 GameThread
+ 108140 sarah     20   0   20952  18476   2424 R  72.7   0.0   0:34.66 wineserver
+     18 root      rt   0       0      0      0 S   9.1   0.0   0:02.51 migration/0
+ 108236 sarah     20   0 1750448 136248  84436 S   9.1   0.1   0:03.62 xalia.exe
+ 113548 sarah     20   0   13380   5956   3864 R   9.1   0.0   0:00.01 top
+      1 root      20   0   27420  17908  11124 S   0.0   0.0   0:05.62 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.06 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_workqueue_release
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/R-rcu_gp
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/R-sync_wq
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/R-kvfree_rcu_reclaim
+      7 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/R-slub_flushwq
+      8 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/R-netns
+     10 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/0:0H-kblockd
+     13 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/R-mm_percpu_wq
+     14 root      20   0       0      0      0 S   0.0   0.0   0:02.69 ksoftirqd/0
+     15 root      20   0       0      0      0 I   0.0   0.0   0:20.33 rcu_preempt
+     16 root      20   0       0      0      0 S   0.0   0.0   0:00.00 rcu_exp_par_gp_kthread_worker/1
+     17 root      20   0       0      0      0 S   0.0   0.0   0:00.01 rcu_exp_gp_kthread_worker
+     19 root      20   0       0      0      0 S   0.0   0.0   0:00.00 kprobe-optimizer
+     20 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/0
+     21 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/0
+     22 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/1
+     23 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/1
+     24 root      rt   0       0      0      0 S   0.0   0.0   0:02.20 migration/1
+     25 root      20   0       0      0      0 S   0.0   0.0   0:01.33 ksoftirqd/1
+     27 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/1:0H-kblockd
+     28 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/2
+     29 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/2
+     30 root      rt   0       0      0      0 S   0.0   0.0   0:01.74 migration/2
+     31 root      20   0       0      0      0 S   0.0   0.0   0:01.38 ksoftirqd/2
+     33 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/2:0H-kblockd
+     34 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/3
+     35 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/3
+     36 root      rt   0       0      0      0 S   0.0   0.0   0:01.36 migration/3
+     37 root      20   0       0      0      0 S   0.0   0.0   0:08.06 ksoftirqd/3
+     39 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/3:0H-kblockd
+     40 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/4
+     41 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/4
+     42 root      rt   0       0      0      0 S   0.0   0.0   0:01.64 migration/4
+     43 root      20   0       0      0      0 S   0.0   0.0   0:02.17 ksoftirqd/4
+     45 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/4:0H-kblockd
+     46 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/5
+     47 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/5
+     48 root      rt   0       0      0      0 S   0.0   0.0   0:02.09 migration/5
+     49 root      20   0       0      0      0 S   0.0   0.0   0:00.69 ksoftirqd/5
+     51 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/5:0H-kblockd
+     52 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/6
+     53 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/6
+     54 root      rt   0       0      0      0 S   0.0   0.0   0:01.15 migration/6
+     55 root      20   0       0      0      0 S   0.0   0.0   0:06.37 ksoftirqd/6
+     57 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/6:0H-kblockd
+     58 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/7
+     59 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/7
+     60 root      rt   0       0      0      0 S   0.0   0.0   0:01.43 migration/7
+     61 root      20   0       0      0      0 S   0.0   0.0   0:00.72 ksoftirqd/7
+     63 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/7:0H-kblockd
+     64 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/8
+     65 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/8
+     66 root      rt   0       0      0      0 S   0.0   0.0   0:03.04 migration/8
+     67 root      20   0       0      0      0 S   0.0   0.0   0:00.50 ksoftirqd/8
+     69 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker/8:0H-kblockd
+     70 root      20   0       0      0      0 S   0.0   0.0   0:00.00 cpuhp/9
+     71 root     -51   0       0      0      0 S   0.0   0.0   0:00.00 idle_inject/9
+     72 root      rt   0       0      0      0 S   0.0   0.0   0:02.69 migration/9
+  

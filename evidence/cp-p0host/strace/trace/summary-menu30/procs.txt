@@ -1,0 +1,33 @@
+# trace 23:16:23.222685 .. 23:16:53.475690
+tgid	tids_seen	name
+98334	1	python3(proton script)
+98335	1	wineserver
+98336	3	steam.exe
+98337	1	wineserver
+98338	1	wineserver(daemon)
+98339	1	steam.exe(fork)
+98340	1	wineboot.exe
+98341	1	wineboot.exe(fork)
+98342	11	services.exe
+98351	1	services.exe(fork)
+98352	9	winedevice.exe
+98363	1	services.exe(fork)
+98364	9	plugplay.exe
+98375	1	services.exe(fork)
+98376	3	svchost.exe
+98386	1	services.exe(fork)
+98387	11	winedevice.exe
+98429	1	steam.exe(fork)
+98430	18	explorer.exe
+98462	1	services.exe(fork)
+98463	7	rpcss.exe
+98472	1	explorer.exe(fork)
+98473	7	tabtip.exe
+98474	1	explorer.exe(fork)
+98475	19	xalia.exe
+98490	1	steam.exe(fork)
+98491	124	Cyberpunk2077.exe
+98510	1	Cyberpunk2077.exe(fork)
+98511	1	REDEngineErrorReporter.exe
+98543	1	REDEngineErrorReporter.exe(fork)
+98544	1	conhost.exe

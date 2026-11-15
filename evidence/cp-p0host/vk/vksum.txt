@@ -1,0 +1,189 @@
+### vkCreateInstance x2
+  iext VK_KHR_external_memory_capabilities
+  iext VK_KHR_external_semaphore_capabilities
+  iext VK_KHR_get_physical_device_properties2
+  iext VK_KHR_wayland_surface
+  iext VK_KHR_xcb_surface
+### vkCreateInstance x1
+  app=xalia.exe appVersion=0x0 engine=DXVK engineVersion=0xc02000 apiVersion=1.3.0
+  iext VK_EXT_swapchain_colorspace
+  iext VK_KHR_external_semaphore_capabilities
+  iext VK_KHR_get_physical_device_properties2
+  iext VK_KHR_get_surface_capabilities2
+  iext VK_KHR_surface
+  iext VK_KHR_surface_maintenance1
+  iext VK_KHR_xlib_surface
+  iext VK_KHR_wayland_surface
+  iext VK_KHR_xcb_surface
+### vkCreateInstance x2
+  app=Cyberpunk2077.exe appVersion=0x0 engine=DXVK engineVersion=0xc02000 apiVersion=1.3.0
+  iext VK_EXT_swapchain_colorspace
+  iext VK_KHR_external_semaphore_capabilities
+  iext VK_KHR_get_physical_device_properties2
+  iext VK_KHR_get_surface_capabilities2
+  iext VK_KHR_surface
+  iext VK_KHR_surface_maintenance1
+  iext VK_KHR_xlib_surface
+  iext VK_KHR_wayland_surface
+  iext VK_KHR_xcb_surface
+### vkCreateInstance x1
+  app=(null) appVersion=0x0 engine=(null) engineVersion=0x0 apiVersion=1.1.0
+  iext VK_KHR_external_memory_capabilities
+  iext VK_KHR_external_semaphore_capabilities
+  iext VK_KHR_get_physical_device_properties2
+  iext VK_KHR_wayland_surface
+  iext VK_KHR_xcb_surface
+### vkCreateInstance x2
+  app=Cyberpunk2077.exe appVersion=0x0 engine=vkd3d engineVersion=0xc02000 apiVersion=1.3.0
+  iext VK_EXT_surface_maintenance1
+  iext VK_KHR_external_semaphore_capabilities
+  iext VK_KHR_get_physical_device_properties2
+  iext VK_KHR_get_surface_capabilities2
+  iext VK_KHR_surface
+  iext VK_KHR_surface_maintenance1
+  iext VK_KHR_xlib_surface
+  iext VK_KHR_wayland_surface
+  iext VK_KHR_xcb_surface
+### vkCreateDevice x2
+  physicalDevice=AMD Radeon RX 9070 XT (RADV GFX1201) vendor=0x1002 device=0x7550 driverVersion=0x6800008 deviceApi=1.4.335
+  queue family=0 count=1 flags=0x0
+  queue family=1 count=4 flags=0x0
+  queue family=4 count=1 flags=0x0
+  dext VK_AMD_buffer_marker
+  dext VK_AMD_device_coherent_memory
+  dext VK_AMD_shader_core_properties
+  dext VK_AMD_shader_core_properties2
+  dext VK_AMD_shader_explicit_vertex_parameter
+  dext VK_EXT_conditional_rendering
+  dext VK_EXT_conservative_rasterization
+  dext VK_EXT_custom_border_color
+  dext VK_EXT_depth_bias_control
+  dext VK_EXT_depth_clip_enable
+  dext VK_EXT_descriptor_buffer
+  dext VK_EXT_device_generated_commands
+  dext VK_EXT_dynamic_rendering_unused_attachments
+  dext VK_EXT_extended_dynamic_state2
+  dext VK_EXT_extended_dynamic_state3
+  dext VK_EXT_external_memory_host
+  dext VK_EXT_fragment_shader_interlock
+  dext VK_EXT_graphics_pipeline_library
+  dext VK_EXT_hdr_metadata
+  dext VK_EXT_image_sliced_view_of_3d
+  dext VK_EXT_image_view_min_lod
+  dext VK_EXT_line_rasterization
+  dext VK_EXT_memory_budget
+  dext VK_EXT_memory_priority
+  dext VK_EXT_mesh_shader
+  dext VK_EXT_mutable_descriptor_type
+  dext VK_EXT_pipeline_library_group_handles
+  dext VK_EXT_robustness2
+  dext VK_EXT_shader_atomic_float
+  dext VK_EXT_shader_float8
+  dext VK_EXT_shader_image_atomic_int64
+  dext VK_EXT_shader_module_identifier
+  dext VK_EXT_shader_stencil_export
+  dext VK_EXT_swapchain_maintenance1
+  dext VK_EXT_transform_feedback
+  dext VK_EXT_vertex_attribute_divisor
+  dext VK_EXT_zero_initialize_device_memory
+  dext VK_KHR_acceleration_structure
+  dext VK_KHR_calibrated_timestamps
+  dext VK_KHR_compute_shader_derivatives
+  dext VK_KHR_cooperative_matrix
+  dext VK_KHR_deferred_host_operations
+  dext VK_KHR_fragment_shader_barycentric
+  dext VK_KHR_fragment_shading_rate
+  dext VK_KHR_index_type_uint8
+  dext VK_KHR_maintenance10
+  dext VK_KHR_maintenance5
+  dext VK_KHR_maintenance6
+  dext VK_KHR_maintenance8
+  dext VK_KHR_maintenance9
+  dext VK_KHR_pipeline_library
+  dext VK_KHR_present_id
+  dext VK_KHR_present_id2
+  dext VK_KHR_present_wait
+  dext VK_KHR_present_wait2
+  dext VK_KHR_push_descriptor
+  dext VK_KHR_ray_query
+  dext VK_KHR_ray_tracing_maintenance1
+  dext VK_KHR_ray_tracing_pipeline
+  dext VK_KHR_shader_float_controls2
+  dext VK_KHR_shader_maximal_reconvergence
+  dext VK_KHR_shader_quad_control
+  dext VK_KHR_shader_untyped_pointers
+  dext VK_KHR_swapchain
+  dext VK_KHR_swapchain_maintenance1
+  dext VK_KHR_unified_image_layouts
+  dext VK_MESA_image_alignment_control
+  dext VK_NV_compute_shader_derivatives
+  dext VK_NV_cooperative_matrix2
+  dext VK_VALVE_mutable_descriptor_type
+  dext VK_KHR_external_memory_fd
+  dext VK_KHR_external_semaphore_fd
+  dext VK_KHR_timeline_semaphore
+  pEnabledFeatures: robustBufferAccess fullDrawIndexUint32 imageCubeArray independentBlend geometryShader tessellationShader sampleRateShading dualSrcBlend logicOp multiDrawIndirect drawIndirectFirstInstance depthClamp depthBiasClamp fillModeNonSolid depthBounds wideLines largePoints alphaToOne multiViewport samplerAnisotropy textureCompressionBC occlusionQueryPrecise pipelineStatisticsQuery vertexPipelineStoresAndAtomics fragmentStoresAndAtomics shaderImageGatherExtended shaderStorageImageExtendedFormats shaderStorageImageMultisample shaderStorageImageReadWithoutFormat shaderStorageImageWriteWithoutFormat shaderUniformBufferArrayDynamicIndexing shaderSampledImageArrayDynamicIndexing shaderStorageBufferArrayDynamicIndexing shaderStorageImageArrayDynamicIndexing shaderClipDistance shaderCullDistance shaderFloat64 shaderInt64 shaderInt16 shaderResourceResidency shaderResourceMinLod sparseBinding sparseResidencyBuffer sparseResidencyImage2D sparseResidencyImage3D sparseResidencyAliased variableMultisampleRate inheritedQueries
+  pNext VkPhysicalDeviceShaderAtomicFloatFeaturesEXT: shaderBufferFloat32Atomics shaderBufferFloat32AtomicAdd shaderBufferFloat64Atomics shaderSharedFloat32Atomics shaderSharedFloat32AtomicAdd shaderSharedFloat64Atomics shaderImageFloat32Atomics shaderImageFloat32AtomicAdd sparseImageFloat32Atomics sparseImageFloat32AtomicAdd
+  pNext VkPhysicalDeviceShaderUntypedPointersFeaturesKHR: shaderUntypedPointers
+  pNext VkPhysicalDeviceShaderFloatControls2Features: shaderFloatControls2
+  pNext VkPhysicalDevicePresentWait2FeaturesKHR: presentWait2
+  pNext VkPhysicalDevicePresentId2FeaturesKHR: presentId2
+  pNext VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR: unifiedImageLayouts unifiedImageLayoutsVideo
+  pNext VkPhysicalDeviceCooperativeMatrix2FeaturesNV: cooperativeMatrixFlexibleDimensions cooperativeMatrixReductions cooperativeMatrixConversions cooperativeMatrixPerElementOperations
+  pNext VkPhysicalDeviceShaderFloat8FeaturesEXT: shaderFloat8 shaderFloat8CooperativeMatrix
+  pNext VkPhysicalDeviceIndexTypeUint8Features: indexTypeUint8
+  pNext VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT: zeroInitializeDeviceMemory
+  pNext VkPhysicalDeviceCooperativeMatrixFeaturesKHR: cooperativeMatrix cooperativeMatrixRobustBufferAccess
+  pNext VkPhysicalDeviceImageAlignmentControlFeaturesMESA: imageAlignmentControl
+  pNext VkPhysicalDeviceDepthBiasControlFeaturesEXT: depthBiasControl leastRepresentableValueForceUnormRepresentation floatRepresentation depthBiasExact
+  pNext VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR: swapchainMaintenance1
+  pNext VkPhysicalDeviceLineRasterizationFeatures: rectangularLines smoothLines
+  pNext VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT: dynamicRenderingUnusedAttachments
+  pNext VkPhysicalDeviceMemoryPriorityFeaturesEXT: memoryPriority
+  pNext VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT: fragmentShaderSampleInterlock fragmentShaderPixelInterlock
+  pNext VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT: graphicsPipelineLibrary
+  pNext VkPhysicalDeviceImageSlicedViewOf3DFeaturesEXT: imageSlicedViewOf3D
+  pNext VkPhysicalDevicePipelineLibraryGroupHandlesFeaturesEXT: pipelineLibraryGroupHandles
+  pNext VkPhysicalDeviceDescriptorBufferFeaturesEXT: descriptorBuffer descriptorBufferPushDescriptors
+  pNext VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR: computeDerivativeGroupQuads computeDerivativeGroupLinear
+  pNext VkPhysicalDeviceShaderQuadControlFeaturesKHR: shaderQuadControl
+  pNext VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR: shaderMaximalReconvergence
+  pNext VkPhysicalDeviceMaintenance10FeaturesKHR: maintenance10
+  pNext VkPhysicalDeviceMaintenance9FeaturesKHR: maintenance9
+  pNext VkPhysicalDeviceMaintenance8FeaturesKHR: maintenance8
+  pNext VkPhysicalDeviceMaintenance6Features: maintenance6
+  pNext VkPhysicalDeviceMaintenance5Features: maintenance5
+  pNext VkPhysicalDevicePresentWaitFeaturesKHR: presentWait
+  pNext VkPhysicalDevicePresentIdFeaturesKHR: presentId
+  pNext VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT: shaderModuleIdentifier
+  pNext VkPhysicalDeviceMeshShaderFeaturesEXT: taskShader meshShader multiviewMeshShader primitiveFragmentShadingRateMeshShader
+  pNext VkPhysicalDeviceCoherentMemoryFeaturesAMD: deviceCoherentMemory
+  pNext VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT: shaderImageInt64Atomics sparseImageInt64Atomics
+  pNext VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR: fragmentShaderBarycentric
+  pNext VkPhysicalDeviceFragmentShadingRateFeaturesKHR: pipelineFragmentShadingRate primitiveFragmentShadingRate attachmentFragmentShadingRate
+  pNext VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR: rayTracingMaintenance1 rayTracingPipelineTraceRaysIndirect2
+  pNext VkPhysicalDeviceRayQueryFeaturesKHR: rayQuery
+  pNext VkPhysicalDeviceRayTracingPipelineFeaturesKHR: rayTracingPipeline rayTracingPipelineTraceRaysIndirect rayTraversalPrimitiveCulling
+  pNext VkPhysicalDeviceAccelerationStructureFeaturesKHR: accelerationStructure descriptorBindingAccelerationStructureUpdateAfterBind
+  pNext VkPhysicalDeviceImageViewMinLodFeaturesEXT: minLod
+  pNext VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT: mutableDescriptorType
+  pNext VkPhysicalDeviceExtendedDynamicState3FeaturesEXT: extendedDynamicState3RasterizationSamples extendedDynamicState3SampleMask extendedDynamicState3AlphaToCoverageEnable extendedDynamicState3DepthClipEnable extendedDynamicState3LineRasterizationMode
+  pNext VkPhysicalDeviceExtendedDynamicState2FeaturesEXT: extendedDynamicState2 extendedDynamicState2PatchControlPoints
+  pNext VkPhysicalDeviceVertexAttributeDivisorFeatures: vertexAttributeInstanceRateDivisor vertexAttributeInstanceRateZeroDivisor
+  pNext VkPhysicalDeviceTransformFeedbackFeaturesEXT: transformFeedback geometryStreams
+  pNext VkPhysicalDeviceRobustness2FeaturesKHR: robustBufferAccess2 robustImageAccess2 nullDescriptor
+  pNext VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT: deviceGeneratedCommands
+  pNext VkPhysicalDeviceDepthClipEnableFeaturesEXT: depthClipEnable
+  pNext VkPhysicalDeviceCustomBorderColorFeaturesEXT: customBorderColors customBorderColorWithoutFormat
+  pNext VkPhysicalDeviceConditionalRenderingFeaturesEXT: conditionalRendering
+  pNext VkPhysicalDeviceVulkan13Features: pipelineCreationCacheControl shaderDemoteToHelperInvocation shaderTerminateInvocation subgroupSizeControl computeFullSubgroups synchronization2 shaderZeroInitializeWorkgroupMemory dynamicRendering shaderIntegerDotProduct maintenance4
+  pNext VkPhysicalDeviceVulkan12Features: samplerMirrorClampToEdge drawIndirectCount storageBuffer8BitAccess shaderBufferInt64Atomics shaderSharedInt64Atomics shaderFloat16 shaderInt8 descriptorIndexing shaderUniformTexelBufferArrayDynamicIndexing shaderStorageTexelBufferArrayDynamicIndexing shaderUniformBufferArrayNonUniformIndexing shaderSampledImageArrayNonUniformIndexing shaderStorageBufferArrayNonUniformIndexing shaderStorageImageArrayNonUniformIndexing shaderUniformTexelBufferArrayNonUniformIndexing shaderStorageTexelBufferArrayNonUniformIndexing descriptorBindingUniformBufferUpdateAfterBind descriptorBindingSampledImageUpdateAfterBind descriptorBindingStorageImageUpdateAfterBind descriptorBindingStorageBufferUpdateAfterBind descriptorBindingUniformTexelBufferUpdateAfterBind descriptorBindingStorageTexelBufferUpdateAfterBind descriptorBindingUpdateUnusedWhilePending descriptorBindingPartiallyBound descriptorBindingVariableDescriptorCount runtimeDescriptorArray samplerFilterMinmax scalarBlockLayout uniformBufferStandardLayout shaderSubgroupExtendedTypes separateDepthStencilLayouts hostQueryReset timelineSemaphore bufferDeviceAddress vulkanMemoryModel vulkanMemoryModelDeviceScope shaderOutputViewportIndex shaderOutputLayer subgroupBroadcastDynamicId
+  pNext VkPhysicalDeviceVulkan11Features: storageBuffer16BitAccess uniformAndStorageBuffer16BitAccess storagePushConstant16 storageInputOutput16 multiview multiviewGeometryShader multiviewTessellationShader variablePointersStorageBuffer variablePointers shaderDrawParameters
+### vkCreateInstance x1
+  app=(null) appVersion=0x0 engine=(null) engineVersion=0x0 apiVersion=1.1.0
+  iext VK_KHR_external_semaphore_capabilities
+  iext VK_KHR_get_physical_device_properties2
+  iext VK_KHR_wayland_surface
+  iext VK_KHR_xcb_surface
+
+# summary of the last vkCreateDevice: 73 device extensions, 57 feature structs in the chain, 202 feature bits set
