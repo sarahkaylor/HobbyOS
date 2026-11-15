@@ -41,6 +41,8 @@
  *          the kernel writes OWNER_DIED|WAITERS and wakes the waiter
  *     R3 G a process SIGKILLed while holding robust lists: new threads on the
  *          reused pids start with get_robust_list == NULL
+ *     P1 G fork/exit/reap x3 and short-lived threads x3: no pid/tid is
+ *          handed straight back; kill(reaped, 0) is ESRCH
  *     G1 G exit_group(42) from a non-leader thread ends the whole group
  *     G2 G the leader exits (exit(60)) first; a worker's exit_group(43) is the
  *          group's status
@@ -584,6 +586,54 @@ static void r3_robust_pid_reuse(void) {
   row("R3 robust-pid-reuse killed=%d,%d status=0x%x waitpid=%d errno=%d threads=%d "
       "reused_dead_pid=%d stale_heads=%d %s",
       dead[0], dead[1], st, wret, werr, seen, reused, bad, ok ? "ok" : "FAIL");
+  grade(ok);
+}
+
+/* P1: pids are not handed straight back.  wineserver polls kill(old, 0) on a
+   dead client and then SIGKILLs it; a pid that is reused at once is a kill
+   of an innocent process.  Linux allocates increasing pids (wrapping at
+   pid_max), so: fork/exit/reap three times -> three different pids, and
+   kill(reaped, 0) is ESRCH while no newer process holds the pid.  Threads
+   follow the same rule (a tid is a pid): three short-lived threads, three
+   different tids. */
+static volatile uint32_t p1_ctid;
+static int p1_kid(void *a) {
+  (void)a;
+  return 0;
+}
+
+static void p1_pid_cycle(void) {
+  int pids[3], sts[3], esrch[3], ok = 1;
+  for (int i = 0; i < 3; i++) {
+    pid_t c = fork();
+    if (c == 0) syscall(SYS_exit_group, 0);
+    pids[i] = c;
+    sts[i] = c > 0 ? reap(c, 3000) : -3;
+    int kr = kill(c, 0);
+    esrch[i] = kr == -1 && errno == ESRCH;
+    if (c <= 0 || sts[i] < 0 || !esrch[i]) ok = 0;
+    for (int j = 0; j < i; j++)
+      if (pids[j] == pids[i]) ok = 0;
+  }
+  int tids[3];
+  for (int i = 0; i < 3; i++) {
+    size_t sz = 64 * 1024;
+    char *st = new_stack(sz);
+    p1_ctid = 1;
+    long t = thr_raw_clone(THR_BASE | CLONE_CHILD_CLEARTID, st + sz, 0, &p1_ctid,
+                           0, p1_kid, 0);
+    tids[i] = (int)t;
+    for (int k = 0; k < 100 && p1_ctid; k++) fut_wait_to(&p1_ctid, p1_ctid, 20);
+    msleep(20);
+    munmap(st, sz);
+    if (t <= 0 || p1_ctid) ok = 0;
+    for (int j = 0; j < i; j++)
+      if (tids[j] == tids[i]) ok = 0;
+  }
+  row("P1 pid-cycle fork pids=%d,%d,%d status=0x%x,0x%x,0x%x kill0_esrch=%d%d%d "
+      "thread tids=%d,%d,%d %s",
+      pids[0], pids[1], pids[2], sts[0], sts[1], sts[2], esrch[0], esrch[1],
+      esrch[2], tids[0], tids[1], tids[2], ok ? "ok" : "FAIL");
   grade(ok);
 }
 
@@ -1136,6 +1186,7 @@ int main(int argc, char **argv) {
   r1_robust_abi();
   r2_robust_death();
   r3_robust_pid_reuse();
+  p1_pid_cycle();
   g1_exit_group_worker();
   g2_leader_first();
 
