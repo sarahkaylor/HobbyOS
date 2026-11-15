@@ -4239,7 +4239,8 @@ int process_fork(struct trap_frame *tf) {
      that misroutes syscalls is worse than one that fails them, because the
      damage is another process rather than an errno. */
   child->abi_flags = group->abi_flags;
-  child->fd_cloexec = group->fd_cloexec;
+  for (int i = 0; i < (int)(sizeof child->fd_cloexec / sizeof child->fd_cloexec[0]); i++)
+    child->fd_cloexec[i] = group->fd_cloexec[i];
 
 
   for (int i = 0; i < 32; i++) {

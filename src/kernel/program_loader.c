@@ -1717,6 +1717,7 @@ void proc_split_argv(struct process *p, const char *args) {
   if (pos < HO_EXEC_ARGV_LEN)
     p->eargv[pos] = '\0';
   p->eargc = narg;
+
 }
 
 /* P2.5 (S5): is [addr, addr+len) readable (write=0) / writable (write=1)

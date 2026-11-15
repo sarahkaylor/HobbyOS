@@ -25,6 +25,14 @@ runs real programs in the guest and records the console as the witness.
    planned and applied once, centrally, after the diagnosis is on the table. A
    worker's job is the experiment and the diagnosis, not the patch.
 6. **Report the log path with every claim.** No number without a file behind it.
+7. **A boot is only evidence if the kernel you booted contains your edit.** Twice
+   now a "result" came from a stale kernel: first `boot.sh` was loading
+   `hobbyos.elf` from inside `disk.img`, so a rebuild that never repacked was
+   invisible; then a compile error (`array type uint64_t[4] is not assignable`)
+   left the previous `hobbyos.elf` in place and three boots silently measured the
+   old code. After any kernel change: check the build's exit code, and
+   `strings hobbyos.elf | grep '<a literal you just added>'` before believing a
+   single line of console output.
 
 ## Workstreams
 
