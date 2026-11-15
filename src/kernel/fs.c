@@ -16,6 +16,7 @@
 #include "virtio_input.h" /* GB-171: the key ring that node drains */
 #include "frame.h" /* M5: fs_read_image contiguous image frames */
 #include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
+#include "ext2_vfs.h" /* cp/ext2: the /EXT data disk */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -586,6 +587,13 @@ static int file_read_maps(struct process *p, struct file *f, char *ubuf,
 }
 
 int file_open(struct process *cur, const char *filename, int flags) {
+  return file_open_mode(cur, filename, flags, 0666);
+}
+
+/* cp/ext2: open(2) with its mode argument.  Only the ext2 volume stores
+ * permission bits; FAT16/NFS ignore `mode` exactly as file_open always did. */
+int file_open_mode(struct process *cur, const char *filename, int flags,
+                   int mode) {
   cur = process_group(cur); /* P1 (D7): the fd table + cwd are group state */
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
 
@@ -770,6 +778,34 @@ int file_open(struct process *cur, const char *filename, int flags) {
    * The check runs whether or not O_DIRECTORY is set: Linux allows
    * open("/dir", O_RDONLY) and only fails read(2) with EISDIR, so a runtime
    * that opens the directory without the flag must get a directory fd too. */
+  /* cp/ext2: a path on the /EXT data disk is opened by the ext2 driver.  A
+   * symlink in it that leads off the volume (Wine's dosdevices/z: -> /)
+   * hands back the redirected path, which then takes the normal FAT16/NFS
+   * route below. */
+  char e2redir[VFS_PATH_MAX];
+  if (f->path[0] && ext2v_owns(f->path)) {
+    fs_copy_path(e2redir, f->path);
+    int er = ext2v_open(e2redir, flags, mode, f);
+    if (er == 0) {
+      fs_copy_path(f->path, e2redir);
+      int efd = fd_install(cur, f);
+      if (efd == -1) {
+        ext2v_close(f);
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -EMFILE;
+      }
+      return efd;
+    }
+    if (er != EXT2_EXTERNAL) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return er < 0 ? er : -EIO;
+    }
+    fs_copy_path(f->path, e2redir);
+    filename = e2redir;
+  }
+
   if (flags & O_DIRECTORY) {
     {
       int nmidx = -1;
@@ -1361,6 +1397,8 @@ int file_ftruncate(struct process *p, int fd, int64_t length) {
     if (length < 0 || (uint64_t)length > VM_OBJ_MAX_BYTES) return -EINVAL;
     return vm_object_truncate(f->memfd.obj, (uint64_t)length);
   }
+  if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR)
+    return ext2v_ftruncate(f, length); /* cp/ext2 */
   if (f->type != FILE_TYPE_FAT16) return -EINVAL;
   if (length < 0 || length > 0xFFFFFFFFLL) return -EINVAL;
   ylock_acquire(&f->lock);
@@ -1869,6 +1907,12 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   } else if (f->type == FILE_TYPE_NFSDIR) {
     base = f->nfs.cursor;
     size = 0;
+  } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
+    /* cp/ext2: 64-bit offsets (files > 4 GiB); a directory's position is
+       the getdents byte offset, SEEK_END on it is 0 like NFS/FAT dirs. */
+    base = (int64_t)f->ext2.cursor;
+    size = ext2v_size(f);
+    if (size < 0) { *errp = EIO; return -1; }
   } else {
     *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK ||
              f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL ||
@@ -1891,6 +1935,8 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
     f->fat16.cursor = (uint32_t)newpos;
   else if (f->type == FILE_TYPE_FAT16DIR || f->type == FILE_TYPE_PROCFD)
     f->fat16.cursor = (uint32_t)newpos;
+  else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR)
+    f->ext2.cursor = (uint64_t)newpos;
   else
     f->nfs.cursor = (uint32_t)newpos;
   ylock_release(&f->lock);
@@ -2023,6 +2069,12 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
        like the other device nodes (there is no uid model on this node). */
     k_stat_fill(st, K_DEV_DEVFS, 5, K_S_IFCHR | 0666, 0);
     return 0;
+  case FILE_TYPE_EXT2:
+  case FILE_TYPE_EXT2DIR: { /* cp/ext2: the inode's real fields */
+    int r = ext2v_fstat(f, st);
+    if (r) { *errp = -r; return -1; }
+    return 0;
+  }
   default:
     *errp = EBADF;
     return -1;
@@ -2153,6 +2205,13 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
+  if (f->type == FILE_TYPE_EXT2DIR) { /* cp/ext2 */
+    if (!ubuf || bufsize <= 0) return -EINVAL;
+    ylock_acquire(&f->lock);
+    int er = ext2v_getdents64(f, ubuf, bufsize);
+    ylock_release(&f->lock);
+    return er;
+  }
   if (f->type != FILE_TYPE_FAT16DIR && f->type != FILE_TYPE_PROCFD &&
       f->type != FILE_TYPE_NFSDIR)
     return -ENOTDIR;
@@ -2318,6 +2377,18 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
   return rc;
 }
 
+/* cp/ext2: 1 when `fd` is an open file/directory on the /EXT volume, 0 when
+   it is some other open fd, -1 when it is not an open fd at all. */
+int file_fd_is_ext2(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_EMPTY) return -1;
+  return f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR;
+}
+
 /* GB-167: is this fd the /dev/fb0 node?  The Linux-ABI ioctl arm needs it to
    route FBIO* requests to the framebuffer machinery instead of ENOTTY. */
 int file_fd_is_devfb(struct process *p, int fd) {
@@ -2374,6 +2445,15 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
   }
   char abs[256];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
+  /* cp/ext2: stat(2) follows symlinks; one that leaves the volume continues
+     with the redirected path below. */
+  if (ext2v_owns(abs)) {
+    int r = ext2v_stat(abs, 1, st);
+    if (r != EXT2_EXTERNAL) {
+      if (r) { *errp = -r; return -1; }
+      return 0;
+    }
+  }
   /* Paths under an NFS mount: answer from the server's fattr3.  Before this,
      stat()/lstat() of anything on /NFS was ENOENT because only FAT16 was
      consulted — realpath() of the launcher's own path needs it (AD-9). */
@@ -2512,6 +2592,8 @@ int file_close(struct process *cur, int fd) {
       lt_epoll_release(f->epollfd.slot);
     } else if (f->type == FILE_TYPE_FAT16) {
       fat16_close(f);
+    } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
+      ext2v_close(f); /* cp/ext2: drops the inode ref (frees an orphan) */
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
     }
@@ -2633,6 +2715,8 @@ void fs_close_global(int g_fd) {
   if (f->ref_count == 0) {
     if (f->type == FILE_TYPE_FAT16) {
       fat16_close(f);
+    } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
+      ext2v_close(f); /* cp/ext2 */
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
     }
@@ -3002,6 +3086,13 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     return net_get_random_bytes(buf, (uint32_t)size); /* never short */
   } else if (f->type == FILE_TYPE_FAT16) {
     return fat16_read(f, buf, size);
+  } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
+    /* cp/ext2: the cursor is per open file description, so serialise on its
+       slot lock like FAT16's writers do. */
+    ylock_acquire(&f->lock);
+    int er = ext2v_read(f, buf, size);
+    ylock_release(&f->lock);
+    return er;
   } else if (f->type == FILE_TYPE_NFS) {
     if (f->nfs.is_dir) return -1;               /* use read_dir for dirs */
     if (size <= 0) return 0;
@@ -3282,6 +3373,11 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
     if (wr > 0)
       file_obj_invalidate_all();
     return wr;
+  } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
+    ylock_acquire(&f->lock); /* cp/ext2: see file_read */
+    int ew = ext2v_write(f, buf, size);
+    ylock_release(&f->lock);
+    return ew;
   } else if (f->type == FILE_TYPE_NFS) {
     return -1;      /* NFS mounts are read-only */
   } else if (f->type == FILE_TYPE_PIPE) {

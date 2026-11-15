@@ -43,6 +43,10 @@ extern const struct l_sysent l_tab_proc[] __attribute__((weak));
 extern const struct l_sysent l_tab_misc[] __attribute__((weak));
 extern const struct l_sysent l_tab_thr[] __attribute__((weak));
 extern const struct l_sysent l_tab_tmr[] __attribute__((weak));
+/* cp/ext2 (src/kernel/ext2_compat.c): consulted FIRST, and its handlers may
+   DECLINE (return 0) a number another table owns when the path/fd is not on
+   the ext2 volume -- the search then continues below as if it were absent. */
+extern const struct l_sysent l_tab_ext2[] __attribute__((weak));
 
 /* ---- user-memory helpers ------------------------------------------------ */
 
@@ -356,6 +360,15 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
 #else
 #define L_DISPATCH_RET(v) do { fat16_flush_pending(); return (v); } while (0)
 #endif
+  if (l_tab_ext2) {
+    for (unsigned i = 0; l_tab_ext2[i].fn; i++) {
+      if ((uint64_t)(int64_t)l_tab_ext2[i].nr == nr) {
+        int _e = l_tab_ext2[i].fn(p, tf);
+        if (_e) L_DISPATCH_RET(_e);
+        break;
+      }
+    }
+  }
   const struct l_sysent *const tables[] = {
     l_tab_core,
     (const struct l_sysent *)l_tab_fd,

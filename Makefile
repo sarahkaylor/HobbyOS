@@ -350,6 +350,19 @@ else
   QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 16384M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(GX_GPU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device $(GX_GPU_DEV) -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
+# cp/ext2 (docs/cp-ext2.md): the optional writable ext2 data disk, x86_64
+# only, attached as NVMe namespace 2 of the boot controller when the file
+# $(CPDATA) exists (make one with tools/cp/mkcpdata.sh).  No file -> the
+# QEMU line is byte-for-byte unchanged.  CPDATA= (empty) never attaches.
+CPDATA ?= cpdata.img
+ifeq ($(ARCH),intel)
+ifneq ($(strip $(CPDATA)),)
+ifneq ($(wildcard $(CPDATA)),)
+QEMU_CMD += -drive file=$(CPDATA),format=raw,id=cpdata,if=none -device nvme-ns,drive=cpdata,nsid=2
+endif
+endif
+endif
+
 # --- F2.4 (browser.md §6): userland C++ build policy ---------------------
 # The minimal C++ runtime (src/libc/src/cxxrt.cpp) and C++ user programs
 # build with the SAME per-arch flags as C (USER_CFLAGS) plus the language
@@ -3379,6 +3392,17 @@ $(MEMFD_TEST): src/host/memfd_test.c
 # boundaries (so ManagedX is not captured), idempotence (paths cross vfs_abs_path
 # more than once), longest-prefix, the chain refusal that keeps idempotence
 # true, and no-truncation.
+# cp/ext2 (docs/cp-ext2.md): the ext2 core against mke2fs/e2fsck/debugfs.
+# Host-bound (needs e2fsprogs; SKIPs cleanly without them).
+EXT2_TEST = ext2_test_host
+$(EXT2_TEST): src/host/ext2_test.c src/kernel/ext2.c src/include/ext2.h
+	$(HOST_CC) -Isrc/include -Wall -Wextra -g -O1 src/kernel/ext2.c src/host/ext2_test.c -o $@
+ext2_test_run: $(EXT2_TEST)
+	$(HOST_RUN_EXT2) ./$(EXT2_TEST)
+host_tests: ext2_test_run
+.PHONY: ext2_test_run
+HOST_RUN_EXT2 = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 300 "$$@"; else exec "$$@"; fi' sh
+
 VFS_BIND_TEST = vfs_bind_test_host
 $(VFS_BIND_TEST): src/host/vfs_bind_test.c src/kernel/vfs_bind.c src/include/vfs_bind.h
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/vfs_bind.c src/host/vfs_bind_test.c -o $@

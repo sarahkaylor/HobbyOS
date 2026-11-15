@@ -130,6 +130,17 @@ extern volatile uint64_t blk_dev_epoch;
 /* Number of transfers discarded because they overlapped a device event. */
 extern volatile uint32_t blk_untrusted;
 
+/**
+ * cp/ext2 (docs/cp-ext2.md): the optional writable DATA disk.  On x86_64 it is
+ * NVMe namespace 2 of the boot controller (QEMU: `-device nvme-ns,nsid=2`,
+ * attached by the Makefile's CPDATA hook); ARM has none.  512-byte sectors,
+ * never routed through the block cache.  Read/write return 0 or -1.
+ */
+int blk_data_present(void);
+uint64_t blk_data_sectors(void);
+int blk_data_read(uint64_t sector, void *buf, uint32_t count);
+int blk_data_write(uint64_t sector, const void *buf, uint32_t count);
+
 #ifdef KERNEL_MODE_UNIT_TEST
 /**
  * M6/L69 test seam (unit tier only): make the device reproduce QEMU's aborted

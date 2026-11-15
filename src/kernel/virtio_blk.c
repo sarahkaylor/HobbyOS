@@ -183,6 +183,7 @@ static void blk_test_abort_apply(int armed, const uint8_t *pre) {
 
 /* L67: defined below; the health hook above the wait path uses them. */
 static void blk_token_acquire(void);
+static void nvme_ns2_probe(void); /* cp/ext2 data disk, defined below */
 static void blk_token_release(void);
 /* L78: bounded variant for the block-stress probe.  Returns 1 when the token
    was taken, 0 when the holder was still inside a transfer after `timeout_ms`.
@@ -1934,6 +1935,7 @@ int virtio_blk_init(void) {
     return -1;
   }
 
+  nvme_ns2_probe(); /* cp/ext2: optional data disk (namespace 2); silent when absent */
   uart_puts("NVMe driver initialized successfully!\n");
   virtio_blk_stress_start();
   return 0;
@@ -2149,6 +2151,122 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
   }
   blk_token_release();
   return res;
+}
+
+/* ---------------------------------------------------------------------------
+ * cp/ext2 (docs/cp-ext2.md): the optional DATA disk = NVMe namespace 2 of the
+ * boot controller.
+ *
+ * Why a namespace and not a second controller: everything above is a
+ * single-controller driver (one BAR window, one admin/IO queue pair, one
+ * in-flight token, one reset/epoch machine).  A second namespace on the same
+ * controller reuses all of it unchanged: the same token serialises both
+ * disks, a controller reset recovers both, and the epoch rule ("never trust a
+ * completion that overlapped a device event") covers both.  QEMU attaches it
+ * as `-drive ...,id=cpdata,if=none -device nvme-ns,drive=cpdata,nsid=2`
+ * (Makefile CPDATA hook).  Without that device, Identify(nsid=2) fails or
+ * reports nsze=0, nothing is printed and the namespace stays absent, so a
+ * boot without the data disk behaves exactly as before.
+ *
+ * Transfers are up to 8 sectors (one 4 KiB bounce page, PRP1 only), the same
+ * bounce discipline as namespace 1.  Namespace 2 never goes through the
+ * block cache: blk_cache is keyed by namespace-1 sectors.
+ * ------------------------------------------------------------------------- */
+static uint64_t ns2_nsze;    /* sectors; 0 = no data disk */
+
+static void nvme_ns2_probe(void) {
+  ns2_nsze = 0;
+  uint16_t st = nvme_identify_ns(2, id_ns);
+  if (st != 0) return;
+  uint64_t nsze = 0;
+  for (int i = 7; i >= 0; i--)
+    nsze = (nsze << 8) | id_ns[i];
+  uint32_t nlbaf = id_ns[25];
+  uint32_t flbas = id_ns[26] & 0x0F;
+  uint32_t lbads = 0;
+  if (flbas <= nlbaf)
+    lbads = id_ns[128 + 4 * flbas + 2];
+  if (nsze == 0) return;
+  if (lbads != 9) {
+    uart_puts("[BLKD] ns2 ignored: lbads=");
+    print_int((int)lbads);
+    uart_puts(" (only 512-byte sectors are supported)\n");
+    return;
+  }
+  ns2_nsze = nsze;
+  uart_puts("[BLKD] data disk nsid=2 sectors=");
+  uart_print_hex(nsze);
+  uart_puts("\n");
+}
+
+int blk_data_present(void) { return ns2_nsze != 0; }
+uint64_t blk_data_sectors(void) { return ns2_nsze; }
+
+/* One command: `nsec` (1..8) sectors at `lba` through bounce_buf.  Caller
+   holds the token.  Same epoch discipline as namespace 1: a completion that
+   overlapped a device event is re-issued once; a second event is an error. */
+static int ns2_xfer_locked(uint64_t lba, uint8_t *buf, uint32_t nsec, int wr) {
+  struct nvme_cmd cmd = {0};
+  cmd.opcode = wr ? 0x01 : 0x02;
+  cmd.nsid = 2;
+  cmd.cid = next_io_cid();
+  cmd.prp1 = (uint64_t)&bounce_buf[0];
+  cmd.cdw10 = (uint32_t)lba;
+  cmd.cdw11 = (uint32_t)(lba >> 32);
+  cmd.cdw12 = nsec - 1;
+  if (wr) memcpy((void *)&bounce_buf[0], buf, nsec * 512u);
+  uint64_t ep0 = blk_dev_epoch;
+  if (!nvme_ready_now()) {
+    nvme_reinit();
+    ep0 = blk_dev_epoch;
+    blk_prerepair++;
+  }
+  uint16_t status = submit_io_cmd(&cmd);
+  if (status == 0 && !nvme_ready_now())
+    __atomic_add_fetch(&blk_dev_epoch, 1, __ATOMIC_SEQ_CST);
+  if (status == 0 && blk_dev_epoch != ep0) {
+    ep0 = blk_dev_epoch;
+    cmd.cid = next_io_cid();
+    if (wr) memcpy((void *)&bounce_buf[0], buf, nsec * 512u);
+    status = submit_io_cmd(&cmd);
+    blk_untrusted++;
+    if (status == 0 && blk_dev_epoch != ep0)
+      status = 0x7FFF;
+  }
+  if (status != 0) return -1;
+  if (!wr) memcpy(buf, (const void *)&bounce_buf[0], nsec * 512u);
+  return 0;
+}
+
+static int ns2_rw(uint64_t sector, uint8_t *buf, uint32_t count, int wr) {
+  if (!ns2_nsze || count == 0) return -1;
+  if (sector >= ns2_nsze || count > ns2_nsze - sector) return -1;
+  blk_token_acquire();
+  int res = 0;
+  while (count > 0) {
+    uint32_t n = count > 8 ? 8 : count;
+    if (ns2_xfer_locked(sector, buf, n, wr) != 0) {
+      res = -1;
+      break;
+    }
+    sector += n;
+    buf += n * 512u;
+    count -= n;
+  }
+  {
+    extern volatile uint64_t cpu_heartbeat_ms[];
+    cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+  }
+  blk_token_release();
+  return res;
+}
+
+int blk_data_read(uint64_t sector, void *buf, uint32_t count) {
+  return ns2_rw(sector, (uint8_t *)buf, count, 0);
+}
+
+int blk_data_write(uint64_t sector, const void *buf, uint32_t count) {
+  return ns2_rw(sector, (uint8_t *)(uintptr_t)buf, count, 1);
 }
 
 #else
@@ -2593,3 +2711,18 @@ int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
   blk_cache_invalidate(sector, count);
   return rc;
 }
+
+#ifndef __x86_64__
+/* cp/ext2: the data disk is an x86_64 NVMe namespace (see the x86 section);
+ * the ARM virtio-mmio transport is single-device, so ARM has none. */
+int blk_data_present(void) { return 0; }
+uint64_t blk_data_sectors(void) { return 0; }
+int blk_data_read(uint64_t sector, void *buf, uint32_t count) {
+  (void)sector; (void)buf; (void)count;
+  return -1;
+}
+int blk_data_write(uint64_t sector, const void *buf, uint32_t count) {
+  (void)sector; (void)buf; (void)count;
+  return -1;
+}
+#endif
