@@ -181,6 +181,28 @@ int ext2_resolve(struct ext2_fs *fs, const char *mnt, const char *abs,
                  int flags, struct ext2_res *res);
 
 int ext2_stat(struct ext2_fs *fs, uint32_t ino, struct ext2_stat *st);
+
+/* cp/ext2b: attribute change (chmod/chown/utimensat; docs/cp-ext2b.md).
+ * Only the fields named in `valid` change; ctime becomes "now" whenever any
+ * bit is set (Linux).  A UID/GID change on a non-directory clears S_ISUID,
+ * and S_ISGID when S_IXGRP is set (Linux notify_change ATTR_KILL_S*ID).
+ * Times are seconds (ext2 stores no nanoseconds; Linux's ext2 has a 1 s
+ * granularity too) and are clamped to the signed 32-bit on-disk range.
+ * 0, -EROFS, -EINVAL (empty valid set is fine: 0), -EIO. */
+#define EXT2_ATTR_MODE 0x01      /* mode: the 07777 bits; the type is kept */
+#define EXT2_ATTR_UID 0x02
+#define EXT2_ATTR_GID 0x04
+#define EXT2_ATTR_ATIME 0x08     /* atime = .atime */
+#define EXT2_ATTR_MTIME 0x10     /* mtime = .mtime */
+#define EXT2_ATTR_ATIME_NOW 0x20 /* atime = fs->now() */
+#define EXT2_ATTR_MTIME_NOW 0x40 /* mtime = fs->now() */
+struct ext2_attr {
+  uint32_t valid;
+  uint32_t mode;
+  uint32_t uid, gid;
+  int64_t atime, mtime;
+};
+int ext2_setattr(struct ext2_fs *fs, uint32_t ino, const struct ext2_attr *a);
 int ext2_statfs(struct ext2_fs *fs, struct ext2_statfs *st);
 
 /* Regular-file data.  read: bytes (0 at EOF); write: bytes written (a short

@@ -42,6 +42,12 @@ struct nfs_fh;
 int file_nfs_ident(struct process *p, int fd, int *mount_idx,
                    struct nfs_fh *fh, uint32_t *size);
 
+/* cp/ext2b: resolve an fd to a REGULAR ext2 (/EXT) file: inode, current size
+ * and the O_* flags it was opened with (mmap's EACCES rules).  0, or -EBADF /
+ * -ENOTSUP for any other fd type.  The page cache is ext2_obj.h. */
+int file_ext2_ident(struct process *p, int fd, uint32_t *ino, uint64_t *size,
+                    uint32_t *oflags);
+
 /* --- /dev/fb0 (GB-025 / M3, implemented in fs.c) -----------------------
  * 1 when `fd` is the framebuffer node opened from /dev/fb0.  vm_mmap maps
  * it to the scanout smem (USER_FB_BASE_V2) instead of a vm_object, and the

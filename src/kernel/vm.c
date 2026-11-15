@@ -24,6 +24,7 @@
 #include "kline.h" /* GB-216: one-write [ASCLONE]/[AS-TD] records */
 #include "lock.h"
 #include "nfs.h" /* L54: VM_OBJ_NFS page source */
+#include "ext2_obj.h" /* cp/ext2b: VM_OBJ_EXT2 page source */
 #include "process.h"
 #include "virtio_gpu.h" /* GB-025 / M3: the scanout framebuffer address */
 #include "vdisplay.h"   /* L84: a hosted process maps its private surface */
@@ -419,7 +420,7 @@ uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off) {
   /* so-vm lane A: a file-backed page is read from disk by file_obj_page()
      outside vm_lock; zero-filling one here would silently corrupt mapped
      text, so refuse instead. */
-  if (o->kind == VM_OBJ_FILE)
+  if (o->kind == VM_OBJ_FILE || o->kind == VM_OBJ_EXT2) /* cp/ext2b */
     return 0;
   uint64_t idx = off / FRAME_SIZE;
   if (idx >= (uint64_t)o->nr_frames)
@@ -1374,6 +1375,8 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
       for (uint32_t k = 0; k < fh.len; k++)
         fh.data[k] = o->nfs_fh[k];
       n[i] = nfs_read_file(m, &fh, (uint32_t)off, (void *)f[i], FRAME_SIZE);
+    } else if (o->kind == VM_OBJ_EXT2) {
+      n[i] = ext2_obj_read(o, off, f[i]); /* cp/ext2b */
     } else {
       if (!o->file_start_cluster)
         break;
@@ -1527,6 +1530,8 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
         for (uint32_t q = 0; q < fh.len; q++)
           fh.data[q] = o->nfs_fh[q];
         n[0] = nfs_read_file(m, &fh, (uint32_t)off, (void *)f[0], FRAME_SIZE);
+      } else if (o->kind == VM_OBJ_EXT2) {
+        n[0] = ext2_obj_read(o, off, f[0]); /* cp/ext2b */
       } else {
         n[0] = fat16_read_direct_pos(o->file_start_cluster, (uint32_t)o->size,
                                      f[0], FRAME_SIZE, (uint32_t)off);
@@ -1677,7 +1682,8 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   struct vm_region *r = vm_region_find(as, a);
   if (as->ver != AS_V2 || !r || !r->obj ||
-      (r->obj->kind != VM_OBJ_FILE && r->obj->kind != VM_OBJ_NFS) ||
+      (r->obj->kind != VM_OBJ_FILE && r->obj->kind != VM_OBJ_NFS &&
+       r->obj->kind != VM_OBJ_EXT2) ||
       a < r->base || a + FRAME_SIZE > r->base + r->len) {
     spinlock_release_irqrestore(&vm_lock, fl);
     return -EFAULT;
@@ -1689,8 +1695,9 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   vm_object_ref_locked(o); /* hold it across the unlocked disk read */
   spinlock_release_irqrestore(&vm_lock, fl);
 
-  uint64_t src = (o->kind == VM_OBJ_NFS) ? nfs_obj_page(o, off)
-                                         : file_obj_page(o, off);
+  uint64_t src = (o->kind == VM_OBJ_NFS)    ? nfs_obj_page(o, off)
+                 : (o->kind == VM_OBJ_EXT2) ? ext2_obj_page(o, off) /* cp/ext2b */
+                                            : file_obj_page(o, off);
   uint64_t priv = 0;
   int beyond_eof = 0;
   if (!src) {
@@ -1740,7 +1747,7 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
    * executable page (UnityPlayer's text is 24.7 MiB of a 1.3 GiB load). */
   int exec_backed = is_exec &&
                     ((o->kind == VM_OBJ_FILE && o->file_start_cluster) ||
-                     o->kind == VM_OBJ_NFS);
+                     o->kind == VM_OBJ_NFS || o->kind == VM_OBJ_EXT2);
   /* M6/L72: an all-zero DATA page is the one shape the exec gate never sees.
      A single raw read is NOT enough evidence for a data page: a torn or
      wrong read published into .data corrupts a static pointer silently, and
@@ -1892,7 +1899,8 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
          a time, outside vm_lock (disk I/O).  A write into a MAP_PRIVATE
          mapping materializes the page privately, straight into a copy. */
       if (r->obj && (r->obj->kind == VM_OBJ_FILE ||
-                     r->obj->kind == VM_OBJ_NFS)) {
+                     r->obj->kind == VM_OBJ_NFS ||
+                     r->obj->kind == VM_OBJ_EXT2)) { /* cp/ext2b */
         /* M6/L63: the exec clause is the L62 fix.  A READ-touch of an
            executable page is a publish for execution just as much as a
            write is: without `is_exec` here the page took the shared branch
@@ -2856,7 +2864,8 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
      (disk I/O, so vm_lock must be dropped); the helper re-validates and
      maps, mapping the object's frame shared — read-only when the region is
      MAP_PRIVATE — or a private copy for a MAP_PRIVATE write. */
-  if (r->obj && (r->obj->kind == VM_OBJ_FILE || r->obj->kind == VM_OBJ_NFS)) {
+  if (r->obj && (r->obj->kind == VM_OBJ_FILE || r->obj->kind == VM_OBJ_NFS ||
+                 r->obj->kind == VM_OBJ_EXT2)) { /* cp/ext2b */
     /* M6/L59: DSO TEXT IS PRIVATE TO THE ADDRESS SPACE.
      *
      * A MAP_PRIVATE text page used to be mapped from the page-cache frame
@@ -3841,6 +3850,10 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
   int anon_obj = 0;
   int file_backed = 0; /* obj carries one reference for this call */
   int nfs_backed = 0;  /* L54: VM_OBJ_NFS instead of VM_OBJ_FILE */
+  int ext2_backed = 0; /* cp/ext2b: VM_OBJ_EXT2 */
+  uint32_t e_ino = 0;
+  uint64_t e_cap = 0;
+  int e_wb = 0;
   uint16_t f_cluster = 0;
   uint32_t f_size = 0;
   int n_mount = -1;
@@ -3911,7 +3924,12 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       int nmount = -1;
       struct nfs_fh nfh;
       uint32_t nsize = 0;
+      uint64_t esize = 0;
+      uint32_t eoflags = 0;
       if (file_fat16_ident(grp, fd, &f_cluster, &f_size) != 0) {
+        if (file_ext2_ident(grp, fd, &e_ino, &esize, &eoflags) == 0) {
+          ext2_backed = 1; /* cp/ext2b */
+        } else {
         /* L54: a regular NFS file maps through the NFS page cache.  Mono's
            MemoryMappedFile (RimWorld's XML loader) maps Data/*.xml; refusing
            them turned every def load into "Could not map file". */
@@ -3921,12 +3939,39 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
         n_mount = nmount;
         n_fh = nfh;
         n_size = nsize;
+        }
       }
       if (offset & 0xFFF)
         return -EINVAL;
       if (!(fl2 & (VM_MAP_SHARED | VM_MAP_PRIVATE)))
         return -EINVAL; /* a file mapping is private or shared, never neither */
-      if (nfs_backed) {
+      if (ext2_backed) {
+        /* cp/ext2b (docs/cp-ext2b.md section 4).  Linux's access rules: the
+           fd must be readable (EACCES), and a MAP_SHARED PROT_WRITE mapping
+           needs an O_RDWR fd (EACCES).  A MAP_SHARED mapping through an
+           O_RDWR fd is a write-back mapping (mprotect may add PROT_WRITE
+           later).  Capacity = the larger of the file and the mapped range,
+           so the pages of a file that grows under the mapping are backed;
+           files over the 64 MiB object ceiling are refused, never mapped
+           partially (the FAT rule). */
+        uint32_t acc = eoflags & 3u;
+        if (acc == 1u)
+          return -EACCES; /* O_WRONLY */
+        if ((fl2 & VM_MAP_SHARED) && (p & VM_PROT_WRITE) && acc != 2u)
+          return -EACCES;
+        e_wb = (fl2 & VM_MAP_SHARED) && acc == 2u;
+        if (esize > VM_OBJ_MAX_BYTES)
+          return -ENOMEM;
+        e_cap = offset + len;
+        if (e_cap < offset || e_cap > VM_OBJ_MAX_BYTES)
+          e_cap = VM_OBJ_MAX_BYTES; /* the tail past the cap reads as zeros */
+        if (e_cap < esize)
+          e_cap = esize;
+        if (offset >= e_cap)
+          return -EINVAL;
+        obj_off = offset;
+        kind = VMK_LIB;
+      } else if (nfs_backed) {
         if (n_size == 0 || n_size > VM_OBJ_MAX_BYTES)
           return -ENOMEM;
         uint64_t ncap = ((uint64_t)n_size + 0xFFF) & ~0xFFFULL;
@@ -4041,7 +4086,12 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       }
     }
   }
-  int obj_owned = (anon_obj || file_backed || nfs_backed);
+  if (ext2_backed) {
+    obj = ext2_obj_get(e_ino, e_cap, e_wb); /* cp/ext2b */
+    if (!obj)
+      return -ENOMEM;
+  }
+  int obj_owned = (anon_obj || file_backed || nfs_backed || ext2_backed);
 
   uint64_t base = 0;
   int from_arena = 0;
@@ -4513,7 +4563,7 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
          write fault would ever break the copy. */
       uint16_t mprot = r.prot;
       if ((r.flags & VM_MAP_PRIVATE) && r.obj &&
-          r.obj->kind == VM_OBJ_FILE)
+          (r.obj->kind == VM_OBJ_FILE || r.obj->kind == VM_OBJ_EXT2))
         mprot = (uint16_t)(mprot & ~VM_PROT_WRITE);
       uint64_t phys;
       if (r.obj) {

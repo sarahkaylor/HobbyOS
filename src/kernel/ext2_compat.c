@@ -29,6 +29,7 @@
 #include "arch/trap.h"
 #include "errno.h"
 #include "ext2_vfs.h"
+#include "ext2_obj.h"
 #include "fs.h"
 #include "linux_layout.h"
 #include "linux_syscall.h"
@@ -411,6 +412,54 @@ static int e2c_fstatfs(struct process *p, struct trap_frame *tf) {
   return ret(tf, statfs_out(p, l_arg(tf, 1), k));
 }
 
+/* ---- access ---------------------------------------------------------------- */
+
+/* access/faccessat on an ext2 path (cp/ext2b): the generic rows copy the path
+   into 256 bytes, which a Wine prefix path outgrows.  uid 0 semantics: F_OK is
+   existence, X_OK needs one x bit on a non-directory, W_OK is EROFS on a
+   read-only volume.  The raw faccessat has no flags argument. */
+static int access_common(struct process *p, struct trap_frame *tf, int dirfd,
+                         uint64_t upath, int64_t mode) {
+  char abs[VFS_PATH_MAX];
+  int o = e2c_owned(p, dirfd, upath, abs);
+  if (o <= 0) return o < 0 ? ret(tf, o) : 0;
+  if (mode & ~7) return ret(tf, -EINVAL);
+  int rc = ext2v_access(abs, (int)mode, 1);
+  if (rc == EXT2_EXTERNAL) {
+    struct k_stat ks;
+    int err = 0;
+    rc = file_stat_path(p, abs, &ks, &err) == 0 ? 0 : -(err ? err : ENOENT);
+  }
+  return ret(tf, rc);
+}
+
+static int e2c_access(struct process *p, struct trap_frame *tf) {
+  return access_common(p, tf, L_AT_FDCWD, l_arg(tf, 0), l_argi(tf, 1));
+}
+
+static int e2c_faccessat(struct process *p, struct trap_frame *tf) {
+  return access_common(p, tf, (int)l_argi(tf, 0), l_arg(tf, 1), l_argi(tf, 2));
+}
+
+/* ---- mmap write-back hooks (cp/ext2b) -------------------------------------- */
+
+/* msync/munmap: write back the stores of every MAP_SHARED writable ext2
+   mapping, then DECLINE so l_tab_mem does the actual msync/munmap.  Cheap
+   when no such mapping exists (one atomic load). */
+static int e2c_msync(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  ext2_obj_sync_all();
+  return 0;
+}
+
+static int e2c_munmap(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)tf;
+  ext2_obj_sync_all();
+  return 0;
+}
+
 const struct l_sysent l_tab_ext2[] = {
   {L_SYS_open, e2c_open, "open"},
   {L_SYS_openat, e2c_openat, "openat"},
@@ -438,6 +487,10 @@ const struct l_sysent l_tab_ext2[] = {
   {E2C_SYS_fdatasync, e2c_fdatasync, "fdatasync"},
   {L_SYS_statfs, e2c_statfs, "statfs"},
   {E2C_SYS_fstatfs, e2c_fstatfs, "fstatfs"},
+  {L_SYS_access, e2c_access, "access"},          /* cp/ext2b */
+  {L_SYS_faccessat, e2c_faccessat, "faccessat"}, /* cp/ext2b */
+  {L_SYS_msync, e2c_msync, "msync"},             /* cp/ext2b: declines */
+  {L_SYS_munmap, e2c_munmap, "munmap"},          /* cp/ext2b: declines */
   L_SYSENT_END
 };
 

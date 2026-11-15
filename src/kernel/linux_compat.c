@@ -47,6 +47,11 @@ extern const struct l_sysent l_tab_tmr[] __attribute__((weak));
    DECLINE (return 0) a number another table owns when the path/fd is not on
    the ext2 volume -- the search then continues below as if it were absent. */
 extern const struct l_sysent l_tab_ext2[] __attribute__((weak));
+/* cp/ext2b (src/kernel/vfs_compat.c): the generic setattr and file-lock rows
+   (chmod/chown/utimensat families, flock, the fcntl lock commands).  Consulted
+   right after l_tab_ext2 with the same decline protocol (return 0 = "not
+   mine", e.g. a non-lock fcntl command). */
+extern const struct l_sysent l_tab_vfsx[] __attribute__((weak));
 
 /* ---- user-memory helpers ------------------------------------------------ */
 
@@ -364,6 +369,15 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     for (unsigned i = 0; l_tab_ext2[i].fn; i++) {
       if ((uint64_t)(int64_t)l_tab_ext2[i].nr == nr) {
         int _e = l_tab_ext2[i].fn(p, tf);
+        if (_e) L_DISPATCH_RET(_e);
+        break;
+      }
+    }
+  }
+  if (l_tab_vfsx) {
+    for (unsigned i = 0; l_tab_vfsx[i].fn; i++) {
+      if ((uint64_t)(int64_t)l_tab_vfsx[i].nr == nr) {
+        int _e = l_tab_vfsx[i].fn(p, tf);
         if (_e) L_DISPATCH_RET(_e);
         break;
       }

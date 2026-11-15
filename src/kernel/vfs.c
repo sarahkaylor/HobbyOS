@@ -37,7 +37,7 @@ void vfs_init(void) {
  * then truncated the OUTPUT at cap -- every limit silently produced a
  * different, shorter path (a deep Wine prefix path named its own ancestor).
  * Now a result that does not fit `cap` is an error (-1), never a prefix. */
-static int vfs_clean(const char *path, char *out, int cap) {
+static int vfs_clean_into(const char *path, char *out, int cap) {
   /* starts[i] = output length before component i (the ".." pop target).  A
      component costs at least two output bytes ("/x"), so cap/2 slots can
      never overflow before `out` itself does. */
@@ -70,6 +70,13 @@ static int vfs_clean(const char *path, char *out, int cap) {
   }
   out[pos] = '\0';
   return 0;
+}
+
+/* A failed canonicalisation leaves an EMPTY string, never a partial path. */
+static int vfs_clean(const char *path, char *out, int cap) {
+  int r = vfs_clean_into(path, out, cap);
+  if (r != 0 && cap > 0) out[0] = '\0';
+  return r;
 }
 
 /* M5c: a bind may redirect this canonical path to another filesystem.  Applied
@@ -411,4 +418,74 @@ int vfs_open_routed(const char *path, struct file *f) {
   f->nfs.is_dir = (attr.type == NF3DIR);
   f->nfs.mount_idx = midx;
   return 1;
+}
+
+/* ==================================================================== */
+/* cp/ext2b: setattr (chmod / chown / utimensat), the vfs.h contract     */
+/* ==================================================================== */
+
+/* A filesystem with no mode/owner/time storage (FAT16, pipes, sockets, the
+ * /dev nodes, memfd here).  The FAT16 answer is Linux vfat's behaviour when
+ * mounted with `quiet`, except for chown:
+ *   - chmod: success, nothing stored (vfat without `quiet` refuses a mode it
+ *     cannot represent with EPERM; a portable copier that chmods after write
+ *     must not abort, and stat() keeps reporting the synthesized 0644/0755 --
+ *     linux_probe_glibc's fchmod row depends on this);
+ *   - chown: success only for the owner every node already reports (uid/gid
+ *     0); a foreign owner is -EPERM (vfat without `quiet`), never a success
+ *     that the next stat() would contradict;
+ *   - utimensat: success, not stored (vfat would store the mtime at 2 s
+ *     granularity; this driver keeps the last-write clock).  */
+static int vfs_setattr_unstored(const struct vfs_setattr *sa) {
+  if ((sa->valid & VFS_SA_UID) && sa->uid != 0) return -EPERM;
+  if ((sa->valid & VFS_SA_GID) && sa->gid != 0) return -EPERM;
+  return 0;
+}
+
+int vfs_setattr_path(const char *path, int follow, const struct vfs_setattr *sa) {
+  if (!path || !sa) return -EFAULT;
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENAMETOOLONG;
+  if (ext2v_owns(abs)) {
+    int r = ext2v_setattr(abs, follow, sa);
+    if (r != EXT2_EXTERNAL) return r;
+    /* a symlink led off the volume: abs is the redirected path */
+  }
+  /* cp-sys (C2-sys), after the merge (docs/cp-ext2b.md 2.3):
+   *   if (tmpfs_owns(abs)) {
+   *     int m; int64_t at, mt; vfs_sa_to_tmpfs(sa, &m, &at, &mt);
+   *     int r = tmpfs_setattr(abs, follow, m, sa->mode, sa->uid, sa->gid, at, mt);
+   *     if (r != TMPFS_EXTERNAL) return r;
+   *   } */
+  /* The path must exist on whatever serves it (Linux resolves before it
+     looks at the filesystem's write policy). */
+  struct k_stat ks;
+  int err = 0;
+  if (file_stat_path(current_process(), abs, &ks, &err) != 0)
+    return -(err ? err : ENOENT);
+  int midx = -1;
+  const char *rel = 0;
+  if (vfs_route(abs, &midx, &rel)) return -EROFS; /* NFS: read-only mounts */
+  return vfs_setattr_unstored(sa);
+}
+
+int vfs_setattr_file(struct file *f, const struct vfs_setattr *sa) {
+  if (!f || !sa) return -EBADF;
+  switch (f->type) {
+  case FILE_TYPE_EMPTY:
+  case FILE_TYPE_UNINIT:
+    return -EBADF;
+  case FILE_TYPE_EXT2:
+  case FILE_TYPE_EXT2DIR:
+    return ext2v_fsetattr(f, sa);
+  case FILE_TYPE_NFS:
+  case FILE_TYPE_NFSDIR:
+    return -EROFS;
+  /* cp-sys (C2-sys), after the merge:
+   *   case FILE_TYPE_TMPFS: case FILE_TYPE_TMPFSDIR: {
+   *     int m; int64_t at, mt; vfs_sa_to_tmpfs(sa, &m, &at, &mt);
+   *     return tmpfs_fsetattr(f, m, sa->mode, sa->uid, sa->gid, at, mt); } */
+  default:
+    return vfs_setattr_unstored(sa);
+  }
 }

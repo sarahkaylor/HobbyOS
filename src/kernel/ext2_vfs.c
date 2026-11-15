@@ -17,6 +17,10 @@
 #include "kline.h"
 #include "lock.h"
 #include "virtio_blk.h"
+#include "vfs.h"
+#include "ext2_obj.h"
+#include "process.h"
+#include "vm.h"
 
 extern uint64_t hb_clock_realtime_ms(void);
 
@@ -85,6 +89,25 @@ static void unlock_flush(int mutated) {
 
 static void unlock(void) { ylock_release(&g_lock); }
 
+/* cp/ext2b: the VM-object glue (ext2_obj.c) runs under the same lock. */
+void ext2v_lock(void) { lock(); }
+void ext2v_unlock(int flush) { unlock_flush(flush); }
+struct ext2_fs *ext2v_fs(void) { return &g_fs; }
+
+/* cp/ext2b: a user buffer must be resident BEFORE the ext2 lock is taken.  A
+   fault on it under the lock would re-enter the lock through an ext2 mmap
+   page fill (ext2_obj_page) -- a self-deadlock.  The trap-layer read/write
+   already pre-touch; pread64/pwrite64 and the kernel's own callers do not. */
+static int user_prefault(const void *buf, int size, int write) {
+  uint64_t a = (uint64_t)(uintptr_t)buf;
+  if (size <= 0 || a < USER_VA_BASE || a >= USER_VA_TOP) return 0;
+  struct process *cur = current_process();
+  if (!cur) return 0;
+  struct process *g = process_group(cur);
+  if (!g || !g->as) return 0;
+  return vm_touch(g, a, (uint64_t)size, write) == 0 ? 0 : -EFAULT;
+}
+
 /* Resolve under the lock.  EXT2_EXTERNAL rewrites `abs`. */
 static int resolve(char *abs, int follow, struct ext2_res *r) {
   int rc = ext2_resolve(&g_fs, EXT2V_MNT, abs, follow ? EXT2_RES_FOLLOW : 0, r);
@@ -103,9 +126,11 @@ static void stat_fill(struct k_stat *st, const struct ext2_stat *es) {
   st->st_size = (long)es->size;
   st->st_blksize = es->blksize;
   st->st_blocks = (long)es->blocks;
-  st->st_atime = es->atime;
-  st->st_mtime = es->mtime;
-  st->st_ctime = es->ctime;
+  /* ext2 times are signed 32-bit seconds (cp/ext2b: utimensat can store a
+     pre-1970 time, which must not read back as 2106). */
+  st->st_atime = (long)(int32_t)es->atime;
+  st->st_mtime = (long)(int32_t)es->mtime;
+  st->st_ctime = (long)(int32_t)es->ctime;
 }
 
 /* ---- mount -------------------------------------------------------------- */
@@ -170,9 +195,10 @@ int ext2v_open(char *abs, int flags, int mode, struct file *f) {
   int wants_write = (acc == O_WRONLY_ || acc == O_RDWR_);
   struct ext2_res r;
   lock();
+  int mutated = ext2_obj_reap_locked(); /* cp/ext2b */
   int rc = resolve(abs, !(flags & O_NOFOLLOW_), &r);
-  int mutated = 0;
   if (rc == EXT2_EXTERNAL) {
+    if (mutated) (void)ext2_flush(&g_fs);
     unlock();
     return EXT2_EXTERNAL;
   }
@@ -215,8 +241,11 @@ int ext2v_open(char *abs, int flags, int mode, struct file *f) {
   if (rc == 0) rc = ext2_iget(&g_fs, ino);
   if (rc == 0 && (imode & EXT2_S_IFMT) == EXT2_S_IFREG && wants_write &&
       (flags & O_TRUNC_)) {
+    uint64_t osz = 0;
+    (void)ext2_file_size(&g_fs, ino, &osz);
     rc = ext2_truncate(&g_fs, ino, 0);
     mutated = 1;
+    if (rc == 0) ext2_obj_note_truncate_locked(ino, osz, 0); /* cp/ext2b */
     if (rc) (void)ext2_iput(&g_fs, ino);
   }
   unlock_flush(mutated);
@@ -232,7 +261,11 @@ int ext2v_open(char *abs, int flags, int mode, struct file *f) {
 void ext2v_close(struct file *f) {
   if (!g_mounted) return;
   lock();
+  /* cp/ext2b: a close writes back this file's shared-writable mappings and
+     reaps cache entries no mapping uses any more. */
+  (void)ext2_obj_writeback_locked(f->ext2.ino);
   (void)ext2_iput(&g_fs, f->ext2.ino);
+  (void)ext2_obj_reap_locked();
   unlock_flush(1);
 }
 
@@ -248,10 +281,13 @@ int ext2v_read(struct file *f, void *buf, int size) {
   if ((f->open_flags & O_ACCMODE_) == O_WRONLY_) return -EBADF;
   if (f->type == FILE_TYPE_EXT2DIR) return -EISDIR;
   if (size <= 0) return 0;
+  if (user_prefault(buf, size, 1)) return -EFAULT;
   lock();
+  /* cp/ext2b: read() sees stores made through a MAP_SHARED mapping. */
+  int wb = ext2_obj_writeback_locked(f->ext2.ino);
   int64_t r = ext2_read(&g_fs, f->ext2.ino, f->ext2.cursor, buf, (uint64_t)size);
   if (r > 0) f->ext2.cursor += (uint64_t)r;
-  unlock();
+  unlock_flush(wb > 0);
   return io_ret(r);
 }
 
@@ -260,14 +296,17 @@ int ext2v_write(struct file *f, const void *buf, int size) {
   if (acc != O_WRONLY_ && acc != O_RDWR_) return -EBADF;
   if (f->type == FILE_TYPE_EXT2DIR) return -EISDIR;
   if (size <= 0) return 0;
+  if (user_prefault(buf, size, 0)) return -EFAULT;
   lock();
   uint64_t off = f->ext2.cursor;
-  if (f->open_flags & O_APPEND_) {
-    uint64_t sz = 0;
-    if (ext2_file_size(&g_fs, f->ext2.ino, &sz) == 0) off = sz;
-  }
+  uint64_t sz = 0;
+  (void)ext2_file_size(&g_fs, f->ext2.ino, &sz);
+  if (f->open_flags & O_APPEND_) off = sz;
   int64_t w = ext2_write(&g_fs, f->ext2.ino, off, buf, (uint64_t)size);
-  if (w > 0) f->ext2.cursor = off + (uint64_t)w;
+  if (w > 0) {
+    f->ext2.cursor = off + (uint64_t)w;
+    ext2_obj_note_write_locked(f->ext2.ino, off, (uint64_t)w, sz); /* cp/ext2b */
+  }
   unlock_flush(1);
   return io_ret(w);
 }
@@ -287,7 +326,10 @@ int ext2v_ftruncate(struct file *f, int64_t len) {
   if (acc != O_WRONLY_ && acc != O_RDWR_) return -EINVAL; /* Linux: EINVAL/EBADF */
   if (len < 0) return -EINVAL;
   lock();
+  uint64_t osz = 0;
+  (void)ext2_file_size(&g_fs, f->ext2.ino, &osz);
   int rc = ext2_truncate(&g_fs, f->ext2.ino, (uint64_t)len);
+  if (rc == 0) ext2_obj_note_truncate_locked(f->ext2.ino, osz, (uint64_t)len);
   unlock_flush(1);
   return rc;
 }
@@ -300,6 +342,8 @@ int ext2v_fsync(struct file *f) {
 int ext2v_sync(void) {
   if (!g_mounted) return 0;
   lock();
+  (void)ext2_obj_writeback_locked(0); /* cp/ext2b: mapped stores too */
+  (void)ext2_obj_reap_locked();
   int rc = ext2_flush(&g_fs);
   unlock();
   return rc;
@@ -427,6 +471,7 @@ int ext2v_unlink(char *abs) {
       rc = -EISDIR;
     else {
       rc = ext2_unlink(&g_fs, r.parent, r.name, r.name_len);
+      (void)ext2_obj_reap_locked(); /* cp/ext2b: an unmapped orphan goes now */
       mutated = 1;
     }
   }
@@ -518,7 +563,10 @@ int ext2v_truncate(char *abs, int64_t len) {
   int rc = resolve(abs, 1, &r);
   int mutated = 0;
   if (rc == 0) {
+    uint64_t osz = 0;
+    (void)ext2_file_size(&g_fs, r.ino, &osz);
     rc = ext2_truncate(&g_fs, r.ino, (uint64_t)len);
+    if (rc == 0) ext2_obj_note_truncate_locked(r.ino, osz, (uint64_t)len);
     mutated = 1;
   }
   unlock_flush(mutated);
@@ -577,4 +625,99 @@ int ext2v_statfs(struct ext2_statfs *out) {
   int rc = ext2_statfs(&g_fs, out);
   unlock();
   return rc;
+}
+
+/* ---- cp/ext2b: setattr / access ------------------------------------------ */
+
+static void sa_to_attr(const struct vfs_setattr *sa, struct ext2_attr *a) {
+  a->valid = 0;
+  a->mode = sa->mode;
+  a->uid = sa->uid;
+  a->gid = sa->gid;
+  a->atime = sa->atime_sec; /* nanoseconds dropped: ext2 stores seconds */
+  a->mtime = sa->mtime_sec;
+  if (sa->valid & VFS_SA_MODE) a->valid |= EXT2_ATTR_MODE;
+  if (sa->valid & VFS_SA_UID) a->valid |= EXT2_ATTR_UID;
+  if (sa->valid & VFS_SA_GID) a->valid |= EXT2_ATTR_GID;
+  if (sa->valid & VFS_SA_ATIME) a->valid |= EXT2_ATTR_ATIME;
+  if (sa->valid & VFS_SA_MTIME) a->valid |= EXT2_ATTR_MTIME;
+  if (sa->valid & VFS_SA_ATIME_NOW) a->valid |= EXT2_ATTR_ATIME_NOW;
+  if (sa->valid & VFS_SA_MTIME_NOW) a->valid |= EXT2_ATTR_MTIME_NOW;
+}
+
+int ext2v_setattr(char *abs, int follow, const struct vfs_setattr *sa) {
+  struct ext2_attr a;
+  sa_to_attr(sa, &a);
+  struct ext2_res r;
+  lock();
+  int rc = resolve(abs, follow, &r);
+  int mutated = 0;
+  if (rc == 0) {
+    rc = ext2_setattr(&g_fs, r.ino, &a);
+    mutated = (a.valid != 0);
+  }
+  unlock_flush(mutated);
+  return rc;
+}
+
+int ext2v_fsetattr(struct file *f, const struct vfs_setattr *sa) {
+  struct ext2_attr a;
+  sa_to_attr(sa, &a);
+  lock();
+  int rc = ext2_setattr(&g_fs, f->ext2.ino, &a);
+  unlock_flush(a.valid != 0);
+  return rc;
+}
+
+int ext2v_access(char *abs, int mode, int follow) {
+  struct ext2_res r;
+  lock();
+  int rc = resolve(abs, follow, &r);
+  unlock();
+  if (rc) return rc;
+  if ((mode & 2) && g_fs.ro) return -EROFS; /* W_OK */
+  if ((mode & 1) && (r.mode & EXT2_S_IFMT) != EXT2_S_IFDIR &&
+      !(r.mode & 0111))
+    return -EACCES; /* X_OK: root still needs one x bit on a file */
+  return 0;
+}
+
+/* ---- cp/ext2b: exec images ------------------------------------------------ */
+
+int ext2v_read_image(char *abs, uint8_t **buf_out, uint32_t *size_out,
+                     uint32_t *pages_out, uint32_t max) {
+  struct ext2_res r;
+  lock();
+  int rc = resolve(abs, 1, &r);
+  if (rc) {
+    unlock();
+    return rc; /* EXT2_EXTERNAL: abs now names the target off the volume */
+  }
+  if ((r.mode & EXT2_S_IFMT) == EXT2_S_IFDIR) rc = -EISDIR;
+  else if ((r.mode & EXT2_S_IFMT) != EXT2_S_IFREG) rc = -EACCES;
+  else if (!(r.mode & 0111)) rc = -EACCES; /* execve: root needs an x bit */
+  uint64_t size = 0;
+  if (rc == 0) rc = ext2_file_size(&g_fs, r.ino, &size);
+  if (rc == 0 && (size == 0 || size > max)) rc = -ENOEXEC;
+  uint64_t buf = 0;
+  uint32_t pages = 0;
+  if (rc == 0) {
+    pages = (uint32_t)((size + FRAME_SIZE - 1) / FRAME_SIZE);
+    buf = frame_alloc_contig((int)pages);
+    if (!buf) rc = -ENOMEM;
+  }
+  if (rc == 0) {
+    int64_t n = ext2_read(&g_fs, r.ino, 0, (void *)(uintptr_t)buf, size);
+    if (n != (int64_t)size) rc = -EIO;
+  }
+  unlock();
+  if (rc) {
+    for (uint32_t i = 0; buf && i < pages; i++)
+      frame_free(buf + (uint64_t)i * FRAME_SIZE);
+    return rc;
+  }
+  *buf_out = (uint8_t *)(uintptr_t)buf;
+  *size_out = (uint32_t)size;
+  *pages_out = pages;
+  return 0;
 }

@@ -66,7 +66,50 @@ int vfs_stats(uint64_t *total, uint64_t *free_bytes);
 /* Is the filesystem containing the cwd writable? (NFS mounts are not.) */
 int vfs_cwd_writable(void);
 
+/* ---- cp/ext2b: the generic attribute-change operation (setattr) --------
+ *
+ * One small operation behind chmod/fchmod/fchmodat, chown/fchown/lchown/
+ * fchownat and utimensat/futimens/utimes (docs/cp-ext2b.md section 2, the
+ * contract a new filesystem implements).  The caller (the compat rows in
+ * vfs_compat.c) has already decoded the Linux arguments: uid/gid -1 ("leave
+ * alone") is simply not in `valid`, UTIME_OMIT is not in `valid`, UTIME_NOW
+ * is the *_NOW bit.  A backend:
+ *   - changes exactly the fields named in `valid`, and sets ctime to "now"
+ *     whenever `valid` is non-empty (an empty set is a successful no-op);
+ *   - MODE replaces the 07777 bits and keeps the file type;
+ *   - a UID or GID change on a non-directory clears S_ISUID, and S_ISGID if
+ *     S_IXGRP is set (Linux notify_change, ATTR_KILL_SUID/SGID);
+ *   - stores times at its own granularity (ext2: seconds, clamped to the
+ *     signed 32-bit range), never rounding a value up;
+ *   - answers -EROFS on a read-only volume, -ENOENT/-ENOTDIR/-ELOOP from the
+ *     lookup, and never -EPERM for these fields: the compat class runs as
+ *     uid 0 (CAP_CHOWN/CAP_FOWNER), so no permission check applies.
+ * Backends today: ext2 (stored), FAT16 (closest Linux vfat answer, below),
+ * NFS (-EROFS: the mounts are read-only), every other fd type (accepted for
+ * mode/times, chown only to the owner it already reports: uid/gid 0).
+ * tmpfs (lane C2-sys) adds its case to vfs_setattr_file/vfs_setattr_path. */
+#define VFS_SA_MODE      0x01 /* mode: 07777 bits */
+#define VFS_SA_UID       0x02
+#define VFS_SA_GID       0x04
+#define VFS_SA_ATIME     0x08 /* atime = atime_sec/atime_nsec */
+#define VFS_SA_MTIME     0x10 /* mtime = mtime_sec/mtime_nsec */
+#define VFS_SA_ATIME_NOW 0x20 /* atime = the filesystem's clock */
+#define VFS_SA_MTIME_NOW 0x40 /* mtime = the filesystem's clock */
+struct vfs_setattr {
+  uint32_t valid;
+  uint32_t mode;
+  uint32_t uid, gid;
+  int64_t atime_sec, mtime_sec;
+  uint32_t atime_nsec, mtime_nsec;
+};
+
 struct file;
+/* Path form: `path` is canonicalised (binds applied); `follow` = 0 changes a
+ * symlink itself (lchown, AT_SYMLINK_NOFOLLOW).  0 or -errno. */
+int vfs_setattr_path(const char *path, int follow, const struct vfs_setattr *sa);
+/* Open-file form (fchmod/fchown/futimens). 0 or -errno. */
+int vfs_setattr_file(struct file *f, const struct vfs_setattr *sa);
+
 /* Open `path` for the VFS layer:
  *   0  the path is not on NFS: the caller should use fat16_open()
  *   1  opened on NFS into f->nfs

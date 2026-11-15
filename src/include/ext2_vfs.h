@@ -29,6 +29,7 @@
 
 struct file;
 struct k_stat;
+struct vfs_setattr;
 
 void ext2v_init(void);
 int ext2v_mounted(void);
@@ -66,6 +67,29 @@ int ext2v_chdir(char *abs);
 int ext2v_read_dir(char *abs, int index, char *name, int ncap, uint8_t *attr,
                    uint32_t *size);
 int ext2v_statfs(struct ext2_statfs *out);
+
+/* ---- cp/ext2b ------------------------------------------------------------ */
+/* setattr (vfs.h contract).  Path form may return EXT2_EXTERNAL (abs
+ * rewritten), like every path operation here. */
+int ext2v_setattr(char *abs, int follow, const struct vfs_setattr *sa);
+int ext2v_fsetattr(struct file *f, const struct vfs_setattr *sa);
+/* access(2)/faccessat(2) for uid 0: F_OK = exists; X_OK needs an x bit on a
+ * non-directory; W_OK on a read-only volume is -EROFS.  0 / -errno /
+ * EXT2_EXTERNAL. */
+int ext2v_access(char *abs, int mode, int follow);
+
+/* exec: read a whole regular file into a fresh contiguous frame range
+ * (`pages` frames, caller frees each).  Needs an x bit (execve, uid 0).
+ * 0, -errno (-ENOEXEC: empty or larger than `max`), or EXT2_EXTERNAL (abs
+ * rewritten to the target off the volume). */
+int ext2v_read_image(char *abs, uint8_t **buf_out, uint32_t *size_out,
+                     uint32_t *pages_out, uint32_t max);
+
+/* Internal to the ext2 kernel glue (ext2_obj.c, the VM object): the single
+ * ext2 lock and the mounted filesystem.  ext2v_unlock(1) flushes first. */
+void ext2v_lock(void);
+void ext2v_unlock(int flush);
+struct ext2_fs *ext2v_fs(void);
 int ext2v_sync(void);
 
 #endif /* EXT2_VFS_H */
