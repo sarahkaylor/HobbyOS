@@ -237,3 +237,14 @@ Two more things this cost, worth reading before diagnosing a "hang":
   `verify-blockb` WEDGE, `verify-blockb2`, `verify-blockb3`). One green run is
   not evidence; two is the minimum, and a wedge should be re-run before it is
   blamed on whatever was last committed.
+
+## The disk image is not a laboratory bench
+
+`make disk.img` recreates the FAT image from scratch, so everything staged or
+guest-written (`/JDKTMP`, `/JDKOUT`) disappears. Measured: `PlainWrite` created
+`/JDKTMP/x.txt`, and two boots later `ReadBack` reported it **absent** -- the
+write-through build had rebuilt `disk.img` in between, while `t.txt` (written
+after that rebuild) survived its own reboot.
+
+A durability claim is therefore only meaningful for boot N -> boot N+1 with **no
+`make` in between**; otherwise the comparison silently measures an empty disk.
