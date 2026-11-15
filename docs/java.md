@@ -248,3 +248,16 @@ after that rebuild) survived its own reboot.
 
 A durability claim is therefore only meaningful for boot N -> boot N+1 with **no
 `make` in between**; otherwise the comparison silently measures an empty disk.
+
+## Suite status on the write-back kernel (83781f3c)
+
+Two consecutive green runs, which is the bar this lane set after measuring the
+1-in-7 wedge flake:
+
+| run | log | result |
+|---|---|---|
+| 1 | `obj/jdk/verify-writeback.log` (6238 lines) | `SUMMARY pass=18 fail=0 skip=0`, `System halt`, no `[ALIVE-SET] no READY work` |
+| 2 | `obj/jdk/verify-writeback2.log` | `SUMMARY pass=18 fail=0 skip=0`, `System halt` |
+
+msync writing back did not disturb the files-nio check, which is the one that
+exercises mappings hardest.
