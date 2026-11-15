@@ -39,6 +39,8 @@
  *     R1 G set_robust_list(len != 24) -> EINVAL; get_robust_list round-trips
  *     R2 G a thread dies holding a robust lock with a waiter parked:
  *          the kernel writes OWNER_DIED|WAITERS and wakes the waiter
+ *     R3 G a process SIGKILLed while holding robust lists: new threads on the
+ *          reused pids start with get_robust_list == NULL
  *     G1 G exit_group(42) from a non-leader thread ends the whole group
  *     G2 G the leader exits (exit(60)) first; a worker's exit_group(43) is the
  *          group's status
@@ -335,11 +337,14 @@ static void x_reject(const char *name, unsigned long flags, unsigned long tls,
 }
 
 /* ---- F/V: fork and vfork shapes ---------------------------------------- */
+static int reap_ret, reap_errno; /* the last waitpid() answer reap() saw */
 static int reap(int pid, int ms) {
   long long dl = now_us() + (long long)ms * 1000;
   int st = 0;
   for (;;) {
     int r = waitpid(pid, &st, WNOHANG);
+    reap_ret = r;
+    reap_errno = r < 0 ? errno : 0;
     if (r == pid) return st;
     if (r < 0) return -2;
     if (now_us() > dl) return -1;
@@ -494,6 +499,91 @@ static void r2_robust_death(void) {
   int ok = owner == (uint32_t)tid && r == 0 && after == 0xC0000000u;
   row("R2 robust-death owner=%u wait=%d word_after=0x%x (want 0xC0000000) %s",
       owner, r, after, ok ? "ok" : "FAIL");
+  grade(ok);
+}
+
+/* R3: a robust list must not outlive its thread's pid.  A process killed
+   with SIGKILL never runs the thread-exit path that drops its robust head;
+   HobbyOS reuses pids at once, so a NEW thread on that pid must still start
+   with no robust list (Linux: every clone child's list is NULL). */
+static struct robust_head r3_head_a, r3_head_b;
+static volatile uint32_t r3_park;
+static int r3_child_thread(void *a) {
+  (void)a;
+  rsys(SYS_set_robust_list, (long)&r3_head_b, sizeof r3_head_b, 0, 0, 0, 0);
+  for (;;) rsys(SYS_futex, (long)&r3_park, FUTEX_WAIT, 0, 0, 0, 0);
+  return 0;
+}
+
+#define R3_N 8
+static volatile int r3_tid[R3_N];
+static volatile long r3_head_seen[R3_N];
+static volatile int r3_done[R3_N];
+static volatile uint32_t r3_go;
+static volatile uint32_t r3_ctid[R3_N];
+static int r3_probe_thread(void *a) {
+  int i = (int)(intptr_t)a;
+  void *h = (void *)1;
+  size_t len = 0;
+  r3_tid[i] = gettid_();
+  long r = rsys(SYS_get_robust_list, 0, (long)&h, (long)&len, 0, 0, 0);
+  r3_head_seen[i] = r == 0 ? (long)(uintptr_t)h : -1;
+  __atomic_store_n(&r3_done[i], 1, __ATOMIC_RELEASE);
+  while (!__atomic_load_n(&r3_go, __ATOMIC_ACQUIRE))
+    rsys(SYS_futex, (long)&r3_go, FUTEX_WAIT, 0, 0, 0, 0);
+  return 0;
+}
+
+static void r3_robust_pid_reuse(void) {
+  int sync[2];
+  pipe(sync);
+  pid_t pid = fork();
+  if (pid == 0) {
+    rsys(SYS_set_robust_list, (long)&r3_head_a, sizeof r3_head_a, 0, 0, 0, 0);
+    size_t sz = 64 * 1024;
+    char *st = new_stack(sz);
+    long t = thr_raw_clone(THR_BASE, st + sz, 0, 0, 0, r3_child_thread, 0);
+    int dead[2] = {(int)rsys(SYS_getpid, 0, 0, 0, 0, 0, 0), (int)t};
+    msleep(30); /* the thread has set its list */
+    (void)!write(sync[1], dead, sizeof dead);
+    for (;;) rsys(SYS_futex, (long)&r3_park, FUTEX_WAIT, 0, 0, 0, 0);
+  }
+  int dead[2] = {0, 0};
+  (void)!read(sync[0], dead, sizeof dead);
+  kill(pid, SIGKILL);
+  int st = reap(pid, 3000);
+  int wret = reap_ret, werr = reap_errno;
+  msleep(50);
+  /* R3_N live threads take the lowest free pids, the dead ones among them. */
+  r3_go = 0;
+  char *stk[R3_N];
+  for (int i = 0; i < R3_N; i++) {
+    r3_done[i] = 0;
+    r3_tid[i] = 0;
+    r3_ctid[i] = 1;
+    stk[i] = new_stack(64 * 1024);
+    thr_raw_clone(THR_BASE | CLONE_CHILD_CLEARTID, stk[i] + 64 * 1024, 0,
+                  &r3_ctid[i], 0, r3_probe_thread, (void *)(intptr_t)i);
+  }
+  int bad = 0, reused = 0, seen = 0;
+  for (int i = 0; i < R3_N; i++) {
+    if (!wait_ge(&r3_done[i], 1, 2000)) continue;
+    seen++;
+    if (r3_head_seen[i] != 0) bad++;
+    if (r3_tid[i] == dead[0] || r3_tid[i] == dead[1]) reused++;
+  }
+  __atomic_store_n(&r3_go, 1, __ATOMIC_RELEASE);
+  fut_wake(&r3_go, R3_N);
+  for (int i = 0; i < R3_N; i++)
+    for (int k = 0; k < 100 && r3_ctid[i]; k++)
+      fut_wait_to(&r3_ctid[i], r3_ctid[i], 20);
+  for (int i = 0; i < R3_N; i++) munmap(stk[i], 64 * 1024);
+  close(sync[0]);
+  close(sync[1]);
+  int ok = st >= 0 && seen == R3_N && bad == 0;
+  row("R3 robust-pid-reuse killed=%d,%d status=0x%x waitpid=%d errno=%d threads=%d "
+      "reused_dead_pid=%d stale_heads=%d %s",
+      dead[0], dead[1], st, wret, werr, seen, reused, bad, ok ? "ok" : "FAIL");
   grade(ok);
 }
 
@@ -1008,6 +1098,12 @@ int main(int argc, char **argv) {
   (void)argv;
   setvbuf(stdout, NULL, _IONBF, 0);
   row("thr probe start pid=%d", getpid());
+#ifdef THR_R3_LOOP
+  /* src/user/linux_probe_r3loop.c (not committed): R3 alone, many times */
+  for (int i = 0; i < THR_R3_LOOP; i++) r3_robust_pid_reuse();
+  row("done rc=%d", fails);
+  return fails ? 1 : 0;
+#endif
   slot_tid[0] = gettid_();
   set_handler(SIGUSR1, on_sig, SA_RESTART, 0);
   set_handler(SIGUSR2, on_sig, SA_RESTART, 0);
@@ -1039,6 +1135,7 @@ int main(int argc, char **argv) {
 
   r1_robust_abi();
   r2_robust_death();
+  r3_robust_pid_reuse();
   g1_exit_group_worker();
   g2_leader_first();
 

@@ -1634,7 +1634,8 @@ static int l_proc_rt_sigsuspend(struct process *p, struct trap_frame *tf) {
        the suspended worker keeps every lock it held, and Mono's ThreadPool can
        never grow again.  Re-check under the same lock that the sender takes. */
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    int late = l_pending_under(p, nm);
+    /* C1-thr: a task killed while inside the syscall is never re-parked. */
+    int late = l_pending_under(p, nm) || (p->state == PROC_STATE_EXITED || p->state == PROC_STATE_THREAD_DONE);
     if (late) {
       /* The signal won the race: do not park.  Linux restores the
          pre-suspend mask and returns -EINTR; the handler runs at this

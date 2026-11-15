@@ -1308,6 +1308,14 @@ static int process_create_internal_ver(int ver) {
   p->teardown_done = 0;
   p->thread_ret = 0;
   p->as = 0;
+  {
+    /* C1-thr: no compat futex/robust state survives from the slot's last
+       occupant (linux_compat_thr_slot_reset). */
+    extern void linux_compat_thr_slot_reset(struct process *)
+        __attribute__((weak));
+    if (linux_compat_thr_slot_reset)
+      linux_compat_thr_slot_reset(p);
+  }
   p->vfork_own_as = 0; /* C1-thr: no borrowed AS, no vfork link */
   p->vfork_parent = 0;
   p->vfork_child = 0;
@@ -6447,6 +6455,14 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   t->futex_uaddr = 0;
   t->clear_child_tid = 0;
   t->teardown_done = 0;
+  {
+    /* C1-thr: no compat futex/robust state survives from the slot's last
+       occupant (linux_compat_thr_slot_reset). */
+    extern void linux_compat_thr_slot_reset(struct process *)
+        __attribute__((weak));
+    if (linux_compat_thr_slot_reset)
+      linux_compat_thr_slot_reset(t);
+  }
   t->vfork_own_as = 0; /* C1-thr */
   t->vfork_parent = 0;
   t->vfork_child = 0;

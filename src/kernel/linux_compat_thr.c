@@ -164,6 +164,37 @@ static int l_thr_slot_of(struct process *p, int create) {
   return i;
 }
 
+/* C1-thr: a pid slot starts clean.  l_thr[] is pid-indexed and only
+   linux_compat_thread_exit() used to drop its state, so a pid whose last
+   occupant died WITHOUT that path (SIGKILL / group teardown, exit_group's
+   siblings, exec's terminated siblings) handed its robust_head -- and owner,
+   as, uaddr, pi -- to the next thread or process that got the pid: measured,
+   linux_probe_thr R3 (both reused pids reported the dead process's head).
+   Linux gives every clone child a NULL robust list, and C2-exec's execve
+   walks the list of a vfork child that still runs in its PARENT's memory, so
+   a stale head would mark OWNER_DIED in the parent.  process.c calls this
+   whenever a slot is handed to a new process (create, fork, vfork) or
+   thread (clone), before it can run.  Takes proc_lock (the wake/PI scans
+   read the table under it); the caller must not hold it. */
+void linux_compat_thr_slot_reset(struct process *p);
+void linux_compat_thr_slot_reset(struct process *p) {
+  if (!p || p->pid <= 0 || p->pid >= MAX_PROCESSES)
+    return;
+  uint64_t f = spinlock_acquire_irqsave(&proc_lock);
+  struct l_thr_slot *s = &l_thr[p->pid];
+  s->used = 0;
+  s->owner = 0;
+  s->as = 0;
+  s->uaddr = 0;
+  s->bitset = 0;
+  s->robust_head = 0;
+  s->pi = 0;
+  s->waits = 0;
+  s->wakes = 0;
+  s->park_seq = 0;
+  spinlock_release_irqrestore(&proc_lock, f);
+}
+
 /* Is slot `i` parked on (as,uaddr) right now?  Caller holds proc_lock. */
 static int l_futex_queued_locked(int i, struct addr_space *as,
                                  uint64_t uaddr) {
@@ -1924,7 +1955,8 @@ static int l_thr_vfork_wait(struct process *p, struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-ENOSYS;
     return 1;
   }
-  if (p->vfork_child == 0) {
+  if (p->vfork_child == 0 || (p->state == PROC_STATE_EXITED || p->state == PROC_STATE_THREAD_DONE)) {
+    /* released -- or killed meanwhile: never re-park a dead task */
     int r = p->vfork_ret;
     p->vfork_ret = 0;
     spinlock_release_irqrestore(&proc_lock, f);
@@ -2193,6 +2225,18 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     }
 
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    /* C1-thr: a kill (process_kill_group_sig / exit_group) that lands while
+       this thread is still inside the syscall has already made it EXITED or
+       THREAD_DONE.  Parking would overwrite that with FUTEX and resurrect a
+       dead task: measured, linux_probe_thr R3 -- a SIGKILLed child parked
+       again, its exit was never reaped and waitpid timed out.  Leave the
+       state alone; the trap exit's schedule() drops the dead task. */
+    if (p->state == PROC_STATE_EXITED || p->state == PROC_STATE_THREAD_DONE ||
+        p->state == PROC_STATE_FREE) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      tf->regs[0] = (uint64_t)(int64_t)-EINTR;
+      return 1;
+    }
     /* Compare under the lock: the waker cannot slip between the compare and
        the park, so no wakeup is lost. */
     if (*(volatile uint32_t *)uaddr != val) {
