@@ -75,7 +75,7 @@ wave)
   [ -n "$c" ] && [ -r "$c" ] && cp -f "$c" "$C"
   while read -r f n; do
     pid=$(grep -a "Process [0-9]*: $f exited" "$C" | head -1 | sed 's/.*Process \([0-9]*\):.*/\1/')
-    code=$( [ -n "$pid" ] && grep -a "^\[EXITPC\] pid=$pid " "$C" | head -1 | sed 's/.*code=//')
+    code=$( [ -n "$pid" ] && grep -a "^\[EXITPC\] pid=$pid " "$C" | head -1 | tr -d '\r' | sed 's/.*code=//')
     if [ "$code" = "0x0" ]; then echo "WAVE $n PASS (pid=$pid)"; else echo "WAVE $n FAIL pid=${pid:-?} code=${code:-none}"; fails=$((fails+1)); fi
   done < "$OUT/names"
   echo "    wave: done-rows=$(grep -ac '^\[LP\] done rc=' "$C" 2>/dev/null) rc0=$(grep -ac '^\[LP\] done rc=0' "$C" 2>/dev/null) halted=$(grep -ac 'System halt' "$C" 2>/dev/null)"
