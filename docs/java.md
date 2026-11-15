@@ -62,7 +62,7 @@ Failures stay in the table — a deleted failure is a lost bug report.
 | # | probe | verdict | log |
 |---|---|---|---|
 | — | (baseline) `sdktest.sh` on `72477b57` | 4/4 PASS, suite 18/18 | `obj/jdk/sdk-*.log` |
-| 5 | 19 OpenJDK test sources (`java/lang/{String,Integer,Math}`), one VM | **19/19 correct**; `String/Split` needs ~20 s here (host 0.82 s), so a 15 s cap reported it as a hang — the cap was wrong, not the VM | `obj/jdk/jtreg-subset.log`, `obj/jdk/jtreg-subset2.log` |
+| 5 | 19 OpenJDK test sources (`java/lang/{String,Integer,Math}`), one VM | **19/19 PASS in one clean run** (`SUMMARY pass=19 fail=0 total=19`); `Split` 21.3 s, the rest 19 ms–1.7 s. An earlier 15 s cap misreported `Split` as a hang — the cap was wrong, not the VM | `obj/jdk/jtreg-subset2.log` (clean), `obj/jdk/jtreg-subset.log` (first, capped run) |
 | 5a | `Split` alone, 240 s budget, default JIT | **PASS, elapsed=20094 ms** | `obj/jdk/split-jit.log` |
 | 5b | `Split` alone, 240 s budget, `-Xint` | HANG-after-240s — consistent with the interpreter costing ~10-30x the JIT, i.e. 400 s+ for this test | `obj/jdk/split-int.log` |
 
