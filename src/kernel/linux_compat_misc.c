@@ -113,22 +113,17 @@ static int l_misc_pread64(struct process *p, struct trap_frame *tf) {
   int64_t n = l_argi(tf, 2);
   int64_t off = l_argi(tf, 3);
   if (n < 0) return l_misc_ret(tf, -EINVAL);
-  int err = 0;
-  int64_t saved = file_seek(p, fd, 0, 1 /* SEEK_CUR */, &err);
-  if (saved < 0) return l_misc_ret(tf, -err);
-  if (file_seek(p, fd, off, 0 /* SEEK_SET */, &err) < 0)
-    return l_misc_ret(tf, -err);
-  /* GB-308: bounce, so an unbacked destination page cannot fault here. */
-  int r = file_read_user(p, fd, buf, n, tf);
+  /* GB-308: atomic positioned read (see file_pread_user): bounce, and hold
+     one lock over seek+read+restore so concurrent readers of one fd cannot
+     read each other's offset. */
+  int r = file_pread_user(p, fd, buf, n, off, tf);
   if (r == -2) {
-    /* Parked: let the restart redo the whole positioned read from `off`. */
-    file_seek(p, fd, off, 0, &err);
+    /* Parked: the restart redoes the whole positioned read from `off`. */
     if ((tf->cs & 3) == 3) tf->elr -= 2;
     save_context(p, tf);
     schedule(tf, 0);
     return 1;
   }
-  file_seek(p, fd, saved, 0, &err);
   return l_misc_ret(tf, r);
 }
 
@@ -138,19 +133,13 @@ static int l_misc_pwrite64(struct process *p, struct trap_frame *tf) {
   int64_t n = l_argi(tf, 2);
   int64_t off = l_argi(tf, 3);
   if (n < 0) return l_misc_ret(tf, -EINVAL);
-  int err = 0;
-  int64_t saved = file_seek(p, fd, 0, 1, &err);
-  if (saved < 0) return l_misc_ret(tf, -err);
-  if (file_seek(p, fd, off, 0, &err) < 0) return l_misc_ret(tf, -err);
-  int r = file_write(p, fd, (const void *)(uintptr_t)buf, (int)n, tf);
+  int r = file_pwrite_user(p, fd, buf, n, off, tf);
   if (r == -2) {
-    file_seek(p, fd, off, 0, &err);
     if ((tf->cs & 3) == 3) tf->elr -= 2;
     save_context(p, tf);
     schedule(tf, 0);
     return 1;
   }
-  file_seek(p, fd, saved, 0, &err);
   return l_misc_ret(tf, r);
 }
 

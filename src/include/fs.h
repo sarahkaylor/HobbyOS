@@ -186,6 +186,12 @@ int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame 
  * vm_kwrite() so an unbacked destination page cannot fault in kernel mode. */
 int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
                    struct trap_frame *tf);
+/* GB-308: positioned I/O that is atomic and cursor-neutral (the native layer
+ * has only a cursor, so this serialises seek+read/write+restore). */
+int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                    int64_t off, struct trap_frame *tf);
+int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                     int64_t off, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
 /* WK-1 M3: length-bounded console write from user space, shared by
  * SYS_WRITE_CONSOLE (0001) and the fd-1/2 console fallback in file_write

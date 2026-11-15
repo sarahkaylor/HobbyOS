@@ -93,12 +93,24 @@ extern void print_int(int val);
  * are range-checked through it before the kernel touches them. */
 extern int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
+/* GB-308: the native layer has only a CURSOR, so pread64/pwrite64 are a
+ * seek-read-restore sequence.  That sequence is not atomic by itself, and the
+ * JVM preads its jimage from several class-loading threads at once: thread A
+ * seeks, B seeks elsewhere, A reads B's offset.  It surfaced as
+ *   ClassFormatError: Unknown constant tag 47 in class file
+ *   java/util/concurrent/ThreadLocalRandom
+ * -- a byte of a PATH string where a constant-pool tag belonged, i.e. data
+ * read from the wrong offset.  One lock over the whole sequence makes
+ * positioned I/O what POSIX says it is: atomic and cursor-neutral. */
+static ylock_t f1_pos_lock;
+
 /**
  * Initializes the virtual file system layer.
  * Sets up the global file table and initializes the FS spinlock.
  */
 void fs_init(void) {
   spinlock_init(&fs_lock);
+  ylock_init(&f1_pos_lock);
   spinlock_init(&file_locks_lock);
   for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
     global_file_table[i].type = FILE_TYPE_EMPTY;
@@ -1139,6 +1151,18 @@ int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
 
   struct socket_pcb *pcb = f->socket.pcb;
   uint16_t port = ntohs(port_be); /* the stack keeps ports host-order */
+
+  /* GB-308: 127.0.0.1 is answered in-kernel -- pair with the listener and
+   * return, so a loopback connect never waits on a SYN that no stack sends. */
+  {
+    int lo = net_socket_connect_lo(pcb, ip_be, port_be);
+    if (lo > 0) {
+      pcb->connect_started = 1;
+      pcb->connect_err = 0;
+      return 0;
+    }
+    if (lo < 0) return lo;
+  }
 
   if (pcb->state == SOCKET_ESTABLISHED && pcb->connect_started &&
       pcb->connect_err == 0) {
@@ -2958,6 +2982,7 @@ static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
 #define FS_RD_BOUNCE (32 * 1024)
 static uint8_t fs_rd_bounce[MAX_CPUS][FS_RD_BOUNCE];
 
+
 int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
                    struct trap_frame *tf) {
   if (size <= 0) return 0;
@@ -2977,6 +3002,52 @@ int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
     if (r < chunk) break;
   }
   return (int)done;
+}
+
+
+/* Positioned read into a USER range: atomic w.r.t. every other positioned op,
+ * and it leaves the fd cursor exactly where it found it. */
+int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                    int64_t off, struct trap_frame *tf) {
+  if (n < 0) return -EINVAL;
+  if (off < 0) return -EINVAL;
+  struct process *pg = process_group(p);
+  int err = 0;
+  int r = 0;
+  ylock_acquire(&f1_pos_lock);
+  int64_t saved = file_seek(pg, fd, 0, 1 /* SEEK_CUR */, &err);
+  if (saved < 0) {
+    r = -err;
+  } else if (file_seek(pg, fd, off, 0 /* SEEK_SET */, &err) < 0) {
+    r = -err;
+  } else {
+    r = file_read_user(pg, fd, ubuf, n, tf);
+  }
+  if (saved >= 0) file_seek(pg, fd, saved, 0, &err);
+  ylock_release(&f1_pos_lock);
+  return r;
+}
+
+/* Positioned write: same contract, cursor-restoring. */
+int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                     int64_t off, struct trap_frame *tf) {
+  if (n < 0) return -EINVAL;
+  if (off < 0) return -EINVAL;
+  struct process *pg = process_group(p);
+  int err = 0;
+  int r = 0;
+  ylock_acquire(&f1_pos_lock);
+  int64_t saved = file_seek(pg, fd, 0, 1, &err);
+  if (saved < 0) {
+    r = -err;
+  } else if (file_seek(pg, fd, off, 0, &err) < 0) {
+    r = -err;
+  } else {
+    r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);
+  }
+  if (saved >= 0) file_seek(pg, fd, saved, 0, &err);
+  ylock_release(&f1_pos_lock);
+  return r;
 }
 
 int file_read(struct process *cur, int fd, void *buf, int size, struct trap_frame *tf) {
@@ -4082,11 +4153,53 @@ static struct file *f1_unix_file(struct process *pg, int fd, int *errp) {
   return f;
 }
 
+/* GB-308: bind/listen/accept/getsockname must also serve an AF_INET fd.
+ * f1_unix_file() rejects FILE_TYPE_SOCKET because its other callers
+ * dereference f->usock; this hands back either kind and lets the caller
+ * branch on f->type. */
+static struct file *f1_any_sock_file(struct process *pg, int fd, int *errp) {
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = -EBADF; return 0; }
+  int g_fd = pg->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = -EBADF; return 0; }
+  struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
+  if (f->type == FILE_TYPE_SOCKET && f->socket.pcb) return f;
+  if (f->type != FILE_TYPE_UNIXSOCK || !f->usock.ptr) {
+    *errp = -ENOTSOCK;
+    return 0;
+  }
+  return f;
+}
+
+/* Format a sockaddr_in (16 bytes, network order) into the caller's scratch. */
+static void f1_inet_format(uint8_t *sa_out, uint32_t ip_host, uint16_t port_host) {
+  sa_out[0] = K_AF_INET;
+  sa_out[1] = 0;
+  sa_out[2] = (uint8_t)((port_host >> 8) & 0xFF);
+  sa_out[3] = (uint8_t)(port_host & 0xFF);
+  sa_out[4] = (uint8_t)((ip_host >> 24) & 0xFF);
+  sa_out[5] = (uint8_t)((ip_host >> 16) & 0xFF);
+  sa_out[6] = (uint8_t)((ip_host >> 8) & 0xFF);
+  sa_out[7] = (uint8_t)(ip_host & 0xFF);
+  for (int i = 8; i < 16; i++) sa_out[i] = 0;
+}
+
 int file_bind(struct process *p, int fd, const uint8_t *sa, int salen) {
   struct process *pg = process_group(p);
   int err = 0;
-  struct file *f = f1_unix_file(pg, fd, &err);
+  struct file *f = f1_any_sock_file(pg, fd, &err);
   if (!f) return err;
+  if (f->type == FILE_TYPE_SOCKET) {
+    /* AF_INET: loopback only.  A bind to any other address is refused rather
+     * than silently accepted, because this stack has no NIC-bound listener
+     * to back it. */
+    if (!sa || salen < 8 || sa[0] != K_AF_INET || sa[1] != 0) return -EINVAL;
+    uint32_t ip = ((uint32_t)sa[4] << 24) | ((uint32_t)sa[5] << 16) |
+                  ((uint32_t)sa[6] << 8) | (uint32_t)sa[7];
+    if (ip != 0u && ip != 0x7F000001u) return -EINVAL;
+    return net_socket_bind_lo(f->socket.pcb,
+                              (uint16_t)(((int)sa[2] << 8) | sa[3]));
+  }
   struct usock_name n;
   int r = usock_name_parse(sa, salen, &n);
   if (r == -EAFNOSUPPORT) return -EINVAL; /* Linux unix_mkname */
@@ -4097,8 +4210,10 @@ int file_bind(struct process *p, int fd, const uint8_t *sa, int salen) {
 int file_listen(struct process *p, int fd, int backlog) {
   struct process *pg = process_group(p);
   int err = 0;
-  struct file *f = f1_unix_file(pg, fd, &err);
+  struct file *f = f1_any_sock_file(pg, fd, &err);
   if (!f) return err;
+  if (f->type == FILE_TYPE_SOCKET)
+    return net_socket_listen_lo(f->socket.pcb, backlog);
   return usock_listen(f->usock.ptr, f->usock.end, backlog);
 }
 
@@ -4106,9 +4221,51 @@ int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
                 int *salen_out) {
   struct process *pg = process_group(p);
   int err = 0;
-  struct file *lf = f1_unix_file(pg, fd, &err);
+  struct file *lf = f1_any_sock_file(pg, fd, &err);
   if (!lf) return err;
   if (flags & ~(K_SOCK_CLOEXEC | K_SOCK_NONBLOCK)) return -EINVAL;
+
+  if (lf->type == FILE_TYPE_SOCKET) {
+    /* GB-308: dequeue a loopback connection.  The slot is reserved BEFORE the
+     * dequeue, exactly like the AF_UNIX path, so a popped connection can
+     * always be installed instead of being lost on ENFILE. */
+    struct socket_pcb *sp = 0;
+    int r = net_socket_accept_lo(lf->socket.pcb, &sp);
+    if (r < 0) return r;                     /* -EAGAIN, or -2 = park */
+    if (pg->num_open_fds >= MAX_OPEN_FDS) {
+      net_socket_close(sp);
+      return -EMFILE;
+    }
+    struct file *nf = file_alloc();
+    if (!nf) {
+      net_socket_close(sp);
+      return -ENFILE;
+    }
+    int nfd = -1;
+    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+      if (pg->open_fds[i] == -1) { nfd = i; break; }
+    }
+    if (nfd < 0) {
+      net_socket_close(sp);
+      nf->type = FILE_TYPE_EMPTY;
+      nf->ref_count = 0;
+      return -EMFILE;
+    }
+    nf->type = FILE_TYPE_SOCKET;
+    nf->socket.pcb = sp;
+    if (flags & K_SOCK_NONBLOCK) sp->nonblock = 1;
+    pg->open_fds[nfd] = get_global_fd(nf);
+    pg->num_open_fds++;
+    if (flags & K_SOCK_CLOEXEC) fd_cloexec_set(pg->fd_cloexec, nfd);
+    else fd_cloexec_clear(pg->fd_cloexec, nfd);
+    if (sa_out && salen_out) {
+      /* The accepted peer is the client that connected to this listener. */
+      f1_inet_format(sa_out, 0x7F000001u,
+                     sp->remote_port ? sp->remote_port : sp->local_port);
+      *salen_out = 16;
+    }
+    return nfd;
+  }
   struct usock *l = lf->usock.ptr;
   if (!usock_is_listening(l)) return -EINVAL;
   if (pg->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
@@ -4180,8 +4337,19 @@ int file_sockname(struct process *p, int fd, int peer, uint8_t *sa_out,
                   int *salen_out) {
   struct process *pg = process_group(p);
   int err = 0;
-  struct file *f = f1_unix_file(pg, fd, &err);
+  struct file *f = f1_any_sock_file(pg, fd, &err);
   if (!f) return err;
+  if (f->type == FILE_TYPE_SOCKET) {
+    /* Java's ServerSocket.getLocalPort() lands here after bind(port 0). */
+    struct socket_pcb *pcb = f->socket.pcb;
+    if (peer)
+      f1_inet_format(sa_out, 0x7F000001u, pcb->remote_port);
+    else
+      f1_inet_format(sa_out, 0x7F000001u,
+                     pcb->bound_port ? pcb->bound_port : pcb->local_port);
+    *salen_out = 16;
+    return 0;
+  }
   struct usock_name n;
   int r = usock_getname(f->usock.ptr, f->usock.end, peer ? 1 : 0, &n);
   if (r != 0) return r;
