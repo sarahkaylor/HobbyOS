@@ -276,8 +276,7 @@ closed by the writer before the next:
 | 1 | `found=0/6 PARTIAL-VISIBILITY` | none visible |
 | 2 | `found=6/6` | |
 | 3 | `found=6/6` | |
-| 4 | `found=6/6` | writer called `sync()` first |
-| 5 | `found=6/6` | writer called `sync()` first |
+| 4-11 | `found=6/6` (8 boots) | "with sync()" -- but see below: sync() does nothing |
 
 Two things are established and one is not:
 
@@ -287,9 +286,14 @@ Two things are established and one is not:
   sector, and the reader was served a stale view of the whole directory. That
   points at the *directory sector* reaching disk on some boots and not others,
   not at an individual entry being dropped;
-* NOT established: whether `sync()` prevents it. The flake is roughly 1 boot in 3,
-  so the two sync runs above are consistent with the defect and with a fix. This
-  needs a scripted N-boot run per arm before anyone claims either.
+* **`sync()` is not implemented.** There is no `L_SYS_sync` anywhere in
+  `src/kernel/`, so the eight "with sync()" boots tested the same thing as the
+  three without it: the calls are no-ops. I briefly read 8/8 versus 2/3 as
+  evidence for a fix and it is not evidence of anything. Corrected rate over all
+  eleven boots: **1 failure in 11 (~9%)**, all-or-nothing when it happens.
+  Consequence worth its own line: a program cannot currently ask for durability
+  at all -- fsync/fdatasync/sync are the POSIX way to say "now", and none of them
+  exists, so a toolchain cannot make a file durable on purpose.
 
 Protocol for whoever picks this up: `tools/jdk/{mkfiles,readfiles}.c` (already in
 the tree), stage both, boot twice per sample, and count. `mkfiles` calls `sync()`
