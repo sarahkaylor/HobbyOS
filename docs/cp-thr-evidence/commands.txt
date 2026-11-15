@@ -1,0 +1,27 @@
+# Exact commands (strix = 192.168.0.123; every build MAKEFLAGS=-j16; every boot under flock /tmp/cp-qemu.lock)
+
+# sync (Mac -> strix)
+rsync -a --delete --exclude .git --exclude obj/ --exclude third_party/ ~/hobbyos-cp-lanes/thr/ strix:cp/lanes/thr/
+
+# reference kernel (strix, Linux 7.0.0-43)
+musl-gcc -static-pie -fPIE -O1 -g -Wall -Wextra -o thr src/user/linux_probe_thr.c && ./thr
+musl-gcc -static-pie -fPIE -O1 -g -Wall -Wextra -o join src/user/linux_probe_join.c && ./join
+
+# guest probe runs, n boots per CPU model (~/cp/thr-scratch/repeat.sh)
+cd ~/cp/lanes/thr && export TOOLS_SKIP=1 MAKEFLAGS=-j16
+LP_TIMEOUT=300 T3_QEMU_ARGS="-enable-kvm -cpu host"   flock /tmp/cp-qemu.lock bash tools/gate/t3_linux_probe.sh thr   # x3, also join x3
+LP_TIMEOUT=300 T3_QEMU_ARGS="-enable-kvm -cpu qemu64" flock /tmp/cp-qemu.lock bash tools/gate/t3_linux_probe.sh thr   # x2, also join x2
+
+# latency diagnosis build (per-signal rows back on)
+SIG_TRACE=1 LP_TIMEOUT=300 flock /tmp/cp-qemu.lock bash tools/gate/t3_linux_probe.sh thr
+
+# probe sweep, lane and base (~/cp/thr-scratch/sweep.sh <tree> <tag>): every linux_probe_*.c except x11,
+# fpu_sig with LP_WAVE_EXTRA="PROBE.ELF nest", default QEMU args (as ~/cp/integ-gates.sh)
+LP_TIMEOUT=300 LP_WAVE_EXTRA="$x" flock /tmp/cp-qemu.lock bash tools/gate/t3_linux_probe.sh $p
+
+# other gates (lane: run in a copy of the lane tree, ~/cp/thr-scratch/armtree, so its obj/ never mixes with probe runs)
+GLIBC_SYSROOT=$HOME/cp/sysroot-glibc231 TOOLS_SKIP=1 MAKEFLAGS=-j16 bash tools/cp/ext2_gate.sh
+flock /tmp/cp-qemu.lock env TOOLS_SKIP=1 MAKEFLAGS=-j16 UNIT_TESTS_TIMEOUT=900 bash ./run_unit_tests_intel.sh
+MAKEFLAGS=-j16 make -k host_tests
+bash tools/cp/mmu/castscan_check.sh
+MAKEFLAGS=-j16 make ARCH=arm TOOLS_SKIP=1 hobbyos.elf

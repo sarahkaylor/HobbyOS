@@ -1,0 +1,74 @@
+# Reference kernel: strix (Linux 7.0.0-43-generic, Zen 5), the SAME static-PIE musl ELFs run natively.
+# musl-gcc -static-pie -fPIE -O1 -g -Wall -Wextra -o thr src/user/linux_probe_thr.c   (and join)
+
+native thr run 1: [LP] done rc=0
+native thr run 2: [LP] done rc=0
+native thr run 3: [LP] done rc=0
+native thr run 4: [LP] done rc=0
+native thr run 5: [LP] done rc=0
+
+--- native thr run 1, all rows
+[LP] thr probe start pid=1237236
+[LP] K1 glibc-pthread flags=0x3d0f00 tid=1237237 ptid=1237237 child_tid=1237237 fs_ok=1 ctid_after=0 parks=1 woke=1 eagain=0 other=0 join_us=80390 ok
+[LP] K2 musl-pthread flags=0x7d0f00 tid=1237238 ptid=1237238 child_tid=1237238 fs_ok=1 ctid_after=0 parks=1 woke=1 eagain=0 other=0 join_us=80404 ok
+[LP] K3 joinE-settid flags=0x1050f00 tid=1237239 ctid_after_exit=1237239 mark=1 ok
+[LP] K4 minimal flags=0x10900 clone=1237240 ran=1 (report-only: Linux accepts; HobbyOS keeps fs/files per group and refuses)
+[LP] X1 thread-no-sighand flags=0x10100 -> -22 want -22 ok
+[LP] X2 sighand-no-vm flags=0x811 -> -22 want -22 ok
+[LP] X3 fs-newns flags=0x20211 -> -22 want -22 ok
+[LP] X4 pidfd-parent-settid flags=0x101011 -> -22 want -22 ok
+[LP] X5 settls-noncanonical flags=0xd0f00 -> -1 want -1 ok
+[LP] X6 linuxthreads-vm-sighand flags=0x911 -> 1237241 want -22 (report-only)
+[LP] X7 vm-process flags=0x111 -> 1237242 want -22 (report-only)
+[LP] F1 glibc-fork flags=0x1200011 pid=1237243 status=0x700 parent_ctid=0 ok
+[LP] F2 fork57 pid=1237244 status=0x900 ok
+[LP] V1 vfork58 pid=1237245 shared_seen=1 status=0x500 ok
+[LP] V2 spawn-shape flags=0x4111 pid=1237246 err_seen=42 child_pid=1237246 status=0x600 ok
+[LP] V3 posix_spawn-enoent r=2 pid=-1 ok
+[LP] R1 robust-abi set(23)=-22 set(24)=0 get=0 head_ok=1 len=24 ok
+[LP] R2 robust-death owner=1237248 wait=0 word_after=0xc0000000 (want 0xC0000000) ok
+[LP] G1 exit_group-from-worker status=0x2a00 ms=30 ok
+[LP] G2 leader-exits-first status=0x2b00 ok
+[LP] L-futex tgkill=0 latency_us=63 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-nanosleep tgkill=0 latency_us=56 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-sigsuspend tgkill=0 latency_us=56 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-read tgkill=0 latency_us=56 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-spin tgkill=0 latency_us=12 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] S1 tgkill-one usr1:w0=0 w1=1 w2=0 main=0 quit:w0=0 w1=0 w2=1 main=0 ok
+[LP] S2 blocked-stays-on-thread held=1 main_sigpending=0 delivered_on_unblock=1 unblock_to_handler_us=56 others=0,0,0 ok
+[LP] S3 kill-process first_to_unblocked=1 all_blocked_held=1 sigpending_shows=1 taken_by_first_unblocker=1 ok
+[LP] S4 wine-suspend first_us=269 nested=0 held_in_handler=1 redelivered=1 count=2 on_altstack=2 futex_returned=0 ok
+[LP] S5 sigquit-one tid=1237777 tgkill=0 ctid_cleared=1 joiner_woken=1 tgkill_after=-3 (want -3) sibling_alive=1 ok
+[LP] S6 handler-sigsuspend entered=1 resumed=1 usr2_on_thread=1 ret=-1 errno=4 mask_restored=1 usr1_blocked_in_handler=1 resume_us=256 ok
+[LP] done rc=0
+
+--- native join (3 runs)
+[LP] join probe start
+[LP] A park-first wait=0 wake=1 flag=1
+[LP] B wake-before-look wait=0 flag=1
+[LP] C join-park-first rc=0 us=120416 ran=1
+[LP] D join-after-exit rc=0 us=33
+[LP] E nocleartid pid=1305307 ctid=1305307 mark=1 ok
+[LP] done rc=0
+[LP] join probe start
+[LP] A park-first wait=0 wake=1 flag=1
+[LP] B wake-before-look wait=0 flag=1
+[LP] C join-park-first rc=0 us=120563 ran=1
+[LP] D join-after-exit rc=0 us=26
+[LP] E nocleartid pid=1305328 ctid=1305328 mark=1 ok
+[LP] done rc=0
+[LP] join probe start
+[LP] A park-first wait=0 wake=1 flag=1
+[LP] B wake-before-look wait=0 flag=1
+[LP] C join-park-first rc=0 us=120776 ran=1
+[LP] D join-after-exit rc=0 us=35
+[LP] E nocleartid pid=1305334 ctid=1305334 mark=1 ok
+[LP] done rc=0
+--- BASE linux_probe_join.c (721266a9) on the reference kernel: row E is musl 1.2.5 clone() refusing CLONE_THREAD
+[LP] join probe start
+[LP] A park-first wait=0 wake=1 flag=1
+[LP] B wake-before-look wait=0 flag=1
+[LP] C join-park-first rc=0 us=121139 ran=1
+[LP] D join-after-exit rc=0 us=33
+[LP] E clone failed errno=22
+[LP] done rc=1

@@ -1,0 +1,38 @@
+# tgkill(SIGUSR1) -> handler entry latency, linux_probe_thr L rows (+ S4 first suspend), strix QEMU/KVM -cpu host.
+# latency_us is CLOCK_MONOTONIC in the guest (1 ms resolution); the reference kernel reads 16-533 us (native-reference.txt).
+
+=== BEFORE (base kernel 721266a9): 10-13 ms; L-read then dies (stale sig_park_kind: SA_RESTART restarted read(2) as nanosleep)
+[LP] L-futex tgkill=0 latency_us=13000 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-nanosleep tgkill=0 latency_us=11000 handler_on=1 after: returned=0 ret=0 errno=0 (want EINTR) FAIL
+[LP] L-sigsuspend tgkill=0 latency_us=10000 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+
+=== DIAGNOSIS: this lane with make SIG_TRACE=1 (the per-signal UART rows back on): 9-11 ms again, S4 20 ms
+[LP] L-futex tgkill=0 latency_us=11000 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-nanosleep tgkill=0 latency_us=9000 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-sigsuspend tgkill=0 latency_us=10000 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-read tgkill=0 latency_us=11000 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-spin tgkill=0 latency_us=9000 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] S4 wine-suspend first_us=20000 nested=0 held_in_handler=1 redelivered=1 count=2 on_altstack=2 futex_returned=0 FAIL
+
+=== AFTER (this lane, default build), 3 boots
+[LP] L-futex tgkill=0 latency_us=0 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-nanosleep tgkill=0 latency_us=0 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-sigsuspend tgkill=0 latency_us=0 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-read tgkill=0 latency_us=0 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-spin tgkill=0 latency_us=0 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] S4 wine-suspend first_us=1000 nested=0 held_in_handler=1 redelivered=1 count=2 on_altstack=2 futex_returned=0 ok
+
+[LP] L-futex tgkill=0 latency_us=0 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-nanosleep tgkill=0 latency_us=0 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-sigsuspend tgkill=0 latency_us=0 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-read tgkill=0 latency_us=0 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-spin tgkill=0 latency_us=0 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] S4 wine-suspend first_us=0 nested=0 held_in_handler=1 redelivered=1 count=2 on_altstack=2 futex_returned=0 ok
+
+[LP] L-futex tgkill=0 latency_us=0 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-nanosleep tgkill=0 latency_us=0 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-sigsuspend tgkill=0 latency_us=0 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+[LP] L-read tgkill=0 latency_us=0 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-spin tgkill=0 latency_us=0 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] S4 wine-suspend first_us=1000 nested=0 held_in_handler=1 redelivered=1 count=2 on_altstack=2 futex_returned=0 ok
+
