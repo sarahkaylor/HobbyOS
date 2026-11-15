@@ -632,6 +632,12 @@ int64_t vm_map_fb_obj(struct process *grp, struct vm_object *obj, uint64_t len);
 int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
                 uint32_t flags, int fd, uint64_t offset);
 
+/* cp/wine2: mremap MAYMOVE of a MAP_PRIVATE object mapping -- copy the
+ * private COW pages of [src, src+len) to dst (pages still reading through
+ * the object stay absent).  Returns pages carried or -ENOMEM. */
+int vm_mremap_carry_private(struct process *grp, uint64_t src, uint64_t dst,
+                            uint64_t len);
+
 /* munmap(addr, len): full or partial (region split); resident private
  * pages are freed.  Unaligned / outside a region -> -EINVAL. */
 int vm_munmap_range(struct process *grp, uint64_t addr, uint64_t len);
