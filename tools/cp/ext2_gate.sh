@@ -151,7 +151,7 @@ LIBC="$(readlink -f "$SYSR/lib/x86_64-linux-gnu/libc.so.6")"
 debugfs -w -f "$X2/stage.cmds" "$IMG" > "$X2/stage.log" 2>&1
 e2fsck -fn "$IMG" > "$D/fsck3pre.log" 2>&1 && good "staged lpx/{bin,glibc} with debugfs; e2fsck -fn rc=0" || { bad "e2fsck after staging"; cat "$D/fsck3pre.log"; }
 for f in bin/hs bin/hd glibc/ld-linux-x86-64.so.2 glibc/libc.so.6; do
-  say "[HOST] info staged /lpx/$f $(dbg "stat /lpx/$f" | sed -n 's/.*Mode: *\([0-7]*\).*Size: *\([0-9]*\).*/mode \1/p;s/.*Size: \([0-9]*\).*/size \1/p' | tr '\n' ' ')"
+  say "[HOST] info staged /lpx/$f mode $(dbg "stat /lpx/$f" | sed -n 's/.*Mode: *\([0-7]*\).*/\1/p' | head -1) size $(dbg "stat /lpx/$f" | sed -n 's/.*Size: \([0-9]*\).*/\1/p' | head -1)"
 done
 
 say "=== ext2_gate: boot 3 (linux_probe_ext2b + helper + glibc hs/hd from /EXT) ==="
