@@ -179,6 +179,32 @@ static int l_misc_rmdir(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, rc);
 }
 
+/* mkdir(2)/mkdirat(2).  The native layer has vfs_mkdir (8.3 FAT16), so javac
+ * writing a PACKAGE (-d /OUT, package pkg -> /OUT/PKG) works; before this the
+ * callers that only ever wrote to a pre-existing directory still passed, which
+ * is exactly how the gap survived until a multi-source compile hit it:
+ *   /T2/Alpha.java:9: error: error while writing Alpha:
+ *   could not create parent directories. */
+static int l_misc_mkdir(struct process *p, struct trap_frame *tf) {
+  char path[256];
+  int r = l_misc_path(p, l_arg(tf, 0), path, sizeof path);
+  if (r != 0) return l_misc_ret(tf, r);
+  return l_misc_ret(tf, vfs_mkdir(path));
+}
+
+static int l_misc_mkdirat(struct process *p, struct trap_frame *tf) {
+  int dirfd = (int)l_argi(tf, 0);
+  uint64_t upath = l_arg(tf, 1);
+  char path[256];
+  int r = l_misc_path(p, upath, path, sizeof path);
+  if (r != 0) return l_misc_ret(tf, r);
+  /* Relative paths are resolved against the cwd by l_misc_path; a path that
+   * is relative to some other directory fd is refused rather than silently
+   * created in the wrong place. */
+  if (path[0] != '/' && dirfd != -100 /* AT_FDCWD */) return l_misc_ret(tf, -EINVAL);
+  return l_misc_ret(tf, vfs_mkdir(path));
+}
+
 static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
   char path[256];
   int r = l_misc_path(p, l_arg(tf, 0), path, sizeof path);
@@ -273,7 +299,7 @@ static int l_misc_rseq(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, -ENOSYS);
 }
 
-const struct l_sysent l_tab_misc[] = { {L_SYS_lseek, l_misc_lseek, "lseek"}, {L_SYS_readv, l_misc_readv, "readv"}, {L_SYS_pread64, l_misc_pread64, "pread64"}, {L_SYS_pwrite64, l_misc_pwrite64, "pwrite64"}, {L_SYS_unlink, l_misc_unlink, "unlink"}, {L_SYS_unlinkat, l_misc_unlinkat, "unlinkat"}, {L_SYS_rename, l_misc_rename, "rename"}, {L_SYS_rmdir, l_misc_rmdir, "rmdir"}, {L_SYS_chdir, l_misc_chdir, "chdir"}, {L_SYS_getcwd, l_misc_getcwd, "getcwd"}, {L_SYS_fsync, l_misc_fsync, "fsync"}, {L_SYS_membarrier, l_misc_membarrier, "membarrier"}, {L_SYS_rseq, l_misc_rseq, "rseq"},
+const struct l_sysent l_tab_misc[] = { {L_SYS_lseek, l_misc_lseek, "lseek"}, {L_SYS_readv, l_misc_readv, "readv"}, {L_SYS_pread64, l_misc_pread64, "pread64"}, {L_SYS_pwrite64, l_misc_pwrite64, "pwrite64"}, {L_SYS_unlink, l_misc_unlink, "unlink"}, {L_SYS_unlinkat, l_misc_unlinkat, "unlinkat"}, {L_SYS_rename, l_misc_rename, "rename"}, {L_SYS_mkdir, l_misc_mkdir, "mkdir"}, {L_SYS_mkdirat, l_misc_mkdirat, "mkdirat"}, {L_SYS_rmdir, l_misc_rmdir, "rmdir"}, {L_SYS_chdir, l_misc_chdir, "chdir"}, {L_SYS_getcwd, l_misc_getcwd, "getcwd"}, {L_SYS_fsync, l_misc_fsync, "fsync"}, {L_SYS_membarrier, l_misc_membarrier, "membarrier"}, {L_SYS_rseq, l_misc_rseq, "rseq"},
   L_SYSENT_END
 };
 
