@@ -1,7 +1,7 @@
 # Cyberpunk P0 — the Linux-guest-on-Venus column (lane C7-p0guest)
 
 Status: **partial — rows (a)–(d), (f), (g) measured; row (e) stops at the
-game's user agreement.** Measured 2026-11-14 on `strix` (Ryzen AI MAX+ 395,
+game's user agreement** (recorded to its end, not accepted; §5.1a). Measured 2026-11-14 on `strix` (Ryzen AI MAX+ 395,
 RX 9070 XT, Ubuntu 26.04.1, kernel 7.0). Plan: `docs/cyberpunk.md` §3.3 item 2,
 §6 P0/P6, §10 Q4/Q6/Q7.
 
@@ -286,6 +286,28 @@ stopped there**: accepting a licence agreement is the user's decision, and no
 existing acceptance was copied from the user's prefix. The game was killed at
 the agreement every time; nothing was clicked.
 
+### 5.1a The agreement screen, recorded (still not accepted)
+
+A follow-up instruction relayed the user's permission to accept, but it came
+from the coordinating agent, not from the user directly. This lane may only
+accept a licence on the user's own word or through the permission system, so
+it still did not click anything. It did open the agreement once more,
+scrolled it to the end (the game requires that before either button works),
+recorded it and closed the game with nothing pressed:
+`evidence/cp-p0guest/cp-agreement-end-unaccepted-960.jpg`. OCR of the end of
+the page (tesseract, verbatim):
+
+```
+'team in particular
+'You must scroll all the way down to decline or accept the end user licence agreement. fc] @ ——
+```
+
+The screenshot shows the two buttons OCR misses: **ACCEPT bound to Enter (↵)**
+and **DECLINE bound to Esc**. The top of the page reads "CD PROJEKT RED USER
+AGREEMENT", "last updated: 10 AUGUST 2026, in effect from: 9 SEPTEMBER 2025".
+Afterwards the guest's `AppData/Local/CD Projekt Red/Cyberpunk 2077/` holds
+only `cache/`; no acceptance was stored.
+
 ### 5.2 Launch-to-first-screen (not launch-to-menu)
 
 `measure.sh guest cpfirst` (OCR every ~2 s + tesseract time, so ±3 s
@@ -358,12 +380,19 @@ what is unmeasured.
 
 ## 8. What the user must do
 
-1. **Decide on the user agreement in the guest.** Either (a) tell the agent
-   "accept the Cyberpunk user agreement in the p0guest VM" — it will scroll
-   to the end and press Accept with xdotool and screenshot the result; or
-   (b) do it yourself on the guest display (VNC socket
-   `~/cp/p0guest/run/vnc.sock` on strix — **unverified** with egl-headless,
-   see §2.1 item 6).
+1. **Accept the user agreement in the guest yourself.** The script does it
+   for you, and it only touches the VM's own profile:
+   ```bash
+   H="bash ~/cp/p0guest/tools/host-venus.sh"
+   $H start && $H push
+   $H ssh 'bash tools/guest-x.sh kms 1280x720; bash tools/guest-proton.sh mount; bash tools/guest-cp-accept.sh'
+   ```
+   `guest-cp-accept.sh` scrolls to the end, saves `~/runs/accept/before.png`,
+   presses Enter (= ACCEPT), saves and OCRs `~/runs/accept/after.png`, prints
+   both and stops the game. Any later first-run prompt (telemetry, account
+   sign-in) is left on screen for a person to decide. Alternatively, say
+   "accept it" to the agent directly in your own message; a permission
+   relayed through another agent does not count.
 2. Then: `bash ~/cp/p0guest/tools/host-venus.sh start && … push`, then
    `GEOM=1280x720 bash ~/cp/p0guest/tools/measure.sh guest cpmenu` and the same
    with `GEOM=1920x1080` (and once with `--avx-off`) — this yields the go/no-go
