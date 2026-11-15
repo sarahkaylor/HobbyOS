@@ -106,6 +106,7 @@ static struct usock *usock_alloc_common(int type, int connected) {
       c->head = c->tail = c->used = 0;
       c->mhead = c->mtail = 0;
       c->mcount = 0;
+      c->wpos = c->rpos = 0; /* cp/sys: stream fd records */
       c->rwait = (struct pid_mask){0};
       c->wwait = (struct pid_mask){0};
       for (int m = 0; m < K_UNIX_MSGS; m++) c->msg_nfds[m] = 0;
@@ -147,6 +148,7 @@ static void drop_chan_queue(struct usock_chan *c, int *fds, int *nfds) {
   c->mhead = c->mtail;
   c->mcount = 0;
   c->head = c->tail = c->used = 0;
+  c->wpos = c->rpos = 0;
 }
 
 /* Release an end's fd ref.  When the ref drops to zero the direction INTO
@@ -273,7 +275,10 @@ static int chan_empty(const struct usock *u, const struct usock_chan *c) {
 
 /* Is the write side full?  Caller holds u->lock. */
 static int chan_full(const struct usock *u, const struct usock_chan *c) {
-  if (u->type == K_UNIX_STREAM) return c->used >= K_UNIX_RING;
+  /* cp/sys: a STREAM is also full while its fd-record slots are (K_UNIX_MSGS
+     unread fd-carrying sends); a writer then parks like on a full ring. */
+  if (u->type == K_UNIX_STREAM)
+    return c->used >= K_UNIX_RING || c->mcount >= K_UNIX_MSGS;
   return c->mcount >= K_UNIX_MSGS;
 }
 
@@ -457,8 +462,9 @@ static int usock_park(struct usock *u, int end, int read_side, int nonblock) {
 /* --- STREAM byte ring --------------------------------------------------- */
 
 static int usock_stream_send(struct usock *u, int end, const struct k_iovec *io,
-                             int niov, int total, int nonblock) {
-  if (!u || total < 0) return -EINVAL;
+                             int niov, int total, const int *gfds, int nfds,
+                             int nonblock) {
+  if (!u || total < 0 || nfds < 0 || nfds > K_UNIX_MAX_FDS) return -EINVAL;
   while (1) {
     spinlock_acquire(&u->lock);
     if (!u->connected) {
@@ -475,7 +481,9 @@ static int usock_stream_send(struct usock *u, int end, const struct k_iovec *io,
     }
     struct usock_chan *c = &u->chan[end];
     int i = 0;
-    while (i < total && c->used < K_UNIX_RING) {
+    /* cp/sys: an fd-carrying send needs a free record slot first. */
+    int room = !(nfds > 0 && c->mcount >= K_UNIX_MSGS);
+    while (room && i < total && c->used < K_UNIX_RING) {
       uint32_t free_bytes = K_UNIX_RING - c->used;
       int take = total - i;
       if ((uint32_t)take > free_bytes) take = (int)free_bytes;
@@ -487,6 +495,16 @@ static int usock_stream_send(struct usock *u, int end, const struct k_iovec *io,
       c->used += (uint32_t)take;
       i += take;
     }
+    if (i > 0 && nfds > 0) {
+      /* The record is anchored at the first byte of this send. */
+      uint32_t mi = c->mhead;
+      c->spos[mi] = c->wpos;
+      c->msg_nfds[mi] = (uint8_t)nfds;
+      for (int f = 0; f < nfds; f++) c->msg_fds[mi][f] = (int16_t)gfds[f];
+      c->mhead = (mi + 1) % K_UNIX_MSGS;
+      c->mcount++;
+    }
+    c->wpos += (uint32_t)i;
     struct pid_mask wake;
     pid_mask_zero(&wake);
     if (i > 0) {
@@ -503,9 +521,15 @@ static int usock_stream_send(struct usock *u, int end, const struct k_iovec *io,
   }
 }
 
+/* cp/sys: gfds_out == NULL is read()/recv(): fds that arrive with the bytes
+ * are closed (there is no control buffer), as Linux discards them. */
 static int usock_stream_recv(struct usock *u, int end, const struct k_iovec *io,
-                             int niov, int cap, int nonblock) {
+                             int niov, int cap, int nonblock, int *gfds_out,
+                             int maxfds, int *nfds_out, int *ctrl_trunc,
+                             int cmsg_cloexec) {
   if (!u || cap < 0) return -EINVAL;
+  if (nfds_out) *nfds_out = 0;
+  struct process *grp = gfds_out ? process_group(current_process()) : 0;
   while (1) {
     spinlock_acquire(&u->lock);
     if (!u->connected) {
@@ -517,9 +541,37 @@ static int usock_stream_recv(struct usock *u, int end, const struct k_iovec *io,
       return 0;
     }
     struct usock_chan *c = &u->chan[1 - end];
+    /* Record boundaries: never read across the next record's first byte;
+       a read that starts AT a record takes its fds. */
+    int limit = cap;
+    int rec = -1;
+    if (c->mcount > 0 && c->used > 0) {
+      uint32_t mi = c->mtail;
+      uint32_t d = c->spos[mi] - c->rpos;
+      if (d == 0) {
+        rec = (int)mi;
+        if (c->mcount > 1) {
+          uint32_t d2 = c->spos[(mi + 1) % K_UNIX_MSGS] - c->rpos;
+          if (d2 > 0 && d2 < (uint32_t)limit) limit = (int)d2;
+        }
+      } else if (d < (uint32_t)limit) {
+        limit = (int)d;
+      }
+    }
+    int rec_fds[K_UNIX_MAX_FDS];
+    int rec_n = 0;
+    if (rec >= 0) {
+      rec_n = c->msg_nfds[rec];
+      int want = rec_n < maxfds ? rec_n : maxfds;
+      if (gfds_out && want > 0 && grp &&
+          grp->num_open_fds + want > MAX_OPEN_FDS) {
+        spinlock_release(&u->lock);
+        return -EMFILE; /* not consumed: the record keeps its refs */
+      }
+    }
     int i = 0;
-    while (i < cap && c->used > 0) {
-      int take = cap - i;
+    while (i < limit && c->used > 0) {
+      int take = limit - i;
       if ((uint32_t)take > c->used) take = (int)c->used;
       uint32_t tail = c->tail;
       uint32_t contig = K_UNIX_RING - tail;
@@ -529,14 +581,41 @@ static int usock_stream_recv(struct usock *u, int end, const struct k_iovec *io,
       c->used -= (uint32_t)take;
       i += take;
     }
+    c->rpos += (uint32_t)i;
+    int took_rec = 0;
+    if (i > 0 && rec >= 0) {
+      for (int f = 0; f < rec_n && f < K_UNIX_MAX_FDS; f++)
+        rec_fds[f] = c->msg_fds[rec][f];
+      c->msg_nfds[rec] = 0;
+      c->mtail = ((uint32_t)rec + 1) % K_UNIX_MSGS;
+      c->mcount--;
+      took_rec = 1;
+    }
     struct pid_mask wake;
     pid_mask_zero(&wake);
-    if (i > 0 && c->used == 0) {
-      wake = c->wwait; /* space freed */
+    if (i > 0 && (c->used == 0 || took_rec)) {
+      wake = c->wwait; /* space (or a record slot) freed */
       pid_mask_zero(&c->wwait);
     }
     spinlock_release(&u->lock);
     drain_wakeup_mask(&wake);
+    if (took_rec) {
+      int installed = 0;
+      for (int f = 0; f < rec_n; f++) {
+        if (gfds_out && grp && f < maxfds) {
+          int ufd = fs_msg_install_gfd(grp, rec_fds[f]);
+          if (ufd >= 0) {
+            if (cmsg_cloexec) fd_cloexec_set(grp->fd_cloexec, ufd);
+            gfds_out[installed++] = ufd;
+            continue;
+          }
+        } else if (ctrl_trunc) {
+          *ctrl_trunc = 1;
+        }
+        fs_close_global(rec_fds[f]);
+      }
+      if (nfds_out) *nfds_out = installed;
+    }
     if (i > 0) return i;
 
     /* Empty: usock_park re-checks under the lock and reports EOF (0) or
@@ -688,7 +767,7 @@ int usock_send(struct usock *u, int end, const void *buf, int n, int nonblock) {
   io.base = (uint64_t)buf;
   io.len = (uint64_t)(n > 0 ? n : 0);
   if (u->type == K_UNIX_STREAM)
-    return usock_stream_send(u, end, &io, 1, n, nonblock);
+    return usock_stream_send(u, end, &io, 1, n, 0, 0, nonblock);
   return usock_msg_send(u, end, &io, 1, n, 0, 0, nonblock);
 }
 
@@ -701,7 +780,7 @@ int usock_recv(struct usock *u, int end, void *buf, int n, int nonblock) {
   io.base = (uint64_t)buf;
   io.len = (uint64_t)(n > 0 ? n : 0);
   if (u->type == K_UNIX_STREAM)
-    return usock_stream_recv(u, end, &io, 1, n, nonblock);
+    return usock_stream_recv(u, end, &io, 1, n, nonblock, 0, 0, 0, 0, 0);
   int got = 0, trunc = 0, nfds = 0, ctrunc = 0;
   int r = usock_msg_recv(u, end, &io, 1, n, &got, &trunc, 0, 0, &nfds,
                          &ctrunc, nonblock, 0);
@@ -713,7 +792,7 @@ int usock_send_msg(struct usock *u, int end, const struct k_iovec *io,
                    int nonblock) {
   if (!u) return -EINVAL;
   if (u->type == K_UNIX_STREAM)
-    return usock_stream_send(u, end, io, niov, total, nonblock);
+    return usock_stream_send(u, end, io, niov, total, gfds, nfds, nonblock);
   return usock_msg_send(u, end, io, niov, total, gfds, nfds, nonblock);
 }
 
@@ -726,8 +805,12 @@ int usock_recv_msg(struct usock *u, int end, const struct k_iovec *io,
   *nfds_out = 0;
   *ctrl_trunc = 0;
   if (!u) return -EINVAL;
-  if (u->type == K_UNIX_STREAM)
-    return usock_stream_recv(u, end, io, niov, bufcap, nonblock);
+  if (u->type == K_UNIX_STREAM) {
+    int r = usock_stream_recv(u, end, io, niov, bufcap, nonblock, gfds_out,
+                              maxfds, nfds_out, ctrl_trunc, cmsg_cloexec);
+    if (r > 0) *got = r;
+    return r;
+  }
   return usock_msg_recv(u, end, io, niov, bufcap, got, trunc, gfds_out,
                         maxfds, nfds_out, ctrl_trunc, nonblock, cmsg_cloexec);
 }

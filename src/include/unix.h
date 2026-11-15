@@ -17,7 +17,11 @@
 #define K_UNIX_DGRAM      3  /* message queue per direction            */
 #define K_UNIX_RING       524288 /* STREAM bytes per direction          */
 #define K_UNIX_MSG_MAX    8192  /* max bytes per message                */
-#define K_UNIX_MSGS       8     /* queued messages per direction        */
+/* cp/sys: 32, was 8.  The same slots hold STREAM fd records, and the
+ * wineserver kills a client whose fd sendmsg answers EAGAIN
+ * (server/request.c:499-503), so 8 unread fd-carrying sends was too shallow.
+ * Cost: ~940 B of .bss per direction (unix_pool, 256 directions). */
+#define K_UNIX_MSGS       32    /* queued messages per direction        */
 #define K_UNIX_MAX_FDS    K_IPC_MAX_FDS   /* fds per message            */
 #define K_UNIX_MAX_IOV    K_IPC_MAX_IOV   /* iovecs per sendmsg/recvmsg */
 /* IceWM M1 (icewm.md section 4.1): raised from 16 so an X server plus its
@@ -49,6 +53,16 @@ struct usock_chan {
   uint32_t mhead, mtail;     /* SEQPACKET/DGRAM: message ring cursors */
   uint32_t mcount;           /* queued messages; full = K_UNIX_MSGS  */
   struct pid_mask rwait, wwait; /* pid masks: parked readers / writers */
+  /* cp/sys: SCM_RIGHTS on STREAM.  A stream carries fds as RECORDS in the
+     msg_fds/msg_nfds/mhead/mtail/mcount slots (unused by STREAM otherwise),
+     each anchored at the stream offset of the first byte sent with it.
+     wpos/rpos count bytes ever written/read (mod 2^32).  A read never
+     crosses a record boundary, and the read that starts AT a record takes
+     its fds (Linux delivers SCM_RIGHTS with the data of the sendmsg that
+     carried them; wineserver's fd protocol depends on it,
+     server/request.c:377-455). */
+  uint32_t spos[K_UNIX_MSGS];
+  uint32_t wpos, rpos;
 };
 
 struct usock {

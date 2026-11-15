@@ -1,0 +1,17 @@
+build-wine: pins verified (tools/cp/fetch-runtime.sh)
+build-wine: sysroot: re-pointed 17 absolute symlinks into /home/sarah/cp/wine-build/sysroot-glibc231
+build-wine: sysroot: GCC 10.5 crt/libgcc from libgcc-10-dev (focal)
+build-wine: source: extracted wine-11.0
+build-wine: configure: CC='clang --sysroot=/home/sarah/cp/wine-build/sysroot-glibc231', PE: clang --target=x86_64-windows
+build-wine: configure: PE compiler = x86_64_CC='clang -D__STDC__'
+build-wine: configure: preloader LDFLAGS = WINEPRELOADER_LDFLAGS='-nostartfiles -nodefaultlibs -static-pie'
+build-wine: configure: loader LDFLAGS    = WINELOADER_LDFLAGS='-Wl,--export-dynamic -pie'
+build-wine: build: make -j16 (log /home/sarah/cp/wine-build/build.log)
+build-wine: build: done in 74 s
+build-wine: install: 202M staged at /home/sarah/cp/wine-build/stage/CP/WINE (strip-debug=1)
+build-wine: install: manifest /home/sarah/cp/wine-build/stage-manifest.sha256 (873 files)
+build-wine: audit: 29 ELF objects; max GLIBC_ symbol version required = GLIBC_2.29 (report /home/sarah/cp/wine-build/audit.txt)
+build-wine: audit: DT_NEEDED union: libc.so.6 libdl.so.2 libgcc_s.so.1 libm.so.6 libpthread.so.0 libresolv.so.2 ntdll.so win32u.so 
+7.0.0-43-generic
+model name	: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S
+avx512f

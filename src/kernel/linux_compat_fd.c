@@ -57,6 +57,9 @@
 #include "process.h"
 #include "vfs.h"
 #include "virtio_gpu.h" /* GB-025 / M3: the scanout address for FBIOGET_* */
+#include "timer.h"
+#include "tmpfs.h" /* cp/sys: bind(2) socket inodes in the compat /tmp */
+#include "unix.h"  /* cp/sys: K_UNIX_SUN_LEN / K_UNIX_PATH_MAX */
 
 /* close_range(2) flags (Linux values; not syscall numbers, so local). */
 #define L_CLOSE_RANGE_UNSHARE 0x2u
@@ -180,13 +183,78 @@ static int l_fd_socketpair(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, 0);
 }
 
-/* bind(fd, const struct sockaddr *addr, socklen_t len). */
+/* cp/sys: pathname AF_UNIX addresses.
+ *
+ * unix.c keys its namespace on the sun_path BYTES, which is right for an
+ * absolute name and wrong for a relative one: wineserver binds "socket"
+ * after chdir()ing into its server directory and every client connects to
+ * "socket" from the same directory (server/request.c:814-818,
+ * dlls/ntdll/unix/server.c:1446-1460), so two servers for two prefixes
+ * would collide on the same key.  A relative name is therefore resolved
+ * against the caller's cwd here, exactly as Linux resolves it, before the
+ * namespace sees it.  `ksa` is a kernel copy of the caller's address
+ * (K_UNIX_SUN_LEN bytes of room); *klen is updated.  `abs_out` receives the
+ * canonical path for a pathname address ("" for abstract/unnamed/INET).
+ * Returns 0 or -errno. */
+static int l_unix_sa_prepare(struct process *p, uint64_t usa, int salen,
+                             uint8_t *ksa, int *klen, char *abs_out) {
+  abs_out[0] = '\0';
+  if (salen < 2 || salen > K_UNIX_SUN_LEN) return -EINVAL;
+  if (!usa) return -EFAULT;
+  int r = l_copy_from_user(p, ksa, usa, (uint64_t)salen);
+  if (r) return r;
+  *klen = salen;
+  uint16_t fam = (uint16_t)(ksa[0] | ((uint16_t)ksa[1] << 8));
+  if (fam != K_AF_UNIX || salen == 2 || ksa[2] == 0) return 0;
+  char path[K_UNIX_PATH_MAX + 1];
+  int n = 0;
+  while (n < salen - 2 && n < K_UNIX_PATH_MAX && ksa[2 + n]) {
+    path[n] = (char)ksa[2 + n];
+    n++;
+  }
+  path[n] = '\0';
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENAMETOOLONG;
+  int an = 0;
+  while (abs[an]) an++;
+  if (path[0] != '/') {
+    if (an >= K_UNIX_PATH_MAX) return -ENAMETOOLONG;
+    for (int i = 0; i < an; i++) ksa[2 + i] = (uint8_t)abs[i];
+    ksa[2 + an] = 0;
+    *klen = 2 + an + 1;
+  }
+  for (int i = 0; i <= an; i++) abs_out[i] = abs[i];
+  return 0;
+}
+
+/* bind(fd, const struct sockaddr *addr, socklen_t len).
+ * cp/sys: a pathname bound inside the compat /tmp also creates the socket
+ * INODE there (S_IFSOCK, 0777 & ~umask, like Linux): Wine's client lstat()s
+ * the name and refuses anything that is not a socket owned by the caller
+ * (dlls/ntdll/unix/server.c:1432-1443).  An existing name is EADDRINUSE,
+ * which is the answer acquire_lock() expects (server/request.c:821-828). */
 static int l_fd_bind(struct process *p, struct trap_frame *tf) {
   int fd = (int)l_argi(tf, 0);
   uint64_t usa = l_arg(tf, 1);
   int salen = (int)l_argi(tf, 2);
   if (salen < 2) return l_ret(tf, -EINVAL);
-  return l_ret(tf, file_bind_user(p, fd, usa, salen));
+  if (salen > K_UNIX_SUN_LEN) return l_ret(tf, file_bind_user(p, fd, usa, salen));
+  uint8_t ksa[K_UNIX_SUN_LEN + 1];
+  int klen = salen;
+  char abs[VFS_PATH_MAX];
+  int r = l_unix_sa_prepare(p, usa, salen, ksa, &klen, abs);
+  if (r) return l_ret(tf, r);
+  int made = 0;
+  if (abs[0] && tmpfs_owns(abs)) {
+    if (l_is_socket(p, fd) <= 0) return l_ret(tf, l_is_socket(p, fd) < 0 ? -EBADF : -ENOTSOCK);
+    r = tmpfs_mksock(abs, (int)(0777u & ~linux_compat_umask()));
+    if (r == TMPFS_EXTERNAL) r = 0; /* a symlinked dir leading off /tmp */
+    else if (r) return l_ret(tf, r);
+    else made = 1;
+  }
+  r = file_bind(p, fd, ksa, klen);
+  if (r != 0 && made) tmpfs_unmksock(abs);
+  return l_ret(tf, r);
 }
 
 /* listen(fd, backlog). */
@@ -226,11 +294,28 @@ static int l_fd_accept4(struct process *p, struct trap_frame *tf) {
 static int l_connect(struct process *p, int fd, uint64_t usa, int salen,
                      int *parked) {
   *parked = 0;
+  /* cp/sys: a relative AF_UNIX pathname is resolved against the cwd first
+     (see l_unix_sa_prepare); INET and sockaddr_storage-sized callers keep
+     the user-pointer path. */
+  uint8_t ksa[K_UNIX_SUN_LEN + 1];
+  int klen = 0;
+  int use_k = 0;
+  if (salen >= 2 && salen <= K_UNIX_SUN_LEN && usa) {
+    uint8_t fam[2];
+    if (l_copy_from_user(p, fam, usa, 2) == 0 && fam[0] == K_AF_UNIX &&
+        fam[1] == 0) {
+      char abs[VFS_PATH_MAX];
+      int pr = l_unix_sa_prepare(p, usa, salen, ksa, &klen, abs);
+      if (pr) return pr;
+      use_k = 1;
+    }
+  }
   int fl = file_fcntl(p, fd, K_F_GETFL, 0);
   int was_nonblock = (fl >= 0) && (fl & K_O_NONBLOCK);
   if (!was_nonblock) (void)file_fcntl(p, fd, K_F_SETFL, K_O_NONBLOCK);
 
-  int r = file_connect_user(p, fd, usa, salen);
+  int r = use_k ? file_connect_sa(p, fd, ksa, klen)
+                : file_connect_user(p, fd, usa, salen);
   if (r == -2) {
     /* Non-blocking: fs.c can only mean "no such name" here. */
     r = -ENOENT;
@@ -238,7 +323,8 @@ static int l_connect(struct process *p, int fd, uint64_t usa, int salen,
     /* Backlog full on a blocking socket: re-enter with the flag cleared so
      * usock_connect() parks us (blocking connect blocks, as Linux). */
     (void)file_fcntl(p, fd, K_F_SETFL, 0);
-    r = file_connect_user(p, fd, usa, salen);
+    r = use_k ? file_connect_sa(p, fd, ksa, klen)
+              : file_connect_user(p, fd, usa, salen);
     if (r == -2) *parked = 1;
   }
   if (!was_nonblock) (void)file_fcntl(p, fd, K_F_SETFL, 0);
@@ -874,6 +960,316 @@ static int l_fd_fchown(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, rc);
 }
 
+/* ---- cp/sys: sendmmsg ---------------------------------------------------
+ *
+ * Not Wine's own call: glibc 2.31's resolver (res_send.c send_dg) sends the
+ * A and AAAA queries of one getaddrinfo() in a single sendmmsg on a
+ * CONNECTED UDP socket (Wine reaches it from wineboot.exe's host-name
+ * lookup, docs/cyberpunk-evidence.md §3.1 rank 6).  Each struct mmsghdr is a
+ * msghdr (56 bytes) followed by msg_len (u32) + 4 bytes of padding.
+ *   AF_UNIX  -> one file_sendmsg per entry (fds and all);
+ *   AF_INET  -> one datagram per entry through the connected-socket write
+ *               path (a single iovec, no msg_name: the resolver's shape).
+ * Linux semantics: the count of messages sent; an error only when the FIRST
+ * message fails; a would-block on the first parks the whole call. */
+#define L_SYS_sendmmsg 307
+#define L_MMSG_SIZE 64
+
+static int l_fd_sendmmsg(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  uint64_t uvec = l_arg(tf, 1);
+  int64_t vlen = l_argi(tf, 2);
+  int flags = (int)l_argi(tf, 3);
+  if (vlen < 0) return l_ret(tf, -EINVAL);
+  if (vlen > 1024) vlen = 1024; /* UIO_MAXIOV, as Linux clamps */
+  if (vlen == 0) return l_ret(tf, 0);
+  int issock = l_is_socket(p, fd);
+  if (issock < 0) return l_ret(tf, -EBADF);
+  if (issock == 0) return l_ret(tf, -ENOTSOCK);
+  if (!l_user_ok(p, uvec, (uint64_t)vlen * L_MMSG_SIZE, 1))
+    return l_ret(tf, -EFAULT);
+  int64_t sent = 0;
+  for (int64_t i = 0; i < vlen; i++) {
+    uint64_t um = uvec + (uint64_t)i * L_MMSG_SIZE;
+    int r = file_sendmsg(p, fd, um, flags);
+    if (r == -EOPNOTSUPP) {
+      /* INET: the connected-datagram write path. */
+      struct k_msghdr m;
+      if (l_copy_from_user(p, &m, um, sizeof m) != 0) {
+        r = -EFAULT;
+      } else if (m.name != 0 && m.namelen != 0) {
+        r = -EOPNOTSUPP; /* directed send: no sendto-with-address engine */
+      } else if (m.iovlen != 1) {
+        r = -EOPNOTSUPP;
+      } else {
+        uint64_t io[2];
+        if (l_copy_from_user(p, io, m.iov, sizeof io) != 0) r = -EFAULT;
+        else if (io[1] > 0x10000) r = -EMSGSIZE;
+        else if (io[1] > 0 && !l_user_ok(p, io[0], io[1], 0)) r = -EFAULT;
+        else {
+          int saved = -1;
+          if (flags & K_MSG_DONTWAIT) saved = l_nonblock_push(p, fd);
+          r = file_write(p, fd, (const void *)(uintptr_t)io[0], (int)io[1], tf);
+          l_nonblock_pop(p, fd, saved);
+          if (r == -1) r = -EIO;
+        }
+      }
+    }
+    if (r == -2) {
+      if (sent == 0) return l_park(p, tf);
+      break;
+    }
+    if (r < 0) {
+      if (sent == 0) return l_ret(tf, r);
+      break;
+    }
+    uint32_t mlen = (uint32_t)r;
+    if (l_copy_to_user(p, um + 56, &mlen, sizeof mlen) != 0) {
+      if (sent == 0) return l_ret(tf, -EFAULT);
+      break;
+    }
+    sent++;
+  }
+  return l_ret(tf, sent);
+}
+
+/* ---- cp/sys: extended attributes -----------------------------------------
+ *
+ * No volume here stores xattrs, so every one answers as a Linux filesystem
+ * without xattr support does: get/set/remove are -EOPNOTSUPP (== ENOTSUP,
+ * 95) and list is an empty list (0).  That is the errno Wine tolerates on
+ * EVERY path that uses them:
+ *   get  (DOS attributes, reparse tag): dlls/ntdll/unix/file.c:1704-1712
+ *        and :1820-1830 return quietly on ENOTSUP (also ENODATA/ENOATTR);
+ *   set/remove (fd_set_dos_attrib):     file.c:1764 ignores ENOTSUP;
+ *   the reparse-point READ (file.c:4060) fails the one operation that
+ *        needs a reparse point, which cannot exist on these volumes.
+ * The arguments are still validated the way Linux validates them before it
+ * reaches the filesystem: a path that does not exist is -ENOENT, a closed fd
+ * is -EBADF, a NULL name is -EFAULT. */
+#define L_SYS_setxattr 188
+#define L_SYS_lsetxattr 189
+#define L_SYS_fsetxattr 190
+#define L_SYS_getxattr 191
+#define L_SYS_lgetxattr 192
+#define L_SYS_fgetxattr 193
+#define L_SYS_listxattr 194
+#define L_SYS_llistxattr 195
+#define L_SYS_flistxattr 196
+#define L_SYS_removexattr 197
+#define L_SYS_lremovexattr 198
+#define L_SYS_fremovexattr 199
+
+/* 0 when the target exists, -errno otherwise.  by_fd: arg0 is an fd. */
+static int l_xattr_target(struct process *p, struct trap_frame *tf, int by_fd,
+                          int follow) {
+  if (by_fd) {
+    struct k_stat ks;
+    int err = 0;
+    return file_stat_fd(p, (int)l_argi(tf, 0), &ks, &err) == 0 ? 0 : -EBADF;
+  }
+  char path[VFS_PATH_MAX];
+  int r = l_copy_cstr(p, path, l_arg(tf, 0), sizeof path);
+  if (r) return r;
+  if (path[0] == '\0') return -ENOENT;
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENAMETOOLONG;
+  struct k_stat ks;
+  if (!follow && tmpfs_owns(abs)) {
+    int tr = tmpfs_stat(abs, 0, &ks);
+    if (tr != TMPFS_EXTERNAL) return tr;
+  }
+  int err = 0;
+  return file_stat_path(p, abs, &ks, &err) == 0 ? 0 : -(err ? err : ENOENT);
+}
+
+static int l_xattr_name(struct process *p, uint64_t uname) {
+  if (!uname) return -EFAULT;
+  char nm[256];
+  int r = l_copy_cstr(p, nm, uname, sizeof nm);
+  if (r == -ENAMETOOLONG) return -ERANGE; /* XATTR_NAME_MAX exceeded */
+  if (r) return r;
+  if (nm[0] == '\0') return -ERANGE;
+  return 0;
+}
+
+static int l_xattr_common(struct process *p, struct trap_frame *tf, int by_fd,
+                          int follow, int is_list) {
+  int r = l_xattr_target(p, tf, by_fd, follow);
+  if (r) return l_ret(tf, r);
+  if (is_list) return l_ret(tf, 0); /* an empty list */
+  r = l_xattr_name(p, l_arg(tf, 1));
+  if (r) return l_ret(tf, r);
+  return l_ret(tf, -EOPNOTSUPP);
+}
+
+static int l_fd_setxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 0); }
+static int l_fd_lsetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 0); }
+static int l_fd_fsetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 0); }
+static int l_fd_getxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 0); }
+static int l_fd_lgetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 0); }
+static int l_fd_fgetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 0); }
+static int l_fd_listxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 1); }
+static int l_fd_llistxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 1); }
+static int l_fd_flistxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 1); }
+static int l_fd_removexattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 0); }
+static int l_fd_lremovexattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 0); }
+static int l_fd_fremovexattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 0); }
+
+/* ---- cp/sys: eventfd ------------------------------------------------------
+ *
+ * A real counter (Linux eventfd(2)): write adds a u64, read returns and
+ * clears it (or returns 1 and decrements it with EFD_SEMAPHORE); readable
+ * while the counter is non-zero, writable while another 1 fits below
+ * 0xfffffffffffffffe.  A blocking read/write parks in 10 ms slices through
+ * the scheduler (the timerfd model: the condition is re-polled on the
+ * restarted syscall), never spins.  Upstream Wine 11.0 does not call it
+ * (no eventfd in server/ or dlls/ntdll/unix/); the host Proton run shows 4
+ * calls (docs/cp-p0-host.md §4), so it is implemented, not refused. */
+#define L_EFD_SEMAPHORE 0x1
+#define L_EFD_NONBLOCK 0x800
+#define L_EFD_CLOEXEC 0x80000
+#define L_EVENTFD_SLOTS 256
+#define L_EVENTFD_MAX 0xfffffffffffffffeULL
+
+static struct {
+  int used;
+  int sem;
+  uint64_t count;
+} l_efd[L_EVENTFD_SLOTS];
+static spinlock_t l_efd_lock;
+
+int l_eventfd_new(unsigned int initval, int flags) {
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  int slot = -ENFILE;
+  for (int i = 0; i < L_EVENTFD_SLOTS; i++) {
+    if (!l_efd[i].used) {
+      l_efd[i].used = 1;
+      l_efd[i].sem = (flags & L_EFD_SEMAPHORE) != 0;
+      l_efd[i].count = initval;
+      slot = i;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  return slot;
+}
+
+void l_eventfd_release(int slot) {
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  l_efd[slot].used = 0;
+  l_efd[slot].count = 0;
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+}
+
+void l_eventfd_probe(int slot, int *r, int *w) {
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  uint64_t c = l_efd[slot].count;
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  if (c > 0) *r = 1;
+  if (c < L_EVENTFD_MAX) *w = 1;
+}
+
+/* Park the calling THREAD for one slice; the syscall restarts. */
+static int l_efd_park(void) {
+  struct process *cur = current_process();
+  if (!cur) return -EAGAIN;
+  if (linux_compat_sig_deliverable(cur)) return -EINTR;
+  uint64_t fl = spinlock_acquire_irqsave(&proc_lock);
+  cur->wake_ms = timer_get_ms() + 10;
+  cur->state = PROC_STATE_BLOCKED;
+  spinlock_release_irqrestore(&proc_lock, fl);
+  return -2;
+}
+
+int l_eventfd_read(struct file *f, void *buf, int size) {
+  if (size < 8) return -EINVAL;
+  int slot = f->eventfd.slot;
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return -EBADF;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  uint64_t c = l_efd[slot].count;
+  uint64_t v = 0;
+  if (c > 0) {
+    v = l_efd[slot].sem ? 1 : c;
+    l_efd[slot].count = c - v;
+  }
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  if (c == 0) {
+    if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
+    return l_efd_park();
+  }
+  if (l_copy_to_user(current_process(), (uint64_t)(uintptr_t)buf, &v, 8) != 0) {
+    /* Put the value back: the read did not happen. */
+    fl = spinlock_acquire_irqsave(&l_efd_lock);
+    l_efd[slot].count += v;
+    spinlock_release_irqrestore(&l_efd_lock, fl);
+    return -EFAULT;
+  }
+  return 8;
+}
+
+int l_eventfd_write(struct file *f, const void *buf, int size) {
+  if (size < 8) return -EINVAL;
+  int slot = f->eventfd.slot;
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return -EBADF;
+  uint64_t v = 0;
+  if (l_copy_from_user(current_process(), &v, (uint64_t)(uintptr_t)buf, 8) != 0)
+    return -EFAULT;
+  if (v == 0xffffffffffffffffULL) return -EINVAL;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  uint64_t c = l_efd[slot].count;
+  int fits = v <= L_EVENTFD_MAX - c;
+  if (fits) l_efd[slot].count = c + v;
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  if (!fits) {
+    if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
+    return l_efd_park();
+  }
+  return 8;
+}
+
+static int l_fd_eventfd_common(struct process *p, struct trap_frame *tf,
+                               unsigned int initval, int flags) {
+  if (flags & ~(L_EFD_SEMAPHORE | L_EFD_NONBLOCK | L_EFD_CLOEXEC))
+    return l_ret(tf, -EINVAL);
+  return l_ret(tf, file_eventfd_create(p, initval, flags));
+}
+
+static int l_fd_eventfd(struct process *p, struct trap_frame *tf) {
+  return l_fd_eventfd_common(p, tf, (unsigned int)l_arg(tf, 0), 0);
+}
+
+static int l_fd_eventfd2(struct process *p, struct trap_frame *tf) {
+  return l_fd_eventfd_common(p, tf, (unsigned int)l_arg(tf, 0),
+                             (int)l_argi(tf, 1));
+}
+
+/* ---- cp/sys: inotify ------------------------------------------------------
+ *
+ * Refused as a kernel built without CONFIG_INOTIFY_USER refuses it: init and
+ * init1 are -ENOSYS, and since no inotify fd can therefore exist, add_watch /
+ * rm_watch answer -EBADF for a closed fd and -EINVAL ("not an inotify
+ * instance") for any other.  Every Wine caller treats a failed init as "no
+ * change notification" and carries on:
+ *   server/change.c:925-927   create_inotify_fd(): `if (unix_fd<0) return NULL`
+ *                             (and our build has no HAVE_SYS_INOTIFY_H at all);
+ *   dlls/winebus.sys/bus_udev.c:1492-1496  WARN and return the error, the
+ *                             udev bus then runs without hot-plug watches. */
+#define L_SYS_inotify_init 253
+#define L_SYS_inotify_add_watch 254
+#define L_SYS_inotify_rm_watch 255
+
+static int l_fd_inotify_init(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  return l_ret(tf, -ENOSYS);
+}
+
+static int l_fd_inotify_watch(struct process *p, struct trap_frame *tf) {
+  return l_ret(tf, l_fd_valid(p, (int)l_argi(tf, 0)) ? -EBADF : -EINVAL);
+}
+
 /* ---- the table --------------------------------------------------------- */
 
 const struct l_sysent l_tab_fd[] = {
@@ -910,5 +1306,25 @@ const struct l_sysent l_tab_fd[] = {
   {L_SYS_pselect6, l_fd_pselect6, "pselect6"},
   {L_SYS_ioctl, l_fd_ioctl, "ioctl"},
   {L_SYS_fcntl, l_fd_fcntl, "fcntl"},
+  /* cp/sys (docs/cp-sys.md): rows Wine reaches */
+  {L_SYS_sendmmsg, l_fd_sendmmsg, "sendmmsg"},
+  {L_SYS_setxattr, l_fd_setxattr, "setxattr"},
+  {L_SYS_lsetxattr, l_fd_lsetxattr, "lsetxattr"},
+  {L_SYS_fsetxattr, l_fd_fsetxattr, "fsetxattr"},
+  {L_SYS_getxattr, l_fd_getxattr, "getxattr"},
+  {L_SYS_lgetxattr, l_fd_lgetxattr, "lgetxattr"},
+  {L_SYS_fgetxattr, l_fd_fgetxattr, "fgetxattr"},
+  {L_SYS_listxattr, l_fd_listxattr, "listxattr"},
+  {L_SYS_llistxattr, l_fd_llistxattr, "llistxattr"},
+  {L_SYS_flistxattr, l_fd_flistxattr, "flistxattr"},
+  {L_SYS_removexattr, l_fd_removexattr, "removexattr"},
+  {L_SYS_lremovexattr, l_fd_lremovexattr, "lremovexattr"},
+  {L_SYS_fremovexattr, l_fd_fremovexattr, "fremovexattr"},
+  {L_SYS_eventfd, l_fd_eventfd, "eventfd"},
+  {L_SYS_eventfd2, l_fd_eventfd2, "eventfd2"},
+  {L_SYS_inotify_init, l_fd_inotify_init, "inotify_init"},
+  {L_SYS_inotify_init1, l_fd_inotify_init, "inotify_init1"},
+  {L_SYS_inotify_add_watch, l_fd_inotify_watch, "inotify_add_watch"},
+  {L_SYS_inotify_rm_watch, l_fd_inotify_watch, "inotify_rm_watch"},
   L_SYSENT_END
 };

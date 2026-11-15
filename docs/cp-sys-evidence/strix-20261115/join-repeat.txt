@@ -1,0 +1,15 @@
+lanes/sys join#1 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1) A=[] E=[E clone failed errno=22]
+base join#1 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1) A=[] E=[E clone failed errno=22]
+lanes/sys join#2 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1) A=[] E=[E clone failed errno=22]
+base join#2 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1) A=[] E=[E clone failed errno=22]
+lanes/sys join#3 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1) A=[] E=[E clone failed errno=22]
+base join#3 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1) A=[] E=[E clone failed errno=22]
+== wine smoke
+smoke_rc=0
+PHASE2DONE
+lanes/sys join#1 [LP] done rc=2
+base join#1 [LP] done rc=2
+lanes/sys join#2 [LP] done rc=1
+base join#2 [LP] done rc=1
+lanes/sys join#3 [LP] done rc=2
+base join#3 [LP] done rc=2

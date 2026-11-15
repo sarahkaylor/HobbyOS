@@ -189,6 +189,23 @@ int linux_compat_sigflags_get(struct process *p, int sig) {
  * shared value changes no observable answer — it only has to round-trip. */
 static uint32_t l_umask = 022;
 
+/* cp/sys: fork() inherits the signal mask and alternate stack of the
+   calling thread and the dispositions' flag words of its process (Linux
+   copy_process; the handlers themselves are native PCB state, copied by
+   linux_compat_fork_child).  Called before the child is READY. */
+void linux_compat_sig_fork(struct process *parent, struct process *child);
+void linux_compat_sig_fork(struct process *parent, struct process *child) {
+  int ps = l_slot(parent), cs = l_slot(child);
+  int gs = l_slot(process_group(parent));
+  if (ps < 0 || cs < 0 || gs < 0) return;
+  l_sigmask[cs] = l_sigmask[ps];
+  for (int i = 0; i < HO_SIG_MAX; i++) l_sigflags[cs][i] = l_sigflags[gs][i];
+  l_altstack[cs] = l_altstack[ps];
+}
+
+/* cp/sys: the creation mask the compat /tmp applies (tmpfs.c). */
+uint32_t linux_compat_umask(void) { return l_umask; }
+
 /* Console budget for the "refused a handler install" diagnostic (below): one
    line per distinct refusal is evidence, an unbounded stream is a flood.  The
    record rides the [LCOMPAT] prefix so the probe gate prints it. */
@@ -1017,6 +1034,99 @@ static int l_proc_faccessat(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, l_access_check(p, upath, mode));
 }
 
+/* ---- process_vm_readv / process_vm_writev (cp/sys) ---------------------
+ *
+ * wineserver reads (and writes) client memory with these
+ * (server/ptrace.c:345-404, HAVE_PROCESS_VM_READV/WRITEV = 1 in our build's
+ * config.h).  Its fallback on ENOSYS/EPERM is ptrace + /proc/<pid>/mem
+ * (ptrace.c:406-), neither of which exists here, so the calls are
+ * implemented: every byte moves through a kernel bounce buffer between the
+ * target's address space (vm_user_read / vm_kwrite on the TARGET process,
+ * which validate and demand-fault its pages) and the caller's.  Linux
+ * semantics: the byte count transferred; a failure before the first byte is
+ * the error (-EFAULT for a bad remote range, -ESRCH for no such process);
+ * a later failure ends the transfer short.  flags must be 0. */
+#define L_SYS_process_vm_readv 310
+#define L_SYS_process_vm_writev 311
+#define L_PVM_IOV_MAX 1024
+#define L_PVM_CHUNK 512
+
+static int l_pvm_iov(struct process *p, uint64_t vec, uint64_t i,
+                     uint64_t *base, uint64_t *len) {
+  uint64_t io[2];
+  if (l_copy_from_user(p, io, vec + i * 16, sizeof io) != 0) return -EFAULT;
+  *base = io[0];
+  *len = io[1];
+  return 0;
+}
+
+static int l_proc_vm_rw(struct process *p, struct trap_frame *tf, int write) {
+  int pid = (int)l_argi(tf, 0);
+  uint64_t lvec = l_arg(tf, 1), lcnt = l_arg(tf, 2);
+  uint64_t rvec = l_arg(tf, 3), rcnt = l_arg(tf, 4);
+  uint64_t flags = l_arg(tf, 5);
+  if (flags != 0) return l_ret(tf, -EINVAL);
+  if (lcnt > L_PVM_IOV_MAX || rcnt > L_PVM_IOV_MAX) return l_ret(tf, -EINVAL);
+  struct process *t = pid > 0 ? process_get_pcb(pid) : 0;
+  if (!t || t->state == PROC_STATE_FREE || t->state == PROC_STATE_EXITED)
+    return l_ret(tf, -ESRCH);
+  t = process_group(t);
+  if (!t || !t->as) return l_ret(tf, -ESRCH);
+  uint64_t li = 0, loff = 0, lbase = 0, llen = 0;
+  uint64_t ri = 0, roff = 0, rbase = 0, rlen = 0;
+  if (lcnt && l_pvm_iov(p, lvec, 0, &lbase, &llen)) return l_ret(tf, -EFAULT);
+  if (rcnt && l_pvm_iov(p, rvec, 0, &rbase, &rlen)) return l_ret(tf, -EFAULT);
+  int64_t total = 0;
+  uint8_t bounce[L_PVM_CHUNK];
+  while (li < lcnt && ri < rcnt) {
+    if (loff >= llen) {
+      if (++li >= lcnt) break;
+      if (l_pvm_iov(p, lvec, li, &lbase, &llen)) return l_ret(tf, total ? total : -EFAULT);
+      loff = 0;
+      continue;
+    }
+    if (roff >= rlen) {
+      if (++ri >= rcnt) break;
+      if (l_pvm_iov(p, rvec, ri, &rbase, &rlen)) return l_ret(tf, total ? total : -EFAULT);
+      roff = 0;
+      continue;
+    }
+    uint64_t n = llen - loff;
+    if (rlen - roff < n) n = rlen - roff;
+    if (n > L_PVM_CHUNK) n = L_PVM_CHUNK;
+    int bad;
+    if (!write) {
+      bad = vm_user_read(t, rbase + roff, bounce, (int)n) != 0;
+      if (!bad && l_copy_to_user(p, lbase + loff, bounce, n) != 0) {
+        if (!total) return l_ret(tf, -EFAULT);
+        break;
+      }
+    } else {
+      if (l_copy_from_user(p, bounce, lbase + loff, n) != 0) {
+        if (!total) return l_ret(tf, -EFAULT);
+        break;
+      }
+      bad = vm_kwrite(t, rbase + roff, bounce, (int)n) != 0;
+    }
+    if (bad) {
+      if (!total) return l_ret(tf, -EFAULT);
+      break;
+    }
+    total += (int64_t)n;
+    loff += n;
+    roff += n;
+  }
+  return l_ret(tf, total);
+}
+
+static int l_proc_process_vm_readv(struct process *p, struct trap_frame *tf) {
+  return l_proc_vm_rw(p, tf, 0);
+}
+
+static int l_proc_process_vm_writev(struct process *p, struct trap_frame *tf) {
+  return l_proc_vm_rw(p, tf, 1);
+}
+
 /* ---- identity: prctl, nice, job control, affinity ----------------------- */
 
 /* Resolve a pid argument the way Linux's getpgid/getsid/prlimit do: 0 is the
@@ -1102,6 +1212,17 @@ static int l_proc_prctl(struct process *p, struct trap_frame *tf) {
         return l_ret(tf, -EFAULT);
       return l_ret(tf, 0);
     }
+  case 59: /* PR_SET_SYSCALL_USER_DISPATCH (cp/sys) */
+    /* -EINVAL, i.e. what a Linux < 5.11 kernel answers: Syscall User
+       Dispatch is not implemented.  Upstream Wine 11.0 never asks for it
+       (no PR_SET_SYSCALL_USER_DISPATCH anywhere in the pinned tree; its
+       prctl calls are PR_SET_NAME, dlls/ntdll/unix/env.c:501, and
+       PR_SET_PTRACER, dlls/ntdll/unix/server.c:1656, whose result is
+       ignored).  The per-thread arming seen on the host
+       (docs/cp-p0-host.md §4) is Proton's Wine, which only uses it to catch
+       Windows code issuing raw `syscall`; refusing it costs that catch, not
+       a crash.  Named here so the row is explicit, not a default. */
+    return l_ret(tf, -EINVAL);
   default:
     return l_ret(tf, -EINVAL);
   }
@@ -1506,5 +1627,8 @@ const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction,
   {L_SYS_sched_get_priority_min, l_proc_sched_prio_min, "sched_get_priority_min"},
   {L_SYS_sched_rr_get_interval, l_proc_sched_rr_interval, "sched_rr_get_interval"},
   {L_SYS_sched_setscheduler, l_proc_sched_setscheduler, "sched_setscheduler"},
+  /* cp/sys */
+  {L_SYS_process_vm_readv, l_proc_process_vm_readv, "process_vm_readv"},
+  {L_SYS_process_vm_writev, l_proc_process_vm_writev, "process_vm_writev"},
   L_SYSENT_END
 };

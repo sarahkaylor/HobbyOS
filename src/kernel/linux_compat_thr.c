@@ -1760,6 +1760,71 @@ static int l_futex_unlock_pi(struct process *p, struct trap_frame *tf) {
 }
 
 
+/* ---- fork-shaped clone (cp/sys) ------------------------------------------
+ *
+ * glibc 2.31's fork() is clone(CLONE_CHILD_SETTID|CLONE_CHILD_CLEARTID|
+ * SIGCHLD, 0, NULL, &THREAD_SELF->tid) -- no CLONE_VM, no CLONE_THREAD -- and
+ * Wine forks through it (the server daemon, start_server(), CreateProcess's
+ * fork+exec).  It is routed to the native process_fork(), which already
+ * clones a v2 address space; process_fork() calls linux_compat_fork_child()
+ * below before the child becomes runnable, and that applies the clone words
+ * (SETTID: the child's pid written into ITS copy of *ctid, which is what
+ * glibc's child reads as its tid; CLEARTID: the exit-time clear/wake word)
+ * and the signal state Linux fork() inherits.  The arguments travel in a
+ * pid-indexed table because process_fork() takes only the trap frame.
+ * A non-zero `stack` (clone's child stack) becomes the child's %rsp. */
+static struct {
+  uint64_t flags;
+  uint64_t ctid;
+} l_fork_args[MAX_PROCESSES];
+
+void linux_compat_fork_child(struct process *parent, struct process *child);
+void linux_compat_fork_child(struct process *parent, struct process *child) {
+  extern void linux_compat_sig_fork(struct process *parent,
+                                    struct process *child);
+  if (!parent || !child) return;
+  struct process *grp = process_group(parent);
+  for (int i = 0; i < HO_SIG_MAX; i++) child->sig_handler[i] = grp->sig_handler[i];
+  child->sig_restorer = grp->sig_restorer;
+  linux_compat_sig_fork(parent, child);
+  if (parent->pid <= 0 || parent->pid >= MAX_PROCESSES) return;
+  uint64_t fl = l_fork_args[parent->pid].flags;
+  uint64_t ctid = l_fork_args[parent->pid].ctid;
+  if ((fl & CLONE_CHILD_SETTID) && ctid) {
+    uint32_t tid = (uint32_t)child->pid;
+    (void)vm_kwrite(child, ctid, &tid, 4);
+  }
+  if (fl & CLONE_CHILD_CLEARTID) child->clear_child_tid = ctid;
+}
+
+#define L_CLONE_FORK_OK                                                        \
+  (0xffULL | CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | CLONE_PARENT_SETTID)
+#define L_SIGCHLD 17
+
+static int l_thr_fork(struct process *p, struct trap_frame *tf, uint64_t flags,
+                      uint64_t stack, uint64_t ptid, uint64_t ctid) {
+  int slot = (p && p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : -1;
+  if (slot >= 0) {
+    l_fork_args[slot].flags = flags;
+    l_fork_args[slot].ctid = ctid;
+  }
+  uint64_t saved_sp = tf->lr; /* x64: the frame-carried user %rsp */
+  if (stack) tf->lr = stack;
+  int pid = process_fork(tf);
+  tf->lr = saved_sp;
+  if (slot >= 0) l_fork_args[slot].flags = 0;
+  if (pid < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EAGAIN;
+    return 1;
+  }
+  if ((flags & CLONE_PARENT_SETTID) && ptid) {
+    uint32_t v = (uint32_t)pid;
+    (void)l_copy_to_user(p, ptid, &v, 4);
+  }
+  tf->regs[0] = (uint64_t)pid;
+  return 1;
+}
+
 /* ---- fork-free thread creation ----------------------------------------- */
 
 static int l_thr_clone(struct process *p, struct trap_frame *tf) {
@@ -1773,6 +1838,10 @@ static int l_thr_clone(struct process *p, struct trap_frame *tf) {
      THREAD|SYSVSEM|SETTLS|PARENT_SETTID|CHILD_SETTID|CHILD_CLEARTID|
      DETACHED) and refuses namespaces, a new AS and a new fd table.  Do the
      cheap shape check here so the refusal is attributable in the log. */
+  /* cp/sys: a fork-shaped clone (glibc fork()) is a fork. */
+  if ((flags & (CLONE_VM | CLONE_THREAD)) == 0 &&
+      (flags & ~L_CLONE_FORK_OK) == 0 && (flags & 0xff) == L_SIGCHLD)
+    return l_thr_fork(p, tf, flags, stack, ptid, ctid);
   if ((flags & (CLONE_VM | CLONE_THREAD)) != (CLONE_VM | CLONE_THREAD)) {
     static int fork_reports;
     if (fork_reports < 4) {

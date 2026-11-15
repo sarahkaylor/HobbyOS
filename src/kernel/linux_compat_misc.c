@@ -36,6 +36,7 @@
 #include "linux_syscall.h"
 #include "process.h"
 #include "vfs.h"
+#include "tmpfs.h" /* cp/sys */
 
 /* vfs.h does not declare rmdir (the native handler declares it locally); keep
    the same shape here rather than growing a shared header for one call. */
@@ -188,6 +189,19 @@ static int l_misc_rmdir(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, rc);
 }
 
+/* cp/sys: store an absolute directory path as the group's cwd.  The cwd
+   buffer is 128 bytes (process.h); a longer path is refused rather than
+   truncated (a truncated cwd names a different directory). */
+static int l_misc_set_cwd(struct process *p, const char *abs) {
+  struct process *grp = process_group(p);
+  if (!grp) return -EINVAL;
+  int n = 0;
+  while (abs[n]) n++;
+  if (n >= (int)sizeof grp->cwd) return -ENAMETOOLONG;
+  for (int i = 0; i <= n; i++) grp->cwd[i] = abs[i];
+  return 0;
+}
+
 static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
   char path[256];
   int r = l_misc_path(p, l_arg(tf, 0), path, sizeof path);
@@ -195,6 +209,26 @@ static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
   struct process *grp = process_group(p);
   char new_cwd[128];
   if (!grp) return l_misc_ret(tf, -EINVAL);
+  /* cp/sys: the compat /tmp.  A symlink there that leaves /tmp continues
+     with the redirected path through the VFS below. */
+  {
+    char abs[VFS_PATH_MAX];
+    if (path[0] == '\0') return l_misc_ret(tf, -ENOENT);
+    if (vfs_abs_path(path, abs, sizeof abs) != 0)
+      return l_misc_ret(tf, -ENAMETOOLONG);
+    if (tmpfs_owns(abs)) {
+      int tr = tmpfs_chdir(abs);
+      if (tr != TMPFS_EXTERNAL) {
+        if (tr != 0) return l_misc_ret(tf, tr);
+        return l_misc_ret(tf, l_misc_set_cwd(p, abs));
+      }
+      for (int i = 0; i < (int)sizeof path; i++) {
+        path[i] = abs[i];
+        if (!abs[i]) break;
+      }
+      path[sizeof path - 1] = '\0';
+    }
+  }
   if (vfs_chdir(path, new_cwd, sizeof new_cwd) != 0) return l_misc_ret(tf, -ENOENT);
   int k = 0;
   while (new_cwd[k] && k < 127) {
@@ -218,6 +252,26 @@ static int l_misc_getcwd(struct process *p, struct trap_frame *tf) {
   if (l_copy_to_user(p, ubuf, grp->cwd, (uint64_t)len + 1) != 0)
     return l_misc_ret(tf, -EFAULT);
   return l_misc_ret(tf, (int64_t)ubuf);
+}
+
+/* fchdir(2) (cp/sys).  Wine's NtQueryDirectoryFile brackets every directory
+   read with fchdir(dir) ... fchdir(cwd) and fails the whole query with
+   errno_to_status() when the first fchdir fails
+   (dlls/ntdll/unix/file.c:2914-2934); the server also fchdir()s between its
+   server and config directories to place temp files
+   (server/mapping.c:374-378).  The VFS keeps the cwd as a path, and every
+   open description records the path it was opened under (file_path_of), so
+   fchdir is "make that path the cwd" after checking it is a directory:
+   EBADF for a closed fd, ENOTDIR for a non-directory (Linux). */
+static int l_misc_fchdir(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  int d = file_fd_is_dir(p, fd);
+  if (d < 0) return l_misc_ret(tf, -EBADF);
+  if (d == 0) return l_misc_ret(tf, -ENOTDIR);
+  char abs[VFS_PATH_MAX];
+  int r = file_path_of(p, fd, abs, sizeof abs);
+  if (r != 0) return l_misc_ret(tf, r == -EBADF ? -EBADF : -ENOENT);
+  return l_misc_ret(tf, l_misc_set_cwd(p, abs));
 }
 
 /* No write-back cache to flush: the FAT writer goes straight to the block
@@ -275,6 +329,7 @@ static int l_misc_rseq(struct process *p, struct trap_frame *tf) {
 }
 
 const struct l_sysent l_tab_misc[] = { {L_SYS_lseek, l_misc_lseek, "lseek"}, {L_SYS_readv, l_misc_readv, "readv"}, {L_SYS_pread64, l_misc_pread64, "pread64"}, {L_SYS_pwrite64, l_misc_pwrite64, "pwrite64"}, {L_SYS_unlink, l_misc_unlink, "unlink"}, {L_SYS_unlinkat, l_misc_unlinkat, "unlinkat"}, {L_SYS_rename, l_misc_rename, "rename"}, {L_SYS_rmdir, l_misc_rmdir, "rmdir"}, {L_SYS_chdir, l_misc_chdir, "chdir"}, {L_SYS_getcwd, l_misc_getcwd, "getcwd"}, {L_SYS_fsync, l_misc_fsync, "fsync"}, {L_SYS_membarrier, l_misc_membarrier, "membarrier"}, {L_SYS_rseq, l_misc_rseq, "rseq"},
+  {81 /* fchdir */, l_misc_fchdir, "fchdir"},
   L_SYSENT_END
 };
 
