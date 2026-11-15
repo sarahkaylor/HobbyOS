@@ -199,6 +199,20 @@ would re-enter it).
   before the FAT16 resolver (≤ one USER_LIB slot, 16 MiB); other names keep
   the FAT16 lookup and alias table.  ld.so then opens and mmaps its DSOs
   (§4).  The PT_INTERP name is bounded by `ELF_INTERP_PATH_MAX` (64).
+- **Open item: glibc static-pie.**  A glibc 2.31 `-static-pie` (the gate's
+  `hs`) carries 24 `R_X86_64_IRELATIVE` relocations (memcpy, strlen, ...);
+  `elf_apply_relocations()` (elf_image.c, not this lane's file) accepts only
+  `RELATIVE` and refuses the image (`ELF load refused rc=-8`) on EVERY
+  filesystem.  Measured on strix: letting IRELATIVE through untouched (what
+  Linux does) gets the image loaded, but it then faults calling a still-zero
+  IFUNC slot (`.got.plt` 0xce278, `__libc_setup_tls`'s memcpy) right after
+  `brk` -- from FAT16 (control boot) exactly as from ext2 -- while the same
+  binary runs on Linux with `_dl_relocate_static_pie` filling that slot (gdb
+  watchpoint).  So it is a compat-loader / startup issue, not ext2; the
+  change was reverted and the item is handed to the loader owner (C1).  The
+  gate proves what ext2 owns: the loader parsed all 914592 bytes it read from
+  `/EXT/lpx/bin/hs`.  The DYNAMIC glibc program (`hd`: ld.so and libc.so.6
+  read and mmap'd from ext2) runs to completion and is graded.
 - **Not covered: compat `execve(2)`** — `process_exec_current()` copies the
   path into 32 bytes, opens it with `fat16_open` and maps a flat image only
   (no ELF at all, on any filesystem).  Exec from ext2 is therefore proven

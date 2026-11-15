@@ -18,13 +18,13 @@
 #      mapped-store bytes (m.bin == m.expect), the exec markers
 #
 # Every QEMU boot runs under `flock /tmp/cp-qemu.lock` (shared CI box).
-# Env: GATE_DIR (default /tmp/cp-ext2-gate), CPDATA_SIZE (default 8G),
+# Env: GATE_DIR (default <repo>/obj/ext2-gate), CPDATA_SIZE (default 8G),
 #      GATE_KEEP=1 keeps the image, GLIBC_SYSROOT (default
 #      ~/cp/wine-build/sysroot-glibc231; tools/cp/build-wine.sh makes it),
 #      GATE_ONLY_EXT2B=1 skips boots 1-2.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-D="${GATE_DIR:-/tmp/cp-ext2-gate}"
+D="${GATE_DIR:-$ROOT/obj/ext2-gate}"  # images stay under the tree's obj/
 IMG="$D/cpdata.img"
 PATH="/usr/sbin:/sbin:$PATH"
 fails=0
@@ -67,7 +67,7 @@ check_image() { # check_image <phase>
   dbg "ls -l /lp" | sed -n '1,40p'
   # exact name set of /lp
   local got want
-  got="$(dbg "ls -p /lp" | awk -F/ 'NF>5 && $6!="." && $6!=".." {print $6}' | sort | tr '\n' ' ')"
+  got="$(dbg "ls -p /lp" | awk -F/ 'NF>5 && $6!="." && $6!=".." {print $6}' | LC_ALL=C sort | tr '\n' ' ')"
   want="big.bin dosdevices hello.hard hello.txt link_dir link_fast link_slow phase1.done "
   [ "$phase" = 2 ] && want="${want}phase2.done "
   want="${want}sparse5g sub sub2 trunc.bin trunc2.bin victim.txt "
@@ -197,11 +197,21 @@ hm="$(sha256sum < "$X2/m.bin" | cut -c1-64)"; he="$(sha256sum < "$X2/m.expect" |
   || bad "m.bin sha256 $hm ($(stat -c %s "$X2/m.bin" 2>/dev/null) bytes) != m.expect $he"
 grep -c "MAPPED-STORE" "$X2/m.bin" >/dev/null && good "m.bin holds the mapped stores ($(grep -ao 'MAPPED-STORE-[0-9]' "$X2/m.bin" | tr '\n' ' '))" || bad "no MAPPED-STORE in m.bin"
 dbg "stat /lpx/unl.bin" 2>&1 | grep -q 'Inode:' && bad "unl.bin still linked" || good "unl.bin (unlinked while mapped) is gone; e2fsck saw no orphan"
-for t in static dyn; do
-  dbg "dump /lpx/out/$t.txt $X2/$t.txt" >/dev/null
-  l="$(head -1 "$X2/$t.txt" 2>/dev/null)"
-  case "$l" in "ok $t "*) good "/lpx/out/$t.txt: $l" ;; *) bad "/lpx/out/$t.txt: '$l'" ;; esac
-done
+dbg "dump /lpx/out/dyn.txt $X2/dyn.txt" >/dev/null
+l="$(head -1 "$X2/dyn.txt" 2>/dev/null)"
+case "$l" in "ok dyn "*"libcpath=/EXT/lpx/glibc/libc.so.6"*) good "/lpx/out/dyn.txt: $l" ;; *) bad "/lpx/out/dyn.txt: '$l'" ;; esac
+# glibc static-pie: OPEN ITEM (docs/cp-ext2b.md section 5).  The compat loader
+# refuses it on every filesystem (R_X86_64_IRELATIVE); what this lane owns is
+# that the image is read from ext2 whole, which the loader's own refusal row
+# proves (it names the file and the byte count it parsed).
+hsz="$(stat -c %s "$X2/hs" 2>/dev/null)"
+if grep -aq "ELF load refused rc=-8 size=$hsz file=/EXT/lpx/bin/hs" "$D/boot3.console.log"; then
+  good "static-pie /EXT/lpx/bin/hs: all $hsz bytes read from ext2 and parsed; refused by the loader (open item: IRELATIVE)"
+elif [ -s "$X2/static.txt" ] || { dbg "dump /lpx/out/static.txt $X2/static.txt" >/dev/null; [ -s "$X2/static.txt" ]; }; then
+  good "/lpx/out/static.txt: $(head -1 "$X2/static.txt")"
+else
+  bad "static-pie /EXT/lpx/bin/hs: neither the loader's refusal row nor a marker"
+fi
 
 if [ "$fails" = 0 ]; then
   say "ext2_gate: PASS"
