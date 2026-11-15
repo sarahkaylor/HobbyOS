@@ -1429,6 +1429,12 @@ int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
   struct process *pg = process_group(p);
   if (!pg) return -EINVAL;
   if (fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  /* cp/exec: F_GETFD/F_SETFD on a closed fd is EBADF (Linux fcntl(2)); the
+     mask bit of a closed slot is meaningless.  Measured: F_GETFD answered 0
+     for the fd an execve had just closed, so a program could not tell. */
+  if ((cmd == K_F_GETFD || cmd == K_F_SETFD) &&
+      (pg->open_fds[fd] < 0 || pg->open_fds[fd] >= MAX_GLOBAL_FILES))
+    return -EBADF;
   if (cmd == K_F_GETFD) return fd_cloexec_test(pg->fd_cloexec, fd) ? K_FD_CLOEXEC : 0;
   if (cmd == K_F_SETFD) {
     /* Replaces the whole flag word (only FD_CLOEXEC exists). */

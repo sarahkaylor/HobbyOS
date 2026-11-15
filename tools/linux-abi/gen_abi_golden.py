@@ -274,7 +274,7 @@ def main():
         for path, rows in ((sc_path, sc), (er_path, er)):
             cur = {}
             for line in open(path, encoding="utf-8"):
-                if line.startswith("#"):
+                if line.lstrip().startswith("#") or not line.strip():
                     continue
                 k, v = line.split()
                 cur[k] = int(v)
@@ -287,7 +287,7 @@ def main():
         cur = {}
         if os.path.exists(lay_path):
             for line in open(lay_path, encoding="utf-8"):
-                if line.startswith("#"):
+                if line.lstrip().startswith("#") or not line.strip():
                     continue
                 k, v = line.split()
                 cur[k] = int(v)

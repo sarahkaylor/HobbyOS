@@ -34,6 +34,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <spawn.h>
 
 static int fails;
 
@@ -84,10 +85,16 @@ static int child_cloexec(char **argv) {
   int base = atoi(argv[1] + 8);
   int a = fd_open(base);
   int b = fd_open(base + 1);
-  row("[LP] child cloexec fd%d=%s fd%d=%s\n", base,
-      a ? "open" : "closed", base + 1, b ? "open" : "closed");
-  /* exit code: bit0 = cloexec fd still open (bad), bit1 = kept fd closed (bad) */
-  return (a ? 1 : 0) | (b ? 0 : 2);
+  errno = 0;
+  int ga = fcntl(base, F_GETFD);
+  int ga_err = errno;
+  int gb = fcntl(base + 1, F_GETFD);
+  row("[LP] child cloexec fd%d=%s fd%d=%s F_GETFD(closed)=%d errno=%d F_GETFD(kept)=%d\n",
+      base, a ? "open" : "closed", base + 1, b ? "open" : "closed", ga, ga_err, gb);
+  /* exit code: bit0 = cloexec fd still open, bit1 = kept fd closed,
+     bit2 = F_GETFD on the closed fd is not EBADF, bit3 = kept fd shows CLOEXEC */
+  return (a ? 1 : 0) | (b ? 0 : 2) | ((ga == -1 && ga_err == EBADF) ? 0 : 4) |
+         (gb == 0 ? 0 : 8);
 }
 
 /* "disp": report the disposition of two signals the driver touched before
@@ -210,6 +217,63 @@ static int thread_spawn_and_exec(void) {
   if (waitpid(pid, &st, 0) != pid) return -3;
   if (WIFEXITED(st)) { int c = WEXITSTATUS(st); return c == 100 ? -100 : c; }
   return -1;
+}
+
+/* ---- CLONE_VM|CLONE_VFORK: the child runs in OUR memory until it execs ----
+ * posix_spawn (musl and glibc 2.31 alike: clone(0x4111, child stack)) and
+ * vfork(2).  If exec tore down the borrowed address space instead of handing
+ * the child its own back (process_vfork_release), the parent would resume in
+ * destroyed memory.  The parent checksums a heap buffer and a stack buffer
+ * across the spawn and checks waitpid's status. */
+extern char **environ;
+static uint32_t fnv(const uint8_t *b, size_t n) {
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u;
+  return h;
+}
+
+static void vfork_rows(void) {
+  enum { HEAP = 256 * 1024, STK = 8192 };
+  uint8_t *heap = malloc(HEAP);
+  volatile uint8_t stk[STK];
+  if (!heap) { row("[LP] FAIL malloc for the vfork rows\n"); fails++; return; }
+  for (size_t i = 0; i < HEAP; i++) heap[i] = (uint8_t)(i * 131u + 7u);
+  for (size_t i = 0; i < STK; i++) stk[i] = (uint8_t)(i * 29u + 3u);
+  uint32_t h0 = fnv(heap, HEAP), s0 = fnv((const uint8_t *)stk, STK);
+
+  /* A. posix_spawn (CLONE_VM|CLONE_VFORK|SIGCHLD) of a static-pie child that
+        exits 23. */
+  {
+    char *argv[] = {self, (char *)"exit:23", NULL};
+    pid_t pid = -1;
+    int r = posix_spawn(&pid, self, NULL, NULL, argv, environ);
+    int st = 0;
+    int w = (r == 0) ? (int)waitpid(pid, &st, 0) : -1;
+    int code = (w == pid && WIFEXITED(st)) ? WEXITSTATUS(st) : -1;
+    uint32_t h1 = fnv(heap, HEAP), s1 = fnv((const uint8_t *)stk, STK);
+    OK(r == 0 && code == 23 && h1 == h0 && s1 == s0,
+       "posix_spawn (CLONE_VM|CLONE_VFORK) child exit=%d, parent heap %s stack %s\n",
+       code, h1 == h0 ? "intact" : "CORRUPT", s1 == s0 ? "intact" : "CORRUPT");
+  }
+
+  /* B. vfork + execve: the child shares this very stack until execve. */
+  {
+    char *argv[] = {self, (char *)"exit:23", NULL};
+    char *envp[] = {NULL};
+    pid_t pid = vfork();
+    if (pid == 0) {
+      execve(self, argv, envp);
+      _exit(127);
+    }
+    int st = 0;
+    int w = pid > 0 ? (int)waitpid(pid, &st, 0) : -1;
+    int code = (w == pid && WIFEXITED(st)) ? WEXITSTATUS(st) : -1;
+    uint32_t h1 = fnv(heap, HEAP), s1 = fnv((const uint8_t *)stk, STK);
+    OK(pid > 0 && code == 23 && h1 == h0 && s1 == s0,
+       "vfork+execve child exit=%d, parent heap %s stack %s\n", code,
+       h1 == h0 ? "intact" : "CORRUPT", s1 == s0 ? "intact" : "CORRUPT");
+  }
+  free(heap);
 }
 
 static void drive(void) {
@@ -362,6 +426,9 @@ static void drive(void) {
     if (rc == -100) NA("threads unavailable (C1-thr: join row E) — exec-from-thread skipped\n");
     else OK(rc == 0, "exec from a multithreaded process, exit=%d\n", rc);
   }
+
+  /* 9b. posix_spawn / vfork: exec from a child that borrows our memory. */
+  vfork_rows();
 
   /* 10. error errnos (Linux execve). */
   {

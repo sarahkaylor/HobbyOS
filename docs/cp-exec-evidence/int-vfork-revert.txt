@@ -1,0 +1,39 @@
+cp-int-exec (strix, KVM): the exec probe's CLONE_VM|CLONE_VFORK rows against the
+integration fix (process_vfork_release(grp) in linux_exec.c step 6).
+Command each time: CPDATA= LP_TIMEOUT=<n> TOOLS_SKIP=1 flock /tmp/cp-qemu.lock bash tools/gate/t3_linux_probe.sh exec
+
+1. Merged tree (5d2b7314 + the new rows), WITH the fix:
+[LP] ok   posix_spawn (CLONE_VM|CLONE_VFORK) child exit=23, parent heap intact stack intact
+[LP] ok   vfork+execve child exit=23, parent heap intact stack intact
+[LP] done rc=0
+
+2. Same tree with the single line `process_vfork_release(grp);` replaced by `(void)0;`
+   (LP_TIMEOUT=240; probe gate rc=1).  The posix_spawn child's exec tore down the
+   address space it was borrowing (the parent's): the AS pool reports a collision,
+   the exec dies past the point of no return, and the guest resets (OVMF boot
+   banner), so the wave starts over and never prints a done marker:
+[LP] ok   exec from a multithreaded process, exit=0
+[EXEC] load pid=1 /PROBE.ELF 2 1
+[GB124-AS] collision pid=1 state=3 thread=0 tgid=1 td=0 as=0x0 epoch=37 name=PROBE.ELF
+[EXEC] dead pid=1 /PROBE.ELF 0 0
+BdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/...   <- reset
+...
+[LP] exec probe start                                                         <- second wave
+[LP] ok   exec static-pie from FAT16 (/PROBE.ELF) exit=0
+(deadline; no "[LP] done")
+
+3. F_GETFD on an fd execve closed (fs.c file_fcntl), probe row "O_CLOEXEC":
+   before the fs.c fix (same tree, probe check added):
+[LP] child cloexec fd3=closed fd4=open F_GETFD(closed)=0 errno=0 F_GETFD(kept)=0
+[LP] FAIL O_CLOEXEC fd closed, plain fd kept across exec (code=4)
+[LP] done rc=1
+   after:
+[LP] child cloexec fd3=closed fd4=open F_GETFD(closed)=-1 errno=9 F_GETFD(kept)=0
+[LP] ok   O_CLOEXEC fd closed, plain fd kept across exec (code=0)
+[LP] done rc=0
+
+4. ABI goldens regenerated on strix (hostname sarahpc, Linux 7.0.0-43) with
+   tools/linux-abi/gen_abi_golden.py: 0 wrong values; new rows execveat 322,
+   ELIBBAD 80, plus 11 syscall / 13 errno names other lanes had added to the
+   headers without regenerating.  --check (after its comment-line fix):
+   "goldens match this Linux box (168 syscalls, 65 errno, 99 layouts)".
