@@ -5999,8 +5999,13 @@ void syscall_init(void) {
   uint32_t lstar_high = (uint32_t)(handler_addr >> 32);
   __asm__ volatile("wrmsr" : : "a"(lstar_low), "d"(lstar_high), "c"(0xC0000082));
 
-  // 4. Set SFMASK MSR (0xC0000084) (mask IF 0x200)
-  __asm__ volatile("wrmsr" : : "a"(0x200), "d"(0), "c"(0xC0000084));
+  // 4. Set SFMASK MSR (0xC0000084).  cp P1: Linux's mask, not just IF:
+  //    TF 0x100 | IF 0x200 | DF 0x400 | IOPL 0x3000 | NT 0x4000 | AC 0x40000.
+  //    A user-set DF used to survive into the kernel, whose memcpy/memset are
+  //    `rep movsb/stosb` (arch/x64/cpu.c): a copy would run BACKWARDS; TF
+  //    would single-step the entry path.  The user's RFLAGS is in r11 and is
+  //    restored from the frame on the way out, so masking costs nothing.
+  __asm__ volatile("wrmsr" : : "a"(0x47700), "d"(0), "c"(0xC0000084));
 }
 
 /* cp P1: make GS_BASE the kernel's on every exception/IRQ entry.
@@ -6023,6 +6028,7 @@ __asm__(
 ".intel_syntax noprefix\n"
 ".global trap_gs_fixup\n"
 "trap_gs_fixup:\n"
+"    cld\n"   /* DF is not cleared by interrupt/trap gates; C assumes DF=0 */
 "    push rax\n"
 "    push rcx\n"
 "    push rdx\n"
