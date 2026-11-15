@@ -1,0 +1,191 @@
+mkcpdata: /home/sarah/cp/lanes/int-ext2b/obj/ext2-gate/cpdata.img (8G sparse) — ext_attr resize_inode filetype sparse_super large_file
+=== ext2_gate: boot 1 (CPDATA=/home/sarah/cp/lanes/int-ext2b/obj/ext2-gate/cpdata.img) ===
+[BLKD] data disk nsid=2 sectors=0x0000000001000000
+[EXT2] mounted /EXT bs=4096 blocks=2097152 free=2059633 inodes=524288 ifree=524277 groups=64 isz=256 rw filetype large_file
+[LP] phase1 complete
+[LP] done rc=0
+boot 1: 75 ok rows; t3_linux_probe: PASS — ext2 reached its done marker
+--- host: e2fsck -fn /home/sarah/cp/lanes/int-ext2b/obj/ext2-gate/cpdata.img (after boot 1) ---
+e2fsck 1.47.2 (1-Jan-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+cpdata: 29/524288 files (0.0% non-contiguous), 37794/2097152 blocks
+[HOST] ok   e2fsck -fn rc=0
+--- host: debugfs view of /lp ---
+  16385   40755 (2)      0      0    4096 15-Nov-2026 13:47 .
+      2   40755 (2)      0      0    4096 15-Nov-2026 13:47 ..
+  32769   40755 (2)      0      0    4096 15-Nov-2026 13:47 sub
+  49153   40750 (2)      0      0    4096 15-Nov-2026 13:47 sub2
+  16386  100640 (1)      0      0      20 15-Nov-2026 13:47 hello.txt
+  16387  100644 (1)      0      0   1048909 15-Nov-2026 13:47 big.bin
+  16388  100644 (1)      0      0   5368709135 15-Nov-2026 13:47 sparse5g
+  16389  100644 (1)      0      0    8192 15-Nov-2026 13:47 trunc.bin
+  16390  100644 (1)      0      0     100 15-Nov-2026 13:47 trunc2.bin
+  16391  120777 (7)      0      0       9 15-Nov-2026 13:47 link_fast
+  16392  120777 (7)      0      0     120 15-Nov-2026 13:47 link_slow
+  16393  120777 (7)      0      0       3 15-Nov-2026 13:47 link_dir
+  65537   40755 (2)      0      0    4096 15-Nov-2026 13:47 dosdevices
+  16396  100644 (1)      0      0      12 15-Nov-2026 13:47 victim.txt
+  16386  100640 (1)      0      0      20 15-Nov-2026 13:47 hello.hard
+  16395  100644 (1)      0      0       2 15-Nov-2026 13:47 phase1.done
+
+[HOST] ok   /lp names = [big.bin dosdevices hello.hard hello.txt link_dir link_fast link_slow phase1.done sparse5g sub sub2 trunc.bin trunc2.bin victim.txt ]
+[HOST] ok   lp/big.bin sha256 d6b7c694481f75abb99600c37262aa35c4780153a569f6fbee92c044ecc1d16d (1048909 bytes)
+[HOST] ok   lp/hello.hard sha256 e3612b8d5957ad6528692ff73f8a6884d5081810b5174d02f2a289329c4c002f (20 bytes)
+[HOST] ok   lp/hello.txt sha256 e3612b8d5957ad6528692ff73f8a6884d5081810b5174d02f2a289329c4c002f (20 bytes)
+[HOST] ok   lp/phase1.done sha256 4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865 (2 bytes)
+[HOST] ok   lp/sub2/r4.txt sha256 fa347eb70a4d91f765ee8d48e892e3a7e07df3d4d76d1feb2a0feea19d9c83f6 (3 bytes)
+[HOST] ok   lp/trunc.bin sha256 f4643696243916d8c71d2a9a0d096a9653a2cdf3219aa0f8dc86590e992d18aa (8192 bytes)
+[HOST] ok   lp/trunc2.bin sha256 bccabc0e15758c541e47a63cab5addd263c38e8110d8a8fd5d73e6c41ffaed89 (100 bytes)
+[HOST] ok   lp/victim.txt sha256 1d054714357ce5ee01723ed91fcaa69206e221faaf9c1fad64f73be2e5d051da (12 bytes)
+[HOST] ok   lp is a directory
+[HOST] ok   lp/sub is a directory
+[HOST] ok   lp/sub2 is a directory
+[HOST] ok   lp/sub2/inner_moved is a directory
+[HOST] ok   lp/dosdevices is a directory
+[HOST] ok   lp/link_fast -> hello.txt
+[HOST] ok   lp/link_slow -> sub2/fghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnop
+[HOST] ok   lp/link_dir -> sub
+[HOST] ok   lp/dosdevices/z: -> /
+[HOST] ok   lp/dosdevices/c: -> ../sub
+[HOST] ok   lp/gone.txt absent
+[HOST] ok   lp/gonedir absent
+[HOST] ok   lp/tmp.bin absent
+[HOST] ok   lp/r1.txt absent
+[HOST] ok   lp/r2.txt absent
+[HOST] ok   lp/repl.txt absent
+[HOST] ok   lp/sub/r3.txt absent
+[HOST] ok   lp/sub/inner absent
+[HOST] ok   hello.hard = inode 16386, Links: 2
+[HOST] ok   sparse5g Size: 5368709135
+[HOST] ok   sparse5g lblk 1310720 -> pblk 197385 holds 'SPARSE-AT-5GiB'
+[HOST] ok   sparse5g lblk 1000 is a hole
+[HOST] info sparse5g Blockcount: 32 (512-byte units)
+=== ext2_gate: boot 2 (CPDATA=/home/sarah/cp/lanes/int-ext2b/obj/ext2-gate/cpdata.img) ===
+[BLKD] data disk nsid=2 sectors=0x0000000001000000
+[EXT2] mounted /EXT bs=4096 blocks=2097152 free=2059358 inodes=524288 ifree=524259 groups=64 isz=256 rw filetype large_file
+[LP] phase2: reading what phase 1 wrote before the reboot
+[LP] phase2 complete
+[LP] done rc=0
+boot 2: 14 ok rows; t3_linux_probe: PASS — ext2 reached its done marker
+[HOST] ok   boot 2 ran phase 2 (persistence)
+--- host: e2fsck -fn /home/sarah/cp/lanes/int-ext2b/obj/ext2-gate/cpdata.img (after boot 2) ---
+e2fsck 1.47.2 (1-Jan-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+cpdata: 30/524288 files (0.0% non-contiguous), 37795/2097152 blocks
+[HOST] ok   e2fsck -fn rc=0
+--- host: debugfs view of /lp ---
+  16385   40755 (2)      0      0    4096 15-Nov-2026 13:47 .
+      2   40755 (2)      0      0    4096 15-Nov-2026 13:47 ..
+  32769   40755 (2)      0      0    4096 15-Nov-2026 13:47 sub
+  49153   40750 (2)      0      0    4096 15-Nov-2026 13:47 sub2
+  16386  100640 (1)      0      0      27 15-Nov-2026 13:47 hello.txt
+  16387  100644 (1)      0      0   1048909 15-Nov-2026 13:47 big.bin
+  16388  100644 (1)      0      0   5368709135 15-Nov-2026 13:47 sparse5g
+  16389  100644 (1)      0      0    8192 15-Nov-2026 13:47 trunc.bin
+  16390  100644 (1)      0      0     100 15-Nov-2026 13:47 trunc2.bin
+  16391  120777 (7)      0      0       9 15-Nov-2026 13:47 link_fast
+  16392  120777 (7)      0      0     120 15-Nov-2026 13:47 link_slow
+  16393  120777 (7)      0      0       3 15-Nov-2026 13:47 link_dir
+  65537   40755 (2)      0      0    4096 15-Nov-2026 13:47 dosdevices
+  16396  100644 (1)      0      0      12 15-Nov-2026 13:47 victim.txt
+  16386  100640 (1)      0      0      27 15-Nov-2026 13:47 hello.hard
+  16395  100644 (1)      0      0       2 15-Nov-2026 13:47 phase1.done
+  16397  100644 (1)      0      0       2 15-Nov-2026 13:47 phase2.done
+
+[HOST] ok   /lp names = [big.bin dosdevices hello.hard hello.txt link_dir link_fast link_slow phase1.done phase2.done sparse5g sub sub2 trunc.bin trunc2.bin victim.txt ]
+[HOST] ok   lp/big.bin sha256 d6b7c694481f75abb99600c37262aa35c4780153a569f6fbee92c044ecc1d16d (1048909 bytes)
+[HOST] ok   lp/hello.hard sha256 13776430ffc6d7f0827af239ac714fc9c451e1d77d274604a22edf9bb55e0521 (27 bytes)
+[HOST] ok   lp/hello.txt sha256 13776430ffc6d7f0827af239ac714fc9c451e1d77d274604a22edf9bb55e0521 (27 bytes)
+[HOST] ok   lp/phase1.done sha256 4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865 (2 bytes)
+[HOST] ok   lp/phase2.done sha256 53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3 (2 bytes)
+[HOST] ok   lp/sub2/r4.txt sha256 fa347eb70a4d91f765ee8d48e892e3a7e07df3d4d76d1feb2a0feea19d9c83f6 (3 bytes)
+[HOST] ok   lp/trunc.bin sha256 f4643696243916d8c71d2a9a0d096a9653a2cdf3219aa0f8dc86590e992d18aa (8192 bytes)
+[HOST] ok   lp/trunc2.bin sha256 bccabc0e15758c541e47a63cab5addd263c38e8110d8a8fd5d73e6c41ffaed89 (100 bytes)
+[HOST] ok   lp/victim.txt sha256 1d054714357ce5ee01723ed91fcaa69206e221faaf9c1fad64f73be2e5d051da (12 bytes)
+[HOST] ok   lp is a directory
+[HOST] ok   lp/sub is a directory
+[HOST] ok   lp/sub2 is a directory
+[HOST] ok   lp/sub2/inner_moved is a directory
+[HOST] ok   lp/dosdevices is a directory
+[HOST] ok   lp/link_fast -> hello.txt
+[HOST] ok   lp/link_slow -> sub2/fghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnop
+[HOST] ok   lp/link_dir -> sub
+[HOST] ok   lp/dosdevices/z: -> /
+[HOST] ok   lp/dosdevices/c: -> ../sub
+[HOST] ok   lp/gone.txt absent
+[HOST] ok   lp/gonedir absent
+[HOST] ok   lp/tmp.bin absent
+[HOST] ok   lp/r1.txt absent
+[HOST] ok   lp/r2.txt absent
+[HOST] ok   lp/repl.txt absent
+[HOST] ok   lp/sub/r3.txt absent
+[HOST] ok   lp/sub/inner absent
+[HOST] ok   hello.hard = inode 16386, Links: 2
+[HOST] ok   sparse5g Size: 5368709135
+[HOST] ok   sparse5g lblk 1310720 -> pblk 197385 holds 'SPARSE-AT-5GiB'
+[HOST] ok   sparse5g lblk 1000 is a hole
+[HOST] info sparse5g Blockcount: 32 (512-byte units)
+[HOST] ok   built glibc 2.31 hs (static-pie) + hd (dynamic, PT_INTERP /EXT/lpx/glibc/ld-linux-x86-64.so.2)
+[HOST] ok   staged lpx/{bin,glibc} with debugfs; e2fsck -fn rc=0
+[HOST] info staged /lpx/bin/hs mode 0755 size 914592
+[HOST] info staged /lpx/bin/hd mode 0755 size 8960
+[HOST] info staged /lpx/glibc/ld-linux-x86-64.so.2 mode 0755 size 191504
+[HOST] info staged /lpx/glibc/libc.so.6 mode 0755 size 2029592
+=== ext2_gate: boot 3 (linux_probe_ext2b + helper + glibc hs/hd from /EXT) ===
+[EXT2] mounted /EXT bs=4096 blocks=2097152 free=2058580 inodes=524288 ifree=524250 groups=64 isz=256 rw filetype large_file
+elf loader: interpreter /EXT/lpx/glibc/ld-linux-x86-64.so.2 mapped
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000001A00 start=0x1008001100
+[LP] info mtime nsec=0 (ext2 stores seconds; Linux ext2 too)
+[LP] info longest path 718 bytes
+[LP] exec marker ok dyn pid=4 libc=2.31 libcpath=/EXT/lpx/glibc/libc.so.6 argv0=/EXT/lpx/bin/hd
+[LP] helper done rc=0 (exiting WITH [0,1), [100,101) and the flock held)
+[LP] info glibc static-pie from /EXT/lpx/bin: no marker (loader refuses glibc static-pie on any filesystem: open item)
+[LP] done rc=0
+boot 3: 124 main ok rows, 9 helper ok rows; t3_linux_probe: PASS — ext2b reached its done marker
+--- host: e2fsck -fn /home/sarah/cp/lanes/int-ext2b/obj/ext2-gate/cpdata.img (after boot 3) ---
+e2fsck 1.47.2 (1-Jan-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+cpdata: 67/524288 files (0.0% non-contiguous), 38604/2097152 blocks
+[HOST] ok   e2fsck -fn rc=0 (after ext2b)
+--- host: debugfs stat /lpx/attr.f ---
+Inode: 22   Type: regular    Mode:  0751   Flags: 0x0
+Generation: 0    Version: 0x00000000
+User:  1234   Group:  5678   Size: 0
+File ACL: 0
+Links: 1   Blockcount: 0
+Fragment:  Address: 0    Number: 0    Size: 0
+ctime: 0x6afa0c56 -- Sun Nov 15 13:47:34 2026
+atime: 0x3b9aca00 -- Sat Sep  8 20:46:40 2001
+mtime: 0x499602d2 -- Fri Feb 13 17:31:30 2009
+Size of extra inode fields: 0
+BLOCKS:
+
+[HOST] ok   /lpx/attr.f Mode: 0751
+[HOST] ok   /lpx/attr.f User: 1234
+[HOST] ok   /lpx/attr.f Group: 5678
+[HOST] ok   /lpx/attr.f atime: 0x3b9aca00
+[HOST] ok   /lpx/attr.f mtime: 0x499602d2
+[HOST] ok   /lpx/attr.l User: 4242
+[HOST] ok   /lpx/attr.l Group: 4444
+[HOST] ok   /lpx/attr.l mtime: 0x00000378
+[HOST] ok   /lpx/attr.d Mode: 02775
+[HOST] ok   /lpx/attr.d User: 7
+[HOST] ok   /lpx/attr.d Group: 8
+[HOST] ok   m.bin sha256 569c9c6e9635e74792294b8cd20b098e8572f8a0383b796dd94e685e8e82d719 == m.expect (write()s + MAP_SHARED stores, 12388 bytes)
+[HOST] ok   m.bin holds the mapped stores (MAPPED-STORE-1 MAPPED-STORE-3 MAPPED-STORE-2 )
+[HOST] ok   unl.bin (unlinked while mapped) is gone; e2fsck saw no orphan
+[HOST] ok   /lpx/out/dyn.txt: ok dyn pid=4 libc=2.31 libcpath=/EXT/lpx/glibc/libc.so.6 argv0=/EXT/lpx/bin/hd
+[HOST] ok   static-pie /EXT/lpx/bin/hs: all 914592 bytes read from ext2 and parsed; refused by the loader (open item: IRELATIVE)
+ext2_gate: PASS
