@@ -120,13 +120,18 @@ struct vm_object *ext2_obj_get(uint32_t ino, uint64_t cap, int wb) {
   struct vm_object *hit = 0;
   uint64_t fl = spinlock_acquire_irqsave(&e2o_lock);
   int free_slot = -1;
+  int matched = 0;
+  /* Scan the WHOLE table: the free slot may lie after the entry being
+     superseded (an early break here once refused every growth mapping with
+     "cache full" while 255 slots were free). */
   for (int i = 0; i < E2O_MAX; i++) {
     struct e2o_entry *e = &e2o_tab[i];
     if (!e->used) {
       if (free_slot < 0) free_slot = i;
       continue;
     }
-    if (e->ino != ino || e->stale) continue;
+    if (matched || e->ino != ino || e->stale) continue;
+    matched = 1;
     if (e->obj->size >= cap) {
       vm_object_ref(e->obj);
       if (wb && !e->wb) {
@@ -137,7 +142,6 @@ struct vm_object *ext2_obj_get(uint32_t ino, uint64_t cap, int wb) {
     } else {
       e->stale = 1; /* too small for this mapping: keep it for its own */
     }
-    break;
   }
   if (!hit && free_slot >= 0 && ext2_iget(fs, ino) == 0) {
     struct vm_object *o = vm_object_create(VM_OBJ_EXT2, cap);
