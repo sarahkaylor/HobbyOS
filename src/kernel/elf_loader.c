@@ -717,6 +717,63 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
   return el_map_pair(as, exe, exe_len, &eimg, 0, 0, 0, flags, info);
 }
 
+int elf_loader_read_interp(const char *interp, uint8_t **buf, uint64_t *len,
+                           uint64_t *pages, char *staged, int cap,
+                           int quiet_missing) {
+  if (!interp || !buf || !len || !pages) return -ENOENT;
+  if (staged && cap > 0) staged[0] = '\0';
+  /* cp/ext2b: an interpreter path on the /EXT ext2 volume is read from there
+   * first (a glibc ld.so staged with the program); every other name keeps the
+   * FAT16 resolver below, alias table included. */
+  {
+    uint8_t *eb = 0;
+    uint32_t esz = 0, epg = 0;
+    int er = fs_read_ext2_file(interp, &eb, &esz, &epg,
+                               (uint32_t)USER_LIB_SLOT_SIZE);
+    if (er < 0) {
+      uart_puts("elf loader: interpreter '");
+      uart_puts(interp);
+      uart_puts(er == -ENOEXEC ? "' on /EXT is empty or larger than one USER_LIB slot\n"
+                               : "' on /EXT cannot be read\n");
+      return er == -ENOEXEC ? -ENOSPC : er;
+    }
+    if (er == 1) {
+      *buf = eb; /* frame run (fs_read_ext2_file) */
+      *pages = epg;
+      *len = esz;
+      if (staged) el_copy_name(staged, cap, interp);
+      return 0;
+    }
+  }
+  char tmp[64];
+  char *st = (staged && cap > 0) ? staged : tmp;
+  int stcap = (staged && cap > 0) ? cap : (int)sizeof tmp;
+  uint16_t icl = 0;
+  uint32_t isz = 0;
+  if (el_compat_resolve(interp, &icl, &isz, st, stcap) != 0) {
+    if (!quiet_missing)
+      el_msg2("elf loader: first missing DSO ", st);
+    uart_puts("elf loader: interpreter '");
+    uart_puts(interp);
+    uart_puts("' not found on the FAT16 root\n");
+    return -ENOENT;
+  }
+  if (isz > USER_LIB_SLOT_SIZE) {
+    uart_puts("elf loader: interpreter '");
+    uart_puts(st);
+    uart_puts("' is larger than one USER_LIB slot\n");
+    return -ENOSPC;
+  }
+  uint64_t pg = 0;
+  uint64_t b = el_read_file(icl, isz, &pg);
+  if (!b)
+    return -ENOMEM;
+  *buf = (uint8_t *)phys_to_virt(b);
+  *pages = pg;
+  *len = isz;
+  return 0;
+}
+
 /* Load an ELF image ALREADY IN KERNEL MEMORY into `as` per the load plan.
  * This is the entry point for a filesystem that is not FAT16 (the VFS/NFS
  * exec path): the caller holds the bytes, so no cluster is involved.  The
@@ -742,56 +799,21 @@ int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
    * native dynamic contract is that the kernel says what it could not find.
    * el_compat_resolve (upstream GB-196) is the resolver: as written, then its
    * basename, then the bounded 8.3 alias table, and it reports the name that
-   * actually resolved -- so a glibc PT_INTERP path still finds LD64.SO. */
+   * actually resolved -- so a glibc PT_INTERP path still finds LD64.SO.
+   * cp/ext2b: a path on /EXT is read from the ext2 volume first.  cp/exec: the
+   * body is elf_loader_read_interp(), shared with execve(2). */
   uint64_t ibuf = 0, ipages = 0, ilen = 0;
   struct elf_image iimg;
   char istaged[64];
   istaged[0] = '\0';
-  /* cp/ext2b: an interpreter path on the /EXT ext2 volume is read from there
-   * first (a glibc ld.so staged with the program); every other name keeps the
-   * FAT16 resolver below, alias table included. */
-  int iext2 = 0;
   if (eimg.has_interp) {
-    uint8_t *eb = 0;
-    uint32_t esz = 0, epg = 0;
-    int er = fs_read_ext2_file(eimg.interp, &eb, &esz, &epg,
-                               (uint32_t)USER_LIB_SLOT_SIZE);
-    if (er < 0) {
-      uart_puts("elf loader: interpreter '");
-      uart_puts(eimg.interp);
-      uart_puts(er == -ENOEXEC ? "' on /EXT is empty or larger than one USER_LIB slot\n"
-                               : "' on /EXT cannot be read\n");
-      return er == -ENOEXEC ? -ENOSPC : er;
-    }
-    if (er == 1) {
-      iext2 = 1;
-      ibuf = virt_to_phys(eb); /* frame run (fs_read_ext2_file) */
-      ipages = epg;
-      ilen = esz;
-      el_copy_name(istaged, sizeof istaged, eimg.interp);
-    }
-  }
-  if (eimg.has_interp && !iext2) {
-    uint16_t icl = 0;
-    uint32_t isz = 0;
-    if (el_compat_resolve(eimg.interp, &icl, &isz, istaged, sizeof istaged) != 0) {
-      if (!(flags & ELF_LOAD_NATIVE))
-        el_msg2("elf loader: first missing DSO ", istaged);
-      uart_puts("elf loader: interpreter '");
-      uart_puts(eimg.interp);
-      uart_puts("' not found on the FAT16 root\n");
-      return -ENOENT;
-    }
-    if (isz > USER_LIB_SLOT_SIZE) {
-      uart_puts("elf loader: interpreter '");
-      uart_puts(istaged);
-      uart_puts("' is larger than one USER_LIB slot\n");
-      return -ENOSPC;
-    }
-    ibuf = el_read_file(icl, isz, &ipages);
-    if (!ibuf)
-      return -ENOMEM;
-    ilen = isz;
+    uint8_t *ib = 0;
+    rc = elf_loader_read_interp(eimg.interp, &ib, &ilen, &ipages, istaged,
+                                (int)sizeof istaged,
+                                (flags & ELF_LOAD_NATIVE) ? 1 : 0);
+    if (rc != 0)
+      return rc;
+    ibuf = virt_to_phys(ib);
   }
   if (eimg.has_interp) {
     rc = el_admit_interp((const uint8_t *)phys_to_virt(ibuf), ilen, &iimg, info);

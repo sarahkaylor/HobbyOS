@@ -58,6 +58,7 @@
 #define ENOSYS      38
 #define ENOTEMPTY   39
 #define ELOOP       40
+#define ELIBBAD     80 /* cp/exec: execve of an interpreter that is not ELF */
 #define EILSEQ      84
 #define EOPNOTSUPP  95 /* Linux value; acl-errno-valid.c */ /* Linux value; used by the byte-mode wide-char layer */
 

@@ -25,8 +25,8 @@
  * ext2 resolver, the compat path rows); a path that does not fit is refused
  * (-1 / -ENAMETOOLONG), never truncated.  Not raised further: several of these
  * buffers live on the 64 KiB kernel stack at once (a rename holds five).
- * The process cwd (struct process.cwd, 128 bytes) is a separate, smaller
- * limit: docs/cp-ext2b.md section 5. */
+ * The process cwd and /proc/self/exe path (struct process.cwd/exe_path) hold
+ * the same VFS_PATH_MAX since cp/exec (PROC_PATH_MAX, process.h). */
 #define VFS_PATH_MAX 1024
 
 /* Kernel-facing mount info for sysinfo(8). */

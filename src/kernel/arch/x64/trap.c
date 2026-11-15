@@ -319,7 +319,13 @@ static void compat_open(struct trap_frame *tf) {
     return;
   }
   const char *staged = compat_soname_staged(kpath);
-  int fd = file_open(caller, staged ? staged : kpath, flags);
+  /* cp/exec: open(2) with O_CLOEXEC must arm FD_CLOEXEC, exactly as the openat
+     row does (l_fd_openat).  Without this a Linux program that opens through
+     open(2) kept its close-on-exec fds open across execve (the CLOEXEC probe
+     row).  Strip the flag (it is not an open mode) and set the bit after. */
+  int fd = file_open(caller, staged ? staged : kpath, flags & ~02000000 /* O_CLOEXEC */);
+  if (fd >= 0 && (flags & 02000000))
+    (void)file_fcntl(caller, fd, K_F_SETFD, K_FD_CLOEXEC);
   if (staged) {
     /* One record: the guest's SONAME, the file it resolved to, and the fd —
        the evidence the open path (not a staged rename) did the work. */

@@ -97,6 +97,7 @@
 #define NFS_PROC_GETATTR    1
 #define NFS_PROC_LOOKUP     3
 #define NFS_PROC_READ       6
+#define NFS_PROC_READLINK   5
 #define NFS_PROC_READDIRPLUS 17
 #define NFS_PROC_FSSTAT     18
 
@@ -211,6 +212,14 @@ int nfs_parse_lookup_reply(const uint8_t *body, int len, struct nfs_fh *fh,
                            struct nfs_attr *a, int *attr_ok);
 int nfs_parse_read_reply(const uint8_t *body, int len, uint8_t *data,
                          int data_cap, uint32_t *count, int *eof);
+/* READLINK3: fills *out (NUL-terminated) with the link target; returns the
+ * length, -2 on a server status error, -1 on a transport/parse failure. */
+int nfs_parse_readlink_reply(const uint8_t *body, int len, char *out, int cap);
+/* cp/exec: join a symlink target against the link path `base` into `out`
+ * (mount-relative, canonical).  Absolute target replaces the path; relative
+ * resolves against base's parent; "."/".." folded; ".." above root dropped.
+ * 0 / -1 (does not fit). */
+int nfs_symlink_join(const char *base, const char *target, char *out, int cap);
 int nfs_parse_fsstat_reply(const uint8_t *body, int len, uint64_t *total,
                            uint64_t *avail);
 /* 0 ok; -2 when the server refused (status != 0); *auth_unix_ok reports
@@ -254,6 +263,11 @@ int  nfs_getattr(const struct nfs_mount *m, const struct nfs_fh *fh,
                  struct nfs_attr *a);
 int  nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
                    uint32_t offset, void *buf, uint32_t len);
+/* cp/exec: READLINK3 on a symlink handle; fills *out (NUL-terminated), returns
+ * the length or < 0.  nfs_lookup follows symlinks itself, so callers rarely
+ * need this directly. */
+int  nfs_readlink(const struct nfs_mount *m, const struct nfs_fh *fh,
+                  char *out, int cap);
 int  nfs_list_dir(const struct nfs_mount *m, const char *rel, int index,
                   char *name, int name_cap, uint8_t *attr_out, uint32_t *size_out);
 /* L54: entry count for a cached directory listing (fills the cache). */

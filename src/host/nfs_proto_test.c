@@ -17,6 +17,7 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <string.h>
 #include "nfs.h"
 #include "nfs_fixtures.h"
 
@@ -409,6 +410,57 @@ static void test_reply_envelope_rules(void) {
         "oversized verifier is malformed");
 }
 
+/* cp/exec: READLINK3 reply parsing + the symlink path join/canonicalize. */
+static void build_post_op_attr_lnk(struct xdr_w *w, uint64_t size) {
+  xdr_w_u32(w, 1);             /* attributes_follow */
+  xdr_w_u32(w, NF3LNK);        /* type */
+  xdr_w_u32(w, 0777);          /* mode */
+  xdr_w_u32(w, 1); xdr_w_u32(w, 0); xdr_w_u32(w, 0); /* nlink uid gid */
+  xdr_w_u64(w, size); xdr_w_u64(w, size);            /* size used */
+  xdr_w_u32(w, 0); xdr_w_u32(w, 0);                  /* rdev */
+  xdr_w_u64(w, 0x1234); xdr_w_u64(w, 0x5678);        /* fsid fileid */
+  xdr_w_u32(w, 1); xdr_w_u32(w, 0);                  /* atime */
+  xdr_w_u32(w, 2); xdr_w_u32(w, 0);                  /* mtime */
+  xdr_w_u32(w, 3); xdr_w_u32(w, 0);                  /* ctime */
+}
+
+static void test_readlink_and_join(void) {
+  printf("-- cp/exec: READLINK3 parse + symlink path join\n");
+  uint8_t msg[256];
+  struct xdr_w w;
+  xdr_w_init(&w, msg, sizeof msg);
+  xdr_w_u32(&w, 0);                 /* status NFS3_OK */
+  build_post_op_attr_lnk(&w, 4);
+  xdr_w_string(&w, "wine");         /* the link target */
+  check(w.err == 0, "READLINK reply encodes");
+  char tgt[256];
+  int n = nfs_parse_readlink_reply(msg, w.len, tgt, sizeof tgt);
+  check(n == 4 && strcmp(tgt, "wine") == 0, "READLINK target is 'wine'");
+
+  /* a server-status error is -2, not a bogus path */
+  xdr_w_init(&w, msg, sizeof msg);
+  xdr_w_u32(&w, 2);                 /* NFS3ERR_NOENT */
+  n = nfs_parse_readlink_reply(msg, w.len, tgt, sizeof tgt);
+  check(n == -2, "READLINK status error -> -2");
+
+  char out[256];
+  /* relative target resolves against the link's parent (Wine's case) */
+  check(nfs_symlink_join("/bin/wineboot", "wine", out, sizeof out) == 0 &&
+        strcmp(out, "/bin/wine") == 0, "join relative: /bin/wineboot + wine");
+  /* absolute target replaces the path */
+  check(nfs_symlink_join("/a/b/link", "/c/d", out, sizeof out) == 0 &&
+        strcmp(out, "/c/d") == 0, "join absolute: /c/d");
+  /* .. and . folded, relative to parent */
+  check(nfs_symlink_join("/x/y/l", "../z/./w", out, sizeof out) == 0 &&
+        strcmp(out, "/x/z/w") == 0, "join ..//. folds to /x/z/w");
+  /* .. above the root stays at root */
+  check(nfs_symlink_join("/l", "../../up", out, sizeof out) == 0 &&
+        strcmp(out, "/up") == 0, "join .. above root clamps");
+  /* a chain target that is itself a bare name in the root */
+  check(nfs_symlink_join("/wineboot", "wine", out, sizeof out) == 0 &&
+        strcmp(out, "/wine") == 0, "join at root: /wineboot + wine");
+}
+
 int main(void) {
   printf("=== nfs_proto host tests (real nfsd fixtures) ===\n");
 
@@ -417,6 +469,7 @@ int main(void) {
   test_truncation_never_succeeds();
   test_writer_and_reader();
   test_reply_envelope_rules();
+  test_readlink_and_join();
 
   printf("\n=== Results: %d checks run, %d failed ===\n",
          checks_run, checks_failed);

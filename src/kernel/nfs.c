@@ -678,6 +678,24 @@ static int getattr_fh(const struct nfs_mount *m, const uint8_t *fh,
   return nfs_parse_getattr_reply(body, blen, attr);
 }
 
+/* cp/exec: READLINK3 on a symlink's handle. */
+int nfs_readlink(const struct nfs_mount *m, const struct nfs_fh *fh,
+                 char *out, int cap) {
+  if (!m || !m->in_use || !fh) return -1;
+  uint8_t args[4 + NFS_FH_MAX];
+  struct xdr_w w;
+  xdr_w_init(&w, args, sizeof args);
+  xdr_w_fh(&w, fh->data, fh->len);
+  if (w.err) return -1;
+  uint8_t rb[NFS_RPC_BUF];
+  const uint8_t *body = 0;
+  int blen = 0;
+  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
+               NFS_PROC_READLINK, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+    return -1;
+  return nfs_parse_readlink_reply(body, blen, out, cap);
+}
+
 static int lookup_one(const struct nfs_mount *m, const uint8_t *dir_fh,
                       uint32_t dir_len, const char *name, struct nfs_fh *out,
                       struct nfs_attr *attr, int *attr_ok) {
@@ -697,7 +715,7 @@ static int lookup_one(const struct nfs_mount *m, const uint8_t *dir_fh,
   return nfs_parse_lookup_reply(body, blen, out, attr, attr_ok);
 }
 
-int nfs_lookup(const struct nfs_mount *m, const char *rel,
+static int nfs_lookup_nofollow(const struct nfs_mount *m, const char *rel,
                struct nfs_fh *fh, struct nfs_attr *attr) {
   if (!m || !m->in_use || !rel) return -1;
   if (rel[0] != '/') return -1;
@@ -783,6 +801,41 @@ int nfs_lookup(const struct nfs_mount *m, const char *rel,
   }
   if (fh) *fh = cur;
   return 0;
+}
+
+/* cp/exec: path lookup that FOLLOWS symbolic links, the Linux default for
+ * open()/stat() (and what execve and the spawn loader need: the staged Wine
+ * tree has /CP/WINE/bin/wineboot -> wine as an NFS symlink).  Walks `rel`
+ * without following, and while the resolved node is NF3LNK reads the target,
+ * rejoins it against the link's parent and re-walks -- bounded to defeat a
+ * symlink cycle.  Every existing caller (open, stat, nfs_is_dir) now follows,
+ * which is correct: there is no lstat path through here. */
+int nfs_lookup(const struct nfs_mount *m, const char *rel,
+               struct nfs_fh *fh, struct nfs_attr *attr) {
+  char cur[NFS_PATH_MAX * 4];
+  int cl = 0;
+  if (!rel) return -1;
+  for (; rel[cl] && cl < (int)sizeof cur - 1; cl++) cur[cl] = rel[cl];
+  cur[cl] = '\0';
+  struct nfs_fh lfh;
+  struct nfs_attr la;
+  for (int hop = 0; hop < 12; hop++) {
+    int rc = nfs_lookup_nofollow(m, cur, &lfh, &la);
+    if (rc != 0) return rc;
+    if (la.type != NF3LNK) {
+      if (fh) *fh = lfh;
+      if (attr) *attr = la;
+      return 0;
+    }
+    char tgt[NFS_PATH_MAX * 2];
+    int n = nfs_readlink(m, &lfh, tgt, sizeof tgt);
+    if (n < 0) return -1;
+    char next[NFS_PATH_MAX * 4];
+    if (nfs_symlink_join(cur, tgt, next, sizeof next) != 0) return -1;
+    for (cl = 0; next[cl] && cl < (int)sizeof cur - 1; cl++) cur[cl] = next[cl];
+    cur[cl] = '\0';
+  }
+  return -1; /* too many hops: a symlink loop */
 }
 
 int nfs_getattr(const struct nfs_mount *m, const struct nfs_fh *fh,

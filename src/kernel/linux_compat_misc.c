@@ -200,8 +200,8 @@ static int l_misc_rmdir(struct process *p, struct trap_frame *tf) {
 }
 
 /* cp/sys: store an absolute directory path as the group's cwd.  The cwd
-   buffer is 128 bytes (process.h); a longer path is refused rather than
-   truncated (a truncated cwd names a different directory). */
+   buffer is VFS_PATH_MAX bytes (process.h, cp/exec); a longer path is refused
+   rather than truncated (a truncated cwd names a different directory). */
 static int l_misc_set_cwd(struct process *p, const char *abs) {
   struct process *grp = process_group(p);
   if (!grp) return -EINVAL;
@@ -213,11 +213,12 @@ static int l_misc_set_cwd(struct process *p, const char *abs) {
 }
 
 static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
-  char path[256];
+  /* cp/exec: full-length paths (the cwd now holds VFS_PATH_MAX). */
+  char path[VFS_PATH_MAX];
   int r = l_misc_path(p, l_arg(tf, 0), path, sizeof path);
   if (r != 0) return l_misc_ret(tf, r);
   struct process *grp = process_group(p);
-  char new_cwd[128];
+  char new_cwd[VFS_PATH_MAX];
   if (!grp) return l_misc_ret(tf, -EINVAL);
   /* cp/sys: the compat /tmp.  A symlink there that leaves /tmp continues
      with the redirected path through the VFS below. */
@@ -240,13 +241,7 @@ static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
     }
   }
   if (vfs_chdir(path, new_cwd, sizeof new_cwd) != 0) return l_misc_ret(tf, -ENOENT);
-  int k = 0;
-  while (new_cwd[k] && k < 127) {
-    grp->cwd[k] = new_cwd[k];
-    k++;
-  }
-  grp->cwd[k] = '\0';
-  return l_misc_ret(tf, 0);
+  return l_misc_ret(tf, l_misc_set_cwd(p, new_cwd));
 }
 
 /* getcwd(2) returns the buffer (glibc/musl both expect a non-NULL return on

@@ -98,6 +98,10 @@ int tmpfs_mksock(char *abs, int mode);
 /* Remove a socket node created by tmpfs_mksock when the bind failed. */
 void tmpfs_unmksock(char *abs);
 int tmpfs_access(char *abs, int mode);
+/* cp/exec: read a whole executable regular file for execve(2) (x bit
+ * required, uid 0); 0 / -errno / TMPFS_EXTERNAL.  Contract in tmpfs.c. */
+int tmpfs_read_image(char *abs, uint8_t **buf_out, uint32_t *size_out,
+                     uint32_t *pages_out, uint32_t max);
 
 /* setattr: the op C3-ext2b's chmod/chown/utimensat route calls.  `mask`
  * bits select the fields; times are seconds since the epoch.  follow: 1 =

@@ -73,6 +73,32 @@ int elf_loader_probe_native(uint16_t cluster, uint32_t fsize);
 /* Buffer form of elf_loader_probe_native(), for the VFS exec path. */
 int elf_loader_probe_native_buf(const uint8_t *exe, uint32_t fsize);
 
+/* cp/exec: read a PT_INTERP image the way the spawn loader does -- a path on
+ * the /EXT ext2 volume from there, every other name through the FAT16
+ * resolver (as written, its basename, the 8.3 alias table).  On success (0)
+ * *buf is a run of *pages frames (direct-map VA; the caller frees each) holding
+ * *len bytes.  -ENOENT (not found), -ENOSPC (larger than one USER_LIB slot),
+ * -ENOMEM, or another -errno from the ext2 reader.  `staged` (cap bytes)
+ * receives the name that resolved, for messages.  elf_loader_load_image and
+ * execve(2) share it. */
+int elf_loader_read_interp(const char *interp, uint8_t **buf, uint64_t *len,
+                           uint64_t *pages, char *staged, int cap,
+                           int quiet_missing);
+
+/* cp/exec: the compat startup auxv (program_loader.c), the one writer of the
+ * frozen auxv contract; spawn and execve(2) both use it.  `w` holds at least
+ * COMPAT_AUXV_WORDS words; returns the number written (AT_NULL included). */
+#define COMPAT_AUXV_WORDS 44
+int compat_auxv_fill(uint64_t *w, uint64_t phdr, uint32_t phnum,
+                     uint64_t interp_base, uint64_t entry,
+                     uint64_t platform_addr, uint64_t rnd_addr,
+                     uint64_t execfn_addr);
+
+/* cp/exec: record /proc/self/exe's answer (a relative path is resolved
+ * against p's cwd); bounded by sizeof p->exe_path (VFS_PATH_MAX). */
+struct process;
+void set_exe_path(struct process *p, const char *path);
+
 /**
  * Loads a user program from the disk and executes it in the current context.
  * Bypasses the scheduler.
