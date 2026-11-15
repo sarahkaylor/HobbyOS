@@ -2330,10 +2330,22 @@ static void sys_exec(struct trap_frame *tf) {
     return;
   }
 
-  char pathbuf[32];
+  /* GB-308: was 32 bytes and u_strcpy truncates SILENTLY, so a longer path was
+     cut and then failed ENOENT (measured: execve("/THIS/PATH/IS/LONGER/...")
+     echoed as /THIS/PATH/IS/LONGER/THAN/THIRT).  A truncated path that fails
+     to exist is a lie about why exec failed. */
+  char pathbuf[256];
   if (!u_strcpy(path, pathbuf, sizeof pathbuf)) {
     tf->regs[0] = -EFAULT;
     return;
+  }
+  {
+    int plen = 0;
+    while (plen < (int)sizeof pathbuf && pathbuf[plen]) plen++;
+    if (plen >= (int)sizeof pathbuf - 1) {
+      tf->regs[0] = -ENAMETOOLONG;
+      return;
+    }
   }
 
   /* P2.5 (S5): every argv access below is validated (v2 AS walk

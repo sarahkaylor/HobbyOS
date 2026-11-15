@@ -4231,6 +4231,16 @@ int process_fork(struct trap_frame *tf) {
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   child->parent_pid = group->pid;
+  /* GB-308: a fork child must inherit the ABI it was forked FROM.  Without
+     this the child runs with abi_flags == 0, so its syscalls are dispatched as
+     NATIVE ones: close(3) became SYS_FORK, dup2(33) became SYS_FTRUNCATE and
+     execve(59) was unknown -- measured as "Unknown System Call Invoked!" x3, a
+     user fault (vector 13) and grandchildren appearing at pids 3,4,5.  A child
+     that misroutes syscalls is worse than one that fails them, because the
+     damage is another process rather than an errno. */
+  child->abi_flags = group->abi_flags;
+  child->fd_cloexec = group->fd_cloexec;
+
 
   for (int i = 0; i < 32; i++) {
     child->name[i] = parent->name[i];

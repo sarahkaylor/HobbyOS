@@ -101,8 +101,23 @@ extern int sys_user_range_ok(uint64_t ptr, uint64_t len);
  *   java/util/concurrent/ThreadLocalRandom
  * -- a byte of a PATH string where a constant-pool tag belonged, i.e. data
  * read from the wrong offset.  One lock over the whole sequence makes
- * positioned I/O what POSIX says it is: atomic and cursor-neutral. */
-static ylock_t f1_pos_lock;
+ * positioned I/O what POSIX says it is: atomic and cursor-neutral.
+ *
+ * The lock is PER GLOBAL FD, not global.  It is held across the read, and a
+ * read can block in FAT/virtio I/O (measured: `keytool -genkeypair` parked a
+ * pread64 with the single global lock held and the whole machine wedged behind
+ * it, [YLOCK-WEDGE] f1_pos_lock).  Per-fd confines a stuck read to the fd that
+ * caused it.  Residual, accepted: two different fds on the SAME file still
+ * race their cursors -- the fix for that is offset-passing inside file_read,
+ * not a wider lock. */
+static ylock_t f1_pos_locks[MAX_GLOBAL_FILES];
+
+/* Index a process fd to its global slot for the positioned-I/O lock, or -1. */
+static int f1_pos_index(struct process *pg, int fd) {
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  int g = pg->open_fds[fd];
+  return (g >= 0 && g < MAX_GLOBAL_FILES) ? g : -1;
+}
 
 /**
  * Initializes the virtual file system layer.
@@ -110,7 +125,7 @@ static ylock_t f1_pos_lock;
  */
 void fs_init(void) {
   spinlock_init(&fs_lock);
-  ylock_init(&f1_pos_lock);
+  for (int i = 0; i < MAX_GLOBAL_FILES; i++) ylock_init(&f1_pos_locks[i]);
   spinlock_init(&file_locks_lock);
   for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
     global_file_table[i].type = FILE_TYPE_EMPTY;
@@ -3014,7 +3029,9 @@ int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
   struct process *pg = process_group(p);
   int err = 0;
   int r = 0;
-  ylock_acquire(&f1_pos_lock);
+  int li = f1_pos_index(pg, fd);
+  ylock_t *plk = (li >= 0) ? &f1_pos_locks[li] : 0;
+  if (plk) ylock_acquire(plk);
   int64_t saved = file_seek(pg, fd, 0, 1 /* SEEK_CUR */, &err);
   if (saved < 0) {
     r = -err;
@@ -3024,7 +3041,7 @@ int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
     r = file_read_user(pg, fd, ubuf, n, tf);
   }
   if (saved >= 0) file_seek(pg, fd, saved, 0, &err);
-  ylock_release(&f1_pos_lock);
+  if (plk) ylock_release(plk);
   return r;
 }
 
@@ -3036,7 +3053,9 @@ int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
   struct process *pg = process_group(p);
   int err = 0;
   int r = 0;
-  ylock_acquire(&f1_pos_lock);
+  int li = f1_pos_index(pg, fd);
+  ylock_t *plk = (li >= 0) ? &f1_pos_locks[li] : 0;
+  if (plk) ylock_acquire(plk);
   int64_t saved = file_seek(pg, fd, 0, 1, &err);
   if (saved < 0) {
     r = -err;
@@ -3046,7 +3065,7 @@ int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
     r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);
   }
   if (saved >= 0) file_seek(pg, fd, saved, 0, &err);
-  ylock_release(&f1_pos_lock);
+  if (plk) ylock_release(plk);
   return r;
 }
 

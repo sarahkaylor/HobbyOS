@@ -96,3 +96,68 @@ as the model predicts (interpreter ≫ JIT, so it exceeds even 240 s).
   it, so those are excluded — jtreg forks per test and this does not.
 - The host baseline is run first, always: 19/19 on the host, so a guest failure is
   the guest's.
+
+## Workstream results (parallel agent runs, 2026-11-14)
+
+Each worker built its own worktree and ran its own boots; the probes and logs are
+committed on `jdk-vt`, `jdk-exec`, `jdk-mmap`, `jdk-tools`.
+
+### 1. Virtual threads — WORKING, no kernel change needed
+
+| probe | verdict | evidence |
+|---|---|---|
+| `VtCore` (9 checks) | **9/9** | two initial failures (`null threadGroup` after termination, `dumpAllThreads` listing 0 virtual threads) reproduced **identically on host JDK 26** — JDK-specified behaviour, not a kernel bug |
+| `VtDump` (4) | **4/4** | `ThreadContainers.root()` walks 50 virtual + 8 platform threads; `VirtualThreadSchedulerMXBean` parallelism=8 poolSize=8; a parked VT is WAITING with the correct 5-frame stack |
+| `VtLocks` (12) | **12/12** | 400k contended monitor increments exact on both thread kinds; 20k items through a 4-slot monitor buffer; `wait(300)`→305 ms; `notifyAll` handoff 205 ms; 2000 park/unpark handoffs in 301 ms; pre-granted permits honoured; 64 VTs holding per-VT monitors across `sleep(100)` → **no pinning (JEP 491)**, while `Object.wait` pins as specified |
+| `VtScale` 10k / 50k | **PASS** | 10k created 1480 ms, heap 17 MB; 50k created 2145 ms, finished 3536 ms, heap 54 MB; blocking-queue totals exact (50 005 000 and 1 250 025 000) |
+| `VtExit` (3) | **3/3** | `System.exit(3)` **from a virtual thread** runs the shutdown hook and the kernel reports `[EXITPC] code=0x3`; 20 VTs × 5 concurrent file reads byte-exact |
+| structured concurrency | **not run** | preview types renamed in 27; the guest's own `javac --enable-preview --release 27` compiles it cleanly, the run boot is missing |
+
+### 2. Process creation — BLOCKED on missing primitives, pipes fine
+
+| probe | verdict | exact evidence |
+|---|---|---|
+| kernel loader baseline (`LEAF.EXE --exit=42`) | **PASS** | `[EXITPC] code=0x2A` — the loader is fine, so exec's target is not the problem |
+| `PIPE` (6 checks) | **6/6** | 300 KB round-trip in 167 ms, byte-exact, EOF on last-writer close, blocking read waits, `EPIPE` → `IOException: Broken pipe` |
+| glibc `fork()` | **FAIL ENOSYS** | `[LCOMPAT] clone refused flags=0x1200011 (no CLONE_VM\|CLONE_THREAD...)` → `errno=38` |
+| `posix_spawn` | **FAIL ENOSYS** | `clone refused flags=0x4111`; this is the JDK's *default* launch mechanism |
+| raw `fork`+`execve` | **BROKEN CHILD** | child misrouted every syscall (`close`→`SYS_FORK`, `dup2`→`SYS_FTRUNCATE`), user fault vector 13, and silently spawned grandchildren at pids 3,4,5 |
+| `execve` itself | **implemented** | maps the image (`v2 loader: image mapped … bytes=18680`), but the exec'd *dynamic* image then faults at `VA=0, PC=0x1000000047` |
+
+### 3. mmap / file locks / channels — NO BOOT (host build defect)
+
+The worker never got a guest run: `make` dies in the ICU host build because
+`Makefile:1331` gates `ICU_CC` on `$(filter macos,$(OS))` while `OS` is never
+defined, so `ICU_CC` inherits the kernel compiler and the stale CommandLineTools
+SDK then fails to link (`ld: tapi error: malformed file ... libSystem.B.tbd:
+unknown architecture`). Workaround that works: `make OS=macos` with
+`SDKROOT=/Applications/Xcode.app/.../MacOSX.sdk` exported. **Two of four workers
+burned their entire budget on this**, so it belongs in the build system, not in
+each worker's head.
+
+Source-level hypotheses for the next run (not boot evidence):
+`MAP_SHARED` on FAT16 never reaches disk (`file_obj.c` has no write path);
+any FAT16 write drops the whole page cache; **`F_SETLKW` returns `-EAGAIN`
+instead of blocking** (`src/kernel/fs.c:1214`), so `FileChannel.lock()` may hand
+back a `FileLock` the kernel never granted; an empty file's `map()` should raise
+`IOException`.
+
+### 4. JDK tooling — partially usable, two kernel defects on the path
+
+| tool | verdict | evidence |
+|---|---|---|
+| guest `javac` | **PASS** | `/JDKOUT/CLASSES/Att.class` 5079 B + `CLASSES/demo/Welcome.class`, exit 0, clean halt, 19 s |
+| `keytool -help` | **PASS** | real help text, exit 0, 11 s |
+| `keytool -genkeypair` (18 args) | **FAIL** | `[LCOMPAT] argv argc=16` → `-storepass` truncated → "password is too short" ×3 |
+| `keytool -genkeypair` (12 args) | **HANG** | `[YLOCK-WEDGE] addr=0x702B4650` = `f1_pos_lock`, owner `pid=27 osys=17` (pread64) |
+| `jlink` | **impossible here** | the pinned JDK ships **no `jmods`** (464 entries, none on disk) |
+| jar / javadoc / javap / jshell / jcmd / jstack / jmap | **not run** | iterations exhausted; payload staged |
+
+### Kernel fixes applied from these findings
+
+| fix | file | why |
+|---|---|---|
+| `COMPAT_MAX_ARGV` 16 → 128 | `program_loader.c` | every Linux-ABI process silently lost argv[17]+; measured 21 in → 16 delivered |
+| positioned-I/O lock: one global → **per file descriptor** | `fs.c` | it is held across the read, and a blocked read wedged the whole machine (`keytool -genkeypair`) |
+| exec path buffer 32 → 256 + `-ENAMETOOLONG` | `arch/x64/trap.c` | `u_strcpy` truncated silently, so a long path failed with a lying `ENOENT` |
+| fork child inherits `abi_flags` (+ `fd_cloexec`) | `process.c` | without it a fork child misroutes every syscall and spawns phantom grandchildren |
