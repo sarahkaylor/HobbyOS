@@ -1,7 +1,7 @@
 # Cyberpunk P0 — the Linux-guest-on-Venus column (lane C7-p0guest)
 
-Status: **partial — rows (a)–(d), (f), (g) measured; row (e) stops at the
-game's user agreement** (recorded to its end, not accepted; §5.1a). Measured 2026-11-14 on `strix` (Ryzen AI MAX+ 395,
+Status: **rows (a)–(g) measured; go/no-go applied: GO** (§7). Row (e) is
+main-menu fps only — the built-in benchmark was not run (§5.6). Measured 2026-11-14 on `strix` (Ryzen AI MAX+ 395,
 RX 9070 XT, Ubuntu 26.04.1, kernel 7.0). Plan: `docs/cyberpunk.md` §3.3 item 2,
 §6 P0/P6, §10 Q4/Q6/Q7.
 
@@ -17,14 +17,14 @@ Every number below has its raw output in `evidence/cp-p0guest/` (the
 | (b) | vkcube fps | KMS/DRI3 present 95–147 fps (IMMEDIATE/MAILBOX), FIFO 30–37 fps; Xvfb software copy 350–705 fps (§3.1) |
 | (c) | D3D12 through Wine + vkd3d-proton | works: FL **12_1**, SM **6.8**, DXR 1.1. GPU-bound throughput **97.8–99.3 % of native**; per-frame CPU path 3× native for an empty frame, 1.55× for 2000 draws (§3.2) |
 | (d) | vkd3d-proton features, Venus vs native | Venus drops 59 device extensions; vkd3d-proton loses **FL 12_2 (mesh shaders)**, EXT_dgc, descriptor_buffer, memory_budget — **nothing it requires** (§4) |
-| (e) | Cyberpunk at 720p/1080p Low | **runs without a Steam client** and reaches its first "PRESS [space] TO CONTINUE" in 35.3 / 38.3 s; then the **CD PROJEKT RED user agreement** blocks the menu. No fps yet (§5) |
-| (f) | AVX masked | guest boots, Venus/vkcube/D3D12 run, **the game starts and reaches the same pre-menu point with no illegal-instruction exception** (§6) |
+| (e) | Cyberpunk at 720p/1080p Low | **runs without a Steam client**; after the user agreement (accepted by the coordinator with the user's go-ahead, §5.1b) it reaches the **main menu in 41.3–41.8 s**. Main menu, Low preset, RT off: **1280×720 median 142.8 / 144.4 fps, p90 59.0 / 55.4 fps** (two runs); **1920×1080 median 144.1, p90 67.1**. Peak RSS 2.1 GiB, 68–69 threads. Benchmark not run (§5) |
+| (f) | AVX masked | guest boots, Venus/vkcube/D3D12 run, the game starts with no illegal-instruction exception; **reaches the main menu in 41.9 s; menu median 143.8 fps, p90 52.2** at 1280×720 Low — same as with AVX (§6) |
 | (g) | fence round trip | submit→signal p50 **276 µs** in the guest vs **48–53 µs** native (§3.3) |
 
-**Go/no-go (§7): cannot be applied yet** — the 15 fps @ 1280×720 Low rule needs
-a menu/benchmark fps, which needs the user agreement accepted in the guest
-prefix. That acceptance is the user's to give (§8). Everything needed to take
-the number afterwards is one command (`measure.sh guest cpmenu`).
+**Go/no-go (§7): GO for Venus.** The rule's number, main-menu fps at 1280×720
+Low in the Linux guest, is a median of 142.8–144.4 fps, with p90 of 55–59 fps,
+against a 15 fps floor. The menu is a light scene: this clears the rule as
+written but is not an in-game number (the benchmark was not run, §5.6).
 
 ## 1. What runs where
 
@@ -281,12 +281,12 @@ warn:debugstr:OutputDebugStringA "[S_API] SteamAPI_Init(): Failed to load module
 
 It plays the intro (Bink video), shows "PRESS [space] TO CONTINUE", and after
 two Space presses (xdotool) shows the **"CD PROJEKT RED USER AGREEMENT"**
-("You must scroll all the way down to decline or accept…"). **This lane
-stopped there**: accepting a licence agreement is the user's decision, and no
-existing acceptance was copied from the user's prefix. The game was killed at
-the agreement every time; nothing was clicked.
+("You must scroll all the way down to decline or accept…"). This lane did not
+accept it: accepting a licence is the user's decision, and no existing
+acceptance was copied from the user's prefix. It was accepted later by the
+coordinator on the user's direct go-ahead (§5.1b).
 
-### 5.1a The agreement screen, recorded (still not accepted)
+### 5.1a The agreement screen, recorded (this lane did not accept it)
 
 A follow-up instruction relayed the user's permission to accept, but it came
 from the coordinating agent, not from the user directly. This lane may only
@@ -308,6 +308,40 @@ AGREEMENT", "last updated: 10 AUGUST 2026, in effect from: 9 SEPTEMBER 2025".
 Afterwards the guest's `AppData/Local/CD Projekt Red/Cyberpunk 2077/` holds
 only `cache/`; no acceptance was stored.
 
+### 5.1b First-run screens after the agreement
+
+The coordinator, with the user's go-ahead given to it directly in chat, ran
+`guest-cp-accept.sh` (this lane did not press ACCEPT). Its record: the end of
+the agreement, then Enter, then the next screen offered a CD PROJEKT RED
+account (`evidence/cp-p0guest/firstrun-accept-before-640.jpg`,
+`firstrun-accept-after-640.jpg`). Then this lane:
+
+1. **Re-launched: the agreement did not reappear** — it persisted. The guest
+   prefix gained `Saved Games/CD Projekt Red/Cyberpunk 2077/user.gls` (plus
+   `EnabledMods.json`, `HDRUserSettings.json`) at the acceptance run;
+   `AppData/Local/.../Cyberpunk 2077/` held only `cache/` until settings were
+   saved.
+2. **Account offer — skipped, no account created or signed in.** OCR:
+   `PROJEKT RED Account Unlock Unique Features with a CD PROJEKT RED Account
+   In-Game Rewards Cross-progression … Downloadable Goodies v Stay in Touch @
+   CONNECT [==] SKIP FOR NOW`. A held Space did not dismiss it; **Esc** did
+   (`firstrun-check2-s17-account-640.jpg`).
+3. **Telemetry consent — REJECT ALL.** OCR: `Help Make Our Games Better We'd
+   like to collect your telemetry data … Share game telemetry / Share
+   marketing campaign data … CONSENT TO ALL [Enter] / REJECT ALL [Esc]`
+   (`firstrun-check2-s18-telemetry-640.jpg`). In the first attempt Esc and a
+   click on REJECT ALL had no visible effect and the game was closed with
+   the prompt still open; on the next launch the walker's Esc / REJECT ALL
+   click dismissed it (`firstrun-check2-after-telemetry-640.jpg`: main
+   menu). Enter (CONSENT TO ALL) was never sent. Persisted result, read
+   from the game-written `UserSettings.json`: `/gameplay/misc EnableTelemetry
+   False`, `/gameplay/misc EnableMarketing False`.
+4. Later launches show none of these prompts.
+
+`tools/cp/p0guest/guest-cp-walk.sh` encodes exactly this: Space at "PRESS …
+TO CONTINUE", Esc at the account offer, Esc/REJECT ALL at telemetry, stop
+(exit 3) at any agreement, done at the main menu.
+
 ### 5.2 Launch-to-first-screen (not launch-to-menu)
 
 `measure.sh guest cpfirst` (OCR every ~2 s + tesseract time, so ±3 s
@@ -322,25 +356,76 @@ attempts, so neither run is truly cold). Raw:
 | AVX masked | 1 | 38.2 s |
 | AVX masked | 2 | 37.8 s |
 
-### 5.3 No audio device (§3.3 item 7, partial)
+### 5.3 No audio device (§3.3 item 7)
 
 The VM has no sound device at all (`lspci` lists none; `/proc/asound` does
-not exist). The game reaches the same pre-menu point; whether the menu and
-gameplay tolerate it is not yet observable.
+not exist). The game runs to the **main menu** and through its Settings pages
+with no audio device; gameplay was not entered.
 
-### 5.4 Menu fps and the built-in benchmark — not measured
+### 5.4 Settings in effect (verified on the Graphics page)
 
-Blocked by §5.1. Prepared and untested past the agreement:
-`guest-ladder.sh cpmenu` (settings → launch with MangoHud CSV → Space through
-the prompts → OCR the main menu → 60 s of frame times → `mango-stats.py`
-median / p90), `guest-cp-settings.py` (Low, RT/PT off, DRS/FG off, VSync off,
-cap off, fullscreen at the target size — **option semantics unverified**, the
-follow-up must confirm the Graphics page by screenshot). MangoHud 0.8.2~rc2
-writes no CSV with `no_display`, so the HUD is drawn with alpha 0; with that
-HUD vkcube IMMEDIATE dropped from ~95 to 71 fps avg (one 3 s sample), so the
-HUD itself costs something at high frame rates — negligible at game rates,
-but it is not free. The built-in benchmark needs menu navigation (OCR-driven,
-not written yet).
+Picked on the game's own Graphics page: Quick Preset **Low** (default after
+first launch was "Ray Tracing: Ultra"; the preset was stepped with the A key
+until the Graphics page read "Low"). The page then shows — screenshot
+`settings-graphics-low-1280x720-960.jpg`, taken again automatically at the end
+of each 720p run (`runs/.../settings-graphics.png`, OCR in the results files):
+Quick Preset **Low**, Resolution Scaling **AMD FSR 2.1, Auto** (part of the
+game's Low preset on this GPU; left as the preset sets it — changing it would
+make the preset "Custom"), Frame Generation **Off**, Texture Quality **Low**,
+Ray Tracing **OFF**, Path Tracing **OFF**. Video page (defaults, not
+changed): VSync **Off**, Maximum FPS **OFF**, Windowed Mode **Windowed
+Borderless**, Resolution **1280x720**. At 1920×1080 the measured run's own
+settings-page screenshots missed (the game's cursor moves ~0.92 px per
+relative unit at 1080p vs 1:1 at 720p), so a separate, unmeasured launch at
+1080p checked the pages: OCR `Windowed Mode < Windowed Borderless`,
+`Resolution < 1920x1080`, `Quick Preset < = Low`, `Resolution Scaling < AMD
+FidelityFX Super Resolution 2.1`, `Texture Quality … low`, `Ray Tracing OFF`
+(`settings-video-1920x1080-960.jpg`). The game-written file
+(`guest-cp-settings.py --show`) agrees: QuickPresets Low, ResolutionScaling
+FSR2, FSR2 Auto, DynamicResolutionScaling False, TextureQuality Low,
+RayTracing False, RayTracedPathTracing False, VSync Off, MaximumFPS_OnOff
+False, WindowMode BorderlessWindowed.
+
+### 5.5 Main-menu fps, launch-to-menu, RSS/threads
+
+`measure.sh guest cpmenu` (lock held): launch with MangoHud loaded (HUD fully
+transparent; logging toggled with Shift_L+F2 so the CSV covers exactly the
+hold), walk to the menu, cursor parked off the menu items, 5 s settle, **60 s
+hold**, per-frame frame times → `mango-stats.py`. "fps p90" = 1000 / p90
+frame time (the slow tail). RSS/threads: `ps` of `Cyberpunk2077.exe` every
+5 s during the hold. Raw: `results/20261114-225754-guest-cpmenu.txt`,
+`…-230804-…` (both 1280×720; the second was meant as 1920×1080 but `measure.sh`
+did not forward `GEOM` into the guest — fixed, kept as a repeat),
+`…-231553-…` (1920×1080). `…-224907-…` is a failed run (the menu detector
+missed the red-on-dark menu; fixed with a red-pixel threshold).
+
+| run | geometry | launch → menu | frames / s | avg fps | median ms (fps) | p90 ms (fps) | p99 ms | peak RSS | peak threads |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1280×720 | 41.8 s | 6877 / 60.6 | 113.6 | 7.00 (142.8) | 16.95 (59.0) | 32.85 | n/a¹ | n/a¹ |
+| 2 | 1280×720 | 41.3 s | 6804 / 60.7 | 112.2 | 6.93 (144.4) | 18.06 (55.4) | 32.73 | 2142 MiB | 68 |
+| 3 | 1920×1080 | 41.5 s | 7451 / 60.5 | 123.1 | 6.94 (144.1) | 14.91 (67.1) | 25.05 | 2140 MiB | 69 |
+
+¹ `ps -C` matched nothing (the process name is truncated to
+`Cyberpunk2077.e`); fixed before run 2. Guest memory in use at the end of
+the hold: 2.9 GiB of 31 GiB.
+
+Reading: the median is the same at both sizes (≈ 7 ms) and the p90 tail is
+the bimodal 15–18 ms seen in §3.1/§3.2 — the menu is **present-path bound**
+(Xorg/glamor → virtio-gpu → QEMU egl-headless), not GPU-bound. Launch-to-menu
+is ~41 s warm (game files in host and guest page caches), of which ~35–38 s
+is reaching the first prompt (§5.2).
+
+### 5.6 The built-in benchmark — not run
+
+The game's Settings page has **RUN BENCHMARK [B]**. Pressing B opens a
+confirmation ("Are you sure you would like to run a benchmark? any unsaved
+setting changes will be reset." — CONFIRM / CANCEL). Sending Enter to confirm
+was **blocked by this session's auto-mode permission check**; the dialog was
+cancelled with Esc and the benchmark was not run, and no workaround was
+attempted. Settings were already saved, so confirming would lose nothing,
+but that call is the user's: allow it (or run `B`, Enter on the Settings
+page yourself) and the benchmark's own results plus MangoHud give median /
+p90 / 1 %-low under load. Until then this column has menu numbers only.
 
 ## 6. (f) AVX masked (answers §10 Q6, first half)
 
@@ -353,50 +438,62 @@ avx512-fp16`. Guest proof: no AVX-family flag in `/proc/cpuinfo`; kernel
 SSE, PKRU — no YMM), glibc `xsave_state_size=0x2c0`.
 
 Results with AVX masked: Venus device present, vkcube rc 0, d3d12probe FL
-12_1 / SM 6.8 and `present` 111.9 fps avg (functional, unlocked run), and
-**the game starts, plays the intro and shows "PRESS [space] TO CONTINUE"**.
-With `PROTON_LOG=1` (`+seh`), the exceptions dispatched are identical in kind
-to the AVX-on run — `40010006` (debug strings) ×7, `406d1388` (thread names)
-×30, `6ba` ×1, `e06d7363` (C++) ×1 (×4 in the longer AVX-on run) — and **no `c000001d` (illegal
-instruction)**. So the engine's start-up does not hard-require AVX; whether
-the menu, world load or gameplay do is unknown until §8. For HobbyOS: XSAVE
-(AD-4) is **not proven to be a hard prerequisite** to get the game *started*;
-keep it as a P1 item for the menu/gameplay until the post-agreement run says
-otherwise.
+12_1 / SM 6.8 and `present` 111.9 fps avg (functional, unlocked run). The
+game starts and plays the intro; with `PROTON_LOG=1` (`+seh`) the exceptions
+dispatched are identical in kind to the AVX-on run — `40010006` (debug
+strings) ×7, `406d1388` (thread names) ×30, `6ba` ×1, `e06d7363` (C++) ×1
+(×4 in the longer AVX-on run) — and **no `c000001d` (illegal instruction)**.
+
+**To the main menu, measured** (`results/20261114-232029-guest-cpmenu.txt`,
+lock held, same settings, 1280×720):
+
+| CPU | launch → menu | frames / s | avg fps | median ms (fps) | p90 ms (fps) | p99 ms | peak RSS | threads |
+|---|---|---|---|---|---|---|---|---|
+| AVX masked | 41.9 s | 6641 / 60.5 | 109.7 | 6.95 (143.8) | 19.15 (52.2) | 33.33 | 2118 MiB | 67 |
+| `-cpu host` (§5.5 run 2) | 41.3 s | 6804 / 60.7 | 112.2 | 6.93 (144.4) | 18.06 (55.4) | 32.73 | 2142 MiB | 68 |
+
+**Answer to §10 Q6 (AVX half): the game reaches and renders its main menu
+with every AVX-family CPUID bit masked and no YMM state in XCR0**, at the
+same frame rate. Not covered: world load and gameplay. For HobbyOS: XSAVE /
+AVX (AD-4) is **not a prerequisite to reach the menu**; it moves from "hard
+P1 prerequisite" to "performance/compatibility item, required only if
+gameplay proves otherwise".
 
 ## 7. Go / no-go (plan §1.4, P0 gate)
 
-**Cannot be applied yet.** The rule needs fps at the main menu (or benchmark)
-at 1280×720 Low; the game stops at its user agreement (§5.1).
+Rule: if the Linux-guest-on-Venus column is **below 15 fps at 1280×720
+Low**, promote native context before P6.
 
-What the measured rows do say (inference from measurements, not a game
-number): GPU-bound work loses 1–2 % through Venus; CPU-side command
-submission costs +64 µs per submit and ≈ +0.085 µs per draw; a CPU-waited
-fence costs +225 µs; the KMS/egl-headless present path caps simple content at
-~90–113 fps with a bimodal 23–26 ms p90. None of these is near a 15 fps
-(66.7 ms) floor on its own, so **nothing measured so far predicts a no-go** —
-but Cyberpunk's draw counts, fence waits and present behaviour are exactly
-what is unmeasured.
+Measured: main menu, 1280×720, Low preset (FSR 2.1 Auto as the preset sets
+it), RT/PT off, VSync off, no frame cap — **median 142.8 and 144.4 fps** in
+two runs, **p90 59.0 and 55.4 fps**, p99 frame time ≈ 33 ms (≈ 30 fps).
+Even the p99 tail is twice the floor.
 
-## 8. What the user must do
+**Verdict: GO — Venus stays the P6 GPU path; native context is not
+promoted.** The second clause (a feature vkd3d-proton requires is missing) is
+not triggered either (§4).
 
-1. **Accept the user agreement in the guest yourself.** The script does it
-   for you, and it only touches the VM's own profile:
-   ```bash
-   H="bash ~/cp/p0guest/tools/host-venus.sh"
-   $H start && $H push
-   $H ssh 'bash tools/guest-x.sh kms 1280x720; bash tools/guest-proton.sh mount; bash tools/guest-cp-accept.sh'
-   ```
-   `guest-cp-accept.sh` scrolls to the end, saves `~/runs/accept/before.png`,
-   presses Enter (= ACCEPT), saves and OCRs `~/runs/accept/after.png`, prints
-   both and stops the game. Any later first-run prompt (telemetry, account
-   sign-in) is left on screen for a person to decide. Alternatively, say
-   "accept it" to the agent directly in your own message; a permission
-   relayed through another agent does not count.
-2. Then: `bash ~/cp/p0guest/tools/host-venus.sh start && … push`, then
-   `GEOM=1280x720 bash ~/cp/p0guest/tools/measure.sh guest cpmenu` and the same
-   with `GEOM=1920x1080` (and once with `--avx-off`) — this yields the go/no-go
-   number.
+Caveats, stated plainly: (1) this is the **main menu**, a light scene; the
+built-in benchmark was not run (§5.6) and no gameplay was measured. (2) The
+menu is bound by the present path, not by Venus' command stream (median 7 ms
+at both 720p and 1080p, the same bimodal tail as the D3D12 probe's present
+rows in §3.2). (3) The host-native column (lane C7-p0host) is the other half
+of AD-10's comparison and is not in this document. The rule is cleared by
+an order of magnitude at the menu; the benchmark row is the one to add before
+anyone leans on "playable".
+
+## 8. What is left, and what the user may want to do
+
+1. **Built-in benchmark** (§5.6): blocked by the session's permission check
+   at the benchmark's confirmation dialog. To run it: allow that step for an
+   agent, or, with the VM up, run `bash ~/cp/p0guest/tools/host-venus.sh ssh
+   'bash tools/guest-cp-ui.sh click 158 364; sleep 4; bash tools/guest-cp-ui.sh key b'`
+   and press Enter yourself — MangoHud is only loaded when the game is
+   launched through `cpmenu` (`CP_MANGO=1`).
+2. In-game fps (a save or the start of a new game) was out of scope here.
+3. The first-run choices made in the guest profile: agreement accepted (by
+   the coordinator), CD PROJEKT RED account offer skipped, telemetry and
+   marketing data sharing rejected. Nothing outside the VM changed.
 
 ## 9. Installed / created
 
@@ -412,10 +509,14 @@ what is unmeasured.
 
 ## 10. Proposed amendments to `docs/cyberpunk.md` (integrator)
 
-1. §1.5 / §1.6: the user's copy is the **Steam** build, and it **starts
-   without a Steam client** (`SteamAPI_Init()` fails, the game continues) —
-   the GOG-only assumption can go; the real gate before the menu is the
-   CD PROJEKT RED user agreement in a fresh profile, which needs the user.
+1. §1.5 / §1.6: the user's copy is the **Steam** build, and it **runs to
+   the main menu without a Steam client** (`SteamAPI_Init()` fails, the game
+   continues) — the GOG-only assumption can go. A fresh profile shows three
+   first-run screens before the menu: the CD PROJEKT RED user agreement
+   (needs the user; persisted in `Saved Games/.../user.gls`), an optional
+   account offer (Esc skips) and a telemetry consent (REJECT ALL = Esc). P8's
+   launcher should pre-seed a profile in which the user has made those
+   choices rather than automate them.
 2. §3.2 / Appendix B: virglrenderer is **1.2.0** (soname 1.10.0); Appendix B's
    QEMU properties are correct; add the **dma-buf `DRM_RDWR` shim** (or a
    libdrm_amdgpu with `DRM_RDWR` in `amdgpu_bo_export`) and the host
@@ -423,9 +524,11 @@ what is unmeasured.
 3. §10 Q4: answered by §4 — FL 12_1 not 12_2 (no mesh shaders), no EXT_dgc,
    no descriptor_buffer, no memory_budget; nothing vkd3d-proton requires is
    missing. P6's `/dev/gpu` M2 gains nothing by chasing these.
-4. §10 Q6: AVX masked → the game starts and reaches the pre-menu with no
-   `#UD`; menu/gameplay pending. AD-4 should say "performance item until
-   proven required" rather than presuming the first `vmovaps ymm` is a `#UD`.
+4. §10 Q6: with AVX/AVX2/AVX-512/FMA/F16C masked (XCR0 without YMM) the game
+   reaches and renders the main menu at the same fps (§6). AD-4 should say
+   "XSAVE/AVX is a performance/compatibility item, not a prerequisite for
+   P8's menu" rather than presuming the first `vmovaps ymm` is a `#UD`;
+   gameplay remains unproven without AVX.
 5. AD-6: measured — on this host the **scanout path** through QEMU
    egl-headless is the bottleneck for presentation (≤ ~147 fps for a trivial
    cube, FIFO at half refresh, bimodal frame times), while a guest-side CPU
@@ -439,8 +542,13 @@ what is unmeasured.
    upstream Wine's `d3d12`/`dxgi` (FL 11_1, adapter "Red Hat VirtIO GPU", a
    16 TB "dedicated" heap) — the HobbyOS launcher must set the
    vkd3d-proton/DXVK overrides itself.
-8. §3.3 item 7: the game reaches its pre-menu prompt with **no audio device**
-   in the machine.
+8. §3.3 item 7: the game reaches the main menu with **no audio device** in
+   the machine.
+9. P0 gate / §1.4: the Linux-guest-on-Venus column at 1280×720 Low is a
+   main-menu median of ~143–144 fps (p90 55–59) — Venus stays the P6 target;
+   native context is not promoted. The menu is present-path bound (median
+   identical at 720p and 1080p), so P7's zero-copy scanout is where the next
+   factor is, not the Venus command stream.
 
 ## 11. Files
 
@@ -451,5 +559,11 @@ what is unmeasured.
 `d3d12probe.cpp` (guest). `evidence/cp-p0guest/`: vulkaninfo summaries,
 extension lists and diff, D3D12 feature dumps, vkd3d-proton info lines,
 `game-steam-and-avx-log-excerpts.txt`, the raw `results/*.txt`, one vkcube
-screendump (`vkcube-kms-guest.png`) and two 640-px pre-menu screendumps
-(`cp-prompt-avx-on-640.jpg`, `cp-prompt-avx-masked-640.jpg`).
+screendump (`vkcube-kms-guest.png`), two 640-px pre-menu screendumps
+(`cp-prompt-avx-on-640.jpg`, `cp-prompt-avx-masked-640.jpg`), the agreement
+end (`cp-agreement-end-unaccepted-960.jpg`), the first-run screens
+(`firstrun-*.jpg`), the Graphics page at Low
+(`settings-graphics-low-1280x720-960.jpg`) and the 1080p menu
+(`menu-1920x1080-640.jpg`). Scripts added for row (e): `guest-cp-accept.sh`
+(run by the coordinator, not this lane), `guest-cp-walk.sh`,
+`guest-cp-ui.sh`.

@@ -78,33 +78,55 @@ cpfirst)
         sleep 3
     done ;;
 cpmenu)
-    # NEEDS the user agreement already accepted in the guest prefix (by the
-    # user). Launch with MangoHud CSV logging, press Space at each "PRESS ...
-    # TO CONTINUE" prompt, detect the main menu by OCR, then hold the menu
-    # for MENU_SECS and report frame times from the window after the menu
-    # appeared (+5 s settle). Never clicks anything else.
+    # Needs the user agreement accepted in the guest prefix (done by the
+    # coordinator with the user's go-ahead) and the Low preset chosen on the
+    # Graphics page once (it persists in UserSettings.json). Per run:
+    #   launch (MangoHud loaded, not logging) -> guest-cp-walk.sh to the main
+    #   menu (Space at prompts; account offer skipped; telemetry rejected;
+    #   stops at an agreement) -> launch-to-menu time -> 5 s settle ->
+    #   MangoHud log for MENU_SECS (Shift_L+F2 on/off) while sampling the
+    #   game's RSS and thread count -> stats -> screenshots of the VIDEO and
+    #   GRAPHICS settings pages as the record of what was measured.
     geom=${GEOM:-1280x720}
+    W=${geom%x*}; H=${geom#*x}
     kms_mode "$geom"
     python3 "$T/guest-cp-settings.py" "$geom" | sed 's/^/settings: /'
-    tag=menu-$geom-$(date +%H%M%S)
-    CP_MANGO=1 bash "$T/guest-cp.sh" launch "$tag" --launcher-skip >/dev/null
-    d=$HOME/runs/$tag; t0=$(cat "$d/t-launch.txt"); state=TIMEOUT
-    for i in $(seq 300); do
-        sleep 2
-        DISPLAY=:0 import -window root "$d/poll.png" 2>/dev/null || continue
-        txt=$(tesseract "$d/poll.png" - 2>/dev/null | tr '\n' ' ')
-        if echo "$txt" | grep -q -i 'USER AGREEMENT'; then state=AGREEMENT; break; fi
-        if echo "$txt" | grep -q -i -E 'NEW GAME|LOAD GAME|CREDITS|ADDITIONAL CONTENT'; then state=MENU; break; fi
-        if echo "$txt" | grep -q -i 'TO CONTINUE'; then DISPLAY=:0 xdotool key space; fi
-        pgrep -f Cyberpunk2077.exe >/dev/null || { state=EXITED; break; }
-    done
-    tm=$(date +%s.%N)
-    cp "$d/poll.png" "$d/menu.png" 2>/dev/null || true
-    echo "cpmenu tag=$tag geom=$geom state=$state launch_to_state_s=$(awk -v a="$t0" -v b="$tm" 'BEGIN{printf "%.1f", b-a}')"
-    if [ "$state" = MENU ]; then
-        sleep "${MENU_SECS:-60}"
+    tag=menu-$geom-$(grep -q -w avx /proc/cpuinfo && echo avx || echo noavx)-$(date +%H%M%S)
+    CP_MANGO=1 CP_MANGO_HOTKEY=1 bash "$T/guest-cp.sh" launch "$tag" --launcher-skip >/dev/null
+    d=$HOME/runs/$tag
+    bash "$T/guest-cp-walk.sh" "$tag" 400 > "$d/walk.txt"; rc=$?
+    grep -v 'walk other' "$d/walk.txt"
+    t0=$(cat "$d/t-launch.txt")
+    if [ $rc = 0 ]; then
+        tm=$(cat "$d/t-menu.txt")
+        echo "cpmenu tag=$tag geom=$geom launch_to_menu_s=$(awk -v a="$t0" -v b="$tm" 'BEGIN{printf "%.1f", b-a}') (OCR poll, ~3-4 s granularity)"
+        bash "$T/guest-cp-ui.sh" at $((W*78/100)) $((H*50/100))   # cursor off the menu items
+        sleep 5
+        mh() { xdotool keydown Shift_L keydown F2; sleep 0.3; xdotool keyup F2 keyup Shift_L; }
+        mh; ts=$(date +%s.%N); maxrss=0; maxthr=0
+        for i in $(seq $(( ${MENU_SECS:-60} / 5 ))); do
+            sleep 5
+            # (comm is truncated to "Cyberpunk2077.e", so find the pid by its command line)
+            gp=$(pgrep -f '^\./Cyberpunk2077\.exe' | head -1)
+            read -r rss thr < <(ps -o rss=,nlwp= -p "${gp:-1}" 2>/dev/null || echo "0 0")
+            [ "${rss:-0}" -gt "$maxrss" ] && maxrss=$rss
+            [ "${thr:-0}" -gt "$maxthr" ] && maxthr=$thr
+        done
+        mh; te=$(date +%s.%N); sleep 3
+        echo "cpmenu hold_s=$(awk -v a="$ts" -v b="$te" 'BEGIN{printf "%.1f", b-a}') peak_rss_mib=$((maxrss/1024)) peak_threads=$maxthr (5 s samples of Cyberpunk2077.exe)"
         csv=$(ls -t "$d"/*.csv 2>/dev/null | grep -v summary | head -1)
-        python3 "$T/mango-stats.py" "$csv" "$(awk -v a="$t0" -v b="$tm" 'BEGIN{printf "%.3f", b-a+5}')"
+        if [ -n "$csv" ]; then python3 "$T/mango-stats.py" "$csv" 0; else echo "cpmenu no MangoHud CSV"; fi
+        free -m | sed -n 2p | awk '{print "guest_mem_used_mib=" $3}'
+        # record of the settings in effect
+        U="bash $T/guest-cp-ui.sh"
+        $U click $((W*158/1280)) $((H*364/720)); sleep 4
+        $U click $((W*564/1280)) $((H*32/720)); sleep 3; $U at $((W*95/100)) $((H*95/100)); sleep 1; $U shot "$d/settings-video.png"
+        $U click $((W*497/1280)) $((H*32/720)); sleep 3; $U at $((W*95/100)) $((H*95/100)); sleep 1; $U shot "$d/settings-graphics.png"
+        echo "settings-video OCR: $(tesseract "$d/settings-video.png" - 2>/dev/null | grep -i -E 'VSync|Maximum|Windowed|Resolution' | tr '\n' '|')"
+        echo "settings-graphics OCR: $(tesseract "$d/settings-graphics.png" - 2>/dev/null | grep -i -E 'Quick Preset|Scaling|Texture|Ray Tracing|Path Tracing' | tr '\n' '|')"
+        $U key Escape; sleep 2
+    else
+        echo "cpmenu tag=$tag geom=$geom walk rc=$rc (no menu) after $(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}') s"
     fi
     bash "$T/guest-cp.sh" kill >/dev/null ;;
 *) sed -n '2,8p' "$0"; exit 2 ;;
