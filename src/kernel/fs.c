@@ -2023,6 +2023,14 @@ static unsigned long nfs_synth_ino(const struct nfs_fh *fh) {
 #define K_DEV_SOCK 0x00000404u
 #define K_DEV_PROCFS 0x00000505u
 #define K_DEV_DEVFS 0x00000606u
+/* cp/wine2: Linux's device numbers (major << 8 | minor) for the char nodes.
+   All of them used to report st_rdev 0, so a console fd and /dev/null were
+   the same device: Wine's debug init (dlls/ntdll/unix/debug.c init_options)
+   compares fstat(2) with stat("/dev/null") and, on equal st_rdev, turns
+   every debug channel off for the process. */
+#define K_RDEV_NULL 0x0103u    /* 1:3 */
+#define K_RDEV_URANDOM 0x0109u /* 1:9 */
+#define K_RDEV_CONSOLE 0x0501u /* 5:1 */
 
 static void k_stat_fill(struct k_stat *st, unsigned long dev,
                         unsigned long ino, unsigned long mode, long size) {
@@ -2095,12 +2103,15 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
        file object (ArgumentException "handle"/"Invalid"); a char device is
        exactly what Linux reports for a redirected-console fd. */
     k_stat_fill(st, K_DEV_DEVFS, 1, K_S_IFCHR | 0644, 0);
+    st->st_rdev = K_RDEV_CONSOLE;
     return 0;
   case FILE_TYPE_DEVNULL:
     k_stat_fill(st, K_DEV_DEVFS, 2, K_S_IFCHR | 0666, 0);
+    st->st_rdev = K_RDEV_NULL;
     return 0;
   case FILE_TYPE_DEVURANDO:
     k_stat_fill(st, K_DEV_DEVFS, 3, K_S_IFCHR | 0666, 0);
+    st->st_rdev = K_RDEV_URANDOM;
     return 0;
   case FILE_TYPE_DEVFB:
     k_stat_fill(st, K_DEV_DEVFS, 4, K_S_IFCHR | 0644, 0);
@@ -2519,6 +2530,7 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
   if (fs_streq(path, "/dev/console") || fs_streq(path, "/dev/null")) {
     k_stat_fill(st, K_DEV_DEVFS, fs_streq(path, "/dev/null") ? 2 : 1,
                 K_S_IFCHR | 0644, 0);
+    st->st_rdev = fs_streq(path, "/dev/null") ? K_RDEV_NULL : K_RDEV_CONSOLE;
     return 0;
   }
   /* AD-9 (M6): Unity resolves its executable with

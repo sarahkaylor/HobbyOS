@@ -153,7 +153,10 @@ void trap_exit_frame_check(uint64_t *frame) {
     if (rip >= 0x1000u)
       return;
   } else {
-    implausible = (rip < 0x1000u) || (rip >= 0x70000000u && rip < USER_VA_BASE);
+    /* cp/wine2: the compat layout (F1) maps user code anywhere from 0x10000
+       up except the kernel-image hole -- Wine's PE images sit at 0x140000000,
+       below USER_VA_BASE -- so only the hole is implausible for a user RIP. */
+    implausible = (rip < 0x1000u) || (rip >= KIMG_BASE && rip < CP_KHOLE_HI);
     if (!implausible)
       return;
   }
@@ -323,7 +326,15 @@ static void compat_open(struct trap_frame *tf) {
      row does (l_fd_openat).  Without this a Linux program that opens through
      open(2) kept its close-on-exec fds open across execve (the CLOEXEC probe
      row).  Strip the flag (it is not an open mode) and set the bit after. */
-  int fd = file_open(caller, staged ? staged : kpath, flags & ~02000000 /* O_CLOEXEC */);
+  /* cp/wine2: the real path first; the SONAME translation only when it does
+     not open.  Wine's static preloader open(2)s "/lib64/ld-linux-x86-64.so.2"
+     by its full path, and translating that to a cwd-relative "LD64.SO" made
+     it ENOENT although the file is staged at exactly that path. */
+  int fd = file_open(caller, kpath, flags & ~02000000 /* O_CLOEXEC */);
+  if (fd < 0 && staged)
+    fd = file_open(caller, staged, flags & ~02000000);
+  else
+    staged = 0; /* no row: the real path did the work */
   if (fd >= 0 && (flags & 02000000))
     (void)file_fcntl(caller, fd, K_F_SETFD, K_FD_CLOEXEC);
   if (staged) {
@@ -2166,9 +2177,13 @@ static void compat_newfstatat(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
     return;
   }
+  uint64_t s5 = tf->regs[5], s4 = tf->regs[4];
   tf->regs[5] = (uint64_t)(uintptr_t)path;
   tf->regs[4] = (uint64_t)(uintptr_t)out;
   compat_stat_path(tf);
+  /* cp/wine2: put the caller's rdi/rsi back -- Linux preserves them */
+  tf->regs[5] = s5;
+  tf->regs[4] = s4;
 }
 
 /* GB-165: openat(dirfd, path, flags, mode).  The clang/musl-target build of
@@ -2184,9 +2199,13 @@ static void compat_openat(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
     return;
   }
+  uint64_t s5 = tf->regs[5], s4 = tf->regs[4];
   tf->regs[5] = (uint64_t)(uintptr_t)path;
   tf->regs[4] = (uint64_t)(uintptr_t)(int64_t)flags;
   compat_open(tf);
+  /* cp/wine2: put the caller's rdi/rsi back -- Linux preserves them */
+  tf->regs[5] = s5;
+  tf->regs[4] = s4;
 }
 
 static void sys_chdir(struct trap_frame *tf) {
@@ -6358,8 +6377,23 @@ __asm__(
 "       frame, run the check, then advance past the frame. */\n"
 "    push rax\n"
 "    push rcx\n"
-"    lea rdi, [rsp + 296]\n"
+"    /* cp/wine2: and every other caller-saved register the C check may\n"\
+"       clobber -- the user's rsi/rdx/r8-r11 are already live here (a [BADIRET]\n"\
+"       row handed the user rsi = &\"\\n\" from the kernel's rodata) */\n"\
+"    push rsi\n"
+"    push rdx\n"
+"    push r8\n"
+"    push r9\n"
+"    push r10\n"
+"    push r11\n"
+"    lea rdi, [rsp + 344]\n"
 "    call trap_exit_frame_check\n"
+"    pop r11\n"
+"    pop r10\n"
+"    pop r9\n"
+"    pop r8\n"
+"    pop rdx\n"
+"    pop rsi\n"
 "    pop rcx\n"
 "    pop rax\n"
 "    add rsp, 264\n"
@@ -6571,8 +6605,23 @@ __asm__(
 "       frame, never into it; advance past the frame only afterwards. */\n"
 "    push rax\n"
 "    push rcx\n"
-"    lea rdi, [rsp + 296]\n"
+"    /* cp/wine2: and every other caller-saved register the C check may\n"\
+"       clobber -- the user's rsi/rdx/r8-r11 are already live here (a [BADIRET]\n"\
+"       row handed the user rsi = &\"\\n\" from the kernel's rodata) */\n"\
+"    push rsi\n"
+"    push rdx\n"
+"    push r8\n"
+"    push r9\n"
+"    push r10\n"
+"    push r11\n"
+"    lea rdi, [rsp + 344]\n"
 "    call trap_exit_frame_check\n"
+"    pop r11\n"
+"    pop r10\n"
+"    pop r9\n"
+"    pop r8\n"
+"    pop rdx\n"
+"    pop rsi\n"
 "    pop rcx\n"
 "    pop rax\n"
 "    add rsp, 264\n"

@@ -101,6 +101,29 @@ static int step(const char *tag, const char *path, char *const argv[], int secs)
   return status;
 }
 
+/* Wait until every process the before-census did not have is gone (the
+   wineserver lingers ~3 s after its last client).  Between steps only:
+   HobbyOS reuses a pid at once (pid == process slot), and a wineserver that
+   is still reaping a dead client polls kill(old_pid, 0) and finally SIGKILLs
+   it (server/process.c process_sigkill) -- which lands on the NEXT step's
+   wine if it was handed the same pid (measured: "wine exited (signal 9)"). */
+static void quiesce(const char *tag, int secs) {
+  int extra = 0;
+  for (int t = 0; t < secs * 4; t++) {
+    struct sys_procinfo tmp[192];
+    int m = sysinfo(3, tmp, (int)sizeof tmp);
+    extra = 0;
+    for (int i = 0; i < m; i++) {
+      int seen = 0;
+      for (int j = 0; j < nbefore; j++) if (before[j].pid == tmp[i].pid) seen = 1;
+      if (!seen && tmp[i].pid != getpid()) extra++;
+    }
+    if (extra == 0) break;
+    usleep(250000);
+  }
+  pc("[P2] quiesce after "); pc(tag); pc(": extra="); pd(extra); pc("\n");
+}
+
 int main(void) {
   pc("[P2] winep2 launcher (C2-wine2)\n");
   nbefore = snap(before, "before");
@@ -121,9 +144,11 @@ int main(void) {
      run the wine binary with argv[0] = "wineboot". */
   char *a_boot[] = { (char *)"wineboot", (char *)"-i", 0 };
   step("wineboot", "/CP/WINE/bin/wine", a_boot, 900);
+  quiesce("wineboot", 30);
 
   char *a_echo[] = { (char *)"wine", (char *)"cmd", (char *)"/c", (char *)"echo", (char *)"hello", 0 };
   step("echo", "/CP/WINE/bin/wine", a_echo, 300);
+  quiesce("echo", 30);
 
   char *a_wp[] = { (char *)"wine", (char *)"Z:\\CP\\WPROBE\\winprobe.exe", 0 };
   step("winprobe", "/CP/WINE/bin/wine", a_wp, 300);
