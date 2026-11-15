@@ -195,3 +195,17 @@ nothing, both writers proceed and the corruption is silent and late.
 
 Order of work from here: #3 (durability), then verify #2 once fork lands, then
 `MAP_SHARED`-on-`O_RDONLY` and the empty-file case.
+
+Two more things this cost, worth reading before diagnosing a "hang":
+
+* **`[ALIVE-SET]` on its own means nothing.** Healthy shutdowns print it too
+  (`verify-blockb2.log`, `verify-blockb3.log`: 18/18 and a clean halt, with
+  `[ALIVE-SET] slot=36 ... GC Thread#7` above the summary). The wedge is
+  `[ALIVE-SET] no READY work` **plus** the boot hitting its timeout
+  (`boot: rc=3`, killed by signal 15) -- a guest that faults to a panic ends the
+  boot instead.
+* **Suite flake rate on this host: 1 wedge in 7 runs** (4 before Block B, 3
+  after: `verify-lo2`, `verify-noshare2`, `verify-mk2`, `verify-final2`,
+  `verify-blockb` WEDGE, `verify-blockb2`, `verify-blockb3`). One green run is
+  not evidence; two is the minimum, and a wedge should be re-run before it is
+  blamed on whatever was last committed.
