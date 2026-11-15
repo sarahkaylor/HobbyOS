@@ -40,6 +40,7 @@
 #include "errno.h"
 #include "futex_trace.h"
 #include "kline.h"
+#include "linux_sigframe.h"
 #include "linux_syscall.h"
 #include "lock.h"
 #include "process.h"
@@ -2543,6 +2544,16 @@ static int l_thr_getcpu(struct process *p, struct trap_frame *tf) {
  *   frame+568  fpstate      512-byte FXSAVE image (576 when base ≡ 0 mod 16)
  *   frame+1080 end
  *
+ * cp P1 / F2 (src/include/linux_sigframe.h, golden-locked): the fpstate now
+ * starts at the first 64-BYTE boundary at or above frame+568 (offset 568..631;
+ * XSAVE needs 64, and Linux 64-aligns the fpstate in every mode), and with
+ * XSAVE on it is the full Linux extended image -- 832-byte XSAVE area with
+ * FP_XSTATE_MAGIC1 + sw bytes at fpstate+464, the XSAVE header at +512, the
+ * AVX upper halves at +576, FP_XSTATE_MAGIC2 at +xstate_size -- and uc_flags
+ * carries UC_FP_XSTATE.  The frame reservation is lsf_frame_bytes(image):
+ * 1472 bytes with XSAVE, 1152 without.  AT_MINSIGSTKSZ (program_loader.c)
+ * and the altstack-fits test below both use lsf_min_sigstksz().
+ *
  * %rdi = signo, %rsi = &siginfo, %rdx = &uc at entry.  The handler returns
  * to pretcode, which does `mov $15,%rax; syscall`; that reaches
  * rt_sigreturn, which parses this frame back (rsp has popped the pretcode by
@@ -2551,21 +2562,17 @@ static int l_thr_getcpu(struct process *p, struct trap_frame *tf) {
 #define L_SF_PRETCODE 0
 #define L_SF_UC 8
 #define L_SF_INFO 432
-#define L_SF_FP 568      /* Linux's offset; legal for a frame base ≡ 8 mod 16 */
-#define L_SF_FP_MAX 576  /* base ≡ 0 mod 16 rounds up to here                  */
-#define L_SF_SIZE 1088
-
-/* The fpstate offset for THIS frame: Linux's layout fixed at 568 for the
-   8-mod-16 base this kernel plants, rounded up so that base+off is always
-   16-byte aligned.  Written as arithmetic (not a second constant) because
-   FXSAVE's alignment rule is about the ADDRESS, not the offset. */
-static uint32_t l_sf_fp_off(uint64_t base) {
-  uint64_t fp = (base + (uint64_t)L_SF_FP + 15u) & ~(uint64_t)15u;
-  return (uint32_t)(fp - base);
+/* The fpstate offset for THIS frame: the first 64-byte-aligned ADDRESS at or
+   above base+568 (src/include/linux_sigframe.h).  Written as arithmetic (not
+   a constant) because the alignment rule is about the ADDRESS, not the
+   offset. */
+static uint32_t l_sf_fp_off(uint64_t base) { return lsf_fp_off(base); }
+/* The whole frame for the machine's FP image (XSAVE extended or FXSAVE). */
+static uint32_t l_sf_size(void) {
+  return lsf_frame_bytes(arch_fpu_sig_image_bytes());
 }
-/* Layout lock: the aligned fpstate plus its image must still fit the frame. */
-typedef char l_sf_fp_fits_assert[(L_SF_FP_MAX + FPU_SIG_IMAGE_BYTES <=
-                                  L_SF_SIZE) ? 1 : -1];
+/* Layout lock: siginfo ends inside the header the fpstate is placed above. */
+typedef char l_sf_hdr_assert[(L_SF_INFO + 128 <= LSF_HDR_BYTES) ? 1 : -1];
 
 #define L_UC_FLAGS 0
 #define L_UC_LINK 8
@@ -3022,6 +3029,8 @@ static int l_sf_plant(struct process *p, struct process *cur,
   uint64_t ipc = tf->elr;    /* interrupted PC, before the handler entry state */
   int flags = linux_compat_sigflags_get(p, sig);
   int on_altstack = 0;
+  const uint32_t fpimg = arch_fpu_sig_image_bytes();
+  const uint32_t sfsz = lsf_frame_bytes(fpimg);
 
   if (restorer == 0 || !l_user_ok(p, restorer, 4, 0)) {
     l_sf_fail(p, sig, tf, "restorer", restorer);
@@ -3032,7 +3041,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
     uint64_t asp = 0, asize = 0;
     int astate = 0;
     if (linux_compat_altstack_get(p, &asp, &asize, &astate) == 0 &&
-        astate == 0 && asp && asize > L_SF_SIZE + 64) {
+        astate == 0 && asp && asize >= lsf_min_sigstksz(fpimg)) {
       sp = asp + asize;
       on_altstack = 1;
     }
@@ -3040,7 +3049,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
   /* Linux skips the interrupted function's 128-byte RED ZONE when the frame
      goes on the normal stack (arch/x86/kernel/signal.c: `sp -= 128` for
      x86-64 unless SA_ONSTACK).  The x86-64 psABI lets a leaf function keep
-     live data at [rsp-128, rsp); a frame planted at rsp-L_SF_SIZE overwrote
+     live data at [rsp-128, rsp); a frame planted at rsp-sfsz overwrote
      the top 112 bytes of it, so every signal delivery silently corrupted the
      interrupted function's locals.  Measured (M6/L31): a local read at
      -0x50(%rsp) came back as 0x2FFFF1A4E and the next `movdqu
@@ -3053,20 +3062,20 @@ static int l_sf_plant(struct process *p, struct process *cur,
     }
     sp -= 128;
   }
-  if (sp < (uint64_t)L_SF_SIZE + 64) {
+  if (sp < (uint64_t)sfsz + 64) {
     l_sf_fail(p, sig, tf, "sp-tight", sp);
     return 0;
   }
   /* Linux enters a signal handler with rsp ≡ 8 (mod 16); see the layout
      note above for why the frame must start 8 bytes below the boundary. */
-  uint64_t base = ((sp - (uint64_t)L_SF_SIZE) & ~(uint64_t)15) - 8;
-  if (vm_touch(p, base, L_SF_SIZE, 1) != 0) {
+  uint64_t base = lsf_frame_base(sp, fpimg);
+  if (vm_touch(p, base, sfsz, 1) != 0) {
     l_sf_fail(p, sig, tf, "touch", base);
     return 0;
   }
   /* M6/L37: an ASSERTION row per delivery, not an observation.  Linux's rule
      is exact: the frame must lie entirely outside the interrupted function's
-     red zone, i.e. `base + L_SF_SIZE <= rsp0 - 128` (SA_ONSTACK: no red
+     red zone, i.e. `base + sfsz <= rsp0 - 128` (SA_ONSTACK: no red
      zone, so the frame only has to fit the altstack).  `rz=1` is the pass.
      This row is printed for EVERY delivery (the [SIGP] row below is capped at
      32), so a lane can count plants and violations independently. */
@@ -3076,7 +3085,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
     if (on_altstack)
       rz = 2; /* not applicable: an altstack has no red zone */
     else
-      rz = (base + (uint64_t)L_SF_SIZE <= tf->lr - 128) ? 1 : 0;
+      rz = (base + (uint64_t)sfsz <= tf->lr - 128) ? 1 : 0;
     if (rz == 0)
       rz_bad++;
     rz_rows++;
@@ -3092,7 +3101,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
       kl_s(&kl, " base=");
       kl_hex(&kl, (unsigned long)base);
       kl_s(&kl, " top=");
-      kl_hex(&kl, (unsigned long)(base + L_SF_SIZE));
+      kl_hex(&kl, (unsigned long)(base + sfsz));
       kl_s(&kl, " rz=");
       kl_i(&kl, rz);
       kl_s(&kl, " bad_total=");
@@ -3109,7 +3118,9 @@ static int l_sf_plant(struct process *p, struct process *cur,
   volatile uint8_t *uc = (volatile uint8_t *)l_sf_addr(base, L_SF_UC);
   for (int i = 0; i < L_UC_SIZE; i++)
     uc[i] = 0;
-  *(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_FLAGS) = 0;
+  /* cp P1 / F2: UC_FP_XSTATE when the fpstate carries the XSAVE extension. */
+  *(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_FLAGS) =
+      arch_fpu_xsave_enabled() ? (uint64_t)LSF_UC_FP_XSTATE : 0;
   *(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_LINK) = 0;
   /* uc_stack: the altstack that is in use, or SS_DISABLE */
   {
@@ -3136,7 +3147,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
     int frc;
     *(volatile uint64_t *)
         l_sf_addr(base, L_SF_UC + L_UC_MCONTEXT + L_MC_FPREG) = fpva;
-    frc = arch_fpu_save_user(p, (void *)fpva);
+    frc = arch_fpu_save_user_sig(p, fpva); /* cp P1: XSAVE image + magic */
     /* Evidence row: base, base%16, the derived offset and the resulting
        address alignment for EVERY plant (bounded rows, unbounded counters), so
        the arithmetic is measured on the machine that runs it. */
@@ -3205,11 +3216,11 @@ static int l_sf_plant(struct process *p, struct process *cur,
   arch_set_user_sp(base);
   /* The resume copy writes [target_sp-320, target_sp) around the handler's
      entry SP; materialize that window too (the sigframe itself is [base,
-     base+L_SF_SIZE)). */
-  (void)vm_touch(p, base - 320, L_SF_SIZE + 320, 1);
+     base+sfsz)). */
+  (void)vm_touch(p, base - 320, sfsz + 320, 1);
   tf->spsr &= ~(uint64_t)0x400;                   /* clear DF */
   /* M6/L32: the exact frame extents.  At a crash the faulting rsp is known,
-     so `[base, base+L_SF_SIZE)` vs `[sp-128, sp)` settles in one row whether
+     so `[base, base+sfsz)` vs `[sp-128, sp)` settles in one row whether
      OUR frame is the writer of a clobbered red-zone local. */
   {
     static int sp_rows;
@@ -3226,7 +3237,7 @@ static int l_sf_plant(struct process *p, struct process *cur,
       kl_s(&kl, " base=");
       kl_hex(&kl, (unsigned long)base);
       kl_s(&kl, " top=");
-      kl_hex(&kl, (unsigned long)(base + L_SF_SIZE));
+      kl_hex(&kl, (unsigned long)(base + sfsz));
       kl_s(&kl, " alt=");
       kl_i(&kl, on_altstack);
       kl_c(&kl, '\n');
@@ -3498,7 +3509,7 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
     return 1;
   }
   uint64_t base = sp - 8; /* pretcode was consumed by the handler's ret */
-  if (vm_touch(p, base, L_SF_SIZE, 0) != 0) {
+  if (vm_touch(p, base, l_sf_size(), 0) != 0) {
     static int bad_reports;
     if (bad_reports < 3) {
       bad_reports++;
@@ -3574,11 +3585,15 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
     uint64_t fp = *(volatile uint64_t *)l_sf_addr(
         base, L_SF_UC + L_UC_MCONTEXT + L_MC_FPREG);
     int frc = -EFAULT;
+    int xs = 0;
+    /* cp P1 / F2: XRSTOR of the extended image when its magic words
+       validate, else the legacy 512 bytes with AVX re-initialised (Linux's
+       fx_only rule); FXRSTOR on a machine without XSAVE. */
     if (fp && (fp & 15u) == 0)
-      frc = arch_fpu_restore_user(p, (const void *)fp);
+      frc = arch_fpu_restore_user_sig(p, fp, &xs);
     if (frc != 0)
-      frc = arch_fpu_restore_user(
-          p, (const void *)l_sf_addr(base, l_sf_fp_off(base)));
+      frc = arch_fpu_restore_user_sig(
+          p, (uint64_t)l_sf_addr(base, l_sf_fp_off(base)), &xs);
     if (frc != 0) {
       static int fx_rows;
       if (fx_rows < 8) {

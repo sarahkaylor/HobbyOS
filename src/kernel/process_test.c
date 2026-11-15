@@ -110,12 +110,15 @@ static void test_process_thread_group(void) {
 #endif
   /* Fresh FP image at create (F1.5 per-thread contract): the clean
      architectural default, never the creator's — all-zero on aarch64; the
-     x86_64 reset image (FCW=0x037F, FTW=0xFF, MXCSR=0x1F80, rest zero). */
+     x86_64 reset image (FCW=0x037F, abridged FTW=0x00 = all registers
+     empty, MXCSR=0x1F80, XSAVE header XSTATE_BV=x87|SSE, rest zero). */
 #ifdef __x86_64__
   {
     uint8_t *img = (uint8_t *)t->fpu_state;
-    EXPECT_EQ((img[0] == 0x7F && img[1] == 0x03 && img[4] == 0xFF &&
+    EXPECT_EQ((img[0] == 0x7F && img[1] == 0x03 && img[4] == 0x00 &&
                img[24] == 0x80 && img[25] == 0x1F && img[26] == 0), 1);
+    EXPECT_EQ((img[512] == 0x03 && img[513] == 0 && img[520] == 0 &&
+               img[575] == 0 && img[576] == 0 && img[1023] == 0), 1);
   }
 #else
   EXPECT_EQ((t->fpu_state[0] == 0 && t->fpu_state[65] == 0), 1);

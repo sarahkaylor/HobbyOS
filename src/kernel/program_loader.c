@@ -10,6 +10,7 @@
 #include "timer.h"
 #include "frame.h"
 #include "vm.h"
+#include "linux_sigframe.h"
 
 
 extern struct process *process_get_pcb(int pid);
@@ -795,7 +796,7 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
    * (argv and DISPLAY arrived); with argc=1 the guest read argv[0] == NULL and
    * an empty environment, and Doom then asked libXau for $HOME and died.
    * Computing argv_base first makes the layout independent of the counts. */
-  uint64_t w[40];                  /* 18 pairs + AT_NULL; see below */
+  uint64_t w[44];                  /* 20 pairs + AT_NULL; see below */
   uint64_t rnd_addr = (sp - 16) & ~(uint64_t)0xF;
   uint64_t arrays = (uint64_t)(argc + 1) * 8 + (uint64_t)(envc + 1) * 8;
 
@@ -807,11 +808,21 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
    *   AT_ENTRY                   where to transfer after relocation;
    *   AT_SECURE/AT_UID..EGID     credential/secure-mode queries;
    *   AT_PLATFORM                hwcaps subdirectory name;
-   *   AT_HWCAP (0)               baseline x86_64 (SSE2) — never a guess at
-   *                              optional ISA bits the kernel has not probed;
+   *   AT_HWCAP                   CPUID.1:EDX, exactly what Linux x86_64
+   *                              reports (ELF_HWCAP); measured by the
+   *                              kernel, never a guess (glibc 2.31 overwrites
+   *                              it with HWCAP_X86_64 and reads CPUID itself);
    *   AT_CLKTCK (100)            sysconf(_SC_CLK_TCK);
    *   AT_RANDOM                  stack-guard seed (16 bytes);
-   *   AT_EXECFN                  the program path for diagnostics. */
+   *   AT_HWCAP2 (0)              no HWCAP2_FSGSBASE: CR4.FSGSBASE stays off,
+   *                              so ring 3 must use arch_prctl for FS/GS;
+   *   AT_EXECFN                  the program path for diagnostics;
+   *   AT_MINSIGSTKSZ             cp P1 / F2: the signal frame this kernel
+   *                              really plants (lsf_min_sigstksz: 1536 with
+   *                              XSAVE/AVX, 1216 without), as Linux 5.14+
+   *                              reports it -- glibc 2.34+ sysconf(
+   *                              _SC_MINSIGSTKSZ) and Wine size altstacks by
+   *                              it. */
   int k = 0;
   w[k++] = 3;  w[k++] = phdr;          /* AT_PHDR   */
   w[k++] = 4;  w[k++] = 56;            /* AT_PHENT  */
@@ -825,12 +836,20 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
   w[k++] = 13; w[k++] = 0;             /* AT_GID    */
   w[k++] = 14; w[k++] = 0;             /* AT_EGID   */
   w[k++] = 15; w[k++] = platform_addr; /* AT_PLATFORM -> "x86_64" */
+#ifdef __x86_64__
+  w[k++] = 16; w[k++] = arch_linux_hwcap(); /* AT_HWCAP: CPUID.1:EDX */
+#else
   w[k++] = 16; w[k++] = 0;             /* AT_HWCAP  */
+#endif
   w[k++] = 17; w[k++] = 100;           /* AT_CLKTCK */
   w[k++] = 23; w[k++] = 0;             /* AT_SECURE */
   w[k++] = 25; w[k++] = rnd_addr;      /* AT_RANDOM */
   w[k++] = 26; w[k++] = 0;             /* AT_HWCAP2 */
   w[k++] = 31; w[k++] = execfn_addr;   /* AT_EXECFN */
+#ifdef __x86_64__
+  w[k++] = LSF_AT_MINSIGSTKSZ;         /* AT_MINSIGSTKSZ (51) */
+  w[k++] = lsf_min_sigstksz(arch_fpu_sig_image_bytes());
+#endif
   w[k++] = 0;  w[k++] = 0;             /* AT_NULL   */
 
   /* argv[0] must sit 8 mod 16 (so %rsp = &argc is 16-aligned).  The auxv is

@@ -654,6 +654,11 @@ static int l_proc_sigaltstack(struct process *p, struct trap_frame *tf) {
     if ((uint32_t)st.ss_flags & ~(uint32_t)(1 | 2 | 0x80000000u))
       return l_ret(tf, -EINVAL);
     if (st.ss_flags & 1) return l_ret(tf, -EINVAL); /* SS_ONSTACK on input */
+    /* cp P1 / F2: Linux refuses an enabled altstack below MINSIGSTKSZ (2048,
+       the UAPI constant) with ENOMEM.  The real frame (AT_MINSIGSTKSZ,
+       lsf_min_sigstksz: 1536 with XSAVE/AVX, 1216 without) is smaller, so
+       every stack Linux accepts can carry this kernel's frame. */
+    if (!(st.ss_flags & 2) && st.ss_size < 2048) return l_ret(tf, -ENOMEM);
     l_altstack[slot].ss_flags = (st.ss_flags & 2) ? 2 : 0;
     if (l_altstack[slot].ss_flags == 2) {
       l_altstack[slot].ss_sp = 0;

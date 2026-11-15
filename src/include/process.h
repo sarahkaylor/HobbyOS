@@ -423,11 +423,21 @@ struct process {
    * A zeroed entry (fresh process) restores as all-zero registers plus
    * default control/status words.
    *
-   * x86_64 (src/kernel/arch/x64/fpu.c): the first 512 bytes hold the
-   * FXSAVE64 image; arch_fpu_reset() fills the architectural defaults
-   * (FCW/FTW/MXCSR) for fresh processes; offsets 512+ are unused there.
+   * x86_64 (src/kernel/arch/x64/fpu.c): an XSAVE standard-format image
+   * (cp P1 / AD-4) when the CPU has XSAVE -- [0,512) legacy FXSAVE region,
+   * [512,576) XSAVE header, [576,832) the AVX upper halves for XCR0 =
+   * x87|SSE|AVX -- or, without XSAVE, a plain FXSAVE64 image in the first
+   * 512 bytes.  1024 bytes, 64-byte aligned: XSAVE/XRSTOR #GP on a memory
+   * operand that is not 64-byte aligned (FXSAVE needs only 16).
+   * arch_fpu_reset() writes one image that is valid for BOTH instructions.
+   * FPU_PCB_IMAGE_BYTES is the capacity; the XSAVE area actually used is
+   * arch_fpu_xsave_size(), checked against it at boot.
    */
+#ifdef __x86_64__
+  uint64_t fpu_state[128] __attribute__((aligned(64)));
+#else
   uint64_t fpu_state[66] __attribute__((aligned(16)));
+#endif
 
   /* --- P1 (p1-threads-design.md section 1): thread / group / futex ------
    * Appended at the END of the struct so parallel lanes merge additively.
@@ -922,6 +932,49 @@ void arch_fpu_restore_from(const void *src);
 #define FPU_SIG_IMAGE_BYTES 512
 #else
 #define FPU_SIG_IMAGE_BYTES 528
+#endif
+
+#ifdef __x86_64__
+/* cp P1 (AD-4): XSAVE support, src/kernel/arch/x64/fpu.c.
+ *
+ * FPU_PCB_IMAGE_BYTES is the capacity of struct process.fpu_state; XSAVE is
+ * only switched on when CPUID.(EAX=0xD,ECX=0).EBX (the standard-format size
+ * for the XCR0 this kernel programs) fits it.  XCR0 is x87|SSE|AVX at most,
+ * whatever else the CPU offers (no AVX-512/AMX/PKRU state is ever enabled),
+ * so the real size is 832 and the capacity is never the limit in practice. */
+#define FPU_PCB_IMAGE_BYTES 1024
+
+int arch_fpu_xsave_enabled(void);   /* 1 = CR4.OSXSAVE set, XSAVE in use  */
+uint64_t arch_fpu_xcr0(void);        /* the XCR0 programmed (0 when off)   */
+uint32_t arch_fpu_xsave_size(void);  /* XSAVE area bytes (512 when off)    */
+uint32_t arch_fpu_mxcsr_mask(void);  /* FXSAVE MXCSR_MASK (0xFFBF default) */
+/* XSAVE/XRSTOR (RFBM = XCR0) against a 64-byte-aligned KERNEL buffer of at
+ * least arch_fpu_xsave_size() bytes.  Only valid when XSAVE is enabled. */
+void arch_fpu_xsave_to(void *dst64);
+void arch_fpu_xrstor_from(const void *src64);
+/* CPUID.1:EDX, what Linux reports as AT_HWCAP on x86_64. */
+uint64_t arch_linux_hwcap(void);
+
+/* cp P1 / F2: the Linux-shaped signal-frame FP image for a COMPAT thread.
+ * With XSAVE: an XSAVE standard-format image whose _fpstate sw_reserved bytes
+ * carry FP_XSTATE_MAGIC1/extended_size/xfeatures/xstate_size and with
+ * FP_XSTATE_MAGIC2 at +xstate_size (docs: src/include/linux_sigframe.h).
+ * Without: the 512-byte FXSAVE image, no magic.  arch_fpu_sig_image_bytes()
+ * is the number of bytes the image occupies at the fpstate pointer.  Both
+ * calls stage through a kernel buffer (never XSAVE/XRSTOR a user VA, M6/L63)
+ * and return 0 or -EFAULT.  The restore validates the magic words exactly as
+ * Linux's check_xstate_in_sigframe does and falls back to the legacy 512-byte
+ * image (AVX state re-initialised) when they do not validate.
+ * *xstate_used (optional) reports 1 when the restore took the XSAVE path. */
+uint32_t arch_fpu_sig_image_bytes(void);
+int arch_fpu_save_user_sig(struct process *p, uint64_t user_dst);
+int arch_fpu_restore_user_sig(struct process *p, uint64_t user_src,
+                              int *xstate_used);
+
+/* cp P1: user GS base (arch_prctl ARCH_SET_GS / ARCH_GET_GS).  set validates
+ * (canonical user half, never the kernel's per-CPU block) and updates both
+ * the PCB and the live IA32_KERNEL_GS_BASE; returns 0 or -EPERM. */
+int process_set_user_gs(struct process *caller, uint64_t base);
 #endif
 
 /* M6/L63: save/restore a signal frame's FP image WITHOUT ever executing an
