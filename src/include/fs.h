@@ -209,6 +209,8 @@ struct vm_object *file_memfd_obj(struct process *p, int fd);
 int file_memfd_seals(struct process *p, int fd, int cmd, int arg);
 int file_connect(struct process *p, uint32_t ip, uint16_t port, int protocol);
 int file_mkdir(struct process *p, const char *path);
+/* mkdir with POSIX errnos (0 / -EEXIST / -ENOENT); see file_mkdir_errno. */
+int file_mkdir_errno(struct process *p, const char *path);
 
 // Helpers for process management
 /**

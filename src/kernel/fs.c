@@ -3836,6 +3836,29 @@ int file_mkdir(struct process *cur, const char *path) {
   return vfs_mkdir(path);
 }
 
+/* mkdir with POSIX errnos.  vfs_mkdir()/fat16_mkdir() answer -1 for every
+ * failure -- "already exists", "no parent", "disk full" -- and the native
+ * SYS_MKDIR callers only ever ask "did it work".  The Linux ABI cannot: Java's
+ * Files.createDirectories("/JDKTMP") on an EXISTING directory must see EEXIST
+ * (it catches FileAlreadyExistsException and then checks it is a directory),
+ * and -1 turns into EPERM, which is what made a passing check fail the moment
+ * mkdir existed at all:
+ *   java.nio.file.FileSystemException: /JDKTMP: Operation not permitted */
+int file_mkdir_errno(struct process *p, const char *path) {
+  if (!path) return -EINVAL;
+  if (vfs_mkdir(path) == 0) return 0;
+  char nm[16];
+  uint8_t attr = 0;
+  uint32_t size = 0;
+  if (vfs_read_dir(path, 0, nm, (int)sizeof nm, &attr, &size) >= 0)
+    return -EEXIST;          /* the path exists and is a directory */
+  struct k_stat st;
+  int err = 0;
+  if (file_stat_path(p, path, &st, &err) == 0)
+    return -EEXIST;          /* it exists, just not as a directory */
+  return -ENOENT;            /* nothing there: the create itself failed */
+}
+
 /* --- P4 (docs/browser/p4-ipc-design.md §3-§4): AF_UNIX + SCM_RIGHTS ------ */
 
 /* Byte-wise copies over a single user range: the range has already been

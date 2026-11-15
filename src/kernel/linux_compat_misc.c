@@ -189,7 +189,7 @@ static int l_misc_mkdir(struct process *p, struct trap_frame *tf) {
   char path[256];
   int r = l_misc_path(p, l_arg(tf, 0), path, sizeof path);
   if (r != 0) return l_misc_ret(tf, r);
-  return l_misc_ret(tf, vfs_mkdir(path));
+  return l_misc_ret(tf, file_mkdir_errno(p, path));
 }
 
 static int l_misc_mkdirat(struct process *p, struct trap_frame *tf) {
@@ -202,7 +202,7 @@ static int l_misc_mkdirat(struct process *p, struct trap_frame *tf) {
    * is relative to some other directory fd is refused rather than silently
    * created in the wrong place. */
   if (path[0] != '/' && dirfd != -100 /* AT_FDCWD */) return l_misc_ret(tf, -EINVAL);
-  return l_misc_ret(tf, vfs_mkdir(path));
+  return l_misc_ret(tf, file_mkdir_errno(p, path));
 }
 
 static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
