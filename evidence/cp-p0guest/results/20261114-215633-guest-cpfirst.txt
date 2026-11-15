@@ -1,0 +1,2 @@
+# guest cpfirst 2026-11-14T21:56:33-06:00 host=sarahpc cpu=avx-on cpu=host shim=1 vkfilter=order
+# waiting for ~/cp/measure.lock

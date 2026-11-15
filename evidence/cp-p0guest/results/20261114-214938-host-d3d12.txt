@@ -1,0 +1,28 @@
+# host d3d12 2026-11-14T21:49:38-06:00 host=sarahpc cpu=avx-on cpu=host shim=1 vkfilter=order
+# waiting for ~/cp/measure.lock
+# lock acquired 2026-11-14T21:51:52-06:00
+### host-radv offscreen 1280 720 10 16 1 d3d12probe
+ADAPTER=AMD Radeon RX 9070 XT (RADV GFX1201)
+START mode=offscreen W=1280 H=720 iters=16 draws=1 tearing=0
+RESULT mode=offscreen frames=318065 secs=10.00 avg_fps=32318.0 median_ms=0.031 p90_ms=0.031 p99_ms=0.033 fps_from_median=32467.5
+### host-radv offscreen 1280 720 10 2048 1 d3d12probe
+ADAPTER=AMD Radeon RX 9070 XT (RADV GFX1201)
+START mode=offscreen W=1280 H=720 iters=2048 draws=1 tearing=0
+RESULT mode=offscreen frames=6274 secs=10.01 avg_fps=632.9 median_ms=1.597 p90_ms=1.616 p99_ms=1.630 fps_from_median=626.0
+### host-radv offscreen 1280 720 10 16 2000 d3d12probe
+ADAPTER=AMD Radeon RX 9070 XT (RADV GFX1201)
+START mode=offscreen W=1280 H=720 iters=16 draws=2000 tearing=0
+RESULT mode=offscreen frames=32023 secs=10.00 avg_fps=3217.3 median_ms=0.311 p90_ms=0.316 p99_ms=0.330 fps_from_median=3218.5
+### host-radv offscreen 1920 1080 10 16 1 d3d12probe
+ADAPTER=AMD Radeon RX 9070 XT (RADV GFX1201)
+START mode=offscreen W=1920 H=1080 iters=16 draws=1 tearing=0
+RESULT mode=offscreen frames=217930 secs=10.00 avg_fps=21870.2 median_ms=0.046 p90_ms=0.046 p99_ms=0.048 fps_from_median=21929.8
+### host-radv offscreen 1920 1080 10 2048 1 d3d12probe
+ADAPTER=AMD Radeon RX 9070 XT (RADV GFX1201)
+START mode=offscreen W=1920 H=1080 iters=2048 draws=1 tearing=0
+RESULT mode=offscreen frames=3163 secs=10.01 avg_fps=318.2 median_ms=3.158 p90_ms=3.176 p99_ms=3.201 fps_from_median=316.6
+### host-radv offscreen 1920 1080 10 16 2000 d3d12probe
+ADAPTER=AMD Radeon RX 9070 XT (RADV GFX1201)
+START mode=offscreen W=1920 H=1080 iters=16 draws=2000 tearing=0
+RESULT mode=offscreen frames=31574 secs=10.00 avg_fps=3171.5 median_ms=0.315 p90_ms=0.322 p99_ms=0.334 fps_from_median=3172.6
+# done 2026-11-14T21:52:58-06:00
