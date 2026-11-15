@@ -9,10 +9,19 @@
 #   4. boot 2: the probe finds the phase-1 marker and re-reads everything
 #      (persistence across a reboot), then appends one record (phase 2)
 #   5. host: e2fsck -fn again; the phase-2 bytes
+#   6. cp/ext2b: build two glibc 2.31 programs (static-pie, and dynamic with
+#      PT_INTERP/RUNPATH /EXT/lpx/glibc), store them, ld.so and libc.so.6 on the
+#      image with debugfs; boot 3 runs linux_probe_ext2b (main + a "helper"
+#      wave member for the two-process lock rows) and both glibc programs
+#      FROM the ext2 volume
+#   7. host: e2fsck -fn; debugfs: the modes/owners/times the probe set, the
+#      mapped-store bytes (m.bin == m.expect), the exec markers
 #
 # Every QEMU boot runs under `flock /tmp/cp-qemu.lock` (shared CI box).
 # Env: GATE_DIR (default /tmp/cp-ext2-gate), CPDATA_SIZE (default 8G),
-#      GATE_KEEP=1 keeps the image.
+#      GATE_KEEP=1 keeps the image, GLIBC_SYSROOT (default
+#      ~/cp/wine-build/sysroot-glibc231; tools/cp/build-wine.sh makes it),
+#      GATE_ONLY_EXT2B=1 skips boots 1-2.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 D="${GATE_DIR:-/tmp/cp-ext2-gate}"
@@ -108,11 +117,91 @@ check_image() { # check_image <phase>
   say "[HOST] info sparse5g Blockcount: $blocks (512-byte units)"
 }
 
+if [ "${GATE_ONLY_EXT2B:-0}" != 1 ]; then
 boot 1
 check_image 1
 boot 2
 grep -aq '^\[LP\] phase2 complete' "$D/boot2.console.log" && good "boot 2 ran phase 2 (persistence)" || bad "boot 2 did not reach phase 2"
 check_image 2
+fi
+
+# ---- cp/ext2b (docs/cp-ext2b.md) ------------------------------------------
+SYSR="${GLIBC_SYSROOT:-$HOME/cp/wine-build/sysroot-glibc231}"
+X2="$D/ext2b"
+mkdir -p "$X2"
+src="$ROOT/tools/cp/ext2b/exec_hello.c"
+if clang --sysroot="$SYSR" -fuse-ld=lld -O1 -static-pie -fPIE -o "$X2/hs" "$src" &&
+   clang --sysroot="$SYSR" -fuse-ld=lld -O1 -fPIE -pie \
+     -Wl,--dynamic-linker=/EXT/lpx/glibc/ld-linux-x86-64.so.2 \
+     -Wl,-rpath,/EXT/lpx/glibc -o "$X2/hd" "$src"; then
+  good "built glibc 2.31 hs (static-pie) + hd (dynamic, PT_INTERP $(readelf -lW "$X2/hd" | sed -n 's/.*interpreter: \(.*\)]/\1/p'))"
+else
+  bad "glibc exec programs did not build (GLIBC_SYSROOT=$SYSR)"
+fi
+LDSO="$(readlink -f "$SYSR/lib64/ld-linux-x86-64.so.2")"
+LIBC="$(readlink -f "$SYSR/lib/x86_64-linux-gnu/libc.so.6")"
+{
+  echo "mkdir lpx"; echo "mkdir lpx/bin"; echo "mkdir lpx/glibc"; echo "mkdir lpx/out"
+  echo "write $X2/hs lpx/bin/hs"; echo "write $X2/hd lpx/bin/hd"
+  echo "write $LDSO lpx/glibc/ld-linux-x86-64.so.2"; echo "write $LIBC lpx/glibc/libc.so.6"
+  for f in lpx/bin/hs lpx/bin/hd lpx/glibc/ld-linux-x86-64.so.2 lpx/glibc/libc.so.6; do
+    echo "sif $f mode 0100755"
+  done
+} > "$X2/stage.cmds"
+debugfs -w -f "$X2/stage.cmds" "$IMG" > "$X2/stage.log" 2>&1
+e2fsck -fn "$IMG" > "$D/fsck3pre.log" 2>&1 && good "staged lpx/{bin,glibc} with debugfs; e2fsck -fn rc=0" || { bad "e2fsck after staging"; cat "$D/fsck3pre.log"; }
+for f in bin/hs bin/hd glibc/ld-linux-x86-64.so.2 glibc/libc.so.6; do
+  say "[HOST] info staged /lpx/$f $(dbg "stat /lpx/$f" | sed -n 's/.*Mode: *\([0-7]*\).*Size: *\([0-9]*\).*/mode \1/p;s/.*Size: \([0-9]*\).*/size \1/p' | tr '\n' ' ')"
+done
+
+say "=== ext2_gate: boot 3 (linux_probe_ext2b + helper + glibc hs/hd from /EXT) ==="
+CPDATA="$IMG" LP_OUT="$D/boot3.tier.log" LP_TIMEOUT="${LP_TIMEOUT:-600}" \
+  LP_WAVE_EXTRA="$(printf 'PROBE.ELF /EXT helper\n/EXT/lpx/bin/hs static\n/EXT/lpx/bin/hd dyn')" \
+  flock /tmp/cp-qemu.lock bash "$ROOT/tools/gate/t3_linux_probe.sh" ext2b \
+  > "$D/boot3.gate.log" 2>&1
+rc3=$?
+console="$(sed -n 's/^T3_LOG=//p' "$D/boot3.tier.log" | tail -1)"
+[ -n "$console" ] && cp "$console" "$D/boot3.console.log"
+grep -a -E '^\[EXT2\]|elf loader: (interpreter|PT_INTERP)|\[E2MAP\]' "$D/boot3.console.log" 2>/dev/null | head -8
+grep -a '\[LP\]' "$D/boot3.console.log" 2>/dev/null | grep -v '\[LP\] ok  \|\[LP\] helper ok  ' || true
+say "boot 3: $(grep -ac '\[LP\] ok  ' "$D/boot3.console.log" 2>/dev/null) main ok rows, $(grep -ac '\[LP\] helper ok  ' "$D/boot3.console.log" 2>/dev/null) helper ok rows; $(tail -1 "$D/boot3.gate.log")"
+[ "$rc3" = 0 ] || bad "boot 3: probe gate rc=$rc3 (see $D/boot3.gate.log)"
+
+say "--- host: e2fsck -fn $IMG (after boot 3) ---"
+e2fsck -fn "$IMG" > "$D/fsck3.log" 2>&1
+frc=$?
+cat "$D/fsck3.log"
+[ "$frc" = 0 ] && good "e2fsck -fn rc=0 (after ext2b)" || bad "e2fsck -fn rc=$frc (after ext2b)"
+field() { dbg "stat $1" | sed -n "s/.*$2 *\([0-9a-fx]*\).*/\1/p" | head -1; }
+want_f() { # path label expected value(s)
+  local got; got="$(field "$1" "$2")"
+  [ "$got" = "$3" ] && good "$1 $2 $got" || bad "$1 $2 '$got' want '$3'"
+}
+say "--- host: debugfs stat /lpx/attr.f ---"
+dbg "stat /lpx/attr.f" | sed -n '1,12p'
+want_f /lpx/attr.f "Mode:" 0751
+want_f /lpx/attr.f "User:" 1234
+want_f /lpx/attr.f "Group:" 5678
+want_f /lpx/attr.f "atime:" 0x3b9aca00
+want_f /lpx/attr.f "mtime:" 0x499602d2
+want_f /lpx/attr.l "User:" 4242
+want_f /lpx/attr.l "Group:" 4444
+want_f /lpx/attr.l "mtime:" 0x00000378
+want_f /lpx/attr.d "Mode:" 02775
+want_f /lpx/attr.d "User:" 7
+want_f /lpx/attr.d "Group:" 8
+dbg "dump /lpx/m.bin $X2/m.bin" >/dev/null; dbg "dump /lpx/m.expect $X2/m.expect" >/dev/null
+hm="$(sha256sum < "$X2/m.bin" | cut -c1-64)"; he="$(sha256sum < "$X2/m.expect" | cut -c1-64)"
+[ -s "$X2/m.bin" ] && [ "$hm" = "$he" ] && [ "$(stat -c %s "$X2/m.bin")" = 12388 ] \
+  && good "m.bin sha256 $hm == m.expect (write()s + MAP_SHARED stores, 12388 bytes)" \
+  || bad "m.bin sha256 $hm ($(stat -c %s "$X2/m.bin" 2>/dev/null) bytes) != m.expect $he"
+grep -c "MAPPED-STORE" "$X2/m.bin" >/dev/null && good "m.bin holds the mapped stores ($(grep -ao 'MAPPED-STORE-[0-9]' "$X2/m.bin" | tr '\n' ' '))" || bad "no MAPPED-STORE in m.bin"
+dbg "stat /lpx/unl.bin" 2>&1 | grep -q 'Inode:' && bad "unl.bin still linked" || good "unl.bin (unlinked while mapped) is gone; e2fsck saw no orphan"
+for t in static dyn; do
+  dbg "dump /lpx/out/$t.txt $X2/$t.txt" >/dev/null
+  l="$(head -1 "$X2/$t.txt" 2>/dev/null)"
+  case "$l" in "ok $t "*) good "/lpx/out/$t.txt: $l" ;; *) bad "/lpx/out/$t.txt: '$l'" ;; esac
+done
 
 if [ "$fails" = 0 ]; then
   say "ext2_gate: PASS"
