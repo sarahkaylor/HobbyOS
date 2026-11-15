@@ -41,6 +41,14 @@ static uint64_t ioremap_pdpt[512] __attribute__((aligned(4096)));
 #define IOREMAP_PDS 64 /* 64 GiB of ioremap VA in 2 MiB pages */
 static uint64_t ioremap_pds[IOREMAP_PDS][512] __attribute__((aligned(4096)));
 #define X64_KTAB 0x03ULL /* P|RW, supervisor: kernel-half upper levels */
+/* P1 (S5): the kernel image's 2 MiB leaves and nothing else: entries
+   [KIMG_BASE, CP_KHOLE_HI) of the 1-2 GiB identity PD.  Native v2 roots point
+   PDPT[1] here and drop PDPT[0] and [2..7], so the only identity left in a
+   process root is the image the entry paths need (LSTAR/IDT/GDT/TSS/stacks/
+   cpu_locals); compat roots copy these leaves into their per-AS PD. */
+static uint64_t kimg_pd[512] __attribute__((aligned(4096)));
+#define KIMG_PD_LO ((KIMG_BASE - 0x40000000ULL) >> 21)   /* 384 */
+#define KIMG_PD_HI ((CP_KHOLE_HI - 0x40000000ULL) >> 21) /* 448 */
 
 static spinlock_t mmu_lock;
 
@@ -161,6 +169,9 @@ void mmu_init_tables(void) {
     uint64_t addr = USER_START + (uint64_t)i * 0x200000;
     pd1_kernel[i] = addr | 0x83;
   }
+
+  for (int i = 0; i < 512; i++)
+    kimg_pd[i] = (i >= (int)KIMG_PD_LO && i < (int)KIMG_PD_HI) ? pd1_kernel[i] : 0;
 
   // P1 (S2): the direct map's 0-8 GiB reuses the identity PDs (pd1_kernel
   // for 1-2 GiB: the plain identity, never the v1 overlay).
@@ -510,6 +521,8 @@ uint64_t vm_arch_root_alloc(struct addr_space *as) {
   uint64_t *p4 = (uint64_t *)phys_to_virt(pml4);
   uint64_t *pd = (uint64_t *)phys_to_virt(pdpt);
   p4[0] = pdpt | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+#ifdef CP_MMU_KEEP_IDMAP
+  /* A/B vehicle: the pre-S5 shape (0-8 GiB identity in every v2 root). */
   pd[0] = kimg_pa(&cpu_pd0) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
   pd[1] = kimg_pa(&pd1_kernel) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
   pd[2] = kimg_pa(&cpu_pd2) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
@@ -518,6 +531,12 @@ uint64_t vm_arch_root_alloc(struct addr_space *as) {
   pd[5] = kimg_pa(&cpu_pd5) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
   pd[6] = kimg_pa(&cpu_pd6) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
   pd[7] = kimg_pa(&cpu_pd7) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+#else
+  /* P1 (S5): the identity tripwire.  Only the kernel image stays mapped
+     below 8 GiB; a leftover identity dereference made while this root is
+     loaded faults and is tagged [IDMAP-TRIP] by the kernel #PF path. */
+  pd[1] = kimg_pa(&kimg_pd) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+#endif
   /* P1 (S2): the shared kernel half (direct map + ioremap area). */
   p4[DMAP_PML4_IDX] = cpu_pml4[0][DMAP_PML4_IDX];
   p4[IOREMAP_PML4_IDX] = cpu_pml4[0][IOREMAP_PML4_IDX];
@@ -586,7 +605,7 @@ int vm_arch_leaf_writable(uint64_t leaf) { return (leaf & X64_PTE_RW) != 0; }
    array pointer, and the walk above already answered the common case. */
 int vm_arch_resume_va_ok(struct addr_space *as, uint64_t va, uint64_t cs) {
   if (!(cs & 3))
-    return va < 0x200000000ULL; /* 8 GiB: the static identity map */
+    return va >= KIMG_BASE && va < CP_KHOLE_HI; /* P1 (D6): kernel text is the image */
   uint64_t leaf = 0;
   if (as && vm_arch_walk(as, va, &leaf) == 0)
     return (leaf & X64_PTE_US) && !(leaf & X64_PTE_NX);
@@ -704,10 +723,17 @@ void vm_x64_shootdown_handler(void) {
    continuing to run on a freed root is instant corruption. */
 void vm_arch_restore_kernel(void) {
   uint32_t cpu = get_cpuid();
-  if (!v2_active_root[cpu])
+  uint64_t cr3 = kimg_pa(&cpu_pml4[cpu]);
+  /* P1 (S5): decide on the real CR3, not only the bookkeeping copy: a reload
+     path (vm_arch_reload_cr3, the 0x82 shootdown) can leave a v2 root loaded
+     with v2_active_root already 0, and a native root no longer maps the v1
+     window / identity the kernel table provides (measured in the unit tier:
+     [IDMAP-TRIP] on a v1 status store with a stale v2 CR3). */
+  uint64_t cur;
+  __asm__ volatile("mov %%cr3, %0" : "=r"(cur));
+  if (!v2_active_root[cpu] && (cur & X64_OA_MASK) == cr3)
     return;
   v2_active_root[cpu] = 0;
-  uint64_t cr3 = kimg_pa(&cpu_pml4[cpu]);
   __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
 }
 

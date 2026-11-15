@@ -278,6 +278,14 @@ struct addr_space { /* one per group (leader PCB owned) */
   uint64_t jit_free_len[VM_JIT_FREE_MAX];
 };
 
+/* P1 (docs/cp-address-space.md section 2.6): THE predicate for "is `va` a
+ * user address of this address space?" -- every functional user-range check
+ * goes through it instead of comparing against USER_VA_BASE/USER_VA_TOP. */
+static inline int vm_va_is_user(const struct addr_space *as, uint64_t va) {
+  (void)as;
+  return va >= USER_VA_BASE && va < USER_VA_TOP;
+}
+
 /* --- AS lifecycle (vm.c) --------------------------------------------- */
 
 /* Create an AS for group `tgid` (1..MAX_PROCESSES-1; the AS pool is keyed
@@ -575,7 +583,7 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
  * 0x1B user) for this AS?  Present leaves are checked for user/NX; an
  * absent user leaf is allowed only when an executable region covers it
  * (the #PF fills it from the image).  Kernel VAs are validated against the
- * static identity map.  Caller holds no lock; the region read is done under
+ * kernel image [KIMG_BASE, CP_KHOLE_HI) (P1, D6).  Caller holds no lock; the region read is done under
  * proc_lock inside the implementation. */
 int vm_arch_resume_va_ok(struct addr_space *as, uint64_t va, uint64_t cs);
 /* P5 (D5.7): the physical address encoded in a vm_arch_walk leaf (OA

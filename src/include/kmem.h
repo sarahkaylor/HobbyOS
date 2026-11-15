@@ -74,6 +74,10 @@ static inline uint64_t kimg_pa(const volatile void *sym) {
   return (uint64_t)(uintptr_t)sym;
 }
 
+/* The direct-map kernel VA of `pa` as an integer (saved stack pointers,
+ * register images): phys_to_virt without a pointer type. */
+static inline uint64_t phys_to_kva(uint64_t pa) { return DMAP_BASE + pa; }
+
 /* Is `va` a direct-map pointer? (diagnostics, tests) */
 static inline int kmem_is_dmap(const volatile void *va) {
   return (uint64_t)(uintptr_t)va - DMAP_BASE < DMAP_SIZE;
@@ -93,6 +97,7 @@ static inline uint64_t virt_to_phys(const volatile void *va) {
 static inline uint64_t kimg_pa(const volatile void *sym) {
   return (uint64_t)(uintptr_t)sym;
 }
+static inline uint64_t phys_to_kva(uint64_t pa) { return pa; }
 static inline int kmem_is_dmap(const volatile void *va) { (void)va; return 1; }
 static inline volatile void *ioremap(uint64_t pa, uint64_t len) {
   (void)len;

@@ -4292,6 +4292,10 @@ static inline uint64_t badvec_rd_dr7(void) {
    each CPU's stack bounds; every entry-stamped frame measured so far
    (0x23FFE2A0, 0x25FFB640) is aligned.  Exported for the unit proof. */
 int badvec_frame_window(uint64_t p) {
+  /* P1 (S5): kernel-task stacks are reached through the direct map now; the
+     window is the same physical range, seen through either alias. */
+  if (p - DMAP_BASE < DMAP_SIZE)
+    p -= DMAP_BASE;
   return (p & 7ULL) == 0 && p >= 0x1000ULL && p < 0x70000000ULL;
 }
 
@@ -5392,6 +5396,31 @@ static void general_interrupt_inner(struct trap_frame *tf) {
            panic_claim), write nothing, and stop this CPU rather than
            interleave fields into the one record. */
         for (;;) __asm__ volatile("hlt");
+      }
+      /* P1 (S5, docs/cp-address-space.md section 3.8): the identity tripwire.
+         Native v2 roots map nothing below 8 GiB except the kernel-image hole,
+         so a kernel-mode #PF there that is not a user VA of the current
+         address space is a leftover identity dereference (a physical address
+         used as a pointer): tag it so the gates can count it.  The dump and
+         the halt below are unchanged. */
+      if (tf->vector == 14) {
+        uint64_t tcr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(tcr2));
+        struct addr_space *tas = cur ? process_group(cur)->as : 0;
+        if (tcr2 < 0x200000000ULL && (tcr2 < KIMG_BASE || tcr2 >= CP_KHOLE_HI) &&
+            !(tas && vm_va_is_user(tas, tcr2))) {
+          uint64_t tcr3;
+          __asm__ volatile("mov %%cr3, %0" : "=r"(tcr3));
+          panic_puts("[IDMAP-TRIP] cr2=");
+          panic_print_hex(tcr2);
+          panic_puts(" rip=");
+          panic_print_hex((uint64_t)tf->elr);
+          panic_puts(" cr3=");
+          panic_print_hex(tcr3);
+          panic_puts(" pid=");
+          print_int_raw(cur ? (int)cur->pid : -1);
+          panic_puts("\n");
+        }
       }
       /* GB-247: capture the frame pointer ONCE and read every slot through
          this value only.  The GB-146-V2 record printed `fatal frame=0x1F36`

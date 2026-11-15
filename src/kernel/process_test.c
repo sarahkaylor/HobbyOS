@@ -2,6 +2,7 @@
 
 #include "unit_test.h"
 #include "kmem.h"
+#include "vm.h"
 #include "process.h"
 #include "errno.h"
 #include "fs.h"
@@ -758,6 +759,12 @@ static void test_p5_waitpid_validation(void) {
 static void test_p5_wait4_rusage(void) {
   tests_run++;
   uart_puts("  Running test_p5_wait4_rusage...\n");
+  /* P1 (S5): the v1 status/rusage VAs below are only live on the kernel
+     table (the v1 window); an earlier suite can leave a v2 root loaded, and a
+     native v2 root no longer carries the identity map that used to absorb
+     these stores (they landed in pool frame 0x44000400).  A v1 process always
+     runs on the kernel table, so put this context there. */
+  vm_arch_restore_kernel();
 
   int ppid = process_create();
   int old_pid = cpu_current_pids[0];
@@ -1304,6 +1311,7 @@ static void test_pid_slot_invariant(void) {
 
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
+  vm_arch_restore_kernel(); /* P1 (S5): v1-context tests run on the kernel table */
   test_process_init_and_create();
   test_pid_slot_invariant(); /* SEC-OBS-A: pid == bounded slot index */
   test_process_set_entry();

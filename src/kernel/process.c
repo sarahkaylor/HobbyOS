@@ -1394,7 +1394,11 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
      address is directly usable from the kernel: PD0/PD2..PD7
      identity-map all RAM at supervisor level (and the block is also
      mapped at USER_VIRT_BASE while the task is current). */
-  p->context[33] = p->user_phys_base + USER_REGION_SIZE - 0x1000;
+  /* P1 (S5): through the direct map.  The kernel task's stack must be
+     reachable in EVERY root: an interrupt taken in the task pushes onto it,
+     and schedule() can load a v2 root (no identity map) before it leaves
+     that stack -- measured as a silent triple-fault reboot loop. */
+  p->context[33] = phys_to_kva(p->user_phys_base + USER_REGION_SIZE - 0x1000);
   p->context[30] = p->context[33]; /* M6/L36: frame lr == resumed SP */
 #ifdef __x86_64__
   p->context[32] = 0x202;                  // RFLAGS = IF (0x200) | Reserved (0x02)

@@ -505,6 +505,7 @@ static void test_kernel_stack_guard(void) {
 
 void trap_test_suite(void) {
   uart_puts("trap_test_suite:\n");
+  vm_arch_restore_kernel(); /* P1 (S5): the USER_VIRT_BASE (v1) tests need the kernel table */
   test_trap_unknown_syscall();
   test_trap_sys_get_cpuid();
   test_u_strcpy_atomic(); /* SEC-3 */
