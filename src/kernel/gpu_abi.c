@@ -358,8 +358,7 @@ void gpu_abi_release_fd(struct process* p, int fd) {
 static int gpu_resolve_pages(struct process* p, uint64_t va, uint64_t len,
                              uint64_t* phys, uint32_t max_pages, uint32_t* n_out) {
   if (!p || !p->as || !phys || !n_out || len == 0) return -EINVAL;
-  if (va < USER_VA_BASE) return -EINVAL;
-  if (len > USER_VA_TOP || va > USER_VA_TOP - len) return -EINVAL;
+  if (!vm_range_is_user(process_group(p)->as, va, len)) return -EINVAL; /* P1 */
   uint32_t n = gpu_abi_pages_for(len);
   if (n == 0 || n > max_pages) return -EINVAL;
 
@@ -669,7 +668,7 @@ static int gpu_do_submit(struct process* p, int fd, uint64_t arg) {
     return -EINVAL;
   if (!gpu_abi_submit_flags_ok(sub.flags)) return -EINVAL;
   if (!sub.va) return -EINVAL;
-  if (sub.len > USER_VA_TOP || sub.va > USER_VA_TOP - sub.len) return -EINVAL;
+  if (!vm_range_is_user(process_group(p)->as, sub.va, sub.len)) return -EINVAL; /* P1 */
 
   struct process* g = process_group(p);
   int pid = g ? g->pid : p->pid;

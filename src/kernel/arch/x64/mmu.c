@@ -699,51 +699,122 @@ static void x64_invlpg(uint64_t va) {
   __asm__ volatile("invlpg (%0)" ::"r"(va) : "memory");
 }
 
-/* Walk (optionally allocating) to the 4 KiB PTE slot for `va`. */
+/* Is this PD a shared kernel table (never freed, never written by the
+   user walker)?  kimg_pd always; the identity PDs only in the A/B vehicle. */
+static int x64_pd_is_kernel(uint64_t pd_pa) {
+  if (pd_pa == kimg_pa(&kimg_pd))
+    return 1;
+#ifdef CP_MMU_KEEP_IDMAP
+  if (pd_pa == kimg_pa(&cpu_pd0) || pd_pa == kimg_pa(&pd1_kernel) ||
+      pd_pa == kimg_pa(&cpu_pd2) || pd_pa == kimg_pa(&cpu_pd3) ||
+      pd_pa == kimg_pa(&cpu_pd4) || pd_pa == kimg_pa(&cpu_pd5) ||
+      pd_pa == kimg_pa(&cpu_pd6) || pd_pa == kimg_pa(&cpu_pd7))
+    return 1;
+#endif
+  return 0;
+}
+
+/* One table level: the next table under entry `e` of `tab`, allocating a
+   zeroed one when absent and `alloc`.  0 for a huge leaf (never produced in a
+   user window) or an allocation failure. */
+static uint64_t *x64_next_table(struct addr_space *as, uint64_t *tab, uint32_t e,
+                                int alloc) {
+  if (!(tab[e] & X64_PTE_P)) {
+    if (!alloc)
+      return 0;
+    uint64_t t = frame_alloc_zeroed();
+    if (!t)
+      return 0;
+    tab[e] = t | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+    as->table_frames++;
+    return (uint64_t *)phys_to_virt(t);
+  }
+  if (tab[e] & 0x80)
+    return 0;
+  return (uint64_t *)phys_to_virt(tab[e] & X64_OA_MASK);
+}
+
+/* Walk (optionally allocating) to the 4 KiB PTE slot for `va`.
+   P1 (D4): a native root knows only PML4[0] / PDPT[64..95] (unchanged); a
+   compat root walks all four levels over the whole lower half (PML4[0..255]).
+   The kernel-image leaves in a compat root's PDPT[1] PD are 2 MiB leaves, so
+   the walk refuses them (and the region list never covers the hole). */
 static uint64_t *x64_v2_walk_alloc(struct addr_space *as, uint64_t va,
                                    int alloc) {
   if (!as->root_phys)
     return 0;
   uint64_t *p4 = (uint64_t *)phys_to_virt(as->root_phys);
-  uint64_t pdpt_pa = p4[0] & X64_OA_MASK;
-  if (!pdpt_pa)
-    return 0;
-  uint64_t *pdpt = (uint64_t *)phys_to_virt(pdpt_pa);
-  uint32_t i3 = (va >> 30) & 0x1FF;
-  if (i3 < 64 || i3 > 95)
-    return 0;
-  uint64_t *pd;
-  if (!(pdpt[i3] & X64_PTE_P)) {
-    if (!alloc)
+  uint32_t i4 = (uint32_t)((va >> 39) & 0x1FF);
+  uint32_t i3 = (uint32_t)((va >> 30) & 0x1FF);
+  uint64_t *pdpt;
+  if (as->layout == VM_LAYOUT_COMPAT) {
+    if (va >= 0x800000000000ULL)
       return 0;
-    uint64_t t = frame_alloc_zeroed();
-    if (!t)
-      return 0;
-    pd = (uint64_t *)phys_to_virt(t);
-    pdpt[i3] = t | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-    as->table_frames++;
+    pdpt = x64_next_table(as, p4, i4, alloc);
   } else {
-    if (pdpt[i3] & 0x80)
-      return 0; /* 1 GiB page in a v2 table: not produced */
-    pd = (uint64_t *)phys_to_virt(pdpt[i3] & X64_OA_MASK);
-  }
-  uint32_t i2 = (va >> 21) & 0x1FF;
-  if (pd[i2] & 0x80)
-    return 0; /* 2 MiB page in a v2 table: not produced */
-  uint64_t *pt;
-  if (!(pd[i2] & X64_PTE_P)) {
-    if (!alloc)
+    if (i4 != 0 || i3 < 64 || i3 > 95)
       return 0;
-    uint64_t t = frame_alloc_zeroed();
-    if (!t)
-      return 0;
-    pt = (uint64_t *)phys_to_virt(t);
-    pd[i2] = t | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-    as->table_frames++;
-  } else {
-    pt = (uint64_t *)phys_to_virt(pd[i2] & X64_OA_MASK);
+    pdpt = (p4[0] & X64_PTE_P) ? (uint64_t *)phys_to_virt(p4[0] & X64_OA_MASK) : 0;
   }
+  if (!pdpt)
+    return 0;
+  if ((pdpt[i3] & X64_PTE_P) && x64_pd_is_kernel(pdpt[i3] & X64_OA_MASK))
+    return 0;
+  uint64_t *pd = x64_next_table(as, pdpt, i3, alloc);
+  if (!pd)
+    return 0;
+  uint64_t *pt = x64_next_table(as, pd, (uint32_t)((va >> 21) & 0x1FF), alloc);
+  if (!pt)
+    return 0;
   return &pt[(va >> 12) & 0x1FF];
+}
+
+/* P1: the first VA >= va whose PTE might exist (va itself when its page
+   table is present), so range loops over huge sparse reservations skip
+   absent tables instead of walking 4 KiB at a time.  Never allocates. */
+uint64_t vm_arch_skip_absent(struct addr_space *as, uint64_t va) {
+  if (!as || !as->root_phys)
+    return va;
+  uint64_t *p4 = (uint64_t *)phys_to_virt(as->root_phys);
+  uint32_t i4 = (uint32_t)((va >> 39) & 0x1FF);
+  if (!(p4[i4] & X64_PTE_P) || va >= 0x800000000000ULL)
+    return (va | ((1ULL << 39) - 1)) + 1;
+  uint64_t *pdpt = (uint64_t *)phys_to_virt(p4[i4] & X64_OA_MASK);
+  uint64_t e3 = pdpt[(va >> 30) & 0x1FF];
+  if (!(e3 & X64_PTE_P) || (e3 & 0x80) || x64_pd_is_kernel(e3 & X64_OA_MASK))
+    return (va | ((1ULL << 30) - 1)) + 1;
+  uint64_t *pd = (uint64_t *)phys_to_virt(e3 & X64_OA_MASK);
+  uint64_t e2 = pd[(va >> 21) & 0x1FF];
+  if (!(e2 & X64_PTE_P) || (e2 & 0x80))
+    return (va | ((1ULL << 21) - 1)) + 1;
+  return va;
+}
+
+/* P1 (S6, docs/cp-address-space.md section 3.4): turn a fresh native root
+   into a compat root.  The compat root's PDPT[1] is a per-AS PD holding a
+   copy of the kernel-image leaves (supervisor-only, never changed after
+   boot) so user page tables for 0x40000000-0x6fffffff and
+   CP_KHOLE_HI-0x7fffffff can sit next to them.  Everything else in the
+   lower half becomes user space on demand. */
+int vm_arch_set_compat(struct addr_space *as) {
+  if (!as || !as->root_phys)
+    return -1;
+  uint64_t *p4 = (uint64_t *)phys_to_virt(as->root_phys);
+  if (!(p4[0] & X64_PTE_P))
+    return -1;
+  uint64_t *pdpt = (uint64_t *)phys_to_virt(p4[0] & X64_OA_MASK);
+  for (int i = 0; i < 8; i++)
+    if (i != 1 && (pdpt[i] & X64_PTE_P))
+      return -1; /* identity still present (CP_MMU_KEEP_IDMAP): no compat */
+  uint64_t pd = frame_alloc_zeroed();
+  if (!pd)
+    return -1;
+  uint64_t *v = (uint64_t *)phys_to_virt(pd);
+  for (int i = 0; i < 512; i++)
+    v[i] = kimg_pd[i];
+  pdpt[1] = pd | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  as->table_frames++;
+  return 0;
 }
 
 uint64_t vm_arch_root_alloc(struct addr_space *as) {
@@ -1038,15 +1109,24 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
       panic_puts(" still translates through it\n");
     }
   }
+  /* P1 (D7): free every user table in the lower half (PML4[0..255]) --
+     a native root only has PML4[0] -> PDPT[64..95], a compat root anything.
+     Shared kernel PDs (kimg_pd) and 2 MiB kernel leaves are skipped; the
+     kernel half (PML4[256..]) is shared and never freed here. */
   uint64_t *p4 = (uint64_t *)phys_to_virt(root_phys);
-  uint64_t pdpt_pa = p4[0] & X64_OA_MASK;
-  if (pdpt_pa) {
+  for (uint32_t i4 = 0; i4 < 256; i4++) {
+    uint64_t e4 = p4[i4];
+    if (!(e4 & X64_PTE_P))
+      continue;
+    uint64_t pdpt_pa = e4 & X64_OA_MASK;
     uint64_t *pdpt = (uint64_t *)phys_to_virt(pdpt_pa);
-    for (uint32_t i3 = 64; i3 <= 95; i3++) {
+    for (uint32_t i3 = 0; i3 < 512; i3++) {
       uint64_t pde = pdpt[i3];
       if (!(pde & X64_PTE_P) || (pde & 0x80))
         continue;
       uint64_t pdp = pde & X64_OA_MASK;
+      if (x64_pd_is_kernel(pdp))
+        continue;
       uint64_t *pd = (uint64_t *)phys_to_virt(pdp);
       for (int i2 = 0; i2 < 512; i2++) {
         uint64_t pte2 = pd[i2];

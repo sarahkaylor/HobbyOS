@@ -464,7 +464,8 @@ static uint64_t el_native_sp(void) {
 /* Parse the executable and apply every refusal that does not need the
  * interpreter's bytes.  Prints the reason (the compat track's message is the
  * same string it always printed) and fills info->parse_rc. */
-static int el_admit_exe(const uint8_t *exe, uint64_t exe_len, uint32_t flags,
+static int el_admit_exe(const struct addr_space *as, const uint8_t *exe,
+                        uint64_t exe_len, uint32_t flags,
                         struct elf_image *eimg, struct elf_load_info *info) {
   /* The parse flags are the TRACK's policy: the native track and the Linux
      track's explicit COMPAT_INTERP mode both let elf_parse_ex capture
@@ -485,7 +486,13 @@ static int el_admit_exe(const uint8_t *exe, uint64_t exe_len, uint32_t flags,
   }
   /* Decisive refusals per docs/elf-loader.md §1: a fixed-address ET_EXEC cannot
      be mapped under the v2 window.  Message unchanged from GB-013. */
-  if (eimg->needs_low_window) {
+  /* P1 (D12): a compat address space maps a fixed-address ET_EXEC at its
+     link address (the Wine preloader is one); the native layout still
+     cannot. */
+  if (eimg->needs_low_window &&
+      !((flags & ELF_LOAD_COMPAT_INTERP) && as->layout == VM_LAYOUT_COMPAT &&
+        vm_range_is_user(as, eimg->vaddr_base,
+                         eimg->vaddr_end - eimg->vaddr_base))) {
     uart_puts("elf loader: ET_EXEC linked below the user window; a -static-pie "
               "build is required (docs/elf-loader.md §1)\n");
     return -ENOEXEC;
@@ -555,7 +562,13 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
     return -ENOEXEC;
   }
   uint64_t base = el_choose_base(eimg);
-  if (eplan.span > USER_IMG_SIZE || base + eplan.span > USER_HEAP_BASE_V2) {
+  /* P1 (D12): an ET_EXEC in a compat AS runs at its link address. */
+  int at_link = !eimg->is_pie && as->layout == VM_LAYOUT_COMPAT &&
+                vm_range_is_user(as, eimg->vaddr_base, eplan.span);
+  if (at_link)
+    base = eimg->vaddr_base;
+  if (!at_link &&
+      (eplan.span > USER_IMG_SIZE || base + eplan.span > USER_HEAP_BASE_V2)) {
     uart_puts("elf loader: image span overlaps the heap slot\n");
     return -ENOSPC;
   }
@@ -563,7 +576,7 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
      interpreter is placed there, and so is every DSO a real ld.so maps for
      the program.  Without this an image between 128 MiB and 1 GiB would be
      accepted and then collide with the library slots. */
-  if (iimg && base + eplan.span > ELF_USER_LIB_BASE) {
+  if (iimg && !at_link && base + eplan.span > ELF_USER_LIB_BASE) {
     uart_puts("elf loader: image span overlaps the DSO band\n");
     return -ENOSPC;
   }
@@ -666,7 +679,7 @@ int elf_loader_map_buffers(struct addr_space *as, const uint8_t *exe,
   if (!as || !info || !exe || exe_len == 0) return -ENOEXEC;
   el_zero((uint8_t *)info, sizeof *info);
   struct elf_image eimg, iimg;
-  int rc = el_admit_exe(exe, exe_len, flags, &eimg, info);
+  int rc = el_admit_exe(as, exe, exe_len, flags, &eimg, info);
   if (rc != 0) return rc;
   if (eimg.has_interp) {
     if (!interp || interp_len == 0) {
@@ -697,7 +710,7 @@ int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
     return -ENOEXEC;
 
   struct elf_image eimg;
-  int rc = el_admit_exe(exe, fsize, flags, &eimg, info);
+  int rc = el_admit_exe(as, exe, fsize, flags, &eimg, info);
   if (rc != 0)
     return rc;
 

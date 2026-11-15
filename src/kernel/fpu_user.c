@@ -60,7 +60,8 @@
  * takes an implicit 512-byte operand and #GP(0)s on a misaligned one, in ring
  * 0, where KVM turns the fault into "emulation failure" and stops the vCPU. */
 int arch_fpu_user_image_ok(uint64_t va) {
-  if (va < USER_VA_BASE || va + FPU_SIG_IMAGE_BYTES - 1 >= USER_VA_TOP)
+  struct process *fp = current_process(); /* P1: the caller's own bounds */
+  if (!vm_range_is_user(fp ? process_group(fp)->as : 0, va, FPU_SIG_IMAGE_BYTES))
     return -EFAULT;
   if ((va & 15u) != 0)
     return -EFAULT;

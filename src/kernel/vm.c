@@ -212,6 +212,9 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   as->jit_bump = 0;
   as->jit_anchor0 = 0;
   as->jit_nfree = 0;
+  as->layout = VM_LAYOUT_NATIVE; /* P1: compat is opted into by the loader */
+  as->va_lo = USER_VA_BASE;
+  as->va_hi = USER_VA_TOP;
   as->img_epoch++; /* a reused slot must never look like its old life */
   uint64_t root = vm_arch_root_alloc(as); /* sets as->root_phys accounting */
   if (!root) {
@@ -226,6 +229,33 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   as->root_phys = root;
   spinlock_release_irqrestore(&vm_lock, flags);
   return as;
+}
+
+/* P1 (S6): opt a fresh AS into the compat layout (docs/cp-address-space.md
+ * section 3.5).  The loader calls it once it knows the image is a Linux-ABI
+ * one; fork copies it (vm_as_clone_into).  Native -> compat only: the native
+ * windows stay inside the compat range, so regions already inserted (the
+ * stack reserve) remain legal.  Compat -> native is refused. */
+int vm_as_set_layout(struct addr_space *as, int layout) {
+  if (!as || as->ver != AS_V2)
+    return -1;
+  if (layout == as->layout)
+    return 0;
+  if (layout != VM_LAYOUT_COMPAT)
+    return -1;
+#ifdef __x86_64__
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  int rc = vm_arch_set_compat(as);
+  if (rc == 0) {
+    as->layout = VM_LAYOUT_COMPAT;
+    as->va_lo = CP_COMPAT_FLOOR;
+    as->va_hi = CP_VA_HI;
+  }
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return rc;
+#else
+  return -1;
+#endif
 }
 
 void vm_as_teardown(struct addr_space *as) {
@@ -600,8 +630,8 @@ static int vm_region_insert_locked(struct addr_space *as, uint64_t base,
     return -1;
   if ((base & 0xFFF) || (len & 0xFFF))
     return -1;
-  if (base < USER_VA_BASE || base + len > USER_VA_TOP)
-    return -1;
+  if (!vm_range_is_user(as, base, len))
+    return -1; /* P1: per-AS bounds; the compat kernel hole is never a region */
   if (region_overlaps(as, base, len)) {
     return -1;
   }
@@ -906,7 +936,7 @@ int vm_map_page(struct addr_space *as, uint64_t va, uint64_t phys,
                 uint16_t prot, uint16_t kind) {
   if (!as || as->ver != AS_V2)
     return -1;
-  if ((va & 0xFFF) || va < USER_VA_BASE || va >= USER_VA_TOP)
+  if ((va & 0xFFF) || !vm_va_is_user(as, va))
     return -1;
   uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   int rc = vm_arch_map(as, va, phys, prot, kind);
@@ -1848,7 +1878,7 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
   struct addr_space *as = p->as;
   if (len == 0)
     len = 1;
-  if (va < USER_VA_BASE || va + len - 1 >= USER_VA_TOP)
+  if (!vm_range_is_user(as, va, len))
     return -1;
   uint64_t end = va + len - 1;
   for (uint64_t a = va & ~0xFFFULL; a <= end; a += FRAME_SIZE) {
@@ -1990,7 +2020,7 @@ int vm_user_read(struct process *p, uint64_t va, void *dst, int len) {
   }
 
   struct addr_space *as = p->as;
-  if (va < USER_VA_BASE || va + (uint64_t)len - 1 >= USER_VA_TOP)
+  if (!vm_range_is_user(as, va, (uint64_t)len))
     return -1;
 
   for (int i = 0; i < len;) {
@@ -2048,7 +2078,7 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
   const unsigned char *s = (const unsigned char *)src;
 
   struct addr_space *as = p->as;
-  if (va < USER_VA_BASE || va + (uint64_t)len - 1 >= USER_VA_TOP)
+  if (!vm_range_is_user(as, va, (uint64_t)len))
     return -1;
 
   for (int i = 0; i < len;) {
@@ -3814,6 +3844,40 @@ static void mr_fail(struct addr_space *as, uint64_t base, uint64_t len) {
   }
 }
 
+#ifdef __x86_64__
+/* P1 (F1): top-down hole search in [lo, hi) -- the compat no-hint policy for
+ * what the native MMAP window cannot hold (Linux's mmap_base shape).  Same
+ * VM_HOLE_GAP rule between distinct regions as vm_hole_find.  0 = none. */
+static uint64_t vm_hole_find_topdown(struct addr_space *as, uint64_t lo,
+                                     uint64_t hi, uint64_t len) {
+  if (hi <= lo || hi - lo < len)
+    return 0;
+  uint64_t top = hi & ~0xFFFULL;
+  for (int i = as->nr - 1; i >= -1; i--) {
+    uint64_t rb = 0, re = 0;
+    if (i >= 0) {
+      rb = as->regions[i].base;
+      re = rb + as->regions[i].len;
+      if (rb >= top)
+        continue; /* wholly above the search top */
+    }
+    uint64_t floor = (i >= 0) ? re + VM_HOLE_GAP : lo;
+    if (floor < lo)
+      floor = lo;
+    if (i < 0 || re < top) {
+      if (top >= floor && top - floor >= len)
+        return (top - len) & ~0xFFFULL;
+    }
+    if (i < 0)
+      break;
+    top = (rb > VM_HOLE_GAP) ? rb - VM_HOLE_GAP : 0;
+    if (top <= lo)
+      return 0;
+  }
+  return 0;
+}
+#endif
+
 int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
                 uint32_t flags, int fd, uint64_t offset) {
   if (!grp || !grp->as)
@@ -3974,7 +4038,23 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
      (docs/shared-libs.md section 2).  Both bounds are written as
      "len <= limit - addr" so a wrapping addr+len cannot pass. */
   int is_fixed = (fl2 & VM_MAP_FIXED) != 0;
-  if (is_fixed) {
+  /* P1: MAP_FIXED_NOREPLACE is a fixed placement that refuses to replace. */
+  int noreplace = (flags & VM_MAP_NOREPLACE) != 0;
+  if (noreplace) {
+    is_fixed = 1;
+    fl2 |= VM_MAP_FIXED;
+  }
+  int compat = (as->layout == VM_LAYOUT_COMPAT);
+  if (is_fixed && compat) {
+    /* F1: any page-aligned user range; the kernel hole is ENOMEM for
+       MAP_FIXED and EEXIST for NOREPLACE (Wine virtual.c probes with
+       NOREPLACE and treats EEXIST as "occupied, try elsewhere"). */
+    if (addr & 0xFFF)
+      return -EINVAL;
+    if (!vm_range_is_user(as, addr, len))
+      return (noreplace && vm_range_hits_hole(as, addr, len)) ? -EEXIST
+                                                               : -ENOMEM;
+  } else if (is_fixed) {
     const uint64_t mmap_lim = USER_VA_BASE + USER_MMAP_SIZE + USER_MMAP_OFF;
     int in_mmap = addr >= USER_VA_BASE && addr <= mmap_lim &&
                   len <= mmap_lim - addr;
@@ -4074,9 +4154,17 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
      * vm_munmap_range does (shared frames are dropped, not freed), then
      * rewrite the records. */
     int replaced = 0;
-    for (uint64_t za = base; za < base + len; za += FRAME_SIZE)
+    if (noreplace && region_overlaps(as, base, len))
+      rc = -EEXIST; /* P1: an existing mapping is never replaced */
+    for (uint64_t za = base; rc == 0 && za < base + len; za += FRAME_SIZE) {
+      uint64_t nx = vm_arch_skip_absent(as, za);
+      if (nx != za) {
+        za = nx - FRAME_SIZE;
+        continue;
+      }
       if (vm_arch_walk(as, za, 0) == 0)
         replaced++;
+    }
     if (replaced) {
       static int mmf_rows;
       if (mmf_rows < 12) {
@@ -4094,7 +4182,9 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       }
       vm_zap_range(as, base, len);
     }
-    if (vm_region_remove_locked(as, base, len) != 0)
+    if (rc != 0)
+      ; /* -EEXIST: nothing touched */
+    else if (vm_region_remove_locked(as, base, len) != 0)
       rc = -EINVAL;
     else if (vm_region_insert_locked(as, base, len, p, kind, fl2, obj,
                                      obj_off) != 0)
@@ -4133,11 +4223,28 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
         picked = 1;
       }
     }
+    /* P1 (F1): a compat hint is honoured anywhere in user VA when free. */
+    if (!picked && compat && addr && !(addr & 0xFFF) &&
+        vm_range_is_user(as, addr, len) && !region_overlaps(as, addr, len)) {
+      base = addr;
+      mr_w = 'C';
+      picked = 1;
+    }
     if (!picked) {
       uint64_t start = USER_MMAP_BASE_V2;
       base = vm_hole_find(as, start, USER_MMAP_LIMIT_V2, len);
       mr_w = '1';
     }
+    /* P1 (F1): what the native window cannot hold (a 64 GiB reservation) goes
+       top-down from CP_MMAP_TOP, above the kernel hole first, then below. */
+#ifdef __x86_64__
+    if (!base && compat) {
+      base = vm_hole_find_topdown(as, CP_KHOLE_HI, CP_MMAP_TOP, len);
+      if (!base && as->va_lo < KIMG_BASE)
+        base = vm_hole_find_topdown(as, as->va_lo, KIMG_BASE, len);
+      mr_w = 'T';
+    }
+#endif
     if (!base)
       rc = -ENOMEM;
     else if (vm_region_insert_locked(as, base, len, p, kind, fl2, obj,
@@ -4172,6 +4279,11 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
  * region span.  Shared pages are dropped without freeing (S4). */
 static void vm_zap_range(struct addr_space *as, uint64_t base, uint64_t len) {
   for (uint64_t a = base; a < base + len; a += FRAME_SIZE) {
+    uint64_t nx = vm_arch_skip_absent(as, a); /* P1: skip absent tables */
+    if (nx != a) {
+      a = nx - FRAME_SIZE;
+      continue;
+    }
     if (vm_arch_walk(as, a, 0) == 0) {
       vm_arch_unmap(as, a); /* frees the frame unless SHARED-marked */
       as->resident_frames--;
@@ -4186,7 +4298,7 @@ int vm_munmap_range(struct process *grp, uint64_t addr, uint64_t len) {
   if (len == 0 || (addr & 0xFFF))
     return -EINVAL;
   len = (len + 0xFFF) & ~0xFFFULL;
-  if (addr < USER_VA_BASE || addr + len > USER_VA_TOP)
+  if (!vm_range_is_user(as, addr, len))
     return -EINVAL;
   if (!vm_region_find(as, addr))
     return -EINVAL; /* nothing mapped at addr */
@@ -4250,17 +4362,20 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
   if (len == 0 || (addr & 0xFFF))
     return -EINVAL;
   len = (len + 0xFFF) & ~0xFFFULL;
-  if (addr < USER_VA_BASE || addr + len > USER_VA_TOP)
-    return -EINVAL;
+  if (!vm_range_is_user(as, addr, len))
+    return as->layout == VM_LAYOUT_COMPAT ? -ENOMEM : -EINVAL;
   uint16_t p = mmap_prot_sanitize(prot);
   uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
-  /* The range must be fully mapped (design 4.1: else -ENOMEM). */
-  for (uint64_t a = addr; a < addr + len; a += FRAME_SIZE) {
+  /* The range must be fully mapped (design 4.1: else -ENOMEM).  P1: walked
+     region by region, not page by page -- a 64 GiB PROT_NONE reservation is
+     16 M pages and this runs with IRQs off. */
+  for (uint64_t a = addr; a < addr + len;) {
     struct vm_region *r = vm_region_find(as, a);
-    if (!r || a + FRAME_SIZE > r->base + r->len) {
+    if (!r) {
       spinlock_release_irqrestore(&vm_lock, fl);
       return -ENOMEM;
     }
+    a = r->base + r->len;
   }
   /* Region records first, leaves second: if the span rewrite fails the PTE
      protection must not already disagree with the VMA (that state — VMA
@@ -4272,8 +4387,14 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
     return -ENOMEM;
   }
   /* Resident pages: re-encode in place, or ZAP for PROT_NONE (design
-     section 4.4: documented divergence from Linux). */
+     section 4.4: documented divergence from Linux).  P1: absent tables are
+     skipped whole. */
   for (uint64_t a = addr; a < addr + len; a += FRAME_SIZE) {
+    uint64_t nx = vm_arch_skip_absent(as, a);
+    if (nx != a) {
+      a = nx - FRAME_SIZE;
+      continue;
+    }
     if (vm_arch_walk(as, a, 0) != 0)
       continue;
     if (p == 0) {
@@ -4328,7 +4449,7 @@ int vm_madvise(struct process *grp, uint64_t addr, uint64_t len, int advice) {
   if (len == 0 || (addr & 0xFFF))
     return -EINVAL;
   len = (len + 0xFFF) & ~0xFFFULL;
-  if (addr < USER_VA_BASE || addr + len > USER_VA_TOP)
+  if (!vm_range_is_user(as, addr, len))
     return -EINVAL;
   if (advice != VM_MADV_DONTNEED && advice != VM_MADV_FREE)
     return 0; /* advisory: everything else is ignored (design 4.1) */
@@ -4420,6 +4541,13 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   }
   if (dst->nr != 0) {
     ASCLONE("dst-not-fresh", dst->nr, 0); /* only into a fresh AS */
+    return -1;
+  }
+  /* P1: fork inherits the layout (a compat parent's low mappings must be
+     legal in the child before any region is copied). */
+  if (src->layout != dst->layout &&
+      vm_as_set_layout(dst, src->layout) != 0) {
+    ASCLONE("layout", -1, 0);
     return -1;
   }
 

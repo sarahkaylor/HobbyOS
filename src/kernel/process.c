@@ -2011,7 +2011,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
          (vm_touch takes vm_lock; it never sleeps for a stack page).
          Observed: IceWM fork()+exec of HBHOST.BIN reset the VM (icewm.md §9). */
       if (proc_table[next].as && !proc_table[next].is_kernel_process &&
-          target_sp > USER_VA_BASE + 0x1000 && target_sp <= USER_VA_TOP) {
+          vm_range_is_user(proc_table[next].as, target_sp - 0x1000, 0x1000)) {
         uint64_t lo = (target_sp - 0x1000) & ~0xFFFULL;
         (void)vm_touch(&proc_table[next], lo, target_sp - lo, /*write=*/1);
       }
@@ -6277,7 +6277,7 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
      validates against its AS -- entry mapped readable, stack top mapped
      writable (the mmap+guard stack from libpthread). */
   if (caller->as) {
-    if (stack < USER_VA_BASE + 16 || stack > USER_VA_TOP)
+    if (!vm_range_is_user(process_group(caller)->as, stack - 16, 16))
       return -EINVAL;
     if (stack & 15)
       return -EINVAL;
@@ -6373,7 +6373,7 @@ int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
   if (!stack)
     return -EINVAL;
   if (caller->as) {
-    if (stack < USER_VA_BASE || stack > USER_VA_TOP)
+    if (!vm_range_is_user(process_group(caller)->as, stack - 16, 16))
       return -EINVAL;
     if (vm_touch(caller, stack - 16, 16, 1) != 0)
       return -EINVAL;

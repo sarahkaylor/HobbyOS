@@ -1188,6 +1188,12 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       lflags = ELF_LOAD_NATIVE;
     else
       lflags = ELF_LOAD_COMPAT_INTERP;
+    /* P1 (S7, docs/cp-address-space.md open question 3: every Linux-ABI
+       process, not only Wine): the compat track gets the compat address
+       space before its image is mapped, so a low-linked ET_EXEC and any low
+       MAP_FIXED are legal.  CP_COMPAT_AS=0 keeps the native layout. */
+    if (CP_COMPAT_AS && native != 1 && vm_as_set_layout(as, VM_LAYOUT_COMPAT) != 0)
+      uart_puts("v2 loader: compat layout refused; staying native\n");
 #else
     lflags = ELF_LOAD_NATIVE;
 #endif

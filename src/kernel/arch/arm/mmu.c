@@ -759,3 +759,15 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
                    : "memory");
   frame_free(root_phys);
 }
+
+/* P1 (docs/cp-address-space.md): the compat layout is x86_64-only (AD-11);
+   ARM keeps its identity map and the native v2 window. */
+int vm_arch_set_compat(struct addr_space *as) {
+  (void)as;
+  return -1;
+}
+
+uint64_t vm_arch_skip_absent(struct addr_space *as, uint64_t va) {
+  (void)as;
+  return va;
+}
