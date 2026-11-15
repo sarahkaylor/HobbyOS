@@ -259,10 +259,13 @@ $(BROWSER_FONT): third_party/fonts/dejavu-fonts-ttf-2.37.zip third_party/fonts/d
 # here so arm, intel and host builds all see it.
 X11_INC = -Isrc/user/x11/include
 
-# Determine if the mode has changed and update the tracker file
+# Determine if the mode has changed and update the tracker file.  C1-thr: the
+# console trace knobs (FUTEX_TRACE / SIG_TRACE, below) ride the same stamp,
+# so toggling one rebuilds instead of linking objects of the other kind.
+MODE_STAMP := $(MODE)$(if $(FUTEX_TRACE),+futex-trace)$(if $(SIG_TRACE),+sig-trace)
 CURRENT_MODE := $(shell [ -f $(MODE_FILE) ] && cat $(MODE_FILE) || echo none)
-ifneq ($(CURRENT_MODE),$(MODE))
-$(shell mkdir -p $(OBJ_DIR) && echo $(MODE) > $(MODE_FILE))
+ifneq ($(CURRENT_MODE),$(MODE_STAMP))
+$(shell mkdir -p $(OBJ_DIR) && echo $(MODE_STAMP) > $(MODE_FILE))
 endif
 
 # Same tracker for the DESKTOP knob (icewm.md §4.5).
