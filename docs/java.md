@@ -193,8 +193,28 @@ Why #2 is the one that matters: a database that opens its store with
 `FileChannel.lock()` gets a `FileLock` object either way. If the kernel grants
 nothing, both writers proceed and the corruption is silent and late.
 
-Order of work from here: #3 (durability), then verify #2 once fork lands, then
-`MAP_SHARED`-on-`O_RDONLY` and the empty-file case.
+## #3 measured properly: the mapping and the read path are two copies
+
+`obj/jdk/mmaptouch.log` (one process, every step printed):
+
+    MT after-write size=4096      MT after-map size=4096
+    MT after-force size=4096 byte0=Z      MT after-close size=4096
+    MT in-process-reread len=4096 first=A     <- plain read() returns the OLD byte
+    PR size=4096 read=4096 first=A VERDICT visible   <- and so do two other processes
+
+So this is not merely "no write-through": **the page cache and the file read path
+are independent copies**.  POSIX requires a mapping and `read()` on the same file
+to agree; here a `MappedByteBuffer.put()` followed by a `FileInputStream.read()`
+in the same process returns stale bytes.  That is the defect to fix, and it makes
+the acceptance test stronger than "the bytes land on disk": after `force()`, a
+plain read in the same process must see them too.
+
+The 0-byte read from `mmap-shared.log` did NOT reproduce in the near-identical
+`mmaptouch` run (size=4096 at every step, both readers saw 4096).  One
+unexplained occurrence is not a rule; it is a reason to keep the cross-boot check.
+
+Order of work from here: #3 (durability + mapping/read coherence), then verify #2
+once fork lands, then `MAP_SHARED`-on-`O_RDONLY` and the empty-file case.
 
 Two more things this cost, worth reading before diagnosing a "hang":
 
