@@ -587,24 +587,24 @@ guest benchmark was skipped at the user's request. Headline numbers: §0.2.
 
 - [x] Design note `docs/cp-address-space.md` (lane C1-as, merged): inventory,
       direct-map layout, F1, migration S0–S8.
-- [ ] Higher-half direct map for the x64 kernel (S0–S3): helpers, convert the
+- [x] *(wave 2, C1-mmu)* Higher-half direct map for the x64 kernel (S0–S3): helpers, convert the
       208 class-A sites, the 23 design items; *(v1 tripwire)* native v2 roots
       drop the identity map so any leftover dereference faults as
       `[IDMAP-TRIP]`; the AST cast scan (`docs/cp-address-space.md` App. A)
       gates new code.
-- [ ] **Multiboot memory-map parser** and a frame pool that grows above 8 GiB
+- [x] *(wave 2, C1-mmu; 16 GiB guest → 15.6 GiB pool)* **Multiboot memory-map parser** and a frame pool that grows above 8 GiB
       only after the direct map is live (S3b) — prerequisite for a ≥16 GiB
       guest (§0.2 item 6).
-- [ ] Compat AS: user mappings permitted from `0x10000` up to
+- [x] *(wave 2, C1-mmu; low `ET_EXEC` reviewed, not run — no execve yet)* Compat AS: user mappings permitted from `0x10000` up to
       `0x7ffffffff000` minus the kernel hole; ships first with an 8 GiB floor,
       then drops to `0x10000`; `MAP_FIXED` (hole → ENOMEM),
       `MAP_FIXED_NOREPLACE` (existing mapping or hole → EEXIST, never EINVAL),
       `PROT_NONE` reservations of ≥64 GiB singly and ≥141 GiB in total without
       committing frames; kernel-mode demand faults on compat user pages below
       `USER_VA_BASE`; low-linked `ET_EXEC` accepted.
-- [x] XSAVE (AD-4) — lane C1-cpu, *held* pending the tramp_sig T2 fix.
-- [x] swapgs discipline + `ARCH_SET_GS`/`ARCH_GET_GS` — lane C1-cpu, *held*.
-- [ ] Probes: `linux_probe_avx.c`, `linux_probe_gs.c` (C1-cpu, passing);
+- [x] XSAVE (AD-4) — lane C1-cpu, merged (XCR0=7 / 832 B even on an AVX-512 host).
+- [x] swapgs discipline + `ARCH_SET_GS`/`ARCH_GET_GS` — lane C1-cpu, merged.
+- [x] Probes: `linux_probe_avx.c`, `linux_probe_gs.c` (C1-cpu, passing);
       `linux_probe_lowva.c` (map `0x7ffe0000` and `0x10000`, read/write them;
       `MAP_FIXED` into the kernel hole → ENOMEM, NOREPLACE → EEXIST).
 - [ ] Regression: Doom ELF, RimWorld to menu, and the full host/unit tiers on
@@ -622,12 +622,12 @@ logs of all of it.
 - [x] `tools/cp/build-wine.sh`: Wine 11.0 (64-bit) against the glibc 2.31
       sysroot, staged `/CP/WINE/{bin,lib/wine/x86_64-unix,lib/wine/x86_64-windows,share/wine}`
       (202 MiB); proven on the host in a pinned-only chroot (lane C2-wine).
-- [ ] Syscalls from the measured list (§0.2 item 10), in order of first use:
+- [x] *(wave 2, C2-sys + C3-ext2b)* Syscalls from the measured list (§0.2 item 10), in order of first use:
       **`fchdir`** first, then `symlink`, `chmod`, `fstatfs`, `ftruncate`
       (the last two now exist for all fds via the ext2 lane), `sendmmsg`, the
       xattr family (answer ENODATA/ENOTSUP as Wine tolerates — verify),
       `utimensat`; each with a probe or a golden row.
-- [ ] tmpfs `/tmp`: unlink-while-open files, coherent `MAP_SHARED` pages across
+- [x] *(wave 2, C2-sys; `MAP_PRIVATE` of a tmpfs/memfd object still → ENOTSUP, wave 3)* tmpfs `/tmp`: unlink-while-open files, coherent `MAP_SHARED` pages across
       processes (wineserver writes KUSER, clients read it), memfd up to and
       beyond 64 MiB (Wine's largest is exactly 64.0 MiB, §0.2 item 12).
 - [ ] `wineserver` lifecycle: daemon start, AF_UNIX socket under `/tmp`,
@@ -816,6 +816,34 @@ Merge order: C1-cpu → C3-ext2b / C2-sys (either order) → C1-mmu (rebased on
 all of them; it is the riskiest). C4-x and C5-vk merge whenever green. Shared
 hot files (`linux_compat.c` dispatch tables, `Makefile`): each lane adds rows
 or blocks, never reorders; the integrator resolves conflicts.
+
+### 7.2c Wave 3 (v2, 2026-11-15) — toward Gate P2
+
+Wave 2 merged in full (`cyberpunk` @ 3da44468; merge order cpu → sys →
+ext2b → mmu, each re-gated on the merged tree). **Gate host is `strix`**
+(linuxci's disk failed on 2026-11-15): checkouts under `strix:~/cp/lanes/`,
+every boot under `flock /tmp/cp-qemu.lock`, every build with
+`MAKEFLAGS=-j16` (the gate scripts' nested makes have no `-j`).
+
+What wave 2 left between HobbyOS and `wine cmd /c echo hello`:
+`wineserver --version`, `wine --version` and `wineserver -f`/`-k` already run
+in the guest (C2-sys smoke). Missing: a compat `execve(2)` that loads an ELF
+from any filesystem (Wine re-execs itself through its preloader); thread-shaped
+`clone()` flag sets that `process_clone()` refuses with EINVAL (join row E);
+`MAP_PRIVATE` of tmpfs/memfd objects (ENOTSUP today, so Wine moves its section
+files onto FAT); then the Windows side proper (TEB via `%gs`, KUSER at
+`0x7ffe0000`, SEH).
+
+| Lane | Scope (milestone) | Owns | Must not touch |
+|---|---|---|---|
+| **C2-exec** | P2: compat `execve(2)`/`execveat` from FAT16, ext2, NFS and tmpfs with full-length paths; static, static-pie (incl. `R_X86_64_IRELATIVE`) and PT_INTERP images; argv/envp/auxv; O_CLOEXEC; pid/tgid kept; dispositions reset; other threads killed; `process.cwd`/`exe_path` to `VFS_PATH_MAX`; `linux_probe_exec` | the exec path (`process_exec_current` and its helpers in `process.c`), `elf_loader.c`, `elf_image.c`, `program_loader.c`, the execve rows in `linux_compat_proc.c` | `process_clone`, the scheduler, futex (C1-thr); `vm.c` (C2-wine2) |
+| **C1-thr** | P2: every `clone()` flag set glibc 2.31's `pthread_create` and Wine use; join rows A and E; the ~100 ms late delivery of a signal to a parked thread; `tgkill` SIGUSR1/SIGQUIT to a chosen thread (wineserver suspend); the `[FUTEX]` trace that splices into probe output | `process_clone` and thread creation in `process.c`, `linux_compat_thr.c`, futex, the scheduler wake paths | the exec path (C2-exec), `vm.c` |
+| **C2-wine2** | Gate P2: `MAP_PRIVATE` copy-on-write of tmpfs/memfd (and ext2) objects; prefix on tmpfs; `wineboot -i`; `wine cmd /c echo hello`; `winprobe.exe` (threads, TLS, `%gs:[0x30]`, SEH, QPC, `GetTickCount64` via KUSER, `C:\` I/O); `wineserver -k` leaves no processes. Pulls `cyberpunk` as C2-exec and C1-thr merge | `vm.c` private-mapping/CoW paths, the mmap rows in `linux_compat_mem.c`, `tools/cp/` Wine harnesses, `src/user/cp/winprobe.c` | the exec path, clone/futex |
+
+Merge order: whichever of C2-exec / C1-thr is green first, then the other,
+then C2-wine2 last. Each merge is re-gated on the merged tree (all probes,
+`ext2_gate.sh`, unit tier, host tests, castscan, ARM build). Still held: C6-venus
+(needs the user's `gpu_abi.c` decision); C4-x's probe needs `cmake` on strix.
 
 ### 7.3 Frozen interfaces (binding)
 
@@ -1020,3 +1048,25 @@ qemu-system-x86_64 -enable-kvm -cpu host -smp 8 -m 24G \
   tmpfs `/tmp` moves to P2. Pre-existing defects recorded (§0.2 item 17).
   The user accepted the CD PROJEKT RED user agreement for the test VM's
   profile only (via the coordinator) and asked to skip the guest benchmark.
+- 2026-11-15 — **v2: wave 2 merged; gate host moved to strix.** linuxci's root
+  filesystem went read-only with on-disk corruption at 08:23; every wave-2
+  result was re-produced on strix (Zen 5, AVX-512) and linuxci's discarded.
+  Merged into `cyberpunk`: C1-cpu (XSAVE XCR0=7/832 B even on AVX-512 hosts,
+  GS base, SFMASK/cld, `-cpu host`, SIG_DFL ignore of CHLD/CONT/URG/WINCH at
+  send and delivery, the tramp_sig T2 idle-CPU kick), C2-sys (tmpfs `/tmp`,
+  memfd, eventfd, SCM_RIGHTS on SOCK_STREAM, fchdir/sendmmsg/xattrs/inotify/
+  SUD/`process_vm_*`, fork-shaped clone, 1 GiB VM objects, FAT `open(dir)`;
+  `wineserver`/`wine --version` run in the guest), C3-ext2b (ext2 mmap incl.
+  `MAP_SHARED` write-back, exec of ext2 images and PT_INTERP via the spawn
+  loader, setattr, a generic POSIX/OFD/flock lock manager shared with FAT16 and
+  tmpfs, `VFS_PATH_MAX` 1024), C1-mmu (direct map + ioremap, identity map
+  dropped from native roots with an `[IDMAP-TRIP]` tripwire, multiboot memory
+  map with frames above 8 GiB, compat AS from `0x10000`, castscan gate, fork
+  keeps the Linux ABI). Merged tree: 17/17 probes, `ext2_gate` PASS, unit
+  450/2 and host 38/40 (the known reds: `virtio_gpu_test.c` ×2 — pre-existing,
+  in the user's `gpu_abi.c` area — and the untracked `gaming.md` ×2); join's
+  row E (`process_clone` EINVAL on thread flags) and row A race are base
+  defects. New open items → wave 3 (§7.2c): compat `execve`, thread clone,
+  `MAP_PRIVATE` of tmpfs/memfd, glibc static-pie IRELATIVE, `cwd[128]`, the
+  64 MiB per-file ext2 mapping cap, SIGBUS past EOF, ~100 ms parked-signal
+  latency.
