@@ -109,6 +109,12 @@ int frame_hole_allocs(void);
  * test_frame_pool_is_ram_only can pin "no extent intersects the PCI hole". */
 int frame_extent_bounds(int idx, uint64_t *lo, uint64_t *hi);
 
+/* P1 (S3b): frames handed out above 8 GiB so far (proof the pool uses RAM
+ * past the old cap), and "is this physical address in the pool?" (the
+ * BAR-in-pool tripwire the NVMe probe prints). */
+uint64_t frame_hi_allocs(void);
+int frame_phys_in_pool(uint64_t phys);
+
 /* --- 32 MiB block layer (v1 process regions) ------------------------- */
 
 #define FRAME_BLOCK_SIZE   0x2000000

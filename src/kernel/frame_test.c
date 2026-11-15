@@ -31,7 +31,15 @@ extern void uart_print_hex(uint64_t val);
 static void test_frame_counts(void) {
   tests_run++;
   uart_puts("  Running test_frame_counts...\n");
-  EXPECT_EQ(frame_total_count(), EXPECT_FRAMES);
+  /* P1 (S3b): the pool is ext0 + ext1 (EXPECT_FRAMES, unchanged) plus the
+     RAM above 8 GiB the firmware map reported; the total is their sum. */
+  {
+    uint64_t lo, hi, sum = 0;
+    for (int e = 0; frame_extent_bounds(e, &lo, &hi) == 0; e++)
+      sum += (hi - lo) / FRAME_SIZE;
+    EXPECT_EQ((frame_total_count() >= EXPECT_FRAMES), 1);
+    EXPECT_EQ(((uint64_t)frame_total_count() == sum), 1);
+  }
   EXPECT_EQ(frame_total_count(), frame_free_count() + frame_used_count());
   EXPECT_EQ((frame_high_water() >= frame_used_count()), 1);
   EXPECT_EQ((frame_block_count() == frame_total_count() / FRAME_BLOCK_FRAMES), 1);

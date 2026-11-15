@@ -8,6 +8,9 @@
 #include "kmem.h"
 
 extern uint32_t get_cpuid(void);
+extern void uart_puts(const char *s);
+extern void uart_print_hex(uint64_t v);
+extern void print_int(int v);
 
 // Aligning to 4096 page size
 uint64_t cpu_pml4[MAX_CPUS][512] __attribute__((aligned(4096)));
@@ -220,6 +223,240 @@ uint64_t kmem_bad_va(uint64_t va, void *caller) {
   return va;
 }
 
+/* ---------------------------------------------------------------------
+ * P1 (S3a/S3b, docs/cp-address-space.md section 3.9): the firmware memory map
+ * and the direct map above 8 GiB.
+ *
+ * Source 1 is the multiboot1 info block boot.s now keeps (EBX; flags bit 6 =
+ * mmap_addr/mmap_length).  Source 2 is QEMU's fw_cfg "etc/e820" file (I/O
+ * ports 0x510/0x511), read every boot as a cross-check and used when the
+ * multiboot map is missing (open question 6).  RAM above 8 GiB is mapped into
+ * the direct map in 2 MiB WB leaves (0x83, the identity PDs' attribute) from
+ * static PDs, one per GiB up to DMAP_RAM_MAX; holes stay unmapped, so a stray
+ * phys_to_virt() into a hole faults.  frame.c builds its extents above 8 GiB
+ * from kmem_ram_hi_range() -- exactly what was mapped here.
+ * ------------------------------------------------------------------- */
+#define DMAP_HI_PDS ((int)((DMAP_RAM_MAX - 0x200000000ULL) >> 30)) /* 56 */
+static uint64_t dmap_hi_pds[DMAP_HI_PDS][512] __attribute__((aligned(4096)));
+
+#define KMEM_MAP_MAX 64
+struct kmem_range { uint64_t base, len; uint32_t type; };
+static struct kmem_range kmem_map[KMEM_MAP_MAX];
+static int kmem_map_n;
+static struct kmem_range kmem_e820[KMEM_MAP_MAX];
+static int kmem_e820_n;
+#define KMEM_HI_MAX 16
+static uint64_t kmem_hi_lo[KMEM_HI_MAX], kmem_hi_hi[KMEM_HI_MAX];
+static int kmem_hi_n;
+extern uint32_t mb_boot_magic, mb_boot_info; /* boot.s */
+
+static uint32_t km_rd32(const volatile uint8_t *p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+         ((uint32_t)p[3] << 24);
+}
+static uint64_t km_rd64(const volatile uint8_t *p) {
+  return (uint64_t)km_rd32(p) | ((uint64_t)km_rd32(p + 4) << 32);
+}
+
+static int kmem_parse_multiboot(void) {
+  if (mb_boot_magic != 0x2BADB002u || mb_boot_info == 0)
+    return -1;
+  const volatile uint8_t *mbi = (const volatile uint8_t *)phys_to_virt(mb_boot_info);
+  uint32_t flags = km_rd32(mbi);
+  if (!(flags & (1u << 6)))
+    return -2;
+  uint32_t len = km_rd32(mbi + 44);
+  uint32_t addr = km_rd32(mbi + 48);
+  if (!addr || !len || len > 0x10000)
+    return -3;
+  const volatile uint8_t *e = (const volatile uint8_t *)phys_to_virt(addr);
+  uint32_t off = 0;
+  while (off + 24 <= len && kmem_map_n < KMEM_MAP_MAX) {
+    uint32_t sz = km_rd32(e + off);
+    kmem_map[kmem_map_n].base = km_rd64(e + off + 4);
+    kmem_map[kmem_map_n].len = km_rd64(e + off + 12);
+    kmem_map[kmem_map_n].type = km_rd32(e + off + 20);
+    kmem_map_n++;
+    if (sz < 20)
+      break;
+    off += sz + 4;
+  }
+  return kmem_map_n > 0 ? 0 : -4;
+}
+
+static inline void km_outw(uint16_t port, uint16_t v) {
+  __asm__ volatile("outw %0, %1" : : "a"(v), "Nd"(port));
+}
+static inline uint8_t km_inb(uint16_t port) {
+  uint8_t v;
+  __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(port));
+  return v;
+}
+static void fwcfg_read(uint8_t *dst, uint32_t n) {
+  for (uint32_t i = 0; i < n; i++)
+    dst[i] = km_inb(0x511);
+}
+
+static int kmem_parse_fwcfg_e820(void) {
+  uint8_t sig[4];
+  km_outw(0x510, 0x0000);
+  fwcfg_read(sig, 4);
+  if (!(sig[0] == 'Q' && sig[1] == 'E' && sig[2] == 'M' && sig[3] == 'U'))
+    return -1;
+  km_outw(0x510, 0x0019); /* FW_CFG_FILE_DIR */
+  uint8_t b[64];
+  fwcfg_read(b, 4);
+  uint32_t count = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) |
+                   ((uint32_t)b[2] << 8) | b[3];
+  uint32_t size = 0;
+  uint16_t sel = 0;
+  for (uint32_t i = 0; i < count && i < 256; i++) {
+    fwcfg_read(b, 64);
+    const char *want = "etc/e820";
+    int eq = 1;
+    for (int k = 0; k < 9; k++)
+      if ((char)b[8 + k] != want[k]) { eq = 0; break; }
+    if (eq) {
+      size = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) |
+             ((uint32_t)b[2] << 8) | b[3];
+      sel = (uint16_t)(((uint16_t)b[4] << 8) | b[5]);
+    }
+  }
+  if (!sel || size < 20)
+    return -2;
+  km_outw(0x510, sel);
+  for (uint32_t off = 0; off + 20 <= size && kmem_e820_n < KMEM_MAP_MAX; off += 20) {
+    uint8_t r[20];
+    fwcfg_read(r, 20);
+    kmem_e820[kmem_e820_n].base = km_rd64(r);
+    kmem_e820[kmem_e820_n].len = km_rd64(r + 8);
+    kmem_e820[kmem_e820_n].type = km_rd32(r + 16);
+    kmem_e820_n++;
+  }
+  return 0;
+}
+
+/* Is [lo, hi) entirely inside type-1 (RAM) entries of the map in use? */
+int kmem_map_is_ram(uint64_t lo, uint64_t hi) {
+  if (kmem_map_n == 0)
+    return -1; /* no map: unknown */
+  uint64_t cur = lo;
+  int progress = 1;
+  while (cur < hi && progress) {
+    progress = 0;
+    for (int i = 0; i < kmem_map_n; i++) {
+      if (kmem_map[i].type != 1)
+        continue;
+      uint64_t b = kmem_map[i].base, e = kmem_map[i].base + kmem_map[i].len;
+      if (cur >= b && cur < e) {
+        cur = e;
+        progress = 1;
+      }
+    }
+  }
+  return cur >= hi ? 1 : 0;
+}
+
+int kmem_ram_hi_range(int i, uint64_t *lo, uint64_t *hi) {
+  if (i < 0 || i >= kmem_hi_n)
+    return -1;
+  *lo = kmem_hi_lo[i];
+  *hi = kmem_hi_hi[i];
+  return 0;
+}
+
+static void kmem_print_map(const char *tag, const struct kmem_range *m, int n) {
+  for (int i = 0; i < n && i < 24; i++) {
+    uart_puts(tag);
+    uart_print_hex(m[i].base);
+    uart_puts("-");
+    uart_print_hex(m[i].base + m[i].len);
+    uart_puts(" type=");
+    print_int((int)m[i].type);
+    uart_puts("\n");
+  }
+}
+
+static void kmem_map_init(void) {
+  int mrc = kmem_parse_multiboot();
+  int frc = kmem_parse_fwcfg_e820();
+  const char *src = "multiboot";
+  if (mrc != 0 && frc == 0) {
+    /* No usable multiboot map: the e820 table is the map. */
+    for (int i = 0; i < kmem_e820_n; i++)
+      kmem_map[i] = kmem_e820[i];
+    kmem_map_n = kmem_e820_n;
+    src = "fw_cfg-e820";
+  } else if (mrc != 0) {
+    src = "none";
+  }
+  /* Cross-check: every e820 RAM byte above 8 GiB must be RAM in the map in
+     use (and vice versa for the ranges actually mapped below). */
+  int agree = -1;
+  if (frc == 0 && kmem_map_n > 0) {
+    agree = 1;
+    for (int i = 0; i < kmem_e820_n; i++) {
+      if (kmem_e820[i].type != 1 || kmem_e820[i].len == 0)
+        continue;
+      if (kmem_map_is_ram(kmem_e820[i].base,
+                          kmem_e820[i].base + kmem_e820[i].len) != 1)
+        agree = 0;
+    }
+  }
+  uart_puts("[MEMMAP] src=");
+  uart_puts(src);
+  uart_puts(" multiboot_rc=");
+  print_int(mrc);
+  uart_puts(" entries=");
+  print_int(kmem_map_n);
+  uart_puts(" e820_rc=");
+  print_int(frc);
+  uart_puts(" e820_entries=");
+  print_int(kmem_e820_n);
+  uart_puts(" e820_ram_in_map=");
+  print_int(agree);
+  uart_puts("\n");
+  kmem_print_map("[MEMMAP]   ", kmem_map, kmem_map_n);
+  if (frc == 0 && mrc == 0)
+    kmem_print_map("[MEMMAP]   e820 ", kmem_e820, kmem_e820_n);
+
+  /* Map RAM above 8 GiB into the direct map (2 MiB pages fully inside a RAM
+     entry only). */
+  uint64_t mapped = 0;
+  for (int i = 0; i < kmem_map_n && kmem_hi_n < KMEM_HI_MAX; i++) {
+    if (kmem_map[i].type != 1)
+      continue;
+    uint64_t lo = kmem_map[i].base, hi = kmem_map[i].base + kmem_map[i].len;
+    if (lo < 0x200000000ULL)
+      lo = 0x200000000ULL;
+    if (hi > DMAP_RAM_MAX)
+      hi = DMAP_RAM_MAX;
+    lo = (lo + 0x1FFFFFULL) & ~0x1FFFFFULL;
+    hi &= ~0x1FFFFFULL;
+    if (hi <= lo)
+      continue;
+    for (uint64_t pa = lo; pa < hi; pa += 0x200000ULL) {
+      uint32_t g = (uint32_t)(pa >> 30);
+      uint64_t *pd = dmap_hi_pds[g - 8];
+      if (!(dmap_pdpt[g] & 1)) {
+        for (int k = 0; k < 512; k++)
+          pd[k] = 0;
+        dmap_pdpt[g] = kimg_pa(pd) | X64_KTAB;
+      }
+      pd[(pa >> 21) & 0x1FF] = pa | 0x83;
+    }
+    kmem_hi_lo[kmem_hi_n] = lo;
+    kmem_hi_hi[kmem_hi_n] = hi;
+    kmem_hi_n++;
+    mapped += hi - lo;
+  }
+  uart_puts("[DMAP] ram above 8 GiB mapped_mib=");
+  print_int((int)(mapped >> 20));
+  uart_puts(" ranges=");
+  print_int(kmem_hi_n);
+  uart_puts("\n");
+}
+
 /* P1 (S4): the ioremap area.  Bump-allocated 2 MiB windows, PCD|PWT|PS
    (0x9B, the attribute mmu_map_mmio_range always used), never re-pointed and
    never unmapped, so a window is valid in every root forever.  A request
@@ -324,6 +561,7 @@ void mmu_init(void) {
     uart_print_hex(IOREMAP_BASE);
     uart_puts(ok ? " alias=ok\n" : " alias=BAD\n");
   }
+  kmem_map_init();
 }
 
 /**

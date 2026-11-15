@@ -1664,6 +1664,8 @@ void virtio_blk_diag_row(void) {
   print_int(frame_high_water());
   uart_puts(" hole=");
   print_int(frame_hole_allocs());
+  uart_puts(" fr_hi=");
+  print_int((int)frame_hi_allocs());
   uart_puts(" mmio=");
   print_int((int)blk_mmio_changes);
   uart_puts("\n");
@@ -1748,8 +1750,7 @@ int virtio_blk_init(void) {
     /* A BAR inside the frame pool is the whole bug; the extents put the pool
        at 0x20000000-0x70000000 and 0x100000000-0x200000000 with the MMIO
        shadow reserved, so this must read 0. */
-    print_int((win >= FRAME_EXT0_BASE && win < FRAME_EXT0_TOP) ||
-              (win >= FRAME_EXT1_BASE && win < FRAME_EXT1_TOP) ? 1 : 0);
+    print_int(frame_phys_in_pool(win));
     /* And the physical page really is the controller: read CAP through the
        identity map of the window's own physical address and compare with the
        register file.  Equal means "this RAM frame would have been the NVMe

@@ -40,19 +40,35 @@ static void frame_raw_hex(uint64_t v) {
    L65-L73).  Extent 1 is now 4-8 GiB, all of it RAM and all of it
    identity-mapped by PD4..PD7.  frame_init() proves each extent with a
    write/read-back probe and refuses an extent that is not RAM. */
+/* P1 (S3b): the extents are a table, built at frame_init: ext0 and ext1 as
+   before, then (x86_64) one extent per RAM range above 8 GiB that the firmware
+   memory map reported and mmu.c mapped into the direct map (kmem_ram_hi_range),
+   rounded inward to whole 32 MiB blocks.  The bitmap is static and sized for
+   the direct map's ceiling (DMAP_RAM_MAX); only the live prefix is used.
+   Frame indices run through the extents in table order. */
+#define FRAME_EXT0_FRAMES ((FRAME_EXT0_TOP - FRAME_EXT0_BASE) / FRAME_SIZE)
 #ifdef __x86_64__
-#define FRAME_EXT0_FRAMES ((FRAME_EXT0_TOP - FRAME_EXT0_BASE) / FRAME_SIZE)
-#define FRAME_TOTAL_FRAMES \
-  ((FRAME_EXT0_FRAMES) + (FRAME_EXT1_TOP - FRAME_EXT1_BASE) / FRAME_SIZE)
+#define FRAME_EXT_MAX 18 /* ext0, ext1, up to 16 ranges above 8 GiB */
+#define FRAME_POOL_MAX_FRAMES                                         \
+  (((FRAME_EXT0_TOP - FRAME_EXT0_BASE) + (DMAP_RAM_MAX - FRAME_EXT1_BASE)) / \
+   FRAME_SIZE)
 #else
-#define FRAME_EXT0_FRAMES ((FRAME_EXT0_TOP - FRAME_EXT0_BASE) / FRAME_SIZE)
-#define FRAME_TOTAL_FRAMES (FRAME_EXT0_FRAMES)
+#define FRAME_EXT_MAX 1
+#define FRAME_POOL_MAX_FRAMES (FRAME_EXT0_FRAMES)
 #endif
+#define FRAME_WORDS_MAX ((int)(FRAME_POOL_MAX_FRAMES / 64))
 
-#define FRAME_WORDS ((int)(FRAME_TOTAL_FRAMES / 64))
-#define BLOCK_COUNT ((int)(FRAME_TOTAL_FRAMES / FRAME_BLOCK_FRAMES))
+static struct { uint64_t base, top; uint32_t first; } fext[FRAME_EXT_MAX];
+static int fext_n;
+static uint32_t frame_total_n; /* live pool size in frames */
+static int frame_words_n;
+static int block_count_n;
+#define FRAME_TOTAL_FRAMES ((uint64_t)frame_total_n)
+#define FRAME_WORDS frame_words_n
+#define BLOCK_COUNT block_count_n
+static uint64_t frame_hi_allocs_n; /* frames handed out above 8 GiB (S3b) */
 
-static uint64_t frame_bits[FRAME_WORDS];
+static uint64_t frame_bits[FRAME_WORDS_MAX];
 /* M6/L60 tripwire (see frame_watch below): declared here because frame_free()
  * must be able to arm/observe them before their accessor functions appear. */
 static uint64_t frame_watch_phys;
@@ -65,16 +81,12 @@ int frame_ext1_is_ram;             /* L75: extent 1 passed the RAM probe */
 static int block_used;      /* blocks currently claimed as whole units */
 static spinlock_t frame_lock;
 
-/* Frame index -> physical address (kernel VA == phys, both arches). */
+/* Frame index -> physical address. */
 static uint64_t frame_phys_of(int idx) {
-#ifdef __x86_64__
-  if (idx < (int)FRAME_EXT0_FRAMES)
-    return FRAME_EXT0_BASE + (uint64_t)idx * FRAME_SIZE;
-  return FRAME_EXT1_BASE +
-         (uint64_t)(idx - (int)FRAME_EXT0_FRAMES) * FRAME_SIZE;
-#else
-  return FRAME_EXT0_BASE + (uint64_t)idx * FRAME_SIZE;
-#endif
+  for (int e = fext_n - 1; e > 0; e--)
+    if ((uint32_t)idx >= fext[e].first)
+      return fext[e].base + (uint64_t)((uint32_t)idx - fext[e].first) * FRAME_SIZE;
+  return fext[0].base + (uint64_t)idx * FRAME_SIZE;
 }
 
 /* Physical address -> frame index.  *ok is set to 0 when the address is
@@ -83,12 +95,9 @@ static int frame_index_of(uint64_t phys, int *ok) {
   *ok = 1;
   if (phys & (FRAME_SIZE - 1))
     goto bad;
-  if (phys >= FRAME_EXT0_BASE && phys < FRAME_EXT0_TOP)
-    return (int)((phys - FRAME_EXT0_BASE) / FRAME_SIZE);
-#ifdef __x86_64__
-  if (phys >= FRAME_EXT1_BASE && phys < FRAME_EXT1_TOP)
-    return (int)FRAME_EXT0_FRAMES + (int)((phys - FRAME_EXT1_BASE) / FRAME_SIZE);
-#endif
+  for (int e = 0; e < fext_n; e++)
+    if (phys >= fext[e].base && phys < fext[e].top)
+      return (int)(fext[e].first + (uint32_t)((phys - fext[e].base) / FRAME_SIZE));
 bad:
   *ok = 0;
   return -1;
@@ -158,8 +167,57 @@ void frame_reserve_range(uint64_t lo, uint64_t hi) {
   spinlock_release_irqrestore(&frame_lock, flags);
 }
 
+static void frame_ext_add(uint64_t base, uint64_t top) {
+  fext[fext_n].base = base;
+  fext[fext_n].top = top;
+  fext[fext_n].first = frame_total_n;
+  fext_n++;
+  frame_total_n += (uint32_t)((top - base) / FRAME_SIZE);
+}
+
 void frame_init(void) {
   spinlock_init(&frame_lock);
+  fext_n = 0;
+  frame_total_n = 0;
+  frame_ext_add(FRAME_EXT0_BASE, FRAME_EXT0_TOP);
+#ifdef __x86_64__
+  frame_ext_add(FRAME_EXT1_BASE, FRAME_EXT1_TOP);
+  /* P1 (S3b): RAM above 8 GiB from the firmware memory map, exactly the
+     ranges mmu.c mapped into the direct map, rounded inward to whole 32 MiB
+     blocks (the block layer's unit).  L75 lesson (the pool once handed out
+     the NVMe BAR as RAM): an extent is accepted only if the map calls ALL of
+     it RAM and three write/read-back probes through the direct map agree;
+     it can never touch the 32-bit PCI hole (it starts above 8 GiB). */
+  {
+    extern int kmem_ram_hi_range(int i, uint64_t *lo, uint64_t *hi);
+    extern int kmem_map_is_ram(uint64_t lo, uint64_t hi);
+    extern uint64_t frame_ram_probe(uint64_t phys);
+    for (int i = 0; fext_n < FRAME_EXT_MAX; i++) {
+      uint64_t lo, hi;
+      if (kmem_ram_hi_range(i, &lo, &hi) != 0)
+        break;
+      lo = (lo + FRAME_BLOCK_SIZE - 1) & ~((uint64_t)FRAME_BLOCK_SIZE - 1);
+      hi &= ~((uint64_t)FRAME_BLOCK_SIZE - 1);
+      uint64_t room = (FRAME_POOL_MAX_FRAMES - frame_total_n) * FRAME_SIZE;
+      if (hi > lo && hi - lo > room)
+        hi = lo + (room & ~((uint64_t)FRAME_BLOCK_SIZE - 1));
+      if (hi <= lo || lo < 0x200000000ULL)
+        continue;
+      uint64_t mid = ((lo + hi) / 2) & ~0x1FFFFFULL;
+      int ram = kmem_map_is_ram(lo, hi) == 1 && frame_ram_probe(lo) &&
+                frame_ram_probe(mid) && frame_ram_probe(hi - FRAME_SIZE);
+      uart_puts("[FRAME] hi ext=0x");
+      uart_print_hex(lo);
+      uart_puts("-0x");
+      uart_print_hex(hi);
+      uart_puts(ram ? " ram=1\n" : " ram=0 -- refused (not RAM per map/probe)\n");
+      if (ram)
+        frame_ext_add(lo, hi);
+    }
+  }
+#endif
+  frame_words_n = (int)(frame_total_n / 64);
+  block_count_n = (int)(frame_total_n / FRAME_BLOCK_FRAMES);
   for (int i = 0; i < FRAME_WORDS; i++)
     frame_bits[i] = 0;
   frame_hint = 0;
@@ -218,6 +276,14 @@ void frame_init(void) {
     frame_reserve_range(img_lo, img_hi);
   }
 
+  /* P1 (S3b): start the rotating hint in RAM above 8 GiB when there is any.
+     Those frames have no identity alias in ANY root (kernel root included),
+     so every frame handed out first is also a tripwire for a leftover
+     physical-address-as-pointer, and the guest provably uses its extra RAM.
+     The v1 block layer still scans from block 0 (ext0) upward. */
+  if (fext_n > 2)
+    frame_hint = fext[2].first / 64;
+
   /* Boot log line (design section 2.1): the pool constants are VMM
      constants; this line is their validation in every boot's log.
      reserved= is the kernel-image reservation above (non-zero). */
@@ -234,6 +300,15 @@ void frame_init(void) {
   uart_print_hex(FRAME_EXT1_BASE);
   uart_puts("-0x");
   uart_print_hex(FRAME_EXT1_TOP);
+  uart_puts(" extents=");
+  print_int(fext_n);
+  uart_puts(" hi_mib=");
+  {
+    uint64_t hb = 0;
+    for (int e = 2; e < fext_n; e++)
+      hb += fext[e].top - fext[e].base;
+    print_int((int)(hb >> 20));
+  }
 #endif
   uart_puts(" reserved=");
   print_int(frame_used);
@@ -293,6 +368,8 @@ uint64_t frame_alloc(void) {
            it means a future extent edit cannot do it silently. */
         if (res >= 0x80000000ULL && res < 0x100000000ULL)
           frame_hole_allocs_n++;
+        if (res >= 0x200000000ULL)
+          frame_hi_allocs_n++; /* P1 (S3b): RAM above 8 GiB in use */
         break;
       }
     }
@@ -402,18 +479,29 @@ uint64_t frame_alloc_contig(int n) {
           run = 0;
           continue;
         }
+        /* P1 (S3b): a run must be physically contiguous, so it may not
+           cross into the next extent unless the two extents touch. */
+        if (run) {
+          for (int x = 1; x < fext_n; x++)
+            if (fext[x].first == i && fext[x].base != fext[x - 1].top) {
+              run = 0;
+              break;
+            }
+        }
         if (run == 0)
           run_start = i;
         if (++run == (uint32_t)n) {
           for (uint32_t j = run_start; j < run_start + (uint32_t)n; j++)
             frame_bits[j / 64] |= (1ULL << (j % 64));
           frame_hint = (run_start + (uint32_t)n) / 64;
-          if (frame_hint >= FRAME_WORDS)
+          if (frame_hint >= (uint32_t)FRAME_WORDS)
             frame_hint = 0;
           frame_used += (uint32_t)n;
           if (frame_used > frame_high)
             frame_high = frame_used;
           res = frame_phys_of((int)run_start);
+          if (res >= 0x200000000ULL)
+            frame_hi_allocs_n += (uint32_t)n;
           break;
         }
       }
@@ -453,13 +541,22 @@ int frame_high_water(void) {
 int frame_extent_bounds(int idx, uint64_t *lo, uint64_t *hi) {
   if (!lo || !hi)
     return -1;
-#ifdef __x86_64__
-  if (idx == 0) { *lo = FRAME_EXT0_BASE; *hi = FRAME_EXT0_TOP; return 0; }
-  if (idx == 1) { *lo = FRAME_EXT1_BASE; *hi = FRAME_EXT1_TOP; return 0; }
-#else
-  if (idx == 0) { *lo = FRAME_EXT0_BASE; *hi = FRAME_EXT0_TOP; return 0; }
-#endif
-  return -1;
+  if (idx < 0 || idx >= fext_n)
+    return -1;
+  *lo = fext[idx].base;
+  *hi = fext[idx].top;
+  return 0;
+}
+
+/* P1 (S3b): frames ever handed out above 8 GiB (single + contiguous). */
+uint64_t frame_hi_allocs(void) { return frame_hi_allocs_n; }
+
+/* Is `phys` inside any pool extent?  (The BAR-in-pool tripwire.) */
+int frame_phys_in_pool(uint64_t phys) {
+  for (int e = 0; e < fext_n; e++)
+    if (phys >= fext[e].base && phys < fext[e].top)
+      return 1;
+  return 0;
 }
 
 /* L75: frames handed out outside RAM (must stay 0; see FRAME_EXT1_BASE). */
@@ -596,7 +693,7 @@ int frame_reclaim_to_free_frames(int want) {
 
 #ifdef KERNEL_MODE_UNIT_TEST
 /* Test-only: snapshot / fake-full / restore for the exhaustion path. */
-static uint64_t frame_test_snapshot[FRAME_WORDS];
+static uint64_t frame_test_snapshot[FRAME_WORDS_MAX];
 static int frame_test_snap_used;
 static int frame_test_snap_hint;
 
