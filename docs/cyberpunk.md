@@ -1,11 +1,12 @@
 # Cyberpunk 2077 on HobbyOS — the Proton track
 
-Status: **v0 — proposed, nothing executing.** Planning document, written
-2026-11-14. Every statement about HobbyOS below was grepped out of this tree on
-that date and carries a `path:line`. Every statement about the game, Wine,
-vkd3d-proton or Venus is either a published fact or marked **verify** — and
-**a verify is a task, not a fact**. Most of them close in P0, which exists
-precisely so that no later milestone is planned on memory.
+Status: **v1 — P0 closed (GO for Venus), wave 1 merged, wave 2 executing.**
+Planning + execution document; v0 written 2026-11-14, v1 2026-11-15. **§0.2
+records what P0 and wave 1 measured and is binding where it disagrees with
+older text below.** Every statement about HobbyOS carries a `path:line`; every
+statement about the game, Wine, vkd3d-proton or Venus is either measured (with
+its evidence doc) or marked **verify** — and **a verify is a task, not a
+fact**.
 
 Audience: agent lanes + maintainers. Read §0, §5 and §7 before touching
 anything; §7.3 is binding once P0 closes.
@@ -93,6 +94,145 @@ Linux-shaped address space; P2 makes it run Windows console programs; P5/P6
 give it Vulkan, which every future game and the browser can use; P7 fixes the
 present path RimWorld is currently bottlenecked on.
 
+### 0.2 v1 status — what P0 and wave 1 established (binding)
+
+Evidence docs (all on branch `cyberpunk`): `docs/cp-p0-host.md` (host-native
+column), `docs/cp-p0-guest.md` (Linux-guest-on-Venus column),
+`docs/cyberpunk-evidence.md` + `docs/cp-pins.md` (Wine), `docs/cp-address-space.md`
+(identity-map inventory + direct-map design), `docs/cp-ext2.md` (ext2).
+
+**Machines.** GPU host is `strix` (192.168.0.123): Ryzen AI MAX+ 395, 93 GB,
+**RX 9070 XT (RDNA4)** + 8060S iGPU, QEMU 10.2.1, virglrenderer **1.2.0**
+(1.10.0 was the soname) built with Venus. KVM build/test box for HobbyOS gates
+is `linuxci` (EPYC 7513, AVX2, no AVX-512, no render node). The game is the
+user's **Steam** build 2.5 (app 1091500, 62 GB on an NFS share).
+
+**P0 go/no-go: GO for Venus.** Low preset, RT/FG off, FSR 2.1 Auto (the
+preset's own default), 60 s at the main menu:
+
+| | host native (Proton, 9070 XT) | Linux guest on Venus | HobbyOS |
+|---|---|---|---|
+| menu fps median @720p | 388–399 | **142.8 / 144.4** | — |
+| menu fps median @1080p | 393.5 | 144.1 | — |
+| menu fps p90 @720p | 284–322 | 59.0 / 55.4 | — |
+| built-in benchmark median / 1%-low @720p | 141.6–142.9 / 74.1–76.1 | not run (user: skip) | — |
+| launch → menu (warm) | 36.7–47.6 s | 41.3–41.9 s | — |
+| game RSS at menu / peak | 2.2 / 3.9–4.0 GiB | 2.1 GiB | — |
+| game threads at menu | 90 | 68 | — |
+
+The guest median is identical at 720p and 1080p → the guest is bound by the
+present path (QEMU display), not by Venus; that is P7's target. GPU-heavy D3D12
+work runs at 98–99 % of native through Venus; Venus adds ~64 µs per submit and
+~225 µs per fence round trip (276 vs 48–53 µs). The 15 fps trigger (§1.4) did
+**not** fire, and no vkd3d-proton-*required* feature is missing under Venus
+(59/231 extensions are not forwarded; visible loss: FL 12_1 instead of 12_2,
+no mesh shaders, no DGC/descriptor-buffer/memory-budget).
+
+**Facts that change the plan** (each folded into the section named):
+
+1. **No GOG build needed** (§1.5): the Steam build reaches the menu with no
+   reachable Steam client (`[S_API FAIL]`, game continues). A fresh profile
+   shows three first-run screens — user agreement, optional CDPR account offer,
+   telemetry consent; P8's launcher must start from a profile in which the
+   user has already made those choices, never automate them.
+2. **AVX is not required to reach the menu** (AD-4): with every AVX-family
+   CPUID bit masked and no AVX xstate, the guest reaches and renders the menu
+   at the same fps. The exe has 1,641 ymm / 339 FMA instructions and
+   cpuid/xgetbv dispatch, so gameplay without AVX stays unverified. XSAVE
+   (already implemented in lane C1-cpu) is a correctness/performance item, not
+   a gate for P8.
+3. **No audio device needed** (AD-9): menu reached with no device at all
+   (guest) and with Wine's audio drivers disabled (host).
+4. **The kernel image does not have to move** (AD-3): it is linked/loaded 1:1
+   at `0x70000000` (`linker_x64.ld:7`, measured end `0x75c72b90`). Nothing Wine
+   needs intersects `[0x70000000, 0x78000000)`: preloader reserves
+   `0x10000–0x110000`, `0x110000–0x68000000`, `0x7f000000–0x7fff0000`,
+   `0x7ffffe000000–0x7fffffff0000` (Wine `loader/preloader.c:115-118`); TEB block
+   `0x7fde0000`, KUSER `0x7ffe0000`. The game exe is DYNAMIC_BASE (0x8160) but
+   Wine loads it at its preferred 0x140000000. Design: keep the image as a
+   supervisor-only hole (K0), direct map at `0xffff800000000000`, ioremap at
+   `0xffff808000000000`; 23 non-mechanical items < 50, so the AD-3 fallback
+   does not fire — and it would not suffice anyway: the game uses **all of
+   0–8 GiB** (4,091 of the first 4,096 MiB mapped/reserved; exe at 5 GiB; a
+   15.4 GiB reservation from 6.6 GiB).
+5. **Address-space scale** (F1): 141.5 GiB of VA at the menu (137 GiB
+   reserved, not committed), largest single reservation 63.3 GiB, highest
+   address `0x7fffffff0000`. Compat ASes must support ~64 GiB single
+   `PROT_NONE` reservations and ≥ 141 GiB total without committing frames.
+6. **RAM** (§4 Memory, R4): the x64 frame pool is fixed extents
+   [0.5, 1.75) + [4, 8) GiB = **5.25 GiB** whatever `-m` says
+   (`src/include/frame.h:36-39`); no firmware memory map is parsed. A ≥16 GiB
+   guest needs P1's direct map **plus** a multiboot memory-map parser.
+7. **No `swapgs` existed** (§3.2): both GS MSRs held `&cpu_locals[cpu]`. Lane
+   C1-cpu introduced a full swapgs discipline (`trap_gs_fixup`, three
+   iretq-to-ring-3 sites) before implementing `ARCH_SET_GS`.
+8. **`MAP_FIXED_NOREPLACE` returns `-EINVAL`** (`linux_compat_mem.c:195`); Wine
+   issues 1,335 of them during `wineboot` and concludes the AS ends at 4 GiB.
+   Required semantics: NOREPLACE over an existing mapping or the kernel hole →
+   **EEXIST**; `MAP_FIXED` into the hole → **ENOMEM**; never EINVAL (Wine
+   `virtual.c:1535-1556`).
+9. **KUSER_SHARED_DATA is a server-written `MAP_SHARED` memfd page** passed over
+   SCM_RIGHTS and refreshed every ≤16 ms (Wine `server/mapping.c`, `fd.c`); Wine
+   `exit(1)`s if it cannot map it at `0x7ffe0000`. P2 therefore needs low VA
+   **and** coherent shared memfd/tmpfs pages.
+10. **Measured Wine syscall gaps** replace v0's guesses (§3.2/§4). Console Wine
+    (`wineboot -i`, `cmd /c echo`): 92 distinct syscalls, 11 unhandled —
+    `symlink chmod fchdir fstatfs ftruncate sendmmsg getxattr fgetxattr
+    fsetxattr fremovexattr utimensat` — plus the behaviour gaps
+    `MAP_FIXED_NOREPLACE` and `ARCH_SET_GS`. **`fchdir` is critical**: every
+    `NtQueryDirectoryFile` uses it. The game under Proton adds
+    `PR_SET_SYSCALL_USER_DISPATCH` (every thread), `userfaultfd` (every Wine
+    process; our 5.4-header build compiles it out), `eventfd2`, `inotify_*`,
+    `process_vm_readv` (wineserver) and a heavy `getrusage(RUSAGE_THREAD)`.
+    `signalfd`/`io_uring` are never used.
+11. **Sync** (AD-8): upstream Wine 11 has only ntsync or server-side sync; our
+    5.4 kernel headers compile ntsync out, so server-side sync is guaranteed
+    with no kernel work. Its measured cost on the host: benchmark −23 %, menu
+    −38 % (one run) — the fast-sync trigger in §1.4 should be expected to fire
+    after P8.
+12. **Mappings vs the 64 MiB cap** (gap #7): archives are never mmapped (read,
+    single `read()`s up to 171.6 MB, 1.35 GB to the menu); the largest
+    game-file mapping is 3.0 MiB. What hits the cap is Wine's largest memfd
+    (exactly 64.0 MiB) and GPU buffer mappings (up to 192 MiB). The exe is
+    66.7 MB but mapped section-wise.
+13. **Process scale**: 15–16 processes and 173–190 threads at the menu on the
+    host vs `MAX_PROCESSES 192` — raise it before P8.
+14. **Venus host recipe** (P6): needs an LD_PRELOAD shim adding `DRM_RDWR` to
+    the render server's dma-buf exports (`tools/cp/p0guest/dmabuf-rdwr-shim.c`;
+    without it every guest `vkMapMemory` fails), GPU ordering via the host's
+    device-select env (the `!` exclusive form breaks Venus on the host), and no
+    `-daemonize`. vkd3d-proton writes its pipeline cache next to the exe /
+    the CWD unless `VKD3D_SHADER_CACHE_PATH` is set; Steam's `steamclient.so`
+    overrides `MESA_SHADER_CACHE_DIR` — HobbyOS's launcher sets both and the DLL
+    overrides itself.
+15. **Wine build** (AD-1/AD-2): Wine 11.0 (GPG-verified) builds 64-bit with
+    plain clang (PE side: clang + lld-link, no MinGW) against the glibc 2.31
+    sysroot plus focal's gcc-10 libgcc (gcc-15 libgcc pulls a GLIBC_2.35
+    symbol and silently produces a fixed-address preloader). Max requirement
+    **GLIBC_2.29** — the 2.31 pin holds. Runs `wineboot -i` and
+    `cmd /c echo hello` on the host inside a pinned-only chroot. Staged tree
+    202 MiB at `/CP/WINE`.
+16. **ext2** (AD-7, P3): read/write ext2 at `/EXT` on **NVMe namespace 2** of the
+    boot controller (`-device nvme-ns,nsid=2`, Makefile `CPDATA`), proven by a
+    two-boot gate with host `e2fsck -fn` clean; mmap/exec of ext2 files, locks,
+    chmod/utimens and `VFS_PATH_MAX` > 256 are still open.
+17. **Pre-existing defects found** (not caused by this work; each verified on
+    base `f7a51cfa`): `linux_probe_join` fails (`E clone failed errno=22` —
+    compat clone refuses non-thread clones; kernel trace lines splice into probe
+    output); `make test_intel` wedges after `MD5SUM_T.BIN` with no FAIL lines;
+    `run_unit_tests_intel.sh` has 3 failures (`virtio_gpu_test.c:213`, `:243`,
+    an interrupt-masking budget test); `make host_tests` fails two board tests
+    for a missing `gaming.md`. These are recorded, not blocking; the T3 wave
+    cannot be an acceptance signal until the wedge is fixed.
+
+**Lane status (2026-11-15).** Merged to `cyberpunk`: C1-as (design), C2-wine
+(pins/build/evidence), C3-ext2 (ext2 rw), C7-p0host, C7-p0guest. **C1-cpu**
+(XSAVE/AVX, F2 frames, swapgs + `ARCH_SET_GS`, SIGCHLD default-ignore, SFMASK)
+is implemented and its new probes pass, but it is **held**: an A/B on
+`-cpu host` shows `linux_probe_tramp_sig` T2 (SA_RESTART-restarted FUTEX_WAIT
+returns EAGAIN) passes on base and fails on the lane twice — a lane regression
+being fixed. Wave 2 (§7.2b) proceeds in parallel.
+
 ---
 
 ## 1. Track selection
@@ -134,7 +274,8 @@ The software stack ends in a Vulkan driver. Which one is the real decision.
 
 ### 1.4 Runners-up and revisit triggers
 
-- **Native context instead of Venus.** Trigger: P0's Linux-guest-on-Venus
+- **Native context instead of Venus.** *(P0: did not fire — 143–144 fps
+  median, no required feature missing; §0.2.)* Trigger: P0's Linux-guest-on-Venus
   baseline is below 15 fps at 1280×720 Low, **or** P6 shows Venus missing a
   feature vkd3d-proton requires. Then native context becomes the P6 target and
   the `/dev/gpu` amendment (F3) is redrawn around the virtgpu DRM UAPI.
@@ -149,8 +290,11 @@ The software stack ends in a Vulkan driver. Which one is the real decision.
 ### 1.5 Licenses
 
 - Cyberpunk 2077: proprietary (CD PROJEKT RED EULA). **Never committed.** Only
-  paths, sizes and hashes appear in the tree. Use the GOG build (no DRM, no
-  client needed); install it **on the host**, never inside the guest.
+  paths, sizes and hashes appear in the tree. Either build works: the user's
+  copy is the **Steam** build, which P0 measured reaching the menu with no
+  reachable Steam client (§0.2 item 1). Never circumvent DRM, never replace or
+  patch game/Steam files. The game is installed **on the host** (served over
+  NFS), never inside the guest.
 - Wine: LGPL-2.1-or-later. vkd3d-proton: LGPL-2.1. DXVK: zlib. Mesa and
   virglrenderer: MIT. glibc: LGPL-2.1-or-later (already pinned for RimWorld).
 - All of the above ship as fetch scripts with sha256s, not as binaries in git,
@@ -170,22 +314,24 @@ gamepad in v1, multiplayer (there is none), and shipping any game asset.
 
 ## 2. Pinned sources & provenance
 
-Nothing is pinned yet. P0 fills this table; until a row has a sha256 it is a
-plan, not a pin.
+Pinned in P0 by lane C2-wine (`docs/cp-pins.md`, `tools/cp/fetch-runtime.sh`,
+all sha256-verified, idempotent). Rows still marked "plan" have no pin yet.
 
-| Component | Choice | Pin (P0) | Notes |
+| Component | Choice | Pin | Notes |
 |---|---|---|---|
-| Game | GOG build, current patch on the user's account | version string + `Cyberpunk2077.exe` sha256 | record `objdump -p` image base and `DllCharacteristics` (DYNAMIC_BASE?) |
-| Wine | upstream stable, 64-bit Unix side only | tarball + sha256 + GPG | built against the glibc 2.31 sysroot (AD-2) — **verify** it builds there |
-| vkd3d-proton | upstream release (prebuilt PE DLLs) | tarball + sha256 | `d3d12.dll`, `d3d12core.dll` |
-| DXVK | upstream release | tarball + sha256 | `dxgi.dll` only (and `d3d11.dll` for the P5 DXVK probe) |
+| Game | user's Steam build, game 2.5 (app 1091500) | `Cyberpunk2077.exe` 66,704,848 B; ImageBase 0x140000000, DllCharacteristics 0x8160 (DYNAMIC_BASE) | never in git; read-only on NFS |
+| Wine | **11.0** (stable), 64-bit Unix side only | sha256 `c07a6857…6e0701`, GPG-verified (key `DA23579A…AF17519D`) | built with clang against glibc 2.31 + focal libgcc-10; max GLIBC_2.29 |
+| libgcc (sysroot) | focal `libgcc-10-dev` 10.5.0 | sha256 `ebe5e967…b897` | gcc-15's libgcc pulls GLIBC_2.35 |
+| vkd3d-proton | **3.1** release (prebuilt PE DLLs) | sha256 `b85ea821…120b` | **verify**: Proton Experimental bundles 3.2.0 / `2576c0b4a`; re-pin to the then-latest release before P5 |
+| DXVK | **3.1.1** | sha256 `40565b4a…f54e608` | `dxgi.dll` (and `d3d11.dll` for the P5 DXVK probe) |
 | Mesa | 26.2.6 — already pinned (`docs/rimworld-plan.md` §2) | existing sha256 | new build: `-Dvulkan-drivers=swrast,virtio` (lavapipe needs LLVM; venus does not) |
 | LLVM (for lavapipe) | 21.1.8 — already in `third_party/llvm-21.1.8` | existing | runtime JIT ⇒ `PROT_EXEC` anonymous mappings (verify present) |
 | libX11/libxcb + Xi, Xrandr, Xrender, Xfixes, Xcursor, Xext, Xinerama | upstream releases | tarballs + sha256 | built against glibc 2.31 (RimWorld AD-11: never against HobbyOS headers) |
-| Vulkan loader | upstream `Vulkan-Loader` release | tarball + sha256 | `libvulkan.so.1` for winevulkan |
-| glibc | 2.31 set — already pinned | existing | **verify** Wine's and Mesa's minimum glibc against it |
-| Host virglrenderer | 1.10.0 present; needs a build with Venus enabled (verify current build flags) | host-side recipe | `tools/cp/host-venus.sh` |
-| Host QEMU | 10.2.1 present | — | Venus device flags verified in P0 (Appendix B) |
+| Vulkan loader + headers | `vulkan-sdk-1.4.363.0` | loader `941eff55…a6f7`, headers `4a078be1…7e7f7e` | `libvulkan.so.1` for winevulkan |
+| glibc | 2.31 set — already pinned | existing | Wine needs ≤ GLIBC_2.29 (measured); Mesa: verify in P5 |
+| Host virglrenderer | **1.2.0** (Ubuntu package; soname 1.10.0), Venus compiled in | — | plus the dma-buf `DRM_RDWR` shim (§0.2 item 14) |
+| Host QEMU | 10.2.1 | — | recipe: `tools/cp/p0guest/host-venus.sh` |
+| Guest reference | Ubuntu 26.04 cloud image (GPG + SHA256 verified), Mesa 26.0.8 venus | — | the Linux-guest column only |
 
 ---
 
@@ -210,16 +356,18 @@ plan, not a pin.
 | QEMU x64 | `-smp 8 -m 12288M`, q35, NVMe disk, virtio-net, virtio-tablet | `Makefile:71`, `Makefile:332` |
 | User VA | `USER_VA_BASE 0x1000000000` (64 GiB); x64 identity map covers 0–8 GiB and the user window must clear it | `src/include/vm.h:11-27` |
 | FPU | FXSAVE64/FXRSTOR64; no XSAVE, no `CR4.OSXSAVE`, no XCR0 | `src/kernel/arch/x64/fpu.c:9-60` |
-| GS | kernel uses `swapgs` + `KERNEL_GS_BASE` for per-CPU data; `L_ARCH_SET_GS`/`GET_GS` defined but unhandled | `src/kernel/arch/x64/trap.c:5917-5938`, `src/include/linux_syscall.h:254-257` |
+| GS | *(v1 correction)* **no `swapgs` anywhere**: GS_BASE = KERNEL_GS_BASE = `&cpu_locals[cpu]`, `syscall_entry` uses `gs:` directly; `L_ARCH_SET_GS`/`GET_GS` defined but unhandled. Lane C1-cpu adds the swapgs discipline (held, §0.2) | `src/kernel/arch/x64/trap.c:5934-5941`, `:6058-6059`, `src/include/linux_syscall.h:254-257` |
+| Kernel image | linked/loaded 1:1 at `0x70000000`, measured end `0x75c72b90` (92 MiB, mostly `.bss`) | `linker_x64.ld:7`, `docs/cp-address-space.md` §1.1 |
+| Frame pool | fixed extents [0.5, 1.75) + [4, 8) GiB = 5.25 GiB; no RAM map parsed; RAM above 8 GiB unused | `src/include/frame.h:36-39` |
 | Present syscalls | `epoll_*`, `timerfd_*`, `memfd_create`, `sigaltstack`, `tgkill`, AF_UNIX + `SCM_RIGHTS` | `src/kernel/linux_compat*.c`, `src/kernel/fs.c:3693` |
-| Absent syscalls (grep) | `eventfd`, `futex_waitv`, `inotify_*`, `signalfd`, `io_uring` — no hits | grep of `src/kernel` |
+| Absent syscalls | *(v1: measured, replaces the v0 guess)* console Wine: `symlink chmod fchdir fstatfs ftruncate sendmmsg getxattr fgetxattr fsetxattr fremovexattr utimensat`; game under Proton adds `PR_SET_SYSCALL_USER_DISPATCH`, `userfaultfd`, `eventfd2`, `inotify_*`, `process_vm_readv` (ext2 lane since added `ftruncate`/`fdatasync`/`fstatfs` for all fds) | `docs/cyberpunk-evidence.md` §6, `docs/cp-p0-host.md` |
 | File mappings | `VM_OBJ_MAX_BYTES 64 MiB` per mapped object; NFS-backed objects exist (`VM_OBJ_NFS`) | `src/include/vm.h:160`, `:201` |
 | Storage | FAT16 `disk.img`; read-only NFSv3; no writable symlink-capable FS | `README.md`, `src/kernel/nfs.c` |
 | GPU ABI | `/dev/gpu` M1: capset 1 (VIRGL), contexts, 3D resources, fenced submit, transfers; explicitly no blobs, no resource mmap, no async fences | `docs/gpu-abi.md` §1, `src/include/gpu_abi.h:18-32` |
 | X | `XHOBBY.BIN` (X.Org-derived) + IceWM; compat `libX11.so.6` is a hand-written shim of the RimWorld-measured symbol set | `README.md`, `src/user/xcompat/libx11.c`, `required-libx11.txt` |
 | Audio | silent by decision; `alsa_null.c`, `pulse_null.c` | `docs/audio.md`, `src/user/xcompat/` |
 | Precedent perf | RimWorld main menu at 1920×1080 through virgl at ~1 fps, ~540 s launch-to-menu; present-path work moved a probe from 1.61 to 7.40 fps | `docs/rimworld-plan.md` (status 2026-11-07), `docs/l88-fps-report.md:136` |
-| Host | Linux workstation, AMD Strix Halo Radeon 8060S, amdgpu render node, QEMU 10.2.1, virglrenderer 1.10.0, KVM | `docs/rimworld-virgl-plan.md` §2.1 |
+| Host | `strix` 192.168.0.123: Ryzen AI MAX+ 395, 93 GB, RX 9070 XT (renderD129) + 8060S (renderD128), QEMU 10.2.1, virglrenderer 1.2.0 with Venus, KVM | `docs/cp-p0-guest.md` §1 |
 
 ### 3.3 What P0 must measure before anything is designed
 
@@ -294,14 +442,37 @@ range. Native processes keep `USER_VA_BASE` unchanged. Fallback (dormant): keep
 the identity map but carve the first 2 GiB out of it for compat processes only.
 Trigger: the inventory shows >50 identity-dependent call sites that cannot be
 mechanically converted.
+*v1 resolution (`docs/cp-address-space.md`):* the kernel image stays at its
+`0x70000000` 1:1 alias (K0) and is a fixed supervisor-only hole
+`[0x70000000, CP_KHOLE_HI ≤ 0x78000000)` in compat ASes; direct map at
+`0xffff800000000000` (PML4[256], reusing today's 0–8 GiB page directories),
+ioremap at `0xffff808000000000`; helpers `phys_to_virt`/`virt_to_phys`/
+`kimg_pa`/`ioremap` (identity on ARM); 2 MiB pages only. Inventory by clang
+AST cast scan: 208 class-A (mechanical), 23 non-mechanical (11 sites + 12
+design items) → fallback does not fire, and the 2 GiB carve-out would be
+insufficient anyway (the game uses all of 0–8 GiB, §0.2 item 4). Migration
+S0–S8 per that doc. K1 (higher-half kernel, needs a new boot protocol: the
+kernel boots as ELF32 multiboot1) trigger: any required Wine/game mapping
+inside the hole, or the image outgrowing 0x78000000. Kernel-mode faults on
+compat user pages must be demand-filled below `USER_VA_BASE` too (today gated
+on `cr2 >= USER_VA_BASE`, `trap.c:5646`), and low-linked `ET_EXEC` must be
+accepted (`elf_loader.c:488`).
 
-**AD-4 — XSAVE with XCR0 = x87 | SSE | AVX in v1; AVX-512 masked at QEMU.**
-`CR4.OSXSAVE=1`, area size from CPUID leaf `0xD`, `XSAVE`/`XRSTOR` on context
+**AD-4 — XSAVE with XCR0 = x87 | SSE | AVX in v1; the kernel's XCR0 masks
+AVX-512.** `CR4.OSXSAVE=1`, area size from CPUID leaf `0xD`, `XSAVE`/`XRSTOR` on context
 switch (XSAVEOPT/XSAVES are later optimisations), Linux-shaped signal frames
 with the extended state and `FP_XSTATE_MAGIC1/2`, `AT_HWCAP2` and
-`AT_MINSIGSTKSZ` in auxv. QEMU runs `-cpu host` minus the AVX-512 feature
-bits so the area stays ~1 KiB. ARM is untouched. The kernel C code stays
-`-mno-avx` (`src/kernel/arch/x64/fpu.c:9`).
+`AT_MINSIGSTKSZ` in auxv. *(v1)* QEMU-side AVX-512 masking is unnecessary:
+XCR0 never enables AVX-512 state, so the area is 832 bytes on any CPU and
+XGETBV-checking software never selects it; `X64_KVM_CPU='-cpu host,-avx512f'`
+remains available. KVM boots default to `-cpu host` (`X64_KVM_CPU`), TCG is
+untouched, `-cpu qemu64` restores the FXSAVE path. Wine reads extended state
+only via MAGIC1 at fpregs+464 and a standard-format header at +512, so the
+48 `sw_reserved` bytes must be zero when no XSAVE area follows, and ntdll runs
+XSAVE/XRSTOR in user mode using CPUID.0xD ∩ `xgetbv(0)`. P0 showed AVX is not
+needed to reach the menu (§0.2 item 2): this AD is required for correctness
+of AVX-using threads, not as a P8 gate. ARM is untouched. The kernel C code
+stays `-mno-avx` (`src/kernel/arch/x64/fpu.c:9`).
 
 **AD-5 — Vulkan through Mesa Venus over a HobbyOS renderer backend; lavapipe
 for bring-up; no DRM UAPI in the kernel (yet).** Mesa's venus driver
@@ -335,9 +506,25 @@ large files and POSIX permissions, and the host can inspect it with standard
 tools. Runner-up: NFSv3 write operations (CREATE/WRITE/SYMLINK/RENAME/REMOVE/
 SETATTR/COMMIT) plus NLM for locks. Trigger to switch: the ext2 driver is still
 unreliable at the end of P3.
+*v1:* the data disk is **NVMe namespace 2** of the boot controller
+(`-device nvme-ns,drive=cpdata,nsid=2`, attached when `CPDATA` — default
+`cpdata.img` — exists), made by `tools/cp/mkcpdata.sh` (`mke2fs -t ext2 -b 4096
+-I 256 -O ^dir_index -m 0`), mounted at **`/EXT`**. Feature policy: unknown
+INCOMPAT (anything but FILETYPE) refuses the mount; unknown RO_COMPAT mounts
+read-only; `dir_index` directories are read linearly and lose
+`EXT2_INDEX_FL` when modified. `/tmp` must be a tmpfs with unlink-while-open
+files and coherent `MAP_SHARED` pages **in P2**, not P3 (KUSER, §0.2 item 9).
+Cache paths are set explicitly by the launcher: `VKD3D_SHADER_CACHE_PATH`
+(else vkd3d-proton writes next to the exe/CWD) and `MESA_SHADER_CACHE_DIR`.
 
 **AD-8 — Synchronisation: Wine's in-server sync first.** No `futex_waitv`, no
 `eventfd`-based esync, no ntsync device until profiling asks for one (§1.4).
+*v1:* guaranteed by the build — upstream Wine 11 has only ntsync or
+server-side sync, and our 5.4 kernel headers compile ntsync out
+(`server/inproc_sync.c:243-292`). Measured host cost of server-side sync:
+benchmark −23 %, menu −38 % (one run, `docs/cp-p0-host.md`); expect the fast-sync
+trigger after P8, and expect wineserver round-trips (pipes, `rt_sigprocmask`)
+to be HobbyOS's hottest syscall paths.
 
 **AD-9 — Audio: null in v1.** Wine with no audio endpoints; P0 item 7 proves
 the game tolerates it. virtio-sound + an ALSA path is P9 work, and it also
@@ -365,21 +552,21 @@ not promises.
 
 ### P0 — Evidence, pins and the go/no-go (size M; host-only, no HobbyOS code)
 
-- [ ] `tools/cp/`: `trace-host.sh` (strace `-f -c` histogram across all Wine
+- [x] `tools/cp/`: `trace-host.sh` (strace `-f -c` histogram across all Wine
       processes), `fps.sh` (MangoHud CSV → median/p90), `vkfeatures.sh`
       (vkd3d-proton log of enabled features/extensions), `vamap.sh`
       (`/proc/<pid>/maps` snapshots at launch, menu, in-game), `files.sh`
       (archive list with sizes; mmap vs read from strace).
-- [ ] `tools/cp/fetch-runtime.sh`: Wine, vkd3d-proton, DXVK, Vulkan loader,
+- [x] `tools/cp/fetch-runtime.sh`: Wine, vkd3d-proton, DXVK, Vulkan loader,
       X client libraries — sha256-verified into `third_party/cp-runtime/`
       (git-ignored). Fills §2.
-- [ ] `tools/cp/check-no-game-files.sh` + `.gitignore`.
-- [ ] Host-native run under the pinned Wine (not Proton) to the menu and
+- [x] `tools/cp/check-no-game-files.sh` + `.gitignore`.
+- [x] Host-native run under the pinned Wine (not Proton) to the menu and
       in-game; record §3.3 items 1, 3, 5, 6.
-- [ ] Linux guest under the same QEMU with Venus (`tools/cp/host-venus.sh`):
+- [x] Linux guest under the same QEMU with Venus (`tools/cp/host-venus.sh`):
       same game, same settings; record item 2 and item 4.
-- [ ] AVX-masked Linux-guest run (item 8) and no-audio run (item 7).
-- [ ] `docs/cyberpunk-evidence.md`: all of the above, raw.
+- [x] AVX-masked Linux-guest run (item 8) and no-audio run (item 7).
+- [x] `docs/cyberpunk-evidence.md`: all of the above, raw.
 
 **Gate P0:** `docs/cyberpunk-evidence.md` contains the histogram, the fps table
 with both columns, the Vulkan feature list with a Venus yes/no per row, and the
@@ -387,29 +574,44 @@ VA map. **Go/no-go:** if the Linux-guest-on-Venus column is below 15 fps at
 1280×720 Low, promote native context (§1.4) before P6 starts. If Venus lacks a
 feature vkd3d-proton requires, same. Either way P1–P5 proceed.
 
+**P0 status: CLOSED 2026-11-15 — GO for Venus.** All items above were done by
+lanes C2-wine, C7-p0host and C7-p0guest; the evidence is split across
+`docs/cyberpunk-evidence.md` (Wine), `docs/cp-p0-host.md` and
+`docs/cp-p0-guest.md` rather than one file. Deviations: the host column used
+Proton Experimental (wine-11.0) because it was the user's working setup —
+distro wine-10.0 with Proton's DLLs reached the user-agreement screen, so the
+Proton trigger (§1.4) did not fire; the X client library pins moved to P4; the
+guest benchmark was skipped at the user's request. Headline numbers: §0.2.
+
 ### P1 — CPU state and the compat address space (size XL; the risk)
 
-- [ ] Design note `docs/cp-address-space.md`: inventory of identity-map
-      dependencies (AD-3), the direct-map layout, the compat AS layout (F1),
-      the TLB/PCID consequences, and the migration order.
-- [ ] Higher-half direct map for the x64 kernel; convert identity-dependent
-      call sites; tripwire that faults any remaining identity dereference while
-      a compat AS is active.
-- [ ] Compat AS: user mappings permitted from `0x10000` up to the 47-bit
-      ceiling; `MAP_FIXED`, `MAP_FIXED_NOREPLACE`, large `PROT_NONE`
-      reservations without committing frames.
-- [ ] XSAVE (AD-4): `src/kernel/arch/x64/fpu.c`, context switch, signal frame
-      (F2), auxv `AT_HWCAP2`/`AT_MINSIGSTKSZ`.
-- [ ] `ARCH_SET_GS`/`ARCH_GET_GS`: store per thread, restore `MSR_GS_BASE`
-      on every return to a compat thread without disturbing the kernel's
-      `swapgs` discipline (`src/kernel/arch/x64/trap.c:5917-5938`).
-- [ ] Probes: `linux_probe_avx.c` (ymm values survive preemption and a signal
-      round-trip; a handler that edits ymm in the frame sees it restored),
-      `linux_probe_lowva.c` (map `0x7ffe0000` and `0x10000`, read/write them),
-      `linux_probe_gs.c` (`%gs:`-relative reads stay correct across 8 threads
-      and forced context switches).
+- [x] Design note `docs/cp-address-space.md` (lane C1-as, merged): inventory,
+      direct-map layout, F1, migration S0–S8.
+- [ ] Higher-half direct map for the x64 kernel (S0–S3): helpers, convert the
+      208 class-A sites, the 23 design items; *(v1 tripwire)* native v2 roots
+      drop the identity map so any leftover dereference faults as
+      `[IDMAP-TRIP]`; the AST cast scan (`docs/cp-address-space.md` App. A)
+      gates new code.
+- [ ] **Multiboot memory-map parser** and a frame pool that grows above 8 GiB
+      only after the direct map is live (S3b) — prerequisite for a ≥16 GiB
+      guest (§0.2 item 6).
+- [ ] Compat AS: user mappings permitted from `0x10000` up to
+      `0x7ffffffff000` minus the kernel hole; ships first with an 8 GiB floor,
+      then drops to `0x10000`; `MAP_FIXED` (hole → ENOMEM),
+      `MAP_FIXED_NOREPLACE` (existing mapping or hole → EEXIST, never EINVAL),
+      `PROT_NONE` reservations of ≥64 GiB singly and ≥141 GiB in total without
+      committing frames; kernel-mode demand faults on compat user pages below
+      `USER_VA_BASE`; low-linked `ET_EXEC` accepted.
+- [x] XSAVE (AD-4) — lane C1-cpu, *held* pending the tramp_sig T2 fix.
+- [x] swapgs discipline + `ARCH_SET_GS`/`ARCH_GET_GS` — lane C1-cpu, *held*.
+- [ ] Probes: `linux_probe_avx.c`, `linux_probe_gs.c` (C1-cpu, passing);
+      `linux_probe_lowva.c` (map `0x7ffe0000` and `0x10000`, read/write them;
+      `MAP_FIXED` into the kernel hole → ENOMEM, NOREPLACE → EEXIST).
 - [ ] Regression: Doom ELF, RimWorld to menu, and the full host/unit tiers on
-      the new MMU.
+      the new MMU, plus `-cpu qemu64` (FXSAVE fallback) runs of the probes.
+      *v1:* `doom_elf_test` needs `doom10.elf`, which is not on linuxci
+      (needs the id sources + a musl X11 sysroot fetched); the T3 wave wedges
+      on base (§0.2 item 17) — use the probe set + unit tiers until fixed.
 
 **Gate P1:** the three probes print their markers and exit 0 in QEMU/KVM;
 `make doom_elf_test` passes; RimWorld still reaches its menu. Evidence: serial
@@ -417,13 +619,22 @@ logs of all of it.
 
 ### P2 — Wine runs Windows console programs (size XL)
 
-- [ ] `tools/cp/build-wine.sh`: cross-build Wine (64-bit) against the glibc
-      2.31 sysroot; stage to `/CP/WINE` (layout F4).
-- [ ] Syscalls from the P0 histogram, in order of first failure; each with a
-      probe or a golden row (F2 of `docs/rimworld-plan.md` — the compat syscall
-      table — remains L3-style single-owner).
+- [x] `tools/cp/build-wine.sh`: Wine 11.0 (64-bit) against the glibc 2.31
+      sysroot, staged `/CP/WINE/{bin,lib/wine/x86_64-unix,lib/wine/x86_64-windows,share/wine}`
+      (202 MiB); proven on the host in a pinned-only chroot (lane C2-wine).
+- [ ] Syscalls from the measured list (§0.2 item 10), in order of first use:
+      **`fchdir`** first, then `symlink`, `chmod`, `fstatfs`, `ftruncate`
+      (the last two now exist for all fds via the ext2 lane), `sendmmsg`, the
+      xattr family (answer ENODATA/ENOTSUP as Wine tolerates — verify),
+      `utimensat`; each with a probe or a golden row.
+- [ ] tmpfs `/tmp`: unlink-while-open files, coherent `MAP_SHARED` pages across
+      processes (wineserver writes KUSER, clients read it), memfd up to and
+      beyond 64 MiB (Wine's largest is exactly 64.0 MiB, §0.2 item 12).
 - [ ] `wineserver` lifecycle: daemon start, AF_UNIX socket under `/tmp`,
-      fd passing, shared memory mapping, lock file, clean shutdown.
+      fd passing, shared memory mapping, lock file, clean shutdown; SIGUSR1/
+      SIGQUIT via `tgkill` (suspend / thread kill).
+- [ ] Staging: `/CP/WINE` reachable as executable + mmappable files (NFS
+      exec/mmap exist today; ext2 mmap/exec is P3 work) and the 2.31 runtime.
 - [ ] Prefix on tmpfs first (decouples P2 from P3): `wineboot -i` completes.
 - [ ] `src/user/cp/winprobe.c` built with MinGW: threads, TLS slots,
       `%gs:[0x30]` TEB read, SEH (`__try`/vectored handler catching an access
@@ -436,14 +647,19 @@ processes. Evidence: serial log + `ps` before/after.
 
 ### P3 — Storage for a Windows game (size L)
 
-- [ ] `src/kernel/ext2.c`: read/write, symlinks, rename, unlink, truncate,
-      `fsync`, large files, directory indexes optional; mounted from a second
-      NVMe disk added to the x64 QEMU line (integrator-owned `Makefile`).
+- [x] `src/kernel/ext2.c` (+ `ext2_vfs.c`, `ext2_compat.c`): read/write,
+      symlinks, rename, unlink, truncate, `fsync`, large/sparse files; mounted
+      at `/EXT` from NVMe namespace 2 (lane C3-ext2; two-boot gate, `e2fsck -fn`
+      clean).
+- [ ] mmap of ext2 files (a VM object for ext2) and exec from ext2 — needed
+      before the prefix can hold PE/`.so` files.
 - [ ] `flock`/`fcntl` record locks (Wine and the vkd3d-proton cache use them;
-      verify which).
-- [ ] NFS: files >4 GiB (64-bit offsets throughout), mappings larger than
-      `VM_OBJ_MAX_BYTES` (raise the limit or make NFS objects demand-paged
-      without a whole-object frame array — decided by P0 item 6).
+      verify which); `chmod`/`fchmod`/`chown`/`utimensat` on ext2.
+- [ ] `VFS_PATH_MAX` 256 → ≥ 1024 (Windows MAX_PATH plus the prefix path).
+- [ ] NFS: files >4 GiB (64-bit offsets throughout); single `read()`s up to
+      ~172 MB (the game's `shader_final.cache`, §0.2 item 12). Archive mmap is
+      *not* needed (P0: archives are read, not mapped); the 64 MiB
+      `VM_OBJ_MAX_BYTES` cap matters for memfd and GPU blob mappings instead.
 - [ ] Prefix moves to ext2; tmpfs for `/tmp`.
 
 **Gate P3:** prefix survives a reboot; a >4 GiB archive read over NFS in the
@@ -514,6 +730,16 @@ screendump.
 - [ ] Launch recipe: launcher row in the Games menu, `--launcher-skip`, the
       game's settings preseeded in the prefix (1280×720, Low, RT off, FSR on —
       exact file and keys from P0).
+      *v1:* the preseeded profile must already carry the **user's own** first-run
+      choices (agreement, account offer skipped, telemetry rejected — written
+      by the game to `Saved Games/CD Projekt Red/Cyberpunk 2077/user.gls` and its
+      settings); never automate those screens. The launcher sets
+      `VKD3D_SHADER_CACHE_PATH`, `MESA_SHADER_CACHE_DIR`, the vkd3d-proton/DXVK
+      DLL overrides (without them Proton's Wine silently uses upstream
+      `d3d12`/`dxgi`: FL 11_1, adapter "Red Hat VirtIO GPU"), and runs with the
+      game's own `bin/x64` read-only (the vkd3d cache otherwise lands there).
+- [ ] `MAX_PROCESSES` ≥ 256 (host: 173–190 threads at the menu, §0.2 item 13);
+      cheap `getrusage(RUSAGE_THREAD)`.
 - [ ] Shader/pipeline caches on ext2, warmed by a first run; first-run compile
       time recorded separately from launch time.
 - [ ] Fix whatever the first boots find: this milestone is where most
@@ -568,6 +794,28 @@ syscall arm — touch only your branch of the file.
 - **Wave 4**: C2's `.exe` probes; C4 in-guest windows/input; C5 `vkcube.exe`
   and D3D12 triangle; C6 Venus probes.
 - **Wave 5**: C6 scanout (P7); C0 integrates → P8 → P9.
+
+### 7.2b Wave 2 (v1, 2026-11-15) — the lanes actually running
+
+Wave 1 (C1-as, C1-cpu, C2-wine, C3-ext2, C7-p0host, C7-p0guest) is done or
+held (§0.2). Wave 2 starts from branch `cyberpunk` at the v1 commit; every
+lane works in `~/hobbyos-cp-lanes/<lane>` (branch `cp-<lane>`) and gates on
+`linuxci` under `flock /tmp/cp-qemu.lock`.
+
+| Lane | Scope (milestone) | Owns | Must not touch |
+|---|---|---|---|
+| **C1-mmu** | P1 S0–S3b + compat AS: direct map, helpers, class-A conversions, multiboot memory map + frame pool above 8 GiB, compat AS from `0x10000` with the kernel hole, `MAP_FIXED`/`MAP_FIXED_NOREPLACE` semantics, ≥64 GiB `PROT_NONE` reservations, low `ET_EXEC`, `linux_probe_lowva` | `src/kernel/arch/x64/mmu.c`, `src/kernel/vm.c`, `src/include/vm.h`, `src/kernel/frame.c`, `src/include/frame.h`, the page-fault path in `trap.c`, `elf_loader.c` (load-address policy), the mmap path in `linux_compat_mem.c`, the S1 one-line conversions anywhere (as minimal diffs) | the syscall/IRQ entry stubs, FPU and signal-frame code (C1-cpu) |
+| **C2-sys** | P2 kernel prerequisites: `fchdir`, `sendmmsg`, xattr family (Wine-tolerated errnos), a tmpfs `/tmp` with symlinks, unlink-while-open and coherent `MAP_SHARED`, memfd > 64 MiB, `eventfd2`; probes | `src/kernel/linux_compat_fd.c`, `linux_compat_misc.c`, `linux_compat_proc.c`, a new `src/kernel/tmpfs.c`, the memfd/shared-file paths | the mmap address-placement logic (C1-mmu), ext2 (C3) |
+| **C3-ext2b** | P3 remainder: mmap + exec of ext2 files, `chmod`/`fchmod`/`chown`/`utimensat` (syscalls + VFS + ext2), `flock`/`fcntl` locks, `VFS_PATH_MAX` ≥ 1024 | `src/kernel/ext2*.c`, `src/kernel/vfs.c`, the file-object/VM-object glue for ext2 | tmpfs (C2-sys) |
+| **C4-x** | P4 groundwork: build real libX11/libxcb + Xext/Xi/Xrandr/Xrender/Xfixes/Xcursor/Xinerama/xcb-shm/xcb-present against the 2.31 sysroot (pins + sha256), stage them for compat processes; audit `XHOBBY.BIN` for XInput2/RandR/MIT-SHM/Present | `tools/cp/x11/`, `docs/cp-x11.md`, `third_party/cp-runtime` pins for X | kernel sources |
+| **C5-vk** | P5 groundwork: Mesa lavapipe + the pinned Vulkan loader for the compat class; first a headless probe (`vulkaninfo`, offscreen triangle read back and blitted to `/dev/fb0` or dumped) inside HobbyOS, then X11 WSI once C4's libxcb exists | `tools/cp/vk/`, `tools/mesa/` (Vulkan builds only), `src/user/cp/vk*` | kernel sources except a reported diff if JIT needs a kernel fix |
+| C6-venus | P6 kernel transport (`/dev/gpu` M2) — **not started**: it edits `src/kernel/gpu_abi.c`, which has uncommitted parallel work in the user's main repo; needs the user's decision first | — | — |
+| C1-cpu | (wave 1, held) fix tramp_sig T2, then merge | as wave 1 | — |
+
+Merge order: C1-cpu → C3-ext2b / C2-sys (either order) → C1-mmu (rebased on
+all of them; it is the riskiest). C4-x and C5-vk merge whenever green. Shared
+hot files (`linux_compat.c` dispatch tables, `Makefile`): each lane adds rows
+or blocks, never reorders; the integrator resolves conflicts.
 
 ### 7.3 Frozen interfaces (binding)
 
@@ -654,10 +902,27 @@ Never fabricate a number; if a measurement could not be taken, say so.
 | R8 | A game patch changes requirements mid-plan | Pin the game version in P0; re-run P0 on any update before trusting older evidence |
 | R9 | Scope creep into a general Windows-compatibility project | Non-goals (§1.6) are binding; every new Wine feature must be traced to a P0 or P8 failure |
 | R10 | The XSAVE signal frame is subtly wrong and Wine corrupts register state on exceptions | F2 host golden against Linux's documented layout; the P1 ymm-edit-in-handler probe |
+| R11 | *(v1)* Measurement contamination: setup work outside the measurement lock (VM boots, builds) overlapped 6 of 10 host benchmark runs | Every process that loads the GPU or many cores takes the lock, not only "measured" runs; contaminated runs stay in the evidence, marked |
+| R12 | *(v1)* Writes into the user's Steam library: vkd3d-proton and `steamclient.so` wrote caches into the game folder / Steam shadercache during early P0 runs (no game, prefix or save data changed; audited) | All game launches run in a namespace where the Steam library is read-only; cache paths are set explicitly (AD-7) |
+| R13 | *(v1)* The x64 T3 wave wedges on base and `join` fails on base, so "all tiers green" is not available as an acceptance signal | Gates use the probe set + unit tiers with base comparison; a hygiene lane fixes the wedge before P8 |
 
 ---
 
 ## 10. Open questions (close in P0/P1)
+
+*v1 answers:* **Q1** — DYNAMIC_BASE (0x8160), loaded at its preferred
+0x140000000; outside the hole. **Q2** — preloader ranges in §0.2 item 4; with
+our sysroot the preloader is static-PIE (fixed form at `0x7d7d00000000` only
+if `-static-pie` fails); nothing intersects `[0x70000000, 0x78000000)`; Wine
+tolerates refused low mappings only with EEXIST (§0.2 item 8). **Q3** —
+`arch_prctl(ARCH_SET_GS, teb)` once per thread, return unchecked; no
+`wrgsbase`; `rdgsbase` only if CPUID.7:EBX[0] **and** `AT_HWCAP2 & 2`.
+**Q4** — no required feature missing; 59/231 extensions not forwarded
+(§0.2). **Q5** — archives are read, never mapped; largest game-file mapping
+3.0 MiB. **Q6** — menu reached with AVX masked and with no audio device.
+**Q7** — `docs/cp-p0-guest.md` §2 (memfd-shared RAM, `virtio-gpu-gl-pci,
+blob=true,hostmem=16G,venus=true`, egl-headless on renderD129, the dma-buf
+shim). **Q8, Q9** — open (P4/P7).
 
 1. Is `Cyberpunk2077.exe` relocatable (`DYNAMIC_BASE`), or must it load at its
    preferred base? (If fixed, the compat AS must also free that range — it is
@@ -742,3 +1007,16 @@ qemu-system-x86_64 -enable-kvm -cpu host -smp 8 -m 24G \
   `ARCH_SET_GS` unhandled, 64 MiB per-object mapping cap, `/dev/gpu` M1
   without blobs/fences, FAT16 + read-only NFS, null audio. Nothing measured
   about the game yet; P0 is the first executable step.
+- 2026-11-15 — **v1: P0 closed (GO for Venus), wave 1 merged, wave 2 defined.**
+  Merged into `cyberpunk`: C1-as (`docs/cp-address-space.md`), C2-wine (pins,
+  Wine 11.0 build, `docs/cyberpunk-evidence.md`), C7-p0guest
+  (`docs/cp-p0-guest.md`; menu 143–144 fps median in a Linux guest on Venus),
+  C3-ext2 (`/EXT`), C7-p0host (`docs/cp-p0-host.md`). C1-cpu held on a
+  tramp_sig T2 regression. Corrections folded in: no swapgs existed; kernel
+  image at 0x70000000 stays (K0); 5.25 GiB frame-pool cap; measured syscall
+  gaps replace v0's guess; AVX and audio not needed for the menu; Steam build
+  instead of GOG; virglrenderer 1.2.0 + dma-buf shim; server-side sync
+  guaranteed and costs ~23 %; `MAP_FIXED_NOREPLACE` must return EEXIST;
+  tmpfs `/tmp` moves to P2. Pre-existing defects recorded (§0.2 item 17).
+  The user accepted the CD PROJEKT RED user agreement for the test VM's
+  profile only (via the coordinator) and asked to skip the guest benchmark.
