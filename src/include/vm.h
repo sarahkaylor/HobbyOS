@@ -157,7 +157,13 @@
  * XML files, and at 64 the pool was exhausted after 8 files so every later
  * mmap returned ENOMEM ("Could not map file"). */
 #define VM_OBJ_MAX 2048
-#define VM_OBJ_MAX_BYTES 0x4000000ULL /* 64 MiB */
+/* cp/sys (C1-mmu owns this header; minimal diff, docs/cp-sys.md): 1 GiB,
+ * was 64 MiB.  Wine's largest memfd is exactly 64.0 MiB and a GPU buffer
+ * mapping reaches 192 MiB (docs/cyberpunk.md §0.2 item 12), so the old cap
+ * refused the first and the second.  The frame array is sized to the
+ * object, not to this cap (vm_object_create/truncate), so small objects
+ * cost what they did. */
+#define VM_OBJ_MAX_BYTES 0x40000000ULL /* 1 GiB */
 #define VM_OBJ_MAX_FRAMES (VM_OBJ_MAX_BYTES / 0x1000)
 
 #define VM_OBJ_MEMFD 1 /* SYS_MEMFD_CREATE backing */

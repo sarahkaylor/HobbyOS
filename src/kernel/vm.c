@@ -492,8 +492,21 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
     return -EPERM;
   }
   int nnf = (int)((size + FRAME_SIZE - 1) / FRAME_SIZE);
-  if (nnf > o->nr_frames) {
+  /* cp/sys: reallocate the frame ARRAY only when the new page count no
+     longer fits the frames it already owns (each array frame holds 512
+     entries = 2 MiB of object), and then at least double it.  Growing a
+     file by appends used to copy the whole array on every new page --
+     quadratic in the file size once files may exceed 64 MiB.  Entries past
+     nr_frames are always zero (shrink clears them), so the slack is clean. */
+  uint64_t cap_entries = (uint64_t)o->arr_frames * (FRAME_SIZE / sizeof(uint64_t));
+  if ((uint64_t)nnf > cap_entries) {
     int naf = obj_frames_for(nnf);
+    if (naf < 2 * o->arr_frames) {
+      int dbl = 2 * o->arr_frames;
+      int maxaf = obj_frames_for((int)VM_OBJ_MAX_FRAMES);
+      naf = dbl < maxaf ? dbl : maxaf;
+      if (naf < obj_frames_for(nnf)) naf = obj_frames_for(nnf);
+    }
     uint64_t na = frame_alloc_contig(naf);
     if (!na) {
       spinlock_release_irqrestore(&vm_lock, flags);
