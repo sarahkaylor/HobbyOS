@@ -261,3 +261,39 @@ Two consecutive green runs, which is the bar this lane set after measuring the
 
 msync writing back did not disturb the files-nio check, which is the one that
 exercises mappings hardest.
+
+## Open: a file created by one process is sometimes invisible to the next
+
+Found while proving munmap write-back, and it may outrank every JDK feature left,
+because an in-guest toolchain (javac writes classes, java reads them) depends on
+it and every build tool does too.
+
+Measured with MKFILES -> READFILES, two wave lines, same boot, six files each
+closed by the writer before the next:
+
+| boot | reader | note |
+|---|---|---|
+| 1 | `found=0/6 PARTIAL-VISIBILITY` | none visible |
+| 2 | `found=6/6` | |
+| 3 | `found=6/6` | |
+| 4 | `found=6/6` | writer called `sync()` first |
+| 5 | `found=6/6` | writer called `sync()` first |
+
+Two things are established and one is not:
+
+* the writer's own view is correct -- it re-opens every file it just created and
+  reads back 8 bytes (`inproc=8` on all six), so creation and write both worked;
+* the failure is all-or-nothing, not per-file: the six dirents share a directory
+  sector, and the reader was served a stale view of the whole directory. That
+  points at the *directory sector* reaching disk on some boots and not others,
+  not at an individual entry being dropped;
+* NOT established: whether `sync()` prevents it. The flake is roughly 1 boot in 3,
+  so the two sync runs above are consistent with the defect and with a fix. This
+  needs a scripted N-boot run per arm before anyone claims either.
+
+Protocol for whoever picks this up: `tools/jdk/{mkfiles,readfiles}.c` (already in
+the tree), stage both, boot twice per sample, and count. `mkfiles` calls `sync()`
+today; to test the no-sync arm, drop that call and rebuild the probe. Until it is
+fixed, any test whose verdict depends on a file written by an earlier process in
+the same boot is unreliable -- which is why every durability claim in this lane is
+cross-boot.
