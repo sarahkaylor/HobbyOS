@@ -1,0 +1,1 @@
+frames=8766 secs=64.3 mean_fps=136.4 median_fps=142.9 p90_fps=106.7 low1_fps=74.1 low01_fps=59.4 max_ft_ms=31.9

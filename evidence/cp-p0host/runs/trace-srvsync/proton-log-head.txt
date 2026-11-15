@@ -1,0 +1,12 @@
+======================
+Proton: 1794497090 experimental-11.0-20261112-x86_64
+SteamGameId: 1091500
+Command: ['/mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/Cyberpunk2077.exe', '--launcher-skip']
+Options: {'gamedrive', 'nofsync', 'forcelgadd'}
+Kernel: Linux 7.0.0-43-generic #43-Ubuntu SMP PREEMPT_DYNAMIC Fri Oct 23 13:25:25 UTC 2026 x86_64
+Language: LC_ALL None, LC_MESSAGES None, LC_CTYPE None
+PATH: /mnt/fast/games/steamapps/common/Proton - Experimental/files/bin/:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+Effective WINEDEBUG: +timestamp,+pid,+tid,+seh,+unwind,+threadname,+debugstr,+loaddll,+mscoree
+======================
+No NV driver found, disabling nvapi
+wineserver: using server-side synchronization.

@@ -1,0 +1,28 @@
+# objdump -d --no-show-raw-insn -M suffix Cyberpunk2077.exe (game 2.5), counted with grep; 2026-11-14 on strix
+# instructions = disassembly lines; ymm/zmm = lines referencing those registers; xmm-vex = v-prefixed mnemonics on xmm
+13039850 /tmp/p0host-dis.txt
+ymm 1641
+zmm 0
+xmm-vex 1784
+fma 339
+kreg 2
+xgetbv 3
+cpuid 25
+total-vex 3359
+bmi 501
+lzcnt-tzcnt-popcnt 104
+    485 vmovups
+    353 vmovaps
+    175 vmulps
+    160 vaddps
+    124 vshufps
+    111 vmulsd
+    103 vmovdqu
+     97 vsubps
+     91 vmovss
+     84 vfmadd213sd
+     82 vfmadd231ps
+     75 vbroadcastss
+     68 vextractf128
+     67 vmovsd
+     66 vmovdqa

@@ -1,0 +1,187 @@
+Loaded L"C:\\Program Files (x86)\\Steam\\gameoverlayrenderer64.dll" at 00006FFFF1A60000: native
+Loaded L"C:\\Program Files (x86)\\Steam\\steamclient64.dll" at 00006FFFF1FC0000: native
+Loaded L"C:\\windows\\Microsoft.NET\\Framework64\\v2.0.50727\\fusion.dll" at 00006FFFFD170000: builtin
+Loaded L"C:\\windows\\system32\\actxprxy.dll" at 00006FFFFDBB0000: builtin
+Loaded L"C:\\windows\\system32\\advapi32.dll" at 00006FFFFFBA0000: builtin
+Loaded L"C:\\windows\\system32\\amdxc64.dll" at 00006FFFF0E10000: builtin
+Loaded L"C:\\windows\\system32\\bcrypt.dll" at 00006FFFFE6F0000: builtin
+Loaded L"C:\\windows\\system32\\cabinet.dll" at 00006FFFFDFA0000: builtin
+Loaded L"C:\\windows\\system32\\cfgmgr32.dll" at 00006FFFFF7E0000: builtin
+Loaded L"C:\\windows\\system32\\combase.dll" at 00006FFFFE750000: builtin
+Loaded L"C:\\windows\\system32\\comctl32.dll" at 00006FFFFDE70000: builtin
+Loaded L"C:\\windows\\system32\\coml2.dll" at 00006FFFFE720000: builtin
+Loaded L"C:\\windows\\system32\\compstui.dll" at 00006FFFF0D40000: builtin
+Loaded L"C:\\windows\\system32\\conhost.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\crypt32.dll" at 00006FFFFE4D0000: builtin
+Loaded L"C:\\windows\\system32\\CRYPT32.dll" at 00006FFFFE4D0000: builtin
+Loaded L"C:\\windows\\system32\\cryptbase.dll" at 00006FFFFF990000: builtin
+Loaded L"C:\\windows\\system32\\cryptnet.dll" at 00006FFFF1A30000: builtin
+Loaded L"C:\\windows\\system32\\d3d12core.dll" at 00006FFFF0520000: native
+Loaded L"C:\\windows\\system32\\d3d12.dll" at 00006FFFF0E70000: native
+Loaded L"C:\\windows\\system32\\dbghelp.dll" at 00006FFFFD9E0000: builtin
+Loaded L"C:\\windows\\system32\\dinput8.dll" at 00006FFFF3A70000: builtin
+Loaded L"C:\\windows\\system32\\dnsapi.dll" at 00006FFFFF340000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\hidclass.sys" at 00006FFFFF290000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\hidparse.sys" at 00006FFFFF2D0000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\mountmgr.sys" at 00006FFFFF710000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\ndis.sys" at 00006FFFFF3B0000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\nsiproxy.sys" at 00006FFFFF3E0000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\winebus.sys" at 00006FFFFF300000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\winehid.sys" at 00006FFFFF2B0000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\wineusb.sys" at 00006FFFFF270000: builtin
+Loaded L"C:\\windows\\system32\\DWMAPI.DLL" at 00006FFFF3B00000: builtin
+Loaded L"C:\\windows\\system32\\dxgi.dll" at 00006FFFFCB40000: native
+Loaded L"C:\\windows\\system32\\DXGI.DLL" at 00006FFFFCB40000: native
+Loaded L"C:\\windows\\system32\\explorer.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\gdi32.dll" at 00006FFFFF4A0000: builtin
+Loaded L"C:\\windows\\system32\\gdiplus.dll" at 00006FFFFE410000: builtin
+Loaded L"C:\\windows\\system32\\hid.dll" at 00006FFFF9F90000: builtin
+Loaded L"C:\\windows\\system32\\HID.DLL" at 00006FFFF9F90000: builtin
+Loaded L"C:\\windows\\system32\\imagehlp.dll" at 00006FFFFE3E0000: builtin
+Loaded L"C:\\windows\\system32\\imm32.dll" at 00006FFFFF420000: builtin
+Loaded L"C:\\windows\\system32\\IMM32.dll" at 00006FFFFF420000: builtin
+Loaded L"C:\\windows\\system32\\iphlpapi.dll" at 00006FFFFF370000: builtin
+Loaded L"C:\\windows\\system32\\jsproxy.dll" at 00006FFFF3E00000: builtin
+Loaded L"C:\\windows\\system32\\Kerberos.dll" at 00006FFFF1CE0000: builtin
+Loaded L"C:\\windows\\system32\\kernel32.dll" at 00006FFFFFEB0000: builtin
+Loaded L"C:\\windows\\system32\\kernelbase.dll" at 00006FFFFFBF0000: builtin
+Loaded L"C:\\windows\\system32\\lsteamclient.dll" at 00006FFFF1D50000: builtin
+Loaded L"C:\\windows\\system32\\lsteamclient.dll" at 00006FFFFD770000: builtin
+Loaded L"C:\\windows\\system32\\mfc140u.dll" at 00006FFFF1000000: native
+Loaded L"C:\\windows\\system32\\mmdevapi.dll" at 00006FFFF0DD0000: builtin
+Loaded L"C:\\windows\\system32\\mpr.dll" at 00006FFFFDCA0000: builtin
+Loaded L"C:\\windows\\system32\\mpr.dll" at 00006FFFFE040000: builtin
+Loaded L"C:\\windows\\system32\\msacm32.dll" at 00006FFFFD260000: builtin
+Loaded L"C:\\windows\\system32\\msasn1.dll" at 00006FFFF0FD0000: builtin
+Loaded L"C:\\windows\\system32\\mscoree.dll" at 00006FFFFDA80000: builtin
+Loaded L"C:\\windows\\system32\\msi.dll" at 00006FFFFDFD0000: builtin
+Loaded L"C:\\windows\\system32\\mspatcha.dll" at 00006FFFFDE50000: builtin
+Loaded L"C:\\windows\\system32\\MSV1_0.dll" at 00006FFFF1CB0000: builtin
+Loaded L"C:\\windows\\system32\\MSVCP140.dll" at 00006FFFFD0C0000: native
+Loaded L"C:\\windows\\system32\\msvcrt.dll" at 00006FFFFFAE0000: builtin
+Loaded L"C:\\windows\\system32\\MSWSOCK.dll" at 00006FFFF1D30000: builtin
+Loaded L"C:\\windows\\system32\\msxml3.dll" at 00006FFFFD7C0000: builtin
+Loaded L"C:\\windows\\system32\\netapi32.dll" at 00006FFFF1C70000: builtin
+Loaded L"C:\\windows\\system32\\netprofm.dll" at 00006FFFF39C0000: builtin
+Loaded L"C:\\windows\\system32\\netutils.dll" at 00006FFFF1C50000: builtin
+Loaded L"C:\\windows\\system32\\Normaliz.dll" at 0000000180000000: builtin
+Loaded L"C:\\windows\\system32\\nsi.dll" at 00006FFFFF320000: builtin
+Loaded L"C:\\windows\\system32\\ntdll.dll" at 00006FFFFFF30000: builtin
+Loaded L"C:\\windows\\system32\\ntoskrnl.exe" at 00006FFFFF740000: builtin
+Loaded L"C:\\windows\\system32\\odbccp32.dll" at 00006FFFFDE20000: builtin
+Loaded L"C:\\windows\\system32\\ole32.dll" at 00006FFFFE7C0000: builtin
+Loaded L"C:\\windows\\system32\\oleacc.dll" at 00006FFFFDAD0000: builtin
+Loaded L"C:\\windows\\system32\\oleaut32.dll" at 00006FFFFE2A0000: builtin
+Loaded L"C:\\windows\\system32\\OLEAUT32.dll" at 00006FFFFE2A0000: builtin
+Loaded L"C:\\windows\\system32\\plugplay.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\POWRPROF.dll" at 00006FFFF4090000: builtin
+Loaded L"C:\\windows\\system32\\PSAPI.DLL" at 00006FFFFE280000: builtin
+Loaded L"C:\\windows\\system32\\rpcrt4.dll" at 00006FFFFF8B0000: builtin
+Loaded L"C:\\windows\\system32\\rpcss.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\rsaenh.dll" at 00006FFFF19D0000: builtin
+Loaded L"C:\\windows\\system32\\rtworkq.dll" at 00006FFFFD790000: builtin
+Loaded L"C:\\windows\\system32\\schannel.dll" at 00006FFFF1600000: builtin
+Loaded L"C:\\windows\\system32\\sechost.dll" at 00006FFFFFAA0000: builtin
+Loaded L"C:\\windows\\system32\\Secur32.dll" at 00006FFFF1D00000: builtin
+Loaded L"C:\\windows\\system32\\services.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\setupapi.dll" at 00006FFFFF820000: builtin
+Loaded L"C:\\windows\\system32\\SETUPAPI.dll" at 00006FFFFF820000: builtin
+Loaded L"C:\\windows\\system32\\shcore.dll" at 00006FFFFE890000: builtin
+Loaded L"C:\\windows\\system32\\shell32.dll" at 00006FFFFE920000: builtin
+Loaded L"C:\\windows\\system32\\SHELL32.dll" at 00006FFFFE920000: builtin
+Loaded L"C:\\windows\\system32\\shlwapi.dll" at 00006FFFFE8C0000: builtin
+Loaded L"C:\\windows\\system32\\steam.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\svchost.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\sxs.dll" at 00006FFFFDE00000: builtin
+Loaded L"C:\\windows\\system32\\tabtip.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\ucrtbase.dll" at 00006FFFFF9B0000: builtin
+Loaded L"C:\\windows\\system32\\uiautomationcore.dll" at 00006FFFFDB20000: builtin
+Loaded L"C:\\windows\\system32\\urlmon.dll" at 00006FFFFDD70000: builtin
+Loaded L"C:\\windows\\system32\\user32.dll" at 00006FFFFF540000: builtin
+Loaded L"C:\\windows\\system32\\USER32.dll" at 00006FFFFF540000: builtin
+Loaded L"C:\\windows\\system32\\userenv.dll" at 00006FFFFF7C0000: builtin
+Loaded L"C:\\windows\\system32\\uxtheme.dll" at 00006FFFFDC10000: builtin
+Loaded L"C:\\windows\\system32\\VCRUNTIME140_1.dll" at 00006FFFFD070000: native
+Loaded L"C:\\windows\\system32\\VCRUNTIME140.dll" at 00006FFFFD090000: native
+Loaded L"C:\\windows\\system32\\version.dll" at 00006FFFFDC80000: builtin
+Loaded L"C:\\windows\\system32\\VERSION.dll" at 00006FFFFDC80000: builtin
+Loaded L"C:\\windows\\system32\\vrclient_x64.dll" at 00006FFFFD7A0000: builtin
+Loaded L"C:\\windows\\system32\\vulkan-1.dll" at 00006FFFF3EF0000: builtin
+Loaded L"C:\\windows\\system32\\wbem\\wbemprox.dll" at 00006FFFEC300000: builtin
+Loaded L"C:\\windows\\system32\\wevtsvc.dll" at 00006FFFFF400000: builtin
+Loaded L"C:\\windows\\system32\\win32u.dll" at 00006FFFFF450000: builtin
+Loaded L"C:\\windows\\system32\\winealsa.drv" at 00006FFFF0D90000: builtin
+Loaded L"C:\\windows\\system32\\wineboot.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\winedevice.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\wineopenxr.dll" at 00006FFFF0E30000: builtin
+Loaded L"C:\\windows\\system32\\wineopenxr.dll" at 00006FFFF15C0000: builtin
+Loaded L"C:\\windows\\system32\\wineopenxr.dll" at 00006FFFF3AC0000: builtin
+Loaded L"C:\\windows\\system32\\winepulse.drv" at 00006FFFF0DB0000: builtin
+Loaded L"C:\\windows\\system32\\winevulkan.dll" at 00006FFFF3E90000: builtin
+Loaded L"c:\\windows\\system32\\winex11.drv" at 00006FFFFDC60000: builtin
+Loaded L"C:\\windows\\system32\\winex11.drv" at 00006FFFFDC60000: builtin
+Loaded L"C:\\windows\\system32\\WINHTTP.dll" at 00006FFFF3E30000: builtin
+Loaded L"C:\\windows\\system32\\wininet.dll" at 00006FFFFDCD0000: builtin
+Loaded L"C:\\windows\\system32\\WININET.dll" at 00006FFFFDCD0000: builtin
+Loaded L"C:\\windows\\system32\\wininet.dll" at 00006FFFFE070000: builtin
+Loaded L"C:\\windows\\system32\\WINMM.dll" at 00006FFFFD290000: builtin
+Loaded L"C:\\windows\\system32\\winspool.drv" at 00006FFFEC2B0000: builtin
+Loaded L"C:\\windows\\system32\\wintrust.dll" at 00006FFFFE240000: builtin
+Loaded L"C:\\windows\\system32\\WINTRUST.DLL" at 00006FFFFE240000: builtin
+Loaded L"C:\\windows\\system32\\WLDAP32.dll" at 00006FFFFE1A0000: builtin
+Loaded L"C:\\windows\\system32\\wldp.dll" at 00006FFFF0FB0000: builtin
+Loaded L"C:\\windows\\system32\\ws2_32.dll" at 00006FFFFF950000: builtin
+Loaded L"C:\\windows\\system32\\WS2_32.dll" at 00006FFFFF950000: builtin
+Loaded L"C:\\windows\\system32\\Wtsapi32.dll" at 00006FFFF0D70000: builtin
+Loaded L"C:\\windows\\system32\\xinput1_4.dll" at 00006FFFF3AD0000: builtin
+Loaded L"C:\\windows\\system32\\XInput1_4.dll" at 00006FFFF3AD0000: builtin
+Loaded L"C:\\windows\\system32\\XINPUT9_1_0.dll" at 00006FFFF4CA0000: builtin
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\amd_ags_x64.dll" at 00006FFFF3F10000: builtin
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\amd_fidelityfx_framegeneration_dx12.dll" at 00006FFFEC350000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\amd_fidelityfx_loader_dx12.dll" at 00006FFFF40B0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\amd_fidelityfx_upscaler_dx12.dll" at 00006FFFEE9A0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\bink2w64.dll" at 00006FFFF4C10000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\CChromaEditorLibrary64.dll" at 00006FFFF1580000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe" at 0000000140000000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\dbghelp.dll" at 00006FFFFD9E0000: builtin
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\GameServicesSteam.dll" at 00006FFFF3A50000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\GfnRuntimeSdk.dll" at 00006FFFF1620000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\GFSDK_Aftermath_Lib.x64.dll" at 00006FFFF0AF0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\icudt.dll" at 0000000100100000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\icuin.dll" at 00006FFFF4970000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\icuuc.dll" at 00006FFFF4780000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\libcurl.dll" at 00006FFFF4D00000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\libxell.dll" at 00006FFFFD000000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\libxess.dll" at 00006FFFF4D80000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\libxess_fg.dll" at 00006FFFF9FB0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\oo2ext_7_win64.dll" at 00006FFFF3F40000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\PhysX3CharacterKinematic_x64.dll" at 00006FFFF44D0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\PhysX3Common_x64.dll" at 00006FFFF4570000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\PhysX3Cooking_x64.dll" at 00006FFFF4370000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\PhysX3_x64.dll" at 00006FFFF40D0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\PxFoundation_x64.dll" at 00006FFFF4430000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\REDEngineErrorReporter.exe" at 0000000140000000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\REDGalaxy64.dll" at 00006FFFF97D0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\redlexer_native.dll" at 00006FFFF4CC0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.common.dll" at 00006FFFF0EB0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.dlss_d.dll" at 00006FFFF0D30000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.dlss.dll" at 00006FFFF0DB0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.dlss_g.dll" at 00006FFFF0C80000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.interposer.dll" at 00006FFFFD1A0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.nis.dll" at 00006FFFF0B50000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.nis.dll" at 00006FFFF0C00000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.pcl.dll" at 00006FFFF0C10000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.pcl.dll" at 00006FFFF0CC0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.reflex.dll" at 00006FFFF0BA0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\sl.reflex.dll" at 00006FFFF0C50000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\steam_api64.dll" at 00006FFFF39F0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\bin\\libmono-2.0-x86_64.dll" at 00006FFFFD370000: builtin
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\4.5\\Facades\\netstandard.dll" at 00000000036C0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\4.5\\mscorlib.dll" at 0000000003070000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\gac\\System\\4.0.0.0__b77a5c561934e089\\System.dll" at 0000000004590000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\gac\\System.Core\\4.0.0.0__b77a5c561934e089\\System.Core.dll" at 0000000010000000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\gac\\System.Numerics\\4.0.0.0__b77a5c561934e089\\System.Numerics.dll" at 0000000004540000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\xalia\\SDL3.dll" at 00006FFFF3B20000: builtin
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\xalia\\Superpower.dll" at 00000000036A0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\xalia\\Tmds.DBus.Protocol.dll" at 0000000005400000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\xalia\\xalia.exe" at 0000000000400000: native

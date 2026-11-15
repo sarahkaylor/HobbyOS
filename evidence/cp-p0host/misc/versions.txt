@@ -1,0 +1,20 @@
+# versions (collected 2026-11-14T23:46:25-06:00)
+proton: 1794497090 experimental-11.0-20261112-x86_64
+proton wine: wine-11.0
+dxvk:  1039f682058fa71f159129b9e14fee05cc4e3cef dxvk (v3.1.1-209-g1039f6820)
+vkd3d-proton:  2576c0b4adfae4a76d4c89d8cf5ec4f5ca795cff vkd3d-proton (vkd3d-1.1-5742-g2576c0b4a)
+proton toolmanifest require_tool_appid: "4183110"
+distro wine: wine-10.0 (Ubuntu 10.0~repack-12ubuntu1)
+mesa: 26.0.8-1ubuntu0.3
+kernel: 7.0.0-43-generic
+gamescope: 3.16.20+ds-1  mangohud: 0.8.2~rc2-1
+strace: strace -- version 6.19
+game appmanifest buildid: "26161058"
+	apiVersion         = 1.4.335
+	deviceID           = 0x7550
+	deviceName         = AMD Radeon RX 9070 XT (RADV GFX1201)
+	driverInfo         = Mesa 26.0.8-1ubuntu0.3
+	apiVersion         = 1.4.335
+	deviceID           = 0x1586
+	deviceName         = AMD Radeon Graphics (RADV STRIX_HALO)
+	driverInfo         = Mesa 26.0.8-1ubuntu0.3

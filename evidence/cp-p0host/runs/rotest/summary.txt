@@ -1,0 +1,10 @@
+launch_to_prompt_s=35.6
+launch_to_menu_s=110.2
+samples=116
+rss_peak_mib=4290
+threads_peak=99
+fds_peak=453
+game_vram_peak_mib=1795
+sys_vram_peak_mib=5933
+sys_vram_before_mib=4068
+sys_vram_delta_peak_mib=1865

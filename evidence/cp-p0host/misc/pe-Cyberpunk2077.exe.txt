@@ -1,0 +1,63 @@
+file Cyberpunk2077.exe size 66704848
+Machine 0x8664  Characteristics 0x0022
+Magic 0x20b  ImageBase 0x140000000  SizeOfImage 0x581b000 (88 MiB)  SectionAlignment 0x1000
+Subsystem 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI)  MajorSubsystemVersion 6.0
+DllCharacteristics 0x8160 ['IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA', 'IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE', 'IMAGE_DLLCHARACTERISTICS_NX_COMPAT', 'IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE']
+SizeOfStackReserve 0x200000 SizeOfStackCommit 0x1000 SizeOfHeapReserve 0x100000
+relocations present: True (1707 blocks)
+sections:
+  .text    va 0x00001000 vsize 0x02ff1ce6 raw 0x02ff1e00 chars 0x60000020
+  .rdata   va 0x02ff3000 vsize 0x0090f99a raw 0x0090fa00 chars 0x40000040
+  .data    va 0x03903000 vsize 0x018f56f8 raw 0x00078200 chars 0xc0000040
+  .pdata   va 0x051f9000 vsize 0x003049e0 raw 0x00304a00 chars 0x40000040
+  _RDATA   va 0x054fe000 vsize 0x00013310 raw 0x00013400 chars 0x40000040
+  .rsrc    va 0x05512000 vsize 0x001d8ad0 raw 0x001d8c00 chars 0x40000040
+  .reloc   va 0x056eb000 vsize 0x0012f030 raw 0x0012f200 chars 0x42000040
+TLS: StartRaw 0x1437bcec0 EndRaw 0x1437bda10 Callbacks@0x143028260 SizeOfZeroFill 0
+imports:
+  KERNEL32.dll                              224
+  USER32.dll                                 76
+  SHELL32.dll                                 3
+  SHLWAPI.dll                                 1
+  dbghelp.dll                                 1
+  IMM32.dll                                   4
+  sl.interposer.dll                          20
+  libxell.dll                                 6
+  libxess_fg.dll                             11
+  HID.DLL                                    11
+  WINMM.dll                                   4
+  REDGalaxy64.dll                            10
+  libxess.dll                                 9
+  libcurl.dll                                15
+  redlexer_native.dll                         1
+  XINPUT9_1_0.dll                             1
+  bink2w64.dll                               21
+  icuin.dll                                  33
+  icuuc.dll                                  96
+  PhysX3Common_x64.dll                        8
+  PhysX3CharacterKinematic_x64.dll            1
+  PhysX3Cooking_x64.dll                       1
+  PhysX3_x64.dll                             42
+  PxFoundation_x64.dll                       16
+  amd_fidelityfx_loader_dx12.dll              5
+  GDI32.dll                                  11
+  ADVAPI32.dll                                5
+  ole32.dll                                  12
+  VERSION.dll                                 3
+  SETUPAPI.dll                                6
+  ntdll.dll                                   2
+  POWRPROF.dll                                1
+  WS2_32.dll                                 31
+  oo2ext_7_win64.dll                          9
+  amd_ags_x64.dll                             6
+  OLEAUT32.dll                                3
+  WINHTTP.dll                                14
+version: CompanyName = CD PROJEKT S.A.
+version: FileVersion = 3.0.5813403
+version: ProductName = Cyberpunk 2077
+version: ProductVersion = 2.5
+version: CompanyName = CD PROJEKT S.A.
+version: FileVersion = 3.0.5813403
+version: ProductName = Cyberpunk 2077
+version: ProductVersion = 2.5
+sha256 d36e74c47592e9c656ae250078cb40b2be63c782af5bfbeff2280d43e653fab4

@@ -1,0 +1,141 @@
+count	proc	fd	request	result
+106622	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_IVPU_SUBMIT	ok
+43398	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT	ok
+14010	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_TRANSFER	ok
+9730	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_CS	ok
+8582	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD	ok
+7370	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_RESET	ok
+6212	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_CREATE	ok
+6140	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_DESTROY	ok
+4299	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE	ok
+4283	Cyberpunk2077.exe	anon_inode:sync_file	SYNC_IOC_MERGE	ok
+4048	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_QUERY	ok
+3612	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_WAIT	ok
+1807	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT	ERR
+995	Cyberpunk2077.exe	/dev/dri/renderD129	_IOC	ok
+652	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_GEM_CREATE	ok
+512	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_GEM_MMAP or DRM_IOCTL_AMDXDNA_DESTROY_HWCTX	ok
+495	Cyberpunk2077.exe	other	VFAT_IOCTL_READDIR_BOTH	ERR
+339	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_GEM_CLOSE	ok
+246	Cyberpunk2077.exe	other	FS_IOC_GETFLAGS	ok
+186	xalia.exe	other	FS_IOC_GETFLAGS	ERR
+143	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_GEM_METADATA	ok
+131	xalia.exe	other	VFAT_IOCTL_READDIR_BOTH	ERR
+121	xalia.exe	other	FS_IOC_GETFLAGS	ok
+120	winedevice.exe	socket	SIOCGIFFLAGS	ok
+120	winedevice.exe	socket	SIOCGIFMTU	ok
+104	Cyberpunk2077.exe	other	FS_IOC_GETFLAGS	ERR
+104	Cyberpunk2077.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+99	explorer.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+91	conhost.exe	other	VFAT_IOCTL_READDIR_BOTH	ERR
+65	steam.exe	other	VFAT_IOCTL_READDIR_BOTH	ERR
+56	wineboot.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+55	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_IVPU_SUBMIT	ok
+47	services.exe	other	FS_IOC_GETFLAGS	ok
+45	services.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+43	steam.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+42	winedevice.exe	other	VFAT_IOCTL_READDIR_BOTH	ERR
+41	tabtip.exe	other	VFAT_IOCTL_READDIR_BOTH	ERR
+41	xalia.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+40	tabtip.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+39	plugplay.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+39	Cyberpunk2077.exe	/dev/dri/renderD128	DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_IVPU_SUBMIT	ok
+36	wineboot.exe	other	FS_IOC_GETFLAGS	ok
+34	xalia.exe	/dev/dri/renderD128	DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_IVPU_SUBMIT	ok
+33	xalia.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_IVPU_SUBMIT	ok
+30	explorer.exe	/dev/dri/renderD128	DRM_IOCTL_AMDGPU_INFO or DRM_IOCTL_IVPU_SUBMIT	ok
+30	REDEngineErrorReporter.exe	other	VFAT_IOCTL_READDIR_BOTH	ERR
+29	explorer.exe	other	FS_IOC_GETFLAGS	ok
+21	REDEngineErrorReporter.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+20	steam.exe	other	FS_IOC_GETFLAGS	ERR
+18	winedevice.exe	other	FS_IOC_GETFLAGS	ok
+18	steam.exe	other	FS_IOC_GETFLAGS	ok
+18	REDEngineErrorReporter.exe	other	FS_IOC_GETFLAGS	ok
+14	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_VERSION	ok
+14	Cyberpunk2077.exe	/dev/dri/renderD128	DRM_IOCTL_VERSION	ok
+12	wineboot.exe	other	VFAT_IOCTL_READDIR_BOTH	ERR
+12	Cyberpunk2077.exe	socket	FIONREAD	ok
+11	plugplay.exe	other	FS_IOC_GETFLAGS	ok
+10	services.exe	/dev/null	TCGETS2	ok
+10	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_VERSION	ok
+10	tabtip.exe	other	FS_IOC_GETFLAGS	ok
+9	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_GET_CAP	ok
+8	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_GEM_CREATE	ok
+8	REDEngineErrorReporter.exe	other	FS_IOC_GETFLAGS	ERR
+8	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_PRIME_HANDLE_TO_FD	ok
+7	conhost.exe	other	FS_IOC_GETFLAGS	ok
+7	conhost.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+7	Cyberpunk2077.exe	/dev/dri/renderD128	DRM_IOCTL_GET_CAP	ok
+6	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_GEM_MMAP or DRM_IOCTL_AMDXDNA_DESTROY_HWCTX	ok
+6	xalia.exe	/dev/dri/renderD129	DRM_IOCTL_VERSION	ok
+6	xalia.exe	/dev/dri/renderD128	DRM_IOCTL_VERSION	ok
+6	Cyberpunk2077.exe	/dev/udmabuf	UDMABUF_CREATE	ok
+6	Cyberpunk2077.exe	other	DMA_BUF_IOCTL_EXPORT_SYNC_FILE	ok
+6	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_SIGNAL	ok
+5	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_GET_CAP	ok
+5	explorer.exe	/dev/dri/renderD129	_IOC	ok
+5	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_CTX or DRM_IOCTL_ETNAVIV_GEM_NEW or DRM_IOCTL_LIMA_GEM_INFO or DRM_IOCTL_MSM_GEM_NEW or DRM_IOCTL_NOVA_GEM_INFO or DRM_IOCTL_PVR_GET_BO_MMAP_OFFSET or DRM_IOCTL_QAIC_MMAP_BO or DRM_IOCTL_V3D_CREATE_BO or DRM_IOCTL_VC4_WAIT_BO	ok
+4	winedevice.exe	other	VFAT_IOCTL_READDIR_BOTH	ok
+4	winedevice.exe	socket	SIOCGIFHWADDR	ok
+4	explorer.exe	/dev/dri/renderD128	DRM_IOCTL_VERSION	ok
+4	explorer.exe	/dev/null	TCGETS2	ok
+4	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_GEM_USERPTR	ok
+3	python3(proton script)	other	TCGETS2	ok
+3	steam.exe	/dev/null	TCGETS2	ok
+3	winedevice.exe	socket	SIOCGIWNAME	ok
+3	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_CREATE	ok
+3	xalia.exe	/dev/dri/renderD129	DRM_IOCTL_GET_CAP	ok
+3	xalia.exe	/dev/dri/renderD128	DRM_IOCTL_GET_CAP	ok
+3	Cyberpunk2077.exe	/dev/null	TCGETS2	ERR
+3	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_CTX or DRM_IOCTL_ETNAVIV_GEM_NEW or DRM_IOCTL_LIMA_GEM_INFO or DRM_IOCTL_MSM_GEM_NEW or DRM_IOCTL_NOVA_GEM_INFO or DRM_IOCTL_PVR_GET_BO_MMAP_OFFSET or DRM_IOCTL_QAIC_MMAP_BO or DRM_IOCTL_V3D_CREATE_BO or DRM_IOCTL_VC4_WAIT_BO	ok
+2	python3(proton script)	/dev/null	TCGETS2	ok
+2	steam.exe	other	TCGETS2	ok
+2	wineboot.exe	/dev/null	TCGETS2	ok
+2	winedevice.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+2	svchost.exe	other	FS_IOC_GETFLAGS	ok
+2	winedevice.exe	other	FS_IOC_GETFLAGS	ERR
+2	explorer.exe	other	VFAT_IOCTL_READDIR_BOTH	ERR
+2	explorer.exe	/dev/dri/renderD128	DRM_IOCTL_GET_CAP	ok
+2	explorer.exe	/dev/dri/renderD128	DRM_IOCTL_SYNCOBJ_CREATE	ok
+2	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_AMDGPU_GEM_METADATA	ok
+2	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_GEM_CLOSE	ok
+2	rpcss.exe	other	FS_IOC_GETFLAGS	ok
+2	xalia.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_CREATE	ok
+2	xalia.exe	/dev/dri/renderD128	DRM_IOCTL_SYNCOBJ_CREATE	ok
+2	xalia.exe	/dev/udmabuf	UDMABUF_CREATE	ok
+2	xalia.exe	other	DMA_BUF_IOCTL_EXPORT_SYNC_FILE	ok
+2	conhost.exe	other	FS_IOC_GETFLAGS	ERR
+2	Cyberpunk2077.exe	/dev/dri/renderD128	DRM_IOCTL_SYNCOBJ_CREATE	ok
+2	Cyberpunk2077.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL	ok
+1	python3(proton script)	other	FIOCLEX	ok
+1	steam.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	wineboot.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	services.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	plugplay.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	svchost.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	wineboot.exe	other	FS_IOC_GETFLAGS	ERR
+1	explorer.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_WAIT	ok
+1	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_DESTROY	ok
+1	explorer.exe	/dev/dri/renderD128	DRM_IOCTL_SYNCOBJ_WAIT	ok
+1	explorer.exe	/dev/dri/renderD128	DRM_IOCTL_SYNCOBJ_DESTROY	ok
+1	explorer.exe	/dev/udmabuf	UDMABUF_CREATE	ok
+1	explorer.exe	other	DMA_BUF_IOCTL_EXPORT_SYNC_FILE	ok
+1	explorer.exe	/dev/dri/renderD129	DRM_IOCTL_PRIME_HANDLE_TO_FD	ok
+1	explorer.exe	other	DMA_BUF_SET_NAME_B	ok
+1	rpcss.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	tabtip.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	tabtip.exe	other	FS_IOC_GETFLAGS	ERR
+1	xalia.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	Cyberpunk2077.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	xalia.exe	/dev/null	TCGETS2	ERR
+1	xalia.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_WAIT	ok
+1	xalia.exe	/dev/dri/renderD129	DRM_IOCTL_SYNCOBJ_DESTROY	ok
+1	xalia.exe	/dev/dri/renderD128	DRM_IOCTL_SYNCOBJ_WAIT	ok
+1	xalia.exe	/dev/dri/renderD128	DRM_IOCTL_SYNCOBJ_DESTROY	ok
+1	REDEngineErrorReporter.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	REDEngineErrorReporter.exe	/dev/null	TCGETS2	ERR
+1	REDEngineErrorReporter.exe	/dev/null	TCGETS2	ok
+1	conhost.exe	anon_inode:[userfaultfd]	UFFDIO_API	ok
+1	Cyberpunk2077.exe	/dev/dri/renderD128	DRM_IOCTL_SYNCOBJ_WAIT	ok
+1	Cyberpunk2077.exe	/dev/dri/renderD128	DRM_IOCTL_SYNCOBJ_DESTROY	ok

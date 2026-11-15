@@ -1,0 +1,41 @@
+# tools/cp/p0host/settings-low-native.keys — the "Low, RT off, native" configuration used by every
+# C7-p0host run, as group/Name=<JSON value> lines for `settings.py <UserSettings.json> set $(grep -v "^#" this)`.
+# Captured from the game itself (2.5): Graphics > Quick Preset = Low, then Resolution Scaling = Off and
+# Frame Generation = Off (the game then labels the preset "Custom"), VSync off, FPS cap off.  Resolution is
+# set per run.  WindowMode BorderlessWindowed is what the game chose under gamescope.
+
+/gameplay/performance/CrowdDensity="Low"
+/graphics/advanced/AmbientOcclusion="Low"
+/graphics/advanced/Anisotropy=4
+/graphics/advanced/CascadedShadowsRange="Medium"
+/graphics/advanced/CascadedShadowsResolution="Medium"
+/graphics/advanced/ColorPrecision="Medium"
+/graphics/advanced/DistantShadowsResolution="Low"
+/graphics/advanced/LODPreset="Low"
+/graphics/advanced/LocalShadowsQuality="Low"
+/graphics/advanced/MaxDynamicDecals="Low"
+/graphics/advanced/MirrorQuality="Low"
+/graphics/advanced/ScreenSpaceReflectionsQuality="Low"
+/graphics/advanced/ShadowMeshQuality="Low"
+/graphics/advanced/SubsurfaceScatteringQuality="Low"
+/graphics/advanced/VolumetricCloudsQuality="Medium"
+/graphics/advanced/VolumetricFogResolution="Low"
+/graphics/basic/DepthOfField=false
+/graphics/basic/FilmGrain=false
+/graphics/basic/MotionBlur="Off"
+/graphics/performance/CrowdDensity="Low"
+/graphics/presets/DynamicResolutionScaling=false
+/graphics/presets/FSR2="Auto"
+/graphics/presets/FSR3_FrameGeneration=false
+/graphics/presets/FrameGeneration="Off"
+/graphics/presets/ResolutionScaling="Off"
+/graphics/presets/TextureQuality="Low"
+/graphics/raytracing/RayTracedLighting="Off"
+/graphics/raytracing/RayTracedLocalShadows=false
+/graphics/raytracing/RayTracedPathTracingForPhotoMode=false
+/graphics/raytracing/RayTracedReflections=false
+/graphics/raytracing/RayTracedSunShadows=false
+/graphics/raytracing/RayTracing=false
+/video/display/MaximumFPS_OnOff=false
+/video/display/WindowMode="BorderlessWindowed"
+/video/display/VSync="UI-Settings-Video-QualitySetting-Off"

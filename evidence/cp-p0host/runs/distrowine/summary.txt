@@ -1,0 +1,2 @@
+launch_to_prompt_s=30.6
+launch_to_menu_s=n/a

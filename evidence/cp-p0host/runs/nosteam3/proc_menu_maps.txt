@@ -1,0 +1,1882 @@
+00010000-00026000 r--p 00000000 00:45 7353416                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/apisetschema.dll
+00030000-0004b000 rw-p 00000000 00:00 0 
+00050000-00113000 r--p 00000000 00:45 7359031                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/nls/locale.nls
+00120000-00122000 ---p 00000000 00:00 0 
+00122000-00320000 rw-p 00000000 00:00 0 
+00320000-00322000 r--p 00000000 00:45 7359030                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/nls/l_intl.nls
+00330000-00341000 r--p 00000000 00:45 7358982                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/nls/c_1252.nls
+00350000-00361000 r--p 00000000 00:45 7359006                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/nls/c_437.nls
+00370000-00570000 rw-p 00000000 00:00 0 
+00570000-008aa000 r--p 00000000 00:45 7359037                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/nls/sortdefault.nls
+008b0000-008bf000 r--p 00000000 00:45 7359033                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/nls/normnfc.nls
+008c0000-008db000 rw-p 00000000 00:00 0 
+008e0000-008f1000 r--p 00000000 00:45 7358990                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/nls/c_20127.nls
+00900000-00a44000 r--p 00000000 00:01 5321                               /memfd:wine-mapping (deleted)
+00a50000-00bd0000 rw-p 00000000 00:00 0 
+00bd0000-00be1000 r--p 00000000 00:45 7358963                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/nls/c_10000.nls
+00bf0000-00cf0000 rw-p 00000000 00:00 0 
+00cf0000-00ef0000 rw-p 00000000 00:00 0 
+00ef0000-01300000 rw-p 00000000 00:00 0 
+01300000-01310000 ---p 00000000 00:00 0 
+01310000-0131b000 rw-p 00000000 00:00 0 
+01320000-0133b000 rw-p 00000000 00:00 0 
+01340000-01460000 rw-p 00000000 00:00 0 
+01460000-01640000 ---p 00000000 00:00 0 
+01640000-019d0000 rw-p 00000000 00:00 0 
+019d0000-019d1000 rw-s 00000000 00:01 17563                              /memfd:wine-mapping (deleted)
+019e0000-01ae0000 rw-p 00000000 00:00 0 
+01ae0000-01af0000 rwxp 00000000 00:00 0 
+01af0000-03a90000 rw-p 00000000 00:00 0 
+03a90000-05340000 rw-p 00000000 00:00 0 
+05340000-24e30000 ---p 00000000 00:00 0 
+24e30000-26030000 rw-p 00000000 00:00 0 
+26030000-64e30000 ---p 00000000 00:00 0 
+64e30000-71210000 rw-p 00000000 00:00 0 
+71210000-71212000 ---p 00000000 00:00 0 
+71212000-71410000 rw-p 00000000 00:00 0 
+71410000-71412000 ---p 00000000 00:00 0 
+71412000-71510000 rw-p 00000000 00:00 0 
+71510000-71512000 ---p 00000000 00:00 0 
+71512000-71610000 rw-p 00000000 00:00 0 
+71610000-71612000 ---p 00000000 00:00 0 
+71612000-71710000 rw-p 00000000 00:00 0 
+71710000-71712000 ---p 00000000 00:00 0 
+71712000-71810000 rw-p 00000000 00:00 0 
+71810000-71812000 ---p 00000000 00:00 0 
+71812000-71910000 rw-p 00000000 00:00 0 
+71910000-71912000 ---p 00000000 00:00 0 
+71912000-71a50000 rw-p 00000000 00:00 0 
+71a50000-71a52000 ---p 00000000 00:00 0 
+71a52000-71b50000 rw-p 00000000 00:00 0 
+71b50000-71b52000 ---p 00000000 00:00 0 
+71b52000-71c50000 rw-p 00000000 00:00 0 
+71c50000-71c52000 ---p 00000000 00:00 0 
+71c52000-71d50000 rw-p 00000000 00:00 0 
+71d50000-71d52000 ---p 00000000 00:00 0 
+71d52000-72010000 rw-p 00000000 00:00 0 
+72010000-72012000 ---p 00000000 00:00 0 
+72012000-72150000 rw-p 00000000 00:00 0 
+72150000-72152000 ---p 00000000 00:00 0 
+72152000-72250000 rw-p 00000000 00:00 0 
+72250000-72252000 ---p 00000000 00:00 0 
+72252000-72350000 rw-p 00000000 00:00 0 
+72350000-72352000 ---p 00000000 00:00 0 
+72352000-72490000 rw-p 00000000 00:00 0 
+72490000-72492000 ---p 00000000 00:00 0 
+72492000-727a0000 rw-p 00000000 00:00 0 
+727a0000-727a2000 ---p 00000000 00:00 0 
+727a2000-728a0000 rw-p 00000000 00:00 0 
+728a0000-728a2000 ---p 00000000 00:00 0 
+728a2000-72b40000 rw-p 00000000 00:00 0 
+72b40000-72ba2000 ---p 00000000 00:00 0 
+72ba2000-72da0000 rw-p 00000000 00:00 0 
+72da0000-72da2000 ---p 00000000 00:00 0 
+72da2000-72fa0000 rw-p 00000000 00:00 0 
+72fa0000-72fa2000 ---p 00000000 00:00 0 
+72fa2000-731a0000 rw-p 00000000 00:00 0 
+731a0000-731a2000 ---p 00000000 00:00 0 
+731a2000-733a0000 rw-p 00000000 00:00 0 
+733a0000-733a2000 ---p 00000000 00:00 0 
+733a2000-735a0000 rw-p 00000000 00:00 0 
+735a0000-735a2000 ---p 00000000 00:00 0 
+735a2000-737a0000 rw-p 00000000 00:00 0 
+737a0000-737a2000 ---p 00000000 00:00 0 
+737a2000-739a0000 rw-p 00000000 00:00 0 
+739a0000-739a2000 ---p 00000000 00:00 0 
+739a2000-73ba0000 rw-p 00000000 00:00 0 
+73ba0000-73ba2000 ---p 00000000 00:00 0 
+73ba2000-73da0000 rw-p 00000000 00:00 0 
+73da0000-73da2000 ---p 00000000 00:00 0 
+73da2000-73fb1000 rw-p 00000000 00:00 0 
+73fc0000-73fc1000 rw-p 00000000 00:00 0 
+73fd0000-73fd1000 rw-p 00000000 00:00 0 
+73fe0000-73fe2000 ---p 00000000 00:00 0 
+73fe2000-74226000 rw-p 00000000 00:00 0 
+74230000-74231000 rw-p 00000000 00:00 0 
+74240000-74241000 rw-p 00000000 00:00 0 
+74250000-74251000 rw-p 00000000 00:00 0 
+74260000-74261000 rw-s 00000000 00:01 19540                              /memfd:wine-mapping (deleted)
+74270000-74271000 rw-p 00000000 00:00 0 
+74280000-74281000 rw-s 00000000 00:01 19540                              /memfd:wine-mapping (deleted)
+742b0000-742b2000 ---p 00000000 00:00 0 
+742b2000-744c0000 rw-p 00000000 00:00 0 
+744c0000-746b0000 rw-p 00000000 00:00 0 
+746b0000-746b2000 ---p 00000000 00:00 0 
+746b2000-748b0000 rw-p 00000000 00:00 0 
+748b0000-748b2000 ---p 00000000 00:00 0 
+748b2000-74ab0000 rw-p 00000000 00:00 0 
+74ab0000-74ab2000 ---p 00000000 00:00 0 
+74ab2000-74cb0000 rw-p 00000000 00:00 0 
+74cb0000-753ec000 r--p 00000000 00:45 7353911                            /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/light.msstyles
+753f0000-753f2000 ---p 00000000 00:00 0 
+753f2000-755f0000 rw-p 00000000 00:00 0 
+755f0000-755f2000 ---p 00000000 00:00 0 
+755f2000-756f0000 rw-p 00000000 00:00 0 
+756f0000-756f2000 ---p 00000000 00:00 0 
+756f2000-757f0000 rw-p 00000000 00:00 0 
+757f0000-757f2000 ---p 00000000 00:00 0 
+757f2000-77d40000 rw-p 00000000 00:00 0 
+77d40000-77d42000 ---p 00000000 00:00 0 
+77d42000-77f40000 rw-p 00000000 00:00 0 
+77f40000-77f42000 ---p 00000000 00:00 0 
+77f42000-78140000 rw-p 00000000 00:00 0 
+78140000-78142000 ---p 00000000 00:00 0 
+78142000-78340000 rw-p 00000000 00:00 0 
+78340000-78342000 ---p 00000000 00:00 0 
+78342000-78540000 rw-p 00000000 00:00 0 
+78540000-78542000 ---p 00000000 00:00 0 
+78542000-78740000 rw-p 00000000 00:00 0 
+78740000-7888d000 r--p 00000000 103:05 80521205                          /home/sarah/cp/p0host/cache/vkd3d/vkd3d-proton.Cyberpunk2077.exe.cache
+78890000-78892000 ---p 00000000 00:00 0 
+78892000-78c90000 rw-p 00000000 00:00 0 
+78c90000-78c92000 ---p 00000000 00:00 0 
+78c92000-78e90000 rw-p 00000000 00:00 0 
+78e90000-78e92000 ---p 00000000 00:00 0 
+78e92000-7e7d0000 rw-p 00000000 00:00 0 
+7e7d0000-7e7d2000 ---p 00000000 00:00 0 
+7e7d2000-7e9d0000 rw-p 00000000 00:00 0 
+7e9d0000-7e9d2000 ---p 00000000 00:00 0 
+7e9d2000-7ebd0000 rw-p 00000000 00:00 0 
+7ebd0000-7ebd2000 ---p 00000000 00:00 0 
+7ebd2000-7edd0000 rw-p 00000000 00:00 0 
+7edd0000-7edd2000 ---p 00000000 00:00 0 
+7edd2000-7efd0000 rw-p 00000000 00:00 0 
+7efd0000-7efd2000 ---p 00000000 00:00 0 
+7efd2000-7f1d0000 rw-p 00000000 00:00 0 
+7f1d0000-7f1d2000 ---p 00000000 00:00 0 
+7f1d2000-7f3d0000 rw-p 00000000 00:00 0 
+7f3d0000-7f3d2000 ---p 00000000 00:00 0 
+7f3d2000-7f5d0000 rw-p 00000000 00:00 0 
+7f5d0000-7f5d2000 ---p 00000000 00:00 0 
+7f5d2000-7f7d0000 rw-p 00000000 00:00 0 
+7f7d0000-7f7d2000 ---p 00000000 00:00 0 
+7f7d2000-7f9d0000 rw-p 00000000 00:00 0 
+7f9d0000-7f9d2000 ---p 00000000 00:00 0 
+7f9d2000-7fbd0000 rw-p 00000000 00:00 0 
+7fbd0000-7fbd2000 ---p 00000000 00:00 0 
+7fbd2000-7fdd0000 rw-p 00000000 00:00 0 
+7fde0000-7ffe0000 rw-p 00000000 00:00 0 
+7ffe0000-7ffe1000 r--s 00000000 00:01 5320                               /memfd:wine-mapping (deleted)
+7ffe1000-7ffe2000 rw-p 00000000 00:00 0 
+7ffe2000-7fff0000 ---p 00000000 00:00 0 
+7fff0000-800f0000 rw-p 00000000 00:00 0 
+800f0000-bfff0000 ---p 00000000 00:00 0 
+bfff0000-c00f0000 rw-p 00000000 00:00 0 
+c00f0000-ffff0000 ---p 00000000 00:00 0 
+100000000-100001000 r--p 00000000 00:00 0 
+100001000-100100000 rw-p 00000000 00:00 0 
+100100000-100101000 r--p 00000000 00:45 7538114                          /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/icudt.dll
+100101000-100103000 r--p 00000000 00:00 0 
+100110000-100111000 r--p 00000000 00:00 0 
+100111000-100210000 rw-p 00000000 00:00 0 
+100210000-100211000 r--p 00000000 00:00 0 
+100211000-100310000 rw-p 00000000 00:00 0 
+100310000-100311000 r--p 00000000 00:00 0 
+100311000-100410000 rw-p 00000000 00:00 0 
+100410000-100411000 r--p 00000000 00:00 0 
+100411000-100510000 rw-p 00000000 00:00 0 
+100510000-100511000 r--p 00000000 00:00 0 
+100511000-100610000 rw-p 00000000 00:00 0 
+100610000-100611000 r--p 00000000 00:00 0 
+100611000-100710000 rw-p 00000000 00:00 0 
+100710000-100711000 r--p 00000000 00:00 0 
+100711000-100810000 rw-p 00000000 00:00 0 
+100810000-100811000 r--p 00000000 00:00 0 
+100811000-100910000 rw-p 00000000 00:00 0 
+100910000-100911000 r--p 00000000 00:00 0 
+100911000-100a10000 rw-p 00000000 00:00 0 
+100a10000-100a11000 r--p 00000000 00:00 0 
+100a11000-100b10000 rw-p 00000000 00:00 0 
+100b10000-100b11000 r--p 00000000 00:00 0 
+100b11000-100c10000 rw-p 00000000 00:00 0 
+100c10000-100c11000 r--p 00000000 00:00 0 
+100c11000-100d10000 rw-p 00000000 00:00 0 
+100d10000-100d11000 r--p 00000000 00:00 0 
+100d11000-100e10000 rw-p 00000000 00:00 0 
+100e10000-100e11000 r--p 00000000 00:00 0 
+100e11000-100f10000 rw-p 00000000 00:00 0 
+100f10000-100f11000 r--p 00000000 00:00 0 
+100f11000-101010000 rw-p 00000000 00:00 0 
+101010000-101011000 r--p 00000000 00:00 0 
+101011000-101110000 rw-p 00000000 00:00 0 
+101110000-101111000 r--p 00000000 00:00 0 
+101111000-101210000 rw-p 00000000 00:00 0 
+101210000-101211000 r--p 00000000 00:00 0 
+101211000-101310000 rw-p 00000000 00:00 0 
+101310000-101311000 r--p 00000000 00:00 0 
+101311000-101410000 rw-p 00000000 00:00 0 
+101410000-101411000 r--p 00000000 00:00 0 
+101411000-101510000 rw-p 00000000 00:00 0 
+101510000-101511000 r--p 00000000 00:00 0 
+101511000-101610000 rw-p 00000000 00:00 0 
+101610000-101611000 r--p 00000000 00:00 0 
+101611000-101710000 rw-p 00000000 00:00 0 
+101710000-101711000 r--p 00000000 00:00 0 
+101711000-101810000 rw-p 00000000 00:00 0 
+101810000-101811000 r--p 00000000 00:00 0 
+101811000-101910000 rw-p 00000000 00:00 0 
+101910000-101911000 r--p 00000000 00:00 0 
+101911000-101a10000 rw-p 00000000 00:00 0 
+101a10000-101a11000 r--p 00000000 00:00 0 
+101a11000-101b10000 rw-p 00000000 00:00 0 
+101b10000-101b11000 r--p 00000000 00:00 0 
+101b11000-101c10000 rw-p 00000000 00:00 0 
+101c10000-101c11000 r--p 00000000 00:00 0 
+101c11000-101d10000 rw-p 00000000 00:00 0 
+101d10000-101d11000 r--p 00000000 00:00 0 
+101d11000-101e10000 rw-p 00000000 00:00 0 
+101e10000-101e11000 r--p 00000000 00:00 0 
+101e11000-101f10000 rw-p 00000000 00:00 0 
+101f10000-101f11000 r--p 00000000 00:00 0 
+101f11000-102010000 rw-p 00000000 00:00 0 
+102010000-102011000 r--p 00000000 00:00 0 
+102011000-102110000 rw-p 00000000 00:00 0 
+102110000-102111000 r--p 00000000 00:00 0 
+102111000-102210000 rw-p 00000000 00:00 0 
+102210000-102211000 r--p 00000000 00:00 0 
+102211000-102310000 rw-p 00000000 00:00 0 
+102310000-102311000 r--p 00000000 00:00 0 
+102311000-102410000 rw-p 00000000 00:00 0 
+102410000-102411000 r--p 00000000 00:00 0 
+102411000-102510000 rw-p 00000000 00:00 0 
+102510000-102511000 r--p 00000000 103:05 72403745                        /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/mfc140enu.dll
+102511000-10251e000 r--p 00000000 00:00 0 
+102520000-102521000 r--p 00000000 00:00 0 
+102521000-102620000 rw-p 00000000 00:00 0 
+102620000-102621000 r--p 00000000 00:00 0 
+102621000-102720000 rw-p 00000000 00:00 0 
+102720000-102721000 r--p 00000000 00:00 0 
+102721000-102820000 rw-p 00000000 00:00 0 
+102820000-102821000 r--p 00000000 00:00 0 
+102821000-102920000 rw-p 00000000 00:00 0 
+102920000-102921000 r--p 00000000 00:00 0 
+102921000-102a20000 rw-p 00000000 00:00 0 
+102a20000-102a21000 r--p 00000000 00:00 0 
+102a21000-102b20000 rw-p 00000000 00:00 0 
+102b20000-102b21000 r--p 00000000 00:00 0 
+102b21000-102c20000 rw-p 00000000 00:00 0 
+102c20000-102c21000 r--p 00000000 00:00 0 
+102c21000-102d20000 rw-p 00000000 00:00 0 
+102d20000-102d21000 r--p 00000000 00:00 0 
+102d21000-102e20000 rw-p 00000000 00:00 0 
+102e20000-102e21000 r--p 00000000 00:00 0 
+102e21000-102f20000 rw-p 00000000 00:00 0 
+102f20000-102f21000 r--p 00000000 00:00 0 
+102f21000-103020000 rw-p 00000000 00:00 0 
+103020000-103021000 r--p 00000000 00:00 0 
+103021000-103120000 rw-p 00000000 00:00 0 
+103120000-103121000 r--p 00000000 00:00 0 
+103121000-103220000 rw-p 00000000 00:00 0 
+103220000-103221000 r--p 00000000 00:00 0 
+103221000-103320000 rw-p 00000000 00:00 0 
+103320000-103321000 r--p 00000000 00:00 0 
+103321000-103420000 rw-p 00000000 00:00 0 
+103420000-103421000 r--p 00000000 00:00 0 
+103421000-103520000 rw-p 00000000 00:00 0 
+103520000-103521000 r--p 00000000 00:00 0 
+103521000-103620000 rw-p 00000000 00:00 0 
+103620000-103621000 r--p 00000000 00:00 0 
+103621000-103720000 rw-p 00000000 00:00 0 
+103720000-103721000 r--p 00000000 00:00 0 
+103721000-103820000 rw-p 00000000 00:00 0 
+103820000-103821000 r--p 00000000 00:00 0 
+103821000-103920000 rw-p 00000000 00:00 0 
+103920000-103921000 r--p 00000000 00:00 0 
+103921000-103a20000 rw-p 00000000 00:00 0 
+103a20000-103a22000 ---p 00000000 00:00 0 
+103a22000-103c20000 rw-p 00000000 00:00 0 
+103c20000-103c21000 r--p 00000000 00:00 0 
+103c21000-103d20000 rw-p 00000000 00:00 0 
+103d20000-103d22000 ---p 00000000 00:00 0 
+103d22000-103f20000 rw-p 00000000 00:00 0 
+103f20000-103f21000 r--p 00000000 00:00 0 
+103f21000-104020000 rw-p 00000000 00:00 0 
+104020000-104022000 ---p 00000000 00:00 0 
+104022000-104220000 rw-p 00000000 00:00 0 
+104220000-104221000 r--p 00000000 00:00 0 
+104221000-104320000 rw-p 00000000 00:00 0 
+104320000-104322000 ---p 00000000 00:00 0 
+104322000-104520000 rw-p 00000000 00:00 0 
+104520000-104521000 r--p 00000000 00:00 0 
+104521000-104620000 rw-p 00000000 00:00 0 
+104620000-104622000 ---p 00000000 00:00 0 
+104622000-104820000 rw-p 00000000 00:00 0 
+104820000-104821000 r--p 00000000 00:00 0 
+104821000-104920000 rw-p 00000000 00:00 0 
+104920000-104922000 ---p 00000000 00:00 0 
+104922000-104b20000 rw-p 00000000 00:00 0 
+104b20000-104cd0000 ---p 00000000 00:00 0 
+104cd0000-104d20000 rw-p 00000000 00:00 0 
+104d20000-104d21000 r--p 00000000 00:00 0 
+104d21000-104e20000 rw-p 00000000 00:00 0 
+104e20000-104e22000 ---p 00000000 00:00 0 
+104e22000-105820000 rw-p 00000000 00:00 0 
+105820000-105821000 r--p 00000000 00:00 0 
+105821000-105920000 rw-p 00000000 00:00 0 
+105920000-105922000 ---p 00000000 00:00 0 
+105922000-105b20000 rw-p 00000000 00:00 0 
+105b20000-105b21000 r--p 00000000 00:00 0 
+105b21000-105c20000 rw-p 00000000 00:00 0 
+105c20000-105c22000 ---p 00000000 00:00 0 
+105c22000-105e20000 rw-p 00000000 00:00 0 
+105e20000-105e21000 r--p 00000000 00:00 0 
+105e21000-105f20000 rw-p 00000000 00:00 0 
+105f20000-105f22000 ---p 00000000 00:00 0 
+105f22000-1070f0000 rw-p 00000000 00:00 0 
+1070f0000-1070f1000 r--p 00000000 00:00 0 
+1070f1000-1071f0000 rw-p 00000000 00:00 0 
+1071f0000-1071f2000 ---p 00000000 00:00 0 
+1071f2000-1083c0000 rw-p 00000000 00:00 0 
+108620000-1095f0000 rw-p 00000000 00:00 0 
+10a300000-10b240000 rw-p 00000000 00:00 0 
+10b240000-10b2d0000 ---p 00000000 00:00 0 
+10b400000-10c3d0000 rw-p 00000000 00:00 0 
+10c500000-10cb20000 rw-p 00000000 00:00 0 
+10cb20000-10d4d0000 ---p 00000000 00:00 0 
+10d4d0000-111410000 rw-p 00000000 00:00 0 
+140000000-140001000 r--p 00000000 00:45 7533140                          /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/Cyberpunk2077.exe
+140001000-142ff3000 r-xp 00000000 00:00 0 
+142ff3000-143903000 r--p 00000000 00:00 0 
+143903000-1451f9000 rw-p 00000000 00:00 0 
+1451f9000-1454fe000 r--p 0397a000 00:45 7533140                          /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/Cyberpunk2077.exe
+1454fe000-14581b000 r--p 00000000 00:00 0 
+180000000-180002000 r--p 00000000 00:45 7354116                          /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/normaliz.dll
+180010000-1a5810000 rw-p 00000000 00:00 0 
+1a5810000-580010000 ---p 00000000 00:00 0 
+580010000-5ac010000 rw-p 00000000 00:00 0 
+5ac010000-1580010000 ---p 00000000 00:00 0 
+1580010000-1584b60000 rw-p 00000000 00:00 0 
+1584b60000-1584c70000 ---p 00000000 00:00 0 
+1584c70000-1584d90000 rw-p 00000000 00:00 0 
+1584d90000-1584e10000 ---p 00000000 00:00 0 
+1584e10000-15866a0000 rw-p 00000000 00:00 0 
+15866a0000-1586700000 ---p 00000000 00:00 0 
+1586700000-15869e0000 rw-p 00000000 00:00 0 
+15869e0000-1586a50000 ---p 00000000 00:00 0 
+1586a50000-1587480000 rw-p 00000000 00:00 0 
+1587480000-15874d0000 ---p 00000000 00:00 0 
+15874d0000-158aae0000 rw-p 00000000 00:00 0 
+158aae0000-158abd0000 ---p 00000000 00:00 0 
+158abd0000-158ae50000 rw-p 00000000 00:00 0 
+158ae50000-158ae60000 ---p 00000000 00:00 0 
+158ae60000-158edb0000 rw-p 00000000 00:00 0 
+158edb0000-158ef20000 ---p 00000000 00:00 0 
+158ef20000-158fdb0000 rw-p 00000000 00:00 0 
+158fdb0000-158fe30000 ---p 00000000 00:00 0 
+158fe30000-159b520000 rw-p 00000000 00:00 0 
+159b520000-159b620000 ---p 00000000 00:00 0 
+159b620000-159c7b0000 rw-p 00000000 00:00 0 
+159c7b0000-159cb00000 ---p 00000000 00:00 0 
+159cb00000-159d1f0000 rw-p 00000000 00:00 0 
+159d1f0000-159d560000 ---p 00000000 00:00 0 
+159d560000-159d6d0000 rw-p 00000000 00:00 0 
+159d6d0000-159d870000 ---p 00000000 00:00 0 
+159d870000-159e140000 rw-p 00000000 00:00 0 
+159e140000-159e300000 ---p 00000000 00:00 0 
+159e300000-159fde0000 rw-p 00000000 00:00 0 
+159fde0000-159ff80000 ---p 00000000 00:00 0 
+159ff80000-15a3b20000 rw-p 00000000 00:00 0 
+15a3b20000-15a4b40000 ---p 00000000 00:00 0 
+15a4b40000-15a4f50000 rw-p 00000000 00:00 0 
+15a4f50000-1d80010000 ---p 00000000 00:00 0 
+1d80010000-1d81890000 rw-p 00000000 00:00 0 
+1d81890000-1e80010000 ---p 00000000 00:00 0 
+1e80010000-1e80a20000 rw-p 00000000 00:00 0 
+1e80a20000-1f80010000 ---p 00000000 00:00 0 
+1f80010000-1f80420000 rw-p 00000000 00:00 0 
+1f80420000-2080010000 ---p 00000000 00:00 0 
+2080010000-2080a20000 rw-p 00000000 00:00 0 
+2080a20000-2180010000 ---p 00000000 00:00 0 
+2180010000-2180060000 rw-p 00000000 00:00 0 
+2180060000-2280010000 ---p 00000000 00:00 0 
+5555851ee000-555585865000 rw-p 00000000 00:00 0                          [heap]
+6fffeda80000-6fffeda81000 r--p 00000000 00:45 7538444                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/amd_fidelityfx_framegeneration_dx12.dll
+6fffeda81000-6fffedb8e000 r-xp 00000000 00:00 0 
+6fffedb8e000-6ffff008f000 r--p 00000000 00:00 0 
+6ffff008f000-6ffff00b4000 rw-p 00000000 00:00 0 
+6ffff00b4000-6ffff00b6000 r--p 00000000 00:00 0 
+6ffff00b6000-6ffff00b7000 r--p 02633000 00:45 7538444                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/amd_fidelityfx_framegeneration_dx12.dll
+6ffff00b7000-6ffff00bc000 r--p 00000000 00:00 0 
+6ffff00d0000-6ffff00d1000 r--p 00000000 00:45 7535737                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/amd_fidelityfx_upscaler_dx12.dll
+6ffff00d1000-6ffff0179000 r-xp 00000000 00:00 0 
+6ffff0179000-6ffff1bcf000 r--p 00000000 00:00 0 
+6ffff1bcf000-6ffff1c2c000 rw-p 00000000 00:00 0 
+6ffff1c2c000-6ffff1c3f000 r--p 00000000 00:00 0 
+6ffff1c50000-6ffff1c51000 r--p 00000000 00:45 7629                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netutils.dll
+6ffff1c51000-6ffff1c53000 r-xp 00001000 00:45 7629                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netutils.dll
+6ffff1c53000-6ffff1c54000 rw-p 00003000 00:45 7629                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netutils.dll
+6ffff1c54000-6ffff1c5c000 r--p 00004000 00:45 7629                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netutils.dll
+6ffff1c70000-6ffff1c71000 r--p 00000000 00:45 7627                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netapi32.dll
+6ffff1c71000-6ffff1c84000 r-xp 00001000 00:45 7627                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netapi32.dll
+6ffff1c84000-6ffff1c85000 rw-p 00014000 00:45 7627                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netapi32.dll
+6ffff1c85000-6ffff1c96000 r--p 00015000 00:45 7627                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netapi32.dll
+6ffff1cb0000-6ffff1cb1000 r--p 00000000 00:45 7289                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msv1_0.dll
+6ffff1cb1000-6ffff1cb9000 r-xp 00001000 00:45 7289                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msv1_0.dll
+6ffff1cb9000-6ffff1cba000 rw-p 00009000 00:45 7289                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msv1_0.dll
+6ffff1cba000-6ffff1cc2000 r--p 0000a000 00:45 7289                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msv1_0.dll
+6ffff1ce0000-6ffff1ce1000 r--p 00000000 00:45 8976                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kerberos.dll
+6ffff1ce1000-6ffff1ce5000 r-xp 00001000 00:45 8976                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kerberos.dll
+6ffff1ce5000-6ffff1ce6000 rw-p 00005000 00:45 8976                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kerberos.dll
+6ffff1ce6000-6ffff1cee000 r--p 00006000 00:45 8976                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kerberos.dll
+6ffff1d50000-6ffff1d51000 r--p 00000000 00:45 4177                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/lsteamclient.dll
+6ffff1d51000-6ffff1e70000 r-xp 00001000 00:45 4177                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/lsteamclient.dll
+6ffff1e70000-6ffff1e92000 rw-p 00120000 00:45 4177                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/lsteamclient.dll
+6ffff1e92000-6ffff1fac000 r--p 00142000 00:45 4177                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/lsteamclient.dll
+6ffff2470000-6ffff2471000 r--p 00000000 103:05 72403739                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12core.dll
+6ffff2471000-6ffff2925000 r-xp 00001000 103:05 72403739                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12core.dll
+6ffff2925000-6ffff2932000 rw-p 004b5000 103:05 72403739                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12core.dll
+6ffff2932000-6ffff2a1f000 r--p 004c2000 103:05 72403739                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12core.dll
+6ffff2a1f000-6ffff2a20000 rw-p 00000000 00:00 0 
+6ffff2a20000-6ffff2a23000 r--p 005af000 103:05 72403739                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12core.dll
+6ffff2a23000-6ffff2a24000 rw-p 005b2000 103:05 72403739                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12core.dll
+6ffff2a24000-6ffff2a29000 r--p 005b3000 103:05 72403739                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12core.dll
+6ffff2a40000-6ffff2a41000 r--p 00000000 00:45 7538451                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/GFSDK_Aftermath_Lib.x64.dll
+6ffff2a41000-6ffff2afa000 r-xp 00000000 00:00 0 
+6ffff2afa000-6ffff2b32000 r--p 00000000 00:00 0 
+6ffff2b32000-6ffff2b7b000 rw-p 00000000 00:00 0 
+6ffff2b7b000-6ffff2b82000 r--p 00000000 00:00 0 
+6ffff2b82000-6ffff2b83000 r--p 0012b000 00:45 7538451                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/GFSDK_Aftermath_Lib.x64.dll
+6ffff2b83000-6ffff2b85000 r--p 00000000 00:00 0 
+6ffff2ba0000-6ffff2ba1000 r--p 00000000 00:45 7537254                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/sl.reflex.dll
+6ffff2ba1000-6ffff2be6000 r-xp 00000000 00:00 0 
+6ffff2be6000-6ffff2bf7000 r--p 00045000 00:45 7537254                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/sl.reflex.dll
+6ffff2bf7000-6ffff2bfa000 rw-p 00000000 00:00 0 
+6ffff2bfa000-6ffff2bff000 r--p 00000000 00:00 0 
+6ffff2c10000-6ffff2c11000 r--p 00000000 00:45 7529918                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/sl.pcl.dll
+6ffff2c11000-6ffff2c50000 r-xp 00000000 00:00 0 
+6ffff2c50000-6ffff2c60000 r--p 00000000 00:00 0 
+6ffff2c60000-6ffff2c63000 rw-p 00000000 00:00 0 
+6ffff2c63000-6ffff2c66000 r--p 00050000 00:45 7529918                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/sl.pcl.dll
+6ffff2c66000-6ffff2c68000 r--p 00000000 00:00 0 
+6ffff2cc0000-6ffff2cc1000 r--p 00000000 00:45 3049                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wtsapi32.dll
+6ffff2cc1000-6ffff2cc5000 r-xp 00001000 00:45 3049                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wtsapi32.dll
+6ffff2cc5000-6ffff2cc6000 rw-p 00005000 00:45 3049                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wtsapi32.dll
+6ffff2cc6000-6ffff2cce000 r--p 00006000 00:45 3049                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wtsapi32.dll
+6ffff2ce0000-6ffff2ce1000 r--p 00000000 00:45 8988                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winealsa.drv
+6ffff2ce1000-6ffff2ce2000 r-xp 00001000 00:45 8988                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winealsa.drv
+6ffff2ce2000-6ffff2ce7000 r--p 00002000 00:45 8988                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winealsa.drv
+6ffff2d00000-6ffff2d01000 r--p 00000000 00:45 1011                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winepulse.drv
+6ffff2d01000-6ffff2d02000 r-xp 00001000 00:45 1011                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winepulse.drv
+6ffff2d02000-6ffff2d07000 r--p 00002000 00:45 1011                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winepulse.drv
+6ffff2d20000-6ffff2d21000 r--p 00000000 00:45 8497                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/mmdevapi.dll
+6ffff2d21000-6ffff2d37000 r-xp 00001000 00:45 8497                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/mmdevapi.dll
+6ffff2d37000-6ffff2d39000 rw-p 00017000 00:45 8497                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/mmdevapi.dll
+6ffff2d39000-6ffff2d4e000 r--p 00019000 00:45 8497                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/mmdevapi.dll
+6ffff2d60000-6ffff2d61000 r--p 00000000 00:45 8240                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/amdxc64.dll
+6ffff2d61000-6ffff2d63000 r-xp 00001000 00:45 8240                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/amdxc64.dll
+6ffff2d63000-6ffff2d64000 rw-p 00003000 00:45 8240                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/amdxc64.dll
+6ffff2d64000-6ffff2d6e000 r--p 00004000 00:45 8240                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/amdxc64.dll
+6ffff2d80000-6ffff2d81000 r--p 00000000 00:45 7135                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wineopenxr.dll
+6ffff2d81000-6ffff2d97000 r-xp 00001000 00:45 7135                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wineopenxr.dll
+6ffff2d97000-6ffff2d98000 rw-p 00017000 00:45 7135                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wineopenxr.dll
+6ffff2d98000-6ffff2dae000 r--p 00018000 00:45 7135                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wineopenxr.dll
+6ffff2dc0000-6ffff2dc1000 r--p 00000000 103:05 72403738                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12.dll
+6ffff2dc1000-6ffff2dd4000 r-xp 00001000 103:05 72403738                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12.dll
+6ffff2dd4000-6ffff2dd5000 rw-p 00014000 103:05 72403738                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12.dll
+6ffff2dd5000-6ffff2ddc000 r--p 00015000 103:05 72403738                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12.dll
+6ffff2ddc000-6ffff2ddd000 rw-p 00000000 00:00 0 
+6ffff2ddd000-6ffff2ddf000 r--p 0001c000 103:05 72403738                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12.dll
+6ffff2ddf000-6ffff2de0000 rw-p 0001e000 103:05 72403738                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12.dll
+6ffff2de0000-6ffff2de2000 r--p 0001f000 103:05 72403738                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/d3d12.dll
+6ffff2e00000-6ffff2e01000 r--p 00000000 00:45 7529408                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/sl.common.dll
+6ffff2e01000-6ffff2e96000 r-xp 00000000 00:00 0 
+6ffff2e96000-6ffff2ebf000 r--p 00000000 00:00 0 
+6ffff2ebf000-6ffff2ed9000 rw-p 00000000 00:00 0 
+6ffff2ed9000-6ffff2ee2000 r--p 00000000 00:00 0 
+6ffff2f00000-6ffff2f01000 r--p 00000000 00:45 6846                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wldp.dll
+6ffff2f01000-6ffff2f03000 r-xp 00001000 00:45 6846                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wldp.dll
+6ffff2f03000-6ffff2f04000 rw-p 00003000 00:45 6846                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wldp.dll
+6ffff2f04000-6ffff2f0c000 r--p 00004000 00:45 6846                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wldp.dll
+6ffff2f20000-6ffff2f21000 r--p 00000000 00:45 8836                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msasn1.dll
+6ffff2f21000-6ffff2f26000 r-xp 00001000 00:45 8836                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msasn1.dll
+6ffff2f26000-6ffff2f27000 rw-p 00006000 00:45 8836                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msasn1.dll
+6ffff2f27000-6ffff2f34000 r--p 00007000 00:45 8836                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msasn1.dll
+6ffff2f50000-6ffff2f51000 r--p 00000000 103:05 72403752                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/mfc140u.dll
+6ffff2f51000-6ffff3224000 r-xp 00000000 00:00 0 
+6ffff3224000-6ffff330f000 r--p 00000000 00:00 0 
+6ffff330f000-6ffff331c000 rw-p 003bd000 103:05 72403752                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/mfc140u.dll
+6ffff331c000-6ffff3323000 rw-p 00000000 00:00 0 
+6ffff3323000-6ffff3347000 r--p 003ca000 103:05 72403752                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/mfc140u.dll
+6ffff3347000-6ffff3348000 rw-p 00000000 00:00 0 
+6ffff3348000-6ffff34a2000 r--p 003ee000 103:05 72403752                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/mfc140u.dll
+6ffff34a2000-6ffff34ba000 r--p 00000000 00:00 0 
+6ffff34d0000-6ffff34d1000 r--p 00000000 00:45 7320539                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/CChromaEditorLibrary64.dll
+6ffff34d1000-6ffff351a000 r-xp 00000000 00:00 0 
+6ffff351a000-6ffff3533000 r--p 00000000 00:00 0 
+6ffff3533000-6ffff3535000 rw-p 00000000 00:00 0 
+6ffff3535000-6ffff353a000 r--p 00062000 00:45 7320539                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/CChromaEditorLibrary64.dll
+6ffff353a000-6ffff353d000 r--p 00000000 00:00 0 
+6ffff3550000-6ffff3551000 r--p 00000000 00:45 7312154                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/GfnRuntimeSdk.dll
+6ffff3551000-6ffff372e000 r-xp 00000000 00:00 0 
+6ffff372e000-6ffff38ad000 r--p 00000000 00:00 0 
+6ffff38ad000-6ffff38c5000 rw-p 00000000 00:00 0 
+6ffff38c5000-6ffff38e0000 r--p 00000000 00:00 0 
+6ffff38e0000-6ffff38e1000 rw-p 00389000 00:45 7312154                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/GfnRuntimeSdk.dll
+6ffff38e1000-6ffff38ea000 r--p 00000000 00:00 0 
+6ffff3900000-6ffff3901000 r--p 00000000 00:45 8471                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/rsaenh.dll
+6ffff3901000-6ffff3927000 r-xp 00001000 00:45 8471                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/rsaenh.dll
+6ffff3927000-6ffff392d000 rw-p 00027000 00:45 8471                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/rsaenh.dll
+6ffff392d000-6ffff3949000 r--p 0002d000 00:45 8471                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/rsaenh.dll
+6ffff3960000-6ffff3961000 r--p 00000000 00:45 8490                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cryptnet.dll
+6ffff3961000-6ffff3969000 r-xp 00001000 00:45 8490                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cryptnet.dll
+6ffff3969000-6ffff396a000 rw-p 00009000 00:45 8490                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cryptnet.dll
+6ffff396a000-6ffff3977000 r--p 0000a000 00:45 8490                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cryptnet.dll
+6ffff3990000-6ffff3991000 r--p 00000000 00:45 7625                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/secur32.dll
+6ffff3991000-6ffff39a3000 r-xp 00001000 00:45 7625                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/secur32.dll
+6ffff39a3000-6ffff39a4000 rw-p 00013000 00:45 7625                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/secur32.dll
+6ffff39a4000-6ffff39b0000 r--p 00014000 00:45 7625                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/secur32.dll
+6ffff39c0000-6ffff39c1000 r--p 00000000 00:45 8259                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netprofm.dll
+6ffff39c1000-6ffff39c7000 r-xp 00001000 00:45 8259                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netprofm.dll
+6ffff39c7000-6ffff39c8000 rw-p 00007000 00:45 8259                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netprofm.dll
+6ffff39c8000-6ffff39d2000 r--p 00008000 00:45 8259                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/netprofm.dll
+6ffff39f0000-6ffff39f1000 r--p 00000000 00:45 7532826                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/steam_api64.dll
+6ffff39f1000-6ffff3a18000 r-xp 00000000 00:00 0 
+6ffff3a18000-6ffff3a34000 r--p 00000000 00:00 0 
+6ffff3a34000-6ffff3a37000 rw-p 00000000 00:00 0 
+6ffff3a37000-6ffff3a3d000 r--p 00000000 00:00 0 
+6ffff3a50000-6ffff3a51000 r--p 00000000 00:45 7542560                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/GameServicesSteam.dll
+6ffff3a51000-6ffff3a55000 r-xp 00000000 00:00 0 
+6ffff3a55000-6ffff3a58000 r--p 00000000 00:00 0 
+6ffff3a58000-6ffff3a5a000 rw-p 00000000 00:00 0 
+6ffff3a5a000-6ffff3a5d000 r--p 00000000 00:00 0 
+6ffff3ad0000-6ffff3ad1000 r--p 00000000 00:45 7544                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/xinput1_4.dll
+6ffff3ad1000-6ffff3ad7000 r-xp 00001000 00:45 7544                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/xinput1_4.dll
+6ffff3ad7000-6ffff3ad9000 rw-p 00007000 00:45 7544                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/xinput1_4.dll
+6ffff3ad9000-6ffff3ae3000 r--p 00009000 00:45 7544                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/xinput1_4.dll
+6ffff3e00000-6ffff3e01000 r--p 00000000 00:45 7244                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/jsproxy.dll
+6ffff3e01000-6ffff3e04000 r-xp 00001000 00:45 7244                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/jsproxy.dll
+6ffff3e04000-6ffff3e05000 rw-p 00004000 00:45 7244                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/jsproxy.dll
+6ffff3e05000-6ffff3e1e000 r--p 00005000 00:45 7244                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/jsproxy.dll
+6ffff3e30000-6ffff3e31000 r--p 00000000 00:45 7547                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winhttp.dll
+6ffff3e31000-6ffff3e52000 r-xp 00001000 00:45 7547                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winhttp.dll
+6ffff3e52000-6ffff3e53000 rw-p 00022000 00:45 7547                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winhttp.dll
+6ffff3e53000-6ffff3e73000 r--p 00023000 00:45 7547                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winhttp.dll
+6ffff3e90000-6ffff3e91000 r--p 00000000 00:45 8618                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winevulkan.dll
+6ffff3e91000-6ffff3eb0000 r-xp 00001000 00:45 8618                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winevulkan.dll
+6ffff3eb0000-6ffff3eb1000 rw-p 00020000 00:45 8618                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winevulkan.dll
+6ffff3eb1000-6ffff3ed2000 r--p 00021000 00:45 8618                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winevulkan.dll
+6ffff3ef0000-6ffff3ef1000 r--p 00000000 00:45 7542                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/vulkan-1.dll
+6ffff3ef1000-6ffff3ef2000 r-xp 00001000 00:45 7542                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/vulkan-1.dll
+6ffff3ef2000-6ffff3ef3000 rw-p 00002000 00:45 7542                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/vulkan-1.dll
+6ffff3ef3000-6ffff3f00000 r--p 00003000 00:45 7542                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/vulkan-1.dll
+6ffff3f10000-6ffff3f11000 r--p 00000000 00:45 8340                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/amd_ags_x64.dll
+6ffff3f11000-6ffff3f18000 r-xp 00001000 00:45 8340                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/amd_ags_x64.dll
+6ffff3f18000-6ffff3f19000 rw-p 00008000 00:45 8340                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/amd_ags_x64.dll
+6ffff3f19000-6ffff3f25000 r--p 00009000 00:45 8340                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/amd_ags_x64.dll
+6ffff3f40000-6ffff3f41000 r--p 00000000 00:45 7534491                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/oo2ext_7_win64.dll
+6ffff3f41000-6ffff4033000 r-xp 00000000 00:00 0 
+6ffff4033000-6ffff4063000 r--p 00000000 00:00 0 
+6ffff4063000-6ffff406a000 rw-p 00000000 00:00 0 
+6ffff406a000-6ffff4071000 r--p 00000000 00:00 0 
+6ffff4071000-6ffff4072000 rw-p 0012a000 00:45 7534491                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/oo2ext_7_win64.dll
+6ffff4072000-6ffff4073000 r--p 00000000 00:00 0 
+6ffff4090000-6ffff4091000 r--p 00000000 00:45 9176                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/powrprof.dll
+6ffff4091000-6ffff4094000 r-xp 00001000 00:45 9176                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/powrprof.dll
+6ffff4094000-6ffff4095000 rw-p 00004000 00:45 9176                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/powrprof.dll
+6ffff4095000-6ffff409c000 r--p 00005000 00:45 9176                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/powrprof.dll
+6ffff40b0000-6ffff40b1000 r--p 00000000 00:45 7530478                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/amd_fidelityfx_loader_dx12.dll
+6ffff40b1000-6ffff40b3000 r-xp 00000000 00:00 0 
+6ffff40b3000-6ffff40b4000 r--p 00000000 00:00 0 
+6ffff40b4000-6ffff40b5000 rw-p 00000000 00:00 0 
+6ffff40b5000-6ffff40b8000 r--p 00000000 00:00 0 
+6ffff40d0000-6ffff40d1000 r--p 00000000 00:45 7526105                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/PhysX3_x64.dll
+6ffff40d1000-6ffff42cf000 r-xp 00000000 00:00 0 
+6ffff42cf000-6ffff4325000 r--p 00000000 00:00 0 
+6ffff4325000-6ffff4331000 rw-p 00000000 00:00 0 
+6ffff4331000-6ffff4351000 r--p 00000000 00:00 0 
+6ffff4370000-6ffff4371000 r--p 00000000 00:45 7538450                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/PhysX3Cooking_x64.dll
+6ffff4371000-6ffff43ef000 r-xp 00000000 00:00 0 
+6ffff43ef000-6ffff4407000 r--p 00000000 00:00 0 
+6ffff4407000-6ffff440b000 rw-p 00000000 00:00 0 
+6ffff440b000-6ffff4415000 r--p 00000000 00:00 0 
+6ffff4430000-6ffff4431000 r--p 00000000 00:45 7538454                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/PxFoundation_x64.dll
+6ffff4431000-6ffff4498000 r-xp 00000000 00:00 0 
+6ffff4498000-6ffff44af000 r--p 00000000 00:00 0 
+6ffff44af000-6ffff44b2000 rw-p 00000000 00:00 0 
+6ffff44b2000-6ffff44bc000 r--p 00000000 00:00 0 
+6ffff44d0000-6ffff44d1000 r--p 00000000 00:45 7526106                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/PhysX3CharacterKinematic_x64.dll
+6ffff44d1000-6ffff453e000 r-xp 00000000 00:00 0 
+6ffff453e000-6ffff4554000 r--p 00000000 00:00 0 
+6ffff4554000-6ffff4557000 rw-p 00000000 00:00 0 
+6ffff4557000-6ffff455d000 r--p 00000000 00:00 0 
+6ffff455d000-6ffff455e000 r--p 00089000 00:45 7526106                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/PhysX3CharacterKinematic_x64.dll
+6ffff455e000-6ffff455f000 r--p 00000000 00:00 0 
+6ffff4570000-6ffff4571000 r--p 00000000 00:45 7537743                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/PhysX3Common_x64.dll
+6ffff4571000-6ffff4723000 r-xp 00000000 00:00 0 
+6ffff4723000-6ffff4753000 r--p 00000000 00:00 0 
+6ffff4753000-6ffff475a000 rw-p 00000000 00:00 0 
+6ffff475a000-6ffff4769000 r--p 00000000 00:00 0 
+6ffff4780000-6ffff4781000 r--p 00000000 00:45 7538449                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/icuuc.dll
+6ffff4781000-6ffff4899000 r-xp 00000000 00:00 0 
+6ffff4899000-6ffff493a000 r--p 00000000 00:00 0 
+6ffff493a000-6ffff4941000 rw-p 00000000 00:00 0 
+6ffff4941000-6ffff4951000 r--p 00000000 00:00 0 
+6ffff4951000-6ffff4954000 r--p 001cb000 00:45 7538449                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/icuuc.dll
+6ffff4970000-6ffff4971000 r--p 00000000 00:45 7530482                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/icuin.dll
+6ffff4971000-6ffff4af6000 r-xp 00000000 00:00 0 
+6ffff4af6000-6ffff4bd5000 r--p 00000000 00:00 0 
+6ffff4bd5000-6ffff4bde000 rw-p 00000000 00:00 0 
+6ffff4bde000-6ffff4bf5000 r--p 00000000 00:00 0 
+6ffff4bf5000-6ffff4bf8000 r--p 00280000 00:45 7530482                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/icuin.dll
+6ffff4c10000-6ffff4c11000 r--p 00000000 00:45 7320538                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/bink2w64.dll
+6ffff4c11000-6ffff4c50000 r-xp 00000000 00:00 0 
+6ffff4c50000-6ffff4c5b000 r--p 0003f000 00:45 7320538                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/bink2w64.dll
+6ffff4c5b000-6ffff4c81000 rw-p 00000000 00:00 0 
+6ffff4c81000-6ffff4c84000 r--p 00000000 00:00 0 
+6ffff4c84000-6ffff4c85000 r-xp 00000000 00:00 0 
+6ffff4c85000-6ffff4c87000 r--p 00000000 00:00 0 
+6ffff4c87000-6ffff4c8c000 rw-p 00000000 00:00 0 
+6ffff4c8c000-6ffff4c8d000 r--p 00000000 00:00 0 
+6ffff4ca0000-6ffff4ca1000 r--p 00000000 00:45 8859                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/xinput9_1_0.dll
+6ffff4ca1000-6ffff4ca3000 r-xp 00001000 00:45 8859                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/xinput9_1_0.dll
+6ffff4ca3000-6ffff4ca4000 rw-p 00003000 00:45 8859                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/xinput9_1_0.dll
+6ffff4ca4000-6ffff4cac000 r--p 00004000 00:45 8859                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/xinput9_1_0.dll
+6ffff4cc0000-6ffff4cc1000 r--p 00000000 00:45 7538568                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/redlexer_native.dll
+6ffff4cc1000-6ffff4cc8000 r-xp 00000000 00:00 0 
+6ffff4cc8000-6ffff4cdf000 r--p 00000000 00:00 0 
+6ffff4cdf000-6ffff4ce0000 rw-p 00000000 00:00 0 
+6ffff4ce0000-6ffff4ce3000 r--p 00000000 00:00 0 
+6ffff4d00000-6ffff4d01000 r--p 00000000 00:45 7537742                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libcurl.dll
+6ffff4d01000-6ffff4d4e000 r-xp 00000000 00:00 0 
+6ffff4d4e000-6ffff4d62000 r--p 00000000 00:00 0 
+6ffff4d62000-6ffff4d63000 rw-p 00000000 00:00 0 
+6ffff4d63000-6ffff4d6a000 r--p 00000000 00:00 0 
+6ffff4d6a000-6ffff4d6b000 r--p 00066000 00:45 7537742                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libcurl.dll
+6ffff4d80000-6ffff4d81000 r--p 00000000 00:45 7312163                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libxess.dll
+6ffff4d81000-6ffff50cb000 r-xp 00000000 00:00 0 
+6ffff50cb000-6ffff9759000 r--p 00000000 00:00 0 
+6ffff9759000-6ffff9762000 rw-p 049d7000 00:45 7312163                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libxess.dll
+6ffff9762000-6ffff9768000 rw-p 00000000 00:00 0 
+6ffff9768000-6ffff9793000 r--p 00000000 00:00 0 
+6ffff9793000-6ffff9794000 rw-p 04a09000 00:45 7312163                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libxess.dll
+6ffff9794000-6ffff97a0000 r--p 00000000 00:00 0 
+6ffff97a0000-6ffff97a1000 rw-p 00000000 00:00 0 
+6ffff97a1000-6ffff97a3000 r--p 00000000 00:00 0 
+6ffff97a3000-6ffff97b6000 r--p 04a16000 00:45 7312163                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libxess.dll
+6ffff97d0000-6ffff97d1000 r--p 00000000 00:45 7535741                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/REDGalaxy64.dll
+6ffff97d1000-6ffff9d72000 r-xp 00000000 00:00 0 
+6ffff9d72000-6ffff9eea000 r--p 00000000 00:00 0 
+6ffff9eea000-6ffff9f1c000 rw-p 00000000 00:00 0 
+6ffff9f1c000-6ffff9f5f000 r--p 00000000 00:00 0 
+6ffff9f5f000-6ffff9f63000 r--p 00785000 00:45 7535741                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/REDGalaxy64.dll
+6ffff9f63000-6ffff9f65000 rw-p 00000000 00:00 0 
+6ffff9f65000-6ffff9f68000 r--p 00000000 00:00 0 
+6ffff9f68000-6ffff9f78000 r--p 0078b000 00:45 7535741                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/REDGalaxy64.dll
+6ffff9f90000-6ffff9f91000 r--p 00000000 00:45 9121                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/hid.dll
+6ffff9f91000-6ffff9f96000 r-xp 00001000 00:45 9121                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/hid.dll
+6ffff9f96000-6ffff9f97000 rw-p 00006000 00:45 9121                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/hid.dll
+6ffff9f97000-6ffff9fa0000 r--p 00007000 00:45 9121                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/hid.dll
+6ffff9fb0000-6ffff9fb1000 r--p 00000000 00:45 7319524                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libxess_fg.dll
+6ffff9fb1000-6ffffa27d000 r-xp 00000000 00:00 0 
+6ffffa27d000-6ffffcaf5000 r--p 00000000 00:00 0 
+6ffffcaf5000-6ffffcb01000 rw-p 00000000 00:00 0 
+6ffffcb01000-6ffffcb1e000 r--p 00000000 00:00 0 
+6ffffcb1e000-6ffffcb1f000 rw-p 00000000 00:00 0 
+6ffffcb1f000-6ffffcb23000 r--p 00000000 00:00 0 
+6ffffcb23000-6ffffcb24000 r--p 02b67000 00:45 7319524                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libxess_fg.dll
+6ffffcb24000-6ffffcb25000 rw-p 00000000 00:00 0 
+6ffffcb25000-6ffffcb26000 r--p 00000000 00:00 0 
+6ffffcb26000-6ffffcb2e000 r--p 02b68000 00:45 7319524                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libxess_fg.dll
+6ffffcb40000-6ffffcb41000 r--p 00000000 103:05 72403066                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/dxgi.dll
+6ffffcb41000-6ffffcf34000 r-xp 00001000 103:05 72403066                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/dxgi.dll
+6ffffcf34000-6ffffcf3d000 rw-p 003f4000 103:05 72403066                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/dxgi.dll
+6ffffcf3d000-6ffffcfe4000 r--p 003fd000 103:05 72403066                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/dxgi.dll
+6ffffcfe4000-6ffffcfe5000 rw-p 00000000 00:00 0 
+6ffffcfe5000-6ffffcfe8000 r--p 004a4000 103:05 72403066                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/dxgi.dll
+6ffffcfe8000-6ffffcfe9000 rw-p 004a7000 103:05 72403066                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/dxgi.dll
+6ffffcfe9000-6ffffcfed000 r--p 004a8000 103:05 72403066                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/dxgi.dll
+6ffffd000000-6ffffd001000 r--p 00000000 00:45 7312162                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libxell.dll
+6ffffd001000-6ffffd039000 r-xp 00000000 00:00 0 
+6ffffd039000-6ffffd04a000 r--p 00000000 00:00 0 
+6ffffd04a000-6ffffd04c000 rw-p 00000000 00:00 0 
+6ffffd04c000-6ffffd054000 r--p 00000000 00:00 0 
+6ffffd054000-6ffffd055000 r--p 00050000 00:45 7312162                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/libxell.dll
+6ffffd055000-6ffffd056000 r--p 00000000 00:00 0 
+6ffffd056000-6ffffd057000 rw-p 00000000 00:00 0 
+6ffffd057000-6ffffd059000 r--p 00000000 00:00 0 
+6ffffd070000-6ffffd071000 r--p 00000000 103:05 72403843                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/vcruntime140_1.dll
+6ffffd071000-6ffffd075000 r-xp 00000000 00:00 0 
+6ffffd075000-6ffffd078000 r--p 00000000 00:00 0 
+6ffffd078000-6ffffd079000 rw-p 00006000 103:05 72403843                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/vcruntime140_1.dll
+6ffffd079000-6ffffd07c000 r--p 00000000 00:00 0 
+6ffffd090000-6ffffd091000 r--p 00000000 103:05 72403844                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/vcruntime140.dll
+6ffffd091000-6ffffd0a0000 r-xp 00000000 00:00 0 
+6ffffd0a0000-6ffffd0a4000 r--p 00000000 00:00 0 
+6ffffd0a4000-6ffffd0a5000 rw-p 00000000 00:00 0 
+6ffffd0a5000-6ffffd0a9000 r--p 00000000 00:00 0 
+6ffffd0c0000-6ffffd0c1000 r--p 00000000 103:05 72403759                  /home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/windows/system32/msvcp140.dll
+6ffffd0c1000-6ffffd116000 r-xp 00000000 00:00 0 
+6ffffd116000-6ffffd147000 r--p 00000000 00:00 0 
+6ffffd147000-6ffffd14b000 rw-p 00000000 00:00 0 
+6ffffd14b000-6ffffd14f000 r--p 00000000 00:00 0 
+6ffffd14f000-6ffffd150000 rw-p 00000000 00:00 0 
+6ffffd150000-6ffffd152000 r--p 00000000 00:00 0 
+6ffffd1a0000-6ffffd1a1000 r--p 00000000 00:45 7533142                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/sl.interposer.dll
+6ffffd1a1000-6ffffd214000 r-xp 00000000 00:00 0 
+6ffffd214000-6ffffd235000 r--p 00000000 00:00 0 
+6ffffd235000-6ffffd23b000 rw-p 00000000 00:00 0 
+6ffffd23b000-6ffffd240000 r--p 00000000 00:00 0 
+6ffffd240000-6ffffd241000 r--p 0009a000 00:45 7533142                    /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/sl.interposer.dll
+6ffffd241000-6ffffd242000 r--p 00000000 00:00 0 
+6ffffd260000-6ffffd261000 r--p 00000000 00:45 7517                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msacm32.dll
+6ffffd261000-6ffffd26f000 r-xp 00001000 00:45 7517                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msacm32.dll
+6ffffd26f000-6ffffd270000 rw-p 0000f000 00:45 7517                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msacm32.dll
+6ffffd270000-6ffffd280000 r--p 00010000 00:45 7517                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msacm32.dll
+6ffffd290000-6ffffd291000 r--p 00000000 00:45 7163                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winmm.dll
+6ffffd291000-6ffffd2b3000 r-xp 00001000 00:45 7163                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winmm.dll
+6ffffd2b3000-6ffffd2bf000 rw-p 00023000 00:45 7163                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winmm.dll
+6ffffd2bf000-6ffffd351000 r--p 0002f000 00:45 7163                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winmm.dll
+6ffffd9e0000-6ffffd9e1000 r--p 00000000 00:45 8968                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/dbghelp.dll
+6ffffd9e1000-6ffffda3c000 r-xp 00001000 00:45 8968                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/dbghelp.dll
+6ffffda3c000-6ffffda46000 rw-p 0005c000 00:45 8968                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/dbghelp.dll
+6ffffda46000-6ffffda66000 r--p 00066000 00:45 8968                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/dbghelp.dll
+6ffffdc10000-6ffffdc11000 r--p 00000000 00:45 7587                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/uxtheme.dll
+6ffffdc11000-6ffffdc25000 r-xp 00001000 00:45 7587                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/uxtheme.dll
+6ffffdc25000-6ffffdc26000 rw-p 00015000 00:45 7587                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/uxtheme.dll
+6ffffdc26000-6ffffdc47000 r--p 00016000 00:45 7587                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/uxtheme.dll
+6ffffdc60000-6ffffdc61000 r--p 00000000 00:45 8285                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winex11.drv
+6ffffdc61000-6ffffdc62000 r-xp 00001000 00:45 8285                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winex11.drv
+6ffffdc62000-6ffffdc63000 rw-p 00002000 00:45 8285                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winex11.drv
+6ffffdc63000-6ffffdc6a000 r--p 00003000 00:45 8285                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/winex11.drv
+6ffffdc80000-6ffffdc81000 r--p 00000000 00:45 8922                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/version.dll
+6ffffdc81000-6ffffdc84000 r-xp 00001000 00:45 8922                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/version.dll
+6ffffdc84000-6ffffdc85000 rw-p 00004000 00:45 8922                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/version.dll
+6ffffdc85000-6ffffdc8d000 r--p 00005000 00:45 8922                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/version.dll
+6ffffdca0000-6ffffdca1000 r--p 00000000 00:45 7849                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/mpr.dll
+6ffffdca1000-6ffffdcac000 r-xp 00001000 00:45 7849                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/mpr.dll
+6ffffdcac000-6ffffdcad000 rw-p 0000c000 00:45 7849                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/mpr.dll
+6ffffdcad000-6ffffdcbe000 r--p 0000d000 00:45 7849                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/mpr.dll
+6ffffdcd0000-6ffffdcd1000 r--p 00000000 00:45 9125                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wininet.dll
+6ffffdcd1000-6ffffdd15000 r-xp 00001000 00:45 9125                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wininet.dll
+6ffffdd15000-6ffffdd16000 rw-p 00045000 00:45 9125                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wininet.dll
+6ffffdd16000-6ffffdd51000 r--p 00046000 00:45 9125                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wininet.dll
+6ffffe1a0000-6ffffe1a1000 r--p 00000000 00:45 9601                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wldap32.dll
+6ffffe1a1000-6ffffe1f7000 r-xp 00001000 00:45 9601                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wldap32.dll
+6ffffe1f7000-6ffffe1fd000 rw-p 00057000 00:45 9601                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wldap32.dll
+6ffffe1fd000-6ffffe22e000 r--p 0005d000 00:45 9601                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wldap32.dll
+6ffffe240000-6ffffe241000 r--p 00000000 00:45 7600                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wintrust.dll
+6ffffe241000-6ffffe258000 r-xp 00001000 00:45 7600                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wintrust.dll
+6ffffe258000-6ffffe259000 rw-p 00018000 00:45 7600                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wintrust.dll
+6ffffe259000-6ffffe26a000 r--p 00019000 00:45 7600                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/wintrust.dll
+6ffffe2a0000-6ffffe2a1000 r--p 00000000 00:45 9143                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/oleaut32.dll
+6ffffe2a1000-6ffffe2fc000 r-xp 00001000 00:45 9143                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/oleaut32.dll
+6ffffe2fc000-6ffffe337000 rw-p 0005c000 00:45 9143                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/oleaut32.dll
+6ffffe337000-6ffffe37b000 r--p 00097000 00:45 9143                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/oleaut32.dll
+6ffffe3e0000-6ffffe3e1000 r--p 00000000 00:45 7512                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/imagehlp.dll
+6ffffe3e1000-6ffffe3e8000 r-xp 00001000 00:45 7512                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/imagehlp.dll
+6ffffe3e8000-6ffffe3e9000 rw-p 00008000 00:45 7512                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/imagehlp.dll
+6ffffe3e9000-6ffffe3f2000 r--p 00009000 00:45 7512                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/imagehlp.dll
+6ffffe410000-6ffffe411000 r--p 00000000 00:45 8501                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/gdiplus.dll
+6ffffe411000-6ffffe470000 r-xp 00001000 00:45 8501                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/gdiplus.dll
+6ffffe470000-6ffffe471000 rw-p 00060000 00:45 8501                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/gdiplus.dll
+6ffffe471000-6ffffe494000 r--p 00061000 00:45 8501                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/gdiplus.dll
+6ffffe4d0000-6ffffe4d1000 r--p 00000000 00:45 8591                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/crypt32.dll
+6ffffe4d1000-6ffffe534000 r-xp 00001000 00:45 8591                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/crypt32.dll
+6ffffe534000-6ffffe53a000 rw-p 00064000 00:45 8591                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/crypt32.dll
+6ffffe53a000-6ffffe5a4000 r--p 0006a000 00:45 8591                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/crypt32.dll
+6ffffe6f0000-6ffffe6f1000 r--p 00000000 00:45 7603                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/bcrypt.dll
+6ffffe6f1000-6ffffe6ff000 r-xp 00001000 00:45 7603                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/bcrypt.dll
+6ffffe6ff000-6ffffe700000 rw-p 0000f000 00:45 7603                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/bcrypt.dll
+6ffffe700000-6ffffe70b000 r--p 00010000 00:45 7603                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/bcrypt.dll
+6ffffe720000-6ffffe721000 r--p 00000000 00:45 7238                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/coml2.dll
+6ffffe721000-6ffffe724000 r-xp 00001000 00:45 7238                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/coml2.dll
+6ffffe724000-6ffffe725000 rw-p 00004000 00:45 7238                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/coml2.dll
+6ffffe725000-6ffffe73c000 r--p 00005000 00:45 7238                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/coml2.dll
+6ffffe750000-6ffffe751000 r--p 00000000 00:45 7406                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/combase.dll
+6ffffe751000-6ffffe779000 r-xp 00001000 00:45 7406                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/combase.dll
+6ffffe779000-6ffffe77a000 rw-p 00029000 00:45 7406                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/combase.dll
+6ffffe77a000-6ffffe7a1000 r--p 0002a000 00:45 7406                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/combase.dll
+6ffffe7c0000-6ffffe7c1000 r--p 00000000 00:45 7626                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ole32.dll
+6ffffe7c1000-6ffffe813000 r-xp 00001000 00:45 7626                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ole32.dll
+6ffffe813000-6ffffe815000 rw-p 00053000 00:45 7626                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ole32.dll
+6ffffe815000-6ffffe87a000 r--p 00055000 00:45 7626                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ole32.dll
+6ffffe890000-6ffffe891000 r--p 00000000 00:45 8138                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shcore.dll
+6ffffe891000-6ffffe89b000 r-xp 00001000 00:45 8138                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shcore.dll
+6ffffe89b000-6ffffe89c000 rw-p 0000b000 00:45 8138                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shcore.dll
+6ffffe89c000-6ffffe8a8000 r--p 0000c000 00:45 8138                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shcore.dll
+6ffffe8c0000-6ffffe8c1000 r--p 00000000 00:45 8847                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shlwapi.dll
+6ffffe8c1000-6ffffe8e0000 r-xp 00001000 00:45 8847                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shlwapi.dll
+6ffffe8e0000-6ffffe8e1000 rw-p 00020000 00:45 8847                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shlwapi.dll
+6ffffe8e1000-6ffffe910000 r--p 00021000 00:45 8847                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shlwapi.dll
+6ffffe920000-6ffffe921000 r--p 00000000 00:45 9119                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shell32.dll
+6ffffe921000-6ffffe9aa000 r-xp 00001000 00:45 9119                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shell32.dll
+6ffffe9aa000-6ffffe9ad000 rw-p 0008a000 00:45 9119                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shell32.dll
+6ffffe9ad000-6fffff252000 r--p 0008d000 00:45 9119                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/shell32.dll
+6fffff320000-6fffff321000 r--p 00000000 00:45 4302                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/nsi.dll
+6fffff321000-6fffff324000 r-xp 00001000 00:45 4302                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/nsi.dll
+6fffff324000-6fffff325000 rw-p 00004000 00:45 4302                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/nsi.dll
+6fffff325000-6fffff32d000 r--p 00005000 00:45 4302                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/nsi.dll
+6fffff340000-6fffff341000 r--p 00000000 00:45 8904                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/dnsapi.dll
+6fffff341000-6fffff349000 r-xp 00001000 00:45 8904                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/dnsapi.dll
+6fffff349000-6fffff34a000 rw-p 00009000 00:45 8904                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/dnsapi.dll
+6fffff34a000-6fffff356000 r--p 0000a000 00:45 8904                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/dnsapi.dll
+6fffff370000-6fffff371000 r--p 00000000 00:45 8475                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/iphlpapi.dll
+6fffff371000-6fffff381000 r-xp 00001000 00:45 8475                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/iphlpapi.dll
+6fffff381000-6fffff382000 rw-p 00011000 00:45 8475                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/iphlpapi.dll
+6fffff382000-6fffff39e000 r--p 00012000 00:45 8475                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/iphlpapi.dll
+6fffff420000-6fffff421000 r--p 00000000 00:45 8338                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/imm32.dll
+6fffff421000-6fffff42f000 r-xp 00001000 00:45 8338                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/imm32.dll
+6fffff42f000-6fffff430000 rw-p 0000f000 00:45 8338                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/imm32.dll
+6fffff430000-6fffff43f000 r--p 00010000 00:45 8338                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/imm32.dll
+6fffff450000-6fffff451000 r--p 00000000 00:45 7531                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/win32u.dll
+6fffff451000-6fffff468000 r-xp 00001000 00:45 7531                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/win32u.dll
+6fffff468000-6fffff469000 rw-p 00018000 00:45 7531                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/win32u.dll
+6fffff469000-6fffff48a000 r--p 00019000 00:45 7531                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/win32u.dll
+6fffff4a0000-6fffff4a1000 r--p 00000000 00:45 9134                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/gdi32.dll
+6fffff4a1000-6fffff4ef000 r-xp 00001000 00:45 9134                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/gdi32.dll
+6fffff4ef000-6fffff4f0000 rw-p 0004f000 00:45 9134                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/gdi32.dll
+6fffff4f0000-6fffff521000 r--p 00050000 00:45 9134                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/gdi32.dll
+6fffff540000-6fffff541000 r--p 00000000 00:45 9156                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/user32.dll
+6fffff541000-6fffff5d6000 r-xp 00001000 00:45 9156                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/user32.dll
+6fffff5d6000-6fffff5d8000 rw-p 00096000 00:45 9156                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/user32.dll
+6fffff5d8000-6fffff700000 r--p 00098000 00:45 9156                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/user32.dll
+6fffff7e0000-6fffff7e1000 r--p 00000000 00:45 8881                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cfgmgr32.dll
+6fffff7e1000-6fffff7f2000 r-xp 00001000 00:45 8881                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cfgmgr32.dll
+6fffff7f2000-6fffff7f3000 rw-p 00012000 00:45 8881                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cfgmgr32.dll
+6fffff7f3000-6fffff805000 r--p 00013000 00:45 8881                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cfgmgr32.dll
+6fffff820000-6fffff821000 r--p 00000000 00:45 8929                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/setupapi.dll
+6fffff821000-6fffff859000 r-xp 00001000 00:45 8929                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/setupapi.dll
+6fffff859000-6fffff85a000 rw-p 00039000 00:45 8929                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/setupapi.dll
+6fffff85a000-6fffff896000 r--p 0003a000 00:45 8929                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/setupapi.dll
+6fffff8b0000-6fffff8b1000 r--p 00000000 00:45 7124                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/rpcrt4.dll
+6fffff8b1000-6fffff8fe000 r-xp 00001000 00:45 7124                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/rpcrt4.dll
+6fffff8fe000-6fffff900000 rw-p 0004e000 00:45 7124                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/rpcrt4.dll
+6fffff900000-6fffff939000 r--p 00050000 00:45 7124                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/rpcrt4.dll
+6fffff950000-6fffff951000 r--p 00000000 00:45 9475                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ws2_32.dll
+6fffff951000-6fffff966000 r-xp 00001000 00:45 9475                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ws2_32.dll
+6fffff966000-6fffff967000 rw-p 00016000 00:45 9475                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ws2_32.dll
+6fffff967000-6fffff979000 r--p 00017000 00:45 9475                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ws2_32.dll
+6fffff990000-6fffff991000 r--p 00000000 00:45 8224                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cryptbase.dll
+6fffff991000-6fffff993000 r-xp 00001000 00:45 8224                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cryptbase.dll
+6fffff993000-6fffff995000 rw-p 00003000 00:45 8224                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cryptbase.dll
+6fffff995000-6fffff99d000 r--p 00005000 00:45 8224                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/cryptbase.dll
+6fffff9b0000-6fffff9b1000 r--p 00000000 00:45 8137                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ucrtbase.dll
+6fffff9b1000-6fffffa40000 r-xp 00001000 00:45 8137                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ucrtbase.dll
+6fffffa40000-6fffffa44000 rw-p 00090000 00:45 8137                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ucrtbase.dll
+6fffffa44000-6fffffa85000 r--p 00094000 00:45 8137                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ucrtbase.dll
+6fffffaa0000-6fffffaa1000 r--p 00000000 00:45 6564                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/sechost.dll
+6fffffaa1000-6fffffab0000 r-xp 00001000 00:45 6564                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/sechost.dll
+6fffffab0000-6fffffab1000 rw-p 00010000 00:45 6564                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/sechost.dll
+6fffffab1000-6fffffac1000 r--p 00011000 00:45 6564                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/sechost.dll
+6fffffae0000-6fffffae1000 r--p 00000000 00:45 7411                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msvcrt.dll
+6fffffae1000-6fffffb54000 r-xp 00001000 00:45 7411                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msvcrt.dll
+6fffffb54000-6fffffb58000 rw-p 00074000 00:45 7411                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msvcrt.dll
+6fffffb58000-6fffffb83000 r--p 00078000 00:45 7411                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/msvcrt.dll
+6fffffba0000-6fffffba1000 r--p 00000000 00:45 3375                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/advapi32.dll
+6fffffba1000-6fffffbc4000 r-xp 00001000 00:45 3375                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/advapi32.dll
+6fffffbc4000-6fffffbc5000 rw-p 00024000 00:45 3375                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/advapi32.dll
+6fffffbc5000-6fffffbdf000 r--p 00025000 00:45 3375                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/advapi32.dll
+6fffffbf0000-6fffffbf1000 r--p 00000000 00:45 7618                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kernelbase.dll
+6fffffbf1000-6fffffc7d000 r-xp 00001000 00:45 7618                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kernelbase.dll
+6fffffc7d000-6fffffc82000 rw-p 0008d000 00:45 7618                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kernelbase.dll
+6fffffc82000-6fffffe9b000 r--p 00092000 00:45 7618                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kernelbase.dll
+6fffffeb0000-6fffffeb1000 r--p 00000000 00:45 7754                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kernel32.dll
+6fffffeb1000-6fffffee4000 r-xp 00001000 00:45 7754                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kernel32.dll
+6fffffee4000-6fffffee5000 rw-p 00034000 00:45 7754                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kernel32.dll
+6fffffee5000-6ffffff16000 r--p 00035000 00:45 7754                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/kernel32.dll
+6ffffff30000-6ffffff31000 r--p 00000000 00:45 9140                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ntdll.dll
+6ffffff31000-6ffffffa7000 r-xp 00001000 00:45 9140                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ntdll.dll
+6ffffffa7000-6ffffffb0000 rw-p 00077000 00:45 9140                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ntdll.dll
+6ffffffb0000-6ffffffe8000 r--p 00080000 00:45 9140                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/ntdll.dll
+7148cc000000-7148cc021000 rw-p 00000000 00:00 0 
+7148cc021000-7148d0000000 ---p 00000000 00:00 0 
+7148d4000000-7148d4021000 rw-p 00000000 00:00 0 
+7148d4021000-7148d8000000 ---p 00000000 00:00 0 
+7148d8000000-7148d8021000 rw-p 00000000 00:00 0 
+7148d8021000-7148dc000000 ---p 00000000 00:00 0 
+7148dc000000-7148dc021000 rw-p 00000000 00:00 0 
+7148dc021000-7148e0000000 ---p 00000000 00:00 0 
+7148e0400000-7148e4000000 rw-s 1b193e000 00:07 1232                      /dev/dri/renderD129
+7148e4000000-7148e411d000 rw-p 00000000 00:00 0 
+7148e411d000-7148e8000000 ---p 00000000 00:00 0 
+7148e8000000-7148e8021000 rw-p 00000000 00:00 0 
+7148e8021000-7148ec000000 ---p 00000000 00:00 0 
+7148ec000000-7148ec021000 rw-p 00000000 00:00 0 
+7148ec021000-7148f0000000 ---p 00000000 00:00 0 
+7148f0000000-7148f0021000 rw-p 00000000 00:00 0 
+7148f0021000-7148f4000000 ---p 00000000 00:00 0 
+7148f4000000-7148f4021000 rw-p 00000000 00:00 0 
+7148f4021000-7148f8000000 ---p 00000000 00:00 0 
+7148f8000000-7148f8021000 rw-p 00000000 00:00 0 
+7148f8021000-7148fc000000 ---p 00000000 00:00 0 
+7148fc000000-7148fc021000 rw-p 00000000 00:00 0 
+7148fc021000-714900000000 ---p 00000000 00:00 0 
+714900000000-714900124000 rw-p 00000000 00:00 0 
+714900124000-714904000000 ---p 00000000 00:00 0 
+714904000000-714904263000 rw-p 00000000 00:00 0 
+714904263000-714908000000 ---p 00000000 00:00 0 
+714908000000-714908341000 rw-p 00000000 00:00 0 
+714908341000-71490c000000 ---p 00000000 00:00 0 
+71490c000000-71490c284000 rw-p 00000000 00:00 0 
+71490c284000-714910000000 ---p 00000000 00:00 0 
+714910000000-7149103fd000 rw-p 00000000 00:00 0 
+7149103fd000-714914000000 ---p 00000000 00:00 0 
+714914000000-71491426d000 rw-p 00000000 00:00 0 
+71491426d000-714918000000 ---p 00000000 00:00 0 
+714918000000-7149183df000 rw-p 00000000 00:00 0 
+7149183df000-71491c000000 ---p 00000000 00:00 0 
+71491c000000-71491c4db000 rw-p 00000000 00:00 0 
+71491c4db000-714920000000 ---p 00000000 00:00 0 
+714920000000-7149202bd000 rw-p 00000000 00:00 0 
+7149202bd000-714924000000 ---p 00000000 00:00 0 
+714924000000-71492430e000 rw-p 00000000 00:00 0 
+71492430e000-714928000000 ---p 00000000 00:00 0 
+714928000000-714928278000 rw-p 00000000 00:00 0 
+714928278000-71492c000000 ---p 00000000 00:00 0 
+71492c000000-71492c266000 rw-p 00000000 00:00 0 
+71492c266000-714930000000 ---p 00000000 00:00 0 
+714930000000-714934000000 rw-s 00000000 00:01 18576                      /memfd:pulseaudio (deleted)
+714934000000-71493429e000 rw-p 00000000 00:00 0 
+71493429e000-714938000000 ---p 00000000 00:00 0 
+714938000000-71493825d000 rw-p 00000000 00:00 0 
+71493825d000-71493c000000 ---p 00000000 00:00 0 
+71493c000000-71493c388000 rw-p 00000000 00:00 0 
+71493c388000-714940000000 ---p 00000000 00:00 0 
+714940000000-71494003b000 rw-p 00000000 00:00 0 
+71494003b000-714944000000 ---p 00000000 00:00 0 
+714944000000-7149442f0000 rw-p 00000000 00:00 0 
+7149442f0000-714948000000 ---p 00000000 00:00 0 
+714948000000-714948046000 rw-p 00000000 00:00 0 
+714948046000-71494c000000 ---p 00000000 00:00 0 
+71494c000000-71494c03a000 rw-p 00000000 00:00 0 
+71494c03a000-714950000000 ---p 00000000 00:00 0 
+714950000000-714950067000 rw-p 00000000 00:00 0 
+714950067000-714954000000 ---p 00000000 00:00 0 
+714954000000-714954066000 rw-p 00000000 00:00 0 
+714954066000-714958000000 ---p 00000000 00:00 0 
+714958000000-714964000000 rw-s 19a462000 00:07 1232                      /dev/dri/renderD129
+714964000000-71496c000000 rw-s 1a933e000 00:07 1232                      /dev/dri/renderD129
+71496c000000-714974000000 rw-s 17d321000 00:07 1232                      /dev/dri/renderD129
+714974000000-71497417e000 rw-p 00000000 00:00 0 
+71497417e000-714978000000 ---p 00000000 00:00 0 
+714978000000-714978066000 rw-p 00000000 00:00 0 
+714978066000-71497c000000 ---p 00000000 00:00 0 
+71497c000000-71497c021000 rw-p 00000000 00:00 0 
+71497c021000-714980000000 ---p 00000000 00:00 0 
+714980000000-714980021000 rw-p 00000000 00:00 0 
+714980021000-714984000000 ---p 00000000 00:00 0 
+714984000000-714984021000 rw-p 00000000 00:00 0 
+714984021000-714988000000 ---p 00000000 00:00 0 
+71498a7ff000-71498b000000 rw-p 00000000 00:00 0 
+71498c000000-71498c021000 rw-p 00000000 00:00 0 
+71498c021000-714990000000 ---p 00000000 00:00 0 
+714990600000-714990e00000 rw-s 18da5a000 00:07 1232                      /dev/dri/renderD129
+714990e00000-714991e00000 rw-s 187f21000 00:07 1232                      /dev/dri/renderD129
+714991e00000-714991e07000 r--p 00000000 103:05 95172984                  /usr/lib/x86_64-linux-gnu/libopus.so.0.11.1
+714991e07000-714991e79000 r-xp 00007000 103:05 95172984                  /usr/lib/x86_64-linux-gnu/libopus.so.0.11.1
+714991e79000-714992212000 r--p 00079000 103:05 95172984                  /usr/lib/x86_64-linux-gnu/libopus.so.0.11.1
+714992212000-714992215000 r--p 00412000 103:05 95172984                  /usr/lib/x86_64-linux-gnu/libopus.so.0.11.1
+714992215000-714992216000 rw-p 00415000 103:05 95172984                  /usr/lib/x86_64-linux-gnu/libopus.so.0.11.1
+714992400000-714992601000 rw-s 00000000 103:05 80521198                  /home/sarah/cp/p0host/cache/mesa/radv_builtin_shaders/index
+714992800000-714992a01000 rw-s 00000000 103:05 80521196                  /home/sarah/cp/p0host/cache/mesa/mesa_shader_cache/index
+714992c00000-714992e01000 rw-s 00000000 103:05 80521198                  /home/sarah/cp/p0host/cache/mesa/radv_builtin_shaders/index
+714993000000-714993201000 rw-s 00000000 103:05 80521196                  /home/sarah/cp/p0host/cache/mesa/mesa_shader_cache/index
+7149933ff000-714993c00000 rw-p 00000000 00:00 0 
+714994000000-714994021000 rw-p 00000000 00:00 0 
+714994021000-714998000000 ---p 00000000 00:00 0 
+714998000000-714998021000 rw-p 00000000 00:00 0 
+714998021000-71499c000000 ---p 00000000 00:00 0 
+71499c000000-71499c021000 rw-p 00000000 00:00 0 
+71499c021000-7149a0000000 ---p 00000000 00:00 0 
+7149a0000000-7149a0021000 rw-p 00000000 00:00 0 
+7149a0021000-7149a4000000 ---p 00000000 00:00 0 
+7149a4000000-7149a4021000 rw-p 00000000 00:00 0 
+7149a4021000-7149a8000000 ---p 00000000 00:00 0 
+7149a8000000-7149a8021000 rw-p 00000000 00:00 0 
+7149a8021000-7149ac000000 ---p 00000000 00:00 0 
+7149ac000000-7149ac021000 rw-p 00000000 00:00 0 
+7149ac021000-7149b0000000 ---p 00000000 00:00 0 
+7149b0000000-7149b0021000 rw-p 00000000 00:00 0 
+7149b0021000-7149b4000000 ---p 00000000 00:00 0 
+7149b4000000-7149b4021000 rw-p 00000000 00:00 0 
+7149b4021000-7149b8000000 ---p 00000000 00:00 0 
+7149b81ff000-7149b8a00000 rw-p 00000000 00:00 0 
+7149b8dff000-7149b9600000 rw-p 00000000 00:00 0 
+7149b9a00000-7149b9c01000 rw-s 00000000 103:05 80521198                  /home/sarah/cp/p0host/cache/mesa/radv_builtin_shaders/index
+7149b9e00000-7149ba001000 rw-s 00000000 103:05 80521196                  /home/sarah/cp/p0host/cache/mesa/mesa_shader_cache/index
+7149ba1ff000-7149baa00000 rw-p 00000000 00:00 0 
+7149baa00000-7149bac01000 rw-s 00000000 103:05 80521198                  /home/sarah/cp/p0host/cache/mesa/radv_builtin_shaders/index
+7149badfe000-7149bbe00000 rw-p 00000000 00:00 0 
+7149bc000000-7149bc021000 rw-p 00000000 00:00 0 
+7149bc021000-7149c0000000 ---p 00000000 00:00 0 
+7149c0000000-7149c0400000 rw-s 185321000 00:07 1232                      /dev/dri/renderD129
+7149c0400000-7149c0601000 rw-s 00000000 103:05 80521196                  /home/sarah/cp/p0host/cache/mesa/mesa_shader_cache/index
+7149c07ff000-7149c1000000 rw-p 00000000 00:00 0 
+7149c1000000-7149c1201000 rw-s 00000000 103:05 80521198                  /home/sarah/cp/p0host/cache/mesa/radv_builtin_shaders/index
+7149c1547000-7149c154b000 rw-s 128228000 00:07 1232                      /dev/dri/renderD129
+7149c154b000-7149c154f000 rw-s 128224000 00:07 1232                      /dev/dri/renderD129
+7149c154f000-7149c1553000 rw-s 128220000 00:07 1232                      /dev/dri/renderD129
+7149c1583000-7149c1587000 rw-s 1281ec000 00:07 1232                      /dev/dri/renderD129
+7149c159f000-7149c15a3000 rw-s 14182a000 00:07 1232                      /dev/dri/renderD129
+7149c15a3000-7149c15a7000 rw-s 141826000 00:07 1232                      /dev/dri/renderD129
+7149c15ff000-7149c25ff000 rw-s 13caca000 00:07 1232                      /dev/dri/renderD129
+7149c25ff000-7149c2e00000 rw-p 00000000 00:00 0 
+7149c2e07000-7149c2e0b000 rw-s 1417ee000 00:07 1232                      /dev/dri/renderD129
+7149c2e27000-7149c2e3b000 rw-s 1417aa000 00:07 1232                      /dev/dri/renderD129
+7149c2e3b000-7149c2e4f000 rw-s 141796000 00:07 1232                      /dev/dri/renderD129
+7149c2e4f000-7149c2e63000 rw-s 141782000 00:07 1232                      /dev/dri/renderD129
+7149c2e63000-7149c2e67000 rw-s 1a8b77000 00:07 1232                      /dev/dri/renderD129
+7149c2e93000-7149c2e97000 rw-s 13dba6000 00:07 1232                      /dev/dri/renderD129
+7149c2ec7000-7149c2ecb000 rw-s 13db9a000 00:07 1232                      /dev/dri/renderD129
+7149c2f23000-7149c2f27000 rw-s 13db3a000 00:07 1232                      /dev/dri/renderD129
+7149c30ff000-7149c31ff000 rw-p 00000000 00:00 0 
+7149c31ff000-7149c3a00000 rw-p 00000000 00:00 0 
+7149c3a40000-7149c3e00000 rw-s 00000000 00:01 33                         /SYSV00000000 (deleted)
+7149c3e00000-7149c4001000 rw-s 00000000 103:05 80521198                  /home/sarah/cp/p0host/cache/mesa/radv_builtin_shaders/index
+7149c408f000-7149c4093000 rw-s 1429ca000 00:07 1232                      /dev/dri/renderD129
+7149c4093000-7149c40a7000 rw-s 19a232000 00:07 1232                      /dev/dri/renderD129
+7149c40d7000-7149c40db000 rw-s 1389c6000 00:07 1232                      /dev/dri/renderD129
+7149c40db000-7149c40ef000 rw-s 18be56000 00:07 1232                      /dev/dri/renderD129
+7149c40ef000-7149c40f3000 rw-s 19a00e000 00:07 1232                      /dev/dri/renderD129
+7149c40f3000-7149c40f7000 rw-s 199cba000 00:07 1232                      /dev/dri/renderD129
+7149c40f7000-7149c410b000 rw-s 142006000 00:07 1232                      /dev/dri/renderD129
+7149c410b000-7149c411f000 rw-s 13c294000 00:07 1232                      /dev/dri/renderD129
+7149c411f000-7149c4123000 rw-s 1891f1000 00:07 1232                      /dev/dri/renderD129
+7149c4123000-7149c4137000 rw-s 13dafa000 00:07 1232                      /dev/dri/renderD129
+7149c4137000-7149c414b000 rw-s 1281f0000 00:07 1232                      /dev/dri/renderD129
+7149c414b000-7149c415f000 rw-s 10d62a000 00:07 1232                      /dev/dri/renderD129
+7149c415f000-7149c4163000 rw-s 12253a000 00:07 1232                      /dev/dri/renderD129
+7149c4163000-7149c4167000 rw-s 122536000 00:07 1232                      /dev/dri/renderD129
+7149c4167000-7149c416b000 rw-s 135d7e000 00:07 1232                      /dev/dri/renderD129
+7149c416b000-7149c417f000 rw-s 18bda2000 00:07 1232                      /dev/dri/renderD129
+7149c4193000-7149c4197000 rw-s 11e9ca000 00:07 1232                      /dev/dri/renderD129
+7149c4197000-7149c419b000 rw-s 122576000 00:07 1232                      /dev/dri/renderD129
+7149c419b000-7149c419f000 rw-s 19a05e000 00:07 1232                      /dev/dri/renderD129
+7149c419f000-7149c41a3000 rw-s 13dade000 00:07 1232                      /dev/dri/renderD129
+7149c41a3000-7149c41a7000 rw-s 12821c000 00:07 1232                      /dev/dri/renderD129
+7149c41a7000-7149c41bb000 rw-s 10d6ca000 00:07 1232                      /dev/dri/renderD129
+7149c41cf000-7149c41d3000 rw-s 11e9b2000 00:07 1232                      /dev/dri/renderD129
+7149c41d3000-7149c41d7000 rw-s 139082000 00:07 1232                      /dev/dri/renderD129
+7149c41eb000-7149c41ff000 rw-s 18bd7a000 00:07 1232                      /dev/dri/renderD129
+7149c41ff000-7149c4a00000 rw-p 00000000 00:00 0 
+7149c4a00000-7149c4c00000 rw-s 1893fa000 00:07 1232                      /dev/dri/renderD129
+7149c4c00000-7149c4e01000 rw-s 00000000 103:05 80521196                  /home/sarah/cp/p0host/cache/mesa/mesa_shader_cache/index
+7149c4e08000-7149c4e0c000 rw-s 11e996000 00:07 1232                      /dev/dri/renderD129
+7149c4e0c000-7149c4e10000 rw-s 13db96000 00:07 1232                      /dev/dri/renderD129
+7149c4e10000-7149c4e14000 rw-s 11e98e000 00:07 1232                      /dev/dri/renderD129
+7149c4e14000-7149c4e18000 rw-s 11e976000 00:07 1232                      /dev/dri/renderD129
+7149c4e18000-7149c4e1c000 rw-s 11e972000 00:07 1232                      /dev/dri/renderD129
+7149c4e1c000-7149c4e20000 rw-s 11e96e000 00:07 1232                      /dev/dri/renderD129
+7149c4e20000-7149c4e24000 rw-s 11e96a000 00:07 1232                      /dev/dri/renderD129
+7149c4e24000-7149c4e28000 rw-s 11e966000 00:07 1232                      /dev/dri/renderD129
+7149c4e28000-7149c4e2c000 rw-s 11e962000 00:07 1232                      /dev/dri/renderD129
+7149c4e2c000-7149c4e30000 rw-s 11e95e000 00:07 1232                      /dev/dri/renderD129
+7149c4e30000-7149c4e34000 rw-s 11e95a000 00:07 1232                      /dev/dri/renderD129
+7149c4e38000-7149c4e4c000 rw-s 13db3e000 00:07 1232                      /dev/dri/renderD129
+7149c4e4c000-7149c4e50000 rw-s 110646000 00:07 1232                      /dev/dri/renderD129
+7149c4e50000-7149c4e64000 rw-s 110632000 00:07 1232                      /dev/dri/renderD129
+7149c4e64000-7149c4e68000 rw-s 11062e000 00:07 1232                      /dev/dri/renderD129
+7149c4e68000-7149c4e6c000 rw-s 12e6a2000 00:07 1232                      /dev/dri/renderD129
+7149c4e6c000-7149c4e70000 rw-s 12e69e000 00:07 1232                      /dev/dri/renderD129
+7149c4e70000-7149c4e74000 rw-s 12e69a000 00:07 1232                      /dev/dri/renderD129
+7149c4e74000-7149c4e88000 rw-s 11061a000 00:07 1232                      /dev/dri/renderD129
+7149c4e88000-7149c4e8c000 rw-s 12e696000 00:07 1232                      /dev/dri/renderD129
+7149c4e8c000-7149c4e90000 rw-s 1198f6000 00:07 1232                      /dev/dri/renderD129
+7149c4e90000-7149c4e94000 rw-s 1198f2000 00:07 1232                      /dev/dri/renderD129
+7149c4e94000-7149c4e98000 rw-s 1198ee000 00:07 1232                      /dev/dri/renderD129
+7149c4e98000-7149c4e9c000 rw-s 1198ea000 00:07 1232                      /dev/dri/renderD129
+7149c4e9c000-7149c4ea0000 rw-s 11bba7000 00:07 1232                      /dev/dri/renderD129
+7149c4ea0000-7149c4ea4000 rw-s 11bba3000 00:07 1232                      /dev/dri/renderD129
+7149c4ea4000-7149c4eb8000 rw-s 110606000 00:07 1232                      /dev/dri/renderD129
+7149c4eb8000-7149c4ecc000 rw-s 141756000 00:07 1232                      /dev/dri/renderD129
+7149c4ecc000-7149c4ee0000 rw-s 189171000 00:07 1232                      /dev/dri/renderD129
+7149c4ee0000-7149c4f0d000 r--p 00000000 103:05 95165191                  /usr/lib/x86_64-linux-gnu/libasound.so.2.0.0
+7149c4f0d000-7149c4fb6000 r-xp 0002d000 103:05 95165191                  /usr/lib/x86_64-linux-gnu/libasound.so.2.0.0
+7149c4fb6000-7149c4ff7000 r--p 000d6000 103:05 95165191                  /usr/lib/x86_64-linux-gnu/libasound.so.2.0.0
+7149c4ff7000-7149c4ffe000 r--p 00117000 103:05 95165191                  /usr/lib/x86_64-linux-gnu/libasound.so.2.0.0
+7149c4ffe000-7149c4fff000 rw-p 0011e000 103:05 95165191                  /usr/lib/x86_64-linux-gnu/libasound.so.2.0.0
+7149c4fff000-7149c5800000 rw-p 00000000 00:00 0 
+7149c5800000-7149c5a01000 rw-s 00000000 103:05 80521196                  /home/sarah/cp/p0host/cache/mesa/mesa_shader_cache/index
+7149c5a08000-7149c5a0c000 rw-s 1327f0000 00:07 1232                      /dev/dri/renderD129
+7149c5a0c000-7149c5a10000 rw-s 1327ec000 00:07 1232                      /dev/dri/renderD129
+7149c5a10000-7149c5a14000 rw-s 13fd6e000 00:07 1232                      /dev/dri/renderD129
+7149c5a14000-7149c5a28000 rw-s 11e97a000 00:07 1232                      /dev/dri/renderD129
+7149c5a28000-7149c5a2c000 rw-s 13e7aa000 00:07 1232                      /dev/dri/renderD129
+7149c5a2c000-7149c5a30000 rw-s 13e7a6000 00:07 1232                      /dev/dri/renderD129
+7149c5a30000-7149c5a34000 rw-s 128e33000 00:07 1232                      /dev/dri/renderD129
+7149c5a34000-7149c5a38000 rw-s 11bb9f000 00:07 1232                      /dev/dri/renderD129
+7149c5a38000-7149c5a3c000 rw-s 1bacb7000 00:07 1232                      /dev/dri/renderD129
+7149c5a3c000-7149c5a40000 rw-s 1327e8000 00:07 1232                      /dev/dri/renderD129
+7149c5a40000-7149c5a44000 rw-s 13c2bc000 00:07 1232                      /dev/dri/renderD129
+7149c5a44000-7149c5a58000 rw-s 1a8b63000 00:07 1232                      /dev/dri/renderD129
+7149c5a58000-7149c5a5c000 rw-s 14218a000 00:07 1232                      /dev/dri/renderD129
+7149c5a5c000-7149c5a60000 rw-s 11e9ba000 00:07 1232                      /dev/dri/renderD129
+7149c5a60000-7149c5a64000 rw-s 13db2a000 00:07 1232                      /dev/dri/renderD129
+7149c5a64000-7149c5a78000 rw-s 13c230000 00:07 1232                      /dev/dri/renderD129
+7149c5a78000-7149c5a7c000 rw-s 1429c2000 00:07 1232                      /dev/dri/renderD129
+7149c5a7c000-7149c5a90000 rw-s 13db7e000 00:07 1232                      /dev/dri/renderD129
+7149c5a90000-7149c5a94000 rw-s 103e5f000 00:07 1232                      /dev/dri/renderD129
+7149c5a94000-7149c5a98000 rw-s 13b35b000 00:07 1232                      /dev/dri/renderD129
+7149c5a98000-7149c5aac000 rw-s 11e942000 00:07 1232                      /dev/dri/renderD129
+7149c5aac000-7149c5ab0000 rw-s 127fb9000 00:07 1232                      /dev/dri/renderD129
+7149c5ab0000-7149c5ac4000 rw-s 138d4a000 00:07 1232                      /dev/dri/renderD129
+7149c5ac4000-7149c5ad8000 rw-s 139e0a000 00:07 1232                      /dev/dri/renderD129
+7149c5ad8000-7149c5aec000 rw-s 139df6000 00:07 1232                      /dev/dri/renderD129
+7149c5aec000-7149c5af0000 rw-s 138a96000 00:07 1232                      /dev/dri/renderD129
+7149c5af0000-7149c5af6000 r--p 00000000 103:05 95160175                  /usr/lib/x86_64-linux-gnu/libmvec.so.1
+7149c5af6000-7149c5b19000 r-xp 00006000 103:05 95160175                  /usr/lib/x86_64-linux-gnu/libmvec.so.1
+7149c5b19000-7149c5be9000 r--p 00029000 103:05 95160175                  /usr/lib/x86_64-linux-gnu/libmvec.so.1
+7149c5be9000-7149c5bea000 r--p 000f8000 103:05 95160175                  /usr/lib/x86_64-linux-gnu/libmvec.so.1
+7149c5bea000-7149c5beb000 rw-p 000f9000 103:05 95160175                  /usr/lib/x86_64-linux-gnu/libmvec.so.1
+7149c5beb000-7149c5bf1000 r--p 00000000 103:05 95158843                  /usr/lib/x86_64-linux-gnu/libmp3lame.so.0.0.0
+7149c5bf1000-7149c5c1a000 r-xp 00006000 103:05 95158843                  /usr/lib/x86_64-linux-gnu/libmp3lame.so.0.0.0
+7149c5c1a000-7149c5c27000 r--p 0002f000 103:05 95158843                  /usr/lib/x86_64-linux-gnu/libmp3lame.so.0.0.0
+7149c5c27000-7149c5c28000 r--p 0003b000 103:05 95158843                  /usr/lib/x86_64-linux-gnu/libmp3lame.so.0.0.0
+7149c5c28000-7149c5c29000 rw-p 0003c000 103:05 95158843                  /usr/lib/x86_64-linux-gnu/libmp3lame.so.0.0.0
+7149c5c29000-7149c5c3a000 rw-p 00000000 00:00 0 
+7149c5c3a000-7149c5c3f000 r--p 00000000 103:05 95172978                  /usr/lib/x86_64-linux-gnu/libmpg123.so.0.49.4
+7149c5c3f000-7149c5c7d000 r-xp 00005000 103:05 95172978                  /usr/lib/x86_64-linux-gnu/libmpg123.so.0.49.4
+7149c5c7d000-7149c5c97000 r--p 00043000 103:05 95172978                  /usr/lib/x86_64-linux-gnu/libmpg123.so.0.49.4
+7149c5c97000-7149c5c98000 r--p 0005d000 103:05 95172978                  /usr/lib/x86_64-linux-gnu/libmpg123.so.0.49.4
+7149c5c98000-7149c5c99000 rw-p 0005e000 103:05 95172978                  /usr/lib/x86_64-linux-gnu/libmpg123.so.0.49.4
+7149c5c99000-7149c5cad000 r--p 00000000 103:05 95172999                  /usr/lib/x86_64-linux-gnu/libvorbisenc.so.2.0.12
+7149c5cad000-7149c5cb0000 r-xp 00014000 103:05 95172999                  /usr/lib/x86_64-linux-gnu/libvorbisenc.so.2.0.12
+7149c5cb0000-7149c5d27000 r--p 00017000 103:05 95172999                  /usr/lib/x86_64-linux-gnu/libvorbisenc.so.2.0.12
+7149c5d27000-7149c5d43000 r--p 0008d000 103:05 95172999                  /usr/lib/x86_64-linux-gnu/libvorbisenc.so.2.0.12
+7149c5d43000-7149c5d44000 rw-p 000a9000 103:05 95172999                  /usr/lib/x86_64-linux-gnu/libvorbisenc.so.2.0.12
+7149c5d44000-7149c5d47000 r--p 00000000 103:05 95173001                  /usr/lib/x86_64-linux-gnu/libvorbis.so.0.4.9
+7149c5d47000-7149c5d60000 r-xp 00003000 103:05 95173001                  /usr/lib/x86_64-linux-gnu/libvorbis.so.0.4.9
+7149c5d60000-7149c5d71000 r--p 0001c000 103:05 95173001                  /usr/lib/x86_64-linux-gnu/libvorbis.so.0.4.9
+7149c5d71000-7149c5d72000 r--p 0002c000 103:05 95173001                  /usr/lib/x86_64-linux-gnu/libvorbis.so.0.4.9
+7149c5d72000-7149c5d73000 rw-p 0002d000 103:05 95173001                  /usr/lib/x86_64-linux-gnu/libvorbis.so.0.4.9
+7149c5d73000-7149c5d7c000 r--p 00000000 103:05 95174161                  /usr/lib/x86_64-linux-gnu/libFLAC.so.14.0.0
+7149c5d7c000-7149c5dc4000 r-xp 00009000 103:05 95174161                  /usr/lib/x86_64-linux-gnu/libFLAC.so.14.0.0
+7149c5dc4000-7149c5dd5000 r--p 00051000 103:05 95174161                  /usr/lib/x86_64-linux-gnu/libFLAC.so.14.0.0
+7149c5dd5000-7149c5dd6000 r--p 00062000 103:05 95174161                  /usr/lib/x86_64-linux-gnu/libFLAC.so.14.0.0
+7149c5dd6000-7149c5dd7000 rw-p 00063000 103:05 95174161                  /usr/lib/x86_64-linux-gnu/libFLAC.so.14.0.0
+7149c5dd7000-7149c5df0000 r--p 00000000 103:05 95159446                  /usr/lib/x86_64-linux-gnu/libsystemd.so.0.42.0
+7149c5df0000-7149c5ea7000 r-xp 00019000 103:05 95159446                  /usr/lib/x86_64-linux-gnu/libsystemd.so.0.42.0
+7149c5ea7000-7149c5ee1000 r--p 000d0000 103:05 95159446                  /usr/lib/x86_64-linux-gnu/libsystemd.so.0.42.0
+7149c5ee1000-7149c5ee9000 r--p 0010a000 103:05 95159446                  /usr/lib/x86_64-linux-gnu/libsystemd.so.0.42.0
+7149c5ee9000-7149c5eea000 rw-p 00112000 103:05 95159446                  /usr/lib/x86_64-linux-gnu/libsystemd.so.0.42.0
+7149c5eea000-7149c5eeb000 rw-p 00000000 00:00 0 
+7149c5eeb000-7149c5ef4000 r--p 00000000 103:05 95174163                  /usr/lib/x86_64-linux-gnu/libsndfile.so.1.0.37
+7149c5ef4000-7149c5f5c000 r-xp 00009000 103:05 95174163                  /usr/lib/x86_64-linux-gnu/libsndfile.so.1.0.37
+7149c5f5c000-7149c5f75000 r--p 00071000 103:05 95174163                  /usr/lib/x86_64-linux-gnu/libsndfile.so.1.0.37
+7149c5f75000-7149c5f78000 r--p 0008a000 103:05 95174163                  /usr/lib/x86_64-linux-gnu/libsndfile.so.1.0.37
+7149c5f78000-7149c5f79000 rw-p 0008d000 103:05 95174163                  /usr/lib/x86_64-linux-gnu/libsndfile.so.1.0.37
+7149c5f79000-7149c5f7b000 rw-p 00000000 00:00 0 
+7149c5f7b000-7149c677b000 rw-s 1a82e7000 00:07 1232                      /dev/dri/renderD129
+7149c677b000-7149c8600000 rw-s 1a6462000 00:07 1232                      /dev/dri/renderD129
+7149c8600000-7149c864a000 r--p 00000000 103:05 95163112                  /usr/lib/x86_64-linux-gnu/libvulkan_radeon.so
+7149c864a000-7149c8cf0000 r-xp 0004a000 103:05 95163112                  /usr/lib/x86_64-linux-gnu/libvulkan_radeon.so
+7149c8cf0000-7149c96e6000 r--p 006f0000 103:05 95163112                  /usr/lib/x86_64-linux-gnu/libvulkan_radeon.so
+7149c96e6000-7149c9737000 r--p 010e5000 103:05 95163112                  /usr/lib/x86_64-linux-gnu/libvulkan_radeon.so
+7149c9737000-7149c9754000 rw-p 01136000 103:05 95163112                  /usr/lib/x86_64-linux-gnu/libvulkan_radeon.so
+7149c9754000-7149c975a000 rw-p 00000000 00:00 0 
+7149c975c000-7149c9770000 rw-s 1ee09c000 00:07 1232                      /dev/dri/renderD129
+7149c9770000-7149c9774000 rw-s 13be40000 00:07 1232                      /dev/dri/renderD129
+7149c9774000-7149c9778000 rw-s 199cd6000 00:07 1232                      /dev/dri/renderD129
+7149c9778000-7149c977a000 r--p 00000000 103:05 95172792                  /usr/lib/x86_64-linux-gnu/libogg.so.0.8.6
+7149c977a000-7149c977d000 r-xp 00002000 103:05 95172792                  /usr/lib/x86_64-linux-gnu/libogg.so.0.8.6
+7149c977d000-7149c9780000 r--p 00005000 103:05 95172792                  /usr/lib/x86_64-linux-gnu/libogg.so.0.8.6
+7149c9780000-7149c9781000 r--p 00008000 103:05 95172792                  /usr/lib/x86_64-linux-gnu/libogg.so.0.8.6
+7149c9781000-7149c9782000 rw-p 00009000 103:05 95172792                  /usr/lib/x86_64-linux-gnu/libogg.so.0.8.6
+7149c9782000-7149c9786000 r--p 00000000 103:05 95158977                  /usr/lib/x86_64-linux-gnu/libapparmor.so.1.30.7
+7149c9786000-7149c9790000 r-xp 00004000 103:05 95158977                  /usr/lib/x86_64-linux-gnu/libapparmor.so.1.30.7
+7149c9790000-7149c9797000 r--p 0000e000 103:05 95158977                  /usr/lib/x86_64-linux-gnu/libapparmor.so.1.30.7
+7149c9797000-7149c9798000 r--p 00014000 103:05 95158977                  /usr/lib/x86_64-linux-gnu/libapparmor.so.1.30.7
+7149c9798000-7149c9799000 rw-p 00015000 103:05 95158977                  /usr/lib/x86_64-linux-gnu/libapparmor.so.1.30.7
+7149c9799000-7149c979b000 r--p 00000000 103:05 95174159                  /usr/lib/x86_64-linux-gnu/libasyncns.so.0.3.1
+7149c979b000-7149c979e000 r-xp 00002000 103:05 95174159                  /usr/lib/x86_64-linux-gnu/libasyncns.so.0.3.1
+7149c979e000-7149c979f000 r--p 00005000 103:05 95174159                  /usr/lib/x86_64-linux-gnu/libasyncns.so.0.3.1
+7149c979f000-7149c97a0000 r--p 00006000 103:05 95174159                  /usr/lib/x86_64-linux-gnu/libasyncns.so.0.3.1
+7149c97a0000-7149c97a1000 rw-p 00007000 103:05 95174159                  /usr/lib/x86_64-linux-gnu/libasyncns.so.0.3.1
+7149c97a1000-7149c97ad000 r--p 00000000 103:05 95158870                  /usr/lib/x86_64-linux-gnu/libdbus-1.so.3.38.3
+7149c97ad000-7149c97de000 r-xp 0000c000 103:05 95158870                  /usr/lib/x86_64-linux-gnu/libdbus-1.so.3.38.3
+7149c97de000-7149c97ef000 r--p 0003d000 103:05 95158870                  /usr/lib/x86_64-linux-gnu/libdbus-1.so.3.38.3
+7149c97ef000-7149c97f0000 r--p 0004d000 103:05 95158870                  /usr/lib/x86_64-linux-gnu/libdbus-1.so.3.38.3
+7149c97f0000-7149c97f1000 rw-p 0004e000 103:05 95158870                  /usr/lib/x86_64-linux-gnu/libdbus-1.so.3.38.3
+7149c97f1000-7149c9803000 r--p 00000000 103:05 95293623                  /usr/lib/x86_64-linux-gnu/pulseaudio/libpulsecommon-17.0.so
+7149c9803000-7149c984d000 r-xp 00012000 103:05 95293623                  /usr/lib/x86_64-linux-gnu/pulseaudio/libpulsecommon-17.0.so
+7149c984d000-7149c986c000 r--p 0005c000 103:05 95293623                  /usr/lib/x86_64-linux-gnu/pulseaudio/libpulsecommon-17.0.so
+7149c986c000-7149c986e000 r--p 0007a000 103:05 95293623                  /usr/lib/x86_64-linux-gnu/pulseaudio/libpulsecommon-17.0.so
+7149c986e000-7149c986f000 rw-p 0007c000 103:05 95293623                  /usr/lib/x86_64-linux-gnu/pulseaudio/libpulsecommon-17.0.so
+7149c986f000-7149c9877000 r--p 00000000 103:05 95159630                  /usr/lib/x86_64-linux-gnu/libudev.so.1.7.12
+7149c9877000-7149c989e000 r-xp 00008000 103:05 95159630                  /usr/lib/x86_64-linux-gnu/libudev.so.1.7.12
+7149c989e000-7149c98b1000 r--p 0002f000 103:05 95159630                  /usr/lib/x86_64-linux-gnu/libudev.so.1.7.12
+7149c98b1000-7149c98b6000 r--p 00041000 103:05 95159630                  /usr/lib/x86_64-linux-gnu/libudev.so.1.7.12
+7149c98b6000-7149c98b7000 rw-p 00046000 103:05 95159630                  /usr/lib/x86_64-linux-gnu/libudev.so.1.7.12
+7149c98b7000-7149c98c3000 r--p 00000000 103:05 95158480                  /usr/lib/x86_64-linux-gnu/libpulse.so.0.24.3
+7149c98c3000-7149c98f4000 r-xp 0000c000 103:05 95158480                  /usr/lib/x86_64-linux-gnu/libpulse.so.0.24.3
+7149c98f4000-7149c9905000 r--p 0003d000 103:05 95158480                  /usr/lib/x86_64-linux-gnu/libpulse.so.0.24.3
+7149c9905000-7149c9907000 r--p 0004d000 103:05 95158480                  /usr/lib/x86_64-linux-gnu/libpulse.so.0.24.3
+7149c9907000-7149c9908000 rw-p 0004f000 103:05 95158480                  /usr/lib/x86_64-linux-gnu/libpulse.so.0.24.3
+7149c990a000-7149c990e000 rw-s 10a1d6000 00:07 1232                      /dev/dri/renderD129
+7149c990e000-7149c9922000 rw-s 128e77000 00:07 1232                      /dev/dri/renderD129
+7149c9922000-7149c9926000 r--p 00000000 00:45 8592                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winealsa.so
+7149c9926000-7149c9931000 r-xp 00004000 00:45 8592                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winealsa.so
+7149c9931000-7149c9936000 r--p 0000f000 00:45 8592                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winealsa.so
+7149c9936000-7149c9937000 r--p 00013000 00:45 8592                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winealsa.so
+7149c9937000-7149c9938000 rw-p 00014000 00:45 8592                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winealsa.so
+7149c9938000-7149c9939000 rw-p 00000000 00:00 0 
+7149c9939000-7149c993c000 r--p 00000000 00:45 9106                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winepulse.so
+7149c993c000-7149c9944000 r-xp 00003000 00:45 9106                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winepulse.so
+7149c9944000-7149c994f000 r--p 0000b000 00:45 9106                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winepulse.so
+7149c994f000-7149c9950000 r--p 00015000 00:45 9106                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winepulse.so
+7149c9950000-7149c9951000 rw-p 00016000 00:45 9106                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winepulse.so
+7149c9951000-7149c9955000 rw-s 135d7a000 00:07 1232                      /dev/dri/renderD129
+7149c9955000-7149c9959000 rw-s 11e9b6000 00:07 1232                      /dev/dri/renderD129
+7149c9959000-7149c996d000 rw-s 139dba000 00:07 1232                      /dev/dri/renderD129
+7149c996d000-7149c9981000 rw-s 139da6000 00:07 1232                      /dev/dri/renderD129
+7149c9981000-7149c9995000 rw-s 1327d4000 00:07 1232                      /dev/dri/renderD129
+7149c9995000-7149c99a9000 rw-s 1327c0000 00:07 1232                      /dev/dri/renderD129
+7149c99a9000-7149c99bd000 rw-s 1327ac000 00:07 1232                      /dev/dri/renderD129
+7149c99bd000-7149c99d1000 rw-s 12d003000 00:07 1232                      /dev/dri/renderD129
+7149c99d1000-7149c99d5000 rw-s 142118000 00:07 1232                      /dev/dri/renderD129
+7149c99d5000-7149c9ad5000 rw-s 12cf03000 00:07 1232                      /dev/dri/renderD129
+7149c9ad5000-7149c9ae9000 rw-s 132798000 00:07 1232                      /dev/dri/renderD129
+7149c9ae9000-7149c9afb000 rw-s 132786000 00:07 1232                      /dev/dri/renderD129
+7149c9afb000-7149c9b0f000 rw-s 132772000 00:07 1232                      /dev/dri/renderD129
+7149c9b0f000-7149c9b23000 rw-s 13275e000 00:07 1232                      /dev/dri/renderD129
+7149c9b23000-7149c9b37000 rw-s 13274a000 00:07 1232                      /dev/dri/renderD129
+7149c9b37000-7149c9b4b000 rw-s 132736000 00:07 1232                      /dev/dri/renderD129
+7149c9b4b000-7149c9b5f000 rw-s 135d66000 00:07 1232                      /dev/dri/renderD129
+7149c9b5f000-7149c9b73000 rw-s 135d52000 00:07 1232                      /dev/dri/renderD129
+7149c9b73000-7149c9b87000 rw-s 135d3e000 00:07 1232                      /dev/dri/renderD129
+7149c9b87000-7149c9b9b000 rw-s 135d2a000 00:07 1232                      /dev/dri/renderD129
+7149c9b9b000-7149c9baf000 rw-s 135d16000 00:07 1232                      /dev/dri/renderD129
+7149c9baf000-7149c9bc3000 rw-s 135d02000 00:07 1232                      /dev/dri/renderD129
+7149c9bc3000-7149c9bd7000 rw-s 135cee000 00:07 1232                      /dev/dri/renderD129
+7149c9bd7000-7149c9beb000 rw-s 135cda000 00:07 1232                      /dev/dri/renderD129
+7149c9beb000-7149c9bff000 rw-s 135cc6000 00:07 1232                      /dev/dri/renderD129
+7149c9bff000-7149ca3ff000 rw-s 131f36000 00:07 1232                      /dev/dri/renderD129
+7149ca3ff000-7149cac00000 rw-p 00000000 00:00 0 
+7149cac00000-7149cef70000 r--p 00000000 103:05 95165678                  /usr/lib/x86_64-linux-gnu/libLLVM.so.21.1
+7149cef70000-7149d2dc3000 r-xp 0436f000 103:05 95165678                  /usr/lib/x86_64-linux-gnu/libLLVM.so.21.1
+7149d2dc3000-7149d2fe2000 r--p 081c1000 103:05 95165678                  /usr/lib/x86_64-linux-gnu/libLLVM.so.21.1
+7149d2fe2000-7149d3029000 rw-p 083df000 103:05 95165678                  /usr/lib/x86_64-linux-gnu/libLLVM.so.21.1
+7149d3029000-7149d30d6000 rw-p 00000000 00:00 0 
+7149d30d7000-7149d30db000 rw-s 12debf000 00:07 1232                      /dev/dri/renderD129
+7149d30db000-7149d30ef000 rw-s 11bb8b000 00:07 1232                      /dev/dri/renderD129
+7149d30ef000-7149d3103000 rw-s 11bb77000 00:07 1232                      /dev/dri/renderD129
+7149d3103000-7149d3117000 rw-s 11bb63000 00:07 1232                      /dev/dri/renderD129
+7149d3117000-7149d3128000 rw-s 11bb52000 00:07 1232                      /dev/dri/renderD129
+7149d3128000-7149d312c000 rw-s 12258e000 00:07 1232                      /dev/dri/renderD129
+7149d312c000-7149d3140000 rw-s 13c184000 00:07 1232                      /dev/dri/renderD129
+7149d3140000-7149d3148000 rw-s 13a03a000 00:07 1232                      /dev/dri/renderD129
+7149d3148000-7149d3150000 rw-s 12deb7000 00:07 1232                      /dev/dri/renderD129
+7149d3150000-7149d3158000 rw-s 142110000 00:07 1232                      /dev/dri/renderD129
+7149d3158000-7149d3160000 rw-s 10a1ce000 00:07 1232                      /dev/dri/renderD129
+7149d3160000-7149d3174000 rw-s 11bb2a000 00:07 1232                      /dev/dri/renderD129
+7149d3174000-7149d3188000 rw-s 11bb16000 00:07 1232                      /dev/dri/renderD129
+7149d3188000-7149d319c000 rw-s 11bb02000 00:07 1232                      /dev/dri/renderD129
+7149d319c000-7149d31b0000 rw-s 11baee000 00:07 1232                      /dev/dri/renderD129
+7149d31b0000-7149d31c4000 rw-s 11bada000 00:07 1232                      /dev/dri/renderD129
+7149d31c4000-7149d31d8000 rw-s 11baa6000 00:07 1232                      /dev/dri/renderD129
+7149d31d8000-7149d31ec000 rw-s 11ba92000 00:07 1232                      /dev/dri/renderD129
+7149d31ec000-7149d3200000 rw-s 13be2c000 00:07 1232                      /dev/dri/renderD129
+7149d3200000-7149d3249000 r--p 00000000 103:05 95163110                  /usr/lib/x86_64-linux-gnu/libvulkan_lvp.so
+7149d3249000-7149d3721000 r-xp 00049000 103:05 95163110                  /usr/lib/x86_64-linux-gnu/libvulkan_lvp.so
+7149d3721000-7149d3f58000 r--p 00521000 103:05 95163110                  /usr/lib/x86_64-linux-gnu/libvulkan_lvp.so
+7149d3f58000-7149d3fa7000 r--p 00d57000 103:05 95163110                  /usr/lib/x86_64-linux-gnu/libvulkan_lvp.so
+7149d3fa7000-7149d3fac000 rw-p 00da6000 103:05 95163110                  /usr/lib/x86_64-linux-gnu/libvulkan_lvp.so
+7149d3fac000-7149d3fd8000 rw-p 00000000 00:00 0 
+7149d3fd8000-7149d3fec000 rw-s 13be18000 00:07 1232                      /dev/dri/renderD129
+7149d3fec000-7149d4000000 rw-s 13be04000 00:07 1232                      /dev/dri/renderD129
+7149d4000000-7149d4021000 rw-p 00000000 00:00 0 
+7149d4021000-7149d8000000 ---p 00000000 00:00 0 
+7149d8000000-7149d8021000 rw-p 00000000 00:00 0 
+7149d8021000-7149dc000000 ---p 00000000 00:00 0 
+7149dc000000-7149dc021000 rw-p 00000000 00:00 0 
+7149dc021000-7149e0000000 ---p 00000000 00:00 0 
+7149e0002000-7149e0016000 rw-s 13bdf0000 00:07 1232                      /dev/dri/renderD129
+7149e0016000-7149e002a000 rw-s 13bddc000 00:07 1232                      /dev/dri/renderD129
+7149e002a000-7149e003e000 rw-s 13bdc8000 00:07 1232                      /dev/dri/renderD129
+7149e003e000-7149e0052000 rw-s 13bdb4000 00:07 1232                      /dev/dri/renderD129
+7149e0052000-7149e0066000 rw-s 13bda0000 00:07 1232                      /dev/dri/renderD129
+7149e0066000-7149e007a000 rw-s 13bd8c000 00:07 1232                      /dev/dri/renderD129
+7149e007a000-7149e008e000 rw-s 13bd78000 00:07 1232                      /dev/dri/renderD129
+7149e008e000-7149e00a2000 rw-s 13bd64000 00:07 1232                      /dev/dri/renderD129
+7149e00a2000-7149e00b6000 rw-s 139066000 00:07 1232                      /dev/dri/renderD129
+7149e00b6000-7149e00ca000 rw-s 139052000 00:07 1232                      /dev/dri/renderD129
+7149e00ca000-7149e00de000 rw-s 13903e000 00:07 1232                      /dev/dri/renderD129
+7149e00de000-7149e00f2000 rw-s 13902a000 00:07 1232                      /dev/dri/renderD129
+7149e00f2000-7149e0106000 rw-s 139016000 00:07 1232                      /dev/dri/renderD129
+7149e0106000-7149e011a000 rw-s 139002000 00:07 1232                      /dev/dri/renderD129
+7149e011a000-7149e012e000 rw-s 138fee000 00:07 1232                      /dev/dri/renderD129
+7149e012e000-7149e0142000 rw-s 138fda000 00:07 1232                      /dev/dri/renderD129
+7149e0142000-7149e0145000 r--p 00000000 103:05 95162650                  /usr/lib/x86_64-linux-gnu/libVkLayer_MESA_device_select.so
+7149e0145000-7149e0154000 r-xp 00003000 103:05 95162650                  /usr/lib/x86_64-linux-gnu/libVkLayer_MESA_device_select.so
+7149e0154000-7149e0159000 r--p 00012000 103:05 95162650                  /usr/lib/x86_64-linux-gnu/libVkLayer_MESA_device_select.so
+7149e0159000-7149e015a000 r--p 00016000 103:05 95162650                  /usr/lib/x86_64-linux-gnu/libVkLayer_MESA_device_select.so
+7149e015a000-7149e015b000 rw-p 00017000 103:05 95162650                  /usr/lib/x86_64-linux-gnu/libVkLayer_MESA_device_select.so
+7149e015b000-7149e015d000 rw-p 00000000 00:00 0 
+7149e015f000-7149e0167000 rw-s 13907a000 00:07 1232                      /dev/dri/renderD129
+7149e0167000-7149e016d000 r--p 00000000 103:05 98195371                  /usr/lib/x86_64-linux-gnu/gamescope/libVkLayer_FROG_gamescope_wsi_x86_64.so
+7149e016d000-7149e0180000 r-xp 00006000 103:05 98195371                  /usr/lib/x86_64-linux-gnu/gamescope/libVkLayer_FROG_gamescope_wsi_x86_64.so
+7149e0180000-7149e018c000 r--p 00019000 103:05 98195371                  /usr/lib/x86_64-linux-gnu/gamescope/libVkLayer_FROG_gamescope_wsi_x86_64.so
+7149e018c000-7149e018d000 r--p 00025000 103:05 98195371                  /usr/lib/x86_64-linux-gnu/gamescope/libVkLayer_FROG_gamescope_wsi_x86_64.so
+7149e018d000-7149e018e000 rw-p 00026000 103:05 98195371                  /usr/lib/x86_64-linux-gnu/gamescope/libVkLayer_FROG_gamescope_wsi_x86_64.so
+7149e018e000-7149e0191000 r--p 00000000 103:05 95174350                  /usr/lib/x86_64-linux-gnu/libXcursor.so.1.0.2
+7149e0191000-7149e0197000 r-xp 00003000 103:05 95174350                  /usr/lib/x86_64-linux-gnu/libXcursor.so.1.0.2
+7149e0197000-7149e0199000 r--p 00009000 103:05 95174350                  /usr/lib/x86_64-linux-gnu/libXcursor.so.1.0.2
+7149e0199000-7149e019a000 r--p 0000a000 103:05 95174350                  /usr/lib/x86_64-linux-gnu/libXcursor.so.1.0.2
+7149e019a000-7149e019b000 rw-p 0000b000 103:05 95174350                  /usr/lib/x86_64-linux-gnu/libXcursor.so.1.0.2
+7149e019b000-7149e0520000 rw-p 00000000 00:00 0 
+7149e0520000-7149e0539000 r--p 00000000 103:05 95165132                  /usr/lib/x86_64-linux-gnu/libX11.so.6.4.0
+7149e0539000-7149e05ce000 r-xp 00019000 103:05 95165132                  /usr/lib/x86_64-linux-gnu/libX11.so.6.4.0
+7149e05ce000-7149e065d000 r--p 000ae000 103:05 95165132                  /usr/lib/x86_64-linux-gnu/libX11.so.6.4.0
+7149e065d000-7149e065e000 r--p 0013d000 103:05 95165132                  /usr/lib/x86_64-linux-gnu/libX11.so.6.4.0
+7149e065e000-7149e0662000 rw-p 0013e000 103:05 95165132                  /usr/lib/x86_64-linux-gnu/libX11.so.6.4.0
+7149e0662000-7149e0664000 rw-s 135d82000 00:07 1232                      /dev/dri/renderD129
+7149e0664000-7149e066c000 rw-s 1276b5000 00:07 1232                      /dev/dri/renderD129
+7149e066c000-7149e0674000 rw-s 13759c000 00:07 1232                      /dev/dri/renderD129
+7149e0674000-7149e0688000 rw-s 138fc6000 00:07 1232                      /dev/dri/renderD129
+7149e0688000-7149e069c000 rw-s 137182000 00:07 1232                      /dev/dri/renderD129
+7149e069c000-7149e06b0000 rw-s 13716e000 00:07 1232                      /dev/dri/renderD129
+7149e06b0000-7149e06c4000 rw-s 13715a000 00:07 1232                      /dev/dri/renderD129
+7149e06c4000-7149e06d8000 rw-s 137146000 00:07 1232                      /dev/dri/renderD129
+7149e06d8000-7149e06ec000 rw-s 137132000 00:07 1232                      /dev/dri/renderD129
+7149e06ec000-7149e0700000 rw-s 13711e000 00:07 1232                      /dev/dri/renderD129
+7149e0700000-7149e0714000 rw-s 13710a000 00:07 1232                      /dev/dri/renderD129
+7149e0714000-7149e0728000 rw-s 1370f6000 00:07 1232                      /dev/dri/renderD129
+7149e0728000-7149e073c000 rw-s 137ef2000 00:07 1232                      /dev/dri/renderD129
+7149e073c000-7149e0750000 rw-s 137ede000 00:07 1232                      /dev/dri/renderD129
+7149e0750000-7149e0764000 rw-s 137eca000 00:07 1232                      /dev/dri/renderD129
+7149e0764000-7149e0778000 rw-s 137eb6000 00:07 1232                      /dev/dri/renderD129
+7149e0778000-7149e078c000 rw-s 137ea2000 00:07 1232                      /dev/dri/renderD129
+7149e078c000-7149e07a0000 rw-s 137e8e000 00:07 1232                      /dev/dri/renderD129
+7149e07a0000-7149e07b4000 rw-s 137e7a000 00:07 1232                      /dev/dri/renderD129
+7149e07b4000-7149e07c8000 rw-s 137e66000 00:07 1232                      /dev/dri/renderD129
+7149e07c8000-7149e07dc000 rw-s 10d772000 00:07 1232                      /dev/dri/renderD129
+7149e07dc000-7149e07f0000 rw-s 10d75e000 00:07 1232                      /dev/dri/renderD129
+7149e07f0000-7149e0804000 rw-s 10d74a000 00:07 1232                      /dev/dri/renderD129
+7149e0804000-7149e0818000 rw-s 10d736000 00:07 1232                      /dev/dri/renderD129
+7149e0818000-7149e082c000 rw-s 10d722000 00:07 1232                      /dev/dri/renderD129
+7149e082c000-7149e0840000 rw-s 10d70e000 00:07 1232                      /dev/dri/renderD129
+7149e0840000-7149e0854000 rw-s 10a1ba000 00:07 1232                      /dev/dri/renderD129
+7149e0854000-7149e0868000 rw-s 10a1a6000 00:07 1232                      /dev/dri/renderD129
+7149e0868000-7149e087c000 rw-s 10a192000 00:07 1232                      /dev/dri/renderD129
+7149e087c000-7149e0890000 rw-s 10a17e000 00:07 1232                      /dev/dri/renderD129
+7149e0890000-7149e08a4000 rw-s 10a16a000 00:07 1232                      /dev/dri/renderD129
+7149e08a4000-7149e08b8000 rw-s 1276a1000 00:07 1232                      /dev/dri/renderD129
+7149e08b8000-7149e08cc000 rw-s 12768d000 00:07 1232                      /dev/dri/renderD129
+7149e08cc000-7149e08e0000 rw-s 127679000 00:07 1232                      /dev/dri/renderD129
+7149e08e0000-7149e08f4000 rw-s 127665000 00:07 1232                      /dev/dri/renderD129
+7149e08f4000-7149e0908000 rw-s 127651000 00:07 1232                      /dev/dri/renderD129
+7149e0908000-7149e091c000 rw-s 142176000 00:07 1232                      /dev/dri/renderD129
+7149e091c000-7149e0930000 rw-s 142162000 00:07 1232                      /dev/dri/renderD129
+7149e0930000-7149e0944000 rw-s 14214e000 00:07 1232                      /dev/dri/renderD129
+7149e0944000-7149e0958000 rw-s 12e6a6000 00:07 1232                      /dev/dri/renderD129
+7149e0958000-7149e096c000 rw-s 11b47e000 00:07 1232                      /dev/dri/renderD129
+7149e096c000-7149e09ec000 rw-s 11b3fe000 00:07 1232                      /dev/dri/renderD129
+7149e09ec000-7149e0a2c000 rw-s 11147e000 00:07 1232                      /dev/dri/renderD129
+7149e0a2c000-7149e0a3c000 rw-s 107b9a000 00:07 1232                      /dev/dri/renderD129
+7149e0a3c000-7149e0a3f000 r--p 00000000 103:05 95159640                  /usr/lib/x86_64-linux-gnu/libXi.so.6.1.0
+7149e0a3f000-7149e0a4c000 r-xp 00003000 103:05 95159640                  /usr/lib/x86_64-linux-gnu/libXi.so.6.1.0
+7149e0a4c000-7149e0a4e000 r--p 00010000 103:05 95159640                  /usr/lib/x86_64-linux-gnu/libXi.so.6.1.0
+7149e0a4e000-7149e0a4f000 r--p 00012000 103:05 95159640                  /usr/lib/x86_64-linux-gnu/libXi.so.6.1.0
+7149e0a4f000-7149e0a50000 rw-p 00013000 103:05 95159640                  /usr/lib/x86_64-linux-gnu/libXi.so.6.1.0
+7149e0a50000-7149e0a51000 r--p 00000000 103:05 95175642                  /usr/lib/x86_64-linux-gnu/libXcomposite.so.1.0.0
+7149e0a51000-7149e0a52000 r-xp 00001000 103:05 95175642                  /usr/lib/x86_64-linux-gnu/libXcomposite.so.1.0.0
+7149e0a52000-7149e0a53000 r--p 00002000 103:05 95175642                  /usr/lib/x86_64-linux-gnu/libXcomposite.so.1.0.0
+7149e0a53000-7149e0a54000 r--p 00002000 103:05 95175642                  /usr/lib/x86_64-linux-gnu/libXcomposite.so.1.0.0
+7149e0a54000-7149e0a55000 rw-p 00003000 103:05 95175642                  /usr/lib/x86_64-linux-gnu/libXcomposite.so.1.0.0
+7149e0a55000-7149e0a57000 r--p 00000000 103:05 95165672                  /usr/lib/x86_64-linux-gnu/libXfixes.so.3.1.0
+7149e0a57000-7149e0a5a000 r-xp 00002000 103:05 95165672                  /usr/lib/x86_64-linux-gnu/libXfixes.so.3.1.0
+7149e0a5a000-7149e0a5b000 r--p 00005000 103:05 95165672                  /usr/lib/x86_64-linux-gnu/libXfixes.so.3.1.0
+7149e0a5b000-7149e0a5c000 r--p 00005000 103:05 95165672                  /usr/lib/x86_64-linux-gnu/libXfixes.so.3.1.0
+7149e0a5c000-7149e0a5d000 rw-p 00006000 103:05 95165672                  /usr/lib/x86_64-linux-gnu/libXfixes.so.3.1.0
+7149e0a5d000-7149e0a5f000 r--p 00000000 103:05 95159828                  /usr/lib/x86_64-linux-gnu/libXrandr.so.2.2.0
+7149e0a5f000-7149e0a66000 r-xp 00002000 103:05 95159828                  /usr/lib/x86_64-linux-gnu/libXrandr.so.2.2.0
+7149e0a66000-7149e0a68000 r--p 00009000 103:05 95159828                  /usr/lib/x86_64-linux-gnu/libXrandr.so.2.2.0
+7149e0a68000-7149e0a69000 r--p 0000a000 103:05 95159828                  /usr/lib/x86_64-linux-gnu/libXrandr.so.2.2.0
+7149e0a69000-7149e0a6a000 rw-p 0000b000 103:05 95159828                  /usr/lib/x86_64-linux-gnu/libXrandr.so.2.2.0
+7149e0a6a000-7149e0a6c000 r--p 00000000 103:05 95159826                  /usr/lib/x86_64-linux-gnu/libXrender.so.1.3.0
+7149e0a6c000-7149e0a73000 r-xp 00002000 103:05 95159826                  /usr/lib/x86_64-linux-gnu/libXrender.so.1.3.0
+7149e0a73000-7149e0a74000 r--p 00009000 103:05 95159826                  /usr/lib/x86_64-linux-gnu/libXrender.so.1.3.0
+7149e0a74000-7149e0a75000 r--p 00009000 103:05 95159826                  /usr/lib/x86_64-linux-gnu/libXrender.so.1.3.0
+7149e0a75000-7149e0a76000 rw-p 0000a000 103:05 95159826                  /usr/lib/x86_64-linux-gnu/libXrender.so.1.3.0
+7149e0a76000-7149e0a77000 r--p 00000000 103:05 95168289                  /usr/lib/x86_64-linux-gnu/libXxf86vm.so.1.0.0
+7149e0a77000-7149e0a7a000 r-xp 00001000 103:05 95168289                  /usr/lib/x86_64-linux-gnu/libXxf86vm.so.1.0.0
+7149e0a7a000-7149e0a7b000 r--p 00004000 103:05 95168289                  /usr/lib/x86_64-linux-gnu/libXxf86vm.so.1.0.0
+7149e0a7b000-7149e0a7c000 r--p 00004000 103:05 95168289                  /usr/lib/x86_64-linux-gnu/libXxf86vm.so.1.0.0
+7149e0a7c000-7149e0a7d000 rw-p 00005000 103:05 95168289                  /usr/lib/x86_64-linux-gnu/libXxf86vm.so.1.0.0
+7149e0a7d000-7149e0a7e000 r--p 00000000 103:05 95158597                  /usr/lib/x86_64-linux-gnu/libXinerama.so.1.0.0
+7149e0a7e000-7149e0a7f000 r-xp 00001000 103:05 95158597                  /usr/lib/x86_64-linux-gnu/libXinerama.so.1.0.0
+7149e0a7f000-7149e0a80000 r--p 00002000 103:05 95158597                  /usr/lib/x86_64-linux-gnu/libXinerama.so.1.0.0
+7149e0a80000-7149e0a81000 r--p 00002000 103:05 95158597                  /usr/lib/x86_64-linux-gnu/libXinerama.so.1.0.0
+7149e0a81000-7149e0a82000 rw-p 00003000 103:05 95158597                  /usr/lib/x86_64-linux-gnu/libXinerama.so.1.0.0
+7149e0a82000-7149e0a86000 r--p 00000000 103:05 95164280                  /usr/lib/x86_64-linux-gnu/libXext.so.6.4.0
+7149e0a86000-7149e0a91000 r-xp 00004000 103:05 95164280                  /usr/lib/x86_64-linux-gnu/libXext.so.6.4.0
+7149e0a91000-7149e0a94000 r--p 0000f000 103:05 95164280                  /usr/lib/x86_64-linux-gnu/libXext.so.6.4.0
+7149e0a94000-7149e0a95000 r--p 00011000 103:05 95164280                  /usr/lib/x86_64-linux-gnu/libXext.so.6.4.0
+7149e0a95000-7149e0a96000 rw-p 00012000 103:05 95164280                  /usr/lib/x86_64-linux-gnu/libXext.so.6.4.0
+7149e0a96000-7149e0aa2000 r--p 00000000 00:45 6742                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winex11.so
+7149e0aa2000-7149e0aee000 r-xp 0000c000 00:45 6742                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winex11.so
+7149e0aee000-7149e0b07000 r--p 00058000 00:45 6742                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winex11.so
+7149e0b07000-7149e0b0a000 r--p 00071000 00:45 6742                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winex11.so
+7149e0b0a000-7149e0b0c000 rw-p 00074000 00:45 6742                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winex11.so
+7149e0b0c000-7149e0b11000 rw-p 00000000 00:00 0 
+7149e0b11000-7149e0b15000 r--p 00000000 103:05 95158960                  /usr/lib/x86_64-linux-gnu/libelf-0.194.so
+7149e0b15000-7149e0b2c000 r-xp 00004000 103:05 95158960                  /usr/lib/x86_64-linux-gnu/libelf-0.194.so
+7149e0b2c000-7149e0b30000 r--p 0001b000 103:05 95158960                  /usr/lib/x86_64-linux-gnu/libelf-0.194.so
+7149e0b30000-7149e0b31000 r--p 0001f000 103:05 95158960                  /usr/lib/x86_64-linux-gnu/libelf-0.194.so
+7149e0b31000-7149e0b32000 rw-p 00020000 103:05 95158960                  /usr/lib/x86_64-linux-gnu/libelf-0.194.so
+7149e0b32000-7149e0b34000 r--p 00000000 103:05 95161775                  /usr/lib/x86_64-linux-gnu/libmd.so.0.1.0
+7149e0b34000-7149e0b3d000 r-xp 00002000 103:05 95161775                  /usr/lib/x86_64-linux-gnu/libmd.so.0.1.0
+7149e0b3d000-7149e0b3f000 r--p 0000b000 103:05 95161775                  /usr/lib/x86_64-linux-gnu/libmd.so.0.1.0
+7149e0b3f000-7149e0b40000 r--p 0000c000 103:05 95161775                  /usr/lib/x86_64-linux-gnu/libmd.so.0.1.0
+7149e0b40000-7149e0b41000 rw-p 0000d000 103:05 95161775                  /usr/lib/x86_64-linux-gnu/libmd.so.0.1.0
+7149e0b41000-7149e0b45000 r--p 00000000 103:05 95161780                  /usr/lib/x86_64-linux-gnu/libbsd.so.0.12.2
+7149e0b45000-7149e0b51000 r-xp 00004000 103:05 95161780                  /usr/lib/x86_64-linux-gnu/libbsd.so.0.12.2
+7149e0b51000-7149e0b54000 r--p 00010000 103:05 95161780                  /usr/lib/x86_64-linux-gnu/libbsd.so.0.12.2
+7149e0b54000-7149e0b55000 r--p 00012000 103:05 95161780                  /usr/lib/x86_64-linux-gnu/libbsd.so.0.12.2
+7149e0b55000-7149e0b56000 rw-p 00013000 103:05 95161780                  /usr/lib/x86_64-linux-gnu/libbsd.so.0.12.2
+7149e0b56000-7149e0b57000 rw-p 00000000 00:00 0 
+7149e0b57000-7149e0b65000 r--p 00000000 103:05 95163981                  /usr/lib/x86_64-linux-gnu/libtinfo.so.6.6
+7149e0b65000-7149e0b79000 r-xp 0000e000 103:05 95163981                  /usr/lib/x86_64-linux-gnu/libtinfo.so.6.6
+7149e0b79000-7149e0b87000 r--p 00022000 103:05 95163981                  /usr/lib/x86_64-linux-gnu/libtinfo.so.6.6
+7149e0b87000-7149e0b8b000 r--p 0002f000 103:05 95163981                  /usr/lib/x86_64-linux-gnu/libtinfo.so.6.6
+7149e0b8b000-7149e0b8c000 rw-p 00033000 103:05 95163981                  /usr/lib/x86_64-linux-gnu/libtinfo.so.6.6
+7149e0b8c000-7149e0b8e000 r--p 00000000 103:05 95161759                  /usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0
+7149e0b8e000-7149e0b90000 r-xp 00002000 103:05 95161759                  /usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0
+7149e0b90000-7149e0b92000 r--p 00004000 103:05 95161759                  /usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0
+7149e0b92000-7149e0b93000 r--p 00005000 103:05 95161759                  /usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0
+7149e0b93000-7149e0b94000 rw-p 00006000 103:05 95161759                  /usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0
+7149e0b94000-7149e0b95000 r--p 00000000 103:05 95161753                  /usr/lib/x86_64-linux-gnu/libXau.so.6.0.0
+7149e0b95000-7149e0b97000 r-xp 00001000 103:05 95161753                  /usr/lib/x86_64-linux-gnu/libXau.so.6.0.0
+7149e0b97000-7149e0b98000 r--p 00003000 103:05 95161753                  /usr/lib/x86_64-linux-gnu/libXau.so.6.0.0
+7149e0b98000-7149e0b99000 r--p 00003000 103:05 95161753                  /usr/lib/x86_64-linux-gnu/libXau.so.6.0.0
+7149e0b99000-7149e0b9a000 rw-p 00004000 103:05 95161753                  /usr/lib/x86_64-linux-gnu/libXau.so.6.0.0
+7149e0b9a000-7149e0bbb000 r--p 00000000 103:05 95161019                  /usr/lib/x86_64-linux-gnu/libxml2.so.16.1.2
+7149e0bbb000-7149e0cb6000 r-xp 00021000 103:05 95161019                  /usr/lib/x86_64-linux-gnu/libxml2.so.16.1.2
+7149e0cb6000-7149e0cf3000 r--p 0011c000 103:05 95161019                  /usr/lib/x86_64-linux-gnu/libxml2.so.16.1.2
+7149e0cf3000-7149e0cfb000 r--p 00159000 103:05 95161019                  /usr/lib/x86_64-linux-gnu/libxml2.so.16.1.2
+7149e0cfb000-7149e0cfc000 rw-p 00161000 103:05 95161019                  /usr/lib/x86_64-linux-gnu/libxml2.so.16.1.2
+7149e0cfc000-7149e0cfd000 rw-p 00000000 00:00 0 
+7149e0cfd000-7149e0d05000 r--p 00000000 103:05 95165676                  /usr/lib/x86_64-linux-gnu/libedit.so.2.0.76
+7149e0d05000-7149e0d24000 r-xp 00008000 103:05 95165676                  /usr/lib/x86_64-linux-gnu/libedit.so.2.0.76
+7149e0d24000-7149e0d30000 r--p 00027000 103:05 95165676                  /usr/lib/x86_64-linux-gnu/libedit.so.2.0.76
+7149e0d30000-7149e0d32000 r--p 00033000 103:05 95165676                  /usr/lib/x86_64-linux-gnu/libedit.so.2.0.76
+7149e0d32000-7149e0d33000 rw-p 00035000 103:05 95165676                  /usr/lib/x86_64-linux-gnu/libedit.so.2.0.76
+7149e0d33000-7149e0d37000 rw-p 00000000 00:00 0 
+7149e0d37000-7149e0d3a000 r--p 00000000 103:05 95174392                  /usr/lib/x86_64-linux-gnu/libdisplay-info.so.0.3.0
+7149e0d3a000-7149e0d52000 r-xp 00003000 103:05 95174392                  /usr/lib/x86_64-linux-gnu/libdisplay-info.so.0.3.0
+7149e0d52000-7149e0d6e000 r--p 0001b000 103:05 95174392                  /usr/lib/x86_64-linux-gnu/libdisplay-info.so.0.3.0
+7149e0d6e000-7149e0d6f000 r--p 00036000 103:05 95174392                  /usr/lib/x86_64-linux-gnu/libdisplay-info.so.0.3.0
+7149e0d6f000-7149e0d70000 rw-p 00037000 103:05 95174392                  /usr/lib/x86_64-linux-gnu/libdisplay-info.so.0.3.0
+7149e0d70000-7149e0d76000 r--p 00000000 103:05 95165920                  /usr/lib/x86_64-linux-gnu/libwayland-client.so.0.24.0
+7149e0d76000-7149e0d7d000 r-xp 00006000 103:05 95165920                  /usr/lib/x86_64-linux-gnu/libwayland-client.so.0.24.0
+7149e0d7d000-7149e0d80000 r--p 0000d000 103:05 95165920                  /usr/lib/x86_64-linux-gnu/libwayland-client.so.0.24.0
+7149e0d80000-7149e0d82000 r--p 0000f000 103:05 95165920                  /usr/lib/x86_64-linux-gnu/libwayland-client.so.0.24.0
+7149e0d82000-7149e0d83000 rw-p 00011000 103:05 95165920                  /usr/lib/x86_64-linux-gnu/libwayland-client.so.0.24.0
+7149e0d83000-7149e0d84000 r--p 00000000 103:05 95165878                  /usr/lib/x86_64-linux-gnu/libxshmfence.so.1.0.0
+7149e0d84000-7149e0d85000 r-xp 00001000 103:05 95165878                  /usr/lib/x86_64-linux-gnu/libxshmfence.so.1.0.0
+7149e0d85000-7149e0d86000 r--p 00002000 103:05 95165878                  /usr/lib/x86_64-linux-gnu/libxshmfence.so.1.0.0
+7149e0d86000-7149e0d87000 r--p 00002000 103:05 95165878                  /usr/lib/x86_64-linux-gnu/libxshmfence.so.1.0.0
+7149e0d87000-7149e0d88000 rw-p 00003000 103:05 95165878                  /usr/lib/x86_64-linux-gnu/libxshmfence.so.1.0.0
+7149e0d88000-7149e0d89000 r--p 00000000 103:05 95166223                  /usr/lib/x86_64-linux-gnu/libxcb-shm.so.0.0.0
+7149e0d89000-7149e0d8a000 r-xp 00001000 103:05 95166223                  /usr/lib/x86_64-linux-gnu/libxcb-shm.so.0.0.0
+7149e0d8a000-7149e0d8b000 r--p 00002000 103:05 95166223                  /usr/lib/x86_64-linux-gnu/libxcb-shm.so.0.0.0
+7149e0d8b000-7149e0d8c000 r--p 00002000 103:05 95166223                  /usr/lib/x86_64-linux-gnu/libxcb-shm.so.0.0.0
+7149e0d8c000-7149e0d8d000 rw-p 00003000 103:05 95166223                  /usr/lib/x86_64-linux-gnu/libxcb-shm.so.0.0.0
+7149e0d8d000-7149e0d90000 r--p 00000000 103:05 95158964                  /usr/lib/x86_64-linux-gnu/libxcb-sync.so.1.0.0
+7149e0d90000-7149e0d93000 r-xp 00003000 103:05 95158964                  /usr/lib/x86_64-linux-gnu/libxcb-sync.so.1.0.0
+7149e0d93000-7149e0d94000 r--p 00006000 103:05 95158964                  /usr/lib/x86_64-linux-gnu/libxcb-sync.so.1.0.0
+7149e0d94000-7149e0d95000 r--p 00007000 103:05 95158964                  /usr/lib/x86_64-linux-gnu/libxcb-sync.so.1.0.0
+7149e0d95000-7149e0d96000 rw-p 00008000 103:05 95158964                  /usr/lib/x86_64-linux-gnu/libxcb-sync.so.1.0.0
+7149e0d96000-7149e0d99000 r--p 00000000 103:05 95166226                  /usr/lib/x86_64-linux-gnu/libxcb-xfixes.so.0.0.0
+7149e0d99000-7149e0d9c000 r-xp 00003000 103:05 95166226                  /usr/lib/x86_64-linux-gnu/libxcb-xfixes.so.0.0.0
+7149e0d9c000-7149e0d9e000 r--p 00006000 103:05 95166226                  /usr/lib/x86_64-linux-gnu/libxcb-xfixes.so.0.0.0
+7149e0d9e000-7149e0d9f000 r--p 00007000 103:05 95166226                  /usr/lib/x86_64-linux-gnu/libxcb-xfixes.so.0.0.0
+7149e0d9f000-7149e0da0000 rw-p 00008000 103:05 95166226                  /usr/lib/x86_64-linux-gnu/libxcb-xfixes.so.0.0.0
+7149e0da0000-7149e0da1000 r--p 00000000 103:05 95165926                  /usr/lib/x86_64-linux-gnu/libxcb-present.so.0.0.0
+7149e0da1000-7149e0da2000 r-xp 00001000 103:05 95165926                  /usr/lib/x86_64-linux-gnu/libxcb-present.so.0.0.0
+7149e0da2000-7149e0da3000 r--p 00002000 103:05 95165926                  /usr/lib/x86_64-linux-gnu/libxcb-present.so.0.0.0
+7149e0da3000-7149e0da4000 r--p 00002000 103:05 95165926                  /usr/lib/x86_64-linux-gnu/libxcb-present.so.0.0.0
+7149e0da4000-7149e0da5000 rw-p 00003000 103:05 95165926                  /usr/lib/x86_64-linux-gnu/libxcb-present.so.0.0.0
+7149e0da5000-7149e0da7000 r--p 00000000 103:05 95165670                  /usr/lib/x86_64-linux-gnu/libxcb-dri3.so.0.1.0
+7149e0da7000-7149e0da9000 r-xp 00002000 103:05 95165670                  /usr/lib/x86_64-linux-gnu/libxcb-dri3.so.0.1.0
+7149e0da9000-7149e0daa000 r--p 00004000 103:05 95165670                  /usr/lib/x86_64-linux-gnu/libxcb-dri3.so.0.1.0
+7149e0daa000-7149e0dab000 r--p 00004000 103:05 95165670                  /usr/lib/x86_64-linux-gnu/libxcb-dri3.so.0.1.0
+7149e0dab000-7149e0dac000 rw-p 00005000 103:05 95165670                  /usr/lib/x86_64-linux-gnu/libxcb-dri3.so.0.1.0
+7149e0dac000-7149e0db0000 r--p 00000000 103:05 95159607                  /usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7
+7149e0db0000-7149e0e60000 r-xp 00004000 103:05 95159607                  /usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7
+7149e0e60000-7149e0e6d000 r--p 000b4000 103:05 95159607                  /usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7
+7149e0e6d000-7149e0e6e000 r--p 000c1000 103:05 95159607                  /usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7
+7149e0e6e000-7149e0e6f000 rw-p 000c2000 103:05 95159607                  /usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7
+7149e0e6f000-7149e0e75000 r--p 00000000 103:05 95165910                  /usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.341
+7149e0e75000-7149e0ecc000 r-xp 00006000 103:05 95165910                  /usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.341
+7149e0ecc000-7149e0efd000 r--p 0005d000 103:05 95165910                  /usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.341
+7149e0efd000-7149e0efe000 r--p 0008e000 103:05 95165910                  /usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.341
+7149e0efe000-7149e0eff000 rw-p 0008f000 103:05 95165910                  /usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.341
+7149e0eff000-7149e0f04000 r--p 00000000 00:45 7350878                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/x86_64-linux-gnu/libopenxr_loader.so.1.1.63
+7149e0f04000-7149e0f65000 r-xp 00005000 00:45 7350878                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/x86_64-linux-gnu/libopenxr_loader.so.1.1.63
+7149e0f65000-7149e0f7a000 r--p 00066000 00:45 7350878                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/x86_64-linux-gnu/libopenxr_loader.so.1.1.63
+7149e0f7a000-7149e0f7b000 r--p 0007b000 00:45 7350878                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/x86_64-linux-gnu/libopenxr_loader.so.1.1.63
+7149e0f7b000-7149e0f7c000 rw-p 0007c000 00:45 7350878                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/x86_64-linux-gnu/libopenxr_loader.so.1.1.63
+7149e0f7c000-7149e0f84000 r--p 00000000 00:45 8109                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/wineopenxr.so
+7149e0f84000-7149e0fd3000 r-xp 00008000 00:45 8109                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/wineopenxr.so
+7149e0fd3000-7149e0ffb000 r--p 00057000 00:45 8109                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/wineopenxr.so
+7149e0ffb000-7149e0ffe000 r--p 0007f000 00:45 8109                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/wineopenxr.so
+7149e0ffe000-7149e0fff000 rw-p 00082000 00:45 8109                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/wineopenxr.so
+7149e0fff000-7149e1000000 rw-p 00000000 00:00 0 
+7149e1000000-7149e1e09000 r--p 00000000 103:05 72399729                  /home/sarah/.local/share/Steam/linux64/steamclient.so
+7149e1e09000-7149e3efc000 r-xp 00e08000 103:05 72399729                  /home/sarah/.local/share/Steam/linux64/steamclient.so
+7149e3efc000-7149e406f000 r--p 02efa000 103:05 72399729                  /home/sarah/.local/share/Steam/linux64/steamclient.so
+7149e406f000-7149e40ac000 rw-p 0306c000 103:05 72399729                  /home/sarah/.local/share/Steam/linux64/steamclient.so
+7149e40ac000-7149e411f000 rw-p 00000000 00:00 0 
+7149e411f000-7149e4120000 r--p 00000000 103:05 95160999                  /usr/lib/x86_64-linux-gnu/libX11-xcb.so.1.0.0
+7149e4120000-7149e4121000 r-xp 00001000 103:05 95160999                  /usr/lib/x86_64-linux-gnu/libX11-xcb.so.1.0.0
+7149e4121000-7149e4122000 r--p 00002000 103:05 95160999                  /usr/lib/x86_64-linux-gnu/libX11-xcb.so.1.0.0
+7149e4122000-7149e4123000 r--p 00002000 103:05 95160999                  /usr/lib/x86_64-linux-gnu/libX11-xcb.so.1.0.0
+7149e4123000-7149e4124000 rw-p 00003000 103:05 95160999                  /usr/lib/x86_64-linux-gnu/libX11-xcb.so.1.0.0
+7149e4124000-7149e4130000 r--p 00000000 103:05 95161765                  /usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0
+7149e4130000-7149e4144000 r-xp 0000c000 103:05 95161765                  /usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0
+7149e4144000-7149e414d000 r--p 00020000 103:05 95161765                  /usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0
+7149e414d000-7149e414e000 r--p 00028000 103:05 95161765                  /usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0
+7149e414e000-7149e414f000 rw-p 00029000 103:05 95161765                  /usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0
+7149e414f000-7149e4156000 r--p 00000000 103:05 95160661                  /usr/lib/x86_64-linux-gnu/libnss_mymachines.so.2
+7149e4156000-7149e4193000 r-xp 00007000 103:05 95160661                  /usr/lib/x86_64-linux-gnu/libnss_mymachines.so.2
+7149e4193000-7149e41a4000 r--p 00044000 103:05 95160661                  /usr/lib/x86_64-linux-gnu/libnss_mymachines.so.2
+7149e41a4000-7149e41a7000 r--p 00055000 103:05 95160661                  /usr/lib/x86_64-linux-gnu/libnss_mymachines.so.2
+7149e41a7000-7149e41a8000 rw-p 00058000 103:05 95160661                  /usr/lib/x86_64-linux-gnu/libnss_mymachines.so.2
+7149e41a8000-7149e41b4000 r--p 00000000 103:05 95159392                  /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2.2
+7149e41b4000-7149e41f1000 r-xp 0000c000 103:05 95159392                  /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2.2
+7149e41f1000-7149e41fc000 r--p 00049000 103:05 95159392                  /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2.2
+7149e41fc000-7149e41fe000 r--p 00053000 103:05 95159392                  /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2.2
+7149e41fe000-7149e4200000 rw-p 00055000 103:05 95159392                  /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2.2
+7149e4200000-7149e42a3000 r--p 00000000 103:05 95160870                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.35
+7149e42a3000-7149e43fe000 r-xp 000a3000 103:05 95160870                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.35
+7149e43fe000-7149e448a000 r--p 001fe000 103:05 95160870                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.35
+7149e448a000-7149e4499000 r--p 0028a000 103:05 95160870                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.35
+7149e4499000-7149e449c000 rw-p 00299000 103:05 95160870                  /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.35
+7149e449c000-7149e44a0000 rw-p 00000000 00:00 0 
+7149e44a1000-7149e44a9000 rw-s 12e6ba000 00:07 1232                      /dev/dri/renderD129
+7149e44a9000-7149e44b0000 r--s 00000000 103:05 95323269                  /usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache
+7149e44b0000-7149e44d4000 r--p 00000000 00:45 7347034                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/fonts/tahoma.ttf
+7149e44d4000-7149e44d7000 r--p 00000000 103:05 95164170                  /usr/lib/x86_64-linux-gnu/libresolv.so.2
+7149e44d7000-7149e44e1000 r-xp 00003000 103:05 95164170                  /usr/lib/x86_64-linux-gnu/libresolv.so.2
+7149e44e1000-7149e44e3000 r--p 0000d000 103:05 95164170                  /usr/lib/x86_64-linux-gnu/libresolv.so.2
+7149e44e3000-7149e44e4000 r--p 0000f000 103:05 95164170                  /usr/lib/x86_64-linux-gnu/libresolv.so.2
+7149e44e4000-7149e44e5000 rw-p 00010000 103:05 95164170                  /usr/lib/x86_64-linux-gnu/libresolv.so.2
+7149e44e5000-7149e44e7000 rw-p 00000000 00:00 0 
+7149e44e7000-7149e44ea000 r--p 00000000 103:05 95162664                  /usr/lib/x86_64-linux-gnu/libkrb5support.so.0.1
+7149e44ea000-7149e44f0000 r-xp 00003000 103:05 95162664                  /usr/lib/x86_64-linux-gnu/libkrb5support.so.0.1
+7149e44f0000-7149e44f2000 r--p 00009000 103:05 95162664                  /usr/lib/x86_64-linux-gnu/libkrb5support.so.0.1
+7149e44f2000-7149e44f3000 r--p 0000b000 103:05 95162664                  /usr/lib/x86_64-linux-gnu/libkrb5support.so.0.1
+7149e44f3000-7149e44f4000 rw-p 0000c000 103:05 95162664                  /usr/lib/x86_64-linux-gnu/libkrb5support.so.0.1
+7149e44f4000-7149e44f8000 r--p 00000000 103:05 95162666                  /usr/lib/x86_64-linux-gnu/libk5crypto.so.3.1
+7149e44f8000-7149e4513000 r-xp 00004000 103:05 95162666                  /usr/lib/x86_64-linux-gnu/libk5crypto.so.3.1
+7149e4513000-7149e451e000 r--p 0001f000 103:05 95162666                  /usr/lib/x86_64-linux-gnu/libk5crypto.so.3.1
+7149e451e000-7149e451f000 r--p 0002a000 103:05 95162666                  /usr/lib/x86_64-linux-gnu/libk5crypto.so.3.1
+7149e451f000-7149e4520000 rw-p 0002b000 103:05 95162666                  /usr/lib/x86_64-linux-gnu/libk5crypto.so.3.1
+7149e4520000-7149e4540000 r--p 00000000 103:05 95160974                  /usr/lib/x86_64-linux-gnu/libkrb5.so.3.3
+7149e4540000-7149e45a3000 r-xp 00020000 103:05 95160974                  /usr/lib/x86_64-linux-gnu/libkrb5.so.3.3
+7149e45a3000-7149e45dd000 r--p 00083000 103:05 95160974                  /usr/lib/x86_64-linux-gnu/libkrb5.so.3.3
+7149e45dd000-7149e45ea000 r--p 000bc000 103:05 95160974                  /usr/lib/x86_64-linux-gnu/libkrb5.so.3.3
+7149e45ea000-7149e45ec000 rw-p 000c9000 103:05 95160974                  /usr/lib/x86_64-linux-gnu/libkrb5.so.3.3
+7149e45ec000-7149e45ed000 r--p 00000000 00:34 3                          /dev/shm/wlroots-dgcBkK (deleted)
+7149e45ed000-7149e45f4000 r--p 00000000 103:05 95166218                  /usr/lib/x86_64-linux-gnu/libxcb-randr.so.0.1.0
+7149e45f4000-7149e45f9000 r-xp 00007000 103:05 95166218                  /usr/lib/x86_64-linux-gnu/libxcb-randr.so.0.1.0
+7149e45f9000-7149e45fc000 r--p 0000c000 103:05 95166218                  /usr/lib/x86_64-linux-gnu/libxcb-randr.so.0.1.0
+7149e45fc000-7149e45fd000 r--p 0000f000 103:05 95166218                  /usr/lib/x86_64-linux-gnu/libxcb-randr.so.0.1.0
+7149e45fd000-7149e45fe000 rw-p 00010000 103:05 95166218                  /usr/lib/x86_64-linux-gnu/libxcb-randr.so.0.1.0
+7149e45fe000-7149e45ff000 r--p 00000000 103:05 95176256                  /usr/lib/x86_64-linux-gnu/libnss_mdns4_minimal.so.2
+7149e45ff000-7149e4601000 r-xp 00001000 103:05 95176256                  /usr/lib/x86_64-linux-gnu/libnss_mdns4_minimal.so.2
+7149e4601000-7149e4602000 r--p 00003000 103:05 95176256                  /usr/lib/x86_64-linux-gnu/libnss_mdns4_minimal.so.2
+7149e4602000-7149e4603000 r--p 00003000 103:05 95176256                  /usr/lib/x86_64-linux-gnu/libnss_mdns4_minimal.so.2
+7149e4603000-7149e4604000 rw-p 00004000 103:05 95176256                  /usr/lib/x86_64-linux-gnu/libnss_mdns4_minimal.so.2
+7149e4604000-7149e4605000 r--p 00000000 103:05 95163471                  /usr/lib/x86_64-linux-gnu/libpthread.so.0
+7149e4605000-7149e4606000 r-xp 00001000 103:05 95163471                  /usr/lib/x86_64-linux-gnu/libpthread.so.0
+7149e4606000-7149e4607000 r--p 00002000 103:05 95163471                  /usr/lib/x86_64-linux-gnu/libpthread.so.0
+7149e4607000-7149e4608000 r--p 00002000 103:05 95163471                  /usr/lib/x86_64-linux-gnu/libpthread.so.0
+7149e4608000-7149e4609000 rw-p 00003000 103:05 95163471                  /usr/lib/x86_64-linux-gnu/libpthread.so.0
+7149e4609000-7149e460a000 r--p 00000000 103:05 95164171                  /usr/lib/x86_64-linux-gnu/librt.so.1
+7149e460a000-7149e460b000 r-xp 00001000 103:05 95164171                  /usr/lib/x86_64-linux-gnu/librt.so.1
+7149e460b000-7149e460c000 r--p 00002000 103:05 95164171                  /usr/lib/x86_64-linux-gnu/librt.so.1
+7149e460c000-7149e460d000 r--p 00002000 103:05 95164171                  /usr/lib/x86_64-linux-gnu/librt.so.1
+7149e460d000-7149e460e000 rw-p 00003000 103:05 95164171                  /usr/lib/x86_64-linux-gnu/librt.so.1
+7149e460e000-7149e460f000 r--p 00000000 103:05 95160169                  /usr/lib/x86_64-linux-gnu/libdl.so.2
+7149e460f000-7149e4610000 r-xp 00001000 103:05 95160169                  /usr/lib/x86_64-linux-gnu/libdl.so.2
+7149e4610000-7149e4611000 r--p 00002000 103:05 95160169                  /usr/lib/x86_64-linux-gnu/libdl.so.2
+7149e4611000-7149e4612000 r--p 00002000 103:05 95160169                  /usr/lib/x86_64-linux-gnu/libdl.so.2
+7149e4612000-7149e4613000 rw-p 00003000 103:05 95160169                  /usr/lib/x86_64-linux-gnu/libdl.so.2
+7149e4613000-7149e4614000 r--p 00000000 00:45 7353371                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/netapi32.so
+7149e4614000-7149e4615000 r-xp 00001000 00:45 7353371                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/netapi32.so
+7149e4615000-7149e4616000 r--p 00002000 00:45 7353371                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/netapi32.so
+7149e4616000-7149e4617000 r--p 00002000 00:45 7353371                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/netapi32.so
+7149e4617000-7149e4618000 rw-p 00003000 00:45 7353371                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/netapi32.so
+7149e4618000-7149e4619000 r--p 00000000 00:45 7353370                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/msv1_0.so
+7149e4619000-7149e461a000 r-xp 00001000 00:45 7353370                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/msv1_0.so
+7149e461a000-7149e461b000 r--p 00002000 00:45 7353370                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/msv1_0.so
+7149e461b000-7149e461c000 r--p 00002000 00:45 7353370                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/msv1_0.so
+7149e461c000-7149e461d000 rw-p 00003000 00:45 7353370                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/msv1_0.so
+7149e461d000-7149e466d000 r--p 00000000 00:45 6751                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/lsteamclient.so
+7149e466d000-7149e472b000 r-xp 00050000 00:45 6751                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/lsteamclient.so
+7149e472b000-7149e47b8000 r--p 0010e000 00:45 6751                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/lsteamclient.so
+7149e47b8000-7149e47d4000 r--p 0019a000 00:45 6751                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/lsteamclient.so
+7149e47d4000-7149e47d5000 rw-p 001b6000 00:45 6751                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/lsteamclient.so
+7149e47d5000-7149e67d5000 rw-p 00000000 00:00 0 
+7149e67d5000-7149e67da000 r--p 00000000 103:05 95163257                  /usr/lib/x86_64-linux-gnu/libgpg-error.so.0.41.1
+7149e67da000-7149e67f5000 r-xp 00005000 103:05 95163257                  /usr/lib/x86_64-linux-gnu/libgpg-error.so.0.41.1
+7149e67f5000-7149e67ff000 r--p 00020000 103:05 95163257                  /usr/lib/x86_64-linux-gnu/libgpg-error.so.0.41.1
+7149e67ff000-7149e6800000 r--p 0002a000 103:05 95163257                  /usr/lib/x86_64-linux-gnu/libgpg-error.so.0.41.1
+7149e6800000-7149e6801000 rw-p 0002b000 103:05 95163257                  /usr/lib/x86_64-linux-gnu/libgpg-error.so.0.41.1
+7149e6801000-7149e6811000 r--p 00000000 103:05 95161683                  /usr/lib/x86_64-linux-gnu/libgcrypt.so.20.7.0
+7149e6811000-7149e695f000 r-xp 00010000 103:05 95161683                  /usr/lib/x86_64-linux-gnu/libgcrypt.so.20.7.0
+7149e695f000-7149e69ad000 r--p 0015e000 103:05 95161683                  /usr/lib/x86_64-linux-gnu/libgcrypt.so.20.7.0
+7149e69ad000-7149e69b2000 r--p 001ac000 103:05 95161683                  /usr/lib/x86_64-linux-gnu/libgcrypt.so.20.7.0
+7149e69b2000-7149e69b8000 rw-p 001b1000 103:05 95161683                  /usr/lib/x86_64-linux-gnu/libgcrypt.so.20.7.0
+7149e69b8000-7149e69c2000 r--p 00000000 103:05 95165024                  /usr/lib/x86_64-linux-gnu/libgmp.so.10.5.0
+7149e69c2000-7149e6a27000 r-xp 0000a000 103:05 95165024                  /usr/lib/x86_64-linux-gnu/libgmp.so.10.5.0
+7149e6a27000-7149e6a3c000 r--p 0006f000 103:05 95165024                  /usr/lib/x86_64-linux-gnu/libgmp.so.10.5.0
+7149e6a3c000-7149e6a3d000 r--p 00083000 103:05 95165024                  /usr/lib/x86_64-linux-gnu/libgmp.so.10.5.0
+7149e6a3d000-7149e6a3e000 rw-p 00084000 103:05 95165024                  /usr/lib/x86_64-linux-gnu/libgmp.so.10.5.0
+7149e6a3e000-7149e6a50000 r--p 00000000 103:05 95165030                  /usr/lib/x86_64-linux-gnu/libunistring.so.5.2.0
+7149e6a50000-7149e6a94000 r-xp 00012000 103:05 95165030                  /usr/lib/x86_64-linux-gnu/libunistring.so.5.2.0
+7149e6a94000-7149e6c20000 r--p 00056000 103:05 95165030                  /usr/lib/x86_64-linux-gnu/libunistring.so.5.2.0
+7149e6c20000-7149e6c24000 r--p 001e1000 103:05 95165030                  /usr/lib/x86_64-linux-gnu/libunistring.so.5.2.0
+7149e6c24000-7149e6c25000 rw-p 001e5000 103:05 95165030                  /usr/lib/x86_64-linux-gnu/libunistring.so.5.2.0
+7149e6c25000-7149e6c67000 r--p 00000000 103:05 95161128                  /usr/lib/x86_64-linux-gnu/libp11-kit.so.0.4.8
+7149e6c67000-7149e6d4b000 r-xp 00042000 103:05 95161128                  /usr/lib/x86_64-linux-gnu/libp11-kit.so.0.4.8
+7149e6d4b000-7149e6dde000 r--p 00126000 103:05 95161128                  /usr/lib/x86_64-linux-gnu/libp11-kit.so.0.4.8
+7149e6dde000-7149e6df0000 r--p 001b8000 103:05 95161128                  /usr/lib/x86_64-linux-gnu/libp11-kit.so.0.4.8
+7149e6df0000-7149e6dff000 rw-p 001ca000 103:05 95161128                  /usr/lib/x86_64-linux-gnu/libp11-kit.so.0.4.8
+7149e6dff000-7149e6e00000 rw-p 00000000 00:00 0 
+7149e6e00000-7149e6e34000 r--p 00000000 103:05 95159466                  /usr/lib/x86_64-linux-gnu/libgnutls.so.30.41.1
+7149e6e34000-7149e6f7f000 r-xp 00034000 103:05 95159466                  /usr/lib/x86_64-linux-gnu/libgnutls.so.30.41.1
+7149e6f7f000-7149e6ffa000 r--p 0017f000 103:05 95159466                  /usr/lib/x86_64-linux-gnu/libgnutls.so.30.41.1
+7149e6ffa000-7149e700b000 r--p 001f9000 103:05 95159466                  /usr/lib/x86_64-linux-gnu/libgnutls.so.30.41.1
+7149e700b000-7149e700d000 rw-p 0020a000 103:05 95159466                  /usr/lib/x86_64-linux-gnu/libgnutls.so.30.41.1
+7149e700d000-7149e7011000 rw-p 00000000 00:00 0 
+7149e7011000-7149e7012000 rw-s 00000000 00:01 21774                      /memfd:lp_dma_buf (deleted)
+7149e7012000-7149e7014000 r--p 00000000 103:05 95163240                  /usr/lib/x86_64-linux-gnu/libffi.so.8.2.0
+7149e7014000-7149e701f000 r-xp 00002000 103:05 95163240                  /usr/lib/x86_64-linux-gnu/libffi.so.8.2.0
+7149e701f000-7149e7021000 r--p 0000d000 103:05 95163240                  /usr/lib/x86_64-linux-gnu/libffi.so.8.2.0
+7149e7021000-7149e7022000 r--p 0000e000 103:05 95163240                  /usr/lib/x86_64-linux-gnu/libffi.so.8.2.0
+7149e7022000-7149e7023000 rw-p 0000f000 103:05 95163240                  /usr/lib/x86_64-linux-gnu/libffi.so.8.2.0
+7149e7023000-7149e702f000 r--p 00000000 103:05 95165026                  /usr/lib/x86_64-linux-gnu/libnettle.so.8.11
+7149e702f000-7149e705f000 r-xp 0000c000 103:05 95165026                  /usr/lib/x86_64-linux-gnu/libnettle.so.8.11
+7149e705f000-7149e7077000 r--p 0003c000 103:05 95165026                  /usr/lib/x86_64-linux-gnu/libnettle.so.8.11
+7149e7077000-7149e7079000 r--p 00054000 103:05 95165026                  /usr/lib/x86_64-linux-gnu/libnettle.so.8.11
+7149e7079000-7149e707a000 rw-p 00056000 103:05 95165026                  /usr/lib/x86_64-linux-gnu/libnettle.so.8.11
+7149e707a000-7149e7083000 r--p 00000000 103:05 95165028                  /usr/lib/x86_64-linux-gnu/libhogweed.so.6.11
+7149e7083000-7149e7098000 r-xp 00009000 103:05 95165028                  /usr/lib/x86_64-linux-gnu/libhogweed.so.6.11
+7149e7098000-7149e70c2000 r--p 0001e000 103:05 95165028                  /usr/lib/x86_64-linux-gnu/libhogweed.so.6.11
+7149e70c2000-7149e70c4000 r--p 00047000 103:05 95165028                  /usr/lib/x86_64-linux-gnu/libhogweed.so.6.11
+7149e70c4000-7149e70c5000 rw-p 00049000 103:05 95165028                  /usr/lib/x86_64-linux-gnu/libhogweed.so.6.11
+7149e70c5000-7149e70c8000 r--p 00000000 103:05 95165034                  /usr/lib/x86_64-linux-gnu/libtasn1.so.6.6.5
+7149e70c8000-7149e70d7000 r-xp 00003000 103:05 95165034                  /usr/lib/x86_64-linux-gnu/libtasn1.so.6.6.5
+7149e70d7000-7149e70da000 r--p 00012000 103:05 95165034                  /usr/lib/x86_64-linux-gnu/libtasn1.so.6.6.5
+7149e70da000-7149e70db000 r--p 00015000 103:05 95165034                  /usr/lib/x86_64-linux-gnu/libtasn1.so.6.6.5
+7149e70db000-7149e70dc000 rw-p 00016000 103:05 95165034                  /usr/lib/x86_64-linux-gnu/libtasn1.so.6.6.5
+7149e70dc000-7149e70de000 r--p 00000000 103:05 95165032                  /usr/lib/x86_64-linux-gnu/libidn2.so.0.4.0
+7149e70de000-7149e70e2000 r-xp 00002000 103:05 95165032                  /usr/lib/x86_64-linux-gnu/libidn2.so.0.4.0
+7149e70e2000-7149e70fc000 r--p 00006000 103:05 95165032                  /usr/lib/x86_64-linux-gnu/libidn2.so.0.4.0
+7149e70fc000-7149e70fd000 r--p 0001f000 103:05 95165032                  /usr/lib/x86_64-linux-gnu/libidn2.so.0.4.0
+7149e70fd000-7149e70fe000 rw-p 00020000 103:05 95165032                  /usr/lib/x86_64-linux-gnu/libidn2.so.0.4.0
+7149e70fe000-7149e7100000 r--p 00000000 103:05 95165018                  /usr/lib/x86_64-linux-gnu/libkeyutils.so.1.10
+7149e7100000-7149e7102000 r-xp 00002000 103:05 95165018                  /usr/lib/x86_64-linux-gnu/libkeyutils.so.1.10
+7149e7102000-7149e7103000 r--p 00004000 103:05 95165018                  /usr/lib/x86_64-linux-gnu/libkeyutils.so.1.10
+7149e7103000-7149e7104000 r--p 00004000 103:05 95165018                  /usr/lib/x86_64-linux-gnu/libkeyutils.so.1.10
+7149e7104000-7149e7105000 rw-p 00005000 103:05 95165018                  /usr/lib/x86_64-linux-gnu/libkeyutils.so.1.10
+7149e7105000-7149e7107000 r--p 00000000 103:05 95165016                  /usr/lib/x86_64-linux-gnu/libcom_err.so.2.1
+7149e7107000-7149e7108000 r-xp 00002000 103:05 95165016                  /usr/lib/x86_64-linux-gnu/libcom_err.so.2.1
+7149e7108000-7149e7109000 r--p 00003000 103:05 95165016                  /usr/lib/x86_64-linux-gnu/libcom_err.so.2.1
+7149e7109000-7149e710a000 r--p 00003000 103:05 95165016                  /usr/lib/x86_64-linux-gnu/libcom_err.so.2.1
+7149e710a000-7149e710b000 rw-p 00004000 103:05 95165016                  /usr/lib/x86_64-linux-gnu/libcom_err.so.2.1
+7149e710b000-7149e710c000 r--p 00000000 00:45 8236                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/kerberos.so
+7149e710c000-7149e7110000 r-xp 00001000 00:45 8236                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/kerberos.so
+7149e7110000-7149e7112000 r--p 00005000 00:45 8236                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/kerberos.so
+7149e7112000-7149e7113000 r--p 00006000 00:45 8236                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/kerberos.so
+7149e7113000-7149e7114000 rw-p 00007000 00:45 8236                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/kerberos.so
+7149e7114000-7149e7115000 r--p 00000000 00:45 7353379                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/secur32.so
+7149e7115000-7149e711a000 r-xp 00001000 00:45 7353379                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/secur32.so
+7149e711a000-7149e711d000 r--p 00006000 00:45 7353379                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/secur32.so
+7149e711d000-7149e711e000 r--p 00008000 00:45 7353379                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/secur32.so
+7149e711e000-7149e711f000 rw-p 00009000 00:45 7353379                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/secur32.so
+7149e711f000-7149e712f000 rw-p 00000000 00:00 0 
+7149e712f000-7149e713f000 rw-s 00000000 00:34 5                          /dev/shm/wine-450bc57-fsync
+7149e713f000-7149e719d000 r--s 00000000 103:05 67637956                  /var/cache/fontconfig/2300eef321c393bfd76478a5c0e95b23-le64.cache-9
+7149e719d000-7149e7221000 r--s 00000000 103:05 67637943                  /var/cache/fontconfig/0bd3dc0958fa2205aaaa8ebb13e2872b-le64.cache-9
+7149e7221000-7149e7261000 r--s 00000000 103:05 69300574                  /home/sarah/.cache/fontconfig/8c595cce8c86d898f644a36c512251ff-le64.cache-12
+7149e7261000-7149e7262000 rw-s 00000000 00:01 29272                      /memfd:lp_dma_buf (deleted)
+7149e7262000-7149e7264000 r--p 00000000 00:45 7347041                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/share/wine/fonts/vgasys.fon
+7149e7264000-7149e7265000 r--p 00000000 00:45 7353364                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/dnsapi.so
+7149e7265000-7149e7266000 r-xp 00001000 00:45 7353364                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/dnsapi.so
+7149e7266000-7149e7267000 r--p 00002000 00:45 7353364                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/dnsapi.so
+7149e7267000-7149e7268000 r--p 00002000 00:45 7353364                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/dnsapi.so
+7149e7268000-7149e7269000 rw-p 00003000 00:45 7353364                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/dnsapi.so
+7149e7269000-7149e7277000 r--s 00000000 103:05 67633650                  /var/cache/fontconfig/a4e60e8d1e10d2fdff3fe3037a1845fb-le64.cache-9
+7149e7277000-7149e727a000 r--s 00000000 103:05 67636613                  /var/cache/fontconfig/99e8ed0e538f840c565b6ed5dad60d56-le64.cache-9
+7149e727a000-7149e727f000 r--s 00000000 103:05 67639105                  /var/cache/fontconfig/c57959a16110560c8d0fcea73374aeeb-le64.cache-9
+7149e727f000-7149e7287000 r--s 00000000 103:05 67637912                  /var/cache/fontconfig/3047814df9a2f067bd2d96a2b9c36e5a-le64.cache-9
+7149e7287000-7149e729f000 r--s 00000000 103:05 67637903                  /var/cache/fontconfig/618c72fff80b36cd78c680959a9b3971-le64.cache-9
+7149e729f000-7149e72b6000 r--s 00000000 103:05 67637811                  /var/cache/fontconfig/d52a8644073d54c13679302ca1180695-le64.cache-9
+7149e72b6000-7149e72bc000 r--s 00000000 103:05 67634468                  /var/cache/fontconfig/d589a48862398ed80a3d6066f4f56f4c-le64.cache-9
+7149e72bc000-7149e72cc000 r--s 00000000 103:05 67637724                  /var/cache/fontconfig/6cc790b63b123a6a96ee260fcdad32a9-le64.cache-9
+7149e72cc000-7149e72d6000 r--s 00000000 103:05 67636569                  /var/cache/fontconfig/bb9ef35e7661cc55c3d6e0d2d8cc2051-le64.cache-9
+7149e72d6000-7149e72e7000 r--s 00000000 103:05 67633631                  /var/cache/fontconfig/9b89f8e3dae116d678bbf48e5f21f69b-le64.cache-9
+7149e72e7000-7149e72eb000 r--p 00000000 103:05 95158503                  /usr/lib/x86_64-linux-gnu/libexpat.so.1.11.2
+7149e72eb000-7149e730a000 r-xp 00004000 103:05 95158503                  /usr/lib/x86_64-linux-gnu/libexpat.so.1.11.2
+7149e730a000-7149e7312000 r--p 00023000 103:05 95158503                  /usr/lib/x86_64-linux-gnu/libexpat.so.1.11.2
+7149e7312000-7149e7314000 r--p 0002b000 103:05 95158503                  /usr/lib/x86_64-linux-gnu/libexpat.so.1.11.2
+7149e7314000-7149e7315000 rw-p 0002d000 103:05 95158503                  /usr/lib/x86_64-linux-gnu/libexpat.so.1.11.2
+7149e7315000-7149e731d000 r--p 00000000 103:05 95158772                  /usr/lib/x86_64-linux-gnu/libfontconfig.so.1.16.1
+7149e731d000-7149e734e000 r-xp 00008000 103:05 95158772                  /usr/lib/x86_64-linux-gnu/libfontconfig.so.1.16.1
+7149e734e000-7149e7365000 r--p 00039000 103:05 95158772                  /usr/lib/x86_64-linux-gnu/libfontconfig.so.1.16.1
+7149e7365000-7149e7367000 r--p 00050000 103:05 95158772                  /usr/lib/x86_64-linux-gnu/libfontconfig.so.1.16.1
+7149e7367000-7149e7368000 rw-p 00052000 103:05 95158772                  /usr/lib/x86_64-linux-gnu/libfontconfig.so.1.16.1
+7149e7368000-7149e736b000 r--p 00000000 103:05 95158786                  /usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0
+7149e736b000-7149e73e7000 r-xp 00003000 103:05 95158786                  /usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0
+7149e73e7000-7149e7412000 r--p 0007f000 103:05 95158786                  /usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0
+7149e7412000-7149e7413000 r--p 000a9000 103:05 95158786                  /usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0
+7149e7413000-7149e7414000 rw-p 000aa000 103:05 95158786                  /usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0
+7149e7414000-7149e7417000 r--p 00000000 103:05 95158979                  /usr/lib/x86_64-linux-gnu/libgraphite2.so.3.2.1
+7149e7417000-7149e7434000 r-xp 00003000 103:05 95158979                  /usr/lib/x86_64-linux-gnu/libgraphite2.so.3.2.1
+7149e7434000-7149e7437000 r--p 00020000 103:05 95158979                  /usr/lib/x86_64-linux-gnu/libgraphite2.so.3.2.1
+7149e7437000-7149e7439000 r--p 00022000 103:05 95158979                  /usr/lib/x86_64-linux-gnu/libgraphite2.so.3.2.1
+7149e7439000-7149e743a000 rw-p 00024000 103:05 95158979                  /usr/lib/x86_64-linux-gnu/libgraphite2.so.3.2.1
+7149e743a000-7149e7459000 r--p 00000000 103:05 95164270                  /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.8800.0
+7149e7459000-7149e74ff000 r-xp 0001f000 103:05 95164270                  /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.8800.0
+7149e74ff000-7149e758f000 r--p 000c5000 103:05 95164270                  /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.8800.0
+7149e758f000-7149e7590000 r--p 00155000 103:05 95164270                  /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.8800.0
+7149e7590000-7149e7591000 rw-p 00156000 103:05 95164270                  /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.8800.0
+7149e7591000-7149e7592000 rw-p 00000000 00:00 0 
+7149e7592000-7149e759e000 r--p 00000000 103:05 95158981                  /usr/lib/x86_64-linux-gnu/libharfbuzz.so.0.61232.0
+7149e759e000-7149e768a000 r-xp 0000c000 103:05 95158981                  /usr/lib/x86_64-linux-gnu/libharfbuzz.so.0.61232.0
+7149e768a000-7149e76bb000 r--p 000f8000 103:05 95158981                  /usr/lib/x86_64-linux-gnu/libharfbuzz.so.0.61232.0
+7149e76bb000-7149e76bc000 r--p 00128000 103:05 95158981                  /usr/lib/x86_64-linux-gnu/libharfbuzz.so.0.61232.0
+7149e76bc000-7149e76bd000 rw-p 00129000 103:05 95158981                  /usr/lib/x86_64-linux-gnu/libharfbuzz.so.0.61232.0
+7149e76bd000-7149e76be000 r--p 00000000 103:05 95159812                  /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1.2.0
+7149e76be000-7149e76bf000 r-xp 00001000 103:05 95159812                  /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1.2.0
+7149e76bf000-7149e76de000 r--p 00002000 103:05 95159812                  /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1.2.0
+7149e76de000-7149e76df000 r--p 00021000 103:05 95159812                  /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1.2.0
+7149e76df000-7149e76e0000 rw-p 00022000 103:05 95159812                  /usr/lib/x86_64-linux-gnu/libbrotlicommon.so.1.2.0
+7149e76e0000-7149e76ed000 r--p 00000000 103:05 95158541                  /usr/lib/x86_64-linux-gnu/libfreetype.so.6.20.5
+7149e76ed000-7149e7784000 r-xp 0000d000 103:05 95158541                  /usr/lib/x86_64-linux-gnu/libfreetype.so.6.20.5
+7149e7784000-7149e77ac000 r--p 000a4000 103:05 95158541                  /usr/lib/x86_64-linux-gnu/libfreetype.so.6.20.5
+7149e77ac000-7149e77b4000 r--p 000cc000 103:05 95158541                  /usr/lib/x86_64-linux-gnu/libfreetype.so.6.20.5
+7149e77b4000-7149e77b5000 rw-p 000d4000 103:05 95158541                  /usr/lib/x86_64-linux-gnu/libfreetype.so.6.20.5
+7149e77b5000-7149e77bf000 r--p 00000000 00:45 996                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winevulkan.so
+7149e77bf000-7149e7858000 r-xp 0000a000 00:45 996                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winevulkan.so
+7149e7858000-7149e787e000 r--p 000a3000 00:45 996                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winevulkan.so
+7149e787e000-7149e7882000 r--p 000c8000 00:45 996                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winevulkan.so
+7149e7882000-7149e7883000 rw-p 000cc000 00:45 996                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/winevulkan.so
+7149e7883000-7149e7895000 r--p 00000000 103:05 95160171                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7149e7895000-7149e7935000 r-xp 00012000 103:05 95160171                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7149e7935000-7149e79a7000 r--p 000b2000 103:05 95160171                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7149e79a7000-7149e79a8000 r--p 00123000 103:05 95160171                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7149e79a8000-7149e79a9000 rw-p 00124000 103:05 95160171                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7149e79a9000-7149e79d8000 r--p 00000000 00:45 8115                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/win32u.so
+7149e79d8000-7149e7b17000 r-xp 0002f000 00:45 8115                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/win32u.so
+7149e7b17000-7149e7b78000 r--p 0016e000 00:45 8115                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/win32u.so
+7149e7b78000-7149e7b82000 r--p 001cf000 00:45 8115                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/win32u.so
+7149e7b82000-7149e7b90000 rw-p 001d9000 00:45 8115                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/win32u.so
+7149e7b90000-7149e7e00000 rw-p 00000000 00:00 0 
+7149e7e00000-7149e8377000 r--p 00000000 103:05 95159277                  /usr/lib/locale/locale-archive
+7149e8377000-7149e837a000 r--s 00000000 103:05 67637897                  /var/cache/fontconfig/a0107c79d978dfcc5e42cb1335b71036-le64.cache-9
+7149e837a000-7149e8399000 r--s 00000000 103:05 67638798                  /var/cache/fontconfig/e13b20fdb08344e0e664864cc2ede53d-le64.cache-9
+7149e8399000-7149e839a000 r--p 00000000 103:05 95159953                  /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.2.0
+7149e839a000-7149e83a3000 r-xp 00001000 103:05 95159953                  /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.2.0
+7149e83a3000-7149e83a6000 r--p 0000a000 103:05 95159953                  /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.2.0
+7149e83a6000-7149e83a7000 r--p 0000c000 103:05 95159953                  /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.2.0
+7149e83a7000-7149e83a8000 rw-p 0000d000 103:05 95159953                  /usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.2.0
+7149e83a8000-7149e83ad000 r--p 00000000 103:05 95164694                  /usr/lib/x86_64-linux-gnu/libpng16.so.16.57.0
+7149e83ad000-7149e83d7000 r-xp 00005000 103:05 95164694                  /usr/lib/x86_64-linux-gnu/libpng16.so.16.57.0
+7149e83d7000-7149e83e0000 r--p 0002f000 103:05 95164694                  /usr/lib/x86_64-linux-gnu/libpng16.so.16.57.0
+7149e83e0000-7149e83e1000 r--p 00037000 103:05 95164694                  /usr/lib/x86_64-linux-gnu/libpng16.so.16.57.0
+7149e83e1000-7149e83e2000 rw-p 00038000 103:05 95164694                  /usr/lib/x86_64-linux-gnu/libpng16.so.16.57.0
+7149e83e2000-7149e83e4000 r--p 00000000 103:05 95158849                  /usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4
+7149e83e4000-7149e83f3000 r-xp 00002000 103:05 95158849                  /usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4
+7149e83f3000-7149e83f5000 r--p 00011000 103:05 95158849                  /usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4
+7149e83f5000-7149e83f6000 r--p 00012000 103:05 95158849                  /usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4
+7149e83f6000-7149e83f7000 rw-p 00013000 103:05 95158849                  /usr/lib/x86_64-linux-gnu/libbz2.so.1.0.4
+7149e83f7000-7149e83fa000 r--p 00000000 103:05 95159976                  /usr/lib/x86_64-linux-gnu/libz.so.1.3.1
+7149e83fa000-7149e840d000 r-xp 00003000 103:05 95159976                  /usr/lib/x86_64-linux-gnu/libz.so.1.3.1
+7149e840d000-7149e8413000 r--p 00016000 103:05 95159976                  /usr/lib/x86_64-linux-gnu/libz.so.1.3.1
+7149e8413000-7149e8414000 r--p 0001c000 103:05 95159976                  /usr/lib/x86_64-linux-gnu/libz.so.1.3.1
+7149e8414000-7149e8415000 rw-p 0001d000 103:05 95159976                  /usr/lib/x86_64-linux-gnu/libz.so.1.3.1
+7149e8415000-7149e8515000 rw-p 00000000 00:00 0 
+7149e8515000-7149e8521000 r--p 00000000 00:45 1762                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ntdll.so
+7149e8521000-7149e8595000 r-xp 0000c000 00:45 1762                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ntdll.so
+7149e8595000-7149e85b8000 r--p 00080000 00:45 1762                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ntdll.so
+7149e85b8000-7149e85ba000 r--p 000a2000 00:45 1762                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ntdll.so
+7149e85ba000-7149e85bc000 rw-p 000a4000 00:45 1762                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ntdll.so
+7149e85bc000-7149e8600000 rw-p 00000000 00:00 0 
+7149e8600000-7149e8628000 r--p 00000000 103:05 95160165                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7149e8628000-7149e87c0000 r-xp 00028000 103:05 95160165                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7149e87c0000-7149e880e000 r--p 001c0000 103:05 95160165                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7149e880e000-7149e8812000 r--p 0020e000 103:05 95160165                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7149e8812000-7149e8814000 rw-p 00212000 103:05 95160165                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7149e8814000-7149e8821000 rw-p 00000000 00:00 0 
+7149e8821000-7149e8823000 r--s 00000000 103:05 67637951                  /var/cache/fontconfig/60495f9738a6f38c2f3f93e3ff28e478-le64.cache-9
+7149e8823000-7149e8826000 r--s 00000000 103:05 67637798                  /var/cache/fontconfig/c7ddd67d65d940f1c07452067469d45b-le64.cache-9
+7149e8826000-7149e882a000 r--p 00000000 103:05 15730453                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.125.0
+7149e882a000-7149e8831000 r-xp 00004000 103:05 15730453                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.125.0
+7149e8831000-7149e8833000 r--p 0000b000 103:05 15730453                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.125.0
+7149e8833000-7149e8834000 r--p 0000c000 103:05 15730453                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.125.0
+7149e8834000-7149e8835000 rw-p 0000d000 103:05 15730453                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.125.0
+7149e8835000-7149e883a000 r--p 00000000 103:05 15730448                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.125.0
+7149e883a000-7149e8848000 r-xp 00005000 103:05 15730448                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.125.0
+7149e8848000-7149e884c000 r--p 00013000 103:05 15730448                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.125.0
+7149e884c000-7149e884d000 r--p 00017000 103:05 15730448                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.125.0
+7149e884d000-7149e884e000 rw-p 00018000 103:05 15730448                  /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.125.0
+7149e884e000-7149e884f000 rw-s 00000000 00:01 3294                       /memfd:lp_dma_buf (deleted)
+7149e884f000-7149e8850000 r--s 00000000 103:05 67636611                  /var/cache/fontconfig/da43223dd54fb3bb4243ae19d4b583b2-le64.cache-9
+7149e8850000-7149e8852000 r--s 00000000 103:05 67636557                  /var/cache/fontconfig/da82082e1ef13c4097208324d67c180c-le64.cache-9
+7149e8852000-7149e8856000 r--s 00000000 103:05 67636555                  /var/cache/fontconfig/4d6aee6d44eccb37054d3216e945f618-le64.cache-9
+7149e8856000-7149e885a000 r--s 00000000 103:05 67639104                  /var/cache/fontconfig/7ef2298fde41cc6eeb7af42e48b7d293-le64.cache-9
+7149e885a000-7149e887f000 r--s 00000000 103:05 67638782                  /var/cache/fontconfig/467c019e582ee353435ea5c21d137ef6-le64.cache-9
+7149e887f000-7149e8883000 r--p 00000000 103:05 95160868                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7149e8883000-7149e88a7000 r-xp 00004000 103:05 95160868                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7149e88a7000-7149e88ab000 r--p 00028000 103:05 95160868                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7149e88ab000-7149e88ac000 r--p 0002c000 103:05 95160868                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7149e88ac000-7149e88ad000 rw-p 0002d000 103:05 95160868                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7149e88ad000-7149e88b0000 rw-p 00000000 00:00 0 
+7149e88b0000-7149e88b1000 r--s 00000000 103:05 67637805                  /var/cache/fontconfig/3f7329c5293ffd510edef78f73874cfd-le64.cache-9
+7149e88b1000-7149e88b2000 r--s 00000000 103:05 67638793                  /var/cache/fontconfig/e0aa53bcfa504e64f87823c16bc01eb6-le64.cache-9
+7149e88b2000-7149e88b4000 r--p 00000000 103:05 95159729                  /usr/lib/x86_64-linux-gnu/libatomic.so.1.2.0
+7149e88b4000-7149e88b8000 r-xp 00002000 103:05 95159729                  /usr/lib/x86_64-linux-gnu/libatomic.so.1.2.0
+7149e88b8000-7149e88ba000 r--p 00006000 103:05 95159729                  /usr/lib/x86_64-linux-gnu/libatomic.so.1.2.0
+7149e88ba000-7149e88bb000 r--p 00007000 103:05 95159729                  /usr/lib/x86_64-linux-gnu/libatomic.so.1.2.0
+7149e88bb000-7149e88bc000 rw-p 00008000 103:05 95159729                  /usr/lib/x86_64-linux-gnu/libatomic.so.1.2.0
+7149e88bc000-7149e88bd000 rw-p 00000000 00:00 0 
+7149e88bd000-7149e88be000 r--p 00000000 00:45 7353359                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/amd_ags_x64.so
+7149e88be000-7149e88bf000 r-xp 00001000 00:45 7353359                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/amd_ags_x64.so
+7149e88bf000-7149e88c0000 r--p 00002000 00:45 7353359                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/amd_ags_x64.so
+7149e88c0000-7149e88c1000 r--p 00002000 00:45 7353359                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/amd_ags_x64.so
+7149e88c1000-7149e88c2000 rw-p 00003000 00:45 7353359                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/amd_ags_x64.so
+7149e88c2000-7149e88c3000 r--p 00000000 00:45 4161                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/bcrypt.so
+7149e88c3000-7149e88cd000 r-xp 00001000 00:45 4161                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/bcrypt.so
+7149e88cd000-7149e88d0000 r--p 0000b000 00:45 4161                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/bcrypt.so
+7149e88d0000-7149e88d1000 r--p 0000d000 00:45 4161                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/bcrypt.so
+7149e88d1000-7149e88d2000 rw-p 0000e000 00:45 4161                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/bcrypt.so
+7149e88d2000-7149e88d3000 r--p 00000000 00:45 7579261                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/crypt32.so
+7149e88d3000-7149e88d5000 r-xp 00001000 00:45 7579261                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/crypt32.so
+7149e88d5000-7149e88d6000 r--p 00003000 00:45 7579261                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/crypt32.so
+7149e88d6000-7149e88d7000 r--p 00003000 00:45 7579261                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/crypt32.so
+7149e88d7000-7149e88d8000 rw-p 00004000 00:45 7579261                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/crypt32.so
+7149e88d8000-7149e88d9000 r--p 00000000 00:45 7227                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ws2_32.so
+7149e88d9000-7149e88dc000 r-xp 00001000 00:45 7227                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ws2_32.so
+7149e88dc000-7149e88dd000 r--p 00004000 00:45 7227                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ws2_32.so
+7149e88dd000-7149e88de000 r--p 00004000 00:45 7227                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ws2_32.so
+7149e88de000-7149e88df000 rw-p 00005000 00:45 7227                       /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ws2_32.so
+7149e88df000-7149e88e0000 rw-p 00000000 00:00 0 
+7149e88e0000-7149e88e1000 rw-p 00000000 00:00 0 
+7149e88e1000-7149e88e3000 rw-p 00000000 00:00 0 
+7149e88e3000-7149e88e4000 r--p 00000000 103:05 95160159                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7149e88e4000-7149e8913000 r-xp 00001000 103:05 95160159                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7149e8913000-7149e891e000 r--p 00030000 103:05 95160159                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7149e891e000-7149e8920000 r--p 0003b000 103:05 95160159                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7149e8920000-7149e8921000 rw-p 0003d000 103:05 95160159                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7149e8921000-7149e8922000 rw-p 00000000 00:00 0 
+7149e8922000-7149e8923000 r--p 00000000 00:45 946                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64
+7149e8923000-7149e8924000 r-xp 00001000 00:45 946                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64
+7149e8924000-7149e8925000 r--p 00002000 00:45 946                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64
+7149e8925000-7149e8926000 r--p 00002000 00:45 946                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64
+7149e8926000-7149e8927000 rw-p 00003000 00:45 946                        /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64
+7149e8927000-7149e892b000 r--p 00000000 00:00 0                          [vvar]
+7149e892b000-7149e892d000 r--p 00000000 00:00 0                          [vvar_vclock]
+7149e892d000-7149e892f000 r-xp 00000000 00:00 0                          [vdso]
+7149e892f000-7149e8930000 r--p 00000000 00:45 7351997                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64-preloader
+7149e8930000-7149e8932000 r-xp 00001000 00:45 7351997                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64-preloader
+7149e8932000-7149e8933000 r--p 00003000 00:45 7351997                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64-preloader
+7149e8933000-7149e8935000 rw-p 00003000 00:45 7351997                    /mnt/fast/games/steamapps/common/Proton - Experimental/files/lib/wine/i386-unix/wine64-preloader
+7ffefa43d000-7ffefa45f000 rw-p 00000000 00:00 0                          [stack]
+7ffffe000000-7fffffbb0000 ---p 00000000 00:00 0 
+7fffffbb0000-7fffffff0000 rw-p 00000000 00:00 0 
+ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsyscall]

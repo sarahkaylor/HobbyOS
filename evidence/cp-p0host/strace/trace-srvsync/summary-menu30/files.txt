@@ -1,0 +1,5 @@
+# game-dir files touched: opens, bytes read (read/pread64/readv), calls
+archive/pc/content/audio_2_soundbanks.archive	size=8898625536	opens=0	bytes_read=786432	reads={'read': 3}	mmaps=0	mmap_bytes=0
+archive/pc/content/basegame_1_engine.archive	size=1733124096	opens=0	bytes_read=12361728	reads={'read': 96}	mmaps=0	mmap_bytes=0
+# TOTAL bytes read from game dir: 13148160
+# bytes read by Cyberpunk2077.exe: 13148160

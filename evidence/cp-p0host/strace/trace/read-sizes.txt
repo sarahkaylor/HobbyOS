@@ -1,0 +1,45 @@
+# game-dir read/pread64 calls up to 23:16:23.222684: 5809, bytes 1350000340
+# return-size histogram (bucket = next power of two >= bytes): bucket	calls	bytes
+1	2	0
+4	129	516
+16	32	352
+32	1	32
+64	117	7425
+128	75	6905
+256	138	33831
+512	261	78214
+1024	22	21390
+2048	41	71709
+4096	1016	4148736
+8192	569	4611702
+16384	293	4033136
+32768	764	22766848
+65536	510	30537322
+131072	721	86788771
+262144	626	143724884
+524288	238	90868242
+1048576	143	105312066
+2097152	65	94325664
+4194304	23	62116769
+8388608	7	44931443
+16777216	5	52305772
+33554432	3	81535204
+67108864	6	276197706
+134217728	1	73979392
+268435456	1	171596309
+# 15 largest single reads: bytes call path
+171596309	read	engine/shader_final.cache
+73979392	pread64	bin/x64/libxess.dll
+50273792	pread64	bin/x64/Cyberpunk2077.exe
+50273792	pread64	bin/x64/Cyberpunk2077.exe
+50273792	pread64	bin/x64/Cyberpunk2077.exe
+44143434	read	r6/cache/tweakdb.bin
+42432000	pread64	bin/x64/libxess_fg.dll
+38800896	pread64	bin/x64/amd_fidelityfx_framegeneration_dx12.dll
+27615232	pread64	bin/x64/amd_fidelityfx_upscaler_dx12.dll
+27099136	read	archive/pc/content/basegame_1_engine.archive
+26820836	read	archive/pc/content/basegame_3_nightcity.archive
+13754368	read	archive/pc/content/memoryresident_1_general.archive
+10047852	read	archive/pc/content/basegame_4_appearance.archive
+9501184	pread64	bin/x64/Cyberpunk2077.exe
+9501184	pread64	bin/x64/Cyberpunk2077.exe

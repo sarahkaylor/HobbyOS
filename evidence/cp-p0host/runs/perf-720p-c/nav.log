@@ -1,0 +1,16 @@
+[    0.0] nav start
+[   30.2] press-to-continue seen (n0021)
+[   34.2] press-to-continue seen (n0023)
+[   38.3] main menu seen (n0025)
+[   48.6] snapshot menu pid=76291 threads=92 fds=473 run_processes=16 run_threads=188
+[   49.7] mangohud log ON (menu)
+[   79.9] mangohud log OFF (menu)
+[   82.3] menu focus = LOAD GAME
+[   83.9] menu focus = SETTINGS
+[   90.0] settings tab (graphics_tab) benchmark-visible=False
+[   90.6] benchmark requested (b)
+[   93.2] benchmark confirm dialog answered (n0031)
+[  137.1] snapshot bench pid=76291 threads=93 fds=467 run_processes=16 run_threads=185
+[  181.5] benchmark result benchmark_2026-11-14_22-42-42
+[  181.8] snapshot postbench pid=76291 threads=93 fds=469 run_processes=16 run_threads=185
+[  182.7] nav done

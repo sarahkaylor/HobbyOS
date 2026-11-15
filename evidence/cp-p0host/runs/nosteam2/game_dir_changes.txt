@@ -1,0 +1,4 @@
+/mnt/fast/games/steamapps/common/Proton - Experimental/__pycache__
+/mnt/fast/games/steamapps
+/mnt/fast/games/steamapps/appmanifest_1091500.acf
+/mnt/fast/games/steamapps/workshop
