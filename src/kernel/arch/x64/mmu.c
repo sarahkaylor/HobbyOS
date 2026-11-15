@@ -5,6 +5,7 @@
 #include "frame.h"
 #include "vm.h"
 #include "display_mode.h" /* DISPLAY_STRIDE_BYTES/HEIGHT: full fb size (GB-065) */
+#include "kmem.h"
 
 extern uint32_t get_cpuid(void);
 
@@ -25,6 +26,21 @@ uint64_t cpu_pd7[512] __attribute__((aligned(4096)));
    v2 process can never see whatever v1 mapping the CPU last installed
    (design sections 1.5/7.2). */
 static uint64_t pd1_kernel[512] __attribute__((aligned(4096)));
+
+/* P1 / AD-3 (docs/cp-address-space.md section 3.2): the kernel half every
+   root shares.  PML4[256] -> dmap_pdpt is the direct map (DMAP_BASE + pa);
+   its first eight entries reuse the identity PDs above, so phys_to_virt()
+   of anything below 8 GiB has exactly the identity map's attributes (MTRR
+   behaviour included).  PML4[257] -> ioremap_pdpt is the uncached device
+   window area.  Both PML4 entries are written once at boot into every
+   cpu_pml4[c] and copied into every v2 root at creation; later growth only
+   adds entries below them (not-present -> present needs no TLB flush), so
+   no root ever needs revisiting. */
+static uint64_t dmap_pdpt[512] __attribute__((aligned(4096)));
+static uint64_t ioremap_pdpt[512] __attribute__((aligned(4096)));
+#define IOREMAP_PDS 64 /* 64 GiB of ioremap VA in 2 MiB pages */
+static uint64_t ioremap_pds[IOREMAP_PDS][512] __attribute__((aligned(4096)));
+#define X64_KTAB 0x03ULL /* P|RW, supervisor: kernel-half upper levels */
 
 static spinlock_t mmu_lock;
 
@@ -145,6 +161,104 @@ void mmu_init_tables(void) {
     uint64_t addr = USER_START + (uint64_t)i * 0x200000;
     pd1_kernel[i] = addr | 0x83;
   }
+
+  // P1 (S2): the direct map's 0-8 GiB reuses the identity PDs (pd1_kernel
+  // for 1-2 GiB: the plain identity, never the v1 overlay).
+  for (int i = 0; i < 512; i++) {
+    dmap_pdpt[i] = 0;
+    ioremap_pdpt[i] = 0;
+  }
+  dmap_pdpt[0] = kimg_pa(&cpu_pd0) | X64_KTAB;
+  dmap_pdpt[1] = kimg_pa(&pd1_kernel) | X64_KTAB;
+  dmap_pdpt[2] = kimg_pa(&cpu_pd2) | X64_KTAB;
+  dmap_pdpt[3] = kimg_pa(&cpu_pd3) | X64_KTAB;
+  dmap_pdpt[4] = kimg_pa(&cpu_pd4) | X64_KTAB;
+  dmap_pdpt[5] = kimg_pa(&cpu_pd5) | X64_KTAB;
+  dmap_pdpt[6] = kimg_pa(&cpu_pd6) | X64_KTAB;
+  dmap_pdpt[7] = kimg_pa(&cpu_pd7) | X64_KTAB;
+  for (int c = 0; c < MAX_CPUS; c++) {
+    cpu_pml4[c][DMAP_PML4_IDX] = kimg_pa(dmap_pdpt) | X64_KTAB;
+    cpu_pml4[c][IOREMAP_PML4_IDX] = kimg_pa(ioremap_pdpt) | X64_KTAB;
+  }
+}
+
+/* Lock-free returning-path row printer (the panic_* sink is for
+   non-returning paths only, GB-097; same pattern as frame.c). */
+extern void uart_putc_dbg(char c);
+static void mmu_raw_puts(const char *s) {
+  while (s && *s) uart_putc_dbg(*s++);
+}
+static void mmu_raw_hex(uint64_t v) {
+  static const char hx[] = "0123456789abcdef";
+  mmu_raw_puts("0x");
+  for (int sh = 60; sh >= 0; sh -= 4) uart_putc_dbg(hx[(v >> sh) & 0xF]);
+}
+
+/* virt_to_phys() tripwire (kmem.h): a pointer that is neither direct-map
+   nor kernel image.  Bounded rows; returns the identity answer. */
+uint64_t kmem_bad_va(uint64_t va, void *caller) {
+  static volatile int rows;
+  if (rows < 16) {
+    rows++;
+    mmu_raw_puts("[KMEM-BADVA] virt_to_phys(");
+    mmu_raw_hex(va);
+    mmu_raw_puts(") caller=");
+    mmu_raw_hex((uint64_t)(uintptr_t)caller);
+    mmu_raw_puts("\n");
+  }
+  return va;
+}
+
+/* P1 (S4): the ioremap area.  Bump-allocated 2 MiB windows, PCD|PWT|PS
+   (0x9B, the attribute mmu_map_mmio_range always used), never re-pointed and
+   never unmapped, so a window is valid in every root forever.  A request
+   that lies inside an earlier window returns that window (ACPI tables and
+   BARs are re-probed). */
+#define IOREMAP_WIN_MAX 64
+static struct { uint64_t lo, hi, off; } ioremap_wins[IOREMAP_WIN_MAX];
+static int ioremap_nwins;
+static uint64_t ioremap_next; /* bytes used, 2 MiB multiple */
+
+volatile void *ioremap(uint64_t pa, uint64_t len) {
+  if (len == 0)
+    len = 1;
+  uint64_t lo = pa & ~0x1FFFFFULL;
+  uint64_t hi = (pa + len + 0x1FFFFFULL) & ~0x1FFFFFULL;
+  if (hi <= lo)
+    return 0;
+  uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
+  for (int i = 0; i < ioremap_nwins; i++) {
+    if (lo >= ioremap_wins[i].lo && hi <= ioremap_wins[i].hi) {
+      uint64_t va = IOREMAP_BASE + ioremap_wins[i].off + (pa - ioremap_wins[i].lo);
+      spinlock_release_irqrestore(&mmu_lock, flags);
+      return (volatile void *)(uintptr_t)va;
+    }
+  }
+  uint64_t n = (hi - lo) >> 21;
+  if (ioremap_next + n * 0x200000ULL > (uint64_t)IOREMAP_PDS << 30) {
+    spinlock_release_irqrestore(&mmu_lock, flags);
+    return 0;
+  }
+  uint64_t off = ioremap_next;
+  for (uint64_t i = 0; i < n; i++) {
+    uint64_t vo = off + i * 0x200000ULL;
+    uint32_t i3 = (uint32_t)(vo >> 30);
+    if (!(ioremap_pdpt[i3] & 1)) {
+      for (int k = 0; k < 512; k++)
+        ioremap_pds[i3][k] = 0;
+      ioremap_pdpt[i3] = kimg_pa(ioremap_pds[i3]) | X64_KTAB;
+    }
+    ioremap_pds[i3][(vo >> 21) & 0x1FF] = (lo + i * 0x200000ULL) | 0x9B;
+  }
+  ioremap_next += n * 0x200000ULL;
+  if (ioremap_nwins < IOREMAP_WIN_MAX) {
+    ioremap_wins[ioremap_nwins].lo = lo;
+    ioremap_wins[ioremap_nwins].hi = hi;
+    ioremap_wins[ioremap_nwins].off = off;
+    ioremap_nwins++;
+  }
+  spinlock_release_irqrestore(&mmu_lock, flags);
+  return (volatile void *)(uintptr_t)(IOREMAP_BASE + off + (pa - lo));
 }
 
 /**
@@ -182,6 +296,23 @@ void mmu_init(void) {
   extern void trap_init(void);
   trap_init();
   mmu_init_core();
+  /* P1 (S2): prove the direct map aliases the image's own physical bytes
+     (one write through each alias, read back through the other). */
+  {
+    static volatile uint64_t dmap_probe = 0x444d41502d4f4b31ULL;
+    volatile uint64_t *alias =
+        (volatile uint64_t *)phys_to_virt(kimg_pa((const void *)&dmap_probe));
+    int ok = (*alias == 0x444d41502d4f4b31ULL);
+    *alias = 0x5a5aa5a5c3c33c3cULL;
+    ok = ok && (dmap_probe == 0x5a5aa5a5c3c33c3cULL);
+    extern void uart_puts(const char *s);
+    extern void uart_print_hex(uint64_t v);
+    uart_puts("[DMAP] base=");
+    uart_print_hex(DMAP_BASE);
+    uart_puts(" ioremap=");
+    uart_print_hex(IOREMAP_BASE);
+    uart_puts(ok ? " alias=ok\n" : " alias=BAD\n");
+  }
 }
 
 /**
@@ -487,6 +618,9 @@ uint64_t vm_arch_root_alloc(struct addr_space *as) {
   pd[5] = ((uint64_t)&cpu_pd5) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
   pd[6] = ((uint64_t)&cpu_pd6) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
   pd[7] = ((uint64_t)&cpu_pd7) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  /* P1 (S2): the shared kernel half (direct map + ioremap area). */
+  p4[DMAP_PML4_IDX] = cpu_pml4[0][DMAP_PML4_IDX];
+  p4[IOREMAP_PML4_IDX] = cpu_pml4[0][IOREMAP_PML4_IDX];
   as->table_frames += 2;
   return pml4;
 }
