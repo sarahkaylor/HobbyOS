@@ -259,10 +259,13 @@ $(BROWSER_FONT): third_party/fonts/dejavu-fonts-ttf-2.37.zip third_party/fonts/d
 # here so arm, intel and host builds all see it.
 X11_INC = -Isrc/user/x11/include
 
-# Determine if the mode has changed and update the tracker file
+# Determine if the mode has changed and update the tracker file.  C1-thr: the
+# console trace knobs (FUTEX_TRACE / SIG_TRACE, below) ride the same stamp,
+# so toggling one rebuilds instead of linking objects of the other kind.
+MODE_STAMP := $(MODE)$(if $(FUTEX_TRACE),+futex-trace)$(if $(SIG_TRACE),+sig-trace)
 CURRENT_MODE := $(shell [ -f $(MODE_FILE) ] && cat $(MODE_FILE) || echo none)
-ifneq ($(CURRENT_MODE),$(MODE))
-$(shell mkdir -p $(OBJ_DIR) && echo $(MODE) > $(MODE_FILE))
+ifneq ($(CURRENT_MODE),$(MODE_STAMP))
+$(shell mkdir -p $(OBJ_DIR) && echo $(MODE_STAMP) > $(MODE_FILE))
 endif
 
 # Same tracker for the DESKTOP knob (icewm.md §4.5).
@@ -669,6 +672,23 @@ endif
 #     make RW_WAKEALL=1 ... disk.img
 ifneq ($(RW_WAKEALL),)
   CFLAGS += -DRW_WAKEALL=1
+endif
+# Diagnostic: print the first 48 futex operations ([FUTEX] ##n rows) and the
+# first 8 idle-CPU kicks ([IPI] rows) on the console.  Off by default: they are
+# emitted from inside the futex/wake syscalls of the program under test, so
+# they interleave with its own console output (docs/cp-thr.md §5).  The
+# futex flight-recorder ring and the hang dump are unaffected.
+#     make FUTEX_TRACE=1 ... disk.img
+ifneq ($(FUTEX_TRACE),)
+  CFLAGS += -DFUTEX_TRACE_CONSOLE=1
+endif
+# Diagnostic: the per-signal rows on the send / park-interrupt / frame-plant /
+# sigreturn path ([SIGIN], [SIG] send, [TGTK], [FWK], [SFP], [SIGD], [RT],
+# [TEXIT], ...).  Off by default: each is a synchronous UART record, and the
+# ~2 KB one signal printed WAS its delivery latency (src/include/sig_trace.h).
+#     make SIG_TRACE=1 ... disk.img
+ifneq ($(SIG_TRACE),)
+  CFLAGS += -DSIG_TRACE_CONSOLE=1
 endif
 
 # Target and objects

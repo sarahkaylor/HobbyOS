@@ -1573,6 +1573,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
      threads keep the old image (documented P1 divergence, as for v1). */
   if (grp->as) {
     vm_arch_restore_kernel();
+    process_vfork_release(grp); /* C1-thr: a vfork child gives the memory back */
     struct addr_space *old = grp->as;
     grp->as = 0;
     vm_as_teardown(old);

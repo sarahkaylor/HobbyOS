@@ -358,3 +358,5 @@ src/kernel/vm.c	I2P	d[i] = *(volatile unsigned char *)(va + (uint64_t)i);
 src/kernel/vm.c	P2I	kl_hex(&kf, (unsigned long)r->obj);
 src/kernel/vm.c	P2I	kl_hex(&kl, (unsigned long)(g ? (uint64_t)(uintptr_t)g->as : 0));
 src/kernel/vm.c	P2I	uart_print_hex((uint64_t)r->obj);
+# C1-thr: l_robust_death reads the dying thread's robust futex word, a USER VA (vm_touch first; CR3 is that thread's AS), exactly like l_futex_word.
+src/kernel/linux_compat_thr.c	I2P	uint32_t w = *(volatile uint32_t *)(uintptr_t)word_va;

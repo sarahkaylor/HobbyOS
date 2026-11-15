@@ -606,6 +606,29 @@ struct process {
    * semantics), exec zeroes it.  0 on ARM and for native processes.
    * Appended at the END so parallel lanes merge additively. */
   uint64_t gs_base;
+
+  /* --- C1-thr (docs/cp-thr.md): CLONE_VM|CLONE_VFORK ----------------- *
+   * glibc 2.31's posix_spawn is clone(CLONE_VM|CLONE_VFORK|SIGCHLD, stack)
+   * and vfork(2) is the same with the caller's stack.  The child is its own
+   * process (fd table, dispositions, mask copied as fork copies them) but
+   * runs in the PARENT's memory: `as` points at the parent group's AS while
+   * the child's own, empty AS waits in vfork_own_as.  exec (before it
+   * replaces the AS) and the exit/kill paths call process_vfork_release(),
+   * which hands the child its own AS back and wakes the parent.
+   *   vfork_own_as : child: its own AS while it borrows the parent's
+   *   vfork_parent : child: the suspended calling thread (pid), else 0
+   *   vfork_child  : parent thread: the child it waits for, 0 = released
+   *   vfork_ret    : parent thread: the child's pid, clone's return value
+   * Appended at the END so parallel lanes merge additively. */
+  struct addr_space *vfork_own_as;
+  int vfork_parent;
+  int vfork_child;
+  int vfork_ret;
+  /* C1-thr: the user PC after the `syscall` of the compat syscall this
+     thread entered last (linux_compat_dispatch).  A BLOCKED park whose saved
+     PC is two bytes before it was rewound for restart; the signal path uses
+     that to pick Linux's restart rule (docs/cp-thr.md §3). */
+  uint64_t sys_entry_pc;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
@@ -633,6 +656,10 @@ int current_pid_of_cpu(uint32_t cpu);
  * flipped a thread READY, so it is not left waiting for the 100 Hz tick.
  * Safe to call without proc_lock; no-op when every other CPU is busy. */
 void sched_wake_idle_cpu(void);
+/* C1-thr: reschedule-IPI the CPU running `pid` in user mode, if any (Linux's
+ * kick_process: a signal for a running thread is noticed now, not at its
+ * next tick). */
+void sched_kick_pid_cpu(int pid);
 
 // Number of free physical blocks (advisory; see program_loader.c's
 // boot-wave headroom reserve).
@@ -816,6 +843,21 @@ int process_set_tls(struct process *caller, uint64_t tls);
 // Returns child PID to parent, 0 to child.
 // tf: The trap frame containing the parent's CPU state.
 int process_fork(struct trap_frame *tf);
+
+/* C1-thr: CLONE_VM|CLONE_VFORK.  Like process_fork(), but the child borrows
+ * the caller's address space instead of a copy, and the calling thread's
+ * vfork_child is set before the child can run.  Returns the child pid or
+ * -1.  The caller (the compat clone) parks the calling thread until
+ * process_vfork_release() runs for the child. */
+int process_fork_vm(struct trap_frame *tf);
+
+/* C1-thr: end a CLONE_VFORK borrow.  Called with `child` = the group anchor
+ * that is about to exec (before its AS is torn down or replaced) or exit;
+ * a no-op for any process that is not a borrowing vfork child.  Gives the
+ * child its own AS back (`as` = vfork_own_as) and makes the suspended
+ * parent thread READY.  Takes proc_lock; the _locked form expects it held. */
+void process_vfork_release(struct process *child);
+void process_vfork_release_locked(struct process *child);
 
 // Perform a round-robin context switch.
 // tf: The trap frame of the interrupted process to be saved.

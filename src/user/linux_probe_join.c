@@ -19,7 +19,8 @@
  *      is already 0, so join must reap and return, never park.
  *   E  clone WITHOUT CLONE_CHILD_CLEARTID: the kernel must NOT clear the
  *      word after the child exits (only the explicit wake signals), which
- *      proves C's clear came from the flag and not from every exit.
+ *      proves C's clear came from the flag and not from every exit.  Issued
+ *      as a RAW clone(2): musl's clone() wrapper refuses CLONE_THREAD.
  *
  * A failure in C/D is the "lost wakeup on thread exit" shape: the joiner
  * sleeps forever because the exit path's clear+broadcast never reached it.
@@ -44,14 +45,19 @@
 
 static int fails;
 
+/* ONE write(2) per row.  The old fputs/vprintf/fputc triple was three
+   writes on an unbuffered stdout, and a kernel console line emitted between
+   them landed inside the row ("[LP] [IPI] ..." then "A park-first ..."), so
+   the gate's '^\[LP\]' grep lost the row. */
 static void row(const char *fmt, ...) {
+  char b[400], out[420];
   va_list ap;
   va_start(ap, fmt);
-  fputs("[LP] ", stdout);
-  vprintf(fmt, ap);
-  fputc('\n', stdout);
-  fflush(stdout);
+  int n = vsnprintf(b, sizeof b, fmt, ap);
   va_end(ap);
+  if (n < 0) return;
+  int m = snprintf(out, sizeof out, "[LP] %s\n", b);
+  if (m > 0) (void)!write(1, out, (size_t)(m < (int)sizeof out ? m : (int)sizeof out - 1));
 }
 
 static void msleep(int ms) {
@@ -86,11 +92,16 @@ static void case_a(void) {
   wake_count_ = -1;
   pthread_create(&t, NULL, setter, NULL);
   int r = fut_wait(&flag_, 0); /* park FIRST */
-  int w = __atomic_load_n(&wake_count_, __ATOMIC_ACQUIRE);
-  row("A park-first wait=%d wake=%d flag=%u", r, w, flag_);
-  if (r != 0 || w != 1 || flag_ != 1)
-    fails++;
+  uint32_t f = __atomic_load_n(&flag_, __ATOMIC_ACQUIRE);
+  /* The setter stores wake_count_ AFTER its futex(WAKE) returns, and the
+     woken waiter can run before that store: reading it here was the row's
+     own race (measured: wait=0 flag=1 wake=-1, with the kernel's WAKE record
+     saying woke=1).  The join orders the read after the store. */
   pthread_join(t, NULL);
+  int w = __atomic_load_n(&wake_count_, __ATOMIC_ACQUIRE);
+  row("A park-first wait=%d wake=%d flag=%u", r, w, f);
+  if (r != 0 || w != 1 || f != 1)
+    fails++;
 }
 
 static void case_b(void) {
@@ -133,6 +144,35 @@ static int child_fn(void *a) {
   syscall(SYS_exit, 0);
   return 0;
 }
+
+/* join_raw_clone(flags, stack, ptid, ctid, fn, arg): glibc clone.S's shape.
+   The child pops fn/arg off its new stack, calls fn(arg), exit(2)s. */
+long join_raw_clone(unsigned long flags, void *stack, volatile uint32_t *ptid,
+                    volatile uint32_t *ctid, int (*fn)(void *), void *arg);
+__asm__(".text\n"
+        ".globl join_raw_clone\n"
+        ".type join_raw_clone,@function\n"
+        "join_raw_clone:\n"
+        "  and $-16, %rsi\n"
+        "  sub $16, %rsi\n"
+        "  mov %r9, 8(%rsi)\n"
+        "  mov %r8, 0(%rsi)\n"
+        "  mov %rcx, %r10\n"
+        "  xor %r8d, %r8d\n"
+        "  mov $56, %eax\n"
+        "  syscall\n"
+        "  test %rax, %rax\n"
+        "  jnz 1f\n"
+        "  xor %ebp, %ebp\n"
+        "  pop %r9\n"
+        "  pop %rdi\n"
+        "  call *%r9\n"
+        "  mov %eax, %edi\n"
+        "  mov $60, %eax\n"
+        "  syscall\n"
+        "  hlt\n"
+        "1: ret\n"
+        ".size join_raw_clone, .-join_raw_clone\n");
 
 static void *new_stack(size_t *sz) {
   *sz = 256 * 1024;
@@ -182,18 +222,21 @@ static void case_e(void) {
   /* SETTID without CLEARTID: after the child exits the word must still name
      it.  No kernel clear means no kernel wake either; the explicit flag is
      the only signal, and it must arrive. */
-  uint32_t ctid = 0;
+  static volatile uint32_t ctid;
+  ctid = 0;
   volatile uint32_t go = 0;
   volatile int mark = 0;
   struct child_arg a = {&go, &mark};
   size_t sz;
   char *st = new_stack(&sz);
-  int pid = clone(child_fn, st + sz,
-                  CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
-                      CLONE_THREAD | CLONE_SYSVSEM | CLONE_CHILD_SETTID,
-                  &a, NULL, NULL, &ctid);
+  /* RAW clone(2): musl 1.2.5's clone() wrapper refuses CLONE_THREAD in
+     user space with EINVAL (measured on the reference kernel too: "E clone
+     failed errno=22" on Linux 7.0), so the wrapper never reached any kernel. */
+  long pid = join_raw_clone(CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
+                                CLONE_THREAD | CLONE_SYSVSEM | CLONE_CHILD_SETTID,
+                            st + sz, NULL, &ctid, child_fn, &a);
   if (pid < 0) {
-    row("E clone failed errno=%d", errno);
+    row("E clone failed errno=%ld", -pid);
     fails++;
     free(st);
     return;
@@ -201,12 +244,12 @@ static void case_e(void) {
   msleep(50);
   __atomic_store_n(&go, 1, __ATOMIC_RELEASE);
   msleep(250);
-  row("E nocleartid pid=%d ctid=%u mark=%d (report-only: raw clone arg ABI)",
-      pid, ctid, mark);
-  /* Not graded: musl's variadic clone() delivers the 7th argument
-     differently from glibc's, so this row is a report on the plumbing, not
-     on the kernel's CLEARTID contract (C and D are that contract). */
-  free(st);
+  int ok = mark == 1 && ctid == (uint32_t)pid;
+  row("E nocleartid pid=%ld ctid=%u mark=%d %s", pid, ctid, mark,
+      ok ? "ok" : "FAIL");
+  if (!ok)
+    fails++;
+  /* stack leaked on purpose: without CLEARTID nothing says it is free */
 }
 
 int main(void) {

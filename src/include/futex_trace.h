@@ -33,7 +33,16 @@
 
 struct process;
 
-#define FUTEX_TRACE_OPS 48  /* console rows printed per boot */
+/* Console rows printed per boot.  C1-thr: 0 unless the kernel is built with
+   `make FUTEX_TRACE=1` (-DFUTEX_TRACE_CONSOLE): the rows are emitted from the
+   futex syscall of the program under test and landed in the middle of its
+   own output (linux_probe_join row A, docs/cp-sys.md §9).  The ring below
+   and futex_trace_dump_locked() record every op either way. */
+#ifdef FUTEX_TRACE_CONSOLE
+#define FUTEX_TRACE_OPS 48
+#else
+#define FUTEX_TRACE_OPS 0
+#endif
 #define FUTEX_TRACE_RING 64 /* flight-recorder depth */
 
 /* Stable op codes: these strings are evidence, do not renumber. */

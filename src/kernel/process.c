@@ -1,4 +1,5 @@
 #include "process.h"
+#include "sig_trace.h"
 #include "vdisplay.h"
 #include "kline.h"
 #include "futex_trace.h"
@@ -405,6 +406,12 @@ static int proc_release_mem_locked(struct process *q) {
   q->as = 0;
   if (q->is_thread)
     as = 0;
+  if (q->vfork_own_as) {
+    /* C1-thr (defensive: teardown releases first): a still-borrowing vfork
+       child owns only its parked AS, never the parent's it points at. */
+    as = q->vfork_own_as;
+    q->vfork_own_as = 0;
+  }
   if (block < 0 && !as)
     return 0;
   /* L85: never free an address space another CPU still translates through.
@@ -421,6 +428,15 @@ static int proc_release_mem_locked(struct process *q) {
     int c = vm_arch_root_cpu(as->root_phys);
     if (c >= 0 && c != (int)get_cpuid())
       return 0;
+    /* C1-thr: a CLONE_VFORK child still running in this AS (its parent
+       group died under it) keeps it alive until it execs or exits. */
+    for (int i = 1; i < MAX_PROCESSES; i++) {
+      struct process *b = &proc_table[i];
+      if (b != q && b->vfork_own_as && b->as == as) {
+        q->as = as;
+        return 0;
+      }
+    }
   }
   q->phys_block_idx = -1;
   if (block >= 0)
@@ -881,6 +897,9 @@ static void group_teardown(struct process *grp, uint64_t code) {
      through it (the [FREERACE] at mmu.c:665). */
   grp->teardown_done = 1;
   grp->phys_block_idx = -1;
+  /* C1-thr: a CLONE_VFORK child that exits hands the parent its memory back
+     and lets the suspended parent thread run (Linux: mm_release at exit). */
+  process_vfork_release_locked(grp);
   spinlock_release_irqrestore(&proc_lock, flags);
 
   /* Close the group's descriptors once.  SEC-9 (security-plan.md #9):
@@ -1289,6 +1308,13 @@ static int process_create_internal_ver(int ver) {
   p->teardown_done = 0;
   p->thread_ret = 0;
   p->as = 0;
+  p->vfork_own_as = 0; /* C1-thr: no borrowed AS, no vfork link */
+  p->vfork_parent = 0;
+  p->vfork_child = 0;
+  p->vfork_ret = 0;
+  p->sys_entry_pc = 0;
+  p->sig_park_kind = 0; /* C1-thr: a recycled slot's park state never leaks */
+  p->sig_park_nr = 0;
   fd_cloexec_reset(p->fd_cloexec);
   p->echild_logged = 0; /* fresh PCB: the ECHILD diagnostic speaks once */
   /* P5 (D7/D3.1): fresh signal/env state — a recycled slot must never
@@ -2837,6 +2863,7 @@ void sched_wake_idle_cpu(void) {
       continue;
     if (current_pid_of_cpu(c) < 0) {
       resched_cpu(c);
+#ifdef FUTEX_TRACE_CONSOLE
       {
         static int ipi_rows;
         if (ipi_rows < 8) {
@@ -2853,9 +2880,33 @@ void sched_wake_idle_cpu(void) {
           kl_emit(&ki);
         }
       }
+#endif
       return;
     }
   }
+#endif
+}
+
+/* C1-thr: Linux's kick_process().  A signal for a thread that is RUNNING on
+   another CPU in user mode is only noticed at that CPU's next trap -- up to a
+   full 10 ms tick for a thread that makes no syscalls (a game's worker loop,
+   exactly what wineserver's SIGUSR1 suspend has to stop).  A reschedule IPI
+   makes it trap now; the 0x81 handler's schedule()/trap-exit path delivers.
+   No-op when the task is not on a CPU (a parked task is woken by the
+   park-interrupt path instead). */
+void sched_kick_pid_cpu(int pid) {
+#ifdef __x86_64__
+  if (!scheduler_started || pid <= 0)
+    return;
+  uint32_t self = get_cpuid();
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    if (c != self && current_pid_of_cpu(c) == pid) {
+      resched_cpu(c);
+      return;
+    }
+  }
+#else
+  (void)pid;
 #endif
 }
 
@@ -2890,6 +2941,7 @@ void process_kill_group_sig(struct process *p, int sig) {
      the AS to the slot-reuse/zombie paths, which free it only once
      process_still_running(i) is false. */
   p->teardown_done = 1;
+  process_vfork_release_locked(p); /* C1-thr: a killed vfork child too */
   {
     int block = p->phys_block_idx;
     p->phys_block_idx = -1;
@@ -3212,7 +3264,7 @@ int process_signal_directed(int pid, int sig, int directed) {
      errno or Mono's stale list. */
   {
     static int in_rows;
-    if (in_rows < 60) {
+    if (in_rows < SIGTR(60)) {
       in_rows++;
       struct kline kl;
       kl_init(&kl);
@@ -3274,6 +3326,7 @@ int process_signal_directed(int pid, int sig, int directed) {
    * bit, entered GC_suspend_handler_inner with GC_lookup_thread() == NULL and
    * died at VA=0x20; the collector waited for an ack that never came. */
   struct process *pender;
+  int kick_pid = 0; /* C1-thr: the member a process-directed signal woke */
   /* `directed` is tgkill/tkill (the caller named a tid).  A kill(2) whose
      pid happens to name a thread is directed too -- a tid selects one task. */
   int thread_directed = (task && task->is_thread) || (directed && task);
@@ -3348,7 +3401,7 @@ int process_signal_directed(int pid, int sig, int directed) {
        suspend that is never delivered leaves the suspended thread holding
        whatever locks it had.  Capped, because a spin on signals is noise. */
     static int sig_reports;
-    if (sig_reports < 400) {
+    if (sig_reports < SIGTR(400)) {
       sig_reports++;
       struct kline kl;
       kl_init(&kl);
@@ -3397,6 +3450,34 @@ int process_signal_directed(int pid, int sig, int directed) {
       if (pender != target)
         linux_compat_signal_interrupt(target);
     }
+    /* C1-thr: Linux complete_signal().  A PROCESS-directed signal that the
+       anchor (main thread) blocks must still wake a member that does not:
+       the anchor-only interrupt above left such a member parked until some
+       unrelated wake, so kill(pid, sig) to a group whose main thread blocks
+       sig (glibc's and Wine's normal shape: the main thread blocks, a
+       worker takes it) was never taken.  Wake the first live member whose
+       mask lets it through (parked: interrupt it; running: kick its CPU). */
+    if (pender == target && !thread_directed) {
+      extern int linux_compat_sig_member_wants(struct process *, int)
+          __attribute__((weak));
+      if (linux_compat_sig_member_wants &&
+          !linux_compat_sig_member_wants(target, sig)) {
+        for (int i = 1; i < MAX_PROCESSES; i++) {
+          struct process *m = &proc_table[i];
+          if (m == target || m->tgid != target->pid || !m->is_thread)
+            continue;
+          if (m->state == PROC_STATE_FREE || m->state == PROC_STATE_EXITED ||
+              m->state == PROC_STATE_THREAD_DONE)
+            continue;
+          if (!linux_compat_sig_member_wants(m, sig))
+            continue;
+          kick_pid = m->pid;
+          if (linux_compat_signal_interrupt)
+            linux_compat_signal_interrupt(m);
+          break;
+        }
+      }
+    }
     /* L41: a signal that lands on a PARKED thread while that thread has it
        BLOCKED cannot run its handler, and the thread will not park again
        until something else wakes it — so the sender waits for ever.
@@ -3437,8 +3518,10 @@ int process_signal_directed(int pid, int sig, int directed) {
      thread ran its handler ~150 ms after the kill, on base and cp-cpu alike,
      which turned T2's SA_RESTART check into a race against the sender's next
      wake-up.  No-op on a busy machine (no idle CPU to poke). */
-  if (pender->abi_flags & PROC_FLAG_LINUX_ABI)
+  if (pender->abi_flags & PROC_FLAG_LINUX_ABI) {
     sched_wake_idle_cpu();
+    sched_kick_pid_cpu(kick_pid > 0 ? kick_pid : pender->pid);
+  }
   return 0;
 }
 
@@ -3747,7 +3830,10 @@ void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
   uint64_t pend = p->sig_pending | p->sig_pending_dir;
   if (p != grp)
     pend |= grp->sig_pending;
-  if (p->sig_in_handler || pend == 0)
+  /* C1-thr: a Linux-ABI thread's handlers nest (its mask decides, see
+     linux_compat_signal_deliver); the native engine keeps D8.5's rule. */
+  if ((p->sig_in_handler && !(grp->abi_flags & PROC_FLAG_LINUX_ABI)) ||
+      pend == 0)
     return;
   /* A rewound syscall (l_park: poll/select/read) must NOT get the frame here:
      the frame would consume the pending signal and the restarted syscall
@@ -3768,7 +3854,7 @@ void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
   if (process_signal_deliver(grp, tf)) {
     if (was_restart) p->sig_park_kind = 0;
     static int sd_rows;
-    if (sd_rows < 24) {
+    if (sd_rows < SIGTR(24)) {
       sd_rows++;
       struct kline kl;
       kl_init(&kl);
@@ -4219,10 +4305,61 @@ static int process_wait_common(struct trap_frame *tf, int want_pid,
  * Returns:
  *   Child PID in the parent, 0 in the child, or -1 on failure.
  */
-int process_fork(struct trap_frame *tf) {
+/* C1-thr: mode 0 = fork(2) (copy the AS); 1 = CLONE_VM|CLONE_VFORK (the
+ * child borrows the caller's AS until exec/exit, see process.h); 2 =
+ * CLONE_VFORK without CLONE_VM (a copy, but the caller still waits). */
+static int process_fork_common(struct trap_frame *tf, int mode);
+
+int process_fork(struct trap_frame *tf) { return process_fork_common(tf, 0); }
+
+int process_fork_vm(struct trap_frame *tf) {
+  return process_fork_common(tf, 1);
+}
+
+int process_fork_vfork_copy(struct trap_frame *tf);
+int process_fork_vfork_copy(struct trap_frame *tf) {
+  return process_fork_common(tf, 2);
+}
+
+void process_vfork_release_locked(struct process *c) {
+  if (!c)
+    return;
+  if (c->vfork_own_as) {
+    /* The child stops translating through the parent's memory: from here
+       on `as` is its own (still empty) AS, which exec replaces or the
+       slot-reuse path frees. */
+    c->as = c->vfork_own_as;
+    c->vfork_own_as = 0;
+  }
+  int pp = c->vfork_parent;
+  c->vfork_parent = 0;
+  if (pp <= 0 || pp >= MAX_PROCESSES)
+    return;
+  struct process *par = &proc_table[pp];
+  if (par->vfork_child != c->pid)
+    return; /* the parent died, or already released */
+  par->vfork_child = 0;
+  if (par->state == PROC_STATE_BLOCKED) {
+    par->wake_ms = 0;
+    par->state = PROC_STATE_READY;
+    sched_wake_idle_cpu();
+  }
+}
+
+void process_vfork_release(struct process *c) {
+  if (!c || (!c->vfork_own_as && !c->vfork_parent))
+    return;
+  uint64_t f = spinlock_acquire_irqsave(&proc_lock);
+  process_vfork_release_locked(c);
+  spinlock_release_irqrestore(&proc_lock, f);
+}
+
+static int process_fork_common(struct trap_frame *tf, int mode) {
   struct process *parent = current_process();
   if (!parent)
     return -1;
+  if (mode == 1 && !process_group(parent)->as)
+    return -1; /* a v1 (32 MiB block) process has no AS to lend */
 
   /* P1 (OQ5, binding): the child is a single-threaded copy of the CALLER.
      A fork from a secondary thread copies the shared group block (identical
@@ -4253,7 +4390,13 @@ int process_fork(struct trap_frame *tf) {
        running thread cannot be reaped), and vm_as_clone_into itself works in
        short critical sections under vm_lock and tolerates a shrinking region
        list (it never holds vm_lock across the frame copies). */
-  if (group->as) {
+  if (mode == 1) {
+    /* C1-thr: CLONE_VM|CLONE_VFORK -- no copy.  The child runs in the
+       caller's memory (the caller is suspended until the child execs or
+       exits); its own fresh AS is parked for that moment. */
+    child->vfork_own_as = child->as;
+    child->as = group->as;
+  } else if (group->as) {
     /* P2.4 (S4, design 5.3/D10): v2 fork clones the group's address
        space into the child's fresh AS (process_create_v2's provisioning):
        resident private pages are copied frame-by-frame, memfd/MAP_SHARED
@@ -4382,6 +4525,13 @@ int process_fork(struct trap_frame *tf) {
   /* Last transition under proc_lock so the scheduler cannot pick the child up
    * before its fd references exist. */
   flags = spinlock_acquire_irqsave(&proc_lock);
+  if (mode != 0) {
+    /* C1-thr: link before the child can run, so an exit or exec that comes
+       before the caller parks still finds (and releases) it. */
+    child->vfork_parent = parent->pid;
+    parent->vfork_child = child->pid;
+    parent->vfork_ret = child->pid;
+  }
   child->state = PROC_STATE_READY;
   spinlock_release_irqrestore(&proc_lock, flags);
   /* L52: pthread_create's waiter blocks on a semaphore for this child's
@@ -6291,6 +6441,13 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   t->futex_uaddr = 0;
   t->clear_child_tid = 0;
   t->teardown_done = 0;
+  t->vfork_own_as = 0; /* C1-thr */
+  t->vfork_parent = 0;
+  t->vfork_child = 0;
+  t->vfork_ret = 0;
+  t->sys_entry_pc = 0;
+  t->sig_park_kind = 0; /* C1-thr: a recycled slot's park state never leaks */
+  t->sig_park_nr = 0;
   t->spawn_retval = -1;
   t->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
@@ -6434,7 +6591,10 @@ int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
   /* Linux clone(2) does not require the child stack to be 16-aligned: musl
      passes a stack with the start routine/argument pushed at -8/-16, giving an
      8-mod-16 rsp for the child.  Only range-check it (and touch the top page,
-     which holds those words). */
+     which holds those words).  C1-thr: stack 0 is legal Linux -- the child
+     starts on the caller's %rsp (copy_thread keeps the parent's sp). */
+  if (!stack)
+    stack = tf->lr;
   if (!stack)
     return -EINVAL;
   if (caller->as) {
@@ -6487,6 +6647,16 @@ int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
     *(volatile uint32_t *)ptid = (uint32_t)t->pid;
   if ((flags & CLONE_CHILD_SETTID) && ctid)
     *(volatile uint32_t *)ctid = (uint32_t)t->pid;
+  /* C1-thr: the new thread's signal mask is its creator's (Linux), never
+     the pid slot's previous occupant's.  Before READY. */
+  t->sig_suspended = 0;
+  t->sig_saved_mask = 0;
+  {
+    extern void linux_compat_sig_clone(struct process *, struct process *)
+        __attribute__((weak));
+    if (linux_compat_sig_clone && (caller->abi_flags & PROC_FLAG_LINUX_ABI))
+      linux_compat_sig_clone(caller, t);
+  }
   t->state = PROC_STATE_READY;
   return t->pid;
 }
@@ -6590,7 +6760,7 @@ void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
        to (base+offset) so an offline reader can tell glibc's start_thread
        from Mono's own exit trampoline without a symbol server. */
     static int texit_rows;
-    if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) && texit_rows < 96) {
+    if ((cur->abi_flags & PROC_FLAG_LINUX_ABI) && texit_rows < SIGTR(96)) {
       texit_rows++;
       struct kline kt;
       kl_init(&kt);
