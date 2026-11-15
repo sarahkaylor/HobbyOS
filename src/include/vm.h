@@ -23,6 +23,7 @@
  */
 
 #include <stdint.h>
+#include "kmem.h" /* P1: phys_to_virt()/virt_to_phys() for frame-backed state */
 
 #define USER_VA_BASE 0x1000000000ULL /* 64 GiB */
 #define USER_WINDOW_SIZE 0x800000000ULL /* 32 GiB */

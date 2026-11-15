@@ -13,6 +13,7 @@
 #include "errno.h"
 #include "fat16.h"
 #include "frame.h"
+#include "kmem.h"
 #include "fs.h"
 #include "kline.h"
 #include "lock.h"
@@ -55,7 +56,7 @@ static int dd_write(void *ctx, uint64_t sector, const void *buf, uint32_t n) {
 static void *dd_alloc(uint32_t n) {
   (void)n; /* always 4096 == FRAME_SIZE */
   uint64_t fr = frame_alloc();
-  return fr ? (void *)(uintptr_t)fr : 0;
+  return fr ? phys_to_virt(fr) : 0;
 }
 
 static uint32_t dd_now(void) {

@@ -10,6 +10,7 @@
 #include "timer.h"
 #include "frame.h"
 #include "vm.h"
+#include "kmem.h"
 
 
 extern struct process *process_get_pcb(int pid);
@@ -379,7 +380,7 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
   uart_puts("\n");
 
   // Clean D-cache and invalidate I-cache so the loaded program executes correctly
-  __builtin___clear_cache((char*)phys_base, (char*)phys_base + bytes_read);
+  __builtin___clear_cache((char*)phys_to_virt(phys_base), (char*)phys_to_virt(phys_base) + bytes_read);
   uart_puts("Cache cleared.\n");
 
   fat16_close(&f);
@@ -1152,7 +1153,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       /* dest is a physical address integer; &magicw is a stack VA == phys
          (kernel direct map), so the read lands in the local. */
       if (fat16_read_direct_pos(f.fat16.entry.start_cluster, fsize,
-                                (uint64_t)&magicw, 4, 0) == 4) {
+                                virt_to_phys(&magicw), 4, 0) == 4) {
         uint8_t *mb = (uint8_t *)&magicw; /* little-endian: bytes 0..3 = magic */
         is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
       }
@@ -1197,7 +1198,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
                                     lflags, &elf_info);
     if (vfs_rc == 1) {
       for (uint32_t i = 0; i < vfs_pages; i++)
-        frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
+        frame_free(virt_to_phys(vfs_img) + (uint64_t)i * FRAME_SIZE);
       vfs_img = 0;
     } else {
       fat16_close(&f);
@@ -1247,7 +1248,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
      * only FAT16 has.  Say so instead of trying an uninitialised struct file. */
     uart_puts("v2 loader: flat .bin images are FAT16-only (use an ELF on NFS)\n");
     for (uint32_t i = 0; i < vfs_pages; i++)
-      frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
+      frame_free(virt_to_phys(vfs_img) + (uint64_t)i * FRAME_SIZE);
     process_free(pid);
     return -ENOEXEC;
   } else if (v2_map_image(as, &f, fsize) != 0) {
@@ -1636,15 +1637,15 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   /* Zero image + bss [0, MAX_PROGRAM_SIZE) so the new program starts
      with clean bss (spawn gets a freshly-allocated region; exec reuses).
      The stack lives near the TOP of the 32MB region, untouched here. */
-  volatile uint8_t *zp = (volatile uint8_t *)base;
+  volatile uint8_t *zp = (volatile uint8_t *)phys_to_virt(base);
   for (uint32_t z = 0; z < MAX_PROGRAM_SIZE; z++)
     zp[z] = 0;
 
-  int n = fat16_read(&f, (void *)base, MAX_PROGRAM_SIZE);
+  int n = fat16_read(&f, phys_to_virt(base), MAX_PROGRAM_SIZE);
   fat16_close(&f);
   if (n <= 0)
     return -ENOENT;
-  __builtin___clear_cache((char *)base, (char *)base + n);
+  __builtin___clear_cache((char *)phys_to_virt(base), (char *)phys_to_virt(base) + n);
 
   int i;
   for (i = 0; new_name && new_name[i] && i < 31; i++)

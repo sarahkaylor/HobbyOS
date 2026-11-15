@@ -1,6 +1,7 @@
 #ifdef KERNEL_MODE_UNIT_TEST
 
 #include "unit_test.h"
+#include "kmem.h"
 #include "virtio_gpu.h"
 #include "display_mode.h"
 #include "gpu_abi.h" /* M1: /dev/gpu ABI pure helpers */
@@ -449,7 +450,7 @@ static void test_virtio_gpu_flush_smoke(void) {
 
   if (virtio_gpu_x64_active_mode() == 2) {
     uint32_t* fb = virtio_gpu_get_framebuffer();
-    volatile uint32_t* lfb = (volatile uint32_t*)(uint64_t)bga_framebuffer_phys;
+    volatile uint32_t* lfb = (volatile uint32_t*)phys_to_virt((uint64_t)bga_framebuffer_phys);
     uint32_t old_in = lfb[100 * DISPLAY_WIDTH + 200];
     uint32_t old_out = lfb[50 * DISPLAY_WIDTH + 50];
     fb[100 * DISPLAY_WIDTH + 200] = 0xFF123456;

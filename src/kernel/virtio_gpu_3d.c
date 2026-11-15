@@ -38,6 +38,7 @@
 #include "virtio_gpu.h"
 #include "errno.h"
 #include "lock.h"
+#include "kmem.h"
 
 extern void uart_puts(const char* s);
 extern void print_int(int val);
@@ -1070,7 +1071,7 @@ void virtio_gpu_3d_probe(void) {
   const int npages = (int)(sizeof(gpu3d_probe_buf) / 4096);
   uint64_t phys[8];
   for (int i = 0; i < npages; i++)
-    phys[i] = (uint64_t)(uintptr_t)(gpu3d_probe_buf + i * (4096 / 4));
+    phys[i] = kimg_pa(gpu3d_probe_buf + i * (4096 / 4));
   if (virtio_gpu_3d_res_attach(res, phys, (uint32_t)npages, sizeof(gpu3d_probe_buf)) != 0) {
     uart_puts("[VIRGL3D] RESULT FAIL step=attach\n");
     virtio_gpu_3d_res_unref(res);

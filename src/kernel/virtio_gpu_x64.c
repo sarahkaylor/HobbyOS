@@ -46,6 +46,7 @@
 #include "display_mode.h"
 #include "lock.h"
 #include "arch/cpu.h"
+#include "kmem.h"
 
 /* R6: mode constants live in display_mode.h (single shared definition). */
 #define GPU_SCREEN_W DISPLAY_WIDTH
@@ -254,7 +255,7 @@ static int bga_setup(void) {
 
 /* Row-wise copy of one clamped rect into the BGA linear framebuffer. */
 static void bga_present_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
-  volatile uint32_t* dst = (volatile uint32_t*)(uint64_t)bga_framebuffer_phys;
+  volatile uint32_t* dst = (volatile uint32_t*)phys_to_virt(bga_framebuffer_phys);
   for (int32_t row = 0; row < h; row++) {
     const uint32_t* s = framebuffer + (uint64_t)(y + row) * GPU_SCREEN_W + (uint64_t)x;
     volatile uint32_t* d = dst + (uint64_t)(y + row) * GPU_SCREEN_W + (uint64_t)x;
@@ -352,7 +353,7 @@ static uint16_t gpu_avail_next = 0;
 static uint16_t gpu_used_ack = 0;
 static uint32_t gpu_timeouts = 0;
 static int gpu_failed = 0;
-static uint64_t gpu_mmio_win = 0; /* 2MiB-aligned phys base mapped into VA */
+static uint64_t gpu_mmio_win = 0; /* BAR phys base mapped at gpu_mmio_base */
 
 /* DMA-stable request/response buffers for the control queue. */
 static struct virtio_gpu_resource_create_2d gpu_req_create;
@@ -385,45 +386,25 @@ static inline void gpu_cc_w64(uint32_t off, uint64_t v) {
 }
 
 /* --- MMIO window -----------------------------------------------------
- * The q35 modern virtio BARs are 64-bit windows far above the kernel's
- * 0-8GiB identity map (observed: BAR4 at 0xC000000000).  Remap a 2MiB/4MiB
- * VA window onto the BAR through the shared kernel PD7 (cpu_pd7[496..497],
- * 7.992-8.0GiB VA - dead PCI-hole space with 6GiB RAM), the same pattern
- * virtio_blk.c's NVMe path uses (cpu_pd7[480] + CR3 reload).  PD7 is
- * shared with every v2 address space, so syscall-context flushes (running
- * on a process CR3) reach it too. */
-#define GPU_MMIO_VA_BASE 0x1FE000000ULL
-#define GPU_MMIO_PD_IDX  ((GPU_MMIO_VA_BASE >> 21) & 0x1FF)
-
-extern uint64_t cpu_pd7[512];
+ * The q35 modern virtio BARs are 64-bit windows far above RAM (observed:
+ * BAR4 at 0xC000000000).  P1 (S4): mapped through the kernel's ioremap
+ * area (PML4[257], uncached, shared by every root).  It used to re-point the
+ * identity PD7[496..497] at VA 0x1FE000000, which hid the RAM at that
+ * physical address and needed the identity map in every root. */
+static volatile uint8_t *gpu_mmio_base;
 
 static int gpu_map_bar(uint64_t bar_phys, uint64_t size) {
-  uint64_t win = bar_phys & ~0x1FFFFFULL;
   uint64_t end = bar_phys + size;
   if (end <= bar_phys) return -1;
-  uint64_t need = ((end - win) + 0x1FFFFF) / 0x200000; /* 1..2 pages */
-  if (need == 0 || need > 2) return -1;
-
-  for (uint64_t i = 0; i < need; i++) {
-    uint64_t phys = (win + i * 0x200000) & 0xFFFFFFFFFFE00000ULL;
-    cpu_pd7[GPU_MMIO_PD_IDX + i] = phys | 0x9B; /* P|RW|PWT|PCD|PS */
-  }
-
-  /* Flush this CPU's TLB (init runs on the boot core before SMP). */
-  uint64_t cr3_val;
-  __asm__ volatile(
-      "mov %%cr3, %0\n"
-      "mov %0, %%cr3"
-      : "=r"(cr3_val)
-      :
-      : "memory");
-
-  gpu_mmio_win = win;
+  volatile void *va = ioremap(bar_phys, size);
+  if (!va) return -1;
+  gpu_mmio_base = (volatile uint8_t *)va;
+  gpu_mmio_win = bar_phys;
   return 0;
 }
 
 static inline volatile uint8_t* gpu_mmio_va(uint64_t phys) {
-  return (volatile uint8_t*)(GPU_MMIO_VA_BASE + (phys - gpu_mmio_win));
+  return gpu_mmio_base + (phys - gpu_mmio_win);
 }
 
 /* --- PCI capability walk --------------------------------------------- */
@@ -489,21 +470,21 @@ int virtio_gpu_x64_transact_ex(const void* req, uint32_t req_len,
   if (data_len && !data) return -1;
   if (!data) data_len = 0;
 
-  gpu_desc[0].addr = (uint64_t)req;
+  gpu_desc[0].addr = virt_to_phys(req);
   gpu_desc[0].len = req_len;
   gpu_desc[0].flags = VQ_DESC_F_NEXT;
   gpu_desc[0].next = 1;
 
   uint16_t last = 1;
   if (data_len) {
-    gpu_desc[1].addr = (uint64_t)data;
+    gpu_desc[1].addr = virt_to_phys(data);
     gpu_desc[1].len = data_len;
     gpu_desc[1].flags = VQ_DESC_F_NEXT;
     gpu_desc[1].next = 2;
     last = 2;
   }
 
-  gpu_desc[last].addr = (uint64_t)resp;
+  gpu_desc[last].addr = virt_to_phys(resp);
   gpu_desc[last].len = resp_cap;
   gpu_desc[last].flags = VQ_DESC_F_WRITE;
   gpu_desc[last].next = 0;
@@ -603,7 +584,7 @@ static int vgpu_resource_setup(void) {
 #endif
   if (r != 0) return -1;
 
-  gpu_req_mem.addr = (uint64_t)framebuffer;
+  gpu_req_mem.addr = kimg_pa(framebuffer);
   gpu_req_mem.length = sizeof(framebuffer);
   gpu_req_mem.padding = 0;
   gpu_req_attach.hdr.type = VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING;
@@ -743,9 +724,9 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   gpu_cc_w16(VPCI_CC_QUEUE_SIZE, qsz);
   gpu_cc_w16(VPCI_CC_QUEUE_MSIX_VEC, 0xFFFF); /* no MSI-X vector */
   gpu_qsize = qsz;
-  gpu_cc_w64(VPCI_CC_QUEUE_DESC, (uint64_t)gpu_desc);
-  gpu_cc_w64(VPCI_CC_QUEUE_DRIVER, (uint64_t)&gpu_avail);
-  gpu_cc_w64(VPCI_CC_QUEUE_DEVICE, (uint64_t)&gpu_used);
+  gpu_cc_w64(VPCI_CC_QUEUE_DESC, kimg_pa(gpu_desc));
+  gpu_cc_w64(VPCI_CC_QUEUE_DRIVER, kimg_pa(&gpu_avail));
+  gpu_cc_w64(VPCI_CC_QUEUE_DEVICE, kimg_pa(&gpu_used));
   gpu_cc_w16(VPCI_CC_QUEUE_ENABLE, 1);
   gpu_notify_off = gpu_cc_r16(VPCI_CC_QUEUE_NOTIFY_OFF);
 

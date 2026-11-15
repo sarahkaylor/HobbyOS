@@ -84,7 +84,7 @@ static void test_frame_alloc_zeroed(void) {
 
   uint64_t f = frame_alloc_zeroed();
   EXPECT_EQ((f != 0), 1);
-  volatile uint64_t *p = (volatile uint64_t *)f;
+  volatile uint64_t *p = (volatile uint64_t *)phys_to_virt(f);
   EXPECT_EQ((p[0] == 0), 1);
   EXPECT_EQ((p[FRAME_SIZE / 8 - 1] == 0), 1);
 
@@ -95,7 +95,7 @@ static void test_frame_alloc_zeroed(void) {
   frame_free(f);
   uint64_t g = frame_alloc_zeroed();
   EXPECT_EQ((g == f), 1);
-  volatile uint64_t *q = (volatile uint64_t *)g;
+  volatile uint64_t *q = (volatile uint64_t *)phys_to_virt(g);
   EXPECT_EQ((q[0] == 0), 1);
   EXPECT_EQ((q[FRAME_SIZE / 8 - 1] == 0), 1);
   frame_free(g);
@@ -202,8 +202,8 @@ static void test_frame_image_reserved(void) {
      walk up to the reserved region deterministically.  frame_init
      reserves the image as whole 32 MiB blocks, so the reserved extent
      starts at the image's block boundary. */
-  uint64_t img_lo = (uint64_t)(uintptr_t)_start;
-  uint64_t img_hi = (uint64_t)(uintptr_t)__stack_top;
+  uint64_t img_lo = kimg_pa(_start);
+  uint64_t img_hi = kimg_pa(__stack_top);
   uint64_t rsv_lo = img_lo & ~((uint64_t)FRAME_BLOCK_SIZE - 1);
 
   int used0 = frame_used_count();
@@ -305,10 +305,15 @@ static void test_frame_pool_is_ram_only(void) {
   EXPECT_EQ((hi <= 0x80000000ULL || lo >= 0x100000000ULL), 1);
   /* Every frame the allocator can hand out is below the 64-bit window. */
   EXPECT_EQ((hi <= 0x200000000ULL), 1);
-  /* The 2 MiB identity shadow of the NVMe (0x1FC000000) and virtio-gpu
-     (0x1FE000000) windows is reserved, so no frame can be the device. */
-  EXPECT_EQ(frame_is_alloced(0x1FC000000ULL), 1);
-  EXPECT_EQ(frame_is_alloced(0x1FE000000ULL), 1);
+  /* P1 (S4): the NVMe / virtio-gpu windows live in the ioremap area and no
+     longer shadow the RAM at 0x1FC000000-0x200000000, so there is no shadow
+     reservation to assert.  Every extent above ext1 must lie above 8 GiB
+     (RAM the firmware map reported, mapped by the direct map) and never in
+     the 32-bit PCI hole. */
+  for (int e = 2; frame_extent_bounds(e, &lo, &hi) == 0; e++) {
+    EXPECT_EQ((lo >= 0x200000000ULL && hi > lo), 1);
+    EXPECT_EQ((hi <= 0x80000000ULL || lo >= 0x100000000ULL), 1);
+  }
   /* The page that was the NVMe BAR is not in the pool at all. */
   EXPECT_EQ(frame_is_alloced(0x81000000ULL), 0);
 #endif

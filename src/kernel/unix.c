@@ -43,13 +43,14 @@ void unix_init(void) {
 #define UNIX_RING_FRAMES ((2 * K_UNIX_RING) / FRAME_SIZE)
 
 static uint8_t *unix_ring_alloc(void) {
-  return (uint8_t *)(uintptr_t)frame_alloc_contig(UNIX_RING_FRAMES);
+  uint64_t r = frame_alloc_contig(UNIX_RING_FRAMES);
+  return r ? (uint8_t *)phys_to_virt(r) : 0;
 }
 
 static void unix_ring_free(uint8_t *base) {
   if (!base) return;
   for (int i = 0; i < UNIX_RING_FRAMES; i++)
-    frame_free((uint64_t)(uintptr_t)base + (uint64_t)i * FRAME_SIZE);
+    frame_free(virt_to_phys(base) + (uint64_t)i * FRAME_SIZE);
 }
 
 static void usock_attach_rings(struct usock *u, uint8_t *base) {

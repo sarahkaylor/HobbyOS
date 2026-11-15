@@ -120,31 +120,31 @@ void mmu_init_tables(void) {
 
     // Link PML4[0] to PDPT
     // Present | Read/Write | User (0x07)
-    cpu_pml4[c][0] = ((uint64_t)&cpu_pdpt[c]) | 0x07;
+    cpu_pml4[c][0] = kimg_pa(&cpu_pdpt[c]) | 0x07;
 
     // Link PDPT[0] to PD0 (covers 0 - 1GB)
-    cpu_pdpt[c][0] = ((uint64_t)&cpu_pd0) | 0x07;
+    cpu_pdpt[c][0] = kimg_pa(&cpu_pd0) | 0x07;
 
     // Link PDPT[1] to PD1 (covers 1 - 2GB)
-    cpu_pdpt[c][1] = ((uint64_t)&cpu_pd1[c]) | 0x07;
+    cpu_pdpt[c][1] = kimg_pa(&cpu_pd1[c]) | 0x07;
 
     // Link PDPT[2] to PD2 (covers 2 - 3GB)
-    cpu_pdpt[c][2] = ((uint64_t)&cpu_pd2) | 0x07;
+    cpu_pdpt[c][2] = kimg_pa(&cpu_pd2) | 0x07;
 
     // Link PDPT[3] to PD3 (covers 3 - 4GB)
-    cpu_pdpt[c][3] = ((uint64_t)&cpu_pd3) | 0x07;
+    cpu_pdpt[c][3] = kimg_pa(&cpu_pd3) | 0x07;
 
     // Link PDPT[4] to PD4 (covers 4 - 5GB)
-    cpu_pdpt[c][4] = ((uint64_t)&cpu_pd4) | 0x07;
+    cpu_pdpt[c][4] = kimg_pa(&cpu_pd4) | 0x07;
 
     // Link PDPT[5] to PD5 (covers 5 - 6GB)
-    cpu_pdpt[c][5] = ((uint64_t)&cpu_pd5) | 0x07;
+    cpu_pdpt[c][5] = kimg_pa(&cpu_pd5) | 0x07;
 
     // Link PDPT[6] to PD6 (covers 6 - 7GB)
-    cpu_pdpt[c][6] = ((uint64_t)&cpu_pd6) | 0x07;
+    cpu_pdpt[c][6] = kimg_pa(&cpu_pd6) | 0x07;
 
     // Link PDPT[7] to PD7 (covers 7 - 8GB)
-    cpu_pdpt[c][7] = ((uint64_t)&cpu_pd7) | 0x07;
+    cpu_pdpt[c][7] = kimg_pa(&cpu_pd7) | 0x07;
 
     // Initialize PD1 with kernel/device permissions by default (1GB to 2GB)
     for (int i = 0; i < 512; i++) {
@@ -265,7 +265,7 @@ volatile void *ioremap(uint64_t pa, uint64_t len) {
  * Configures the current CPU's CR3 register to point to its specific PML4 table.
  */
 void mmu_init_core_with_id(uint32_t cpu) {
-  uint64_t pml4_phys = (uint64_t)&cpu_pml4[cpu];
+  uint64_t pml4_phys = kimg_pa(&cpu_pml4[cpu]);
 
   /* P2.2 (design section 1.5): EFER.NXE must be enabled for the v2 page
      tables' NX leaves (bit 63); idempotent per core (boot.s also sets it
@@ -396,119 +396,19 @@ void __clear_cache(void *begin, void *end) {
   (void)end;
 }
 
-#define DYNAMIC_PDPT_COUNT 4
-#define DYNAMIC_PD_COUNT 64
-
-static uint64_t dynamic_pdpts[DYNAMIC_PDPT_COUNT][512] __attribute__((aligned(4096)));
-static uint64_t dynamic_pds[DYNAMIC_PD_COUNT][512] __attribute__((aligned(4096)));
-
-static int next_pdpt_idx = 0;
-static int next_pd_idx = 0;
-
-void mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
-  uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
-
-  uint64_t start = phys_addr;
-  uint64_t end = phys_addr + size;
-
-  // Align end up to 2MB
-  if (end % 0x200000) {
-    end += 0x200000 - (end % 0x200000);
-  }
-
-  uint64_t addr = start;
-  while (addr < end) {
-    // Check if we can map a 1GB huge page:
-    // 1. Current address is 1GB aligned
-    // 2. Remaining size to map is at least 1GB
-    if ((addr % 0x40000000 == 0) && (end - addr >= 0x40000000)) {
-      // Map 1GB huge page
-      uint32_t pml4_idx = (addr >> 39) & 0x1FF;
-      uint32_t pdpt_idx = (addr >> 30) & 0x1FF;
-
-      uint64_t* pdpt = 0;
-      if (cpu_pml4[0][pml4_idx] & 0x1) {
-        pdpt = (uint64_t*)(cpu_pml4[0][pml4_idx] & ~0xFFF);
-      } else {
-        if (next_pdpt_idx < DYNAMIC_PDPT_COUNT) {
-          pdpt = dynamic_pdpts[next_pdpt_idx];
-          for (int i = 0; i < 512; i++) pdpt[i] = 0;
-          next_pdpt_idx++;
-        } else {
-          spinlock_release_irqrestore(&mmu_lock, flags);
-          return;
-        }
-      }
-
-      for (int c = 0; c < MAX_CPUS; c++) {
-        cpu_pml4[c][pml4_idx] = ((uint64_t)pdpt) | 0x07;
-      }
-
-      // Present | RW | PCD | PWT | Huge Page (0x9B)
-      pdpt[pdpt_idx] = addr | 0x9B;
-
-      addr += 0x40000000;
-    } else {
-      // Map 2MB huge page
-      uint32_t pml4_idx = (addr >> 39) & 0x1FF;
-      uint32_t pdpt_idx = (addr >> 30) & 0x1FF;
-      uint32_t pd_idx   = (addr >> 21) & 0x1FF;
-
-      uint64_t* pdpt = 0;
-      if (cpu_pml4[0][pml4_idx] & 0x1) {
-        pdpt = (uint64_t*)(cpu_pml4[0][pml4_idx] & ~0xFFF);
-      } else {
-        if (next_pdpt_idx < DYNAMIC_PDPT_COUNT) {
-          pdpt = dynamic_pdpts[next_pdpt_idx];
-          for (int i = 0; i < 512; i++) pdpt[i] = 0;
-          next_pdpt_idx++;
-        } else {
-          spinlock_release_irqrestore(&mmu_lock, flags);
-          return;
-        }
-      }
-
-      for (int c = 0; c < MAX_CPUS; c++) {
-        cpu_pml4[c][pml4_idx] = ((uint64_t)pdpt) | 0x07;
-      }
-
-      uint64_t* pd = 0;
-      if (pdpt[pdpt_idx] & 0x1) {
-        // Ensure it's not a 1GB huge page (bit 7 must be 0)
-        if (pdpt[pdpt_idx] & 0x80) {
-          spinlock_release_irqrestore(&mmu_lock, flags);
-          return;
-        }
-        pd = (uint64_t*)(pdpt[pdpt_idx] & ~0xFFF);
-      } else {
-        if (next_pd_idx < DYNAMIC_PD_COUNT) {
-          pd = dynamic_pds[next_pd_idx];
-          for (int i = 0; i < 512; i++) pd[i] = 0;
-          next_pd_idx++;
-        } else {
-          spinlock_release_irqrestore(&mmu_lock, flags);
-          return;
-        }
-        pdpt[pdpt_idx] = ((uint64_t)pd) | 0x07;
-      }
-
-      pd[pd_idx] = (addr & ~((uint64_t)0x1FFFFF)) | 0x9B;
-
-      addr += 0x200000;
-    }
-  }
-
-  // Reload CR3 to invalidate TLB
-  uint64_t cr3_val;
-  __asm__ volatile(
-      "mov %%cr3, %0\n"
-      "mov %0, %%cr3\n"
-      : "=r"(cr3_val)
-      :
-      : "memory"
-  );
-
-  spinlock_release_irqrestore(&mmu_lock, flags);
+/* P1 (S4, docs/cp-address-space.md section 1.3): the old identity-VA MMIO
+   mapper is retired.  It rewrote shared identity PDs (so it changed RAM
+   attributes under every root), pointed every CPU's PML4[0] at CPU 0's
+   private PDPT (defect 1), and was invisible in v2 roots for anything above
+   8 GiB (defect 2).  Callers now get a pointer: below 4 GiB the direct map
+   (legacy MMIO and firmware tables, the attributes the shared PDs already
+   give that range), above it a fresh ioremap window visible in every root. */
+volatile void *mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
+  if (size == 0)
+    size = 1;
+  if (phys_addr + size <= 0x100000000ULL)
+    return (volatile void *)phys_to_virt(phys_addr);
+  return ioremap(phys_addr, size);
 }
 
 /* ---------------------------------------------------------------------
@@ -555,11 +455,11 @@ static uint64_t *x64_v2_walk_alloc(struct addr_space *as, uint64_t va,
                                    int alloc) {
   if (!as->root_phys)
     return 0;
-  uint64_t *p4 = (uint64_t *)as->root_phys;
+  uint64_t *p4 = (uint64_t *)phys_to_virt(as->root_phys);
   uint64_t pdpt_pa = p4[0] & X64_OA_MASK;
   if (!pdpt_pa)
     return 0;
-  uint64_t *pdpt = (uint64_t *)pdpt_pa;
+  uint64_t *pdpt = (uint64_t *)phys_to_virt(pdpt_pa);
   uint32_t i3 = (va >> 30) & 0x1FF;
   if (i3 < 64 || i3 > 95)
     return 0;
@@ -570,13 +470,13 @@ static uint64_t *x64_v2_walk_alloc(struct addr_space *as, uint64_t va,
     uint64_t t = frame_alloc_zeroed();
     if (!t)
       return 0;
-    pd = (uint64_t *)t;
+    pd = (uint64_t *)phys_to_virt(t);
     pdpt[i3] = t | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
     as->table_frames++;
   } else {
     if (pdpt[i3] & 0x80)
       return 0; /* 1 GiB page in a v2 table: not produced */
-    pd = (uint64_t *)(pdpt[i3] & X64_OA_MASK);
+    pd = (uint64_t *)phys_to_virt(pdpt[i3] & X64_OA_MASK);
   }
   uint32_t i2 = (va >> 21) & 0x1FF;
   if (pd[i2] & 0x80)
@@ -588,11 +488,11 @@ static uint64_t *x64_v2_walk_alloc(struct addr_space *as, uint64_t va,
     uint64_t t = frame_alloc_zeroed();
     if (!t)
       return 0;
-    pt = (uint64_t *)t;
+    pt = (uint64_t *)phys_to_virt(t);
     pd[i2] = t | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
     as->table_frames++;
   } else {
-    pt = (uint64_t *)(pd[i2] & X64_OA_MASK);
+    pt = (uint64_t *)phys_to_virt(pd[i2] & X64_OA_MASK);
   }
   return &pt[(va >> 12) & 0x1FF];
 }
@@ -607,17 +507,17 @@ uint64_t vm_arch_root_alloc(struct addr_space *as) {
       frame_free(pml4);
     return 0;
   }
-  uint64_t *p4 = (uint64_t *)pml4;
-  uint64_t *pd = (uint64_t *)pdpt;
+  uint64_t *p4 = (uint64_t *)phys_to_virt(pml4);
+  uint64_t *pd = (uint64_t *)phys_to_virt(pdpt);
   p4[0] = pdpt | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-  pd[0] = ((uint64_t)&cpu_pd0) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-  pd[1] = ((uint64_t)&pd1_kernel) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-  pd[2] = ((uint64_t)&cpu_pd2) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-  pd[3] = ((uint64_t)&cpu_pd3) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-  pd[4] = ((uint64_t)&cpu_pd4) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-  pd[5] = ((uint64_t)&cpu_pd5) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-  pd[6] = ((uint64_t)&cpu_pd6) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
-  pd[7] = ((uint64_t)&cpu_pd7) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[0] = kimg_pa(&cpu_pd0) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[1] = kimg_pa(&pd1_kernel) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[2] = kimg_pa(&cpu_pd2) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[3] = kimg_pa(&cpu_pd3) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[4] = kimg_pa(&cpu_pd4) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[5] = kimg_pa(&cpu_pd5) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[6] = kimg_pa(&cpu_pd6) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[7] = kimg_pa(&cpu_pd7) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
   /* P1 (S2): the shared kernel half (direct map + ioremap area). */
   p4[DMAP_PML4_IDX] = cpu_pml4[0][DMAP_PML4_IDX];
   p4[IOREMAP_PML4_IDX] = cpu_pml4[0][IOREMAP_PML4_IDX];
@@ -723,8 +623,8 @@ static volatile uint64_t x64_shootdown_root;
 static volatile int x64_shootdown_acks;
 
 static void x64_send_ipi(uint32_t cpu, uint32_t vector) {
-  volatile uint32_t *icr_hi = (volatile uint32_t *)(0xFEE00000 + 0x310);
-  volatile uint32_t *icr_lo = (volatile uint32_t *)(0xFEE00000 + 0x300);
+  volatile uint32_t *icr_hi = (volatile uint32_t *)phys_to_virt(0xFEE00000 + 0x310);
+  volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00000 + 0x300);
   *icr_hi = cpu << 24; /* APIC id == CPU index (smp.c convention) */
   *icr_lo = vector;    /* fixed delivery, physical destination, edge */
 }
@@ -736,7 +636,7 @@ static void x64_send_ipi(uint32_t cpu, uint32_t vector) {
    0x81 broadcast can leave a write pending, and a write while busy is lost
    (measured: the first injection never reached cpu1). */
 void x64_send_test_ipi(uint32_t cpu, uint32_t vector) {
-  volatile uint32_t *icr_lo = (volatile uint32_t *)(0xFEE00000 + 0x300);
+  volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00000 + 0x300);
   for (volatile int spin = 0; spin < 1000000; spin++) {
     if ((*icr_lo & (1u << 12)) == 0)
       break;
@@ -807,7 +707,7 @@ void vm_arch_restore_kernel(void) {
   if (!v2_active_root[cpu])
     return;
   v2_active_root[cpu] = 0;
-  uint64_t cr3 = (uint64_t)&cpu_pml4[cpu];
+  uint64_t cr3 = kimg_pa(&cpu_pml4[cpu]);
   __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
 }
 
@@ -874,22 +774,22 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
       panic_puts(" still translates through it\n");
     }
   }
-  uint64_t *p4 = (uint64_t *)root_phys;
+  uint64_t *p4 = (uint64_t *)phys_to_virt(root_phys);
   uint64_t pdpt_pa = p4[0] & X64_OA_MASK;
   if (pdpt_pa) {
-    uint64_t *pdpt = (uint64_t *)pdpt_pa;
+    uint64_t *pdpt = (uint64_t *)phys_to_virt(pdpt_pa);
     for (uint32_t i3 = 64; i3 <= 95; i3++) {
       uint64_t pde = pdpt[i3];
       if (!(pde & X64_PTE_P) || (pde & 0x80))
         continue;
       uint64_t pdp = pde & X64_OA_MASK;
-      uint64_t *pd = (uint64_t *)pdp;
+      uint64_t *pd = (uint64_t *)phys_to_virt(pdp);
       for (int i2 = 0; i2 < 512; i2++) {
         uint64_t pte2 = pd[i2];
         if (!(pte2 & X64_PTE_P) || (pte2 & 0x80))
           continue;
         uint64_t ptp = pte2 & X64_OA_MASK;
-        uint64_t *pt = (uint64_t *)ptp;
+        uint64_t *pt = (uint64_t *)phys_to_virt(ptp);
         for (int j = 0; j < 512; j++) {
           uint64_t leaf = pt[j];
           if (!(leaf & X64_PTE_P))

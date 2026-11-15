@@ -2,6 +2,7 @@
 #include "lock.h"
 #include "process.h"
 #include "arch/cpu.h"
+#include "kmem.h"
 
 #ifdef __x86_64__
 #define NUM_RX_BUFFERS 512
@@ -268,7 +269,7 @@ int virtio_net_init(void) {
   rx_qsize = qsize;
 
   if (rx_qsize == 1024) {
-    rx_vq_phys = (uint64_t)&rx_vq_1024;
+    rx_vq_phys = kimg_pa(&rx_vq_1024);
     rx_desc = rx_vq_1024.desc;
     rx_avail_idx = &rx_vq_1024.avail.idx;
     rx_avail_ring = rx_vq_1024.avail.ring;
@@ -276,7 +277,7 @@ int virtio_net_init(void) {
     rx_used_ring = rx_vq_1024.used.ring;
   } else {
     rx_qsize = 256;
-    rx_vq_phys = (uint64_t)&rx_vq_256;
+    rx_vq_phys = kimg_pa(&rx_vq_256);
     rx_desc = rx_vq_256.desc;
     rx_avail_idx = &rx_vq_256.avail.idx;
     rx_avail_ring = rx_vq_256.avail.ring;
@@ -304,20 +305,20 @@ int virtio_net_init(void) {
   uart_puts(" PFN: ");
   uart_print_hex((uint32_t)((uint64_t)&tx_vq / 4096));
   uart_puts("\n");
-  outl(io_base + VIRTIO_PCI_QUEUE_PFN, (uint32_t)((uint64_t)&tx_vq / 4096));
+  outl(io_base + VIRTIO_PCI_QUEUE_PFN, (uint32_t)(kimg_pa(&tx_vq) / 4096));
 
   // Populate RX descriptors
   int num_buffers = rx_qsize / 2;
   if (num_buffers > NUM_RX_BUFFERS) num_buffers = NUM_RX_BUFFERS;
   for (int i = 0; i < num_buffers; i++) {
     // Descriptor 0: header
-    rx_desc[i * 2].addr = (uint64_t)&rx_hdrs[i];
+    rx_desc[i * 2].addr = kimg_pa(&rx_hdrs[i]);
     rx_desc[i * 2].len = sizeof(struct virtio_net_hdr);
     rx_desc[i * 2].flags = 3; // NEXT | WRITE
     rx_desc[i * 2].next = i * 2 + 1;
 
     // Descriptor 1: buffer
-    rx_desc[i * 2 + 1].addr = (uint64_t)rx_buffers[i];
+    rx_desc[i * 2 + 1].addr = kimg_pa(rx_buffers[i]);
     rx_desc[i * 2 + 1].len = RX_BUFFER_SIZE;
     rx_desc[i * 2 + 1].flags = 2; // WRITE
     rx_desc[i * 2 + 1].next = 0;
@@ -392,13 +393,13 @@ int virtio_net_send(const void *buf, uint32_t len) {
   uint16_t desc_idx = slot * 2;
 
   // Header descriptor
-  tx_vq.desc[desc_idx].addr = (uint64_t)&tx_hdrs[slot];
+  tx_vq.desc[desc_idx].addr = kimg_pa(&tx_hdrs[slot]);
   tx_vq.desc[desc_idx].len = sizeof(struct virtio_net_hdr);
   tx_vq.desc[desc_idx].flags = 1; // NEXT
   tx_vq.desc[desc_idx].next = desc_idx + 1;
 
   // Payload descriptor — points to our persistent buffer, not caller's stack
-  tx_vq.desc[desc_idx + 1].addr = (uint64_t)tx_buffers[slot];
+  tx_vq.desc[desc_idx + 1].addr = kimg_pa(tx_buffers[slot]);
   tx_vq.desc[desc_idx + 1].len = copy_len;
   tx_vq.desc[desc_idx + 1].flags = 0; // End of chain
   tx_vq.desc[desc_idx + 1].next = 0;
@@ -848,12 +849,12 @@ int virtio_net_send(const void *buf, uint32_t len) {
     tx_buffers[slot][i] = ((const uint8_t*)buf)[i];
   }
 
-  tx_vq.desc[desc_idx].addr = (uint64_t)&tx_hdrs[slot];
+  tx_vq.desc[desc_idx].addr = kimg_pa(&tx_hdrs[slot]);
   tx_vq.desc[desc_idx].len = sizeof(struct virtio_net_hdr);
   tx_vq.desc[desc_idx].flags = 1;
   tx_vq.desc[desc_idx].next = desc_idx + 1;
 
-  tx_vq.desc[desc_idx + 1].addr = (uint64_t)tx_buffers[slot];
+  tx_vq.desc[desc_idx + 1].addr = kimg_pa(tx_buffers[slot]);
   tx_vq.desc[desc_idx + 1].len = copy_len;
   tx_vq.desc[desc_idx + 1].flags = 0;
   tx_vq.desc[desc_idx + 1].next = 0;

@@ -461,9 +461,9 @@ void __clear_cache(void *begin, void *end) {
   __asm__ volatile("dsb ish\nisb" : : : "memory");
 }
 
-void mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
-  (void)phys_addr;
+volatile void *mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
   (void)size;
+  return (volatile void *)(uintptr_t)phys_addr; /* identity (device attrs in L1[0]) */
 }
 
 /* ---------------------------------------------------------------------

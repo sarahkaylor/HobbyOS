@@ -194,7 +194,7 @@ static void copy_requested_sectors(uint64_t unit, uint8_t req, uint64_t frame,
     int bit = __builtin_ctz(req);
     req = (uint8_t)(req & (req - 1));
     uint64_t s = unit * 8 + (uint64_t)bit;
-    uint8_t *src = (uint8_t *)(frame + (uint64_t)bit * 512);
+    uint8_t *src = (uint8_t *)phys_to_virt(frame + (uint64_t)bit * 512);
     uint8_t *dst = buf + (s - sector) * 512;
     /* Byte loop: with -mgeneral-regs-only this never becomes a libcall
        or SIMD (other kernel files that call memcpy() compile it to an
@@ -252,7 +252,7 @@ struct fill_op {
 static void close_fill_op(struct fill_op *op, int *run_failed) {
   if (!op->active)
     return;
-  if (virtio_blk_read_raw(op->start_sector, (void *)op->start_addr,
+  if (virtio_blk_read_raw(op->start_sector, phys_to_virt(op->start_addr),
                           (uint32_t)op->n) != 0)
     *run_failed = 1;
   stat_fill_ops += 1;
@@ -667,8 +667,10 @@ void blk_cache_init(void) {
      frame_alloc_contig failure path, which is gated on cache_ready (0) —
      no recursion.  On failure the cache stays not-ready: every read
      routes raw (passthrough) and boot proceeds normally. */
-  if (entries == 0)
-    entries = (struct blk_cache_entry *)frame_alloc_contig(BLK_CACHE_ENTRIES_FRAMES);
+  if (entries == 0) {
+    uint64_t et = frame_alloc_contig(BLK_CACHE_ENTRIES_FRAMES);
+    entries = et ? (struct blk_cache_entry *)phys_to_virt(et) : 0;
+  }
   if (!entries) {
     uart_puts("[BLK-CACHE] frame-pool entry table allocation failed; "
               "cache disabled (reads pass through raw)\n");
@@ -946,7 +948,7 @@ int blk_cache_probe_unit(uint64_t sector, struct blk_cache_unit_info *out) {
     out->valid = entries[e].valid;
     out->req = req ? 8u : 0u; /* whole unit: the page is always 8 sectors */
     out->frame = entries[e].frame;
-    const volatile uint8_t *p = (const volatile uint8_t *)entries[e].frame;
+    const volatile uint8_t *p = (const volatile uint8_t *)phys_to_virt(entries[e].frame);
     uint32_t nz = 0, sum = 0;
     for (uint32_t i = 0; i < BLK_CACHE_UNIT_BYTES; i++) {
       uint8_t v = p[i];
@@ -973,7 +975,7 @@ int blk_cache_test_poison(uint64_t sector, const uint8_t *bytes,
   uint64_t fr = frame_alloc();
   if (!fr)
     return -1;
-  volatile uint8_t *p = (volatile uint8_t *)fr;
+  volatile uint8_t *p = (volatile uint8_t *)phys_to_virt(fr);
   for (uint32_t i = 0; i < BLK_CACHE_UNIT_BYTES; i++)
     p[i] = (i < len) ? bytes[i] : 0;
   spinlock_acquire(&fill_lock);

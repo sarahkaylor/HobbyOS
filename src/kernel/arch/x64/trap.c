@@ -43,6 +43,7 @@
 #include "rw_watch.h"
 #include "blk_cache.h"
 #include "fb_mmap.h"
+#include "kmem.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -1569,7 +1570,7 @@ extern int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects,
                                     int count); /* SEC-7 */
 
 static void sys_map_fb(struct trap_frame *tf) {
-  uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
+  uint64_t phys_addr = kimg_pa(virtio_gpu_get_framebuffer());
   {
     /* icewm.md §9: an attached process maps its private surface. */
     int vd = vdisp_attached(current_process());
@@ -1617,7 +1618,7 @@ static void sys_map_fb(struct trap_frame *tf) {
 void sys_fb_ioctl(struct trap_frame *tf) {
   unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
   void *arg = (void *)tf->regs[4];                    /* rsi */
-  uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
+  uint64_t smem_start = kimg_pa(virtio_gpu_get_framebuffer());
 
   size_t sz = hb_fb_ioctl_arg_size(req);
   if (sz == (size_t)-1) {
@@ -3470,23 +3471,23 @@ void watchdog_stack_arena(uint64_t *lo, uint64_t *hi) {
 int kpml_present(uint64_t va) {
   uint64_t cr3;
   __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-  uint64_t *pml4 = (uint64_t *)(cr3 & ~0xFFFULL);
+  uint64_t *pml4 = (uint64_t *)phys_to_virt(cr3 & ~0xFFFULL);
   uint64_t e = pml4[(va >> 39) & 511];
   if (!(e & 1))
     return 0;
-  uint64_t *pdpt = (uint64_t *)(e & ~0xFFFULL);
+  uint64_t *pdpt = (uint64_t *)phys_to_virt(e & 0x000FFFFFFFFFF000ULL);
   e = pdpt[(va >> 30) & 511];
   if (!(e & 1))
     return 0;
   if (e & (1ULL << 7))
     return 1; /* 1 GiB page */
-  uint64_t *pd = (uint64_t *)(e & ~0xFFFULL);
+  uint64_t *pd = (uint64_t *)phys_to_virt(e & 0x000FFFFFFFFFF000ULL);
   e = pd[(va >> 21) & 511];
   if (!(e & 1))
     return 0;
   if (e & (1ULL << 7))
     return 1; /* 2 MiB page */
-  uint64_t *pt = (uint64_t *)(e & ~0xFFFULL);
+  uint64_t *pt = (uint64_t *)phys_to_virt(e & 0x000FFFFFFFFFF000ULL);
   e = pt[(va >> 12) & 511];
   return (e & 1) ? 1 : 0;
 }
@@ -3752,7 +3753,7 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
  * every further interrupt of that priority class.
  */
 void lapic_send_eoi(void) {
-  *(volatile uint32_t *)0xFEE000B0 = 0;
+  *(volatile uint32_t *)phys_to_virt(0xFEE000B0) = 0;
 }
 
 /* GB-068 (2026-10-19): a fault record must be ONE write.
@@ -4733,7 +4734,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
 
       // Broadcast rescheduling IPI (vector 0x81) to all other cores.
       // Bit 14 stays clear: it is defined for level-triggered delivery only.
-      *(volatile uint32_t*)(0xFEE00300) = 0x000C0081;
+      *(volatile uint32_t*)phys_to_virt(0xFEE00300) = 0x000C0081;
 #ifdef PANIC_IPI_TEST
       /* GB-207: fire the two-CPU panic injection once the wave is running
          (a secondary sits in an IF=0 wait before there is a process). */
@@ -5242,10 +5243,10 @@ static void general_interrupt_inner(struct trap_frame *tf) {
             cn = fat16_read_direct_pos(ur->obj->file_start_cluster,
                                        (uint32_t)ur->obj->size, cpage,
                                        FRAME_SIZE, (uint32_t)ur->obj_off);
-          const uint8_t *cbt = (const uint8_t *)cpage;
+          const uint8_t *cbt = cpage ? (const uint8_t *)phys_to_virt(cpage) : 0;
           int obj_ok = objfr && frame_is_alloced(objfr);
-          const uint8_t *ob = (const uint8_t *)(obj_ok ? objfr : 0);
-          const uint8_t *fp = (const uint8_t *)fpage;
+          const uint8_t *ob = obj_ok ? (const uint8_t *)phys_to_virt(objfr) : 0;
+          const uint8_t *fp = fpage ? (const uint8_t *)phys_to_virt(fpage) : 0;
           int same = 1;
           if (fn != (int)FRAME_SIZE) {
             same = 0;

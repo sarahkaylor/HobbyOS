@@ -264,7 +264,7 @@ static int el_map_region(struct addr_space *as, uint64_t va, uint64_t len,
     if (!fr)
       return -ENOMEM;
     /* Fill before mapping (no lock needed: this frame is private). */
-    uint8_t *fp = (uint8_t *)fr; /* kernel VA == phys (direct map) */
+    uint8_t *fp = (uint8_t *)phys_to_virt(fr); /* the direct map */
     uint64_t base_off = a - va;  /* byte offset of this page in the region */
     uint64_t take = FRAME_SIZE;
     if (base_off + take > len)
@@ -272,7 +272,7 @@ static int el_map_region(struct addr_space *as, uint64_t va, uint64_t len,
     el_copy(fp, stage + base_off, take);
     if (take < FRAME_SIZE)
       el_zero(fp + take, FRAME_SIZE - take);
-    __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+    __builtin___clear_cache((char *)phys_to_virt(fr), (char *)phys_to_virt(fr) + FRAME_SIZE);
     if (vm_map_page(as, a, fr, prot, kind) != 0) {
       frame_free(fr);
       return -ENOMEM;
@@ -343,8 +343,8 @@ static int el_stage_build(const struct elf_image *img, const struct elf_plan *pl
   uint64_t stage = frame_alloc_contig((int)pages);
   if (!stage)
     return -ENOMEM;
-  el_zero((uint8_t *)stage, span);
-  int rc = elf_copy_into(img, file, flen, (uint8_t *)stage, span);
+  el_zero((uint8_t *)phys_to_virt(stage), span);
+  int rc = elf_copy_into(img, file, flen, (uint8_t *)phys_to_virt(stage), span);
   if (rc != ELF_OK) {
     uart_puts(what);
     uart_puts(": ");
@@ -361,7 +361,7 @@ static int el_stage_build(const struct elf_image *img, const struct elf_plan *pl
      because the interpreter walks it.  The interpreter ITSELF is static-PIE and
      still takes the kernel's RELATIVE pass. */
   if (apply_reloc) {
-    rc = elf_apply_relocations(img, (uint8_t *)stage, span, base);
+    rc = elf_apply_relocations(img, (uint8_t *)phys_to_virt(stage), span, base);
     if (rc != ELF_OK) {
       uart_puts(what);
       uart_puts(": relocations: ");
@@ -370,9 +370,9 @@ static int el_stage_build(const struct elf_image *img, const struct elf_plan *pl
       el_free_contig(stage, pages);
       return -ENOEXEC;
     }
-    el_clear_reloc_counts(img, (uint8_t *)stage, span);
+    el_clear_reloc_counts(img, (uint8_t *)phys_to_virt(stage), span);
   }
-  *stage_out = (uint8_t *)stage;
+  *stage_out = (uint8_t *)phys_to_virt(stage);
   *pages_out = pages;
   return 0;
 }
@@ -428,12 +428,12 @@ static int el_map_start_page(struct addr_space *as, const struct hb_start *s) {
   uint64_t fr = frame_alloc();
   if (!fr)
     return -ENOMEM;
-  uint8_t *fp = (uint8_t *)fr;
+  uint8_t *fp = (uint8_t *)phys_to_virt(fr);
   el_zero(fp, FRAME_SIZE);
   const uint8_t *src = (const uint8_t *)s;
   for (uint32_t i = 0; i < (uint32_t)sizeof(struct hb_start); i++)
     fp[i] = src[i];
-  __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+  __builtin___clear_cache((char *)phys_to_virt(fr), (char *)phys_to_virt(fr) + FRAME_SIZE);
   if (vm_region_insert(as, ELF_USER_START_BASE, USER_START_SIZE, VM_PROT_READ,
                        VMK_ANON, VM_MAP_PRIVATE, 0, 0) != 0) {
     uart_puts("elf loader: start page region insert failed\n");
@@ -645,8 +645,8 @@ static int el_map_pair(struct addr_space *as, const uint8_t *exe, uint64_t exe_l
   rc = 0;
 
 done:
-  el_free_contig((uint64_t)stage, stage_pages);
-  el_free_contig((uint64_t)istage, istage_pages);
+  if (stage) el_free_contig(virt_to_phys(stage), stage_pages);
+  if (istage) el_free_contig(virt_to_phys(istage), istage_pages);
   return rc;
 }
 
@@ -732,7 +732,7 @@ int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
     if (!ibuf)
       return -ENOMEM;
     ilen = isz;
-    rc = el_admit_interp((const uint8_t *)ibuf, ilen, &iimg, info);
+    rc = el_admit_interp((const uint8_t *)phys_to_virt(ibuf), ilen, &iimg, info);
     if (rc != 0) {
       el_free_contig(ibuf, ipages);
       return rc;
@@ -742,7 +742,7 @@ int elf_loader_load_image(struct addr_space *as, const uint8_t *exe,
   }
 
   rc = el_map_pair(as, exe, fsize, &eimg,
-                   (const uint8_t *)ibuf, ilen, eimg.has_interp ? &iimg : 0,
+                   ibuf ? (const uint8_t *)phys_to_virt(ibuf) : 0, ilen, eimg.has_interp ? &iimg : 0,
                    flags, info);
   if (ibuf) el_free_contig(ibuf, ipages);
   return rc;
@@ -783,7 +783,7 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
      executable and the interpreter and let the real ld.so map its own
      DT_NEEDED closure from /LIB64 -- the behaviour the M2/M3/M4 gate set
      exercises, and the only shape that can also serve an exec from NFS. */
-  int rc = elf_loader_load_image(as, (const uint8_t *)exe_buf, fsize, flags,
+  int rc = elf_loader_load_image(as, (const uint8_t *)phys_to_virt(exe_buf), fsize, flags,
                                  info);
   el_free_contig(exe_buf, exe_pages);
   return rc;
@@ -805,7 +805,7 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
 int elf_loader_probe_native(uint16_t cluster, uint32_t fsize) {
   if (fsize < EL_PROBE_EHDR) return 0;
   uint8_t eh[EL_PROBE_EHDR];
-  if (fat16_read_direct_pos(cluster, fsize, (uint64_t)eh, EL_PROBE_EHDR, 0) !=
+  if (fat16_read_direct_pos(cluster, fsize, virt_to_phys(eh), EL_PROBE_EHDR, 0) !=
       EL_PROBE_EHDR)
     return -1;
   if (!(eh[0] == 0x7f && eh[1] == 'E' && eh[2] == 'L' && eh[3] == 'F')) return 0;
@@ -819,7 +819,7 @@ int elf_loader_probe_native(uint16_t cluster, uint32_t fsize) {
   for (uint16_t i = 0; i < phnum; i++) {
     uint8_t ph[EL_PROBE_PHDR];
     uint32_t pos = (uint32_t)(phoff + (uint64_t)i * phent);
-    if (fat16_read_direct_pos(cluster, fsize, (uint64_t)ph, EL_PROBE_PHDR, pos) !=
+    if (fat16_read_direct_pos(cluster, fsize, virt_to_phys(ph), EL_PROBE_PHDR, pos) !=
         EL_PROBE_PHDR)
       return 0;
     if (rd32(ph + 0) != 3 /* PT_INTERP */) continue;
@@ -828,7 +828,7 @@ int elf_loader_probe_native(uint16_t cluster, uint32_t fsize) {
     if (isz < 2 || isz > ELF_INTERP_PATH_MAX) return 0;
     if (ioff > fsize || isz > fsize - ioff) return 0;
     char path[ELF_INTERP_PATH_MAX];
-    if (fat16_read_direct_pos(cluster, fsize, (uint64_t)path, (int)isz,
+    if (fat16_read_direct_pos(cluster, fsize, virt_to_phys(path), (int)isz,
                               (uint32_t)ioff) != (int)isz)
       return 0;
     return elf_interp_is_native(path, (uint32_t)(isz - 1));

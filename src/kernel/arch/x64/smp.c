@@ -1,10 +1,11 @@
 #include "lock.h"
 #include "process.h"
 #include "arch/cpu.h"
+#include "kmem.h"
 
 #define LAPIC_BASE 0xFEE00000
-#define LAPIC_ICR_LOW  ((volatile uint32_t*)(LAPIC_BASE + 0x300))
-#define LAPIC_ICR_HIGH ((volatile uint32_t*)(LAPIC_BASE + 0x310))
+#define LAPIC_ICR_LOW  ((volatile uint32_t*)phys_to_virt(LAPIC_BASE + 0x300))
+#define LAPIC_ICR_HIGH ((volatile uint32_t*)phys_to_virt(LAPIC_BASE + 0x310))
 
 extern uint64_t smp_temp_stack;
 extern uint64_t smp_temp_cpu;
@@ -24,7 +25,7 @@ void smp_init(void) {
   // Copy trampoline code to physical address 0x7000
   extern uint8_t trampoline_start[];
   extern uint8_t trampoline_end[];
-  uint8_t *dest = (uint8_t*)0x7000;
+  uint8_t *dest = (uint8_t*)phys_to_virt(0x7000);
   uint8_t *src = trampoline_start;
   uint32_t len = (uint32_t)(trampoline_end - trampoline_start);
 

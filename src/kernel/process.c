@@ -13,6 +13,7 @@
 #include "errno.h"
 #include "syscall.h"
 #include "virtio_blk.h"
+#include "kmem.h"
 #include <stdint.h>
 
 /* --- debugcon (0xE9) parking diagnostic: IRQ-safe port writes only --- */
@@ -692,7 +693,7 @@ static void reap_status_write(struct process *parent, uint64_t va, int st) {
   }
   uint64_t off = va - USER_VIRT_BASE;
   if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base)
-    *(int *)(parent->user_phys_base + off) = st;
+    *(int *)phys_to_virt(parent->user_phys_base + off) = st;
 }
 
 /* --- W2-5 (selfhost): wait4 rusage ----------------------------------- *\
@@ -727,7 +728,7 @@ static void user_rusage_store(struct process *p, uint64_t va,
   uint64_t off = va - USER_VIRT_BASE;
   if (off + sizeof(*ru) <= USER_REGION_SIZE && p->user_phys_base) {
     const uint8_t *src = (const uint8_t *)ru;
-    uint8_t *dst = (uint8_t *)(p->user_phys_base + off);
+    uint8_t *dst = (uint8_t *)phys_to_virt(p->user_phys_base + off);
     for (int k = 0; k < (int)sizeof(*ru); k++)
       dst[k] = src[k];
   }
@@ -1302,8 +1303,8 @@ static int process_create_internal_ver(int ver) {
       uart_print_hex(p->user_phys_base);
       uart_puts("\n");
     }
-    kmemset((void *)p->user_phys_base, 0, USER_INITIAL_CLEAR_SIZE);
-    kmemset((void *)(p->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE), 0, USER_STACK_CLEAR_SIZE);
+    kmemset(phys_to_virt(p->user_phys_base), 0, USER_INITIAL_CLEAR_SIZE);
+    kmemset(phys_to_virt(p->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE), 0, USER_STACK_CLEAR_SIZE);
     if (trace)
       uart_puts("Inside process_create: kmemset done.\n");
   }
@@ -1592,9 +1593,9 @@ void wd_dump_proc_table(void) {
     if (!proc_table[i].is_kernel_process && proc_table[i].user_phys_base) {
       uint64_t pb = proc_table[i].user_phys_base;
       panic_puts2(" img=");
-      panic_print_hex2(*(volatile uint64_t *)pb);
+      panic_print_hex2(*(volatile uint64_t *)phys_to_virt(pb));
       panic_puts2("/");
-      panic_print_hex2(*(volatile uint64_t *)(pb + 8));
+      panic_print_hex2(*(volatile uint64_t *)phys_to_virt(pb + 8));
     }
     panic_puts2("\n");
   }
@@ -2774,8 +2775,8 @@ static void resched_cpu(uint32_t c) {
     __asm__ volatile("int $0x81" ::: "memory");
     return;
   }
-  volatile uint32_t *icr_hi = (volatile uint32_t *)0xFEE00310;
-  volatile uint32_t *icr_lo = (volatile uint32_t *)0xFEE00300;
+  volatile uint32_t *icr_hi = (volatile uint32_t *)phys_to_virt(0xFEE00310);
+  volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00300);
   *icr_hi = (uint32_t)(c << 24);
   *icr_lo = 0x00002081u; /* fixed delivery, vector 0x81, level assert, edge */
   for (int i = 0; i < 200000; i++) {
@@ -4222,10 +4223,10 @@ int process_fork(struct trap_frame *tf) {
       return -1;
     }
   } else {
-    kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
+    kmemcpy(phys_to_virt(child->user_phys_base), phys_to_virt(group->user_phys_base),
             USER_INITIAL_CLEAR_SIZE);
-    kmemcpy((void *)(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
-            (void *)(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+    kmemcpy(phys_to_virt(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+            phys_to_virt(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
             USER_STACK_CLEAR_SIZE);
   }
 
@@ -6622,7 +6623,7 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
         return -EFAULT;
       if (!grp->user_phys_base)
         return -EFAULT;
-      word = (volatile uint32_t *)(grp->user_phys_base + (uaddr - USER_VIRT_BASE));
+      word = (volatile uint32_t *)phys_to_virt(grp->user_phys_base + (uaddr - USER_VIRT_BASE));
     }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     /* (2) compare under proc_lock: no lost wakeups (see process.h). */

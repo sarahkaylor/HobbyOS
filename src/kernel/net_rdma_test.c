@@ -6,6 +6,7 @@
 #if defined(KERNEL_MODE_UNIT_TEST)
 #include "net_rdma.h"
 #include "unit_test.h"
+#include "kmem.h"
 extern void uart_puts(const char* s);
 extern void uart_print_hex(uint64_t val);
 
@@ -175,7 +176,7 @@ void net_rdma_test_suite(void) {
   }
 
   // Register local memory range with Host RDMA
-  int reg_status = rdma_register_mr((uint64_t)&test_dma_buf[0], 128);
+  int reg_status = rdma_register_mr(kimg_pa(&test_dma_buf[0]), 128);
   tests_run++;
   if (reg_status == 0) {
     uart_puts("    Memory Region registered successfully.\n");
@@ -186,7 +187,7 @@ void net_rdma_test_suite(void) {
   }
 
   // Sync Receiver local memory to Host physical shadow memory
-  int sync_status = rdma_dma_sync((uint64_t)&test_dma_buf[0], 128, 1);
+  int sync_status = rdma_dma_sync(kimg_pa(&test_dma_buf[0]), 128, 1);
   tests_run++;
   if (sync_status == 0) {
     uart_puts("    DMA Sync (to Host) completed successfully.\n");
@@ -198,7 +199,7 @@ void net_rdma_test_suite(void) {
 
   // Map register fields to start PCIe device DMA: Host shadow PFN -> internal buffer
   extern uint64_t guest_to_host_phys(uint64_t guest_phys);
-  uint64_t host_shadow_phys = guest_to_host_phys((uint64_t)&test_dma_buf[0]);
+  uint64_t host_shadow_phys = guest_to_host_phys(kimg_pa(&test_dma_buf[0]));
 
   v_edu_write64(EDU_REG_DMA_SRC, host_shadow_phys);
   v_edu_write64(EDU_REG_DMA_DST, EDU_BUFF_OFFSET);
@@ -253,7 +254,7 @@ void net_rdma_test_suite(void) {
   }
 
   // Sync Host shadow contiguous memory back to Receiver RAM over the network
-  int reverse_sync = rdma_dma_sync((uint64_t)&test_dma_buf[0], 128, 0);
+  int reverse_sync = rdma_dma_sync(kimg_pa(&test_dma_buf[0]), 128, 0);
   tests_run++;
   if (reverse_sync == 0) {
     uart_puts("    DMA Sync (to Guest) completed successfully.\n");
@@ -353,16 +354,16 @@ void net_rdma_test_suite(void) {
   for (int i = 0; i < 128; i++) {
     test_dma_buf[i] = (uint8_t)(0x5A + i);
   }
-  rdma_register_mr((uint64_t)&test_dma_buf[0], 128);
-  int rel_sync = rdma_dma_sync((uint64_t)&test_dma_buf[0], 128, 1);
-  int verify_match = rdma_dma_verify((uint64_t)&test_dma_buf[0], 128);
+  rdma_register_mr(kimg_pa(&test_dma_buf[0]), 128);
+  int rel_sync = rdma_dma_sync(kimg_pa(&test_dma_buf[0]), 128, 1);
+  int verify_match = rdma_dma_verify(kimg_pa(&test_dma_buf[0]), 128);
   uart_puts("    sync="); print_int(rel_sync);
   uart_puts(" verify(match)="); print_int(verify_match);
   uart_puts("\n");
 
   // Now corrupt one byte locally WITHOUT syncing — host must report a mismatch.
   test_dma_buf[64] ^= 0xFF;
-  int verify_mismatch = rdma_dma_verify((uint64_t)&test_dma_buf[0], 128);
+  int verify_mismatch = rdma_dma_verify(kimg_pa(&test_dma_buf[0]), 128);
   uart_puts("    verify(after local corruption)="); print_int(verify_mismatch);
   uart_puts(" (expect 1)\n");
   test_dma_buf[64] ^= 0xFF; // restore
@@ -388,17 +389,17 @@ void net_rdma_test_suite(void) {
     region_a[i] = (uint8_t)(0x11 + i);
     region_b[i] = (uint8_t)(0xC0 - i);
   }
-  rdma_register_mr((uint64_t)&region_a[0], 256);
-  rdma_register_mr((uint64_t)&region_b[0], 256);
-  int sa = rdma_dma_sync((uint64_t)&region_a[0], 256, 1);
-  int sb = rdma_dma_sync((uint64_t)&region_b[0], 256, 1);
-  int va = rdma_dma_verify((uint64_t)&region_a[0], 256);
-  int vb = rdma_dma_verify((uint64_t)&region_b[0], 256);
+  rdma_register_mr(kimg_pa(&region_a[0]), 256);
+  rdma_register_mr(kimg_pa(&region_b[0]), 256);
+  int sa = rdma_dma_sync(kimg_pa(&region_a[0]), 256, 1);
+  int sb = rdma_dma_sync(kimg_pa(&region_b[0]), 256, 1);
+  int va = rdma_dma_verify(kimg_pa(&region_a[0]), 256);
+  int vb = rdma_dma_verify(kimg_pa(&region_b[0]), 256);
 
   // Corrupt region A locally; B's verification must remain a match.
   region_a[100] ^= 0xFF;
-  int va_bad = rdma_dma_verify((uint64_t)&region_a[0], 256);
-  int vb_still = rdma_dma_verify((uint64_t)&region_b[0], 256);
+  int va_bad = rdma_dma_verify(kimg_pa(&region_a[0]), 256);
+  int vb_still = rdma_dma_verify(kimg_pa(&region_b[0]), 256);
   region_a[100] ^= 0xFF; // restore
 
   uart_puts("    sa="); print_int(sa); uart_puts(" sb="); print_int(sb);

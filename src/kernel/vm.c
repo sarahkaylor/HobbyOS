@@ -101,8 +101,8 @@ static void vm_lock_init_once(void) {
 
 static uint64_t v2_memcpy_frames(uint64_t dst, uint64_t src, uint64_t n) {
   /* byte-wise copy (kernel C is -mgeneral-regs-only) */
-  volatile unsigned char *d = (volatile unsigned char *)dst;
-  const unsigned char *s = (const unsigned char *)src;
+  volatile unsigned char *d = (volatile unsigned char *)phys_to_virt(dst);
+  const unsigned char *s = (const unsigned char *)phys_to_virt(src);
   for (uint64_t i = 0; i < n; i++)
     d[i] = s[i];
   return dst;
@@ -138,11 +138,11 @@ static int region_grow(struct addr_space *as) {
     if (!arr)
       return -1;
   }
-  v2_memcpy_frames(arr, (uint64_t)as->regions,
+  v2_memcpy_frames(arr, virt_to_phys(as->regions),
                    (uint64_t)as->nr * sizeof(struct vm_region));
   int old = region_frames_for(as->cap);
-  uint64_t oldarr = (uint64_t)as->regions;
-  as->regions = (struct vm_region *)arr;
+  uint64_t oldarr = virt_to_phys(as->regions);
+  as->regions = (struct vm_region *)phys_to_virt(arr);
   as->cap = newcap;
   for (int i = 0; i < old; i++)
     frame_free(oldarr + (uint64_t)i * FRAME_SIZE);
@@ -195,7 +195,7 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   as->ver = AS_V2;
   as->root_phys = 0;
   as->asid = (uint16_t)tgid;
-  as->regions = (struct vm_region *)arr;
+  as->regions = (struct vm_region *)phys_to_virt(arr);
   as->nr = 0;
   as->cap = VM_REGION_INIT_CAP;
   as->resident_frames = 0;
@@ -249,7 +249,7 @@ void vm_as_teardown(struct addr_space *as) {
   }
   uint64_t root = as->root_phys;
   uint16_t asid = as->asid;
-  uint64_t arr = (uint64_t)as->regions;
+  uint64_t arr = as->regions ? virt_to_phys(as->regions) : 0;
   int cap = as->cap;
   int nr = as->nr;
   as->ver = 0;
@@ -280,7 +280,7 @@ void vm_as_teardown(struct addr_space *as) {
   /* S4: every region record held one object reference; drop it while the
      array is still readable (before its frames are released). */
   if (arr && nr > 0) {
-    struct vm_region *ra = (struct vm_region *)arr;
+    struct vm_region *ra = (struct vm_region *)phys_to_virt(arr);
     for (int i = 0; i < nr; i++) {
       if (ra[i].obj)
         vm_object_unref(ra[i].obj);
@@ -310,7 +310,7 @@ void vm_as_teardown(struct addr_space *as) {
 static struct vm_object vm_objects[VM_OBJ_MAX];
 
 static void vm_obj_zero(uint64_t phys, uint64_t n) {
-  volatile unsigned char *d = (volatile unsigned char *)phys;
+  volatile unsigned char *d = (volatile unsigned char *)phys_to_virt(phys);
   for (uint64_t i = 0; i < n; i++)
     d[i] = 0;
 }
@@ -346,7 +346,7 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
       return 0;
     }
     vm_obj_zero(a, (uint64_t)af * FRAME_SIZE); /* 0 == not materialized */
-    arr = (uint64_t *)a;
+    arr = (uint64_t *)phys_to_virt(a);
   }
   o->used = 1;
   o->refs = 1; /* the creation reference: whoever called create owns it */
@@ -369,7 +369,7 @@ static void vm_object_free_locked(struct vm_object *o) {
   }
   if (o->frames) {
     for (int i = 0; i < o->arr_frames; i++)
-      frame_free((uint64_t)o->frames + (uint64_t)i * FRAME_SIZE);
+      frame_free(virt_to_phys(o->frames) + (uint64_t)i * FRAME_SIZE);
   }
   o->used = 0;
   o->refs = 0;
@@ -500,12 +500,12 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
       return -ENOMEM;
     }
     vm_obj_zero(na, (uint64_t)naf * FRAME_SIZE);
-    uint64_t *narr = (uint64_t *)na;
+    uint64_t *narr = (uint64_t *)phys_to_virt(na);
     for (int i = 0; i < o->nr_frames; i++)
       narr[i] = o->frames[i];
     if (o->frames) {
       for (int i = 0; i < o->arr_frames; i++)
-        frame_free((uint64_t)o->frames + (uint64_t)i * FRAME_SIZE);
+        frame_free(virt_to_phys(o->frames) + (uint64_t)i * FRAME_SIZE);
     }
     o->frames = narr;
     o->arr_frames = naf;
@@ -1055,7 +1055,7 @@ static uint32_t vm_pub_file_xzero, vm_pub_anon_xzero, vm_pub_rows_printed;
 
 /* Zero BYTES in a 4 KiB frame (kernel VA == phys on both arches). */
 static int vm_zero_bytes(uint64_t phys) {
-  const volatile uint64_t *w = (const volatile uint64_t *)phys;
+  const volatile uint64_t *w = (const volatile uint64_t *)phys_to_virt(phys);
   int z = 0;
   for (int i = 0; i < (int)(FRAME_SIZE / 8); i++) {
     uint64_t v = w[i];
@@ -1097,7 +1097,7 @@ uint32_t vm_test_id_checks(void) { return vm_id_checks; }
 #endif
 
 static uint32_t vm_page_nz_sum(uint64_t phys, uint32_t *sum) {
-  const volatile uint8_t *p = (const volatile uint8_t *)phys;
+  const volatile uint8_t *p = (const volatile uint8_t *)phys_to_virt(phys);
   uint32_t nz = 0, s = 0;
   for (uint32_t i = 0; i < (uint32_t)FRAME_SIZE; i++) {
     uint8_t v = p[i];
@@ -1373,7 +1373,7 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
         break;
       for (uint32_t k = 0; k < fh.len; k++)
         fh.data[k] = o->nfs_fh[k];
-      n[i] = nfs_read_file(m, &fh, (uint32_t)off, (void *)f[i], FRAME_SIZE);
+      n[i] = nfs_read_file(m, &fh, (uint32_t)off, phys_to_virt(f[i]), FRAME_SIZE);
     } else {
       if (!o->file_start_cluster)
         break;
@@ -1429,12 +1429,12 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
       if (pb) {
         struct fat16_page_id pid;
         if (fat16_page_probe(o->file_start_cluster, (uint32_t)o->size,
-                             (uint32_t)off, (uint8_t *)pb, &pid) == 1) {
+                             (uint32_t)off, (uint8_t *)phys_to_virt(pb), &pid) == 1) {
           vm_frame_copy(dst, pb, FRAME_SIZE);
 #ifdef KERNEL_MODE_UNIT_TEST
           if (vm_test_corrupt_publish) {
             vm_test_corrupt_publish = 0;
-            volatile uint8_t *cz = (volatile uint8_t *)dst;
+            volatile uint8_t *cz = (volatile uint8_t *)phys_to_virt(dst);
             for (int z = 0; z < 256; z++)
               cz[z] = 0;
           }
@@ -1526,7 +1526,7 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
           break;
         for (uint32_t q = 0; q < fh.len; q++)
           fh.data[q] = o->nfs_fh[q];
-        n[0] = nfs_read_file(m, &fh, (uint32_t)off, (void *)f[0], FRAME_SIZE);
+        n[0] = nfs_read_file(m, &fh, (uint32_t)off, phys_to_virt(f[0]), FRAME_SIZE);
       } else {
         n[0] = fat16_read_direct_pos(o->file_start_cluster, (uint32_t)o->size,
                                      f[0], FRAME_SIZE, (uint32_t)off);
@@ -1645,7 +1645,7 @@ static uint64_t vm_data_page_rescue(struct vm_object *o, uint64_t off) {
     if (m && fh.len && fh.len <= NFS_FH_MAX) {
       for (uint32_t k = 0; k < fh.len; k++)
         fh.data[k] = o->nfs_fh[k];
-      n = nfs_read_file(m, &fh, (uint32_t)off, (void *)fr, FRAME_SIZE);
+      n = nfs_read_file(m, &fh, (uint32_t)off, phys_to_virt(fr), FRAME_SIZE);
     }
   }
   if (n != (int)FRAME_SIZE || vm_page_zero(fr)) {
@@ -2014,7 +2014,7 @@ int vm_user_read(struct process *p, uint64_t va, void *dst, int len) {
       return -1; /* peer unmapped/protected between touch and lock */
     }
     uint64_t pa = vm_arch_leaf_phys(leaf) + (a & (FRAME_SIZE - 1));
-    const volatile unsigned char *src = (const volatile unsigned char *)pa;
+    const volatile unsigned char *src = (const volatile unsigned char *)phys_to_virt(pa);
     for (int k = 0; k < in_page; k++)
       d[i + k] = src[k]; /* under vm_lock: frame cannot be freed/unmapped */
     spinlock_release_irqrestore(&vm_lock, fl);
@@ -2072,7 +2072,7 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
       return -1; /* peer unmapped/protected between touch and lock */
     }
     uint64_t pa = vm_arch_leaf_phys(leaf) + (a & (FRAME_SIZE - 1));
-    volatile unsigned char *dst = (volatile unsigned char *)pa;
+    volatile unsigned char *dst = (volatile unsigned char *)phys_to_virt(pa);
     for (int k = 0; k < in_page; k++)
       dst[k] = s[i + k]; /* under vm_lock: frame cannot be freed/unmapped */
     spinlock_release_irqrestore(&vm_lock, fl);
@@ -2097,7 +2097,7 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
  * read ONCE at exec and each page's sum is kept (4 B/page); a later fill
  * must produce the same sum, which a zero-delivery cannot. */
 static uint32_t vm_page_sum(uint64_t phys) {
-  const volatile uint8_t *p = (const volatile uint8_t *)phys;
+  const volatile uint8_t *p = (const volatile uint8_t *)phys_to_virt(phys);
   uint32_t h = 2166136261u;
   for (int i = 0; i < (int)FRAME_SIZE; i++)
     h = (h ^ p[i]) * 16777619u;
@@ -2125,7 +2125,7 @@ int vm_image_sums_build(struct addr_space *as) {
       frame_free(sums + (uint64_t)i * FRAME_SIZE);
     return -ENOMEM;
   }
-  uint32_t *tab = (uint32_t *)sums;
+  uint32_t *tab = (uint32_t *)phys_to_virt(sums);
   for (uint32_t i = 0; i < pages; i++) {
     uint32_t pos = i * (uint32_t)FRAME_SIZE;
     uint32_t want = as->img_file_size - pos;
@@ -2150,7 +2150,7 @@ int vm_image_sums_build(struct addr_space *as) {
       return -EIO;
     }
     /* The bytes past EOF in the last page are zeros by definition. */
-    volatile uint8_t *sp = (volatile uint8_t *)scr;
+    volatile uint8_t *sp = (volatile uint8_t *)phys_to_virt(scr);
     for (uint32_t b = want; b < FRAME_SIZE; b++)
       sp[b] = 0;
     tab[i] = vm_page_sum(scr);
@@ -2243,10 +2243,10 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
   }
   /* Tail of a partial last page: zero it (the eager path delivered a
      zeroed frame, so the bytes past the image size were already zero). */
-  volatile uint8_t *fp = (volatile uint8_t *)fr;
+  volatile uint8_t *fp = (volatile uint8_t *)phys_to_virt(fr);
   for (int i = n; i < (int)FRAME_SIZE; i++)
     fp[i] = 0;
-  __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+  __builtin___clear_cache((char *)phys_to_virt(fr), (char *)phys_to_virt(fr) + FRAME_SIZE);
 
   /* Executable image pages: two independent reads must agree before the
      page becomes code.  One bad read is then re-read instead of executed.
@@ -2281,7 +2281,7 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
     uint32_t pi = pos / (uint32_t)FRAME_SIZE;
     if (as->img_sums && pi < as->img_sums_pages) {
       uint32_t want = vm_page_sum(fr);
-      uint32_t have = ((const uint32_t *)as->img_sums)[pi];
+      uint32_t have = ((const uint32_t *)phys_to_virt(as->img_sums))[pi];
       if (want != have) {
         /* M6/L69: THE SUM IS THE WITNESS; THE CACHE IS NOT.  A frame published
            from an aborted transfer is all zeros, and every cache read of that
@@ -2751,7 +2751,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
       uint64_t nf = frame_alloc_zeroed();
       if (nf) {
         const volatile uint64_t *oldp = (const volatile uint64_t *)a;
-        volatile uint64_t *dst = (volatile uint64_t *)nf;
+        volatile uint64_t *dst = (volatile uint64_t *)phys_to_virt(nf);
         for (int i = 0; i < FRAME_SIZE / 8; i++)
           dst[i] = oldp[i];
         vm_arch_unmap(as, a); /* frees the old private frame, flushes */
@@ -3023,8 +3023,8 @@ static int v2_prefetch_alive_locked(struct addr_space *as, uint32_t epoch,
 /* Word-wise frame copy for the prefetch path (both sides are 4 KiB frame
    runs; kernel C is -mgeneral-regs-only, so no SIMD). */
 static void v2_prefetch_copy(uint64_t dst, uint64_t src) {
-  volatile uint64_t *d = (volatile uint64_t *)dst;
-  const uint64_t *s = (const uint64_t *)src;
+  volatile uint64_t *d = (volatile uint64_t *)phys_to_virt(dst);
+  const uint64_t *s = (const uint64_t *)phys_to_virt(src);
   for (uint64_t i = 0; i < FRAME_SIZE / 8; i++)
     d[i] = s[i];
 }
@@ -3122,7 +3122,7 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
         st->stopped = 2;
         break;
       }
-      volatile uint8_t *bp = (volatile uint8_t *)buf;
+      volatile uint8_t *bp = (volatile uint8_t *)phys_to_virt(buf);
       for (int i = got; i < want; i++)
         bp[i] = 0;
     }
@@ -3170,7 +3170,7 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
           /* M6/L63: the load-time sum is the witness -- no second read, and
              a device that answers the same zeros twice cannot pass it. */
           vok = (vm_page_sum(buf + i * FRAME_SIZE) ==
-                 ((const uint32_t *)as->img_sums)[pi]);
+                 ((const uint32_t *)phys_to_virt(as->img_sums))[pi]);
         } else if (ppos + FRAME_SIZE <= (uint64_t)fsize) {
           uint64_t chk = frame_alloc();
           if (chk) {
@@ -3195,7 +3195,7 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
         break;
       }
       v2_prefetch_copy(fr, buf + i * FRAME_SIZE);
-      __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+      __builtin___clear_cache((char *)phys_to_virt(fr), (char *)phys_to_virt(fr) + FRAME_SIZE);
       cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
 
       /* Re-validate under vm_lock and install if still absent: a peer
@@ -3891,7 +3891,7 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
         return -ENOTSUP; /* sub-page window into scanout: not modelled */
       if (!virtio_gpu_get_framebuffer())
         return -ENODEV;
-      return vm_map_fb(grp, (uint64_t)(uintptr_t)virtio_gpu_get_framebuffer());
+      return vm_map_fb(grp, kimg_pa(virtio_gpu_get_framebuffer()));
     }
     obj = file_memfd_obj(grp, fd);
     if (obj) {
@@ -4355,16 +4355,16 @@ int vm_frame_used_snapshot(void) { return frame_used_count(); }
 /* Copy `n` bytes between identity-mapped frames (kernel C is
  * -mgeneral-regs-only: no SIMD copying). */
 static void vm_frame_copy(uint64_t dst, uint64_t src, uint64_t n) {
-  volatile unsigned char *d = (volatile unsigned char *)dst;
-  const unsigned char *s = (const unsigned char *)src;
+  volatile unsigned char *d = (volatile unsigned char *)phys_to_virt(dst);
+  const unsigned char *s = (const unsigned char *)phys_to_virt(src);
   for (uint64_t i = 0; i < n; i++)
     d[i] = s[i];
 }
 
 /* M6/L60: page identity/emptiness tests for the executable page-in gate. */
 static int vm_page_eq(uint64_t x, uint64_t y) {
-  const volatile uint64_t *a = (const volatile uint64_t *)x;
-  const volatile uint64_t *b = (const volatile uint64_t *)y;
+  const volatile uint64_t *a = (const volatile uint64_t *)phys_to_virt(x);
+  const volatile uint64_t *b = (const volatile uint64_t *)phys_to_virt(y);
   for (int i = 0; i < (int)(FRAME_SIZE / 8); i++)
     if (a[i] != b[i])
       return 0;
@@ -4372,7 +4372,7 @@ static int vm_page_eq(uint64_t x, uint64_t y) {
 }
 
 static int vm_page_zero(uint64_t x) {
-  const volatile uint64_t *a = (const volatile uint64_t *)x;
+  const volatile uint64_t *a = (const volatile uint64_t *)phys_to_virt(x);
   for (int i = 0; i < (int)(FRAME_SIZE / 8); i++)
     if (a[i])
       return 0;
@@ -4447,8 +4447,8 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
     uint32_t run = (src->img_sums_pages * 4 + FRAME_SIZE - 1) / FRAME_SIZE;
     uint64_t cp = frame_alloc_contig((int)run);
     if (cp) {
-      const volatile uint8_t *from = (const volatile uint8_t *)src->img_sums;
-      volatile uint8_t *to = (volatile uint8_t *)cp;
+      const volatile uint8_t *from = (const volatile uint8_t *)phys_to_virt(src->img_sums);
+      volatile uint8_t *to = (volatile uint8_t *)phys_to_virt(cp);
       for (uint32_t i = 0; i < run * FRAME_SIZE; i++)
         to[i] = from[i];
       dst->img_sums = cp;

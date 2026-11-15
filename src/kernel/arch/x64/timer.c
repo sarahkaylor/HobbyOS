@@ -2,14 +2,15 @@
 #include "virtio_net.h"
 #include "arch/cpu.h"
 #include <stdint.h>
+#include "kmem.h"
 
 static volatile uint64_t timer_ticks = 0;
 
 // --- LAPIC timer registers (xAPIC MMIO; each core reaches its own LAPIC) ---
-#define LAPIC_LVT_TIMER (*(volatile uint32_t *)0xFEE00320)
-#define LAPIC_TIC_INIT  (*(volatile uint32_t *)0xFEE00380)
-#define LAPIC_TIC_CUR   (*(volatile uint32_t *)0xFEE00390)
-#define LAPIC_TDC       (*(volatile uint32_t *)0xFEE003E0)
+#define LAPIC_LVT_TIMER (*(volatile uint32_t *)phys_to_virt(0xFEE00320))
+#define LAPIC_TIC_INIT  (*(volatile uint32_t *)phys_to_virt(0xFEE00380))
+#define LAPIC_TIC_CUR   (*(volatile uint32_t *)phys_to_virt(0xFEE00390))
+#define LAPIC_TDC       (*(volatile uint32_t *)phys_to_virt(0xFEE003E0))
 
 // Counts per millisecond of this machine's LAPIC timer, measured once on
 // the boot core (the PIT is the global time base, but only the boot core

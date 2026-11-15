@@ -202,9 +202,6 @@ void frame_init(void) {
       uart_puts(" ext1=NOT-RAM(that is a device window, not memory) -- reserved");
       frame_reserve_range(FRAME_EXT1_BASE, FRAME_EXT1_TOP);
     }
-    /* The MMIO windows shadow the identity map of their own physical
-       2 MiB; a frame there would be the device.  Never hand those out. */
-    frame_reserve_range(FRAME_MMIO_SHADOW_LO, FRAME_MMIO_SHADOW_HI);
 #endif
     uart_puts("\n");
   }
@@ -216,8 +213,8 @@ void frame_init(void) {
   {
     extern char _start[];
     extern char __stack_top[];
-    uint64_t img_lo = (uint64_t)(uintptr_t)_start;
-    uint64_t img_hi = (uint64_t)(uintptr_t)__stack_top + 0x10000;
+    uint64_t img_lo = kimg_pa(_start);
+    uint64_t img_hi = kimg_pa(__stack_top) + 0x10000;
     frame_reserve_range(img_lo, img_hi);
   }
 
@@ -246,7 +243,7 @@ void frame_init(void) {
 /* Write/read-back probe for one frame.  Returns 1 when the address behaves
  * like RAM, 0 when it does not.  Leaves the frame zeroed and unallocated. */
 uint64_t frame_ram_probe(uint64_t phys) {
-  volatile uint64_t *p = (volatile uint64_t *)phys;
+  volatile uint64_t *p = (volatile uint64_t *)phys_to_virt(phys);
   uint64_t a = 0x5A5A5A5A5A5A5A5AULL, b = 0xA5A5A5A5A5A5A5A5ULL;
   int ok;
   p[0] = a;
@@ -317,7 +314,7 @@ uint64_t frame_alloc_zeroed(void) {
   if (!p)
     return 0;
   /* Plain 64-bit stores (kernel C is -mgeneral-regs-only: no SIMD). */
-  volatile uint64_t *d = (volatile uint64_t *)p;
+  volatile uint64_t *d = (volatile uint64_t *)phys_to_virt(p);
   for (int i = 0; i < FRAME_SIZE / 8; i++)
     d[i] = 0;
   return p;

@@ -51,6 +51,7 @@
 #include "gpu_abi.h" /* M1: /dev/gpu GPU_IOC_* surface */
 #include "fs.h"
 #include "kline.h"
+#include "kmem.h"
 #include "ipc_proto.h"
 #include "linux_fb.h"
 #include "linux_syscall.h"
@@ -647,7 +648,7 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
     if (!arg) return l_ret(tf, -EFAULT);
     unsigned char kbuf[160];
     int rr = hb_fb_ioctl_route((unsigned long)req, kbuf,
-                               (uint64_t)virtio_gpu_get_framebuffer());
+                               kimg_pa(virtio_gpu_get_framebuffer()));
     if (rr != 0) return l_ret(tf, rr);
     int cr = l_copy_to_user(p, arg, kbuf, sz);
     return l_ret(tf, cr != 0 ? cr : 0);

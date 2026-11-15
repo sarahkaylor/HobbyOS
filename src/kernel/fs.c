@@ -15,6 +15,7 @@
 #include "input_node.h"   /* GB-171: evdev record fill for /dev/input/event0 */
 #include "virtio_input.h" /* GB-171: the key ring that node drains */
 #include "frame.h" /* M5: fs_read_image contiguous image frames */
+#include "kmem.h"
 #include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
 #include "ext2_vfs.h" /* cp/ext2: the /EXT data disk */
 
@@ -3643,7 +3644,7 @@ int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
      * 1 KiB clamp here serialized every exec image read at one RPC per
      * millisecond-plus. */
     int got = nfs_read_file(m, &f.nfs.fh, off,
-                            (void *)(uintptr_t)(buf + off), size - off);
+                            phys_to_virt(buf + off), size - off);
     if (got <= 0) {
       for (uint32_t i = 0; i < pages; i++)
         frame_free(buf + (uint64_t)i * FRAME_SIZE);
@@ -3652,7 +3653,7 @@ int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
     off += (uint32_t)got;
   }
 
-  *buf_out = (uint8_t *)(uintptr_t)buf;
+  *buf_out = (uint8_t *)phys_to_virt(buf);
   *size_out = size;
   *pages_out = pages;
   return 1;
