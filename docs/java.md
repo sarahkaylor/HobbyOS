@@ -33,10 +33,18 @@ runs real programs in the guest and records the console as the witness.
    old code. After any kernel change: check the build's exit code, and
    `strings hobbyos.elf | grep '<a literal you just added>'` before believing a
    single line of console output.
-8. **The harness runs one program at a time, so "concurrency" needs fork.** Wave
-   lines are launched sequentially (`[ARRIVED] A` prints before `[WAVE-TRY] B`),
-   and record locks are keyed per process, so neither two wave lines nor two
-   threads in one JVM can produce contention. Any claim about blocking,
+8. **Program stdout is NOT ordered by execution order.** The wave driver is
+   strictly sequential -- `[WAVE-TRY] MMapTouch`, `[ARRIVED]`, `[WAVE-TRY]
+   PlainRead`, `[ARRIVED]` (`obj/jdk/mmaptouch.log:109-305`) -- but MMapTouch's six
+   output lines are written to the log AFTER both PlainRead runs that followed it.
+   A program's buffered stdout can surface anywhere. Attribute output by its own
+   prefix (`MT `, `PR `), never by where it sits relative to the driver's markers,
+   and read execution order off `[WAVE-TRY]`/`[ARRIVED]` only. Anything that
+   depends on ordering between two programs' prints is unmeasurable.
+
+9. **The harness runs one program at a time, so "concurrency" needs fork.** Wave
+   lines are launched sequentially, and record locks are keyed per process, so
+   neither two wave lines nor two threads in one JVM can produce contention. Any claim about blocking,
    cross-process locking or parallel writers is untestable until fork exists --
    say "unverified", not "fixed".
 
