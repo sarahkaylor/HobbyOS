@@ -193,6 +193,9 @@ int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
 int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
                      int64_t off, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
+
+/* GB-308: open flags of an fd (-EBADF if absent), for the mmap access check. */
+int file_open_flags(struct process *p, int fd, uint32_t *out);
 /* WK-1 M3: length-bounded console write from user space, shared by
  * SYS_WRITE_CONSOLE (0001) and the fd-1/2 console fallback in file_write
  * (0002).  Emits exactly `size` bytes and returns size; -EFAULT on an

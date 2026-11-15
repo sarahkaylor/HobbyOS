@@ -3790,6 +3790,17 @@ int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
   return 0;
 }
 
+/* GB-308: the open flags of an fd, for the mmap access check.  Returns 0 and
+ * fills *out, or -EBADF.  The access mode is the low two bits (O_ACCMODE). */
+int file_open_flags(struct process *p, int fd, uint32_t *out) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -EBADF;
+  if (out) *out = global_file_table[gfd].open_flags;
+  return 0;
+}
+
 /* GB-308 MAP_SHARED write-back.  Write `len` bytes at file offset `off` into
  * the FAT16 file identified by (start_cluster, file_size), through an fd this
  * process already holds on it.  Why an fd and not the object: there is no
