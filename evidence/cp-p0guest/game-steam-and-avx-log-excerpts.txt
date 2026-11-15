@@ -1,0 +1,20 @@
+## AVX masked run (PROTON_LOG=1, +seh)
+      7 dispatch_exception code=40010006
+     30 dispatch_exception code=406d1388
+      1 dispatch_exception code=6ba
+      1 dispatch_exception code=e06d7363
+## AVX on run (try1)
+      7 dispatch_exception code=40010006
+     30 dispatch_exception code=406d1388
+      1 dispatch_exception code=6ba
+      4 dispatch_exception code=e06d7363
+## steam_api in AVX-on run
+811.916:0020:0024:trace:loaddll:build_module Loaded L"Z:\\opt\\cp2077\\bin\\x64\\steam_api64.dll" at 00006FFFF4990000: native
+812.007:0020:0024:warn:debugstr:OutputDebugStringA "[S_API] SteamAPI_Init(): Failed to load module 'C:\\Program Files (x86)\\Steam\\steamclient64.dll'\n"
+## guest cpu (AVX masked boot)
+[    1.457047] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    1.459029] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    1.460159] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    1.462030] x86/fpu: xstate_offset[9]:  576, xstate_sizes[9]:    8
+[    1.463157] x86/fpu: Enabled xstate features 0x203, context size is 584 bytes, using 'compacted' format.
+0

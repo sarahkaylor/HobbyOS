@@ -1,0 +1,10 @@
+# host fence 2026-11-14T21:41:10-06:00 host=sarahpc cpu=avx-on cpu=host shim=1 vkfilter=order
+# waiting for ~/cp/measure.lock
+# lock acquired 2026-11-14T21:41:10-06:00
+### host-radv fence 5000 d3d12probe
+ADAPTER=AMD Radeon RX 9070 XT (RADV GFX1201)
+RESULT mode=fence count=5000 submit_us_p50=0.8 submit_us_p99=1.6 roundtrip_us_p50=47.7 roundtrip_us_p90=55.2 roundtrip_us_p99=126.1
+### host-radv fence 5000 d3d12probe
+ADAPTER=AMD Radeon RX 9070 XT (RADV GFX1201)
+RESULT mode=fence count=5000 submit_us_p50=1.4 submit_us_p99=2.0 roundtrip_us_p50=53.3 roundtrip_us_p90=55.7 roundtrip_us_p99=137.5
+# done 2026-11-14T21:41:12-06:00

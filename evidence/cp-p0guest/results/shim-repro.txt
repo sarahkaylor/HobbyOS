@@ -1,0 +1,19 @@
+## SHIM=0 avx-on cpu=host shim=0 vkfilter=order
+vkcube: ./cube/cube.c:1861: demo_prepare_texture_image: Assertion `!err' failed.
+vkcube_rc=134
+# strace (failed mmaps):
+53945 mmap(NULL, 262144, PROT_READ|PROT_WRITE, MAP_SHARED, 201</dmabuf:>, 0) = -1 EACCES (Permission denied)
+53945 --- SIGPIPE {si_signo=SIGPIPE, si_code=SI_USER, si_pid=53945, si_uid=1000} ---
+# qemu/render-server stderr:
+      1 virtio_gpu_virgl_process_cmd: ctrl 0x208, error 0x1200
+      1 virtio_gpu_virgl_map_resource_blob: failed to map virgl resource: Invalid argument
+## SHIM=1 avx-on cpu=host shim=1 vkfilter=order
+vkcube_rc=0
+# qemu/render-server stderr:
+      2 cp-shim: pid 54646 (virgl_render_server) drmPrimeHandleToFD(handle=24, flags=0x80000) -> +DRM_RDWR = 0
+      1 cp-shim: pid 54646 (virgl_render_server) drmPrimeHandleToFD(handle=6, flags=0x80000) -> +DRM_RDWR = 0
+      1 cp-shim: pid 54646 (virgl_render_server) drmPrimeHandleToFD(handle=5, flags=0x80000) -> +DRM_RDWR = 0
+      1 cp-shim: pid 54646 (virgl_render_server) drmPrimeHandleToFD(handle=4, flags=0x80000) -> +DRM_RDWR = 0
+      1 cp-shim: pid 54646 (virgl_render_server) drmPrimeHandleToFD(handle=36, flags=0x80000) -> +DRM_RDWR = 0
+      1 cp-shim: pid 54646 (virgl_render_server) drmPrimeHandleToFD(handle=30, flags=0x80000) -> +DRM_RDWR = 0
+      1 cp-shim: pid 54646 (virgl_render_server) drmPrimeHandleToFD(handle=11, flags=0x80000) -> +DRM_RDWR = 0

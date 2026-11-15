@@ -1,0 +1,46 @@
+# guest d3d12 2026-11-14T21:44:26-06:00 host=sarahpc cpu=avx-on cpu=host shim=1 vkfilter=order
+# waiting for ~/cp/measure.lock
+# lock acquired 2026-11-14T21:46:40-06:00
+### present-kms-dmabuf light DISPLAY=:0  d3d12probe present 1280 720 10 16 1
+START mode=present W=1280 H=720 iters=16 draws=1 tearing=1
+RESULT mode=present frames=904 secs=10.02 avg_fps=90.1 median_ms=5.903 p90_ms=26.357 p99_ms=26.771 fps_from_median=169.4
+### present-kms-dmabuf draws2000 DISPLAY=:0  d3d12probe present 1280 720 10 16 2000
+START mode=present W=1280 H=720 iters=16 draws=2000 tearing=1
+RESULT mode=present frames=940 secs=10.03 avg_fps=93.8 median_ms=7.051 p90_ms=25.514 p99_ms=26.153 fps_from_median=141.8
+### present-kms-swcopy light DISPLAY=:0 MESA_VK_WSI_DEBUG=sw d3d12probe present 1280 720 10 16 1
+START mode=present W=1280 H=720 iters=16 draws=1 tearing=1
+RESULT mode=present frames=601 secs=10.04 avg_fps=59.9 median_ms=16.710 p90_ms=16.932 p99_ms=17.291 fps_from_median=59.8
+### present-xvfb-swcopy light DISPLAY=:1 MESA_VK_WSI_DEBUG=sw d3d12probe present 1280 720 10 16 1
+START mode=present W=1280 H=720 iters=16 draws=1 tearing=1
+RESULT mode=present frames=6753 secs=10.00 avg_fps=686.5 median_ms=1.453 p90_ms=1.480 p99_ms=1.653 fps_from_median=688.2
+### offscreen light DISPLAY=:0  d3d12probe offscreen 1280 720 10 16 1
+START mode=offscreen W=1280 H=720 iters=16 draws=1 tearing=0
+RESULT mode=offscreen frames=102646 secs=10.00 avg_fps=10482.2 median_ms=0.009 p90_ms=0.271 p99_ms=0.283 fps_from_median=116279.1
+### offscreen gpuheavy DISPLAY=:0  d3d12probe offscreen 1280 720 10 2048 1
+START mode=offscreen W=1280 H=720 iters=2048 draws=1 tearing=0
+RESULT mode=offscreen frames=6069 secs=10.01 avg_fps=618.8 median_ms=1.585 p90_ms=1.780 p99_ms=1.817 fps_from_median=631.1
+### offscreen draws2000 DISPLAY=:0  d3d12probe offscreen 1280 720 10 16 2000
+START mode=offscreen W=1280 H=720 iters=16 draws=2000 tearing=0
+RESULT mode=offscreen frames=20573 secs=10.00 avg_fps=2083.0 median_ms=0.460 p90_ms=0.668 p99_ms=0.705 fps_from_median=2173.0
+### present-kms-dmabuf light DISPLAY=:0  d3d12probe present 1920 1080 10 16 1
+START mode=present W=1920 H=1080 iters=16 draws=1 tearing=1
+RESULT mode=present frames=1122 secs=10.02 avg_fps=112.6 median_ms=3.224 p90_ms=22.937 p99_ms=23.352 fps_from_median=310.2
+### present-kms-dmabuf draws2000 DISPLAY=:0  d3d12probe present 1920 1080 10 16 2000
+START mode=present W=1920 H=1080 iters=16 draws=2000 tearing=1
+RESULT mode=present frames=1104 secs=10.01 avg_fps=110.3 median_ms=11.891 p90_ms=13.860 p99_ms=22.371 fps_from_median=84.1
+### present-kms-swcopy light DISPLAY=:0 MESA_VK_WSI_DEBUG=sw d3d12probe present 1920 1080 10 16 1
+START mode=present W=1920 H=1080 iters=16 draws=1 tearing=1
+RESULT mode=present frames=732 secs=10.03 avg_fps=74.5 median_ms=13.335 p90_ms=13.669 p99_ms=14.983 fps_from_median=75.0
+### present-xvfb-swcopy light DISPLAY=:1 MESA_VK_WSI_DEBUG=sw d3d12probe present 1920 1080 10 16 1
+START mode=present W=1920 H=1080 iters=16 draws=1 tearing=1
+RESULT mode=present frames=3502 secs=10.01 avg_fps=356.0 median_ms=2.786 p90_ms=2.900 p99_ms=3.239 fps_from_median=358.9
+### offscreen light DISPLAY=:0  d3d12probe offscreen 1920 1080 10 16 1
+START mode=offscreen W=1920 H=1080 iters=16 draws=1 tearing=0
+RESULT mode=offscreen frames=95816 secs=10.00 avg_fps=9818.7 median_ms=0.010 p90_ms=0.269 p99_ms=0.281 fps_from_median=104166.7
+### offscreen gpuheavy DISPLAY=:0  d3d12probe offscreen 1920 1080 10 2048 1
+START mode=offscreen W=1920 H=1080 iters=2048 draws=1 tearing=0
+RESULT mode=offscreen frames=3102 secs=10.01 avg_fps=315.9 median_ms=3.115 p90_ms=3.335 p99_ms=3.358 fps_from_median=321.0
+### offscreen draws2000 DISPLAY=:0  d3d12probe offscreen 1920 1080 10 16 2000
+START mode=offscreen W=1920 H=1080 iters=16 draws=2000 tearing=0
+RESULT mode=offscreen frames=20592 secs=10.00 avg_fps=2080.4 median_ms=0.458 p90_ms=0.660 p99_ms=0.704 fps_from_median=2183.4
+# done 2026-11-14T21:49:32-06:00

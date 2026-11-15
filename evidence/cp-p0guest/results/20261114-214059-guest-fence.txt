@@ -1,0 +1,8 @@
+# guest fence 2026-11-14T21:40:59-06:00 host=sarahpc cpu=avx-on cpu=host shim=1 vkfilter=order
+# waiting for ~/cp/measure.lock
+# lock acquired 2026-11-14T21:40:59-06:00
+### fence DISPLAY=:0  d3d12probe fence 5000
+RESULT mode=fence count=5000 submit_us_p50=5.8 submit_us_p99=17.7 roundtrip_us_p50=277.0 roundtrip_us_p90=312.3 roundtrip_us_p99=596.4
+### fence DISPLAY=:0  d3d12probe fence 5000
+RESULT mode=fence count=5000 submit_us_p50=5.3 submit_us_p99=15.5 roundtrip_us_p50=275.9 roundtrip_us_p90=410.4 roundtrip_us_p99=681.7
+# done 2026-11-14T21:41:06-06:00
