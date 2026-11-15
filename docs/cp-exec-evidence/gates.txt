@@ -1,0 +1,30 @@
+cp/exec (lane C2-exec) gate results — strix (192.168.0.123, Zen 5 AVX-512), 2026-11-15
+Branch cp-exec @ aa81dfc7, parity base ~/cp/base @ 721266a9.
+All builds MAKEFLAGS=-j16; every QEMU boot under flock /tmp/cp-qemu.lock.
+
+Common gate suite (tools/gate/t3_linux_probe.sh per probe):
+  build rc=0
+  hello      rc=0 [LP] done rc=0
+  exec       rc=0 [LP] done rc=0        <-- this lane's probe
+  fd         rc=0 [LP] done rc=0
+  mem        rc=0 [LP] done rc=0
+  proc       rc=0 [LP] done rc=0
+  tmpfs      rc=0 [LP] done rc=0
+  wsys       rc=0 [LP] done rc=0
+  gs         rc=0 [LP] done rc=0
+  timers     rc=0 [LP] done rc=0
+  futex_sig  rc=0 [LP] done rc=0
+  fpu_sig    rc=0 [LP] done rc=0
+  tramp_sig  rc=0 [LP] done rc=0
+  avx        rc=0 [LP] done rc=0
+  join       rc=1  FAIL — KNOWN BASE RED (C1-thr; join rows A/E). base fails identically.
+  unit       rc=1  Tests run 450, Tests failed 2 — virtio_gpu_test.c:214/:244
+                   (known base reds, the ±1-line tolerance of base's :213/:243)
+  host_tests 38/40 passed — the two known gaming.md board tests (make -k exit 2).
+                   New host tests all pass: ALL NFS PROTO TESTS PASSED (readlink +
+                   symlink join), ELF IMAGE host tests (IRELATIVE), linux_abi
+                   (execve/execveat/ELIBBAD golden).
+  castscan   rc=0  — no new unreviewed int<->pointer casts.
+  arm        rc=0  — make ARCH=arm TOOLS_SKIP=1 hobbyos.elf links.
+
+Every red above is present identically on ~/cp/base: full parity.
