@@ -17,6 +17,7 @@ native `SYS_EXEC` (`process_exec_current`) maps flat FAT16 images through a
 | NFS symlinks | `nfs_lookup` (follows), `nfs_readlink`, `nfs_parse_readlink_reply`, `nfs_symlink_join` | §4 |
 | paths | `struct process.cwd`, `exe_path` = `PROC_PATH_MAX` (== `VFS_PATH_MAX` 1024) | the compat chdir row widened to match |
 | probe | `src/user/linux_probe_exec.c` | execs copies of itself; no helper to stage |
+| glibc gate | `tools/cp/exec/exec_gate.sh`, `tools/cp/exec/exec_child.c` | stages a glibc 2.31 static-pie and dynamic child + the runtime on FAT16; the probe's glibc rows become mandatory |
 
 ## 2. execve order (Linux fs/exec.c)
 
@@ -86,7 +87,22 @@ mount root) and walks again, 12 hops at most.  Every NFS caller (open, stat,
 spawn, exec) follows, the Linux default; nothing reaches NFS with lstat
 semantics.  A symlink in an intermediate component is not followed yet.
 
-## 5. Cross-lane fixes the probe exposed (minimal)
+## 5. Evidence (strix, 2026-11-15; `docs/cp-exec-evidence/*.txt`)
+
+- `t3_linux_probe.sh exec`: `[LP] done rc=0` without and with CPDATA (ext2 and
+  ext2-symlink rows run with it).
+- `exec_gate.sh`: glibc static-pie, dynamic (FAT16) and dynamic (tmpfs copy)
+  execve'd, each `libc=2.31` with argv/env intact: `exec_gate: PASS`.
+- `ext2_gate.sh`: PASS, static-pie row now the program's own marker.
+- `run-wine-smoke.sh` (unchanged; `/etc/exports` restored byte-for-byte,
+  `/srv/nfs/wine-smoke` removed): wineserver/wine `--version` exit 0, server
+  lifecycle as before.  It exercises no execve: `wine --version` answers from
+  the loader without re-executing, so the Wine re-exec itself is C2-wine2's
+  `wineboot` run.  Its NFS mount is the only real NFS in these runs; NFS
+  symlink following is proven by the host test only (no staged NFS link is
+  exec'd in a boot).
+
+## 6. Cross-lane fixes the probe exposed (minimal)
 
 - `process_fork` (process.c) did not copy `fd_cloexec`, so every post-fork
   exec kept its CLOEXEC fds: one `fd_cloexec_copy` line.

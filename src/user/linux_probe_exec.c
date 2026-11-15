@@ -110,8 +110,8 @@ static int child_disp(void) {
 
 static char self[1024];
 
-static int write_copy(const char *dst, int mode) {
-  int in = open(self, O_RDONLY);
+static int copy_file(const char *src, const char *dst, int mode) {
+  int in = open(src, O_RDONLY);
   if (in < 0) return -1;
   int out = open(dst, O_CREAT | O_TRUNC | O_WRONLY, mode);
   if (out < 0) { close(in); return -1; }
@@ -124,6 +124,24 @@ static int write_copy(const char *dst, int mode) {
   close(in);
   close(out);
   return ok ? 0 : -1;
+}
+
+static int write_copy(const char *dst, int mode) { return copy_file(self, dst, mode); }
+
+static int run(const char *path, char *const argv[], char *const envp[],
+               int use_at, int dirfd, int atflags);
+static int want_glibc; /* argv[1] == "glibc": exec_gate.sh staged the children */
+
+/* exec one glibc child (tools/cp/exec/exec_child.c): it prints a row and exits
+ * with argv[2] when MARK=glibc arrived. */
+static void test_glibc(const char *what, const char *path) {
+  char *argv[] = {(char *)path, (char *)what, (char *)"23", NULL};
+  /* execve passes exactly this environment (no kernel LD_LIBRARY_PATH
+     fallback, unlike the spawn loader), so name the staged runtime the way a
+     spawned Wine's inherited environment does. */
+  char *envp[] = {(char *)"MARK=glibc", (char *)"LD_LIBRARY_PATH=/LIB64", NULL};
+  int rc = run(path, argv, envp, 0, AT_FDCWD, 0);
+  OK(rc == 23, "execve glibc %s (%s) exit=%d\n", what, path, rc);
 }
 
 /* fork, execve the child at `path` with argv/envp, wait: returns the child's
@@ -263,6 +281,25 @@ static void drive(void) {
     if (!done) NA("no NFS symlink staged (wine smoke exercises this row)\n");
   }
 
+  /* 4c. glibc 2.31 children (Wine is glibc): static-pie with IRELATIVE, and
+     dynamic through /lib64/ld-linux-x86-64.so.2, from FAT16 and from a tmpfs
+     copy.  Staged by tools/cp/exec/exec_gate.sh; n/a in a plain wave. */
+  {
+    struct stat sb;
+    if (stat("/XHS.ELF", &sb) == 0 && stat("/XHD.ELF", &sb) == 0) {
+      test_glibc("static-pie", "/XHS.ELF");
+      test_glibc("dynamic", "/XHD.ELF");
+      if (copy_file("/XHD.ELF", "/tmp/lpexec_xhd", 0755) == 0)
+        test_glibc("dynamic-from-tmpfs", "/tmp/lpexec_xhd");
+      else { row("[LP] FAIL could not copy XHD.ELF to /tmp\n"); fails++; }
+    } else if (want_glibc) {
+      row("[LP] FAIL glibc children requested but /XHS.ELF or /XHD.ELF missing\n");
+      fails++;
+    } else {
+      NA("glibc children not staged (tools/cp/exec/exec_gate.sh runs these rows)\n");
+    }
+  }
+
   /* 5. argv / envp round trip: the child echoes them; fds (its stdout) are
      the parent's, so its [LP] row is proof enough, and exit 0 confirms. */
   {
@@ -385,6 +422,7 @@ int main(int argc, char **argv) {
     if (!strncmp(argv[1], "cloexec:", 8)) return child_cloexec(argv);
     if (!strcmp(argv[1], "disp")) return child_disp();
   }
+  want_glibc = argc > 1 && !strcmp(argv[1], "glibc");
   row("[LP] exec probe start\n");
   drive();
   row("[LP] done rc=%d\n", fails);
