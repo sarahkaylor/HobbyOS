@@ -36,6 +36,7 @@ sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/"
 sudo -n chmod -R a+rX "$EXPORT"
 OPTS="ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534"
 if ! grep -qsE "^[[:space:]]*${EXPORT//./\\.}[[:space:]]" /etc/exports; then
+  sudo -n cp -a /etc/exports "/etc/exports.cp-sys-backup.$(date +%Y%m%d%H%M%S)"
   printf '%s *(%s)\n' "$EXPORT" "$OPTS" | sudo -n tee -a /etc/exports >/dev/null
 fi
 sudo -n exportfs -ra
@@ -82,7 +83,9 @@ flock /tmp/cp-qemu.lock bash -c '
     grep -aq "\[WS\] done" '"$LOG"' && sleep 2 && break
     sleep 1
   done
-  pkill -f "qemu-system-x86_64.*disk.img" 2>/dev/null || true'
+  # Only the QEMU holding THIS tree'"'"'s disk.img (never a pattern kill:
+  # other lanes'"'"' QEMUs share the box).
+  for qp in $(fuser '"$IMG"' 2>/dev/null); do kill "$qp" 2>/dev/null; done'
 echo
 echo "== wineprobe rows + the compat/loader ladder"
 grep -anE '\[WS\]|\[LCOMPAT\]|error while loading|cannot open shared|failed to map|ARCH_SET_GS|KUSER|exit\(1\)|\[EXITPC\]|memory fault|PT_INTERP|wine:|wineserver:|System halt' "$LOG" || echo "(none)"
