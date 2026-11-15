@@ -1218,12 +1218,10 @@ int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
  * (whose start_cluster is 0 for all of them).  NFS/pipe/socket fds have no
  * record locks here (-EINVAL; SQLite runs off FAT16 for P6).
  *
- * The kernel never blocks on a lock: F_SETLKW behaves like F_SETLK (one
- * attempt, -EAGAIN on conflict).  The libc wrapper supplies the bounded
- * blocking loop with real sleeps -- the same shape as SQLite's own
- * non-blocking + busy-retry consumption.  Parking the syscall instead
- * would need the -2 restart plumbing select() uses, which buys nothing
- * here.
+ * F_SETLK is one attempt (-EAGAIN on conflict); F_SETLKW blocks until the
+ * region is free or a 10 s ceiling (see the engine below).  The old design --
+ * "the libc wrapper retries" -- was wrong for glibc, whose fcntl(F_SETLKW) is
+ * a single blocking syscall.
  */
 
 static uint64_t file_lock_id(const struct file *f) {
@@ -1381,10 +1379,38 @@ static int file_lock_fcntl(struct process *pg, struct file *f, int cmd,
   }
 
   /* F_SETLK / F_SETLKW: replace the owner's overlapping locks, then add the
-   * new one unless this is an unlock.  Kernel-side this is one attempt for
-   * both commands (see the block comment above). */
-  if (type != K_F_UNLCK &&
-      file_lock_find_conflict(pid, id, start, len, type) >= 0) {
+   * new one unless this is an unlock.
+   *
+   * GB-308: F_SETLKW now actually BLOCKS.  It used to be one attempt for both
+   * commands, on the theory that the libc wrapper retries -- but glibc's
+   * fcntl(F_SETLKW) is a single syscall that is REQUIRED to block, so
+   * FileChannel.lock() returned a FileLock the kernel had never granted while
+   * another process held the region.  That is the worst shape of bug for a
+   * database: two writers both believe they own the file.
+   *
+   * The wait is a halt loop (safe_wfi) with a 10 s ceiling rather than a
+   * scheduler park: parking needs the -2 restart plumbing threaded through
+   * fcntl, and a holder that dies must not strand a waiter forever, so a
+   * bounded wait that reports -EAGAIN is the honest failure.  The lock table
+   * lock is released across every wait -- never held while halted. */
+  int conflicting = (type != K_F_UNLCK &&
+                     file_lock_find_conflict(pid, id, start, len, type) >= 0);
+  if (conflicting && cmd == K_F_SETLKW) {
+    uint64_t deadline = timer_get_ms() + 10000;
+    spinlock_release_irqrestore(&file_locks_lock, flags);
+    for (;;) {
+      safe_wfi();
+      flags = spinlock_acquire_irqsave(&file_locks_lock);
+      file_locks_sweep_dead();
+      conflicting = (file_lock_find_conflict(pid, id, start, len, type) >= 0);
+      if (!conflicting)
+        break;                        /* got it: fall through with flags held */
+      spinlock_release_irqrestore(&file_locks_lock, flags);
+      if (timer_get_ms() >= deadline)
+        return -EAGAIN;
+    }
+  }
+  if (conflicting) {
     spinlock_release_irqrestore(&file_locks_lock, flags);
     return -EAGAIN;
   }
@@ -2028,7 +2054,7 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     k_stat_fill(st, K_DEV_FAT16,
                 fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
                 (f->fat16.entry.attr & 0x10)
-                    ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
+                    ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0755),
                 f->fat16.entry.file_size);
     /* w10-fstime: report the dirent's real RTC timestamp (UTC).  FAT has
        no atime; use the modify time for all three (matches sysinfo/time). */
@@ -2486,8 +2512,11 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
     *errp = ENOENT;
     return -1;
   }
+  /* GB-308: exec bits, matching Linux's vfat (mode=0777 & ~umask) and the
+   * fd-based fill above.  This is the site file_stat_path() uses, so it decides
+   * what access(X_OK) and Files.isExecutable() report. */
   k_stat_fill(st, K_DEV_FAT16, fat16_synth_ino(sector, offset),
-              (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
+              (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0755),
               entry.file_size);
   /* w10-fstime: real RTC timestamp from the dirent (UTC; no FAT atime). */
   long ts = (long)fat16_entry_epoch(&entry);

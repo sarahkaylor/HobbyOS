@@ -4,6 +4,18 @@ ARCH ?= intel
 # --- OS Detection ---
 # Detect whether we are on macOS (Homebrew) or Linux (system packages)
 UNAME_S := $(shell uname -s)
+
+# GB-308: OS was never defined anywhere, so `$(filter macos,$(OS))` was always
+# empty and ICU_CC stayed on the kernel compiler.  On macOS that means the ICU
+# host/target build dies in configure/link with
+#   ld: tapi error: malformed file ... libSystem.B.tbd: unknown architecture
+# unless the caller happened to pass OS=macos (two workers lost a whole session
+# to this).  Derive it, so a plain `make` and `make OS=macos` agree.
+ifeq ($(UNAME_S),Darwin)
+OS ?= macos
+else
+OS ?= $(shell echo $(UNAME_S) | tr 'A-Z' 'a-z')
+endif
 ifeq ($(UNAME_S),Darwin)
   OS := macos
 else

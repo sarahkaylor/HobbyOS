@@ -33,6 +33,12 @@ runs real programs in the guest and records the console as the witness.
    old code. After any kernel change: check the build's exit code, and
    `strings hobbyos.elf | grep '<a literal you just added>'` before believing a
    single line of console output.
+8. **The harness runs one program at a time, so "concurrency" needs fork.** Wave
+   lines are launched sequentially (`[ARRIVED] A` prints before `[WAVE-TRY] B`),
+   and record locks are keyed per process, so neither two wave lines nor two
+   threads in one JVM can produce contention. Any claim about blocking,
+   cross-process locking or parallel writers is untestable until fork exists --
+   say "unverified", not "fixed".
 
 ## Workstreams
 
@@ -169,3 +175,23 @@ back a `FileLock` the kernel never granted; an empty file's `map()` should raise
 | positioned-I/O lock: one global → **per file descriptor** | `fs.c` | it is held across the read, and a blocked read wedged the whole machine (`keytool -genkeypair`) |
 | exec path buffer 32 → 256 + `-ENAMETOOLONG` | `arch/x64/trap.c` | `u_strcpy` truncated silently, so a long path failed with a lying `ENOENT` |
 | fork child inherits `abi_flags` (+ `fd_cloexec`) | `process.c` | without it a fork child misroutes every syscall and spawns phantom grandchildren |
+
+## Block B -- the silently-wrong list (in progress)
+
+These are not "missing" surfaces; they are surfaces that answer wrongly, which is
+worse, because a program cannot detect the lie.
+
+| # | defect | state | evidence |
+|---|---|---|---|
+| 1 | `Files.isExecutable()`/`access(X_OK)` false for every file | **FIXED, VERIFIED** | `EXECBIT isExecutable=true canExecute=true` / `VERDICT PASS` (`obj/jdk/execbit2.log`). Two FAT16 stat fills carry the mode; the *path* one is what `file_stat_path()` (and therefore `access`) reads -- patching only the fd one changed nothing, which is what the first FAIL run showed |
+| 2 | `F_SETLKW` returned `-EAGAIN` instead of blocking | **IMPLEMENTED, UNVERIFIED** | engine now waits: halt loop (`safe_wfi`), 10 s ceiling, lock table released across every wait, dead-owner sweep each round. glibc's `F_SETLKW` is one blocking syscall, so the old one-attempt version handed back a `FileLock` the kernel never granted |
+| 3 | `MAP_SHARED` never reaches disk | **NOT DONE -- needs infrastructure** | `file_obj.c` has no dirty tracking at all (`grep -c dirty` = 0; `vm.c` = 1). Required: per-page dirty set on the file object, set in the write-fault path; write through `fat16_write` on `msync`/`munmap`/eviction; `-EACCES` for `MAP_SHARED` on an `O_RDONLY` fd. Not fakable -- do not claim durability until a probe writes via `MappedByteBuffer`, `force()`s, then re-reads through a fresh fd |
+| 4 | empty-file `map()` returns `-ENOMEM` | **NOT DONE** (low value) | should be `-ENODEV`/`IOException`; no known program depends on it |
+| 5 | `make` needed `OS=macos` or ICU died in configure/link | **FIXED, VERIFIED** | `OS` was never defined anywhere; now derived from `UNAME_S`. `make -n -p` shows `OS := macos` and `ICU_CC` = `tools/cc-x86-none-elf.sh` |
+
+Why #2 is the one that matters: a database that opens its store with
+`FileChannel.lock()` gets a `FileLock` object either way. If the kernel grants
+nothing, both writers proceed and the corruption is silent and late.
+
+Order of work from here: #3 (durability), then verify #2 once fork lands, then
+`MAP_SHARED`-on-`O_RDONLY` and the empty-file case.
