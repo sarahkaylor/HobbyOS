@@ -8,6 +8,31 @@
 # deadline.  Always kills only ITS OWN qemu pid: other lanes may be running.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# --- refuse to boot a kernel that predates its sources --------------------
+# Three measurement rounds in this lane were polluted by booting a stale kernel:
+# boot.sh used to load the ELF from inside disk.img (a rebuild that never
+# repacked was invisible), a failed build left the previous ELF in place (the
+# fd_cloexec array assignment), and a broken refactor left 11 compile errors.
+# Every one of those boots looked NORMAL: rc=0, "System halt", plausible output.
+# So: if any kernel source is newer than the built ELF, this is not a rebuild and
+# the run is not evidence.  --allow-stale / ALLOW_STALE_KERNEL=1 overrides, for
+# the deliberate case of booting an older image on purpose.
+KERNEL_ELF="$ROOT/hobbyos.elf"
+allow_stale="${ALLOW_STALE_KERNEL:-0}"
+for _arg in "$@"; do [ "$_arg" = "--allow-stale" ] && allow_stale=1; done
+if [ -f "$KERNEL_ELF" ] && [ "$allow_stale" != "1" ]; then
+  NEWER="$(find "$ROOT/src" \( -name '*.c' -o -name '*.h' -o -name '*.S' \) \
+             -newer "$KERNEL_ELF" -print -quit 2>/dev/null)"
+  if [ -n "$NEWER" ]; then
+    echo "boot.sh: REFUSING to boot -- a kernel source is newer than hobbyos.elf:" >&2
+    echo "  $NEWER" >&2
+    echo "  The build did not run or did not finish; anything this boot prints" >&2
+    echo "  would describe the PREVIOUS kernel.  Run make first, or pass" >&2
+    echo "  --allow-stale if booting the old image is the point." >&2
+    exit 4
+  fi
+fi
 cd "$ROOT" || exit 2
 
 TIMEOUT_S=900
@@ -18,6 +43,7 @@ while [ $# -gt 0 ]; do
     --timeout) TIMEOUT_S=$2; shift 2 ;;
     --log)     LOG=$2; shift 2 ;;
     --marker)  MARKER=$2; shift 2 ;;
+    --allow-stale) shift ;;   # handled above; accepted here so it is not "unknown"
     *) echo "unknown arg $1"; exit 2 ;;
   esac
 done
