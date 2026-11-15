@@ -256,11 +256,23 @@ static void c0_cpu(void) {
   cpuid(0, 0, m);
   cpuid(1, 0, r);
   int xsave = (r[2] >> 26) & 1, osxsave = (r[2] >> 27) & 1, avx = (r[2] >> 28) & 1;
-  int avx2 = 0;
+  int avx2 = 0, avx512f = 0;
   if (m[0] >= 7) {
     uint32_t s[4];
     cpuid(7, 0, s);
     avx2 = (s[1] >> 5) & 1;
+    avx512f = (s[1] >> 16) & 1;
+  }
+  /* What the CPU OFFERS (CPUID.(0xD,0).EDX:EAX, ECX = size if everything
+     were enabled) versus what the OS ENABLED (XGETBV): on an AVX-512 host
+     the first has bits 5..7 (and more) while the kernel keeps XCR0 at 7. */
+  uint64_t xsup = 0;
+  uint32_t xmax = 0;
+  if (xsave && m[0] >= 0xD) {
+    uint32_t d0[4];
+    cpuid(0xD, 0, d0);
+    xsup = ((uint64_t)d0[3] << 32) | d0[0];
+    xmax = d0[2];
   }
   uint64_t xcr0 = osxsave ? xgetbv0() : 0;
   uint32_t xsz = 0;
@@ -271,9 +283,10 @@ static void c0_cpu(void) {
     xsz = d0[1];
     g_avx_off = d2[1];
   }
-  row("[LP] C0 cpu xsave=%d osxsave=%d avx=%d avx2=%d xcr0=0x%llx "
-      "xsave_size=%u avx_off=%u\n",
-      xsave, osxsave, avx, avx2, (unsigned long long)xcr0, xsz, g_avx_off);
+  row("[LP] C0 cpu xsave=%d osxsave=%d avx=%d avx2=%d avx512f=%d xcr0=0x%llx "
+      "xsave_size=%u avx_off=%u cpu_xfeatures=0x%llx cpu_xsave_max=%u\n",
+      xsave, osxsave, avx, avx2, avx512f, (unsigned long long)xcr0, xsz,
+      g_avx_off, (unsigned long long)xsup, xmax);
   if (xsave && avx) {
     if (!osxsave || (xcr0 & 6) != 6) {
       row("[LP] C0 FAIL CPU has XSAVE+AVX but the OS did not enable it "
