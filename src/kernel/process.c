@@ -4312,6 +4312,21 @@ int process_fork(struct trap_frame *tf) {
   for (int i = 0; i < inherited_n; i++)
     fs_reopen(inherited_fds[i]);
 
+  /* cp/sys: a Linux-ABI child stays a Linux-ABI process (its syscalls must
+     keep reaching the compat table), and the compat layer copies what Linux
+     fork() inherits -- dispositions, mask, altstack -- and applies the
+     clone(CLONE_CHILD_SETTID/CLEARTID) words glibc's fork() passes.  Done
+     before READY so the child never runs without it.  Weak: absent compat
+     layer, nothing happens. */
+  {
+    extern void linux_compat_fork_child(struct process *parent,
+                                        struct process *child)
+        __attribute__((weak));
+    child->abi_flags = group->abi_flags;
+    if ((group->abi_flags & PROC_FLAG_LINUX_ABI) && linux_compat_fork_child)
+      linux_compat_fork_child(parent, child);
+  }
+
   /* Last transition under proc_lock so the scheduler cannot pick the child up
    * before its fd references exist. */
   flags = spinlock_acquire_irqsave(&proc_lock);

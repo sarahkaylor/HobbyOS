@@ -189,6 +189,20 @@ int linux_compat_sigflags_get(struct process *p, int sig) {
  * shared value changes no observable answer — it only has to round-trip. */
 static uint32_t l_umask = 022;
 
+/* cp/sys: fork() inherits the signal mask and alternate stack of the
+   calling thread and the dispositions' flag words of its process (Linux
+   copy_process; the handlers themselves are native PCB state, copied by
+   linux_compat_fork_child).  Called before the child is READY. */
+void linux_compat_sig_fork(struct process *parent, struct process *child);
+void linux_compat_sig_fork(struct process *parent, struct process *child) {
+  int ps = l_slot(parent), cs = l_slot(child);
+  int gs = l_slot(process_group(parent));
+  if (ps < 0 || cs < 0 || gs < 0) return;
+  l_sigmask[cs] = l_sigmask[ps];
+  for (int i = 0; i < HO_SIG_MAX; i++) l_sigflags[cs][i] = l_sigflags[gs][i];
+  l_altstack[cs] = l_altstack[ps];
+}
+
 /* cp/sys: the creation mask the compat /tmp applies (tmpfs.c). */
 uint32_t linux_compat_umask(void) { return l_umask; }
 
