@@ -19,7 +19,7 @@
  * The -DHOST_TEST build (obj/host_ipc_test.o, run from `make test`) runs the
  * same logic against glibc to validate the test itself.  HobbyOS-only
  * expectations are #ifndef HOST_TEST (documented divergences: the 8192-byte
- * message cap, STREAM+control EOPNOTSUPP, poll(nfds > 256), recvmsg with
+ * message cap, STREAM+control carries the fd (cp/sys), poll(nfds > 256), recvmsg with
  * msg_name set, and dup/dup2-clears-CLOEXEC as an fd-table invariant).
  * A macOS host (IPC_HOST_DARWIN) additionally skips the abstract namespace,
  * SOCK_SEQPACKET, the 64 KiB ring fill and control truncation, none of which
@@ -879,7 +879,9 @@ static void t_error_paths(void) {
   r = (int)recvmsg(sv[1], &nm, MSG_DONTWAIT);
   check("recvmsg with msg_name set -> -1/EINVAL", r == -1 && errno == EINVAL);
 
-  /* STREAM + ancillary data: no cmsg channel on a byte stream. */
+  /* STREAM + ancillary data.  cp/sys: a byte stream carries SCM_RIGHTS
+   * (Linux does; Wine passes every fd over its SOCK_STREAM server
+   * connection), delivered with the bytes of the sendmsg that carried it. */
   char cbuf[64];
   size_t cl = mk_fd_cmsg(cbuf, sizeof cbuf, p[0]);
   struct msghdr cm;
@@ -890,7 +892,22 @@ static void t_error_paths(void) {
   cm.msg_controllen = cl;
   errno = 0;
   r = (int)sendmsg(sv[0], &cm, 0);
-  check("sendmsg control on STREAM -> -1/EOPNOTSUPP", r == -1 && errno == EOPNOTSUPP);
+  check("sendmsg control on STREAM -> 3 bytes + fd", r == 3);
+  {
+    char rb[8];
+    char rc[64];
+    struct iovec riov = { rb, sizeof rb };
+    struct msghdr rm;
+    memset(&rm, 0, sizeof rm);
+    rm.msg_iov = &riov;
+    rm.msg_iovlen = 1;
+    rm.msg_control = rc;
+    rm.msg_controllen = sizeof rc;
+    r = (int)recvmsg(sv[1], &rm, MSG_DONTWAIT);
+    int gfd = r == 3 ? cmsg_fd(&rm) : -1;
+    check("recvmsg on STREAM -> the 3 bytes and the fd", r == 3 && gfd >= 0);
+    if (gfd >= 0) close(gfd);
+  }
 #endif
 
   /* F_GETFD/F_SETFD on a plain file fd (fd-table mask, every fd type). */

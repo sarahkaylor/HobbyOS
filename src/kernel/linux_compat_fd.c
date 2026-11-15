@@ -184,13 +184,78 @@ static int l_fd_socketpair(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, 0);
 }
 
-/* bind(fd, const struct sockaddr *addr, socklen_t len). */
+/* cp/sys: pathname AF_UNIX addresses.
+ *
+ * unix.c keys its namespace on the sun_path BYTES, which is right for an
+ * absolute name and wrong for a relative one: wineserver binds "socket"
+ * after chdir()ing into its server directory and every client connects to
+ * "socket" from the same directory (server/request.c:814-818,
+ * dlls/ntdll/unix/server.c:1446-1460), so two servers for two prefixes
+ * would collide on the same key.  A relative name is therefore resolved
+ * against the caller's cwd here, exactly as Linux resolves it, before the
+ * namespace sees it.  `ksa` is a kernel copy of the caller's address
+ * (K_UNIX_SUN_LEN bytes of room); *klen is updated.  `abs_out` receives the
+ * canonical path for a pathname address ("" for abstract/unnamed/INET).
+ * Returns 0 or -errno. */
+static int l_unix_sa_prepare(struct process *p, uint64_t usa, int salen,
+                             uint8_t *ksa, int *klen, char *abs_out) {
+  abs_out[0] = '\0';
+  if (salen < 2 || salen > K_UNIX_SUN_LEN) return -EINVAL;
+  if (!usa) return -EFAULT;
+  int r = l_copy_from_user(p, ksa, usa, (uint64_t)salen);
+  if (r) return r;
+  *klen = salen;
+  uint16_t fam = (uint16_t)(ksa[0] | ((uint16_t)ksa[1] << 8));
+  if (fam != K_AF_UNIX || salen == 2 || ksa[2] == 0) return 0;
+  char path[K_UNIX_PATH_MAX + 1];
+  int n = 0;
+  while (n < salen - 2 && n < K_UNIX_PATH_MAX && ksa[2 + n]) {
+    path[n] = (char)ksa[2 + n];
+    n++;
+  }
+  path[n] = '\0';
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENAMETOOLONG;
+  int an = 0;
+  while (abs[an]) an++;
+  if (path[0] != '/') {
+    if (an >= K_UNIX_PATH_MAX) return -ENAMETOOLONG;
+    for (int i = 0; i < an; i++) ksa[2 + i] = (uint8_t)abs[i];
+    ksa[2 + an] = 0;
+    *klen = 2 + an + 1;
+  }
+  for (int i = 0; i <= an; i++) abs_out[i] = abs[i];
+  return 0;
+}
+
+/* bind(fd, const struct sockaddr *addr, socklen_t len).
+ * cp/sys: a pathname bound inside the compat /tmp also creates the socket
+ * INODE there (S_IFSOCK, 0777 & ~umask, like Linux): Wine's client lstat()s
+ * the name and refuses anything that is not a socket owned by the caller
+ * (dlls/ntdll/unix/server.c:1432-1443).  An existing name is EADDRINUSE,
+ * which is the answer acquire_lock() expects (server/request.c:821-828). */
 static int l_fd_bind(struct process *p, struct trap_frame *tf) {
   int fd = (int)l_argi(tf, 0);
   uint64_t usa = l_arg(tf, 1);
   int salen = (int)l_argi(tf, 2);
   if (salen < 2) return l_ret(tf, -EINVAL);
-  return l_ret(tf, file_bind_user(p, fd, usa, salen));
+  if (salen > K_UNIX_SUN_LEN) return l_ret(tf, file_bind_user(p, fd, usa, salen));
+  uint8_t ksa[K_UNIX_SUN_LEN + 1];
+  int klen = salen;
+  char abs[VFS_PATH_MAX];
+  int r = l_unix_sa_prepare(p, usa, salen, ksa, &klen, abs);
+  if (r) return l_ret(tf, r);
+  int made = 0;
+  if (abs[0] && tmpfs_owns(abs)) {
+    if (l_is_socket(p, fd) <= 0) return l_ret(tf, l_is_socket(p, fd) < 0 ? -EBADF : -ENOTSOCK);
+    r = tmpfs_mksock(abs, (int)(0777u & ~linux_compat_umask()));
+    if (r == TMPFS_EXTERNAL) r = 0; /* a symlinked dir leading off /tmp */
+    else if (r) return l_ret(tf, r);
+    else made = 1;
+  }
+  r = file_bind(p, fd, ksa, klen);
+  if (r != 0 && made) tmpfs_unmksock(abs);
+  return l_ret(tf, r);
 }
 
 /* listen(fd, backlog). */
@@ -230,11 +295,28 @@ static int l_fd_accept4(struct process *p, struct trap_frame *tf) {
 static int l_connect(struct process *p, int fd, uint64_t usa, int salen,
                      int *parked) {
   *parked = 0;
+  /* cp/sys: a relative AF_UNIX pathname is resolved against the cwd first
+     (see l_unix_sa_prepare); INET and sockaddr_storage-sized callers keep
+     the user-pointer path. */
+  uint8_t ksa[K_UNIX_SUN_LEN + 1];
+  int klen = 0;
+  int use_k = 0;
+  if (salen >= 2 && salen <= K_UNIX_SUN_LEN && usa) {
+    uint8_t fam[2];
+    if (l_copy_from_user(p, fam, usa, 2) == 0 && fam[0] == K_AF_UNIX &&
+        fam[1] == 0) {
+      char abs[VFS_PATH_MAX];
+      int pr = l_unix_sa_prepare(p, usa, salen, ksa, &klen, abs);
+      if (pr) return pr;
+      use_k = 1;
+    }
+  }
   int fl = file_fcntl(p, fd, K_F_GETFL, 0);
   int was_nonblock = (fl >= 0) && (fl & K_O_NONBLOCK);
   if (!was_nonblock) (void)file_fcntl(p, fd, K_F_SETFL, K_O_NONBLOCK);
 
-  int r = file_connect_user(p, fd, usa, salen);
+  int r = use_k ? file_connect_sa(p, fd, ksa, klen)
+                : file_connect_user(p, fd, usa, salen);
   if (r == -2) {
     /* Non-blocking: fs.c can only mean "no such name" here. */
     r = -ENOENT;
@@ -242,7 +324,8 @@ static int l_connect(struct process *p, int fd, uint64_t usa, int salen,
     /* Backlog full on a blocking socket: re-enter with the flag cleared so
      * usock_connect() parks us (blocking connect blocks, as Linux). */
     (void)file_fcntl(p, fd, K_F_SETFL, 0);
-    r = file_connect_user(p, fd, usa, salen);
+    r = use_k ? file_connect_sa(p, fd, ksa, klen)
+              : file_connect_user(p, fd, usa, salen);
     if (r == -2) *parked = 1;
   }
   if (!was_nonblock) (void)file_fcntl(p, fd, K_F_SETFL, 0);

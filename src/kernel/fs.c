@@ -4166,7 +4166,8 @@ int file_sendmsg(struct process *p, int fd, uint64_t umsg, int flags) {
   if (msg.controllen > 0) {
     if (msg.control == 0) return -EINVAL;
     if (msg.controllen > K_IPC_CTRL_MAX) return -EINVAL;
-    if (is_stream) return -EOPNOTSUPP; /* no ancillary data on STREAM */
+    /* cp/sys: STREAM carries SCM_RIGHTS too (unix.c fd records); Wine
+       passes every handle's fd over its SOCK_STREAM server connection. */
     uint8_t ctrl[K_IPC_CTRL_MAX];
     if (!fs_copy_in(ctrl, msg.control, msg.controllen)) return -EFAULT;
     struct ipc_cmsg_fds parsed;
@@ -4176,6 +4177,9 @@ int file_sendmsg(struct process *p, int fd, uint64_t umsg, int flags) {
     for (int i = 0; i < nfds; i++) fds_user[i] = parsed.fds[i];
   }
   if (!is_stream && total > K_UNIX_MSG_MAX) return -EMSGSIZE;
+  /* cp/sys: Linux sends nothing for a zero-length STREAM sendmsg, fds
+     included; answer 0 before any reference is taken. */
+  if (is_stream && total == 0) return 0;
 
   /* §4.2 step 1: validate every sender fd, then take message-owned refs.
    * Any failure releases what was already taken and enqueues nothing. */
