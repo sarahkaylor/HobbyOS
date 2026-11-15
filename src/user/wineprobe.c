@@ -25,7 +25,13 @@
 #define WINE_EXPORT "/srv/nfs/wine-smoke"
 #endif
 #define MNT   "/CP"
-#define PFX   "/tmp/pfx"
+/* WINEPREFIX: a FAT directory.  This launcher is NATIVE and sees the FAT
+ * /tmp, while the compat wineserver sees the tmpfs /tmp (tmpfs.h), so a prefix
+ * created here under /tmp would not exist for Wine (measured on strix:
+ * "wineserver: chdir to /tmp/pfx: No such file or directory").  The server
+ * dir /tmp/.wine-0/server-<dev>-<ino>/ is still created by wineserver itself,
+ * on the tmpfs. */
+#define PFX   "/CPPFX"
 
 static void pc(const char *s) { print_console(s); }
 static void pd(long v) {
@@ -87,7 +93,6 @@ static int run(const char *path, char *const argv[], char *const envp[], int sec
 int main(void) {
   pc("[WS] cp/sys Wine smoke launcher\n");
   if (mount_export() != 0) { pc("[WS] done (no mount)\n"); exit(2); }
-  (void)mkdir("/tmp", 0777);
   (void)mkdir(PFX, 0700);
 
   /* The environment Wine needs.  /CP/WINE is the staged prefix; the loader
@@ -102,7 +107,7 @@ int main(void) {
     (char *)"WINEDLLPATH=/CP/WINE/lib/wine",
     (char *)"LD_LIBRARY_PATH=/LIB64:/CP/WINE/lib/wine/x86_64-unix",
     (char *)"WINEDEBUG=+loaddll,+server",
-    (char *)"HOME=/tmp",
+    (char *)"HOME=" PFX,
     (char *)"PATH=/CP/WINE/bin",
     0
   };
@@ -118,10 +123,27 @@ int main(void) {
   char *a2[] = { (char *)"wine", (char *)"--version", 0 };
   run("/CP/WINE/bin/wine", a2, envp, 30, -1);
 
-  /* 3. wineserver -f -p5: start it in the foreground, give it 5s to create
-        its socket under /tmp/.wine-<uid>/, then SIGTERM it. */
+  /* 3. wineserver -f -p5 in the background: it creates
+        /tmp/.wine-0/server-<dev>-<ino>/{lock,socket} on the tmpfs and waits.
+     4. wineserver -k: a second compat process finds the running server
+        through the lock file (F_GETLK -> owner pid, server/request.c:706-750)
+        and signals it; then the first must exit. */
   char *a3[] = { (char *)"wineserver", (char *)"-f", (char *)"-p5", 0 };
-  run("/CP/WINE/bin/wineserver", a3, envp, 12, 6);
+  pc("[WS] run /CP/WINE/bin/wineserver -f -p5 (background)\n");
+  int spid = spawn_ex("/CP/WINE/bin/wineserver", a3, envp, 0, 0);
+  pc("[WS] server pid="); pd(spid); pc("\n");
+  usleep(4000000);
+  int st = -1;
+  int early = spid > 0 ? waitpid(spid, &st, 1) : -1;
+  pc("[WS] server alive after 4s: "); pc(early == 0 ? "yes" : "NO"); pc("\n");
+  char *a4[] = { (char *)"wineserver", (char *)"-k", 0 };
+  run("/CP/WINE/bin/wineserver", a4, envp, 20, -1);
+  if (spid > 0 && early == 0) {
+    int wp = 0;
+    for (int s = 0; s < 10 && wp == 0; s++) { wp = waitpid(spid, &st, 1); if (!wp) usleep(1000000); }
+    if (wp == 0) { pc("[WS] server still up 10s after -k; SIGKILL\n"); kill(spid, 9); waitpid(spid, &st, 0); }
+    pc("[WS] server exit status="); pd(st); pc("\n");
+  }
 
   pc("[WS] done\n");
   return 0;
