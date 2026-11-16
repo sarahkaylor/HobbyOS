@@ -16,6 +16,7 @@
  * i.e. every present is an xcb_put_image of the swapchain image.
  *
  *   vkcubex [seconds] [W] [H] [present_mode]   default: 65 640 480 fifo
+ *   vkcube.exe --idle SECS | --winprobe        Wine session warm-up (w32_warm)
  *           present_mode: fifo | mailbox | immediate (falls back to fifo)
  *
  * Rows ("[VK] ..."): the WSI facts (surface caps, formats, present modes),
@@ -579,7 +580,45 @@ static double median(double *v, int n) {
   return v[n / 2];
 }
 
+#ifdef _WIN32
+/* Session warm-up helpers for the Wine launcher (tools/cp/p5/winep5.c).
+ * win32u starts explorer (the desktop owner, which loads winex11) and waits
+ * only 10 s for it (NtUserWaitForInputIdle(process, 10000),
+ * dlls/win32u/winstation.c:877); in-guest explorer pages winex11 + the X
+ * libraries in over NFS for longer, so the FIRST GUI client of a session
+ * reads no GraphicsDriver and stays on the null driver.  Explorer does come
+ * up a little later, and stays up while any client lives.  So:
+ *   --idle SECS   a quiet client that asks for the desktop (GetDesktopWindow
+ *                 starts explorer) and then just lives, keeping explorer and
+ *                 the X driver loaded across the probe steps;
+ *   --winprobe    a fresh client that tries to create a window: exit 0 when
+ *                 it gets a real driver, 3 on the null driver ("nodrv"). */
+static int w32_warm(int argc, char **argv) {
+  if (!strcmp(argv[1], "--idle")) {
+    int secs = argc > 2 ? atoi(argv[2]) : 3600;
+    HWND d = GetDesktopWindow();
+    vk_row("idle: keepalive pid %d, desktop %p, %d s", (int)GetCurrentProcessId(), (void *)d, secs);
+    for (int i = 0; i < secs; i++) Sleep(1000);
+    vk_row("idle: done");
+    return 0;
+  }
+  WNDCLASSA wc = {.lpfnWndProc = DefWindowProcA, .hInstance = GetModuleHandleA(NULL),
+                  .lpszClassName = "vkwinprobe"};
+  RegisterClassA(&wc);
+  double t0 = vk_now_ms();
+  HWND h = CreateWindowExA(0, "vkwinprobe", "winprobe", WS_OVERLAPPEDWINDOW, 0, 0, 64, 64, NULL, NULL,
+                           wc.hInstance, NULL);
+  vk_row("winprobe: CreateWindowEx -> %p in %.0f ms (%s)", (void *)h, vk_now_ms() - t0,
+         h ? "display driver loaded" : "null driver");
+  if (h) DestroyWindow(h);
+  return h ? 0 : 3;
+}
+#endif
+
 int main(int argc, char **argv) {
+#ifdef _WIN32
+  if (argc > 1 && (!strcmp(argv[1], "--idle") || !strcmp(argv[1], "--winprobe"))) return w32_warm(argc, argv);
+#endif
   int secs = argc > 1 ? atoi(argv[1]) : 65;
   uint32_t W = argc > 2 ? (uint32_t)atoi(argv[2]) : 640;
   uint32_t H = argc > 3 ? (uint32_t)atoi(argv[3]) : 480;

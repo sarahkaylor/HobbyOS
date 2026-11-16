@@ -12,6 +12,9 @@
  *                                      The FAT /CP is shadowed, so EVERYTHING
  *                                      /CP-prefixed must be in the export.
  *   wineboot -i                        WINEPREFIX=/tmp/pfx (compat tmpfs)
+ *   keepalive + warm-up                vkcube.exe --idle (background, the whole
+ *                                      session) and vkcube.exe --winprobe until
+ *                                      a fresh client gets the X driver
  *   wine Z:\CP\P5\VK\vkcube.exe     65 640 480
  *   wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480   (DXVK d3d11/dxgi beside it)
  *   wine Z:\CP\P5\D3D12\d3d12tri.exe 65 640 480   (vkd3d-proton + DXVK dxgi)
@@ -40,6 +43,9 @@
 #endif
 #ifndef P5_BOOT_QUIESCE_S
 #define P5_BOOT_QUIESCE_S 3600 /* winep2: the NFS page-in of wineboot -i (docs/cp-nfs.md §7) */
+#endif
+#ifndef P5_WARM_TRIES
+#define P5_WARM_TRIES 12
 #endif
 #define MNT "/CP"
 
@@ -162,6 +168,29 @@ int main(int argc, char **argv) {
   set_display(1);
   quiesce("wineboot", P5_BOOT_QUIESCE_S);
 
+  /* Session warm-up (C4-x2's finding): win32u waits only 10 s for explorer
+     (winstation.c:877), and in-guest explorer needs longer to page winex11
+     and the X libraries in over NFS, so the first GUI client of a session
+     stays on the null driver.  Keep one quiet client alive for the whole
+     session (it starts explorer and keeps it, and winex11, loaded), then
+     probe with fresh clients until one gets a real display driver. */
+  char *a_idle[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\VK\\vkcube.exe", (char *)"--idle",
+                     (char *)"7200", 0 };
+  pc("[P5] begin keepalive (background) :");
+  for (int i = 0; a_idle[i]; i++) { pc(" "); pc(a_idle[i]); }
+  pc("\n");
+  int keep = spawn_ex("/CP/WINE/bin/wine", a_idle, envp, 0, 0);
+  pc("[P5] keepalive pid="); pd(keep); pc("\n");
+  int warm = 0;
+  for (int t = 1; t <= P5_WARM_TRIES && !warm; t++) {
+    char tag[16] = "winprobe";
+    tag[8] = (char)('0' + t / 10); tag[9] = (char)('0' + t % 10); tag[10] = 0;
+    char *a_wp[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\VK\\vkcube.exe", (char *)"--winprobe", 0 };
+    if (step(tag, "/CP/WINE/bin/wine", a_wp, 300) == 0) warm = 1;
+    else usleep(5000000);
+  }
+  pc(warm ? "[P5] warm-up: display driver loaded\n" : "[P5] warm-up: FAILED (null driver after all tries)\n");
+
   static const char *tags[] = { "vkcube", "d3d11", "d3d12" };
   static const char *exes[] = { "Z:\\CP\\P5\\VK\\vkcube.exe", "Z:\\CP\\P5\\D3D11\\d3d11tri.exe",
                                 "Z:\\CP\\P5\\D3D12\\d3d12tri.exe" };
@@ -171,7 +200,6 @@ int main(int argc, char **argv) {
     if (!want) continue;
     char *a[] = { (char *)"wine", (char *)exes[k], (char *)P5_SECS, (char *)"640", (char *)"480", 0 };
     step(tags[k], "/CP/WINE/bin/wine", a, 900);
-    quiesce(tags[k], 60);
   }
 
   char *a_k[] = { (char *)"wineserver", (char *)"-k", 0 };

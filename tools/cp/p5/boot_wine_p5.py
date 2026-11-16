@@ -155,11 +155,20 @@ def main():
         elif cs[0]["hash"] == cs[1]["hash"]:
             fails.append(f"{p}: screendumps identical (not moving)"); ok = False
         log(f"{p}: {'PASS' if ok else 'FAIL'}")
+    # Until C3-nfs2's hard-retry fix lands, a failed NFS read can reach Wine as
+    # zero-filled data (docs/cp-vk.md 8.5): any NFS failure row voids the run.
+    nfs_bad = [ln for ln in lines if "rpc: no reply from server" in ln or
+               ("[NFLK] retry" in ln and "rc=-1" in ln)]
+    if nfs_bad:
+        log(f"VOID: {len(nfs_bad)} NFS failure row(s), first: {nfs_bad[0][:160]}")
     bad = [ln for ln in lines if any(k in ln for k in ("memory fault", "page fault", "FATAL"))]
     if bad:
         fails.append(f"{len(bad)} fault line(s): {bad[0][:160]}")
     for f in fails:
         log("FAIL: " + f)
+    if nfs_bad:
+        log("VERDICT: VOID (NFS failure rows; not evidence either way)")
+        return 3
     if not fails:
         log("PASS: " + ", ".join(probes) + " each ran >= 60 s under Wine with two distinct, recognisable screendumps")
     return 1 if fails else 0

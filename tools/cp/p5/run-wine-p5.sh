@@ -30,7 +30,9 @@
 #      GLIBC231_LIB (default $CP_VK_WORK/sysroot-glibc231/lib/x86_64-linux-gnu)
 #      P5_EXPORT (default /srv/nfs/cp-vk2-p5), P5_PROBES (default "vkcube d3d11 d3d12"),
 #      P5_WINEDEBUG (default err+all,fixme-all), TIMEOUT_S (default 7200),
-#      P5_CFLAGS (extra launcher -D flags, diagnostics only)
+#      P5_CFLAGS (extra launcher -D flags, diagnostics only),
+#      P5_XHOBBY + P5_XHOBBY_SHA256 (an X server build to stage over ::/XHOBBY.BIN),
+#      P5_XSESSION_ENV ("K=V;K2=V2" lines appended to ::/X11/XSESSION.ENV)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT" || exit 2
@@ -127,6 +129,23 @@ for so in ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 li
 done
 stage "$(readlink -f "$LDIR/ld-linux-x86-64.so.2")" ::/lib64/ld-linux-x86-64.so.2
 stage "$OUT/winep5.bin" ::/WINEP5.BIN
+# Optional X server override (scratch use only, never committed): P5_XHOBBY is
+# a built XHOBBY.BIN checked against P5_XHOBBY_SHA256, staged over ::/XHOBBY.BIN.
+if [ -n "${P5_XHOBBY:-}" ]; then
+  [ -n "${P5_XHOBBY_SHA256:-}" ] || die "P5_XHOBBY needs P5_XHOBBY_SHA256"
+  cp "$P5_XHOBBY" "$OUT/XHOBBY.BIN"
+  echo "${P5_XHOBBY_SHA256}  $OUT/XHOBBY.BIN" | sha256sum -c --quiet - || die "P5_XHOBBY sha256 mismatch"
+  stage "$OUT/XHOBBY.BIN" ::/XHOBBY.BIN
+  echo "== X server: $P5_XHOBBY (sha256 $P5_XHOBBY_SHA256) staged as ::/XHOBBY.BIN"
+fi
+# P5_XSESSION_ENV: extra KEY=VALUE lines (';'-separated) for ::/X11/XSESSION.ENV.
+if [ -n "${P5_XSESSION_ENV:-}" ]; then
+  rm -f "$OUT/XSESSION.ENV"
+  mcopy -o -i "$D" ::/X11/XSESSION.ENV "$OUT/XSESSION.ENV" 2>/dev/null || : > "$OUT/XSESSION.ENV"
+  printf '%s\n' "${P5_XSESSION_ENV//;/$'\n'}" >> "$OUT/XSESSION.ENV"
+  stage "$OUT/XSESSION.ENV" ::/X11/XSESSION.ENV
+  echo "== XSESSION.ENV: $(tr '\n' ' ' < "$OUT/XSESSION.ENV")"
+fi
 printf '# autostart (staged by tools/cp/p5/run-wine-p5.sh)\n/WINEP5.BIN %s\n' "$PROBES" > "$OUT/XSTART.TXT"
 stage "$OUT/XSTART.TXT" ::/XSTART.TXT
 
