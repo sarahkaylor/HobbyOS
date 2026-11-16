@@ -15,7 +15,19 @@
  * docs/rimworld-m2-thread-ceiling.md.  Keep this a multiple of 64: pid
  * bitmaps are word arrays (src/include/pidmask.h) and slot allocation is a
  * linear scan, so 192 keeps both cheap. */
+#ifdef __x86_64__
+/* C1-k4: 512 on x86_64.  Cyberpunk under Wine runs 173-190 game threads
+ * plus ~18 Wine processes (docs/cyberpunk.md §0.2 item 13), and every thread
+ * is a slot.  Measured cost (strix, nm of the intel kernel): proc_table
+ * 11,776 B/slot, spawn_ex_pool 4,720, spawn_args_pool 1,072, the compat
+ * signal tables ~1.6 KiB, the rest small -- about 19 KiB per slot, so
+ * 192 -> 512 adds ~6.2 MiB of BSS (docs/cp-k4.md §3).  The ARM build stays
+ * at 192: its address spaces use 8-bit ASIDs keyed by tgid (vm_as_create),
+ * which a pid >= 256 would alias, and the compat class is x86_64-only. */
+#define MAX_PROCESSES 512 // Maximum number of concurrent processes
+#else
 #define MAX_PROCESSES 192 // Maximum number of concurrent processes
+#endif
 #define MAX_CPUS 8       // Maximum number of CPU cores supported
 
 _Static_assert(MAX_PROCESSES <= PID_MASK_BITS,
@@ -636,6 +648,24 @@ struct process {
      PC is two bytes before it was rewound for restart; the signal path uses
      that to pick Linux's restart rule (docs/cp-thr.md §3). */
   uint64_t sys_entry_pc;
+  /* C1-k4: this thread is parked in poll/select/epoll_wait and registered
+     with poll_notify() (process.c).  Cleared on every compat syscall entry
+     and whenever the park is re-evaluated, so a stale registration can
+     never wake an unrelated park. */
+  int poll_waiting;
+  /* C1-k4: a blocking pipe write(v) that parked after writing part of its
+     buffer (Linux writes a blocking pipe write in full).  The restarted
+     syscall resumes at pw_done when (pipe, buffer, length) match. */
+  void *pw_pipe;
+  uint64_t pw_key;
+  uint32_t pw_total;
+  uint32_t pw_done;
+  /* C1-k4: the siginfo a CPU fault delivers, decided where the fault is
+     understood (trap.c / vm_handle_fault) and consumed by the compat signal
+     frame (linux_compat_fault): Linux si_code and si_addr. */
+  int fault_si_set;
+  int fault_si_code;
+  uint64_t fault_si_addr;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
@@ -926,6 +956,33 @@ void process_sleep(void);
 
 // Wake up a specific process.
 void process_wakeup(int pid);
+
+/* C1-k4: readiness notification for poll/select/epoll_wait.  Every state
+ * change of a pipe, AF_UNIX socket or eventfd calls poll_notify() with no
+ * spinlock held; a poller takes poll_seq_snapshot() BEFORE its readiness
+ * scan and, under proc_lock, poll_park_locked() refuses the park (returns 1:
+ * scan again) when any event happened since.  Dekker-ordered: either the
+ * notifier sees the registration or the poller sees the event. */
+void poll_notify(void);
+uint64_t poll_seq_snapshot(void);
+int poll_park_locked(struct process *p, uint64_t seen);
+void poll_unpark(struct process *p);
+void process_cancel_park(struct process *p);
+/* C1-k4: may a blocking syscall commit its park?  Not when a kill
+ * (process_kill_group_sig / exit_group / exec) already made the task EXITED
+ * or THREAD_DONE while it was inside the syscall on its CPU: parking would
+ * resurrect it (C1-thr2 fixed futex/nanosleep/sigsuspend; this covers pipe,
+ * AF_UNIX, poll/select/epoll, eventfd, timerfd, pause, flock).  The park site
+ * then returns its "parked" code without parking; the trap exit's
+ * schedule() drops the dead task.  Caller holds proc_lock. */
+static inline int process_park_ok_locked(const struct process *p) {
+  return p->state != PROC_STATE_EXITED && p->state != PROC_STATE_THREAD_DONE &&
+         p->state != PROC_STATE_FREE;
+}
+/* C1-k4: execve from a secondary thread moves the caller onto the leader's
+ * pid (Linux de_thread); returns the PCB that is now current. */
+struct process *process_exec_become_leader(struct process *grp,
+                                           struct process *cur);
 
 // Wake up all kernel threads that are in the BLOCKED state.
 void process_wake_all(void);

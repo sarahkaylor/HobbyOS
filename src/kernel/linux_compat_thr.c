@@ -4131,7 +4131,13 @@ int linux_compat_fault(struct process *p, struct trap_frame *tf, int signo) {
   }
   int code = L_SEGV_MAPERR;
   uint64_t fault_addr = 0;
-  if (tf->vector == 14)
+  if (p->fault_si_set) {
+    /* C1-k4: the trap layer decoded the real fault (SEGV_MAPERR vs ACCERR,
+       BUS_ADRERR, ILL_ILLOPN, FPE_FLT* from FSW/MXCSR, SI_KERNEL). */
+    code = p->fault_si_code;
+    fault_addr = p->fault_si_addr;
+    p->fault_si_set = 0;
+  } else if (tf->vector == 14)
     __asm__ volatile("mov %%cr2, %0" : "=r"(fault_addr));
   else if (signo == HO_SIGILL)
     code = L_ILL_ILLOPC;

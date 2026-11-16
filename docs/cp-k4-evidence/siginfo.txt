@@ -1,0 +1,30 @@
+# linux_probe_siginfo, strix QEMU/KVM 8 vCPUs.
+## BASE cyberpunk 5eea3712: I1/I2 wrong si_code/si_addr, then the core freezes at I3's fwait (CR0.NE=0)
+[LP] FAIL I1 #UD sig=4 code=1 addr=0 (want sig=4 code=2 addr=0x1000001802)
+[LP] FAIL I2 #DE sig=8 code=1 addr=0 (want sig=8 code=1 addr=0x1000001852)
+t3_linux_probe: FAIL — siginfo never printed '[LP] done rc=0' (tier rc=1)
+## LANE before the CR0.NE fix (1f2006c5): same freeze at I3
+[LP] PASS I1 #UD sig=4 code=2 addr=0x1000001802 (want sig=4 code=2 addr=0x1000001802)
+[LP] PASS I2 #DE sig=8 code=1 addr=0x1000001852 (want sig=8 code=1 addr=0x1000001852)
+t3_linux_probe: FAIL — siginfo never printed '[LP] done rc=0' (tier rc=1)
+## LANE merged (cyberpunk 8b9fc2c9) + CR0.NE + memfd/tmpfs maps past EOF: three consecutive boots
+siginfo run1 rc=0 [LP] done rc=0
+siginfo run2 rc=0 [LP] done rc=0
+siginfo run3 rc=0 [LP] done rc=0
+ALLDONE
+[LP] PASS I1 #UD sig=4 code=2 addr=0x1000001802 (want sig=4 code=2 addr=0x1000001802)
+[LP] PASS I2 #DE sig=8 code=1 addr=0x1000001852 (want sig=8 code=1 addr=0x1000001852)
+[LP] PASS I3 #MF x87 1/0 sig=8 code=3 addr=0x10000018ac (want sig=8 code=3 any-addr 0)
+[LP] PASS I4 #MF x87 0/0 sig=8 code=7 addr=0x1000001909 (want sig=8 code=7 any-addr 0)
+[LP] PASS I5 #XM divss 1/0 sig=8 code=3 addr=0x1000001998 (want sig=8 code=3 addr=0x1000001998)
+[LP] PASS I6 #XM sqrtss -1 sig=8 code=7 addr=0x1000001a27 (want sig=8 code=7 addr=0x1000001a27)
+[LP] PASS I7 #XM overflow sig=8 code=4 addr=0x1000001abc (want sig=8 code=4 addr=0x1000001abc)
+[LP] PASS P1 unmapped read sig=11 code=1 addr=0x1080001008 (want sig=11 code=1 addr=0x1080001008)
+[LP] PASS P2 write to PROT_READ sig=11 code=2 addr=0x1080000010 (want sig=11 code=2 addr=0x1080000010)
+[LP] PASS P3 read of PROT_NONE sig=11 code=2 addr=0x1080002018 (want sig=11 code=2 addr=0x1080002018)
+[LP] PASS B1 memfd past EOF sig=7 code=2 addr=0x1080004004 (want sig=7 code=2 addr=0x1080004004)
+[LP] PASS B3 EOF page tail reads 0 (sig=0 byte=0)
+[LP] PASS B2 /tmp file past EOF sig=7 code=2 addr=0x108000600c (want sig=7 code=2 addr=0x108000600c)
+[LP] PASS G1 #GP (hlt) sig=11 code=128 addr=0 (want sig=11 code=128 addr=0)
+[LP] PASS T1 #BP (int3) sig=5 code=128 addr=0 (want sig=5 code=128 any-addr 0)
+[LP] done rc=0

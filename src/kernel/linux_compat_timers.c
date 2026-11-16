@@ -365,8 +365,10 @@ static int l_tmr_pause(struct process *p, struct trap_frame *tf) {
   (void)tf;
   if (!p) return 1;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  p->wake_ms = 0;
-  p->state = PROC_STATE_BLOCKED;
+  if (process_park_ok_locked(p)) { /* C1-k4: never re-park the dead */
+    p->wake_ms = 0;
+    p->state = PROC_STATE_BLOCKED;
+  }
   spinlock_release_irqrestore(&proc_lock, flags);
   return -2;
 }
@@ -495,20 +497,36 @@ static int l_tmr_delete(struct process *p, struct trap_frame *tf) {
  * Not a timer, but the same question ("does a wait with a timeout behave")
  * and the same missing-syscall list: epoll_create/create1/ctl/wait/pwait all
  * answered ENOSYS.  This is a LEVEL-TRIGGERED implementation over the one
- * readiness engine the kernel already has (file_poll): every wake re-polls the
- * registered set, and a wait with no ready fd parks with a 10 ms slice until
- * its deadline.  That is enough for a timerfd/socket/pipe event loop and it
- * does not invent a second poller; EPOLLET/EPOLLONESHOT are accepted and
- * ignored (level-triggered is the documented fallback of last resort, and no
- * guest in this tree asks for edge semantics yet).
+ * readiness engine the kernel already has (file_poll_fd): every wake re-polls
+ * the registered set.  EPOLLET/EPOLLONESHOT are accepted and ignored
+ * (level-triggered is the documented fallback of last resort; wineserver
+ * asks for neither).
+ *
+ * C1-k4: the interest list held 32 fds and 8 instances system-wide.
+ * wineserver keeps one fd per client thread (its request pipe) plus one per
+ * process (its socket) in ONE epoll set; the 33rd add failed with ENOSPC,
+ * wineserver perror()s and carries on, and that thread's requests are never
+ * read again -- the client sits in read(reply_fd) forever (P2's wineboot
+ * hang shape: every client BLOCKED, no futex, no timer, server polling).
+ * Now 1024 fds per instance (the game: ~190 threads), 16 instances, and the
+ * wait is woken by poll_notify() instead of re-scanning in 10 ms slices.
  */
-#define LE_MAX 8
+#ifdef __x86_64__
+#define LE_MAX 16
+#define LE_FDS 1024
+#else
+#define LE_MAX 8 /* the compat class is x86_64-only; keep ARM's .bss small */
 #define LE_FDS 32
+#endif
 struct l_epoll {
   int used;
   int pid;
   int n;
-  uint64_t deadline; /* 0 = none; set on the first pass of a timed wait */
+  int rot;   /* C1-k4: round-robin start, so a busy fd cannot starve the rest */
+  uint32_t busy;      /* C1-k4: consecutive waits answered at once ([EPOLLSPIN]) */
+  uint64_t busy_t0;   /* ms of the first of them */
+  uint64_t spin_rows; /* [EPOLLSPIN] rows printed */
+  int hw;    /* C1-k4: high-water mark of n (one [EPOLLHW] row per new 2^k) */
   struct {
     int fd;
     uint32_t events;
@@ -516,6 +534,9 @@ struct l_epoll {
   } e[LE_FDS];
 };
 static struct l_epoll le[LE_MAX];
+/* C1-k4: the deadline belongs to the WAITER (several threads may wait on one
+   epoll instance), not to the instance; 0 = none. */
+static uint64_t le_deadline[MAX_PROCESSES];
 
 int lt_epoll_new(void) {
   struct process *grp = process_group(current_process());
@@ -525,7 +546,10 @@ int lt_epoll_new(void) {
       le[i].used = 1;
       le[i].pid = grp->pid;
       le[i].n = 0;
-      le[i].deadline = 0;
+      le[i].rot = 0;
+      le[i].hw = 0;
+      le[i].busy = 0;
+      le[i].spin_rows = 0;
       return i;
     }
   return -ENOMEM;
@@ -583,8 +607,34 @@ static int l_tmr_epoll_ctl(struct process *p, struct trap_frame *tf) {
     if (e->e[i].fd == fd) break;
   if (i == e->n) {
     if (op == L_EPOLL_MOD) return l_ret(tf, -ENOENT);
-    if (e->n >= LE_FDS) return l_ret(tf, -ENOSPC);
+    if (e->n >= LE_FDS) {
+      /* Loud: a silent ENOSPC here is how a server loses a client. */
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[EPOLLFULL] pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " n=");
+      kl_i(&kl, e->n);
+      kl_s(&kl, " fd=");
+      kl_i(&kl, fd);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+      return l_ret(tf, -ENOSPC);
+    }
     e->n++;
+    if (e->n > e->hw) {
+      e->hw = e->n;
+      if (e->hw >= 16 && (e->hw & (e->hw - 1)) == 0) {
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[EPOLLHW] pid=");
+        kl_i(&kl, p->pid);
+        kl_s(&kl, " n=");
+        kl_i(&kl, e->hw);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
   }
   e->e[i].fd = fd;
   e->e[i].events = ev.events;
@@ -592,17 +642,9 @@ static int l_tmr_epoll_ctl(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, 0);
 }
 
-static int lt_epoll_park(struct process *p, struct trap_frame *tf) {
-  if (linux_compat_sig_deliverable(p)) return l_ret(tf, -EINTR);
-#if defined(__x86_64__)
-  if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind the x64 2-byte syscall */
-#endif
-  save_context(p, tf);
-  schedule(tf, 0);
-  return 1;
-}
-
 static int l_tmr_epoll_wait(struct process *p, struct trap_frame *tf) {
+  extern int file_poll_fd(struct process *p, int fd, short events);
+  extern int file_fd_notifies(struct process *p, int fd);
   int epfd = (int)l_argi(tf, 0);
   uint64_t uev = l_arg(tf, 1);
   int maxev = (int)l_argi(tf, 2);
@@ -612,50 +654,109 @@ static int l_tmr_epoll_wait(struct process *p, struct trap_frame *tf) {
   if (slot < 0) return l_ret(tf, -EINVAL);
   if (maxev <= 0) return l_ret(tf, -EINVAL);
   struct l_epoll *e = &le[slot];
-  struct k_pollfd pf[LE_FDS];
-  int n = e->n;
-  for (int i = 0; i < n; i++) {
-    pf[i].fd = e->e[i].fd;
-    pf[i].revents = 0;
-    pf[i].events = 0;
-    if (e->e[i].events & 0x1) pf[i].events |= 0x1; /* EPOLLIN  -> POLLIN  */
-    if (e->e[i].events & 0x4) pf[i].events |= 0x4; /* EPOLLOUT -> POLLOUT */
-  }
-  int ready = n ? file_poll(p, pf, n, 0) : 0;
-  if (ready > 0) {
+  int me = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+  poll_unpark(p);
+  for (;;) {
+    uint64_t seen = poll_seq_snapshot(); /* C1-k4: before the scan */
+    int all_notify = 1;
+    int n = e->n;
     int out = 0;
-    for (int i = 0; i < n && out < maxev; i++) {
-      if (!pf[i].revents) continue;
+    int start = (n > 0) ? (e->rot % n) : 0;
+    for (int k = 0; k < n && out < maxev; k++) {
+      int i = (start + k) % n;
+      short want = 0;
+      if (e->e[i].events & 0x1) want |= 0x1; /* EPOLLIN  -> POLLIN  */
+      if (e->e[i].events & 0x4) want |= 0x4; /* EPOLLOUT -> POLLOUT */
+      int rv = file_poll_fd(p, e->e[i].fd, want);
+      if (rv & 0x20) continue; /* POLLNVAL: epoll never reports a dead fd */
+      if (all_notify && !file_fd_notifies(p, e->e[i].fd)) all_notify = 0;
+      if (!rv) continue;
       struct {
         uint32_t events;
         uint64_t data;
       } __attribute__((packed)) ev;
       ev.events = 0;
-      if (pf[i].revents & 0x1) ev.events |= 0x1;
-      if (pf[i].revents & 0x4) ev.events |= 0x4;
-      if (pf[i].revents & 0x8) ev.events |= 0x8;  /* POLLERR  -> EPOLLERR  */
-      if (pf[i].revents & 0x10) ev.events |= 0x10; /* POLLHUP -> EPOLLHUP  */
+      if (rv & 0x1) ev.events |= 0x1;
+      if (rv & 0x4) ev.events |= 0x4;
+      if (rv & 0x8) ev.events |= 0x8;   /* POLLERR  -> EPOLLERR  */
+      if (rv & 0x10) ev.events |= 0x10; /* POLLHUP -> EPOLLHUP  */
       ev.data = e->e[i].data;
       if (l_copy_to_user(p, uev + (uint64_t)out * sizeof ev, &ev, sizeof ev) != 0)
         return l_ret(tf, -EFAULT);
       out++;
+      e->rot = i + 1;
     }
-    e->deadline = 0;
-    return l_ret(tf, out);
-  }
-  uint64_t now = timer_get_ms();
-  if (timeout == 0) { e->deadline = 0; return l_ret(tf, 0); }
-  if (e->deadline == 0 && timeout > 0) e->deadline = now + (uint64_t)timeout;
-  if (e->deadline && now >= e->deadline) { e->deadline = 0; return l_ret(tf, 0); }
-  uint64_t wake = now + 10;
-  if (e->deadline && e->deadline < wake) wake = e->deadline;
-  {
+    if (out > 0) {
+      le_deadline[me] = 0;
+      /* C1-k4: a level-triggered set that answers every wait at once for
+         seconds is an event loop that is not consuming what it is told
+         (P2: wineserver st=RUNNING for minutes while every client waits).
+         Name the ready entries, at most 6 rows per instance. */
+      uint64_t tnow = timer_get_ms();
+      if (e->busy++ == 0) e->busy_t0 = tnow;
+      if (e->busy >= 20000 && e->spin_rows < 6) {
+        e->spin_rows++;
+        for (int k = 0; k < n; k++) {
+          short want = 0;
+          if (e->e[k].events & 0x1) want |= 0x1;
+          if (e->e[k].events & 0x4) want |= 0x4;
+          int rv = file_poll_fd(p, e->e[k].fd, want);
+          if (!rv || (rv & 0x20)) continue;
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[EPOLLSPIN] pid=");
+          kl_i(&kl, p->pid);
+          kl_s(&kl, " waits=");
+          kl_i(&kl, (long)e->busy);
+          kl_s(&kl, " ms=");
+          kl_i(&kl, (long)(tnow - e->busy_t0));
+          kl_s(&kl, " fd=");
+          kl_i(&kl, e->e[k].fd);
+          kl_s(&kl, " ev=0x");
+          kl_hex(&kl, e->e[k].events);
+          kl_s(&kl, " rv=0x");
+          kl_hex(&kl, (unsigned long)rv);
+          kl_s(&kl, " data=0x");
+          kl_hex(&kl, (unsigned long)e->e[k].data);
+          kl_c(&kl, '\n');
+          kl_emit(&kl);
+        }
+        e->busy = 0;
+      }
+      return l_ret(tf, out);
+    }
+    e->busy = 0;
+    uint64_t now = timer_get_ms();
+    if (timeout == 0) { le_deadline[me] = 0; return l_ret(tf, 0); }
+    if (le_deadline[me] == 0 && timeout > 0) le_deadline[me] = now + (uint64_t)timeout;
+    if (le_deadline[me] && now >= le_deadline[me]) { le_deadline[me] = 0; return l_ret(tf, 0); }
+    uint64_t wake = now + (all_notify ? 250 : 10);
+    if (le_deadline[me] && le_deadline[me] < wake) wake = le_deadline[me];
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    p->wake_ms = wake;
-    p->state = PROC_STATE_BLOCKED;
+    /* C1-k4: the signal check comes BEFORE the park commits; it used to run
+       after BLOCKED was set, so an EINTR return left the thread BLOCKED while
+       it ran on in user space. */
+    if (linux_compat_sig_deliverable(p)) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      le_deadline[me] = 0;
+      return l_ret(tf, -EINTR);
+    }
+    if (process_park_ok_locked(p)) { /* C1-k4: never re-park the dead */
+      if (poll_park_locked(p, seen)) {
+        spinlock_release_irqrestore(&proc_lock, flags);
+        continue; /* an event raced the scan */
+      }
+      p->wake_ms = wake;
+      p->state = PROC_STATE_BLOCKED;
+    }
     spinlock_release_irqrestore(&proc_lock, flags);
+#if defined(__x86_64__)
+    if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind the x64 2-byte syscall */
+#endif
+    save_context(p, tf);
+    schedule(tf, 0);
+    return 1;
   }
-  return lt_epoll_park(p, tf);
 }
 
 /* ---- timerfd syscalls --------------------------------------------------- */

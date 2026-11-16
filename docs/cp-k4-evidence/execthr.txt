@@ -1,0 +1,20 @@
+# linux_probe_execthr, strix QEMU/KVM 8 vCPUs.  BASE = cyberpunk 5eea3712, LANE = cp-k4 1f2006c5
+## BASE
+[LP] FAIL E1 round 1: after exec-from-thread pid=3 (was 3) tid=5
+[LP] PASS E2 round 1: Threads=-1 (-1 = no /proc/self/status)
+[LP] FAIL E3 round 1: getppid=-1 (want 2)
+[LP] PASS E4 round 1: SIGUSR2 still blocked=1
+[LP] FAIL E3 parent reaped pid 3 (forked 3) status=0x100
+[LP] done rc=1
+t3_linux_probe: FAIL — execthr never printed '[LP] done rc=0' (tier rc=1)
+## LANE
+[LP] PASS E1 round 1: after exec-from-thread pid=3 (was 3) tid=3
+[LP] PASS E2 round 1: Threads=-1 (-1 = no /proc/self/status)
+[LP] PASS E3 round 1: getppid=2 (want 2)
+[LP] PASS E4 round 1: SIGUSR2 still blocked=1
+[LP] PASS E1 round 2: after exec-from-thread pid=3 (was 3) tid=3
+[LP] PASS E2 round 2: Threads=-1 (-1 = no /proc/self/status)
+[LP] PASS E3 round 2: getppid=2 (want 2)
+[LP] PASS E4 round 2: SIGUSR2 still blocked=1
+[LP] PASS E3 parent reaped pid 3 (forked 3) status=0x0
+[LP] done rc=0

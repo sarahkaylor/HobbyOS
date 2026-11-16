@@ -610,6 +610,19 @@ void vm_arch_unmap(struct addr_space *as, uint64_t va) {
   arm_v2_flush_va(as->asid, va);
 }
 
+/* C1-k4: see vm.h. */
+uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va) {
+  uint64_t *pte = arm_v2_walk_alloc(as, va, 0);
+  if (!pte)
+    return 0;
+  uint64_t leaf = *pte;
+  if (!(leaf & 1))
+    return 0;
+  *pte = 0;
+  arm_v2_flush_va(as->asid, va);
+  return (leaf & ARM_LEAF_SHARED) ? 0 : (leaf & ARM_OA_MASK);
+}
+
 void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot) {
   uint64_t *pte = arm_v2_walk_alloc(as, va, 0);
   if (!pte)
