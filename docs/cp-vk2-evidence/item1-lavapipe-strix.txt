@@ -1,0 +1,138 @@
+# C5-vk2 item 1 — lavapipe rebuilt on strix; headless enum + cube gates (baseline)
+# host: strix (Zen 5, AVX-512), guest QEMU -cpu host -smp 8 -m 12288M under KVM (Makefile X64_KVM_CPU default)
+# date: 2026-11-16T15:05:59Z
+
+## build (tools/cp/vk/build.sh, CP_VK_WORK=~/cp/vk2-build, JOBS=16)
+cp-vk: pins verified offline in /home/sarah/cp/vk2-rt/dl: Vulkan-Loader/Headers vulkan-sdk-1.4.363.0, glibc 2.31 set
+cp-vk: pins verified: llvm-project 21.1.8 (4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142), mesa 26.2.6 (b9436b3e1a8be76fbd4823dc884f90596ab7c6ac5e1867a305e66ffccfb31a92)
+cp-vk: sysroot: /home/sarah/cp/vk2-build/sysroot-glibc231 (cached)
+cp-vk: source: extracted llvm-project-21.1.8.src
+cp-vk: runtimes: configure (log /home/sarah/cp/vk2-build/log/runtimes.log)
+libc++.a
+libc++.modules.json
+libc++abi.a
+libc++experimental.a
+libunwind.a
+cp-vk: runtimes: libc++ 5.8M static (abi + unwinder merged in)
+cp-vk: llvm: configure (log /home/sarah/cp/vk2-build/log/llvm.log), -j16, link jobs 1
+cp-vk: llvm: built in 275 s; 21.1.8 rtti=NO mode=static targets=X86
+
+## glslang (host tool only, ~/cp/vk2-tools)
+glslang-16.2.0.tar.gz  https://github.com/KhronosGroup/glslang/archive/refs/tags/16.2.0.tar.gz  4294235 B  sha256 01985335785c97906a91afe3cb5ee015997696181ec6c125bab5555602ba08e2  (new pin)
+Glslang Version: 11:16.2.0
+cmake: -DENABLE_OPT=OFF -DENABLE_HLSL=OFF -DGLSLANG_TESTS=OFF -DBUILD_SHARED_LIBS=OFF, host clang 21.1.8
+
+## libdrm (Mesa subprojects/libdrm.wrap, static + hidden)
+libdrm-2.4.133.tar.xz  https://dri.freedesktop.org/libdrm/libdrm-2.4.133.tar.xz  436912 B  sha256 fc68f9d0ba2ea63c9432a299e14fea09fad7a8a66e8039fcd7802ca59f77b4f5
+
+## stage manifest
+589aa9595468f874     245000 CP/VK/bin/vkcube
+9e411c861ba6c32c     155768 CP/VK/bin/vkenum
+93b943a3ba6ddc51       4010 CP/VK/lib/cmake/VulkanLoader/VulkanLoaderConfig.cmake
+2a9d69bbb3cfa9fc        854 CP/VK/lib/cmake/VulkanLoader/VulkanLoaderConfig-release.cmake
+1a84ee670acddac1       2768 CP/VK/lib/cmake/VulkanLoader/VulkanLoaderConfigVersion.cmake
+e0c0d6076a9fcda0   60661824 CP/VK/lib/libvulkan_lvp.so
+symlink CP/VK/lib/libvulkan.so -> libvulkan.so.1
+symlink CP/VK/lib/libvulkan.so.1 -> libvulkan.so.1.4.363
+41afdaee9792abef     612128 CP/VK/lib/libvulkan.so.1.4.363
+4f0a0e1d7678a0a1        207 CP/VK/lib/pkgconfig/vulkan.pc
+e9a0f596ef04fed7        176 CP/VK/share/vulkan/icd.d/lvp_icd.x86_64.json
+
+## audit
+# cp-vk audit 2026-11-16T15:00:10Z — every ELF under /home/sarah/cp/vk2-build/stage/CP/VK
+/CP/VK/bin/vkcube                                GLIBC_max=2.17   NEEDED: libdl.so.2 libm.so.6 libc.so.6 
+/CP/VK/bin/vkenum                                GLIBC_max=2.17   NEEDED: libdl.so.2 libc.so.6 
+/CP/VK/lib/libvulkan.so.1.4.363                  GLIBC_max=2.17   NEEDED: libdl.so.2 libm.so.6 libpthread.so.0 libc.so.6 
+/CP/VK/lib/libvulkan_lvp.so                      GLIBC_max=2.29   NEEDED: libpthread.so.0 libdl.so.2 libm.so.6 libc.so.6 ld-linux-x86-64.so.2 
+# GLIBC max over the tree: GLIBC_2.29 (allowed <= 2.31)
+# lavapipe exports (7): ddebug_screen_create noop_screen_create trace_screen_create util_run_tests vk_icdGetInstanceProcAddr vk_icdGetPhysicalDeviceProcAddr vk_icdNegotiateLoaderICDInterfaceVersion 
+# lavapipe undefined symbols: 305; not provided by the 2.31 runtime: none
+
+## host run (strix, pinned 2.31 ld.so, VK_DRIVER_FILES -> staged ICD, no fb)
+LP_NATIVE_VECTOR_WIDTH=default
+[VK] device: llvmpipe (LLVM 21.1.8, 256 bits) (api 1.4.354) instance+enumerate 50.3 ms
+[VK] size 640x480 RESULT frames=90 wall=62.6 ms fps=1437.55 | per-frame total ms min/median/p90/max 0.18/0.21/0.59/34.56 | render+readback median 0.21 | blit+present median 0.00 | record mean 0.013
+[VK] size 640x480 last frame fnv1a64=0x4c1987840da44743 covered=62854/307200 px (20.5%) placed at (0,0) [no fb]
+[VK] size 1280x720 RESULT frames=90 wall=62.9 ms fps=1431.70 | per-frame total ms min/median/p90/max 0.30/0.39/0.69/20.50 | render+readback median 0.38 | blit+present median 0.00 | record mean 0.002
+[VK] size 1280x720 last frame fnv1a64=0xfded9b56a4459c16 covered=141412/921600 px (15.3%) placed at (0,0) [no fb]
+[VK] done rc=0
+LP_NATIVE_VECTOR_WIDTH=128
+[VK] device: llvmpipe (LLVM 21.1.8, 128 bits) (api 1.4.354) instance+enumerate 9.9 ms
+[VK] size 640x480 RESULT frames=90 wall=71.9 ms fps=1251.75 | per-frame total ms min/median/p90/max 0.17/0.36/0.94/20.35 | render+readback median 0.36 | blit+present median 0.00 | record mean 0.003
+[VK] size 640x480 last frame fnv1a64=0x4c1987840da44743 covered=62854/307200 px (20.5%) placed at (0,0) [no fb]
+[VK] size 1280x720 RESULT frames=90 wall=101.8 ms fps=883.92 | per-frame total ms min/median/p90/max 0.33/0.82/1.34/18.06 | render+readback median 0.82 | blit+present median 0.00 | record mean 0.004
+[VK] size 1280x720 last frame fnv1a64=0xfded9b56a4459c16 covered=141412/921600 px (15.3%) placed at (0,0) [no fb]
+[VK] done rc=0
+
+## guest enum (tools/cp/vk/gate.sh enum) — PASS, raw rows
+[VK] vkenum start (C5-vk)
+[VK] env VK_DRIVER_FILES=(unset)
+[VK] env VK_ICD_FILENAMES=(unset)
+[VK] env XDG_DATA_DIRS=(unset)
+[VK] env LP_NUM_THREADS=(unset)
+[VK] loader libvulkan.so.1 loaded in 101.0 ms
+[VK] Vulkan Instance Version: 1.4.363
+[VK] Instance Extensions: count = 9
+[VK]   VK_KHR_device_group_creation             : extension revision 1
+[VK]   VK_KHR_external_fence_capabilities       : extension revision 1
+[VK]   VK_KHR_external_memory_capabilities      : extension revision 1
+[VK]   VK_KHR_external_semaphore_capabilities   : extension revision 1
+[VK]   VK_KHR_get_physical_device_properties2   : extension revision 2
+[VK]   VK_EXT_debug_report                      : extension revision 10
+[VK]   VK_EXT_debug_utils                       : extension revision 2
+[VK]   VK_KHR_portability_enumeration           : extension revision 1
+[VK]   VK_LUNARG_direct_driver_loading          : extension revision 1
+[VK] vkCreateInstance ok in 102.0 ms
+[VK] vkEnumeratePhysicalDevices: 1 device(s) in 117.0 ms
+[VK] Devices:
+[VK] ========
+[VK] GPU0:
+[VK]     apiVersion         = 1.4.354
+[VK]     driverVersion      = 26.2.6
+[VK]     vendorID           = 0x10005
+[VK]     deviceID           = 0x0000
+[VK]     deviceType         = PHYSICAL_DEVICE_TYPE_CPU
+[VK]     deviceName         = llvmpipe (LLVM 21.1.8, 256 bits)
+[VK]     driverID           = 13
+[VK]     driverName         = llvmpipe
+[VK]     driverInfo         = Mesa 26.2.6 (LLVM 21.1.8)
+[VK]     conformanceVersion = 1.3.1.1
+[VK]     maxImageDimension2D = 16384, maxPushConstantsSize = 256, maxBoundDescriptorSets = 8
+[VK]     memoryHeap[0] size = 11520 MiB flags = 0x1
+[VK]     memoryType[0] heap 0 flags = 0xf
+[VK]     queueFamily[0] count = 1 flags = 0xf timestampValidBits = 64
+[VK]     Device Extensions: count = 178
+[VK]       VK_KHR_swapchain                             no
+[VK]       VK_KHR_push_descriptor                       yes
+[VK]       VK_EXT_robustness2                           yes
+[EXITPC] pid=2 last_user_pc=0x10800EB146 code=0x0
+System halt from CPU 1.
+cp-vk-gate: PASS (enum)
+
+## guest cube (VK_SKIP_BUILD=1 tools/cp/vk/gate.sh cube) — PASS, raw rows; screendump evidence/cp-vk2/cube-fb0-strix-cpuhost.png
+[VK] vkcube start (C5-vk): frames=90 hold=20s
+[VK] loader libvulkan.so.1 loaded in 62.0 ms
+[VK] device: llvmpipe (LLVM 21.1.8, 256 bits) (api 1.4.354) instance+enumerate 2074.0 ms
+[VK] vkCreateDevice ok in 3538.0 ms (queue family 0)
+[VK] fb: /dev/fb0 1920x1080 bpp=32 stride=7680 smem=8294400 (R@16 G@8 B@0)
+[VK] size 640x480: 90 frames
+[VK] size 640x480: setup 212.0 ms (pipeline create 186.0 ms)
+[VK] size 640x480 frame 0: record 29.00 ms, render+readback 2019.00 ms, blit+present 1.00 ms, total 2049.00 ms
+[VK] size 640x480 frame 1: record 2.00 ms, render+readback 39.00 ms, blit+present 1.00 ms, total 42.00 ms
+[VK] size 640x480 frame 2: record 0.00 ms, render+readback 6.00 ms, blit+present 1.00 ms, total 7.00 ms
+[VK] size 640x480 frame 89: record 0.00 ms, render+readback 2.00 ms, blit+present 1.00 ms, total 3.00 ms
+[VK] size 640x480 RESULT frames=90 wall=2298.0 ms fps=39.16 | per-frame total ms min/median/p90/max 0.00/2.00/3.00/2049.00 | render+readback median 2.00 | blit+present median 0.00 | record mean 0.356
+[VK] size 640x480 last frame fnv1a64=0x4c1987840da44743 covered=62854/307200 px (20.5%) placed at (1280,0)
+[VK] size 1280x720: 90 frames
+[VK] size 1280x720: setup 6.0 ms (pipeline create 2.0 ms)
+[VK] size 1280x720 frame 0: record 0.00 ms, render+readback 212.00 ms, blit+present 1.00 ms, total 213.00 ms
+[VK] size 1280x720 frame 1: record 0.00 ms, render+readback 2.00 ms, blit+present 0.00 ms, total 2.00 ms
+[VK] size 1280x720 frame 2: record 0.00 ms, render+readback 2.00 ms, blit+present 0.00 ms, total 2.00 ms
+[VK] size 1280x720 frame 89: record 0.00 ms, render+readback 2.00 ms, blit+present 0.00 ms, total 2.00 ms
+[VK] size 1280x720 RESULT frames=90 wall=442.0 ms fps=203.62 | per-frame total ms min/median/p90/max 1.00/3.00/3.00/213.00 | render+readback median 2.00 | blit+present median 0.00 | record mean 0.011
+[VK] size 1280x720 last frame fnv1a64=0xfded9b56a4459c16 covered=141412/921600 px (15.3%) placed at (0,0)
+[VK] hold 20 s: frames are on /dev/fb0 now (screendump window)
+[VK] teardown: clean
+[VK] done rc=0
+[EXITPC] pid=2 last_user_pc=0x108023A146 code=0x0
+cp-vk-gate: PASS (cube)
