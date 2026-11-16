@@ -262,6 +262,22 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
       - exec from a secondary thread leaves tid ≠ pid.
       - SIGBUS past EOF is reported as SIGSEGV.
       - The 64 MiB per-file ext2 mapping cap.
+    - **Wave 4 findings (2026-11-16, in progress).**
+      - *Fixed:* `fat16_rename` stored the last path component through NULL
+        (a kernel write to VA 0), so every FAT `rename(2)` from user space hung
+        a CPU; IceWM's fontconfig hits it at session start. c5640214, guard row
+        `linux_probe_tmpfs` T4f (61745d15).
+      - *Open, C3-nfs2:* after three unanswered READs the NFS client returned
+        zero-filled data instead of an error, so Wine read an all-zero NLS
+        section and crashed (C5-vk2 run 1) and winex11 failed to load. The
+        replies are lost at QEMU slirp's host UDP socket (default 212992-byte
+        receive buffer, `UdpRcvbufErrors` climbing with four guests). Until the
+        hard-retry fix lands, only Wine runs with zero NFS failure rows count.
+      - *Wine trap:* win32u waits only 10 s for explorer
+        (`dlls/win32u/winstation.c:877`); in the guest the first GUI client of
+        a session stays on the null driver unless a keepalive client warms
+        explorer first (`tools/cp/p5/winep5.c`).
+      - *Gate host:* four QEMU slots and per-call `/etc/exports` edits (§7.4).
 
 **Lane status (2026-11-15).** Merged to `cyberpunk`: C1-as (design), C2-wine
 (pins/build/evidence), C3-ext2 (ext2 rw), C7-p0host, C7-p0guest. **C1-cpu**
@@ -739,12 +755,12 @@ mouse deltas from QMP-injected motion. Evidence: screendumps + serial log.
 
 ### P5 — Vulkan on the CPU (size L)
 
-- [ ] Mesa lavapipe built for the compat class; LLVM JIT works under compat
+- [x] *(C5-vk, C5-vk2: `docs/cp-vk.md` §1–4, §8.1)* Mesa lavapipe built for the compat class; LLVM JIT works under compat
       (`PROT_EXEC` anonymous memory, `mprotect` transitions).
 - [ ] Vulkan loader + ICD JSON staging; winevulkan.
-- [ ] A Vulkan X11 WSI path that works with lavapipe (software presentation
+- [x] *(C5-vk2: Mesa's software `put_image` path; Present 1.2 fake-msc paces it at ~30 Hz, render median 1 ms)* A Vulkan X11 WSI path that works with lavapipe (software presentation
       is acceptable here — this rung is about correctness).
-- [ ] Probes: Linux `vkcube`; `vkcube.exe` under Wine; a DXVK D3D11 triangle;
+- [ ] Probes: Linux `vkcube` *(done, C5-vk2: 65 s in the guest X session, 1853 frames, two distinct screendumps, `docs/cp-vk2-evidence/item2-vkcubex-x11.txt`)*; `vkcube.exe` under Wine; a DXVK D3D11 triangle;
       a vkd3d-proton D3D12 triangle (MinGW-built, in `src/user/cp/`).
 
 **Gate P5:** all four render recognisably in screendumps and run ≥60 s without

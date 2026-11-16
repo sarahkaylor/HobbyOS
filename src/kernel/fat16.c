@@ -1309,14 +1309,20 @@ int fat16_resolve_parent(const char *path, struct fat16_dir_entry *out_parent_en
       out_parent_entry->start_cluster = 0;
       out_parent_entry->file_size = 0;
     }
-    const char *comp = path;
-    if (*comp == '/') comp++;
-    int idx = 0;
-    while (comp[idx] && idx < 63) {
-      out_last_component[idx] = comp[idx];
-      idx++;
+    /* out_last_component may be NULL: fat16_rename asks only for the old
+       path's parent.  Writing through it was a kernel store to VA 0, which
+       faults (IF=0, CPU hung) from any process's address space now that the
+       identity map is gone -- every FAT rename(2) from user space. */
+    if (out_last_component) {
+      const char *comp = path;
+      if (*comp == '/') comp++;
+      int idx = 0;
+      while (comp[idx] && idx < 63) {
+        out_last_component[idx] = comp[idx];
+        idx++;
+      }
+      out_last_component[idx] = '\0';
     }
-    out_last_component[idx] = '\0';
     return 0;
   }
 
@@ -1334,13 +1340,15 @@ int fat16_resolve_parent(const char *path, struct fat16_dir_entry *out_parent_en
     parent_path[idx] = '\0';
   }
 
-  const char *comp = last_slash + 1;
-  int idx = 0;
-  while (comp[idx] && idx < 63) {
-    out_last_component[idx] = comp[idx];
-    idx++;
+  if (out_last_component) {
+    const char *comp = last_slash + 1;
+    int idx = 0;
+    while (comp[idx] && idx < 63) {
+      out_last_component[idx] = comp[idx];
+      idx++;
+    }
+    out_last_component[idx] = '\0';
   }
-  out_last_component[idx] = '\0';
 
   return fat16_resolve_path(parent_path, out_parent_entry, 0, 0);
 }
