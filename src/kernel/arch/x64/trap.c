@@ -5407,7 +5407,22 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       }
       /* w5 (ii): a user-mode exception (BRK/#UD/#GP/...) kills with a
          signal status, never a stale-x0 exit code (rc=0 false pass). */
-      process_fault_exit(tf, 11); /* SIGSEGV status byte */
+      /* cp/wine2: a Linux-ABI process gets Linux's signal for the vector
+         (arch/x86 traps.c): #DE/#MF/#XM -> SIGFPE, #UD -> SIGILL, #DB/#BP ->
+         SIGTRAP, #AC -> SIGBUS, the rest SIGSEGV.  Wine maps SIGFPE+trapno 0
+         to EXCEPTION_INT_DIVIDE_BY_ZERO; a SIGSEGV for #DE was "Got unexpected
+         trap 0" and a dead winprobe.exe.  Native processes keep status 11. */
+      int fsig = 11;
+      if (cur->abi_flags & PROC_FLAG_LINUX_ABI) {
+        switch ((unsigned)tf->vector) {
+        case 0: case 16: case 19: fsig = 8; break;  /* SIGFPE  */
+        case 6:                   fsig = 4; break;  /* SIGILL  */
+        case 1: case 3:           fsig = 5; break;  /* SIGTRAP */
+        case 17:                  fsig = 7; break;  /* SIGBUS  */
+        default: break;
+        }
+      }
+      process_fault_exit(tf, fsig); /* the signal status byte */
     } else if (trap_user_cs_no_process(tf, cur)) {
       /* GB-101 (classifier clause): a user-mode frame whose CPU has no
          current process is still a user-mode fault.  GB-147 measured one:
@@ -6673,6 +6688,12 @@ void trap_init(void) {
   SET_EXCEPTION(20); SET_EXCEPTION(21); SET_EXCEPTION(22); SET_EXCEPTION(23);
   SET_EXCEPTION(24); SET_EXCEPTION(25); SET_EXCEPTION(26); SET_EXCEPTION(27);
   SET_EXCEPTION(28); SET_EXCEPTION(29); SET_EXCEPTION(30); SET_EXCEPTION(31);
+  /* cp/wine2: #BP (int3) and #OF (into) are raised BY user code as software
+     interrupts, so their gates need DPL 3 (Linux: set_system_intr_gate).
+     With DPL 0 a ring-3 int3 was a #GP -> SIGSEGV, never SIGTRAP: Windows
+     breakpoints / DebugBreak under Wine arrive as access violations. */
+  idt_set_gate(3, (uint64_t)exception_3, 0x08, 0xEE);
+  idt_set_gate(4, (uint64_t)exception_4, 0x08, 0xEE);
 
   // Register PIC interrupts (vectors 32-47)
   idt_set_gate(32, (uint64_t)exception_32, 0x08, 0x8E);
