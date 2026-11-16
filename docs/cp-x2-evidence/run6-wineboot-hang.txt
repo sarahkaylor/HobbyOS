@@ -1,0 +1,17 @@
+# run6 (strix, cyberpunk 8b9fc2c9 kernel, 4 guests): wineboot-tree hang -- excerpt
+[P4] winep4 launcher (C4-x2)
+[X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+[P4] mount 10.0.2.2:/srv/nfs/cp-x2-p4f -> /CP ok
+[P4] begin wineboot : wineboot -i
+[P4] end wineboot status=53 ms=310567
+no-reply=211 nfshard-retry=33 giveup=0 max_waited_ms=63816
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[IDLESTUCK] slot=12 pid=12 st=5 wake=1611039 futex=0x0 rip=0x10000758f4 /XEYESR.BIN
+[IDLESTUCK] slot=14 pid=14 st=5 wake=1611247 futex=0x0 rip=0x1000006434 /WINEP4.BIN
+[IDLESTUCK] slot=18 pid=18 st=5 wake=1611007 futex=0x0 rip=0x1080127648 wineserver
+[IDLESTUCK] slot=20 pid=20 st=5 wake=0 futex=0x0 rip=0x1080050390 wineboot.exe
+[IDLESTUCK] slot=22 pid=22 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=23 pid=23 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=24 pid=24 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=36 pid=36 st=3 wake=0 futex=0x0 rip=0x108017d07e rundll32.exe
+[IDLESTUCK] claims: c0=-1/1/0 c1=-1/538/0 c2=-1/538/0 c3=-1/535/0 c4=-1/1145/0 c5=36/390/0 c6=-1/543/0 c7=-1/530/0 lock_owner=8 locked=1 park_returns=0 lock_addr=0x0000000074C59448
