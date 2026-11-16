@@ -267,12 +267,22 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
         (a kernel write to VA 0), so every FAT `rename(2)` from user space hung
         a CPU; IceWM's fontconfig hits it at session start. c5640214, guard row
         `linux_probe_tmpfs` T4f (61745d15).
-      - *Open, C3-nfs2:* after three unanswered READs the NFS client returned
-        zero-filled data instead of an error, so Wine read an all-zero NLS
-        section and crashed (C5-vk2 run 1) and winex11 failed to load. The
-        replies are lost at QEMU slirp's host UDP socket (default 212992-byte
-        receive buffer, `UdpRcvbufErrors` climbing with four guests). Until the
-        hard-retry fix lands, only Wine runs with zero NFS failure rows count.
+      - *Fixed, C3-nfs2 (cp-nfs2 merged at 1cb981be):* after three unanswered
+        READs the NFS client returned zero-filled data instead of an error, so
+        Wine read an all-zero NLS section and crashed (C5-vk2 run 1) and
+        winex11 failed to load. NFS is now hard-mounted (2555d642): a lost
+        reply is re-sent with backoff for up to 180 s, and a failure is
+        `-EIO`/SIGBUS, never zeros; guard G9 injects reply loss. The replies
+        were lost at QEMU slirp's host UDP socket (212992-byte default receive
+        buffer holds ~3 replies); at most 2 READs are now outstanding per socket
+        (14e8e111), and run 3 had 1 stall where run 2 had 412. No host setting
+        is needed. Also fixed: readahead windows per (file, 64 KiB block)
+        (P2's wineboot phase read 43 MB where run23 read 269 MB), 64-bit
+        offsets, stat times, symlinks in any path component.
+      - *Open:* wineboot still ends at Wine's 300 s boot-event wait
+        (status 53, ~303 s) with NFS no longer the cause; one NFS LOOKUP went
+        unanswered for 95 s in P2 run 3 (suspected `exportfs -ra` cache flush,
+        unproven).
       - *Wine trap:* win32u waits only 10 s for explorer
         (`dlls/win32u/winstation.c:877`); in the guest the first GUI client of
         a session stays on the null driver unless a keepalive client warms
@@ -727,7 +737,7 @@ hash check.
 - [x] *(wave 2, C3-ext2b: one lock manager, `vfs_lock.c`, for FAT16/ext2/tmpfs)* `flock`/`fcntl` record locks (Wine and the vkd3d-proton cache use them;
       verify which); `chmod`/`fchmod`/`chown`/`utimensat` on ext2.
 - [x] *(wave 2, C3-ext2b)* `VFS_PATH_MAX` 256 → ≥ 1024 (Windows MAX_PATH plus the prefix path).
-- [ ] NFS: files >4 GiB (64-bit offsets throughout); single `read()`s up to
+- [x] *(C3-nfs2 26a36445, 46b7c0ba: a 5 GiB file's sha256 matches the host's, one 176 MiB `read()` matches; guard G8)* NFS: files >4 GiB (64-bit offsets throughout); single `read()`s up to
       ~172 MB (the game's `shader_final.cache`, §0.2 item 12). Archive mmap is
       *not* needed (P0: archives are read, not mapped); the 64 MiB
       `VM_OBJ_MAX_BYTES` cap matters for memfd and GPU blob mappings instead.
@@ -1000,7 +1010,9 @@ user's approval through the integrator.
   the 1344-byte clamp), must pass `python3 tools/cp/nfs/rsize_scan.py` (also
   part of `make host_tests`) and the boot guard `tools/cp/nfs/rsize_guard.sh`
   on the merged tree before `cyberpunk` moves. Every integration gate batch runs
-  both. When a conflict lands in those files, keep the cp/nfs side; see
+  both. Since cp-nfs2 the boot guard also covers G6 (concurrent readers), G7
+  (per-file windows), G8 (64-bit, large reads, stat times, symlinks) and G9
+  (hard mount under injected reply loss). When a conflict lands in those files, keep the cp/nfs side; see
   `docs/cp-nfs.md` §6.
 - Game files: never in a worktree, never in a commit.
 
