@@ -1,0 +1,23 @@
+/* XPM */
+static char * swriter_16x16_xpm[] = {
+"16 16 4 1",
+"  c None",
+". c #1C71D8",
+"B c #1C71D8",
+"W c #FFFFFF",
+"                ",
+"  ......... ..  ",
+"  .......... .  ",
+"  ..WWWW.WWW.   ",
+"  ..WWWWWWWW..  ",
+"  ..WBBBBBBW..  ",
+"  ..WWWWWWWW..  ",
+"  ..WBBBBBBW..  ",
+"  ..WWWWWWWW..  ",
+"  ..WBBBBBBW..  ",
+"  ..WWWWWWWW..  ",
+"  ..WBBBWWWW..  ",
+"  ..WWWWWWWW..  ",
+"  ............  ",
+"  ............  ",
+"                "};
