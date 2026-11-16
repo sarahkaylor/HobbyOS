@@ -40,14 +40,23 @@
 #         LLVM_TARBALL (default: search the tree's llvm/libcxx vendor dirs, then
 #                       $WORK/dl; sha256-checked against third_party/llvm-21.1.8)
 #         MESA_TARBALL (default: $WORK/dl, ~/.cache/hobbyos-mesa; sha256-checked)
-#         JOBS         (default 6)
+#         JOBS         (default 16)
+#         CP_VK_WSI    none (default: headless, docs/cp-vk.md §1-6) | x11: the
+#                      loader with BUILD_WSI_XLIB/XCB_SUPPORT and Mesa
+#                      -Dplatforms=x11 against C4-x's libraries
+#                      (tools/cp/x11/build.sh; docs/cp-x11.md §5), staged in
+#                      $WORK/stage-x11 + the X11 probe vkcubex.  LLVM, libc++
+#                      and the headers are shared between the variants.
+#         CP_X11_WORK  (x11 only; default $HOME/cp/x11-build) C4-x's work dir:
+#                      destdir/CP/X11 (headers, libs) and pc/ (pkg-config)
+#         GLSLANG      glslangValidator >= 12.2 for the mesa step (PATH lookup)
 # Exit:   0 ok, 1 build/audit failure, 2 tooling error.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 RT="${CP_RUNTIME:-$ROOT/third_party/cp-runtime}"
 DL="$RT/dl"
 WORK="${CP_VK_WORK:-$HOME/cp/vk-build}"
-JOBS="${JOBS:-6}"
+JOBS="${JOBS:-16}"
 STEP="${1:-all}"
 
 PREFIX=/CP/VK
@@ -55,7 +64,6 @@ SYS="$WORK/sysroot-glibc231"
 LCXX="$WORK/libcxx"          # libc++ install (include/c++/v1, lib/libc++.a)
 LLVMI="$WORK/llvm"           # LLVM install (static libs + llvm-config)
 VKH="$WORK/vulkan-headers"   # Vulkan-Headers install
-STAGE="$WORK/stage"
 GLIBC_MAX_ALLOWED=2.31
 
 LLVM_VER=21.1.8
@@ -68,10 +76,34 @@ VK_TAG=vulkan-sdk-1.4.363.0
 say() { printf 'cp-vk: %s\n' "$*"; }
 die() { say "ERROR: $*"; exit "${2:-1}"; }
 
-for t in clang clang++ ld.lld llvm-ar cmake ninja meson dpkg-deb readelf python3 glslangValidator sha256sum; do
-  command -v "$t" >/dev/null || die "missing host tool: $t (apt: clang lld llvm cmake ninja-build meson dpkg readelf python3-mako python3-yaml glslang-tools)" 2
+WSI="${CP_VK_WSI:-none}"
+case "$WSI" in
+  none) SFX= ;;
+  x11)  SFX=-x11 ;;
+  *) die "CP_VK_WSI=$WSI: expected none or x11" 2 ;;
+esac
+STAGE="$WORK/stage$SFX"
+X11W="${CP_X11_WORK:-$HOME/cp/x11-build}"
+X11DEV="$X11W/destdir/CP/X11"   # C4-x dev tree (include/, lib/)
+X11PC="$X11W/pc"                # its .pc files, paths rewritten to the destdir
+X11_RPATH=/CP/X11/lib           # where the guest stages the X libraries
+SYSPC="$SYS/usr/lib/x86_64-linux-gnu/pkgconfig"
+PCLIBDIR="$SYSPC"
+if [ "$WSI" = x11 ]; then
+  [ -f "$X11PC/xcb.pc" ] && [ -f "$X11DEV/include/xcb/xcb.h" ] || \
+    die "CP_VK_WSI=x11 needs C4-x's libraries at $X11W (CP_X11_WORK=$X11W bash tools/cp/x11/build.sh all)" 2
+  PCLIBDIR="$X11PC:$SYSPC"
+fi
+
+for t in clang clang++ ld.lld llvm-ar cmake ninja meson dpkg-deb readelf python3 sha256sum; do
+  command -v "$t" >/dev/null || die "missing host tool: $t (apt: clang lld llvm cmake ninja-build meson dpkg readelf python3-mako python3-yaml)" 2
 done
 python3 -c 'import mako, yaml' 2>/dev/null || die "python3 needs mako + yaml (apt install python3-mako python3-yaml)" 2
+# glslangValidator: only the mesa step needs it (>= 12.2: Mesa's BVH shaders
+# pass '-P' preamble options, meson.build:735-760).  The probe shaders are
+# committed as SPIR-V headers (src/user/cp/vkcube_*_spv.h) so `probes` needs
+# no glslang; CP_VK_REGEN_SPV=1 regenerates them with $GLSLANG.
+GLSLANG="${GLSLANG:-$(command -v glslangValidator || true)}"
 mkdir -p "$WORK/dl" "$WORK/src" "$WORK/log"
 
 # ---------------------------------------------------------------------------
@@ -95,29 +127,42 @@ CXX_LDFLAGS="$LDFLAGS_COMMON -stdlib=libc++ -L$LCXX/lib -static-libgcc -Wl,--as-
 
 sha_ok() { echo "$2  $1" | sha256sum -c --quiet - >/dev/null 2>&1; }
 
-# --- 0. pins ------------------------------------------------------------------
+# --- 0. pins (OFFLINE: this script never downloads) ------------------------------
+# The pinned files are verified by sha256 where they already are; a missing
+# file is an error naming its URL (fetch it with tools/cp/fetch-runtime.sh or
+# by hand, after approval).  The table is the subset of docs/cp-pins.md /
+# tools/cp/fetch-runtime.sh this build reads; a row changes in all three.
+VK_PINS="Vulkan-Loader-$VK_TAG.tar.gz|941eff558fc74f248745fb7df367640cf89a8457f216dae498a74ae14b6ba6f7|https://github.com/KhronosGroup/Vulkan-Loader/archive/refs/tags/$VK_TAG.tar.gz
+Vulkan-Headers-$VK_TAG.tar.gz|4a078be12bef21cfebc09d878b77a63cff9d68f899254a0b00d0e37ef73e7f7e|https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/$VK_TAG.tar.gz
+libc6_2.31-0ubuntu9.18_amd64.deb|1b2281aac4935dfea1f89dfc19e445fdbb45303202af60679ccb8bf035f081a0|http://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_2.31-0ubuntu9.18_amd64.deb
+libc6-dev_2.31-0ubuntu9.18_amd64.deb|11029900f2315b93ce487792ae1bf15f0927e5e50880c091e6a440b14d4e164a|http://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6-dev_2.31-0ubuntu9.18_amd64.deb
+linux-libc-dev_5.4.0-218.238_amd64.deb|0aa210458df2ab7bc4536e8edf0f9423a7018e74e2eac0b5777fd2a36f170c2f|http://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-libc-dev_5.4.0-218.238_amd64.deb
+libgcc-s1_10.5.0-1ubuntu1~20.04_amd64.deb|4aa7b9c9f3225df65a750ae0ff5c890fc6108c82a609b3c5abd45d211838bf3c|http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-10/libgcc-s1_10.5.0-1ubuntu1~20.04_amd64.deb
+libgcc-10-dev_10.5.0-1ubuntu1~20.04_amd64.deb|ebe5e967fca32ea5811946180f7822ee749857861eadaa29514e65857ce3b897|http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-10/libgcc-10-dev_10.5.0-1ubuntu1~20.04_amd64.deb"
 pins() {
-  bash "$ROOT/tools/cp/fetch-runtime.sh" >/dev/null || die "fetch-runtime.sh failed (run it directly for detail)" 2
-  say "pins verified (tools/cp/fetch-runtime.sh: Vulkan-Loader/Headers $VK_TAG, glibc 2.31 set)"
-  local c
+  local n sha url c bad=0
+  while IFS='|' read -r n sha url; do
+    if [ ! -f "$DL/$n" ]; then say "missing $DL/$n (pinned $sha, $url)"; bad=1
+    elif ! sha_ok "$DL/$n" "$sha"; then say "MISMATCH $DL/$n (pinned $sha)"; bad=1; fi
+  done <<< "$VK_PINS"
+  [ "$bad" = 0 ] || die "pinned runtime files missing or wrong in $DL (CP_RUNTIME=$RT)" 2
+  say "pins verified offline in $DL: Vulkan-Loader/Headers $VK_TAG, glibc 2.31 set"
   if [ ! -f "$WORK/dl/llvm-project-$LLVM_VER.src.tar.xz" ]; then
     for c in "${LLVM_TARBALL:-}" "$ROOT/third_party/llvm-$LLVM_VER/llvm-project-$LLVM_VER.src.tar.xz" \
              "$ROOT/third_party/libcxx-$LLVM_VER/llvm-project-$LLVM_VER.src.tar.xz"; do
       [ -n "$c" ] && [ -f "$c" ] && { cp "$c" "$WORK/dl/"; break; }
     done
   fi
-  [ -f "$WORK/dl/llvm-project-$LLVM_VER.src.tar.xz" ] || {
-    say "LLVM tarball not found locally; third_party/llvm-$LLVM_VER/fetch.sh fetches it from the release page"
-    bash "$ROOT/third_party/llvm-$LLVM_VER/fetch.sh" >/dev/null
-    cp "$ROOT/third_party/llvm-$LLVM_VER/llvm-project-$LLVM_VER.src.tar.xz" "$WORK/dl/"; }
+  [ -f "$WORK/dl/llvm-project-$LLVM_VER.src.tar.xz" ] || \
+    die "LLVM tarball not found (third_party/llvm-$LLVM_VER/fetch.sh fetches it; sha256 $LLVM_SHA256)" 2
   sha_ok "$WORK/dl/llvm-project-$LLVM_VER.src.tar.xz" "$LLVM_SHA256" || die "LLVM tarball sha256 mismatch"
   grep -q "$LLVM_SHA256" "$ROOT/third_party/llvm-$LLVM_VER/container.sha256" || die "LLVM pin drifted from third_party/llvm-$LLVM_VER/container.sha256"
   if [ ! -f "$WORK/dl/mesa-$MESA_VER.tar.xz" ]; then
     for c in "${MESA_TARBALL:-}" "$HOME/.cache/hobbyos-mesa/mesa-$MESA_VER.tar.xz"; do
       [ -n "$c" ] && [ -f "$c" ] && { cp "$c" "$WORK/dl/"; break; }
     done
-    [ -f "$WORK/dl/mesa-$MESA_VER.tar.xz" ] || curl -fsSL -o "$WORK/dl/mesa-$MESA_VER.tar.xz" "$MESA_URL"
   fi
+  [ -f "$WORK/dl/mesa-$MESA_VER.tar.xz" ] || die "Mesa tarball not found ($MESA_URL, sha256 $MESA_SHA256)" 2
   sha_ok "$WORK/dl/mesa-$MESA_VER.tar.xz" "$MESA_SHA256" || die "Mesa tarball sha256 mismatch"
   say "pins verified: llvm-project $LLVM_VER ($LLVM_SHA256), mesa $MESA_VER ($MESA_SHA256)"
 }
@@ -228,27 +273,32 @@ do_loader() {
     cmake --install "$WORK/build-vkh" >> "$WORK/log/vkh.log" 2>&1
     touch "$VKH/.ok"
   fi
-  local B="$WORK/build-loader"; rm -rf "$B"
-  say "loader: configure + build (log $WORK/log/loader.log)"
+  local B="$WORK/build-loader$SFX" LG="$WORK/log/loader$SFX.log"; rm -rf "$B"
+  local wsi=OFF lcf="$CFLAGS_COMMON"
+  # x11: the loader only needs the xlib/xcb HEADERS (it forwards
+  # vkCreateXlib/XcbSurfaceKHR to the ICD and never links an X library).
+  [ "$WSI" = x11 ] && { wsi=ON; lcf="$lcf -I$X11DEV/include"; }
+  say "loader: configure + build, WSI xlib/xcb $wsi (log $LG)"
   # FALLBACK_DATA_DIRS: with XDG_DATA_DIRS unset (a wave boot, or a Wine
   # process that never sets it) the loader still finds
   # $PREFIX/share/vulkan/icd.d/lvp_icd.x86_64.json — no env needed.  An
   # explicit VK_DRIVER_FILES / VK_ICD_FILENAMES still overrides it.
   # The loader REQUIREs pkg-config on Linux; point it at the sysroot so no
   # host .pc file can leak in (the WSI ones are all switched off anyway).
-  PKG_CONFIG_LIBDIR="$SYS/usr/lib/x86_64-linux-gnu/pkgconfig" PKG_CONFIG_PATH= \
+  PKG_CONFIG_LIBDIR="$PCLIBDIR" PKG_CONFIG_PATH= \
   cmake -G Ninja -S "$WORK/src/Vulkan-Loader-$VK_TAG" -B "$B" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_INSTALL_LIBDIR=lib \
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_ASM_COMPILER=clang \
-    -DCMAKE_C_FLAGS="$CFLAGS_COMMON" -DCMAKE_ASM_FLAGS="--sysroot=$SYS" \
+    -DCMAKE_C_FLAGS="$lcf" -DCMAKE_ASM_FLAGS="--sysroot=$SYS" \
     -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS_COMMON" -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS_COMMON" \
     -DCMAKE_PREFIX_PATH="$VKH" -DVULKAN_HEADERS_INSTALL_DIR="$VKH" \
-    -DBUILD_WSI_XCB_SUPPORT=OFF -DBUILD_WSI_XLIB_SUPPORT=OFF -DBUILD_WSI_WAYLAND_SUPPORT=OFF \
+    -DBUILD_WSI_XCB_SUPPORT=$wsi -DBUILD_WSI_XLIB_SUPPORT=$wsi -DBUILD_WSI_WAYLAND_SUPPORT=OFF \
     -DBUILD_WSI_DIRECTFB_SUPPORT=OFF -DBUILD_TESTS=OFF \
     -DFALLBACK_DATA_DIRS="$PREFIX/share:/usr/local/share:/usr/share" \
-    > "$WORK/log/loader.log" 2>&1 || { tail -30 "$WORK/log/loader.log"; die "loader configure failed"; }
-  ninja -C "$B" -j"$JOBS" >> "$WORK/log/loader.log" 2>&1 || { tail -30 "$WORK/log/loader.log"; die "loader build failed"; }
-  DESTDIR="$STAGE" cmake --install "$B" >> "$WORK/log/loader.log" 2>&1
+    > "$LG" 2>&1 || { tail -30 "$LG"; die "loader configure failed"; }
+  grep -E 'XCB|X11|Xlib' "$LG" | head -8 || true
+  ninja -C "$B" -j"$JOBS" >> "$LG" 2>&1 || { tail -30 "$LG"; die "loader build failed"; }
+  DESTDIR="$STAGE" cmake --install "$B" >> "$LG" 2>&1
   say "loader: $(readelf -dW "$STAGE$PREFIX/lib/libvulkan.so.1" | awk '/SONAME/{print $NF}') installed under $STAGE$PREFIX/lib"
 }
 
@@ -256,8 +306,17 @@ do_loader() {
 do_mesa() {
   do_llvm
   src_extract "$WORK/dl/mesa-$MESA_VER.tar.xz" "mesa-$MESA_VER"
-  local B="$WORK/build-mesa"
-  local NF="$WORK/meson-native.ini"
+  local B="$WORK/build-mesa$SFX" NF="$WORK/meson-native$SFX.ini"
+  local LC="$WORK/log/mesa-configure$SFX.log" LB="$WORK/log/mesa-build$SFX.log"
+  local plat= xlink=
+  # x11: Mesa's X11 WSI links libxcb + xcb-{dri3,present,sync,xfixes,randr,shm},
+  # libX11-xcb and libxshmfence.  DT_RPATH (not RUNPATH: --disable-new-dtags)
+  # /CP/X11/lib so the guest's copies win over XSESSION's LD_LIBRARY_PATH=/LIB64
+  # (docs/cp-x11.md §5); -rpath-link resolves libxcb's libXau/libXdmcp.
+  if [ "$WSI" = x11 ]; then
+    plat=x11
+    xlink=", '-L$X11DEV/lib', '-Wl,-rpath-link,$X11DEV/lib', '-Wl,--disable-new-dtags', '-Wl,-rpath,$X11_RPATH'"
+  fi
   # Arrays in the native file: meson passes each element as one argv entry.
   local cxxinc="'-stdlib=libc++', '-nostdinc++', '-isystem', '$LCXX/include/c++/v1'"
   # Hide every static archive that is not Mesa's own: libc++/abi/unwind,
@@ -277,11 +336,11 @@ pkg-config = 'pkg-config'
 [built-in options]
 c_args = ['-g1']
 cpp_args = ['-g1']
-c_link_args = ['-fuse-ld=lld', '-Wl,--build-id=sha1']
-cpp_link_args = ['-fuse-ld=lld', '-Wl,--build-id=sha1', '-stdlib=libc++', '-L$LCXX/lib', '-static-libgcc', '-Wl,--as-needed', '$MXLIBS', '-lpthread']
+c_link_args = ['-fuse-ld=lld', '-Wl,--build-id=sha1'$xlink]
+cpp_link_args = ['-fuse-ld=lld', '-Wl,--build-id=sha1', '-stdlib=libc++', '-L$LCXX/lib', '-static-libgcc', '-Wl,--as-needed', '$MXLIBS', '-lpthread'$xlink]
 
 [properties]
-pkg_config_libdir = '$SYS/usr/lib/x86_64-linux-gnu/pkgconfig'
+pkg_config_libdir = '$PCLIBDIR'
 EOF
   # libdrm: on Linux every Mesa Vulkan driver build requires it
   # (meson.build: with_dri2 = with_any_vk and dri platform 'drm').  Mesa's own
@@ -298,32 +357,34 @@ EOF
   mkdir -p "$WORK/src/mesa-$MESA_VER/subprojects/packagecache"
   local pc="$WORK/src/mesa-$MESA_VER/subprojects/packagecache/$drm_file"
   if ! sha_ok "$pc" "$drm_sha"; then
-    [ -f "$WORK/dl/$drm_file" ] || curl -fsSL -o "$WORK/dl/$drm_file" "$drm_url"
+    [ -f "$WORK/dl/$drm_file" ] || { [ -n "${LIBDRM_TARBALL:-}" ] && cp "$LIBDRM_TARBALL" "$WORK/dl/$drm_file"; } || true
+    [ -f "$WORK/dl/$drm_file" ] || die "missing $WORK/dl/$drm_file ($drm_url, sha256 $drm_sha; or set LIBDRM_TARBALL)" 2
     sha_ok "$WORK/dl/$drm_file" "$drm_sha" || die "$drm_file sha256 != Mesa's libdrm.wrap ($drm_sha)"
     cp "$WORK/dl/$drm_file" "$pc"
   fi
   say "mesa: libdrm subproject $drm_file sha256 $drm_sha (= Mesa $MESA_VER subprojects/libdrm.wrap)"
   if [ ! -f "$B/build.ninja" ]; then
-    say "mesa: configure (log $WORK/log/mesa-configure.log)"
-    PKG_CONFIG_LIBDIR="$SYS/usr/lib/x86_64-linux-gnu/pkgconfig" PKG_CONFIG_PATH= \
+    [ -n "$GLSLANG" ] && [ -x "$GLSLANG" ] || die "the mesa step needs glslangValidator >= 12.2 (GLSLANG=...)" 2
+    say "mesa: configure, platforms='$plat', glslang $("$GLSLANG" --version | sed -n 's/^Glslang Version: [0-9]*://p') (log $LC)"
+    PATH="$(dirname "$GLSLANG"):$PATH" PKG_CONFIG_LIBDIR="$PCLIBDIR" PKG_CONFIG_PATH= \
     meson setup "$B" "$WORK/src/mesa-$MESA_VER" --native-file "$NF" \
       --prefix="$PREFIX" --libdir=lib --buildtype=release -Db_ndebug=true \
       --wrap-mode=nodownload -Dallow-fallback-for=libdrm -Dlibdrm:default_library=static \
       -Dcpp_rtti=false \
-      -Dplatforms= -Dvulkan-drivers=swrast -Dgallium-drivers= \
+      -Dplatforms=$plat -Dvulkan-drivers=swrast -Dgallium-drivers= \
       -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Degl=disabled -Dglx=disabled -Dgbm=disabled \
       -Dllvm=enabled -Dshared-llvm=disabled -Ddraw-use-llvm=true \
       -Dshader-cache=disabled -Dzlib=disabled -Dzstd=disabled -Dexpat=disabled -Dxmlconfig=disabled \
       -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled -Dspirv-tools=disabled \
       -Dbuild-tests=false -Dvideo-codecs= -Dtools= -Dvulkan-layers= \
       -Dandroid-libbacktrace=disabled \
-      > "$WORK/log/mesa-configure.log" 2>&1 || { tail -40 "$WORK/log/mesa-configure.log"; die "mesa configure failed"; }
-    grep -A40 -E '^  (Vulkan|LLVM)' "$WORK/log/mesa-configure.log" | head -40 || true
+      > "$LC" 2>&1 || { tail -40 "$LC"; die "mesa configure failed"; }
+    grep -A40 -E '^  (Vulkan|LLVM|Platforms)' "$LC" | head -40 || true
   fi
-  say "mesa: build (log $WORK/log/mesa-build.log)"
+  say "mesa: build (log $LB)"
   local t0=$SECONDS
-  ninja -C "$B" -j"$JOBS" >> "$WORK/log/mesa-build.log" 2>&1 || { tail -40 "$WORK/log/mesa-build.log"; die "mesa build failed"; }
-  DESTDIR="$STAGE" meson install -C "$B" --no-rebuild --skip-subprojects >> "$WORK/log/mesa-build.log" 2>&1
+  PATH="$(dirname "${GLSLANG:-/nonexistent/x}"):$PATH" ninja -C "$B" -j"$JOBS" >> "$LB" 2>&1 || { tail -40 "$LB"; die "mesa build failed"; }
+  DESTDIR="$STAGE" meson install -C "$B" --no-rebuild --skip-subprojects >> "$LB" 2>&1
   say "mesa: built in $((SECONDS-t0)) s"
 }
 
@@ -331,27 +392,51 @@ EOF
 do_probes() {
   do_sysroot
   local P="$ROOT/src/user/cp" O="$WORK/probes"; mkdir -p "$O" "$STAGE$PREFIX/bin"
-  for s in vkcube.vert vkcube.frag; do
-    glslangValidator -V --quiet -o "$O/$s.spv" "$P/$s"
-    python3 - "$O/$s.spv" "$O/${s/./_}_spv.h" "${s/./_}_spv" <<'EOF'
-import sys, struct
+  # The SPIR-V is committed (src/user/cp/vkcube_{vert,frag}_spv.h, generated
+  # by `CP_VK_REGEN_SPV=1 bash tools/cp/vk/build.sh probes` with glslang
+  # 16.2.0) so a build host needs no glslang.  Regeneration rewrites the
+  # committed headers; `git diff` then shows whether the bytes changed.
+  if [ "${CP_VK_REGEN_SPV:-0}" = 1 ]; then
+    [ -n "$GLSLANG" ] && [ -x "$GLSLANG" ] || die "CP_VK_REGEN_SPV=1 needs glslangValidator (GLSLANG=...)" 2
+    local gv; gv=$("$GLSLANG" --version | sed -n 's/^Glslang Version: [0-9]*://p')
+    for s in vkcube.vert vkcube.frag; do
+      "$GLSLANG" -V --quiet -o "$O/$s.spv" "$P/$s"
+      python3 - "$O/$s.spv" "$P/${s/./_}_spv.h" "${s/./_}_spv" "$s" "$gv" <<'EOF2'
+import sys, struct, hashlib
 data = open(sys.argv[1], 'rb').read()
 words = struct.unpack('<%dI' % (len(data) // 4), data)
 with open(sys.argv[2], 'w') as f:
-    f.write('/* generated from %s by tools/cp/vk/build.sh */\n' % sys.argv[1].split('/')[-1])
+    f.write('/* GENERATED -- do not edit.  SPIR-V of src/user/cp/%s (%d bytes, sha256 %s),\n'
+            % (sys.argv[4], len(data), hashlib.sha256(data).hexdigest()))
+    f.write(' * made by glslangValidator %s: `glslangValidator -V --quiet -o <out>.spv %s`\n'
+            % (sys.argv[5], sys.argv[4]))
+    f.write(' * (CP_VK_REGEN_SPV=1 bash tools/cp/vk/build.sh probes). */\n')
     f.write('static const unsigned int %s[] = {\n' % sys.argv[3])
     for i in range(0, len(words), 8):
         f.write('  ' + ', '.join('0x%08x' % w for w in words[i:i + 8]) + ',\n')
     f.write('};\n')
-EOF
+EOF2
+    done
+    say "probes: regenerated SPIR-V headers with glslang $gv"
+  fi
+  for s in vkcube_vert_spv.h vkcube_frag_spv.h; do
+    [ -f "$P/$s" ] || die "missing committed $P/$s (CP_VK_REGEN_SPV=1 regenerates it)"
   done
   # Plain glibc PIEs: libdl + libc only.  They dlopen("libvulkan.so.1") the way
   # winevulkan does; RUNPATH names the staged lib dir so no LD_LIBRARY_PATH is
   # needed (a wave boot has no environment).
-  local cf=(--sysroot="$SYS" -O2 -g -Wall -Wextra -fPIE -pie -I"$VKH/include" -I"$O"
+  local cf=(--sysroot="$SYS" -O2 -g -Wall -Wextra -fPIE -pie -I"$VKH/include" -I"$P"
             -fuse-ld=lld -Wl,--enable-new-dtags,-rpath,$PREFIX/lib -Wl,--build-id=sha1)
   clang "${cf[@]}" -o "$STAGE$PREFIX/bin/vkenum" "$P/vkenum.c" -ldl
   clang "${cf[@]}" -o "$STAGE$PREFIX/bin/vkcube" "$P/vkcube.c" -ldl -lm
+  if [ "$WSI" = x11 ]; then
+    # vkcubex links libxcb: DT_RPATH (old dtags) /CP/X11/lib:/CP/VK/lib so the
+    # X libraries resolve from /CP/X11/lib ahead of LD_LIBRARY_PATH=/LIB64.
+    local cx=(--sysroot="$SYS" -O2 -g -Wall -Wextra -fPIE -pie -I"$VKH/include" -I"$P" -I"$X11DEV/include"
+              -fuse-ld=lld -L"$X11DEV/lib" -Wl,-rpath-link,"$X11DEV/lib"
+              -Wl,--disable-new-dtags,-rpath,$X11_RPATH:$PREFIX/lib -Wl,--build-id=sha1)
+    clang "${cx[@]}" -o "$STAGE$PREFIX/bin/vkcubex" "$P/vkcubex.c" -lxcb -ldl -lm
+  fi
   say "probes: $(ls "$STAGE$PREFIX/bin" | tr '\n' ' ')"
 }
 
@@ -380,8 +465,13 @@ do_stage() {
 
 # --- 8. audit: GLIBC_ requirement + DT_NEEDED closure -----------------------------
 do_audit() {
+  # C collation: under en_US.UTF-8 (strix) `sort -u` and `comm` disagree on
+  # underscore-prefixed names and every libc symbol looked "missing".
+  local LC_ALL=C; export LC_ALL
   local bad=0 max="0" f v need
   local allowed_need='^(libc\.so\.6|libm\.so\.6|libpthread\.so\.0|libdl\.so\.2|librt\.so\.1|ld-linux-x86-64\.so\.2|libvulkan\.so\.1)$'
+  # x11: also the C4-x X client libraries (staged at /CP/X11/lib)
+  [ "$WSI" = x11 ] && allowed_need='^(libc\.so\.6|libm\.so\.6|libpthread\.so\.0|libdl\.so\.2|librt\.so\.1|ld-linux-x86-64\.so\.2|libvulkan\.so\.1|libX11\.so\.6|libX11-xcb\.so\.1|libxcb\.so\.1|libxcb-[a-z0-9]+\.so\.[0-9]+|libxshmfence\.so\.1|libXrandr\.so\.2|libXext\.so\.6|libXrender\.so\.1)$'
   {
     echo "# cp-vk audit $(date -u +%FT%TZ) — every ELF under $STAGE$PREFIX"
     while IFS= read -r f; do
@@ -409,9 +499,11 @@ do_audit() {
       && { echo "  FAIL: lavapipe exports symbols outside the ICD interface + Mesa PUBLIC set"; bad=1; }
     # every undefined symbol of lavapipe must be satisfied by the pinned runtime
     local U; U=$(nm -D --undefined-only "$STAGE$PREFIX/lib/libvulkan_lvp.so" | awk '{print $NF}' | sed 's/@.*//' | sort -u)
-    local D; D=$(for l in libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 ld-linux-x86-64.so.2; do
+    local D; D=$( (for l in libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 ld-linux-x86-64.so.2; do
                    nm -D --defined-only "$SYS/lib/x86_64-linux-gnu/$l" 2>/dev/null || nm -D --defined-only "$SYS/lib64/$l"
-                 done | awk '{print $NF}' | sed 's/@.*//' | sort -u)
+                 done
+                 if [ "$WSI" = x11 ]; then for l in "$X11DEV"/lib/lib*.so.*; do [ -L "$l" ] || nm -D --defined-only "$l"; done; fi
+                 ) | awk '{print $NF}' | sed 's/@.*//' | sort -u)
     local miss; miss=$(comm -23 <(echo "$U") <(echo "$D") | grep -v '^_ITM\|^__gmon_start__\|^_Jv_Register\|^__morestack$' || true)
     echo "# lavapipe undefined symbols: $(echo "$U" | wc -l); not provided by the 2.31 runtime: ${miss:-none}"
     [ -z "$miss" ] || bad=1

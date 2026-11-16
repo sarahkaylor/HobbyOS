@@ -30,6 +30,7 @@
 #include <unistd.h>
 
 #include "vkcube_frag_spv.h"
+#include "vkcube_math.h"
 #include "vkcube_vert_spv.h"
 
 #define CLEAR_R 0.06f
@@ -177,33 +178,6 @@ static void fb_place(uint32_t w, uint32_t h, uint32_t *ox, uint32_t *oy) {
   if (w == 640 && h == 480 && fb_w >= 1920) { *ox = 1280; *oy = 0; return; }
   *ox = fb_w > w ? (fb_w - w) / 2 : 0;
   *oy = fb_h > h ? (fb_h - h) / 2 : 0;
-}
-
-/* ---- maths (column-major, Vulkan clip space: y down, z in [0,1]) ------------- */
-static void mat_mul(float *o, const float *a, const float *b) {
-  float t[16];
-  for (int c = 0; c < 4; c++)
-    for (int r = 0; r < 4; r++) {
-      float s = 0;
-      for (int k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
-      t[c * 4 + r] = s;
-    }
-  memcpy(o, t, sizeof(t));
-}
-
-static void cube_mvp(float *mvp, float aspect, int frame) {
-  float a = (float)frame * (6.2831853f / 90.0f);
-  float f = 1.0f / tanf(0.5f * 0.9f), n = 0.1f, fa = 50.0f;
-  float P[16] = {f / aspect, 0, 0, 0,  0, -f, 0, 0,  0, 0, fa / (n - fa), -1,
-                 0, 0, n * fa / (n - fa), 0};
-  float V[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -5.0f, 1};
-  float cy = cosf(a), sy = sinf(a), cx = cosf(a * 0.7f), sx = sinf(a * 0.7f);
-  float RY[16] = {cy, 0, -sy, 0, 0, 1, 0, 0, sy, 0, cy, 0, 0, 0, 0, 1};
-  float RX[16] = {1, 0, 0, 0, 0, cx, sx, 0, 0, -sx, cx, 0, 0, 0, 0, 1};
-  float M[16];
-  mat_mul(M, RY, RX);
-  mat_mul(mvp, V, M);
-  mat_mul(mvp, P, mvp);
 }
 
 static int cmp_d(const void *a, const void *b) {
