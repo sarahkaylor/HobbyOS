@@ -973,6 +973,10 @@ static inline int process_park_ok_locked(const struct process *p) {
   return p->state != PROC_STATE_EXITED && p->state != PROC_STATE_THREAD_DONE &&
          p->state != PROC_STATE_FREE;
 }
+/* C1-k4: execve from a secondary thread moves the caller onto the leader's
+ * pid (Linux de_thread); returns the PCB that is now current. */
+struct process *process_exec_become_leader(struct process *grp,
+                                           struct process *cur);
 
 // Wake up all kernel threads that are in the BLOCKED state.
 void process_wake_all(void);

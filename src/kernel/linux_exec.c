@@ -722,6 +722,8 @@ int linux_execve(struct process *p, struct trap_frame *tf, int dirfd,
     process_exec_terminate_siblings(grp, cur);
   linux_compat_thread_exit(cur);
   cur->clear_child_tid = 0;
+  /* C1-k4: from a secondary thread, continue as the leader (tid == pid). */
+  cur = process_exec_become_leader(grp, cur);
 
   /* 6. a fresh compat address space in the same (tgid-indexed) slot */
   vm_arch_restore_kernel();

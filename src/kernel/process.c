@@ -3229,6 +3229,67 @@ void process_exec_terminate_siblings(struct process *grp,
   }
 }
 
+/* C1-k4: execve from a secondary thread -- Linux de_thread(): the exec'ing
+ * thread takes over the leader's pid, so the new image runs with
+ * gettid() == getpid() == the pid the parent knows.  Called right after
+ * process_exec_terminate_siblings() (every other member is THREAD_DONE and
+ * off-CPU, the leader slot included); the caller is running on this CPU.
+ * Moves the state Linux keeps for the exec'ing thread into the leader's
+ * slot, re-points this CPU's claim at it, and leaves the thread's own slot a
+ * THREAD_DONE tombstone (reclaimed like any exited thread).  Returns the PCB
+ * that is now current: the leader, or `cur` when it already was the leader.
+ * The image itself (registers, FPU, TLS, altstack) is reset by the exec
+ * after this, on the returned PCB. */
+struct process *process_exec_become_leader(struct process *grp,
+                                           struct process *cur) {
+  if (!grp || !cur || grp == cur || !cur->is_thread || cur->tgid != grp->pid)
+    return cur;
+  extern uint64_t linux_compat_sigmask_get(struct process *p);
+  extern void linux_compat_sigmask_set(struct process *p, uint64_t mask);
+  extern void linux_compat_thr_slot_reset(struct process *)
+      __attribute__((weak));
+  /* Compat per-thread tables (outside proc_lock: they have their own rules
+     and the leader slot is off-CPU and THREAD_DONE). */
+  linux_compat_sigmask_set(grp, linux_compat_sigmask_get(cur));
+  if (linux_compat_thr_slot_reset)
+    linux_compat_thr_slot_reset(grp); /* the old leader's futex/robust state */
+  uint32_t cpu = get_cpuid();
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  grp->sig_pending_dir = cur->sig_pending_dir; /* the thread's own pending */
+  grp->sig_in_handler = 0;
+  grp->sig_frame = 0;
+  grp->sig_suspended = 0;
+  grp->sig_park_kind = 0;
+  grp->sig_park_nr = 0;
+  grp->sys_entry_pc = cur->sys_entry_pc;
+  grp->poll_waiting = 0;
+  grp->pw_pipe = 0;
+  grp->futex_uaddr = 0;
+  grp->wake_ms = 0;
+  grp->clear_child_tid = 0;
+  grp->tls_base = cur->tls_base;
+  for (int i = 0; i < 36; i++)
+    grp->context[i] = cur->context[i];
+  for (unsigned i = 0; i < sizeof grp->fpu_state / sizeof grp->fpu_state[0]; i++)
+    grp->fpu_state[i] = cur->fpu_state[i];
+  grp->live_threads = 1;
+  grp->state = PROC_STATE_RUNNING;
+  /* Children the thread forked belong to the group (Linux: the thread
+     group is the parent). */
+  for (int i = 1; i < MAX_PROCESSES; i++)
+    if (proc_table[i].state != PROC_STATE_FREE &&
+        proc_table[i].parent_pid == cur->pid && &proc_table[i] != cur)
+      proc_table[i].parent_pid = grp->pid;
+  cur->state = PROC_STATE_THREAD_DONE;
+  cur->futex_uaddr = 0;
+  cur->wake_ms = 0;
+  cur->live_threads = 0;
+  file_select_forget(cur->pid);
+  set_current_process_pid(cpu, grp->pid);
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return grp;
+}
+
 /* Row 16 completion (D9): process-directed targeting + disposition-based
  * action.  See process.h for the contract. */
 int process_signal_directed(int pid, int sig, int directed) {
