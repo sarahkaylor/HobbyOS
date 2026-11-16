@@ -390,6 +390,7 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
   o->nr_frames = nf;
   o->arr_frames = af;
   o->frames = arr;
+  o->wgen = 0;
   spinlock_release_irqrestore(&vm_lock, flags);
   return o;
 }
@@ -532,6 +533,61 @@ uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr) 
   o->frames[idx] = fr;
   spinlock_release_irqrestore(&vm_lock, flags);
   return fr;
+}
+
+/* cp/pfx: FAT16 write coherence (file_obj_note_write, docs/cp-pfx.md). */
+uint32_t vm_object_wgen(struct vm_object *o) {
+  return o ? __atomic_load_n(&o->wgen, __ATOMIC_ACQUIRE) : 0;
+}
+
+uint64_t vm_object_install_page_gen(struct vm_object *o, uint64_t off, uint64_t fr,
+                                    uint32_t gen, int *stale) {
+  if (stale)
+    *stale = 0;
+  if (!o || !fr)
+    return 0;
+  vm_lock_init_once();
+  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t idx = off / FRAME_SIZE;
+  if (!o->used || idx >= (uint64_t)o->nr_frames) {
+    spinlock_release_irqrestore(&vm_lock, flags);
+    frame_free(fr);
+    return 0;
+  }
+  if (o->frames[idx]) { /* a peer filled it first; a refresh keeps it current */
+    uint64_t peer = o->frames[idx];
+    spinlock_release_irqrestore(&vm_lock, flags);
+    frame_free(fr);
+    return peer;
+  }
+  if (o->wgen != gen) { /* a write landed after this fill read the disk */
+    spinlock_release_irqrestore(&vm_lock, flags);
+    frame_free(fr);
+    if (stale)
+      *stale = 1;
+    return 0;
+  }
+  o->frames[idx] = fr;
+  spinlock_release_irqrestore(&vm_lock, flags);
+  return fr;
+}
+
+int vm_object_file_writers(uint16_t cluster, struct vm_object **out, int max) {
+  if (cluster == 0 || !out || max <= 0)
+    return 0;
+  vm_lock_init_once();
+  int n = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  for (int i = 0; i < VM_OBJ_MAX && n < max; i++) {
+    struct vm_object *o = &vm_objects[i];
+    if (!o->used || o->kind != VM_OBJ_FILE || o->file_start_cluster != cluster)
+      continue;
+    o->wgen++;
+    o->refs++;
+    out[n++] = o;
+  }
+  spinlock_release_irqrestore(&vm_lock, flags);
+  return n;
 }
 
 /* cp/wine2: the reverse map vm_object_truncate needs.  Drop every leaf, in

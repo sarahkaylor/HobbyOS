@@ -106,6 +106,13 @@ uint64_t nfs_obj_page(struct vm_object *o, uint64_t off);
 void file_obj_invalidate(uint16_t start_cluster, uint32_t file_size);
 void file_obj_invalidate_all(void);
 
+/* cp/pfx: write() coherence.  After a FAT16 write of [off, off+len) reached
+ * the disk (file_size = the size now), copy the written bytes into every
+ * frame already materialized by a live object of that file, so MAP_SHARED
+ * views and MAP_PRIVATE pages the mapper has not written see them (Linux).
+ * NO lock may be held (disk I/O).  fs.c's FAT write path calls it. */
+void file_obj_note_write(uint16_t cluster, uint32_t off, uint32_t len, uint32_t file_size);
+
 /* Number of live cache entries (diagnostics / unit tests). */
 int file_obj_count(void);
 

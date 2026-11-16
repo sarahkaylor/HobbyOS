@@ -3525,6 +3525,12 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
       }
     }
     int wr = fat16_write(f, buf, size);
+    /* cp/pfx: mappings that already hold pages of this file see the bytes
+       (MAP_SHARED, and MAP_PRIVATE pages not yet written by the mapper).
+       The cursor has advanced past them (O_APPEND moved it to EOF first). */
+    if (wr > 0 && f->fat16.cursor >= (uint32_t)wr)
+      file_obj_note_write(f->fat16.entry.start_cluster, f->fat16.cursor - (uint32_t)wr,
+                          (uint32_t)wr, f->fat16.entry.file_size);
     /* so-vm lane A (CROSS-LANE, additive): an in-place write changes the
        bytes behind (start_cluster, file_size), so the VM_OBJ_FILE page
        cache must drop its frames — otherwise a rebuilt DSO would keep
