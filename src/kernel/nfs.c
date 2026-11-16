@@ -79,7 +79,14 @@ volatile uint64_t nfs_io_ops;
  * bytes directly instead of waiting. */
 #define NFS_RA_BYTES    (64 * 1024)      /* one window: an aligned block */
 #define NFS_RA_PAGES    (NFS_RA_BYTES / 4096)
+#if defined(__x86_64__)
 #define NFS_RA_WINDOWS  4096             /* 256 MiB at most, frames taken on first use */
+#else
+/* ARM: the window descriptors are .bss (~144 B each), and the ARM kernel's
+ * .bss must fit limine's placement window (docs/blk-cache.md section 11):
+ * 4096 of them did not link.  256 windows = 16 MiB at most. */
+#define NFS_RA_WINDOWS  256
+#endif
 #define NFS_RA_HBITS    10               /* hash buckets: (fh, block) -> window chain */
 #define NFS_RA_SEQ      4                /* windows a sequential miss loads */
 #define NFS_RA_FILL_MAX 16               /* windows one fill may load */
