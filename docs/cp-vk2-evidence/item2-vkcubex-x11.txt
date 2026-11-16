@@ -1,0 +1,123 @@
+# C5-vk2 item 2 -- Linux vkcube through Mesa X11 WSI (lavapipe) in the guest X session, >= 60 s
+# host: strix (Zen 5, AVX-512); guest: QEMU -cpu host -smp 8 -m 12288M KVM, default MODE=desktop DESKTOP=icewm disk
+# QEMU guests on the host during the run (incl. this one): 4 (t=20s and t=50s)
+# tree: cp-vk2 incl. 37dc2c92 (fat16 fix); X11 libs: tools/cp/x11/build.sh, CP_X11_WORK=~/cp/vk2-x11 (audit under LC_ALL=C)
+
+## build: CP_VK_WSI=x11 tools/cp/vk/build.sh (audit)
+# cp-vk audit 2026-11-16T15:48:57Z — every ELF under /home/sarah/cp/vk2-build/stage-x11/CP/VK
+/CP/VK/bin/vkcube                                GLIBC_max=2.17   NEEDED: libdl.so.2 libm.so.6 libc.so.6 
+/CP/VK/bin/vkcubex                               GLIBC_max=2.17   NEEDED: libxcb.so.1 libdl.so.2 libm.so.6 libc.so.6 
+/CP/VK/bin/vkenum                                GLIBC_max=2.17   NEEDED: libdl.so.2 libc.so.6 
+/CP/VK/lib/libvulkan.so.1.4.363                  GLIBC_max=2.17   NEEDED: libdl.so.2 libm.so.6 libpthread.so.0 libc.so.6 
+/CP/VK/lib/libvulkan_lvp.so                      GLIBC_max=2.29   NEEDED: libpthread.so.0 libdl.so.2 libm.so.6 libxcb.so.1 libxcb-randr.so.0 libX11-xcb.so.1 libxcb-dri3.so.0 libxcb-present.so.0 libxcb-xfixes.so.0 libxcb-sync.so.1 libxcb-shm.so.0 libxshmfence.so.1 libc.so.6 ld-linux-x86-64.so.2 
+# GLIBC max over the tree: GLIBC_2.29 (allowed <= 2.31)
+# lavapipe exports (7): ddebug_screen_create noop_screen_create trace_screen_create util_run_tests vk_icdGetInstanceProcAddr vk_icdGetPhysicalDeviceProcAddr vk_icdNegotiateLoaderICDInterfaceVersion 
+# lavapipe undefined symbols: 415; not provided by the 2.31 runtime: none
+
+## X11 build (tools/cp/x11/build.sh all): audit fails under en_US.UTF-8, passes under LC_ALL=C
+cp-x11-build: audit: every NEEDED resolves inside {stage} + {glibc 2.31}; every strong undefined symbol is defined in that closure: NO   (LANG=en_US.UTF-8)
+cp-x11-build: audit: every NEEDED resolves inside {stage} + {glibc 2.31}; every strong undefined symbol is defined in that closure: yes  (LC_ALL=C)
+
+## mesa configure (x11)
+Run-time dependency xcb found: YES 1.17.0
+Run-time dependency xcb-randr found: YES 1.17.0
+Run-time dependency xcb-keysyms found: NO  (tried pkg-config)
+Run-time dependency x11-xcb found: YES 1.8.14
+Run-time dependency xcb-dri3 found: YES 1.17.0
+Run-time dependency xcb-present found: YES 1.17.0
+Run-time dependency xcb-shm found: YES 1.17.0
+Run-time dependency xcb-sync found: YES 1.17.0
+Run-time dependency xshmfence found: YES 1.3.3
+Run-time dependency xcb-xfixes found: YES 1.17.0
+    Platforms             : x11 xcb
+
+## run 2: python3 tools/cp/p5/run_vkcubex.py --secs 65  -> PASS
+[P5X] build: make ARCH=intel hobbyos.elf disk.img (default MODE=desktop, DESKTOP=icewm)
+[P5X] staged: /LIB64 glibc 2.31, /CP/X11 (37 libs), /CP/VK (x11 variant), /VKCUBEX.ELF; XSTART: /VKCUBEX.ELF 65 640 480 fifo
+[P5X] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+qemu-slot: slot 3 of 4 held by pid 3444334 11:05:04
+[P5X] slot 3 acquired 11:05:04; boot: -smp 8 -m 12288M -cpu host (KVM)
+[P5X] qemu pid 3452173
+[P5X] t=20s: screendump taken; QEMU guests on the host now (incl. this one): 4
+[P5X] t=50s: screendump taken; QEMU guests on the host now (incl. this one): 4
+[P5X] guests on the host at the end of the run: 3 (incl. none of ours)
+[P5X] boot finished after 85 s; lock released
+[P5X] screendump vkcubex-t20s.ppm: clear=242432 cube=65408 bbox=(332, 24, 970, 502) hash=02598ca7787ef177
+[P5X] screendump vkcubex-t50s.ppm: clear=244512 cube=63284 bbox=(332, 24, 970, 502) hash=989afa44d0cc14f0
+[P5X] --- [VK] rows (serial) ---
+[VK] vkcubex start (C5-vk2, VK_KHR_xcb_surface): 65 s, 640x480, present mode fifo, pid 14
+[VK] prefault (startup): touched 1119 pages in 8 objects in 1337 ms
+[VK] x11: xcb_connect ok in 17.0 ms DISPLAY=:0 screen 0 1920x1080 depth 24 vendor "The X.Org Foundation"
+[VK] x11: ext Present  present
+[VK] x11: ext DRI3     absent
+[VK] x11: ext MIT-SHM  absent
+[VK] x11: ext XFIXES   present
+[VK] x11: ext SYNC     present
+[VK] x11: ext RANDR    present
+[VK] x11: window 0x800000 640x480 mapped
+[VK] loader libvulkan.so.1 loaded in 64.0 ms
+[VK] instance surface extensions (18 total): VK_KHR_get_surface_capabilities2 VK_KHR_surface VK_KHR_surface_maintenance1 VK_KHR_surface_protected_capabilities VK_KHR_xcb_surface VK_KHR_xlib_surface VK_EXT_headless_surface VK_EXT_surface_maintenance1
+[VK] device: llvmpipe (LLVM 21.1.8, 256 bits) (api 1.4.354) instance+enumerate 259.0 ms
+[VK] vkCreateDevice ok in 4238.0 ms (queue family 0, VK_KHR_swapchain)
+[VK] surface: formats(format/colorspace): 50/0 44/0 -> 44; present modes: IMMEDIATE MAILBOX FIFO FIFO_RELAXED -> FIFO
+[VK] surface caps: images 3..0 current 640x480 min 640x480 max 640x480 usage 0x8009f -> 4 images 640x480
+[VK] swapchain: 4 images in 120.0 ms
+[VK] pipeline created in 200.0 ms
+[VK] render loop: 65 s
+[VK] frame 0: acquire 0.00 ms, render 2334.00 ms, present 4.00 ms, total 2338.00 ms (image 0)
+[VK] frame 1: acquire 0.00 ms, render 8.00 ms, present 0.00 ms, total 8.00 ms (image 1)
+[VK] frame 2: acquire 0.00 ms, render 11.00 ms, present 0.00 ms, total 11.00 ms (image 2)
+[VK] t=5s frames=84 window fps=16.79 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=10s frames=235 window fps=30.20 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=15s frames=362 window fps=25.30 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=20s frames=513 window fps=30.27 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=25s frames=665 window fps=30.28 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=30s frames=818 window fps=30.67 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=35s frames=967 window fps=29.75 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=40s frames=1120 window fps=30.72 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=45s frames=1238 window fps=23.60 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=50s frames=1394 window fps=31.09 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=55s frames=1544 window fps=29.94 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=60s frames=1699 window fps=31.19 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] t=65s frames=1853 window fps=30.68 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] RESULT frames=1853 wall=65023.0 ms fps=28.50 | per-frame total median 30.00 p90 41.00 worst(after frame 0) 1059.00 ms | swapchain 640x480 4 images FIFO | recreated=0 suboptimal=0
+[VK] teardown: clean
+[VK] done rc=0
+[P5X] --- session / loader / fault lines ---
+  [XSESS] IceWM session launcher starting
+  [XSESS] WARN /dev/null did not land on fd 0 (got 3)
+  [XSESS] children's stdout/stderr relayed to the console (pipe fd 9)
+  [XSESS] dir ok: /tmp
+  [XSESS] dir created: /tmp/.X11-unix
+  [XSESS] spawned /XHOBBY.BIN pid=3
+  [XSESS] waiting for /tmp/.X11-unix/X0 (named AF_UNIX connect probe)
+  [XSESS] server ready after ~200 ms
+  [XSESS] spawned /ICEWMBG.BIN pid=6
+  [XSESS] spawned /ICEWM.BIN pid=9
+  [XSESS] spawned /XEYESR.BIN pid=12
+  [XSESS] XSTART: /VKCUBEX.ELF
+  [XSESS] spawned /VKCUBEX.ELF pid=14
+  [XSESS] XSTART: spawned 1 program(s)
+  [XSESS] session running
+  [COW] va=0x0000001080370000[EXITPC] pid=6 last_user_pc=0x1000257627 code=0x0
+  [XSESS] background pid=6 exited status=0
+  [EXITPC] pid=14 last_user_pc=0x1080268146 code=0x0
+  [XSESS] child pid=14 exited status=0
+[P5X] PASS: Linux vkcube on Mesa's X11 WSI (lavapipe) in the X session for >= 60 s, two distinct screendumps
+
+## run 1 (before the fat16 fix): IceWM killed by the kernel FAT-rename hang; swapchain -> VK_ERROR_SURFACE_LOST_KHR
+[IDMAP-TRIP] cr2=0x0000000000000000 rip=0x0000000070014D30 cr3=0x00000002023CE000 pid=9
+  CPU6 rip=0x0000000070014d30 rflags=0x0000000000010046 vec=14 err=0x0000000000000002 pid=9 resume_pid=9 resume_sp=0x00000017fffff288 age_ms=14878 syscall=23
+[LOSTWAKE] disposing pid=9 /ICEWM.BIN (stale dead-owner claim, poisoned resume)
+ csts=[KERNEL] pid=9 (/ICEWM.BIN) memory fault VA=0x0000000000841F07 PC=0x00000010003423DB rw=r  in=HOLE region=NONE rsp=0x00000017FFFFF27F live=1 inH=0 cr3frame=0x00000002023CE000 asroot=0x00000002023CE000 sys=91 ret=0xFFFFFFFFFFFFFFF2 rbx
+[X] [VK] surface caps: images 3..0 current 640x480 min 640x480 max 640x480 usage 0x8009f -> 4 images 640x480
+[X] [VK] FAIL vkCreateSwapchainKHR(dev, &sc, NULL, &swch) -> VkResult -1000000000 (line 450)
+[X] [VK] done rc=1
+[XSESS] session over: window manager exited
+  CPU6 rip=0x0000000070014d30 rflags=0x0000000000010046 vec=14 err=0x0000000000000002 pid=9 resume_pid=9 resume_sp=0x00000017fffff288 age_ms=44878 syscall=23
+  CPU6 rip=0x0000000070014d30 rflags=0x0000000000010046 vec=14 err=0x0000000000000002 pid=9 resume_pid=9 resume_sp=0x00000017fffff288 age_ms=74878 syscall=23
+  CPU6 rip=0x0000000070014d30 rflags=0x0000000000010046 vec=14 err=0x0000000000000002 pid=9 resume_pid=9 resume_sp=0x00000017fffff288 age_ms=104878 syscall=23
+  CPU6 rip=0x0000000070014d30 rflags=0x0000000000010046 vec=14 err=0x0000000000000002 pid=9 resume_pid=9 resume_sp=0x00000017fffff288 age_ms=134878 syscall=23
+  CPU6 rip=0x0000000070014d30 rflags=0x0000000000010046 vec=14 err=0x0000000000000002 pid=9 resume_pid=9 resume_sp=0x00000017fffff288 age_ms=164878 syscall=23
+  CPU6 rip=0x0000000070014d30 rflags=0x0000000000010046 vec=14 err=0x0000000000000002 pid=9 resume_pid=9 resume_sp=0x00000017fffff288 age_ms=194878 syscall=23
+  CPU6 rip=0x0000000070014d30 rflags=0x0000000000010046 vec=14 err=0x0000000000000002 pid=9 resume_pid=9 resume_sp=0x00000017fffff288 age_ms=224878 syscall=23
