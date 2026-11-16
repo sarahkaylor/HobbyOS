@@ -1,0 +1,67 @@
+# strix, CP_X11_WORK=~/cp/x11-build-x2 tools/cp/x11/build.sh all
+cp-x11-build: xorgproto: cached
+cp-x11-build: xcb-proto: cached
+cp-x11-build: libpthread-stubs: cached
+cp-x11-build: libXau: cached
+cp-x11-build: libXdmcp: ok (3 s)
+cp-x11-build: libxcb: ok (7 s)
+cp-x11-build: xtrans: ok (2 s)
+cp-x11-build: libX11: ok (10 s)
+cp-x11-build: libXext: ok (3 s)
+cp-x11-build: libXrender: ok (3 s)
+cp-x11-build: libXfixes: ok (4 s)
+cp-x11-build: libXcomposite: ok (3 s)
+cp-x11-build: libXi: ok (3 s)
+cp-x11-build: libXrandr: ok (3 s)
+cp-x11-build: libXcursor: ok (3 s)
+cp-x11-build: libXinerama: ok (3 s)
+cp-x11-build: libxshmfence: ok (3 s)
+cp-x11-build: freetype: ok (4 s)
+cp-x11-build: libxcb extensions built: composite damage dbe dpms dri2 dri3 glx present randr record render res screensaver shape shm sync xf86dri xfixes xinerama xinput xkb xtest xv xvmc 
+cp-x11-build: stage: 39 shared objects -> /home/sarah/cp/x11-build-x2/stage/CP/X11/lib (4.1M); tree 6.0M, 230 files
+cp-x11-build: stage: manifest /home/sarah/cp/x11-build-x2/stage-manifest.sha256
+cp-x11-build: audit: 39 shared objects; max GLIBC_ required = GLIBC_2.27 (allowed <= 2.31)
+cp-x11-build: audit: DT_NEEDED union: libX11.so.6 libXau.so.6 libXdmcp.so.6 libXext.so.6 libXfixes.so.3 libXrender.so.1 libc.so.6 libdl.so.2 libpthread.so.0 libxcb.so.1 
+cp-x11-build: audit: every NEEDED resolves inside {stage} + {glibc 2.31}; every strong undefined symbol is defined in that closure: yes
+cp-x11-build: smoke: /home/sarah/cp/x11-build-x2/xsmoke/xsmoke.elf (77848 B) GLIBC_max=2.17
+cp-x11-build: smoke: DT_RPATH=/CP/X11/lib  interp=/lib64/ld-linux-x86-64.so.2
+cp-x11-build: smoke: DT_NEEDED: libX11.so.6 libX11-xcb.so.1 libxcb.so.1 libxcb-present.so.0 libxcb-dri3.so.0 libxcb-composite.so.0 libxcb-damage.so.0 libxcb-shm.so.0 libxcb-sync.so.1 libXext.so.6 libXi.so.6 libXrandr.so.2 libXrender.so.1 libXfixes.so.3 libXcursor.so.1 libXinerama.so.1 libxshmfence.so.1 libdl.so.2 libc.so.6 
+libX11-xcb.so.1            GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libdl.so.2 libc.so.6 
+libX11.so.6                GLIBC_max=2.26  RPATH=$ORIGIN  needed=libpthread.so.0 libxcb.so.1 libdl.so.2 libc.so.6 
+libXau.so.6                GLIBC_max=2.25  RPATH=$ORIGIN  needed=libc.so.6 
+libXcomposite.so.1         GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libX11.so.6 libc.so.6 
+libXcursor.so.1            GLIBC_max=2.14  RPATH=$ORIGIN  needed=libXrender.so.1 libXfixes.so.3 libX11.so.6 libc.so.6 
+libXdmcp.so.6              GLIBC_max=2.25  RPATH=$ORIGIN  needed=libc.so.6 
+libXext.so.6               GLIBC_max=2.26  RPATH=$ORIGIN  needed=libX11.so.6 libc.so.6 
+libXfixes.so.3             GLIBC_max=2.14  RPATH=$ORIGIN  needed=libX11.so.6 libc.so.6 
+libXi.so.6                 GLIBC_max=2.14  RPATH=$ORIGIN  needed=libXext.so.6 libX11.so.6 libc.so.6 
+libXinerama.so.1           GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libXext.so.6 libX11.so.6 libc.so.6 
+libXrandr.so.2             GLIBC_max=2.14  RPATH=$ORIGIN  needed=libXext.so.6 libXrender.so.1 libX11.so.6 libc.so.6 
+libXrender.so.1            GLIBC_max=2.14  RPATH=$ORIGIN  needed=libX11.so.6 libc.so.6 
+libfreetype.so.6           GLIBC_max=2.14  RPATH=$ORIGIN  needed=libpthread.so.0 libc.so.6 
+libxcb-composite.so.0      GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-damage.so.0         GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-dbe.so.0            GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-dpms.so.0           GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-dri2.so.0           GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-dri3.so.0           GLIBC_max=2.14  RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-glx.so.0            GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-present.so.0        GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-randr.so.0          GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-record.so.0         GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-render.so.0         GLIBC_max=2.14  RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-res.so.0            GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-screensaver.so.0    GLIBC_max=2.14  RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-shape.so.0          GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-shm.so.0            GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-sync.so.1           GLIBC_max=2.14  RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-xf86dri.so.0        GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-xfixes.so.0         GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-xinerama.so.0       GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-xinput.so.0         GLIBC_max=2.14  RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-xkb.so.1            GLIBC_max=2.14  RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-xtest.so.0          GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-xv.so.0             GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb-xvmc.so.0           GLIBC_max=2.2.5 RPATH=$ORIGIN  needed=libxcb.so.1 libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxcb.so.1                GLIBC_max=2.14  RPATH=$ORIGIN  needed=libXau.so.6 libXdmcp.so.6 libc.so.6 
+libxshmfence.so.1          GLIBC_max=2.27  RPATH=$ORIGIN  needed=libc.so.6 

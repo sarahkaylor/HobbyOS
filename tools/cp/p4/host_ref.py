@@ -71,7 +71,7 @@ class Host:
         self.out = out
         self.env = {"DISPLAY": f":{display}"}
 
-    def wine(self, args, logname, background=False, wdebug="-all", extra_env=None):
+    def wine(self, args, logname, background=False, wdebug=os.environ.get("P4H_WINEDEBUG", "-all"), extra_env=None):
         """Run `args` (a /CP/WINE/bin program + args) in the chroot."""
         inner = ('R=$1; shift; mount --rbind /dev "$R/dev"; mount -t proc proc "$R/proc"; '
                  'mkdir -p "$R/tmp/.X11-unix"; mount --bind /tmp/.X11-unix "$R/tmp/.X11-unix"; exec "$@"')
