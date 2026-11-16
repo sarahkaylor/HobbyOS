@@ -44,6 +44,7 @@
 #include "blk_cache.h"
 #include "fb_mmap.h"
 #include "kmem.h"
+#include "pipe.h" /* C1-k4: struct pipe_seg for writev on a pipe */
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -1175,6 +1176,45 @@ static void compat_writev(struct trap_frame *tf) {
   if (cnt < 0 || cnt > 1024) { tf->regs[0] = (uint64_t)(int64_t)-EINVAL; return; }
   if (cnt == 0) { tf->regs[0] = 0; return; }
   if (!sys_user_range_ok(iov, (uint64_t)cnt * 16)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+  /* C1-k4: a pipe gets the whole gather as ONE write (Linux pipe_write: a
+     <= PIPE_BUF writev is atomic and a blocking one completes in full).  The
+     per-segment loop below wrote wineserver's 64-byte reply header and its
+     data as two writes, and a park in the second segment returned a short
+     count with the thread still marked BLOCKED. */
+  {
+    extern int file_fd_pipe_wend(struct process *, int);
+    extern int file_writev_pipe(struct process *, int, const struct pipe_seg *,
+                                int, uint64_t, struct trap_frame *);
+    if (cnt <= 64 && file_fd_pipe_wend(c, fd)) {
+      struct pipe_seg sg[64];
+      int ns = 0;
+      uint64_t sum = 0;
+      for (long i = 0; i < cnt; i++) {
+        uint64_t base = 0, len = 0;
+        if (vm_user_read(c, iov + (uint64_t)i * 16, &base, 8) != 0 ||
+            vm_user_read(c, iov + (uint64_t)i * 16 + 8, &len, 8) != 0) {
+          tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
+        }
+        if (len == 0) continue;
+        if (len > COMPAT_MAX_RW_COUNT - sum) len = COMPAT_MAX_RW_COUNT - sum;
+        if (!sys_user_range(base, len, 0)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+        sg[ns].base = (const uint8_t *)(uintptr_t)base;
+        sg[ns].len = (uint32_t)len;
+        ns++;
+        sum += len;
+        if (sum >= COMPAT_MAX_RW_COUNT) break;
+      }
+      int r = file_writev_pipe(c, fd, sg, ns, iov, tf);
+      if (r == -2) {
+        if ((tf->cs & 3) == 3) tf->elr -= 2;
+        save_context(c, tf);
+        schedule(tf, 0);
+        return;
+      }
+      tf->regs[0] = (uint64_t)(int64_t)r;
+      return;
+    }
+  }
   int64_t total = 0;
   for (long i = 0; i < cnt; i++) {
     uint64_t base = 0, len = 0;
@@ -1193,7 +1233,11 @@ static void compat_writev(struct trap_frame *tf) {
          2-byte `syscall` and re-schedule so the write RESTARTS on wake; the parked
          segment resumes as if nothing was written.  A subsequent iovec segment that
          already advanced total is a short write, not a park — see below. */
-      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if (total > 0) {
+        process_cancel_park(c); /* C1-k4: a short write, not a park */
+        tf->regs[0] = (uint64_t)total;
+        return;
+      }
       if ((tf->cs & 3) == 3) tf->elr -= 2;
       save_context(c, tf);
       schedule(tf, 0);
@@ -1235,7 +1279,11 @@ static void compat_readv(struct trap_frame *tf) {
     if (!sys_user_range(base, len, 1)) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : -EFAULT); return; }
     int r = file_read(c, fd, (void *)(uintptr_t)base, (int)len, tf);
     if (r == -2) {
-      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if (total > 0) {
+        process_cancel_park(c); /* C1-k4: a short read, not a park */
+        tf->regs[0] = (uint64_t)total;
+        return;
+      }
       if ((tf->cs & 3) == 3) tf->elr -= 2;
       save_context(c, tf);
       schedule(tf, 0);
@@ -4964,6 +5012,9 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         fl_s(&fe, " -> SIGBUS (EIO, not a protection fault)\n");
         fe.b[fe.n] = 0;
         uart_puts(fe.b);
+        cur->fault_si_set = 1; /* C1-k4: BUS_ADRERR at the faulting address */
+        cur->fault_si_code = 2;
+        cur->fault_si_addr = cr2;
         process_fault_exit(tf, 7); /* SIGBUS: a failed file load, not SIGSEGV */
         return;
       }
@@ -5092,6 +5143,22 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         sc_hist_dump(cur);
 #endif
         compat_fault_dump(cur, tf, cr2);
+      }
+      /* C1-k4: Linux's siginfo for the fault.  No region at all is
+         SEGV_MAPERR; a region that refuses the access is SEGV_ACCERR; a
+         mapped page wholly past the end of its file/object is SIGBUS
+         BUS_ADRERR (vm_handle_fault says "BUS").  si_addr is CR2. */
+      {
+        int bus = why && why[0] == 'B' && why[1] == 'U' && why[2] == 'S';
+        int hole = why && why[0] == 'H' && why[1] == 'O';
+        cur->fault_si_set = 1;
+        cur->fault_si_code = bus ? 2 /* BUS_ADRERR */
+                                 : hole ? 1 /* SEGV_MAPERR */ : 2 /* SEGV_ACCERR */;
+        cur->fault_si_addr = cr2;
+        if (bus && (cur->abi_flags & PROC_FLAG_LINUX_ABI)) {
+          process_fault_exit(tf, 7);
+          return;
+        }
       }
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
@@ -5421,6 +5488,46 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         case 17:                  fsig = 7; break;  /* SIGBUS  */
         default: break;
         }
+        /* C1-k4: and Linux's si_code / si_addr for it (traps.c, fpu/core.c
+           fpu__exception_code): #DE FPE_INTDIV, #UD ILL_ILLOPN, #MF/#XM the
+           FPE_FLT* code of the first unmasked pending exception (x87 FSW &
+           ~FCW, or MXCSR flags & ~masks), si_addr the faulting RIP; #AC
+           BUS_ADRALN; #DB TRAP_TRACE; #BP, #GP and the rest SI_KERNEL with
+           si_addr 0. */
+        int code = 0x80; /* SI_KERNEL */
+        uint64_t addr = 0;
+        switch ((unsigned)tf->vector) {
+        case 0: code = 1; addr = tf->elr; break;  /* FPE_INTDIV */
+        case 6: code = 2; addr = tf->elr; break;  /* ILL_ILLOPN */
+        case 16:
+        case 19: {
+          uint32_t err;
+          if (tf->vector == 16) {
+            uint16_t swd = 0, cwd = 0;
+            __asm__ volatile("fnstsw %0" : "=m"(swd));
+            __asm__ volatile("fnstcw %0" : "=m"(cwd));
+            err = (uint32_t)(swd & ~cwd);
+          } else {
+            uint32_t mx = 0;
+            __asm__ volatile("stmxcsr %0" : "=m"(mx));
+            err = ~(mx >> 7) & mx;
+          }
+          if (err & 0x001) code = 7;      /* FPE_FLTINV (incl. stack fault) */
+          else if (err & 0x004) code = 3; /* FPE_FLTDIV */
+          else if (err & 0x008) code = 4; /* FPE_FLTOVF */
+          else if (err & 0x012) code = 5; /* FPE_FLTUND (underflow/denormal) */
+          else if (err & 0x020) code = 6; /* FPE_FLTRES */
+          else code = 0;
+          addr = tf->elr;
+          break;
+        }
+        case 17: code = 1; break;          /* BUS_ADRALN */
+        case 1: code = 2; break;           /* TRAP_TRACE */
+        default: break;
+        }
+        cur->fault_si_set = 1;
+        cur->fault_si_code = code;
+        cur->fault_si_addr = addr;
       }
       process_fault_exit(tf, fsig); /* the signal status byte */
     } else if (trap_user_cs_no_process(tf, cur)) {

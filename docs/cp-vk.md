@@ -431,11 +431,24 @@ NFS export (§8.3); the probes are built and staged.
 |---|---|---|
 | 1 | stock XHOBBY, no warm-up, 4 guests | **VOID.** `wineboot -i` faulted in `kernelbase!load_sortdefault_nls` (`locale.c:519`): an 8-byte read below an all-zero `sortdefault.nls` section, after `[NFS] rpc: no reply from server` ×4 and `[NFLK] retry comp=WINE tries=3 rc=-1`. A failed NFS read reached Wine as zero-filled data (reported to C3-nfs2). Then `nodrv_CreateWindow` everywhere. Log: `docs/cp-vk2-evidence/winep5-run1-serial.txt` |
 | 2 | same | **VOID.** 323 NFS failure rows during `wineboot` (`share`, `WINE`, `wine` lookups); nodrv |
-| 3 | C4-x2's one-screen XHOBBY.BIN (sha256 `935c760f…c97`, scratch only), `HB_SECOND_SCREEN=0`, warm-up | **held**, at the integrator's direction, until C3-nfs2's hard-retry and in-flight-budget fix is merged |
+| 3 | Kernel cyberpunk 8b9fc2c9 (NFS hard mount); C4-x2's one-screen XHOBBY.BIN (sha256 `935c760f…c97`, scratch only); `HB_SECOND_SCREEN=0`; warm-up | **Not void** (179 no-reply rows, longest hard-retry wait 18,271 ms, no GIVE UP). `wineboot -i` → status 53 after 314 s. The wineboot tree then wedged: wineboot, services ×3, winedevice and rundll32 stayed alive, wineserver logged `epoll_ctl: No space left on device` ×5, and there were 926 IDLESTUCK dumps. The launcher's 3600 s quiesce waited on it, so no probe ran; stopped at +1500 s |
+| 4 | Same, with `P5_CFLAGS=-DP5_BOOT_QUIESCE_S=60` | **Not void** (134 no-reply rows, longest wait 1,504 ms, no GIVE UP). wineboot → status 53; the tree again never exited (wineboot, services ×3 and rundll32 alive, no explorer; 985 IDLESTUCK dumps; no epoll ENOSPC this time). Every later wine — the keepalive and `--winprobe` 01–05 — logged `run_wineboot boot event wait timed out` and ended status 53 (one SIGKILLed at 300 s) **before any probe code ran**. Stopped at +1800 s |
+
+**Stopping point (items 3–4).** In the guest's X session, Wine's prefix
+initialisation never completes. The wineboot tree (wineboot.exe,
+services.exe, rundll32.exe) wedges, so the boot event is never signalled,
+and every later wine process gives up after 300 s with status 53 before its
+`main`. vkcube.exe, d3d11tri.exe and d3d12tri.exe therefore never start. This
+matches the open "wineboot-tree hang" (§0.2 item 18) and C1-k4's
+epoll/park work, and is not a Vulkan/DXVK/vkd3d-proton issue. NFS is no
+longer the blocker on the hard-mount kernel. Evidence:
+`docs/cp-vk2-evidence/winep5-runs3-4.txt`.
 
 Two traps for anyone running Wine in-guest:
-- **Zero-filled reads.** Until C3-nfs2's fix lands, a run with any NFS
-  failure row is void, and `boot_wine_p5.py` grades it VOID (rc 3).
+- **Zero-filled reads.** These are fixed on the hard-mount kernel
+  (8b9fc2c9). `boot_wine_p5.py` voids a run only on `[NFSHARD] GIVE UP`,
+  `[NFLK] … rc=-1`, or no-reply rows without hard-mount rows (an old kernel).
+  It reports the no-reply count and the longest `waited_ms`.
 - **The explorer timeout.** win32u waits only 10 s for explorer
   (`NtUserWaitForInputIdle(process, 10000)`, `dlls/win32u/winstation.c:877`,
   found by C4-x2). Paging winex11 and the X libraries in over NFS takes

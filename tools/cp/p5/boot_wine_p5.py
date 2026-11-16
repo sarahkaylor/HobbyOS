@@ -55,8 +55,15 @@ def main():
     ap.add_argument("--mem", type=int, default=12288)
     ap.add_argument("--cpu", default="host")
     ap.add_argument("--timeout", type=int, default=7200)
+    ap.add_argument("--grade-only", action="store_true",
+                    help="no boot: regrade OUT/serial.log and OUT/<probe>-t{20,50}s.ppm")
     args = ap.parse_args()
     probes = [p for p in args.probes.split(",") if p]
+    if args.grade_only:
+        serial = os.path.join(args.out, "serial.log")
+        shots = {p: [s for s in (os.path.join(args.out, f"{p}-t{t}s.ppm") for t in (20, 50))
+                     if os.path.exists(s)] for p in probes}
+        return grade(args, probes, serial, shots)
 
     cmd, qmp_path, serial = qemu_cmd(args.out, args.disk, args)
     if os.path.exists(serial):
@@ -102,6 +109,10 @@ def main():
         log(f"guests on the host at the end of the run: {guests_running()} (incl. none of ours)")
         log(f"boot finished after {time.time() - t0:.0f} s; lock released")
 
+    return grade(args, probes, serial, shots)
+
+
+def grade(args, probes, serial, shots):
     ser = read(serial)
     lines = ser.splitlines()
     fails = []
@@ -155,10 +166,21 @@ def main():
         elif cs[0]["hash"] == cs[1]["hash"]:
             fails.append(f"{p}: screendumps identical (not moving)"); ok = False
         log(f"{p}: {'PASS' if ok else 'FAIL'}")
-    # Until C3-nfs2's hard-retry fix lands, a failed NFS read can reach Wine as
-    # zero-filled data (docs/cp-vk.md 8.5): any NFS failure row voids the run.
-    nfs_bad = [ln for ln in lines if "rpc: no reply from server" in ln or
-               ("[NFLK] retry" in ln and "rc=-1" in ln)]
+    # NFS evidence rule (docs/cp-vk.md 8.5), for the hard-mount kernel
+    # (cyberpunk 8b9fc2c9+): every unanswered attempt prints "rpc: no reply"
+    # and is retried ("[NFSHARD] retry ... waited_ms=N"), so no-reply rows alone
+    # lose nothing.  VOID on "[NFSHARD] GIVE UP", a failed lookup
+    # ("[NFLK] retry ... rc=-1"), or no-reply rows with no hard-mount rows at
+    # all (an old kernel that may have zero-filled the read).
+    import re
+    noreply = [ln for ln in lines if "rpc: no reply from server" in ln]
+    hard = [ln for ln in lines if "[NFSHARD] retry" in ln]
+    waited = [int(m.group(1)) for ln in hard for m in [re.search(r"waited_ms=(\d+)", ln)] if m]
+    giveup = [ln for ln in lines if "[NFSHARD] GIVE UP" in ln]
+    nflk = [ln for ln in lines if "[NFLK] retry" in ln and "rc=-1" in ln]
+    nfs_bad = giveup + nflk + (noreply if noreply and not hard else [])
+    log(f"NFS: no-reply rows={len(noreply)} [NFSHARD] retry rows={len(hard)} "
+        f"longest waited_ms={max(waited) if waited else 0} GIVE UP={len(giveup)} NFLK rc=-1={len(nflk)}")
     if nfs_bad:
         log(f"VOID: {len(nfs_bad)} NFS failure row(s), first: {nfs_bad[0][:160]}")
     bad = [ln for ln in lines if any(k in ln for k in ("memory fault", "page fault", "FATAL"))]

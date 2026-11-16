@@ -96,14 +96,9 @@ static uint64_t l_up(uint64_t n) { return (n + LPG - 1) & ~(LPG - 1); }
    resident counter honest (it is the same primitive vm.c's own zap uses);
    the region lookup just skips spans with nothing mapped. */
 static void l_zap_pages(struct addr_space *as, uint64_t base, uint64_t len) {
-  for (uint64_t a = base; a < base + len; a += LPG) {
-    uint64_t nx = vm_arch_skip_absent(as, a); /* P1: skip absent tables */
-    if (nx != a) {
-      a = nx - LPG;
-      continue;
-    }
-    if (vm_region_find(as, a)) vm_unmap_page(as, a);
-  }
+  /* C1-k4: one zap for the span with the cross-CPU TLB shootdown before any
+     frame is released (vm_unmap_page flushed only this CPU, page by page). */
+  vm_zap_span(as, base, len);
 }
 
 /* Is [base, base+len) inside the MMAP arena or the DSO band -- the only two
@@ -458,9 +453,8 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
   int fixed = (flags & L_MREMAP_FIXED) != 0;
   if (!fixed && new_len <= old_len) {
     if (new_len < old_len) {
-      l_zap_pages(as, old_addr + new_len, old_len - new_len);
-      if (vm_region_remove(as, old_addr + new_len, old_len - new_len) != 0)
-        return l_ret(tf, -EINVAL);
+      if (vm_unmap_span(as, old_addr + new_len, old_len - new_len) != 0)
+        return l_ret(tf, -EINVAL); /* C1-k4: zap + remove + shootdown */
     }
     return l_ret(tf, (int64_t)old_addr);
   }
@@ -532,8 +526,7 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
     }
   }
   if (restore_prot) (void)sys_mprotect(dst, new_len, prot);
-  l_zap_pages(as, old_addr, old_len);
-  vm_region_remove(as, old_addr, old_len);
+  (void)vm_unmap_span(as, old_addr, old_len); /* C1-k4: + cross-CPU flush */
   return l_ret(tf, (int64_t)dst);
 }
 

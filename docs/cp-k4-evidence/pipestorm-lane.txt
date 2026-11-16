@@ -1,0 +1,17 @@
+# linux_probe_pipestorm on LANE (cp-k4 1f2006c5), strix QEMU/KVM 8 vCPUs; 0 GB145-GHOST/TLBTIMEOUT/EPOLLFULL rows in the serial
+[LP] PASS R1 thr_pingpong (235 ms)
+[LP] PASS R2 proc_pingpong (450 ms)
+[LP] PASS R3 poll_fanin (231 ms)
+[LP] PASS R4 select_fanin (179 ms)
+[LP] PASS R5 epoll_fanin(48) (414 ms)
+[LP] PASS R6 wine_proto (4697 ms)
+[LP] PASS R7 bigwrite (64 ms)
+[LP] info R8 capacity=65536
+[LP] PASS R8 nonblock (147 ms)
+[LP] PASS R9 unix_pingpong (236 ms)
+[LP] PASS R10 efd_pingpong (286 ms)
+[LP] PASS R11 close_wake (531 ms)
+[LP] info R12 signals=1161
+[LP] PASS R12 sig_read (119 ms)
+[LP] PASS R13 kill_busy (3083 ms)
+[LP] done rc=0

@@ -1910,6 +1910,14 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
       vm_object_unref(o);
       return -EIO;
     }
+    /* C1-k4: a Linux-ABI address space gets Linux's answer for a page wholly
+       past EOF -- SIGBUS/BUS_ADRERR (glibc's ld.so replaces such pages with
+       anonymous MAP_FIXED before it touches them; Wine's image mapper the
+       same).  GB-201's zero page stays for the native loaders. */
+    if (as->layout == VM_LAYOUT_COMPAT) {
+      vm_object_unref(o);
+      return -ENXIO;
+    }
     priv = frame_alloc_zeroed();
     if (!priv) {
       vm_object_unref(o);
@@ -3101,6 +3109,11 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     if (mrc != 0) {
       if (mrc == -EIO)
         return vm_page_io_error(as, a, why);
+      if (mrc == -ENXIO) {
+        if (why)
+          *why = "BUS"; /* C1-k4: past EOF -> SIGBUS/BUS_ADRERR */
+        return 1;
+      }
       if (why)
         *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
       return 1;
@@ -3127,11 +3140,14 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   uint64_t fr;
   int shared = (r->obj != 0);
   if (shared) {
-    fr = vm_object_page_locked(r->obj, (a - r->base) + r->obj_off);
+    uint64_t soff = (a - r->base) + r->obj_off;
+    fr = vm_object_page_locked(r->obj, soff);
     if (!fr) {
+      /* C1-k4: past the object's last page is SIGBUS (Linux), not OOM. */
+      int beyond = r->obj->used && soff / FRAME_SIZE >= (uint64_t)r->obj->nr_frames;
       spinlock_release_irqrestore(&vm_lock, fl);
       if (why)
-        *why = "OOM";
+        *why = beyond ? "BUS" : "OOM";
       return 1;
     }
   } else {
@@ -4178,8 +4194,12 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       if (offset & 0xFFF)
         return -EINVAL;
       uint64_t cap = (vm_object_size(obj) + 0xFFF) & ~0xFFFULL;
-      if (offset >= cap || len > cap - offset)
-        return -EINVAL; /* mapping past the object's page capacity */
+      /* C1-k4: Linux maps a range LONGER than the memfd/tmpfs file (the file
+         rule above): only the first page must exist.  A page past the
+         object's capacity is never backed; touching it is SIGBUS/BUS_ADRERR
+         (vm_handle_fault), and a later ftruncate grow makes it fillable. */
+      if (offset >= cap && !(offset == 0 && cap == 0))
+        return -EINVAL;
       /* prot may not exceed the memfd's seals (4.1) -- for a SHARED mapping
          only: Linux's F_SEAL_WRITE refuses MAP_SHARED|PROT_WRITE, while a
          private writable mapping never writes the object. */
@@ -4529,6 +4549,161 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
   return (int64_t)base;
 }
 
+/* ---- C1-k4: cross-CPU TLB shootdown for munmap / mprotect / mremap ------
+ *
+ * A leaf cleared here used to be flushed from THIS CPU's TLB only, and its
+ * frame went straight back to the allocator.  Another thread of the group,
+ * running on another CPU with the translation cached, kept reading -- and
+ * writing -- that frame after munmap returned, by then possibly someone
+ * else's page.  Now every frame a zap releases is parked in a batch, the
+ * leaves are cleared under vm_lock, and after the lock is dropped
+ * vm_arch_shootdown() IPIs every CPU translating through the AS and waits for
+ * each to flush; only then are the frames (and the object references taken
+ * for the span, whose last unref frees object pages) released.  The
+ * shootdown runs with no spinlock held: a CPU spinning on vm_lock with
+ * interrupts off could never acknowledge it. */
+#define VTB_INLINE 64
+#define VTB_OBJS 32
+#define VTB_PER_PAGE ((int)(FRAME_SIZE / 8) - 1)
+struct vm_tlb_batch {
+  uint64_t fr[VTB_INLINE];
+  int n;
+  uint64_t chain;      /* overflow pages: word 0 = next page, words 1.. = frames */
+  int chain_n;         /* entries used in the head overflow page */
+  struct vm_object *obj[VTB_OBJS];
+  int nobj;
+  int flush;           /* a leaf changed: a shootdown is owed */
+};
+
+static void vtb_init(struct vm_tlb_batch *b) {
+  b->n = 0;
+  b->chain = 0;
+  b->chain_n = 0;
+  b->nobj = 0;
+  b->flush = 0;
+}
+
+/* Park a frame for release after the shootdown.  Caller holds vm_lock. */
+static void vtb_add(struct vm_tlb_batch *b, uint64_t fr) {
+  b->flush = 1;
+  if (!fr)
+    return;
+  if (b->n < VTB_INLINE) {
+    b->fr[b->n++] = fr;
+    return;
+  }
+  if (!b->chain || b->chain_n >= VTB_PER_PAGE) {
+    uint64_t pg = frame_alloc();
+    if (!pg) {
+      /* No page for the list: the pre-C1-k4 behaviour for this one frame. */
+      frame_free(fr);
+      return;
+    }
+    uint64_t *w = (uint64_t *)phys_to_virt(pg);
+    w[0] = b->chain;
+    b->chain = pg;
+    b->chain_n = 0;
+  }
+  ((uint64_t *)phys_to_virt(b->chain))[1 + b->chain_n++] = fr;
+}
+
+/* Hold every object mapped in [base, base+len) across the shootdown: the
+ * region removal may drop its last reference.  Caller holds vm_lock. */
+static void vtb_hold_objects_locked(struct vm_tlb_batch *b,
+                                    struct addr_space *as, uint64_t base,
+                                    uint64_t len) {
+  for (int i = 0; i < as->nr && b->nobj < VTB_OBJS; i++) {
+    struct vm_region *r = &as->regions[i];
+    if (r->base + r->len <= base)
+      continue;
+    if (r->base >= base + len)
+      break;
+    if (!r->obj)
+      continue;
+    int dup = 0;
+    for (int k = 0; k < b->nobj; k++)
+      if (b->obj[k] == r->obj)
+        dup = 1;
+    if (dup)
+      continue;
+    vm_object_ref_locked(r->obj);
+    b->obj[b->nobj++] = r->obj;
+  }
+}
+
+/* Shoot down, then release.  Caller holds NO spinlock. */
+static void vtb_finish(struct vm_tlb_batch *b, struct addr_space *as) {
+  if (b->flush || b->n || b->chain)
+    vm_arch_shootdown(as);
+  for (int i = 0; i < b->n; i++)
+    frame_free(b->fr[i]);
+  while (b->chain) {
+    uint64_t *w = (uint64_t *)phys_to_virt(b->chain);
+    uint64_t next = w[0];
+    for (int i = 0; i < b->chain_n; i++)
+      frame_free(w[1 + i]);
+    frame_free(b->chain);
+    b->chain = next;
+    b->chain_n = VTB_PER_PAGE; /* every older page is full */
+  }
+  for (int k = 0; k < b->nobj; k++)
+    vm_object_unref(b->obj[k]);
+  vtb_init(b);
+}
+
+/* vm_zap_range with the releases parked in `b`.  Caller holds vm_lock. */
+static void vm_zap_range_defer(struct addr_space *as, uint64_t base,
+                               uint64_t len, struct vm_tlb_batch *b) {
+  for (uint64_t a = base; a < base + len; a += FRAME_SIZE) {
+    uint64_t nx = vm_arch_skip_absent(as, a); /* P1: skip absent tables */
+    if (nx != a) {
+      a = nx - FRAME_SIZE;
+      continue;
+    }
+    if (vm_arch_walk(as, a, 0) == 0) {
+      vtb_add(b, vm_arch_unmap_keep(as, a)); /* 0 for a SHARED-marked leaf */
+      as->resident_frames--;
+    }
+  }
+}
+
+/* C1-k4: drop every resident leaf of [base, base+len) on EVERY CPU, keeping
+ * the region records (mremap's and MAP_FIXED's zap). */
+void vm_zap_span(struct addr_space *as, uint64_t base, uint64_t len) {
+  if (!as || as->ver != AS_V2 || len == 0)
+    return;
+  struct vm_tlb_batch b;
+  vtb_init(&b);
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  vtb_hold_objects_locked(&b, as, base, len);
+  vm_zap_range_defer(as, base, len, &b);
+  spinlock_release_irqrestore(&vm_lock, fl);
+  vtb_finish(&b, as);
+}
+
+/* C1-k4: munmap's core -- zap + forget the region span, then shoot down and
+ * release.  `jit` also returns a freed code chunk (munmap only).  0 / -1. */
+static int vm_unmap_span_jit(struct addr_space *as, uint64_t base,
+                             uint64_t len, int jit) {
+  struct vm_tlb_batch b;
+  vtb_init(&b);
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  vtb_hold_objects_locked(&b, as, base, len);
+  vm_zap_range_defer(as, base, len, &b);
+  int rc = vm_region_remove_locked(as, base, len);
+  if (rc == 0 && jit)
+    vm_jit_release(as, base, len); /* a freed code chunk is reusable */
+  spinlock_release_irqrestore(&vm_lock, fl);
+  vtb_finish(&b, as);
+  return rc;
+}
+
+int vm_unmap_span(struct addr_space *as, uint64_t base, uint64_t len) {
+  if (!as || as->ver != AS_V2 || len == 0)
+    return -1;
+  return vm_unmap_span_jit(as, base, len, 0);
+}
+
 /* Free every resident private leaf in [base, base+len) and forget the
  * region span.  Shared pages are dropped without freeing (S4). */
 static void vm_zap_range(struct addr_space *as, uint64_t base, uint64_t len) {
@@ -4556,13 +4731,9 @@ int vm_munmap_range(struct process *grp, uint64_t addr, uint64_t len) {
     return -EINVAL;
   if (!vm_region_find(as, addr))
     return -EINVAL; /* nothing mapped at addr */
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
-  /* zap the resident pages first (the region list still describes them) */
-  vm_zap_range(as, addr, len);
-  int rc = vm_region_remove_locked(as, addr, len);
-  if (rc == 0)
-    vm_jit_release(as, addr, len); /* a freed code chunk is reusable */
-  spinlock_release_irqrestore(&vm_lock, fl);
+  /* C1-k4: zap (the region list still describes the pages), forget the span,
+     shoot the other CPUs' TLBs down, and only then release the frames. */
+  int rc = vm_unmap_span_jit(as, addr, len, 1);
   return rc == 0 ? 0 : -EINVAL;
 }
 
@@ -4674,6 +4845,11 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
   if (!vm_range_is_user(as, addr, len))
     return as->layout == VM_LAYOUT_COMPAT ? -ENOMEM : -EINVAL;
   uint16_t p = mmap_prot_sanitize(prot);
+  /* C1-k4: frames a PROT_NONE zap releases, and the flush a downgrade owes
+     the other CPUs, are settled after vm_lock is dropped (vtb_finish). */
+  struct vm_tlb_batch tb;
+  vtb_init(&tb);
+  uint16_t old_or = 0;
   uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   /* The range must be fully mapped (design 4.1: else -ENOMEM).  P1: walked
      region by region, not page by page -- a 64 GiB PROT_NONE reservation is
@@ -4684,8 +4860,11 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
       spinlock_release_irqrestore(&vm_lock, fl);
       return -ENOMEM;
     }
+    old_or |= r->prot;
     a = r->base + r->len;
   }
+  if (p == 0)
+    vtb_hold_objects_locked(&tb, as, addr, len);
   /* Region records first, leaves second: if the span rewrite fails the PTE
      protection must not already disagree with the VMA (that state — VMA
      read-write, PTE read-only, no object frame under it — is what turned a
@@ -4707,9 +4886,11 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
     if (vm_arch_walk(as, a, 0) != 0)
       continue;
     if (p == 0) {
-      vm_arch_unmap(as, a);
+      vtb_add(&tb, vm_arch_unmap_keep(as, a));
       as->resident_frames--;
     } else {
+      if (old_or & (uint16_t)~p)
+        tb.flush = 1; /* a right was taken away: stale TLB entries grant it */
       uint16_t lp = p;
       /* so-vm lane A (W^X, docs/shared-libs.md section 4 item 5): never
          hand out WRITE on an object frame in a MAP_PRIVATE region — the
@@ -4748,6 +4929,7 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
     }
   }
   spinlock_release_irqrestore(&vm_lock, fl);
+  vtb_finish(&tb, as);
   return rc == 0 ? 0 : -ENOMEM;
 }
 
@@ -4764,9 +4946,7 @@ int vm_madvise(struct process *grp, uint64_t addr, uint64_t len, int advice) {
     return 0; /* advisory: everything else is ignored (design 4.1) */
   if (!vm_region_find(as, addr))
     return -EINVAL;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
-  vm_zap_range(as, addr, len);
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_zap_span(as, addr, len); /* C1-k4: every CPU's TLB, then the frames */
   return 0;
 }
 
