@@ -56,7 +56,7 @@ Nothing in this plan replaces it; it stacks on top.
 | 4 | Wine (NT/Win32 on Linux) | nothing | the game is a PE executable |
 | 5 | Vulkan 1.3 with the vkd3d-proton feature set | GL only; `gpu_abi.h:32`: "Not in M1: blob resources / dmabuf, mmap of a resource, async fences" | D3D12 → Vulkan |
 | 6 | A writable, symlink-capable, large-file filesystem | FAT16 `disk.img`; NFS is read-only | Wine prefix (`dosdevices/` are symlinks), registry, saves, shader caches |
-| 7 | Large file mappings | `VM_OBJ_MAX_BYTES` = 64 MiB per object (`src/include/vm.h:160`) | Wine maps the PE image; the game's archives are multi-GB (verify how they are read) |
+| 7 | Large file mappings | `VM_OBJ_MAX_BYTES` = 64 MiB per object (`src/include/vm.h:160`) *(stale: 1 GiB since cp/sys ca51e8cf, C3-pfx)* | Wine maps the PE image; the game's archives are multi-GB (verify how they are read) |
 | 8 | A broad X client surface | `src/user/xcompat/libx11.c` implements the RimWorld-measured subset (`required-libx11.txt`) | `winex11.drv` needs real libX11 + XInput2, RandR, Render, Fixes, Cursor, XShm |
 | 9 | Zero-copy presentation | present goes through X (`docs/l88-fps-report.md`: 1.61 → 7.40 fps after fixing the present path alone) | at 1080p a readback present is ~8 MB per frame |
 | 10 | Audio | silent by decision (`docs/audio.md`, GB-029) | Wwise must at least initialise against "no device" (verify) |
@@ -258,7 +258,7 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
       - *(fixed, C3-nfs2)* fstat of an NFS fd reports mtime 0.
       - *(fixed, C1-k4; also CR0.NE=1, so an x87 fault no longer freezes the
         core on FERR#)* si_code details.
-      - *(fixed, C3-pfx — not yet merged)* FAT private mappings miss later `write()`s.
+      - *(fixed, C3-pfx 205a73b6; open: `ftruncate`/`O_TRUNC` of a mapped FAT file)* FAT private mappings miss later `write()`s.
       - *(fixed, C3-nfs2)* NFS symlinks in intermediate path components aren't followed.
       - *(fixed, C1-k4)* exec from a secondary thread leaves tid ≠ pid.
       - *(fixed, C1-k4)* SIGBUS past EOF is reported as SIGSEGV.
@@ -301,6 +301,19 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
       - *Open, P8 ceiling:* `MAX_GLOBAL_FILES` 512 (so 256 pipes),
         `MAX_OPEN_FDS` 256, poll nfds 256; Wine uses 3 pipes per thread, so
         ~190 game threads need ~570 pipes.
+      - *Merged, C3-pfx (bcae5139):* Gate P3 passed; `sync`/`syncfs`; FAT mapping
+        coherence; big-object frees moved out of `vm_lock`.
+      - *Open, ext2 speed:* `wineserver -k` gives the server 10.5 s, which can
+        cut a registry hive save short on `/EXT` (~125 KB/s for 4 KiB writes:
+        write-through, ~5 single-block NVMe commands per write). Next storage
+        step: batched write-through and multi-block commands.
+      - *Open, NFS:* with four guests the host's nfsd once went silent for
+        180 s (C3-pfx run 6, hard mount gave up correctly); C4-x2 saw retries of
+        46–64 s.
+      - *Open, possible regression (C1-k4 investigating):* in a Wine X session
+        on 030a7f10, services.exe, explorer.exe and winedevice.exe fault at wild
+        addresses, one an unresolved instruction fetch inside a mapped r-x
+        `.so` (`in=V1 prot=5 kind=7`); Gate P4's Wine half is blocked on it.
       - *Gate host:* four QEMU slots and per-call `/etc/exports` edits (§7.4).
 
 **Lane status (2026-11-15).** Merged to `cyberpunk`: C1-as (design), C2-wine
@@ -439,7 +452,7 @@ all sha256-verified, idempotent). Rows still marked "plan" have no pin yet.
 | Frame pool | fixed extents [0.5, 1.75) + [4, 8) GiB = 5.25 GiB; no RAM map parsed; RAM above 8 GiB unused | `src/include/frame.h:36-39` |
 | Present syscalls | `epoll_*`, `timerfd_*`, `memfd_create`, `sigaltstack`, `tgkill`, AF_UNIX + `SCM_RIGHTS` | `src/kernel/linux_compat*.c`, `src/kernel/fs.c:3693` |
 | Absent syscalls | *(v1: measured, replaces the v0 guess)* console Wine: `symlink chmod fchdir fstatfs ftruncate sendmmsg getxattr fgetxattr fsetxattr fremovexattr utimensat`; game under Proton adds `PR_SET_SYSCALL_USER_DISPATCH`, `userfaultfd`, `eventfd2`, `inotify_*`, `process_vm_readv` (ext2 lane since added `ftruncate`/`fdatasync`/`fstatfs` for all fds) | `docs/cyberpunk-evidence.md` §6, `docs/cp-p0-host.md` |
-| File mappings | `VM_OBJ_MAX_BYTES 64 MiB` per mapped object; NFS-backed objects exist (`VM_OBJ_NFS`) | `src/include/vm.h:160`, `:201` |
+| File mappings | `VM_OBJ_MAX_BYTES` 64 MiB *(1 GiB since cp/sys ca51e8cf)* per mapped object; NFS-backed objects exist (`VM_OBJ_NFS`) | `src/include/vm.h:160`, `:201` |
 | Storage | FAT16 `disk.img`; read-only NFSv3; no writable symlink-capable FS | `README.md`, `src/kernel/nfs.c` |
 | GPU ABI | `/dev/gpu` M1: capset 1 (VIRGL), contexts, 3D resources, fenced submit, transfers; explicitly no blobs, no resource mmap, no async fences | `docs/gpu-abi.md` §1, `src/include/gpu_abi.h:18-32` |
 | X | `XHOBBY.BIN` (X.Org-derived) + IceWM; compat `libX11.so.6` is a hand-written shim of the RimWorld-measured symbol set | `README.md`, `src/user/xcompat/libx11.c`, `required-libx11.txt` |
@@ -755,9 +768,9 @@ hash check.
       ~172 MB (the game's `shader_final.cache`, §0.2 item 12). Archive mmap is
       *not* needed (P0: archives are read, not mapped); the 64 MiB
       `VM_OBJ_MAX_BYTES` cap matters for memfd and GPU blob mappings instead.
-- [ ] Prefix moves to ext2; tmpfs for `/tmp`.
+- [x] *(C3-pfx: two-boot run 7, P1–P5 PASS, `docs/cp-pfx-evidence/`)* Prefix moves to ext2; tmpfs for `/tmp`.
 
-**Gate P3:** prefix survives a reboot; a >4 GiB archive read over NFS in the
+**Gate P3 — PASSED (2026-11-16):** prefix survives a reboot *(C3-pfx run 7: boot 2 reuses all 1,012 entries, hello + winprobe 41/41 from Z: and from C:\ on ext2, `e2fsck -fn` clean)*; a 5 GiB file over NFS matches the host's sha256 *(C3-nfs2 G8)*; the game's largest mapping shape (66,704,848-byte file, 3,166,208 bytes at 0x397a000, `MAP_PRIVATE|MAP_FIXED` RW) and 200 MiB memfd/shared-anon/ext2 objects fault in correctly *(`linux_probe_bigobj`)*. Original wording: prefix survives a reboot; a >4 GiB archive read over NFS in the
 guest matches the host's sha256; an `mmap` of the game's largest mapped file
 (from P0) faults in correctly. Evidence: serial log + hashes.
 
