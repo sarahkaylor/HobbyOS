@@ -147,12 +147,40 @@ struct socket_pcb {
   // sent, syn_last_ms is the ms timestamp of the last one.
   int syn_retries;
   uint64_t syn_last_ms;
+
+  /* ---- GB-308: loopback peers -------------------------------------------
+   * A stream socket connected to 127.0.0.1 is PAIRED with the pcb that the
+   * listening socket hands to accept().  The data path IS the existing rx
+   * ring, so read/write/EOF behave like the wire path without a TCP stack:
+   * send() pushes into the peer's ring, and close() marks the peer
+   * SOCKET_CLOSED so a parked reader wakes and returns 0 (EOF).  Anything
+   * that is not loopback still leaves through the wire. */
+  struct socket_pcb *peer;      /* paired end, 0 when not loopback-connected */
+  int listening;                /* bound + listen: accepts into lo_q[] */
+  uint16_t bound_port;          /* host order; 0 = unbound */
+  int lo_backlog;
+  struct socket_pcb *lo_q[16];  /* pcbs awaiting accept() */
+  int lo_head, lo_tail;
 };
 
 /**
  * Initializes the networking subsystem.
  * Sets up the internal PCB table and registers the socket subsystem.
  */
+/* GB-308: loopback (AF_INET 127.0.0.1) in-kernel peers.  Each returns 0 on
+ * success, a negative errno, or a sentinel the caller must honour:
+ *   net_socket_connect_lo: 1 = paired on loopback (done), 0 = not loopback
+ *                          (use the wire), <0 = errno.
+ *   net_socket_accept_lo:   0 = dequeued into *out, -2 = nothing pending and
+ *                          the caller should park, <0 = errno.
+ */
+int net_socket_bind_lo(struct socket_pcb *pcb, uint16_t port);
+int net_socket_listen_lo(struct socket_pcb *pcb, int backlog);
+int net_socket_connect_lo(struct socket_pcb *pcb, uint32_t ip_be, uint16_t port_be);
+int net_socket_accept_lo(struct socket_pcb *pcb, struct socket_pcb **out);
+int net_socket_lo_send(struct socket_pcb *pcb, const void *buf, uint32_t len);
+int net_socket_is_listening_lo(struct socket_pcb *pcb);
+
 void net_init(void);
 void net_refresh_mac(void);
 

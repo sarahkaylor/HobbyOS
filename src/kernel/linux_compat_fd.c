@@ -56,6 +56,8 @@
 #include "linux_syscall.h"
 #include "process.h"
 #include "vfs.h"
+#include "frame.h"  /* GB-308: FRAME_SIZE for fsync write-back */
+#include "vm.h"      /* GB-308: struct vm_object, vm_object_unref */
 #include "virtio_gpu.h" /* GB-025 / M3: the scanout address for FBIOGET_* */
 
 /* close_range(2) flags (Linux values; not syscall numbers, so local). */
@@ -390,7 +392,8 @@ static int l_fd_recvfrom(struct process *p, struct trap_frame *tf) {
     saved = l_nonblock_push(p, fd);
     if (saved < 0) return l_ret(tf, saved);
   }
-  int r = file_read(p, fd, (void *)ubuf, (int)len, tf);
+  /* GB-308: recv target is a user VA too — bounce it like every read. */
+  int r = file_read_user(p, fd, ubuf, len, tf);
   l_nonblock_pop(p, fd, saved);
   if (r == -2) return l_park(p, tf);
   if (r == -1) return l_ret(tf, -EBADF);
@@ -876,7 +879,29 @@ static int l_fd_fchown(struct process *p, struct trap_frame *tf) {
 
 /* ---- the table --------------------------------------------------------- */
 
-const struct l_sysent l_tab_fd[] = {
+/* GB-308 fsync(2) / fdatasync(2).
+ *
+ * Historically none of sync/fsync/fdatasync existed, so a program could not ask
+ * for durability at all.  What is worth flushing here is the mmap half: pages
+ * modified through a MAP_SHARED mapping that nobody has force()d.  Ordinary
+ * write(2) data already reaches the device through fat16_write as it goes.
+ *
+ * The flush walks the process's MAPPINGS (l_mem_fsync_file), not the page-cache
+ * object: a write invalidates the cache, so an object-based flush refills from
+ * disk and writes stale bytes back -- measured, see linux_compat_mem.c.
+ * A file that this process has not mapped has nothing of ours to flush: 0.
+ */
+static int l_fd_fsync(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  uint16_t cl = 0;
+  uint32_t sz = 0;
+  int r = file_fat16_ident(p, fd, &cl, &sz);
+  if (r != 0) return l_ret(tf, r);
+  return l_ret(tf, l_mem_fsync_file(p, cl, sz, tf));
+}
+
+const struct l_sysent l_tab_fd[] = { {L_SYS_fsync, l_fd_fsync, "fsync"},
+    {L_SYS_fdatasync, l_fd_fsync, "fdatasync"},
   /* descriptors */
   {L_SYS_openat, l_fd_openat, "openat"},
   {L_SYS_fchmod, l_fd_fchmod, "fchmod"},

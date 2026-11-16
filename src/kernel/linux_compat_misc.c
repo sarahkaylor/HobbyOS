@@ -85,7 +85,8 @@ static int l_misc_readv(struct process *p, struct trap_frame *tf) {
     /* One segment is one read; the kernel's file_read takes an int size. */
     while (len > 0) {
       int chunk = len > 0x10000000ULL ? 0x10000000 : (int)len;
-      int r = file_read(p, fd, (void *)(uintptr_t)base, chunk, tf);
+      /* GB-308: into the caller's range via the bounce helper (fs.c). */
+      int r = file_read_user(p, fd, base, chunk, tf);
       if (r == -2) {
         if (total > 0) return l_misc_ret(tf, total);
         if ((tf->cs & 3) == 3) tf->elr -= 2;
@@ -112,21 +113,17 @@ static int l_misc_pread64(struct process *p, struct trap_frame *tf) {
   int64_t n = l_argi(tf, 2);
   int64_t off = l_argi(tf, 3);
   if (n < 0) return l_misc_ret(tf, -EINVAL);
-  int err = 0;
-  int64_t saved = file_seek(p, fd, 0, 1 /* SEEK_CUR */, &err);
-  if (saved < 0) return l_misc_ret(tf, -err);
-  if (file_seek(p, fd, off, 0 /* SEEK_SET */, &err) < 0)
-    return l_misc_ret(tf, -err);
-  int r = file_read(p, fd, (void *)(uintptr_t)buf, (int)n, tf);
+  /* GB-308: atomic positioned read (see file_pread_user): bounce, and hold
+     one lock over seek+read+restore so concurrent readers of one fd cannot
+     read each other's offset. */
+  int r = file_pread_user(p, fd, buf, n, off, tf);
   if (r == -2) {
-    /* Parked: let the restart redo the whole positioned read from `off`. */
-    file_seek(p, fd, off, 0, &err);
+    /* Parked: the restart redoes the whole positioned read from `off`. */
     if ((tf->cs & 3) == 3) tf->elr -= 2;
     save_context(p, tf);
     schedule(tf, 0);
     return 1;
   }
-  file_seek(p, fd, saved, 0, &err);
   return l_misc_ret(tf, r);
 }
 
@@ -136,19 +133,13 @@ static int l_misc_pwrite64(struct process *p, struct trap_frame *tf) {
   int64_t n = l_argi(tf, 2);
   int64_t off = l_argi(tf, 3);
   if (n < 0) return l_misc_ret(tf, -EINVAL);
-  int err = 0;
-  int64_t saved = file_seek(p, fd, 0, 1, &err);
-  if (saved < 0) return l_misc_ret(tf, -err);
-  if (file_seek(p, fd, off, 0, &err) < 0) return l_misc_ret(tf, -err);
-  int r = file_write(p, fd, (const void *)(uintptr_t)buf, (int)n, tf);
+  int r = file_pwrite_user(p, fd, buf, n, off, tf);
   if (r == -2) {
-    file_seek(p, fd, off, 0, &err);
     if ((tf->cs & 3) == 3) tf->elr -= 2;
     save_context(p, tf);
     schedule(tf, 0);
     return 1;
   }
-  file_seek(p, fd, saved, 0, &err);
   return l_misc_ret(tf, r);
 }
 
@@ -188,6 +179,32 @@ static int l_misc_rmdir(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, rc);
 }
 
+/* mkdir(2)/mkdirat(2).  The native layer has vfs_mkdir (8.3 FAT16), so javac
+ * writing a PACKAGE (-d /OUT, package pkg -> /OUT/PKG) works; before this the
+ * callers that only ever wrote to a pre-existing directory still passed, which
+ * is exactly how the gap survived until a multi-source compile hit it:
+ *   /T2/Alpha.java:9: error: error while writing Alpha:
+ *   could not create parent directories. */
+static int l_misc_mkdir(struct process *p, struct trap_frame *tf) {
+  char path[256];
+  int r = l_misc_path(p, l_arg(tf, 0), path, sizeof path);
+  if (r != 0) return l_misc_ret(tf, r);
+  return l_misc_ret(tf, file_mkdir_errno(p, path));
+}
+
+static int l_misc_mkdirat(struct process *p, struct trap_frame *tf) {
+  int dirfd = (int)l_argi(tf, 0);
+  uint64_t upath = l_arg(tf, 1);
+  char path[256];
+  int r = l_misc_path(p, upath, path, sizeof path);
+  if (r != 0) return l_misc_ret(tf, r);
+  /* Relative paths are resolved against the cwd by l_misc_path; a path that
+   * is relative to some other directory fd is refused rather than silently
+   * created in the wrong place. */
+  if (path[0] != '/' && dirfd != -100 /* AT_FDCWD */) return l_misc_ret(tf, -EINVAL);
+  return l_misc_ret(tf, file_mkdir_errno(p, path));
+}
+
 static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
   char path[256];
   int r = l_misc_path(p, l_arg(tf, 0), path, sizeof path);
@@ -205,8 +222,16 @@ static int l_misc_chdir(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, 0);
 }
 
-/* getcwd(2) returns the buffer (glibc/musl both expect a non-NULL return on
-   success); DOOMWADDIR's fallback "." never calls it, but SDL-era clients do. */
+/* getcwd(2): the kernel ABI is `long getcwd(char *buf, unsigned long size)` and
+   Linux returns the LENGTH of the path INCLUDING the terminating NUL
+   (fs/d_path.c: do_getcwd() ends `return len;`, not `return buf;`).  It happens
+   to be >= 0 either way, so "the buffer pointer" looked like success — until
+   glibc compared it against `size`, decided the path was longer than the
+   buffer, and fell into its ERANGE/ENAMETOOLONG retry, which cannot succeed
+   either: measured, `getcwd()` returned NULL with a perfectly good "/" in the
+   buffer, and OpenJDK died at startup with
+   "java.lang.Error: Properties init: Could not determine current working
+   directory".  libjava's java_props_md.c is the only caller that matters here. */
 static int l_misc_getcwd(struct process *p, struct trap_frame *tf) {
   uint64_t ubuf = l_arg(tf, 0);
   int64_t size = l_argi(tf, 1);
@@ -217,7 +242,7 @@ static int l_misc_getcwd(struct process *p, struct trap_frame *tf) {
   if (size < (int64_t)len + 1) return l_misc_ret(tf, -ERANGE);
   if (l_copy_to_user(p, ubuf, grp->cwd, (uint64_t)len + 1) != 0)
     return l_misc_ret(tf, -EFAULT);
-  return l_misc_ret(tf, (int64_t)ubuf);
+  return l_misc_ret(tf, (int64_t)len + 1);
 }
 
 /* No write-back cache to flush: the FAT writer goes straight to the block
@@ -274,7 +299,7 @@ static int l_misc_rseq(struct process *p, struct trap_frame *tf) {
   return l_misc_ret(tf, -ENOSYS);
 }
 
-const struct l_sysent l_tab_misc[] = { {L_SYS_lseek, l_misc_lseek, "lseek"}, {L_SYS_readv, l_misc_readv, "readv"}, {L_SYS_pread64, l_misc_pread64, "pread64"}, {L_SYS_pwrite64, l_misc_pwrite64, "pwrite64"}, {L_SYS_unlink, l_misc_unlink, "unlink"}, {L_SYS_unlinkat, l_misc_unlinkat, "unlinkat"}, {L_SYS_rename, l_misc_rename, "rename"}, {L_SYS_rmdir, l_misc_rmdir, "rmdir"}, {L_SYS_chdir, l_misc_chdir, "chdir"}, {L_SYS_getcwd, l_misc_getcwd, "getcwd"}, {L_SYS_fsync, l_misc_fsync, "fsync"}, {L_SYS_membarrier, l_misc_membarrier, "membarrier"}, {L_SYS_rseq, l_misc_rseq, "rseq"},
+const struct l_sysent l_tab_misc[] = { {L_SYS_lseek, l_misc_lseek, "lseek"}, {L_SYS_readv, l_misc_readv, "readv"}, {L_SYS_pread64, l_misc_pread64, "pread64"}, {L_SYS_pwrite64, l_misc_pwrite64, "pwrite64"}, {L_SYS_unlink, l_misc_unlink, "unlink"}, {L_SYS_unlinkat, l_misc_unlinkat, "unlinkat"}, {L_SYS_rename, l_misc_rename, "rename"}, {L_SYS_mkdir, l_misc_mkdir, "mkdir"}, {L_SYS_mkdirat, l_misc_mkdirat, "mkdirat"}, {L_SYS_rmdir, l_misc_rmdir, "rmdir"}, {L_SYS_chdir, l_misc_chdir, "chdir"}, {L_SYS_getcwd, l_misc_getcwd, "getcwd"}, {L_SYS_fsync, l_misc_fsync, "fsync"}, {L_SYS_membarrier, l_misc_membarrier, "membarrier"}, {L_SYS_rseq, l_misc_rseq, "rseq"},
   L_SYSENT_END
 };
 

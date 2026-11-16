@@ -16,6 +16,7 @@
 #include "virtio_input.h" /* GB-171: the key ring that node drains */
 #include "frame.h" /* M5: fs_read_image contiguous image frames */
 #include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
+#include "arch/cpu.h" /* GB-308: get_cpuid() picks the per-CPU read bounce */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -92,12 +93,39 @@ extern void print_int(int val);
  * are range-checked through it before the kernel touches them. */
 extern int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
+/* GB-308: the native layer has only a CURSOR, so pread64/pwrite64 are a
+ * seek-read-restore sequence.  That sequence is not atomic by itself, and the
+ * JVM preads its jimage from several class-loading threads at once: thread A
+ * seeks, B seeks elsewhere, A reads B's offset.  It surfaced as
+ *   ClassFormatError: Unknown constant tag 47 in class file
+ *   java/util/concurrent/ThreadLocalRandom
+ * -- a byte of a PATH string where a constant-pool tag belonged, i.e. data
+ * read from the wrong offset.  One lock over the whole sequence makes
+ * positioned I/O what POSIX says it is: atomic and cursor-neutral.
+ *
+ * The lock is PER GLOBAL FD, not global.  It is held across the read, and a
+ * read can block in FAT/virtio I/O (measured: `keytool -genkeypair` parked a
+ * pread64 with the single global lock held and the whole machine wedged behind
+ * it, [YLOCK-WEDGE] f1_pos_lock).  Per-fd confines a stuck read to the fd that
+ * caused it.  Residual, accepted: two different fds on the SAME file still
+ * race their cursors -- the fix for that is offset-passing inside file_read,
+ * not a wider lock. */
+static ylock_t f1_pos_locks[MAX_GLOBAL_FILES];
+
+/* Index a process fd to its global slot for the positioned-I/O lock, or -1. */
+static int f1_pos_index(struct process *pg, int fd) {
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  int g = pg->open_fds[fd];
+  return (g >= 0 && g < MAX_GLOBAL_FILES) ? g : -1;
+}
+
 /**
  * Initializes the virtual file system layer.
  * Sets up the global file table and initializes the FS spinlock.
  */
 void fs_init(void) {
   spinlock_init(&fs_lock);
+  for (int i = 0; i < MAX_GLOBAL_FILES; i++) ylock_init(&f1_pos_locks[i]);
   spinlock_init(&file_locks_lock);
   for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
     global_file_table[i].type = FILE_TYPE_EMPTY;
@@ -903,6 +931,29 @@ int file_open(struct process *cur, const char *filename, int flags) {
        creators, so it is enforced inside fat16_open_ex (one fat_lock
        critical section covers existence check + slot claim), not by this
        probe.  The probe above stays as the cheap ENOENT fast path only. */
+    /* GB-308: open(dir, O_RDONLY) is legal POSIX and Linux honours it —
+       read(2) then answers EISDIR, and a caller that only wants a dirfd for
+       getdents64 works.  The JDK's Files.list() opens the directory with
+       plain O_RDONLY and enumerates it, and this VFS answered ENOENT for an
+       entry the probe had just resolved as a directory, so EVERY listing
+       failed with NoSuchFileException (measured: "/", "/JDK", "/C", "/JDKTMP",
+       all of them).  Only O_DIRECTORY reached fat16_open_dir before. */
+    if (exists && (probe_entry.attr & 0x10)) {
+      /* A directory cannot be created-then-opened, truncated, or written
+         through; Linux says EISDIR for each of those. */
+      if ((flags & 3) || (flags & (O_CREAT | O_EXCL | O_TRUNC))) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -EISDIR;
+      }
+      if (fat16_open_dir(filename, f) != 0) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -ENOENT;
+      }
+      f->open_flags = (uint32_t)flags;
+      goto opened; /* same tail as a regular open: install the fd */
+    }
     int orc = fat16_open_ex(filename, f,
                             (flags & O_CREAT) && (flags & O_EXCL) ? 1 : 0);
     if (orc == -2) {
@@ -926,6 +977,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
     }
   }
 
+opened:
   if (routed == 1) nfs_selfcheck(f);
   int fd = -1;
   fd = fd_install(cur, f);
@@ -1115,6 +1167,18 @@ int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
   struct socket_pcb *pcb = f->socket.pcb;
   uint16_t port = ntohs(port_be); /* the stack keeps ports host-order */
 
+  /* GB-308: 127.0.0.1 is answered in-kernel -- pair with the listener and
+   * return, so a loopback connect never waits on a SYN that no stack sends. */
+  {
+    int lo = net_socket_connect_lo(pcb, ip_be, port_be);
+    if (lo > 0) {
+      pcb->connect_started = 1;
+      pcb->connect_err = 0;
+      return 0;
+    }
+    if (lo < 0) return lo;
+  }
+
   if (pcb->state == SOCKET_ESTABLISHED && pcb->connect_started &&
       pcb->connect_err == 0) {
     /* Already connected.  Linux says EISCONN; that errno is not in the
@@ -1154,12 +1218,10 @@ int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
  * (whose start_cluster is 0 for all of them).  NFS/pipe/socket fds have no
  * record locks here (-EINVAL; SQLite runs off FAT16 for P6).
  *
- * The kernel never blocks on a lock: F_SETLKW behaves like F_SETLK (one
- * attempt, -EAGAIN on conflict).  The libc wrapper supplies the bounded
- * blocking loop with real sleeps -- the same shape as SQLite's own
- * non-blocking + busy-retry consumption.  Parking the syscall instead
- * would need the -2 restart plumbing select() uses, which buys nothing
- * here.
+ * F_SETLK is one attempt (-EAGAIN on conflict); F_SETLKW blocks until the
+ * region is free or a 10 s ceiling (see the engine below).  The old design --
+ * "the libc wrapper retries" -- was wrong for glibc, whose fcntl(F_SETLKW) is
+ * a single blocking syscall.
  */
 
 static uint64_t file_lock_id(const struct file *f) {
@@ -1317,10 +1379,38 @@ static int file_lock_fcntl(struct process *pg, struct file *f, int cmd,
   }
 
   /* F_SETLK / F_SETLKW: replace the owner's overlapping locks, then add the
-   * new one unless this is an unlock.  Kernel-side this is one attempt for
-   * both commands (see the block comment above). */
-  if (type != K_F_UNLCK &&
-      file_lock_find_conflict(pid, id, start, len, type) >= 0) {
+   * new one unless this is an unlock.
+   *
+   * GB-308: F_SETLKW now actually BLOCKS.  It used to be one attempt for both
+   * commands, on the theory that the libc wrapper retries -- but glibc's
+   * fcntl(F_SETLKW) is a single syscall that is REQUIRED to block, so
+   * FileChannel.lock() returned a FileLock the kernel had never granted while
+   * another process held the region.  That is the worst shape of bug for a
+   * database: two writers both believe they own the file.
+   *
+   * The wait is a halt loop (safe_wfi) with a 10 s ceiling rather than a
+   * scheduler park: parking needs the -2 restart plumbing threaded through
+   * fcntl, and a holder that dies must not strand a waiter forever, so a
+   * bounded wait that reports -EAGAIN is the honest failure.  The lock table
+   * lock is released across every wait -- never held while halted. */
+  int conflicting = (type != K_F_UNLCK &&
+                     file_lock_find_conflict(pid, id, start, len, type) >= 0);
+  if (conflicting && cmd == K_F_SETLKW) {
+    uint64_t deadline = timer_get_ms() + 10000;
+    spinlock_release_irqrestore(&file_locks_lock, flags);
+    for (;;) {
+      safe_wfi();
+      flags = spinlock_acquire_irqsave(&file_locks_lock);
+      file_locks_sweep_dead();
+      conflicting = (file_lock_find_conflict(pid, id, start, len, type) >= 0);
+      if (!conflicting)
+        break;                        /* got it: fall through with flags held */
+      spinlock_release_irqrestore(&file_locks_lock, flags);
+      if (timer_get_ms() >= deadline)
+        return -EAGAIN;
+    }
+  }
+  if (conflicting) {
     spinlock_release_irqrestore(&file_locks_lock, flags);
     return -EAGAIN;
   }
@@ -1964,7 +2054,7 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     k_stat_fill(st, K_DEV_FAT16,
                 fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
                 (f->fat16.entry.attr & 0x10)
-                    ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
+                    ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0755),
                 f->fat16.entry.file_size);
     /* w10-fstime: report the dirent's real RTC timestamp (UTC).  FAT has
        no atime; use the modify time for all three (matches sysinfo/time). */
@@ -2422,8 +2512,11 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
     *errp = ENOENT;
     return -1;
   }
+  /* GB-308: exec bits, matching Linux's vfat (mode=0777 & ~umask) and the
+   * fd-based fill above.  This is the site file_stat_path() uses, so it decides
+   * what access(X_OK) and Files.isExecutable() report. */
   k_stat_fill(st, K_DEV_FAT16, fat16_synth_ino(sector, offset),
-              (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
+              (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0755),
               entry.file_size);
   /* w10-fstime: real RTC timestamp from the dirent (UTC; no FAT atime). */
   long ts = (long)fat16_entry_epoch(&entry);
@@ -2902,6 +2995,107 @@ static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
     spinlock_release_irqrestore(&l76_rc_lock, fl);
   }
   return got;
+}
+
+/* ---- reads into a USER buffer -------------------------------------------
+ *
+ * file_read() writes its bytes straight into the pointer it is handed, and
+ * every syscall hands it a user VA (sys_read's own comment says so: "buf is
+ * the caller's user pointer, already range-checked").  Range-checked is not
+ * backed: a destination page that is not materialized yet faults with the
+ * kernel's own CS, and the x64 trap path then dies on a frame it cannot
+ * account for.  Measured on a 4 MiB pread64 into a fresh malloc'd buffer:
+ *
+ *     [BADVEC] fatal frame=0x0000000075C61030 not-a-frame
+ *
+ * one CPU halted, the wave never ended.  The same 140 MiB read into a
+ * pre-touched buffer ran at a flat 12.6 MiB/s with per-block latency flat out
+ * to the last block, so neither FAT's cluster walk nor the device was at
+ * fault; only the unbacked destination was.
+ *
+ * So a syscall-side read goes through a kernel bounce buffer and vm_kwrite() —
+ * the sanctioned copy the rest of the ABI uses, which materializes demand-zero
+ * pages and re-validates each page, turning a hole into -EFAULT instead of a
+ * kernel-mode fault.  32 KiB per CPU keeps the copy overhead under the
+ * sector-paced FAT read it wraps and costs 256 KiB of BSS across 8 CPUs.
+ *
+ * Returns what file_read() returns, including -2 ("would block, park") when
+ * nothing was transferred; a partial transfer that then blocks reports the
+ * bytes already delivered, the same contract a short read has.
+ */
+#define FS_RD_BOUNCE (32 * 1024)
+static uint8_t fs_rd_bounce[MAX_CPUS][FS_RD_BOUNCE];
+
+
+int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
+                   struct trap_frame *tf) {
+  if (size <= 0) return 0;
+  if (!cur) return -EINVAL;
+  uint32_t cpu = get_cpuid();
+  uint8_t *b = fs_rd_bounce[cpu < MAX_CPUS ? cpu : 0];
+  int64_t done = 0;
+  while (done < size) {
+    int chunk = (size - done) > FS_RD_BOUNCE ? FS_RD_BOUNCE : (int)(size - done);
+    int r = file_read(cur, fd, b, chunk, tf);
+    if (r == -2) return done > 0 ? (int)done : -2;
+    if (r < 0) return done > 0 ? (int)done : r;
+    if (r == 0) break;
+    if (vm_kwrite(cur, ubuf + (uint64_t)done, b, r) != 0)
+      return done > 0 ? (int)done : -EFAULT;
+    done += r;
+    if (r < chunk) break;
+  }
+  return (int)done;
+}
+
+
+/* Positioned read into a USER range: atomic w.r.t. every other positioned op,
+ * and it leaves the fd cursor exactly where it found it. */
+int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                    int64_t off, struct trap_frame *tf) {
+  if (n < 0) return -EINVAL;
+  if (off < 0) return -EINVAL;
+  struct process *pg = process_group(p);
+  int err = 0;
+  int r = 0;
+  int li = f1_pos_index(pg, fd);
+  ylock_t *plk = (li >= 0) ? &f1_pos_locks[li] : 0;
+  if (plk) ylock_acquire(plk);
+  int64_t saved = file_seek(pg, fd, 0, 1 /* SEEK_CUR */, &err);
+  if (saved < 0) {
+    r = -err;
+  } else if (file_seek(pg, fd, off, 0 /* SEEK_SET */, &err) < 0) {
+    r = -err;
+  } else {
+    r = file_read_user(pg, fd, ubuf, n, tf);
+  }
+  if (saved >= 0) file_seek(pg, fd, saved, 0, &err);
+  if (plk) ylock_release(plk);
+  return r;
+}
+
+/* Positioned write: same contract, cursor-restoring. */
+int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                     int64_t off, struct trap_frame *tf) {
+  if (n < 0) return -EINVAL;
+  if (off < 0) return -EINVAL;
+  struct process *pg = process_group(p);
+  int err = 0;
+  int r = 0;
+  int li = f1_pos_index(pg, fd);
+  ylock_t *plk = (li >= 0) ? &f1_pos_locks[li] : 0;
+  if (plk) ylock_acquire(plk);
+  int64_t saved = file_seek(pg, fd, 0, 1, &err);
+  if (saved < 0) {
+    r = -err;
+  } else if (file_seek(pg, fd, off, 0, &err) < 0) {
+    r = -err;
+  } else {
+    r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);
+  }
+  if (saved >= 0) file_seek(pg, fd, saved, 0, &err);
+  if (plk) ylock_release(plk);
+  return r;
 }
 
 int file_read(struct process *cur, int fd, void *buf, int size, struct trap_frame *tf) {
@@ -3596,6 +3790,52 @@ int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
   return 0;
 }
 
+/* GB-308: the open flags of an fd, for the mmap access check.  Returns 0 and
+ * fills *out, or -EBADF.  The access mode is the low two bits (O_ACCMODE). */
+int file_open_flags(struct process *p, int fd, uint32_t *out) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -EBADF;
+  if (out) *out = global_file_table[gfd].open_flags;
+  return 0;
+}
+
+/* GB-308 MAP_SHARED write-back.  Write `len` bytes at file offset `off` into
+ * the FAT16 file identified by (start_cluster, file_size), through an fd this
+ * process already holds on it.  Why an fd and not the object: there is no
+ * kmalloc in this kernel, so the page-cache object cannot carry the file's
+ * path, and a mapping outlives the fd that created it.  The fd is the only
+ * handle available at msync time; when the process has none (channel closed
+ * before force()), the caller gets -EBADF and must not report durability.
+ *
+ * The cursor is saved and restored: the JDK preads its jimage from several
+ * class-loader threads, and a moved cursor is what produced "ClassFormatError:
+ * Unknown constant tag 47" earlier in this port. */
+int file_writeback_fat16(struct process *p, uint16_t cluster, uint32_t size,
+                         uint32_t off, const void *kbuf, uint32_t len,
+                         struct trap_frame *tf) {
+  p = process_group(p);
+  if (!p) return -EBADF;
+  for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
+    int gfd = p->open_fds[fd];
+    if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) continue;
+    struct file *f = &global_file_table[gfd];
+    if (f->type != FILE_TYPE_FAT16) continue;
+    if (f->fat16.entry.start_cluster != cluster) continue;
+    if (f->fat16.entry.file_size != size) continue;
+    int err = 0;
+    int64_t cur = file_seek(p, fd, 0, 1 /*SEEK_CUR*/, &err);
+    if (cur < 0) return (int)cur;
+    int64_t at = file_seek(p, fd, off, 0 /*SEEK_SET*/, &err);
+    if (at < 0) return (int)at;
+    int w = file_write(p, fd, kbuf, (int)len, tf);
+    file_seek(p, fd, cur, 0 /*SEEK_SET*/, &err); /* restore, ignore failure */
+    return w == (int)len ? 0 : (w < 0 ? w : -EIO);
+  }
+  return -EBADF;
+}
+
 /* L54: the NFS sibling of file_fat16_ident.  A regular file on a mounted
  * export is identified by (mount index, NFSv3 file handle); nfs_obj_get()
  * keys the page cache on that pair, so every mapping of one file shares its
@@ -3688,6 +3928,29 @@ int file_mkdir(struct process *cur, const char *path) {
   cur = process_group(cur); /* P1 (D7): cwd is group state */
   if (!cur || !path) return -1;
   return vfs_mkdir(path);
+}
+
+/* mkdir with POSIX errnos.  vfs_mkdir()/fat16_mkdir() answer -1 for every
+ * failure -- "already exists", "no parent", "disk full" -- and the native
+ * SYS_MKDIR callers only ever ask "did it work".  The Linux ABI cannot: Java's
+ * Files.createDirectories("/JDKTMP") on an EXISTING directory must see EEXIST
+ * (it catches FileAlreadyExistsException and then checks it is a directory),
+ * and -1 turns into EPERM, which is what made a passing check fail the moment
+ * mkdir existed at all:
+ *   java.nio.file.FileSystemException: /JDKTMP: Operation not permitted */
+int file_mkdir_errno(struct process *p, const char *path) {
+  if (!path) return -EINVAL;
+  if (vfs_mkdir(path) == 0) return 0;
+  char nm[16];
+  uint8_t attr = 0;
+  uint32_t size = 0;
+  if (vfs_read_dir(path, 0, nm, (int)sizeof nm, &attr, &size) >= 0)
+    return -EEXIST;          /* the path exists and is a directory */
+  struct k_stat st;
+  int err = 0;
+  if (file_stat_path(p, path, &st, &err) == 0)
+    return -EEXIST;          /* it exists, just not as a directory */
+  return -ENOENT;            /* nothing there: the create itself failed */
 }
 
 /* --- P4 (docs/browser/p4-ipc-design.md §3-§4): AF_UNIX + SCM_RIGHTS ------ */
@@ -4007,11 +4270,53 @@ static struct file *f1_unix_file(struct process *pg, int fd, int *errp) {
   return f;
 }
 
+/* GB-308: bind/listen/accept/getsockname must also serve an AF_INET fd.
+ * f1_unix_file() rejects FILE_TYPE_SOCKET because its other callers
+ * dereference f->usock; this hands back either kind and lets the caller
+ * branch on f->type. */
+static struct file *f1_any_sock_file(struct process *pg, int fd, int *errp) {
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = -EBADF; return 0; }
+  int g_fd = pg->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = -EBADF; return 0; }
+  struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
+  if (f->type == FILE_TYPE_SOCKET && f->socket.pcb) return f;
+  if (f->type != FILE_TYPE_UNIXSOCK || !f->usock.ptr) {
+    *errp = -ENOTSOCK;
+    return 0;
+  }
+  return f;
+}
+
+/* Format a sockaddr_in (16 bytes, network order) into the caller's scratch. */
+static void f1_inet_format(uint8_t *sa_out, uint32_t ip_host, uint16_t port_host) {
+  sa_out[0] = K_AF_INET;
+  sa_out[1] = 0;
+  sa_out[2] = (uint8_t)((port_host >> 8) & 0xFF);
+  sa_out[3] = (uint8_t)(port_host & 0xFF);
+  sa_out[4] = (uint8_t)((ip_host >> 24) & 0xFF);
+  sa_out[5] = (uint8_t)((ip_host >> 16) & 0xFF);
+  sa_out[6] = (uint8_t)((ip_host >> 8) & 0xFF);
+  sa_out[7] = (uint8_t)(ip_host & 0xFF);
+  for (int i = 8; i < 16; i++) sa_out[i] = 0;
+}
+
 int file_bind(struct process *p, int fd, const uint8_t *sa, int salen) {
   struct process *pg = process_group(p);
   int err = 0;
-  struct file *f = f1_unix_file(pg, fd, &err);
+  struct file *f = f1_any_sock_file(pg, fd, &err);
   if (!f) return err;
+  if (f->type == FILE_TYPE_SOCKET) {
+    /* AF_INET: loopback only.  A bind to any other address is refused rather
+     * than silently accepted, because this stack has no NIC-bound listener
+     * to back it. */
+    if (!sa || salen < 8 || sa[0] != K_AF_INET || sa[1] != 0) return -EINVAL;
+    uint32_t ip = ((uint32_t)sa[4] << 24) | ((uint32_t)sa[5] << 16) |
+                  ((uint32_t)sa[6] << 8) | (uint32_t)sa[7];
+    if (ip != 0u && ip != 0x7F000001u) return -EINVAL;
+    return net_socket_bind_lo(f->socket.pcb,
+                              (uint16_t)(((int)sa[2] << 8) | sa[3]));
+  }
   struct usock_name n;
   int r = usock_name_parse(sa, salen, &n);
   if (r == -EAFNOSUPPORT) return -EINVAL; /* Linux unix_mkname */
@@ -4022,8 +4327,10 @@ int file_bind(struct process *p, int fd, const uint8_t *sa, int salen) {
 int file_listen(struct process *p, int fd, int backlog) {
   struct process *pg = process_group(p);
   int err = 0;
-  struct file *f = f1_unix_file(pg, fd, &err);
+  struct file *f = f1_any_sock_file(pg, fd, &err);
   if (!f) return err;
+  if (f->type == FILE_TYPE_SOCKET)
+    return net_socket_listen_lo(f->socket.pcb, backlog);
   return usock_listen(f->usock.ptr, f->usock.end, backlog);
 }
 
@@ -4031,9 +4338,51 @@ int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
                 int *salen_out) {
   struct process *pg = process_group(p);
   int err = 0;
-  struct file *lf = f1_unix_file(pg, fd, &err);
+  struct file *lf = f1_any_sock_file(pg, fd, &err);
   if (!lf) return err;
   if (flags & ~(K_SOCK_CLOEXEC | K_SOCK_NONBLOCK)) return -EINVAL;
+
+  if (lf->type == FILE_TYPE_SOCKET) {
+    /* GB-308: dequeue a loopback connection.  The slot is reserved BEFORE the
+     * dequeue, exactly like the AF_UNIX path, so a popped connection can
+     * always be installed instead of being lost on ENFILE. */
+    struct socket_pcb *sp = 0;
+    int r = net_socket_accept_lo(lf->socket.pcb, &sp);
+    if (r < 0) return r;                     /* -EAGAIN, or -2 = park */
+    if (pg->num_open_fds >= MAX_OPEN_FDS) {
+      net_socket_close(sp);
+      return -EMFILE;
+    }
+    struct file *nf = file_alloc();
+    if (!nf) {
+      net_socket_close(sp);
+      return -ENFILE;
+    }
+    int nfd = -1;
+    for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+      if (pg->open_fds[i] == -1) { nfd = i; break; }
+    }
+    if (nfd < 0) {
+      net_socket_close(sp);
+      nf->type = FILE_TYPE_EMPTY;
+      nf->ref_count = 0;
+      return -EMFILE;
+    }
+    nf->type = FILE_TYPE_SOCKET;
+    nf->socket.pcb = sp;
+    if (flags & K_SOCK_NONBLOCK) sp->nonblock = 1;
+    pg->open_fds[nfd] = get_global_fd(nf);
+    pg->num_open_fds++;
+    if (flags & K_SOCK_CLOEXEC) fd_cloexec_set(pg->fd_cloexec, nfd);
+    else fd_cloexec_clear(pg->fd_cloexec, nfd);
+    if (sa_out && salen_out) {
+      /* The accepted peer is the client that connected to this listener. */
+      f1_inet_format(sa_out, 0x7F000001u,
+                     sp->remote_port ? sp->remote_port : sp->local_port);
+      *salen_out = 16;
+    }
+    return nfd;
+  }
   struct usock *l = lf->usock.ptr;
   if (!usock_is_listening(l)) return -EINVAL;
   if (pg->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
@@ -4105,8 +4454,19 @@ int file_sockname(struct process *p, int fd, int peer, uint8_t *sa_out,
                   int *salen_out) {
   struct process *pg = process_group(p);
   int err = 0;
-  struct file *f = f1_unix_file(pg, fd, &err);
+  struct file *f = f1_any_sock_file(pg, fd, &err);
   if (!f) return err;
+  if (f->type == FILE_TYPE_SOCKET) {
+    /* Java's ServerSocket.getLocalPort() lands here after bind(port 0). */
+    struct socket_pcb *pcb = f->socket.pcb;
+    if (peer)
+      f1_inet_format(sa_out, 0x7F000001u, pcb->remote_port);
+    else
+      f1_inet_format(sa_out, 0x7F000001u,
+                     pcb->bound_port ? pcb->bound_port : pcb->local_port);
+    *salen_out = 16;
+    return 0;
+  }
   struct usock_name n;
   int r = usock_getname(f->usock.ptr, f->usock.end, peer ? 1 : 0, &n);
   if (r != 0) return r;

@@ -3401,6 +3401,18 @@ int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize) {
         if (entries[j].name[0] == (char)0xE5) { lfn_reset(&st); continue; }
         if (entries[j].attr == 0x0F) { lfn_add_chunk(&st, (const unsigned char *)&entries[j]); continue; }
         if (entries[j].attr & 0x08) { lfn_reset(&st); continue; }
+        /* GB-308: the implicit "." and ".." above are logical indices 0 and 1;
+           the SAME two entries also exist on disk and were emitted a second
+           time, so every listing carried two of each (measured: /JDK gave
+           ". .. . .. BIN CONF", and a walker cannot tell that from a directory
+           that really holds those names).  Skip the on-disk pair, but only
+           when no long-name record is pending: a file whose SHORT name starts
+           with '.' and whose long name differs is a real child. */
+        if (!st.have && entries[j].name[0] == '.' &&
+            (entries[j].name[1] == ' ' || entries[j].name[1] == '.')) {
+          lfn_reset(&st);
+          continue;
+        }
         if (current_idx < start_index) { current_idx++; lfn_reset(&st); continue; }
         /* pack */
         char name[32];
@@ -3439,6 +3451,18 @@ int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize) {
           if (entries[j].name[0] == (char)0xE5) { lfn_reset(&st); continue; }
           if (entries[j].attr == 0x0F) { lfn_add_chunk(&st, (const unsigned char *)&entries[j]); continue; }
           if (entries[j].attr & 0x08) { lfn_reset(&st); continue; }
+        /* GB-308: the implicit "." and ".." above are logical indices 0 and 1;
+           the SAME two entries also exist on disk and were emitted a second
+           time, so every listing carried two of each (measured: /JDK gave
+           ". .. . .. BIN CONF", and a walker cannot tell that from a directory
+           that really holds those names).  Skip the on-disk pair, but only
+           when no long-name record is pending: a file whose SHORT name starts
+           with '.' and whose long name differs is a real child. */
+        if (!st.have && entries[j].name[0] == '.' &&
+            (entries[j].name[1] == ' ' || entries[j].name[1] == '.')) {
+          lfn_reset(&st);
+          continue;
+        }
           if (current_idx < start_index) { current_idx++; lfn_reset(&st); continue; }
           char name[32];
           lfn_entry_display(&st, &entries[j], name, sizeof name);

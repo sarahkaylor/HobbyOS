@@ -103,9 +103,11 @@
 #define L_SYS_uname 63
 #define L_SYS_fcntl 72
 #define L_SYS_fsync 74
+#define L_SYS_fdatasync 75
 #define L_SYS_getcwd 79
 #define L_SYS_chdir 80
 #define L_SYS_rename 82
+#define L_SYS_mkdir 83
 #define L_SYS_mkdir 83
 #define L_SYS_rmdir 84
 #define L_SYS_creat 85
