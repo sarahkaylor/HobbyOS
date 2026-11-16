@@ -66,11 +66,26 @@ libX11|libX11-1.8.14.tar.xz|--enable-xthreads --enable-xkb --enable-xlocale --di
 libXext|libXext-1.3.7.tar.xz|--disable-specs --without-xmlto --without-fop --without-xsltproc
 libXrender|libXrender-0.9.13.tar.xz|
 libXfixes|libXfixes-6.0.2.tar.xz|
+libXcomposite|libXcomposite-0.4.7.tar.xz|
 libXi|libXi-1.8.4.tar.xz|--disable-docs --disable-specs --without-xmlto --without-fop --without-xsltproc --without-asciidoc
 libXrandr|libXrandr-1.5.5.tar.xz|
 libXcursor|libXcursor-1.2.3.tar.xz|
 libXinerama|libXinerama-1.1.6.tar.xz|
-libxshmfence|libxshmfence-1.3.3.tar.xz|"
+libxshmfence|libxshmfence-1.3.3.tar.xz|
+freetype|freetype-2.14.3.tar.xz|--with-zlib=no --with-bzip2=no --with-png=no --with-harfbuzz=no --with-brotli=no --with-librsvg=no --enable-freetype-config"
+
+# Packages a build may go without when their tarball is absent (reported as
+# SKIPPED, never silently): libXdmcp (libxcb then has no XDM auth),
+# libxshmfence (only Mesa's DRI3 path uses it; Wine does not) and libXi
+# (without it Wine configures with no XInput2: no raw mouse, no ClipCursor --
+# tools/cp/build-wine.sh's X variant refuses that unless told otherwise).
+OPTIONAL_PKGS=" libXdmcp libxshmfence libXi "
+# FreeType (lane C4-x2, for Wine's --with-freetype): built from the tarball
+# vendored in third_party/ with its own bundled zlib/gzip code and no
+# png/bzip2/brotli/harfbuzz, so libfreetype.so.6 needs only libc.  It is
+# staged in /CP/X11/lib with the X libraries: that directory is first on a
+# Wine session's LD_LIBRARY_PATH (docs/cp-x11.md §2.3) and win32u dlopens
+# libfreetype.so.6 by soname.
 
 # --- sysroot ------------------------------------------------------------------
 pick_sysroot() {
@@ -97,6 +112,33 @@ pick_sysroot() {
   grep -q '__GLIBC_MINOR__	31' "$SYS/usr/include/features.h" || die "sysroot $SYS is not glibc 2.31" 2
 }
 
+# --- tarball lookup -----------------------------------------------------------------
+# $DL (fetch.sh's verified cache) first.  Then the tarballs the repo already
+# holds, each checked against its committed sha256: the native X stack's
+# third_party/x11/dl (13 of fetch.sh's 16 pins are byte-identical to its
+# pins, docs/cp-x11.md §1.1, plus libXcomposite) and third_party/<tarball>
+# (FreeType, vendored).  Prints the path; returns 1 when there is none.
+tb_path() {
+  local tb="$1" c sum
+  [ -f "$DL/$tb" ] && { printf '%s\n' "$DL/$tb"; return 0; }
+  sum="$ROOT/third_party/x11/sums/$tb.sha256"
+  for c in "$ROOT/third_party/x11/dl/$tb" "$ROOT/third_party/$tb"; do
+    [ -f "$c" ] && [ -f "$sum" ] || continue
+    [ "$(sha256sum "$c" | cut -d' ' -f1)" = "$(cut -d' ' -f1 "$sum")" ] ||
+      die "$c does not match $sum -- not using it" 1
+    printf '%s\n' "$c"; return 0
+  done
+  return 1
+}
+
+# Which optional packages are present changes what later packages link
+# (libxcb + libXdmcp), so it is part of every cache key.
+built_set() {
+  local p out=""
+  for p in xdmcp xshmfence; do [ -f "$DEV/lib/pkgconfig/$p.pc" ] && out="$out$p,"; done
+  printf '%s' "$out"
+}
+
 # --- one autotools package ----------------------------------------------------------
 pc_refresh() {
   # The dev tree's .pc files, with /CP/X11 -> the destdir, so later packages
@@ -114,14 +156,16 @@ pc_refresh() {
 build_pkg() {
   local name="$1" tb="$2" extra="$3"
   local src="$WORK/src" obj="$WORK/obj/$name" log="$LOGS/$name.log" stamp="$WORK/.stamps/$name"
-  local key; key=$(printf '%s|%s|%s|%s|r1' "$(sha256sum "$DL/$tb" | cut -c1-16)" "$extra" "$SYS" "$CFLAGS_X" | sha256sum | cut -c1-16)
+  local tbp; tbp=$(tb_path "$tb") || {
+    case "$OPTIONAL_PKGS" in *" $name "*) say "$name: SKIPPED (optional; $tb not in $DL or the native stack)"; return 0 ;; esac
+    die "$tb missing: run tools/cp/x11/fetch.sh" 2; }
+  local key; key=$(printf '%s|%s|%s|%s|%s|r1' "$(sha256sum "$tbp" | cut -c1-16)" "$extra" "$SYS" "$CFLAGS_X" "$(built_set)" | sha256sum | cut -c1-16)
   if [ "${CP_X11_FORCE:-0}" != 1 ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$key" ]; then
     say "$name: cached"; return 0
   fi
-  [ -f "$DL/$tb" ] || die "$tb missing: run tools/cp/x11/fetch.sh" 2
-  local dir; dir=$(tar -tf "$DL/$tb" | awk -F/ 'NR==1{print $1}')
+  local dir; dir=$(tar -tf "$tbp" | awk -F/ 'NR==1{print $1}')
   rm -rf "${src:?}/$dir" "$obj"; mkdir -p "$src" "$obj" "$LOGS" "$WORK/.stamps"
-  tar -C "$src" -xf "$DL/$tb"
+  tar -C "$src" -xf "$tbp"
   say "$name: configure + make -j$JOBS (log $log)"
   local t0=$SECONDS
   # shellcheck disable=SC2086  # $extra is a word list
@@ -179,6 +223,10 @@ do_stage() {
 
 # --- audit: GLIBC_ versions, DT_NEEDED closure, undefined-symbol resolution ----------
 do_audit() {
+  # sort/comm must agree on one collation: under en_US.UTF-8 (strix's
+  # default) sort ignores '_' and comm rejects the input, which turned every
+  # symbol into "unresolved".
+  export LC_ALL=C
   pick_sysroot
   [ -d "$STAGE/lib" ] || die "nothing staged (run stage)"
   local report="$WORK/audit.txt" bad=0 max=0 f b v needed rp n
@@ -225,6 +273,9 @@ do_audit() {
 do_smoke() {
   pick_sysroot
   local out="$WORK/xsmoke/xsmoke.elf" libs
+  if [ ! -f "$DEV/lib/pkgconfig/xshmfence.pc" ]; then
+    say "smoke: SKIPPED (xsmoke links libxshmfence, which this build does not have)"; return 0
+  fi
   mkdir -p "$WORK/xsmoke"
   libs="-lX11 -lX11-xcb -lxcb -lxcb-present -lxcb-dri3 -lxcb-composite -lxcb-damage -lxcb-shm -lxcb-sync -lXext -lXi -lXrandr -lXrender -lXfixes -lXcursor -lXinerama -lxshmfence -ldl"
   # shellcheck disable=SC2086

@@ -118,6 +118,13 @@ static void emit_position(evdev_decoder_t *d, evdev_emit_fn emit, void *ctx) {
   emit(ctx, EVDEV_EV_ABS, EVDEV_ABS_Y, (uint32_t)d->mouse_y);
 }
 
+/* The packet's raw deltas (evdev sign: +y down), unclamped -- see evdev.h
+ * "Relative motion".  Emitted right after the ABS pair. */
+static void emit_rel(int dx, int dy_ps2, evdev_emit_fn emit, void *ctx) {
+  if (dx != 0) emit(ctx, EVDEV_EV_REL, EVDEV_REL_X, (uint32_t)dx);
+  if (dy_ps2 != 0) emit(ctx, EVDEV_EV_REL, EVDEV_REL_Y, (uint32_t)(-dy_ps2));
+}
+
 /* A complete packet must look like one.  The header's bit 3 is checked
  * when it is taken; an IntelliMouse packet's 4th byte (a signed wheel
  * delta: +-1 per detent, a handful when detents coalesce) must also be
@@ -197,6 +204,7 @@ void evdev_mouse_byte(evdev_decoder_t *d, uint8_t data, evdev_emit_fn emit,
     d->px_x = clampi(d->px_x + dx, 0, d->screen_w - 1);
     d->px_y = clampi(d->px_y - dy, 0, d->screen_h - 1);
     emit_position(d, emit, ctx);
+    emit_rel(dx, dy, emit, ctx);
     emit(ctx, EVDEV_EV_SYN, 0, 0);
     return;
   }
@@ -205,6 +213,7 @@ void evdev_mouse_byte(evdev_decoder_t *d, uint8_t data, evdev_emit_fn emit,
   d->px_x = clampi(d->px_x + dx, 0, d->screen_w - 1);
   d->px_y = clampi(d->px_y - dy, 0, d->screen_h - 1);
   emit_position(d, emit, ctx);
+  emit_rel(dx, dy, emit, ctx);
 
   emit_buttons(d, (flags & 0x01) != 0, (flags & 0x02) != 0,
                (flags & 0x04) != 0, emit, ctx);

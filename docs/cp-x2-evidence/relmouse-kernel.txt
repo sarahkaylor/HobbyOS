@@ -1,0 +1,48 @@
+build=0
+[RELM] qemu pid 3320548
+[RELM] row: [REL] total rel_x=4050 rel_y=25 nrel=110 abs_x=32749 abs_y=17141 nabs=110
+[RELM] expect rel_x=4050 rel_y=25 abs_x=32749 (px 1919)
+  [REL] ready
+  [REL] ev type=3 code=0 value=16502
+  [REL] ev type=3 code=1 value=16474
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] ev type=3 code=0 value=16622
+  [REL] ev type=3 code=1 value=16565
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] ev type=3 code=0 value=16741
+  [REL] ev type=3 code=1 value=16656
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] ev type=3 code=0 value=16861
+  [REL] ev type=3 code=1 value=16747
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] ev type=3 code=0 value=16980
+  [REL] ev type=3 code=1 value=16838
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] ev type=3 code=0 value=17100
+  [REL] ev type=3 code=1 value=16929
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] ev type=3 code=0 value=17219
+  [REL] ev type=3 code=1 value=17020
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] ev type=3 code=0 value=17339
+  [REL] ev type=3 code=1 value=17111
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] ev type=3 code=0 value=17458
+  [REL] ev type=3 code=1 value=17202
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] ev type=3 code=0 value=17578
+  [REL] ev type=3 code=1 value=17293
+  [REL] ev type=2 code=0 value=7
+  [REL] ev type=2 code=1 value=3
+  [REL] total rel_x=4050 rel_y=25 nrel=110 abs_x=32749 abs_y=17141 nabs=110
+  [REL] done rc=0
+[RELM] PASS

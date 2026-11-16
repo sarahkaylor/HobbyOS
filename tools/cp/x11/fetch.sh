@@ -25,6 +25,9 @@
 # Usage:  bash tools/cp/x11/fetch.sh [--list]
 # Env:    CP_RUNTIME (default <repo>/third_party/cp-runtime) -> $CP_RUNTIME/x11/dl
 #         CP_REQUIRE_GPG=1
+#         CP_X11_ONLY="libXi libXdmcp ..."  only these rows (package name =
+#                       the tarball name before its version); the others are
+#                       neither fetched nor checked
 # Exit:   0 all verified, 1 verification failure, 2 tooling/network error.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -98,6 +101,9 @@ fi
 fail=0 net=0 ngpg=0 nsha=0 n=0
 while IFS='|' read -r f sub sha sigsha fpr; do
   [ -n "$f" ] || continue
+  if [ -n "${CP_X11_ONLY:-}" ]; then
+    case " $CP_X11_ONLY " in *" ${f%-[0-9]*} "*) ;; *) continue ;; esac
+  fi
   n=$((n+1))
   get "$f" "$BASE/$sub/$f" "$sha"; r=$?
   [ $r = 1 ] && fail=1; [ $r = 2 ] && net=1
