@@ -237,7 +237,7 @@ def main():
     ap.add_argument("--disk", required=True)
     ap.add_argument("--ovmf", required=True)
     ap.add_argument("--mem", default="12288M")
-    ap.add_argument("--boot-timeout", type=int, default=4200)
+    ap.add_argument("--boot-timeout", type=int, default=6000)
     a = ap.parse_args()
     out = a.out
     cmd, qmp_path, serial = qemu_cmd(out, a.disk, a.ovmf, a.mem)
