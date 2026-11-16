@@ -38,7 +38,7 @@
 #define P4_WINEDEBUG "err+all,fixme-all"
 #endif
 #ifndef P4_BOOT_QUIESCE_S
-#define P4_BOOT_QUIESCE_S 3600
+#define P4_BOOT_QUIESCE_S 1500
 #endif
 #define MNT "/CP"
 #ifndef P4_WARMUP_S
@@ -175,6 +175,16 @@ int main(void) {
   char *a_boot[] = { (char *)"wineboot", (char *)"-i", 0 };
   step("wineboot", "/CP/WINE/bin/wine", a_boot, 900);
   quiesce("wineboot", P4_BOOT_QUIESCE_S);
+  if (extras() > 0) {
+    /* The wineboot tree did not finish: the still-open lost-wakeup hang
+       (every client parked in a read, wineserver idle; C1-k4) looks exactly
+       like this.  Kill the tree and go on with the prefix as far as it got:
+       the GUI steps then show what works. */
+    pc("[P4] wineboot tree still alive after the quiesce window: wineserver -k\n");
+    char *a_k0[] = { (char *)"wineserver", (char *)"-k", 0 };
+    step("kill-boot", "/CP/WINE/bin/wineserver", a_k0, 60);
+    quiesce("kill-boot", 60);
+  }
 
 #ifndef P4_BOOT_ONLY
   /* Keep the desktop up for every GUI step: win32u gives explorer only 10 s
