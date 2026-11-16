@@ -1,0 +1,228 @@
+# P2 gate run18 on strix (cp-wine2 6a3a3d35 + quiesce 1500): G1 hello printed + exit 0 (graded FAIL by the pipefail bug), G2 winprobe [WP] done rc=0 + exit 0 from Z: and from C:\ (markers spliced by kernel rows; graded FAIL), G3 PASS
+exportfs: Failed to stat /srv/nfs/cp-nfs-bench: No such file or directory
+G1 wine cmd /c echo hello prints hello : FAIL   ([P2] end echo status=0 ms=130267)
+G2 winprobe.exe every marker + exit 0  : FAIL   ([P2] end winprobe status=0 ms=233109; 41 markers, 22 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=719; [P2] ps-extra count=0)
+extra: winprobe from C:\ (tmpfs)       : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=16752)
+exportfs: Failed to stat /srv/nfs/cp-nfs-bench: No such file or directory
+== /etc/exports restored (cmp identical to the pre-run copy)
+== removed /srv/nfs/cp-wine2-p2
+
+[P2] winep2 launcher (C2-wine2)
+[P2] ps-before count=1
+[P2] mount 10.0.2.2:/srv/nfs/cp-wine2-p2 -> /CP ok
+[P2] begin nfscount : pfxls -c /CP/WINE/lib/wine/x86_64-windows /CP/WINE/lib/wine/x86_64-unix /CP/WINE/share/wine
+[P2] end nfscount status=0 ms=231
+[P2] begin wineboot : wineboot -i
+wine: created the configuration directory '/tmp/pfx'
+wine: could not load kernel32.dll, status c0000135
+[P2] end wineboot status=53 ms=304502
+[P2] quiesce after wineboot: extra=5
+[P2] begin pfxls : pfxls /tmp/pfx
+[P2] end pfxls status=0 ms=191
+[P2] begin echo : wine cmd /c echo hello
+wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": c0000135
+hello
+[P2] end echo status=0 ms=130267
+[P2] quiesce after echo: extra=0
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+[WP] winprobe start
+[WP] PASS W1 %gs:[0x30] non-null (0x7ffc0000)
+[WP] PASS W1 %gs:[0x30] == NtCurrentTeb() (0x7ffc0000)
+[WP] PASS W1 TEB->Self == TEB (0x7ffc0000)
+[WP] PASS W1 TEB ClientId.UniqueProcess (32)
+[WP] PASS W1 TEB ClientId.UniqueThread (36)
+[WP] PASS W1 TEB->ProcessEnvironmentBlock (0x7ffd0000)
+[WP] PASS W1 TIB stack bounds contain the stack (0x7ffffe1ffd60)
+[WP] PASS W3 TlsAlloc (2)
+[WP] [PUB] who=fault_obj va=0x1080328000 off=0x11000 prot=RX priv=1 src=file zero=327 ver=1
+[WP] PASS W2 WaitForMultipleObjects(all) (0)
+[WP] PASS W2 thread exit codes (1)
+[WP] PASS W2 InterlockedIncrement 4x1000 (4000)
+[WP] PASS W1 each thread has its own TEB via %gs (1)
+[WP] PASS W3 TLS isolated per thread (+ TEB TlsSlots) (1)
+[WP] PASS W3 main thread TLS value kept (20817)
+[WP] PASS W3 TlsFree (0)
+[WP] PASS W4 __try/__except catches an access violation (0)
+[WP] PASS W4 __try/__except catches an integer divide by zero (0)
+[WP] PASS W4 AddVectoredExceptionHandler (0x7ffffe225e10)
+[WP] PASS W4 vectored handler resumes after AV (16726)
+[WP] PASS W4 vectored handler resumes after #DE (17494)
+[WP] PASS W4 RemoveVectoredExceptionHandler (0)
+[WP] PASS W4 __except again after VEH removal (0)
+[WP] PASS W5 QueryPerformanceFrequency (0x989680)
+[WP] PASS W5 QueryPerformanceCounter monotonic x10000 (1)
+[WP] PASS W5 QPC advances ~200 ms across Sleep(200) (270)
+[WP] PASS W6 GetTickCount64 advances across Sleep(200) (240)
+[WP] PASS W6 KUSER TickCountMultiplier readable at 0x7ffe0004 (0x1000000)
+[WP] PASS W6 KUSER NtMajorVersion (10)
+[WP] PASS W6 KUSER TickCount moves (server-written page seen live) (240)
+[WP] PASS W6 KUSER InterruptTime moves (0x249f00)
+[WP] PASS W6 GetTickCount64 agrees with KUSER TickCount (0x235308)
+[WP] PASS W7 CreateFile C:\winprobe.tmp (0)
+[WP] PASS W7 WriteFile (39)
+[WP] PASS W7 FlushFileBuffers (0)
+[WP] PASS W7 reopen for read (0)
+[WP] PASS W7 GetFileSize (39)
+[WP] PASS W7 ReadFile returns the bytes written (39)
+[WP] PASS W7 FindFirstFile C:\* lists it (1)
+[WP] PASS W7 DeleteFile (18)
+[WP] PASS W7 gone after delete (18)
+[WP] done rc=0
+[P2] end winprobe status=0 ms=233109
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+[P2] end copy status=0 ms=57753
+[P2] begin winprobe-c : wine C:\winprobe.exe
+[WP] winprobe start
+[WP] PASS W1 %gs:[0x30] non-null (0x7ffc0000)
+[WP] PASS W1 %gs:[0x30] == NtCurrentTeb() (0x7ffc0000)
+[WP] PASS W1 TEB->Self == TEB (0x7ffc0000)
+[WP] PASS W1 TEB ClientId.UniqueProcess (196)
+[WP] PASS W1 TEB ClientId.UniqueThread (200)
+[WP] PASS W1 TEB->ProcessEnvironmentBlock (0x7ffd0000)
+[WP] PASS W1 TIB stack bounds contain the stack (0x7ffffe1ffd60)
+[WP] PASS W3 TlsAlloc (2)
+[WP] [PUB] who=fault_obj va=0x1080325000 off=0xE000 prot=RX priv=1 src=file zero=592 ver=1
+[WP] PASS W2 WaitForMultipleObjects(all) (0)
+[WP] PASS W2 thread exit codes (1)
+[WP] PASS W2 InterlockedIncrement 4x1000 (4000)
+[WP] PASS W1 each thread has its own TEB via %gs (1)
+[WP] PASS W3 TLS isolated per thread (+ TEB TlsSlots) (1)
+[WP] PASS W3 main thread TLS value kept (20817)
+[WP] PASS W3 TlsFree (0)
+[WP] PASS W4 __try/__except catches an access violation (0)
+[WP] PASS W4 __try/__except catches an integer divide by zero (0)
+[WP] PASS W4 AddVectoredExceptionHandler (0x7ffffe225e70)
+[WP] PASS W4 vectored handler resumes after AV (16726)
+[WP] PASS W4 vectored handler resumes after #DE (17494)
+[WP] PASS W4 RemoveVectoredExceptionHandler (0)
+[WP] PASS W4 __except again after VEH removal (0)
+[WP] PASS W5 QueryPerformanceFrequency (0x989680)
+[WP] PASS W5 QueryPerformanceCounter monotonic x10000 (1)
+[WP] PASS W5 QPC advances ~200 ms across Sleep(200) (216)
+[WP] PASS W6 GetTickCount64 advances across Sleep(200) (200)
+[WP] PASS W6 KUSER TickCountMultiplier readable at 0x7ffe0004 (0x1000000)
+[WP] PASS W6 KUSER NtMajorVersion (10)
+[WP] PASS W6 KUSER TickCount moves (server-written page seen live) (200)
+[WP] PASS W6 KUSER InterruptTime moves (0x1e8480)
+[WP] PASS W6 GetTickCount64 agrees with KUSER TickCount (0x247627)
+[WP] PASS W7 CreateFile C:\winprobe.tmp (0)
+[WP] PASS W7 WriteFile (39)
+[WP] PASS W7 FlushFileBuffers (0)
+[WP] PASS W7 reopen for read (0)
+[WP] PASS W7 GetFileSize (39)
+[WP] PASS W7 ReadFile returns the bytes written (39)
+[WP] PASS W7 FindFirstFile C:\* lists it (1)
+[WP] PASS W7 DeleteFile (18)
+[WP] PASS W7 gone after delete (18)
+[WP] done rc=0
+[P2] end winprobe-c status=0 ms=16752
+[P2] begin kill : wineserver -k
+[P2] end kill status=0 ms=719
+[P2] ps-after count=1
+[P2] ps-extra count=0
+[P2] done
+## ps
+[P2] ps-before count=1
+[P2] ps-before pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-after count=1
+[P2] ps-after pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-extra count=0
+## pid -> process names (ALIVE-SET/exit rows)
+2: WINEP2.BIN wake
+6: start.exe wine
+7: wineserver
+8: wineserver
+9: wine
+10: wineboot.exe
+11: wineboot.exe
+12: services.exe
+13: services.exe
+14: services.exe
+15: wineboot.exe
+16: rundll32.exe
+17: wineboot.exe
+18: explorer.exe
+19: rundll32.exe
+20: explorer.exe
+21: explorer.exe
+22: explorer.exe
+23: services.exe
+24: services.exe
+26: services.exe
+27: services.exe
+28: wine winedevice.exe
+29: wineboot.exe
+30: rundll32.exe
+31: rundll32.exe
+32: control.exe wine
+33: rundll32.exe
+34: iexplore.exe wine
+35: services.exe
+36: services.exe
+37: services.exe
+38: svchost.exe wine
+40: services.exe
+41: services.exe
+42: plugplay.exe
+46: start.exe wine
+47: services.exe
+48: winedevice.exe
+49: services.exe
+50: winedevice.exe
+51: wineboot.exe
+52: wine
+53: services.exe
+54: services.exe
+55: services.exe
+56: wine winedevice.exe
+57: services.exe
+58: wine winedevice.exe
+59: services.exe
+60: services.exe
+61: services.exe
+62: rpcss.exe wine
+63: start.exe
+64: cmd.exe
+66: wine winprobe.exe
+67: wineserver
+68: wineserver
+69: wine
+70: wine wineboot.exe
+71: wineboot.exe
+72: wine winemenubuilder
+73: wineboot.exe
+74: services.exe wine
+75: services.exe
+76: winemenubuilder
+77: explorer.exe wine
+78: services.exe
+79: winedevice.exe
+80: services.exe
+81: plugplay.exe wine
+82: services.exe
+83: svchost.exe wine
+84: services.exe
+85: wine winedevice.exe
+86: services.exe
+87: wine winedevice.exe
+88: services.exe
+89: wine winedevice.exe
+90: winemenubuilder
+91: winemenubuilder
+92: winemenubuilder
+93: services.exe
+94: winemenubuilder
+95: wine winedevice.exe
+96: services.exe
+97: explorer.exe
+98: services.exe
+99: services.exe
+100: services.exe
+101: rpcss.exe wine
+102: services.exe
+103: rpcss.exe wine
+109: start.exe wine
+110: start.exe
+111: cmd.exe wine
+113: wine winprobe.exe

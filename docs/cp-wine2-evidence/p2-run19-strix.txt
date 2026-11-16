@@ -1,0 +1,53 @@
+# P2 gate run19 on strix (ca7d0004): wineboot tree never quiesced (all clients BLOCKED, no futex, no wake timer; wineserver in its poll loop) -> every later step waited 300 s on the boot event
+G1 wine cmd /c echo hello prints hello : FAIL   ([P2] end echo status=53 ms=302122)
+G2 winprobe.exe every marker + exit 0  : FAIL   ([P2] end winprobe status=53 ms=302248; 41 markers, 41 missing/failed)
+G3 wineserver -k leaves no processes   : FAIL   ([P2] end kill status=0 ms=350; [P2] ps-extra count=1)
+extra: winprobe from C:\ (tmpfs)       :  ()
+== /etc/exports: our line removed (cmp identical to the pre-run copy)
+== removed /srv/nfs/cp-wine2-p2
+rc=1 wall=3060s
+[P2] winep2 launcher (C2-wine2)
+[P2] ps-before count=1
+[P2] mount 10.0.2.2:/srv/nfs/cp-wine2-p2 -> /CP ok
+[P2] begin nfscount : pfxls -c /CP/WINE/lib/wine/x86_64-windows /CP/WINE/lib/wine/x86_64-unix /CP/WINE/share/wine
+[P2] end nfscount status=0 ms=232
+[P2] begin wineboot : wineboot -i
+wine: created the configuration directory '/tmp/pfx'
+wine: could not load kernel32.dll, status c0000135
+[P2] end wineboot status=53 ms=303987
+[P2] quiesce after wineboot: extra=5
+[P2] begin pfxls : pfxls /tmp/pfx
+[P2] end pfxls status=0 ms=54
+[P2] begin echo : wine cmd /c echo hello
+wine: could not load kernel32.dll, status c0000135
+[P2] end echo status=53 ms=302122
+[P2] quiesce after echo: extra=5
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+wine: could not load kernel32.dll, status c0000135
+[P2] end winprobe status=53 ms=302248
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+wine: could not load kernel32.dll, status c0000135
+[P2] end copy status=53 ms=301943
+[P2] begin kill : wineserver -k
+[P2] end kill status=0 ms=350
+[P2] ps-after count=2
+[P2] leftover pid=28 name=wine
+[P2] ps-extra count=1
+[P2] done
+[P2] ps-before count=1
+[P2] ps-before pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-after count=2
+[P2] ps-after pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-after pid=28 ppid=27 state=5 name=wine
+[P2] ps-extra count=1
+## state of the stuck tree at the quiesce deadline
+[IDLESTUCK] slot=2 pid=2 st=5 wake=1800510 futex=0x0 rip=0x10000064e4 WINEP2.BIN
+[IDLESTUCK] slot=8 pid=8 st=5 wake=1800392 futex=0x0 rip=0x1080127648 wineserver
+[IDLESTUCK] slot=10 pid=10 st=5 wake=0 futex=0x0 rip=0x1080050390 wineboot.exe
+[IDLESTUCK] slot=12 pid=12 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=13 pid=13 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=14 pid=14 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=16 pid=16 st=5 wake=0 futex=0x0 rip=0x1080050390 rundll32.exe
+[IDLESTUCK] slot=21 pid=21 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=22 pid=22 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=28 pid=28 st=5 wake=0 futex=0x0 rip=0x1080050390 wine

@@ -1,0 +1,98 @@
+# P2 gate run16 on strix (cp-wine2 @ 64760702 + c635edce merge), serial extract
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=252090)
+G2 winprobe.exe every marker + exit 0  : FAIL   ([P2] end winprobe status=0 ms=284126; 41 markers, 41 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=3471; [P2] ps-extra count=0)
+extra: winprobe from C:\ (tmpfs)       :  ([P2] end winprobe-c status=9 ms=490)
+== /etc/exports restored (cmp identical to the pre-run copy)
+== removed /srv/nfs/cp-wine2-p2
+
+[P2] winep2 launcher (C2-wine2)
+[P2] ps-before count=1
+[P2] mount 10.0.2.2:/srv/nfs/cp-wine2-p2 -> /CP ok
+[P2] begin nfscount : pfxls -c /CP/WINE/lib/wine/x86_64-windows /CP/WINE/lib/wine/x86_64-unix /CP/WINE/share/wine
+[PFX] count /CP/WINE/lib/wine/x86_64-windows open=1 entries=757 last=hid.dll
+[PFX] count /CP/WINE/lib/wine/x86_64-unix open=1 entries=27 last=secur32.so
+[PFX] count /CP/WINE/share/wine open=1 entries=3 last=wine.inf
+[P2] end nfscount status=0 ms=224
+[P2] begin wineboot : wineboot -i
+wine: created the configuration directory '/tmp/pfx'
+wine: could not load kernel32.dll, status c0000135
+[P2] end wineboot status=53 ms=304630
+wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": c0000135
+[P2] quiesce after wineboot: extra=0
+[P2] begin pfxls : pfxls /tmp/pfx
+[PFX] dir /tmp/pfx/drive_c/windows/system32 open=1 entries=797
+[PFX] dir /tmp/pfx/drive_c/windows open=1 entries=22
+[PFX] /tmp/pfx/dosdevices entry .
+[PFX] /tmp/pfx/dosdevices entry ..
+[PFX] /tmp/pfx/dosdevices entry c:
+[PFX] /tmp/pfx/dosdevices entry z:
+[PFX] dir /tmp/pfx/dosdevices open=1 entries=4
+[PFX] /tmp/pfx/ entry .
+[PFX] /tmp/pfx/ entry ..
+[PFX] /tmp/pfx/ entry dosdevices
+[PFX] /tmp/pfx/ entry drive_c
+[PFX] /tmp/pfx/ entry .update-timestamp
+[PFX] /tmp/pfx/ entry userdef.reg
+[PFX] /tmp/pfx/ entry system.reg
+[PFX] /tmp/pfx/ entry user.reg
+[PFX] dir /tmp/pfx/ open=1 entries=8
+[PFX] /tmp/pfx/drive_c/windows/system32/kernel32.dll stat=0 size=552960 mode=100644 open=1 read=4 head=4d5a7800
+[PFX] /tmp/pfx/drive_c/windows/system32/kernelbase.dll stat=0 size=1499136 mode=100644 open=1 read=4 head=4d5a7800
+[PFX] /tmp/pfx/drive_c/windows/system32/ntdll.dll stat=0 size=925696 mode=100644 open=1 read=4 head=4d5a7800
+[PFX] /tmp/pfx/drive_c/windows/system32/start.exe stat=0 size=53248 mode=100755 open=1 read=4 head=4d5a7800
+[PFX] /tmp/pfx/drive_c/windows/system32/cmd.exe stat=0 size=299008 mode=100755 open=1 read=4 head=4d5a7800
+[PFX] /tmp/pfx/dosdevices/c:/windows/system32/kernel32.dll stat=0 size=552960 mode=100644 open=1 read=4 head=4d5a7800
+[PFX] /tmp/pfx/.update-timestamp stat=0 size=3 mode=100644 open=1 read=3 head=300d0a00
+[PFX] /tmp/pfx/system.reg stat=0 size=1824047 mode=100644 open=1 read=4 head=57494e45
+[PFX] update-timestamp="0" wine.inf stat=0 mtime=1794762086
+[P2] end pfxls status=0 ms=305
+[P2] begin echo : wine cmd /c echo hello
+hello
+[P2] end echo status=0 ms=252090
+[P2] quiesce after echo: extra=0
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+[WP] winprobe start
+[WP] PASS W1 %gs:[0x30] non-null (0x7ffc0000)
+[WP] PASS W1 %gs:[0x30] == NtCurrentTeb() (0x7ffc0000)
+[WP] PASS W1 TEB->Self == TEB (0x7ffc0000)
+[WP] PASS W1 TEB ClientId.UniqueProcess (32)
+[WP] PASS W1 TEB ClientId.UniqueThread (36)
+[WP] PASS W1 TEB->ProcessEnvironmentBlock (0x7ffd0000)
+[WP] PASS W1 TIB stack bounds contain the stack (0x7ffffe1ffd60)
+[WP] PASS W3 TlsAlloc (2)
+[WP] PASS W2 CreateThread x4[MR] s=4686 pid=10 g=3 as=0x75F04418 len=0x8000000 base=0x1080732000 w=1
+[WP] PASS W2 WaitForMultipleObjects(all) (0)
+[WP] PASS W2 thread exit codes (1)
+[WP] PASS W2 InterlockedIncrement 4x1000 (4000)
+[WP] PASS W1 each thread has its own TEB via %gs (1)
+[WP] PASS W3 TLS isolated per thread (+ TEB TlsSlots) (1)
+[WP] PASS W3 main thread TLS value kept (20817)
+[WP] PASS W3 TlsFree (0)
+[WP] PASS W4 __try/__except catches an access violation (0)
+wine: Unhandled illegal instruction at address 00000001400013F3 (thread 0024), starting debugger...
+[P2] end winprobe status=0 ms=284126
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+[P2] end copy status=0 ms=60605
+[P2] begin winprobe-c : wine C:\winprobe.exe
+[P2] end winprobe-c status=9 ms=490
+[P2] begin kill : wineserver -k
+[P2] end kill status=0 ms=3471
+[P2] ps-after count=1
+[P2] ps-extra count=0
+[P2] done
+## ps rows
+[P2] ps-before count=1
+[P2] ps-before pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-after count=1
+[P2] ps-after pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-extra count=0
+## W4 #DE tail
+[KERNEL] User process fault! Vector: 0 RIP: 0x1400013f3
+[PANIC-SINK-VIOLATION] panic_puts from a returning path (suppressed=1)
+[KERNEL] fault-pc region=0x0000000140001000+0x0000000000002000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1FFD20
+[KREG] pid=3 vec=0 erc=0x0000000000000000 rip=0x00000001400013F3 rsp=0x00007FFFFE1FFD20 rax=0x0000000000000007 rbx=0x0000000000000001 rcx=0x0000000000000000 rdx=0x0000000000000000 rsi=0x0000000000005151 rdi=0x00007FFFFFD
+--
+[KERNEL] User process fault! Vector: 0 RIP: 0x1400013f3
+[KERNEL] fault-pc region=0x0000000140001000+0x0000000000002000 prot=5 kind=3 jit=0 live=2 err=0x0000000000000000 rsp=0x00007FFFFE1FFD20
+[KREG] pid=3 vec=0 erc=0x0000000000000000 rip=0x00000001400013F3 rsp=0x00007FFFFE1FFD20 rax=0x0000000000000007 rbx=0x0000000000000001 rcx=0x0000000000000000 rdx=0x0000000000000000 rsi=0x0000000000005151 rdi=0x00007FFFFFD
