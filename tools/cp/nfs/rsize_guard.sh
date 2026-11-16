@@ -71,7 +71,9 @@ else
 fi
 
 # G2 (and the can't-judge case)
-FS="$(grep -a '\[NFS\] fsinfo' "$C" | tail -1)"
+# Only well-formed rows are judged: two CPUs writing the console can garble a
+# row into nonsense (measured: "rs=32768[NFSRTT]  issued=periodic2 ...").
+FS="$(grep -aoE '\[NFS\] fsinfo rc=-?[0-9]+ rtmax=[0-9]+ rtpref=[0-9]+ rsize=[0-9]+' "$C" | tail -1)"
 if [ -z "$FS" ]; then
   bad "G2 no '[NFS] fsinfo' row: the mount never asked the server for its READ size"
 else
@@ -90,7 +92,7 @@ fi
 grep -aq '\[NFS\] rsize fallback' "$C" && bad "G3 $(grep -a '\[NFS\] rsize fallback' "$C" | head -1)"
 
 # G4
-P="$(grep -a '^\[NFSPIPE\] len=65536 ' "$C")"
+P="$(grep -aoE '\[NFSPIPE\] len=65536 rs=[0-9]+ issued=[0-9]+ replies=[0-9]+ ' "$C")"
 if [ -z "$P" ]; then
   bad "G4 no [NFSPIPE] len=65536 rows (the pipelined READ path never ran)"
 else

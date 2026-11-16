@@ -80,7 +80,10 @@ static uint8_t buf[65536];
 #define CONC_READERS 6
 #define CONC_BYTES (4u * 1024u * 1024u)
 #define CONC_PAGE 4096u
-static uint8_t conc_ref[CONC_BYTES];   /* the first CONC_BYTES of the file */
+/* The first CONC_BYTES of the file, on the heap: a 4 MiB static array made
+ * the image big enough that ~1050 [PUB] img_pf trace rows hit the serial
+ * console during the seq65536 phase and cut its MB/s to a quarter. */
+static uint8_t *conc_ref;
 static uint8_t conc_pg[CONC_PAGE];
 
 /* The same xorshift stream tools/cp/nfs/fnv64.c writes. */
@@ -136,6 +139,8 @@ static int conc_reader(int k) {
 }
 
 static int phase_conc(void) {
+  conc_ref = (uint8_t *)malloc(CONC_BYTES);
+  if (!conc_ref) { conc_row(" malloc", 0, 0, 1, 0, 0); return 1; }
   conc_fill_ref();
   int pid[CONC_READERS];
   for (int k = 0; k < CONC_READERS; k++) {
