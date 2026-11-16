@@ -84,8 +84,8 @@ single conflict marker in some hunks. There are three layers of guard:
 | Layer | Runs | Catches |
 |---|---|---|
 | `nfs_proto_test` rows "guard: ..." | `make host_tests` | `NFS_READ_RSIZE_MAX` < 32 KiB, a reply buffer too small for a 32 KiB reply, `nfs_pick_rsize` no longer giving 32 KiB. Literal 32768s on purpose: a row written against the macro would still pass after the macro went back to 1344. |
-| `tools/cp/nfs/rsize_scan.py` | `make host_tests` (target `nfs_rsize_scan`) | R1 the max constant; R2 `if (rs > NFS_READ_RSIZE) rs = NFS_READ_RSIZE;`; R3 readahead calling `nfs_read_pipelined(..., NFS_READ_RSIZE)`; R4 no FSINFO, or `read_size` not set from `nfs_pick_rsize`; R5 no `NFS_RPC_RBIG` reply buffers; R6 `net.c` no longer sending fragments to `ipr_add`. `--selftest` re-applies each one to a temporary copy and must see the scan FAIL. |
-| `tools/cp/nfs/rsize_guard.sh [tree]` | boot, on a host whose nfsd offers 32 KiB (strix) | Behaviour, however it regressed: G1 the 64 MiB checksum matches; G2 `[NFS] fsinfo ... rsize=32768`; G3 no `rsize fallback`; G4 every sampled `[NFSPIPE] len=65536` row has `rs=32768 issued<=2`; G5 READ bytes / READ RPCs >= 16384 over the whole run. rc 1 = regression, rc 2 = could not judge. |
+| `tools/cp/nfs/rsize_scan.py` | `make host_tests` (target `nfs_rsize_scan`) | R1 the max constant; R2 `if (rs > NFS_READ_RSIZE) rs = NFS_READ_RSIZE;`; R3 readahead calling `nfs_read_pipelined(..., NFS_READ_RSIZE)`; R4 no FSINFO, or `read_size` not set from `nfs_pick_rsize`; R5 no `NFS_RPC_RBIG` reply buffers; R6 `net.c` no longer sending fragments to `ipr_add`. R7 the readahead fill not invalidating the shared window first (§7). `--selftest` re-applies each one to a temporary copy and must see the scan FAIL. |
+| `tools/cp/nfs/rsize_guard.sh [tree]` | boot, on a host whose nfsd offers 32 KiB (strix) | Behaviour, however it regressed: G1 every bench phase passes, including the 64 MiB checksum; G6 six concurrent readers of reverse-order 4 KiB pages get every page right (§7); G2 `[NFS] fsinfo ... rsize=32768`; G3 no `rsize fallback`; G4 every sampled `[NFSPIPE] len=65536` row has `rs=32768 issued<=2`; G5 READ bytes / READ RPCs >= 16384 over the whole run. rc 1 = regression, rc 2 = could not judge. |
 
 The guards were checked both ways (2026-11-15):
 
@@ -100,3 +100,32 @@ The guards were checked both ways (2026-11-15):
 When a merge conflicts in `nfs.c`, `nfs.h` or `net.c`, keep the cp/nfs side of
 every READ-size line. Then run both guards before moving `cyberpunk`
 (docs/cyberpunk.md §7.4).
+
+## 7. Concurrent-reader corruption (2026-11-16, cp/nfsfix)
+
+C2-wine2 found that after cp/nfs, six processes reading the same files over
+NFS sometimes got wrong `pread()` bytes. ntdll.so came back wrong from byte
+212992 on, and Wine processes jumped to garbage addresses. One process alone
+was always right.
+
+**Cause.** `nfs_ra_try()` set `busy=1`, dropped the lock and refilled the
+single global `nfs_ra_buf`, but it left `valid=1` with the old `(fh, base)`.
+A concurrent reader whose range matched the old window was served bytes the
+fill was overwriting. The race predates cp/nfs, but small reads take the
+window only when `len <= rs`. At rs=1344, 4 KiB page-ins never got there; at
+32 KiB they all do.
+
+**Fix.** Set `nfs_ra.valid = 0` under the lock before the fill.
+
+**Proof.** On the unfixed tree, conc6 fails: reader 1 got `bad=16` pages,
+exactly one 64 KiB window, first bad byte 3276800. On the fixed tree:
+- the full gate batch passes;
+- G6 passes in 5 of 5 boots;
+- sequential reads run at 188–193 MB/s.
+
+R7 in `rsize_scan.py` keeps the invalidation line from going missing.
+
+**Still open.** The single global window thrashes between concurrent readers.
+That costs performance, not correctness: each 4 KiB read can cost a 64 KiB
+refill. A per-file window table is the next step if Wine's page-in time calls
+for it.
