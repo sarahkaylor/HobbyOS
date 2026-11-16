@@ -113,7 +113,9 @@ def main():
 
 
 def grade(args, probes, serial, shots):
-    ser = read(serial)
+    # XSESSION relays its children's stdout/stderr with an "[X] " prefix; the
+    # probes' rows arrive as "[X] [VK] ...".  Grade the unprefixed rows.
+    ser = "\n".join(ln[4:] if ln.startswith("[X] ") else ln for ln in read(serial).splitlines())
     lines = ser.splitlines()
     fails = []
     log("--- [P5] rows and probe rows (serial) ---")
