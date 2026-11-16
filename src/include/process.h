@@ -15,7 +15,19 @@
  * docs/rimworld-m2-thread-ceiling.md.  Keep this a multiple of 64: pid
  * bitmaps are word arrays (src/include/pidmask.h) and slot allocation is a
  * linear scan, so 192 keeps both cheap. */
+#ifdef __x86_64__
+/* C1-k4: 512 on x86_64.  Cyberpunk under Wine runs 173-190 game threads
+ * plus ~18 Wine processes (docs/cyberpunk.md §0.2 item 13), and every thread
+ * is a slot.  Measured cost (strix, nm of the intel kernel): proc_table
+ * 11,776 B/slot, spawn_ex_pool 4,720, spawn_args_pool 1,072, the compat
+ * signal tables ~1.6 KiB, the rest small -- about 19 KiB per slot, so
+ * 192 -> 512 adds ~6.2 MiB of BSS (docs/cp-k4.md §3).  The ARM build stays
+ * at 192: its address spaces use 8-bit ASIDs keyed by tgid (vm_as_create),
+ * which a pid >= 256 would alias, and the compat class is x86_64-only. */
+#define MAX_PROCESSES 512 // Maximum number of concurrent processes
+#else
 #define MAX_PROCESSES 192 // Maximum number of concurrent processes
+#endif
 #define MAX_CPUS 8       // Maximum number of CPU cores supported
 
 _Static_assert(MAX_PROCESSES <= PID_MASK_BITS,
