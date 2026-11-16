@@ -39,6 +39,12 @@ llvm-objcopy -O binary "$OUT/nb.elf" "$OUT/nb.bin"
 cc -O2 -o "$OUT/fnv64" "$SELF/tools/cp/nfs/fnv64.c" || die "fnv64"
 "$OUT/fnv64" "$OUT/big64m.bin" $((64 * 1024 * 1024)) > "$OUT/expect.txt" || die "data"
 echo "== data: 64 MiB, fnv1a64=$(cat "$OUT/expect.txt")"
+# cp/nfs2: six 2 MiB files for the multi-file phase (seed k = the guest's
+# multi_seed(k) in cpnfsbench.c)
+for k in 0 1 2 3 4 5; do
+  seed=$(python3 -I -c "print(hex(0x9e3779b97f4a7c15 ^ (($k + 1) * 0xbf58476d1ce4e5b9 % 2**64)))")
+  "$OUT/fnv64" "$OUT/m$k.bin" $((2 * 1024 * 1024)) "$seed" > /dev/null || die "data m$k"
+done
 printf 'CPNFSB.BIN\n' > "$OUT/wave.cfg"
 STAGE="mcopy -o -i $TREE/disk.img $OUT/nb.bin ::/CPNFSB.BIN && mcopy -o -i $TREE/disk.img $OUT/expect.txt ::/NBEXPECT.TXT && mcopy -o -i $TREE/disk.img $OUT/wave.cfg ::/WAVE.CFG"
 
@@ -63,7 +69,7 @@ flock /tmp/cp-exports.lock flock /tmp/cp-qemu.lock bash -c '
     sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
   }
   trap cleanup EXIT
-  sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$EXPORT/" && sudo -n chmod -R a+rX "$EXPORT" || exit 3
+  sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$OUT"/m?.bin "$EXPORT/" && sudo -n chmod -R a+rX "$EXPORT" || exit 3
   printf "%s\n" "$LINE" | sudo -n tee -a /etc/exports > /dev/null
   sudo -n exportfs -ra
   cd "$TREE" && T3_TIMEOUT="$NB_TIMEOUT" T3_STAGE="$STAGE" T3_MIN_LINES=1 TOOLS_SKIP=1 \

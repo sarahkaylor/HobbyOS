@@ -16,6 +16,15 @@
  *               a reader while another fill was overwriting it corrupted
  *               Wine's page-ins (2026-11-16).  One row per reader plus a
  *               summary row; any bad page fails the phase.
+ *   multi6      cp/nfs2: 6 forked readers, each reading a DIFFERENT 2 MiB
+ *               file (/NFS/m<k>.bin, xorshift seed k) as 4 KiB pages,
+ *               even readers forward, odd readers backward, all at once, every
+ *               page compared with the host's stream.  One row per reader, a
+ *               summary row, and a ".ra" row with the NFS READ bytes the phase
+ *               cost: amp_pct = fetched / read, hit_pct_est = share of page
+ *               reads that needed no window fill (fetched / 64 KiB fills).
+ *               One shared readahead window refilled on almost every page
+ *               (amp ~1600%); per-file windows load each 64 KiB block once.
  *   done rc=<n> n = phases that failed (bad byte count or checksum)
  * MB/s is 10^6 bytes per second of guest wall time (CLOCK_MONOTONIC).
  */
@@ -95,12 +104,13 @@ static void conc_fill_ref(void) {
   }
 }
 
-static void conc_row(const char *what, unsigned long a, unsigned long b,
-                     unsigned long c, long first, int ok) {
+static void phase_row(const char *phase, const char *what, unsigned long a,
+                      unsigned long b, unsigned long c, long first, int ok) {
   char line[200];
   int n = 0;
-  const char *p = "[NB] conc6";
+  const char *p = "[NB] ";
   while (*p) line[n++] = *p++;
+  for (p = phase; *p; p++) line[n++] = *p;
   for (p = what; *p; p++) line[n++] = *p;
   p = " a="; while (*p) line[n++] = *p++; dec(line, &n, a);
   p = " pages="; while (*p) line[n++] = *p++; dec(line, &n, b);
@@ -111,6 +121,11 @@ static void conc_row(const char *what, unsigned long a, unsigned long b,
   while (*p) line[n++] = *p++;
   line[n] = 0;
   pc(line);
+}
+
+static void conc_row(const char *what, unsigned long a, unsigned long b,
+                     unsigned long c, long first, int ok) {
+  phase_row("conc6", what, a, b, c, first, ok);
 }
 
 /* One reader: every page once, last to first, starting `k` pages in. */
@@ -155,6 +170,89 @@ static int phase_conc(void) {
   }
   conc_row("", CONC_READERS, CONC_READERS * (CONC_BYTES / CONC_PAGE), (unsigned long)failed,
            -1, failed == 0);
+  return failed ? 1 : 0;
+}
+
+/* ---- cp/nfs2: interleaved readers of different files ------------------- */
+#define MULTI_READERS 6
+#define MULTI_BYTES (2u * 1024u * 1024u)
+
+/* Seed of /NFS/m<k>.bin; tools/cp/nfs/nfs_bench.sh writes the files with
+ * `fnv64 <out> <bytes> <seed>` and the same numbers. */
+static uint64_t multi_seed(int k) {
+  return 0x9e3779b97f4a7c15ULL ^ ((uint64_t)(k + 1) * 0xbf58476d1ce4e5b9ULL);
+}
+
+static void stream_fill(uint8_t *dst, uint32_t n, uint64_t x) {
+  for (uint32_t i = 0; i < n; i++) {
+    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+    dst[i] = (uint8_t)(x >> 29);
+  }
+}
+
+static int multi_reader(int k) {
+  char path[24] = "/NFS/m0.bin";
+  path[6] = (char)('0' + k);
+  uint8_t *ref = (uint8_t *)malloc(MULTI_BYTES);
+  if (!ref) { phase_row("multi6", ".child malloc", (unsigned long)k, 0, 1, 0, 0); return 1; }
+  stream_fill(ref, MULTI_BYTES, multi_seed(k));
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) { phase_row("multi6", ".child open", (unsigned long)k, 0, 1, 0, 0); return 1; }
+  uint32_t npages = MULTI_BYTES / CONC_PAGE, bad = 0, done = 0;
+  long first = -1;
+  for (uint32_t i = 0; i < npages; i++) {
+    uint32_t pg = (k & 1) ? npages - 1u - i : i;
+    uint32_t off = pg * CONC_PAGE;
+    if (lseek(fd, (off_t)off, SEEK_SET) != (off_t)off) { bad++; if (first < 0) first = (long)off; continue; }
+    int r = read(fd, conc_pg, CONC_PAGE);
+    done++;
+    int same = r == (int)CONC_PAGE;
+    for (uint32_t j = 0; same && j < CONC_PAGE; j++)
+      if (conc_pg[j] != ref[off + j]) {
+        same = 0;
+        if (first < 0 || (long)(off + j) < first) first = (long)(off + j);
+      }
+    if (!same) { bad++; if (first < 0) first = (long)off; }
+  }
+  close(fd);
+  phase_row("multi6", ".child", (unsigned long)k, done, bad, first, bad == 0);
+  return bad ? 1 : 0;
+}
+
+static void kv(char *line, int *n, const char *k, unsigned long v) {
+  for (const char *p = k; *p; p++) line[(*n)++] = *p;
+  dec(line, n, v);
+}
+
+static int phase_multi(void) {
+  struct sys_nfsio a, b;
+  a.bytes = a.ops = b.bytes = b.ops = 0;
+  (void)sysinfo(10, &a, (int)sizeof a);
+  int pid[MULTI_READERS];
+  for (int k = 0; k < MULTI_READERS; k++) {
+    pid[k] = fork();
+    if (pid[k] == 0) exit(multi_reader(k));
+    if (pid[k] < 0) { phase_row("multi6", " fork", (unsigned long)k, 0, 1, 0, 0); return 1; }
+  }
+  int failed = 0;
+  for (int k = 0; k < MULTI_READERS; k++) {
+    int st = 0;
+    if (waitpid(pid[k], &st, 0) != pid[k] || st != 0) failed++;
+  }
+  (void)sysinfo(10, &b, (int)sizeof b);
+  uint64_t rd = (uint64_t)MULTI_READERS * MULTI_BYTES, got = b.bytes - a.bytes;
+  uint64_t pages = rd / CONC_PAGE, fills = (got + 65535u) / 65536u;
+  char line[200];
+  int n = 0;
+  kv(line, &n, "[NB] multi6.ra read_kib=", (unsigned long)(rd >> 10));
+  kv(line, &n, " fetched_kib=", (unsigned long)(got >> 10));
+  kv(line, &n, " rpcs=", (unsigned long)(b.ops - a.ops));
+  kv(line, &n, " amp_pct=", (unsigned long)(got * 100u / rd));
+  kv(line, &n, " hit_pct_est=", (unsigned long)(fills >= pages ? 0 : (pages - fills) * 100u / pages));
+  line[n++] = '\n';
+  line[n] = 0;
+  pc(line);
+  phase_row("multi6", "", MULTI_READERS, (unsigned long)pages, (unsigned long)failed, -1, failed == 0);
   return failed ? 1 : 0;
 }
 
@@ -239,6 +337,7 @@ int main(void) {
   fails += phase("seq4096", 4096, 16u * 1024u * 1024u, 0, 0);
   fails += phase("seq1344", 1344, 4u * 1024u * 1024u, 0, 0);
   fails += phase_conc();
+  fails += phase_multi();
   char d[40];
   int m = 0;
   const char *p = "[NB] done rc=";

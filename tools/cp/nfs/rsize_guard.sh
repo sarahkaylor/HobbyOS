@@ -16,6 +16,10 @@
 #   G6  6 concurrent readers of reverse-order 4 KiB pages get the right
 #       bytes (a readahead window handed out mid-refill corrupted Wine's
 #       page-ins, 2026-11-16)
+#   G7  (cp/nfs2) 6 concurrent readers of 6 DIFFERENT files get every 4 KiB
+#       page right, and the phase fetches at most 2x what it reads
+#       ("[NB] multi6.ra ... amp_pct=" <= 200): one shared readahead window
+#       refilled 64 KiB for almost every page (~1600%)
 #   G5  over all READ RPCs (the last "[NFSRTT] periodic" set): bytes / RPCs
 #       >= 16384.  1344-byte READs give ~1344; 32 KiB READs give ~32768.
 #
@@ -68,6 +72,18 @@ else
   nc=$(grep -c '^\[NB\] conc6\.child ' <<<"$CR"); nbad=$(grep -c ' FAIL$' <<<"$CR")
   if [ "$nc" -ne 6 ] || [ "$nbad" -ne 0 ]; then bad "G6 concurrent 4 KiB readers: $nc/6 reported, $nbad FAIL rows: $(grep ' FAIL$' <<<"$CR" | head -2 | tr '\n' ' ')"
   else note "G6 6/6 concurrent readers, every 4 KiB page correct"; fi
+fi
+
+# G7 (cp/nfs2): interleaved readers of different files, per-file windows
+MR="$(grep -aoE '\[NB\] multi6(\.child)? a=[0-9]+ pages=[0-9]+ bad=[0-9]+ first_bad=[-0-9]+ (ok|FAIL)' "$C")"
+MA="$(grep -aoE '\[NB\] multi6\.ra read_kib=[0-9]+ fetched_kib=[0-9]+ rpcs=[0-9]+ amp_pct=[0-9]+ hit_pct_est=[0-9]+' "$C" | tail -1)"
+if [ -z "$MR" ] || [ -z "$MA" ]; then bad "G7 no [NB] multi6 rows (the multi-file phase did not run)"
+else
+  nc=$(grep -c '^\[NB\] multi6\.child ' <<<"$MR"); nbad=$(grep -c ' FAIL$' <<<"$MR")
+  amp=$(sed -n 's/.*amp_pct=\([0-9]*\).*/\1/p' <<<"$MA")
+  if [ "$nc" -ne 6 ] || [ "$nbad" -ne 0 ]; then bad "G7 multi-file readers: $nc/6 reported, $nbad FAIL rows: $(grep ' FAIL$' <<<"$MR" | head -2 | tr '\n' ' ')"
+  elif [ "${amp:-99999}" -gt 200 ]; then bad "G7 readahead amplification: $MA (want amp_pct <= 200)"
+  else note "G7 6/6 readers of 6 files, every page correct; ${MA#\[NB\] multi6.ra }"; fi
 fi
 
 # G2 (and the can't-judge case)

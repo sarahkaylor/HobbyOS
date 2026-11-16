@@ -129,3 +129,49 @@ R7 in `rsize_scan.py` keeps the invalidation line from going missing.
 That costs performance, not correctness: each 4 KiB read can cost a 64 KiB
 refill. A per-file window table is the next step if Wine's page-in time calls
 for it.
+
+## 8. Per-file readahead windows (cp/nfs2, item 1)
+
+Gate P2 (run23) read 1.66 GB in 51k 32 KiB READs to bring up ~200 MB of
+Wine; `[NFSRA] hits=21536 fills=8477`: 555 MB of 64 KiB fills served 65 MB.
+The one global window lost three ways: interleaved readers of different
+files evicted it; a fill started AT the request and ran forward, so a
+backwards or scattered reader (pfxls's reverse 4 KiB preads cost 69 MB for
+13.5 MB of hashing; a loader's page faults) paid a fresh 64 KiB per page; and
+nothing survived for the next process paging the same DLL.
+
+**Now** (`nfs.c`, "readahead window"): `NFS_RA_WINDOWS` (256) windows, each
+an aligned 64 KiB block of one file, keyed by (mount, file handle, block) and
+replaced LRU; buffers are taken from the frame pool on first use (16 MiB).
+Every read up to `NFS_RA_MAXREQ` (1 MiB) goes through them piece by piece;
+a miss loads the blocks the read still needs, and a miss right after a block
+that was read to its end (per-window `next`) loads `NFS_RA_SEQ` (4) blocks in
+one pipelined fill.  Larger reads stream straight into the caller's buffer.
+
+**The cp/nfsfix rule, per window.** A fill marks each claimed window
+`busy = 1; valid = 0` in the same locked section, drops the lock for the
+READs, and publishes `valid = 1` under the lock; readers copy only from
+`valid && !busy` windows, under the lock.  A reader that needs a block being
+filled reads its own bytes directly (`direct=` in `[NFSRA]`).  `rsize_scan`
+R7 checks both halves per window (three selftest mutations: the invalidation
+removed, moved after the unlock, the reader's busy check removed); R8 fails
+on fewer than 8 windows or a lookup that stops keying on (handle, block).
+
+**Transport, same commit.** A 32 KiB reply is ~23 fragments and the RX
+virtqueue holds 256 frames; run23's stalls ("inflight=10 issued=22
+replies=12") are that queue overflowing.  Pipelines now share an in-flight
+budget (`NFS_INFLIGHT_MAX`, 6 x 32 KiB; a pipeline with nothing in flight may
+always send one), and a reply timeout re-sends the in-flight READs instead of
+finishing the whole range serially (`resent=` in `[NFSPIPE]`, `stalls=` in
+`[NFSRA]`).
+
+**Bench** (`cpnfsbench` phase `multi6`): six processes read six different
+2 MiB files at once (even ones forward, odd ones backward, 4 KiB pages), every
+page compared with the host's xorshift stream; `rsize_guard.sh` G7 requires
+all pages right and `amp_pct` (READ bytes / bytes read) <= 200.
+
+| strix, intel guest | base 5eea3712 | cp/nfs2 |
+|---|---|---|
+| multi6 amp_pct (fetched / read) | 345 (42400 KiB for 12288) | 100 (12288 for 12288) |
+| multi6 hit_pct_est | 78 | 93 |
+| conc6 / multi6 pages | all correct | all correct |
