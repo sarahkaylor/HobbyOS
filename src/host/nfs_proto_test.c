@@ -492,6 +492,18 @@ static void test_fsinfo_and_rsize(void) {
   check(nfs_pick_rsize(0, 0) == NFS_READ_RSIZE, "rsize: no answer -> single-frame");
   check(nfs_pick_rsize(1024, 1024) == NFS_READ_RSIZE, "rsize: never below single-frame");
   check(nfs_pick_rsize(20000, 20000) == 16384, "rsize: rounded down to 4 KiB");
+  /* cp/nfsguard: the 32 KiB READ size has been lost to merges more than once.
+     These rows use LITERALS on purpose: a row written against
+     NFS_READ_RSIZE_MAX would still pass after someone set it back to 1344.
+     The source scan (tools/cp/nfs/rsize_scan.py) and the boot guard
+     (tools/cp/nfs/rsize_guard.sh) cover the call sites; docs/cp-nfs.md. */
+  check(NFS_READ_RSIZE_MAX >= 32768, "guard: NFS_READ_RSIZE_MAX is at least 32 KiB");
+  check(NFS_RPC_RBIG >= NFS_READ_RSIZE_MAX + 128,
+        "guard: a READ reply buffer holds a 32 KiB reply plus RPC/NFS overhead");
+  check(nfs_pick_rsize(32768, 32768) == 32768,
+        "guard: a server offering 32 KiB gets 32 KiB READs, not 1344");
+  check(nfs_pick_rsize(1048576, 1048576) == 32768,
+        "guard: a server offering 1 MiB gets 32 KiB READs");
 }
 
 int main(void) {
