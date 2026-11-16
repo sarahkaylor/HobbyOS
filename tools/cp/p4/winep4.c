@@ -38,7 +38,7 @@
 #define P4_WINEDEBUG "err+all,fixme-all"
 #endif
 #ifndef P4_BOOT_QUIESCE_S
-#define P4_BOOT_QUIESCE_S 1500
+#define P4_BOOT_QUIESCE_S 4800
 #endif
 #define MNT "/CP"
 #ifndef P4_WARMUP_S
