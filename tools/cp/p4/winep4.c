@@ -41,6 +41,9 @@
 #define P4_BOOT_QUIESCE_S 3600
 #endif
 #define MNT "/CP"
+#ifndef P4_WARMUP_S
+#define P4_WARMUP_S 90
+#endif
 
 static void pc(const char *s) { print_console(s); }
 static void pd(long v) {
@@ -174,21 +177,35 @@ int main(void) {
   quiesce("wineboot", P4_BOOT_QUIESCE_S);
 
 #ifndef P4_BOOT_ONLY
+  /* Keep the desktop up for every GUI step: win32u gives explorer only 10 s
+     (NtUserWaitForInputIdle, dlls/win32u/winstation.c) before the starting
+     client falls back to the null driver for good, and loading explorer +
+     winex11 + the X libraries over NFS takes longer than that in-guest.  A
+     background "hold" client starts explorer once and keeps it alive; the
+     steps run after a warm-up, without quiescing in between. */
+  char *a_hold[] = { (char *)"wine", (char *)"Z:\\CP\\P4\\rawinput.exe", (char *)"hold",
+                     (char *)"7200000", 0 };
+  pc("[P4] begin hold : desktop holder (background)\n");
+  int hold_pid = spawn_ex("/CP/WINE/bin/wine", a_hold, envp, 0, 0);
+  pc("[P4] hold pid="); pd(hold_pid); pc("\n");
+  for (int i = 0; i < P4_WARMUP_S * 4; i++) usleep(250000);
+  pc("[P4] warm-up done\n");
+
   char *a_ri[] = { (char *)"wine", (char *)"Z:\\CP\\P4\\rawinput.exe", (char *)"120000", 0 };
   step("rawinput", "/CP/WINE/bin/wine", a_ri, 600);
-  quiesce("rawinput", 30);
+  usleep(2000000);
 
   char *a_md[] = { (char *)"wine", (char *)"Z:\\CP\\P4\\rawinput.exe", (char *)"modes", 0 };
   step("modes", "/CP/WINE/bin/wine", a_md, 300);
-  quiesce("modes", 30);
+  usleep(2000000);
 
   char *a_cfg[] = { (char *)"wine", (char *)"winecfg", 0 };
   step("winecfg", "/CP/WINE/bin/wine", a_cfg, 900);
-  quiesce("winecfg", 30);
+  usleep(2000000);
 
   char *a_np[] = { (char *)"wine", (char *)"notepad", 0 };
   step("notepad", "/CP/WINE/bin/wine", a_np, 900);
-  quiesce("notepad", 30);
+  if (hold_pid > 0) kill(hold_pid, 9);
 #endif
 
   char *a_k[] = { (char *)"wineserver", (char *)"-k", 0 };

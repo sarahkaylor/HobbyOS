@@ -269,8 +269,9 @@ def main():
         if not ser.wait(r"\[P4\] mount .* ok", 120):
             notes.append("NFS mount failed")
             raise SystemExit
-        if not ser.wait(r"\[P4\] begin rawinput", a.boot_timeout):
-            notes.append("never reached the rawinput step (wineboot)")
+        m = ser.wait(r"\[P4\] begin rawinput|\[P4\] done", a.boot_timeout)
+        if not m or "done" in m.group(0):
+            notes.append("never reached the rawinput step (wineboot, or a P4_DIAG/P4_BOOT_ONLY run)")
             raise SystemExit
         # --- rawinput ---------------------------------------------------------
         m = ser.wait(r"\[RI\] phase free ready", 300)

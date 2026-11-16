@@ -21,6 +21,8 @@
  *   (or after clip_ms, default 90 s, with none).  The host harness injects
  *   QMP relative motion after a "ready" row and compares the sums.
  *
+ *   rawinput.exe hold <ms>   keeps the desktop (explorer) alive for <ms>.
+ *
  *   rawinput.exe modes       the display-mode probe: EnumDisplaySettings,
  *     ChangeDisplaySettingsEx to 1280x720 (CDS_FULLSCREEN), the metrics Wine
  *     then reports, a 4 s hold (screendump), and the restore.
@@ -349,6 +351,16 @@ int main(int argc, char **argv) {
       for (const char *c = argv[i]; *c >= '0' && *c <= '9'; c++) v = v * 10 + (DWORD)(*c - '0');
       max_ms = v;
     }
+  }
+  if (argc > 1 && argv[1][0] == 'h') {
+    /* "hold": keep a user32 client alive so the desktop process (explorer,
+       which owns winex11's display setup) stays up across the gate's steps;
+       win32u waits only 10 s for explorer when the first client starts it. */
+    HWND d = GetDesktopWindow();
+    r_s(&r, "[RI] hold desktop="); r_x(&r, (unsigned long long)(ULONG_PTR)d);
+    r_s(&r, " ms="); r_d(&r, max_ms); r_end(&r);
+    Sleep(max_ms);
+    return 0;
   }
   r_s(&r, "[RI] rawinput probe (C4-x2) mode="); r_s(&r, modes ? "modes" : "mouselook"); r_end(&r);
   if (modes) run_modes();
