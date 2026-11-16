@@ -34,7 +34,8 @@
 #endif
 #define MNT "/CP"
 #ifndef P2_BOOT_QUIESCE_S
-#define P2_BOOT_QUIESCE_S 1500
+#define P2_BOOT_QUIESCE_S 3600 /* run23 finished near 1500 s: the shared NFS
+                                     readahead window thrashes (docs/cp-nfs.md §7) */
 #endif
 
 static void pc(const char *s) { print_console(s); }

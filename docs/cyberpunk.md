@@ -224,6 +224,44 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
     an interrupt-masking budget test); `make host_tests` fails two board tests
     for a missing `gaming.md`. These are recorded, not blocking; the T3 wave
     cannot be an acceptance signal until the wedge is fixed.
+18. **Wave 3 findings (2026-11-16, toward and through Gate P2).**
+    - **NFS READ size.** At rs=1344, `wineboot -i` over NFS took about 15
+      minutes, roughly 1.7 ms per 1.3 KiB RPC. cp/nfs moved READs to 32 KiB
+      (IPv4 reassembly + FSINFO); sequential reads went from 82 to 190 MB/s.
+      That exposed an older readahead race in which concurrent readers were
+      handed another fill's bytes, which crashed Wine; fixed by cp/nfsfix.
+      Guards: `rsize_scan.py` (in `host_tests`) and `rsize_guard.sh` (boot);
+      see `docs/cp-nfs.md` §6–7. The single global readahead window still
+      thrashes: P2 read 1.66 GB to bring up about 200 MB of Wine, so a
+      per-file window is the next NFS fix.
+    - **Kernel defects that P2 found (fixed in wave 3).**
+      - `trap_exit_frame_check` clobbered the user's rsi/rdx/r8–r11 and
+        misfired for compat RIPs below 64 GiB.
+      - compat `openat`/`newfstatat` clobbered rdi/rsi.
+      - `compat_open` translated the path before trying the real one.
+      - `st_rdev` was 0 for the console and `/dev/null`, so Wine turned its
+        debug channels off.
+      - Every CPU exception reached a compat process as SIGSEGV, and the #BP
+        and #OF gates were DPL 0.
+      - `NFS_DIR_CACHE_MAX` 256 silently truncated `x86_64-windows` (757
+        entries).
+      - A killed task could be re-parked (C1-thr2); pid allocation is now
+        cyclic (C1-thr3).
+    - **Process count.** At most 18 live at once in P2, so 192 slots are not
+      tight for Wine. One P2 run uses about 130 pids. §0.2 item 13 (173–190
+      game threads) still needs ≥ 256 before P8.
+    - **Still open.**
+      - An intermittent wineboot-tree hang: every client BLOCKED with no
+        futex and no timer, which looks like the pipe.c park race.
+      - munmap/mprotect flush only the local TLB.
+      - fstat of an NFS fd reports mtime 0.
+      - si_code details: `#UD` gives `ILL_ILLOPC`, and `#MF`/`#XM` give
+        `FPE_INTDIV`.
+      - FAT private mappings miss later `write()`s.
+      - NFS symlinks in intermediate path components aren't followed.
+      - exec from a secondary thread leaves tid ≠ pid.
+      - SIGBUS past EOF is reported as SIGSEGV.
+      - The 64 MiB per-file ext2 mapping cap.
 
 **Lane status (2026-11-15).** Merged to `cyberpunk`: C1-as (design), C2-wine
 (pins/build/evidence), C3-ext2 (ext2 rw), C7-p0host, C7-p0guest. **C1-cpu**
@@ -630,13 +668,16 @@ logs of all of it.
 - [x] *(wave 2, C2-sys; `MAP_PRIVATE` of a tmpfs/memfd object still → ENOTSUP, wave 3)* tmpfs `/tmp`: unlink-while-open files, coherent `MAP_SHARED` pages across
       processes (wineserver writes KUSER, clients read it), memfd up to and
       beyond 64 MiB (Wine's largest is exactly 64.0 MiB, §0.2 item 12).
-- [ ] `wineserver` lifecycle: daemon start, AF_UNIX socket under `/tmp`,
+- [x] *(wave 3, C2-wine2 + C1-thr)* `wineserver` lifecycle: daemon start, AF_UNIX socket under `/tmp`,
       fd passing, shared memory mapping, lock file, clean shutdown; SIGUSR1/
       SIGQUIT via `tgkill` (suspend / thread kill).
-- [ ] Staging: `/CP/WINE` reachable as executable + mmappable files (NFS
+- [x] *(wave 3; NFS at 32 KiB READs, cp/nfs + cp/nfsfix)* Staging: `/CP/WINE` reachable as executable + mmappable files (NFS
       exec/mmap exist today; ext2 mmap/exec is P3 work) and the 2.31 runtime.
-- [ ] Prefix on tmpfs first (decouples P2 from P3): `wineboot -i` completes.
-- [ ] `src/user/cp/winprobe.c` built with MinGW: threads, TLS slots,
+- [x] *(wave 3, C2-wine2; `MAP_PRIVATE` CoW over memfd/tmpfs)* Prefix on tmpfs first (decouples P2 from P3): `wineboot -i` completes
+      (it runs past Wine's 5-minute boot-event wait, status 53, and the tree
+      then finishes on its own; see §0.2 item 18).
+- [x] *(wave 3, C2-wine2; built with `clang -target x86_64-windows` against
+      Wine's own import libs, not MinGW)* `src/user/cp/winprobe.c`: threads, TLS slots,
       `%gs:[0x30]` TEB read, SEH (`__try`/vectored handler catching an access
       violation and a divide by zero), `QueryPerformanceCounter`,
       `GetTickCount64` (reads `KUSER_SHARED_DATA`), file I/O in `C:\`.
@@ -645,17 +686,31 @@ logs of all of it.
 `winprobe.exe` prints every marker and exits 0; `wineserver -k` leaves no
 processes. Evidence: serial log + `ps` before/after.
 
+**Gate P2 PASSED (2026-11-16, strix, QEMU/KVM, 12 GiB guest).** On the
+merged tree (cp-wine2 72039e9c = `cyberpunk` cfc30b4f + C2-wine2), run23:
+- G1: `hello`, status 0.
+- G2: winprobe 41/41 markers + `[WP] done rc=0`, exit 0, both from `Z:`
+  (NFS) and from `C:\` (the tmpfs prefix).
+- G3: `wineserver -k` status 0, and `ps` after equals `ps` before
+  (`WINEP2.BIN` only, no extra processes).
+
+Evidence is in `docs/cp-wine2-evidence/p2-run23-PASS-merged-strix.txt`; the
+same gate passed first on the pre-cp-nfs tree (run22). Commands:
+`bash tools/cp/run-wine-p2.sh`, and
+`P2_LS_ONLY=1 TIMEOUT_S=900 bash tools/cp/run-wine-p2.sh` for the six-reader
+hash check.
+
 ### P3 — Storage for a Windows game (size L)
 
 - [x] `src/kernel/ext2.c` (+ `ext2_vfs.c`, `ext2_compat.c`): read/write,
       symlinks, rename, unlink, truncate, `fsync`, large/sparse files; mounted
       at `/EXT` from NVMe namespace 2 (lane C3-ext2; two-boot gate, `e2fsck -fn`
       clean).
-- [ ] mmap of ext2 files (a VM object for ext2) and exec from ext2 — needed
+- [x] *(wave 2, C3-ext2b)* mmap of ext2 files (a VM object for ext2) and exec from ext2 — needed
       before the prefix can hold PE/`.so` files.
-- [ ] `flock`/`fcntl` record locks (Wine and the vkd3d-proton cache use them;
+- [x] *(wave 2, C3-ext2b: one lock manager, `vfs_lock.c`, for FAT16/ext2/tmpfs)* `flock`/`fcntl` record locks (Wine and the vkd3d-proton cache use them;
       verify which); `chmod`/`fchmod`/`chown`/`utimensat` on ext2.
-- [ ] `VFS_PATH_MAX` 256 → ≥ 1024 (Windows MAX_PATH plus the prefix path).
+- [x] *(wave 2, C3-ext2b)* `VFS_PATH_MAX` 256 → ≥ 1024 (Windows MAX_PATH plus the prefix path).
 - [ ] NFS: files >4 GiB (64-bit offsets throughout); single `read()`s up to
       ~172 MB (the game's `shader_final.cache`, §0.2 item 12). Archive mmap is
       *not* needed (P0: archives are read, not mapped); the 64 MiB
@@ -842,7 +897,14 @@ files onto FAT); then the Windows side proper (TEB via `%gs`, KUSER at
 
 Merge order: whichever of C2-exec / C1-thr is green first, then the other,
 then C2-wine2 last. Each merge is re-gated on the merged tree (all probes,
-`ext2_gate.sh`, unit tier, host tests, castscan, ARM build). Still held: C6-venus
+`ext2_gate.sh`, unit tier, host tests, castscan, ARM build).
+
+**Status (2026-11-16): wave 3 is complete and Gate P2 passed.** Merged in
+order: C2-wine2's CoW, truncate and mremap work; C1-thr; C2-exec;
+C1-thr2/thr3; cp/nfs (32 KiB READs); cp/nfsguard; cp/nfsfix (the readahead
+race); then C2-wine2 (the P2 harness, winprobe and the trap/fs fixes). Each
+merge was re-gated on strix. The next wave's candidates are the open items in
+§0.2 item 18, P3's remaining items (NFS > 4 GiB, prefix on ext2), and P4/P5. Still held: C6-venus
 (needs the user's `gpu_abi.c` decision); C4-x's probe needs `cmake` on strix.
 
 ### 7.3 Frozen interfaces (binding)
@@ -862,6 +924,12 @@ then C2-wine2 last. Each merge is re-gated on the merged tree (all probes,
 - Local commits only, one phase per commit, repo message style; **no pushes**.
 - The integrator merges lanes and runs gates on the merged tree, including the
   Doom ELF and RimWorld regressions after any C1 merge.
+- **`/etc/exports` on the gate host (binding).** Every harness that edits
+  it takes `flock /tmp/cp-exports.lock` OUTSIDE `/tmp/cp-qemu.lock`, from
+  before its backup until after its restore. It adds only localhost-only
+  read-only lines, removes only its own line, and `cmp`s the result against
+  the pre-run copy. One whole-file restore put back another harness's line
+  (2026-11-15).
 - **NFS READ size guard (binding; the 32 KiB fix has been lost to merges more
   than once).** Any merge that touches `src/kernel/nfs.c`, `src/include/nfs.h`
   or `src/kernel/net.c`, and above all any merge from `main` (which still has
