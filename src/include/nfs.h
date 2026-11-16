@@ -161,6 +161,18 @@ struct nfs_mount {
    * sharing it: the loser of the CAS gets a temporary socket instead. */
   struct socket_pcb *rd_sock;
   volatile int rd_busy;
+  /* cp/nfs2b: a small POOL of long-lived sockets for every RPC on the mount
+   * (READ pipelines, the serial READ, LOOKUP/GETATTR/READLINK/READDIRPLUS).
+   * A fresh socket per RPC is a fresh guest port, and QEMU's slirp keeps a
+   * host UDP socket (a host ephemeral port) for every guest port for 240 s:
+   * Wine's thousands of LOOKUPs held ~6-8k host ports per guest, four
+   * guests exhaust the host's 28232-port range, and from then on every NEW
+   * socket's requests are dropped on the host while old sockets still work
+   * -- a LOOKUP unanswered for 180 s while READs flow (C5-vk2 run 5).
+   * rd_sock/rd_busy are slot 0. */
+#define NFS_SOCK_POOL 6
+  struct socket_pcb *pool[NFS_SOCK_POOL];
+  volatile int pool_busy[NFS_SOCK_POOL];
   /* Adapt-down bookkeeping: a server whose rsize is smaller than ours
    * answers short; honour it only when the SAME short count is seen twice
    * in a row and it is a sane rsize (>= 512).  A one-off short reply must
