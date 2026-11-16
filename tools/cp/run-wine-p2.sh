@@ -13,12 +13,12 @@
 #   2. stages the Wine tree from strix:~/cp/wine-build/stage over a TEMPORARY
 #      NFS export that is localhost-only and read-only, exactly
 #        <dir> 127.0.0.1(ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534)
-#      QEMU user networking reaches it as 10.0.2.2.  Everything that touches
-#      /etc/exports runs under /tmp/cp-exports.lock (taken OUTER to the QEMU
-#      lock, as nfs_bench.sh does): a pre-run copy is taken under the lock, and
-#      every exit path (EXIT/INT/TERM/HUP trap) removes exactly this run's line
-#      -- never copies an old snapshot back -- then `cmp`s the file against the
-#      pre-run copy.  The export directory is removed after the run.  The
+#      QEMU user networking reaches it as 10.0.2.2.  The line is added and
+#      removed only with tools/cp/exports.sh (docs/cyberpunk.md §7.4: it holds
+#      /tmp/cp-exports.lock only while it edits the file, never across the
+#      boot, and checks that every non-cp line is unchanged); every exit path
+#      (EXIT/INT/TERM/HUP trap) removes exactly this run's line.  WINE_EXPORT
+#      must be /srv/nfs/cp-<name>.  The export directory is removed after the run.  The
 #      export is never widened; an export dir that already exists is refused
 #      (it is not this run's to delete);
 #   3. stages the glibc 2.31 runtime on the FAT disk (/LIB64 + /lib64/ld);
@@ -57,7 +57,7 @@ done
 [ -x "$STAGE/bin/wine" ] || die "no staged Wine at $STAGE (tools/cp/build-wine.sh all)"
 [ -f "$LDIR/libc-2.31.so" ] || die "no glibc 2.31 at $LDIR"
 [ -f "$MARKERS" ] || die "no marker list $MARKERS"
-case "$EXPORT" in /srv/nfs/?*) ;; *) die "WINE_EXPORT must be under /srv/nfs/ ($EXPORT)";; esac
+case "$EXPORT" in /srv/nfs/cp-?*) ;; *) die "WINE_EXPORT must be /srv/nfs/cp-<name> ($EXPORT)";; esac
 [ -e "$EXPORT" ] && die "$EXPORT already exists: not this run's to reuse or delete; remove it by hand"
 
 echo "== build: kernel + disk (intel, test), winep2.bin, winprobe.exe"
@@ -76,41 +76,20 @@ llvm-objcopy -O binary "$OUT/winep2.elf" "$OUT/winep2.bin"
 bash tools/cp/build-winprobe.sh "$OUT/winprobe.exe" >"$OUT/winprobe-build.log" 2>&1 ||
   { cat "$OUT/winprobe-build.log"; die "winprobe.exe"; }
 # ---- /etc/exports: ONE localhost-only ro line, removed again on every exit ---
-# Every lane that edits /etc/exports takes /tmp/cp-exports.lock first, OUTER
-# to /tmp/cp-qemu.lock (nfs_bench.sh's order).  The pre-run copy is taken
-# under that lock; at exit only OUR exact line is removed (never an old
-# snapshot copied over the file, which could resurrect or drop another lane's
-# line) and the result is cmp'd against the pre-run copy.
-OPTS="ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534"
-MYLINE="$EXPORT 127.0.0.1($OPTS)"
-exec 9>>/tmp/cp-exports.lock
-echo "== waiting for /tmp/cp-exports.lock"
-flock 9
-EXP_BAK="$(mktemp /tmp/cp-wine2-exports.XXXXXX)"
-sudo -n cat /etc/exports > "$EXP_BAK" || die "cannot copy /etc/exports"
+# docs/cyberpunk.md §7.4: the line is added and removed only with
+# tools/cp/exports.sh, which holds /tmp/cp-exports.lock just while it edits the
+# file (never across the boot) and checks that every non-cp line is unchanged.
 ADDED=""
 MADE_DIR=""
 CLEANED=""
 cleanup() {
   [ -n "$CLEANED" ] && return 0
   CLEANED=1
-  if [ -n "$ADDED" ]; then
-    local t; t="$(mktemp /tmp/cp-wine2-exports-new.XXXXXX)"
-    sudo -n cat /etc/exports | grep -vxF -- "$MYLINE" > "$t"
-    sudo -n tee /etc/exports < "$t" >/dev/null
-    rm -f "$t"
-  fi
-  sudo -n exportfs -ra
-  if cmp -s "$EXP_BAK" <(sudo -n cat /etc/exports); then
-    echo "== /etc/exports: our line removed (cmp identical to the pre-run copy)"
-    rm -f "$EXP_BAK"
-  else
-    echo "== WARNING: /etc/exports differs from the pre-run copy $EXP_BAK (kept)"
-  fi
+  [ -n "$ADDED" ] && bash "$ROOT/tools/cp/exports.sh" remove "$EXPORT"
   if [ -n "$MADE_DIR" ]; then
     sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
   fi
-  sudo -n exportfs -v 2>/dev/null | grep -F "$EXPORT" && echo "== WARNING: $EXPORT still exported"
+  sudo -n exportfs -v 2>/dev/null | grep -F "$EXPORT " && echo "== WARNING: $EXPORT still exported"
   return 0
 }
 trap cleanup EXIT
@@ -121,11 +100,8 @@ sudo -n mkdir -p "$EXPORT/WINE" "$EXPORT/WPROBE" && MADE_DIR=1
 sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/" || die "rsync stage"
 sudo -n cp "$OUT/winprobe.exe" "$EXPORT/WPROBE/winprobe.exe"
 sudo -n chmod -R a+rX "$EXPORT"
-
-if ! grep -qsE "^[[:space:]]*${EXPORT//./\\.}[[:space:]]" /etc/exports; then
-  printf '%s\n' "$MYLINE" | sudo -n tee -a /etc/exports >/dev/null && ADDED=1
-fi
-sudo -n exportfs -ra
+ADDED=1   # before the call: a half-finished add is still undone by cleanup
+bash "$ROOT/tools/cp/exports.sh" add "$EXPORT" || die "exports.sh add $EXPORT"
 sudo -n exportfs -v | grep -F "$EXPORT" | sed 's/^/== exported: /'
 
 echo "== stage: glibc 2.31 under /LIB64 + /lib64/ld + WINEP2.BIN + WAVE.CFG"
