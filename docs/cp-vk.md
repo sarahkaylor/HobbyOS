@@ -433,16 +433,19 @@ NFS export (§8.3); the probes are built and staged.
 | 2 | same | **VOID.** 323 NFS failure rows during `wineboot` (`share`, `WINE`, `wine` lookups); nodrv |
 | 3 | Kernel cyberpunk 8b9fc2c9 (NFS hard mount); C4-x2's one-screen XHOBBY.BIN (sha256 `935c760f…c97`, scratch only); `HB_SECOND_SCREEN=0`; warm-up | **Not void** (179 no-reply rows, longest hard-retry wait 18,271 ms, no GIVE UP). `wineboot -i` → status 53 after 314 s. The wineboot tree then wedged: wineboot, services ×3, winedevice and rundll32 stayed alive, wineserver logged `epoll_ctl: No space left on device` ×5, and there were 926 IDLESTUCK dumps. The launcher's 3600 s quiesce waited on it, so no probe ran; stopped at +1500 s |
 | 4 | Same, with `P5_CFLAGS=-DP5_BOOT_QUIESCE_S=60` | **Not void** (134 no-reply rows, longest wait 1,504 ms, no GIVE UP). wineboot → status 53; the tree again never exited (wineboot, services ×3 and rundll32 alive, no explorer; 985 IDLESTUCK dumps; no epoll ENOSPC this time). Every later wine — the keepalive and `--winprobe` 01–05 — logged `run_wineboot boot event wait timed out` and ended status 53 (one SIGKILLed at 300 s) **before any probe code ran**. Stopped at +1800 s |
+| 5 | Kernel cyberpunk 030a7f10 (C1-k4 + hard mount); same server and warm-up; default 3600 s post-wineboot quiesce | **VOID**: one `[NFSHARD] GIVE UP op=RPC … tries=55 after_ms=180000 -> EIO` during wineboot (94 no-reply rows, longest retry 102,384 ms). wineboot → status 53 after 305 s. This time the tree **exited by itself**, somewhere between +2104 s and +2405 s of the run (slow, not wedged, as C1-k4 found). The keepalive then started. A winedevice.exe thread (pid 111, tgid 107) took a NULL read at `PC 0x108074F736` (a unix-side library mapped at `0x1080742000`, offset `+0xD736`; last syscall 41 `socket`, after `nsi:poll_events netlink socket creation failed, errno 97`). PlugPlay and RpcSs "failed to start", and `--winprobe` 01–05 each timed out at 300 s with no row. Stopped at about +4200 s on the integrator's instruction: this matches the post-wineboot Wine-process faults C4-x2 saw on the same kernel (C1-k4 investigating). Evidence: `docs/cp-vk2-evidence/winep5-run5.txt` |
 
-**Stopping point (items 3–4).** In the guest's X session, Wine's prefix
-initialisation never completes. The wineboot tree (wineboot.exe,
-services.exe, rundll32.exe) wedges, so the boot event is never signalled,
-and every later wine process gives up after 300 s with status 53 before its
-`main`. vkcube.exe, d3d11tri.exe and d3d12tri.exe therefore never start. This
-matches the open "wineboot-tree hang" (§0.2 item 18) and C1-k4's
-epoll/park work, and is not a Vulkan/DXVK/vkd3d-proton issue. NFS is no
-longer the blocker on the hard-mount kernel. Evidence:
-`docs/cp-vk2-evidence/winep5-runs3-4.txt`.
+**Stopping point (items 3–4).** On 8b9fc2c9 (runs 3–4), Wine's prefix
+initialisation did not complete within the run, and every later wine process
+timed out on the boot event (status 53) before its `main`. On 030a7f10 (run
+5, VOID on one NFS give-up) the prefix tree finished by itself after about
+2200 s. The next Wine clients then hung: a winedevice.exe thread faulted on a
+NULL read in a unix-side library, the PlugPlay and RpcSs services failed to
+start, and every `--winprobe` client timed out at 300 s. vkcube.exe,
+d3d11tri.exe and d3d12tri.exe have still never started. This is the
+post-wineboot Wine-process fault C1-k4 is investigating, not a
+Vulkan/DXVK/vkd3d-proton issue. Evidence:
+`docs/cp-vk2-evidence/winep5-runs3-4.txt`, `winep5-run5.txt`.
 
 Two traps for anyone running Wine in-guest:
 - **Zero-filled reads.** These are fixed on the hard-mount kernel
