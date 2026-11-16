@@ -264,7 +264,7 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
       - *(fixed, C1-k4)* SIGBUS past EOF is reported as SIGSEGV.
       - *(stale: `VM_OBJ_MAX_BYTES` has been 1 GiB since cp/sys ca51e8cf —
         C3-pfx)* The 64 MiB per-file ext2 mapping cap.
-    - **Wave 4 findings (2026-11-16, in progress).**
+    - **Wave 4 findings (2026-11-16; Gates P3, P4 and P5 passed).**
       - *Fixed:* `fat16_rename` stored the last path component through NULL
         (a kernel write to VA 0), so every FAT `rename(2)` from user space hung
         a CPU; IceWM's fontconfig hits it at session start. c5640214, guard row
@@ -325,6 +325,15 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
         exists (`linux_probe_netlink`). The services.exe/explorer.exe wild
         faults of C4-x2 run 8 did not recur in three runs after cp-nfs2b.
       - *Gate host:* four QEMU slots and per-call `/etc/exports` edits (§7.4).
+      - *Wine trap, C5-vk2 (0b7da2ba):* once winex11 works, `wineboot -i` runs
+        appwiz's `install_mono` and blocks forever on the Wine Mono Installer
+        dialog. Every in-guest Wine launch in an X session needs
+        `mscoree,mshtml=` in `WINEDLLOVERRIDES` (C4-x2's P4 env already had it).
+      - *Harness trap:* XSESSION relays child output with an `[X] ` prefix;
+        graders that read probe rows from the serial log must strip it.
+      - *Open:* C4-x2's one-screen `XHOBBY.BIN` (sha256 `935c760f…4c97`) is
+        still a scratch override in the P4/P5 runs; `third_party/x11` must be
+        rebuilt with its DDX so trees produce it themselves.
 
 **Lane status (2026-11-15).** Merged to `cyberpunk`: C1-as (design), C2-wine
 (pins/build/evidence), C3-ext2 (ext2 rw), C7-p0host, C7-p0guest. **C1-cpu**
@@ -804,13 +813,20 @@ mouse deltas from QMP-injected motion. Evidence: screendumps + serial log.
 
 - [x] *(C5-vk, C5-vk2: `docs/cp-vk.md` §1–4, §8.1)* Mesa lavapipe built for the compat class; LLVM JIT works under compat
       (`PROT_EXEC` anonymous memory, `mprotect` transitions).
-- [ ] Vulkan loader + ICD JSON staging; winevulkan.
+- [x] *(C5-vk2: Wine's `vulkan-1.dll` → winevulkan → `libvulkan.so.1` → lavapipe, run 7)* Vulkan loader + ICD JSON staging; winevulkan.
 - [x] *(C5-vk2: Mesa's software `put_image` path; Present 1.2 fake-msc paces it at ~30 Hz, render median 1 ms)* A Vulkan X11 WSI path that works with lavapipe (software presentation
       is acceptable here — this rung is about correctness).
-- [ ] Probes: Linux `vkcube` *(done, C5-vk2: 65 s in the guest X session, 1853 frames, two distinct screendumps, `docs/cp-vk2-evidence/item2-vkcubex-x11.txt`)*; `vkcube.exe` under Wine; a DXVK D3D11 triangle;
-      a vkd3d-proton D3D12 triangle (MinGW-built, in `src/user/cp/`).
+- [x] Probes: Linux `vkcube` *(done, C5-vk2: 65 s in the guest X session, 1853 frames, two distinct screendumps, `docs/cp-vk2-evidence/item2-vkcubex-x11.txt`)*; `vkcube.exe` under Wine; a DXVK D3D11 triangle;
+      a vkd3d-proton D3D12 triangle (MinGW-built, in `src/user/cp/`) *(done, C5-vk2 run 7:
+      `vkcube.exe`, `d3d11tri.exe` on DXVK 3.1.1, `d3d12tri.exe` on vkd3d-proton 3.1)*.
 
-**Gate P5:** all four render recognisably in screendumps and run ≥60 s without
+**Gate P5 — PASSED (2026-11-16, C5-vk2 run 7 on cyberpunk 9991149a, `docs/cp-vk2-evidence/winep5-run7-PASS.txt`; merged at 0b7da2ba):**
+`vkcube.exe`, `d3d11tri.exe` (DXVK 3.1.1) and `d3d12tri.exe` (vkd3d-proton 3.1) each ran 65 s on
+`llvmpipe (LLVM 21.1.8, 256 bits)` in the guest IceWM session, with two distinct screendumps each;
+NFS clean (0 no-reply rows, 0 retries, 0 give-ups), no fault rows. Row 1, Linux `vkcube` on X11,
+passed earlier (65 s). The Wine fps (~1000 vkcube, ~480 D3D) are unpaced, not lavapipe speeds:
+winex11's Vulkan path presents through its own surface, which XHOBBY's fake-msc Present does not pace.
+Original wording: all four render recognisably in screendumps and run ≥60 s without
 a fault. Evidence: screendumps + serial log.
 
 ### P6 — Venus: the host GPU (size XL; can start alongside P1)
@@ -1089,9 +1105,9 @@ user's approval through the integrator.
 
 - [ ] AVX, low-VA and GS probes pass; Doom ELF and RimWorld regressions pass on
       the new MMU.
-- [ ] `wine cmd /c echo` and `winprobe.exe` pass; prefix persists on ext2.
-- [ ] `winecfg` in IceWM; raw mouse deltas reach a Windows program.
-- [ ] `vkcube.exe` and the D3D12 triangle on lavapipe and on Venus.
+- [x] `wine cmd /c echo` and `winprobe.exe` pass; prefix persists on ext2. *(Gates P2, P3)*
+- [x] `winecfg` in IceWM; raw mouse deltas reach a Windows program. *(Gate P4)*
+- [ ] `vkcube.exe` and the D3D12 triangle on lavapipe and on Venus. *(lavapipe done, Gate P5; Venus is P6)*
 - [ ] Fullscreen scanout present measured.
 - [ ] Cyberpunk main menu screendump, OCR-confirmed.
 - [ ] 10 minutes played from a host save; save/reload; fps against both
