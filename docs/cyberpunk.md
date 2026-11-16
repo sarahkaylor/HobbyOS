@@ -314,10 +314,16 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
         most per guest); guard G10 in rsize_guard. **wineboot -i now ends with
         status 0 in ~25 s** (run23: status 53 at 307 s), and Gate P2 reads
         208 MB in total (run23: 1.66 GB).
-      - *Open, possible regression (C1-k4 investigating):* in a Wine X session
-        on 030a7f10, services.exe, explorer.exe and winedevice.exe fault at wild
-        addresses, one an unresolved instruction fetch inside a mapped r-x
-        `.so` (`in=V1 prot=5 kind=7`); Gate P4's Wine half is blocked on it.
+      - *(fixed, cp-k4b; see below)* Wild faults in Wine X sessions on 030a7f10.
+      - *Fixed, cp-k4b (merged):* a dying thread group's members kept running
+        after `exit_group` (the drain never kicked their CPUs), and a refused
+        address-space release cleared its pointer anyway, so the survivor
+        faulted with `in=V1`; reaped groups also held their address spaces
+        until slot reuse (`linux_probe_exitgroup` X6: 5344 MiB → 32 MiB lost).
+        Wine's nsiproxy NULL read came from `if_nameindex()` with no
+        AF_NETLINK: a minimal NETLINK_ROUTE socket (link/addr/route dumps) now
+        exists (`linux_probe_netlink`). The services.exe/explorer.exe wild
+        faults of C4-x2 run 8 did not recur in three runs after cp-nfs2b.
       - *Gate host:* four QEMU slots and per-call `/etc/exports` edits (§7.4).
 
 **Lane status (2026-11-15).** Merged to `cyberpunk`: C1-as (design), C2-wine
@@ -786,11 +792,11 @@ guest matches the host's sha256; an `mmap` of the game's largest mapped file
 - [x] *(C4-x2, in-OS xprobe: one-screen session `HB_SECOND_SCREEN=0` gives XINERAMA + Composite; XI2 raw deltas exact from a relative slave fed by kernel REL events; 12 RandR modes with a real mode set; MIT-SHM still absent, plan in `docs/cp-x2.md` §6)* `XHOBBY.BIN`: the server side of XInput2 (raw motion), RandR (one mode
       per supported resolution), Render, Fixes, Cursor, MIT-SHM — **verify**
       which are already present in the X.Org-derived server.
-- [ ] Wine X11 driver configuration: fullscreen without a window-manager fight
+- [x] *(C4-x2 harness, C1-k4b runs: a fullscreen 1280×720 window fills the glass after a RandR mode set; `ClipCursor` holds under IceWM and raw deltas keep arriving)* Wine X11 driver configuration: fullscreen without a window-manager fight
       (IceWM and Wine's fullscreen hints), pointer grab/clip for mouselook.
-- [ ] Null audio (AD-9).
+- [x] *(Wine is built with no audio driver; winecfg's Audio tab opens and responds)* Null audio (AD-9).
 
-**Gate P4:** `winecfg` opens in an IceWM window and its tabs respond to QMP
+**Gate P4 — PASSED (2026-11-16, `docs/cp-k4-evidence/p4-k4b-strix.txt`; three runs on strix):** winecfg 3/3 tab clicks change the dialog, notepad shows the typed text, and the raw-input probe reads relative deltas (free dx=70 dy=30, clip dx=850 dy=25, cursor inside the clip). Original wording: `winecfg` opens in an IceWM window and its tabs respond to QMP
 clicks; `notepad` accepts typed text; a MinGW raw-input probe prints relative
 mouse deltas from QMP-injected motion. Evidence: screendumps + serial log.
 
