@@ -75,7 +75,11 @@ static char *envp[] = {
   (char *)"WINEDLLPATH=/CP/WINE/lib/wine",
   (char *)"LD_LIBRARY_PATH=/CP/X11/lib:/CP/WINE/lib:/CP/VK/lib:/LIB64:/CP/WINE/lib/wine/x86_64-unix",
   (char *)"WINEDEBUG=" P5_WINEDEBUG,
-  (char *)"WINEDLLOVERRIDES=d3d11,dxgi,d3d10core,d3d9,d3d12,d3d12core=n,b;winemenubuilder.exe=d",
+  /* mscoree,mshtml= : no Wine Mono / Gecko install offer.  With a working
+     display driver wineboot -i runs appwiz's install_mono, which shows the
+     "Wine Mono Installer" dialog and waits for a click forever (run 6
+     screendump); C4-x2's P4 env disables it the same way. */
+  (char *)"WINEDLLOVERRIDES=d3d11,dxgi,d3d10core,d3d9,d3d12,d3d12core=n,b;mscoree,mshtml=;winemenubuilder.exe=d",
   (char *)"DXVK_LOG_LEVEL=info",
   (char *)"DXVK_LOG_PATH=none",
   (char *)"VKD3D_DEBUG=warn",

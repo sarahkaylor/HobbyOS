@@ -1,0 +1,46 @@
+# Wine P5 run 6 (cyberpunk 9991149a: cp-nfs2b socket pool + cp-k4b teardown/NETLINK_ROUTE; one-screen XHOBBY 935c760f..c97, HB_SECOND_SCREEN=0; 0 other guests)
+# NFS: no-reply=0 NFSHARD retry=0 GIVE UP=0  -- clean
+# memory-fault rows: 0
+# wineboot -i ended status=0 after 305 s; its tree never exited: the screen showed the Wine Mono Installer dialog
+# (wineboot -i -> control.exe appwiz.cpl install_mono, waiting for a click; screendump evidence/cp-vk2/run6-stuck.png).
+# Fix: WINEDLLOVERRIDES += mscoree,mshtml= (as C4-x2's P4 env). Stopped by me after ~55 min.
+
+[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-vk2-p6 -> /CP ok
+[P5] begin wineboot : wineboot -i
+[X] 004c:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 004c:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 004c:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[X] 0054:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 0054:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 0054:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[X] 004c:err:ole:start_rpcss Failed to open RpcSs service
+[X] 0094:err:setupapi:SetupDefaultQueueCallbackW copy error 1812 L"@C:\\windows\\system32\\drivers\\wineusb.sys,-1" -> L"C:\\windows\\inf\\wineusb.inf"
+[X] 0024:err:environ:run_wineboot boot event wait timed out
+[X] 00a4:err:winediag:getaddrinfo Failed to resolve your host name IP
+[P5] end wineboot status=0 ms=305423
+## live processes at the last [ALIVE-SET] dump
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 pc=0x100000696b mod=0x1000000000+0x696b XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 pc=0x100020f64b mod=0x1000000000+0x20f64b /XHOBBY.BIN
+  [ALIVE-SET] slot=9 pid=9 st=3 parent=1 claimed_by=1 pc=0x100033ae2e mod=0x1000000000+0x33ae2e /ICEWM.BIN
+  [ALIVE-SET] slot=12 pid=12 st=5 parent=1 claimed_by=-1 pc=0x10000758f4 mod=0x1000000000+0x758f4 /XEYESR.BIN
+  [ALIVE-SET] slot=14 pid=14 st=5 parent=1 claimed_by=-1 pc=0x10000054d4 mod=0x1000000000+0x54d4 /WINEP5.BIN
+  [ALIVE-SET] slot=18 pid=18 st=3 parent=17 claimed_by=4 pc=0x1080127648 mod=0x1080008000+0x11f648 wineserver
+  [ALIVE-SET] slot=20 pid=20 st=5 parent=19 claimed_by=-1 pc=0x1080050390 mod=0x108003d000+0x13390 wineboot.exe
+  [ALIVE-SET] slot=22 pid=22 st=5 parent=21 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=23 pid=23 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=24 pid=24 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=30 pid=30 st=5 parent=28 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca explorer.exe
+  [ALIVE-SET] slot=31 pid=31 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca explorer.exe
+  [ALIVE-SET] slot=32 pid=32 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca explorer.exe
+  [ALIVE-SET] slot=37 pid=37 st=5 parent=36 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca winedevice.exe
+  [ALIVE-SET] slot=38 pid=38 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=40 pid=40 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca winedevice.exe
+  [ALIVE-SET] slot=41 pid=41 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca winedevice.exe
+  [ALIVE-SET] slot=42 pid=42 st=8 parent=-1 claimed_by=-1 pc=0x108017895d mod=0x1080060000+0x11895d winedevice.exe
+  [ALIVE-SET] slot=43 pid=43 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca winedevice.exe
+  [ALIVE-SET] slot=46 pid=46 st=5 parent=45 claimed_by=-1 pc=0x1080050390 mod=0x108003d000+0x13390 rundll32.exe
+  [ALIVE-SET] slot=48 pid=48 st=5 parent=47 claimed_by=-1 pc=0x1080050390 mod=0x108003d000+0x13390 control.exe
+  [ALIVE-SET] slot=52 pid=52 st=5 parent=51 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=53 pid=53 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=61 pid=61 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
