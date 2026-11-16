@@ -292,6 +292,11 @@ int  nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
  * LOOKUP or GETATTR returned if younger than 3 s, else a GETATTR.  0 / -1. */
 int  nfs_getattr_cached(const struct nfs_mount *m, const struct nfs_fh *fh,
                         struct nfs_attr *a);
+/* cp/nfs2: give the buffers of up to `n` (<= 32) idle readahead windows (64
+ * KiB each) back to the frame pool; returns frames freed.  The window table
+ * calls it itself on a miss while less than 1/8 of the pool is free; a
+ * frame-pool reclaim path may call it too.  No lock may be held. */
+int  nfs_ra_shrink(int n);
 /* cp/exec: READLINK3 on a symlink handle; fills *out (NUL-terminated), returns
  * the length or < 0.  nfs_lookup follows symlinks itself, so callers rarely
  * need this directly. */

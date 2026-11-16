@@ -63,7 +63,8 @@ volatile uint64_t nfs_io_ops;
  *   - nothing was kept: the next process faulting the same DLL page read it
  *     over the wire again.
  * Now there are NFS_RA_WINDOWS windows, each an ALIGNED 64 KiB block of one
- * file keyed by (mount, file handle, block), replaced least-recently-used.
+ * file keyed by (mount, file handle, block) through a hash table, replaced
+ * by a second-chance clock (an approximation of least-recently-used).
  * A file may own several windows, so a backwards or scattered reader loads
  * each block once and the next process finds it.  Sequential detection is
  * per window: `next` is where the last read served from it ended, and a miss
@@ -77,7 +78,8 @@ volatile uint64_t nfs_io_ops;
  * bytes directly instead of waiting. */
 #define NFS_RA_BYTES    (64 * 1024)      /* one window: an aligned block */
 #define NFS_RA_PAGES    (NFS_RA_BYTES / 4096)
-#define NFS_RA_WINDOWS  256              /* 16 MiB, frames taken on first use */
+#define NFS_RA_WINDOWS  4096             /* 256 MiB at most, frames taken on first use */
+#define NFS_RA_HBITS    10               /* hash buckets: (fh, block) -> window chain */
 #define NFS_RA_SEQ      4                /* windows a sequential miss loads */
 #define NFS_RA_FILL_MAX 8                /* windows one fill may load */
 #define NFS_RA_MAXREQ   (1024 * 1024)    /* larger reads go straight through */
@@ -91,12 +93,16 @@ struct nfs_ra_win {
   uint64_t base;        /* NFS_RA_BYTES-aligned file offset of buf[0] */
   uint32_t len;         /* bytes valid */
   uint64_t next;        /* end of the last read served from this window */
-  uint64_t lru;         /* nfs_ra.tick at last use */
+  int ref;              /* used since the clock hand last passed */
+  uint16_t hnext;       /* next window in this hash chain, index + 1 */
+  uint16_t hb;          /* the bucket it is chained on, + 1 (0: none) */
   uint8_t *buf;         /* NFS_RA_BYTES, allocated by the first fill */
 };
 static struct nfs_ra_win nfs_ra_win[NFS_RA_WINDOWS];
+static uint16_t nfs_ra_head[1u << NFS_RA_HBITS]; /* first window, index + 1 */
+static uint32_t nfs_ra_used;  /* windows [0, used) have been handed out */
+static uint32_t nfs_ra_hand;  /* the replacement clock */
 static struct {
-  uint64_t tick;
   uint64_t hits;        /* window pieces served without an RPC */
   uint64_t misses;      /* pieces that started a fill */
   uint64_t fills;       /* windows loaded */
@@ -104,6 +110,9 @@ static struct {
   uint64_t fill_bytes;  /* bytes loaded into windows */
   uint64_t direct;      /* pieces read around the windows (block busy, no window) */
   uint64_t saved;       /* bytes served from windows */
+  uint64_t big_bytes;   /* asked by reads above NFS_RA_MAXREQ (no windows) */
+  uint64_t tail_bytes;  /* re-read serially after a pipeline hole or stall */
+  uint64_t shrunk;      /* window buffers given back under memory pressure */
   uint64_t alloc_us;    /* time taking window buffers (first fills) */
   uint64_t fill_us;     /* time in window fills (the READs) */
   uint32_t gen;         /* bumped by unmount: a fill that straddles it is dropped */
@@ -267,6 +276,14 @@ void nfs_perf_dump(const char *why) {
     kl_i(&kl, all ? (long)(nfs_ra.hits * 100 / all) : 0);
     kl_s(&kl, " stalls=");
     kl_i(&kl, (long)nfs_pipe_stalls);
+    kl_s(&kl, " big_kib=");
+    kl_i(&kl, (long)(nfs_ra.big_bytes >> 10));
+    kl_s(&kl, " tail_kib=");
+    kl_i(&kl, (long)(nfs_ra.tail_bytes >> 10));
+    kl_s(&kl, " wins=");
+    kl_i(&kl, (long)nfs_ra_used);
+    kl_s(&kl, " shrunk=");
+    kl_i(&kl, (long)nfs_ra.shrunk);
     kl_s(&kl, " alloc_us=");
     kl_i(&kl, (long)nfs_ra.alloc_us);
     kl_s(&kl, " fill_us=");
@@ -288,12 +305,17 @@ static void nfs_pf_record(uint32_t want, uint64_t sock_us, uint64_t send_us,
   if (wait_us < b->wait_min_us) b->wait_min_us = wait_us;
 }
 
-/* Emit a [NFSRTT] set every 1 MiB of READ traffic, so a long asset load
- * leaves a latency table in the serial log without one row per RPC. */
+/* Emit a [NFSRTT] set every NFS_PERF_DUMP_BYTES of READ traffic, so a long
+ * asset load leaves a latency table in the serial log without one row per
+ * RPC.  cp/nfs2: 1 MiB -> 8 MiB.  Every console byte is a trapped port
+ * write; at 1 MiB the three-row set cost the 64 MiB sequential bench ~30% of
+ * its throughput once the windows made [NFSRA] print on every set, and Gate
+ * P2 (run23) printed 12576 [NFSRTT] rows. */
+#define NFS_PERF_DUMP_BYTES (8u << 20)
 static uint64_t nfs_pf_since_dump;
 static void nfs_perf_note_bytes(uint32_t n) {
   nfs_pf_since_dump += n;
-  if (nfs_pf_since_dump >= (1u << 20)) {
+  if (nfs_pf_since_dump >= NFS_PERF_DUMP_BYTES) {
     nfs_pf_since_dump = 0;
     nfs_perf_dump("periodic");
   }
@@ -1375,6 +1397,13 @@ static int nfs_rd_issue(const struct nfs_mount *m, struct socket_pcb *pcb,
 #define NFS_INFLIGHT_MAX (6 * NFS_READ_RSIZE_MAX)
 static volatile int32_t nfs_inflight_bytes;
 #define NFS_PIPE_RESENDS 2   /* stalls in a row before the serial tail */
+/* cp/nfs2: the first wait for a pipelined reply.  Gate P2 loses about one
+ * 32 KiB reply per MiB even with a single READ in flight ("[NFSPIPE] stall
+ * inflight=1 ... budget=32768"), and every loss cost the full 500 ms RPC
+ * timeout.  Replies that arrive at all arrive within ~100 ms (run23
+ * wait_max_us=99153), so the first wait is 150 ms; a re-sent READ gets the
+ * full NFS_RPC_TIMEOUT_MS. */
+#define NFS_PIPE_TIMEOUT_MS 150
 
 /* Where byte `rel` of a pipelined read lands: one flat buffer, or (segs) a
  * list of NFS_RA_BYTES readahead windows. */
@@ -1482,7 +1511,8 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
     if (inflight == 0) break;
 
     int got = net_socket_recv_timeout(pcb, rbuf, NFS_RPC_RBIG,
-                                      NFS_RPC_TIMEOUT_MS);
+                                      stalls ? NFS_RPC_TIMEOUT_MS
+                                             : NFS_PIPE_TIMEOUT_MS);
     if (got <= 0) {                     /* timeout / socket closed */
       nfs_pipe_stalls++;
       /* L41: a stall row, not a guess.  If the load freezes at a byte count,
@@ -1609,6 +1639,7 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
 
   if (contig < end && !hit_eof) {
     /* Finish the tail with serial RPCs (holes, timeouts, short replies). */
+    nfs_ra.tail_bytes += end - contig;   /* a statistic: no lock */
     int tail = nfs_read_serial_into(m, fh, contig, buf, segs, contig - offset,
                                     (uint32_t)(end - contig));
     if (tail < 0) { if (contig == offset) return -1; }
@@ -1683,13 +1714,19 @@ static int nfs_ra_fh_eq(const struct nfs_fh *a, const struct nfs_fh *b) {
   return 1;
 }
 
+static uint32_t nfs_ra_bucket(uint32_t fhash, uint64_t base) {
+  uint32_t k = fhash ^ ((uint32_t)(base >> 16) * 0x9E3779B1u);
+  k ^= (uint32_t)(base >> 48);
+  return (k * 0x85EBCA6Bu) >> (32 - NFS_RA_HBITS);
+}
+
 /* The window holding block `base` of (m, fh), valid or being filled.  Lock
  * held. */
 static struct nfs_ra_win *nfs_ra_find(const struct nfs_mount *m,
                                       const struct nfs_fh *fh, uint32_t fhash,
                                       uint64_t base) {
-  for (int i = 0; i < NFS_RA_WINDOWS; i++) {
-    struct nfs_ra_win *w = &nfs_ra_win[i];
+  for (uint32_t i = nfs_ra_head[nfs_ra_bucket(fhash, base)]; i; i = nfs_ra_win[i - 1].hnext) {
+    struct nfs_ra_win *w = &nfs_ra_win[i - 1];
     if (!(w->valid || w->busy) || w->base != base || w->fhash != fhash ||
         w->m != m)
       continue;
@@ -1698,22 +1735,69 @@ static struct nfs_ra_win *nfs_ra_find(const struct nfs_mount *m,
   return 0;
 }
 
-/* A window to (re)fill: an empty one that already has a buffer, then one
- * that has none, then the least recently used.  Never a busy one.  Lock
- * held. */
-static struct nfs_ra_win *nfs_ra_victim(void) {
-  struct nfs_ra_win *empty = 0, *old = 0;
-  for (int i = 0; i < NFS_RA_WINDOWS; i++) {
-    struct nfs_ra_win *w = &nfs_ra_win[i];
-    if (w->busy) continue;
-    if (!w->valid) {
-      if (w->buf) return w;
-      if (!empty) empty = w;
-      continue;
-    }
-    if (!old || w->lru < old->lru) old = w;
+/* Move window `w` to the chain of its (new) key.  Lock held. */
+static void nfs_ra_rehash(struct nfs_ra_win *w) {
+  uint16_t self = (uint16_t)(w - nfs_ra_win + 1);
+  if (w->hb) {
+    uint16_t *pp = &nfs_ra_head[w->hb - 1];
+    while (*pp && *pp != self) pp = &nfs_ra_win[*pp - 1].hnext;
+    if (*pp == self) *pp = w->hnext;
   }
-  return empty ? empty : old;
+  uint32_t b = nfs_ra_bucket(w->fhash, w->base);
+  w->hb = (uint16_t)(b + 1);
+  w->hnext = nfs_ra_head[b];
+  nfs_ra_head[b] = self;
+}
+
+/* A window to (re)fill, never a busy one: a window never used yet while
+ * `may_grow` (the frame pool is not short), else the replacement clock
+ * (second chance, an approximation of least-recently-used): an invalid
+ * window at once, a valid one only after the hand found it unused since its
+ * last pass.  Lock held. */
+static struct nfs_ra_win *nfs_ra_victim(int may_grow) {
+  if (may_grow && nfs_ra_used < NFS_RA_WINDOWS) return &nfs_ra_win[nfs_ra_used++];
+  for (uint32_t step = 0; nfs_ra_used && step < 2 * nfs_ra_used + 1; step++) {
+    struct nfs_ra_win *w = &nfs_ra_win[nfs_ra_hand];
+    nfs_ra_hand = (nfs_ra_hand + 1) % nfs_ra_used;
+    if (w->busy) continue;
+    if (!w->valid) return w;
+    if (w->ref) { w->ref = 0; continue; }
+    return w;
+  }
+  return 0;
+}
+
+/* Give the buffers of up to `n` idle windows back to the frame pool: empty
+ * windows first, then the clock's victims.  The table grows only while a
+ * quarter of the pool is free and shrinks by this on every miss while less
+ * than an eighth is (and anyone may call it).  Returns frames freed. */
+#define NFS_RA_SHRINK_MAX 32
+int nfs_ra_shrink(int n) {
+  uint8_t *bufs[NFS_RA_SHRINK_MAX];
+  int k = 0;
+  if (n > NFS_RA_SHRINK_MAX) n = NFS_RA_SHRINK_MAX;
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ra_lock);
+  for (uint32_t i = 0; i < nfs_ra_used && k < n; i++) {
+    struct nfs_ra_win *w = &nfs_ra_win[i];
+    if (w->busy || w->valid || !w->buf) continue;
+    bufs[k++] = w->buf;
+    w->buf = 0;
+  }
+  for (uint32_t tries = 0; k < n && tries < 2 * nfs_ra_used + 1; tries++) {
+    struct nfs_ra_win *w = nfs_ra_victim(0);
+    if (!w) break;
+    if (!w->buf) continue;
+    w->valid = 0;                         /* never busy: nfs_ra_victim skips those */
+    bufs[k++] = w->buf;
+    w->buf = 0;
+  }
+  nfs_ra.shrunk += (uint64_t)k;
+  spinlock_release_irqrestore(&nfs_ra_lock, fl);
+  for (int i = 0; i < k; i++) {
+    uint64_t pa = virt_to_phys(bufs[i]);
+    for (int f = 0; f < NFS_RA_PAGES; f++) frame_free(pa + (uint64_t)f * FRAME_SIZE);
+  }
+  return k * NFS_RA_PAGES;
 }
 
 /* Copy [at, at+len) of a valid, idle window to buf.  1 when served (*got <
@@ -1728,7 +1812,7 @@ static int nfs_ra_serve(struct nfs_ra_win *w, uint32_t at, void *buf,
   if (n) memcpy(buf, w->buf + at, n);
   *got = (int)n;
   w->next = w->base + at + n;
-  w->lru = ++nfs_ra.tick;
+  w->ref = 1;
   nfs_ra.saved += n;
   return 1;
 }
@@ -1747,6 +1831,11 @@ static int nfs_ra_try(const struct nfs_mount *m, const struct nfs_fh *fh,
   uint32_t at = (uint32_t)(offset - base);
   struct nfs_ra_win *claim[NFS_RA_FILL_MAX];
   int k = 0, seq = 0;
+  /* New window buffers only while a quarter of the frame pool is free (read
+     before the lock: the frame allocator has its own). */
+  int fr_free = frame_free_count(), fr_total = frame_total_count();
+  int may_grow = fr_free > fr_total / 4;
+  if (fr_free < fr_total / 8) (void)nfs_ra_shrink(NFS_RA_SHRINK_MAX);
   uint64_t fl = spinlock_acquire_irqsave(&nfs_ra_lock);
   struct nfs_ra_win *w = nfs_ra_find(m, fh, fhash, base);
   if (w && w->valid && !w->busy && nfs_ra_serve(w, at, buf, len, got)) {
@@ -1773,7 +1862,7 @@ static int nfs_ra_try(const struct nfs_mount *m, const struct nfs_fh *fh,
     uint64_t b = base + j * NFS_RA_BYTES;
     struct nfs_ra_win *x = j == 0 ? w : nfs_ra_find(m, fh, fhash, b);
     if (j > 0 && x) break;              /* loaded or loading: the run ends */
-    if (!x) x = nfs_ra_victim();
+    if (!x) x = nfs_ra_victim(may_grow);
     if (!x) break;
     x->busy = 1;
     /* cp/nfsfix, per window: the fill below writes x->buf with the lock
@@ -1791,7 +1880,8 @@ static int nfs_ra_try(const struct nfs_mount *m, const struct nfs_fh *fh,
     x->base = b;
     x->len = 0;
     x->next = 0;
-    x->lru = ++nfs_ra.tick;
+    x->ref = 1;
+    nfs_ra_rehash(x);
     claim[k++] = x;
   }
   if (k == 0) {
@@ -1876,7 +1966,7 @@ static int nfs_ra_read(const struct nfs_mount *m, const struct nfs_fh *fh,
 static void nfs_ra_drop_mount(const struct nfs_mount *m) {
   uint64_t fl = spinlock_acquire_irqsave(&nfs_ra_lock);
   nfs_ra.gen++;
-  for (int i = 0; i < NFS_RA_WINDOWS; i++)
+  for (uint32_t i = 0; i < nfs_ra_used; i++)
     if (nfs_ra_win[i].m == m && !nfs_ra_win[i].busy) nfs_ra_win[i].valid = 0;
   spinlock_release_irqrestore(&nfs_ra_lock, fl);
 }
@@ -1911,6 +2001,7 @@ int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
   if (len > 0x7FFFFFFFu) len = 0x7FFFFFFFu; /* the count is returned as int */
   if (nfs_perf_legacy) return nfs_read_serial_legacy(m, fh, offset, buf, len);
   if (len <= NFS_RA_MAXREQ) return nfs_ra_read(m, fh, offset, (uint8_t *)buf, len, rs);
+  nfs_ra.big_bytes += len;                /* a statistic: no lock */
   return nfs_read_pipelined(m, fh, offset, buf, len, rs);
 }
 

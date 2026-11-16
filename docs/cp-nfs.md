@@ -247,6 +247,26 @@ slots busy; `ipr_drop_bad`) and complete UDP datagrams no socket took
 `[NFSNET]` row with the stall count.  A minimal diff (counters only, no
 behaviour change), in its own commit.
 
+## 13. Window table, second pass (cp/nfs2)
+
+The item-1 P2 run showed the 16 MiB table was too small for rundll32's
+repeated passes over the 185 MB tree (hit rate 97% in wineboot, 83% by the
+quiesce), and the per-MiB console set was costing throughput:
+
+- `NFS_RA_WINDOWS` 256 -> 4096 (256 MiB at most), found through a 1024-bucket
+  hash on (fh, block) instead of a linear scan, replaced by a second-chance
+  clock.  New buffers are taken only while a quarter of the frame pool is
+  free; while less than an eighth is, every miss gives up to 32 idle window
+  buffers back (`nfs_ra_shrink()`, exported for a future frame-pool reclaim
+  hook; `shrunk=` in `[NFSRA]`).
+- The first wait for a pipelined reply is 150 ms (`NFS_PIPE_TIMEOUT_MS`;
+  replies that come at all came within 99 ms in run23), re-sends get 500 ms.
+- `[NFSRTT]`/`[NFSRA]`/`[NFSNET]` print every 8 MiB of READ traffic instead
+  of every 1 MiB (each console byte is a trapped port write; run23 printed
+  12576 `[NFSRTT]` rows).
+- `[NFSRA]` gains `big_kib` (reads above 1 MiB, no windows), `tail_kib`
+  (re-read serially after a hole) and `wins` (windows in use).
+
 ## 14. nfs_bench.sh on QEMU slots (cp/nfs2)
 
 `nfs_bench.sh` (and so `rsize_guard.sh`) no longer holds
