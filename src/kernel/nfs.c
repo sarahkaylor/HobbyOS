@@ -264,6 +264,13 @@ void nfs_perf_dump(const char *why) {
     kl_i(&kl, (long)nfs_pipe_stalls);
     kl_s(&kl, " inj_dropped=");
     kl_i(&kl, (long)nfs_inj_dropped);
+    {
+      /* cp/nfs2b: guest sockets ever created (each one is a slirp host
+         socket, i.e. a host ephemeral port, for 240 s) */
+      extern volatile uint32_t net_sock_created;
+      kl_s(&kl, " socks=");
+      kl_i(&kl, (long)net_sock_created);
+    }
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
@@ -556,7 +563,10 @@ static int nfs_inj_trigger(const char *rel) {
   }
   if (!*p) return 0;
   const char *q = p;
-  if (q[0] == 'o' && q[1] == 'f' && q[2] == 'f') {
+  if (q[0] == 'd' && q[1] == 'u' && q[2] == 'm' && q[3] == 'p') {
+    nfs_perf_dump("inject");           /* cp/nfs2b: counters on request */
+    return 1;
+  } else if (q[0] == 'o' && q[1] == 'f' && q[2] == 'f') {
     nfs_inj_every = 0;
     nfs_inj_until_ms = 0;
   } else if (q[0] == 'e' && q[1] == 'v' && q[2] == 'e' && q[3] == 'r' && q[4] == 'y' && q[5] == '.') {

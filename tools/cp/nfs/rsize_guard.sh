@@ -29,6 +29,10 @@
 #       dropped and with every reply dropped for 8 s (a test kernel's fault
 #       injection), fresh files read page by page and mapped come back
 #       right -- no FAIL "[NB] inject." row, at least 5 rows
+#   G10 (cp/nfs2b) 4 x 1500 stat()s create at most 32 guest sockets
+#       ("socks=" in the [NFSNET] rows the bench requests around the storm):
+#       a socket per RPC pins one host ephemeral port in QEMU's slirp for
+#       240 s, and four guests exhausted the host's range (2026-11-16)
 #   G5  over all READ RPCs (the last "[NFSRTT] periodic" set): bytes / RPCs
 #       >= 16384.  1344-byte READs give ~1344; 32 KiB READs give ~32768.
 #
@@ -109,6 +113,17 @@ n9=$(grep -c . <<<"$G9"); f9=$(grep -c ' FAIL$' <<<"$G9")
 if [ -z "$G9" ] || [ "$n9" -lt 5 ] || [ "$f9" -ne 0 ]; then
   bad "G9 injected reply loss: $n9 rows, $f9 FAIL: $(grep ' FAIL$' <<<"$G9" | head -3 | tr '\n' ' ')"
 else note "G9 $n9/$n9 injected-loss rows right ($(grep -o 'inject.blackout.read [^ ]* [^ ]* [^ ]* [^ ]* ms=[0-9]*' <<<"$G9"))"; fi
+
+# G10 (cp/nfs2b): sockets created by the LOOKUP storm
+read -r s0 s1 < <(tr -d '\r' < "$C" | awk '
+  /\[NB\] lookstorm mark0/ {m=0} /\[NB\] lookstorm mark1/ {m=1}
+  m!="" && match($0, /socks=[0-9]+/) && !(m in v) {v[m]=substr($0, RSTART+6, RLENGTH-6)}
+  END {print v[0]+0, v[1]+0}')
+SR="$(tr -d '\r' < "$C" | grep -aoE '\[NB\] lookstorm stats=[0-9]+ failed_procs=[0-9]+ ms=[0-9]+ (ok|FAIL)' | tail -1)"
+if [ -z "$SR" ] || [ "${s1:-0}" -eq 0 ]; then bad "G10 no lookstorm rows/counters ($SR)"
+elif ! grep -q ' ok$' <<<"$SR"; then bad "G10 $SR"
+elif [ $((s1 - s0)) -gt 32 ]; then bad "G10 the LOOKUP storm created $((s1 - s0)) sockets (want <= 32): one per RPC ($SR)"
+else note "G10 ${SR#\[NB\] } with $((s1 - s0)) new sockets"; fi
 
 # G2 (and the can't-judge case)
 # Only well-formed rows are judged: two CPUs writing the console can garble a
