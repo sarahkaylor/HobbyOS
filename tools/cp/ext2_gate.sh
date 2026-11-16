@@ -39,7 +39,7 @@ boot() { # boot <n>
   local n="$1"
   say "=== ext2_gate: boot $n (CPDATA=$IMG) ==="
   CPDATA="$IMG" LP_OUT="$D/boot$n.tier.log" LP_TIMEOUT="${LP_TIMEOUT:-600}" \
-    flock /tmp/cp-qemu.lock bash "$ROOT/tools/gate/t3_linux_probe.sh" ext2 \
+    bash "$ROOT/tools/cp/qemu-slot.sh" bash "$ROOT/tools/gate/t3_linux_probe.sh" ext2 \
     > "$D/boot$n.gate.log" 2>&1
   local rc=$?
   local console
@@ -157,7 +157,7 @@ done
 say "=== ext2_gate: boot 3 (linux_probe_ext2b + helper + glibc hs/hd from /EXT) ==="
 CPDATA="$IMG" LP_OUT="$D/boot3.tier.log" LP_TIMEOUT="${LP_TIMEOUT:-600}" \
   LP_WAVE_EXTRA="$(printf 'PROBE.ELF /EXT helper\n/EXT/lpx/bin/hs static\n/EXT/lpx/bin/hd dyn')" \
-  flock /tmp/cp-qemu.lock bash "$ROOT/tools/gate/t3_linux_probe.sh" ext2b \
+  bash "$ROOT/tools/cp/qemu-slot.sh" bash "$ROOT/tools/gate/t3_linux_probe.sh" ext2b \
   > "$D/boot3.gate.log" 2>&1
 rc3=$?
 console="$(sed -n 's/^T3_LOG=//p' "$D/boot3.tier.log" | tail -1)"

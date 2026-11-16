@@ -22,7 +22,7 @@
 #      export is never widened; an export dir that already exists is refused
 #      (it is not this run's to delete);
 #   3. stages the glibc 2.31 runtime on the FAT disk (/LIB64 + /lib64/ld);
-#   4. boots once under `flock /tmp/cp-qemu.lock` and the launcher runs
+#   4. boots once under a QEMU slot (tools/cp/qemu-slot.sh) and the launcher runs
 #      ps, wineboot -i, wine cmd /c echo hello, wine winprobe.exe (from Z: and
 #      from C:), wineserver -k, ps with WINEPREFIX=/tmp/pfx on the compat tmpfs;
 #   5. grades the serial log: G1 hello, G2 every marker in
@@ -152,7 +152,7 @@ OVMF="$OUT/OVMF_CODE_4M.fd"; [ -f "$OVMF" ] || cp "$OVMF_SRC" "$OVMF"
 echo "== boot (deadline ${TIMEOUT_S}s, under the shared QEMU lock)"
 : >"$LOG"
 QA="-display none -enable-kvm${QEMU_MEM:+ -m $QEMU_MEM}"
-flock /tmp/cp-qemu.lock bash -c '
+bash "$ROOT/tools/cp/qemu-slot.sh" bash -c '
   ( make -o disk.img ARCH=intel MODE=test EDK2_X86_64='"$OVMF"' run \
          QEMU_ARGS="'"$QA"'" >>'"$LOG"' 2>&1 & )
   for i in $(seq 1 '"$TIMEOUT_S"'); do
