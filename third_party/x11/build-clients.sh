@@ -76,7 +76,7 @@ stage_clients() {
       $("$PKG_CONFIG" --libs x11)
 
     cp "$o/XPUTBENCH.BIN" "$HB_BIN_DIR/XPUTBENCH.BIN"
-    hb_log "clients: XPUTBENCH.BIN ($(stat -c %s "$HB_BIN_DIR/XPUTBENCH.BIN") bytes)"
+    hb_log "clients: XPUTBENCH.BIN ($(stat -c %s "$HB_BIN_DIR/XPUTBENCH.BIN" 2>/dev/null || stat -f %z "$HB_BIN_DIR/XPUTBENCH.BIN") bytes)"
   else
     hb_log "xputbench: skipped (--only)"
   fi

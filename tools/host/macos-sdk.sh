@@ -20,7 +20,15 @@
 # the newest installed SDK that can (26.5 on the machine this was written on).
 # On a healthy host the probe links and nothing is changed.
 
-if [ "$(uname -s)" = "Darwin" ] && [ -z "${SDKROOT:-}" ]; then
+# NOTE: this probe must run even when SDKROOT is already set.  A pre-set SDKROOT
+# is not evidence that it works: this host exported
+# SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk (the versionless
+# symlink -> 27.2), the link below still failed, and the old guard
+# (`-z "${SDKROOT:-}"`) meant the fallback never ran -- so freetype's configure
+# reported "native C compiler is not working" while a perfectly good MacOSX26.5
+# SDK sat next to it.  Probe unconditionally; if the current setting links, this
+# changes nothing.
+if [ "$(uname -s)" = "Darwin" ]; then
   _hbsdk_probe="$(mktemp "${TMPDIR:-/tmp}/hbsdk-XXXXXX.c")"
   printf 'int main(void){return 0;}\n' > "$_hbsdk_probe"
   if ! ${HB_SDK_CC:-cc} "$_hbsdk_probe" -o "$_hbsdk_probe.out" 2>/dev/null; then
