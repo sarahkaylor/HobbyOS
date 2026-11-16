@@ -161,6 +161,21 @@ int main(void) {
   char *a_cnt[] = { (char *)"pfxls", (char *)"-c", (char *)"/CP/WINE/lib/wine/x86_64-windows",
                     (char *)"/CP/WINE/lib/wine/x86_64-unix", (char *)"/CP/WINE/share/wine", 0 };
   step("nfscount", "/PFXLS.ELF", a_cnt, 60);
+  char *a_hash[] = { (char *)"pfxls", (char *)"-h",
+    (char *)"/CP/WINE/lib/wine/x86_64-unix/ntdll.so",
+    (char *)"/CP/WINE/lib/wine/x86_64-windows/kernelbase.dll",
+    (char *)"/CP/WINE/lib/wine/x86_64-windows/ntdll.dll",
+    (char *)"/CP/WINE/lib/wine/x86_64-windows/wineboot.exe",
+    (char *)"/CP/WINE/lib/wine/x86_64-windows/setupapi.dll",
+    (char *)"/CP/WINE/share/wine/wine.inf", 0 };
+  step("nfshash", "/PFXLS.ELF", a_hash, 120);
+#ifdef P2_LS_ONLY
+  /* the same files read by 6 processes at once */
+  a_hash[1] = (char *)"-H";
+  char *a_hash6[16] = { a_hash[0], (char *)"-H", (char *)"6" };
+  for (int i = 2; a_hash[i] && i < 12; i++) a_hash6[i + 1] = a_hash[i];
+  step("nfshash6", "/PFXLS.ELF", a_hash6, 300);
+#endif
 #ifdef P2_LS_ONLY
   pc("[P2] done\n");
   return 0;
