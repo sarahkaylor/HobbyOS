@@ -409,6 +409,8 @@ def main():
     nfs_bad["nfshard-retry"] = len(re.findall(r"\[NFSHARD\] retry", ser.text))
     nfs_bad["nfshard-giveup"] = len(re.findall(r"\[NFSHARD\] GIVE UP", ser.text))
     hard = "[NFSHARD]" in ser.text or "NFS_HARD" in ser.text
+    waits = [int(w) for w in re.findall(r"\[NFSHARD\] retry[^\n]*waited_ms=(\d+)", ser.text)]
+    nfs_bad["max-waited-ms"] = max(waits) if waits else 0
     # With the hard mount (cyberpunk 8b9fc2c9) every unanswered attempt still
     # prints 'rpc: no reply from server' and is then retried ([NFSHARD] retry,
     # rate-limited after 32 rows); a call fails only with '[NFSHARD] GIVE UP'.
