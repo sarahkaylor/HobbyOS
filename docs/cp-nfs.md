@@ -264,8 +264,12 @@ quiesce), and the per-MiB console set was costing throughput:
 - `[NFSRTT]`/`[NFSRA]`/`[NFSNET]` print every 8 MiB of READ traffic instead
   of every 1 MiB (each console byte is a trapped port write; run23 printed
   12576 `[NFSRTT]` rows).
-- `[NFSRA]` gains `big_kib` (reads above 1 MiB, no windows), `tail_kib`
-  (re-read serially after a hole) and `wins` (windows in use).
+- `[NFSRA]` gains `big_kib` (reads above `NFS_RA_MAXREQ`, no windows),
+  `tail_kib` (re-read serially after a hole) and `wins` (windows in use).
+- `NFS_RA_MAXREQ` 1 MiB -> 16 MiB, `NFS_RA_FILL_MAX` 8 -> 16: P2 run 2 read
+  223 MB with read()s above 1 MiB (the same DLLs once per Wine process)
+  against 158 MB through the windows.  Only reads above 16 MiB (the 172 MB
+  shader cache) stream straight into the caller's buffer.
 
 ## 14. nfs_bench.sh on QEMU slots (cp/nfs2)
 

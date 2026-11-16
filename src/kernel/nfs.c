@@ -82,8 +82,12 @@ volatile uint64_t nfs_io_ops;
 #define NFS_RA_WINDOWS  4096             /* 256 MiB at most, frames taken on first use */
 #define NFS_RA_HBITS    10               /* hash buckets: (fh, block) -> window chain */
 #define NFS_RA_SEQ      4                /* windows a sequential miss loads */
-#define NFS_RA_FILL_MAX 8                /* windows one fill may load */
-#define NFS_RA_MAXREQ   (1024 * 1024)    /* larger reads go straight through */
+#define NFS_RA_FILL_MAX 16               /* windows one fill may load */
+/* cp/nfs2: was 1 MiB.  Gate P2 run 2 read 223 MB with read()s above 1 MiB
+ * (big_kib) against 158 MB through the windows, the same DLLs once per Wine
+ * process; those now share the windows too.  Only reads above 16 MiB (the
+ * 172 MB shader cache) stream straight into the caller's buffer. */
+#define NFS_RA_MAXREQ   (16 * 1024 * 1024)
 struct nfs_ra_win {
   int valid;            /* buf[0..len) holds the file's bytes at base */
   int busy;             /* a fill owns it; valid is 0 while busy */
