@@ -1,0 +1,16 @@
+# linux_probe_tlb, strix QEMU/KVM 8 vCPUs.  BASE = cyberpunk 5eea3712, LANE = cp-k4 1f2006c5
+## BASE
+[LP] FAIL T1 munmap iter 0: A finished without a fault
+[LP] FAIL T2 mprotect(PROT_NONE) iter 0: A finished without a fault
+[LP] FAIL T3 mprotect(PROT_READ) under writes iter 0: A used the stale translation 30015096 more times (c0=308021)
+[LP] FAIL T4 mremap move iter 0: A finished without a fault
+[LP] FAIL T5 madvise(DONTNEED) iter 0: A saw the dropped page for 24870732 accesses after madvise
+[LP] done rc=5
+t3_linux_probe: FAIL — tlb never printed '[LP] done rc=0' (tier rc=1)
+## LANE
+[LP] PASS T1 munmap (12 iterations, slack 1000)
+[LP] PASS T2 mprotect(PROT_NONE) (12 iterations, slack 1000)
+[LP] PASS T3 mprotect(PROT_READ) under writes (12 iterations, slack 1000)
+[LP] PASS T4 mremap move (12 iterations, slack 1000)
+[LP] PASS T5 madvise(DONTNEED) (12 iterations, slack 1000)
+[LP] done rc=0

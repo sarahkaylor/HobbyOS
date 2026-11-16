@@ -1,0 +1,52 @@
+# Gate P2 on the merged tree (cp-k4 3456bf40), strix, KVM, 12 GiB, hard-mount NFS: PASS
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=145506)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=72576; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=466; [P2] ps-extra count=0)
+extra: winprobe from C:\ (tmpfs)       : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=5911)
+[P2] winep2 launcher (C2-wine2)
+[P2] ps-before count=1
+[P2] ps-before pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] mount 10.0.2.2:/srv/nfs/cp-k4-p2 -> /CP ok
+[P2] begin nfscount : pfxls -c /CP/WINE/lib/wine/x86_64-windows /CP/WINE/lib/wine/x86_64-unix /CP/WINE/share/wine
+[P2] end nfscount status=0 ms=2261
+[P2] begin nfshash : pfxls -h /CP/WINE/lib/wine/x86_64-unix/ntdll.so /CP/WINE/lib/wine/x86_64-windows/kernelbase.dll /CP/WINE/lib/wine/x86_64-windows/ntdll.dll /CP/WINE/lib/wine/x86_64-windows/wineboot.exe /CP/WINE/lib/wine/x86_64-windows/setupapi.dll /CP/WINE/share/wine/wine.inf
+[P2] end nfshash status=0 ms=626
+[P2] begin wineboot : wineboot -i
+[EPOLLHW] pid=10 n=16
+[P2] end wineboot status=53 ms=319754
+[EPOLLHW] pid=10 n=32
+[P2] quiesce after wineboot: extra=0
+[P2] begin pfxls : pfxls /tmp/pfx
+[P2] end pfxls status=0 ms=2267
+[P2] begin echo : wine cmd /c echo hello
+[EPOLLHW] pid=81 n=16
+[EPOLLHW] pid=81 n=32
+hello
+[P2] end echo status=0 ms=145506
+[P2] quiesce after echo: extra=0
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+[EPOLLHW] pid=146 n=16
+[EPOLLHW] pid=146 n=32
+[P2] end winprobe status=0 ms=72576
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+[P2] end copy status=0 ms=20751
+[P2] begin winprobe-c : wine C:\winprobe.exe
+[P2] end winprobe-c status=0 ms=5911
+[P2] begin kill : wineserver -k
+[GB145-GHOST] skipping thread slot=179[PUB] who=fault_obj va=0x10800EA000 off=0xE2000 prot=RX priv=1 src=file zero=714 ver=1
+[GB145-GHOST] skipping thread slot=188 pid=188 tgid=152 anchor_state=9
+[GB145-GHOST] skipping thread slot=179 pid=179 tgid=152 anchor_state=9
+[GB145-GHOST] skipping thread slot=188 pid=188 tgid=152 anchor_state=9
+[GB145-GHOST] skipping thread slot=188 pid=188 tgid=152 anchor_state=9
+[GB145-GHOST] skipping thread slot=188 pid=188 tgid=152 anchor_state=9
+[GB145-GHOST] skipping thread slot=188 pid=188 tgid=152 anchor_state=9
+[GB145-GHOST] skipping thread slot=188 pid=188 tgid=152 anchor_state=9
+[P2] end kill status=0 ms=466
+[P2] ps-after count=1
+[P2] ps-after pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-extra count=0
+[P2] done
+rpc-no-reply rows: 91  NFSHARD retries: 33
+
+# VOID pre-merge P2 (cp-k4 1f2006c5, soft-mount NFS, 34 rpc no-reply rows from t~30 s): wineboot status=53 ms=305979, [EPOLLHW] pid=10 n=16 only;
+# stopped in the post-wineboot quiesce (no 'quiesce after wineboot' row): clients st=5 in __read, wineserver alternating in lstat/open/epoll_wait; I killed the guest at ~660 s.

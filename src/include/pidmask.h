@@ -21,7 +21,11 @@
  * Bit 0 is never used (pid 0 is the reserved kernel slot), which keeps
  * "mask is empty" and "no pid" unambiguous.
  */
+#ifdef __x86_64__
+#define PID_MASK_BITS 512 /* C1-k4: MAX_PROCESSES is 512 on x86_64 */
+#else
 #define PID_MASK_BITS 256
+#endif
 #define PID_MASK_WORDS (PID_MASK_BITS / 64)
 
 struct pid_mask {

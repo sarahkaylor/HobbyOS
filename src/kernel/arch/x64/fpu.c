@@ -163,6 +163,7 @@ static void fpu_probe(void) {
  *
  *   CR0.EM = 0  no x87 emulation trap (EM=1 makes every x87/SSE op #UD)
  *   CR0.MP = 1  fwait/finit honors pending FP operations
+ *   CR0.NE = 1  unmasked x87 exceptions raise #MF (vector 16), not FERR#
  *   CR0.TS = 0  no lazy FPU switching: this kernel saves/restores the whole
  *               image on every context switch, so the #NM "task switched"
  *               trap is never part of the design.
@@ -179,7 +180,13 @@ void arch_fpu_enable_core(void) {
 
   __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
   cr0 &= ~(uint64_t)((1u << 2) | (1u << 3)); /* EM, TS = 0 */
-  cr0 |= (uint64_t)(1u << 1);                /* MP = 1     */
+  /* MP = 1; C1-k4: NE = 1 -- native x87 error reporting.  With NE = 0 an
+     unmasked x87 exception is reported through the legacy FERR#/IRQ 13 line
+     and the CPU freezes at the next waiting FP instruction: a compat program
+     that unmasks ZM and divides by zero stopped its core at the `fwait`
+     (linux_probe_siginfo I3, base and lane) instead of taking #MF (vector
+     16, SIGFPE/FPE_FLTDIV).  Linux runs with NE set. */
+  cr0 |= (uint64_t)((1u << 1) | (1u << 5));
   __asm__ volatile("mov %0, %%cr0" : : "r"(cr0) : "memory");
 
   __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));

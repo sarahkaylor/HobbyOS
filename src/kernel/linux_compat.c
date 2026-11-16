@@ -355,6 +355,7 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     p->sig_park_kind = 0;
     p->sig_park_nr = 0;
     p->sys_entry_pc = tf->elr;
+    p->poll_waiting = 0; /* C1-k4: a poll registration belongs to one syscall */
   }
 #ifdef RW_SC_RING
   /* L85: open a history slot BEFORE the handler runs, so a fault inside the
