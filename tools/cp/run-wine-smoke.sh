@@ -108,7 +108,7 @@ OVMF="$OUT/OVMF_CODE_4M.fd"; [ -f "$OVMF" ] || cp "$OVMF_SRC" "$OVMF"
 
 echo "== boot (deadline ${TIMEOUT_S}s, under the shared QEMU lock)"
 : >"$LOG"
-flock /tmp/cp-qemu.lock bash -c '
+bash "$ROOT/tools/cp/qemu-slot.sh" bash -c '
   ( make -o disk.img ARCH=intel MODE=test EDK2_X86_64='"$OVMF"' run \
          QEMU_ARGS="-display none -enable-kvm" >>'"$LOG"' 2>&1 & )
   for _ in $(seq 1 '"$TIMEOUT_S"'); do

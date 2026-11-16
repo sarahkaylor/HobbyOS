@@ -1,0 +1,63 @@
+# Gate P2 runs on cp-nfs2, strix.  Every run hung in the post-wineboot quiesce with the C1-k4 epoll signature (all Wine clients st=5, futex=0x0, wineserver idle, no NFS traffic for > 6 min); I killed my own QEMU each time.  run23 reference: 1.66 GB of READ, 51331 x 32 KiB, wineboot status=53 ms=306756, wall 2343 s, [NFSRA] hits=21536 fills=8477.
+
+# run 1: cp-nfs2 15ad85b7 (item 1 only, 256 windows), 1 guest slot era
+## phases (READ bytes at the last [NFSRTT] set before each row; 8 MiB sets from run 2 on, 1 MiB before)
+ [P2] begin nfscount : pfxls -c /CP/WINE/lib/wine/x86_64-windows /CP/WINE/lib/wine/x86_64-unix /CP/WINE/share/
+ [P2] end nfscount status=0 ms=222
+ [P2] begin nfshash : pfxls -h /CP/WINE/lib/wine/x86_64-unix/ntdll.so /CP/WINE/lib/wine/x86_64-windows/kernelb
+3694840 [P2] end nfshash status=0 ms=114
+3694840 [P2] begin wineboot : wineboot -i
+100008514 [P2] end wineboot status=53 ms=304877
+## last counters
+[NFSRTT] periodic want=32768 n=18621 sock_us=0 send_us=0 wait_us=11474 wait_max_us=133597 wait_min_us=47 bytes=568416040
+[NFSRA] hits=17107 fills=6513 saved_kib=433657 misses=3343 seqfills=1252 fill_kib=361582 direct=0 hit_pct=83 stalls=568 alloc_us=292 fill_us=219593429
+stall rows: 8  [NFSHARD] rows: 0
+## NFS byte counter (watchdog rows) at the end
+NFSIO] bytes=0x0x0000000021ed7e20 rpcs=0x0x0000000000004909 ms=0x0x000000000023f00d
+## hang signature at the end
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXIT
+[IDLESTUCK] slot=33 pid=33 st=5 wake=0 futex=0x0 rip=0x1080050390 rundll32.exe
+[IDLESTUCK] slot=38 pid=38 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+
+# run 2: cp-nfs2 528e5c81 (4096 windows, 150 ms first wait, no per-socket cap), up to 4 guests
+## phases (READ bytes at the last [NFSRTT] set before each row; 8 MiB sets from run 2 on, 1 MiB before)
+ [P2] begin nfscount : pfxls -c /CP/WINE/lib/wine/x86_64-windows /CP/WINE/lib/wine/x86_64-unix /CP/WINE/share/
+ [P2] end nfscount status=0 ms=220
+ [P2] begin nfshash : pfxls -h /CP/WINE/lib/wine/x86_64-unix/ntdll.so /CP/WINE/lib/wine/x86_64-windows/kernelb
+ [P2] end nfshash status=0 ms=114
+ [P2] begin wineboot : wineboot -i
+84595266 [P2] end wineboot status=53 ms=304031
+## last counters
+[NFSRTT] periodic want=32768 n=13282 sock_us=0 send_us=0 wait_us=14378 wait_max_us=87780 wait_min_us=73 bytes=390196926
+[NFSRA] hits=21520 fills=2899 saved_kib=487766 misses=1498 seqfills=576 fill_kib=158207 direct=0 hit_pct=93 stalls=412 big_kib=222780 tail_kib=0 wins=3593 shrunk=0 alloc_us=2243 fill_us=54117146
+[NFSNET] frags=273924 done=12272 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=412
+stall rows: 8  [NFSHARD] rows: 0
+## NFS byte counter (watchdog rows) at the end
+NFSIO] bytes=0x0x00000000177583b2 rpcs=0x0x0000000000003481 ms=0x0x00000000002295ea
+## hang signature at the end
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXIT
+[IDLESTUCK] slot=76 pid=76 st=5 wake=0 futex=0x0 rip=0x10800503ca rpcss.exe
+[IDLESTUCK] slot=77 pid=77 st=5 wake=0 futex=0x0 rip=0x10800503ca rpcss.exe
+
+# run 3: cp-nfs2 39c639f4 (+ hard mount, 2 replies per socket, 16 MiB window reads) + run-wine-p2.sh from cp-pfx f8ceec91 (scratch only), 4 guests
+## phases (READ bytes at the last [NFSRTT] set before each row; 8 MiB sets from run 2 on, 1 MiB before)
+ [P2] begin nfscount : pfxls -c /CP/WINE/lib/wine/x86_64-windows /CP/WINE/lib/wine/x86_64-unix /CP/WINE/share/
+ [P2] end nfscount status=0 ms=218
+ [P2] begin nfshash : pfxls -h /CP/WINE/lib/wine/x86_64-unix/ntdll.so /CP/WINE/lib/wine/x86_64-windows/kernelb
+ [P2] end nfshash status=0 ms=116
+ [P2] begin wineboot : wineboot -i
+43256930 [P2] end wineboot status=53 ms=303393
+## last counters
+[NFSRTT] periodic want=32768 n=6519 sock_us=0 send_us=0 wait_us=7713 wait_max_us=126950 wait_min_us=54 bytes=198560866
+[NFSRA] hits=13285 fills=3382 saved_kib=351850 misses=1299 seqfills=489 fill_kib=193523 direct=0 hit_pct=91 stalls=1 big_kib=0 tail_kib=0 wins=3858 shrunk=0 alloc_us=2136 fill_us=27515763
+[NFSNET] frags=139455 done=6385 drop_timeout=2 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=1 inj_dropped=0
+stall rows: 1  [NFSHARD] rows: 32
+## NFS byte counter (watchdog rows) at the end
+NFSIO] bytes=0x0x000000000c00dc62 rpcs=0x0x00000000000019d5 ms=0x0x000000000018bdf7
+## hang signature at the end
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXIT
+[IDLESTUCK] slot=36 pid=36 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=38 pid=38 st=5 wake=0 futex=0x0 rip=0x1080050390 rundll32.exe
+== exports.sh: remove /srv/nfs/cp-nfs2-p2 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-nfs2-p2
+rc=1 wall=2409s

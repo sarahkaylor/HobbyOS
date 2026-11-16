@@ -23,7 +23,7 @@ LOCK=/tmp/cp-qemu.lock
 export TOOLS_SKIP=1
 # Every QEMU boot runs under the shared lock -- unless the caller already holds
 # it for a whole batch (GATES_LOCKED=1, e.g. `flock LOCK env GATES_LOCKED=1 ...`).
-lk() { if [ "${GATES_LOCKED:-0}" = 1 ]; then "$@"; else flock "$LOCK" "$@"; fi; }
+lk() { if [ "${GATES_LOCKED:-0}" = 1 ]; then "$@"; else bash "$ROOT/tools/cp/qemu-slot.sh" "$@"; fi; }
 cmd=${1:?usage: gates.sh probes|wave|unit [names]}; shift
 fails=0
 case "$cmd" in

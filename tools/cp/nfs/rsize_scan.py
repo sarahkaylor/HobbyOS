@@ -18,10 +18,16 @@ NFS server, and FAILs when any known regression is present:
       truncates every large READ)
   R6  net.c no longer sends IPv4 fragments to reassembly (ipr_add): a 32 KiB
       reply arrives as ~23 fragments
-  R7  the readahead fill no longer invalidates the shared window before it
-      overwrites nfs_ra_buf with the lock dropped.  With 32 KiB READs every
-      4 KiB page-in uses the window, so concurrent readers got another
-      file's bytes (Wine, 2026-11-16).
+  R7  a readahead window fill no longer invalidates the window before it
+      overwrites the window's buffer with the lock dropped, or a reader no
+      longer refuses a busy window.  With 32 KiB READs every 4 KiB page-in
+      uses the windows, so concurrent readers got another file's bytes
+      (Wine, 2026-11-16).  cp/nfs2: checked per window (`x->busy = 1;` must
+      be followed by `x->valid = 0;` before the lock is released).
+  R8  the readahead window table is gone or back to one shared window
+      (NFS_RA_WINDOWS < 8, or the lookup no longer keys on the file handle
+      and block): interleaved readers of different files then evict each
+      other and Gate P2 reads 1.66 GB for ~200 MB of Wine (cp/nfs2).
 
 --selftest re-applies each regression to a temporary copy of the files and
 requires the scan to FAIL on every one and PASS on the untouched copy, so the
@@ -72,6 +78,12 @@ def scan(root):
         if args and args[-1] == "NFS_READ_RSIZE":
             line = c.count("\n", 0, mm.start()) + 1
             bad.append("R3 nfs.c:%d: nfs_read_pipelined() called with the 1344-byte rsize" % line)
+    # cp/nfs2: the window fill calls nfs_read_pipe(m, fh, off, buf, segs, len, rs, eof)
+    for mm in re.finditer(r"\bnfs_read_pipe\s*\(([^;{]*?)\)\s*;", c, re.S):
+        args = [a.strip() for a in mm.group(1).split(",")]
+        if len(args) == 8 and args[6] == "NFS_READ_RSIZE":
+            line = c.count("\n", 0, mm.start()) + 1
+            bad.append("R3 nfs.c:%d: nfs_read_pipe() called with the 1344-byte rsize" % line)
 
     if "NFS_PROC_FSINFO" not in c:
         bad.append("R4 nfs.c: the mount never sends FSINFO (READ size never learned)")
@@ -89,12 +101,34 @@ def scan(root):
         bad.append("R7 nfs.c: nfs_ra_try() not found (readahead window race unchecked)")
     else:
         body = m.group(1)
-        i_busy = body.find("nfs_ra.busy = 1")
-        i_fill = body.find("nfs_read_pipelined(")
-        between = body[i_busy:i_fill] if 0 <= i_busy < i_fill else ""
-        if not re.search(r"nfs_ra\.valid\s*=\s*0\s*;", between):
-            bad.append("R7 nfs.c: nfs_ra_try() refills nfs_ra_buf without first setting "
-                       "nfs_ra.valid = 0 (concurrent readers get mid-refill bytes)")
+        # The fill: a window marked busy must be marked invalid in the SAME
+        # locked section, before the lock is dropped for the READs.
+        mb = re.search(r"(\w+)->busy\s*=\s*1\s*;", body)
+        i_fill = body.find("nfs_read_pipe(")
+        if not mb or i_fill < 0 or mb.start() > i_fill:
+            bad.append("R7 nfs.c: nfs_ra_try() has no busy-claim before its fill "
+                       "(nfs_read_pipe); the window race is unchecked")
+        else:
+            var = re.escape(mb.group(1))
+            rel = body.find("spinlock_release", mb.end())
+            stop = min(x for x in (rel, i_fill) if x >= 0)
+            if not re.search(var + r"->valid\s*=\s*0\s*;", body[mb.end():stop]):
+                bad.append("R7 nfs.c: nfs_ra_try() refills a window without first setting "
+                           "%s->valid = 0 under the lock (concurrent readers get "
+                           "mid-refill bytes)" % mb.group(1))
+        # The reader: only a valid window that no fill owns may be copied.
+        i_rd = body.find("nfs_ra_serve(")
+        if i_rd < 0 or not re.search(r"\w+->valid\s*&&\s*!\s*\w+->busy", body[:i_rd]):
+            bad.append("R7 nfs.c: nfs_ra_try() serves a window without checking "
+                       "valid && !busy first")
+
+    m = re.search(r"^\s*#\s*define\s+NFS_RA_WINDOWS\s+\(?\s*(\d+)", c, re.M)
+    if not m or int(m.group(1)) < 8:
+        bad.append("R8 nfs.c: NFS_RA_WINDOWS missing or below 8 (%s): one shared readahead "
+                   "window thrashes between readers" % (m.group(1) if m else "not defined"))
+    m = re.search(r"\bnfs_ra_find\s*\([^)]*\)\s*\{(.*?)\n\}", c, re.S)
+    if not m or "nfs_ra_fh_eq(" not in m.group(1) or not re.search(r"->base\s*!=\s*base", m.group(1)):
+        bad.append("R8 nfs.c: nfs_ra_find() no longer keys windows on (file handle, block)")
     return bad
 
 
@@ -105,15 +139,25 @@ MUTATIONS = [
      r"if \(rs > NFS_READ_RSIZE_MAX\) rs = NFS_READ_RSIZE_MAX;",
      "if (rs > NFS_READ_RSIZE) rs = NFS_READ_RSIZE;"),
     ("R3", "src/kernel/nfs.c",
-     r"(nfs_read_pipelined\(m, fh, base, nfs_ra_buf, NFS_RA_BYTES,\s*)rars\)",
-     r"\g<1>NFS_READ_RSIZE)"),
+     r"(nfs_read_pipe\(m, fh, base, 0, segs, [^,]+,\s*)rars(, &eof\))",
+     r"\g<1>NFS_READ_RSIZE\g<2>"),
     ("R4", "src/kernel/nfs.c",
      r"m->read_size\s*=\s*nfs_pick_rsize\s*\(rtmax, rtpref\);", "(void)rtpref;"),
     ("R5", "src/kernel/nfs.c", r"\bNFS_RPC_RBIG\b", "NFS_RPC_BUF"),
     ("R6", "src/kernel/net.c",
      r"struct ipr_slot \*sl = ipr_add\(", "struct ipr_slot *sl = (struct ipr_slot *)0; (void)("),
     ("R7", "src/kernel/nfs.c",
-     r"(?s)(nfs_ra\.busy = 1;)(.*?)\n\s*nfs_ra\.valid = 0;", r"\g<1>\g<2>"),
+     r"(?s)(x->busy = 1;)(.*?)\n\s*x->valid = 0;", r"\g<1>\g<2>"),
+    # the invalidation moved to after the lock is dropped: still a race
+    ("R7", "src/kernel/nfs.c",
+     r"(?s)\n(\s*)x->valid = 0;(.*?)(\n\s*uint32_t gen = nfs_ra\.gen;\n\s*spinlock_release_irqrestore\(&nfs_ra_lock, fl\);)",
+     r"\g<2>\g<3>\n\g<1>for (int i = 0; i < k; i++) claim[i]->valid = 0;"),
+    ("R7", "src/kernel/nfs.c",
+     r"if \(w && w->valid && !w->busy && nfs_ra_serve", "if (w && nfs_ra_serve"),
+    ("R8", "src/kernel/nfs.c",
+     r"(#define\s+NFS_RA_WINDOWS\s+)\d+", r"\g<1>1"),
+    ("R8", "src/kernel/nfs.c",
+     r"if \(nfs_ra_fh_eq\(&w->fh, fh\)\) return w;", "return w;"),
 ]
 
 

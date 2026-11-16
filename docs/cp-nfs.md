@@ -129,3 +129,241 @@ R7 in `rsize_scan.py` keeps the invalidation line from going missing.
 That costs performance, not correctness: each 4 KiB read can cost a 64 KiB
 refill. A per-file window table is the next step if Wine's page-in time calls
 for it.
+
+## 8. Per-file readahead windows (cp/nfs2, item 1)
+
+Gate P2 (run23) read 1.66 GB in 51k 32 KiB READs to bring up ~200 MB of
+Wine; `[NFSRA] hits=21536 fills=8477`: 555 MB of 64 KiB fills served 65 MB.
+The one global window lost three ways: interleaved readers of different
+files evicted it; a fill started AT the request and ran forward, so a
+backwards or scattered reader (pfxls's reverse 4 KiB preads cost 69 MB for
+13.5 MB of hashing; a loader's page faults) paid a fresh 64 KiB per page; and
+nothing survived for the next process paging the same DLL.
+
+**Now** (`nfs.c`, "readahead window"): `NFS_RA_WINDOWS` (256) windows, each
+an aligned 64 KiB block of one file, keyed by (mount, file handle, block) and
+replaced LRU; buffers are taken from the frame pool on first use (16 MiB).
+Every read up to `NFS_RA_MAXREQ` (1 MiB) goes through them piece by piece;
+a miss loads the blocks the read still needs, and a miss right after a block
+that was read to its end (per-window `next`) loads `NFS_RA_SEQ` (4) blocks in
+one pipelined fill.  Larger reads stream straight into the caller's buffer.
+
+**The cp/nfsfix rule, per window.** A fill marks each claimed window
+`busy = 1; valid = 0` in the same locked section, drops the lock for the
+READs, and publishes `valid = 1` under the lock; readers copy only from
+`valid && !busy` windows, under the lock.  A reader that needs a block being
+filled reads its own bytes directly (`direct=` in `[NFSRA]`).  `rsize_scan`
+R7 checks both halves per window (three selftest mutations: the invalidation
+removed, moved after the unlock, the reader's busy check removed); R8 fails
+on fewer than 8 windows or a lookup that stops keying on (handle, block).
+
+**Transport, same commit.** A 32 KiB reply is ~23 fragments and the RX
+virtqueue holds 256 frames; run23's stalls ("inflight=10 issued=22
+replies=12") are that queue overflowing.  Pipelines now share an in-flight
+budget (`NFS_INFLIGHT_MAX`, 6 x 32 KiB; a pipeline with nothing in flight may
+always send one), and a reply timeout re-sends the in-flight READs instead of
+finishing the whole range serially (`resent=` in `[NFSPIPE]`, `stalls=` in
+`[NFSRA]`).
+
+**Bench** (`cpnfsbench` phase `multi6`): six processes read six different
+2 MiB files at once (even ones forward, odd ones backward, 4 KiB pages), every
+page compared with the host's xorshift stream; `rsize_guard.sh` G7 requires
+all pages right and `amp_pct` (READ bytes / bytes read) <= 200.
+
+| strix, intel guest | base 5eea3712 | cp/nfs2 |
+|---|---|---|
+| multi6 amp_pct (fetched / read) | 345 (42400 KiB for 12288) | 100 (12288 for 12288) |
+| multi6 hit_pct_est | 78 | 93 |
+| conc6 / multi6 pages | all correct | all correct |
+
+## 9. 64-bit offsets and files > 4 GiB (cp/nfs2, item 2)
+
+Audit of every offset and size on the NFS read, getattr, lseek and
+page-cache paths:
+
+| Where | Was | Now |
+|---|---|---|
+| `nfs_read_file()` (nfs.h) | `uint32_t offset` | `uint64_t`; count clamped to INT_MAX (returned as int) |
+| serial READ, pipeline slots, `issue_off`/`contig`/`end`, windows | `uint32_t` (a READ past 4 GiB asked the server for offset mod 2^32) | `uint64_t` |
+| `struct file.nfs.cursor`, `.ra_next` (fs.h) | `uint32_t`: read() wrapped to offset 0 after 4 GiB | `uint64_t` |
+| `file_seek()` NFS branch | `cursor = (uint32_t)newpos` | 64-bit |
+| `l76_nfs_read()` window/page cache (fs.c) | `uint32_t off`, `base = off & ~(uint32_t)4095` | 64-bit (the mask no longer clears the high half) |
+| `file_nfs_ident()` size for mmap | `(uint32_t)size`: a 4 GiB + 10 MB file mapped as 10 MB | saturates at 0xFFFFFFFF, so the page cache's size cap refuses it |
+| fattr3 size, `f->nfs.size`, `k_stat.st_size` | already 64-bit | unchanged |
+| `nfs_obj_get()`/`nfs_obj_page()` (file_obj.c), the NFS reads in `vm.c` | `uint32_t` sizes/offsets | unchanged: objects are capped at `VM_OBJ_MAX_BYTES` (< 4 GiB) and a > 4 GiB file no longer reaches them; the casts are for C3-pfx/C1-k4 when that cap grows past 4 GiB |
+| readdir cache sizes (`nfs_list_dir` `size_out`) | `uint32_t` | unchanged (native `ls` only; the API is vfs.c's) |
+
+Gate (`NB_BIG=1 bash tools/cp/nfs/nfs_bench.sh`): a 5 GiB + 12345 byte
+xorshift file, written under `obj/` on strix's root filesystem, renamed
+into the export and removed with it; the guest reads it with 4 MiB read()s
+(the direct pipeline) and SHA-256s it (`cpnfsbench`'s own SHA-256, checked
+against `sha256sum` on the host), checks fstat and `lseek(SEEK_END)` give
+the 64-bit size, and re-reads a 4 KiB page at 4 GiB + 8 MiB + 123 through
+the window path after an lseek.
+
+## 10. One read() of ~172 MB (cp/nfs2, item 3)
+
+The game reads `shader_final.cache` (172 MB, cyberpunk.md §0.2 item 12) with
+one `read()`.  The path is native/compat `read()` -> `file_read` (int count)
+-> `l76_nfs_read` (no L76 window: the count is > 16 KiB) ->
+`nfs_read_file` -> `nfs_read_pipe` straight into the caller's buffer (reads
+above `NFS_RA_MAXREQ` bypass the windows).  What had to change was the
+pipeline's failure mode: one lost reply used to end the pipeline and read
+the REST of the range serially, one round trip per 32 KiB block (thousands
+for 172 MB); it now re-sends the READs in flight (item 1).
+Gate: `cpnfsbench` phase `one176m`, 176 MiB + 777 bytes in one read() into
+one malloc'd buffer, SHA-256 against the host's (`rsize_guard.sh` G8).
+
+## 11. stat times and symlinked directories (cp/nfs2, item 4)
+
+- **fstat/stat times.** `nfs_parse_fattr3` now keeps atime and ctime;
+  `file_stat_fd` (fstat) and the NFS branch of stat(path) report all three
+  (fstat gave 0 for all three; stat(path) gave mtime for all three).  fstat needs the attributes of an open handle: the ones
+  every LOOKUP returns are kept in a 64-entry cache keyed by (mount, handle),
+  3 s TTL like Linux's acregmin, else GETATTR (`nfs_getattr_cached`).
+- **Symlinks in intermediate components.** `nfs_lookup` walks the path one
+  component at a time; when ANY component is NF3LNK it reads the target,
+  joins it against the link's directory (`nfs_symlink_join`), appends the
+  rest of the path and restarts from the root, at most 40 links per lookup
+  (Linux MAXSYMLINKS; ends a cycle).  Before, only a link in the last
+  component was followed: `dlink -> sub` made `/NFS/dlink/file` fail, since
+  the server answers LOOKUP in a symlink handle with NFS3ERR_NOTDIR.
+- Probe rows (`cpnfsbench`): `[NB] fstat`/`[NB] stat` against the host's
+  `stat -c '%X %Y %Z'` of a file whose times the harness set with touch;
+  `[NB] symlink path=...` for `dlink/`, `d2/` (link to a link), `sub/up/`
+  (`..`) and `sub/up/d2/` (three links in one walk), each opened, stat()ed
+  and read whole.  Tests: `nfs_proto_test` (fattr3 times + a 5 GiB size),
+  kernel `nfs_test` (atime/ctime).
+
+## 12. Where lost READ replies go (cp/nfs2, net.c counters)
+
+Gate P2 on the item-1 commit stalled 544 times with ONE READ in flight
+system-wide (`[NFSPIPE] stall inflight=1 ... budget=32768`), about one per
+MiB; the single-reader bench never stalls.  So it is not RX-queue overflow.
+`net.c` now counts why reassembly drops an incomplete datagram
+(`ipr_drop_timeout`: a fragment never came; `ipr_drop_evict`/`_full`: all 8
+slots busy; `ipr_drop_bad`) and complete UDP datagrams no socket took
+(`udp_nosock`, `udp_dgram_full`); `nfs_perf_dump` prints them as one
+`[NFSNET]` row with the stall count.  A minimal diff (counters only, no
+behaviour change), in its own commit.
+
+## 13. Window table, second pass (cp/nfs2)
+
+The item-1 P2 run showed the 16 MiB table was too small for rundll32's
+repeated passes over the 185 MB tree (hit rate 97% in wineboot, 83% by the
+quiesce), and the per-MiB console set was costing throughput:
+
+- `NFS_RA_WINDOWS` 256 -> 4096 (256 MiB at most), found through a 1024-bucket
+  hash on (fh, block) instead of a linear scan, replaced by a second-chance
+  clock.  New buffers are taken only while a quarter of the frame pool is
+  free; while less than an eighth is, every miss gives up to 32 idle window
+  buffers back (`nfs_ra_shrink()`, exported for a future frame-pool reclaim
+  hook; `shrunk=` in `[NFSRA]`).
+- The first wait for a pipelined reply is 150 ms (`NFS_PIPE_TIMEOUT_MS`;
+  replies that come at all came within 99 ms in run23), re-sends get 500 ms.
+- `[NFSRTT]`/`[NFSRA]`/`[NFSNET]` print every 8 MiB of READ traffic instead
+  of every 1 MiB (each console byte is a trapped port write; run23 printed
+  12576 `[NFSRTT]` rows).
+- `[NFSRA]` gains `big_kib` (reads above `NFS_RA_MAXREQ`, no windows),
+  `tail_kib` (re-read serially after a hole) and `wins` (windows in use).
+- `NFS_RA_MAXREQ` 1 MiB -> 16 MiB, `NFS_RA_FILL_MAX` 8 -> 16: P2 run 2 read
+  223 MB with read()s above 1 MiB (the same DLLs once per Wine process)
+  against 158 MB through the windows.  Only reads above 16 MiB (the 172 MB
+  shader cache) stream straight into the caller's buffer.
+
+## 14. nfs_bench.sh on QEMU slots (cp/nfs2)
+
+`nfs_bench.sh` (and so `rsize_guard.sh`) no longer holds
+`/tmp/cp-exports.lock` across its boot: it fills the export dir, adds its
+line with `tools/cp/exports.sh add`, boots under `tools/cp/qemu-slot.sh`,
+and its EXIT/INT/TERM/HUP trap runs `exports.sh remove` and removes the
+dir (the run-wine-p2.sh pattern of cp-pfx f8ceec91).  The default export is
+`/srv/nfs/cp-nfs-bench-<tree dir name>`, so a lane and a base bench can run
+in two slots at once.
+
+## 15. Hard-mount semantics: a lost reply is never data (cp/nfs2)
+
+C5-vk2 (strix, 4 guests) saw `[NFSPIPE] stall` rows, `[NFS] rpc: no reply
+from server`, `[NFLK] retry comp=WINE tries=3 rc=-1`, then wineboot fault
+on an all-zero `sortdefault.nls` section.  The client gave up after a short
+budget (READ: 2 x 500 ms; LOOKUP: ~6 s) and the READ paths returned the
+bytes they had so far as a successful short read, which a caller that
+zero-fills short reads turns into zeros.
+
+**Now:**
+- A READ with no reply is re-sent (fresh xid, fresh socket, backoff 0/250/
+  500/1000/2000 ms on top of each 500 ms wait) until it is answered or
+  `NFS_HARD_MS` (180 s) have passed; every retry is a bounded `[NFSHARD]
+  retry` row, a give-up is `[NFSHARD] GIVE UP ... -> EIO`.  The same holds
+  for LOOKUP, GETATTR, READLINK, READDIRPLUS and FSSTAT on a mounted export
+  (`rpc_call_hard`); mount-time calls stay soft so a missing server fails
+  `mount` quickly.
+- A failed read fails WHOLE: `nfs_read_file` returns -1, never a partial
+  count (serial READ, pipeline tail, window fill, the direct piece of a
+  windowed read).  `read()`/`pread()` see -EIO; a page-in (`nfs_obj_page`,
+  the exec gate) fails and the fault is SIGBUS (trap.c, `VM_MAP_IOERR`),
+  never a zero page.  Only end of file ends a read short; a short non-EOF
+  reply is followed by a READ for the rest.
+- The rsize fallback (1344-byte READs) now needs evidence: three large
+  READs unanswered while a single-frame READ of the same block IS answered.
+  A server that answers nothing no longer drops the mount to 1344.
+
+**Guard (G9):** test kernels can drop NFS reply datagrams on receipt
+(`/.cp-nfs-inject.every.N`, `.blackout.MS`, `.off` as a LOOKUP name under
+the mount).  `cpnfsbench` phase `inject` reads fresh files page by page and
+maps one, with every 5th reply dropped and with all replies dropped for 8 s,
+and compares every page with the host's stream.  It fails on the commit
+before the fix (the blackout read gives up) and passes after it.
+
+## 16. Why the server "stopped answering" (strix, 2026-11-16)
+
+Measured during Gate P2 run 2 with four guests up: the guest's reassembly
+saw no partial datagram (`[NFSNET] frags=36503 done=1604 drop_timeout=0
+drop_evict=0 ... stalls=29`): whole replies vanished.  On the host,
+`/proc/net/snmp` Udp `RcvbufErrors` grew by 203 in 90 s while that guest
+counted 28 stalls, and `ss -uamnp` showed the drops on qemu-system-x86's
+slirp sockets (`rb212992 ... d3030` for one guest, `d62` for ours).  So the
+loss is QEMU's slirp host socket, whose 212992-byte default receive buffer
+holds only about three 32 KiB replies (truesize ~2x), overflowing while
+QEMU drains slowly.  It is not `exportfs -ra` (no partial or deferred
+pattern needed to explain it; the counters account for it).
+
+Client side: at most two 32 KiB READs outstanding per socket
+(`NFS_PIPE_INFLIGHT`), and hard-mount retries for the rest.  Host side
+(proposed, not done: it is a system setting): `net.core.rmem_default` of
+1-4 MiB would give every slirp socket room for a full pipeline.
+
+Run 3 (39c639f4, 2 replies per socket): stalls=1 where run 2 had 65 at the
+same point, and every one of our QEMU's 5775 slirp sockets showed `d0`
+(`docs/cp-nfs2-evidence/slirp-rcvbuf-strix.txt`).  The per-socket cap is
+enough; no host setting needed for our guests.
+
+One more shape: in run 3 a LOOKUP went unanswered for 95 s (30 hard
+retries) while READs on other sockets were answered.  A small reply cannot
+overflow a buffer, so this is nfsd not answering.  Suspected (not proven):
+`exportfs -ra` in tools/cp/exports.sh flushes nfsd's export caches, and
+nfsd drops (defers) UDP requests that arrive before mountd refills them.
+Proposed for exports.sh (integrator-owned, not edited here): add with
+`exportfs -o ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534 127.0.0.1:DIR`
+and remove with `exportfs -u 127.0.0.1:DIR` (keeping the /etc/exports edit
+for persistence), so other exports' cache entries survive; and log each
+call with a timestamp so a no-reply window can be matched to it.
+
+## 17. Gate P2 with cp/nfs2 (strix)
+
+| | run23 (base) | run 1 (15ad85b7) | run 2 (528e5c81) | run 3 (39c639f4) |
+|---|---|---|---|---|
+| READ bytes, wineboot phase | 269 MB | 96 MB | <= 85 MB | <= 43 MB |
+| READ bytes, whole run | 1.66 GB (complete) | 569 MB at the hang | 393 MB at the hang | 201 MB at the hang |
+| wineboot | status=53 ms=306756 | status=53 ms=304877 | status=53 ms=304031 | status=53 ms=303393 |
+| window hit rate | 72% (fills/hits) | 83% | 93% | 91% |
+| pipeline stalls | (8 rows capped) | 568 | 412 | 1 |
+| guests on strix | 1 | 1-2 | up to 4 | 4 |
+
+Every cp/nfs2 run hung in the post-wineboot quiesce with C1-k4's epoll
+signature (all clients st=5, futex=0x0, wineserver idle, no NFS traffic),
+so no run reached G1-G3; the NFS numbers are judged on page-in volume,
+stalls and correctness (`docs/cp-nfs2-evidence/p2-runs-strix.txt`).
+wineboot still ends at the 300 s boot-event timeout: NFS now accounts for
+a few seconds of RPC wait in that window, not for the timeout.
+

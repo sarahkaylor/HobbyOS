@@ -28,7 +28,7 @@ mcopy -o -i \$ROOT/disk.img $LDSO ::/lib64/ld-linux-x86-64.so.2 && \
 mcopy -o -i \$ROOT/disk.img $LIBC ::/LIB64/libc.so.6 && \
 mcopy -o -i \$ROOT/disk.img $D/wave.cfg ::WAVE.CFG"
 T3_TIMEOUT="${LP_TIMEOUT:-420}" T3_STAGE="$STAGE" T3_MIN_LINES=1 TOOLS_SKIP=1 \
-  flock /tmp/cp-qemu.lock bash "$ROOT/tools/t3_tier.sh" intel > "$D/tier.log" 2>&1
+  bash "$ROOT/tools/cp/qemu-slot.sh" bash "$ROOT/tools/t3_tier.sh" intel > "$D/tier.log" 2>&1
 CONSOLE="$(sed -n 's/^T3_LOG=//p' "$D/tier.log" | tail -1)"
 [ -r "$CONSOLE" ] || { echo "exec_gate: FAIL — no console"; tail -20 "$D/tier.log"; exit 1; }
 cp "$CONSOLE" "$D/console.log"

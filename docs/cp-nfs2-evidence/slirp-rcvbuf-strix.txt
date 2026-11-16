@@ -1,0 +1,19 @@
+# Where "the server stopped answering": host-side UDP receive-buffer drops (strix, 2026-11-16)
+
+## P2 run 2 (cp-nfs2 528e5c81: up to 6 x 32 KiB READs in flight per socket), 4 guests up
+guest:  [NFSNET] frags=273924 done=12272 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=412
+        (no partial datagram ever reached reassembly: whole replies were lost)
+host:   /proc/net/snmp Udp RcvbufErrors +203 in 90 s while that guest went from stalls=29 to stalls=57
+host:   ss -uamnp, qemu-system-x86 slirp sockets with drops:
+          pfx's QEMU (pid 3453971, base nfs.c, 16 READs in flight)  skmem:(r0,rb212992,...,d3030)
+          ours (pid 3668278)                                       skmem:(r0,rb212992,...,d62)
+        net.core.rmem_default = 212992 (one 32 KiB reply on loopback is one ~33 KiB datagram, truesize ~2x)
+
+## P2 run 3 (cp-nfs2 39c639f4: at most 2 x 32 KiB in flight per socket, 6 globally), 4 guests up
+guest:  [NFSNET] frags=139455 done=6385 drop_timeout=2 ... stalls=1 (run 2 at the same point: stalls=65)
+host:   ss -uamnp on our QEMU (pid 3948923) at the hang: 5775 UDP sockets, every one d0
+host:   Udp RcvbufErrors 34094 -> 40342 during the run: other lanes' guests (base nfs.c)
+other:  one LOOKUP was unanswered for 95 s (30 hard-mount retries, [NFSHARD] try=30 waited_ms=95379)
+        while READs on other sockets were answered: a small reply, not a buffer overflow.  Suspect
+        nfsd deferring a request during an export-cache flush (`exportfs -ra` from another lane's
+        exports.sh) -- not proven: exports.sh calls carry no timestamps to correlate.
