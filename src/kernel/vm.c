@@ -1910,6 +1910,14 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
       vm_object_unref(o);
       return -EIO;
     }
+    /* C1-k4: a Linux-ABI address space gets Linux's answer for a page wholly
+       past EOF -- SIGBUS/BUS_ADRERR (glibc's ld.so replaces such pages with
+       anonymous MAP_FIXED before it touches them; Wine's image mapper the
+       same).  GB-201's zero page stays for the native loaders. */
+    if (as->layout == VM_LAYOUT_COMPAT) {
+      vm_object_unref(o);
+      return -ENXIO;
+    }
     priv = frame_alloc_zeroed();
     if (!priv) {
       vm_object_unref(o);
@@ -3101,6 +3109,11 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     if (mrc != 0) {
       if (mrc == -EIO)
         return vm_page_io_error(as, a, why);
+      if (mrc == -ENXIO) {
+        if (why)
+          *why = "BUS"; /* C1-k4: past EOF -> SIGBUS/BUS_ADRERR */
+        return 1;
+      }
       if (why)
         *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
       return 1;
@@ -3127,11 +3140,14 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   uint64_t fr;
   int shared = (r->obj != 0);
   if (shared) {
-    fr = vm_object_page_locked(r->obj, (a - r->base) + r->obj_off);
+    uint64_t soff = (a - r->base) + r->obj_off;
+    fr = vm_object_page_locked(r->obj, soff);
     if (!fr) {
+      /* C1-k4: past the object's last page is SIGBUS (Linux), not OOM. */
+      int beyond = r->obj->used && soff / FRAME_SIZE >= (uint64_t)r->obj->nr_frames;
       spinlock_release_irqrestore(&vm_lock, fl);
       if (why)
-        *why = "OOM";
+        *why = beyond ? "BUS" : "OOM";
       return 1;
     }
   } else {

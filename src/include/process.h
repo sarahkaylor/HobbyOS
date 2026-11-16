@@ -660,6 +660,12 @@ struct process {
   uint64_t pw_key;
   uint32_t pw_total;
   uint32_t pw_done;
+  /* C1-k4: the siginfo a CPU fault delivers, decided where the fault is
+     understood (trap.c / vm_handle_fault) and consumed by the compat signal
+     frame (linux_compat_fault): Linux si_code and si_addr. */
+  int fault_si_set;
+  int fault_si_code;
+  uint64_t fault_si_addr;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux

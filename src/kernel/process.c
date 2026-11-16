@@ -1356,6 +1356,7 @@ static int process_create_internal_ver(int ver) {
   p->pw_key = 0;
   p->pw_total = 0;
   p->pw_done = 0;
+  p->fault_si_set = 0;
   p->sig_park_kind = 0; /* C1-thr: a recycled slot's park state never leaks */
   p->sig_park_nr = 0;
   fd_cloexec_reset(p->fd_cloexec);
@@ -3264,6 +3265,7 @@ struct process *process_exec_become_leader(struct process *grp,
   grp->sys_entry_pc = cur->sys_entry_pc;
   grp->poll_waiting = 0;
   grp->pw_pipe = 0;
+  grp->fault_si_set = 0;
   grp->futex_uaddr = 0;
   grp->wake_ms = 0;
   grp->clear_child_tid = 0;
@@ -6648,6 +6650,7 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   t->pw_key = 0;
   t->pw_total = 0;
   t->pw_done = 0;
+  t->fault_si_set = 0;
   t->sig_park_kind = 0; /* C1-thr: a recycled slot's park state never leaks */
   t->sig_park_nr = 0;
   t->spawn_retval = -1;
