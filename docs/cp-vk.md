@@ -420,3 +420,31 @@ export. It runs `wineboot -i` and then the probes, with
 `DISPLAY=:0`. `run-wine-p5.sh` follows the exports rule: it takes
 `/tmp/cp-exports.lock` outside `/tmp/cp-qemu.lock`, adds one line, removes
 exactly that line, and `cmp`s the file against the pre-run copy.
+
+### 8.5 Wine rows (items 3–4): status
+
+`tools/cp/p5/run-wine-p5.sh` uses C4-x2's Wine build (`~/cp/wine-build-x`:
+X11, XInput2, FreeType, Vulkan) and its X stage. It runs everything from one
+NFS export (§8.3); the probes are built and staged.
+
+| run | setup | result |
+|---|---|---|
+| 1 | stock XHOBBY, no warm-up, 4 guests | **VOID.** `wineboot -i` faulted in `kernelbase!load_sortdefault_nls` (`locale.c:519`): an 8-byte read below an all-zero `sortdefault.nls` section, after `[NFS] rpc: no reply from server` ×4 and `[NFLK] retry comp=WINE tries=3 rc=-1`. A failed NFS read reached Wine as zero-filled data (reported to C3-nfs2). Then `nodrv_CreateWindow` everywhere. Log: `docs/cp-vk2-evidence/winep5-run1-serial.txt` |
+| 2 | same | **VOID.** 323 NFS failure rows during `wineboot` (`share`, `WINE`, `wine` lookups); nodrv |
+| 3 | C4-x2's one-screen XHOBBY.BIN (sha256 `935c760f…c97`, scratch only), `HB_SECOND_SCREEN=0`, warm-up | **held**, at the integrator's direction, until C3-nfs2's hard-retry and in-flight-budget fix is merged |
+
+Two traps for anyone running Wine in-guest:
+- **Zero-filled reads.** Until C3-nfs2's fix lands, a run with any NFS
+  failure row is void, and `boot_wine_p5.py` grades it VOID (rc 3).
+- **The explorer timeout.** win32u waits only 10 s for explorer
+  (`NtUserWaitForInputIdle(process, 10000)`, `dlls/win32u/winstation.c:877`,
+  found by C4-x2). Paging winex11 and the X libraries in over NFS takes
+  longer, so the first GUI client of a session stays on the null driver.
+  `winep5.c` therefore starts `vkcube.exe --idle 7200` in the background (a
+  quiet client that asks for the desktop and keeps explorer loaded), then
+  retries `vkcube.exe --winprobe` (a fresh `CreateWindowEx`) until one gets a
+  real driver, and only then runs the probes in that session.
+
+The PE probes and harness are built and compile-checked but have not yet run
+to a window. Gate P5's rows 2–4 (vkcube.exe, D3D11, D3D12) are therefore
+open; row 1 (Linux vkcube, §8.2b) passes.
