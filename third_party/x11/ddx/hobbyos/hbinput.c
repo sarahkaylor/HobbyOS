@@ -15,10 +15,21 @@
  *                           dropped, XKB repeats on its own.
  *   BTN_LEFT/MIDDLE/RIGHT/SIDE/EXTRA (+BTN_TOUCH) -> buttons 1/2/3/8/9
  *   REL_WHEEL +/- -> button 4/5 click, REL_HWHEEL -/+ -> 6/7
- *   ABS_X/ABS_Y (0..32767: x86 PS/2 + vmmouse via the kernel decoder, ARM
- *   virtio-tablet) -> absolute screen position; REL_X/REL_Y (a virtio
- *   mouse) -> relative motion of the same position.  Motion is coalesced
- *   per EV_SYN packet and flushed before any button so clicks land at the
+ *   ABS_X/ABS_Y (0..32767: vmmouse via the kernel decoder, ARM
+ *   virtio-tablet) -> absolute screen position on the "HobbyOS pointer"
+ *   slave (Absolute valuators, screen pixels).
+ *   REL_X/REL_Y (x86 PS/2 -- QMP "rel" events land there -- or an ARM
+ *   virtio mouse) -> RELATIVE motion on a second slave, "HobbyOS relative
+ *   pointer", whose two valuators are Relative and unbounded: dix posts the
+ *   unaccelerated, unclamped deltas in XI_RawMotion (what Wine's mouselook
+ *   reads: winex11 mouse.c update_relative_valuators wants valuators 0/1
+ *   in XIModeRelative on the master; the master takes the classes of the
+ *   slave that moved last, announced by XI_DeviceChanged).  The kernel
+ *   (src/kernel/evdev.c) also integrates a PS/2 packet into ABS_X/ABS_Y for
+ *   consumers that only read absolute positions; a packet that carries
+ *   REL_X/REL_Y is a relative packet, so its ABS rows are ignored here and
+ *   its buttons go to the relative slave too.  Motion is coalesced per
+ *   EV_SYN packet and flushed before any button so clicks land at the
  *   packet's position.
  */
 #ifdef HAVE_DIX_CONFIG_H
@@ -82,9 +93,12 @@ struct hb_input_event {         /* Linux ABI, 24 bytes */
 
 int hbInputPollMs = HB_INPUT_POLL_MS_DEFAULT;
 
-static DeviceIntPtr hbPointer, hbKeyboard;
+static DeviceIntPtr hbPointer, hbKeyboard, hbRelPointer;
 static int hbPx = -1, hbPy = -1;        /* current pointer position */
 static Bool hbMotionPending;
+static int hbRelDx, hbRelDy;            /* this packet's relative motion */
+static Bool hbRelPacket;                /* this packet carried REL_X/REL_Y */
+unsigned long hbRelEvents;              /* stats: relative motions posted */
 static Bool hbBlockRegistered;
 unsigned long hbInputEvents;            /* stats (debugger aid) */
 
@@ -171,7 +185,78 @@ hbMouseProc(DeviceIntPtr pDevice, int onoff)
     return Success;
 }
 
+/* The relative slave: same buttons, two Relative, unbounded valuators. */
+static int
+hbRelMouseProc(DeviceIntPtr pDevice, int onoff)
+{
+    BYTE map[HB_NBUTTONS + 1];
+    DevicePtr pDev = (DevicePtr) pDevice;
+    Atom btn_labels[HB_NBUTTONS] = { 0 };
+    Atom axes_labels[HB_NAXES] = { 0 };
+    int i;
+
+    switch (onoff) {
+    case DEVICE_INIT:
+        for (i = 0; i <= HB_NBUTTONS; i++)
+            map[i] = i;
+        btn_labels[0] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_LEFT);
+        btn_labels[1] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_MIDDLE);
+        btn_labels[2] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_RIGHT);
+        btn_labels[3] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_WHEEL_UP);
+        btn_labels[4] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_WHEEL_DOWN);
+        btn_labels[5] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_HWHEEL_LEFT);
+        btn_labels[6] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_HWHEEL_RIGHT);
+        btn_labels[7] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_SIDE);
+        btn_labels[8] = XIGetKnownProperty(BTN_LABEL_PROP_BTN_EXTRA);
+        axes_labels[0] = XIGetKnownProperty(AXIS_LABEL_PROP_REL_X);
+        axes_labels[1] = XIGetKnownProperty(AXIS_LABEL_PROP_REL_Y);
+        if (!InitPointerDeviceStruct(pDev, map, HB_NBUTTONS, btn_labels,
+                                     (PtrCtrlProcPtr) NoopDDA,
+                                     GetMotionHistorySize(), HB_NAXES,
+                                     axes_labels))
+            return BadAlloc;
+        InitValuatorAxisStruct(pDevice, 0, axes_labels[0], NO_AXIS_LIMITS,
+                               NO_AXIS_LIMITS, 1, 0, 1, Relative);
+        InitValuatorAxisStruct(pDevice, 1, axes_labels[1], NO_AXIS_LIMITS,
+                               NO_AXIS_LIMITS, 1, 0, 1, Relative);
+        break;
+    case DEVICE_ON:
+        pDev->on = TRUE;
+        break;
+    case DEVICE_OFF:
+        pDev->on = FALSE;
+        break;
+    case DEVICE_CLOSE:
+        break;
+    }
+    return Success;
+}
+
 /* ---- event translation -------------------------------------------------- */
+/* Post this packet's relative motion: no POINTER_ACCELERATE, so the raw
+ * event's processed values equal the device deltas, and the cursor moves
+ * 1:1 (clamped to the screen by dix; the raw deltas are not). */
+static void
+hbFlushRel(void)
+{
+    ValuatorMask mask;
+
+    if ((hbRelDx || hbRelDy) && hbRelPointer && hbRelPointer->public.on) {
+        valuator_mask_zero(&mask);
+        if (hbRelDx)
+            valuator_mask_set(&mask, 0, hbRelDx);
+        if (hbRelDy)
+            valuator_mask_set(&mask, 1, hbRelDy);
+        QueuePointerEvents(hbRelPointer, MotionNotify, 0, POINTER_RELATIVE,
+                           &mask);
+        hbRelEvents++;
+        /* The sprite moved: the next absolute report must be posted even if
+         * it repeats the last absolute position. */
+        hbPx = hbPy = -1;
+    }
+    hbRelDx = hbRelDy = 0;
+}
+
 static void
 hbFlushMotion(void)
 {
@@ -191,12 +276,16 @@ static void
 hbButton(int button, Bool down)
 {
     ValuatorMask mask;
+    DeviceIntPtr dev = hbRelPacket ? hbRelPointer : hbPointer;
 
-    if (!hbPointer || !hbPointer->public.on)
+    if (!dev || !dev->public.on)
         return;
-    hbFlushMotion();
+    if (hbRelPacket)
+        hbFlushRel();
+    else
+        hbFlushMotion();
     valuator_mask_zero(&mask);
-    QueuePointerEvents(hbPointer, down ? ButtonPress : ButtonRelease, button,
+    QueuePointerEvents(dev, down ? ButtonPress : ButtonRelease, button,
                        POINTER_RELATIVE, &mask);
 }
 
@@ -220,6 +309,8 @@ hbClamp(int v, int lo, int hi)
 static void
 hbSetPos(int x, int y)
 {
+    if (hbRelPacket)
+        return;         /* the kernel's integration of a relative packet */
     x = hbClamp(x, 0, hbScreenWidth() - 1);
     y = hbClamp(y, 0, hbScreenHeight() - 1);
     if (x != hbPx || y != hbPy) {
@@ -234,8 +325,13 @@ hbHandleEvent(const struct hb_input_event *ev)
 {
     switch (ev->type) {
     case HB_EV_SYN:
-        if (ev->code == 0)
-            hbFlushMotion();
+        if (ev->code == 0) {
+            if (hbRelPacket)
+                hbFlushRel();
+            else
+                hbFlushMotion();
+            hbRelPacket = FALSE;
+        }
         break;
     case HB_EV_KEY:
         switch (ev->code) {
@@ -256,10 +352,14 @@ hbHandleEvent(const struct hb_input_event *ev)
     case HB_EV_REL:
         switch (ev->code) {
         case HB_REL_X:
-            hbSetPos((hbPx < 0 ? 0 : hbPx) + ev->value, hbPy < 0 ? 0 : hbPy);
+            hbRelPacket = TRUE;
+            hbMotionPending = FALSE;
+            hbRelDx += ev->value;
             break;
         case HB_REL_Y:
-            hbSetPos(hbPx < 0 ? 0 : hbPx, (hbPy < 0 ? 0 : hbPy) + ev->value);
+            hbRelPacket = TRUE;
+            hbMotionPending = FALSE;
+            hbRelDy += ev->value;
             break;
         case HB_REL_WHEEL:
             if (ev->value > 0) hbClick(4, ev->value);
@@ -273,12 +373,14 @@ hbHandleEvent(const struct hb_input_event *ev)
         break;
     case HB_EV_ABS: {
         int v = hbClamp(ev->value, 0, HB_ABS_MAX);
+        /* ABS spans the whole framebuffer (the glass); the screen may be
+         * smaller after a RandR mode set (top-left aligned), hbSetPos clamps. */
         if (ev->code == HB_ABS_X)
-            hbSetPos((int) (((int64_t) v * (hbScreenWidth() - 1) + HB_ABS_MAX / 2) / HB_ABS_MAX),
+            hbSetPos((int) (((int64_t) v * (hbFbWidth() - 1) + HB_ABS_MAX / 2) / HB_ABS_MAX),
                      hbPy < 0 ? hbScreenHeight() / 2 : hbPy);
         else if (ev->code == HB_ABS_Y)
             hbSetPos(hbPx < 0 ? hbScreenWidth() / 2 : hbPx,
-                     (int) (((int64_t) v * (hbScreenHeight() - 1) + HB_ABS_MAX / 2) / HB_ABS_MAX));
+                     (int) (((int64_t) v * (hbFbHeight() - 1) + HB_ABS_MAX / 2) / HB_ABS_MAX));
         break;
     }
     }
@@ -336,7 +438,10 @@ hbDrainInput(void)
             hbHandleEvent(&evs[i]);
         total += n;
     } while (n == 64 && total < 4096);
-    hbFlushMotion();
+    /* A packet cut by the batch limit is finished by its own SYN later;
+     * only absolute motion is flushed early (it is idempotent). */
+    if (!hbRelPacket)
+        hbFlushMotion();
     hbInputEvents += total;
     return total;
 }
@@ -361,9 +466,11 @@ InitInput(int argc, char *argv[])
     Atom xiclass;
 
     hbPointer = AddInputDevice(serverClient, hbMouseProc, TRUE);
+    hbRelPointer = AddInputDevice(serverClient, hbRelMouseProc, TRUE);
     hbKeyboard = AddInputDevice(serverClient, hbKeybdProc, TRUE);
     xiclass = MakeAtom(XI_MOUSE, sizeof(XI_MOUSE) - 1, TRUE);
     AssignTypeAndName(hbPointer, xiclass, "HobbyOS pointer");
+    AssignTypeAndName(hbRelPointer, xiclass, "HobbyOS relative pointer");
     xiclass = MakeAtom(XI_KEYBOARD, sizeof(XI_KEYBOARD) - 1, TRUE);
     AssignTypeAndName(hbKeyboard, xiclass, "HobbyOS keyboard");
     (void) mieqInit();
@@ -380,6 +487,6 @@ CloseInput(void)
         RemoveBlockAndWakeupHandlers(hbBlockHandler, hbWakeupHandler, NULL);
         hbBlockRegistered = FALSE;
     }
-    hbPointer = hbKeyboard = NULL;
+    hbPointer = hbKeyboard = hbRelPointer = NULL;
     mieqFini();
 }
