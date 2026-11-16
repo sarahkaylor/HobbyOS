@@ -76,6 +76,18 @@ static char *envp[] = {
   0
 };
 
+/* Optional per-step debug channels for the steps after wineboot
+   (iteration aid: P2_STEP_WINEDEBUG; the gate leaves it unset). */
+#ifdef P2_STEP_WINEDEBUG
+static void step_debug(void) {
+  for (int i = 0; envp[i]; i++)
+    if (envp[i][0] == 'W' && envp[i][4] == 'D' && envp[i][5] == 'E' && envp[i][6] == 'B')
+      envp[i] = (char *)"WINEDEBUG=" P2_STEP_WINEDEBUG;
+}
+#else
+static void step_debug(void) {}
+#endif
+
 /* Run one step: spawn, wait up to `secs`, print the bracket rows. */
 static int step(const char *tag, const char *path, char *const argv[], int secs) {
   pc("[P2] begin "); pc(tag); pc(" :");
@@ -145,6 +157,14 @@ int main(void) {
   /* bin/wineboot is a symlink to wine; spawning the NFS symlink itself
      answers ENOENT (measured), so do what execve of the link does on Linux:
      run the wine binary with argv[0] = "wineboot". */
+  /* the builtin dirs as a compat process reads them over NFS (diagnostic) */
+  char *a_cnt[] = { (char *)"pfxls", (char *)"-c", (char *)"/CP/WINE/lib/wine/x86_64-windows",
+                    (char *)"/CP/WINE/lib/wine/x86_64-unix", (char *)"/CP/WINE/share/wine", 0 };
+  step("nfscount", "/PFXLS.ELF", a_cnt, 60);
+#ifdef P2_LS_ONLY
+  pc("[P2] done\n");
+  return 0;
+#endif
   char *a_boot[] = { (char *)"wineboot", (char *)"-i", 0 };
   step("wineboot", "/CP/WINE/bin/wine", a_boot, 900);
   /* wineboot -i outlives its launcher here: the prefix's DefaultInstall
@@ -154,6 +174,10 @@ int main(void) {
      The work itself carries on in wineboot.exe/rundll32.exe, so wait for the
      whole tree to finish before the next step uses the prefix. */
   quiesce("wineboot", P2_BOOT_QUIESCE_S);
+  /* the prefix as a compat process sees it (diagnostic rows, not graded) */
+  char *a_ls[] = { (char *)"pfxls", (char *)"/tmp/pfx", 0 };
+  step("pfxls", "/PFXLS.ELF", a_ls, 60);
+  step_debug();
 
 #ifndef P2_BOOT_ONLY
   char *a_echo[] = { (char *)"wine", (char *)"cmd", (char *)"/c", (char *)"echo", (char *)"hello", 0 };

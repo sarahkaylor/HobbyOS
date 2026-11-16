@@ -59,7 +59,11 @@
 #define NFS_READ_DEPTH      16     /* READs kept outstanding per read() */
 #define NFS_READDIR_DCOUNT  512    /* READDIRPLUS dircount hint */
 #define NFS_READDIR_MAXC    1200   /* READDIRPLUS maxcount hint */
-#define NFS_DIR_CACHE_MAX   256    /* entries cached per directory listing
+/* cp/wine2: 256 -> 4096.  Wine's builtin dir lib/wine/x86_64-windows has
+   757 entries; at 256 readdir silently ended there and wineboot's fake-DLL
+   install skipped kernel32/ntdll/start/cmd (a prefix that cannot start a
+   process: "could not load kernel32.dll, status c0000135").  ~280 KiB bss. */
+#define NFS_DIR_CACHE_MAX   4096   /* entries cached per directory listing
                                     * (RimWorldLinux_Data/Managed has 102;
                                     * at 64 the listing silently stopped at
                                     * 64 because read_dir(index) reports

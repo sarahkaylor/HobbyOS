@@ -95,7 +95,7 @@ UCFLAGS=(-O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics
          -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding
          -mno-red-zone -nostdinc -isystem "$RESINC" -mcmodel=large)
 clang "${UCFLAGS[@]}" -DWINE_EXPORT="\"$EXPORT\"" -DP2_WINEDEBUG="\"$WDBG\"" \
-  ${P2_BOOT_ONLY:+-DP2_BOOT_ONLY=1} \
+  ${P2_BOOT_ONLY:+-DP2_BOOT_ONLY=1} ${P2_LS_ONLY:+-DP2_LS_ONLY=1} ${P2_STEP_WINEDEBUG:+-DP2_STEP_WINEDEBUG="\"$P2_STEP_WINEDEBUG\""} \
   -c src/user/winep2.c -o "$OUT/winep2.o" || die "winep2.c"
 ld.lld -T src/user/linker.ld -e _start -o "$OUT/winep2.elf" "$OUT/winep2.o" obj/intel/libc.a || die "ld winep2"
 llvm-objcopy -O binary "$OUT/winep2.elf" "$OUT/winep2.bin"
@@ -118,6 +118,8 @@ for so in ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 li
   [ -e "$LDIR/$so" ] && stage "$(readlink -f "$LDIR/$so")" "::/LIB64/$so"
 done
 stage "$(readlink -f "$LDIR/ld-linux-x86-64.so.2")" ::/lib64/ld-linux-x86-64.so.2
+musl-gcc -static-pie -fPIE -O1 -Wall -o "$OUT/pfxls.elf" tools/cp/p2/pfxls.c || die "pfxls"
+stage "$OUT/pfxls.elf" ::/PFXLS.ELF
 stage "$OUT/winep2.bin" ::/WINEP2.BIN
 printf 'WINEP2.BIN\n' > "$OUT/wave.cfg"
 stage "$OUT/wave.cfg" ::/WAVE.CFG
