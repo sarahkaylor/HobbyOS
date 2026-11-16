@@ -910,9 +910,9 @@ merge was re-gated on strix. The next wave's candidates are the open items in
 ### 7.2d Wave 4 (v4, 2026-11-16) — P3, P4 and P5, and the stability debt
 
 Wave 4 starts from `cyberpunk` @ d7a63823 (Gate P2 passed). Gate host is
-still `strix` (§7.2c rules: lanes under `strix:~/cp/lanes/`, every boot under
-`flock /tmp/cp-qemu.lock`, every build with `MAKEFLAGS=-j16`, the §7.4
-`/etc/exports` lock and the NFS READ size guard). `cmake`, `meson` and `ninja`
+still `strix` (§7.2c rules: lanes under `strix:~/cp/lanes/`, every build with
+`MAKEFLAGS=-j16`, and the §7.4 QEMU-slot, `/etc/exports` and NFS READ size
+rules; since 2026-11-16 up to four guests run at once). `cmake`, `meson` and `ninja`
 exist on strix in `~/.local/bin`, which a non-login ssh shell does not put on
 `PATH`; the "x11 probe needs cmake" item of §7.2c was that, not a missing
 package.
@@ -960,12 +960,24 @@ user's approval through the integrator.
 - Local commits only, one phase per commit, repo message style; **no pushes**.
 - The integrator merges lanes and runs gates on the merged tree, including the
   Doom ELF and RimWorld regressions after any C1 merge.
-- **`/etc/exports` on the gate host (binding).** Every harness that edits
-  it takes `flock /tmp/cp-exports.lock` OUTSIDE `/tmp/cp-qemu.lock`, from
-  before its backup until after its restore. It adds only localhost-only
-  read-only lines, removes only its own line, and `cmp`s the result against
-  the pre-run copy. One whole-file restore put back another harness's line
-  (2026-11-15).
+- **QEMU slots on the gate host (binding; 2026-11-16).** The user allowed up
+  to four guests at once on strix (12 GiB each). Every boot runs under
+  `bash tools/cp/qemu-slot.sh CMD...` (or `. tools/cp/qemu-slot.sh;
+  cp_qemu_slot_acquire` for the rest of a shell), which takes one of four
+  slots. Slot 1 is the old `/tmp/cp-qemu.lock`, so a leftover
+  `flock /tmp/cp-qemu.lock` still counts as one slot; nested calls reuse the
+  caller's slot. One boot per slot; never hold a slot across a batch.
+- **`/etc/exports` on the gate host (binding).** Harnesses add and remove their
+  export only through `bash tools/cp/exports.sh add|remove /srv/nfs/cp-<name>`.
+  It holds `/tmp/cp-exports.lock` only while it edits the file (never across a
+  boot, so several guests can each have an export), writes only the approved
+  `127.0.0.1(ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534)`
+  form, touches only its own line, verifies that every non-cp line is
+  byte-identical before and after, and restores its snapshot on any failure.
+  Harnesses call `remove` from an EXIT trap. Self-test:
+  `bash tools/cp/exports_selftest.sh`. (Before 2026-11-16 each harness held
+  the exports lock across its whole boot and `cmp`ed the whole file; one
+  whole-file restore had put back another harness's line on 2026-11-15.)
 - **NFS READ size guard (binding; the 32 KiB fix has been lost to merges more
   than once).** Any merge that touches `src/kernel/nfs.c`, `src/include/nfs.h`
   or `src/kernel/net.c`, and above all any merge from `main` (which still has
