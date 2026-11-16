@@ -653,8 +653,10 @@ static void inj_row(const char *name, uint32_t pages, uint32_t bad, uint32_t sho
   pc(line);
 }
 
-/* mode 0: lseek + read() each 4 KiB page; mode 1: mmap and touch each page */
-static int inj_check(const char *name, int k, int mode) {
+/* mode 0: lseek + read() each 4 KiB page; mode 1: mmap and touch each page.
+ * blackout_ms > 0: drop every NFS reply for that long, starting AFTER the
+ * open (and the mmap), so the READ path itself meets the silence. */
+static int inj_check(const char *name, int k, int mode, const char *blackout) {
   char path[24] = "/NFS/inj0.bin";
   path[8] = (char)('0' + k);
   uint8_t *ref = (uint8_t *)malloc(INJ_BYTES);
@@ -672,6 +674,7 @@ static int inj_check(const char *name, int k, int mode) {
       inj_row(name, 0, 0, 0, 0, now_us() - t0, " mmap-unsupported(skip)", 1);
       return 0;
     }
+    if (blackout) inj_ctl(blackout);
     int pid = fork();
     if (pid == 0) {
       for (uint32_t i = 0; i < npages; i++)
@@ -687,6 +690,7 @@ static int inj_check(const char *name, int k, int mode) {
             st == 0 ? " mmap" : " mmap-child-died-or-bad", st == 0);
     return st == 0 ? 0 : 1;
   }
+  if (blackout) inj_ctl(blackout);
   for (uint32_t i = 0; i < npages; i++) {
     uint32_t off = i * CONC_PAGE;
     if (lseek(fd, (off_t)off, SEEK_SET) != (off_t)off) { eio++; continue; }
@@ -706,14 +710,17 @@ static int inj_check(const char *name, int k, int mode) {
 static int phase_inject(void) {
   int fails = 0;
   inj_ctl("every.5");                      /* every 5th NFS reply lost */
-  fails += inj_check("every5.read", 0, 0);
-  fails += inj_check("every5.mmap", 1, 1);
+  fails += inj_check("every5.read", 0, 0, 0);
+  fails += inj_check("every5.mmap", 1, 1, 0);
   inj_ctl("off");
-  inj_ctl("blackout.8000");                /* the server "stops answering" */
-  fails += inj_check("blackout.read", 2, 0);
+  /* the server "stops answering" for 8 s: in the READ path (after the
+     open), in the page-in path (after the mmap), and in the open's LOOKUP */
+  fails += inj_check("blackout.read", 2, 0, "blackout.8000");
   inj_ctl("off");
-  inj_ctl("blackout.8000");                /* ... and the open's LOOKUP too */
-  fails += inj_check("blackout.open", 3, 0);
+  fails += inj_check("blackout.mmap", 3, 1, "blackout.8000");
+  inj_ctl("off");
+  inj_ctl("blackout.8000");
+  fails += inj_check("blackout.open", 4, 0, 0);
   inj_ctl("off");
   return fails;
 }

@@ -50,9 +50,9 @@ done
 ONE_BYTES=$((176 * 1024 * 1024 + 777))
 "$OUT/fnv64" "$OUT/big176m.bin" $ONE_BYTES 0x5851f42d4c957f2d > /dev/null || die "data big176m"
 echo "$ONE_BYTES $(sha256sum "$OUT/big176m.bin" | cut -c1-64)" > "$OUT/one.txt"
-# cp/nfs2: four fresh 4 MiB files for the fault-injection phase (seed
+# cp/nfs2: five fresh 4 MiB files for the fault-injection phase (seed
 # multi_seed(10 + k) in cpnfsbench.c)
-for k in 0 1 2 3; do
+for k in 0 1 2 3 4; do
   seed=$(python3 -I -c "print(hex(0x9e3779b97f4a7c15 ^ ((10 + $k + 1) * 0xbf58476d1ce4e5b9 % 2**64)))")
   "$OUT/fnv64" "$OUT/inj$k.bin" $((4 * 1024 * 1024)) "$seed" > /dev/null || die "data inj$k"
 done

@@ -28,7 +28,7 @@
 #   G9  (cp/nfs2) lost replies never become data: with every 5th NFS reply
 #       dropped and with every reply dropped for 8 s (a test kernel's fault
 #       injection), fresh files read page by page and mapped come back
-#       right -- no FAIL "[NB] inject." row, at least 4 rows
+#       right -- no FAIL "[NB] inject." row, at least 5 rows
 #   G5  over all READ RPCs (the last "[NFSRTT] periodic" set): bytes / RPCs
 #       >= 16384.  1344-byte READs give ~1344; 32 KiB READs give ~32768.
 #
@@ -106,7 +106,7 @@ else note "G8 one 176 MiB read() hash match, stat times, 5/5 symlinked paths$(gr
 # G9 (cp/nfs2): hard-mount semantics under injected reply loss
 G9="$(tr -d '\r' < "$C" | grep -aoE '\[NB\] inject\.[a-z0-9.]+ pages=[0-9]+ .*(ok|FAIL)$')"
 n9=$(grep -c . <<<"$G9"); f9=$(grep -c ' FAIL$' <<<"$G9")
-if [ -z "$G9" ] || [ "$n9" -lt 4 ] || [ "$f9" -ne 0 ]; then
+if [ -z "$G9" ] || [ "$n9" -lt 5 ] || [ "$f9" -ne 0 ]; then
   bad "G9 injected reply loss: $n9 rows, $f9 FAIL: $(grep ' FAIL$' <<<"$G9" | head -3 | tr '\n' ' ')"
 else note "G9 $n9/$n9 injected-loss rows right ($(grep -o 'inject.blackout.read [^ ]* [^ ]* [^ ]* [^ ]* ms=[0-9]*' <<<"$G9"))"; fi
 
