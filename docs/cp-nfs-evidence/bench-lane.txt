@@ -1,0 +1,20 @@
+cp/nfs bench, LANE tree cp-nfs. Command: bash tools/cp/nfs/nfs_bench.sh
+(the /etc/exports note: C2-wine2's harness added its own export line during this run; only our line was removed.)
+
+== build: tree /home/sarah/cp/lanes/nfs (intel, test) + cpnfsbench.bin
+== data: 64 MiB, fnv1a64=7a56a810ac49cd58
+== /etc/exports changed by someone else meanwhile: removing only our line
+== NOTE: /etc/exports differs from our backup (another harness edited it); our line is gone: 0
+== removed /srv/nfs/cp-nfs-bench
+[NB] cp/nfs throughput bench
+[NFS] fsinfo rc=0 rtmax=32768 rtpref=32768 rsize=32768
+[NFS] mounted 10.0.2.2:/srv/nfs/cp-nfs-bench at /NFS
+[NB] mount 10.0.2.2:/srv/nfs/cp-nfs-bench -> /NFS ok
+[NB] seq65536 bytes=67108864 ms=362 MBps=185.38 fnv=0x7a56a810ac49cd58 match ok
+[NB] seq4096 bytes=16777216 ms=96 MBps=174.76 fnv=0xb4a2bb4ec2694432 ok
+[NB] seq1344 bytes=4194304 ms=25 MBps=167.77 fnv=0x5d242dd7ec48c3b6 ok
+[NB] done rc=0
+[NFSPIPE] len=65536 rs=32768 issued=2 replies=2 short=0 bad=0 got=65536 us=4082 first_count=32768
+[NFSPIPE] len=65536 rs=32768 issued=2 replies=2 short=0 bad=0 got=65536 us=318 first_count=32768
+[NFSPIPE] len=65536 rs=32768 issued=2 replies=2 short=0 bad=0 got=65536 us=275 first_count=32768
+nfs_bench: PASS (/home/sarah/cp/lanes/nfs)

@@ -44,6 +44,7 @@ static uint32_t entropy_draws = 0;
 static struct socket_pcb sockets[MAX_SOCKETS];
 volatile uint32_t rdma_ring_dbg = 0;
 static spinlock_t net_lock;
+static spinlock_t ipr_lock; /* cp/nfs: IPv4 reassembly (ipr_*, below) */
 
 // Simple ARP cache
 struct arp_entry {
@@ -173,6 +174,7 @@ int net_get_random_bytes(void* buf, uint32_t len) {
 void net_init(void) {
   // Initialize global network spinlock to serialize accesses to the socket table
   spinlock_init(&net_lock);
+  spinlock_init(&ipr_lock); /* cp/nfs: IPv4 reassembly */
 /* IRQ class: the receive path runs from the device interrupt. */
   lock_register(&net_lock, "net_lock", LOCK_RANK_BACKEND, LOCK_CLASS_IRQ);
 
@@ -685,6 +687,115 @@ __attribute__((noinline)) static void safe_print_int(int val) {
     uart_putc(buf[--idx]);
 }
 
+/* ---- cp/nfs: IPv4 receive-side reassembly -------------------------------
+ * The stack never EMITS a fragment (every request is under one frame), but a
+ * large UDP reply -- an NFS READ of 32 KiB -- arrives from slirp as ~23 IP
+ * fragments.  Without reassembly the client had to cap READ at 1344 bytes so
+ * that a reply always fit one frame (~1.7 ms per 1.3 KiB RPC through slirp).
+ *
+ * Slots are keyed by (src, dst, id, proto) as RFC 791 prescribes.  Received
+ * bytes are tracked in 8-byte units (the fragment-offset granularity), so a
+ * duplicate fragment never counts twice and completion is "every unit up to
+ * the last fragment's end is present".  A slot that has not completed within
+ * IPR_TIMEOUT_MS, or the oldest one when all are busy, is dropped: a lost
+ * fragment costs that one datagram, and the RPC layer retries.  Delivery runs
+ * with ipr_lock RELEASED (the slot is detached first), so the UDP handler's
+ * net_lock never nests inside it. */
+#define IPR_SLOTS 8
+#define IPR_MAX 65535u
+#define IPR_UNITS ((IPR_MAX + 7u) / 8u)
+#define IPR_TIMEOUT_MS 1000
+struct ipr_slot {
+  int state;               /* 0 free, 1 collecting, 2 delivering */
+  uint32_t src, dst;
+  uint16_t id;
+  uint8_t proto;
+  uint32_t total;          /* payload length once the last fragment is in, else 0 */
+  uint32_t have;           /* payload bytes present */
+  uint64_t t_ms;
+  struct ipv4_hdr hdr;     /* the first fragment's header */
+  uint8_t units[(IPR_UNITS + 7u) / 8u];
+  uint8_t data[IPR_MAX];
+};
+static struct ipr_slot ipr[IPR_SLOTS];
+volatile uint32_t ipr_done, ipr_dropped, ipr_frags;
+
+static void ipr_free_locked(struct ipr_slot *sl) {
+  sl->state = 0;
+  sl->total = 0;
+  sl->have = 0;
+  for (uint32_t i = 0; i < sizeof sl->units; i++) sl->units[i] = 0;
+}
+
+/* Returns the slot holding a complete datagram (state 2, owned by the
+ * caller until ipr_release), or 0 while it is still incomplete / dropped. */
+static struct ipr_slot *ipr_add(struct ipv4_hdr *ip, const uint8_t *payload,
+                                uint32_t plen, uint32_t off, int mf) {
+  if (off + plen > IPR_MAX || (mf && (plen & 7u))) {
+    ipr_dropped++;
+    return 0;
+  }
+  uint64_t now = timer_get_ms();
+  uint64_t fl = spinlock_acquire_irqsave(&ipr_lock);
+  ipr_frags++;
+  struct ipr_slot *sl = 0, *freeslot = 0, *oldest = 0;
+  for (int i = 0; i < IPR_SLOTS; i++) {
+    struct ipr_slot *c = &ipr[i];
+    if (c->state == 1 && now - c->t_ms > IPR_TIMEOUT_MS) {
+      ipr_free_locked(c);
+      ipr_dropped++;
+    }
+    if (c->state == 1 && c->src == ip->src_ip && c->dst == ip->dst_ip &&
+        c->id == ip->id && c->proto == ip->protocol) {
+      sl = c;
+      break;
+    }
+    if (c->state == 0 && !freeslot) freeslot = c;
+    if (c->state == 1 && (!oldest || c->t_ms < oldest->t_ms)) oldest = c;
+  }
+  if (!sl) {
+    sl = freeslot;
+    if (!sl) {
+      if (!oldest) { spinlock_release_irqrestore(&ipr_lock, fl); ipr_dropped++; return 0; }
+      ipr_free_locked(oldest); /* evict the stalest incomplete datagram */
+      ipr_dropped++;
+      sl = oldest;
+    }
+    sl->state = 1;
+    sl->src = ip->src_ip;
+    sl->dst = ip->dst_ip;
+    sl->id = ip->id;
+    sl->proto = ip->protocol;
+    sl->t_ms = now;
+  }
+  for (uint32_t i = 0; i < plen; i++) sl->data[off + i] = payload[i];
+  if (off == 0) sl->hdr = *ip;
+  uint32_t u0 = off / 8u, u1 = (off + plen + 7u) / 8u;
+  for (uint32_t u = u0; u < u1; u++) {
+    uint8_t bit = (uint8_t)(1u << (u & 7u));
+    if (sl->units[u >> 3] & bit) continue;
+    sl->units[u >> 3] |= bit;
+    uint32_t ub = u * 8u, ue = ub + 8u;
+    if (ue > off + plen) ue = off + plen;
+    sl->have += ue - ub;
+  }
+  if (!mf) sl->total = off + plen;
+  struct ipr_slot *done = 0;
+  if (sl->total && sl->have >= sl->total) {
+    sl->state = 2;
+    ipr_done++;
+    done = sl;
+  }
+  spinlock_release_irqrestore(&ipr_lock, fl);
+  return done;
+}
+
+static void ipr_release(struct ipr_slot *sl) {
+  uint64_t fl = spinlock_acquire_irqsave(&ipr_lock);
+  ipr_free_locked(sl);
+  spinlock_release_irqrestore(&ipr_lock, fl);
+}
+
 void net_rx_packet(uint8_t* packet, uint32_t len) {
   if (len < sizeof(struct eth_hdr)) return;
   struct eth_hdr* eth = (struct eth_hdr*)packet;
@@ -754,6 +865,25 @@ void net_rx_packet(uint8_t* packet, uint32_t len) {
 
     // Discard packets not destined for us or broadcast
     if (ip->dst_ip != local_ip && ip->dst_ip != 0xFFFFFFFF) return;
+
+    /* cp/nfs: a fragment (MF set or a non-zero offset) goes to reassembly;
+       the whole datagram is demultiplexed once its last byte is in. */
+    {
+      uint16_t fo = ntohs(ip->frag_off);
+      uint32_t ihl = (uint32_t)ip->ihl * 4u;
+      if ((fo & 0x3FFF) && ihl >= sizeof(struct ipv4_hdr) && ihl <= iplen) {
+        const uint8_t *pl = packet + sizeof(struct eth_hdr) + ihl;
+        struct ipr_slot *sl = ipr_add(ip, pl, iplen - ihl,
+                                      (uint32_t)(fo & 0x1FFF) * 8u, (fo & 0x2000) != 0);
+        if (!sl) return;
+        if (sl->proto == IP_PROTO_UDP)
+          handle_udp(&sl->hdr, sl->data, sl->total);
+        else if (sl->proto == IP_PROTO_ICMP)
+          handle_icmp(&sl->hdr, sl->data, sl->total);
+        ipr_release(sl); /* TCP never fragments here (MSS-sized segments) */
+        return;
+      }
+    }
 
     // Demultiplex incoming IPv4 datagrams by protocol
     if (ip->protocol == IP_PROTO_ICMP) {
