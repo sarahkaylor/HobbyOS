@@ -26,6 +26,9 @@
  * Links libxcb (DT_RPATH /CP/X11/lib, before XSESSION's LD_LIBRARY_PATH=/LIB64)
  * and dlopens libvulkan.so.1 like winevulkan does (vkcommon.h).
  */
+#ifndef _WIN32
+#define _GNU_SOURCE 1 /* dl_iterate_phdr */
+#endif
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR 1
 #define SURFACE_EXT VK_KHR_WIN32_SURFACE_EXTENSION_NAME
@@ -103,7 +106,7 @@ static uint32_t mem_type(uint32_t bits, VkMemoryPropertyFlags want) {
 /* The compat kernel can hang when a writev() source page is not resident
  * (docs/cp-x11.md §4.2: #PF inside the kernel's memcpy with IF=0).  Touch
  * every page of every loaded object first, as tools/cp/x11/xsmoke.c does;
- * VKCUBEX_PREFAULT=0 skips it. */
+ * VKCUBEX_PREFAULT=0 skips it; =all repeats it after vkCreateDevice. */
 static int prefault_cb(struct dl_phdr_info *info, size_t size, void *data) {
   (void)size;
   long *acc = data;
@@ -241,7 +244,7 @@ static void plat_open(uint32_t W, uint32_t H) {
   vk_row("x11: window 0x%x %ux%u mapped", xwin, W, H);
 }
 
-/* returns 0 normally, 1 on close request; updates *w/*h on ConfigureNotify */
+/* returns 0 normally, 1 on close request; updates the size on ConfigureNotify */
 static int plat_pump(uint32_t *w, uint32_t *h, int *resized) {
   xcb_generic_event_t *ev;
   int quit = 0;
@@ -593,7 +596,10 @@ int main(int argc, char **argv) {
   plat_open(W, H);
   if (vk_load_loader() != 0) { vk_row("done rc=1"); return 1; }
   init_vulkan();
-  prefault("after vkCreateDevice");
+  /* lavapipe's 60 MiB is never a writev() source; touching it took 13 s in
+     the first in-OS run, so it is opt-in (VKCUBEX_PREFAULT=all). */
+  if (getenv("VKCUBEX_PREFAULT") && !strcmp(getenv("VKCUBEX_PREFAULT"), "all"))
+    prefault("after vkCreateDevice");
   choose_surface(want);
   create_swapchain(W, H);
   VkPipelineLayout pl;

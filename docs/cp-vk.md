@@ -316,3 +316,107 @@ sees Zen 5: `llvmpipe (LLVM 21.1.8, 256 bits)`, 178 device extensions,
 the qemu64 CPU model (no FMA/F16C → different float code paths), not lavapipe
 or the kernel. §4's ~11 ms/frame floor is gone too (median 2–3 ms): it was
 qemu64 plus a loaded linuxci.
+
+### 8.2b X11 WSI (item 2) — Linux vkcube in the X session: PASS
+
+`CP_VK_WSI=x11 CP_X11_WORK=~/cp/vk2-x11 bash tools/cp/vk/build.sh all` builds
+the same tree with the X11 window-system path, in `$CP_VK_WORK/stage-x11`:
+
+- **Loader:** `BUILD_WSI_XLIB_SUPPORT`/`XCB_SUPPORT=ON`. It needs only the X
+  headers, and links no X library (`DT_NEEDED` is the glibc set). It exports
+  `vkCreateXlibSurfaceKHR`/`vkCreateXcbSurfaceKHR` and the presentation-support
+  queries.
+- **Mesa:** `-Dplatforms=x11`. lavapipe now needs `libxcb`, `xcb-{randr,dri3,present,xfixes,sync,shm}`,
+  `libX11-xcb` and `libxshmfence`; xshmfence ≥ 1.1 is mandatory for any Vulkan
+  driver with the x11 platform (`meson.build:2372-2378`). DT_RPATH
+  (`--disable-new-dtags`) is `/CP/X11/lib`, so the X libraries resolve there
+  ahead of XSESSION's `LD_LIBRARY_PATH=/LIB64`. Audit PASS, GLIBC max 2.29.
+- **Instance extensions:** 18, including `VK_KHR_xcb_surface` and
+  `VK_KHR_xlib_surface`.
+- **X libraries:** built with `tools/cp/x11/build.sh` (unchanged). Its audit
+  fails under strix's `en_US.UTF-8` for the same `sort`/`comm` collation
+  reason as §8.1 item 4. It passes with `LC_ALL=C`, and the fix was reported
+  to C4-x2.
+
+`python3 tools/cp/p5/run_vkcubex.py --secs 65` (strix, guest `-cpu host -smp 8`,
+**4 QEMU guests on the host**): **PASS**. Evidence:
+`docs/cp-vk2-evidence/item2-vkcubex-x11.txt`; screendumps
+`evidence/cp-vk2/vkcubex-t{20,50}s.png`.
+
+```
+[VK] x11: ext Present  present / DRI3 absent / MIT-SHM absent / XFIXES, SYNC, RANDR present
+[VK] surface: formats(format/colorspace): 50/0 44/0 -> 44; present modes: IMMEDIATE MAILBOX FIFO FIFO_RELAXED -> FIFO
+[VK] surface caps: images 3..0 current 640x480 min 640x480 max 640x480 usage 0x8009f -> 4 images 640x480
+[VK] swapchain: 4 images in 120.0 ms
+[VK] frame 0: acquire 0.00 ms, render 2334.00 ms, present 4.00 ms, total 2338.00 ms (image 0)
+[VK] t=60s frames=1699 window fps=31.19 | median ms acquire 29.00 render 1.00 present 0.00 total 30.00
+[VK] RESULT frames=1853 wall=65023.0 ms fps=28.50 | per-frame total median 30.00 p90 41.00 worst(after frame 0) 1059.00 ms | swapchain 640x480 4 images FIFO | recreated=0 suboptimal=0
+[VK] done rc=0
+```
+
+How to read these numbers:
+- **The frame rate is the X server's, not lavapipe's.** Render takes a 1 ms
+  median, while `vkAcquireNextImageKHR` waits 29 ms in FIFO. Present 1.2 in
+  fake-msc mode paces presents at about 33 Hz (docs/cp-x11.md §5).
+- **Mesa took the software path.** With no DRI3 and no MIT-SHM, every present
+  is an `xcb_put_image` of 1.2 MB.
+- **The first frame took 2.3 s** (shader JIT). Window fps dipped to 23–25
+  twice; four guests shared the host.
+
+The first run (§8.4) found a kernel defect instead: every FAT `rename(2)` from
+user space hung a CPU. IceWM's fontconfig hit it, the session died, and the
+swapchain returned `VK_ERROR_SURFACE_LOST_KHR`. The fix is `fat16:` commit
+37dc2c92, and the row `linux_probe_tmpfs T4f` hangs on base and passes with
+it (`docs/cp-vk2-evidence/fat16-rename-ab.txt`).
+
+### 8.4 Kernel defect: FAT rename stored through a NULL pointer
+
+`fat16_rename` calls `fat16_resolve_parent(abs_old, &old_parent, 0)`.
+`fat16_resolve_parent` then copied the last path component into
+`out_last_component` without checking it for NULL, in both of its loops.
+Since cp/mmu removed the identity map, that kernel store to VA 0 faults from
+any process's address space with IF=0, and the CPU never comes back
+(`[IDMAP-TRIP] cr2=0x0 rip=0x70014D30`). Kernel-AS unit tests cannot see it,
+because VA 0 is still mapped there and the store silently lands on physical
+page 0. The fix guards both loops. It is its own commit so it can be
+cherry-picked ahead of this lane.
+
+### 8.3 Gate P5 probes and harnesses
+
+| row | program | path | harness |
+|---|---|---|---|
+| Linux vkcube | `/CP/VK/bin/vkcubex` (`src/user/cp/vkcubex.c`) | VK_KHR_xcb_surface → loader (xlib/xcb WSI) → lavapipe → Mesa's software X11 WSI → XHOBBY.BIN | `tools/cp/p5/run_vkcubex.py` |
+| vkcube.exe | the same source, PE | VK_KHR_win32_surface → Wine's vulkan-1.dll → winevulkan → `libvulkan.so.1` → lavapipe → winex11 | `tools/cp/p5/run-wine-p5.sh` |
+| D3D11 | `d3d11tri.exe` (`src/user/cp/d3d11tri.c`) | DXVK 3.1.1 d3d11 + dxgi (native, beside the exe) → winevulkan → lavapipe | same |
+| D3D12 | `d3d12tri.exe` (`src/user/cp/d3d12tri.c`) | vkd3d-proton 3.1 d3d12 + d3d12core, DXVK dxgi → winevulkan → lavapipe | same |
+
+Every probe renders for a **wall-clock duration** (default 65 s), prints a
+progress row every 5 s (`t=20s …`), a `RESULT frames= wall= fps=` row and
+`done rc=0`. The PE probes resolve every D3D/Vulkan entry point with
+`LoadLibrary`/`GetProcAddress` and print the module path, so the log shows
+whether DXVK/vkd3d-proton or Wine's builtin answered. The D3D adapter row
+(`DXGI_ADAPTER_DESC`) must name llvmpipe. HLSL is compiled at run time by
+Wine's `d3dcompiler_47` (no precompiled bytecode in the tree).
+
+`build-pe.sh` is `tools/cp/build-winprobe.sh`'s recipe (clang `-target
+x86_64-windows`, Wine's headers and import libs, no MinGW). C needs
+`WIDL_C_INLINE_WRAPPERS` for the D3D12 methods that return structs
+(`GetAdapterLuid`, `GetCPUDescriptorHandleForHeapStart`); without it widl's
+macros expand to a deliberate compile error.
+
+The harnesses screendump each probe twice, on its `t=20s` and `t=50s` rows.
+They grade ≥ 60 s of wall time, `done rc=0` and no fault line. Both shots
+must show the probe's frame: at least 20,000 pixels of the clear colour
+(15,18,28) and at least 2,000 saturated pixels, and the two shots must differ
+inside the frame.
+
+Wine runs inside the X session. `XSTART.TXT` spawns the native launcher
+`tools/cp/p5/winep5.c` (the `src/user/winep2.c` pattern). It mounts one
+localhost-only, read-only NFS export at `/CP` that holds `WINE/ X11/ VK/
+P5/`; the mount shadows the FAT `/CP`, so every `/CP` path has to be in the
+export. It runs `wineboot -i` and then the probes, with
+`LD_LIBRARY_PATH=/CP/X11/lib:/CP/VK/lib:/LIB64:…`,
+`WINEDLLOVERRIDES=d3d11,dxgi,d3d10core,d3d9,d3d12,d3d12core=n,b` and
+`DISPLAY=:0`. `run-wine-p5.sh` follows the exports rule: it takes
+`/tmp/cp-exports.lock` outside `/tmp/cp-qemu.lock`, adds one line, removes
+exactly that line, and `cmp`s the file against the pre-run copy.
