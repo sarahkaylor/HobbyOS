@@ -763,10 +763,10 @@ guest matches the host's sha256; an `mmap` of the game's largest mapped file
 
 ### P4 — Windows, input and the X surface Wine needs (size L)
 
-- [ ] Real libX11/libxcb and the extension libraries built against glibc 2.31
+- [x] *(C4-x, C4-x2: 39 libraries incl. Xi/Xcomposite/FreeType 2.14.3, max GLIBC_2.27, staged at `/CP/X11`; Wine rebuilt with x/xinput2/xrandr/xrender/xfixes/xcursor/xinerama/xcomposite/xshm/freetype/vulkan, `CP_WINE_VARIANT=x`)* Real libX11/libxcb and the extension libraries built against glibc 2.31
       and staged for compat processes (the RimWorld shim stays for RimWorld
       until it is proven redundant).
-- [ ] `XHOBBY.BIN`: the server side of XInput2 (raw motion), RandR (one mode
+- [x] *(C4-x2, in-OS xprobe: one-screen session `HB_SECOND_SCREEN=0` gives XINERAMA + Composite; XI2 raw deltas exact from a relative slave fed by kernel REL events; 12 RandR modes with a real mode set; MIT-SHM still absent, plan in `docs/cp-x2.md` §6)* `XHOBBY.BIN`: the server side of XInput2 (raw motion), RandR (one mode
       per supported resolution), Render, Fixes, Cursor, MIT-SHM — **verify**
       which are already present in the X.Org-derived server.
 - [ ] Wine X11 driver configuration: fullscreen without a window-manager fight
