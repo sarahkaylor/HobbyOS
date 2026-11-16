@@ -175,3 +175,13 @@ all pages right and `amp_pct` (READ bytes / bytes read) <= 200.
 | multi6 amp_pct (fetched / read) | 345 (42400 KiB for 12288) | 100 (12288 for 12288) |
 | multi6 hit_pct_est | 78 | 93 |
 | conc6 / multi6 pages | all correct | all correct |
+
+## 14. nfs_bench.sh on QEMU slots (cp/nfs2)
+
+`nfs_bench.sh` (and so `rsize_guard.sh`) no longer holds
+`/tmp/cp-exports.lock` across its boot: it fills the export dir, adds its
+line with `tools/cp/exports.sh add`, boots under `tools/cp/qemu-slot.sh`,
+and its EXIT/INT/TERM/HUP trap runs `exports.sh remove` and removes the
+dir (the run-wine-p2.sh pattern of cp-pfx f8ceec91).  The default export is
+`/srv/nfs/cp-nfs-bench-<tree dir name>`, so a lane and a base bench can run
+in two slots at once.

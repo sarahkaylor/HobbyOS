@@ -6,20 +6,17 @@
 # with the bench as the only wave member and prints its [NB] rows.  Run it on
 # the base tree and the lane tree for before/after.
 #
-# Host hygiene (same pattern as tools/cp/run-wine-smoke.sh): /etc/exports is
-# backed up and, on every exit path, restored BYTE-FOR-BYTE when the only
-# change is our one line; if another harness edited it meanwhile, only our own
-# line is removed (never their export).  The export directory is removed.  The
-# whole export lifetime and the boot run under flock /tmp/cp-exports.lock
-# (outer: every harness that edits /etc/exports should hold it from backup to
-# restore -- a whole-file restore by a harness that snapshotted the file while
-# our line was in it puts our line back, measured 2026-11-15) and then
-# /tmp/cp-qemu.lock.
-# Env: NB_EXPORT (default /srv/nfs/cp-nfs-bench), NB_TIMEOUT (default 420).
+# Host hygiene: the export is ONE localhost-only read-only line added and
+# removed with tools/cp/exports.sh (docs/cyberpunk.md §7.4: it holds
+# /tmp/cp-exports.lock only while it edits /etc/exports, never across the
+# boot, and checks every non-cp line is unchanged); the EXIT trap removes our
+# line and the export directory.  The boot runs in a QEMU slot
+# (tools/cp/qemu-slot.sh), so benches of different trees can run at once.
+# Env: NB_EXPORT (default /srv/nfs/cp-nfs-bench-<tree dir name>), NB_TIMEOUT (default 420).
 set -uo pipefail
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TREE="$(cd "${1:-$SELF}" && pwd)"
-EXPORT="${NB_EXPORT:-/srv/nfs/cp-nfs-bench}"
+EXPORT="${NB_EXPORT:-/srv/nfs/cp-nfs-bench-$(basename "$TREE" | tr -c 'A-Za-z0-9._\n-' _)}"
 OUT="$TREE/obj/nfs-bench"; rm -rf "$OUT"; mkdir -p "$OUT"
 die() { echo "nfs_bench: $*" >&2; exit 2; }
 case "$EXPORT" in /srv/nfs/cp-nfs-bench*) ;; *) die "refusing export path $EXPORT";; esac
@@ -48,34 +45,24 @@ done
 printf 'CPNFSB.BIN\n' > "$OUT/wave.cfg"
 STAGE="mcopy -o -i $TREE/disk.img $OUT/nb.bin ::/CPNFSB.BIN && mcopy -o -i $TREE/disk.img $OUT/expect.txt ::/NBEXPECT.TXT && mcopy -o -i $TREE/disk.img $OUT/wave.cfg ::/WAVE.CFG"
 
-LINE="$EXPORT 127.0.0.1(ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534)"
-export TREE OUT EXPORT LINE STAGE NB_TIMEOUT="${NB_TIMEOUT:-420}"
-flock /tmp/cp-exports.lock bash "$SELF/tools/cp/qemu-slot.sh" bash -c '
-  set -u
-  BAK="$OUT/exports.backup"
-  sudo -n cp -a /etc/exports "$BAK" || exit 3
-  cleanup() {
-    if sudo -n test -f "$BAK"; then
-      if printf "%s\n" "$LINE" | sudo -n sh -c "cat \"$BAK\" - | cmp -s - /etc/exports"; then
-        sudo -n cp -a "$BAK" /etc/exports
-      else
-        echo "== /etc/exports changed by someone else meanwhile: removing only our line"
-        sudo -n python3 -I -c "import sys;p=\"/etc/exports\";l=sys.argv[1]+\"\\n\";s=open(p).read();open(p,\"w\").write(s.replace(l,\"\",1))" "$LINE"
-      fi
-      sudo -n exportfs -ra
-      if sudo -n cmp -s "$BAK" /etc/exports; then echo "== /etc/exports restored (cmp identical to backup)"
-      else echo "== NOTE: /etc/exports differs from our backup (another harness edited it); our line is gone: $(grep -cF "$EXPORT " /etc/exports)"; fi
-    fi
-    sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
-  }
-  trap cleanup EXIT
-  sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$OUT"/m?.bin "$EXPORT/" && sudo -n chmod -R a+rX "$EXPORT" || exit 3
-  printf "%s\n" "$LINE" | sudo -n tee -a /etc/exports > /dev/null
-  sudo -n exportfs -ra
-  cd "$TREE" && T3_TIMEOUT="$NB_TIMEOUT" T3_STAGE="$STAGE" T3_MIN_LINES=1 TOOLS_SKIP=1 \
-    bash tools/t3_tier.sh intel > "$OUT/tier.log" 2>&1
-  true
-'
+export TREE OUT EXPORT STAGE NB_TIMEOUT="${NB_TIMEOUT:-420}"
+# The export dir and its files first, then the export (tools/cp/exports.sh
+# holds /tmp/cp-exports.lock only while it edits /etc/exports), then the boot
+# in a QEMU slot.  The EXIT trap removes exactly our line and the directory.
+ADDED=0
+cleanup() {
+  trap - EXIT INT TERM HUP
+  [ "$ADDED" = 1 ] && bash "$SELF/tools/cp/exports.sh" remove "$EXPORT"
+  sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM HUP
+sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$OUT"/m?.bin "$EXPORT/" || die "export dir"
+sudo -n chmod -R a+rX "$EXPORT" || die "chmod"
+ADDED=1
+bash "$SELF/tools/cp/exports.sh" add "$EXPORT" || die "exports.sh add"
+( cd "$TREE" && T3_TIMEOUT="$NB_TIMEOUT" T3_STAGE="$STAGE" T3_MIN_LINES=1 TOOLS_SKIP=1 \
+    bash "$SELF/tools/cp/qemu-slot.sh" bash tools/t3_tier.sh intel > "$OUT/tier.log" 2>&1 )
 CONSOLE="$(sed -n 's/^T3_LOG=//p' "$OUT/tier.log" 2>/dev/null | tail -1)"
 [ -r "$CONSOLE" ] && cp "$CONSOLE" "$OUT/console.log"
 grep -aE '^\[NB\]|\[NFS\] (fsinfo|mounted|rsize)|\[IPR\]' "$OUT/console.log" 2>/dev/null
