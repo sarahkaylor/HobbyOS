@@ -17,3 +17,14 @@ pipestorm rc=0 [LP] info R8 capacity=65536 [LP] info R12 signals=1187 [LP] don
 manythr rc=0 [LP] done rc=0  drain=0 v1=0
 execthr rc=0 [LP] done rc=0  drain=0 v1=0
 tlb rc=0 [LP] done rc=0  drain=0 v1=0
+
+## X7 on cp-k4b 2aa73fef+e17a9ec8 (before exit_owner)
+[LP] PASS X1 exit_group with 7 writing threads x40 (0 bad)
+[LP] PASS X2 SIGKILL with 7 writing threads x40 (0 bad)
+[LP] PASS X4 exit_group with 7 threads in a signal handler x20 (0 bad)
+[LP] FAIL X7 two concurrent exit_group callers x20 (20 bad, worst 2413 ms)
+[LP] PASS X5 no thread runs after its group was reaped x20 (0 bad)
+[LP] PASS X3 checker saw no foreign byte in its fresh pages (status 0x0)
+[LP] PASS X6 free memory before 11456 MiB, after 11424 MiB (drop 32 MiB)
+[LP] done rc=1
+t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
