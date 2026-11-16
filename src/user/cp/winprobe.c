@@ -53,15 +53,17 @@ static void fmt_u64(char *b, unsigned long long v, int hex) {
   b[k] = 0;
 }
 
+/* One row = ONE WriteFile: separate writes let kernel console rows splice
+   into the middle of a marker (measured in HobbyOS: "[WP] [PUB] who=..."). */
 static void ck(int ok, const char *what, unsigned long long v) {
-  char num[32];
+  char num[32], row[256];
+  int n = 0;
   fmt_u64(num, v, v > 0xffff);
-  put("[WP] ");
-  put(ok ? "PASS " : "FAIL ");
-  put(what);
-  put(" (");
-  put(num);
-  put(")\r\n");
+  const char *parts[] = {"[WP] ", ok ? "PASS " : "FAIL ", what, " (", num, ")\r\n", 0};
+  for (int i = 0; parts[i]; i++)
+    for (const char *c = parts[i]; *c && n < (int)sizeof row - 1; c++) row[n++] = *c;
+  row[n] = 0;
+  put(row);
   if (!ok) fails++;
 }
 
@@ -340,10 +342,11 @@ int main(void) {
   w4();
   w5_w6();
   w7();
-  char num[24];
+  char num[24], row[48] = "[WP] done rc=";
   fmt_u64(num, (unsigned long long)fails, 0);
-  put("[WP] done rc=");
-  put(num);
-  put("\r\n");
+  int n = 13;
+  for (const char *c = num; *c; c++) row[n++] = *c;
+  row[n++] = '\r'; row[n++] = '\n'; row[n] = 0;
+  put(row);
   return fails;
 }

@@ -32,39 +32,45 @@ done
 [ -d "$STAGE/bin" ] || die "no staged Wine at $STAGE (run tools/cp/build-wine.sh all)"
 [ -f "$LDIR/libc-2.31.so" ] || die "no glibc 2.31 at $LDIR (run tools/rw/run-rimworld.sh once, or set GLIBC231)"
 
+# cp/wine2: everything that touches /etc/exports runs under
+# /tmp/cp-exports.lock (OUTER to /tmp/cp-qemu.lock, nfs_bench.sh's order).  A
+# pre-run copy is taken under the lock; every exit path removes exactly this
+# run's line (never copies an old snapshot back over the file) and cmp's the
+# result against the pre-run copy.  The export copy is removed again too.
+OPTS="ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534"
+MYLINE="$EXPORT 127.0.0.1($OPTS)"
+exec 9>>/tmp/cp-exports.lock
+flock 9
+EXP_PRE="$(mktemp /tmp/cp-wine-smoke-exports.XXXXXX)"
+sudo -n cat /etc/exports > "$EXP_PRE" || die "cannot copy /etc/exports"
+ADDED=""
 echo "== export: $EXPORT (CP/WINE copy)"
 MADE_EXPORT_DIR=""
 [ -e "$EXPORT" ] || MADE_EXPORT_DIR=1
-sudo -n mkdir -p "$EXPORT/WINE"
-sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/"
-sudo -n chmod -R a+rX "$EXPORT"
-OPTS="ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534"
-# /etc/exports is the host's own config: back it up, add one line, and put it
-# back BYTE-FOR-BYTE on every exit path (trap), then re-export, so the host's
-# export set is exactly what it was before this script ran.
-EXP_BAK=""
-restore_exports() {
-  [ -n "$EXP_BAK" ] || return 0
-  sudo -n cp -a "$EXP_BAK" /etc/exports && sudo -n exportfs -ra
-  if sudo -n cmp -s "$EXP_BAK" /etc/exports; then
-    echo "== /etc/exports restored (cmp identical to $EXP_BAK)"
-    sudo -n rm -f "$EXP_BAK" && echo "== removed backup $EXP_BAK"
-  else
-    echo "== WARNING: /etc/exports differs from $EXP_BAK"
-  fi
-}
-# The export copy is removed again too, so nothing is left on the host.
 cleanup() {
-  restore_exports
+  if [ -n "$ADDED" ]; then
+    local t; t="$(mktemp /tmp/cp-wine-smoke-exports-new.XXXXXX)"
+    sudo -n cat /etc/exports | grep -vxF -- "$MYLINE" > "$t"
+    sudo -n tee /etc/exports < "$t" >/dev/null
+    rm -f "$t"
+  fi
+  sudo -n exportfs -ra
+  if cmp -s "$EXP_PRE" <(sudo -n cat /etc/exports); then
+    echo "== /etc/exports: our line removed (cmp identical to the pre-run copy)"
+    rm -f "$EXP_PRE"
+  else
+    echo "== WARNING: /etc/exports differs from the pre-run copy $EXP_PRE (kept)"
+  fi
   if [ -n "$MADE_EXPORT_DIR" ]; then
     sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
   fi
 }
 trap cleanup EXIT
+sudo -n mkdir -p "$EXPORT/WINE"
+sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/"
+sudo -n chmod -R a+rX "$EXPORT"
 if ! grep -qsE "^[[:space:]]*${EXPORT//./\\.}[[:space:]]" /etc/exports; then
-  EXP_BAK="/etc/exports.cp-sys-backup.$(date +%Y%m%d%H%M%S)"
-  sudo -n cp -a /etc/exports "$EXP_BAK"
-  printf '%s 127.0.0.1(%s)\n' "$EXPORT" "$OPTS" | sudo -n tee -a /etc/exports >/dev/null
+  printf '%s\n' "$MYLINE" | sudo -n tee -a /etc/exports >/dev/null && ADDED=1
 fi
 sudo -n exportfs -ra
 

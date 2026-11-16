@@ -34,7 +34,7 @@
 #endif
 #define MNT "/CP"
 #ifndef P2_BOOT_QUIESCE_S
-#define P2_BOOT_QUIESCE_S 3600
+#define P2_BOOT_QUIESCE_S 1500
 #endif
 
 static void pc(const char *s) { print_console(s); }

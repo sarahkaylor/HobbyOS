@@ -13,9 +13,12 @@
 #   2. stages the Wine tree from strix:~/cp/wine-build/stage over a TEMPORARY
 #      NFS export that is localhost-only and read-only, exactly
 #        <dir> 127.0.0.1(ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534)
-#      QEMU user networking reaches it as 10.0.2.2.  /etc/exports is backed up
-#      first and put back BYTE-FOR-BYTE on every exit path (EXIT/INT/TERM/HUP
-#      trap, then `cmp`); the export directory is removed after the run.  The
+#      QEMU user networking reaches it as 10.0.2.2.  Everything that touches
+#      /etc/exports runs under /tmp/cp-exports.lock (taken OUTER to the QEMU
+#      lock, as nfs_bench.sh does): a pre-run copy is taken under the lock, and
+#      every exit path (EXIT/INT/TERM/HUP trap) removes exactly this run's line
+#      -- never copies an old snapshot back -- then `cmp`s the file against the
+#      pre-run copy.  The export directory is removed after the run.  The
 #      export is never widened; an export dir that already exists is refused
 #      (it is not this run's to delete);
 #   3. stages the glibc 2.31 runtime on the FAT disk (/LIB64 + /lib64/ld);
@@ -57,35 +60,6 @@ done
 case "$EXPORT" in /srv/nfs/?*) ;; *) die "WINE_EXPORT must be under /srv/nfs/ ($EXPORT)";; esac
 [ -e "$EXPORT" ] && die "$EXPORT already exists: not this run's to reuse or delete; remove it by hand"
 
-# ---- /etc/exports: back up, add ONE localhost-only ro line, restore always ----
-OPTS="ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534"
-EXP_BAK="$(mktemp /tmp/cp-wine2-exports.XXXXXX)"
-sudo -n cp -a /etc/exports "$EXP_BAK" || die "cannot back up /etc/exports"
-MADE_DIR=""
-CLEANED=""
-cleanup() {
-  [ -n "$CLEANED" ] && return 0
-  CLEANED=1
-  sudo -n cp "$EXP_BAK" /etc/exports && sudo -n exportfs -ra
-  if sudo -n cmp -s "$EXP_BAK" /etc/exports; then
-    echo "== /etc/exports restored (cmp identical to the pre-run copy)"
-    sudo -n rm -f "$EXP_BAK"
-  else
-    echo "== WARNING: /etc/exports differs from the backup $EXP_BAK (kept)"
-  fi
-  if [ -n "$MADE_DIR" ]; then
-    sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
-  fi
-  sudo -n exportfs -v 2>/dev/null | grep -F "$EXPORT" && echo "== WARNING: $EXPORT still exported"
-  return 0
-}
-trap cleanup EXIT
-trap 'cleanup; exit 130' INT TERM HUP
-
-echo "== export: $EXPORT (Wine stage + winprobe.exe), 127.0.0.1 only, ro"
-sudo -n mkdir -p "$EXPORT/WINE" "$EXPORT/WPROBE" && MADE_DIR=1
-sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/" || die "rsync stage"
-
 echo "== build: kernel + disk (intel, test), winep2.bin, winprobe.exe"
 make ARCH=intel MODE=test hobbyos.elf disk.img >"$OUT/build.log" 2>&1 ||
   { echo "BUILD FAILED"; tail -30 "$OUT/build.log"; exit 2; }
@@ -101,11 +75,55 @@ ld.lld -T src/user/linker.ld -e _start -o "$OUT/winep2.elf" "$OUT/winep2.o" obj/
 llvm-objcopy -O binary "$OUT/winep2.elf" "$OUT/winep2.bin"
 bash tools/cp/build-winprobe.sh "$OUT/winprobe.exe" >"$OUT/winprobe-build.log" 2>&1 ||
   { cat "$OUT/winprobe-build.log"; die "winprobe.exe"; }
+# ---- /etc/exports: ONE localhost-only ro line, removed again on every exit ---
+# Every lane that edits /etc/exports takes /tmp/cp-exports.lock first, OUTER
+# to /tmp/cp-qemu.lock (nfs_bench.sh's order).  The pre-run copy is taken
+# under that lock; at exit only OUR exact line is removed (never an old
+# snapshot copied over the file, which could resurrect or drop another lane's
+# line) and the result is cmp'd against the pre-run copy.
+OPTS="ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534"
+MYLINE="$EXPORT 127.0.0.1($OPTS)"
+exec 9>>/tmp/cp-exports.lock
+echo "== waiting for /tmp/cp-exports.lock"
+flock 9
+EXP_BAK="$(mktemp /tmp/cp-wine2-exports.XXXXXX)"
+sudo -n cat /etc/exports > "$EXP_BAK" || die "cannot copy /etc/exports"
+ADDED=""
+MADE_DIR=""
+CLEANED=""
+cleanup() {
+  [ -n "$CLEANED" ] && return 0
+  CLEANED=1
+  if [ -n "$ADDED" ]; then
+    local t; t="$(mktemp /tmp/cp-wine2-exports-new.XXXXXX)"
+    sudo -n cat /etc/exports | grep -vxF -- "$MYLINE" > "$t"
+    sudo -n tee /etc/exports < "$t" >/dev/null
+    rm -f "$t"
+  fi
+  sudo -n exportfs -ra
+  if cmp -s "$EXP_BAK" <(sudo -n cat /etc/exports); then
+    echo "== /etc/exports: our line removed (cmp identical to the pre-run copy)"
+    rm -f "$EXP_BAK"
+  else
+    echo "== WARNING: /etc/exports differs from the pre-run copy $EXP_BAK (kept)"
+  fi
+  if [ -n "$MADE_DIR" ]; then
+    sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
+  fi
+  sudo -n exportfs -v 2>/dev/null | grep -F "$EXPORT" && echo "== WARNING: $EXPORT still exported"
+  return 0
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM HUP
+
+echo "== export: $EXPORT (Wine stage + winprobe.exe), 127.0.0.1 only, ro"
+sudo -n mkdir -p "$EXPORT/WINE" "$EXPORT/WPROBE" && MADE_DIR=1
+sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/" || die "rsync stage"
 sudo -n cp "$OUT/winprobe.exe" "$EXPORT/WPROBE/winprobe.exe"
 sudo -n chmod -R a+rX "$EXPORT"
 
 if ! grep -qsE "^[[:space:]]*${EXPORT//./\\.}[[:space:]]" /etc/exports; then
-  printf '%s 127.0.0.1(%s)\n' "$EXPORT" "$OPTS" | sudo -n tee -a /etc/exports >/dev/null
+  printf '%s\n' "$MYLINE" | sudo -n tee -a /etc/exports >/dev/null && ADDED=1
 fi
 sudo -n exportfs -ra
 sudo -n exportfs -v | grep -F "$EXPORT" | sed 's/^/== exported: /'
@@ -148,6 +166,10 @@ flock /tmp/cp-qemu.lock bash -c '
   for qp in $(fuser '"$IMG"' 2>/dev/null); do kill "$qp" 2>/dev/null; done'
 
 # ---- grade -------------------------------------------------------------------
+# No pipefail here: `span ... | grep -q` exits early, awk takes SIGPIPE, and
+# under pipefail a found marker reads as missing (measured: "hello" printed,
+# G1 graded FAIL).
+set +o pipefail
 tr -d '\r' < "$LOG" > "$OUT/serial.txt"
 S="$OUT/serial.txt"
 span() { awk -v t="$1" '$0 ~ "\\[P2\\] begin "t" :" {on=1; next} $0 ~ "\\[P2\\] end "t" " {on=0} on' "$S"; }
