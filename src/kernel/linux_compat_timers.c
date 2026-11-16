@@ -523,6 +523,9 @@ struct l_epoll {
   int pid;
   int n;
   int rot;   /* C1-k4: round-robin start, so a busy fd cannot starve the rest */
+  uint32_t busy;      /* C1-k4: consecutive waits answered at once ([EPOLLSPIN]) */
+  uint64_t busy_t0;   /* ms of the first of them */
+  uint64_t spin_rows; /* [EPOLLSPIN] rows printed */
   int hw;    /* C1-k4: high-water mark of n (one [EPOLLHW] row per new 2^k) */
   struct {
     int fd;
@@ -545,6 +548,8 @@ int lt_epoll_new(void) {
       le[i].n = 0;
       le[i].rot = 0;
       le[i].hw = 0;
+      le[i].busy = 0;
+      le[i].spin_rows = 0;
       return i;
     }
   return -ENOMEM;
@@ -683,8 +688,44 @@ static int l_tmr_epoll_wait(struct process *p, struct trap_frame *tf) {
     }
     if (out > 0) {
       le_deadline[me] = 0;
+      /* C1-k4: a level-triggered set that answers every wait at once for
+         seconds is an event loop that is not consuming what it is told
+         (P2: wineserver st=RUNNING for minutes while every client waits).
+         Name the ready entries, at most 6 rows per instance. */
+      uint64_t tnow = timer_get_ms();
+      if (e->busy++ == 0) e->busy_t0 = tnow;
+      if (e->busy >= 20000 && e->spin_rows < 6) {
+        e->spin_rows++;
+        for (int k = 0; k < n; k++) {
+          short want = 0;
+          if (e->e[k].events & 0x1) want |= 0x1;
+          if (e->e[k].events & 0x4) want |= 0x4;
+          int rv = file_poll_fd(p, e->e[k].fd, want);
+          if (!rv || (rv & 0x20)) continue;
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[EPOLLSPIN] pid=");
+          kl_i(&kl, p->pid);
+          kl_s(&kl, " waits=");
+          kl_i(&kl, (long)e->busy);
+          kl_s(&kl, " ms=");
+          kl_i(&kl, (long)(tnow - e->busy_t0));
+          kl_s(&kl, " fd=");
+          kl_i(&kl, e->e[k].fd);
+          kl_s(&kl, " ev=0x");
+          kl_hex(&kl, e->e[k].events);
+          kl_s(&kl, " rv=0x");
+          kl_hex(&kl, (unsigned long)rv);
+          kl_s(&kl, " data=0x");
+          kl_hex(&kl, (unsigned long)e->e[k].data);
+          kl_c(&kl, '\n');
+          kl_emit(&kl);
+        }
+        e->busy = 0;
+      }
       return l_ret(tf, out);
     }
+    e->busy = 0;
     uint64_t now = timer_get_ms();
     if (timeout == 0) { le_deadline[me] = 0; return l_ret(tf, 0); }
     if (le_deadline[me] == 0 && timeout > 0) le_deadline[me] = now + (uint64_t)timeout;
