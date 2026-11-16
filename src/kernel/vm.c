@@ -4194,8 +4194,12 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
       if (offset & 0xFFF)
         return -EINVAL;
       uint64_t cap = (vm_object_size(obj) + 0xFFF) & ~0xFFFULL;
-      if (offset >= cap || len > cap - offset)
-        return -EINVAL; /* mapping past the object's page capacity */
+      /* C1-k4: Linux maps a range LONGER than the memfd/tmpfs file (the file
+         rule above): only the first page must exist.  A page past the
+         object's capacity is never backed; touching it is SIGBUS/BUS_ADRERR
+         (vm_handle_fault), and a later ftruncate grow makes it fillable. */
+      if (offset >= cap && !(offset == 0 && cap == 0))
+        return -EINVAL;
       /* prot may not exceed the memfd's seals (4.1) -- for a SHARED mapping
          only: Linux's F_SEAL_WRITE refuses MAP_SHARED|PROT_WRITE, while a
          private writable mapping never writes the object. */
