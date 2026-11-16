@@ -1,0 +1,324 @@
+# C3-pfx lane gate batch on the merged tree (strix, 2026-11-16; cp-pfx d46f438e = merge of cyberpunk 030a7f10 (C1-k4 in), rsynced to ~/cp/lanes/pfx-dev; up to 4 concurrent guests)
+tree cp-pfx d46f438e (merge of cyberpunk 030a7f10; rsynced from the Mac lane)
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/pfx-dev)
+unit rc=1 Tests failed! Tests run:    453 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 365 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+ALLDONE
+
+# unit tier lines
+  [VMCOST] 200 MiB object: frame array=101 frames, data=51200 frames, mapping overhead (page tables + region array)=101 frames
+  [VMCOST] 1 GiB (VM_OBJ_MAX_BYTES) object: frame array=513 contiguous frames
+[LOCKHEALTH] blockhold=0 selflock=0 classerr=0 irqsave_proc=0 irqoff_max_us=3630 irqoff_total_us=1240119 reg_used=530 reg_dropped=0
+[LOCKHEALTH-IRQOFF] cpu=0 max_us=3630 total_us=1241883 worst_lock=vm_lock pc=0x70118814
+
+# pfx_gate
+[LP] done rc=0
+pfx_gate: pfx probe rc=0 PASS rows=72 skips=0; e2fsck -fn rc=0 (cpdata: 25/131072 files (0.0% non-contiguous), 9529/524288 blocks)
+[LP] done rc=0
+pfx_gate: bigobj probe rc=0 PASS rows=30 skips=0; e2fsck -fn rc=0 (cpdata: 11/131072 files (0.0% non-contiguous), 9004/524288 blocks)
+[LP] done rc=0
+pfx_gate: fatcoh probe rc=0 PASS rows=17 skips=0; e2fsck -fn rc=0 (cpdata: 11/131072 files (0.0% non-contiguous), 9004/524288 blocks)
+pfx_gate: PASS
+
+## lane linux_probe_pfx (merged tree, data disk attached)
+[LP] pfx probe (C3-pfx): Wine prefix operations on /EXT
+[LP] PASS X1 mkdir prefix (0)
+[LP] PASS X1 chdir into the prefix (0)
+[LP] PASS X1 relative mkdir drive_c, dosdevices (0)
+[LP] PASS X1 relative symlink dosdevices/c: -> ../drive_c (0)
+[LP] PASS X1 relative symlink dosdevices/z: -> / (0)
+[LP] PASS X1 mkdir through c: and directly (0)
+[LP] PASS X1 prefix owned by the caller (Wine refuses otherwise) (0)
+[LP] PASS X1 z: reaches / (0)
+[LP] PASS X2 first system.reg (0)
+[LP] PASS X2 open(O_WRONLY) + lstat: regular, nlink 1 -> temp-file path (1)
+[LP] PASS X2 O_CREAT|O_EXCL temp (0)
+[LP] PASS X2 2nd O_EXCL is EEXIST (17)
+[LP] PASS X2 fdopen (17)
+[LP] PASS X2 fclose (stdio flush, ~110 KB) (17)
+[LP] PASS X2 rename temp over system.reg (17)
+[LP] PASS X2 new system.reg size (100000)
+[LP] PASS X2 temp name gone (17)
+[LP] PASS X2 fd opened before the rename still reads the old bytes (3)
+[LP] PASS X2 a second rename over it (2)
+[LP] PASS X3 open system.reg O_RDWR (2)
+[LP] PASS X3 F_SETLK F_WRLCK [0,1) (2)
+[LP] PASS X3 F_GETLK reports the child's range (0)
+[LP] PASS X3 child: GETLK l_pid, EAGAIN, disjoint ok, SETLKW woken by close (0)
+[LP] PASS X4 ftruncate grow to 1 MiB (100000)
+[LP] PASS X4 pwrite + fsync + fdatasync (2)
+[LP] PASS X4 ftruncate shrink to 5000 (1048576)
+[LP] PASS X4 regrow reads zeros (1)
+[LP] PASS X4 st_blocks small after shrink (sparse regrow) (0)
+[LP] PASS X5 open config dir + server dir fds (2)
+[LP] PASS X5 50 x fchdir(server) / fchdir(config) + relative open (2)
+[LP] PASS X5 getcwd after fchdir (2)
+[LP] PASS X6 open dosdevices O_DIRECTORY (2)
+[LP] PASS X6 openat create through c: (0)
+[LP] PASS X6 fstatat through c: (2)
+[LP] PASS X6 openat dir through c: (2)
+[LP] PASS X6 mkdirat (2)
+[LP] PASS X6 renameat into a subdir (2)
+[LP] PASS X6 symlinkat (2)
+[LP] PASS X6 readlinkat (2)
+[LP] PASS X6 fstatat follows the link (2)
+[LP] PASS X6 unlinkat + renameat back (2)
+[LP] PASS X6 unlinkat AT_REMOVEDIR (2)
+[LP] PASS X6 faccessat (2)
+[LP] PASS X7 write a 3-page PE-like file (2)
+[LP] PASS X7 MAP_PRIVATE RW view (0)
+[LP] PASS X7 PROT_EXEC view runs the file's code (0)
+[LP] PASS X7 private view reads a later write() through (90)
+[LP] PASS X7 private store does not reach the file (0)
+[LP] PASS X7 MAP_SHARED store reaches read() after msync (0)
+[LP] PASS X8 file (2)
+[LP] PASS X8 utimensat (2)
+[LP] PASS X8 stat shows the times (1794861989)
+[LP] PASS X8 open+read leaves mtime (1234567890)
+[LP] PASS X8 append + futimens (1234567890)
+[LP] PASS X8 write() moves mtime to now (1500000000)
+[LP] PASS X9 statfs (61267)
+[LP] PASS X9 fstatfs agrees (1799)
+[LP] info X9 f_type=0xef53 (ext2 0xef53)
+[LP] info X9 fgetxattr user.DOSATTRIB -> -1 errno=95
+[LP] PASS X9 fgetxattr answers a Wine-tolerated errno (95)
+[LP] PASS X10 mkdir (95)
+[LP] PASS X10 900 files created (95)
+[LP] PASS X10 getdents64 lists all 900 (+ . ..) (900)
+[LP] PASS X10 300 renames in the big directory (95)
+[LP] PASS X10 unlink all while iterating (900)
+[LP] PASS X10 rmdir the emptied dir (95)
+[LP] PASS X11 2 MiB source (95)
+[LP] PASS X11 copied with read()/write() (2097152)
+[LP] PASS X11 copy identical (0)
+[LP] PASS X12 d1/f, empty d2 (95)
+[LP] PASS X12 rename dir over an empty dir (95)
+[LP] PASS X12 rmdir non-empty -> ENOTEMPTY (2)
+[LP] PASS X12 rename an open file, write via old fd (39)
+[LP] PASS X12 bytes at the new name; rmdir the emptied dir (39)
+[LP] done rc=0
+## lane linux_probe_bigobj (merged tree, data disk attached)
+[LP] bigobj probe (C3-pfx): 200 MiB objects, root=/EXT
+[LP] PASS B5 memfd 64 MiB + 1 page (0)
+[LP] PASS B5 mmap 64 MiB + 1 page MAP_SHARED (0)
+[LP] PASS B5 every page incl. the one past 64 MiB (0)
+[LP] PASS B1 memfd_create (0)
+[LP] PASS B1 ftruncate 200 MiB (0)
+[LP] PASS B1 mmap 200 MiB MAP_SHARED RW (0)
+[LP] PASS B1 every page of the shared view holds its store (0)
+[LP] PASS B1 a 2nd MAP_SHARED view sees every page (0)
+[LP] PASS B1 pread() sees the stores (every 97th page + the last) (0)
+[LP] PASS B1 mmap 200 MiB MAP_PRIVATE RW (0)
+[LP] PASS B1 private view reads every page through (0)
+[LP] PASS B1 private writes (last + middle page) stay private (43981)
+[LP] PASS B1 untouched private page sees a later shared store (119)
+[LP] info M memfd 200 MiB: freeram before=11698176 KiB after-touch=11501568 KiB delta=196608 KiB, data=204800 KiB, overhead=-8192 KiB (frame array + page tables)
+[LP] info M memfd 200 MiB released: freeram=11534336 KiB (before=11698176)
+[LP] PASS B2 mmap 200 MiB MAP_SHARED|MAP_ANONYMOUS (0)
+[LP] PASS B2 every page holds its store (0)
+[LP] PASS B2 fork child reads every page (0)
+[LP] PASS B2 the child's stores reach the parent on every page (0)
+[LP] PASS B3 ext2 file 200 MiB written (0)
+[LP] PASS B3 ext2 mmap 200 MiB MAP_SHARED RO (0)
+[LP] PASS B3 every page of the shared view = the file (0)
+[LP] PASS B3 ext2 mmap 200 MiB MAP_PRIVATE RW (0)
+[LP] PASS B3 every page of the private view = the file (0)
+[LP] PASS B3 private stores on every page, the file unchanged (0)
+[LP] PASS B3 ext2 mmap 200 MiB MAP_SHARED RW (0)
+[LP] PASS B3 shared stores reach read() after msync (65261)
+[LP] PASS B4 ext2 file of Cyberpunk2077.exe's size (66,704,848 B) (0)
+[LP] PASS B4 PROT_NONE reservation (0)
+[LP] PASS B4 MAP_PRIVATE|MAP_FIXED RW view at 0x397a000 + 3,166,208 (0)
+[LP] PASS B4 every page of the view = the file at its offset (0)
+[LP] PASS B4 relocation-style writes stay private (773)
+[LP] done rc=0
+## lane linux_probe_fatcoh (merged tree, data disk attached)
+[LP] fatcoh probe (C3-pfx): file /FATCOH.BIN
+[LP] PASS setup create (0)
+[LP] PASS setup write 10000 bytes (a/b/c pages) (2)
+[LP] PASS setup mmap MAP_PRIVATE RW 3 pages (0)
+[LP] PASS setup mmap MAP_SHARED RO 3 pages (0)
+[LP] PASS setup read faults pages 0 and 2 (97)
+[LP] PASS F1 faulted private page sees a later pwrite() (80)
+[LP] PASS F1 faulted private page sees a later write() (87)
+[LP] PASS F2 untouched private page sees a later pwrite() (81)
+[LP] PASS F3 written page is private: later write not shown (97)
+[LP] PASS F3 the file has the write, not the private store (82)
+[LP] PASS F4 MAP_SHARED RO view sees every write (82)
+[LP] PASS F5 before: past-EOF bytes of the last page read 0 (0)
+[LP] PASS F5 an extending write shows in the mapped last page (69)
+[LP] PASS F6 new mapping has the writes (82)
+[LP] PASS F6 old and new views agree after one more write (90)
+[LP] PASS F7 pipe (2)
+[LP] PASS F7 fork child's private page sees the parent's write (0)
+[LP] done rc=0
+
+# earlier: the same batch on cp-pfx 76942554 (merge of 8b9fc2c9)
+tree cp-pfx 76942554 (merge of cyberpunk 8b9fc2c9; rsynced from the Mac lane)
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/pfx-dev)
+unit rc=1 Tests failed! Tests run:    453 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 362 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+ALLDONE
+
+# earlier: on cp-pfx 205a73b6 (on c7e40bc3)
+tree cp-pfx  (rsynced from the Mac lane, 3 commits on c7e40bc3)
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/pfx-dev)
+unit rc=1 Tests failed! Tests run:    453 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 362 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+ALLDONE
+
+# base reference: ~/cp/base4-gates.txt (cyberpunk 5eea3712)
+tree 5eea3712 plan v4: wave 4 lanes -- C3-nfs2, C3-pfx, C1-k4, C4-x2, C5-vk2 (§7.2d)
+build rc=0
+avx rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/base4)
+unit rc=1 Tests failed! Tests run:    452 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 362 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+ALLDONE

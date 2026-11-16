@@ -225,7 +225,7 @@ int main(void) {
      So wait for wineboot.exe itself to finish before the graded steps --
      bounded: in runs 1 and 3 that --init never finished (every client
      BLOCKED in read() on its server reply pipe, wineserver polling: the
-     C1-k4 lost-wakeup shape, docs/cp-pfx.md §1.5); later clients then wait
+     C1-k4 lost-wakeup shape, docs/cp-pfx.md §1.6); later clients then wait
      out Wine's 5-minute boot-event timeout and run (echo did: 344 s). */
   wait_gone("wineboot.exe", P2_B2_INIT_WAIT_S);
   char *a_wp2[] = { (char *)"wine", (char *)"Z:\\CP\\WPROBE\\winprobe.exe", 0 };
