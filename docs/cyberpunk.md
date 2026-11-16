@@ -251,17 +251,19 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
       tight for Wine. One P2 run uses about 130 pids. §0.2 item 13 (173–190
       game threads) still needs ≥ 256 before P8.
     - **Still open.**
-      - An intermittent wineboot-tree hang: every client BLOCKED with no
-        futex and no timer, which looks like the pipe.c park race.
-      - munmap/mprotect flush only the local TLB.
-      - fstat of an NFS fd reports mtime 0.
-      - si_code details: `#UD` gives `ILL_ILLOPC`, and `#MF`/`#XM` give
-        `FPE_INTDIV`.
-      - FAT private mappings miss later `write()`s.
-      - NFS symlinks in intermediate path components aren't followed.
-      - exec from a secondary thread leaves tid ≠ pid.
-      - SIGBUS past EOF is reported as SIGSEGV.
-      - The 64 MiB per-file ext2 mapping cap.
+      - *(fixed, C1-k4: epoll 32-fd/8-instance cap, 512-byte pipes, ignored
+        O_NONBLOCK, killed tasks re-parking)* An intermittent wineboot-tree
+        hang: every client BLOCKED with no futex and no timer.
+      - *(fixed, C1-k4)* munmap/mprotect flush only the local TLB.
+      - *(fixed, C3-nfs2)* fstat of an NFS fd reports mtime 0.
+      - *(fixed, C1-k4; also CR0.NE=1, so an x87 fault no longer freezes the
+        core on FERR#)* si_code details.
+      - *(fixed, C3-pfx — not yet merged)* FAT private mappings miss later `write()`s.
+      - *(fixed, C3-nfs2)* NFS symlinks in intermediate path components aren't followed.
+      - *(fixed, C1-k4)* exec from a secondary thread leaves tid ≠ pid.
+      - *(fixed, C1-k4)* SIGBUS past EOF is reported as SIGSEGV.
+      - *(stale: `VM_OBJ_MAX_BYTES` has been 1 GiB since cp/sys ca51e8cf —
+        C3-pfx)* The 64 MiB per-file ext2 mapping cap.
     - **Wave 4 findings (2026-11-16, in progress).**
       - *Fixed:* `fat16_rename` stored the last path component through NULL
         (a kernel write to VA 0), so every FAT `rename(2)` from user space hung
@@ -287,6 +289,18 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
         (`dlls/win32u/winstation.c:877`); in the guest the first GUI client of
         a session stays on the null driver unless a keepalive client warms
         explorer first (`tools/cp/p5/winep5.c`).
+      - *Merged, C1-k4 (2c5529f3):* the fixes above plus `MAX_PROCESSES` 512
+        on x86_64 (ARM stays 192); new probes pipestorm, tlb, siginfo,
+        manythr, execthr fail on base and pass. Gate P2 passes on the merged
+        tree (G1 hello, G2 41/41, G3 clean).
+      - *Open:* wineboot's 300 s boot-event wait still expires (status 53,
+        ~320 s); after it the prefix install runs on to ~2200 s of uptime,
+        mostly wineserver/rundll32 `lstat`/`open` on the tmpfs prefix — slow,
+        not wedged. Launchers that start Wine programs right after wineboot
+        must wait for the tree to finish.
+      - *Open, P8 ceiling:* `MAX_GLOBAL_FILES` 512 (so 256 pipes),
+        `MAX_OPEN_FDS` 256, poll nfds 256; Wine uses 3 pipes per thread, so
+        ~190 game threads need ~570 pipes.
       - *Gate host:* four QEMU slots and per-call `/etc/exports` edits (§7.4).
 
 **Lane status (2026-11-15).** Merged to `cyberpunk`: C1-as (design), C2-wine
