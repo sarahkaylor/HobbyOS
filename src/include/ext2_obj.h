@@ -28,7 +28,7 @@
  * if needed, inode released) at the next ext2 open/close/unlink/rename/sync.
  *
  * Capacity: max(file size, offset + length) of the mmap that created the
- * object, capped at VM_OBJ_MAX_BYTES (64 MiB).  A later mmap that needs more
+ * object, capped at VM_OBJ_MAX_BYTES (1 GiB since cp/sys).  A later mmap that needs more
  * gets a new object; the old one keeps serving its mappings and still
  * receives write() updates.  Pages past EOF read as zeros (Linux would
  * SIGBUS) and a truncate zeroes cached bytes past the new size.

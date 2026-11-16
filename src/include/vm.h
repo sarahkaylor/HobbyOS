@@ -175,8 +175,8 @@
 
 /* --- P2.4 (S4): shared objects (memfd / MAP_SHARED anon) ------------- */
 
-/* Object slots and cap.  64 MiB per object is the S4 acceptance scope
- * (terabytes of sparse VA are fine; resident object pages are frames).
+/* Object slots and cap (the cap is below: 1 GiB since cp/sys; terabytes of
+ * sparse VA are fine; resident object pages are frames).
  * L54: slots raised 64 -> 2048 because RimWorld's XML loader keeps one mapped
  * view per LoadableXmlAsset while it parses the Core defs; the tree has 1,209
  * XML files, and at 64 the pool was exhausted after 8 files so every later
@@ -188,6 +188,13 @@
  * refused the first and the second.  The frame array is sized to the
  * object, not to this cap (vm_object_create/truncate), so small objects
  * cost what they did. */
+/* cp/pfx (docs/cp-pfx.md §2): what the cap protects is one contiguous frame
+ * allocation -- the per-object page array, 8 bytes per page (a 1 GiB object
+ * is 513 contiguous frames, a 200 MiB one 101) -- and nothing else: no
+ * structure is sized by VM_OBJ_MAX_FRAMES, the slot table is VM_OBJ_MAX
+ * fixed-size records, and data frames are allocated on first touch.  Measured
+ * by test_vm_big_object_cost (vm_test.c) and linux_probe_bigobj (200 MiB
+ * memfd, shared anon and ext2 file, shared and private). */
 #define VM_OBJ_MAX_BYTES 0x40000000ULL /* 1 GiB */
 #define VM_OBJ_MAX_FRAMES (VM_OBJ_MAX_BYTES / 0x1000)
 
