@@ -407,10 +407,14 @@ def main():
         ("nfspipe-stall", r"\[NFSPIPE\] stall"))}
     log("NFS failure rows: " + " ".join(f"{k}={v}" for k, v in nfs_bad.items()))
     nfs_bad["nfshard-retry"] = len(re.findall(r"\[NFSHARD\] retry", ser.text))
-    # With the hard mount (cyberpunk 8b9fc2c9) a retry that succeeds is fine;
-    # only a READ that got no reply at all can have zero-filled a page.
-    if nfs_bad["rpc-no-reply"]:
-        notes.append("VOID: 'rpc: no reply from server' rows present (pages may have been zero-filled)")
+    nfs_bad["nfshard-giveup"] = len(re.findall(r"\[NFSHARD\] GIVE UP", ser.text))
+    hard = "[NFSHARD]" in ser.text or "NFS_HARD" in ser.text
+    # With the hard mount (cyberpunk 8b9fc2c9) every unanswered attempt still
+    # prints 'rpc: no reply from server' and is then retried ([NFSHARD] retry,
+    # rate-limited after 32 rows); a call fails only with '[NFSHARD] GIVE UP'.
+    # Without the hard mount a no-reply READ is zero-filled.
+    if nfs_bad["nfshard-giveup"] or nfs_bad["nflk-rc-1"] or (nfs_bad["rpc-no-reply"] and not hard):
+        notes.append("VOID: an NFS call failed (GIVE UP / rc=-1 / no-reply without hard mount)")
     for n in notes:
         log("NOTE: " + n)
     for k in ("G1", "G2", "G3"):
