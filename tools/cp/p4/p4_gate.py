@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """tools/cp/p4/p4_gate.py -- boot + drive + grade Gate P4 (lane C4-x2).
 
-Called by tools/cp/p4/run-p4.sh (which builds, exports and stages) UNDER the
-shared QEMU lock.  One boot of a DESKTOP=icewm disk whose /XSTART.TXT runs
+Called by tools/cp/p4/run-p4.sh (which builds, exports and stages) inside one
+QEMU slot (tools/cp/qemu-slot.sh).  One boot of a DESKTOP=icewm disk whose /XSTART.TXT runs
 WINEP4.BIN (tools/cp/p4/winep4.c) in the X session.  This script follows the
 serial log and drives the guest over QMP the way a user would:
 

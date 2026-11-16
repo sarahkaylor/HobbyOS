@@ -14,14 +14,12 @@
 #   2. exports, over a TEMPORARY localhost-only read-only NFS line
 #        <dir> 127.0.0.1(ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534)
 #      the X variant of Wine (/CP/WINE), the C4-x client libraries + FreeType
-#      (/CP/X11) and the probe (/CP/P4).  /etc/exports is edited only under
-#      /tmp/cp-exports.lock, taken OUTER to the QEMU lock, from before the
-#      backup until after the restore; the exit path removes exactly this
-#      run's line and cmp's the file against the pre-run copy;
+#      (/CP/X11) and the probe (/CP/P4).  /etc/exports is edited only through
+#      tools/cp/exports.sh (add, and remove in the EXIT trap; §7.4);
 #   3. stages, on a COPY of disk.img: glibc 2.31 (/LIB64 + /lib64/ld),
 #      /WINEP4.BIN, /XSTART.TXT, and /X11/XSESSION.ENV + HB_SECOND_SCREEN=0
 #      (the one-screen DDX mode: Composite and RandR's Xinerama come back);
-#   4. boots once under `flock /tmp/cp-qemu.lock`: tools/cp/p4/p4_gate.py
+#   4. boots once in one QEMU slot (tools/cp/qemu-slot.sh): tools/cp/p4/p4_gate.py
 #      follows the serial log, injects QMP input, screendumps and grades.
 #
 # Exit 0 only when G1 (winecfg), G2 (notepad) and G3 (raw deltas) pass.
@@ -50,7 +48,7 @@ done
 [ -x "$STAGE/bin/wine" ] || die "no staged Wine at $STAGE (CP_WINE_VARIANT=x tools/cp/build-wine.sh all)"
 [ -f "$X11STAGE/lib/libX11.so.6" ] || die "no /CP/X11 stage at $X11STAGE (tools/cp/x11/build.sh all)"
 [ -f "$LDIR/libc-2.31.so" ] || die "no glibc 2.31 at $LDIR"
-case "$EXPORT" in /srv/nfs/?*) ;; *) die "WINE_EXPORT must be under /srv/nfs/ ($EXPORT)";; esac
+case "$EXPORT" in /srv/nfs/cp-?*) ;; *) die "WINE_EXPORT must be /srv/nfs/cp-<name> ($EXPORT)";; esac
 [ -e "$EXPORT" ] && die "$EXPORT already exists: not this run's to reuse or delete; remove it by hand"
 
 if [ -z "${P4_SKIP_BUILD:-}" ]; then
@@ -73,33 +71,16 @@ if [ -z "${P4_SKIP_BUILD:-}" ]; then
 fi
 [ -f "$OUT/winep4.bin" ] && [ -f "$OUT/rawinput.exe" ] && [ -f disk.img ] || die "nothing built"
 
-# ---- /etc/exports: ONE localhost-only ro line, removed again on every exit ---
-OPTS="ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534"
-MYLINE="$EXPORT 127.0.0.1($OPTS)"
-exec 9>>/tmp/cp-exports.lock
-echo "== waiting for /tmp/cp-exports.lock"
-flock 9
-EXP_BAK="$(mktemp /tmp/cp-x2-exports.XXXXXX)"
-sudo -n cat /etc/exports > "$EXP_BAK" || die "cannot copy /etc/exports"
-ADDED=""; MADE_DIR=""; CLEANED=""
+# ---- the export: ONE localhost-only ro line via tools/cp/exports.sh --------
+# (docs/cyberpunk.md §7.4: exports.sh takes /tmp/cp-exports.lock only while it
+# edits /etc/exports and checks every non-cp line is unchanged; never held
+# across the boot.)  `remove` in the EXIT trap; the export dir is ours.
+MADE_DIR=""; CLEANED=""
 cleanup() {
   [ -n "$CLEANED" ] && return 0
   CLEANED=1
-  if [ -n "$ADDED" ]; then
-    local t; t="$(mktemp /tmp/cp-x2-exports-new.XXXXXX)"
-    sudo -n cat /etc/exports | grep -vxF -- "$MYLINE" > "$t"
-    sudo -n tee /etc/exports < "$t" >/dev/null
-    rm -f "$t"
-  fi
-  sudo -n exportfs -ra
-  if cmp -s "$EXP_BAK" <(sudo -n cat /etc/exports); then
-    echo "== /etc/exports: our line removed (cmp identical to the pre-run copy)"
-    rm -f "$EXP_BAK"
-  else
-    echo "== WARNING: /etc/exports differs from the pre-run copy $EXP_BAK (kept)"
-  fi
+  bash tools/cp/exports.sh remove "$EXPORT" && echo "== export line removed (exports.sh)"
   [ -n "$MADE_DIR" ] && sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
-  sudo -n exportfs -v 2>/dev/null | grep -F "$EXPORT" && echo "== WARNING: $EXPORT still exported"
   return 0
 }
 trap cleanup EXIT
@@ -111,10 +92,7 @@ sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/" || die "rsync wine"
 sudo -n rsync -a --delete "$X11STAGE/" "$EXPORT/X11/" || die "rsync x11"
 sudo -n cp "$OUT/rawinput.exe" "$EXPORT/P4/rawinput.exe"
 sudo -n chmod -R a+rX "$EXPORT"
-if ! grep -qsE "^[[:space:]]*${EXPORT//./\\.}[[:space:]]" /etc/exports; then
-  printf '%s\n' "$MYLINE" | sudo -n tee -a /etc/exports >/dev/null && ADDED=1
-fi
-sudo -n exportfs -ra
+bash tools/cp/exports.sh add "$EXPORT" || die "exports.sh add $EXPORT"
 sudo -n exportfs -v | grep -F "$EXPORT" | sed 's/^/== exported: /'
 
 echo "== stage (on a copy of disk.img): glibc 2.31, WINEP4.BIN, XSTART.TXT, XSESSION.ENV"
@@ -141,8 +119,8 @@ done
 [ -n "$OVMF_SRC" ] || die "no OVMF_CODE_4M.fd"
 cp "$OVMF_SRC" "$OUT/ovmf.fd"
 
-echo "== boot + drive (under the shared QEMU lock)"
-flock /tmp/cp-qemu.lock python3 tools/cp/p4/p4_gate.py --out "$OUT" --disk "$IMG" \
+echo "== boot + drive (one QEMU slot, tools/cp/qemu-slot.sh)"
+bash tools/cp/qemu-slot.sh python3 tools/cp/p4/p4_gate.py --out "$OUT" --disk "$IMG" \
   --ovmf "$OUT/ovmf.fd" --mem "${QEMU_MEM:-12288M}" 2>&1 | tee "$OUT/gate.log"
 rc=${PIPESTATUS[0]}
 

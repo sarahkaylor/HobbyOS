@@ -11,8 +11,8 @@ screen edge.  PASS needs the probe's REL sums to equal the injected sums
 exactly (rel_x=4050, rel_y=25: evdev +y is down, as QMP's) and ABS_X to sit
 at the edge (px 1919 of 1920).
 
-Run from the tree root, under the shared lock:
-  flock /tmp/cp-qemu.lock python3 tools/cp/p4/relmouse.py [--out DIR] [--no-build]
+Run from the tree root, in one QEMU slot:
+  bash tools/cp/qemu-slot.sh python3 tools/cp/p4/relmouse.py [--out DIR] [--no-build]
 """
 import argparse
 import os
