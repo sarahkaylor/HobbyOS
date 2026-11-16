@@ -262,6 +262,32 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
       - exec from a secondary thread leaves tid ≠ pid.
       - SIGBUS past EOF is reported as SIGSEGV.
       - The 64 MiB per-file ext2 mapping cap.
+    - **Wave 4 findings (2026-11-16, in progress).**
+      - *Fixed:* `fat16_rename` stored the last path component through NULL
+        (a kernel write to VA 0), so every FAT `rename(2)` from user space hung
+        a CPU; IceWM's fontconfig hits it at session start. c5640214, guard row
+        `linux_probe_tmpfs` T4f (61745d15).
+      - *Fixed, C3-nfs2 (cp-nfs2 merged at 1cb981be):* after three unanswered
+        READs the NFS client returned zero-filled data instead of an error, so
+        Wine read an all-zero NLS section and crashed (C5-vk2 run 1) and
+        winex11 failed to load. NFS is now hard-mounted (2555d642): a lost
+        reply is re-sent with backoff for up to 180 s, and a failure is
+        `-EIO`/SIGBUS, never zeros; guard G9 injects reply loss. The replies
+        were lost at QEMU slirp's host UDP socket (212992-byte default receive
+        buffer holds ~3 replies); at most 2 READs are now outstanding per socket
+        (14e8e111), and run 3 had 1 stall where run 2 had 412. No host setting
+        is needed. Also fixed: readahead windows per (file, 64 KiB block)
+        (P2's wineboot phase read 43 MB where run23 read 269 MB), 64-bit
+        offsets, stat times, symlinks in any path component.
+      - *Open:* wineboot still ends at Wine's 300 s boot-event wait
+        (status 53, ~303 s) with NFS no longer the cause; one NFS LOOKUP went
+        unanswered for 95 s in P2 run 3 (suspected `exportfs -ra` cache flush,
+        unproven).
+      - *Wine trap:* win32u waits only 10 s for explorer
+        (`dlls/win32u/winstation.c:877`); in the guest the first GUI client of
+        a session stays on the null driver unless a keepalive client warms
+        explorer first (`tools/cp/p5/winep5.c`).
+      - *Gate host:* four QEMU slots and per-call `/etc/exports` edits (§7.4).
 
 **Lane status (2026-11-15).** Merged to `cyberpunk`: C1-as (design), C2-wine
 (pins/build/evidence), C3-ext2 (ext2 rw), C7-p0host, C7-p0guest. **C1-cpu**
@@ -711,7 +737,7 @@ hash check.
 - [x] *(wave 2, C3-ext2b: one lock manager, `vfs_lock.c`, for FAT16/ext2/tmpfs)* `flock`/`fcntl` record locks (Wine and the vkd3d-proton cache use them;
       verify which); `chmod`/`fchmod`/`chown`/`utimensat` on ext2.
 - [x] *(wave 2, C3-ext2b)* `VFS_PATH_MAX` 256 → ≥ 1024 (Windows MAX_PATH plus the prefix path).
-- [ ] NFS: files >4 GiB (64-bit offsets throughout); single `read()`s up to
+- [x] *(C3-nfs2 26a36445, 46b7c0ba: a 5 GiB file's sha256 matches the host's, one 176 MiB `read()` matches; guard G8)* NFS: files >4 GiB (64-bit offsets throughout); single `read()`s up to
       ~172 MB (the game's `shader_final.cache`, §0.2 item 12). Archive mmap is
       *not* needed (P0: archives are read, not mapped); the 64 MiB
       `VM_OBJ_MAX_BYTES` cap matters for memfd and GPU blob mappings instead.
@@ -739,12 +765,12 @@ mouse deltas from QMP-injected motion. Evidence: screendumps + serial log.
 
 ### P5 — Vulkan on the CPU (size L)
 
-- [ ] Mesa lavapipe built for the compat class; LLVM JIT works under compat
+- [x] *(C5-vk, C5-vk2: `docs/cp-vk.md` §1–4, §8.1)* Mesa lavapipe built for the compat class; LLVM JIT works under compat
       (`PROT_EXEC` anonymous memory, `mprotect` transitions).
 - [ ] Vulkan loader + ICD JSON staging; winevulkan.
-- [ ] A Vulkan X11 WSI path that works with lavapipe (software presentation
+- [x] *(C5-vk2: Mesa's software `put_image` path; Present 1.2 fake-msc paces it at ~30 Hz, render median 1 ms)* A Vulkan X11 WSI path that works with lavapipe (software presentation
       is acceptable here — this rung is about correctness).
-- [ ] Probes: Linux `vkcube`; `vkcube.exe` under Wine; a DXVK D3D11 triangle;
+- [ ] Probes: Linux `vkcube` *(done, C5-vk2: 65 s in the guest X session, 1853 frames, two distinct screendumps, `docs/cp-vk2-evidence/item2-vkcubex-x11.txt`)*; `vkcube.exe` under Wine; a DXVK D3D11 triangle;
       a vkd3d-proton D3D12 triangle (MinGW-built, in `src/user/cp/`).
 
 **Gate P5:** all four render recognisably in screendumps and run ≥60 s without
@@ -984,7 +1010,9 @@ user's approval through the integrator.
   the 1344-byte clamp), must pass `python3 tools/cp/nfs/rsize_scan.py` (also
   part of `make host_tests`) and the boot guard `tools/cp/nfs/rsize_guard.sh`
   on the merged tree before `cyberpunk` moves. Every integration gate batch runs
-  both. When a conflict lands in those files, keep the cp/nfs side; see
+  both. Since cp-nfs2 the boot guard also covers G6 (concurrent readers), G7
+  (per-file windows), G8 (64-bit, large reads, stat times, symlinks) and G9
+  (hard mount under injected reply loss). When a conflict lands in those files, keep the cp/nfs side; see
   `docs/cp-nfs.md` §6.
 - Game files: never in a worktree, never in a commit.
 

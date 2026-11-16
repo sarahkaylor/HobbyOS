@@ -129,7 +129,7 @@ cleanup() {
   if [ -n "$MADE_DIR" ]; then
     sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
   fi
-  sudo -n exportfs -v 2>/dev/null | grep -F "$EXPORT" && echo "== WARNING: $EXPORT still exported"
+  sudo -n exportfs -v 2>/dev/null | grep -F "$EXPORT " && echo "== WARNING: $EXPORT still exported"
   return 0
 }
 trap cleanup EXIT

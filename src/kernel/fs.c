@@ -164,10 +164,10 @@ static void nfs_selfcheck(struct file *f) {
   static uint8_t b[16384];
   unsigned long long h = 1469598103934665603ULL;
   long tot = 0, nul = 0;
-  uint32_t off = 0;
+  uint64_t off = 0;
   while (off < f->nfs.size && tot < (long)sizeof b) {
-    uint32_t w = f->nfs.size - off;
-    if (w > 4096) w = 4096;
+    uint64_t left = f->nfs.size - off;
+    uint32_t w = left > 4096 ? 4096 : (uint32_t)left;
     if ((long)w > (long)sizeof b - tot) w = (uint32_t)((long)sizeof b - tot);
     int got = nfs_read_file(m, &f->nfs.fh, off, b + tot, w);
     if (got <= 0) break;
@@ -1979,7 +1979,7 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   else if (f->type == FILE_TYPE_MEMFD)
     f->memfd.cursor = (uint64_t)newpos;
   else
-    f->nfs.cursor = (uint32_t)newpos;
+    f->nfs.cursor = (uint64_t)newpos; /* cp/nfs2: files > 4 GiB */
   ylock_release(&f->lock);
   *errp = 0;
   return newpos;
@@ -2068,12 +2068,22 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     return 0;
   }
   case FILE_TYPE_NFS:
-  case FILE_TYPE_NFSDIR:
+  case FILE_TYPE_NFSDIR: {
     k_stat_fill(st, K_DEV_NFS, nfs_synth_ino(&f->nfs.fh),
                 (f->type == FILE_TYPE_NFSDIR || f->nfs.is_dir)
                     ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
                 f->nfs.size);
+    /* cp/nfs2: the server's times (they were 0).  The attributes the open's
+       LOOKUP returned are cached for 3 s, so this is usually no RPC. */
+    const struct nfs_mount *m = nfs_mount_at(f->nfs.mount_idx);
+    struct nfs_attr a;
+    if (m && f->nfs.fh.len && nfs_getattr_cached(m, &f->nfs.fh, &a) == 0) {
+      st->st_atime = (long)a.atime;
+      st->st_mtime = (long)a.mtime;
+      st->st_ctime = (long)a.ctime;
+    }
     return 0;
+  }
   /* Anonymous objects: Linux gives each pipe/socket its own inode on its own
      pseudo-filesystem.  Deriving the inode from the global slot keeps two
      distinct pipes from reporting the same (dev, ino) pair — the property a
@@ -2604,6 +2614,9 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                 (a.type == NF3DIR) ? (K_S_IFDIR | 0755)
                                    : (K_S_IFREG | 0644),
                 (long)a.size);
+    st->st_atime = (long)a.atime;  /* cp/nfs2: the server's times, not 0 */
+    st->st_mtime = (long)a.mtime;
+    st->st_ctime = (long)a.ctime;
     /* M6/L31: the engine's JSON probe, as stat() sees it. */
     {
       const char *t = "ScriptingAssemblies.json";
@@ -2620,7 +2633,6 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
         kl_c(&kl, '\n'); kl_emit(&kl);
       }
     }
-    st->st_atime = st->st_mtime = st->st_ctime = (long)a.mtime;
     return 0;
   }
   struct fat16_dir_entry entry;
@@ -2999,14 +3011,15 @@ void rw_rdf_dump(void) {
 struct l76_ra {
   int used, filling, mount;
   struct nfs_fh fh;
-  uint32_t base, len;
+  uint64_t base;             /* cp/nfs2: 64-bit file offsets */
+  uint32_t len;
   uint8_t data[L76_RA_BYTES];
 };
 static struct l76_ra l76_ra[L76_RA_SLOTS];
 struct l76_bc {
   int used, mount;
   struct nfs_fh fh;
-  uint32_t off;
+  uint64_t off;
   uint8_t data[L76_PAGE];
 };
 static struct l76_bc l76_bc[L76_BC_SLOTS];
@@ -3021,7 +3034,7 @@ static int l76_fh_eq(const struct nfs_fh *a, const struct nfs_fh *b) {
 }
 
 static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
-                        uint32_t off, void *buf, uint32_t want) {
+                        uint64_t off, void *buf, uint32_t want) {
   uint8_t *dst = (uint8_t *)buf;
   const int mnt = f->nfs.mount_idx;
   if (!l76_rc_inited) {
@@ -3052,7 +3065,7 @@ static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
       if (r->used && !r->filling && r->mount == mnt &&
           l76_fh_eq(&r->fh, &f->nfs.fh) && off >= r->base &&
           off + want <= r->base + r->len) {
-        uint32_t at = off - r->base;
+        uint32_t at = (uint32_t)(off - r->base);
         for (uint32_t k = 0; k < want; k++) dst[k] = r->data[at + k];
         spinlock_release_irqrestore(&l76_rc_lock, fl);
         l76_rc_stat[1]++;
@@ -3074,7 +3087,7 @@ static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
     }
     spinlock_release_irqrestore(&l76_rc_lock, fl);
     if (slot) {
-      uint32_t base = off & ~(uint32_t)(L76_PAGE - 1);
+      uint64_t base = off & ~(uint64_t)(L76_PAGE - 1);
       uint64_t remain = f->nfs.size > base ? f->nfs.size - base : 0;
       uint32_t len = remain < L76_RA_BYTES ? (uint32_t)remain : L76_RA_BYTES;
       if (len >= want) {
@@ -3094,7 +3107,7 @@ static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
            window from a different file. */
         int served = got >= (int)want;
         if (served) {
-          uint32_t at = off - base;
+          uint32_t at = (uint32_t)(off - base);
           for (uint32_t k = 0; k < want; k++) dst[k] = slot->data[at + k];
           l76_rc_stat[2]++;
         }
@@ -3296,10 +3309,10 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
         kl_c(&kl, '\n'); kl_emit(&kl);
       }
     }
-    if (got > 0) f->nfs.cursor += (uint32_t)got;
+    if (got > 0) f->nfs.cursor += (uint64_t)got;
     /* L76: sequential detection for the read-ahead window. */
     if (got > 0) {
-      if (f->nfs.ra_next == (uint32_t)(f->nfs.cursor - (uint32_t)got) &&
+      if (f->nfs.ra_next == f->nfs.cursor - (uint64_t)got &&
           f->nfs.ra_next != 0)
         f->nfs.ra_seq++;
       else
@@ -3979,7 +3992,9 @@ int file_nfs_ident(struct process *p, int fd, int *mount_idx,
   if (fh)
     *fh = f->nfs.fh;
   if (size)
-    *size = (uint32_t)f->nfs.size;
+    /* cp/nfs2: a file > 4 GiB must not map as its size mod 2^32; saturate so
+       the page cache's size cap refuses it. */
+    *size = f->nfs.size > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)f->nfs.size;
   return 0;
 }
 

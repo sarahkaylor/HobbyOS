@@ -1,14 +1,18 @@
 /* tools/cp/nfs/fnv64.c — host helper for nfs_bench.sh: write N bytes of a
  * deterministic xorshift stream to a file and print their FNV-1a-64 (the same
- * hash src/user/cpnfsbench.c computes in the guest). */
+ * hash src/user/cpnfsbench.c computes in the guest).  An optional third
+ * argument seeds the stream (cp/nfs2: the multi-file phase; default is the
+ * original seed). */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 int main(int argc, char **argv) {
-  if (argc != 3) { fprintf(stderr, "usage: fnv64 <out> <bytes>\n"); return 2; }
+  if (argc != 3 && argc != 4) { fprintf(stderr, "usage: fnv64 <out> <bytes> [seed]\n"); return 2; }
   FILE *f = fopen(argv[1], "wb");
   if (!f) return 1;
   uint64_t n = strtoull(argv[2], 0, 0), x = 0x9e3779b97f4a7c15ULL;
+  if (argc == 4) x = strtoull(argv[3], 0, 0);
+  if (!x) return 2;
   uint64_t h = 0xcbf29ce484222325ULL;
   static uint8_t b[1 << 16];
   for (uint64_t done = 0; done < n;) {

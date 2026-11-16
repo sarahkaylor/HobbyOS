@@ -384,6 +384,10 @@ static void handle_arp(uint8_t* packet, uint32_t len) {
 // Forward decl for DHCP
 extern void dhcp_rx(uint8_t* packet, uint32_t len);
 
+/* cp/nfs2: complete UDP datagrams that no socket took (no socket on the
+ * port; the socket's datagram FIFO full). */
+volatile uint32_t udp_nosock, udp_dgram_full;
+
 static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
   if (len < sizeof(struct udp_hdr)) return;
   struct udp_hdr* udp = (struct udp_hdr*)packet;
@@ -499,10 +503,13 @@ static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
           sockets[i].rx_dgram_len[dt % SOCKET_RX_DGRAM_MAX] = data_len;
           arch_memory_barrier();
           sockets[i].rx_dgram_tail = dt + 1;
+        } else {
+          udp_dgram_full++;
         }
       }
       break;
     }
+    if (i == MAX_SOCKETS - 1) udp_nosock++; /* cp/nfs2: no socket on that port */
   }
   if (ntohs(udp->dst_port) == 7777 && !rdma_socket_found) {
     extern void uart_puts(const char* s);
@@ -719,6 +726,10 @@ struct ipr_slot {
 };
 static struct ipr_slot ipr[IPR_SLOTS];
 volatile uint32_t ipr_done, ipr_dropped, ipr_frags;
+/* cp/nfs2: why incomplete datagrams were dropped (ipr_dropped is the sum),
+ * and complete UDP datagrams no socket took: a lost 32 KiB NFS READ reply
+ * (~23 fragments) is a 500 ms stall, and these say where it was lost. */
+volatile uint32_t ipr_drop_bad, ipr_drop_timeout, ipr_drop_evict, ipr_drop_full;
 
 static void ipr_free_locked(struct ipr_slot *sl) {
   sl->state = 0;
@@ -733,6 +744,7 @@ static struct ipr_slot *ipr_add(struct ipv4_hdr *ip, const uint8_t *payload,
                                 uint32_t plen, uint32_t off, int mf) {
   if (off + plen > IPR_MAX || (mf && (plen & 7u))) {
     ipr_dropped++;
+    ipr_drop_bad++;
     return 0;
   }
   uint64_t now = timer_get_ms();
@@ -744,6 +756,7 @@ static struct ipr_slot *ipr_add(struct ipv4_hdr *ip, const uint8_t *payload,
     if (c->state == 1 && now - c->t_ms > IPR_TIMEOUT_MS) {
       ipr_free_locked(c);
       ipr_dropped++;
+      ipr_drop_timeout++;
     }
     if (c->state == 1 && c->src == ip->src_ip && c->dst == ip->dst_ip &&
         c->id == ip->id && c->proto == ip->protocol) {
@@ -756,9 +769,15 @@ static struct ipr_slot *ipr_add(struct ipv4_hdr *ip, const uint8_t *payload,
   if (!sl) {
     sl = freeslot;
     if (!sl) {
-      if (!oldest) { spinlock_release_irqrestore(&ipr_lock, fl); ipr_dropped++; return 0; }
+      if (!oldest) {
+        spinlock_release_irqrestore(&ipr_lock, fl);
+        ipr_dropped++;
+        ipr_drop_full++;
+        return 0;
+      }
       ipr_free_locked(oldest); /* evict the stalest incomplete datagram */
       ipr_dropped++;
+      ipr_drop_evict++;
       sl = oldest;
     }
     sl->state = 1;

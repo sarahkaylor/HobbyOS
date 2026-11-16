@@ -22,6 +22,7 @@
 #include "lock.h"
 #include "frame.h" /* cp/nfs: READ reply buffers */
 #include "kmem.h"
+#include "arch/cpu.h" /* cp/nfs2: cpu_relax in the hard-mount backoff */
 
 struct socket_pcb;      /* net.h's PCB; nfs.h only carries a pointer to it */
 
@@ -49,22 +50,89 @@ volatile uint64_t nfs_io_ops;
  *
  * The access pattern this exploits is Unity's own: sequential within a file.
  * A backwards seek, a different file, or a window that does not cover the
- * request simply refills.  Two threads reading different files at once would
- * thrash one window, so a `busy` fill makes the second reader go direct
- * instead of queueing behind a fill it will invalidate.  Files are read-only
- * here (the mount is exported ro), so nothing invalidates a window. */
-#define NFS_RA_BYTES (64 * 1024)
-static uint8_t nfs_ra_buf[NFS_RA_BYTES] __attribute__((aligned(64)));
-static struct {
-  int valid;
-  int busy;
+ * request simply refills.  Files are read-only here (the mount is exported
+ * ro), so nothing but an unmount invalidates a window.
+ *
+ * cp/nfs2: ONE global window thrashed.  Gate P2 (run23) read 1.66 GB over NFS
+ * to bring up ~200 MB of Wine: 8477 fills of 64 KiB served 65 MB.  Three
+ * causes, all in the window, not the transport:
+ *   - interleaved readers of different files evicted each other's window
+ *     (every Wine process pages ntdll.so/ntdll.dll/kernelbase.dll at once);
+ *   - a fill started AT the request and ran forward, so a reader walking a
+ *     file backwards (pfxls's reverse 4 KiB preads, a loader's scattered
+ *     faults) paid a fresh 64 KiB fill for every 4 KiB page (16x);
+ *   - nothing was kept: the next process faulting the same DLL page read it
+ *     over the wire again.
+ * Now there are NFS_RA_WINDOWS windows, each an ALIGNED 64 KiB block of one
+ * file keyed by (mount, file handle, block) through a hash table, replaced
+ * by a second-chance clock (an approximation of least-recently-used).
+ * A file may own several windows, so a backwards or scattered reader loads
+ * each block once and the next process finds it.  Sequential detection is
+ * per window: `next` is where the last read served from it ended, and a miss
+ * on the block right after a window that was read to its end loads a run of
+ * NFS_RA_SEQ windows in one pipelined fill.
+ *
+ * Correctness (cp/nfsfix, now per window): a window is filled with the lock
+ * DROPPED, so the fill first marks it busy AND invalid under the lock; a
+ * reader copies only from a window that is valid and not busy, under the
+ * lock.  A reader that needs a block another thread is filling reads its own
+ * bytes directly instead of waiting. */
+#define NFS_RA_BYTES    (64 * 1024)      /* one window: an aligned block */
+#define NFS_RA_PAGES    (NFS_RA_BYTES / 4096)
+#if defined(__x86_64__)
+#define NFS_RA_WINDOWS  4096             /* 256 MiB at most, frames taken on first use */
+#else
+/* ARM: the window descriptors are .bss (~144 B each), and the ARM kernel's
+ * .bss must fit limine's placement window (docs/blk-cache.md section 11):
+ * 4096 of them did not link.  256 windows = 16 MiB at most. */
+#define NFS_RA_WINDOWS  256
+#endif
+#define NFS_RA_HBITS    10               /* hash buckets: (fh, block) -> window chain */
+#define NFS_RA_SEQ      4                /* windows a sequential miss loads */
+#define NFS_RA_FILL_MAX 16               /* windows one fill may load */
+/* cp/nfs2: was 1 MiB.  Gate P2 run 2 read 223 MB with read()s above 1 MiB
+ * (big_kib) against 158 MB through the windows, the same DLLs once per Wine
+ * process; those now share the windows too.  Only reads above 16 MiB (the
+ * 172 MB shader cache) stream straight into the caller's buffer. */
+#define NFS_RA_MAXREQ   (16 * 1024 * 1024)
+struct nfs_ra_win {
+  int valid;            /* buf[0..len) holds the file's bytes at base */
+  int busy;             /* a fill owns it; valid is 0 while busy */
+  int eof;              /* the fill hit end of file at base + len */
   const struct nfs_mount *m;
   struct nfs_fh fh;
-  uint32_t base;        /* file offset of nfs_ra_buf[0] */
+  uint32_t fhash;       /* nfs_ra_fhash(fh): cheap first compare */
+  uint64_t base;        /* NFS_RA_BYTES-aligned file offset of buf[0] */
   uint32_t len;         /* bytes valid */
-  uint64_t hits, fills, saved;
+  uint64_t next;        /* end of the last read served from this window */
+  int ref;              /* used since the clock hand last passed */
+  uint16_t hnext;       /* next window in this hash chain, index + 1 */
+  uint16_t hb;          /* the bucket it is chained on, + 1 (0: none) */
+  uint8_t *buf;         /* NFS_RA_BYTES, allocated by the first fill */
+};
+static struct nfs_ra_win nfs_ra_win[NFS_RA_WINDOWS];
+static uint16_t nfs_ra_head[1u << NFS_RA_HBITS]; /* first window, index + 1 */
+static uint32_t nfs_ra_used;  /* windows [0, used) have been handed out */
+static uint32_t nfs_ra_hand;  /* the replacement clock */
+static struct {
+  uint64_t hits;        /* window pieces served without an RPC */
+  uint64_t misses;      /* pieces that started a fill */
+  uint64_t fills;       /* windows loaded */
+  uint64_t seqfills;    /* fills started by sequential detection */
+  uint64_t fill_bytes;  /* bytes loaded into windows */
+  uint64_t direct;      /* pieces read around the windows (block busy, no window) */
+  uint64_t saved;       /* bytes served from windows */
+  uint64_t big_bytes;   /* asked by reads above NFS_RA_MAXREQ (no windows) */
+  uint64_t tail_bytes;  /* re-read serially after a pipeline hole or stall */
+  uint64_t shrunk;      /* window buffers given back under memory pressure */
+  uint64_t alloc_us;    /* time taking window buffers (first fills) */
+  uint64_t fill_us;     /* time in window fills (the READs) */
+  uint32_t gen;         /* bumped by unmount: a fill that straddles it is dropped */
 } nfs_ra;
 static spinlock_t nfs_ra_lock;
+/* cp/nfs2: pipelined READs that timed out waiting for a reply. */
+volatile uint32_t nfs_pipe_stalls;
+extern volatile uint32_t nfs_inj_dropped;   /* fault injection, below */
 
 
 /* L35: where does a READ RPC's wall time go?  Every READ RPC is bucketed by
@@ -166,18 +234,77 @@ void nfs_perf_dump(const char *why) {
     uart_puts(c);
     uart_puts("\n");
   }
+  {
+    /* cp/nfs2: where lost READ replies go (net.c counters).  frags = IP
+       fragments into reassembly, done = datagrams rebuilt; drops by reason
+       (timeout: a fragment never came; evict/full: all 8 slots were busy;
+       bad: malformed); nosock/dgfull: complete UDP datagrams no socket
+       took. */
+    extern volatile uint32_t ipr_done, ipr_frags, ipr_drop_bad, ipr_drop_timeout,
+        ipr_drop_evict, ipr_drop_full, udp_nosock, udp_dgram_full;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[NFSNET] frags=");
+    kl_i(&kl, (long)ipr_frags);
+    kl_s(&kl, " done=");
+    kl_i(&kl, (long)ipr_done);
+    kl_s(&kl, " drop_timeout=");
+    kl_i(&kl, (long)ipr_drop_timeout);
+    kl_s(&kl, " drop_evict=");
+    kl_i(&kl, (long)ipr_drop_evict);
+    kl_s(&kl, " drop_full=");
+    kl_i(&kl, (long)ipr_drop_full);
+    kl_s(&kl, " drop_bad=");
+    kl_i(&kl, (long)ipr_drop_bad);
+    kl_s(&kl, " nosock=");
+    kl_i(&kl, (long)udp_nosock);
+    kl_s(&kl, " dgfull=");
+    kl_i(&kl, (long)udp_dgram_full);
+    kl_s(&kl, " stalls=");
+    kl_i(&kl, (long)nfs_pipe_stalls);
+    kl_s(&kl, " inj_dropped=");
+    kl_i(&kl, (long)nfs_inj_dropped);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
   if (nfs_ra.hits | nfs_ra.fills) {
-    char a[24], b[24], c[24];
-    nfs_put_dec((int)(nfs_ra.hits & 0x7fffffff), a);
-    nfs_put_dec((int)(nfs_ra.fills & 0x7fffffff), b);
-    nfs_put_dec((int)(nfs_ra.saved >> 10), c);   /* KiB served from the window */
-    uart_puts("[NFSRA] hits=");
-    uart_puts(a);
-    uart_puts(" fills=");
-    uart_puts(b);
-    uart_puts(" saved_kib=");
-    uart_puts(c);
-    uart_puts("\n");
+    /* cp/nfs2: hits/fills/saved_kib keep their old meaning (fills now counts
+       windows loaded); the rest says where the READ bytes went. */
+    uint64_t all = nfs_ra.hits + nfs_ra.misses + nfs_ra.direct;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[NFSRA] hits=");
+    kl_i(&kl, (long)nfs_ra.hits);
+    kl_s(&kl, " fills=");
+    kl_i(&kl, (long)nfs_ra.fills);
+    kl_s(&kl, " saved_kib=");
+    kl_i(&kl, (long)(nfs_ra.saved >> 10));
+    kl_s(&kl, " misses=");
+    kl_i(&kl, (long)nfs_ra.misses);
+    kl_s(&kl, " seqfills=");
+    kl_i(&kl, (long)nfs_ra.seqfills);
+    kl_s(&kl, " fill_kib=");
+    kl_i(&kl, (long)(nfs_ra.fill_bytes >> 10));
+    kl_s(&kl, " direct=");
+    kl_i(&kl, (long)nfs_ra.direct);
+    kl_s(&kl, " hit_pct=");
+    kl_i(&kl, all ? (long)(nfs_ra.hits * 100 / all) : 0);
+    kl_s(&kl, " stalls=");
+    kl_i(&kl, (long)nfs_pipe_stalls);
+    kl_s(&kl, " big_kib=");
+    kl_i(&kl, (long)(nfs_ra.big_bytes >> 10));
+    kl_s(&kl, " tail_kib=");
+    kl_i(&kl, (long)(nfs_ra.tail_bytes >> 10));
+    kl_s(&kl, " wins=");
+    kl_i(&kl, (long)nfs_ra_used);
+    kl_s(&kl, " shrunk=");
+    kl_i(&kl, (long)nfs_ra.shrunk);
+    kl_s(&kl, " alloc_us=");
+    kl_i(&kl, (long)nfs_ra.alloc_us);
+    kl_s(&kl, " fill_us=");
+    kl_i(&kl, (long)nfs_ra.fill_us);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
   }
 }
 
@@ -193,12 +320,17 @@ static void nfs_pf_record(uint32_t want, uint64_t sock_us, uint64_t send_us,
   if (wait_us < b->wait_min_us) b->wait_min_us = wait_us;
 }
 
-/* Emit a [NFSRTT] set every 1 MiB of READ traffic, so a long asset load
- * leaves a latency table in the serial log without one row per RPC. */
+/* Emit a [NFSRTT] set every NFS_PERF_DUMP_BYTES of READ traffic, so a long
+ * asset load leaves a latency table in the serial log without one row per
+ * RPC.  cp/nfs2: 1 MiB -> 8 MiB.  Every console byte is a trapped port
+ * write; at 1 MiB the three-row set cost the 64 MiB sequential bench ~30% of
+ * its throughput once the windows made [NFSRA] print on every set, and Gate
+ * P2 (run23) printed 12576 [NFSRTT] rows. */
+#define NFS_PERF_DUMP_BYTES (8u << 20)
 static uint64_t nfs_pf_since_dump;
 static void nfs_perf_note_bytes(uint32_t n) {
   nfs_pf_since_dump += n;
-  if (nfs_pf_since_dump >= (1u << 20)) {
+  if (nfs_pf_since_dump >= NFS_PERF_DUMP_BYTES) {
     nfs_pf_since_dump = 0;
     nfs_perf_dump("periodic");
   }
@@ -263,6 +395,11 @@ static void n_str_append(char *dst, int cap, const char *src) {
 static struct nfs_mount mounts[NFS_MAX_MOUNTS];
 
 static void dir_cache_invalidate_all(void);
+static void nfs_ra_drop_mount(const struct nfs_mount *m);
+static void nfs_ac_drop_mount(const struct nfs_mount *m);
+static int rpc_call_hard(const struct nfs_mount *m, uint32_t proc,
+                         const uint8_t *args, int args_len, uint8_t *body_buf,
+                         int body_cap, const uint8_t **body, int *body_len);
 
 void nfs_init(void) {
   for (int i = 0; i < NFS_MAX_MOUNTS; i++) mounts[i].in_use = 0;
@@ -375,6 +512,79 @@ static void nfs_rsize_fallback(struct nfs_mount *m, const char *why) {
 }
 /* L57: READ RPCs that needed the one retry (see nfs_read_serial). */
 volatile uint32_t nfs_read_retries;
+
+/* ---- cp/nfs2: fault injection (MODE=test kernels only) ----------------- */
+/* The client must never turn a lost reply into short or zero data (Wine read
+ * an all-zero sortdefault.nls after "[NFS] rpc: no reply from server",
+ * 2026-11-16).  To test that without breaking the server, a test kernel can
+ * drop NFS-program reply datagrams on receipt: every Nth one, or all of them
+ * for T ms.  The trigger is a LOOKUP of a name under any NFS mount (it
+ * answers ENOENT):
+ *   .cp-nfs-inject.every.<N>      drop every Nth NFS reply
+ *   .cp-nfs-inject.blackout.<ms>  drop every NFS reply for <ms> from now
+ *   .cp-nfs-inject.off
+ * Mount-time calls (portmap, MOUNT) are never dropped. */
+extern uint64_t timer_get_ms(void);
+volatile uint32_t nfs_inj_dropped;
+#ifdef KERNEL_MODE_TEST
+static volatile uint32_t nfs_inj_every, nfs_inj_seen;
+static volatile uint64_t nfs_inj_until_ms;
+static int nfs_inj_drop(void) {
+  if (nfs_inj_until_ms && timer_get_ms() < nfs_inj_until_ms) {
+    nfs_inj_dropped++;
+    return 1;
+  }
+  if (nfs_inj_every && __sync_add_and_fetch(&nfs_inj_seen, 1) % nfs_inj_every == 0) {
+    nfs_inj_dropped++;
+    return 1;
+  }
+  return 0;
+}
+static uint64_t nfs_inj_num(const char *p) {
+  uint64_t v = 0;
+  while (*p >= '0' && *p <= '9') v = v * 10 + (uint64_t)(*p++ - '0');
+  return v;
+}
+/* 1 when `rel` is an injection trigger (and it was applied). */
+static int nfs_inj_trigger(const char *rel) {
+  static const char key[] = "/.cp-nfs-inject.";
+  const char *p = rel;
+  for (; *p; p++) {
+    int i = 0;
+    while (key[i] && p[i] == key[i]) i++;
+    if (!key[i]) { p += i; break; }
+  }
+  if (!*p) return 0;
+  const char *q = p;
+  if (q[0] == 'o' && q[1] == 'f' && q[2] == 'f') {
+    nfs_inj_every = 0;
+    nfs_inj_until_ms = 0;
+  } else if (q[0] == 'e' && q[1] == 'v' && q[2] == 'e' && q[3] == 'r' && q[4] == 'y' && q[5] == '.') {
+    nfs_inj_seen = 0;
+    nfs_inj_every = (uint32_t)nfs_inj_num(q + 6);
+  } else if (q[0] == 'b' && q[1] == 'l' && q[2] == 'a' && q[3] == 'c' && q[4] == 'k') {
+    while (*q && *q != '.') q++;
+    if (*q == '.') q++;
+    nfs_inj_until_ms = timer_get_ms() + nfs_inj_num(q);
+  } else {
+    return 0;
+  }
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[NFSINJ] ");
+  kl_s(&kl, p);
+  kl_s(&kl, " every=");
+  kl_i(&kl, (long)nfs_inj_every);
+  kl_s(&kl, " dropped=");
+  kl_i(&kl, (long)nfs_inj_dropped);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+  return 1;
+}
+#else
+static int nfs_inj_drop(void) { return 0; }
+static int nfs_inj_trigger(const char *rel) { (void)rel; return 0; }
+#endif
 static uint32_t next_xid = 0x484F424F;      /* "HOBO" + bumps per call */
 
 /* Send one already-built RPC on `pcb` and read its reply into `rbuf`.  On
@@ -383,11 +593,15 @@ static uint32_t next_xid = 0x484F424F;      /* "HOBO" + bumps per call */
  * variant and the READ path for the cached one). */
 static int rpc_xfer(struct socket_pcb *pcb, uint32_t xid, const uint8_t *call,
                     int n, uint8_t *rbuf, int rcap,
-                    const uint8_t **body, int *body_len) {
+                    const uint8_t **body, int *body_len, int inj) {
   if (net_socket_send(pcb, call, (uint32_t)n) < 0) return -1;
+  uint64_t t0 = timer_get_ms();
   for (;;) {
-    int got = net_socket_recv_timeout(pcb, rbuf, rcap, NFS_RPC_TIMEOUT_MS);
+    int left = NFS_RPC_TIMEOUT_MS - (int)(timer_get_ms() - t0);
+    if (left <= 0) return -1;
+    int got = net_socket_recv_timeout(pcb, rbuf, rcap, left);
     if (got <= 0) return -1;
+    if (inj && nfs_inj_drop()) continue;    /* cp/nfs2: injected loss */
     int bo = 0, bl = 0;
     int pr = rpc_parse_reply(rbuf, got, xid, &bo, &bl);
     if (pr == RPC_E_WRONG_XID) continue;    /* stale datagram */
@@ -444,7 +658,8 @@ static int rpc_call(uint32_t ip, uint16_t port, uint32_t prog, uint32_t vers,
       return -1;
     }
     uint64_t t1 = timer_get_us();
-    int rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, sizeof rbuf, body, body_len);
+    int rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, sizeof rbuf, body, body_len,
+                      prog == NFS_PROG);
     uint64_t t3 = timer_get_us();
     net_socket_close(pcb);
     if (rc == 0) {
@@ -700,6 +915,8 @@ int nfs_mount_remove(const char *point) {
     }
 
     mounts[i].in_use = 0;
+    nfs_ra_drop_mount(&mounts[i]); /* cp/nfs2: its windows die with it */
+    nfs_ac_drop_mount(&mounts[i]);
     /* L35: the cached READ socket belongs to the mount — close it, or a
      * later mount into this slot inherits a socket connected to the old
      * server (and a stuck rd_busy). */
@@ -734,10 +951,79 @@ static int getattr_fh(const struct nfs_mount *m, const uint8_t *fh,
   uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
-  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_GETATTR, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+  if (rpc_call_hard(m, NFS_PROC_GETATTR, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_getattr_reply(body, blen, attr);
+}
+
+/* ---- cp/nfs2: attribute cache for fstat --------------------------------- */
+/* fstat() on an NFS fd reported st_mtime = 0: the file object keeps only the
+ * size.  The attributes LOOKUP already returned at open are kept here, keyed
+ * by (mount, file handle), so fstat needs no RPC right after an open; an
+ * entry older than NFS_AC_TTL_MS is fetched again with GETATTR (Linux's
+ * acregmin is 3 s). */
+#define NFS_AC_SLOTS  64
+#define NFS_AC_TTL_MS 3000
+extern uint64_t timer_get_ms(void);
+static struct {
+  int used;
+  const struct nfs_mount *m;
+  struct nfs_fh fh;
+  struct nfs_attr a;
+  uint64_t t_ms;
+} nfs_ac[NFS_AC_SLOTS];
+static unsigned nfs_ac_next;
+static spinlock_t nfs_ac_lock;
+
+static int nfs_ac_fh_eq(const struct nfs_fh *a, const struct nfs_fh *b) {
+  if (a->len != b->len) return 0;
+  for (uint32_t i = 0; i < a->len; i++)
+    if (a->data[i] != b->data[i]) return 0;
+  return 1;
+}
+
+static void nfs_ac_put(const struct nfs_mount *m, const struct nfs_fh *fh,
+                       const struct nfs_attr *a) {
+  uint64_t now = timer_get_ms();
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ac_lock);
+  int slot = -1;
+  for (int i = 0; i < NFS_AC_SLOTS; i++)
+    if (nfs_ac[i].used && nfs_ac[i].m == m && nfs_ac_fh_eq(&nfs_ac[i].fh, fh)) {
+      slot = i;
+      break;
+    }
+  if (slot < 0) slot = (int)(nfs_ac_next++ % NFS_AC_SLOTS);
+  nfs_ac[slot].used = 1;
+  nfs_ac[slot].m = m;
+  nfs_ac[slot].fh = *fh;
+  nfs_ac[slot].a = *a;
+  nfs_ac[slot].t_ms = now;
+  spinlock_release_irqrestore(&nfs_ac_lock, fl);
+}
+
+static void nfs_ac_drop_mount(const struct nfs_mount *m) {
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ac_lock);
+  for (int i = 0; i < NFS_AC_SLOTS; i++)
+    if (nfs_ac[i].m == m) nfs_ac[i].used = 0;
+  spinlock_release_irqrestore(&nfs_ac_lock, fl);
+}
+
+int nfs_getattr_cached(const struct nfs_mount *m, const struct nfs_fh *fh,
+                       struct nfs_attr *a) {
+  if (!m || !m->in_use || !fh || fh->len == 0 || !a) return -1;
+  uint64_t now = timer_get_ms();
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ac_lock);
+  for (int i = 0; i < NFS_AC_SLOTS; i++)
+    if (nfs_ac[i].used && nfs_ac[i].m == m && now - nfs_ac[i].t_ms < NFS_AC_TTL_MS &&
+        nfs_ac_fh_eq(&nfs_ac[i].fh, fh)) {
+      *a = nfs_ac[i].a;
+      spinlock_release_irqrestore(&nfs_ac_lock, fl);
+      return 0;
+    }
+  spinlock_release_irqrestore(&nfs_ac_lock, fl);
+  if (getattr_fh(m, fh->data, fh->len, a) != 0) return -1;
+  nfs_ac_put(m, fh, a);
+  return 0;
 }
 
 /* cp/exec: READLINK3 on a symlink's handle. */
@@ -752,8 +1038,7 @@ int nfs_readlink(const struct nfs_mount *m, const struct nfs_fh *fh,
   uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
-  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_READLINK, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+  if (rpc_call_hard(m, NFS_PROC_READLINK, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_readlink_reply(body, blen, out, cap);
 }
@@ -771,133 +1056,129 @@ static int lookup_one(const struct nfs_mount *m, const uint8_t *dir_fh,
   uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
-  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_LOOKUP, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+  if (rpc_call_hard(m, NFS_PROC_LOOKUP, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_lookup_reply(body, blen, out, attr, attr_ok);
 }
 
-static int nfs_lookup_nofollow(const struct nfs_mount *m, const char *rel,
-               struct nfs_fh *fh, struct nfs_attr *attr) {
-  if (!m || !m->in_use || !rel) return -1;
-  if (rel[0] != '/') return -1;
-
-  struct nfs_fh cur;
-  cur.len = m->root_fh_len;
-  for (uint32_t i = 0; i < cur.len; i++) cur.data[i] = m->root_fh[i];
-
-  if (rel[1] == '\0') {
-    /* The mount root itself. */
-    if (attr) {
-      int rc = getattr_fh(m, cur.data, cur.len, attr);
-      if (rc != 0) return -1;
-    }
-    if (fh) *fh = cur;
-    return 0;
+/* One LOOKUP of `name` in `dir`, retried after a transport-shaped failure
+ * (L76): -2 is the SERVER saying "no such entry" -- definitive, return it.
+ * -1 is a transport or parse failure: a lost datagram, a reply stolen by a
+ * second socket that shares the ephemeral port, or a socket the pool could
+ * not hand out.  Mapping that to ENOENT is what produced "Could not find file
+ * /NFS/Data/Biotech/.../WITabs.xml" for a file the game had already opened in
+ * the same run, and the NullReferenceException in GraphicData.Init that
+ * followed it.  A LOOKUP is idempotent: retry the component before reporting
+ * a missing file. */
+static int lookup_comp(const struct nfs_mount *m, const struct nfs_fh *dir,
+                       const char *comp, struct nfs_fh *next,
+                       struct nfs_attr *attr, int *attr_ok) {
+  int lrc = lookup_one(m, dir->data, dir->len, comp, next, attr, attr_ok);
+  if (lrc == 0 || lrc == -2) return lrc;
+  int tries = 0;
+  while (lrc != 0 && tries < 3) {
+    tries++;
+    lrc = lookup_one(m, dir->data, dir->len, comp, next, attr, attr_ok);
   }
+  nfs_lookup_retries += (uint32_t)tries;
+  if (nfs_lookup_rows < 24) {
+    nfs_lookup_rows++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[NFLK] retry comp=");
+    kl_s(&kl, comp);
+    kl_s(&kl, " tries=");
+    kl_i(&kl, (long)tries);
+    kl_s(&kl, " rc=");
+    kl_i(&kl, (long)lrc);
+    kl_s(&kl, " total=");
+    kl_i(&kl, (long)nfs_lookup_retries);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  return lrc;
+}
 
-  const char *p = rel + 1;
+/* cp/exec + cp/nfs2: path lookup that FOLLOWS symbolic links, the Linux
+ * default for open()/stat() (and what execve and the spawn loader need: the
+ * staged Wine tree has /CP/WINE/bin/wineboot -> wine as an NFS symlink).
+ *
+ * The walk goes one component at a time from the mount root.  When ANY
+ * component -- not only the last -- is NF3LNK, its target is read, joined
+ * against the directory that holds the link (nfs_symlink_join), the rest of
+ * the path is appended, and the walk restarts from the root.  cp/exec only
+ * followed a link in the LAST component, so `dir -> sub` made
+ * /NFS/dir/file fail: the server answers LOOKUP in a symlink handle with
+ * NFS3ERR_NOTDIR.  At most NFS_SYMLINK_HOPS links per lookup (Linux's
+ * MAXSYMLINKS is 40), which also ends a cycle.  Every caller (open, stat,
+ * nfs_is_dir) follows: there is no lstat path through here. */
+#define NFS_SYMLINK_HOPS 40
+int nfs_lookup(const struct nfs_mount *m, const char *rel,
+               struct nfs_fh *fh, struct nfs_attr *attr) {
+  if (!m || !m->in_use || !rel || rel[0] != '/') return -1;
+  if (nfs_inj_trigger(rel)) return -1;      /* cp/nfs2: test kernels only */
+  char cur[NFS_PATH_MAX * 4];
+  int cl = 0;
+  for (; rel[cl] && cl < (int)sizeof cur - 1; cl++) cur[cl] = rel[cl];
+  if (rel[cl]) return -1;                   /* does not fit */
+  cur[cl] = '\0';
+  int hops = 0;
+restart:;
+  struct nfs_fh dir;
+  dir.len = m->root_fh_len;
+  for (uint32_t i = 0; i < dir.len; i++) dir.data[i] = m->root_fh[i];
+  struct nfs_attr last;
+  int have = 0;
   /* A path component is NOT bounded by the 32-byte readdir display name:
    * RimWorld ships names like
    * UnityEngine.RuntimeInitializeOnLoadManagerInitializerModule.dll (63
-   * bytes).  The old buf was NFS_NAME_MAX and the loop stopped at 31 chars,
-   * then resumed mid-component — every such path failed LOOKUP. */
+   * bytes). */
   char comp[NFS_COMP_MAX];
-  struct nfs_attr last_attr;
-  int have_attr = 0;
-  while (*p) {
+  int p = 1;
+  while (cur[p]) {
     int len = 0;
-    while (p[len] && p[len] != '/' && len < NFS_COMP_MAX - 1) len++;
-    for (int i = 0; i < len; i++) comp[i] = p[i];
+    while (cur[p + len] && cur[p + len] != '/') len++;
+    if (len == 0) { p++; continue; }
+    if (len >= NFS_COMP_MAX) return -1;
+    for (int i = 0; i < len; i++) comp[i] = cur[p + i];
     comp[len] = '\0';
-    if (len == 0) {
-      p++;
-      continue;
-    }
-    int attr_ok = 0;
     struct nfs_fh next;
-    int lrc = lookup_one(m, cur.data, cur.len, comp, &next, &last_attr, &attr_ok);
-    if (lrc != 0) {
-      /* L76: -2 is the SERVER saying "no such entry" -- definitive, return it.
-       * -1 is a transport or parse failure: a lost datagram, a reply stolen by
-       * a second socket that shares the ephemeral port, or a socket the pool
-       * could not hand out.  Mapping that to ENOENT is what produced
-       * "Could not find file /NFS/Data/Biotech/.../WITabs.xml" for a file the
-       * game had already opened in the same run, and the NullReferenceException
-       * in GraphicData.Init that followed it.  A LOOKUP is idempotent: retry
-       * the component before reporting a missing file. */
-      if (lrc != -2) {
-        int tries = 0;
-        while (lrc != 0 && tries < 3) {
-          tries++;
-          lrc = lookup_one(m, cur.data, cur.len, comp, &next, &last_attr, &attr_ok);
-        }
-        nfs_lookup_retries += (uint32_t)tries;
-        if (nfs_lookup_rows < 24) {
-          nfs_lookup_rows++;
-          struct kline kl;
-          kl_init(&kl);
-          kl_s(&kl, "[NFLK] retry comp=");
-          kl_s(&kl, comp);
-          kl_s(&kl, " tries=");
-          kl_i(&kl, (long)tries);
-          kl_s(&kl, " rc=");
-          kl_i(&kl, (long)lrc);
-          kl_s(&kl, " total=");
-          kl_i(&kl, (long)nfs_lookup_retries);
-          kl_c(&kl, '\n');
-          kl_emit(&kl);
-        }
-      }
-      if (lrc != 0)
-        return -1;
+    int attr_ok = 0;
+    if (lookup_comp(m, &dir, comp, &next, &last, &attr_ok) != 0) return -1;
+    if (!attr_ok && getattr_fh(m, next.data, next.len, &last) != 0) return -1;
+    have = 1;
+    int end = p + len;                      /* index just past this component */
+    if (last.type == NF3LNK) {
+      if (++hops > NFS_SYMLINK_HOPS) return -1;  /* a symlink loop */
+      char tgt[NFS_PATH_MAX * 2];
+      if (nfs_readlink(m, &next, tgt, sizeof tgt) < 0) return -1;
+      /* The link's own path is cur[0..end); the target resolves against its
+         parent.  Then the rest of the walk, cur[end..], is appended. */
+      char lpath[NFS_PATH_MAX * 4];
+      for (int i = 0; i < end; i++) lpath[i] = cur[i];
+      lpath[end] = '\0';
+      char joined[NFS_PATH_MAX * 4];
+      if (nfs_symlink_join(lpath, tgt, joined, sizeof joined) != 0) return -1;
+      int jl = n_strlen(joined);
+      int rl = n_strlen(cur + end);
+      if (jl + rl >= (int)sizeof cur) return -1;
+      char rest[NFS_PATH_MAX * 4];
+      for (int i = 0; i <= rl; i++) rest[i] = cur[end + i];
+      for (int i = 0; i < jl; i++) cur[i] = joined[i];
+      for (int i = 0; i <= rl; i++) cur[jl + i] = rest[i];
+      if (cur[0] != '/') return -1;
+      goto restart;
     }
-    cur = next;
-    have_attr = attr_ok;
-    p += len;
-    while (*p == '/') p++;
+    dir = next;
+    p = end;
   }
   if (attr) {
-    if (have_attr) *attr = last_attr;
-    else if (getattr_fh(m, cur.data, cur.len, attr) != 0) return -1;
+    if (have) *attr = last;
+    else if (getattr_fh(m, dir.data, dir.len, attr) != 0) return -1;
   }
-  if (fh) *fh = cur;
+  if (have) nfs_ac_put(m, &dir, &last);
+  if (fh) *fh = dir;
   return 0;
-}
-
-/* cp/exec: path lookup that FOLLOWS symbolic links, the Linux default for
- * open()/stat() (and what execve and the spawn loader need: the staged Wine
- * tree has /CP/WINE/bin/wineboot -> wine as an NFS symlink).  Walks `rel`
- * without following, and while the resolved node is NF3LNK reads the target,
- * rejoins it against the link's parent and re-walks -- bounded to defeat a
- * symlink cycle.  Every existing caller (open, stat, nfs_is_dir) now follows,
- * which is correct: there is no lstat path through here. */
-int nfs_lookup(const struct nfs_mount *m, const char *rel,
-               struct nfs_fh *fh, struct nfs_attr *attr) {
-  char cur[NFS_PATH_MAX * 4];
-  int cl = 0;
-  if (!rel) return -1;
-  for (; rel[cl] && cl < (int)sizeof cur - 1; cl++) cur[cl] = rel[cl];
-  cur[cl] = '\0';
-  struct nfs_fh lfh;
-  struct nfs_attr la;
-  for (int hop = 0; hop < 12; hop++) {
-    int rc = nfs_lookup_nofollow(m, cur, &lfh, &la);
-    if (rc != 0) return rc;
-    if (la.type != NF3LNK) {
-      if (fh) *fh = lfh;
-      if (attr) *attr = la;
-      return 0;
-    }
-    char tgt[NFS_PATH_MAX * 2];
-    int n = nfs_readlink(m, &lfh, tgt, sizeof tgt);
-    if (n < 0) return -1;
-    char next[NFS_PATH_MAX * 4];
-    if (nfs_symlink_join(cur, tgt, next, sizeof next) != 0) return -1;
-    for (cl = 0; next[cl] && cl < (int)sizeof cur - 1; cl++) cur[cl] = next[cl];
-    cur[cl] = '\0';
-  }
-  return -1; /* too many hops: a symlink loop */
 }
 
 int nfs_getattr(const struct nfs_mount *m, const struct nfs_fh *fh,
@@ -972,13 +1253,103 @@ static void rd_sock_put(struct nfs_mount *m, struct socket_pcb *p, int temp,
   m->rd_busy = 0;
 }
 
+/* ---- cp/nfs2: hard-mount retry bookkeeping ------------------------------ */
+#define NFS_HARD_MS (180u * 1000u)  /* a call fails only after 3 min unanswered */
+volatile uint32_t nfs_hard_retries, nfs_hard_giveups;
+static void nfs_hard_note(const char *op, uint64_t off, uint32_t want, int tries,
+                          uint64_t waited_ms) {
+  static uint32_t rows;
+  nfs_hard_retries++;
+  rows++;
+  if (rows > 32 && (rows & 63)) return;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[NFSHARD] retry op=");
+  kl_s(&kl, op);
+  kl_s(&kl, " off=");
+  kl_i(&kl, (long)off);
+  kl_s(&kl, " want=");
+  kl_i(&kl, (long)want);
+  kl_s(&kl, " try=");
+  kl_i(&kl, tries);
+  kl_s(&kl, " waited_ms=");
+  kl_i(&kl, (long)waited_ms);
+  kl_s(&kl, " total=");
+  kl_i(&kl, (long)nfs_hard_retries);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+static void nfs_hard_giveup(const char *op, uint64_t off, uint32_t want, int tries) {
+  nfs_hard_giveups++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[NFSHARD] GIVE UP op=");
+  kl_s(&kl, op);
+  kl_s(&kl, " off=");
+  kl_i(&kl, (long)off);
+  kl_s(&kl, " want=");
+  kl_i(&kl, (long)want);
+  kl_s(&kl, " tries=");
+  kl_i(&kl, tries);
+  kl_s(&kl, " after_ms=");
+  kl_i(&kl, (long)NFS_HARD_MS);
+  kl_s(&kl, " -> EIO\n");
+  kl_emit(&kl);
+}
+/* Wait between retries: 0, 250, 500, 1000, 2000 ms, then 2 s (on top of each
+ * attempt's own NFS_RPC_TIMEOUT_MS). */
+static void nfs_hard_backoff(int tries) {
+  uint64_t ms = tries <= 1 ? 0 : (uint64_t)125 << (tries > 5 ? 4 : tries - 1);
+  uint64_t t0 = timer_get_ms();
+  while (timer_get_ms() - t0 < ms) cpu_relax();
+}
+/* One single-frame READ at `off` on a fresh socket: 1 when answered. */
+static int nfs_read_probe_small(const struct nfs_mount *m, const struct nfs_fh *fh,
+                                uint64_t off) {
+  uint8_t args[4 + NFS_FH_MAX + 4 + 6 + 8 + 4];
+  struct xdr_w w;
+  xdr_w_init(&w, args, sizeof args);
+  xdr_w_fh(&w, fh->data, fh->len);
+  xdr_w_u64(&w, off);
+  xdr_w_u32(&w, NFS_READ_RSIZE);
+  if (w.err) return 0;
+  uint8_t rb[NFS_RPC_BUF];
+  const uint8_t *body = 0;
+  int blen = 0;
+  return rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS, NFS_PROC_READ,
+                  args, w.len, rb, sizeof rb, &body, &blen) == 0;
+}
+/* rpc_call for the NFS program's own procedures on a mounted export, with
+ * the same hard semantics: re-sent until answered or NFS_HARD_MS. */
+static int rpc_call_hard(const struct nfs_mount *m, uint32_t proc,
+                         const uint8_t *args, int args_len, uint8_t *body_buf,
+                         int body_cap, const uint8_t **body, int *body_len) {
+  uint64_t t0 = 0;
+  for (int tries = 1;; tries++) {
+    if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS, proc, args,
+                 args_len, body_buf, body_cap, body, body_len) == 0)
+      return 0;
+    if (!t0) t0 = timer_get_ms();
+    nfs_hard_note(proc == NFS_PROC_LOOKUP ? "LOOKUP" : proc == NFS_PROC_GETATTR
+                  ? "GETATTR" : proc == NFS_PROC_READLINK ? "READLINK"
+                  : proc == NFS_PROC_READDIRPLUS ? "READDIRPLUS" : "NFS",
+                  0, 0, tries, timer_get_ms() - t0);
+    if (timer_get_ms() - t0 > NFS_HARD_MS) {
+      nfs_hard_giveup("RPC", 0, proc, tries);
+      return -1;
+    }
+    nfs_hard_backoff(tries);
+  }
+}
+
 /* One READ RPC, at most m->read_size bytes, into buf.  Returns bytes
- * transferred (0 at EOF), or -1 before anything was transferred. */
+ * transferred (short only at EOF), or -1 when the read failed (cp/nfs2: a
+ * failure is never a short count). */
 static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *fh,
-                                uint32_t offset, void *buf, uint32_t len,
+                                uint64_t offset, void *buf, uint32_t len,
                                 uint8_t *rbuf, int rcap);
 static int nfs_read_serial(const struct nfs_mount *m, const struct nfs_fh *fh,
-                           uint32_t offset, void *buf, uint32_t len) {
+                           uint64_t offset, void *buf, uint32_t len) {
   uint8_t *rb = nfs_rbig_get();
   if (!rb) return -1;
   int r = nfs_read_serial_body(m, fh, offset, buf, len, rb, NFS_RPC_RBIG);
@@ -987,7 +1358,7 @@ static int nfs_read_serial(const struct nfs_mount *m, const struct nfs_fh *fh,
 }
 
 static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *fh,
-                                uint32_t offset, void *buf, uint32_t len,
+                                uint64_t offset, void *buf, uint32_t len,
                                 uint8_t *rbuf, int rcap) {
   uint8_t cbuf[NFS_RPC_BUF];
   struct nfs_mount *mw = (struct nfs_mount *)m;
@@ -995,7 +1366,8 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
   if (rs > NFS_READ_RSIZE_MAX) rs = NFS_READ_RSIZE_MAX;
   int temp = 0;
   struct socket_pcb *pcb = rd_sock_get(mw, &temp);
-  int broken = 0;
+  uint64_t hard_t0 = 0;
+  int hard_tries = 0;
   uint32_t done = 0;
   while (done < len) {
     uint32_t want = len - done;
@@ -1005,87 +1377,63 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
     struct xdr_w w;
     xdr_w_init(&w, args, sizeof args);
     xdr_w_fh(&w, fh->data, fh->len);
-    xdr_w_u64(&w, (uint64_t)offset + done);
+    xdr_w_u64(&w, offset + done);
     xdr_w_u32(&w, want);
-    if (w.err) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return done ? (int)done : -1; }
+    if (w.err) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return -1; }
 
     uint32_t xid = next_xid++;
     int n = rpc_build_call(cbuf, sizeof cbuf, xid, NFS_PROG, NFS_VERS,
                            NFS_PROC_READ, args, w.len);
-    if (n <= 0) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return done ? (int)done : -1; }
+    if (n <= 0) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return -1; }
 
     uint64_t t0 = timer_get_us();
     const uint8_t *body = 0;
     int blen = 0;
-    int rc = pcb ? rpc_xfer(pcb, xid, cbuf, n, rbuf, rcap, &body, &blen) : -1;
+    int rc = pcb ? rpc_xfer(pcb, xid, cbuf, n, rbuf, rcap, &body, &blen, 1) : -1;
     uint64_t wait = timer_get_us() - t0;
-    /* L57: ONE retry on a fresh socket.  A single lost datagram -- the
-     * duplicate-ephemeral-port window in net_socket_create, a two-consumer
-     * RX ring, or slirp dropping one -- must not become a failed read():
-     * the caller saw -1, trap.c turned it into EBADF and Mono reported
-     * "Invalid handle to path" for a file that was never closed.  A READ is
-     * idempotent, so resending the same xid is safe. */
     if (rc != 0) {
-      if (pcb) rd_sock_put(mw, pcb, temp, 1);
+      /* cp/nfs2: HARD-mount semantics.  A READ that gets no reply is sent
+       * again -- fresh xid, fresh socket, growing wait -- until it is
+       * answered or NFS_HARD_MS have passed; only then does the read fail,
+       * and then as a whole (-1 -> -EIO / SIGBUS), never as the bytes it had
+       * so far.  It used to give up after one retry (2 x 500 ms) and return
+       * the partial count, which a caller that zero-fills a short read
+       * turned into zeros (Wine's sortdefault.nls, 2026-11-16).
+       * cp/nfs: if large READs keep timing out while a single-frame READ of
+       * the same block is answered, the path drops fragments: fall back to
+       * 1344-byte READs for the mount, once, loudly. */
+      if (pcb) rd_sock_put(mw, pcb, temp, wait >= (uint64_t)NFS_RPC_TIMEOUT_MS * 1000u);
+      pcb = 0;
       temp = 0;
+      if (!hard_t0) hard_t0 = timer_get_ms();
+      hard_tries++;
+      nfs_read_retries++;
+      nfs_hard_note("READ", offset + done, want, hard_tries, timer_get_ms() - hard_t0);
+      if (want > NFS_READ_RSIZE && hard_tries == 3 &&
+          nfs_read_probe_small(m, fh, offset + done)) {
+        nfs_rsize_fallback(mw, "large READ replies time out, single-frame READs answered");
+        rs = NFS_READ_RSIZE;
+      }
+      if (timer_get_ms() - hard_t0 > NFS_HARD_MS) {
+        nfs_hard_giveup("READ", offset + done, want, hard_tries);
+        return -1;
+      }
+      nfs_hard_backoff(hard_tries);
       pcb = rd_sock_get(mw, &temp);
-      if (pcb) {
-        uint64_t t1 = timer_get_us();
-        rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, rcap, &body, &blen);
-        wait += timer_get_us() - t1;
-        nfs_read_retries++;
-      }
+      continue;                          /* the same block again */
     }
-    if (rc != 0) {
-      /* A timeout may leave a late reply in this socket's queue; a stale
-       * xid is skipped by the next rpc_xfer, so keep the socket unless the
-       * send side itself is broken. */
-      /* L57: one row per failed READ RPC — the wait says timeout vs bad
-       * reply, and `temp` says whether the cached socket was unavailable. */
-      static int rd_fail_rows;
-      if (rd_fail_rows < 24) {
-        rd_fail_rows++;
-        struct kline kl;
-        kl_init(&kl);
-        kl_s(&kl, "[NFSRD] fail off=");
-        kl_i(&kl, (long)(offset + done));
-        kl_s(&kl, " want=");
-        kl_i(&kl, (long)want);
-        kl_s(&kl, " wait_us=");
-        kl_i(&kl, (long)wait);
-        kl_s(&kl, " temp=");
-        kl_i(&kl, temp);
-        kl_s(&kl, " done=");
-        kl_i(&kl, (long)done);
-        kl_c(&kl, '\n');
-        kl_emit(&kl);
-      }
-      broken = (rc != 0 && wait >= (uint64_t)NFS_RPC_TIMEOUT_MS);
-      if (pcb) rd_sock_put(mw, pcb, temp, broken);
-      /* cp/nfs: a multi-fragment READ timed out on both attempts (the send
-         and the fresh-socket retry above): fall back to single-frame READs
-         and finish the range from where it stopped. */
-      if (want > NFS_READ_RSIZE && broken) {
-        nfs_rsize_fallback(mw, "large READ replies time out");
-        offset += done;
-        buf = (uint8_t *)buf + done;
-        len -= done;
-        uint32_t base_done = done;
-        done = 0;
-        int more = nfs_read_serial_body(m, fh, offset, buf, len, rbuf, rcap);
-        if (more < 0) return base_done ? (int)base_done : -1;
-        return (int)(base_done + (uint32_t)more);
-      }
-      return done ? (int)done : -1;
-    }
+    hard_t0 = 0;
+    hard_tries = 0;
     nfs_pf_record(want, 0, 0, wait);
 
     uint32_t count = 0;
     int eof = 0;
     if (nfs_parse_read_reply(body, blen, (uint8_t *)buf + done, (int)want,
                              &count, &eof) != 0) {
+      /* a malformed reply or a server error: nothing usable, and the bytes
+         read so far are not returned as if the file ended here */
       if (pcb) rd_sock_put(mw, pcb, temp, 0);
-      return done ? (int)done : -1;
+      return -1;
     }
     if (count == 0) break;
     /* Adapt down: a server with a smaller rsize answers short.  Two equal
@@ -1105,7 +1453,9 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
     done += count;
     nfs_io_bytes += count;
     nfs_io_ops++;
-    if (count < want || eof) break;
+    /* cp/nfs2: only end of file ends the read; a short non-EOF reply (a
+       server with a smaller rsize) is followed by a READ for the rest */
+    if (eof) break;
   }
   if (pcb) rd_sock_put(mw, pcb, temp, 0);
   nfs_perf_note_bytes(done);
@@ -1115,7 +1465,7 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
 /* The pre-L35 read loop, kept verbatim for the A/B measurement: one 1 KiB
  * READ RPC per iteration on a fresh socket, no pipeline. */
 static int nfs_read_serial_legacy(const struct nfs_mount *m,
-                                  const struct nfs_fh *fh, uint32_t offset,
+                                  const struct nfs_fh *fh, uint64_t offset,
                                   void *buf, uint32_t len) {
   uint32_t done = 0;
   while (done < len) {
@@ -1126,7 +1476,7 @@ static int nfs_read_serial_legacy(const struct nfs_mount *m,
     struct xdr_w w;
     xdr_w_init(&w, args, sizeof args);
     xdr_w_fh(&w, fh->data, fh->len);
-    xdr_w_u64(&w, (uint64_t)offset + done);
+    xdr_w_u64(&w, offset + done);
     xdr_w_u32(&w, want);
     if (w.err) return done ? (int)done : -1;
 
@@ -1157,7 +1507,7 @@ static int nfs_read_serial_legacy(const struct nfs_mount *m,
 /* One in-flight READ in a pipeline. */
 struct nfs_rd_slot {
   uint32_t xid;
-  uint32_t off;        /* absolute file offset (low 32 bits of it) */
+  uint64_t off;        /* absolute file offset */
   uint32_t want;
   uint32_t got;
   uint64_t t_issue;    /* timer_get_us() when the READ went out */
@@ -1170,15 +1520,16 @@ static uint32_t rd_be32(const uint8_t *p) {
          ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
-/* Issue one READ for `off`/`want` on `pcb`; fills the slot. */
+/* Issue one READ for `off`/`want` on `pcb`; fills the slot (a fresh xid, so a
+ * re-send after a stall is told apart from the late original). */
 static int nfs_rd_issue(const struct nfs_mount *m, struct socket_pcb *pcb,
                         const struct nfs_fh *fh, struct nfs_rd_slot *s,
-                        uint32_t off, uint32_t want) {
+                        uint64_t off, uint32_t want) {
   uint8_t args[4 + NFS_FH_MAX + 4 + 6 + 8 + 4];
   struct xdr_w w;
   xdr_w_init(&w, args, sizeof args);
   xdr_w_fh(&w, fh->data, fh->len);
-  xdr_w_u64(&w, (uint64_t)off);
+  xdr_w_u64(&w, off);
   xdr_w_u32(&w, want);
   if (w.err) return -1;
 
@@ -1198,54 +1549,135 @@ static int nfs_rd_issue(const struct nfs_mount *m, struct socket_pcb *pcb,
   return 0;
 }
 
-/* Pipelined read of len > rsize bytes.  Issues up to NFS_READ_DEPTH READs on
- * ONE UDP socket, then reaps replies by xid (any order) until every issued
- * block has landed.  The caller's buffer is filled at each block's own
- * offset, so out-of-order completion needs no shuffling; `contig` only
- * advances over blocks that are actually complete, and a short non-EOF reply
- * (or a dropped RPC) falls back to serial reads from that point.
+/* cp/nfs2: READ reply bytes in flight, summed over every pipeline.  A 32 KiB
+ * reply is ~23 IP fragments and the virtio-net RX queue holds 256 frames, so
+ * more than ~11 replies outstanding at once can overflow it whenever the guest
+ * drains slower than slirp sends.  Gate P2 (run23) shows exactly that shape:
+ * "[NFSPIPE] stall inflight=10 issued=22 replies=12" -- twelve replies
+ * arrived, the other ten were dropped, and each stall cost a 500 ms timeout
+ * plus a serial finish.  Pipelines now share one budget; a pipeline with
+ * nothing in flight may always issue one READ, so none can starve. */
+#define NFS_INFLIGHT_MAX (6 * NFS_READ_RSIZE_MAX)
+/* cp/nfs2: and at most NFS_PIPE_INFLIGHT bytes outstanding on ONE socket.
+ * Every guest UDP socket is a host UDP socket inside QEMU's slirp with the
+ * default 212992-byte receive buffer, and a 32 KiB reply arrives there as
+ * one ~33 KiB datagram (loopback, no fragments) whose skb truesize is about
+ * twice that.  When QEMU drains slowly (four guests on the host), a third
+ * reply overflows it and the host drops the WHOLE datagram: measured on
+ * strix, Udp RcvbufErrors +203 in 90 s, `ss -uam` showing the drops (d3030,
+ * d62) on qemu-system-x86's sockets, while the guest's reassembly counted
+ * no partial datagram at all ([NFSNET] drop_timeout=0).  Two replies fit. */
+#define NFS_PIPE_INFLIGHT (2 * NFS_READ_RSIZE_MAX)
+static volatile int32_t nfs_inflight_bytes;
+#define NFS_PIPE_RESENDS 2   /* stalls in a row before the serial tail */
+/* cp/nfs2: the first wait for a pipelined reply.  Gate P2 loses about one
+ * 32 KiB reply per MiB even with a single READ in flight ("[NFSPIPE] stall
+ * inflight=1 ... budget=32768"), and every loss cost the full 500 ms RPC
+ * timeout.  Replies that arrive at all arrive within ~100 ms (run23
+ * wait_max_us=99153), so the first wait is 150 ms; a re-sent READ gets the
+ * full NFS_RPC_TIMEOUT_MS. */
+#define NFS_PIPE_TIMEOUT_MS 150
+
+/* Where byte `rel` of a pipelined read lands: one flat buffer, or (segs) a
+ * list of NFS_RA_BYTES readahead windows. */
+static uint8_t *nfs_rd_dst(uint8_t *buf, uint8_t *const *segs, uint64_t rel) {
+  if (!segs) return buf + rel;
+  return segs[rel / NFS_RA_BYTES] + (rel % NFS_RA_BYTES);
+}
+
+/* Serial READs of [off, off+len) into buf/segs, never crossing a segment.
+ * Returns bytes read (short at EOF), -1 when nothing was read. */
+static int nfs_read_serial_into(const struct nfs_mount *m, const struct nfs_fh *fh,
+                                uint64_t off, uint8_t *buf, uint8_t *const *segs,
+                                uint64_t rel, uint32_t len) {
+  uint32_t done = 0;
+  while (done < len) {
+    uint32_t want = len - done;
+    if (segs) {
+      uint32_t in = (uint32_t)((rel + done) % NFS_RA_BYTES);
+      if (want > NFS_RA_BYTES - in) want = NFS_RA_BYTES - in;
+    }
+    int r = nfs_read_serial(m, fh, off + done, nfs_rd_dst(buf, segs, rel + done), want);
+    if (r < 0) return -1;                /* cp/nfs2: never a partial count */
+    done += (uint32_t)r;
+    if ((uint32_t)r < want) break;
+  }
+  return (int)done;
+}
+
+/* Pipelined read of [offset, offset+len).  Issues up to NFS_READ_DEPTH READs
+ * on ONE UDP socket (bounded by the shared in-flight budget), then reaps
+ * replies by xid (any order) until every issued block has landed.  Each block
+ * is written at its own place (buf, or the window list `segs`; a READ never
+ * crosses a window), so out-of-order completion needs no shuffling; `contig`
+ * only advances over blocks that are actually complete.
+ *
+ * A reply timeout re-sends what is still in flight (cp/nfs2; it used to end
+ * the pipeline and read the whole rest serially, one round trip per block --
+ * for a 172 MB read that is thousands of serial RPCs).  After
+ * NFS_PIPE_RESENDS timeouts in a row, a short mid-file reply, or a bad reply,
+ * the rest is read serially.  *eof_out (optional) is set when the server
+ * reported end of file at the returned length.
  *
  * Why one socket: the reply's destination port identifies the RPC, and the
  * socket's rx ring is 4 MiB with per-datagram framing, so N replies queue
  * safely.  A fresh socket per RPC (the old shape) costs one create/close and
  * cannot pipeline at all. */
-static int nfs_read_pipelined(const struct nfs_mount *m,
-                              const struct nfs_fh *fh, uint32_t offset,
-                              void *buf, uint32_t len, uint32_t rs) {
+static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
+                         uint64_t offset, uint8_t *buf, uint8_t *const *segs,
+                         uint32_t len, uint32_t rs, int *eof_out) {
   struct nfs_mount *mw = (struct nfs_mount *)m;
+  if (eof_out) *eof_out = 0;
   uint8_t *rbuf = nfs_rbig_get(); /* cp/nfs: one reply datagram, off the stack */
-  if (!rbuf) return nfs_read_serial(m, fh, offset, buf, len);
+  if (!rbuf) return nfs_read_serial_into(m, fh, offset, buf, segs, 0, len);
   int temp = 0;
   struct socket_pcb *pcb = rd_sock_get(mw, &temp);
-  if (!pcb) { nfs_rbig_put(rbuf); return nfs_read_serial(m, fh, offset, buf, len); }
+  if (!pcb) {
+    nfs_rbig_put(rbuf);
+    return nfs_read_serial_into(m, fh, offset, buf, segs, 0, len);
+  }
 
   struct nfs_rd_slot slot[NFS_READ_DEPTH];
   for (int i = 0; i < NFS_READ_DEPTH; i++) slot[i].state = 0;
 
   uint64_t t_start = timer_get_us();
   uint32_t issued = 0, replies = 0, shorts = 0, bad = 0, first_count = 0;
+  uint32_t resent = 0;
   int sampled = 0;
 
-  uint32_t end = offset + len;          /* file offset one past the request */
-  uint32_t issue_off = offset;          /* next block to issue               */
-  uint32_t contig = offset;             /* contiguous bytes completed        */
+  uint64_t end = offset + len;          /* file offset one past the request */
+  uint64_t issue_off = offset;          /* next block to issue               */
+  uint64_t contig = offset;             /* contiguous bytes completed        */
   int inflight = 0;
-  int eof = 0;
-  int rc = 0;
+  int stop = 0;                         /* issue nothing more                */
+  int hit_eof = 0;                      /* contig is the end of the file     */
+  int hole = 0;                         /* contig cannot advance: go serial  */
+  int stalls = 0;                       /* timeouts since the last reply     */
+  int32_t mine = 0;                     /* our share of nfs_inflight_bytes   */
 
   for (;;) {
-    while (!eof && inflight < NFS_READ_DEPTH && issue_off < end) {
-      uint32_t want = end - issue_off;
-      if (want > rs) want = rs;
+    while (!stop && inflight < NFS_READ_DEPTH && issue_off < end) {
+      uint64_t left = end - issue_off;
+      uint32_t want = left > rs ? rs : (uint32_t)left;
+      if (segs) {
+        uint32_t in = (uint32_t)((issue_off - offset) % NFS_RA_BYTES);
+        if (want > NFS_RA_BYTES - in) want = NFS_RA_BYTES - in;
+      }
+      if (inflight > 0 && nfs_inflight_bytes + (int32_t)want > NFS_INFLIGHT_MAX)
+        break;
+      if (inflight > 0 && mine + (int32_t)want > NFS_PIPE_INFLIGHT)
+        break;
       int idx = -1;
       for (int i = 0; i < NFS_READ_DEPTH; i++)
         if (slot[i].state == 0) { idx = i; break; }
       if (idx < 0) break;
       if (nfs_rd_issue(m, pcb, fh, &slot[idx], issue_off, want) != 0) {
-        if (inflight == 0) { rc = -1; goto out; }
-        eof = 1;                        /* stop issuing, drain what we have */
+        stop = 1;                       /* drain what we have; the serial */
+        hole = inflight == 0;           /* tail (hard) reads the rest     */
         break;
       }
+      __sync_fetch_and_add(&nfs_inflight_bytes, (int32_t)want);
+      mine += (int32_t)want;
       issue_off += want;
       inflight++;
       issued++;
@@ -1254,8 +1686,11 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
     if (inflight == 0) break;
 
     int got = net_socket_recv_timeout(pcb, rbuf, NFS_RPC_RBIG,
-                                      NFS_RPC_TIMEOUT_MS);
+                                      stalls ? NFS_RPC_TIMEOUT_MS
+                                             : NFS_PIPE_TIMEOUT_MS);
+    if (got > 0 && nfs_inj_drop()) continue; /* cp/nfs2: injected loss */
     if (got <= 0) {                     /* timeout / socket closed */
+      nfs_pipe_stalls++;
       /* L41: a stall row, not a guess.  If the load freezes at a byte count,
          the question is whether an issued READ is still unanswered at that
          offset (a lost reply) or no READ is outstanding at all (the client is
@@ -1265,43 +1700,49 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
       static int stall_rows;
       if (stall_rows < 8) {
         stall_rows++;
-        char num[7][24];
-        nfs_put_dec(inflight, num[0]);
-        nfs_put_dec(issued, num[1]);
-        nfs_put_dec(replies, num[2]);
-        nfs_put_dec(contig, num[3]);
-        nfs_put_dec(end, num[4]);
-        nfs_put_dec((uint64_t)(timer_get_us() - t_start), num[5]);
-        uart_puts("[NFSPIPE] stall inflight=");
-        uart_puts(num[0]);
-        uart_puts(" issued=");
-        uart_puts(num[1]);
-        uart_puts(" replies=");
-        uart_puts(num[2]);
-        uart_puts(" contig=");
-        uart_puts(num[3]);
-        uart_puts(" end=");
-        uart_puts(num[4]);
-        uart_puts(" us=");
-        uart_puts(num[5]);
-        uart_puts(" xids=");
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[NFSPIPE] stall inflight=");
+        kl_i(&kl, inflight);
+        kl_s(&kl, " issued=");
+        kl_i(&kl, (long)issued);
+        kl_s(&kl, " replies=");
+        kl_i(&kl, (long)replies);
+        kl_s(&kl, " contig=");
+        kl_i(&kl, (long)contig);
+        kl_s(&kl, " end=");
+        kl_i(&kl, (long)end);
+        kl_s(&kl, " us=");
+        kl_i(&kl, (long)(timer_get_us() - t_start));
+        kl_s(&kl, " budget=");
+        kl_i(&kl, (long)nfs_inflight_bytes);
+        kl_s(&kl, " xids=");
         for (int i = 0; i < NFS_READ_DEPTH; i++) {
-          if (slot[i].state != 1)
-            continue;
-          char xb[16];
-          nfs_put_dec(slot[i].xid, xb);
-          uart_puts(xb);
-          uart_puts("/");
-          char ob[16];
-          nfs_put_dec(slot[i].off, ob);
-          uart_puts(ob);
-          uart_puts(" ");
+          if (slot[i].state != 1) continue;
+          kl_i(&kl, (long)slot[i].xid);
+          kl_c(&kl, '/');
+          kl_i(&kl, (long)slot[i].off);
+          kl_c(&kl, ' ');
         }
-        uart_puts("\n");
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
       }
-      /* L57: do not fail read() on one lost reply.  Break out and finish the
-       * range serially, which retries each block on a fresh socket. */
-      break;                            /* finish serially from contig */
+      /* cp/nfs2: re-send every READ still in flight (new xids) and keep
+         pipelining; only a run of stalls falls back to serial reads. */
+      if (++stalls > NFS_PIPE_RESENDS) break;
+      for (int i = 0; i < NFS_READ_DEPTH; i++) {
+        if (slot[i].state != 1) continue;
+        if (nfs_rd_issue(m, pcb, fh, &slot[i], slot[i].off, slot[i].want) == 0) {
+          resent++;
+          continue;
+        }
+        __sync_fetch_and_sub(&nfs_inflight_bytes, (int32_t)slot[i].want);
+        mine -= (int32_t)slot[i].want;
+        slot[i].state = 0;              /* a hole: the serial tail reads it */
+        inflight--;
+        stop = 1;
+      }
+      continue;
     }
     uint32_t rxid = rd_be32(rbuf);
     int idx = -1;
@@ -1313,14 +1754,19 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
     int pr = rpc_parse_reply(rbuf, got, rxid, &bo, &bl);
     if (pr != RPC_OK) continue;
 
+    stalls = 0;
+    __sync_fetch_and_sub(&nfs_inflight_bytes, (int32_t)slot[idx].want);
+    mine -= (int32_t)slot[idx].want;
     uint32_t count = 0;
     int reply_eof = 0;
     if (nfs_parse_read_reply(rbuf + bo, bl,
-                             (uint8_t *)buf + (slot[idx].off - offset),
+                             nfs_rd_dst(buf, segs, slot[idx].off - offset),
                              (int)slot[idx].want, &count, &reply_eof) != 0) {
       bad++;
       slot[idx].state = 0;
       inflight--;
+      if (slot[idx].off == contig) break; /* a hole at contig: serial tail */
+      stop = 1;
       continue;
     }
     replies++;
@@ -1337,8 +1783,7 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
     inflight--;
     nfs_io_bytes += count;
     nfs_io_ops++;
-    if (reply_eof) eof = 1;
-    if (!reply_eof && count == 0) eof = 1;
+    if (reply_eof || count == 0) stop = 1;
 
     /* Advance `contig` over every complete block that starts there. */
     for (;;) {
@@ -1346,39 +1791,37 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
       for (int i = 0; i < NFS_READ_DEPTH; i++) {
         if (slot[i].state != 2) continue;
         if (slot[i].off != contig) continue;
-        if (slot[i].got < slot[i].want && !slot[i].eof) {
-          /* Short mid-file reply: the byte after `got` is missing, so the
-           * pipeline's contiguous chain ends here.  Re-read serially. */
-          contig += slot[i].got;
-          eof = 1;
-          adv = 1;
-          break;
-        }
         contig += slot[i].got;
         slot[i].state = 0;
         adv = 1;
+        if (slot[i].eof) hit_eof = 1;
+        else if (slot[i].got < slot[i].want) hole = 1; /* short mid-file reply */
         break;
       }
-      if (!adv) break;
+      if (!adv || hit_eof || hole) break;
     }
-    if (contig >= end) break;
+    if (contig >= end || hit_eof || hole) break;
   }
 
   /* Drain the pipeline's bookkeeping: blocks past `contig` were filled but
    * cannot extend the contiguous run (a hole or a timeout stopped it). */
   for (int i = 0; i < NFS_READ_DEPTH; i++) slot[i].state = 0;
+  if (mine) __sync_fetch_and_sub(&nfs_inflight_bytes, mine);
+  mine = 0;
   rd_sock_put(mw, pcb, temp, 0);
   pcb = 0;
   nfs_rbig_put(rbuf);
   rbuf = 0;
 
-  if (contig < end) {
+  if (contig < end && !hit_eof) {
     /* Finish the tail with serial RPCs (holes, timeouts, short replies). */
-    int tail = nfs_read_serial(m, fh, contig, (uint8_t *)buf + (contig - offset),
-                               end - contig);
-    if (tail < 0) { if (contig == offset) return -1; }
-    else contig += (uint32_t)tail;
+    nfs_ra.tail_bytes += end - contig;   /* a statistic: no lock */
+    int tail = nfs_read_serial_into(m, fh, contig, buf, segs, contig - offset,
+                                    (uint32_t)(end - contig));
+    if (tail < 0) return -1;            /* cp/nfs2: a failed read fails whole */
+    contig += (uint32_t)tail;
   }
+  if (hit_eof && eof_out) *eof_out = 1;
   /* One row per read() would flood a 9.9 MB load (152 rows for 64 KiB
    * reads); the first four and then every 256th show the shape. */
   {
@@ -1387,120 +1830,318 @@ static int nfs_read_pipelined(const struct nfs_mount *m,
     if (pipe_n <= 4 || (pipe_n & 255) == 0) sampled = 1;
   }
   if (sampled) {
-    char num[8][24];
-    nfs_put_dec(len, num[0]);
-    nfs_put_dec(rs, num[1]);
-    nfs_put_dec(issued, num[2]);
-    nfs_put_dec(replies, num[3]);
-    nfs_put_dec((uint64_t)shorts, num[4]);
-    nfs_put_dec((uint64_t)bad, num[5]);
-    nfs_put_dec((uint64_t)(contig - offset), num[6]);
-    nfs_put_dec(timer_get_us() - t_start, num[7]);
-    uart_puts("[NFSPIPE] len=");
-    uart_puts(num[0]);
-    uart_puts(" rs=");
-    uart_puts(num[1]);
-    uart_puts(" issued=");
-    uart_puts(num[2]);
-    uart_puts(" replies=");
-    uart_puts(num[3]);
-    uart_puts(" short=");
-    uart_puts(num[4]);
-    uart_puts(" bad=");
-    uart_puts(num[5]);
-    uart_puts(" got=");
-    uart_puts(num[6]);
-    uart_puts(" us=");
-    uart_puts(num[7]);
-    uart_puts(" first_count=");
-    {
-      char fc[24];
-      nfs_put_dec(first_count, fc);
-      uart_puts(fc);
-    }
-    uart_puts("\n");
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[NFSPIPE] len=");
+    kl_i(&kl, (long)len);
+    kl_s(&kl, " rs=");
+    kl_i(&kl, (long)rs);
+    kl_s(&kl, " issued=");
+    kl_i(&kl, (long)issued);
+    kl_s(&kl, " replies=");
+    kl_i(&kl, (long)replies);
+    kl_s(&kl, " short=");
+    kl_i(&kl, (long)shorts);
+    kl_s(&kl, " bad=");
+    kl_i(&kl, (long)bad);
+    kl_s(&kl, " got=");
+    kl_i(&kl, (long)(contig - offset));
+    kl_s(&kl, " us=");
+    kl_i(&kl, (long)(timer_get_us() - t_start));
+    kl_s(&kl, " first_count=");
+    kl_i(&kl, (long)first_count);
+    kl_s(&kl, " resent=");
+    kl_i(&kl, (long)resent);
+    kl_s(&kl, segs ? " win=1" : " win=0");
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
   }
-  nfs_perf_note_bytes(contig - offset);
+  nfs_perf_note_bytes((uint32_t)(contig - offset));
   return (int)(contig - offset);
-
-out:
-  for (int i = 0; i < NFS_READ_DEPTH; i++) slot[i].state = 0;
-  if (pcb) rd_sock_put(mw, pcb, temp, 0);
-  nfs_rbig_put(rbuf);
-  (void)rc;
-  return contig > offset ? (int)(contig - offset) : -1;
 }
 
-static int nfs_ra_same(const struct nfs_mount *m, const struct nfs_fh *fh) {
-  if (!nfs_ra.valid || nfs_ra.m != m ||
-      (uint32_t)nfs_ra.fh.len != fh->len)
-    return 0;
-  for (uint32_t i = 0; i < fh->len; i++)
-    if (nfs_ra.fh.data[i] != fh->data[i]) return 0;
+/* The flat-buffer pipelined read (read()s larger than one RPC). */
+static int nfs_read_pipelined(const struct nfs_mount *m,
+                              const struct nfs_fh *fh, uint64_t offset,
+                              void *buf, uint32_t len, uint32_t rs) {
+  return nfs_read_pipe(m, fh, offset, (uint8_t *)buf, 0, len, rs, 0);
+}
+
+/* ---- cp/nfs2: the window table ---------------------------------------- */
+
+static uint32_t nfs_ra_fhash(const struct nfs_fh *fh) {
+  uint32_t h = 2166136261u ^ fh->len;
+  for (uint32_t i = 0; i < fh->len && i < NFS_FH_MAX; i++)
+    h = (h ^ fh->data[i]) * 16777619u;
+  return h;
+}
+
+static int nfs_ra_fh_eq(const struct nfs_fh *a, const struct nfs_fh *b) {
+  if (a->len != b->len) return 0;
+  for (uint32_t i = 0; i < a->len; i++)
+    if (a->data[i] != b->data[i]) return 0;
   return 1;
 }
 
-/* Serves `len` bytes at `offset` from the window, refilling it when needed.
- * Returns 1 and sets *got when the read was served, 0 when the caller must
- * do the READ itself (a fill is already in progress). */
-static int nfs_ra_try(const struct nfs_mount *m, const struct nfs_fh *fh,
-                      uint32_t offset, void *buf, uint32_t len, int *got) {
-  uint64_t fl = spinlock_acquire_irqsave(&nfs_ra_lock);
-  if (nfs_ra_same(m, fh) && offset >= nfs_ra.base &&
-      offset + len <= nfs_ra.base + nfs_ra.len) {
-    memcpy(buf, nfs_ra_buf + (offset - nfs_ra.base), len);
-    nfs_ra.hits++;
-    nfs_ra.saved += len;
-    spinlock_release_irqrestore(&nfs_ra_lock, fl);
-    *got = (int)len;
-    return 1;
-  }
-  if (nfs_ra.busy) {
-    spinlock_release_irqrestore(&nfs_ra_lock, fl);
-    return 0;
-  }
-  nfs_ra.busy = 1;
-  /* cp/nfsfix: the fill below overwrites nfs_ra_buf with the lock released.
-     Invalidate the window FIRST.  Otherwise a concurrent reader whose range
-     matches the old (fh, base) is served bytes the fill is overwriting with
-     another file's or offset's data.  This race was latent until cp/nfs: small
-     reads only use the window when len <= rs, so at rs=1344 4 KiB page-ins
-     never got here.  At 32 KiB they all do, and six concurrent Wine processes
-     got wrong ntdll.so pages (2026-11-16).  Guarded by the conc6 phase of
-     tools/cp/nfs/rsize_guard.sh (G6). */
-  nfs_ra.valid = 0;
-  spinlock_release_irqrestore(&nfs_ra_lock, fl);
+static uint32_t nfs_ra_bucket(uint32_t fhash, uint64_t base) {
+  uint32_t k = fhash ^ ((uint32_t)(base >> 16) * 0x9E3779B1u);
+  k ^= (uint32_t)(base >> 48);
+  return (k * 0x85EBCA6Bu) >> (32 - NFS_RA_HBITS);
+}
 
-  uint32_t base = offset & ~(uint32_t)4095;
-  uint32_t rars = m->read_size ? m->read_size : NFS_READ_RSIZE;
-  if (rars > NFS_READ_RSIZE_MAX) rars = NFS_READ_RSIZE_MAX;
-  int n = nfs_read_pipelined(m, fh, base, nfs_ra_buf, NFS_RA_BYTES, rars);
-  fl = spinlock_acquire_irqsave(&nfs_ra_lock);
-  nfs_ra.busy = 0;
-  if (n > 0) {
-    nfs_ra.valid = 1;
-    nfs_ra.m = m;
-    nfs_ra.fh = *fh;
-    nfs_ra.base = base;
-    nfs_ra.len = (uint32_t)n;
-    nfs_ra.fills++;
-    if (offset + len <= base + (uint32_t)n) {
-      memcpy(buf, nfs_ra_buf + (offset - base), len);
-      nfs_ra.hits++;
-      nfs_ra.saved += len;
-      spinlock_release_irqrestore(&nfs_ra_lock, fl);
-      *got = (int)len;
-      return 1;
-    }
-  } else {
-    nfs_ra.valid = 0;
+/* The window holding block `base` of (m, fh), valid or being filled.  Lock
+ * held. */
+static struct nfs_ra_win *nfs_ra_find(const struct nfs_mount *m,
+                                      const struct nfs_fh *fh, uint32_t fhash,
+                                      uint64_t base) {
+  for (uint32_t i = nfs_ra_head[nfs_ra_bucket(fhash, base)]; i; i = nfs_ra_win[i - 1].hnext) {
+    struct nfs_ra_win *w = &nfs_ra_win[i - 1];
+    if (!(w->valid || w->busy) || w->base != base || w->fhash != fhash ||
+        w->m != m)
+      continue;
+    if (nfs_ra_fh_eq(&w->fh, fh)) return w;
   }
-  spinlock_release_irqrestore(&nfs_ra_lock, fl);
   return 0;
 }
 
+/* Move window `w` to the chain of its (new) key.  Lock held. */
+static void nfs_ra_rehash(struct nfs_ra_win *w) {
+  uint16_t self = (uint16_t)(w - nfs_ra_win + 1);
+  if (w->hb) {
+    uint16_t *pp = &nfs_ra_head[w->hb - 1];
+    while (*pp && *pp != self) pp = &nfs_ra_win[*pp - 1].hnext;
+    if (*pp == self) *pp = w->hnext;
+  }
+  uint32_t b = nfs_ra_bucket(w->fhash, w->base);
+  w->hb = (uint16_t)(b + 1);
+  w->hnext = nfs_ra_head[b];
+  nfs_ra_head[b] = self;
+}
+
+/* A window to (re)fill, never a busy one: a window never used yet while
+ * `may_grow` (the frame pool is not short), else the replacement clock
+ * (second chance, an approximation of least-recently-used): an invalid
+ * window at once, a valid one only after the hand found it unused since its
+ * last pass.  Lock held. */
+static struct nfs_ra_win *nfs_ra_victim(int may_grow) {
+  if (may_grow && nfs_ra_used < NFS_RA_WINDOWS) return &nfs_ra_win[nfs_ra_used++];
+  for (uint32_t step = 0; nfs_ra_used && step < 2 * nfs_ra_used + 1; step++) {
+    struct nfs_ra_win *w = &nfs_ra_win[nfs_ra_hand];
+    nfs_ra_hand = (nfs_ra_hand + 1) % nfs_ra_used;
+    if (w->busy) continue;
+    if (!w->valid) return w;
+    if (w->ref) { w->ref = 0; continue; }
+    return w;
+  }
+  return 0;
+}
+
+/* Give the buffers of up to `n` idle windows back to the frame pool: empty
+ * windows first, then the clock's victims.  The table grows only while a
+ * quarter of the pool is free and shrinks by this on every miss while less
+ * than an eighth is (and anyone may call it).  Returns frames freed. */
+#define NFS_RA_SHRINK_MAX 32
+int nfs_ra_shrink(int n) {
+  uint8_t *bufs[NFS_RA_SHRINK_MAX];
+  int k = 0;
+  if (n > NFS_RA_SHRINK_MAX) n = NFS_RA_SHRINK_MAX;
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ra_lock);
+  for (uint32_t i = 0; i < nfs_ra_used && k < n; i++) {
+    struct nfs_ra_win *w = &nfs_ra_win[i];
+    if (w->busy || w->valid || !w->buf) continue;
+    bufs[k++] = w->buf;
+    w->buf = 0;
+  }
+  for (uint32_t tries = 0; k < n && tries < 2 * nfs_ra_used + 1; tries++) {
+    struct nfs_ra_win *w = nfs_ra_victim(0);
+    if (!w) break;
+    if (!w->buf) continue;
+    w->valid = 0;                         /* never busy: nfs_ra_victim skips those */
+    bufs[k++] = w->buf;
+    w->buf = 0;
+  }
+  nfs_ra.shrunk += (uint64_t)k;
+  spinlock_release_irqrestore(&nfs_ra_lock, fl);
+  for (int i = 0; i < k; i++) {
+    uint64_t pa = virt_to_phys(bufs[i]);
+    for (int f = 0; f < NFS_RA_PAGES; f++) frame_free(pa + (uint64_t)f * FRAME_SIZE);
+  }
+  return k * NFS_RA_PAGES;
+}
+
+/* Copy [at, at+len) of a valid, idle window to buf.  1 when served (*got <
+ * len only where the window ends at end of file), 0 when the window does not
+ * cover the range.  Lock held. */
+static int nfs_ra_serve(struct nfs_ra_win *w, uint32_t at, void *buf,
+                        uint32_t len, int *got) {
+  uint32_t n;
+  if (at + len <= w->len) n = len;
+  else if (w->eof) n = at < w->len ? w->len - at : 0;
+  else return 0;
+  if (n) memcpy(buf, w->buf + at, n);
+  *got = (int)n;
+  w->next = w->base + at + n;
+  w->ref = 1;
+  nfs_ra.saved += n;
+  return 1;
+}
+
+/* Serves `len` bytes at `offset` -- inside ONE window block -- from the
+ * windows, loading the block when it is missing.  When the caller's read
+ * continues past this block (`more` bytes), or the reader streamed off the
+ * end of the previous block, the following blocks are loaded in the same
+ * pipelined fill.  Returns 1 and sets *got when the read was served (short
+ * only at end of file), 0 when the caller must READ this piece itself (the
+ * block is being filled by another thread, or no window is free). */
+static int nfs_ra_try(const struct nfs_mount *m, const struct nfs_fh *fh,
+                      uint32_t fhash, uint64_t offset, void *buf, uint32_t len,
+                      uint64_t more, int *got) {
+  uint64_t base = offset & ~(uint64_t)(NFS_RA_BYTES - 1);
+  uint32_t at = (uint32_t)(offset - base);
+  struct nfs_ra_win *claim[NFS_RA_FILL_MAX];
+  int k = 0, seq = 0;
+  /* New window buffers only while a quarter of the frame pool is free (read
+     before the lock: the frame allocator has its own). */
+  int fr_free = frame_free_count(), fr_total = frame_total_count();
+  int may_grow = fr_free > fr_total / 4;
+  if (fr_free < fr_total / 8) (void)nfs_ra_shrink(NFS_RA_SHRINK_MAX);
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ra_lock);
+  struct nfs_ra_win *w = nfs_ra_find(m, fh, fhash, base);
+  if (w && w->valid && !w->busy && nfs_ra_serve(w, at, buf, len, got)) {
+    nfs_ra.hits++;
+    spinlock_release_irqrestore(&nfs_ra_lock, fl);
+    return 1;
+  }
+  if (w && w->busy) {
+    nfs_ra.direct++;
+    spinlock_release_irqrestore(&nfs_ra_lock, fl);
+    return 0;
+  }
+  /* A miss: load what this read still needs, or a run of NFS_RA_SEQ blocks
+     when the previous block of this file was read to its end. */
+  if (base >= NFS_RA_BYTES) {
+    struct nfs_ra_win *p = nfs_ra_find(m, fh, fhash, base - NFS_RA_BYTES);
+    seq = p && p->valid && p->len == NFS_RA_BYTES && p->next == base;
+  }
+  uint64_t need = (uint64_t)at + len + more;
+  uint64_t nwin = (need + NFS_RA_BYTES - 1) / NFS_RA_BYTES;
+  if (seq && nwin < NFS_RA_SEQ) nwin = NFS_RA_SEQ;
+  if (nwin > NFS_RA_FILL_MAX) nwin = NFS_RA_FILL_MAX;
+  for (uint64_t j = 0; j < nwin; j++) {
+    uint64_t b = base + j * NFS_RA_BYTES;
+    struct nfs_ra_win *x = j == 0 ? w : nfs_ra_find(m, fh, fhash, b);
+    if (j > 0 && x) break;              /* loaded or loading: the run ends */
+    if (!x) x = nfs_ra_victim(may_grow);
+    if (!x) break;
+    x->busy = 1;
+    /* cp/nfsfix, per window: the fill below writes x->buf with the lock
+       released.  Invalidate the window FIRST, or a concurrent reader whose
+       range matches its old (fh, base) is served bytes the fill is
+       overwriting with another file's or block's data -- six Wine processes
+       got wrong ntdll.so pages that way (2026-11-16).  Guarded by conc6 and
+       the multi-file phase of tools/cp/nfs/rsize_guard.sh, and by R7 of
+       rsize_scan.py. */
+    x->valid = 0;
+    x->eof = 0;
+    x->m = m;
+    x->fh = *fh;
+    x->fhash = fhash;
+    x->base = b;
+    x->len = 0;
+    x->next = 0;
+    x->ref = 1;
+    nfs_ra_rehash(x);
+    claim[k++] = x;
+  }
+  if (k == 0) {
+    nfs_ra.direct++;
+    spinlock_release_irqrestore(&nfs_ra_lock, fl);
+    return 0;
+  }
+  nfs_ra.misses++;
+  if (seq) nfs_ra.seqfills++;
+  uint32_t gen = nfs_ra.gen;
+  spinlock_release_irqrestore(&nfs_ra_lock, fl);
+
+  /* A window's first fill gives it its buffer (no lock held: it is ours). */
+  int have = k;
+  uint64_t t0 = timer_get_us();
+  for (int i = 0; i < k; i++) {
+    if (claim[i]->buf) continue;
+    uint64_t pa = frame_alloc_contig(NFS_RA_PAGES);
+    if (!pa) { have = i; break; }
+    claim[i]->buf = (uint8_t *)phys_to_virt(pa);
+  }
+  uint64_t t1 = timer_get_us();
+  int n = -1, eof = 0;
+  if (have > 0) {
+    uint8_t *segs[NFS_RA_FILL_MAX];
+    for (int i = 0; i < have; i++) segs[i] = claim[i]->buf;
+    uint32_t rars = m->read_size ? m->read_size : NFS_READ_RSIZE;
+    if (rars > NFS_READ_RSIZE_MAX) rars = NFS_READ_RSIZE_MAX;
+    n = nfs_read_pipe(m, fh, base, 0, segs, (uint32_t)have * NFS_RA_BYTES, rars, &eof);
+  }
+
+  uint64_t t2 = timer_get_us();
+  fl = spinlock_acquire_irqsave(&nfs_ra_lock);
+  nfs_ra.alloc_us += t1 - t0;
+  nfs_ra.fill_us += t2 - t1;
+  for (int i = 0; i < k; i++) {
+    struct nfs_ra_win *x = claim[i];
+    uint64_t lo = (uint64_t)i * NFS_RA_BYTES;
+    uint32_t hv = 0;
+    if (n > 0 && (uint64_t)n > lo)
+      hv = (uint64_t)n - lo >= NFS_RA_BYTES ? NFS_RA_BYTES : (uint32_t)((uint64_t)n - lo);
+    int ok = i < have && n >= 0 && gen == nfs_ra.gen &&
+             (hv > 0 || (eof && (uint64_t)n == lo));
+    x->busy = 0;
+    x->valid = ok;
+    x->len = ok ? hv : 0;
+    x->eof = ok && eof && (uint64_t)n < lo + NFS_RA_BYTES;
+    if (ok) {
+      nfs_ra.fills++;
+      nfs_ra.fill_bytes += hv;
+    }
+  }
+  int served = claim[0]->valid && nfs_ra_serve(claim[0], at, buf, len, got);
+  spinlock_release_irqrestore(&nfs_ra_lock, fl);
+  return served;
+}
+
+/* Reads of up to NFS_RA_MAXREQ bytes go through the windows one block-sized
+ * piece at a time; a piece the windows cannot take is READ directly. */
+static int nfs_ra_read(const struct nfs_mount *m, const struct nfs_fh *fh,
+                       uint64_t offset, uint8_t *buf, uint32_t len, uint32_t rs) {
+  uint32_t fhash = nfs_ra_fhash(fh);
+  uint32_t done = 0;
+  while (done < len) {
+    uint64_t o = offset + done;
+    uint32_t in = (uint32_t)(o & (NFS_RA_BYTES - 1));
+    uint32_t n = NFS_RA_BYTES - in;
+    if (n > len - done) n = len - done;
+    int got = 0;
+    if (!nfs_ra_try(m, fh, fhash, o, buf + done, n, len - done - n, &got)) {
+      got = n <= rs ? nfs_read_serial(m, fh, o, buf + done, n)
+                    : nfs_read_pipelined(m, fh, o, buf + done, n, rs);
+      if (got < 0) return -1;            /* cp/nfs2: never a partial count */
+    }
+    done += (uint32_t)got;
+    if ((uint32_t)got < n) break;       /* end of file */
+  }
+  return (int)done;
+}
+
+/* Unmount: no window of `m` may serve again, including one being filled. */
+static void nfs_ra_drop_mount(const struct nfs_mount *m) {
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ra_lock);
+  nfs_ra.gen++;
+  for (uint32_t i = 0; i < nfs_ra_used; i++)
+    if (nfs_ra_win[i].m == m && !nfs_ra_win[i].busy) nfs_ra_win[i].valid = 0;
+  spinlock_release_irqrestore(&nfs_ra_lock, fl);
+}
+
 int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
-                  uint32_t offset, void *buf, uint32_t len) {
+                  uint64_t offset, void *buf, uint32_t len) {
   if (!m || !m->in_use || !fh || fh->len == 0) return -1;
   /* A regular-file read() returns the whole count unless it hits EOF or an
    * error; it does not stop at the transport's rsize.  One NFS READ RPC
@@ -1518,17 +2159,18 @@ int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
    * asset tree).  With rsize raised to the datagram limit the same read is
    * latency-bound again unless several READs are outstanding, so up to
    * NFS_READ_DEPTH requests are issued on one socket before any reply is
-   * reaped; replies are matched by xid rather than assumed to be in order. */
+   * reaped; replies are matched by xid rather than assumed to be in order.
+   *
+   * cp/nfs2: every read up to NFS_RA_MAXREQ goes through the window table
+   * (page-ins, Unity's 512-byte reads, a loader's section preads), so a
+   * block is fetched once however many readers want it; bigger reads stream
+   * straight into the caller's buffer. */
   uint32_t rs = m->read_size ? m->read_size : NFS_READ_RSIZE;
   if (rs > NFS_READ_RSIZE_MAX) rs = NFS_READ_RSIZE_MAX;
+  if (len > 0x7FFFFFFFu) len = 0x7FFFFFFFu; /* the count is returned as int */
   if (nfs_perf_legacy) return nfs_read_serial_legacy(m, fh, offset, buf, len);
-  if (len <= rs) {
-    /* Small reads (Unity's 512-byte asset reads) come from the readahead
-     * window; a miss there is the same serial READ it always was. */
-    int got = 0;
-    if (nfs_ra_try(m, fh, offset, buf, len, &got)) return got;
-    return nfs_read_serial(m, fh, offset, buf, len);
-  }
+  if (len <= NFS_RA_MAXREQ) return nfs_ra_read(m, fh, offset, (uint8_t *)buf, len, rs);
+  nfs_ra.big_bytes += len;                /* a statistic: no lock */
   return nfs_read_pipelined(m, fh, offset, buf, len, rs);
 }
 
@@ -1546,8 +2188,7 @@ int nfs_statfs(const struct nfs_mount *m, const char *rel,
   uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
-  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_FSSTAT, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+  if (rpc_call_hard(m, NFS_PROC_FSSTAT, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_fsstat_reply(body, blen, total, avail);
 }
@@ -1613,8 +2254,7 @@ static int dir_cache_fill(const struct nfs_mount *m, int midx, const char *rel) 
     uint8_t rb[NFS_RPC_BUF];
     const uint8_t *body = 0;
     int blen = 0;
-    if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-                 NFS_PROC_READDIRPLUS, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+    if (rpc_call_hard(m, NFS_PROC_READDIRPLUS, args, w.len, rb, sizeof rb, &body, &blen) != 0)
       return -1;
 
     struct xdr_r r;

@@ -290,6 +290,8 @@ static void test_parse_replies(void) {
   EXPECT_EQ(nfs_parse_getattr_reply(buf, w.len, &a), 0);
   EXPECT_EQ((int)a.type, NF3DIR);
   ASSERT(a.mtime == 2000);
+  ASSERT(a.atime == 1000);  /* cp/nfs2: fstat reports all three times */
+  ASSERT(a.ctime == 3000);
   xdr_w_init(&w, buf, sizeof buf);
   xdr_w_u32(&w, 2);                    /* NFS3ERR_NOENT */
   EXPECT_EQ(nfs_parse_getattr_reply(buf, w.len, &a), -2);
