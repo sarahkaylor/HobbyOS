@@ -41,7 +41,20 @@ while [ $# -gt 0 ]; do
 done
 
 say() { printf '== %s\n' "$*"; }
-mkd() { mmd -i "$IMG" "$1" >/dev/null 2>&1 || true; }
+# Create a guest directory INCLUDING missing parents.  Plain mmd has no -p, and
+# the old swallow-everything version made `--dir ...:/etc/fonts` a silent no-op:
+# ::/etc did not exist, so ::/etc/fonts failed, nothing was copied, and the JDK
+# still reported "Fontconfig head is null" with no hint where the file went.
+mkd() {
+  local d=${1#::} acc="" part oldifs=$IFS
+  IFS=/
+  for part in $d; do
+    [ -n "$part" ] || continue
+    acc="$acc/$part"
+    mmd -i "$IMG" "::$acc" >/dev/null 2>&1 || true
+  done
+  IFS=$oldifs
+}
 stage() {
   mcopy -o -i "$IMG" "$1" "$2" >/dev/null || { echo "mcopy FAILED: $1 -> $2"; exit 2; }
 }

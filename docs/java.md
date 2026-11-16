@@ -323,3 +323,52 @@ files while `open` says ENOENT, the defect is in path resolution (a cached name
 map or an entry snapshot, the same family as the `disk_seen` clobber guard).
 If both are empty, look at the write itself and at the device's completion, since
 the cache is not the explanation.
+
+## UI frameworks: measured, not assumed
+
+`tools/jdk/tests/ui/UiHeadless.java` reports each capability separately, because
+the useful answer is which part breaks, not whether all of it works.
+
+Boot `obj/jdk/ui-fonts3.log` (headless, fonts and fonts.conf staged):
+
+| capability | result |
+|---|---|
+| Toolkit (headless) | PASS |
+| Graphics2D shapes, antialiasing | PASS, 5446 painted pixels |
+| image pipeline (scale, colour model) | PASS |
+| Swing components + layout | FAIL -- fontconfig |
+| Swing look and feel (Metal) | PASS |
+| Event Dispatch Thread | PASS, `onEdt=true` |
+| offscreen component painting | PASS, px=ffff0000 |
+| font families / text rendering | FAIL -- fontconfig |
+
+So java.desktop's 2D core, image pipeline, Swing LAF, EDT and component painting
+work with no display at all. Everything that needs a font dies on one message:
+`Fontconfig head is null, check your fonts or fonts configuration`.
+
+What that message does and does not mean, established:
+
+* `libfontmanager.so` does not link fontconfig -- its NEEDED list is libawt, libc,
+  libfreetype, libjava, libjvm, libm -- and the message string lives in
+  `lib/modules`. The JDK therefore dlopen()s fontconfig itself at runtime.
+* the library IS in the image: `libfontconfig.so.1` (285840 bytes, from
+  libfontconfig1 2.13.1-2ubuntu3, the focal build that matches the glibc 2.31 pin)
+  and `libexpat.so.1`, both verified present with `mdir`.
+* `tools/jdk/fcprobe.c` then dlopen()ed it by soname and by three absolute paths,
+  including `/lib/x86_64-linux-gnu/libfontconfig.so.1`: all four FAILED. Its own
+  dlerror() printing is buggy (two calls, second clears the message), so the next
+  step is to fix that probe and read the loader's actual complaint -- most likely
+  the guest loader failing to resolve libexpat.so.1 for the dlopen'd object, or
+  the LFN/short-name mapping (the image stores it as LIBFON~1.1).
+* the config side is fine: `/etc/fonts/fonts.conf` lands (after the mkd fix below)
+  and points at `/FONTS`, where DejaVuSans.ttf is staged.
+
+Fixed on the way: `stage.sh`'s mkd() swallowed every error and had no -p, so
+`--dir ...:/etc/fonts` was a silent no-op -- ::/etc did not exist, ::/etc/fonts
+failed, nothing was copied, and the only symptom was the same "head is null"
+message as a missing font. It now creates each path component.
+
+Open, in order: read the real dlopen error; make libfontconfig loadable (dependency
+resolution or LFN mapping, whichever it turns out to be); then re-run UiHeadless
+expecting 9/9; then AWT/X11 on-screen, which needs libX11/libXext/libXrender as
+well as a display server the JDK can connect to.
