@@ -4753,3 +4753,22 @@ host_tests_portable: $(filter-out $(HOST_TESTS_HOSTBOUND),$(HOST_TESTS_TARGETS))
 	[ "$$fail" -eq 0 ]
 
 .PHONY: host_tests_portable
+
+# ==== cp/x2 (lane C4-x2, docs/cyberpunk.md §6 P4) -- integrator review ====
+# Stage the X client libraries a Wine session needs onto the disk:
+#   make ARCH=intel cp-x11-disk [CP_X11_STAGE=<dir>/stage/CP/X11]
+# copies tools/cp/x11/build.sh's runtime tree (the C4-x libraries under their
+# sonames, libXcomposite and FreeType 2.14.3 included, + share/X11) to
+# ::/CP/X11 on disk.img -- the F4 layout of docs/cp-x11.md §2.3.  It is NOT a
+# disk.img prerequisite: the default disk is unchanged.  A Wine session puts
+# /CP/X11/lib FIRST on LD_LIBRARY_PATH (winex11 dlopens by bare soname, and
+# /LIB64 may hold the RimWorld libX11 shim).  A session that mounts NFS at /CP
+# (tools/cp/p4/run-p4.sh) sees the export's copy instead of this one.
+CP_X11_STAGE ?= $(HOME)/cp/x11-build/stage/CP/X11
+.PHONY: cp-x11-disk
+cp-x11-disk: disk.img
+	@[ -f "$(CP_X11_STAGE)/lib/libX11.so.6" ] || { echo "[cp-x11] no stage at $(CP_X11_STAGE) (bash tools/cp/x11/build.sh all)"; exit 1; }
+	-$(MMD) -i disk.img ::/CP >/dev/null 2>&1
+	$(MCOPY) -s -o -i disk.img "$(CP_X11_STAGE)" ::/CP/
+	@echo "[cp-x11] staged $$(ls "$(CP_X11_STAGE)/lib" | wc -l) libraries at ::/CP/X11/lib"
+# ==== end cp/x2 ====
