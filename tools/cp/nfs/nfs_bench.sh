@@ -44,7 +44,7 @@ STAGE="mcopy -o -i $TREE/disk.img $OUT/nb.bin ::/CPNFSB.BIN && mcopy -o -i $TREE
 
 LINE="$EXPORT 127.0.0.1(ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534)"
 export TREE OUT EXPORT LINE STAGE NB_TIMEOUT="${NB_TIMEOUT:-420}"
-flock /tmp/cp-exports.lock flock /tmp/cp-qemu.lock bash -c '
+flock /tmp/cp-exports.lock bash "$SELF/tools/cp/qemu-slot.sh" bash -c '
   set -u
   BAK="$OUT/exports.backup"
   sudo -n cp -a /etc/exports "$BAK" || exit 3

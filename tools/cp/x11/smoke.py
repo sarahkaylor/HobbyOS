@@ -22,7 +22,7 @@ Grade (all required): "[XS] XOpenDisplay ok", libX11 resolved from
 (0,255,0) and blue (0,0,255) in the screendump.
 
 Run on linuxci, ALWAYS under the shared lock:
-  flock /tmp/cp-qemu.lock python3 tools/cp/x11/smoke.py [--out DIR] [--build-disk]
+  bash tools/cp/qemu-slot.sh python3 tools/cp/x11/smoke.py [--out DIR] [--build-disk]
 Env: CP_X11_WORK (default ~/cp/x11-build), CP_SYSROOT (default
 ~/cp/wine-build/sysroot-glibc231).
 """

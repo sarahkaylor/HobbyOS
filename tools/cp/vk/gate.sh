@@ -16,7 +16,7 @@
 # file), the glibc runtime in /lib64 + /lib/x86_64-linux-gnu (as the M1 gate),
 # and a root copy of the probe named in WAVE.CFG.
 #
-# Every boot runs under `flock /tmp/cp-qemu.lock` (linuxci is shared).
+# Every boot runs under a QEMU slot (tools/cp/qemu-slot.sh).
 # Env: CP_VK_WORK (default ~/cp/vk-build), VK_TIMEOUT (s, default 420),
 #      VK_FRAMES (default 90), VK_HOLD (default 20), VK_QEMU_EXTRA (e.g. "-cpu host"),
 #      VK_SMP (QEMU_SMP override), VK_TAG (suffix for log/shot names), VK_SKIP_BUILD=1.
@@ -75,9 +75,8 @@ OVMF="$OUT/OVMF_CODE_4M.fd"
 rm -f "$SOCK" "$LOG"
 SMPARG=(); [ -n "${VK_SMP:-}" ] && SMPARG=(QEMU_SMP="$VK_SMP")
 
-say "boot under flock /tmp/cp-qemu.lock (deadline ${TIMEOUT_S}s, serial $LOG)"
-exec 9>/tmp/cp-qemu.lock
-flock 9
+say "boot under a QEMU slot (tools/cp/qemu-slot.sh; deadline ${TIMEOUT_S}s, serial $LOG)"
+. "$ROOT/tools/cp/qemu-slot.sh"; cp_qemu_slot_acquire
 say "lock acquired $(date -u +%T)"
 make -C "$ROOT" -o disk.img -o hobbyos.elf ARCH=intel MODE=test EDK2_X86_64="$OVMF" "${SMPARG[@]}" run \
   QEMU_ARGS="-display none -enable-kvm -qmp unix:$SOCK,server,nowait ${VK_QEMU_EXTRA:-}" > "$LOG" 2>&1 &
@@ -106,7 +105,7 @@ if kill -0 "$MAKEPID" 2>/dev/null; then
   sleep 2; kill "$MAKEPID" 2>/dev/null
 fi
 wait "$MAKEPID" 2>/dev/null
-flock -u 9
+flock -u 197; exec 197>&-; unset CP_QEMU_SLOT_HELD
 say "boot finished after $((SECONDS - t0)) s"
 
 echo "--- [VK] rows ---"
