@@ -201,6 +201,19 @@ against `sha256sum` on the host), checks fstat and `lseek(SEEK_END)` give
 the 64-bit size, and re-reads a 4 KiB page at 4 GiB + 8 MiB + 123 through
 the window path after an lseek.
 
+## 10. One read() of ~172 MB (cp/nfs2, item 3)
+
+The game reads `shader_final.cache` (172 MB, cyberpunk.md §0.2 item 12) with
+one `read()`.  The path is native/compat `read()` -> `file_read` (int count)
+-> `l76_nfs_read` (no L76 window: the count is > 16 KiB) ->
+`nfs_read_file` -> `nfs_read_pipe` straight into the caller's buffer (reads
+above `NFS_RA_MAXREQ` bypass the windows).  What had to change was the
+pipeline's failure mode: one lost reply used to end the pipeline and read
+the REST of the range serially, one round trip per 32 KiB block (thousands
+for 172 MB); it now re-sends the READs in flight (item 1).
+Gate: `cpnfsbench` phase `one176m`, 176 MiB + 777 bytes in one read() into
+one malloc'd buffer, SHA-256 against the host's (`rsize_guard.sh` G8).
+
 ## 14. nfs_bench.sh on QEMU slots (cp/nfs2)
 
 `nfs_bench.sh` (and so `rsize_guard.sh`) no longer holds

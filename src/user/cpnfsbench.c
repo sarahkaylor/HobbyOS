@@ -25,6 +25,9 @@
  *               reads that needed no window fill (fetched / 64 KiB fills).
  *               One shared readahead window refilled on almost every page
  *               (amp ~1600%); per-file windows load each 64 KiB block once.
+ *   one176m     cp/nfs2: /NFS/big176m.bin (176 MiB + 777, larger than the
+ *               game's 172 MB shader_final.cache) in ONE read() into one
+ *               buffer, SHA-256 against the host's (/NBONE.TXT).
  *   big5g       cp/nfs2, only when the harness staged /NBBIG.TXT (NB_BIG=1):
  *               /NFS/big5g.bin (5 GiB + 12345) read through with 4 MiB
  *               read()s and hashed with SHA-256 against the host's
@@ -48,6 +51,7 @@
 #define NB_MNT "/NFS"
 #define NB_FILE "/NFS/big64m.bin"
 #define NB_SIZE (64u * 1024u * 1024u)
+#define NB_ONE "/NFS/big176m.bin"   /* cp/nfs2: one read() of > 172 MB */
 #define NB_BIG "/NFS/big5g.bin"     /* cp/nfs2: > 4 GiB (NB_BIG=1 only) */
 
 static void pc(const char *s) { print_console(s); }
@@ -402,6 +406,32 @@ static void big_row(const char *name, uint64_t got, uint64_t want, uint64_t us,
   pc(line);
 }
 
+/* Item 3: the whole of /NFS/big176m.bin (> 172 MB, the game's
+ * shader_final.cache) in ONE read() into one buffer, hashed. */
+static int phase_one(void) {
+  uint64_t size = 0;
+  char want[65], got[65];
+  if (!read_expect("/NBONE.TXT", &size, want)) { pc("[NB] one176m no /NBONE.TXT FAIL\n"); return 1; }
+  int fd = open(NB_ONE, O_RDONLY);
+  if (fd < 0) { pc("[NB] one176m open FAIL\n"); return 1; }
+  uint8_t *b = (uint8_t *)malloc((size_t)size);
+  if (!b) { close(fd); pc("[NB] one176m malloc FAIL\n"); return 1; }
+  uint64_t t0 = now_us();
+  ssize_t r = read(fd, b, (size_t)size);
+  uint64_t us = now_us() - t0;
+  close(fd);
+  uint64_t n = r > 0 ? (uint64_t)r : 0;
+  struct sha256 s;
+  sha256_init(&s);
+  sha256_update(&s, b, n);
+  sha256_hex(&s, got);
+  free(b);
+  int match = str_eq(got, want);
+  int ok = n == size && match;
+  big_row("one176m", n, size, us, got, match, " reads=1", ok);
+  return ok ? 0 : 1;
+}
+
 /* Item 2: /NFS/big5g.bin (> 4 GiB) read through with 4 MiB read()s, hashed;
  * fstat and lseek(SEEK_END) must report the 64-bit size; a 4 KiB page past
  * 4 GiB re-read after an lseek must equal the bytes the stream had there.
@@ -540,6 +570,7 @@ int main(void) {
   fails += phase("seq1344", 1344, 4u * 1024u * 1024u, 0, 0);
   fails += phase_conc();
   fails += phase_multi();
+  fails += phase_one();
   fails += phase_big();
   char d[40];
   int m = 0;

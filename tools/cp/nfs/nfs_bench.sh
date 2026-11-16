@@ -46,6 +46,10 @@ for k in 0 1 2 3 4 5; do
   seed=$(python3 -I -c "print(hex(0x9e3779b97f4a7c15 ^ (($k + 1) * 0xbf58476d1ce4e5b9 % 2**64)))")
   "$OUT/fnv64" "$OUT/m$k.bin" $((2 * 1024 * 1024)) "$seed" > /dev/null || die "data m$k"
 done
+# cp/nfs2: one read() larger than the game's 172 MB shader_final.cache
+ONE_BYTES=$((176 * 1024 * 1024 + 777))
+"$OUT/fnv64" "$OUT/big176m.bin" $ONE_BYTES 0x5851f42d4c957f2d > /dev/null || die "data big176m"
+echo "$ONE_BYTES $(sha256sum "$OUT/big176m.bin" | cut -c1-64)" > "$OUT/one.txt"
 BIG=""
 if [ "${NB_BIG:-0}" = 1 ]; then
   BIG_BYTES=$((5 * 1024 * 1024 * 1024 + 12345))
@@ -57,6 +61,7 @@ if [ "${NB_BIG:-0}" = 1 ]; then
 fi
 printf 'CPNFSB.BIN\n' > "$OUT/wave.cfg"
 STAGE="mcopy -o -i $TREE/disk.img $OUT/nb.bin ::/CPNFSB.BIN && mcopy -o -i $TREE/disk.img $OUT/expect.txt ::/NBEXPECT.TXT && mcopy -o -i $TREE/disk.img $OUT/wave.cfg ::/WAVE.CFG"
+STAGE="$STAGE && mcopy -o -i $TREE/disk.img $OUT/one.txt ::/NBONE.TXT"
 [ -n "$BIG" ] && STAGE="$STAGE && mcopy -o -i $TREE/disk.img $OUT/big.txt ::/NBBIG.TXT"
 
 export TREE OUT EXPORT STAGE BIG NB_TIMEOUT="${NB_TIMEOUT:-420}"
@@ -72,7 +77,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM HUP
-sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$OUT"/m?.bin "$EXPORT/" || die "export dir"
+sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$OUT"/m?.bin "$OUT/big176m.bin" "$EXPORT/" || die "export dir"
 if [ -n "$BIG" ]; then sudo -n mv "$BIG" "$EXPORT/" || die "big5g into the export"; fi
 sudo -n chmod -R a+rX "$EXPORT" || die "chmod"
 ADDED=1
