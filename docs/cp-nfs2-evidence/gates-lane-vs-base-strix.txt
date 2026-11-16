@@ -1,0 +1,96 @@
+# C3-nfs2 gate batch on cp-nfs2 10d07e73 (merge of cyberpunk 978eef37), strix, boots in QEMU slots with 3-4 other lanes guests running
+tree cp-nfs2 10d07e73 (merge of cyberpunk 978eef37)
+build rc=0
+avx rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/nfs2)
+unit rc=1 Tests failed! Tests run:    452 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 362 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=2
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+exports_selftest rc=0 exports_selftest: 0 failure(s)
+ALLDONE
+
+# ARM re-run after c6350f46 (256 windows on ARM; x86_64 code of nfs.c byte-identical in the disassembly):
+arm rc=0 (make ARCH=arm TOOLS_SKIP=1 hobbyos.elf, ~/cp/lanes/nfs2-logs/arm2.log)
+first arm run: ld.lld: error: kernel .bss exceeds the limine placement window (docs/blk-cache.md section 11)
+
+# base reference: ~/cp/base4-gates.txt (cyberpunk 5eea3712)
+tree 5eea3712 plan v4: wave 4 lanes -- C3-nfs2, C3-pfx, C1-k4, C4-x2, C5-vk2 (§7.2d)
+build rc=0
+avx rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/base4)
+unit rc=1 Tests failed! Tests run:    452 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 362 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+ALLDONE
+
+# rsize_guard of the batch
+rsize_guard: G6 6/6 concurrent readers, every 4 KiB page correct
+rsize_guard: G7 6/6 readers of 6 files, every page correct; read_kib=12288 fetched_kib=12288 rpcs=384 amp_pct=100 hit_pct_est=93
+rsize_guard: G8 one 176 MiB read() hash match, stat times, 5/5 symlinked paths
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=9009)
+rsize_guard: [NFS] fsinfo rc=0 rtmax=32768 rtpref=32768 rsize=32768
+rsize_guard: G4 1/1 sampled 64 KiB reads: rs=32768 issued<=2
+rsize_guard: G5 8641 READ RPCs for 283116297 bytes: 32764 bytes/RPC, 2.0 RPCs per 64 KiB
+rsize_guard: [NB] seq65536 bytes=67108864 ms=738 MBps=90.93 fnv=0x7a56a810ac49cd58 match ok
+rsize_guard: [NB] one176m bytes=184550153 want=184550153 ms=3033 MBps=60.84 sha256=4436465b87fd649c04b0d91f16a1eed8b5e5af0027fcd8062ee8da252ec1fab9 match reads=1 ok
+rsize_guard: PASS (/home/sarah/cp/lanes/nfs2)

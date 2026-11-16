@@ -1,0 +1,50 @@
+# the SAME bench (cp-nfs2 12577485 cpnfsbench) against the PRE-FIX kernel (aa9165d1: injection knob, no hard mount), strix
+[NFS] rsize fallback 32768 -> 1344 (large READ replies time out)
+[NB] inject.blackout.read pages=1024 bad=0 short=0 eio=2 ms=8569 read FAIL
+[NB] inject.blackout.mmap pages=1024 bad=1 short=0 eio=0 ms=4923 mmap-child-died-or-bad FAIL
+[NB] inject.blackout.open pages=0 bad=0 short=0 eio=1 ms=6014 open-failed FAIL
+[NB] done rc=3
+[NFSPIPE] len=65536 rs=32768 issued=2 replies=2 short=0 bad=0 got=65536 us=624 first_count=32768 resent=0 win=1
+[NFSPIPE] len=262144 rs=32768 issued=8 replies=8 short=0 bad=0 got=262144 us=1063 first_count=32768 resent=0 win=1
+[NFSPIPE] len=262144 rs=32768 issued=8 replies=8 short=0 bad=0 got=262144 us=554 first_count=32768 resent=0 win=1
+nfs_bench: FAIL (/home/sarah/cp/lanes/nfs2-injb)
+exports.sh: remove /srv/nfs/cp-nfs-bench-nfs2-injb ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-nfs-bench-nfs2-injb
+rc=1
+
+## console
+[NFSINJ] every.5 every=5 dropped=0
+[NB] inject.every5.read pages=1024 bad=0 short=0 eio=0 ms=2458 read ok
+[NB] inject.every5.mmap pages=1024 bad=0 short=0 eio=0 ms=3669 mmap ok
+[NFSINJ] off every=0 dropped=65
+[NFSINJ] blackout.8000 every=0 dropped=65
+[NFSRD] fail off=0 want=32768 wait_us=1001991 temp=0 done=0
+[NFS] rsize fallback 32768 -> 1344 (large READ replies time out)
+[NFSRD] fail off=0 want=1344 wait_us=1001315 temp=0 done=0
+[NFSRD] fail off=0 want=1344 wait_us=1001130 temp=0 done=0
+[NFSRD] fail off=0 want=1344 wait_us=1001990 temp=0 done=0
+[NFSRD] fail off=4096 want=1344 wait_us=1001989 temp=0 done=0
+[NB] inject.blackout.read pages=1024 bad=0 short=0 eio=2 ms=8569 read FAIL
+[NFSINJ] off every=0 dropped=141
+[NFSINJ] blackout.8000 every=0 dropped=141
+[NFSRD] fail off=0 want=1344 wait_us=1001988 temp=0 done=0
+[NFSRD] fail off=0 want=1344 wait_us=1001987 temp=0 done=0
+[NB] inject.blackout.mmap pages=1024 bad=1 short=0 eio=0 ms=4923 mmap-child-died-or-bad FAIL
+[NFSINJ] off every=0 dropped=220
+[NFSINJ] blackout.8000 every=0 dropped=220
+[NFLK] retry comp=inj4.bin tries=3 rc=-1 total=3
+[NB] inject.blackout.open pages=0 bad=0 short=0 eio=1 ms=6014 open-failed FAIL
+[NFSINJ] off every=0 dropped=232
+
+# rsize_guard on aa9165d1 with its own (open-time blackout) bench
+rsize_guard: FAIL G1 a bench phase failed (bad byte count or checksum) ([NB] inject.blackout.open pages=0 bad=0 short=0 eio=1 ms=6013 open-failed FAIL [NB] done rc=2 )
+rsize_guard: G6 6/6 concurrent readers, every 4 KiB page correct
+rsize_guard: G7 6/6 readers of 6 files, every page correct; read_kib=12288 fetched_kib=12288 rpcs=384 amp_pct=100 hit_pct_est=93
+rsize_guard: G8 one 176 MiB read() hash match, stat times, 5/5 symlinked paths
+rsize_guard: FAIL G9 injected reply loss: 4 rows, 2 FAIL: [NB] inject.blackout.read pages=0 bad=0 short=0 eio=1 ms=6014 open-failed FAIL [NB] inject.blackout.open pages=0 bad=0 short=0 eio=1 ms=6013 open-failed FAIL 
+rsize_guard: [NFS] fsinfo rc=0 rtmax=32768 rtpref=32768 rsize=32768
+rsize_guard: G4 1/1 sampled 64 KiB reads: rs=32768 issued<=2
+rsize_guard: G5 8645 READ RPCs for 283116297 bytes: 32749 bytes/RPC, 2.0 RPCs per 64 KiB
+rsize_guard: [NB] seq65536 bytes=67108864 ms=508 MBps=132.10 fnv=0x7a56a810ac49cd58 match ok
+rsize_guard: [NB] one176m bytes=184550153 want=184550153 ms=1051 MBps=175.59 sha256=4436465b87fd649c04b0d91f16a1eed8b5e5af0027fcd8062ee8da252ec1fab9 match reads=1 ok
+rsize_guard: FAIL (/home/sarah/cp/lanes/nfs2-injb; console /home/sarah/cp/lanes/nfs2-injb/obj/nfs-bench/console.log)

@@ -332,3 +332,38 @@ Client side: at most two 32 KiB READs outstanding per socket
 (`NFS_PIPE_INFLIGHT`), and hard-mount retries for the rest.  Host side
 (proposed, not done: it is a system setting): `net.core.rmem_default` of
 1-4 MiB would give every slirp socket room for a full pipeline.
+
+Run 3 (39c639f4, 2 replies per socket): stalls=1 where run 2 had 65 at the
+same point, and every one of our QEMU's 5775 slirp sockets showed `d0`
+(`docs/cp-nfs2-evidence/slirp-rcvbuf-strix.txt`).  The per-socket cap is
+enough; no host setting needed for our guests.
+
+One more shape: in run 3 a LOOKUP went unanswered for 95 s (30 hard
+retries) while READs on other sockets were answered.  A small reply cannot
+overflow a buffer, so this is nfsd not answering.  Suspected (not proven):
+`exportfs -ra` in tools/cp/exports.sh flushes nfsd's export caches, and
+nfsd drops (defers) UDP requests that arrive before mountd refills them.
+Proposed for exports.sh (integrator-owned, not edited here): add with
+`exportfs -o ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534 127.0.0.1:DIR`
+and remove with `exportfs -u 127.0.0.1:DIR` (keeping the /etc/exports edit
+for persistence), so other exports' cache entries survive; and log each
+call with a timestamp so a no-reply window can be matched to it.
+
+## 17. Gate P2 with cp/nfs2 (strix)
+
+| | run23 (base) | run 1 (15ad85b7) | run 2 (528e5c81) | run 3 (39c639f4) |
+|---|---|---|---|---|
+| READ bytes, wineboot phase | 269 MB | 96 MB | <= 85 MB | <= 43 MB |
+| READ bytes, whole run | 1.66 GB (complete) | 569 MB at the hang | 393 MB at the hang | 201 MB at the hang |
+| wineboot | status=53 ms=306756 | status=53 ms=304877 | status=53 ms=304031 | status=53 ms=303393 |
+| window hit rate | 72% (fills/hits) | 83% | 93% | 91% |
+| pipeline stalls | (8 rows capped) | 568 | 412 | 1 |
+| guests on strix | 1 | 1-2 | up to 4 | 4 |
+
+Every cp/nfs2 run hung in the post-wineboot quiesce with C1-k4's epoll
+signature (all clients st=5, futex=0x0, wineserver idle, no NFS traffic),
+so no run reached G1-G3; the NFS numbers are judged on page-in volume,
+stalls and correctness (`docs/cp-nfs2-evidence/p2-runs-strix.txt`).
+wineboot still ends at the 300 s boot-event timeout: NFS now accounts for
+a few seconds of RPC wait in that window, not for the timeout.
+

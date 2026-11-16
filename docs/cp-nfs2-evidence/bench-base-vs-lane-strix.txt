@@ -1,0 +1,44 @@
+# base 5eea3712 kernel + cp-nfs2 cpnfsbench (528e5c81 bench), NB_BIG=1, strix, 4 guests running
+[NB] cp/nfs throughput bench
+[NB] mount 10.0.2.2:/srv/nfs/cp-nfs-bench-nfs2-base -> /NFS ok
+[NB] seq65536 bytes=67108864 ms=439 MBps=152.86 fnv=0x7a56a810ac49cd58 match ok
+[NB] seq4096 bytes=16777216 ms=109 MBps=153.91 fnv=0xb4a2bb4ec2694432 ok
+[NB] seq1344 bytes=4194304 ms=29 MBps=144.63 fnv=0x5d242dd7ec48c3b6 ok
+[NB] conc6 a=6 pages=6144 bad=0 first_bad=- ok
+[NB] multi6.ra read_kib=12288 fetched_kib=46716 rpcs=5202 amp_pct=380 hit_pct_est=76
+[NB] multi6 a=6 pages=3072 bad=2 first_bad=- FAIL
+[NB] fstat rc=1 atime=0 mtime=0 ctime=0 want=1700000001/1600000002/1794848795 FAIL
+[NB] stat rc=0 atime=1600000002 mtime=1600000002 ctime=1600000002 want=1700000001/1600000002/1794848795 FAIL
+[NB] symlink path=/NFS/sub/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] symlink path=/NFS/dlink/data.bin stat=1 size=0 open=1 bytes=0 MISMATCH FAIL
+[NB] symlink path=/NFS/d2/data.bin stat=1 size=0 open=1 bytes=0 MISMATCH FAIL
+[NB] symlink path=/NFS/sub/up/sub/data.bin stat=1 size=0 open=1 bytes=0 MISMATCH FAIL
+[NB] symlink path=/NFS/sub/up/d2/data.bin stat=1 size=0 open=1 bytes=0 MISMATCH FAIL
+[NB] one176m bytes=184550153 want=184550153 ms=35366 MBps=5.21 sha256=4436465b87fd649c04b0d91f16a1eed8b5e5af0027fcd8062ee8da252ec1fab9 match reads=1 ok
+[NB] big5g bytes=4290772992 want=5368721465 ms=240328 MBps=17.85 sha256=24888f520107cd100d7644f4ba6e9c3b136c188b3db65119eee6ed5d426f9f88 MISMATCH fstat=ok seek_end=ok page_past_4g=BAD FAIL
+[NB] done rc=8
+
+# lane: cp-nfs2 12577485 kernel + bench (NB_BIG=1), strix, 2-3 other guests running
+[NB] cp/nfs throughput bench
+[NB] mount 10.0.2.2:/srv/nfs/cp-nfs-bench-nfs2-injf -> /NFS ok
+[NB] seq65536 bytes=67108864 ms=276 MBps=243.14 fnv=0x7a56a810ac49cd58 match ok
+[NB] seq4096 bytes=16777216 ms=24 MBps=699.05 fnv=0xb4a2bb4ec2694432 ok
+[NB] seq1344 bytes=4194304 ms=8 MBps=524.28 fnv=0x5d242dd7ec48c3b6 ok
+[NB] conc6 a=6 pages=6144 bad=0 first_bad=- ok
+[NB] multi6.ra read_kib=12288 fetched_kib=12288 rpcs=384 amp_pct=100 hit_pct_est=93
+[NB] multi6 a=6 pages=3072 bad=0 first_bad=- ok
+[NB] fstat rc=0 atime=1700000001 mtime=1600000002 ctime=1794854935 want=1700000001/1600000002/1794854935 ok
+[NB] stat rc=0 atime=1700000001 mtime=1600000002 ctime=1794854935 want=1700000001/1600000002/1794854935 ok
+[NB] symlink path=/NFS/sub/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] symlink path=/NFS/dlink/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] symlink path=/NFS/d2/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] symlink path=/NFS/sub/up/sub/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] symlink path=/NFS/sub/up/d2/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] one176m bytes=184550153 want=184550153 ms=428 MBps=431.19 sha256=4436465b87fd649c04b0d91f16a1eed8b5e5af0027fcd8062ee8da252ec1fab9 match reads=1 ok
+[NB] big5g bytes=5368721465 want=5368721465 ms=29420 MBps=182.48 sha256=a520d5a74db66de9c06bd8018b11dee2b95444e005a5cc17976d9d5c33e8b935 match fstat=ok seek_end=ok page_past_4g=ok ok
+[NB] inject.every5.read pages=1024 bad=0 short=0 eio=0 ms=2949 read ok
+[NB] inject.every5.mmap pages=1024 bad=0 short=0 eio=0 ms=2596 mmap ok
+[NB] inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8927 read ok
+[NB] inject.blackout.mmap pages=1024 bad=0 short=0 eio=0 ms=9135 mmap ok
+[NB] inject.blackout.open pages=1024 bad=0 short=0 eio=0 ms=8289 read ok
+[NB] done rc=0
