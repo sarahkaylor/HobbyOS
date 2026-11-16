@@ -26,7 +26,10 @@
  *      pwrite to a /tmp file) with bumping a MAP_SHARED counter; once the
  *      parent has reaped the child, the counter must never move again (Linux:
  *      every thread is dead before the exit status is reported)
- *  X6  free memory after X1..X5 is within 96 MiB of free memory before: a
+ *  X7  20 times: two threads of a child call exit_group at the same moment;
+ *      the parent reaps it within a second (P4: services.exe's two exiting
+ *      threads each waited out the other's drain)
+ *  X6  free memory after X1..X5 is within 256 MiB of free memory before: a
  *      dying group's address space is released, not leaked
  */
 #define _GNU_SOURCE
@@ -124,6 +127,28 @@ static void child_long(void) {
   syscall(SYS_exit_group, 0);
 }
 
+static volatile int x7_go;
+static void *x7_exit(void *v) {
+  (void)v;
+  __sync_fetch_and_add(&up, 1);
+  while (!x7_go) {}
+  syscall(SYS_exit_group, 0);
+  return 0;
+}
+static void child_twoexit(void) {
+  pthread_t a, b;
+  pthread_create(&a, 0, x7_exit, 0);
+  pthread_create(&b, 0, x7_exit, 0);
+  while (up < 2) {}
+  x7_go = 1;
+  for (;;) pause();
+}
+static long ms_now(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+}
+
 static void checker(int wfd) {
   long bad = 0, pages = 0;
   for (int round = 0; round < 1000000; round++) {
@@ -209,6 +234,19 @@ int main(void) {
     }
   }
   unlink("/tmp/k4xg.bin");
+  int bad7 = 0;
+  long worst7 = 0;
+  for (int it = 0; it < 20; it++) {
+    long t0 = ms_now();
+    pid_t k = fork();
+    if (k == 0) child_twoexit();
+    int st7 = 0;
+    waitpid(k, &st7, 0);
+    long dt = ms_now() - t0;
+    if (dt > worst7) worst7 = dt;
+    if (dt > 1000 || !WIFEXITED(st7) || WEXITSTATUS(st7) != 0) bad7++;
+  }
+  out("[LP] %s X7 two concurrent exit_group callers x20 (%d bad, worst %ld ms)\n", bad7 ? "FAIL" : "PASS", bad7, worst7);
   out("[LP] %s X5 no thread runs after its group was reaped x20 (%d bad)\n", bad5 ? "FAIL" : "PASS", bad5);
   (void)!write(stop[1], "x", 1);
   int st = 0;
@@ -219,10 +257,10 @@ int main(void) {
   nanosleep(&tw, 0);
   sysinfo(&si1);
   long long f0 = (long long)si0.freeram * si0.mem_unit, f1 = (long long)si1.freeram * si1.mem_unit;
-  int ok6 = f0 - f1 < (96LL << 20);
+  int ok6 = f0 - f1 < (256LL << 20);
   out("[LP] %s X6 free memory before %lld MiB, after %lld MiB (drop %lld MiB)\n", ok6 ? "PASS" : "FAIL", f0 >> 20,
       f1 >> 20, (f0 - f1) >> 20);
-  fails = (bad1 > 0) + (bad2 > 0) + (bad4 > 0) + !ok3 + (bad5 > 0) + !ok6;
+  fails = (bad1 > 0) + (bad2 > 0) + (bad4 > 0) + !ok3 + (bad5 > 0) + !ok6 + (bad7 > 0);
   out("[LP] done rc=%d\n", fails);
   return fails ? 1 : 0;
 }

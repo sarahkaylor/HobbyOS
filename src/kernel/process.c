@@ -1397,6 +1397,7 @@ static int process_create_internal_ver(int ver) {
   p->pw_total = 0;
   p->pw_done = 0;
   p->fault_si_set = 0;
+  p->exit_owner = 0; /* C1-k4 */
   p->sig_park_kind = 0; /* C1-thr: a recycled slot's park state never leaks */
   p->sig_park_nr = 0;
   fd_cloexec_reset(p->fd_cloexec);
@@ -2785,6 +2786,21 @@ void process_exit(struct trap_frame *tf) {
      siblings: OQ3 -- bounded wait; the existing watchdogs/LOSTWAKE
      machinery stays the safety net.] */
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  /* C1-k4: ONE thread owns a group's exit.  Two threads calling exit_group
+     at once each marked the other THREAD_DONE and then waited for the
+     other's CPU claim -- both until the drain timeout (P4: services.exe,
+     "[THREADS] exit_group claim drain timeout" twice for one group).  The
+     loser just leaves its CPU; the owner's drain then completes. */
+  if (grp->exit_owner && grp->exit_owner != cur->pid) {
+    if (cur != grp)
+      cur->state = PROC_STATE_THREAD_DONE;
+    cur->futex_uaddr = 0;
+    cur->wake_ms = 0;
+    spinlock_release_irqrestore(&proc_lock, flags);
+    schedule(tf, 0);
+    return;
+  }
+  grp->exit_owner = cur->pid;
   for (int i = 0; i < MAX_PROCESSES; i++) {
     struct process *m = &proc_table[i];
     if (m == cur || m->state == PROC_STATE_FREE ||
@@ -6707,6 +6723,7 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   t->pw_total = 0;
   t->pw_done = 0;
   t->fault_si_set = 0;
+  t->exit_owner = 0; /* C1-k4 */
   t->sig_park_kind = 0; /* C1-thr: a recycled slot's park state never leaks */
   t->sig_park_nr = 0;
   t->spawn_retval = -1;

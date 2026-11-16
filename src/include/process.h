@@ -666,6 +666,9 @@ struct process {
   int fault_si_set;
   int fault_si_code;
   uint64_t fault_si_addr;
+  /* C1-k4: the pid of the thread that owns this group's exit_group (group
+     anchor only; 0 = none yet). */
+  int exit_owner;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
