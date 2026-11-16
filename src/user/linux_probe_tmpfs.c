@@ -10,6 +10,10 @@
  *   T9 memfd I/O              T10 socket inode   T11 locks across fork
  *   T12 shared counter page over AF_UNIX SOCK_STREAM SCM_RIGHTS to a child
  *   T13 two fd records back to back on one stream
+ *   T4f rename on the FAT root (relative 8.3 names: the guest's cwd is the FAT
+ *       root, a host run renames in its cwd).  fat16_rename passed a NULL
+ *       last-component buffer that fat16_resolve_parent wrote through: a
+ *       kernel store to VA 0, which hung the CPU (no "[LP] done" row).
  */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -107,6 +111,19 @@ static void t4_rename(void) {
   fd = open(P("r5"), O_RDWR | O_CREAT, 0644); close(fd);
   ck(syscall(SYS_renameat2, AT_FDCWD, P("r4"), AT_FDCWD, P("r5"), 1 /*NOREPLACE*/) == -1 &&
      errno == EEXIST, "T4 renameat2 NOREPLACE EEXIST", errno);
+}
+
+static void t4f_rename_fat(void) {
+  unlink("LPFATR1.TMP"); unlink("LPFATR2.TMP");
+  int fd = open("LPFATR1.TMP", O_RDWR | O_CREAT | O_TRUNC, 0644);
+  long w = fd >= 0 ? write(fd, "fat!", 4) : -1;
+  if (fd >= 0) close(fd);
+  ck(fd >= 0 && w == 4, "T4f create on FAT", fd < 0 ? errno : w);
+  ck(rename("LPFATR1.TMP", "LPFATR2.TMP") == 0, "T4f rename on FAT", errno);
+  struct stat st;
+  int gone = stat("LPFATR1.TMP", &st), there = stat("LPFATR2.TMP", &st);
+  ck(gone == -1 && there == 0 && st.st_size == 4, "T4f old gone new there", there ? errno : (long)st.st_size);
+  ck(unlink("LPFATR2.TMP") == 0, "T4f unlink", errno);
 }
 
 static void t5_symlink(void) {
@@ -330,6 +347,7 @@ int main(void) {
   t2_file();
   t3_unlink_open();
   t4_rename();
+  t4f_rename_fat();
   t5_symlink();
   t6_dents();
   t7_open_errno();

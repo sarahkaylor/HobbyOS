@@ -1,0 +1,110 @@
+# fat16 rename NULL-write: linux_probe_tmpfs T4f A/B on strix (guest -cpu host, MODE=test, T3 wave)
+# base = cyberpunk 5eea3712 + ONLY the T4f probe row (src/user/linux_probe_tmpfs.c); lane = cp-vk2 with 37dc2c92 (fat16 fix)
+# host reference (strix, musl static, cwd = scratch dir):
+[LP] PASS T4f create on FAT (4)
+[LP] PASS T4f rename on FAT (2)
+[LP] PASS T4f old gone new there (4)
+[LP] PASS T4f unlink (2)
+[LP] done rc=0
+
+base build rc=0
+base(5eea3712 + probe row) tmpfs rc=1 [LP] PASS T4f create on FAT (4)
+ t3_linux_probe: FAIL — tmpfs never printed '[LP] done rc=0' (tier rc=1) 
+lane build rc=0
+lane(+fat16 fix) tmpfs rc=0 [LP] PASS T4f create on FAT (4)
+ [LP] PASS T4f rename on FAT (2)
+ [LP] PASS T4f old gone new there (4)
+ [LP] PASS T4f unlink (2)
+ [LP] done rc=0
+ 
+ALLDONE
+
+## base gate (raw)
+qemu-slot: slot 2 of 4 held by pid 3449920 17:05:02
+t3_linux_probe: building /home/sarah/cp/lanes/vk2-base/obj/intel/probe_tmpfs.elf
+make: Entering directory '/home/sarah/cp/lanes/vk2-base'
+make: Leaving directory '/home/sarah/cp/lanes/vk2-base'
+=== t3_linux_probe: tmpfs (deadline 150s, log /home/sarah/cp/lanes/vk2-base/obj/linux_probe_tmpfs.log) ===
+--- probe rows ---
+[LP] PASS T1 mkdir 0700 (0)
+[LP] PASS T1 is dir (7)
+[LP] PASS T1 mode 0700 (448)
+[LP] PASS T1 owner caller (0)
+[LP] PASS T1 EEXIST (0)
+[LP] PASS T1 ENOENT parent (17)
+[LP] PASS T2 open create (3)
+[LP] PASS T2 write/seek/read (5)
+[LP] PASS T2 fstat size 11 (4096)
+[LP] PASS T2 ftruncate 4 (11)
+[LP] PASS T3 unlink-while-open keeps data (7)
+[LP] PASS T4 rename (2)
+[LP] PASS T4 old gone new there (4)
+[LP] PASS T4 rename replaces (2)
+[LP] PASS T4 renameat2 (2)
+[LP] PASS T4 renameat2 NOREPLACE EEXIST (2)
+[LP] PASS T4f create on FAT (4)
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+t3_linux_probe: FAIL — tmpfs never printed '[LP] done rc=0' (tier rc=1)
+
+## base T3 console (grep): the rename enters fat16_rename, then the kernel store to VA 0
+/LPFATR1.TMP
+/LPFATR1.TMP new=/LPFATR2.TMP
+[IDMAP-TRIP] cr2=0x0000000000000000 rip=0x0000000070014D30 cr3=0x0000000200C06000 pid=2
+(no further [LP] row; the 150 s deadline hit -- the same rip as IceWM's hang in the P5 X11 run 1)
+
+## lane gate (raw)
+t3_linux_probe: building /home/sarah/cp/lanes/vk2/obj/intel/probe_tmpfs.elf
+=== t3_linux_probe: tmpfs (deadline 300s, log /home/sarah/cp/lanes/vk2/obj/linux_probe_tmpfs.log) ===
+[LP] PASS T1 mkdir 0700 (0)
+[LP] PASS T1 is dir (7)
+[LP] PASS T1 mode 0700 (448)
+[LP] PASS T1 owner caller (0)
+[LP] PASS T1 EEXIST (0)
+[LP] PASS T1 ENOENT parent (17)
+[LP] PASS T2 open create (3)
+[LP] PASS T2 write/seek/read (5)
+[LP] PASS T2 fstat size 11 (4096)
+[LP] PASS T2 ftruncate 4 (11)
+[LP] PASS T3 unlink-while-open keeps data (7)
+[LP] PASS T4 rename (2)
+[LP] PASS T4 old gone new there (4)
+[LP] PASS T4 rename replaces (2)
+[LP] PASS T4 renameat2 (2)
+[LP] PASS T4 renameat2 NOREPLACE EEXIST (2)
+[LP] PASS T4f create on FAT (4)
+[LP] PASS T4f rename on FAT (2)
+[LP] PASS T4f old gone new there (4)
+[LP] PASS T4f unlink (2)
+[LP] PASS T5 symlink (2)
+[LP] PASS T5 readlink (1)
+[LP] PASS T5 lstat is link (33188)
+[LP] PASS T5 stat follows to file (41471)
+[LP] PASS T5 symlink to / (2)
+[LP] PASS T5 link off /tmp follows (33188)
+[LP] PASS T6 getdents lists entries (7)
+[LP] PASS T6 rmdir a file ENOTDIR (2)
+[LP] PASS T6 unlink a dir EISDIR (20)
+[LP] PASS T6 rmdir non-empty ENOTEMPTY (21)
+[LP] PASS T7 O_EXCL EEXIST (17)
+[LP] PASS T7 ENOENT (17)
+[LP] PASS T7 ENOTDIR (2)
+[LP] PASS T7 dir O_WRONLY EISDIR (20)
+[LP] PASS T8 mmap 66MiB MAP_SHARED (0)
+[LP] PASS T8 mmap store visible to read() (90)
+[LP] PASS T8 write() visible in the mapping (81)
+[LP] PASS T9 memfd ftruncate 66MiB (21)
+[LP] PASS T9 memfd pread/pwrite (3)
+[LP] PASS T9 memfd mmap sees write (102)
+[LP] PASS T9 memfd fstat size (0)
+[LP] PASS T10 bind makes a socket inode (49645)
+[LP] PASS T10 second bind EADDRINUSE (21)
+[LP] PASS T11 F_SETLK write lock (98)
+[LP] PASS T11 child sees the lock across fork (89)
+[LP] PASS T12 pass the page fd over SCM_RIGHTS (98)
+[LP] PASS T12 child observes the counter change (89)
+[LP] PASS T13 two records each carry their fd (1)
+[LP] PASS T14 statfs /tmp is tmpfs (16914836)
+[LP] done rc=0
+t3_linux_probe: PASS — tmpfs reached its done marker
