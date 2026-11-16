@@ -27,6 +27,15 @@
 #                                      library must be built the same way
 set -euo pipefail
 
+# This stage builds and RUNS native host tools, so it links with the host
+# compiler -- and on macOS 27 the CLT SDK's libSystem.B.tbd defeats the CLT's own
+# clang, making autoconf report "C compiler cannot create executables" with a
+# perfectly usable older SDK sitting beside it.  macos-sdk.sh pins a linkable
+# SDKROOT when the default cannot link; it is a no-op off Darwin and on healthy
+# hosts.  (Same fix as third_party/x11/build.sh: every host-side stage needs it,
+# which is exactly what that file's header says.)
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../tools/host/macos-sdk.sh"
+
 # macOS-only guard for a host SDK that the installed clang cannot read.  A
 # newer CLT/Xcode SDK can ship libSystem.tbd with arch syntax the local clang
 # does not know yet (macOS 27: `arm64e.x1-macos` -> "ld: tapi error: malformed
