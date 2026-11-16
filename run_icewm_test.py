@@ -176,7 +176,13 @@ def qemu_cmd(args, work, disk):
         if os.path.exists("/dev/kvm") and not os.environ.get("SKIP_KVM"):
             cmd.append("-enable-kvm")
     else:
-        fw = os.path.expanduser("~/.local/share/AAVMF/AAVMF_CODE.fd")
+        fw_candidates = [
+            os.path.expanduser("~/.local/share/AAVMF/AAVMF_CODE.fd"),
+            "/opt/homebrew/share/qemu/edk2-aarch64-code.fd",
+            "/usr/share/AAVMF/AAVMF_CODE.fd",
+            "/usr/share/qemu-efi-aarch64/QEMU_EFI.fd",
+        ]
+        fw = next((c for c in fw_candidates if os.path.exists(c)), fw_candidates[0])
         cmd = ["qemu-system-aarch64", "-M", "virt", "-cpu", "cortex-a53", "-smp", "4",
                "-m", "8192M", "-accel", "tcg,thread=multi", "-bios", fw,
                "-display", "none", "-serial", f"file:{serial}",
