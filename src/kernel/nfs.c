@@ -1460,6 +1460,15 @@ static int nfs_ra_try(const struct nfs_mount *m, const struct nfs_fh *fh,
     return 0;
   }
   nfs_ra.busy = 1;
+  /* cp/nfsfix: the fill below overwrites nfs_ra_buf with the lock released.
+     Invalidate the window FIRST.  Otherwise a concurrent reader whose range
+     matches the old (fh, base) is served bytes the fill is overwriting with
+     another file's or offset's data.  This race was latent until cp/nfs: small
+     reads only use the window when len <= rs, so at rs=1344 4 KiB page-ins
+     never got here.  At 32 KiB they all do, and six concurrent Wine processes
+     got wrong ntdll.so pages (2026-11-16).  Guarded by the conc6 phase of
+     tools/cp/nfs/rsize_guard.sh (G6). */
+  nfs_ra.valid = 0;
   spinlock_release_irqrestore(&nfs_ra_lock, fl);
 
   uint32_t base = offset & ~(uint32_t)4095;

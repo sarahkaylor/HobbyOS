@@ -18,6 +18,10 @@ NFS server, and FAILs when any known regression is present:
       truncates every large READ)
   R6  net.c no longer sends IPv4 fragments to reassembly (ipr_add): a 32 KiB
       reply arrives as ~23 fragments
+  R7  the readahead fill no longer invalidates the shared window before it
+      overwrites nfs_ra_buf with the lock dropped.  With 32 KiB READs every
+      4 KiB page-in uses the window, so concurrent readers got another
+      file's bytes (Wine, 2026-11-16).
 
 --selftest re-applies each regression to a temporary copy of the files and
 requires the scan to FAIL on every one and PASS on the untouched copy, so the
@@ -79,6 +83,18 @@ def scan(root):
 
     if len(re.findall(r"\bipr_add\s*\(", n)) < 2:  # the definition plus the call
         bad.append("R6 net.c: IPv4 fragments are no longer sent to ipr_add (no reassembly)")
+
+    m = re.search(r"\bnfs_ra_try\s*\([^)]*\)\s*\{(.*?)\n\}", c, re.S)
+    if not m:
+        bad.append("R7 nfs.c: nfs_ra_try() not found (readahead window race unchecked)")
+    else:
+        body = m.group(1)
+        i_busy = body.find("nfs_ra.busy = 1")
+        i_fill = body.find("nfs_read_pipelined(")
+        between = body[i_busy:i_fill] if 0 <= i_busy < i_fill else ""
+        if not re.search(r"nfs_ra\.valid\s*=\s*0\s*;", between):
+            bad.append("R7 nfs.c: nfs_ra_try() refills nfs_ra_buf without first setting "
+                       "nfs_ra.valid = 0 (concurrent readers get mid-refill bytes)")
     return bad
 
 
@@ -96,6 +112,8 @@ MUTATIONS = [
     ("R5", "src/kernel/nfs.c", r"\bNFS_RPC_RBIG\b", "NFS_RPC_BUF"),
     ("R6", "src/kernel/net.c",
      r"struct ipr_slot \*sl = ipr_add\(", "struct ipr_slot *sl = (struct ipr_slot *)0; (void)("),
+    ("R7", "src/kernel/nfs.c",
+     r"(?s)(nfs_ra\.busy = 1;)(.*?)\n\s*nfs_ra\.valid = 0;", r"\g<1>\g<2>"),
 ]
 
 
