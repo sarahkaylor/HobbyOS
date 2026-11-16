@@ -127,6 +127,9 @@ src/kernel/arch/x64/trap.c	P2I	badvec_at_entry[cpu].frame = (uint64_t)tf;
 src/kernel/arch/x64/trap.c	P2I	badvec_eu[c].pc = (uint64_t)__builtin_return_address(0);
 src/kernel/arch/x64/trap.c	P2I	badvec_watch_arm((uint64_t)&tf->vector, (uint64_t)tf, tf->vector);
 src/kernel/arch/x64/trap.c	P2I	cpu_locals[cpu].kernel_stack = (uint64_t)&__stack_top - (cpu * 64 * 1024) - 4096;
+# cp/wine2: #BP/#OF gates with DPL 3 -- a function pointer into the IDT, like every gate.
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(3, (uint64_t)exception_3, 0x08, 0xEE);
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(4, (uint64_t)exception_4, 0x08, 0xEE);
 src/kernel/arch/x64/trap.c	P2I	idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);
 src/kernel/arch/x64/trap.c	P2I	idt_set_gate(130, (uint64_t)exception_130, 0x08, 0x8E);
 src/kernel/arch/x64/trap.c	P2I	idt_set_gate(32, (uint64_t)exception_32, 0x08, 0x8E);

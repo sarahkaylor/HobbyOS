@@ -59,13 +59,20 @@ def main():
     for i, (_pos, before) in enumerate(sites, 1):
         # the two adds that advance past the frame, in this tail
         adv = before.rfind('add rsp, 264')
-        lea = before.rfind('lea rdi, [rsp + 296]')
+        # cp/wine2: the check now also saves rsi/rdx/r8-r11 (the user's live
+        # registers), so the frame pointer is frame+280 plus 8 per push below
+        # the frame: [rsp + 296] with 2 pushes, [rsp + 344] with 8.
+        leas = list(re.finditer(r"lea rdi, \[rsp \+ (\d+)\]", before))
+        lea = leas[-1].start() if leas else -1
+        lea_off = int(leas[-1].group(1)) if leas else -1
         early_lea = before.rfind('lea rdi, [rsp + 16]')
+        base = before.rfind('mov rax, [rsp')
+        pushes = len(re.findall(r'"\s+push [a-z0-9]+\\n"', before[base:lea])) if base >= 0 and lea > 0 else -1
         check(adv == -1,
               f"tail {i}: rsp is NOT advanced past the frame before the check")
-        check(lea > 0 and lea > early_lea,
-              f"tail {i}: the check gets [rsp + 296] (frame+280) from a rsp below the frame",
-              f"lea@+{lea} early_lea@+{early_lea}")
+        check(lea > 0 and lea > early_lea and lea_off == 280 + 8 * pushes,
+              f"tail {i}: the check gets frame+280 ([rsp + 280 + 8*pushes]) from a rsp below the frame",
+              f"lea@+{lea} off={lea_off} pushes={pushes} early_lea@+{early_lea}")
         # and the advance must still exist somewhere after the call site
         after = src[_pos:_pos + 400]
         check('add rsp, 264' in after and 'add rsp, 16' in after,
