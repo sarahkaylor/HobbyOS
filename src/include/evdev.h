@@ -31,6 +31,18 @@
  * which is exactly what QEMU's own absolute devices produce for a host
  * pixel, so the desktop's ceil-decode  px = ceil(abs * dim / EVDEV_ABS_MAX)
  * recovers the pixel exactly for every source.
+ *
+ * Relative motion (lane C4-x2, P4 mouselook)
+ * ------------------------------------------
+ * A PS/2 packet with motion ALSO reports its raw device deltas, right after
+ * the ABS pair: EV_REL REL_X = dx, REL_Y = -dy (evdev's +y is down; PS/2's
+ * is up), one row per nonzero axis.  They are the device's counts, never
+ * clamped: at a screen edge ABS stops changing but REL keeps arriving, which
+ * is what a game's mouselook (XI2 raw motion -> Wine WM_INPUT) needs.  QMP
+ * `input-send-event` "rel" events reach the guest exactly this way (QEMU
+ * routes them to the PS/2 mouse, the only relative device).  Consumers that
+ * track the cursor use ABS and may ignore REL_X/REL_Y; a consumer that uses
+ * REL must ignore that packet's ABS rows (XHOBBY.BIN's DDX does).
  */
 
 #define EVDEV_EV_SYN 0x00
@@ -39,6 +51,8 @@
 #define EVDEV_EV_ABS 0x03
 #define EVDEV_ABS_X  0x00
 #define EVDEV_ABS_Y  0x01
+#define EVDEV_REL_X  0x00
+#define EVDEV_REL_Y  0x01
 #define EVDEV_REL_WHEEL 0x08
 #define EVDEV_BTN_LEFT   0x110
 #define EVDEV_BTN_RIGHT  0x111
