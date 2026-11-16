@@ -73,3 +73,30 @@ no Wine harness was running (no `exportfs -ra` during their boot).
 `nfs_bench.sh` now holds `/tmp/cp-exports.lock` (outer) around its whole
 export lifetime; the same lock in run-wine-smoke.sh / run-wine-p2.sh (taken
 before the backup, released after the restore) closes the race for good.
+
+## 6. Regression guard (cp/nfsguard)
+
+The 32 KiB READ size has been fixed and then lost more than once, usually when
+an older `nfs.c` came back through a merge. `main` still has the 1344-byte
+clamp on every READ path, so a merge from `main` brings it back without a
+single conflict marker in some hunks. There are three layers of guard:
+
+| Layer | Runs | Catches |
+|---|---|---|
+| `nfs_proto_test` rows "guard: ..." | `make host_tests` | `NFS_READ_RSIZE_MAX` < 32 KiB, a reply buffer too small for a 32 KiB reply, `nfs_pick_rsize` no longer giving 32 KiB. Literal 32768s on purpose: a row written against the macro would still pass after the macro went back to 1344. |
+| `tools/cp/nfs/rsize_scan.py` | `make host_tests` (target `nfs_rsize_scan`) | R1 the max constant; R2 `if (rs > NFS_READ_RSIZE) rs = NFS_READ_RSIZE;`; R3 readahead calling `nfs_read_pipelined(..., NFS_READ_RSIZE)`; R4 no FSINFO, or `read_size` not set from `nfs_pick_rsize`; R5 no `NFS_RPC_RBIG` reply buffers; R6 `net.c` no longer sending fragments to `ipr_add`. `--selftest` re-applies each one to a temporary copy and must see the scan FAIL. |
+| `tools/cp/nfs/rsize_guard.sh [tree]` | boot, on a host whose nfsd offers 32 KiB (strix) | Behaviour, however it regressed: G1 the 64 MiB checksum matches; G2 `[NFS] fsinfo ... rsize=32768`; G3 no `rsize fallback`; G4 every sampled `[NFSPIPE] len=65536` row has `rs=32768 issued<=2`; G5 READ bytes / READ RPCs >= 16384 over the whole run. rc 1 = regression, rc 2 = could not judge. |
+
+The guards were checked both ways (2026-11-15):
+
+- `rsize_scan` passes on cp/nfsguard. On c635edce (before cp/nfs) and on `main`
+  it fails with every R1–R6 row and the exact clamp lines. Its selftest
+  detects all six mutations.
+- On the cp/nfs console log the `rsize_guard` judge
+  (`RSIZE_GUARD_CONSOLE=<log>`) passes: 2.0 RPCs per 64 KiB, 32768 bytes per
+  RPC. On the c635edce log it fails G2, G4 (`rs=1344 issued=49`) and G5 (1337
+  bytes per RPC).
+
+When a merge conflicts in `nfs.c`, `nfs.h` or `net.c`, keep the cp/nfs side of
+every READ-size line. Then run both guards before moving `cyberpunk`
+(docs/cyberpunk.md §7.4).

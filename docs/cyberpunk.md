@@ -862,6 +862,14 @@ then C2-wine2 last. Each merge is re-gated on the merged tree (all probes,
 - Local commits only, one phase per commit, repo message style; **no pushes**.
 - The integrator merges lanes and runs gates on the merged tree, including the
   Doom ELF and RimWorld regressions after any C1 merge.
+- **NFS READ size guard (binding; the 32 KiB fix has been lost to merges more
+  than once).** Any merge that touches `src/kernel/nfs.c`, `src/include/nfs.h`
+  or `src/kernel/net.c`, and above all any merge from `main` (which still has
+  the 1344-byte clamp), must pass `python3 tools/cp/nfs/rsize_scan.py` (also
+  part of `make host_tests`) and the boot guard `tools/cp/nfs/rsize_guard.sh`
+  on the merged tree before `cyberpunk` moves. Every integration gate batch runs
+  both. When a conflict lands in those files, keep the cp/nfs side; see
+  `docs/cp-nfs.md` §6.
 - Game files: never in a worktree, never in a commit.
 
 ---
@@ -893,6 +901,8 @@ then C2-wine2 last. Each merge is re-gated on the merged tree (all probes,
 | `tri_d3d11.exe`, `tri_d3d12.exe` | in-OS | `src/user/cp/` |
 | `vn_fence_bench` | in-OS | `src/user/cp/vn_fence_bench.c` |
 | `check-no-game-files` | host | `tools/cp/check-no-game-files.sh` |
+| `rsize_scan` (32 KiB NFS READ regressions R1–R6, with selftest) | host (`make host_tests`) | `tools/cp/nfs/rsize_scan.py` |
+| `rsize_guard` (2 READ RPCs per 64 KiB against a real nfsd) | boot | `tools/cp/nfs/rsize_guard.sh` |
 
 ### 8.3 Acceptance checklist (v1 "done")
 
