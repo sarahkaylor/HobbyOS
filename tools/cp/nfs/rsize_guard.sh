@@ -13,6 +13,9 @@
 #       back to 1344-byte READs)
 #   G4  every sampled "[NFSPIPE] len=65536" row has rs=32768 and issued<=2
 #       (at least one row must be present)
+#   G6  6 concurrent readers of reverse-order 4 KiB pages get the right
+#       bytes (a readahead window handed out mid-refill corrupted Wine's
+#       page-ins, 2026-11-16)
 #   G5  over all READ RPCs (the last "[NFSRTT] periodic" set): bytes / RPCs
 #       >= 16384.  1344-byte READs give ~1344; 32 KiB READs give ~32768.
 #
@@ -54,7 +57,18 @@ note() { echo "rsize_guard: $*"; }
 bad()  { echo "rsize_guard: FAIL $*"; fail=1; }
 
 # G1
-grep -aq '^\[NB\] done rc=0' "$C" || bad "G1 the 64 MiB read did not complete with a checksum match ($(grep -a '^\[NB\]' "$C" | tail -2 | tr '\n' ' '))"
+grep -aq '^\[NB\] done rc=0' "$C" || bad "G1 a bench phase failed (bad byte count or checksum) ($(grep -a '^\[NB\]' "$C" | tail -2 | tr '\n' ' '))"
+
+# G6 (cp/nfsfix): 6 concurrent readers of 4 KiB pages all saw the right bytes
+# rows are matched anywhere in a line: kernel output interleaves the console
+# (measured: "[NFSRA] hits=276 fills=[NB] conc6.child a=1 ... FAIL").
+CR="$(grep -aoE '\[NB\] conc6(\.child)? a=[0-9]+ pages=[0-9]+ bad=[0-9]+ first_bad=[-0-9]+ (ok|FAIL)' "$C")"
+if [ -z "$CR" ]; then bad "G6 no [NB] conc6 rows (the concurrent-reader phase did not run)"
+else
+  nc=$(grep -c '^\[NB\] conc6\.child ' <<<"$CR"); nbad=$(grep -c ' FAIL$' <<<"$CR")
+  if [ "$nc" -ne 6 ] || [ "$nbad" -ne 0 ]; then bad "G6 concurrent 4 KiB readers: $nc/6 reported, $nbad FAIL rows: $(grep ' FAIL$' <<<"$CR" | head -2 | tr '\n' ' ')"
+  else note "G6 6/6 concurrent readers, every 4 KiB page correct"; fi
+fi
 
 # G2 (and the can't-judge case)
 FS="$(grep -a '\[NFS\] fsinfo' "$C" | tail -1)"
