@@ -406,8 +406,11 @@ def main():
         ("nflk-rc-1", r"\[NFLK\][^\n]*rc=-1"),
         ("nfspipe-stall", r"\[NFSPIPE\] stall"))}
     log("NFS failure rows: " + " ".join(f"{k}={v}" for k, v in nfs_bad.items()))
-    if any(nfs_bad.values()):
-        notes.append("VOID: NFS failure rows present (pages may have been zero-filled)")
+    nfs_bad["nfshard-retry"] = len(re.findall(r"\[NFSHARD\] retry", ser.text))
+    # With the hard mount (cyberpunk 8b9fc2c9) a retry that succeeds is fine;
+    # only a READ that got no reply at all can have zero-filled a page.
+    if nfs_bad["rpc-no-reply"]:
+        notes.append("VOID: 'rpc: no reply from server' rows present (pages may have been zero-filled)")
     for n in notes:
         log("NOTE: " + n)
     for k in ("G1", "G2", "G3"):
