@@ -172,9 +172,28 @@ wineboot -i 8.6 s; free phase `dx=70 dy=30` exact.  With **no window manager**
 the clip does not hold (Wine never logs `clipping to`, the cursor leaves the
 window, `inside=0`), so the clip phase is only meaningful under IceWM in-OS.
 
-## 8. Results
+## 8. Results (strix KVM, up to 4 guests at once)
 
-(filled from the final gate run)
+| Row | Result | Evidence |
+|---|---|---|
+| Wine X build: 14 features ON, closure audit | PASS | `wine-x-build.txt` |
+| X libs + FreeType, 39 objects, GLIBC ≤ 2.27 | PASS | `x11-build.txt` |
+| kernel REL rows in-OS (no X): `rel_x=4050 rel_y=25`, ABS pinned | PASS | `relmouse-kernel.txt` |
+| X server, no Wine: screens=1, XINERAMA, Composite | PASS | `xprobe-x-server.txt` |
+| XI2 raw from the relative slave: `dx=4050 dy=25` with the cursor pinned | PASS | same |
+| RandR 1280x720 set, glass = (0,0)-(1279,719), refusal of an offset, restore | PASS | same + `xprobe-randr-1280x720.png` |
+| winex11 in-guest: Xinerama monitor, XRandR 1.4 handler, XComposite | PASS (diag1 rows) | `diag1-excerpt.txt` |
+| **Gate P4** G1 winecfg tabs / G2 notepad text / G3 WM_INPUT deltas | **not reached** | `run6-wineboot-hang.txt`, `run7-gui-hang.txt` |
+
+**Where Gate P4 stops.**  On the merged kernel (cyberpunk 8b9fc2c9: NFS hard
+mount, 0 GIVE UP rows) `wineboot -i` reads ~197 MB over NFS and then every Wine
+process parks with no READY work (wineboot.exe, services.exe, rundll32.exe;
+wineserver idle on its timer) — the same point in run6 and run7.  run7 then
+kills that tree, starts the desktop holder, and the GUI steps park the same way
+within ~3 minutes (four explorer.exe, services.exe, winedevice.exe parked;
+`rawinput.exe` printed only its first row).  This is the open lost-wakeup hang
+C1-k4 owns.  The harness, the probes and the X side are ready: the same
+`run-p4.sh` grades G1–G3 once Wine's processes stop parking.
 
 ## 9. Open items
 
