@@ -426,8 +426,15 @@ static int proc_release_mem_locked(struct process *q) {
      vm_arch_teardown() already leaves v2 mode for that case. */
   if (as) {
     int c = vm_arch_root_cpu(as->root_phys);
-    if (c >= 0 && c != (int)get_cpuid())
+    if (c >= 0 && c != (int)get_cpuid()) {
+      /* C1-k4: keep it attached, as the comment above promises.  The
+         pointer used to be dropped (q->as = 0 above) on this refusal: the
+         AS leaked, and a member still running in it (an exit_group whose
+         claim drain timed out) faulted "in=V1 live=0" in its own mapped
+         text -- C4-x2 P4 run 8, winedevice.exe. */
+      q->as = as;
       return 0;
+    }
     /* C1-thr: a CLONE_VFORK child still running in this AS (its parent
        group died under it) keeps it alive until it execs or exits. */
     for (int i = 1; i < MAX_PROCESSES; i++) {
@@ -597,6 +604,18 @@ static int proc_reap_parked_locked(void) {
         proc_release_mem_locked(q);
       q->state = PROC_STATE_FREE;
       n++;
+    } else if (q->state == PROC_STATE_FREE && !q->is_thread &&
+               (q->as || q->phys_block_idx >= 0)) {
+      /* C1-k4: a group reaped by reap_deliver_locked (its parent was
+         parked in wait4) goes FREE with its address space still attached,
+         and kept it until the slot was handed out again.  With cyclic pids
+         over 512 slots that is up to ~500 dead address spaces: measured
+         (linux_probe_exitgroup X6) a 5.3 GiB drop in free memory after 140
+         short-lived children.  Release it as soon as the slot is off every
+         CPU (proc_release_mem_locked still refuses while a CPU translates
+         through the root). */
+      if (proc_release_mem_locked(q))
+        n++;
     }
   }
   return n;
@@ -659,6 +678,27 @@ static void user_gs_write_live(uint64_t v) {
  * exit_group wait is tick-granular (design section 1): each RUNNING member is
  * preempted once by its own timer tick; parked members hold no claim and are
  * gone already. */
+static void resched_cpu(uint32_t c);
+
+/* C1-k4: send every CPU that runs a THREAD_DONE member of `grp` through
+ * schedule() now, so it stops executing (and translating through) the dying
+ * group.  Members were only preempted by their own next tick before. */
+static void group_kick_members(struct process *grp, struct process *self) {
+  uint32_t mask = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    int pid = cpu_current_pids[c];
+    if (pid <= 0 || pid >= MAX_PROCESSES || &proc_table[pid] == self)
+      continue;
+    if (proc_table[pid].tgid == grp->pid && c != get_cpuid())
+      mask |= 1u << c;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (mask & (1u << c))
+      resched_cpu(c);
+}
+
 static int group_claims_pending(struct process *grp, struct process *self) {
   int pending = 0;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
@@ -2760,14 +2800,26 @@ void process_exit(struct trap_frame *tf) {
   grp->live_threads = 0; /* this caller included: the whole group is dead */
   spinlock_release_irqrestore(&proc_lock, flags);
 
-  for (int waited = 0; group_claims_pending(grp, cur);) {
-    if (++waited > 32) {
-      uart_puts("[THREADS] exit_group claim drain timeout, group ");
-      print_int(grp->pid);
-      uart_puts("\n");
-      break;
+  /* C1-k4: kick the members' CPUs, and bound the drain by time (2 s), not
+     by 32 wakeups of this CPU -- a few ms under IPI traffic, while a member
+     running in user mode only left at its own tick.  Re-kick every ~50 ms. */
+  {
+    uint64_t t0 = timer_get_ms(), last = t0;
+    group_kick_members(grp, cur);
+    while (group_claims_pending(grp, cur)) {
+      uint64_t now = timer_get_ms();
+      if (now - t0 > 2000) {
+        uart_puts("[THREADS] exit_group claim drain timeout, group ");
+        print_int(grp->pid);
+        uart_puts("\n");
+        break;
+      }
+      if (now - last > 50) {
+        last = now;
+        group_kick_members(grp, cur);
+      }
+      safe_wfi();
     }
-    safe_wfi();
   }
 
   group_teardown(grp, (uint64_t)code);
@@ -3022,6 +3074,7 @@ void process_kill_group_sig(struct process *p, int sig) {
     if (current_pid_of_cpu((int)c) == kpid)
       resched_cpu(c);
   }
+  group_kick_members(p, 0); /* C1-k4: the members' CPUs too */
 
   /* SEC-9 (security-plan.md #9): close through file_close(), which claims
    * each fd slot atomically under proc_lock.  The old loop snapshotted
@@ -3219,8 +3272,11 @@ void process_exec_terminate_siblings(struct process *grp,
   grp->live_threads = 1; /* just the caller (the new single image) */
   spinlock_release_irqrestore(&proc_lock, flags);
 
+  group_kick_members(grp, caller); /* C1-k4 */
   for (int waited = 0; group_claims_pending(grp, caller);) {
-    if (++waited > 32) {
+    if ((waited & 7) == 7)
+      group_kick_members(grp, caller);
+    if (++waited > 256) {
       uart_puts("[P5] exec sibling claim drain timeout, group ");
       print_int(grp->pid);
       uart_puts("\n");

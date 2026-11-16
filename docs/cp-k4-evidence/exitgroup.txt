@@ -1,0 +1,19 @@
+# linux_probe_exitgroup, strix QEMU/KVM 8 vCPUs (qemu-slot, up to 4 guests on the host)
+# drain = '[THREADS] exit_group claim drain timeout' rows, v1 = 'in=V1' fault rows in the serial
+base-5eea3712 rc=1 [LP] FAIL X6 free memory before 11456 MiB, after 10144 MiB (drop 1312 MiB) [LP] done rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)  drain_timeouts=0 v1=0
+unfixed-b8d73938 rc=1 [LP] FAIL X6 free memory before 11456 MiB, after 6112 MiB (drop 5344 MiB) [LP] done rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)  drain_timeouts=2 v1=0
+kick+pointer-fix-only-b8d73938 rc=1 [LP] FAIL X6 free memory before 11456 MiB, after 6048 MiB (drop 5408 MiB) [LP] done rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)  drain_timeouts=0 v1=0
+## this commit (kick + pointer + reap release) on b8d73938
+[LP] PASS X1 exit_group with 7 writing threads x40 (0 bad)
+[LP] PASS X1 exit_group with 7 writing threads x40 (0 bad)
+[LP] PASS X2 SIGKILL with 7 writing threads x40 (0 bad)
+[LP] PASS X4 exit_group with 7 threads in a signal handler x20 (0 bad)
+[LP] PASS X5 no thread runs after its group was reaped x20 (0 bad)
+[LP] PASS X3 checker saw no foreign byte in its fresh pages (status 0x0)
+[LP] PASS X6 free memory before 11456 MiB, after 11424 MiB (drop 32 MiB)
+[LP] done rc=0
+exitgroup rc=0 [LP] done rc=0  drain=0 v1=0
+pipestorm rc=0 [LP] info R8 capacity=65536 [LP] info R12 signals=1187 [LP] done rc=0  drain=0 v1=0
+manythr rc=0 [LP] done rc=0  drain=0 v1=0
+execthr rc=0 [LP] done rc=0  drain=0 v1=0
+tlb rc=0 [LP] done rc=0  drain=0 v1=0
