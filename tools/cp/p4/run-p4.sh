@@ -29,6 +29,7 @@
 #      WINE_EXPORT (default /srv/nfs/cp-x2-p4), P4_OUT (default obj/p4/run),
 #      P4_WINEDEBUG (default err+all,fixme-all), QEMU_MEM (default 12288M),
 #      P4_BOOT_ONLY=1 (iteration aid: wineboot only; never a gate result),
+#      P4_DIAG=1 (iteration aid: xsmoke + wineboot with +x11drv,warn+module),
 #      P4_SKIP_BUILD=1 (reuse obj/ and disk.img from the previous run).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -62,7 +63,7 @@ if [ -z "${P4_SKIP_BUILD:-}" ]; then
            -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding
            -mno-red-zone -nostdinc -isystem "$RESINC" -mcmodel=large)
   clang "${UCFLAGS[@]}" -DWINE_EXPORT="\"$EXPORT\"" -DP4_WINEDEBUG="\"$WDBG\"" \
-    ${P4_BOOT_ONLY:+-DP4_BOOT_ONLY=1} -c tools/cp/p4/winep4.c -o "$OUT/winep4.o" || die "winep4.c"
+    ${P4_BOOT_ONLY:+-DP4_BOOT_ONLY=1} ${P4_DIAG:+-DP4_DIAG=1} -c tools/cp/p4/winep4.c -o "$OUT/winep4.o" || die "winep4.c"
   ld.lld -T src/user/linker.ld -e _start -o "$OUT/winep4.elf" "$OUT/winep4.o" obj/intel/libc.a || die "ld winep4"
   llvm-objcopy -O binary "$OUT/winep4.elf" "$OUT/winep4.bin"
   WINE_BUILD="$(dirname "$(dirname "$(dirname "$STAGE")")")" \
@@ -91,6 +92,8 @@ sudo -n mkdir -p "$EXPORT/WINE" "$EXPORT/X11" "$EXPORT/P4" && MADE_DIR=1
 sudo -n rsync -a --delete "$STAGE/" "$EXPORT/WINE/" || die "rsync wine"
 sudo -n rsync -a --delete "$X11STAGE/" "$EXPORT/X11/" || die "rsync x11"
 sudo -n cp "$OUT/rawinput.exe" "$EXPORT/P4/rawinput.exe"
+XSMOKE="$(dirname "$(dirname "$(dirname "$X11STAGE")")")/xsmoke/xsmoke.elf"
+[ -f "$XSMOKE" ] && sudo -n cp "$XSMOKE" "$EXPORT/P4/xsmoke.elf"
 sudo -n chmod -R a+rX "$EXPORT"
 bash tools/cp/exports.sh add "$EXPORT" || die "exports.sh add $EXPORT"
 sudo -n exportfs -v | grep -F "$EXPORT" | sed 's/^/== exported: /'

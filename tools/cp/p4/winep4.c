@@ -83,6 +83,7 @@ static char *envp[] = {
   (char *)"USER=root",
   (char *)"PATH=/CP/WINE/bin",
   (char *)"LANG=C",
+  (char *)"XSMOKE_HOLD_MS=3000",   /* the diagnostic X client (P4_DIAG) */
   0
 };
 
@@ -151,6 +152,23 @@ int main(void) {
   }
   pc("[P4] mount "); pc(src); pc(" -> " MNT " ok\n");
 
+#ifdef P4_DIAG
+  /* Diagnostic boot (iteration aid, never a gate result): can a compat
+     process open :0 at all (tools/cp/x11/xsmoke.c, DT_RPATH /CP/X11/lib),
+     and why does winex11 not load (+x11drv, warn+module during wineboot)? */
+  char *a_xs[] = { (char *)"xsmoke", 0 };
+  step("xsmoke", "/CP/P4/xsmoke.elf", a_xs, 120);
+  for (int i = 0; envp[i]; i++)
+    if (envp[i][0] == 'W' && envp[i][4] == 'D' && envp[i][5] == 'E' && envp[i][6] == 'B')
+      envp[i] = (char *)"WINEDEBUG=err+all,warn+module,+x11drv,+winediag";
+  char *a_bootd[] = { (char *)"wineboot", (char *)"-i", 0 };
+  step("wineboot", "/CP/WINE/bin/wine", a_bootd, 600);
+  quiesce("wineboot", 900);
+  char *a_kd[] = { (char *)"wineserver", (char *)"-k", 0 };
+  step("kill", "/CP/WINE/bin/wineserver", a_kd, 60);
+  pc("[P4] done\n");
+  return 0;
+#endif
   char *a_boot[] = { (char *)"wineboot", (char *)"-i", 0 };
   step("wineboot", "/CP/WINE/bin/wine", a_boot, 900);
   quiesce("wineboot", P4_BOOT_QUIESCE_S);

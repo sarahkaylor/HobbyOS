@@ -399,6 +399,14 @@ def main():
             except subprocess.TimeoutExpired:
                 proc.kill()
     ser.poll()
+    # NFS transport failures zero-fill pages (C3-nfs2): such a run is void.
+    nfs_bad = {k: len(re.findall(rx, ser.text)) for k, rx in (
+        ("rpc-no-reply", r"rpc: no reply from server"),
+        ("nflk-rc-1", r"\[NFLK\][^\n]*rc=-1"),
+        ("nfspipe-stall", r"\[NFSPIPE\] stall"))}
+    log("NFS failure rows: " + " ".join(f"{k}={v}" for k, v in nfs_bad.items()))
+    if any(nfs_bad.values()):
+        notes.append("VOID: NFS failure rows present (pages may have been zero-filled)")
     for n in notes:
         log("NOTE: " + n)
     for k in ("G1", "G2", "G3"):
