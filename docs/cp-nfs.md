@@ -235,6 +235,18 @@ one malloc'd buffer, SHA-256 against the host's (`rsize_guard.sh` G8).
   and read whole.  Tests: `nfs_proto_test` (fattr3 times + a 5 GiB size),
   kernel `nfs_test` (atime/ctime).
 
+## 12. Where lost READ replies go (cp/nfs2, net.c counters)
+
+Gate P2 on the item-1 commit stalled 544 times with ONE READ in flight
+system-wide (`[NFSPIPE] stall inflight=1 ... budget=32768`), about one per
+MiB; the single-reader bench never stalls.  So it is not RX-queue overflow.
+`net.c` now counts why reassembly drops an incomplete datagram
+(`ipr_drop_timeout`: a fragment never came; `ipr_drop_evict`/`_full`: all 8
+slots busy; `ipr_drop_bad`) and complete UDP datagrams no socket took
+(`udp_nosock`, `udp_dgram_full`); `nfs_perf_dump` prints them as one
+`[NFSNET]` row with the stall count.  A minimal diff (counters only, no
+behaviour change), in its own commit.
+
 ## 14. nfs_bench.sh on QEMU slots (cp/nfs2)
 
 `nfs_bench.sh` (and so `rsize_guard.sh`) no longer holds

@@ -212,6 +212,37 @@ void nfs_perf_dump(const char *why) {
     uart_puts(c);
     uart_puts("\n");
   }
+  {
+    /* cp/nfs2: where lost READ replies go (net.c counters).  frags = IP
+       fragments into reassembly, done = datagrams rebuilt; drops by reason
+       (timeout: a fragment never came; evict/full: all 8 slots were busy;
+       bad: malformed); nosock/dgfull: complete UDP datagrams no socket
+       took. */
+    extern volatile uint32_t ipr_done, ipr_frags, ipr_drop_bad, ipr_drop_timeout,
+        ipr_drop_evict, ipr_drop_full, udp_nosock, udp_dgram_full;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[NFSNET] frags=");
+    kl_i(&kl, (long)ipr_frags);
+    kl_s(&kl, " done=");
+    kl_i(&kl, (long)ipr_done);
+    kl_s(&kl, " drop_timeout=");
+    kl_i(&kl, (long)ipr_drop_timeout);
+    kl_s(&kl, " drop_evict=");
+    kl_i(&kl, (long)ipr_drop_evict);
+    kl_s(&kl, " drop_full=");
+    kl_i(&kl, (long)ipr_drop_full);
+    kl_s(&kl, " drop_bad=");
+    kl_i(&kl, (long)ipr_drop_bad);
+    kl_s(&kl, " nosock=");
+    kl_i(&kl, (long)udp_nosock);
+    kl_s(&kl, " dgfull=");
+    kl_i(&kl, (long)udp_dgram_full);
+    kl_s(&kl, " stalls=");
+    kl_i(&kl, (long)nfs_pipe_stalls);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
   if (nfs_ra.hits | nfs_ra.fills) {
     /* cp/nfs2: hits/fills/saved_kib keep their old meaning (fills now counts
        windows loaded); the rest says where the READ bytes went. */
