@@ -876,6 +876,19 @@ void vm_arch_unmap(struct addr_space *as, uint64_t va) {
   x64_invlpg(va);
 }
 
+/* C1-k4: see vm.h. */
+uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va) {
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
+  if (!pte)
+    return 0;
+  uint64_t leaf = *pte;
+  if (!(leaf & X64_PTE_P))
+    return 0;
+  *pte = 0;
+  x64_invlpg(va);
+  return (leaf & X64_PTE_SHARED) ? 0 : (leaf & X64_OA_MASK);
+}
+
 void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot) {
   uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
   if (!pte)
@@ -943,18 +956,52 @@ void vm_arch_reload_cr3(struct addr_space *as) {
   __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
 }
 
-/* Shootdown IPI (vector 0x82, OQ5): sent only when the AS is claimed on
- * another CPU (cpu_current_pids scan).  The handler reloads CR3 when this
- * CPU runs the target AS; the sender waits for acks with a bounded spin.
- * Coarse but correct; page-granular invlpg is a later optimization. */
-static volatile uint64_t x64_shootdown_root;
-static volatile int x64_shootdown_acks;
+/* Shootdown IPI (vector 0x82, OQ5).
+ *
+ * C1-k4: made reliable enough that callers may free frames after it returns.
+ * The old version shared one ack counter between concurrent senders, gave up
+ * after a bounded spin, could lose an IPI written while the ICR was busy,
+ * and was called by nothing on the munmap/mprotect path.  Now:
+ *  - senders serialise on x64_tlb_lock; a CPU spinning for that lock (or
+ *    waiting for its own acks) services its own pending flush, so two
+ *    senders that target each other cannot deadlock;
+ *  - each target has its own pending word, cleared by that CPU after it
+ *    reloaded CR3 (only when CR3 is the target root: any other CPU switched
+ *    AS since, and a CR3 load already dropped the old non-global entries);
+ *  - targets are every CPU whose CR3 bookkeeping (v2_active_root) is the
+ *    root OR whose claimed process belongs to the AS;
+ *  - the ICR is written only when idle, an unacknowledged IPI is re-sent
+ *    every ~1 ms of TSC, and after ~2 s of TSC the sender reports
+ *    [TLBTIMEOUT] and goes on (a wedged CPU must not wedge the machine).
+ * The caller holds no spinlock: a target spinning on one with IRQs off
+ * could not take the IPI. */
+static volatile uint64_t x64_tlb_root;
+static volatile uint32_t x64_tlb_pending[MAX_CPUS];
+static volatile uint32_t x64_tlb_lock;
+static volatile uint64_t x64_tlb_timeouts;
 
 static void x64_send_ipi(uint32_t cpu, uint32_t vector) {
   volatile uint32_t *icr_hi = (volatile uint32_t *)phys_to_virt(0xFEE00000 + 0x310);
   volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00000 + 0x300);
   *icr_hi = cpu << 24; /* APIC id == CPU index (smp.c convention) */
   *icr_lo = vector;    /* fixed delivery, physical destination, edge */
+}
+
+static inline uint64_t x64_rdtsc(void) {
+  uint32_t lo, hi;
+  __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+  return ((uint64_t)hi << 32) | lo;
+}
+
+/* Wait (bounded) for the ICR delivery-status bit: a write while it is set
+   is lost (GB-207 measured the first injection never reaching cpu1). */
+static void x64_icr_wait_idle(void) {
+  volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00000 + 0x300);
+  for (int spin = 0; spin < 100000; spin++) {
+    if ((*icr_lo & (1u << 12)) == 0)
+      return;
+    __asm__ volatile("pause");
+  }
 }
 
 #ifdef PANIC_IPI_TEST
@@ -964,67 +1011,115 @@ static void x64_send_ipi(uint32_t cpu, uint32_t vector) {
    0x81 broadcast can leave a write pending, and a write while busy is lost
    (measured: the first injection never reached cpu1). */
 void x64_send_test_ipi(uint32_t cpu, uint32_t vector) {
-  volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00000 + 0x300);
-  for (volatile int spin = 0; spin < 1000000; spin++) {
-    if ((*icr_lo & (1u << 12)) == 0)
-      break;
-    __asm__ volatile("pause");
-  }
+  x64_icr_wait_idle();
   x64_send_ipi(cpu, vector);
 }
 #endif
 
+/* Settle this CPU's owed flush, if any.  Safe from any context. */
+static void x64_tlb_service(void) {
+  uint32_t me = get_cpuid();
+  if (me >= MAX_CPUS || !__atomic_load_n(&x64_tlb_pending[me], __ATOMIC_ACQUIRE))
+    return;
+  uint64_t root = __atomic_load_n(&x64_tlb_root, __ATOMIC_ACQUIRE);
+  uint64_t cr3;
+  __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+  if (root && (cr3 & X64_OA_MASK) == root)
+    __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+  __atomic_store_n(&x64_tlb_pending[me], 0, __ATOMIC_RELEASE);
+}
+
 void vm_arch_shootdown(struct addr_space *as) {
   if (!as || !as->root_phys)
     return;
+  uint64_t root = as->root_phys;
   uint32_t me = get_cpuid();
-  int targets = 0;
-  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+  uint32_t ncpu = smp_init_count();
+  if (ncpu > MAX_CPUS)
+    ncpu = MAX_CPUS;
+  /* The leaf stores the caller made must be visible before we read which
+     CPUs translate through the root (a CPU switching in after this read
+     loads CR3 afterwards and walks the new tables). */
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+  while (__atomic_exchange_n(&x64_tlb_lock, 1, __ATOMIC_ACQUIRE)) {
+    x64_tlb_service();
+    __asm__ volatile("pause");
+  }
+  uint32_t targets = 0;
+  for (uint32_t c = 0; c < ncpu; c++) {
     if (c == me)
       continue;
-    extern int current_pid_of_cpu(uint32_t cpu);
-    int pid = current_pid_of_cpu(c);
-    if (pid <= 0)
-      continue;
-    struct process *p = process_get_pcb(pid);
-    if (p && process_group(p)->as == as)
-      targets++;
+    int hit = (__atomic_load_n(&v2_active_root[c], __ATOMIC_ACQUIRE) == root);
+    if (!hit) {
+      extern int current_pid_of_cpu(uint32_t cpu);
+      int pid = current_pid_of_cpu(c);
+      if (pid > 0) {
+        struct process *p = process_get_pcb(pid);
+        if (p && process_group(p) && process_group(p)->as == as)
+          hit = 1;
+      }
+    }
+    if (hit)
+      targets |= 1u << c;
   }
-  if (!targets)
+  if (!targets) {
+    __atomic_store_n(&x64_tlb_lock, 0, __ATOMIC_RELEASE);
     return;
-  x64_shootdown_root = as->root_phys;
-  x64_shootdown_acks = 0;
-  for (uint32_t c = 0; c < MAX_CPUS; c++) {
-    if (c == me)
-      continue;
-    extern int current_pid_of_cpu(uint32_t cpu);
-    int pid = current_pid_of_cpu(c);
-    if (pid <= 0)
-      continue;
-    struct process *p = process_get_pcb(pid);
-    if (p && process_group(p)->as == as)
+  }
+  __atomic_store_n(&x64_tlb_root, root, __ATOMIC_RELEASE);
+  for (uint32_t c = 0; c < ncpu; c++)
+    if (targets & (1u << c))
+      __atomic_store_n(&x64_tlb_pending[c], 1, __ATOMIC_RELEASE);
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+  for (uint32_t c = 0; c < ncpu; c++)
+    if (targets & (1u << c)) {
+      x64_icr_wait_idle();
       x64_send_ipi(c, 0x82);
-  }
-  for (volatile int spin = 0; spin < 10000000; spin++) {
-    if (x64_shootdown_acks >= targets)
+    }
+  uint64_t t0 = x64_rdtsc(), last = t0;
+  for (;;) {
+    uint32_t left = 0;
+    for (uint32_t c = 0; c < ncpu; c++)
+      if ((targets & (1u << c)) &&
+          __atomic_load_n(&x64_tlb_pending[c], __ATOMIC_ACQUIRE))
+        left |= 1u << c;
+    if (!left)
       break;
+    uint64_t now = x64_rdtsc();
+    if (now - t0 > 6000000000ULL) {
+      for (uint32_t c = 0; c < ncpu; c++)
+        if (left & (1u << c))
+          __atomic_store_n(&x64_tlb_pending[c], 0, __ATOMIC_RELEASE);
+      if (x64_tlb_timeouts++ < 8) {
+        /* No spinlock is held here (the caller's contract), so the normal
+           console path is safe (the panic sink is for paths that stop). */
+        extern void uart_puts(const char *s);
+        extern void uart_print_hex(uint64_t v);
+        uart_puts("[TLBTIMEOUT] shootdown root=");
+        uart_print_hex(root);
+        uart_puts(" unacked cpus=");
+        uart_print_hex(left);
+        uart_puts("\n");
+      }
+      break;
+    }
+    if (now - last > 3000000ULL) { /* ~1 ms: re-send to the laggards */
+      last = now;
+      for (uint32_t c = 0; c < ncpu; c++)
+        if (left & (1u << c)) {
+          x64_icr_wait_idle();
+          x64_send_ipi(c, 0x82);
+        }
+    }
+    __asm__ volatile("pause");
   }
-  x64_shootdown_root = 0;
+  __atomic_store_n(&x64_tlb_root, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&x64_tlb_lock, 0, __ATOMIC_RELEASE);
 }
 
 /* Called from the vector 0x82 handler (trap.c): never schedules, never
  * touches kernel-mode task state beyond a CR3 reload of the target AS. */
-void vm_x64_shootdown_handler(void) {
-  if (!x64_shootdown_root)
-    return;
-  struct process *cur = current_process();
-  if (cur && process_group(cur)->as &&
-      process_group(cur)->as->root_phys == x64_shootdown_root) {
-    uint64_t cr3 = x64_shootdown_root;
-    __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
-  }
-  x64_shootdown_acks++;
-}
+void vm_x64_shootdown_handler(void) { x64_tlb_service(); }
 
 /* P2.2 (S2): hand this CPU back to the kernel PML4.  Cheap no-op when
    already there.  Required (a) when a CPU stops running a v2 AS (v1

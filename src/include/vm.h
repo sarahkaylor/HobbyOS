@@ -669,6 +669,13 @@ uint64_t vm_arch_root_alloc(struct addr_space *as);
 int vm_arch_map(struct addr_space *as, uint64_t va, uint64_t phys,
                 uint16_t prot, uint16_t kind);
 void vm_arch_unmap(struct addr_space *as, uint64_t va);
+/* C1-k4: clear the leaf and flush it locally, but hand the private frame
+ * back (0 for an absent or SHARED-marked leaf) instead of freeing it: the
+ * caller frees it after vm_arch_shootdown(). */
+uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va);
+/* C1-k4: munmap/mremap cores with the cross-CPU flush (vm.c). */
+void vm_zap_span(struct addr_space *as, uint64_t base, uint64_t len);
+int vm_unmap_span(struct addr_space *as, uint64_t base, uint64_t len);
 void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot);
 /* 0 + *leaf when a page mapping is present; -1 when absent. */
 int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
