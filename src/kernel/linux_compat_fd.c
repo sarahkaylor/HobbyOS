@@ -62,6 +62,28 @@
 #include "tmpfs.h" /* cp/sys: bind(2) socket inodes in the compat /tmp */
 #include "unix.h"  /* cp/sys: K_UNIX_SUN_LEN / K_UNIX_PATH_MAX */
 
+/* C1-k4: AF_NETLINK / NETLINK_ROUTE (linux_compat_netlink.c). */
+extern int linux_netlink_is(struct process *p, int fd);
+extern int linux_netlink_socket(struct process *p, int type, int protocol);
+extern int linux_netlink_bind(struct process *p, int fd, const uint8_t *sa, int len);
+extern void linux_netlink_name(struct process *p, int fd, int self, uint8_t *sa);
+extern int linux_netlink_send(struct process *p, int fd, const uint8_t *req, int len);
+
+/* Write a 12-byte sockaddr_nl to (usa, *ulenp) the way getsockname does. */
+static int l_nl_name_out(struct process *p, int fd, int self, uint64_t usa,
+                         uint64_t ulenp) {
+  if (!usa || !ulenp) return 0;
+  uint32_t ulen = 0;
+  if (l_copy_from_user(p, &ulen, ulenp, 4) != 0) return -EFAULT;
+  uint8_t sa[12];
+  linux_netlink_name(p, fd, self, sa);
+  uint32_t n = ulen < 12 ? ulen : 12;
+  if (n && l_copy_to_user(p, usa, sa, n) != 0) return -EFAULT;
+  uint32_t full = 12;
+  if (l_copy_to_user(p, ulenp, &full, 4) != 0) return -EFAULT;
+  return 0;
+}
+
 /* close_range(2) flags (Linux values; not syscall numbers, so local). */
 #define L_CLOSE_RANGE_UNSHARE 0x2u
 #define L_CLOSE_RANGE_CLOEXEC 0x4u
@@ -168,6 +190,8 @@ static int l_fd_socket(struct process *p, struct trap_frame *tf) {
   int domain = (int)l_argi(tf, 0);
   int type = (int)l_argi(tf, 1);
   int protocol = (int)l_argi(tf, 2);
+  if (domain == 16 /* AF_NETLINK */)
+    return l_ret(tf, linux_netlink_socket(p, type, protocol));
   return l_ret(tf, file_socket(p, domain, type, protocol));
 }
 
@@ -249,6 +273,11 @@ static int l_fd_bind(struct process *p, struct trap_frame *tf) {
   uint64_t usa = l_arg(tf, 1);
   int salen = (int)l_argi(tf, 2);
   if (salen < 2) return l_ret(tf, -EINVAL);
+  if (linux_netlink_is(p, fd)) { /* C1-k4 */
+    uint8_t nsa[12] = {0};
+    if (salen < 12 || l_copy_from_user(p, nsa, usa, 12) != 0) return l_ret(tf, -EINVAL);
+    return l_ret(tf, linux_netlink_bind(p, fd, nsa, salen));
+  }
   if (salen > K_UNIX_SUN_LEN) return l_ret(tf, file_bind_user(p, fd, usa, salen));
   uint8_t ksa[K_UNIX_SUN_LEN + 1];
   int klen = salen;
@@ -354,6 +383,8 @@ static int l_fd_connect(struct process *p, struct trap_frame *tf) {
 
 /* getsockname(51) / getpeername(52): (fd, addr, socklen_t *lenp). */
 static int l_fd_sockname(struct process *p, struct trap_frame *tf, int peer) {
+  if (linux_netlink_is(p, (int)l_argi(tf, 0))) /* C1-k4 */
+    return l_ret(tf, l_nl_name_out(p, (int)l_argi(tf, 0), !peer, l_arg(tf, 1), l_arg(tf, 2)));
   return l_ret(tf, file_sockname_user(p, (int)l_argi(tf, 0), peer,
                                       l_arg(tf, 1), l_arg(tf, 2)));
 }
@@ -384,6 +415,7 @@ static int l_fd_setsockopt(struct process *p, struct trap_frame *tf) {
   int64_t len = l_argi(tf, 4);
 
   if (len < 0) return l_ret(tf, -EINVAL);
+  if (linux_netlink_is(p, fd)) return l_ret(tf, 0); /* C1-k4: SO_RCVBUF, NETLINK_* */
   uint8_t kbuf[L_SOCKOPT_MAX];
   int klen = (int)len;
   if (klen > L_SOCKOPT_MAX) klen = L_SOCKOPT_MAX;
@@ -444,6 +476,13 @@ static int l_fd_sendto(struct process *p, struct trap_frame *tf) {
   int64_t dlen = l_argi(tf, 5);
 
   if (len < 0) return l_ret(tf, -EINVAL);
+  if (linux_netlink_is(p, fd)) { /* C1-k4: a request to the kernel */
+    static uint8_t nreq[4096];
+    int n = len > (int64_t)sizeof nreq ? (int)sizeof nreq : (int)len;
+    if (n > 0 && l_copy_from_user(p, nreq, ubuf, (uint64_t)n) != 0) return l_ret(tf, -EFAULT);
+    (void)udest; (void)dlen;
+    return l_ret(tf, linux_netlink_send(p, fd, nreq, n));
+  }
   if (flags & ~(K_MSG_DONTWAIT | K_MSG_NOSIGNAL)) return l_ret(tf, -EOPNOTSUPP);
   if (udest != 0 && dlen > 0) return l_ret(tf, -EOPNOTSUPP);
   if (len > 0 && !l_user_ok(p, ubuf, (uint64_t)len, 0))
@@ -495,7 +534,8 @@ static int l_fd_recvfrom(struct process *p, struct trap_frame *tf) {
   if (r >= 0 && usrc != 0 && ulenp != 0) {
     /* Best effort, like Linux for a connected socket: the peer's name.  A
      * socket with no peer leaves the address untouched. */
-    (void)file_sockname_user(p, fd, 1, usrc, ulenp);
+    if (linux_netlink_is(p, fd)) (void)l_nl_name_out(p, fd, 0, usrc, ulenp); /* C1-k4 */
+    else (void)file_sockname_user(p, fd, 1, usrc, ulenp);
   }
   return l_ret(tf, r);
 }
@@ -510,9 +550,41 @@ static int l_msg_common(struct process *p, struct trap_frame *tf, int recv) {
 
   if (!l_user_ok(p, umsg, sizeof(struct k_msghdr), 1))
     return l_ret(tf, -EFAULT);
+  int nl = linux_netlink_is(p, fd);
+  struct k_msghdr mh;
+  if (nl && l_copy_from_user(p, &mh, umsg, sizeof mh) != 0) return l_ret(tf, -EFAULT);
+  if (nl && !recv) { /* C1-k4: gather the request datagram, answer it */
+    static uint8_t nreq[4096];
+    int n = 0;
+    for (uint64_t i = 0; i < mh.iovlen && i < 64; i++) {
+      uint64_t iv[2];
+      if (l_copy_from_user(p, iv, mh.iov + i * 16, 16) != 0) return l_ret(tf, -EFAULT);
+      uint64_t take = iv[1];
+      if (take > sizeof nreq - (uint64_t)n) take = sizeof nreq - (uint64_t)n;
+      if (take && l_copy_from_user(p, nreq + n, iv[0], take) != 0) return l_ret(tf, -EFAULT);
+      n += (int)take;
+    }
+    return l_ret(tf, linux_netlink_send(p, fd, nreq, n));
+  }
+  if (nl && recv) {
+    /* the unix engine refuses msg_name/msg_namelen (connected sockets
+       only): hide them for the call and answer the name ourselves below */
+    uint64_t z[2] = {0, 0};
+    (void)l_copy_to_user(p, umsg, z, 12);
+  }
   int r = recv ? file_recvmsg(p, fd, umsg, flags)
                : file_sendmsg(p, fd, umsg, flags);
+  if (nl && recv)
+    (void)l_copy_to_user(p, umsg, &mh, 12); /* name + namelen back */
   if (r == -2) return l_park(p, tf);
+  if (nl && recv && mh.name && r >= 0) {
+    uint8_t sa[12];
+    linux_netlink_name(p, fd, 0, sa);
+    uint32_t n = mh.namelen < 12 ? mh.namelen : 12;
+    if (n) (void)l_copy_to_user(p, mh.name, sa, n);
+    uint32_t full = 12;
+    (void)l_copy_to_user(p, umsg + 8, &full, 4);
+  }
   return l_ret(tf, r);
 }
 

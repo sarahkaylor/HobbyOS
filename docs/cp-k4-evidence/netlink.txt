@@ -1,0 +1,14 @@
+# linux_probe_netlink, strix QEMU/KVM.  base = cyberpunk b8d73938, lane = cp-k4b
+## Linux 7.0 (strix host): 5/5 PASS (N3 ext=192.168.0.123)
+base-b8d73938 rc=1 [LP] FAIL N1 netlink socket fd=-1 errno=97 bind=-1 getsockname=-1 family=0 [LP] FAIL N2 if_nameindex=NULL count=0 lo=0 [LP] FAIL N3 getifaddrs=-1 lo=0 ext= [LP] FAIL N4 RTM_GETROUTE dump default=0 done=0 sender_ok=1 [LP] FAIL N5 idle subscription poll=-2 recv=-2 errno=0 [LP] done rc=5 t3_linux_probe: FAIL — netlink never printed '[LP] done rc=0' (tier rc=1) 
+## lane
+[LP] PASS N1 netlink socket fd=3 errno=0 bind=0 getsockname=0 family=16
+[LP] PASS N2 if_nameindex=ok count=2 lo=1
+[LP] PASS N3 getifaddrs=0 lo=1 ext=10.0.2.15
+[LP] PASS N4 RTM_GETROUTE dump default=1 done=1 sender_ok=1
+[LP] PASS N5 idle subscription poll=0 recv=-1 errno=11
+[LP] done rc=0
+
+# Why: Wine 11 dlls/nsiproxy.sys/ndis.c update_if_table() calls if_nameindex() and dereferences the result unchecked;
+# glibc 2.31 if_nameindex() is a NETLINK_ROUTE client and returns NULL when socket(AF_NETLINK) fails.
+# nsiproxy.so+0x7730: call if_nameindex@plt; +0x7736: mov (%rax),%r15d  <- the 'VA=0 PC=0x108074F736' faults (load base 0x1080748000)

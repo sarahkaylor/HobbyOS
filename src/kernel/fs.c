@@ -4688,6 +4688,37 @@ int file_accept_user(struct process *p, int fd, uint64_t usa, uint64_t ulenp,
   return r;
 }
 
+/* C1-k4 (linux_compat_netlink.c): the global file index behind `fd`. */
+int fs_fd_gfd(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  int g = p->open_fds[fd];
+  return (g >= 0 && g < MAX_GLOBAL_FILES) ? g : -1;
+}
+
+/* C1-k4: the AF_UNIX endpoint a global file holds (NULL otherwise). */
+struct usock *fs_gfd_usock(int gfd, int *end) {
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
+  struct file *f = &global_file_table[gfd];
+  if (f->type != FILE_TYPE_UNIXSOCK) return 0;
+  if (end) *end = f->usock.end;
+  return f->usock.ptr;
+}
+
+/* C1-k4: take `fd` out of the group's table WITHOUT closing its file (the
+ * caller now owns that reference and closes it with fs_close_global). */
+int fs_detach_fd(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  uint64_t fl = spinlock_acquire_irqsave(&proc_lock);
+  int g = p->open_fds[fd];
+  p->open_fds[fd] = -1;
+  fd_cloexec_clear(p->fd_cloexec, fd);
+  if (g >= 0 && p->num_open_fds > 0) p->num_open_fds--;
+  spinlock_release_irqrestore(&proc_lock, fl);
+  return g;
+}
+
 int file_sockname_user(struct process *p, int fd, int peer, uint64_t usa,
                        uint64_t ulenp) {
   if (!usa || !ulenp) return -EFAULT;
