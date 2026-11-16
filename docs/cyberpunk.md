@@ -904,8 +904,44 @@ order: C2-wine2's CoW, truncate and mremap work; C1-thr; C2-exec;
 C1-thr2/thr3; cp/nfs (32 KiB READs); cp/nfsguard; cp/nfsfix (the readahead
 race); then C2-wine2 (the P2 harness, winprobe and the trap/fs fixes). Each
 merge was re-gated on strix. The next wave's candidates are the open items in
-§0.2 item 18, P3's remaining items (NFS > 4 GiB, prefix on ext2), and P4/P5. Still held: C6-venus
-(needs the user's `gpu_abi.c` decision); C4-x's probe needs `cmake` on strix.
+§0.2 item 18, P3's remaining items (NFS > 4 GiB, prefix on ext2), and P4/P5; they are wave 4
+(§7.2d). Still held: C6-venus (needs the user's `gpu_abi.c` decision).
+
+### 7.2d Wave 4 (v4, 2026-11-16) — P3, P4 and P5, and the stability debt
+
+Wave 4 starts from `cyberpunk` @ d7a63823 (Gate P2 passed). Gate host is
+still `strix` (§7.2c rules: lanes under `strix:~/cp/lanes/`, every boot under
+`flock /tmp/cp-qemu.lock`, every build with `MAKEFLAGS=-j16`, the §7.4
+`/etc/exports` lock and the NFS READ size guard). `cmake`, `meson` and `ninja`
+exist on strix in `~/.local/bin`, which a non-login ssh shell does not put on
+`PATH`; the "x11 probe needs cmake" item of §7.2c was that, not a missing
+package.
+
+Two facts shape the wave:
+- **Every Wine boot pays the NFS page-in.** P2 read 1.66 GB for about 200 MB of
+  Wine, and the QEMU lock serialises all five lanes' boots, so the per-file
+  readahead fix (C3-nfs2) speeds up every other lane. It merges first.
+- **The staged Wine was built `--without-x --without-vulkan --without-freetype`**
+  (`tools/cp/build-wine.sh` `WITHOUT=`). P4 and P5 need a second build with
+  X11, the X extensions, FreeType and Vulkan. C4-x2 owns that build; it goes to
+  a new work dir, so the P2 stage in `strix:~/cp/wine-build/` stays untouched.
+
+| Lane | Scope (milestone) | Owns | Must not touch |
+|---|---|---|---|
+| **C3-nfs2** | P3 NFS + the page-in cost: a readahead window per file (keyed by file handle, a small LRU), keeping the invalidate-before-refill rule of §0.2 item 18 per window; 64-bit offsets everywhere and files > 4 GiB; single `read()`s up to ~172 MB; `fstat` mtime on NFS fds; symlinks in intermediate path components. Gate: P3's "> 4 GiB file over NFS matches the host's sha256", both NFS guards, and P2's page-in down from 1.66 GB | `src/kernel/nfs.c`, `src/include/nfs.h`, `tools/cp/nfs/`, `src/user/cpnfsbench.c`, `docs/cp-nfs.md` | `net.c` except a reported minimal diff |
+| **C3-pfx** | P3 prefix: the Wine prefix on ext2 survives a reboot (`wineboot -i` in boot 1, `wine cmd /c echo hello` with no re-init in boot 2, `e2fsck -fn` clean); `VM_OBJ_MAX_BYTES` 64 MiB → ≥ 256 MiB for memfd, `MAP_SHARED` anon and ext2 objects (P0: Wine's largest memfd is exactly 64 MiB; GPU BOs of 192 MiB come later); FAT private mappings see later `write()`s; the "largest mapped file" part of Gate P3 | `src/kernel/ext2*.c`, `src/kernel/vfs.c`, `vfs_lock.c`, `tmpfs.c`, the VM-object size and file-object coherence code in `vm.c`/`vm.h`, `tools/cp/run-wine-p2.sh`, `src/user/winep2.c` | the unmap/protect/TLB paths of `vm.c` (C1-k4), NFS (C3-nfs2) |
+| **C1-k4** | Stability: the intermittent wineboot-tree hang (all clients BLOCKED, no futex, no timer — suspect the `pipe.c` park race), reproduced by a probe before it is fixed; cross-CPU TLB shootdown for `munmap`/`mprotect`/`mremap`; `MAX_PROCESSES` ≥ 256 (the game runs 173–190 threads); `execve` from a secondary thread makes that thread the leader (tid = pid); SIGBUS past EOF; `si_code` from the real fault (`ILL_ILLOPN`, `FPE_FLT*` from MXCSR/FSW, `SEGV_MAPERR`/`SEGV_ACCERR`) | `src/kernel/pipe.c`, the scheduler park/wake paths, `src/kernel/arch/x64/mmu.c` (TLB), the unmap/protect/remap and fault-to-signal paths of `vm.c`, the process table and the exec-from-thread step in `process.c`, signal mapping in `trap.c` | the VM-object code (C3-pfx), the compat syscall arm of `trap.c` except signal mapping |
+| **C4-x2** | P4: Wine rebuilt with X11 + Xi2/RandR/Render/Fixes/Cursor/Xinerama/XShm + FreeType (from `third_party/freetype-2.14.3` against the 2.31 sysroot) + Vulkan; the C4-x libraries staged by a `make` rule; a one-screen DDX mode for Wine sessions (Composite and Xinerama come back); RandR modes or a clean refusal; relative pointer motion from the kernel mouse path through XI2 raw events; Wine fullscreen and pointer grab under IceWM; null audio (AD-9). Gate P4 | `src/user/x11/**`, `third_party/x11/ddx` (server side), `tools/cp/x11/`, `tools/cp/build-wine.sh`, the kernel mouse/input driver path for relative events, `tools/cp/p4/`, `src/user/cp/rawinput*` | NFS, ext2, `vm.c` |
+| **C5-vk2** | P5: the lavapipe tree rebuilt on strix (linuxci's work dir is gone), now with the loader's xlib/xcb WSI and Mesa `-Dplatforms=x11` against C4-x's libraries; Linux `vkcube` in an X window for ≥ 60 s; then, on C4-x2's Wine build, winevulkan, `vkcube.exe`, a DXVK D3D11 triangle and a vkd3d-proton D3D12 triangle (MinGW-style PE probes built with clang + Wine's import libs). Gate P5 | `tools/cp/vk/`, `tools/mesa/` (Vulkan builds), `src/user/cp/vk*`, `src/user/cp/d3d*`, `tools/cp/p5/` | `tools/cp/x11/` and `build-wine.sh` (use them, report diffs) |
+| C6-venus | P6 — still held for the user's `gpu_abi.c` decision | — | — |
+
+Merge order: C3-nfs2 first, then whichever of C1-k4 / C3-pfx is green (both
+touch `vm.c`, in different functions; the integrator resolves), then C4-x2,
+then C5-vk2 (it needs C4-x2's Wine build for its `.exe` probes). Every merge is
+re-gated on the merged tree with the full batch, including both NFS guards and
+one Gate P2 run. Downloads beyond what strix already holds (DXVK 3.1.1 and
+vkd3d-proton 3.1 from `docs/cp-pins.md`, any X library, glslang) wait for the
+user's approval through the integrator.
 
 ### 7.3 Frozen interfaces (binding)
 
