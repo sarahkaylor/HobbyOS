@@ -400,3 +400,21 @@ FSINFO) and an overflow when all six stay busy for 20 ms (`pool_temp=` in
 **Guard G10:** `cpnfsbench` phase `lookstorm` (4 processes x 1500 stat()s);
 the storm may create at most 32 guest sockets (`socks=` in the `[NFSNET]`
 rows the bench requests before and after it).
+
+**Measured (strix, `docs/cp-nfs2-evidence/nfs2b-sockets-strix.txt`):**
+
+| | 12e14203 (G10, no pool) | 6e586000 (pool) |
+|---|---|---|
+| lookstorm (4 x 1500 stat()s) | 18000 new sockets, 27.2 s, G10 FAIL | 1 new socket, 0.68 s, G10 PASS |
+| UDP sockets this guest's QEMU held (ss) | 16384 (the whole guest port range) | 11 at most |
+| whole bench, guest sockets created | -- | 14 |
+| Udp RcvbufErrors during both runs | +0 | +0 |
+| nfsd pool_stats threads-timedout | 0 | 0 |
+
+Gate P2 run 4 on 6e586000 (cyberpunk b8d73938 + the pool): **G1, G2 and
+G3 PASS**; `wineboot status=0 ms=25309` (run23: status=53 ms=306756);
+207.9 MB of READ for the whole run (the 202 MB Wine tree; run23: 1.66
+GB); 0 pipeline stalls, 0 `[NFSHARD]` retries, 8 guest sockets for the
+whole boot.  The host is not short of nfsd threads (16; threads-timedout
+0) and nfsd's own socket drops nothing: the give-ups were the client's
+socket churn exhausting host ports.
