@@ -78,3 +78,25 @@ of its file/object (memfd, tmpfs, MAP_SHARED objects, and file objects in a
 compat address space) → SIGBUS `BUS_ADRERR`; `#UD` → `ILL_ILLOPN`; `#MF`/`#XM`
 → the `FPE_FLT*` code from FSW&~FCW / MXCSR (Linux `fpu__exception_code`);
 `#GP`/`#BP` and the rest → `SI_KERNEL`.
+
+## 6. Dying groups (follow-up, branch cp-k4b)
+
+C4-x2 P4 run 8's `in=V1 prot=5 kind=7` row: kind 7 is VMK_LIB (a DSO mapping);
+`in=V1` is vm_handle_fault's first return, `process_group(cur)->as == NULL`.
+The faulting winedevice thread belonged to a group that had exit_group'ed:
+the drain waited 32 wakeups of the exiting CPU without kicking the members'
+CPUs, and proc_release_mem_locked then refused to free the AS (a CPU still
+translated through it) after it had already cleared the anchor's `as`.  Fixes:
+`group_kick_members()` on exit/exec/kill, a 2 s time-bounded drain, the
+pointer kept on refusal, reaped groups' address spaces released at once (with
+512 cyclic slots up to ~500 dead ASes were held: 5.3 GiB in
+`linux_probe_exitgroup` X6), and one exit owner per group (two concurrent
+exit_group callers each waited out the other).
+
+## 7. AF_NETLINK / NETLINK_ROUTE (`linux_compat_netlink.c`)
+
+glibc's if_nameindex()/getifaddrs() are netlink clients; with EAFNOSUPPORT,
+if_nameindex() returned NULL and Wine's nsiproxy.so `update_if_table()`
+dereferenced it (nsiproxy.so+0x7736, the `VA=0 PC=...F736` winedevice
+faults).  The compat socket is a kernel-held AF_UNIX DGRAM pair that answers
+RTM_GETLINK/GETADDR/GETROUTE dumps for lo and eth0; subscriptions never fire.
