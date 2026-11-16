@@ -90,7 +90,10 @@ static int l_misc_readv(struct process *p, struct trap_frame *tf) {
         return l_misc_ret(tf, total > 0 ? total : -EFAULT);
       int r = file_read(p, fd, (void *)(uintptr_t)base, chunk, tf);
       if (r == -2) {
-        if (total > 0) return l_misc_ret(tf, total);
+        if (total > 0) {
+          process_cancel_park(p); /* C1-k4: short read, not a park */
+          return l_misc_ret(tf, total);
+        }
         if ((tf->cs & 3) == 3) tf->elr -= 2;
         save_context(p, tf);
         schedule(tf, 0);

@@ -294,8 +294,10 @@ static int vx_park(struct process *p, struct trap_frame *tf) {
   }
   {
     uint64_t fl = spinlock_acquire_irqsave(&proc_lock);
-    p->wake_ms = timer_get_ms() + 10;
-    p->state = PROC_STATE_BLOCKED;
+    if (process_park_ok_locked(p)) { /* C1-k4: never re-park the dead */
+      p->wake_ms = timer_get_ms() + 10;
+      p->state = PROC_STATE_BLOCKED;
+    }
     spinlock_release_irqrestore(&proc_lock, fl);
   }
   if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind over the 2-byte `syscall` */

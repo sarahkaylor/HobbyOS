@@ -636,6 +636,18 @@ struct process {
      PC is two bytes before it was rewound for restart; the signal path uses
      that to pick Linux's restart rule (docs/cp-thr.md §3). */
   uint64_t sys_entry_pc;
+  /* C1-k4: this thread is parked in poll/select/epoll_wait and registered
+     with poll_notify() (process.c).  Cleared on every compat syscall entry
+     and whenever the park is re-evaluated, so a stale registration can
+     never wake an unrelated park. */
+  int poll_waiting;
+  /* C1-k4: a blocking pipe write(v) that parked after writing part of its
+     buffer (Linux writes a blocking pipe write in full).  The restarted
+     syscall resumes at pw_done when (pipe, buffer, length) match. */
+  void *pw_pipe;
+  uint64_t pw_key;
+  uint32_t pw_total;
+  uint32_t pw_done;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
@@ -926,6 +938,29 @@ void process_sleep(void);
 
 // Wake up a specific process.
 void process_wakeup(int pid);
+
+/* C1-k4: readiness notification for poll/select/epoll_wait.  Every state
+ * change of a pipe, AF_UNIX socket or eventfd calls poll_notify() with no
+ * spinlock held; a poller takes poll_seq_snapshot() BEFORE its readiness
+ * scan and, under proc_lock, poll_park_locked() refuses the park (returns 1:
+ * scan again) when any event happened since.  Dekker-ordered: either the
+ * notifier sees the registration or the poller sees the event. */
+void poll_notify(void);
+uint64_t poll_seq_snapshot(void);
+int poll_park_locked(struct process *p, uint64_t seen);
+void poll_unpark(struct process *p);
+void process_cancel_park(struct process *p);
+/* C1-k4: may a blocking syscall commit its park?  Not when a kill
+ * (process_kill_group_sig / exit_group / exec) already made the task EXITED
+ * or THREAD_DONE while it was inside the syscall on its CPU: parking would
+ * resurrect it (C1-thr2 fixed futex/nanosleep/sigsuspend; this covers pipe,
+ * AF_UNIX, poll/select/epoll, eventfd, timerfd, pause, flock).  The park site
+ * then returns its "parked" code without parking; the trap exit's
+ * schedule() drops the dead task.  Caller holds proc_lock. */
+static inline int process_park_ok_locked(const struct process *p) {
+  return p->state != PROC_STATE_EXITED && p->state != PROC_STATE_THREAD_DONE &&
+         p->state != PROC_STATE_FREE;
+}
 
 // Wake up all kernel threads that are in the BLOCKED state.
 void process_wake_all(void);

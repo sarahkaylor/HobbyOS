@@ -125,6 +125,10 @@ static struct file *file_alloc(void) {
          invariants in file_read/file_write/file_close/stat, so an abandoned
          slot can only ever halt loudly, never corrupt. */
       global_file_table[i].type = FILE_TYPE_UNINIT;
+      /* C1-k4: a recycled slot must not hand its last occupant's status
+         flags (O_NONBLOCK above all) to the next file -- pipe reads and
+         writes honour O_NONBLOCK now. */
+      global_file_table[i].open_flags = 0;
       spinlock_release(&fs_lock);
       return &global_file_table[i];
     }
@@ -1529,6 +1533,7 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
     uint32_t count = pp->count;
     uint32_t readers = pp->reader_count;
     uint32_t writers = pp->writer_count;
+    int writable = pipe_writable(pp); /* C1-k4: capacity is per pipe now */
     spinlock_release_irqrestore(&pp->lock, flags);
 
     if (f->pipe.end == 0) {
@@ -1546,7 +1551,7 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
       if (readers == 0) {
         *w = 1;
         *e = 1;
-      } else if (count < PIPE_SIZE) {
+      } else if (writable) {
         *w = 1;
       }
     }
@@ -1622,6 +1627,35 @@ void file_select_forget(int pid) {
 }
 
 #define SELECT_POLL_SLICE_MS 10
+/* C1-k4: a set made only of notifying fds (pipe, AF_UNIX, eventfd) is woken
+ * by poll_notify(); the slice is only a safety net then. */
+#define POLL_NOTIFY_SLICE_MS 250
+
+int file_fd_notifies(struct process *p, int fd);
+
+/* C1-k4: park a poller that found nothing ready.  Returns -2 (parked: the
+ * syscall restarts) or 1 when an event raced the scan (scan again). */
+static int fs_poll_park(struct process *p, uint64_t seen, int all_notify,
+                        uint64_t now) {
+  uint64_t wake = now + (all_notify ? POLL_NOTIFY_SLICE_MS : SELECT_POLL_SLICE_MS);
+  if (select_wait[p->pid].deadline_ms != 0 &&
+      select_wait[p->pid].deadline_ms < wake) {
+    wake = select_wait[p->pid].deadline_ms;
+  }
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  if (!process_park_ok_locked(p)) { /* C1-k4: killed inside the syscall */
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return -2;
+  }
+  if (poll_park_locked(p, seen)) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return 1;
+  }
+  p->wake_ms = wake;
+  p->state = PROC_STATE_BLOCKED;
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return -2;
+}
 
 int file_select(struct process *p, int nfds, struct fd_set_k *rd,
                 struct fd_set_k *wr, struct fd_set_k *ex, int timeout_ms) {
@@ -1643,6 +1677,10 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
     }
   }
 
+  poll_unpark(p);
+  for (;;) {
+  uint64_t seen = poll_seq_snapshot(); /* C1-k4: before the scan */
+  int all_notify = 1;
   struct fd_set_k out_rd, out_wr, out_ex;
   for (int i = 0; i < K_FD_SET_WORDS; i++) {
     out_rd.bits[i] = 0;
@@ -1668,6 +1706,7 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
         return -EBADF;
       }
       e |= hup || 0; /* select folds POLLHUP into its exception set */
+      if (all_notify && !file_fd_notifies(p, fd)) all_notify = 0;
       uint32_t m = 1u << bit;
       if (rd && (rd->bits[word] & m) && r) {
         out_rd.bits[word] |= m;
@@ -1707,16 +1746,9 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
     return 0;
   }
 
-  uint64_t wake = now + SELECT_POLL_SLICE_MS;
-  if (select_wait[p->pid].deadline_ms != 0 &&
-      select_wait[p->pid].deadline_ms < wake) {
-    wake = select_wait[p->pid].deadline_ms;
-  }
-  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  p->wake_ms = wake;
-  p->state = PROC_STATE_BLOCKED;
-  spinlock_release_irqrestore(&proc_lock, flags);
-  return -2;
+  if (fs_poll_park(p, seen, all_notify, now) == -2) return -2;
+  now = timer_get_ms();
+  } /* C1-k4: an event raced the scan -- scan again */
 }
 
 /* P4 (docs/browser/p4-ipc-design.md §4.3): the SYS_POLL engine.  A pure
@@ -1741,6 +1773,10 @@ int file_poll(struct process *p, struct k_pollfd *fds, int nfds,
     }
   }
 
+  poll_unpark(p);
+  for (;;) {
+  uint64_t seen = poll_seq_snapshot(); /* C1-k4: before the scan */
+  int all_notify = 1;
   int ready = 0;
   for (int i = 0; i < nfds; i++) {
     short revents = 0;
@@ -1752,6 +1788,7 @@ int file_poll(struct process *p, struct k_pollfd *fds, int nfds,
         revents = K_POLLNVAL;
       } else {
         revents = ipc_poll_map(r, w, e, hup, fds[i].events);
+        if (all_notify && !file_fd_notifies(p, fd)) all_notify = 0;
       }
     }
     fds[i].revents = revents;
@@ -1771,16 +1808,9 @@ int file_poll(struct process *p, struct k_pollfd *fds, int nfds,
     return 0;
   }
 
-  uint64_t wake = now + SELECT_POLL_SLICE_MS;
-  if (select_wait[p->pid].deadline_ms != 0 &&
-      select_wait[p->pid].deadline_ms < wake) {
-    wake = select_wait[p->pid].deadline_ms;
-  }
-  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  p->wake_ms = wake;
-  p->state = PROC_STATE_BLOCKED;
-  spinlock_release_irqrestore(&proc_lock, flags);
-  return -2;
+  if (fs_poll_park(p, seen, all_notify, now) == -2) return -2;
+  now = timer_get_ms();
+  } /* C1-k4: an event raced the scan -- scan again */
 }
 
 struct socket_pcb *file_socket_pcb(struct process *p, int fd) {
@@ -3213,8 +3243,10 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
       uint64_t next = lt_timerfd_next(f->timerfd.slot);
       uint64_t now = timer_get_ms();
       uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-      cur->wake_ms = next && next > now ? next : now + 50;
-      cur->state = PROC_STATE_BLOCKED;
+      if (process_park_ok_locked(cur)) { /* C1-k4: never re-park the dead */
+        cur->wake_ms = next && next > now ? next : now + 50;
+        cur->state = PROC_STATE_BLOCKED;
+      }
       spinlock_release_irqrestore(&proc_lock, flags);
       return -2;
     }
@@ -3310,7 +3342,10 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     return got;
   } else if (f->type == FILE_TYPE_PIPE) {
     if (f->pipe.end != 0) return -1; // Read end only
-    return pipe_read(f->pipe.ptr, buf, size, tf);
+    (void)tf;
+    /* C1-k4: O_NONBLOCK is honoured (it used to park the caller). */
+    return pipe_read_ex(f->pipe.ptr, buf, size,
+                        (f->open_flags & K_O_NONBLOCK) != 0);
   } else if (f->type == FILE_TYPE_UNIXSOCK) {
     if (!f->usock.ptr) return -1;
     /* Both ends are readable; -2 (park) rides the same restart convention
@@ -3562,7 +3597,13 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
       uart_puts("\n");
       return -1;
     }
-    return pipe_write(f->pipe.ptr, buf, size, tf);
+    {
+      /* C1-k4: O_NONBLOCK honoured; blocking writes complete in full. */
+      struct pipe_seg sg = {(const uint8_t *)buf, size > 0 ? (uint32_t)size : 0};
+      return pipe_writev_ex(f->pipe.ptr, &sg, 1,
+                            (f->open_flags & K_O_NONBLOCK) != 0,
+                            (uint64_t)(uintptr_t)buf, tf);
+    }
   } else if (f->type == FILE_TYPE_UNIXSOCK) {
     if (!f->usock.ptr) return -1;
     /* §2.2/D3: peer gone -> -EPIPE (no signal in P4); message types frame one
@@ -3587,6 +3628,54 @@ int file_gfd_is_pipe(int gfd) {
   return global_file_table[gfd].type == FILE_TYPE_PIPE;
 }
 
+/* C1-k4: writev(2) on a pipe write end as ONE pipe write (Linux: a gather of
+ * <= PIPE_BUF bytes is atomic, and a blocking one completes in full).
+ * Returns -ENOTTY (caller: not a pipe, use the per-segment loop), bytes
+ * written, -2 (parked: restart), or -errno.  The segments are user ranges the
+ * caller has validated; `key` identifies the call for a part-way restart. */
+int file_writev_pipe(struct process *cur, int fd, const struct pipe_seg *seg,
+                     int nseg, uint64_t key, struct trap_frame *tf) {
+  cur = process_group(cur);
+  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -ENOTTY;
+  int g_fd = cur->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -ENOTTY;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type != FILE_TYPE_PIPE || f->pipe.end != 1) return -ENOTTY;
+  return pipe_writev_ex(f->pipe.ptr, seg, nseg,
+                        (f->open_flags & K_O_NONBLOCK) != 0, key, tf);
+}
+
+int file_fd_pipe_wend(struct process *cur, int fd) {
+  cur = process_group(cur);
+  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
+  int g_fd = cur->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return 0;
+  struct file *f = &global_file_table[g_fd];
+  return f->type == FILE_TYPE_PIPE && f->pipe.end == 1;
+}
+
+/* C1-k4: one fd's poll answer (revents for `events`) for epoll_wait, which
+ * walks its own interest list instead of building a pollfd array. */
+int file_poll_fd(struct process *p, int fd, short events) {
+  p = process_group(p);
+  int r = 0, w = 0, e = 0, hup = 0;
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS || f1_probe_fd(p, fd, &r, &w, &e, &hup) != 0)
+    return K_POLLNVAL;
+  return ipc_poll_map(r, w, e, hup, events);
+}
+
+/* C1-k4: does `fd` notify poll_notify() on every readiness change?  A poll
+ * set made only of these parks without a re-scan slice. */
+int file_fd_notifies(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 1; /* POLLNVAL: static */
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return 1;
+  int t = global_file_table[g_fd].type;
+  return t == FILE_TYPE_PIPE || t == FILE_TYPE_UNIXSOCK ||
+         t == FILE_TYPE_EVENTFD || t == FILE_TYPE_DEVNULL;
+}
+
 /**
  * Creates an anonymous pipe and assigns two file descriptors (read and write).
  *
@@ -3608,11 +3697,14 @@ int file_pipe(struct process *cur, int fds[2]) {
     return -1;
   }
 
-  if (pipe_alloc(&f0, &f1) != 0) {
+  /* C1-k4: a Linux-ABI creator gets Linux's 64 KiB ring. */
+  if (pipe_alloc_ex(&f0, &f1, (cur->abi_flags & PROC_FLAG_LINUX_ABI) != 0) != 0) {
     f0->type = FILE_TYPE_EMPTY;
     f1->type = FILE_TYPE_EMPTY;
     return -1;
   }
+  f0->open_flags = 0; /* O_RDONLY (Linux F_GETFL of a pipe read end) */
+  f1->open_flags = 1; /* O_WRONLY */
 
   int user_fd0 = -1, user_fd1 = -1;
   for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {

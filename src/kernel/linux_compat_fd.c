@@ -82,8 +82,18 @@ static int l_park(struct process *p, struct trap_frame *tf) {
      NOW must end the wait with -EINTR instead of parking again: the syscall
      entry re-runs after a wake, so this is also the check that answers EINTR
      for the restarted instruction.  The handler itself is planted at this
-     trap exit, i.e. before the guest sees the return. */
-  if (linux_compat_sig_deliverable(p)) return l_ret(tf, -EINTR);
+     trap exit, i.e. before the guest sees the return.
+     C1-k4: the backend (usock_park & co.) has already committed the park --
+     BLOCKED, pid bit set -- so answering EINTR must undo it, or the thread
+     runs on in user space marked BLOCKED and the next tick parks it with
+     nothing left to wake it. */
+  if (linux_compat_sig_deliverable(p)) {
+    uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+    if (p->state == PROC_STATE_BLOCKED)
+      p->state = PROC_STATE_RUNNING;
+    spinlock_release_irqrestore(&proc_lock, pf);
+    return l_ret(tf, -EINTR);
+  }
 #ifdef __x86_64__
   if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind over the 2-byte `syscall` */
 #else
@@ -1137,8 +1147,23 @@ static struct {
   int used;
   int sem;
   uint64_t count;
+  /* C1-k4: parked readers / writers.  A blocking read used to re-poll in
+     10 ms slices with nobody waking it: an eventfd ping-pong ran at 50 round
+     trips a second (linux_probe_pipestorm R10). */
+  struct pid_mask rwait, wwait;
 } l_efd[L_EVENTFD_SLOTS];
 static spinlock_t l_efd_lock;
+
+static void l_efd_drain(struct pid_mask *m) {
+  for (int wi = 0; wi < PID_MASK_WORDS; wi++) {
+    uint64_t x = m->w[wi];
+    while (x) {
+      int pid = (wi << 6) + __builtin_ctzll(x);
+      x &= x - 1;
+      process_wakeup(pid);
+    }
+  }
+}
 
 int l_eventfd_new(unsigned int initval, int flags) {
   uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
@@ -1148,6 +1173,8 @@ int l_eventfd_new(unsigned int initval, int flags) {
       l_efd[i].used = 1;
       l_efd[i].sem = (flags & L_EFD_SEMAPHORE) != 0;
       l_efd[i].count = initval;
+      pid_mask_zero(&l_efd[i].rwait);
+      pid_mask_zero(&l_efd[i].wwait);
       slot = i;
       break;
     }
@@ -1173,42 +1200,66 @@ void l_eventfd_probe(int slot, int *r, int *w) {
   if (c < L_EVENTFD_MAX) *w = 1;
 }
 
-/* Park the calling THREAD for one slice; the syscall restarts. */
-static int l_efd_park(void) {
+/* Park the calling THREAD until the counter changes; the syscall restarts.
+ * C1-k4: the condition is re-checked and the waiter registered under
+ * proc_lock -> l_efd_lock (the pipe.c order), so a write between the first
+ * check and the park cannot be lost.  Returns -2 (parked), 1 (the condition
+ * changed: try again) or -EINTR. */
+static int l_efd_park(int slot, int read_side) {
   struct process *cur = current_process();
   if (!cur) return -EAGAIN;
-  if (linux_compat_sig_deliverable(cur)) return -EINTR;
-  uint64_t fl = spinlock_acquire_irqsave(&proc_lock);
-  cur->wake_ms = timer_get_ms() + 10;
-  cur->state = PROC_STATE_BLOCKED;
-  spinlock_release_irqrestore(&proc_lock, fl);
-  return -2;
+  uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+  if (linux_compat_sig_deliverable(cur)) {
+    spinlock_release_irqrestore(&proc_lock, pf);
+    return -EINTR;
+  }
+  spinlock_acquire(&l_efd_lock);
+  uint64_t c = l_efd[slot].count;
+  int ready = read_side ? (c > 0) : (c < L_EVENTFD_MAX);
+  if (!ready && process_park_ok_locked(cur)) { /* C1-k4: not the dead */
+    pid_mask_set(read_side ? &l_efd[slot].rwait : &l_efd[slot].wwait, cur->pid);
+    cur->wake_ms = 0;
+    cur->state = PROC_STATE_BLOCKED;
+  }
+  spinlock_release(&l_efd_lock);
+  spinlock_release_irqrestore(&proc_lock, pf);
+  return ready ? 1 : -2;
 }
 
 int l_eventfd_read(struct file *f, void *buf, int size) {
   if (size < 8) return -EINVAL;
   int slot = f->eventfd.slot;
   if (slot < 0 || slot >= L_EVENTFD_SLOTS) return -EBADF;
-  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
-  uint64_t c = l_efd[slot].count;
-  uint64_t v = 0;
-  if (c > 0) {
-    v = l_efd[slot].sem ? 1 : c;
-    l_efd[slot].count = c - v;
-  }
-  spinlock_release_irqrestore(&l_efd_lock, fl);
-  if (c == 0) {
-    if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
-    return l_efd_park();
-  }
-  if (l_copy_to_user(current_process(), (uint64_t)(uintptr_t)buf, &v, 8) != 0) {
-    /* Put the value back: the read did not happen. */
-    fl = spinlock_acquire_irqsave(&l_efd_lock);
-    l_efd[slot].count += v;
+  for (;;) {
+    struct pid_mask wake;
+    pid_mask_zero(&wake);
+    uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+    uint64_t c = l_efd[slot].count;
+    uint64_t v = 0;
+    if (c > 0) {
+      v = l_efd[slot].sem ? 1 : c;
+      l_efd[slot].count = c - v;
+      wake = l_efd[slot].wwait; /* room for a parked writer */
+      pid_mask_zero(&l_efd[slot].wwait);
+    }
     spinlock_release_irqrestore(&l_efd_lock, fl);
-    return -EFAULT;
+    if (c == 0) {
+      if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
+      int r = l_efd_park(slot, 1);
+      if (r == 1) continue;
+      return r;
+    }
+    l_efd_drain(&wake);
+    poll_notify();
+    if (l_copy_to_user(current_process(), (uint64_t)(uintptr_t)buf, &v, 8) != 0) {
+      /* Put the value back: the read did not happen. */
+      fl = spinlock_acquire_irqsave(&l_efd_lock);
+      l_efd[slot].count += v;
+      spinlock_release_irqrestore(&l_efd_lock, fl);
+      return -EFAULT;
+    }
+    return 8;
   }
-  return 8;
 }
 
 int l_eventfd_write(struct file *f, const void *buf, int size) {
@@ -1219,16 +1270,30 @@ int l_eventfd_write(struct file *f, const void *buf, int size) {
   if (l_copy_from_user(current_process(), &v, (uint64_t)(uintptr_t)buf, 8) != 0)
     return -EFAULT;
   if (v == 0xffffffffffffffffULL) return -EINVAL;
-  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
-  uint64_t c = l_efd[slot].count;
-  int fits = v <= L_EVENTFD_MAX - c;
-  if (fits) l_efd[slot].count = c + v;
-  spinlock_release_irqrestore(&l_efd_lock, fl);
-  if (!fits) {
-    if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
-    return l_efd_park();
+  for (;;) {
+    struct pid_mask wake;
+    pid_mask_zero(&wake);
+    uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+    uint64_t c = l_efd[slot].count;
+    int fits = v <= L_EVENTFD_MAX - c;
+    if (fits) {
+      l_efd[slot].count = c + v;
+      if (v) {
+        wake = l_efd[slot].rwait;
+        pid_mask_zero(&l_efd[slot].rwait);
+      }
+    }
+    spinlock_release_irqrestore(&l_efd_lock, fl);
+    if (!fits) {
+      if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
+      int r = l_efd_park(slot, 0);
+      if (r == 1) continue;
+      return r;
+    }
+    l_efd_drain(&wake);
+    if (v) poll_notify();
+    return 8;
   }
-  return 8;
 }
 
 static int l_fd_eventfd_common(struct process *p, struct trap_frame *tf,

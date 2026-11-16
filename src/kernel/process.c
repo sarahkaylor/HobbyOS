@@ -1351,6 +1351,11 @@ static int process_create_internal_ver(int ver) {
   p->vfork_child = 0;
   p->vfork_ret = 0;
   p->sys_entry_pc = 0;
+  p->poll_waiting = 0; /* C1-k4 */
+  p->pw_pipe = 0;
+  p->pw_key = 0;
+  p->pw_total = 0;
+  p->pw_done = 0;
   p->sig_park_kind = 0; /* C1-thr: a recycled slot's park state never leaks */
   p->sig_park_nr = 0;
   fd_cloexec_reset(p->fd_cloexec);
@@ -4621,6 +4626,85 @@ void process_wakeup(int pid) {
     sched_wake_idle_cpu();
 }
 
+/* C1-k4: poll/select/epoll_wait wakeups (see process.h).  Pollers used to
+ * re-scan in 10 ms slices with nothing waking them, so every request a
+ * single-threaded event loop (wineserver) served from an idle wait paid up
+ * to 10 ms; now the scan is re-run as soon as any pipe / AF_UNIX / eventfd
+ * changes state.  The mask is guarded by proc_lock; the sequence word is the
+ * lock-free half of the Dekker pair. */
+static volatile uint64_t poll_event_seq;
+static struct pid_mask poll_waiters;
+
+uint64_t poll_seq_snapshot(void) {
+  return __atomic_load_n(&poll_event_seq, __ATOMIC_SEQ_CST);
+}
+
+int poll_park_locked(struct process *p, uint64_t seen) {
+  if (!p || p->pid <= 0 || p->pid >= MAX_PROCESSES)
+    return 0;
+  pid_mask_set(&poll_waiters, p->pid);
+  p->poll_waiting = 1;
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+  if (__atomic_load_n(&poll_event_seq, __ATOMIC_SEQ_CST) != seen) {
+    p->poll_waiting = 0; /* the bit may stay: poll_waiting gates every wake */
+    return 1;
+  }
+  return 0;
+}
+
+/* C1-k4: a backend committed a park (BLOCKED + its wait-mask bit) but the
+ * caller decided to return instead (a vectored read/write that already moved
+ * bytes).  Undo the state so the thread does not run on marked BLOCKED; a
+ * stale mask bit can only cause one spurious, re-checked wake later. */
+void process_cancel_park(struct process *p) {
+  if (!p)
+    return;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  if (p->state == PROC_STATE_BLOCKED) {
+    p->state = PROC_STATE_RUNNING;
+    p->wake_ms = 0;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+}
+
+void poll_unpark(struct process *p) {
+  if (p)
+    p->poll_waiting = 0;
+}
+
+void poll_notify(void) {
+  __atomic_fetch_add(&poll_event_seq, 1, __ATOMIC_SEQ_CST);
+  int any = 0;
+  for (int wi = 0; wi < PID_MASK_WORDS; wi++)
+    if (__atomic_load_n(&poll_waiters.w[wi], __ATOMIC_SEQ_CST)) {
+      any = 1;
+      break;
+    }
+  if (!any)
+    return;
+  int woke = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int wi = 0; wi < PID_MASK_WORDS; wi++) {
+    uint64_t x = poll_waiters.w[wi];
+    poll_waiters.w[wi] = 0;
+    while (x) {
+      int pid = (wi << 6) + __builtin_ctzll(x);
+      x &= x - 1;
+      if (pid >= MAX_PROCESSES)
+        continue;
+      struct process *q = &proc_table[pid];
+      if (q->poll_waiting && q->state == PROC_STATE_BLOCKED) {
+        q->poll_waiting = 0;
+        q->state = PROC_STATE_READY;
+        woke = 1;
+      }
+    }
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  if (woke)
+    sched_wake_idle_cpu();
+}
+
 /* Scheduler-state access for the blocking lock (see process.h).  Caller holds
  * proc_lock; deliberately lock-free so a wait queue can be inspected and
  * updated without nesting another registered lock under proc_lock. */
@@ -6498,6 +6582,11 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   t->vfork_child = 0;
   t->vfork_ret = 0;
   t->sys_entry_pc = 0;
+  t->poll_waiting = 0; /* C1-k4 */
+  t->pw_pipe = 0;
+  t->pw_key = 0;
+  t->pw_total = 0;
+  t->pw_done = 0;
   t->sig_park_kind = 0; /* C1-thr: a recycled slot's park state never leaks */
   t->sig_park_nr = 0;
   t->spawn_retval = -1;

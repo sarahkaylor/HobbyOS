@@ -44,6 +44,7 @@
 #include "blk_cache.h"
 #include "fb_mmap.h"
 #include "kmem.h"
+#include "pipe.h" /* C1-k4: struct pipe_seg for writev on a pipe */
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -1175,6 +1176,45 @@ static void compat_writev(struct trap_frame *tf) {
   if (cnt < 0 || cnt > 1024) { tf->regs[0] = (uint64_t)(int64_t)-EINVAL; return; }
   if (cnt == 0) { tf->regs[0] = 0; return; }
   if (!sys_user_range_ok(iov, (uint64_t)cnt * 16)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+  /* C1-k4: a pipe gets the whole gather as ONE write (Linux pipe_write: a
+     <= PIPE_BUF writev is atomic and a blocking one completes in full).  The
+     per-segment loop below wrote wineserver's 64-byte reply header and its
+     data as two writes, and a park in the second segment returned a short
+     count with the thread still marked BLOCKED. */
+  {
+    extern int file_fd_pipe_wend(struct process *, int);
+    extern int file_writev_pipe(struct process *, int, const struct pipe_seg *,
+                                int, uint64_t, struct trap_frame *);
+    if (cnt <= 64 && file_fd_pipe_wend(c, fd)) {
+      struct pipe_seg sg[64];
+      int ns = 0;
+      uint64_t sum = 0;
+      for (long i = 0; i < cnt; i++) {
+        uint64_t base = 0, len = 0;
+        if (vm_user_read(c, iov + (uint64_t)i * 16, &base, 8) != 0 ||
+            vm_user_read(c, iov + (uint64_t)i * 16 + 8, &len, 8) != 0) {
+          tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
+        }
+        if (len == 0) continue;
+        if (len > COMPAT_MAX_RW_COUNT - sum) len = COMPAT_MAX_RW_COUNT - sum;
+        if (!sys_user_range(base, len, 0)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+        sg[ns].base = (const uint8_t *)(uintptr_t)base;
+        sg[ns].len = (uint32_t)len;
+        ns++;
+        sum += len;
+        if (sum >= COMPAT_MAX_RW_COUNT) break;
+      }
+      int r = file_writev_pipe(c, fd, sg, ns, iov, tf);
+      if (r == -2) {
+        if ((tf->cs & 3) == 3) tf->elr -= 2;
+        save_context(c, tf);
+        schedule(tf, 0);
+        return;
+      }
+      tf->regs[0] = (uint64_t)(int64_t)r;
+      return;
+    }
+  }
   int64_t total = 0;
   for (long i = 0; i < cnt; i++) {
     uint64_t base = 0, len = 0;
@@ -1193,7 +1233,11 @@ static void compat_writev(struct trap_frame *tf) {
          2-byte `syscall` and re-schedule so the write RESTARTS on wake; the parked
          segment resumes as if nothing was written.  A subsequent iovec segment that
          already advanced total is a short write, not a park — see below. */
-      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if (total > 0) {
+        process_cancel_park(c); /* C1-k4: a short write, not a park */
+        tf->regs[0] = (uint64_t)total;
+        return;
+      }
       if ((tf->cs & 3) == 3) tf->elr -= 2;
       save_context(c, tf);
       schedule(tf, 0);
@@ -1235,7 +1279,11 @@ static void compat_readv(struct trap_frame *tf) {
     if (!sys_user_range(base, len, 1)) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : -EFAULT); return; }
     int r = file_read(c, fd, (void *)(uintptr_t)base, (int)len, tf);
     if (r == -2) {
-      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if (total > 0) {
+        process_cancel_park(c); /* C1-k4: a short read, not a park */
+        tf->regs[0] = (uint64_t)total;
+        return;
+      }
       if ((tf->cs & 3) == 3) tf->elr -= 2;
       save_context(c, tf);
       schedule(tf, 0);

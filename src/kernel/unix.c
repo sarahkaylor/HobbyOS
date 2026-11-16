@@ -71,6 +71,10 @@ static void drain_wakeup_mask(const struct pid_mask *mask) {
       process_wakeup(pid);
     }
   }
+  /* C1-k4: every state change of an endpoint ends here (send, receive,
+     close, connect, accept, listen), so this is the one place that tells
+     parked poll/select/epoll_wait callers to re-scan. */
+  poll_notify();
 }
 
 static struct usock *usock_alloc_common(int type, int connected) {
@@ -448,11 +452,13 @@ static int usock_park(struct usock *u, int end, int read_side, int nonblock) {
   } else if (read_side ? !chan_empty(u, c) : !chan_full(u, c)) {
     ret = 1;
   } else {
-    if (read_side)
-      pid_mask_set(&c->rwait, cur->pid);
-    else
-      pid_mask_set(&c->wwait, cur->pid);
-    cur->state = PROC_STATE_BLOCKED;
+    if (process_park_ok_locked(cur)) { /* C1-k4: never re-park the dead */
+      if (read_side)
+        pid_mask_set(&c->rwait, cur->pid);
+      else
+        pid_mask_set(&c->wwait, cur->pid);
+      cur->state = PROC_STATE_BLOCKED;
+    }
     ret = -2;
   }
   spinlock_release(&u->lock);
@@ -594,7 +600,10 @@ static int usock_stream_recv(struct usock *u, int end, const struct k_iovec *io,
     }
     struct pid_mask wake;
     pid_mask_zero(&wake);
-    if (i > 0 && (c->used == 0 || took_rec)) {
+    /* C1-k4: any freed byte can admit a parked writer; waking only once the
+       ring was empty could leave a writer parked behind a reader that read
+       part of the ring and then waited on that writer. */
+    if (i > 0) {
       wake = c->wwait; /* space (or a record slot) freed */
       pid_mask_zero(&c->wwait);
     }
@@ -971,8 +980,10 @@ static int usock_name_park(struct pid_mask *mask,
   spinlock_acquire(&unix_name_lock);
   int ret;
   if (still_wait(l, arg)) {
-    pid_mask_set(mask, cur->pid);
-    cur->state = PROC_STATE_BLOCKED;
+    if (process_park_ok_locked(cur)) { /* C1-k4: never re-park the dead */
+      pid_mask_set(mask, cur->pid);
+      cur->state = PROC_STATE_BLOCKED;
+    }
     ret = -2;
   } else {
     ret = 1;
