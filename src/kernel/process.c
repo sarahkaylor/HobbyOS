@@ -950,16 +950,38 @@ static void group_teardown(struct process *grp, uint64_t code) {
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
+/* C1-thr: CYCLIC pid allocation (Linux alloc_pid: increasing, wrapping).
+ * pid == PCB slot, and every slot search used to take the LOWEST free slot,
+ * so a pid freed by a reap was the very next pid handed out.  wineserver
+ * polls kill(old_pid, 0) on a dead client and then SIGKILLs it
+ * (server/process.c process_sigkill): measured, that SIGKILL landed on the
+ * next `wine` that had been given the same pid ("Process 3: wine exited
+ * (signal 9)"), and pids 1 and 8 were reused inside one wineboot.  Now every
+ * search (process create, its zombie/tombstone reclaim passes, and the
+ * thread allocator) starts AFTER the pid handed out last and wraps, so a
+ * freed pid comes back only after every other slot was tried.  Boot order is
+ * unchanged (the cursor starts at 0: the first scan is 1, 2, 3, ...).
+ * pid_cursor is only touched under proc_lock. */
+static int pid_cursor;
+static inline int pid_scan_slot(int k) { /* k = 1 .. MAX_PROCESSES-1 */
+  return 1 + (pid_cursor + k - 1) % (MAX_PROCESSES - 1);
+}
+
 /* SYS_THREAD_CREATE slot search (design section 1): a FREE slot, else a
  * THREAD_DONE slot under the reclamation gate -- reusable only when
  * !process_still_running; a leader tombstone additionally requires every
  * member dead.  Caller holds proc_lock.  Returns a slot index or -1. */
 static int thread_alloc_slot_locked(void) {
-  for (int i = 1; i < MAX_PROCESSES; i++) {
-    if (proc_table[i].state == PROC_STATE_FREE)
+  /* C1-thr: cyclic, like process create (see pid_cursor): a tid is a pid. */
+  for (int k = 1; k < MAX_PROCESSES; k++) {
+    int i = pid_scan_slot(k);
+    if (proc_table[i].state == PROC_STATE_FREE) {
+      pid_cursor = i;
       return i;
+    }
   }
-  for (int i = 1; i < MAX_PROCESSES; i++) {
+  for (int k = 1; k < MAX_PROCESSES; k++) {
+    int i = pid_scan_slot(k);
     struct process *q = &proc_table[i];
     if (q->state != PROC_STATE_THREAD_DONE || process_still_running(i))
       continue;
@@ -970,6 +992,7 @@ static int thread_alloc_slot_locked(void) {
       proc_release_mem_locked(q);
     }
     q->state = PROC_STATE_FREE;
+    pid_cursor = i;
     return i;
   }
   return -1;
@@ -1107,7 +1130,8 @@ static int process_create_internal_ver(int ver) {
   int pid = -1;
   int block_idx = -1;
   uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
-  for (int i = 1; i < MAX_PROCESSES; i++) {
+  for (int k = 1; k < MAX_PROCESSES; k++) {
+    int i = pid_scan_slot(k);
     if (proc_table[i].state == PROC_STATE_FREE) {
       /* GB-159: if the previous pid's CPU is still in its teardown tail, the
          slot is not reusable yet -- reusing it would collide the pid and free
@@ -1136,6 +1160,8 @@ static int process_create_internal_ver(int ver) {
     }
   }
 
+  if (pid >= 0)
+    pid_cursor = pid;
   if (pid < 0) {
     /* No free slots: reclaim zombies that can never be reaped —
        processes whose parent no longer exists or never did (kernel
@@ -1143,7 +1169,8 @@ static int process_create_internal_ver(int ver) {
        boot-loaded program is in this class once it exits).  Zombies of a LIVE parent are
        left alone: the parent may still waitpid() them.  Slot 0 is
        reserved and never handed out here either. */
-    for (int i = 1; i < MAX_PROCESSES && pid < 0; i++) {
+    for (int k = 1; k < MAX_PROCESSES && pid < 0; k++) {
+      int i = pid_scan_slot(k);
       struct process *q = &proc_table[i];
       if (q->state != PROC_STATE_EXITED || process_still_running(i))
         continue;
@@ -1161,7 +1188,8 @@ static int process_create_internal_ver(int ver) {
     /* P1 (design section 1): THREAD_DONE slots are reusable only once the
        thread is off every CPU; a leader's slot additionally requires every
        group member dead (live_threads == 0). */
-    for (int i = 1; i < MAX_PROCESSES && pid < 0; i++) {
+    for (int k = 1; k < MAX_PROCESSES && pid < 0; k++) {
+      int i = pid_scan_slot(k);
       struct process *q = &proc_table[i];
       if (q->state != PROC_STATE_THREAD_DONE || process_still_running(i))
         continue;
@@ -1173,6 +1201,8 @@ static int process_create_internal_ver(int ver) {
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
     }
+    if (pid >= 0)
+      pid_cursor = pid;
     if (pid < 0) {
       spinlock_release_irqrestore(&proc_lock, p_flags);
       /* D5.6 slot forensics: how many slots are zombies (EXITED with a
