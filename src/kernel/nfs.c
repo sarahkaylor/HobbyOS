@@ -1783,7 +1783,7 @@ static void nfs_ra_drop_mount(const struct nfs_mount *m) {
 }
 
 int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
-                  uint32_t offset, void *buf, uint32_t len) {
+                  uint64_t offset, void *buf, uint32_t len) {
   if (!m || !m->in_use || !fh || fh->len == 0) return -1;
   /* A regular-file read() returns the whole count unless it hits EOF or an
    * error; it does not stop at the transport's rsize.  One NFS READ RPC
@@ -1809,6 +1809,7 @@ int nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
    * straight into the caller's buffer. */
   uint32_t rs = m->read_size ? m->read_size : NFS_READ_RSIZE;
   if (rs > NFS_READ_RSIZE_MAX) rs = NFS_READ_RSIZE_MAX;
+  if (len > 0x7FFFFFFFu) len = 0x7FFFFFFFu; /* the count is returned as int */
   if (nfs_perf_legacy) return nfs_read_serial_legacy(m, fh, offset, buf, len);
   if (len <= NFS_RA_MAXREQ) return nfs_ra_read(m, fh, offset, (uint8_t *)buf, len, rs);
   return nfs_read_pipelined(m, fh, offset, buf, len, rs);

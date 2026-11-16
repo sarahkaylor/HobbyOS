@@ -25,6 +25,12 @@
  *               reads that needed no window fill (fetched / 64 KiB fills).
  *               One shared readahead window refilled on almost every page
  *               (amp ~1600%); per-file windows load each 64 KiB block once.
+ *   big5g       cp/nfs2, only when the harness staged /NBBIG.TXT (NB_BIG=1):
+ *               /NFS/big5g.bin (5 GiB + 12345) read through with 4 MiB
+ *               read()s and hashed with SHA-256 against the host's
+ *               sha256sum; fstat and lseek(SEEK_END) must give the 64-bit
+ *               size, and a 4 KiB page past 4 GiB re-read after an lseek must
+ *               match the bytes the pass saw there.
  *   done rc=<n> n = phases that failed (bad byte count or checksum)
  * MB/s is 10^6 bytes per second of guest wall time (CLOCK_MONOTONIC).
  */
@@ -32,6 +38,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/stat.h>
 #include "libc.h"
 
 #ifndef NB_EXPORT
@@ -41,6 +48,7 @@
 #define NB_MNT "/NFS"
 #define NB_FILE "/NFS/big64m.bin"
 #define NB_SIZE (64u * 1024u * 1024u)
+#define NB_BIG "/NFS/big5g.bin"     /* cp/nfs2: > 4 GiB (NB_BIG=1 only) */
 
 static void pc(const char *s) { print_console(s); }
 
@@ -256,6 +264,200 @@ static int phase_multi(void) {
   return failed ? 1 : 0;
 }
 
+/* ---- cp/nfs2: SHA-256 (FIPS 180-4), for the host's sha256sum ----------- */
+struct sha256 {
+  uint32_t h[8];
+  uint64_t n;          /* bytes hashed */
+  uint8_t b[64];
+  uint32_t bl;         /* bytes in b */
+};
+
+static const uint32_t sha256_k[64] = {
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+static uint32_t sha_ror(uint32_t x, int r) { return (x >> r) | (x << (32 - r)); }
+
+static void sha256_init(struct sha256 *s) {
+  static const uint32_t iv[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+  for (int i = 0; i < 8; i++) s->h[i] = iv[i];
+  s->n = 0;
+  s->bl = 0;
+}
+
+static void sha256_block(struct sha256 *s, const uint8_t *p) {
+  uint32_t w[64];
+  for (int i = 0; i < 16; i++)
+    w[i] = ((uint32_t)p[4 * i] << 24) | ((uint32_t)p[4 * i + 1] << 16) |
+           ((uint32_t)p[4 * i + 2] << 8) | (uint32_t)p[4 * i + 3];
+  for (int i = 16; i < 64; i++) {
+    uint32_t s0 = sha_ror(w[i - 15], 7) ^ sha_ror(w[i - 15], 18) ^ (w[i - 15] >> 3);
+    uint32_t s1 = sha_ror(w[i - 2], 17) ^ sha_ror(w[i - 2], 19) ^ (w[i - 2] >> 10);
+    w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+  }
+  uint32_t a = s->h[0], b = s->h[1], c = s->h[2], d = s->h[3];
+  uint32_t e = s->h[4], f = s->h[5], g = s->h[6], h = s->h[7];
+  for (int i = 0; i < 64; i++) {
+    uint32_t t1 = h + (sha_ror(e, 6) ^ sha_ror(e, 11) ^ sha_ror(e, 25)) +
+                  ((e & f) ^ (~e & g)) + sha256_k[i] + w[i];
+    uint32_t t2 = (sha_ror(a, 2) ^ sha_ror(a, 13) ^ sha_ror(a, 22)) +
+                  ((a & b) ^ (a & c) ^ (b & c));
+    h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+  }
+  s->h[0] += a; s->h[1] += b; s->h[2] += c; s->h[3] += d;
+  s->h[4] += e; s->h[5] += f; s->h[6] += g; s->h[7] += h;
+}
+
+static void sha256_update(struct sha256 *s, const uint8_t *p, uint64_t n) {
+  s->n += n;
+  while (n) {
+    if (s->bl == 0 && n >= 64) {
+      sha256_block(s, p);
+      p += 64;
+      n -= 64;
+      continue;
+    }
+    uint32_t k = 64 - s->bl;
+    if (k > n) k = (uint32_t)n;
+    for (uint32_t i = 0; i < k; i++) s->b[s->bl + i] = p[i];
+    s->bl += k;
+    p += k;
+    n -= k;
+    if (s->bl == 64) { sha256_block(s, s->b); s->bl = 0; }
+  }
+}
+
+/* Final digest as 64 lowercase hex characters + NUL. */
+static void sha256_hex(struct sha256 *s, char out[65]) {
+  uint64_t bits = s->n * 8;
+  uint8_t pad = 0x80;
+  uint64_t keep = s->n;
+  sha256_update(s, &pad, 1);
+  pad = 0;
+  while (s->bl != 56) sha256_update(s, &pad, 1);
+  uint8_t len[8];
+  for (int i = 0; i < 8; i++) len[i] = (uint8_t)(bits >> (56 - 8 * i));
+  sha256_update(s, len, 8);
+  s->n = keep;
+  static const char hx[] = "0123456789abcdef";
+  for (int i = 0; i < 8; i++)
+    for (int j = 0; j < 8; j++) out[8 * i + j] = hx[(s->h[i] >> (28 - 4 * j)) & 15];
+  out[64] = 0;
+}
+
+/* ---- cp/nfs2: large files and large reads ----------------------------- */
+/* "<bytes> <sha256 hex>" from a staged FAT file; 0 when absent. */
+static int read_expect(const char *path, uint64_t *size, char sha[65]) {
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) return 0;
+  char e[128];
+  int r = (int)read(fd, e, sizeof e - 1);
+  close(fd);
+  if (r <= 0) return 0;
+  e[r] = 0;
+  uint64_t v = 0;
+  int i = 0;
+  while (e[i] >= '0' && e[i] <= '9') v = v * 10 + (uint64_t)(e[i++] - '0');
+  while (e[i] == ' ') i++;
+  for (int k = 0; k < 64; k++) sha[k] = e[i + k];
+  sha[64] = 0;
+  *size = v;
+  return v > 0;
+}
+
+static int str_eq(const char *a, const char *b) {
+  while (*a && *a == *b) { a++; b++; }
+  return *a == *b;
+}
+
+static void big_row(const char *name, uint64_t got, uint64_t want, uint64_t us,
+                    const char *sha, int match, const char *extra, int ok) {
+  char line[256];
+  int n = 0;
+  const char *p = "[NB] ";
+  while (*p) line[n++] = *p++;
+  for (p = name; *p; p++) line[n++] = *p;
+  kv(line, &n, " bytes=", (unsigned long)got);
+  kv(line, &n, " want=", (unsigned long)want);
+  kv(line, &n, " ms=", (unsigned long)(us / 1000));
+  unsigned long centi = us ? (unsigned long)(got * 100u / us) : 0;
+  kv(line, &n, " MBps=", centi / 100);
+  line[n++] = '.';
+  line[n++] = (char)('0' + (centi / 10) % 10);
+  line[n++] = (char)('0' + centi % 10);
+  for (p = " sha256="; *p; p++) line[n++] = *p;
+  for (p = sha; *p; p++) line[n++] = *p;
+  for (p = match ? " match" : " MISMATCH"; *p; p++) line[n++] = *p;
+  for (p = extra; *p; p++) line[n++] = *p;
+  for (p = ok ? " ok\n" : " FAIL\n"; *p; p++) line[n++] = *p;
+  line[n] = 0;
+  pc(line);
+}
+
+/* Item 2: /NFS/big5g.bin (> 4 GiB) read through with 4 MiB read()s, hashed;
+ * fstat and lseek(SEEK_END) must report the 64-bit size; a 4 KiB page past
+ * 4 GiB re-read after an lseek must equal the bytes the stream had there.
+ * Runs only when the harness staged /NBBIG.TXT (NB_BIG=1). */
+#define BIG_CHUNK (4u * 1024u * 1024u)
+#define BIG_PROBE (0x100000000ULL + 0x800000ULL + 123u) /* 4 GiB + 8 MiB + 123 */
+static int phase_big(void) {
+  uint64_t size = 0;
+  char want[65], got[65];
+  if (!read_expect("/NBBIG.TXT", &size, want)) return 0;   /* not staged */
+  int fd = open(NB_BIG, O_RDONLY);
+  if (fd < 0) { pc("[NB] big5g open FAIL\n"); return 1; }
+  struct stat st;
+  int st_ok = fstat(fd, &st) == 0 && (uint64_t)st.st_size == size;
+  int end_ok = (uint64_t)lseek(fd, 0, SEEK_END) == size;
+  int set_ok = lseek(fd, 0, SEEK_SET) == 0;
+  uint8_t *b = (uint8_t *)malloc(BIG_CHUNK);
+  static uint8_t probe[4096], again[4096];
+  if (!b) { close(fd); pc("[NB] big5g malloc FAIL\n"); return 1; }
+  struct sha256 s;
+  sha256_init(&s);
+  uint64_t done = 0;
+  uint64_t t0 = now_us();
+  while (done < size) {
+    ssize_t r = read(fd, b, BIG_CHUNK);
+    if (r <= 0) break;
+    {                                               /* keep the probe page */
+      uint64_t lo = done > BIG_PROBE ? done : BIG_PROBE;
+      uint64_t hi = done + (uint64_t)r;
+      if (hi > BIG_PROBE + sizeof probe) hi = BIG_PROBE + sizeof probe;
+      for (uint64_t o = lo; o < hi; o++) probe[o - BIG_PROBE] = b[o - done];
+    }
+    sha256_update(&s, b, (uint64_t)r);
+    done += (uint64_t)r;
+  }
+  uint64_t us = now_us() - t0;
+  sha256_hex(&s, got);
+  int seek_ok = (uint64_t)lseek(fd, (off_t)BIG_PROBE, SEEK_SET) == BIG_PROBE &&
+                read(fd, again, sizeof again) == (ssize_t)sizeof again;
+  for (unsigned i = 0; seek_ok && i < sizeof again; i++)
+    if (again[i] != probe[i]) seek_ok = 0;
+  close(fd);
+  free(b);
+  int match = str_eq(got, want);
+  char extra[96];
+  int n = 0;
+  const char *p;
+  for (p = st_ok ? " fstat=ok" : " fstat=BAD"; *p; p++) extra[n++] = *p;
+  for (p = end_ok ? " seek_end=ok" : " seek_end=BAD"; *p; p++) extra[n++] = *p;
+  for (p = (seek_ok && set_ok) ? " page_past_4g=ok" : " page_past_4g=BAD"; *p; p++) extra[n++] = *p;
+  extra[n] = 0;
+  int ok = done == size && match && st_ok && end_ok && set_ok && seek_ok;
+  big_row("big5g", done, size, us, got, match, extra, ok);
+  return ok ? 0 : 1;
+}
+
 /* Read `total` bytes from the start of NB_FILE in `chunk`-byte read()s.
  * Returns 0 when the byte count is right (and, for the full file, the
  * checksum matches `expect`). */
@@ -338,6 +540,7 @@ int main(void) {
   fails += phase("seq1344", 1344, 4u * 1024u * 1024u, 0, 0);
   fails += phase_conc();
   fails += phase_multi();
+  fails += phase_big();
   char d[40];
   int m = 0;
   const char *p = "[NB] done rc=";

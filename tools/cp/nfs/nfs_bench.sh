@@ -12,7 +12,11 @@
 # boot, and checks every non-cp line is unchanged); the EXIT trap removes our
 # line and the export directory.  The boot runs in a QEMU slot
 # (tools/cp/qemu-slot.sh), so benches of different trees can run at once.
-# Env: NB_EXPORT (default /srv/nfs/cp-nfs-bench-<tree dir name>), NB_TIMEOUT (default 420).
+# Env: NB_EXPORT (default /srv/nfs/cp-nfs-bench-<tree dir name>), NB_TIMEOUT (default 420),
+#      NB_BIG=1 (cp/nfs2, Gate P3's NFS half): also export a 5 GiB + 12345
+#      byte file and let the guest SHA-256 it against the host's sha256sum.
+#      It is written under $TREE/obj (strix: the root filesystem, never
+#      /mnt/fast), renamed into the export dir, and removed with it.
 set -uo pipefail
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TREE="$(cd "${1:-$SELF}" && pwd)"
@@ -42,10 +46,20 @@ for k in 0 1 2 3 4 5; do
   seed=$(python3 -I -c "print(hex(0x9e3779b97f4a7c15 ^ (($k + 1) * 0xbf58476d1ce4e5b9 % 2**64)))")
   "$OUT/fnv64" "$OUT/m$k.bin" $((2 * 1024 * 1024)) "$seed" > /dev/null || die "data m$k"
 done
+BIG=""
+if [ "${NB_BIG:-0}" = 1 ]; then
+  BIG_BYTES=$((5 * 1024 * 1024 * 1024 + 12345))
+  case "$(df -P "$OUT" | awk 'NR==2{print $6}')" in /mnt/fast*) die "refusing to write 5 GiB under /mnt/fast";; esac
+  "$OUT/fnv64" "$OUT/big5g.bin" $BIG_BYTES 0x2545f4914f6cdd1d > /dev/null || die "data big5g"
+  echo "$BIG_BYTES $(sha256sum "$OUT/big5g.bin" | cut -c1-64)" > "$OUT/big.txt"
+  echo "== data: big5g.bin $(cat "$OUT/big.txt")"
+  BIG="$OUT/big5g.bin"
+fi
 printf 'CPNFSB.BIN\n' > "$OUT/wave.cfg"
 STAGE="mcopy -o -i $TREE/disk.img $OUT/nb.bin ::/CPNFSB.BIN && mcopy -o -i $TREE/disk.img $OUT/expect.txt ::/NBEXPECT.TXT && mcopy -o -i $TREE/disk.img $OUT/wave.cfg ::/WAVE.CFG"
+[ -n "$BIG" ] && STAGE="$STAGE && mcopy -o -i $TREE/disk.img $OUT/big.txt ::/NBBIG.TXT"
 
-export TREE OUT EXPORT STAGE NB_TIMEOUT="${NB_TIMEOUT:-420}"
+export TREE OUT EXPORT STAGE BIG NB_TIMEOUT="${NB_TIMEOUT:-420}"
 # The export dir and its files first, then the export (tools/cp/exports.sh
 # holds /tmp/cp-exports.lock only while it edits /etc/exports), then the boot
 # in a QEMU slot.  The EXIT trap removes exactly our line and the directory.
@@ -54,10 +68,12 @@ cleanup() {
   trap - EXIT INT TERM HUP
   [ "$ADDED" = 1 ] && bash "$SELF/tools/cp/exports.sh" remove "$EXPORT"
   sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"
+  rm -f "$OUT/big5g.bin"   # if the run stopped before it moved into the export
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM HUP
 sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$OUT"/m?.bin "$EXPORT/" || die "export dir"
+if [ -n "$BIG" ]; then sudo -n mv "$BIG" "$EXPORT/" || die "big5g into the export"; fi
 sudo -n chmod -R a+rX "$EXPORT" || die "chmod"
 ADDED=1
 bash "$SELF/tools/cp/exports.sh" add "$EXPORT" || die "exports.sh add"

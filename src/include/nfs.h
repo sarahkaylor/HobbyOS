@@ -280,8 +280,12 @@ int  nfs_lookup(const struct nfs_mount *m, const char *rel,
                 struct nfs_fh *fh, struct nfs_attr *a);
 int  nfs_getattr(const struct nfs_mount *m, const struct nfs_fh *fh,
                  struct nfs_attr *a);
+/* cp/nfs2: `offset` is 64-bit (files > 4 GiB); `len` may be anything up to
+ * INT_MAX (one read() of the game's 172 MB shader cache streams straight into
+ * the caller's buffer).  Returns bytes read (short only at end of file), or
+ * -1 when nothing could be read. */
 int  nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
-                   uint32_t offset, void *buf, uint32_t len);
+                   uint64_t offset, void *buf, uint32_t len);
 /* cp/exec: READLINK3 on a symlink handle; fills *out (NUL-terminated), returns
  * the length or < 0.  nfs_lookup follows symlinks itself, so callers rarely
  * need this directly. */

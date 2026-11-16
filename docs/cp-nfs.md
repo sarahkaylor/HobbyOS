@@ -176,6 +176,31 @@ all pages right and `amp_pct` (READ bytes / bytes read) <= 200.
 | multi6 hit_pct_est | 78 | 93 |
 | conc6 / multi6 pages | all correct | all correct |
 
+## 9. 64-bit offsets and files > 4 GiB (cp/nfs2, item 2)
+
+Audit of every offset and size on the NFS read, getattr, lseek and
+page-cache paths:
+
+| Where | Was | Now |
+|---|---|---|
+| `nfs_read_file()` (nfs.h) | `uint32_t offset` | `uint64_t`; count clamped to INT_MAX (returned as int) |
+| serial READ, pipeline slots, `issue_off`/`contig`/`end`, windows | `uint32_t` (a READ past 4 GiB asked the server for offset mod 2^32) | `uint64_t` |
+| `struct file.nfs.cursor`, `.ra_next` (fs.h) | `uint32_t`: read() wrapped to offset 0 after 4 GiB | `uint64_t` |
+| `file_seek()` NFS branch | `cursor = (uint32_t)newpos` | 64-bit |
+| `l76_nfs_read()` window/page cache (fs.c) | `uint32_t off`, `base = off & ~(uint32_t)4095` | 64-bit (the mask no longer clears the high half) |
+| `file_nfs_ident()` size for mmap | `(uint32_t)size`: a 4 GiB + 10 MB file mapped as 10 MB | saturates at 0xFFFFFFFF, so the page cache's size cap refuses it |
+| fattr3 size, `f->nfs.size`, `k_stat.st_size` | already 64-bit | unchanged |
+| `nfs_obj_get()`/`nfs_obj_page()` (file_obj.c), the NFS reads in `vm.c` | `uint32_t` sizes/offsets | unchanged: objects are capped at `VM_OBJ_MAX_BYTES` (< 4 GiB) and a > 4 GiB file no longer reaches them; the casts are for C3-pfx/C1-k4 when that cap grows past 4 GiB |
+| readdir cache sizes (`nfs_list_dir` `size_out`) | `uint32_t` | unchanged (native `ls` only; the API is vfs.c's) |
+
+Gate (`NB_BIG=1 bash tools/cp/nfs/nfs_bench.sh`): a 5 GiB + 12345 byte
+xorshift file, written under `obj/` on strix's root filesystem, renamed
+into the export and removed with it; the guest reads it with 4 MiB read()s
+(the direct pipeline) and SHA-256s it (`cpnfsbench`'s own SHA-256, checked
+against `sha256sum` on the host), checks fstat and `lseek(SEEK_END)` give
+the 64-bit size, and re-reads a 4 KiB page at 4 GiB + 8 MiB + 123 through
+the window path after an lseek.
+
 ## 14. nfs_bench.sh on QEMU slots (cp/nfs2)
 
 `nfs_bench.sh` (and so `rsize_guard.sh`) no longer holds

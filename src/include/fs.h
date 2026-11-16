@@ -155,8 +155,10 @@ struct file {
     struct {
       struct nfs_fh fh;            /**< NFSv3 file handle */
       uint64_t size;               /**< Size from the open attributes */
-      uint32_t cursor;             /**< Current read position */
-      uint32_t ra_next;            /**< L76: end of the previous read */
+      uint64_t cursor;             /**< Current read position (cp/nfs2: 64-bit,
+                                        files > 4 GiB; a directory's getdents
+                                        resume index) */
+      uint64_t ra_next;            /**< L76: end of the previous read */
       int ra_seq;                  /**< L76: consecutive sequential reads */
       int is_dir;                  /**< Opened entry is a directory */
       int mount_idx;               /**< Index of the mount serving it */
