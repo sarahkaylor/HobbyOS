@@ -378,7 +378,7 @@ int nfs_symlink_join(const char *base, const char *target, char *out,
     if (n == 0 || work[n - 1] != '/') { if (n < (int)sizeof work - 1) work[n++] = '/'; }
     for (int i = 0; target[i] && n < (int)sizeof work - 1; i++) work[n++] = target[i];
   }
-  work[n] = ' ';
+  work[n] = '\0';
   /* canonicalize into out */
   int o = 0;
   if (cap < 2) return -1;
@@ -399,7 +399,7 @@ int nfs_symlink_join(const char *base, const char *target, char *out,
     if (o > 1) { if (o >= cap - 1) return -1; out[o++] = '/'; }
     for (int k = 0; k < len; k++) { if (o >= cap - 1) return -1; out[o++] = work[s + k]; }
   }
-  out[o] = ' ';
+  out[o] = '\0';
   return 0;
 }
 
@@ -434,6 +434,38 @@ int nfs_parse_fsstat_reply(const uint8_t *body, int len, uint64_t *total,
   if (total) *total = t;
   if (avail) *avail = f ? f : a;      /* prefer free, fall back to available */
   return 0;
+}
+
+int nfs_parse_fsinfo_reply(const uint8_t *body, int len, uint32_t *rtmax,
+                           uint32_t *rtpref) {
+  struct xdr_r r;
+  xdr_r_init(&r, body, len);
+  uint32_t status;
+  if (parse_status(&r, &status) != 0) return -1;
+  if (status != 0) return -2;
+  if (nfs_parse_post_op_attr(&r, 0, 0) != 0) return -1; /* obj_attributes */
+  uint32_t mx = xdr_r_u32(&r);                            /* rtmax */
+  uint32_t pf = xdr_r_u32(&r);                            /* rtpref */
+  (void)xdr_r_u32(&r);                                    /* rtmult */
+  (void)xdr_r_u32(&r); (void)xdr_r_u32(&r); (void)xdr_r_u32(&r); /* wt* */
+  (void)xdr_r_u32(&r);                                    /* dtpref */
+  (void)xdr_r_u64(&r);                                    /* maxfilesize */
+  (void)xdr_r_u32(&r); (void)xdr_r_u32(&r);               /* time_delta */
+  (void)xdr_r_u32(&r);                                    /* properties */
+  if (!xdr_r_ok(&r)) return -1;
+  if (rtmax) *rtmax = mx;
+  if (rtpref) *rtpref = pf;
+  return 0;
+}
+
+uint32_t nfs_pick_rsize(uint32_t rtmax, uint32_t rtpref) {
+  if (rtmax == 0) return NFS_READ_RSIZE;
+  uint32_t v = rtpref ? rtpref : rtmax;
+  if (v > rtmax) v = rtmax;
+  if (v > NFS_READ_RSIZE_MAX) v = NFS_READ_RSIZE_MAX;
+  v &= ~(uint32_t)4095;
+  if (v < NFS_READ_RSIZE) v = NFS_READ_RSIZE;
+  return v;
 }
 
 int nfs_parse_mount_reply(const uint8_t *body, int len, struct nfs_fh *fh,

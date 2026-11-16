@@ -19,11 +19,11 @@
  * WRITE/CREATE/REMOVE: NFS directories are presented read-only and the
  * kernel returns failure for mutations, exactly like a read-only mount.
  *
- * Every request and reply is kept under a 1500-byte Ethernet frame: the
- * network stack does not reassemble IP fragments, so the client must never
- * provoke one.  READ uses a 1344-byte rsize (1472-byte datagram minus the
- * READ reply's 128 bytes of RPC/NFS overhead) and READDIRPLUS a 1200-byte
- * maxcount hint.
+ * Every REQUEST is kept under one 1500-byte Ethernet frame (the stack never
+ * emits a fragment).  Replies may span many: cp/nfs added IPv4 receive-side
+ * reassembly (net.c), so READ uses the size the server's FSINFO offers, up to
+ * NFS_READ_RSIZE_MAX (32 KiB), with the single-frame 1344-byte rsize as the
+ * fallback.  READDIRPLUS keeps its 1200-byte maxcount hint.
  */
 
 /* ---- sizes ----------------------------------------------------------- */
@@ -55,7 +55,14 @@
  * returns fewer bytes than asked for on a non-EOF read, read_size becomes
  * that count, so a server with a smaller rsize is honoured instead of
  * retried forever. */
-#define NFS_READ_RSIZE      1344   /* READ rsize actually requested */
+#define NFS_READ_RSIZE      1344   /* single-frame READ: the fallback size */
+/* cp/nfs: since the stack reassembles IP fragments (net.c ipr_*), a mount
+ * asks the server (FSINFO) and reads min(rtpref, rtmax, NFS_READ_RSIZE_MAX)
+ * per RPC; the reply then arrives as ~23 fragments that are reassembled
+ * before UDP demux.  If large READs keep timing out (a path that drops
+ * fragments) the mount falls back to NFS_READ_RSIZE and says so. */
+#define NFS_READ_RSIZE_MAX  32768
+#define NFS_RPC_RBIG        (NFS_READ_RSIZE_MAX + 1024) /* a READ reply datagram */
 #define NFS_READ_DEPTH      16     /* READs kept outstanding per read() */
 #define NFS_READDIR_DCOUNT  512    /* READDIRPLUS dircount hint */
 #define NFS_READDIR_MAXC    1200   /* READDIRPLUS maxcount hint */
@@ -100,6 +107,7 @@
 #define NFS_PROC_READLINK   5
 #define NFS_PROC_READDIRPLUS 17
 #define NFS_PROC_FSSTAT     18
+#define NFS_PROC_FSINFO     19 /* cp/nfs: rtmax/rtpref for the READ size */
 
 /* ftype3 */
 #define NF3REG              1
@@ -222,6 +230,13 @@ int nfs_parse_readlink_reply(const uint8_t *body, int len, char *out, int cap);
 int nfs_symlink_join(const char *base, const char *target, char *out, int cap);
 int nfs_parse_fsstat_reply(const uint8_t *body, int len, uint64_t *total,
                            uint64_t *avail);
+/* cp/nfs: FSINFO3resok's rtmax/rtpref (RFC 1813 3.3.19).  0 / -2 status / -1. */
+int nfs_parse_fsinfo_reply(const uint8_t *body, int len, uint32_t *rtmax,
+                           uint32_t *rtpref);
+/* cp/nfs: the READ size a mount uses for a server's FSINFO answer:
+ * min(rtpref (or rtmax when rtpref is 0), rtmax, NFS_READ_RSIZE_MAX), rounded
+ * down to 4 KiB, never below NFS_READ_RSIZE; NFS_READ_RSIZE when unknown. */
+uint32_t nfs_pick_rsize(uint32_t rtmax, uint32_t rtpref);
 /* 0 ok; -2 when the server refused (status != 0); *auth_unix_ok reports
  * whether AUTH_UNIX is among the flavors the server offered. */
 int nfs_parse_mount_reply(const uint8_t *body, int len, struct nfs_fh *fh,

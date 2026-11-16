@@ -461,6 +461,39 @@ static void test_readlink_and_join(void) {
         strcmp(out, "/wine") == 0, "join at root: /wineboot + wine");
 }
 
+/* cp/nfs: FSINFO3 parse + the READ size policy. */
+static void test_fsinfo_and_rsize(void) {
+  printf("-- cp/nfs: FSINFO3 parse + rsize policy\n");
+  uint8_t msg[256];
+  struct xdr_w w;
+  xdr_w_init(&w, msg, sizeof msg);
+  xdr_w_u32(&w, 0);          /* NFS3_OK */
+  xdr_w_u32(&w, 0);          /* obj_attributes: not present */
+  xdr_w_u32(&w, 1048576);    /* rtmax */
+  xdr_w_u32(&w, 32768);      /* rtpref */
+  xdr_w_u32(&w, 4096);       /* rtmult */
+  xdr_w_u32(&w, 1048576); xdr_w_u32(&w, 32768); xdr_w_u32(&w, 4096);
+  xdr_w_u32(&w, 32768);      /* dtpref */
+  xdr_w_u64(&w, 0xFFFFFFFFFFFFULL);
+  xdr_w_u32(&w, 0); xdr_w_u32(&w, 1);
+  xdr_w_u32(&w, 0x1b);       /* properties */
+  uint32_t mx = 0, pf = 0;
+  check(w.err == 0 && nfs_parse_fsinfo_reply(msg, w.len, &mx, &pf) == 0 &&
+        mx == 1048576 && pf == 32768, "FSINFO: rtmax 1 MiB, rtpref 32 KiB");
+  check(nfs_parse_fsinfo_reply(msg, w.len - 4, &mx, &pf) == -1,
+        "FSINFO: a truncated reply is refused");
+  xdr_w_init(&w, msg, sizeof msg);
+  xdr_w_u32(&w, 10001);      /* NFS3ERR_BADHANDLE */
+  check(nfs_parse_fsinfo_reply(msg, w.len, &mx, &pf) == -2, "FSINFO: status error -> -2");
+  check(nfs_pick_rsize(1048576, 32768) == 32768, "rsize: rtpref 32 KiB");
+  check(nfs_pick_rsize(1048576, 1048576) == NFS_READ_RSIZE_MAX, "rsize: capped at 32 KiB");
+  check(nfs_pick_rsize(8192, 32768) == 8192, "rsize: never above rtmax");
+  check(nfs_pick_rsize(65536, 0) == 32768, "rsize: rtpref 0 -> rtmax, capped");
+  check(nfs_pick_rsize(0, 0) == NFS_READ_RSIZE, "rsize: no answer -> single-frame");
+  check(nfs_pick_rsize(1024, 1024) == NFS_READ_RSIZE, "rsize: never below single-frame");
+  check(nfs_pick_rsize(20000, 20000) == 16384, "rsize: rounded down to 4 KiB");
+}
+
 int main(void) {
   printf("=== nfs_proto host tests (real nfsd fixtures) ===\n");
 
@@ -470,6 +503,7 @@ int main(void) {
   test_writer_and_reader();
   test_reply_envelope_rules();
   test_readlink_and_join();
+  test_fsinfo_and_rsize();
 
   printf("\n=== Results: %d checks run, %d failed ===\n",
          checks_run, checks_failed);

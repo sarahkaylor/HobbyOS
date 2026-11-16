@@ -450,6 +450,85 @@ static void test_net_ether_padding(void) {
   net_test_end(pid);
 }
 
+/* cp/nfs: IPv4 receive-side reassembly.  A 3000-byte UDP payload arrives as
+ * three fragments, out of order and with a duplicate, as slirp sends a large
+ * NFS READ reply; the socket must see ONE datagram with exactly those bytes.
+ * A lone fragment of another datagram delivers nothing, and an MF fragment
+ * whose length is not a multiple of 8 is refused. */
+static void reass_frag(uint8_t *f, uint16_t id, const uint8_t *dgram,
+                       uint32_t off, uint32_t len, int mf) {
+  struct eth_hdr *eth = (struct eth_hdr *)f;
+  struct ipv4_hdr *ip = (struct ipv4_hdr *)(f + sizeof(struct eth_hdr));
+  for (int i = 0; i < 6; i++) { eth->dst_mac[i] = 0x52; eth->src_mac[i] = 0x53; }
+  eth->type = htons(ETH_TYPE_IPV4);
+  ip->version = 4;
+  ip->ihl = 5;
+  ip->tos = 0;
+  ip->total_len = htons((uint16_t)(sizeof(struct ipv4_hdr) + len));
+  ip->id = htons(id);
+  ip->frag_off = htons((uint16_t)((mf ? 0x2000 : 0) | (off / 8)));
+  ip->ttl = 64;
+  ip->protocol = IP_PROTO_UDP;
+  ip->checksum = 0;
+  ip->src_ip = 0x0202000Au;
+  ip->dst_ip = 0x0F02000Au;
+  uint8_t *p = f + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr);
+  for (uint32_t i = 0; i < len; i++) p[i] = dgram[off + i];
+}
+
+static void test_net_ipv4_reassembly(void) {
+  uart_puts("  Running test_net_ipv4_reassembly...\n");
+  tests_run++;
+  net_set_ip(0x0F02000Au, 0x00FFFFFFu, 0x0202000Au);
+  net_refresh_mac();
+  struct socket_pcb *pcb = net_socket_create(IP_PROTO_UDP);
+  ASSERT(pcb != 0);
+
+  enum { PAY = 3000, DG = 8 + PAY };
+  static uint8_t dgram[DG];
+  struct udp_hdr *u = (struct udp_hdr *)dgram;
+  u->src_port = htons(2049);
+  u->dst_port = htons(pcb->local_port);
+  u->length = htons(DG);
+  u->checksum = 0;
+  for (int i = 0; i < PAY; i++) dgram[8 + i] = (uint8_t)(i * 7 + 1);
+
+  static uint8_t fr[3][sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + 1480];
+  reass_frag(fr[0], 0x4242, dgram, 0, 1480, 1);
+  reass_frag(fr[1], 0x4242, dgram, 1480, 1480, 1);
+  reass_frag(fr[2], 0x4242, dgram, 2960, DG - 2960, 0);
+  uint32_t l0 = sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + 1480;
+  uint32_t l2 = sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + (DG - 2960);
+
+  /* last first, then a duplicate middle, then the middle again, then the head */
+  net_rx_packet(fr[2], l2);
+  EXPECT_EQ(net_socket_available(pcb), 0);
+  net_rx_packet(fr[1], l0);
+  net_rx_packet(fr[1], l0);
+  EXPECT_EQ(net_socket_available(pcb), 0);
+  /* an orphan fragment of a different datagram (id 0x4343): no delivery */
+  static uint8_t orphan[sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + 1480];
+  reass_frag(orphan, 0x4343, dgram, 1480, 1480, 1);
+  net_rx_packet(orphan, l0);
+  /* an MF fragment whose length is not a multiple of 8 is refused */
+  static uint8_t odd[sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + 100];
+  reass_frag(odd, 0x4444, dgram, 0, 100 - 3, 1);
+  net_rx_packet(odd, sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + 97);
+  EXPECT_EQ(net_socket_available(pcb), 0);
+
+  net_rx_packet(fr[0], l0);
+  EXPECT_EQ(net_socket_available(pcb), PAY);
+  static uint8_t got[PAY + 16];
+  int n = net_socket_recv_timeout(pcb, got, sizeof got, 100);
+  EXPECT_EQ(n, PAY);
+  int match = (n == PAY);
+  for (int i = 0; match && i < PAY; i++)
+    if (got[i] != (uint8_t)(i * 7 + 1)) match = 0;
+  EXPECT_EQ(match, 1);
+  EXPECT_EQ(net_socket_available(pcb), 0);
+  net_socket_close(pcb);
+}
+
 void net_test_suite(void) {
   uart_puts("Running net stack tests...\n");
   net_test();
@@ -458,6 +537,7 @@ void net_test_suite(void) {
   test_net_select_engine();
   test_net_getrandom();
   test_net_ether_padding();
+  test_net_ipv4_reassembly();
 }
 
 #endif

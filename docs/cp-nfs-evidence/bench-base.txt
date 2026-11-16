@@ -1,0 +1,17 @@
+cp/nfs bench, BASE tree c635edce. Command: bash tools/cp/nfs/nfs_bench.sh ~/cp/lanes/nfs-base
+
+== build: tree /home/sarah/cp/lanes/nfs-base (intel, test) + cpnfsbench.bin
+== data: 64 MiB, fnv1a64=7a56a810ac49cd58
+== /etc/exports restored (cmp identical to backup)
+== removed /srv/nfs/cp-nfs-bench
+[NB] cp/nfs throughput bench
+[NFS] mounted 10.0.2.2:/srv/nfs/cp-nfs-bench at /NFS
+[NB] mount 10.0.2.2:/srv/nfs/cp-nfs-bench -> /NFS ok
+[NB] seq65536 bytes=67108864 ms=817 MBps=82.14 fnv=0x7a56a810ac49cd58 match ok
+[NB] seq4096 bytes=16777216 ms=219 MBps=76.60 fnv=0xb4a2bb4ec2694432 ok
+[NB] seq1344 bytes=4194304 ms=60 MBps=69.90 fnv=0x5d242dd7ec48c3b6 ok
+[NB] done rc=0
+[NFSPIPE] len=65536 rs=1344 issued=49 replies=49 short=0 bad=0 got=65536 us=4713 first_count=1344
+[NFSPIPE] len=65536 rs=1344 issued=49 replies=49 short=0 bad=0 got=65536 us=635 first_count=1344
+[NFSPIPE] len=65536 rs=1344 issued=49 replies=49 short=0 bad=0 got=65536 us=695 first_count=1344
+nfs_bench: PASS (/home/sarah/cp/lanes/nfs-base)
