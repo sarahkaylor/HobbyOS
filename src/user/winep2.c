@@ -46,6 +46,9 @@
 #define P2_WINEDEBUG "err+all,fixme-all"
 #endif
 #define MNT "/CP"
+#ifndef P2_B2_INIT_WAIT_S
+#define P2_B2_INIT_WAIT_S 600 /* boot 2: the bounded wait for wineboot --init */
+#endif
 #ifndef P2_BOOT_QUIESCE_S
 #define P2_BOOT_QUIESCE_S 3600 /* run23 finished near 1500 s: the shared NFS
                                      readahead window thrashes (docs/cp-nfs.md §7) */
@@ -169,7 +172,7 @@ static int name_is(const char *a, const char *b) {
   for (; a[i] && b[i]; i++) if (a[i] != b[i]) return 0;
   return a[i] == b[i];
 }
-static void wait_gone(const char *name, int secs) {
+static __attribute__((unused)) void wait_gone(const char *name, int secs) {
   uint64_t t0 = now_ms();
   int n = 0;
   for (int t = 0; t < secs; t++) {
@@ -219,8 +222,12 @@ int main(void) {
      NFS that --init (services.exe, the winedevice drivers) takes longer than
      5 min (measured in the first two-boot run: winprobe, started 2 min after
      echo, sat in "boot event wait timed out" until its 300 s step timeout).
-     So wait for wineboot.exe itself to finish before the graded steps. */
-  wait_gone("wineboot.exe", P2_BOOT_QUIESCE_S);
+     So wait for wineboot.exe itself to finish before the graded steps --
+     bounded: in runs 1 and 3 that --init never finished (every client
+     BLOCKED in read() on its server reply pipe, wineserver polling: the
+     C1-k4 lost-wakeup shape, docs/cp-pfx.md §1.5); later clients then wait
+     out Wine's 5-minute boot-event timeout and run (echo did: 344 s). */
+  wait_gone("wineboot.exe", P2_B2_INIT_WAIT_S);
   char *a_wp2[] = { (char *)"wine", (char *)"Z:\\CP\\WPROBE\\winprobe.exe", 0 };
   step("winprobe", "/CP/WINE/bin/wine", a_wp2, 900);
   char *a_cp2[] = { (char *)"wine", (char *)"cmd", (char *)"/c", (char *)"copy", (char *)"/y",

@@ -34,7 +34,7 @@
 #      WINE_EXPORT (default /srv/nfs/cp-wine2-p2), TIMEOUT_S (default 7200),
 #      P2_WINEDEBUG (default err+all,fixme-all), QEMU_MEM (default unset),
 #      P2_BOOT_ONLY=1 (iteration aid: only wineboot -i, then wineserver -k;
-#      never a gate result).
+#      never a gate result), P2_GRADE_ONLY=1 (re-grade $OUT, no boot).
 #
 # P2_PFX=1: the prefix-on-ext2 mode (lane C3-pfx, Gate P3 "the prefix survives
 # a reboot", docs/cp-pfx.md).  WINEPREFIX=/EXT/pfx on a fresh
@@ -74,6 +74,9 @@ MARKERS="$ROOT/tools/cp/winprobe-markers.txt"
 die() { echo "wine-p2: $*" >&2; exit 2; }
 export MAKEFLAGS="${MAKEFLAGS:--j16}" TOOLS_SKIP="${TOOLS_SKIP:-1}"
 
+# P2_GRADE_ONLY=1: re-grade the files of the last run in $OUT (no build, no
+# export, no boot) -- e.g. after a grader fix.
+if [ -z "${P2_GRADE_ONLY:-}" ]; then
 for t in clang ld.lld llvm-objcopy mcopy mmd qemu-system-x86_64 exportfs cmp; do
   command -v "$t" >/dev/null 2>&1 || die "missing $t"
 done
@@ -237,6 +240,9 @@ else
   p2_boot "$LOG"
 fi
 
+fi # P2_GRADE_ONLY
+PIMG="$OUT/cpdata-pfx.img"
+
 # ---- grade -------------------------------------------------------------------
 # No pipefail here: `span ... | grep -q` exits early, awk takes SIGPIPE, and
 # under pipefail a found marker reads as missing (measured: "hello" printed,
@@ -264,7 +270,7 @@ endrow kill | grep -q 'status=0 ' && grep -aq '^\[P2\] ps-extra count=0$' "$S" &
 echo "G1 wine cmd /c echo hello prints hello : $G1   ($(endrow echo))"
 echo "G2 winprobe.exe every marker + exit 0  : $G2   ($(endrow winprobe); $(wc -l < "$MARKERS") markers, $miss missing/failed)"
 echo "G3 wineserver -k leaves no processes   : $G3   ($(endrow kill); $(grep -a 'ps-extra' "$S" | tail -1))"
-echo "extra: winprobe from C:\\ (tmpfs)       : $(span winprobe-c | grep -a '^\[WP\] done' | tail -1) ($(endrow winprobe-c))"
+echo "extra: winprobe from C:\\ (the prefix) : $(span winprobe-c | grep -a '^\[WP\] done' | tail -1) ($(endrow winprobe-c))"
 echo
 echo "== ps before / after"
 grep -aE '^\[P2\] ps-(before|after)' "$S"
@@ -306,18 +312,23 @@ ts2=$(cat "$OUT/manifest-b2.update-timestamp" 2>/dev/null | tr -d '\n')
 # every entry boot 1 left, except what a 2nd start rewrites on Linux too
 # (tools/cp/pfx/host_pfx_ref.sh) and what the boot-2 steps create, must be
 # byte-identical in type, mtime, size and link target
-allow='^(pfx|pfx/dosdevices|pfx/dosdevices/com[0-9]+|pfx/(system|user|userdef)\.reg)$'
+# plus pfx/drive_c's own mtime: boot 2's graded steps write into C:\ (the
+# copy of winprobe.exe, and W7's C:\winprobe.tmp, created and deleted)
+allow='^(pfx|pfx/dosdevices|pfx/dosdevices/com[0-9]+|pfx/(system|user|userdef)\.reg|pfx/drive_c)$'
 cmpm() { # cmpm changed|gone|kept|regs : compare the two manifests by path
   awk -F'\t' -v w="$1" 'NR==FNR {a[$1]=$0; next}
     { seen[$1]=1; if ($1 in a) { k++; if (a[$1]!=$0) { if (w=="changed") print $1; if (w=="regs" && $1 ~ /\.reg$/) print $1 } } }
     END { if (w=="kept") print k+0; if (w=="gone") for (p in a) if (!(p in seen)) print p }' "$M1" "$M2"
+  [ "$1" = new ] && awk -F'\t' 'NR==FNR {a[$1]=1; next} !($1 in a) {print $1}' "$M1" "$M2"
 }
 changed=$(cmpm changed | grep -Ev "$allow")
 gone=$(cmpm gone | grep -Ev "$allow")
 kept=$(cmpm kept)
 regre=$(cmpm regs | tr '\n' ' ')
+newb2=$(cmpm new | tr '\n' ' ')
 echo "== pfx: boot 2 changed entries outside the allowed set: $(printf '%s\n' "$changed" | grep -c .); gone: $(printf '%s\n' "$gone" | grep -c .)"
 printf '%s\n' "$changed" "$gone" | grep . | head -20 | sed 's/^/   /'
+echo "== pfx: entries new in boot 2: ${newb2:-none}"
 [ "$upd2" = 0 ] && [ "$cre2" = 0 ] && [ -n "$ts1" ] && [ "$ts1" = "$ts2" ] && [ -z "$changed" ] && [ -z "$gone" ] &&
   mf "$M2" pfx/system.reg | awk -F'\t' '$2=="f"' | grep -q . && P3=PASS
 echo "P3 boot 2 did not re-initialise         : $P3   (has-been-updated $upd2, created-config $cre2; .update-timestamp '$ts1' -> '$ts2'; $kept entries kept; hives re-saved: ${regre:-none})"
