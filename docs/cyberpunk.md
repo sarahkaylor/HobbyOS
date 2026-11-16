@@ -293,11 +293,9 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
         on x86_64 (ARM stays 192); new probes pipestorm, tlb, siginfo,
         manythr, execthr fail on base and pass. Gate P2 passes on the merged
         tree (G1 hello, G2 41/41, G3 clean).
-      - *Open:* wineboot's 300 s boot-event wait still expires (status 53,
-        ~320 s); after it the prefix install runs on to ~2200 s of uptime,
-        mostly wineserver/rundll32 `lstat`/`open` on the tmpfs prefix — slow,
-        not wedged. Launchers that start Wine programs right after wineboot
-        must wait for the tree to finish.
+      - *(fixed by cp-nfs2b, see below)* wineboot's 300 s boot-event wait
+        expired (status 53, ~320 s) and the prefix install ran on to ~2200 s
+        of uptime — the per-LOOKUP sockets, not tmpfs.
       - *Open, P8 ceiling:* `MAX_GLOBAL_FILES` 512 (so 256 pipes),
         `MAX_OPEN_FDS` 256, poll nfds 256; Wine uses 3 pipes per thread, so
         ~190 game threads need ~570 pipes.
@@ -307,9 +305,15 @@ no mesh shaders, no DGC/descriptor-buffer/memory-budget).
         cut a registry hive save short on `/EXT` (~125 KB/s for 4 KiB writes:
         write-through, ~5 single-block NVMe commands per write). Next storage
         step: batched write-through and multi-block commands.
-      - *Open, NFS:* with four guests the host's nfsd once went silent for
-        180 s (C3-pfx run 6, hard mount gave up correctly); C4-x2 saw retries of
-        46–64 s.
+      - *Fixed, cp-nfs2b (03a1fccf):* the 180 s NFS give-ups and 46–102 s
+        retries were host ephemeral-port exhaustion, not nfsd load: QEMU slirp
+        keeps one host UDP socket per guest port for 240 s, and the client
+        opened a fresh socket for every LOOKUP/GETATTR/READLINK/READDIRPLUS
+        (one guest held 16384 host sockets; strix has 28232 ports). Every RPC
+        on a mount now uses a pool of 6 long-lived sockets (11 host sockets at
+        most per guest); guard G10 in rsize_guard. **wineboot -i now ends with
+        status 0 in ~25 s** (run23: status 53 at 307 s), and Gate P2 reads
+        208 MB in total (run23: 1.66 GB).
       - *Open, possible regression (C1-k4 investigating):* in a Wine X session
         on 030a7f10, services.exe, explorer.exe and winedevice.exe fault at wild
         addresses, one an unresolved instruction fetch inside a mapped r-x
