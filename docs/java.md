@@ -372,3 +372,36 @@ Open, in order: read the real dlopen error; make libfontconfig loadable (depende
 resolution or LFN mapping, whichever it turns out to be); then re-run UiHeadless
 expecting 9/9; then AWT/X11 on-screen, which needs libX11/libXext/libXrender as
 well as a display server the JDK can connect to.
+
+### The font stack, solved
+
+`obj/jdk/ui-fc7.log` -- **UI 11/11 PASS**, fonts included:
+
+```
+FCP dlopen libfontconfig.so.1 OK      FCP version=21301
+FCP FcInitLoadConfigAndFonts=0x1040002c90   FCP VERDICT fontconfig-works
+UI PASS font-families count=6 first=DejaVu Sans
+UI PASS font-dialog name=Dialog       UI PASS text-metrics stringWidth=64 ascent=13
+UI PASS text-render non-white-pixels=156
+UI PASS swing-components children=3 pref=51x59 btnText=go
+UI PASS swing-laf                     UI PASS edt onEdt=true
+UI PASS swing-offscreen-paint px=ffff0000
+```
+
+How it fell out, one layer per boot, each layer discovered only by unwrapping the
+previous one with `tools/jdk/fcprobe.c` (the JDK's own message names nothing):
+
+| boot | dlopen of libfontconfig says | what it meant |
+|---|---|---|
+| fcprobe.log | `(null)` | my probe called dlerror() twice -- probe bug |
+| fcprobe2.log | `libfreetype.so.6: cannot open shared object file` | stage freetype |
+| ui-ui.log (after) | `libuuid.so.1: ...` | freetype present, uuid missing |
+| fc5 | `undefined symbol: FT_Get_BDF_Property` | the JDK's bundled freetype has no BDF; use Ubuntu's |
+| fc6 | `libpng16.so.16: ...` | Ubuntu freetype needs png |
+| fc7 | **OK** | fontconfig loads, FcInit returns a config, 6 families |
+
+`tools/jdk/fetch-font-stack.sh` reproduces all six libraries from the same focal
+ABI as the glibc pin, so this is not a hand-assembled guess: rerun it and the
+state is the same.  Note the general lesson for this lane: a missing .so surfaced
+as a *font* error three layers away, and the only reliable tool was a probe that
+asked the loader directly.
