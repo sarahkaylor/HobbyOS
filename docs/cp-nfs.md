@@ -276,3 +276,37 @@ and its EXIT/INT/TERM/HUP trap runs `exports.sh remove` and removes the
 dir (the run-wine-p2.sh pattern of cp-pfx f8ceec91).  The default export is
 `/srv/nfs/cp-nfs-bench-<tree dir name>`, so a lane and a base bench can run
 in two slots at once.
+
+## 15. Hard-mount semantics: a lost reply is never data (cp/nfs2)
+
+C5-vk2 (strix, 4 guests) saw `[NFSPIPE] stall` rows, `[NFS] rpc: no reply
+from server`, `[NFLK] retry comp=WINE tries=3 rc=-1`, then wineboot fault
+on an all-zero `sortdefault.nls` section.  The client gave up after a short
+budget (READ: 2 x 500 ms; LOOKUP: ~6 s) and the READ paths returned the
+bytes they had so far as a successful short read, which a caller that
+zero-fills short reads turns into zeros.
+
+**Now:**
+- A READ with no reply is re-sent (fresh xid, fresh socket, backoff 0/250/
+  500/1000/2000 ms on top of each 500 ms wait) until it is answered or
+  `NFS_HARD_MS` (180 s) have passed; every retry is a bounded `[NFSHARD]
+  retry` row, a give-up is `[NFSHARD] GIVE UP ... -> EIO`.  The same holds
+  for LOOKUP, GETATTR, READLINK, READDIRPLUS and FSSTAT on a mounted export
+  (`rpc_call_hard`); mount-time calls stay soft so a missing server fails
+  `mount` quickly.
+- A failed read fails WHOLE: `nfs_read_file` returns -1, never a partial
+  count (serial READ, pipeline tail, window fill, the direct piece of a
+  windowed read).  `read()`/`pread()` see -EIO; a page-in (`nfs_obj_page`,
+  the exec gate) fails and the fault is SIGBUS (trap.c, `VM_MAP_IOERR`),
+  never a zero page.  Only end of file ends a read short; a short non-EOF
+  reply is followed by a READ for the rest.
+- The rsize fallback (1344-byte READs) now needs evidence: three large
+  READs unanswered while a single-frame READ of the same block IS answered.
+  A server that answers nothing no longer drops the mount to 1344.
+
+**Guard (G9):** test kernels can drop NFS reply datagrams on receipt
+(`/.cp-nfs-inject.every.N`, `.blackout.MS`, `.off` as a LOOKUP name under
+the mount).  `cpnfsbench` phase `inject` reads fresh files page by page and
+maps one, with every 5th reply dropped and with all replies dropped for 8 s,
+and compares every page with the host's stream.  It fails on the commit
+before the fix (the blackout read gives up) and passes after it.

@@ -22,6 +22,7 @@
 #include "lock.h"
 #include "frame.h" /* cp/nfs: READ reply buffers */
 #include "kmem.h"
+#include "arch/cpu.h" /* cp/nfs2: cpu_relax in the hard-mount backoff */
 
 struct socket_pcb;      /* net.h's PCB; nfs.h only carries a pointer to it */
 
@@ -385,6 +386,9 @@ static struct nfs_mount mounts[NFS_MAX_MOUNTS];
 static void dir_cache_invalidate_all(void);
 static void nfs_ra_drop_mount(const struct nfs_mount *m);
 static void nfs_ac_drop_mount(const struct nfs_mount *m);
+static int rpc_call_hard(const struct nfs_mount *m, uint32_t proc,
+                         const uint8_t *args, int args_len, uint8_t *body_buf,
+                         int body_cap, const uint8_t **body, int *body_len);
 
 void nfs_init(void) {
   for (int i = 0; i < NFS_MAX_MOUNTS; i++) mounts[i].in_use = 0;
@@ -936,8 +940,7 @@ static int getattr_fh(const struct nfs_mount *m, const uint8_t *fh,
   uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
-  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_GETATTR, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+  if (rpc_call_hard(m, NFS_PROC_GETATTR, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_getattr_reply(body, blen, attr);
 }
@@ -1024,8 +1027,7 @@ int nfs_readlink(const struct nfs_mount *m, const struct nfs_fh *fh,
   uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
-  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_READLINK, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+  if (rpc_call_hard(m, NFS_PROC_READLINK, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_readlink_reply(body, blen, out, cap);
 }
@@ -1043,8 +1045,7 @@ static int lookup_one(const struct nfs_mount *m, const uint8_t *dir_fh,
   uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
-  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_LOOKUP, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+  if (rpc_call_hard(m, NFS_PROC_LOOKUP, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_lookup_reply(body, blen, out, attr, attr_ok);
 }
@@ -1241,8 +1242,98 @@ static void rd_sock_put(struct nfs_mount *m, struct socket_pcb *p, int temp,
   m->rd_busy = 0;
 }
 
+/* ---- cp/nfs2: hard-mount retry bookkeeping ------------------------------ */
+#define NFS_HARD_MS (180u * 1000u)  /* a call fails only after 3 min unanswered */
+volatile uint32_t nfs_hard_retries, nfs_hard_giveups;
+static void nfs_hard_note(const char *op, uint64_t off, uint32_t want, int tries,
+                          uint64_t waited_ms) {
+  static uint32_t rows;
+  nfs_hard_retries++;
+  rows++;
+  if (rows > 32 && (rows & 63)) return;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[NFSHARD] retry op=");
+  kl_s(&kl, op);
+  kl_s(&kl, " off=");
+  kl_i(&kl, (long)off);
+  kl_s(&kl, " want=");
+  kl_i(&kl, (long)want);
+  kl_s(&kl, " try=");
+  kl_i(&kl, tries);
+  kl_s(&kl, " waited_ms=");
+  kl_i(&kl, (long)waited_ms);
+  kl_s(&kl, " total=");
+  kl_i(&kl, (long)nfs_hard_retries);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+static void nfs_hard_giveup(const char *op, uint64_t off, uint32_t want, int tries) {
+  nfs_hard_giveups++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[NFSHARD] GIVE UP op=");
+  kl_s(&kl, op);
+  kl_s(&kl, " off=");
+  kl_i(&kl, (long)off);
+  kl_s(&kl, " want=");
+  kl_i(&kl, (long)want);
+  kl_s(&kl, " tries=");
+  kl_i(&kl, tries);
+  kl_s(&kl, " after_ms=");
+  kl_i(&kl, (long)NFS_HARD_MS);
+  kl_s(&kl, " -> EIO\n");
+  kl_emit(&kl);
+}
+/* Wait between retries: 0, 250, 500, 1000, 2000 ms, then 2 s (on top of each
+ * attempt's own NFS_RPC_TIMEOUT_MS). */
+static void nfs_hard_backoff(int tries) {
+  uint64_t ms = tries <= 1 ? 0 : (uint64_t)125 << (tries > 5 ? 4 : tries - 1);
+  uint64_t t0 = timer_get_ms();
+  while (timer_get_ms() - t0 < ms) cpu_relax();
+}
+/* One single-frame READ at `off` on a fresh socket: 1 when answered. */
+static int nfs_read_probe_small(const struct nfs_mount *m, const struct nfs_fh *fh,
+                                uint64_t off) {
+  uint8_t args[4 + NFS_FH_MAX + 4 + 6 + 8 + 4];
+  struct xdr_w w;
+  xdr_w_init(&w, args, sizeof args);
+  xdr_w_fh(&w, fh->data, fh->len);
+  xdr_w_u64(&w, off);
+  xdr_w_u32(&w, NFS_READ_RSIZE);
+  if (w.err) return 0;
+  uint8_t rb[NFS_RPC_BUF];
+  const uint8_t *body = 0;
+  int blen = 0;
+  return rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS, NFS_PROC_READ,
+                  args, w.len, rb, sizeof rb, &body, &blen) == 0;
+}
+/* rpc_call for the NFS program's own procedures on a mounted export, with
+ * the same hard semantics: re-sent until answered or NFS_HARD_MS. */
+static int rpc_call_hard(const struct nfs_mount *m, uint32_t proc,
+                         const uint8_t *args, int args_len, uint8_t *body_buf,
+                         int body_cap, const uint8_t **body, int *body_len) {
+  uint64_t t0 = 0;
+  for (int tries = 1;; tries++) {
+    if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS, proc, args,
+                 args_len, body_buf, body_cap, body, body_len) == 0)
+      return 0;
+    if (!t0) t0 = timer_get_ms();
+    nfs_hard_note(proc == NFS_PROC_LOOKUP ? "LOOKUP" : proc == NFS_PROC_GETATTR
+                  ? "GETATTR" : proc == NFS_PROC_READLINK ? "READLINK"
+                  : proc == NFS_PROC_READDIRPLUS ? "READDIRPLUS" : "NFS",
+                  0, 0, tries, timer_get_ms() - t0);
+    if (timer_get_ms() - t0 > NFS_HARD_MS) {
+      nfs_hard_giveup("RPC", 0, proc, tries);
+      return -1;
+    }
+    nfs_hard_backoff(tries);
+  }
+}
+
 /* One READ RPC, at most m->read_size bytes, into buf.  Returns bytes
- * transferred (0 at EOF), or -1 before anything was transferred. */
+ * transferred (short only at EOF), or -1 when the read failed (cp/nfs2: a
+ * failure is never a short count). */
 static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *fh,
                                 uint64_t offset, void *buf, uint32_t len,
                                 uint8_t *rbuf, int rcap);
@@ -1264,7 +1355,8 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
   if (rs > NFS_READ_RSIZE_MAX) rs = NFS_READ_RSIZE_MAX;
   int temp = 0;
   struct socket_pcb *pcb = rd_sock_get(mw, &temp);
-  int broken = 0;
+  uint64_t hard_t0 = 0;
+  int hard_tries = 0;
   uint32_t done = 0;
   while (done < len) {
     uint32_t want = len - done;
@@ -1276,85 +1368,61 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
     xdr_w_fh(&w, fh->data, fh->len);
     xdr_w_u64(&w, offset + done);
     xdr_w_u32(&w, want);
-    if (w.err) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return done ? (int)done : -1; }
+    if (w.err) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return -1; }
 
     uint32_t xid = next_xid++;
     int n = rpc_build_call(cbuf, sizeof cbuf, xid, NFS_PROG, NFS_VERS,
                            NFS_PROC_READ, args, w.len);
-    if (n <= 0) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return done ? (int)done : -1; }
+    if (n <= 0) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return -1; }
 
     uint64_t t0 = timer_get_us();
     const uint8_t *body = 0;
     int blen = 0;
     int rc = pcb ? rpc_xfer(pcb, xid, cbuf, n, rbuf, rcap, &body, &blen, 1) : -1;
     uint64_t wait = timer_get_us() - t0;
-    /* L57: ONE retry on a fresh socket.  A single lost datagram -- the
-     * duplicate-ephemeral-port window in net_socket_create, a two-consumer
-     * RX ring, or slirp dropping one -- must not become a failed read():
-     * the caller saw -1, trap.c turned it into EBADF and Mono reported
-     * "Invalid handle to path" for a file that was never closed.  A READ is
-     * idempotent, so resending the same xid is safe. */
     if (rc != 0) {
-      if (pcb) rd_sock_put(mw, pcb, temp, 1);
+      /* cp/nfs2: HARD-mount semantics.  A READ that gets no reply is sent
+       * again -- fresh xid, fresh socket, growing wait -- until it is
+       * answered or NFS_HARD_MS have passed; only then does the read fail,
+       * and then as a whole (-1 -> -EIO / SIGBUS), never as the bytes it had
+       * so far.  It used to give up after one retry (2 x 500 ms) and return
+       * the partial count, which a caller that zero-fills a short read
+       * turned into zeros (Wine's sortdefault.nls, 2026-11-16).
+       * cp/nfs: if large READs keep timing out while a single-frame READ of
+       * the same block is answered, the path drops fragments: fall back to
+       * 1344-byte READs for the mount, once, loudly. */
+      if (pcb) rd_sock_put(mw, pcb, temp, wait >= (uint64_t)NFS_RPC_TIMEOUT_MS * 1000u);
+      pcb = 0;
       temp = 0;
+      if (!hard_t0) hard_t0 = timer_get_ms();
+      hard_tries++;
+      nfs_read_retries++;
+      nfs_hard_note("READ", offset + done, want, hard_tries, timer_get_ms() - hard_t0);
+      if (want > NFS_READ_RSIZE && hard_tries == 3 &&
+          nfs_read_probe_small(m, fh, offset + done)) {
+        nfs_rsize_fallback(mw, "large READ replies time out, single-frame READs answered");
+        rs = NFS_READ_RSIZE;
+      }
+      if (timer_get_ms() - hard_t0 > NFS_HARD_MS) {
+        nfs_hard_giveup("READ", offset + done, want, hard_tries);
+        return -1;
+      }
+      nfs_hard_backoff(hard_tries);
       pcb = rd_sock_get(mw, &temp);
-      if (pcb) {
-        uint64_t t1 = timer_get_us();
-        rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, rcap, &body, &blen, 1);
-        wait += timer_get_us() - t1;
-        nfs_read_retries++;
-      }
+      continue;                          /* the same block again */
     }
-    if (rc != 0) {
-      /* A timeout may leave a late reply in this socket's queue; a stale
-       * xid is skipped by the next rpc_xfer, so keep the socket unless the
-       * send side itself is broken. */
-      /* L57: one row per failed READ RPC — the wait says timeout vs bad
-       * reply, and `temp` says whether the cached socket was unavailable. */
-      static int rd_fail_rows;
-      if (rd_fail_rows < 24) {
-        rd_fail_rows++;
-        struct kline kl;
-        kl_init(&kl);
-        kl_s(&kl, "[NFSRD] fail off=");
-        kl_i(&kl, (long)(offset + done));
-        kl_s(&kl, " want=");
-        kl_i(&kl, (long)want);
-        kl_s(&kl, " wait_us=");
-        kl_i(&kl, (long)wait);
-        kl_s(&kl, " temp=");
-        kl_i(&kl, temp);
-        kl_s(&kl, " done=");
-        kl_i(&kl, (long)done);
-        kl_c(&kl, '\n');
-        kl_emit(&kl);
-      }
-      broken = (rc != 0 && wait >= (uint64_t)NFS_RPC_TIMEOUT_MS);
-      if (pcb) rd_sock_put(mw, pcb, temp, broken);
-      /* cp/nfs: a multi-fragment READ timed out on both attempts (the send
-         and the fresh-socket retry above): fall back to single-frame READs
-         and finish the range from where it stopped. */
-      if (want > NFS_READ_RSIZE && broken) {
-        nfs_rsize_fallback(mw, "large READ replies time out");
-        offset += done;
-        buf = (uint8_t *)buf + done;
-        len -= done;
-        uint32_t base_done = done;
-        done = 0;
-        int more = nfs_read_serial_body(m, fh, offset, buf, len, rbuf, rcap);
-        if (more < 0) return base_done ? (int)base_done : -1;
-        return (int)(base_done + (uint32_t)more);
-      }
-      return done ? (int)done : -1;
-    }
+    hard_t0 = 0;
+    hard_tries = 0;
     nfs_pf_record(want, 0, 0, wait);
 
     uint32_t count = 0;
     int eof = 0;
     if (nfs_parse_read_reply(body, blen, (uint8_t *)buf + done, (int)want,
                              &count, &eof) != 0) {
+      /* a malformed reply or a server error: nothing usable, and the bytes
+         read so far are not returned as if the file ended here */
       if (pcb) rd_sock_put(mw, pcb, temp, 0);
-      return done ? (int)done : -1;
+      return -1;
     }
     if (count == 0) break;
     /* Adapt down: a server with a smaller rsize answers short.  Two equal
@@ -1374,7 +1442,9 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
     done += count;
     nfs_io_bytes += count;
     nfs_io_ops++;
-    if (count < want || eof) break;
+    /* cp/nfs2: only end of file ends the read; a short non-EOF reply (a
+       server with a smaller rsize) is followed by a READ for the rest */
+    if (eof) break;
   }
   if (pcb) rd_sock_put(mw, pcb, temp, 0);
   nfs_perf_note_bytes(done);
@@ -1507,7 +1577,7 @@ static int nfs_read_serial_into(const struct nfs_mount *m, const struct nfs_fh *
       if (want > NFS_RA_BYTES - in) want = NFS_RA_BYTES - in;
     }
     int r = nfs_read_serial(m, fh, off + done, nfs_rd_dst(buf, segs, rel + done), want);
-    if (r < 0) return done ? (int)done : -1;
+    if (r < 0) return -1;                /* cp/nfs2: never a partial count */
     done += (uint32_t)r;
     if ((uint32_t)r < want) break;
   }
@@ -1579,8 +1649,8 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
         if (slot[i].state == 0) { idx = i; break; }
       if (idx < 0) break;
       if (nfs_rd_issue(m, pcb, fh, &slot[idx], issue_off, want) != 0) {
-        if (inflight == 0) goto out;
-        stop = 1;                       /* drain what we have */
+        stop = 1;                       /* drain what we have; the serial */
+        hole = inflight == 0;           /* tail (hard) reads the rest     */
         break;
       }
       __sync_fetch_and_add(&nfs_inflight_bytes, (int32_t)want);
@@ -1725,8 +1795,8 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
     nfs_ra.tail_bytes += end - contig;   /* a statistic: no lock */
     int tail = nfs_read_serial_into(m, fh, contig, buf, segs, contig - offset,
                                     (uint32_t)(end - contig));
-    if (tail < 0) { if (contig == offset) return -1; }
-    else contig += (uint32_t)tail;
+    if (tail < 0) return -1;            /* cp/nfs2: a failed read fails whole */
+    contig += (uint32_t)tail;
   }
   if (hit_eof && eof_out) *eof_out = 1;
   /* One row per read() would flood a 9.9 MB load (152 rows for 64 KiB
@@ -1765,13 +1835,6 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
   }
   nfs_perf_note_bytes((uint32_t)(contig - offset));
   return (int)(contig - offset);
-
-out:
-  for (int i = 0; i < NFS_READ_DEPTH; i++) slot[i].state = 0;
-  if (mine) __sync_fetch_and_sub(&nfs_inflight_bytes, mine);
-  if (pcb) rd_sock_put(mw, pcb, temp, 0);
-  nfs_rbig_put(rbuf);
-  return contig > offset ? (int)(contig - offset) : -1;
 }
 
 /* The flat-buffer pipelined read (read()s larger than one RPC). */
@@ -2037,7 +2100,7 @@ static int nfs_ra_read(const struct nfs_mount *m, const struct nfs_fh *fh,
     if (!nfs_ra_try(m, fh, fhash, o, buf + done, n, len - done - n, &got)) {
       got = n <= rs ? nfs_read_serial(m, fh, o, buf + done, n)
                     : nfs_read_pipelined(m, fh, o, buf + done, n, rs);
-      if (got < 0) return done ? (int)done : -1;
+      if (got < 0) return -1;            /* cp/nfs2: never a partial count */
     }
     done += (uint32_t)got;
     if ((uint32_t)got < n) break;       /* end of file */
@@ -2102,8 +2165,7 @@ int nfs_statfs(const struct nfs_mount *m, const char *rel,
   uint8_t rb[NFS_RPC_BUF];
   const uint8_t *body = 0;
   int blen = 0;
-  if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-               NFS_PROC_FSSTAT, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+  if (rpc_call_hard(m, NFS_PROC_FSSTAT, args, w.len, rb, sizeof rb, &body, &blen) != 0)
     return -1;
   return nfs_parse_fsstat_reply(body, blen, total, avail);
 }
@@ -2169,8 +2231,7 @@ static int dir_cache_fill(const struct nfs_mount *m, int midx, const char *rel) 
     uint8_t rb[NFS_RPC_BUF];
     const uint8_t *body = 0;
     int blen = 0;
-    if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS,
-                 NFS_PROC_READDIRPLUS, args, w.len, rb, sizeof rb, &body, &blen) != 0)
+    if (rpc_call_hard(m, NFS_PROC_READDIRPLUS, args, w.len, rb, sizeof rb, &body, &blen) != 0)
       return -1;
 
     struct xdr_r r;
