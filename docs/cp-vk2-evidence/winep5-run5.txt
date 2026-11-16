@@ -1,0 +1,91 @@
+################ Wine P5 run 5 (cyberpunk 030a7f10: C1-k4 + NFS hard mount; C4-x2 one-screen XHOBBY.BIN 935c760f..c97 + HB_SECOND_SCREEN=0; warm-up launcher, default 3600 s post-wineboot quiesce)
+# 2 guests on the host at start. Stopped by me during winprobe06 (integrator: no more reruns on the post-wineboot Wine fault).
+## NFS summary (grader --grade-only)
+[P5W] NFS: no-reply rows=94 [NFSHARD] retry rows=33 longest waited_ms=102384 GIVE UP=1 NFLK rc=-1=0
+[P5W] VERDICT: VOID ([NFSHARD] GIVE UP op=RPC off=0 want=3 tries=55 after_ms=180000 -> EIO)
+## launcher rows
+[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-vk2-p5e -> /CP ok
+[P5] begin wineboot : wineboot -i
+[NFSHARD] GIVE UP op=RPC off=0 want=3 tries=55 after_ms=180000 -> EIO
+[P5] end wineboot status=53 ms=304926
+[P5] quiesce after wineboot: extra=0
+[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+[P5] keepalive pid=92
+[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] timeout winprobe01 after 300s: SIGKILL pid=94
+[P5] end winprobe01 status=timeout ms=336053
+[P5] begin winprobe02 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] timeout winprobe02 after 300s: SIGKILL pid=141
+[P5] end winprobe02 status=timeout ms=315809
+[P5] begin winprobe03 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] timeout winprobe03 after 300s: SIGKILL pid=152
+[P5] end winprobe03 status=timeout ms=307556
+[P5] begin winprobe04 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] timeout winprobe04 after 300s: SIGKILL pid=154
+[P5] end winprobe04 status=timeout ms=307076
+[P5] begin winprobe05 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] timeout winprobe05 after 300s: SIGKILL pid=156
+[P5] end winprobe05 status=timeout ms=307256
+[P5] begin winprobe06 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+## Wine err rows (first 40)
+[X] 0044:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 0044:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] 002c:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 002c:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] 004c:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 004c:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 004c:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[X] 0054:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 0054:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 0054:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[X] 004c:err:ole:start_rpcss Failed to open RpcSs service
+[X] 0054:err:ole:start_rpcss Failed to open RpcSs service
+[X] 0088:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 0088:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] 0024:err:environ:run_wineboot boot event wait timed out
+[X] 0088:err:setupapi:SetupDefaultQueueCallbackW copy error 1812 L"@C:\\windows\\system32\\drivers\\wineusb.sys,-1" -> L"C:\\windows\\inf\\wineusb.inf"
+[X] 00a0:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 00a0:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] 00b0:err:service:process_send_start_message service L"PlugPlay" failed to start
+[X] 00d8:err:nsi:poll_events netlink socket creation failed, errno 97.
+[X] 002c:err:setupapi:do_file_copyW Unsupported style(s) 0x10
+[X] 00fc:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[X] 002c:err:setupapi:SetupDiInstallDevice Failed to start service L"winebth" for device L"ROOT\\WINE\\WINEBTH", error 1359.
+[X] 002c:err:setupapi:SetupDiInstallDevice Failed to control service L"winebth" for device L"ROOT\\WINE\\WINEBTH", error 1062.
+[X] 002c:err:setupapi:do_file_copyW Unsupported style(s) 0x10
+[X] 0034:err:winediag:getaddrinfo Failed to resolve your host name IP
+[X] 0034:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 0044:err:service:process_send_start_message service L"PlugPlay" failed to start
+[X] 0090:err:nsi:poll_events netlink socket creation failed, errno 97.
+[X] 00a4:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[X] 00b0:err:setupapi:do_file_copyW Unsupported style(s) 0x10
+[X] 00b0:err:setupapi:do_file_copyW Unsupported style(s) 0x10
+[X] 00ec:err:service:process_send_start_message service L"RpcSs" failed to start
+[X] 00e0:err:ole:start_rpcss Failed to start RpcSs service
+[X] 00ec:err:service:process_send_start_message service L"RpcSs" failed to start
+[X] 00e0:err:ole:start_rpcss Failed to start RpcSs service
+## the Wine-process fault after wineboot (winedevice.exe thread pid 111, tgid 107)
+[KERNEL] pid=111 (winedevice.exe) memory fault VA=0x0000000000000000 PC=0x000000108074F736 rw=r  in=HOLE region=NONE rsp=0x00007FFFFEB0E920 live=5 inH=0 cr3frame=0x000000025F282000 asroot=0x000000025F282000 sys=41 ret=0x0000000000000038 rbx=0x00007FFFFEE6D094 rdi=0x0000000000000010 rsi=0x0000000000080003 rbp=0x00000000000006DC rbp0=<unreadable> -> killed
+[SIGDUMP] pid=111 tgid=107 nm=winedevice.exe rip=0x000000108074F736 rsp=0x00007FFFFEB0E920 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x0000000000000000
+[SGPR] rax=0x0000000000000000 rbx=0x00007FFFFEE6D094 rcx=0x0000000000000000 rdx=0x0000000000000000
+[SGPR] rsi=0x0000000000080003 rdi=0x0000000000000010 rbp=0x00000000000006DC r8=0x000000007FFA0000
+[SGPR] r9=0x0000000000000008 r10=0x0000000000000258 r11=0x0000000000000246 r12=0x00007FFFFEE58794
+[SGPR] r13=0x00007FFFFEE69A94 r14=0x00007FFFFEE69A94 r15=0x00007FFFFEE58994
+[STK-100] 0x00007FFFFEE60000 0x00007FFFFFDB07E0 0x0000000000000004 0x0EABBBE78A744D00 0x0000000000020000 0x00000010802B9ED5 0x00007FFFFFDB07E0 0x000000108019A7FE 0x00007FFFFEC0F908 0x0000000000000000 0x00007FFFFEB0E9D0 0x0EABBBE78A744D00 0x000000108028F6D0 0x00007FFFFEE6D094 0x00007FFFFEB0E8B0 0x000000108019A0AC
+[STK-80] 0x0000000000000002 0x00007FFFFEC0F890 0x00000000FFFFFFFF 0x0000001000000000 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0EABBBE78A744D00 0x0000000000000000 0x00007FFFFEE6D094 0x00000000000006DC 0x00007FFFFEE58794 0x00007FFFFEE69A94 0x00007FFFFEE69A94 0x00007FFFFEE58994 0x000000108074F736
+[SLOT-50] va=0x00007FFFFEB0E8D0 val=0x0000000000000000 ==rsp=0 off=0x00007FFFFEB0E920
+[STK+00] 0x00007FFFFE22EAD0 0x0000000000000038 0x0000000000000000 0x000000108028CA16 0x0000004400000001 0x0000000000000040 0x0000000000000000 0x0000000000000000 0x00007FFFFEC0F7C8 0x00000010802B0F20 0x0000000000000000 0x0000005C0000004C 0x00007FFFFEE6D094 0x00007FFFFEE58994 0x00000000000004DC 0x000000108074FF03
+[SREG] va=0x00007FFFFEB0E920 base=0x00007FFFFE912000 len=0x00000000001FE000 off=0x00000000001FC920 prot=3 kind=anon
+[SREG] va=0x00007FFFFEB0E820 base=0x00007FFFFE912000 len=0x00000000001FE000 off=0x00000000001FC820 prot=3 kind=anon
+[SREG] va=0x00007FFFFEB0D920 base=0x00007FFFFE912000 len=0x00000000001FE000 off=0x00000000001FB920 prot=3 kind=anon
+[SREG] va=0x0000000000000000 region=NONE
+[SREG2F] probes=256 mapped=0 (window 0x2F000000..0x30000000)
+[SIGSIG] trapframe_images=1 first_cs_off=+0x00000000000001D8
+[SRESUME] pid=111 hit=1 dist=0x0000000000000008 age_ms=33
+## mapping rows of the faulting module (PC 0x108074F736 = base 0x1080742000 + 0xD736)
+[MR] s=176 pid=20 g=20 as=0x76506150 len=0x1C000 base=0x1080742000 w=1
+[MR] s=993 pid=31 g=22 as=0x765064C0 len=0x10000 base=0x1080742000 w=1
+[MR] s=1209 pid=37 g=34 as=0x76507960 len=0x6000 base=0x1080742000 w=1
+[FUTEX] map base=0x1080742000 len=0x1000 kind=7 prot=1
+## memory-fault rows from any process: 0; Unexpected termination rows: 0
