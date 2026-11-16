@@ -2068,12 +2068,22 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     return 0;
   }
   case FILE_TYPE_NFS:
-  case FILE_TYPE_NFSDIR:
+  case FILE_TYPE_NFSDIR: {
     k_stat_fill(st, K_DEV_NFS, nfs_synth_ino(&f->nfs.fh),
                 (f->type == FILE_TYPE_NFSDIR || f->nfs.is_dir)
                     ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
                 f->nfs.size);
+    /* cp/nfs2: the server's times (they were 0).  The attributes the open's
+       LOOKUP returned are cached for 3 s, so this is usually no RPC. */
+    const struct nfs_mount *m = nfs_mount_at(f->nfs.mount_idx);
+    struct nfs_attr a;
+    if (m && f->nfs.fh.len && nfs_getattr_cached(m, &f->nfs.fh, &a) == 0) {
+      st->st_atime = (long)a.atime;
+      st->st_mtime = (long)a.mtime;
+      st->st_ctime = (long)a.ctime;
+    }
     return 0;
+  }
   /* Anonymous objects: Linux gives each pipe/socket its own inode on its own
      pseudo-filesystem.  Deriving the inode from the global slot keeps two
      distinct pipes from reporting the same (dev, ino) pair — the property a
@@ -2604,6 +2614,9 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                 (a.type == NF3DIR) ? (K_S_IFDIR | 0755)
                                    : (K_S_IFREG | 0644),
                 (long)a.size);
+    st->st_atime = (long)a.atime;  /* cp/nfs2: the server's times, not 0 */
+    st->st_mtime = (long)a.mtime;
+    st->st_ctime = (long)a.ctime;
     /* M6/L31: the engine's JSON probe, as stat() sees it. */
     {
       const char *t = "ScriptingAssemblies.json";
@@ -2620,7 +2633,6 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
         kl_c(&kl, '\n'); kl_emit(&kl);
       }
     }
-    st->st_atime = st->st_mtime = st->st_ctime = (long)a.mtime;
     return 0;
   }
   struct fat16_dir_entry entry;

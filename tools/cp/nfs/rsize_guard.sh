@@ -20,6 +20,11 @@
 #       page right, and the phase fetches at most 2x what it reads
 #       ("[NB] multi6.ra ... amp_pct=" <= 200): one shared readahead window
 #       refilled 64 KiB for almost every page (~1600%)
+#   G8  (cp/nfs2) one read() of 176 MiB + 777 bytes returns all of it with
+#       the host's SHA-256 ("[NB] one176m ... match ... ok"); fstat/stat of an
+#       NFS file give the server's atime/mtime/ctime; files behind symlinked
+#       directories open, stat and read right (5 "[NB] symlink" rows); with
+#       NB_BIG=1 also the 5 GiB SHA-256 row ("[NB] big5g").
 #   G5  over all READ RPCs (the last "[NFSRTT] periodic" set): bytes / RPCs
 #       >= 16384.  1344-byte READs give ~1344; 32 KiB READs give ~32768.
 #
@@ -86,6 +91,14 @@ else
   else note "G7 6/6 readers of 6 files, every page correct; ${MA#\[NB\] multi6.ra }"; fi
 fi
 
+# G8 (cp/nfs2): large reads, stat times, symlinked directories
+G8="$(tr -d '\r' < "$C" | grep -aoE '\[NB\] (one176m|big5g|fstat|stat|symlink) .*(ok|FAIL)$')"
+n_one=$(grep -c '^\[NB\] one176m .* match .* ok$' <<<"$G8"); n_t=$(grep -cE '^\[NB\] f?stat .* ok$' <<<"$G8")
+n_sl=$(grep -c '^\[NB\] symlink .* ok$' <<<"$G8"); n_f=$(grep -c ' FAIL$' <<<"$G8")
+if [ "$n_one" -ne 1 ] || [ "$n_t" -ne 2 ] || [ "$n_sl" -ne 5 ] || [ "$n_f" -ne 0 ]; then
+  bad "G8 one176m=$n_one/1 stat-times=$n_t/2 symlink=$n_sl/5 FAIL rows=$n_f: $(grep ' FAIL$' <<<"$G8" | head -3 | tr '\n' ' ')"
+else note "G8 one 176 MiB read() hash match, stat times, 5/5 symlinked paths$(grep -q '^\[NB\] big5g .* ok$' <<<"$G8" && echo ', big5g sha256 match')"; fi
+
 # G2 (and the can't-judge case)
 # Only well-formed rows are judged: two CPUs writing the console can garble a
 # row into nonsense (measured: "rs=32768[NFSRTT]  issued=periodic2 ...").
@@ -133,6 +146,6 @@ else
   fi
 fi
 
-grep -a '^\[NB\] seq65536' "$C" | sed 's/^/rsize_guard: /'
+grep -aE '^\[NB\] (seq65536|one176m|big5g)' "$C" | sed 's/^/rsize_guard: /'
 if [ $fail -ne 0 ]; then echo "rsize_guard: FAIL ($TREE; console $C)"; exit 1; fi
 echo "rsize_guard: PASS ($TREE)"; exit 0

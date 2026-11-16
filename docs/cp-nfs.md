@@ -214,6 +214,27 @@ for 172 MB); it now re-sends the READs in flight (item 1).
 Gate: `cpnfsbench` phase `one176m`, 176 MiB + 777 bytes in one read() into
 one malloc'd buffer, SHA-256 against the host's (`rsize_guard.sh` G8).
 
+## 11. stat times and symlinked directories (cp/nfs2, item 4)
+
+- **fstat/stat times.** `nfs_parse_fattr3` now keeps atime and ctime;
+  `file_stat_fd` (fstat) and the NFS branch of stat(path) report all three
+  (fstat gave 0 for all three; stat(path) gave mtime for all three).  fstat needs the attributes of an open handle: the ones
+  every LOOKUP returns are kept in a 64-entry cache keyed by (mount, handle),
+  3 s TTL like Linux's acregmin, else GETATTR (`nfs_getattr_cached`).
+- **Symlinks in intermediate components.** `nfs_lookup` walks the path one
+  component at a time; when ANY component is NF3LNK it reads the target,
+  joins it against the link's directory (`nfs_symlink_join`), appends the
+  rest of the path and restarts from the root, at most 40 links per lookup
+  (Linux MAXSYMLINKS; ends a cycle).  Before, only a link in the last
+  component was followed: `dlink -> sub` made `/NFS/dlink/file` fail, since
+  the server answers LOOKUP in a symlink handle with NFS3ERR_NOTDIR.
+- Probe rows (`cpnfsbench`): `[NB] fstat`/`[NB] stat` against the host's
+  `stat -c '%X %Y %Z'` of a file whose times the harness set with touch;
+  `[NB] symlink path=...` for `dlink/`, `d2/` (link to a link), `sub/up/`
+  (`..`) and `sub/up/d2/` (three links in one walk), each opened, stat()ed
+  and read whole.  Tests: `nfs_proto_test` (fattr3 times + a 5 GiB size),
+  kernel `nfs_test` (atime/ctime).
+
 ## 14. nfs_bench.sh on QEMU slots (cp/nfs2)
 
 `nfs_bench.sh` (and so `rsize_guard.sh`) no longer holds

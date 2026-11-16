@@ -25,6 +25,14 @@
  *               reads that needed no window fill (fetched / 64 KiB fills).
  *               One shared readahead window refilled on almost every page
  *               (amp ~1600%); per-file windows load each 64 KiB block once.
+ *   fstat/stat  cp/nfs2: fstat() and stat() of /NFS/stat.bin report the
+ *               server's mtime and ctime exactly and an atime no older than
+ *               the one the harness set (it stages /NBSTAT.TXT); fstat gave
+ *               0 for all three, stat() gave mtime for all three.
+ *   symlink     cp/nfs2: files reached through symlinked DIRECTORIES
+ *               (dlink -> sub, d2 -> dlink, sub/up -> ..) open, stat and
+ *               read whole (seed-1 stream); only a symlink in the last
+ *               component used to be followed.
  *   one176m     cp/nfs2: /NFS/big176m.bin (176 MiB + 777, larger than the
  *               game's 172 MB shader_final.cache) in ONE read() into one
  *               buffer, SHA-256 against the host's (/NBONE.TXT).
@@ -488,6 +496,117 @@ static int phase_big(void) {
   return ok ? 0 : 1;
 }
 
+/* ---- cp/nfs2: stat times and symlinked directories ---------------------- */
+static uint64_t parse_dec(const char **s) {
+  uint64_t v = 0;
+  while (**s == ' ') (*s)++;
+  while (**s >= '0' && **s <= '9') v = v * 10 + (uint64_t)(*(*s)++ - '0');
+  return v;
+}
+
+static void time_row(const char *what, const struct stat *st, int rc,
+                     uint64_t a, uint64_t m, uint64_t c, int ok) {
+  char line[256];
+  int n = 0;
+  const char *p = "[NB] ";
+  while (*p) line[n++] = *p++;
+  for (p = what; *p; p++) line[n++] = *p;
+  kv(line, &n, " rc=", (unsigned long)(rc < 0 ? 1 : 0));
+  kv(line, &n, " atime=", (unsigned long)(rc == 0 ? st->st_atime : 0));
+  kv(line, &n, " mtime=", (unsigned long)(rc == 0 ? st->st_mtime : 0));
+  kv(line, &n, " ctime=", (unsigned long)(rc == 0 ? st->st_ctime : 0));
+  kv(line, &n, " want=", (unsigned long)a);
+  line[n++] = '/';
+  dec(line, &n, (unsigned long)m);
+  line[n++] = '/';
+  dec(line, &n, (unsigned long)c);
+  for (p = ok ? " ok\n" : " FAIL\n"; *p; p++) line[n++] = *p;
+  line[n] = 0;
+  pc(line);
+}
+
+/* fstat() and stat() of /NFS/stat.bin must report the server's atime, mtime
+ * and ctime (the harness set atime/mtime with touch and staged all three in
+ * /NBSTAT.TXT).  The guest never reads the file, so its atime stays put. */
+static int phase_stat(void) {
+  int fd = open("/NBSTAT.TXT", O_RDONLY);
+  char e[96];
+  int r = fd >= 0 ? (int)read(fd, e, sizeof e - 1) : -1;
+  if (fd >= 0) close(fd);
+  if (r <= 0) { pc("[NB] fstat no /NBSTAT.TXT FAIL\n"); return 1; }
+  e[r] = 0;
+  const char *q = e;
+  uint64_t a = parse_dec(&q), m = parse_dec(&q), c = parse_dec(&q);
+  struct stat st;
+  int fails = 0;
+  fd = open("/NFS/stat.bin", O_RDONLY);
+  int rc = fd >= 0 ? fstat(fd, &st) : -1;
+  if (fd >= 0) close(fd);
+  /* atime only has to be at least the staged one: the server moves it on
+     access (measured: the open itself) */
+  int ok = rc == 0 && (uint64_t)st.st_atime >= a && (uint64_t)st.st_mtime == m &&
+           (uint64_t)st.st_ctime == c;
+  time_row("fstat", &st, rc, a, m, c, ok);
+  fails += !ok;
+  rc = stat("/NFS/stat.bin", &st);
+  ok = rc == 0 && (uint64_t)st.st_atime >= a && (uint64_t)st.st_mtime == m &&
+       (uint64_t)st.st_ctime == c;
+  time_row("stat", &st, rc, a, m, c, ok);
+  fails += !ok;
+  return fails;
+}
+
+/* Paths whose INTERMEDIATE components are symlinks (the harness builds
+ * sub/data.bin = m1.bin, dlink -> sub, d2 -> dlink, sub/up -> ..).  Each
+ * file is opened, stat()ed and read whole, and compared with seed 1. */
+static int phase_symlink(void) {
+  static const char *paths[] = {
+    "/NFS/sub/data.bin",            /* control: no link */
+    "/NFS/dlink/data.bin",          /* one link in the middle */
+    "/NFS/d2/data.bin",             /* a link to a link */
+    "/NFS/sub/up/sub/data.bin",     /* a relative ".." link */
+    "/NFS/sub/up/d2/data.bin",      /* three links in one walk */
+  };
+  uint8_t *ref = (uint8_t *)malloc(MULTI_BYTES);
+  uint8_t *b = (uint8_t *)malloc(MULTI_BYTES);
+  if (!ref || !b) { pc("[NB] symlink malloc FAIL\n"); return 1; }
+  stream_fill(ref, MULTI_BYTES, multi_seed(1));
+  int fails = 0;
+  for (unsigned i = 0; i < sizeof paths / sizeof paths[0]; i++) {
+    struct stat st;
+    int src = stat(paths[i], &st);
+    int fd = open(paths[i], O_RDONLY);
+    uint32_t got = 0;
+    while (fd >= 0 && got < MULTI_BYTES) {
+      ssize_t r = read(fd, b + got, MULTI_BYTES - got);
+      if (r <= 0) break;
+      got += (uint32_t)r;
+    }
+    if (fd >= 0) close(fd);
+    int same = got == MULTI_BYTES;
+    for (uint32_t k = 0; same && k < MULTI_BYTES; k++)
+      if (b[k] != ref[k]) same = 0;
+    int ok = src == 0 && (uint64_t)st.st_size == MULTI_BYTES && fd >= 0 && same;
+    char line[200];
+    int n = 0;
+    const char *p = "[NB] symlink path=";
+    while (*p) line[n++] = *p++;
+    for (p = paths[i]; *p; p++) line[n++] = *p;
+    kv(line, &n, " stat=", (unsigned long)(src == 0 ? 0 : 1));
+    kv(line, &n, " size=", (unsigned long)(src == 0 ? st.st_size : 0));
+    kv(line, &n, " open=", (unsigned long)(fd >= 0 ? 0 : 1));
+    kv(line, &n, " bytes=", (unsigned long)got);
+    for (p = same ? " match" : " MISMATCH"; *p; p++) line[n++] = *p;
+    for (p = ok ? " ok\n" : " FAIL\n"; *p; p++) line[n++] = *p;
+    line[n] = 0;
+    pc(line);
+    fails += !ok;
+  }
+  free(b);
+  free(ref);
+  return fails;
+}
+
 /* Read `total` bytes from the start of NB_FILE in `chunk`-byte read()s.
  * Returns 0 when the byte count is right (and, for the full file, the
  * checksum matches `expect`). */
@@ -570,6 +689,8 @@ int main(void) {
   fails += phase("seq1344", 1344, 4u * 1024u * 1024u, 0, 0);
   fails += phase_conc();
   fails += phase_multi();
+  fails += phase_stat();
+  fails += phase_symlink();
   fails += phase_one();
   fails += phase_big();
   char d[40];

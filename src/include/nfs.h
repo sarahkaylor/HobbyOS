@@ -132,7 +132,9 @@ struct nfs_attr {
   uint32_t type;      /* ftype3 */
   uint32_t mode;
   uint64_t size;
-  uint32_t mtime;
+  uint32_t mtime;     /* seconds (nfstime3) */
+  uint32_t atime;     /* cp/nfs2: fstat/stat report all three */
+  uint32_t ctime;
 };
 
 struct nfs_fh {
@@ -286,6 +288,10 @@ int  nfs_getattr(const struct nfs_mount *m, const struct nfs_fh *fh,
  * -1 when nothing could be read. */
 int  nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
                    uint64_t offset, void *buf, uint32_t len);
+/* cp/nfs2: the attributes for an open file handle (fstat): the ones the last
+ * LOOKUP or GETATTR returned if younger than 3 s, else a GETATTR.  0 / -1. */
+int  nfs_getattr_cached(const struct nfs_mount *m, const struct nfs_fh *fh,
+                        struct nfs_attr *a);
 /* cp/exec: READLINK3 on a symlink handle; fills *out (NUL-terminated), returns
  * the length or < 0.  nfs_lookup follows symlinks itself, so callers rarely
  * need this directly. */

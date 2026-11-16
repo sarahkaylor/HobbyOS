@@ -237,11 +237,11 @@ int nfs_parse_fattr3(struct xdr_r *r, struct nfs_attr *a) {
   (void)xdr_r_u32(r);                 /* rdev.minor */
   (void)xdr_r_u64(r);                 /* fsid */
   (void)xdr_r_u64(r);                 /* fileid */
-  (void)xdr_r_u32(r);                 /* atime.seconds */
+  tmp.atime = xdr_r_u32(r);           /* atime.seconds (cp/nfs2: kept) */
   (void)xdr_r_u32(r);                 /* atime.nseconds */
   tmp.mtime = xdr_r_u32(r);           /* mtime.seconds */
   (void)xdr_r_u32(r);                 /* mtime.nseconds */
-  (void)xdr_r_u32(r);                 /* ctime.seconds */
+  tmp.ctime = xdr_r_u32(r);           /* ctime.seconds (cp/nfs2: kept) */
   (void)xdr_r_u32(r);                 /* ctime.nseconds */
   if (!xdr_r_ok(r)) return -1;
   if (a) *a = tmp;

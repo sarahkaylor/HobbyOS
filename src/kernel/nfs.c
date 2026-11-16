@@ -328,6 +328,7 @@ static struct nfs_mount mounts[NFS_MAX_MOUNTS];
 
 static void dir_cache_invalidate_all(void);
 static void nfs_ra_drop_mount(const struct nfs_mount *m);
+static void nfs_ac_drop_mount(const struct nfs_mount *m);
 
 void nfs_init(void) {
   for (int i = 0; i < NFS_MAX_MOUNTS; i++) mounts[i].in_use = 0;
@@ -766,6 +767,7 @@ int nfs_mount_remove(const char *point) {
 
     mounts[i].in_use = 0;
     nfs_ra_drop_mount(&mounts[i]); /* cp/nfs2: its windows die with it */
+    nfs_ac_drop_mount(&mounts[i]);
     /* L35: the cached READ socket belongs to the mount — close it, or a
      * later mount into this slot inherits a socket connected to the old
      * server (and a stuck rd_busy). */
@@ -806,6 +808,76 @@ static int getattr_fh(const struct nfs_mount *m, const uint8_t *fh,
   return nfs_parse_getattr_reply(body, blen, attr);
 }
 
+/* ---- cp/nfs2: attribute cache for fstat --------------------------------- */
+/* fstat() on an NFS fd reported st_mtime = 0: the file object keeps only the
+ * size.  The attributes LOOKUP already returned at open are kept here, keyed
+ * by (mount, file handle), so fstat needs no RPC right after an open; an
+ * entry older than NFS_AC_TTL_MS is fetched again with GETATTR (Linux's
+ * acregmin is 3 s). */
+#define NFS_AC_SLOTS  64
+#define NFS_AC_TTL_MS 3000
+extern uint64_t timer_get_ms(void);
+static struct {
+  int used;
+  const struct nfs_mount *m;
+  struct nfs_fh fh;
+  struct nfs_attr a;
+  uint64_t t_ms;
+} nfs_ac[NFS_AC_SLOTS];
+static unsigned nfs_ac_next;
+static spinlock_t nfs_ac_lock;
+
+static int nfs_ac_fh_eq(const struct nfs_fh *a, const struct nfs_fh *b) {
+  if (a->len != b->len) return 0;
+  for (uint32_t i = 0; i < a->len; i++)
+    if (a->data[i] != b->data[i]) return 0;
+  return 1;
+}
+
+static void nfs_ac_put(const struct nfs_mount *m, const struct nfs_fh *fh,
+                       const struct nfs_attr *a) {
+  uint64_t now = timer_get_ms();
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ac_lock);
+  int slot = -1;
+  for (int i = 0; i < NFS_AC_SLOTS; i++)
+    if (nfs_ac[i].used && nfs_ac[i].m == m && nfs_ac_fh_eq(&nfs_ac[i].fh, fh)) {
+      slot = i;
+      break;
+    }
+  if (slot < 0) slot = (int)(nfs_ac_next++ % NFS_AC_SLOTS);
+  nfs_ac[slot].used = 1;
+  nfs_ac[slot].m = m;
+  nfs_ac[slot].fh = *fh;
+  nfs_ac[slot].a = *a;
+  nfs_ac[slot].t_ms = now;
+  spinlock_release_irqrestore(&nfs_ac_lock, fl);
+}
+
+static void nfs_ac_drop_mount(const struct nfs_mount *m) {
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ac_lock);
+  for (int i = 0; i < NFS_AC_SLOTS; i++)
+    if (nfs_ac[i].m == m) nfs_ac[i].used = 0;
+  spinlock_release_irqrestore(&nfs_ac_lock, fl);
+}
+
+int nfs_getattr_cached(const struct nfs_mount *m, const struct nfs_fh *fh,
+                       struct nfs_attr *a) {
+  if (!m || !m->in_use || !fh || fh->len == 0 || !a) return -1;
+  uint64_t now = timer_get_ms();
+  uint64_t fl = spinlock_acquire_irqsave(&nfs_ac_lock);
+  for (int i = 0; i < NFS_AC_SLOTS; i++)
+    if (nfs_ac[i].used && nfs_ac[i].m == m && now - nfs_ac[i].t_ms < NFS_AC_TTL_MS &&
+        nfs_ac_fh_eq(&nfs_ac[i].fh, fh)) {
+      *a = nfs_ac[i].a;
+      spinlock_release_irqrestore(&nfs_ac_lock, fl);
+      return 0;
+    }
+  spinlock_release_irqrestore(&nfs_ac_lock, fl);
+  if (getattr_fh(m, fh->data, fh->len, a) != 0) return -1;
+  nfs_ac_put(m, fh, a);
+  return 0;
+}
+
 /* cp/exec: READLINK3 on a symlink's handle. */
 int nfs_readlink(const struct nfs_mount *m, const struct nfs_fh *fh,
                  char *out, int cap) {
@@ -843,127 +915,123 @@ static int lookup_one(const struct nfs_mount *m, const uint8_t *dir_fh,
   return nfs_parse_lookup_reply(body, blen, out, attr, attr_ok);
 }
 
-static int nfs_lookup_nofollow(const struct nfs_mount *m, const char *rel,
-               struct nfs_fh *fh, struct nfs_attr *attr) {
-  if (!m || !m->in_use || !rel) return -1;
-  if (rel[0] != '/') return -1;
-
-  struct nfs_fh cur;
-  cur.len = m->root_fh_len;
-  for (uint32_t i = 0; i < cur.len; i++) cur.data[i] = m->root_fh[i];
-
-  if (rel[1] == '\0') {
-    /* The mount root itself. */
-    if (attr) {
-      int rc = getattr_fh(m, cur.data, cur.len, attr);
-      if (rc != 0) return -1;
-    }
-    if (fh) *fh = cur;
-    return 0;
+/* One LOOKUP of `name` in `dir`, retried after a transport-shaped failure
+ * (L76): -2 is the SERVER saying "no such entry" -- definitive, return it.
+ * -1 is a transport or parse failure: a lost datagram, a reply stolen by a
+ * second socket that shares the ephemeral port, or a socket the pool could
+ * not hand out.  Mapping that to ENOENT is what produced "Could not find file
+ * /NFS/Data/Biotech/.../WITabs.xml" for a file the game had already opened in
+ * the same run, and the NullReferenceException in GraphicData.Init that
+ * followed it.  A LOOKUP is idempotent: retry the component before reporting
+ * a missing file. */
+static int lookup_comp(const struct nfs_mount *m, const struct nfs_fh *dir,
+                       const char *comp, struct nfs_fh *next,
+                       struct nfs_attr *attr, int *attr_ok) {
+  int lrc = lookup_one(m, dir->data, dir->len, comp, next, attr, attr_ok);
+  if (lrc == 0 || lrc == -2) return lrc;
+  int tries = 0;
+  while (lrc != 0 && tries < 3) {
+    tries++;
+    lrc = lookup_one(m, dir->data, dir->len, comp, next, attr, attr_ok);
   }
+  nfs_lookup_retries += (uint32_t)tries;
+  if (nfs_lookup_rows < 24) {
+    nfs_lookup_rows++;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[NFLK] retry comp=");
+    kl_s(&kl, comp);
+    kl_s(&kl, " tries=");
+    kl_i(&kl, (long)tries);
+    kl_s(&kl, " rc=");
+    kl_i(&kl, (long)lrc);
+    kl_s(&kl, " total=");
+    kl_i(&kl, (long)nfs_lookup_retries);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  return lrc;
+}
 
-  const char *p = rel + 1;
+/* cp/exec + cp/nfs2: path lookup that FOLLOWS symbolic links, the Linux
+ * default for open()/stat() (and what execve and the spawn loader need: the
+ * staged Wine tree has /CP/WINE/bin/wineboot -> wine as an NFS symlink).
+ *
+ * The walk goes one component at a time from the mount root.  When ANY
+ * component -- not only the last -- is NF3LNK, its target is read, joined
+ * against the directory that holds the link (nfs_symlink_join), the rest of
+ * the path is appended, and the walk restarts from the root.  cp/exec only
+ * followed a link in the LAST component, so `dir -> sub` made
+ * /NFS/dir/file fail: the server answers LOOKUP in a symlink handle with
+ * NFS3ERR_NOTDIR.  At most NFS_SYMLINK_HOPS links per lookup (Linux's
+ * MAXSYMLINKS is 40), which also ends a cycle.  Every caller (open, stat,
+ * nfs_is_dir) follows: there is no lstat path through here. */
+#define NFS_SYMLINK_HOPS 40
+int nfs_lookup(const struct nfs_mount *m, const char *rel,
+               struct nfs_fh *fh, struct nfs_attr *attr) {
+  if (!m || !m->in_use || !rel || rel[0] != '/') return -1;
+  char cur[NFS_PATH_MAX * 4];
+  int cl = 0;
+  for (; rel[cl] && cl < (int)sizeof cur - 1; cl++) cur[cl] = rel[cl];
+  if (rel[cl]) return -1;                   /* does not fit */
+  cur[cl] = '\0';
+  int hops = 0;
+restart:;
+  struct nfs_fh dir;
+  dir.len = m->root_fh_len;
+  for (uint32_t i = 0; i < dir.len; i++) dir.data[i] = m->root_fh[i];
+  struct nfs_attr last;
+  int have = 0;
   /* A path component is NOT bounded by the 32-byte readdir display name:
    * RimWorld ships names like
    * UnityEngine.RuntimeInitializeOnLoadManagerInitializerModule.dll (63
-   * bytes).  The old buf was NFS_NAME_MAX and the loop stopped at 31 chars,
-   * then resumed mid-component — every such path failed LOOKUP. */
+   * bytes). */
   char comp[NFS_COMP_MAX];
-  struct nfs_attr last_attr;
-  int have_attr = 0;
-  while (*p) {
+  int p = 1;
+  while (cur[p]) {
     int len = 0;
-    while (p[len] && p[len] != '/' && len < NFS_COMP_MAX - 1) len++;
-    for (int i = 0; i < len; i++) comp[i] = p[i];
+    while (cur[p + len] && cur[p + len] != '/') len++;
+    if (len == 0) { p++; continue; }
+    if (len >= NFS_COMP_MAX) return -1;
+    for (int i = 0; i < len; i++) comp[i] = cur[p + i];
     comp[len] = '\0';
-    if (len == 0) {
-      p++;
-      continue;
-    }
-    int attr_ok = 0;
     struct nfs_fh next;
-    int lrc = lookup_one(m, cur.data, cur.len, comp, &next, &last_attr, &attr_ok);
-    if (lrc != 0) {
-      /* L76: -2 is the SERVER saying "no such entry" -- definitive, return it.
-       * -1 is a transport or parse failure: a lost datagram, a reply stolen by
-       * a second socket that shares the ephemeral port, or a socket the pool
-       * could not hand out.  Mapping that to ENOENT is what produced
-       * "Could not find file /NFS/Data/Biotech/.../WITabs.xml" for a file the
-       * game had already opened in the same run, and the NullReferenceException
-       * in GraphicData.Init that followed it.  A LOOKUP is idempotent: retry
-       * the component before reporting a missing file. */
-      if (lrc != -2) {
-        int tries = 0;
-        while (lrc != 0 && tries < 3) {
-          tries++;
-          lrc = lookup_one(m, cur.data, cur.len, comp, &next, &last_attr, &attr_ok);
-        }
-        nfs_lookup_retries += (uint32_t)tries;
-        if (nfs_lookup_rows < 24) {
-          nfs_lookup_rows++;
-          struct kline kl;
-          kl_init(&kl);
-          kl_s(&kl, "[NFLK] retry comp=");
-          kl_s(&kl, comp);
-          kl_s(&kl, " tries=");
-          kl_i(&kl, (long)tries);
-          kl_s(&kl, " rc=");
-          kl_i(&kl, (long)lrc);
-          kl_s(&kl, " total=");
-          kl_i(&kl, (long)nfs_lookup_retries);
-          kl_c(&kl, '\n');
-          kl_emit(&kl);
-        }
-      }
-      if (lrc != 0)
-        return -1;
+    int attr_ok = 0;
+    if (lookup_comp(m, &dir, comp, &next, &last, &attr_ok) != 0) return -1;
+    if (!attr_ok && getattr_fh(m, next.data, next.len, &last) != 0) return -1;
+    have = 1;
+    int end = p + len;                      /* index just past this component */
+    if (last.type == NF3LNK) {
+      if (++hops > NFS_SYMLINK_HOPS) return -1;  /* a symlink loop */
+      char tgt[NFS_PATH_MAX * 2];
+      if (nfs_readlink(m, &next, tgt, sizeof tgt) < 0) return -1;
+      /* The link's own path is cur[0..end); the target resolves against its
+         parent.  Then the rest of the walk, cur[end..], is appended. */
+      char lpath[NFS_PATH_MAX * 4];
+      for (int i = 0; i < end; i++) lpath[i] = cur[i];
+      lpath[end] = '\0';
+      char joined[NFS_PATH_MAX * 4];
+      if (nfs_symlink_join(lpath, tgt, joined, sizeof joined) != 0) return -1;
+      int jl = n_strlen(joined);
+      int rl = n_strlen(cur + end);
+      if (jl + rl >= (int)sizeof cur) return -1;
+      char rest[NFS_PATH_MAX * 4];
+      for (int i = 0; i <= rl; i++) rest[i] = cur[end + i];
+      for (int i = 0; i < jl; i++) cur[i] = joined[i];
+      for (int i = 0; i <= rl; i++) cur[jl + i] = rest[i];
+      if (cur[0] != '/') return -1;
+      goto restart;
     }
-    cur = next;
-    have_attr = attr_ok;
-    p += len;
-    while (*p == '/') p++;
+    dir = next;
+    p = end;
   }
   if (attr) {
-    if (have_attr) *attr = last_attr;
-    else if (getattr_fh(m, cur.data, cur.len, attr) != 0) return -1;
+    if (have) *attr = last;
+    else if (getattr_fh(m, dir.data, dir.len, attr) != 0) return -1;
   }
-  if (fh) *fh = cur;
+  if (have) nfs_ac_put(m, &dir, &last);
+  if (fh) *fh = dir;
   return 0;
-}
-
-/* cp/exec: path lookup that FOLLOWS symbolic links, the Linux default for
- * open()/stat() (and what execve and the spawn loader need: the staged Wine
- * tree has /CP/WINE/bin/wineboot -> wine as an NFS symlink).  Walks `rel`
- * without following, and while the resolved node is NF3LNK reads the target,
- * rejoins it against the link's parent and re-walks -- bounded to defeat a
- * symlink cycle.  Every existing caller (open, stat, nfs_is_dir) now follows,
- * which is correct: there is no lstat path through here. */
-int nfs_lookup(const struct nfs_mount *m, const char *rel,
-               struct nfs_fh *fh, struct nfs_attr *attr) {
-  char cur[NFS_PATH_MAX * 4];
-  int cl = 0;
-  if (!rel) return -1;
-  for (; rel[cl] && cl < (int)sizeof cur - 1; cl++) cur[cl] = rel[cl];
-  cur[cl] = '\0';
-  struct nfs_fh lfh;
-  struct nfs_attr la;
-  for (int hop = 0; hop < 12; hop++) {
-    int rc = nfs_lookup_nofollow(m, cur, &lfh, &la);
-    if (rc != 0) return rc;
-    if (la.type != NF3LNK) {
-      if (fh) *fh = lfh;
-      if (attr) *attr = la;
-      return 0;
-    }
-    char tgt[NFS_PATH_MAX * 2];
-    int n = nfs_readlink(m, &lfh, tgt, sizeof tgt);
-    if (n < 0) return -1;
-    char next[NFS_PATH_MAX * 4];
-    if (nfs_symlink_join(cur, tgt, next, sizeof next) != 0) return -1;
-    for (cl = 0; next[cl] && cl < (int)sizeof cur - 1; cl++) cur[cl] = next[cl];
-    cur[cl] = '\0';
-  }
-  return -1; /* too many hops: a symlink loop */
 }
 
 int nfs_getattr(const struct nfs_mount *m, const struct nfs_fh *fh,

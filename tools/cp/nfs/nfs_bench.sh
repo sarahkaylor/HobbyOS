@@ -62,6 +62,7 @@ fi
 printf 'CPNFSB.BIN\n' > "$OUT/wave.cfg"
 STAGE="mcopy -o -i $TREE/disk.img $OUT/nb.bin ::/CPNFSB.BIN && mcopy -o -i $TREE/disk.img $OUT/expect.txt ::/NBEXPECT.TXT && mcopy -o -i $TREE/disk.img $OUT/wave.cfg ::/WAVE.CFG"
 STAGE="$STAGE && mcopy -o -i $TREE/disk.img $OUT/one.txt ::/NBONE.TXT"
+STAGE="$STAGE && mcopy -o -i $TREE/disk.img $OUT/stat.txt ::/NBSTAT.TXT"
 [ -n "$BIG" ] && STAGE="$STAGE && mcopy -o -i $TREE/disk.img $OUT/big.txt ::/NBBIG.TXT"
 
 export TREE OUT EXPORT STAGE BIG NB_TIMEOUT="${NB_TIMEOUT:-420}"
@@ -79,7 +80,17 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM HUP
 sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$OUT"/m?.bin "$OUT/big176m.bin" "$EXPORT/" || die "export dir"
 if [ -n "$BIG" ]; then sudo -n mv "$BIG" "$EXPORT/" || die "big5g into the export"; fi
+# cp/nfs2: symlinked directories (dlink -> sub, d2 -> dlink, sub/up -> ..)
+sudo -n mkdir "$EXPORT/sub" && sudo -n cp "$OUT/m1.bin" "$EXPORT/sub/data.bin" &&
+  sudo -n ln -s sub "$EXPORT/dlink" && sudo -n ln -s dlink "$EXPORT/d2" &&
+  sudo -n ln -s .. "$EXPORT/sub/up" || die "symlinks"
 sudo -n chmod -R a+rX "$EXPORT" || die "chmod"
+# cp/nfs2: a file with known times for fstat/stat (the guest never reads it)
+sudo -n cp "$OUT/m2.bin" "$EXPORT/stat.bin" && sudo -n chmod a+r "$EXPORT/stat.bin" &&
+  sudo -n touch -a -d @1700000001 "$EXPORT/stat.bin" &&
+  sudo -n touch -m -d @1600000002 "$EXPORT/stat.bin" || die "stat.bin"
+stat -c "%X %Y %Z" "$EXPORT/stat.bin" > "$OUT/stat.txt" || die "stat.bin times"
+echo "== stat.bin atime/mtime/ctime: $(cat "$OUT/stat.txt")"
 ADDED=1
 bash "$SELF/tools/cp/exports.sh" add "$EXPORT" || die "exports.sh add"
 ( cd "$TREE" && T3_TIMEOUT="$NB_TIMEOUT" T3_STAGE="$STAGE" T3_MIN_LINES=1 TOOLS_SKIP=1 \
