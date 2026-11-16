@@ -133,6 +133,7 @@ static spinlock_t nfs_ra_lock;
 /* cp/nfs2: pipelined READs that timed out waiting for a reply. */
 volatile uint32_t nfs_pipe_stalls;
 extern volatile uint32_t nfs_inj_dropped;   /* fault injection, below */
+extern volatile uint32_t nfs_pool_temp;     /* socket pool, below */
 
 
 /* L35: where does a READ RPC's wall time go?  Every READ RPC is bucketed by
@@ -264,6 +265,16 @@ void nfs_perf_dump(const char *why) {
     kl_i(&kl, (long)nfs_pipe_stalls);
     kl_s(&kl, " inj_dropped=");
     kl_i(&kl, (long)nfs_inj_dropped);
+    {
+      /* cp/nfs2b: guest sockets ever created (each one is a slirp host
+         socket, i.e. a host ephemeral port, for 240 s), and the pool's
+         temporary overflow sockets */
+      extern volatile uint32_t net_sock_created;
+      kl_s(&kl, " socks=");
+      kl_i(&kl, (long)net_sock_created);
+      kl_s(&kl, " pool_temp=");
+      kl_i(&kl, (long)nfs_pool_temp);
+    }
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
@@ -556,7 +567,10 @@ static int nfs_inj_trigger(const char *rel) {
   }
   if (!*p) return 0;
   const char *q = p;
-  if (q[0] == 'o' && q[1] == 'f' && q[2] == 'f') {
+  if (q[0] == 'd' && q[1] == 'u' && q[2] == 'm' && q[3] == 'p') {
+    nfs_perf_dump("inject");           /* cp/nfs2b: counters on request */
+    return 1;
+  } else if (q[0] == 'o' && q[1] == 'f' && q[2] == 'f') {
     nfs_inj_every = 0;
     nfs_inj_until_ms = 0;
   } else if (q[0] == 'e' && q[1] == 'v' && q[2] == 'e' && q[3] == 'r' && q[4] == 'y' && q[5] == '.') {
@@ -624,7 +638,7 @@ static int rpc_call(uint32_t ip, uint16_t port, uint32_t prog, uint32_t vers,
                     const uint8_t **body, int *body_len) {
   uint8_t cbuf[NFS_RPC_BUF];
   uint8_t rbuf[NFS_RPC_BUF];
-  uint32_t xid = next_xid++;
+  uint32_t xid = __sync_fetch_and_add(&next_xid, 1);
   int n = rpc_build_call(cbuf, sizeof cbuf, xid, prog, vers, proc,
                          args, args_len);
   if (n <= 0) {
@@ -848,6 +862,10 @@ int nfs_mount_add(const char *source, const char *point) {
   m->read_size = NFS_READ_RSIZE;
   m->rd_sock = 0;
   m->rd_busy = 0;
+  for (int i = 0; i < NFS_SOCK_POOL; i++) {
+    m->pool[i] = 0;
+    m->pool_busy[i] = 0;
+  }
   m->short_val = 0;
   m->short_n = 0;
 
@@ -925,6 +943,11 @@ int nfs_mount_remove(const char *point) {
       mounts[i].rd_sock = 0;
     }
     mounts[i].rd_busy = 0;
+    for (int k = 0; k < NFS_SOCK_POOL; k++) {   /* cp/nfs2b */
+      if (mounts[i].pool[k]) net_socket_close(mounts[i].pool[k]);
+      mounts[i].pool[k] = 0;
+      mounts[i].pool_busy[k] = 0;
+    }
     mounts[i].short_val = 0;
     mounts[i].short_n = 0;
     dir_cache_invalidate_all();
@@ -1195,38 +1218,25 @@ int nfs_is_dir(const struct nfs_mount *m, const char *rel) {
 
 /* ---- L35: serial and pipelined READ ---------------------------------- */
 
-/* Borrow the mount's cached READ socket.  Returns 0 (and sets *temp) on
- * failure so the caller can fall back to the old per-RPC shape. */
-static struct socket_pcb *rd_sock_get(struct nfs_mount *m, int *temp) {
-  *temp = 0;
-  if (__sync_lock_test_and_set(&m->rd_busy, 1) == 0) {
-    if (!m->rd_sock) {
-      struct socket_pcb *p = net_socket_create(IP_PROTO_UDP);
-      if (!p) { m->rd_busy = 0; return 0; }
-      if (net_socket_connect(p, m->server_ip, m->nfs_port) != 0) {
-        net_socket_close(p);
-        m->rd_busy = 0;
-        return 0;
-      }
-      m->rd_sock = p;
-    }
-    return m->rd_sock;
-  }
-  /* Another thread owns the cached socket: use a temporary one so the two
-   * never interleave xids on one queue. */
+/* cp/nfs2b: borrow one of the mount's pooled sockets (see nfs.h: a fresh
+ * socket per RPC exhausts the HOST's ephemeral ports through slirp).
+ * *slot is the pool index, or -1 for a temporary socket, which is used only
+ * when every pooled socket stays busy for NFS_POOL_WAIT_US.  Returns 0 when
+ * no socket could be had at all. */
+volatile uint32_t nfs_pool_temp;   /* temporary sockets handed out */
+#define NFS_POOL_WAIT_US 20000
+static struct socket_pcb *nfs_sock_open(const struct nfs_mount *m) {
   struct socket_pcb *p = net_socket_create(IP_PROTO_UDP);
   if (!p) {
-    /* L57: MAX_SOCKETS (16) with one socket per concurrent reader is a real
-     * ceiling, and hitting it used to be completely silent: the READ returned
-     * -1, file_read mapped that to EBADF and Mono said "Invalid handle to
-     * path".  Name it. */
+    /* L57: MAX_SOCKETS (16) is a real ceiling, and hitting it used to be
+     * completely silent.  Name it. */
     extern int net_sockets_in_use(void);
     static int nosock_rows;
     if (nosock_rows < 16) {
       nosock_rows++;
       struct kline kl;
       kl_init(&kl);
-      kl_s(&kl, "[NFSNOSOCK] site=rd_sock_get inuse=");
+      kl_s(&kl, "[NFSNOSOCK] site=nfs_sock_get inuse=");
       kl_i(&kl, (long)net_sockets_in_use());
       kl_s(&kl, " max=");
       kl_i(&kl, (long)MAX_SOCKETS);
@@ -1239,18 +1249,38 @@ static struct socket_pcb *rd_sock_get(struct nfs_mount *m, int *temp) {
     net_socket_close(p);
     return 0;
   }
-  *temp = 1;
   return p;
 }
 
-static void rd_sock_put(struct nfs_mount *m, struct socket_pcb *p, int temp,
-                        int broken) {
-  if (temp) { net_socket_close(p); return; }
-  if (broken && m->rd_sock) {
-    net_socket_close(m->rd_sock);
-    m->rd_sock = 0;
+static struct socket_pcb *rd_sock_get(struct nfs_mount *m, int *slot) {
+  *slot = -1;
+  uint64_t t0 = 0;
+  for (;;) {
+    for (int i = 0; i < NFS_SOCK_POOL; i++) {
+      if (__sync_lock_test_and_set(&m->pool_busy[i], 1) != 0) continue;
+      if (!m->pool[i]) m->pool[i] = nfs_sock_open(m);
+      if (!m->pool[i]) { __sync_lock_release(&m->pool_busy[i]); return 0; }
+      *slot = i;
+      return m->pool[i];
+    }
+    if (!t0) t0 = timer_get_us();
+    if (timer_get_us() - t0 > NFS_POOL_WAIT_US) break;
+    cpu_relax();
   }
-  m->rd_busy = 0;
+  nfs_pool_temp++;
+  return nfs_sock_open(m);              /* *slot stays -1: closed on put */
+}
+
+/* Give a socket back.  `broken` closes a pooled socket (the next user opens
+ * a new one); a late reply left in a kept socket is skipped by xid. */
+static void rd_sock_put(struct nfs_mount *m, struct socket_pcb *p, int slot,
+                        int broken) {
+  if (slot < 0) { if (p) net_socket_close(p); return; }
+  if (broken && m->pool[slot]) {
+    net_socket_close(m->pool[slot]);
+    m->pool[slot] = 0;
+  }
+  __sync_lock_release(&m->pool_busy[slot]);
 }
 
 /* ---- cp/nfs2: hard-mount retry bookkeeping ------------------------------ */
@@ -1319,6 +1349,44 @@ static int nfs_read_probe_small(const struct nfs_mount *m, const struct nfs_fh *
   return rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS, NFS_PROC_READ,
                   args, w.len, rb, sizeof rb, &body, &blen) == 0;
 }
+/* cp/nfs2b: one NFS-program RPC on a POOLED socket of the mount (the
+ * mount-time calls keep rpc_call's per-call socket).  NFS_RPC_TRIES sends,
+ * fresh xid each; the reply body is copied into body_buf. */
+static int rpc_call_pool(const struct nfs_mount *m, uint32_t proc,
+                         const uint8_t *args, int args_len, uint8_t *body_buf,
+                         int body_cap, const uint8_t **body, int *body_len) {
+  struct nfs_mount *mw = (struct nfs_mount *)m;
+  uint8_t cbuf[NFS_RPC_BUF];
+  uint8_t rbuf[NFS_RPC_BUF];
+  for (int attempt = 0; attempt < NFS_RPC_TRIES; attempt++) {
+    uint32_t xid = __sync_fetch_and_add(&next_xid, 1);
+    int n = rpc_build_call(cbuf, sizeof cbuf, xid, NFS_PROG, NFS_VERS, proc,
+                           args, args_len);
+    if (n <= 0) return -1;
+    int slot = -1;
+    struct socket_pcb *pcb = rd_sock_get(mw, &slot);
+    if (!pcb) return -1;
+    int rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, sizeof rbuf, body, body_len, 1);
+    if (rc == 0) {
+      int bl = *body_len;
+      if (bl < 0 || bl > body_cap) {
+        rd_sock_put(mw, pcb, slot, 0);
+        uart_puts("[NFS] rpc: reply body too large\n");
+        return -1;
+      }
+      for (int i = 0; i < bl; i++) body_buf[i] = (*body)[i];
+      *body = body_buf;
+      rd_sock_put(mw, pcb, slot, 0);
+      return 0;
+    }
+    /* keep the socket: a late reply is skipped by xid, and a NEW socket is
+       exactly what a host short of ephemeral ports cannot serve */
+    rd_sock_put(mw, pcb, slot, 0);
+  }
+  uart_puts("[NFS] rpc: no reply from server\n");
+  return -1;
+}
+
 /* rpc_call for the NFS program's own procedures on a mounted export, with
  * the same hard semantics: re-sent until answered or NFS_HARD_MS. */
 static int rpc_call_hard(const struct nfs_mount *m, uint32_t proc,
@@ -1326,8 +1394,8 @@ static int rpc_call_hard(const struct nfs_mount *m, uint32_t proc,
                          int body_cap, const uint8_t **body, int *body_len) {
   uint64_t t0 = 0;
   for (int tries = 1;; tries++) {
-    if (rpc_call(m->server_ip, m->nfs_port, NFS_PROG, NFS_VERS, proc, args,
-                 args_len, body_buf, body_cap, body, body_len) == 0)
+    if (rpc_call_pool(m, proc, args, args_len, body_buf, body_cap, body,
+                      body_len) == 0)
       return 0;
     if (!t0) t0 = timer_get_ms();
     nfs_hard_note(proc == NFS_PROC_LOOKUP ? "LOOKUP" : proc == NFS_PROC_GETATTR
@@ -1381,7 +1449,7 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
     xdr_w_u32(&w, want);
     if (w.err) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return -1; }
 
-    uint32_t xid = next_xid++;
+    uint32_t xid = __sync_fetch_and_add(&next_xid, 1);
     int n = rpc_build_call(cbuf, sizeof cbuf, xid, NFS_PROG, NFS_VERS,
                            NFS_PROC_READ, args, w.len);
     if (n <= 0) { if (pcb) rd_sock_put(mw, pcb, temp, 0); return -1; }
@@ -1402,7 +1470,8 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
        * cp/nfs: if large READs keep timing out while a single-frame READ of
        * the same block is answered, the path drops fragments: fall back to
        * 1344-byte READs for the mount, once, loudly. */
-      if (pcb) rd_sock_put(mw, pcb, temp, wait >= (uint64_t)NFS_RPC_TIMEOUT_MS * 1000u);
+      (void)wait;
+      if (pcb) rd_sock_put(mw, pcb, temp, 0); /* cp/nfs2b: keep it (see nfs.h) */
       pcb = 0;
       temp = 0;
       if (!hard_t0) hard_t0 = timer_get_ms();
@@ -1534,7 +1603,7 @@ static int nfs_rd_issue(const struct nfs_mount *m, struct socket_pcb *pcb,
   if (w.err) return -1;
 
   uint8_t cbuf[NFS_RPC_BUF];
-  uint32_t xid = next_xid++;
+  uint32_t xid = __sync_fetch_and_add(&next_xid, 1);
   int n = rpc_build_call(cbuf, sizeof cbuf, xid, NFS_PROG, NFS_VERS,
                          NFS_PROC_READ, args, w.len);
   if (n <= 0) return -1;

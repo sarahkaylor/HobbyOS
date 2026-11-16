@@ -367,3 +367,54 @@ stalls and correctness (`docs/cp-nfs2-evidence/p2-runs-strix.txt`).
 wineboot still ends at the 300 s boot-event timeout: NFS now accounts for
 a few seconds of RPC wait in that window, not for the timeout.
 
+
+## 18. The 180 s LOOKUP give-up: host ephemeral ports (cp/nfs2b)
+
+After cp-nfs2 merged, C5-vk2 run 5 logged `[NFSHARD] GIVE UP op=RPC off=0
+want=3 tries=55 after_ms=180000 -> EIO` (`want=` carries the procedure
+there: 3 = LOOKUP, of the component `WINE` in the export root; the
+`[NFLK] retry comp=WINE tries=1 rc=0` right after it succeeded at once).
+During the 180 s, READs on the same mount kept flowing and the guest's
+reassembly lost nothing (`[NFSNET] drop_timeout=0`); nfsd's own UDP socket
+showed no drops (`ss`: d0), and nothing in the mountd/nfsd journal.
+
+What differs between the two: READs use the mount's long-lived socket,
+while every LOOKUP/GETATTR/READLINK/READDIRPLUS went out on a FRESH guest
+UDP socket (`rpc_call`: create, connect, send, close).  A fresh guest port
+is a fresh host UDP socket inside QEMU's slirp, kept for 240 s, bound to a
+host ephemeral port.  strix's range is 32768-60999 (28232 ports); our
+Gate P2 QEMU held 5775-8459 UDP sockets (`ss -uap`), so four guests booting
+Wine exhaust the range, and from then on slirp cannot send any NEW
+socket's datagrams (the kernel's autobind fails) while old sockets keep
+working.  A LOOKUP that happens to start then is never sent, retry after
+retry, until enough slirp sockets expire.
+
+**Fix:** every RPC on a mounted export goes out on one of a small pool of
+long-lived sockets per mount (`NFS_SOCK_POOL` 6: READ pipelines, the serial
+READ and `rpc_call_pool` for the other procedures); a socket is kept on a
+timeout (a late reply is skipped by xid; a NEW socket is what an
+exhausted host cannot serve).  Only mount-time calls (portmap, MNT,
+FSINFO) and an overflow when all six stay busy for 20 ms (`pool_temp=` in
+`[NFSNET]`) create a socket.  xids are taken atomically.
+
+**Guard G10:** `cpnfsbench` phase `lookstorm` (4 processes x 1500 stat()s);
+the storm may create at most 32 guest sockets (`socks=` in the `[NFSNET]`
+rows the bench requests before and after it).
+
+**Measured (strix, `docs/cp-nfs2-evidence/nfs2b-sockets-strix.txt`):**
+
+| | 12e14203 (G10, no pool) | 6e586000 (pool) |
+|---|---|---|
+| lookstorm (4 x 1500 stat()s) | 18000 new sockets, 27.2 s, G10 FAIL | 1 new socket, 0.68 s, G10 PASS |
+| UDP sockets this guest's QEMU held (ss) | 16384 (the whole guest port range) | 11 at most |
+| whole bench, guest sockets created | -- | 14 |
+| Udp RcvbufErrors during both runs | +0 | +0 |
+| nfsd pool_stats threads-timedout | 0 | 0 |
+
+Gate P2 run 4 on 6e586000 (cyberpunk b8d73938 + the pool): **G1, G2 and
+G3 PASS**; `wineboot status=0 ms=25309` (run23: status=53 ms=306756);
+207.9 MB of READ for the whole run (the 202 MB Wine tree; run23: 1.66
+GB); 0 pipeline stalls, 0 `[NFSHARD]` retries, 8 guest sockets for the
+whole boot.  The host is not short of nfsd threads (16; threads-timedout
+0) and nfsd's own socket drops nothing: the give-ups were the client's
+socket churn exhausting host ports.

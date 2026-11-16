@@ -47,6 +47,9 @@
  *               read page by page (and one mapped) and every page compared
  *               with the host's stream: a lost reply must be retried, never
  *               returned as short, failed or zero data.
+ *   lookstorm   cp/nfs2b (test kernels): 4 x 1500 stat()s; the kernel's
+ *               socket count (socks=) before and after says whether every
+ *               RPC took a fresh socket (a host ephemeral port via slirp).
  *   done rc=<n> n = phases that failed (bad byte count or checksum)
  * MB/s is 10^6 bytes per second of guest wall time (CLOCK_MONOTONIC).
  */
@@ -725,6 +728,54 @@ static int phase_inject(void) {
   return fails;
 }
 
+/* ---- cp/nfs2b: LOOKUP storm, sockets per RPC ----------------------------- */
+/* Four processes stat() paths on the export 1500 times each (several LOOKUPs
+ * per stat, symlinked directories included).  The test kernel prints its
+ * [NFSNET] counters (socks= is every guest socket ever created) on a
+ * stat("/NFS/.cp-nfs-inject.dump") before and after; rsize_guard G10 needs
+ * the storm to create a handful of sockets, not one per RPC: every guest
+ * socket pins a host ephemeral port inside QEMU's slirp for 240 s. */
+#define STORM_PROCS 4
+#define STORM_STATS 1500
+static int phase_lookstorm(void) {
+  static const char *paths[] = { "/NFS/m0.bin", "/NFS/sub/data.bin", "/NFS/d2/data.bin",
+                                 "/NFS/sub/up/sub/data.bin", "/NFS/no-such-file" };
+  pc("[NB] lookstorm mark0\n");
+  inj_ctl("dump");
+  uint64_t t0 = now_us();
+  int pid[STORM_PROCS];
+  for (int k = 0; k < STORM_PROCS; k++) {
+    pid[k] = fork();
+    if (pid[k] == 0) {
+      int bad = 0;
+      for (int i = 0; i < STORM_STATS; i++) {
+        struct stat st;
+        int r = stat(paths[(i + k) % 5], &st);
+        if (((i + k) % 5 == 4) ? r == 0 : r != 0) bad++;
+      }
+      exit(bad ? 1 : 0);
+    }
+  }
+  int failed = 0;
+  for (int k = 0; k < STORM_PROCS; k++) {
+    int st = 0;
+    if (pid[k] < 0 || waitpid(pid[k], &st, 0) != pid[k] || st != 0) failed++;
+  }
+  uint64_t us = now_us() - t0;
+  pc("[NB] lookstorm mark1\n");
+  inj_ctl("dump");
+  char line[160];
+  int n = 0;
+  kv(line, &n, "[NB] lookstorm stats=", (unsigned long)(STORM_PROCS * STORM_STATS));
+  kv(line, &n, " failed_procs=", (unsigned long)failed);
+  kv(line, &n, " ms=", (unsigned long)(us / 1000));
+  const char *p = failed ? " FAIL\n" : " ok\n";
+  while (*p) line[n++] = *p++;
+  line[n] = 0;
+  pc(line);
+  return failed ? 1 : 0;
+}
+
 /* Read `total` bytes from the start of NB_FILE in `chunk`-byte read()s.
  * Returns 0 when the byte count is right (and, for the full file, the
  * checksum matches `expect`). */
@@ -812,6 +863,7 @@ int main(void) {
   fails += phase_one();
   fails += phase_big();
   fails += phase_inject();
+  fails += phase_lookstorm();
   char d[40];
   int m = 0;
   const char *p = "[NB] done rc=";
