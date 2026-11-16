@@ -1547,6 +1547,16 @@ static int nfs_rd_issue(const struct nfs_mount *m, struct socket_pcb *pcb,
  * plus a serial finish.  Pipelines now share one budget; a pipeline with
  * nothing in flight may always issue one READ, so none can starve. */
 #define NFS_INFLIGHT_MAX (6 * NFS_READ_RSIZE_MAX)
+/* cp/nfs2: and at most NFS_PIPE_INFLIGHT bytes outstanding on ONE socket.
+ * Every guest UDP socket is a host UDP socket inside QEMU's slirp with the
+ * default 212992-byte receive buffer, and a 32 KiB reply arrives there as
+ * one ~33 KiB datagram (loopback, no fragments) whose skb truesize is about
+ * twice that.  When QEMU drains slowly (four guests on the host), a third
+ * reply overflows it and the host drops the WHOLE datagram: measured on
+ * strix, Udp RcvbufErrors +203 in 90 s, `ss -uam` showing the drops (d3030,
+ * d62) on qemu-system-x86's sockets, while the guest's reassembly counted
+ * no partial datagram at all ([NFSNET] drop_timeout=0).  Two replies fit. */
+#define NFS_PIPE_INFLIGHT (2 * NFS_READ_RSIZE_MAX)
 static volatile int32_t nfs_inflight_bytes;
 #define NFS_PIPE_RESENDS 2   /* stalls in a row before the serial tail */
 /* cp/nfs2: the first wait for a pipelined reply.  Gate P2 loses about one
@@ -1643,6 +1653,8 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
         if (want > NFS_RA_BYTES - in) want = NFS_RA_BYTES - in;
       }
       if (inflight > 0 && nfs_inflight_bytes + (int32_t)want > NFS_INFLIGHT_MAX)
+        break;
+      if (inflight > 0 && mine + (int32_t)want > NFS_PIPE_INFLIGHT)
         break;
       int idx = -1;
       for (int i = 0; i < NFS_READ_DEPTH; i++)

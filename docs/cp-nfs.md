@@ -310,3 +310,21 @@ the mount).  `cpnfsbench` phase `inject` reads fresh files page by page and
 maps one, with every 5th reply dropped and with all replies dropped for 8 s,
 and compares every page with the host's stream.  It fails on the commit
 before the fix (the blackout read gives up) and passes after it.
+
+## 16. Why the server "stopped answering" (strix, 2026-11-16)
+
+Measured during Gate P2 run 2 with four guests up: the guest's reassembly
+saw no partial datagram (`[NFSNET] frags=36503 done=1604 drop_timeout=0
+drop_evict=0 ... stalls=29`): whole replies vanished.  On the host,
+`/proc/net/snmp` Udp `RcvbufErrors` grew by 203 in 90 s while that guest
+counted 28 stalls, and `ss -uamnp` showed the drops on qemu-system-x86's
+slirp sockets (`rb212992 ... d3030` for one guest, `d62` for ours).  So the
+loss is QEMU's slirp host socket, whose 212992-byte default receive buffer
+holds only about three 32 KiB replies (truesize ~2x), overflowing while
+QEMU drains slowly.  It is not `exportfs -ra` (no partial or deferred
+pattern needed to explain it; the counters account for it).
+
+Client side: at most two 32 KiB READs outstanding per socket
+(`NFS_PIPE_INFLIGHT`), and hard-mount retries for the rest.  Host side
+(proposed, not done: it is a system setting): `net.core.rmem_default` of
+1-4 MiB would give every slirp socket room for a full pipeline.
