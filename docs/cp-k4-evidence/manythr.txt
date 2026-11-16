@@ -1,0 +1,12 @@
+# linux_probe_manythr, strix QEMU/KVM 8 vCPUs.  BASE = cyberpunk 5eea3712, LANE = cp-k4 1f2006c5
+## BASE
+[LP] FAIL M1 300 threads: 190/300 threads alive at once, distinct=1 max_tid=191 err=11
+[LP] FAIL M2 3 children x 100 threads: 187 alive at once, children ok=0
+[LP] FAIL M3 300 threads again: 190/300 threads alive at once, distinct=1 max_tid=191 err=11
+[LP] done rc=3
+t3_linux_probe: FAIL — manythr never printed '[LP] done rc=0' (tier rc=1)
+## LANE
+[LP] PASS M1 300 threads: 300/300 threads alive at once, distinct=1 max_tid=302 err=0
+[LP] PASS M2 3 children x 100 threads: 300 alive at once, children ok=1
+[LP] PASS M3 300 threads again: 300/300 threads alive at once, distinct=1 max_tid=395 err=0
+[LP] done rc=0
