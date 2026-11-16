@@ -222,6 +222,10 @@ uint64_t file_obj_page(struct vm_object *o, uint64_t off) {
   if (idx >= (uint64_t)(((uint64_t)size + FRAME_SIZE - 1) / FRAME_SIZE))
     return 0; /* past the object's page capacity */
 
+  /* cp/pfx: the write generation this fill reads under (see
+     vm_object_install_page_gen); a write landing meanwhile restarts it. */
+  for (int gen_try = 0;; gen_try++) {
+  uint32_t gen = vm_object_wgen(o);
   uint64_t nf = frame_alloc();
   if (!nf)
     return 0;
@@ -304,8 +308,81 @@ uint64_t file_obj_page(struct vm_object *o, uint64_t off) {
   __builtin___clear_cache((char *)phys_to_virt(nf), (char *)phys_to_virt(nf) + FRAME_SIZE);
 
   /* Publish into the object.  A peer CPU that faulted the same page while
-     we read wins; install frees our frame and hands back its own. */
-  return vm_object_install_page(o, off, nf);
+     we read wins; install frees our frame and hands back its own.  cp/pfx:
+     a write() that reached the disk after our read bumped the generation:
+     read again (bounded; a file rewritten that fast is still served
+     coherently by the last round, which installs unconditionally). */
+  int stale = 0;
+  uint64_t got = gen_try < 8 ? vm_object_install_page_gen(o, off, nf, gen, &stale)
+                             : vm_object_install_page(o, off, nf);
+  if (!stale)
+    return got;
+  }
+}
+
+/* cp/pfx (docs/cp-pfx.md; docs/cyberpunk.md §0.2 item 18): a FAT16 write()
+ * of [off, off+len) to the file whose chain starts at `cluster` has reached
+ * the disk; `file_size` is the file's size now.  Linux has one page cache, so
+ * a MAP_PRIVATE page the mapper has not written -- and every MAP_SHARED page
+ * -- shows the new bytes.  Here every live VM_OBJ_FILE object of that file
+ * (the cached one and any an invalidation detached but a mapping still
+ * holds) gets the written bytes copied into the frames it has already
+ * materialized; pages it has not materialized are read from the disk when
+ * first touched, under the write generation that makes a racing fill re-read.
+ * Private COW copies are separate frames and are not touched (Linux).  Only
+ * the written bytes are copied: the rest of a frame keeps what it has.
+ * Writers are serialized among themselves (fobj_wlock) so two refreshes of one
+ * range cannot land out of order.  NO lock may be held by the caller. */
+static ylock_t fobj_wlock;
+static volatile int fobj_wlock_ready;
+
+void file_obj_note_write(uint16_t cluster, uint32_t off, uint32_t len, uint32_t file_size) {
+  if (cluster == 0 || len == 0)
+    return;
+  struct vm_object *objs[16];
+  int n = vm_object_file_writers(cluster, objs, 16);
+  if (n == 0)
+    return;
+  if (!__atomic_load_n(&fobj_wlock_ready, __ATOMIC_ACQUIRE)) {
+    static volatile int st;
+    int e = 0;
+    if (__atomic_compare_exchange_n(&st, &e, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+      ylock_init(&fobj_wlock);
+      __atomic_store_n(&fobj_wlock_ready, 1, __ATOMIC_RELEASE);
+    } else {
+      while (!__atomic_load_n(&fobj_wlock_ready, __ATOMIC_ACQUIRE))
+        ;
+    }
+  }
+  ylock_acquire(&fobj_wlock);
+  uint64_t scratch = frame_alloc();
+  uint64_t end = (uint64_t)off + len;
+  for (uint64_t p = (uint64_t)off & ~(uint64_t)(FRAME_SIZE - 1); scratch && p < end; p += FRAME_SIZE) {
+    int have = 0; /* is the page cached by any object? read the disk once */
+    for (int k = 0; k < n; k++)
+      if (vm_object_peek(objs[k], p)) have = 1;
+    if (!have)
+      continue;
+    int rd = p < file_size ? fat16_read_direct_pos(cluster, file_size, scratch, (int)FRAME_SIZE, (uint32_t)p) : 0;
+    uint64_t a = off > p ? off : p;
+    uint64_t b = end < p + FRAME_SIZE ? end : p + FRAME_SIZE;
+    if (rd < 0 || (uint64_t)rd < b - p)
+      continue; /* short read: leave the frame alone, never publish zeros */
+    const volatile uint8_t *src = (const volatile uint8_t *)phys_to_virt(scratch);
+    for (int k = 0; k < n; k++) {
+      uint64_t fr = vm_object_peek(objs[k], p);
+      if (!fr) continue;
+      volatile uint8_t *dst = (volatile uint8_t *)phys_to_virt(fr);
+      for (uint64_t i = a - p; i < b - p; i++)
+        dst[i] = src[i];
+      __builtin___clear_cache((char *)phys_to_virt(fr), (char *)phys_to_virt(fr) + FRAME_SIZE);
+    }
+  }
+  if (scratch)
+    frame_free(scratch);
+  ylock_release(&fobj_wlock);
+  for (int k = 0; k < n; k++)
+    vm_object_unref(objs[k]);
 }
 
 /* ====================================================================== */

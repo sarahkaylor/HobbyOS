@@ -806,6 +806,90 @@ static void test_vm_memfd_private_cow(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* cp/pfx (docs/cp-pfx.md): what an object far above the old 64 MiB cap costs
+ * the kernel, measured in frames against the real allocator.  A 200 MiB
+ * object (Wine's 64 MiB memfd x3, above P0's 192 MiB GPU BO) costs its frame
+ * array -- 8 bytes per page, 51,200 entries = 101 frames, allocated
+ * contiguously at create -- plus one frame per materialized page; a MAP_SHARED
+ * mapping of all of it costs each address space its page tables (one 4 KiB
+ * table per 2 MiB, ~100 + the upper levels).  Everything comes back at
+ * teardown + unref.  At the 1 GiB cap the array is 513 contiguous frames. */
+static void test_vm_big_object_cost(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_big_object_cost...\n");
+  const uint64_t big = 200ULL << 20, npg = big / FRAME_SIZE;
+  int free0 = frame_free_count();
+  struct vm_object *o = vm_object_create(VM_OBJ_MEMFD, big);
+  EXPECT_EQ((o != 0), 1);
+  if (!o)
+    return;
+  int arr = free0 - frame_free_count();
+  EXPECT_EQ(arr, 101);
+  struct process p;
+  for (unsigned i = 0; i < sizeof(p); i++)
+    ((unsigned char *)&p)[i] = 0;
+  p.as = vm_as_create(VM_TEST_TAG + 1);
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as) {
+    vm_object_unref(o);
+    return;
+  }
+  int f_as = frame_free_count();
+  uint64_t b = USER_MMAP_BASE_V2;
+  EXPECT_EQ(vm_region_insert(p.as, b, big, VM_PROT_READ | VM_PROT_WRITE,
+                             VMK_SHARED, VM_MAP_SHARED, o, 0),
+            0);
+  /* Materialize every page through the object (no lock-holding fault-path
+     diagnostics: faulting all 51,200 pages through vm_handle_fault once held
+     vm_lock with IRQs off for 930 ms in one fault -- a [PUB]/[PUBS] console
+     row emitted under the lock -- and tripped the tier's IRQ-off budget), and
+     fault one page per 2 MiB through the mapping: that is what builds every
+     page table the full mapping needs. */
+  const char *why = 0;
+  int bad = 0;
+  for (uint64_t i = 0; i < npg; i++) {
+    uint64_t fr = vm_object_page_locked(o, i * FRAME_SIZE);
+    if (!fr) { bad++; continue; }
+    *(volatile uint64_t *)phys_to_virt(fr) = 0xB16B0000ULL + i;
+  }
+  for (uint64_t i = 0; i < npg; i += 512)
+    if (vm_handle_fault(&p, b + i * FRAME_SIZE, 1, 0, &why) != 0)
+      bad++;
+  if (vm_handle_fault(&p, b + (npg - 1) * FRAME_SIZE, 1, 0, &why) != 0)
+    bad++;
+  EXPECT_EQ(bad, 0);
+  uint64_t lf = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, b + (npg - 1) * FRAME_SIZE, &lf), 0);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(vm_arch_leaf_phys(lf)), 0xB16B0000ULL + npg - 1);
+  int used = f_as - frame_free_count();      /* data + this AS's tables + region array */
+  int tables = used - (int)npg;
+  uart_puts("  [VMCOST] 200 MiB object: frame array=");
+  print_int(arr);
+  uart_puts(" frames, data=");
+  print_int((int)npg);
+  uart_puts(" frames, mapping overhead (page tables + region array)=");
+  print_int(tables);
+  uart_puts(" frames\n");
+  EXPECT_EQ((tables >= 100 && tables <= 110), 1);
+  vm_as_teardown(p.as);
+  EXPECT_EQ(free0 - frame_free_count(), arr + (int)npg); /* tables back; pages stay the object's */
+  vm_object_unref(o);
+  EXPECT_EQ(frame_free_count(), free0);
+  /* the ceiling itself: create costs only the array */
+  struct vm_object *g = vm_object_create(VM_OBJ_MEMFD, VM_OBJ_MAX_BYTES);
+  EXPECT_EQ((g != 0), 1);
+  if (g) {
+    int garr = free0 - frame_free_count();
+    uart_puts("  [VMCOST] 1 GiB (VM_OBJ_MAX_BYTES) object: frame array=");
+    print_int(garr);
+    uart_puts(" contiguous frames\n");
+    EXPECT_EQ(garr, 513);
+    vm_object_unref(g);
+  }
+  EXPECT_EQ((vm_object_create(VM_OBJ_MEMFD, VM_OBJ_MAX_BYTES + FRAME_SIZE) == 0), 1);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 /* L9 (prefetch): the eager first page — the entry page is resident right
  * after the loader mapped the image, everything else stays lazy. */
 static void test_v2_image_first_page(void) {
@@ -2854,6 +2938,7 @@ void vm_test_suite(void) {
   test_vm_as_clone_fork();
   test_vm_teardown_leak_cycles();
   test_vm_memfd_private_cow();
+  test_vm_big_object_cost(); /* cp/pfx */
   test_vm_user_read(); /* SEC-2 */
   test_vm_kwrite();    /* SEC-8 */
   /* so-vm lane A: file-backed shared mappings (docs/shared-libs.md §4) */

@@ -47,6 +47,8 @@ extern int vfs_rmdir(const char *path);
 #define E2C_SYS_linkat 265
 #define E2C_SYS_symlinkat 266
 #define E2C_SYS_renameat2 316
+#define E2C_SYS_sync 162   /* cp/pfx */
+#define E2C_SYS_syncfs 306 /* cp/pfx */
 
 #define E2C_AT_REMOVEDIR 0x200
 #define E2C_RENAME_NOREPLACE 1
@@ -358,6 +360,21 @@ static int e2c_fdatasync(struct process *p, struct trap_frame *tf) {
   return ret(tf, k ? ext2v_sync() : 0);
 }
 
+/* cp/pfx: sync(2) and syncfs(2).  ext2 is the only filesystem here with
+   state to flush (write-through at each mutating syscall, plus the MAP_SHARED
+   write-back pages); Linux's sync never fails.  syncfs needs a valid fd. */
+static int e2c_sync(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  (void)ext2v_sync();
+  return ret(tf, 0);
+}
+
+static int e2c_syncfs(struct process *p, struct trap_frame *tf) {
+  int k = file_fd_is_ext2(p, (int)l_argi(tf, 0));
+  if (k < 0) return ret(tf, -EBADF);
+  return ret(tf, k ? ext2v_sync() : 0);
+}
+
 /* ---- statfs ---------------------------------------------------------------- */
 
 static void put64(uint8_t *b, int off, uint64_t v) {
@@ -485,6 +502,8 @@ const struct l_sysent l_tab_ext2[] = {
   {E2C_SYS_ftruncate, e2c_ftruncate, "ftruncate"},
   {L_SYS_fsync, e2c_fsync, "fsync"},
   {E2C_SYS_fdatasync, e2c_fdatasync, "fdatasync"},
+  {E2C_SYS_sync, e2c_sync, "sync"},       /* cp/pfx */
+  {E2C_SYS_syncfs, e2c_syncfs, "syncfs"}, /* cp/pfx */
   {L_SYS_statfs, e2c_statfs, "statfs"},
   {E2C_SYS_fstatfs, e2c_fstatfs, "fstatfs"},
   {L_SYS_access, e2c_access, "access"},          /* cp/ext2b */

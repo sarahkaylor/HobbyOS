@@ -175,8 +175,8 @@
 
 /* --- P2.4 (S4): shared objects (memfd / MAP_SHARED anon) ------------- */
 
-/* Object slots and cap.  64 MiB per object is the S4 acceptance scope
- * (terabytes of sparse VA are fine; resident object pages are frames).
+/* Object slots and cap (the cap is below: 1 GiB since cp/sys; terabytes of
+ * sparse VA are fine; resident object pages are frames).
  * L54: slots raised 64 -> 2048 because RimWorld's XML loader keeps one mapped
  * view per LoadableXmlAsset while it parses the Core defs; the tree has 1,209
  * XML files, and at 64 the pool was exhausted after 8 files so every later
@@ -188,6 +188,13 @@
  * refused the first and the second.  The frame array is sized to the
  * object, not to this cap (vm_object_create/truncate), so small objects
  * cost what they did. */
+/* cp/pfx (docs/cp-pfx.md §2): what the cap protects is one contiguous frame
+ * allocation -- the per-object page array, 8 bytes per page (a 1 GiB object
+ * is 513 contiguous frames, a 200 MiB one 101) -- and nothing else: no
+ * structure is sized by VM_OBJ_MAX_FRAMES, the slot table is VM_OBJ_MAX
+ * fixed-size records, and data frames are allocated on first touch.  Measured
+ * by test_vm_big_object_cost (vm_test.c) and linux_probe_bigobj (200 MiB
+ * memfd, shared anon and ext2 file, shared and private). */
 #define VM_OBJ_MAX_BYTES 0x40000000ULL /* 1 GiB */
 #define VM_OBJ_MAX_FRAMES (VM_OBJ_MAX_BYTES / 0x1000)
 
@@ -245,6 +252,12 @@ struct vm_object {
   /* cp/ext2b: VM_OBJ_EXT2 source identity (the inode; the cache entry holds
      an ext2 open reference on it for the object's whole life). */
   uint32_t ext2_ino;
+  /* cp/pfx: VM_OBJ_FILE write generation.  file_obj_note_write() bumps it
+     (under vm_lock) after a FAT16 write() reached the disk and before it
+     refreshes the frames already cached; a page fill that read the disk
+     under an older generation is not published (it re-reads), so no fill
+     can install bytes from before a write behind the refresh's back. */
+  uint32_t wgen;
 };
 
 struct vm_region {  /* sorted by base; per AS, under proc_lock */
@@ -595,6 +608,17 @@ uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off);
 uint64_t vm_object_peek(struct vm_object *o, uint64_t off);
 uint64_t vm_object_peek_locked(struct vm_object *o, uint64_t off);
 uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr);
+
+/* cp/pfx (FAT write coherence, file_obj.c): `install_page_gen` is
+ * install_page that publishes only while o->wgen == gen; on a newer
+ * generation it frees `fr`, sets *stale and returns 0 (the caller re-reads).
+ * `file_writers` takes one reference on every live VM_OBJ_FILE object whose
+ * source is `cluster` -- cached or already detached by an invalidation but
+ * still mapped -- bumps its wgen, and returns how many it put in `out`. */
+uint32_t vm_object_wgen(struct vm_object *o);
+uint64_t vm_object_install_page_gen(struct vm_object *o, uint64_t off, uint64_t fr,
+                                    uint32_t gen, int *stale);
+int vm_object_file_writers(uint16_t cluster, struct vm_object **out, int max);
 
 /* ftruncate for objects: set the byte size.  Grow allocates a bigger
  * frame array; shrink frees materialized pages above the new size.

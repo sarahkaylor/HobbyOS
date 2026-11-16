@@ -355,6 +355,19 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
   if (size > VM_OBJ_MAX_BYTES)
     return 0;
   int nf = (int)((size + FRAME_SIZE - 1) / FRAME_SIZE);
+  /* cp/pfx: the array is allocated and zeroed BEFORE vm_lock (it is 513
+     frames = 2 MiB at the 1 GiB cap; zeroing it with IRQs off was a
+     millisecond-scale window).  A full slot table frees it again. */
+  uint64_t *arr = 0;
+  int af = 0;
+  if (nf > 0) {
+    af = obj_frames_for(nf);
+    uint64_t a = frame_alloc_contig(af);
+    if (!a)
+      return 0;
+    vm_obj_zero(a, (uint64_t)af * FRAME_SIZE); /* 0 == not materialized */
+    arr = (uint64_t *)phys_to_virt(a);
+  }
   uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
   struct vm_object *o = 0;
   for (int i = 0; i < VM_OBJ_MAX; i++) {
@@ -365,19 +378,9 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
   }
   if (!o) {
     spinlock_release_irqrestore(&vm_lock, flags);
+    for (int i = 0; arr && i < af; i++)
+      frame_free(virt_to_phys(arr) + (uint64_t)i * FRAME_SIZE);
     return 0;
-  }
-  uint64_t *arr = 0;
-  int af = 0;
-  if (nf > 0) {
-    af = obj_frames_for(nf);
-    uint64_t a = frame_alloc_contig(af);
-    if (!a) {
-      spinlock_release_irqrestore(&vm_lock, flags);
-      return 0;
-    }
-    vm_obj_zero(a, (uint64_t)af * FRAME_SIZE); /* 0 == not materialized */
-    arr = (uint64_t *)phys_to_virt(a);
   }
   o->used = 1;
   o->refs = 1; /* the creation reference: whoever called create owns it */
@@ -387,6 +390,7 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
   o->nr_frames = nf;
   o->arr_frames = af;
   o->frames = arr;
+  o->wgen = 0;
   spinlock_release_irqrestore(&vm_lock, flags);
   return o;
 }
@@ -444,8 +448,30 @@ void vm_object_unref(struct vm_object *o) {
     return;
   vm_lock_init_once();
   uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
-  vm_object_unref_locked(o);
+  if (!o->used || o->refs > 1) {
+    vm_object_unref_locked(o);
+    spinlock_release_irqrestore(&vm_lock, flags);
+    return;
+  }
+  /* cp/pfx: the last reference.  Detach the frame array under vm_lock (the
+     slot is free and reusable at once) and free its frames AFTER the lock:
+     freeing a 200 MiB object's 51,200 frames inside vm_lock held IRQs off
+     for 181 ms in the unit tier (test_vm_big_object_cost,
+     [LOCKHEALTH-IRQOFF] worst_lock=vm_lock); a 1 GiB one would be ~5x. */
+  uint64_t *arr = o->frames;
+  int af = o->arr_frames;
+  o->frames = 0;
+  o->arr_frames = 0;
+  vm_object_free_locked(o); /* no array left: only resets the slot */
   spinlock_release_irqrestore(&vm_lock, flags);
+  if (arr) {
+    uint64_t cap = (uint64_t)af * (FRAME_SIZE / sizeof(uint64_t));
+    for (uint64_t i = 0; i < cap; i++)
+      if (arr[i])
+        frame_free(arr[i]);
+    for (int i = 0; i < af; i++)
+      frame_free(virt_to_phys(arr) + (uint64_t)i * FRAME_SIZE);
+  }
 }
 
 uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off) {
@@ -507,6 +533,61 @@ uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr) 
   o->frames[idx] = fr;
   spinlock_release_irqrestore(&vm_lock, flags);
   return fr;
+}
+
+/* cp/pfx: FAT16 write coherence (file_obj_note_write, docs/cp-pfx.md). */
+uint32_t vm_object_wgen(struct vm_object *o) {
+  return o ? __atomic_load_n(&o->wgen, __ATOMIC_ACQUIRE) : 0;
+}
+
+uint64_t vm_object_install_page_gen(struct vm_object *o, uint64_t off, uint64_t fr,
+                                    uint32_t gen, int *stale) {
+  if (stale)
+    *stale = 0;
+  if (!o || !fr)
+    return 0;
+  vm_lock_init_once();
+  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t idx = off / FRAME_SIZE;
+  if (!o->used || idx >= (uint64_t)o->nr_frames) {
+    spinlock_release_irqrestore(&vm_lock, flags);
+    frame_free(fr);
+    return 0;
+  }
+  if (o->frames[idx]) { /* a peer filled it first; a refresh keeps it current */
+    uint64_t peer = o->frames[idx];
+    spinlock_release_irqrestore(&vm_lock, flags);
+    frame_free(fr);
+    return peer;
+  }
+  if (o->wgen != gen) { /* a write landed after this fill read the disk */
+    spinlock_release_irqrestore(&vm_lock, flags);
+    frame_free(fr);
+    if (stale)
+      *stale = 1;
+    return 0;
+  }
+  o->frames[idx] = fr;
+  spinlock_release_irqrestore(&vm_lock, flags);
+  return fr;
+}
+
+int vm_object_file_writers(uint16_t cluster, struct vm_object **out, int max) {
+  if (cluster == 0 || !out || max <= 0)
+    return 0;
+  vm_lock_init_once();
+  int n = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  for (int i = 0; i < VM_OBJ_MAX && n < max; i++) {
+    struct vm_object *o = &vm_objects[i];
+    if (!o->used || o->kind != VM_OBJ_FILE || o->file_start_cluster != cluster)
+      continue;
+    o->wgen++;
+    o->refs++;
+    out[n++] = o;
+  }
+  spinlock_release_irqrestore(&vm_lock, flags);
+  return n;
 }
 
 /* cp/wine2: the reverse map vm_object_truncate needs.  Drop every leaf, in
@@ -4240,8 +4321,8 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
            O_RDWR fd is a write-back mapping (mprotect may add PROT_WRITE
            later).  Capacity = the larger of the file and the mapped range,
            so the pages of a file that grows under the mapping are backed;
-           files over the 64 MiB object ceiling are refused, never mapped
-           partially (the FAT rule). */
+           files over the VM_OBJ_MAX_BYTES object ceiling (1 GiB) are
+           refused, never mapped partially (the FAT rule). */
         uint32_t acc = eoflags & 3u;
         if (acc == 1u)
           return -EACCES; /* O_WRONLY */

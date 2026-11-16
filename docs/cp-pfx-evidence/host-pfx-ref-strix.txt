@@ -1,0 +1,134 @@
+mkcpdata: /home/sarah/cp/lanes/pfx-scratch/hostref2/cpdata.img (8G sparse) — ext_attr resize_inode filetype sparse_super large_file
+== host ref: boot1: /CP/WINE/bin/wineboot -i
+   exit 0; 70 log lines
+== host ref: boot2: /CP/WINE/bin/wine cmd /c echo hello
+   exit 0; 25 log lines
+== e2fsck -fn rc=0: cpdata: 1055/524288 files (53.3% non-contiguous), 91203/2097152 blocks
+== boot2 output:
+002c:err:winediag:getaddrinfo Failed to resolve your host name IP
+0044:err:vulkan:vulkan_init_once Wine was built without Vulkan support.
+0044:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+0044:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+0044:err:systray:initialize_systray Could not create tray window
+00c0:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+hello
+== wineboot update rows: boot1 1, boot2 0
+== created-config rows: boot1 1, boot2 0
+== persisted: boot1-after vs boot2-before: identical
+== changed by boot 2 (mtime or size; + new, - gone):
+- pfx 1794845540.4103072720 4096
++ pfx 1794845544.7642476440 4096
+- pfx/dosdevices 1794845532.6484135730 4096
++ pfx/dosdevices 1794845540.6023046430 4096
+- pfx/dosdevices/com1 1794845532.6474135870 10
+- pfx/dosdevices/com10 1794845532.6484135730 10
+- pfx/dosdevices/com11 1794845532.6484135730 11
+- pfx/dosdevices/com12 1794845532.6484135730 11
+- pfx/dosdevices/com13 1794845532.6484135730 11
+- pfx/dosdevices/com14 1794845532.6484135730 11
+- pfx/dosdevices/com15 1794845532.6484135730 11
+- pfx/dosdevices/com16 1794845532.6484135730 11
+- pfx/dosdevices/com17 1794845532.6484135730 11
+- pfx/dosdevices/com18 1794845532.6484135730 11
+- pfx/dosdevices/com19 1794845532.6484135730 11
+- pfx/dosdevices/com2 1794845532.6474135870 10
+- pfx/dosdevices/com20 1794845532.6484135730 11
+- pfx/dosdevices/com21 1794845532.6484135730 11
+- pfx/dosdevices/com22 1794845532.6484135730 11
+- pfx/dosdevices/com23 1794845532.6484135730 11
+- pfx/dosdevices/com24 1794845532.6484135730 11
+- pfx/dosdevices/com25 1794845532.6484135730 11
+- pfx/dosdevices/com26 1794845532.6484135730 11
+- pfx/dosdevices/com27 1794845532.6484135730 11
+- pfx/dosdevices/com28 1794845532.6484135730 11
+- pfx/dosdevices/com29 1794845532.6484135730 11
+- pfx/dosdevices/com3 1794845532.6474135870 10
+- pfx/dosdevices/com30 1794845532.6484135730 11
+- pfx/dosdevices/com31 1794845532.6484135730 11
+- pfx/dosdevices/com32 1794845532.6484135730 11
+- pfx/dosdevices/com4 1794845532.6474135870 10
+- pfx/dosdevices/com5 1794845532.6474135870 10
+- pfx/dosdevices/com6 1794845532.6474135870 10
+- pfx/dosdevices/com7 1794845532.6484135730 10
+- pfx/dosdevices/com8 1794845532.6484135730 10
+- pfx/dosdevices/com9 1794845532.6484135730 10
++ pfx/dosdevices/com1 1794845540.6013046560 10
++ pfx/dosdevices/com10 1794845540.6023046430 10
++ pfx/dosdevices/com11 1794845540.6023046430 11
++ pfx/dosdevices/com12 1794845540.6023046430 11
+## full boot-2 change list (path mtime size), - before / + after
+- pfx 1794845540.4103072720 4096
++ pfx 1794845544.7642476440 4096
+- pfx/dosdevices 1794845532.6484135730 4096
++ pfx/dosdevices 1794845540.6023046430 4096
+- pfx/dosdevices/com1 1794845532.6474135870 10
+- pfx/dosdevices/com10 1794845532.6484135730 10
+- pfx/dosdevices/com11 1794845532.6484135730 11
+- pfx/dosdevices/com12 1794845532.6484135730 11
+- pfx/dosdevices/com13 1794845532.6484135730 11
+- pfx/dosdevices/com14 1794845532.6484135730 11
+- pfx/dosdevices/com15 1794845532.6484135730 11
+- pfx/dosdevices/com16 1794845532.6484135730 11
+- pfx/dosdevices/com17 1794845532.6484135730 11
+- pfx/dosdevices/com18 1794845532.6484135730 11
+- pfx/dosdevices/com19 1794845532.6484135730 11
+- pfx/dosdevices/com2 1794845532.6474135870 10
+- pfx/dosdevices/com20 1794845532.6484135730 11
+- pfx/dosdevices/com21 1794845532.6484135730 11
+- pfx/dosdevices/com22 1794845532.6484135730 11
+- pfx/dosdevices/com23 1794845532.6484135730 11
+- pfx/dosdevices/com24 1794845532.6484135730 11
+- pfx/dosdevices/com25 1794845532.6484135730 11
+- pfx/dosdevices/com26 1794845532.6484135730 11
+- pfx/dosdevices/com27 1794845532.6484135730 11
+- pfx/dosdevices/com28 1794845532.6484135730 11
+- pfx/dosdevices/com29 1794845532.6484135730 11
+- pfx/dosdevices/com3 1794845532.6474135870 10
+- pfx/dosdevices/com30 1794845532.6484135730 11
+- pfx/dosdevices/com31 1794845532.6484135730 11
+- pfx/dosdevices/com32 1794845532.6484135730 11
+- pfx/dosdevices/com4 1794845532.6474135870 10
+- pfx/dosdevices/com5 1794845532.6474135870 10
+- pfx/dosdevices/com6 1794845532.6474135870 10
+- pfx/dosdevices/com7 1794845532.6484135730 10
+- pfx/dosdevices/com8 1794845532.6484135730 10
+- pfx/dosdevices/com9 1794845532.6484135730 10
++ pfx/dosdevices/com1 1794845540.6013046560 10
++ pfx/dosdevices/com10 1794845540.6023046430 10
++ pfx/dosdevices/com11 1794845540.6023046430 11
++ pfx/dosdevices/com12 1794845540.6023046430 11
++ pfx/dosdevices/com13 1794845540.6023046430 11
++ pfx/dosdevices/com14 1794845540.6023046430 11
++ pfx/dosdevices/com15 1794845540.6023046430 11
++ pfx/dosdevices/com16 1794845540.6023046430 11
++ pfx/dosdevices/com17 1794845540.6023046430 11
++ pfx/dosdevices/com18 1794845540.6023046430 11
++ pfx/dosdevices/com19 1794845540.6023046430 11
++ pfx/dosdevices/com2 1794845540.6013046560 10
++ pfx/dosdevices/com20 1794845540.6023046430 11
++ pfx/dosdevices/com21 1794845540.6023046430 11
++ pfx/dosdevices/com22 1794845540.6023046430 11
++ pfx/dosdevices/com23 1794845540.6023046430 11
++ pfx/dosdevices/com24 1794845540.6023046430 11
++ pfx/dosdevices/com25 1794845540.6023046430 11
++ pfx/dosdevices/com26 1794845540.6023046430 11
++ pfx/dosdevices/com27 1794845540.6023046430 11
++ pfx/dosdevices/com28 1794845540.6023046430 11
++ pfx/dosdevices/com29 1794845540.6023046430 11
++ pfx/dosdevices/com3 1794845540.6013046560 10
++ pfx/dosdevices/com30 1794845540.6023046430 11
++ pfx/dosdevices/com31 1794845540.6023046430 11
++ pfx/dosdevices/com32 1794845540.6023046430 11
++ pfx/dosdevices/com4 1794845540.6013046560 10
++ pfx/dosdevices/com5 1794845540.6013046560 10
++ pfx/dosdevices/com6 1794845540.6013046560 10
++ pfx/dosdevices/com7 1794845540.6023046430 10
++ pfx/dosdevices/com8 1794845540.6023046430 10
++ pfx/dosdevices/com9 1794845540.6023046430 10
+- pfx/system.reg 1794845540.4103072720 1831152
+- pfx/user.reg 1794845540.4103072720 23064
+- pfx/userdef.reg 1794845540.4103072720 3974
++ pfx/system.reg 1794845544.7642476440 1831054
++ pfx/user.reg 1794845544.7642476440 23064
++ pfx/userdef.reg 1794845544.7642476440 3974
+## boot1 files: 883 regular, 216658776 bytes
