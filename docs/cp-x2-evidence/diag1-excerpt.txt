@@ -1,0 +1,84 @@
+# diag1 (strix KVM, 4 slots busy), P4_DIAG=1, one-screen XHOBBY.BIN sha256 935c760f..., excerpt
+[X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+[P4] winep4 launcher (C4-x2)
+[P4] mount 10.0.2.2:/srv/nfs/cp-x2-p4d -> /CP ok
+[P4] begin xsmoke : xsmoke
+[P4] end xsmoke status=0 ms=12950
+[P4] begin wineboot : wineboot -i
+[P4] end wineboot status=53 ms=282412
+[P4] quiesce after wineboot: extra=0
+[P4] begin kill : wineserver -k
+[P4] end kill status=256 ms=2041
+[P4] done
+[X] [XS] xsmoke up pid=16 DISPLAY=:0 LD_LIBRARY_PATH=/CP/X11/lib:/CP/WINE/lib:/LIB64:/CP/WINE/lib/wine/x86_64-unix
+[X] [XS] prefault: touched 1124 pages in 24 loaded objects in 1391 ms (kernel writev workaround)
+[X] [XS] libX11=/CP/X11/lib/libX11.so.6 libxcb=/CP/X11/lib/libxcb.so.1 libXi=/CP/X11/lib/libXi.so.6 libXrandr=/CP/X11/lib/libXrandr.so.2
+[X] [XS] XOpenDisplay ok: ":0" vendor="The X.Org Foundation" release=12101025 proto=11.0 screens=1 default=0 1920x1080 depth=24
+[X] [XS] XListExtensions: 19
+[X] [XS] XI2: XIQueryVersion(2.4) -> Success, server 2.4
+[X] [XS] XI2: device 2 "Virtual core pointer" master-pointer classes=3 valuators=2 (relative=2 absolute=0)
+[X] [XS] XI2: device 3 "Virtual core keyboard" master-keyboard classes=1 valuators=0 (relative=0 absolute=0)
+[X] [XS] XI2: device 4 "Virtual core XTEST pointer" slave-pointer classes=3 valuators=2 (relative=2 absolute=0)
+[X] [XS] XI2: device 5 "Virtual core XTEST keyboard" slave-keyboard classes=1 valuators=0 (relative=0 absolute=0)
+[X] [XS] XI2: device 6 "HobbyOS pointer" slave-pointer classes=3 valuators=2 (relative=0 absolute=2)
+[X] [XS] XI2: device 7 "HobbyOS relative pointer" slave-pointer classes=3 valuators=2 (relative=2 absolute=0)
+[X] [XS] XI2: device 8 "HobbyOS keyboard" slave-keyboard classes=1 valuators=0 (relative=0 absolute=0)
+[X] [XS] XI2: XISelectEvents(root, RawMotion|RawButtonPress) -> accepted
+[X] [XS] RandR: version 1.6
+[X] [XS] RandR: crtcs=1 outputs=1 modes=12
+[X] [XS] RandR: mode 0x39 1920x1080 1920x1080
+[X] [XS] RandR: mode 0x3a 1680x1050 1680x1050
+[X] [XS] RandR: mode 0x3b 1600x900 1600x900
+[X] [XS] RandR: mode 0x3c 1440x900 1440x900
+[X] [XS] RandR: mode 0x3d 1366x768 1366x768
+[X] [XS] RandR: mode 0x3e 1280x1024 1280x1024
+[X] [XS] RandR: mode 0x3f 1280x960 1280x960
+[X] [XS] RandR: mode 0x40 1280x800 1280x800
+[X] [XS] RandR: mode 0x41 1280x720 1280x720
+[X] [XS] RandR: mode 0x42 1024x768 1024x768
+[X] [XS] RandR: mode 0x43 800x600 800x600
+[X] [XS] RandR: mode 0x44 640x480 640x480
+[X] [XS] RandR: output HOBBYFB connection=connected crtc=0x45 nmode=12 mm=508x286
+[X] [XS] RandR: crtc 0x45 1920x1080+0+0 mode=0x39 gamma_size=256
+[X] [XS] RandR: monitors=1
+[X] [XS] RENDER: version 0.11, 23 picture formats
+[X] [XS] XFIXES: version 6.0
+[X] [XS] Xcursor: XcursorSupportsARGB=1 XcursorSupportsAnim=1
+[X] [XS] MIT-SHM: absent (XShmQueryVersion=False)
+[X] [XS] SYNC: version 3.1, 9 system counters, first=DEVICEIDLETIME 8
+[X] [XS] XINERAMA: present, active=1 screens=1
+[X] [XS] XKB: present 1.0
+[X] [XS] xcb: XGetXCBConnection=0x1040001750 (libX11-xcb /CP/X11/lib/libX11-xcb.so.1)
+[X] [XS] xcb Present: version 1.2
+[X] [XS]   Generic Event Extension
+[X] [XS]   SHAPE
+[X] [XS]   XInputExtension
+[X] [XS]   XTEST
+[X] [XS]   BIG-REQUESTS
+[X] [XS]   SYNC
+[X] [XS]   XKEYBOARD
+[X] [XS]   XC-MISC
+[X] [XS]   XFIXES
+[X] [XS]   RENDER
+[X] [XS]   RANDR
+[X] [XS]   XINERAMA
+[X] [XS]   Composite
+[X] [XS]   DAMAGE
+[X] [XS]   MIT-SCREEN-SAVER
+[X] [XS]   DOUBLE-BUFFER
+[X] [XS]   RECORD
+[X] [XS]   Present
+[X] [XS]   X-Resource
+[X] 002c:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 002c:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] 0044:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 0044:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] 004c:trace:x11drv:xinerama_init monitor 0x0: (0,0)-(1920,1080) work (0,0)-(1920,1054) (primary)
+[X] 004c:trace:x11drv:X11DRV_DisplayDevices_SetHandler Display device functions are now handled by: Xinerama
+[X] 004c:trace:x11drv:X11DRV_Settings_SetHandler Display settings are now handled by: NoRes.
+[X] 004c:trace:x11drv:X11DRV_Settings_SetHandler Display settings are now handled by: XRandR 1.0.
+[X] 004c:trace:x11drv:X11DRV_DisplayDevices_SetHandler Display device functions are now handled by: XRandR 1.4
+[X] 004c:trace:x11drv:X11DRV_Settings_SetHandler Display settings are now handled by: XRandR 1.4.
+[X] 004c:trace:x11drv:X11DRV_XComposite_Init XComposite is up and running error_base = 0
+[X] 002c:warn:module:load_dll Failed to load module L"setupapi.dll"; status=c0000135
+NFS failure rows: no-reply=296 nflk-rc-1=24 stall=8 (first no-reply at line 9976; first nodrv at line 8754)
