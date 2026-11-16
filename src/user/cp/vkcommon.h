@@ -14,9 +14,16 @@
 #define CP_VKCOMMON_H
 
 #define VK_NO_PROTOTYPES 1
+#ifdef _WIN32
+/* The PE build (vkcube.exe under Wine, tools/cp/p5/build-pe.sh): the loader is
+ * Wine's vulkan-1.dll (-> winevulkan -> the host libvulkan.so.1). */
+#include <windows.h>
+#endif
 #include <vulkan/vulkan.h>
 
+#ifndef _WIN32
 #include <dlfcn.h>
+#endif
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -36,14 +43,43 @@ static void vk_row(const char *fmt, ...) {
 }
 
 static double vk_now_ms(void) {
+#ifdef _WIN32
+  static LARGE_INTEGER f;
+  LARGE_INTEGER c;
+  if (!f.QuadPart) QueryPerformanceFrequency(&f);
+  QueryPerformanceCounter(&c);
+  return (double)c.QuadPart * 1e3 / (double)f.QuadPart;
+#else
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
+#endif
 }
 
 static PFN_vkGetInstanceProcAddr vk_gipa;
 static void *vk_lib;
 
+#ifdef _WIN32
+/* LoadLibrary the loader the way a Windows Vulkan application does. */
+static int vk_load_loader(void) {
+  double t0 = vk_now_ms();
+  HMODULE m = LoadLibraryA("vulkan-1.dll");
+  if (!m) {
+    vk_row("FAIL LoadLibrary vulkan-1.dll: error %lu", (unsigned long)GetLastError());
+    return -1;
+  }
+  vk_lib = (void *)m;
+  vk_gipa = (PFN_vkGetInstanceProcAddr)(void (*)(void))GetProcAddress(m, "vkGetInstanceProcAddr");
+  if (!vk_gipa) {
+    vk_row("FAIL GetProcAddress vkGetInstanceProcAddr: error %lu", (unsigned long)GetLastError());
+    return -1;
+  }
+  char path[MAX_PATH] = "?";
+  GetModuleFileNameA(m, path, sizeof path);
+  vk_row("loader vulkan-1.dll (%s) loaded in %.1f ms", path, vk_now_ms() - t0);
+  return 0;
+}
+#else
 /* dlopen the loader by soname (RUNPATH /CP/VK/lib finds it in the guest). */
 static int vk_load_loader(void) {
   double t0 = vk_now_ms();
@@ -60,6 +96,7 @@ static int vk_load_loader(void) {
   vk_row("loader libvulkan.so.1 loaded in %.1f ms", vk_now_ms() - t0);
   return 0;
 }
+#endif
 
 #define VK_IFN(inst, name) PFN_##name name = (PFN_##name)vk_gipa((inst), #name)
 
@@ -89,7 +126,7 @@ static __attribute__((unused)) const char *vk_type_name(VkPhysicalDeviceType t) 
  * nothing needs setting; report what discovery will see. */
 static void vk_report_env(void) {
   const char *vars[] = {"VK_DRIVER_FILES", "VK_ICD_FILENAMES", "XDG_DATA_DIRS",
-                        "LP_NUM_THREADS", NULL};
+                        "LP_NUM_THREADS", "DISPLAY", "LD_LIBRARY_PATH", NULL};
   for (int i = 0; vars[i]; i++) {
     const char *v = getenv(vars[i]);
     vk_row("env %s=%s", vars[i], v ? v : "(unset)");
