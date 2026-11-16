@@ -120,6 +120,7 @@ static struct {
 static spinlock_t nfs_ra_lock;
 /* cp/nfs2: pipelined READs that timed out waiting for a reply. */
 volatile uint32_t nfs_pipe_stalls;
+extern volatile uint32_t nfs_inj_dropped;   /* fault injection, below */
 
 
 /* L35: where does a READ RPC's wall time go?  Every READ RPC is bucketed by
@@ -249,6 +250,8 @@ void nfs_perf_dump(const char *why) {
     kl_i(&kl, (long)udp_dgram_full);
     kl_s(&kl, " stalls=");
     kl_i(&kl, (long)nfs_pipe_stalls);
+    kl_s(&kl, " inj_dropped=");
+    kl_i(&kl, (long)nfs_inj_dropped);
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
@@ -494,6 +497,79 @@ static void nfs_rsize_fallback(struct nfs_mount *m, const char *why) {
 }
 /* L57: READ RPCs that needed the one retry (see nfs_read_serial). */
 volatile uint32_t nfs_read_retries;
+
+/* ---- cp/nfs2: fault injection (MODE=test kernels only) ----------------- */
+/* The client must never turn a lost reply into short or zero data (Wine read
+ * an all-zero sortdefault.nls after "[NFS] rpc: no reply from server",
+ * 2026-11-16).  To test that without breaking the server, a test kernel can
+ * drop NFS-program reply datagrams on receipt: every Nth one, or all of them
+ * for T ms.  The trigger is a LOOKUP of a name under any NFS mount (it
+ * answers ENOENT):
+ *   .cp-nfs-inject.every.<N>      drop every Nth NFS reply
+ *   .cp-nfs-inject.blackout.<ms>  drop every NFS reply for <ms> from now
+ *   .cp-nfs-inject.off
+ * Mount-time calls (portmap, MOUNT) are never dropped. */
+extern uint64_t timer_get_ms(void);
+volatile uint32_t nfs_inj_dropped;
+#ifdef KERNEL_MODE_TEST
+static volatile uint32_t nfs_inj_every, nfs_inj_seen;
+static volatile uint64_t nfs_inj_until_ms;
+static int nfs_inj_drop(void) {
+  if (nfs_inj_until_ms && timer_get_ms() < nfs_inj_until_ms) {
+    nfs_inj_dropped++;
+    return 1;
+  }
+  if (nfs_inj_every && __sync_add_and_fetch(&nfs_inj_seen, 1) % nfs_inj_every == 0) {
+    nfs_inj_dropped++;
+    return 1;
+  }
+  return 0;
+}
+static uint64_t nfs_inj_num(const char *p) {
+  uint64_t v = 0;
+  while (*p >= '0' && *p <= '9') v = v * 10 + (uint64_t)(*p++ - '0');
+  return v;
+}
+/* 1 when `rel` is an injection trigger (and it was applied). */
+static int nfs_inj_trigger(const char *rel) {
+  static const char key[] = "/.cp-nfs-inject.";
+  const char *p = rel;
+  for (; *p; p++) {
+    int i = 0;
+    while (key[i] && p[i] == key[i]) i++;
+    if (!key[i]) { p += i; break; }
+  }
+  if (!*p) return 0;
+  const char *q = p;
+  if (q[0] == 'o' && q[1] == 'f' && q[2] == 'f') {
+    nfs_inj_every = 0;
+    nfs_inj_until_ms = 0;
+  } else if (q[0] == 'e' && q[1] == 'v' && q[2] == 'e' && q[3] == 'r' && q[4] == 'y' && q[5] == '.') {
+    nfs_inj_seen = 0;
+    nfs_inj_every = (uint32_t)nfs_inj_num(q + 6);
+  } else if (q[0] == 'b' && q[1] == 'l' && q[2] == 'a' && q[3] == 'c' && q[4] == 'k') {
+    while (*q && *q != '.') q++;
+    if (*q == '.') q++;
+    nfs_inj_until_ms = timer_get_ms() + nfs_inj_num(q);
+  } else {
+    return 0;
+  }
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[NFSINJ] ");
+  kl_s(&kl, p);
+  kl_s(&kl, " every=");
+  kl_i(&kl, (long)nfs_inj_every);
+  kl_s(&kl, " dropped=");
+  kl_i(&kl, (long)nfs_inj_dropped);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+  return 1;
+}
+#else
+static int nfs_inj_drop(void) { return 0; }
+static int nfs_inj_trigger(const char *rel) { (void)rel; return 0; }
+#endif
 static uint32_t next_xid = 0x484F424F;      /* "HOBO" + bumps per call */
 
 /* Send one already-built RPC on `pcb` and read its reply into `rbuf`.  On
@@ -502,11 +578,15 @@ static uint32_t next_xid = 0x484F424F;      /* "HOBO" + bumps per call */
  * variant and the READ path for the cached one). */
 static int rpc_xfer(struct socket_pcb *pcb, uint32_t xid, const uint8_t *call,
                     int n, uint8_t *rbuf, int rcap,
-                    const uint8_t **body, int *body_len) {
+                    const uint8_t **body, int *body_len, int inj) {
   if (net_socket_send(pcb, call, (uint32_t)n) < 0) return -1;
+  uint64_t t0 = timer_get_ms();
   for (;;) {
-    int got = net_socket_recv_timeout(pcb, rbuf, rcap, NFS_RPC_TIMEOUT_MS);
+    int left = NFS_RPC_TIMEOUT_MS - (int)(timer_get_ms() - t0);
+    if (left <= 0) return -1;
+    int got = net_socket_recv_timeout(pcb, rbuf, rcap, left);
     if (got <= 0) return -1;
+    if (inj && nfs_inj_drop()) continue;    /* cp/nfs2: injected loss */
     int bo = 0, bl = 0;
     int pr = rpc_parse_reply(rbuf, got, xid, &bo, &bl);
     if (pr == RPC_E_WRONG_XID) continue;    /* stale datagram */
@@ -563,7 +643,8 @@ static int rpc_call(uint32_t ip, uint16_t port, uint32_t prog, uint32_t vers,
       return -1;
     }
     uint64_t t1 = timer_get_us();
-    int rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, sizeof rbuf, body, body_len);
+    int rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, sizeof rbuf, body, body_len,
+                      prog == NFS_PROG);
     uint64_t t3 = timer_get_us();
     net_socket_close(pcb);
     if (rc == 0) {
@@ -1023,6 +1104,7 @@ static int lookup_comp(const struct nfs_mount *m, const struct nfs_fh *dir,
 int nfs_lookup(const struct nfs_mount *m, const char *rel,
                struct nfs_fh *fh, struct nfs_attr *attr) {
   if (!m || !m->in_use || !rel || rel[0] != '/') return -1;
+  if (nfs_inj_trigger(rel)) return -1;      /* cp/nfs2: test kernels only */
   char cur[NFS_PATH_MAX * 4];
   int cl = 0;
   for (; rel[cl] && cl < (int)sizeof cur - 1; cl++) cur[cl] = rel[cl];
@@ -1204,7 +1286,7 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
     uint64_t t0 = timer_get_us();
     const uint8_t *body = 0;
     int blen = 0;
-    int rc = pcb ? rpc_xfer(pcb, xid, cbuf, n, rbuf, rcap, &body, &blen) : -1;
+    int rc = pcb ? rpc_xfer(pcb, xid, cbuf, n, rbuf, rcap, &body, &blen, 1) : -1;
     uint64_t wait = timer_get_us() - t0;
     /* L57: ONE retry on a fresh socket.  A single lost datagram -- the
      * duplicate-ephemeral-port window in net_socket_create, a two-consumer
@@ -1218,7 +1300,7 @@ static int nfs_read_serial_body(const struct nfs_mount *m, const struct nfs_fh *
       pcb = rd_sock_get(mw, &temp);
       if (pcb) {
         uint64_t t1 = timer_get_us();
-        rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, rcap, &body, &blen);
+        rc = rpc_xfer(pcb, xid, cbuf, n, rbuf, rcap, &body, &blen, 1);
         wait += timer_get_us() - t1;
         nfs_read_retries++;
       }
@@ -1513,6 +1595,7 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
     int got = net_socket_recv_timeout(pcb, rbuf, NFS_RPC_RBIG,
                                       stalls ? NFS_RPC_TIMEOUT_MS
                                              : NFS_PIPE_TIMEOUT_MS);
+    if (got > 0 && nfs_inj_drop()) continue; /* cp/nfs2: injected loss */
     if (got <= 0) {                     /* timeout / socket closed */
       nfs_pipe_stalls++;
       /* L41: a stall row, not a guess.  If the load freezes at a byte count,

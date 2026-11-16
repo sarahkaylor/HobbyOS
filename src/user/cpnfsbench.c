@@ -42,6 +42,11 @@
  *               sha256sum; fstat and lseek(SEEK_END) must give the 64-bit
  *               size, and a 4 KiB page past 4 GiB re-read after an lseek must
  *               match the bytes the pass saw there.
+ *   inject.*    cp/nfs2 (test kernels): with every 5th NFS reply dropped,
+ *               and with every reply dropped for 8 s, fresh 4 MiB files are
+ *               read page by page (and one mapped) and every page compared
+ *               with the host's stream: a lost reply must be retried, never
+ *               returned as short, failed or zero data.
  *   done rc=<n> n = phases that failed (bad byte count or checksum)
  * MB/s is 10^6 bytes per second of guest wall time (CLOCK_MONOTONIC).
  */
@@ -50,6 +55,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include "libc.h"
 
 #ifndef NB_EXPORT
@@ -607,6 +613,111 @@ static int phase_symlink(void) {
   return fails;
 }
 
+/* ---- cp/nfs2: a lost reply must never become data ---------------------- */
+/* Test kernels drop NFS reply datagrams on request (nfs.c, "fault
+ * injection"): a stat() of /NFS/.cp-nfs-inject.<cmd> sets it.  Fresh files
+ * /NFS/inj<k>.bin (4 MiB, seed multi_seed(10 + k)) are read page by page --
+ * or mapped and touched, in a child so a SIGBUS shows -- and every page is
+ * compared with the host's stream.  A read that fails is an error (eio=),
+ * never zeros or a short page. */
+#define INJ_BYTES (4u * 1024u * 1024u)
+#ifndef MAP_FAILED
+#define MAP_FAILED ((void *)-1)
+#endif
+
+static void inj_ctl(const char *cmd) {
+  char p[96] = "/NFS/.cp-nfs-inject.";
+  int n = 0;
+  while (p[n]) n++;
+  for (const char *c = cmd; *c && n < (int)sizeof p - 1; c++) p[n++] = *c;
+  p[n] = 0;
+  struct stat st;
+  (void)stat(p, &st);
+}
+
+static void inj_row(const char *name, uint32_t pages, uint32_t bad, uint32_t shorts,
+                    uint32_t eio, uint64_t us, const char *note, int ok) {
+  char line[200];
+  int n = 0;
+  const char *p = "[NB] inject.";
+  while (*p) line[n++] = *p++;
+  for (p = name; *p; p++) line[n++] = *p;
+  kv(line, &n, " pages=", pages);
+  kv(line, &n, " bad=", bad);
+  kv(line, &n, " short=", shorts);
+  kv(line, &n, " eio=", eio);
+  kv(line, &n, " ms=", (unsigned long)(us / 1000));
+  for (p = note; *p; p++) line[n++] = *p;
+  for (p = ok ? " ok\n" : " FAIL\n"; *p; p++) line[n++] = *p;
+  line[n] = 0;
+  pc(line);
+}
+
+/* mode 0: lseek + read() each 4 KiB page; mode 1: mmap and touch each page */
+static int inj_check(const char *name, int k, int mode) {
+  char path[24] = "/NFS/inj0.bin";
+  path[8] = (char)('0' + k);
+  uint8_t *ref = (uint8_t *)malloc(INJ_BYTES);
+  if (!ref) { inj_row(name, 0, 0, 0, 1, 0, " malloc", 0); return 1; }
+  stream_fill(ref, INJ_BYTES, multi_seed(10 + k));
+  uint32_t npages = INJ_BYTES / CONC_PAGE, bad = 0, shorts = 0, eio = 0;
+  uint64_t t0 = now_us();
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) { inj_row(name, 0, 0, 0, 1, now_us() - t0, " open-failed", 0); free(ref); return 1; }
+  if (mode == 1) {
+    const uint8_t *mp = (const uint8_t *)mmap(0, INJ_BYTES, PROT_READ, MAP_PRIVATE, fd, 0);
+    if ((void *)mp == MAP_FAILED) {
+      close(fd);
+      free(ref);
+      inj_row(name, 0, 0, 0, 0, now_us() - t0, " mmap-unsupported(skip)", 1);
+      return 0;
+    }
+    int pid = fork();
+    if (pid == 0) {
+      for (uint32_t i = 0; i < npages; i++)
+        for (uint32_t j = 0; j < CONC_PAGE; j++)
+          if (mp[i * CONC_PAGE + j] != ref[i * CONC_PAGE + j]) { bad++; break; }
+      exit(bad ? 1 : 0);
+    }
+    int st = -1;
+    if (pid < 0 || waitpid(pid, &st, 0) != pid) st = -1;
+    close(fd);
+    free(ref);
+    inj_row(name, npages, st == 0 ? 0 : 1, 0, 0, now_us() - t0,
+            st == 0 ? " mmap" : " mmap-child-died-or-bad", st == 0);
+    return st == 0 ? 0 : 1;
+  }
+  for (uint32_t i = 0; i < npages; i++) {
+    uint32_t off = i * CONC_PAGE;
+    if (lseek(fd, (off_t)off, SEEK_SET) != (off_t)off) { eio++; continue; }
+    ssize_t r = read(fd, conc_pg, CONC_PAGE);
+    if (r < 0) { eio++; continue; }
+    if (r != (ssize_t)CONC_PAGE) shorts++;
+    for (uint32_t j = 0; j < (uint32_t)(r > 0 ? r : 0); j++)
+      if (conc_pg[j] != ref[off + j]) { bad++; break; }
+  }
+  close(fd);
+  free(ref);
+  int ok = bad == 0 && shorts == 0 && eio == 0;
+  inj_row(name, npages, bad, shorts, eio, now_us() - t0, " read", ok);
+  return ok ? 0 : 1;
+}
+
+static int phase_inject(void) {
+  int fails = 0;
+  inj_ctl("every.5");                      /* every 5th NFS reply lost */
+  fails += inj_check("every5.read", 0, 0);
+  fails += inj_check("every5.mmap", 1, 1);
+  inj_ctl("off");
+  inj_ctl("blackout.8000");                /* the server "stops answering" */
+  fails += inj_check("blackout.read", 2, 0);
+  inj_ctl("off");
+  inj_ctl("blackout.8000");                /* ... and the open's LOOKUP too */
+  fails += inj_check("blackout.open", 3, 0);
+  inj_ctl("off");
+  return fails;
+}
+
 /* Read `total` bytes from the start of NB_FILE in `chunk`-byte read()s.
  * Returns 0 when the byte count is right (and, for the full file, the
  * checksum matches `expect`). */
@@ -693,6 +804,7 @@ int main(void) {
   fails += phase_symlink();
   fails += phase_one();
   fails += phase_big();
+  fails += phase_inject();
   char d[40];
   int m = 0;
   const char *p = "[NB] done rc=";

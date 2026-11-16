@@ -25,6 +25,10 @@
 #       NFS file give the server's atime/mtime/ctime; files behind symlinked
 #       directories open, stat and read right (5 "[NB] symlink" rows); with
 #       NB_BIG=1 also the 5 GiB SHA-256 row ("[NB] big5g").
+#   G9  (cp/nfs2) lost replies never become data: with every 5th NFS reply
+#       dropped and with every reply dropped for 8 s (a test kernel's fault
+#       injection), fresh files read page by page and mapped come back
+#       right -- no FAIL "[NB] inject." row, at least 4 rows
 #   G5  over all READ RPCs (the last "[NFSRTT] periodic" set): bytes / RPCs
 #       >= 16384.  1344-byte READs give ~1344; 32 KiB READs give ~32768.
 #
@@ -98,6 +102,13 @@ n_sl=$(grep -c '^\[NB\] symlink .* ok$' <<<"$G8"); n_f=$(grep -c ' FAIL$' <<<"$G
 if [ "$n_one" -ne 1 ] || [ "$n_t" -ne 2 ] || [ "$n_sl" -ne 5 ] || [ "$n_f" -ne 0 ]; then
   bad "G8 one176m=$n_one/1 stat-times=$n_t/2 symlink=$n_sl/5 FAIL rows=$n_f: $(grep ' FAIL$' <<<"$G8" | head -3 | tr '\n' ' ')"
 else note "G8 one 176 MiB read() hash match, stat times, 5/5 symlinked paths$(grep -q '^\[NB\] big5g .* ok$' <<<"$G8" && echo ', big5g sha256 match')"; fi
+
+# G9 (cp/nfs2): hard-mount semantics under injected reply loss
+G9="$(tr -d '\r' < "$C" | grep -aoE '\[NB\] inject\.[a-z0-9.]+ pages=[0-9]+ .*(ok|FAIL)$')"
+n9=$(grep -c . <<<"$G9"); f9=$(grep -c ' FAIL$' <<<"$G9")
+if [ -z "$G9" ] || [ "$n9" -lt 4 ] || [ "$f9" -ne 0 ]; then
+  bad "G9 injected reply loss: $n9 rows, $f9 FAIL: $(grep ' FAIL$' <<<"$G9" | head -3 | tr '\n' ' ')"
+else note "G9 $n9/$n9 injected-loss rows right ($(grep -o 'inject.blackout.read [^ ]* [^ ]* [^ ]* [^ ]* ms=[0-9]*' <<<"$G9"))"; fi
 
 # G2 (and the can't-judge case)
 # Only well-formed rows are judged: two CPUs writing the console can garble a
