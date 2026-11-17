@@ -148,6 +148,61 @@ int main(void) {
   D3D12_FEATURE_DATA_D3D12_OPTIONS7 o7 = { 0 };
   if (SUCCEEDED(ID3D12Device_CheckFeatureSupport(dev, D3D12_FEATURE_D3D12_OPTIONS7, &o7, sizeof o7)))
     row("options7: MeshShaderTier %d SamplerFeedbackTier %d", o7.MeshShaderTier, o7.SamplerFeedbackTier);
+  /* C6-venus (P8 stop 11): do timed waits last as long as asked?  vkd3d's
+   * frame limiter (VKD3D_FRAME_RATE) has no effect on Venus, so something
+   * it sleeps on returns early.  5 reps of each 50 ms wait, after GPU fence
+   * waits in this same thread (the FENCE_WAIT2 path). */
+  {
+    ID3D12CommandQueue *q = NULL;
+    ID3D12Fence *fe = NULL;
+    D3D12_COMMAND_QUEUE_DESC qd = { D3D12_COMMAND_LIST_TYPE_DIRECT, 0, D3D12_COMMAND_QUEUE_FLAG_NONE, 0 };
+    HANDLE fev = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (SUCCEEDED(ID3D12Device_CreateCommandQueue(dev, &qd, &IID_ID3D12CommandQueue, (void **)&q)) &&
+        SUCCEEDED(ID3D12Device_CreateFence(dev, 0, D3D12_FENCE_FLAG_NONE, &IID_ID3D12Fence, (void **)&fe))) {
+      for (UINT64 v = 1; v <= 20; v++) {
+        ID3D12CommandQueue_Signal(q, fe, v);
+        ID3D12Fence_SetEventOnCompletion(fe, v, fev);
+        WaitForSingleObject(fev, 2000);
+      }
+      row("timing: 20 GPU fence waits done, completed=%llu", (unsigned long long)ID3D12Fence_GetCompletedValue(fe));
+    }
+    LARGE_INTEGER fq, t0, t1;
+    QueryPerformanceFrequency(&fq);
+    HANDLE ev = CreateEventW(NULL, TRUE, FALSE, NULL);
+    HANDLE ht = CreateWaitableTimerExW(NULL, NULL, 0x00000002 /* HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
+    HANDLE lt = CreateWaitableTimerW(NULL, TRUE, NULL);
+    const char *names[6] = {"Sleep(50)", "SleepEx(50)", "WaitForSingleObject(event,50)", "hires timer 50",
+                            "timer 50", "50x Sleep(1)"};
+    for (int k = 0; k < 6; k++) {
+      double mn = 1e9, mx = 0;
+      for (int r = 0; r < 5; r++) {
+        ULONGLONG g0 = GetTickCount64();
+        QueryPerformanceCounter(&t0);
+        LARGE_INTEGER due;
+        due.QuadPart = -500000; /* 50 ms */
+        switch (k) {
+        case 0: Sleep(50); break;
+        case 1: SleepEx(50, FALSE); break;
+        case 2: WaitForSingleObject(ev, 50); break;
+        case 3: if (ht) { SetWaitableTimer(ht, &due, 0, NULL, NULL, FALSE); WaitForSingleObject(ht, 1000); } break;
+        case 4: if (lt) { SetWaitableTimer(lt, &due, 0, NULL, NULL, FALSE); WaitForSingleObject(lt, 1000); } break;
+        case 5: for (int i = 0; i < 50; i++) Sleep(1); break;
+        }
+        QueryPerformanceCounter(&t1);
+        double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)fq.QuadPart;
+        (void)g0;
+        if (ms < mn) mn = ms;
+        if (ms > mx) mx = ms;
+      }
+      row("timing: %-30s min %.2f ms max %.2f ms (qpf %lld)", names[k], mn, mx, (long long)fq.QuadPart);
+    }
+    ULONGLONG g0 = GetTickCount64();
+    QueryPerformanceCounter(&t0);
+    Sleep(500);
+    QueryPerformanceCounter(&t1);
+    row("timing: Sleep(500): qpc %.1f ms, tick %llu ms", (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)fq.QuadPart,
+        (unsigned long long)(GetTickCount64() - g0));
+  }
   ID3D12Device_Release(dev);
   row("done rc=0");
   return 0;
