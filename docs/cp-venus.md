@@ -93,7 +93,10 @@ virtio registers to BAR 2 when `hostmem` is set), capsets virgl (1), virgl2
   shmems answer `map_info=1` (CACHED).
 * **Copies.** `vm_user_read`/`vm_kwrite` refuse a device page (`-EFAULT`)
   instead of dereferencing it through the direct map, which does not cover the
-  window (gap for P8: `read()` straight into a mapped upload heap).
+  window.  `read()` into a mapped blob is unaffected (cp-sync's
+  `file_read_user()` writes through the caller's mapping).  Blob mappings are
+  not VM objects, so `VM_OBJ_MAX_BYTES` (4 GiB since cp-sync) does not bound
+  them; the 8 GiB window and `GPU_WIN_MAX_EXTENTS` (4096) do.
 
 ## 4. Mesa (`tools/mesa/venus/build.sh`, `src/user/cp/vn_renderer_hobbyos.c`)
 

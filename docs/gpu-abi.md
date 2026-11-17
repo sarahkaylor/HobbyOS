@@ -500,8 +500,9 @@ host-visible window).
 
 `SET_SCANOUT_BLOB` (P7, AD-6, F5), guest-memory blobs, dma-buf/sync-file
 export and import, resource UUIDs, cross-device sharing, more than one context
-per fd, and kernel `read()`/`write()` of a user buffer that lies in a mapped
-blob (the kernel copies user memory through the direct map, which does not
-cover the window; such a copy answers `-EFAULT` instead of faulting the
-kernel — the P8 lane must lift this if the game reads files straight into
-upload heaps).
+per fd, and kernel copies through `vm_user_read`/`vm_kwrite` (ioctl structs,
+cross-process writes) of a user range that lies in a mapped blob: those go
+through the direct map, which does not cover the window, so they answer
+`-EFAULT` instead of faulting the kernel.  `read()`/`pread()` into a mapped
+blob are fine: since cp-sync, `file_read_user()` materializes the destination
+and `file_read()` writes it through the caller's own mapping.
