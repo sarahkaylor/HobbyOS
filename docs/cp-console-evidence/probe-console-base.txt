@@ -1,0 +1,40 @@
+# linux_probe_console on the BASE tree: 058fd3d5 + src/kernel/linux_compat_cons.c, the linux_compat.c table line,
+# the probe, tools/gate/lp_check_console.py and tools/gate/t3_linux_probe.sh as at 6bbac98e; console code untouched.
+# strix (Zen 5, KVM, -smp 8 -m 12G): LP_TIMEOUT=300 bash tools/cp/qemu-slot.sh bash tools/gate/t3_linux_probe.sh console
+
+qemu-slot: slot 4 of 4 held by pid 1607824 16:05:10
+t3_linux_probe: building /home/sarah/cp/lanes/console-base/obj/intel/probe_console.elf
+=== t3_linux_probe: console (deadline 300s, log /home/sarah/cp/lanes/console-ev/console-base-console.tier.log) ===
+--- probe rows ---
+[LP] console begin secs=60 stress=12 writers=4 ncpu=8
+[LP] console totals kernel=12399 user=10985 cpus=0xff ncpus=8 w0=1083 w1=934 w2=7968 w3=1000 secs=60.2
+[LP] done rc=0
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+[EXITPC] pid=2 last_user_pc=0x100000468E code=0x0
+--- host-side check: lp_check_console.py ---
+lp_check_console: kernel rows intact 440/12399, user rows intact 7134/10985, interleaved lines 6605, torn rows 1076, missing 15810, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+  e.g. 0[CSTR] c=[MR] s=4 pid=2 g=2 as=0x76704260 len=0x23000 base=0x1080069000 w=1
+  e.g. Taho[CSTR] c=0 k=2 s=2 p=CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4B e=54
+  e.g. [CSTR] c=0[CSTR] c=0 e= s=60000000 p= k=AHOVcjqx4BIPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GN[RESUME-RZ] pid=10 tsp=0000001080117EF8 win_lo=0000001080117D38 win_hi=0000001080117E78 redzone_hit=0 ba
+  e.g.  k=0 s=[CSTR] c=3 k=0 s=30000000 p=80000000[CSTR] c= p=pw3AHOVc6BIPWdkry k=5CJQXelsz6DKRYfmt07ELSZgnu18FMTajqx4BIPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18hov29GNU0bipw3AHOVcjqx4BIFMTahov29GNUbipw3AHOVcjqx4BI
+  e.g. ov29GNUb[CSTR] c=5 k=2 s=80000002 p=ry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4BIPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4B e=119
+  e.g. ipw3AHOV[CSTR] c=[MR] s=12 pid=2 g=2 as=0x76704260 len=0x23000 base=0x1080181000 w=1
+  e.g.  p= p=nu18FMTa p=Ubipw3AHOVcjqx4BIPWdkry54BIPWdkry5CJQXelsz6DKRYf[CSTR] c=1 k=2 s=10000002 p=Xelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4BIPWdkry5CJQXelsz e=67
+  e.g. ] [CSTR] c=2 k=2 s=40000002 p=Wdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4BIPWdkry5CJQXelsz6DKR e=80
+lp_check_console: FAIL -- 6605 interleaved line(s); 1076 torn row(s); 15810 missing row(s)
+t3_linux_probe: FAIL — console reached its done marker but lp_check_console.py failed
+rc=1
+
+# the same base console log re-checked with the final checker (863c79ae):
+lp_check_console: kernel rows intact 440/12399, user rows intact 7134/10985, interleaved lines 6605, torn rows 1076, missing 15810, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+  e.g. 0[CSTR] c=[MR] s=4 pid=2 g=2 as=0x76704260 len=0x23000 base=0x1080069000 w=1
+  e.g. Taho[CSTR] c=0 k=2 s=2 p=CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4B e=54
+  e.g. [CSTR] c=0[CSTR] c=0 e= s=60000000 p= k=AHOVcjqx4BIPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GN[RESUME-RZ] pid=10 tsp=0000001080117EF8 win_lo=0000001080117D38 win_hi=0000001080117E78 redzone_hit=0 ba
+  e.g.  k=0 s=[CSTR] c=3 k=0 s=30000000 p=80000000[CSTR] c= p=pw3AHOVc6BIPWdkry k=5CJQXelsz6DKRYfmt07ELSZgnu18FMTajqx4BIPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18hov29GNU0bipw3AHOVcjqx4BIFMTahov29GNUbipw3AHOVcjqx4BI
+  e.g. ov29GNUb[CSTR] c=5 k=2 s=80000002 p=ry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4BIPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4B e=119
+  e.g. ipw3AHOV[CSTR] c=[MR] s=12 pid=2 g=2 as=0x76704260 len=0x23000 base=0x1080181000 w=1
+  e.g.  p= p=nu18FMTa p=Ubipw3AHOVcjqx4BIPWdkry54BIPWdkry5CJQXelsz6DKRYf[CSTR] c=1 k=2 s=10000002 p=Xelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4BIPWdkry5CJQXelsz e=67
+  e.g. ] [CSTR] c=2 k=2 s=40000002 p=Wdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4BIPWdkry5CJQXelsz6DKR e=80
+lp_check_console: FAIL -- 6605 interleaved line(s); 1076 torn row(s); 15810 missing row(s)

@@ -1,0 +1,145 @@
+# per-tag line/byte counts of the integ7 serial logs (strix:~/cp/integ10/p5b.serial.log and ~/cp/integ/obj/{cp-p8/integ10-lvp,p4/integ10,wine-p2}/serial.log),
+# tag = the first [..] or word of a line after leading spaces (tagcount.py, below). Base for the default-off set in docs/cp-console.md §3.
+
+== /home/sarah/cp/integ10/p5b.serial.log lines 69834 bytes 6072583
+[PUB]                      35630 lines   3153693 bytes  51.9%
+[ALIVE-SET]                 9397 lines   1079932 bytes  17.8%
+[FUTEX]                    12575 lines    817451 bytes  13.5%
+[MR]                        5932 lines    435347 bytes   7.2%
+(other)                     1355 lines    100398 bytes   1.7%
+[THRS]                       425 lines     54938 bytes   0.9%
+[IDLESTUCK]                  550 lines     47421 bytes   0.8%
+[X]                          604 lines     36608 bytes   0.6%
+[RESUME-RZ]                  276 lines     36312 bytes   0.6%
+[SIGST]                      347 lines     28209 bytes   0.5%
+[PROCLOCK-HOLD]               88 lines     21560 bytes   0.4%
+[GDT]                        318 lines     21140 bytes   0.3%
+[BLKD]                        65 lines     15424 bytes   0.3%
+[LOCKDIAG]                    40 lines     13322 bytes   0.2%
+[PUBS]                        79 lines     12312 bytes   0.2%
+[NFSRTT]                     127 lines     12311 bytes   0.2%
+CSTK                          28 lines      8964 bytes   0.1%
+[RDP]                         80 lines      8491 bytes   0.1%
+CDATA                         27 lines      7195 bytes   0.1%
+[KERNEL]                     113 lines      7135 bytes   0.1%
+[NFSRA]                       37 lines      6903 bytes   0.1%
+[LNFSD]                       64 lines      6662 bytes   0.1%
+[NFSNET]                      37 lines      5355 bytes   0.1%
+[PBI]                         25 lines      5338 bytes   0.1%
+[RDF]                         48 lines      4668 bytes   0.1%
+[NFSLS]                       82 lines      4624 bytes   0.1%
+[EXEC]                        64 lines      4521 bytes   0.1%
+[MPROT]                       39 lines      4227 bytes   0.1%
+[EXITPC]                      77 lines      4062 bytes   0.1%
+CPU                           27 lines      3969 bytes   0.1%
+== /home/sarah/cp/integ/obj/cp-p8/integ10-lvp/serial.log lines 77427 bytes 6622057
+[PUB]                      20166 lines   1797342 bytes  27.1%
+[ALIVE-SET]                14881 lines   1714694 bytes  25.9%
+[FUTEX]                    26555 lines   1678979 bytes  25.4%
+[MR]                        5816 lines    430648 bytes   6.5%
+(other)                     1775 lines    150366 bytes   2.3%
+[X]                         1600 lines    138886 bytes   2.1%
+[PUBS]                       552 lines     89893 bytes   1.4%
+[IDLESTUCK]                  953 lines     83243 bytes   1.3%
+[NFSRTT]                     760 lines     80745 bytes   1.2%
+[ANONF]                      485 lines     63493 bytes   1.0%
+[THRS]                       474 lines     61760 bytes   0.9%
+[SIGST]                      503 lines     40177 bytes   0.6%
+[GDT]                        398 lines     21874 bytes   0.3%
+[NFSRA]                      101 lines     19417 bytes   0.3%
+[PROCLOCK-HOLD]               79 lines     18676 bytes   0.3%
+[NFSNET]                     101 lines     14814 bytes   0.2%
+[BLKD]                        64 lines     14447 bytes   0.2%
+[RESUME-RZ]                   94 lines     12300 bytes   0.2%
+wait                          79 lines      7807 bytes   0.1%
+[RDP]                         80 lines      7504 bytes   0.1%
+[LNFSD]                       64 lines      6396 bytes   0.1%
+[LOCKDIAG]                    19 lines      6292 bytes   0.1%
+CPU                           32 lines      5649 bytes   0.1%
+x                             40 lines      5142 bytes   0.1%
+want                          50 lines      5098 bytes   0.1%
+periodic                      47 lines      4884 bytes   0.1%
+[PBI]                         19 lines      4056 bytes   0.1%
+[MPROT]                       37 lines      3932 bytes   0.1%
+n                             45 lines      3826 bytes   0.1%
+e                             41 lines      3681 bytes   0.1%
+== /home/sarah/cp/integ/obj/p4/integ10/serial.log lines 33506 bytes 2962817
+[PUB]                      17384 lines   1519624 bytes  51.3%
+[ALIVE-SET]                 4410 lines    508260 bytes  17.2%
+[MR]                        5972 lines    438634 bytes  14.8%
+[FUTEX]                     1629 lines    120981 bytes   4.1%
+[X]                          825 lines     83421 bytes   2.8%
+(other)                      708 lines     38238 bytes   1.3%
+[THRS]                       250 lines     32086 bytes   1.1%
+[IDLESTUCK]                  259 lines     21698 bytes   0.7%
+[SIGST]                      225 lines     18176 bytes   0.6%
+[GDT]                        211 lines     14833 bytes   0.5%
+[LOCKDIAG]                    36 lines     11904 bytes   0.4%
+[PROCLOCK-HOLD]               48 lines     11338 bytes   0.4%
+[BLKD]                        43 lines     10639 bytes   0.4%
+[RDP]                         80 lines      8746 bytes   0.3%
+[PUBS]                        55 lines      8465 bytes   0.3%
+CPU                           55 lines      7771 bytes   0.3%
+[KERNEL]                     106 lines      6675 bytes   0.2%
+[LNFSD]                       64 lines      6084 bytes   0.2%
+[EXEC]                        64 lines      4548 bytes   0.2%
+[NFSRA]                       24 lines      4413 bytes   0.1%
+[MPROT]                       39 lines      4104 bytes   0.1%
+[NFSRTT]                      48 lines      4000 bytes   0.1%
+[RESUME-RZ]                   31 lines      3993 bytes   0.1%
+[EXITPC]                      74 lines      3910 bytes   0.1%
+[PBI]                         18 lines      3836 bytes   0.1%
+[COW]                         22 lines      3746 bytes   0.1%
+[NFSLS]                       63 lines      3623 bytes   0.1%
+[PFE]                         22 lines      3528 bytes   0.1%
+[NFSNET]                      24 lines      3460 bytes   0.1%
+[LMMAP]                       39 lines      3181 bytes   0.1%
+== /home/sarah/cp/integ/obj/wine-p2/serial.log lines 23361 bytes 1978138
+[PUB]                      13630 lines   1195122 bytes  60.4%
+[MR]                        5763 lines    429123 bytes  21.7%
+[ALIVE-SET]                  741 lines     85382 bytes   4.3%
+[FUTEX]                      495 lines     33818 bytes   1.7%
+(other)                      613 lines     29637 bytes   1.5%
+clang                        109 lines     28395 bytes   1.4%
+[GDT]                        179 lines     12852 bytes   0.6%
+[KERNEL]                     153 lines     12022 bytes   0.6%
+[PUBS]                        72 lines      9248 bytes   0.5%
+[RDP]                         80 lines      8899 bytes   0.4%
+src                           71 lines      6739 bytes   0.3%
+[THRS]                        43 lines      5505 bytes   0.3%
+[EXITPC]                     104 lines      5468 bytes   0.3%
+[LNFSD]                       58 lines      5446 bytes   0.3%
+[NFSLS]                       90 lines      5243 bytes   0.3%
+[PFE]                         24 lines      4848 bytes   0.2%
+[EXEC]                        64 lines      4542 bytes   0.2%
+[MPROT]                       40 lines      4520 bytes   0.2%
+[NFSRA]                       24 lines      4401 bytes   0.2%
+[COW]                         24 lines      4368 bytes   0.2%
+[WP]                          86 lines      4196 bytes   0.2%
+[NFSRTT]                      48 lines      3858 bytes   0.2%
+[PBI]                         18 lines      3834 bytes   0.2%
+[IDLESTUCK]                   45 lines      3761 bytes   0.2%
+[NFSNET]                      24 lines      3460 bytes   0.2%
+[LMMAP]                       40 lines      3254 bytes   0.2%
+[SIGST]                       37 lines      2912 bytes   0.1%
+[PFX]                         34 lines      2699 bytes   0.1%
+ld                             1 lines      2545 bytes   0.1%
+[LOCKDIAG]                     7 lines      2324 bytes   0.1%
+
+# tagcount.py
+#!/usr/bin/env python3
+"""Per-tag line/byte counts of a HobbyOS serial log (tag = first [..] or word)."""
+import re, sys, collections
+for fn in sys.argv[1:]:
+    data = open(fn, "rb").read().decode("utf-8", "replace")
+    lines = data.split("\n")
+    c = collections.Counter(); b = collections.Counter()
+    for l in lines:
+        s = l.lstrip().rstrip("\r")
+        m = re.match(r"(\[[A-Za-z0-9_!\-]+\]|[A-Za-z]+)", s)
+        k = m.group(1) if m else "(other)"
+        c[k] += 1; b[k] += len(l) + 1
+    tot = sum(b.values())
+    print("==", fn, "lines", len(lines), "bytes", tot)
+    for k, v in b.most_common(int(sys.argv[0] and 30)):
+        print("%-24s %7d lines %9d bytes %5.1f%%" % (k, c[k], v, 100.0 * v / tot))

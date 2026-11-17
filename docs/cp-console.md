@@ -46,7 +46,10 @@ A slot reaches the wire only:
 - when it is stale (`stale`). The timer tick pushes it out once it is 50 ms old **and**
   the wire has been quiet for 50 ms, or once it is 2 s old. A busy console never breaks a
   line whose writer is only waiting to be scheduled. A 30 ms age-only rule tore 2 of
-  39 000 probe rows under host load;
+  39 000 probe rows under host load. The thread the tick interrupted is in the middle of
+  its row and resumes when the tick returns, so its own slot goes out only past 2 s. A
+  host stall of the whole guest had made such a row look old on a quiet wire: 1 torn row
+  in 38 000;
 - when it is evicted because all three slots hold text (`evicted`);
 - when its CPU halts (`cpu_halt_record` calls `cons_flush_local`).
 
@@ -212,11 +215,11 @@ the console:
 | this branch | 25 524 / 25 524 | 12 428 / 12 428 | **0** | 0 | 0 | 8 |
 
 Host test: `make kconsole_test_host && ./kconsole_test_host` (also part of
-`make host_tests`). It runs 15 cases against stub hooks: the multi-call row, an IRQ row on
+`make host_tests`). It runs 17 cases against stub hooks: the multi-call row, an IRQ row on
 the same CPU, a row across an irqsave lock, a preempted thread, the filter and the knob, a
 user line in three pieces, a stale prompt, several lines in one write, a halted holder,
-takeover past the bound, a line longer than a slot, and a stale kernel partial with its
-continuation.
+takeover past the bound, a line longer than a slot, a stale kernel partial with its
+continuation, and a row the tick interrupts after a quiet 60 ms.
 
 ## 6. Cost: serial bytes and boot time
 
