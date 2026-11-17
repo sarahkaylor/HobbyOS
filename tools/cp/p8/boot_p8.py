@@ -43,7 +43,10 @@ from p5lib import acquire_slot, guests_running, ppm, read, release_slot  # noqa:
 MENU_WORDS = ["NEW GAME", "LOAD GAME", "CONTINUE", "SETTINGS", "CREDITS", "QUIT GAME", "ADDITIONAL CONTENT"]
 FIRST_RUN = [
     ("agreement", re.compile(r"USER\s+AGREEMENT|LICEN[CS]E\s+AGREEMENT|decline\s+or\s+accept", re.I)),
-    ("account offer", re.compile(r"PROJEKT\s+RED\s+Account|SKIP\s+FOR\s+NOW|Unlock\s+Unique\s+Features", re.I)),
+    # Not "CD PROJEKT RED ACCOUNT": the main menu itself has a corner button
+    # with that label (run9-tmpcache stopped on it, a false positive).  The
+    # offer is a modal with these phrases (docs/cp-p0-guest.md §5.1b).
+    ("account offer", re.compile(r"SKIP\s+FOR\s+NOW|Unlock\s+Unique\s+Features|Cross-progression", re.I)),
     ("telemetry", re.compile(r"telemetry|CONSENT\s+TO\s+ALL|REJECT\s+ALL", re.I)),
 ]
 PRESS_CONTINUE = re.compile(r"PRESS\b.{0,24}\bTO\s+CONTINUE", re.I | re.S)

@@ -31,8 +31,8 @@
 # Env: CP_WINE_STAGE (default ~/cp/wine-build-x/stage/CP/WINE), WINE_BUILD
 #      (default ~/cp/wine-build-x), CP_VK_WORK (~/cp/vk2-build), CP_X11_WORK
 #      (~/cp/x11-build-x2), CP_P5_PE (~/cp/vk2-pe), P8_PROFILE (~/cp/game-profile),
-#      P8_XHOBBY + P8_XHOBBY_SHA256 (default: C4-x2's one-screen server
-#      ~/cp/vk2-scratch/x2-xserver/XHOBBY.BIN, 935c760f...), P8_RUN (run name,
+#      P8_XHOBBY + P8_XHOBBY_SHA256 (a scratch X server over the tree's own
+#      XHOBBY.BIN; default none since integ5/C4-x3), P8_RUN (run name,
 #      default run<N>), P8_WINEDEBUG, P8_GAME_S (launcher's game deadline,
 #      default 3600), TIMEOUT_S (boot deadline, default 5400), P8_STALL_S
 #      (default 1200), P8_PRESS_CONTINUE (default 1), P8_CFLAGS (extra -D for
@@ -52,8 +52,10 @@ PROF="${P8_PROFILE:-$HOME/cp/game-profile}"
 LDIR="${GLIBC231_LIB:-$VKW/sysroot-glibc231/lib/x86_64-linux-gnu}"
 EXPORT="${P8_EXPORT:-/srv/nfs/cp-game-p8}"
 GAME=/srv/nfs/cp-game
-XHOBBY="${P8_XHOBBY:-$HOME/cp/vk2-scratch/x2-xserver/XHOBBY.BIN}"
-XHOBBY_SHA="${P8_XHOBBY_SHA256:-935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97}"
+# integ5 (C4-x3): the tree builds its own one-screen XHOBBY.BIN with MIT-SHM;
+# P8_XHOBBY (+ P8_XHOBBY_SHA256) stages a scratch server over it, diagnostics only.
+XHOBBY="${P8_XHOBBY:-}"
+XHOBBY_SHA="${P8_XHOBBY_SHA256:-}"
 WDBG="${P8_WINEDEBUG:-+loaddll,fixme-all}"
 TIMEOUT_S="${TIMEOUT_S:-5400}"
 BASE="$ROOT/obj/cp-p8"
@@ -189,10 +191,15 @@ stage "$OUT/p8env.elf" ::/P8ENV.ELF
 stage "$OUT/p8fd.elf" ::/P8FD.ELF
 stage "$OUT/p8scm.elf" ::/P8SCM.ELF
 stage "$OUT/p8kill.elf" ::/P8KILL.ELF
-cp "$XHOBBY" "$OUT/XHOBBY.BIN"
-echo "$XHOBBY_SHA  $OUT/XHOBBY.BIN" | sha256sum -c --quiet - || die "XHOBBY.BIN sha256 mismatch"
-stage "$OUT/XHOBBY.BIN" ::/XHOBBY.BIN
-echo "== X server: $XHOBBY (sha256 $XHOBBY_SHA) staged as ::/XHOBBY.BIN (scratch override, not committed)"
+if [ -n "$XHOBBY" ]; then
+  [ -n "$XHOBBY_SHA" ] || die "P8_XHOBBY needs P8_XHOBBY_SHA256"
+  cp "$XHOBBY" "$OUT/XHOBBY.BIN"
+  echo "$XHOBBY_SHA  $OUT/XHOBBY.BIN" | sha256sum -c --quiet - || die "XHOBBY.BIN sha256 mismatch"
+  stage "$OUT/XHOBBY.BIN" ::/XHOBBY.BIN
+  echo "== X server: $XHOBBY (sha256 $XHOBBY_SHA) staged as ::/XHOBBY.BIN (scratch override, not committed)"
+else
+  echo "== X server: the tree's own XHOBBY.BIN, sha256 $(mcopy -n -i "$D" ::/XHOBBY.BIN - 2>/dev/null | sha256sum | cut -c1-16)"
+fi
 rm -f "$OUT/XSESSION.ENV"
 mcopy -o -i "$D" ::/X11/XSESSION.ENV "$OUT/XSESSION.ENV" 2>/dev/null || : > "$OUT/XSESSION.ENV"
 printf 'HB_SECOND_SCREEN=0\n' >> "$OUT/XSESSION.ENV"

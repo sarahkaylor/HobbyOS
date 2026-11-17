@@ -10,13 +10,18 @@
  *                                 is what is left: HobbyOS answers EMFILE for
  *                                 both (fs.c file_alloc failure), Linux would
  *                                 say ENFILE for the second.
+ * It also prints the frame pool: statfs("/tmp") on HobbyOS's tmpfs reports
+ * f_bfree = frame_free_count() (tmpfs.c tmpfs_statfs), i.e. free 4 KiB frames
+ * of the whole kernel pool (the 12 GiB question, docs/cp-p8.md).
  * usage: p8fdcount [CAP]   (default 600)
- * Row: "[P8FD] cap=<n> opened=<n> first_errno=<n>"
+ * Rows: "[P8FD] cap=<n> opened=<n> first_errno=<n>"
+ *       "[P8MEM] frames_free=<n> free_mib=<n>"
  */
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/statfs.h>
 #include <unistd.h>
 
 int main(int argc, char **argv) {
@@ -30,6 +35,10 @@ int main(int argc, char **argv) {
     fds[n++] = fd;
   }
   for (int i = 0; i < n; i++) close(fds[i]);
+  struct statfs sf;
+  if (statfs("/tmp", &sf) == 0)
+    printf("[P8MEM] frames_free=%llu free_mib=%llu (bsize %ld)\n", (unsigned long long)sf.f_bfree,
+           (unsigned long long)sf.f_bfree * (unsigned long long)sf.f_bsize >> 20, (long)sf.f_bsize);
   printf("[P8FD] cap=%d opened=%d first_errno=%d%s\n", cap, n, err,
          err == EMFILE ? " (EMFILE)" : err == ENFILE ? " (ENFILE)" : "");
   return 0;

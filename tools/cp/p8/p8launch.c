@@ -62,6 +62,15 @@
 #endif
 #define P8_STR_(x) #x
 #define P8_STR(x) P8_STR_(x)
+/* The caches live on ext2 (the recipe).  A diagnostic run may move them, e.g.
+   -DP8_MESA_CACHE='"/tmp/mc"' -DP8_VKD3D_CACHE='"Z:\\tmp\\vc"' (docs/cp-p8.md
+   stop 9: isolating ext2 write-back). */
+#ifndef P8_VKD3D_CACHE
+#define P8_VKD3D_CACHE "C:\\vc"
+#endif
+#ifndef P8_MESA_CACHE
+#define P8_MESA_CACHE "/EXT/mc"
+#endif
 #ifndef P8_GAME_ARGS
 #define P8_GAME_ARGS "--launcher-skip"
 #endif
@@ -108,8 +117,8 @@ static char *envp[] = {
   (char *)"LD_LIBRARY_PATH=/CP/X11/lib:/CP/WINE/lib:/CP/VK/lib:/LIB64:/CP/WINE/lib/wine/x86_64-unix",
   (char *)"WINEDEBUG=" P8_WINEDEBUG,
   (char *)"WINEDLLOVERRIDES=d3d12,d3d12core,dxgi,d3d11=n;mscoree,mshtml=;winemenubuilder.exe=d",
-  (char *)"VKD3D_SHADER_CACHE_PATH=C:\\vc",
-  (char *)"MESA_SHADER_CACHE_DIR=/EXT/mc",
+  (char *)"VKD3D_SHADER_CACHE_PATH=" P8_VKD3D_CACHE,
+  (char *)"MESA_SHADER_CACHE_DIR=" P8_MESA_CACHE,
   (char *)"DXVK_LOG_PATH=none",
   (char *)"SteamAppId=1091500",
   (char *)"HOME=/tmp",
@@ -279,6 +288,23 @@ int main(void) {
     int es = -1;
     if (ep >= 0) waitpid(ep, &es, 0);
     pc("[P8] end envprobe40 status="); pd(es); pc("\n");
+    /* E5: an env that cannot fit must be refused (E2BIG), never truncated.
+       80 entries x 39 bytes = 3120 bytes > the 2048-byte blob of integ5. */
+    static char st5[80][48];
+    static char *big5[81];
+    for (int i = 0; i < 80; i++) {
+      for (int k = 0; k < 38; k++) st5[i][k] = st[i % 40][k];
+      st5[i][0] = 'F'; st5[i][1] = (char)('0' + i / 10); st5[i][2] = (char)('0' + i % 10);
+      st5[i][38] = 0;
+      big5[i] = st5[i];
+    }
+    big5[80] = 0;
+    int ep5 = spawn_ex("/P8ENV.ELF", a_env40, big5, 0, 0);
+    int e5 = ep5 < 0 ? errno : 0;
+    if (ep5 >= 0) { int s5; waitpid(ep5, &s5, 0); }
+    pc("[P8ENV] E5 spawn_ex with 80 entries / 3120 bytes: ");
+    if (ep5 < 0) { pc("refused errno="); pd(e5); pc(e5 == 7 ? " (E2BIG) -> PASS\n" : " -> FAIL (want E2BIG)\n"); }
+    else pc("spawned (truncated?) -> FAIL (want E2BIG)\n");
   }
 #endif
 #if P8_PHASE == 3
