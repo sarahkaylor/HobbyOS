@@ -1,0 +1,12 @@
+== C0-console probe (linux_probe_console + lp_check_console.py), strix load average ~15-16 (four guests), 2026-11-17T14:51:02-06:00
+-- run-2 batch, cp-k6 5ae97d4d:
+lp_check_console: kernel rows intact 22765/22794, user rows intact 10691/10694, interleaved lines 1, torn rows 3, missing 32, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: FAIL -- 1 interleaved line(s); 3 torn row(s); 32 missing row(s)
+-- k6-dev2:cp-k6 5ae97d4d x2 (same hour):
+lp_check_console: kernel rows intact 26190/26223, user rows intact 12023/12037, interleaved lines 0, torn rows 4, missing 47, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: kernel rows intact 25688/25722, user rows intact 11824/11836, interleaved lines 1, torn rows 5, missing 46, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+-- k6-dev:integ9 adb81ee4 x2 (same hour):
+lp_check_console: kernel rows intact 26316/26325, user rows intact 12095/12095, interleaved lines 1, torn rows 0, missing 9, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: kernel rows intact 25356/25377, user rows intact 11799/11805, interleaved lines 0, torn rows 4, missing 27, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+-- integrator, integ9 batch (integ-gates12.txt):
+console rc=0 [LP] done rc=0lp_check_console: kernel rows intact 23748/23748, user rows intact 11350/11350, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
