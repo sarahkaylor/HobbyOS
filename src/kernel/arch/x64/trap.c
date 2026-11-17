@@ -3933,6 +3933,31 @@ static void fl_dec(struct fl_buf *f, int v) {
  * window.  Rate-limited to the first four faults of a boot; one uart_puts per
  * line so SMP cannot shred it (rule: a fault record must be one write).
  */
+#ifdef CP_FAULT_PTRS
+/* C6-venus (P8 stop 11): the MSVC RTTI class name of vtable `vt`, if it has
+ * one.  x64 layout: vt[-1] -> RTTICompleteObjectLocator {u32 signature (1),
+ * offset, cdOffset, i32 pTypeDescriptor, pClassDescriptor, pSelf} with
+ * image-relative RVAs; image base = COL - pSelf; TypeDescriptor =
+ * {pVFTable, spare, char name[]}.  Appends " <tag>=<name>" and returns 1. */
+static int fl_rtti(struct fl_buf *f, struct process *p, const char *tag, uint64_t vt) {
+  uint64_t col = 0;
+  uint32_t c[6];
+  char nm[72];
+  if (vt < 0x10000 || (vt & 7) || vm_user_read(p, vt - 8, &col, 8) != 0) return 0;
+  if (col < 0x10000 || (col & 3) || vm_user_read(p, col, c, sizeof c) != 0) return 0;
+  if (c[0] != 1 || c[5] == 0 || c[5] > col) return 0;
+  uint64_t base = col - c[5];
+  if ((base & 0xFFFF) || vm_user_read(p, base + c[3] + 16, nm, sizeof nm - 1) != 0) return 0;
+  nm[sizeof nm - 1] = 0;
+  if (nm[0] != '.' || nm[1] != '?') return 0;
+  fl_c(f, ' ');
+  fl_s(f, tag);
+  fl_c(f, '=');
+  fl_s(f, nm);
+  return 1;
+}
+#endif /* CP_FAULT_PTRS */
+
 static void fl_qwords(struct fl_buf *f, struct process *p, uint64_t va, int n) {
   uint64_t q[16];
   if (n > 16) n = 16;
@@ -4229,6 +4254,108 @@ static void compat_fault_dump(struct process *cur, struct trap_frame *tf,
   fl_c(&f, '\n');
   f.b[f.n] = 0;
   uart_puts(f.b);
+
+#ifdef CP_FAULT_PTRS
+  /* C6-venus (P8 stop 11): what every register and the first stack words
+   * point at -- region kind and 8 qwords around it -- and the code bytes
+   * before the return address and at the PC, so a call through a clobbered
+   * pointer can be decoded and the clobbered object read. */
+  {
+    extern struct vm_region *vm_region_find(struct addr_space *, uint64_t);
+    static const char *pk[] = {"?", "img", "heap", "anon", "shared", "stack", "fb", "lib"};
+    static const char *rn[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8",
+                               "r9",  "r10", "r11", "r12", "r13", "r14", "r15"};
+    uint64_t stk[4] = {0, 0, 0, 0};
+    vm_user_read(cur, rsp, stk, sizeof stk);
+    for (int i = 0; i < 15 + 4; i++) {
+      uint64_t v = i < 15 ? tf->regs[i] : stk[i - 15];
+      struct vm_region *r = (cur->as && v >= 0x10000) ? vm_region_find(cur->as, v) : 0;
+      if (!r) continue;
+      f.n = 0;
+      fl_s(&f, "[SPTR] ");
+      if (i < 15) fl_s(&f, rn[i]);
+      else { fl_s(&f, "stk"); fl_dec(&f, i - 15); }
+      fl_s(&f, "=");
+      fl_hex(&f, v);
+      fl_s(&f, " kind=");
+      fl_s(&f, (r->kind < 8) ? pk[r->kind] : "?");
+      fl_s(&f, " prot=");
+      fl_dec(&f, (int)r->prot);
+      fl_s(&f, " base=");
+      fl_hex(&f, r->base);
+      fl_s(&f, " off=");
+      fl_hex(&f, v - r->base);
+      fl_s(&f, " @-10:");
+      fl_qwords(&f, cur, (v & ~7ull) - 0x10, 8);
+      {
+        uint64_t q0 = 0;
+        fl_rtti(&f, cur, "vt", v);
+        if (vm_user_read(cur, v & ~7ull, &q0, 8) == 0) fl_rtti(&f, cur, "obj", q0);
+      }
+      fl_c(&f, '\n');
+      f.b[f.n] = 0;
+      uart_puts(f.b);
+    }
+    /* Objects named by their vtables among the first 64 stack words (the
+     * callers' `this` pointers), and the fields of r8's object around the
+     * array (+0x100..+0x140) that the faulting code read. */
+    {
+      uint64_t sw[64];
+      int named = 0;
+      if (vm_user_read(cur, rsp, sw, sizeof sw) == 0) {
+        for (int j = 0; j < 64 && named < 12; j++) {
+          uint64_t q0 = 0;
+          if (sw[j] < 0x10000 || (sw[j] & 7) || vm_user_read(cur, sw[j], &q0, 8) != 0) continue;
+          f.n = 0;
+          fl_s(&f, "[SOBJ] stk+");
+          fl_hex(&f, (uint64_t)j * 8);
+          fl_s(&f, " p=");
+          fl_hex(&f, sw[j]);
+          if (!fl_rtti(&f, cur, "obj", q0)) continue;
+          fl_s(&f, " +0:");
+          fl_qwords(&f, cur, sw[j], 6);
+          fl_c(&f, '\n');
+          f.b[f.n] = 0;
+          uart_puts(f.b);
+          named++;
+        }
+      }
+      for (int k = 0; k < 15; k++) {
+        uint64_t v = tf->regs[k];
+        uint64_t q0 = 0;
+        if (v < 0x10000 || (v & 7) || vm_user_read(cur, v, &q0, 8) != 0) continue;
+        f.n = 0;
+        fl_s(&f, "[SFLD] ");
+        fl_s(&f, rn[k]);
+        fl_s(&f, " +100:");
+        fl_qwords(&f, cur, v + 0x100, 8);
+        fl_c(&f, '\n');
+        f.b[f.n] = 0;
+        uart_puts(f.b);
+      }
+    }
+    uint64_t pcs[2] = {stk[0] - 24, tf->elr - 16};
+    for (int k = 0; k < 2; k++) {
+      uint8_t cb[40];
+      if (vm_user_read(cur, pcs[k], cb, sizeof cb) != 0) continue;
+      f.n = 0;
+      fl_s(&f, k == 0 ? "[SCODE] ret-24=" : "[SCODE] pc-16=");
+      fl_hex(&f, pcs[k]);
+      fl_c(&f, ':');
+      static const char hx[] = "0123456789abcdef";
+      for (int j = 0; j < (int)sizeof cb; j++) {
+        fl_c(&f, ' ');
+        fl_c(&f, hx[cb[j] >> 4]);
+        fl_c(&f, hx[cb[j] & 15]);
+      }
+      fl_c(&f, '\n');
+      f.b[f.n] = 0;
+      uart_puts(f.b);
+    }
+    extern void gpu_m2_dump_maps(struct process *p);
+    gpu_m2_dump_maps(cur);
+  }
+#endif /* CP_FAULT_PTRS */
 
   /* Where does rsp live, and is the fault address inside any region at all?
    * `region=NONE` for cr2 is the "in=HOLE" verdict in numbers. */

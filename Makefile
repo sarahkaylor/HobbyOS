@@ -653,6 +653,18 @@ endif
 ifneq ($(RW_WATCH_FIXUP),)
   CFLAGS += -DRW_WATCH_FIXUP=1
 endif
+# Diagnostics (C6-venus, P8 stop 11), both off by default:
+#   CP_FAULT_PTRS=1  fatal user-fault dump also prints [SPTR]/[SCODE]/[SFLD]/
+#                    [SOBJ]/[SMAP]: what each register points at, code bytes
+#                    at the PC and before the return address, live blob maps;
+#   CP_XCMP=1        every read of an NFS /r6/config/*.xml is compared with a
+#                    fresh uncached read of the same range ([XCMP] rows).
+ifneq ($(CP_FAULT_PTRS),)
+  CFLAGS += -DCP_FAULT_PTRS=1
+endif
+ifneq ($(CP_XCMP),)
+  CFLAGS += -DCP_XCMP=1
+endif
 # Diagnostic: one compact serial row per memory syscall (mmap/munmap/mremap/
 # mprotect/madvise/brk/msync/mincore/memfd), with the caller's six arguments and
 # the return value.  Empty = no row, no code growth.  Used to name the strategy

@@ -19,6 +19,7 @@
 #include <dxgi1_4.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
 static void row(const char *fmt, ...) {
   char b[512];
@@ -61,6 +62,55 @@ int main(void) {
           (unsigned long long)(d.DedicatedVideoMemory >> 20), (unsigned long long)(d.SharedSystemMemory >> 20));
   } else {
     row("adapter: CreateDXGIFactory1/EnumAdapters1 failed");
+  }
+  /* C6-venus (P8 stop 11): every adapter's outputs, their mode lists and the
+   * memory budget -- what the game sizes its display and streaming lists from. */
+  for (UINT ai = 0; fac; ai++) {
+    IDXGIAdapter1 *a = NULL;
+    if (FAILED(IDXGIFactory1_EnumAdapters1(fac, ai, &a))) { row("adapters: %u", ai); break; }
+    DXGI_ADAPTER_DESC1 d;
+    IDXGIAdapter1_GetDesc1(a, &d);
+    row("adapter[%u] \"%ls\" luid %08lx:%08lx flags 0x%x", ai, d.Description,
+        (unsigned long)d.AdapterLuid.HighPart, (unsigned long)d.AdapterLuid.LowPart, d.Flags);
+    IDXGIAdapter3 *a3 = NULL;
+    if (SUCCEEDED(IDXGIAdapter1_QueryInterface(a, &IID_IDXGIAdapter3, (void **)&a3))) {
+      for (int g = 0; g < 2; g++) {
+        DXGI_QUERY_VIDEO_MEMORY_INFO mi;
+        memset(&mi, 0, sizeof mi);
+        HRESULT hq = IDXGIAdapter3_QueryVideoMemoryInfo(a3, 0, g ? DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL
+                                                                 : DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mi);
+        row("adapter[%u] budget %s hr=0x%08lx budget %llu MiB usage %llu MiB reservation %llu MiB", ai,
+            g ? "non-local" : "local", (unsigned long)hq, (unsigned long long)(mi.Budget >> 20),
+            (unsigned long long)(mi.CurrentUsage >> 20), (unsigned long long)(mi.AvailableForReservation >> 20));
+      }
+      IDXGIAdapter3_Release(a3);
+    }
+    for (UINT oi = 0;; oi++) {
+      IDXGIOutput *o = NULL;
+      HRESULT ho = IDXGIAdapter1_EnumOutputs(a, oi, &o);
+      if (FAILED(ho)) { row("adapter[%u] outputs: %u (hr=0x%08lx)", ai, oi, (unsigned long)ho); break; }
+      DXGI_OUTPUT_DESC od;
+      IDXGIOutput_GetDesc(o, &od);
+      row("adapter[%u] output[%u] \"%ls\" attached %d rect %ld,%ld-%ld,%ld rot %d", ai, oi, od.DeviceName,
+          od.AttachedToDesktop, od.DesktopCoordinates.left, od.DesktopCoordinates.top,
+          od.DesktopCoordinates.right, od.DesktopCoordinates.bottom, (int)od.Rotation);
+      DXGI_FORMAT fmts[3] = {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM};
+      for (int fi = 0; fi < 3; fi++) {
+        UINT n = 0;
+        HRESULT hm = IDXGIOutput_GetDisplayModeList(o, fmts[fi], 0, &n, NULL);
+        static DXGI_MODE_DESC md[256];
+        UINT k = n > 256 ? 256 : n;
+        if (SUCCEEDED(hm) && k) IDXGIOutput_GetDisplayModeList(o, fmts[fi], 0, &k, md);
+        if (SUCCEEDED(hm) && k)
+          row("  fmt %d: %u modes, first %ux%u@%u/%u last %ux%u@%u/%u", (int)fmts[fi], n, md[0].Width,
+              md[0].Height, md[0].RefreshRate.Numerator, md[0].RefreshRate.Denominator, md[k - 1].Width,
+              md[k - 1].Height, md[k - 1].RefreshRate.Numerator, md[k - 1].RefreshRate.Denominator);
+        else
+          row("  fmt %d: %u modes hr=0x%08lx", (int)fmts[fi], n, (unsigned long)hm);
+      }
+      IDXGIOutput_Release(o);
+    }
+    IDXGIAdapter1_Release(a);
   }
 
   ID3D12Device *dev12 = NULL;
