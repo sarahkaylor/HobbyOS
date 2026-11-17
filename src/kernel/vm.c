@@ -1279,6 +1279,17 @@ static int vm_cow_page_locked(struct addr_space *as, struct vm_region *r,
   return 0;
 }
 
+/* C1-fork: is the leaf at `a` a fork copy-on-write share? */
+static int vm_touch_leaf_cow_locked(struct addr_space *as, uint64_t a) {
+#ifdef __x86_64__
+  uint64_t leaf = 0;
+  return vm_arch_walk(as, a, &leaf) == 0 && vm_arch_leaf_cow(leaf);
+#else
+  (void)as; (void)a;
+  return 0;
+#endif
+}
+
 /* cp/wine2: is a leaf present at `a` and read-only?  (vm_touch's COW test.) */
 static int vm_touch_leaf_ro_locked(struct addr_space *as, uint64_t a) {
   uint64_t leaf = 0;
@@ -2186,6 +2197,184 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
 }
 
 
+/* ---------------------------------------------------------------------
+ * C1-fork: copy-on-write sharing of private frames across fork (x86_64).
+ *
+ * fork used to copy every resident private page (D10's resident-copy fork).
+ * Besides the copy itself, that hands the child frames the guest has never
+ * touched, and on strix each first touch of fresh guest RAM can stall the
+ * vCPU in the host's THP compaction for tens to hundreds of ms
+ * (docs/cp-fork.md §2).  Now a private leaf is SHARED between parent and
+ * child: both leaves become read-only with the COW bit, and this table
+ * counts the address spaces that map the frame.  An entry exists only while
+ * the count is >= 2; no entry means the one remaining mapper owns the frame.
+ *   - a write fault (or a kernel write through vm_touch/vm_kwrite) on a COW
+ *     leaf copies the frame when it is still shared, or just takes the leaf
+ *     back writable when this AS is the last mapper (vm_cow_share_break_locked);
+ *   - every path that drops a leaf releases through x64_leaf_release /
+ *     vm_arch_unmap_keep, which free the frame only for the last mapper;
+ *   - mprotect keeps a COW leaf read-only (vm_arch_prot).
+ * The table is open-addressed (linear probing, backward-shift deletion), a
+ * static 2^20 entries (8 MiB .bss on x86_64); when it is 3/4 full (786k
+ * shared frames = 3 GiB) a fork falls back to copying.  Lock order: vm_lock -> cowt_lock (teardown takes
+ * cowt_lock alone). */
+#define COWT_BITS 20
+#define COWT_N (1u << COWT_BITS)
+struct cowt_ent {
+  uint32_t pfn1; /* pfn + 1; 0 = empty */
+  uint32_t n;    /* mappers, >= 2 */
+};
+#ifdef __x86_64__
+static struct cowt_ent cowt_tab[COWT_N]; /* 8 MiB of .bss, x86_64 only */
+static struct cowt_ent *const cowt = cowt_tab;
+#else
+static struct cowt_ent *const cowt = 0; /* ARM never shares (vm_clone_cow_share) */
+#endif
+static uint32_t cowt_used;
+static spinlock_t cowt_lock;
+static volatile int cowt_state; /* 0 not yet, 1 initializing, 2 ready */
+
+/* The table is static (so no fork ever allocates for it, and frame counts
+   around a fork stay exact); only the lock needs a one-time init. */
+static int cowt_ready(void) {
+#ifndef __x86_64__
+  return 0;
+#else
+  int st = __atomic_load_n(&cowt_state, __ATOMIC_ACQUIRE);
+  if (st == 2)
+    return 1;
+  int expect = 0;
+  if (__atomic_compare_exchange_n(&cowt_state, &expect, 1, 0, __ATOMIC_ACQ_REL,
+                                  __ATOMIC_ACQUIRE)) {
+    spinlock_init(&cowt_lock);
+    __atomic_store_n(&cowt_state, 2, __ATOMIC_RELEASE);
+    return 1;
+  }
+  while (__atomic_load_n(&cowt_state, __ATOMIC_ACQUIRE) != 2)
+    ;
+  return 1;
+#endif
+}
+
+static uint32_t cowt_home(uint32_t pfn1) {
+  return (pfn1 * 2654435761u) >> (32 - COWT_BITS);
+}
+
+/* slot of pfn1, or the empty slot where it would go (cowt_lock held) */
+static uint32_t cowt_slot(uint32_t pfn1, int *found) {
+  uint32_t i = cowt_home(pfn1);
+  for (;;) {
+    if (cowt[i].pfn1 == pfn1) {
+      *found = 1;
+      return i;
+    }
+    if (cowt[i].pfn1 == 0) {
+      *found = 0;
+      return i;
+    }
+    i = (i + 1) & (COWT_N - 1);
+  }
+}
+
+static void cowt_delete(uint32_t i) { /* backward-shift deletion */
+  uint32_t j = i;
+  for (;;) {
+    j = (j + 1) & (COWT_N - 1);
+    if (cowt[j].pfn1 == 0)
+      break;
+    uint32_t h = cowt_home(cowt[j].pfn1);
+    /* move j into the hole at i unless its home lies cyclically in (i, j] */
+    int in_range = (i <= j) ? (h > i && h <= j) : (h > i || h <= j);
+    if (!in_range) {
+      cowt[i] = cowt[j];
+      i = j;
+    }
+  }
+  cowt[i].pfn1 = 0;
+  cowt[i].n = 0;
+  cowt_used--;
+}
+
+int vm_cow_frame_get(uint64_t phys) {
+  if (!cowt_ready())
+    return -1;
+  uint32_t pfn1 = (uint32_t)(phys / FRAME_SIZE) + 1;
+  uint64_t fl = spinlock_acquire_irqsave(&cowt_lock);
+  int found = 0;
+  uint32_t i = cowt_slot(pfn1, &found);
+  int rc = 0;
+  if (found) {
+    cowt[i].n++;
+  } else if (cowt_used < COWT_N / 4 * 3) {
+    cowt[i].pfn1 = pfn1;
+    cowt[i].n = 2; /* the AS that had it and the new one */
+    cowt_used++;
+  } else {
+    rc = -1; /* full: the caller copies instead */
+  }
+  spinlock_release_irqrestore(&cowt_lock, fl);
+  return rc;
+}
+
+int vm_cow_frame_put(uint64_t phys) {
+  if (__atomic_load_n(&cowt_state, __ATOMIC_ACQUIRE) != 2)
+    return 1; /* no table: nothing was ever shared */
+  uint32_t pfn1 = (uint32_t)(phys / FRAME_SIZE) + 1;
+  uint64_t fl = spinlock_acquire_irqsave(&cowt_lock);
+  int found = 0;
+  uint32_t i = cowt_slot(pfn1, &found);
+  if (found) {
+    if (--cowt[i].n <= 1)
+      cowt_delete(i); /* one mapper left: it owns the frame now */
+  }
+  spinlock_release_irqrestore(&cowt_lock, fl);
+  return found ? 0 : 1;
+}
+
+int vm_cow_frame_shared(uint64_t phys) {
+  if (__atomic_load_n(&cowt_state, __ATOMIC_ACQUIRE) != 2)
+    return 0;
+  uint32_t pfn1 = (uint32_t)(phys / FRAME_SIZE) + 1;
+  uint64_t fl = spinlock_acquire_irqsave(&cowt_lock);
+  int found = 0;
+  (void)cowt_slot(pfn1, &found);
+  spinlock_release_irqrestore(&cowt_lock, fl);
+  return found;
+}
+
+/* Break the copy-on-write share of the present COW leaf at `a` for a write
+ * (caller holds vm_lock; the region allows the write).  Returns 0 when the
+ * leaf was taken back in place (this AS was the last mapper), 1 when the page
+ * now has a private copy (the caller owes vm_arch_shootdown(as) after
+ * dropping the lock: other threads may still translate to the shared frame),
+ * or -ENOMEM. */
+static int vm_cow_share_break_locked(struct addr_space *as, struct vm_region *r,
+                                     uint64_t a, uint64_t leaf) {
+#ifdef __x86_64__
+  uint64_t ph = vm_arch_leaf_phys(leaf);
+  if (!vm_cow_frame_shared(ph)) {
+    vm_arch_cow_clear(as, a, r->prot);
+    return 0;
+  }
+  uint64_t fr = frame_alloc();
+  if (!fr)
+    return -ENOMEM;
+  vm_frame_copy(fr, ph, FRAME_SIZE);
+  vm_arch_unmap(as, a); /* drops this AS's share (the frame stays the peer's) */
+  if (vm_arch_map(as, a, fr, r->prot, r->kind) != 0) {
+    frame_free(fr);
+    as->resident_frames--; /* the page is absent now; a refault zero-fills */
+    return -ENOMEM;
+  }
+  vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot,
+              (r->flags & VM_MAP_PRIVATE) != 0, VM_PUB_COPY, fr, 1, VM_PW_COW);
+  return 1;
+#else
+  (void)as; (void)r; (void)a; (void)leaf;
+  return 0;
+#endif
+}
+
 /* C1-pe: the shootdown a copy-on-write owes the other CPUs.  The page's old
  * leaf named the object's frame read-only; any CPU running a thread of this
  * AS may hold that translation and would keep reading the pre-write bytes
@@ -2337,6 +2526,20 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
          bytes the writer supplies -- legal, counted, never alarmed. */
       vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot, !shared,
                   VM_PUB_ZERO, fr, 0, VM_PW_TOUCH_ANON);
+    } else if (write && vm_touch_leaf_cow_locked(as, a)) {
+      /* C1-fork: a kernel write into a page shared copy-on-write since a
+         fork must land in this AS's own copy (vm_kwrite stores through the
+         leaf's frame). */
+      uint64_t leaf = 0;
+      (void)vm_arch_walk(as, a, &leaf);
+      int brc = vm_cow_share_break_locked(as, r, a, leaf);
+      spinlock_release_irqrestore(&vm_lock, fl);
+      if (brc < 0)
+        return -2;
+      if (brc > 0)
+        vm_arch_shootdown(as);
+      retouch = 0;
+      continue;
     } else if (write && r->obj && (r->flags & VM_MAP_PRIVATE) &&
                vm_touch_leaf_ro_locked(as, a)) {
       /* so-vm lane A: a kernel-side write into a MAP_PRIVATE file page must
@@ -2475,6 +2678,7 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
   if (!vm_range_is_user(as, va, (uint64_t)len))
     return -1;
 
+  int kw_retry = 0;
   for (int i = 0; i < len;) {
     uint64_t a = va + (uint64_t)i;
     uint64_t page = a & ~(uint64_t)(FRAME_SIZE - 1);
@@ -2495,6 +2699,17 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
       spinlock_release_irqrestore(&vm_lock, fl);
       return -1; /* peer unmapped/protected between touch and lock */
     }
+#ifdef __x86_64__
+    /* C1-fork: a fork re-shared the page between the touch and this lock
+       (another thread forked): break the share again, then retry. */
+    if (vm_arch_leaf_cow(leaf)) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      if (++kw_retry > 8)
+        return -1;
+      continue;
+    }
+#endif
+    kw_retry = 0;
     uint64_t pa = vm_arch_leaf_phys(leaf) + (a & (FRAME_SIZE - 1));
 #ifdef __x86_64__
     /* P6 (docs/gpu-abi.md §10.6): a mapped GPU blob lives in the device's
@@ -3042,6 +3257,29 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
          with in=PROT (docs/rimworld-launch-log.md §19.6/§20).  The budget
          below stays for the one case that makes no progress, a present
          writable leaf (stale TLB). */
+#ifdef __x86_64__
+  /* C1-fork: a write to a page shared copy-on-write by fork (any region:
+     anonymous, or an object region's private copy).  Must come before the
+     [VMFIX] prot-up below, which would hand the shared frame out writable. */
+  if (write) {
+    uint64_t leaf = 0;
+    if (vm_arch_walk(as, a, &leaf) == 0 && vm_arch_leaf_cow(leaf)) {
+      int brc = vm_cow_share_break_locked(as, r, a, leaf);
+      if (brc < 0) {
+        spinlock_release_irqrestore(&vm_lock, fl);
+        if (why)
+          *why = "OOM";
+        return 1;
+      }
+      vm_fault_resolved(as);
+      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_arch_flush_va(as, a);
+      if (brc > 0)
+        vm_arch_shootdown(as); /* C1-pe: readers of the shared frame */
+      return 0;
+    }
+  }
+#endif
   if (write && r->obj && (r->flags & VM_MAP_PRIVATE)) {
     uint64_t leaf = 0;
     if (vm_arch_walk(as, a, &leaf) == 0 && !vm_arch_leaf_writable(leaf)) {
@@ -5186,6 +5424,25 @@ static int vm_page_zero(uint64_t x) {
   return 1;
 }
 
+/* C1-fork: share the parent's private page at `a` copy-on-write with the
+   child (caller holds vm_lock).  1 = shared (the parent's leaf is now
+   read-only + COW, the count includes the child), 0 = copy it instead (ARM,
+   an object/SHARED leaf, the table is full). */
+static int vm_clone_cow_share(struct addr_space *src, uint64_t a, uint64_t phys) {
+#ifdef __x86_64__
+  if (vm_cow_frame_get(phys) != 0)
+    return 0;
+  if (vm_arch_cow_mark(src, a) != 0) {
+    (void)vm_cow_frame_put(phys);
+    return 0;
+  }
+  return 1;
+#else
+  (void)src; (void)a; (void)phys;
+  return 0;
+#endif
+}
+
 /* C1-fork: the last clone's lock batches and its longest single hold (the
    [FORKT] row in process.c; diagnostics only, written by the cloning CPU). */
 uint64_t vm_clone_stat_batches, vm_clone_stat_max_us;
@@ -5314,6 +5571,7 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   vm_clone_stat_batches = 0;
   vm_clone_stat_max_us = 0;
 #define CLONE_SCAN 512  /* page steps (absent spans count one) per hold */
+  int src_marked = 0; /* a parent leaf became read-only: shoot its CPUs down */
   int i = 0;
   while (i < src->nr) {
     struct vm_region r;
@@ -5369,6 +5627,7 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
         uint16_t mprot = r.prot;
         uint64_t phys;
         int fresh = 0; /* phys is a frame this clone allocated */
+        int cow = 0;   /* phys is the parent's frame, shared copy-on-write */
         if (r.obj) {
           uint64_t objfr = vm_object_peek_locked(r.obj, (a - r.base) + r.obj_off);
           uint64_t lphys = vm_arch_leaf_phys(leaf);
@@ -5384,6 +5643,10 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
               break;
             }
             mkind = VMK_SHARED;
+          } else if (vm_clone_cow_share(src, a, lphys)) {
+            phys = lphys; /* the parent's private copy, now shared COW */
+            cow = 1;
+            src_marked = 1;
           } else {
             phys = frame_alloc(); /* private COW copy of the parent's page */
             if (!phys) {
@@ -5395,8 +5658,12 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
           }
         } else if (r.kind == VMK_FB) {
           phys = vm_arch_leaf_phys(leaf); /* kernel framebuffer frame(s) */
+        } else if (vm_clone_cow_share(src, a, vm_arch_leaf_phys(leaf))) {
+          phys = vm_arch_leaf_phys(leaf); /* shared copy-on-write */
+          cow = 1;
+          src_marked = 1;
         } else {
-          phys = frame_alloc(); /* D10 resident-copy fork */
+          phys = frame_alloc(); /* D10 resident-copy fork (ARM; COW table full) */
           if (!phys) {
             err = 2;
             break;
@@ -5407,9 +5674,15 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
         if (vm_arch_map(dst, a, phys, mprot, mkind) != 0) {
           if (fresh)
             frame_free(phys);
+          if (cow)
+            (void)vm_cow_frame_put(phys); /* the child never got its share */
           err = 3;
           break;
         }
+#ifdef __x86_64__
+        if (cow)
+          (void)vm_arch_cow_mark(dst, a); /* the child's leaf: read-only + COW */
+#endif
         dst->resident_frames++;
         if (dst->resident_frames > dst->peak_frames)
           dst->peak_frames = dst->resident_frames;
@@ -5440,10 +5713,17 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   }
 #undef CLONE_BATCH
 #undef CLONE_SCAN
+  /* C1-fork: the parent's shared leaves went read-only (local invlpg each);
+     other threads of the parent may still hold writable translations, and a
+     store through one after the child started would reach the child. */
+  if (src_marked)
+    vm_arch_shootdown(src);
   return 0;
 
 fail:
   /* The caller tears `dst` down (it may be a process PCB's AS). */
+  if (src_marked)
+    vm_arch_shootdown(src);
   ASCLONE("fail", i, 0);
   #undef ASCLONE
   return -1;
