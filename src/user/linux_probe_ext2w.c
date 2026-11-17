@@ -215,11 +215,11 @@ static void bench(void) {
     ck(bad == 0, "B3 rand4k rewrites read back (touched = new, rest = old)", bad);
   }
 
-  /* B4: fsync after every 4 KiB write, 512 KiB */
+  /* B4: fsync after every 4 KiB write, 2 MiB */
   {
-    const uint64_t SZ = 512u << 10;
+    const uint64_t SZ = 2u << 20;
     us = write_file(P("w/fsync.bin"), 4, SZ, 4096, 1, 0, 0, &err);
-    ck(err == 0, "B4 fsync-per-write 128 x (write 4 KiB + fsync)", err);
+    ck(err == 0, "B4 fsync-per-write 512 x (write 4 KiB + fsync)", err);
     perf("fsync4k", SZ, SZ / 4096, us);
     ck(check_file(P("w/fsync.bin"), 4, SZ) == 0, "B4 fsync.bin reads back", 0);
   }

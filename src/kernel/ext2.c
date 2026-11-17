@@ -2394,14 +2394,19 @@ static int commit_pass(struct ext2_fs *fs, uint32_t n, int pass) {
   return write_imgs(fs, fs->ordv2, imgv, m);
 }
 
-static int ext2_commit(struct ext2_fs *fs) {
+static int ext2_commit_sb(struct ext2_fs *fs, int sb_lazy);
+static int ext2_commit(struct ext2_fs *fs) { return ext2_commit_sb(fs, 0); }
+
+static int ext2_commit_sb(struct ext2_fs *fs, int sb_lazy) {
   if (fs->in_commit) return 0;
   uint32_t n = 0;
   for (uint32_t i = 0; i < fs->ncache; i++) {
     struct ext2_cbuf *c = &fs->cache[i];
     if (c->valid && c->dirty) fs->ordv[n++] = i;
   }
-  if (n == 0 && !(fs->sb_dirty && !fs->ro)) return 0;
+  int want_sb = fs->sb_dirty && !fs->ro &&
+                (!sb_lazy || fs->feat_ro != fs->feat_ro_disk);
+  if (n == 0 && !want_sb) return 0;
   fs->in_commit = 1;
   fs->st_commits++;
   int rc = 0;
@@ -2435,7 +2440,7 @@ static int ext2_commit(struct ext2_fs *fs) {
     struct ext2_cbuf *c = &fs->cache[fs->ordv[k]];
     if (rc == 0) mark_clean(fs, c);
   }
-  if (rc == 0 && fs->sb_dirty && !fs->ro) {
+  if (rc == 0 && want_sb) {
     uint8_t *s = fs->sb_raw;
     wr32(s + 12, fs->free_blocks);
     wr32(s + 16, fs->free_inodes);
@@ -2444,16 +2449,19 @@ static int ext2_commit(struct ext2_fs *fs) {
     wr32(s + 100, fs->feat_ro);
     fs->st_dev_writes++;
     fs->st_cmds++;
-    if (fs->dev.write(fs->dev.ctx, 2, s, 2) != 0)
+    if (fs->dev.write(fs->dev.ctx, 2, s, 2) != 0) {
       rc = -EIO;
-    else
+    } else {
       fs->sb_dirty = 0;
+      fs->feat_ro_disk = fs->feat_ro;
+    }
   }
   fs->in_commit = 0;
   return rc;
 }
 
 int ext2_flush(struct ext2_fs *fs) { return ext2_commit(fs); }
+int ext2_flush_file(struct ext2_fs *fs) { return ext2_commit_sb(fs, 1); }
 
 int ext2_writeback_early(struct ext2_fs *fs) {
   if (fs->in_commit || fs->ro) return 0;
@@ -2545,6 +2553,7 @@ int ext2_mount(struct ext2_fs *fs, const struct ext2_dev *dev, int force_ro) {
     fs->feat_incompat = rd32(s + 96);
     fs->feat_ro = rd32(s + 100);
   }
+  fs->feat_ro_disk = fs->feat_ro;
   if (fs->feat_incompat & ~(uint32_t)EXT2_INCOMPAT_SUPP) return -ENOTSUP;
   fs->filetype = (fs->feat_incompat & EXT2_FEATURE_INCOMPAT_FILETYPE) != 0;
   fs->ro = force_ro || (fs->feat_ro & ~(uint32_t)EXT2_RO_COMPAT_SUPP) != 0;

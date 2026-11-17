@@ -128,6 +128,7 @@ struct ext2_fs {
   uint32_t feat_compat, feat_incompat, feat_ro;
   int filetype;           /* INCOMPAT_FILETYPE: dirents carry a type byte */
   int sb_dirty;
+  uint32_t feat_ro_disk;  /* RO_COMPAT as last written to the superblock */
   uint32_t alloc_hint;    /* next-fit goal for block allocation */
   uint8_t sb_raw[1024];
 
@@ -204,6 +205,11 @@ int ext2_mount(struct ext2_fs *fs, const struct ext2_dev *dev, int force_ro);
  * frees, the final bitmaps, the group descriptors, the superblock).  When it
  * returns 0 the disk holds exactly the cached state.  0 / -EIO. */
 int ext2_flush(struct ext2_fs *fs);
+/* The same commit for fsync/fdatasync: the superblock is written only when
+ * its feature bits changed.  Its free counts are hints e2fsck does not grade
+ * (rc 0 with them stale); the next ext2_flush writes them.  One command less
+ * per fsync. */
+int ext2_flush_file(struct ext2_fs *fs);
 
 /* cp/ext2w: write back only what may go early -- regular-file data and
  * blocks allocated since the last commit (never metadata an on-disk

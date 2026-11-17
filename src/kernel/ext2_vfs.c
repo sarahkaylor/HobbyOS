@@ -130,6 +130,7 @@ static inline uint64_t e2w_tsc(void) {
 #endif
 }
 static uint64_t g_pw_n, g_pw_pf, g_pw_lock, g_pw_core, g_pw_note, g_pw_unl;
+static uint64_t g_sy_n, g_sy_obj, g_sy_commit, g_sy_cmds; /* ext2v_sync profile */
 
 static void e2w_row(const char *why) {
   static uint32_t nrows;
@@ -162,6 +163,16 @@ static void e2w_row(const char *why) {
   kl_i(&kl, (long)g_fs.st_ra);
   kl_s(&kl, " nopre=");
   kl_i(&kl, (long)g_fs.st_nopre);
+  if (g_sy_n) {
+    kl_s(&kl, " sync_n=");
+    kl_i(&kl, (long)g_sy_n);
+    kl_s(&kl, " kcyc/sync obj=");
+    kl_i(&kl, (long)(g_sy_obj / g_sy_n / 1000));
+    kl_s(&kl, " commit=");
+    kl_i(&kl, (long)(g_sy_commit / g_sy_n / 1000));
+    kl_s(&kl, " cmds/sync*10=");
+    kl_i(&kl, (long)(g_sy_cmds * 10 / g_sy_n));
+  }
   if (g_pw_n) {
     kl_s(&kl, " write_n=");
     kl_i(&kl, (long)g_pw_n);
@@ -535,17 +546,33 @@ int ext2v_ftruncate(struct file *f, int64_t len) {
   return rc;
 }
 
+/* fsync/fdatasync: the whole cache is committed (a superset of the file),
+   but the superblock's free counts wait for the next full commit. */
 int ext2v_fsync(struct file *f) {
   (void)f;
-  return ext2v_sync();
+  if (!g_mounted) return 0;
+  lock();
+  (void)ext2_obj_writeback_locked(0);
+  (void)ext2_obj_reap_locked();
+  int rc = ext2_dirty(&g_fs) ? ext2_flush_file(&g_fs) : 0;
+  g_ncommit_sync++;
+  if (!ext2_dirty(&g_fs)) g_dirty_since = 0;
+  unlock_flush(1); /* a still-dirty superblock: the flusher writes it */
+  return rc;
 }
 
 int ext2v_sync(void) {
   if (!g_mounted) return 0;
   lock();
+  uint64_t t0 = e2w_tsc();
   (void)ext2_obj_writeback_locked(0); /* cp/ext2b: mapped stores too */
   (void)ext2_obj_reap_locked();
+  uint64_t t1 = e2w_tsc(), c0 = g_fs.st_cmds;
   int rc = commit_locked(&g_ncommit_sync);
+  g_sy_n++;
+  g_sy_obj += t1 - t0;
+  g_sy_commit += e2w_tsc() - t1;
+  g_sy_cmds += g_fs.st_cmds - c0;
   if (!ext2_dirty(&g_fs)) g_dirty_since = 0;
   unlock();
   e2w_row("sync");

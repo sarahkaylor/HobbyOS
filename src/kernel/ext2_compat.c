@@ -349,7 +349,7 @@ static int e2c_ftruncate(struct process *p, struct trap_frame *tf) {
 
 static int e2c_fsync(struct process *p, struct trap_frame *tf) {
   if (file_fd_is_ext2(p, (int)l_argi(tf, 0)) != 1) return 0; /* l_misc_fsync */
-  return ret(tf, ext2v_sync());
+  return ret(tf, ext2v_fsync(0)); /* cp/ext2w: superblock counts deferred */
 }
 
 /* fdatasync: ext2 flushes; every other open fd has no write-back cache (the
@@ -357,7 +357,7 @@ static int e2c_fsync(struct process *p, struct trap_frame *tf) {
 static int e2c_fdatasync(struct process *p, struct trap_frame *tf) {
   int k = file_fd_is_ext2(p, (int)l_argi(tf, 0));
   if (k < 0) return ret(tf, -EBADF);
-  return ret(tf, k ? ext2v_sync() : 0);
+  return ret(tf, k ? ext2v_fsync(0) : 0);
 }
 
 /* cp/pfx: sync(2) and syncfs(2).  ext2 is the only filesystem here with
