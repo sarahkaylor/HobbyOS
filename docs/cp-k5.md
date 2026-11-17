@@ -37,7 +37,8 @@ Measured on strix (`nm -S`, intel MODE=test): `proc_table` went from
 0x4000. `.bss` and `__stack_top` are unchanged (0x766a7784 / 0x76727790), and
 so is the 24.8 MiB headroom: the shrinks and growths net to about −360 KiB,
 which the section's 2 MiB alignment absorbs. The unit-test kernel ends at
-`__stack_top` 0x76b3a790.
+`__stack_top` 0x76b3a790. These figures are from before the cyberpunk merge and
+the P8 scope; for the merged tree see §8.
 
 Frame cost at run time: the fd tables take one 32 MiB block at boot (8 MiB of it used). Each file chunk is
 80 KiB, each pipe chunk 60 KiB, each epoll instance 64 KiB the first time it
@@ -244,3 +245,37 @@ BSS: `HO_ENV_LEN` 2048 grows `struct process` and `spawn_ex_pool` by
 - Main's AF_INET loopback `file_accept` fd-install loop honours
   RLIMIT_NOFILE. Its full-table answers were already EMFILE and ENFILE.
 - `COMPAT_MAX_ARGV` is 128 (main) and `COMPAT_MAX_ENV` is 128 (this lane).
+
+### fd-install races (found on the merged tree)
+
+The P8 commit moved `file_pipe`'s fd scan in front of the file and pipe
+allocation, and the scan holds no lock. That widened a race that was already
+there: two threads creating pipes at once could be handed the same fd
+numbers.
+
+- **Symptom:** thrstorm on the merged tree stalled. Wine clients printed
+  `read: Bad file descriptor` on their reply fds, and the server hit EPIPE
+  (`thrstorm-merged-regression.txt`).
+- **Probe:** fdscale's new row **F11 pipe_race** (16 threads creating, using
+  and closing pipes, socketpairs and dups) hung on that kernel
+  (`fdscale-f11-regression.txt`).
+- **Fix:**
+  - `fd_install2` finds and fills both fds under `fdtab_lock`, for pipe and
+    socketpair.
+  - `fs_msg_install_gfd` (SCM_RIGHTS receive; ntdll's fd cache receives
+    concurrently) and `file_dup_min` (dup, F_DUPFD) now scan and install
+    under the same lock. `file_dup_min` takes its reference first and gives
+    it back with `fs_close_global` if the table is full.
+- **Result:** F11, thrstorm and fdscale all pass (`fdscale-final.txt`,
+  `thrstorm-final.txt`).
+- **Still unlocked:** the scans in eventfd, timerfd, epoll and memfd
+  creation, and the native `file_connect`/accept paths. These are older and
+  narrower windows; they should move to `fd_install` when someone next
+  touches them.
+
+### Facts from C4-x3 (no change here)
+
+- `K_IPC_CTRL_MAX` (SCM_RIGHTS control-buffer cap) is untouched by this lane;
+  the MSG_CTRUNC work is in the fd-install loops, not the control-size path.
+- The ~50 ms a child's address space outlives `waitpid` was not looked at;
+  nothing in the fd/rusage work changes when the AS is released.
