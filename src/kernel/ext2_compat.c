@@ -352,12 +352,14 @@ static int e2c_fsync(struct process *p, struct trap_frame *tf) {
   return ret(tf, ext2v_fsync(0)); /* cp/ext2w: superblock counts deferred */
 }
 
-/* fdatasync: ext2 flushes; every other open fd has no write-back cache (the
-   same answer fsync gives them).  A closed fd is EBADF. */
+/* fdatasync: ext2 flushes.  Every other fd is declined (return 0) to
+   linux_compat_fd.c's l_fd_fsync, which flushes a FAT16 file's MAP_SHARED
+   pages (main's GB-308, merged by cp-sync) and answers 0 for the rest, the
+   same answer fsync gives them.  A closed fd is EBADF there too. */
 static int e2c_fdatasync(struct process *p, struct trap_frame *tf) {
   int k = file_fd_is_ext2(p, (int)l_argi(tf, 0));
-  if (k < 0) return ret(tf, -EBADF);
-  return ret(tf, k ? ext2v_fsync(0) : 0);
+  if (k != 1) return 0; /* not ext2: l_fd_fsync */
+  return ret(tf, ext2v_fsync(0)); /* cp/ext2w: superblock counts deferred */
 }
 
 /* cp/pfx: sync(2) and syncfs(2).  ext2 is the only filesystem here with

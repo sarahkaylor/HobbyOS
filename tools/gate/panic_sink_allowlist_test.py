@@ -37,7 +37,7 @@ ALLOW = {
 
     # ---- non-returning diagnostics: they end in halt/reboot by construction ----
     "src/kernel/ssp.c": (3, "SEC-4 canary panic: __stack_chk_fail/ssp_fail_c never returns; two call sites (x64 panic-claimed record, arm branch) + the declaration; a smasher may hold uart_lock (GB-246)"),
-    "src/kernel/arch/x64/trap.c": (341, "fatal dump, stall watchdog, spinlock scream, KPFLOOP, GB-146-A [BADVEC] record + DR0 writer watchpoint + pid-keyed stamp lookup, GB-234 armed-slot set, GB-238 live DR0/DR7 + per-CPU last-#DB timeline, GB-233 [TORNFRAME-STAMP] handoff, GB-101 [USERFAULT] no-process classifier, GB-244 [BADVEC] writer-row helper, GB-247 not-a-frame guard + one-line report (314->326->328->333), P1 [IDMAP-TRIP] tag inside the claimed kernel-fault record (333->341)"),
+    "src/kernel/arch/x64/trap.c": (348, "fatal dump, stall watchdog, spinlock scream, KPFLOOP, GB-146-A [BADVEC] record + DR0 writer watchpoint + pid-keyed stamp lookup, GB-234 armed-slot set, GB-238 live DR0/DR7 + per-CPU last-#DB timeline, GB-233 [TORNFRAME-STAMP] handoff, GB-101 [USERFAULT] no-process classifier, GB-244 [BADVEC] writer-row helper, GB-247 not-a-frame guard + one-line report (314->326->328->333), P1 [IDMAP-TRIP] tag inside the claimed kernel-fault record (333->341), GB-308 per-CPU kernel_stack rows printed before the not-a-frame halt (main, merged by cp-sync; 341->348)"),
     "src/kernel/arch/x64/locks.c": (13, "spinlock scream paths: printed while the lock is wedged"),
     "src/kernel/arch/arm/locks.c": (36, "same, arm"),
 

@@ -1069,6 +1069,26 @@ Two facts shape this wave:
 | **C6-venus** | P6: the host recipe (`tools/cp/host-venus.sh`: QEMU 10.2.1 `virtio-gpu-gl` with `venus=on,blob=on,hostmem=`, `/usr/libexec/virgl_render_server`, memfd-backed guest RAM, rendering on the RX 9070 XT `renderD129`, headless, never the user's display). The kernel M2 transport (`CONTEXT_INIT`, `RESOURCE_BLOB`, the host-visible shm region mapped into user space with the right cache attributes, blob create/map/unmap, ring fences completed from the IRQ path). The `docs/gpu-abi.md` M2 amendment (F3). Mesa `vn_renderer_hobbyos.c` with `-Dvulkan-drivers=virtio`. Probes: Linux `vkcube` on Venus, then the P5 D3D12 triangle on Venus, and a fence-latency benchmark. Host recipe and Mesa backend first; the kernel after C0-sync lands. Gate P6 | `src/kernel/virtio_gpu_3d.c`, `src/kernel/gpu_abi.c`, `src/include/gpu_abi.h`, `docs/gpu-abi.md`, `tools/cp/venus/`, `tools/cp/host-venus.sh`, the Mesa Venus build under `tools/mesa/` | the user's main checkout; the GUI session, Steam, `/mnt/fast` |
 | **C8-game** | P8 scouting on lavapipe: the launch recipe (`tools/cp/p8/`): the game over NFS from `/srv/nfs/cp-game`, the prefix on ext2 preseeded from `~/cp/game-profile`, `--launcher-skip`, the vkd3d-proton/DXVK overrides and `mscoree,mshtml=`, `VKD3D_SHADER_CACHE_PATH`/`MESA_SHADER_CACHE_DIR` on ext2, the game's directory read-only. Boot it, and push it as far as it goes. Record every stop in order (fault rows, the missing syscall/ioctl, the Wine/vkd3d log line) and fix it, or hand it over: fix in your own files; for files another lane owns, write a minimal reproducing probe plus a proposed diff and report it. Never automate the first-run screens. Gate: P8's main menu if it gets there; otherwise a ranked list of blockers, each with evidence, and the furthest screendump | `tools/cp/p8/`, `src/user/cp/p8*`, `docs/cp-p8.md` | game files in git; `/mnt/fast`; Steam |
 
+**C0-sync landed (2026-11-17, cp-sync 7f79b1c6 = merge f752acca + 5 fix-ups; `docs/cp-sync.md`).** Full batch,
+Gate P2, `pfx_gate`, Gate P4 and Gate P5 pass at parity with base5. Two of main's auto-merged changes
+broke this tree with no conflict marker: munmap write-back through a physical address (kernel page fault on
+the first `munmap`), and compat fsync routing that dropped main's FAT16 mapping flush. Both are fixed and
+covered by probes. Resolutions: `VM_OBJ_MAX_BYTES` 4 GiB (main's JDK heap); cyberpunk's `vfs_lock`
+manager for `F_SETLKW`; main's `file_read_user` without its bounce buffer (a 176 MiB NFS read runs at
+404–448 MB/s instead of 282). LibreOffice is staged on `disk.img` only when the X prefix exists
+(`LO_ON_DISK=` turns it off). Not run: OpenJDK `sdktest`/UI gates (no JDK 27 tree or host `javac` on
+strix) and the Doom ELF (its build downloads Alpine packages).
+
+**C8-game first boots (2026-11-17, branch `cp-game`, `docs/cp-p8.md`):** the game loads modules for
+≤ 42 s, then dies before its first window. The wineserver fills its 256-entry fd table; HobbyOS `recvmsg`
+then returns EMFILE with SCM_RIGHTS still queued (Linux delivers the data and sets MSG_CTRUNC); Wine kills
+the client and the wineserver crashes in `grab_object(NULL)`. Handed to C1-k5: fd limits, SCM_RIGHTS
+truncation, ENFILE, the native→compat env cap (512 B / 24 entries, silently truncated), `fadvise64`, and
+optionally SIGKILL of a group whose leader has exited. Handed to C3-ext2w: an `ext2_lock` wedge when Wine
+processes start concurrently on the prefix (1 in 6 boots). Open, unowned: one corrupted read (`msvcrt.dll`
+importing an empty-named library) in 1 of 9 Wine boots, with a clean NFS log. On lavapipe, vkd3d-proton
+offers FL 11_1 by default; `VKD3D_FEATURE_LEVEL=12_0` creates an FL 12_0 device.
+
 Merge order: C0-sync first. Then, in whatever order they go green: C1-k5,
 C3-ext2w, C4-x3 and C6-venus (C1-k5 and C3-ext2w both touch `vm.c`/`fs.c` in
 different functions; the integrator resolves). C8-game's harness merges at the
@@ -1119,7 +1139,10 @@ approval through the integrator.
   the 1344-byte clamp), must pass `python3 tools/cp/nfs/rsize_scan.py` (also
   part of `make host_tests`) and the boot guard `tools/cp/nfs/rsize_guard.sh`
   on the merged tree before `cyberpunk` moves. Every integration gate batch runs
-  both. Since cp-nfs2 the boot guard also covers G6 (concurrent readers), G7
+  both. Since cp-sync, syscall-side reads go through `file_read_user` (it makes the destination
+  resident, then reads into it directly); do not reintroduce a bounce buffer, which costs about 35 % on
+  large NFS reads while both guards still pass. Merges from `main` must also run castscan and the
+  panic-sink allowlist, which main runs neither of. Since cp-nfs2 the boot guard also covers G6 (concurrent readers), G7
   (per-file windows), G8 (64-bit, large reads, stat times, symlinks) and G9
   (hard mount under injected reply loss). When a conflict lands in those files, keep the cp/nfs side; see
   `docs/cp-nfs.md` §6.

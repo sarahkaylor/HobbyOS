@@ -1,0 +1,31 @@
+# Gate P2 (tools/cp/run-wine-p2.sh), strix KVM.  lane = cp-sync; base = cyberpunk 949ba008 in ~/cp/lanes/sync-base
+## lane p2-run1 (WINE_EXPORT=/srv/nfs/cp-sync-p2)
+missing marker: W4 __except again after VEH removal
+missing marker: W5 QueryPerformanceFrequency
+missing marker: W5 QueryPerformanceCounter monotonic x10000
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=9806)
+G2 winprobe.exe every marker + exit 0  : FAIL   ([P2] end winprobe status=0 ms=9300; 41 markers, 3 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=464; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=967)
+## lane p2-run2 (WINE_EXPORT=/srv/nfs/cp-sync-p2)
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=8372)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=8113; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=1136; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=1036)
+## base p2-base1 (WINE_EXPORT=/srv/nfs/cp-sync-base-p2)
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=8225)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=7739; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=318; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=1033)
+
+# run1's three missing rows: printed, but spliced into a kernel [SIGDUMP]/[SGPR]/[STK] dump written by two CPUs at once after winprobe's third expected AV (serial lines 21858-21870 of run1).  Every run has the same expected faults: SIGDUMP count lane run1 3+3, base 4; [SFX] MISMATCH delta=-1808 rows on both trees.  The same rows are intact in run1's C:\ span and in run2.
+## run1 serial around the splice
+[SFX] MISMATCH pid=184 gen=27 planted=0x0x7FFFFE1FFD10 restored=0x0x7FFFFE1FF600 delta=-1808
+[WP] PASS W4 vectored handler resumes after #DE (17494)
+[WP] PASS W4 RemoveVectoredExceptionHandler (0)
+[KERNEL] pid=184 (winprobe.exe) memory fault VA=0x0000000000000000 PC=0x00000001400014D2 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE1FFD10 live=1 inH=0 cr3frame=0x000000028D942000 asroot=0x000000028D94
+[SIGDUMP] pid=184 tgid=184 nm=winprobe.exe rip=0x00000001400014D2 rsp=0x00007FFFFE1FFD10 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x00000000000000 0 0C
+S[TSKG cPpRu]2 :r a0xx=000x00000000000070000060a0300f0e0 00x 0r0b0x=000x00000070000060a0305020 000x000010 0r0c0x0=007x000060a0305020 000x000000000000100 7r0d0x6=0ax305020 000x00000000000000000700006
+a[3SfGeP R0]x 0r0s0i0=000x00070000076FaF3F5F2E 02x2050E01000 0r0di0=700x0050b090c71F F0FxF0F0D06000D00080 7r0b0p6=a03xf0e0 00x0070F0F0F0F0E010F7F0D0960a 3rf8e= 00xx000000000000000070000060a0305020 0
+x[0S0G0P0R0]0 0r097=000x2030604087F F0xF0FE000F0F0A0A080 7r01006=a03xf0e0 000x000000000000000070000361a 3r5121 =00xx0000000000000070000060a0305022 002x 0r01020=0000x0070000060a0305020 000x00000000000
+0[0SG70P0R6]a 3r5123=
