@@ -1,0 +1,22 @@
+HobbyOS xserver patch (lane C4-x3, docs/cp-x3.md).
+Xext/shm.c: MIT-SHM access check on HobbyOS.  There are no peer
+credentials on local sockets (NO_LOCAL_CLIENT_CRED) and one identity (uid 0),
+so shm_access() grants every segment, as Linux does for uid 0.
+
+--- a/Xext/shm.c
++++ b/Xext/shm.c
+@@ -314,6 +314,14 @@
+     int uidset = 0, gidset = 0;
+     LocalClientCredRec *lcc;
+ 
++#ifdef __hobbyos__
++    /* HobbyOS has one identity (uid/gid 0) and no peer credentials on its
++     * local sockets (NO_LOCAL_CLIENT_CRED), so GetLocalClientCreds always
++     * fails and the "everyone else" bits below would refuse every segment a
++     * client created 0600/0700 (winex11: IPC_CREAT | 0700).  Every client is
++     * uid 0 here, and uid 0 always gets access. */
++    return 0;
++#endif
+     if (GetLocalClientCreds(client, &lcc) != -1) {
+ 
+         if (lcc->fieldsSet & LCC_UID_SET) {

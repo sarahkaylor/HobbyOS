@@ -114,6 +114,11 @@ stage "$OUT/xstart.txt" ::/XSTART.TXT
 mcopy -o -i "$IMG" ::/X11/XSESSION.ENV "$OUT/xsession.env.orig" >/dev/null 2>&1 || : > "$OUT/xsession.env.orig"
 { grep -v '^HB_SECOND_SCREEN=' "$OUT/xsession.env.orig"; echo "HB_SECOND_SCREEN=0"; } > "$OUT/xsession.env"
 stage "$OUT/xsession.env" ::/X11/XSESSION.ENV
+# cp/x3: name the X server this run boots (the tree's own; x11-staged keeps it
+# current with third_party/x11), so evidence never depends on a stale build dir.
+rm -f "$OUT/XHOBBY.disk"
+mcopy -o -i "$IMG" ::/XHOBBY.BIN "$OUT/XHOBBY.disk" >/dev/null 2>&1 &&
+  echo "== X server: the tree's ::/XHOBBY.BIN, sha256 $(sha256sum "$OUT/XHOBBY.disk" | cut -d' ' -f1)"
 
 OVMF_SRC=""
 for c in "$HOME/.local/share/OVMF/OVMF_CODE_4M.fd" /usr/share/OVMF/OVMF_CODE_4M.fd; do
@@ -133,6 +138,8 @@ echo "== the P4 rows"
 grep -aE '\[P4\]|\[RI\] (PASS|FAIL|phase|window|mode|modes|Change|restore|done)' "$OUT/serial.txt" | grep -av ' ps-' | head -80
 echo "== X server rows"
 grep -aE 'hobbyos: (one screen|two screens|randr)|Composite|XINERAMA' "$OUT/serial.txt" | head -20
+echo "== MIT-SHM rows (kernel [SHM]: a Wine process's shmget + XHOBBY's shmat of the same id)"
+grep -a '\[SHM\]' "$OUT/serial.txt" | head -24
 for f in "$OUT"/*.ppm; do
   [ -f "$f" ] && command -v convert >/dev/null && convert "$f" "${f%.ppm}.png" 2>/dev/null
 done

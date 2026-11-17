@@ -1,0 +1,71 @@
+# Full gate batch, POST-MERGE: cp-x3 809c7861 (cyberpunk 15ad4a35 merged), strix, ~/cp/lanes/x3-gates.sh (= base5-gates.sh, paths changed), LO_ON_DISK default (LibreOffice staged), run concurrently with 2 of this lane's Wine guests
+# parity reference: docs/cp-sync-evidence/batch-lane.txt (C0-sync) and base5
+tree 
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+fatcoh rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/x3)
+unit rc=1 Tests failed! Tests run:    453 Tests failed: 3  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 365 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+ALLDONE
+
+## exitgroup X7 (two concurrent exit_group callers reaped within 1 s): load-sensitive, not this lane
+batch (post-merge): [LP] FAIL X7 two concurrent exit_group callers x20 (2 bad, worst 1160 ms)
+batch (pre-merge):  [LP] FAIL X7 two concurrent exit_group callers x20 (5 bad, worst 2510 ms)
+lane pre-merge isolated run 1: [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 370 ms)
+lane post-merge isolated run 1: [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 340 ms)
+lane pre-merge isolated run 2: [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 400 ms)
+lane post-merge isolated run 2: [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 363 ms)
+BASE5 kernel under the same load: x3-base run 1: [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 369 ms) [LP] done rc=0 
+BASE5 kernel under the same load: x3-base run 2: [LP] FAIL X7 two concurrent exit_group callers x20 (6 bad, worst 1414 ms) [LP] done rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1) 
+BASE5 kernel under the same load: x3-base run 3: [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 291 ms) [LP] done rc=0 
+
+## unit: the batch row has a 3rd red, LOCKHEALTH irq-off budget (irqoff_max_us=61159 on cpu0, worst_lock=vm_lock) under host load; isolated rerun on the same tree:
+Tests failed!
+EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:214
+EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:244
+[LOCKHEALTH] blockhold=0 selflock=0 classerr=0 irqsave_proc=0 irqoff_max_us=3494 irqoff_total_us=1290916 reg_used=530 reg_dropped=0
+Tests run:    453
+Tests failed: 2

@@ -1,0 +1,25 @@
+# P5 + fullscr run 2 (tree cp-x3 984f3746 pre-merge), strix: VOID -- killed by hand after 3 x 300 s warm-up timeouts
+# cause: explorer.exe of the second Wine session died in Wine's PE loader: 'err:seh:NtRaiseException Unhandled exception code c0000005 addr 0x6ffffff7210d' = import_dll, dlls/ntdll/loader.c:1166 (ntdll at 0x6FFFFFF40000); with no explorer every winprobe client hung on the null driver. Same loader family as wine-faults-ab.txt; no [SHM] row in that process.
+1756: stop=[P5] winep5 launcher (C5-vk2)
+1777:[P5] mount 10.0.2.2:/srv/nfs/cp-x3-p5b -> /CP ok
+1779:[P5] begin wineboot : wineboot -i
+10037:[SHM] get pid=20 (wineboot.exe) a=0 b=0x30000 -> 256
+10038:[SHM] at pid=20 (wineboot.exe) a=256 b=0x1081653000 -> 196608
+10039:[SHM] at pid=3 (/XHOBBY.BIN) a=256 b=0x1080000000 -> 196608
+10040:[SHM] rmid pid=20 (wineboot.exe) a=256 b=0x0 -> 0
+17613:[P5] end wineboot status=0 ms=43040
+18236:[P5] quiesce after wineboot: extra=0
+18237:[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+18283:[P5] keepalive pid=110
+18284:[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+24294:[SFX] MISMATCH pid=162 gen=15 planted=0x0x7FFFFE1FEF90 restored=0x0x7FFFFE1FE880 delta=-1808
+24300:[X] 00e0:err:seh:NtRaiseException Unhandled exception code c0000005 flags 0 addr 0x6ffffff7210d
+36729:[P5] timeout winprobe01 after 300s: SIGKILL pid=112
+36734:[P5] end winprobe01 status=timeout ms=305242
+37171:[P5] begin winprobe02 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+48097:[P5] timeout winprobe02 after 300s: SIGKILL pid=178
+48101:[P5] end winprobe02 status=timeout ms=304385
+48235:[P5] begin winprobe03 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+59054:[P5] timeout winprobe03 after 300s: SIGKILL pid=180
+59058:[P5] end winprobe03 status=timeout ms=305028
+59150:[P5] begin winprobe04 : wine Z:\CP\P5\VK\vkcube.exe --winprobe

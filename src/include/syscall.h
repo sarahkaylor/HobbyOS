@@ -269,8 +269,17 @@
  * Both paths must be canonical absolute paths (see src/include/vfs_bind.h). */
 #define SYS_VFS_BIND      (105)
 
+/* cp/x3 (docs/cp-x3.md): System V shared memory for native processes
+ * (XHOBBY.BIN's MIT-SHM), one multiplexed row over the table the compat
+ * class's shmget/shmat/shmdt/shmctl use (src/kernel/linux_compat_shm.c).
+ *   SYS_SHM (op, a1, a2, a3): op 0 shmget(key, size, flg) -> id
+ *     1 shmat(id, addr, flg) -> addr   2 shmdt(addr) -> 0
+ *     3 shmctl(id, cmd, struct shmid_ds* (x86_64 Linux layout)) -> 0
+ *   all -> -errno on failure. */
+#define SYS_SHM           (106)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
  * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
-#define SYS_MAX           (105)
+#define SYS_MAX           (106)
 
 #endif /* SYSCALL_H */
