@@ -1,0 +1,120 @@
+# P8 stop 11 -- boots v15..v22 (C6-venus), strix 2026-11-17, Venus, -smp 8 -m 12288M, kernel = integ6 + 5f77dfd5
+
+## v15 v15-fps10
+== run-p8 gpu=venus phase=game run=v15-fps10 2026-11-17T04:43:11-06:00 host=sarahpc tree=/home/sarah/cp/lanes/
+[P8W] +    27.4 s  04:43:47  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   145.2 s  04:45:44  game process ended: [P8] end game status=11 ms=117301
+[P8W] +   180.9 s  04:46:20  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+== verdict: launcher-done
+[KERNEL] pid=96 (Cyberpunk2077.e) memory fault VA=0x0000000143059FC0 PC=0x0000000143059FC0 rw=rx in=PROT region=0x0000000142FF3000+0x0000000000910000 prot=1 kind=3 rsp=0x
+[X]  74.802:0134:0138:info:vkd3d-proton:dxgi_vk_swap_chain_init_frame_rate_limiter: Set frame rate limit to 10.0 FPS via environme
+
+## v16 v16-fps30
+== run-p8 gpu=venus phase=game run=v16-fps30 2026-11-17T04:43:11-06:00 host=sarahpc tree=/home/sarah/cp/lanes/
+[P8W] +    27.4 s  04:43:42  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   146.4 s  04:45:42  game process ended: [P8] end game status=11 ms=118519
+[P8W] +   182.2 s  04:46:17  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 2
+== verdict: launcher-done
+[KERNEL] pid=89 (Cyberpunk2077.e) memory fault VA=0x00000000000000F8 PC=0x00000001422CA324 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE2FF780 live=45 inH=0 cr3frame=0x00000
+[X]  73.158:0134:0138:info:vkd3d-proton:dxgi_vk_swap_chain_init_frame_rate_limiter: Set frame rate limit to 30.0 FPS via environme
+
+## v17 v17-timing
+== run-p8 gpu=venus phase=game run=v17-timing 2026-11-17T04:47:32-06:00 host=sarahpc tree=/home/sarah/cp/lanes
+[P8W] +    32.4 s  04:48:09  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +    62.9 s  04:48:40  game process ended: [P8] end game status=timeout ms=30194
+[P8W] +    97.8 s  04:49:15  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 2
+== verdict: launcher-done
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 50.00 ms max 60.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 50.00 ms max 60.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 50.00 ms max 60.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.00 ms max 59.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 50.00 ms max 102.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 407.00 ms max 1110.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 509.0 ms, tick 499 ms
+
+## v18 v18-timing-lvp
+== run-p8 gpu=lavapipe phase=game run=v18-timing-lvp 2026-11-17T04:47:32-06:00 host=sarahpc tree=/home/sarah/c
+[P8W] +    34.4 s  04:48:12  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +    65.0 s  04:48:42  game process ended: [P8] end game status=timeout ms=30464
+[P8W] +    99.7 s  04:49:17  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+== verdict: launcher-done
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 50.00 ms max 113.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 50.00 ms max 59.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 50.00 ms max 60.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.00 ms max 60.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 59.00 ms max 60.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 430.00 ms max 2149.00 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 500.0 ms, tick 500 ms
+
+## v19 v19-usclock
+== run-p8 gpu=venus phase=game run=v19-usclock 2026-11-17T04:49:17-06:00 host=sarahpc tree=/home/sarah/cp/lane
+[P8W] +    32.4 s  04:49:57  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+== verdict: 
+   +    32.4 s  04:49:57  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 49.94 ms max 58.61 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 49.89 ms max 59.85 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 51.98 ms max 60.09 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.15 ms max 60.05 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 50.47 ms max 110.02 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 459.74 ms max 1189.80 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 499.9 ms, tick 480 ms
+
+## v20 v20-usclock
+== run-p8 gpu=venus phase=game run=v20-usclock 2026-11-17T04:49:25-06:00 host=sarahpc tree=/home/sarah/cp/lane
+[P8W] +    32.4 s  04:50:02  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   141.3 s  04:51:51  title prompt 'PRESS ... TO CONTINUE' at s006-t000109: sent one Space (#1)
+[P8W] +   173.1 s  04:52:22  title prompt 'PRESS ... TO CONTINUE' at s008-t000140: sent one Space (#2)
+[P8W] +   189.0 s  04:52:38  main menu OCR at s009-t000156: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 49.91 ms max 53.99 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 49.83 ms max 59.98 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 50.16 ms max 79.08 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.12 ms max 59.90 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 59.75 ms max 80.52 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 379.51 ms max 1119.84 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 499.9 ms, tick 480 ms
+
+## v21 v21-usclock
+== run-p8 gpu=venus phase=game run=v21-usclock 2026-11-17T05:15:38-06:00 host=sarahpc tree=/home/sarah/cp/lane
+[P8W] +    33.4 s  05:16:20  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   126.5 s  05:17:53  title prompt 'PRESS ... TO CONTINUE' at s005-t000093: sent one Space (#1)
+[P8W] +   174.3 s  05:18:41  title prompt 'PRESS ... TO CONTINUE' at s008-t000140: sent one Space (#2)
+[P8W] +   190.3 s  05:18:57  main menu OCR at s009-t000156: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 49.97 ms max 59.08 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 49.93 ms max 50.04 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 59.95 ms max 60.03 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 55.46 ms max 104.47 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 59.86 ms max 60.04 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 269.76 ms max 1168.59 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 499.8 ms, tick 500 ms
+
+## v22 v22-usclock
+== run-p8 gpu=venus phase=game run=v22-usclock 2026-11-17T05:15:38-06:00 host=sarahpc tree=/home/sarah/cp/lane
+[P8W] +    33.4 s  05:16:20  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   142.4 s  05:18:09  title prompt 'PRESS ... TO CONTINUE' at s006-t000108: sent one Space (#1)
+[P8W] +   174.4 s  05:18:41  title prompt 'PRESS ... TO CONTINUE' at s008-t000140: sent one Space (#2)
+[P8W] +   189.3 s  05:18:56  main menu OCR at s009-t000155: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 49.99 ms max 67.20 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 49.92 ms max 50.01 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 59.99 ms max 60.03 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 52.46 ms max 87.45 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 50.15 ms max 60.67 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 329.19 ms max 1339.77 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 499.9 ms, tick 500 ms
+
+## reading (C6-venus)
+- v15/v16 VKD3D_FRAME_RATE=10/30 on the fixed fence-wake kernel: the limiter is set but has no effect (40-67 fps), and the fault recurs.
+- v17/v18 (p8caps timing rows, Venus and lavapipe): Sleep / SleepEx / event / waitable-timer waits are NOT short (50 ms waits take 50-60 ms),
+  but every QueryPerformanceCounter interval is a whole number of milliseconds: CLOCK_MONOTONIC (sys_gettime) was
+  timer_get_ms(), so the game's QPC (Wine: clock_gettime(CLOCK_MONOTONIC)) had 1 ms resolution, against ns on Linux (P0).
+- v19..v22: the monotonic clocks (1, 4, 6, 7) answer from timer_get_us() (the same TSC, microsecond resolution); QPC
+  intervals become 49.94 / 499.9 ms.  Result: v20, v21, v22 reach the MAIN MENU (launch -> menu ~156 s including
+  the harness's PRESS SPACE presses); v19 shows no fault in 25 min but sat on the title/loading screen (stopped by PID).
+  Before the change: 1 main menu (v7) in 13 Venus boots, every other boot died at stop 11.
+
+## gates on this kernel (venus-p8b, t3_linux_probe.sh under qemu-slot): clock, timers, futex_sig, exitgroup, hello, join -- all rc=0 [LP] done rc=0

@@ -3672,6 +3672,57 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
         kl_c(&kl, '\n'); kl_emit(&kl);
       }
     }
+#ifdef CP_XCMP
+    /* C6-venus (P8 stop 11): the game dies right after opening its input
+     * config XMLs (/r6/config/*.xml) on Venus only.  For those files, hash
+     * what this read returned and the same range read straight from the
+     * server (no cache), one bounded row per read. */
+    if (got > 0) {
+      const char *p = f->path;
+      int pl = 0, cfg = 0;
+      while (p[pl]) pl++;
+      for (int i = 0; i + 11 <= pl; i++)
+        if (p[i] == '/' && p[i + 1] == 'r' && p[i + 2] == '6' && p[i + 3] == '/' &&
+            p[i + 4] == 'c' && p[i + 5] == 'o' && p[i + 6] == 'n' && p[i + 7] == 'f' &&
+            p[i + 8] == 'i' && p[i + 9] == 'g' && p[i + 10] == '/') cfg = 1;
+      static int xcmp_rows;
+      if (cfg && pl > 4 && p[pl - 4] == '.' && p[pl - 1] == 'l' && xcmp_rows < 200) {
+        xcmp_rows++;
+        static uint8_t xb[4096];
+        static ylock_t xlk;
+        static int xlk_init;
+        if (!xlk_init) { ylock_init(&xlk); xlk_init = 1; }
+        unsigned long long h1 = 1469598103934665603ULL, h2 = h1;
+        const uint8_t *src = (const uint8_t *)buf;
+        for (int i = 0; i < got; i++) { h1 ^= src[i]; h1 *= 1099511628211ULL; }
+        long dgot = 0, mism = -1;
+        ylock_acquire(&xlk);
+        while (dgot < got) {
+          uint32_t w = (uint32_t)(got - dgot) > 4096 ? 4096 : (uint32_t)(got - dgot);
+          int g2 = nfs_read_file(m, &f->nfs.fh, f->nfs.cursor + (uint64_t)dgot, xb, w);
+          if (g2 <= 0) break;
+          for (int i = 0; i < g2; i++) {
+            h2 ^= xb[i]; h2 *= 1099511628211ULL;
+            if (mism < 0 && xb[i] != src[dgot + i]) mism = dgot + i;
+          }
+          dgot += g2;
+        }
+        ylock_release(&xlk);
+        struct kline kl; kl_init(&kl);
+        kl_s(&kl, "[XCMP] off="); kl_i(&kl, (long)f->nfs.cursor);
+        kl_s(&kl, " want="); kl_i(&kl, (long)want);
+        kl_s(&kl, " got="); kl_i(&kl, (long)got);
+        kl_s(&kl, " size="); kl_i(&kl, (long)f->nfs.size);
+        kl_s(&kl, " direct="); kl_i(&kl, dgot);
+        kl_s(&kl, " fnv=0x"); kl_hex(&kl, (unsigned long)h1);
+        kl_s(&kl, " dfnv=0x"); kl_hex(&kl, (unsigned long)h2);
+        kl_s(&kl, " first_diff="); kl_i(&kl, mism);
+        kl_s(&kl, " tid="); kl_i(&kl, cur ? (long)cur->pid : -1L);
+        kl_s(&kl, " "); kl_s(&kl, p);
+        kl_c(&kl, '\n'); kl_emit(&kl);
+      }
+    }
+#endif /* CP_XCMP */
     if (got > 0) f->nfs.cursor += (uint64_t)got;
     /* L76: sequential detection for the read-ahead window. */
     if (got > 0) {

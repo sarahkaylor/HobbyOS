@@ -1,0 +1,66 @@
+# P8 run5 -- the committed recipe with defaults: the guest wedged on ext2_lock during the warm-up (stop 6)
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cyberpunk 949ba008 + cp-game harness (tools/cp/p8)
+# generated 2026-11-17T00:29:09-06:00 from obj/cp-p8/run5 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=game run=run5 2026-11-17T00:21:47-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== p8caps.exe 77824 B sha256 4cf754caf2176809
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== game copy before: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy before: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== exports.sh: add /srv/nfs/cp-game ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: /home/sarah/cp/vk2-scratch/x2-xserver/XHOBBY.BIN (sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97) staged as ::/XHOBBY.BIN (scratch override, not committed)
+== data disk: a copy of /home/sarah/cp/lanes/game/obj/cp-p8/pfx-seeded.img
+== boot (deadline 1200s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  00:21:52  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] qemu pid 1745828
+[P8W] +     4.3 s  00:21:56  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +   305.7 s  00:26:57  STALL: no launcher/Wine row and no screen change for 300 s
+[P8W] +   307.0 s  00:26:59  verdict: stall; QEMU stopped, slot released; guests on the host now: 2
+== e2fsck -fn after the boot: rc=0 (cpdata: 1034/1048576 files (0.6% non-contiguous), 135257/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== game copy unchanged (count, bytes, newest mtime)
+== caches on ext2 after the boot (debugfs, sizes only)
+   /pfx/drive_c/vc              0 entries, 0 bytes
+   /mc                          0 entries, 0 bytes
+== verdict: stall
+== timeline:
+== exports.sh: remove /srv/nfs/cp-game ok (non-cp lines unchanged)
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  00:21:52  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
++     4.3 s  00:21:56  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++   305.7 s  00:26:57  STALL: no launcher/Wine row and no screen change for 300 s
++   307.0 s  00:26:59  verdict: stall; QEMU stopped, slot released; guests on the host now: 2
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] p8launch (C8-game) phase 2
+[P8] env entries=14 bytes=423 (HobbyOS keeps <= 512 bytes / 24 entries per process)
+[X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 86400
+[P8] keepalive pid=16
+[P8] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+
+
+## the wedge (serial tail: the last kernel rows; the serial log has no byte after them for the 300 s stall window)
+[KERNEL] Process 22: wineserver exited unexpectedly or gracefully.
+[EXITPC] pid=22 last_user_pc=0x10800EB146 code=0x2
+[KERNEL] Process 19: wineserver exited unexpectedly or gracefully.
+[EXITPC] pid=19 last_user_pc=0x10800EB146 code=0x2
+[YLOCK-STALL] site=ext2_lock lock=ext2_lock addr=0x7023957C pc=0x7 extra=0x100000 cpu=0
+[YLOCK-WEDGE] site=ext2_lock lock=ext2_lock addr=0x7023957C pc=0x7 extra=0x1 cpu=0
+[YLOCK-OWNER] ext2_lock pid=21 cpu=7 pcb_live=1 ost=3 osys=0
+  [YLOCK] f->lock held=1 owner_cpu=0 nwait=0 waiters=-
+  [YLOCK] f->lock held=1 owner_cpu=7 nwait=0 waiters=-

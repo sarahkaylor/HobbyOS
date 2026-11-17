@@ -1,0 +1,62 @@
+# P8 probe3 -- P8_PHASE=probe on integ5: E3/E5, S1-S3 pass, p8fdcount 600, K1/K2 still fail
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cp-game = integ5 efd3a765 merged + harness
+# generated 2026-11-17T03:01:08-06:00 from obj/cp-p8/probe3 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=probe run=probe3 2026-11-17T02:23:08-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: the tree's own XHOBBY.BIN, sha256 9b161eded42374e0
+== boot (deadline 900s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  02:24:14  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] qemu pid 3994630
+[P8W] +     4.3 s  02:24:19  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8W] +    16.3 s  02:24:31  launcher done: [P8] done
+[P8W] +    20.8 s  02:24:35  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 3
+== e2fsck -fn after the boot: rc=0 (cpdata: 11/1048576 files (0.0% non-contiguous), 77073/4194304 blocks)
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  02:24:14  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
++     4.3 s  02:24:19  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
++    16.3 s  02:24:31  launcher done: [P8] done
++    20.8 s  02:24:35  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 3
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] p8launch (C8-game) phase 3
+[X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+[P8] env entries=14 bytes=423 (HobbyOS keeps <= 512 bytes / 24 entries per process)
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] begin envprobe : /P8ENV.ELF
+[X] [P8ENV] E0 spawned with envc=14 bytes=423 last=VKD3D_FEATURE_LEVEL
+[X] [P8ENV] E1 child sees envc=40 bytes=1560 last=E39
+[X] [P8ENV] E1 execve env: 40/40 entries intact -> PASS
+[X] [P8ENV] E2 malformed entries: 0 -> PASS
+[P8] end envprobe status=0 ms=185
+[P8] begin envprobe40 : spawn_ex with 40 entries / 1560 bytes
+[X] [P8ENV] E3 spawned40 sees envc=41 bytes=1583 last=LD_LIBRARY_PATH
+[X] [P8ENV] E3 spawn_ex env: 40/40 entries intact -> PASS
+[P8] end envprobe40 status=0
+[X] [P8ENV] E4 malformed entries: 0 -> PASS
+[P8] fd headroom with no Wine running (cap 600):
+[P8] begin scmprobe : /P8SCM.ELF
+[X] [P8SCM] table filled with 1019 fds (stopped by errno 24)
+[X] [P8SCM] S1 recvmsg ret=4 errno=0 -> PASS
+[X] [P8SCM] S2 MSG_CTRUNC=1 fd_delivered=-1 -> PASS
+[X] [P8SCM] S3 second recvmsg ret=-1 errno=11 -> PASS
+[P8] begin killprobe : /P8KILL.ELF
+[X] [P8KILL] kill rc=-1; K1 reaped=0 after 10000 ms -> FAIL
+[X] [P8KILL] K2 status=0x0 signaled=0 sig=0 -> FAIL
+[P8] end killprobe status=0 ms=11193
+[P8] done
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+[P8] fd headroom with no Wine running (cap 600):
+[X] [P8FD] cap=600 opened=600 first_errno=0
+

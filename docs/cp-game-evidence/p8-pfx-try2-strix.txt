@@ -1,0 +1,115 @@
+# P8 pfx-try2 -- prefix boot with the short env; seeding left unconnected inodes (harness bug, fixed)
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cyberpunk 949ba008 + cp-game harness (tools/cp/p8)
+# generated 2026-11-17T00:24:36-06:00 from obj/cp-p8/pfx-try2 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=pfx run=pfx 2026-11-16T23:53:14-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: /home/sarah/cp/vk2-scratch/x2-xserver/XHOBBY.BIN (sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97) staged as ::/XHOBBY.BIN (scratch override, not committed)
+== boot (deadline 1800s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  23:53:17  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] qemu pid 1446924
+[P8W] +     5.3 s  23:53:22  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8W] +    51.4 s  23:54:08  wineboot -i ended: [P8] end wineboot status=0 ms=46483
+[P8W] +    73.6 s  23:54:30  sync done: [P8] sync done
+[P8W] +    73.6 s  23:54:30  launcher done: [P8] done
+[P8W] +    77.9 s  23:54:34  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+== e2fsck -fn after the boot: rc=0 (cpdata: 1024/1048576 files (0.2% non-contiguous), 130754/4194304 blocks)
+== seed: prefix user directory: users/root
+== settings: version 152; 36 keys checked (P0 list + Resolution), 0 differ
+   /graphics/presets/QuickPresets = "Custom"
+   /video/display/Resolution = "1280x720"
+   /video/display/WindowMode = "BorderlessWindowed"
+   /graphics/raytracing/RayTracing = false
+   /graphics/presets/ResolutionScaling = "Off"
+   /graphics/presets/TextureQuality = "Low"
+   /gameplay/misc/EnableTelemetry = false
+   /gameplay/misc/EnableMarketing = false
+== seeded files (sha256 read back from the image)
+   ok 14c27bb3c9f6451d        391 /pfx/drive_c/users/root/Saved Games/CD Projekt Red/Cyberpunk 2077/user.gls
+   ok e7b0dead904088b6        282 /pfx/drive_c/users/root/Saved Games/CD Projekt Red/Cyberpunk 2077/EnabledMods.json
+   ok 7b5b2d130e2ac25a        217 /pfx/drive_c/users/root/Saved Games/CD Projekt Red/Cyberpunk 2077/HDRUserSettings.json
+   ok 866b009ce54bb9df      68628 /pfx/drive_c/users/root/AppData/Local/CD Projekt Red/Cyberpunk 2077/UserSettings.json
+   ok 502694a5fd5e0638     147470 /pfx/drive_c/windows/system32/d3d12.dll
+   ok 0dfd690a39ef8361    6651918 /pfx/drive_c/windows/system32/d3d12core.dll
+   ok e3c1178eb7f0dd59    5414926 /pfx/drive_c/windows/system32/dxgi.dll
+   ok 0a203b6255c89343    7483406 /pfx/drive_c/windows/system32/d3d11.dll
+   ok dir /pfx/drive_c/vc
+   ok dir /mc
+== seed: done
+run-p8: e2fsck after seeding: cpdata: ********** WARNING: Filesystem still has errors **********
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  23:53:17  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
++     5.3 s  23:53:22  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
++    51.4 s  23:54:08  wineboot -i ended: [P8] end wineboot status=0 ms=46483
++    73.6 s  23:54:30  sync done: [P8] sync done
++    73.6 s  23:54:30  launcher done: [P8] done
++    77.9 s  23:54:34  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] p8launch (C8-game) phase 1
+[X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+[P8] env entries=13 bytes=398 (HobbyOS keeps <= 512 bytes / 24 entries per process)
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] begin envprobe : /P8ENV.ELF
+[X] [P8ENV] E0 spawned with envc=13 bytes=398 last=PATH
+[X] [P8ENV] E1 child sees envc=40 bytes=1560 last=E39
+[X] [P8ENV] E1 exec env: 40/40 entries intact -> PASS
+[X] [P8ENV] E2 malformed entries: 0 -> PASS
+[P8] end envprobe status=0 ms=89
+[P8] begin wineboot : wineboot -i
+[X] wine: created the configuration directory '/EXT/pfx'
+[X] 004c:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 004c:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 004c:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[X] 004c:err:ole:start_rpcss Failed to open RpcSs service
+[X] 0054:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 0054:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 0054:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[LCOMPAT] ENOSYS nr=29 name=wineboot.exe pid=22 rip=0x108018141E rdi=0x0
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffff990c0
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1FED38
+[X] wine: Unhandled page fault on read access to FFFFFFFFFFFFFFFF at address 00006FFFFFF990C0 (thread 0044), starting debugger...
+[X] 0044:err:seh:start_debugger Couldn't start debugger L"winedbg --auto 64 104" (2)
+[X] Read the Wine Developers Guide on how to set up winedbg or another debugger
+[X] 006c:err:setupapi:SetupDefaultQueueCallbackW copy error 1812 L"@C:\\windows\\system32\\drivers\\wineusb.sys,-1" -> L"C:\\windows\\inf\\wineusb.inf"
+[X] wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": c0000135
+[X] 002c:err:setupapi:do_file_copyW Unsupported style(s) 0x10
+[X] 00e4:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[X] 002c:err:setupapi:SetupDiInstallDevice Failed to start service L"winebth" for device L"ROOT\\WINE\\WINEBTH", error 1359.
+[X] 002c:err:setupapi:SetupDiInstallDevice Failed to control service L"winebth" for device L"ROOT\\WINE\\WINEBTH", error 1062.
+[X] 002c:err:setupapi:do_file_copyW Unsupported style(s) 0x10
+[X] 0110:err:setupapi:do_file_copyW Unsupported style(s) 0x10
+[X] 0110:err:setupapi:do_file_copyW Unsupported style(s) 0x10
+[X] 0128:err:winediag:getaddrinfo Failed to resolve your host name IP
+[X] 0128:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 0128:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[P8] end wineboot status=0 ms=46483
+[X] 0054:err:ole:start_rpcss Failed to start RpcSs service
+[X] 0158:err:rpc:I_RpcReceive we got fault packet with status 0x1c010003
+[P8] quiesce after wineboot: extra=0
+[P8] begin reg-crashdialog : wine reg add HKCU\Software\Wine\WineDbg /v ShowCrashDialog /t REG_DWORD /d 0 /f
+[X] 002c:err:winediag:getaddrinfo Failed to resolve your host name IP
+[X] 002c:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 002c:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 00a8:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[X] reg: The operation completed successfully
+[P8] end reg-crashdialog status=0 ms=9728
+[P8] quiesce after reg: extra=0
+[P8] begin sync : pfxsync
+[X] [PFX] sync rc=0 errno=0
+[P8] end sync status=0 ms=15
+[P8] sync done
+[P8] done
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+

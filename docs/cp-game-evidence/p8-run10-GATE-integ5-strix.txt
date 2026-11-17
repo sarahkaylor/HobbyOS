@@ -1,0 +1,567 @@
+# P8 run10 -- GATE P8: the main menu with the recipe as committed (OCR x3: NEW GAME, LOAD GAME, SETTINGS, CREDITS, QUIT GAME)
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cp-game = integ5 efd3a765 merged + harness (the recipe: caches on ext2)
+# generated 2026-11-17T03:01:08-06:00 from obj/cp-p8/run10 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=game run=run10 2026-11-17T02:49:21-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== p8caps.exe 77824 B sha256 ad6fc7aec1e39506
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== game copy before: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy before: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== exports.sh: add /srv/nfs/cp-game ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: the tree's own XHOBBY.BIN, sha256 9b161eded42374e0
+== data disk: a copy of /home/sarah/cp/lanes/game/obj/cp-p8/pfx-seeded.img
+== boot (deadline 5400s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  02:54:19  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] qemu pid 103945
+[P8W] +     4.3 s  02:54:24  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +    22.3 s  02:54:42  warm-up result: [P8] warm-up: display driver loaded
+[P8W] +    33.4 s  02:54:53  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +    33.5 s  02:54:53  baseline screendump 1920x1080 (desktop before the game's window)
+[P8W] +    94.6 s  02:55:54  first screen change after launch (45.5% of the screen differs from the baseline): s002-t000061
+[P8W] +   299.7 s  02:59:19  title prompt 'PRESS ... TO CONTINUE' at s015-t000266: sent one Space (#1)
+[P8W] +   346.5 s  03:00:06  title prompt 'PRESS ... TO CONTINUE' at s018-t000313: sent one Space (#2)
+[P8W] +   361.8 s  03:00:21  main menu OCR at s019-t000328: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   367.6 s  03:00:27  main menu OCR at s020-t000334: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   373.3 s  03:00:33  main menu OCR at s021-t000339: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   375.3 s  03:00:35  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 2
+== e2fsck -fn after the boot: rc=0 (cpdata: 1049/1048576 files (0.8% non-contiguous), 139645/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== game copy unchanged (count, bytes, newest mtime)
+== caches on ext2 after the boot (debugfs, sizes only)
+   /pfx/drive_c/vc              1 entries, 17684080 bytes
+   /mc                          0 entries, 0 bytes
+== verdict: main-menu
+== timeline:
+== exports.sh: remove /srv/nfs/cp-game ok (non-cp lines unchanged)
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  02:54:19  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
++     4.3 s  02:54:24  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    22.3 s  02:54:42  warm-up result: [P8] warm-up: display driver loaded
++    33.4 s  02:54:53  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    33.5 s  02:54:53  baseline screendump 1920x1080 (desktop before the game's window)
++    94.6 s  02:55:54  first screen change after launch (45.5% of the screen differs from the baseline): s002-t000061
++   299.7 s  02:59:19  title prompt 'PRESS ... TO CONTINUE' at s015-t000266: sent one Space (#1)
++   346.5 s  03:00:06  title prompt 'PRESS ... TO CONTINUE' at s018-t000313: sent one Space (#2)
++   361.8 s  03:00:21  main menu OCR at s019-t000328: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   367.6 s  03:00:27  main menu OCR at s020-t000334: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   373.3 s  03:00:33  main menu OCR at s021-t000339: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   375.3 s  03:00:35  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 2
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] p8launch (C8-game) phase 2
+[P8] env entries=14 bytes=423 (HobbyOS keeps <= 512 bytes / 24 entries per process)
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 86400
+[P8] keepalive pid=16
+[X] 002c:err:winediag:getaddrinfo Failed to resolve your host name IP
+[X] 002c:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 00a4:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[P8] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] [VK] idle: keepalive pid 32, desktop 0000000000010020, 86400 s
+[X] [VK] winprobe: CreateWindowEx -> 0000000000010056 in 110 ms (display driver loaded)
+[P8] end winprobe01 status=0 ms=2672
+[P8] warm-up: display driver loaded
+[P8] begin d3d12caps : wine Z:\CP\P8\p8caps.exe
+[X] [P8CAPS] start (C8-game)
+[X] [P8CAPS] module d3d12.dll      C:\windows\system32\d3d12.dll
+[X] [P8CAPS] module d3d12core.dll  C:\windows\system32\d3d12core.dll
+[X] [P8CAPS] module dxgi.dll       C:\windows\system32\dxgi.dll
+[X] info:  Game: p8caps.exe
+[X] info:  DXVK: v3.1.1
+[X] info:  Build: x86_64 gcc 16.2.0
+[X] info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x7ffffeb63b60
+[X] info:  Extension providers:
+[X] info:    Platform WSI
+[X] info:    OpenVR
+[X] info:  OpenVR: could not open registry key, status 2
+[X] info:  OpenVR: Failed to locate module
+[X] info:    OpenXR
+[X] info:  Enabled instance extensions:
+[X] info:    VK_KHR_get_surface_capabilities2
+[X] info:    VK_KHR_surface
+[X] info:    VK_KHR_surface_maintenance1
+[X] info:    VK_KHR_win32_surface
+[X] info:  Found device: llvmpipe (LLVM 21.1.8, 256 bits) (llvmpipe 26.2.6)
+[X] warn:  DxgiAdapter::QueryInterface: Unknown interface query
+[X] warn:  f0db4c7f-fe5a-42a2-bd62-f2a6cf6fc83e
+[X]  25.947:0120:0124:info:vkd3d-proton:vkd3d_instance_apply_application_workarounds: Detected SteamAppID 1091500
+[X]  25.957:0120:0124:info:vkd3d-proton:vkd3d_instance_deduce_config_flags_from_environment: shader_cache is used, global_pipeline_cache is enforced.
+[X]  25.957:0120:0124:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  26.001:0120:0124:info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.1.0.
+[X]  26.001:0120:0124:info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 4522cc1a8b1347f.
+[X]  26.067:0120:0124:info:vkd3d-proton:vkd3d_physical_device_info_init_maint9: Implementation supports eliding QFOT for non-compressed optimal images.
+[X]  29.288:0120:0124:info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: UMA-like topology.
+[X]  29.288:0120:0124:info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+[X]  29.304:0120:0124:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Enabling fast paths for advanced ExecuteIndirect() graphics and compute (EXT_dgc).
+[X]  29.306:0120:0124:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+[X]  29.763:0120:0124:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 256, may be inaccurate.
+[X]  29.766:0120:0124:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+[X]  29.766:0120:0124:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+[X]  29.777:0120:0124:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  29.777:0120:0124:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X] [P8CAPS] D3D12CreateDevice(FL 12_0) hr=0x00000000
+[X]  29.928:0120:012c:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+[X]  29.938:0120:012c:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+[X]  29.962:0120:012c:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 7.000 ms.
+[X]  29.968:0120:012c:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  29.968:0120:012c:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+[X]  32.065:0120:0124:info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.1.0.
+[X]  32.065:0120:0124:info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 4522cc1a8b1347f.
+[X]  32.112:0120:0124:info:vkd3d-proton:vkd3d_physical_device_info_init_maint9: Implementation supports eliding QFOT for non-compressed optimal images.
+[X]  32.200:0120:0124:info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: UMA-like topology.
+[X]  32.200:0120:0124:info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+[X]  32.200:0120:0124:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Enabling fast paths for advanced ExecuteIndirect() graphics and compute (EXT_dgc).
+[X]  32.200:0120:0124:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+[X]  32.333:0120:0124:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 256, may be inaccurate.
+[X]  32.333:0120:0124:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+[X]  32.333:0120:0124:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+[X]  32.333:0120:0124:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  32.333:0120:0124:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X] [P8CAPS] D3D12CreateDevice(FL 11_0) hr=0x00000000 in 320 ms
+[X]  32.349:0120:0134:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+[X] [P8CAPS] max feature level 0xc000
+[X] [P8CAPS] highest shader model 0x60 (hr=0x00000000)
+[X] [P8CAPS] options: ResourceBindingTier 3 TiledResourcesTier 2 ResourceHeapTier 2 ConservativeRaster 0 ROVs 1 TypedUAVLoadAdditionalFormats 1
+[X] [P8CAPS] options1: WaveOps 1 WaveLaneCount 8..8 Int64ShaderOps 1
+[X] [P8CAPS] options5: RaytracingTier 11 RenderPassesTier 0
+[X] [P8CAPS] options7: MeshShaderTier 0 SamplerFeedbackTier 90
+[X]  32.350:0120:0134:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+[X]  32.354:0120:0134:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 5.000 ms.
+[X]  32.358:0120:0134:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  32.358:0120:0134:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+[X] [P8CAPS] done rc=0
+[P8] end d3d12caps status=0 ms=10340
+[P8] chdir /GAME/bin/x64 rc=0
+[P8] fd headroom before the game (cap 600):
+[X] [P8MEM] frames_free=2853829 free_mib=11147 (bsize 4096)
+[P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8] game pid=124
+[P8] census game t=5s procs: vkcube.exe/16:s5 wineserver/18:s5 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s3 /125 ext2flush/126:s3 (n=12)
+[X] [P8MEM] frames_free=2679831 free_mib=10468 (bsize 4096)
+[X] 0164:err:secur32:SECUR32_initSchannelSP no schannel support, expect problems
+[X] 0164:err:kerberos:kerberos_LsaApInitializePackage no Kerberos support, expect problems
+[X] info:  Game: Cyberpunk2077.exe
+[X] info:  DXVK: v3.1.1
+[X] info:  Build: x86_64 gcc 16.2.0
+[X] info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x7fe374f23b60
+[X] info:  Extension providers:
+[X] info:    Platform WSI
+[X] info:    OpenVR
+[X] info:  OpenVR: could not open registry key, status 2
+[X] info:  OpenVR: Failed to locate module
+[X] info:    OpenXR
+[X] info:  Enabled instance extensions:
+[X] info:    VK_KHR_get_surface_capabilities2
+[X] info:    VK_KHR_surface
+[X] info:    VK_KHR_surface_maintenance1
+[X] info:    VK_KHR_win32_surface
+[X] info:  Found device: llvmpipe (LLVM 21.1.8, 256 bits) (llvmpipe 26.2.6)
+[X] info:  XeSS: hiding Intel GPU Vendor ID
+[X] 013c:err:module:import_dll Library mfc140u.dll (which is needed by L"Z:\\GAME\\bin\\x64\\CChromaEditorLibrary64.dll") not found
+[X] info:  Game: Cyberpunk2077.exe
+[X] info:  DXVK: v3.1.1
+[X] info:  Build: x86_64 gcc 16.2.0
+[X] info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x7fe374d13b60
+[X] info:  Extension providers:
+[X] info:    Platform WSI
+[X] info:    OpenVR
+[X] info:  OpenVR: could not open registry key, status 2
+[X] info:  OpenVR: Failed to locate module
+[X] info:    OpenXR
+[X] info:  Enabled instance extensions:
+[X] info:    VK_KHR_get_surface_capabilities2
+[X] info:    VK_KHR_surface
+[X] info:    VK_KHR_surface_maintenance1
+[X] info:    VK_KHR_win32_surface
+[X] info:  Found device: llvmpipe (LLVM 21.1.8, 256 bits) (llvmpipe 26.2.6)
+[X] info:  XeSS: hiding Intel GPU Vendor ID
+[X] warn:  CreateDXGIFactory2: Ignoring flags
+[X] info:  Game: Cyberpunk2077.exe
+[X] info:  DXVK: v3.1.1
+[X] info:  Build: x86_64 gcc 16.2.0
+[X] info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x7fe374ce3b60
+[X] info:  Extension providers:
+[X] info:    Platform WSI
+[X] info:    OpenVR
+[X] info:  OpenVR: could not open registry key, status 2
+[X] info:  OpenVR: Failed to locate module
+[X] info:    OpenXR
+[X] info:  Enabled instance extensions:
+[X] info:    VK_KHR_get_surface_capabilities2
+[X] info:    VK_KHR_surface
+[X] info:    VK_KHR_surface_maintenance1
+[X] info:    VK_KHR_win32_surface
+[X] info:  Found device: llvmpipe (LLVM 21.1.8, 256 bits) (llvmpipe 26.2.6)
+[X] info:  XeSS: hiding Intel GPU Vendor ID
+[X] warn:  DxgiAdapter::QueryInterface: Unknown interface query
+[X] warn:  f0db4c7f-fe5a-42a2-bd62-f2a6cf6fc83e
+[X]  66.181:0138:013c:info:vkd3d-proton:vkd3d_instance_apply_application_workarounds: Detected SteamAppID 1091500
+[X]  66.202:0138:013c:info:vkd3d-proton:vkd3d_instance_apply_application_workarounds: Detected game Cyberpunk2077.exe, adding 1 configs, removing 0 configs.
+[X]  66.202:0138:013c:info:vkd3d-proton:vkd3d_instance_deduce_config_flags_from_environment: shader_cache is used, global_pipeline_cache is enforced.
+[X]  66.202:0138:013c:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  66.244:0138:013c:info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.1.0.
+[X]  66.245:0138:013c:info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 4522cc1a8b1347f.
+[X]  66.382:0138:013c:info:vkd3d-proton:vkd3d_physical_device_info_init_maint9: Implementation supports eliding QFOT for non-compressed optimal images.
+[P8] census game t=35s procs: vkcube.exe/16:s5 wineserver/18:s3 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s3 REDEngineErrorR/129:s5 conhost.exe/136:s5 ext2flush/168:s3 (n=13)
+[X] [P8MEM] frames_free=2555469 free_mib=9982 (bsize 4096)
+[X]  69.626:0138:013c:info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: UMA-like topology.
+[X]  69.626:0138:013c:info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+[X]  69.642:0138:013c:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Enabling fast paths for advanced ExecuteIndirect() graphics and compute (EXT_dgc).
+[X]  69.644:0138:013c:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+[X]  70.295:0138:013c:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 256, may be inaccurate.
+[X]  70.298:0138:013c:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+[X]  70.298:0138:013c:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+[X]  70.307:0138:013c:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: C:\vc\vkd3d-proton.Cyberpunk2077.exe.cache.
+[X]  70.307:0138:013c:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: C:\vc\vkd3d-proton.Cyberpunk2077.exe.cache.
+[X]  70.530:0138:0198:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+[X]  70.536:0138:0198:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+[X]  70.540:0138:0198:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 3.000 ms.
+[X]  70.547:0138:0198:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: C:\vc\vkd3d-proton.Cyberpunk2077.exe.cache.
+[X]  70.547:0138:0198:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+[X]  70.598:0138:013c:fixme:vkd3d-proton:d3d12_dred_settings_SetAutoBreadcrumbsEnablement: iface 00000010845e37c0, enablement 0 stub!
+[X]  70.598:0138:013c:fixme:vkd3d-proton:d3d12_dred_settings_SetPageFaultEnablement: iface 00000010845e37c0, enablement 2 stub!
+[X] err:   readMonitorEdidFromKey: Failed to get EDID reg key size
+[X] err:   DXGI: Failed to parse display metadata + colorimetry info, using blank.
+[X]  70.656:0138:013c:info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.1.0.
+[X]  70.656:0138:013c:info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 4522cc1a8b1347f.
+[X]  70.767:0138:013c:info:vkd3d-proton:vkd3d_physical_device_info_init_maint9: Implementation supports eliding QFOT for non-compressed optimal images.
+[X]  70.885:0138:013c:info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: UMA-like topology.
+[X]  70.885:0138:013c:info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+[X]  70.885:0138:013c:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Enabling fast paths for advanced ExecuteIndirect() graphics and compute (EXT_dgc).
+[X]  70.885:0138:013c:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+[X]  71.207:0138:013c:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 256, may be inaccurate.
+[X]  71.207:0138:013c:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+[X]  71.207:0138:013c:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+[X]  71.207:0138:013c:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: C:\vc\vkd3d-proton.Cyberpunk2077.exe.cache.
+[X]  71.207:0138:013c:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: C:\vc\vkd3d-proton.Cyberpunk2077.exe.cache.
+[X]  71.217:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+[X]  71.219:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+[X]  71.220:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 3.000 ms.
+[X]  71.221:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: C:\vc\vkd3d-proton.Cyberpunk2077.exe.cache.
+[X]  71.222:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+[X]  75.710:0138:013c:fixme:vkd3d-proton:vkd3d_memory_allocation_init: Requested alignment of 10000, but got GPU VA of 7fe3441ec000 for intended start of heap, which is not aligned as expected. If application relies on this alignment, weird things might happen.
+[X]  79.351:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 01dc:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X]  81.658:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 190). It seems like application has stopped creating new PSOs for the time being.
+[X] 014c:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X] 014c:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X] 014c:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X] 014c:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X]  85.036:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X]  92.046:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 247). It seems like application has stopped creating new PSOs for the time being.
+[X]  92.114:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X]  97.634:0138:013c:info:vkd3d-proton:dxgi_vk_swap_chain_init: Creating swapchain (1280 x 720), BufferCount = 3.
+[X]  97.686:0138:013c:info:vkd3d-proton:dxgi_vk_swap_chain_init_sync_objects: Enabling frame latency handles.
+[X]  97.690:0138:013c:info:vkd3d-proton:dxgi_vk_swap_chain_init_sync_objects: Ensure maximum latency of 3 frames with KHR_present_wait.
+[X]  97.695:0138:013c:info:vkd3d-proton:dxgi_vk_swap_chain_init_sleep_state: Timer interval is 1.0 ms.
+[X] warn:  DXGI: MakeWindowAssociation: Ignoring flags
+[X]  97.881:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[P8] census game t=65s procs: vkcube.exe/16:s2 wineserver/18:s2 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s3 REDEngineErrorR/129:s5 conhost.exe/136:s5 ext2flush/222:s3 (n=13)
+[X]  98.312:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 624). It seems like application has stopped creating new PSOs for the time being.
+[X] [P8MEM] frames_free=1859284 free_mib=7262 (bsize 4096)
+[X] 101.336:0138:01a8:fixme:vkd3d-proton:dxgi_vk_swap_chain_update_wait_timing_capabilities: Implementation supports neither present_wait1 or present_wait2. Latency will increase.
+[X] 101.361:0138:01a8:info:vkd3d-proton:dxgi_vk_swap_chain_recreate_swapchain_in_present_task: Got 3 swapchain images.
+[X] 101.523:0138:01b8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b840, queue family 0.
+[X] 101.528:0138:01b8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b840, queue family 0.
+[X] 101.653:0138:01a8:info:vkd3d-proton:dxgi_vk_swap_chain_recreate_swapchain_in_present_task: Got 3 swapchain images.
+[X] 102.670:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 103.090:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 103.090:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 104.290:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 6). It seems like application has stopped creating new PSOs for the time being.
+[X] 108.644:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 109.132:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 109.204:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 110.336:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 110.425:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 111.619:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 16). It seems like application has stopped creating new PSOs for the time being.
+[X] 111.631:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 112.697:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 6). It seems like application has stopped creating new PSOs for the time being.
+[X] 113.032:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 114.427:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 5). It seems like application has stopped creating new PSOs for the time being.
+[X] 114.718:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 116.658:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 33). It seems like application has stopped creating new PSOs for the time being.
+[X] 117.738:0138:01b8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b840, queue family 0.
+[X] 118.594:0138:01b0:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b5e0, queue family 0.
+[P8] census game t=95s procs: vkcube.exe/16:s3 wineserver/18:s3 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s5 REDEngineErrorR/129:s5 conhost.exe/136:s5 (n=12)
+[X] [P8MEM] frames_free=1535941 free_mib=5999 (bsize 4096)
+[X] 132.801:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 132.802:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 136.372:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 136.431:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 137.300:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 137.372:0138:01b8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b840, queue family 0.
+[X] 138.382:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 138.438:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 22). It seems like application has stopped creating new PSOs for the time being.
+[X] 138.611:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 142.765:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 142.767:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 142.872:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 146.682:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 147.616:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 152.304:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 57). It seems like application has stopped creating new PSOs for the time being.
+[X] 152.702:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 152.755:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 154.108:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 155.769:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 155.945:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[P8] census game t=125s procs: vkcube.exe/16:s2 wineserver/18:s2 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s2 REDEngineErrorR/129:s5 conhost.exe/136:s5 ext2flush/243:s3 (n=13)
+[X] [P8MEM] frames_free=1443690 free_mib=5639 (bsize 4096)
+[X] 158.760:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 40). It seems like application has stopped creating new PSOs for the time being.
+[X] 159.122:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 161.436:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 4). It seems like application has stopped creating new PSOs for the time being.
+[X] 163.216:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 166.796:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 9). It seems like application has stopped creating new PSOs for the time being.
+[X] 166.881:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 166.882:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 167.197:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 169.199:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 6). It seems like application has stopped creating new PSOs for the time being.
+[X] 171.256:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 175.165:0138:01b8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b840, queue family 0.
+[X] 177.477:0138:01b8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b840, queue family 0.
+[X] 182.294:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 80). It seems like application has stopped creating new PSOs for the time being.
+[X] 182.703:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 182.704:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 182.885:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[P8] census game t=156s procs: vkcube.exe/16:s5 wineserver/18:s5 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s5 REDEngineErrorR/129:s5 conhost.exe/136:s5 ext2flush/255:s3 (n=13)
+[X] [P8MEM] frames_free=1328427 free_mib=5189 (bsize 4096)
+[X] 191.064:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 68). It seems like application has stopped creating new PSOs for the time being.
+[X] 191.205:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 191.205:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 191.205:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 212.251:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flus
+[X] 212.679:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 212.760:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 212.760:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[P8] census game t=186s procs: vkcube.exe/16:s5 wineserver/18:s5 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s5 REDEngineErrorR/129:s5 conhost.exe/136:s5 ext2flush/271:s3 (n=13)
+[X] [P8MEM] frames_free=1187606 free_mib=4639 (bsize 4096)
+[X] 242.297:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 274). It seems like application has stopped creating new PSOs for the time being.
+[X] 242.311:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 242.704:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 242.876:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[P8] census game t=216s procs: vkcube.exe/16:s5 wineserver/18:s5 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s5 REDEngineErrorR/129:s5 conhost.exe/136:s5 ext2flush/284:s3 (n=13)
+[X] [P8MEM] frames_free=1039087 free_mib=4058 (bsize 4096)
+[X] 254.224:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 122). It seems like application has stopped creating new PSOs for the time being.
+[X] 272.668:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 272.668:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[P8] census game t=246s procs: vkcube.exe/16:s5 wineserver/18:s5 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s3 REDEngineErrorR/129:s5 conhost.exe/136:s5 (n=12)
+[X] [P8MEM] frames_free=1032171 free_mib=4031 (bsize 4096)
+[X] 302.517:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 302.517:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 307.094:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 307.094:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[P8] census game t=277s procs: vkcube.exe/16:s5 wineserver/18:s3 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s2 REDEngineErrorR/129:s5 conhost.exe/136:s5 (n=12)
+[X] [P8MEM] frames_free=1040686 free_mib=4065 (bsize 4096)
+[X] 311.132:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 311.373:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 316.224:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 316.347:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 319.123:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 319.279:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 319.634:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 320.877:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 325.904:0138:01a0:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 100). It seems like application has stopped creating new PSOs for the time being.
+[P8] census game t=307s procs: vkcube.exe/16:s5 wineserver/18:s3 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s5 REDEngineErrorR/129:s5 conhost.exe/136:s5 (n=12)
+[X] [P8MEM] frames_free=1007212 free_mib=3934 (bsize 4096)
+[X] 347.230:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 348.874:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 349.753:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 352.243:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 357.941:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 358.942:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+[X] 368.848:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Enabling staggered submissions for command queue 000000108455b380, queue family 0.
+[P8] census game t=337s procs: vkcube.exe/16:s2 wineserver/18:s2 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/70:s5 Cyberpunk2077.e/124:s5 REDEngineErrorR/129:s5 conhost.exe/136:s5 (n=12)
+[X] [P8MEM] frames_free=1012543 free_mib=3955 (bsize 4096)
+[X] 369.817:0138:01a8:info:vkd3d-proton:d3d12_command_queue_execute: Disabling staggered submissions for command queue 000000108455b380, queue family 0.
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+[P8] fd headroom before the game (cap 600):
+[X] [P8FD] cap=600 opened=600 first_errno=0
+[P8] census game t=5s (n=12)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=35s (n=13)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=65s (n=13)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=95s (n=12)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=125s (n=13)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=156s (n=13)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=186s (n=13)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=216s (n=13)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=246s (n=12)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=277s (n=12)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=307s (n=12)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=337s (n=12)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+
+## modules the game process tree loaded after launch (WINEDEBUG +loaddll; names only)
+1: 013c native Z:\GAME\bin\x64\Cyberpunk2077.exe
+2: 013c builtin C:\windows\system32\kernelbase.dll
+3: 013c builtin C:\windows\system32\kernel32.dll
+4: 013c builtin C:\windows\system32\ucrtbase.dll
+5: 013c builtin C:\windows\system32\sechost.dll
+6: 013c builtin C:\windows\system32\msvcrt.dll
+7: 013c builtin C:\windows\system32\advapi32.dll
+8: 013c builtin C:\windows\system32\win32u.dll
+9: 013c builtin C:\windows\system32\gdi32.dll
+10: 013c builtin C:\windows\system32\USER32.dll
+11: 013c builtin C:\windows\system32\shcore.dll
+12: 013c builtin C:\windows\system32\shlwapi.dll
+13: 013c builtin C:\windows\system32\SHELL32.dll
+14: 013c builtin Z:\GAME\bin\x64\dbghelp.dll
+15: 013c builtin C:\windows\system32\IMM32.dll
+16: 013c builtin C:\windows\system32\cryptbase.dll
+17: 013c builtin C:\windows\system32\rpcrt4.dll
+18: 013c builtin C:\windows\system32\combase.dll
+19: 013c builtin C:\windows\system32\coml2.dll
+20: 013c builtin C:\windows\system32\ole32.dll
+21: 013c builtin C:\windows\system32\vcruntime140.dll
+22: 013c builtin C:\windows\system32\MSVCP140.dll
+23: 013c builtin C:\windows\system32\VCRUNTIME140_1.dll
+24: 013c native Z:\GAME\bin\x64\sl.interposer.dll
+25: 013c builtin C:\windows\system32\SETUPAPI.dll
+26: 013c builtin C:\windows\system32\VERSION.dll
+27: 013c native C:\windows\system32\dxgi.dll
+28: 013c builtin C:\windows\system32\CFGMGR32.dll
+29: 013c native Z:\GAME\bin\x64\libxell.dll
+30: 013c native Z:\GAME\bin\x64\libxess_fg.dll
+31: 013c builtin C:\windows\system32\HID.DLL
+32: 013c builtin C:\windows\system32\msacm32.dll
+33: 013c builtin C:\windows\system32\WINMM.dll
+34: 013c builtin C:\windows\system32\WS2_32.dll
+35: 013c builtin C:\windows\system32\bcrypt.dll
+36: 013c builtin C:\windows\system32\CRYPT32.dll
+37: 013c builtin C:\windows\system32\mpr.dll
+38: 013c builtin C:\windows\system32\WININET.dll
+39: 013c native Z:\GAME\bin\x64\REDGalaxy64.dll
+40: 013c native Z:\GAME\bin\x64\libxess.dll
+41: 013c builtin C:\windows\system32\WLDAP32.dll
+42: 013c builtin C:\windows\system32\Normaliz.dll
+43: 013c native Z:\GAME\bin\x64\libcurl.dll
+44: 013c native Z:\GAME\bin\x64\redlexer_native.dll
+45: 013c builtin C:\windows\system32\XINPUT9_1_0.dll
+46: 013c native Z:\GAME\bin\x64\bink2w64.dll
+47: 013c native Z:\GAME\bin\x64\icudt.dll
+48: 013c native Z:\GAME\bin\x64\icuuc.dll
+49: 013c native Z:\GAME\bin\x64\icuin.dll
+50: 013c native Z:\GAME\bin\x64\PhysX3Common_x64.dll
+51: 013c native Z:\GAME\bin\x64\PxFoundation_x64.dll
+52: 013c native Z:\GAME\bin\x64\PhysX3CharacterKinematic_x64.dll
+53: 013c native Z:\GAME\bin\x64\PhysX3Cooking_x64.dll
+54: 013c native Z:\GAME\bin\x64\PhysX3_x64.dll
+55: 013c native Z:\GAME\bin\x64\amd_fidelityfx_loader_dx12.dll
+56: 013c builtin C:\windows\system32\POWRPROF.dll
+57: 013c native Z:\GAME\bin\x64\oo2ext_7_win64.dll
+58: 013c native Z:\GAME\bin\x64\amd_ags_x64.dll
+59: 013c builtin C:\windows\system32\OLEAUT32.dll
+60: 013c builtin C:\windows\system32\jsproxy.dll
+61: 013c builtin C:\windows\system32\WINHTTP.dll
+62: 013c builtin C:\windows\system32\concrt140.dll
+63: 0144 native Z:\GAME\bin\x64\REDEngineErrorReporter.exe
+64: 0144 builtin C:\windows\system32\kernelbase.dll
+65: 0144 builtin C:\windows\system32\kernel32.dll
+66: 0144 builtin C:\windows\system32\ucrtbase.dll
+67: 0144 builtin C:\windows\system32\sechost.dll
+68: 0144 builtin C:\windows\system32\msvcrt.dll
+69: 0144 builtin C:\windows\system32\advapi32.dll
+70: 0144 builtin C:\windows\system32\win32u.dll
+71: 0144 builtin C:\windows\system32\gdi32.dll
+72: 0144 builtin C:\windows\system32\USER32.dll
+73: 0144 builtin Z:\GAME\bin\x64\dbghelp.dll
+74: 0144 builtin C:\windows\system32\VERSION.dll
+75: 0144 builtin C:\windows\system32\shcore.dll
+76: 0144 builtin C:\windows\system32\shlwapi.dll
+77: 0144 builtin C:\windows\system32\SHELL32.dll
+78: 0144 builtin C:\windows\system32\cryptbase.dll
+79: 0144 builtin C:\windows\system32\rpcrt4.dll
+80: 0144 builtin C:\windows\system32\combase.dll
+81: 0144 builtin C:\windows\system32\coml2.dll
+82: 0144 builtin C:\windows\system32\ole32.dll
+83: 013c native Z:\GAME\bin\x64\steam_api64.dll
+84: 013c native Z:\GAME\bin\x64\GameServicesSteam.dll
+85: 013c builtin C:\windows\system32\dnsapi.dll
+86: 013c builtin C:\windows\system32\nsi.dll
+87: 013c builtin C:\windows\system32\iphlpapi.dll
+88: 013c builtin C:\windows\system32\netprofm.dll
+89: 0164 builtin C:\windows\system32\secur32.dll
+90: 0164 builtin C:\windows\system32\Kerberos.dll
+91: 0164 builtin C:\windows\system32\netutils.dll
+92: 0164 builtin C:\windows\system32\netapi32.dll
+93: 0164 builtin C:\windows\system32\MSV1_0.dll
+94: 013c builtin C:\windows\system32\cryptnet.dll
+95: 013c builtin C:\windows\system32\WINTRUST.DLL
+96: 013c builtin C:\windows\system32\imagehlp.dll
+97: 013c builtin C:\windows\system32\rsaenh.dll
+98: 013c builtin C:\windows\system32\gdiplus.dll
+99: 013c native Z:\GAME\bin\x64\GfnRuntimeSdk.dll
+100: 0 wait_us=72[X] 0158:trace:loaddll:build_module Loaded L"C:\windows\system32\conhost.exe" at 0000000140000000: builtin
+101: 0158 builtin C:\windows\system32\kernelbase.dll
+102: 0158 builtin C:\windows\system32\kernel32.dll
+103: 0158 builtin C:\windows\system32\ucrtbase.dll
+104: 0158 builtin C:\windows\system32\sechost.dll
+105: 0158 builtin C:\windows\system32\msvcrt.dll
+106: 0158 builtin C:\windows\system32\advapi32.dll
+107: 0158 builtin C:\windows\system32\win32u.dll
+108: 0158 builtin C:\windows\system32\gdi32.dll
+109: 0158 builtin C:\windows\system32\user32.dll
+110: 0144 builtin C:\windows\system32\imm32.dll
+111: 0158 builtin C:\windows\system32\imm32.dll
+112: 0158 builtin c:\windows\system32\winex11.drv
+113: 013c builtin C:\windows\system32\winevulkan.dll
+114: 0158 builtin C:\windows\system32\uxtheme.dll
+115: 013c builtin c:\windows\system32\winex11.drv
+116: 013c builtin C:\windows\system32\uxtheme.dll
+117: 013c builtin C:\windows\system32\msasn1.dll
+118: 013c builtin C:\windows\system32\wldp.dll
+119: 013c native C:\windows\system32\d3d12.dll
+120: 013c native Z:\GAME\bin\x64\sl.common.dll
+121: 013c builtin C:\windows\system32\winevulkan.dll
+122: 013c native Z:\GAME\bin\x64\sl.dlss.dll
+123: 013c native Z:\GAME\bin\x64\sl.dlss_d.dll
+124: 013c native Z:\GAME\bin\x64\sl.dlss_g.dll
+125: 013c native Z:\GAME\bin\x64\sl.nis.dll
+126: 013c native Z:\GAME\bin\x64\sl.pcl.dll
+127: 013c native Z:\GAME\bin\x64\sl.reflex.dll
+128: 013c native Z:\GAME\bin\x64\GFSDK_Aftermath_Lib.x64.dll
+129: 013c builtin C:\windows\system32\winevulkan.dll
+130: 013c native C:\windows\system32\d3d12.dll
+131: [BLKD] cc=0x0000000000460001 csts=0x0000000000000001 cap=0x000000000F0107FF/0x0000000000400820 vs=0x0000000000010400 regs=0xFFFF808000200000 reqs=31818 stalls=0 devoff=0 cc0=0 cc0_ms=0 resets=0 pre=0 recover_us=0 fr_used=366921 fr_high=403291 hole=0 fr_hi=789460 mmio=[X] 013c:trace:loaddll:build_module Loaded L"C:\windows\system32\d3d12core.dll" at 00007FE374650000: native
+132: 013c native Z:\GAME\bin\x64\amd_fidelityfx_upscaler_dx12.dll
+133: 013c native Z:\GAME\bin\x64\amd_fidelityfx_framegeneration_dx12.dll
+134: 01dc builtin C:\windows\system32\mmdevapi.dll
+135: 013c builtin C:\windows\system32\Wtsapi32.dll
+136: 013c builtin C:\windows\system32\xinput1_4.dll
+137: 014c builtin C:\windows\system32\comctl32.dll
+138: 014c builtin C:\windows\system32\compstui.dll
+139: 014c builtin C:\windows\system32\winspool.drv
+140: 014c builtin C:\windows\system32\wbem\wbemprox.dll
+
+## Gate P8 OCR (tesseract --psm 11 on the QMP screendumps; menu-item words only)
+[P8W] +   361.8 s  03:00:21  main menu OCR at s019-t000328: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   367.6 s  03:00:27  main menu OCR at s020-t000334: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   373.3 s  03:00:33  main menu OCR at s021-t000339: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   361.8 s  03:00:21  main menu OCR at s019-t000328: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   367.6 s  03:00:27  main menu OCR at s020-t000334: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   373.3 s  03:00:33  main menu OCR at s021-t000339: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+full OCR of s019 (menu labels; the rest is the menu's own corner widgets):
+ (P) 25 TNA NEW GAME LOAD GAME SETTINGS MODS CREDITS QUIT GAME Vv] LEARN MORE ay [BJ £00 PROJEKT RED ACCOUNT #(x/T 2 xeyes 
+screendumps (git-ignored): evidence/cp-game/run10/s019-t000328.png, s020-t000334.png, s021-t000339.png

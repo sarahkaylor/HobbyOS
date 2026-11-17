@@ -1443,8 +1443,16 @@ static struct gpu_win* gpu3d_winp;
 static uint64_t gpu3d_seq64 = GPU3D_SEQ64_BASE;
 static volatile int gpu3d_wake_pending = 0;
 static struct pid_mask gpu3d_waiters;
+/* P8 stop 11: pids parked in FENCE_WAIT2 right now.  The mask alone is not
+ * enough: a waiter that leaves by its own deadline (the per-tick re-check)
+ * keeps its bit, and the next fence IRQ then made whatever that thread was
+ * blocked in NEXT -- nanosleep, poll, a pipe read -- READY early.  Those waits
+ * resume as if their event happened (nanosleep returns 0 with time left), so
+ * Sleep() and timed waits in a Venus game returned early at random. */
+static uint8_t gpu3d_parked[MAX_PROCESSES];
 static uint32_t gpu3d_fence_errors = 0;
 static uint32_t gpu3d_fence_retired = 0;
+static uint32_t gpu3d_stale_skips = 0; /* fence wakes withheld from non-parked pids */
 /* post -> retire latency histogram (us bucket upper bounds) and where the
  * retirement was seen (the INTx handler vs a transaction's drain). */
 #define GPU3D_HIST_N 10
@@ -1470,6 +1478,8 @@ static void gpu3d_fence_stats_row(const char* why) {
   print_int((int)gpu3d_fence_errors);
   uart_puts(" waiter_tick_finds=");
   print_int((int)gpu3d_retire_tick);
+  uart_puts(" stale_skips=");
+  print_int((int)gpu3d_stale_skips);
   uart_puts(" post->retire_us");
   for (int i = 0; i < GPU3D_HIST_N; i++) {
     uart_puts(i + 1 < GPU3D_HIST_N ? " <=" : " >");
@@ -2168,11 +2178,22 @@ int virtio_gpu_3d_fence_park(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno,
               __atomic_load_n(&c2->done[ring_idx], __ATOMIC_SEQ_CST) >= seqno);
   if (!done && process_park_ok_locked(cur)) {
     pid_mask_set(&gpu3d_waiters, cur->pid);
+    if (cur->pid >= 0 && cur->pid < MAX_PROCESSES) gpu3d_parked[cur->pid] = 1;
     cur->wake_ms = deadline_ms;
     cur->state = PROC_STATE_BLOCKED;
   }
   spinlock_release_irqrestore(&proc_lock, pf);
   return done ? 0 : GPU_ABI_PARKED;
+}
+
+/* Every FENCE_WAIT2 entry (first call and each restart after a park): this
+ * thread is no longer parked, so a later fence IRQ must not wake it. */
+void virtio_gpu_3d_fence_unpark(void) {
+  struct process* cur = current_process();
+  if (!cur || cur->pid < 0 || cur->pid >= MAX_PROCESSES) return;
+  uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+  gpu3d_parked[cur->pid] = 0;
+  spinlock_release_irqrestore(&proc_lock, pf);
 }
 
 void virtio_gpu_3d_fence_wake(void) {
@@ -2185,6 +2206,11 @@ void virtio_gpu_3d_fence_wake(void) {
     while (x) {
       int pid = (wi << 6) + __builtin_ctzll(x);
       x &= x - 1;
+      if (pid >= MAX_PROCESSES || !gpu3d_parked[pid]) {
+        gpu3d_stale_skips++;
+        continue; /* not parked in FENCE_WAIT2 any more: leave it alone */
+      }
+      gpu3d_parked[pid] = 0;
       if (process_try_wake_locked(pid) == 1) woke = 1;
     }
   }
