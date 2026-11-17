@@ -1,0 +1,75 @@
+# C1-k5: full gate batch on the strix lane tree
+# script: ~/cp/lanes/k5-gates.sh = ~/cp/base5-gates.sh with the tree/log paths changed (+ LO_ON_DISK= for batch 2)
+# host strix (Zen 5), KVM; every boot under tools/cp/qemu-slot.sh; MAKEFLAGS=-j16 TOOLS_SKIP=1
+# parity references: strix:~/cp/base5-gates.txt (base5 949ba008) and docs/cp-sync-evidence/batch-lane.txt (cyberpunk 15ad4a35)
+
+## batch 1 -- cp-k5 4ed0a01c (pre-merge, pre-P8-scope): every probe rc=0 (fdscale included), ext2/exec/rsize_guard PASS,
+## host 38/40, castscan rc=0, arm rc=0, rsize_scan PASS, pfx_gate PASS; unit rc=1 with THREE new reds:
+##   frame_test.c:118 / :196 (an 8 MiB frame run for the fd tables left a partial block at boot)
+##   unix_test.c:389 (test_file_poll_engine passed K_FD_SETSIZE+1 entries over a 2-entry array, expecting the old
+##   256 engine cap; the engine took 257 and the stack canary of unix_test_suite tripped)
+## fixed in e220c200 (whole frame block for the fd tables; the test bound follows MAX_OPEN_FDS)
+
+## batch 2 -- cp-k5 053a5745 (cyberpunk 15ad4a35 merged, P8 scope in):
+tree k5 lane 053a5745 Merge branch 'cyberpunk' (15ad4a35, C0-sync: main in) into cp-k5
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+fatcoh rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/k5)
+unit rc=1 Tests failed! Tests run:    454 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=1 src/kernel/arch/x64/trap.c	I2P	int er = process_read_envp(cur, (const char *const *)tf->regs[3], envbuf,
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+ALLDONE
+
+## follow-ups on the same tree
+# castscan: the one new row is the reviewed sys_exec envp cast, rewritten as 'int er = ...'; allowlist row updated
+# (no other change) -> castscan: 365 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+# exitgroup: batch 2's FAIL was X7 "5 bad, worst 1541 ms" (the row's bound is 1000 ms; strix had all four QEMU slots busy
+# and other lanes' builds running).  Rerun three times right after, same tree:
+[LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 363 ms)
+[LP] done rc=0
+[LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 387 ms)
+[LP] done rc=0
+[LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 376 ms)
+[LP] done rc=0
