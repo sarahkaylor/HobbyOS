@@ -639,15 +639,53 @@ static void test_vm_as_clone_fork(void) {
     return;
   }
 
-  /* Private page: present in the clone, DIFFERENT frame, same content. */
   uint64_t lc = 0;
   EXPECT_EQ(vm_arch_walk(c, (uint64_t)b, &lc), 0);
+#ifdef __x86_64__
+  /* C1-fork: the private page is SHARED copy-on-write: the same frame,
+     read-only + COW in both, counted twice. */
+  {
+    uint64_t lpl = 0;
+    EXPECT_EQ(vm_arch_walk(as, (uint64_t)b, &lpl), 0);
+    EXPECT_EQ(vm_arch_leaf_cow(lpl), 1);
+    EXPECT_EQ(vm_arch_leaf_writable(lpl), 0);
+    EXPECT_EQ(vm_arch_leaf_cow(lc), 1);
+    EXPECT_EQ(vm_arch_leaf_writable(lc), 0);
+    EXPECT_EQ((vm_arch_leaf_phys(lc) == lp), 1);
+    EXPECT_EQ(vm_cow_frame_shared(lp), 1);
+  }
+  /* A kernel-side write in the child breaks the share: a new frame with the
+     same content, the parent's frame untouched and no longer shared. */
+  {
+    struct process pc;
+    for (unsigned i = 0; i < sizeof(pc); i++)
+      ((unsigned char *)&pc)[i] = 0;
+    pc.as = c;
+    EXPECT_EQ(vm_touch(&pc, (uint64_t)b, 8, 1), 0);
+    EXPECT_EQ(vm_arch_walk(c, (uint64_t)b, &lc), 0);
+    EXPECT_EQ(vm_arch_leaf_cow(lc), 0);
+    EXPECT_EQ(vm_arch_leaf_writable(lc), 1);
+    EXPECT_EQ(vm_cow_frame_shared(lp), 0);
+  }
+#endif
+  /* Private page: present in the clone, DIFFERENT frame, same content. */
   lc = vm_arch_leaf_phys(lc);
   EXPECT_EQ((lc != 0 && lc != lp), 1);
   EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(lc), 0xA1B2C3D4ULL);
   /* ...and the copies are isolated. */
   *(volatile uint64_t *)phys_to_virt(lc) = 0xDEADULL;
   EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(lp), 0xA1B2C3D4ULL);
+#ifdef __x86_64__
+  /* The parent, now the frame's only mapper, takes its leaf back in place. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 1), 0);
+  {
+    uint64_t lpl = 0;
+    EXPECT_EQ(vm_arch_walk(as, (uint64_t)b, &lpl), 0);
+    EXPECT_EQ((vm_arch_leaf_phys(lpl) == lp), 1);
+    EXPECT_EQ(vm_arch_leaf_cow(lpl), 0);
+    EXPECT_EQ(vm_arch_leaf_writable(lpl), 1);
+  }
+#endif
   /* The untouched page of the same region stays a hole in the clone. */
   EXPECT_EQ(vm_arch_walk(c, (uint64_t)b + 0x1000, 0), -1);
   /* Object page: the SAME shared frame, not a copy. */
@@ -792,6 +830,19 @@ static void test_vm_memfd_private_cow(void) {
     EXPECT_EQ((vm_arch_leaf_phys(cl) == of3), 1);
     EXPECT_EQ(vm_arch_leaf_writable(cl), 0);
     EXPECT_EQ(vm_arch_walk(c, b, &cl), 0);
+#ifdef __x86_64__
+    /* C1-fork: the parent's private copy is shared copy-on-write; the
+       child's first write (here a kernel write) gives it its own frame. */
+    EXPECT_EQ((vm_arch_leaf_phys(cl) == c0 && vm_arch_leaf_cow(cl)), 1);
+    {
+      struct process pc;
+      for (unsigned i = 0; i < sizeof(pc); i++)
+        ((unsigned char *)&pc)[i] = 0;
+      pc.as = c;
+      EXPECT_EQ(vm_touch(&pc, b, 8, 1), 0);
+      EXPECT_EQ(vm_arch_walk(c, b, &cl), 0);
+    }
+#endif
     uint64_t cc0 = vm_arch_leaf_phys(cl);
     EXPECT_EQ((cc0 != c0 && cc0 != of0), 1);
     EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(cc0), 0x3333ULL);
@@ -875,6 +926,13 @@ static void test_vm_big_object_cost(void) {
   uart_puts(" frames\n");
   EXPECT_EQ((tables >= 100 && tables <= 110), 1);
   vm_as_teardown(p.as);
+  if (free0 - frame_free_count() != arr + (int)npg) {
+    uart_puts("  [VMCOST] after teardown: used=");
+    print_int(free0 - frame_free_count());
+    uart_puts(" want=");
+    print_int(arr + (int)npg);
+    uart_puts("\n");
+  }
   EXPECT_EQ(free0 - frame_free_count(), arr + (int)npg); /* tables back; pages stay the object's */
   vm_object_unref(o);
   EXPECT_EQ(frame_free_count(), free0);
@@ -1720,6 +1778,14 @@ static void test_vm_file_map_fork(void) {
      object page still holds the file's byte. */
   uint64_t lc0 = 0;
   EXPECT_EQ(vm_arch_walk(child, (uint64_t)b, &lc0), 0);
+#ifdef __x86_64__
+  /* C1-fork: the parent's private copy is shared copy-on-write; the child's
+     first write copies it. */
+  EXPECT_EQ((vm_arch_leaf_phys(lc0) == priv0 && vm_arch_leaf_cow(lc0)), 1);
+  EXPECT_EQ(vm_handle_fault(&pc, (uint64_t)b, 1, 0, &why), 0);
+  EXPECT_EQ(vm_arch_walk(child, (uint64_t)b, &lc0), 0);
+  EXPECT_EQ(vm_arch_leaf_cow(lc0), 0);
+#endif
   uint64_t c0phys = vm_arch_leaf_phys(lc0);
   EXPECT_EQ((c0phys != 0 && c0phys != priv0), 1);
   EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(c0phys))[0]), 0x5A);
@@ -1746,6 +1812,13 @@ out:
     file_close(&p, fd);
   file_obj_invalidate_all();
   EXPECT_EQ(file_obj_count(), c0);
+  if (frame_free_count() != free0) {
+    uart_puts("  [VMFILE-FORK] frames: free0=");
+    print_int(free0);
+    uart_puts(" now=");
+    print_int(frame_free_count());
+    uart_puts("\n");
+  }
   EXPECT_EQ(frame_free_count(), free0);
 }
 

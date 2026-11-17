@@ -1,0 +1,110 @@
+# Full gate batch, lane cp-fork @ 9a51c83c (kernel) on strix KVM; script = ~/cp/integ-gates10.sh with paths for ~/cp/lanes/fork
+# (strix:~/cp/lanes/fork-ev/fork-gates.sh; P4/thrstorm/k5probes/P6/P8 rows dropped -- the Venus P8 boot is p8-venus-createprocess-strix.txt).
+# The strix worktree's HEAD prints as 058fd3d5: the lane's files are rsynced over it.
+# Parity reference: integ7 batch strix:~/cp/integ-gates10.txt (8c1007cb)
+tree 058fd3d5 plan v6: wave 6 lanes -- C0-console, C9-play (P9 on Venus), C6-p7, C1-k6 (§7.2f)
+tree 058fd3d5 plan v6: wave 6 lanes -- C0-console, C9-play (P9 on Venus), C6-p7, C1-k6 (§7.2f)
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/fork)
+unit rc=1 Tests failed! Tests run:    461 Tests failed: 5  src/kernel/vm_test.c:834 src/kernel/vm_test.c:916 src/kernel/vm_test.c:1795 src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 364 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=1 ext2w_gate: FAIL (1)
+reg_gate rc=1 == removed /srv/nfs/cp-ext2w-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+gate_p2 rc=0 G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=415; [P2] ps-extra count=0)
+gate_p5 rc=0 [P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics) [P5W] slot 2 acquired 12:57:31; boot: -smp 8 -m 12288M -cpu host (KVM) [P5W] qemu pid 3147560 [P5W] +0 s: (no [P5] row yet) [P5W] screendump vkcube-t20s.ppm at +89 s; QEMU guests on the host now (incl. this one): 3 [P5W] screendump vkcube-t50s.ppm at +119 s; QEMU guests on the host now (incl. this one): 2 [P5W] screendump
+ALLDONE
+
+# the integ7 reference rows that differ, for comparison
+unit rc=1 Tests failed! Tests run:    461 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+ext2w_gate rc=1 ext2w_gate: FAIL (1)
+reg_gate rc=0 == removed /srv/nfs/cp-ext2w-reg
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+gate_p5 rc=1 [P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics) [P5W] slot 1 acquired 06:00:02; boot: -smp 8 -m 12288M -cpu host (KVM) [P5W] qemu pid 1212289 [P5W] +0 s: (no [P5] row yet) [P5W] screendump d3d11-t20s.ppm at +161 s; QEMU guests on the host now (incl. this one): 1 [P5W] sc
+
+# reruns on the final tree (268ada25 = 9a51c83c + the vm_test expectation fix), same host
+# unit: the first run's vm_test.c:834/916/1795 were the old test writing 0x5555 straight into a frame the COW fork now shares (fixed in 268ada25)
+# reg_gate: the first run's FAIL was a console splice (the HKCU row read 'X REG_SZ Y/tmp/.local/SHARE/ICONS/...': another process's output glued to it); the value was there
+unit(268ada25) rc=1 Tests failed! Tests run:    461 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244 
+reg_gate#2 rc=0 reg_gate: PASS
+forkva(268ada25) rc=0 [LP] done rc=0
+forkcow(268ada25) rc=0 [LP] done rc=0
+ALLDONE
+[LP] P9FORK F1 small parent: fork+exec -> child running min 11.0 med 13.0 max 28.4 ms; reaped med 14.5 ms (n=5) -> INFO
+[LP] P9FORK F2a 64 GiB PROT_NONE only: fork+exec -> child running min 11.1 med 11.1 max 11.1 ms; reaped med 12.7 ms (n=5) -> INFO
+[LP] P9FORK F2b 1300 mappings only: fork+exec -> child running min 45.5 med 48.1 max 50.7 ms; reaped med 49.8 ms (n=5) -> INFO
+[LP] P9FORK F2 big VA: fork+exec -> child running min 46.1 med 49.4 max 50.1 ms; reaped med 51.0 ms (n=5) -> PASS
+[LP] P9FORK F3 big VA + 40 threads: fork+exec -> child running min 49.1 med 49.7 max 49.8 ms; reaped med 51.3 ms (n=5) -> PASS
+[LP] P9FORK F4 big VA + 40 threads: vfork+exec -> child running min 11.4 med 12.1 max 14.7 ms; reaped med 14.0 ms (n=5) -> INFO
+[LP] PASS K1 fork snapshot + child stores: child bad=0, parent after the child's stores bad=0
+[LP] PASS K2 parent stores after fork stay the parent's: child saw 0 words of the parent's later stores
+[LP] PASS K3 read(2) into a shared page in the child: child bad=0, parent bad=0
+[LP] PASS K4 three generations: child+grandchild bad=0, parent bad=0
+[LP] PASS K5 fork while a thread stores: 0 of 10 children saw their snapshot move
+[LP] PASS K6 mprotect R/RW in the child: child bad=0, parent bad=0
+[LP] PASS K7 MADV_DONTNEED in the child: child page not zero=0, parent bad=0
+[LP] PASS K8 parent munmap under a live child: child bad=0 after the parent's munmap
+[LP] PASS K9 200 fork/exit cycles of a 64 MiB parent: free 11665408 KiB -> 11632640 KiB (drop 32768 KiB), bad=0
+[LP] done rc=0
+
+# first reg_gate run (console splice):
+== reg query output (kernel rows removed): HKEY_CURRENT_USER\Software\CpTest X REG_SZ Y/tmp/.local/SHARE/ICONS/HICOLOR/48X48/APPS/C06E_winhlp32.0.png HKEY_LOCAL_MACHINE\Software\CpTest X REG_SZ Y 
+[HOST] FAIL boot 2: the value is not there

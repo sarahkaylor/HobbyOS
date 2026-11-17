@@ -689,6 +689,10 @@ volatile void *mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
 /* Software bit (bits 9-11 are available to software): the frame is
    owned by a shared object (memfd/fb); teardown must not free it. */
 #define X64_PTE_SHARED (1ULL << 9)
+/* C1-fork: a private anonymous frame shared copy-on-write after fork.  The
+   leaf is always read-only; the frame's mapper count lives in vm.c's COW
+   table (vm_cow_frame_*), and only the last mapper frees it. */
+#define X64_PTE_COW (1ULL << 10)
 #define X64_OA_MASK 0x000FFFFFFFFFF000ULL
 /* P6: 4 KiB leaf memory-type bits (PAT index = PAT<<2 | PCD<<1 | PWT). */
 #define X64_PTE_PWT (1ULL << 3)
@@ -870,6 +874,17 @@ uint64_t vm_arch_root_alloc(struct addr_space *as) {
   return pml4;
 }
 
+/* C1-fork: the frame a dropped leaf owned: free it unless it is an object's
+   (SHARED) or still mapped copy-on-write by another address space. */
+static void x64_leaf_release(uint64_t leaf) {
+  if (leaf & X64_PTE_SHARED)
+    return;
+  uint64_t fr = leaf & X64_OA_MASK;
+  if ((leaf & X64_PTE_COW) && !vm_cow_frame_put(fr))
+    return; /* another mapper still holds it */
+  frame_free(fr);
+}
+
 int vm_arch_map(struct addr_space *as, uint64_t va, uint64_t phys,
                 uint16_t prot, uint16_t kind) {
   uint64_t *pte = x64_v2_walk_alloc(as, va, 1);
@@ -887,10 +902,9 @@ void vm_arch_unmap(struct addr_space *as, uint64_t va) {
   uint64_t leaf = *pte;
   if (!(leaf & X64_PTE_P))
     return;
-  if (!(leaf & X64_PTE_SHARED))
-    frame_free(leaf & X64_OA_MASK);
   *pte = 0;
   x64_invlpg(va);
+  x64_leaf_release(leaf);
 }
 
 /* C1-k4: see vm.h. */
@@ -903,7 +917,49 @@ uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va) {
     return 0;
   *pte = 0;
   x64_invlpg(va);
-  return (leaf & X64_PTE_SHARED) ? 0 : (leaf & X64_OA_MASK);
+  if (leaf & X64_PTE_SHARED)
+    return 0;
+  /* C1-fork: a copy-on-write frame another AS still maps is not ours to
+     free; the last mapper's frame is returned for release after the
+     shootdown like any private frame. */
+  if ((leaf & X64_PTE_COW) && !vm_cow_frame_put(leaf & X64_OA_MASK))
+    return 0;
+  return leaf & X64_OA_MASK;
+}
+
+/* C1-fork: make a present private leaf a copy-on-write share (read-only,
+   COW bit).  Local invlpg only: the caller shoots the other CPUs down once
+   for the whole fork.  0, or -1 when no private leaf is present. */
+int vm_arch_cow_mark(struct addr_space *as, uint64_t va) {
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
+  if (!pte || !(*pte & X64_PTE_P) || (*pte & X64_PTE_SHARED))
+    return -1;
+  *pte = (*pte | X64_PTE_COW) & ~X64_PTE_RW;
+  x64_invlpg(va);
+  return 0;
+}
+
+int vm_arch_leaf_cow(uint64_t leaf) { return (leaf & X64_PTE_COW) != 0; }
+
+/* C1-fork: map `phys` at `va` as a copy-on-write share (read-only + COW). */
+int vm_arch_map_cow(struct addr_space *as, uint64_t va, uint64_t phys, uint16_t prot) {
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 1);
+  if (!pte)
+    return -1;
+  *pte = (x64_v2_pte_desc(phys, prot, VMK_ANON) | X64_PTE_COW) & ~X64_PTE_RW;
+  x64_invlpg(va);
+  return 0;
+}
+
+/* C1-fork: the last mapper of a copy-on-write frame takes it back: drop the
+   COW bit and give the leaf the region's protection. */
+void vm_arch_cow_clear(struct addr_space *as, uint64_t va, uint16_t prot) {
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
+  if (!pte || !(*pte & X64_PTE_P))
+    return;
+  uint64_t leaf = *pte & ~X64_PTE_COW;
+  *pte = x64_v2_pte_desc(leaf & X64_OA_MASK, prot, VMK_ANON) | (leaf & X64_PTE_CACHE_MASK);
+  x64_invlpg(va);
 }
 
 void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot) {
@@ -915,7 +971,12 @@ void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot) {
     return;
   uint16_t kind = (leaf & X64_PTE_SHARED) ? VMK_SHARED : VMK_ANON;
   /* P6: keep a device leaf's memory type (PWT/PCD/PAT) across mprotect. */
-  *pte = x64_v2_pte_desc(leaf & X64_OA_MASK, prot, kind) | (leaf & X64_PTE_CACHE_MASK);
+  uint64_t d = x64_v2_pte_desc(leaf & X64_OA_MASK, prot, kind) | (leaf & X64_PTE_CACHE_MASK);
+  /* C1-fork: a copy-on-write share stays read-only whatever the region
+     allows; the write fault breaks the share. */
+  if (leaf & X64_PTE_COW)
+    d = (d | X64_PTE_COW) & ~X64_PTE_RW;
+  *pte = d;
   x64_invlpg(va);
 }
 
@@ -1278,12 +1339,23 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
           continue;
         uint64_t ptp = pte2 & X64_OA_MASK;
         uint64_t *pt = (uint64_t *)phys_to_virt(ptp);
+        /* C1-fork: COW shares are counted; one table lock per page table */
+        uint64_t cowfr[512];
+        int ncow = 0;
         for (int j = 0; j < 512; j++) {
           uint64_t leaf = pt[j];
-          if (!(leaf & X64_PTE_P))
+          if (!(leaf & X64_PTE_P) || (leaf & X64_PTE_SHARED))
             continue;
-          if (!(leaf & X64_PTE_SHARED))
+          if (leaf & X64_PTE_COW)
+            cowfr[ncow++] = leaf & X64_OA_MASK;
+          else
             frame_free(leaf & X64_OA_MASK);
+        }
+        if (ncow) {
+          vm_cow_frame_put_batch(cowfr, ncow);
+          for (int j = 0; j < ncow; j++)
+            if (cowfr[j])
+              frame_free(cowfr[j]);
         }
         frame_free(ptp);
       }

@@ -763,5 +763,21 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va);
  * implementation; the retry path uses this once the cheap flush has failed. */
 void vm_arch_reload_cr3(struct addr_space *as);
 void vm_arch_shootdown(struct addr_space *as);
+/* C1-fork (x86_64): copy-on-write sharing of private frames across fork.
+   vm_arch_cow_mark makes a present private leaf read-only + COW (local
+   invlpg only); vm_arch_leaf_cow tests a vm_arch_walk leaf; vm_arch_cow_clear
+   gives the last mapper its writable leaf back.  The mapper counts are vm.c's:
+   vm_cow_frame_get adds a mapper (0, or -1 when the table is full: copy
+   instead), vm_cow_frame_put drops one and returns 1 when the caller was the
+   last (it must free the frame), vm_cow_frame_shared says whether another AS
+   still maps it.  ARM never creates COW leaves (its fork copies). */
+int vm_arch_cow_mark(struct addr_space *as, uint64_t va);
+int vm_arch_leaf_cow(uint64_t leaf);
+int vm_arch_map_cow(struct addr_space *as, uint64_t va, uint64_t phys, uint16_t prot);
+void vm_arch_cow_clear(struct addr_space *as, uint64_t va, uint16_t prot);
+int vm_cow_frame_get(uint64_t phys);
+int vm_cow_frame_put(uint64_t phys);
+int vm_cow_frame_shared(uint64_t phys);
+void vm_cow_frame_put_batch(uint64_t *phys, int n);
 
 #endif /* VM_H */
