@@ -1029,11 +1029,23 @@ static void x64_tlb_service(void) {
   __atomic_store_n(&x64_tlb_pending[me], 0, __ATOMIC_RELEASE);
 }
 
+/* C1-pe: how many other CPUs this CPU's last shootdown had to flush (0 = the
+   AS ran nowhere else).  Diagnostics only (vm.c's [PECOW] rows): a COW with
+   peers > 0 is one whose readers kept the pre-write translation before the
+   COW path shot them down. */
+static volatile uint8_t x64_tlb_last_targets[MAX_CPUS];
+int vm_arch_last_shootdown_targets(void) {
+  uint32_t me = get_cpuid();
+  return me < MAX_CPUS ? x64_tlb_last_targets[me] : 0;
+}
+
 void vm_arch_shootdown(struct addr_space *as) {
   if (!as || !as->root_phys)
     return;
   uint64_t root = as->root_phys;
   uint32_t me = get_cpuid();
+  if (me < MAX_CPUS)
+    x64_tlb_last_targets[me] = 0;
   uint32_t ncpu = smp_init_count();
   if (ncpu > MAX_CPUS)
     ncpu = MAX_CPUS;
@@ -1066,6 +1078,8 @@ void vm_arch_shootdown(struct addr_space *as) {
     __atomic_store_n(&x64_tlb_lock, 0, __ATOMIC_RELEASE);
     return;
   }
+  if (me < MAX_CPUS)
+    x64_tlb_last_targets[me] = (uint8_t)__builtin_popcount(targets);
   __atomic_store_n(&x64_tlb_root, root, __ATOMIC_RELEASE);
   for (uint32_t c = 0; c < ncpu; c++)
     if (targets & (1u << c))
