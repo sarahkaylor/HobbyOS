@@ -1,0 +1,26 @@
+C6-p7b: partial gate batch on the PROPOSED fix tree (a0235c57, branch cp-p7b-kstack-for-c1k6), strix KVM.
+Script ~/cp/p7b/gates.sh (= ~/cp/integ-gates12.sh retargeted to ~/cp/lanes/p7, cp-p7b-* exports, up to P5).
+STOPPED by this lane at 15:5x after the coordinator re-homed the fix to C1-k6 (schedule() is C1-k6's file);
+the fpu_sig boot in flight was killed by PID. Not a parity claim: probes avx..forkva only.
+
+tree  start 15:24:12
+build rc=0 15:24:20
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0lp_check_console: kernel rows intact 27618/27618, user rows intact 12817/12817, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0

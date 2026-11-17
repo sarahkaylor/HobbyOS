@@ -1,0 +1,102 @@
+C6-p7b: kstack probe (tools/gate/t3_linux_probe.sh kstack, LP_TIMEOUT=300, under qemu-slot.sh; strix KVM, test kernel)
+
+results.txt rows:
+probe kstack det1 rc=1 t3_linux_probe: FAIL — kstack never printed '[LP] done rc=0' (tier rc=1) 15:10:29
+probe kstack integ8det rc=1 t3_linux_probe: FAIL — kstack never printed '[LP] done rc=0' (tier rc=1) 15:23:18
+probe kstack fix1 rc=0 [LP] done rc=0 15:24:00
+
+=== det1: 5564bd40 (integ9 + pin bookkeeping and detector, NO skip) -- pre-fix
+--- gate output (probe rows + verdict) ---
+[LP] kstack probe: tasks=6 ms=4000 users=4 rounds=2
+[LP] S1 round 1: started 6 kernel tasks, 4 churn children
+[LP] PASS S1 every stress task started
+t3_linux_probe: FAIL — kstack never printed '[LP] done rc=0' (tier rc=1)
+--- console: KSTACK / fault / lock-strand rows (first 30) ---
+[KSTACK-SHARE] site=schedule cpu=0 slot=7 ? still on its stack: cpu=3 n=1
+[KSTACK-SHARE] site=schedule cpu=1 slot=8 ? still on its stack: cpu=5 n=2
+[KSTACK-SHARE] site=schedule cpu=1 slot=7 ? still on its stack: cpu=0 n=3
+[KSTACK-SHARE] site=schedule cpu=4 slot=8 ? still on its stack: cpu=1 n=4
+[KSTACK-SHARE] site=schedule cpu=3 slot=9 ? still on its stack: cpu=0 n=5
+[KSTACK-SHARE] site=schedule cpu=3 slot=9 ? still on its stack: cpu=5 n=6
+[KSTACK-SHARE] site=schedule cpu=1 slot=10 ? still on its stack: cpu=6 n=7
+[KSTACK-SHARE] site=schedule cpu=1 slot=10 ? still on its stack: cpu=5 n=8
+[KSTACK-ST] start run=1 tasks=6/6 ms=4000
+[KSTACK-SHARE] site=schedule cpu=4 slot=12 ? still on its stack: cpu=5 n=9
+[KSTACK-SHARE] site=schedule cpu=3 slot=10 ? still on its stack: cpu=6 n=10
+[KSTACK-SHARE] site=schedule cpu=6 slot=12 ? still on its stack: cpu=0 n=11
+[KSTACK-SHARE] site=schedule cpu=1 slot=10 ? still on its stack: cpu=4 n=12
+[KSTACK-SHARE] site=schedule cpu=0 slot=9 ? still on its stack: cpu=3 n=13
+[KSTACK-SHARE] site=schedule cpu=5 slot=11 ? still on its stack: cpu=1 n=14
+[KSTACK-SHARE] site=schedule cpu=1 slot=12 ? still on its stack: cpu=5 n=15
+[KSTACK-SHARE] site=schedule cpu=0 slot=8 ? still on its stack: cpu=3 n=16
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000010
+[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=14 rip=0x0000000000000005 cr2=0x0000000000000005 pid=6 err=0 cr3=0x0000000200C78000 pd480=0x00000001FC000083
+[STALLBREAK] cpu=7 lock=0x0000000074d57988 owner_cpu=5 stale_ms=2092 owner_pc=0x0000000000000000 owner_pc2=0x0000000000000000 waiter_stage=0 pc=0x00000000700fc514
+[STALLBREAK] cpu=2 lock=0x0000000074d57988 owner_cpu=7 stale_ms=2574 owner_pc=0x0000000000000000 owner_pc2=0x0000000000000000 waiter_stage=0 pc=0x00000000700fc514
+(counts: KSTACK-SHARE rows=16 FATAL=1 STALLBREAK=2)
+
+=== integ8det: 53bcfc18 (integ8 f802fa77 + the same detector commit cherry-picked) -- pre-fix, integ8
+--- gate output (probe rows + verdict) ---
+[LP] kstack probe: tasks=6 ms=4000 users=4 rounds=2
+[LP] S1 round 1: started 6 kernel tasks, 4 churn children
+[LP] PASS S1 every stress task started
+t3_linux_probe: FAIL — kstack never printed '[LP] done rc=0' (tier rc=1)
+--- console: KSTACK / fault / lock-strand rows (first 30) ---
+[KSTACK-SHARE] site=schedule cpu=4 slot=1 ? still on its stack: cpu=2 n=1
+[KSTACK-SHARE] site=schedule cpu=0 slot=10 ? still on its stack: cpu=5 n=2
+[KSTACK-ST] start run=1 tasks=6/6 ms=4000
+[KSTACK-SHARE] site=schedule cpu=5 slot=12 ? still on its stack: cpu=0 n=3
+[KSTACK-SHARE] site=schedule cpu=5 slot=13 ? still on its stack: cpu=0 n=4
+[KSTACK-SHARE] site=schedule cpu=7 slot=15 ? still on its stack: cpu=6 n=5
+[KSTACK-SHARE] site=schedule cpu=4 slot=15 ? still on its stack: cpu=7 n=6
+[KSTACK-SHARE] site=schedule cpu=7 slot=15 ? still on its stack: cpu=6 n=7
+[KSTACK-SHARE] site=schedule cpu=4 slot=15 ? still on its stack: cpu=7 n=8
+[KSTACK-SHARE] site=schedule cpu=4 slot=13 ? still on its stack: cpu=7 n=9
+[KSTACK-SHARE] site=schedule cpu=7 slot=10 ? still on its stack: cpu=6 n=10
+[KSTACK-SHARE] site=schedule cpu=7 slot=15 ? still on its stack: cpu=6 n=11
+[KSTACK-SHARE] site=schedule cpu=5 slot=10 ? still on its stack: cpu=0 n=12
+[KSTACK-SHARE] site=schedule cpu=5 slot=13 ? still on its stack: cpu=0 n=13
+[KSTACK-SHARE] site=schedule cpu=4 slot=15 ? still on its stack: cpu=5 n=14
+[KSTACK-SHARE] site=schedule cpu=6 slot=14 ? still on its stack: cpu=4 n=15
+[KSTACK-SHARE] site=schedule cpu=0 slot=15 ? still on its stack: cpu=5 n=16
+[STALLBREAK] cpu=3 lock=0x0000000074d57988 owner_cpu=5 stale_ms=2075 owner_pc=0x0000000000000000 owner_pc2=0x0000000000000000 waiter_stage=0 pc=0x00000000700f8b54
+[STALLBREAK] cpu=2 lock=0x000000007673aef4 owner_cpu=7 stale_ms=2089 owner_pc=0x00000000700f8b54 owner_pc2=0x00000000700e18f7 waiter_stage=0 pc=0x00000000700f8b54
+[STALLBREAK] cpu=6 lock=0x0000000074d57988 owner_cpu=3 stale_ms=2234 owner_pc=0x0000000000000000 owner_pc2=0x0000000000000000 waiter_stage=0 pc=0x00000000700f8b54
+[KSTACK-ST] done run=1 yields=4540 canary_bad=0 share=594
+[STALLBREAK] cpu=2 lock=0x000000007673aef4 owner_cpu=1 stale_ms=2090 owner_pc=0x0000000000000000 owner_pc2=0x0000000000000000 waiter_stage=0 pc=0x00000000700f8b54
+(counts: KSTACK-SHARE rows=16 FATAL=0 STALLBREAK=4)
+
+=== fix1: a0235c57 (the fix)
+--- gate output (probe rows + verdict) ---
+[LP] kstack probe: tasks=6 ms=4000 users=4 rounds=2
+[LP] S1 round 1: started 6 kernel tasks, 4 churn children
+[LP] PASS S1 every stress task started
+[LP] S2 round 1: live=0 after 5198 ms, yields=33209, children reaped 4/4, sigchld=11
+[LP] PASS S2 the stress run completed
+[LP] PASS S2 the tasks really yielded (>1000 switches)
+[LP] S3 round 1: resumes of a kernel task another CPU was still on: 0
+[LP] PASS S3 no kernel-task stack was shared by two CPUs
+[LP] S4 round 1: canary mismatches across a yield: 0
+[LP] PASS S4 every task's frame survived its yields
+[LP] S1 round 2: started 6 kernel tasks, 4 churn children
+[LP] PASS S1 every stress task started
+[LP] S2 round 2: live=0 after 5192 ms, yields=32638, children reaped 4/4, sigchld=20
+[LP] PASS S2 the stress run completed
+[LP] PASS S2 the tasks really yielded (>1000 switches)
+[LP] S3 round 2: resumes of a kernel task another CPU was still on: 0
+[LP] PASS S3 no kernel-task stack was shared by two CPUs
+[LP] S4 round 2: canary mismatches across a yield: 0
+[LP] PASS S4 every task's frame survived its yields
+[LP] done rc=0
+--- host-side check: lp_check_kstack.py (console kept: /home/sarah/cp/p7b/kstack.fix1.gate.console.log) ---
+lp_check_kstack: run 1 yields=33209 canary_bad=0 share=0
+lp_check_kstack: run 2 yields=65847 canary_bad=0 share=0
+lp_check_kstack: PASS
+t3_linux_probe: PASS — kstack reached its done marker
+--- console: KSTACK / fault / lock-strand rows (first 30) ---
+[KSTACK-ST] start run=1 tasks=6/6 ms=4000
+[KSTACK-ST] done run=1 yields=33209 canary_bad=0 share=0 pin_skips=3875
+[KSTACK-ST] start run=2 tasks=6/6 ms=4000
+[KSTACK-ST] done run=2 yields=65847 canary_bad=0 share=0 pin_skips=7829
+[LOCKCNT] STALLBREAK=0 STOLEN=0 LOCKFOREVER=0 UNOWNED-FREED=0
+(counts: KSTACK-SHARE rows=0 FATAL=0 STALLBREAK=0)

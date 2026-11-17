@@ -1,0 +1,63 @@
+C6-p7b: Gate P5 on integ9 + C3-ext2w3 [KSTACK-RELEASE] probe + this lane's [KSTACK-SHARE] detector
+Tree: local branch p7b-integ9-release-probe = adb81ee4 + 5564bd40 (pin/detector, no skip) + 1740044e (git am of
+  ~/hobbyos-cp-lanes/ext2w3/docs/cp-ext2w-evidence/r3-kstack-release-probe-for-c1k6.patch.txt). strix KVM, -smp 8 -m 12G.
+Command: ~/cp/p7b/run-p5.sh rel1 / rel2 (the integrator P5 line, P5_PROBES="vkcube d3d11 d3d12 fullscr").
+[KSTACK-RELEASE] = a kernel task made READY while this CPU is on its stack (rows n=1..4, then every 1024th).
+[KSTACK-SHARE]   = a pick RESUMES a kernel task while another CPU is still on its stack (the actual hazard).
+
+p5 rel1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendump
+p5 rel2 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendump
+
+=== rel1: KSTACK-RELEASE rows=4 KSTACK-SHARE rows=3 fault rows=0
+[KSTACK-RELEASE] n=1 cpu=4 pid=2 rsp=0xFFFF800023FFE730 resume_sp=0xFFFF800023FFF000 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=2 cpu=4 pid=2 rsp=0xFFFF800023FFB2C0 resume_sp=0xFFFF800023FFBB98 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=3 cpu=4 pid=2 rsp=0xFFFF800023FFB330 resume_sp=0xFFFF800023FFBC08 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=4 cpu=4 pid=2 rsp=0xFFFF800023FFB330 resume_sp=0xFFFF800023FFBC08 (READY while this CPU is on its stack)
+--- serial line 3048 (context)
+[P5] end d3d12 status=0 ms=66922
+[P5] begin fullscr : wine Z:\CP\P5\FS\fullscr.exe run 6000
+Loading program for scheduler (v2 AS): /CP/WINE/bin/wine
+elf loader: interpreter /lib64/ld-linux-x86-64.so.2 mapped
+[KSTACK-SHARE] site=schedule cpu=3 slot=260 ? still on its stack: cpu=2 n=1
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000001160 start=0x1008001100
+--- serial line 3145 (context)
+[X] hobbyos: randr: crtc mode 1920x1080 on screen 1920x1080
+/ICEWMBG.BIN
+v2 loader: image mapped (lazy), bytes=3702744 pages=904 first=in elap=4ms
+[IMGPRF] pid=265 start: pages=904 batch=128
+[KSTACK-SHARE] site=schedule cpu=0 slot=266 ? still on its stack: cpu=7 n=2
+[IMGPRF] pid=265 done: pages=904 mapped=855 skipped=49 batches=8 stop=0 ms=6
+--- serial line 3247 (context)
+/ICEWMBG.BIN
+[P7] scanout X fullscreen window/size 2098949 125830200 seq=0
+[X] hobbyos: fullscreen window 0x200705 1920x1080
+elf loader: interpreter /lib64/ld-linux-x86-64.so.2 mapped
+[KSTACK-SHARE] site=idle cpu=0 slot=271 ? still on its stack: cpu=5 n=3
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000001160 start=0x1008001100
+
+=== rel2: KSTACK-RELEASE rows=4 KSTACK-SHARE rows=2 fault rows=0
+[KSTACK-RELEASE] n=1 cpu=4 pid=2 rsp=0xFFFF800023FFB2D0 resume_sp=0xFFFF800023FFBBA8 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=2 cpu=4 pid=2 rsp=0xFFFF800023FFB2D0 resume_sp=0xFFFF800023FFBBA8 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=3 cpu=4 pid=2 rsp=0xFFFF800023FFB2D0 resume_sp=0xFFFF800023FFBBA8 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=4 cpu=4 pid=2 rsp=0xFFFF800023FFB2D0 resume_sp=0xFFFF800023FFBBA8 (READY while this CPU is on its stack)
+--- serial line 3102 (context)
+v2 loader: image mapped (lazy), bytes=3702744 pages=904 first=in elap=4ms
+[GDT] rel=/VK/share/vulkan/icd.d total=1 path=/CP/VK/share/vulkan/icd.d
+[IMGPRF] pid=259 start: pages=904 batch=128
+[TXT] n=30208 bad=0
+[KSTACK-SHARE] site=schedule cpu=0 slot=260 ? still on its stack: cpu=6 n=1
+[IMGPRF] pid=259 done: pages=904 mapped=861 skipped=43 batches=8 stop=0 ms=8
+--- serial line 3247 (context)
+Loading program for scheduler (v2 AS): /CP/WINE/bin/wine
+[X] hobbyos: randr: screen 0 now 1920x1080 (508x286 mm)
+[X] hobbyos: randr: crtc mode 1920x1080 on screen 1920x1080
+/ICEWMBG.BIN
+[KSTACK-SHARE] site=schedule cpu=2 slot=268 ? still on its stack: cpu=7 n=2
+elf loader: interpreter /lib64/ld-linux-x86-64.so.2 mapped
+
+Reading: pid 2 (block_idx=1, cleared at 0x22000000; the XSESSION spawn worker for /XHOBBY.BIN) is the first
+kernel task on block 1 -- the block whose stack (top 0xFFFF800023FFF000) both integ9 CPUs were on.  Spawn
+workers take the lowest free block and exit after the load, so later workers reuse block 1.
+rel1 line 3247 and rel2 line 3247 are the integ9 fault moment exactly: the fscheck spawn worker loading wine
+(elf loader: interpreter mapped) while ICEWMBG.BIN starts on the restored 1920x1080 screen -- and a kernel task
+is resumed while another CPU is still on its stack.  Benign in these two boots (no fault row).
