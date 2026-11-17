@@ -163,7 +163,23 @@ static void cover(HWND fw, DWORD w, DWORD h, const char *tag, DWORD hold) {
     if ((wr.left == 0 && wr.top == 0 && wr.right == (LONG)w && wr.bottom == (LONG)h) || settle >= 8000)
       break;
   }
-  pump(1000);
+  /* Watch it for 3 s: a window manager or a late ConfigureNotify can move it
+     again after it first matched (run 2, M5: matched at 100 ms, back to the
+     old 1920x1080 by 1.1 s).  Every change is a row. */
+  RECT last = wr;
+  for (int i = 0; i < 30; i++) {
+    pump(100);
+    RECT q;
+    GetWindowRect(fw, &q);
+    if (q.left != last.left || q.top != last.top || q.right != last.right || q.bottom != last.bottom) {
+      struct row c = {{0}, 0};
+      r_s(&c, "[FS] "); r_s(&c, tag); r_s(&c, " rect changed at +"); r_d(&c, (long long)(GetTickCount() - t0));
+      r_s(&c, " ms -> "); r_d(&c, q.left); r_s(&c, ","); r_d(&c, q.top); r_s(&c, ",");
+      r_d(&c, q.right); r_s(&c, ","); r_d(&c, q.bottom);
+      r_end(&c);
+      last = q;
+    }
+  }
   GetWindowRect(fw, &wr);
   GetClientRect(fw, &cr);
   struct row r = {{0}, 0};
