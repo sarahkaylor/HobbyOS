@@ -82,15 +82,38 @@ done
 [ -n "$OVMF_SRC" ] || die "no OVMF_CODE_4M.fd"
 OVMF="$OUT/OVMF_CODE_4M.fd"; [ -f "$OVMF" ] || cp "$OVMF_SRC" "$OVMF"
 
+# A boot whose serial stops growing for SILENT_S seconds is wedged: the HMP
+# monitor (a unix socket in $OUT) dumps every vCPU's registers twice, 2 s
+# apart, into $OUT/wedge-regs-<boot>.txt, and the boot ends there instead of
+# at TIMEOUT_S.  rg_wedge_rows names each vCPU's RIP from hobbyos.elf.
+SILENT_S="${SILENT_S:-300}"
 rg_boot() { # rg_boot <log>: one boot, ends at System halt
   local log="$1"
+  local mon="$OUT/mon-$(basename "$log" .log).sock" regs="$OUT/wedge-regs-$(basename "$log" .log).txt"
   : >"$log"
+  rm -f "$mon" "$regs"
   bash "$ROOT/tools/cp/qemu-slot.sh" bash -c '
     ( make -o disk.img ARCH=intel MODE=test EDK2_X86_64='"$OVMF"' CPDATA='"$PIMG"' run \
-           QEMU_ARGS="-display none -enable-kvm" >>'"$log"' 2>&1 & )
+           QEMU_ARGS="-display none -enable-kvm -monitor unix:'"$mon"',server,nowait" >>'"$log"' 2>&1 & )
+    last=0; quiet=0
     for i in $(seq 1 '"$TIMEOUT_S"'); do
       grep -aq "System halt" '"$log"' && sleep 1 && break
       [ $i -gt 30 ] && ! fuser '"$IMG"' >/dev/null 2>&1 && break
+      sz=$(stat -c %s '"$log"' 2>/dev/null || echo 0)
+      if [ "$sz" = "$last" ]; then quiet=$((quiet + 1)); else quiet=0; last=$sz; fi
+      if [ $quiet -ge '"$SILENT_S"' ] && [ -S '"$mon"' ]; then
+        for k in 1 2; do
+          { echo "== info registers -a (sample $k, serial silent $quiet s)"
+            printf "info registers -a\n" | socat -t 3 - UNIX-CONNECT:'"$mon"' 2>&1 | tr -d "\r"
+            for c in 0 1 2 3 4 5 6 7; do # each vCPU stack: who called the safe_wfi/spin RIP
+              echo "== cpu $c stack (x/48gx \$rsp)"
+              printf "cpu $c\nx/48gx \$rsp\n" | socat -t 3 - UNIX-CONNECT:'"$mon"' 2>&1 | tr -d "\r"
+            done
+          } >> '"$regs"'
+          sleep 2
+        done
+        break
+      fi
       sleep 1
     done
     for qp in $(fuser '"$IMG"' 2>/dev/null); do kill "$qp" 2>/dev/null; done
@@ -163,7 +186,38 @@ nok=$(sed -n 's/^\[RG\] race round [0-9]*: clients done=3 ok=\([0-9]\).*/\1/p' "
 grep -a '^\[RG\] race round' "$B2"
 [ "$nr" -ge 4 ] && good "boot 2: $nr race rounds of 3 concurrent Wine clients all finished, no wedge (C8 stop 6); clients exit 0: $nok of $((nr * 3))" ||
   bad "boot 2: race rounds finished: $nr of 4"
-grep -aq 'YLOCK-WEDGE\|YLOCK-STALL' "$B2" && bad "boot 2: ylock stall/wedge rows: $(grep -a 'YLOCK-' "$B2" | head -3 | tr '\n' ' ')"
+# Lock rows.  [YLOCK-STALL] is a contention REPORT (a waiter spun ~1M times,
+# a few ms; lockscale.c keeps waiting) and is listed, named, not graded.
+# A wedge is graded: [YLOCK-WEDGE] (64M spins), the ext2 lock held 2 s
+# ([E2W] ext2_lock wait), or a slot quarantined by the resume pre-flight
+# ([RESUME-PREFLIGHT] ... QUARANTINE: a user frame with a RIP that is not a
+# mapped user address, trap.c resume_preflight_c).
+if [ -z "${LOCKNAME_FILE:-}" ]; then # struct file's layout, from this tree's fs.h
+  printf '#include <stddef.h>\n#include <stdio.h>\n#include "fs.h"\nint main(void){printf("%%zu %%zu %%zu\\n",sizeof(struct file),offsetof(struct file,lock),offsetof(struct file,pos_lock));return 0;}\n' > "$OUT/fslayout.c"
+  clang -D__x86_64__ -Isrc/include -o "$OUT/fslayout" "$OUT/fslayout.c" 2>/dev/null && LOCKNAME_FILE=$("$OUT/fslayout")
+fi
+for b in "$B1" "$B2"; do
+  bn=$(basename "$b" .txt)
+  addrs=$(grep -ao 'YLOCK-STALL\] site=[^ ]* lock=[^ ]* addr=0x[0-9A-Fa-f]*' "$b" | sed 's/.*addr=//' | sort -u | tr '\n' ' ')
+  if [ -n "$addrs" ]; then
+    names=$(LOCKNAME_FILE="${LOCKNAME_FILE:-}" python3 tools/cp/ext2w/lockname.py hobbyos.elf $addrs 2>/dev/null | tr '\n' ';')
+    echo "[HOST] info $bn: [YLOCK-STALL] contention rows on: ${names:-$addrs}"
+  fi
+  grep -aq 'YLOCK-WEDGE' "$b" && bad "$bn: [YLOCK-WEDGE]: $(grep -a 'YLOCK-WEDGE\|YLOCK-OWNER' "$b" | head -2 | tr '\n' ' ')"
+  grep -aq 'E2W\] ext2_lock wait' "$b" && bad "$bn: $(grep -a 'E2W\] ext2_lock wait' "$b" | head -1)"
+  grep -aq 'RESUME-PREFLIGHT.*QUARANTINE' "$b" && bad "$bn: $(grep -a 'RESUME-PREFLIGHT' "$b" | head -2 | tr '\n' ' ')"
+  # a kernel stack smash or the flusher's own stack guard (ext2_vfs.c)
+  grep -aq 'stack smashing detected\|E2W-KSTACK\]' "$b" &&
+    bad "$bn: $(grep -a -A1 'stack smashing detected\|E2W-KSTACK\]' "$b" | head -3 | tr '\n' ' ')"
+done
+for r in "$OUT"/wedge-regs-*.txt; do # a wedged boot: name every vCPU's RIP
+  [ -f "$r" ] || continue
+  bad "$(basename "$r" .txt): serial silent ${SILENT_S} s, vCPU registers dumped"
+  grep -ao "^CPU#[0-9]*\|RIP=[0-9a-f]*" "$r" | paste - - | sort -u | while read -r cpu rip; do
+    a=0x${rip#RIP=}
+    echo "[HOST] info $(basename "$r" .txt): $cpu rip=$a $(llvm-addr2line -f -e hobbyos.elf "$a" 2>/dev/null | head -1)"
+  done
+done
 fsck_img b2
 if [ "$fails" = 0 ]; then echo "reg_gate: PASS"; else echo "reg_gate: FAIL ($fails)"; fi
 [ "$fails" = 0 ]
