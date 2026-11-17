@@ -10,7 +10,10 @@
  *            hives before SIGKILL); "[RG] done" -- NO sync(2): the kernel's
  *            write-back (flusher, halt waits for a clean cache) must do it
  *   phase 2  (next boot, same disk) wine reg query HKCU\Software\CpTest /v X,
- *            wineserver -k, "[RG] done"
+ *            the same for HKLM, wineserver -k; then REGP_RACE_ROUNDS rounds of
+ *            three Wine clients started at the same moment (racing wineservers
+ *            on the ext2 prefix, docs/cp-p8.md stop 6), each round closed by
+ *            wineserver -k; "[RG] done"
  * The host greps the query output and checks the image (e2fsck, debugfs).
  */
 #include <errno.h>
@@ -22,6 +25,9 @@
 #define WINE_EXPORT "/srv/nfs/cp-ext2w-reg"
 #endif
 #define MNT "/CP"
+#ifndef REGP_RACE_ROUNDS
+#define REGP_RACE_ROUNDS 4
+#endif
 
 static void pc(const char *s) { print_console(s); }
 static void pd(long v) {
@@ -148,6 +154,32 @@ int main(void) {
   char *a_q2[] = { (char *)"wine", (char *)"reg", (char *)"query", (char *)"HKLM\\Software\\CpTest",
                    (char *)"/v", (char *)"X", 0 };
   step("regquery-hklm", "/CP/WINE/bin/wine", a_q2, 900);
+  step("kill0", "/CP/WINE/bin/wineserver", a_k, 60);
+  quiesce("kill0", 60);
+  /* C8 stop 6 (docs/cp-p8.md): several Wine clients start at the same moment
+     on the ext2 prefix, so several wineservers race for the server lock.
+     Rounds of 3 concurrent clients, each round closed by wineserver -k; a
+     wedge shows as a round that never finishes. */
+  for (int round = 0; round < REGP_RACE_ROUNDS; round++) {
+    uint64_t t0 = now_ms();
+    int pids[3];
+    char *a_r[] = { (char *)"wine", (char *)"reg", (char *)"query", (char *)"HKCU\\Software\\CpTest", 0 };
+    for (int k = 0; k < 3; k++) pids[k] = spawn_ex("/CP/WINE/bin/wine", a_r, envp, 0, 0);
+    int done = 0, ok = 0;
+    for (int t = 0; t < 600 * 4 && done < 3; t++) {
+      for (int k = 0; k < 3; k++) {
+        if (pids[k] <= 0) continue;
+        int st = -1;
+        if (waitpid(pids[k], &st, 1) != 0) { done++; if (st == 0) ok++; pids[k] = 0; }
+      }
+      if (done < 3) usleep(250000);
+    }
+    pc("[RG] race round "); pd(round); pc(": clients done="); pd(done); pc(" ok="); pd(ok);
+    pc(" ms="); pd((long)(now_ms() - t0)); pc("\n");
+    for (int k = 0; k < 3; k++) if (pids[k] > 0) kill(pids[k], 9);
+    step("race-kill", "/CP/WINE/bin/wineserver", a_k, 60);
+    quiesce("race", 60);
+  }
   step("kill", "/CP/WINE/bin/wineserver", a_k, 60);
   quiesce("kill", 60);
 #endif

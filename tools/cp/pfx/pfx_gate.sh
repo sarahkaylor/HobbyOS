@@ -9,9 +9,12 @@
 #   ext2w   ext2 write-back: speed rows + write-back correctness
 #           (linux_probe_ext2w.c, cp/ext2w; its reboot/plug-pull halves
 #           are tools/cp/ext2w/ext2w_gate.sh)
+#   e2stress  6 processes x 3 threads + racing "servers" at once in one ext2
+#           directory: create/rename/fsync/F_SETLK/getdents/mmap-read (C8
+#           stop 6, linux_probe_e2stress.c)
 # A probe that SKIPs a row here is a failure: the disk is attached.
 #
-# Usage: bash tools/cp/pfx/pfx_gate.sh [probe...]   (default: all four)
+# Usage: bash tools/cp/pfx/pfx_gate.sh [probe...]   (default: all five)
 # Env: LP_TIMEOUT (default 600), GATE_DIR (default <tree>/obj/pfx-gate).
 # Every boot holds one QEMU slot (tools/cp/qemu-slot.sh), one slot per boot.
 set -u
@@ -20,7 +23,7 @@ D="${GATE_DIR:-$ROOT/obj/pfx-gate}"
 PATH="/usr/sbin:/sbin:$PATH"
 PROBES="$*"
 if [ -z "$PROBES" ]; then
-  for p in pfx bigobj fatcoh ext2w; do [ -f "$ROOT/src/user/linux_probe_$p.c" ] && PROBES="$PROBES $p"; done
+  for p in pfx bigobj fatcoh ext2w e2stress; do [ -f "$ROOT/src/user/linux_probe_$p.c" ] && PROBES="$PROBES $p"; done
 fi
 fails=0
 rm -rf "$D" && mkdir -p "$D"

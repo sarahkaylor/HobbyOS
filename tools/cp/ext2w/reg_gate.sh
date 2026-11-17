@@ -154,6 +154,16 @@ qv=$(awk '/^\[RG\] begin regquery-hklm/{on=1;next} /^\[RG\] end regquery-hklm/{o
      sed 's/\[[A-Z][A-Z0-9_-]*\] .*$//' | grep -aE '^(HKEY_| {4})' | tr '\n' ' ')
 printf '%s' "$qv" | grep -aqE 'HKEY_LOCAL_MACHINE\\Software\\CpTest +X +REG_SZ +Y( |$)' &&
   good "boot 2: HKLM reg query prints X REG_SZ Y" || bad "boot 2: the HKLM value is not there"
+# stop 6 is a wedge: every round must FINISH (all 3 clients exited).  A
+# client that exits non-zero is counted, not graded: Wine's own failures in a
+# race (measured: c000011f too many open files on the lane, c00000fd in
+# start.exe on base5) are not the storage lane's.
+nr=$(grep -ac '^\[RG\] race round [0-9]*: clients done=3 ' "$B2")
+nok=$(sed -n 's/^\[RG\] race round [0-9]*: clients done=3 ok=\([0-9]\).*/\1/p' "$B2" | awk '{s+=$1} END{print s+0}')
+grep -a '^\[RG\] race round' "$B2"
+[ "$nr" -ge 4 ] && good "boot 2: $nr race rounds of 3 concurrent Wine clients all finished, no wedge (C8 stop 6); clients exit 0: $nok of $((nr * 3))" ||
+  bad "boot 2: race rounds finished: $nr of 4"
+grep -aq 'YLOCK-WEDGE\|YLOCK-STALL' "$B2" && bad "boot 2: ylock stall/wedge rows: $(grep -a 'YLOCK-' "$B2" | head -3 | tr '\n' ' ')"
 fsck_img b2
 if [ "$fails" = 0 ]; then echo "reg_gate: PASS"; else echo "reg_gate: FAIL ($fails)"; fi
 [ "$fails" = 0 ]
