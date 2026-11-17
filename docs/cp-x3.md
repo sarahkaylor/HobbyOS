@@ -165,8 +165,16 @@ that changes resolution from its own settings while fullscreen is exactly M5.
 | Wine fullscreen 1280x720 / 1920x1080 / 1280x720, restore on exit | PASS (fs4, with IceWM 0005) | — | `fullscr-fs4-PASS.txt` |
 | full batch (pre-merge) | parity; exitgroup X7 failed once under load (worst 2510 ms), 2/2 PASS on rerun | base5 | `gates-premerge.txt` |
 
-Post-merge runs: see `gates-postmerge.txt`, `p4-postmerge-*.txt`,
-`p5-postmerge-*.txt`.
+**After merging `cyberpunk` 15ad4a35** (C0-sync: main in), same sources:
+
+| Row | LibreOffice on the disk (default) | `LO_ON_DISK=` | Evidence |
+|---|---|---|---|
+| Gate P4 G1–G3 | PASS, 0 fault rows | PASS, 0 fault rows | `postmerge-mlo.txt`, `postmerge-mnolo.txt` |
+| Gate P5 vkcube / d3d11 / d3d12 | PASS / ran 65 s, done rc=0, but the grader missed its RESULT row (a kernel `[PROCLOCK-HOLD]` row spliced into it on the console) / PASS | PASS / PASS / PASS | same |
+| fullscr (M3/M4/M5 screendumps, restore) | PASS | PASS | same |
+| full batch | `gates-postmerge.txt` | | |
+
+Screendumps: `evidence/cp-x3/postmerge/{lo,nolo}-*.png`.
 
 **Wine start-up faults are not this lane's** (`wine-faults-ab.txt`).  Single
 faults in a Wine process at start-up (explorer/rundll32/vkcube), all inside
