@@ -134,26 +134,27 @@ static int l_park(struct process *p, struct trap_frame *tf) {
 }
 
 /* Read a Linux timeout (struct timeval for select, struct timespec for
- * pselect6) into milliseconds: -1 = wait forever, rounded UP like Linux.
- * Returns 0 or -errno. */
-static int l_timeout_ms(struct process *p, uint64_t uptr, int is_timespec,
-                        int64_t *out_ms) {
+ * pselect6/ppoll) into microseconds: -1 = wait forever, rounded UP like
+ * Linux.  C1-k6: was milliseconds, which made select({0,100}) a 1 ms wait
+ * and every sub-tick timeout a tick.  Returns 0 or -errno. */
+static int l_timeout_us(struct process *p, uint64_t uptr, int is_timespec,
+                        int64_t *out_us) {
   if (uptr == 0) {
-    *out_ms = -1;
+    *out_us = -1;
     return 0;
   }
-  int64_t tv[2]; /* { sec, usec } or { sec, nsec } — 16 bytes either way */
+  int64_t tv[2];
   int r = l_copy_from_user(p, tv, uptr, sizeof tv);
   if (r != 0) return -EFAULT;
   if (tv[0] < 0 || tv[1] < 0) return -EINVAL;
+  if (tv[0] > 100000LL) tv[0] = 100000LL; /* 27.8 h is "forever" (the old cap) */
   if (is_timespec) {
     if (tv[1] >= 1000000000LL) return -EINVAL;
-    *out_ms = tv[0] * 1000 + (tv[1] + 999999) / 1000000;
+    *out_us = tv[0] * 1000000LL + (tv[1] + 999) / 1000;
   } else {
     if (tv[1] >= 1000000LL) return -EINVAL;
-    *out_ms = tv[0] * 1000 + (tv[1] + 999) / 1000;
+    *out_us = tv[0] * 1000000LL + tv[1];
   }
-  if (*out_ms < 0 || *out_ms > 100000000LL) *out_ms = 100000000LL;
   return 0;
 }
 
@@ -699,7 +700,7 @@ static int l_fd_close_range(struct process *p, struct trap_frame *tf) {
  * C1-k5: nfds is bounded by RLIMIT_NOFILE (Linux do_sys_poll: EINVAL above
  * it), not by the native 256-entry cap. */
 static int l_poll_common(struct process *p, struct trap_frame *tf, uint64_t ufds,
-                         int64_t nfds, int timeout) {
+                         int64_t nfds, int64_t timeout_us) {
   if (nfds < 0 || nfds > (int64_t)process_fd_limit(process_group(p)))
     return l_ret(tf, -EINVAL);
   if (nfds > 0) {
@@ -707,23 +708,25 @@ static int l_poll_common(struct process *p, struct trap_frame *tf, uint64_t ufds
     if (!l_user_ok(p, ufds, (uint64_t)nfds * sizeof(struct k_pollfd), 1))
       return l_ret(tf, -EFAULT);
   }
-  int r = file_poll(p, (struct k_pollfd *)ufds, (int)nfds, timeout);
+  int r = file_poll_us(p, (struct k_pollfd *)ufds, (int)nfds, timeout_us);
   if (r == -2) return l_park(p, tf);
   return l_ret(tf, r);
 }
 
 static int l_fd_poll(struct process *p, struct trap_frame *tf) {
-  return l_poll_common(p, tf, l_arg(tf, 0), l_argi(tf, 1), (int)l_argi(tf, 2));
+  int tmo = (int)l_argi(tf, 2); /* ms; any negative value is "forever" */
+  return l_poll_common(p, tf, l_arg(tf, 0), l_argi(tf, 1),
+                       tmo < 0 ? -1 : (int64_t)tmo * 1000);
 }
 
 /* C1-k5: ppoll(fds, nfds, const struct timespec *tmo, sigmask, sigsetsize).
  * A NULL timeout waits forever; the signal mask is not applied (the same
  * limitation as pselect6 below). */
 static int l_fd_ppoll(struct process *p, struct trap_frame *tf) {
-  int64_t ms = -1;
-  int err = l_timeout_ms(p, l_arg(tf, 2), 1, &ms);
+  int64_t us = -1;
+  int err = l_timeout_us(p, l_arg(tf, 2), 1, &us);
   if (err != 0) return l_ret(tf, err);
-  return l_poll_common(p, tf, l_arg(tf, 0), l_argi(tf, 1), (int)ms);
+  return l_poll_common(p, tf, l_arg(tf, 0), l_argi(tf, 1), us);
 }
 
 /* select(23) / pselect6(270).  C1-k5: Linux semantics for any nfds: the sets
@@ -744,8 +747,8 @@ static int l_select_common(struct process *p, struct trap_frame *tf,
   if (nfds < 0) return l_ret(tf, -EINVAL);
   if (nfds > (int64_t)MAX_OPEN_FDS) nfds = MAX_OPEN_FDS;
 
-  int64_t ms = -1;
-  int err = l_timeout_ms(p, utimeout, is_timespec, &ms);
+  int64_t us = -1;
+  int err = l_timeout_us(p, utimeout, is_timespec, &us);
   if (err != 0) return l_ret(tf, err);
 
   uint64_t rd[L_SEL_WORDS64], wr[L_SEL_WORDS64], ex[L_SEL_WORDS64];
@@ -774,8 +777,8 @@ static int l_select_common(struct process *p, struct trap_frame *tf,
   }
 
   /* x86_64 is little-endian: a long array is the same bits as 2*nl u32. */
-  int r = file_select_words(p, (int)nfds, (uint32_t *)(void *)prd, (uint32_t *)(void *)pwr,
-                            (uint32_t *)(void *)pex, nl * 2, (int)ms);
+  int r = file_select_words_us(p, (int)nfds, (uint32_t *)(void *)prd, (uint32_t *)(void *)pwr,
+                               (uint32_t *)(void *)pex, nl * 2, us);
   if (r == -2) return l_park(p, tf);
   if (r >= 0) {
     /* Ready sets (or all-zero on timeout) go back to the guest: exactly
@@ -1449,6 +1452,157 @@ static int l_fd_eventfd2(struct process *p, struct trap_frame *tf) {
                              (int)l_argi(tf, 1));
 }
 
+/* ---- C1-k6: signalfd / signalfd4 (docs/cp-k6.md §4) ---------------------
+ *
+ * signalfd(fd, const sigset_t *mask, size_t sizemask) and signalfd4(..., flags).
+ * fd == -1 makes a new signalfd; otherwise fd must be a signalfd and its mask
+ * is replaced.  sizemask must be 8 (the kernel sigset); flags SFD_CLOEXEC |
+ * SFD_NONBLOCK (O_CLOEXEC/O_NONBLOCK values).  SIGKILL and SIGSTOP are
+ * silently dropped from the mask, as Linux does.
+ *
+ * A read dequeues the READER's pending signals that are in the mask -- its
+ * thread-directed set first, then its own process-directed bits, then the
+ * group's -- lowest number first, one 128-byte signalfd_siginfo each, up to
+ * count / 128.  Nothing pending: EAGAIN (O_NONBLOCK) or a park that the next
+ * signal sent to a Linux-ABI process ends (process_signal_directed ->
+ * l_signalfd_notify -> poll_notify, only while a signalfd exists), with a
+ * 250 ms re-check as the safety net.  Programs block the signals they read
+ * this way; a blocked SIG_DFL signal stays pending for it (process.c). */
+#define L_SFD_CLOEXEC 0x80000
+#define L_SFD_NONBLOCK 0x800
+#define L_SYS_signalfd4 289
+#define L_SSI_SIZE 128
+static int l_sfd_live; /* open signalfds; 0 = signal sends skip the notify */
+
+void l_signalfd_count(int delta) {
+  __atomic_fetch_add(&l_sfd_live, delta, __ATOMIC_SEQ_CST);
+}
+
+/* process.c, after a signal has been made pending (no lock held). */
+void l_signalfd_notify(void) {
+  if (__atomic_load_n(&l_sfd_live, __ATOMIC_SEQ_CST) > 0) poll_notify();
+}
+
+static uint64_t l_sfd_pending(struct process *cur, uint64_t mask) {
+  struct process *grp = process_group(cur);
+  uint64_t pend = cur->sig_pending_dir | cur->sig_pending;
+  if (grp && grp != cur) pend |= grp->sig_pending;
+  return pend & mask;
+}
+
+int l_signalfd_ready(struct file *f) {
+  struct process *cur = current_process();
+  if (!cur) return 0;
+  return l_sfd_pending(cur, __atomic_load_n(&f->sigfd.mask, __ATOMIC_SEQ_CST)) != 0;
+}
+
+struct l_ssi_rec {
+  int sig, code, pid, status;
+};
+
+int l_signalfd_read(struct file *f, void *buf, int size) {
+  struct process *cur = current_process();
+  if (!cur) return -EINVAL;
+  if (size < L_SSI_SIZE) return -EINVAL;
+  struct process *grp = process_group(cur);
+  int max = size / L_SSI_SIZE;
+  if (max > 16) max = 16;
+  struct l_ssi_rec rec[16];
+  int n = 0;
+  for (;;) {
+    uint64_t seen = poll_seq_snapshot();
+    uint64_t mask = __atomic_load_n(&f->sigfd.mask, __ATOMIC_SEQ_CST);
+    uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+    while (n < max) {
+      uint64_t dir = cur->sig_pending_dir & mask;
+      uint64_t own = cur->sig_pending & mask;
+      uint64_t sh = (grp && grp != cur) ? (grp->sig_pending & mask) : 0;
+      uint64_t any = dir | own | sh;
+      if (!any) break;
+      int sig = __builtin_ctzll(any) + 1;
+      uint64_t bit = 1ull << (sig - 1);
+      int directed = (dir & bit) != 0;
+      if (directed) cur->sig_pending_dir &= ~bit;
+      else if (own & bit) cur->sig_pending &= ~bit;
+      else grp->sig_pending &= ~bit;
+      rec[n].sig = sig;
+      rec[n].code = directed ? -6 /* SI_TKILL */ : 0 /* SI_USER */;
+      rec[n].pid = 0; /* the sender is not recorded */
+      rec[n].status = 0;
+      if (sig == 17 /* SIGCHLD */ && grp && grp->sig_child_pid > 0) {
+        int st = grp->sig_child_status;
+        rec[n].pid = grp->sig_child_pid;
+        if ((st & 0x7f) == 0) {
+          rec[n].code = 1; /* CLD_EXITED */
+          rec[n].status = (st >> 8) & 0xff;
+        } else {
+          rec[n].code = 2; /* CLD_KILLED */
+          rec[n].status = st & 0x7f;
+        }
+      }
+      n++;
+    }
+    if (n > 0 || (f->open_flags & L_SFD_NONBLOCK)) {
+      spinlock_release_irqrestore(&proc_lock, pf);
+      break;
+    }
+    if (linux_compat_sig_deliverable(cur)) {
+      spinlock_release_irqrestore(&proc_lock, pf);
+      return -EINTR;
+    }
+    if (!process_park_ok_locked(cur)) { /* killed inside the syscall */
+      spinlock_release_irqrestore(&proc_lock, pf);
+      return -EINTR;
+    }
+    if (poll_park_locked(cur, seen)) { /* a signal raced the scan */
+      spinlock_release_irqrestore(&proc_lock, pf);
+      continue;
+    }
+    proc_set_deadline_us(cur, timer_get_us() + 250000);
+    cur->state = PROC_STATE_BLOCKED;
+    spinlock_release_irqrestore(&proc_lock, pf);
+    return -2; /* parked: the read restarts */
+  }
+  if (n == 0) return -EAGAIN;
+  for (int i = 0; i < n; i++) {
+    uint8_t ssi[L_SSI_SIZE];
+    for (int k = 0; k < L_SSI_SIZE; k++) ssi[k] = 0;
+    uint32_t v[11] = {(uint32_t)rec[i].sig, 0, (uint32_t)rec[i].code,
+                      (uint32_t)rec[i].pid, 0, 0, 0, 0, 0, 0,
+                      (uint32_t)rec[i].status};
+    /* ssi_signo@0 errno@4 code@8 pid@12 uid@16 fd@20 tid@24 band@28
+       overrun@32 trapno@36 status@40 (byte-wise: no unaligned stores) */
+    for (int w = 0; w < 11; w++)
+      for (int b = 0; b < 4; b++) ssi[w * 4 + b] = (uint8_t)(v[w] >> (8 * b));
+    if (l_copy_to_user(cur, (uint64_t)(uintptr_t)buf + (uint64_t)i * L_SSI_SIZE,
+                       ssi, L_SSI_SIZE) != 0)
+      return i ? i * L_SSI_SIZE : -EFAULT;
+  }
+  return n * L_SSI_SIZE;
+}
+
+static int l_fd_signalfd_common(struct process *p, struct trap_frame *tf,
+                                int fd, uint64_t umask, uint64_t sizemask,
+                                int flags) {
+  if (flags & ~(L_SFD_CLOEXEC | L_SFD_NONBLOCK)) return l_ret(tf, -EINVAL);
+  if (sizemask != 8) return l_ret(tf, -EINVAL);
+  uint64_t mask = 0;
+  if (l_copy_from_user(p, &mask, umask, 8) != 0) return l_ret(tf, -EFAULT);
+  mask &= ~((1ull << (9 - 1)) | (1ull << (19 - 1))); /* never SIGKILL/SIGSTOP */
+  if (fd == -1) return l_ret(tf, file_signalfd_create(p, mask, flags));
+  return l_ret(tf, file_signalfd_set_mask(p, fd, mask));
+}
+
+static int l_fd_signalfd(struct process *p, struct trap_frame *tf) {
+  return l_fd_signalfd_common(p, tf, (int)l_argi(tf, 0), l_arg(tf, 1),
+                              l_arg(tf, 2), 0);
+}
+
+static int l_fd_signalfd4(struct process *p, struct trap_frame *tf) {
+  return l_fd_signalfd_common(p, tf, (int)l_argi(tf, 0), l_arg(tf, 1),
+                              l_arg(tf, 2), (int)l_argi(tf, 3));
+}
+
 /* ---- cp/sys: inotify ------------------------------------------------------
  *
  * Refused as a kernel built without CONFIG_INOTIFY_USER refuses it: init and
@@ -1561,6 +1715,8 @@ const struct l_sysent l_tab_fd[] = { {L_SYS_fsync, l_fd_fsync, "fsync"},
   {L_SYS_fremovexattr, l_fd_fremovexattr, "fremovexattr"},
   {L_SYS_eventfd, l_fd_eventfd, "eventfd"},
   {L_SYS_eventfd2, l_fd_eventfd2, "eventfd2"},
+  {L_SYS_signalfd, l_fd_signalfd, "signalfd"},
+  {L_SYS_signalfd4, l_fd_signalfd4, "signalfd4"},
   {L_SYS_inotify_init, l_fd_inotify_init, "inotify_init"},
   {L_SYS_inotify_init1, l_fd_inotify_init, "inotify_init1"},
   {L_SYS_inotify_add_watch, l_fd_inotify_watch, "inotify_add_watch"},

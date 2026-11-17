@@ -31,6 +31,10 @@ static inline uint64_t rdtsc(void) {
   return ((uint64_t)hi << 32) | lo;
 }
 
+/* C1-k6: LAPIC timer counts per ms at divide-by-16, from the same window
+   but divided by the exact elapsed microseconds; 0 = no one-shot timer. */
+static uint64_t lapic_cnt_per_ms_exact = 0;
+
 static uint32_t calib_start_count = 0;
 static int calib_state = 0; // 0 = not started, 1 = measuring, 2 = done
 
@@ -134,6 +138,9 @@ static void lapic_timer_calibration_tick(void) {
       lapic_counts_per_ms = 100000; // safe default, never used on x64
     }
     tsc_per_ms = tsc_used * 1000ULL / elapsed_us;
+    /* C1-k6: the one-shot needs the exact rate (lapic_counts_per_ms divides
+       by whole milliseconds of a ~60 ms window, up to 1.7 % off). */
+    lapic_cnt_per_ms_exact = (uint64_t)lapic_used * 1000ULL / elapsed_us;
   } else {
     lapic_counts_per_ms = 100000;
     tsc_per_ms = 0; // unmeasurable: fall back to the tick clock
@@ -234,7 +241,7 @@ void timer_reload(void) {
      interrupts off, and the work is lock-and-load only. */
   {
     extern void linux_compat_timer_tick(uint64_t now);
-    linux_compat_timer_tick(timer_get_ms());
+    linux_compat_timer_tick(timer_get_us()); /* C1-k6: microseconds */
   }
   /* L75: log every controller state change the MMIO registers show (CC,
      CSTS, INTMS/INTMC, admin ring indices).  CPU 0 only: one tick per
@@ -277,4 +284,34 @@ uint64_t timer_get_us(void) {
     return timer_ticks * 10000;
   }
   return (rdtsc() * 1000) / tsc_per_ms;
+}
+
+/* ---- C1-k6: the high-resolution one-shot (docs/cp-k6.md §1) ------------
+ *
+ * Each CPU's LAPIC timer, in ONE-SHOT mode on its own vector (HRT_VECTOR,
+ * 0x84), fires at the nearest park deadline that CPU was asked to cover
+ * (process.c hrt_cover_locked).  It is never periodic and never vector 32:
+ * the periodic AP LVT that timer_init() describes above preempted a resumed
+ * process at its first instruction on every tick; a one-shot fires once per
+ * deadline, and its handler (trap.c) only preempts user mode, exactly like
+ * the 0x81 IPI does.  Divide-by-16, the calibration's divider.  Returns 1 if
+ * the one-shot is now armed for deadline_us. */
+#define HRT_VECTOR_X64 0x84u
+static uint8_t hrt_lvt_ready[8];
+int hrt_arch_arm_us(uint64_t deadline_us, uint64_t now_us) {
+  if (!lapic_cnt_per_ms_exact || deadline_us <= now_us) return 0;
+  uint32_t cpu = get_cpuid();
+  if (cpu >= 8) return 0;
+  uint64_t span = deadline_us - now_us;
+  uint64_t count = (span * lapic_cnt_per_ms_exact + 999) / 1000;
+  if (count == 0) count = 1;
+  if (count > 0xFFFFFFF0ULL) count = 0xFFFFFFF0ULL;
+  if (!hrt_lvt_ready[cpu]) {
+    LAPIC_TIC_INIT = 0;
+    LAPIC_TDC = 0x3;                   /* divide by 16 */
+    LAPIC_LVT_TIMER = HRT_VECTOR_X64;  /* one-shot, unmasked */
+    hrt_lvt_ready[cpu] = 1;
+  }
+  LAPIC_TIC_INIT = (uint32_t)count;    /* (re)starts the countdown */
+  return 1;
 }

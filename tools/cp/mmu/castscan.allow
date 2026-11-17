@@ -223,7 +223,7 @@ src/kernel/fs.c	I2P	uint8_t *d = (uint8_t *)dst;
 src/kernel/fs.c	I2P	uint8_t *w = (uint8_t *)uarg;
 src/kernel/fs.c	P2I	if (vm_user_read(p, (uint64_t)(s + done), stage, n) != 0)
 src/kernel/fs_test.c	P2I	return file_fcntl(p, fd, cmd, (uint64_t)flock_buf);
-src/kernel/linux_compat_fd.c	I2P	int r = file_poll(p, (struct k_pollfd *)ufds, (int)nfds, timeout);
+src/kernel/linux_compat_fd.c	I2P	int r = file_poll_us(p, (struct k_pollfd *)ufds, (int)nfds, timeout_us);
 src/kernel/linux_compat_fd.c	I2P	int r = file_write(p, fd, (const void *)ubuf, (int)len, tf);
 src/kernel/linux_compat_fd.c	I2P	r = file_write(p, fd, (const void *)(uintptr_t)io[0], (int)io[1], tf);
 src/kernel/linux_compat_fd.c	P2I	if (l_copy_from_user(current_process(), &v, (uint64_t)(uintptr_t)buf, 8) != 0)
@@ -367,3 +367,7 @@ src/kernel/fs.c	I2P	r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n
 # cp/ext2w: positioned ext2 I/O hands the caller's USER VA straight to ext2v_pread/pwrite (no pos_lock, no seeks; the copy runs with no lock held, docs/cp-ext2w.md section 7.3).
 src/kernel/fs.c	I2P	return ext2v_pread(gfile(li), (void *)(uintptr_t)ubuf, (int)n, off);
 src/kernel/fs.c	I2P	return ext2v_pwrite(gfile(li), (const void *)(uintptr_t)ubuf, (int)n, off);
+# C1-k6: the one-shot timer's IDT gate (a function pointer, like every gate); the [FRAME-DFREE] row's caller (a return address printed as a number, like [FREEW] above); the signalfd read's USER VA arithmetic for l_copy_to_user (range-checked by the copy).
+src/kernel/arch/x64/trap.c	P2I	idt_set_gate(132, (uint64_t)exception_132, 0x08, 0x8E);
+src/kernel/frame.c	P2I	frame_raw_hex((uint64_t)(uintptr_t)__builtin_return_address(0));
+src/kernel/linux_compat_fd.c	P2I	if (l_copy_to_user(cur, (uint64_t)(uintptr_t)buf + (uint64_t)i * L_SSI_SIZE,

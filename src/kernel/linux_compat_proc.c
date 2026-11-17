@@ -825,9 +825,9 @@ static int l_signal_one(struct trap_frame *tf, const char *op, int tgid,
     int probe = pid;
     if (probe == 0) return l_ret(tf, current_process() ? 0 : -ESRCH);
     if (probe < 0) probe = -probe;
-    struct process *t = process_get_pcb(probe);
-    if (t && t->state != PROC_STATE_FREE && t->state != PROC_STATE_EXITED &&
-        t->state != PROC_STATE_THREAD_DONE)
+    /* C1-k6: a group whose leader thread has exited still exists. */
+    extern int process_pid_alive(int pid);
+    if (process_pid_alive(probe))
       return l_ret(tf, 0);
     return l_ret(tf, -ESRCH);
   }
@@ -1502,15 +1502,18 @@ static int l_proc_statx(struct process *p, struct trap_frame *tf) {
 
 /* ---- timer resolution + scheduler queries + rt_sigtimedwait (Mono) ------- */
 
-/* clock_getres(229).  The kernel's tick is 100 Hz, so 10 ms is the honest
- * answer for every clock; a NULL resolver only validates the clock id.
- * Mono sizes its timer wheels from this. */
+/* clock_getres(229); a NULL resolver only validates the clock id.  Mono
+ * sizes its timer wheels from this.  C1-k6: the clocks read the TSC in
+ * microseconds and timeouts are met by a one-shot timer, so 1 us is the
+ * honest answer; the COARSE clocks keep the 100 Hz tick's 10 ms (Linux
+ * answers a jiffy for them). */
 static int l_proc_clock_getres(struct process *p, struct trap_frame *tf) {
   int clockid = (int)l_argi(tf, 0);
   uint64_t ures = l_arg(tf, 1);
   if (clockid < 0 || clockid > 11) return l_ret(tf, -EINVAL);
   if (!ures) return l_ret(tf, 0);
-  struct { int64_t sec; int64_t nsec; } ts = {0, 10000000};
+  struct { int64_t sec; int64_t nsec; } ts = {0, 1000};
+  if (clockid == 5 || clockid == 6) ts.nsec = 10000000;
   if (l_copy_to_user(p, ures, &ts, sizeof ts) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
 }
