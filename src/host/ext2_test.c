@@ -1370,7 +1370,7 @@ static void crash_batch(uint32_t *seed, int round) {
   }
 }
 
-static void scenario_crash(int bs, int ordered, int rounds, int *danger_out) {
+static void scenario_crash(int bs, int ordered, int rounds, int *danger_out, int cache) {
   char img[300], base[300], test[300];
   snprintf(img, sizeof img, "%s/crash%d.img", tmpdir, bs);
   snprintf(base, sizeof base, "%s/crash%d.base", tmpdir, bs);
@@ -1378,12 +1378,12 @@ static void scenario_crash(int bs, int ordered, int rounds, int *danger_out) {
   run("rm -f %s && truncate -s 24M %s", img, img);
   CHECK(run("%s -q -F -t ext2 -b %d -O ^dir_index %s >/dev/null 2>&1", mke2fs_bin,
             bs, img) == 0, "mke2fs crash bs=%d", bs);
-  int rc = mount_img(img, 0, 512);
+  int rc = mount_img(img, 0, cache);
   CHECK(rc == 0, "crash mount rc=%d", rc);
   if (rc) return;
   if (!ordered) FS.ordered = 0;
-  printf("scenario crash bs=%d %s commit, %d batches\n", bs,
-         ordered ? "ORDERED" : "plain-order (pre-ext2w)", rounds);
+  printf("scenario crash bs=%d %s commit, %d batches, cache %d\n", bs,
+         ordered ? "ORDERED" : "plain-order (pre-ext2w)", rounds, cache);
   CHECK(mkdir_p("/EXT/c") == 0, "mkdir c");
   CHECK(ext2_flush(&FS) == 0, "first commit");
   uint32_t seed = 777u + (uint32_t)bs;
@@ -1422,8 +1422,9 @@ static void scenario_crash(int bs, int ordered, int rounds, int *danger_out) {
   }
   umount_img();
   CHECK(fsck(img, "after crash batches") == 0, "crash image clean");
-  printf("  crash prefixes checked=%d clean=%d leak-only=%d DANGER=%d%s%s\n",
+  printf("  crash prefixes checked=%d clean=%d leak-only=%d DANGER=%d midop=%llu evictwb=%llu%s%s\n",
          prefixes, prefixes - leaks - dangers, leaks, dangers,
+         (unsigned long long)FS.st_midop, (unsigned long long)FS.st_evict_wb,
          first[0] ? "  first: " : "", first);
   *danger_out = dangers;
   wlog_clear();
@@ -1458,10 +1459,15 @@ int main(void) {
   scenario_corrupt();
   {
     int d1 = 0, d4 = 0, dplain = 0;
-    scenario_crash(1024, 1, 6, &d1);
-    scenario_crash(4096, 1, 8, &d4);
+    int de = 0;
+    scenario_crash(1024, 1, 6, &d1, 512);
+    scenario_crash(4096, 1, 12, &d4, 512);
+    /* a cache too small for one batch: eviction write-backs of data/new
+       blocks interleave with the batch (still safe); in-operation commits
+       (midop) are the documented exception and are counted, not graded */
+    scenario_crash(4096, 1, 6, &de, 12);
     CHECK(d1 == 0 && d4 == 0, "ordered commit: no crash prefix is worse than a leak");
-    scenario_crash(4096, 0, 8, &dplain);
+    scenario_crash(4096, 0, 8, &dplain, 512);
     CHECK(dplain > 0, "plain-order commit shows unsafe prefixes (the check is sensitive)");
   }
   if (failures && getenv("EXT2_TEST_KEEP"))
