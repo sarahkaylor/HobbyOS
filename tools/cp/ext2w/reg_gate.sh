@@ -105,6 +105,10 @@ rg_boot() { # rg_boot <log>: one boot, ends at System halt
         for k in 1 2; do
           { echo "== info registers -a (sample $k, serial silent $quiet s)"
             printf "info registers -a\n" | socat -t 3 - UNIX-CONNECT:'"$mon"' 2>&1 | tr -d "\r"
+            for c in 0 1 2 3 4 5 6 7; do # each vCPU stack: who called the safe_wfi/spin RIP
+              echo "== cpu $c stack (x/48gx \$rsp)"
+              printf "cpu $c\nx/48gx \$rsp\n" | socat -t 3 - UNIX-CONNECT:'"$mon"' 2>&1 | tr -d "\r"
+            done
           } >> '"$regs"'
           sleep 2
         done

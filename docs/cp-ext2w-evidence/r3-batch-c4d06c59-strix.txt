@@ -1,0 +1,63 @@
+# full batch, strix ~/cp/lanes/ext2w3 at cp-ext2w3 c4d06c59 (script ~/cp/lanes/ext2w3-gates.sh = the lane's ext2w-gates.sh, paths -> ext2w3). castscan row fixed after this batch by 8a28225d (rerun below).
+tree 
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=1 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/ext2w3)
+unit rc=1 Tests failed! Tests run:    461 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=1 src/kernel/ext2_vfs.c	P2I	kl_hex(&kl, (unsigned long)(uintptr_t)&kl);
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=0 == removed /srv/nfs/cp-ext2w-reg
+ext2_test rc=0 ext2_test: PASS 3 ordered runs DANGER=0
+ALLDONE
