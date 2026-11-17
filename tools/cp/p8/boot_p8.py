@@ -81,6 +81,57 @@ def qemu_cmd(out, disk, cpdata, args):
     return cmd, qmp, serial
 
 
+def venus_qemu_cmd(out, disk, cpdata, args):
+    """--gpu venus: C6-venus's host recipe, unchanged (tools/cp/host-venus.sh argv +
+    env, as tools/cp/venus/p5venus.py runs it), plus the ext2 data disk as NVMe
+    namespace 2 appended to its QEMU argv."""
+    hv = os.path.join(REPO, "tools", "cp", "host-venus.sh")
+    env = dict(os.environ, MEM=f"{args.mem}M", SMP=str(args.smp), CPU=args.cpu)
+    extra = ["-drive", f"file={cpdata},format=raw,id=cpdata,if=none", "-device", "nvme-ns,drive=cpdata,nsid=2"]
+    argv = [ln for ln in subprocess.run(["bash", hv, "argv", disk, out] + extra, capture_output=True, text=True,
+                                        check=True, env=env).stdout.splitlines() if ln]
+    envv = [ln for ln in subprocess.run(["bash", hv, "env"], capture_output=True, text=True, check=True,
+                                        env=env).stdout.splitlines() if ln]
+    err = os.path.join(out, "qemu-stderr.txt")
+    with open(os.path.join(out, "cmdline.txt"), "w") as f:
+        f.write(" ".join(argv) + "\n" + "\n".join(envv) + "\n")
+    cmd = (["sh", "-c", 'exec "$@" 2>>"$0"', err, "env", "-u", "DISPLAY", "-u", "WAYLAND_DISPLAY",
+            "-u", "XAUTHORITY"] + envv + argv)
+    return cmd, os.path.join(out, "qmp-sock"), os.path.join(out, "serial.log")
+
+
+def dri_nodes(qemu_pid):
+    """Every /dev/dri node the QEMU process tree (QEMU, virgl_render_server and
+    their threads share fd tables per process) holds open: docs/cp-venus.md §6
+    render-node fencing, checked again under the game's load."""
+    pids = [qemu_pid]
+    try:
+        kids = subprocess.run(["pgrep", "-P", str(qemu_pid)], capture_output=True, text=True).stdout.split()
+        pids += [int(k) for k in kids]
+        for k in list(pids[1:]):
+            pids += [int(x) for x in subprocess.run(["pgrep", "-P", str(k)], capture_output=True,
+                                                    text=True).stdout.split()]
+    except Exception:  # noqa: BLE001
+        pass
+    rows = []
+    for pid in pids:
+        try:
+            comm = open(f"/proc/{pid}/comm").read().strip()
+            fds = os.listdir(f"/proc/{pid}/fd")
+        except OSError:
+            continue
+        nodes = set()
+        for fd in fds:
+            try:
+                t = os.readlink(f"/proc/{pid}/fd/{fd}")
+            except OSError:
+                continue
+            if t.startswith("/dev/dri/"):
+                nodes.add(t)
+        rows.append(f"{comm}/{pid}: {' '.join(sorted(nodes)) or '-'}")
+    return rows
+
+
 def unprefix(text):
     return "\n".join(ln[4:] if ln.startswith("[X] ") else ln for ln in text.splitlines())
 
@@ -135,12 +186,21 @@ def main():
     ap.add_argument("--shot-every", type=int, default=15)
     ap.add_argument("--stall-s", type=int, default=1200)
     ap.add_argument("--press-continue", action="store_true")
+    ap.add_argument("--gpu", choices=["lavapipe", "venus"], default="lavapipe")
     args = ap.parse_args()
     if args.mem > 12288:
         sys.exit("boot_p8: -m above 12 GiB needs the integrator's approval")
     shots_dir = os.path.join(args.out, "shots")
     os.makedirs(shots_dir, exist_ok=True)
-    cmd, qmp_path, serial = qemu_cmd(args.out, args.disk, args.cpdata, args)
+    if args.gpu == "venus":
+        cmd, qmp_path, serial = venus_qemu_cmd(args.out, args.disk, args.cpdata, args)
+        # QMP screendump answers "no surface" on egl-headless: C6's pmemsave
+        # fallback of the kernel framebuffer (tools/cp/venus/p5venus.py), unchanged.
+        sys.path.insert(0, os.path.join(REPO, "tools", "cp", "venus"))
+        import p5venus  # noqa: E402
+        p5venus._patch_qmp()
+    else:
+        cmd, qmp_path, serial = qemu_cmd(args.out, args.disk, args.cpdata, args)
     for p in (serial, qmp_path):
         if os.path.exists(p):
             os.remove(p)
@@ -194,6 +254,9 @@ def main():
                     mark(f"{label}: {ser[i:ser.find(chr(10), i)][:200]}")
                     if key == "[P8] begin game ":
                         game_t = time.time()
+                        if args.gpu == "venus":
+                            for r in dri_nodes(proc.pid):
+                                mark(f"dri nodes at game launch: {r}")
             if "[P8] done" in ser or "System halt" in ser:
                 verdict = "launcher-done"
                 time.sleep(3)
@@ -241,6 +304,9 @@ def main():
                                 menu_hits += 1
                                 mark(f"main menu OCR at {tag}: {words}")
                                 if menu_hits >= 3:
+                                    if args.gpu == "venus":
+                                        for r in dri_nodes(proc.pid):
+                                            mark(f"dri nodes at the menu: {r}")
                                     verdict = "main-menu"
                                     break
                                 next_shot = time.time() + 5

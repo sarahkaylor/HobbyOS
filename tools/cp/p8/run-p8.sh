@@ -38,7 +38,9 @@
 #      (default 1200), P8_PRESS_CONTINUE (default 1), P8_CFLAGS (extra -D for
 #      the launcher, e.g. -DP8_EXTRA_ENV='"VKD3D_FEATURE_LEVEL=12_0"'),
 #      P8_SMP (default 8), P8_MEM (MiB, default 12288, never more),
-#      P8_VKD3D_FL (VKD3D_FEATURE_LEVEL for lavapipe, default 12_0; empty = unset).
+#      P8_VKD3D_FL (VKD3D_FEATURE_LEVEL; default 12_0 on lavapipe, unset on Venus),
+#      P8_GPU (lavapipe | venus), VENUS_BUILD (~/cp/venus-build), HOSTMEM (Venus
+#      BAR window, host-venus.sh default 8G: a host mapping, not guest RAM).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT" || exit 2
@@ -56,12 +58,23 @@ GAME=/srv/nfs/cp-game
 # P8_XHOBBY (+ P8_XHOBBY_SHA256) stages a scratch server over it, diagnostics only.
 XHOBBY="${P8_XHOBBY:-}"
 XHOBBY_SHA="${P8_XHOBBY_SHA256:-}"
-WDBG="${P8_WINEDEBUG:-+loaddll,fixme-all}"
+WDBG="${P8_WINEDEBUG:-+loaddll,fixme-all,+fps}"   # +fps: winevulkan's "N fps" row every few seconds
+# P8_GPU=lavapipe (default) | venus (docs/cp-p8.md §9): Venus reuses C6-venus's
+# pieces unchanged -- tools/cp/host-venus.sh's QEMU line and environment
+# (virtio-gpu-gl venus/blob/hostmem, memfd guest RAM, egl-headless on
+# renderD129, the dma-buf/deny shim, MESA_VK_DEVICE_SELECT) and the guest ICD
+# from ~/cp/venus-build (tools/mesa/venus/build.sh: present_wait hidden,
+# synchronous present).  The guest Vulkan tree is C5's loader with lavapipe's
+# ICD JSON removed and the Venus ICD added (tools/cp/venus/run-wine-venus.sh's
+# merge), so Venus is the only GPU.
+GPU="${P8_GPU:-lavapipe}"
+VENUS_BUILD="${VENUS_BUILD:-$HOME/cp/venus-build}"
 TIMEOUT_S="${TIMEOUT_S:-5400}"
 BASE="$ROOT/obj/cp-p8"
 SEEDED="$BASE/pfx-seeded.img"
 IMG="$ROOT/disk.img"
 die() { echo "run-p8: $*" >&2; exit 2; }
+case "$GPU" in lavapipe|venus) ;; *) die "P8_GPU must be lavapipe or venus";; esac
 export MAKEFLAGS="${MAKEFLAGS:--j16}" TOOLS_SKIP="${TOOLS_SKIP:-1}"
 export PATH="/usr/sbin:/sbin:$PATH"
 mkdir -p "$BASE"
@@ -71,7 +84,7 @@ if [ "$PHASE" = pfx ]; then RUN="${P8_RUN:-pfx}"; elif [ "$PHASE" = probe ]; the
   n=1; while [ -e "$BASE/run$n" ]; do n=$((n+1)); done; RUN="${P8_RUN:-run$n}"; fi
 OUT="$BASE/$RUN"; mkdir -p "$OUT"
 exec > >(tee -a "$OUT/run-p8.log") 2>&1
-echo "== run-p8 phase=$PHASE run=$RUN $(date -Is) host=$(hostname) tree=$ROOT"
+echo "== run-p8 gpu=$GPU phase=$PHASE run=$RUN $(date -Is) host=$(hostname) tree=$ROOT"
 
 for t in clang ld.lld llvm-objcopy mcopy mmd qemu-system-x86_64 rsync python3 musl-gcc debugfs e2fsck mke2fs; do
   command -v "$t" >/dev/null 2>&1 || die "missing $t"
@@ -91,7 +104,6 @@ case "$EXPORT" in /srv/nfs/cp-?*) ;; *) die "P8_EXPORT must be /srv/nfs/cp-<name
 if [ "$PHASE" = game ]; then
   [ -f "$SEEDED" ] || die "no $SEEDED: run P8_PHASE=pfx first"
   [ -f "$GAME/bin/x64/Cyberpunk2077.exe" ] || die "no game copy at $GAME"
-  grep -q "^$GAME " /etc/exports && die "$GAME is already exported (another P8 run?): not touching it"
 fi
 
 echo "== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client"
@@ -102,7 +114,9 @@ UCFLAGS=(-O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics
          -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding
          -mno-red-zone -nostdinc -isystem "$RESINC" -mcmodel=large)
 PH=2; [ "$PHASE" = pfx ] && PH=1; [ "$PHASE" = probe ] && PH=3
-VKFL="${P8_VKD3D_FL-12_0}"   # lavapipe needs it for FL 12_0 (docs/cp-p8.md stop 4); P8_VKD3D_FL= unsets
+# lavapipe needs VKD3D_FEATURE_LEVEL=12_0 (docs/cp-p8.md stop 4); the RX 9070 XT
+# reports 12_x natively, so Venus runs without it.  P8_VKD3D_FL= unsets.
+if [ "$GPU" = venus ]; then VKFL="${P8_VKD3D_FL-}"; else VKFL="${P8_VKD3D_FL-12_0}"; fi
 # shellcheck disable=SC2086
 clang "${UCFLAGS[@]}" -DP8_PHASE=$PH -DP8_EXPORT="\"$EXPORT\"" -DP8_WINEDEBUG="\"$WDBG\"" \
   ${P8_GAME_S:+-DP8_GAME_S=$P8_GAME_S} ${VKFL:+-DP8_VKD3D_FL="\"$VKFL\""} ${P8_CFLAGS:-} \
@@ -139,14 +153,49 @@ game_census() {
   printf '== game copy %s: modes of the top dir and bin/x64: %s %s\n' "$1" "$(stat -c %A "$GAME")" "$(stat -c %A "$GAME/bin/x64")"
 }
 
+# The game copy's export is SHARED by every concurrent P8 run (C3-ext2w runs
+# this harness too).  Run 14 lost it mid-boot: another run's `exports.sh add`
+# failed ("already exported"), its EXIT trap removed the line, and this run's
+# guest got ENOENT for Z:\GAME (docs/cp-p8.md §9, stop 10).  So the export is
+# reference-counted: under /tmp/cp-game-export.lock each run registers its pid
+# in /tmp/cp-game-export.users/, the first one adds the export and the last
+# one (dead pids pruned) removes it.  The lock is held only around the edit.
+GLOCK=/tmp/cp-game-export.lock
+GUSERS=/tmp/cp-game-export.users
+game_export_get() {
+  (
+    flock 197
+    mkdir -p "$GUSERS"
+    : > "$GUSERS/$$"
+    if grep -qxF "$GAME 127.0.0.1(ro,sync,no_subtree_check,insecure,all_squash,anonuid=65534,anongid=65534)" /etc/exports; then
+      echo "== $GAME already exported (shared with: $(ls "$GUSERS" | grep -vx "$$" | tr '\n' ' '))"
+    else
+      bash "$ROOT/tools/cp/exports.sh" add "$GAME" | sed 's/^/== /'
+      [ "${PIPESTATUS[0]}" = 0 ] || { rm -f "$GUSERS/$$"; exit 1; }
+    fi
+  ) 197>>"$GLOCK"
+}
+game_export_put() {
+  (
+    flock 197
+    rm -f "$GUSERS/$$"
+    for f in "$GUSERS"/*; do [ -e "$f" ] || continue; kill -0 "${f##*/}" 2>/dev/null || rm -f "$f"; done
+    if [ -z "$(ls -A "$GUSERS" 2>/dev/null)" ]; then
+      bash "$ROOT/tools/cp/exports.sh" remove "$GAME" | sed 's/^/== /'
+    else
+      echo "== $GAME left exported for: $(ls "$GUSERS" | tr '\n' ' ')"
+    fi
+  ) 197>>"$GLOCK"
+}
+
 MADE_DIR=""; ADDED=""; ADDED_GAME=""; CLEANED=""
 cleanup() {
   [ -n "$CLEANED" ] && return 0
   CLEANED=1
-  [ -n "$ADDED_GAME" ] && bash "$ROOT/tools/cp/exports.sh" remove "$GAME" | sed 's/^/== /'
+  [ -n "$ADDED_GAME" ] && game_export_put
   [ -n "$ADDED" ] && bash "$ROOT/tools/cp/exports.sh" remove "$EXPORT" | sed 's/^/== /'
   if [ -n "$MADE_DIR" ]; then sudo -n rm -rf "$EXPORT" && echo "== removed $EXPORT"; fi
-  sudo -n exportfs -v 2>/dev/null | grep -E "^($EXPORT|$GAME)[[:space:]]" && echo "== WARNING: still exported"
+  sudo -n exportfs -v 2>/dev/null | grep -E "^$EXPORT[[:space:]]" && echo "== WARNING: $EXPORT still exported"
   return 0
 }
 trap cleanup EXIT
@@ -158,6 +207,14 @@ sudo -n rsync -a --delete "$WINE/" "$EXPORT/WINE/" || die "rsync wine"
 sudo -n rsync -aL --delete "$X11W/stage/CP/X11/" "$EXPORT/X11/" || die "rsync x11"
 sudo -n rsync -aL --delete --exclude include --exclude cmake --exclude pkgconfig \
   "$VKW/stage-x11/CP/VK/" "$EXPORT/VK/" || die "rsync vk"
+if [ "$GPU" = venus ]; then
+  [ -f "$VENUS_BUILD/stage/CP/VK/lib/libvulkan_virtio.so" ] || die "no Venus ICD in $VENUS_BUILD (tools/mesa/venus/build.sh)"
+  sudo -n rm -f "$EXPORT/VK/share/vulkan/icd.d/lvp_icd.x86_64.json" "$EXPORT/VK/lib/libvulkan_lvp.so"
+  sudo -n cp "$VENUS_BUILD/stage/CP/VK/lib/libvulkan_virtio.so" "$EXPORT/VK/lib/" &&
+    sudo -n cp "$VENUS_BUILD/stage/CP/VK/share/vulkan/icd.d/virtio_icd.x86_64.json" "$EXPORT/VK/share/vulkan/icd.d/" ||
+    die "stage the Venus ICD"
+  echo "== Vulkan ICDs in the export: $(ls "$EXPORT/VK/share/vulkan/icd.d" | tr '\n' ' ')(Venus only)"
+fi
 if [ "$PHASE" = game ]; then
   sudo -n mkdir -p "$EXPORT/P8" && sudo -n cp "$OUT/pe/vkcube.exe" "$EXPORT/P5/VK/" &&
     sudo -n cp "$OUT/pe/p8caps.exe" "$EXPORT/P8/" || die "stage the PE probes"
@@ -170,9 +227,8 @@ bash "$ROOT/tools/cp/exports.sh" add "$EXPORT" | sed 's/^/== /'
 [ "${PIPESTATUS[0]}" = 0 ] || die "exports.sh add $EXPORT failed"
 if [ "$PHASE" = game ]; then
   game_census before | tee "$OUT/game-census-before.txt"
+  game_export_get || die "exporting $GAME failed"
   ADDED_GAME=1
-  bash "$ROOT/tools/cp/exports.sh" add "$GAME" | sed 's/^/== /'
-  [ "${PIPESTATUS[0]}" = 0 ] || die "exports.sh add $GAME failed"
 fi
 sudo -n exportfs -v | grep -E "^($EXPORT|$GAME)[[:space:]]" | sed 's/^/== exported: /'
 
@@ -218,7 +274,7 @@ fi
 
 echo "== boot (deadline ${TIMEOUT_S}s; one QEMU slot for the boot only)"
 BPH="$PHASE"; [ "$PHASE" = probe ] && BPH=pfx   # the same "wait for [P8] done" boot
-BA=(--out "$OUT" --disk "$D" --cpdata "$CPD" --phase "$BPH" --timeout "$TIMEOUT_S"
+BA=(--out "$OUT" --disk "$D" --cpdata "$CPD" --phase "$BPH" --timeout "$TIMEOUT_S" --gpu "$GPU"
     --smp "${P8_SMP:-8}" --mem "${P8_MEM:-12288}" --stall-s "${P8_STALL_S:-1200}")
 [ "${P8_PRESS_CONTINUE:-1}" = 1 ] && BA+=(--press-continue)
 python3 tools/cp/p8/boot_p8.py "${BA[@]}"
