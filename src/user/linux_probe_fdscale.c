@@ -35,6 +35,10 @@
  *                 thread and a reaped child, nvcsw counting, bad who EINVAL
  *  F10 wine_shape 300 threads, each parked in read() on its own pipe with two
  *                 more pipes open (900 pipes): every thread answers a ping
+ *  F11 pipe_race  16 threads create, use and close pipes/socketpairs/dups at
+ *                 once (what every new Wine thread does): every fd a thread
+ *                 gets carries that thread's own bytes (no two threads are
+ *                 ever handed the same fd number)
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -613,6 +617,52 @@ static int f10(void) {
   return 0;
 }
 
+/* ---- F11 ------------------------------------------------------------- */
+#define NRT 16
+#define RT_ITERS 1500
+static volatile int rt_go;
+static volatile int rt_bad;
+static char rt_why[160];
+static void *rt_main(void *a) {
+  int id = (int)(intptr_t)a;
+  while (!rt_go) {}
+  for (int it = 0; it < RT_ITERS && !rt_bad; it++) {
+    int p[2], q[2];
+    unsigned char tok = (unsigned char)(id * 16 + (it & 15)), got = 0;
+    int kind = it % 3;
+    if (kind == 0) {
+      if (pipe(p) != 0) { snprintf(rt_why, sizeof rt_why, "t%d pipe errno=%d", id, errno); rt_bad = 1; break; }
+    } else if (kind == 1) {
+      if (socketpair(AF_UNIX, SOCK_STREAM, 0, p) != 0) { snprintf(rt_why, sizeof rt_why, "t%d socketpair errno=%d", id, errno); rt_bad = 1; break; }
+    } else {
+      if (pipe(q) != 0) { snprintf(rt_why, sizeof rt_why, "t%d pipe errno=%d", id, errno); rt_bad = 1; break; }
+      p[0] = dup(q[0]);
+      p[1] = fcntl(q[1], F_DUPFD, 3);
+      close(q[0]);
+      close(q[1]);
+      if (p[0] < 0 || p[1] < 0) { snprintf(rt_why, sizeof rt_why, "t%d dup errno=%d", id, errno); rt_bad = 1; break; }
+    }
+    if (write(p[1], &tok, 1) != 1 || read(p[0], &got, 1) != 1 || got != tok) {
+      snprintf(rt_why, sizeof rt_why, "t%d iter %d kind %d fds %d/%d: wrote %u read %u errno=%d", id, it, kind,
+               p[0], p[1], tok, got, errno);
+      rt_bad = 1;
+    }
+    close(p[0]);
+    close(p[1]);
+  }
+  return 0;
+}
+static int f11(void) {
+  CHECK(raise_soft(WANT_HARD) == 0, "raise soft errno=%d", errno);
+  pthread_t th[NRT];
+  for (int i = 0; i < NRT; i++) pthread_create(&th[i], 0, rt_main, (void *)(intptr_t)i);
+  msleep(50);
+  rt_go = 1;
+  for (int i = 0; i < NRT; i++) pthread_join(th[i], 0);
+  CHECK(!rt_bad, "%s", rt_why);
+  return 0;
+}
+
 static int fails;
 static void run_row(const char *name, int (*fn)(void)) {
   long t0 = now_ms();
@@ -683,6 +733,7 @@ int main(void) {
   run_row("F8 dup_high", f8);
   run_row("F9 rusage", f9);
   run_row("F10 wine_shape", f10);
+  run_row("F11 pipe_race", f11);
   out("[LP] done rc=%d\n", fails);
   return fails ? 1 : 0;
 }

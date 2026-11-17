@@ -502,6 +502,39 @@ static int fd_install(struct process *p, struct file *f) {
   return fd;
 }
 
+/* C1-k5: the two-fd form of fd_install (pipe, socketpair): find two free
+ * slots below the soft RLIMIT_NOFILE and install both under fdtab_lock.  The
+ * old open-coded scan+install had no lock, so two threads creating pipes at
+ * once (every new Wine thread makes its reply and wait pipes) could pick
+ * the same fd numbers; with 4096 slots and a scan placed before the
+ * allocation that window became wide enough to hit (measured: thrstorm's
+ * clients read EBADF on their reply fd).  Returns 0, or -EMFILE with
+ * nothing installed. */
+static int fd_install2(struct process *p, struct file *f0, struct file *f1,
+                       int fds[2]) {
+  uint64_t fl = spinlock_acquire_irqsave(&fdtab_lock);
+  int a = -1, b = -1;
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(p); i++) {
+    if (p->open_fds[i] == -1) {
+      if (a == -1) a = i;
+      else { b = i; break; }
+    }
+  }
+  if (b < 0) {
+    spinlock_release_irqrestore(&fdtab_lock, fl);
+    return -EMFILE;
+  }
+  p->open_fds[a] = get_global_fd(f0);
+  p->open_fds[b] = get_global_fd(f1);
+  p->num_open_fds += 2;
+  fd_slot_gen[a]++;
+  fd_slot_gen[b]++;
+  spinlock_release_irqrestore(&fdtab_lock, fl);
+  fds[0] = a;
+  fds[1] = b;
+  return 0;
+}
+
 /* Public: close_range is rare, so one row per call is affordable and answers
  * "does anything close a whole range, and over which slots" directly. */
 void fs_fd_ev_range(struct process *p, int first, int last) {
@@ -2972,14 +3005,6 @@ int file_dup_min(struct process *cur, int fd, int minfd) {
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_EMPTY) return -EBADF;
   if (cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
-  int newfd = -1;
-  for (int i = minfd; i < process_fd_limit(cur); i++) {
-    if (cur->open_fds[i] == -1) {
-      newfd = i;
-      break;
-    }
-  }
-  if (newfd < 0) return -EMFILE;
   ylock_acquire(&f->lock);
   f->ref_count++;
   if (f->type == FILE_TYPE_MEMFD)
@@ -2991,9 +3016,27 @@ int file_dup_min(struct process *cur, int fd, int minfd) {
   else if (f->type == FILE_TYPE_UNIXSOCK)
     usock_reopen(f->usock.ptr, f->usock.end); /* P4: same ref discipline */
   ylock_release(&f->lock);
-  cur->open_fds[newfd] = g_fd;
+  /* C1-k5: the reference is taken first; the slot is found and filled under
+     fdtab_lock (two threads dup'ing at once used to pick the same fd), and
+     a full table gives the reference back the way a close would. */
+  uint64_t tfl = spinlock_acquire_irqsave(&fdtab_lock);
+  int newfd = -1;
+  for (int i = minfd; i < process_fd_limit(cur); i++) {
+    if (cur->open_fds[i] == -1) {
+      newfd = i;
+      break;
+    }
+  }
+  if (newfd >= 0) {
+    cur->open_fds[newfd] = g_fd;
+    cur->num_open_fds++;
+  }
+  spinlock_release_irqrestore(&fdtab_lock, tfl);
+  if (newfd < 0) {
+    fs_close_global(g_fd);
+    return -EMFILE;
+  }
   fd_cloexec_clear(cur->fd_cloexec, newfd); /* P5 (D3.2): dup clears CLOEXEC */
-  cur->num_open_fds++;
   fd_ev_note(FDEV_DUP, cur, newfd, g_fd, f->path);
   return newfd;
 }
@@ -3996,22 +4039,9 @@ int file_pipe(struct process *cur, int fds[2]) {
   cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || cur->num_open_fds + 2 > MAX_OPEN_FDS) return -EMFILE;
 
-  /* C1-k5: find the two fds FIRST (the old order allocated the files and the
-     pipe, then leaked both when the table was full), and tell the two limits
-     apart: a full fd table is -EMFILE, a full file table or pipe pool
-     -ENFILE (Linux).  Callers that only test != 0 are unaffected. */
-  int user_fd0 = -1, user_fd1 = -1;
-  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++) {
-    if (cur->open_fds[i] == -1) {
-      if (user_fd0 == -1) user_fd0 = i;
-      else if (user_fd1 == -1) {
-        user_fd1 = i;
-        break;
-      }
-    }
-  }
-  if (user_fd0 == -1 || user_fd1 == -1) return -EMFILE;
-
+  /* C1-k5: a full fd table is -EMFILE, a full file table or pipe pool
+     -ENFILE (Linux); callers that only test != 0 are unaffected.  The two
+     fds are installed atomically by fd_install2 (fdtab_lock). */
   struct file *f0 = file_alloc();
   struct file *f1 = file_alloc();
   if (!f0 || !f1) {
@@ -4031,12 +4061,13 @@ int file_pipe(struct process *cur, int fds[2]) {
   f0->open_flags = 0; /* O_RDONLY (Linux F_GETFL of a pipe read end) */
   f1->open_flags = 1; /* O_WRONLY */
 
-  cur->open_fds[user_fd0] = get_global_fd(f0);
-  cur->open_fds[user_fd1] = get_global_fd(f1);
-  cur->num_open_fds += 2;
-
-  fds[0] = user_fd0;
-  fds[1] = user_fd1;
+  if (fd_install2(cur, f0, f1, fds) != 0) {
+    /* Full table: give both ends back the way a close would (the pipe's
+       reader/writer counts and its frames included). */
+    fs_close_global(get_global_fd(f0));
+    fs_close_global(get_global_fd(f1));
+    return -EMFILE;
+  }
   return 0;
 }
 
@@ -4602,15 +4633,8 @@ int file_socketpair(struct process *p, int domain, int type, int proto,
   f1->usock.ptr = u;
   f1->usock.end = 1;
 
-  int fd0 = -1, fd1 = -1;
-  for (int i = FD_STDIO_FIRST; i < process_fd_limit(p); i++) {
-    if (p->open_fds[i] == -1) {
-      if (fd0 == -1) fd0 = i;
-      else if (fd1 == -1) { fd1 = i; break; }
-    }
-  }
-  if (fd0 == -1 || fd1 == -1) {
-    /* Unreachable behind the num_open_fds check; clean up defensively. */
+  int two[2];
+  if (fd_install2(p, f0, f1, two) != 0) { /* C1-k5: locked scan+install */
     usock_close(u, 0);
     usock_close(u, 1);
     f0->type = FILE_TYPE_EMPTY;
@@ -4619,9 +4643,7 @@ int file_socketpair(struct process *p, int domain, int type, int proto,
     f1->ref_count = 0;
     return -EMFILE;
   }
-  p->open_fds[fd0] = get_global_fd(f0);
-  p->open_fds[fd1] = get_global_fd(f1);
-  p->num_open_fds += 2;
+  int fd0 = two[0], fd1 = two[1];
   if (type & K_SOCK_CLOEXEC) { fd_cloexec_set(p->fd_cloexec, fd0); fd_cloexec_set(p->fd_cloexec, fd1); }
   if (type & K_SOCK_NONBLOCK) {
     usock_set_nonblock(u, 0, 1);
@@ -4672,13 +4694,19 @@ int fs_msg_install_gfd(struct process *p, int gfd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -EBADF;
   if (gfile(gfd)->type == FILE_TYPE_EMPTY) return -EBADF;
   if (p->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  /* C1-k5: scan+install under fdtab_lock -- Wine's client threads receive
+     fds from the server concurrently (ntdll's fd cache). */
+  uint64_t fl = spinlock_acquire_irqsave(&fdtab_lock);
   int fd = -1;
   for (int i = FD_STDIO_FIRST; i < process_fd_limit(p); i++) {
     if (p->open_fds[i] == -1) { fd = i; break; }
   }
+  if (fd >= 0) {
+    p->open_fds[fd] = gfd;
+    p->num_open_fds++;
+  }
+  spinlock_release_irqrestore(&fdtab_lock, fl);
   if (fd < 0) return -EMFILE;
-  p->open_fds[fd] = gfd;
-  p->num_open_fds++;
   return fd; /* FD_CLOEXEC is the caller's (MSG_CMSG_CLOEXEC) business */
 }
 

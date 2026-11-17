@@ -1,0 +1,20 @@
+# C1-k5: fdscale F11 (concurrent pipe/socketpair/dup creation in 16 threads) on the REGRESSION kernel cp-k5 053a5745
+# (file_pipe scanned for its fds before allocating, with no lock).  host strix, intel MODE=test KVM 8 vCPU
+# cmd: LP_TIMEOUT=600 bash tools/cp/qemu-slot.sh bash tools/gate/t3_linux_probe.sh fdscale
+
+[LP] info F1 initial soft=1024 hard=4096
+[LP] PASS F1 rlimit (79 ms)
+[LP] PASS F2 soft_limit (76 ms)
+[LP] info F3 3000 pipes live, parent maxfd=4005
+[LP] PASS F3 pipes3000 (402 ms)
+[LP] PASS F4 poll2000 (396 ms)
+[LP] PASS F5 epoll2000 (380 ms)
+[LP] PASS F6 select_big (344 ms)
+[LP] PASS F7 fd_kinds (74 ms)
+[LP] PASS F8 dup_high (68 ms)
+[LP] info F9 spinner=399ms self=402ms child=375ms nvcsw=0->5
+[LP] PASS F9 rusage (992 ms)
+[LP] PASS F10 wine_shape (968 ms)
+[LP] FAIL F11 pipe_race HANG: no finish in 90000 ms
+[LP] done rc=1
+t3_linux_probe: FAIL — fdscale never printed '[LP] done rc=0' (tier rc=1)
