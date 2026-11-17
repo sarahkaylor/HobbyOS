@@ -1,0 +1,31 @@
+C6-p7b: Gate P5 reproduction on integ9 (adb81ee4) and on the detector build (strix KVM, -smp 8 -m 12G)
+Command: ~/cp/p7b/run-p5.sh TAG  (= the integrator batch line: P5_PROBES="vkcube d3d11 d3d12 fullscr" P5_XSESSION_ENV=HB_SECOND_SCREEN=0,
+  CP_WINE_STAGE=~/cp/wine-build-x/stage/CP/WINE WINE_BUILD=~/cp/wine-build-x CP_VK_WORK=~/cp/vk2-build CP_X11_WORK=~/cp/x11-build-x2
+  CP_P5_PE=~/cp/vk2-pe P5_EXPORT=/srv/nfs/cp-p7b-p5 MAKEFLAGS=-j16 TOOLS_SKIP=1 bash tools/cp/p5/run-wine-p5.sh)
+
+p5 integ9-1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 291 s; lock released 14:44:58
+p5 integ9-2 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 300 s; lock released 14:56:45
+p5 integ9-3 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 289 s; lock released 15:03:06
+p5 det1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 296 s; lock released 15:16:59
+
+Fault rows (FATAL / UNOWNED-FREED / SPAWNTIME / STALLBREAK) per serial:
+  integ9-1: 0
+  integ9-2: 0
+  integ9-3: 0
+  det1: 0
+
+integ9 rate: integrator 1 FAIL / 1 run; this lane 0 FAIL / 3 runs (integ9-1..3) + 0 / 1 on the detector build => 1 / 5 boots.
+
+=== det1 (5564bd40: detector, no skip): the window opens in the fullscreen row, at ICEWMBG start ===
+/ICEWMBG.BIN
+[NFSLS] n=1 dirs=0 complete=1 rel=/VK/share/vulkan/icd.d
+[GDT] rel=/VK/share/vulkan/icd.d total=1 path=/CP/VK/share/vulkan/icd.d
+v2 loader: image mapped (lazy), bytes=3702744 pages=904 first=in elap=9ms
+[PUBS] n=274432 exec=33523 xzero=84 file_xzero=84 anon_xzero=13 xunv=0 idc=30098 idf=0 | fault_anon xzero=13 xunv=0 | img xzero=64 xunv=0 | img_pf xzero=20 xunv=0
+[IMGPRF] pid=259 start: pages=904 batch=128
+[KSTACK-SHARE] site=schedule cpu=7 slot=260 ? still on its stack: cpu=4 n=1
+[KERNEL] Process 259: ICEWMBG.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=259 last_user_pc=0x100025157F code=0x0
+[IMGPRF] pid=259 done: pages=904 mapped=247 skipped=9 batches=3 stop=1 ms=14
+[TXT] n=30208 bad=0
+(KSTACK-SHARE rows in this boot: 1; slot 260 = the image-prefetch kernel task for ICEWMBG pid 259; benign this time)

@@ -1,0 +1,73 @@
+C6-p7b: the integ9 Gate P5 fullscreen-row fault, symbolized (strix, KVM, -smp 8 -m 12G)
+
+Source: strix:~/cp/integ12/p5.1.serial (integrator's integ9 batch, copied read-only), lines 3355-3415.
+Kernel rebuilt at adb81ee4 (integ9) in strix:~/cp/lanes/p7 with run-wine-p5.sh's build line
+(MAKEFLAGS=-j16 TOOLS_SKIP=1 make ARCH=intel hobbyos.elf), symbolized with llvm-addr2line / llvm-nm:
+
+  0x700F7E3B  spin_acquire_raw  locks.c:291  (__builtin_return_address(1): mov (%rbp),%rax; mov 0x8(%rax),%rax)
+              -> CPU 7 #PF cr2=0x4E: the caller's saved RBP slot held 0x46 (RAX=0x46, an RFLAGS image)
+  0x700F8E0A  spin_acquire_raw  locks.c:436  (lock_wait_addr[cpu] = 0, cpu reloaded from -0x78(%rbp))
+              -> CPU 6 #GP: the spilled cpu index held 0xFFFF800023FFE128, a stack address
+  0x700f94e4  spinlock_acquire_irqsave locks.c:598  ([UNOWNED-FREED] on cpu 1)
+  0x74D56948  = proc_lock (llvm-nm: 74d56948 B proc_lock) -- not a freed object
+
+Both faulting CPUs report the SAME trap-frame address frame=0xFFFF800023FFD7F0 and RSP=0xFFFF800023FFD930:
+a direct-map address (DMAP_BASE + 0x23FFD930), i.e. a kernel TASK's stack (process_create_kernel puts it at
+user_phys_base + USER_REGION_SIZE - 0x1000 through the direct map); per-CPU stacks are in the image at 0x76F..
+pid 270 runs with CR3 0x76F8F000 (the kernel root): a kernel task -- the sys_spawn_worker loading wine for
+'fullscr.exe check' (its 'elf loader: interpreter ... mapped' row is the last thing before the faults; the
+worker never reported, hence [SPAWNTIME] ... -EAGAIN and '[P5] end fscheck status=spawn-failed errno=11').
+pid 9 is ICEWM.BIN (XSESS spawned /ICEWM.BIN pid=9), with a SIGCHLD from ICEWMBG pid 272 that had just exited.
+
+--- raw (p5.1.serial 3355-3400) ---
+[X] hobbyos: randr: crtc off 0x0 on screen 1280x720
+[P7] scanout X fullscreen window/size 0 0 seq=0
+[KERNEL] Process 260: fullscr.exe exited unexpectedly or gracefully.
+[X] hobbyos: fullscreen window 0x0 0x0
+[EXITPC] pid=260 last_user_pc=0x1080143146 code=0x0
+[P5] end fullscr status=0 ms=28477
+[P5] begin fscheck : wine Z:\CP\P5\FS\fullscr.exe check 30000
+Loading program for scheduler (v2 AS): /CP/WINE/bin/wine
+[X] hobbyos: randr: screen 0 now 1920x1080 (508x286 mm)
+[X] hobbyos: randr: crtc mode 1920x1080 on screen 1920x1080
+/ICEWMBG.BIN
+v2 loader: image mapped (lazy), bytes=3702728 pages=904 first=in elap=7ms
+[IMGPRF] pid=272 start: pages=904 batch=128
+[P7] scanout X fullscreen window/size 4196101 125830200 seq=0
+elf loader: interpreter /lib64/ld-linux-x86-64.so.2 mapped
+[X] hobbyos: fullscreen window 0x400705 1920x1080
+[KERNEL] Process 272: ICEWMBG.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=272 last_user_pc=0x100025157F code=0x0
+[IDMAP-TRIP] cr2=0x000000000000004E rip=0x00000000700F7E3B cr3=0x0000000202464000 pid=9
+[BADVEC] fatal frame=0xFFFF800023FFD7F0 in_user=1 vector_slot=0xFFFF800023FFD8F8 cs_slot=0xFFFF800023FFD908
+[BADVEC] entry slots unchanged: frame=0xFFFF800023FFD7F0 v=14 cs=0x0000000000000008 entry_pid=9 cpu=7
+  [BADVEC] drstate cpu=7 owner_cpu=7 dr0=0x0000000000000000 dr7=0x0000000000000400 dr6=0x00000000FFFF0FF0 now_ms=0x0000000000040854
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000000
+  RIP: 0x00000000700F7E3B  RSP: 0xFFFF800023FFD930
+  CS:  0x0000000000000008  SS:  0x0000000000000010  RFLAGS: 0x0000000000010097
+  RAX: 0x0000000000000046  RBX: 0x0000000000000011  RCX: 0x0000000000000002  RDX: 0x0000000074D56948
+  RDI: 0x0000000000001C08  RSI: 0x0000000000000000  RBP: 0xFFFF800023FFD9A0
+  ERR: 0x0000000000000000  R8:  0x0000000074D56948  R9:  0x0000001800000000  R10: 0x000000000000000A
+  CPU: 7  pid: 9
+  STACK: skipped (RSP outside identity-mapped RAM)
+[PANIC-SINK-VIOLATION] panic_puts from a returning path (suppressed=1)
+[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=14 rip=0x00000000700F7E3B cr2=0x000000000000004E pid=9 err=0 cr3=0x0000000202464000 pd480=0x00000001FC000083
+[BADVEC] fatal frame=0xFFFF800023FFD7F0 in_user=1 vector_slot=0xFFFF800023FFD8F8 cs_slot=0xFFFF800023FFD908
+[BADVEC] entry slots unchanged: frame=0xFFFF800023FFD7F0 v=13 cs=0x0000000000000008 entry_pid=270 cpu=6
+  [BADVEC] drstate cpu=6 owner_cpu=6 dr0=0x0000000000000000 dr7=0x0000000000000400 dr6=0x00000000FFFF0FF0 now_ms=0x0000000000040861
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 13 Error Code: 0x0000000000000000
+  RIP: 0x00000000700F8E0A  RSP: 0xFFFF800023FFD930
+  CS:  0x0000000000000008  SS:  0x0000000000000010  RFLAGS: 0x0000000000010046
+  RAX: 0xFFFF800023FFE128  RBX: 0x0000000000048697  RCX: 0x0000000000000006  RDX: 0x0000000074D56948
+  RDI: 0x0000000074D56948  RSI: 0x0000000000000001  RBP: 0xFFFF800023FFD9B0
+  ERR: 0x0000000000000000  R8:  0x0000000000000000  R9:  0x0000000000032139  R10: 0x0000000000006FE4
+  CPU: 6  pid: 270
+  STACK: skipped (RSP outside identity-mapped RAM)
+[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=13 rip=0x00000000700F8E0A cr2=0x00000010002585C0 pid=270 err=0 cr3=0x0000000076F8F000 pd480=0x00000001FC000083
+
+[UNOWNED-FREED] cpu=1 lock=0x0000000074d56948 pc=0x00000000700f94e4
+...
+[IMGPRF] pid=272 done: pages=904 mapped=190 skipped=30 batches=2 stop=1 ms=913
+[LOSTWAKE] disposing pid=270  (stale dead-owner claim, poisoned resume)
+[SPAWNTIME] releasing spawn caller slot=14 pid=14 /WINEP5.BIN -> -EAGAIN (its worker never reported)
+[P5] end fscheck status=spawn-failed errno=11
