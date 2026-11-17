@@ -183,6 +183,9 @@ for b in "$B1" "$B2"; do
   grep -aq 'YLOCK-WEDGE' "$b" && bad "$bn: [YLOCK-WEDGE]: $(grep -a 'YLOCK-WEDGE\|YLOCK-OWNER' "$b" | head -2 | tr '\n' ' ')"
   grep -aq 'E2W\] ext2_lock wait' "$b" && bad "$bn: $(grep -a 'E2W\] ext2_lock wait' "$b" | head -1)"
   grep -aq 'RESUME-PREFLIGHT.*QUARANTINE' "$b" && bad "$bn: $(grep -a 'RESUME-PREFLIGHT' "$b" | head -2 | tr '\n' ' ')"
+  # a kernel stack smash or the flusher's own stack guard (ext2_vfs.c)
+  grep -aq 'stack smashing detected\|E2W-KSTACK\]' "$b" &&
+    bad "$bn: $(grep -a -A1 'stack smashing detected\|E2W-KSTACK\]' "$b" | head -3 | tr '\n' ' ')"
 done
 fsck_img b2
 if [ "$fails" = 0 ]; then echo "reg_gate: PASS"; else echo "reg_gate: FAIL ($fails)"; fi

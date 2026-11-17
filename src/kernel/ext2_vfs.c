@@ -9,6 +9,7 @@
  */
 
 #include "ext2_vfs.h"
+#include "arch/cpu.h"
 
 #include "errno.h"
 #include "fat16.h"
@@ -260,10 +261,66 @@ static int commit_locked(uint64_t *counter) {
  * after the last commit. */
 static int g_flusher_pid = -1;
 
+/* cp/ext2w3 (reg_gate wedge): the flusher's own stack is watched.  The
+ * wedged reg_gate boot panicked "stack smashing detected" with rsp inside
+ * this task's stack (0xffff800023ffe718, 0x8b0 under its resume_sp) while
+ * the watchdog showed CPU0 AND CPU5 both with pid=1 resume_sp=...efc8: two
+ * contexts on one kernel-task stack.  A guard pattern in this frame, checked
+ * every poll, and the CPU's current pid while this code runs, turn the next
+ * occurrence into a named row instead of a silent canary panic.  Rows are
+ * bounded (8). */
+static void flusher_guard_row(const char *why, long a, unsigned long b) {
+  static int nrows;
+  if (nrows >= 8) return;
+  nrows++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[E2W-KSTACK] ");
+  kl_s(&kl, why);
+  kl_s(&kl, " cpu=");
+  kl_i(&kl, (long)get_cpuid());
+  kl_s(&kl, " a=");
+  kl_i(&kl, a);
+  kl_s(&kl, " b=");
+  kl_hex(&kl, b);
+  kl_s(&kl, " sp~=");
+  kl_hex(&kl, (unsigned long)(uintptr_t)&kl);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+#define FG_WORDS 32
+static int g_fl_inside;
+static volatile int g_fl_last_cpu = -1;
+static void flusher_guard_check(volatile uint64_t *g) {
+  for (int i = 0; i < FG_WORDS; i++) {
+    uint64_t want = 0xE2F1A5E000000000ull ^ (uint64_t)i;
+    if (g[i] != want) {
+      flusher_guard_row("flusher stack guard clobbered (word, found)", i, g[i]);
+      g[i] = want;
+    }
+  }
+  struct process *c = current_process();
+  if (!c || c->pid != g_flusher_pid)
+    flusher_guard_row("flusher code running on a CPU whose current pid is", c ? c->pid : -1,
+                      (unsigned long)g_flusher_pid);
+}
+
 static void flusher_task(void *arg) {
   (void)arg;
   int seen_other = 0;
+  volatile uint64_t guard[FG_WORDS];
+  for (int i = 0; i < FG_WORDS; i++) guard[i] = 0xE2F1A5E000000000ull ^ (uint64_t)i;
   for (;;) {
+    /* One copy of this loop may run at a time.  A preempted flusher that
+       migrates keeps the count at 1 (it resumes the same iteration); a
+       second CPU running this task at the same time sees 1 here. */
+    int inside = __atomic_fetch_add(&g_fl_inside, 1, __ATOMIC_SEQ_CST);
+    if (inside != 0)
+      flusher_guard_row("flusher loop entered by a second CPU (copies inside)", inside,
+                        (unsigned long)g_fl_last_cpu);
+    g_fl_last_cpu = (int)get_cpuid();
+    flusher_guard_check(guard);
     uint64_t now = timer_get_ms();
     uint64_t ds = g_dirty_since;
     if (ds && now - ds >= EXT2W_TIMER_MS) {
@@ -280,6 +337,7 @@ static void flusher_task(void *arg) {
         __atomic_store_n(&g_flusher, 0, __ATOMIC_SEQ_CST);
         ylock_release(&g_lock);
         e2w_row("flusher exit (nothing else alive, cache clean)");
+        __atomic_fetch_sub(&g_fl_inside, 1, __ATOMIC_SEQ_CST);
         kernel_exit();
         return;
       }
@@ -288,6 +346,8 @@ static void flusher_task(void *arg) {
     }
     uint64_t t0 = timer_get_ms();
     while (timer_get_ms() - t0 < 50) safe_wfi();
+    flusher_guard_check(guard);
+    __atomic_fetch_sub(&g_fl_inside, 1, __ATOMIC_SEQ_CST);
   }
 }
 
