@@ -49,6 +49,12 @@ struct cpu_local {
   uint64_t cpu_id;
   struct process *current_proc;
   uint64_t initialized;  /* 48: set by trap_init_core_with_id on each core */
+  /* 56 (C6-p7b): slot + 1 of the KERNEL TASK whose stack this CPU is still
+     executing on after schedule() gave that task up (saved it, made it
+     READY or parked it, and claimed the next slot); 0 = none.  enter_user_space
+     clears it (`mov qword ptr gs:[56], 0`) once it has finished with the old
+     stack.  See kstack_pin_set() in process.c. */
+  uint64_t kstack_pin;
 } __attribute__((packed));
 
 extern struct cpu_local cpu_locals[];

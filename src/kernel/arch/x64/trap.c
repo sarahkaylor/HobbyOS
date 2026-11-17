@@ -3280,6 +3280,18 @@ void sync_lower_handler_c(struct trap_frame *tf) {
           return;
         }
         default:
+#ifdef KERNEL_MODE_TEST
+          /* C6-p7b: LX_HB_TEST_KSTACK ('KST'), test kernels only -- the kstack
+             probe's handle on the kernel-task stack stress (process.c,
+             kstack_stress_op).  rdi = op, rsi/rdx = its arguments.  Release
+             kernels answer -ENOSYS like any other unknown number. */
+          if (syscall_num == 0x4B5354u) {
+            extern int64_t kstack_stress_op(int op, int64_t a, int64_t b);
+            tf->regs[0] = (uint64_t)kstack_stress_op((int)tf->regs[5], (int64_t)tf->regs[4],
+                                                     (int64_t)tf->regs[3]);
+            return;
+          }
+#endif
           /* Nothing owns this number: name it on the console once, then answer
              -ENOSYS as Linux does.  Bring-up of a real Linux program is this
              line plus the next handler, never a guess. */
@@ -7128,6 +7140,15 @@ __asm__(
 "       between the swapgs and the iretq would run on the user GS (iretq\n"
 "       reloads IF from the frame).  [rsp + 8] is the frame's CS. */\n"
 "    cli\n"
+"    /* C6-p7b: the last C call on the outgoing stack is behind us.  When\n"
+"       schedule() switched away from a kernel task, that stack was the\n"
+"       task's own (an int 0x81 from ring 0 does not switch stacks), and\n"
+"       until here the task must not be resumed elsewhere: its resume\n"
+"       writes and runs below its saved RSP, over the frames this CPU was\n"
+"       still using.  Drop the pin before the swapgs (it is gs-relative);\n"
+"       what is left only pops the 5-word iretq frame, which lies a whole\n"
+"       schedule() call chain below that saved RSP. */\n"
+"    mov qword ptr gs:[56], 0\n"
 "    test byte ptr [rsp + 8], 3\n"
 "    jz 4f\n"
 "    swapgs\n"

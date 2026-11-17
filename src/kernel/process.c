@@ -430,6 +430,89 @@ void set_current_process_pid(uint32_t cpu, int pid) {
 #endif
 }
 
+#ifdef __x86_64__
+/* C6-p7b: a kernel task's stack outlives its claim.
+ *
+ * A kernel task runs in ring 0 on its own stack (process_create_kernel), so
+ * an interrupt it takes -- the int 0x81 of a yield, the 100 Hz broadcast
+ * 0x81, the blk-cache wait's yield -- pushes its frame onto THAT stack and
+ * schedule() runs there.  schedule() saves the task, makes it READY (or
+ * leaves it parked), claims the next slot and drops proc_lock, and only then
+ * runs the switch tail -- resume diagnostics, vm_touch, the next thread's
+ * signal delivery, enter_user_space's frame check -- still on the task's
+ * stack, until enter_user_space moves RSP or iretqs.  The claim
+ * (cpu_current_pids) is already gone, so another CPU may pick the task in
+ * that window and resume it at its saved RSP: the resume copies its frame to
+ * [rsp-320, rsp) and the task then runs below rsp -- over the frames this
+ * CPU is still executing.  Measured (integ9 Gate P5, fullscreen row): CPU 7
+ * (now "pid 9", icewm) and CPU 6 (pid 270, the image-prefetch task) both in
+ * spin_acquire_raw(&proc_lock) on ONE stack (trap frame 0xFFFF800023FFD7F0
+ * on both), CPU 7 #PF at the __builtin_return_address(1) walk (saved RBP
+ * 0x46, an RFLAGS image), CPU 6 #GP on a spilled CPU index that held a stack
+ * address; then [UNOWNED-FREED] on proc_lock and P5's next spawn -EAGAIN.
+ *
+ * The pin (cpu_locals[cpu].kstack_pin = slot + 1) is set under proc_lock by
+ * the CPU that gives the task up and cleared by enter_user_space once that
+ * CPU is done with the stack (or by start_scheduler after a longjmp off it).
+ * The pick sites read it under proc_lock. */
+volatile uint64_t kstack_share_count; /* resumes of a pinned task (see report) */
+
+/* cpu_local is packed (fixed gs: offsets), so no __atomic on its fields: an
+   aligned qword store/load is single-copy atomic on x86_64, the setter and
+   the pick sites are ordered by proc_lock, and the barriers keep the compiler
+   from moving the accesses across the surrounding code. */
+static void kstack_pin_set(uint32_t cpu, int slot) {
+  if (cpu < MAX_CPUS) {
+    cpu_locals[cpu].kstack_pin = (uint64_t)(slot + 1);
+    __asm__ volatile("" ::: "memory");
+  }
+}
+
+static void kstack_pin_clear(uint32_t cpu) {
+  if (cpu < MAX_CPUS) {
+    __asm__ volatile("" ::: "memory");
+    cpu_locals[cpu].kstack_pin = 0;
+    __asm__ volatile("" ::: "memory");
+  }
+}
+
+/* The CPU other than `self` that is still on slot's stack, or -1. */
+static int kstack_pin_holder(int slot, uint32_t self) {
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    if (c == self)
+      continue;
+    __asm__ volatile("" ::: "memory");
+    if (cpu_locals[c].kstack_pin == (uint64_t)(slot + 1))
+      return (int)c;
+  }
+  return -1;
+}
+
+/* Under proc_lock: `cpu` is about to resume kernel slot `slot` while CPU
+   `holder` still runs on that slot's stack.  Bounded rows, always counted. */
+static void kstack_share_report(const char *site, int slot, int holder, uint32_t cpu) {
+  uint64_t n = __atomic_add_fetch(&kstack_share_count, 1, __ATOMIC_RELAXED);
+  if (n > 16 && (n & 1023) != 0)
+    return;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[KSTACK-SHARE] site=");
+  kl_s(&kl, site);
+  kl_s(&kl, " cpu=");
+  kl_i(&kl, (long)cpu);
+  kl_s(&kl, " slot=");
+  kl_i(&kl, (long)slot);
+  kl_s(&kl, " ");
+  kl_s(&kl, proc_table[slot].name[0] ? proc_table[slot].name : "?");
+  kl_s(&kl, " still on its stack: cpu=");
+  kl_i(&kl, (long)holder);
+  kl_s(&kl, " n=");
+  kl_i(&kl, (long)n);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+#endif
+
 /* P2.2 (S2): which slot claims `cpu` (-1 = none); the x64 shootdown
  * send path scans these (design section 7.2). */
 int current_pid_of_cpu(uint32_t cpu) {
@@ -2321,6 +2404,22 @@ void schedule(struct trap_frame *tf, int is_yield) {
         break;
       }
     }
+#ifdef __x86_64__
+    /* C6-p7b: this CPU is on the kernel task's own stack from here until
+       enter_user_space leaves it; pin it so no pick resumes the task in
+       that window (see kstack_pin_set).  A task some other CPU already
+       claims is running on this very stack right now: say so. */
+    if (cur->is_kernel_process) {
+      if (taken_elsewhere) {
+        int other = -1;
+        for (uint32_t c2 = 0; c2 < MAX_CPUS; c2++)
+          if (c2 != cpu && cpu_current_pids[c2] == current_pid)
+            other = (int)c2;
+        kstack_share_report("owner", current_pid, other, cpu);
+      }
+      kstack_pin_set(cpu, current_pid);
+    }
+#endif
     if (!taken_elsewhere) {
       /* C1-k5: charge the slice ending here; remember whether a switch
          away would be voluntary (blocked) or involuntary (still runnable). */
@@ -2513,6 +2612,14 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
       if (claimed_elsewhere)
         continue;
+#ifdef __x86_64__
+      /* C6-p7b: a kernel task another CPU is still running on (its stack). */
+      if (proc_table[idx].is_kernel_process) {
+        int kh = kstack_pin_holder(idx, cpu);
+        if (kh >= 0)
+          kstack_share_report("schedule", idx, kh, cpu);
+      }
+#endif
       /* GB-057: an unresumable slot must be SKIPPED, not resumed.
 
          A user slot with no address space AND no v1 block cannot be resumed by
@@ -2580,6 +2687,12 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
     if (next >= 0) {
       set_current_process_pid(cpu, next);
+#ifdef __x86_64__
+      /* C6-p7b: resuming the pinned task ourselves is the plain yield case
+         (its resume relocates onto its own stack top); not a share. */
+      if (cpu_locals[cpu].kstack_pin == (uint64_t)(next + 1))
+        kstack_pin_clear(cpu);
+#endif
       /* C1-k5: count the switch away from ru_prev (once), stamp the slice. */
       if (ru_prev >= 0 && next != ru_prev)
         ru_count_switch_locked(ru_prev, ru_vol);
@@ -5925,6 +6038,11 @@ void start_scheduler(void) {
   }
 
   int jmp_val = setjmp(scheduler_return_ctx[cpu]);
+#ifdef __x86_64__
+  /* C6-p7b: back on this CPU's scheduler stack (a longjmp from schedule()'s
+     nothing-READY path may have left a kernel task's stack just now). */
+  kstack_pin_clear(cpu);
+#endif
   if (jmp_val == 1) {
     interrupts_enable();
     // Exit scheduler (tests finished)
@@ -6011,6 +6129,14 @@ void start_scheduler(void) {
       }
       if (claimed_elsewhere)
         continue;
+#ifdef __x86_64__
+      /* C6-p7b: same stack-pin rule as schedule()'s pick. */
+      if (proc_table[i].is_kernel_process) {
+        int kh = kstack_pin_holder(i, cpu);
+        if (kh >= 0)
+          kstack_share_report("idle", i, kh, cpu);
+      }
+#endif
       {
         set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
@@ -8116,3 +8242,99 @@ uint64_t kernel_stack_remaining(void) {
 int kernel_stack_low(uint64_t margin) {
   return kernel_stack_remaining() < margin ? 1 : 0;
 }
+
+#if defined(__x86_64__) && defined(KERNEL_MODE_TEST)
+/* C6-p7b: kernel-task stack-sharing stress (test kernels only; reached from
+ * the kstack probe, src/user/linux_probe_kstack.c, through the test-only
+ * compat syscall LX_HB_TEST_KSTACK in trap.c).
+ *
+ * N kernel tasks yield (int 0x81 from ring 0, i.e. schedule() on the task's
+ * own stack) as fast as they can for `ms` milliseconds while the probe's
+ * user processes keep the run queue full.  Every yield that switches away is
+ * exactly the window kstack_pin_set() describes: the task is READY, nobody
+ * claims it, and the outgoing CPU is still on its stack.  A pick that
+ * resumes it there counts in kstack_share_count ([KSTACK-SHARE]); each task
+ * also checks a canary block in its own frame across every yield. */
+#define KST_MAX 8
+static int kst_ids[KST_MAX];
+static volatile int kst_live;
+static volatile int kst_ms;
+static volatile uint64_t kst_yields, kst_bad, kst_runs;
+
+static void kstack_stress_task(void *arg) {
+  int id = *(const int *)arg;
+  uint64_t t_end = timer_get_ms() + (uint64_t)kst_ms;
+  volatile uint64_t canary[16];
+  uint64_t n = 0, bad = 0;
+  while (timer_get_ms() < t_end) {
+    uint64_t seed = ((uint64_t)(id + 1) << 56) ^ (n * 0x9E3779B97F4A7C15ull);
+    for (int i = 0; i < 16; i++)
+      canary[i] = seed ^ (uint64_t)i;
+    arch_yield();
+    for (int i = 0; i < 16; i++)
+      if (canary[i] != (seed ^ (uint64_t)i))
+        bad++;
+    n++;
+  }
+  __atomic_add_fetch(&kst_yields, n, __ATOMIC_SEQ_CST);
+  __atomic_add_fetch(&kst_bad, bad, __ATOMIC_SEQ_CST);
+  if (__atomic_sub_fetch(&kst_live, 1, __ATOMIC_SEQ_CST) == 0) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[KSTACK-ST] done run=");
+    kl_i(&kl, (long)kst_runs);
+    kl_s(&kl, " yields=");
+    kl_i(&kl, (long)kst_yields);
+    kl_s(&kl, " canary_bad=");
+    kl_i(&kl, (long)kst_bad);
+    kl_s(&kl, " share=");
+    kl_i(&kl, (long)kstack_share_count);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  kernel_exit();
+}
+
+/* op 1: start `a` tasks for `b` ms (returns how many started, -EBUSY while a
+ *       run is live); op 2: tasks still live; op 3: kstack_share_count;
+ *       op 4: canary mismatches; op 5: yields of the finished tasks. */
+int64_t kstack_stress_op(int op, int64_t a, int64_t b) {
+  switch (op) {
+  case 1: {
+    if (__atomic_load_n(&kst_live, __ATOMIC_SEQ_CST) != 0)
+      return -EBUSY;
+    int nt = (a < 1) ? 1 : (a > KST_MAX ? KST_MAX : (int)a);
+    kst_ms = (b < 100) ? 100 : (b > 20000 ? 20000 : (int)b);
+    kst_runs++;
+    int started = 0;
+    __atomic_store_n(&kst_live, nt, __ATOMIC_SEQ_CST);
+    for (int i = 0; i < nt; i++) {
+      kst_ids[i] = i;
+      if (process_create_kernel_nowait(kstack_stress_task, &kst_ids[i]) < 0)
+        break;
+      started++;
+    }
+    if (started < nt)
+      __atomic_sub_fetch(&kst_live, nt - started, __ATOMIC_SEQ_CST);
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[KSTACK-ST] start run=");
+    kl_i(&kl, (long)kst_runs);
+    kl_s(&kl, " tasks=");
+    kl_i(&kl, (long)started);
+    kl_s(&kl, "/");
+    kl_i(&kl, (long)nt);
+    kl_s(&kl, " ms=");
+    kl_i(&kl, (long)kst_ms);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    return started;
+  }
+  case 2: return __atomic_load_n(&kst_live, __ATOMIC_SEQ_CST);
+  case 3: return (int64_t)__atomic_load_n(&kstack_share_count, __ATOMIC_SEQ_CST);
+  case 4: return (int64_t)__atomic_load_n(&kst_bad, __ATOMIC_SEQ_CST);
+  case 5: return (int64_t)__atomic_load_n(&kst_yields, __ATOMIC_SEQ_CST);
+  default: return -EINVAL;
+  }
+}
+#endif
