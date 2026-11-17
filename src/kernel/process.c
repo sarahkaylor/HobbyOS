@@ -315,50 +315,45 @@ static void kmemset(void *dst, uint8_t val, uint64_t n) {
 /* C1-k5 (docs/cp-k5.md §1): the per-slot fd tables.  MAX_OPEN_FDS ints per
  * slot (16 KiB on x86_64) used to live inline in struct process; at 4096 fds
  * x 512 slots that is 8 MiB, and the x86_64 image has ~25 MiB left below
- * CP_KHOLE_HI (linker_x64.ld's ASSERT).  So every slot's open_fds points into
- * ONE frame-pool region taken here, right after frame_init(): 2048 frames on
- * x86_64, 48 on ARM.  It is never freed; a second process_init() (trap_test's
- * mock setup re-runs frame_init, which forgets every allocation) re-reserves
- * the same region, and that call resets every slot anyway.  If the
- * pool cannot give one contiguous run, each slot gets its own run; failing
- * that the boot stops here, loudly -- a NULL table would fault on the first
- * open. */
+ * CP_KHOLE_HI (linker_x64.ld's ASSERT).  So on x86_64 every slot's open_fds
+ * points into ONE whole 32 MiB frame-pool block taken here, right after
+ * frame_init().  A whole block, not an 8 MiB frame run: the block layer's
+ * invariant (free blocks + whole-unit blocks == all blocks, frame_test.c) holds
+ * only while nothing outside a whole unit is allocated this early, and a
+ * partial block would break it (measured: frame_test.c:118/:196).  The other
+ * 24 MiB of the block are unused.  It is never freed; a second process_init()
+ * (trap_test's mock setup re-runs frame_init, which forgets every allocation)
+ * re-reserves the same block, and that call resets every slot anyway.  No
+ * block is a loud halt: a NULL table would fault on the first open.  ARM
+ * keeps a static array of its 256-fd tables (192 KiB, the old inline size). */
 #define FDT_SLOT_BYTES ((uint64_t)MAX_OPEN_FDS * sizeof(int))
-#define FDT_SLOT_PAGES ((int)((FDT_SLOT_BYTES + FRAME_SIZE - 1) / FRAME_SIZE))
-static uint64_t fdt_region_pa; /* the region of the first process_init() */
+#ifdef __x86_64__
+_Static_assert(FDT_SLOT_BYTES * MAX_PROCESSES <= FRAME_BLOCK_SIZE,
+               "the fd tables must fit one frame block");
+static int fdt_block = -1; /* the block of the first process_init() */
 static void process_fdt_alloc(void) {
-  uint64_t total = FDT_SLOT_BYTES * (uint64_t)MAX_PROCESSES;
-  int pages = (int)((total + FRAME_SIZE - 1) / FRAME_SIZE);
-  uint64_t pa = 0;
-  if (fdt_region_pa) {
-    /* A re-run (trap_test's mock setup): frame_init() just forgot every
-       allocation, including this region.  Taking a NEW region now would
-       write -1s over whatever the allocator hands back -- frames other
-       subsystems still use.  Keep the old region and mark it used again
-       (frame_reserve_range works in whole 32 MiB blocks: unit-test kernels
-       only, at most two blocks). */
-    pa = fdt_region_pa;
-    frame_reserve_range(pa, pa + (uint64_t)pages * FRAME_SIZE);
+  if (fdt_block >= 0) {
+    uint64_t lo = frame_block_base_phys(fdt_block);
+    frame_reserve_range(lo, lo + FRAME_BLOCK_SIZE);
   } else {
-    pa = frame_alloc_contig(pages);
-    fdt_region_pa = pa;
+    fdt_block = frame_block_alloc_first_free();
   }
-  if (pa) {
-    uint8_t *base = (uint8_t *)phys_to_virt(pa);
-    for (int i = 0; i < MAX_PROCESSES; i++)
-      proc_table[i].open_fds = (int *)(void *)(base + (uint64_t)i * FDT_SLOT_BYTES);
-    return;
+  if (fdt_block < 0) {
+    uart_puts("[K5] FATAL: no frame block for the per-process fd tables\n");
+    for (;;)
+      ;
   }
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    uint64_t one = frame_alloc_contig(FDT_SLOT_PAGES);
-    if (!one) {
-      uart_puts("[K5] FATAL: no frames for the per-process fd tables\n");
-      for (;;)
-        ;
-    }
-    proc_table[i].open_fds = (int *)phys_to_virt(one);
-  }
+  uint8_t *base = (uint8_t *)phys_to_virt(frame_block_base_phys(fdt_block));
+  for (int i = 0; i < MAX_PROCESSES; i++)
+    proc_table[i].open_fds = (int *)(void *)(base + (uint64_t)i * FDT_SLOT_BYTES);
 }
+#else
+static int fdt_static[MAX_PROCESSES][MAX_OPEN_FDS];
+static void process_fdt_alloc(void) {
+  for (int i = 0; i < MAX_PROCESSES; i++)
+    proc_table[i].open_fds = fdt_static[i];
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // Process Init

@@ -21,7 +21,7 @@ that:
 
 | table | base5 | lane | as a static array | what the lane does |
 |---|---|---|---|---|
-| per-process fd table `open_fds[]` | 256 ints inline per slot (1 KiB × 512) | **4096** (`MAX_OPEN_FDS`, x86_64; ARM stays 256) | 16 KiB × 512 = **8 MiB** | `int *open_fds` points into **one frame-pool region** that `process_init()` takes right after `frame_init()` (2048 frames; a per-slot fallback; a loud halt if both fail). Never freed. A second `process_init()` (trap_test's mock setup re-runs `frame_init`) keeps the same region and marks it used again with `frame_reserve_range` (whole 32 MiB blocks; unit-test kernels only). |
+| per-process fd table `open_fds[]` | 256 ints inline per slot (1 KiB × 512) | **4096** (`MAX_OPEN_FDS`, x86_64; ARM stays 256) | 16 KiB × 512 = **8 MiB** | `int *open_fds` points into **one whole 32 MiB frame-pool block** that `process_init()` takes right after `frame_init()` (`frame_block_alloc_first_free`; 8 MiB used, 24 MiB idle). It has to be a whole block: the block layer's invariant (free + whole-unit blocks = all blocks) is checked by `frame_test.c:118/:196`, and an 8 MiB frame run broke it (measured in the first unit run). Never freed. A second `process_init()` (trap_test re-runs `frame_init`) re-reserves the same block. ARM keeps a static 192 KiB array (`fdt_static`), the old inline size. |
 | `fd_cloexec[]` | 4 words | 64 words inline | +240 KiB | stays inline |
 | system-wide file table | 512 static (`global_file_table`, 627 KiB) | **16384** (`MAX_GLOBAL_FILES`, x86_64; ARM 512) | 1.2 KiB × 16384 = **19.6 MiB** | the first 512 (`GFT_STATIC`) stay static. The rest come in **64-slot chunks** (20 frames each) from the frame pool, taken when every materialised slot is busy and never freed. `gfile(i)` is the only accessor, and an index whose chunk does not exist yet names `gft_dead`, which is always EMPTY. `struct file` gained `gidx` (pointer arithmetic is gone). The static slots are scanned first and lowest first, as before; the chunks are scanned from a rotating hint. |
 | pipe pool | `MAX_GLOBAL_FILES/2` = 256 static (237 KiB) | **8192** | 930 B × 8192 = **7.4 MiB** | 256 static, then 64-pipe chunks (15 frames each), the same scheme (`pipe.c` `pipe_slot`) |
@@ -39,7 +39,7 @@ so is the 24.8 MiB headroom: the shrinks and growths net to about −360 KiB,
 which the section's 2 MiB alignment absorbs. The unit-test kernel ends at
 `__stack_top` 0x76b3a790.
 
-Frame cost at run time: the fd tables take 8 MiB at boot. Each file chunk is
+Frame cost at run time: the fd tables take one 32 MiB block at boot (8 MiB of it used). Each file chunk is
 80 KiB, each pipe chunk 60 KiB, each epoll instance 64 KiB the first time it
 is used. A Linux-ABI pipe's 64 KiB ring (C1-k4) is unchanged, so 3000 Linux
 pipes are 188 MiB of rings.
@@ -128,13 +128,17 @@ because 16384 would not fit.
 512 on x86_64 since cp-k4, and this lane leaves it alone. Every thread takes
 a slot. Measured on the host: the game menu has 15–16 processes and 173–190
 threads in total (§0.2 item 13). The P2 tree peaked at 18 processes.
-thrstorm in the guest needs 256 workers + about 10 Wine threads in its own
-process, plus wineserver, services, winedevice ×2, plugplay, svchost,
-explorer and rpcss (§7). That is under 350 slots, so 512 leaves at least
-160 spare. Per-slot cost is now 11.4 KiB of BSS plus 16 KiB of frame-pool fd
-table. Going to 1024 would add about 5.7 MiB of BSS (proc_table plus the
-other `MAX_PROCESSES`-sized tables, ~19 KiB per slot, docs/cp-k4.md §3) and
-8 MiB of frames. It is not needed for P8.
+
+thrstorm in the guest (§7) ran with 257 threads in its own process (its
+Toolhelp count) and 9 live processes (the launcher's `sysinfo(3)` census,
+which counts thread groups). Adding a few threads for each Wine service
+process still keeps the run under about 300 slots, so 512 leaves more than
+200 spare.
+
+Per-slot cost is now 11.4 KiB of BSS plus a 16 KiB frame-pool fd table.
+Going to 1024 slots would add about 5.7 MiB of BSS (proc_table and the other
+`MAX_PROCESSES`-sized tables, ~19 KiB per slot, docs/cp-k4.md §3) and 8 MiB
+of frames. P8 does not need it.
 
 ## 6. Fixed-size tables on the fd path (inventory)
 
@@ -183,7 +187,23 @@ Guest harness: `tools/cp/k5/run-thrstorm.sh`, a cut-down
 thrstorm, then wineserver -k. Grades: S1 done rc=0 and exit 0, S2 storm
 ≥ 60 s, S3 nothing left after wineserver -k, S4 no fault line.
 
-Host reference, strix Wine in a private glibc-2.31 chroot: 20 s, 3249
-rounds, 831,744 trips. Base5 guest: thrstorm printed its header and then
-never printed the T1 row; the step was killed at its 900 s timeout
-(`thrstorm-base.txt`). Lane guest: `thrstorm-lane.txt`.
+Results on strix:
+
+| run | rounds | round trips | per second | worst round |
+|---|---|---|---|---|
+| host: strix Wine in a private glibc-2.31 chroot, 20 s | 2899 | 742,144 | ~37,000 | 18 ms |
+| base5 guest | — | — | — | — |
+| lane guest, 60 s | 261 | 66,816 | ~1,100 | 1,813 ms |
+
+On base5, thrstorm printed its header and then never printed the T1 row. It
+was killed at the 900 s step timeout, and the guest stayed wedged afterwards
+(`thrstorm-base.txt`).
+
+On the lane, T1 started 256 threads (Toolhelp 257) in 2.9 s, and T2 and T3
+passed. wineserver's epoll set grew past 256 fds (`[EPOLLHW] n=256`), and
+`wineserver -k` left nothing behind (`thrstorm-lane.txt`).
+
+The guest runs about 33 times slower than the host per round trip. Each trip
+is a SetEvent, a wait, a pipe write and read, and a reply, and every one of
+those is a wineserver request over pipes. This is the wineserver IPC cost P8
+will pay. It is a performance item for a later lane, not a ceiling.
