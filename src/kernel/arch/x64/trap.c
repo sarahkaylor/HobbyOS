@@ -5230,10 +5230,21 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       if (kg && kg->as && vm_va_is_user(kg->as, kcr2)) {
         static uint64_t kdf_last[MAX_CPUS];
         static uint32_t kdf_rep[MAX_CPUS];
+        static uint64_t kdf_t[MAX_CPUS];
         uint32_t kc = get_cpuid();
         if (kc >= MAX_CPUS) kc = 0;
-        if (kdf_last[kc] == (kcr2 & ~0xFFFULL)) kdf_rep[kc]++;
+        /* C1-k6: a REPEAT is the same page faulting again at once (a
+           resolution that does not stick: microseconds apart).  The same page
+           faulting again after a peer thread re-mapped it is a new fault: a
+           pread into a window another thread keeps MAP_FIXED-replacing every
+           few hundred microseconds (linux_probe_e2fault, now that usleep(200)
+           sleeps 200 us instead of a 10 ms tick) counted every one of them as
+           a repeat and was killed with SIGSEGV after the 4th
+           (docs/cp-k6.md §9). */
+        uint64_t kdf_now = timer_get_us();
+        if (kdf_last[kc] == (kcr2 & ~0xFFFULL) && kdf_now - kdf_t[kc] < 100) kdf_rep[kc]++;
         else { kdf_last[kc] = kcr2 & ~0xFFFULL; kdf_rep[kc] = 0; }
+        kdf_t[kc] = kdf_now;
         if (kdf_rep[kc] < 4) {
           const char *why = "PROT";
           int pf_w = (int)((tf->error_code >> 1) & 1);
