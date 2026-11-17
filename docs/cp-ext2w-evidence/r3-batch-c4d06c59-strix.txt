@@ -61,3 +61,4 @@ ext2w_gate rc=0 ext2w_gate: PASS
 reg_gate rc=0 == removed /srv/nfs/cp-ext2w-reg
 ext2_test rc=0 ext2_test: PASS 3 ordered runs DANGER=0
 ALLDONE
+--- rerun at 8a28225d (strix ~/cp/lanes/ext2w3, after the batch): castscan rc=0 castscan: 364 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present; intel build rc=0
