@@ -324,7 +324,10 @@ task; it does not park BLOCKED through `arch_yield`, the L78 stack-smash shape
 documented in `virtio_blk.c`), commits when the oldest dirty buffer is 1 s
 old, and calls `kernel_exit` exactly once: when the cache is clean and
 `process_others_alive()` says nothing else is left (the end of a wave).  The
-halt therefore still follows the last commit.
+halt therefore still follows the last commit.  Started at mount, it takes the
+first process slot: with a data disk attached, `ext2flush` is pid 1 and the
+first wave member or XSESSION is pid 2 (C8's game boots on this tree reached
+the menu that way; nothing in the gates assumes pid 1).
 
 ### 7.3 Stop 6 / the integ5 `reg_gate` wedge -- user memory under the locks
 
