@@ -110,7 +110,13 @@ def main():
             ser = read(serial)
             for (p, t) in list(pending):
                 begin = ser.rfind(f"[P5] begin {p} ")
-                if begin >= 0 and f"{PFX[p]} {t} " in ser[begin:]:
+                # the probe prints t=5s, t=10s, ...; under host load a row can be
+                # skipped (measured on a Venus P6 run: t=15s then t=22s), so the
+                # first row at or past the mark triggers the screendump
+                due = int(t[2:-1])
+                seen = [int(m.group(1)) for m in
+                        re.finditer(re.escape(PFX[p]) + r" t=(\d+)s ", ser[begin:])] if begin >= 0 else []
+                if seen and max(seen) >= due:
                     path = os.path.join(args.out, f"{p}-{t.replace('=', '')}.ppm")
                     if qmp.shot(path):
                         shots[p].append(path)
