@@ -101,6 +101,20 @@ vn_renderer_create(struct vn_instance *instance,
 assert h.count(old) == 1
 h = h.replace(old, decl, 1)
 open(v + '/vn_renderer.h', 'w').write(h)
+# WSI: a renderer that cannot import dma-bufs (HobbyOS) cannot share native
+# images with the X server, so take the software WSI path (CPU copy + PutImage)
+# instead of requiring DRI3 -- without this, vkGetPhysicalDeviceSurfaceSupportKHR
+# answers false on XHOBBY (no DRI3) and nothing can present.
+w = open(v + '/vn_wsi.c').read()
+old = """   const bool use_sw_device =
+      !physical_dev->base.vk.supported_extensions
+          .EXT_external_memory_dma_buf ||"""
+assert w.count(old) == 1
+w = w.replace(old, """   const bool use_sw_device =
+      !physical_dev->instance->renderer->info.has_dma_buf_import ||
+      !physical_dev->base.vk.supported_extensions
+          .EXT_external_memory_dma_buf ||""", 1)
+open(v + '/vn_wsi.c', 'w').write(w)
 print("patched", v)
 EOF
   say "patch: Mesa 26.2.6 (sha256 ok) + vn_renderer_hobbyos.c + gpu_abi.h + meson/vn_renderer.h hooks"
