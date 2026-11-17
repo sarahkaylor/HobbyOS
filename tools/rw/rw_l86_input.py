@@ -685,7 +685,7 @@ class L86:
         still on its banner, and the modal turned up ~5 min later).  So the
         modal is handled here, in the loop that is already waiting."""
         if timeout is None:
-            timeout = int(os.environ.get("RW_L86_MENU_TIMEOUT", "1500"))
+            timeout = int(os.environ.get("RW_L86_MENU_TIMEOUT", "3000"))
         end = time.time() + timeout
         t_start = time.time()
         png = None
@@ -801,7 +801,7 @@ class L86:
                            "opens": opens, "quiet": int(quiet)})
                 print("[L86] loading: n=%s opens=%d quiet=%ds"
                       % (n, opens, int(quiet)), flush=True)
-            stall_s = int(os.environ.get("RW_L86_STALL_SECS", "900"))
+            stall_s = int(os.environ.get("RW_L86_STALL_SECS", "1800"))
             if n is not None and is_stalled(quiet, stall_s):
                 self.emit({"ev": "stalled", "stage": "menu", "n": n,
                            "opens": opens, "quiet": int(quiet),
