@@ -24,6 +24,7 @@
 #include "vm.h"
 
 extern uint64_t hb_clock_realtime_ms(void);
+extern void *memcpy(void *dst, const void *src, size_t n);
 
 #define K_DEV_EXT2 0x00000707u
 
@@ -93,11 +94,12 @@ static void v_copy(char *dst, const char *src, int cap) {
  * holder's pid and its lock() call site (resolve with addr2line on
  * hobbyos.elf), so a wedge says where the holder entered. */
 #define EXT2W_HOLD_REPORT_MS 2000u
-static volatile uint64_t g_hold_site, g_hold_ms;
+static const void *volatile g_hold_site;
+static volatile uint64_t g_hold_ms;
 static volatile int g_hold_pid;
 extern uint64_t timer_get_ms(void);
 
-static void lock_note(uint64_t site) {
+static void lock_note(const void *site) {
   struct process *c = current_process();
   g_hold_site = site;
   g_hold_pid = c ? c->pid : -1;
@@ -105,7 +107,7 @@ static void lock_note(uint64_t site) {
 }
 
 static __attribute__((noinline)) void lock(void) {
-  uint64_t site = (uint64_t)(uintptr_t)__builtin_return_address(0);
+  const void *site = __builtin_return_address(0);
   static volatile int reported;
   if (!reported && __atomic_load_n(&g_lock.locked, __ATOMIC_ACQUIRE)) {
     /* held: watch (read-only) before joining ylock_acquire's spin */
@@ -120,11 +122,15 @@ static __attribute__((noinline)) void lock(void) {
         kl_s(&kl, " ms: holder pid=");
         kl_i(&kl, (long)g_hold_pid);
         kl_s(&kl, " site=");
-        kl_hex(&kl, (unsigned long)g_hold_site);
+        const void *hs = g_hold_site;
+        uint64_t hv = 0, wv = 0; /* code addresses, printed (no int<->ptr cast) */
+        memcpy(&hv, &hs, sizeof hs);
+        memcpy(&wv, &site, sizeof site);
+        kl_hex(&kl, (unsigned long)hv);
         kl_s(&kl, " held_ms=");
         kl_i(&kl, (long)(timer_get_ms() - g_hold_ms));
         kl_s(&kl, " waiter site=");
-        kl_hex(&kl, (unsigned long)site);
+        kl_hex(&kl, (unsigned long)wv);
         kl_c(&kl, '\n');
         kl_emit(&kl);
       }
