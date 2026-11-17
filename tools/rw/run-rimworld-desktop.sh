@@ -329,11 +329,13 @@ echo "  staged: ${GUESTN:-0}/$HOSTN assemblies, ${GUESTB:-0}/$HOSTB bytes"
 
 # AD-9: install the launcher AS the game's executable, in the game dir; the
 # 14,720-byte ET_EXEC stub is preserved beside it as RimWorldLinux.orig.
-if [ "$(stat -c %s "$RW_EXPORT/RimWorldLinux")" = 14720 ]; then
-  cp -f "$RW_EXPORT/RimWorldLinux" "$RW_EXPORT/RimWorldLinux.orig"
+if [ "${RW_SKIP_INSTALL:-0}" != 1 ]; then
+  if [ "$(stat -c %s "$RW_EXPORT/RimWorldLinux")" = 14720 ]; then
+    cp -f "$RW_EXPORT/RimWorldLinux" "$RW_EXPORT/RimWorldLinux.orig"
+  fi
+  rm -f "$RW_EXPORT/RimWorldLinux" # break any stale hardlink, then install
+  cp -f "$OUT/RimWorldLinux.ad9" "$RW_EXPORT/RimWorldLinux"
 fi
-rm -f "$RW_EXPORT/RimWorldLinux" # break any stale hardlink, then install
-cp -f "$OUT/RimWorldLinux.ad9" "$RW_EXPORT/RimWorldLinux"
 # L63: no private alias is needed any more.  The export itself belongs to this
 # worktree, so /NFS/RimWorldLinux is already this lane's binary (the .l61
 # alias existed only because lanes shared one directory).
