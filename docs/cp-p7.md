@@ -15,10 +15,12 @@ Evidence: `docs/cp-p7-evidence/`; screendumps `evidence/cp-p7/` (git-ignored).
 | Linux `vkcubex` fullscreen 1920x1080 FIFO, 65 s | **96.9 fps**, every present a blob flip | 39.9 fps (`HB_SCANOUT=0`: put_image) | `vkcubex-linux-fullscreen.txt` |
 | `vkcube.exe` (Wine) fullscreen 1920x1080 FIFO, 65 s | **93.3 fps** (105–110 fps while the host was quiet) | 37.1 fps (put_image build, `HB_SCANOUT=0`) | `wine-vkcube-fs-and-p6-windowed.txt`, `wine-baselines.txt` |
 | per-present cost, scanout (`[HBP]`, µs avg) | acquire 0, submit 80, wait 3 300, **flip 6 300** (SET_SCANOUT_BLOB 100 + RESOURCE_FLUSH 6 100) | flip 24 000 (put_image of 8 MB) | same |
-| D3D11 / D3D12 triangle fullscreen 1920x1080 (synchronous present) | 70.8 / 54.7 fps on the scanout | — | §6 |
+| D3D12 / D3D11 triangle fullscreen 1920x1080, 65 s | **100.4 / 97.8 fps** on the scanout with async present (synchronous present, run right after: 64.9 / 69.8) | — | `wine-baselines.txt` |
+| **Cyberpunk 2077 main menu on Venus, P7 path** | **main menu (OCR x3) at launch + 201 s**, every present a blob flip at 1920x1080; title and menu 42–50 fps (winevulkan `+fps`), `[HBP]` flip 8.4–10 ms | integ7 (P6 path: 1280x720 window, put_image): menu at launch + 161–177 s, 46–52 fps | `game-venus2-menu.txt` |
 | `VK_KHR_present_wait` | **exposed again**; ids complete after put_image or the flip; DXVK `presentWait: 1`, vkd3d-proton paces with it | hidden | `wine-vkcube-fs-and-p6-windowed.txt` |
 | venus async present | **root-caused and fixed** (§3.2); d3d11 114.8, d3d12 166.9 fps for 65 s | d3d11/d3d12 died at frame 2 | `async-present-rootcause.txt` |
-| P6 rows windowed, present_wait on | vkcube.exe 207.9, d3d11 121.4, d3d12 188.4 fps | 204 / 118–123 / 176–190 | same |
+| P6 rows windowed, present_wait on (sync present) | vkcube.exe 207.9, d3d11 121.4, d3d12 188.4 fps | 204 / 118–123 / 176–190 | same |
+| P6 rows windowed, final defaults (async + present_wait) | vkcube.exe 184.3, d3d11 108.5, d3d12 200.7 fps, PASS | same | `wine-baselines.txt` |
 | F5 hand-back: a window on top, RandR 1280x720 and back, exit | X takes the screen back each time, the client gets it back after | — | `f5-handback.txt` |
 
 **Why not "the host's refresh rate".**  There is none: strix's monitor is
@@ -191,6 +193,47 @@ X geometry round trip; `set`/`flush` the kernel's two round trips.
 | d3dfs1 | D3D12/D3D11 fs, scanout, sync present | 54.7 / 70.8 fps, PASS |
 | f5a | vkcubex fs + p7occlude (occluder, RandR round trip), async on | every transition as §2.2 |
 
-## 7. Not done / open
+| vkput1 | vkcube.exe fs, put_image build | 37.1 fps, PASS |
+| d3dfs2 / d3dfs3 | D3D12, D3D11, vkcube.exe fs; async / sync present, back to back | 100.4, 97.8, 76.9 / 64.9, 69.8, 72.9 fps, PASS |
+| p6win2 | P6 rows windowed, final defaults | 184.3 / 108.5 / 200.7 fps, PASS |
+| p7-venus1 | Cyberpunk, profile copy with WindowMode=Fullscreen (1280x720 swapchain, vkd3d upscales into the 1920x1080 window) | scanout from the first frame, title at 52–62 fps; stopped at the title by hand: the harness's first Space came too early and its OCR never re-read the prompt on the upscaled title |
+| p7-venus2 | Cyberpunk, profile copy with Resolution=1920x1080 (BorderlessWindowed kept) | **main menu**, 42–50 fps |
 
-See the lane report.
+## 7. The game on the P7 path
+
+The user's profile (`~/cp/game-profile`) has `WindowMode BorderlessWindowed`
+and `Resolution 1280x720`: the game opens a 1280x720 borderless window on the
+1920x1080 desktop, which does not cover the screen, so it stays on put_image
+(the integ7 menu boots).  For P7 the boots used `P8_PROFILE` = a copy of the
+profile with one display key changed (never the original, nothing in git):
+`Resolution 1920x1080` makes the borderless window the whole screen and every
+present after the first a blob flip.  `run-p8.sh`/`boot_p8.py` are unchanged.
+
+Menu fps here (42–50 at 1920x1080, the game rendering 2.25x the pixels) is
+level with integ7's put_image menu (46–52 at 1280x720).  The per-frame split
+(`[HBP]`): the venus present thread's blit + fence `sub` 8–11 ms, the flip 9 ms
+(QEMU's egl-headless readback, slower than the 6 ms of the quiet host: four
+Venus guests shared the GPU and QEMU's main threads).  A like-for-like
+comparison needs the X screen at 1280x720 (then the stock profile's window is
+the whole screen): XHOBBY has no knob for its startup size that `run-p8.sh`
+reaches (only `XSESSION.ENV` from the disk image), so it is left for C9-play.
+
+## 8. Not done / open
+
+* **No vblank.**  egl-headless has none and the host monitor is off, so FIFO
+  is unpaced; a virtual 60 Hz pacing knob was not added (it would hide the
+  ceiling this lane was asked to measure).
+* **The host display's readback is the ceiling** (6.1 ms per 1080p flip on a
+  quiet host, 8–10 ms under load), on QEMU's main thread, serializing every
+  virtio-gpu command behind it.  A display backend that scans the dma-buf out
+  without reading it back (gtk-gl, spice-gl, dbus) would remove it; none is
+  usable headless on strix without touching the user's session.
+* The flip is synchronous: `RESOURCE_FLUSH` is not posted asynchronously.
+  It would overlap the readback with the guest's next frame only partly,
+  because QEMU processes the control queue in order.
+* 1280x720 scanout of the game (an X screen that starts at 1280x720, or
+  exclusive fullscreen with a real RandR switch) was not measured.
+* **Buffer release on a real display.**  The WSI hands an image back for
+  acquire as soon as its flip returns.  That is safe on egl-headless, which
+  has copied the image by then; a display that keeps scanning the dma-buf out
+  (gtk-gl, spice-gl) needs the image held until the *next* flip has landed.
