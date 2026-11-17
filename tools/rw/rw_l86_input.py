@@ -156,7 +156,7 @@ def norm(s):
 
 
 # ---------------------------------------------------------------- liveness
-def liveness_quiet(now, last_present_at, last_open_at):
+def liveness_quiet(now, last_present_at, last_open_at, last_transfer_at=None):
     """Seconds since the front end last showed progress.
 
     L87: a frozen present counter is NOT a stall while the def loader is still
@@ -164,8 +164,17 @@ def liveness_quiet(now, last_present_at, last_open_at):
     all (L78 M2: n=280 at t=322 s, n=290 at t=537 s) while [XO] rows keep
     arriving; the menu shows up at n~600 after ~650 s.  A present and a loader
     open are both progress, so the quiet clock is the later of the two.
+
+    L91: a front-end load can also spend many minutes issuing [VIRGL3D]
+    transfer_to_host rows for thousands of mip levels with no present and no
+    new [XO] open.  Those transfers are progress: without counting them the
+    driver declares a stall at 900 s while the GPU worker is still uploading
+    the menu atlas (measured on a fresh 1.6.4871 boot).
     """
-    return now - max(last_present_at, last_open_at)
+    stamps = [last_present_at, last_open_at]
+    if last_transfer_at is not None:
+        stamps.append(last_transfer_at)
+    return now - max(stamps)
 
 
 def is_stalled(quiet_s, stall_s):
@@ -684,6 +693,7 @@ class L86:
         dismissed = 0
         last_n, last_n_at = None, time.time()
         last_opens, last_opens_at = None, time.time()
+        last_transfer, last_transfer_at = None, time.time()
         last_report = 0.0
         while time.time() < end:
             # establish_geometry() runs at boot, when the only window on screen
@@ -771,15 +781,20 @@ class L86:
             # control to the harness, and the harness killed QEMU -- which read
             # as a guest freeze in L86.  Liveness is presents OR loader opens,
             # and the quiet threshold is above the measured plateau.
-            x = parse_xsw(self.serial())
+            ser = self.serial()
+            x = parse_xsw(ser)
             n = x["n"] if x else None
-            opens = len(re.findall(r"^\[XO\] ", self.serial(), re.M))
+            opens = len(re.findall(r"^\[XO\] ", ser, re.M))
+            transfers = len(re.findall(r"\[VIRGL3D\] transfer_to_host", ser))
             now = time.time()
             if n is not None and n != last_n:
                 last_n, last_n_at = n, now
             if opens != last_opens:
                 last_opens, last_opens_at = opens, now
-            quiet = liveness_quiet(now, last_n_at, last_opens_at)
+            if transfers != last_transfer:
+                last_transfer, last_transfer_at = transfers, now
+            quiet = liveness_quiet(now, last_n_at, last_opens_at,
+                                   last_transfer_at)
             if now - last_report >= 60:
                 last_report = now
                 self.emit({"ev": "loading", "stage": "menu", "n": n,
@@ -1520,11 +1535,22 @@ def run(q, grab, log_path, args, shots):
 
     # 1. the Steam modal arrives with the menu, so main_menu() below owns it.
     # 2. menu -> scenario -> storyteller -> worldopts, every click OCR-located
-    png, words, txt = d.main_menu()
-    d.measure(int(os.environ.get("RW_L86_MENU_MEASURE", "20")), "menu")
-    ok, png, words = d.advance("menu", "New colony",
-                               ["Choose scenario", "Crashlanded",
-                                "Rich explorer", "Scenario"], 120)
+    start_stage = os.environ.get("RW_L86_START_STAGE", "")
+    if start_stage == "scenario":
+        # A live run can be resumed after its menu click: the front end is
+        # already on the scenario page, so waiting for the menu again would
+        # burn the whole menu budget and end with reached_colony=False.
+        png = d.shot("resume_scenario")
+        words = d.ocr(png, tag="resume_scenario") if png else []
+        txt = d.text_of(words)
+        print("[L86] resume at scenario: %r" % txt[:120], flush=True)
+        ok = True
+    else:
+        png, words, txt = d.main_menu()
+        d.measure(int(os.environ.get("RW_L86_MENU_MEASURE", "20")), "menu")
+        ok, png, words = d.advance("menu", "New colony",
+                                   ["Choose scenario", "Crashlanded",
+                                    "Rich explorer", "Scenario"], 120)
     if ok:
         # Crashlanded is a card: clicking it only changes the selection
         d.advance("scenario", "Crashlanded",

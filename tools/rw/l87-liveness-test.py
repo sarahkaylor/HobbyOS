@@ -33,8 +33,8 @@ def check(name, got, want):
 # Timeline of the real load, seconds after the launch handed over.
 # (t, last present at, last [XO] at) -- presents stop at 150 s, loader opens
 # continue until 300 s, menu at 650 s.
-def at(t, last_present, last_open):
-    return liveness_quiet(t, last_present, last_open)
+def at(t, last_present, last_open, last_transfer=None):
+    return liveness_quiet(t, last_present, last_open, last_transfer)
 
 
 OLD = 150
@@ -52,6 +52,11 @@ check("new rule waits through the end of the load",
       at(600, 150, 300) > NEW, False)
 # A genuinely dead guest: both signals silent for >900 s.
 check("new rule fires on a real 901 s silence", at(1201, 150, 300) > NEW, True)
+# A GPU upload can keep the front end alive after presents and opens stop.
+check("new rule treats a transfer as progress",
+      at(1200, 150, 300, 1100) > NEW, False)
+check("new rule fires after transfers also go quiet",
+      at(1201, 150, 300, 300) > NEW, True)
 # is_stalled is a strict comparison: exactly the budget is not yet a stall.
 check("boundary: quiet == budget is not a stall", is_stalled(900, 900), False)
 check("boundary: quiet = budget+1 is a stall", is_stalled(901, 900), True)
