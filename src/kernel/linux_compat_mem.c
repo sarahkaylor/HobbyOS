@@ -258,9 +258,13 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
       /* F1: MAP_FIXED into the kernel hole / past the ceiling is ENOMEM on
          compat; the native bands keep their historical EINVAL. */
       return l_ret(tf, as->layout == VM_LAYOUT_COMPAT ? -ENOMEM : -EINVAL);
-    /* Replace, don't overlay: vm_mmap rewrites the region records only, so the
-       old leaves would survive the swap with their old protection. */
-    l_zap_pages(as, addr, rlen);
+    /* C1-pe: no zap here.  vm_mmap's MAP_FIXED branch drops the old leaves
+       in the same vm_lock section that rewrites the records, with the
+       cross-CPU shootdown before any frame is released.  A zap here, ahead
+       of that section, let a peer thread refault the page from the OLD
+       region in between: it read zeros (neither the old bytes nor the new
+       mapping's), and that leaf's frame was later freed without a shootdown
+       (linux_probe_pemap V5). */
   }
 
   int64_t r = sys_mmap6(addr, len, prot, (int64_t)hf, fd, off);

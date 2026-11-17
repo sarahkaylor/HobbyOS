@@ -1,0 +1,27 @@
+t3_linux_probe: building /home/sarah/cp/lanes/pe-base/obj/intel/probe_pemap.elf
+=== t3_linux_probe: pemap (deadline 300s, log /home/sarah/cp/lanes/pe-base/obj/linux_probe_pemap.log) ===
+[LP] pemap: 3 data files (first /tmp/pemap/pemap00.bin, 615400 bytes), par=8 children=16 iters=4
+[LP] FAIL V1 COW memfd: 12 of 12 iterations stale; first iter 0: A read the old value 3529953 more times after B's change returned (c0=14382517)
+[LP] FAIL V2 COW file: 12 of 12 iterations stale; first iter 0: A read the old value 15502849 more times after B's change returned (c0=8048835)
+[LP] FAIL V3 COW by read(): 12 of 12 iterations stale; first iter 0: A read the old value 28443137 more times after B's change returned (c0=348426)
+[LP] PASS V4 MAP_FIXED anon (12 iterations, slack 2000)
+[LP] FAIL V5 MAP_FIXED file: 12 of 12 iterations stale; first iter 0: A read 0x0, want 0xe7500d4d15288b42
+[LP] S1 child 0 pid 63 BAD: sibling read /tmp/pemap/pemap00.bin+0x5940 = 0x8e06b57e57df62e1, want 0x8e06b57f26d322e1 (unrelocated 0x8e06b57e57df62e1)
+[LP] S1 child 1 pid 64 BAD: sibling read /tmp/pemap/pemap01.bin+0x1d170 = 0x911a6b5b34a6e49e, want 0x911a6b5ba098249e (unrelocated 0x911a6b5b34a6e49e)
+[LP] S1 child 2 pid 66 BAD: sibling read /tmp/pemap/pemap01.bin+0x5b38 = 0xd67cd8a5e37a7b4f, want 0xd67cd8a6d9d54b4f (unrelocated 0xd67cd8a5e37a7b4f)
+[LP] S1 child 3 pid 68 BAD: sibling read /tmp/pemap/pemap00.bin+0x2e80 = 0x73ffd2ce8eb106ca, want 0x73ffd2cf3c0906ca (unrelocated 0x73ffd2ce8eb106ca)
+[LP] S1 child 5 pid 72 BAD: sibling read /tmp/pemap/pemap00.bin+0x5c88 = 0xfc8a9f45b5c453b1, want 0xfc8a9f46478003b1 (unrelocated 0xfc8a9f45b5c453b1)
+[LP] S1 child 6 pid 74 BAD: sibling read /tmp/pemap/pemap00.bin+0x2cc8 = 0xf9819a63be8e2de, want 0xf9819a6bb9bc2de (unrelocated 0xf9819a63be8e2de)
+[LP] S1 child 7 pid 76 BAD: sibling read /tmp/pemap/pemap00.bin+0x28c0 = 0xb97e2aca8abd879b, want 0xb97e2acb3f50b79b (unrelocated 0xb97e2aca8abd879b)
+[LP] S1 child 4 pid 70 BAD: sibling read /tmp/pemap/pemap00.bin+0x2030 = 0x8f938ff5703f7279, want 0x8f938ff5a53ea279 (unrelocated 0x8f938ff5703f7279)
+[LP] S1 child 10 pid 82 BAD: sibling read /tmp/pemap/pemap01.bin+0x2700 = 0x347ab43e321f6eb2, want 0x347ab43eaebf0eb2 (unrelocated 0x347ab43e321f6eb2)
+[LP] S1 child 12 pid 86 BAD: sibling read /tmp/pemap/pemap02.bin+0x2870 = 0x79d529b9c1bd819c, want 0x79d529ba57cbb19c (unrelocated 0x79d529b9c1bd819c)
+[LP] S1 child 9 pid 80 BAD: sibling read /tmp/pemap/pemap00.bin+0x23f0 = 0x7f0d54986a758cb3, want 0x7f0d54991436fcb3 (unrelocated 0x7f0d54986a758cb3)
+[LP] S1 child 11 pid 84 BAD: sibling read /tmp/pemap/pemap02.bin+0x58a0 = 0x6fa22d1893046d56, want 0x6fa22d197298dd56 (unrelocated 0x6fa22d1893046d56)
+[LP] S1 child 13 pid 89 BAD: sibling read /tmp/pemap/pemap01.bin+0x2a30 = 0xce590ed9f8c50d9b, want 0xce590edab28bfd9b (unrelocated 0xce590ed9f8c50d9b)
+[LP] S1 child 8 pid 78 BAD: sibling read /tmp/pemap/pemap00.bin+0x2310 = 0xcae53c4b72a5142e, want 0xcae53c4bf3a3f42e (unrelocated 0xcae53c4b72a5142e)
+[LP] S1 child 14 pid 90 BAD: sibling read /tmp/pemap/pemap02.bin+0x5030 = 0xf4ebfb1edc8f75ae, want 0xf4ebfb1f7badf5ae (unrelocated 0xf4ebfb1edc8f75ae)
+[LP] S1 child 15 pid 92 BAD: sibling read /tmp/pemap/pemap00.bin+0x5888 = 0xde9bede5f549c576, want 0xde9bede666801576 (unrelocated 0xde9bede5f549c576)
+[LP] FAIL S1 storm: 16 children (8 at a time) x 4 iters x 3 files, 16 bad, 3051 ms
+[LP] done rc=5
+t3_linux_probe: FAIL — pemap never printed '[LP] done rc=0' (tier rc=1)
