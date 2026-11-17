@@ -73,7 +73,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <errno.h>
+#include "../include/gpu_abi.h"
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -312,6 +315,26 @@ typedef void (*PFN_glRenderbufferStorage)(GLenum, GLenum, GLsizei, GLsizei);
 typedef void (*PFN_glFramebufferRenderbuffer)(GLenum, GLenum, GLenum, GLuint);
 typedef GLenum (*PFN_glCheckFramebufferStatus)(GLenum);
 typedef GLint (*PFN_glGetAttribLocation)(GLuint, const GLchar *);
+typedef void (*PFN_glGenTextures)(GLsizei, GLuint *);
+typedef void (*PFN_glBindTexture)(GLenum, GLuint);
+typedef void (*PFN_glTexParameteri)(GLenum, GLenum, GLint);
+typedef void (*PFN_glTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint,
+                                 GLenum, GLenum, const void *);
+typedef void (*PFN_glFramebufferTexture2D)(GLenum, GLenum, GLenum, GLuint,
+                                           GLint);
+typedef void (*PFN_glPixelStorei)(GLenum, GLint);
+typedef void (*PFN_glTexSubImage2D)(GLenum, GLint, GLint, GLint, GLsizei,
+                                    GLsizei, GLenum, GLenum, const void *);
+typedef void (*PFN_glEnable)(GLenum);
+typedef void (*PFN_glDisable)(GLenum);
+typedef void (*PFN_glDepthFunc)(GLenum);
+typedef void (*PFN_glDepthMask)(GLboolean);
+typedef void (*PFN_glDrawElements)(GLenum, GLsizei, GLenum, const void *);
+typedef void (*PFN_glActiveTexture)(GLenum);
+typedef void (*PFN_glUniform1i)(GLint, GLint);
+typedef GLint (*PFN_glGetUniformLocation)(GLuint, const GLchar *);
+typedef void (*PFN_glBlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint,
+                                     GLint, GLint, GLbitfield, GLenum);
 
 static struct {
   PFN_glClear Clear;
@@ -349,6 +372,22 @@ static struct {
   PFN_glFramebufferRenderbuffer FramebufferRenderbuffer;
   PFN_glCheckFramebufferStatus CheckFramebufferStatus;
   PFN_glGetAttribLocation GetAttribLocation;
+  PFN_glGenTextures GenTextures;
+  PFN_glBindTexture BindTexture;
+  PFN_glTexParameteri TexParameteri;
+  PFN_glTexImage2D TexImage2D;
+  PFN_glFramebufferTexture2D FramebufferTexture2D;
+  PFN_glPixelStorei PixelStorei;
+  PFN_glTexSubImage2D TexSubImage2D;
+  PFN_glEnable Enable;
+  PFN_glDisable Disable;
+  PFN_glDepthFunc DepthFunc;
+  PFN_glDepthMask DepthMask;
+  PFN_glDrawElements DrawElements;
+  PFN_glActiveTexture ActiveTexture;
+  PFN_glUniform1i Uniform1i;
+  PFN_glGetUniformLocation GetUniformLocation;
+  PFN_glBlitFramebuffer BlitFramebuffer;
 } gl;
 
 typedef __GLXextFuncPtr (*PFN_glXGetProcAddress)(const GLubyte *);
@@ -436,6 +475,22 @@ static int resolve_gl(void) {
   RESOLVE(FramebufferRenderbuffer, "glFramebufferRenderbuffer");
   RESOLVE(CheckFramebufferStatus, "glCheckFramebufferStatus");
   RESOLVE(GetAttribLocation, "glGetAttribLocation");
+  RESOLVE(GenTextures, "glGenTextures");
+  RESOLVE(BindTexture, "glBindTexture");
+  RESOLVE(TexParameteri, "glTexParameteri");
+  RESOLVE(TexImage2D, "glTexImage2D");
+  RESOLVE(FramebufferTexture2D, "glFramebufferTexture2D");
+  RESOLVE(PixelStorei, "glPixelStorei");
+  RESOLVE(TexSubImage2D, "glTexSubImage2D");
+  RESOLVE(Enable, "glEnable");
+  RESOLVE(Disable, "glDisable");
+  RESOLVE(DepthFunc, "glDepthFunc");
+  RESOLVE(DepthMask, "glDepthMask");
+  RESOLVE(DrawElements, "glDrawElements");
+  RESOLVE(ActiveTexture, "glActiveTexture");
+  RESOLVE(Uniform1i, "glUniform1i");
+  RESOLVE(GetUniformLocation, "glGetUniformLocation");
+  RESOLVE(BlitFramebuffer, "glBlitFramebuffer");
   return g_fail != start ? -1 : 0;
 }
 
@@ -579,9 +634,545 @@ static const char *ctx_version(Display *dpy, Window win, GLXContext c) {
   return v ? (const char *)v : "(glGetString returned NULL)";
 }
 
-/* Unity's request, kept separate from the classic attribute set so the log
- * distinguishes "the frontend rejected the attributes" from "the driver
- * refused the version". */
+/* ---- per-level texture upload probe (RimWorld's planet-ramp shape) ------
+ * The colony's map renders as black wedges while the HUD is crisp and
+ * Player.log carries no GL errors, and the world map's planet ramp is an
+ * 8192x4096 RGBA8 texture with last_level=4.  The probe uploads a different
+ * solid colour into EVERY mip level, attaches each level to the FBO and reads
+ * one pixel back.  If every level returns its own colour, per-level content
+ * arrival is correct and the colony fault is in draw coverage; if levels
+ * 1..n come back zero or with level 0's colour, the mip upload path is the
+ * bug.  This runs in seconds inside the M4 gate, instead of a 35-minute
+ * RimWorld run per hypothesis. */
+static int mip_probe_one(const char *tag, int w0, int h0, int nlev) {
+  static const unsigned char palette[6][4] = {
+      {255, 0, 0, 255},   {0, 255, 0, 255},   {0, 0, 255, 255},
+      {255, 255, 0, 255}, {255, 0, 255, 255}, {0, 255, 255, 255}};
+  int bad = 0;
+  GLuint tex = 0;
+  gl.GenTextures(1, &tex);
+  gl.BindTexture(GL_TEXTURE_2D, tex);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, nlev - 1);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                   GL_NEAREST_MIPMAP_NEAREST);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  /* Mesa's rule (fbobject.c:test_attachment_completeness): a *mutable non
+   * base level* texture attached to an FBO must be mipmap complete, so the
+   * uploads all have to happen before any level is attached -- attaching
+   * level 1 while levels 2+ are still missing legitimately returns
+   * INCOMPLETE_ATTACHMENT.  That is a property of the probe, not of the
+   * stack, and it is exactly the interleave that would have been read as a
+   * mip bug. */
+  for (int l = 0; l < nlev; l++) {
+    int w = w0 >> l, h = h0 >> l;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    size_t n = (size_t)w * h * 4;
+    unsigned char *buf = (unsigned char *)malloc(n);
+    if (!buf) {
+      say("[RAMP] %s lvl=%d: malloc(%zu) failed\n", tag, l, n);
+      return 1;
+    }
+    for (size_t i = 0; i < n; i += 4)
+      memcpy(buf + i, palette[l % 6], 4);
+    gl.TexImage2D(GL_TEXTURE_2D, l, GL_RGBA8, w, h, 0, GL_RGBA,
+                  GL_UNSIGNED_BYTE, buf);
+    free(buf);
+    GLenum e1 = gl.GetError();
+    say("[RAMP] %s upload lvl=%d %dx%d err=0x%x\n", tag, l, w, h, e1);
+  }
+  for (int l = 0; l < nlev; l++) {
+    int w = w0 >> l, h = h0 >> l;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                            tex, l);
+    GLenum st = gl.CheckFramebufferStatus(GL_FRAMEBUFFER);
+    unsigned char px[4] = {0x77, 0x77, 0x77, 0x77};
+    gl.ReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    gl.Finish();
+    GLenum e2 = gl.GetError();
+    int ok = st == GL_FRAMEBUFFER_COMPLETE && px[0] == palette[l % 6][0] &&
+             px[1] == palette[l % 6][1] && px[2] == palette[l % 6][2] &&
+             px[3] == palette[l % 6][3];
+    say("[RAMP] %s lvl=%d %dx%d status=0x%x rd_err=0x%x "
+        "px=%u,%u,%u,%u expect=%u,%u,%u,%u %s\n",
+        tag, l, w, h, st, e2, px[0], px[1], px[2], px[3],
+        palette[l % 6][0], palette[l % 6][1], palette[l % 6][2],
+        palette[l % 6][3], ok ? "OK" : "FAIL");
+    if (!ok) bad++;
+  }
+  return bad;
+}
+
+/* ---- glTexSubImage2D atlas-region upload (Unity's sprite-atlas path) -----
+ * Full-level uploads all arrive intact (the [RAMP] rows pass even for the
+ * 8192x4096 five-level planet ramp), so the colony's black tile-shaped wedges
+ * have to come from the way sprites are written INTO a texture, not from the
+ * texture's own allocation.  This writes a 16x16 cell out of a much larger
+ * source atlas with UNPACK_ROW_LENGTH set to the atlas width -- the exact
+ * case whose row stride differs from the destination box's width -- and then
+ * reads the whole 256x256 destination back and verifies every cell. */
+static GLuint g_atlas_tex = 0;
+static int atlas_probe(void) {
+  enum { TW = 256, TH = 256, CELL = 16, GRID = TW / CELL, SW = 512 };
+  unsigned char *atlas = (unsigned char *)malloc((size_t)SW * SW * 4);
+  unsigned char *zero = (unsigned char *)calloc((size_t)TW * TH, 4);
+  unsigned char *back = (unsigned char *)malloc((size_t)TW * TH * 4);
+  if (!atlas || !zero || !back) {
+    say("[ATLAS] allocation failed\n");
+    return 1;
+  }
+  for (int j = 0; j < GRID; j++)
+    for (int i = 0; i < GRID; i++) {
+      unsigned char col[4] = {(unsigned char)(i * 16),
+                              (unsigned char)(j * 16),
+                              (unsigned char)(((i + j) * 8) & 0xff), 255};
+      for (int r = 0; r < CELL; r++)
+        for (int c = 0; c < CELL; c++)
+          memcpy(atlas + (((size_t)(j * CELL + r) * SW) + i * CELL + c) * 4,
+                 col, 4);
+    }
+  GLuint tex = 0;
+  gl.GenTextures(1, &tex);
+  gl.BindTexture(GL_TEXTURE_2D, tex);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, TW, TH, 0, GL_RGBA,
+                GL_UNSIGNED_BYTE, zero);
+  g_atlas_tex = tex;
+  GLenum first_err = gl.GetError();
+  gl.PixelStorei(GL_UNPACK_ROW_LENGTH, SW);
+  int bad = 0;
+  for (int j = 0; j < GRID; j++)
+    for (int i = 0; i < GRID; i++) {
+      const unsigned char *src =
+          atlas + (((size_t)(j * CELL) * SW) + (size_t)(i * CELL)) * 4;
+      gl.TexSubImage2D(GL_TEXTURE_2D, 0, i * CELL, j * CELL, CELL, CELL,
+                       GL_RGBA, GL_UNSIGNED_BYTE, src);
+      GLenum e = gl.GetError();
+      if (e != GL_NO_ERROR) {
+        if (bad < 4)
+          say("[ATLAS] upload cell(%d,%d) glError=0x%x\n", i, j, e);
+        bad++;
+      }
+    }
+  gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+  gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                          tex, 0);
+  GLenum st = gl.CheckFramebufferStatus(GL_FRAMEBUFFER);
+  gl.ReadPixels(0, 0, TW, TH, GL_RGBA, GL_UNSIGNED_BYTE, back);
+  gl.Finish();
+  int mismatch = 0, shown = 0;
+  for (int j = 0; j < GRID && mismatch >= 0; j++)
+    for (int i = 0; i < GRID; i++) {
+      unsigned char want[4] = {(unsigned char)(i * 16),
+                               (unsigned char)(j * 16),
+                               (unsigned char)(((i + j) * 8) & 0xff), 255};
+      size_t off = ((size_t)(j * CELL) * TW + (size_t)(i * CELL)) * 4;
+      if (memcmp(back + off, want, 4) != 0) {
+        mismatch++;
+        if (shown < 6) {
+          say("[ATLAS] cell(%d,%d) dst=(%u,%u,%u,%u) want=(%u,%u,%u,%u)\n", i,
+              j, back[off], back[off + 1], back[off + 2], back[off + 3], want[0],
+              want[1], want[2], want[3]);
+          shown++;
+        }
+      }
+    }
+  say("[ATLAS] 16x16 grid: uploads_err=%d readback fbstatus=0x%x "
+      "first_err=0x%x mismatched_cells=%d/%d %s\n",
+      bad, st, first_err, mismatch, GRID * GRID,
+      mismatch == 0 ? "OK" : "FAIL");
+  free(atlas);
+  free(zero);
+  free(back);
+  return (bad || mismatch) ? 1 : 0;
+}
+
+/* ---- textured, indexed, grid-of-quads pass (RimWorld's map pass) --------
+ * glDrawElements rather than glDrawArrays, interleaved vertex attributes and
+ * an atlas texture bound to a sampler: the primitives whose output is corrupt
+ * in the colony.  256 quads cover the 256x256 FBO as a 16x16 grid, each cell
+ * sampling the atlas cell with the matching colour.  Any tile that comes out
+ * black, shifted or wrong implicates the drawing or the sampling path, which
+ * the two upload probes above have already cleared. */
+static const char *TEX_VS =
+    "#version 330 core\n"
+    "in vec2 a_pos;\n"
+    "in vec2 a_uv;\n"
+    "out vec2 v_uv;\n"
+    "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); v_uv = a_uv; }\n";
+static const char *TEX_FS =
+    "#version 330 core\n"
+    "uniform sampler2D u_tex;\n"
+    "in vec2 v_uv;\n"
+    "out vec4 o_col;\n"
+    "void main() { o_col = texture(u_tex, v_uv); }\n";
+
+static int tile_mesh_probe(GLuint tex, int show_depth, int grid)
+{
+  enum { W = 256, H = 256 };
+  const int GRID = grid, CELL = W / GRID;
+  GLuint vs = compile(GL_VERTEX_SHADER, TEX_VS, "tile-vs");
+  GLuint fs = compile(GL_FRAGMENT_SHADER, TEX_FS, "tile-fs");
+  if (!vs || !fs) return 1;
+  GLuint prog = gl.CreateProgram();
+  gl.AttachShader(prog, vs);
+  gl.AttachShader(prog, fs);
+  gl.LinkProgram(prog);
+  GLint ok = 0;
+  gl.GetProgramiv(prog, GL_LINK_STATUS, &ok);
+  if (!ok) {
+    say("[TILE] link failed\n");
+    return 1;
+  }
+  gl.UseProgram(prog);
+
+  float vx[GRID * GRID * 4 * 4];
+  unsigned short idx[GRID * GRID * 6];
+  int nv = 0, ni = 0;
+  for (int j = 0; j < GRID; j++)
+    for (int i = 0; i < GRID; i++) {
+      float x0 = -1.0f + 2.0f * i / GRID, x1 = -1.0f + 2.0f * (i + 1) / GRID;
+      float y0 = -1.0f + 2.0f * j / GRID, y1 = -1.0f + 2.0f * (j + 1) / GRID;
+      float u0 = (float)i / GRID, u1 = (float)(i + 1) / GRID;
+      float v0 = (float)j / GRID, v1 = (float)(j + 1) / GRID;
+      unsigned short base = (unsigned short)(nv / 4);
+      float quad[4][4] = {{x0, y0, u0, v0}, {x1, y0, u1, v0},
+                          {x0, y1, u0, v1}, {x1, y1, u1, v1}};
+      for (int k = 0; k < 4; k++)
+        for (int c = 0; c < 4; c++) vx[nv++] = quad[k][c];
+      unsigned short tri[6] = {(unsigned short)(base + 0),
+                               (unsigned short)(base + 1),
+                               (unsigned short)(base + 2),
+                               (unsigned short)(base + 2),
+                               (unsigned short)(base + 1),
+                               (unsigned short)(base + 3)};
+      for (int k = 0; k < 6; k++) idx[ni++] = tri[k];
+    }
+
+  GLuint vao = 0, vbo = 0, ibo = 0;
+  gl.GenVertexArrays(1, &vao);
+  gl.BindVertexArray(vao);
+  gl.GenBuffers(1, &vbo);
+  gl.BindBuffer(GL_ARRAY_BUFFER, vbo);
+  gl.BufferData(GL_ARRAY_BUFFER, sizeof vx, vx, GL_STATIC_DRAW);
+  gl.GenBuffers(1, &ibo);
+  gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+  gl.BufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof idx, idx, GL_STATIC_DRAW);
+  GLint a_pos = gl.GetAttribLocation(prog, "a_pos");
+  GLint a_uv = gl.GetAttribLocation(prog, "a_uv");
+  gl.EnableVertexAttribArray((GLuint)a_pos);
+  gl.VertexAttribPointer((GLuint)a_pos, 2, GL_FLOAT, GL_FALSE,
+                         4 * sizeof(float), (const void *)0);
+  gl.EnableVertexAttribArray((GLuint)a_uv);
+  gl.VertexAttribPointer((GLuint)a_uv, 2, GL_FLOAT, GL_FALSE,
+                         4 * sizeof(float), (const void *)(2 * sizeof(float)));
+
+  GLint uloc = gl.GetUniformLocation(prog, "u_tex");
+  gl.ActiveTexture(GL_TEXTURE0);
+  gl.BindTexture(GL_TEXTURE_2D, tex);
+  gl.Uniform1i(uloc, 0);
+  gl.Viewport(0, 0, W, H);
+  gl.ClearColor(0, 0, 0, 1);
+  gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  if (show_depth) {
+    gl.Enable(GL_DEPTH_TEST);
+    gl.DepthFunc(GL_LEQUAL);
+    gl.DepthMask(GL_TRUE);
+  } else {
+    gl.Disable(GL_DEPTH_TEST);
+  }
+  gl.DrawElements(GL_TRIANGLES, ni, GL_UNSIGNED_SHORT, 0);
+  gl.Finish();
+  GLenum de = gl.GetError();
+
+  unsigned char *back = (unsigned char *)malloc((size_t)W * H * 4);
+  gl.ReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, back);
+  gl.Finish();
+  int bad = 0, shown = 0;
+  for (int j = 0; j < GRID; j++)
+    for (int i = 0; i < GRID; i++) {
+      unsigned char want[4] = {(unsigned char)(i * 16),
+                               (unsigned char)(j * 16),
+                               (unsigned char)(((i + j) * 8) & 0xff), 255};
+      size_t off = ((size_t)(j * CELL + CELL / 2) * W + i * CELL + CELL / 2) * 4;
+      if (memcmp(back + off, want, 4) != 0) {
+        bad++;
+        if (shown < 6) {
+          say("[TILE] cell(%d,%d) got=%u,%u,%u,%u want=%u,%u,%u,%u\n", i, j,
+              back[off], back[off + 1], back[off + 2], back[off + 3], want[0],
+              want[1], want[2], want[3]);
+          shown++;
+        }
+      }
+    }
+  say("[TILE] grid indexed quads depth=%d grid=%d vbytes=%zu ibytes=%zu "
+      "draw_err=0x%x %d/%d cells wrong %s\n",
+      show_depth, GRID, sizeof vx, sizeof idx, de, bad, GRID * GRID,
+      bad == 0 ? "OK" : "FAIL");
+  free(back);
+  return bad ? 1 : 0;
+}
+
+/* ---- shader sampling of every mip level (not just FBO attachment) -------
+ * Upload and FBO-readback of each level is proven intact, but that is not the
+ * path Unity's planet/map pass uses: those sample levels through a shader
+ * sampler, which resolves base/max level at the host.  Force base==max=l, draw
+ * a full-screen textured triangle and read one pixel; the only colour it can
+ * come out is the one uploaded into level l.  Any other answer pins the fault
+ * to sampler-level selection rather than to transfer or rasterisation. */
+static int lod_sample_probe(const char *tag, int w0, int h0, int nlev)
+{
+  static const unsigned char palette[6][4] = {
+      {255, 0, 0, 255},   {0, 255, 0, 255},   {0, 0, 255, 255},
+      {255, 255, 0, 255}, {255, 0, 255, 255}, {0, 255, 255, 255}};
+  GLuint tex = 0;
+  gl.GenTextures(1, &tex);
+  gl.BindTexture(GL_TEXTURE_2D, tex);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, nlev - 1);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                   GL_NEAREST_MIPMAP_NEAREST);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  for (int l = 0; l < nlev; l++) {
+    int w = w0 >> l, h = h0 >> l;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    size_t n = (size_t)w * h * 4;
+    unsigned char *buf = (unsigned char *)malloc(n);
+    if (!buf) return 1;
+    for (size_t i = 0; i < n; i += 4) memcpy(buf + i, palette[l % 6], 4);
+    gl.TexImage2D(GL_TEXTURE_2D, l, GL_RGBA8, w, h, 0, GL_RGBA,
+                  GL_UNSIGNED_BYTE, buf);
+    free(buf);
+  }
+
+  GLuint vs = compile(GL_VERTEX_SHADER, TEX_VS, "lod-vs");
+  GLuint fs = compile(GL_FRAGMENT_SHADER, TEX_FS, "lod-fs");
+  if (!vs || !fs) return 1;
+  GLuint prog = gl.CreateProgram();
+  gl.AttachShader(prog, vs);
+  gl.AttachShader(prog, fs);
+  gl.LinkProgram(prog);
+  GLint ok = 0;
+  gl.GetProgramiv(prog, GL_LINK_STATUS, &ok);
+  if (!ok) return 1;
+  gl.UseProgram(prog);
+  GLint uloc = gl.GetUniformLocation(prog, "u_tex");
+  GLint a_pos = gl.GetAttribLocation(prog, "a_pos");
+  GLint a_uv = gl.GetAttribLocation(prog, "a_uv");
+
+  static const GLfloat tri[] = {-1, -1, 0, 0, 3, -1, 2, 0, -1, 3, 0, 2};
+  GLuint vao = 0, vbo = 0;
+  gl.GenVertexArrays(1, &vao);
+  gl.BindVertexArray(vao);
+  gl.GenBuffers(1, &vbo);
+  gl.BindBuffer(GL_ARRAY_BUFFER, vbo);
+  gl.BufferData(GL_ARRAY_BUFFER, sizeof tri, tri, GL_STATIC_DRAW);
+  gl.EnableVertexAttribArray((GLuint)a_pos);
+  gl.VertexAttribPointer((GLuint)a_pos, 2, GL_FLOAT, GL_FALSE,
+                         4 * sizeof(float), (const void *)0);
+  gl.EnableVertexAttribArray((GLuint)a_uv);
+  gl.VertexAttribPointer((GLuint)a_uv, 2, GL_FLOAT, GL_FALSE,
+                         4 * sizeof(float), (const void *)(2 * sizeof(float)));
+  gl.ActiveTexture(GL_TEXTURE0);
+  gl.BindTexture(GL_TEXTURE_2D, tex);
+  gl.Uniform1i(uloc, 0);
+  gl.Disable(GL_DEPTH_TEST);
+  gl.ClearColor(0x11 / 255.0f, 0x11 / 255.0f, 0x11 / 255.0f, 1);
+  gl.Clear(GL_COLOR_BUFFER_BIT);
+  int bad = 0;
+  for (int l = 0; l < nlev; l++) {
+    gl.BindTexture(GL_TEXTURE_2D, tex);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, l);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, l);
+    gl.DrawArrays(GL_TRIANGLES, 0, 3);
+    gl.Finish();
+    unsigned char px[4] = {0x77, 0x77, 0x77, 0x77};
+    gl.ReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    gl.Finish();
+    int good = px[0] == palette[l % 6][0] && px[1] == palette[l % 6][1] &&
+               px[2] == palette[l % 6][2] && px[3] == palette[l % 6][3];
+    say("[LOD] %s lvl=%d sample px=%u,%u,%u,%u expect=%u,%u,%u,%u %s\n", tag,
+        l, px[0], px[1], px[2], px[3], palette[l % 6][0], palette[l % 6][1],
+        palette[l % 6][2], palette[l % 6][3], good ? "OK" : "FAIL");
+    if (!good) bad++;
+  }
+  return bad;
+}
+
+/* ---- FBO -> FBO blit (the offscreen-map composite path) ------------------
+ * Every upload, FBO attachment, sampler read and indexed draw pass above is
+ * clean.  What none of them exercises is the composite step Unity uses to put
+ * an offscreen-rendered world into the visible frame: glBlitFramebuffer with
+ * different source and destination sizes.  Blit a known source colour into a
+ * differently sized destination, then read the destination back -- once at
+ * same size, and once from an 8192x4096 source (the planet pass's size) down
+ * to a 1280x720 window-sized target. */
+static int blit_probe_one(const char *tag, int sw, int sh, int dw, int dh)
+{
+  static const unsigned char col[4] = {37, 173, 91, 255};
+  unsigned char *fill = (unsigned char *)malloc((size_t)sw * sh * 4);
+  if (!fill) return 1;
+  for (size_t i = 0; i < (size_t)sw * sh * 4; i += 4) memcpy(fill + i, col, 4);
+  GLuint tex = 0;
+  gl.GenTextures(1, &tex);
+  gl.BindTexture(GL_TEXTURE_2D, tex);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, sw, sh, 0, GL_RGBA,
+                GL_UNSIGNED_BYTE, fill);
+  free(fill);
+  GLuint srcfbo = 0, dstfbo = 0, drbo = 0;
+  gl.GenFramebuffers(1, &srcfbo);
+  gl.BindFramebuffer(GL_FRAMEBUFFER, srcfbo);
+  gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                          tex, 0);
+  gl.GenFramebuffers(1, &dstfbo);
+  gl.BindFramebuffer(GL_FRAMEBUFFER, dstfbo);
+  gl.GenRenderbuffers(1, &drbo);
+  gl.BindRenderbuffer(GL_RENDERBUFFER, drbo);
+  gl.RenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, dw, dh);
+  gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                            GL_RENDERBUFFER, drbo);
+  gl.BindFramebuffer(GL_READ_FRAMEBUFFER, srcfbo);
+  gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, dstfbo);
+  gl.BlitFramebuffer(0, 0, sw, sh, 0, 0, dw, dh, GL_COLOR_BUFFER_BIT,
+                     GL_NEAREST);
+  gl.BindFramebuffer(GL_FRAMEBUFFER, dstfbo);
+  gl.Finish();
+  GLsizei samplew = dw < 32 ? dw : 32, sampleh = dh < 32 ? dh : 32;
+  unsigned char *back = malloc((size_t)samplew * sampleh * 4);
+  gl.ReadPixels(0, 0, samplew, sampleh, GL_RGBA, GL_UNSIGNED_BYTE, back);
+  gl.Finish();
+  GLenum err = gl.GetError();
+  int bad = 0;
+  for (int y = 0; y < sampleh; y++)
+    for (int x = 0; x < samplew; x++) {
+      size_t off = ((size_t)y * samplew + x) * 4;
+      if (memcmp(back + off, col, 4) != 0) {
+        if (bad < 3)
+          say("[BLIT] %s got=%u,%u,%u,%u at (%d,%d) expect=%u,%u,%u,%u\n", tag,
+              back[off], back[off + 1], back[off + 2], back[off + 3], x, y,
+              col[0], col[1], col[2], col[3]);
+        bad++;
+      }
+    }
+  say("[BLIT] %s %dx%d -> %dx%d err=0x%x bad=%d/%d %s\n", tag, sw, sh, dw, dh,
+      err, bad, samplew * sampleh, bad == 0 ? "OK" : "FAIL");
+  free(back);
+  return bad ? 1 : 0;
+}
+
+/* ---- direct byte-wide TRANSFER contract ---------------------------------
+ * This tests the ABI itself, not an indirect GL effect.  A PIPE_BUFFER's
+ * TRANSFER box.width is the number of BYTEs to move.  A legal multi-megabyte
+ * buffer upload used to be rejected by the /dev/gpu ioctl layer as if it were
+ * a texture wider than 16384 pixels, leaving its host resource unmodified.
+ * (The kernel cap is 512 MiB; the virgl host has its own 1-D transfer limit,
+ * so the gate uses 8 MiB -- far above the old 16 KiB bug and below that host
+ * limit.)  Do the transfer both ways and compare every byte. */
+static int abi_buffer_transfer_probe(void)
+{
+  const size_t bytes = (size_t)8 * 1024 * 1024;
+  int fd = -1, bad = 0;
+  unsigned char *page = NULL;
+  struct gpu_ctx_create cc;
+  struct gpu_ctx_destroy cd;
+  memset(&cc, 0, sizeof cc);
+  fd = open("/dev/gpu", O_RDWR);
+  if (fd < 0) {
+    say("[ABIX] skipped: /dev/gpu unavailable\n");
+    return 0;
+  }
+  if (ioctl(fd, GPU_IOC_GET_CAPSET_INFO, &(struct gpu_capset_info){0}) == 0) {
+    /* The subsequent create asks for the capset explicitly below. */
+  }
+  cc.capset_id = 1;
+  cc.capset_version = 1;
+  const char *name = "byte-wide-transfer";
+  snprintf(cc.name, sizeof cc.name, "%s", name);
+  if (ioctl(fd, GPU_IOC_CTX_CREATE, &cc) != 0) {
+    say("[ABIX] ctx create failed errno=%d\n", errno);
+    close(fd);
+    return 1;
+  }
+  struct gpu_res_create rc;
+  memset(&rc, 0, sizeof rc);
+  rc.ctx_id = cc.ctx_id;
+  rc.target = 0;        /* VIRGL_TEXTURE_TARGET_BUFFER */
+  rc.format = 1;        /* PIPE_FORMAT_R8_UNORM */
+  rc.bind = 0;
+  rc.width = (uint32_t)bytes;
+  rc.height = 1;
+  rc.depth = 1;
+  rc.array_size = 1;
+  if (ioctl(fd, GPU_IOC_RES_CREATE, &rc) != 0) {
+    say("[ABIX] buffer create failed errno=%d\n", errno);
+    bad = 1;
+  }
+  if (!bad && posix_memalign((void **)&page, 4096, bytes) != 0) bad = 1;
+  if (!bad) {
+    for (size_t i = 0; i < bytes; i++) page[i] = (unsigned char)(i * 13);
+    struct gpu_res_attach ra;
+    memset(&ra, 0, sizeof ra);
+    ra.res_id = rc.res_id;
+    ra.va = (uint64_t)(uintptr_t)page;
+    ra.len = bytes;
+    if (ioctl(fd, GPU_IOC_RES_ATTACH, &ra) != 0) {
+      say("[ABIX] attach failed errno=%d\n", errno);
+      bad = 1;
+    }
+  }
+  if (!bad) {
+    struct gpu_transfer t;
+    memset(&t, 0, sizeof t);
+    t.res_id = rc.res_id;
+    t.to_host = 0;
+    t.stride = (uint32_t)bytes;
+    t.box.w = (uint32_t)bytes;
+    t.box.h = 1;
+    t.box.d = 1;
+    errno = 0;
+    int up = ioctl(fd, GPU_IOC_TRANSFER, &t);
+    say("[ABIX] byte-wide upload w=%u rc=%d errno=%d\n", t.box.w, up, errno);
+    if (up != 0) {
+      bad = 1;
+    } else {
+      for (size_t i = 0; i < bytes; i++) page[i] = 0;
+      t.to_host = 1;
+      errno = 0;
+      int down = ioctl(fd, GPU_IOC_TRANSFER, &t);
+      say("[ABIX] byte-wide readback rc=%d errno=%d\n", down, errno);
+      if (down != 0) {
+        bad = 1;
+      } else {
+        for (size_t i = 0; i < bytes; i++) {
+          if (page[i] != (unsigned char)(i * 13)) {
+            say("[ABIX] mismatch at %zu got=%u want=%u\n", i, page[i],
+                (unsigned)(i * 13) & 0xff);
+            bad = 1;
+            break;
+          }
+        }
+      }
+    }
+    say("[ABIX] %zu MiB buffer transfer round trip %s\n", bytes / (1024 * 1024),
+        bad ? "FAIL" : "OK (every byte)");
+  }
+  free(page);
+  if (rc.res_id) {
+    struct gpu_res_unref ru = {rc.res_id, 0};
+    ioctl(fd, GPU_IOC_RES_UNREF, &ru);
+  }
+  memset(&cd, 0, sizeof cd);
+  cd.ctx_id = cc.ctx_id;
+  ioctl(fd, GPU_IOC_CTX_DESTROY, &cd);
+  close(fd);
+  return bad;
+}
+
 #define GLX_CONTEXT_OPENGL_NO_ERROR_ARB_LOCAL 0x31B3
 #ifndef GLX_CONTEXT_OPENGL_NO_ERROR_ARB
 #define GLX_CONTEXT_OPENGL_NO_ERROR_ARB GLX_CONTEXT_OPENGL_NO_ERROR_ARB_LOCAL
@@ -1000,6 +1591,93 @@ int main(void) {
       PROBE_W * PROBE_H, nonbg * 100 / (PROBE_W * PROBE_H), ncol, bg[0], bg[1],
       bg[2], bg[3]);
   coverage_map(px, PROBE_W, PROBE_H, bg);
+  gl.BindVertexArray(0);
+  {
+    int bad = 0;
+    bad += mip_probe_one("small", 64, 64, 4);
+    bad += mip_probe_one("planet", 8192, 4096, 5);
+    say("[GL] mip-probe: %d level(s) failed\n", bad);
+    if (bad) g_fail = 1;
+    if (atlas_probe() != 0) g_fail = 1;
+    /* Diagnostic only: the current virgl host rejects 1-D transfers wider
+     * than 16 KiB, so this cannot be a default gate until the host path gains
+     * a real buffer upload.  Keep it runnable with GL_PROBE_ABI=1. */
+    const char *abi_env = getenv("GL_PROBE_ABI");
+    if (abi_env && *abi_env == '1' && abi_buffer_transfer_probe()) g_fail = 1;
+    if (g_atlas_tex) {
+      gl.BindFramebuffer(GL_FRAMEBUFFER, fbo);
+      /* atlas_probe leaves its texture attached to this FBO; rendering into
+       * the texture we sample is a feedback loop and makes the whole mesh
+       * pass produce no pixels (measured: draw_px=0).  Restore the independent
+       * RGBA8 renderbuffer the tile pass expects. */
+      gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                 GL_RENDERBUFFER, rbo);
+      /* The mesh pass is a 16x16 grid.  Coarser grids are not comparable:
+       * their UVs span multiple atlas cells, so per-cell colour expectations
+       * would be wrong rather than informative. */
+      if (tile_mesh_probe(g_atlas_tex, 0, 16) != 0) g_fail = 1;
+      if (tile_mesh_probe(g_atlas_tex, 1, 16) != 0) g_fail = 1;
+      if (lod_sample_probe("small", 64, 64, 4) > 0) g_fail = 1;
+      if (lod_sample_probe("planet", 8192, 4096, 5) > 0) g_fail = 1;
+      if (blit_probe_one("same", 256, 256, 256, 256)) g_fail = 1;
+      if (blit_probe_one("down", 8192, 4096, 1280, 720)) g_fail = 1;
+    }
+  }
+  gl.BindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+
+  /* Shared-object transfer from a second GLX screen.  Unity's renderer uses
+   * worker contexts; a second X display connection forces a second Mesa screen
+   * and therefore a second /dev/gpu fd in the winsys.  GLX still permits the
+   * objects to be shared, so this upload must not be refused merely because
+   * the res_id was created by the other context. */
+  if (g_atlas_tex) {
+    GLenum serr = gl.GetError();
+    Display *d2 = XOpenDisplay(NULL);
+    GLXContext c2 = NULL;
+    XVisualInfo *vi2 = NULL;
+    Window w2 = 0;
+    int made = 0;
+    if (d2) {
+      int cfg_n = 0;
+      GLXFBConfig *configs =
+          x_glXChooseFBConfig(d2, DefaultScreen(d2), attribs, &cfg_n);
+      if (configs && cfg_n > 0) {
+        vi2 = x_glXGetVisualFromFBConfig(d2, configs[0]);
+        c2 = request_ctx(d2, configs[0], ctx, "share-second-display", NULL);
+        if (vi2 && c2) {
+          XSetWindowAttributes swa2;
+          memset(&swa2, 0, sizeof swa2);
+          swa2.colormap = XCreateColormap(
+              d2, RootWindow(d2, vi2->screen), vi2->visual, AllocNone);
+          w2 = XCreateWindow(d2, RootWindow(d2, vi2->screen), 0, 0, 64, 64, 0,
+                             vi2->depth, InputOutput, vi2->visual, CWColormap,
+                             &swa2);
+          XMapWindow(d2, w2);
+          XSync(d2, False);
+          made = x_glXMakeCurrent(d2, w2, c2);
+          if (made) {
+            gl.BindTexture(GL_TEXTURE_2D, g_atlas_tex);
+            unsigned char cp[4] = {19, 87, 233, 255};
+            gl.TexSubImage2D(GL_TEXTURE_2D, 0, 3, 3, 1, 1, GL_RGBA,
+                             GL_UNSIGNED_BYTE, cp);
+            gl.Finish();
+            serr = gl.GetError();
+          }
+        }
+        XFree(configs);
+      }
+    }
+    say("[SHARE] second-display ctx=%d made_current=%d upload_err=0x%x\n",
+        c2 != NULL, made, serr);
+    if (d2 && made) x_glXMakeCurrent(d2, None, NULL);
+    x_glXMakeCurrent(dpy, win, ctx);
+    if (c2) x_glXDestroyContext(d2, c2);
+    if (w2) XDestroyWindow(d2, w2);
+    if (vi2) XFree(vi2);
+    if (d2) XCloseDisplay(d2);
+    resolve_gl();
+  }
 
   /* 8. leave the pixels on the disk image too: a PPM the harness copies out,
    *    so a reader can look at the frame without a screenshot of a window. */
