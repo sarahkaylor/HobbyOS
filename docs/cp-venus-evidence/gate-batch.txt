@@ -1,0 +1,78 @@
+# Full gate batch (docs/cyberpunk.md common rules) on cp-venus after merging cyberpunk 15ad4a35, strix, 2026-11-17
+# script: ~/cp/venus-gates.sh = ~/cp/base5-gates.sh with the tree ~/cp/lanes/venus-gate, LO_ON_DISK= and ~/.local/bin on PATH
+# parity references: docs/cp-sync-evidence/batch-lane.txt (C0-sync, cyberpunk 15ad4a35) and ~/cp/base5-gates.txt
+
+tree de1b34d9 cp/venus: syncs wait for submit (like drm_syncobj WAIT_FOR_SUBMIT); vn_info timeline test
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+fatcoh rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/venus-gate)
+unit rc=1 Tests failed! Tests run:    460 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 365 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+ALLDONE
+
+# diff vs C0-sync's batch (rows only)
+8c8
+< exitgroup rc=0 [LP] done rc=0
+---
+> exitgroup rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+40,41c40,41
+< rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/sync)
+< unit rc=1 Tests failed! Tests run:    453 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+---
+> rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/venus-gate)
+> unit rc=1 Tests failed! Tests run:    460 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+43,44c43,44
+< host [host-tests] done: 37/40 passed
+< castscan rc=1 src/kernel/fs.c	I2P	r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);
+---
+> host [host-tests] done: 38/40 passed
+> castscan rc=0 castscan: 365 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+
+# exitgroup reruns on the same tree (X7 is timing-sensitive; first run was on a host with 4 guests + this lane's Wine boot)
+exitgroup rerun 1 rc=0 [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 370 ms) [LP] done rc=0 
+exitgroup rerun 2 rc=0 [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 426 ms) [LP] done rc=0 
+
+[exited with code 0]
+[LP] FAIL X7 two concurrent exit_group callers x20 (3 bad, worst 1601 ms)

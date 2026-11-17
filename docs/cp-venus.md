@@ -134,6 +134,19 @@ JSON).
 | `run_vkcubex_venus.py` | C5-vk2's `tools/cp/p5/run_vkcubex.py`, unchanged, with the Venus QEMU line and Venus as the only ICD |
 | `run-wine-venus.sh` | C5-vk2's `tools/cp/p5/run-wine-p5.sh`, unchanged, with a merged Vulkan tree (Venus ICD only) and `p5venus.py` hooked into `boot_wine_p5.py` through `pyhook/sitecustomize.py` (`VENUS_P5=1`) |
 
-## 6. Gate P6
+## 6. Gate P6 (strix, cp-venus merged with cyberpunk 15ad4a35)
 
-(filled in by the gate runs; see the lane report)
+| row | result | evidence |
+|---|---|---|
+| host recipe: device, window, capsets | features `0x3000001B`; window BAR 4, 8 GiB; capset 4 (Venus) v0, 160 B | `step1-boot-check.txt` |
+| kernel transport, no Mesa | every request and error row ok; 1 MiB shmem mapped WB and verified; 100 fenced submits through 32 slots | `step3-transport-probe.txt` |
+| vulkaninfo --summary in the guest | GPU0 `Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))`, venus, Mesa 26.2.6, API 1.4.307, 171 device extensions; GPU1 is the 8060S | `vulkaninfo-fence.txt` |
+| GPU work on the host | `vkCmdFillBuffer` + copy of 4 MiB into mapped host-visible memory, 0 mismatches | `vulkaninfo-fence.txt` |
+| **fence latency** (vkQueueSubmit → vkWaitForFences, 10 000 fences, TSC) | empty cmdbuf: **p50 101 µs, p90 190, p99 276, max 4213**; empty batch: p50 56, p99 144; submit p50 52 µs | `vulkaninfo-fence.txt` |
+| reference: Linux guest on Venus (P0) | D3D12 fence round trip p50 276 µs, p99 596–682 | `docs/cp-p0-guest.md` §3.3 |
+| kernel post→retire | 20 002 fences: 93 % ≤ 200 µs, none > 5 ms; 9 300 retired by INTx, 10 702 by the waiter's kick-poll drain | `vulkaninfo-fence.txt` |
+| timeline semaphores (vkWaitSemaphores) | correct, but p50 10.0 ms: venus' feedback path sleeps in `vn_relax` and the guest's sleep is tick-granular | `vulkaninfo-fence.txt` |
+| **probe 1: Linux vkcube on Venus in X** | **PASS**: 14 731 frames / 65 s = 226.6 fps (FIFO, 640×480, software present), two screendumps with the cube | `probe1-vkcubex-venus.txt`, `evidence/cp-venus/vkcubex-t{20,50}s.png` |
+| vkcube.exe under Wine (winevulkan) on Venus | 13 265 frames / 65 s (~200 fps) | `probe2-wine-venus.txt` |
+| **probe 2: D3D12 triangle (vkd3d-proton 3.1) under Wine on Venus** | **FAIL**: device, swapchain (3 images), PSO and frame 0 (124–140 ms) render; the second frame's `ID3D12Fence` wait times out after 10 s, three runs (with async and with synchronous venus present) | `probe2-wine-venus.txt` |
+| full batch at parity | PASS (one timing flake, exitgroup X7, 2/2 on rerun) | `gate-batch.txt` |

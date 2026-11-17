@@ -115,6 +115,17 @@ w = w.replace(old, """   const bool use_sw_device =
       !physical_dev->base.vk.supported_extensions
           .EXT_external_memory_dma_buf ||""", 1)
 open(v + '/vn_wsi.c', 'w').write(w)
+# Diagnostics: VENUS_DEBUG_DEFAULT=<VN_DEBUG list> bakes a default for builds
+# whose processes get no environment (Wine children of the P5 launcher).
+import os
+dd = os.environ.get('VENUS_DEBUG_DEFAULT', '')
+if dd:
+    c = open(v + '/vn_common.c').read()
+    old = 'parse_debug_string(os_get_option("VN_DEBUG"), vn_debug_options)'
+    assert c.count(old) == 1
+    c = c.replace(old, 'parse_debug_string(os_get_option("VN_DEBUG") ? os_get_option("VN_DEBUG") : "%s", vn_debug_options)' % dd, 1)
+    open(v + '/vn_common.c', 'w').write(c)
+    print("VN_DEBUG default:", dd)
 print("patched", v)
 EOF
   say "patch: Mesa 26.2.6 (sha256 ok) + vn_renderer_hobbyos.c + gpu_abi.h + meson/vn_renderer.h hooks"
