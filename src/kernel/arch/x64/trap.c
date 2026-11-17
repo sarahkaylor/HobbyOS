@@ -230,6 +230,14 @@ static void sys_exit(struct trap_frame *tf) {
   process_exit(tf);
 }
 
+/* exit_group(code): end the whole thread group, from ANY thread.  Shares
+ * process_exit with SYS_EXIT; the difference is only that it never takes the
+ * clone(2) child carve-out above. */
+static void sys_exit_group(struct trap_frame *tf) {
+  tf->regs[0] = tf->regs[5]; /* rdi = the exit code */
+  process_exit(tf);
+}
+
 static void sys_fork(struct trap_frame *tf) {
   int pid = process_fork(tf);
   tf->regs[0] = pid < 0 ? (uint64_t)-EAGAIN : (uint64_t)pid;
@@ -413,7 +421,10 @@ static void sys_read(struct trap_frame *tf) {
   int size = (int)tf->regs[3]; // rdx
   struct process *caller = current_process();
   if (sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 1)) {
-    int ret = file_read(caller, fd, buf, size, tf);
+    /* GB-308: read into the CALLER's range through the bounce helper —
+       file_read() writes straight into `buf`, and an unbacked page there
+       faults with the kernel's CS (see file_read_user in fs.c). */
+    int ret = file_read_user(caller, fd, (uint64_t)buf, size, tf);
     if (ret == -2) {
       /* Restart the syscall on wake: rewind elr over the 2-byte `syscall`
          instruction, and save our own resume frame BEFORE switching out —
@@ -2401,10 +2412,22 @@ static void sys_exec(struct trap_frame *tf) {
     return;
   }
 
-  char pathbuf[32];
+  /* GB-308: was 32 bytes and u_strcpy truncates SILENTLY, so a longer path was
+     cut and then failed ENOENT (measured: execve("/THIS/PATH/IS/LONGER/...")
+     echoed as /THIS/PATH/IS/LONGER/THAN/THIRT).  A truncated path that fails
+     to exist is a lie about why exec failed. */
+  char pathbuf[256];
   if (!u_strcpy(path, pathbuf, sizeof pathbuf)) {
     tf->regs[0] = -EFAULT;
     return;
+  }
+  {
+    int plen = 0;
+    while (plen < (int)sizeof pathbuf && pathbuf[plen]) plen++;
+    if (plen >= (int)sizeof pathbuf - 1) {
+      tf->regs[0] = -ENAMETOOLONG;
+      return;
+    }
   }
 
   /* P2.5 (S5): every argv access below is validated (v2 AS walk
@@ -3066,7 +3089,16 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            fell to the default -ENOSYS and the probe "died inside _Exit" (GB-113
            signature: exit-0 observed as a signal death, last_user_pc in _Exit),
            rows never flushed to write(1).  exit_group(code) with code in rdi. */
-        case 231: syscall_num = SYS_EXIT;  break;  /* exit_group(code)  */
+        /* GB-308: NOT SYS_EXIT.  SYS_EXIT's handler ends only the calling
+           thread when the caller is a clone(2) child (GB-021/GB-216), which is
+           right for exit(60) and wrong for exit_group(231): every thread of
+           the group must die.  Measured: the JVM's System.exit()/Runtime.halt()
+           runs on a clone child, so exit_group killed that one thread and left
+           13 parked ones -- the process never exited (no "[KERNEL] Process ...
+           exited" row, all threads st=8, the wave never ended), while a
+           program that simply returns from main (the launcher thread is the
+           group anchor, so SYS_EXIT takes the whole group) exited fine. */
+        case 231: syscall_num = SYS_EXIT_GROUP; break; /* exit_group(code) */
         /* GB-141 (V2 mechanism): musl stdio calls writev(20), not write — the compat
            table had no case 20, so every printf byte hit -ENOSYS. */
         case 20: compat_writev(tf); return;
@@ -3218,6 +3250,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_write_console(tf);
   } else if (syscall_num == SYS_EXIT) {
     sys_exit(tf);
+  } else if (syscall_num == SYS_EXIT_GROUP) {
+    sys_exit_group(tf);
   } else if (syscall_num == SYS_FORK) {
     sys_fork(tf);
   } else if (syscall_num == SYS_OPEN) {
@@ -4381,7 +4415,40 @@ int badvec_frame_window(uint64_t p) {
      window is the same physical range, seen through either alias. */
   if (p - DMAP_BASE < DMAP_SIZE)
     p -= DMAP_BASE;
-  return (p & 7ULL) == 0 && p >= 0x1000ULL && p < 0x70000000ULL;
+  if ((p & 7ULL) != 0 || p < 0x1000ULL)
+    return 0;
+  /* cp-sync (merge of main): both windows.  Kernel-task stacks are frames
+     below the image (the 0x23FFE2A0 / 0x25FFB640 stamps, the unit proof);
+     the per-CPU trap stacks live INSIDE the image above 0x70000000 and are
+     asked for explicitly (GB-308 below).  Kernel text between the two is
+     never a frame. */
+  if (p < 0x70000000ULL)
+    return 1;
+  /* GB-308: ask the stacks instead of testing a constant.
+   *
+   * This was `p < 0x70000000ULL`, a bound that does not describe this image:
+   * the x64 kernel LINKS at 0x70000000 and keeps its per-CPU stacks ABOVE it
+   * (cpu_locals[c].kernel_stack = &__stack_top - c*64K - 4096, i.e. 0x75Cxxxxx
+   * here).  So every legitimate kernel-stack frame failed this test,
+   * badvec_print_not_a_frame() announced "not-a-frame (outside every per-CPU
+   * frame window)" for a good frame, and the fatal path halted the CPU instead
+   * of printing the state it had already collected -- a diagnostic that
+   * destroys the evidence it exists to produce.
+   *
+   * Measured: a 4 MiB pread64 into a freshly mmap'd buffer on a
+   * kernel-mode-copy path halted a CPU with frame=0x75C41030, which is exactly
+   * where cpu 1's trap frame lives (&__stack_top - 64K - 4096).  A core that
+   * never powered on has kernel_stack == 0 and contributes no window. */
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    uint64_t top = cpu_locals[c].kernel_stack;
+    if (top - DMAP_BASE < DMAP_SIZE)
+      top -= DMAP_BASE;
+    if (!top || p > top)
+      continue;
+    if (p + sizeof(struct trap_frame) > top - 64u * 1024u)
+      return 1;
+  }
+  return 0;
 }
 
 /* GB-244: the pure arming decision, split out so a unit test can prove it.
@@ -4600,7 +4667,20 @@ static void general_interrupt_inner(struct trap_frame *tf) {
        entered as v=13.  Do not watch pid 1's boot frames either, and skip the
        #DB itself so its entry does not overwrite the interrupted frame's
        stamp. */
-    if (badvec_should_arm((uint64_t)tf, tf->cs, tf->vector, badvec_pid(),
+    /* GB-308: the watchpoint is a MEASUREMENT, and it must never be armed by
+     * accident.  badvec_should_arm() gates on badvec_frame_window(), which on
+     * this image used to reject every kernel-stack frame (frames live at
+     * 0x75Cxxxxx, the test said p < 0x70000000), so arming had been dead for
+     * the whole x64 lane.  Fixing that window made every pid>1 exception frame
+     * arm DR0 on its own vector slot: a #DB on the next write into the frame,
+     * in the middle of the scheduler, and the machine wedged on proc_lock
+     * within seconds (measured: [PUB] libpthread page fault, then silence,
+     * 8 CPUs spinning).  Off unless a debugging session asks for it. */
+#ifndef BADVEC_WATCH_ENABLE
+#define BADVEC_WATCH_ENABLE 0
+#endif
+    if (BADVEC_WATCH_ENABLE &&
+        badvec_should_arm((uint64_t)tf, tf->cs, tf->vector, badvec_pid(),
                           timer_get_ms(), badvec_watch_armed[cpu],
                           badvec_writer_prints, badvec_pid1_prints)) {
       if (badvec_pid() == 1)
@@ -5622,6 +5702,24 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         /* Not a frame on any CPU: report it and read nothing through it.
            panic_claim is held here, so leave it before halting. */
         extern void cpu_halt_record(uint32_t cpu);
+        {
+          /* GB-308: say WHY.  The window test is a question about per-CPU
+             stacks, so print the stacks it asked about. */
+          extern void panic_puts(const char *s);
+          extern void panic_print_hex(uint64_t v);
+          extern void print_int_raw(int v);
+          for (uint32_t c = 0; c < MAX_CPUS; c++) {
+            panic_puts("[BADVEC] cpu=");
+            print_int_raw((int)c);
+            panic_puts(" kernel_stack=");
+            panic_print_hex(cpu_locals[c].kernel_stack);
+            panic_puts(" pid=");
+            print_int_raw(cpu_locals[c].current_proc
+                              ? (int)cpu_locals[c].current_proc->pid
+                              : -1);
+            panic_puts("\n");
+          }
+        }
         badvec_print_not_a_frame(tfu);
         panic_leave();
         cpu_halt_record(get_cpuid());

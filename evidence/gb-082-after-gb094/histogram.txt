@@ -1,2 +1,0 @@
-obj/t3_098.log  total=2
-    [KERNEL]          2

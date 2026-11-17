@@ -4321,7 +4321,7 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
            O_RDWR fd is a write-back mapping (mprotect may add PROT_WRITE
            later).  Capacity = the larger of the file and the mapped range,
            so the pages of a file that grows under the mapping are backed;
-           files over the VM_OBJ_MAX_BYTES object ceiling (1 GiB) are
+           files over the VM_OBJ_MAX_BYTES object ceiling (4 GiB) are
            refused, never mapped partially (the FAT rule). */
         uint32_t acc = eoflags & 3u;
         if (acc == 1u)

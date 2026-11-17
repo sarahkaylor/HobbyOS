@@ -107,6 +107,12 @@
 #define SYS_FUTEX         (73)  /* (uaddr, op, val, timeout_ms) -> 0/count | -EAGAIN
   *  | -ETIMEDOUT | -EINVAL | -EFAULT | -ENOSYS */
 #define SYS_THREAD_EXIT   (74)  /* (retval) -> noreturn (exits this thread) */
+/* GB-308: exit_group(2)'s group meaning, as an INTERNAL dispatch marker.  The
+ * x64 Linux-ABI lane remaps 231 onto this instead of SYS_EXIT because SYS_EXIT
+ * carves out clone(2) children (they only end their own thread), and the group
+ * meaning is exactly what a compat program's exit_group asks for.  Never a
+ * syscall number any program can pass: it lives above the native table. */
+#define SYS_EXIT_GROUP    (0x2000)
 #define SYS_SET_TLS       (75)  /* (tls) -> 0 | -EINVAL */
 
 /* P4 (docs/browser/p4-ipc-design.md section 6.2; integrator consent

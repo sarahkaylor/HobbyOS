@@ -68,6 +68,9 @@
 #include "linux_syscall.h"
 #include "process.h"
 #include "vm.h"
+#include "file_obj.h" /* GB-308: MAP_SHARED write-back */
+static int mem_writeback_range(struct process *p, uint64_t addr, uint64_t len,
+                               struct trap_frame *tf);
 
 #define LPG ((uint64_t)FRAME_SIZE) /* 4 KiB: the Linux page size musl assumes */
 
@@ -218,6 +221,24 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
     off = 0;
   } else if ((int32_t)fd < 0) {
     return l_ret(tf, -EBADF); /* not anonymous and no descriptor */
+  }
+  /* GB-308: a writable MAP_SHARED mapping of a read-only fd must be refused.
+     Linux answers EACCES; without it the mapping was granted, the write hit the
+     page cache, and write-back then put those bytes in a file the process had
+     no writable handle on.  MAP_PRIVATE|PROT_WRITE stays legal: that is COW. */
+  if ((int32_t)fd >= 0 && (hf & L_MAP_SHARED) && (prot & L_PROT_WRITE)) {
+    uint32_t of = 0;
+    if (file_open_flags(p, (int)fd, &of) == 0 && (of & 3u) == 0u)
+      return l_ret(tf, -EACCES);
+  }
+  /* GB-308: mapping a zero-length file fell into the page-cache object, which
+     refuses an empty file, so the caller got -ENOMEM -- "out of memory" for a
+     file with no pages.  -ENODEV is actionable. */
+  if ((int32_t)fd >= 0 && !(hf & L_MAP_ANONYMOUS) && len) {
+    uint16_t cl = 0;
+    uint32_t fsz = 0;
+    if (file_fat16_ident(p, (int)fd, &cl, &fsz) == 0 && fsz == 0)
+      return l_ret(tf, -ENODEV);
   }
   if (off & (LPG - 1)) return l_ret(tf, -EINVAL);
 
@@ -372,6 +393,14 @@ static int l_mem_munmap(struct process *p, struct trap_frame *tf) {
     if (!nr || nr->base >= addr + rlen) return l_ret(tf, 0);
     start = nr->base;
   }
+  /* GB-308: unmap writes back, as Linux does -- and it must happen BEFORE
+     sys_munmap drops the region records, because the write-back walks them to
+     find each page's object and file offset.  This is l_mem_munmap specifically:
+     mremap shares the region_remove/return pairing and an earlier edit landed
+     there instead, where it never fired for an ordinary munmap (obj/jdk/
+     munmapwb5.log has no [WB] row although munmap plainly ran).  A failure
+     cannot be reported here (the unmap has succeeded), so it is dropped. */
+  mem_writeback_range(p, addr, rlen, tf);
   int rc = sys_munmap(start, addr + rlen - start);
   return l_ret(tf, rc == 0 ? 0 : rc);
 }
@@ -530,6 +559,46 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, (int64_t)dst);
 }
 
+/* ---- GB-308: fsync(fd) flushes the MAPPING's pages ---------------------- */
+/* Flush the pages a process has mapped from one FAT16 file, identified by
+ * (cluster, size).  It must walk the REGIONS, not the page-cache object: writing
+ * through fat16_write invalidates the cache (an in-place write changes the bytes
+ * behind the object), so after one flush file_obj_get() builds a fresh object and
+ * file_obj_page() refills from disk -- and writing THOSE pages back puts stale
+ * bytes on the file.  Measured: fsync() wrote the mapping's 'N' correctly, then
+ * fdatasync() wrote the pre-change 'A' over the next byte
+ * (obj/jdk/fsync.log: disk[0]=N ok, disk[1]=A want X).  A live mapping keeps its
+ * own frames across invalidation, and those frames are the truth.
+ * Returns 0, or the last write error. */
+int l_mem_fsync_file(struct process *p, uint16_t cl, uint32_t sz,
+                     struct trap_frame *tf) {
+  struct addr_space *as = l_as(p);
+  if (!as || !as->regions) return 0;
+  int bad = 0;
+  for (int i = 0; i < as->nr; i++) {
+    struct vm_region *r = &as->regions[i];
+    if (!r->obj || r->obj->kind != VM_OBJ_FILE) continue;
+    if (r->obj->file_start_cluster != cl || (uint32_t)r->obj->size != sz) continue;
+    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) continue;
+    for (uint64_t a = r->base; a < r->base + r->len; a += LPG) {
+      uint64_t off = r->obj_off + (a - r->base);
+      uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
+      if (off >= r->obj->size) break;
+      /* cp-sync: resident pages only, through the direct map (see
+         mem_writeback_range). */
+      uint64_t fr = vm_object_peek(r->obj, pg);
+      if (!fr) continue;
+      uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
+                                                             : (uint64_t)LPG);
+      if (off + n > r->obj->size) n = (uint32_t)(r->obj->size - off);
+      int wr = file_writeback_fat16(p, cl, sz, (uint32_t)off,
+                                    (const void *)phys_to_virt(fr), n, tf);
+      if (wr != 0) bad = wr;
+    }
+  }
+  return bad;
+}
+
 /* ---- msync -------------------------------------------------------------- */
 
 static int l_mem_msync(struct process *p, struct trap_frame *tf) {
@@ -550,8 +619,20 @@ static int l_mem_msync(struct process *p, struct trap_frame *tf) {
       if (!vm_region_find(as, a)) return l_ret(tf, -ENOMEM);
     }
   }
-  /* Every page is RAM, and a MAP_SHARED object frame is the page cache itself:
-     there is no dirty write-back buffer to flush, so success is the truth. */
+  /* GB-308: a MAP_SHARED file page must reach the file.  "Every page is RAM and
+     the frame is the page cache, so success is the truth" was wrong, and
+     measurably so: a mapping wrote 'Z' at offset 0, force() returned 0, and a
+     plain read() in the same process returned 'A' (obj/jdk/mmaptouch.log).
+     The page-cache frame, reached through phys_to_virt (cp-sync: compat roots
+     have no identity map), is a valid kernel
+     pointer and the bytes go straight through an fd the process still holds.
+     Private and read-only regions have nothing to flush.  Over-approximate: we
+     write every present page of the region, not only modified ones -- there is
+     no dirty tracking (file_obj.c has none), and rewriting an unmodified page
+     writes the same bytes.  The cache is then invalidated so the ordinary read
+     path re-reads from disk and sees what the mapping wrote. */
+  int wb = mem_writeback_range(p, addr, len, tf);
+  if (wb < 0) return l_ret(tf, wb);
   return l_ret(tf, 0);
 }
 
@@ -699,3 +780,81 @@ void l_mem_trace(const char *name, struct process *p, uint64_t a0, uint64_t a1,
 const struct l_sysent l_tab_mem[] = { {L_SYS_mmap, l_mem_mmap, "mmap"}, {L_SYS_mprotect, l_mem_mprotect, "mprotect"}, {L_SYS_munmap, l_mem_munmap, "munmap"}, {L_SYS_brk, l_mem_brk, "brk"}, {L_SYS_mremap, l_mem_mremap, "mremap"}, {L_SYS_msync, l_mem_msync, "msync"}, {L_SYS_mincore, l_mem_mincore, "mincore"}, {L_SYS_madvise, l_mem_madvise, "madvise"}, {L_SYS_memfd_create, l_mem_memfd_create, "memfd_create"},
   L_SYSENT_END
 };
+
+/* ---- GB-308: MAP_SHARED write-back, shared by msync and munmap ---------- */
+/* Write a mapped range's MAP_SHARED file pages back to their files.  Linux
+ * writes back on unmap as well as on msync, and without that an un-forced buffer
+ * on a closed channel lost its pages silently.  Over-approximates: every present
+ * page of a shared+writable region is written, because file_obj.c has no dirty
+ * bits (rewriting an unmodified page writes the same bytes).  Frames are
+ * reached through phys_to_virt (kmem.h), so the cached page is a valid kernel
+ * pointer.  Returns 0, or
+ * -EBADF when a page's file has no fd left to write through. */
+static int mem_writeback_range(struct process *p, uint64_t addr, uint64_t len,
+                               struct trap_frame *tf) {
+  int wrote = 0, failed = 0, skipped = 0, ro = 0;
+  struct addr_space *as2 = l_as(p);
+  uint64_t rlen2 = l_up(len);
+  uint64_t end = addr + rlen2;
+  /* cp-sync (merge of main): walk REGION by region, never page by page over
+     the whole range.  Wine munmaps reservations of many GiB (P1 found munmap
+     itself by region for the same reason); a per-page vm_region_find over a
+     64 GiB hole is 16M lookups.  Inside a shared+writable FAT16 region only
+     RESIDENT pages are written (vm_object_peek): a page the mapping never
+     touched is not in the object and has nothing to flush, and
+     file_obj_page() would read it from disk only to write the same bytes
+     back.  The frame is reached through the direct map (kmem.h, F1): compat
+     address spaces have no identity map of RAM. */
+  uint64_t a = addr;
+  while (as2 && a < end) {
+    struct vm_region *r = vm_region_find(as2, a);
+    if (!r) {
+      struct vm_region *nr = vm_region_above(as2, a, end - a);
+      if (!nr || nr->base >= end || nr->base <= a) break;
+      a = nr->base;
+      continue;
+    }
+    uint64_t rend = r->base + r->len;
+    if (rend > end) rend = end;
+    if (!r->obj || r->obj->kind != VM_OBJ_FILE) { skipped++; a = rend; continue; }
+    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) { ro++; a = rend; continue; }
+    if (!r->obj->file_start_cluster || !r->obj->size) { a = rend; continue; }
+    for (; a < rend; a += LPG) {
+      uint64_t off = r->obj_off + (a - r->base);
+      if (off >= r->obj->size) { a = rend; break; }
+      uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
+      uint64_t fr = vm_object_peek(r->obj, pg);
+      if (!fr) continue;
+      uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
+                                                             : (uint64_t)LPG);
+      if ((uint64_t)off + n > r->obj->size)
+        n = (uint32_t)(r->obj->size - off);
+      int wr = file_writeback_fat16(p, r->obj->file_start_cluster,
+                                   (uint32_t)r->obj->size, (uint32_t)off,
+                                   (const void *)phys_to_virt(fr), n, tf);
+      if (wr == 0) wrote++; else failed++;
+    }
+  }
+  if (wrote) file_obj_invalidate_all();
+  {   /* Bounded diagnostic: which pages the walk saw and what happened to them.
+         Silent failure here is what made the first munmap test unreadable. */
+    static int wb_rows;
+    if (wb_rows < 4) {
+      wb_rows++;
+      struct kline kw;
+      kl_init(&kw);
+      kl_s(&kw, "[WB] wrote=");
+      kl_i(&kw, wrote);
+      kl_s(&kw, " failed=");
+      kl_i(&kw, failed);
+      kl_s(&kw, " skipped=");
+      kl_i(&kw, skipped);
+      kl_s(&kw, " nowrite=");
+      kl_i(&kw, ro);
+      kl_s(&kw, "\n");
+      kl_emit(&kw);
+    }
+  }
+  if (failed) return -EBADF;
+  return 0;
+}

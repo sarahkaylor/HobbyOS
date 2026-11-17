@@ -1,0 +1,30 @@
+# Gate P4 (tools/cp/p4/run-p4.sh, P4_WINEDEBUG=err+all,fixme-all,+loaddll), strix KVM, X session + IceWM, cp-sync tree with its own X stack (third_party/x11/build.sh --stage all from main checkout's sha-pinned dl/, no download) and LO_ON_DISK=1 (the merged default: LibreOffice staged on the disk)
+# command: WINE_EXPORT=/srv/nfs/cp-sync-p4 P4_WINEDEBUG=err+all,fixme-all,+loaddll PATH=$HOME/.local/bin:$PATH MAKEFLAGS=-j16 TOOLS_SKIP=1 bash tools/cp/p4/run-p4.sh
+[P4G] qemu: qemu-system-x86_64 -M q35,vmport=on -enable-kvm -cpu host -smp 8 -m 12288M -drive if=pflash,format=raw,readonly=on,file=/home/sarah/cp/lanes/sync/obj/p4/run/ovmf.fd -display none -serial file:/home/sarah/cp/lanes/sync/obj/p4/run/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/sync/obj/p4/run/disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-gpu-pci -vga none -action shutdown=poweroff -qmp unix:/home/sarah/cp/lanes/sync/obj/p4/run/qmp.sock,server,nowait
+[P4G] qemu pid 1966582
+[P4G] clip row: [RI] phase clip total n=70 rel=70 abs=0 dx=850 dy=25 lastabs=0,0 cursor=835,428 inside=1
+[P4G] modes: fullscreen (magenta) window bbox on the glass (0, 0, 1278, 718, 921600)
+[P4G] winecfg dialog face bbox (4, 30, 412, 474, 28824)
+[P4G] winecfg tab libraries: region hash d75e74c3f3ffe411 -> b585f8d695dab704
+[P4G] winecfg tab graphics: region hash b585f8d695dab704 -> 3416f27e601e9893
+[P4G] winecfg tab audio: region hash 3416f27e601e9893 -> f2ff0749893d8a2f
+[P4G] winecfg: 3/3 tab clicks changed the dialog; exit status 0
+[P4G] notepad edit area bbox (0, 0, 1918, 1078, 711556)
+[P4G] notepad: dark pixels in the edit area 6505 -> 7106
+[P4G] notepad exit status 0
+[P4G] NFS failure rows: rpc-no-reply=0 nflk-rc-1=0 nfspipe-stall=0
+[P4G] NOTE: info: fullscreen window bbox (0, 0, 1278, 718, 921600) (expect (0, 0, 1278, 718) at 1280x720)
+[P4G] G1 PASS
+[P4G] G2 PASS
+[P4G] G3 PASS
+[P4] end wineboot status=0 ms=55796
+[X] [RI] PASS RegisterRawInputDevices
+[X] [RI] PASS ClipCursor got=204,180,836,626
+[P4] end rawinput status=0 ms=15173
+[P4] end modes status=0 ms=8200
+[P4] end winecfg status=0 ms=23158
+[P4] end notepad status=0 ms=17640
+[P4] end kill status=0 ms=375
+[P4] leftover pid=113 name=rawinput.exe
+memory faults in serial: 0
+# reference (docs/cp-k4-evidence/p4-k4b-strix.txt; ~/cp/lanes/k4-p4base1.log): G1-G3 PASS, the same [P4] leftover pid=1xx name=rawinput.exe row

@@ -28,6 +28,13 @@
 # patch-set hash + recipe version); --force or --only rebuilds.
 set -euo pipefail
 
+# Host-side generators in this stage (freetype's configure builds and runs native
+# helper programs) link with the HOST compiler, and on macOS 27 the CLT SDK's
+# libSystem.B.tbd defeats the CLT's own clang -- autoconf then says "native C
+# compiler is not working".  tools/host/macos-sdk.sh pins a linkable SDKROOT when
+# that happens; it is a no-op off Darwin and on healthy hosts.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../tools/host/macos-sdk.sh"
+
 HB_X11_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ARCH=""; PREFIX=""; STAGE="clientlibs"; JOBS="${JOBS:-8}"; ONLY=""; FORCE=0
 usage() { sed -n '2,8p' "$0" >&2; exit 2; }
