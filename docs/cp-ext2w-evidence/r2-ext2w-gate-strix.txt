@@ -1,0 +1,69 @@
+[LP] info ext2w mode=bench vol=/EXT
+[LP] perf cold4k bytes=4194304 ops=1024 ms=9 KBps=455111 ops_per_s=113777
+[LP] perf cold4k+fsync bytes=4194304 ops=1024 ms=13 KBps=315076 ops_per_s=78769
+[LP] perf seq4k bytes=4194304 ops=1024 ms=7 KBps=585142 ops_per_s=146285
+[LP] perf seq4k+fsync bytes=4194304 ops=1024 ms=9 KBps=455111 ops_per_s=113777
+[LP] perf seq4k32m bytes=33554432 ops=8192 ms=59 KBps=555389 ops_per_s=138847
+[LP] perf seq4k32m+fsync bytes=33554432 ops=8192 ms=59 KBps=555389 ops_per_s=138847
+[LP] perf seq1m bytes=33554432 ops=32 ms=46 KBps=712347 ops_per_s=695
+[LP] perf seq1m+fsync bytes=33554432 ops=32 ms=46 KBps=712347 ops_per_s=695
+[LP] perf read64k bytes=33554432 ops=512 ms=65 KBps=504123 ops_per_s=7876
+[LP] perf rand4k bytes=2097152 ops=512 ms=3 KBps=682666 ops_per_s=170666
+[LP] perf fsync4k bytes=2097152 ops=512 ms=135 KBps=15170 ops_per_s=3792
+[LP] perf smallfile bytes=409600 ops=200 ms=34 KBps=11764 ops_per_s=5882
+[LP] perf unlink bytes=0 ops=20 ms=1 KBps=0 ops_per_s=20000
+[LP] perf churn bytes=0 ops=300 ms=37 KBps=0 ops_per_s=8108
+[LP] perf unlink32m bytes=0 ops=1 ms=0 KBps=0 ops_per_s=1000000
+[LP] done rc=0
+bench: 25 PASS rows, rc=0
+[E2W] sync commits=7 timer=0 sync=3 closewb=0 press=3 midop=0 evictwb=0 blk_w=7222 blk_r=14 cmds=113 ra=0 nopre=0 sync_n=1 kcyc/sync obj=0 commit=1052 cmds/sync*10=70 write_n=1408 kcyc/write pf=0 lock=0 core=5 note=0 unlock=21
+[E2W] sync commits=533 timer=0 sync=520 closewb=500 press=11 midop=0 evictwb=500 blk_w=28199 blk_r=17062 cmds=4807 ra=11285 nopre=0 sync_n=2 kcyc/sync obj=9 commit=1812 cmds/sync*10=105 write_n=12661 kcyc/write pf=0 lock=0 core=1 note=0 unlock=8
+[E2W] flusher exit (nothing else alive, cache clean) commits=535 timer=1 sync=520 closewb=517 press=11 midop=0 evictwb=517 blk_w=29339 blk_r=17069 cmds=4856 ra=11285 nopre=0 sync_n=2 kcyc/sync obj=9 commit=1812 cmds/sync*10=105 write_n=13758 kcyc/write pf[HALT-CD] cpu=2 free=512 alloc=0 exited=0 running=0 blocked=0 other=0 as_col=0 as_recl=0 as_noas=0
+[HOST] ok   bench: e2fsck -fn rc=0 (cpdata: 32/524288 files (0.0% non-contiguous), 40170/2097152 blocks)
+[LP] info ext2w mode=verify vol=/EXT
+[LP] PASS V1 every persist file survived the reboot byte for byte (0)
+[LP] PASS V1 the rename survived (old name gone) (0)
+[LP] PASS V1 seq4k.bin holds B3's rewrites (not all key 1) (0)
+[LP] done rc=0
+[HOST] ok   verify: e2fsck -fn rc=0 (cpdata: 32/524288 files (0.0% non-contiguous), 40170/2097152 blocks)
+=== crash run 1: quit after SYNCED n=1 + 0 ms ===
+[HOST] info run 1: last SYNCED n=1 on the console, crashw reached i>=0
+[HOST] ok   crash1: e2fsck -fn rc=0 (cpdata: 82/131072 files (1.2% non-contiguous), 9204/524288 blocks)
+[HOST] ok   run 1: s0..s1 (synced before the quit) intact
+[HOST] info run 1: /cw holds 66 entries on disk
+=== crash run 2: quit after SYNCED n=3 + 0 ms ===
+[HOST] info run 2: last SYNCED n=3 on the console, crashw reached i>=2048
+[HOST] ok   crash2: e2fsck -fn rc=0 (cpdata: 80/131072 files (0.0% non-contiguous), 9221/524288 blocks)
+[HOST] ok   run 2: s0..s3 (synced before the quit) intact
+[HOST] info run 2: /cw holds 62 entries on disk
+=== crash run 3: quit after SYNCED n=6 + 0 ms ===
+[HOST] info run 3: last SYNCED n=6 on the console, crashw reached i>=5120
+[HOST] ok   crash3: e2fsck -fn rc=0 (cpdata: 85/131072 files (3.5% non-contiguous), 9282/524288 blocks)
+[HOST] ok   run 3: s0..s6 (synced before the quit) intact
+[HOST] info run 3: /cw holds 64 entries on disk
+=== crash run 4: quit after SYNCED n=2 + 400 ms ===
+[HOST] info run 4: last SYNCED n=3 on the console, crashw reached i>=2048
+[HOST] ok   crash4: e2fsck -fn rc=4, leak-class only (the quit landed inside a commit): Unattached inode 32785 Unattached inode 32800 Unattached inode 32804 
+[HOST] ok   run 4: s0..s2 (synced before the quit) intact
+[HOST] info run 4: /cw holds 62 entries on disk
+=== crash run 5: quit after SYNCED n=4 + 1300 ms ===
+[HOST] info run 5: last SYNCED n=8 on the console, crashw reached i>=6144
+[HOST] ok   crash5: e2fsck -fn rc=0 (cpdata: 87/131072 files (5.7% non-contiguous), 9325/524288 blocks)
+[HOST] ok   run 5: s0..s4 (synced before the quit) intact
+[HOST] info run 5: /cw holds 64 entries on disk
+=== crash run 6: quit after SYNCED n=5 + 2600 ms ===
+[HOST] info run 6: last SYNCED n=14 on the console, crashw reached i>=12288
+[HOST] ok   crash6: e2fsck -fn rc=0 (cpdata: 95/131072 files (9.5% non-contiguous), 9428/524288 blocks)
+[HOST] ok   run 6: s0..s5 (synced before the quit) intact
+[HOST] info run 6: /cw holds 66 entries on disk
+=== crash run 7: quit after SYNCED n=8 + 0 ms ===
+[HOST] info run 7: last SYNCED n=8 on the console, crashw reached i>=6144
+[HOST] ok   crash7: e2fsck -fn rc=0 (cpdata: 89/131072 files (4.5% non-contiguous), 9327/524288 blocks)
+[HOST] ok   run 7: s0..s8 (synced before the quit) intact
+[HOST] info run 7: /cw holds 66 entries on disk
+=== crash run 8: quit after SYNCED n=3 + 900 ms ===
+[HOST] info run 8: last SYNCED n=5 on the console, crashw reached i>=5120
+[HOST] ok   crash8: e2fsck -fn rc=0 (cpdata: 84/131072 files (4.8% non-contiguous), 9265/524288 blocks)
+[HOST] ok   run 8: s0..s3 (synced before the quit) intact
+[HOST] info run 8: /cw holds 64 entries on disk
+ext2w_gate: PASS

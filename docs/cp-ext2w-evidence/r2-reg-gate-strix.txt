@@ -1,0 +1,70 @@
+== build: kernel + disk (intel, test), regp launchers
+== export: /srv/nfs/cp-ext2w-reg (Wine stage), 127.0.0.1 only, ro
+== exports.sh: add /srv/nfs/cp-ext2w-reg ok (non-cp lines unchanged)
+== stage: glibc 2.31 under /LIB64 + /lib64/ld
+== boot 1: wineboot -i, reg add, wineserver -k, no sync
+qemu-slot: slot 1 of 4 held by pid 914429 10:42:47
+[RG] regp launcher (C3-ext2w) phase 1
+[RG] begin wineboot : wineboot -i
+[RG] end wineboot status=0 ms=25823
+[RG] quiesce after wineboot: extra=0 ms=9293
+[RG] begin regadd : wine reg add HKCU\Software\CpTest /v X /d Y /f
+[RG] end regadd status=0 ms=8290
+[RG] begin regadd-hklm : wine reg add HKLM\Software\CpTest /v X /d Y /f
+[RG] end regadd-hklm status=0 ms=1483
+[RG] begin kill : wineserver -k
+[RG] end kill status=0 ms=388
+[RG] quiesce after kill: extra=0 ms=0
+[RG] done
+[E2W] flusher exit (nothing else alive, cache clean) commits=145 timer=16 sync=0 closewb=911 press=1 midop=0 evictwb=911 blk_w=56309 blk_r=3821 cmds=3908 ra=2029 nopre=0 write_n=4713 kcyc/write pf=2 lock=0 core=7 note=0 unlock=2
+[HOST] ok   reg add exit 0
+[HOST] ok   wineserver -k exit 0 in 388 ms (Wine SIGKILLs the server at 10.5 s)
+[HOST] ok   boot 1 halted
+[HOST] ok   e2fsck -fn after b1 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+[HOST] ok   pfx/user.reg on the disk holds [Software\\CpTest] "X"="Y" (23191 bytes)
+[HOST] ok   pfx/system.reg on the disk holds the HKLM key (1811981 bytes)
+[HOST] ok   HKLM reg add exit 0
+[HOST] ok   no reg*.tmp left in pfx/
+== boot 2: wine reg query
+qemu-slot: slot 1 of 4 held by pid 922843 10:43:37
+[RG] regp launcher (C3-ext2w) phase 2
+[RG] begin regquery : wine reg query HKCU\Software\CpTest /v X
+[RG] end regquery status=0 ms=8818
+[RG] begin regquery-hklm : wine reg query HKLM\Software\CpTest /v X
+[RG] end regquery-hklm status=0 ms=1516
+[RG] begin kill0 : wineserver -k
+[RG] end kill0 status=0 ms=440
+[RG] quiesce after kill0: extra=0 ms=0
+[RG] race round 0: clients done=3 ok=3 ms=10729
+[RG] begin race-kill : wineserver -k
+[RG] end race-kill status=0 ms=324
+[RG] quiesce after race: extra=0 ms=257
+[RG] race round 1: clients done=3 ok=3 ms=12498
+[RG] begin race-kill : wineserver -k
+[RG] end race-kill status=0 ms=1018
+[RG] quiesce after race: extra=0 ms=0
+[RG] race round 2: clients done=3 ok=3 ms=13606
+[RG] begin race-kill : wineserver -k
+[RG] end race-kill status=0 ms=674
+[RG] quiesce after race: extra=0 ms=0
+[RG] race round 3: clients done=3 ok=3 ms=16670
+[RG] begin race-kill : wineserver -k
+[RG] end race-kill status=0 ms=1056
+[RG] quiesce after race: extra=0 ms=0
+[RG] begin kill : wineserver -k
+[RG] end kill status=256 ms=459
+[RG] quiesce after kill: extra=0 ms=0
+[RG] done
+== reg query output (kernel rows removed): HKEY_CURRENT_USER\Software\CpTest X REG_SZ Y HKEY_LOCAL_MACHINE\Software\CpTest X REG_SZ Y 
+[HOST] ok   boot 2: reg query prints X REG_SZ Y
+[HOST] ok   reg query exit 0
+[HOST] ok   boot 2: HKLM reg query prints X REG_SZ Y
+[RG] race round 0: clients done=3 ok=3 ms=10729
+[RG] race round 1: clients done=3 ok=3 ms=12498
+[RG] race round 2: clients done=3 ok=3 ms=13606
+[RG] race round 3: clients done=3 ok=3 ms=16670
+[HOST] ok   boot 2: 4 race rounds of 3 concurrent Wine clients all finished, no wedge (C8 stop 6); clients exit 0: 12 of 12
+[HOST] ok   e2fsck -fn after b2 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+reg_gate: PASS
+== exports.sh: remove /srv/nfs/cp-ext2w-reg ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-ext2w-reg
