@@ -583,12 +583,16 @@ int l_mem_fsync_file(struct process *p, uint16_t cl, uint32_t sz,
     for (uint64_t a = r->base; a < r->base + r->len; a += LPG) {
       uint64_t off = r->obj_off + (a - r->base);
       uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
-      uint64_t fr = file_obj_page(r->obj, pg);
+      if (off >= r->obj->size) break;
+      /* cp-sync: resident pages only, through the direct map (see
+         mem_writeback_range). */
+      uint64_t fr = vm_object_peek(r->obj, pg);
       if (!fr) continue;
       uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
                                                              : (uint64_t)LPG);
       if (off + n > r->obj->size) n = (uint32_t)(r->obj->size - off);
-      int wr = file_writeback_fat16(p, cl, sz, (uint32_t)off, (const void *)fr, n, tf);
+      int wr = file_writeback_fat16(p, cl, sz, (uint32_t)off,
+                                    (const void *)phys_to_virt(fr), n, tf);
       if (wr != 0) bad = wr;
     }
   }
@@ -619,7 +623,8 @@ static int l_mem_msync(struct process *p, struct trap_frame *tf) {
      the frame is the page cache, so success is the truth" was wrong, and
      measurably so: a mapping wrote 'Z' at offset 0, force() returned 0, and a
      plain read() in the same process returned 'A' (obj/jdk/mmaptouch.log).
-     Frames are identity-mapped, so the page-cache frame is a valid kernel
+     The page-cache frame, reached through phys_to_virt (cp-sync: compat roots
+     have no identity map), is a valid kernel
      pointer and the bytes go straight through an fd the process still holds.
      Private and read-only regions have nothing to flush.  Over-approximate: we
      write every present page of the region, not only modified ones -- there is
@@ -782,31 +787,53 @@ const struct l_sysent l_tab_mem[] = { {L_SYS_mmap, l_mem_mmap, "mmap"}, {L_SYS_m
  * on a closed channel lost its pages silently.  Over-approximates: every present
  * page of a shared+writable region is written, because file_obj.c has no dirty
  * bits (rewriting an unmodified page writes the same bytes).  Frames are
- * identity-mapped, so the cached page is a valid kernel pointer.  Returns 0, or
+ * reached through phys_to_virt (kmem.h), so the cached page is a valid kernel
+ * pointer.  Returns 0, or
  * -EBADF when a page's file has no fd left to write through. */
 static int mem_writeback_range(struct process *p, uint64_t addr, uint64_t len,
                                struct trap_frame *tf) {
   int wrote = 0, failed = 0, skipped = 0, ro = 0;
   struct addr_space *as2 = l_as(p);
   uint64_t rlen2 = l_up(len);
-  for (uint64_t a = addr; as2 && a < addr + rlen2; a += LPG) {
+  uint64_t end = addr + rlen2;
+  /* cp-sync (merge of main): walk REGION by region, never page by page over
+     the whole range.  Wine munmaps reservations of many GiB (P1 found munmap
+     itself by region for the same reason); a per-page vm_region_find over a
+     64 GiB hole is 16M lookups.  Inside a shared+writable FAT16 region only
+     RESIDENT pages are written (vm_object_peek): a page the mapping never
+     touched is not in the object and has nothing to flush, and
+     file_obj_page() would read it from disk only to write the same bytes
+     back.  The frame is reached through the direct map (kmem.h, F1): compat
+     address spaces have no identity map of RAM. */
+  uint64_t a = addr;
+  while (as2 && a < end) {
     struct vm_region *r = vm_region_find(as2, a);
-    if (!r || !r->obj || r->obj->kind != VM_OBJ_FILE) { skipped++; continue; }
-    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) { ro++; continue; }
-    if (!r->obj->file_start_cluster || !r->obj->size) continue;
-    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) continue;
-    uint64_t off = r->obj_off + (a - r->base);
-    uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
-    uint64_t fr = file_obj_page(r->obj, pg);
-    if (!fr) continue;
-    uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
-                                                           : (uint64_t)LPG);
-    if ((uint64_t)off + n > r->obj->size)
-      n = (uint32_t)(r->obj->size - off);
-    int wr = file_writeback_fat16(p, r->obj->file_start_cluster,
-                                 (uint32_t)r->obj->size, (uint32_t)off,
-                                 (const void *)fr, n, tf);
-    if (wr == 0) wrote++; else failed++;
+    if (!r) {
+      struct vm_region *nr = vm_region_above(as2, a, end - a);
+      if (!nr || nr->base >= end || nr->base <= a) break;
+      a = nr->base;
+      continue;
+    }
+    uint64_t rend = r->base + r->len;
+    if (rend > end) rend = end;
+    if (!r->obj || r->obj->kind != VM_OBJ_FILE) { skipped++; a = rend; continue; }
+    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) { ro++; a = rend; continue; }
+    if (!r->obj->file_start_cluster || !r->obj->size) { a = rend; continue; }
+    for (; a < rend; a += LPG) {
+      uint64_t off = r->obj_off + (a - r->base);
+      if (off >= r->obj->size) { a = rend; break; }
+      uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
+      uint64_t fr = vm_object_peek(r->obj, pg);
+      if (!fr) continue;
+      uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
+                                                             : (uint64_t)LPG);
+      if ((uint64_t)off + n > r->obj->size)
+        n = (uint32_t)(r->obj->size - off);
+      int wr = file_writeback_fat16(p, r->obj->file_start_cluster,
+                                   (uint32_t)r->obj->size, (uint32_t)off,
+                                   (const void *)phys_to_virt(fr), n, tf);
+      if (wr == 0) wrote++; else failed++;
+    }
   }
   if (wrote) file_obj_invalidate_all();
   {   /* Bounded diagnostic: which pages the walk saw and what happened to them.
