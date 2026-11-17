@@ -4816,7 +4816,36 @@ static int process_fork_common(struct trap_frame *tf, int mode) {
        resident private pages are copied frame-by-frame, memfd/MAP_SHARED
        pages re-map the same object frames, holes stay holes.  The child
        holds no v1 block (user_phys_base stays 0). */
-    if (vm_as_clone_into(group->as, child->as) != 0) {
+    /* C1-fork: one bounded row per slow clone (and the first few), so a
+       game boot's log shows what each fork cost in the kernel. */
+    extern uint64_t timer_get_us(void);
+    uint64_t fk_t0 = timer_get_us();
+    int fk_rc = vm_as_clone_into(group->as, child->as);
+    {
+      static int fk_rows;
+      uint64_t fk_us = timer_get_us() - fk_t0;
+      if (fk_rows < 32 && (fk_us > 20000 || fk_rows < 2)) {
+        extern uint64_t vm_clone_stat_batches, vm_clone_stat_max_us;
+        fk_rows++;
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[FORKT] pid=");
+        kl_i(&kl, (long)group->pid);
+        kl_s(&kl, " clone_us=");
+        kl_i(&kl, (long)fk_us);
+        kl_s(&kl, " regions=");
+        kl_i(&kl, (long)group->as->nr);
+        kl_s(&kl, " resident=");
+        kl_i(&kl, (long)group->as->resident_frames);
+        kl_s(&kl, " batches=");
+        kl_i(&kl, (long)vm_clone_stat_batches);
+        kl_s(&kl, " max_hold_us=");
+        kl_i(&kl, (long)vm_clone_stat_max_us);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
+    if (fk_rc != 0) {
       vm_as_teardown(child->as);
       child->as = 0;
       child->state = PROC_STATE_FREE;

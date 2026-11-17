@@ -5151,6 +5151,17 @@ int vm_frame_used_snapshot(void) { return frame_used_count(); }
 /* Copy `n` bytes between identity-mapped frames (kernel C is
  * -mgeneral-regs-only: no SIMD copying). */
 static void vm_frame_copy(uint64_t dst, uint64_t src, uint64_t n) {
+  /* C1-fork: frames are page-aligned, so copy 8 bytes at a time (plain
+     integer loads/stores: no SIMD in the kernel, aligned on ARM).  The old
+     byte loop was most of a fork's cost for a parent with 300+ MiB
+     resident. */
+  if (((dst | src | n) & 7) == 0) {
+    volatile uint64_t *d = (volatile uint64_t *)phys_to_virt(dst);
+    const volatile uint64_t *s = (const volatile uint64_t *)phys_to_virt(src);
+    for (uint64_t i = 0; i < n / 8; i++)
+      d[i] = s[i];
+    return;
+  }
   volatile unsigned char *d = (volatile unsigned char *)phys_to_virt(dst);
   const unsigned char *s = (const unsigned char *)phys_to_virt(src);
   for (uint64_t i = 0; i < n; i++)
@@ -5175,6 +5186,9 @@ static int vm_page_zero(uint64_t x) {
   return 1;
 }
 
+/* C1-fork: the last clone's lock batches and its longest single hold (the
+   [FORKT] row in process.c; diagnostics only, written by the cloning CPU). */
+uint64_t vm_clone_stat_batches, vm_clone_stat_max_us;
 int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   /* GB-216: the caller prints one "[KERNEL] fork: AS clone failed" and the
      four silent returns here were indistinguishable from each other -- the
@@ -5274,10 +5288,32 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
     dst->jit_free_len[j] = src->jit_free_len[j];
   }
 
-  /* Copy the regions in list order; each insert takes vm_lock itself.
-     Sibling threads of the parent could in principle mutate the list
-     concurrently -- v2 fork's binding contract is a copy of the CALLER
-     (D10/P1 OQ5), so the walk tolerates the list only shrinking. */
+  /* C1-fork: cost proportional to what is MAPPED, not to the reserved VA.
+     The old walk visited every 4 KiB page of every region (a 64 GiB
+     PROT_NONE reservation is 16 M pages) with one vm_lock irqsave per page
+     and three per present page: [P9FORK] F2a 3.9 s where Linux takes 0.1 ms,
+     and Cyberpunk's two forks for CreateProcess took ~17 s.  Now:
+       - absent page-table levels are skipped whole (vm_arch_skip_absent:
+         one step per absent 4 KiB-table / 2 MiB / 1 GiB / 512 GiB span);
+       - vm_lock is taken once per batch of up to CLONE_BATCH present pages
+         or CLONE_SCAN steps, never per page; the region record, the parent
+         leaf, the object frame and the child's leaf are all read and written
+         in the same critical section, so a peer thread's munmap/mprotect
+         between "look" and "map" is no longer possible;
+       - private pages are copied 8 bytes at a time into an UNzeroed frame.
+     Resident private pages are still copied eagerly: there is no per-frame
+     share count (a non-SHARED leaf is freed by whichever AS unmaps it), so
+     sharing an anonymous frame copy-on-write between parent and child would
+     double-free it (docs/cp-fork.md §3).  The parent's own leaves are never
+     changed here, so the parent owes no shootdown (C1-pe's rules hold).
+     Sibling threads of the parent may still mutate the list concurrently
+     (D10/P1 OQ5: fork copies the CALLER); the walk re-finds its region by
+     index under each lock and tolerates the list only shrinking. */
+#define CLONE_BATCH 32  /* present pages copied per vm_lock hold */
+  extern uint64_t timer_get_us(void);
+  vm_clone_stat_batches = 0;
+  vm_clone_stat_max_us = 0;
+#define CLONE_SCAN 512  /* page steps (absent spans count one) per hold */
   int i = 0;
   while (i < src->nr) {
     struct vm_region r;
@@ -5287,10 +5323,10 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
       break;
     }
     r = src->regions[i];
+    int irc = vm_region_insert_locked(dst, r.base, r.len, r.prot, r.kind, r.flags,
+                                      r.obj, r.obj_off);
     spinlock_release_irqrestore(&vm_lock, fl);
-
-    if (vm_region_insert(dst, r.base, r.len, r.prot, r.kind, r.flags, r.obj,
-                         r.obj_off) != 0) {
+    if (irc != 0) {
       uart_puts("[VM] clone: insert failed i=");
       print_int(i);
       uart_puts(" base=");
@@ -5300,90 +5336,110 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
       uart_puts("\n");
       goto fail;
     }
-
-    for (uint64_t a = r.base; a < r.base + r.len; a += FRAME_SIZE) {
-      uint64_t leaf = 0;
+    int priv_obj = (r.flags & VM_MAP_PRIVATE) && r.obj;
+    uint64_t end = r.base + r.len;
+    uint64_t a = r.base;
+    while (a < end) {
+      int copied = 0, steps = 0, err = 0;
       fl = spinlock_acquire_irqsave(&vm_lock);
-      int present = (vm_arch_walk(src, a, &leaf) == 0);
-      spinlock_release_irqrestore(&vm_lock, fl);
-      if (!present)
-        continue; /* holes stay holes */
-      uint16_t mkind = r.kind;
-      /* M6/L30: an object frame re-mapped into a MAP_PRIVATE child must stay
-         READ-ONLY, exactly as the fill path installs it — otherwise the
-         child's first store would go straight into the page-cache frame that
-         every other mapping (the parent's text among them) shares, and no
-         write fault would ever break the copy. */
-      /* cp/wine2: for every object kind (memfd/tmpfs and NFS too, not only
-         FAT/ext2), and only for the leaves that ARE the object's frame (set
-         below): a page the parent already copied is copied again for the
-         child and keeps the region's protection. */
-      uint16_t mprot = r.prot;
-      int priv_obj = (r.flags & VM_MAP_PRIVATE) && r.obj;
-      uint64_t phys;
-      if (r.obj) {
-        /* so-vm lane A: a page still pointing at the object's own frame is
-           shared (re-map the same frame); a page that was already broken by
-           copy-on-write is private to the parent and must be COPIED, or the
-           child would see the unmodified file text. */
-        fl = spinlock_acquire_irqsave(&vm_lock);
-        uint64_t objfr = vm_object_peek_locked(r.obj, (a - r.base) + r.obj_off);
+      uint64_t bt0 = timer_get_us();
+      /* The region must still be the one we copied (same index, same base):
+         a peer's munmap may have shrunk the list. */
+      if (i >= src->nr || src->regions[i].base != r.base) {
         spinlock_release_irqrestore(&vm_lock, fl);
-        uint64_t lphys = vm_arch_leaf_phys(leaf);
-        if (objfr && lphys == objfr) {
-          phys = objfr; /* same backing frame, shared leaf */
-          mkind = VMK_SHARED;
-          if (priv_obj)
-            mprot = (uint16_t)(mprot & ~VM_PROT_WRITE);
-        } else if (!objfr && !priv_obj) {
-          /* Not materialized in the object: refill it (allocates). */
-          fl = spinlock_acquire_irqsave(&vm_lock);
-          phys = vm_object_page_locked(r.obj, (a - r.base) + r.obj_off);
-          spinlock_release_irqrestore(&vm_lock, fl);
-          if (!phys) {
-            uart_puts("[VM] clone: obj page failed i=");
-            print_int(i);
-            uart_puts(" va=");
-            uart_print_hex(a);
-            uart_puts("\n");
-            goto fail;
-          }
-          mkind = VMK_SHARED;
-        } else {
-          /* Private (copy-on-write) page: copy frame-by-frame. */
-          phys = frame_alloc_zeroed();
-          if (!phys) {
-            ASCLONE("alloc-cow", i, a);
-            goto fail;
-          }
-          vm_frame_copy(phys, lphys, FRAME_SIZE);
-        }
-      } else if (r.kind == VMK_FB) {
-        phys = vm_arch_leaf_phys(leaf); /* kernel framebuffer frame(s) */
-      } else {
-        /* Private page: copy frame-by-frame (D10 resident-copy fork). */
-        phys = frame_alloc_zeroed();
-        if (!phys) {
-          ASCLONE("alloc-private", i, a);
-          goto fail;
-        }
-        vm_frame_copy(phys, vm_arch_leaf_phys(leaf), FRAME_SIZE);
+        break;
       }
-      if (vm_map_page(dst, a, phys, mprot, mkind) != 0) {
-        if (mkind != VMK_SHARED && r.kind != VMK_FB)
-          frame_free(phys); /* a copy made above (object COW copies too) */
-        uart_puts("[VM] clone: map failed i=");
+      while (a < end && copied < CLONE_BATCH && steps < CLONE_SCAN) {
+        steps++;
+        uint64_t nx = vm_arch_skip_absent(src, a);
+        if (nx != a) {
+          a = nx > end || nx < a ? end : nx; /* a whole absent table */
+          continue;
+        }
+        uint64_t leaf = 0;
+        if (vm_arch_walk(src, a, &leaf) != 0) {
+          a += FRAME_SIZE; /* holes stay holes */
+          continue;
+        }
+        uint16_t mkind = r.kind;
+        /* M6/L30 + cp/wine2: an object frame re-mapped into a MAP_PRIVATE
+           child stays READ-ONLY (its first store must break the copy, not
+           write the page cache); a page the parent already copied is copied
+           again for the child and keeps the region's protection. */
+        uint16_t mprot = r.prot;
+        uint64_t phys;
+        int fresh = 0; /* phys is a frame this clone allocated */
+        if (r.obj) {
+          uint64_t objfr = vm_object_peek_locked(r.obj, (a - r.base) + r.obj_off);
+          uint64_t lphys = vm_arch_leaf_phys(leaf);
+          if (objfr && lphys == objfr) {
+            phys = objfr; /* same backing frame, shared leaf */
+            mkind = VMK_SHARED;
+            if (priv_obj)
+              mprot = (uint16_t)(mprot & ~VM_PROT_WRITE);
+          } else if (!objfr && !priv_obj) {
+            phys = vm_object_page_locked(r.obj, (a - r.base) + r.obj_off);
+            if (!phys) {
+              err = 1; /* not materialized and not fillable */
+              break;
+            }
+            mkind = VMK_SHARED;
+          } else {
+            phys = frame_alloc(); /* private COW copy of the parent's page */
+            if (!phys) {
+              err = 2;
+              break;
+            }
+            vm_frame_copy(phys, lphys, FRAME_SIZE);
+            fresh = 1;
+          }
+        } else if (r.kind == VMK_FB) {
+          phys = vm_arch_leaf_phys(leaf); /* kernel framebuffer frame(s) */
+        } else {
+          phys = frame_alloc(); /* D10 resident-copy fork */
+          if (!phys) {
+            err = 2;
+            break;
+          }
+          vm_frame_copy(phys, vm_arch_leaf_phys(leaf), FRAME_SIZE);
+          fresh = 1;
+        }
+        if (vm_arch_map(dst, a, phys, mprot, mkind) != 0) {
+          if (fresh)
+            frame_free(phys);
+          err = 3;
+          break;
+        }
+        dst->resident_frames++;
+        if (dst->resident_frames > dst->peak_frames)
+          dst->peak_frames = dst->resident_frames;
+        copied++;
+        a += FRAME_SIZE;
+      }
+      {
+        uint64_t bus = timer_get_us() - bt0;
+        vm_clone_stat_batches++;
+        if (bus > vm_clone_stat_max_us)
+          vm_clone_stat_max_us = bus;
+      }
+      spinlock_release_irqrestore(&vm_lock, fl);
+      if (err) {
+        if (err == 2)
+          ASCLONE("alloc-private", i, a);
+        uart_puts("[VM] clone: page failed err=");
+        print_int(err);
+        uart_puts(" i=");
         print_int(i);
         uart_puts(" va=");
         uart_print_hex(a);
-        uart_puts(" kind=");
-        print_int(mkind);
         uart_puts("\n");
         goto fail;
       }
     }
     i++;
   }
+#undef CLONE_BATCH
+#undef CLONE_SCAN
   return 0;
 
 fail:
