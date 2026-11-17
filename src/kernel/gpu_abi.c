@@ -855,6 +855,7 @@ struct gpu_m2_map {
   uint64_t va, len;
 };
 static struct gpu_m2_map* gpu_m2_maps; /* frame-allocated (~160 KiB), see gpu_m2_init */
+static uint32_t gpu_m2_map_count, gpu_m2_map_races, gpu_m2_unmap_count; /* P8 stop 11 */
 /* Rings per context (index = client slot); 0 = not a CTX_CREATE2 context. */
 static uint32_t gpu_m2_rings[GPU_ABI_MAX_CLIENTS];
 
@@ -1144,8 +1145,22 @@ static int gpu_m2_res_map_blob(struct process* p, int fd, uint64_t arg) {
     return rc;
   }
   int slot = -1;
+  uint64_t won_va = 0, won_len = 0;
   fl = spinlock_acquire_irqsave(&gpu_abi_lock);
-  for (int i = 0; i < GPU_M2_MAX_MAPS; i++)
+  /* Two threads can map the same blob at once (venus' bo_map is "not
+   * thread-safe but fine" on DRM, where both mmaps stay valid).  Keep ONE
+   * record per (client, blob): the loser drops its own PTEs and returns the
+   * winner's VA, so an unmap can never leave a second live mapping behind on
+   * a window extent that is about to be reused. */
+  for (int i = 0; i < GPU_M2_MAX_MAPS; i++) {
+    struct gpu_m2_map* m = &gpu_m2_maps[i];
+    if (m->used && m->pid == pid && m->fd == fd && m->res_id == mb.res_id) {
+      won_va = m->va;
+      won_len = m->len;
+      break;
+    }
+  }
+  for (int i = 0; !won_va && i < GPU_M2_MAX_MAPS; i++)
     if (!gpu_m2_maps[i].used) {
       slot = i;
       gpu_m2_maps[i].used = 1;
@@ -1157,12 +1172,22 @@ static int gpu_m2_res_map_blob(struct process* p, int fd, uint64_t arg) {
       break;
     }
   spinlock_release_irqrestore(&gpu_abi_lock, fl);
+  if (won_va) {
+    struct process* g = process_group(p);
+    vm_munmap_range(g ? g : p, va, size);
+    gpu_m2_map_races++;
+    mb.va = won_va;
+    mb.size = won_len;
+    mb.map_info = mi;
+    return vm_kwrite(p, arg, &mb, sizeof(mb)) == 0 ? 0 : -EFAULT;
+  }
   if (slot < 0) {
     struct process* g = process_group(p);
     vm_munmap_range(g ? g : p, va, size);
     virtio_gpu_3d_blob_unmap(mb.res_id);
     return -ENOSPC;
   }
+  gpu_m2_map_count++;
   static int map_rows = 0;
   if (map_rows++ < 16) {
     gpu_abi_say("[VENUS] user map res=", (int)mb.res_id);
@@ -1178,6 +1203,42 @@ static int gpu_m2_res_map_blob(struct process* p, int fd, uint64_t arg) {
   mb.size = size;
   mb.map_info = mi;
   return vm_kwrite(p, arg, &mb, sizeof(mb)) == 0 ? 0 : -EFAULT;
+}
+
+/* P8 stop 11 (fault dump, arch/x64/trap.c): every live blob mapping of the
+ * faulting process group, so a register that points into one is named. */
+void gpu_m2_dump_maps(struct process* p) {
+  if (!p || !__atomic_load_n(&gpu_m2_maps, __ATOMIC_ACQUIRE)) return;
+  int pid = gpu_m2_pid(p), n = 0;
+  uint64_t bytes = 0, lo = ~0ull, hi = 0;
+  extern void uart_print_hex(uint64_t val);
+  for (int i = 0; i < GPU_M2_MAX_MAPS; i++) {
+    struct gpu_m2_map* m = &gpu_m2_maps[i];
+    if (!m->used || m->pid != pid) continue;
+    n++;
+    bytes += m->len;
+    if (m->va < lo) lo = m->va;
+    if (m->va + m->len > hi) hi = m->va + m->len;
+    if (n <= 48) {
+      uart_puts("[SMAP] res=");
+      print_int((int)m->res_id);
+      uart_puts(" va=");
+      uart_print_hex(m->va);
+      uart_puts(" len=");
+      uart_print_hex(m->len);
+      uart_puts("\n");
+    }
+  }
+  gpu_abi_say("[SMAP] maps=", (int)gpu_m2_map_count);
+  gpu_abi_say(" unmaps=", (int)gpu_m2_unmap_count);
+  gpu_abi_say(" races=", (int)gpu_m2_map_races);
+  gpu_abi_say(" live=", n);
+  gpu_abi_say(" mib=", (int)(bytes >> 20));
+  uart_puts(" span=");
+  uart_print_hex(n ? lo : 0);
+  uart_puts("..");
+  uart_print_hex(hi);
+  uart_puts("\n");
 }
 
 /* Drop this client's user mapping of res_id (if any): PTEs, then the record. */
@@ -1196,6 +1257,7 @@ static void gpu_m2_drop_map(struct process* p, int pid, int fd, uint32_t res_id)
   }
   spinlock_release_irqrestore(&gpu_abi_lock, fl);
   if (!va) return;
+  gpu_m2_unmap_count++;
   struct process* g = process_group(p);
   struct process* owner = g ? g : p;
   if (owner && owner->as) {
@@ -1260,6 +1322,7 @@ static int gpu_m2_submit2(struct process* p, int fd, uint64_t arg) {
 
 static int gpu_m2_fence_wait2(struct process* p, int fd, uint64_t arg) {
   struct gpu_fence_wait2 fw;
+  virtio_gpu_3d_fence_unpark(); /* P8 stop 11: a restart is not parked */
   if (vm_user_read(p, arg, &fw, sizeof(fw)) != 0) return -EFAULT;
   uint32_t rings = 0;
   if (!gpu_m2_owns_ctx(p, fd, fw.ctx_id, &rings) || fw.ring_idx >= rings || fw.seqno == 0)

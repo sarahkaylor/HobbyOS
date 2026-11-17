@@ -125,6 +125,7 @@ int virtio_gpu_3d_submit2(uint32_t ctx_id, uint32_t ring_idx, int fenced, const 
 int virtio_gpu_3d_fence_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno);
 /* Commit a park of the current thread until the fence retires or deadline_ms
  * (0 = none): 0 signalled (no park), GPU_ABI_PARKED parked, -EINVAL. */
+void virtio_gpu_3d_fence_unpark(void);
 int virtio_gpu_3d_fence_park(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno,
                              uint64_t deadline_ms);
 #endif
