@@ -342,6 +342,22 @@ kernel-side copy, and the copy to or from user memory runs after it is
 released (a fault there takes the locks it needs).  No ext2 path touches user
 memory under `ext2_lock` or under the NVMe token any more.
 
+That was not enough.  `linux_probe_e2fault` (a pread of a 48 MiB ext2 file
+into a 64 KiB window that another thread keeps re-mapping from a FAT file, an
+ext2 file and anonymous memory) wedges base integ5 in 2 of 2 runs with the
+batch's exact signature (`[E2W] ext2_lock wait 2000 ms: holder … site=ext2v_read`,
+holder `pread64`, then silence).  On the bounce-only fix it passed once and
+then hit `[MUTEX-SELF]` on an `f->lock` held by the same `pread64`.  A fault
+inside a syscall can park the thread (the rewound-syscall park) or end it,
+and any ylock held across that is never released: the holder looks RUNNING
+and waits on nothing, which is the stop-6 picture.  So `fs.c` no longer
+takes `f->lock` around ext2 read/write/getdents64 (`ext2v_*` read and advance
+the cursor under `ext2_lock`, chunk by chunk; two concurrent reads of one
+description may interleave chunks), and `pread64`/`pwrite64` of an ext2 fd
+go straight to `ext2v_pread`/`ext2v_pwrite` at the offset (no `pos_lock`, no
+cursor juggling).  The rule now: **no ylock is held while an ext2 path
+touches user memory.**
+
 Device waits under `ext2_lock` remain by design (a commit must be atomic
 against modifications; a cache miss reads under the lock).  They are bounded
 and loud: `nvme_wait_cid` prints `[BLKSLOW]` at 250 ms and resets the
