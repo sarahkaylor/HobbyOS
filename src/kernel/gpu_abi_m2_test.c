@@ -223,8 +223,10 @@ static void test_gpu_m2_scanout(void) {
   EXPECT_EQ((int)((GPU_IOC_SCANOUT_BLOB >> 16) & 0x3FFF), 64);
   EXPECT_EQ((int)(GPU_IOC_SCANOUT_BLOB >> 30), 3); /* read|write: seqno, timings out */
   EXPECT_EQ(gpu_abi_m2_req_size(GPU_IOC_SCANOUT_BLOB), 64);
-  /* No process: refused before anything reaches the device. */
+#ifdef __x86_64__
+  /* No process: refused before anything reaches the device (ARM: no 3D). */
   EXPECT_EQ(gpu_abi_ioctl(0, -1, GPU_IOC_SCANOUT_BLOB, 0), -EINVAL);
+#endif
   struct gpu_scanout_blob b = {0};
   b.res_id = 7;
   b.width = 1920;
