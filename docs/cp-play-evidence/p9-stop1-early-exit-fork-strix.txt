@@ -1,0 +1,65 @@
+# Stop P9-1: the clean early exit (game status 0 at launch + 20 s) -- strix, cp-play harness on cyberpunk @ 058fd3d5
+# Seen: integ7 integ10-venus (1 of 3), cp-play gateA3 (1 of 10 cp-play game boots). WINEDEBUG +timestamp,+process from gateA4 on.
+
+## gateA3 (bad): launcher + Wine process rows around the exit (relay order; [X] rows lag kernel rows)
+[P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[X] 0140:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 316"
+[X] 0140:warn:process:CreateProcessInternalW (L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe",...): ignoring some flags in 5000210
+[X] 0140:trace:process:NtCreateUserProcess L"\\??\\Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" image L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 316" parent (nil) machine 0
+[P8] census game t=5s procs: vkcube.exe/17:s5 wineserver/19:s5 services.exe/25:s5 winedevice.exe/28:s5 plugplay.exe/37:s5 svchost.exe/43:s5 winedevice.exe/49:s5 explorer.exe/64:s5 rpcss.exe/70:s5 Cyberpunk2077.e/92:s3 /93 (n=11)
+[KERNEL] Process 93: Cyberpunk2077.e exited unexpectedly or gracefully.
+[X] 0140:trace:process:NtCreateUserProcess L"\\??\\Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" pid 0144 tid 0148 handles 0xbc/0xc0
+[X] 0140:trace:process:CreateProcessInternalW started process pid 0144 tid 0148
+[X] 0140:trace:process:NtQueryInformationProcess (0xffffffffffffffff,0x00000000,0x7ffffe0ffb20,0x00000030,(nil))
+[X] 0140:trace:process:NtQueryInformationProcess (0xffffffffffffffff,0x00000000,0x7ffffe0ffb20,0x00000030,(nil))
+[KERNEL] Process 92: Cyberpunk2077.e exited unexpectedly or gracefully.
+[P8] end game status=0 ms=20362
+[P8] census after-game t=20s procs: vkcube.exe/17:s3 wineserver/19:s3 services.exe/25:s5 winedevice.exe/28:s5 plugplay.exe/37:s5 svchost.exe/43:s5 winedevice.exe/49:s5 explorer.exe/64:s5 rpcss.exe/70:s5 REDEngineErrorR/96:s5 (n=10
+[X] 0148:trace:process:CreateProcessInternalW app L"C:\\windows\\system32\\conhost.exe" cmdline L"\"C:\\windows\\system32\\conhost.exe\" --server 0x2c"
+[X] 0148:trace:process:CreateProcessInternalW PROC_THREAD_ATTRIBUTE_HANDLE_LIST handle count 1.
+[X] 0148:trace:process:NtCreateUserProcess L"\\??\\C:\\windows\\system32\\conhost.exe" image L"C:\\windows\\system32\\conhost.exe" cmdline L"\"C:\\windows\\system32\\conhost.exe\" --server 0x2c" parent (nil) machine 0
+
+## gateA4 (good, +timestamp): the same sequence with Wine timestamps (s since boot)
+[P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[X]  37.351:0140:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 316"
+[X]  54.093:0148:trace:process:NtQueryInformationProcess (0xffffffffffffffff,0x00000025,0x7ffffe2ff9b0,0x00000040,(nil))
+[X]  54.166:0140:trace:process:NtQueryInformationProcess (0xffffffffffffffff,0x00000000,0x7ffffe0ffb20,0x00000030,(nil))
+[X]  54.166:0140:trace:process:NtQueryInformationProcess (0xffffffffffffffff,0x00000000,0x7ffffe0ffb20,0x00000030,(nil))
+[X]  54.676:0148:trace:process:CreateProcessInternalW app L"C:\\windows\\system32\\conhost.exe" cmdline L"\"C:\\windows\\system32\\conhost.exe\" --server 0x2c"
+[X]  54.764:0140:trace:loaddll:build_module Loaded L"Z:\\GAME\\bin\\x64\\steam_api64.dll" at 00007FE375460000: native
+  -> the game (thread 0140) calls CreateProcess(REDEngineErrorReporter.exe <its pid>) at 37.35 s; Wine's
+     NtCreateUserProcess inside it returns at 54.05 s (16.7 s; trace rows 37.358 "NtCreateUserProcess ... image"
+     and 54.052 "... pid 0144 tid 0148"), the reporter (0148) runs at 54.09 s, the game queries its own process
+     at 54.17 s and goes on to steam_api64.  In gateA3 the game exited (status 0) right after those two
+     queries, at launch + 20.4 s, i.e. about 16.7 s after the same CreateProcess.
+
+## why process creation takes 16.7 s: src/user/cp/p9forkprobe.c in the guest (P8_PHASE=probe, probe-fork2, -m 12G)
+[P9FORK] start (C9-play): self=/P9FORK.ELF
+[P9FORK] F1 small parent: fork+exec -> child running min 71.7 med 75.1 max 76.4 ms; reaped med 76.8 ms (n=5) -> INFO
+[P9FORK] 64 GiB PROT_NONE reservation: ok
+[P9FORK] F2a 64 GiB PROT_NONE only: fork+exec -> child running min 3899.0 med 3937.3 max 4189.0 ms; reaped med 3939.1 ms (n=5) -> INFO
+[P9FORK] 1300 x 256 KiB touched mappings
+[P9FORK] F2b 1300 mappings only: fork+exec -> child running min 273.3 med 1328.5 max 2479.8 ms; reaped med 1330.2 ms (n=5) -> INFO
+[P9FORK] big parent: reservation 64 GiB + the 1300 mappings
+[P9FORK] F2 big VA: fork+exec -> child running min 4197.0 med 5736.0 max 6203.4 ms; reaped med 5737.7 ms (n=5) -> FAIL
+[P9FORK] + 40 threads blocked in read()
+[P9FORK] F3 big VA + 40 threads: fork+exec -> child running min 4856.6 med 5854.1 max 6427.1 ms; reaped med 5855.7 ms (n=5) -> FAIL
+[P9FORK] F4 big VA + 40 threads: vfork+exec -> child running min 11.7 med 13.3 max 14.6 ms; reaped med 15.3 ms (n=5) -> INFO
+[P9FORK] done: FAIL
+
+## the same probe on the strix host (Linux 7.0, musl static-pie)
+[P9FORK] start (C9-play): self=/tmp/p9fork.elf
+[P9FORK] F1 small parent: fork+exec -> child running min 0.1 med 0.1 max 0.1 ms; reaped med 0.1 ms (n=5) -> INFO
+[P9FORK] 64 GiB PROT_NONE reservation: ok
+[P9FORK] F2a 64 GiB PROT_NONE only: fork+exec -> child running min 0.1 med 0.1 max 0.1 ms; reaped med 0.1 ms (n=5) -> INFO
+[P9FORK] 1300 x 256 KiB touched mappings
+[P9FORK] F2b 1300 mappings only: fork+exec -> child running min 7.9 med 13.9 max 17.9 ms; reaped med 13.9 ms (n=5) -> INFO
+[P9FORK] big parent: reservation 64 GiB + the 1300 mappings
+[P9FORK] F2 big VA: fork+exec -> child running min 4.5 med 6.7 max 9.7 ms; reaped med 6.8 ms (n=5) -> PASS
+[P9FORK] + 40 threads blocked in read()
+[P9FORK] F3 big VA + 40 threads: fork+exec -> child running min 8.7 med 11.4 max 12.4 ms; reaped med 11.4 ms (n=5) -> PASS
+[P9FORK] F4 big VA + 40 threads: vfork+exec -> child running min 0.1 med 0.1 max 0.3 ms; reaped med 0.1 ms (n=5) -> INFO
+[P9FORK] done: PASS
+
+## the game process at that point ([THRS], gateA4)
+[THRS] pid=92 live=15 gt=15 hw=15 slots=65/511 regs=668 anon=555 anon_mib=135451 big_mib=64832 stk=1 res_mib=508 pk_mib=516 Cyberpunk2077.e

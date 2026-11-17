@@ -315,6 +315,9 @@ int main(void) {
   run("scmprobe", "/P8SCM.ELF", a_scm, 60);
   char *a_kill[] = { (char *)"/P8KILL.ELF", 0 };
   run("killprobe", "/P8KILL.ELF", a_kill, 60);
+  /* C9-play stop P9-1: fork+exec latency of a big parent (src/user/cp/p9forkprobe.c) */
+  char *a_fork[] = { (char *)"/P9FORK.ELF", 0 };
+  run("forkprobe", "/P9FORK.ELF", a_fork, 600);
   pc("[P8] done\n");
   return 0;
 #elif P8_PHASE == 1

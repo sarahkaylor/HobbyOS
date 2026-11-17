@@ -1,0 +1,123 @@
+# Gate P9 boot B, final (gateB6): reboot + reload on boot A (gateA5)'s data disk -- strix, cyberpunk @ 058fd3d5 + cp-play harness
+# cmd: P9_SCRIPT=tools/cp/p9/reload.p9 P9_FROM=gateA5 P9_RUN=gateB6 MAKEFLAGS=-j16 TOOLS_SKIP=1 bash tools/cp/p9/run-p9.sh
+
+## harness rows
+== run-p9 run=gateB6 script=tools/cp/p9/reload.p9 mem=32768M from=gateA5 2026-11-17T11:26:40-06:00
+== run-p8 gpu=venus phase=game run=gateB6 2026-11-17T11:26:40-06:00 host=sarahpc tree=/home/sarah/cp/lanes/play
+== game copy before: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy before: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== data disk: a copy of /home/sarah/cp/lanes/play/obj/cp-p9/gateA5/cpdata.img
+[P9W] +   580.5 s  11:37:38  verdict: script-done; QEMU stopped, slot released; guests on the host now: 4
+== e2fsck -fn after the boot: rc=0 (cpdata: 1071/1048576 files (0.9% non-contiguous), 144838/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== game copy unchanged (count, bytes, newest mtime)
+== verdict: script-done
+   +   580.5 s  11:37:38  verdict: script-done; QEMU stopped, slot released; guests on the host now: 4
+
+## host timeline
++     0.0 s  11:27:57  slot 4 acquired + big-guest lock; boot -smp 8 -m 32768M -cpu host (KVM, venus); QEMU guests on the host before ours: 3
++    17.0 s  11:28:14  kernel frame pool: [FRAME] frames=8192000 total_mib=32000 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=26624 reserved=0
++    21.0 s  11:28:18  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-play-p9 -> /CP ok
++    39.6 s  11:28:37  warm-up result: [P8] warm-up: display driver loaded
++    48.1 s  11:28:45  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    48.1 s  11:28:45  phase launch
++    48.1 s  11:28:45  dri nodes at game launch: qemu-system-x86/2385393: /dev/dri/renderD129
++    48.1 s  11:28:45  dri nodes at game launch: virgl_render_se/2385435: -
++    48.1 s  11:28:45  dri nodes at game launch: virgl-2-gpu_ren/2386889: /dev/dri/renderD129
++    48.3 s  11:28:45  baseline screendump 1920x1080
++    53.5 s  11:28:51  serial row: [X]  52.940:0148:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 324"
++    93.7 s  11:29:31  first screen change after launch (45.5% differs from the baseline)
++   222.4 s  11:31:40  title prompt 'PRESS ... TO CONTINUE' at s010-t000174-pre: sent one Space (#1)
++   239.9 s  11:31:57  title prompt 'PRESS ... TO CONTINUE' at s011-t000191-pre: sent one Space (#2)
++   251.6 s  11:32:09  main menu OCR at s012-t000203-pre: ['NEW GAME', 'LOAD GAME', 'CONTINUE', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   256.5 s  11:32:14  main menu OCR at s013-t000208-pre: ['NEW GAME', 'LOAD GAME', 'CONTINUE', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   256.5 s  11:32:14  phase menu
++   256.5 s  11:32:14  main menu reached: running the play script reload.p9
++   256.5 s  11:32:14  phase menu
++   258.1 s  11:32:15  expect menu-continue: matched /CONTINUE/ at s015-t000209-menu-continue
++   261.2 s  11:32:18  seek menu-load: main menu focus on LOAD GAME after 2 taps
++   262.8 s  11:32:20  expect loadlist: matched /LOAD\s*GAME/ at s019-t000214-loadlist
++   267.9 s  11:32:25  expect loadlist-newsaves: matched /Ripperdoc.*Ripperdoc.*Ripperdoc/ at s021-t000219-loadlist-newsaves
++   276.2 s  11:32:33  seek menu-continue: main menu focus on CONTINUE after 2 taps
++   276.2 s  11:32:33  phase loading
++   387.0 s  11:34:24  expect loaded: matched /PRESS\b.{0,24}\bTO\s+CONTINUE/ at s052-t000338-loaded
++   394.0 s  11:34:31  phase world
++   394.5 s  11:34:32  expect inworld: matched /RIPPERDOC|Jackie/ at s053-t000346-inworld
++   405.6 s  11:34:43  phase prof-reload-world
++   425.7 s  11:35:03  phase world
++   425.7 s  11:35:03  prof reload-world: 185 samples x vCPUs -> prof-reload-world.txt
++   425.7 s  11:35:03  phase prof-reload-stack
++   455.9 s  11:35:33  phase world
++   455.9 s  11:35:33  prof reload-stack: 116 samples x vCPUs -> prof-reload-stack.txt
++   455.9 s  11:35:33  phase save
++   462.4 s  11:35:40  phase world
++   521.9 s  11:36:39  phase quit
++   534.3 s  11:36:52  seek pause-quit: pause menu focus on QUIT GAME after 5 taps
++   538.9 s  11:36:56  expect quit-confirm: matched /sure.{0,20}quit/ at s073-t000490-quit-confirm
++   546.6 s  11:37:04  game process ended: [P8] end game status=0 ms=498411
++   546.9 s  11:37:04  play script ended: script-done
++   577.9 s  11:37:35  sync done: [P8] sync done
++   577.9 s  11:37:35  launcher done: [P8] done
++   580.5 s  11:37:38  verdict: script-done; QEMU stopped, slot released; guests on the host now: 4
+
+## OCR: the save list, the world after CONTINUE
+--- s021-t000219-loadlist-newsaves.ocr.txt
+xeyes -oOx © = LOAD GAME 4 Streetkid The Ripperdoc ie i The Ripperdoc The Ripperdoc Streetkid of The Streetkid Cross Progression Collapse groups Expand groups Select Delete Close #(x/T 2 xeyes 
+
+--- s053-t000346-inworld.ocr.txt
+xeyes -oOx —— 2036 2 11] THE RIPPERDOC Talk to uackie. = z) w (Z ilu #(x/T 2 xeyes 
+
+--- s054-t000346-reloaded-place.ocr.txt
+xeyes -oOx — 2036 2 11] ‘THE RIPPERDOC Talk to-uackie. w iw #(x/T 2 xeyes 
+
+
+## same place: screendump diff, boot A right after F5 vs boot B right after the reload (game window 1280x720 at 320,180)
+s120-t000959-saved-place.png vs s054-t000346-reloaded-place.png: 0.1 % of scene pixels differ by > 24 (mean abs diff 2.4)
+
+## saves after boot B (QuickSave-0 = boot A F5 at the end of play; QuickSave-1 = boot B F5 after the reload, no movement input between)
+AutoSave-0       name=AutoSave-0 time=17:22:28, 17.11.2026 playTime=4352.0 pos=(-1426.61, 1301.79, 27.06)
+                 sav.dat(1638702) metadata.9.json(2646) screenshot.png(129551) 
+AutoSave-16      name=AutoSave-16 time=21:52:29, 1.08.2025 playTime=97.8 pos=(-1262.37, -1001.16, 12.04)
+                 metadata.9.json(2642) sav.dat(1311119) screenshot.png(154637) 
+ManualSave-86    name=ManualSave-86 time=13:24:42, 8.08.2025 playTime=4031.0 pos=(-1429.96, 1255.29, 23.09)
+                 metadata.9.json(2611) sav.dat(1645305) screenshot.png(183177) 
+QuickSave-0      name=QuickSave-0 time=17:25:25, 17.11.2026 playTime=4482.4 pos=(-1443.71, 1308.92, 27.07)
+                 sav.dat(1639385) metadata.9.json(2652) screenshot.png(82693) 
+QuickSave-1      name=QuickSave-1 time=17:35:32, 17.11.2026 playTime=4522.8 pos=(-1443.71, 1308.92, 27.07)
+                 sav.dat(1632538) metadata.9.json(2650) screenshot.png(78724) 
+
+## summary
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/play/obj/cp-p9/gateB6
+phase           rows          game s   median     p10     min     max    mean
+launch            94          49-207     37.3    24.2     0.0    62.0    35.4
+menu              12         210-227     39.6    30.1     6.2    46.7    37.3
+loading           73         228-345     33.6     9.3     1.1    65.9    32.2
+world             44         347-473     12.8     9.6     0.4    19.7    12.4
+prof-reload-world    12         358-376      5.1     3.9     2.1    11.2     5.7
+prof-reload-stack    19         378-408     12.7    10.4     6.4    17.9    12.8
+save               4         409-414     11.9    10.8    10.6    17.8    13.0
+quit              13         474-495     46.5    19.3     0.9    55.7    41.2
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             31651   31651   31651  (1 rows)
+   launch           31264   29335   29339  (7 rows)
+   menu             29393   29393   29393  (1 rows)
+   loading          29178   28011   28011  (4 rows)
+   prof-reload-world   28000   28000   28000  (1 rows)
+   prof-reload-stack   28000   28000   28000  (1 rows)
+   world            27995   27969   27969  (2 rows)
+   quit             27984   27984   31420  (2 rows)
+== game process ([THRS]): max threads 46, max anon 140836 MiB, max res 4111 MiB (94 rows)
+== phases (host s since boot, game s since launch, name)
+   48.1 0.0 launch
+   256.5 208.4 menu
+   256.5 208.4 menu
+   276.2 228.2 loading
+   394.0 346.0 world
+   405.6 357.6 prof-reload-world
+   425.7 377.6 world
+   425.7 377.6 prof-reload-stack
+   455.9 407.8 world
+   455.9 407.8 save
+   462.4 414.3 world
+   521.9 473.8 quit
