@@ -295,3 +295,91 @@ show unsafe prefixes, or the check proves nothing.
   getdents64 into fresh mappings, read() into an untouched ext2 MAP_PRIVATE
   page, MAP_SHARED + msync, fchdir, ftruncate, exit_group with threads
   mid-syscall).  Linux host, base5 and lane: PASS.
+
+## 7. On integ5: C8 stops 6, 8 and 9, and the fixes (wave 5, second round)
+
+### 7.1 Stop 8 -- the kernel-task exit window (root cause, `process.c`)
+
+`kernel_exit` set the slot FREE, released its memory block, dropped the
+CPU's claim and re-enabled interrupts while still running on the task's own
+stack, which lives inside that block -- and only then longjmp'd to the
+scheduler.  Another CPU could hand the slot and block to a new process (and
+`process_create` zeroes it) under the live frames, or a tick could push its
+interrupt frame onto the released stack.  Run 7: CPU0 at rip 0x7009, IF=0,
+pid -1, `resume_pid=219` (the flusher that had just exited).  Run 8: pids 241
+and 245 with the same `resume_sp` (two live kernel tasks on one stack), one
+of them stuck in `nvme_wait_cid`.  The per-episode flusher made this path hot
+(a respawn reuses the block just freed, `frame_block_alloc_first_free`).
+
+Fix: `kernel_exit` disables interrupts, marks the slot EXITED (still claimed
+by this CPU, so no reaper frees it) and longjmps; `kernel_exit_finish`, on
+the scheduler stack (`start_scheduler`, jmp_val 2), drops the claim and
+releases the block.
+
+### 7.2 One long-lived flusher (`ext2_vfs.c`)
+
+`ext2flush` is started once, at mount, so it is in every process census taken
+after boot.  It polls every 50 ms (`safe_wfi`, preemptible like any kernel
+task; it does not park BLOCKED through `arch_yield`, the L78 stack-smash shape
+documented in `virtio_blk.c`), commits when the oldest dirty buffer is 1 s
+old, and calls `kernel_exit` exactly once: when the cache is clean and
+`process_others_alive()` says nothing else is left (the end of a wave).  The
+halt therefore still follows the last commit.
+
+### 7.3 Stop 6 / the integ5 `reg_gate` wedge -- user memory under the locks
+
+`[E2W] ext2_lock wait 2000 ms: holder pid=7 site=ext2v_read … waiter
+site=ext2v_stat`, holder in `pread64`, then silence.  `ext2v_read` prefaulted
+the caller's buffer, took `ext2_lock` and passed the USER pointer down to
+`ext2_read`, whose direct path handed it to the NVMe layer -- which copies the
+bounce into it while holding the NVMe token.  A fault there (a page another
+thread of the process unmapped or remapped after the prefault, or a
+file-backed page) runs a page fill that needs the NVMe token (FAT, ext2) or
+`ext2_lock` (ext2) again; `blk_token_acquire` waits in a silent `safe_wfi`
+loop.  Now `read()`, `write()` and `getdents64` move bytes through a kernel
+bounce in chunks of at most 64 KiB: the lock is held only for the
+kernel-side copy, and the copy to or from user memory runs after it is
+released (a fault there takes the locks it needs).  No ext2 path touches user
+memory under `ext2_lock` or under the NVMe token any more.
+
+Device waits under `ext2_lock` remain by design (a commit must be atomic
+against modifications; a cache miss reads under the lock).  They are bounded
+and loud: `nvme_wait_cid` prints `[BLKSLOW]` at 250 ms and resets the
+controller at 2 s.
+
+### 7.4 Stop 9 -- a long NVMe wait pinning a CPU
+
+`nvme_wait_cid` now yields between polls when the waiter is a kernel task
+(the flusher) and the command has been outstanding for more than 2 ms
+(interrupts on only; a user syscall's continuation never moves, trap.c's
+0x81 guard).  The run-8 picture itself (a task RUNNING and claimed by CPU7
+while CPU7 ran the flusher) is the shared-stack corruption of §7.1: two
+contexts on one stack.  Can an idle CPU steal a task claimed by a busy one?
+No: a RUNNING slot is resumed only by the CPU that claims it
+(`cpu_current_pids`).  The lost-owner reaper requeues a stale claim only
+when every other slot is parked (`table_drained_except`, so that a
+genuinely running task is never run twice).  A claim that is wrong while the
+machine is busy is never stolen.  That is the scheduler's documented rule
+(process.c, "Class-B idle-fix"); this lane does not change it.
+
+### 7.5 `EXT2_OPEN_MAX`
+
+16384 (was 512, "== MAX_GLOBAL_FILES" of the old table).  One slot per
+distinct open inode, and at most one inode per open file description, so it
+equals C1-k5's x86_64 file table.  Scans stop at `open_hi`, the highest slot
+in use, so the larger table costs nothing until it is used.
+
+### 7.6 A repair pass at mount?
+
+The integ5 batch's pull-the-plug saw rc 4 once in 8 (unattached inodes and
+`-` bitmap leaks): a quit that landed inside a commit (§2, guarantee 2).  A
+full leak scrub at mount is a mini-e2fsck (walk every in-use inode's block
+tree to rebuild both bitmaps and the link counts, then reconnect unattached
+inodes).  It is not cheap to write correctly, and it would read every in-use
+inode-table block and indirect block at each boot.  The cheap, standard
+alternative: clear `s_state`'s VALID bit in the superblock before the first
+write of a commit and set it after the last.  That costs 2 superblock
+commands per commit, or 1 if the clear is folded into the previous commit's
+superblock write.  A host (or a future in-guest preen) then knows exactly
+when a crash landed mid-commit and that `e2fsck -p` is needed; every other
+crash needs nothing.  Proposed, not implemented (it costs fsync latency).
