@@ -711,7 +711,42 @@ struct process {
   uint64_t ru_run_us, ru_nvcsw, ru_nivcsw;
   uint64_t ru_grp_us, ru_grp_nvcsw, ru_grp_nivcsw;
   uint64_t ru_ch_us, ru_ch_nvcsw, ru_ch_nivcsw;
+  /* C1-k6 (docs/cp-k6.md §1): a sub-millisecond deadline.  wake_ms stays the
+     one field every park site and every waker reads and clears; wake_us is
+     the precise deadline behind it, honoured only while wake_ms is exactly
+     its ceiling in ms (proc_deadline_us).  A site that writes wake_ms alone
+     (or clears it) therefore never sees a stale wake_us. */
+  uint64_t wake_us;
+  /* C1-k6: a relative clock_nanosleep on the group's CPU clock parks in
+     slices and re-runs; its absolute target is anchored once per call
+     (keyed by the call site and the req pointer). */
+  uint64_t cns_cpu_pc, cns_cpu_req, cns_cpu_target;
+  /* C1-k6 (docs/cp-k6.md §5): system time.  ru_kin_us is when this thread
+     last entered the kernel from user mode (0 = in user mode); ru_ksl_us
+     the kernel time of the current slice not yet charged; ru_sys_us /
+     ru_grp_sys_us / ru_ch_sys_us the system-time parts of ru_run_us /
+     ru_grp_us / ru_ch_us.  ru_utime is the rest. */
+  uint64_t ru_kin_us, ru_ksl_us, ru_sys_us, ru_grp_sys_us, ru_ch_sys_us;
 };
+
+/* C1-k6: set / read a park deadline in microseconds (timer_get_us base). */
+static inline void proc_set_deadline_us(struct process *p, uint64_t us) {
+  if (!us) {
+    p->wake_ms = 0;
+    p->wake_us = 0;
+    return;
+  }
+  p->wake_us = us;
+  p->wake_ms = (us + 999) / 1000;
+  if (!p->wake_ms) p->wake_ms = 1;
+}
+static inline uint64_t proc_deadline_us(const struct process *p) {
+  uint64_t ms = p->wake_ms;
+  if (!ms) return 0;
+  uint64_t us = p->wake_us;
+  if (us && (us + 999) / 1000 == ms) return us;
+  return ms * 1000;
+}
 
 /* C1-k5: the group's soft RLIMIT_NOFILE, clamped to [FD_STDIO_FIRST+1 ..
  * MAX_OPEN_FDS]; every fd-allocating path scans [3, limit). */
@@ -727,6 +762,8 @@ static inline void process_k5_reset(struct process *p) {
   p->ru_run_us = p->ru_nvcsw = p->ru_nivcsw = 0;
   p->ru_grp_us = p->ru_grp_nvcsw = p->ru_grp_nivcsw = 0;
   p->ru_ch_us = p->ru_ch_nvcsw = p->ru_ch_nivcsw = 0;
+  p->ru_kin_us = p->ru_ksl_us = p->ru_sys_us = 0;
+  p->ru_grp_sys_us = p->ru_ch_sys_us = 0;
 }
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux

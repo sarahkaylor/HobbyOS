@@ -1,0 +1,10 @@
+== strix Linux host (7.0.0-43-generic), unprivileged, static musl probe_killgrp.elf (the same source as the guest run)
+[LP] K3 kill(pid,0) on a leader-exited group     rc=0 errno=0 -> PASS
+[LP] K1 SIGKILL: the group is reaped             kill rc=0 waited=50ms -> PASS
+[LP] K2 SIGKILL: status is killed-by-9           status=0x9 -> PASS
+[LP] K4 SIGTERM (SIG_DFL) terminates it          kill rc=0 waited=50ms status=0xf -> PASS
+[LP] K5 SIGUSR1 (handler) runs on a worker       kill rc=0 waited=50ms status=0x2a00 -> PASS
+[LP] K6 a worker's exit_group(7)                 waited=300ms status=0x700 -> PASS
+[LP] K7 the last thread returns                  waited=300ms status=0x0 -> PASS
+[LP] done rc=0
+exit=0

@@ -1,0 +1,62 @@
+== strix, fpsprobe (Venus, -smp 8, 12 GiB); kernel: before (4ef19867, before 0352bd42)
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/k6-dev/obj/cp-p9/k6-before3
+phase           rows          game s   median     p10     min     max    mean
+launch            68          46-156     40.3    26.1     0.0    63.0    37.3
+menu              11         158-173     41.2    38.6    37.9    48.6    41.9
+loading           68         174-281     42.0    13.0     2.4    69.4    39.8
+world             52         282-368     10.2     6.8     1.9    17.3    10.1
+prof-fp-world     14         370-389     15.0     8.2     7.1    18.6    14.0
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             11172   11172   11172  (1 rows)
+   launch           10709    8791    8791  (6 rows)
+   loading           8600    7388    7388  (4 rows)
+   world             7311    7186    7186  (3 rows)
+== game process ([THRS]): max threads 55, max anon 141058 MiB, max res 4394 MiB (73 rows)
+== phases (host s since boot, game s since launch, name)
+   56.8 0.0 launch
+   214.3 157.5 menu
+   214.3 157.5 menu
+   230.2 173.4 loading
+   338.2 281.4 world
+   426.4 369.6 prof-fp-world
+   446.4 389.6 world
+
+== /home/sarah/cp/lanes/k6-dev/obj/cp-p9/k6-before3/prof-fp-world.txt: 1576 vCPU samples
+   kernel          833   52.9 %
+   idle (HLT)      548   34.8 %
+   user            195   12.4 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   82 /   18 /    0
+   cpu1:   14 /   66 /   20
+   cpu2:   18 /   60 /   21
+   cpu3:   24 /   61 /   15
+   cpu4:   27 /   59 /   13
+   cpu5:   33 /   59 /    8
+   cpu6:   38 /   53 /   10
+   cpu7:   42 /   45 /   13
+== kernel, top symbols (% of all samples)
+    23.2 %  spin_acquire_raw
+     7.9 %  get_cpuid
+     1.6 %  schedule
+     1.5 %  virtio_gpu_x64_transact_ex
+     1.4 %  uart_puts
+     1.4 %  sched_wake_idle_cpu
+     1.1 %  virtio_gpu_x64_kick
+     1.1 %  linux_compat_dispatch
+     1.0 %  spin_release_raw
+     1.0 %  lock_audit_irqoff_end
+     0.8 %  virtio_blk_watch_mmio
+     0.6 %  gpu_m2_fence_wait2
+     0.6 %  lock_audit_held_push
+     0.5 %  safe_wfi
+     0.4 %  general_interrupt_inner
+     0.4 %  vm_arch_switch
+
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 50.05 ms max 51.85 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 50.05 ms max 50.08 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 50.79 ms max 51.16 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.67 ms max 50.79 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 50.66 ms max 51.01 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 51.53 ms max 54.85 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 500.1 ms, tick 500 ms

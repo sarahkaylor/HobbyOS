@@ -1662,17 +1662,24 @@ static int l_futex_lock_pi(struct process *p, struct trap_frame *tf,
   uint64_t utime = l_arg(tf, 3);
   struct addr_space *as = p->as;
   int64_t timeout_ms = -1;
+  int64_t timeout_us = -1; /* C1-k6: the precise park deadline */
 
   if (utime) {
-    int64_t ms = 0;
-    int r = l_timespec_to_ms(p, utime, &ms);
+    int64_t us = 0;
+    int r = l_timespec_to_us(p, utime, &us);
     if (r != 0)
       return r;
-    int64_t now = (int64_t)timer_get_ms();
-    ms -= now; /* absolute -> relative */
-    if (ms < 0)
-      ms = 0;
-    timeout_ms = ms;
+    /* C1-k6: FUTEX_LOCK_PI's timeout is ABSOLUTE CLOCK_REALTIME (Linux
+       futex_lock_pi; only LOCK_PI2 is monotonic).  It was compared against
+       uptime, so any realtime deadline read as ~56 years away. */
+    extern uint64_t hb_clock_realtime_us(void);
+    us -= (int64_t)hb_clock_realtime_us(); /* absolute -> relative */
+    if (us < 0)
+      us = 0;
+    if (us > 100000000000LL)
+      us = 100000000000LL;
+    timeout_us = us;
+    timeout_ms = (us + 999) / 1000;
   }
 
   int slot = l_thr_slot_of(p, 1);
@@ -1719,7 +1726,7 @@ static int l_futex_lock_pi(struct process *p, struct trap_frame *tf,
       return -ETIMEDOUT;
     }
     p->futex_uaddr = uaddr;
-    p->wake_ms = (timeout_ms < 0) ? 0 : timer_get_ms() + (uint64_t)timeout_ms;
+    proc_set_deadline_us(p, (timeout_us < 0) ? 0 : timer_get_us() + (uint64_t)timeout_us);
     p->park_since_ms = timer_get_ms();
     p->context[0] = 0;
     p->state = PROC_STATE_FUTEX;
@@ -2142,6 +2149,7 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
   int realtime = (op & L_FUTEX_CLOCK_REALTIME) != 0;
   struct addr_space *as = p->as;
   int64_t timeout_ms = -1;
+  int64_t timeout_us = -1; /* C1-k6: the precise park deadline */
 
   switch (cmd) {
   case L_FUTEX_WAIT:
@@ -2158,11 +2166,13 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     }
     if (utime) {
       int64_t ms = 0;
-      int r = l_timespec_to_ms(p, utime, &ms);
+      int64_t us = 0;
+      int r = l_timespec_to_us(p, utime, &us);
       if (r != 0) {
         tf->regs[0] = (uint64_t)(int64_t)r;
         return 1;
       }
+      ms = (us + 999) / 1000;
       if (absolute) {
         /* FUTEX_WAIT_BITSET takes an ABSOLUTE time.  WHICH clock is named by
            FUTEX_CLOCK_REALTIME in the op word, and the two clocks are not the
@@ -2175,15 +2185,19 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
            timeout; with the timeout inflated to 1e8 ms the collector never
            resumes, so the world stays stopped and the game parks for ever on
            GC_suspend_ack_sem. */
-        int64_t now = realtime ? (int64_t)hb_clock_realtime_ms()
-                               : (int64_t)timer_get_ms();
-        ms -= now;
-        if (ms < 0)
-          ms = 0;
-        if (ms > 100000000)
-          ms = 100000000; /* 27.8 h: a relative cap, after the subtraction */
+        /* C1-k6: in microseconds, against the same two clocks. */
+        extern uint64_t hb_clock_realtime_us(void);
+        int64_t now_us = realtime ? (int64_t)hb_clock_realtime_us()
+                                  : (int64_t)timer_get_us();
+        us -= now_us;
+        if (us < 0)
+          us = 0;
       }
+      if (us > 100000000000LL)
+        us = 100000000000LL; /* 27.8 h: a relative cap, after the subtraction */
+      ms = (us + 999) / 1000;
       timeout_ms = ms;
+      timeout_us = us;
       /* L52: a 5..60 s pool park that expires at once is a timeout-conversion
          bug; print the computed value once so the arithmetic is in the log. */
       if (timeout_ms > 1000) {
@@ -2297,7 +2311,7 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       return 1;
     }
     p->futex_uaddr = uaddr;
-    p->wake_ms = (timeout_ms < 0) ? 0 : timer_get_ms() + (uint64_t)timeout_ms;
+    proc_set_deadline_us(p, (timeout_us < 0) ? 0 : timer_get_us() + (uint64_t)timeout_us);
     if ((p->pid == 4 || p->pid == 27) && timeout_ms < 0) {
       /* M6/L44: the infinite park is the one that must be broken by somebody
          else; a timed park breaks itself.  One row per park (capped) records
@@ -4202,6 +4216,9 @@ int linux_compat_sig_deliverable(struct process *p) {
       continue; /* blocked: Linux does not wake a park for it either */
     if (grp->sig_handler[s] == HO_SIG_IGN)
       continue; /* ignored signals never interrupt a syscall */
+    if (grp->sig_handler[s] == HO_SIG_DFL && ho_linux_sig_dfl_ignored(s))
+      continue; /* C1-k6: nor do default-ignored ones (a queued blocked
+                   SIGCHLD that was later unblocked) */
     return s;
   }
   return 0;
@@ -4312,6 +4329,7 @@ static int l_rewound_restartable(struct process *t) {
   case 7:   /* poll */
   case 23:  /* select */
   case 34:  /* pause */
+  case 230: /* clock_nanosleep (C1-k6: a CPU-clock slice parks rewound) */
   case 232: /* epoll_wait */
   case 270: /* pselect6 */
   case 271: /* ppoll */

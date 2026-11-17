@@ -74,6 +74,7 @@ static uint64_t frame_bits[FRAME_WORDS_MAX];
 static uint64_t frame_watch_phys;
 static int frame_watch_hits;
 static uint32_t frame_hint; /* rotating alloc hint: word index */
+static int frame_dfree_n;   /* C1-k6: frees of an already-free frame */
 static int frame_used;      /* count of set bits */
 static int frame_high;      /* high-water mark of frame_used */
 static uint32_t frame_hole_allocs_n; /* L75: frames handed out in the PCI hole */
@@ -421,12 +422,35 @@ void frame_free(uint64_t phys) {
   uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
   uint32_t w = (uint32_t)idx / 64;
   uint32_t bit = (uint32_t)idx % 64;
+  int dfree = 0;
   if (frame_bits[w] & (1ULL << bit)) {
     frame_bits[w] &= ~(1ULL << bit);
     frame_used--;
+  } else {
+    dfree = ++frame_dfree_n;
   }
   spinlock_release_irqrestore(&frame_lock, flags);
+  if (dfree) {
+    /* C1-k6 (docs/cp-k6.md §7; C1-pe's open item): a free of a frame that is
+     * already free.  It is still ignored (nothing else changes), but it is no
+     * longer silent: a double free whose frame was handed out again in
+     * between gives one frame two owners -- the shape C1-pe could not rule
+     * out for the single-threaded wineserver's c0000130 read.  Bounded: the
+     * first 16, then every 1024th, each with the running count. */
+    if (dfree <= 16 || (dfree & 1023) == 0) {
+      frame_raw_puts("[FRAME-DFREE] n=");
+      frame_raw_hex((uint64_t)dfree);
+      frame_raw_puts(" phys=");
+      frame_raw_hex(phys);
+      frame_raw_puts(" caller=");
+      frame_raw_hex((uint64_t)(uintptr_t)__builtin_return_address(0));
+      frame_raw_puts("\n");
+    }
+  }
 }
+
+/* C1-k6: how many already-free frames frame_free() has been handed. */
+int frame_dfree_count(void) { return frame_dfree_n; }
 
 uint64_t frame_watch_peek(void) { return frame_watch_phys; }
 int frame_watch_bump(void) { return ++frame_watch_hits; }

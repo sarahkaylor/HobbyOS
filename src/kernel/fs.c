@@ -20,6 +20,7 @@
 #include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
 #include "ext2_vfs.h" /* cp/ext2: the /EXT data disk */
 #include "tmpfs.h" /* cp/sys: the compat /tmp */
+#include "arch/cpu.h" /* C1-k6: get_cpuid for the per-CPU poll cap */
 
 /* C1-k5 (docs/cp-k5.md §1): the system-wide open-file table is MAX_GLOBAL_FILES
  * (16384 on x86_64) slots.  One slot is ~1.2 KiB (path[VFS_PATH_MAX]), so a
@@ -498,6 +499,31 @@ static int fd_install(struct process *p, struct file *f) {
   }
   spinlock_release_irqrestore(&fdtab_lock, fl);
   /* L57: record outside the lock (the row goes to the UART). */
+  if (fd >= 0) fd_ev_note(FDEV_OPEN, p, fd, get_global_fd(f), f->path);
+  return fd;
+}
+
+/* C1-k6 (docs/cp-k6.md §6): fd_install plus the FD_CLOEXEC bit, set or
+ * cleared under the same lock as the slot, so no fork/exec can see the new
+ * fd without its flag.  The fd-creating calls that still scanned and filled
+ * the table with no lock (eventfd, timerfd, epoll_create, memfd_create,
+ * signalfd, the two accept paths) all come through here now. */
+static int fd_install_cloexec(struct process *p, struct file *f, int cloexec) {
+  if (!p || !f) return -1;
+  uint64_t fl = spinlock_acquire_irqsave(&fdtab_lock);
+  int fd = -1;
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(p); i++) {
+    if (p->open_fds[i] == -1) {
+      p->open_fds[i] = get_global_fd(f);
+      p->num_open_fds++;
+      fd_slot_gen[i]++;
+      if (cloexec) fd_cloexec_set(p->fd_cloexec, i);
+      else fd_cloexec_clear(p->fd_cloexec, i);
+      fd = i;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&fdtab_lock, fl);
   if (fd >= 0) fd_ev_note(FDEV_OPEN, p, fd, get_global_fd(f), f->path);
   return fd;
 }
@@ -1683,6 +1709,24 @@ int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
  * POLLHUP is its own channel now (poll); select folds hup into its
  * exception set.  Returns 0, or -1 when the fd is not open (select then
  * fails the whole call with EBADF, like Linux; poll reports POLLNVAL). */
+/* C1-k6: a poll/select/epoll scan that sees an armed, not-yet-expired
+ * timerfd remembers its expiry here, and the park that follows wakes then
+ * instead of at the 10 ms re-scan slice.  Per CPU: a scan runs on one CPU
+ * from reset to park (a syscall is never preempted in kernel mode). */
+static uint64_t fs_poll_cap[MAX_CPUS];
+void fs_poll_cap_reset(void) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS) fs_poll_cap[c] = 0;
+}
+void fs_poll_cap_note(uint64_t us) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS && us && (!fs_poll_cap[c] || us < fs_poll_cap[c])) fs_poll_cap[c] = us;
+}
+uint64_t fs_poll_cap_get(void) {
+  uint32_t c = get_cpuid();
+  return c < MAX_CPUS ? fs_poll_cap[c] : 0;
+}
+
 static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
                        int *hup) {
   p = process_group(p); /* P1 (D7): the fd table is group state */
@@ -1698,7 +1742,9 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
 
   if (f->type == FILE_TYPE_TIMERFD) {
     extern int lt_timerfd_pending(int slot);
+    extern uint64_t lt_timerfd_next(int slot);
     if (lt_timerfd_pending(f->timerfd.slot)) *r = 1;
+    else fs_poll_cap_note(lt_timerfd_next(f->timerfd.slot));
     return 0;
   }
 
@@ -1775,6 +1821,13 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
     l_eventfd_probe(f->eventfd.slot, r, w);
     return 0;
   }
+  if (f->type == FILE_TYPE_SIGNALFD) {
+    /* C1-k6: readable when the POLLING thread has a signal of the mask
+       pending (Linux signalfd_poll checks current's pending sets). */
+    extern int l_signalfd_ready(struct file *f);
+    if (l_signalfd_ready(f)) *r = 1;
+    return 0;
+  }
   return -1;
 }
 
@@ -1788,7 +1841,7 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
  * early wake, never a longer-than-requested wait, and it is cleared by the
  * next wait's completion. */
 static struct {
-  uint64_t deadline_ms; /* absolute; 0 = wait forever */
+  uint64_t deadline_us; /* absolute (timer_get_us); 0 = wait forever.  C1-k6: us */
   int valid;
 } select_wait[MAX_PROCESSES];
 
@@ -1799,7 +1852,7 @@ void file_select_forget(int pid) {
   if (pid < 0 || pid >= MAX_PROCESSES)
     return;
   select_wait[pid].valid = 0;
-  select_wait[pid].deadline_ms = 0;
+  select_wait[pid].deadline_us = 0;
 }
 
 #define SELECT_POLL_SLICE_MS 10
@@ -1812,11 +1865,15 @@ int file_fd_notifies(struct process *p, int fd);
 /* C1-k4: park a poller that found nothing ready.  Returns -2 (parked: the
  * syscall restarts) or 1 when an event raced the scan (scan again). */
 static int fs_poll_park(struct process *p, uint64_t seen, int all_notify,
-                        uint64_t now) {
-  uint64_t wake = now + (all_notify ? POLL_NOTIFY_SLICE_MS : SELECT_POLL_SLICE_MS);
-  if (select_wait[p->pid].deadline_ms != 0 &&
-      select_wait[p->pid].deadline_ms < wake) {
-    wake = select_wait[p->pid].deadline_ms;
+                        uint64_t now_us) {
+  uint64_t wake = now_us + 1000ULL * (all_notify ? POLL_NOTIFY_SLICE_MS : SELECT_POLL_SLICE_MS);
+  if (select_wait[p->pid].deadline_us != 0 &&
+      select_wait[p->pid].deadline_us < wake) {
+    wake = select_wait[p->pid].deadline_us;
+  }
+  {
+    uint64_t cap = fs_poll_cap_get(); /* C1-k6: a timerfd in the set expires */
+    if (cap && cap < wake) wake = cap > now_us ? cap : now_us + 1;
   }
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   if (!process_park_ok_locked(p)) { /* C1-k4: killed inside the syscall */
@@ -1827,7 +1884,7 @@ static int fs_poll_park(struct process *p, uint64_t seen, int all_notify,
     spinlock_release_irqrestore(&proc_lock, flags);
     return 1;
   }
-  p->wake_ms = wake;
+  proc_set_deadline_us(p, wake); /* C1-k6: met by the one-shot */
   p->state = PROC_STATE_BLOCKED;
   spinlock_release_irqrestore(&proc_lock, flags);
   return -2;
@@ -1840,34 +1897,53 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
                            ex ? ex->bits : 0, K_FD_SET_WORDS, timeout_ms);
 }
 
+/* C1-k6: the engines take microseconds; the millisecond entry points stay
+ * for the native callers (-1 = forever). */
+static void fs_wait_arm(struct process *p, int64_t timeout_us, uint64_t now) {
+  if (!select_wait[p->pid].valid) {
+    select_wait[p->pid].valid = 1;
+    select_wait[p->pid].deadline_us =
+        (timeout_us < 0) ? 0 : now + (uint64_t)timeout_us;
+  } else if (timeout_us >= 0) {
+    uint64_t cap = now + (uint64_t)timeout_us;
+    if (select_wait[p->pid].deadline_us == 0 ||
+        select_wait[p->pid].deadline_us > cap) {
+      /* Only reachable through a stale entry (pid reuse): never wait past
+       * what this caller asked for. */
+      select_wait[p->pid].deadline_us = cap;
+    }
+  }
+}
+
+int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
+                      uint32_t *ex, int nwords, int timeout_ms) {
+  return file_select_words_us(p, nfds, rd, wr, ex, nwords,
+                              timeout_ms < 0 ? -1 : (int64_t)timeout_ms * 1000);
+}
+
+int file_poll(struct process *p, struct k_pollfd *fds, int nfds,
+              int timeout_ms) {
+  return file_poll_us(p, fds, nfds,
+                      timeout_ms < 0 ? -1 : (int64_t)timeout_ms * 1000);
+}
+
 /* C1-k5: the select engine over sets of `nwords` 32-bit words (the native
  * fd_set_k is 8 words; the compat select/pselect6 pass ceil(nfds/64) longs,
  * up to MAX_OPEN_FDS bits -- Linux's FDS_BYTES).  The result sets are
  * written back into rd/wr/ex. */
 #define SEL_MAX_WORDS ((MAX_OPEN_FDS + 31) / 32)
-int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
-                      uint32_t *ex, int nwords, int timeout_ms) {
+int file_select_words_us(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
+                         uint32_t *ex, int nwords, int64_t timeout_us) {
   if (!p) return -EINVAL;
   if (nfds < 0 || nwords < 0 || nwords > SEL_MAX_WORDS || nfds > nwords * 32)
     return -EINVAL;
-  uint64_t now = timer_get_ms();
-  if (!select_wait[p->pid].valid) {
-    select_wait[p->pid].valid = 1;
-    select_wait[p->pid].deadline_ms =
-        (timeout_ms < 0) ? 0 : now + (uint64_t)timeout_ms;
-  } else if (timeout_ms >= 0) {
-    uint64_t cap = now + (uint64_t)timeout_ms;
-    if (select_wait[p->pid].deadline_ms == 0 ||
-        select_wait[p->pid].deadline_ms > cap) {
-      /* Only reachable through a stale entry (pid reuse): never wait past
-       * what this caller asked for. */
-      select_wait[p->pid].deadline_ms = cap;
-    }
-  }
+  uint64_t now = timer_get_us();
+  fs_wait_arm(p, timeout_us, now);
 
   poll_unpark(p);
   for (;;) {
   uint64_t seen = poll_seq_snapshot(); /* C1-k4: before the scan */
+  fs_poll_cap_reset(); /* C1-k6 */
   int all_notify = 1;
   uint32_t out_rd[SEL_MAX_WORDS], out_wr[SEL_MAX_WORDS], out_ex[SEL_MAX_WORDS];
   for (int i = 0; i < nwords; i++) {
@@ -1921,9 +1997,9 @@ int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
     return ready;
   }
 
-  int expired = (timeout_ms == 0) ||
-                (select_wait[p->pid].deadline_ms != 0 &&
-                 now >= select_wait[p->pid].deadline_ms);
+  int expired = (timeout_us == 0) ||
+                (select_wait[p->pid].deadline_us != 0 &&
+                 now >= select_wait[p->pid].deadline_us);
   if (expired) {
     select_wait[p->pid].valid = 0;
     for (int i = 0; i < nwords; i++) {
@@ -1935,7 +2011,7 @@ int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
   }
 
   if (fs_poll_park(p, seen, all_notify, now) == -2) return -2;
-  now = timer_get_ms();
+  now = timer_get_us();
   } /* C1-k4: an event raced the scan -- scan again */
 }
 
@@ -1943,29 +2019,20 @@ int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
  * read-only pass over the caller's array; revents is written back per entry
  * (-EBADF is never a poll error; bad fds are POLLNVAL).  Not-ready parks
  * through the shared deadline table exactly like file_select. */
-int file_poll(struct process *p, struct k_pollfd *fds, int nfds,
-              int timeout_ms) {
+int file_poll_us(struct process *p, struct k_pollfd *fds, int nfds,
+                 int64_t timeout_us) {
   if (!p) return -EINVAL;
   /* C1-k5: up to the fd table (the compat layer bounds it by RLIMIT_NOFILE
      first, as Linux does); the engine itself has no fixed array. */
   if (nfds < 0 || nfds > MAX_OPEN_FDS) return -EINVAL;
 
-  uint64_t now = timer_get_ms();
-  if (!select_wait[p->pid].valid) {
-    select_wait[p->pid].valid = 1;
-    select_wait[p->pid].deadline_ms =
-        (timeout_ms < 0) ? 0 : now + (uint64_t)timeout_ms;
-  } else if (timeout_ms >= 0) {
-    uint64_t cap = now + (uint64_t)timeout_ms;
-    if (select_wait[p->pid].deadline_ms == 0 ||
-        select_wait[p->pid].deadline_ms > cap) {
-      select_wait[p->pid].deadline_ms = cap; /* stale pid-reuse entry */
-    }
-  }
+  uint64_t now = timer_get_us();
+  fs_wait_arm(p, timeout_us, now);
 
   poll_unpark(p);
   for (;;) {
   uint64_t seen = poll_seq_snapshot(); /* C1-k4: before the scan */
+  fs_poll_cap_reset(); /* C1-k6 */
   int all_notify = 1;
   int ready = 0;
   for (int i = 0; i < nfds; i++) {
@@ -1990,16 +2057,16 @@ int file_poll(struct process *p, struct k_pollfd *fds, int nfds,
     return ready;
   }
 
-  int expired = (timeout_ms == 0) ||
-                (select_wait[p->pid].deadline_ms != 0 &&
-                 now >= select_wait[p->pid].deadline_ms);
+  int expired = (timeout_us == 0) ||
+                (select_wait[p->pid].deadline_us != 0 &&
+                 now >= select_wait[p->pid].deadline_us);
   if (expired) {
     select_wait[p->pid].valid = 0;
     return 0;
   }
 
   if (fs_poll_park(p, seen, all_notify, now) == -2) return -2;
-  now = timer_get_ms();
+  now = timer_get_us();
   } /* C1-k4: an event raced the scan -- scan again */
 }
 
@@ -2369,6 +2436,7 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
                 K_S_IFREG | 0777, (long)vm_object_size(f->memfd.obj));
     return 0;
   case FILE_TYPE_EVENTFD:
+  case FILE_TYPE_SIGNALFD: /* C1-k6: an anon inode, like eventfd */
     k_stat_fill(st, K_DEV_DEVFS, (unsigned long)g_fd + 0x200000, 0600, 0);
     return 0;
   default:
@@ -2962,6 +3030,9 @@ int file_close(struct process *cur, int fd) {
     } else if (f->type == FILE_TYPE_EVENTFD) {
       extern void l_eventfd_release(int slot);
       l_eventfd_release(f->eventfd.slot);
+    } else if (f->type == FILE_TYPE_SIGNALFD) {
+      extern void l_signalfd_count(int delta);
+      l_signalfd_count(-1); /* C1-k6 */
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
     }
@@ -3114,6 +3185,9 @@ void fs_close_global(int g_fd) {
     } else if (f->type == FILE_TYPE_EVENTFD) {
       extern void l_eventfd_release(int slot);
       l_eventfd_release(f->eventfd.slot);
+    } else if (f->type == FILE_TYPE_SIGNALFD) {
+      extern void l_signalfd_count(int delta);
+      l_signalfd_count(-1); /* C1-k6 */
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
     }
@@ -3594,12 +3668,13 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     int r = lt_timerfd_take(f->timerfd.slot, &n);
     if (r == -EAGAIN) {
       if (f->open_flags & 0x800 /* O_NONBLOCK */) return -EAGAIN;
-      extern uint64_t timer_get_ms(void);
+      extern uint64_t timer_get_us(void);
       uint64_t next = lt_timerfd_next(f->timerfd.slot);
-      uint64_t now = timer_get_ms();
+      uint64_t now = timer_get_us();
       uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
       if (process_park_ok_locked(cur)) { /* C1-k4: never re-park the dead */
-        cur->wake_ms = next && next > now ? next : now + 50;
+        /* C1-k6: microseconds -- woken by the one-shot at the expiry */
+        proc_set_deadline_us(cur, next && next > now ? next : now + 50000);
         cur->state = PROC_STATE_BLOCKED;
       }
       spinlock_release_irqrestore(&proc_lock, flags);
@@ -3642,6 +3717,9 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   } else if (f->type == FILE_TYPE_EVENTFD) {
     extern int l_eventfd_read(struct file *f, void *buf, int size);
     return l_eventfd_read(f, buf, size);
+  } else if (f->type == FILE_TYPE_SIGNALFD) {
+    extern int l_signalfd_read(struct file *f, void *buf, int size);
+    return l_signalfd_read(f, buf, size); /* C1-k6 */
   } else if (f->type == FILE_TYPE_NFS) {
     if (f->nfs.is_dir) return -1;               /* use read_dir for dirs */
     if (size <= 0) return 0;
@@ -4085,7 +4163,8 @@ int file_fd_notifies(struct process *p, int fd) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return 1;
   int t = gfile(g_fd)->type;
   return t == FILE_TYPE_PIPE || t == FILE_TYPE_UNIXSOCK ||
-         t == FILE_TYPE_EVENTFD || t == FILE_TYPE_DEVNULL;
+         t == FILE_TYPE_EVENTFD || t == FILE_TYPE_DEVNULL ||
+         t == FILE_TYPE_SIGNALFD; /* C1-k6: process_signal notifies */
 }
 
 /**
@@ -4153,18 +4232,18 @@ int file_timerfd_create(struct process *cur, int clockid, int flags) {
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
   int slot = lt_timerfd_new(clockid, flags);
   if (slot < 0) return slot;
-  int ufd = -1;
-  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++)
-    if (cur->open_fds[i] == -1) { ufd = i; break; }
-  if (ufd < 0) { lt_timerfd_release(slot); return -EMFILE; }
   struct file *f = file_alloc();
   if (!f) { lt_timerfd_release(slot); return -ENFILE; }
   f->type = FILE_TYPE_TIMERFD;
   f->timerfd.slot = slot;
   f->open_flags = (uint32_t)flags;
-  cur->open_fds[ufd] = get_global_fd(f);
-  cur->num_open_fds++;
-  if (flags & 0x80000) fd_cloexec_set(cur->fd_cloexec, ufd);
+  int ufd = fd_install_cloexec(cur, f, (flags & 0x80000) != 0); /* C1-k6 */
+  if (ufd < 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    lt_timerfd_release(slot);
+    return -EMFILE;
+  }
   return ufd;
 }
 
@@ -4177,20 +4256,54 @@ int file_eventfd_create(struct process *cur, unsigned int initval, int flags) {
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
   int slot = l_eventfd_new(initval, flags);
   if (slot < 0) return slot;
-  int ufd = -1;
-  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++)
-    if (cur->open_fds[i] == -1) { ufd = i; break; }
-  if (ufd < 0) { l_eventfd_release(slot); return -EMFILE; }
   struct file *f = file_alloc();
   if (!f) { l_eventfd_release(slot); return -ENFILE; }
   f->type = FILE_TYPE_EVENTFD;
   f->eventfd.slot = slot;
   f->open_flags = 0x2 | ((uint32_t)flags & 0x800); /* O_RDWR [| O_NONBLOCK] */
   f->path[0] = '\0';
-  cur->open_fds[ufd] = get_global_fd(f);
-  cur->num_open_fds++;
-  if (flags & 0x80000) fd_cloexec_set(cur->fd_cloexec, ufd);
+  int ufd = fd_install_cloexec(cur, f, (flags & 0x80000) != 0); /* C1-k6 */
+  if (ufd < 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    l_eventfd_release(slot);
+    return -EMFILE;
+  }
   return ufd;
+}
+
+/* C1-k6 (docs/cp-k6.md §4): a signalfd.  Its only state is the mask; the
+   signals stay in the reader's pending sets until a read dequeues them
+   (linux_compat_fd.c l_signalfd_read). */
+int file_signalfd_create(struct process *cur, uint64_t mask, int flags) {
+  extern void l_signalfd_count(int delta);
+  cur = process_group(cur);
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  struct file *f = file_alloc();
+  if (!f) return -ENFILE;
+  f->type = FILE_TYPE_SIGNALFD;
+  f->sigfd.mask = mask;
+  f->open_flags = 0x0 | ((uint32_t)flags & 0x800); /* O_RDONLY [| O_NONBLOCK] */
+  f->path[0] = '\0';
+  int ufd = fd_install_cloexec(cur, f, (flags & 0x80000) != 0);
+  if (ufd < 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -EMFILE;
+  }
+  l_signalfd_count(1);
+  return ufd;
+}
+
+int file_signalfd_set_mask(struct process *p, int fd, uint64_t mask) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int g = p->open_fds[fd];
+  if (g < 0 || g >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = gfile(g);
+  if (f->type != FILE_TYPE_SIGNALFD) return -EINVAL;
+  __atomic_store_n(&f->sigfd.mask, mask, __ATOMIC_SEQ_CST);
+  return fd;
 }
 
 /* L49: an epoll instance's fd. */
@@ -4201,17 +4314,19 @@ int file_epoll_create(struct process *cur, int flags) {
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
   int slot = lt_epoll_new();
   if (slot < 0) return slot;
-  int ufd = -1;
-  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++)
-    if (cur->open_fds[i] == -1) { ufd = i; break; }
-  if (ufd < 0) { lt_epoll_release(slot); return -EMFILE; }
   struct file *f = file_alloc();
   if (!f) { lt_epoll_release(slot); return -ENFILE; }
   f->type = FILE_TYPE_EPOLL;
   f->epollfd.slot = slot;
   f->open_flags = (uint32_t)flags;
-  cur->open_fds[ufd] = get_global_fd(f);
-  cur->num_open_fds++;
+  /* C1-k6: EPOLL_CLOEXEC (02000000 octal = O_CLOEXEC) is now honoured too. */
+  int ufd = fd_install_cloexec(cur, f, (flags & 0x80000) != 0);
+  if (ufd < 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    lt_epoll_release(slot);
+    return -EMFILE;
+  }
   return ufd;
 }
 
@@ -4266,15 +4381,6 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
   cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS)
     return -EMFILE;
-  int ufd = -1;
-  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++) {
-    if (cur->open_fds[i] == -1) {
-      ufd = i;
-      break;
-    }
-  }
-  if (ufd < 0)
-    return -EMFILE;
 
   struct vm_object *o = vm_object_create(VM_OBJ_MEMFD, 0);
   if (!o)
@@ -4290,10 +4396,15 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
   f->memfd.cursor = 0; /* cp/sys: memfds read/write/seek like files */
   f->open_flags = 0x2; /* O_RDWR: Linux memfds are opened read-write */
 
-  cur->open_fds[ufd] = get_global_fd(f);
-  cur->num_open_fds++;
-  if (flags & K_MFD_CLOEXEC)
-    fd_cloexec_set(cur->fd_cloexec, ufd); /* recorded; P5's exec sweep consumes */
+  /* C1-k6: scan + install under fdtab_lock (the CLOEXEC bit with it; P5's
+     exec sweep consumes it). */
+  int ufd = fd_install_cloexec(cur, f, (flags & K_MFD_CLOEXEC) != 0);
+  if (ufd < 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    vm_object_unref(o);
+    return -EMFILE;
+  }
   return ufd;
 }
 
@@ -5044,23 +5155,17 @@ int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
       net_socket_close(sp);
       return -ENFILE;
     }
-    int nfd = -1;
-    for (int i = FD_STDIO_FIRST; i < process_fd_limit(pg); i++) {
-      if (pg->open_fds[i] == -1) { nfd = i; break; }
-    }
+    nf->type = FILE_TYPE_SOCKET;
+    nf->socket.pcb = sp;
+    if (flags & K_SOCK_NONBLOCK) sp->nonblock = 1;
+    /* C1-k6: scan + install (+ CLOEXEC) under fdtab_lock */
+    int nfd = fd_install_cloexec(pg, nf, (flags & K_SOCK_CLOEXEC) != 0);
     if (nfd < 0) {
       net_socket_close(sp);
       nf->type = FILE_TYPE_EMPTY;
       nf->ref_count = 0;
       return -EMFILE;
     }
-    nf->type = FILE_TYPE_SOCKET;
-    nf->socket.pcb = sp;
-    if (flags & K_SOCK_NONBLOCK) sp->nonblock = 1;
-    pg->open_fds[nfd] = get_global_fd(nf);
-    pg->num_open_fds++;
-    if (flags & K_SOCK_CLOEXEC) fd_cloexec_set(pg->fd_cloexec, nfd);
-    else fd_cloexec_clear(pg->fd_cloexec, nfd);
     if (sa_out && salen_out) {
       /* The accepted peer is the client that connected to this listener. */
       f1_inet_format(sa_out, 0x7F000001u,
@@ -5084,24 +5189,18 @@ int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
     nf->ref_count = 0;
     return r; /* -EAGAIN / -EINVAL / -2 (parked) */
   }
-  int nfd = -1;
-  for (int i = FD_STDIO_FIRST; i < process_fd_limit(pg); i++) {
-    if (pg->open_fds[i] == -1) { nfd = i; break; }
-  }
-  if (nfd < 0) { /* raced with a sibling thread filling the table */
-    usock_close(c, 1);
-    nf->type = FILE_TYPE_EMPTY;
-    nf->ref_count = 0;
-    return -EMFILE;
-  }
   nf->usock.ptr = c;
   nf->usock.end = 1; /* the queue's end-1 reference transfers to this fd */
   nf->type = FILE_TYPE_UNIXSOCK;
   if (flags & K_SOCK_NONBLOCK) usock_set_nonblock(c, 1, 1);
-  pg->open_fds[nfd] = get_global_fd(nf);
-  pg->num_open_fds++;
-  if (flags & K_SOCK_CLOEXEC) fd_cloexec_set(pg->fd_cloexec, nfd);
-  else fd_cloexec_clear(pg->fd_cloexec, nfd);
+  /* C1-k6: scan + install (+ CLOEXEC) under fdtab_lock */
+  int nfd = fd_install_cloexec(pg, nf, (flags & K_SOCK_CLOEXEC) != 0);
+  if (nfd < 0) { /* a sibling thread filled the table */
+    nf->type = FILE_TYPE_EMPTY;
+    nf->ref_count = 0;
+    usock_close(c, 1);
+    return -EMFILE;
+  }
 
   if (sa_out && salen_out) {
     struct usock_name pn;

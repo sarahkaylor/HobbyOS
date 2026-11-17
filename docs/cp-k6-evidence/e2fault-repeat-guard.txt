@@ -1,0 +1,34 @@
+== strix guest, tools/cp/pfx/pfx_gate.sh (e2fault on the ext2 data disk)
+-- lane a06a49b5 in the gate batch: FAIL
+pfx_gate: pfx probe rc=0 PASS rows=72 skips=0; e2fsck -fn rc=0 (cpdata: 25/131072 files (0.0% non-contiguous), 9529/524288 blocks)
+pfx_gate: bigobj probe rc=0 PASS rows=30 skips=0; e2fsck -fn rc=0 (cpdata: 11/131072 files (0.0% non-contiguous), 9004/524288 blocks)
+pfx_gate: fatcoh probe rc=0 PASS rows=17 skips=0; e2fsck -fn rc=0 (cpdata: 11/131072 files (0.0% non-contiguous), 9004/524288 blocks)
+pfx_gate: ext2w probe rc=0 PASS rows=25 skips=0; e2fsck -fn rc=0 (cpdata: 31/131072 files (0.0% non-contiguous), 11654/524288 blocks)
+pfx_gate: e2stress probe rc=0 PASS rows=5 skips=0; e2fsck -fn rc=0 (cpdata: 56/131072 files (0.0% non-contiguous), 9611/524288 blocks)
+pfx_gate: e2churn probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 29/131072 files (3.4% non-contiguous), 13053/524288 blocks)
+pfx_gate: e2fault probe rc=1 PASS rows=1 skips=0; e2fsck -fn rc=0 (cpdata: 13/131072 files (0.0% non-contiguous), 21322/524288 blocks)
+pfx_gate: FAIL (1)
+
+-- the same kernel + a diagnostic row on the fall-through ([KDF-DEV], dev tree only), e2fault x2: FAIL 2/2
+pfx_gate: e2fault probe rc=1 PASS rows=1 skips=0; e2fsck -fn rc=0 (cpdata: 13/131072 files (0.0% non-contiguous), 21322/524288 blocks)
+pfx_gate: e2fault probe rc=1 PASS rows=1 skips=0; e2fsck -fn rc=0 (cpdata: 13/131072 files (0.0% non-contiguous), 21322/524288 blocks)
+pfx_gate: FAIL (2)
+(the kill is the kernel-mode #PF repeat guard: rep>=4 on one page, why=REPEAT; ipc=0x700F294A is memcpy)
+
+-- with the 100 us repeat window (dev tree), e2fault x3: PASS 3/3
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: PASS
+[LP] PASS pread kept making progress (worst gap ms) (394)
+[LP] info e2fault: 560280 preads, 41551 remaps
+[LP] PASS both threads ran (preads) (560280)
+[LP] PASS the 48 MiB file reads back (0)
+[LP] done rc=0
+
+-- the [KDF-DEV] rows of that FAIL run (copied from its console before the next run overwrote it):
+[KDF-DEV] cr2=0x0x1080000000 rep=4 why=REPEAT
+[KDF-DEV] cr2=0x0x1080000000 rep=4 why=REPEAT
+[KDF-DEV] cr2=0x0x1080000000 rep=5 why=REPEAT
+[LCOMPAT] fault sig=11 pid=4 tgid=3 tls=0x1080032F38 live_fs=0x0x1080032F38
+[LCOMPAT] fault-no-handler pid=4 sig=11 ipc=0x0x700F294A rsp=0x0x1080032E90 vec=14 cr2=0x0x1080000000 live=3 -> default action

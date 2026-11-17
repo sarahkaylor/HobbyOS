@@ -1,0 +1,7 @@
+== before2: the harness lost the LOAD GAME list focus (listseek-failed:loadlist-focus) before the world; not a kernel stop
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/k6-dev/obj/cp-p9/k6-before2
+phase           rows          game s   median     p10     min     max    mean
+launch            88          65-205     37.7    29.1     0.0    61.5    35.8
+menu              29         218-250     44.4    39.7     4.0    52.5    43.0
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   +   285.8 s  12:22:51  verdict: listseek-failed:loadlist-focus; QEMU stopped, slot released; guests on the host now: 3

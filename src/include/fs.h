@@ -95,7 +95,10 @@ typedef enum {
   FILE_TYPE_TMPFS,
   FILE_TYPE_TMPFSDIR,
   /* cp/sys: an eventfd counter (linux_compat_fd.c owns the slot table). */
-  FILE_TYPE_EVENTFD
+  FILE_TYPE_EVENTFD,
+  /* C1-k6: a signalfd (linux_compat_fd.c reads it: the reader's pending
+     signals in the fd's mask, dequeued as signalfd_siginfo records). */
+  FILE_TYPE_SIGNALFD
 } file_type_t;
 
 struct vm_object;
@@ -189,6 +192,10 @@ struct file {
       int slot;                    /**< L49: index into linux_compat_timers'
                                         epoll table */
     } epollfd;
+    struct {
+      uint64_t mask;               /**< C1-k6: signals this signalfd reads
+                                        (bit sig-1; never SIGKILL/SIGSTOP) */
+    } sigfd;
   };
   int gidx;                        /**< C1-k5: this slot's global index (the
                                         table is chunked, fs.c gfile) */
@@ -268,6 +275,11 @@ struct vm_object *file_memfd_obj(struct process *p, int fd);
 int file_memfd_seals(struct process *p, int fd, int cmd, int arg);
 /* cp/sys: an eventfd fd over linux_compat_fd.c's counter slots. */
 int file_eventfd_create(struct process *p, unsigned int initval, int flags);
+/* C1-k6: signalfd.  create: a new fd (flags SFD_CLOEXEC|SFD_NONBLOCK) or
+   -errno; set_mask: replace an existing signalfd's mask (-EINVAL when fd is
+   not one, -EBADF when closed). */
+int file_signalfd_create(struct process *p, uint64_t mask, int flags);
+int file_signalfd_set_mask(struct process *p, int fd, uint64_t mask);
 /* cp/sys: 1 when `fd` is an open directory (any filesystem), 0 when it is
  * some other open fd, -EBADF when it is not open.  fchdir(2) uses it. */
 int file_fd_is_dir(struct process *p, int fd);
@@ -452,6 +464,11 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
                 struct fd_set_k *wr, struct fd_set_k *ex, int timeout_ms);
 /* C1-k5: the same engine over sets of nwords 32-bit words (<= MAX_OPEN_FDS
  * bits); the compat select/pselect6 path. */
+/* C1-k6: the engines in microseconds (-1 = forever); the ms forms wrap them. */
+int file_select_words_us(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
+                         uint32_t *ex, int nwords, int64_t timeout_us);
+int file_poll_us(struct process *p, struct k_pollfd *fds, int nfds,
+                 int64_t timeout_us);
 int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
                       uint32_t *ex, int nwords, int timeout_ms);
 

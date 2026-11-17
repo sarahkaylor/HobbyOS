@@ -7,7 +7,25 @@ static uint64_t user_sp[MAX_CPUS];
  * Returns the logical ID of the current CPU core (0 to MAX_CPUS-1).
  * Queries CPUID leaf 1 to extract the initial APIC ID.
  */
+/* C1-k6 (docs/cp-k6.md §10): once every CPU the boot started has loaded its
+ * cpu_locals block into GS_BASE (trap_init_core_with_id counts them;
+ * smp_init says how many there are), ring-0 GS is always that block -- the
+ * entry stubs swapgs before any C code -- and the id is one %gs load.  The
+ * GS_BASE rdmsr below was 6-7 % of all guest samples in the P9 profile: the
+ * lock audit asks for the CPU id on every lock operation. */
+volatile uint32_t x64_gs_ready_mask;    /* bit c: CPU c's GS_BASE is set */
+volatile uint32_t x64_gs_expected;      /* CPUs the boot started (0 = not yet known) */
+static volatile int x64_cpuid_fast;
+
 uint32_t get_cpuid(void) {
+  if (__builtin_expect(x64_cpuid_fast, 1)) {
+    uint64_t id;
+    __asm__ volatile("mov %%gs:32, %0" : "=r"(id));
+    return (uint32_t)id;
+  }
+  if (x64_gs_expected &&
+      (uint32_t)__builtin_popcount(x64_gs_ready_mask) >= x64_gs_expected)
+    x64_cpuid_fast = 1;
   uint64_t gs_base = 0;
   uint32_t low, high;
   __asm__ volatile(

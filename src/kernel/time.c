@@ -87,6 +87,15 @@ static spinlock_t hb_rt_base_lock = {0};
  * and realtime collapses to uptime (matches sysinfo command 6's no-RTC
  * fallback).  SMP-safe: the one-time capture is under a spinlock, and
  * further reads are plain (only the first lock holder stores the base). */
+uint64_t hb_clock_realtime_ms(void);
+/* C1-k6: the same clock in microseconds (the base, plus timer_get_us), for
+   CLOCK_REALTIME / gettimeofday at the resolution Wine's NtQuerySystemTime
+   reads, and for absolute realtime deadlines. */
+uint64_t hb_clock_realtime_us(void) {
+  (void)hb_clock_realtime_ms(); /* captures the base on first use */
+  return hb_rt_base_ms * 1000ULL + timer_get_us();
+}
+
 uint64_t hb_clock_realtime_ms(void) {
   if (!hb_rt_base_lock.locked && !hb_rt_base_ready) {
     uint64_t flags = spinlock_acquire_irqsave(&hb_rt_base_lock);

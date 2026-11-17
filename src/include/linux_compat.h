@@ -107,6 +107,8 @@ int l_copy_cstr(struct process *p, char *kdst, uint64_t usrc, uint64_t cap);
 /* struct timespec (16 B: tv_sec, tv_nsec) -> milliseconds, rounded up.
    Returns -EINVAL for a negative or absurd timespec. */
 int l_timespec_to_ms(struct process *p, uint64_t uts, int64_t *out_ms);
+/* C1-k6: the same in microseconds, rounded up; never clamps a relative wait. */
+int l_timespec_to_us(struct process *p, uint64_t uts, int64_t *out_us);
 
 /* --- M6/L33: pending-signal query for a blocking compat syscall ---------
  * Returns the first signal this thread would take right now: pending on the

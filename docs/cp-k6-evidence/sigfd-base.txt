@@ -1,0 +1,16 @@
+== strix guest (KVM -cpu host, 8 vCPU, 12 GiB), tools/gate/t3_linux_probe.sh sigfd, tree base (cyberpunk 058fd3d5 + the probe source), 2026-11-17T10:20:53-06:00
+qemu-slot: slot 3 of 4 held by pid 1707169 16:20:45
+t3_linux_probe: building /home/sarah/cp/lanes/k6-base/obj/intel/probe_sigfd.elf
+make: Entering directory '/home/sarah/cp/lanes/k6-base'
+musl-gcc -static-pie -fPIE -O1 -g -Wall -Wextra -o obj/intel/probe_sigfd.elf src/user/linux_probe_sigfd.c
+make: Leaving directory '/home/sarah/cp/lanes/k6-base'
+=== t3_linux_probe: sigfd (deadline 300s, log /home/sarah/cp/lanes/k6-base/obj/linux_probe_sigfd.log) ===
+--- probe rows ---
+[LP] S1 signalfd4(-1, mask, 8, NONBLOCK|CLOEXEC)     fd=-38 -> FAIL
+[LP] done rc=11
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+[LCOMPAT] ENOSYS nr=289 name=PROBE.ELF pid=2 rip=0x10000027E1 rdi=0xFFFFFFFF
+--- faults / exits ---
+[EXITPC] pid=2 last_user_pc=0x1000004C0E code=0x1
+t3_linux_probe: FAIL — sigfd never printed '[LP] done rc=0' (tier rc=1)

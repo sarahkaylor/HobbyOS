@@ -1075,6 +1075,11 @@ static void sys_gettime(struct trap_frame *tf) {
     tf->regs[0] = -EFAULT;
     return;
   }
+  /* C1-k6: the alarm clocks and TAI read as their base clocks (no suspend,
+     TAI offset 0 -- Linux's default until adjtimex sets one); they are the
+     clocks clock_nanosleep now sleeps on. */
+  if (clk == 8 || clk == 11) clk = 0;      /* REALTIME_ALARM, TAI */
+  else if (clk == 9) clk = 7;              /* BOOTTIME_ALARM */
   if (clk == 0) {               /* CLOCK_REALTIME */
     ms = hb_clock_realtime_ms();
   } else if (clk == 1) {        /* CLOCK_MONOTONIC */
@@ -1095,6 +1100,16 @@ static void sys_gettime(struct trap_frame *tf) {
     /* 2/3 are PROCESS/THREAD_CPUTIME: answering them with wall time would be
        a lie, and nothing in the target set uses them. */
     tf->regs[0] = -EINVAL;
+    return;
+  }
+  if (clk == 0 || clk == 5) {
+    /* C1-k6: CLOCK_REALTIME at microsecond resolution too (Wine's
+       NtQuerySystemTime, which paces NtDelayExecution's select loop). */
+    extern uint64_t hb_clock_realtime_us(void);
+    uint64_t us = hb_clock_realtime_us();
+    *sec = (int64_t)(us / 1000000);
+    *nsec = (int64_t)((us % 1000000) * 1000);
+    tf->regs[0] = 0;
     return;
   }
   if (clk == 1 || clk == 4 || clk == 6 || clk == 7) {
@@ -4780,6 +4795,13 @@ void enter_user_space_note(uint64_t src, uint64_t dst) {
 }
 
 void general_interrupt_handler(struct trap_frame *tf) {
+  /* C1-k6 (docs/cp-k6.md §5): a trap from user mode starts a stretch of
+     system time; returning to the same user frame ends it.  A switch away
+     in between is charged by schedule() (ru_charge_locked). */
+  extern void ru_trap_enter(void);
+  extern void ru_trap_exit(void);
+  int from_user = (tf->cs & 3) == 3;
+  if (from_user) ru_trap_enter();
   /* Always-on lock audit: an IRQ handler must never try to park on a ylock_t,
    * and rank rules do not govern acquisitions from exception context (see
    * lock.h).  Both instruments are told, in every build. */
@@ -4792,6 +4814,7 @@ void general_interrupt_handler(struct trap_frame *tf) {
   lockdbg_irq_exit();
 #endif
   lock_audit_irq_exit();
+  if (from_user) ru_trap_exit();
 }
 
 /* GB-101/GB-243: the user-mode classifier decision, isolated so the kernel
@@ -5148,6 +5171,37 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       return;
     }
     schedule(tf, 1);
+  } else if (tf->vector == 0x84) {
+    /* C1-k6 (docs/cp-k6.md §1): this CPU's high-resolution one-shot.
+       LAPIC-delivered: EOI first.  Expire the due sleepers, then get them a
+       CPU: this one if it is idle, otherwise idle CPUs by IPI, otherwise
+       preempt this CPU's user-mode thread (never a kernel-mode window: the
+       0x81 rule above).  The woken slot is this CPU's next pick. */
+    lapic_send_eoi();
+    extern int sched_hrt_fire(void);
+    extern int sched_kick_idle_cpus(int n);
+    int woke = sched_hrt_fire();
+    {
+      /* A Linux timer due now raises its signal / counts its expiry here,
+         not at the next 10 ms tick (re-checked under lt_lock). */
+      extern void linux_compat_timer_tick(uint64_t now);
+      linux_compat_timer_tick(timer_get_us());
+    }
+    if (woke > 0) {
+      struct process *hcur = current_process();
+      if (!hcur) {
+        if (woke > 1) (void)sched_kick_idle_cpus(woke - 1);
+        schedule(tf, 1);
+        return;
+      }
+      int kicked = sched_kick_idle_cpus(woke);
+      if (kicked < woke && !hcur->is_kernel_process && (tf->cs & 3) == 3 &&
+          kernel_preempt_count() == 0) {
+        schedule(tf, 0);
+        process_signal_trap_exit(tf);
+        return;
+      }
+    }
   } else if (tf->vector == 0x82) {
     // P2.2 (S2/OQ5) TLB shootdown IPI: LAPIC-delivered, so EOI first.
     // The handler never schedules and never preempts anything: it may
@@ -5182,10 +5236,21 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       if (kg && kg->as && vm_va_is_user(kg->as, kcr2)) {
         static uint64_t kdf_last[MAX_CPUS];
         static uint32_t kdf_rep[MAX_CPUS];
+        static uint64_t kdf_t[MAX_CPUS];
         uint32_t kc = get_cpuid();
         if (kc >= MAX_CPUS) kc = 0;
-        if (kdf_last[kc] == (kcr2 & ~0xFFFULL)) kdf_rep[kc]++;
+        /* C1-k6: a REPEAT is the same page faulting again at once (a
+           resolution that does not stick: microseconds apart).  The same page
+           faulting again after a peer thread re-mapped it is a new fault: a
+           pread into a window another thread keeps MAP_FIXED-replacing every
+           few hundred microseconds (linux_probe_e2fault, now that usleep(200)
+           sleeps 200 us instead of a 10 ms tick) counted every one of them as
+           a repeat and was killed with SIGSEGV after the 4th
+           (docs/cp-k6.md §9). */
+        uint64_t kdf_now = timer_get_us();
+        if (kdf_last[kc] == (kcr2 & ~0xFFFULL) && kdf_now - kdf_t[kc] < 100) kdf_rep[kc]++;
         else { kdf_last[kc] = kcr2 & ~0xFFFULL; kdf_rep[kc] = 0; }
+        kdf_t[kc] = kdf_now;
         if (kdf_rep[kc] < 4) {
           const char *why = "PROT";
           int pf_w = (int)((tf->error_code >> 1) & 1);
@@ -6438,6 +6503,11 @@ void trap_init_core_with_id(uint32_t cpu) {
   uint32_t high = (uint32_t)(gs_base >> 32);
   __asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(0xC0000101));
   __asm__ volatile("wrmsr" : : "a"(0u), "d"(0u), "c"(0xC0000102));
+  {
+    /* C1-k6: this CPU's GS is live (get_cpuid's fast path waits for all). */
+    extern volatile uint32_t x64_gs_ready_mask;
+    if (cpu < 32) __atomic_fetch_or(&x64_gs_ready_mask, 1u << cpu, __ATOMIC_SEQ_CST);
+  }
 
   // Load IDT for this CPU
   struct idt_ptr ptr;
@@ -6594,6 +6664,8 @@ EXCEPTION_NO_ERR(47);
 EXCEPTION_NO_ERR(129); // 0x81
 // P2.2 (S2/OQ5): TLB shootdown IPI
 EXCEPTION_NO_ERR(130); // 0x82
+// C1-k6: high-resolution one-shot (LAPIC timer)
+EXCEPTION_NO_ERR(132); // 0x84
 #ifdef PANIC_IPI_TEST
 EXCEPTION_NO_ERR(131); // 0x83 (GB-207 two-CPU panic-injection vehicle)
 #endif
@@ -7100,6 +7172,8 @@ void trap_init(void) {
   idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);
   // P2.2 (S2): TLB shootdown IPI on vector 0x82 (kernel-only gate, 0x8E).
   idt_set_gate(130, (uint64_t)exception_130, 0x08, 0x8E);
+  // C1-k6: the one-shot timer on vector 0x84 (kernel-only gate).
+  idt_set_gate(132, (uint64_t)exception_132, 0x08, 0x8E);
 #ifdef PANIC_IPI_TEST
   // GB-207: test vehicle vector 0x83 (kernel-only gate, 0x8E).
   idt_set_gate(131, (uint64_t)exception_131, 0x08, 0x8E);
