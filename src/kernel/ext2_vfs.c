@@ -575,7 +575,8 @@ static void kb_put(struct kbounce *kb) {
   kb->phys = 0;
 }
 
-int ext2v_read(struct file *f, void *buf, int size) {
+/* `pos` NULL: the description's cursor (read under the lock per chunk). */
+static int ext2v_read_at(struct file *f, void *buf, int size, int64_t *pos) {
   if ((f->open_flags & O_ACCMODE_) == O_WRONLY_) return -EBADF;
   if (f->type == FILE_TYPE_EXT2DIR) return -EISDIR;
   if (size <= 0) return 0;
@@ -588,8 +589,12 @@ int ext2v_read(struct file *f, void *buf, int size) {
     lock();
     /* cp/ext2b: read() sees stores made through a MAP_SHARED mapping. */
     int wb = ext2_obj_writeback_locked(f->ext2.ino);
-    r = ext2_read(&g_fs, f->ext2.ino, f->ext2.cursor, kb.p, (uint64_t)n);
-    if (r > 0) f->ext2.cursor += (uint64_t)r;
+    uint64_t at = pos ? (uint64_t)*pos : f->ext2.cursor;
+    r = ext2_read(&g_fs, f->ext2.ino, at, kb.p, (uint64_t)n);
+    if (r > 0) {
+      if (pos) *pos += r;
+      else f->ext2.cursor += (uint64_t)r;
+    }
     unlock_flush(wb > 0);
     if (r <= 0) break;
     memcpy(dst + done, kb.p, (size_t)r); /* no lock held: a fault is fine */
@@ -601,7 +606,16 @@ int ext2v_read(struct file *f, void *buf, int size) {
   return io_ret(r);
 }
 
-int ext2v_write(struct file *f, const void *buf, int size) {
+int ext2v_read(struct file *f, void *buf, int size) {
+  return ext2v_read_at(f, buf, size, 0);
+}
+
+int ext2v_pread(struct file *f, void *buf, int size, int64_t off) {
+  if (off < 0) return -EINVAL;
+  return ext2v_read_at(f, buf, size, &off);
+}
+
+static int ext2v_write_at(struct file *f, const void *buf, int size, int64_t *pos) {
   int acc = f->open_flags & O_ACCMODE_;
   if (acc != O_WRONLY_ && acc != O_RDWR_) return -EBADF;
   if (f->type == FILE_TYPE_EXT2DIR) return -EISDIR;
@@ -617,14 +631,15 @@ int ext2v_write(struct file *f, const void *buf, int size) {
     uint64_t t1 = e2w_tsc();
     lock();
     uint64_t t2 = e2w_tsc();
-    uint64_t off = f->ext2.cursor;
+    uint64_t off = pos ? (uint64_t)*pos : f->ext2.cursor;
     uint64_t sz = 0;
     (void)ext2_file_size(&g_fs, f->ext2.ino, &sz);
-    if (f->open_flags & O_APPEND_) off = sz;
+    if (f->open_flags & O_APPEND_) off = sz; /* Linux: pwrite appends too */
     w = ext2_write(&g_fs, f->ext2.ino, off, kb.p, (uint64_t)n);
     uint64_t t3 = e2w_tsc();
     if (w > 0) {
-      f->ext2.cursor = off + (uint64_t)w;
+      if (pos) *pos = (int64_t)(off + (uint64_t)w);
+      else f->ext2.cursor = off + (uint64_t)w;
       ext2_obj_note_write_locked(f->ext2.ino, off, (uint64_t)w, sz); /* cp/ext2b */
     }
     uint64_t t4 = e2w_tsc();
@@ -643,6 +658,15 @@ int ext2v_write(struct file *f, const void *buf, int size) {
   kb_put(&kb);
   if (done > 0) return io_ret(done);
   return io_ret(w);
+}
+
+int ext2v_write(struct file *f, const void *buf, int size) {
+  return ext2v_write_at(f, buf, size, 0);
+}
+
+int ext2v_pwrite(struct file *f, const void *buf, int size, int64_t off) {
+  if (off < 0) return -EINVAL;
+  return ext2v_write_at(f, buf, size, &off);
 }
 
 int64_t ext2v_size(struct file *f) {

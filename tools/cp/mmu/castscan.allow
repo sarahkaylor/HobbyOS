@@ -208,7 +208,6 @@ src/kernel/arch/x64/trap.c	P2I	uint64_t tss_addr = (uint64_t)&tss_entries[cpu];
 src/kernel/arch/x64/trap.c	P2I	wd_last_tfp[cpu] = (uint64_t)tf;
 src/kernel/arch/x64/trap.c	P2I	} else if (buf && sys_user_range((uint64_t)buf, (uint64_t)size, 1)) {
 src/kernel/arch/x64/uart.c	P2I	uint64_t v = (uint64_t)&uart_lock;
-src/kernel/ext2_vfs.c	P2I	uint64_t a = (uint64_t)(uintptr_t)buf;
 src/kernel/fb_mmap.c	P2I	return hb_fb_blank_ioctl((unsigned long)arg);
 src/kernel/fb_mmap_test.c	I2P	EXPECT_EQ(hb_fb_ioctl_route(HB_FBIOBLANK, (void *)HB_VESA_NO_BLANK, 0), 0);
 src/kernel/fpu_user.c	I2P	const volatile uint8_t *s = (const volatile uint8_t *)(uintptr_t)src;
@@ -340,8 +339,6 @@ src/kernel/unix_test.c	P2I	#define RT_ADDR(p) ((uint64_t)(uintptr_t)(p) ^ test_a
 src/kernel/unix_test.c	P2I	struct k_iovec io = {(uint64_t)buf, 8};
 src/kernel/unix_test.c	P2I	struct k_iovec io = {(uint64_t)data, 3};
 src/kernel/unix_test.c	P2I	struct k_iovec rio = {(uint64_t)out, 16};
-src/kernel/virtio_blk.c	I2P	return ns2_rw(sector, (uint8_t *)(uintptr_t)buf, count, 1);
-src/kernel/virtio_blk.c	P2I	return ns2_rw(sector, (uint8_t *)(uintptr_t)buf, count, 1);
 src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)(uintptr_t)nvme_regs);
 src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)__builtin_return_address(0));
 src/kernel/virtio_blk.c	P2I	uart_print_hex((uint64_t)io_cq_db);
@@ -367,3 +364,6 @@ src/kernel/arch/x64/trap.c	P2I	badvec_should_arm((uint64_t)tf, tf->cs, tf->vecto
 src/kernel/arch/x64/trap.c	P2I	int ret = file_read_user(caller, fd, (uint64_t)buf, size, tf);
 src/kernel/fs.c	I2P	int r = file_read(cur, fd, (void *)(uintptr_t)(ubuf + (uint64_t)done), chunk, tf);
 src/kernel/fs.c	I2P	r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);
+# cp/ext2w: positioned ext2 I/O hands the caller's USER VA straight to ext2v_pread/pwrite (no pos_lock, no seeks; the copy runs with no lock held, docs/cp-ext2w.md section 7.3).
+src/kernel/fs.c	I2P	return ext2v_pread(gfile(li), (void *)(uintptr_t)ubuf, (int)n, off);
+src/kernel/fs.c	I2P	return ext2v_pwrite(gfile(li), (const void *)(uintptr_t)ubuf, (int)n, off);
