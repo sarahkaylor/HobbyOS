@@ -69,6 +69,8 @@ void virtio_blk_diag_row(void);
  * holder (pid, CPU, held_ms, state, whether it is on a CPU).  Printed by a
  * token waiter past 2 s and by the ylock wedge report. */
 void blk_token_diag_row(const char *why);
+/* cp-fat: [BLKTOKW] token wait-time distribution (printed when it changed). */
+void blk_token_wait_row(void);
 
 /**
  * L75: log every observable controller state change.
