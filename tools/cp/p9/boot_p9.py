@@ -33,6 +33,7 @@ What it adds to boot_p8.py (whose helpers it imports unchanged):
                                   screen row), at most MAX taps -> FAIL
         listseek TAG DIR MAX Y    save list: tap until the focused entry's cyan
                                   frame is centred at screen row Y (+-15)
+        unwind TAG MAX REGEX      Esc while the screen matches REGEX (map/hub -> world)
         phase NAME                label the fps/mem rows from here on
         mark TEXT                 a timeline row
         repeat N / end            loop
@@ -70,6 +71,10 @@ FPS_RX = re.compile(r"trace:fps:\S+ \S+ @ approx ([0-9.]+)fps, total ([0-9.]+)fp
 MEM_RX = re.compile(r"\[P8MEM\] frames_free=(\d+) free_mib=(\d+)")
 THRS_RX = re.compile(r"\[THRS\] pid=(\d+) live=(\d+) .*?anon_mib=(\d+) .*?res_mib=(\d+) .*?(Cyberpunk2077\.e|REDEngineErr\w*|wineserver)")
 FRAME_RX = re.compile(r"\[FRAME\] frames=(\d+) total_mib=(\d+)")
+# C6-p7's present-cost row (tools/mesa/venus/hb_present_stats.h), one per process per 2 s
+HBP_RX = re.compile(r"\[HBP\] pid=(\d+) n=(\d+) fps=([0-9.]+) path=(\w+).*?sub=(\d+)/\d+ wait=(\d+)/\d+"
+                    r" flip=(\d+)/\d+.*?scanout=(\d+) putimage=(\d+) refused=(\d+)")
+P7_RX = re.compile(r"\[P7\] scanout (taken|back|refused)[^\n]{0,120}")
 
 
 def log(msg):
@@ -124,6 +129,7 @@ def main():
     ap.add_argument("--gpu", choices=["lavapipe", "venus"], default="venus")
     ap.add_argument("--script", required=True)
     ap.add_argument("--menu-hits", type=int, default=2)
+    ap.add_argument("--xscreen", default="1920x1080", help="XHOBBY's screen size (run-p8.sh P8_XSCREEN)")
     args = ap.parse_args()
     # SIGTERM -> SystemExit so `finally` stops QEMU and drops the locks (gateA2:
     # a plain SIGTERM left its 32 GiB guest running without a slot).
@@ -165,6 +171,8 @@ def main():
     mem_f.write("host_s,game_s,phase,free_mib\n")
     thr_f = open(os.path.join(args.out, "thrs.csv"), "w")
     thr_f.write("host_s,game_s,phase,pid,threads,anon_mib,res_mib,name\n")
+    hbp_f = open(os.path.join(args.out, "hbp.csv"), "w")
+    hbp_f.write("host_s,game_s,phase,pid,n,fps,path,sub_us,wait_us,flip_us,scanout,putimage,refused\n")
     ph_f = open(os.path.join(args.out, "phases.txt"), "w")
     t0 = None
     st = {"phase": "boot", "game_t": None}
@@ -222,7 +230,26 @@ def main():
                 os.remove(keep)
             text = ""
             if do_ocr:
+                ocr_src = pngp
+                try:
+                    from PIL import Image
+                    im = Image.open(pngp)
+                    if im.size == (1280, 720):
+                        # a VNC shot of a 1280x720 scanout: also OCR it in the layout
+                        # the scripts' patterns were written on (the game window at
+                        # 320,180 of 1920x1080, black around)
+                        c = Image.new("RGB", (1920, 1080))
+                        c.paste(im.convert("RGB"), (320, 180))
+                        ocr_src = os.path.join(shots_dir, "ocr-canon.png")
+                        c.save(ocr_src)
+                except Exception as e:  # noqa: BLE001
+                    log(f"canon OCR image: {e}")
                 text = P8.ocr(pngp) or ""
+                if ocr_src != pngp:
+                    # tesseract reads some 1280x720 screens only bare (scan2: the
+                    # menu) and others only in the old layout (the LOAD GAME
+                    # title): use both
+                    text += "\n" + (P8.ocr(ocr_src) or "")
                 with open(os.path.join(shots_dir, name + ".ocr.txt"), "w") as f:
                     f.write(text)
             flat = " ".join(text.split())
@@ -257,10 +284,23 @@ def main():
                     thr_f.write(f"{time.time() - t0:.1f},{gtime():.1f},{st['phase']},{m.group(1)},{m.group(2)},"
                                 f"{m.group(3)},{m.group(4)},{m.group(5)}\n")
                     continue
+                m = HBP_RX.search(ln)
+                if m:
+                    hbp_f.write(f"{time.time() - t0:.1f},{gtime():.1f},{st['phase']}," + ",".join(m.groups()) + "\n")
+                    hbp_f.flush()
+                    continue
+                m = P7_RX.search(ln)
+                if m:
+                    k = "p7:" + m.group(1)
+                    st[k] = st.get(k, 0) + 1
+                    if st[k] <= 8:
+                        mark(f"kernel: {m.group(0).strip()}")
                 m = FRAME_RX.search(ln)
                 if m and "frame" not in seen:
                     seen.add("frame")
                     mark(f"kernel frame pool: {ln.strip()[:200]}")
+                if ln.startswith("[X] ") or ln.startswith("[P8] "):
+                    st["prog_rows"] = st.get("prog_rows", 0) + 1
                 u = ln[4:] if ln.startswith("[X] ") else ln
                 for key, label in (("[P8] mount ", "NFS mount"), ("[P8] warm-up: ", "warm-up result"),
                                    ("[P8] begin game ", "game launched"), ("[P8] end game ", "game process ended"),
@@ -283,6 +323,91 @@ def main():
             fps_f.flush()
             thr_f.flush()
 
+        prof_rx = re.compile(r"CPU#(\d+).*?RSP=([0-9a-f]+).*?RIP=([0-9a-f]+).*?CPL=(\d).*?HLT=(\d)", re.S)
+        word_rx = re.compile(r"0x([0-9a-f]{16})")
+
+        def sample_regs(tag, secs, hz, stack, sleeper):
+            """QMP 'info registers -a' (+ kernel stack words) -> OUT/prof-TAG.txt"""
+            n = 0
+            with open(os.path.join(args.out, f"prof-{tag}.txt"), "a") as f:
+                end = time.time() + secs
+                while time.time() < end:
+                    r = qmp.cmd("human-monitor-command", {"command-line": "info registers -a"})
+                    for blk in r.get("return", "").split("CPU#")[1:]:
+                        m = prof_rx.search("CPU#" + blk)
+                        if not m:
+                            continue
+                        cpu, rsp, rip, cpl, hlt = m.groups()
+                        extra = ""
+                        if stack and cpl == "0" and hlt == "0":
+                            x = qmp.cmd("human-monitor-command",
+                                        {"command-line": f"x /48gx 0x{rsp}", "cpu-index": int(cpu)})
+                            ws = [int(w, 16) for w in word_rx.findall(x.get("return", ""))]
+                            ks = [w for w in ws if 0x70000000 <= w < 0x80000000]
+                            extra = " k=" + ",".join(f"{w:x}" for w in ks[:16])
+                        f.write(f"{time.time() - t0:.2f} {cpu} {rip} {cpl} {hlt}{extra}\n")
+                    n += 1
+                    sleeper(1.0 / hz)
+            return n
+
+        def prompt_ocr(name):
+            """the title prompt "PRESS [SPACE] TO CONTINUE" read from its own band
+            (game y 540..660, x 300..980, red text kept, 3x up-scaled): on the
+            1280x720 scanout glass the full-screen OCR missed it over the busy
+            title art (r2-fps-scan1; docs/cp-p7.md's OCR/Space trap)"""
+            try:
+                from PIL import Image
+                im = Image.open(os.path.join(shots_dir, name + ".png")).convert("RGB")
+                ox, oy = (0, 0) if im.size == (1280, 720) or args.xscreen != "1920x1080" else (320, 180)
+                c = im.crop((ox + 300, oy + 540, ox + 980, oy + 660))
+                # the prompt is red text (~239,79,73): keep red pixels as black ink
+                g = Image.new("L", c.size, 255)
+                cpx, gpx = c.load(), g.load()
+                for y in range(c.size[1]):
+                    for x in range(c.size[0]):
+                        r, gg, b = cpx[x, y]
+                        if r > 170 and gg < 140 and b < 140:
+                            gpx[x, y] = 0
+                g = g.resize((g.size[0] * 3, g.size[1] * 3))
+                cp = os.path.join(shots_dir, name + "-prompt.png")
+                g.save(cp)
+                r = subprocess.run(["tesseract", cp, "-", "--psm", "6"], capture_output=True, text=True, timeout=30)
+                t = " ".join(r.stdout.split())
+            except Exception as e:  # noqa: BLE001
+                log(f"prompt OCR failed: {e}")
+                return False
+            hit = bool(P8.PRESS_CONTINUE.search(t))
+            log(f"prompt band OCR {name}: {t[:80]!r} -> {hit}")
+            return hit
+
+        def menu_ocr(name):
+            """the main menu's item column read on its own (canonical layout x
+            420..760, y 440..720: red items, the focused one yellow, kept as black
+            ink, 2x): over the menu's animated background tesseract read none of
+            the items on whole 1280x720-screen shots in some boots (r2-fps-put1)"""
+            try:
+                from PIL import Image
+                im = Image.open(os.path.join(shots_dir, name + ".png")).convert("RGB")
+                ox, oy = (0, 0) if im.size == (1280, 720) or args.xscreen != "1920x1080" else (320, 180)
+                c = im.crop((ox + 100, oy + 260, ox + 440, oy + 540))
+                g = Image.new("L", c.size, 255)
+                cpx, gpx = c.load(), g.load()
+                for y in range(c.size[1]):
+                    for x in range(c.size[0]):
+                        r, gg, b = cpx[x, y]
+                        if (r > 160 and gg < 120 and b < 120) or (r > 190 and gg > 150 and b < 110):
+                            gpx[x, y] = 0
+                g = g.resize((g.size[0] * 2, g.size[1] * 2))
+                cp = os.path.join(shots_dir, name + "-menu.png")
+                g.save(cp)
+                r = subprocess.run(["tesseract", cp, "-", "--psm", "6"], capture_output=True, text=True, timeout=30)
+                t = " ".join(r.stdout.split())
+            except Exception as e:  # noqa: BLE001
+                log(f"menu OCR failed: {e}")
+                return ""
+            log(f"menu column OCR {name}: {t[:100]!r}")
+            return t
+
         def alive():
             return proc.poll() is None and "[P8] done" not in seen
 
@@ -294,8 +419,21 @@ def main():
         presses = 0
         last_press = 0
         last_change = time.time()
+        last_rows = [0, time.time()]
+        stall_sampled = False
         while time.time() - t0 < args.timeout and alive():
             pump()
+            # before the game starts the launcher/Wine rows are the progress; when
+            # only kernel rows trickle for 120 s, sample where the vCPUs are once
+            # (r2-fps-scan3: Wine froze 14 s in, one vCPU pinned at 100 % for 8 min)
+            if not st["game_t"] and not stall_sampled:
+                prog = st.get("prog_rows", 0)
+                if prog != last_rows[0]:
+                    last_rows[:] = [prog, time.time()]
+                elif time.time() - last_rows[1] > 120:
+                    stall_sampled = True
+                    mark("no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)")
+                    sample_regs("prestall", 20, 4, True, time.sleep)
             if "[P8] end game " in seen:
                 verdict = "game-exited-before-menu"
                 break
@@ -322,6 +460,8 @@ def main():
                             verdict = f"first-run:{e.what}"
                             break
                         words = [w for w in P8.MENU_WORDS if w in flat.upper()]
+                        if len(words) < 2 and name:
+                            words = [w for w in P8.MENU_WORDS if w in menu_ocr(name).upper()]
                         if len(words) >= 2:
                             menu_hits += 1
                             mark(f"main menu OCR at {name}: {words}")
@@ -329,8 +469,8 @@ def main():
                                 verdict = "main-menu"
                                 break
                             next_shot = time.time() + 4
-                        elif (args.press_continue and P8.PRESS_CONTINUE.search(flat) and presses < 6
-                              and time.time() - last_press > 15):
+                        elif (args.press_continue and presses < 6 and time.time() - last_press > 15
+                              and (P8.PRESS_CONTINUE.search(flat) or prompt_ocr(name))):
                             presses += 1
                             last_press = time.time()
                             qmp.cmd("send-key", {"keys": [{"type": "qcode", "data": "spc"}]})
@@ -377,6 +517,8 @@ def main():
                 while True:
                     name, flat = shoot(tag)
                     hit = bool(re.search(rx, flat, re.I))
+                    if not hit and not negate and "CONTINUE" in rx and name:
+                        hit = prompt_ocr(name)      # the red "PRESS ... TO CONTINUE" band
                     if hit != negate:
                         mark(f"expect {tag}: {'no longer ' if negate else ''}matched /{rx}/ at {name}")
                         return True
@@ -387,8 +529,6 @@ def main():
                     if not tick(4):
                         return False
 
-            prof_rx = re.compile(r"CPU#(\d+).*?RSP=([0-9a-f]+).*?RIP=([0-9a-f]+).*?CPL=(\d).*?HLT=(\d)", re.S)
-            word_rx = re.compile(r"0x([0-9a-f]{16})")
 
             def prof(secs, hz, tag, stack=False):
                 """guest PC sampler: QMP 'info registers -a' at hz for secs; one row
@@ -398,32 +538,11 @@ def main():
                 i.e. a rough call chain (tools/cp/p9/prof.py).  The samples stop
                 the vCPUs briefly, so the phase is 'prof-TAG' while it runs and its
                 fps rows do not count as play."""
-                path = os.path.join(args.out, f"prof-{tag}.txt")
                 prev_phase = st["phase"]
                 set_phase(f"prof-{tag}")
-                n = 0
-                with open(path, "a") as f:
-                    end = time.time() + secs
-                    while time.time() < end:
-                        r = qmp.cmd("human-monitor-command", {"command-line": "info registers -a"})
-                        text = r.get("return", "")
-                        for blk in text.split("CPU#")[1:]:
-                            m = prof_rx.search("CPU#" + blk)
-                            if not m:
-                                continue
-                            cpu, rsp, rip, cpl, hlt = m.groups()
-                            extra = ""
-                            if stack and cpl == "0" and hlt == "0":
-                                x = qmp.cmd("human-monitor-command",
-                                            {"command-line": f"x /48gx 0x{rsp}", "cpu-index": int(cpu)})
-                                ws = [int(w, 16) for w in word_rx.findall(x.get("return", ""))]
-                                ks = [w for w in ws if 0x70000000 <= w < 0x80000000]
-                                extra = " k=" + ",".join(f"{w:x}" for w in ks[:16])
-                            f.write(f"{time.time() - t0:.2f} {cpu} {rip} {cpl} {hlt}{extra}\n")
-                        n += 1
-                        tick(1.0 / hz)
+                n = sample_regs(tag, secs, hz, stack, tick)
                 set_phase(prev_phase)
-                mark(f"prof {tag}: {n} samples x vCPUs -> {os.path.basename(path)}")
+                mark(f"prof {tag}: {n} samples x vCPUs -> prof-{tag}.txt")
 
             # Row centres (screen y, 1920x1080 desktop, the game's 1280x720 window at
             # 320,180) of the main and pause menus, measured on ctl1's screendumps.
@@ -436,17 +555,36 @@ def main():
                           ("SETTINGS", 632), ("CREDITS", 672), ("EXIT TO MAIN MENU", 712), ("QUIT GAME", 752)],
             }
 
+            def canon(name):
+                """the shot in the 1920x1080 layout the row tables were measured
+                in (ctl1: the 1280x720 game window at 320,180 of a 1920x1080 X
+                screen).  With a 1280x720 X screen the game is the whole screen:
+                a VNC shot of a scanout blob is 1280x720, a shot of the desktop
+                path shows it top-left on the 1920x1080 glass."""
+                from PIL import Image
+                im = Image.open(os.path.join(shots_dir, name + ".png")).convert("RGB")
+                if im.size == (1920, 1080) and args.xscreen == "1920x1080":
+                    return im
+                g = im.crop((0, 0, 1280, 720)) if im.size != (1280, 720) else im
+                c = Image.new("RGB", (1920, 1080))
+                c.paste(g, (320, 180))
+                return c
+
             def focus_row(tag, menu):
                 """the highlighted row of a main/pause menu: (label, y) or (None, y)"""
                 name, _ = shoot(tag, do_ocr=False)
                 if not name:
                     return None, None
-                from PIL import Image
-                im = Image.open(os.path.join(shots_dir, name + ".png")).convert("RGB")
+                im = canon(name)
                 px = im.load()
-                ys = [y for y in range(420, 800)
+                # the highlight's yellow is ~(230,190,60) on pmemsave shots but as
+                # dim as ~(170,125,40) on VNC shots of the glass (r2-play-scan1);
+                # red rows have g ~70.  Main menu: stop above the orange Phantom
+                # Liberty banner (y 736..777).
+                ymax = 715 if menu == "main" else 790
+                ys = [y for y in range(420, ymax)
                       if sum(1 for x in range(400, 800, 2)
-                             if px[x, y][0] > 190 and px[x, y][1] > 150 and px[x, y][2] < 110) > 2]
+                             if px[x, y][0] > 140 and px[x, y][1] > 95 and px[x, y][2] < 90) > 2]
                 cl = []
                 for y in ys:                      # clusters: frame lines + text, gaps <= 12
                     if not cl or y - cl[-1][1] > 12:
@@ -491,8 +629,7 @@ def main():
                 name, _ = shoot(tag, do_ocr=False)
                 if not name:
                     return None
-                from PIL import Image
-                im = Image.open(os.path.join(shots_dir, name + ".png")).convert("RGB")
+                im = canon(name)
                 px = im.load()
                 ys = [y for y in range(250, 900)
                       if sum(1 for x in range(540, 1380, 2)
@@ -612,6 +749,21 @@ def main():
                         # listseek TAG DIR MAX Y: focus the save-list entry whose frame centre is Y
                         if not list_seek(a[0], a[1], int(a[2]), float(a[3])):
                             return f"listseek-failed:{a[0]}"
+                    elif op == "unwind":
+                        # unwind TAG MAX REGEX: while the screen's OCR matches REGEX (a
+                        # map/hub/menu), press Esc (Esc steps map -> hub -> world)
+                        rx = raw.split(None, 3)[3]
+                        for k in range(int(a[1]) + 1):
+                            name, flat = shoot(f"{a[0]}{k}")
+                            if not re.search(rx, flat, re.I):
+                                mark(f"unwind {a[0]}: clear after {k} x Esc")
+                                break
+                            if k == int(a[1]):
+                                return f"unwind-failed:{a[0]}"
+                            send([qcode_event("esc", True)])
+                            tick(0.2)
+                            send([qcode_event("esc", False)])
+                            tick(3)
                     elif op == "phase":
                         set_phase(a[0])
                     elif op == "mark":
@@ -698,7 +850,7 @@ def main():
             big.close()
         P8.release_slot(lockf)
         mark(f"verdict: {verdict}; QEMU stopped, slot released; guests on the host now: {P8.guests_running()}")
-        for f in (tl, fps_f, mem_f, thr_f, ph_f):
+        for f in (tl, fps_f, mem_f, thr_f, ph_f, hbp_f):
             f.close()
     open(os.path.join(args.out, "verdict.txt"), "w").write(verdict + "\n")
     return 0 if verdict in ("script-done", "script-stop", "launcher-done") else 1

@@ -53,3 +53,17 @@ if os.path.exists(ph):
     print("== phases (host s since boot, game s since launch, name)")
     for ln in open(ph):
         print("   " + ln.rstrip())
+hbp = os.path.join(out, "hbp.csv")
+if os.path.exists(hbp):
+    h = list(csv.DictReader(open(hbp)))
+    if h:
+        print("== present path ([HBP] rows, C6-p7's instrument; per phase: rows, frames by path, avg flip/sub/wait us)")
+        for ph in dict.fromkeys(r["phase"] for r in h):
+            rs = [r for r in h if r["phase"] == ph]
+            sc = sum(int(r["scanout"]) for r in rs)
+            pu = sum(int(r["putimage"]) for r in rs)
+            rf = sum(int(r["refused"]) for r in rs)
+            n = max(sum(int(r["n"]) for r in rs), 1)
+            avg = lambda k: sum(int(r[k]) * int(r["n"]) for r in rs) / n  # noqa: E731
+            print(f"   {ph:<18} rows {len(rs):4d}  scanout {sc:6d}  putimage {pu:6d}  refused {rf:4d}  "
+                  f"flip {avg('flip_us'):7.0f}  sub {avg('sub_us'):7.0f}  wait {avg('wait_us'):7.0f}")

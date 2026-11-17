@@ -1,0 +1,123 @@
+# r2-fps-put2: tools/cp/p9/fpsprobe.p9 on integ9 adb81ee4 + cp-play round 2 (strix, -smp 8 -m 32G, Venus RX 9070 XT, XHOBBY screen 1280x720 = the user's 1280x720 borderless window covers it)
+== run-p9 run=r2-fps-put2 script=tools/cp/p9/fpsprobe.p9 mem=32768M from=<fresh: pfx-saves.img> xscreen=1280x720 scanout=0 venus=/home/sarah/cp/lanes/play-venus vnc=1 2026-11-17T14:09:45-06:00
+# present path: put_image (P9_SCANOUT=0 -> HB_SCANOUT=0 in the game env)
+
+## harness rows
+== X screen: HB_SCREEN_SIZE=1280x720 (XSESSION.ENV)
+[P9W] +   403.9 s  14:16:41  verdict: script-stop; QEMU stopped, slot released; guests on the host now: 2
+== e2fsck -fn after the boot: rc=0 (cpdata: 1057/1048576 files (0.7% non-contiguous), 143572/4194304 blocks)
+== game copy unchanged (count, bytes, newest mtime)
+== verdict: script-stop
+   +   403.9 s  14:16:41  verdict: script-stop; QEMU stopped, slot released; guests on the host now: 2
+
+## timeline
++     0.0 s  14:09:57  slot 3 acquired + big-guest lock; boot -smp 8 -m 32768M -cpu host (KVM, venus); QEMU guests on the host before ours: 3
++    11.4 s  14:10:08  kernel frame pool: [FRAME] frames=8192000 total_mib=32000 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=26624 reserved=0
++    14.4 s  14:10:11  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-play-p9 -> /CP ok
++    29.9 s  14:10:27  warm-up result: [P8] warm-up: display driver loaded
++    32.9 s  14:10:30  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    32.9 s  14:10:30  phase launch
++    32.9 s  14:10:30  dri nodes at game launch: qemu-system-x86/3720472: /dev/dri/renderD129
++    32.9 s  14:10:30  dri nodes at game launch: virgl_render_se/3720525: -
++    32.9 s  14:10:30  dri nodes at game launch: virgl-2-gpu_ren/3722625: /dev/dri/renderD129
++    33.0 s  14:10:30  baseline screendump 1920x1080
++    36.1 s  14:10:33  serial row: [X]  35.533:0140:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 316"
++    48.2 s  14:10:45  first screen change after launch (44.4% differs from the baseline)
++   140.7 s  14:12:18  title prompt 'PRESS ... TO CONTINUE' at s008-t000107-pre: sent one Space (#1)
++   156.2 s  14:12:33  title prompt 'PRESS ... TO CONTINUE' at s009-t000122-pre: sent one Space (#2)
++   171.5 s  14:12:48  main menu OCR at s010-t000137-pre: ['NEW GAME', 'LOAD GAME', 'CONTINUE', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   178.6 s  14:12:55  main menu OCR at s011-t000144-pre: ['NEW GAME', 'LOAD GAME', 'CONTINUE', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   178.6 s  14:12:55  phase menu
++   178.6 s  14:12:55  main menu reached: running the play script fpsprobe.p9
++   178.6 s  14:12:55  phase menu
++   182.4 s  14:12:59  seek menu-load: main menu focus on LOAD GAME after 2 taps
++   183.9 s  14:13:01  expect loadlist: matched /LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression/ at s016-t000151-loadlist
++   187.5 s  14:13:04  expect loadlist-ripperdoc: matched /Ripperdoc/ at s017-t000154-loadlist-ripperdoc
++   194.5 s  14:13:11  listseek loadlist-focus: entry at y=509 focused after 5 taps
++   194.5 s  14:13:11  phase loading
++   266.0 s  14:14:23  expect loaded: matched /PRESS\b.{0,24}\bTO\s+CONTINUE/ at s041-t000233-loaded
++   273.0 s  14:14:30  phase world
++   292.5 s  14:14:49  expect inworld: matched /RIPPERDOC|Jackie/ at s047-t000259-inworld
++   381.9 s  14:16:19  phase prof-fp-world
++   402.0 s  14:16:39  phase world
++   402.0 s  14:16:39  prof fp-world: 190 samples x vCPUs -> prof-fp-world.txt
++   402.0 s  14:16:39  play script ended: script-stop
++   403.9 s  14:16:41  verdict: script-stop; QEMU stopped, slot released; guests on the host now: 2
+
+## summary
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/play/obj/cp-p9/r2-fps-put2
+phase           rows          game s   median     p10     min     max    mean
+launch            82          19-143     70.9    53.6     0.0   100.9    70.3
+menu              12         147-161     89.0    83.6    82.9    95.4    88.6
+loading           52         163-240     71.0    22.2     9.7   110.8    66.0
+world             70         242-347     18.9    12.7     7.0    25.6    18.4
+prof-fp-world     14         349-368     22.1    20.1    17.6    23.9    21.8
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             31652   31652   31652  (1 rows)
+   launch           30985   29296   29301  (5 rows)
+   menu             29309   29309   29309  (1 rows)
+   loading          28580   27956   27956  (2 rows)
+   world            27761   27561   27561  (4 rows)
+   prof-fp-world    27551   27551   27551  (1 rows)
+== game process ([THRS]): max threads 50, max anon 141078 MiB, max res 4499 MiB (74 rows)
+== phases (host s since boot, game s since launch, name)
+   32.9 0.0 launch
+   178.6 145.7 menu
+   178.6 145.7 menu
+   194.5 161.6 loading
+   273.0 240.1 world
+   381.9 349.0 prof-fp-world
+   402.0 369.1 world
+== present path ([HBP] rows, C6-p7's instrument; per phase: rows, frames by path, avg flip/sub/wait us)
+   launch             rows   60  scanout      0  putimage   8651  refused    0  flip    3871  sub    3443  wait       9
+   menu               rows    9  scanout      0  putimage   1603  refused    0  flip    3012  sub    2194  wait       7
+   loading            rows   39  scanout      0  putimage   5281  refused    0  flip    3856  sub    3167  wait      10
+   world              rows   54  scanout      0  putimage   2014  refused    0  flip    2214  sub    6572  wait       8
+   prof-fp-world      rows   10  scanout      0  putimage    439  refused    0  flip    1828  sub    6759  wait       7
+
+## guest PC profile in the world (20 s, 10 Hz)
+== obj/cp-p9/r2-fps-put2/prof-fp-world.txt: 1520 vCPU samples
+   idle (HLT)      778   51.2 %
+   kernel          488   32.1 %
+   user            254   16.7 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   86 /   14 /    0
+   cpu1:   47 /   36 /   17
+   cpu2:   44 /   36 /   20
+   cpu3:   45 /   32 /   23
+   cpu4:   44 /   36 /   20
+   cpu5:   44 /   35 /   21
+   cpu6:   48 /   34 /   18
+   cpu7:   50 /   34 /   16
+== kernel, top symbols (% of all samples)
+     9.5 %  spin_acquire_raw
+     2.7 %  linux_compat_dispatch
+     2.2 %  virtio_gpu_x64_kick
+     2.0 %  virtio_gpu_x64_transact_ex
+     1.7 %  sched_wake_idle_cpu
+     1.4 %  safe_wfi
+     1.0 %  gpu_m2_fence_wait2
+     0.9 %  general_interrupt_inner
+     0.8 %  schedule
+     0.7 %  virtio_gpu_x64_handle_irq
+     0.6 %  virtio_blk_watch_mmio
+     0.5 %  vmmouse_drain_nolock
+
+## sample [HBP] rows in the world
+[X] [HBP] pid=92 n=44 fps=21.9 path=putimage acq=1/1 sub=6479/14657 wait=7/24 flip=1954/5528 geom=1/1 set=0 flush=0 us scanout=0 putimage=44 refused=0 total=17898
+[X] [HBP] pid=92 n=44 fps=21.6 path=putimage acq=1/2 sub=6391/7774 wait=7/29 flip=1541/2550 geom=1/9 set=0 flush=0 us scanout=0 putimage=44 refused=0 total=17942
+[X] [HBP] pid=92 n=46 fps=22.7 path=putimage acq=1/1 sub=6553/8406 wait=6/18 flip=1776/4167 geom=1/1 set=0 flush=0 us scanout=0 putimage=46 refused=0 total=17988
+
+## the reporter CreateProcess (P9-1)
+[X]  35.537:0140:trace:process:NtCreateUserProcess L"\\??\\Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" image L"Z:\\GAME\\bin\\x64\\REDEn
+[X]  35.648:0140:trace:process:NtCreateUserProcess L"\\??\\Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" pid 0144 tid 0148 handles 0xbc/0x
+
+## Sleep timing (p8caps)
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 50.03 ms max 50.16 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 50.03 ms max 50.10 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 50.34 ms max 51.47 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.37 ms max 50.64 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 50.45 ms max 50.70 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 51.76 ms max 52.27 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 500.1 ms, tick 500 ms

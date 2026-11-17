@@ -8,7 +8,18 @@ renderD129), guest `-cpu host -smp 8`, tree `cyberpunk` @ 058fd3d5 plus this
 lane's harness commits (no kernel change).  Evidence: `docs/cp-play-evidence/*.txt`;
 screendumps (git-ignored) under `evidence/cp-play/`.
 
-**Result.**  **Gate P9's functional half passes on Venus; its frame-rate target
+**Round 2 (integ9: C1-k6, C6-p7, cp-fork; §10).**  The user's unchanged
+1280×720 window now covers a 1280×720 XHOBBY screen (`HB_SCREEN_SIZE`), and
+every frame goes through C6-p7's zero-copy scanout.  Load, 10.5 minutes of
+play, save, reboot and reload to the identical position pass again.  World
+fps is **19–26 median (p10 12–16)**, up from 12–15.  Menus run at 90–110 fps.
+The 30 fps target is **still not met** in the world.  The guest is no longer
+kernel-bound (44–55 % idle), and in the world scanout and put_image are level
+(19.0 vs 19.5).  P9-1 is gone: the reporter's CreateProcess takes 0.1 s, with
+0 early exits in 11 boots.  New: stop P9-8, an X session wedge on `fat_lock`
+before the game (2 of 13 boots).
+
+**Round 1 result.**  **Gate P9's functional half passes on Venus; its frame-rate target
 does not.**  Boot A (gateA5): main menu → LOAD GAME → the user's ManualSave-86
 (The Ripperdoc, Little China, Watson) → **11.1 minutes in the world** driven by
 scripted QMP keyboard and relative-mouse input (walk, sprint, strafe,
@@ -337,3 +348,159 @@ python3 tools/cp/p9/prof.py obj/cp-p9/<run>/prof-<tag>.txt hobbyos.elf
 - `gateB6/s021-…-loadlist-newsaves.png` — the save list on the reloaded disk (QuickSave-0, AutoSave-0, ManualSave-86).
 - `gateA5/s127-…-quit-confirm.png` — the quit dialog.
 - `ctl1/s031-…-walk1.png`, `s032-…-look1.png` — walking into Jackie's dialogue, then the relative-mouse turn; `s035-…-map1.png`, `s037-…-sprint1.png`, `s060-…-newsave2.png` ("GAME SAVED", ManualSave-87).
+
+## 10. Round 2 on `integ9` (C0-console + C6-p7 + C1-k6 + cp-fork): the game on the zero-copy scanout
+
+`cp-play` merged `integ9` @ adb81ee4.  It brings C1-k6 (`Sleep(1)` ≈ 1 ms,
+`proc_lock` off the hot paths), C6-p7 (`GPU_IOC_SCANOUT_BLOB` zero-copy
+fullscreen present, `VK_KHR_present_wait`, async present) and cp-fork (fork
+walks only what is mapped, private pages COW).  The guest Venus Mesa is this
+tree's `tools/mesa/venus/build.sh` (C6-p7's WSI), built into
+`VENUS_WORK=~/cp/lanes/play-venus`.
+
+### 10.1 The game covers the screen without touching the user's settings
+
+C6-p7's flip is granted only to the one X window that covers the whole
+screen.  The user's profile (unchanged, `~/cp/game-profile`) opens a
+1280×720 borderless window, which on the 1920×1080 XHOBBY screen stays on
+put_image.  So the X screen now starts at 1280×720:
+
+- **XHOBBY** (`third_party/x11/ddx/hobbyos/hbscreen.c`): `HB_SCREEN_SIZE=WxH`
+  in the environment sets screen 0's startup size: the env twin of the
+  existing `-screen WxH`, read from `/X11/XSESSION.ENV` like `HB_XDEPTH`.
+  Unset keeps the framebuffer's 1920×1080, so nothing else changes.  The
+  picture sits top-left on the glass like a RandR mode; RandR can still go to
+  1920×1080.
+- **`run-p8.sh`**: `P8_XSCREEN=WxH` appends it to the run's `XSESSION.ENV`.
+- **`run-p9.sh`**: `P9_XSCREEN` (default **1280x720**), `P9_SCANOUT=0` (puts
+  `HB_SCANOUT=0` into the game's environment through `P8_EXTRA_ENV`: the
+  put_image A/B on the same screen), `VENUS_BUILD`, and `VENUS_VNC=1`.  A
+  blob on the scanout is only visible over QEMU's VNC socket
+  (`docs/cp-p7.md` §4); `pmemsave` shows the X framebuffer.
+
+Result: `[P7] scanout taken` at the first window, and **every present of the
+game is a blob flip** (`[HBP] path=scanout`, 0 put_image, 0 refused) from the
+intro to the quit.
+
+### 10.2 Harness changes for the 1280×720 glass
+
+- VNC shots are 1280×720 while the game owns the scanout and 1920×1080 (X top-left) otherwise.
+  The menu and save-list row tables are kept in the old 1920×1080 layout, and
+  each shot is mapped into it (`canon()`).
+- OCR on the new shots was erratic (the menu items, the red "PRESS … TO
+  CONTINUE", the red LOAD GAME title).  `shoot()` now OCRs the shot both bare
+  and in the old layout.  Two red-ink-mask OCRs back it up: one on the title
+  prompt's band (`prompt_ocr`, also used by `expect … CONTINUE`) and one on
+  the main menu's item column (`menu_ocr`).  The save-list check also accepts
+  its footer ("Collapse/Expand groups", "Cross Progression").
+- The focused row's yellow is dimmer on the glass (~170,125,40 against
+  ~230,190,60 on pmemsave shots).  `seek` takes the dimmer yellow and stops the
+  main-menu scan above the orange Phantom Liberty banner.
+- `[HBP]` rows go to `hbp.csv` (per phase: frames by path, flip/sub/wait µs in
+  `summary.txt`), and `[P7]` transitions go to the timeline.
+- When no launcher/Wine row arrives for 120 s before the game starts,
+  `boot_p9.py` samples the vCPUs once with kernel stack words
+  (`prof-prestall.txt`), see §10.5.
+- `boot_p8.py` turns SIGTERM into a clean shutdown, as `boot_p9.py` does
+  (C6-p7 orphaned a QEMU for 44 min).
+
+### 10.3 Boots on integ9 (strix, `-smp 8 -m 32G`, Venus, X screen 1280×720)
+
+| run | script, path | result |
+|---|---|---|
+| r2-fps-scan1, -scan2, -scan4 | fpsprobe, scanout | harness bring-up: the title prompt, the LOAD GAME title and the menu items were not OCR'd on the new shots → §10.2 fixes; stopped by SIGTERM (clean) |
+| r2-fps-scan3, -scan5 | fpsprobe, scanout | **stop P9-8**: the X session wedges on `fat_lock` before the game (§10.5) |
+| **r2-fps-scan6** | fpsprobe, **scanout** | 3 min of walking; menu at launch + 144 s |
+| r2-fps-put1 | fpsprobe, put_image | menu-item OCR missed (→ `menu_ocr`) |
+| **r2-fps-put2** | fpsprobe, **put_image** (`HB_SCANOUT=0`) | the A/B of r2-fps-scan6 |
+| **r2-play-scan1** | play.p9 (Gate boot A), **scanout** | LOAD GAME → ManualSave-86, **10.5 min in the world**, map ×2, F5 → QuickSave-0; the pause-menu `seek` then missed the dim VNC yellow (fixed), so QEMU was stopped by the harness (e2fsck rc 0, the save on disk) |
+| **r2-reload-scan1** | reload.p9 (Gate boot B) on r2-play-scan1's disk, scanout | **PASS**: save list with the new saves, CONTINUE → QuickSave-0, **the same place** (screendumps 1.1 % apart; the F5 after the reload has the identical playerPosition (-1451.06, 1213.55, 23.06)); QUIT GAME, status 0, `[P7] scanout back (X revoked)` at the exit; e2fsck rc 0 |
+| r2-play-put1 | play.p9, put_image | `M` opened the hub instead of the map, and the strict map check stopped it after 2 min (→ `unwind`) |
+| r2-play-put2 | play.p9, put_image | `M` opened the hub and its OCR read no hub word (→ wider `unwind` pattern); stopped |
+| **r2-play-put3** | play.p9, **put_image** | 10 min in the world; the second `M` again landed in the hub unread, so the rows after it are hub frames: the A/B below uses the segment up to the second map (6.1 min); stopped by SIGTERM after |
+
+No early exit in any integ9 boot that started the game (11 of 11; P9-1): the
+reporter's `NtCreateUserProcess` takes **0.09–0.13 s** (was 16.5–17.6 s).
+`Sleep(1)` ×50 = 51.2–51.7 ms (was 380–1,210 ms).  Launch → first window
+15–31 s (was 45–61 s); launch → main menu 99–160 s, including the title
+Space timing; save loaded → in the world 72–95 s (was 118–132 s).
+
+### 10.4 Frame rate, present path, kernel split (median (p10) fps of winevulkan `trace:fps` rows; `prof-*` phases excluded)
+
+| | fpsprobe scanout (r2-fps-scan6) | fpsprobe put_image (r2-fps-put2) | play.p9 scanout (r2-play-scan1) | play.p9 put_image (r2-play-put3) | reload scanout (r2-reload-scan1) | wave 6 round 1 (gateA5, integ7 kernel, put_image at 1280×720 in 1920×1080) |
+|---|---|---|---|---|---|---|
+| **in the world** | **25.7 (13.8)**, 59 rows | **18.9 (12.7)**, 70 rows | **19.0 (11.7)**, 366 rows, 10.5 min | **19.5 (15.0)**, 201 rows (world segment to the 2nd map; scanout run's same segment: 19.0 (11.4), 206 rows) | 19.6 (15.8), 51 rows | 12.1 (7.0) |
+| standing in the world (prof phase) | 35.1 (31.7) | 22.1 (20.1) | 11.1–20.2 | 11.8–22.9 | 19.9–22.9 | — |
+| main menu | 108.8 (98.0) | 89.0 (83.6) | 95.9 (88.6) | 91.2 (82.5) | 89.9 (72.9) | 42.6 (37.2) |
+| loading screen | 165.3 (28.6) | 71.0 (22.2) | 107.9 (23.2) | 73.8 (24.5) | 152.3 (27.7) | 35.6 (13.0) |
+| map | — | — | 31.9 (21.4) | 38.0 (22.6) | — | 20.7 (8.0) |
+| `[HBP]` path | 100 % scanout (26,870 flips, 0 put_image, 0 refused) | 100 % put_image | 100 % scanout (33,563 flips) | 100 % put_image | 100 % scanout | put_image |
+| `[HBP]` flip / sub, world (µs avg) | 2,973 / 4,316 | 2,214 / 6,572 | 3,554 / 6,012 | 2,060 / 3,758 | — | — |
+| vCPU kernel / idle / user in the world | 30 / 55 / 15 % | 32 / 51 / 17 % | 35–42 / 44–49 / 14–16 % | 33–45 / 43–52 / 12–15 % | — | 53–65 / 27–37 / 8–11 % |
+| top kernel symbol | `spin_acquire_raw` 7.4 % | 9.5 % | 11.8 % (+ `sched_wake_idle_cpu` 4.3 %) | — | — | 28–32 % |
+| frame pool in use, world | ~4.1 GiB | ~4.1 GiB | ~4.1 GiB (27,563–27,702 MiB free of 31,652) | — | — | ~4.2 GiB |
+
+**Verdict against §6 P9's target (≥ 30 fps at 1280×720 Low): still not met
+in the world.**  With integ9 + the zero-copy scanout, the world median is
+19–26 fps (p10 12–16) depending on where V walks.  That is 1.6–2.1× round 1.
+Standing still, the scanout reaches 35 fps.  The menus are 90–110 fps.
+- **Scanout vs put_image:** about +36 % on the short probe (25.7 vs 18.9)
+  and +60 % standing (35.1 vs 22.1).  But over the same 6-minute world
+  segment of the long sessions the two paths are level (19.0 vs 19.5 fps median): **the world frame is not present-bound**, and the short-probe gap is within run-to-run and host-load variance (2–3 other guests on strix in every run).
+- **What's left:** the guest is no longer kernel-bound.  It is 44–55 % idle
+  with 15 % user and 30–40 % kernel.  `spin_acquire_raw` fell from 30 % to
+  7–12 %.  The frame now waits rather than spins: the present's `sub`
+  (Venus' present thread: blit + fence) is 4–10 ms, and the flip is 3–3.6 ms
+  (QEMU's egl-headless readback, `docs/cp-p7.md` §8).  The next lever is the
+  CPU→GPU submission and wait path per frame (C6), and the remaining
+  `proc_lock` share (C1-k6).
+
+### 10.5 Stop P9-8 — the X session wedges on `fat_lock` before the game (new; 2 of 13 integ9 boots)
+
+In r2-fps-scan3 and r2-fps-scan5 the Wine warm-up never finished.  Wine's own
+rows stop ~14 s after boot, right after `explorer.exe /desktop` loads
+`winex11.drv`/`uxtheme.dll`, and `winprobe01` times out after 300 s.  The X
+server keeps drawing (its clock ticks in a VNC shot).
+
+- **scan5 kernel rows:**
+  `[YLOCK-WEDGE] site=fat_lock … [YLOCK-OWNER] fat_lock pid=10 cpu=4 pcb_live=1 ost=3 osys=23`.
+  The owner is IceWM (pid 10), in `SYS_RENAME` (23), holding the FAT16
+  `fat_lock` while it is not running (state 3).
+- **The sampler** (`prof-prestall`, kernel stack words): vCPU 0 and vCPU 3
+  spin in `ylock_acquire`, one under `fat16_read_direct_locked`, the other
+  under `find_entry_in_root` ← `vfs_open_routed`.  The other six vCPUs are
+  idle.
+- **scan3** printed no YLOCK row, but one vCPU was at 100 % host CPU for
+  8 min with the rest idle: the same picture.
+
+Both boots ran with `HB_SCREEN_SIZE=1280x720`, as did the 11 that got past the warm-up.
+The rename is IceWM's own preferences/clock-state write on the FAT boot disk,
+which this lane does not touch.
+**Owner:** the kernel's FAT16/VFS locking (`fat16.c`, `vfs*.c`; not in any wave-6 row) — the integrator
+assigns.  Evidence: `docs/cp-play-evidence/p9r2-stop8-fat-lock-wedge-strix.txt`.
+
+### 10.6 Gates and commands (round 2)
+
+- Gate P4 (`tools/cp/p4/run-p4.sh`, lavapipe, the rebuilt XHOBBY with
+  `HB_SCREEN_SIZE` unset): **G1/G2/G3 PASS**, the same as integ7.  The DDX
+  change is inert unless the variable is set.
+- Every game boot: `e2fsck -fn` rc 0, game copy census unchanged, no
+  first-run screen, the game export through `run-p8.sh`'s refcount.
+
+```
+VENUS_WORK=$HOME/cp/lanes/play-venus bash tools/mesa/venus/build.sh all     # the guest Venus ICD with C6-p7's WSI
+P9_SCRIPT=tools/cp/p9/fpsprobe.p9 P9_RUN=r2-fps-scan6 PATH=$HOME/.local/bin:$PATH MAKEFLAGS=-j16 TOOLS_SKIP=1 bash tools/cp/p9/run-p9.sh
+P9_SCANOUT=0 P9_SCRIPT=tools/cp/p9/fpsprobe.p9 P9_RUN=r2-fps-put2 (same env) bash tools/cp/p9/run-p9.sh
+P9_SCRIPT=tools/cp/p9/play.p9 P9_RUN=r2-play-scan1 (same env) bash tools/cp/p9/run-p9.sh
+P9_SCRIPT=tools/cp/p9/reload.p9 P9_FROM=r2-play-scan1 P9_RUN=r2-reload-scan1 (same env) bash tools/cp/p9/run-p9.sh
+P9_SCANOUT=0 P9_SCRIPT=tools/cp/p9/play.p9 P9_RUN=r2-play-put3 (same env) bash tools/cp/p9/run-p9.sh
+# defaults: P9_XSCREEN=1280x720, VENUS_BUILD=~/cp/lanes/play-venus, VENUS_VNC=1
+```
+
+Screendumps (git-ignored `evidence/cp-play/r2/`): `r2-play-scan1/s103-…-saved-place.png`
+and `r2-reload-scan1/s045-…-reloaded-place.png` (the same place, the
+1280×720 glass); `r2-fps-scan6` world and menu shots.
+
+Open: the hub-instead-of-map OCR gap (`unwind` stops one Esc early when the
+hub's OCR reads no hub word; a pixel test for the hub would be firmer); the
+long put_image session needs a clean rerun past its second map.

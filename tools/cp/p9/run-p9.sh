@@ -22,6 +22,13 @@
 #   P9_SCRIPT   play script (default tools/cp/p9/play.p9)
 #   P9_FROM     run name under obj/cp-p9 whose cpdata.img this boot starts from
 #   P9_SAVES    saves to seed (default "ManualSave-86 AutoSave-16")
+#   P9_XSCREEN  XHOBBY's startup screen (default 1280x720: the user's 1280x720
+#               borderless window then covers the screen and C6-p7's zero-copy
+#               scanout presents it; "" = the 1920x1080 framebuffer size)
+#   P9_SCANOUT  1 (default) or 0: HB_SCANOUT=0 in the game's environment
+#               (put_image only, the A/B)
+#   VENUS_BUILD the guest Venus Mesa (default ~/cp/lanes/play-venus: this
+#               tree's tools/mesa/venus/build.sh with C6-p7's WSI)
 #   P9_MEM      guest MiB (default 32768, max 32768); P9_GAME_S (launcher's game
 #               deadline, default 3000); TIMEOUT_S (default 5400); P9_RUN.
 # First run once: P8_PHASE=pfx bash tools/cp/p8/run-p8.sh (the prefix image).
@@ -59,14 +66,21 @@ if [ -n "${P9_FROM:-}" ]; then
 fi
 if [ -n "${P9_RUN:-}" ]; then RUN="$P9_RUN"; else n=1; while [ -e "$B9/run$n" ]; do n=$((n+1)); done; RUN="run$n"; fi
 MEM="${P9_MEM:-32768}"
-BARGS="--script $ROOT/$SCRIPT --play-shot-every ${P9_SHOT_S:-30}"
+XSCREEN="${P9_XSCREEN-1280x720}"
+BARGS="--script $ROOT/$SCRIPT --play-shot-every ${P9_SHOT_S:-30} --xscreen ${XSCREEN:-1920x1080}"
+P8CF="${P8_CFLAGS:-}"
+if [ "${P9_SCANOUT:-1}" = 0 ]; then P8CF="$P8CF -DP8_EXTRA_ENV=\"HB_SCANOUT=0\""; fi
+export VENUS_BUILD="${VENUS_BUILD:-$HOME/cp/lanes/play-venus}"
+# the glass, not the X framebuffer: a scanout blob is only visible over VNC
+# (docs/cp-p7.md §4; tools/cp/venus/p5venus.py prefers it when the socket exists)
+export VENUS_VNC="${VENUS_VNC:-1}"
 [ "$MEM" -gt 12288 ] && BARGS="$BARGS --big-guest"
-echo "== run-p9 run=$RUN script=$SCRIPT mem=${MEM}M from=${P9_FROM:-<fresh: pfx-saves.img>} $(date -Is)"
+echo "== run-p9 run=$RUN script=$SCRIPT mem=${MEM}M from=${P9_FROM:-<fresh: pfx-saves.img>} xscreen=${XSCREEN:-fb} scanout=${P9_SCANOUT:-1} venus=$VENUS_BUILD vnc=$VENUS_VNC $(date -Is)"
 
 P8_GPU=venus P8_BASE="$B9" P8_SEEDED="$SAVES_IMG" P8_CPDATA_FROM="$FROM_IMG" \
 P8_BOOT=tools/cp/p9/boot_p9.py P8_BOOT_ARGS="$BARGS" P8_MEM="$MEM" P8_RUN="$RUN" \
 P8_GAME_S="${P9_GAME_S:-3000}" TIMEOUT_S="${TIMEOUT_S:-5400}" P8_STALL_S="${P8_STALL_S:-900}" \
-P8_EXPORT="${P8_EXPORT:-/srv/nfs/cp-play-p9}" P8_WINEDEBUG="${P8_WINEDEBUG:-+timestamp,+loaddll,fixme-all,+fps,+process}" \
+P8_XSCREEN="$XSCREEN" P8_CFLAGS="$P8CF" P8_EXPORT="${P8_EXPORT:-/srv/nfs/cp-play-p9}" P8_WINEDEBUG="${P8_WINEDEBUG:-+timestamp,+loaddll,fixme-all,+fps,+process}" \
   bash tools/cp/p8/run-p8.sh
 rc=$?
 OUT="$B9/$RUN"

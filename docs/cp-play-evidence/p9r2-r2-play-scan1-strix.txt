@@ -1,0 +1,195 @@
+# r2-play-scan1: tools/cp/p9/play.p9 (Gate P9 boot A script) on integ9 adb81ee4 + cp-play round 2, strix, -smp 8 -m 32G, Venus, XHOBBY 1280x720 -> zero-copy scanout
+== run-p9 run=r2-play-scan1 script=tools/cp/p9/play.p9 mem=32768M from=<fresh: pfx-saves.img> xscreen=1280x720 scanout=1 venus=/home/sarah/cp/lanes/play-venus vnc=1 2026-11-17T14:16:42-06:00
+# ended: the pause-menu seek did not see the focused row on the dim VNC colours (fixed after this run); F5 had already saved QuickSave-0; QEMU stopped by the harness, e2fsck rc 0
+
+## harness rows
+== X screen: HB_SCREEN_SIZE=1280x720 (XSESSION.ENV)
+[P9W] +   938.5 s  14:32:56  verdict: seek-failed:pause-quit; QEMU stopped, slot released; guests on the host now: 3
+== e2fsck -fn after the boot: rc=0 (cpdata: 1065/1048576 files (0.8% non-contiguous), 144665/4194304 blocks)
+== game copy unchanged (count, bytes, newest mtime)
+== verdict: seek-failed:pause-quit
+   +   938.5 s  14:32:56  verdict: seek-failed:pause-quit; QEMU stopped, slot released; guests on the host now: 3
+
+## timeline
++     0.0 s  14:17:18  slot 4 acquired + big-guest lock; boot -smp 8 -m 32768M -cpu host (KVM, venus); QEMU guests on the host before ours: 2
++    13.8 s  14:17:32  kernel frame pool: [FRAME] frames=8192000 total_mib=32000 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=26624 reserved=0
++    16.8 s  14:17:35  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-play-p9 -> /CP ok
++    32.0 s  14:17:50  warm-up result: [P8] warm-up: display driver loaded
++    35.1 s  14:17:53  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    35.1 s  14:17:53  phase launch
++    35.1 s  14:17:53  dri nodes at game launch: qemu-system-x86/3761989: /dev/dri/renderD129
++    35.1 s  14:17:53  dri nodes at game launch: virgl_render_se/3762040: -
++    35.1 s  14:17:53  dri nodes at game launch: virgl-2-gpu_ren/3763826: /dev/dri/renderD129
++    35.2 s  14:17:53  baseline screendump 1920x1080
++    38.3 s  14:17:56  serial row: [X]  38.144:0140:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 316"
++    56.6 s  14:18:15  kernel: [P7] scanout taken res/window 4159 20971570 seq=1
++    57.1 s  14:18:15  kernel: [P7] scanout back (blob freed) 4159 0 seq=1
++    57.1 s  14:18:15  kernel: [P7] scanout taken res/window 4162 20971570 seq=2
++    65.7 s  14:18:24  first screen change after launch (100.0% differs from the baseline)
++    97.9 s  14:18:56  title prompt 'PRESS ... TO CONTINUE' at s004-t000061-pre: sent one Space (#1)
++   113.2 s  14:19:11  title prompt 'PRESS ... TO CONTINUE' at s005-t000077-pre: sent one Space (#2)
++   128.7 s  14:19:27  main menu OCR at s006-t000093-pre: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'QUIT GAME']
++   134.1 s  14:19:32  main menu OCR at s007-t000098-pre: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'QUIT GAME']
++   134.1 s  14:19:32  phase menu
++   134.1 s  14:19:32  main menu reached: running the play script play.p9
++   134.1 s  14:19:32  phase menu
++   138.3 s  14:19:36  seek menu-load: main menu focus on LOAD GAME after 2 taps
++   141.2 s  14:19:39  expect loadlist: matched /LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression/ at s012-t000105-loadlist
++   145.4 s  14:19:43  expect loadlist-ripperdoc: matched /Ripperdoc/ at s013-t000109-loadlist-ripperdoc
++   152.5 s  14:19:50  listseek loadlist-focus: entry at y=509 focused after 5 taps
++   152.5 s  14:19:50  phase loading
++   240.0 s  14:21:18  expect loaded: matched /PRESS\b.{0,24}\bTO\s+CONTINUE/ at s039-t000204-loaded
++   247.0 s  14:21:25  phase world
++   247.9 s  14:21:26  expect inworld: matched /RIPPERDOC|Jackie/ at s040-t000212-inworld
++   248.8 s  14:21:27  phase prof-world-start
++   268.8 s  14:21:47  phase world
++   268.8 s  14:21:47  prof world-start: 178 samples x vCPUs -> prof-world-start.txt
++   288.4 s  14:22:06  phase map
++   295.4 s  14:22:13  expect map: matched /FILTER|Track\s*Waypoint|Zoom/ at s046-t000259-map
++   300.4 s  14:22:18  phase world
++   301.4 s  14:22:19  expect back-in-world: no longer matched /SKIP\s*TIME|DATABASE|FILTER/ at s047-t000265-back-in-world
++   586.9 s  14:27:05  phase prof-world-mid
++   606.9 s  14:27:25  phase world
++   606.9 s  14:27:25  prof world-mid: 188 samples x vCPUs -> prof-world-mid.txt
++   621.4 s  14:27:39  phase map
++   628.8 s  14:27:47  expect map2: matched /FILTER|Track\s*Waypoint|Zoom/ at s075-t000592-map2
++   633.8 s  14:27:52  phase world
++   635.0 s  14:27:53  expect back-in-world2: no longer matched /SKIP\s*TIME|DATABASE|FILTER/ at s076-t000599-back-in-world2
++   869.6 s  14:31:48  phase prof-world-end
++   889.8 s  14:32:08  phase world
++   889.8 s  14:32:08  prof world-end: 191 samples x vCPUs -> prof-world-end.txt
++   900.6 s  14:32:19  phase save
++   936.0 s  14:32:54  SEEK FAILED pause-quit: pause menu row 'QUIT GAME' not focused after 9 x down
++   936.0 s  14:32:54  play script ended: seek-failed:pause-quit
++   938.5 s  14:32:56  verdict: seek-failed:pause-quit; QEMU stopped, slot released; guests on the host now: 3
+
+## summary
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/play/obj/cp-p9/r2-play-scan1
+phase           rows          game s   median     p10     min     max    mean
+launch            50           22-97     86.5    58.0     0.0   132.7    85.5
+menu              13         101-116     95.9    88.6    84.2   102.4    94.7
+loading           63         118-212    107.9    23.2     9.6   213.7   111.4
+prof-world-start    14         214-234     15.3    10.2     7.8    19.6    15.0
+world            366         235-864     19.0    11.7     6.5    29.2    18.1
+map               18         253-599     31.9    21.4    18.5    53.4    34.0
+prof-world-mid    14         552-571     11.1     7.4     6.7    12.9    10.4
+prof-world-end    14         834-854     20.2    15.2     8.0    23.6    19.5
+save              23         866-899    110.4    19.7    19.4   136.4    82.1
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             31652   31652   31652  (1 rows)
+   launch           31002   29299   29299  (4 rows)
+   loading          29234   28033   28033  (3 rows)
+   prof-world-start   27767   27767   27767  (1 rows)
+   world            27702   27563   27582  (20 rows)
+   prof-world-end   27583   27583   27583  (1 rows)
+   save             27576   27576   27576  (1 rows)
+== game process ([THRS]): max threads 55, max anon 141110 MiB, max res 4503 MiB (180 rows)
+== phases (host s since boot, game s since launch, name)
+   35.1 0.0 launch
+   134.1 99.1 menu
+   134.1 99.1 menu
+   152.5 117.5 loading
+   247.0 211.9 world
+   248.8 213.7 prof-world-start
+   268.8 233.8 world
+   288.4 253.3 map
+   300.4 265.3 world
+   586.9 551.8 prof-world-mid
+   606.9 571.9 world
+   621.4 586.4 map
+   633.8 598.8 world
+   869.6 834.5 prof-world-end
+   889.8 854.7 world
+   900.6 865.6 save
+== present path ([HBP] rows, C6-p7's instrument; per phase: rows, frames by path, avg flip/sub/wait us)
+   launch             rows   36  scanout   6362  putimage      0  refused    0  flip    5026  sub    5194  wait       9
+   menu               rows    9  scanout   1711  putimage      0  refused    0  flip    5073  sub    4618  wait       7
+   loading            rows   47  scanout  10654  putimage      0  refused    0  flip    3679  sub    3592  wait       8
+   prof-world-start   rows   11  scanout    325  putimage      0  refused    0  flip    3016  sub    8864  wait       8
+   world              rows  277  scanout  10197  putimage      0  refused    0  flip    3554  sub    6012  wait       8
+   map                rows   13  scanout    908  putimage      0  refused    0  flip    3388  sub    3157  wait       7
+   prof-world-mid     rows   10  scanout    208  putimage      0  refused    0  flip    4295  sub   10157  wait      10
+   prof-world-end     rows   10  scanout    391  putimage      0  refused    0  flip    3044  sub    5414  wait       7
+   save               rows   17  scanout   2807  putimage      0  refused    0  flip    3337  sub    2941  wait       5
+
+## saves after
+AutoSave-0       name=AutoSave-0 time=20:26:49, 17.11.2026 playTime=4339.7 pos=(-1414.88, 1246.73, 23.07)
+                 sav.dat(1640250) metadata.9.json(2643) screenshot.png(167893) 
+AutoSave-16      name=AutoSave-16 time=21:52:29, 1.08.2025 playTime=97.8 pos=(-1262.37, -1001.16, 12.04)
+                 metadata.9.json(2642) sav.dat(1311119) screenshot.png(154637) 
+ManualSave-86    name=ManualSave-86 time=13:24:42, 8.08.2025 playTime=4031.0 pos=(-1429.96, 1255.29, 23.09)
+                 metadata.9.json(2611) sav.dat(1645305) screenshot.png(183177) 
+QuickSave-0      name=QuickSave-0 time=20:32:17, 17.11.2026 playTime=4633.9 pos=(-1451.06, 1213.55, 23.06)
+                 sav.dat(1653154) metadata.9.json(2651) screenshot.png(142992) 
+
+## guest PC profiles in the world
+== obj/cp-p9/r2-play-scan1/prof-world-start.txt: 1424 vCPU samples
+   idle (HLT)      626   44.0 %
+   kernel          596   41.9 %
+   user            202   14.2 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   88 /   12 /    0
+   cpu1:   29 /   58 /   13
+   cpu2:   35 /   49 /   15
+   cpu3:   38 /   46 /   16
+   cpu4:   39 /   45 /   16
+   cpu5:   42 /   42 /   17
+   cpu6:   40 /   42 /   18
+   cpu7:   40 /   41 /   19
+== kernel, top symbols (% of all samples)
+    12.6 %  spin_acquire_raw
+     2.9 %  sched_wake_idle_cpu
+     2.2 %  linux_compat_dispatch
+     2.0 %  general_interrupt_inner
+     2.0 %  virtio_gpu_x64_kick
+     1.7 %  safe_wfi
+     1.5 %  virtio_gpu_x64_transact_ex
+     1.5 %  schedule
+== obj/cp-p9/r2-play-scan1/prof-world-mid.txt: 1504 vCPU samples
+   idle (HLT)      678   45.1 %
+   kernel          611   40.6 %
+   user            215   14.3 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   90 /   10 /    0
+   cpu1:   29 /   53 /   18
+   cpu2:   36 /   48 /   16
+   cpu3:   33 /   49 /   18
+   cpu4:   38 /   46 /   16
+   cpu5:   45 /   41 /   13
+   cpu6:   47 /   36 /   18
+   cpu7:   43 /   42 /   15
+== kernel, top symbols (% of all samples)
+    11.8 %  spin_acquire_raw
+     4.3 %  sched_wake_idle_cpu
+     2.6 %  safe_wfi
+     2.2 %  linux_compat_dispatch
+     1.6 %  virtio_gpu_x64_kick
+     1.5 %  schedule
+     1.3 %  general_interrupt_inner
+     1.3 %  virtio_gpu_x64_transact_ex
+== obj/cp-p9/r2-play-scan1/prof-world-end.txt: 1528 vCPU samples
+   idle (HLT)      748   49.0 %
+   kernel          541   35.4 %
+   user            239   15.6 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   93 /    7 /    0
+   cpu1:   40 /   44 /   16
+   cpu2:   40 /   41 /   19
+   cpu3:   38 /   39 /   23
+   cpu4:   40 /   42 /   18
+   cpu5:   44 /   37 /   19
+   cpu6:   45 /   38 /   17
+   cpu7:   52 /   36 /   13
+== kernel, top symbols (% of all samples)
+     9.4 %  spin_acquire_raw
+     2.3 %  safe_wfi
+     2.2 %  sched_wake_idle_cpu
+     1.9 %  schedule
+     1.6 %  virtio_gpu_x64_transact_ex
+     1.6 %  linux_compat_dispatch
+     1.6 %  virtio_gpu_x64_kick
+     1.3 %  general_interrupt_inner
+
+## the reporter CreateProcess (P9-1)
+[X]  38.148:0140:trace:process:NtCreateUserProcess L"\\??\\Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" image L"Z:\\GAME\\bin\\x64\\REDEn
+[X]  38.260:0140:trace:process:NtCreateUserProcess L"\\??\\Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" pid 0144 tid 0148 handles 0xbc/0x
