@@ -628,7 +628,13 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
   return 0;
 }
 
-#define COMPAT_MAX_ARGV 16
+/* GB-308: was 16.  A Linux-ABI process silently lost argv[17] and beyond --
+ * measured 21 args in, argc=16 delivered, which truncated `keytool -genkeypair
+ * -storepass changeit ...` at its password flag and made every real JDK tool
+ * invocation subtly wrong with no diagnostic.  HO_EXEC_MAX_ARGS is 128 and the
+ * flat-string path already allows HO_EXEC_ARGV_LEN per element, so matching
+ * that ceiling is the honest limit rather than a silent 16. */
+#define COMPAT_MAX_ARGV 128
 #define COMPAT_MAX_ENV 24
 #define COMPAT_STR_MAX 512
 
@@ -1767,6 +1773,7 @@ void proc_split_argv(struct process *p, const char *args) {
   if (pos < HO_EXEC_ARGV_LEN)
     p->eargv[pos] = '\0';
   p->eargc = narg;
+
 }
 
 /* P2.5 (S5): is [addr, addr+len) readable (write=0) / writable (write=1)

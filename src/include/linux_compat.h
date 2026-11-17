@@ -117,3 +117,9 @@ int l_timespec_to_ms(struct process *p, uint64_t uts, int64_t *out_ms);
 int linux_compat_sig_deliverable(struct process *p);
 
 #endif /* LINUX_COMPAT_H */
+
+/* GB-308: flush the pages this process has mapped from one FAT16 file. */
+struct process;
+struct trap_frame;
+int l_mem_fsync_file(struct process *p, uint16_t cl, uint32_t sz,
+                     struct trap_frame *tf);

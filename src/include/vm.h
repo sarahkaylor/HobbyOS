@@ -195,7 +195,26 @@
  * fixed-size records, and data frames are allocated on first touch.  Measured
  * by test_vm_big_object_cost (vm_test.c) and linux_probe_bigobj (200 MiB
  * memfd, shared anon and ext2 file, shared and private). */
-#define VM_OBJ_MAX_BYTES 0x40000000ULL /* 1 GiB */
+/* The per-object ceiling is set by the largest single mapping a real Linux
+ * program asks for, not by the S4 acceptance scope (it used to be 64 MiB,
+ * which every compat workload was small enough to fit).
+ *
+ * OpenJDK 27's `lib/modules` is a 140 MiB jimage and libjimage maps the WHOLE
+ * thing in one call — a 64 MiB ceiling answered -ENOMEM and the launcher died
+ * at VA=0x12E0C before the VM printed a line.  HotSpot also reserves its whole
+ * MaxHeapSize with one MAP_NORESERVE anonymous mmap (3 GiB at this guest's
+ * 12 GiB RAM), so the ceiling has to clear the default heap too, not just the
+ * jimage.  Only the page-number array is eager (8 bytes per 4 KiB page: 2 MiB
+ * of frames for a 3 GiB reservation); resident pages are still demand-zero,
+ * so this costs nothing until something is touched. */
+/* cp-sync (merge of main): cyberpunk had raised the cap to 1 GiB, main to
+ * 4 GiB; the larger one is kept.  Both sides' reasoning holds at 4 GiB: the
+ * frame array is sized to the object (a 4 GiB object is 2049 contiguous
+ * frames = 8 MiB, a 200 MiB one still 101), the slot table is VM_OBJ_MAX
+ * fixed records, data frames are demand-zero, and page counts (<= 2^20) fit
+ * the int fields vm.c keeps.  test_vm_big_object_cost measures the 4 GiB
+ * array. */
+#define VM_OBJ_MAX_BYTES 0x100000000ULL /* 4 GiB */
 #define VM_OBJ_MAX_FRAMES (VM_OBJ_MAX_BYTES / 0x1000)
 
 #define VM_OBJ_MEMFD 1 /* SYS_MEMFD_CREATE backing */
