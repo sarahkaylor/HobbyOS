@@ -207,3 +207,40 @@ The guest runs about 33 times slower than the host per round trip. Each trip
 is a SetEvent, a wait, a pipe write and read, and a reply, and every one of
 those is a wineserver request over pipes. This is the wineserver IPC cost P8
 will pay. It is a performance item for a later lane, not a ceiling.
+
+## 8. P8 scope added mid-wave (C8-game's first game boots, docs/cp-p8.md)
+
+C8-game's boots died within 42 s. The wineserver's 256-fd table filled up,
+`recvmsg` with SCM_RIGHTS failed with EMFILE and left the message queued, and
+Wine killed the client; the wineserver then crashed in `grab_object(NULL)`.
+The integrator moved the following into this lane. C8's probes
+`src/user/cp/p8{env,scm,kill}probe.c` and `p8fdcount.c` are copied unchanged
+from `cp-game`. `tools/cp/k5/run-k5probes.sh` with its launcher
+`tools/cp/k5/k5probes.c` runs them in one boot without NFS.
+Evidence: `p8probes-base.txt` (base5) and `p8probes-lane.txt`.
+
+| item | change | probe | base5 | lane |
+|---|---|---|---|---|
+| fd/file tables | §1, §2 | p8fdcount | opened 253, EMFILE | opened 600 of 600 |
+| SCM_RIGHTS into a full table (`unix.c`) | A Linux-ABI receiver gets `scm_detach_fds` semantics in both the stream and the dgram/seqpacket paths: the data is delivered, the fds that do not fit are closed, `MSG_CTRUNC` is set and the record is consumed. Native callers keep the P4 rule (EMFILE, message not consumed; `docs/browser/p4-ipc-design.md` §4.2). | p8scmprobe S1–S3 | FAIL ×3 (`ret=-1 errno=24`; the message stays queued) | PASS ×3 |
+| ENFILE vs EMFILE (`fs.c`) | When the file table is full (open, socket, socketpair, pipe), the error is `ENFILE`. `file_pipe` now finds its two fds before it allocates anything; on a full table it used to leak two file slots and a pipe. The compat `pipe2` passes the code through. | — | — | — |
+| env (`HO_ENV_LEN`, `COMPAT_MAX_ENV`) | `HO_ENV_LEN` is 2048 on x86_64. ARM stays at 512 to keep its .bss inside the limine window, and keeps the old truncating behaviour. Too large an env for `spawn_ex`/`execve` is `E2BIG` (`process_read_envp` returns -2), not truncated. `COMPAT_MAX_ENV` is 128; more entries is `E2BIG` from the loader. The env strings go to the compat stack straight from the PCB blob, with no 512-byte bounce. | p8envprobe E3/E4, k5probes E5 | E3 FAIL (13/40 intact, 535 bytes); E5 FAIL (an 80-entry, 3120-byte env was accepted and cut) | E3 PASS (40/40, 1583 bytes); E5 PASS (`errno=7`) |
+| the native execve's env buffer (`trap.c`, x64 and ARM) | **moved off the stack**. The frame already held three 4 KiB argv buffers, so the env blob now lives in one `frame_alloc_zeroed()` frame, freed after `process_exec_current` copies it into the PCB. Running out of frames is `ENOMEM`. `compat_stack_block` still uses the stack: `s[512]` + `argp[129]` + `envp[129]` + `off[128]` ≈ 3.1 KiB, checked against the 64 KiB per-CPU stack (the loader worker calls it near the top of its stack). | — | — | — |
+| `fadvise64` (221) | 0 after validation: `EBADF` for a closed fd, `ESPIPE` for a pipe, `EINVAL` for advice > 5 or len < 0 | — | ENOSYS | 0 |
+| SIGKILL to a group whose leader exited (stop 7) | **not done; it goes to wave 6.** Two gates stop it: `process_signal_directed` treats a THREAD_DONE anchor as gone (`-ESRCH`, which reaches the caller as `kill rc=-1`), and `process_kill_group_sig` returns early for a THREAD_DONE anchor. The fix has to let both act on an anchor whose `live_threads` > 0, and then make sure group teardown and the reap cope with an anchor that is already THREAD_DONE. That is the process/signal teardown, not this lane's tables. | p8killprobe K1/K2 | FAIL | FAIL (unchanged) |
+
+BSS: `HO_ENV_LEN` 2048 grows `struct process` and `spawn_ex_pool` by
+1.5 KiB per slot, 1.5 MiB in total on x86_64. On the merged tree
+(cp-k5 + cyberpunk 15ad4a35), `__stack_top` is 0x76927640, which leaves
+22.8 MiB below `CP_KHOLE_HI`.
+
+### Merge with cyberpunk 15ad4a35 (C0-sync)
+
+- Main added `f1_pos_locks[MAX_GLOBAL_FILES]`, a static array of `ylock_t`,
+  for positioned I/O. At 16384 slots that would be about 1.2 MiB. It is now
+  `struct file`'s `pos_lock`, initialised with each slot (`gft_slot_init`),
+  so it grows with the chunked table.
+- Main's new `global_file_table[]` uses now go through `gfile()`.
+- Main's AF_INET loopback `file_accept` fd-install loop honours
+  RLIMIT_NOFILE. Its full-table answers were already EMFILE and ENFILE.
+- `COMPAT_MAX_ARGV` is 128 (main) and `COMPAT_MAX_ENV` is 128 (this lane).
