@@ -305,13 +305,17 @@ static void test_gpu_abi_transfer_ok(void) {
   bad = t; bad.box.d = 0;   EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
   EXPECT_EQ(gpu_abi_transfer_ok(0), 0);
 
-  /* The ioctl layer refuses a width the virgl host cannot transfer as a 1-D
-   * resource.  Relaxing this to 512 MiB made the kernel return rc=0 while the
-   * host rejected the transfer and read back zeros -- a silent corruption,
-   * worse than EINVAL.  The 16384 ceiling matches the host's 1-D limit. */
-  bad = t; bad.box.w = 16384; bad.box.h = 1; bad.box.d = 1;
-  EXPECT_EQ(gpu_abi_transfer_ok(&bad), 1);
+  /* A PIPE_BUFFER transfer carries a BYTE COUNT in box.w, not a texel
+   * dimension.  RimWorld's 4096x4096 map passes upload meshes/index buffers
+   * well above 16 KiB; refusing them here produced tile-shaped holes in an
+   * otherwise correct frame.  The whole-resource 512 MiB cap is the bound for
+   * the width of a 1-D buffer transfer; the host still validates the exact box
+   * against the resource, and box.h stays within the texture dimension cap. */
   bad = t; bad.box.w = 16384 + 1u; bad.box.h = 1; bad.box.d = 1;
+  EXPECT_EQ(gpu_abi_transfer_ok(&bad), 1);
+  bad = t; bad.box.w = (uint32_t)(512ull * 1024 * 1024); bad.box.h = 1; bad.box.d = 1;
+  EXPECT_EQ(gpu_abi_transfer_ok(&bad), 1);
+  bad = t; bad.box.w = (uint32_t)(512ull * 1024 * 1024) + 1u; bad.box.h = 1; bad.box.d = 1;
   EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
   bad = t; bad.box.w = 1; bad.box.h = 16384 + 1u; bad.box.d = 1;
   EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
