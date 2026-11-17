@@ -127,30 +127,33 @@ the same AS; none for a single-threaded process).
 
 ## 5. Results (strix)
 
-**Probe, deterministic rows.**  Base 15ad4a35 fails V1, V2, V3 and V5 in
-12/12 iterations of every run (t3 and NFS/ext2 harness, 5 runs, 0 passes);
-lane passes 12/12 in every run; the Linux host passes 10/10 runs.
+| | base 15ad4a35 | lane | Linux host |
+|---|---|---|---|
+| probe V1/V2/V3/V5 (12 iterations each) | FAIL in 6/6 runs (t3 x2, NFS+ext2 x4), 11-12 of 12 iterations stale | PASS in 11/11 runs | PASS 10/10 runs |
+| probe V4 (MAP_FIXED anon) | PASS | PASS | PASS |
+| probe V6 (reader asleep in futex_wait) | PASS | PASS | PASS |
+| probe S1 storm, sibling judging | FAIL 6/6 runs (every child in t3; 4/4 NFS+ext2 runs) | 0 data errors in 11/11 runs; 1 liveness timeout (below) | PASS 10/10 |
+| probe S1, `-s -n` (owner views only) | PASS 4/4 runs x 48 children x 6 loads x 8 files | -- | -- |
+| Gate P5 sessions, Wine-process faults | 0 in 6 (P5 PASS 5/6; run 2 missed a screendump) | 0 in 6 (P5 PASS 6/6) | -- |
+| storm PAR=3 (72 concurrent-start batches) | 0 faults in 3 sessions | 0 faults in 3 sessions | -- |
+| storm PAR=6 | fd table exhausted -> NLS init c000011f -> ntdll casemap NULL read | the same | -- |
 
-**Probe, storm S1.**  Base: every child of every run fails (t3: 16/16; NFS
-+ ext2 harness: 2 boots x 2 runs x 32 children, 4/4 runs FAIL), always the
-sibling reading an unrelocated word.  Lane: 0 bad over 3 t3 runs and 2
-NFS/ext2 runs (32 children x 4 loads x 8 files each); Linux: 0 bad.
-Base with `-n`: 4/4 runs x 48 children x 6 loads x 8 files PASS (the owner's
-own views are exact).  N and rates: base 100% (9/9 probe runs), lane 0% (5/5),
-host 0% (10/10).
+Lane runs: t3 x3 (batch, rerun, V6) + NFS/ext2 x8 (2 + 6).  Base runs: t3 x2
++ NFS/ext2 x4.  The one lane failure (`run-pemap.sh` boot 1 run 1) is a
+liveness timeout -- the sibling did not answer the touch request within 10 s
+while `[YLOCK-STALL] site=ext2_lock` was printed (8 children paging the same
+ext2 files): C3-ext2w's `ext2_lock` contention, not a wrong byte.
 
-**Wine, Gate P5 sessions** (`wine-ab.sh`, 6 + 6): 0 Wine-process faults on
-either tree (0 `[SIGDUMP]`, 0 `memory fault`, 0 Unhandled), P5 PASS 5/6 base
-(run 2: one screendump missed), 6/6 lane.  The lane's `[PECOW]` rows: 1 COW
-with a peer CPU in 2 of 6 sessions (winedevice.exe, an ELF data page), out
-of ~382 COWs per session.  So the start-up faults C4-x3 saw (2 of 3 sessions
-on 949ba008) do not reproduce on 15ad4a35 in P5 sessions at a measurable rate.
+V6 passing on base says which readers were exposed: a thread that sleeps
+switches CR3 when it next runs, so only a reader **running on another CPU
+across the write** keeps the stale translation.
 
-**Wine, start-up storm.**  PAR=6: both trees exhaust the 512-entry system file
-table (40+ "Too many open files" rows); Wine's NLS init fails (c000011f) and
-`RtlUpcaseUnicodeString` reads a NULL case table (ntdll `casemap`,
-locale.c:51) on base AND lane -- the C1-k5 fd ceiling, not this lane's bug.
-PAR=3: see `docs/cp-pe-evidence/wine-storm-par3-strix.txt`.
+The lane's `[PECOW]` rows count those COWs in real workloads: 1 per P5
+session in 2 of 6 sessions (winedevice.exe), 0 in the PAR=3 storms, and
+~330 000 of ~565 000 COWs in a probe run.  In P5 Wine sessions the precondition
+is rare, which fits a fault seen in some sessions and not others; on this base
+it did not occur in 12 Wine sessions on either kernel, so the Wine-level A/B
+cannot show a rate difference (0 vs 0).
 
 ## 6. What this does and does not explain
 

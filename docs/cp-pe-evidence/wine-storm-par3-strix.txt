@@ -1,0 +1,16 @@
+# Wine start-up storm, PE_PAR=3 x PE_ROUNDS=8 (24 concurrent-start batches per session: vkcube --winprobe / cmd /c exit), 3 sessions per tree, strix KVM
+# rc=1 is the P5 screendump grader (no P5 probes run in this mode); the storm row is the result
+# storm3-base: 3 Gate P5 sessions in /home/sarah/cp/lanes/pe-base (2026-11-17T08:56:05Z, host strix)
+run 1 rc=1 fault_procs=0 sigdump_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  storm(starts=24 nonzero=0) p5=""
+run 2 rc=1 fault_procs=0 sigdump_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  storm(starts=24 nonzero=0) p5=""
+run 3 rc=1 fault_procs=0 sigdump_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  storm(starts=24 nonzero=0) p5=""
+# storm3-lane: 3 Gate P5 sessions in /home/sarah/cp/lanes/pe-ab (2026-11-17T08:56:08Z, host strix)
+run 1 rc=1 fault_procs=0 sigdump_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  storm(starts=24 nonzero=0) p5=""
+run 2 rc=1 fault_procs=0 sigdump_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  storm(starts=24 nonzero=0) p5=""
+run 3 rc=1 fault_procs=0 sigdump_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  storm(starts=24 nonzero=0) p5=""
+storm3-base-run1.serial: Too-many-open=0 SIGDUMP=0 memory-fault=0
+storm3-base-run2.serial: Too-many-open=0 SIGDUMP=0 memory-fault=0
+storm3-base-run3.serial: Too-many-open=0 SIGDUMP=0 memory-fault=0
+storm3-lane-run1.serial: Too-many-open=0 SIGDUMP=0 memory-fault=0
+storm3-lane-run2.serial: Too-many-open=0 SIGDUMP=0 memory-fault=0
+storm3-lane-run3.serial: Too-many-open=0 SIGDUMP=0 memory-fault=0
