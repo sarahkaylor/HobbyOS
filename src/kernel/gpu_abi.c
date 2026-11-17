@@ -1259,6 +1259,25 @@ static int gpu_m2_fence_wait2(struct process* p, int fd, uint64_t arg) {
     fw.deadline_ms = gpu_abi_deadline_ms(now, fw.timeout_ns);
     if (vm_kwrite(p, arg, &fw, sizeof(fw)) != 0) return -EFAULT;
   } else if (fw.deadline_ms != ~0ull && now >= fw.deadline_ms) {
+    /* A fence that never retires is the one thing a hang report needs. */
+    static int to_rows = 0;
+    if (to_rows++ < 16) {
+      uint64_t issued = 0, done = 0;
+      int inflight = 0;
+      virtio_gpu_3d_fence_state(fw.ctx_id, fw.ring_idx, &issued, &done, &inflight);
+      gpu_abi_say("[VENUS] fence_wait2 timeout pid=", gpu_m2_pid(p));
+      gpu_abi_say(" ctx=", (int)fw.ctx_id);
+      gpu_abi_say(" ring=", (int)fw.ring_idx);
+      uart_puts(" seqno=");
+      extern void uart_print_hex(uint64_t val);
+      uart_print_hex(fw.seqno);
+      uart_puts(" issued=");
+      uart_print_hex(issued);
+      uart_puts(" done=");
+      uart_print_hex(done);
+      gpu_abi_say(" ctx_inflight=", inflight);
+      uart_puts("\n");
+    }
     return -ETIMEDOUT;
   }
   return virtio_gpu_3d_fence_park(fw.ctx_id, fw.ring_idx, fw.seqno,

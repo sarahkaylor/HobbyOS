@@ -150,3 +150,32 @@ JSON).
 | vkcube.exe under Wine (winevulkan) on Venus | 13 265 frames / 65 s (~200 fps) | `probe2-wine-venus.txt` |
 | **probe 2: D3D12 triangle (vkd3d-proton 3.1) under Wine on Venus** | **FAIL**: device, swapchain (3 images), PSO and frame 0 (124–140 ms) render; the second frame's `ID3D12Fence` wait times out after 10 s, three runs (with async and with synchronous venus present) | `probe2-wine-venus.txt` |
 | full batch at parity | PASS (one timing flake, exitgroup X7, 2/2 on rerun) | `gate-batch.txt` |
+
+### 6.1 The open row: DXVK / vkd3d-proton stall after their first frames
+
+What is known (`probe2-wine-venus.txt`, runs 1–5):
+* Wine + winevulkan + Venus works: `vkcube.exe` renders for 65 s (~204 fps) and
+  both D3D adapters are created on the Radeon (vkd3d-proton: FL 12_1 path,
+  SM 6.0 asked, swapchain of 3 images; DXVK: FL 11_1).
+* `d3d12tri.exe` renders frame 0 (124–153 ms), then the `ID3D12Fence` wait for
+  frame 1 times out (10 s).  `d3d11tri.exe` renders frames 0 and 1, then stops
+  making progress.  Lavapipe passes both (Gate P5), so the difference is
+  Venus' own path, not Wine or the X server.
+* Not the cause: venus' async present (run 3 presented synchronously: same
+  stall); sync wait-for-submit semantics (run 2 onward); a Vulkan error (run 5
+  with `VN_DEBUG=result,wsi` baked in logged none; `VENUS_DEBUG_DEFAULT` in
+  `tools/mesa/venus/build.sh`).
+* The kernel's global fence counters show only 4 ring fences retired across
+  every Venus process of run 5 -- the stalled process never retired a
+  renderer-sync fence, i.e. no `vkQueueSubmit(..., fence)` it waited on came
+  back.  Timeline semaphores (vkd3d's D3D12 fences) are on venus' feedback
+  path and do work in isolation (`vn_info timeline`).
+* Next step: per-process fence state at the stall.  `FENCE_WAIT2` now prints
+  `[VENUS] fence_wait2 timeout ... issued= done= ctx_inflight=` for finite
+  waits; WSI waits are infinite, so the next lane should add the same row to
+  a periodic dump (or a SysRq-style hook) and check whether the stalled
+  queue's ring has fences issued and never answered by the host (a host queue
+  blocked on a semaphore wait) or no fence issued at all (a guest-side wait
+  that never submits).  Suspects, in order: a host-side `VkQueue` blocked on a
+  semaphore the guest signalled only through venus' feedback path; a WSI
+  image fence on a queue whose ring differs from the one the wait uses.

@@ -2028,6 +2028,18 @@ int virtio_gpu_3d_fence_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno
   return rc;
 }
 
+void virtio_gpu_3d_fence_state(uint32_t ctx_id, uint32_t ring_idx, uint64_t* issued,
+                               uint64_t* done, int* inflight) {
+  uint64_t fl = virtio_gpu_x64_lock();
+  struct gpu3d_ctx2* c2 = gpu3d_ctx2_find(ctx_id);
+  if (c2 && ring_idx < c2->num_rings) {
+    *issued = c2->issued[ring_idx];
+    *done = c2->done[ring_idx];
+    *inflight = c2->inflight;
+  }
+  virtio_gpu_x64_unlock(fl);
+}
+
 int virtio_gpu_3d_fence_kick_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno) {
   if (!gpu3d_ready) return -ENODEV;
   uint64_t fl = virtio_gpu_x64_lock();
