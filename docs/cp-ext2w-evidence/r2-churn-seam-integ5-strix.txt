@@ -1,0 +1,24 @@
+build=0
+pfx_gate: e2churn probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 29/131072 files (3.4% non-contiguous), 13053/524288 blocks)
+pfx_gate: PASS
+run 1: flusher exits=15 halt=1 rip7009=0
+[IDLESTUCK] dsr=l=01ox0t0 =006r0e 0sp0ui0m0de=0_06s 0p0s=t000=x5000 0w 0pa0ki0de0==1130700f 2fr2fe fsfuuftm9ee6x0_= p0ixd0a=g er1_0imps ==-r30 esxwuma1ei0_t0s_0p0l0o=30cx1k30=00 0Px0R000O00B01E07.0Ef0LfF0f07
+[IDLESTUCK] claims: c0=12/0/0 c1=9/0/0 c2=10/0/0 c3=-1/2/0 c4=8/2/0 c5=-1/3/0 c6=-1/9/0 c7=-1/2/0 lock_owner=4 locked=1 park_returns=0 loc k_raedsdurme=0_xp0i0d0=10020 0r0e7su4Dm2e_Es98p8=0x
+[IDLESTUCK] cpu=6 rounds=2 t=30099
+[IDLESTUCK] slot=2 pid=2 st=5 wake=30116 futex=0x0 rip=0x1000003130 PROBE.ELF
+[IDLESTUCK] slot=3 pid=3 st=5 wake=30608 futex=0x0 rip=0x1000003130 PROBE.ELF
+[IDLESTUCK] slot=4 pid=4 st=5 wake=30615 futex=0x0 rip=0x1000003130 PROBE.ELF
+[IDLESTUCK] slot=6 pid=6 st=5 wake=30622 futex=0x0 rip=0x1000003130 PROBE.ELF
+[IDLESTUCK] slot=7 pid=7 st=5 wake=30128 futex=0x0 rip=0x1000003130 PROBE.ELF
+pfx_gate: e2churn probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 29/131072 files (3.4% non-contiguous), 13053/524288 blocks)
+pfx_gate: PASS
+run 2: flusher exits=15 halt=1 rip7009=0
+[IDLESTUCK] slot=14 pid=14 st=3 wake=0 futex=0x0 rip=0x100000312e PROBE.ELF
+[IDLESTUCK] claims: c0=-1/1/0 c1=9/7/0 c2=14/4/0 c3=-1/1/0 c4=-1/1/0 c5=-1/7/0 c6=-1/4/0 c7=-1/2/0 lock_owner=1 locked=1 park_returns=0 lock_addr=0x0000000074D2E988
+[LP] info e2churn t=30s writers 50 50 50 50 pipes 7701 7809 7877
+[IDLESTUCK] cpu=7 rounds=3 t=60077
+[IDLESTUCK] slot=2 pid=2 st=5 wake=60096 futex=0x0 rip=0x1000003130 PROBE.ELF
+[IDLESTUCK] slot=3 pid=3 st=3 wake=0 futex=0x0 rip=0x1000003130 PROBE.ELF
+[IDLESTUCK] slot=5 pid=5 st=3 wake=0 futex=0x0 rip=0x1000003130 PROBE.ELF
+[IDLESTUCK] slot=6 pid=6 st=3 wake=0 futex=0x0 rip=0x1000003130 PROBE.ELF
+ALLDONE

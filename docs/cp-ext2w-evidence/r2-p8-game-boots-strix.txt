@@ -1,0 +1,48 @@
+## ext2w-run1-oldharness
++     0.0 s  03:33:21  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
++     4.3 s  03:33:26  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    22.3 s  03:33:44  warm-up result: [P8] warm-up: display driver loaded
++    30.4 s  03:33:52  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    30.4 s  03:33:52  baseline screendump 1920x1080 (desktop before the game's window)
++    76.2 s  03:34:37  first screen change after launch (45.5% of the screen differs from the baseline): s002-t000046
++   259.0 s  03:37:40  game process ended: [P8] end game status=768 ms=228596
++   263.8 s  03:37:45  verdict: timeout; QEMU stopped, slot released; guests on the host now: 1
+## ext2w-run1
++     0.0 s  03:51:44  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
++     4.3 s  03:51:48  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    21.3 s  03:52:05  warm-up result: [P8] warm-up: display driver loaded
++    28.4 s  03:52:12  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    28.5 s  03:52:12  baseline screendump 1920x1080 (desktop before the game's window)
++    74.4 s  03:52:58  first screen change after launch (45.8% of the screen differs from the baseline): s002-t000046
++   261.9 s  03:56:06  title prompt 'PRESS ... TO CONTINUE' at s010-t000233: sent one Space (#1)
++   292.7 s  03:56:36  title prompt 'PRESS ... TO CONTINUE' at s012-t000264: sent one Space (#2)
++   307.8 s  03:56:51  main menu OCR at s013-t000279: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   313.5 s  03:56:57  main menu OCR at s014-t000285: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   319.2 s  03:57:03  main menu OCR at s015-t000290: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   320.9 s  03:57:05  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 1
+## ext2w-run2
++     0.0 s  03:57:14  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
++     4.3 s  03:57:19  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    21.3 s  03:57:36  warm-up result: [P8] warm-up: display driver loaded
++    32.4 s  03:57:47  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    32.5 s  03:57:47  baseline screendump 1920x1080 (desktop before the game's window)
++    93.6 s  03:58:48  first screen change after launch (45.8% of the screen differs from the baseline): s002-t000061
++   282.5 s  04:01:57  title prompt 'PRESS ... TO CONTINUE' at s013-t000250: sent one Space (#1)
++   313.7 s  04:02:28  title prompt 'PRESS ... TO CONTINUE' at s015-t000281: sent one Space (#2)
++   328.9 s  04:02:43  main menu OCR at s016-t000296: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   334.7 s  04:02:49  main menu OCR at s017-t000302: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   340.5 s  04:02:55  main menu OCR at s018-t000307: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   342.3 s  04:02:57  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 2
+## ext2w-run4
++     0.0 s  04:16:34  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
++     4.3 s  04:16:38  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    23.4 s  04:16:57  warm-up result: [P8] warm-up: display driver loaded
++    34.5 s  04:17:08  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    34.5 s  04:17:08  baseline screendump 1920x1080 (desktop before the game's window)
++    95.8 s  04:18:09  first screen change after launch (45.5% of the screen differs from the baseline): s002-t000061
++   362.6 s  04:22:36  title prompt 'PRESS ... TO CONTINUE' at s016-t000328: sent one Space (#1)
++   393.1 s  04:23:07  title prompt 'PRESS ... TO CONTINUE' at s018-t000358: sent one Space (#2)
++   408.4 s  04:23:22  main menu OCR at s019-t000373: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   430.2 s  04:23:44  main menu OCR at s020-t000395: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   436.1 s  04:23:50  main menu OCR at s021-t000401: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   438.1 s  04:23:52  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 3
