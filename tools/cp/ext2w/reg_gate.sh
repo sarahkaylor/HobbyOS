@@ -163,7 +163,27 @@ nok=$(sed -n 's/^\[RG\] race round [0-9]*: clients done=3 ok=\([0-9]\).*/\1/p' "
 grep -a '^\[RG\] race round' "$B2"
 [ "$nr" -ge 4 ] && good "boot 2: $nr race rounds of 3 concurrent Wine clients all finished, no wedge (C8 stop 6); clients exit 0: $nok of $((nr * 3))" ||
   bad "boot 2: race rounds finished: $nr of 4"
-grep -aq 'YLOCK-WEDGE\|YLOCK-STALL' "$B2" && bad "boot 2: ylock stall/wedge rows: $(grep -a 'YLOCK-' "$B2" | head -3 | tr '\n' ' ')"
+# Lock rows.  [YLOCK-STALL] is a contention REPORT (a waiter spun ~1M times,
+# a few ms; lockscale.c keeps waiting) and is listed, named, not graded.
+# A wedge is graded: [YLOCK-WEDGE] (64M spins), the ext2 lock held 2 s
+# ([E2W] ext2_lock wait), or a slot quarantined by the resume pre-flight
+# ([RESUME-PREFLIGHT] ... QUARANTINE: a user frame with a RIP that is not a
+# mapped user address, trap.c resume_preflight_c).
+if [ -z "${LOCKNAME_FILE:-}" ]; then # struct file's layout, from this tree's fs.h
+  printf '#include <stddef.h>\n#include <stdio.h>\n#include "fs.h"\nint main(void){printf("%%zu %%zu %%zu\\n",sizeof(struct file),offsetof(struct file,lock),offsetof(struct file,pos_lock));return 0;}\n' > "$OUT/fslayout.c"
+  clang -D__x86_64__ -Isrc/include -o "$OUT/fslayout" "$OUT/fslayout.c" 2>/dev/null && LOCKNAME_FILE=$("$OUT/fslayout")
+fi
+for b in "$B1" "$B2"; do
+  bn=$(basename "$b" .txt)
+  addrs=$(grep -ao 'YLOCK-STALL\] site=[^ ]* lock=[^ ]* addr=0x[0-9A-Fa-f]*' "$b" | sed 's/.*addr=//' | sort -u | tr '\n' ' ')
+  if [ -n "$addrs" ]; then
+    names=$(LOCKNAME_FILE="${LOCKNAME_FILE:-}" python3 tools/cp/ext2w/lockname.py hobbyos.elf $addrs 2>/dev/null | tr '\n' ';')
+    echo "[HOST] info $bn: [YLOCK-STALL] contention rows on: ${names:-$addrs}"
+  fi
+  grep -aq 'YLOCK-WEDGE' "$b" && bad "$bn: [YLOCK-WEDGE]: $(grep -a 'YLOCK-WEDGE\|YLOCK-OWNER' "$b" | head -2 | tr '\n' ' ')"
+  grep -aq 'E2W\] ext2_lock wait' "$b" && bad "$bn: $(grep -a 'E2W\] ext2_lock wait' "$b" | head -1)"
+  grep -aq 'RESUME-PREFLIGHT.*QUARANTINE' "$b" && bad "$bn: $(grep -a 'RESUME-PREFLIGHT' "$b" | head -2 | tr '\n' ' ')"
+done
 fsck_img b2
 if [ "$fails" = 0 ]; then echo "reg_gate: PASS"; else echo "reg_gate: FAIL ($fails)"; fi
 [ "$fails" = 0 ]
