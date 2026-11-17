@@ -70,7 +70,21 @@ them).
 
 ## 3. Results (strix)
 
-See the lane report and `docs/cp-fork-evidence/` for the tables and raw rows.
+`linux_probe_forkva`, fork+exec -> child running, median of 5 (`forkva-ab-strix.txt`):
+
+| case | base 058fd3d5 | step 1 (walk) | step 2 (COW) | final 9a51c83c | Linux host |
+|---|---|---|---|---|---|
+| F1 small parent | 73 ms | 14 ms | 14 ms | 13 ms | 0.3 ms |
+| F2a 64 GiB PROT_NONE only | 3920 ms | 11.6 ms | 12.0 ms | 11.4 ms | 0.3 ms |
+| F2b 1300 touched mappings (325 MiB) | 1466 ms | 374 ms (host stalls) | 90 ms | 51 ms | 4.5 ms |
+| F2 big VA (gate) | **5318 ms FAIL** | 175 ms | 85 ms | **44 ms PASS** | 3.9-10.5 ms |
+| F3 big VA + 40 threads (gate) | **6233 ms FAIL** | 1463 ms FAIL | 81 ms | **48 ms PASS** | 4.4-11.5 ms |
+| F4 vfork + exec | 18 ms | 11 ms | 11 ms | 11 ms | 0.2 ms |
+
+The game (`p8-venus-createprocess-strix.txt`): one Venus boot to the main menu; Wine's
+`NtCreateUserProcess` for REDEngineErrorReporter.exe runs 38.051 -> 38.486 s =
+**0.44 s** (C9's gateA4 before: 16.7 s); the two forks of the game process cost 59 and
+47 ms in the kernel (`[FORKT] regions=495 resident=96200`).
 
 ## 4. Tests
 

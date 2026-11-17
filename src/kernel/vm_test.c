@@ -830,6 +830,19 @@ static void test_vm_memfd_private_cow(void) {
     EXPECT_EQ((vm_arch_leaf_phys(cl) == of3), 1);
     EXPECT_EQ(vm_arch_leaf_writable(cl), 0);
     EXPECT_EQ(vm_arch_walk(c, b, &cl), 0);
+#ifdef __x86_64__
+    /* C1-fork: the parent's private copy is shared copy-on-write; the
+       child's first write (here a kernel write) gives it its own frame. */
+    EXPECT_EQ((vm_arch_leaf_phys(cl) == c0 && vm_arch_leaf_cow(cl)), 1);
+    {
+      struct process pc;
+      for (unsigned i = 0; i < sizeof(pc); i++)
+        ((unsigned char *)&pc)[i] = 0;
+      pc.as = c;
+      EXPECT_EQ(vm_touch(&pc, b, 8, 1), 0);
+      EXPECT_EQ(vm_arch_walk(c, b, &cl), 0);
+    }
+#endif
     uint64_t cc0 = vm_arch_leaf_phys(cl);
     EXPECT_EQ((cc0 != c0 && cc0 != of0), 1);
     EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(cc0), 0x3333ULL);
@@ -913,6 +926,13 @@ static void test_vm_big_object_cost(void) {
   uart_puts(" frames\n");
   EXPECT_EQ((tables >= 100 && tables <= 110), 1);
   vm_as_teardown(p.as);
+  if (free0 - frame_free_count() != arr + (int)npg) {
+    uart_puts("  [VMCOST] after teardown: used=");
+    print_int(free0 - frame_free_count());
+    uart_puts(" want=");
+    print_int(arr + (int)npg);
+    uart_puts("\n");
+  }
   EXPECT_EQ(free0 - frame_free_count(), arr + (int)npg); /* tables back; pages stay the object's */
   vm_object_unref(o);
   EXPECT_EQ(frame_free_count(), free0);
@@ -1792,6 +1812,13 @@ out:
     file_close(&p, fd);
   file_obj_invalidate_all();
   EXPECT_EQ(file_obj_count(), c0);
+  if (frame_free_count() != free0) {
+    uart_puts("  [VMFILE-FORK] frames: free0=");
+    print_int(free0);
+    uart_puts(" now=");
+    print_int(frame_free_count());
+    uart_puts("\n");
+  }
   EXPECT_EQ(frame_free_count(), free0);
 }
 
