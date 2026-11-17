@@ -1,0 +1,111 @@
+[LP] info ext2w mode=bench vol=/EXT
+[LP] perf cold4k bytes=4194304 ops=1024 ms=319 KBps=12840 ops_per_s=3210
+[LP] perf cold4k+fsync bytes=4194304 ops=1024 ms=319 KBps=12840 ops_per_s=3210
+[LP] perf seq4k bytes=4194304 ops=1024 ms=290 KBps=14124 ops_per_s=3531
+[LP] perf seq4k+fsync bytes=4194304 ops=1024 ms=290 KBps=14124 ops_per_s=3531
+[LP] perf seq4k32m bytes=33554432 ops=8192 ms=2374 KBps=13802 ops_per_s=3450
+[LP] perf seq4k32m+fsync bytes=33554432 ops=8192 ms=2374 KBps=13802 ops_per_s=3450
+[LP] perf seq1m bytes=33554432 ops=32 ms=430 KBps=76204 ops_per_s=74
+[LP] perf seq1m+fsync bytes=33554432 ops=32 ms=430 KBps=76204 ops_per_s=74
+[LP] perf read64k bytes=33554432 ops=512 ms=417 KBps=78580 ops_per_s=1227
+[LP] perf rand4k bytes=2097152 ops=512 ms=52 KBps=39384 ops_per_s=9846
+[LP] perf fsync4k bytes=524288 ops=128 ms=36 KBps=14222 ops_per_s=3555
+[LP] perf smallfile bytes=409600 ops=200 ms=172 KBps=2325 ops_per_s=1162
+[LP] perf unlink bytes=0 ops=20 ms=7 KBps=0 ops_per_s=2857
+[LP] perf churn bytes=0 ops=300 ms=241 KBps=0 ops_per_s=1244
+[LP] perf unlink32m bytes=0 ops=1 ms=0 KBps=0 ops_per_s=1000000
+[LP] done rc=0
+bench: 25 PASS rows, rc=0
+[HOST] ok   bench: e2fsck -fn rc=0 (cpdata: 32/524288 files (0.0% non-contiguous), 39786/2097152 blocks)
+[LP] info ext2w mode=verify vol=/EXT
+[LP] PASS V1 every persist file survived the reboot byte for byte (0)
+[LP] PASS V1 the rename survived (old name gone) (0)
+[LP] PASS V1 seq4k.bin holds B3's rewrites (not all key 1) (0)
+[LP] done rc=0
+[HOST] ok   verify: e2fsck -fn rc=0 (cpdata: 32/524288 files (0.0% non-contiguous), 39786/2097152 blocks)
+=== crash run 1: quit after SYNCED n=1 + 0 ms ===
+[HOST] info run 1: last SYNCED n=1 on the console, crashw reached i>=0
+[HOST] FAIL crash1: e2fsck -fn rc=4
+e2fsck 1.47.2 (1-Jan-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Inode bitmap differences:  -32834
+Fix? no
+
+Free inodes count wrong (130988, counted=130987).
+Fix? no
+
+
+cpdata: ********** WARNING: Filesystem still has errors **********
+
+cpdata: 84/131072 files (2.4% non-contiguous), 9209/524288 blocks
+[HOST] ok   run 1: s0..s1 (synced before the quit) intact
+[HOST] info run 1: /cw holds 68 entries on disk
+=== crash run 2: quit after SYNCED n=3 + 0 ms ===
+[HOST] info run 2: last SYNCED n=3 on the console, crashw reached i>=1024
+[HOST] ok   crash2: e2fsck -fn rc=0 (cpdata: 85/131072 files (3.5% non-contiguous), 9239/524288 blocks)
+[HOST] ok   run 2: s0..s3 (synced before the quit) intact
+[HOST] info run 2: /cw holds 67 entries on disk
+=== crash run 3: quit after SYNCED n=6 + 0 ms ===
+[HOST] info run 3: last SYNCED n=6 on the console, crashw reached i>=2048
+[HOST] ok   crash3: e2fsck -fn rc=0 (cpdata: 87/131072 files (6.9% non-contiguous), 9292/524288 blocks)
+[HOST] ok   run 3: s0..s6 (synced before the quit) intact
+[HOST] info run 3: /cw holds 66 entries on disk
+=== crash run 4: quit after SYNCED n=2 + 400 ms ===
+[HOST] info run 4: last SYNCED n=3 on the console, crashw reached i>=1024
+[HOST] ok   crash4: e2fsck -fn rc=0 (cpdata: 84/131072 files (3.6% non-contiguous), 9240/524288 blocks)
+[HOST] ok   run 4: s0..s2 (synced before the quit) intact
+[HOST] info run 4: /cw holds 66 entries on disk
+=== crash run 5: quit after SYNCED n=4 + 1300 ms ===
+[HOST] info run 5: last SYNCED n=8 on the console, crashw reached i>=3072
+[HOST] FAIL crash5: e2fsck -fn rc=4
+e2fsck 1.47.2 (1-Jan-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Free blocks count wrong for group #10 (32186, counted=32188).
+Fix? no
+
+
+cpdata: ********** WARNING: Filesystem still has errors **********
+
+cpdata: 85/131072 files (12.9% non-contiguous), 9313/524288 blocks
+[HOST] ok   run 5: s0..s4 (synced before the quit) intact
+[HOST] info run 5: /cw holds 62 entries on disk
+=== crash run 6: quit after SYNCED n=5 + 2600 ms ===
+[HOST] info run 6: last SYNCED n=14 on the console, crashw reached i>=7168
+[HOST] ok   crash6: e2fsck -fn rc=0 (cpdata: 89/131072 files (18.0% non-contiguous), 9406/524288 blocks)
+[HOST] ok   run 6: s0..s5 (synced before the quit) intact
+[HOST] info run 6: /cw holds 60 entries on disk
+=== crash run 7: quit after SYNCED n=8 + 0 ms ===
+[HOST] info run 7: last SYNCED n=8 on the console, crashw reached i>=3072
+[HOST] FAIL crash7: e2fsck -fn rc=4
+e2fsck 1.47.2 (1-Jan-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+Block bitmap differences:  -(361090--361091)
+Fix? no
+
+Free blocks count wrong for group #11 (32180, counted=32178).
+Fix? no
+
+
+cpdata: ********** WARNING: Filesystem still has errors **********
+
+cpdata: 87/131072 files (9.2% non-contiguous), 9326/524288 blocks
+[HOST] ok   run 7: s0..s8 (synced before the quit) intact
+[HOST] info run 7: /cw holds 64 entries on disk
+=== crash run 8: quit after SYNCED n=3 + 900 ms ===
+[HOST] info run 8: last SYNCED n=5 on the console, crashw reached i>=2048
+[HOST] ok   crash8: e2fsck -fn rc=0 (cpdata: 84/131072 files (7.1% non-contiguous), 9271/524288 blocks)
+[HOST] ok   run 8: s0..s3 (synced before the quit) intact
+[HOST] info run 8: /cw holds 63 entries on disk
+ext2w_gate: FAIL (3)

@@ -1,0 +1,46 @@
+== build: kernel + disk (intel, test), regp launchers
+== export: /srv/nfs/cp-ext2w-regb (Wine stage), 127.0.0.1 only, ro
+== exports.sh: add /srv/nfs/cp-ext2w-regb ok (non-cp lines unchanged)
+== stage: glibc 2.31 under /LIB64 + /lib64/ld
+== boot 1: wineboot -i, reg add, wineserver -k, no sync
+qemu-slot: all 4 slots busy; waiting
+qemu-slot: slot 2 of 4 held by pid 1910155 06:26:12
+[RG] regp launcher (C3-ext2w) phase 1
+[RG] begin wineboot : wineboot -i
+[RG] end wineboot status=0 ms=36612
+[RG] quiesce after wineboot: extra=0 ms=8832
+[RG] begin regadd : wine reg add HKCU\Software\CpTest /v X /d Y /f
+[RG] end regadd status=0 ms=9185
+[RG] begin regadd-hklm : wine reg add HKLM\Software\CpTest /v X /d Y /f
+[RG] end regadd-hklm status=0 ms=1487
+[RG] begin kill : wineserver -k
+[RG] end kill status=0 ms=569
+[RG] quiesce after kill: extra=0 ms=0
+[RG] done
+[HOST] ok   reg add exit 0
+[HOST] ok   wineserver -k exit 0 in 569 ms (Wine SIGKILLs the server at 10.5 s)
+[HOST] ok   boot 1 halted
+[HOST] ok   e2fsck -fn after b1 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+[HOST] ok   pfx/user.reg on the disk holds [Software\\CpTest] "X"="Y" (23191 bytes)
+[HOST] ok   pfx/system.reg on the disk holds the HKLM key (1811981 bytes)
+[HOST] ok   HKLM reg add exit 0
+[HOST] ok   no reg*.tmp left in pfx/
+== boot 2: wine reg query
+qemu-slot: slot 2 of 4 held by pid 1932662 06:27:20
+[RG] regp launcher (C3-ext2w) phase 2
+[RG] begin regquery : wine reg query HKCU\Software\CpTest /v X
+[RG] end regquery status=0 ms=8826
+[RG] begin regquery-hklm : wine reg query HKLM\Software\CpTest /v X
+[RG] end regquery-hklm status=0 ms=1485
+[RG] begin kill : wineserver -k
+[RG] end kill status=0 ms=586
+[RG] quiesce after kill: extra=0 ms=0
+[RG] done
+== reg query output (kernel rows removed): Inside process_create: acquiring lock... Inside process_create: lock released. pid=3 block_idx=0 Inside process_create: clearing memory at 0x0000000020000000 Inside process_create: kmemset done. Loadi
+[HOST] ok   boot 2: reg query prints X REG_SZ Y
+[HOST] ok   reg query exit 0
+[HOST] ok   boot 2: HKLM reg query prints X REG_SZ Y
+[HOST] ok   e2fsck -fn after b2 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+reg_gate: PASS
+== exports.sh: remove /srv/nfs/cp-ext2w-regb ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-ext2w-regb
