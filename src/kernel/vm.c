@@ -2213,13 +2213,13 @@ static void vm_cow_shootdown(struct addr_space *as, int pid, uint64_t va, int ok
     kl_i(&kl, (long)n);
     kl_s(&kl, " pid=");
     kl_i(&kl, (long)pid);
-    kl_s(&kl, " va=0x");
+    kl_s(&kl, " va=");
     kl_hex(&kl, (unsigned long)va);
     kl_s(&kl, " peers=");
     kl_i(&kl, (long)peers);
     kl_s(&kl, okind == VM_OBJ_NFS ? " obj=nfs" : okind == VM_OBJ_EXT2 ? " obj=ext2"
                  : okind == VM_OBJ_FILE ? " obj=fat" : " obj=anon");
-    kl_s(&kl, " off=0x");
+    kl_s(&kl, " off=");
     kl_hex(&kl, (unsigned long)off);
     kl_s(&kl, kernel_write ? " by=kernel\n" : " by=user\n");
     kl_emit(&kl);
