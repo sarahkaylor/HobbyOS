@@ -4668,6 +4668,8 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern uint32_t gic_acknowledge_interrupt(void);
   extern void gic_end_interrupt(uint32_t intid);
   extern int virtio_net_irq;
+  extern int virtio_gpu_x64_irq_vector;      /* P6: -1 = polled */
+  extern void virtio_gpu_x64_handle_irq(void);
 
   uint32_t cpu = get_cpuid();
   if (cpu < MAX_CPUS && tf->vector != 1) {
@@ -4961,6 +4963,17 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     uint32_t intid = gic_acknowledge_interrupt();
     extern void virtio_input_handle_irq(int irq);
     virtio_input_handle_irq(intid);
+    gic_end_interrupt(intid);
+  } else if (virtio_gpu_x64_irq_vector != -1 &&
+             tf->vector == (uint32_t)virtio_gpu_x64_irq_vector) {
+    /* P6 (docs/gpu-abi.md §10.5): virtio-gpu INTx retires async fences.
+       A line shared with the legacy net device serves both. */
+    uint32_t intid = gic_acknowledge_interrupt();
+    virtio_gpu_x64_handle_irq();
+    if (virtio_net_irq != -1 && tf->vector == (uint32_t)virtio_net_irq) {
+      extern void virtio_net_handle_irq(void);
+      virtio_net_handle_irq();
+    }
     gic_end_interrupt(intid);
   } else if (virtio_net_irq != -1 && tf->vector == (uint32_t)virtio_net_irq) {
     uint32_t intid = gic_acknowledge_interrupt();

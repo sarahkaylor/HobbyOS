@@ -52,6 +52,7 @@ void run_all_unit_tests(void) {
   vm_test_post_cache_suite();
   blk_cache_press_suite();
   virtio_gpu_test_suite();
+  gpu_abi_m2_test_suite(); /* P6: Venus ABI (docs/gpu-abi.md §10) */
   virtio_input_test_suite();
   fb_ioctl_test_suite();
   vdisplay_test_suite();

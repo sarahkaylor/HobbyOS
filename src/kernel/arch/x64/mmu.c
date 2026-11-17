@@ -525,6 +525,18 @@ void mmu_init_core_with_id(uint32_t cpu) {
     __asm__ volatile("wrmsr" : : "a"(lo), "d"(hi), "c"(0xC0000080));
   }
 
+  /* P6 (docs/gpu-abi.md §10.4): IA32_PAT entry 4 becomes write-combining on
+     every core (identically, before any WC leaf exists).  Entries 0-3 keep
+     their power-on WB/WT/UC-/UC, and nothing else sets the 4 KiB PAT bit
+     (bit 7), so no existing mapping changes type.  Venus maps host-visible
+     blobs that the host maps WC through PAT 4. */
+  {
+    uint32_t lo, hi;
+    __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0x277));
+    hi = (hi & ~0xFFu) | 0x01u; /* PA4 = WC */
+    __asm__ volatile("wrmsr" : : "a"(lo), "d"(hi), "c"(0x277));
+  }
+
   __asm__ volatile("mov %0, %%cr3" : : "r"(pml4_phys) : "memory");
 
   // Set up core-local GS base for swapgs stack switching
@@ -678,6 +690,11 @@ volatile void *mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
    owned by a shared object (memfd/fb); teardown must not free it. */
 #define X64_PTE_SHARED (1ULL << 9)
 #define X64_OA_MASK 0x000FFFFFFFFFF000ULL
+/* P6: 4 KiB leaf memory-type bits (PAT index = PAT<<2 | PCD<<1 | PWT). */
+#define X64_PTE_PWT (1ULL << 3)
+#define X64_PTE_PCD (1ULL << 4)
+#define X64_PTE_PAT4K (1ULL << 7)
+#define X64_PTE_CACHE_MASK (X64_PTE_PWT | X64_PTE_PCD | X64_PTE_PAT4K)
 
 /* P2.2 (S2): the root_phys this CPU is currently translating through
    (0 = kernel PML4).  Used to hand the CPU back to the kernel table
@@ -897,8 +914,26 @@ void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot) {
   if (!(leaf & X64_PTE_P))
     return;
   uint16_t kind = (leaf & X64_PTE_SHARED) ? VMK_SHARED : VMK_ANON;
-  *pte = x64_v2_pte_desc(leaf & X64_OA_MASK, prot, kind);
+  /* P6: keep a device leaf's memory type (PWT/PCD/PAT) across mprotect. */
+  *pte = x64_v2_pte_desc(leaf & X64_OA_MASK, prot, kind) | (leaf & X64_PTE_CACHE_MASK);
   x64_invlpg(va);
+}
+
+/* P6 (docs/gpu-abi.md §10.4): give an installed user leaf a memory type.
+   mode 0 = WB (PAT 0), 1 = WC (PAT 4, programmed at boot), 2 = UC (PAT 3).
+   Returns 0, or -1 when no leaf is present. */
+int vm_arch_set_cache(struct addr_space *as, uint64_t va, int mode) {
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
+  if (!pte || !(*pte & X64_PTE_P))
+    return -1;
+  uint64_t leaf = *pte & ~X64_PTE_CACHE_MASK;
+  if (mode == 1)
+    leaf |= X64_PTE_PAT4K;
+  else if (mode == 2)
+    leaf |= X64_PTE_PWT | X64_PTE_PCD;
+  *pte = leaf;
+  x64_invlpg(va);
+  return 0;
 }
 
 int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {

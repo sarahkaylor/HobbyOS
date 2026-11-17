@@ -1,0 +1,43 @@
+# Render-node fencing: /proc/<pid>/fd of QEMU and every virgl_render_server process/thread, sampled every 5 s through
+# a Wine run (vkcube.exe + d3d12tri.exe on Venus), strix 2026-11-17.  host-venus.sh: CP_SHIM_DENY=CP_SHIM_DENY=/dev/dri/card1:/dev/dri/renderD128
+# renderD128 / card1 = the 8060S (desktop); renderD129 / card2 = the RX 9070 XT.  Count of samples per (process, open DRM nodes):
+     33   comm=edu dri: 7 /dev/dri/renderD129
+     66   comm=qemu-s:sh_opt0 dri: 7 /dev/dri/renderD129
+    264   comm=qemu-s:traceq0 dri: 7 /dev/dri/renderD129
+     66   comm=qemu-sy:disk$0 dri: 7 /dev/dri/renderD129
+      1   comm=qemu-sys:gdrv0 dri:
+     65   comm=qemu-sys:gdrv0 dri: 7 /dev/dri/renderD129
+     33   comm=qemu-syste:cs0 dri: 7 /dev/dri/renderD129
+     65   comm=qemu-syste:gl0 dri: 7 /dev/dri/renderD129
+     66   comm=qemu-system-x86 dri: 7 /dev/dri/renderD129
+     66   comm=qemu-syste:sh0 dri: 7 /dev/dri/renderD129
+      7   comm=virgl-2-gpu_ren dri: 2 /dev/dri/renderD129
+     15   comm=virgl-4-gpu_ren dri: 2 /dev/dri/renderD129
+     13   comm=virgl-6-gpu_ren dri: 2 /dev/dri/renderD129
+      2   comm=virgl-7-gpu_ren dri: 2 /dev/dri/renderD129
+      2   comm=virgl-8-gpu_ren dri: 2 /dev/dri/renderD129
+      2   comm=virgl-9-gpu_ren dri: 2 /dev/dri/renderD129
+     82   comm=virgl_r:disk$0 dri: 2 /dev/dri/renderD129
+     33   comm=virgl_render_se dri:
+     12   comm=vkr-queue-6 dri: 2 /dev/dri/renderD129
+     12   comm=vkr-queue-9 dri: 2 /dev/dri/renderD129
+      7   comm=vkr-ring-2 dri: 2 /dev/dri/renderD129
+     15   comm=vkr-ring-4 dri: 2 /dev/dri/renderD129
+     13   comm=vkr-ring-6 dri: 2 /dev/dri/renderD129
+      2   comm=vkr-ring-7 dri: 2 /dev/dri/renderD129
+      2   comm=vkr-ring-8 dri: 2 /dev/dri/renderD129
+      4   comm=vkr-ring-9 dri: 2 /dev/dri/renderD129
+      7   comm=vkr-ringmon-2 dri: 2 /dev/dri/renderD129
+     15   comm=vkr-ringmon-4 dri: 2 /dev/dri/renderD129
+     13   comm=vkr-ringmon-6 dri: 2 /dev/dri/renderD129
+      2   comm=vkr-ringmon-7 dri: 2 /dev/dri/renderD129
+      2   comm=vkr-ringmon-8 dri: 2 /dev/dri/renderD129
+      2   comm=vkr-ringmon-9 dri: 2 /dev/dri/renderD129
+     16   comm=worker dri: 7 /dev/dri/renderD129
+
+# any sample naming renderD128 or card1:
+0
+
+# direct check of the shim (CP_SHIM_LOG=1):
+cp-shim: pid 3296035 (vtest) open(/dev/dri/renderD128) denied
+128=-1(errno 2) 129=3

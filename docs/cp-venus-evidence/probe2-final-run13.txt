@@ -1,0 +1,57 @@
+# Run 13 (final config): synchronous present, VK_KHR_present_wait hidden under VN_HOBBYOS, timeline syncs, kernel at c0630b75
+# cmd: P5_PROBES="vkcube d3d11 d3d12" LO_ON_DISK= MAKEFLAGS=-j16 tools/cp/venus/run-wine-venus.sh > ~/cp/venus-wine13.out 2>&1
+
+## grader (~/cp/venus-wine13.out)
+[P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P5W] slot 3 acquired 02:55:50; boot: -smp 8 -m 12288M -cpu host (KVM)
+[P5W] qemu pid 109372
+[P5W] +1 s: (no [P5] row yet)
+[P5W] screendump vkcube-t20s.ppm at +91 s; QEMU guests on the host now (incl. this one): 4
+[P5W] screendump vkcube-t50s.ppm at +121 s; QEMU guests on the host now (incl. this one): 4
+[P5W] screendump d3d11-t20s.ppm at +159 s; QEMU guests on the host now (incl. this one): 4
+[P5W] screendump d3d11-t50s.ppm at +189 s; QEMU guests on the host now (incl. this one): 4
+[P5W] screendump d3d12-t20s.ppm at +227 s; QEMU guests on the host now (incl. this one): 4
+[P5W] screendump d3d12-t50s.ppm at +256 s; QEMU guests on the host now (incl. this one): 3
+[P5W] guests on the host at the end of the run: 2 (incl. none of ours)
+[P5W] boot finished after 295 s; lock released
+[P5W] --- [P5] rows and probe rows (serial) ---
+[P5W] vkcube vkcube-t20s.ppm: clear=244364 saturated=63392 bbox=(44, 70, 682, 548) hash=db881b4e7e42949b
+[P5W] vkcube vkcube-t50s.ppm: clear=241140 saturated=66644 bbox=(44, 70, 682, 548) hash=33d87166cb4b6e82
+[P5W] vkcube: PASS
+[P5W] d3d11 d3d11-t20s.ppm: clear=237128 saturated=48388 bbox=(724, 70, 1362, 548) hash=de3e0c7df3ff4656
+[P5W] d3d11 d3d11-t50s.ppm: clear=237252 saturated=48284 bbox=(724, 70, 1362, 548) hash=06ed575dd85f1389
+[P5W] d3d11: PASS
+[P5W] d3d12 d3d12-t20s.ppm: clear=237304 saturated=46484 bbox=(724, 574, 1362, 1052) hash=542e7f001df93002
+[P5W] d3d12 d3d12-t50s.ppm: clear=237328 saturated=46448 bbox=(724, 574, 1362, 1052) hash=c4ad73467cc2e362
+[P5W] d3d12: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps
+rc=0
+
+## guest serial: devices and results
+[X] [VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 171.0 ms
+[X] [VK] RESULT frames=13248 wall=65005.0 ms fps=203.80 | per-frame total median 5.00 p90 8.00 worst(after frame 0) 553.00 ms | swapchain 640x480 4 images FIFO | recreated=0 suboptimal=0
+[X] [D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[X] [D3D11] RESULT frames=7666 wall=65007.0 ms fps=117.93 | per-frame median 8.00 p90 9.00 worst(after frame 0) 1161.00 ms
+[X] [D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[X] [D3D12] RESULT frames=11463 wall=65000.0 ms fps=176.35 | per-frame median 5.00 p90 6.00 worst(after frame 0) 741.00 ms
+
+## kernel fence rows (no [VENUS] stall row: no wait was pending >= 2 s)
+[VENUS] fence stats (ctx_destroy) retired=0 irq=0 inline=0 errors=0 waiter_tick_finds=0 post->retire_us <=25:0 <=50:0 <=100:0 <=200:0 <=500:0 <=1000:0 <=2000:0 <=5000:0 <=11000:0 >11000:0
+[VENUS] fence stats (ctx_destroy) retired=122166 irq=39496 inline=82670 errors=0 waiter_tick_finds=23 post->retire_us <=25:77 <=50:2523 <=100:15291 <=200:29661 <=500:38060 <=1000:18764 <=2000:516 <=5000:17052 <=11000:203 >11000:19
+[VENUS] fence stats (ctx_destroy) retired=122167 irq=39497 inline=82670 errors=0 waiter_tick_finds=23 post->retire_us <=25:77 <=50:2523 <=100:15291 <=200:29662 <=500:38060 <=1000:18764 <=2000:516 <=5000:17052 <=11000:203 >11000:19
+[VENUS] fence stats (ctx_destroy) retired=26498 irq=8928 inline=17570 errors=0 waiter_tick_finds=0 post->retire_us <=25:0 <=50:176 <=100:2080 <=200:5441 <=500:8278 <=1000:6003 <=2000:32 <=5000:4475 <=11000:13 >11000:0
+[VENUS] fence stats (ctx_destroy) retired=64835 irq=19518 inline=45317 errors=0 waiter_tick_finds=1 post->retire_us <=25:77 <=50:1681 <=100:8622 <=200:16343 <=500:18417 <=1000:11218 <=2000:160 <=5000:8258 <=11000:53 >11000:6
+[VENUS] fence_wait2 timeout pid=193 ctx=7 ring=1 seqno=0x0000000100006783 issued=0x0000000100006783 done=0x0000000000000000 ctx_inflight=1
+[VENUS] fence_wait2 timeout pid=203 ctx=11 ring=1 seqno=0x0000000100012826 issued=0x0000000100012829 done=0x0000000100012825 ctx_inflight=4
+[VENUS] fence_wait2 timeout pid=203 ctx=11 ring=1 seqno=0x0000000100019A53 issued=0x0000000100019A57 done=0x0000000100019A52 ctx_inflight=5
+[VENUS] fence_wait2 timeout pid=203 ctx=11 ring=1 seqno=0x000000010001D6D1 issued=0x000000010001D6D2 done=0x000000010001D6D0 ctx_inflight=2
+[VENUS] fence_wait2 timeout pid=203 ctx=11 ring=1 seqno=0x000000010001D757 issued=0x000000010001D75A done=0x000000010001D756 ctx_inflight=4
+
+## reading
+All three probes PASS in one boot with the final configuration.  No `[VENUS] stall`
+row fired (no fence wait was pending >= 2 s).  The five `fence_wait2 timeout` rows
+are waits whose caller-supplied deadline expired before the fence retired (each
+fence is the next-but-one in flight on ring 1, done = seqno - 1); the caller
+retried and every fence retired (errors=0 in every ctx_destroy row).
+waiter_tick_finds=23 of 122 167 retirements were found by the per-tick re-check.

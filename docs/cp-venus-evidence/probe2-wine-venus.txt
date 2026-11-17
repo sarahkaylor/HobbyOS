@@ -1,0 +1,136 @@
+# Gate P6 probe 2 -- C5-vk2's Wine P5 probes on Venus (strix, cp-venus + cyberpunk 15ad4a35, 2026-11-17)
+# command: CP_WINE_STAGE=~/cp/wine-build-x/stage/CP/WINE WINE_BUILD=~/cp/wine-build-x CP_X11_WORK=~/cp/x11-build-x2 CP_P5_PE=~/cp/vk2-pe P5_XHOBBY=... P5_XHOBBY_SHA256=935c760f... P5_XSESSION_ENV=HB_SECOND_SCREEN=0 P5_PROBES='vkcube d3d11 d3d12' LO_ON_DISK= TOOLS_SKIP=1 MAKEFLAGS=-j16 bash tools/cp/venus/run-wine-venus.sh
+# verdicts in our terms:
+#   vkcube.exe (winevulkan -> Venus): renders 65 s, 13265 frames (~204 fps), two distinct screendumps.  P5's grader FAILs it only on 'device is not llvmpipe' (P5 hard-codes lavapipe).
+#   d3d11tri.exe (DXVK 3.1.1): frames 0 and 1 render, then the process stops making progress (launcher timeout).
+#   d3d12tri.exe (vkd3d-proton 3.1): frame 0 renders, then ID3D12Fence wait times out after 10 s.  Same in runs 1-3 (run 3 with venus present made synchronous).
+
+[VENUS-P5] qemu: qemu-system-x86_64 -name hobbyos-venus,debug-threads=on -machine q35,accel=kvm,memory-backend=mem0 -cpu host -smp 8 -m 12288M -object memory-backend-memfd,id=mem0,size=12288M,share=on -drive if=pflash,format=raw,file=/home/sarah/cp/lanes/venus/obj/cp-p5/wine/ovmf.fd -device virtio-gpu-gl-pci,blob=true,hostmem=8G,venus=true -vga none -display egl-headless,rendernode=/dev/dri/renderD129 -serial file:/home/sarah/cp/lanes/venus/obj/cp-p5/wine/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/venus/obj/cp-p5/wine/disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff -qmp unix:/home/sarah/cp/lanes/venus/obj/cp-p5/wine/qmp-sock,server,nowait -d guest_errors -D /home/sarah/cp/lanes/venus/obj/cp-p5/wine/qemu-debug.log
+[P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+qemu-slot: all 4 slots busy; waiting
+qemu-slot: slot 4 of 4 held by pid 2622703 01:20:09
+[P5W] slot 4 acquired 01:20:09; boot: -smp 8 -m 12288M -cpu host (KVM)
+[P5W] qemu pid 2650494
+[P5W] +0 s: (no [P5] row yet)
+[VENUS-P5] screendump via pmemsave of framebuffer pa=0x75c00000 -> /home/sarah/cp/lanes/venus/obj/cp-p5/wine/vkcube-t20s.ppm
+[P5W] screendump vkcube-t20s.ppm at +93 s; QEMU guests on the host now (incl. this one): 3
+[VENUS-P5] screendump via pmemsave of framebuffer pa=0x75c00000 -> /home/sarah/cp/lanes/venus/obj/cp-p5/wine/vkcube-t50s.ppm
+[P5W] screendump vkcube-t50s.ppm at +122 s; QEMU guests on the host now (incl. this one): 3
+[P5W] +301 s: [P5] begin d3d11 : wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480
+[P5W] +601 s: [P5] begin d3d11 : wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480
+[P5W] +901 s: [P5] begin d3d11 : wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480
+[P5W] guests on the host at the end of the run: 2 (incl. none of ours)
+[P5W] boot finished after 1110 s; lock released
+[P5W] --- [P5] rows and probe rows (serial) ---
+[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-venus-p5 -> /CP ok
+[P5] begin wineboot : wineboot -i
+[P5] quiesce after wineboot: extra=0
+[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+[P5] keepalive pid=113
+[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[VK] idle: keepalive pid 32, desktop 0000000000010020, 7200 s
+[VK] winprobe: CreateWindowEx -> 0000000000010056 in 117 ms (display driver loaded)
+[P5] end winprobe01 status=0 ms=15221
+[P5] warm-up: display driver loaded
+[P5] begin vkcube : wine Z:\CP\P5\VK\vkcube.exe 65 640 480
+[VK] vkcubex start (C5-vk2, VK_KHR_win32_surface): 65 s, 640x480, present mode fifo, pid 308
+[VK] env VK_DRIVER_FILES=(unset)
+[VK] env VK_ICD_FILENAMES=(unset)
+[VK] env XDG_DATA_DIRS=(unset)
+[VK] env LP_NUM_THREADS=(unset)
+[VK] env DISPLAY=:0
+[VK] env LD_LIBRARY_PATH=/CP/X11/lib:/CP/WINE/lib:/CP/VK/lib:/LIB64:/CP/WINE/lib/wine/x86_64-unix
+[VK] prefault (startup): n/a for a PE image
+[VK] win32: window 000000000003002A 640x480 client, created+shown in 217.0 ms
+[VK] loader vulkan-1.dll (C:\windows\system32\vulkan-1.dll) loaded in 16.0 ms
+[VK] instance surface extensions (14 total): VK_KHR_get_surface_capabilities2 VK_KHR_surface VK_KHR_surface_maintenance1 VK_EXT_surface_maintenance1 VK_KHR_win32_surface
+[VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 183.0 ms
+[VK] vkCreateDevice ok in 97.0 ms (queue family 0, VK_KHR_swapchain)
+[VK] surface: formats(format/colorspace): 50/0 44/0 -> 44; present modes: IMMEDIATE MAILBOX FIFO FIFO_RELAXED -> FIFO
+[VK] surface caps: images 3..16 current 640x480 min 640x480 max 640x480 usage 0x8009f -> 4 images 640x480
+[VK] swapchain: 4 images in 128.0 ms
+[VK] pipeline created in 14.0 ms
+[VK] render loop: 65 s
+[VK] frame 0: acquire 42.00 ms, render 30.00 ms, present 12.00 ms, total 84.00 ms (image 0)
+[VK] frame 1: acquire 0.00 ms, render 0.00 ms, present 1.00 ms, total 1.00 ms (image 1)
+[VK] frame 2: acquire 0.00 ms, render 0.00 ms, present 0.00 ms, total 0.00 ms (image 2)
+[VK] t=5s frames=1066 window fps=213.20 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=10s frames=2164 window fps=219.51 | median ms acquire 1.00 render 1.00 present 0.00 total 4.00
+[VK] t=15s frames=3220 window fps=211.20 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=20s frames=4130 window fps=182.07 | median ms acquire 1.00 render 1.00 present 0.00 total 4.00
+[VK] t=25s frames=5133 window fps=200.56 | median ms acquire 4.00 render 1.00 present 0.00 total 5.00
+[VK] t=30s frames=6151 window fps=203.40 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=35s frames=7234 window fps=216.77 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=40s frames=8299 window fps=213.04 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=45s frames=9278 window fps=195.84 | median ms acquire 4.00 render 1.00 present 0.00 total 5.00
+[VK] t=50s frames=10171 window fps=178.49 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=55s frames=11216 window fps=209.00 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=60s frames=12157 window fps=188.28 | median ms acquire 3.00 render 1.00 present 0.00 total 5.00
+[VK] t=65s frames=13265 window fps=221.64 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] RESULT frames=13265 wall=65001.0 ms fps=204.07 | per-frame total median 4.00 p90 8.00 worst(after frame 0) 746.00 ms | swapchain 640x480 4 images FIFO | recreated=0 suboptimal=0
+[VK] teardown: clean
+[VK] done rc=0
+[P5] end vkcube status=0 ms=67362
+[P5] begin d3d11 : wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480
+[D3D11] d3d11tri start (C5-vk2): 65 s, 640x480, pid 316
+[D3D11] env WINEDLLOVERRIDES=d3d11,dxgi,d3d10core,d3d9,d3d12,d3d12core=n,b;mscoree,mshtml=;winemenubuilder.exe=d DXVK_LOG_LEVEL=info
+[D3D11] module d3d11.dll          Z:\CP\P5\D3D11\d3d11.dll
+[D3D11] module dxgi.dll           Z:\CP\P5\D3D11\dxgi.dll
+[D3D11] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[D3D11] D3D11CreateDeviceAndSwapChain ok in 1071.0 ms, feature level 0xb100
+[D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[D3D11] D3DCompile vs/vs_5_0: 1372 bytes DXBC in 2.0 ms
+[D3D11] D3DCompile ps/ps_5_0: 580 bytes DXBC in 1.0 ms
+[D3D11] frame 0: 83.00 ms
+[D3D11] frame 1: 13.00 ms
+[P5] timeout d3d11 after 900s: SIGKILL pid=191
+[P5] end d3d11 status=timeout ms=936340
+[P5] begin d3d12 : wine Z:\CP\P5\D3D12\d3d12tri.exe 65 640 480
+[D3D12] d3d12tri start (C5-vk2): 65 s, 640x480, pid 352
+[D3D12] env WINEDLLOVERRIDES=d3d11,dxgi,d3d10core,d3d9,d3d12,d3d12core=n,b;mscoree,mshtml=;winemenubuilder.exe=d VKD3D_DEBUG=warn
+[D3D12] module d3d12.dll          Z:\CP\P5\D3D12\d3d12.dll
+[D3D12] module d3d12core.dll      Z:\CP\P5\D3D12\d3d12core.dll
+[D3D12] module dxgi.dll           Z:\CP\P5\D3D12\dxgi.dll
+[D3D12] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[D3D12] D3D12CreateDevice ok in 422.0 ms
+[D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[D3D12] highest shader model (asked 6.0): 0x60
+[D3D12] CreateSwapChainForHwnd ok in 49.0 ms (2 buffers, FLIP_DISCARD)
+[D3D12] D3DCompile vs/vs_5_0: 1340 bytes DXBC in 2.0 ms
+[D3D12] D3DCompile ps/ps_5_0: 580 bytes DXBC in 1.0 ms
+[D3D12] CreateGraphicsPipelineState ok in 4.0 ms
+[D3D12] render loop: 65 s
+[D3D12] frame 0: 153.00 ms (back buffer 0)
+[D3D12] FAIL fence wait timed out (10 s) -> hr=0x80004005
+[D3D12] GetDeviceRemovedReason -> 0x00000000
+[D3D12] done rc=1
+[P5] end d3d12 status=256 ms=13029
+[P5] begin kill : wineserver -k
+[P5] end kill status=0 ms=390
+[P5] quiesce after kill: extra=1
+[P5] done
+[P5W] vkcube vkcube-t20s.ppm: clear=240880 saturated=66872 bbox=(44, 70, 682, 548) hash=946db1de161b960d
+[P5W] vkcube vkcube-t50s.ppm: clear=245544 saturated=62192 bbox=(44, 70, 682, 548) hash=31103a4929d00021
+[P5W] vkcube: FAIL
+[P5W] d3d11: FAIL
+[P5W] d3d12: FAIL
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] FAIL: vkcube: device is not llvmpipe
+[P5W] FAIL: d3d11: no RESULT row
+[P5W] FAIL: d3d11: no '[D3D11] done rc=0'
+[P5W] FAIL: d3d11: launcher end row [P5] end d3d11 status=timeout ms=936340
+[P5W] FAIL: d3d11: adapter row [D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[P5W] FAIL: d3d11: 0 screendump(s)
+[P5W] FAIL: d3d12: no RESULT row
+[P5W] FAIL: d3d12: no '[D3D12] done rc=0'
+[P5W] FAIL: d3d12: launcher end row [P5] end d3d12 status=256 ms=13029
+[P5W] FAIL: d3d12: adapter row [D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[P5W] FAIL: d3d12: 0 screendump(s)
+raw serial: /home/sarah/cp/lanes/venus/obj/cp-p5/wine/serial.log
+rc=1
+
+# --- probe rows from the serial log (run 4)
+6[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-venus-p5 -> /CP ok
+[P5] begin wineboot : wineboot -i

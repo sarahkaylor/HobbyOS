@@ -1,0 +1,53 @@
+# Gate P6 step 1 -- HobbyOS on the Venus host recipe (strix, Ryzen AI MAX+ 395 / RX 9070 XT, 2026-11-16)
+# tree: cp-venus (949ba008 + step-1 logging), make ARCH=intel hobbyos.elf disk.img
+# command: bash tools/cp/venus/boot_check.sh $PWD/obj/venus-check 120
+$ bash tools/cp/host-venus.sh check
+render /dev/dri/renderD129 = 1002:7550 driver=amdgpu pci=0000:65:00.0
+QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.3)
+virglrenderer 1.2.0-2ubuntu2
+-rwxr-xr-x 1 root root 686592 Apr 15  2026 /usr/libexec/virgl_render_server
+shim /home/sarah/cp/venus-build/shim/dmabuf-rdwr-shim.so
+  blob=<bool>            - on/off (default: off)
+  hostmem=<size>         -  (default: 0)
+  venus=<bool>           - on/off (default: off)
+
+--- QEMU command line (obj/venus-check/cmdline.txt)
+host-venus: qemu-system-x86_64 -name hobbyos-venus,debug-threads=on -machine q35,accel=kvm,memory-backend=mem0 -cpu host -smp 8 -m 12288M -object memory-backend-memfd,id=mem0,size=12288M,share=on -drive if=pflash,format=raw,file=/home/sarah/cp/lanes/venus/obj/venus-check/ovmf.fd -device virtio-gpu-gl-pci,blob=true,hostmem=8G,venus=true -vga none -display egl-headless,rendernode=/dev/dri/renderD129 -serial file:/home/sarah/cp/lanes/venus/obj/venus-check/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/venus/obj/venus-check/disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff -qmp unix:/home/sarah/cp/lanes/venus/obj/venus-check/qmp-sock,server,nowait -d guest_errors -D /home/sarah/cp/lanes/venus/obj/venus-check/qemu-debug.log
+LD_PRELOAD=/home/sarah/cp/venus-build/shim/dmabuf-rdwr-shim.so
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/radeon_icd.json
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
+MESA_VK_DEVICE_SELECT=1002:7550
+
+--- serial rows
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[VIRGL3D] feat offered lo=0x000000003000001B virgl=1 edid=1 uuid=0 blob=1 ctx_init=1
+[VIRGL3D] feat virgl=1 ctx_init=0
+[VIRGL3D] capset_info id=1 maxver=1 maxsize=308 resp=0x0000000000001102
+[VIRGL3D] capset index=0 id=1 (virgl) maxver=1 maxsize=308
+[VIRGL3D] capset index=1 id=2 (virgl2) maxver=2 maxsize=1408
+[VIRGL3D] capset index=2 id=4 (venus) maxver=0 maxsize=160
+[VIRGL3D] capset id=1 ver=1 len=308 blob_maxver=1 resp=0x0000000000001103
+VirtIO GPU: virtio-pci
+VirtIO GPU successfully initialized.
+[VIRGL3D] ctx_create ctx=1 name_len=8 resp=0x0000000000001100
+[VIRGL3D] res_create res=4096 64x64 fmt=67 bind=0x000000000000000A resp=0x0000000000001100
+[VIRGL3D] attach res=4096 pages=4 len=16384 resp=0x0000000000001100
+[VIRGL3D] ctx_attach ctx=1 res=4096 resp=0x0000000000001100
+[VIRGL3D] transfer_to_host res=4096 box=64x64x1 resp=0x0000000000001100
+[VIRGL3D] submit ctx=1 bytes=52 fence=1 echoed=1 resp=0x0000000000001100
+[VIRGL3D] fence id=1 retired=1
+[VIRGL3D] transfer_from_host res=4096 box=64x64x1 resp=0x0000000000001100
+[VIRGL3D] readback px00=0x00000000FF00FF00 px_mid=0x00000000FF00FF00 px_last=0x00000000FF00FF00 expect=0x00000000FF00FF00 match=4096/4096
+[VIRGL3D] timing submits=64 total_ms=639 us_per_roundtrip=9984 ok=1
+[VIRGL3D] timing_submit submits=64 total_ms=640 us_each=10000 ok=1
+[VIRGL3D] timing_unfenced submits=64 total_ms=6 us_per_roundtrip=93 ok=1
+[VIRGL3D] submit ctx=1 bytes=52 fence=0 echoed=0 resp=0x0000000000001100
+[VIRGL3D] transfer_from_host res=4096 box=64x64x1 resp=0x0000000000001100
+[VIRGL3D] unfenced_readback px00=0x00000000FF0000FF expect=0x00000000FF0000FF
+[VIRGL3D] submit ctx=1 bytes=52 fence=0 echoed=0 resp=0x0000000000001100
+[VIRGL3D] timing_readback bytes=16384 total_ms=4 us_each=62 ok=1
+[VIRGL3D] flush res=4096 fence=130 resp=0x0000000000001100
+[VIRGL3D] unref res=4096 resp=0x0000000000001100
+[VIRGL3D] ctx_destroy ctx=1 resp=0x0000000000001100
+[VIRGL3D] stats res_in_use=0 peak_res=1 pages_in_use=0 peak_pages=4 peak_mib=0 caps=16384/1048576
+[VIRGL3D] RESULT PASS

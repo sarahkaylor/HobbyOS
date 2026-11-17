@@ -2429,6 +2429,15 @@ int vm_user_read(struct process *p, uint64_t va, void *dst, int len) {
       return -1; /* peer unmapped/protected between touch and lock */
     }
     uint64_t pa = vm_arch_leaf_phys(leaf) + (a & (FRAME_SIZE - 1));
+#ifdef __x86_64__
+    /* P6 (docs/gpu-abi.md §10.6): a mapped GPU blob lives in the device's
+       host-visible window, which the direct map does not cover.  Refuse the
+       copy (EFAULT) instead of faulting the kernel. */
+    if (pa >= DMAP_RAM_MAX) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -1;
+    }
+#endif
     const volatile unsigned char *src = (const volatile unsigned char *)phys_to_virt(pa);
     for (int k = 0; k < in_page; k++)
       d[i + k] = src[k]; /* under vm_lock: frame cannot be freed/unmapped */
@@ -2487,6 +2496,15 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
       return -1; /* peer unmapped/protected between touch and lock */
     }
     uint64_t pa = vm_arch_leaf_phys(leaf) + (a & (FRAME_SIZE - 1));
+#ifdef __x86_64__
+    /* P6 (docs/gpu-abi.md §10.6): a mapped GPU blob lives in the device's
+       host-visible window, which the direct map does not cover.  Refuse the
+       copy (EFAULT) instead of faulting the kernel. */
+    if (pa >= DMAP_RAM_MAX) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -1;
+    }
+#endif
     volatile unsigned char *dst = (volatile unsigned char *)phys_to_virt(pa);
     for (int k = 0; k < in_page; k++)
       dst[k] = s[i + k]; /* under vm_lock: frame cannot be freed/unmapped */

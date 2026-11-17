@@ -323,10 +323,13 @@ static void gpu_client_teardown_unlocked(struct gpu_abi_client* c) {
 
 /* fd close / process teardown hook (fs.c).  On ARM this compiles to a
  * lookup that never matches, because no client can ever be created. */
+static void gpu_m2_release_maps(struct process* p, int pid, int fd);
+
 void gpu_abi_release_fd(struct process* p, int fd) {
   if (!p) return;
   struct process* g = process_group(p);
   int pid = g ? g->pid : p->pid;
+  gpu_m2_release_maps(p, pid, fd); /* P6: user mappings of this fd's blobs */
   struct gpu_abi_client snapshot;
   int have = 0;
 
@@ -641,6 +644,8 @@ static int gpu_do_res_attach(struct process* p, int fd, uint64_t arg) {
   return vm_kwrite(p, arg, &ra, sizeof(ra)) == 0 ? 0 : -EFAULT;
 }
 
+static void gpu_m2_unref_hook(struct process* p, int pid, int fd, uint32_t res_id);
+
 static int gpu_do_res_unref(struct process* p, int fd, uint64_t arg) {
   struct gpu_res_unref ru;
   if (vm_user_read(p, arg, &ru, sizeof(ru)) != 0) return -EFAULT;
@@ -651,6 +656,7 @@ static int gpu_do_res_unref(struct process* p, int fd, uint64_t arg) {
   int owns = c && gpu_client_owns_res(c, ru.res_id);
   spinlock_release_irqrestore(&gpu_abi_lock, fl);
   if (!owns) return -EINVAL;
+  gpu_m2_unref_hook(p, pid, fd, ru.res_id); /* P6: a mapped blob's user PTEs */
 
   int rc = g3d_res_unref(ru.res_id);
   if (rc != 0) return -EIO;
@@ -730,7 +736,12 @@ static int gpu_do_transfer(struct process* p, int fd, uint64_t arg) {
 }
 
 /* The one entry point fs.c / the compat ioctl path call. */
+static int gpu_abi_m2_ioctl(struct process* p, int fd, unsigned long req, uint64_t arg);
+
 int gpu_abi_ioctl(struct process* p, int fd, unsigned long req, uint64_t arg) {
+  /* P6: the Venus requests (11..20, docs/gpu-abi.md §10) have their own
+   * dispatcher; M1's below is unchanged. */
+  if (gpu_abi_m2_req_size(req) >= 0) return gpu_abi_m2_ioctl(p, fd, req, arg);
   /* Request identity first: an unknown number is ENOTTY even without a
    * process/argument, which is also what makes the routing unit-testable. */
   int sz = gpu_abi_req_size(req);
@@ -751,3 +762,629 @@ int gpu_abi_ioctl(struct process* p, int fd, unsigned long req, uint64_t arg) {
     default: return -ENOTTY;
   }
 }
+
+/* ================================================================== */
+/* P6 / Cyberpunk F3: the Venus requests (docs/gpu-abi.md §10).        */
+/* ================================================================== */
+
+int gpu_abi_m2_req_size(unsigned long req) {
+  switch (req) {
+    case GPU_IOC_GET_PARAM: return (int)sizeof(struct gpu_param);
+    case GPU_IOC_GET_CAPSET_INFO2: return (int)sizeof(struct gpu_capset_info2);
+    case GPU_IOC_GET_CAPSET2: return (int)sizeof(struct gpu_capset2);
+    case GPU_IOC_CTX_CREATE2: return (int)sizeof(struct gpu_ctx_create2);
+    case GPU_IOC_RES_CREATE_BLOB: return (int)sizeof(struct gpu_res_create_blob);
+    case GPU_IOC_RES_MAP_BLOB: return (int)sizeof(struct gpu_res_map_blob);
+    case GPU_IOC_RES_UNMAP_BLOB: return (int)sizeof(struct gpu_res_unmap_blob);
+    case GPU_IOC_SUBMIT2: return (int)sizeof(struct gpu_submit2);
+    case GPU_IOC_FENCE_WAIT2: return (int)sizeof(struct gpu_fence_wait2);
+    case GPU_IOC_SCANOUT_BLOB: return 64;
+    default: return -1;
+  }
+}
+
+int gpu_abi_ctx2_ok(const struct gpu_ctx_create2* c, uint32_t max_rings) {
+  if (!c) return 0;
+  if (c->capset_id == 0 || c->capset_id > 0xFF) return 0;
+  if (c->num_rings == 0 || c->num_rings > max_rings || c->num_rings > GPU_MAX_RINGS)
+    return 0;
+  if (c->flags != 0) return 0;
+  return 1;
+}
+
+int gpu_abi_blob_ok(const struct gpu_res_create_blob* b) {
+  if (!b) return 0;
+  if (b->ctx_id == 0) return 0;
+  if (b->blob_mem != GPU_BLOB_MEM_HOST3D) return 0; /* v2: host blobs only */
+  if (b->blob_flags & ~(uint32_t)(GPU_BLOB_FLAG_MAPPABLE | GPU_BLOB_FLAG_SHAREABLE |
+                                  GPU_BLOB_FLAG_CROSS_DEVICE))
+    return 0;
+  if (b->size == 0 || b->size > (64ull << 30)) return 0; /* > the largest window */
+  if (b->cmd_size) {
+    if (!b->cmd || (b->cmd_size & 3u) || b->cmd_size > GPU_ABI_MAX_SUBMIT) return 0;
+  }
+  return 1;
+}
+
+int gpu_abi_submit2_ok(const struct gpu_submit2* s, uint32_t num_rings) {
+  if (!s) return 0;
+  if (s->ctx_id == 0) return 0;
+  if (s->flags & ~(uint32_t)GPU_SUBMIT2_F_FENCE) return 0;
+  if (s->ring_idx >= num_rings || s->ring_idx >= GPU_MAX_RINGS) return 0;
+  if ((s->cs_size & 3u) || s->cs_size > GPU_ABI_MAX_SUBMIT) return 0;
+  if (s->cs_size && !s->cs) return 0;
+  if (!s->cs_size && !(s->flags & GPU_SUBMIT2_F_FENCE)) return 0; /* nothing to do */
+  return 1;
+}
+
+int gpu_abi_map_cache_mode(uint32_t map_info) {
+  switch (map_info & 0x0Fu) {
+    case GPU_MAP_CACHE_CACHED: return 0; /* WB */
+    case GPU_MAP_CACHE_WC: return 1;     /* WC */
+    default: return 2;                   /* UNCACHED, NONE, unknown: UC */
+  }
+}
+
+uint64_t gpu_abi_deadline_ms(uint64_t now_ms, uint64_t timeout_ns) {
+  if (timeout_ns == ~0ull) return ~0ull;
+  uint64_t ms = timeout_ns / 1000000ull;
+  if (timeout_ns % 1000000ull) ms++; /* never earlier than asked */
+  if (ms == 0) ms = 1;
+  if (now_ms > ~0ull - ms) return ~0ull;
+  return now_ms + ms;
+}
+
+#ifdef __x86_64__
+#include "virtio_gpu_blob.h"
+#include "frame.h"
+#include "kmem.h"
+extern uint64_t timer_get_ms(void);
+extern uint64_t timer_get_us(void);
+/* Kick-poll budget of one FENCE_WAIT2 before it parks (see there). */
+#ifndef GPU_M2_KICK_SPIN_US
+#define GPU_M2_KICK_SPIN_US 4000
+#endif
+
+/* One user mapping of a blob (for teardown at fd close). */
+#define GPU_M2_MAX_MAPS 4096
+struct gpu_m2_map {
+  int used;
+  int pid; /* process group */
+  int fd;
+  uint32_t res_id;
+  uint64_t va, len;
+};
+static struct gpu_m2_map* gpu_m2_maps; /* frame-allocated (~160 KiB), see gpu_m2_init */
+/* Rings per context (index = client slot); 0 = not a CTX_CREATE2 context. */
+static uint32_t gpu_m2_rings[GPU_ABI_MAX_CLIENTS];
+
+/* Copy-in staging for command streams and capsets: one blocking lock, never
+ * held across a park (FENCE_WAIT2 does not use it). */
+static uint8_t* gpu_m2_buf; /* frame-allocated 128 KiB, see gpu_m2_init */
+static ylock_t gpu_m2_buf_lock;
+static volatile int gpu_m2_buf_state; /* 0 uninit, 1 init in progress, 2 ready */
+
+/* One-time setup on the first Venus request: the staging lock, and the
+ * staging buffer + mapping table as frame allocations (the kernel image's
+ * static footprint is budgeted, docs/blk-cache.md §11).  0, or -ENOMEM. */
+static void gpu_m2_free_run(uint64_t pa, int n) {
+  for (int i = 0; i < n; i++) frame_free(pa + (uint64_t)i * 4096);
+}
+
+static int gpu_m2_init(void) {
+  int st = __atomic_load_n(&gpu_m2_buf_state, __ATOMIC_ACQUIRE);
+  if (st == 2) return 0;
+  if (st == 3) return -ENOMEM;
+  int e = 0;
+  if (__atomic_compare_exchange_n(&gpu_m2_buf_state, &e, 1, 0, __ATOMIC_ACQ_REL,
+                                  __ATOMIC_ACQUIRE)) {
+    ylock_init(&gpu_m2_buf_lock);
+    int nb = (int)((GPU_ABI_MAX_SUBMIT + 4095) / 4096);
+    int nm = (int)((sizeof(struct gpu_m2_map) * GPU_M2_MAX_MAPS + 4095) / 4096);
+    uint64_t pb = frame_alloc_contig(nb), pm = frame_alloc_contig(nm);
+    if (!pb || !pm) {
+      if (pb) gpu_m2_free_run(pb, nb);
+      if (pm) gpu_m2_free_run(pm, nm);
+      uart_puts("[VENUS] gpu_abi: frame allocation failed\n");
+      __atomic_store_n(&gpu_m2_buf_state, 3, __ATOMIC_RELEASE);
+      return -ENOMEM;
+    }
+    gpu_m2_buf = (uint8_t*)phys_to_virt(pb);
+    struct gpu_m2_map* m = (struct gpu_m2_map*)phys_to_virt(pm);
+    for (int i = 0; i < GPU_M2_MAX_MAPS; i++) m[i].used = 0;
+    __atomic_store_n(&gpu_m2_maps, m, __ATOMIC_RELEASE);
+    __atomic_store_n(&gpu_m2_buf_state, 2, __ATOMIC_RELEASE);
+    return 0;
+  }
+  while ((st = __atomic_load_n(&gpu_m2_buf_state, __ATOMIC_ACQUIRE)) == 1 || st == 0)
+    __asm__ volatile("pause");
+  return st == 2 ? 0 : -ENOMEM;
+}
+
+static void gpu_m2_buf_acquire(void) { ylock_acquire(&gpu_m2_buf_lock); }
+
+static void gpu_m2_buf_release(void) { ylock_release(&gpu_m2_buf_lock); }
+
+static int gpu_m2_pid(struct process* p) {
+  struct process* g = process_group(p);
+  return g ? g->pid : p->pid;
+}
+
+/* The caller's context id and its ring count, if it owns `ctx_id`. */
+static int gpu_m2_owns_ctx(struct process* p, int fd, uint32_t ctx_id, uint32_t* rings) {
+  int pid = gpu_m2_pid(p);
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  struct gpu_abi_client* c = gpu_client_find(pid, fd);
+  int ok = c && c->ctx_id == ctx_id && ctx_id != 0 && ctx_id != GPU_CTX_RESERVED;
+  if (ok && rings) *rings = gpu_m2_rings[c - gpu_clients];
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
+  return ok;
+}
+
+static int gpu_m2_owns_res(struct process* p, int fd, uint32_t res_id) {
+  int pid = gpu_m2_pid(p);
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  struct gpu_abi_client* c = gpu_client_find(pid, fd);
+  int ok = c && gpu_client_owns_res(c, res_id);
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
+  return ok;
+}
+
+static int gpu_m2_get_param(struct process* p, uint64_t arg) {
+  struct gpu_param gp;
+  if (vm_user_read(p, arg, &gp, sizeof(gp)) != 0) return -EFAULT;
+  switch (gp.param) {
+    case GPU_PARAM_ABI_VERSION: gp.value = GPU_ABI_VERSION_VENUS; break;
+    case GPU_PARAM_FEATURES: gp.value = (uint64_t)virtio_gpu_3d_features(); break;
+    case GPU_PARAM_HOST_VISIBLE_SIZE:
+      gp.value = (virtio_gpu_3d_features() & GPU_FEAT_HOST_VISIBLE) ? virtio_gpu_x64_shm_len : 0;
+      break;
+    case GPU_PARAM_MAX_RINGS: gp.value = GPU_MAX_RINGS; break;
+    case GPU_PARAM_NUM_CAPSETS: gp.value = (uint64_t)virtio_gpu_3d_num_capsets(); break;
+    case GPU_PARAM_FENCE_SLOTS: gp.value = VGPU_ASYNC_SLOTS; break;
+    default: return -EINVAL;
+  }
+  return vm_kwrite(p, arg, &gp, sizeof(gp)) == 0 ? 0 : -EFAULT;
+}
+
+static int gpu_m2_capset_info2(struct process* p, uint64_t arg) {
+  struct gpu_capset_info2 ci;
+  if (vm_user_read(p, arg, &ci, sizeof(ci)) != 0) return -EFAULT;
+  int rc = virtio_gpu_3d_capset_at(ci.index, &ci.capset_id, &ci.max_version, &ci.max_size);
+  if (rc != 0) return rc;
+  return vm_kwrite(p, arg, &ci, sizeof(ci)) == 0 ? 0 : -EFAULT;
+}
+
+static int gpu_m2_capset2(struct process* p, uint64_t arg) {
+  struct gpu_capset2 cs;
+  if (vm_user_read(p, arg, &cs, sizeof(cs)) != 0) return -EFAULT;
+  if (!cs.blob || cs.size == 0) return -EINVAL;
+  uint32_t cap = cs.size > GPU_ABI_MAX_BLOB ? GPU_ABI_MAX_BLOB : cs.size;
+  uint32_t n = 0;
+  gpu_m2_buf_acquire();
+  int rc = virtio_gpu_3d_capset_get(cs.capset_id, cs.version, gpu_m2_buf, cap, &n);
+  if (rc == 0 && vm_kwrite(p, cs.blob, gpu_m2_buf, (int)n) != 0) rc = -EFAULT;
+  gpu_m2_buf_release();
+  if (rc != 0) return rc;
+  cs.size = n;
+  return vm_kwrite(p, arg, &cs, sizeof(cs)) == 0 ? 0 : -EFAULT;
+}
+
+static int gpu_m2_ctx_create2(struct process* p, int fd, uint64_t arg) {
+  struct gpu_ctx_create2 cc;
+  if (vm_user_read(p, arg, &cc, sizeof(cc)) != 0) return -EFAULT;
+  if (gpu_abi_present() != 1) return -ENODEV;
+  if (!(virtio_gpu_3d_features() & GPU_FEAT_CONTEXT_INIT)) return -ENODEV;
+  if (!gpu_abi_ctx2_ok(&cc, GPU_MAX_RINGS)) return -EINVAL;
+  cc.name[sizeof(cc.name) - 1] = '\0';
+  int pid = gpu_m2_pid(p);
+
+  /* Reserve the client slot exactly as CTX_CREATE does (one ctx per fd). */
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  struct gpu_abi_client* c = gpu_client_find(pid, fd);
+  if (c && c->ctx_id != 0) {
+    spinlock_release_irqrestore(&gpu_abi_lock, fl);
+    return -EBUSY;
+  }
+  if (!c)
+    for (int i = 0; i < GPU_ABI_MAX_CLIENTS; i++)
+      if (!gpu_clients[i].used) {
+        c = &gpu_clients[i];
+        break;
+      }
+  if (!c) {
+    spinlock_release_irqrestore(&gpu_abi_lock, fl);
+    return -ENOSPC;
+  }
+  c->used = 1;
+  c->pid = pid;
+  c->fd = fd;
+  c->ctx_id = GPU_CTX_RESERVED;
+  c->nres = 0;
+  c->pages = 0;
+  c->bytes = 0;
+  gpu_m2_rings[c - gpu_clients] = 0;
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
+
+  uint32_t id = 0;
+  int rc = virtio_gpu_3d_ctx_create2(cc.capset_id, cc.num_rings, cc.name, &id);
+
+  fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  c = gpu_client_find(pid, fd);
+  int still_ours = (c && c->ctx_id == GPU_CTX_RESERVED);
+  if (rc == 0 && still_ours) {
+    c->ctx_id = id;
+    gpu_m2_rings[c - gpu_clients] = cc.num_rings;
+  } else if (still_ours) {
+    c->used = 0;
+    c->pid = 0;
+    c->fd = -1;
+    c->ctx_id = 0;
+  }
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
+  if (rc != 0) return rc == -EINVAL ? -EINVAL : -EIO;
+  if (!still_ours) {
+    g3d_ctx_destroy(id);
+    return -EBADF;
+  }
+  cc.ctx_id = id;
+  return vm_kwrite(p, arg, &cc, sizeof(cc)) == 0 ? 0 : -EFAULT;
+}
+
+static int gpu_m2_res_create_blob(struct process* p, int fd, uint64_t arg) {
+  struct gpu_res_create_blob rb;
+  if (vm_user_read(p, arg, &rb, sizeof(rb)) != 0) return -EFAULT;
+  if (!gpu_abi_blob_ok(&rb)) {
+    gpu_abi_say("[GPU] blob_create refused: mem=", (int)rb.blob_mem);
+    gpu_abi_say(" flags=", (int)rb.blob_flags);
+    gpu_abi_say(" size_k=", (int)(rb.size >> 10));
+    gpu_abi_say(" cmd_size=", (int)rb.cmd_size);
+    uart_puts("\n");
+    return -EINVAL;
+  }
+  if (!gpu_m2_owns_ctx(p, fd, rb.ctx_id, 0)) return -EINVAL;
+  int pid = gpu_m2_pid(p);
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  struct gpu_abi_client* c = gpu_client_find(pid, fd);
+  int full = !c || c->nres >= GPU_ABI_MAX_RES_PER_CLIENT;
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
+  if (full) return -ENOSPC;
+
+  uint32_t id = 0;
+  int rc;
+  if (rb.cmd_size) {
+    gpu_m2_buf_acquire();
+    if (vm_user_read(p, rb.cmd, gpu_m2_buf, (int)rb.cmd_size) != 0)
+      rc = -EFAULT;
+    else
+      rc = virtio_gpu_3d_blob_create(rb.ctx_id, rb.blob_mem, rb.blob_flags, rb.blob_id,
+                                     rb.size, gpu_m2_buf, rb.cmd_size, &id);
+    gpu_m2_buf_release();
+  } else {
+    rc = virtio_gpu_3d_blob_create(rb.ctx_id, rb.blob_mem, rb.blob_flags, rb.blob_id,
+                                   rb.size, 0, 0, &id);
+  }
+  if (rc != 0) return rc == -EFAULT ? -EFAULT : (rc == -ENOSPC ? -ENOSPC : -EIO);
+
+  fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  c = gpu_client_find(pid, fd);
+  int stored = 0;
+  if (c && c->ctx_id == rb.ctx_id && c->nres < GPU_ABI_MAX_RES_PER_CLIENT) {
+    c->res_ids[c->nres] = id;
+    c->res_pages[c->nres] = 0; /* host memory: nothing counted against the pool */
+    c->nres++;
+    stored = 1;
+  }
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
+  if (!stored) {
+    g3d_res_unref(id);
+    return -EBADF;
+  }
+  rb.res_id = id;
+  return vm_kwrite(p, arg, &rb, sizeof(rb)) == 0 ? 0 : -EFAULT;
+}
+
+/* Install [phys, phys+size) into the caller's address space with the
+ * memory type map_info asks for; the leaves are VMK_FB-class (shared, never
+ * freed by teardown).  Returns 0 + *va. */
+static int gpu_m2_map_user(struct process* p, uint64_t phys, uint64_t size,
+                           uint32_t map_info, uint64_t* va) {
+  struct process* g = process_group(p);
+  struct addr_space* as = g ? g->as : p->as;
+  if (!as || as->ver != AS_V2) return -EFAULT;
+  uint64_t lo = USER_MMAP_BASE_V2, hi = USER_MMAP_LIMIT_V2;
+  if (as->layout == VM_LAYOUT_COMPAT) {
+    lo = 0x700000000000ull;
+    hi = 0x7f0000000000ull;
+  }
+  uint64_t base = 0;
+  if (vm_region_alloc_hole(as, lo, hi, size, VM_PROT_READ | VM_PROT_WRITE, VMK_FB,
+                           VM_MAP_SHARED, 0, 0, &base) != 0)
+    return -ENOMEM;
+  int mode = gpu_abi_map_cache_mode(map_info);
+  for (uint64_t off = 0; off < size; off += 4096) {
+    if (vm_map_page(as, base + off, phys + off, VM_PROT_READ | VM_PROT_WRITE, VMK_FB) != 0 ||
+        (mode != 0 && vm_arch_set_cache(as, base + off, mode) != 0)) {
+      vm_munmap_range(g ? g : p, base, size);
+      return -ENOMEM;
+    }
+  }
+  *va = base;
+  return 0;
+}
+
+static int gpu_m2_res_map_blob(struct process* p, int fd, uint64_t arg) {
+  struct gpu_res_map_blob mb;
+  if (vm_user_read(p, arg, &mb, sizeof(mb)) != 0) return -EFAULT;
+  if (mb.res_id == 0 || !gpu_m2_owns_res(p, fd, mb.res_id)) return -EINVAL;
+  int pid = gpu_m2_pid(p);
+  /* Already mapped by this client: same answer. */
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  for (int i = 0; i < GPU_M2_MAX_MAPS; i++) {
+    struct gpu_m2_map* m = &gpu_m2_maps[i];
+    if (m->used && m->pid == pid && m->fd == fd && m->res_id == mb.res_id) {
+      mb.va = m->va;
+      mb.size = m->len;
+      spinlock_release_irqrestore(&gpu_abi_lock, fl);
+      uint64_t ph = 0, sz = 0;
+      virtio_gpu_3d_blob_map(mb.res_id, &ph, &sz, &mb.map_info); /* already mapped: no-op */
+      return vm_kwrite(p, arg, &mb, sizeof(mb)) == 0 ? 0 : -EFAULT;
+    }
+  }
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
+
+  uint64_t phys = 0, size = 0;
+  uint32_t mi = 0;
+  int rc = virtio_gpu_3d_blob_map(mb.res_id, &phys, &size, &mi);
+  if (rc != 0) return rc;
+  uint64_t va = 0;
+  rc = gpu_m2_map_user(p, phys, size, mi, &va);
+  if (rc != 0) {
+    virtio_gpu_3d_blob_unmap(mb.res_id);
+    return rc;
+  }
+  int slot = -1;
+  fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  for (int i = 0; i < GPU_M2_MAX_MAPS; i++)
+    if (!gpu_m2_maps[i].used) {
+      slot = i;
+      gpu_m2_maps[i].used = 1;
+      gpu_m2_maps[i].pid = pid;
+      gpu_m2_maps[i].fd = fd;
+      gpu_m2_maps[i].res_id = mb.res_id;
+      gpu_m2_maps[i].va = va;
+      gpu_m2_maps[i].len = size;
+      break;
+    }
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
+  if (slot < 0) {
+    struct process* g = process_group(p);
+    vm_munmap_range(g ? g : p, va, size);
+    virtio_gpu_3d_blob_unmap(mb.res_id);
+    return -ENOSPC;
+  }
+  static int map_rows = 0;
+  if (map_rows++ < 16) {
+    gpu_abi_say("[VENUS] user map res=", (int)mb.res_id);
+    gpu_abi_say(" size_k=", (int)(size >> 10));
+    gpu_abi_say(" map_info=", (int)mi);
+    gpu_abi_say(" mode=", gpu_abi_map_cache_mode(mi));
+    uart_puts(" va=");
+    extern void uart_print_hex(uint64_t val);
+    uart_print_hex(va);
+    uart_puts("\n");
+  }
+  mb.va = va;
+  mb.size = size;
+  mb.map_info = mi;
+  return vm_kwrite(p, arg, &mb, sizeof(mb)) == 0 ? 0 : -EFAULT;
+}
+
+/* Drop this client's user mapping of res_id (if any): PTEs, then the record. */
+static void gpu_m2_drop_map(struct process* p, int pid, int fd, uint32_t res_id) {
+  uint64_t va = 0, len = 0;
+  if (!__atomic_load_n(&gpu_m2_maps, __ATOMIC_ACQUIRE)) return; /* no Venus request ran */
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+  for (int i = 0; i < GPU_M2_MAX_MAPS; i++) {
+    struct gpu_m2_map* m = &gpu_m2_maps[i];
+    if (m->used && m->pid == pid && m->fd == fd && m->res_id == res_id) {
+      va = m->va;
+      len = m->len;
+      m->used = 0;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&gpu_abi_lock, fl);
+  if (!va) return;
+  struct process* g = process_group(p);
+  struct process* owner = g ? g : p;
+  if (owner && owner->as) {
+    struct vm_region* r = vm_region_find(owner->as, va);
+    if (r && r->kind == VMK_FB) vm_munmap_range(owner, va, len);
+  }
+}
+
+static void gpu_m2_unref_hook(struct process* p, int pid, int fd, uint32_t res_id) {
+  gpu_m2_drop_map(p, pid, fd, res_id);
+}
+
+static int gpu_m2_res_unmap_blob(struct process* p, int fd, uint64_t arg) {
+  struct gpu_res_unmap_blob ub;
+  if (vm_user_read(p, arg, &ub, sizeof(ub)) != 0) return -EFAULT;
+  if (ub.res_id == 0 || !gpu_m2_owns_res(p, fd, ub.res_id)) return -EINVAL;
+  gpu_m2_drop_map(p, gpu_m2_pid(p), fd, ub.res_id);
+  return virtio_gpu_3d_blob_unmap(ub.res_id) == 0 ? 0 : -EIO;
+}
+
+static void gpu_m2_release_maps(struct process* p, int pid, int fd) {
+  if (!__atomic_load_n(&gpu_m2_maps, __ATOMIC_ACQUIRE)) return;
+  for (;;) {
+    uint32_t res = 0;
+    uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
+    for (int i = 0; i < GPU_M2_MAX_MAPS; i++)
+      if (gpu_m2_maps[i].used && gpu_m2_maps[i].pid == pid && gpu_m2_maps[i].fd == fd) {
+        res = gpu_m2_maps[i].res_id;
+        break;
+      }
+    spinlock_release_irqrestore(&gpu_abi_lock, fl);
+    if (!res) return;
+    gpu_m2_drop_map(p, pid, fd, res);
+  }
+}
+
+static int gpu_m2_submit2(struct process* p, int fd, uint64_t arg) {
+  struct gpu_submit2 sb;
+  if (vm_user_read(p, arg, &sb, sizeof(sb)) != 0) return -EFAULT;
+  uint32_t rings = 0;
+  if (!gpu_m2_owns_ctx(p, fd, sb.ctx_id, &rings) || rings == 0) return -EINVAL;
+  if (!gpu_abi_submit2_ok(&sb, rings)) return -EINVAL;
+  if (sb.cs_size && !vm_range_is_user(process_group(p)->as, sb.cs, sb.cs_size))
+    return -EINVAL;
+  int fenced = (sb.flags & GPU_SUBMIT2_F_FENCE) ? 1 : 0;
+  uint64_t seq = 0;
+  int rc;
+  if (sb.cs_size) {
+    gpu_m2_buf_acquire();
+    if (vm_user_read(p, sb.cs, gpu_m2_buf, (int)sb.cs_size) != 0)
+      rc = -EFAULT;
+    else
+      rc = virtio_gpu_3d_submit2(sb.ctx_id, sb.ring_idx, fenced, gpu_m2_buf, sb.cs_size, &seq);
+    gpu_m2_buf_release();
+  } else {
+    rc = virtio_gpu_3d_submit2(sb.ctx_id, sb.ring_idx, fenced, 0, 0, &seq);
+  }
+  if (rc != 0) return rc == -EFAULT ? -EFAULT : (rc == -EINVAL ? -EINVAL : -EIO);
+  sb.seqno = seq;
+  return vm_kwrite(p, arg, &sb, sizeof(sb)) == 0 ? 0 : -EFAULT;
+}
+
+static int gpu_m2_fence_wait2(struct process* p, int fd, uint64_t arg) {
+  struct gpu_fence_wait2 fw;
+  if (vm_user_read(p, arg, &fw, sizeof(fw)) != 0) return -EFAULT;
+  uint32_t rings = 0;
+  if (!gpu_m2_owns_ctx(p, fd, fw.ctx_id, &rings) || fw.ring_idx >= rings || fw.seqno == 0)
+    return -EINVAL;
+  int rc = virtio_gpu_3d_fence_check(fw.ctx_id, fw.ring_idx, fw.seqno);
+  if (rc != -EAGAIN) return rc;
+  if (fw.timeout_ns == 0) return -ETIMEDOUT;
+  /* Kick-poll before parking (docs/gpu-abi.md §10.5): QEMU retires a finished
+   * fence when it handles a queue notification, otherwise only from its 10 ms
+   * poll timer.  Spin with kicks for up to GPU_M2_KICK_SPIN_US (once per wait,
+   * not again after a restart), then park for the IRQ. */
+  if (fw.deadline_ms == 0) {
+    uint64_t t0 = timer_get_us(), budget = GPU_M2_KICK_SPIN_US;
+    if (fw.timeout_ns / 1000ull < budget) budget = fw.timeout_ns / 1000ull;
+    while (timer_get_us() - t0 < budget) {
+      rc = virtio_gpu_3d_fence_kick_check(fw.ctx_id, fw.ring_idx, fw.seqno);
+      if (rc != -EAGAIN) return rc;
+      for (int k = 0; k < 2000; k++) __asm__ volatile("pause");
+    }
+  }
+  uint64_t now = timer_get_ms();
+  if (fw.deadline_ms == 0) {
+    /* First park: fix the deadline in the caller's struct so the restarted
+     * syscall keeps it (docs/gpu-abi.md §10.5). */
+    fw.deadline_ms = gpu_abi_deadline_ms(now, fw.timeout_ns);
+    if (vm_kwrite(p, arg, &fw, sizeof(fw)) != 0) return -EFAULT;
+  } else if (fw.deadline_ms != ~0ull && now >= fw.deadline_ms) {
+    /* A fence that never retires is the one thing a hang report needs. */
+    static int to_rows = 0;
+    if (to_rows++ < 16) {
+      uint64_t issued = 0, done = 0;
+      int inflight = 0;
+      virtio_gpu_3d_fence_state(fw.ctx_id, fw.ring_idx, &issued, &done, &inflight);
+      gpu_abi_say("[VENUS] fence_wait2 timeout pid=", gpu_m2_pid(p));
+      gpu_abi_say(" ctx=", (int)fw.ctx_id);
+      gpu_abi_say(" ring=", (int)fw.ring_idx);
+      uart_puts(" seqno=");
+      extern void uart_print_hex(uint64_t val);
+      uart_print_hex(fw.seqno);
+      uart_puts(" issued=");
+      uart_print_hex(issued);
+      uart_puts(" done=");
+      uart_print_hex(done);
+      gpu_abi_say(" ctx_inflight=", inflight);
+      uart_puts("\n");
+    }
+    return -ETIMEDOUT;
+  }
+  /* A restarted wait (deadline already set): drain + kick before parking
+   * again.  The device's INTx can be lost -- on q35 it shares line 10 with the
+   * legacy virtio-net, and an edge-mode PIC drops the GPU's edge while the
+   * net holds the line (measured: a d3d12tri waiter parked 2 s on a fence the
+   * used ring had long retired).  So a parked waiter also re-checks every
+   * tick; the IRQ remains the fast path. */
+  if (fw.deadline_ms != 0) {
+    rc = virtio_gpu_3d_fence_kick_check(fw.ctx_id, fw.ring_idx, fw.seqno);
+    if (rc != -EAGAIN) {
+      if (rc == 0) virtio_gpu_3d_note_tick_retire();
+      return rc;
+    }
+    /* Still pending after >= 2 s: dump the context's fence state (rate-limited)
+     * -- the stall report an infinite WSI wait otherwise never produces. */
+    static struct { int tid; uint64_t seqno, first_ms; } seen[32];
+    static uint64_t last_dump_ms;
+    static int dumps;
+    int k, slot = -1;
+    for (k = 0; k < 32; k++)
+      if (seen[k].tid == p->pid && seen[k].seqno == fw.seqno) break;
+    if (k == 32) {
+      for (k = 0; k < 32; k++)
+        if (seen[k].tid == 0 || now - seen[k].first_ms > 60000) { slot = k; break; }
+      if (slot < 0) slot = (int)(now % 32);
+      seen[slot].tid = p->pid;
+      seen[slot].seqno = fw.seqno;
+      seen[slot].first_ms = now;
+      k = slot;
+    }
+    if (now - seen[k].first_ms >= 2000 && now - last_dump_ms >= 1000 && dumps < 64) {
+      last_dump_ms = now;
+      dumps++;
+      gpu_abi_say("[VENUS] stall pid=", gpu_m2_pid(p));
+      gpu_abi_say(" tid=", p->pid);
+      gpu_abi_say(" waits_ms=", (int)(now - seen[k].first_ms));
+      gpu_abi_say(" ctx=", (int)fw.ctx_id);
+      gpu_abi_say(" ring=", (int)fw.ring_idx);
+      uart_puts(" seqno=");
+      extern void uart_print_hex(uint64_t val);
+      uart_print_hex(fw.seqno);
+      uart_puts("\n");
+      virtio_gpu_3d_fence_dump(fw.ctx_id);
+    }
+  }
+  /* Park until the IRQ wakes us, the deadline, or the next tick. */
+  uint64_t wake = now + 1;
+  if (fw.deadline_ms != ~0ull && fw.deadline_ms < wake) wake = fw.deadline_ms;
+  return virtio_gpu_3d_fence_park(fw.ctx_id, fw.ring_idx, fw.seqno, wake);
+}
+
+static int gpu_abi_m2_ioctl(struct process* p, int fd, unsigned long req, uint64_t arg) {
+  if (!p || arg == 0) return -EINVAL;
+  if (gpu_abi_present() != 1) return -ENODEV;
+  if (gpu_m2_init() != 0) return -ENOMEM;
+  switch (req) {
+    case GPU_IOC_GET_PARAM: return gpu_m2_get_param(p, arg);
+    case GPU_IOC_GET_CAPSET_INFO2: return gpu_m2_capset_info2(p, arg);
+    case GPU_IOC_GET_CAPSET2: return gpu_m2_capset2(p, arg);
+    case GPU_IOC_CTX_CREATE2: return gpu_m2_ctx_create2(p, fd, arg);
+    case GPU_IOC_RES_CREATE_BLOB: return gpu_m2_res_create_blob(p, fd, arg);
+    case GPU_IOC_RES_MAP_BLOB: return gpu_m2_res_map_blob(p, fd, arg);
+    case GPU_IOC_RES_UNMAP_BLOB: return gpu_m2_res_unmap_blob(p, fd, arg);
+    case GPU_IOC_SUBMIT2: return gpu_m2_submit2(p, fd, arg);
+    case GPU_IOC_FENCE_WAIT2: return gpu_m2_fence_wait2(p, fd, arg);
+    case GPU_IOC_SCANOUT_BLOB: return -ENOSYS;
+    default: return -ENOTTY;
+  }
+}
+#else
+static void gpu_m2_release_maps(struct process* p, int pid, int fd) {
+  (void)p; (void)pid; (void)fd;
+}
+static void gpu_m2_unref_hook(struct process* p, int pid, int fd, uint32_t res_id) {
+  (void)p; (void)pid; (void)fd; (void)res_id;
+}
+static int gpu_abi_m2_ioctl(struct process* p, int fd, unsigned long req, uint64_t arg) {
+  (void)p; (void)fd; (void)req; (void)arg;
+  return -ENODEV; /* ARM: no 3D transport */
+}
+#endif
