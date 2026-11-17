@@ -96,6 +96,8 @@ uint64_t frame_alloc_contig(int n);
 
 int frame_total_count(void);
 int frame_free_count(void);
+/* C1-k6: frees of an already-free frame seen so far ([FRAME-DFREE] rows). */
+int frame_dfree_count(void);
 int frame_used_count(void);
 int frame_high_water(void);
 /* L75: frames handed out at a physical address that is not RAM (the 32-bit

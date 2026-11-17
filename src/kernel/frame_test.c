@@ -62,14 +62,18 @@ static void test_frame_alloc_free_delta(void) {
   frame_free(f);
   EXPECT_EQ(frame_free_count(), free0);
 
-  /* Freeing again is idempotent (no double-decrement). */
+  /* Freeing again is idempotent (no double-decrement).  C1-k6: and it is
+     counted, with one [FRAME-DFREE] row -- the tripwire's contract. */
+  int dfree0 = frame_dfree_count();
   frame_free(f);
   EXPECT_EQ(frame_free_count(), free0);
+  EXPECT_EQ(frame_dfree_count(), dfree0 + 1);
 
-  /* Out-of-pool / misaligned frees are ignored. */
+  /* Out-of-pool / misaligned frees are ignored (and are not double frees). */
   frame_free(0x1000);
   frame_free(f + 1);
   EXPECT_EQ(frame_free_count(), free0);
+  EXPECT_EQ(frame_dfree_count(), dfree0 + 1);
 }
 
 static void test_frame_reuse(void) {
