@@ -2316,19 +2316,38 @@ int vm_cow_frame_get(uint64_t phys) {
   return rc;
 }
 
-int vm_cow_frame_put(uint64_t phys) {
-  if (__atomic_load_n(&cowt_state, __ATOMIC_ACQUIRE) != 2)
-    return 1; /* no table: nothing was ever shared */
+static int cowt_put_locked(uint64_t phys) {
   uint32_t pfn1 = (uint32_t)(phys / FRAME_SIZE) + 1;
-  uint64_t fl = spinlock_acquire_irqsave(&cowt_lock);
   int found = 0;
   uint32_t i = cowt_slot(pfn1, &found);
   if (found) {
     if (--cowt[i].n <= 1)
       cowt_delete(i); /* one mapper left: it owns the frame now */
   }
-  spinlock_release_irqrestore(&cowt_lock, fl);
   return found ? 0 : 1;
+}
+
+int vm_cow_frame_put(uint64_t phys) {
+  if (__atomic_load_n(&cowt_state, __ATOMIC_ACQUIRE) != 2)
+    return 1; /* no table: nothing was ever shared */
+  uint64_t fl = spinlock_acquire_irqsave(&cowt_lock);
+  int r = cowt_put_locked(phys);
+  spinlock_release_irqrestore(&cowt_lock, fl);
+  return r;
+}
+
+/* C1-fork: release a batch of COW frames under one cowt_lock hold (the
+   teardown of an exec'd fork child drops every shared frame at once).
+   phys[i] is set to 0 for frames another AS still maps; the caller frees
+   the rest. */
+void vm_cow_frame_put_batch(uint64_t *phys, int n) {
+  if (__atomic_load_n(&cowt_state, __ATOMIC_ACQUIRE) != 2)
+    return;
+  uint64_t fl = spinlock_acquire_irqsave(&cowt_lock);
+  for (int i = 0; i < n; i++)
+    if (!cowt_put_locked(phys[i]))
+      phys[i] = 0;
+  spinlock_release_irqrestore(&cowt_lock, fl);
 }
 
 int vm_cow_frame_shared(uint64_t phys) {
@@ -5671,7 +5690,14 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
           vm_frame_copy(phys, vm_arch_leaf_phys(leaf), FRAME_SIZE);
           fresh = 1;
         }
-        if (vm_arch_map(dst, a, phys, mprot, mkind) != 0) {
+        int mrc;
+#ifdef __x86_64__
+        if (cow)
+          mrc = vm_arch_map_cow(dst, a, phys, mprot); /* read-only + COW */
+        else
+#endif
+          mrc = vm_arch_map(dst, a, phys, mprot, mkind);
+        if (mrc != 0) {
           if (fresh)
             frame_free(phys);
           if (cow)
@@ -5679,10 +5705,6 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
           err = 3;
           break;
         }
-#ifdef __x86_64__
-        if (cow)
-          (void)vm_arch_cow_mark(dst, a); /* the child's leaf: read-only + COW */
-#endif
         dst->resident_frames++;
         if (dst->resident_frames > dst->peak_frames)
           dst->peak_frames = dst->resident_frames;

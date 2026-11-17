@@ -773,9 +773,11 @@ void vm_arch_shootdown(struct addr_space *as);
    still maps it.  ARM never creates COW leaves (its fork copies). */
 int vm_arch_cow_mark(struct addr_space *as, uint64_t va);
 int vm_arch_leaf_cow(uint64_t leaf);
+int vm_arch_map_cow(struct addr_space *as, uint64_t va, uint64_t phys, uint16_t prot);
 void vm_arch_cow_clear(struct addr_space *as, uint64_t va, uint16_t prot);
 int vm_cow_frame_get(uint64_t phys);
 int vm_cow_frame_put(uint64_t phys);
 int vm_cow_frame_shared(uint64_t phys);
+void vm_cow_frame_put_batch(uint64_t *phys, int n);
 
 #endif /* VM_H */
