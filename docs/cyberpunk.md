@@ -1155,6 +1155,40 @@ than 12 GiB, any download (Mesa is already on strix; virglrenderer is
 installed), and any `/etc` change other than `exports.sh` wait for the user's
 approval through the integrator.
 
+### 7.2f Wave 6 (v6, 2026-11-17) — playing the game: P9 on Venus, P7, and the infrastructure under them
+
+Wave 6 starts from `cyberpunk` @ e36f70a9: Gates P2–P6 passed, and Cyberpunk 2077 reaches its main menu in
+HobbyOS on lavapipe (launch + ~300 s) and on Venus with the RX 9070 XT (launch + ~160–180 s, 2 of 3 boots on
+integ7). The parity reference is the integ7 batch (`strix:~/cp/integ-gates10.txt`, `integ10-rerun.txt`).
+Gate host, slots, `exports.sh`, `-j16` and the NFS guards are unchanged (§7.4).
+
+The user decided two things on 2026-11-17:
+- **P9 uses the user's own saves.** The newest autosave (AutoSave-16, 2025-08-01) and manual save
+  (ManualSave-86, 2025-08-08) were copied read-only from P0's host prefix into `strix:~/cp/game-profile/`.
+  Save files never go into git.
+- **P9 game boots may use up to 32 GiB of guest RAM.** At most one such boot runs at a time
+  (`flock /tmp/cp-bigguest.lock`); every other boot stays at 12 GiB.
+
+Three facts shape the wave:
+- **The serial console is not line-atomic.** Kernel rows from two CPUs interleave character by character and
+  destroy probe rows (integ7's P5 grade, integ6's P2 "hello"). Every gate grades from that console, so it is
+  the first thing to fix.
+- **Presentation is a CPU copy.** Venus frames reach the screen through Mesa's software WSI and X PutImage
+  (synchronous present, `VK_KHR_present_wait` hidden). P7's zero-copy scanout is the path to real fps.
+- **Timers are coarse.** `Sleep(1)` costs 8–22 ms in the guest (C6's p8caps rows). Windows games pace frames
+  and worker threads with short sleeps and waits.
+
+| Lane | Scope (milestone) | Owns | Must not touch |
+|---|---|---|---|
+| **C0-console** | Console integrity: every kernel row is written to serial whole (per-CPU line buffers flushed under one lock, or an equivalent), user console writes relayed whole, and crash/fault dumps still printed when locks are held (a bounded trylock and fallback). A verbosity knob (`CP_DIAG=` or a boot arg) moves the high-volume diagnostic rows (`[PUB]`, `[MR]`, `[RESUME-*]`, `[ALIVE-SET]`, `[BLKD]`, `[PECOW]`…) off by default, keeping every row a gate grades. Graders (`tools/cp/p2`, `p4`, `p5`, `p8`, `run-wine-p2.sh`) match rows anywhere in a line as a second line of defence, and P5/P6 get separate output dirs. Gate: a probe with 8 CPUs of kernel rows plus user-space writers for 60 s and 0 interleaved lines; P2/P4/P5/P6/P8 graded clean twice each; serial time per boot reported | the console/serial print path, the diagnostic-row call sites (gating only), `tools/cp/*` graders, `docs/cp-console.md` | behaviour changes outside printing |
+| **C9-play** | P9 on Venus: load ManualSave-86 or AutoSave-16 from the staged profile, play 10 minutes with QMP keyboard input (walk, look, open the map; drive if the save allows), save, quit, reboot, reload. fps rows at 1280×720 Low (winevulkan `+fps` or DXVK/vkd3d HUD counters), frame-pool and RSS use, and every stop in order with an owner. Guest up to `-m 32G` under the big-guest lock. Also chase P8's open game-side stops on Venus: the clean early exit (1 of 3 integ7 boots), the title/loading stall (C6 v19) and the game's own exit 3 / int3 (C3-ext2w boots) | `tools/cp/p9/`, `tools/cp/p8/` (shared with nobody now), `src/user/cp/p9*`, `docs/cp-p9.md` | kernel files (report with a probe) |
+| **C6-p7** | P7: zero-copy presentation for Venus. A swapchain blob shown with `SET_SCANOUT_BLOB` (AD-6) when a window is fullscreen, with hand-back to X on exit or focus loss (F5, with the X server); then bring back `VK_KHR_present_wait` and async present (root-cause the async-present `pthread_mutex_lock(0x9)` fault first). A present-cost instrument (like RimWorld's `[HBT]`). Gate P7: `vkcube.exe` fullscreen at 1920×1080 at the host's refresh rate, or a measured reason why not; per-present cost; then the P8 menu on Venus with the new path, and its menu fps | `src/kernel/virtio_gpu*`, `gpu_abi*`, `docs/gpu-abi.md`, `tools/cp/venus/`, `tools/mesa/venus/`, the WSI patches, the X server's scanout hand-back (`src/user/x11/**`, `third_party/x11` server side) | timers, signals, console |
+| **C1-k6** | Kernel debt under the game: high-resolution timeouts (nanosleep, futex, poll/epoll and `clock_nanosleep` deadlines below the tick, e.g. a one-shot TSC-deadline/APIC timer), so `Sleep(1)` costs ~1 ms; `clock_nanosleep(TIMER_ABSTIME)`; SIGKILL of a group whose leader thread has exited (p8killprobe K1/K2); `signalfd`; `ru_stime`; the remaining unlocked fd-install scans (eventfd, timerfd, epoll, memfd, `file_connect`); a bounded `[FRAME-DFREE]` tripwire for double `frame_free` (C1-pe's open item). Each with a probe that fails on base | timer/tick code, the scheduler's sleep/wake paths, signal delivery in `process.c`/`trap.c`, `linux_compat_*` for these calls, `frame.c` (tripwire only) | the console (C0-console), GPU files |
+
+Merge order: C0-console first (every later grade depends on it). Then C1-k6, C6-p7 and C9-play's harness, in
+whatever order they go green. Each merge is re-gated on the merged tree with the full batch, P2, P4, P5,
+the Venus P6 rows and one P8 boot on each GPU.
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
