@@ -43,6 +43,7 @@ extern const struct l_sysent l_tab_proc[] __attribute__((weak));
 extern const struct l_sysent l_tab_misc[] __attribute__((weak));
 extern const struct l_sysent l_tab_thr[] __attribute__((weak));
 extern const struct l_sysent l_tab_tmr[] __attribute__((weak));
+extern const struct l_sysent l_tab_shm[] __attribute__((weak)); /* cp/x3 */
 /* cp/ext2 (src/kernel/ext2_compat.c): consulted FIRST, and its handlers may
    DECLINE (return 0) a number another table owns when the path/fd is not on
    the ext2 volume -- the search then continues below as if it were absent. */
@@ -423,6 +424,7 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     (const struct l_sysent *)l_tab_misc,
     (const struct l_sysent *)l_tab_thr,
     (const struct l_sysent *)l_tab_tmr,
+    (const struct l_sysent *)l_tab_shm,
   };
   for (unsigned t = 0; t < sizeof tables / sizeof tables[0]; t++) {
     const struct l_sysent *tab = tables[t];

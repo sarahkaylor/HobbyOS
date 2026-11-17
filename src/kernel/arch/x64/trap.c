@@ -3415,6 +3415,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_shutdown(tf);
   } else if (syscall_num == SYS_VDISPLAY) {
     sys_vdisplay(tf);
+  } else if (syscall_num == SYS_SHM) { /* cp/x3: linux_compat_shm.c */
+    extern int64_t hb_shm_native(struct process *, int, uint64_t, uint64_t, uint64_t);
+    tf->regs[0] = (uint64_t)hb_shm_native(current_process(), (int)tf->regs[5],
+                                          tf->regs[4], tf->regs[3], tf->regs[9]);
   } else {
     uart_puts("Unknown System Call Invoked!\n");
     tf->regs[0] = -ENOSYS;
