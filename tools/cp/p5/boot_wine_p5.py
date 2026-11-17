@@ -16,6 +16,12 @@ probe twice, on its "t=20s" and "t=50s" progress rows, and grades:
        d3d11.dll + dxgi.dll from Z:\\CP\\P5\\D3D11 (DXVK); d3d12 -> d3d12.dll +
        d3d12core.dll from Z:\\CP\\P5\\D3D12 (vkd3d-proton); D3D adapters name
        llvmpipe
+  fullscr (C4-x3, opt-in): src/user/cp/fullscr.c switches to 1280x720,
+    1920x1080 and 1280x720 with CDS_FULLSCREEN and covers each mode with a
+    WS_POPUP window; one screendump per "[FS] hold" row must show its four
+    corner markers at the mode's corners on the glass (and black outside the
+    mode); the process exits without restoring, and "fullscr.exe check" plus
+    a last screendump must show the desktop mode back (markers gone).
   global: no fault line (page fault / memory fault / FATAL).
 
 Usage: boot_wine_p5.py --out DIR --disk IMG [--probes vkcube,d3d11,d3d12]
@@ -33,7 +39,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run_icewm_test import Qmp  # noqa: E402
 from p5lib import acquire_slot, census, guests_running, qemu_cmd, read, release_slot  # noqa: E402
 
-PFX = {"vkcube": "[VK]", "d3d11": "[D3D11]", "d3d12": "[D3D12]"}
+PFX = {"vkcube": "[VK]", "d3d11": "[D3D11]", "d3d12": "[D3D12]", "fullscr": "[FS]"}
+# fullscr: screendump name -> (serial trigger, mode on the glass or None = desktop)
+FS_SHOTS = [("fs-M3-1280x720", "[FS] hold M3 ", (1280, 720)),
+            ("fs-M4-1920x1080", "[FS] hold M4 ", (1920, 1080)),
+            ("fs-M5-1280x720", "[FS] hold M5 ", (1280, 720)),
+            ("fs-restored", "[P5] fullscr restored-desktop shot", None)]
 MODS = {
     "vkcube": [],  # vkcommon.h prints "[VK] loader vulkan-1.dll (<path>) loaded" instead
     "d3d11": [("d3d11.dll", "\\cp\\p5\\d3d11\\"), ("dxgi.dll", "\\cp\\p5\\d3d11\\")],
@@ -62,7 +73,10 @@ def main():
     if args.grade_only:
         serial = os.path.join(args.out, "serial.log")
         shots = {p: [s for s in (os.path.join(args.out, f"{p}-t{t}s.ppm") for t in (20, 50))
-                     if os.path.exists(s)] for p in probes}
+                     if os.path.exists(s)] for p in probes if p != "fullscr"}
+        if "fullscr" in probes:
+            shots["fullscr"] = [s for s in (os.path.join(args.out, n + ".ppm") for n, _, _ in FS_SHOTS)
+                                if os.path.exists(s)]
         return grade(args, probes, serial, shots)
 
     cmd, qmp_path, serial = qemu_cmd(args.out, args.disk, args)
@@ -77,7 +91,8 @@ def main():
     log(f"qemu pid {proc.pid}")
     try:
         qmp = Qmp(qmp_path, deadline_s=40)
-        pending = [(p, t) for p in probes for t in ("t=20s", "t=50s")]
+        pending = [(p, t) for p in probes if p != "fullscr" for t in ("t=20s", "t=50s")]
+        fs_pending = list(FS_SHOTS) if "fullscr" in probes else []
         last_report = 0
         while time.time() - t0 < args.timeout and proc.poll() is None:
             ser = read(serial)
@@ -90,6 +105,15 @@ def main():
                         log(f"screendump {os.path.basename(path)} at +{time.time() - t0:.0f} s; "
                             f"QEMU guests on the host now (incl. this one): {guests_running()}")
                     pending.remove((p, t))
+            for item in list(fs_pending):
+                name, trig, _ = item
+                if trig in ser:
+                    time.sleep(1.5 if trig.startswith("[FS] hold") else 0)
+                    path = os.path.join(args.out, name + ".ppm")
+                    if qmp.shot(path):
+                        shots["fullscr"].append(path)
+                        log(f"screendump {name}.ppm at +{time.time() - t0:.0f} s")
+                    fs_pending.remove(item)
             if "[P5] done" in ser or "System halt" in ser:
                 break
             if time.time() - last_report > 300:
@@ -123,6 +147,12 @@ def grade(args, probes, serial, shots):
         if ln.startswith("[P5]") or any(ln.startswith(PFX[p]) for p in probes):
             print(ln, flush=True)
     for p in probes:
+        if p == "fullscr":
+            if not grade_fullscr(args, ser, shots.get("fullscr", []), fails):
+                log("fullscr: FAIL")
+            else:
+                log("fullscr: PASS")
+            continue
         b = ser.rfind(f"[P5] begin {p} ")
         e = ser.find(f"[P5] end {p} ", b) if b >= 0 else -1
         span = ser[b:e + 200] if b >= 0 else ""
@@ -196,6 +226,63 @@ def grade(args, probes, serial, shots):
     if not fails:
         log("PASS: " + ", ".join(probes) + " each ran >= 60 s under Wine with two distinct, recognisable screendumps")
     return 1 if fails else 0
+
+
+def _ppm(path):
+    data = open(path, "rb").read()
+    parts, i = [], 2
+    while len(parts) < 3:
+        while data[i:i + 1].isspace():
+            i += 1
+        j = i
+        while not data[j:j + 1].isspace():
+            j += 1
+        parts.append(int(data[i:j]))
+        i = j
+    return parts[0], parts[1], data[i + 1:]
+
+
+def grade_fullscr(args, ser, shots, fails):
+    """C4-x3: the fullscreen mode-switch probe (src/user/cp/fullscr.c)."""
+    ok = True
+    for tag in ("fullscr", "fscheck"):
+        e = [ln for ln in ser.splitlines() if ln.startswith(f"[P5] end {tag} ")]
+        if not e or " status=0 " not in e[-1] + " ":
+            fails.append(f"fullscr: launcher end row for {tag}: {e[-1] if e else '(none)'}"); ok = False
+    rows = [ln for ln in ser.splitlines() if ln.startswith("[FS]")]
+    if sum(1 for r in rows if r.startswith("[FS] done rc=0")) != 2:
+        fails.append("fullscr: want two '[FS] done rc=0' rows (run + check)"); ok = False
+    if any(" FAIL " in r + " " for r in rows):
+        fails.append("fullscr: " + next(r for r in rows if " FAIL " in r + " ")); ok = False
+    red, green, blue, white = b"\xff\x00\x00", b"\x00\xff\x00", b"\x00\x00\xff", b"\xff\xff\xff"
+    byname = {os.path.basename(s)[:-4]: s for s in shots}
+    for name, _, mode in FS_SHOTS:
+        path = byname.get(name)
+        if not path:
+            fails.append(f"fullscr: no screendump {name}"); ok = False
+            continue
+        w, h, px = _ppm(path)
+        at = lambda x, y: px[(y * w + x) * 3:(y * w + x) * 3 + 3]  # noqa: E731
+        subprocess.run([sys.executable, os.path.join(REPO, "skills/hobbyos-screenshot/scripts/ppm2png.py"),
+                        path, path[:-4] + ".png"], capture_output=True)
+        if mode:
+            mw, mh = mode
+            want = {(8, 8): red, (mw - 9, 8): green, (8, mh - 9): blue, (mw - 9, mh - 9): white}
+            bad = [f"{xy}={at(*xy).hex()} want {c.hex()}" for xy, c in want.items() if at(*xy) != c]
+            # outside the mode (only when it is smaller than the glass): black
+            outside = [(xy) for xy in ((mw + 40, 40), (w - 10, h - 10), (40, mh + 40))
+                       if mw < w and mh < h and at(*xy) != b"\x00\x00\x00"]
+            log(f"fullscr {name}: glass {w}x{h}, markers {'ok' if not bad else bad}, "
+                f"non-black outside the mode: {len(outside)}")
+            if bad or outside:
+                fails.append(f"fullscr: {name} markers {bad} outside {outside}"); ok = False
+        else:
+            gone = at(8, 8) != red and at(1271, 8) != green
+            log(f"fullscr {name}: glass {w}x{h}, (8,8)={at(8, 8).hex()} (1271,8)={at(1271, 8).hex()} "
+                f"(1910,1070)={at(1910, 1070).hex()} -> pattern {'gone' if gone else 'STILL THERE'}")
+            if (w, h) != (1920, 1080) or not gone:
+                fails.append(f"fullscr: {name}: desktop not back"); ok = False
+    return ok
 
 
 if __name__ == "__main__":

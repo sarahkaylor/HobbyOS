@@ -171,15 +171,25 @@ static void shm_reap(void) {
 static void shm_row(const char *what, struct process *p, int64_t a, int64_t b,
                     int64_t r) {
   static int rows;
-  if (rows >= 24)
+  if (rows >= 64)
     return;
   rows++;
+  struct process *g = p ? process_group(p) : 0;
+  char nm[33];
+  int i = 0;
+  if (g)
+    for (; i < 32 && g->name[i]; i++)
+      nm[i] = g->name[i];
+  nm[i] = 0;
   struct kline kl;
   kl_init(&kl);
   kl_s(&kl, "[SHM] ");
   kl_s(&kl, what);
   kl_s(&kl, " pid=");
   kl_i(&kl, p ? p->pid : -1);
+  kl_s(&kl, " (");
+  kl_s(&kl, nm);
+  kl_s(&kl, ")");
   kl_s(&kl, " a=");
   kl_i(&kl, (long)a);
   kl_s(&kl, " b=");
