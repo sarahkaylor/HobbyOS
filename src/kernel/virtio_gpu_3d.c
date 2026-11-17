@@ -280,25 +280,47 @@ int virtio_gpu_3d_available(void) { return gpu3d_ready; }
 /* capset                                                             */
 /* ------------------------------------------------------------------ */
 
-static int gpu3d_capset_query(void) {
+/* P6 (docs/gpu-abi.md §10): every capset the device offers, by probe index.
+ * Index 0 is VIRGL and stays M1's capset (gpu3d_capset_*); a Venus device
+ * adds VIRGL2 (2) and VENUS (4).  The device-config num_capsets field is not
+ * read: GET_CAPSET_INFO past the last index answers an error, which ends the
+ * walk. */
+#define GPU3D_MAX_CAPSETS 8
+struct gpu3d_capset_ent {
+  uint32_t id, maxver, maxsize;
+};
+static struct gpu3d_capset_ent gpu3d_capsets[GPU3D_MAX_CAPSETS];
+static int gpu3d_ncapsets = 0;
+
+static int gpu3d_capset_info_at(uint32_t index, struct gpu3d_capset_ent* out,
+                                uint32_t* rtype_out) {
   uint32_t rlen = 0, rtype = 0;
   hdr_init(&gpu3d_req_capinfo.hdr, VIRTIO_GPU_CMD_GET_CAPSET_INFO, 0, 0, 0);
-  gpu3d_req_capinfo.capset_index = 0;
+  gpu3d_req_capinfo.capset_index = index;
   gpu3d_req_capinfo.padding = 0;
   gpu3d_zero(&gpu3d_resp_info, sizeof(gpu3d_resp_info));
-  if (gpu3d_cmd(&gpu3d_req_capinfo, sizeof(gpu3d_req_capinfo), 0, 0,
-                &gpu3d_resp_info, sizeof(gpu3d_resp_info), &rlen, &rtype) != 0) {
+  int rc = gpu3d_cmd(&gpu3d_req_capinfo, sizeof(gpu3d_req_capinfo), 0, 0,
+                     &gpu3d_resp_info, sizeof(gpu3d_resp_info), &rlen, &rtype);
+  if (rtype_out) *rtype_out = rtype;
+  if (rc != 0) return -1;
+  out->id = gpu3d_resp_info.capset_id;
+  out->maxver = gpu3d_resp_info.capset_max_version;
+  out->maxsize = gpu3d_resp_info.capset_max_size;
+  return 0;
+}
+
+static int gpu3d_capset_query(void) {
+  uint32_t rtype = 0;
+  struct gpu3d_capset_ent e0;
+  if (gpu3d_capset_info_at(0, &e0, &rtype) != 0) {
     uart_puts("[VIRGL3D] capset_info FAIL resp=");
     uart_print_hex(rtype);
-    uart_puts(" len=");
-    print_int((int)rlen);
     uart_puts("\n");
     return -1;
   }
-  struct virtio_gpu_resp_capset_info* ri = &gpu3d_resp_info;
-  gpu3d_capset_id = ri->capset_id;
-  gpu3d_capset_maxver = ri->capset_max_version;
-  gpu3d_capset_maxsize = ri->capset_max_size;
+  gpu3d_capset_id = e0.id;
+  gpu3d_capset_maxver = e0.maxver;
+  gpu3d_capset_maxsize = e0.maxsize;
   uart_puts("[VIRGL3D] capset_info id=");
   print_int((int)gpu3d_capset_id);
   uart_puts(" maxver=");
@@ -308,6 +330,29 @@ static int gpu3d_capset_query(void) {
   uart_puts(" resp=");
   uart_print_hex(rtype);
   uart_puts("\n");
+  /* P6: the rest of the list, one row per index ("cap set N: id M" in Linux's
+   * words), so the host recipe is checkable from the guest. */
+  gpu3d_capsets[0] = e0;
+  gpu3d_ncapsets = 1;
+  for (uint32_t i = 1; i < GPU3D_MAX_CAPSETS; i++) {
+    struct gpu3d_capset_ent e;
+    if (gpu3d_capset_info_at(i, &e, &rtype) != 0 || e.id == 0) break;
+    gpu3d_capsets[gpu3d_ncapsets++] = e;
+  }
+  for (int i = 0; i < gpu3d_ncapsets; i++) {
+    uart_puts("[VIRGL3D] capset index=");
+    print_int(i);
+    uart_puts(" id=");
+    print_int((int)gpu3d_capsets[i].id);
+    uart_puts(gpu3d_capsets[i].id == 4 ? " (venus)" :
+              gpu3d_capsets[i].id == 2 ? " (virgl2)" :
+              gpu3d_capsets[i].id == 1 ? " (virgl)" : "");
+    uart_puts(" maxver=");
+    print_int((int)gpu3d_capsets[i].maxver);
+    uart_puts(" maxsize=");
+    print_int((int)gpu3d_capsets[i].maxsize);
+    uart_puts("\n");
+  }
   if (gpu3d_capset_id == 0 || gpu3d_capset_maxver == 0 ||
       gpu3d_capset_maxsize == 0 || gpu3d_capset_maxsize > GPU3D_CAPS_MAX)
     return -1;

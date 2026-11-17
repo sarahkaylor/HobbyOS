@@ -274,6 +274,10 @@ static void bga_present_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
 #define VIRTIO_PCI_CAP_COMMON_CFG 1
 #define VIRTIO_PCI_CAP_NOTIFY_CFG 2
 #define VIRTIO_PCI_CAP_ISR_CFG    3
+/* P6 (docs/gpu-abi.md §10): struct virtio_pci_cap64, cfg_type 8.  QEMU's
+ * virtio-gpu with hostmem= exposes the host-visible window this way, with
+ * shmid VIRTIO_GPU_SHM_ID_HOST_VISIBLE (1). */
+#define VIRTIO_PCI_CAP_SHARED_MEMORY_CFG 8
 
 /* PCI command register (offset 0x04) bits used here. */
 #define PCI_CMD_MEM_SPACE  0x0002u
@@ -368,6 +372,12 @@ static struct virtio_gpu_ctrl_hdr gpu_resp;
  * driver-feature set.  virtio_gpu_3d.c reads these (the 2D path never does). */
 int virtio_gpu_x64_virgl_offered = 0;
 int virtio_gpu_x64_virgl_negotiated = 0;
+/* P6 (docs/gpu-abi.md §10): the device's low feature word as offered, and the
+ * host-visible shared-memory window (shmid 1), 0 when absent.  Read by
+ * virtio_gpu_3d.c only. */
+uint32_t virtio_gpu_x64_feat_offered = 0;
+uint64_t virtio_gpu_x64_shm_phys = 0;
+uint64_t virtio_gpu_x64_shm_len = 0;
 
 #if G2_VPCI_DBG
 static int gpu_dbg_cmds = 0;
@@ -412,9 +422,12 @@ static inline volatile uint8_t* gpu_mmio_va(uint64_t phys) {
 struct vpci_cap {
   uint8_t kind; /* cfg_type */
   uint8_t bar;
+  uint8_t id;   /* shared-memory cap: shmid (P6) */
   uint32_t offset;
   uint32_t length;
   uint32_t mult; /* notify-offset multiplier (notify cap only) */
+  uint32_t offset_hi; /* struct virtio_pci_cap64 (shared-memory cap only) */
+  uint32_t length_hi;
 };
 
 static int vpci_collect_caps(uint8_t bus, uint8_t slot, struct vpci_cap* caps, int max_caps) {
@@ -426,13 +439,21 @@ static int vpci_collect_caps(uint8_t bus, uint8_t slot, struct vpci_cap* caps, i
   while (ptr && guard++ < 64 && n < max_caps) {
     uint32_t d0 = pci_read_config(bus, slot, 0, ptr);
     if ((d0 & 0xFF) == 0x09) { /* vendor-specific: virtio structure */
+      uint32_t d1 = pci_read_config(bus, slot, 0, ptr + 4);
       caps[n].kind = (d0 >> 24) & 0xFF;
-      caps[n].bar = pci_read_config(bus, slot, 0, ptr + 4) & 0xFF;
+      caps[n].bar = d1 & 0xFF;
+      caps[n].id = (d1 >> 8) & 0xFF;
       caps[n].offset = pci_read_config(bus, slot, 0, ptr + 8);
       caps[n].length = pci_read_config(bus, slot, 0, ptr + 12);
       caps[n].mult = 0;
+      caps[n].offset_hi = 0;
+      caps[n].length_hi = 0;
       if (caps[n].kind == VIRTIO_PCI_CAP_NOTIFY_CFG)
         caps[n].mult = pci_read_config(bus, slot, 0, ptr + 16);
+      if (caps[n].kind == VIRTIO_PCI_CAP_SHARED_MEMORY_CFG) {
+        caps[n].offset_hi = pci_read_config(bus, slot, 0, ptr + 16);
+        caps[n].length_hi = pci_read_config(bus, slot, 0, ptr + 20);
+      }
       n++;
     }
     ptr = (d0 >> 8) & 0xFC;
@@ -629,8 +650,8 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   pci_write_config(bus, slot, 0, 0x04,
                    cmd | PCI_CMD_MEM_SPACE | PCI_CMD_BUS_MASTER | PCI_CMD_INTX_DIS);
 
-  struct vpci_cap caps[8];
-  int ncaps = vpci_collect_caps(bus, slot, caps, 8);
+  struct vpci_cap caps[12];
+  int ncaps = vpci_collect_caps(bus, slot, caps, 12);
   if (ncaps <= 0) return -1;
 
   struct vpci_cap* cc = 0; /* common */
@@ -640,6 +661,23 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
     if (caps[i].kind == VIRTIO_PCI_CAP_COMMON_CFG) cc = &caps[i];
     else if (caps[i].kind == VIRTIO_PCI_CAP_NOTIFY_CFG) nc = &caps[i];
     else if (caps[i].kind == VIRTIO_PCI_CAP_ISR_CFG) ic = &caps[i];
+    else if (caps[i].kind == VIRTIO_PCI_CAP_SHARED_MEMORY_CFG && caps[i].id == 1) {
+      /* P6: host-visible window = BAR base + 64-bit offset, 64-bit length. */
+      uint64_t sbar = vpci_bar_phys(bus, slot, caps[i].bar);
+      uint64_t soff = ((uint64_t)caps[i].offset_hi << 32) | caps[i].offset;
+      uint64_t slen = ((uint64_t)caps[i].length_hi << 32) | caps[i].length;
+      if (sbar >= 0x100000 && slen) {
+        virtio_gpu_x64_shm_phys = sbar + soff;
+        virtio_gpu_x64_shm_len = slen;
+      }
+      uart_puts("[VIRGL3D] shm id=1 bar=");
+      print_int((int)caps[i].bar);
+      uart_puts(" base=");
+      uart_print_hex(virtio_gpu_x64_shm_phys);
+      uart_puts(" len=");
+      uart_print_hex(slen);
+      uart_puts("\n");
+    }
   }
   if (!cc || !nc || !ic) return -1;
   if (cc->bar != nc->bar || cc->bar != ic->bar) return -1;
@@ -699,6 +737,22 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   uart_puts("\n");
 #endif
   if (!(feat_hi & VPCI_F_VERSION_1)) return -1;
+  virtio_gpu_x64_feat_offered = feat_lo;
+  if (feat_lo & (1u << VIRTIO_GPU_F_VIRGL)) {
+    /* P6: what the device offers, so a host recipe can be checked from the
+     * guest's serial log (blob/context_init need blob=true / venus=true). */
+    uart_puts("[VIRGL3D] feat offered lo=");
+    uart_print_hex(feat_lo);
+    uart_puts(" virgl=1 edid=");
+    print_int((int)((feat_lo >> VIRTIO_GPU_F_EDID) & 1));
+    uart_puts(" uuid=");
+    print_int((int)((feat_lo >> 2) & 1));
+    uart_puts(" blob=");
+    print_int((int)((feat_lo >> 3) & 1));
+    uart_puts(" ctx_init=");
+    print_int((int)((feat_lo >> VIRTIO_GPU_F_CONTEXT_INIT) & 1));
+    uart_puts("\n");
+  }
 
   virtio_gpu_x64_virgl_offered =
       (feat_lo & (1u << VIRTIO_GPU_F_VIRGL)) ? 1 : 0;
