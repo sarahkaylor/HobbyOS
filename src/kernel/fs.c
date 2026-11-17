@@ -21,8 +21,49 @@
 #include "ext2_vfs.h" /* cp/ext2: the /EXT data disk */
 #include "tmpfs.h" /* cp/sys: the compat /tmp */
 
-static struct file global_file_table[MAX_GLOBAL_FILES];
+/* C1-k5 (docs/cp-k5.md §1): the system-wide open-file table is MAX_GLOBAL_FILES
+ * (16384 on x86_64) slots.  One slot is ~1.2 KiB (path[VFS_PATH_MAX]), so a
+ * static array would add ~19 MiB of BSS -- most of the ~25 MiB the x86_64
+ * image has left below CP_KHOLE_HI.  The first GFT_STATIC slots stay static
+ * (boot and every small workload never leave them); the rest come in chunks
+ * of GFT_CHUNK slots from the frame pool, allocated the first time file_alloc
+ * finds every materialised slot busy, and never freed (a struct file pointer
+ * must stay valid for as long as anything may hold it).  Every access goes
+ * through gfile(): an index whose chunk does not exist yet names gft_dead, an
+ * always-EMPTY slot, which is exactly what an unused static slot used to look
+ * like to the index-checking callers.  Chunk slots' locks are not entered in
+ * the lock registry (LS_REG_SLOTS 4096 could not hold 16384 of them); the
+ * static 512 are, as before. */
+static struct file gft_static[GFT_STATIC];
+#define GFT_CHUNK 64
+#define GFT_NCHUNK ((MAX_GLOBAL_FILES - GFT_STATIC + GFT_CHUNK - 1) / GFT_CHUNK + 1)
+#define GFT_CHUNK_PAGES ((int)((GFT_CHUNK * sizeof(struct file) + 4095) / 4096))
+static struct file *volatile gft_chunk[GFT_NCHUNK];
+static struct file gft_dead;
+static int gft_hint;      /* chunk-area scan start, relative (fs_lock) */
+static int gft_live;      /* materialised slots (GFT_STATIC + chunks) */
 static spinlock_t fs_lock;
+
+static inline struct file *gfile(int i) {
+  if ((unsigned)i < (unsigned)GFT_STATIC) return &gft_static[i];
+  if (i < 0 || i >= MAX_GLOBAL_FILES) return &gft_dead;
+  unsigned k = (unsigned)(i - GFT_STATIC);
+  struct file *c = gft_chunk[k / GFT_CHUNK];
+  return c ? &c[k % GFT_CHUNK] : &gft_dead;
+}
+
+/* Test/diagnostic: materialised slot count. */
+int fs_gft_live(void) { return gft_live; }
+
+/* Set up one fresh slot (static or chunk). */
+static void gft_slot_init(struct file *f, int idx) {
+  uint8_t *b = (uint8_t *)f;
+  for (uint64_t k = 0; k < sizeof *f; k++) b[k] = 0;
+  f->type = FILE_TYPE_EMPTY;
+  f->ref_count = 0;
+  f->gidx = idx;
+  ylock_init(&f->lock);
+}
 
 /* GB-173: the process that owns the evdev key channel.  A static-musl game
    draws straight into /dev/fb0 and has no desktop window, so "focused window"
@@ -90,10 +131,11 @@ extern int sys_user_range_ok(uint64_t ptr, uint64_t len);
  */
 void fs_init(void) {
   spinlock_init(&fs_lock);
-  for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
-    global_file_table[i].type = FILE_TYPE_EMPTY;
-    global_file_table[i].ref_count = 0;
-    ylock_init(&global_file_table[i].lock);
+  gft_hint = 0;
+  gft_live = GFT_STATIC;
+  gft_slot_init(&gft_dead, -1);
+  for (int i = 0; i < GFT_STATIC; i++) {
+    gft_slot_init(&gft_static[i], i);
     /* Registration is ALWAYS ON (not unit-test only): the class is what tells
      * the audit that an irqsave acquisition of this lock is the defect being
      * removed, and the rank is what the debug tracker orders.  Registering
@@ -101,7 +143,7 @@ void fs_init(void) {
      * file_locks_lock stays unregistered: it is a leaf taken only after
      * f->lock drops, never nesting anything above (cp/ext2b: that lock is
      * now vfs_lock.c's lk_lock, with the same leaf discipline). */
-    lock_register(&global_file_table[i].lock, "f->lock", LOCK_RANK_FILE,
+    lock_register(&gft_static[i].lock, "f->lock", LOCK_RANK_FILE,
                   LOCK_CLASS_PROCESS);
   }
   lock_register(&fs_lock, "fs_lock", LOCK_RANK_FS, LOCK_CLASS_PROCESS);
@@ -114,27 +156,56 @@ void fs_init(void) {
  *   Pointer to the allocated struct file, or 0 if no slots are available.
  */
 static struct file *file_alloc(void) {
-  spinlock_acquire(&fs_lock);
-  for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
-    if (global_file_table[i].type == FILE_TYPE_EMPTY) {
-      global_file_table[i].ref_count = 1;
-      /* SEC-6: UNINIT, not FAT16.  A caller that fails between allocation
-         and setting the real type used to leave a slot claiming to be a
-         FAT16 file with garbage start_cluster/cursor — any later operation
-         on it read/wrote arbitrary disk sectors.  UNINIT is rejected by the
-         invariants in file_read/file_write/file_close/stat, so an abandoned
-         slot can only ever halt loudly, never corrupt. */
-      global_file_table[i].type = FILE_TYPE_UNINIT;
-      /* C1-k4: a recycled slot must not hand its last occupant's status
-         flags (O_NONBLOCK above all) to the next file -- pipe reads and
-         writes honour O_NONBLOCK now. */
-      global_file_table[i].open_flags = 0;
-      spinlock_release(&fs_lock);
-      return &global_file_table[i];
+  for (;;) {
+    spinlock_acquire(&fs_lock);
+    int live = gft_live;
+    int span = live - GFT_STATIC;
+    int h = (gft_hint >= 0 && gft_hint < span) ? gft_hint : 0;
+    /* C1-k5: the static slots first, lowest first (exactly the old order, so
+       a workload that fits in them never touches a chunk), then one pass
+       over the chunks from a rotating hint (a close never has to touch the
+       hint; 16000 slots are not rescanned from the start each time). */
+    for (int n = 0; n < live; n++) {
+      int i = n < GFT_STATIC ? n
+                             : GFT_STATIC + ((h + n - GFT_STATIC) % (span > 0 ? span : 1));
+      struct file *f = gfile(i);
+      if (f->type == FILE_TYPE_EMPTY) {
+        f->ref_count = 1;
+        /* SEC-6: UNINIT, not FAT16.  A caller that fails between allocation
+           and setting the real type used to leave a slot claiming to be a
+           FAT16 file with garbage start_cluster/cursor — any later operation
+           on it read/wrote arbitrary disk sectors.  UNINIT is rejected by the
+           invariants in file_read/file_write/file_close/stat, so an abandoned
+           slot can only ever halt loudly, never corrupt. */
+        f->type = FILE_TYPE_UNINIT;
+        /* C1-k4: a recycled slot must not hand its last occupant's status
+           flags (O_NONBLOCK above all) to the next file -- pipe reads and
+           writes honour O_NONBLOCK now. */
+        f->open_flags = 0;
+        if (i >= GFT_STATIC) gft_hint = i + 1 - GFT_STATIC;
+        spinlock_release(&fs_lock);
+        return f;
+      }
     }
+    spinlock_release(&fs_lock);
+    /* C1-k5: every materialised slot is busy -- add a chunk (frames are
+       taken with no fs_lock held), publish it under the lock, retry. */
+    if (live >= MAX_GLOBAL_FILES) return 0;
+    uint64_t pa = frame_alloc_contig(GFT_CHUNK_PAGES);
+    if (!pa) return 0;
+    struct file *c = (struct file *)phys_to_virt(pa);
+    int ci = (live - GFT_STATIC) / GFT_CHUNK;
+    for (int k = 0; k < GFT_CHUNK; k++) gft_slot_init(&c[k], live + k);
+    spinlock_acquire(&fs_lock);
+    int mine = (gft_live == live && !gft_chunk[ci]);
+    if (mine) {
+      gft_chunk[ci] = c;
+      gft_live = live + GFT_CHUNK > MAX_GLOBAL_FILES ? MAX_GLOBAL_FILES : live + GFT_CHUNK;
+    }
+    spinlock_release(&fs_lock);
+    if (!mine) /* another CPU grew the table first: give ours back */
+      for (int k = 0; k < GFT_CHUNK_PAGES; k++) frame_free(pa + (uint64_t)k * 4096);
   }
-  spinlock_release(&fs_lock);
-  return 0;
 }
 
 
@@ -387,7 +458,7 @@ static int fd_install(struct process *p, struct file *f) {
   if (!p || !f) return -1;
   uint64_t fl = spinlock_acquire_irqsave(&fdtab_lock);
   int fd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(p); i++) {
     if (p->open_fds[i] == -1) {
       p->open_fds[i] = get_global_fd(f);
       p->num_open_fds++;
@@ -454,7 +525,7 @@ static void fs_slot_panic(const char *op) {
  */
 static int get_global_fd(struct file *f) {
   if (!f) return -1;
-  return (int)(f - global_file_table);
+  return f->gidx; /* C1-k5: chunked table, so no pointer arithmetic */
 }
 
 /**
@@ -1075,7 +1146,7 @@ static struct file *f1_socket_file(struct process *p, int fd, int *errp) {
     *errp = EBADF;
     return 0;
   }
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type != FILE_TYPE_SOCKET || !f->socket.pcb) {
     *errp = ENOTSOCK;
@@ -1185,7 +1256,7 @@ static int f1_unix_guard(struct process *p, int fd) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return 0;
-  return global_file_table[g_fd].type == FILE_TYPE_UNIXSOCK;
+  return gfile(g_fd)->type == FILE_TYPE_UNIXSOCK;
 }
 
 int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
@@ -1245,7 +1316,7 @@ static uint64_t file_lock_id(const struct file *f) {
  * amount to for an object that has exactly one description family. */
 void file_lock_key(const struct file *f, struct vfs_lock_key *key) {
   key->fsid = VFS_LKFS_ANON;
-  key->ino = (uint64_t)(f - global_file_table) + 1;
+  key->ino = (uint64_t)(int64_t)f->gidx + 1;
   switch (f->type) {
   case FILE_TYPE_FAT16:
     key->fsid = VFS_LKFS_FAT16;
@@ -1404,7 +1475,7 @@ int file_ftruncate(struct process *p, int fd, int64_t length) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_MEMFD) {
     if (length < 0 || (uint64_t)length > VM_OBJ_MAX_BYTES) return -EINVAL;
@@ -1451,7 +1522,7 @@ int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
 
   int g_fd = pg->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
 
   /* P6.1: record-lock commands (FAT16 regular files). */
@@ -1517,7 +1588,7 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
 
   if (f->type == FILE_TYPE_TIMERFD) {
@@ -1659,9 +1730,21 @@ static int fs_poll_park(struct process *p, uint64_t seen, int all_notify,
 
 int file_select(struct process *p, int nfds, struct fd_set_k *rd,
                 struct fd_set_k *wr, struct fd_set_k *ex, int timeout_ms) {
-  if (!p) return -EINVAL;
   if (nfds < 0 || nfds > K_FD_SETSIZE) return -EINVAL;
+  return file_select_words(p, nfds, rd ? rd->bits : 0, wr ? wr->bits : 0,
+                           ex ? ex->bits : 0, K_FD_SET_WORDS, timeout_ms);
+}
 
+/* C1-k5: the select engine over sets of `nwords` 32-bit words (the native
+ * fd_set_k is 8 words; the compat select/pselect6 pass ceil(nfds/64) longs,
+ * up to MAX_OPEN_FDS bits -- Linux's FDS_BYTES).  The result sets are
+ * written back into rd/wr/ex. */
+#define SEL_MAX_WORDS ((MAX_OPEN_FDS + 31) / 32)
+int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
+                      uint32_t *ex, int nwords, int timeout_ms) {
+  if (!p) return -EINVAL;
+  if (nfds < 0 || nwords < 0 || nwords > SEL_MAX_WORDS || nfds > nwords * 32)
+    return -EINVAL;
   uint64_t now = timer_get_ms();
   if (!select_wait[p->pid].valid) {
     select_wait[p->pid].valid = 1;
@@ -1681,19 +1764,19 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
   for (;;) {
   uint64_t seen = poll_seq_snapshot(); /* C1-k4: before the scan */
   int all_notify = 1;
-  struct fd_set_k out_rd, out_wr, out_ex;
-  for (int i = 0; i < K_FD_SET_WORDS; i++) {
-    out_rd.bits[i] = 0;
-    out_wr.bits[i] = 0;
-    out_ex.bits[i] = 0;
+  uint32_t out_rd[SEL_MAX_WORDS], out_wr[SEL_MAX_WORDS], out_ex[SEL_MAX_WORDS];
+  for (int i = 0; i < nwords; i++) {
+    out_rd[i] = 0;
+    out_wr[i] = 0;
+    out_ex[i] = 0;
   }
 
   int ready = 0;
-  for (int word = 0; word < K_FD_SET_WORDS; word++) {
+  for (int word = 0; word < nwords && word * 32 < nfds; word++) {
     uint32_t bits = 0;
-    if (rd) bits |= rd->bits[word];
-    if (wr) bits |= wr->bits[word];
-    if (ex) bits |= ex->bits[word];
+    if (rd) bits |= rd[word];
+    if (wr) bits |= wr[word];
+    if (ex) bits |= ex[word];
     while (bits) {
       int bit = __builtin_ctz(bits);
       bits &= bits - 1;
@@ -1708,16 +1791,16 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
       e |= hup || 0; /* select folds POLLHUP into its exception set */
       if (all_notify && !file_fd_notifies(p, fd)) all_notify = 0;
       uint32_t m = 1u << bit;
-      if (rd && (rd->bits[word] & m) && r) {
-        out_rd.bits[word] |= m;
+      if (rd && (rd[word] & m) && r) {
+        out_rd[word] |= m;
         ready++;
       }
-      if (wr && (wr->bits[word] & m) && w) {
-        out_wr.bits[word] |= m;
+      if (wr && (wr[word] & m) && w) {
+        out_wr[word] |= m;
         ready++;
       }
-      if (ex && (ex->bits[word] & m) && e) {
-        out_ex.bits[word] |= m;
+      if (ex && (ex[word] & m) && e) {
+        out_ex[word] |= m;
         ready++;
       }
     }
@@ -1725,10 +1808,10 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
 
   if (ready > 0) {
     select_wait[p->pid].valid = 0;
-    for (int i = 0; i < K_FD_SET_WORDS; i++) {
-      if (rd) rd->bits[i] = out_rd.bits[i];
-      if (wr) wr->bits[i] = out_wr.bits[i];
-      if (ex) ex->bits[i] = out_ex.bits[i];
+    for (int i = 0; i < nwords; i++) {
+      if (rd) rd[i] = out_rd[i];
+      if (wr) wr[i] = out_wr[i];
+      if (ex) ex[i] = out_ex[i];
     }
     return ready;
   }
@@ -1738,10 +1821,10 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
                  now >= select_wait[p->pid].deadline_ms);
   if (expired) {
     select_wait[p->pid].valid = 0;
-    for (int i = 0; i < K_FD_SET_WORDS; i++) {
-      if (rd) rd->bits[i] = 0;
-      if (wr) wr->bits[i] = 0;
-      if (ex) ex->bits[i] = 0;
+    for (int i = 0; i < nwords; i++) {
+      if (rd) rd[i] = 0;
+      if (wr) wr[i] = 0;
+      if (ex) ex[i] = 0;
     }
     return 0;
   }
@@ -1758,7 +1841,9 @@ int file_select(struct process *p, int nfds, struct fd_set_k *rd,
 int file_poll(struct process *p, struct k_pollfd *fds, int nfds,
               int timeout_ms) {
   if (!p) return -EINVAL;
-  if (nfds < 0 || nfds > K_FD_SETSIZE) return -EINVAL;
+  /* C1-k5: up to the fd table (the compat layer bounds it by RLIMIT_NOFILE
+     first, as Linux does); the engine itself has no fixed array. */
+  if (nfds < 0 || nfds > MAX_OPEN_FDS) return -EINVAL;
 
   uint64_t now = timer_get_ms();
   if (!select_wait[p->pid].valid) {
@@ -1827,8 +1912,8 @@ int file_socket_getopt(struct process *p, int fd, int level, int optname,
     if (pg && fd >= 0 && fd < MAX_OPEN_FDS) {
       int g = pg->open_fds[fd];
       if (g >= 0 && g < MAX_GLOBAL_FILES &&
-          global_file_table[g].type == FILE_TYPE_UNIXSOCK) {
-        struct file *uf = &global_file_table[g];
+          gfile(g)->type == FILE_TYPE_UNIXSOCK) {
+        struct file *uf = gfile(g);
         if (level != K_SOL_SOCKET) return -ENOPROTOOPT;
         if (!val || !len) return -EINVAL;
         if (optname == K_SO_PEERCRED) {
@@ -1913,7 +1998,7 @@ int file_socket_setopt(struct process *p, int fd, int level, int optname,
     if (pg && fd >= 0 && fd < MAX_OPEN_FDS) {
       int g = pg->open_fds[fd];
       if (g >= 0 && g < MAX_GLOBAL_FILES &&
-          global_file_table[g].type == FILE_TYPE_UNIXSOCK) {
+          gfile(g)->type == FILE_TYPE_UNIXSOCK) {
         if (level != K_SOL_SOCKET) return -ENOPROTOOPT;
         switch (optname) {
         case K_SO_SNDBUF:
@@ -1947,7 +2032,7 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
 
   int64_t base, size;
@@ -2082,7 +2167,7 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   switch (f->type) {
   case FILE_TYPE_FAT16: {
@@ -2194,7 +2279,7 @@ int file_path_of(struct process *p, int fd, char *out, int cap) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS || !out || cap <= 0) return -EBADF;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_EMPTY) return -EBADF;
   if (!f->path[0]) return -ENOENT;
@@ -2309,7 +2394,7 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_EXT2DIR) { /* cp/ext2 */
     if (!ubuf || bufsize <= 0) return -EINVAL;
@@ -2497,7 +2582,7 @@ int file_fd_is_ext2(struct process *p, int fd) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   if (f->type == FILE_TYPE_EMPTY) return -1;
   return f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR;
 }
@@ -2508,7 +2593,7 @@ int file_fd_is_dir(struct process *p, int fd) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   if (f->type == FILE_TYPE_EMPTY) return -EBADF;
   return f->type == FILE_TYPE_FAT16DIR || f->type == FILE_TYPE_NFSDIR ||
          f->type == FILE_TYPE_EXT2DIR || f->type == FILE_TYPE_TMPFSDIR ||
@@ -2522,7 +2607,7 @@ int file_setattr_fd(struct process *p, int fd, const struct vfs_setattr *sa) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   if (f->type == FILE_TYPE_EMPTY || f->type == FILE_TYPE_UNINIT) return -EBADF;
   return vfs_setattr_file(f, sa);
 }
@@ -2536,7 +2621,7 @@ int file_lock_target(struct process *p, int fd, struct vfs_lock_key *key,
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   if (f->type == FILE_TYPE_EMPTY || f->type == FILE_TYPE_UNINIT) return -EBADF;
   file_lock_key(f, key);
   *desc = g_fd + 1;
@@ -2551,7 +2636,7 @@ int file_fd_is_devfb(struct process *p, int fd) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return 0;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   if (f->type == FILE_TYPE_EMPTY) return 0;
   return f->type == FILE_TYPE_DEVFB;
 }
@@ -2718,7 +2803,7 @@ int file_close(struct process *cur, int fd) {
     spinlock_release_irqrestore(&proc_lock, cflags);
   }
 
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   /* L57: who closed which fd, and which file description it named. */
   fd_ev_note(FDEV_CLOSE, cur, fd, g_fd, f->path);
@@ -2795,16 +2880,25 @@ int file_close(struct process *cur, int fd) {
 
 /* dup(fd): the lowest unused user fd now refers to the same open file. */
 int file_dup(struct process *cur, int fd) {
+  return file_dup_min(cur, fd, FD_STDIO_FIRST);
+}
+
+/* C1-k5: F_DUPFD semantics -- the lowest unused fd >= minfd (never below
+ * FD_STDIO_FIRST, see GB-108) and below the soft RLIMIT_NOFILE.  minfd at or
+ * past the limit is -EINVAL (Linux f_dupfd); no free slot is -EMFILE. */
+int file_dup_min(struct process *cur, int fd, int minfd) {
   cur = process_group(cur); /* P1 (D7): the fd table is group state */
+  if (cur && minfd >= process_fd_limit(cur)) return -EINVAL;
+  if (minfd < FD_STDIO_FIRST) minfd = FD_STDIO_FIRST;
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
   int g_fd = cur->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_EMPTY) return -EBADF;
   if (cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
   int newfd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+  for (int i = minfd; i < process_fd_limit(cur); i++) {
     if (cur->open_fds[i] == -1) {
       newfd = i;
       break;
@@ -2836,11 +2930,13 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
   if (!cur || oldfd < 0 || oldfd >= MAX_OPEN_FDS) return -EBADF;
   int g_fd = cur->open_fds[oldfd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_EMPTY) return -EBADF;
   if (oldfd == newfd) return newfd;
-  if (newfd < 0 || newfd >= MAX_OPEN_FDS) return -EINVAL;
+  /* C1-k5: the soft RLIMIT_NOFILE bounds newfd (Linux dup2: EBADF, which
+     the compat layer maps this -EINVAL to). */
+  if (newfd < 0 || newfd >= process_fd_limit(cur)) return -EINVAL;
   if (cur->open_fds[newfd] != -1) {
     int r = file_close(cur, newfd);
     if (r != 0) return -EBADF;
@@ -2865,7 +2961,7 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
 void fs_close_global(int g_fd) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return;
 
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
 
   /* SEC-OBS-B: see file_close — backend close wakes peers (proc_lock), so
@@ -3191,7 +3287,7 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     return -1;
   }
 
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_EMPTY) {
     fd_ev_dump(cur, fd, "type-empty");
@@ -3385,7 +3481,7 @@ int file_available(struct process *cur, int fd) {
   int g_fd = cur->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
 
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_FAT16) {
     // FAT16 files just return size minus cursor
@@ -3517,7 +3613,7 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
     return -1;
   }
 
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return size; /* /dev/null swallows any write, accepts it fully */
@@ -3644,7 +3740,7 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
  */
 int file_gfd_is_pipe(int gfd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
-  return global_file_table[gfd].type == FILE_TYPE_PIPE;
+  return gfile(gfd)->type == FILE_TYPE_PIPE;
 }
 
 /* C1-k4: writev(2) on a pipe write end as ONE pipe write (Linux: a gather of
@@ -3658,7 +3754,7 @@ int file_writev_pipe(struct process *cur, int fd, const struct pipe_seg *seg,
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -ENOTTY;
   int g_fd = cur->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -ENOTTY;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   if (f->type != FILE_TYPE_PIPE || f->pipe.end != 1) return -ENOTTY;
   return pipe_writev_ex(f->pipe.ptr, seg, nseg,
                         (f->open_flags & K_O_NONBLOCK) != 0, key, tf);
@@ -3669,7 +3765,7 @@ int file_fd_pipe_wend(struct process *cur, int fd) {
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
   int g_fd = cur->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return 0;
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   return f->type == FILE_TYPE_PIPE && f->pipe.end == 1;
 }
 
@@ -3690,7 +3786,7 @@ int file_fd_notifies(struct process *p, int fd) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 1; /* POLLNVAL: static */
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return 1;
-  int t = global_file_table[g_fd].type;
+  int t = gfile(g_fd)->type;
   return t == FILE_TYPE_PIPE || t == FILE_TYPE_UNIXSOCK ||
          t == FILE_TYPE_EVENTFD || t == FILE_TYPE_DEVNULL;
 }
@@ -3726,7 +3822,7 @@ int file_pipe(struct process *cur, int fds[2]) {
   f1->open_flags = 1; /* O_WRONLY */
 
   int user_fd0 = -1, user_fd1 = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++) {
     if (cur->open_fds[i] == -1) {
       if (user_fd0 == -1) user_fd0 = i;
       else if (user_fd1 == -1) {
@@ -3771,7 +3867,7 @@ int file_timerfd_create(struct process *cur, int clockid, int flags) {
   int slot = lt_timerfd_new(clockid, flags);
   if (slot < 0) return slot;
   int ufd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++)
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++)
     if (cur->open_fds[i] == -1) { ufd = i; break; }
   if (ufd < 0) { lt_timerfd_release(slot); return -EMFILE; }
   struct file *f = file_alloc();
@@ -3795,7 +3891,7 @@ int file_eventfd_create(struct process *cur, unsigned int initval, int flags) {
   int slot = l_eventfd_new(initval, flags);
   if (slot < 0) return slot;
   int ufd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++)
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++)
     if (cur->open_fds[i] == -1) { ufd = i; break; }
   if (ufd < 0) { l_eventfd_release(slot); return -EMFILE; }
   struct file *f = file_alloc();
@@ -3819,7 +3915,7 @@ int file_epoll_create(struct process *cur, int flags) {
   int slot = lt_epoll_new();
   if (slot < 0) return slot;
   int ufd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++)
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++)
     if (cur->open_fds[i] == -1) { ufd = i; break; }
   if (ufd < 0) { lt_epoll_release(slot); return -EMFILE; }
   struct file *f = file_alloc();
@@ -3837,7 +3933,7 @@ int file_epoll_slot(struct process *p, int fd) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
   int g = p->open_fds[fd];
   if (g < 0 || g >= MAX_GLOBAL_FILES) return -1;
-  struct file *f = &global_file_table[g];
+  struct file *f = gfile(g);
   if (f->type != FILE_TYPE_EPOLL) return -1;
   return f->epollfd.slot;
 }
@@ -3848,7 +3944,7 @@ int file_timerfd_slot(struct process *p, int fd) {
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
   int g = p->open_fds[fd];
   if (g < 0 || g >= MAX_GLOBAL_FILES) return -1;
-  struct file *f = &global_file_table[g];
+  struct file *f = gfile(g);
   if (f->type != FILE_TYPE_TIMERFD) return -1;
   return f->timerfd.slot;
 }
@@ -3866,7 +3962,7 @@ static struct file *f1_memfd(struct process *p, int fd, int *err) {
     *err = EBADF;
     return 0;
   }
-  struct file *f = &global_file_table[gfd];
+  struct file *f = gfile(gfd);
   if (f->type != FILE_TYPE_MEMFD) {
     *err = EINVAL;
     return 0;
@@ -3884,7 +3980,7 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS)
     return -EMFILE;
   int ufd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++) {
     if (cur->open_fds[i] == -1) {
       ufd = i;
       break;
@@ -4029,7 +4125,7 @@ struct vm_object *file_memfd_obj(struct process *p, int fd) {
     if (!g || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
     int gfd = g->open_fds[fd];
     if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
-    struct file *tf = &global_file_table[gfd];
+    struct file *tf = gfile(gfd);
     if (tf->type != FILE_TYPE_TMPFS) return 0;
     return tmpfs_file_obj(tf);
   }
@@ -4054,7 +4150,7 @@ int file_fat16_ident(struct process *p, int fd, uint16_t *cluster,
   int gfd = p->open_fds[fd];
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return -EBADF;
-  struct file *f = &global_file_table[gfd];
+  struct file *f = gfile(gfd);
   if (f->type != FILE_TYPE_FAT16)
     return -ENOTSUP;
   if (cluster)
@@ -4076,7 +4172,7 @@ int file_nfs_ident(struct process *p, int fd, int *mount_idx,
   int gfd = p->open_fds[fd];
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return -EBADF;
-  struct file *f = &global_file_table[gfd];
+  struct file *f = gfile(gfd);
   if (f->type != FILE_TYPE_NFS || f->nfs.is_dir)
     return -ENOTSUP;
   if (mount_idx)
@@ -4101,7 +4197,7 @@ int file_ext2_ident(struct process *p, int fd, uint32_t *ino, uint64_t *size,
   int gfd = p->open_fds[fd];
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return -EBADF;
-  struct file *f = &global_file_table[gfd];
+  struct file *f = gfile(gfd);
   if (f->type != FILE_TYPE_EXT2)
     return -ENOTSUP; /* a directory (EXT2DIR) has no data to map */
   int64_t sz = ext2v_size(f);
@@ -4127,7 +4223,7 @@ int file_is_devfb(struct process *p, int fd) {
   int gfd = p->open_fds[fd];
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return 0;
-  return global_file_table[gfd].type == FILE_TYPE_DEVFB;
+  return gfile(gfd)->type == FILE_TYPE_DEVFB;
 }
 
 /* M1 (docs/gpu-abi.md): is `fd` the /dev/gpu node?  The compat ioctl route
@@ -4139,7 +4235,7 @@ int file_is_devgpu(struct process *p, int fd) {
   int gfd = p->open_fds[fd];
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return 0;
-  return global_file_table[gfd].type == FILE_TYPE_DEVGPU;
+  return gfile(gfd)->type == FILE_TYPE_DEVGPU;
 }
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) for memfd (design 4.3, OQ7 minimal set:
@@ -4165,7 +4261,7 @@ int file_memfd_seals(struct process *p, int fd, int cmd, int arg) {
  */
 void fs_reopen(int global_fd) {
   if (global_fd < 0 || global_fd >= MAX_GLOBAL_FILES) return;
-  struct file *f = &global_file_table[global_fd];
+  struct file *f = gfile(global_fd);
   ylock_acquire(&f->lock);
   if (f->type != FILE_TYPE_EMPTY) {
     f->ref_count++;
@@ -4244,7 +4340,7 @@ int file_socketpair(struct process *p, int domain, int type, int proto,
   f1->usock.end = 1;
 
   int fd0 = -1, fd1 = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(p); i++) {
     if (p->open_fds[i] == -1) {
       if (fd0 == -1) fd0 = i;
       else if (fd1 == -1) { fd1 = i; break; }
@@ -4278,8 +4374,8 @@ int file_socketpair(struct process *p, int domain, int type, int proto,
  * file_gfd_is_pipe). */
 int file_gfd_is_ipc_endpoint(int gfd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
-  return global_file_table[gfd].type == FILE_TYPE_PIPE ||
-         global_file_table[gfd].type == FILE_TYPE_UNIXSOCK;
+  return gfile(gfd)->type == FILE_TYPE_PIPE ||
+         gfile(gfd)->type == FILE_TYPE_UNIXSOCK;
 }
 
 /* §4.2 step 1: validate a sender fd and take a message-owned reference to
@@ -4287,7 +4383,7 @@ int file_gfd_is_ipc_endpoint(int gfd) {
  * aligned so the later release actually drops the backend ref). */
 int fs_msg_ref_gfd(int gfd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -EBADF;
-  struct file *f = &global_file_table[gfd];
+  struct file *f = gfile(gfd);
   ylock_acquire(&f->lock);
   if (f->type == FILE_TYPE_EMPTY) {
     ylock_release(&f->lock);
@@ -4311,10 +4407,10 @@ int fs_msg_install_gfd(struct process *p, int gfd) {
   p = process_group(p);
   if (!p) return -EBADF;
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -EBADF;
-  if (global_file_table[gfd].type == FILE_TYPE_EMPTY) return -EBADF;
+  if (gfile(gfd)->type == FILE_TYPE_EMPTY) return -EBADF;
   if (p->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
   int fd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(p); i++) {
     if (p->open_fds[i] == -1) { fd = i; break; }
   }
   if (fd < 0) return -EMFILE;
@@ -4330,7 +4426,7 @@ static struct file *f1_msg_socket(struct process *pg, int fd, int *errp) {
   if (!pg || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = -EBADF; return 0; }
   int g_fd = pg->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = -EBADF; return 0; }
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_SOCKET) { *errp = -EOPNOTSUPP; return 0; }
   if (f->type != FILE_TYPE_UNIXSOCK || !f->usock.ptr) {
@@ -4497,7 +4593,7 @@ static struct file *f1_unix_file(struct process *pg, int fd, int *errp) {
   if (!pg || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = -EBADF; return 0; }
   int g_fd = pg->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = -EBADF; return 0; }
-  struct file *f = &global_file_table[g_fd];
+  struct file *f = gfile(g_fd);
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_SOCKET) { *errp = -EOPNOTSUPP; return 0; }
   if (f->type != FILE_TYPE_UNIXSOCK || !f->usock.ptr) {
@@ -4550,7 +4646,7 @@ int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
     return r; /* -EAGAIN / -EINVAL / -2 (parked) */
   }
   int nfd = -1;
-  for (int i = FD_STDIO_FIRST; i < MAX_OPEN_FDS; i++) {
+  for (int i = FD_STDIO_FIRST; i < process_fd_limit(pg); i++) {
     if (pg->open_fds[i] == -1) { nfd = i; break; }
   }
   if (nfd < 0) { /* raced with a sibling thread filling the table */
@@ -4699,7 +4795,7 @@ int fs_fd_gfd(struct process *p, int fd) {
 /* C1-k4: the AF_UNIX endpoint a global file holds (NULL otherwise). */
 struct usock *fs_gfd_usock(int gfd, int *end) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
-  struct file *f = &global_file_table[gfd];
+  struct file *f = gfile(gfd);
   if (f->type != FILE_TYPE_UNIXSOCK) return 0;
   if (end) *end = f->usock.end;
   return f->usock.ptr;
@@ -4745,6 +4841,6 @@ struct usock *fs_test_usock(struct process *p, int fd) {
 
 int fs_test_slot_type(int gfd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -1;
-  return (int)global_file_table[gfd].type;
+  return (int)gfile(gfd)->type;
 }
 #endif

@@ -190,14 +190,25 @@ struct file {
                                         epoll table */
     } epollfd;
   };
+  int gidx;                        /**< C1-k5: this slot's global index (the
+                                        table is chunked, fs.c gfile) */
 };
 
 /* L55: 512, not 128.  MAX_OPEN_FDS is now 256 per process, and this table is
  * the one every local fd indexes: leaving it at 128 would have made the wider
  * per-process table unusable (a single process could still only reach 128
  * distinct open files, and the desktop/launcher/socket slots share the rest).
- * One slot is ~400 B, so the extra 384 slots cost ~150 KiB of BSS. */
+ * One slot is ~400 B, so the extra 384 slots cost ~150 KiB of BSS.
+ * C1-k5: 16384 on x86_64 (Wine: ~3 pipes = 6 files per thread, in two
+ * processes).  Only GFT_STATIC slots are static; the rest are frame-pool
+ * chunks allocated on demand (fs.c gfile, docs/cp-k5.md §1).  ARM stays at
+ * 512, all static. */
+#ifdef __x86_64__
+#define MAX_GLOBAL_FILES 16384
+#else
 #define MAX_GLOBAL_FILES 512
+#endif
+#define GFT_STATIC 512
 
 void fs_init(void);
 struct trap_frame;
@@ -219,6 +230,8 @@ int fs_read_ext2_file(const char *path, uint8_t **buf_out, uint32_t *size_out,
 int file_close(struct process *p, int fd);
 int file_dup(struct process *p, int fd);
 int file_dup2(struct process *p, int oldfd, int newfd);
+/* C1-k5: F_DUPFD -- lowest free fd >= minfd below RLIMIT_NOFILE. */
+int file_dup_min(struct process *p, int fd, int minfd);
 int file_gfd_is_pipe(int gfd);
 int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
@@ -418,6 +431,10 @@ int file_ftruncate(struct process *p, int fd, int64_t length);
  * SYN retransmission while a program waits in select(). */
 int file_select(struct process *p, int nfds, struct fd_set_k *rd,
                 struct fd_set_k *wr, struct fd_set_k *ex, int timeout_ms);
+/* C1-k5: the same engine over sets of nwords 32-bit words (<= MAX_OPEN_FDS
+ * bits); the compat select/pselect6 path. */
+int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
+                      uint32_t *ex, int nwords, int timeout_ms);
 
 /* P1: drop a pid's remembered select deadline (group teardown / thread
  * death: a parked select must not resurrect a dead thread's slice). */

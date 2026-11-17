@@ -312,6 +312,54 @@ static void kmemset(void *dst, uint8_t val, uint64_t n) {
   }
 }
 
+/* C1-k5 (docs/cp-k5.md §1): the per-slot fd tables.  MAX_OPEN_FDS ints per
+ * slot (16 KiB on x86_64) used to live inline in struct process; at 4096 fds
+ * x 512 slots that is 8 MiB, and the x86_64 image has ~25 MiB left below
+ * CP_KHOLE_HI (linker_x64.ld's ASSERT).  So every slot's open_fds points into
+ * ONE frame-pool region taken here, right after frame_init(): 2048 frames on
+ * x86_64, 48 on ARM.  It is never freed; a second process_init() (trap_test's
+ * mock setup re-runs frame_init, which forgets every allocation) re-reserves
+ * the same region, and that call resets every slot anyway.  If the
+ * pool cannot give one contiguous run, each slot gets its own run; failing
+ * that the boot stops here, loudly -- a NULL table would fault on the first
+ * open. */
+#define FDT_SLOT_BYTES ((uint64_t)MAX_OPEN_FDS * sizeof(int))
+#define FDT_SLOT_PAGES ((int)((FDT_SLOT_BYTES + FRAME_SIZE - 1) / FRAME_SIZE))
+static uint64_t fdt_region_pa; /* the region of the first process_init() */
+static void process_fdt_alloc(void) {
+  uint64_t total = FDT_SLOT_BYTES * (uint64_t)MAX_PROCESSES;
+  int pages = (int)((total + FRAME_SIZE - 1) / FRAME_SIZE);
+  uint64_t pa = 0;
+  if (fdt_region_pa) {
+    /* A re-run (trap_test's mock setup): frame_init() just forgot every
+       allocation, including this region.  Taking a NEW region now would
+       write -1s over whatever the allocator hands back -- frames other
+       subsystems still use.  Keep the old region and mark it used again
+       (frame_reserve_range works in whole 32 MiB blocks: unit-test kernels
+       only, at most two blocks). */
+    pa = fdt_region_pa;
+    frame_reserve_range(pa, pa + (uint64_t)pages * FRAME_SIZE);
+  } else {
+    pa = frame_alloc_contig(pages);
+    fdt_region_pa = pa;
+  }
+  if (pa) {
+    uint8_t *base = (uint8_t *)phys_to_virt(pa);
+    for (int i = 0; i < MAX_PROCESSES; i++)
+      proc_table[i].open_fds = (int *)(void *)(base + (uint64_t)i * FDT_SLOT_BYTES);
+    return;
+  }
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    uint64_t one = frame_alloc_contig(FDT_SLOT_PAGES);
+    if (!one) {
+      uart_puts("[K5] FATAL: no frames for the per-process fd tables\n");
+      for (;;)
+        ;
+    }
+    proc_table[i].open_fds = (int *)phys_to_virt(one);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Process Init
 // ---------------------------------------------------------------------------
@@ -327,6 +375,7 @@ void process_init(void) {
   /* P2.2 (design section 2): the frame bitmap is the single source of
      truth for pool state; the 32 MiB block layer is layered on it. */
   frame_init();
+  process_fdt_alloc();
   for (int i = 0; i < MAX_PROCESSES; i++) {
     proc_table[i].pid = i;
     proc_table[i].state = PROC_STATE_FREE;
@@ -363,6 +412,7 @@ void process_init(void) {
     for (int j = 0; j < MAX_OPEN_FDS; j++) {
       proc_table[i].open_fds[j] = -1;
     }
+    process_k5_reset(&proc_table[i]);
   }
   for (int i = 0; i < MAX_CPUS; i++) {
     set_current_process_pid(i, -1);
@@ -775,12 +825,69 @@ static void reap_status_write(struct process *parent, uint64_t va, int st) {
  * pre-allocated 32 MiB physical block, so its resident set (== peak) is
  * USER_REGION_SIZE in KiB; v2 AS pages are not frame-counted here. */
 
-static void ho_rusage_fill(struct ho_rusage *ru, const struct process *child) {
+/* C1-k5: CPU time is now real (schedule()'s accounting, see ru_charge_locked).
+ * All of it is reported as ru_utime: the kernel cannot split user from system
+ * time without hooks on every trap entry, and a total under utime is what
+ * Linux's tick accounting also gives a compute-bound thread.  ru_stime stays
+ * 0 (documented, docs/cp-k5.md §4). */
+static uint64_t ru_slice_t0_peek(uint32_t cpu); /* C1-k5: schedule()'s stamp */
+static void ho_rusage_set(struct ho_rusage *ru, uint64_t us, uint64_t nv, uint64_t niv,
+                          const struct process *who) {
   int64_t *w = (int64_t *)ru;
   for (int i = 0; i < (int)(sizeof(struct ho_rusage) / sizeof(int64_t)); i++)
     w[i] = 0;
-  if (child && !child->as)
+  ru->ru_utime_sec = (int64_t)(us / 1000000u);
+  ru->ru_utime_usec = (int64_t)(us % 1000000u);
+  ru->ru_nvcsw = (int64_t)nv;
+  ru->ru_nivcsw = (int64_t)niv;
+  if (who && !who->as)
     ru->ru_maxrss = (int64_t)(USER_REGION_SIZE / 1024);
+}
+
+/* wait4's rusage: the child's whole group plus its own reaped children
+ * (Linux wait_task_zombie: RUSAGE_BOTH). */
+static void ho_rusage_fill(struct ho_rusage *ru, const struct process *child) {
+  if (!child) {
+    ho_rusage_set(ru, 0, 0, 0, 0);
+    return;
+  }
+  ho_rusage_set(ru, child->ru_grp_us + child->ru_ch_us,
+                child->ru_grp_nvcsw + child->ru_ch_nvcsw,
+                child->ru_grp_nivcsw + child->ru_ch_nivcsw, child);
+}
+
+/* C1-k5: a reaped child's totals move into the parent group's RUSAGE_CHILDREN.
+ * Caller holds proc_lock. */
+static void ru_reap_charge_locked(struct process *pgrp, const struct process *child) {
+  if (!pgrp || !child) return;
+  pgrp->ru_ch_us += child->ru_grp_us + child->ru_ch_us;
+  pgrp->ru_ch_nvcsw += child->ru_grp_nvcsw + child->ru_ch_nvcsw;
+  pgrp->ru_ch_nivcsw += child->ru_grp_nivcsw + child->ru_ch_nivcsw;
+}
+
+/* C1-k5: getrusage(2) for the compat layer.  who: 0 SELF, -1 CHILDREN,
+ * 1 THREAD (anything else is the caller's -EINVAL).  O(1): the group
+ * totals are kept by schedule(), so no slot walk.  The running slice of the
+ * calling thread is included (it has not been charged yet). */
+void process_rusage(struct process *p, int who, struct ho_rusage *ru) {
+  struct process *g = process_group(p);
+  if (!p || !g) {
+    ho_rusage_set(ru, 0, 0, 0, 0);
+    return;
+  }
+  uint64_t live = 0;
+  {
+    uint32_t cpu = get_cpuid();
+    uint64_t t0 = cpu < MAX_CPUS ? ru_slice_t0_peek(cpu) : 0;
+    uint64_t now = timer_get_us();
+    if (t0 && now > t0 && current_process() == p) live = now - t0;
+  }
+  if (who == 1)
+    ho_rusage_set(ru, p->ru_run_us + live, p->ru_nvcsw, p->ru_nivcsw, g);
+  else if (who == -1)
+    ho_rusage_set(ru, g->ru_ch_us, g->ru_ch_nvcsw, g->ru_ch_nivcsw, 0);
+  else
+    ho_rusage_set(ru, g->ru_grp_us + live, g->ru_grp_nvcsw, g->ru_grp_nivcsw, g);
 }
 
 /* Byte-wise 144-byte store into user memory (never a whole-struct cast).
@@ -871,6 +978,8 @@ static void reap_deliver_locked(struct process *grp) {
     if (want > 0 && want != grp->pid)
       continue;
     parent->context[0] = grp->pid;         /* waitpid return value */
+    if (grp->state != PROC_STATE_FREE)    /* C1-k5: charge the reap once */
+      ru_reap_charge_locked(process_group(parent), grp);
     uint64_t stp = parent->wait_status_va; /* saved status pointer */
     parent->wait_status_va = 0;
     if (stp) {
@@ -1423,6 +1532,7 @@ static int process_create_internal_ver(int ver) {
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
     p->open_fds[i] = -1;
   }
+  process_k5_reset(p); /* C1-k5: default RLIMIT_NOFILE, zero rusage */
 
   /* P2.2 (S2): v2 processes demand-commit (S3) and never touch a block;
      the eager 1 MiB + 256 KiB zeroing is the v1 contract only. */
@@ -1829,6 +1939,39 @@ volatile int scheduler_started = 0;
  */
 /* GB-057: defined below the idle loop; declared here because the switch paths
    above call them.  See resume_target_unmapped() for what they report. */
+/* C1-k5 (docs/cp-k5.md §4): CPU accounting at the switch points.  The slice
+ * that a CPU's current thread has run since it was switched in is charged
+ * when schedule() is entered for it; the switch-in stamps the next slice.
+ * timer_get_us is one rdtsc and a divide, under proc_lock, which schedule()
+ * holds here anyway.  nvcsw/nivcsw count only real switches away (Linux:
+ * prev != next), so a sched_yield with nothing else runnable changes
+ * neither -- the property Wine's NtYieldExecution tests. */
+static uint64_t ru_slice_t0[MAX_CPUS];
+static void ru_charge_locked(struct process *cur, uint32_t cpu) {
+  uint64_t now = timer_get_us();
+  uint64_t t0 = ru_slice_t0[cpu];
+  ru_slice_t0[cpu] = now;
+  if (!t0 || now <= t0) return;
+  uint64_t d = now - t0;
+  cur->ru_run_us += d;
+  struct process *g = process_group(cur);
+  if (g && g != cur) g->ru_grp_us += d;
+  else cur->ru_grp_us += d;
+}
+static uint64_t ru_slice_t0_peek(uint32_t cpu) { return ru_slice_t0[cpu]; }
+static void ru_count_switch_locked(int pid, int vol) {
+  if (pid < 0 || pid >= MAX_PROCESSES || vol < 0) return;
+  struct process *p = &proc_table[pid];
+  struct process *g = process_group(p);
+  if (vol) {
+    p->ru_nvcsw++;
+    if (g) g->ru_grp_nvcsw++;
+  } else {
+    p->ru_nivcsw++;
+    if (g) g->ru_grp_nivcsw++;
+  }
+}
+
 void schedule(struct trap_frame *tf, int is_yield) {
   if (!scheduler_started) return;
 
@@ -1854,6 +1997,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   int current_pid = cpu_current_pids[cpu];
+  int ru_prev = -1, ru_vol = -1; /* C1-k5: the switch being counted */
 
   if (current_pid >= 0) {
     struct process *cur = &proc_table[current_pid];
@@ -1870,6 +2014,16 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
     }
     if (!taken_elsewhere) {
+      /* C1-k5: charge the slice ending here; remember whether a switch
+         away would be voluntary (blocked) or involuntary (still runnable). */
+      ru_charge_locked(cur, cpu);
+      ru_prev = current_pid;
+      if (cur->state == PROC_STATE_RUNNING)
+        ru_vol = 0;
+      else if (cur->state == PROC_STATE_READY || cur->state == PROC_STATE_BLOCKED ||
+               cur->state == PROC_STATE_WAIT_SPAWN || cur->state == PROC_STATE_WAIT_CHILD ||
+               cur->state == PROC_STATE_FUTEX)
+        ru_vol = 1;
       if (cur->state == PROC_STATE_RUNNING) {
         save_context(cur, tf);
         cur->state = PROC_STATE_READY;
@@ -2071,6 +2225,11 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
     if (next >= 0) {
       set_current_process_pid(cpu, next);
+      /* C1-k5: count the switch away from ru_prev (once), stamp the slice. */
+      if (ru_prev >= 0 && next != ru_prev)
+        ru_count_switch_locked(ru_prev, ru_vol);
+      ru_prev = -1;
+      ru_slice_t0[cpu] = timer_get_us();
       /* WK-3 (draft 0008): liveness heartbeat on every claim, not just
          the idle path.  The heartbeat proves a CPU is alive; the idle
          reaper wastes a RUNNING slot whose every claimer heartbeat is
@@ -2399,6 +2558,13 @@ void schedule(struct trap_frame *tf, int is_yield) {
          takes no lock, so it cannot deadlock the console it is reporting on). */
       resume_returned_halt(proc_table[next].pid, &local_tf);
     }
+
+    /* C1-k5: going idle is a switch away from ru_prev too (counted once). */
+    if (ru_prev >= 0) {
+      ru_count_switch_locked(ru_prev, ru_vol);
+      ru_prev = -1;
+    }
+    ru_slice_t0[cpu] = 0;
 
     // No ready processes. Check if any are still alive.
     // GB-057-a: a BLOCKED slot is alive only while it has a possible waker. Stamp
@@ -4350,6 +4516,7 @@ static int process_wait_common(struct trap_frame *tf, int want_pid,
     int st = p->exit_status;
     struct ho_rusage ru;
     ho_rusage_fill(&ru, p);
+    ru_reap_charge_locked(grp, p); /* C1-k5: RUSAGE_CHILDREN */
     p->state = PROC_STATE_FREE;
     p->exit_status = 0;
     /* GB-159: the child's AS is now deferred out of the exit/kill path.  The
@@ -4646,14 +4813,15 @@ static int process_fork_common(struct trap_frame *tf, int mode) {
    * and the exact cycle this kernel forbids.  The child is not READY yet, so
    * no other core can observe it, and a concurrent close in the group is
    * still serialised by the snapshot taken under the lock. */
-  int inherited_fds[MAX_OPEN_FDS];
-  int inherited_n = 0;
+  /* C1-k5: the snapshot IS the child's own table (nothing else can see it
+   * yet), so the reopen pass below walks that instead of a 16 KiB copy on the
+   * 64 KiB kernel stack. */
   child->num_open_fds = group->num_open_fds;
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
     child->open_fds[i] = group->open_fds[i];
-    if (child->open_fds[i] != -1 && inherited_n < MAX_OPEN_FDS)
-      inherited_fds[inherited_n++] = child->open_fds[i];
-  }
+  /* C1-k5: fork copies RLIMIT_NOFILE (Linux copy_signal/rlim). */
+  child->rlim_nofile_cur = group->rlim_nofile_cur;
+  child->rlim_nofile_max = group->rlim_nofile_max;
   /* cp/exec (CROSS-LANE, minimal: fork fd inheritance, not the clone/thread
      path C1-thr owns): fork(2) copies the FD_CLOEXEC flags, so a child that
      then execve()s closes exactly the fds the parent marked -- Wine's forking
@@ -4688,8 +4856,9 @@ static int process_fork_common(struct trap_frame *tf, int mode) {
   spinlock_release_irqrestore(&proc_lock, flags);
 
   /* Now the per-file references, with no proc_lock held (see above). */
-  for (int i = 0; i < inherited_n; i++)
-    fs_reopen(inherited_fds[i]);
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    if (child->open_fds[i] != -1)
+      fs_reopen(child->open_fds[i]);
 
   /* cp/sys: a Linux-ABI child stays a Linux-ABI process (its syscalls must
      keep reaching the compat table), and the compat layer copies what Linux
@@ -6700,6 +6869,7 @@ static struct process *thread_alloc_common(struct process *caller, int *err) {
   t->num_open_fds = 0;
   for (int i = 0; i < MAX_OPEN_FDS; i++)
     t->open_fds[i] = -1;
+  process_k5_reset(t); /* C1-k5: the thread's own rusage starts at zero */
   t->wake_ms = 0;
   t->futex_uaddr = 0;
   t->clear_child_tid = 0;

@@ -12,7 +12,8 @@
  *   ps                                   (after; nothing new may remain)
  *
  * While thrstorm runs, a "[K5] census" row every 10 s counts the kernel's live
- * process slots (threads included) and the slots of the biggest thread group.
+ * processes (sysinfo(3) lists thread groups; thrstorm reports its own thread
+ * count through Toolhelp).
  * Each step is bracketed by "[K5] begin <tag>" / "[K5] end <tag> status=<n>".
  */
 #include <fcntl.h>
@@ -95,22 +96,11 @@ static int step(const char *tag, const char *path, char *const argv[], int secs,
     wp = waitpid(pid, &status, 1 /* WNOHANG */);
     if (wp != 0) break;
     if (census_every > 0 && now_ms() >= next) {
+      /* sysinfo(3) lists processes (thread groups), not threads: the thread
+         count is thrstorm's own Toolhelp row. */
       int m = census(tmp);
-      /* biggest thread group: count slots per tgid-equivalent name */
-      int big = 0;
-      for (int i = 0; i < m; i++) {
-        int c = 0;
-        for (int j = 0; j < m; j++)
-          if (tmp[j].name[0] && tmp[i].name[0]) {
-            int k = 0;
-            while (tmp[i].name[k] && tmp[i].name[k] == tmp[j].name[k]) k++;
-            if (tmp[i].name[k] == tmp[j].name[k]) c++;
-          }
-        if (c > big) big = c;
-      }
       if (m > peak) peak = m;
-      pc("[K5] census t="); pd((long)((now_ms() - t0) / 1000)); pc("s slots="); pd(m);
-      pc(" biggest_same_name="); pd(big); pc("\n");
+      pc("[K5] census t="); pd((long)((now_ms() - t0) / 1000)); pc("s processes="); pd(m); pc("\n");
       next += (uint64_t)census_every * 1000;
     }
     usleep(250000);
@@ -123,7 +113,7 @@ static int step(const char *tag, const char *path, char *const argv[], int secs,
     return -2;
   }
   pc("[K5] end "); pc(tag); pc(" status="); pd(status); pc(" ms="); pd((long)(now_ms() - t0));
-  if (census_every > 0) { pc(" peak_slots="); pd(peak); }
+  if (census_every > 0) { pc(" peak_processes="); pd(peak); }
   pc("\n");
   return status;
 }

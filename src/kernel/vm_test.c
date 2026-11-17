@@ -10,6 +10,7 @@
 #include "blk_cache.h"
 #include "virtio_blk.h"
 #include "process.h"
+static int *vm_test_fdt_take(void); /* C1-k5: fake fd tables (below) */
 
 extern void uart_puts(const char *s);
 extern void print_int(int v);
@@ -449,6 +450,7 @@ static void test_vm_mmap_family(void) {
      suite may have left holding a real file — and a regular-file fd is now
      a legal (file-backed) mmap source.  fd 3 CLOSED is the deterministic
      "not a mappable fd" case: -ENOTSUP, unchanged. */
+  fake.open_fds = vm_test_fdt_take(); /* C1-k5: the table is a pointer */
   fake.open_fds[3] = -1;
   EXPECT_EQ(vm_mmap(&fake, 0, 0x1000, VM_PROT_READ, VM_MAP_PRIVATE, 3, 0),
             -ENOTSUP);
@@ -1300,12 +1302,22 @@ static int vm_file_fixture(uint16_t *cluster, uint32_t *size) {
   return (*cluster != 0 && *size == VM_FILE_LEN) ? 0 : -1;
 }
 
-/* A fake process with a usable fd table (open_fds[] must read -1 = free). */
+/* A fake process with a usable fd table (open_fds[] must read -1 = free).
+ * C1-k5: struct process holds a POINTER to its table now (process.c
+ * process_fdt_alloc); a fake takes the next of four static tables, so the
+ * two fakes a test holds at once never share one. */
+static int vm_test_fdt[4][MAX_OPEN_FDS];
+static int vm_test_fdt_next;
+static int *vm_test_fdt_take(void) {
+  int *t = vm_test_fdt[vm_test_fdt_next++ & 3];
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    t[i] = -1;
+  return t;
+}
 static void vm_file_proc_init(struct process *p, struct addr_space *as) {
   for (unsigned i = 0; i < sizeof(*p); i++)
     ((unsigned char *)p)[i] = 0;
-  for (int i = 0; i < MAX_OPEN_FDS; i++)
-    p->open_fds[i] = -1;
+  p->open_fds = vm_test_fdt_take();
   p->num_open_fds = 0;
   p->as = as;
 }
