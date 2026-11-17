@@ -200,6 +200,10 @@ def main():
     ap.add_argument("--press-continue", action="store_true")
     ap.add_argument("--gpu", choices=["lavapipe", "venus"], default="lavapipe")
     args = ap.parse_args()
+    # SIGTERM -> SystemExit, so `finally` stops QEMU and releases the slot
+    # (C6-p7 orphaned a QEMU for 44 min with a plain SIGTERM; boot_p9.py the same)
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     if args.mem > 12288:
         sys.exit("boot_p8: -m above 12 GiB needs the integrator's approval")
     shots_dir = os.path.join(args.out, "shots")

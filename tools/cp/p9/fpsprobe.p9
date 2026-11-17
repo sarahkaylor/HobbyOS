@@ -20,7 +20,7 @@ shot menu
 # ---- LOAD GAME -> ManualSave-86 ---------------------------------------------
 seek menu-load main down 6 LOAD GAME
 key ret
-expect loadlist 30 LOAD\s*GAME
+expect loadlist 30 LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression
 key 0
 wait 2
 # the list with both groups expanded (ctl1): Streetkid/AutoSave-16 group at

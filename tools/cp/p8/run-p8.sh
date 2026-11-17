@@ -39,6 +39,7 @@
 #      the launcher, e.g. -DP8_EXTRA_ENV='"VKD3D_FEATURE_LEVEL=12_0"'),
 #      P8_SMP (default 8), P8_MEM (MiB, default 12288, never more),
 #      P8_VKD3D_FL (VKD3D_FEATURE_LEVEL; default 12_0 on lavapipe, unset on Venus),
+#      P8_XSCREEN (WxH: XHOBBY's startup screen size; default the framebuffer's),
 #      P8_GPU (lavapipe | venus), VENUS_BUILD (~/cp/venus-build), HOSTMEM (Venus
 #      BAR window, host-venus.sh default 8G: a host mapping, not guest RAM).
 # P9 hooks (lane C9-play, docs/cp-p9.md; tools/cp/p9/run-p9.sh sets them):
@@ -277,6 +278,14 @@ fi
 rm -f "$OUT/XSESSION.ENV"
 mcopy -o -i "$D" ::/X11/XSESSION.ENV "$OUT/XSESSION.ENV" 2>/dev/null || : > "$OUT/XSESSION.ENV"
 printf 'HB_SECOND_SCREEN=0\n' >> "$OUT/XSESSION.ENV"
+# P8_XSCREEN=WxH (C9-play): XHOBBY's startup screen size (HB_SCREEN_SIZE, the
+# DDX's env twin of -screen).  1280x720 makes the user's 1280x720 borderless
+# game window cover the screen, so C6-p7's zero-copy scanout takes its frames.
+if [ -n "${P8_XSCREEN:-}" ]; then
+  case "$P8_XSCREEN" in [0-9]*x[0-9]*) ;; *) die "P8_XSCREEN must be WxH";; esac
+  printf 'HB_SCREEN_SIZE=%s\n' "$P8_XSCREEN" >> "$OUT/XSESSION.ENV"
+  echo "== X screen: HB_SCREEN_SIZE=$P8_XSCREEN (XSESSION.ENV)"
+fi
 stage "$OUT/XSESSION.ENV" ::/X11/XSESSION.ENV
 printf '# autostart (staged by tools/cp/p8/run-p8.sh)\n/P8.BIN\n' > "$OUT/XSTART.TXT"
 stage "$OUT/XSTART.TXT" ::/XSTART.TXT

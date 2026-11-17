@@ -1047,6 +1047,30 @@ hbDepthFromEnv(void)
     return 24;
 }
 
+/* HB_SCREEN_SIZE=WxH (lane C9-play): the depth-24 screen's startup size,
+ * like "-screen WxH" but read from the environment, so XSESSION.BIN's
+ * /X11/XSESSION.ENV can set it per disk image (tools/cp/p8/run-p8.sh
+ * P8_XSCREEN).  Unset keeps the framebuffer's size (1920x1080).  A game whose
+ * borderless window is exactly this size covers the screen, which is what the
+ * P7 scanout path (hbScanoutPoll) needs; the picture sits top-left on the
+ * glass like a RandR mode, and RandR can still switch to the full size. */
+static void
+hbScreenSizeFromEnv(int *w, int *h)
+{
+    const char *s = getenv("HB_SCREEN_SIZE");
+    int ew, eh;
+
+    if (!s || !*s)
+        return;
+    if (sscanf(s, "%dx%d", &ew, &eh) == 2 && ew >= 320 && eh >= 200 && ew <= 8192 && eh <= 8192) {
+        *w = ew;
+        *h = eh;
+        ErrorF("hobbyos: HB_SCREEN_SIZE=%s: screen 0 starts at %dx%d\n", s, ew, eh);
+    }
+    else
+        ErrorF("hobbyos: HB_SCREEN_SIZE=%s ignored (want WxH, 320x200..8192x8192)\n", s);
+}
+
 /* HB_SECOND_SCREEN selects the depth-8 :0.1 screen:
  *   unset/empty  the default -- added when :0.0 is depth 24;
  *   0            never: ONE screen (Wine sessions, lane C4-x2).  With :0.1
@@ -1091,6 +1115,8 @@ hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
     else {
         scr->width = hbReqWidth ? hbReqWidth : scr->fbWidth;
         scr->height = hbReqHeight ? hbReqHeight : scr->fbHeight;
+        if (!hbReqWidth && pScreen->myNum == 0)
+            hbScreenSizeFromEnv(&scr->width, &scr->height);
     }
 
     fbmap = map_fb();

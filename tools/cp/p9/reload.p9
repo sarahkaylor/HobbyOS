@@ -11,7 +11,7 @@ expect menu-continue 10 CONTINUE
 # the save list first (evidence only), then back
 seek menu-load main down 6 LOAD GAME
 key ret
-expect loadlist 30 LOAD\s*GAME
+expect loadlist 30 LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression
 key 0
 wait 3
 shot loadlist
