@@ -1089,6 +1089,46 @@ processes start concurrently on the prefix (1 in 6 boots). Open, unowned: one co
 importing an empty-named library) in 1 of 9 Wine boots, with a clean NFS log. On lavapipe, vkd3d-proton
 offers FL 11_1 by default; `VKD3D_FEATURE_LEVEL=12_0` creates an FL 12_0 device.
 
+**integ5 landed (2026-11-17, cyberpunk = efd3a765):** cp-ext2w + cp-x3 + cp-k5 + one integrator fix-up
+(ARM `linker.ld` sorts `.bss` by alignment: two 2 MiB-aligned objects had jumped a 2 MiB boundary and pushed
+`__bss_end` past the limine assert; now 0x454cb1f0, about 1.2 MB of headroom). The gate batch
+(`strix:~/cp/integ-gates8.txt`) passed: every probe, ext2/exec/pfx/ext2w gates, both NFS guards, unit (2 known
+reds), host 38/40, ARM build, Gate P2, Gate P4, Gate P5 (with `fullscr`), thrstorm 256 threads (S1 PASS) and
+C8's P8 probes. Known, not blocking:
+- exitgroup X7 is load-flaky on base too (base: 12–16 bad at load ≈ 14).
+- `reg_gate` boot 1 wedged on `ext2_lock` (holder `ext2v_read` under pread64), C8's old stop 6; with C3-ext2w.
+- One pull-the-plug run in 8 is not fsck-clean (leak-class only, synced data intact); ext2 has no journal.
+- The ARM **unit-test** image is over the placement window since the main merge (pre-existing on 15ad4a35).
+- The ARM image is build-checked only (its boot config is a 16 GiB guest).
+
+**Wave 5 results so far.**
+- **C3-ext2w:** ext2 write-back with an ordered commit, plus multi-block NVMe commands. 4 KiB writes 14 →
+  540–680 MB/s; pull-the-plug 8/8 clean in the lane (base 5/8); FAT ftruncate under a mapping fixed. Open:
+  C8 stops 8/9 (flusher exit, `nvme_wait_cid` spinning on a CPU) and the `ext2_lock` wedge (back with the lane).
+- **C4-x3:** SysV shm (compat 29/30/31/67; native row **SYS_SHM 106**, signed off by the integrator), MIT-SHM 1.1
+  in XHOBBY (every winex11 window draws through XShm), the tree builds its own one-screen server (the override was
+  a stale build dir), RandR 1280×720 ↔ 1920×1080 with IceWM patch 0005. Open: MIT-SHM 1.2 / DRI3 (fd passing),
+  and the real scanout follows the mode only in P7.
+- **C1-k5:** `MAX_OPEN_FDS` 4096 with RLIMIT_NOFILE 1024/4096; 16384 files / 8192 pipes from the frame pool;
+  poll/ppoll/select/epoll scale; Linux SCM_RIGHTS truncation (MSG_CTRUNC) for Linux-ABI receivers; ENFILE; env
+  2048 B / 128 entries with E2BIG; fadvise64; O(1) getrusage. Open: SIGKILL of a group whose leader has exited
+  (p8killprobe K1/K2), signalfd, `ru_stime`.
+- **C8-game: Gate P8 PASSED on lavapipe** (integ5 + `cp-game` run10; on integ6 again in run13 at +297 s):
+  Cyberpunk 2077's main menu at launch + 328 s, OCR ×3 (NEW GAME … QUIT GAME), the user's preseeded profile
+  (no first-run screen shown), 7.4 GiB of the 11.25 GiB frame pool in use, e2fsck clean, game copy unchanged.
+  On Venus (integ6), FL 12_1 / SM 6.7 native, first window at +46 s, intro at 44–68 fps, then **stop 11**: a
+  deterministic Venus-only fault (game code executes in or writes to the exe's `.rdata`) 60–100 s in; with C6.
+- **C6-venus: Gate P6 PASSED** (lane run 13): vulkaninfo names `Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV
+  GFX1201))`; D3D12 176–190 fps, D3D11 118–123 fps, vkcube.exe 204 fps, Linux vkcube 226 fps; fence p50 162 µs;
+  timeline waits p50 76 µs. Mesa's software-WSI never completes `VK_KHR_present_wait`, so it is hidden;
+  synchronous present (async faults at frame 2, open). The host render server is fenced to renderD129 by an
+  LD_PRELOAD deny shim (the 8060S runs the user's desktop). F3 frozen at `docs/gpu-abi.md` §10 (ABI v2).
+- **C1-pe:** x86 COW and MAP_FIXED flushed only the local TLB (stale or unrelocated DLL bytes for threads on
+  other CPUs); fixed with probe `linux_probe_pemap` (base 6/6 FAIL, lane 11/11 PASS). Wine A/B 0 vs 0 faults,
+  so the PE-loader faults are not proven gone. Open: a single-threaded wineserver `c0000130` read; a proposed
+  `frame_free` double-free tripwire.
+- `/srv/nfs/cp-game` is shared between P8 runs only through `run-p8.sh`'s refcount (`/tmp/cp-game-export.lock`).
+
 Merge order: C0-sync first. Then, in whatever order they go green: C1-k5,
 C3-ext2w, C4-x3 and C6-venus (C1-k5 and C3-ext2w both touch `vm.c`/`fs.c` in
 different functions; the integrator resolves). C8-game's harness merges at the
