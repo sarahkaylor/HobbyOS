@@ -37,7 +37,10 @@
 #      VENUS_BUILD (~/cp/venus-build: shim .so lives in $VENUS_BUILD/shim),
 #      OVMF (~/.local/share/OVMF/OVMF_CODE_4M.fd), QEMU (qemu-system-x86_64),
 #      VENUS_TRACE (comma list of QEMU trace patterns, e.g. virtio_gpu_cmd_*),
-#      VENUS_VNC (1: -vnc unix:WORK/vnc-sock, for tools/cp/venus/vncshot.py).
+#      VENUS_VNC (1: -vnc unix:WORK/vnc-sock, for tools/cp/venus/vncshot.py),
+#      VENUS_IOEVENTFD (1 = ioeventfd=on on the GPU, the default; 0 = QEMU's
+#      default, off), VENUS_GPU_OPTS (extra virtio-gpu-gl-pci properties;
+#      C6-present's A/B knobs, docs/cp-present.md).
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
@@ -92,6 +95,13 @@ argv() {
     [ "$mib" -le 12288 ] || die "MEM=$MEM is above the 12 GiB slot limit"
     mkdir -p "$work"
     local fw=$work/ovmf.fd
+    # C6-present (docs/cp-present.md §3): the device's queue notify as an
+    # ioeventfd.  QEMU 10.2.1 defaults it off for virtio-gpu, so every guest
+    # kick was a userspace MMIO exit that took the BQL in the vCPU thread --
+    # behind egl-headless' ~3 ms scanout readback on the main thread.  On,
+    # the kick is an eventfd write in KVM and the vCPU runs on.
+    local gpuopt=
+    [ "${VENUS_IOEVENTFD:-1}" = 1 ] && gpuopt=,ioeventfd=on
     [ -f "$fw" ] || cp "$OVMF" "$fw"
     local a=(
         "$QEMU" -name hobbyos-venus,debug-threads=on
@@ -99,7 +109,7 @@ argv() {
         -cpu "$CPU" -smp "$SMP" -m "${mib}M"
         -object "memory-backend-memfd,id=mem0,size=${mib}M,share=on"
         -drive "if=pflash,format=raw,file=$fw"
-        -device virtio-gpu-gl-pci,blob=true,hostmem="$HOSTMEM",venus=true
+        -device "virtio-gpu-gl-pci,blob=true,hostmem=$HOSTMEM,venus=true$gpuopt${VENUS_GPU_OPTS:+,$VENUS_GPU_OPTS}"
         -vga none
         -display "egl-headless,rendernode=$RENDER"
         -serial "file:$work/serial.log"
