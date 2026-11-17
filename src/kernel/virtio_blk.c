@@ -1939,18 +1939,111 @@ int virtio_blk_init(void) {
  * held while a *lock* is held across the device wait, so the spinlock stall
  * breaker (which frees a lock whose owner stopped taking timer interrupts)
  * cannot admit a second driver entrant — the exact mechanism that used to
- * desynchronize the completion ring.  A waiter sleeps with interrupts on. */
+ * desynchronize the completion ring.  A waiter sleeps with interrupts on.
+ *
+ * cp-fat (P9-8): WHO holds it.  The token is shared by the boot volume (FAT,
+ * namespace 1) and the cp/ext2 data disk (namespace 2), and a FAT directory
+ * operation (rename, unlink, create) takes it while holding fat_lock.  A token
+ * whose holder never runs again therefore surfaces as a fat_lock (or ext2_lock)
+ * wedge whose owner is "RUNNING" on a CPU that is only halting here, with no
+ * [BLKQ] row, because the waiter never reaches a device wait.  Measured shape:
+ * [YLOCK-OWNER] fat_lock pid=10 cpu=4 ost=3 osys=23 with CPU 4 in HLT.  The
+ * waiter names the holder after BLK_TOKEN_REPORT_MS; the wait itself is not
+ * bounded (a FAT metadata write has no error path that leaves the volume
+ * consistent), so this is evidence, not recovery. */
+#define BLK_TOKEN_REPORT_MS 2000u
+static volatile int32_t blk_tok_pid = -1;   /* holder's pid, -1 = none */
+static volatile int32_t blk_tok_cpu = -1;   /* holder's CPU at acquire */
+static volatile uint64_t blk_tok_ms;        /* acquire time */
+static volatile uint64_t blk_tok_site;      /* acquire return address */
+static volatile uint32_t blk_tok_long_waits; /* waits past the report mark */
+
+static void blk_token_note_owner(uint64_t site) {
+  uint32_t c = get_cpuid();
+  blk_tok_cpu = (int32_t)c;
+  blk_tok_pid = (c < MAX_CPUS) ? cpu_current_pids[c] : -1;
+  blk_tok_ms = timer_get_ms();
+  blk_tok_site = site;
+}
+
+/* One record: the token's holder, where (if anywhere) it is running, and the
+ * caller's own context.  Usable from any context (no lock taken; the fields
+ * are a racy snapshot, which is all a wedge report needs). */
+void blk_token_diag_row(const char *why) {
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[BLKTOK] ");
+  kl_s(&kl, why ? why : "state");
+  kl_s(&kl, " in_use=");
+  kl_i(&kl, (long)blk_in_use);
+  kl_s(&kl, " inside=");
+  kl_i(&kl, (long)blk_inside);
+  int32_t hp = blk_tok_pid;
+  kl_s(&kl, " holder pid=");
+  kl_i(&kl, (long)hp);
+  kl_s(&kl, " cpu=");
+  kl_i(&kl, (long)blk_tok_cpu);
+  if (blk_in_use) {
+    kl_s(&kl, " held_ms=");
+    kl_i(&kl, (long)(timer_get_ms() - blk_tok_ms));
+  }
+  kl_s(&kl, " site=");
+  kl_hex(&kl, blk_tok_site);
+  struct process *hpcb = (hp >= 0) ? process_get_pcb((int)hp) : 0;
+  if (hpcb) {
+    kl_s(&kl, " st=");
+    kl_i(&kl, (long)hpcb->state);
+    kl_s(&kl, " kern=");
+    kl_i(&kl, (long)hpcb->is_kernel_process);
+    kl_s(&kl, " osys=");
+    kl_i(&kl, (long)hpcb->last_syscall);
+  }
+  /* Is the holder on a CPU right now?  -1: on none (preempted or lost). */
+  int on = -1;
+  if (hp >= 0)
+    for (uint32_t c = 0; c < MAX_CPUS; c++)
+      if (cpu_current_pids[c] == hp) { on = (int)c; break; }
+  kl_s(&kl, " on_cpu=");
+  kl_i(&kl, (long)on);
+  uint32_t me = get_cpuid();
+  kl_s(&kl, " me pid=");
+  kl_i(&kl, (long)((me < MAX_CPUS) ? cpu_current_pids[me] : -1));
+  kl_s(&kl, " cpu=");
+  kl_i(&kl, (long)me);
+  kl_s(&kl, " holds=");
+  kl_s(&kl, lock_audit_held_outermost());
+  kl_s(&kl, " long_waits=");
+  kl_i(&kl, (long)blk_tok_long_waits);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
 static void blk_token_acquire(void) {
+  uint64_t site = (uint64_t)(uintptr_t)__builtin_return_address(0);
+  uint64_t t0 = 0;
+  int reported = 0;
   for (;;) {
     uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
     if (!blk_in_use) {
       blk_in_use = 1;
+      blk_token_note_owner(site);
       spinlock_release_irqrestore(&blk_request_lock, flags);
       break;
     }
     spinlock_release_irqrestore(&blk_request_lock, flags);
+    uint64_t now = timer_get_ms();
+    if (!t0) {
+      t0 = now;
+    } else if (!reported && now - t0 >= BLK_TOKEN_REPORT_MS) {
+      reported = 1;
+      uint32_t n = __atomic_add_fetch(&blk_tok_long_waits, 1, __ATOMIC_SEQ_CST);
+      if (n <= 8 || (n & 63) == 0)
+        blk_token_diag_row("wait>2s");
+    }
     safe_wfi();
   }
+  if (reported)
+    blk_token_diag_row("wait-ended");
   if (__atomic_add_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST) > 1) {
     uart_puts("[BLKRACE] two drivers inside the queue, inside=");
     print_int((int)blk_inside);
@@ -1961,6 +2054,8 @@ static void blk_token_acquire(void) {
 static void blk_token_release(void) {
   __atomic_sub_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST);
   uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+  blk_tok_pid = -1;
+  blk_tok_cpu = -1;
   blk_in_use = 0;
   spinlock_release_irqrestore(&blk_request_lock, flags);
 }
@@ -1976,6 +2071,7 @@ static int blk_token_try_acquire(uint32_t timeout_ms) {
     uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
     if (!blk_in_use) {
       blk_in_use = 1;
+      blk_token_note_owner((uint64_t)(uintptr_t)__builtin_return_address(0));
       spinlock_release_irqrestore(&blk_request_lock, flags);
       break;
     }
@@ -2845,4 +2941,6 @@ void blk_data_stats(uint64_t *cmds, uint64_t *sectors, uint32_t *max_sectors) {
   if (sectors) *sectors = 0;
   if (max_sectors) *max_sectors = 0;
 }
+/* cp-fat: the ARM transport has no shared token holder to name. */
+void blk_token_diag_row(const char *why) { (void)why; }
 #endif

@@ -65,6 +65,10 @@ int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count);
  * initialised.
  */
 void virtio_blk_diag_row(void);
+/* cp-fat (P9-8): one [BLKTOK] row naming the single-in-flight device token's
+ * holder (pid, CPU, held_ms, state, whether it is on a CPU).  Printed by a
+ * token waiter past 2 s and by the ylock wedge report. */
+void blk_token_diag_row(const char *why);
 
 /**
  * L75: log every observable controller state change.

@@ -249,6 +249,7 @@ void lock_audit_irqoff_end(int we_unmask);
 void lock_audit_held_push(const void *lock, uint64_t pc);
 void lock_audit_held_pop(const void *lock);
 int lock_audit_held_depth(void);
+uint64_t lock_audit_held_site(const void *lock); /* cp-fat: 0 = not held here */
 const char *lock_audit_held_outermost(void);
 
 /* Called by the arch irqsave primitive after a successful acquire: counts (and

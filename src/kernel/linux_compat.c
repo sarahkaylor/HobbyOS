@@ -538,11 +538,12 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     }                                                                         \
     /* FAT flushes land here, on the way OUT of a syscall: no filesystem lock */\
     /* is held at this point, so a device write can never run under fat_lock. */\
+    fat16_syscall_exit_check((long)nr);                                       \
     fat16_flush_pending();                                                    \
     return (v);                                                               \
   } while (0)
 #else
-#define L_DISPATCH_RET(v) do { fat16_flush_pending(); return (v); } while (0)
+#define L_DISPATCH_RET(v) do { fat16_syscall_exit_check((long)nr); fat16_flush_pending(); return (v); } while (0)
 #endif
   /* C1-k6 round 2 (docs/cp-k6.md §12): the table walk -- three optional
      decline-capable tables, then the first match in the main tables -- was a
