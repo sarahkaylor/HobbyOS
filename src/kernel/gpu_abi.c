@@ -836,6 +836,8 @@ uint64_t gpu_abi_deadline_ms(uint64_t now_ms, uint64_t timeout_ns) {
 
 #ifdef __x86_64__
 #include "virtio_gpu_blob.h"
+#include "frame.h"
+#include "kmem.h"
 extern uint64_t timer_get_ms(void);
 extern uint64_t timer_get_us(void);
 /* Kick-poll budget of one FENCE_WAIT2 before it parks (see there). */
@@ -852,30 +854,54 @@ struct gpu_m2_map {
   uint32_t res_id;
   uint64_t va, len;
 };
-static struct gpu_m2_map gpu_m2_maps[GPU_M2_MAX_MAPS];
+static struct gpu_m2_map* gpu_m2_maps; /* frame-allocated (~160 KiB), see gpu_m2_init */
 /* Rings per context (index = client slot); 0 = not a CTX_CREATE2 context. */
 static uint32_t gpu_m2_rings[GPU_ABI_MAX_CLIENTS];
 
 /* Copy-in staging for command streams and capsets: one blocking lock, never
  * held across a park (FENCE_WAIT2 does not use it). */
-static uint8_t gpu_m2_buf[GPU_ABI_MAX_SUBMIT] __attribute__((aligned(4096)));
+static uint8_t* gpu_m2_buf; /* frame-allocated 128 KiB, see gpu_m2_init */
 static ylock_t gpu_m2_buf_lock;
 static volatile int gpu_m2_buf_state; /* 0 uninit, 1 init in progress, 2 ready */
 
-static void gpu_m2_buf_acquire(void) {
-  if (__atomic_load_n(&gpu_m2_buf_state, __ATOMIC_ACQUIRE) != 2) {
-    int e = 0;
-    if (__atomic_compare_exchange_n(&gpu_m2_buf_state, &e, 1, 0, __ATOMIC_ACQ_REL,
-                                    __ATOMIC_ACQUIRE)) {
-      ylock_init(&gpu_m2_buf_lock);
-      __atomic_store_n(&gpu_m2_buf_state, 2, __ATOMIC_RELEASE);
-    } else {
-      while (__atomic_load_n(&gpu_m2_buf_state, __ATOMIC_ACQUIRE) != 2)
-        __asm__ volatile("pause");
-    }
-  }
-  ylock_acquire(&gpu_m2_buf_lock);
+/* One-time setup on the first Venus request: the staging lock, and the
+ * staging buffer + mapping table as frame allocations (the kernel image's
+ * static footprint is budgeted, docs/blk-cache.md §11).  0, or -ENOMEM. */
+static void gpu_m2_free_run(uint64_t pa, int n) {
+  for (int i = 0; i < n; i++) frame_free(pa + (uint64_t)i * 4096);
 }
+
+static int gpu_m2_init(void) {
+  int st = __atomic_load_n(&gpu_m2_buf_state, __ATOMIC_ACQUIRE);
+  if (st == 2) return 0;
+  if (st == 3) return -ENOMEM;
+  int e = 0;
+  if (__atomic_compare_exchange_n(&gpu_m2_buf_state, &e, 1, 0, __ATOMIC_ACQ_REL,
+                                  __ATOMIC_ACQUIRE)) {
+    ylock_init(&gpu_m2_buf_lock);
+    int nb = (int)((GPU_ABI_MAX_SUBMIT + 4095) / 4096);
+    int nm = (int)((sizeof(struct gpu_m2_map) * GPU_M2_MAX_MAPS + 4095) / 4096);
+    uint64_t pb = frame_alloc_contig(nb), pm = frame_alloc_contig(nm);
+    if (!pb || !pm) {
+      if (pb) gpu_m2_free_run(pb, nb);
+      if (pm) gpu_m2_free_run(pm, nm);
+      uart_puts("[VENUS] gpu_abi: frame allocation failed\n");
+      __atomic_store_n(&gpu_m2_buf_state, 3, __ATOMIC_RELEASE);
+      return -ENOMEM;
+    }
+    gpu_m2_buf = (uint8_t*)phys_to_virt(pb);
+    struct gpu_m2_map* m = (struct gpu_m2_map*)phys_to_virt(pm);
+    for (int i = 0; i < GPU_M2_MAX_MAPS; i++) m[i].used = 0;
+    __atomic_store_n(&gpu_m2_maps, m, __ATOMIC_RELEASE);
+    __atomic_store_n(&gpu_m2_buf_state, 2, __ATOMIC_RELEASE);
+    return 0;
+  }
+  while ((st = __atomic_load_n(&gpu_m2_buf_state, __ATOMIC_ACQUIRE)) == 1 || st == 0)
+    __asm__ volatile("pause");
+  return st == 2 ? 0 : -ENOMEM;
+}
+
+static void gpu_m2_buf_acquire(void) { ylock_acquire(&gpu_m2_buf_lock); }
 
 static void gpu_m2_buf_release(void) { ylock_release(&gpu_m2_buf_lock); }
 
@@ -1157,6 +1183,7 @@ static int gpu_m2_res_map_blob(struct process* p, int fd, uint64_t arg) {
 /* Drop this client's user mapping of res_id (if any): PTEs, then the record. */
 static void gpu_m2_drop_map(struct process* p, int pid, int fd, uint32_t res_id) {
   uint64_t va = 0, len = 0;
+  if (!__atomic_load_n(&gpu_m2_maps, __ATOMIC_ACQUIRE)) return; /* no Venus request ran */
   uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
   for (int i = 0; i < GPU_M2_MAX_MAPS; i++) {
     struct gpu_m2_map* m = &gpu_m2_maps[i];
@@ -1190,6 +1217,7 @@ static int gpu_m2_res_unmap_blob(struct process* p, int fd, uint64_t arg) {
 }
 
 static void gpu_m2_release_maps(struct process* p, int pid, int fd) {
+  if (!__atomic_load_n(&gpu_m2_maps, __ATOMIC_ACQUIRE)) return;
   for (;;) {
     uint32_t res = 0;
     uint64_t fl = spinlock_acquire_irqsave(&gpu_abi_lock);
@@ -1280,13 +1308,36 @@ static int gpu_m2_fence_wait2(struct process* p, int fd, uint64_t arg) {
     }
     return -ETIMEDOUT;
   }
-  return virtio_gpu_3d_fence_park(fw.ctx_id, fw.ring_idx, fw.seqno,
-                                  fw.deadline_ms == ~0ull ? 0 : fw.deadline_ms);
+  /* A restarted wait (deadline already set) whose fence is still pending has
+   * slept >= 2 s: dump the context's fence state (rate-limited) -- the stall
+   * report the WSI's infinite waits otherwise never produce. */
+  if (fw.deadline_ms != 0) {
+    static uint64_t last_dump_ms;
+    static int dumps;
+    if (now - last_dump_ms >= 1000 && dumps < 64) {
+      last_dump_ms = now;
+      dumps++;
+      gpu_abi_say("[VENUS] stall pid=", gpu_m2_pid(p));
+      gpu_abi_say(" tid=", p->pid);
+      gpu_abi_say(" waits ctx=", (int)fw.ctx_id);
+      gpu_abi_say(" ring=", (int)fw.ring_idx);
+      uart_puts(" seqno=");
+      extern void uart_print_hex(uint64_t val);
+      uart_print_hex(fw.seqno);
+      uart_puts("\n");
+      virtio_gpu_3d_fence_dump(fw.ctx_id);
+    }
+  }
+  /* Self-wake every 2 s so a stall is reported even for an infinite wait. */
+  uint64_t wake = (fw.deadline_ms == ~0ull) ? now + 2000 : fw.deadline_ms;
+  if (wake > now + 2000) wake = now + 2000;
+  return virtio_gpu_3d_fence_park(fw.ctx_id, fw.ring_idx, fw.seqno, wake);
 }
 
 static int gpu_abi_m2_ioctl(struct process* p, int fd, unsigned long req, uint64_t arg) {
   if (!p || arg == 0) return -EINVAL;
   if (gpu_abi_present() != 1) return -ENODEV;
+  if (gpu_m2_init() != 0) return -ENOMEM;
   switch (req) {
     case GPU_IOC_GET_PARAM: return gpu_m2_get_param(p, arg);
     case GPU_IOC_GET_CAPSET_INFO2: return gpu_m2_capset_info2(p, arg);

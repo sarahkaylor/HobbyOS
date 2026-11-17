@@ -43,6 +43,7 @@
 #include "kmem.h"
 #include "process.h"
 #include "pidmask.h"
+#include "frame.h"
 
 extern void uart_puts(const char* s);
 extern void print_int(int val);
@@ -1432,9 +1433,13 @@ struct gpu3d_fslot {
 };
 
 static struct gpu3d_ctx2 gpu3d_ctx2s[GPU3D_MAX_CTX];
-static struct gpu3d_blob gpu3d_blobs[GPU3D_MAX_BLOBS];
+/* The blob table (~160 KiB) and the window allocator (~96 KiB) are frame
+ * allocations made at bring-up, not .bss: the kernel image's static
+ * footprint is budgeted (docs/blk-cache.md §11), and only a Venus-capable
+ * device ever needs them. */
+static struct gpu3d_blob* gpu3d_blobs;
 static struct gpu3d_fslot gpu3d_fslots[VGPU_ASYNC_SLOTS] __attribute__((aligned(4096)));
-static struct gpu_win gpu3d_win;
+static struct gpu_win* gpu3d_winp;
 static uint64_t gpu3d_seq64 = GPU3D_SEQ64_BASE;
 static volatile int gpu3d_wake_pending = 0;
 static struct pid_mask gpu3d_waiters;
@@ -1476,8 +1481,46 @@ static struct virtio_gpu_resource_map_blob gpu3d_req_map;
 static struct virtio_gpu_resource_unmap_blob gpu3d_req_unmap;
 static struct virtio_gpu_resp_map_info gpu3d_resp_map;
 
+static void* gpu3d_frames(uint64_t bytes) {
+  int n = (int)((bytes + 4095) / 4096);
+  uint64_t pa = frame_alloc_contig(n);
+  if (!pa) return 0;
+  gpu3d_zero(phys_to_virt(pa), (uint64_t)n * 4096);
+  return phys_to_virt(pa);
+}
+
+/* The tables are allocated on the first CTX_CREATE2, not at bring-up: the GPU
+ * comes up before the frame allocator does.  0 or -ENOMEM; lock not held. */
+static volatile int gpu3d_tables_state; /* 0 none, 1 busy, 2 ready, 3 failed */
+static int gpu3d_m2_tables(void) {
+  int st = __atomic_load_n(&gpu3d_tables_state, __ATOMIC_ACQUIRE);
+  if (st == 2) return 0;
+  if (st == 3) return -ENOMEM;
+  int e = 0;
+  if (__atomic_compare_exchange_n(&gpu3d_tables_state, &e, 1, 0, __ATOMIC_ACQ_REL,
+                                  __ATOMIC_ACQUIRE)) {
+    struct gpu3d_blob* b =
+        (struct gpu3d_blob*)gpu3d_frames(sizeof(struct gpu3d_blob) * GPU3D_MAX_BLOBS);
+    struct gpu_win* w = (struct gpu_win*)gpu3d_frames(sizeof(struct gpu_win));
+    if (!b || !w) {
+      uart_puts("[VENUS] transport tables: frame allocation failed\n");
+      __atomic_store_n(&gpu3d_tables_state, 3, __ATOMIC_RELEASE);
+      return -ENOMEM;
+    }
+    gpu_win_init(w, virtio_gpu_x64_shm_len);
+    uint64_t fl = virtio_gpu_x64_lock();
+    gpu3d_blobs = b;
+    gpu3d_winp = w;
+    virtio_gpu_x64_unlock(fl);
+    __atomic_store_n(&gpu3d_tables_state, 2, __ATOMIC_RELEASE);
+    return 0;
+  }
+  while ((st = __atomic_load_n(&gpu3d_tables_state, __ATOMIC_ACQUIRE)) == 1 || st == 0)
+    __asm__ volatile("pause");
+  return st == 2 ? 0 : -ENOMEM;
+}
+
 static void gpu3d_m2_init(void) {
-  gpu_win_init(&gpu3d_win, virtio_gpu_x64_shm_len);
   pid_mask_zero(&gpu3d_waiters);
   uart_puts("[VENUS] transport blob=");
   print_int(virtio_gpu_x64_blob_negotiated);
@@ -1566,6 +1609,7 @@ int virtio_gpu_3d_ctx_create2(uint32_t capset_id, uint32_t num_rings, const char
   if (!virtio_gpu_x64_ctxinit_negotiated) return -ENODEV;
   if (!gpu3d_capset_by_id(capset_id) || capset_id > 0xFF) return -EINVAL;
   if (num_rings == 0 || num_rings > GPU_MAX_RINGS) return -EINVAL;
+  if (gpu3d_m2_tables() != 0) return -ENOMEM;
 
   uint64_t fl = virtio_gpu_x64_lock();
   int si = -1;
@@ -1648,6 +1692,7 @@ static int gpu3d_m2_ctx_quiesce(uint32_t ctx_id) {
 }
 
 static struct gpu3d_blob* gpu3d_blob_find(uint32_t res_id) {
+  if (!gpu3d_blobs) return 0;
   for (int i = 0; i < GPU3D_MAX_BLOBS; i++)
     if (gpu3d_blobs[i].used && gpu3d_blobs[i].res_id == res_id) return &gpu3d_blobs[i];
   return 0;
@@ -1661,7 +1706,7 @@ static int gpu3d_blob_unmap_locked(struct gpu3d_blob* b) {
   uint32_t rlen = 0, rtype = 0;
   int rc = gpu3d_cmd(&gpu3d_req_unmap, sizeof(gpu3d_req_unmap), 0, 0, &gpu3d_resp,
                      GPU3D_RESP_HDR_LEN, &rlen, &rtype);
-  gpu_win_free(&gpu3d_win, b->win_off);
+  gpu_win_free(gpu3d_winp, b->win_off);
   b->mapped = 0;
   return rc == 0 ? 0 : -EIO;
 }
@@ -1674,6 +1719,7 @@ static void gpu3d_blob_forget_locked(uint32_t res_id) {
 }
 
 static void gpu3d_m2_ctx_gone_locked(uint32_t ctx_id) {
+  if (!gpu3d_blobs) return;
   for (int i = 0; i < GPU3D_MAX_BLOBS; i++) {
     struct gpu3d_blob* b = &gpu3d_blobs[i];
     if (!b->used || b->ctx_id != ctx_id) continue;
@@ -1825,14 +1871,14 @@ int virtio_gpu_3d_blob_map(uint32_t res_id, uint64_t* phys, uint64_t* size,
   }
   if (!b->mapped) {
     uint64_t off = 0;
-    if (gpu_win_alloc(&gpu3d_win, b->size, res_id, &off) != 0) {
+    if (gpu_win_alloc(gpu3d_winp, b->size, res_id, &off) != 0) {
       virtio_gpu_x64_unlock(fl);
       uart_puts("[VENUS] map refused: host-visible window full res=");
       print_int((int)res_id);
       uart_puts(" size_k=");
       print_int((int)(b->size >> 10));
       uart_puts(" extents=");
-      print_int(gpu3d_win.n);
+      print_int(gpu3d_winp->n);
       uart_puts("\n");
       return -ENOMEM;
     }
@@ -1860,7 +1906,7 @@ int virtio_gpu_3d_blob_map(uint32_t res_id, uint64_t* phys, uint64_t* size,
       uart_puts("\n");
     }
     if (rc != 0 || rtype != VIRTIO_GPU_RESP_OK_MAP_INFO) {
-      gpu_win_free(&gpu3d_win, off);
+      gpu_win_free(gpu3d_winp, off);
       virtio_gpu_x64_unlock(fl);
       return -EIO;
     }
@@ -2026,6 +2072,52 @@ int virtio_gpu_3d_fence_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno
   virtio_gpu_x64_unlock(fl);
   if (gpu3d_wake_pending) virtio_gpu_3d_fence_wake();
   return rc;
+}
+
+/* Stall report: the context's per-ring issued/done counters (low 32 bits
+ * above the 2^32 base) and every async slot in flight with its age. */
+void virtio_gpu_3d_fence_dump(uint32_t ctx_id) {
+  uint64_t fl = virtio_gpu_x64_lock();
+  virtio_gpu_x64_drain();
+  struct gpu3d_ctx2* c2 = gpu3d_ctx2_find(ctx_id);
+  uint64_t now = timer_get_us();
+  uart_puts("[VENUS] stall ctx=");
+  print_int((int)ctx_id);
+  if (!c2) {
+    uart_puts(" (gone)\n");
+  } else {
+    uart_puts(" inflight=");
+    print_int(c2->inflight);
+    uart_puts(" rings(issued/done):");
+    for (uint32_t r = 0; r < c2->num_rings; r++) {
+      if (!c2->issued[r]) continue;
+      uart_puts(" r");
+      print_int((int)r);
+      uart_puts("=");
+      print_int((int)(uint32_t)c2->issued[r]);
+      uart_puts("/");
+      print_int((int)(uint32_t)c2->done[r]);
+    }
+    uart_puts("\n");
+  }
+  int any = 0;
+  for (int k = 0; k < VGPU_ASYNC_SLOTS; k++) {
+    struct gpu3d_fslot* f = &gpu3d_fslots[k];
+    if (!f->used) continue;
+    if (!any) uart_puts("[VENUS] stall slots:");
+    any = 1;
+    uart_puts(" [ctx ");
+    print_int((int)f->ctx_id);
+    uart_puts(" r");
+    print_int((int)f->ring);
+    uart_puts(" s");
+    print_int((int)(uint32_t)f->seqno);
+    uart_puts(" age_ms ");
+    print_int((int)((now - f->t_post_us) / 1000));
+    uart_puts("]");
+  }
+  uart_puts(any ? "\n" : "[VENUS] stall slots: none in flight\n");
+  virtio_gpu_x64_unlock(fl);
 }
 
 void virtio_gpu_3d_fence_state(uint32_t ctx_id, uint32_t ring_idx, uint64_t* issued,

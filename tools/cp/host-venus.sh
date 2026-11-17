@@ -24,9 +24,12 @@
 #   * the render server inherits QEMU's environment: only the radeon ICD, and the
 #     9070 XT *ordered* first (MESA_VK_DEVICE_SELECT=vid:did without the `!`; the
 #     `!` form breaks guest enumeration, P0 §2.1 item 4).
-#   * LD_PRELOAD of the dma-buf DRM_RDWR shim (tools/cp/p0guest/dmabuf-rdwr-shim.c):
-#     without it the render server exports read-only dma-bufs, QEMU's mmap fails
-#     with EACCES and every RESOURCE_MAP_BLOB fails (P0 §2.1 item 3).
+#   * LD_PRELOAD of tools/cp/venus/venus-host-shim.c: (a) P0's dma-buf DRM_RDWR fix
+#     (without it the render server exports read-only dma-bufs, QEMU's mmap fails
+#     with EACCES and every RESOURCE_MAP_BLOB fails, P0 §2.1 item 3); (b) every
+#     open of a DRM node that is not the render GPU's fails (CP_SHIM_DENY), so
+#     the render server never opens the 8060S that runs the user's desktop, not
+#     even to enumerate -- the guest then sees exactly one Venus GPU.
 #   * no -daemonize: the render server reports Venus failures only on QEMU's stderr.
 #
 # Env: MEM (MiB or G, default 12G, refused above 12G), HOSTMEM (default 8G), SMP (8),
@@ -74,7 +77,7 @@ render_check() {
 }
 
 shim_so() {
-    local so=$VENUS_BUILD/shim/dmabuf-rdwr-shim.so src=$REPO/tools/cp/p0guest/dmabuf-rdwr-shim.c
+    local so=$VENUS_BUILD/shim/venus-host-shim.so src=$REPO/tools/cp/venus/venus-host-shim.c
     if [ ! -f "$so" ] || [ "$src" -nt "$so" ]; then
         mkdir -p "$VENUS_BUILD/shim"
         cc -O2 -Wall -shared -fPIC -o "$so" "$src" -ldl >&2
@@ -115,9 +118,23 @@ argv() {
     printf '%s\n' "${a[@]}" "$@"
 }
 
+deny_nodes() { # every DRM node that is not the render GPU's (colon list)
+    local mine n out=
+    mine=$(readlink -f "/sys/class/drm/${RENDER##*/}/device")
+    for n in /sys/class/drm/card[0-9]* /sys/class/drm/renderD*; do
+        case ${n##*/} in *-*) continue ;; esac   # connectors (card1-DP-1)
+        [ "$(readlink -f "$n/device")" = "$mine" ] && continue
+        out=${out:+$out:}/dev/dri/${n##*/}
+    done
+    echo "$out"
+}
+
 envv() { # the environment QEMU (and so virgl_render_server) runs with
     local pre=
     [ "$SHIM" = 1 ] && pre=$(shim_so)
+    # Render-node fencing (venus-host-shim.c): the render server must never open
+    # the desktop GPU's nodes, not even to enumerate (DENY=0 turns it off).
+    [ "$SHIM" = 1 ] && [ "${DENY:-1}" = 1 ] && printf '%s\n' "CP_SHIM_DENY=$(deny_nodes)"
     printf '%s\n' "LD_PRELOAD=$pre" \
         "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/radeon_icd.json" \
         "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json" \
@@ -130,7 +147,7 @@ case "${1:-}" in
         "$QEMU" --version | head -1
         dpkg-query -W -f='virglrenderer ${Version}\n' libvirglrenderer1 2>/dev/null || true
         ls -l /usr/libexec/virgl_render_server
-        [ "$SHIM" = 1 ] && echo "shim $(shim_so)"
+        [ "$SHIM" = 1 ] && echo "shim $(shim_so)" && echo "deny $(deny_nodes)"
         "$QEMU" -device virtio-gpu-gl-pci,help 2>/dev/null | grep -E '^\s+(blob|hostmem|venus|context_init)' || true
         ;;
     argv) shift; [ $# -ge 2 ] || die "usage: argv DISK WORK [args]"; render_check >&2; argv "$@" ;;

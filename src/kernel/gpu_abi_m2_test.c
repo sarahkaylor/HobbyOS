@@ -169,12 +169,21 @@ static void test_gpu_m2_cache_and_deadline(void) {
 }
 
 #ifdef __x86_64__
-static struct gpu_win test_win;
+#include "frame.h"
+#include "kmem.h"
+static struct gpu_win* test_winp;
+#define test_win (*test_winp)
 
 static void test_gpu_m2_window(void) {
   uart_puts("  Running test_gpu_m2_window...\n");
   tests_run++;
   uint64_t a = 0, b = 0, c = 0, d = 0;
+  if (!test_winp) {
+    /* ~96 KiB: a frame allocation, not .bss (docs/blk-cache.md §11). */
+    uint64_t pa = frame_alloc_contig((int)((sizeof(struct gpu_win) + 4095) / 4096));
+    ASSERT(pa != 0);
+    test_winp = (struct gpu_win*)phys_to_virt(pa);
+  }
   gpu_win_init(&test_win, 64ull << 20); /* 64 MiB window */
   EXPECT_EQ(gpu_win_alloc(&test_win, 100, 1, &a), 0); /* rounded to a page */
   EXPECT_EQ((int)a, 0);

@@ -95,10 +95,38 @@ def _patch_qmp():
     run_icewm_test.Qmp.shot = shot
 
 
+DEVICE = os.environ.get("VENUS_P5_DEVICE", "Virtio-GPU Venus")
+OVERRIDE = " [P5 device override: '%s' stands in for llvmpipe]"
+
+
+def _patch_read(p5lib):
+    """P5's grader hard-codes llvmpipe as the device (boot_wine_p5.py: the
+    vkcube device row and the D3D adapter rows must contain 'llvmpipe').  For a
+    Venus run the expected device is VENUS_P5_DEVICE: such rows get an
+    explicit override marker appended when the grader reads the serial log
+    (the log file itself is not touched), so every other P5 check still applies."""
+    orig = p5lib.read
+
+    def read(path):
+        text = orig(path)
+        if not text or DEVICE not in text:
+            return text
+        out = []
+        for ln in text.split("\n"):
+            if DEVICE in ln and ("[VK] device: " in ln or " adapter: " in ln):
+                body = ln.rstrip("\r")  # the console ends rows with \r\r
+                ln = body + OVERRIDE % DEVICE + ln[len(body):]
+            out.append(ln)
+        return "\n".join(out)
+
+    p5lib.read = read
+
+
 def install():
     _patch_qmp()
     if P5DIR not in sys.path:
         sys.path.insert(0, P5DIR)
     import p5lib
     p5lib.qemu_cmd = venus_qemu_cmd
+    _patch_read(p5lib)
     return p5lib

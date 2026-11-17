@@ -87,6 +87,8 @@ void virtio_gpu_x64_drain(void);
 void virtio_gpu_x64_kick(void);
 /* Kick the queue, drain, and report (ctx, ring, seqno): 0 done, -EAGAIN, -EINVAL. */
 int virtio_gpu_3d_fence_kick_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno);
+/* Diagnostics: stall report (per-ring counters + in-flight slots). */
+void virtio_gpu_3d_fence_dump(uint32_t ctx_id);
 /* Diagnostics: the (ctx, ring) fence counters and the context's in-flight count. */
 void virtio_gpu_3d_fence_state(uint32_t ctx_id, uint32_t ring_idx, uint64_t* issued,
                                uint64_t* done, int* inflight);
