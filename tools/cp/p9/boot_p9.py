@@ -33,6 +33,7 @@ What it adds to boot_p8.py (whose helpers it imports unchanged):
                                   screen row), at most MAX taps -> FAIL
         listseek TAG DIR MAX Y    save list: tap until the focused entry's cyan
                                   frame is centred at screen row Y (+-15)
+        unwind TAG MAX REGEX      Esc while the screen matches REGEX (map/hub -> world)
         phase NAME                label the fps/mem rows from here on
         mark TEXT                 a timeline row
         repeat N / end            loop
@@ -576,9 +577,14 @@ def main():
                     return None, None
                 im = canon(name)
                 px = im.load()
-                ys = [y for y in range(420, 800)
+                # the highlight's yellow is ~(230,190,60) on pmemsave shots but as
+                # dim as ~(170,125,40) on VNC shots of the glass (r2-play-scan1);
+                # red rows have g ~70.  Main menu: stop above the orange Phantom
+                # Liberty banner (y 736..777).
+                ymax = 715 if menu == "main" else 790
+                ys = [y for y in range(420, ymax)
                       if sum(1 for x in range(400, 800, 2)
-                             if px[x, y][0] > 190 and px[x, y][1] > 150 and px[x, y][2] < 110) > 2]
+                             if px[x, y][0] > 140 and px[x, y][1] > 95 and px[x, y][2] < 90) > 2]
                 cl = []
                 for y in ys:                      # clusters: frame lines + text, gaps <= 12
                     if not cl or y - cl[-1][1] > 12:
@@ -743,6 +749,21 @@ def main():
                         # listseek TAG DIR MAX Y: focus the save-list entry whose frame centre is Y
                         if not list_seek(a[0], a[1], int(a[2]), float(a[3])):
                             return f"listseek-failed:{a[0]}"
+                    elif op == "unwind":
+                        # unwind TAG MAX REGEX: while the screen's OCR matches REGEX (a
+                        # map/hub/menu), press Esc (Esc steps map -> hub -> world)
+                        rx = raw.split(None, 3)[3]
+                        for k in range(int(a[1]) + 1):
+                            name, flat = shoot(f"{a[0]}{k}")
+                            if not re.search(rx, flat, re.I):
+                                mark(f"unwind {a[0]}: clear after {k} x Esc")
+                                break
+                            if k == int(a[1]):
+                                return f"unwind-failed:{a[0]}"
+                            send([qcode_event("esc", True)])
+                            tick(0.2)
+                            send([qcode_event("esc", False)])
+                            tick(3)
                     elif op == "phase":
                         set_phase(a[0])
                     elif op == "mark":

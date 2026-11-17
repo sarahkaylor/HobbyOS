@@ -50,16 +50,15 @@ down shift
 hold w 5000
 up shift
 shot w2
-# 3. the map: open, look, close.  M closes it again; Esc would go on to the
-#    hub menu (gateA2 spent its loops there), so the HUD is checked after.
+# 3. the map: open, look, close.  M usually opens the map, once (r2-play-put1)
+#    the hub; Esc steps map -> hub -> world, so `unwind` presses Esc until no
+#    map/hub text is left (gateA2 spent its loops in the hub).
 phase map
 key m
 wait 5
-expect map 20 FILTER|Track\s*Waypoint|Zoom
-key m
-wait 4
+shot map
+unwind map-close 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
 phase world
-expect_not back-in-world 20 SKIP\s*TIME|DATABASE|FILTER
 # 4. a loop of walking / sprinting / looking (16 x ~20 s)
 repeat 16
 down shift
@@ -85,11 +84,9 @@ up shift
 phase map
 key m
 wait 5
-expect map2 20 FILTER|Track\s*Waypoint|Zoom
-key m
-wait 4
+shot map2
+unwind map-close2 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
 phase world
-expect_not back-in-world2 20 SKIP\s*TIME|DATABASE|FILTER
 # 6. another loop (16 x ~17 s)
 repeat 16
 hold w 5000
