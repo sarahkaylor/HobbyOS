@@ -722,6 +722,9 @@ int vm_unmap_span(struct addr_space *as, uint64_t base, uint64_t len);
 void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot);
 /* 0 + *leaf when a page mapping is present; -1 when absent. */
 int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
+/* P6 (x64; docs/gpu-abi.md §10.4): set an installed leaf's memory type:
+ * 0 = WB, 1 = WC, 2 = UC.  0, or -1 when absent.  x64 only (no ARM definition). */
+int vm_arch_set_cache(struct addr_space *as, uint64_t va, int mode);
 /* GB-245: is `va` a legitimate resume target at CPL `cs` (0x08 kernel /
  * 0x1B user) for this AS?  Present leaves are checked for user/NX; an
  * absent user leaf is allowed only when an executable region covers it

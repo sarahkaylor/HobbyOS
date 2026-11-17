@@ -1,0 +1,89 @@
+# tools/cp/pe/run-pemap.sh (probe over NFS /CP: 5 files, ext2 /EXT/pe: 3 files), lane cp-pe @ ee8757be kernel, strix KVM
+# PE_BOOTS=2 PE_RUNS=3, args -p 8 -c 32 -i 4 (V1-V6 + S1 every run)
+# boot 1 run 1: the only failure is a LIVENESS timeout (sibling did not answer within 10 s) during a [YLOCK-STALL] site=ext2_lock
+# (8 children paging the same ext2 files at once; C3-ext2w's ext2_lock contention); no data mismatch in any run
+== build: tree /home/sarah/cp/lanes/pe (intel, test), probe + launcher from /home/sarah/cp/lanes/pe
+== data: NFS set + ext2 set (generator: the probe's --gen)
+== host reference: [LP] PASS S1 storm: 16 children (8 at a time) x 3 iters x 8 files, 0 bad, 360 ms
+== host reference: [LP] done rc=0
+exports.sh: add /srv/nfs/cp-pe-pe ok (non-cp lines unchanged)
+[boot 1] [EXT2] mounted /EXT bs=4096 blocks=131072 free=128274 inodes=32768 ifree=32753 groups=4 isz=256 rw filetype large_file
+[boot 1] [PE] pemap launcher (C1-pe) args="-p 8 -c 32 -i 4 /CP /EXT/pe"
+[boot 1] [PE] mount 10.0.2.2:/srv/nfs/cp-pe-pe -> /CP ok
+[boot 1] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=32 iters=4
+[boot 1] [LP] PASS V1 COW memfd (12 iterations, slack 2000)
+[boot 1] [LP] PASS V2 COW file (12 iterations, slack 2000)
+[boot 1] [LP] PASS V3 COW by read() (12 iterations, slack 2000)
+[boot 1] [LP] PASS V4 MAP_FIXED anon (12 iterations, slack 2000)
+[boot 1] [LP] PASS V5 MAP_FIXED file (12 iterations, slack 2000)
+[boot 1] [LP] PASS V6 COW while the reader sleeps in futex_wait (12 iterations)
+[boot 1] [LP] S1 child 11 pid 98 BAD: sibling never touched the view
+[boot 1] [LP] FAIL S1 storm: 32 children (8 at a time) x 4 iters x 8 files, 1 bad, 95586 ms
+[boot 1] [LP] done rc=1
+[boot 1] [PE] run 0 status=256 ms=97074
+[boot 1] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=32 iters=4
+[boot 1] [LP] PASS V1 COW memfd (12 iterations, slack 2000)
+[boot 1] [LP] PASS V2 COW file (12 iterations, slack 2000)
+[boot 1] [LP] PASS V3 COW by read() (12 iterations, slack 2000)
+[boot 1] [LP] PASS V4 MAP_FIXED anon (12 iterations, slack 2000)
+[boot 1] [LP] PASS V5 MAP_FIXED file (12 iterations, slack 2000)
+[boot 1] [LP] PASS V6 COW while the reader sleeps in futex_wait (12 iterations)
+[boot 1] [LP] PASS S1 storm: 32 children (8 at a time) x 4 iters x 8 files, 0 bad, 59502 ms
+[boot 1] [LP] done rc=0
+[boot 1] [PE] run 1 status=0 ms=60587
+[boot 1] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=32 iters=4
+[boot 1] [LP] PASS V1 COW memfd (12 iterations, slack 2000)
+[boot 1] [LP] PASS V2 COW file (12 iterations, slack 2000)
+[boot 1] [LP] PASS V3 COW by read() (12 iterations, slack 2000)
+[boot 1] [LP] PASS V4 MAP_FIXED anon (12 iterations, slack 2000)
+[boot 1] [LP] PASS V5 MAP_FIXED file (12 iterations, slack 2000)
+[boot 1] [LP] PASS V6 COW while the reader sleeps in futex_wait (12 iterations)
+[boot 1] [LP] PASS S1 storm: 32 children (8 at a time) x 4 iters x 8 files, 0 bad, 18440 ms
+[boot 1] [LP] done rc=0
+[boot 1] [PE] run 2 status=0 ms=19575
+[boot 1] [PE] done runs=3 bad=1
+pemap: boot 1 run 1 rc=1
+pemap: boot 1 run 2 rc=0
+pemap: boot 1 run 3 rc=0
+[boot 2] [EXT2] mounted /EXT bs=4096 blocks=131072 free=128274 inodes=32768 ifree=32753 groups=4 isz=256 rw filetype large_file
+[boot 2] [PE] pemap launcher (C1-pe) args="-p 8 -c 32 -i 4 /CP /EXT/pe"
+[boot 2] [PE] mount 10.0.2.2:/srv/nfs/cp-pe-pe -> /CP ok
+[boot 2] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=32 iters=4
+[boot 2] [LP] PASS V1 COW memfd (12 iterations, slack 2000)
+[boot 2] [LP] PASS V2 COW file (12 iterations, slack 2000)
+[boot 2] [LP] PASS V3 COW by read() (12 iterations, slack 2000)
+[boot 2] [LP] PASS V4 MAP_FIXED anon (12 iterations, slack 2000)
+[boot 2] [LP] PASS V5 MAP_FIXED file (12 iterations, slack 2000)
+[boot 2] [LP] PASS V6 COW while the reader sleeps in futex_wait (12 iterations)
+[boot 2] [LP] PASS S1 storm: 32 children (8 at a time) x 4 iters x 8 files, 0 bad, 54877 ms
+[boot 2] [LP] done rc=0
+[boot 2] [PE] run 0 status=0 ms=56404
+[boot 2] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=32 iters=4
+[boot 2] [LP] PASS V1 COW memfd (12 iterations, slack 2000)
+[boot 2] [LP] PASS V2 COW file (12 iterations, slack 2000)
+[boot 2] [LP] PASS V3 COW by read() (12 iterations, slack 2000)
+[boot 2] [LP] PASS V4 MAP_FIXED anon (12 iterations, slack 2000)
+[boot 2] [LP] PASS V5 MAP_FIXED file (12 iterations, slack 2000)
+[boot 2] [LP] PASS V6 COW while the reader sleeps in futex_wait (12 iterations)
+[boot 2] [LP] PASS S1 storm: 32 children (8 at a time) x 4 iters x 8 files, 0 bad, 34593 ms
+[boot 2] [LP] done rc=0
+[boot 2] [PE] run 1 status=0 ms=35756
+[boot 2] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=32 iters=4
+[boot 2] [LP] PASS V1 COW memfd (12 iterations, slack 2000)
+[boot 2] [LP] PASS V2 COW file (12 iterations, slack 2000)
+[boot 2] [LP] PASS V3 COW by read() (12 iterations, slack 2000)
+[boot 2] [LP] PASS V4 MAP_FIXED anon (12 iterations, slack 2000)
+[boot 2] [LP] PASS V5 MAP_FIXED file (12 iterations, slack 2000)
+[boot 2] [LP] PASS V6 COW while the reader sleeps in futex_wait (12 iterations)
+[boot 2] [LP] PASS S1 storm: 32 children (8 at a time) x 4 iters x 8 files, 0 bad, 18286 ms
+[boot 2] [LP] done rc=0
+[boot 2] [PE] run 2 status=0 ms=19428
+[boot 2] [PE] done runs=3 bad=0
+pemap: boot 2 run 1 rc=0
+pemap: boot 2 run 2 rc=0
+pemap: boot 2 run 3 rc=0
+pemap: SUMMARY tree=/home/sarah/cp/lanes/pe runs=6 pass=5 fail=1
+exports.sh: remove /srv/nfs/cp-pe-pe ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-pe-pe
+## the stall row in boot 1:
+[YLOCK-STALL] site=ext2_lock lock=ext2_lock addr=0x7023957C pc=0x1 extra=0x100000 cpu=5

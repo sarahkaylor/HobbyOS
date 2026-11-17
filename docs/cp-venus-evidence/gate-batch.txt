@@ -1,0 +1,75 @@
+# Full gate batch (docs/cyberpunk.md common rules) on cp-venus, strix, 2026-11-17
+# script: ~/cp/venus-gates.sh = ~/cp/base5-gates.sh with the tree ~/cp/lanes/venus-gate, LO_ON_DISK= and ~/.local/bin on PATH
+# tree: bacc6aae + the run-12/13 build.sh (code identical to HEAD; later commits touch only docs/evidence)
+# parity reference: docs/cp-sync-evidence/batch-lane.txt (C0-sync, cyberpunk 15ad4a35)
+# previous lane run (de1b34d9, before the frame-allocation / IRQ / timeline changes): ~/cp/venus-gates-de1b34d9.txt
+
+tree bacc6aae cp/venus: Gate P6 D3D12 row PASSES -- d3d12tri (vkd3d-proton) 190 fps and d3d11tri (DXVK) 123 fps on Venus for 65 s (+ build.sh: no sync-present patch)
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/venus-gate)
+unit rc=1 Tests failed! Tests run:    460 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 365 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+ALLDONE
+
+# diff vs C0-sync's batch (rows only; '<' C0-sync, '>' this lane)
+40,41c40,41
+< rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/sync)
+< unit rc=1 Tests failed! Tests run:    453 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+---
+> rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/venus-gate)
+> unit rc=1 Tests failed! Tests run:    460 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+43,44c43,44
+< host [host-tests] done: 37/40 passed
+< castscan rc=1 src/kernel/fs.c	I2P	r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);
+---
+> host [host-tests] done: 38/40 passed
+> castscan rc=0 castscan: 365 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+
+# reading
+- every t3 probe passes first time, exitgroup X7 included (it flaked once in the de1b34d9 run; two reruns passed then).
+- unit: the same 2 failures as C0-sync (virtio_gpu_test.c:214, :244 -- pre-existing, in base); 460 run vs 453 = this lane's +7 M2 tests, all pass.
+- host 38/40 vs 37/40, castscan rc=0 vs rc=1: this lane's tree carries the cyberpunk fixes after C0-sync's snapshot; no regression.
+- ARM: arm rc=0; __bss_end 0x454b44e8 on this branch == base 15ad4a35 (the M2 code is x86-only; Venus tables are frame allocations).

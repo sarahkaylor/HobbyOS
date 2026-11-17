@@ -43,6 +43,7 @@
 #endif
 
 #include "virtio_gpu.h"
+#include "virtio_gpu_blob.h" /* P6: blob/ctx-init/async fences */
 #include "display_mode.h"
 #include "lock.h"
 #include "arch/cpu.h"
@@ -274,6 +275,10 @@ static void bga_present_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
 #define VIRTIO_PCI_CAP_COMMON_CFG 1
 #define VIRTIO_PCI_CAP_NOTIFY_CFG 2
 #define VIRTIO_PCI_CAP_ISR_CFG    3
+/* P6 (docs/gpu-abi.md §10): struct virtio_pci_cap64, cfg_type 8.  QEMU's
+ * virtio-gpu with hostmem= exposes the host-visible window this way, with
+ * shmid VIRTIO_GPU_SHM_ID_HOST_VISIBLE (1). */
+#define VIRTIO_PCI_CAP_SHARED_MEMORY_CFG 8
 
 /* PCI command register (offset 0x04) bits used here. */
 #define PCI_CMD_MEM_SPACE  0x0002u
@@ -303,7 +308,10 @@ static void bga_present_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
 #define VPCI_F_VERSION_1 0x1u /* feature bit 32 = high-word bit 0 */
 
 #define VGPU_QUEUE_ID 0
-#define VGPU_QDESC    64
+/* P6: 128 (was 64).  Descriptors 0..2 carry the one synchronous command;
+ * 3..66 carry the 32 async fence slots (two each, virtio_gpu_blob.h). */
+#define VGPU_QDESC    128
+#define VGPU_ASYNC_DESC0 3
 
 /* Descriptor flags. */
 #define VQ_DESC_F_NEXT  1
@@ -368,6 +376,23 @@ static struct virtio_gpu_ctrl_hdr gpu_resp;
  * driver-feature set.  virtio_gpu_3d.c reads these (the 2D path never does). */
 int virtio_gpu_x64_virgl_offered = 0;
 int virtio_gpu_x64_virgl_negotiated = 0;
+/* P6 (docs/gpu-abi.md §10): the device's low feature word as offered, and the
+ * host-visible shared-memory window (shmid 1), 0 when absent.  Read by
+ * virtio_gpu_3d.c only. */
+uint32_t virtio_gpu_x64_feat_offered = 0;
+uint64_t virtio_gpu_x64_shm_phys = 0;
+uint64_t virtio_gpu_x64_shm_len = 0;
+int virtio_gpu_x64_blob_negotiated = 0;
+int virtio_gpu_x64_ctxinit_negotiated = 0;
+int virtio_gpu_x64_irq_vector = -1;
+
+/* P6: used-ring bookkeeping shared by the synchronous path, the async fence
+ * slots and the interrupt handler (all under gpu_lock). */
+static volatile int gpu_sync_done = 0;
+static uint32_t gpu_sync_len = 0;
+static int gpu_sync_orphan = 0; /* a timed-out sync command still in flight */
+static void* gpu_async_resp[VGPU_ASYNC_SLOTS];
+static int gpu_async_inflight = 0;
 
 #if G2_VPCI_DBG
 static int gpu_dbg_cmds = 0;
@@ -412,9 +437,12 @@ static inline volatile uint8_t* gpu_mmio_va(uint64_t phys) {
 struct vpci_cap {
   uint8_t kind; /* cfg_type */
   uint8_t bar;
+  uint8_t id;   /* shared-memory cap: shmid (P6) */
   uint32_t offset;
   uint32_t length;
   uint32_t mult; /* notify-offset multiplier (notify cap only) */
+  uint32_t offset_hi; /* struct virtio_pci_cap64 (shared-memory cap only) */
+  uint32_t length_hi;
 };
 
 static int vpci_collect_caps(uint8_t bus, uint8_t slot, struct vpci_cap* caps, int max_caps) {
@@ -426,13 +454,21 @@ static int vpci_collect_caps(uint8_t bus, uint8_t slot, struct vpci_cap* caps, i
   while (ptr && guard++ < 64 && n < max_caps) {
     uint32_t d0 = pci_read_config(bus, slot, 0, ptr);
     if ((d0 & 0xFF) == 0x09) { /* vendor-specific: virtio structure */
+      uint32_t d1 = pci_read_config(bus, slot, 0, ptr + 4);
       caps[n].kind = (d0 >> 24) & 0xFF;
-      caps[n].bar = pci_read_config(bus, slot, 0, ptr + 4) & 0xFF;
+      caps[n].bar = d1 & 0xFF;
+      caps[n].id = (d1 >> 8) & 0xFF;
       caps[n].offset = pci_read_config(bus, slot, 0, ptr + 8);
       caps[n].length = pci_read_config(bus, slot, 0, ptr + 12);
       caps[n].mult = 0;
+      caps[n].offset_hi = 0;
+      caps[n].length_hi = 0;
       if (caps[n].kind == VIRTIO_PCI_CAP_NOTIFY_CFG)
         caps[n].mult = pci_read_config(bus, slot, 0, ptr + 16);
+      if (caps[n].kind == VIRTIO_PCI_CAP_SHARED_MEMORY_CFG) {
+        caps[n].offset_hi = pci_read_config(bus, slot, 0, ptr + 16);
+        caps[n].length_hi = pci_read_config(bus, slot, 0, ptr + 20);
+      }
       n++;
     }
     ptr = (d0 >> 8) & 0xFC;
@@ -452,6 +488,87 @@ static uint64_t vpci_bar_phys(uint8_t bus, uint8_t slot, uint8_t bar) {
 }
 
 /* --- control queue command submission -------------------------------- */
+
+/* P6 (docs/gpu-abi.md §10.5): consume every used-ring entry the device has
+ * published.  Head 0 is the synchronous command; heads 3+2k are async fence
+ * slot k, whose completion is the host's fence retirement.  Caller holds
+ * gpu_lock. */
+static void vgpu_drain_locked(void) {
+  if (gpu_qsize == 0) return;
+  uint16_t idx = *(volatile uint16_t*)&gpu_used.idx;
+  while (gpu_used_ack != idx) {
+    arch_memory_barrier();
+    uint32_t id = gpu_used.ring[gpu_used_ack % gpu_qsize].id;
+    uint32_t len = gpu_used.ring[gpu_used_ack % gpu_qsize].len;
+    gpu_used_ack++;
+    if (id == 0) {
+      if (gpu_sync_orphan) {
+        gpu_sync_orphan = 0;
+      } else {
+        gpu_sync_len = len;
+        gpu_sync_done = 1;
+      }
+    } else if (id >= VGPU_ASYNC_DESC0 && ((id - VGPU_ASYNC_DESC0) & 1u) == 0 &&
+               (id - VGPU_ASYNC_DESC0) / 2 < VGPU_ASYNC_SLOTS) {
+      int slot = (int)((id - VGPU_ASYNC_DESC0) / 2);
+      uint32_t rt = gpu_async_resp[slot] ? *(volatile uint32_t*)gpu_async_resp[slot] : 0;
+      gpu_async_resp[slot] = 0;
+      if (gpu_async_inflight > 0) gpu_async_inflight--;
+      virtio_gpu_3d_async_done(slot, rt);
+    }
+    idx = *(volatile uint16_t*)&gpu_used.idx;
+  }
+  /* No async command in flight: ask the device not to interrupt for the
+   * synchronous ones (which are polled).  Cleared again by post_async. */
+  if (gpu_async_inflight == 0 && virtio_gpu_x64_irq_vector >= 0) gpu_avail.flags = 1;
+}
+
+void virtio_gpu_x64_drain(void) { vgpu_drain_locked(); }
+
+/* P6: notify the control queue with nothing new in it.  QEMU's virgl device
+ * retires fences when it handles a queue notification (and otherwise only
+ * from a 10 ms poll timer), so a waiter that kicks sees a finished GPU fence
+ * without waiting for the timer.  Caller holds gpu_lock. */
+void virtio_gpu_x64_kick(void) {
+  if (gpu_failed || gpu_qsize == 0 || !gpu_notify) return;
+  arch_memory_barrier();
+  *(volatile uint16_t*)(gpu_notify + (uint64_t)gpu_notify_off * gpu_notify_mult) =
+      (uint16_t)VGPU_QUEUE_ID;
+}
+
+/* P6: queue one fenced command on slot `slot` without waiting.  The request
+ * and response buffers belong to the slot until virtio_gpu_3d_async_done().
+ * Caller holds gpu_lock. */
+int virtio_gpu_x64_post_async(int slot, const void* req, uint32_t req_len, void* resp,
+                              uint32_t resp_len) {
+  if (gpu_failed || gpu_qsize == 0 || !gpu_cc) return -1;
+  if (slot < 0 || slot >= VGPU_ASYNC_SLOTS || !req || !resp || req_len == 0 ||
+      resp_len < sizeof(struct virtio_gpu_ctrl_hdr))
+    return -1;
+  uint16_t h = (uint16_t)(VGPU_ASYNC_DESC0 + 2 * slot);
+  if ((uint32_t)h + 1 >= gpu_qsize) return -1;
+  gpu_desc[h].addr = virt_to_phys(req);
+  gpu_desc[h].len = req_len;
+  gpu_desc[h].flags = VQ_DESC_F_NEXT;
+  gpu_desc[h].next = (uint16_t)(h + 1);
+  gpu_desc[h + 1].addr = virt_to_phys(resp);
+  gpu_desc[h + 1].len = resp_len;
+  gpu_desc[h + 1].flags = VQ_DESC_F_WRITE;
+  gpu_desc[h + 1].next = 0;
+  *(volatile uint32_t*)resp = 0;
+  gpu_async_resp[slot] = resp;
+  gpu_async_inflight++;
+  gpu_avail.flags = 0; /* completions must interrupt now */
+  gpu_avail.ring[gpu_avail_next % gpu_qsize] = h;
+  arch_memory_barrier();
+  gpu_avail.idx = (uint16_t)(gpu_avail_next + 1);
+  gpu_avail_next++;
+  arch_memory_barrier();
+  *(volatile uint16_t*)(gpu_notify + (uint64_t)gpu_notify_off * gpu_notify_mult) =
+      (uint16_t)VGPU_QUEUE_ID;
+  return 0;
+}
+
 
 /* M1: generic transaction with a caller-supplied response buffer.  The 3D
  * commands need two things the 2D helper never did:
@@ -490,6 +607,7 @@ int virtio_gpu_x64_transact_ex(const void* req, uint32_t req_len,
   gpu_desc[last].next = 0;
   *(volatile uint32_t*)resp = 0; /* resp.type, cleared before the kick */
 
+  gpu_sync_done = 0;
   gpu_avail.ring[gpu_avail_next % gpu_qsize] = 0; /* head descriptor */
   arch_memory_barrier();
   gpu_avail.idx = (uint16_t)(gpu_avail_next + 1);
@@ -500,20 +618,23 @@ int virtio_gpu_x64_transact_ex(const void* req, uint32_t req_len,
       (uint16_t)VGPU_QUEUE_ID;
   arch_memory_barrier();
 
-  uint16_t ack0 = gpu_used_ack;
+  /* P6: the used ring may also carry async fence completions (heads >= 3),
+   * in any order relative to this command; drain them all and stop at ours
+   * (head 0). */
   uint64_t spins = 0;
-  while (*(volatile uint16_t*)&gpu_used.idx == ack0) {
+  for (;;) {
+    vgpu_drain_locked();
+    if (gpu_sync_done) break;
     __asm__ volatile("pause");
     if (++spins >= VGPU_CMD_SPIN_LIMIT) {
-      /* Device wedged: leave gpu_used_ack stale (the completion is absorbed
-       * by the next transaction's wait) and stop trusting the device after
-       * repeated timeouts. */
+      /* Device wedged: the late completion of this command is absorbed by
+       * the drain (gpu_sync_orphan), and repeated timeouts stop the driver
+       * from trusting the device. */
       gpu_timeouts++;
+      gpu_sync_orphan = 1;
 #if G2_VPCI_DBG
       uart_puts("G2DBG cmd TIMEOUT used.idx=");
       uart_print_hex(*(volatile uint16_t*)&gpu_used.idx);
-      uart_puts(" ack0=");
-      uart_print_hex(ack0);
       uart_puts(" avail_next=");
       print_int((int)gpu_avail_next);
       uart_puts("\n");
@@ -522,9 +643,7 @@ int virtio_gpu_x64_transact_ex(const void* req, uint32_t req_len,
       return -1;
     }
   }
-  arch_memory_barrier();
-  gpu_used_ack = *(volatile uint16_t*)&gpu_used.idx;
-  uint32_t used_len = gpu_used.ring[ack0 % gpu_qsize].len;
+  uint32_t used_len = gpu_sync_len;
   arch_memory_barrier();
 
   uint32_t rtype = *(volatile uint32_t*)resp;
@@ -629,8 +748,8 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   pci_write_config(bus, slot, 0, 0x04,
                    cmd | PCI_CMD_MEM_SPACE | PCI_CMD_BUS_MASTER | PCI_CMD_INTX_DIS);
 
-  struct vpci_cap caps[8];
-  int ncaps = vpci_collect_caps(bus, slot, caps, 8);
+  struct vpci_cap caps[12];
+  int ncaps = vpci_collect_caps(bus, slot, caps, 12);
   if (ncaps <= 0) return -1;
 
   struct vpci_cap* cc = 0; /* common */
@@ -640,6 +759,23 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
     if (caps[i].kind == VIRTIO_PCI_CAP_COMMON_CFG) cc = &caps[i];
     else if (caps[i].kind == VIRTIO_PCI_CAP_NOTIFY_CFG) nc = &caps[i];
     else if (caps[i].kind == VIRTIO_PCI_CAP_ISR_CFG) ic = &caps[i];
+    else if (caps[i].kind == VIRTIO_PCI_CAP_SHARED_MEMORY_CFG && caps[i].id == 1) {
+      /* P6: host-visible window = BAR base + 64-bit offset, 64-bit length. */
+      uint64_t sbar = vpci_bar_phys(bus, slot, caps[i].bar);
+      uint64_t soff = ((uint64_t)caps[i].offset_hi << 32) | caps[i].offset;
+      uint64_t slen = ((uint64_t)caps[i].length_hi << 32) | caps[i].length;
+      if (sbar >= 0x100000 && slen) {
+        virtio_gpu_x64_shm_phys = sbar + soff;
+        virtio_gpu_x64_shm_len = slen;
+      }
+      uart_puts("[VIRGL3D] shm id=1 bar=");
+      print_int((int)caps[i].bar);
+      uart_puts(" base=");
+      uart_print_hex(virtio_gpu_x64_shm_phys);
+      uart_puts(" len=");
+      uart_print_hex(slen);
+      uart_puts("\n");
+    }
   }
   if (!cc || !nc || !ic) return -1;
   if (cc->bar != nc->bar || cc->bar != ic->bar) return -1;
@@ -699,11 +835,35 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   uart_puts("\n");
 #endif
   if (!(feat_hi & VPCI_F_VERSION_1)) return -1;
+  virtio_gpu_x64_feat_offered = feat_lo;
+  if (feat_lo & (1u << VIRTIO_GPU_F_VIRGL)) {
+    /* P6: what the device offers, so a host recipe can be checked from the
+     * guest's serial log (blob/context_init need blob=true / venus=true). */
+    uart_puts("[VIRGL3D] feat offered lo=");
+    uart_print_hex(feat_lo);
+    uart_puts(" virgl=1 edid=");
+    print_int((int)((feat_lo >> VIRTIO_GPU_F_EDID) & 1));
+    uart_puts(" uuid=");
+    print_int((int)((feat_lo >> 2) & 1));
+    uart_puts(" blob=");
+    print_int((int)((feat_lo >> 3) & 1));
+    uart_puts(" ctx_init=");
+    print_int((int)((feat_lo >> VIRTIO_GPU_F_CONTEXT_INIT) & 1));
+    uart_puts("\n");
+  }
 
   virtio_gpu_x64_virgl_offered =
       (feat_lo & (1u << VIRTIO_GPU_F_VIRGL)) ? 1 : 0;
   uint32_t drv_lo = 0;
   if (virtio_gpu_x64_virgl_offered) drv_lo |= (1u << VIRTIO_GPU_F_VIRGL);
+  /* P6 (docs/gpu-abi.md §10.1): blob resources and context-init, only next
+   * to VIRGL and only as a pair (Venus needs both; neither changes an M1
+   * command's encoding). */
+  int want_m2 = virtio_gpu_x64_virgl_offered &&
+                (feat_lo & (1u << VIRTIO_GPU_F_RESOURCE_BLOB)) &&
+                (feat_lo & (1u << VIRTIO_GPU_F_CONTEXT_INIT));
+  if (want_m2)
+    drv_lo |= (1u << VIRTIO_GPU_F_RESOURCE_BLOB) | (1u << VIRTIO_GPU_F_CONTEXT_INIT);
 
   gpu_cc_w32(VPCI_CC_DRV_FEAT_SEL, 0);
   gpu_cc_w32(VPCI_CC_DRV_FEAT, drv_lo);
@@ -715,6 +875,8 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   arch_memory_barrier();
   if (!(gpu_cc_r8(VPCI_CC_DEVICE_STATUS) & VPCI_STATUS_FEATURES_OK)) return -1;
   virtio_gpu_x64_virgl_negotiated = virtio_gpu_x64_virgl_offered;
+  virtio_gpu_x64_blob_negotiated = want_m2;
+  virtio_gpu_x64_ctxinit_negotiated = want_m2;
 
   /* Control queue (0): size, addresses, enable. */
   gpu_cc_w16(VPCI_CC_QUEUE_SEL, VGPU_QUEUE_ID);
@@ -749,7 +911,74 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
   /* M1: capset discovery.  Any 3D failure here is contained: the 2D path
    * above already owns the scanout, so the desktop boots either way. */
   if (virtio_gpu_x64_virgl_negotiated) virtio_gpu_3d_init();
+
+  /* P6 (docs/gpu-abi.md §10.5): async fences are retired by the device's
+   * INTx.  Only a blob-capable (Venus) device gets it; every other device
+   * keeps INTx disabled and stays polled exactly as before. */
+  if (virtio_gpu_x64_blob_negotiated && virtio_gpu_3d_available()) {
+    uint32_t il = pci_read_config(bus, slot, 0, 0x3C) & 0xFF;
+    if (il >= 1 && il <= 15 && il != 2) {
+      extern void gic_enable_interrupt(uint32_t intid);
+      virtio_gpu_x64_irq_vector = 32 + (int)il;
+      uint32_t c2 = pci_read_config(bus, slot, 0, 0x04);
+      pci_write_config(bus, slot, 0, 0x04, c2 & ~PCI_CMD_INTX_DIS);
+      gpu_isr_ack();
+      gic_enable_interrupt((uint32_t)virtio_gpu_x64_irq_vector);
+    }
+    uart_puts("[VIRGL3D] irq line=");
+    print_int((int)il);
+    uart_puts(" vector=");
+    print_int(virtio_gpu_x64_irq_vector);
+    uart_puts(virtio_gpu_x64_irq_vector >= 0 ? " (fences retired by INTx)\n"
+                                             : " (no usable INTx line: polled)\n");
+  }
   return 0;
+}
+
+/* P6: the device interrupt.  Read ISR first (deasserts INTx; a completion
+ * published after the drain raises it again), then retire what the used ring
+ * holds, then wake the fence sleepers outside the lock. */
+int virtio_gpu_x64_drain_from_irq = 0; /* P6: fence statistics only */
+
+/* P6: called once, from process context after boot (the first CTX_CREATE2).
+ * Two things bring-up cannot do: (1) the PIC is (re)initialised by gic_init()
+ * AFTER virtio_gpu_init(), which masks every line again, so the unmask done at
+ * bring-up is lost unless another device on the same line re-enables it; (2)
+ * a PCI INTx line is level-triggered and on q35 the GPU shares it with the
+ * legacy virtio-net, so the PIC must be in level mode for it (ELCR), or an
+ * edge is lost whenever the net holds the line.  Logs the ELCR before/after. */
+void virtio_gpu_x64_irq_late_enable(void) {
+  static int done;
+  if (done || virtio_gpu_x64_irq_vector < 0) return;
+  done = 1;
+  int irq = virtio_gpu_x64_irq_vector - 32;
+  uint16_t port = irq < 8 ? 0x4D0 : 0x4D1;
+  uint8_t bit = (uint8_t)(1u << (irq & 7));
+  uint8_t before = inb(port);
+  if (!(before & bit)) outb(port, (uint8_t)(before | bit));
+  uint8_t after = inb(port);
+  extern void gic_enable_interrupt(uint32_t intid);
+  gic_enable_interrupt((uint32_t)virtio_gpu_x64_irq_vector);
+  uint8_t mask = irq < 8 ? inb(0x21) : inb(0xA1);
+  uart_puts("[VIRGL3D] irq late-enable line=");
+  print_int(irq);
+  uart_puts(" elcr_before=");
+  uart_print_hex(before);
+  uart_puts(" elcr_after=");
+  uart_print_hex(after);
+  uart_puts(" pic_mask=");
+  uart_print_hex(mask);
+  uart_puts("\n");
+}
+
+void virtio_gpu_x64_handle_irq(void) {
+  gpu_isr_ack();
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_lock);
+  virtio_gpu_x64_drain_from_irq = 1;
+  vgpu_drain_locked();
+  virtio_gpu_x64_drain_from_irq = 0;
+  spinlock_release_irqrestore(&gpu_lock, fl);
+  virtio_gpu_3d_fence_wake();
 }
 
 /* Probe the PCI bus for a modern virtio GPU and bring it up. */
