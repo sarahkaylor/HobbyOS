@@ -51,11 +51,14 @@ def upayload(w, s):
 # tools/t3_tier.sh appends its own "\n=== T3 guest sample: ... ===\n" to the
 # console log when it sees a stall marker, wherever the guest's byte stream
 # happens to be; that is the host writing into the file, not the console.
-T3_NOTE = re.compile(r"\n=== T3 guest sample[^\n]*===\n")
+# The tier writes it as two writes (echo ""; echo "=== ..."), and QEMU's
+# own writes to the same file can land between them, so guest bytes may sit
+# between the note's newline and its text: keep those, drop the rest.
+T3_NOTE = re.compile(r"\n([^\n]*?)=== T3 guest sample[^\n]*===\n")
 
 
 def check(text, min_cpus=0, show=8):
-    text = T3_NOTE.sub("", text.replace("\r", ""))
+    text = T3_NOTE.sub(r"\1", text.replace("\r", ""))
     lines = text.split("\n")
     inter, torn = [], []
     kseen, useen, cpus = set(), set(), set()
@@ -147,6 +150,10 @@ def self_test():
     # the tier's own note dropped into the middle of a row is not a tear
     note = list(good)
     note[0] = note[0][:20] + "\n=== T3 guest sample: SKIPPED -- no monitor ===\n" + note[0][20:]
+    r = check("\n".join(note + [tot]))
+    assert verdict(r, 1)[0] == 0, r
+    # ... and with guest bytes between the tier's two writes
+    note[0] = good[0][:20] + "\n" + good[0][20:22] + "=== T3 guest sample: SKIPPED -- x ===\n" + good[0][22:]
     r = check("\n".join(note + [tot]))
     assert verdict(r, 1)[0] == 0, r
     print("lp_check_console self-test: PASS")
