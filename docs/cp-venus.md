@@ -139,43 +139,50 @@ JSON).
 | row | result | evidence |
 |---|---|---|
 | host recipe: device, window, capsets | features `0x3000001B`; window BAR 4, 8 GiB; capset 4 (Venus) v0, 160 B | `step1-boot-check.txt` |
-| kernel transport, no Mesa | every request and error row ok; 1 MiB shmem mapped WB and verified; 100 fenced submits through 32 slots | `step3-transport-probe.txt` |
-| vulkaninfo --summary in the guest | GPU0 `Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))`, venus, Mesa 26.2.6, API 1.4.307, 171 device extensions; GPU1 is the 8060S | `vulkaninfo-fence.txt` |
-| GPU work on the host | `vkCmdFillBuffer` + copy of 4 MiB into mapped host-visible memory, 0 mismatches | `vulkaninfo-fence.txt` |
-| **fence latency** (vkQueueSubmit → vkWaitForFences, 10 000 fences, TSC) | empty cmdbuf: **p50 101 µs, p90 190, p99 276, max 4213**; empty batch: p50 56, p99 144; submit p50 52 µs | `vulkaninfo-fence.txt` |
-| reference: Linux guest on Venus (P0) | D3D12 fence round trip p50 276 µs, p99 596–682 | `docs/cp-p0-guest.md` §3.3 |
-| kernel post→retire | 20 002 fences: 93 % ≤ 200 µs, none > 5 ms; 9 300 retired by INTx, 10 702 by the waiter's kick-poll drain | `vulkaninfo-fence.txt` |
-| timeline semaphores (vkWaitSemaphores) | correct, but p50 10.0 ms: venus' feedback path sleeps in `vn_relax` and the guest's sleep is tick-granular | `vulkaninfo-fence.txt` |
-| **probe 1: Linux vkcube on Venus in X** | **PASS**: 14 731 frames / 65 s = 226.6 fps (FIFO, 640×480, software present), two screendumps with the cube | `probe1-vkcubex-venus.txt`, `evidence/cp-venus/vkcubex-t{20,50}s.png` |
-| vkcube.exe under Wine (winevulkan) on Venus | 13 265 frames / 65 s (~200 fps) | `probe2-wine-venus.txt` |
-| **probe 2: D3D12 triangle (vkd3d-proton 3.1) under Wine on Venus** | **FAIL**: device, swapchain (3 images), PSO and frame 0 (124–140 ms) render; the second frame's `ID3D12Fence` wait times out after 10 s, three runs (with async and with synchronous venus present) | `probe2-wine-venus.txt` |
-| full batch at parity | PASS (one timing flake, exitgroup X7, 2/2 on rerun) | `gate-batch.txt` |
+| render server off the desktop GPU | every QEMU / render-server process and thread holds only renderD129; the one enumeration open of renderD128 is refused by the shim | `render-node-fencing.txt` |
+| kernel transport, no Mesa | every request and error row ok; 1 MiB shmem mapped WB and verified | `step3-transport-probe.txt` |
+| vulkaninfo --summary in the guest | GPU0 `Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))`, venus, Mesa 26.2.6, API 1.4.307, 171 device extensions -- and now the only GPU | `vulkaninfo-fence.txt` |
+| GPU work on the host | 4 MiB fill + copy into mapped host-visible memory, 0 mismatches | `vulkaninfo-fence.txt` |
+| **fence latency** (vkQueueSubmit -> vkWaitForFences, 10 000, TSC) | empty cmdbuf p50 101-162 us, p99 276-322 us; empty batch p50 56-66 us | `vulkaninfo-fence.txt` |
+| timeline vkWaitSemaphores (2 000) | **p50 76 us, p99 200 us** (timeline syncs; was 10 ms on venus' feedback path) | `vulkaninfo-fence.txt` |
+| **Linux vkcube on Venus in X** | **PASS**: 226.6 fps for 65 s, two screendumps | `probe1-vkcubex-venus.txt` |
+| **D3D12 triangle (vkd3d-proton 3.1) under Wine on Venus** | **PASS**: 12 374 frames / 65 s = 190 fps, two screendumps | `probe2-d3d-venus-PASS.txt` |
+| D3D11 triangle (DXVK 3.1.1) under Wine on Venus | PASS: 7 994 frames / 65 s = 123 fps | `probe2-d3d-venus-PASS.txt` |
+| vkcube.exe under Wine on Venus | PASS (with the P5 device-name override) | `probe2-wine-venus.txt` |
+| full batch at parity | see `gate-batch.txt` | `gate-batch.txt` |
 
-### 6.1 The open row: DXVK / vkd3d-proton stall after their first frames
+### 6.1 The D3D stall (closed): root cause and fixes
 
-What is known (`probe2-wine-venus.txt`, runs 1–5):
-* Wine + winevulkan + Venus works: `vkcube.exe` renders for 65 s (~204 fps) and
-  both D3D adapters are created on the Radeon (vkd3d-proton: FL 12_1 path,
-  SM 6.0 asked, swapchain of 3 images; DXVK: FL 11_1).
-* `d3d12tri.exe` renders frame 0 (124–153 ms), then the `ID3D12Fence` wait for
-  frame 1 times out (10 s).  `d3d11tri.exe` renders frames 0 and 1, then stops
-  making progress.  Lavapipe passes both (Gate P5), so the difference is
-  Venus' own path, not Wine or the X server.
-* Not the cause: venus' async present (run 3 presented synchronously: same
-  stall); sync wait-for-submit semantics (run 2 onward); a Vulkan error (run 5
-  with `VN_DEBUG=result,wsi` baked in logged none; `VENUS_DEBUG_DEFAULT` in
-  `tools/mesa/venus/build.sh`).
-* The kernel's global fence counters show only 4 ring fences retired across
-  every Venus process of run 5 -- the stalled process never retired a
-  renderer-sync fence, i.e. no `vkQueueSubmit(..., fence)` it waited on came
-  back.  Timeline semaphores (vkd3d's D3D12 fences) are on venus' feedback
-  path and do work in isolation (`vn_info timeline`).
-* Next step: per-process fence state at the stall.  `FENCE_WAIT2` now prints
-  `[VENUS] fence_wait2 timeout ... issued= done= ctx_inflight=` for finite
-  waits; WSI waits are infinite, so the next lane should add the same row to
-  a periodic dump (or a SysRq-style hook) and check whether the stalled
-  queue's ring has fences issued and never answered by the host (a host queue
-  blocked on a semaphore wait) or no fence issued at all (a guest-side wait
-  that never submits).  Suspects, in order: a host-side `VkQueue` blocked on a
-  semaphore the guest signalled only through venus' feedback path; a WSI
-  image fence on a queue whose ring differs from the one the wait uses.
+Symptom (runs 1-10): d3d12tri rendered frame 0 and timed out on its fence for
+frame 1; d3d11tri stopped after frame 1; vkcube.exe and Linux vkcube were fine.
+
+1. **A transport bug, found first and fixed** (`[VENUS] stall` dump): a
+   waiter parked 2 s on a fence whose used-ring entry had long been written.
+   The GPU's INTx (line 10) is shared with the legacy virtio-net and was in
+   edge mode (ELCR before = 0x00), so its edge was lost while the net held the
+   line; and `gic_init()` re-masks every PIC line after the GPU's bring-up.
+   Fix: level mode + re-unmask on the first `CTX_CREATE2`, and a per-tick
+   re-check by parked waiters.  The stall stayed.
+2. **The root cause: `VK_KHR_present_wait`.**  With the transport fixed, the
+   stall dump showed no waiter in the kernel and every issued fence retired,
+   while every thread of the process sat in a futex.  Venus advertises
+   `VK_KHR_present_wait{,2}` unconditionally; lavapipe -- on which Gate P5
+   passed with the same Wine, DXVK, vkd3d-proton and X server -- does not.
+   DXVK and vkd3d-proton pace frames with `vkWaitForPresentKHR` when it
+   exists, and on the X11 software-WSI path (XHOBBY: no DRI3, PutImage) the
+   present id they wait for never completes.  Hiding both extensions on
+   HobbyOS (`tools/mesa/venus/build.sh`, `#ifndef VN_HOBBYOS`) removes the
+   stall: run 11 passed both D3D probes.
+3. **Venus' async present must stay off** (the second, smaller workaround).
+   Run 12 restored it (present-wait still hidden): vkcube.exe passed, but
+   d3d11tri and d3d12tri both died at frame 2 with a user fault in
+   `pthread_mutex_lock` on address 0x9 (libpthread+0xafc4, `mov 0x10(%rdi)`,
+   rdi=9).  The build presents synchronously (`HOBBYOS_VN_ASYNC_PRESENT=1`
+   restores the async path at run time); the fault is open (likely in the
+   async thread's queue/fence hand-off with timeline syncs; Linux virtgpu runs
+   the same path with real drm syncobjs).
+   The proper fix belongs to P7 (scanout present, AD-6), where presents
+   complete through the device and present-wait can come back.
+4. Not causes (each measured): venus' async present (run 3 synchronous,
+   same stall); binary vs timeline syncs (runs 1-8 binary, 8-11 timeline);
+   Vulkan errors (`VN_DEBUG=result,wsi`, none).

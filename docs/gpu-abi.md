@@ -481,6 +481,18 @@ memory region is gone, so the next `MAP_BLOB` can reuse the range safely.
   wake, Linux-style).  The kernel writes the absolute deadline into
   `deadline_ms` on the first park so a restarted wait keeps the original
   deadline; a caller sets `deadline_ms = 0` before each new wait.
+  Before the first park it kick-polls (notify + drain) for up to 4 ms,
+  because QEMU 10.2.1 retires a finished virgl fence only on a queue
+  notification or from its 10 ms poll timer.  A parked waiter also re-checks
+  on every scheduler tick: the INTx can be lost (see below).  A wait still
+  pending after 2 s prints `[VENUS] stall` rows (per-ring issued/done, slots
+  in flight) once a second at most.
+* **The interrupt line.** On q35 the GPU's INTx is line 10, shared with the
+  legacy virtio-net, and firmware leaves it in **edge** mode (ELCR 0x00): an
+  edge is lost whenever the net holds the line.  `gic_init()` also runs after
+  the GPU's bring-up and masks every PIC line.  The first `CTX_CREATE2`
+  therefore puts the line in level mode (ELCR 0x00 → 0x04) and unmasks it
+  (`[VIRGL3D] irq late-enable` row).
 * **Ring 0 is slow on this host.** QEMU 10.2.1 answers CPU-ring (ring 0)
   fences from its 10 ms virgl fence poll: measured submit 14 µs p50, signal
   10.0 ms p50 (`docs/cp-venus-evidence/step3-transport-probe.txt`).  Venus

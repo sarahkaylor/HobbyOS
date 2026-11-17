@@ -115,11 +115,12 @@ w = w.replace(old, """   const bool use_sw_device =
       !physical_dev->base.vk.supported_extensions
           .EXT_external_memory_dma_buf ||""", 1)
 open(v + '/vn_wsi.c', 'w').write(w)
-# Present synchronously on HobbyOS (docs/cp-venus.md §6.1): venus' async
+# Present synchronously on HobbyOS (docs/cp-venus.md §6.1): with venus' async
 # present thread (vn_wsi_present_async, used when the renderer has no implicit
-# fencing) deadlocked against DXVK's / vkd3d-proton's present threads and
-# Mesa's X11 software-WSI queue thread -- every thread of d3d11tri.exe parked
-# in a futex after frame 1.  HOBBYOS_VN_ASYNC_PRESENT=1 restores it at run time.
+# fencing) and timeline syncs, d3d11tri and d3d12tri die at frame 2 in
+# pthread_mutex_lock(0x9) (run 12, present_wait already hidden); synchronous
+# present passes both (run 11).  HOBBYOS_VN_ASYNC_PRESENT=1 restores it at run
+# time.
 old = """   if (!dev->renderer->info.has_implicit_fencing &&
        !VN_PERF(NO_ASYNC_PRESENT)) {"""
 assert w.count(old) == 1
