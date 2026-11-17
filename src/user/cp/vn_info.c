@@ -141,6 +141,10 @@ DFN(vkWaitForFences);
 DFN(vkResetFences);
 DFN(vkDeviceWaitIdle);
 DFN(vkInvalidateMappedMemoryRanges);
+DFN(vkCreateSemaphore);
+DFN(vkWaitSemaphores);
+DFN(vkGetSemaphoreCounterValue);
+DFN(vkSignalSemaphore);
 #define DLOAD(name) p##name = (PFN_##name)vk_gipa(inst, #name)
 
 static int find_mem(uint32_t bits, VkMemoryPropertyFlags want) {
@@ -198,7 +202,9 @@ static int open_device(void) {
   float prio = 1.0f;
   VkDeviceQueueCreateInfo qci = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                                  .queueFamilyIndex = qfam, .queueCount = 1, .pQueuePriorities = &prio};
-  VkDeviceCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+  VkPhysicalDeviceVulkan12Features f12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+                                         .timelineSemaphore = VK_TRUE};
+  VkDeviceCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &f12,
                             .queueCreateInfoCount = 1, .pQueueCreateInfos = &qci};
   DLOAD(vkCreateDevice);
   double t0 = vk_now_ms();
@@ -211,6 +217,8 @@ static int open_device(void) {
   DLOAD(vkCmdPipelineBarrier); DLOAD(vkCreateFence); DLOAD(vkQueueSubmit);
   DLOAD(vkWaitForFences); DLOAD(vkResetFences); DLOAD(vkDeviceWaitIdle);
   DLOAD(vkInvalidateMappedMemoryRanges);
+  DLOAD(vkCreateSemaphore); DLOAD(vkWaitSemaphores); DLOAD(vkGetSemaphoreCounterValue);
+  DLOAD(vkSignalSemaphore);
   pvkGetDeviceQueue(dev, qfam, 0, &queue);
   return 0;
 }
@@ -341,6 +349,47 @@ static void fence_loop(int n, int with_cb) {
   free(rt);
 }
 
+/* vkd3d-proton's D3D12 fences are timeline semaphores signalled by
+ * vkQueueSubmit and waited on the host (vkWaitSemaphores). */
+static void do_timeline(int n) {
+  VkSemaphoreTypeCreateInfo tci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                                   .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0};
+  VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &tci};
+  VkSemaphore sem;
+  VK_CHECK(pvkCreateSemaphore(dev, &sci, NULL, &sem));
+  uint64_t *rt = calloc((size_t)n, sizeof(uint64_t));
+  int ok = 0;
+  for (int i = 0; i < n; i++) {
+    uint64_t v = (uint64_t)i + 1;
+    VkTimelineSemaphoreSubmitInfo ts = {.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                                        .signalSemaphoreValueCount = 1, .pSignalSemaphoreValues = &v};
+    VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &ts,
+                       .signalSemaphoreCount = 1, .pSignalSemaphores = &sem};
+    uint64_t a = rdtsc();
+    VkResult r = pvkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
+    if (r != VK_SUCCESS) { vk_row("FAIL timeline submit %d -> %d", i, (int)r); break; }
+    VkSemaphoreWaitInfo wi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1,
+                              .pSemaphores = &sem, .pValues = &v};
+    r = pvkWaitSemaphores(dev, &wi, 2000000000ull);
+    if (r != VK_SUCCESS) {
+      uint64_t cur = 0;
+      pvkGetSemaphoreCounterValue(dev, sem, &cur);
+      vk_row("FAIL timeline wait %d for %llu -> %d (counter %llu)", i, (unsigned long long)v, (int)r,
+             (unsigned long long)cur);
+      break;
+    }
+    rt[i] = rdtsc() - a;
+    ok++;
+  }
+  if (ok != n) fails++;
+  if (ok) {
+    qsort(rt, (size_t)ok, sizeof(uint64_t), cmp_u64);
+    vk_row("TIMELINE n=%d submit->vkWaitSemaphores_us p50=%.1f p90=%.1f p99=%.1f max=%.1f", ok,
+           tsc_us(rt[ok / 2]), tsc_us(rt[(ok * 9) / 10]), tsc_us(rt[(ok * 99) / 100]), tsc_us(rt[ok - 1]));
+  }
+  free(rt);
+}
+
 static void do_bw(void) {
   const VkDeviceSize sz = 64u << 20;
   VkBuffer hbuf;
@@ -368,12 +417,13 @@ static void do_bw(void) {
 }
 
 int main(int argc, char **argv) {
-  int want_info = 0, want_work = 0, want_bw = 0, nfence = 0;
+  int want_info = 0, want_work = 0, want_bw = 0, nfence = 0, ntl = 0;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "info")) want_info = 1;
     else if (!strcmp(argv[i], "work")) want_work = 1;
     else if (!strcmp(argv[i], "bw")) want_bw = 1;
     else if (!strcmp(argv[i], "fence") && i + 1 < argc) nfence = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "timeline") && i + 1 < argc) ntl = atoi(argv[++i]);
   }
   if (argc == 1) {
     want_info = want_work = 1;
@@ -417,7 +467,7 @@ int main(int argc, char **argv) {
     vk_row("========");
     for (uint32_t i = 0; i < n; i++) print_summary(i, pds[i]);
   }
-  if (want_work || nfence || want_bw) {
+  if (want_work || nfence || want_bw || ntl) {
     if (open_device() != 0) {
       fails++;
     } else {
@@ -426,6 +476,7 @@ int main(int argc, char **argv) {
         fence_loop(nfence, 0);
         fence_loop(nfence, 1);
       }
+      if (ntl) do_timeline(ntl);
       if (want_bw) do_bw();
       pvkDeviceWaitIdle(dev);
     }

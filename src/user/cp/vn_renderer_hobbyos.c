@@ -239,10 +239,16 @@ hobbyos_wait(struct vn_renderer *renderer, const struct vn_renderer_wait *wait)
             int st = hb_sync_poll(hb, s, left);
             if (st == 1)
                break;
-            if (st == -1)
-               return VK_TIMEOUT; /* nothing submitted: like Mesa's sim syncobj */
             if (left == 0)
                return VK_TIMEOUT;
+            if (st == -1) {
+               /* Nothing submitted yet: wait-for-submit, like drm_syncobj's
+                * WAIT_FOR_SUBMIT that the virtgpu backend always sets.  Another
+                * thread (venus' async present, vkd3d's submit thread) may be
+                * about to submit it; Mesa's sim syncobj returns ETIME here. */
+               os_time_sleep(200);
+               continue;
+            }
             if (abs != OS_TIMEOUT_INFINITE && os_time_get_nano() >= abs)
                return VK_TIMEOUT;
          }
@@ -264,11 +270,13 @@ hobbyos_wait(struct vn_renderer *renderer, const struct vn_renderer_wait *wait)
                first_pending = (int)i;
          }
       }
-      if (!any_pending)
-         return VK_TIMEOUT;
       const int64_t now = os_time_get_nano();
       if (abs != OS_TIMEOUT_INFINITE && now >= abs)
          return VK_TIMEOUT;
+      if (!any_pending) {
+         os_time_sleep(200); /* wait-for-submit, see the wait_all branch */
+         continue;
+      }
       uint64_t slice = 1000000ull; /* 1 ms, then look at the others again */
       if (abs != OS_TIMEOUT_INFINITE && (uint64_t)(abs - now) < slice)
          slice = (uint64_t)(abs - now);
