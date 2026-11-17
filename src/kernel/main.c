@@ -676,6 +676,9 @@ void main(void) {
    * LIBC.SO, which is what makes the page-cache evidence (file_obj.c "so
    * cache: ... refs=N") meaningful. */
   load_and_run_program_in_scheduler_args("CATDYN.BIN", -1, -1, -1, -1, "E2E.TXT");
+#elif defined(KERNEL_MODE_LO_TEST)
+  uart_puts("Mode: LO_TEST - Running LibreOffice E2E automated test suite...\n");
+  load_and_run_program_in_scheduler("LO_TEST.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

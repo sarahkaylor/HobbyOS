@@ -815,7 +815,8 @@ static void test_vm_memfd_private_cow(void) {
  * contiguously at create -- plus one frame per materialized page; a MAP_SHARED
  * mapping of all of it costs each address space its page tables (one 4 KiB
  * table per 2 MiB, ~100 + the upper levels).  Everything comes back at
- * teardown + unref.  At the 1 GiB cap the array is 513 contiguous frames. */
+ * teardown + unref.  At the 4 GiB cap (cp-sync; 1 GiB before) the array is
+ * 2049 contiguous frames. */
 static void test_vm_big_object_cost(void) {
   tests_run++;
   uart_puts("  Running test_vm_big_object_cost...\n");
@@ -882,10 +883,10 @@ static void test_vm_big_object_cost(void) {
   EXPECT_EQ((g != 0), 1);
   if (g) {
     int garr = free0 - frame_free_count();
-    uart_puts("  [VMCOST] 1 GiB (VM_OBJ_MAX_BYTES) object: frame array=");
+    uart_puts("  [VMCOST] 4 GiB (VM_OBJ_MAX_BYTES) object: frame array=");
     print_int(garr);
     uart_puts(" contiguous frames\n");
-    EXPECT_EQ(garr, 513);
+    EXPECT_EQ(garr, (int)((VM_OBJ_MAX_FRAMES * 8) / FRAME_SIZE) + 1); /* 2049 at 4 GiB */
     vm_object_unref(g);
   }
   EXPECT_EQ((vm_object_create(VM_OBJ_MEMFD, VM_OBJ_MAX_BYTES + FRAME_SIZE) == 0), 1);

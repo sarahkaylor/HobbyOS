@@ -1,0 +1,23 @@
+# Gate P5 (tools/cp/p5/run-wine-p5.sh), strix KVM, cp-sync tree (LO_ON_DISK=1 default, own X stack), rerun line from the wave-5 common rules with P5_EXPORT=/srv/nfs/cp-sync-p5
+[P5W] screendump vkcube-t20s.ppm at +105 s; QEMU guests on the host now (incl. this one): 3
+[P5W] screendump vkcube-t50s.ppm at +135 s; QEMU guests on the host now (incl. this one): 3
+[P5W] screendump d3d11-t20s.ppm at +177 s; QEMU guests on the host now (incl. this one): 3
+[P5W] screendump d3d11-t50s.ppm at +206 s; QEMU guests on the host now (incl. this one): 3
+[P5W] screendump d3d12-t20s.ppm at +248 s; QEMU guests on the host now (incl. this one): 3
+[P5W] screendump d3d12-t50s.ppm at +278 s; QEMU guests on the host now (incl. this one): 3
+[P5W] guests on the host at the end of the run: 3 (incl. none of ours)
+[P5W] vkcube vkcube-t20s.ppm: clear=238960 saturated=68832 bbox=(44, 70, 682, 548) hash=dbe86a6bc2d384f7
+[P5W] vkcube vkcube-t50s.ppm: clear=241148 saturated=66612 bbox=(44, 70, 682, 548) hash=ed20a08e74be874d
+[P5W] vkcube: PASS
+[P5W] d3d11 d3d11-t20s.ppm: clear=237252 saturated=48328 bbox=(724, 70, 1362, 548) hash=7506c1d4ad21e288
+[P5W] d3d11 d3d11-t50s.ppm: clear=237260 saturated=48300 bbox=(724, 70, 1362, 548) hash=536a772e8f98dfc0
+[P5W] d3d11: PASS
+[P5W] d3d12 d3d12-t20s.ppm: clear=237308 saturated=46488 bbox=(724, 574, 1362, 1052) hash=bfa858d0696fdf81
+[P5W] d3d12 d3d12-t50s.ppm: clear=237272 saturated=46560 bbox=(724, 574, 1362, 1052) hash=f5063aa71e76d88c
+[P5W] d3d12: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps
+== exports.sh: add /srv/nfs/cp-sync-p5 ok (non-cp lines unchanged)
+== exports.sh: remove /srv/nfs/cp-sync-p5 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-sync-p5
+# reference: docs/cp-vk2-evidence/winep5-run7-PASS.txt (vkcube, d3d11, d3d12 PASS)

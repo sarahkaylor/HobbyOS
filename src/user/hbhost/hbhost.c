@@ -129,9 +129,13 @@ static void logmsg(const char *a, const char *b) {
 #define HBT_EVERY 16
 
 static inline unsigned long long tsc_now(void) {
+#if defined(__x86_64__) || defined(_M_X64)
   unsigned lo, hi;
   __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
   return ((unsigned long long)hi << 32) | lo;
+#else
+  return 0;
+#endif
 }
 
 struct hbt_stats {

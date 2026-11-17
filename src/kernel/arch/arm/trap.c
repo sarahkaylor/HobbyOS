@@ -178,7 +178,10 @@ static void sys_read(struct trap_frame *tf) {
   int size = (int)tf->regs[2];
   struct process *caller = current_process();
   if (sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 1)) {
-    int ret = file_read(caller, fd, buf, size, tf);
+    /* GB-308: read into the CALLER's range through the bounce helper —
+       file_read() writes straight into `buf`, and an unbacked page there
+       faults with the kernel's CS (see file_read_user in fs.c). */
+    int ret = file_read_user(caller, fd, (uint64_t)buf, size, tf);
 
     if (ret == -2) {
       tf->elr -= 4; // Restart syscall
