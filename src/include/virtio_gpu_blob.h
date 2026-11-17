@@ -108,6 +108,11 @@ void virtio_gpu_3d_note_tick_retire(void);
 void virtio_gpu_3d_fence_state(uint32_t ctx_id, uint32_t ring_idx, uint64_t* issued,
                                uint64_t* done, int* inflight);
 void virtio_gpu_3d_async_done(int slot, uint32_t resp_type);
+/* C6-present: a kernel command on a slot, waited for with gpu_lock dropped
+ * (virtio_gpu_3d.c).  Both called with gpu_lock held. */
+int virtio_gpu_3d_post_waited(const void* req, uint32_t req_len);
+int virtio_gpu_3d_waited_poll(int slot, uint32_t* rt);
+int virtio_gpu_3d_free_slots(void);
 /* The device interrupt (trap.c). */
 void virtio_gpu_x64_handle_irq(void);
 /* Re-unmask the INTx line after gic_init() and put it in level mode (ELCR). */

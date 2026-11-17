@@ -1245,7 +1245,6 @@ static struct vgpu_so_owner vgpu_so;
 static uint32_t vgpu_fs_window, vgpu_fs_w, vgpu_fs_h; /* the X server's report */
 static uint64_t vgpu_so_seq;
 static uint32_t vgpu_so_restores, vgpu_so_refusals, vgpu_so_rows;
-static struct virtio_gpu_set_scanout_blob gpu_req_sblob;
 
 extern uint64_t timer_get_us(void);
 
@@ -1302,11 +1301,61 @@ static int vgpu_restore_desktop_locked(const char* why) {
   return (r == 0 && r2 == 0) ? 0 : -1;
 }
 
+/* C6-present (docs/cp-present.md): the flip's own request buffers.  The
+ * flip is sent on two async slots and waited for with gpu_lock dropped, so
+ * these must not be the shared gpu_req_* buffers the desktop hand-back (or
+ * any synchronous command) may reuse while the flip is still in the queue. */
+static struct virtio_gpu_set_scanout_blob vgpu_flip_sblob;
+static struct virtio_gpu_resource_flush vgpu_flip_flush;
+static volatile int vgpu_flip_busy;
+int vgpu_flip_unlocked = 1; /* 0: the P7 flip (both round trips under gpu_lock), A/B */
+static uint32_t vgpu_flip_async_n, vgpu_flip_sync_n;
+
+static void vgpu_fill_flip(const struct vgpu_scanout_req* rq) {
+  vgpu_flip_sblob.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT_BLOB;
+  vgpu_flip_sblob.hdr.flags = 0;
+  vgpu_flip_sblob.hdr.fence_id = 0;
+  vgpu_flip_sblob.hdr.ctx_id = 0;
+  vgpu_flip_sblob.hdr.padding = 0;
+  vgpu_flip_sblob.r.x = 0;
+  vgpu_flip_sblob.r.y = 0;
+  vgpu_flip_sblob.r.width = rq->width;
+  vgpu_flip_sblob.r.height = rq->height;
+  vgpu_flip_sblob.scanout_id = 0;
+  vgpu_flip_sblob.resource_id = rq->res_id;
+  vgpu_flip_sblob.width = rq->width;
+  vgpu_flip_sblob.height = rq->height;
+  vgpu_flip_sblob.format = rq->format;
+  vgpu_flip_sblob.padding = 0;
+  for (int i = 0; i < 4; i++) {
+    vgpu_flip_sblob.strides[i] = i == 0 ? rq->stride : 0;
+    vgpu_flip_sblob.offsets[i] = 0;
+  }
+  vgpu_flip_flush.hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
+  vgpu_flip_flush.hdr.flags = 0;
+  vgpu_flip_flush.hdr.fence_id = 0;
+  vgpu_flip_flush.hdr.ctx_id = 0;
+  vgpu_flip_flush.hdr.padding = 0;
+  vgpu_flip_flush.r.x = 0;
+  vgpu_flip_flush.r.y = 0;
+  vgpu_flip_flush.r.width = rq->width;
+  vgpu_flip_flush.r.height = rq->height;
+  vgpu_flip_flush.resource_id = rq->res_id;
+  vgpu_flip_flush.padding = 0;
+}
+
 int virtio_gpu_x64_scanout_flip(int pid, int fd, uint32_t window, const struct vgpu_scanout_req* rq,
                                 uint64_t* seqno, uint32_t* set_us, uint32_t* flush_us) {
   if (gpu_mode != VGPU_MODE_VIRTIO || !virtio_gpu_x64_blob_negotiated) return -ENODEV;
   if (!rq || !rq->res_id) return -EINVAL;
   uint64_t fl = spinlock_acquire_irqsave(&gpu_lock);
+  /* One flip in the queue at a time (its buffers are static). */
+  while (vgpu_flip_busy) {
+    spinlock_release_irqrestore(&gpu_lock, fl);
+    for (int k = 0; k < 2000; k++) __asm__ volatile("pause");
+    fl = spinlock_acquire_irqsave(&gpu_lock);
+    vgpu_drain_locked();
+  }
   if (vgpu_so_active && (vgpu_so.pid != pid || vgpu_so.fd != fd)) {
     spinlock_release_irqrestore(&gpu_lock, fl);
     return -EBUSY;
@@ -1320,26 +1369,76 @@ int virtio_gpu_x64_scanout_flip(int pid, int fd, uint32_t window, const struct v
     return -EPERM;
   }
   uint64_t t0 = timer_get_us();
-  gpu_req_sblob.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT_BLOB;
-  gpu_req_sblob.hdr.flags = 0;
-  gpu_req_sblob.hdr.fence_id = 0;
-  gpu_req_sblob.hdr.ctx_id = 0;
-  gpu_req_sblob.hdr.padding = 0;
-  gpu_req_sblob.r.x = 0;
-  gpu_req_sblob.r.y = 0;
-  gpu_req_sblob.r.width = rq->width;
-  gpu_req_sblob.r.height = rq->height;
-  gpu_req_sblob.scanout_id = 0;
-  gpu_req_sblob.resource_id = rq->res_id;
-  gpu_req_sblob.width = rq->width;
-  gpu_req_sblob.height = rq->height;
-  gpu_req_sblob.format = rq->format;
-  gpu_req_sblob.padding = 0;
-  for (int i = 0; i < 4; i++) {
-    gpu_req_sblob.strides[i] = i == 0 ? rq->stride : 0;
-    gpu_req_sblob.offsets[i] = 0;
+  vgpu_fill_flip(rq);
+  int first = !vgpu_so_active || vgpu_so.w != rq->width || vgpu_so.h != rq->height;
+  int s1 = -1, s2 = -1;
+  if (vgpu_flip_unlocked && virtio_gpu_x64_irq_vector >= 0 && virtio_gpu_3d_free_slots() >= 2) {
+    s1 = virtio_gpu_3d_post_waited(&vgpu_flip_sblob, sizeof(vgpu_flip_sblob));
+    if (s1 >= 0) s2 = virtio_gpu_3d_post_waited(&vgpu_flip_flush, sizeof(vgpu_flip_flush));
   }
-  int r = gpu_transact(&gpu_req_sblob, sizeof(gpu_req_sblob), 0, 0);
+  if (s1 >= 0 && s2 >= 0) {
+    /* C6-present: both commands are in the queue; wait with gpu_lock
+     * dropped and interrupts on.  QEMU runs the queue in order, so every
+     * command posted after this point (the app's submits) still executes
+     * after the flip, and nothing waits on gpu_lock meanwhile. */
+    vgpu_flip_busy = 1;
+    if (++vgpu_flip_async_n == 1) vgpu_so_row("flip unlocked async/sync", vgpu_flip_async_n, vgpu_flip_sync_n);
+    vgpu_so_active = 1;
+    vgpu_so.pid = pid;
+    vgpu_so.fd = fd;
+    vgpu_so.res_id = rq->res_id;
+    vgpu_so.window = window;
+    vgpu_so.w = rq->width;
+    vgpu_so.h = rq->height;
+    uint32_t rt1 = 0, rt2 = 0;
+    int d1 = 0, d2 = 0;
+    uint64_t t1 = 0;
+    for (;;) {
+      if (!d1) {
+        d1 = virtio_gpu_3d_waited_poll(s1, &rt1);
+        if (d1) t1 = timer_get_us();
+      }
+      if (!d2) d2 = virtio_gpu_3d_waited_poll(s2, &rt2);
+      if (d1 && d2) break;
+      if (timer_get_us() - t0 > 2000000ull) {
+        /* Device wedged: leave the slots to complete (or not) on their own;
+         * the flip reports an error and the WSI falls back to put_image. */
+        vgpu_flip_busy = 0;
+        vgpu_so_row("flip timeout res", rq->res_id, 0);
+        spinlock_release_irqrestore(&gpu_lock, fl);
+        return -EIO;
+      }
+      spinlock_release_irqrestore(&gpu_lock, fl);
+      for (int k = 0; k < 500; k++) __asm__ volatile("pause");
+      fl = spinlock_acquire_irqsave(&gpu_lock);
+    }
+    uint64_t t2 = timer_get_us();
+    if (!t1) t1 = t2;
+    vgpu_flip_busy = 0;
+    uint64_t seq = ++vgpu_so_seq;
+    if (rt1 >= 0x1200) {
+      vgpu_so_row("SET_SCANOUT_BLOB failed res/resp", rq->res_id, rt1);
+      if (vgpu_so_active && vgpu_so.pid == pid && vgpu_so.fd == fd)
+        vgpu_restore_desktop_locked("back (device error)");
+      spinlock_release_irqrestore(&gpu_lock, fl);
+      return -EIO;
+    }
+    if (first) vgpu_so_row("taken res/window", rq->res_id, window);
+    gpu_isr_ack();
+    spinlock_release_irqrestore(&gpu_lock, fl);
+    if (seqno) *seqno = seq;
+    if (set_us) *set_us = (uint32_t)(t1 - t0);
+    if (flush_us) *flush_us = (uint32_t)(t2 - t1);
+    return rt2 >= 0x1200 ? -EIO : 0;
+  }
+  if (s1 >= 0) {
+    /* Only one slot after all: wait for it under the lock (rare). */
+    uint32_t rt = 0;
+    while (!virtio_gpu_3d_waited_poll(s1, &rt)) __asm__ volatile("pause");
+  }
+  /* The P7 path: two synchronous round trips under gpu_lock. */
+  if (++vgpu_flip_sync_n == 1) vgpu_so_row("flip locked async/sync", vgpu_flip_async_n, vgpu_flip_sync_n);
+  int r = gpu_transact(&vgpu_flip_sblob, sizeof(vgpu_flip_sblob), 0, 0);
   uint64_t t1 = timer_get_us();
   if (r != 0) {
     uint32_t rt = gpu_resp.type;
@@ -1348,7 +1447,6 @@ int virtio_gpu_x64_scanout_flip(int pid, int fd, uint32_t window, const struct v
     spinlock_release_irqrestore(&gpu_lock, fl);
     return -EIO;
   }
-  int first = !vgpu_so_active || vgpu_so.w != rq->width || vgpu_so.h != rq->height;
   vgpu_so_active = 1;
   vgpu_so.pid = pid;
   vgpu_so.fd = fd;
@@ -1356,18 +1454,7 @@ int virtio_gpu_x64_scanout_flip(int pid, int fd, uint32_t window, const struct v
   vgpu_so.window = window;
   vgpu_so.w = rq->width;
   vgpu_so.h = rq->height;
-  gpu_req_flush.hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
-  gpu_req_flush.hdr.flags = 0;
-  gpu_req_flush.hdr.fence_id = 0;
-  gpu_req_flush.hdr.ctx_id = 0;
-  gpu_req_flush.hdr.padding = 0;
-  gpu_req_flush.r.x = 0;
-  gpu_req_flush.r.y = 0;
-  gpu_req_flush.r.width = rq->width;
-  gpu_req_flush.r.height = rq->height;
-  gpu_req_flush.resource_id = rq->res_id;
-  gpu_req_flush.padding = 0;
-  int r2 = gpu_transact(&gpu_req_flush, sizeof(gpu_req_flush), 0, 0);
+  int r2 = gpu_transact(&vgpu_flip_flush, sizeof(vgpu_flip_flush), 0, 0);
   uint64_t t2 = timer_get_us();
   uint64_t seq = ++vgpu_so_seq;
   if (first) vgpu_so_row("taken res/window", rq->res_id, window);
