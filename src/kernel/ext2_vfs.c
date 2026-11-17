@@ -340,23 +340,6 @@ void ext2v_lock(void) { lock(); }
 void ext2v_unlock(int flush) { unlock_flush(flush); }
 struct ext2_fs *ext2v_fs(void) { return &g_fs; }
 
-/* cp/ext2b: a user buffer must be resident BEFORE the ext2 lock is taken.  A
-   fault on it under the lock would re-enter the lock through an ext2 mmap
-   page fill (ext2_obj_page) -- a self-deadlock.  The trap-layer read/write
-   already pre-touch; pread64/pwrite64 and the kernel's own callers do not. */
-static int user_prefault(const void *buf, int size, int write) {
-  uint64_t a = (uint64_t)(uintptr_t)buf;
-  if (size <= 0) return 0;
-  struct process *cur = current_process();
-  if (!cur) return 0;
-  struct process *g = process_group(cur);
-  if (!g || !g->as) return 0;
-  /* P1: a user buffer is any user VA of the caller's address space (compat
-     processes live below USER_VA_BASE); a kernel buffer needs no prefault. */
-  if (!vm_va_is_user(g->as, a)) return 0;
-  return vm_touch(g, a, (uint64_t)size, write) == 0 ? 0 : -EFAULT;
-}
-
 /* Resolve under the lock.  EXT2_EXTERNAL rewrites `abs`. */
 static int resolve(char *abs, int follow, struct ext2_res *r) {
   int rc = ext2_resolve(&g_fs, EXT2V_MNT, abs, follow ? EXT2_RES_FOLLOW : 0, r);
@@ -544,17 +527,77 @@ static int io_ret(int64_t v) {
   return (int)v;
 }
 
+/* cp/ext2w (C8 stops 6/9): user memory is never touched while ext2_lock (or,
+ * below it, the NVMe token) is held.  A page fault on the caller's buffer
+ * under those locks -- a page another thread of the process unmapped or
+ * remapped after a prefault, or one backed by a file -- runs a page fill that
+ * needs the same lock or the NVMe token: a silent wedge.  So read() and
+ * write() move the bytes through a kernel bounce in chunks, the lock held only
+ * for the kernel-side copy and the user copy done after it is released. */
+#define EXT2V_BOUNCE_MAX (64u * 1024u)
+
+struct kbounce {
+  uint8_t *p;
+  uint64_t phys;
+  uint32_t cap, pages;
+  uint8_t small[512];
+};
+
+static void kb_get(struct kbounce *kb, uint32_t want) {
+  kb->phys = 0;
+  kb->pages = 0;
+  if (want <= sizeof kb->small) {
+    kb->p = kb->small;
+    kb->cap = sizeof kb->small;
+    return;
+  }
+  if (want > EXT2V_BOUNCE_MAX) want = EXT2V_BOUNCE_MAX;
+  uint32_t pages = (want + FRAME_SIZE - 1) / FRAME_SIZE;
+  uint64_t ph = pages > 1 ? frame_alloc_contig((int)pages) : 0;
+  if (!ph) {
+    pages = 1;
+    ph = frame_alloc();
+  }
+  if (!ph) {
+    kb->p = kb->small;
+    kb->cap = sizeof kb->small;
+    return;
+  }
+  kb->phys = ph;
+  kb->pages = pages;
+  kb->p = (uint8_t *)phys_to_virt(ph);
+  kb->cap = pages * FRAME_SIZE;
+}
+
+static void kb_put(struct kbounce *kb) {
+  for (uint32_t i = 0; kb->phys && i < kb->pages; i++)
+    frame_free(kb->phys + (uint64_t)i * FRAME_SIZE);
+  kb->phys = 0;
+}
+
 int ext2v_read(struct file *f, void *buf, int size) {
   if ((f->open_flags & O_ACCMODE_) == O_WRONLY_) return -EBADF;
   if (f->type == FILE_TYPE_EXT2DIR) return -EISDIR;
   if (size <= 0) return 0;
-  if (user_prefault(buf, size, 1)) return -EFAULT;
-  lock();
-  /* cp/ext2b: read() sees stores made through a MAP_SHARED mapping. */
-  int wb = ext2_obj_writeback_locked(f->ext2.ino);
-  int64_t r = ext2_read(&g_fs, f->ext2.ino, f->ext2.cursor, buf, (uint64_t)size);
-  if (r > 0) f->ext2.cursor += (uint64_t)r;
-  unlock_flush(wb > 0);
+  struct kbounce kb;
+  kb_get(&kb, (uint32_t)size);
+  uint8_t *dst = (uint8_t *)buf;
+  int64_t done = 0, r = 0;
+  while (done < size) {
+    uint32_t n = (uint32_t)(size - done) < kb.cap ? (uint32_t)(size - done) : kb.cap;
+    lock();
+    /* cp/ext2b: read() sees stores made through a MAP_SHARED mapping. */
+    int wb = ext2_obj_writeback_locked(f->ext2.ino);
+    r = ext2_read(&g_fs, f->ext2.ino, f->ext2.cursor, kb.p, (uint64_t)n);
+    if (r > 0) f->ext2.cursor += (uint64_t)r;
+    unlock_flush(wb > 0);
+    if (r <= 0) break;
+    memcpy(dst + done, kb.p, (size_t)r); /* no lock held: a fault is fine */
+    done += r;
+    if ((uint64_t)r < n) break;
+  }
+  kb_put(&kb);
+  if (done > 0) return io_ret(done);
   return io_ret(r);
 }
 
@@ -563,30 +606,42 @@ int ext2v_write(struct file *f, const void *buf, int size) {
   if (acc != O_WRONLY_ && acc != O_RDWR_) return -EBADF;
   if (f->type == FILE_TYPE_EXT2DIR) return -EISDIR;
   if (size <= 0) return 0;
-  uint64_t t0 = e2w_tsc();
-  if (user_prefault(buf, size, 0)) return -EFAULT;
-  uint64_t t1 = e2w_tsc();
-  lock();
-  uint64_t t2 = e2w_tsc();
-  uint64_t off = f->ext2.cursor;
-  uint64_t sz = 0;
-  (void)ext2_file_size(&g_fs, f->ext2.ino, &sz);
-  if (f->open_flags & O_APPEND_) off = sz;
-  int64_t w = ext2_write(&g_fs, f->ext2.ino, off, buf, (uint64_t)size);
-  uint64_t t3 = e2w_tsc();
-  if (w > 0) {
-    f->ext2.cursor = off + (uint64_t)w;
-    ext2_obj_note_write_locked(f->ext2.ino, off, (uint64_t)w, sz); /* cp/ext2b */
+  struct kbounce kb;
+  kb_get(&kb, (uint32_t)size);
+  const uint8_t *src = (const uint8_t *)buf;
+  int64_t done = 0, w = 0;
+  while (done < size) {
+    uint32_t n = (uint32_t)(size - done) < kb.cap ? (uint32_t)(size - done) : kb.cap;
+    uint64_t t0 = e2w_tsc();
+    memcpy(kb.p, src + done, n); /* before the lock: a fault is fine */
+    uint64_t t1 = e2w_tsc();
+    lock();
+    uint64_t t2 = e2w_tsc();
+    uint64_t off = f->ext2.cursor;
+    uint64_t sz = 0;
+    (void)ext2_file_size(&g_fs, f->ext2.ino, &sz);
+    if (f->open_flags & O_APPEND_) off = sz;
+    w = ext2_write(&g_fs, f->ext2.ino, off, kb.p, (uint64_t)n);
+    uint64_t t3 = e2w_tsc();
+    if (w > 0) {
+      f->ext2.cursor = off + (uint64_t)w;
+      ext2_obj_note_write_locked(f->ext2.ino, off, (uint64_t)w, sz); /* cp/ext2b */
+    }
+    uint64_t t4 = e2w_tsc();
+    unlock_flush(1);
+    uint64_t t5 = e2w_tsc();
+    g_pw_n++;
+    g_pw_pf += t1 - t0;
+    g_pw_lock += t2 - t1;
+    g_pw_core += t3 - t2;
+    g_pw_note += t4 - t3;
+    g_pw_unl += t5 - t4;
+    if (w <= 0) break;
+    done += w;
+    if ((uint64_t)w < n) break;
   }
-  uint64_t t4 = e2w_tsc();
-  unlock_flush(1);
-  uint64_t t5 = e2w_tsc();
-  g_pw_n++;
-  g_pw_pf += t1 - t0;
-  g_pw_lock += t2 - t1;
-  g_pw_core += t3 - t2;
-  g_pw_note += t4 - t3;
-  g_pw_unl += t5 - t4;
+  kb_put(&kb);
+  if (done > 0) return io_ret(done);
   return io_ret(w);
 }
 
@@ -671,14 +726,15 @@ static uint8_t ft_to_dt(uint8_t ft) {
 
 int ext2v_getdents64(struct file *f, void *ubuf, int bufsize) {
   if (f->type != FILE_TYPE_EXT2DIR) return -ENOTDIR;
-  uint8_t *out = (uint8_t *)ubuf;
   int used = 0;
   char name[EXT2_NAME_MAX + 1];
-  /* cp/ext2w (C8 stop 6): the records are stored into user memory under the
-     ext2 lock, so make it resident first, like read/write do -- a first touch
-     under the lock is a page fault inside it (an ext2-backed buffer would
-     re-enter the lock from the fault path). */
-  if (user_prefault(ubuf, bufsize, 1)) return -EFAULT;
+  /* cp/ext2w (C8 stops 6/9): records are built in a kernel bounce under the
+     lock and copied to the caller after it is released (ext2v_read). */
+  struct kbounce kb;
+  kb_get(&kb, bufsize > 0 ? (uint32_t)bufsize : 0);
+  int cap = bufsize < (int)kb.cap ? bufsize : (int)kb.cap;
+  uint8_t *out = kb.p;
+  int err = 0;
   lock();
   for (;;) {
     uint64_t pos = f->ext2.cursor;
@@ -687,16 +743,13 @@ int ext2v_getdents64(struct file *f, void *ubuf, int bufsize) {
     int nl;
     int rc = ext2_readdir(&g_fs, f->ext2.ino, &pos, &ino, &ft, name, &nl);
     if (rc < 0) {
-      unlock();
-      return used ? used : rc;
+      if (!used) err = rc;
+      break;
     }
     if (rc == 0) break;
     int reclen = (19 + nl + 1 + 7) & ~7;
-    if (used + reclen > bufsize) {
-      if (used == 0) {
-        unlock();
-        return -EINVAL;
-      }
+    if (used + reclen > cap) {
+      if (used == 0) err = -EINVAL;
       break; /* f->ext2.cursor not advanced: the entry is returned next call */
     }
     uint8_t *pb = out + used;
@@ -712,7 +765,9 @@ int ext2v_getdents64(struct file *f, void *ubuf, int bufsize) {
     f->ext2.cursor = pos;
   }
   unlock();
-  return used;
+  if (used > 0) memcpy(ubuf, out, (size_t)used); /* no lock held */
+  kb_put(&kb);
+  return err ? err : used;
 }
 
 /* ---- path operations ---------------------------------------------------- */

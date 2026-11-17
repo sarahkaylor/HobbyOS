@@ -771,6 +771,20 @@ static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
     if ((spins++ & 0x3FF) == 0) {
       extern volatile uint64_t cpu_heartbeat_ms[];
       cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+      /* cp/ext2w (C8 stop 9): a KERNEL TASK (the ext2 flusher) whose
+         command has been outstanding for more than 2 ms gives its CPU away
+         between polls, so a slow device never pins a CPU and what is queued
+         on it.  Only with interrupts on (the same point a tick preempts a
+         kernel task at) and never for a user process, whose syscall's
+         kernel continuation must not move (trap.c 0x81 guard).  The NVMe
+         token stays held across the yield: other submitters wait for it,
+         as they would for the poll. */
+      if (timer_get_ms() - t0 >= 2) {
+        uint64_t rf;
+        __asm__ volatile("pushfq; popq %0" : "=r"(rf));
+        struct process *cp = current_process();
+        if ((rf & 0x200) && cp && cp->is_kernel_process) arch_yield();
+      }
     }
 
     /* Drain every VALID completion at the head.  Validity is the phase tag,
