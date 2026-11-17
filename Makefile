@@ -2509,6 +2509,17 @@ icewm-stubs: $(X11STUB_BINS)
 # source with third_party/x11/build.sh (default build dir only — an explicit
 # X11_BUILD_DIR that lacks them is an error, never a silent rebuild).
 X11_REQUIRED_BINS = XHOBBY.BIN ICEWM.BIN
+# cp/x3: a build dir that already HAS XHOBBY.BIN/ICEWM.BIN used to be taken
+# as-is, so a tree whose server or window-manager sources changed (C4-x2's
+# one-screen DDX, MIT-SHM, IceWM patches) kept booting whatever the dir was
+# first built with.  When any input of a stage is newer than the dir's last
+# check of that stage, the stage is re-run; build.sh's content keys make that
+# a no-op (a few seconds) when nothing really changed.
+X11_COMMON_INPUTS = third_party/x11/build.sh third_party/x11/cross $(OBJ_DIR)/libc.a
+X11_server_INPUTS = third_party/x11/ddx third_party/x11/patches/xserver \
+  third_party/x11/build-server.sh third_party/x11/pins/server.txt
+X11_icewm_INPUTS = third_party/x11/icewm third_party/x11/patches/icewm \
+  third_party/x11/build-icewm.sh third_party/x11/pins/icewm.txt
 # The runtime prerequisites build.sh links every flat .BIN against: listing
 # them here makes the outer make build them first, so build.sh's own
 # `make obj/<arch>/libc.a` is a no-op instead of rewriting libc.a while a
@@ -2516,6 +2527,16 @@ X11_REQUIRED_BINS = XHOBBY.BIN ICEWM.BIN
 .PHONY: x11-staged
 x11-staged: $(OBJ_DIR)/libc.a $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libcxx.a
 	@missing=""; for b in $(X11_REQUIRED_BINS); do [ -f "$(X11_BUILD_DIR)/bin/$$b" ] || missing="$$missing $$b"; done; \
+	if [ -z "$$missing" ] && [ "$(X11_BUILD_DIR)" = "third_party/x11/build/$(ARCH)" ] && [ -f third_party/x11/build.sh ]; then \
+	  for st in server icewm; do \
+	    case $$st in server) ins="$(X11_server_INPUTS)";; *) ins="$(X11_icewm_INPUTS)";; esac; \
+	    chk="$(X11_BUILD_DIR)/.$$st-inputs-checked"; \
+	    new=""; [ -f "$$chk" ] && new="$$(find $$ins $(X11_COMMON_INPUTS) -newer "$$chk" 2>/dev/null | head -1)"; \
+	    if [ ! -f "$$chk" ] || [ -n "$$new" ]; then \
+	      echo "[x11] $$st inputs changed$${new:+ ($$new)}: re-running build.sh --stage $$st (cached when the key matches)"; \
+	      bash third_party/x11/build.sh --arch $(ARCH) --stage $$st -j $(or $(X11_JOBS),8) || exit 1; \
+	      touch "$$chk"; fi; \
+	  done; fi; \
 	if [ -z "$$missing" ]; then echo "[x11] using $(X11_BUILD_DIR)"; exit 0; fi; \
 	if [ "$(X11_BUILD_DIR)" != "third_party/x11/build/$(ARCH)" ]; then \
 	  echo "[x11] ERROR: X11_BUILD_DIR=$(X11_BUILD_DIR) lacks:$$missing (expected in $(X11_BUILD_DIR)/bin/)"; exit 1; fi; \
