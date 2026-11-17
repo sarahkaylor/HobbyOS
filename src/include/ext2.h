@@ -35,8 +35,9 @@
 #define EXT2_NAME_MAX 255
 #define EXT2_PATH_MAX 1024      /* == VFS_PATH_MAX (cp/ext2b: was 256) */
 #define EXT2_SYMLINK_MAX 4095   /* additionally < block size */
-#define EXT2_CACHE_MAX 1024     /* cache slots (one block each) */
-#define EXT2_HASH_N 1024
+#define EXT2_CACHE_MAX 4096     /* cache slots (one block each) */
+#define EXT2_HASH_N 4096
+#define EXT2_RUN_MAX 128        /* blocks in one device command run */
 #define EXT2_OPEN_MAX 512       /* distinct open inodes (== MAX_GLOBAL_FILES) */
 
 #define EXT2_EXTERNAL 1         /* ext2_resolve: path left the filesystem */
@@ -72,22 +73,37 @@
 
 #define EXT2_INDEX_FL 0x00001000
 
-/* 512-byte-sector block device. */
+/* 512-byte-sector block device.  `rwv` (optional, cp/ext2w) moves `nbuf`
+ * buffers of `nsec_each` sectors each to/from consecutive sectors starting
+ * at `sector` -- one device command per run where the device allows it.
+ * NULL: the core falls back to one read/write call per block. */
 struct ext2_dev {
   void *ctx;
   int (*read)(void *ctx, uint64_t sector, void *buf, uint32_t nsec);
   int (*write)(void *ctx, uint64_t sector, const void *buf, uint32_t nsec);
   uint64_t nsectors;
+  int (*rwv)(void *ctx, uint64_t sector, void *const *bufs, uint32_t nbuf,
+             uint32_t nsec_each, int wr);
 };
 
+/* cp/ext2w: the cache is write-back across syscalls; ext2_flush() is the
+ * ordered commit (docs/cp-ext2w.md section 2).  `kind` says which commit
+ * phase a dirty buffer belongs to; `pre` is the committed (on-disk) image of
+ * a bitmap or inode-table block, captured at its first change since the
+ * last commit. */
 struct ext2_cbuf {
   uint32_t blk;
-  uint32_t age;
+  uint32_t aux;     /* K_ITAB: first inode of the block; bitmaps: group */
   int32_t hnext;    /* hash chain (slot index), -1 = end */
   uint16_t pin;
   uint8_t valid;
   uint8_t dirty;
+  uint8_t kind;     /* ext2.c K_* */
+  uint8_t ref;      /* clock: referenced since the hand last passed */
+  uint8_t ph;       /* commit scratch: phase class */
+  uint8_t two;      /* commit scratch: which held-back images differ */
   uint8_t *data;    /* one block; owned by the cache for the fs lifetime */
+  uint8_t *pre;     /* committed image (bitmaps, inode table) or NULL */
 };
 
 struct ext2_open_ref {
@@ -123,12 +139,28 @@ struct ext2_fs {
   struct ext2_cbuf cache[EXT2_CACHE_MAX];
   int32_t hash[EXT2_HASH_N];
   uint32_t ncache;
-  uint32_t clock;
+  uint32_t clock;         /* the clock hand (eviction) */
+  uint32_t ndirty;        /* dirty cache buffers */
+  int in_commit;          /* ext2_flush is running (no nested commit) */
+  int ordered;            /* every GDT block pinned: phased commit possible */
+  uint32_t npre_free, npre_total;
+  uint8_t *prepool[EXT2_CACHE_MAX];
+  uint32_t ordv[EXT2_CACHE_MAX], ordv2[EXT2_CACHE_MAX]; /* commit scratch */
+  uint8_t *scratch[EXT2_RUN_MAX]; /* commit: phase images of one run */
+  uint32_t nscratch;
+  uint32_t ra_ino;        /* read-ahead: last block read through the cache */
+  uint64_t ra_next;
 
   struct ext2_open_ref open[EXT2_OPEN_MAX];
 
   /* statistics (host test + kernel diagnostics) */
   uint64_t st_dev_reads, st_dev_writes, st_hits;
+  uint64_t st_cmds;          /* device calls (one per run) */
+  uint64_t st_commits;       /* ext2_flush calls that wrote something */
+  uint64_t st_midop;         /* commits forced inside an operation */
+  uint64_t st_evict_wb;      /* data/new write-back batches for eviction */
+  uint64_t st_nopre;         /* pre-image allocation failures */
+  uint64_t st_ra;            /* blocks read ahead */
   int corrupt;            /* sticky: a structural check failed at least once */
 };
 
@@ -165,8 +197,24 @@ struct ext2_res {
  * fs->ro says whether writes are allowed.  `force_ro` mounts read-only. */
 int ext2_mount(struct ext2_fs *fs, const struct ext2_dev *dev, int force_ro);
 
-/* Write every dirty cached block, then the superblock.  0 / -EIO. */
+/* The ordered commit (cp/ext2w, docs/cp-ext2w.md section 2): every dirty
+ * cached block, in the phase order that keeps an interrupted commit
+ * repairable (data and new blocks, bitmaps as old|new, inode tables with this
+ * batch's frees held back, directories and indirect blocks, the inode-table
+ * frees, the final bitmaps, the group descriptors, the superblock).  When it
+ * returns 0 the disk holds exactly the cached state.  0 / -EIO. */
 int ext2_flush(struct ext2_fs *fs);
+
+/* cp/ext2w: write back only what may go early -- regular-file data and
+ * blocks allocated since the last commit (never metadata an on-disk
+ * structure points at).  The on-disk image stays as clean as the last commit
+ * left it.  Returns the number of blocks written, or -EIO. */
+int ext2_writeback_early(struct ext2_fs *fs);
+
+/* Dirty buffers held (callers decide when to commit). */
+static inline uint32_t ext2_dirty(const struct ext2_fs *fs) {
+  return fs->ndirty + (fs->sb_dirty ? 1u : 0u);
+}
 
 /* Path resolution.  `abs` is an absolute canonical path whose first
  * component is the mount point `mnt` (e.g. "/EXT" and "/EXT/a/b").

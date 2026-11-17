@@ -361,7 +361,7 @@ static int e2c_fdatasync(struct process *p, struct trap_frame *tf) {
 }
 
 /* cp/pfx: sync(2) and syncfs(2).  ext2 is the only filesystem here with
-   state to flush (write-through at each mutating syscall, plus the MAP_SHARED
+   state to flush (the write-back cache, cp/ext2w, plus the MAP_SHARED
    write-back pages); Linux's sync never fails.  syncfs needs a valid fd. */
 static int e2c_sync(struct process *p, struct trap_frame *tf) {
   (void)p;
@@ -465,8 +465,12 @@ static int e2c_faccessat(struct process *p, struct trap_frame *tf) {
    when no such mapping exists (one atomic load). */
 static int e2c_msync(struct process *p, struct trap_frame *tf) {
   (void)p;
-  (void)tf;
-  ext2_obj_sync_all();
+  /* cp/ext2w: MS_SYNC (4) also commits the write-back cache, so the stores
+     are on the disk when msync returns (Linux: the range; here: all). */
+  if (l_argi(tf, 2) & 4)
+    (void)ext2v_sync();
+  else
+    ext2_obj_sync_all();
   return 0;
 }
 

@@ -57,6 +57,13 @@ static int dd_write(void *ctx, uint64_t sector, const void *buf, uint32_t n) {
   return blk_data_write(sector, buf, n);
 }
 
+/* cp/ext2w: a run of blocks in as few NVMe commands as the device allows. */
+static int dd_rwv(void *ctx, uint64_t sector, void *const *bufs, uint32_t nbuf,
+                  uint32_t nsec_each, int wr) {
+  (void)ctx;
+  return blk_data_rw_vec(sector, bufs, nbuf, nsec_each, wr);
+}
+
 static void *dd_alloc(uint32_t n) {
   (void)n; /* always 4096 == FRAME_SIZE */
   uint64_t fr = frame_alloc();
@@ -83,9 +90,172 @@ static void v_copy(char *dst, const char *src, int cap) {
 
 static void lock(void) { ylock_acquire(&g_lock); }
 
+/* ---- cp/ext2w: when the write-back cache is committed (docs/cp-ext2w.md) --
+ *
+ * A mutating call no longer writes through.  ext2_flush() (the ordered
+ * commit) runs at:
+ *   - fsync / fdatasync / syncfs / sync              (ext2v_sync)
+ *   - the close of a writable file description writes back the file data
+ *     (the early-safe class only, no metadata: ext2v_close)
+ *   - the flusher, at most EXT2W_TIMER_MS after the cache first got dirty
+ *   - cache pressure: more than half the cache dirty at a call boundary
+ *   - inside an operation only when no clean or early-writable buffer is
+ *     left (ext2.c free_slot), or an allocation needs this batch's frees
+ *   - shutdown: the flusher keeps the machine alive until the cache is
+ *     clean, so the wave's halt comes after the last commit.
+ * Every commit above except the in-operation one runs under the ext2 lock at
+ * a syscall boundary, so it writes a state some syscall sequence produced. */
+#define EXT2W_TIMER_MS 1000u  /* oldest dirty data waits at most ~1 s */
+#define EXT2W_LINGER_MS 200u  /* a clean flusher exits after this (it is a
+                                 process: process censuses see it, and a
+                                 halt waits for it) */
+
+static volatile int g_flusher;          /* 1: a flusher task exists */
+static volatile uint64_t g_dirty_since; /* ms the cache first went dirty, 0 = clean */
+static uint64_t g_ncommit_timer, g_ncommit_sync, g_ncommit_close, g_ncommit_press;
+
+extern uint64_t timer_get_ms(void);
+extern int process_create_kernel_nowait(void (*entry)(void *), void *arg);
+extern void kernel_exit(void);
+extern void safe_wfi(void);
+
+/* cp/ext2w profile (cycles): where a write(2) spends its time. */
+static inline uint64_t e2w_tsc(void) {
+#if defined(__x86_64__)
+  uint32_t lo, hi;
+  __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+  return ((uint64_t)hi << 32) | lo;
+#else
+  return 0;
+#endif
+}
+static uint64_t g_pw_n, g_pw_pf, g_pw_lock, g_pw_core, g_pw_note, g_pw_unl;
+
+static void e2w_row(const char *why) {
+  static uint32_t nrows;
+  if (nrows++ >= 16 && (nrows & 63) != 0) return; /* bounded console cost */
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[E2W] ");
+  kl_s(&kl, why);
+  kl_s(&kl, " commits=");
+  kl_i(&kl, (long)g_fs.st_commits);
+  kl_s(&kl, " timer=");
+  kl_i(&kl, (long)g_ncommit_timer);
+  kl_s(&kl, " sync=");
+  kl_i(&kl, (long)g_ncommit_sync);
+  kl_s(&kl, " closewb=");
+  kl_i(&kl, (long)g_ncommit_close);
+  kl_s(&kl, " press=");
+  kl_i(&kl, (long)g_ncommit_press);
+  kl_s(&kl, " midop=");
+  kl_i(&kl, (long)g_fs.st_midop);
+  kl_s(&kl, " evictwb=");
+  kl_i(&kl, (long)g_fs.st_evict_wb);
+  kl_s(&kl, " blk_w=");
+  kl_i(&kl, (long)g_fs.st_dev_writes);
+  kl_s(&kl, " blk_r=");
+  kl_i(&kl, (long)g_fs.st_dev_reads);
+  kl_s(&kl, " cmds=");
+  kl_i(&kl, (long)g_fs.st_cmds);
+  kl_s(&kl, " ra=");
+  kl_i(&kl, (long)g_fs.st_ra);
+  kl_s(&kl, " nopre=");
+  kl_i(&kl, (long)g_fs.st_nopre);
+  if (g_pw_n) {
+    kl_s(&kl, " write_n=");
+    kl_i(&kl, (long)g_pw_n);
+    kl_s(&kl, " kcyc/write pf=");
+    kl_i(&kl, (long)(g_pw_pf / g_pw_n / 1000));
+    kl_s(&kl, " lock=");
+    kl_i(&kl, (long)(g_pw_lock / g_pw_n / 1000));
+    kl_s(&kl, " core=");
+    kl_i(&kl, (long)(g_pw_core / g_pw_n / 1000));
+    kl_s(&kl, " note=");
+    kl_i(&kl, (long)(g_pw_note / g_pw_n / 1000));
+    kl_s(&kl, " unlock=");
+    kl_i(&kl, (long)(g_pw_unl / g_pw_n / 1000));
+  }
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+/* Commit under the lock (the caller holds it). */
+static int commit_locked(uint64_t *counter) {
+  if (!ext2_dirty(&g_fs)) return 0;
+  int rc = ext2_flush(&g_fs);
+  if (counter) (*counter)++;
+  if (rc == 0 && !ext2_dirty(&g_fs)) g_dirty_since = 0;
+  return rc;
+}
+
+static void flusher_task(void *arg) {
+  (void)arg;
+  uint64_t clean_since = timer_get_ms();
+  for (;;) {
+    uint64_t now = timer_get_ms();
+    uint64_t ds = g_dirty_since;
+    if (ds && now - ds >= EXT2W_TIMER_MS) {
+      lock();
+      (void)commit_locked(&g_ncommit_timer);
+      ylock_release(&g_lock);
+      clean_since = timer_get_ms();
+    } else if (!ds && now - clean_since >= EXT2W_LINGER_MS) {
+      /* Exit only while holding the lock, so a writer that dirtied the cache
+         after the check above sees g_flusher == 0 and starts a new one. */
+      lock();
+      if (!ext2_dirty(&g_fs)) {
+        g_dirty_since = 0;
+        __atomic_store_n(&g_flusher, 0, __ATOMIC_SEQ_CST);
+        ylock_release(&g_lock);
+        e2w_row("flusher idle exit");
+        kernel_exit();
+        return;
+      }
+      if (!g_dirty_since) g_dirty_since = timer_get_ms();
+      ylock_release(&g_lock);
+    } else if (ds) {
+      clean_since = now;
+    }
+    uint64_t t0 = timer_get_ms();
+    while (timer_get_ms() - t0 < 50) safe_wfi();
+  }
+}
+
+/* Release the lock after a call that may have dirtied the cache.  `mutated`
+ * is advisory now: the cache's own dirty count decides. */
 static void unlock_flush(int mutated) {
-  if (mutated) (void)ext2_flush(&g_fs);
+  (void)mutated;
+  int spawn = 0;
+  if (ext2_dirty(&g_fs)) {
+    /* pressure: keep at least half the cache clean or early-writable */
+    if (g_fs.ndirty > g_fs.cache_cap / 2) (void)commit_locked(&g_ncommit_press);
+    if (ext2_dirty(&g_fs)) {
+      if (!g_dirty_since) g_dirty_since = timer_get_ms();
+      if (!g_flusher) {
+        g_flusher = 1;
+        spawn = 1;
+      }
+    }
+  }
   ylock_release(&g_lock);
+  int fpid = spawn ? process_create_kernel_nowait(flusher_task, 0) : 0;
+  if (spawn && fpid > 0) {
+    struct process *fp = process_get_pcb(fpid);
+    if (fp) {
+      const char *nm = "ext2flush";
+      int i = 0;
+      for (; nm[i] && i < 31; i++) fp->name[i] = nm[i];
+      fp->name[i] = 0;
+    }
+  }
+  if (spawn && fpid < 0) {
+    /* No task slot: commit now instead of leaving data unscheduled. */
+    lock();
+    (void)commit_locked(&g_ncommit_press);
+    g_flusher = 0;
+    ylock_release(&g_lock);
+  }
 }
 
 static void unlock(void) { ylock_release(&g_lock); }
@@ -147,10 +317,11 @@ void ext2v_init(void) {
   dev.ctx = 0;
   dev.read = dd_read;
   dev.write = dd_write;
+  dev.rwv = dd_rwv;
   dev.nsectors = blk_data_sectors();
   g_fs.now = dd_now;
   g_fs.alloc_buf = dd_alloc;
-  g_fs.cache_cap = 1024; /* 4 MiB of frames, allocated on demand */
+  g_fs.cache_cap = 4096; /* 16 MiB of frames, allocated on demand (cp/ext2w) */
   lock();
   int rc = ext2_mount(&g_fs, &dev, 0);
   char desc[160];
@@ -270,6 +441,20 @@ void ext2v_close(struct file *f) {
   (void)ext2_obj_writeback_locked(f->ext2.ino);
   (void)ext2_iput(&g_fs, f->ext2.ino);
   (void)ext2_obj_reap_locked();
+  /* cp/ext2w: the last close of a WRITABLE description writes the cached
+     file data (and every block allocated since the last commit) to the disk
+     -- the class of writes that can never leave the on-disk image worse than
+     the last commit did.  The metadata that points at it (inode, bitmaps,
+     directory entry) follows with the next commit (timer, sync, fsync).  A
+     full commit here would keep the disk mid-commit most of the time under a
+     program that churns small files (measured: the pull-the-plug gate's
+     writer, 600 commits in 2 s, e2fsck found its half-written commit), and
+     docs/cp-ext2w.md section 2 promises e2fsck-clean after a crash at any
+     point between commits.  A read-only close writes nothing. */
+  int acc = f->open_flags & O_ACCMODE_;
+  if (acc == O_WRONLY_ || acc == O_RDWR_) {
+    if (ext2_writeback_early(&g_fs) > 0) g_ncommit_close++;
+  }
   unlock_flush(1);
 }
 
@@ -300,18 +485,30 @@ int ext2v_write(struct file *f, const void *buf, int size) {
   if (acc != O_WRONLY_ && acc != O_RDWR_) return -EBADF;
   if (f->type == FILE_TYPE_EXT2DIR) return -EISDIR;
   if (size <= 0) return 0;
+  uint64_t t0 = e2w_tsc();
   if (user_prefault(buf, size, 0)) return -EFAULT;
+  uint64_t t1 = e2w_tsc();
   lock();
+  uint64_t t2 = e2w_tsc();
   uint64_t off = f->ext2.cursor;
   uint64_t sz = 0;
   (void)ext2_file_size(&g_fs, f->ext2.ino, &sz);
   if (f->open_flags & O_APPEND_) off = sz;
   int64_t w = ext2_write(&g_fs, f->ext2.ino, off, buf, (uint64_t)size);
+  uint64_t t3 = e2w_tsc();
   if (w > 0) {
     f->ext2.cursor = off + (uint64_t)w;
     ext2_obj_note_write_locked(f->ext2.ino, off, (uint64_t)w, sz); /* cp/ext2b */
   }
+  uint64_t t4 = e2w_tsc();
   unlock_flush(1);
+  uint64_t t5 = e2w_tsc();
+  g_pw_n++;
+  g_pw_pf += t1 - t0;
+  g_pw_lock += t2 - t1;
+  g_pw_core += t3 - t2;
+  g_pw_note += t4 - t3;
+  g_pw_unl += t5 - t4;
   return io_ret(w);
 }
 
@@ -348,8 +545,10 @@ int ext2v_sync(void) {
   lock();
   (void)ext2_obj_writeback_locked(0); /* cp/ext2b: mapped stores too */
   (void)ext2_obj_reap_locked();
-  int rc = ext2_flush(&g_fs);
+  int rc = commit_locked(&g_ncommit_sync);
+  if (!ext2_dirty(&g_fs)) g_dirty_since = 0;
   unlock();
+  e2w_row("sync");
   return rc;
 }
 
