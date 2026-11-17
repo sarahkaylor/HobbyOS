@@ -146,9 +146,9 @@ JSON).
 | **fence latency** (vkQueueSubmit -> vkWaitForFences, 10 000, TSC) | empty cmdbuf p50 101-162 us, p99 276-322 us; empty batch p50 56-66 us | `vulkaninfo-fence.txt` |
 | timeline vkWaitSemaphores (2 000) | **p50 76 us, p99 200 us** (timeline syncs; was 10 ms on venus' feedback path) | `vulkaninfo-fence.txt` |
 | **Linux vkcube on Venus in X** | **PASS**: 226.6 fps for 65 s, two screendumps | `probe1-vkcubex-venus.txt` |
-| **D3D12 triangle (vkd3d-proton 3.1) under Wine on Venus** | **PASS**: 12 374 frames / 65 s = 190 fps, two screendumps | `probe2-d3d-venus-PASS.txt` |
-| D3D11 triangle (DXVK 3.1.1) under Wine on Venus | PASS: 7 994 frames / 65 s = 123 fps | `probe2-d3d-venus-PASS.txt` |
-| vkcube.exe under Wine on Venus | PASS (with the P5 device-name override) | `probe2-wine-venus.txt` |
+| **D3D12 triangle (vkd3d-proton 3.1) under Wine on Venus** | **PASS**: 12 374 frames / 65 s = 190 fps (run 11); final config run 13: 11 463 frames = 176 fps; two screendumps each | `probe2-d3d-venus-PASS.txt`, `probe2-final-run13.txt` |
+| D3D11 triangle (DXVK 3.1.1) under Wine on Venus | PASS: 7 994 frames / 65 s = 123 fps (run 11); run 13: 7 666 frames = 118 fps | `probe2-d3d-venus-PASS.txt`, `probe2-final-run13.txt` |
+| vkcube.exe under Wine on Venus | PASS (with the P5 device-name override); run 13: 13 248 frames = 204 fps | `probe2-wine-venus.txt`, `probe2-final-run13.txt` |
 | full batch at parity | see `gate-batch.txt` | `gate-batch.txt` |
 
 ### 6.1 The D3D stall (closed): root cause and fixes
