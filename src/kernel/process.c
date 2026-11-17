@@ -454,8 +454,11 @@ void set_current_process_pid(uint32_t cpu, int pid) {
  * The pin (cpu_locals[cpu].kstack_pin = slot + 1) is set under proc_lock by
  * the CPU that gives the task up and cleared by enter_user_space once that
  * CPU is done with the stack (or by start_scheduler after a longjmp off it).
- * The pick sites read it under proc_lock. */
+ * The pick sites read it under proc_lock and leave a pinned task for a later
+ * pass (the pin lasts microseconds: the rest of one switch tail).  The task is
+ * READY, so the idle loop's lock-free look keeps coming back for it. */
 volatile uint64_t kstack_share_count; /* resumes of a pinned task (see report) */
+volatile uint64_t kstack_pin_skips;   /* picks that left a pinned task for later */
 
 /* cpu_local is packed (fixed gs: offsets), so no __atomic on its fields: an
    aligned qword store/load is single-copy atomic on x86_64, the setter and
@@ -2613,11 +2616,11 @@ void schedule(struct trap_frame *tf, int is_yield) {
       if (claimed_elsewhere)
         continue;
 #ifdef __x86_64__
-      /* C6-p7b: a kernel task another CPU is still running on (its stack). */
-      if (proc_table[idx].is_kernel_process) {
-        int kh = kstack_pin_holder(idx, cpu);
-        if (kh >= 0)
-          kstack_share_report("schedule", idx, kh, cpu);
+      /* C6-p7b: never resume a kernel task while the CPU that gave it up is
+         still on its stack (kstack_pin_set): wait for enter_user_space. */
+      if (proc_table[idx].is_kernel_process && kstack_pin_holder(idx, cpu) >= 0) {
+        kstack_pin_skips++;
+        continue; /* its giver is still on its stack: next pass */
       }
 #endif
       /* GB-057: an unresumable slot must be SKIPPED, not resumed.
@@ -6131,10 +6134,9 @@ void start_scheduler(void) {
         continue;
 #ifdef __x86_64__
       /* C6-p7b: same stack-pin rule as schedule()'s pick. */
-      if (proc_table[i].is_kernel_process) {
-        int kh = kstack_pin_holder(i, cpu);
-        if (kh >= 0)
-          kstack_share_report("idle", i, kh, cpu);
+      if (proc_table[i].is_kernel_process && kstack_pin_holder(i, cpu) >= 0) {
+        kstack_pin_skips++;
+        continue;
       }
 #endif
       {
@@ -8289,6 +8291,8 @@ static void kstack_stress_task(void *arg) {
     kl_i(&kl, (long)kst_bad);
     kl_s(&kl, " share=");
     kl_i(&kl, (long)kstack_share_count);
+    kl_s(&kl, " pin_skips=");
+    kl_i(&kl, (long)kstack_pin_skips);
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
