@@ -1,0 +1,20 @@
+# Wine-session fault rows, lane vs base (strix KVM, the fullscr harness = run-wine-p5.sh P5_PROBES=fullscr, wineboot + keepalive + fullscr)
+# base = ~/cp/lanes/x3-base (cyberpunk 949ba008 kernel, C4-x2's 935c760f server via P5_XHOBBY, this lane's harness files only)
+# lane = cp-x3 (SysV shm kernel, MIT-SHM server 9b161ede)
+# conclusion: single startup faults in a Wine process (explorer/rundll32/vkcube, before that process ever calls shmget) happen on base too, at a similar or higher rate; not caused by this lane
+## base run 1: 2 fault rows
+[KERNEL] pid=30 (explorer.exe) memory fault VA=0x0000000000112000 PC=0x00007FFFFFCA3940 rw=w  in=HOLE region=NONE rsp=0x00007FFFFE1FF688 live=1 inH=0 cr3frame=0x000000020FD83000 asroot=0x000000020FD83000 sys=14 ret=0x0000000000000040 rbx=0x0000000000000001 rdi
+[KERNEL] pid=30 (explorer.exe) memory fault VA=0x00000000C0000005 PC=0x00007FFFFFCA3940 rw=w  in=HOLE region=NONE rsp=0x00007FFFFE1FF688 live=1 inH=0 cr3frame=0x000000020FD83000 asroot=0x000000020FD83000 sys=15 ret=0x0000000000000040 rbx=0x0000000000000000 rdi
+## base run 2: 453 fault rows
+[KERNEL] pid=109 (vkcube.exe) memory fault VA=0x0000000170075860 PC=0x00006FFFFFF647D3 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE1FF3D8 live=1 inH=0 cr3frame=0x000000025DB84000 asroot=0x000000025DB84000 sys=138 ret=0x0000000000000040 rbx=0x00007FFFFE1FF6A0 rdi
+[KERNEL] pid=109 (vkcube.exe) memory fault VA=0x0000000170099160 PC=0x00006FFFFFF63D50 rw=w  in=HOLE region=NONE rsp=0x00007FFFFE1FEAE0 live=1 inH=0 cr3frame=0x000000025DB84000 asroot=0x000000025DB84000 sys=15 ret=0x0000000000000040 rbx=0x00006FFFFFFD9158 rdi=
+## base run 3: 0 fault rows
+## lane fs1: 1 row (rundll32.exe NULL+8 read, during wineboot)
+[KERNEL] pid=26 (rundll32.exe) memory fault VA=0x0000000000000008 PC=0x00006FFFFFF6D990 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE1FED20 live=1 inH=0 cr3frame=0x000000020A602000 asroot=0x000000020A602000 sys=14 ret=0x0000000000000040 rbx=0x0000000040000003 rdi
+## lane fs2: 3 rows (explorer.exe NULL read x2, during wineboot, before any [SHM] row); fs3 (+event,+x11drv): 0; fs4: 1 (vkcube.exe keepalive write to a read-only page at start-up); P4 run1: 0; P5 run1: 0
+## lane P4 run 2: 1 row -- explorer.exe NULL+8 read at PE ntdll 0x6FFFFFF6D990 during wineboot (the same PC as fs1's rundll32.exe)
+## symbolized (ntdll.dll loaded at 0x6FFFFFF40000, ImageBase 0x170000000; llvm-symbolizer on ~/cp/wine-build-x/build-x86_64/dlls/ntdll/x86_64-windows/ntdll.dll):
+##   0x6FFFFFF6D990 -> find_existing_module, loader.c:2789 (nt = RtlImageNtHeader(new mapping) is NULL: the mapped image has no PE header)
+##   0x6FFFFFF6F449 -> LdrProcessRelocationBlock, loader.c:3614 (fs4: relocation write into a page mapped read-only)
+##   base run 2: vkcube.exe reads 0x170075860, i.e. ntdll's link-time ImageBase range (an unrelocated pointer)
+## All three are Wine's PE loader seeing inconsistent image mappings at process start-up; base shows the family too.
