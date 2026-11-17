@@ -1128,6 +1128,23 @@ C8's P8 probes. Known, not blocking:
   so the PE-loader faults are not proven gone. Open: a single-threaded wineserver `c0000130` read; a proposed
   `frame_free` double-free tripwire.
 - `/srv/nfs/cp-game` is shared between P8 runs only through `run-p8.sh`'s refcount (`/tmp/cp-game-export.lock`).
+- **integ7 landed (2026-11-17):** integ6 (cp-pe + cp-venus) + cp-venus-p8 (stop 11 fix + C8's harness `cp-game`)
+  + cp-ext2w round 2. Batch `strix:~/cp/integ-gates10.txt` plus reruns (`integ10-rerun.txt`): every probe,
+  ext2/exec/pfx/reg gates, both NFS guards, unit (2 known reds), host 38/40, ARM (`__bss_end` 0x454ea218),
+  Gate P2, P4, the Venus D3D rows of P6, thrstorm, the P8 probes, and **Cyberpunk at its main menu on lavapipe
+  (OCR) and on Venus in 2 of 3 boots** (menu at launch + 161–177 s; the third boot's game exited by itself with
+  status 0 after 20 s, no window). P5's d3d11/d3d12 rows ran and passed but were graded FAIL: **kernel rows from
+  two CPUs interleave character by character on the serial console** and destroyed `[P5] end d3d11` (also the
+  likely cause of integ6's missing P2 "hello"). Console integrity is wave 6's first item.
+- **Stop 11 closed (C6-venus, b8cc46c8):** x86 `clock_gettime` answered every monotonic clock in whole
+  milliseconds, so a Windows game's `QueryPerformanceCounter` (Wine maps it to CLOCK_MONOTONIC) ticked at 1 ms;
+  Cyberpunk's start-up then used engine lists before they were filled on the fast GPU. Now microseconds from
+  the TSC. Also fixed: stale fence-IRQ wakes, a blob double-map race. Open: v19-style title stall,
+  `VKD3D_FRAME_RATE` ignored, `clock_nanosleep(TIMER_ABSTIME)` EINVAL, async present.
+- **C3-ext2w round 2:** stop 8 was `kernel_exit` freeing a task's block while still on its stack (now finished on
+  the scheduler stack; one long-lived `ext2flush`); stop 6/9 was a lock held across user-memory copies (bounce
+  buffers; no `f->lock`/`pos_lock` on ext2 I/O). `EXT2_OPEN_MAX` 16384. Open: the NVMe wait still polls (a
+  yield put two CPUs on one stack); pull-the-plug can still leave leak-class errors even at delay 0 (no journal).
 
 Merge order: C0-sync first. Then, in whatever order they go green: C1-k5,
 C3-ext2w, C4-x3 and C6-venus (C1-k5 and C3-ext2w both touch `vm.c`/`fs.c` in
