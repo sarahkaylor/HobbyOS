@@ -1,0 +1,26 @@
+# NFS throughput A/B, strix KVM, interleaved base (cyberpunk 949ba008, ~/cp/lanes/sync-base) / lane (cp-sync), tools/cp/nfs/nfs_bench.sh, load = 1-min loadavg after each run (other lanes' guests share the host)
+sync-base run1 [NB] seq65536 ms=743 MBps=90.32 [NB] seq4096 ms=26 MBps=645.27 [NB] one176m ms=1419 MBps=130.05  load=10.09
+sync run1 [NB] seq65536 ms=366 MBps=183.35 [NB] seq4096 ms=27 MBps=621.37 [NB] one176m ms=441 MBps=418.48  load=3.76
+sync-base run2 [NB] seq65536 ms=683 MBps=98.25 [NB] seq4096 ms=26 MBps=645.27 [NB] one176m ms=559 MBps=330.14  load=8.78
+sync run2 [NB] seq65536 ms=261 MBps=257.12 [NB] seq4096 ms=25 MBps=671.08 [NB] one176m ms=407 MBps=453.44  load=8.96
+
+[exited with code 0]
+# reference: base5 batch rsize_guard (23:46) seq65536 247.63 MBps, one176m 453.44 MBps; lane batch rsize_guard (00:04, load ~10) 109.65 / 79.41 -- the low lane batch numbers were host load, not the merge
+
+# file_read_user A/B (fix-up 30445eb0): main's 32 KiB bounce (merge-commit fs.c/fs.h/linux_compat_misc.c) vs the materialize version, interleaved in ~/cp/lanes/sync
+bounce run1 [NB] seq65536 ms=299 MBps=224.44 [NB] seq4096 ms=27 MBps=621.37 [NB] one176m ms=653 MBps=282.61  load=14.27
+final run1 [NB] seq65536 ms=290 MBps=231.40 [NB] seq4096 ms=26 MBps=645.27 [NB] one176m ms=457 MBps=403.82  load=14.27
+bounce run2 [NB] seq65536 ms=297 MBps=225.95 [NB] seq4096 ms=28 MBps=599.18 [NB] one176m ms=655 MBps=281.75  load=13.22
+final run2 [NB] seq65536 ms=286 MBps=234.64 [NB] seq4096 ms=25 MBps=671.08 [NB] one176m ms=412 MBps=447.93  load=11.16
+# rsize_guard with the bounce: PASS as well (the guards do not catch this; it is throughput only):
+rsize_scan: PASS (32 KiB NFS READ paths intact)
+rsize_guard: G6 6/6 concurrent readers, every 4 KiB page correct
+rsize_guard: G7 6/6 readers of 6 files, every page correct; read_kib=12288 fetched_kib=12288 rpcs=384 amp_pct=100 hit_pct_est=93
+rsize_guard: G8 one 176 MiB read() hash match, stat times, 5/5 symlinked paths
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8935)
+rsize_guard: G10 lookstorm stats=6000 failed_procs=0 ms=2017 ok with 1 new sockets
+rsize_guard: G4 1/1 sampled 64 KiB reads: rs=32768 issued<=2
+rsize_guard: G5 8707 READ RPCs for 285278985 bytes: 32764 bytes/RPC, 2.0 RPCs per 64 KiB
+rsize_guard: [NB] seq65536 bytes=67108864 ms=308 MBps=217.88 fnv=0x7a56a810ac49cd58 match ok
+rsize_guard: [NB] one176m bytes=184550153 want=184550153 ms=684 MBps=269.81 sha256=4436465b87fd649c04b0d91f16a1eed8b5e5af0027fcd8062ee8da252ec1fab9 match reads=1 ok
+rsize_guard: PASS (/home/sarah/cp/lanes/sync)
