@@ -1,0 +1,125 @@
+# tools/cp/p9/play.p9 -- Gate P9 boot A (lane C9-play, docs/cp-p9.md §3).
+# Main menu -> LOAD GAME -> ManualSave-86 (the user's save, "The Ripperdoc",
+# Megabuilding H10 atrium, Little China, Watson), ~10.5 min of play with QMP
+# keyboard + relative mouse (walk, turn, sprint, map), F5 quick save, QUIT GAME.
+# The sequences come from the interactive boot ctl1 (docs/cp-p9.md §2):
+#  * menus: the focus is hidden until the first key; taps need ~0.8 s
+#    spacing (boot_p9 `key` default); `seek` reads the highlighted row's
+#    position from the screendump, so no tap count is trusted (gateA1: in the
+#    main menu "up" past CONTINUE lands on the patch-notes button).
+#  * LOAD GAME groups saves by playthrough; "0" expands every group; the
+#    Ripperdoc group (ManualSave-86) is the last entry, above the
+#    Cross Progression button.
+#  * the save's world: walking forward from the start meets Jackie (a talk
+#    trigger, not a choice); the street is behind and to the left.
+
+phase menu
+shot menu
+# ---- LOAD GAME -> ManualSave-86 ---------------------------------------------
+seek menu-load main down 6 LOAD GAME
+key ret
+expect loadlist 30 LOAD\s*GAME
+key 0
+wait 2
+# the list with both groups expanded (ctl1): Streetkid/AutoSave-16 group at
+# the top, then the second Streetkid group whose one entry, "The Ripperdoc"
+# (ManualSave-86), has its frame centred at screen row 509
+expect loadlist-ripperdoc 10 Ripperdoc
+listseek loadlist-focus down 8 509
+phase loading
+key ret
+expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 6
+phase world
+expect inworld 60 RIPPERDOC|Jackie
+shot world-start
+prof 20 10 world-start
+
+# ---- ~10 min in the world -------------------------------------------------------
+# 1. walk to Jackie (dialogue trigger), look around
+hold w 3000
+look 500 0 25 16
+wait 2
+look -500 0 25 16
+shot w1
+# 2. turn around toward the street, walk and sprint
+look 1200 0 40 16
+hold w 4000
+down shift
+hold w 5000
+up shift
+shot w2
+# 3. the map: open, look, close.  M closes it again; Esc would go on to the
+#    hub menu (gateA2 spent its loops there), so the HUD is checked after.
+phase map
+key m
+wait 5
+expect map 20 FILTER|Track\s*Waypoint|Zoom
+key m
+wait 4
+phase world
+expect_not back-in-world 20 SKIP\s*TIME|DATABASE|FILTER
+# 4. a loop of walking / sprinting / looking (12 x ~20 s)
+repeat 12
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -150 40 10 16
+hold a 1500
+hold d 1500
+look 0 -40 5 16
+wait 3
+shot loop
+end
+prof 20 10 world-mid
+# 5. backwards / strafing and a second map look
+hold s 3000
+hold a 3000
+look -900 0 30 16
+down shift
+hold w 8000
+up shift
+phase map
+key m
+wait 5
+expect map2 20 FILTER|Track\s*Waypoint|Zoom
+key m
+wait 4
+phase world
+expect_not back-in-world2 20 SKIP\s*TIME|DATABASE|FILTER
+# 6. another loop (12 x ~17 s)
+repeat 12
+hold w 5000
+look 600 0 20 16
+down shift
+hold w 5000
+up shift
+look -300 0 10 16
+wait 3
+shot loop2
+end
+prof 20 10 world-end
+wait 10
+shot before-save
+
+# ---- save, then QUIT GAME --------------------------------------------------------
+phase save
+key f5
+wait 5
+shot saved-place
+wait 5
+key esc
+wait 4
+shot pause
+seek pause-quit pause down 9 QUIT GAME
+exit_ok
+phase quit
+key ret
+wait 3
+shot quit-confirm
+expect quit-confirm 10 sure.{0,20}quit
+key ret
+wait_exit 180
