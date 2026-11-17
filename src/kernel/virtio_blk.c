@@ -395,6 +395,7 @@ static int nvme_admin_enable(void) {
  * (and the driver's own read path is LBA-based, so a wrong nsze silently
  * turns into reads past the end). */
 static uint8_t id_ns[4096] __attribute__((aligned(4096)));
+static uint32_t nvme_mdts = 0xFF; /* Identify Controller MDTS (0xFF: not read) */
 
 static uint16_t nvme_identify_ns(uint32_t nsid, uint8_t *buf) {
   for (int i = 0; i < 4096; i++)
@@ -451,6 +452,7 @@ static int nvme_ns_validate(int print_rows) {
   }
   uint32_t vid = id_ns[0] | (id_ns[1] << 8);
   uint32_t ssvid = id_ns[2] | (id_ns[3] << 8);
+  nvme_mdts = id_ns[77]; /* cp/ext2w: max transfer = 2^MDTS min pages; 0 = none */
 
   nvme_id.nsid = 1;
   nvme_id.nsze = nsze;
@@ -2188,19 +2190,78 @@ static void nvme_ns2_probe(void) {
 int blk_data_present(void) { return ns2_nsze != 0; }
 uint64_t blk_data_sectors(void) { return ns2_nsze; }
 
-/* One command: `nsec` (1..8) sectors at `lba` through bounce_buf.  Caller
-   holds the token.  Same epoch discipline as namespace 1: a completion that
-   overlapped a device event is re-issued once; a second event is an error. */
-static int ns2_xfer_locked(uint64_t lba, uint8_t *buf, uint32_t nsec, int wr) {
+/* cp/ext2w: multi-block commands.  A transfer of up to NS2_MAX_PAGES pages
+ * goes through one physically contiguous bounce region (allocated at the
+ * first data-disk transfer) with a PRP list, so a run of blocks is one NVMe
+ * command instead of one per 4 KiB.  The bounce copy keeps the namespace-1
+ * discipline (the device only ever DMAs into driver-owned memory, and the
+ * M6/L69 re-issue rule needs the caller's bytes intact for a second try).
+ * Bounded by the controller's MDTS; without the region the old 8-sector
+ * path through bounce_buf is used. */
+#define NS2_MAX_PAGES 128u /* 512 KiB: QEMU's default MDTS (7) with 4 KiB pages */
+static uint64_t ns2_bounce_pa;   /* physically contiguous, NS2_MAX_PAGES pages */
+static uint8_t *ns2_bounce;
+static uint64_t ns2_prpl_pa;     /* one page of PRP entries */
+static uint64_t *ns2_prpl;
+static uint32_t ns2_max_pages = 0; /* 0: not set up yet; 1: fallback */
+static uint64_t ns2_cmds, ns2_secs;
+static uint32_t ns2_max_secs;
+
+static void ns2_setup_locked(void) {
+  if (ns2_max_pages) return;
+  ns2_max_pages = 1;
+  uint32_t lim = NS2_MAX_PAGES;
+  if (nvme_mdts != 0xFF && nvme_mdts != 0) {
+    uint32_t m = nvme_mdts > 16 ? 0x10000u : (1u << nvme_mdts);
+    /* MDTS counts CAP.MPSMIN pages; this driver programs MPS = MPSMIN = 4 KiB */
+    if (nvme_id.mpsmin == 0 && m < lim) lim = m;
+  }
+  if (lim < 2) return;
+  uint64_t pl = frame_alloc();
+  uint64_t b = frame_alloc_contig((int)lim);
+  if (!pl || !b) {
+    if (pl) frame_free(pl);
+    if (b)
+      for (uint32_t i = 0; i < lim; i++) frame_free(b + (uint64_t)i * 4096u);
+    uart_puts("[BLKD] ns2 multi-block bounce unavailable: 8-sector commands\n");
+    return;
+  }
+  ns2_prpl_pa = pl;
+  ns2_prpl = (uint64_t *)phys_to_virt(pl);
+  ns2_bounce_pa = b;
+  ns2_bounce = (uint8_t *)phys_to_virt(b);
+  for (uint32_t i = 1; i < lim; i++) ns2_prpl[i - 1] = b + (uint64_t)i * 4096u;
+  ns2_max_pages = lim;
+  uart_puts("[BLKD] ns2 multi-block commands: up to ");
+  print_int((int)(lim * 8));
+  uart_puts(" sectors (mdts=");
+  print_int((int)nvme_mdts);
+  uart_puts(")\n");
+}
+
+/* One command: `nsec` sectors at `lba`, data in `dbuf` (bounce_buf: <= 8
+   sectors, or the ns2 bounce region: <= ns2_max_pages * 8).  The caller has
+   copied the payload in (write) and copies it out (read).  Caller holds the
+   token.  Same epoch discipline as namespace 1: a completion that overlapped
+   a device event is re-issued once; a second event is an error. */
+static int ns2_cmd_locked(uint64_t lba, uint32_t nsec, int wr, int big) {
   struct nvme_cmd cmd = {0};
   cmd.opcode = wr ? 0x01 : 0x02;
   cmd.nsid = 2;
   cmd.cid = next_io_cid();
-  cmd.prp1 = kimg_pa(&bounce_buf[0]);
+  uint32_t pages = (nsec * 512u + 4095u) / 4096u;
+  if (big) {
+    cmd.prp1 = ns2_bounce_pa;
+    if (pages == 2)
+      cmd.prp2 = ns2_bounce_pa + 4096u;
+    else if (pages > 2)
+      cmd.prp2 = ns2_prpl_pa;
+  } else {
+    cmd.prp1 = kimg_pa(&bounce_buf[0]);
+  }
   cmd.cdw10 = (uint32_t)lba;
   cmd.cdw11 = (uint32_t)(lba >> 32);
   cmd.cdw12 = nsec - 1;
-  if (wr) memcpy((void *)&bounce_buf[0], buf, nsec * 512u);
   uint64_t ep0 = blk_dev_epoch;
   if (!nvme_ready_now()) {
     nvme_reinit();
@@ -2211,48 +2272,104 @@ static int ns2_xfer_locked(uint64_t lba, uint8_t *buf, uint32_t nsec, int wr) {
   if (status == 0 && !nvme_ready_now())
     __atomic_add_fetch(&blk_dev_epoch, 1, __ATOMIC_SEQ_CST);
   if (status == 0 && blk_dev_epoch != ep0) {
+    /* the payload is still in the bounce memory: re-issue as is */
     ep0 = blk_dev_epoch;
     cmd.cid = next_io_cid();
-    if (wr) memcpy((void *)&bounce_buf[0], buf, nsec * 512u);
     status = submit_io_cmd(&cmd);
     blk_untrusted++;
     if (status == 0 && blk_dev_epoch != ep0)
       status = 0x7FFF;
   }
-  if (status != 0) return -1;
-  if (!wr) memcpy(buf, (const void *)&bounce_buf[0], nsec * 512u);
-  return 0;
+  ns2_cmds++;
+  ns2_secs += nsec;
+  if (nsec > ns2_max_secs) ns2_max_secs = nsec;
+  return status == 0 ? 0 : -1;
 }
 
-static int ns2_rw(uint64_t sector, uint8_t *buf, uint32_t count, int wr) {
-  if (!ns2_nsze || count == 0) return -1;
-  if (sector >= ns2_nsze || count > ns2_nsze - sector) return -1;
+/* Vectored transfer: buffer i holds `each` sectors (each * 512 bytes). */
+static int ns2_rw_vec(uint64_t sector, void *const *bufs, uint32_t nbuf,
+                      uint32_t each, int wr) {
+  if (!ns2_nsze || nbuf == 0 || each == 0) return -1;
+  uint64_t total = (uint64_t)nbuf * each;
+  if (sector >= ns2_nsze || total > ns2_nsze - sector) return -1;
   blk_token_acquire();
+  ns2_setup_locked();
+  int big = ns2_max_pages > 1;
+  uint32_t cap = big ? ns2_max_pages * 8u : 8u; /* sectors per command */
+  uint8_t *bb = big ? ns2_bounce : (uint8_t *)&bounce_buf[0];
   int res = 0;
-  while (count > 0) {
-    uint32_t n = count > 8 ? 8 : count;
-    if (ns2_xfer_locked(sector, buf, n, wr) != 0) {
+  uint32_t bi = 0, boff = 0; /* position: buffer index, sector within it */
+  while (total > 0) {
+    uint32_t n = total > cap ? cap : (uint32_t)total;
+    /* walk the buffers for this command's n sectors */
+    uint32_t sbi = bi, sboff = boff;
+    if (wr) {
+      for (uint32_t done = 0; done < n;) {
+        uint32_t take = each - sboff;
+        if (take > n - done) take = n - done;
+        memcpy(bb + (uint64_t)done * 512u,
+               (const uint8_t *)bufs[sbi] + (uint64_t)sboff * 512u, take * 512u);
+        done += take;
+        sboff += take;
+        if (sboff == each) {
+          sboff = 0;
+          sbi++;
+        }
+      }
+    }
+    if (ns2_cmd_locked(sector, n, wr, big) != 0) {
       res = -1;
       break;
     }
+    if (!wr) {
+      sbi = bi;
+      sboff = boff;
+      for (uint32_t done = 0; done < n;) {
+        uint32_t take = each - sboff;
+        if (take > n - done) take = n - done;
+        memcpy((uint8_t *)bufs[sbi] + (uint64_t)sboff * 512u,
+               bb + (uint64_t)done * 512u, take * 512u);
+        done += take;
+        sboff += take;
+        if (sboff == each) {
+          sboff = 0;
+          sbi++;
+        }
+      }
+    }
+    bi = sbi;
+    boff = sboff;
     sector += n;
-    buf += n * 512u;
-    count -= n;
-  }
-  {
-    extern volatile uint64_t cpu_heartbeat_ms[];
-    cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+    total -= n;
+    /* L9 liveness: this core is provably alive after a completed command */
+    {
+      extern volatile uint64_t cpu_heartbeat_ms[];
+      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+    }
   }
   blk_token_release();
   return res;
 }
 
 int blk_data_read(uint64_t sector, void *buf, uint32_t count) {
-  return ns2_rw(sector, (uint8_t *)buf, count, 0);
+  void *b[1] = {buf};
+  return ns2_rw_vec(sector, b, 1, count, 0);
 }
 
 int blk_data_write(uint64_t sector, const void *buf, uint32_t count) {
-  return ns2_rw(sector, (uint8_t *)(uintptr_t)buf, count, 1);
+  void *b[1] = {(void *)(uintptr_t)buf};
+  return ns2_rw_vec(sector, b, 1, count, 1);
+}
+
+int blk_data_rw_vec(uint64_t sector, void *const *bufs, uint32_t nbuf,
+                    uint32_t nsec_each, int wr) {
+  return ns2_rw_vec(sector, bufs, nbuf, nsec_each, wr);
+}
+
+void blk_data_stats(uint64_t *cmds, uint64_t *sectors, uint32_t *max_sectors) {
+  if (cmds) *cmds = ns2_cmds;
+  if (sectors) *sectors = ns2_secs;
+  if (max_sectors) *max_sectors = ns2_max_secs;
 }
 
 #else
@@ -2710,5 +2827,15 @@ int blk_data_read(uint64_t sector, void *buf, uint32_t count) {
 int blk_data_write(uint64_t sector, const void *buf, uint32_t count) {
   (void)sector; (void)buf; (void)count;
   return -1;
+}
+int blk_data_rw_vec(uint64_t sector, void *const *bufs, uint32_t nbuf,
+                    uint32_t nsec_each, int wr) {
+  (void)sector; (void)bufs; (void)nbuf; (void)nsec_each; (void)wr;
+  return -1;
+}
+void blk_data_stats(uint64_t *cmds, uint64_t *sectors, uint32_t *max_sectors) {
+  if (cmds) *cmds = 0;
+  if (sectors) *sectors = 0;
+  if (max_sectors) *max_sectors = 0;
 }
 #endif
