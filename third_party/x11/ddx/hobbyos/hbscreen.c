@@ -67,6 +67,9 @@
 #include "miline.h"
 #include "randrstr.h"
 #include "shadow.h"
+#ifdef MITSHM
+#include "shmint.h"
+#endif
 #include "hobbyos.h"
 
 /* ---- HobbyOS native calls (repo libc.a; declared here so this file
@@ -1058,6 +1061,11 @@ hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
         return FALSE;
     if (hbRender && !fbPictureInit(pScreen, 0, 0))
         return FALSE;
+#ifdef MITSHM
+    /* MIT-SHM (lane C4-x3): fb can wrap a client's segment as a pixmap, so
+     * ShmCreatePixmap works (QueryVersion reports sharedPixmaps). */
+    ShmRegisterFbFuncs(pScreen);
+#endif
     if (scr->depth == 8) {
         hbRealizeWindowOrig = pScreen->RealizeWindow;
         pScreen->RealizeWindow = hbRealizeWindow;
