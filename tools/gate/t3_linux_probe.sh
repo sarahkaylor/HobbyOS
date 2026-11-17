@@ -85,13 +85,29 @@ if [ -z "$CONSOLE" ] || [ ! -r "$CONSOLE" ]; then
   exit 1
 fi
 
+# C0-console: rows are matched ANYWHERE in a line (a second line of defence
+# behind the line-atomic console, docs/cp-console.md §4): a kernel row spliced
+# in front of "[LP] done rc=0" must not turn a pass into a fail.  "rc=0" must
+# end the number ("rc=01" is not 0).
+LP_DONE0='\[LP\] done rc=0([^0-9]|$)'
 echo "--- probe rows ---"
-grep -a '^\[LP\]' "$CONSOLE" || echo "(none: the probe produced no [LP] row)"
+grep -aoE '\[LP\] .*' "$CONSOLE" | grep -v '^\[LP\] console stress ' ||
+  echo "(none: the probe produced no [LP] row)"
 echo "--- unhandled Linux syscalls (name the next handler) ---"
 grep -a '\[LCOMPAT\]' "$CONSOLE" | head -20 || true
 echo "--- faults / exits ---"
 grep -aE 'memory fault|\[EXITPC\]|pid=[0-9]+ \(PROBE' "$CONSOLE" | tail -8 || true
-if grep -aq '^\[LP\] done rc=0' "$CONSOLE"; then
+if grep -aqE "$LP_DONE0" "$CONSOLE"; then
+  # A probe whose verdict lives in the console itself (it cannot see the
+  # console) ships a host-side checker: tools/gate/lp_check_<name>.py.
+  CHK="$ROOT/tools/gate/lp_check_$NAME.py"
+  if [ -f "$CHK" ]; then
+    echo "--- host-side check: $(basename "$CHK") ---"
+    if ! python3 "$CHK" "$CONSOLE"; then
+      echo "t3_linux_probe: FAIL — $NAME reached its done marker but $(basename "$CHK") failed"
+      exit 1
+    fi
+  fi
   echo "t3_linux_probe: PASS — $NAME reached its done marker"
   exit 0
 fi
