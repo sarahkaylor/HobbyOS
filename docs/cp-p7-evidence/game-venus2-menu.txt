@@ -1,0 +1,90 @@
+=================== Cyberpunk 2077 boot p7-venus2 (strix): MAIN MENU on Venus through the P7 scanout path
+run-p8.sh unchanged: P8_GPU=venus VENUS_BUILD=~/cp/p7work/venus-p7 VENUS_VNC=1 P8_EXPORT=/srv/nfs/cp-p7-p8 P8_RUN=p7-venus2 TIMEOUT_S=3600 P8_STALL_S=600 P8_GAME_S=1500
+P8_PROFILE = a copy of ~/cp/game-profile with only /video/display/Resolution changed 1280x720 -> 1920x1080 (WindowMode stays BorderlessWindowed), so the game window covers the 1920x1080 screen
+--- timeline
++     0.0 s  11:11:51  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 4
++     8.4 s  11:11:59  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    27.4 s  11:12:18  warm-up result: [P8] warm-up: display driver loaded
++    37.5 s  11:12:29  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    37.6 s  11:12:29  dri nodes at game launch: qemu-system-x86/2302758: /dev/dri/renderD129
++    37.6 s  11:12:29  dri nodes at game launch: virgl_render_se/2303206: -
++    37.6 s  11:12:29  dri nodes at game launch: virgl-2-gpu_ren/2304655: /dev/dri/renderD129
++    37.7 s  11:12:29  baseline screendump 1920x1080 (desktop before the game's window)
++    83.5 s  11:13:15  first screen change after launch (99.9% of the screen differs from the baseline): s002-t000046
++   145.7 s  11:14:17  title prompt 'PRESS ... TO CONTINUE' at s006-t000107: sent one Space (#1)
++   222.7 s  11:15:34  title prompt 'PRESS ... TO CONTINUE' at s011-t000184: sent one Space (#2)
++   238.2 s  11:15:49  main menu OCR at s012-t000200: ['NEW GAME', 'LOAD GAME', 'QUIT GAME']
++   244.5 s  11:15:55  main menu OCR at s013-t000206: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   250.7 s  11:16:02  main menu OCR at s014-t000212: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   250.7 s  11:16:02  dri nodes at the menu: qemu-system-x86/2302758: /dev/dri/renderD129
++   250.7 s  11:16:02  dri nodes at the menu: virgl_render_se/2303206: -
++   250.7 s  11:16:02  dri nodes at the menu: virgl-2-gpu_ren/2304655: /dev/dri/renderD129
++   250.7 s  11:16:02  dri nodes at the menu: virgl-8-gpu_ren/2306492: /dev/dri/renderD129
++   250.7 s  11:16:02  dri nodes at the menu: virgl-9-gpu_ren/2307261: /dev/dri/renderD129
++   250.7 s  11:16:02  dri nodes at the menu: virgl-11-gpu_re/2307299: /dev/dri/renderD129
++   253.5 s  11:16:04  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 4
+--- verdict
+main-menu
+--- serial: game window / swapchain / scanout ownership
+ mapped=[X] hobbyos: fullscreen window 0x0 0x0
+[P7] scanout X fullscreen window/size[PFE] rip= 0x0000001080190730 page=0x00000010801900006291631 base=0x000000108002A000+0x0000000000178000  prot=5 kind=7 flags=18 ooff=0x0000000000022000 obj=0x00000
+[X] hobbyos: fullscreen window 0x6000af 1920x1080
+[P7] scanout X fullscreen window/size 0 0 seq=0
+[X] hobbyos: fullscreen window 0x0 0x0
+[P7] scanout X fullscreen window/size 23068675 125830200 seq=0
+[X] hobbyos: fullscreen window 0x1600003 1920x1080
+[X]  87.379:0144:0148:info:vkd3d-proton:dxgi_vk_swap_chain_init: Creating swapchain (1920 x 1080), BufferCount = 3.
+[P7] scanout X fullscreen window/size 20971570 125830200 seq=0
+[X] hobbyos: fullscreen window 0x1400032 1920x1080
+[X]  87.670:0144:0148:info:vkd3d-proton:dxgi_vk_swap_chain_init_sync_objects: Ensure maximum latency of 3 frames with KHR_present_wait.
+[P7] scanout taken res/window 4159 20971570 seq=1
+[P7] scanout back (blob freed) 4159 0 seq=1
+[P7] scanout taken res/window 4162 20971570 seq=2
+--- winevulkan +fps and [HBP], the last 60 s (title prompt -> main menu)
+ site=[X] [HBP] pid=94 n=71 fps=17.7 path=scanout acq=1/6 sub=10361/28731 wait=15/110 flip=9151/15082 geom=0/0 set=225 flush=8841 us scanout=71 putimage=0 refused=0 total=4707
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 48.57fps, total 37.96fps
+[X] [HBP] pid=94 n=88 fps=43.9 path=scanout acq=1/2 sub=11171/186710 wait=12/61 flip=10273/16892 geom=0/0 set=249 flush=9913 us scanout=88 putimage=0 refused=0 total=4795
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 43.85fps, total 38.03fps
+[X] [HBP] pid=94 n=90 fps=44.6 path=scanout acq=1/7 sub=11447/28369 wait=12/76 flip=10336/16629 geom=0/0 set=246 flush=9995 us scanout=90 putimage=0 refused=0 total=4885
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 42.27fps, total 38.08fps
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 42.38fps, total 38.13fps
+[X] [HBP] pid=94 n=89 fps=44.1 path=scanout acq=1/2 sub=10878/26037 wait=13/98 flip=10376/18712 geom=0/0 set=263 flush=10027 us scanout=89 putimage=0 refused=0 total=4974
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 49.64fps, total 38.26fps
+[X] [HBP] pid=94 n=90 fps=44.9 path=scanout acq=1/2 sub=7336/21981 wait=15/166 flip=9040/14227 geom=0/0 set=243 flush=8703 us scanout=90 putimage=0 refused=0 total=5064
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 42.41fps, total 38.30fps
+[X] [HBP] pid=94 n=86 fps=42.2 path=scanout acq=1/2 sub=8581/19900 wait=14/60 flip=8720/16929 geom=0/0 set=212 flush=8389 us scanout=86 putimage=0 refused=0 total=5150
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 39.12fps, total 38.31fps
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 45.31fps, total 38.39fps
+[X] [HBP] pid=94 n=91 fps=45.1 path=scanout acq=1/10 sub=11422/180557 wait=11/54 flip=9628/16234 geom=0/0 set=259 flush=9268 us scanout=91 putimage=0 refused=0 total=5241
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 43.99fps, total 38.45fps
+[X] [HBP] pid=94 n=83 fps=41.1 path=scanout acq=1/4 sub=8484/21127 wait=14/136 flip=9259/16010 geom=0/0 set=351 flush=8779 us scanout=83 putimage=0 refused=0 total=5324
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 42.96fps, total 38.50fps
+[X] [HBP] pid=94 n=89 fps=44.0 path=scanout acq=1/12 sub=10853/185837 wait=16/142 flip=9190/14344 geom=0/0 set=314 flush=8761 us scanout=89 putimage=0 refused=0 total=5413
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 43.94fps, total 38.56fps
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 44.85fps, total 38.63fps
+[X] [HBP] pid=94 n=94 fps=47.0 path=scanout acq=1/6 sub=8056/20642 wait=12/101 flip=8933/15088 geom=0/0 set=305 flush=8545 us scanout=94 putimage=0 refused=0 total=5507
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 52.84fps, total 38.78fps
+[X] [HBP] pid=94 n=97 fps=48.1 path=scanout acq=1/6 sub=7838/23052 wait=18/406 flip=8885/15337 geom=0/0 set=354 flush=8444 us scanout=97 putimage=0 refused=0 total=5604
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 46.14fps, total 38.85fps
+[X] [HBP] pid=94 n=99 fps=49.3 path=scanout acq=2/96 sub=3978/12842 wait=11/57 flip=6706/11396 geom=0/0 set=219 flush=6406 us scanout=99 putimage=0 refused=0 total=5703
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 49.04fps, total 38.96fps
+[X] [HBP] pid=94 n=91 fps=45.4 path=scanout acq=1/5 sub=9190/178367 wait=15/149 flip=8452/16860 geom=0/0 set=330 flush=8029 us scanout=91 putimage=0 refused=0 total=5794
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 42.38fps, total 38.99fps
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 47.43fps, total 39.08fps
+[X] [HBP] pid=94 n=87 fps=43.4 path=scanout acq=1/31 sub=10042/22940 wait=16/154 flip=9783/16808 geom=0/0 set=288 flush=9389 us scanout=87 putimage=0 refused=0 total=5881
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 44.47fps, total 39.13fps
+[PROCLOCK-HOLD] cpu=3[X] [HBP] pid=94 n=64 fps=17.0 path=scanout acq=1/2 sub=42908/2204414 wait=10/43 flip=13864/319288 geom=0/0 set=243 flush=8642 us scanout=64 putimage=0 refused=0 total=5945
+[PROCLOCK-HOLD] cpu=5 acq=2842102 rel=2842102 last=release last_ms=242555 site=0x00000000700F2629 owner_site3=0x000000007009A0AC[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 3.68fps, total 38.51fps
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 48.54fps, total 38.61fps
+[X] [HBP] pid=94 n=89 fps=44.3 path=scanout acq=1/12 sub=12430/187311 wait=18/285 flip=9315/17054 geom=0/0 set=337 flush=8876 us scanout=89 putimage=0 refused=0 total=6034
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 46.64fps, total 38.68fps
+[X] [HBP] pid=94 n=93 fps=46.0 path=scanout acq=1/9 sub=9025/28313 wait=13/107 flip=9625/16992 geom=0/0 set=254 flush=9281 us scanout=93 putimage=0 refused=0 total=6127
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 42.48fps, total 38.72fps
+[X] [HBP] pid=94 n=89 fps=44.4 path=scanout acq=1/4 sub=9721/26657 wait=11/110 flip=9360/16825 geom=0/0 set=331 flush=8877 us scanout=89 putimage=0 refused=0 total=6216
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 42.55fps, total 38.75fps
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 49.97fps, total 38.86fps
+[X] [HBP] pid=94 n=92 fps=45.6 path=scanout acq=1/10 sub=11719/192530 wait=13/91 flip=9392/17184 geom=0/0 set=368 flush=8882 us scanout=92 putimage=0 refused=0 total=6308
+[X] 01b8:trace:fps:win32u_vkQueuePresentKHR 0x104009d2f0 @ approx 44.17fps, total 38.91fps
+--- qemu-debug.log (guest errors)
+pci_nvme_ub_db_wr_invalid_cq in nvme_process_db: completion queue doorbell write for nonexistent queue, sqid=1, ignoring
+(end)
