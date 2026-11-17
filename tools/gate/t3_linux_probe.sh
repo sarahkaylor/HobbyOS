@@ -102,7 +102,10 @@ if grep -aqE "$LP_DONE0" "$CONSOLE"; then
   # console) ships a host-side checker: tools/gate/lp_check_<name>.py.
   CHK="$ROOT/tools/gate/lp_check_$NAME.py"
   if [ -f "$CHK" ]; then
-    echo "--- host-side check: $(basename "$CHK") ---"
+    # keep the graded console next to LP_OUT: the tier's T3_LOG is reused by
+    # the next boot
+    cp "$CONSOLE" "${OUT%.log}.console.log" 2>/dev/null || true
+    echo "--- host-side check: $(basename "$CHK") (console kept: ${OUT%.log}.console.log) ---"
     if ! python3 "$CHK" "$CONSOLE"; then
       echo "t3_linux_probe: FAIL — $NAME reached its done marker but $(basename "$CHK") failed"
       exit 1

@@ -182,12 +182,23 @@ int main(void) {
 
   /* T12 a stale kernel partial (a row without its newline) is pushed out */
   reset();
-  on(6, 0); cur_irqon = 1; kw("Booting...");
+  on(6, 70); cur_irqon = 1; kw("Booting...");
   now_us += 60000;
+  on(6, 71); /* its thread is not the one running when the tick comes */
   cons_tick(6);
   EXPECT("T12 stale kernel partial flushed", "Booting...");
-  on(6, 0); kw(" done\n");
+  on(6, 70); kw(" done\n");
   EXPECT("T12b continuation joins it", "Booting... done\n");
+
+  /* T13 the tick interrupts the very thread that is mid-row, after a quiet
+     60 ms (a host stall of the whole guest): the row is left alone */
+  reset();
+  on(5, 80); cur_irqon = 1; kw("[CSTR] c=5 k=1 s=1 p=abc");
+  now_us += 60000;
+  cons_tick(5);
+  EXPECT("T13 interrupted thread's row not pushed", "");
+  kw(" e=3\n");
+  EXPECT("T13b and it ends whole", "[CSTR] c=5 k=1 s=1 p=abc e=3\n");
 
   printf("kconsole_test: %s (%d failure%s)\n", fails ? "FAIL" : "PASS", fails, fails == 1 ? "" : "s");
   return fails ? 1 : 0;

@@ -628,13 +628,19 @@ void cons_tick(uint32_t cpu) {
   cons_nest[cpu] = 1;
   if (cons_dirty[cpu]) {
     int left = 0;
+    /* The thread this tick interrupted: a slot of its own is a row it is in
+       the middle of writing, and it resumes the moment the tick returns (a
+       host stall of the whole guest makes such a row look old on a quiet
+       wire).  Only the hard limit pushes it out. */
+    const void *running = cons_hw_ctx(cpu);
     for (int i = 0; i < CONS_SLOTS; i++) {
       struct cons_slot *x = &cons_slot[cpu][i];
       if (!x->used || x->n == 0)
         continue;
       uint64_t last = wire_last_us;
       uint64_t age = now > x->t_us ? now - x->t_us : 0, quiet = now > last ? now - last : 0;
-      if ((age >= CONS_KSTALE_US && quiet >= CONS_KSTALE_US) || age >= CONS_HARD_STALE_US) {
+      int mine = x->ctx == running && x->irqon;
+      if ((!mine && age >= CONS_KSTALE_US && quiet >= CONS_KSTALE_US) || age >= CONS_HARD_STALE_US) {
         cons_stats.stale++;
         slot_push(cpu, x, 0);
       } else {
