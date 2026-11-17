@@ -209,8 +209,10 @@ static void test_gpu_abi_pages_for(void) {
   EXPECT_EQ(gpu_abi_pages_for(4097), 2);
   EXPECT_EQ(gpu_abi_pages_for(64 * 64 * 4), 4);        /* the M1 probe buffer */
   EXPECT_EQ(gpu_abi_pages_for(64ull * 1024 * 1024), 16384);
-  /* Over the transport's per-attach cap: refuse rather than truncate. */
-  EXPECT_EQ(gpu_abi_pages_for(64ull * 1024 * 1024 + 1), 0);
+  /* The per-resource cap moved to 512 MiB so a planet-sized texture can be
+   * attached; the old 64 MiB boundary is an ordinary legal buffer now. */
+  EXPECT_EQ(gpu_abi_pages_for(64ull * 1024 * 1024 + 1), 16385);
+  EXPECT_EQ(gpu_abi_pages_for(512ull * 1024 * 1024 + 1), 0);
   EXPECT_EQ(gpu_abi_pages_for(0xFFFFFFFFFFFFFFFFull), 0);
 }
 
@@ -240,6 +242,8 @@ static void test_gpu_abi_res_ok(void) {
   r.width = 1024 * 1024;
   EXPECT_EQ(gpu_abi_res_ok(&r), 1);
   r.width = 65 * 1024 * 1024;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 1); /* 64 MiB is no longer the ceiling */
+  r.width = 512u * 1024u * 1024u + 1u;
   EXPECT_EQ(gpu_abi_res_ok(&r), 0);
   r = (struct gpu_res_create){ .ctx_id = 1, .target = 2, .format = 67,
                                .bind = 0xA, .width = 1920, .height = 1080,
@@ -300,6 +304,17 @@ static void test_gpu_abi_transfer_ok(void) {
   bad = t; bad.box.h = 0;   EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
   bad = t; bad.box.d = 0;   EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
   EXPECT_EQ(gpu_abi_transfer_ok(0), 0);
+
+  /* The ioctl layer refuses a width the virgl host cannot transfer as a 1-D
+   * resource.  Relaxing this to 512 MiB made the kernel return rc=0 while the
+   * host rejected the transfer and read back zeros -- a silent corruption,
+   * worse than EINVAL.  The 16384 ceiling matches the host's 1-D limit. */
+  bad = t; bad.box.w = 16384; bad.box.h = 1; bad.box.d = 1;
+  EXPECT_EQ(gpu_abi_transfer_ok(&bad), 1);
+  bad = t; bad.box.w = 16384 + 1u; bad.box.h = 1; bad.box.d = 1;
+  EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
+  bad = t; bad.box.w = 1; bad.box.h = 16384 + 1u; bad.box.d = 1;
+  EXPECT_EQ(gpu_abi_transfer_ok(&bad), 0);
 }
 
 #ifdef __x86_64__
