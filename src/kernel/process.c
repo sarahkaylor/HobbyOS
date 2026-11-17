@@ -4715,6 +4715,222 @@ void rw_thr_sample(void) {
      virtio_blk_stress_start), never from this census. */
 }
 
+/* ---- C6-present (docs/cp-present.md): what the threads are waiting in ----
+ * Row: run/ready/futex = average threads in that state; blk NR:avg = threads
+ * blocked, by the syscall they are in; kern = running threads that were in
+ * the kernel at the tick (trap = of those, not in a syscall: faults and
+ * interrupts), ksys NR:avg by syscall; top TID:run%/ready%/kern%/trap%(NR=%..). *
+ * The frame waits on something serial while the vCPUs are half idle.  Every
+ * 10 ms tick (boot core) this samples every Linux-ABI thread: running, ready
+ * (runnable, not on a CPU), in a futex, or blocked -- and in which syscall
+ * (last_syscall).  Every 5 s one [THRW] row per busy group: the average
+ * number of its threads in each state, the top blocking syscalls, and its
+ * three threads that ran most (tid:run%/ready%).  Read-only and lock-free:
+ * the fields are read racily, which a statistic tolerates. */
+#ifdef __x86_64__ /* the hook is the x86_64 PIT tick (arch/x64/trap.c) */
+#define CPW_GROUPS 12
+#define CPW_NR 10
+struct cpw_group {
+  int tgid;
+  uint32_t run, ready, futex, other;
+  struct { int nr; uint32_t n; } blk[CPW_NR];
+  uint32_t blk_other;
+  /* running threads that were in the kernel at the tick, by last syscall */
+  struct { int nr; uint32_t n; } ks[CPW_NR];
+  uint32_t kern, ktrap; /* ktrap: in the kernel but not in a syscall (fault, IRQ) */
+};
+static struct cpw_group cpw_g[CPW_GROUPS];
+static uint16_t cpw_run[MAX_PROCESSES], cpw_ready[MAX_PROCESSES], cpw_kern[MAX_PROCESSES],
+    cpw_ktrap[MAX_PROCESSES];
+/* per thread: its in-kernel ticks by last syscall, top 4 */
+#define CPW_TKS 6
+static struct { int16_t nr; uint16_t n; } cpw_tks[MAX_PROCESSES][CPW_TKS];
+static uint32_t cpw_ticks;
+
+static struct cpw_group *cpw_find(int tgid) {
+  for (int i = 0; i < CPW_GROUPS; i++)
+    if (cpw_g[i].tgid == tgid) return &cpw_g[i];
+  for (int i = 0; i < CPW_GROUPS; i++)
+    if (cpw_g[i].tgid == 0) {
+      cpw_g[i].tgid = tgid;
+      return &cpw_g[i];
+    }
+  return 0;
+}
+
+static void cpw_pct(struct kline *kl, uint32_t n, uint32_t ticks) {
+  /* average threads in a state, two decimals */
+  uint32_t v = ticks ? (uint32_t)((uint64_t)n * 100u / ticks) : 0;
+  kl_i(kl, (long)(v / 100));
+  kl_c(kl, '.');
+  if (v % 100 < 10) kl_c(kl, '0');
+  kl_i(kl, (long)(v % 100));
+}
+
+void cp_wait_sample(int emit) {
+  cpw_ticks++;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = &proc_table[i];
+    int st = q->state;
+    if (st == PROC_STATE_FREE || st == PROC_STATE_THREAD_DONE || st == PROC_STATE_EXITED ||
+        st == PROC_STATE_ALLOCATED)
+      continue;
+    if (!(q->abi_flags & PROC_FLAG_LINUX_ABI)) continue;
+    struct cpw_group *g = cpw_find(q->tgid);
+    if (!g) continue;
+    if (st == PROC_STATE_RUNNING) {
+      g->run++;
+      if (cpw_run[i] < 0xFFFF) cpw_run[i]++;
+      int oncpu = -1;
+      for (uint32_t c = 0; c < MAX_CPUS; c++)
+        if (current_pid_of_cpu(c) == i) {
+          oncpu = (int)c;
+          break;
+        }
+      extern int cp_core_in_syscall(uint32_t cpu);
+      if (q->ru_kin_us && oncpu >= 0 && !cp_core_in_syscall((uint32_t)oncpu)) {
+        /* in the kernel, but not in a syscall: a fault or an interrupt */
+        g->kern++;
+        g->ktrap++;
+        if (cpw_kern[i] < 0xFFFF) cpw_kern[i]++;
+        if (cpw_ktrap[i] < 0xFFFF) cpw_ktrap[i]++;
+      } else if (q->ru_kin_us) {
+        /* in a syscall right now: name it by the syscall */
+        g->kern++;
+        if (cpw_kern[i] < 0xFFFF) cpw_kern[i]++;
+        int nr = (int)q->last_syscall, k;
+        for (k = 0; k < CPW_TKS; k++) {
+          if (cpw_tks[i][k].n && cpw_tks[i][k].nr == (int16_t)nr) break;
+          if (!cpw_tks[i][k].n) {
+            cpw_tks[i][k].nr = (int16_t)nr;
+            break;
+          }
+        }
+        if (k < CPW_TKS && cpw_tks[i][k].n < 0xFFFF) cpw_tks[i][k].n++;
+        for (k = 0; k < CPW_NR; k++) {
+          if (g->ks[k].n && g->ks[k].nr == nr) break;
+          if (!g->ks[k].n) {
+            g->ks[k].nr = nr;
+            break;
+          }
+        }
+        if (k < CPW_NR) g->ks[k].n++;
+      }
+    } else if (st == PROC_STATE_READY) {
+      g->ready++;
+      if (cpw_ready[i] < 0xFFFF) cpw_ready[i]++;
+    } else if (st == PROC_STATE_FUTEX) {
+      g->futex++;
+    } else if (st == PROC_STATE_BLOCKED) {
+      int nr = (int)q->last_syscall, k;
+      for (k = 0; k < CPW_NR; k++) {
+        if (g->blk[k].n && g->blk[k].nr == nr) break;
+        if (!g->blk[k].n) {
+          g->blk[k].nr = nr;
+          break;
+        }
+      }
+      if (k < CPW_NR) g->blk[k].n++;
+      else g->blk_other++;
+    } else {
+      g->other++;
+    }
+  }
+  if (!emit) return;
+  static int rows;
+  for (int gi = 0; gi < CPW_GROUPS && rows < 3000; gi++) {
+    struct cpw_group *g = &cpw_g[gi];
+    if (!g->tgid) continue;
+    /* only groups that did something: >= 0.05 threads running or ready */
+    if ((g->run + g->ready) * 20u >= cpw_ticks) {
+      rows++;
+      struct process *lead = (g->tgid > 0 && g->tgid < MAX_PROCESSES) ? &proc_table[g->tgid] : 0;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[THRW] pid=");
+      kl_i(&kl, g->tgid);
+      kl_s(&kl, " ticks=");
+      kl_i(&kl, (long)cpw_ticks);
+      kl_s(&kl, " run=");
+      cpw_pct(&kl, g->run, cpw_ticks);
+      kl_s(&kl, " ready=");
+      cpw_pct(&kl, g->ready, cpw_ticks);
+      kl_s(&kl, " futex=");
+      cpw_pct(&kl, g->futex, cpw_ticks);
+      kl_s(&kl, " blk");
+      for (int k = 0; k < CPW_NR; k++) {
+        if (!g->blk[k].n) continue;
+        kl_c(&kl, ' ');
+        kl_i(&kl, g->blk[k].nr);
+        kl_c(&kl, ':');
+        cpw_pct(&kl, g->blk[k].n, cpw_ticks);
+      }
+      kl_s(&kl, " kern=");
+      cpw_pct(&kl, g->kern, cpw_ticks);
+      kl_s(&kl, " trap=");
+      cpw_pct(&kl, g->ktrap, cpw_ticks);
+      kl_s(&kl, " ksys");
+      for (int k = 0; k < CPW_NR; k++) {
+        if (!g->ks[k].n) continue;
+        kl_c(&kl, ' ');
+        kl_i(&kl, g->ks[k].nr);
+        kl_c(&kl, ':');
+        cpw_pct(&kl, g->ks[k].n, cpw_ticks);
+      }
+      kl_s(&kl, " top");
+      /* the group's three threads that ran most this window */
+      int used[3] = { 0, 0, 0 };
+      for (int t = 0; t < 3; t++) {
+        int best = 0;
+        for (int i = 1; i < MAX_PROCESSES; i++) {
+          if (proc_table[i].tgid != g->tgid || i == used[0] || i == used[1]) continue;
+          if (cpw_run[i] + cpw_ready[i] > cpw_run[best] + cpw_ready[best] || !best) best = i;
+        }
+        if (!best || cpw_run[best] + cpw_ready[best] == 0) break;
+        used[t] = best;
+        kl_c(&kl, ' ');
+        kl_i(&kl, best);
+        kl_c(&kl, ':');
+        kl_i(&kl, (long)((uint32_t)cpw_run[best] * 100u / cpw_ticks));
+        kl_c(&kl, '/');
+        kl_i(&kl, (long)((uint32_t)cpw_ready[best] * 100u / cpw_ticks));
+        kl_c(&kl, '/');
+        kl_i(&kl, (long)((uint32_t)cpw_kern[best] * 100u / cpw_ticks));
+        kl_c(&kl, '/');
+        kl_i(&kl, (long)((uint32_t)cpw_ktrap[best] * 100u / cpw_ticks));
+        /* its syscall ticks by syscall, in % of the window */
+        for (int k = 0; k < CPW_TKS; k++) {
+          if (!cpw_tks[best][k].n) continue;
+          kl_c(&kl, k ? ',' : '(');
+          kl_i(&kl, cpw_tks[best][k].nr);
+          kl_c(&kl, '=');
+          kl_i(&kl, (long)((uint32_t)cpw_tks[best][k].n * 100u / cpw_ticks));
+          if (k == CPW_TKS - 1 || !cpw_tks[best][k + 1].n) kl_c(&kl, ')');
+        }
+      }
+      kl_c(&kl, ' ');
+      if (lead) kl_s(&kl, lead->name);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  for (int gi = 0; gi < CPW_GROUPS; gi++) {
+    struct cpw_group *g = &cpw_g[gi];
+    int tg = g->tgid;
+    /* keep the slot only while its leader lives */
+    int alive = tg > 0 && tg < MAX_PROCESSES && proc_table[tg].state != PROC_STATE_FREE &&
+                proc_table[tg].tgid == tg;
+    for (unsigned b = 0; b < sizeof(*g); b++) ((volatile uint8_t *)g)[b] = 0;
+    if (alive) g->tgid = tg;
+  }
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    cpw_run[i] = cpw_ready[i] = cpw_kern[i] = cpw_ktrap[i] = 0;
+    for (int k = 0; k < CPW_TKS; k++) cpw_tks[i][k].n = 0, cpw_tks[i][k].nr = 0;
+  }
+  cpw_ticks = 0;
+}
+#endif /* __x86_64__ */
+
 void process_signal_trap_exit(struct trap_frame *tf) {
   struct process *cur = current_process();
   if (!cur || cur->is_kernel_process || !tf)

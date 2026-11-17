@@ -2764,6 +2764,9 @@ static void compat_mkdirat(struct trap_frame *tf) {
 /* Last syscall each core entered; 0 = not in a syscall.  A core wedged
    inside a syscall leaves this set, which the stall watchdog prints. */
 static volatile int core_in_syscall[MAX_CPUS];
+/* C6-present: [THRW] (process.c) tells a running thread's kernel time in a
+ * syscall from a fault or an interrupt by its CPU's entry here. */
+int cp_core_in_syscall(uint32_t cpu) { return cpu < MAX_CPUS ? core_in_syscall[cpu] : 0; }
 
 /* L73: name the kernel path that dereferenced a user VA.
  *
@@ -5072,6 +5075,12 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       {
         extern void rw_thr_sample(void);
         static uint32_t thr_ticks;
+        /* C6-present: [THRW] thread-state sampler, every tick, a row per
+           busy group every 5 s (process.c, docs/cp-present.md). */
+        {
+          extern void cp_wait_sample(int emit);
+          cp_wait_sample(thr_ticks + 1 >= 500);
+        }
         if (++thr_ticks >= 500) {
           thr_ticks = 0;
           rw_thr_sample();
