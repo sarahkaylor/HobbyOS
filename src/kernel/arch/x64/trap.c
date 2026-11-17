@@ -6497,6 +6497,11 @@ void trap_init_core_with_id(uint32_t cpu) {
   uint32_t high = (uint32_t)(gs_base >> 32);
   __asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(0xC0000101));
   __asm__ volatile("wrmsr" : : "a"(0u), "d"(0u), "c"(0xC0000102));
+  {
+    /* C1-k6: this CPU's GS is live (get_cpuid's fast path waits for all). */
+    extern volatile uint32_t x64_gs_ready_mask;
+    if (cpu < 32) __atomic_fetch_or(&x64_gs_ready_mask, 1u << cpu, __ATOMIC_SEQ_CST);
+  }
 
   // Load IDT for this CPU
   struct idt_ptr ptr;

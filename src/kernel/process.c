@@ -122,6 +122,7 @@ static int alive_reported;
    is exactly the kind of load that turns an idle loop into a stalled one.  A
    time floor bounds it whatever the scheduler does. */
 static uint64_t alive_last_ms;
+static uint64_t sched_last_pick_ms; /* C1-k6: the last successful pick, any CPU */
 /* GB-057-a: the wave-end predicate is a NEGATIVE test -- anything not
    FREE/EXITED/ALLOCATED/THREAD_DONE counts as live work -- so PROC_STATE_BLOCKED
    (5) is counted, and a process blocked with no possible waker keeps `any_alive`
@@ -1830,10 +1831,12 @@ void wd_dump_proc_table(void) {
   extern void panic_puts2(const char *s);
   extern void panic_print_hex2(uint64_t v);
   extern void print_int_raw2(int val);
-  /* Snapshot under proc_lock: the state values and the per-CPU claims are
-     both written under it, so reading both inside the lock gives a
-     consistent picture of stranded processes. */
-  spinlock_acquire(&proc_lock);
+  /* C1-k6 (docs/cp-k6.md §10): NO proc_lock.  This dump prints the whole
+     table to COM2 one outb at a time; under proc_lock that held every other
+     CPU spinning for the length of the dump, every watchdog cooldown, in
+     the middle of a game (C9's P9 profile: wd_dump_proc_table under
+     spin_acquire_raw).  A stall dump is a diagnostic: racy reads are fine,
+     and it must not need the lock a stall may be holding. */
   extern int cpu_current_pids[MAX_CPUS];
   panic_puts2("   claim:");
   for (int c = 0; c < MAX_CPUS; c++) {
@@ -1868,7 +1871,6 @@ void wd_dump_proc_table(void) {
     }
     panic_puts2("\n");
   }
-  spinlock_release(&proc_lock);
 }
 
 static void restore_context(struct process *p, struct trap_frame *tf) {
@@ -1942,6 +1944,7 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
  * the next tick, as before. */
 static void resched_cpu(uint32_t c);
 static int scheduler_started_peek(void);
+static volatile uint8_t sched_kick_pending[MAX_CPUS]; /* see sched_wake_idle_cpu */
 static uint64_t hrt_armed_us[MAX_CPUS];
 static int hrt_boost_idx[MAX_CPUS]; /* +1; 0 = none (written by the fire) */
 static uint64_t hrt_fires, hrt_fires_empty, hrt_arms;
@@ -1973,6 +1976,13 @@ static void hrt_cover_locked(uint32_t cpu, uint64_t d, uint64_t now) {
 /* Expire every due sleeper.  Returns how many were made READY; *first gets
  * the first one's slot (or -1) and *next the nearest deadline still
  * pending (0 = none).  Caller holds proc_lock. */
+/* C1-k6 (docs/cp-k6.md §10): the nearest sleeper deadline the last full
+ * scan saw (0 = none), lowered by every park schedule() covers, and when
+ * that scan ran.  schedule() skips the 512-slot scan until one of them says
+ * it is due: a deadline has come, or 10 ms have passed (the old tick-rate
+ * scan, kept as the backstop).  Under proc_lock. */
+static uint64_t sleep_next_us, sleep_full_us;
+
 static int process_check_sleeping_us(uint64_t current_us, int *first,
                                      uint64_t *next) {
   int woke = 0;
@@ -2015,6 +2025,8 @@ static int process_check_sleeping_us(uint64_t current_us, int *first,
     woke++;
   }
   if (next) *next = nearest;
+  sleep_next_us = nearest;
+  sleep_full_us = current_us;
   return woke;
 }
 
@@ -2071,8 +2083,9 @@ int sched_kick_idle_cpus(int n) {
   for (uint32_t c = 0; c < (uint32_t)ncpu && kicked < n; c++) {
     if (c == self) continue;
     if (current_pid_of_cpu(c) < 0) {
-      resched_cpu(c);
-      kicked++;
+      if (!__atomic_exchange_n(&sched_kick_pending[c], 1, __ATOMIC_SEQ_CST))
+        resched_cpu(c);
+      kicked++; /* pending or sent: that CPU will pick */
     }
   }
   return kicked;
@@ -2158,6 +2171,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
   uint32_t cpu = get_cpuid();
   if (cpu >= MAX_CPUS)
     return;
+  /* C1-k6: a reschedule IPI sent to this CPU is being served now. */
+  __atomic_store_n(&sched_kick_pending[cpu], 0, __ATOMIC_SEQ_CST);
 
   /* Run the WHOLE switch with interrupts disabled.  The -2/blocking-syscall
      and yield paths enter via `syscall` (IF stays SET), so a timer
@@ -2226,10 +2241,15 @@ void schedule(struct trap_frame *tf, int is_yield) {
     uint64_t now_us = timer_get_us();
     if (current_pid >= 0) {
       struct process *pk = &proc_table[current_pid];
-      if (pk->state == PROC_STATE_BLOCKED || pk->state == PROC_STATE_FUTEX)
-        hrt_cover_locked(cpu, proc_deadline_us(pk), now_us);
+      if (pk->state == PROC_STATE_BLOCKED || pk->state == PROC_STATE_FUTEX) {
+        uint64_t d = proc_deadline_us(pk);
+        hrt_cover_locked(cpu, d, now_us);
+        if (d && (!sleep_next_us || d < sleep_next_us)) sleep_next_us = d;
+      }
     }
-    (void)process_check_sleeping_us(now_us, 0, 0);
+    if ((sleep_next_us && now_us >= sleep_next_us) ||
+        now_us - sleep_full_us >= 10000 || now_us < sleep_full_us)
+      (void)process_check_sleeping_us(now_us, 0, 0);
   }
 
   /* C1-k6: the slot the one-shot just woke on this CPU is tried first. */
@@ -2435,6 +2455,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
          Any CPU actively running or claiming a process proves the OS is
          alive; refresh here on each claim. */
       cpu_heartbeat_ms[cpu] = timer_get_ms();
+      __atomic_store_n(&sched_last_pick_ms, cpu_heartbeat_ms[cpu], __ATOMIC_RELAXED);
       proc_table[next].state = PROC_STATE_RUNNING;
       struct trap_frame local_tf;
       restore_context(&proc_table[next], &local_tf);
@@ -2857,6 +2878,15 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
     }
 
+    /* C1-k6 (docs/cp-k6.md §10): the [ALIVE-SET] dump below prints every
+       live slot to the console with proc_lock held -- 150 rows of a running
+       game every 2 s, one outb VM exit per byte, while every other CPU spins
+       on the lock (C9's P9 profile: uart_puts under spin_acquire_raw).  It
+       exists for a machine that has gone quiet; dump only when no CPU has
+       picked any work for 2 s. */
+    if (any_alive && !alive_reported &&
+        timer_get_ms() - __atomic_load_n(&sched_last_pick_ms, __ATOMIC_RELAXED) < 2000)
+      goto alive_dump_done;
     if (any_alive && !alive_reported) {
       /* GB-063: say WHAT keeps the wave alive, once per idle stretch.
 
@@ -3270,6 +3300,20 @@ static void kernel_exit_finish(uint32_t cpu) {
  * exits only when nothing else is left, so the halt that follows has a clean
  * cache and the flusher never churns through kernel_exit. */
 int process_others_alive(int self) {
+  /* C1-k6: a lock-free look first.  "Something is alive" from a racy read
+     is always safe to act on (the flusher just keeps running), and in a
+     running system it is the answer at the first live slot; only "nothing
+     else" -- the flusher's exit -- is confirmed under proc_lock.  It was
+     taken 20 times a second by the ext2 flusher, in the P9 profile's
+     proc_lock spinners. */
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (i == self)
+      continue;
+    int st = __atomic_load_n(&proc_table[i].state, __ATOMIC_RELAXED);
+    if (st != PROC_STATE_FREE && st != PROC_STATE_EXITED &&
+        st != PROC_STATE_THREAD_DONE)
+      return 1;
+  }
   int n = 0;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 1; i < MAX_PROCESSES; i++) {
@@ -3378,15 +3422,23 @@ static void resched_cpu(uint32_t c) {
    picked in microseconds.  At most one CPU is poked per wake (a wake only
    needs one), and only when it is idle, so a wake storm cannot turn into an
    IPI storm: a busy machine has no idle CPU to poke and behaves as before. */
+/* C1-k6 (docs/cp-k6.md §10): an idle CPU that has been sent the reschedule
+ * IPI and not yet entered schedule() is not sent another: a burst of wakes
+ * used to IPI the same idle CPU (always the lowest-numbered one) once per
+ * wake, and every IPI is a VM exit plus a schedule() pass under proc_lock.
+ * The flag is cleared at schedule() entry, before the pick reads the run
+ * state, so a wake that saw it set is picked by that pass.  The search
+ * starts after this CPU, so wakes spread over the idle CPUs. */
 void sched_wake_idle_cpu(void) {
 #ifdef __x86_64__
   if (!scheduler_started)
     return;
   uint32_t self = get_cpuid();
-  for (uint32_t c = 0; c < MAX_CPUS; c++) {
-    if (c == self)
-      continue;
+  for (uint32_t k = 1; k < MAX_CPUS; k++) {
+    uint32_t c = (self + k) % MAX_CPUS;
     if (current_pid_of_cpu(c) < 0) {
+      if (__atomic_exchange_n(&sched_kick_pending[c], 1, __ATOMIC_SEQ_CST))
+        return; /* that idle CPU is already on its way into schedule() */
       resched_cpu(c);
 #ifdef FUTEX_TRACE_CONSOLE
       {
@@ -5663,6 +5715,32 @@ void start_scheduler(void) {
   }
 
   while (1) {
+    /* C1-k6 (docs/cp-k6.md §10): an idle CPU wakes on every interrupt and
+       came straight back here to take proc_lock and scan the table twice.
+       Look first without the lock: no READY slot, no sleeper due and the
+       10 ms full scan not due means nothing to do -- go back to sleep.  A
+       slot made READY after this look comes with a reschedule IPI (the
+       waker's sched_wake_idle_cpu), and the 100 Hz tick still ends every
+       sleep; every 64th pass still takes the slow path for the idle
+       bookkeeping below. */
+    {
+      static uint32_t fast_idle_pass[MAX_CPUS];
+      uint32_t fc = get_cpuid();
+      uint64_t nu = timer_get_us();
+      uint64_t snx = __atomic_load_n(&sleep_next_us, __ATOMIC_RELAXED);
+      uint64_t sfu = __atomic_load_n(&sleep_full_us, __ATOMIC_RELAXED);
+      int work = (snx && nu >= snx) || nu - sfu >= 10000 || nu < sfu;
+      for (int i = 0; !work && i < MAX_PROCESSES; i++)
+        if (__atomic_load_n(&proc_table[i].state, __ATOMIC_RELAXED) == PROC_STATE_READY)
+          work = 1;
+      if (!work && fc < MAX_CPUS && cpu_current_pids[fc] < 0 &&
+          (++fast_idle_pass[fc] & 63) != 0) {
+        cpu_heartbeat_ms[fc] = timer_get_ms();
+        sched_idle_rounds++; /* the reaper's clock counts these passes too */
+        safe_wfi();
+        continue;
+      }
+    }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     process_check_sleeping();
     for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -5703,6 +5781,7 @@ void start_scheduler(void) {
         proc_table[i].state = PROC_STATE_RUNNING;
         sched_idle_rounds = 0;
         if (cpu >= 0 && cpu < MAX_CPUS) sched_idle_rounds_cpu[cpu] = 0;
+        __atomic_store_n(&sched_last_pick_ms, timer_get_ms(), __ATOMIC_RELAXED);
         /* GB-057: work was found, so this idle stretch is over -- reset the
            quiet-dump divider with it.  Without this the divider (which is only
            meaningful within one stretch) survives the reset, so a long run
@@ -5871,7 +5950,16 @@ void start_scheduler(void) {
     }
     { int _c = (int)get_cpuid(); if (_c >= 0 && _c < MAX_CPUS) sched_idle_rounds_cpu[_c]++; }
     int acted = 0;   /* w5 (v): this pass RECLAIMED or DISPOSED a slot */
-    if (sched_idle_rounds >= 500) {
+    /* C1-k6 (docs/cp-k6.md §10): the lost-owner reaper below scans the whole
+       table under proc_lock.  sched_idle_rounds is reset only by a pick in
+       THIS loop, and a busy machine picks through schedule() instead, so
+       once past 500 the scan ran on every idle pass of every CPU -- in the
+       P9 game, thousands of times a second.  It now runs at most every
+       50 ms (its grace periods are 0.5-2 s). */
+    static uint64_t reap_last_ms;
+    uint64_t reap_now_ms = timer_get_ms();
+    if (sched_idle_rounds >= 500 && reap_now_ms - reap_last_ms >= 50) {
+      reap_last_ms = reap_now_ms;
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
       /* GB-240: bracket this detector's proc_lock section.  The imbalanced
          [PROCLOCK-HOLD] row attributed here (owner_site3 0x7007BC9D) is this
@@ -6171,6 +6259,14 @@ void start_scheduler(void) {
         dump_stuck = 1;
       }
     }
+    /* C1-k6 (docs/cp-k6.md §10): the dump below prints the thread table, the
+       futex queue and every process's map to the console with proc_lock held
+       (thousands of rows; 1232 [IDLESTUCK] tables in one P9 fpsprobe boot,
+       while every other CPU spun on the lock).  It is for a machine that has
+       stopped: only when no CPU has picked any work for 2 s. */
+    if (dump_stuck &&
+        timer_get_ms() - __atomic_load_n(&sched_last_pick_ms, __ATOMIC_RELAXED) < 2000)
+      dump_stuck = 0;
     if (dump_stuck) {
       uart_puts("[IDLESTUCK] cpu=");
       print_int((int)get_cpuid());
