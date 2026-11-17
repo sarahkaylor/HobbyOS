@@ -113,13 +113,16 @@ static void round_ops(uint32_t salt, int lockfd, int dirfd, int rootfd) {
   int a = (int)(r % NNAMES), b = (int)((r >> 8) % NNAMES);
   size_t n = 1 + (r >> 4) % sizeof buf;
   /* create + write + fsync + rename over a shared name */
-  int fd = open(PD("t%d.%u", me, salt & 7), O_RDWR | O_CREAT | O_TRUNC, 0644);
+  /* the temp name is per THREAD (a probe bug before: two threads of one
+     worker shared t<me>.<salt&7> and interleaved their bytes into one file) */
+  long tid = syscall(SYS_gettid);
+  int fd = open(PD("t%d.%ld.%u", me, tid, salt & 7), O_RDWR | O_CREAT | O_TRUNC, 0644);
   if (fd >= 0) {
     mk(buf, n, (uint8_t)(r >> 16));
     (void)!write(fd, buf, n);
     if ((r & 3) == 0) (void)fsync(fd);
     close(fd);
-    (void)rename(PD("t%d.%u", me, salt & 7), PD("n%d", a));
+    (void)rename(PD("t%d.%ld.%u", me, tid, salt & 7), PD("n%d", a));
   }
   if ((r & 7) == 3) (void)unlink(PD("n%d", b));
   lock_dance(lockfd, (r & 15) == 5);
@@ -143,7 +146,7 @@ static void round_ops(uint32_t salt, int lockfd, int dirfd, int rootfd) {
       uint8_t *m = mmap(0, 32768, PROT_READ | PROT_WRITE, MAP_PRIVATE, mfd, 0);
       if (m != MAP_FAILED) {
         (void)!read(sfd, m + 4096 * (r % 4), 8192);
-        int o = open(PD("w%d", me), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        int o = open(PD("w%d.%ld", me, tid), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (o >= 0) {
           (void)!write(o, m + 16384, 8192);
           close(o);

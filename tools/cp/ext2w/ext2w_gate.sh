@@ -50,6 +50,27 @@ fsck_clean() { # fsck_clean IMG LABEL
   else bad "$2: e2fsck -fn rc=$frc"; sed -n '1,30p' "$D/$2.fsck.log"; fi
 }
 
+# A quit that lands INSIDE a commit (the 1 s timer's, under the writer) may
+# leave only repairable leaks (docs/cp-ext2w.md section 2, guarantee 2): '-'
+# bitmap differences, wrong free/directory counts, unattached inodes,
+# unconnected directories, link counts too high or one short.  Anything else
+# fails, as does any damage at a delay-0 point (right after sync returned).
+fsck_leak_ok() { # fsck_leak_ok IMG LABEL
+  e2fsck -fn "$1" > "$D/$2.fsck.log" 2>&1
+  local frc=$?
+  if [ "$frc" = 0 ]; then good "$2: e2fsck -fn rc=0 ($(tail -1 "$D/$2.fsck.log"))"; return; fi
+  local bad_lines
+  bad_lines=$(grep -av '^e2fsck \|^Pass \|^Fix? no\|^Clear? no\|^Connect to /lost+found? no\|^Free blocks count wrong\|^Free inodes count wrong\|^Directories count wrong\|^Unattached inode\|^Unattached zero-length inode\|^Padding at end of\|^Unconnected directory inode\|^'"'"'\.\.'"'"' in \|WARNING: Filesystem still has errors\| files (.*blocks$\|^$' "$D/$2.fsck.log" |
+    awk '/^(Block|Inode) bitmap differences:/ { if ($0 ~ /\+/) print; next }
+         /^Inode [0-9]+ ref count is [0-9]+, should be [0-9]+/ { split($0, w, " "); a = w[6] + 0; b = w[9] + 0; if (!(a > b || b == a + 1)) print; next }
+         { print }')
+  if [ -z "$bad_lines" ]; then
+    good "$2: e2fsck -fn rc=$frc, leak-class only (the quit landed inside a commit): $(grep -a 'bitmap differences\|count wrong\|Unattached' "$D/$2.fsck.log" | head -3 | tr '\n' ' ')"
+  else
+    bad "$2: e2fsck -fn rc=$frc with damage beyond leaks:"; printf '%s\n' "$bad_lines" | head -10
+  fi
+}
+
 if [[ " $WHAT " == *" bench "* ]]; then
   IMG="$D/cpdata-bench.img"
   CPDATA_FORCE=1 bash "$ROOT/tools/cp/mkcpdata.sh" "$IMG" 8G >/dev/null || exit 2
@@ -126,7 +147,11 @@ if [[ " $WHAT " == *" crash "* ]]; then
     last=$(grep -ao '\[LP\] SYNCED n=[0-9]*' "$D/$tag.console.log" | tail -1 | tr -dc '0-9')
     wi=$(grep -ao '\[LP\] info crashw i=[0-9]*' "$D/$tag.console.log" | tail -1 | tr -dc '0-9')
     say "[HOST] info run $run: last SYNCED n=$last on the console, crashw reached i>=${wi:-?}"
-    fsck_clean "$IMG" "$tag"
+    if [ "$DLY" = 0 ]; then
+      fsck_clean "$IMG" "$tag" # right after sync returned: must be clean
+    else
+      fsck_leak_ok "$IMG" "$tag" # later: a quit may land inside a commit
+    fi
     okn=0
     for n in $(seq 0 "$K"); do
       pat_file "$n" "$D/want.bin"
