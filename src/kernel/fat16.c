@@ -6,6 +6,8 @@
 #include "process.h"
 #include "errno.h"
 #include "kline.h"
+#include "vm.h"       /* cp/ext2w: live mappings follow a truncate */
+#include "file_obj.h"
 
 /* Wall-clock for dirent timestamps (selfhost w10-fstime): the kernel's
  * RTC-anchored REALTIME clock (kernel/time.c — the same clock sysinfo 6
@@ -2281,6 +2283,38 @@ int fat16_close(struct file* f) {
   return fat16_sync_entry(f);
 }
 
+/* cp/ext2w (docs/cp-ext2w.md section 4; docs/cyberpunk.md §0.2 item 18): a
+ * truncate of a file that is mapped.  Linux keeps one page cache: a mapped
+ * page wholly past the new end is unmapped and a later touch is SIGBUS
+ * (truncate_pagecache), the page holding the new end reads zeros after it,
+ * and a later extension reads zeros.  Here every live VM_OBJ_FILE object of
+ * the file (found by its first cluster, cached or detached) is resized with
+ * vm_object_truncate -- a shrink drops the cut pages from every address
+ * space, a grow makes the range fillable again -- and the materialized frame
+ * holding the new end is zeroed past it.  The cache slots are dropped so the
+ * next fill reads with the object's new size.  Called with no lock held,
+ * after the chain and the entry are updated; `cluster` is the chain's first
+ * cluster before the call (O_TRUNC frees it). */
+static void fat16_mapped_resize(uint16_t cluster, uint32_t new_size) {
+  if (cluster < 2) return;
+  struct vm_object *objs[16];
+  int n = vm_object_file_writers(cluster, objs, 16); /* bumps wgen: racing fills re-read */
+  for (int k = 0; k < n; k++) {
+    struct vm_object *o = objs[k];
+    if ((uint64_t)new_size != o->size) (void)vm_object_truncate(o, new_size);
+    uint32_t tail = new_size & (FRAME_SIZE - 1);
+    if (tail) {
+      uint64_t fr = vm_object_peek(o, (uint64_t)new_size & ~(uint64_t)(FRAME_SIZE - 1));
+      if (fr) {
+        volatile uint8_t *pg = (volatile uint8_t *)phys_to_virt(fr);
+        for (uint32_t i = tail; i < FRAME_SIZE; i++) pg[i] = 0;
+      }
+    }
+    vm_object_unref(o);
+  }
+  if (n) file_obj_invalidate_all();
+}
+
 /**
  * Empties an existing file (open with O_TRUNC): frees its whole cluster
  * chain and resets the directory entry to zero length, so a subsequent
@@ -2296,6 +2330,8 @@ int fat16_truncate(struct file* f) {
 
   ylock_acquire(&fat_lock);
   uint16_t c = f->fat16.entry.start_cluster;
+  uint16_t first = c;
+  uint32_t had = f->fat16.entry.file_size;
   while (c >= 2 && c < 0xFFF8) {
     ylock_release(&fat_lock);
     uint16_t next = read_fat(c);
@@ -2311,6 +2347,7 @@ int fat16_truncate(struct file* f) {
   f->fat16.dirty = 1;
 
   fat16_sync_entry(f);
+  if (had) fat16_mapped_resize(first, 0); /* cp/ext2w */
   return 0;
 }
 
@@ -2403,6 +2440,7 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
     fat16_stamp_entry(&f->fat16.entry);  /* ftruncate extend is a modification */
     f->fat16.dirty = 1;
     fat16_sync_entry(f);
+    fat16_mapped_resize(f->fat16.entry.start_cluster, new_size); /* cp/ext2w */
     return 0;
   }
 
@@ -2436,6 +2474,7 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
   fat16_stamp_entry(&f->fat16.entry);  /* ftruncate shrink is a modification */
   f->fat16.dirty = 1;
   fat16_sync_entry(f);
+  fat16_mapped_resize(f->fat16.entry.start_cluster, new_size); /* cp/ext2w */
   return 0;
 }
 
