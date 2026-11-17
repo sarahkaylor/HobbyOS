@@ -20,7 +20,6 @@
 #include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
 #include "ext2_vfs.h" /* cp/ext2: the /EXT data disk */
 #include "tmpfs.h" /* cp/sys: the compat /tmp */
-#include "arch/cpu.h" /* GB-308: get_cpuid() picks the per-CPU read bounce */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -3267,35 +3266,46 @@ static int l76_nfs_read(const struct nfs_mount *m, struct file *f,
  * to the last block, so neither FAT's cluster walk nor the device was at
  * fault; only the unbacked destination was.
  *
- * So a syscall-side read goes through a kernel bounce buffer and vm_kwrite() —
- * the sanctioned copy the rest of the ABI uses, which materializes demand-zero
- * pages and re-validates each page, turning a hole into -EFAULT instead of a
- * kernel-mode fault.  32 KiB per CPU keeps the copy overhead under the
- * sector-paced FAT read it wraps and costs 256 KiB of BSS across 8 CPUs.
+ * cp-sync (merge of main): main fixed this with a 32 KiB per-CPU bounce buffer
+ * and vm_kwrite(); cyberpunk's P1 had fixed the same fault by materializing
+ * the destination first (l_user_ok / vm_range_ok, which demand-commits every
+ * covered page, vm.h).  The merged helper keeps main's entry points and
+ * contract (-EFAULT for a hole, -2 park, short reads) with P1's mechanism:
+ * the destination is materialized writable, then file_read() fills it
+ * directly.  Why not the bounce: it split every read into 32 KiB file_read()
+ * calls, so a 64 KiB NFS read() became two 32 KiB pipelined READs -- the
+ * NFS READ-size boot guard (tools/cp/nfs/rsize_guard.sh G4, every sampled
+ * "[NFSPIPE] len=65536" row) has no 64 KiB rows left to judge -- and it
+ * added a copy to every Wine DLL page read over NFS.  The kernel does not
+ * preempt kernel mode (only user contexts are preempted, trap.c), so a
+ * materialized page stays mapped for the read unless a peer thread unmaps it,
+ * which is the pre-existing rule for every direct user copy here.
  *
  * Returns what file_read() returns, including -2 ("would block, park") when
  * nothing was transferred; a partial transfer that then blocks reports the
  * bytes already delivered, the same contract a short read has.
  */
-#define FS_RD_BOUNCE (32 * 1024)
-static uint8_t fs_rd_bounce[MAX_CPUS][FS_RD_BOUNCE];
-
+#define FS_RD_CHUNK 0x10000000LL /* file_read() takes an int size */
 
 int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
                    struct trap_frame *tf) {
   if (size <= 0) return 0;
   if (!cur) return -EINVAL;
-  uint32_t cpu = get_cpuid();
-  uint8_t *b = fs_rd_bounce[cpu < MAX_CPUS ? cpu : 0];
   int64_t done = 0;
   while (done < size) {
-    int chunk = (size - done) > FS_RD_BOUNCE ? FS_RD_BOUNCE : (int)(size - done);
-    int r = file_read(cur, fd, b, chunk, tf);
-    if (r == -2) return done > 0 ? (int)done : -2;
+    int chunk = (size - done) > FS_RD_CHUNK ? (int)FS_RD_CHUNK : (int)(size - done);
+    if (cur->as && vm_range_ok(cur, ubuf + (uint64_t)done, (uint64_t)chunk, 1) != 0)
+      return done > 0 ? (int)done : -EFAULT;
+    int r = file_read(cur, fd, (void *)(uintptr_t)(ubuf + (uint64_t)done), chunk, tf);
+    if (r == -2) {
+      if (done > 0) {
+        process_cancel_park(cur); /* C1-k4: short read, not a park */
+        return (int)done;
+      }
+      return -2;
+    }
     if (r < 0) return done > 0 ? (int)done : r;
     if (r == 0) break;
-    if (vm_kwrite(cur, ubuf + (uint64_t)done, b, r) != 0)
-      return done > 0 ? (int)done : -EFAULT;
     done += r;
     if (r < chunk) break;
   }
@@ -3321,7 +3331,7 @@ int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
   } else if (file_seek(pg, fd, off, 0 /* SEEK_SET */, &err) < 0) {
     r = -err;
   } else {
-    r = file_read_user(pg, fd, ubuf, n, tf);
+    r = file_read_user(p, fd, ubuf, n, tf); /* cp-sync: the caller thread (park) */
   }
   if (saved >= 0) file_seek(pg, fd, saved, 0, &err);
   if (plk) ylock_release(plk);
@@ -3345,7 +3355,12 @@ int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
   } else if (file_seek(pg, fd, off, 0, &err) < 0) {
     r = -err;
   } else {
-    r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);
+    /* cp-sync: P1's source check (materialize readable) kept from cyberpunk's
+       l_misc_pwrite64; -EFAULT for a hole instead of a kernel-mode fault. */
+    if (n > 0 && p->as && vm_range_ok(p, ubuf, (uint64_t)n, 0) != 0)
+      r = -EFAULT;
+    else
+      r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);
   }
   if (saved >= 0) file_seek(pg, fd, saved, 0, &err);
   if (plk) ylock_release(plk);

@@ -221,8 +221,10 @@ int file_dup(struct process *p, int fd);
 int file_dup2(struct process *p, int oldfd, int newfd);
 int file_gfd_is_pipe(int gfd);
 int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame *tf);
-/* GB-308: read into a USER virtual range — bounces through a kernel buffer and
- * vm_kwrite() so an unbacked destination page cannot fault in kernel mode. */
+/* GB-308: read into a USER virtual range.  cp-sync: materializes the range
+ * writable (vm_range_ok, P1) and then reads into it directly, so an unbacked
+ * destination page cannot fault in kernel mode (main's bounce buffer split
+ * 64 KiB NFS reads; see fs.c). */
 int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
                    struct trap_frame *tf);
 /* GB-308: positioned I/O that is atomic and cursor-neutral (the native layer

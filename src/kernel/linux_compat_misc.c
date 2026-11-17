@@ -118,7 +118,7 @@ static int l_misc_pread64(struct process *p, struct trap_frame *tf) {
   int64_t n = l_argi(tf, 2);
   int64_t off = l_argi(tf, 3);
   if (n < 0) return l_misc_ret(tf, -EINVAL);
-  /* GB-308: atomic positioned read (see file_pread_user): bounce, and hold
+  /* GB-308: atomic positioned read (see file_pread_user): materialize, hold
      one lock over seek+read+restore so concurrent readers of one fd cannot
      read each other's offset. */
   int r = file_pread_user(p, fd, buf, n, off, tf);
