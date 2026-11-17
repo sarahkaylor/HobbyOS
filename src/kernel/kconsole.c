@@ -49,8 +49,14 @@ extern int cpu_is_halted(uint32_t cpu);
 #define CONS_WAIT_US 200000ULL        /* normal writer: 200 ms, then tag */
 #define CONS_WAIT_PANIC_US 20000ULL   /* fatal record: 20 ms */
 #define CONS_SPIN_CAP (1ULL << 27)    /* backstop if the clock does not move */
-#define CONS_KSTALE_US 50000ULL       /* kernel partial line pushed out */
-#define CONS_USER_STALE_US 30000ULL   /* user partial line pushed out */
+/* A partial line is pushed out by the tick only when it is old AND the wire
+   has been quiet as long (nobody else is writing, so its continuation, when
+   it comes, still joins it), or when it is very old.  A busy console never
+   breaks a line that is merely waiting for its writer to be scheduled
+   (measured: a 30 ms rule tore 2 of 39 000 probe rows under host load). */
+#define CONS_KSTALE_US 50000ULL       /* kernel partial line, quiet wire */
+#define CONS_USER_STALE_US 30000ULL   /* user partial line, quiet wire */
+#define CONS_HARD_STALE_US 2000000ULL /* any partial line, however busy */
 #define CONS_UPEND 16
 #define CONS_UPEND_CAP 512
 #define CONS_SUMMARY_US 60000000ULL   /* [CONS] row at most once a minute */
@@ -92,6 +98,7 @@ static volatile uint32_t wire_serving; /* the ticket that owns the wire */
 static volatile uint32_t wire_holder;  /* owner's cpu + 1, 0 = none */
 static uint32_t wire_my[CONS_NCPU];    /* each CPU's ticket while it holds */
 static uint64_t wire_open;             /* id of the writer whose line is open */
+static volatile uint64_t wire_last_us; /* time of the last byte on the wire */
 
 volatile uint32_t cons_diag_mask;
 struct cons_stats cons_stats;
@@ -194,6 +201,7 @@ static void wire_piece(uint64_t id, const char *s, int n, int ends) {
   if (n > 0)
     cons_hw_tx(s, n);
   wire_open = ends ? 0 : id;
+  wire_last_us = timer_get_us();
 }
 
 /* ---- the diagnostic filter ------------------------------------------- */
@@ -624,7 +632,9 @@ void cons_tick(uint32_t cpu) {
       struct cons_slot *x = &cons_slot[cpu][i];
       if (!x->used || x->n == 0)
         continue;
-      if (now - x->t_us >= CONS_KSTALE_US) {
+      uint64_t last = wire_last_us;
+      uint64_t age = now > x->t_us ? now - x->t_us : 0, quiet = now > last ? now - last : 0;
+      if ((age >= CONS_KSTALE_US && quiet >= CONS_KSTALE_US) || age >= CONS_HARD_STALE_US) {
         cons_stats.stale++;
         slot_push(cpu, x, 0);
       } else {
@@ -635,13 +645,20 @@ void cons_tick(uint32_t cpu) {
   }
   if (cpu == 0) {
     int any = 0;
+    uint64_t last = wire_last_us;
+    uint64_t quiet = now > last ? now - last : 0;
+#define CONS_USTALE(e) ((e)->n && ((now - (e)->t_us >= CONS_USER_STALE_US && quiet >= CONS_USER_STALE_US) || \
+                                   now - (e)->t_us >= CONS_HARD_STALE_US))
     for (int i = 0; i < CONS_UPEND; i++)
-      if (cons_upend[i].n && now - cons_upend[i].t_us >= CONS_USER_STALE_US)
+      if (CONS_USTALE(&cons_upend[i]))
         any = 1;
     if (any && wire_lock(cpu, 0) > 0) {
+      now = timer_get_us(); /* entries written before we took the lock are older than this */
+      last = wire_last_us;
+      quiet = now > last ? now - last : 0;
       for (int i = 0; i < CONS_UPEND; i++) {
         struct cons_upend *e = &cons_upend[i];
-        if (e->n && now - e->t_us >= CONS_USER_STALE_US) {
+        if (CONS_USTALE(e)) {
           cons_stats.stale++;
           upend_out(e);
         }

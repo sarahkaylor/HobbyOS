@@ -48,8 +48,15 @@ def upayload(w, s):
     return "".join(ALPHA[(s + i * 17 + w * 5) % 62] for i in range(ulen(w, s)))
 
 
+# tools/t3_tier.sh appends its own "\n=== T3 guest sample: ... ===\n" to the
+# console log when it sees a stall marker, wherever the guest's byte stream
+# happens to be; that is the host writing into the file, not the console.
+T3_NOTE = re.compile(r"\n=== T3 guest sample[^\n]*===\n")
+
+
 def check(text, min_cpus=0, show=8):
-    lines = text.replace("\r", "").split("\n")
+    text = T3_NOTE.sub("", text.replace("\r", ""))
+    lines = text.split("\n")
     inter, torn = [], []
     kseen, useen, cpus = set(), set(), set()
     totals = None
@@ -137,6 +144,11 @@ def self_test():
     # not enough CPUs
     r = check("\n".join(good + [tot.replace("ncpus=1", "ncpus=8")]))
     assert verdict(r, 1)[0] == 1, r
+    # the tier's own note dropped into the middle of a row is not a tear
+    note = list(good)
+    note[0] = note[0][:20] + "\n=== T3 guest sample: SKIPPED -- no monitor ===\n" + note[0][20:]
+    r = check("\n".join(note + [tot]))
+    assert verdict(r, 1)[0] == 0, r
     print("lp_check_console self-test: PASS")
     return 0
 
