@@ -1,0 +1,22 @@
+# Wine A/B, Gate P5 sessions (tools/cp/pe/wine-ab.sh; the wave-5 P5 rerun line, LO_ON_DISK=), strix KVM, 2026-11-17
+# base = cyberpunk 15ad4a35 (strix:~/cp/lanes/pe-base), lane = cp-pe 35f97d73 (strix:~/cp/lanes/pe-ab)
+# per run: fault_procs = Wine .exe processes with a [KERNEL] memory fault row; unhandled = Wine 'Unhandled page fault/exception' lines;
+# emptyname_imports = 'err:module:import_dll Library  (' lines; pecow_rows = [PECOW] rows (lane only: COWs that had other CPUs to shoot down)
+# post-hoc scan of all 12 serial logs: 0 [SIGDUMP], 0 'User process fault', 0 'memory fault' rows
+# base: 6 Gate P5 sessions in /home/sarah/cp/lanes/pe-base (2026-11-17T07:55:45Z, host strix)
+run 1 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+run 2 rc=1 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] FAIL: vkcube: 1 screendump(s)"
+run 3 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+run 4 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+run 5 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+run 6 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+# lane: 6 Gate P5 sessions in /home/sarah/cp/lanes/pe-ab (2026-11-17T07:55:47Z, host strix)
+run 1 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=1 last_pecow(peers=1 cows=382) p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+run 2 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+run 3 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+run 4 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=1 last_pecow(peers=1 cows=382) p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+run 5 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+run 6 rc=0 fault_procs=0 unhandled=0 emptyname_imports=0 pecow_rows=0  p5="[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, "
+# the two lane [PECOW] rows:
+[PECOW] cow_with_peers=1 cows=382 pid=145 va=0x0x1080BBF000 peers=1 obj=nfs off=0x0x2000 by=user
+[PECOW] cow_with_peers=1 cows=382 pid=147 va=0x0x1080BCF000 peers=1 obj=nfs off=0x0x2000 by=user

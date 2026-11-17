@@ -1,0 +1,26 @@
+# linux_probe_pemap via tools/gate/t3_linux_probe.sh pemap (default args: /tmp data, 16 children x 4), strix KVM, 8 vCPUs
+## lane cp-pe @ ee8757be
+[LP] pemap: 3 data files (first /tmp/pemap/pemap00.bin, 615400 bytes), par=8 children=16 iters=4
+[LP] PASS V1 COW memfd (12 iterations, slack 2000)
+[LP] PASS V2 COW file (12 iterations, slack 2000)
+[LP] PASS V3 COW by read() (12 iterations, slack 2000)
+[LP] PASS V4 MAP_FIXED anon (12 iterations, slack 2000)
+[LP] PASS V5 MAP_FIXED file (12 iterations, slack 2000)
+[LP] PASS V6 COW while the reader sleeps in futex_wait (12 iterations)
+[LP] S1 child 0 pid 75 ok maps=68 preads=15 sib_reads=1840 sib_churn=282
+[LP] S1 child 1 pid 76 ok maps=70 preads=6 sib_reads=1842 sib_churn=336
+[LP] PASS S1 storm: 16 children (8 at a time) x 4 iters x 3 files, 0 bad, 7631 ms
+[LP] done rc=0
+t3_linux_probe: PASS — pemap reached its done marker
+## Linux host (strix, kernel 7.0.0-43-generic), same source built with gcc, 10 runs: every run rc=0
+[LP] pemap: 3 data files (first /tmp/pemap/pemap02.bin, 640090 bytes), par=8 children=32 iters=6
+[LP] PASS V1 COW memfd (12 iterations, slack 2000)
+[LP] PASS V2 COW file (12 iterations, slack 2000)
+[LP] PASS V3 COW by read() (12 iterations, slack 2000)
+[LP] PASS V4 MAP_FIXED anon (12 iterations, slack 2000)
+[LP] PASS V5 MAP_FIXED file (12 iterations, slack 2000)
+[LP] PASS V6 COW while the reader sleeps in futex_wait (12 iterations)
+[LP] S1 child 0 pid 95402 ok maps=81 preads=26 sib_reads=2759 sib_churn=1029
+[LP] S1 child 1 pid 95403 ok maps=79 preads=43 sib_reads=2761 sib_churn=1035
+[LP] PASS S1 storm: 32 children (8 at a time) x 6 iters x 3 files, 0 bad, 450 ms
+[LP] done rc=0
