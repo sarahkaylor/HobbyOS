@@ -1,0 +1,74 @@
+# P8 probe2 -- P8_PHASE=probe on base: p8envprobe, p8fdcount, p8scmprobe, p8killprobe (no Wine)
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cyberpunk 949ba008 + cp-game harness (tools/cp/p8)
+# generated 2026-11-17T00:46:43-06:00 from obj/cp-p8/probe2 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=probe run=probe2 2026-11-17T00:40:38-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: /home/sarah/cp/vk2-scratch/x2-xserver/XHOBBY.BIN (sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97) staged as ::/XHOBBY.BIN (scratch override, not committed)
+== boot (deadline 600s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  00:46:13  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] qemu pid 2149605
+[P8W] +     4.3 s  00:46:17  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8W] +    15.3 s  00:46:28  launcher done: [P8] done
+[P8W] +    19.6 s  00:46:32  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 3
+== e2fsck -fn after the boot: rc=0 (cpdata: 11/1048576 files (0.0% non-contiguous), 77073/4194304 blocks)
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  00:46:13  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
++     4.3 s  00:46:17  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
++    15.3 s  00:46:28  launcher done: [P8] done
++    19.6 s  00:46:32  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 3
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+[P8] env entries=14 bytes=423 (HobbyOS keeps <= 512 bytes / 24 entries per process)
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] begin envprobe : /P8ENV.ELF
+[X] [P8ENV] E0 spawned with envc=14 bytes=423 last=VKD3D_FEATURE_LEVEL
+[X] [P8ENV] E1 child sees envc=40 bytes=1560 last=E39
+[X] [P8ENV] E1 execve env: 40/40 entries intact -> PASS
+[P8] end envprobe status=0 ms=93
+[P8] begin envprobe40 : spawn_ex with 40 entries / 1560 bytes
+[X] [P8ENV] E2 malformed entries: 0 -> PASS
+[X] [P8ENV] E3 spawned40 sees envc=15 bytes=535 last=LD_LIBRARY_PATH
+[P8] end envprobe40 status=256
+[X] [P8ENV] E3 spawn_ex env: 13/40 entries intact -> FAIL
+[P8] fd headroom with no Wine running (cap 600):
+[X] [P8ENV] E4 malformed entries: 0 -> PASS
+[P8] begin scmprobe : /P8SCM.ELF
+[X] [P8SCM] table filled with 251 fds (stopped by errno 24)
+[X] [P8SCM] S1 recvmsg ret=-1 errno=24 -> FAIL
+[X] [P8SCM] S2 MSG_CTRUNC=0 fd_delivered=-1 -> FAIL
+[X] [P8SCM] S3 second recvmsg ret=4 errno=0 -> FAIL
+[P8] end scmprobe status=0 ms=68
+[P8] begin killprobe : /P8KILL.ELF
+[X] [P8KILL] kill rc=-1; K1 reaped=0 after 10000 ms -> FAIL
+[X] [P8KILL] K2 status=0x0 signaled=0 sig=0 -> FAIL
+[P8] end killprobe status=0 ms=11240
+[P8] done
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+[P8] fd headroom with no Wine running (cap 600):
+[X] [P8FD] cap=600 opened=253 first_errno=24 (EMFILE)
+
+
+## Linux reference (strix host, Ubuntu 26.04 kernel 7.0.0-43, `ulimit -n 256`; the same sources, gcc and musl-gcc static builds, identical rows)
+[P8SCM] table filled with 251 fds (stopped by errno 24)
+[P8SCM] S1 recvmsg ret=4 errno=0 -> PASS
+[P8SCM] S2 MSG_CTRUNC=1 fd_delivered=-1 -> PASS
+[P8SCM] S3 second recvmsg ret=-1 errno=11 -> PASS
+[P8ENV] E1 child sees envc=40 bytes=1560 last=E39
+[P8ENV] E1 execve env: 40/40 entries intact -> PASS
+[P8ENV] E2 malformed entries: 0 -> PASS
+[P8KILL] kill rc=0; K1 reaped=1 after 100 ms -> PASS
+[P8KILL] K2 status=0x9 signaled=1 sig=9 -> PASS
+(E3/E4 need HobbyOS's native spawn_ex; there is no Linux equivalent.)

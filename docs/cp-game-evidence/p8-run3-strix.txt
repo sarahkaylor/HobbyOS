@@ -1,0 +1,541 @@
+# P8 run3 -- game boot, headroom every 3 s cap 100 (stop 2)
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cyberpunk 949ba008 + cp-game harness (tools/cp/p8)
+# generated 2026-11-17T00:24:38-06:00 from obj/cp-p8/run3 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=game run=run3 2026-11-17T00:03:41-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== game copy before: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy before: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== exports.sh: add /srv/nfs/cp-game ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: /home/sarah/cp/vk2-scratch/x2-xserver/XHOBBY.BIN (sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97) staged as ::/XHOBBY.BIN (scratch override, not committed)
+== data disk: a copy of /home/sarah/cp/lanes/game/obj/cp-p8/pfx-seeded.img
+== boot (deadline 1500s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  00:03:45  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] qemu pid 1528396
+[P8W] +     5.3 s  00:03:50  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +    30.3 s  00:04:15  warm-up result: [P8] warm-up: display driver loaded
+[P8W] +    30.3 s  00:04:15  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +    30.4 s  00:04:15  baseline screendump 1920x1080 (desktop before the game's window)
+[P8W] +   419.4 s  00:10:44  verdict: qemu-exited rc=0; QEMU stopped, slot released; guests on the host now: 2
+== e2fsck -fn after the boot: rc=0 (cpdata: 1034/1048576 files (0.6% non-contiguous), 135257/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== game copy unchanged (count, bytes, newest mtime)
+== caches on ext2 after the boot (debugfs, sizes only)
+   /pfx/drive_c/vc              0 entries, 0 bytes
+   /mc                          0 entries, 0 bytes
+== verdict: qemu-exited rc=0
+== timeline:
+== exports.sh: remove /srv/nfs/cp-game ok (non-cp lines unchanged)
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  00:03:45  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
++     5.3 s  00:03:50  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    30.3 s  00:04:15  warm-up result: [P8] warm-up: display driver loaded
++    30.3 s  00:04:15  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    30.4 s  00:04:15  baseline screendump 1920x1080 (desktop before the game's window)
++   419.4 s  00:10:44  verdict: qemu-exited rc=0; QEMU stopped, slot released; guests on the host now: 2
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] p8launch (C8-game) phase 2
+[P8] env entries=13 bytes=398 (HobbyOS keeps <= 512 bytes / 24 entries per process)
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 86400
+[P8] keepalive pid=16
+[P8] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] 0034:err:winediag:getaddrinfo Failed to resolve your host name IP
+[X] 0034:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 00ac:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[X] [VK] idle: keepalive pid 32, desktop 0000000000010020, 86400 s
+[X] [VK] winprobe: CreateWindowEx -> 0000000000010056 in 132 ms (display driver loaded)
+[P8] end winprobe01 status=0 ms=24576
+[P8] warm-up: display driver loaded
+[P8] chdir /GAME/bin/x64 rc=0
+[P8] fd headroom before the game (cap 600):
+[P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8] game pid=93
+[P8] census game t=5s procs: vkcube.exe/16:s5 wineserver/22:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s3 (n=10)
+[P8] census game t=8s procs: vkcube.exe/16:s2 wineserver/22:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s3 /96 (n=11)
+[P8] census game t=11s procs: vkcube.exe/16:s5 wineserver/22:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s3 /96 (n=11)
+[P8] census game t=14s procs: vkcube.exe/16:s5 wineserver/22:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s3 /96 (n=11)
+[P8] census game t=17s procs: vkcube.exe/16:s5 wineserver/22:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s3 /96 (n=11)
+[P8] census game t=30s procs: vkcube.exe/16:s3 wineserver/22:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s7 Cyberpunk2077.e/96:s3 Cyberpunk2077.e/105:s3 (n=12)
+[LCOMPAT] ENOSYS nr=221 name=wineserver pid=22 rip=0x108011AD0E rdi=0xC4
+[X] 0168:err:secur32:SECUR32_initSchannelSP no schannel support, expect problems
+[X] 0168:err:kerberos:kerberos_LsaApInitializePackage no Kerberos support, expect problems
+[X] 0140:err:winediag:NtCreateFile Too many open files, ulimit -n probably needs to be increased
+[X] 0140:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 0140:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[KERNEL] User process fault! Vector: 3 RIP: 0x1422d7b7b
+[KERNEL] fault-pc region=0x0000000140001000+0x0000000002FF2000 prot=5 kind=3 jit=0 live=12 err=0x0000000000000000 rsp=0x00007FFFFE2FF660
+[P8] census game t=33s procs: vkcube.exe/16:s5 wineserver/22:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 REDEngineErrorR/105:s3 /111 (n=12)
+[X] Protocol error: process 0158: recvmsg: Too many open files
+[KERNEL] pid=22 (wineserver) memory fault VA=0x0000000000000000 PC=0x0000001000043D20 rw=r  in=HOLE region=NONE rsp=0x00000017FFFFF318 live=1 inH=0 cr3frame=0x000000020522A000 asroot=0x000000020522A000 sys=47 ret=0x0000000000000000 rbx=0x0000001040708D80 rdi=0x0000000000000000 rsi=0x0000000000000018
+[SIGDUMP] pid=22 tgid=22 nm=wineserver rip=0x0000001000043D20 rsp=0x00000017FFFFF318 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x0000000000000000
+[X] wineserver crashed, please enable coredumps (ulimit -c unlimited) and restart.
+[P8] census game t=36s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=39s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=42s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=45s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=48s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=51s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=54s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=57s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=61s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=65s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=68s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=71s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=74s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=77s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=80s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=83s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=86s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=89s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=92s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=95s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=98s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=101s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=104s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=107s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=110s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=113s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=116s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=120s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=123s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=126s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=129s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=132s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=135s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=138s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=141s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=144s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=147s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=150s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=153s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=156s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=159s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=162s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=165s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=168s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=171s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=174s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=177s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=181s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=184s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=187s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=190s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=193s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=196s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=199s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=202s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=205s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=209s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=212s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=215s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=218s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=221s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=224s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=227s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=230s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=233s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=236s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=239s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=242s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=245s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=248s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=251s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=254s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=257s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=260s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=263s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=267s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=270s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=273s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=276s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=279s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=282s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=285s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=288s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=291s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=294s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=297s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=304s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=307s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=310s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=313s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=316s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=319s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=323s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=326s procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=329s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=332s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=335s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=338s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=341s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=344s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=347s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=350s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=353s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=356s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=359s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=362s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=365s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=368s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=371s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=374s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=377s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=381s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=384s procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+[P8] census game t=387s procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/68:s5 rpcss.exe/77:s5 Cyberpunk2077.e/93:s5 wine/122:s5 (n=10)
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+[P8] fd headroom before the game (cap 600):
+[X] [P8FD] cap=600 opened=120 first_errno=24 (EMFILE)
+[P8] census game t=5s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=8s (n=11)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=11s (n=11)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=14s (n=11)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=17s (n=11)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=30s (n=12)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=33s (n=12)
+[X] [P8FD] cap=100 opened=59 first_errno=24 (EMFILE)
+[P8] census game t=36s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=39s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=42s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=45s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=48s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=51s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=54s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=57s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=61s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=65s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=68s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=71s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=74s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=77s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=80s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=83s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=86s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=89s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=92s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=95s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=98s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=101s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=104s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=107s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=110s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=113s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=116s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=120s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=123s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=126s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=129s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=132s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=135s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=138s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=141s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=144s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=147s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=150s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=153s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=156s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=159s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=162s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=165s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=168s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=171s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=174s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=177s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=181s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=184s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=187s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=190s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=193s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=196s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=199s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=202s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=205s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=209s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=212s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=215s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=218s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=221s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=224s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=227s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=230s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=233s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=236s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=239s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=242s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=245s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=248s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=251s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=254s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=257s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=260s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=263s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=267s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=270s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=273s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=276s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=279s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=282s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=285s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=288s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=291s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=294s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=297s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=304s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=307s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=310s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=313s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=316s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=319s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=323s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=326s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=329s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=332s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=335s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=338s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=341s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=344s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=347s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=350s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=353s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=356s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=359s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=362s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=365s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=368s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=371s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=374s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=377s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=381s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=384s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+[P8] census game t=387s (n=10)
+[X] [P8FD] cap=100 opened=100 first_errno=0
+
+## modules the game process tree loaded after launch (WINEDEBUG +loaddll; names only)
+1: 0140 native Z:\GAME\bin\x64\Cyberpunk2077.exe
+2: 0140 builtin C:\windows\system32\kernelbase.dll
+3: 0140 builtin C:\windows\system32\kernel32.dll
+4: 0140 builtin C:\windows\system32\ucrtbase.dll
+5: 0140 builtin C:\windows\system32\sechost.dll
+6: 0140 builtin C:\windows\system32\msvcrt.dll
+7: 0140 builtin C:\windows\system32\advapi32.dll
+8: 0140 builtin C:\windows\system32\win32u.dll
+9: 0140 builtin C:\windows\system32\gdi32.dll
+10: 0140 builtin C:\windows\system32\USER32.dll
+11: 0140 builtin C:\windows\system32\shcore.dll
+12: 0140 builtin C:\windows\system32\shlwapi.dll
+13: 0140 builtin C:\windows\system32\SHELL32.dll
+14: 0140 builtin Z:\GAME\bin\x64\dbghelp.dll
+15: 0140 builtin C:\windows\system32\IMM32.dll
+16: 0140 builtin C:\windows\system32\cryptbase.dll
+17: 0140 builtin C:\windows\system32\rpcrt4.dll
+18: 0140 builtin C:\windows\system32\combase.dll
+19: 0140 builtin C:\windows\system32\coml2.dll
+20: 0140 builtin C:\windows\system32\ole32.dll
+21: 0140 builtin C:\windows\system32\vcruntime140.dll
+22: 0140 builtin C:\windows\system32\MSVCP140.dll
+23: 0140 builtin C:\windows\system32\VCRUNTIME140_1.dll
+24: 0140 native Z:\GAME\bin\x64\sl.interposer.dll
+25: 0140 builtin C:\windows\system32\SETUPAPI.dll
+26: 0140 builtin C:\windows\system32\VERSION.dll
+27: 0140 native C:\windows\system32\dxgi.dll
+28: 0140 builtin C:\windows\system32\CFGMGR32.dll
+29: 0140 native Z:\GAME\bin\x64\libxell.dll
+30: 0140 native Z:\GAME\bin\x64\libxess_fg.dll
+31: 0140 builtin C:\windows\system32\HID.DLL
+32: 0140 builtin C:\windows\system32\msacm32.dll
+33: 0140 builtin C:\windows\system32\WINMM.dll
+34: 0140 builtin C:\windows\system32\WS2_32.dll
+35: 0140 builtin C:\windows\system32\bcrypt.dll
+36: 0140 builtin C:\windows\system32\CRYPT32.dll
+37: 0140 builtin C:\windows\system32\mpr.dll
+38: 0140 builtin C:\windows\system32\WININET.dll
+39: 0140 native Z:\GAME\bin\x64\REDGalaxy64.dll
+40: 0140 native Z:\GAME\bin\x64\libxess.dll
+41: 0140 builtin C:\windows\system32\WLDAP32.dll
+42: 0140 builtin C:\windows\system32\Normaliz.dll
+43: 0140 native Z:\GAME\bin\x64\libcurl.dll
+44: 0140 native Z:\GAME\bin\x64\redlexer_native.dll
+45: 0140 builtin C:\windows\system32\XINPUT9_1_0.dll
+46: 0140 native Z:\GAME\bin\x64\bink2w64.dll
+47: 0140 native Z:\GAME\bin\x64\icudt.dll
+48: 0140 native Z:\GAME\bin\x64\icuuc.dll
+49: 0140 native Z:\GAME\bin\x64\icuin.dll
+50: 0140 native Z:\GAME\bin\x64\PhysX3Common_x64.dll
+51: 0140 native Z:\GAME\bin\x64\PxFoundation_x64.dll
+52: 0140 native Z:\GAME\bin\x64\PhysX3CharacterKinematic_x64.dll
+53: 0140 native Z:\GAME\bin\x64\PhysX3Cooking_x64.dll
+54: 0140 native Z:\GAME\bin\x64\PhysX3_x64.dll
+55: 0140 native Z:\GAME\bin\x64\amd_fidelityfx_loader_dx12.dll
+56: 0140 builtin C:\windows\system32\POWRPROF.dll
+57: 0140 native Z:\GAME\bin\x64\oo2ext_7_win64.dll
+58: 0140 native Z:\GAME\bin\x64\amd_ags_x64.dll
+59: 0140 builtin C:\windows\system32\OLEAUT32.dll
+60: 0140 builtin C:\windows\system32\jsproxy.dll
+61: 0140 builtin C:\windows\system32\WINHTTP.dll
+62: 0140 builtin C:\windows\system32\concrt140.dll
+63: 0148 native Z:\GAME\bin\x64\REDEngineErrorReporter.exe
+64: 0148 builtin C:\windows\system32\kernelbase.dll
+65: 0148 builtin C:\windows\system32\kernel32.dll
+66: 0148 builtin C:\windows\system32\ucrtbase.dll
+67: 0148 builtin C:\windows\system32\sechost.dll
+68: 0148 builtin C:\windows\system32\msvcrt.dll
+69: 0148 builtin C:\windows\system32\advapi32.dll
+70: 0148 builtin C:\windows\system32\win32u.dll
+71: 0148 builtin C:\windows\system32\gdi32.dll
+72: 0148 builtin C:\windows\system32\USER32.dll
+73: 0148 builtin Z:\GAME\bin\x64\dbghelp.dll
+74: 0148 builtin C:\windows\system32\VERSION.dll
+75: 0148 builtin C:\windows\system32\shcore.dll
+76: 0148 builtin C:\windows\system32\shlwapi.dll
+77: 0148 builtin C:\windows\system32\SHELL32.dll
+78: 0148 builtin C:\windows\system32\cryptbase.dll
+79: 0148 builtin C:\windows\system32\rpcrt4.dll
+80: 0148 builtin C:\windows\system32\combase.dll
+81: 0148 builtin C:\windows\system32\coml2.dll
+82: 0148 builtin C:\windows\system32\ole32.dll
+83: 0140 native Z:\GAME\bin\x64\steam_api64.dll
+84: 0140 native Z:\GAME\bin\x64\GameServicesSteam.dll
+85: 0140 builtin C:\windows\system32\dnsapi.dll
+86: 0140 builtin C:\windows\system32\nsi.dll
+87: 0140 builtin C:\windows\system32\iphlpapi.dll
+88: 0140 builtin C:\windows\system32\netprofm.dll
+89: 0168 builtin C:\windows\system32\secur32.dll
+90: 0168 builtin C:\windows\system32\Kerberos.dll
+91: 0168 builtin C:\windows\system32\netutils.dll
+92: 0168 builtin C:\windows\system32\netapi32.dll
+93: 0168 builtin C:\windows\system32\MSV1_0.dll

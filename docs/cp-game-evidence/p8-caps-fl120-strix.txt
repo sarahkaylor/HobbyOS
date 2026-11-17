@@ -1,0 +1,195 @@
+# P8 caps-fl120 -- caps probe only with VKD3D_FEATURE_LEVEL=12_0
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cyberpunk 949ba008 + cp-game harness (tools/cp/p8)
+# generated 2026-11-17T00:24:38-06:00 from obj/cp-p8/caps-fl120 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=game run=caps-fl120 2026-11-17T00:20:02-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== p8caps.exe 77824 B sha256 0d57885c87943790
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== game copy before: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy before: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== exports.sh: add /srv/nfs/cp-game ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: /home/sarah/cp/vk2-scratch/x2-xserver/XHOBBY.BIN (sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97) staged as ::/XHOBBY.BIN (scratch override, not committed)
+== data disk: a copy of /home/sarah/cp/lanes/game/obj/cp-p8/pfx-seeded.img
+== boot (deadline 900s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  00:20:37  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] qemu pid 1712036
+[P8W] +     4.3 s  00:20:41  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +    24.3 s  00:21:01  warm-up result: [P8] warm-up: display driver loaded
+[P8W] +    34.4 s  00:21:11  launcher done: [P8] done
+[P8W] +    38.6 s  00:21:15  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 2
+== e2fsck -fn after the boot: rc=0 (cpdata: 1034/1048576 files (0.6% non-contiguous), 135257/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== game copy unchanged (count, bytes, newest mtime)
+== caches on ext2 after the boot (debugfs, sizes only)
+   /pfx/drive_c/vc              0 entries, 0 bytes
+   /mc                          0 entries, 0 bytes
+== verdict: launcher-done
+== timeline:
+== exports.sh: remove /srv/nfs/cp-game ok (non-cp lines unchanged)
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  00:20:37  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
++     4.3 s  00:20:41  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    24.3 s  00:21:01  warm-up result: [P8] warm-up: display driver loaded
++    34.4 s  00:21:11  launcher done: [P8] done
++    38.6 s  00:21:15  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 2
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] p8launch (C8-game) phase 2
+[P8] env entries=14 bytes=423 (HobbyOS keeps <= 512 bytes / 24 entries per process)
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 86400
+[P8] keepalive pid=16
+[P8] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] 0034:err:winediag:getaddrinfo Failed to resolve your host name IP
+[X] 0034:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 00ac:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[X] [VK] idle: keepalive pid 32, desktop 0000000000010020, 86400 s
+[X] [VK] winprobe: CreateWindowEx -> 0000000000010056 in 104 ms (display driver loaded)
+[P8] end winprobe01 status=0 ms=19677
+[P8] warm-up: display driver loaded
+[P8] begin d3d12caps : wine Z:\CP\P8\p8caps.exe
+[X] [P8CAPS] start (C8-game)
+[X] [P8CAPS] module d3d12.dll      C:\windows\system32\d3d12.dll
+[X] [P8CAPS] module d3d12core.dll  C:\windows\system32\d3d12core.dll
+[X] [P8CAPS] module dxgi.dll       C:\windows\system32\dxgi.dll
+[X] info:  Game: p8caps.exe
+[X] info:  DXVK: v3.1.1
+[X] info:  Build: x86_64 gcc 16.2.0
+[X] info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x7ffffeb63b60
+[X] info:  Extension providers:
+[X] info:    Platform WSI
+[X] info:    OpenVR
+[X] info:  OpenVR: could not open registry key, status 2
+[X] info:  OpenVR: Failed to locate module
+[X] info:    OpenXR
+[X] info:  Enabled instance extensions:
+[X] info:    VK_KHR_get_surface_capabilities2
+[X] info:    VK_KHR_surface
+[X] info:    VK_KHR_surface_maintenance1
+[X] info:    VK_KHR_win32_surface
+[X] info:  Found device: llvmpipe (LLVM 21.1.8, 256 bits) (llvmpipe 26.2.6)
+[X] [P8CAPS] adapter: "llvmpipe (LLVM 21.1.8, 256 bits)" vendor 0x10005 device 0x0000 dedicated 11520 MiB shared 11520 MiB
+[X] warn:  DxgiAdapter::QueryInterface: Unknown interface query
+[X] warn:  f0db4c7f-fe5a-42a2-bd62-f2a6cf6fc83e
+[X]  27.434:013c:0140:info:vkd3d-proton:vkd3d_instance_apply_application_workarounds: Detected SteamAppID 1091500
+[X]  27.443:013c:0140:info:vkd3d-proton:vkd3d_instance_deduce_config_flags_from_environment: shader_cache is used, global_pipeline_cache is enforced.
+[X]  27.443:013c:0140:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  27.481:013c:0140:info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.1.0.
+[X]  27.481:013c:0140:info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 4522cc1a8b1347f.
+[X]  27.658:013c:0140:info:vkd3d-proton:vkd3d_physical_device_info_init_maint9: Implementation supports eliding QFOT for non-compressed optimal images.
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X]  32.111:013c:0140:info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: UMA-like topology.
+[X]  32.111:013c:0140:info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+[X]  32.124:013c:0140:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Enabling fast paths for advanced ExecuteIndirect() graphics and compute (EXT_dgc).
+[X]  32.126:013c:0140:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X]  32.496:013c:0140:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 256, may be inaccurate.
+[X]  32.499:013c:0140:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+[X]  32.499:013c:0140:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+[X]  32.506:013c:0140:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  32.506:013c:0140:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X] [P8CAPS] D3D12CreateDevice(FL 12_0) hr=0x00000000
+[X]  32.522:013c:0148:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+[X]  32.526:013c:0148:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+[X]  32.529:013c:0148:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 3.000 ms.
+[X]  32.536:013c:0148:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  32.536:013c:0148:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+[X]  32.620:013c:0140:info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.1.0.
+[X]  32.620:013c:0140:info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 4522cc1a8b1347f.
+[X]  32.664:013c:0140:info:vkd3d-proton:vkd3d_physical_device_info_init_maint9: Implementation supports eliding QFOT for non-compressed optimal images.
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X]  32.736:013c:0140:info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: UMA-like topology.
+[X]  32.736:013c:0140:info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+[X]  32.736:013c:0140:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Enabling fast paths for advanced ExecuteIndirect() graphics and compute (EXT_dgc).
+[X]  32.736:013c:0140:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X] libunwind: __unw_add_dynamic_fde: bad fde: FDE is really a CIE
+[X]  32.852:013c:0140:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 256, may be inaccurate.
+[X]  32.852:013c:0140:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+[X]  32.852:013c:0140:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+[X]  32.852:013c:0140:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  32.852:013c:0140:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X] [P8CAPS] D3D12CreateDevice(FL 11_0) hr=0x00000000 in 273 ms
+[X]  32.859:013c:0150:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+[X]  32.860:013c:0150:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+[X] [P8CAPS] max feature level 0xc000
+[X] [P8CAPS] highest shader model 0x60 (hr=0x00000000)
+[X]  32.861:013c:0150:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 2.000 ms.
+[X] [P8CAPS] options: ResourceBindingTier 3 TiledResourcesTier 2 ResourceHeapTier 2 ConservativeRaster 0 ROVs 1 TypedUAVLoadAdditionalFormats 1
+[X] [P8CAPS] options1: WaveOps 1 WaveLaneCount 8..8 Int64ShaderOps 1
+[X] [P8CAPS] options5: RaytracingTier 11 RenderPassesTier 0
+[X] [P8CAPS] options7: MeshShaderTier 0 SamplerFeedbackTier 90
+[X]  32.863:013c:0150:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  32.871:013c:0150:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+[X] [P8CAPS] done rc=0
+[P8] end d3d12caps status=0 ms=9186
+[P8] P8_CAPS_ONLY: no game this boot
+[P8] begin kill : wineserver -k
+[P8] end kill status=0 ms=574
+[P8] done
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+

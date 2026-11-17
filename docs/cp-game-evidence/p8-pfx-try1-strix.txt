@@ -1,0 +1,55 @@
+# P8 pfx-try1 -- first prefix boot: the full P8 env, wine crashes in strlen(NULL) (stop 1)
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cyberpunk 949ba008 + cp-game harness (tools/cp/p8)
+# generated 2026-11-17T00:24:36-06:00 from obj/cp-p8/pfx-try1 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=pfx run=pfx 2026-11-16T23:47:30-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: /home/sarah/cp/vk2-scratch/x2-xserver/XHOBBY.BIN (sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97) staged as ::/XHOBBY.BIN (scratch override, not committed)
+== boot (deadline 1800s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  23:50:06  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 0
+[P8W] qemu pid 1402842
+[P8W] +     4.3 s  23:50:11  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8W] +     6.3 s  23:50:13  wineboot -i ended: [P8] end wineboot status=11 ms=1545
+[P8W] +     7.3 s  23:50:14  sync done: [P8] sync done
+[P8W] +     7.3 s  23:50:14  launcher done: [P8] done
+[P8W] +    11.6 s  23:50:18  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 0
+== e2fsck -fn after the boot: rc=0 (cpdata: 11/1048576 files (0.0% non-contiguous), 77073/4194304 blocks)
+run-p8: seed-prefix
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  23:50:06  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 0
++     4.3 s  23:50:11  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
++     6.3 s  23:50:13  wineboot -i ended: [P8] end wineboot status=11 ms=1545
++     7.3 s  23:50:14  sync done: [P8] sync done
++     7.3 s  23:50:14  launcher done: [P8] done
++    11.6 s  23:50:18  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 0
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] p8launch (C8-game) phase 1
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] begin wineboot : wineboot -i
+[KERNEL] pid=16 (/CP/WINE/bin/wine) memory fault VA=0x0000000000000000 PC=0x0000001080190915 rw=r  in=HOLE region=NONE rsp=0x00000017FFFFF928 live=1 inH=0 cr3frame=0x00000002030F1000 asroot=0x00000002030F1000 sys=257 ret=0x0000000000000000 rbx=0x0000000000000000 rdi=0x0000000000000000 rsi=0x00000000
+[SIGDUMP] pid=16 tgid=16 nm=/CP/WINE/bin/wine rip=0x0000001080190915 rsp=0x00000017FFFFF928 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x0000000000000000
+/X11/FONTS/DJVSCND.TTF[LCOMPAT] fault-no-handler pid=16 sig=11 ipc=0x0x1080190915 rsp=0x0x17FFFFF928 vec=14 cr2=0x0x0 live=1 -> default action
+[P8] end wineboot status=11 ms=1545
+[P8] quiesce after wineboot: extra=0
+[P8] begin reg-crashdialog : wine reg add HKCU\Software\Wine\WineDbg /v ShowCrashDialog /t REG_DWORD /d 0 /f
+[KERNEL] pid=18 (/CP/WINE/bin/wine) memory fault VA=0x0000000000000000 PC=0x0000001080190915 rw=r  in=HOLE region=NONE rsp=0x00000017FFFFF8A8 live=1 inH=0 cr3frame=0x0000000203C78000 asroot=0x0000000203C78000 sys=257 ret=0x0000000000000000 rbx=0x0000000000000000 rdi=0x0000000000000000 rsi=0x00000000
+[SIGDUMP] pid=18 tgid=18 nm=/CP/WINE/bin/wine rip=0x0000001080190915 rsp=0x00000017FFFFF8A8 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x0000000000000000
+[LCOMPAT] fault-no-handler pid=18 sig=11 ipc=0x0x1080190915 rsp=0x0x17FFFFF8A8 vec=14 cr2=0x0x0 live=1 -> default action
+[X] [PFX] sync rc=0 errno=0
+[P8] end sync status=0 ms=18
+[P8] sync done
+[P8] done
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+

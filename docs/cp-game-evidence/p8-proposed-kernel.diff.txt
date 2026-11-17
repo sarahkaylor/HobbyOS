@@ -1,0 +1,90 @@
+# Proposed kernel diff from lane C8-game (docs/cp-p8.md stops 1, 2b, 7) -- NOT applied on cp-game.
+# Against cyberpunk @ 949ba008.  Owners: unix.c + fs.c -> C1-k5 (fd table / SCM_RIGHTS install);
+# process.h HO_ENV_LEN + program_loader.c COMPAT_MAX_ENV -> unowned this wave (integrator to assign).
+# Not built or tested by this lane (kernel files of other lanes).  Probes that should flip to PASS:
+# src/user/cp/p8scmprobe.c S1-S3 (unix.c hunks), src/user/cp/p8envprobe.c E3 (env hunks), via
+# `P8_PHASE=probe bash tools/cp/p8/run-p8.sh`.  The unix.c change replaces the P4 IPC design rule
+# (docs/browser/p4-ipc-design.md:271, "EMFILE, message not consumed") with Linux scm_detach_fds
+# semantics; keep the old rule for native callers if wanted.
+
+diff -ru a/src/include/process.h b/src/include/process.h
+--- a/src/include/process.h	2026-11-17 00:13:21
++++ b/src/include/process.h	2026-11-17 00:13:34
+@@ -235,7 +235,7 @@
+  * every one of those rt_sigaction calls answered -EINVAL (measured: Mono 6.12
+  * printed `[LCOMPAT] sigaction refused sig=32/33/35` and never reached managed
+  * code).  The pending set therefore had to widen from uint32_t to uint64_t. */
+-#define HO_ENV_LEN 512
++#define HO_ENV_LEN 2048 /* C8-game: Wine + the P8 env needs > 512 B (trap.c:2466 keeps one on the kernel stack) */
+ 
+ /* cp/exec: the cwd and the /proc/self/exe path hold a full VFS path
+  * (VFS_PATH_MAX in vfs.h; equality asserted where both headers meet). */
+diff -ru a/src/kernel/fs.c b/src/kernel/fs.c
+--- a/src/kernel/fs.c	2026-11-17 00:13:21
++++ b/src/kernel/fs.c	2026-11-17 00:13:21
+@@ -627,7 +627,7 @@
+   }
+ 
+   struct file *f = file_alloc();
+-  if (!f) return -EMFILE;
++  if (!f) return -ENFILE; /* the SYSTEM table (MAX_GLOBAL_FILES), as Linux */
+   f->open_flags = (uint32_t)flags;
+   /* Remember the name this fd was opened under: /proc/self/fd/N is a link to
+      it, and re-opening through that link must go back to the SAME file.  The
+diff -ru a/src/kernel/program_loader.c b/src/kernel/program_loader.c
+--- a/src/kernel/program_loader.c	2026-11-17 00:13:21
++++ b/src/kernel/program_loader.c	2026-11-17 00:13:34
+@@ -629,7 +629,7 @@
+ }
+ 
+ #define COMPAT_MAX_ARGV 16
+-#define COMPAT_MAX_ENV 24
++#define COMPAT_MAX_ENV 64
+ #define COMPAT_STR_MAX 512
+ 
+ /* Write `s` (with its NUL) at the descending stack cursor and report its
+diff -ru a/src/kernel/unix.c b/src/kernel/unix.c
+--- a/src/kernel/unix.c	2026-11-17 00:13:21
++++ b/src/kernel/unix.c	2026-11-17 00:13:21
+@@ -569,12 +569,10 @@
+     int rec_n = 0;
+     if (rec >= 0) {
+       rec_n = c->msg_nfds[rec];
+-      int want = rec_n < maxfds ? rec_n : maxfds;
+-      if (gfds_out && want > 0 && grp &&
+-          grp->num_open_fds + want > MAX_OPEN_FDS) {
+-        spinlock_release(&u->lock);
+-        return -EMFILE; /* not consumed: the record keeps its refs */
+-      }
++      /* Linux (scm_detach_fds): a full receiver table never fails the
++         read; the data is delivered, the fds that do not fit are closed and
++         MSG_CTRUNC is set (the install loop below).  Wine's wineserver
++         relies on it (server/request.c receive_fd). */
+     }
+     int i = 0;
+     while (i < limit && c->used > 0) {
+@@ -619,6 +617,7 @@
+             gfds_out[installed++] = ufd;
+             continue;
+           }
++          if (ctrl_trunc) *ctrl_trunc = 1; /* table full: dropped, as Linux */
+         } else if (ctrl_trunc) {
+           *ctrl_trunc = 1;
+         }
+@@ -711,10 +710,12 @@
+       spinlock_release(&u->lock);
+       return -EINVAL; /* no receiver fd table to install into */
+     }
+-    if (grp && grp->num_open_fds + deliver > MAX_OPEN_FDS) {
+-      /* §4.2: message NOT consumed, refs stay with the queued message. */
+-      spinlock_release(&u->lock);
+-      return -EMFILE;
++    if (grp) {
++      /* Linux: deliver what fits, drop the rest with MSG_CTRUNC (the
++         gexcess path below); never -EMFILE for a full receiver table. */
++      int room = MAX_OPEN_FDS - grp->num_open_fds;
++      if (room < 0) room = 0;
++      if (deliver > room) deliver = room;
+     }
+     int copy = mlen < bufcap ? mlen : bufcap;
+     if (copy > 0) {
