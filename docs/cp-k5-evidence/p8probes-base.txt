@@ -1,0 +1,47 @@
+# C1-k5: C8-game's P8 kernel probes (src/user/cp/p8*.c) on the UNCHANGED kernel: cyberpunk @ 949ba008 source + only the probes and tools/cp/k5
+# host strix (Zen 5), guest intel MODE=test KVM 8 vCPU 12 GiB, one QEMU slot (all sources touched so make rebuilt every object)
+# cmd: K5_OUT=obj/cp-k5/probes-base bash tools/cp/k5/run-k5probes.sh
+
+== rows
+[K5P] k5probes launcher (C1-k5; probes by C8-game)
+[K5P] begin envprobe
+[P8ENV] E0 spawned with envc=3 bytes=37 last=LD_LIBRARY_PATH
+[P8ENV] E1 child sees envc=40 bytes=1560 last=E39
+[P8ENV] E1 execve env: 40/40 entries intact -> PASS
+[P8ENV] E2 malformed entries: 0 -> PASS
+[K5P] end envprobe status=0 ms=53
+[K5P] begin envprobe40
+[P8ENV] E3 spawned40 sees envc=15 bytes=535 last=LD_LIBRARY_PATH
+[P8ENV] E3 spawn_ex env: 13/40 entries intact -> FAIL
+[P8ENV] E4 malformed entries: 0 -> PASS
+[K5P] end envprobe40 status=256 ms=14
+[K5P] begin e2big : spawn_ex with 80 entries / 3120 bytes
+[P8ENV] E3 spawned40 sees envc=15 bytes=535 last=LD_LIBRARY_PATH
+[P8ENV] E3 spawn_ex env: 0/40 entries intact -> FAIL
+[P8ENV] E4 malformed entries: 0 -> PASS
+[K5P] E5 spawn_ex env > HO_ENV_LEN: rc=8 errno=0 -> FAIL
+[K5P] begin fdcount
+[P8FD] cap=600 opened=253 first_errno=24 (EMFILE)
+[K5P] end fdcount status=0 ms=21
+[K5P] begin scmprobe
+[P8SCM] table filled with 251 fds (stopped by errno 24)
+[P8SCM] S1 recvmsg ret=-1 errno=24 -> FAIL
+[P8SCM] S2 MSG_CTRUNC=0 fd_delivered=-1 -> FAIL
+[P8SCM] S3 second recvmsg ret=4 errno=0 -> FAIL
+[K5P] end scmprobe status=0 ms=24
+[K5P] begin killprobe
+[P8KILL] kill rc=-1; K1 reaped=0 after 10000 ms -> FAIL
+[P8KILL] K2 status=0x0 signaled=0 sig=0 -> FAIL
+[K5P] end killprobe status=0 ms=11167
+[K5P] done
+PASS  E1 execve env
+PASS  E2 malformed
+FAIL  E3 spawn_ex env
+PASS  E4 malformed
+FAIL  E5 spawn_ex env > HO_ENV_LEN
+FAIL  S1 recvmsg
+FAIL  S2 MSG_CTRUNC
+FAIL  S3 second recvmsg
+FAIL  K1 reaped (not graded unless K5_GRADE_KILL=1)
+FAIL  K2 status (not graded unless K5_GRADE_KILL=1)
+k5-probes: 5 failure(s); raw serial /home/sarah/cp/lanes/k5/obj/cp-k5/probes-base/serial.log

@@ -22,6 +22,8 @@
 #include "input_node.h"
 #include "virtio_input.h"
 #include "fb_mmap.h"
+#include "frame.h" /* C1-k5: the exec env blob lives in a frame */
+#include "kmem.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -1087,10 +1089,15 @@ static void sys_spawn_ex(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
-  if (process_read_envp(caller, (const char *const *)envp, ex->env,
-                        (int)sizeof ex->env, &ex->envc) != 0) {
-    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
-    return;
+  {
+    /* C1-k5: an env larger than the 2048-byte blob is -E2BIG, not a silent
+       truncation (C8-game stop 1). */
+    int er = process_read_envp(caller, (const char *const *)envp, ex->env,
+                               (int)sizeof ex->env, &ex->envc);
+    if (er != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)(er == -2 ? -E2BIG : -EFAULT);
+      return;
+    }
   }
   for (int k = 0; k < n; k++) {
     ex->fdmap_src[k] = fdmap[2 * k];
@@ -1628,13 +1635,23 @@ static void sys_exec(struct trap_frame *tf) {
 
   /* P5 (D3.1/D3.5): marshal envp (regs[2]) into the kernel env blob; a bad
      pointer anywhere is -EFAULT (argv keeps its truncating behavior). */
-  char envbuf[HO_ENV_LEN];
-  for (int i = 0; i < HO_ENV_LEN; i++)
-    envbuf[i] = 0;
+  /* C1-k5: HO_ENV_LEN is 2048 now, and this frame already holds three
+     HO_EXEC_ARGV_LEN (4 KiB) buffers, so the env blob lives in one frame
+     instead of the 64 KiB kernel stack (process_exec_current copies it into
+     the PCB before returning).  An env larger than the blob is -E2BIG
+     (process_read_envp -2), not a silent truncation. */
+  uint64_t env_pa = frame_alloc_zeroed();
+  if (!env_pa) {
+    tf->regs[0] = (uint64_t)(int64_t)-ENOMEM;
+    return;
+  }
+  char *envbuf = (char *)phys_to_virt(env_pa);
   int envc = 0;
-  if (process_read_envp(cur, (const char *const *)tf->regs[2], envbuf,
-                        HO_ENV_LEN, &envc) != 0) {
-    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+  int er = process_read_envp(cur, (const char *const *)tf->regs[2], envbuf,
+                             HO_ENV_LEN, &envc);
+  if (er != 0) {
+    frame_free(env_pa);
+    tf->regs[0] = (uint64_t)(int64_t)(er == -2 ? -E2BIG : -EFAULT);
     return;
   }
 
@@ -1642,6 +1659,7 @@ static void sys_exec(struct trap_frame *tf) {
      the exec return); the argv/env blobs were installed kernel-side. */
   int r = process_exec_current(tf, pathbuf, argbuf, namebuf, envbuf, envc,
                                argvblob, argvc);
+  frame_free(env_pa);
   if (r < 0)
     tf->regs[0] = (uint64_t)r;  /* success redirects elr + sets regs[0]=0 */
 }

@@ -176,7 +176,23 @@ uint32_t smp_init_count(void);
  * below, so widening the table cannot silently lose a CLOEXEC bit past fd 63.
  * Native processes are unaffected: they use the same table, and every access
  * goes through the same helpers. */
+/* C1-k5 (docs/cp-k5.md §1): 4096 on x86_64.  Wine keeps three pipes per
+ * thread (request/reply/wait) and the game runs 173-190 threads, and Wine
+ * raises RLIMIT_NOFILE's soft limit to the hard one at startup -- 4096 is
+ * Linux's own default hard limit.  The table is no longer inline in struct
+ * process: 4096 ints x 512 slots would add 8 MiB of BSS to an image that has
+ * ~25 MiB left below CP_KHOLE_HI.  Each slot's open_fds points into one
+ * frame-pool region process_init() allocates (process.c).  ARM keeps 256:
+ * the compat class is x86_64-only. */
+#ifdef __x86_64__
+#define MAX_OPEN_FDS 4096
+#else
 #define MAX_OPEN_FDS 256
+#endif
+/* RLIMIT_NOFILE defaults (Linux: soft 1024, hard 4096).  The hard limit is
+ * the table; the soft limit is what fd allocation honours. */
+#define FD_RLIM_HARD_DEFAULT MAX_OPEN_FDS
+#define FD_RLIM_SOFT_DEFAULT (MAX_OPEN_FDS < 1024 ? MAX_OPEN_FDS : 1024)
 #define FD_CLOEXEC_WORDS ((MAX_OPEN_FDS + 63) / 64)
 
 static inline int fd_cloexec_test(const uint64_t *m, int fd) {
@@ -235,7 +251,18 @@ struct addr_space;
  * every one of those rt_sigaction calls answered -EINVAL (measured: Mono 6.12
  * printed `[LCOMPAT] sigaction refused sig=32/33/35` and never reached managed
  * code).  The pending set therefore had to widen from uint32_t to uint64_t. */
-#define HO_ENV_LEN 512
+/* C1-k5 (C8-game stop 1): 2048, was 512.  The P8 launcher's env (Wine + DXVK
+ * + vkd3d + cache paths) is 626 bytes; past the blob spawn_ex/execve now fail
+ * with E2BIG instead of truncating.  Cost: struct process and spawn_ex_pool
+ * each grow 1.5 KiB per slot (x86_64: 2 x 768 KiB of BSS).  The native
+ * execve keeps its copy in a frame, not on the kernel stack (trap.c).  ARM
+ * keeps 512 (and the old truncating behaviour, process_read_envp). */
+#ifdef __x86_64__
+#define HO_ENV_LEN 2048
+#else
+#define HO_ENV_LEN 512 /* ARM: its .bss must stay inside the limine placement
+                          window (linker.ld), and the compat class is x86-only */
+#endif
 
 /* cp/exec: the cwd and the /proc/self/exe path hold a full VFS path
  * (VFS_PATH_MAX in vfs.h; equality asserted where both headers meet). */
@@ -343,7 +370,7 @@ struct process {
    * Local file descriptor table.
    * Maps local FDs to indices in the global file table.
    */
-  int open_fds[MAX_OPEN_FDS];
+  int *open_fds; /* C1-k5: MAX_OPEN_FDS entries in the frame pool (process_init) */
 
   int num_open_fds; /**< Number of currently open file descriptors */
 
@@ -508,7 +535,7 @@ struct process {
    * closed at exec.  fcntl F_GETFD/F_SETFD read/write bit 0; dup2/dup and
    * spawn2's 0/1/2 grants clear the bit on the new fd; P5's execve runs
    * the sweep.  Appended at the END so parallel lanes merge additively. */
-  uint64_t fd_cloexec[FD_CLOEXEC_WORDS]; /* L55: one bit per fd, word array (MAX_OPEN_FDS 256) */
+  uint64_t fd_cloexec[FD_CLOEXEC_WORDS]; /* L55: one bit per fd, word array (MAX_OPEN_FDS) */
 
   /* --- P5 (docs/browser/p5-exec-signals-design.md D7): exec + signals --- *
    * Appended at the END so parallel lanes merge additively.  All of this
@@ -669,7 +696,38 @@ struct process {
   /* C1-k4: the pid of the thread that owns this group's exit_group (group
      anchor only; 0 = none yet). */
   int exit_owner;
+  /* C1-k5 (docs/cp-k5.md §2): RLIMIT_NOFILE, group anchor only.  fd
+     allocation honours the soft limit (process_fd_limit); fork copies both,
+     exec keeps them, a fresh process gets FD_RLIM_*_DEFAULT. */
+  uint32_t rlim_nofile_cur;
+  uint32_t rlim_nofile_max;
+  /* C1-k5 (docs/cp-k5.md §4): CPU accounting for getrusage/wait4, kept by
+     schedule() at the switch points (timer_get_us).  ru_* is this thread;
+     ru_grp_* the whole group including exited threads (anchor only);
+     ru_ch_* the reaped children's totals (anchor only).  nvcsw counts
+     switches away from a thread that blocked, nivcsw from one that was still
+     runnable (preempted or sched_yield) -- Wine's NtYieldExecution compares
+     both around sched_yield(). */
+  uint64_t ru_run_us, ru_nvcsw, ru_nivcsw;
+  uint64_t ru_grp_us, ru_grp_nvcsw, ru_grp_nivcsw;
+  uint64_t ru_ch_us, ru_ch_nvcsw, ru_ch_nivcsw;
 };
+
+/* C1-k5: the group's soft RLIMIT_NOFILE, clamped to [FD_STDIO_FIRST+1 ..
+ * MAX_OPEN_FDS]; every fd-allocating path scans [3, limit). */
+static inline int process_fd_limit(const struct process *pg) {
+  int lim = pg ? (int)pg->rlim_nofile_cur : MAX_OPEN_FDS;
+  if (lim <= 0 || lim > MAX_OPEN_FDS) lim = MAX_OPEN_FDS;
+  return lim;
+}
+/* C1-k5: reset a slot's rlimit/rusage state (fresh process or thread). */
+static inline void process_k5_reset(struct process *p) {
+  p->rlim_nofile_cur = FD_RLIM_SOFT_DEFAULT;
+  p->rlim_nofile_max = FD_RLIM_HARD_DEFAULT;
+  p->ru_run_us = p->ru_nvcsw = p->ru_nivcsw = 0;
+  p->ru_grp_us = p->ru_grp_nvcsw = p->ru_grp_nivcsw = 0;
+  p->ru_ch_us = p->ru_ch_nvcsw = p->ru_ch_nivcsw = 0;
+}
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
  * translation table (GB-014).  See linux-abi.md §2. */
@@ -744,6 +802,10 @@ struct ho_rusage {
   int64_t ru_inblock, ru_oublock, ru_msgsnd, ru_msgrcv;
   int64_t ru_nsignals, ru_nvcsw, ru_nivcsw;
 };
+
+/* C1-k5: getrusage(2) totals (who: 0 SELF, -1 CHILDREN, 1 THREAD); CPU time
+ * in ru_utime (docs/cp-k5.md §4).  O(1), no lock. */
+void process_rusage(struct process *p, int who, struct ho_rusage *ru);
 
 /* W2-5: waitpid(2) + a rusage out-param.  Same pid/status/options
  * semantics as process_waitpid -- the rusage pointer rides tf->regs[3]

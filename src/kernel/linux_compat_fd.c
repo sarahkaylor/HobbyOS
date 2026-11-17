@@ -642,7 +642,7 @@ static int l_fd_pipe2(struct process *p, struct trap_frame *tf) {
 
   int kfds[2] = {-1, -1};
   int r = file_pipe(p, kfds);
-  if (r != 0) return l_ret(tf, -EMFILE);
+  if (r != 0) return l_ret(tf, r < -1 ? r : -EMFILE); /* C1-k5: EMFILE/ENFILE */
   if (flags & L_O_NONBLOCK) {
     (void)file_fcntl(p, kfds[0], K_F_SETFL, K_O_NONBLOCK);
     (void)file_fcntl(p, kfds[1], K_F_SETFL, K_O_NONBLOCK);
@@ -678,7 +678,11 @@ static int l_fd_close_range(struct process *p, struct trap_frame *tf) {
     fs_fd_ev_range(p, (int)first, (int)last);
   }
 
+  struct process *pg = process_group(p);
   for (uint32_t fd = first; fd <= last; fd++) {
+    /* C1-k5: 4096 slots -- skip the closed ones (and never mark a closed
+       slot CLOEXEC: the next fd allocated there would inherit the bit). */
+    if (pg && pg->open_fds[fd] == -1) continue;
     if (flags & L_CLOSE_RANGE_CLOEXEC)
       (void)file_fcntl(p, (int)fd, K_F_SETFD, K_FD_CLOEXEC);
     else
@@ -691,13 +695,13 @@ static int l_fd_close_range(struct process *p, struct trap_frame *tf) {
 
 /* poll(struct pollfd *fds, nfds_t nfds, int timeout_ms).  fs.c's engine
  * writes revents through the guest pointer (the same pointer the native
- * sys_poll passes), so only the range/alignment is checked here. */
-static int l_fd_poll(struct process *p, struct trap_frame *tf) {
-  uint64_t ufds = l_arg(tf, 0);
-  int64_t nfds = l_argi(tf, 1);
-  int timeout = (int)l_argi(tf, 2);
-
-  if (nfds < 0 || nfds > K_FD_SETSIZE) return l_ret(tf, -EINVAL);
+ * sys_poll passes), so only the range/alignment is checked here.
+ * C1-k5: nfds is bounded by RLIMIT_NOFILE (Linux do_sys_poll: EINVAL above
+ * it), not by the native 256-entry cap. */
+static int l_poll_common(struct process *p, struct trap_frame *tf, uint64_t ufds,
+                         int64_t nfds, int timeout) {
+  if (nfds < 0 || nfds > (int64_t)process_fd_limit(process_group(p)))
+    return l_ret(tf, -EINVAL);
   if (nfds > 0) {
     if (!ufds || (ufds & 3) != 0) return l_ret(tf, -EFAULT);
     if (!l_user_ok(p, ufds, (uint64_t)nfds * sizeof(struct k_pollfd), 1))
@@ -708,10 +712,27 @@ static int l_fd_poll(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, r);
 }
 
-/* select(23) / pselect6(270).  The native engine speaks the kernel's 256-bit
- * fd_set (struct fd_set_k, 32 bytes); Linux's fd_set is 1024 bits but only
- * the first nfds bits are ever examined, so a 32-byte copy is exact for
- * nfds <= 256 and EINVAL (like Linux's nfds > FD_SETSIZE) beyond that. */
+static int l_fd_poll(struct process *p, struct trap_frame *tf) {
+  return l_poll_common(p, tf, l_arg(tf, 0), l_argi(tf, 1), (int)l_argi(tf, 2));
+}
+
+/* C1-k5: ppoll(fds, nfds, const struct timespec *tmo, sigmask, sigsetsize).
+ * A NULL timeout waits forever; the signal mask is not applied (the same
+ * limitation as pselect6 below). */
+static int l_fd_ppoll(struct process *p, struct trap_frame *tf) {
+  int64_t ms = -1;
+  int err = l_timeout_ms(p, l_arg(tf, 2), 1, &ms);
+  if (err != 0) return l_ret(tf, err);
+  return l_poll_common(p, tf, l_arg(tf, 0), l_argi(tf, 1), (int)ms);
+}
+
+/* select(23) / pselect6(270).  C1-k5: Linux semantics for any nfds: the sets
+ * are FDS_BYTES(nfds) = ceil(nfds/64) longs (a glibc fd_set is 1024 bits, a
+ * program that wants more passes a bigger array), nfds is clamped to the fd
+ * table (Linux clamps to the table's max_fds), and only the first nfds bits
+ * are examined or written back.  The kernel copies hold up to MAX_OPEN_FDS
+ * bits (3 x 512 bytes on the syscall stack). */
+#define L_SEL_WORDS64 ((MAX_OPEN_FDS + 63) / 64)
 static int l_select_common(struct process *p, struct trap_frame *tf,
                            int is_timespec) {
   int64_t nfds = l_argi(tf, 0);
@@ -720,40 +741,48 @@ static int l_select_common(struct process *p, struct trap_frame *tf,
   uint64_t uex = l_arg(tf, 3);
   uint64_t utimeout = l_arg(tf, 4);
 
-  if (nfds < 0 || nfds > K_FD_SETSIZE) return l_ret(tf, -EINVAL);
+  if (nfds < 0) return l_ret(tf, -EINVAL);
+  if (nfds > (int64_t)MAX_OPEN_FDS) nfds = MAX_OPEN_FDS;
 
   int64_t ms = -1;
   int err = l_timeout_ms(p, utimeout, is_timespec, &ms);
   if (err != 0) return l_ret(tf, err);
 
-  struct fd_set_k rd, wr, ex;
-  struct fd_set_k *prd = 0, *pwr = 0, *pex = 0;
-  if (urd) {
-    if (l_copy_from_user(p, &rd, urd, sizeof rd) != 0)
-      return l_ret(tf, -EFAULT);
-    prd = &rd;
+  uint64_t rd[L_SEL_WORDS64], wr[L_SEL_WORDS64], ex[L_SEL_WORDS64];
+  int nl = (int)((nfds + 63) / 64);
+  uint64_t bytes = (uint64_t)nl * 8u;
+  uint64_t *prd = 0, *pwr = 0, *pex = 0;
+  if (urd && nl) {
+    if (l_copy_from_user(p, rd, urd, bytes) != 0) return l_ret(tf, -EFAULT);
+    prd = rd;
   }
-  if (uwr) {
-    if (l_copy_from_user(p, &wr, uwr, sizeof wr) != 0)
-      return l_ret(tf, -EFAULT);
-    pwr = &wr;
+  if (uwr && nl) {
+    if (l_copy_from_user(p, wr, uwr, bytes) != 0) return l_ret(tf, -EFAULT);
+    pwr = wr;
   }
-  if (uex) {
-    if (l_copy_from_user(p, &ex, uex, sizeof ex) != 0)
-      return l_ret(tf, -EFAULT);
-    pex = &ex;
+  if (uex && nl) {
+    if (l_copy_from_user(p, ex, uex, bytes) != 0) return l_ret(tf, -EFAULT);
+    pex = ex;
+  }
+  /* Bits at or past nfds are not examined (Linux); they come back as 0 in
+     the last long, as Linux's whole-long write-back leaves them. */
+  if (nl && (nfds & 63)) {
+    uint64_t mask = (1ull << (nfds & 63)) - 1;
+    if (prd) rd[nl - 1] &= mask;
+    if (pwr) wr[nl - 1] &= mask;
+    if (pex) ex[nl - 1] &= mask;
   }
 
-  int r = file_select(p, (int)nfds, prd, pwr, pex, (int)ms);
+  /* x86_64 is little-endian: a long array is the same bits as 2*nl u32. */
+  int r = file_select_words(p, (int)nfds, (uint32_t *)(void *)prd, (uint32_t *)(void *)pwr,
+                            (uint32_t *)(void *)pex, nl * 2, (int)ms);
   if (r == -2) return l_park(p, tf);
   if (r >= 0) {
-    /* Ready sets (or all-zero on timeout) go back to the guest. */
-    if (prd && l_copy_to_user(p, urd, prd, sizeof *prd) != 0)
-      return l_ret(tf, -EFAULT);
-    if (pwr && l_copy_to_user(p, uwr, pwr, sizeof *pwr) != 0)
-      return l_ret(tf, -EFAULT);
-    if (pex && l_copy_to_user(p, uex, pex, sizeof *pex) != 0)
-      return l_ret(tf, -EFAULT);
+    /* Ready sets (or all-zero on timeout) go back to the guest: exactly
+       FDS_BYTES(nfds), as Linux writes them. */
+    if (prd && l_copy_to_user(p, urd, prd, bytes) != 0) return l_ret(tf, -EFAULT);
+    if (pwr && l_copy_to_user(p, uwr, pwr, bytes) != 0) return l_ret(tf, -EFAULT);
+    if (pex && l_copy_to_user(p, uex, pex, bytes) != 0) return l_ret(tf, -EFAULT);
   }
   return l_ret(tf, r);
 }
@@ -766,6 +795,23 @@ static int l_fd_select(struct process *p, struct trap_frame *tf) {
  * compat surface has no signal-mask swap. */
 static int l_fd_pselect6(struct process *p, struct trap_frame *tf) {
   return l_select_common(p, tf, 1);
+}
+
+/* C1-k5 (C8-game: the wineserver calls it once per boot): fadvise64(fd,
+ * offset, len, advice).  Advice is only a hint and this kernel has no
+ * readahead policy to tune, so a valid call is 0 -- Linux's answers for the
+ * invalid ones: EBADF for a closed fd, ESPIPE for a pipe, EINVAL for an
+ * unknown advice (POSIX_FADV_NORMAL..NOREUSE = 0..5) or a negative len. */
+static int l_fd_fadvise64(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  int64_t len = l_argi(tf, 2);
+  int advice = (int)l_argi(tf, 3);
+  struct process *pg = process_group(p);
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS || pg->open_fds[fd] < 0)
+    return l_ret(tf, -EBADF);
+  if (file_gfd_is_pipe(pg->open_fds[fd])) return l_ret(tf, -ESPIPE);
+  if (advice < 0 || advice > 5 || len < 0) return l_ret(tf, -EINVAL);
+  return l_ret(tf, 0);
 }
 
 /* ---- ioctl / fcntl ------------------------------------------------------ */
@@ -836,16 +882,24 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
 }
 
 /* fcntl(72): (fd, cmd, arg64).  file_fcntl owns the real work (fd flags,
- * status flags, record locks, memfd seals); F_DUPFD/F_DUPFD_CLOEXEC are the
- * one command it cannot express — "lowest free fd at or above N" has no
- * native entry point — so they are refused explicitly instead of returning
- * a wrong number. */
+ * status flags, record locks, memfd seals).  C1-k5: F_DUPFD and
+ * F_DUPFD_CLOEXEC are fs.c's file_dup_min ("lowest free fd >= arg", bounded
+ * by RLIMIT_NOFILE: arg at or past it is EINVAL, a full table EMFILE); they
+ * used to be refused with EINVAL. */
+#define L_F_DUPFD_CLOEXEC 1030
 static int l_fd_fcntl(struct process *p, struct trap_frame *tf) {
   int fd = (int)l_argi(tf, 0);
   int cmd = (int)l_argi(tf, 1);
   uint64_t arg = l_arg(tf, 2);
 
-  if (cmd == L_F_DUPFD) return l_ret(tf, -EINVAL);
+  if (cmd == L_F_DUPFD || cmd == L_F_DUPFD_CLOEXEC) {
+    int64_t minfd = (int64_t)arg;
+    if (minfd < 0 || minfd > (int64_t)MAX_OPEN_FDS) return l_ret(tf, -EINVAL);
+    int r = file_dup_min(p, fd, (int)minfd);
+    if (r >= 0 && cmd == L_F_DUPFD_CLOEXEC)
+      (void)file_fcntl(p, r, K_F_SETFD, K_FD_CLOEXEC);
+    return l_ret(tf, r);
+  }
   return l_ret(tf, file_fcntl(p, fd, cmd, arg));
 }
 
@@ -1215,7 +1269,10 @@ static int l_fd_fremovexattr(struct process *p, struct trap_frame *tf) { return 
 #define L_EFD_SEMAPHORE 0x1
 #define L_EFD_NONBLOCK 0x800
 #define L_EFD_CLOEXEC 0x80000
-#define L_EVENTFD_SLOTS 256
+/* C1-k5: 1024 system-wide (was 256).  A slot is ~150 B of BSS (two pid
+   masks), so 1024 cost ~110 KiB more; upstream Wine 11.0 uses none (no
+   esync), the host Proton trace 4.  Exhaustion is ENFILE, as Linux. */
+#define L_EVENTFD_SLOTS 1024
 #define L_EVENTFD_MAX 0xfffffffffffffffeULL
 
 static struct {
@@ -1479,6 +1536,8 @@ const struct l_sysent l_tab_fd[] = { {L_SYS_fsync, l_fd_fsync, "fsync"},
   {L_SYS_poll, l_fd_poll, "poll"},
   {L_SYS_select, l_fd_select, "select"},
   {L_SYS_pselect6, l_fd_pselect6, "pselect6"},
+  {L_SYS_ppoll, l_fd_ppoll, "ppoll"},
+  {L_SYS_fadvise64, l_fd_fadvise64, "fadvise64"},
   {L_SYS_ioctl, l_fd_ioctl, "ioctl"},
   {L_SYS_fcntl, l_fd_fcntl, "fcntl"},
   /* cp/sys (docs/cp-sys.md): rows Wine reaches */

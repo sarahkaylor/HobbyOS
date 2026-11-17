@@ -1,0 +1,50 @@
+# C1-k5: thrstorm.exe under console Wine on the LANE kernel (cp-k5 4ac5ee27)
+# host strix (Zen 5), guest intel MODE=test KVM 8 vCPU 12 GiB, one QEMU slot
+# cmd: K5_OUT=obj/cp-k5/ts-lane TIMEOUT_S=2400 bash tools/cp/k5/run-thrstorm.sh
+
+[K5] k5wine launcher (C1-k5)
+[K5] ps-before count=1
+[K5] mount 10.0.2.2:/srv/nfs/cp-k5-ts -> /CP ok
+[K5] begin wineboot : wineboot -i
+[K5] end wineboot status=0 ms=26586
+[K5] quiesce after wineboot: extra=0
+[K5] begin thrstorm : wine Z:\CP\K5\thrstorm.exe 60
+[TS] thrstorm (C1-k5): threads=256 secs=60 pid=32
+[TS] PASS T1 create (threads=256 why=0)
+[TS] PASS T1 start (started=256 toolhelp=257)
+[TS] info startup ms=2871
+[K5] census t=10s processes=9
+[K5] census t=20s processes=9
+[TS] t=10s rounds=46 trips=11776 worst_round_ms=662 threads=257
+[K5] census t=30s processes=9
+[TS] t=20s rounds=83 trips=21248 worst_round_ms=1674 threads=257
+[TS] t=30s rounds=129 trips=33024 worst_round_ms=1674 threads=257
+[K5] census t=40s processes=9
+[K5] census t=50s processes=9
+[TS] t=40s rounds=176 trips=45056 worst_round_ms=1674 threads=257
+[K5] census t=60s processes=9
+[TS] t=50s rounds=215 trips=55040 worst_round_ms=1813 threads=257
+[TS] t=60s rounds=261 trips=66816 worst_round_ms=1813 threads=257
+[TS] PASS T2 storm (rounds=261 ms=60204)
+[TS] PASS T3 stop (bad=0 first=0)
+[TS] done rc=0
+[K5] end thrstorm status=0 ms=70110 peak_processes=9
+[K5] begin kill : wineserver -k
+[K5] end kill status=0 ms=347
+[K5] ps-extra count=0
+[K5] done
+--- fault lines: 0
+--- [EPOLLHW]/[EPOLLFULL] rows:
+[EPOLLHW] pid=6 n=16
+[EPOLLHW] pid=6 n=32
+[EPOLLHW] pid=103 n=16
+[EPOLLHW] pid=103 n=32
+[EPOLLHW] pid=103 n=64
+[EPOLLHW] pid=103 n=128
+[EPOLLHW] pid=103 n=256
+--- grader
+build-thrstorm: /home/sarah/cp/lanes/k5/obj/cp-k5/ts-lane/thrstorm.exe 65536 B sha256 a4913aca325fdbc6
+S1 thrstorm done rc=0, exit 0        : PASS   ([K5] end thrstorm status=0 ms=70110 peak_processes=9)
+S2 storm >= 60s, rounds > 0          : PASS   (rounds/ms: 261 60204)
+S3 wineserver -k, nothing left        : PASS   ([K5] end kill status=0 ms=347; [K5] ps-extra count=0)
+S4 no fault line                      : PASS   (0 lines)

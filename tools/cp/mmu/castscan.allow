@@ -74,7 +74,7 @@ src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], kpath, s
 src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) { /* L73 */
 src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], ksrc, sizeof ksrc) || /* L73 */
 src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], ktgt, sizeof ktgt)) { /* L73 */
-src/kernel/arch/x64/trap.c	I2P	if (process_read_envp(cur, (const char *const *)tf->regs[3], envbuf,
+src/kernel/arch/x64/trap.c	I2P	int er = process_read_envp(cur, (const char *const *)tf->regs[3], envbuf,
 src/kernel/arch/x64/trap.c	I2P	if (u_strcpy((const char *)tf->regs[5], kfile, sizeof kfile)) { /* L73 */
 src/kernel/arch/x64/trap.c	I2P	int *fds = (int *)tf->regs[5]; // rdi
 src/kernel/arch/x64/trap.c	I2P	int *len = (int *)tf->regs[7]; // r8
