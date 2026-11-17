@@ -2822,7 +2822,13 @@ disk.img: certs/cacert.pem
 
 # LibreOffice suite (`make run` completeness): build and stage all 7 apps into
 # every disk.img (skipped only when X11_BUILD_DIR is the synthetic x11stub dir).
-ifeq ($(filter %/x11stub,$(X11_BUILD_DIR)),)
+# cp-sync (merge of main): ...and when the X client prefix the suite links
+# against has not been built.  Without that, lo-x11-libs would run
+# third_party/x11/build.sh --stage all (a from-source X stack build) inside
+# every `make disk.img`, which the cyberpunk gate trees do not carry.
+# LO_ON_DISK=1 forces the suite in, LO_ON_DISK= keeps it out.
+LO_ON_DISK ?= $(if $(filter %/x11stub,$(X11_BUILD_DIR)),,$(if $(wildcard $(LO_X11_DIR)/prefix/lib/libX11.a),1,))
+ifneq ($(LO_ON_DISK),)
 disk.img: $(LIBREOFFICE_BINS)
 endif
 ifeq ($(MODE),lo_test)
@@ -2981,7 +2987,7 @@ endif
 ifeq ($(MODE),lo_test)
 	$(MCOPY) -i disk.img $(LO_TEST_BIN) ::/LO_TEST.BIN
 endif
-ifeq ($(filter %/x11stub,$(X11_BUILD_DIR)),)
+ifneq ($(LO_ON_DISK),)
 	$(MCOPY) -i disk.img $(SOFFICE_BIN) ::/SOFFICE.BIN
 	$(MCOPY) -i disk.img $(SWRITER_BIN) ::/SWRITER.BIN
 	$(MCOPY) -i disk.img $(SCALC_BIN) ::/SCALC.BIN
