@@ -153,7 +153,7 @@ of frames. P8 does not need it.
 | eventfd | 1024 | linux_compat_fd.c `L_EVENTFD_SLOTS` | C1-k5 | raised; ENFILE when full |
 | timers (itimer/POSIX/timerfd) | 256 | linux_compat_timers.c `LT_MAX` | C1-k5 | raised |
 | signalfd | — | — | — | **not implemented** (ENOSYS; Wine 11 does not use it) |
-| AF_UNIX pairs (socketpair, every connect) | **128** | unix.h `MAX_UNIX_PAIRS` | (unix.c) | **open**. Each pair is 3.5 KiB of BSS plus 1 MiB of ring frames. Wine needs one per process to wineserver plus one per X client, ~40 for the game, so it is not a P8 blocker; raise it to 256 (+448 KiB BSS) if C8-game hits it |
+| AF_UNIX pairs (socketpair, every connect) | **128** | unix.h `MAX_UNIX_PAIRS` | unix.c (C1-k5 owns its SCM_RIGHTS install path since §8) | **open**. Each pair is 3.5 KiB of BSS plus 1 MiB of ring frames. Wine needs one per process to wineserver plus one per X client, ~40 for the game, so it is not a P8 blocker; raise it to 256 (+448 KiB BSS) if C8-game hits it |
 | SCM_RIGHTS fds per message | 16 | ipc_proto.h `K_IPC_MAX_FDS` | (unix.c) | open; wineserver passes 1 per message |
 | AF_INET sockets | **16** | net.h `MAX_SOCKETS` | net.c (NFS lane) | **open**. 4 MiB of RX buffer each, so 64 MiB of BSS for 16; growing it needs net.c to allocate RX rings. The game's telemetry/launcher sockets count here. |
 | netlink sockets | 32 | linux_compat_netlink.c `L_NL_MAX` | — | open, ample |
