@@ -1,0 +1,220 @@
+# Gate P9 boot A, final (gateA5), strix (Ryzen AI MAX+ 395, KVM), cyberpunk @ 058fd3d5 + cp-play harness (no kernel change)
+# guest: -smp 8 -cpu host -m 32768M (big-guest lock), Venus on the RX 9070 XT (renderD129), 1280x720, the user's Low-equivalent profile
+# cmd: P9_SCRIPT=tools/cp/p9/play.p9 P9_RUN=gateA5 MAKEFLAGS=-j16 TOOLS_SKIP=1 bash tools/cp/p9/run-p9.sh
+
+## harness rows
+== run-p9 run=gateA5 script=tools/cp/p9/play.p9 mem=32768M from=<fresh: pfx-saves.img> 2026-11-17T11:06:38-06:00
+== run-p8 gpu=venus phase=game run=gateA5 2026-11-17T11:06:38-06:00 host=sarahpc tree=/home/sarah/cp/lanes/play
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== Vulkan ICDs in the export: virtio_icd.x86_64.json (Venus only)
+== game copy before: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy before: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== X server: the tree's own XHOBBY.BIN, sha256 9b161eded42374e0
+== data disk: a copy of /home/sarah/cp/lanes/play/obj/cp-p9/pfx-saves.img
+[P9W] +  1059.8 s  11:26:38  verdict: script-done; QEMU stopped, slot released; guests on the host now: 4
+== e2fsck -fn after the boot: rc=0 (cpdata: 1065/1048576 files (0.8% non-contiguous), 144359/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== game copy unchanged (count, bytes, newest mtime)
+== verdict: script-done
+   +  1059.8 s  11:26:38  verdict: script-done; QEMU stopped, slot released; guests on the host now: 4
+== saves on the data disk after the boot (names, sizes, mtimes)
+
+## host timeline (boot_p9.py)
++     0.0 s  11:08:58  slot 2 acquired + big-guest lock; boot -smp 8 -m 32768M -cpu host (KVM, venus); QEMU guests on the host before ours: 2
++     3.5 s  11:09:01  kernel frame pool: [FRAME] frames=8192000 total_mib=32000 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=26624 reserved=0
++     8.0 s  11:09:06  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-play-p9 -> /CP ok
++    26.5 s  11:09:24  warm-up result: [P8] warm-up: display driver loaded
++    35.5 s  11:09:33  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    35.5 s  11:09:33  phase launch
++    35.5 s  11:09:33  dri nodes at game launch: qemu-system-x86/2251620: /dev/dri/renderD129
++    35.5 s  11:09:33  dri nodes at game launch: virgl_render_se/2251825: -
++    35.5 s  11:09:33  dri nodes at game launch: virgl-2-gpu_ren/2257736: /dev/dri/renderD129
++    35.6 s  11:09:33  baseline screendump 1920x1080
++    39.8 s  11:09:38  serial row: [X]  39.075:0148:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 324"
++    96.2 s  11:10:34  first screen change after launch (45.8% differs from the baseline)
++   142.6 s  11:11:20  title prompt 'PRESS ... TO CONTINUE' at s005-t000107-pre: sent one Space (#1)
++   173.4 s  11:11:51  title prompt 'PRESS ... TO CONTINUE' at s007-t000137-pre: sent one Space (#2)
++   188.6 s  11:12:06  main menu OCR at s008-t000153-pre: ['NEW GAME', 'LOAD GAME', 'CONTINUE', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   193.2 s  11:12:11  main menu OCR at s009-t000157-pre: ['NEW GAME', 'LOAD GAME', 'CONTINUE', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   193.2 s  11:12:11  phase menu
++   193.2 s  11:12:11  main menu reached: running the play script play.p9
++   193.2 s  11:12:11  phase menu
++   198.2 s  11:12:16  seek menu-load: main menu focus on LOAD GAME after 3 taps
++   199.7 s  11:12:18  expect loadlist: matched /LOAD\s*GAME/ at s015-t000164-loadlist
++   203.3 s  11:12:21  expect loadlist-ripperdoc: matched /Ripperdoc/ at s016-t000167-loadlist-ripperdoc
++   210.6 s  11:12:28  listseek loadlist-focus: entry at y=509 focused after 5 taps
++   210.6 s  11:12:28  phase loading
++   335.1 s  11:14:33  expect loaded: matched /PRESS\b.{0,24}\bTO\s+CONTINUE/ at s054-t000299-loaded
++   342.1 s  11:14:40  phase world
++   342.7 s  11:14:41  expect inworld: matched /RIPPERDOC|Jackie/ at s055-t000307-inworld
++   343.2 s  11:14:41  phase prof-world-start
++   363.2 s  11:15:01  phase world
++   363.2 s  11:15:01  prof world-start: 191 samples x vCPUs -> prof-world-start.txt
++   380.3 s  11:15:18  phase map
++   391.6 s  11:15:29  expect map: matched /FILTER|Track\s*Waypoint|Zoom/ at s062-t000355-map
++   396.6 s  11:15:35  phase world
++   397.2 s  11:15:35  expect back-in-world: no longer matched /SKIP\s*TIME|DATABASE|FILTER/ at s063-t000361-back-in-world
++   681.0 s  11:20:19  phase prof-world-mid
++   701.1 s  11:20:39  phase world
++   701.1 s  11:20:39  prof world-mid: 195 samples x vCPUs -> prof-world-mid.txt
++   715.6 s  11:20:53  phase map
++   727.2 s  11:21:05  expect map2: matched /FILTER|Track\s*Waypoint|Zoom/ at s092-t000691-map2
++   732.3 s  11:21:10  phase world
++   733.1 s  11:21:11  expect back-in-world2: no longer matched /SKIP\s*TIME|DATABASE|FILTER/ at s093-t000697-back-in-world2
++   958.2 s  11:24:56  phase prof-world-end
++   978.3 s  11:25:16  phase world
++   978.3 s  11:25:16  prof world-end: 191 samples x vCPUs -> prof-world-end.txt
++   988.8 s  11:25:27  phase save
++  1009.7 s  11:25:48  seek pause-quit: pause menu focus on QUIT GAME after 2 taps
++  1009.7 s  11:25:48  phase quit
++  1015.0 s  11:25:53  expect quit-confirm: matched /sure.{0,20}quit/ at s127-t000979-quit-confirm
++  1025.5 s  11:26:03  game process ended: [P8] end game status=0 ms=990284
++  1026.0 s  11:26:04  play script ended: script-done
++  1057.0 s  11:26:35  sync done: [P8] sync done
++  1057.0 s  11:26:35  launcher done: [P8] done
++  1059.8 s  11:26:38  verdict: script-done; QEMU stopped, slot released; guests on the host now: 4
+
+## summary (fps per phase, frame pool, game process, phases)
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/play/obj/cp-p9/gateA5
+phase           rows          game s   median     p10     min     max    mean
+launch            60          58-157     35.9    22.4     0.0    54.7    35.0
+menu              11         159-174     42.6    37.2     5.1    48.1    39.3
+loading           81         176-306     35.6    13.0     0.4    61.8    34.0
+prof-world-start    12         308-327      6.1     3.6     2.0     7.3     5.6
+world            329         329-952     12.1     7.0     0.4    18.3    11.8
+map               22         345-696     20.7     8.0     6.5    29.9    19.3
+prof-world-mid    13         646-665      9.5     7.4     5.1    13.3     9.5
+prof-world-end    12         923-942     14.6     8.7     4.7    17.4    13.7
+save              13         953-974     15.1    13.7     0.5    47.3    21.2
+quit               4         976-983     46.4    22.5    12.8    55.4    40.3
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             31652   31652   31652  (1 rows)
+   launch           31076   29247   29247  (6 rows)
+   loading          29099   27989   27989  (4 rows)
+   prof-world-start   27844   27844   27844  (1 rows)
+   world            27768   27404   27404  (20 rows)
+   prof-world-end   27433   27433   27433  (1 rows)
+   save             27421   27421   27421  (1 rows)
+   quit             31448   31448   31448  (1 rows)
+== game process ([THRS]): max threads 46, max anon 141075 MiB, max res 4672 MiB (194 rows)
+== phases (host s since boot, game s since launch, name)
+   35.5 0.0 launch
+   193.2 157.7 menu
+   193.2 157.7 menu
+   210.6 175.1 loading
+   342.1 306.6 world
+   343.2 307.7 prof-world-start
+   363.2 327.7 world
+   380.3 344.8 map
+   396.6 361.1 world
+   681.0 645.5 prof-world-mid
+   701.1 665.6 world
+   715.6 680.1 map
+   732.3 696.7 world
+   958.2 922.7 prof-world-end
+   978.3 942.8 world
+   988.8 953.3 save
+   1009.7 974.2 quit
+
+## saves on the data disk after the boot (tools/cp/p9/saves.sh; names, times, positions only)
+AutoSave-0       name=AutoSave-0 time=17:22:28, 17.11.2026 playTime=4352.0 pos=(-1426.61, 1301.79, 27.06)
+                 sav.dat(1638702) metadata.9.json(2646) screenshot.png(129551) 
+AutoSave-16      name=AutoSave-16 time=21:52:29, 1.08.2025 playTime=97.8 pos=(-1262.37, -1001.16, 12.04)
+                 metadata.9.json(2642) sav.dat(1311119) screenshot.png(154637) 
+ManualSave-86    name=ManualSave-86 time=13:24:42, 8.08.2025 playTime=4031.0 pos=(-1429.96, 1255.29, 23.09)
+                 metadata.9.json(2611) sav.dat(1645305) screenshot.png(183177) 
+QuickSave-0      name=QuickSave-0 time=17:25:25, 17.11.2026 playTime=4482.4 pos=(-1443.71, 1308.92, 27.07)
+                 sav.dat(1639385) metadata.9.json(2652) screenshot.png(82693) 
+
+## kernel frame pool
+[FRAME] frames=8192000 total_mib=32000 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=26624 reserved=0
+
+## Sleep timing from p8caps (before the game)
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 49.92 ms max 54.10 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 49.76 ms max 50.04 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 59.96 ms max 60.01 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 59.88 ms max 60.10 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 53.64 ms max 116.45 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 299.70 ms max 539.92 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 500.0 ms, tick 480 ms
+
+## CreateProcess of the crash reporter (stop P9-1), Wine +timestamp
+[X]  35.583:0148:trace:process:NtQueryInformationProcess (0xffffffffffffffff,0x00000025,0x7ffffe2ff9b0,0x00000040,(nil))
+[X]  39.075:0148:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 324"
+[X]  56.687:0148:trace:process:NtCreateUserProcess L"\\??\\Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" pid 014c tid 0150 handles 0xbc/0xc0
+
+## rows.sh (launcher + Wine rows; loaddll/fps/process traces filtered)
+[P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8] game pid=94
+[X]  57.683:0170:err:kerberos:kerberos_LsaApInitializePackage no Kerberos support, expect problems
+[X]  64.363:0148:err:module:import_dll Library mfc140u.dll (which is needed by L"Z:\\GAME\\bin\\x64\\CChromaEditorLibrary64.dll") not found
+[X] warn:  CreateDXGIFactory2: Ignoring flags
+[X] warn:  DxgiAdapter::QueryInterface: Unknown interface query
+[X] warn:  f0db4c7f-fe5a-42a2-bd62-f2a6cf6fc83e
+[X]  68.971:0144:0148:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 2048, may be inaccurate.
+[X]  69.088:0144:0148:fixme:vkd3d-proton:d3d12_dred_settings_SetAutoBreadcrumbsEnablement: iface 0000001084627550, enablement 0 stub!
+[X]  69.089:0144:0148:fixme:vkd3d-proton:d3d12_dred_settings_SetPageFaultEnablement: iface 0000001084627550, enablement 2 stub!
+[X] err:   readMonitorEdidFromKey: Failed to get EDID reg key size
+[X] err:   DXGI: Failed to parse display metadata + colorimetry info, using blank.
+[X]  69.372:0144:0148:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 2048, may be inaccurate.
+[X]  79.451:022c:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X]  80.720:0158:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X]  80.780:0158:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X]  80.841:0158:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X]  80.876:0158:err:mmdevapi:init_driver No driver from L"pulse,alsa,oss,coreaudio" could be initialized. Maybe check dependencies with WINEDEBUG=warn+module.
+[X] warn:  DXGI: MakeWindowAssociation: Ignoring flags
+[P8] end game status=0 ms=990284
+[P8] begin kill : wineserver -k
+[P8] end kill status=0 ms=758
+[P8] quiesce after kill: extra=1 left: vkcube.exe/17:s4
+[P8] begin sync : pfxsync
+[X] [PFX] sync rc=0 errno=0
+[P8] end sync status=0 ms=29
+[P8] sync done
+[P8] done
+
+## guest PC profiles in the world
+== obj/cp-p9/gateA5/prof-world-start.txt: 1528 vCPU samples
+   kernel          997   65.2 %
+   idle (HLT)      419   27.4 %
+   user            112    7.3 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   70 /   30 /    0
+   cpu1:    6 /   84 /   10
+   cpu2:    8 /   85 /    7
+   cpu3:   15 /   77 /    8
+   cpu4:   24 /   70 /    7
+   cpu5:   26 /   61 /   13
+   cpu6:   29 /   65 /    5
+   cpu7:   42 /   50 /    8
+== kernel, top symbols (% of all samples)
+== obj/cp-p9/gateA5/prof-world-mid.txt: 1560 vCPU samples
+   kernel          782   50.1 %
+   idle (HLT)      585   37.5 %
+   user            193   12.4 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   73 /   27 /    0
+   cpu1:   19 /   63 /   18
+   cpu2:   18 /   62 /   19
+   cpu3:   28 /   55 /   16
+   cpu4:   32 /   56 /   12
+   cpu5:   37 /   50 /   13
+   cpu6:   41 /   48 /   11
+   cpu7:   51 /   40 /    9
+== kernel, top symbols (% of all samples)
+== obj/cp-p9/gateA5/prof-world-end.txt: 1528 vCPU samples
+   kernel          904   59.2 %
+   idle (HLT)      472   30.9 %
+   user            152    9.9 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   68 /   32 /    0
+   cpu1:   16 /   72 /   13
+   cpu2:   17 /   72 /   10
+   cpu3:   20 /   68 /   12
+   cpu4:   29 /   54 /   17
+   cpu5:   26 /   60 /   14
+   cpu6:   32 /   58 /   10
+   cpu7:   39 /   58 /    3
+== kernel, top symbols (% of all samples)

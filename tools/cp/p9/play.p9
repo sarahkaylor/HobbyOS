@@ -1,6 +1,6 @@
 # tools/cp/p9/play.p9 -- Gate P9 boot A (lane C9-play, docs/cp-p9.md §3).
 # Main menu -> LOAD GAME -> ManualSave-86 (the user's save, "The Ripperdoc",
-# Megabuilding H10 atrium, Little China, Watson), ~10.5 min of play with QMP
+# Megabuilding H10 atrium, Little China, Watson), ~11.5 min of play with QMP
 # keyboard + relative mouse (walk, turn, sprint, map), F5 quick save, QUIT GAME.
 # The sequences come from the interactive boot ctl1 (docs/cp-p9.md §2):
 #  * menus: the focus is hidden until the first key; taps need ~0.8 s
@@ -60,8 +60,8 @@ key m
 wait 4
 phase world
 expect_not back-in-world 20 SKIP\s*TIME|DATABASE|FILTER
-# 4. a loop of walking / sprinting / looking (12 x ~20 s)
-repeat 12
+# 4. a loop of walking / sprinting / looking (16 x ~20 s)
+repeat 16
 down shift
 hold w 6000
 up shift
@@ -90,8 +90,8 @@ key m
 wait 4
 phase world
 expect_not back-in-world2 20 SKIP\s*TIME|DATABASE|FILTER
-# 6. another loop (12 x ~17 s)
-repeat 12
+# 6. another loop (16 x ~17 s)
+repeat 16
 hold w 5000
 look 600 0 20 16
 down shift
