@@ -1,0 +1,154 @@
+=================== run vkcubex1 (scanout path, default)
+--- harness
+[P5X] staged: /LIB64 glibc 2.31, /CP/X11 (39 libs), /CP/VK (x11 variant), /VKCUBEX.ELF; XSTART: /VKCUBEX.ELF 65 fs 1080 fifo
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p7/vkcubex1/vkcubex-t20s.ppm
+[P5X] t=20s: screendump taken; QEMU guests on the host now (incl. this one): 2
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p7/vkcubex1/vkcubex-t50s.ppm
+[P5X] t=50s: screendump taken; QEMU guests on the host now (incl. this one): 2
+[P5X] screendump vkcubex-t20s.ppm: clear=1776780 cube=296820 bbox=(0, 0, 1918, 1078) hash=bbd663617a42a7e2
+[P5X] screendump vkcubex-t50s.ppm: clear=1762044 cube=311556 bbox=(0, 0, 1918, 1078) hash=f1cb76db606f9795
+[VK] RESULT frames=6299 wall=65002.1 ms fps=96.90 | per-frame total median 9.05 p90 12.69 worst(after frame 0) 318.47 ms | swapchain 1920x1080 4 images FIFO | recreated=0 suboptimal=0
+  [XSESS] XSTART: /VKCUBEX.ELF
+  [XSESS] XSTART: spawned 1 program(s)
+[P5X] PASS: Linux vkcube on Mesa's X11 WSI (lavapipe) in the X session for >= 60 s, two distinct screendumps
+[P5X] device row: [VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 249.5 ms [P5 device override: 'Virtio-GPU Venus' stands in for llvmpipe]
+[P5X] PASS: Linux vkcube on Venus (host RX 9070 XT) in the X session for >= 60 s, two distinct screendumps
+--- serial: [P7] kernel rows, X fullscreen reports, [VK] and [HBP] rows
+6[X] hobbyos: fullscreen window 0x0 0x0
+[X] hobbyos: fullscreen window 0x6000af 1920x1080
+[P7] scanout X fullscreen window/size 0 0 seq=0
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] [VK] x11: window 0x800000 1920x1080 mapped (fullscreen, override-redirect)
+[X] hobbyos: fullscreen window 0x800000 1920x1080
+[X] [VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 249.5 ms
+[X] [VK] render loop: 65 s
+[P7] scanout taken res/window 4099 8388608 seq=1
+[X] [HBP] pid=14 n=196 fps=97.9 path=scanout acq=0/4 sub=119/8367 wait=3427/14509 flip=6488/13417 geom=0/0 set=101 flush=6082 us scanout=196 putimage=0 refused=0 total=196
+[X] [HBP] pid=14 n=200 fps=99.7 path=scanout acq=0/2 sub=120/8522 wait=3271/14801 flip=6439/22003 geom=0/0 set=123 flush=6163 us scanout=200 putimage=0 refused=0 total=396
+[X] [VK] t=5s frames=496 window fps=99.10 | median ms acquire 0.00 render 6.13 present 2.71 total 8.95
+[X] [HBP] pid=14 n=197 fps=98.4 path=scanout acq=0/1 sub=80/454 wait=3402/14157 flip=6305/10117 geom=0/0 set=107 flush=6137 us scanout=197 putimage=0 refused=0 total=593
+[X] [HBP] pid=14 n=197 fps=98.4 path=scanout acq=0/1 sub=78/195 wait=3507/17048 flip=6270/9456 geom=0/0 set=100 flush=6088 us scanout=197 putimage=0 refused=0 total=790
+[X] [VK] t=10s frames=990 window fps=98.85 | median ms acquire 0.00 render 6.14 present 2.73 total 9.00
+[X] [HBP] pid=14 n=201 fps=100.1 path=scanout acq=0/1 sub=77/312 wait=3266/13625 flip=6259/9911 geom=0/0 set=103 flush=6080 us scanout=201 putimage=0 refused=0 total=991
+[X] [HBP] pid=14 n=216 fps=108.0 path=scanout acq=0/6 sub=114/7163 wait=3027/14846 flip=5964/14077 geom=0/0 set=88 flush=5767 us scanout=216 putimage=0 refused=0 total=1207
+[X] [HBP] pid=14 n=214 fps=106.6 path=scanout acq=0/1 sub=83/1296 wait=2943/14105 flip=6152/12225 geom=0/0 set=90 flush=5978 us scanout=214 putimage=0 refused=0 total=1421
+[X] [VK] t=15s frames=1522 window fps=106.32 | median ms acquire 0.00 render 6.02 present 2.72 total 8.78
+[X] [HBP] pid=14 n=202 fps=100.7 path=scanout acq=0/2 sub=90/3295 wait=3183/14217 flip=6230/10202 geom=0/0 set=106 flush=6048 us scanout=202 putimage=0 refused=0 total=1623
+[X] [HBP] pid=14 n=198 fps=98.8 path=scanout acq=0/6 sub=139/8179 wait=3320/15288 flip=6367/11320 geom=0/0 set=106 flush=6168 us scanout=198 putimage=0 refused=0 total=1821
+[X] [VK] t=20s frames=2006 window fps=96.81 | median ms acquire 0.00 render 6.14 present 2.71 total 9.02
+[X] [HBP] pid=14 n=188 fps=93.6 path=scanout acq=692/129999 sub=78/354 wait=3337/15454 flip=6933/144482 geom=0/0 set=111 flush=6001 us scanout=188 putimage=0 refused=0 total=2009
+[X] [HBP] pid=14 n=193 fps=96.4 path=scanout acq=0/1 sub=78/392 wait=3582/15020 flip=6352/9368 geom=0/0 set=108 flush=6156 us scanout=193 putimage=0 refused=0 total=2202
+[X] [HBP] pid=14 n=194 fps=96.8 path=scanout acq=0/33 sub=78/378 wait=3605/14088 flip=6417/9962 geom=0/0 set=107 flush=6239 us scanout=194 putimage=0 refused=0 total=2396
+[X] [VK] t=25s frames=2493 window fps=97.37 | median ms acquire 0.00 render 6.23 present 2.74 total 9.19
+[X] [HBP] pid=14 n=195 fps=97.4 path=scanout acq=0/9 sub=132/10912 wait=3591/15096 flip=6437/11623 geom=0/0 set=102 flush=6256 us scanout=195 putimage=0 refused=0 total=2591
+[X] [HBP] pid=14 n=196 fps=97.6 path=scanout acq=0/2 sub=78/486 wait=3634/15982 flip=6381/9814 geom=0/0 set=98 flush=6202 us scanout=196 putimage=0 refused=0 total=2787
+[X] [VK] t=30s frames=2984 window fps=98.23 | median ms acquire 0.00 render 6.15 present 2.72 total 9.06
+[X] [HBP] pid=14 n=203 fps=101.2 path=scanout acq=0/1 sub=82/474 wait=3304/13593 flip=6358/18639 geom=0/0 set=94 flush=6120 us scanout=203 putimage=0 refused=0 total=2990
+[X] [HBP] pid=14 n=203 fps=101.4 path=scanout acq=0/2 sub=163/8721 wait=3413/24721 flip=6265/9240 geom=0/0 set=94 flush=6082 us scanout=203 putimage=0 refused=0 total=3193
+[X] [HBP] pid=14 n=202 fps=100.6 path=scanout acq=0/4 sub=214/8323 wait=3180/14059 flip=6346/9846 geom=0/0 set=94 flush=6181 us scanout=202 putimage=0 refused=0 total=3395
+[X] [VK] t=35s frames=3489 window fps=101.00 | median ms acquire 0.00 render 6.09 present 2.71 total 8.93
+[X] [HBP] pid=14 n=200 fps=99.9 path=scanout acq=0/1 sub=259/12227 wait=3483/13807 flip=6401/9539 geom=0/0 set=96 flush=6225 us scanout=200 putimage=0 refused=0 total=3595
+[X] [HBP] pid=14 n=199 fps=98.9 path=scanout acq=0/1 sub=165/8370 wait=3441/14406 flip=6416/13881 geom=0/0 set=112 flush=6177 us scanout=199 putimage=0 refused=0 total=3794
+[X] [VK] t=40s frames=3988 window fps=99.91 | median ms acquire 0.00 render 6.13 present 2.73 total 8.98
+[X] [HBP] pid=14 n=204 fps=101.4 path=scanout acq=0/1 sub=174/11774 wait=3233/13908 flip=6340/11860 geom=0/0 set=106 flush=6154 us scanout=204 putimage=0 refused=0 total=3998
+[X] [HBP] pid=14 n=222 fps=110.6 path=scanout acq=0/1 sub=137/8191 wait=3040/14082 flip=5878/11847 geom=0/0 set=75 flush=5704 us scanout=222 putimage=0 refused=0 total=4220
+[X] [HBP] pid=14 n=220 fps=109.8 path=scanout acq=0/5 sub=123/8427 wait=2859/14397 flip=6032/12188 geom=0/0 set=84 flush=5874 us scanout=220 putimage=0 refused=0 total=4440
+[X] [VK] t=45s frames=4532 window fps=108.66 | median ms acquire 0.00 render 5.91 present 2.71 total 8.65
+[X] [HBP] pid=14 n=207 fps=103.4 path=scanout acq=0/2 sub=79/462 wait=3237/14468 flip=6175/10074 geom=0/0 set=95 flush=5998 us scanout=207 putimage=0 refused=0 total=4647
+[X] [HBP] pid=14 n=201 fps=100.5 path=scanout acq=0/2 sub=233/12969 wait=3133/13271 flip=6354/10401 geom=0/0 set=102 flush=6175 us scanout=201 putimage=0 refused=0 total=4848
+[X] [VK] t=50s frames=4998 window fps=93.19 | median ms acquire 0.00 render 6.13 present 2.72 total 8.95
+[X] [HBP] pid=14 n=160 fps=79.9 path=scanout acq=507/81051 sub=179/8620 wait=5589/318141 flip=8803/412043 geom=0/0 set=93 flush=6080 us scanout=160 putimage=0 refused=0 total=5008
+[X] [HBP] pid=14 n=175 fps=87.3 path=scanout acq=0/2 sub=85/1033 wait=4149/15157 flip=6757/10737 geom=0/0 set=91 flush=6594 us scanout=175 putimage=0 refused=0 total=5183
+[X] [HBP] pid=14 n=170 fps=84.8 path=scanout acq=0/1 sub=140/8445 wait=4145/16182 flip=6979/10463 geom=0/0 set=126 flush=6776 us scanout=170 putimage=0 refused=0 total=5353
+[X] [VK] t=55s frames=5431 window fps=86.70 | median ms acquire 0.00 render 6.72 present 2.79 total 10.13
+[X] [HBP] pid=14 n=173 fps=86.2 path=scanout acq=0/1 sub=82/714 wait=3870/15376 flip=6954/11570 geom=0/0 set=116 flush=6743 us scanout=173 putimage=0 refused=0 total=5526
+[X] [HBP] pid=14 n=172 fps=85.9 path=scanout acq=0/1 sub=78/427 wait=3959/14307 flip=6889/16027 geom=0/0 set=122 flush=6626 us scanout=172 putimage=0 refused=0 total=5698
+[X] [VK] t=60s frames=5858 window fps=85.39 | median ms acquire 0.00 render 6.89 present 2.77 total 10.39
+[X] [HBP] pid=14 n=172 fps=85.6 path=scanout acq=0/5 sub=77/425 wait=4210/15775 flip=6878/10140 geom=0/0 set=123 flush=6687 us scanout=172 putimage=0 refused=0 total=5870
+[X] [HBP] pid=14 n=173 fps=86.5 path=scanout acq=11/1856 sub=125/8017 wait=4346/20380 flip=6793/19458 geom=0/0 set=100 flush=6559 us scanout=173 putimage=0 refused=0 total=6043
+[X] [HBP] pid=14 n=180 fps=89.5 path=scanout acq=0/1 sub=126/8450 wait=4064/23624 flip=6594/10486 geom=0/0 set=107 flush=6410 us scanout=180 putimage=0 refused=0 total=6223
+[X] [VK] t=65s frames=6299 window fps=88.21 | median ms acquire 0.00 render 6.33 present 2.77 total 9.81
+[X] [VK] RESULT frames=6299 wall=65002.1 ms fps=96.90 | per-frame total median 9.05 p90 12.69 worst(after frame 0) 318.47 ms | swapchain 1920x1080 4 images FIFO | recreated=0 suboptimal=0
+[P7] scanout back (blob freed) 4102 0 seq=6299
+[X] [VK] done rc=0
+[P7] scanout X fullscreen window/size 0 0 seq=6299
+[X] hobbyos: fullscreen window 0x0 0x0
+--- qemu-debug.log (guest errors)
+(end)
+=================== run vkcubex-put (put_image baseline, HB_SCANOUT=0)
+--- harness
+[P5X] staged: /LIB64 glibc 2.31, /CP/X11 (39 libs), /CP/VK (x11 variant), /VKCUBEX.ELF; XSTART: /VKCUBEX.ELF 65 fs 1080 fifo
+[P5X] venus: XSESSION.ENV += HB_SCANOUT=0
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p7/vkcubex-put/vkcubex-t20s.ppm
+[P5X] t=20s: screendump taken; QEMU guests on the host now (incl. this one): 2
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p7/vkcubex-put/vkcubex-t50s.ppm
+[P5X] t=50s: screendump taken; QEMU guests on the host now (incl. this one): 4
+[P5X] screendump vkcubex-t20s.ppm: clear=1745960 cube=327556 bbox=(0, 0, 1918, 1078) hash=9b92c6672ee920e6
+[P5X] screendump vkcubex-t50s.ppm: clear=1736672 cube=336844 bbox=(0, 0, 1918, 1078) hash=7a66c20cc257ecaf
+[VK] RESULT frames=2591 wall=65007.3 ms fps=39.86 | per-frame total median 24.33 p90 29.07 worst(after frame 0) 411.46 ms | swapchain 1920x1080 4 images FIFO | recreated=0 suboptimal=0
+  [XSESS] env: 1 line(s) from /X11/XSESSION.ENV
+  [XSESS] XSTART: /VKCUBEX.ELF
+  [XSESS] XSTART: spawned 1 program(s)
+[P5X] PASS: Linux vkcube on Mesa's X11 WSI (lavapipe) in the X session for >= 60 s, two distinct screendumps
+[P5X] device row: [VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 242.5 ms [P5 device override: 'Virtio-GPU Venus' stands in for llvmpipe]
+[P5X] PASS: Linux vkcube on Venus (host RX 9070 XT) in the X session for >= 60 s, two distinct screendumps
+--- serial: [P7] kernel rows, X fullscreen reports, [VK] and [HBP] rows
+ mapped=[X] hobbyos: fullscreen window 0x0 0x0
+[X] hobbyos: fullscreen window 0x6000af 1920x1080
+[P7] scanout X fullscreen window/size 0 0 seq=0
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] [VK] x11: window 0x800000 1920x1080 mapped (fullscreen, override-redirect)
+[X] hobbyos: fullscreen window 0x800000 1920x1080
+[X] [VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 242.5 ms
+[X] [VK] render loop: 65 s
+[X] [HBP] pid=14 n=75 fps=37.2 path=putimage acq=14787/38528 sub=315/8394 wait=7689/13171 flip=26236/42464 geom=1/2 set=0 flush=0 us scanout=0 putimage=75 refused=0 total=75
+[X] [HBP] pid=14 n=80 fps=39.9 path=putimage acq=13895/20721 sub=95/559 wait=7942/12952 flip=25001/36392 geom=1/2 set=0 flush=0 us scanout=0 putimage=80 refused=0 total=155
+[X] [VK] t=5s frames=201 window fps=40.14 | median ms acquire 13.79 render 0.68 present 8.46 total 24.59
+[X] [HBP] pid=14 n=84 fps=42.0 path=putimage acq=13086/17667 sub=77/202 wait=7909/12967 flip=23777/34082 geom=1/2 set=0 flush=0 us scanout=0 putimage=84 refused=0 total=239
+[X] [HBP] pid=14 n=84 fps=41.7 path=putimage acq=13390/21592 sub=89/449 wait=7867/21943 flip=23932/35854 geom=1/2 set=0 flush=0 us scanout=0 putimage=84 refused=0 total=323
+[X] [VK] t=10s frames=408 window fps=41.35 | median ms acquire 13.69 render 0.66 present 8.29 total 24.05
+[X] [HBP] pid=14 n=83 fps=41.1 path=putimage acq=13673/29509 sub=194/8343 wait=7540/12409 flip=24247/38303 geom=1/5 set=0 flush=0 us scanout=0 putimage=83 refused=0 total=406
+[X] [HBP] pid=14 n=82 fps=40.9 path=putimage acq=13258/20661 sub=301/8356 wait=7090/15408 flip=24380/35688 geom=1/2 set=0 flush=0 us scanout=0 putimage=82 refused=0 total=488
+[X] [HBP] pid=14 n=85 fps=42.2 path=putimage acq=13892/18739 sub=154/8028 wait=7787/13655 flip=23650/37342 geom=1/1 set=0 flush=0 us scanout=0 putimage=85 refused=0 total=573
+[X] [VK] t=15s frames=617 window fps=41.85 | median ms acquire 13.62 render 0.79 present 8.16 total 23.47
+[X] [HBP] pid=14 n=87 fps=43.2 path=putimage acq=12776/19215 sub=234/8144 wait=7124/12494 flip=23066/40240 geom=1/2 set=0 flush=0 us scanout=0 putimage=87 refused=0 total=660
+[X] [HBP] pid=14 n=83 fps=41.3 path=putimage acq=13301/20295 sub=74/507 wait=8137/13366 flip=24133/39034 geom=1/2 set=0 flush=0 us scanout=0 putimage=83 refused=0 total=743
+[X] [VK] t=20s frames=824 window fps=41.33 | median ms acquire 13.03 render 0.54 present 8.35 total 23.15
+[X] [HBP] pid=14 n=81 fps=40.4 path=putimage acq=14235/134290 sub=70/195 wait=8250/13006 flip=24716/142891 geom=1/2 set=0 flush=0 us scanout=0 putimage=81 refused=0 total=824
+[X] [HBP] pid=14 n=84 fps=41.6 path=putimage acq=13465/28484 sub=285/8287 wait=7531/12207 flip=23810/32056 geom=1/2 set=0 flush=0 us scanout=0 putimage=84 refused=0 total=908
+[X] [HBP] pid=14 n=78 fps=38.8 path=putimage acq=14422/36443 sub=557/15309 wait=7116/12689 flip=25462/37935 geom=1/2 set=0 flush=0 us scanout=0 putimage=78 refused=0 total=986
+[X] [VK] t=25s frames=1016 window fps=38.38 | median ms acquire 13.77 render 0.78 present 8.23 total 24.84
+[X] [HBP] pid=14 n=62 fps=30.9 path=putimage acq=15816/51300 sub=859/7426 wait=6823/15724 flip=32211/62656 geom=2/3 set=0 flush=0 us scanout=0 putimage=62 refused=0 total=1048
+[X] [HBP] pid=14 n=77 fps=38.2 path=putimage acq=14142/27211 sub=645/15889 wait=7896/17870 flip=26132/45035 geom=1/4 set=0 flush=0 us scanout=0 putimage=77 refused=0 total=1125
+[X] [VK] t=30s frames=1202 window fps=37.27 | median ms acquire 13.96 render 0.79 present 8.51 total 25.53
+[X] [HBP] pid=14 n=80 fps=39.7 path=putimage acq=13882/19861 sub=102/689 wait=8324/13394 flip=25103/38193 geom=1/2 set=0 flush=0 us scanout=0 putimage=80 refused=0 total=1205
+[X] [HBP] pid=14 n=82 fps=40.6 path=putimage acq=13788/20893 sub=81/353 wait=8308/14160 flip=24586/34519 geom=1/2 set=0 flush=0 us scanout=0 putimage=82 refused=0 total=1287
+[X] [HBP] pid=14 n=82 fps=40.8 path=putimage acq=13649/23686 sub=187/8497 wait=7939/13171 flip=24465/34397 geom=1/9 set=0 flush=0 us scanout=0 putimage=82 refused=0 total=1369
+[X] [VK] t=35s frames=1406 window fps=40.71 | median ms acquire 13.64 render 0.66 present 8.52 total 24.09
+[X] [HBP] pid=14 n=82 fps=40.8 path=putimage acq=13553/20798 sub=206/8855 wait=7370/12118 flip=24456/34747 geom=1/6 set=0 flush=0 us scanout=0 putimage=82 refused=0 total=1451
+[X] [HBP] pid=14 n=82 fps=40.6 path=putimage acq=14051/26723 sub=132/3510 wait=8281/11953 flip=24566/35887 geom=1/2 set=0 flush=0 us scanout=0 putimage=82 refused=0 total=1533
+[X] [VK] t=40s frames=1608 window fps=40.51 | median ms acquire 13.87 render 0.62 present 8.40 total 24.65
+[X] [HBP] pid=14 n=81 fps=40.2 path=putimage acq=14069/28745 sub=81/351 wait=8156/13256 flip=24817/37793 geom=1/10 set=0 flush=0 us scanout=0 putimage=81 refused=0 total=1614
+[X] [HBP] pid=14 n=81 fps=40.1 path=putimage acq=14254/28089 sub=170/7193 wait=8048/13650 flip=24841/35924 geom=1/3 set=0 flush=0 us scanout=0 putimage=81 refused=0 total=1695
+[X] [HBP] pid=14 n=77 fps=38.3 path=putimage acq=16400/28002 sub=106/2734 wait=7929/12300 flip=26071/39645 geom=1/4 set=0 flush=0 us scanout=0 putimage=77 refused=0 total=1772
+[X] [VK] t=45s frames=1805 window fps=39.36 | median ms acquire 14.90 render 0.73 present 8.34 total 24.72
+[X] [HBP] pid=14 n=82 fps=40.9 path=putimage acq=14418/36191 sub=84/597 wait=7882/12094 flip=24102/30853 geom=1/2 set=0 flush=0 us scanout=0 putimage=82 refused=0 total=1854
+[X] [HBP] pid=14 n=84 fps=41.5 path=putimage acq=13418/18070 sub=101/1456 wait=8077/13076 flip=24021/35063 geom=1/4 set=0 flush=0 us scanout=0 putimage=84 refused=0 total=1938
+[X] [VK] t=50s frames=1993 window fps=37.65 | median ms acquire 13.87 render 0.60 present 8.27 total 24.19
+[X] [HBP] pid=14 n=64 fps=31.7 path=putimage acq=19921/389015 sub=338/8281 wait=7471/14544 flip=31465/396353 geom=1/2 set=0 flush=0 us scanout=0 putimage=64 refused=0 total=2002
+[X] [HBP] pid=14 n=79 fps=39.3 path=putimage acq=14546/43012 sub=191/4122 wait=7310/12637 flip=25057/34608 geom=1/1 set=0 flush=0 us scanout=0 putimage=79 refused=0 total=2081
+[X] [HBP] pid=14 n=82 fps=40.7 path=putimage acq=13497/26311 sub=310/12921 wait=6477/12074 flip=24521/38858 geom=1/2 set=0 flush=0 us scanout=0 putimage=82 refused=0 total=2163
+[X] [VK] t=55s frames=2193 window fps=39.83 | median ms acquire 13.93 render 0.80 present 8.15 total 25.06
+[X] [HBP] pid=14 n=79 fps=39.3 path=putimage acq=13880/19014 sub=208/3274 wait=7534/12883 flip=25399/38021 geom=1/2 set=0 flush=0 us scanout=0 putimage=79 refused=0 total=2242
+[X] [HBP] pid=14 n=78 fps=38.8 path=putimage acq=14096/21878 sub=280/8272 wait=7542/13548 flip=25699/41329 geom=1/2 set=0 flush=0 us scanout=0 putimage=78 refused=0 total=2320
+[X] [VK] t=60s frames=2389 window fps=39.25 | median ms acquire 14.35 render 0.71 present 8.31 total 25.01
+[X] [HBP] pid=14 n=80 fps=39.7 path=putimage acq=14033/16947 sub=136/2085 wait=7737/12322 flip=25135/39129 geom=1/1 set=0 flush=0 us scanout=0 putimage=80 refused=0 total=2400
+[X] [HBP] pid=14 n=81 fps=40.0 path=putimage acq=14360/21261 sub=114/904 wait=7421/12095 flip=24915/39125 geom=1/2 set=0 flush=0 us scanout=0 putimage=81 refused=0 total=2481
+[X] [HBP] pid=14 n=83 fps=41.1 path=putimage acq=13475/33363 sub=228/8146 wait=7029/12278 flip=24007/31934 geom=1/2 set=0 flush=0 us scanout=0 putimage=83 refused=0 total=2564
+[X] [VK] t=65s frames=2591 window fps=40.49 | median ms acquire 14.04 render 0.68 present 8.15 total 24.24
+[X] [VK] RESULT frames=2591 wall=65007.3 ms fps=39.86 | per-frame total median 24.33 p90 29.07 worst(after frame 0) 411.46 ms | swapchain 1920x1080 4 images FIFO | recreated=0 suboptimal=0
+[X] [VK] done rc=0
+[P7] scanout X fullscreen window/size 0 0 seq=0
+[X] hobbyos: fullscreen window 0x0 0x0
+--- qemu-debug.log (guest errors)
+(end)

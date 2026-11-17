@@ -44,6 +44,20 @@ struct virtio_gpu_resp_map_info {
   uint32_t padding;
 };
 
+/* P7 (AD-6): VIRTIO_GPU_CMD_SET_SCANOUT_BLOB (virtio spec 5.7.6.7). */
+struct virtio_gpu_set_scanout_blob {
+  struct virtio_gpu_ctrl_hdr hdr;
+  struct virtio_gpu_rect r;
+  uint32_t scanout_id;
+  uint32_t resource_id;
+  uint32_t width;
+  uint32_t height;
+  uint32_t format;
+  uint32_t padding;
+  uint32_t strides[4];
+  uint32_t offsets[4];
+};
+
 struct virtio_gpu_resource_unmap_blob {
   struct virtio_gpu_ctrl_hdr hdr;
   uint32_t resource_id;
@@ -100,6 +114,30 @@ void virtio_gpu_x64_handle_irq(void);
 void virtio_gpu_x64_irq_late_enable(void);
 /* Wake FENCE_WAIT2 sleepers after a retirement (no lock held). */
 void virtio_gpu_3d_fence_wake(void);
+
+/* P7 (AD-6, F5; docs/gpu-abi.md §10.7): blob scanout and the desktop
+ * hand-back (virtio_gpu_x64.c).  The owner is (process group pid, fd). */
+struct vgpu_scanout_req {
+  uint32_t res_id, width, height, format, stride;
+};
+/* Flip: 0 shown, -EPERM not granted, -EBUSY other owner, -EIO device error,
+ * -ENODEV no blob device. */
+int virtio_gpu_x64_scanout_flip(int pid, int fd, uint32_t window, const struct vgpu_scanout_req* rq,
+                                uint64_t* seqno, uint32_t* set_us, uint32_t* flush_us);
+/* Hand the screen back if (pid, fd[, res_id]) owns it (fd < 0: any fd,
+ * res_id 0: any blob).  1 when it did. */
+int virtio_gpu_x64_scanout_release(int pid, int fd, uint32_t res_id);
+/* The X server's fullscreen report, carried by SYS_FLUSH_FB_RECTS as one
+ * control rect: {x = VGPU_FSCTL_MAGIC, y = VGPU_FSCTL_OP_FS, w = window
+ * (0 = none), h = screen_w << 16 | screen_h}.  Pure decode (unit-tested):
+ * 1 and the fields, or 0 when the rect is not a valid control rect. */
+#define VGPU_FSCTL_MAGIC 0x48425037 /* "HBP7" */
+#define VGPU_FSCTL_OP_FS 1
+int virtio_gpu_x64_fsctl_decode(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t* window,
+                                uint32_t* sw, uint32_t* sh);
+/* Diagnostics: flips, hand-backs, refusals, suppressed desktop flushes. */
+void virtio_gpu_x64_scanout_stats(uint64_t* flips, uint32_t* restores, uint32_t* refusals,
+                                  uint64_t* suppressed);
 
 /* 3D-layer entry points (virtio_gpu_3d.c). */
 int virtio_gpu_3d_features(void); /* GPU_FEAT_* */

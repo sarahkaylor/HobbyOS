@@ -67,6 +67,21 @@ def _patch_qmp():
     def shot(self, path):
         if orig(self, path) and os.path.exists(path):
             return True
+        # P7: with VENUS_VNC=1 the glass itself (a blob scanout included) via
+        # QEMU's VNC listener; pmemsave below only sees the X framebuffer.
+        try:
+            sock = os.path.join(os.path.dirname(self.sock.getpeername()), "vnc-sock")
+        except OSError:
+            sock = ""
+        sock = os.environ.get("VENUS_VNC_SOCK", sock)
+        if os.environ.get("VENUS_VNC") == "1" and os.path.exists(sock):
+            try:
+                import vncshot
+                w, h = vncshot.shot(sock, path)
+                print(f"[VENUS-P5] screendump via VNC ({w}x{h}, the glass) -> {path}", flush=True)
+                return True
+            except Exception as e:  # noqa: BLE001
+                print(f"[VENUS-P5] VNC screendump failed ({e}); falling back to pmemsave", flush=True)
         pa = _fb_phys()
         if not pa:
             return False

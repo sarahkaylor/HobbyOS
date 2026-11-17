@@ -706,6 +706,86 @@ hbViewableChild(ScreenPtr pScreen)
     return NULL;
 }
 
+/* ---- P7 (docs/cp-p7.md, F5): who may scan out ---------------------------
+ * The kernel lets a Vulkan client put its swapchain image on the scanout
+ * (GPU_IOC_SCANOUT_BLOB) only for the window this server reports as covering
+ * the whole of what is on the glass, unobscured: the one window whose
+ * clipList is the entire screen.  Clip lists partition the screen, so there
+ * is at most one.  The report travels on the flush path as a single control
+ * rect {HB_FSCTL_MAGIC, 1, window, w << 16 | h}; the kernel hands the screen
+ * back to us the moment the report changes -- another window on top (focus
+ * loss, a menu, a dialog), the window unmapped or moved, a RandR mode change
+ * -- and while a client owns the scanout it drops our flushes (we keep
+ * drawing the shadow into the framebuffer; the hand-back transfers all of
+ * it).  A kernel without P7 refuses the control rect (-EINVAL): logged once,
+ * nothing else changes. */
+#define HB_FSCTL_MAGIC 0x48425037 /* "HBP7", src/include/virtio_gpu_blob.h */
+#define HB_FSCTL_OP_FS 1
+static XID hbFsReported = (XID) ~0;
+static int hbFsRepW = -1, hbFsRepH = -1, hbFsRows, hbFsBroken;
+
+static WindowPtr
+hbFullscreenWindow(ScreenPtr pScreen, int w, int h)
+{
+    BoxRec box = { 0, 0, (short) w, (short) h };
+    WindowPtr p = pScreen->root, c;
+
+    if (!p || w <= 0 || h <= 0)
+        return NULL;
+    /* Descend through the topmost viewable child that is visible over the
+     * whole box (its borderClip holds every pixel of it). */
+    for (;;) {
+        for (c = p->firstChild; c; c = c->nextSib)
+            if (c->viewable &&
+                RegionContainsRect(&c->borderClip, &box) == rgnIN)
+                break;
+        if (!c)
+            break;
+        p = c;
+    }
+    if (p == pScreen->root || RegionContainsRect(&p->clipList, &box) != rgnIN)
+        return NULL;
+    return p;
+}
+
+static void
+hbScanoutPoll(void)
+{
+    ScreenPtr pScreen = screenInfo.numScreens > 0 ? screenInfo.screens[0] : NULL;
+    HbScreenRec *scr = hbScreenOf(pScreen);
+    WindowPtr pWin = NULL;
+    XID id = 0;
+    int w = 0, h = 0;
+
+    if (!scr || hbFsBroken)
+        return;
+    hbVisible(scr, &w, &h);
+    /* The depth-8 :0.1 owning the glass, or a CRTC that is off: nobody. */
+    if (!hbSecondActive && hbOwner == pScreen->myNum && scr->viewWidth != 0 &&
+        scr->depth != 8 && w == pScreen->width && h == pScreen->height)
+        pWin = hbFullscreenWindow(pScreen, w, h);
+    if (pWin)
+        id = pWin->drawable.id;
+    else
+        w = h = 0;
+    if (id == hbFsReported && w == hbFsRepW && h == hbFsRepH)
+        return;
+    {
+        struct hb_fb_rect32 r = { HB_FSCTL_MAGIC, HB_FSCTL_OP_FS, (int32_t) id,
+                                  (int32_t) (((uint32_t) w << 16) | (uint32_t) h) };
+        if (flush_fb_rects(&r, 1) < 0) {
+            hbFsBroken = 1;
+            ErrorF("hobbyos: kernel has no P7 scanout control (fullscreen report refused)\n");
+            return;
+        }
+    }
+    hbFsReported = id;
+    hbFsRepW = w;
+    hbFsRepH = h;
+    if (hbFsRows++ < 64)
+        ErrorF("hobbyos: fullscreen window 0x%lx %dx%d\n", (unsigned long) id, w, h);
+}
+
 /* Registered as a server block handler by InitOutput: runs once per server
  * loop pass, before the per-screen shadow block handlers.  Two state
  * transitions to notice: a screen-1 window appeared (game takes the glass) or
@@ -716,6 +796,7 @@ hbOwnershipPoll(void *blockData, void *timeout)
     ScreenPtr pDesktop, pGame;
     WindowPtr pWin;
 
+    hbScanoutPoll();
     if (screenInfo.numScreens < 2)
         return;
     pDesktop = screenInfo.screens[0];

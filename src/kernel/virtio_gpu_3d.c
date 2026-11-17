@@ -1554,6 +1554,7 @@ int virtio_gpu_3d_features(void) {
   if (virtio_gpu_x64_ctxinit_negotiated) f |= GPU_FEAT_CONTEXT_INIT;
   if (virtio_gpu_x64_blob_negotiated && virtio_gpu_x64_shm_len) f |= GPU_FEAT_HOST_VISIBLE;
   if (virtio_gpu_x64_irq_vector >= 0) f |= GPU_FEAT_FENCE_IRQ;
+  if (virtio_gpu_x64_blob_negotiated) f |= GPU_FEAT_SCANOUT_BLOB; /* P7 */
   return f;
 }
 

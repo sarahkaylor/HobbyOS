@@ -224,6 +224,8 @@ struct gpu_param {
 #define GPU_FEAT_CONTEXT_INIT  (1u << 2)
 #define GPU_FEAT_HOST_VISIBLE  (1u << 3)
 #define GPU_FEAT_FENCE_IRQ     (1u << 4)
+/* P7 (AD-6, F5; docs/gpu-abi.md §10.7): GPU_IOC_SCANOUT_BLOB works. */
+#define GPU_FEAT_SCANOUT_BLOB  (1u << 5)
 
 #define GPU_MAX_RINGS 64
 
@@ -317,13 +319,44 @@ struct gpu_fence_wait2 {
 #define GPU_IOC_RES_UNMAP_BLOB   GPU_IOW(GPU_IOC_MAGIC, 17, struct gpu_res_unmap_blob)
 #define GPU_IOC_SUBMIT2          GPU_IOWR(GPU_IOC_MAGIC, 18, struct gpu_submit2)
 #define GPU_IOC_FENCE_WAIT2      GPU_IOWR(GPU_IOC_MAGIC, 19, struct gpu_fence_wait2)
-#define GPU_IOC_SCANOUT_BLOB     GPU_IOC(GPU_IOC_WRITE, GPU_IOC_MAGIC, 20, 64) /* P7 */
+/* P7 (AD-6, F5; docs/gpu-abi.md §10.7): show a blob on scanout 0 with
+ * VIRTIO_GPU_CMD_SET_SCANOUT_BLOB + RESOURCE_FLUSH, synchronously (the
+ * device has displayed the image when the call returns).  Granted only for the
+ * X window the X server reports as covering the whole screen, unobscured, at
+ * exactly width x height; the kernel hands the screen back to the desktop when
+ * the owner calls with res_id 0, closes the fd, unrefs the blob, or when the X
+ * server's report changes (focus loss, a window on top, a mode change).
+ * Errors: -EPERM not granted (present through X instead), -EBUSY another
+ * client owns the scanout, -EINVAL bad arguments / not this fd's blob,
+ * -ENODEV no blob scanout on this device, -EIO the device refused (QEMU: the
+ * blob has no dma-buf, or a bad format/stride: do not retry). */
+#define GPU_SCANOUT_FMT_B8G8R8A8 1   /* virtio-gpu format numbers */
+#define GPU_SCANOUT_FMT_B8G8R8X8 2
+#define GPU_SCANOUT_FMT_R8G8B8A8 67
+#define GPU_SCANOUT_FMT_R8G8B8X8 134
+struct gpu_scanout_blob {
+  uint32_t res_id;   /* a blob of this fd's context; 0 = hand the scanout back */
+  uint32_t flags;    /* 0 */
+  uint32_t width;    /* the image = the scanout mode (16..4096) */
+  uint32_t height;
+  uint32_t format;   /* GPU_SCANOUT_FMT_* */
+  uint32_t stride;   /* bytes per row: >= width * 4, a multiple of 4; the image starts at 0 */
+  uint32_t window;   /* the X window this image is presented to */
+  uint32_t padding;
+  uint64_t seqno;    /* out: this flip's number (device-wide, monotonic) */
+  uint32_t set_us;   /* out: SET_SCANOUT_BLOB round trip, microseconds */
+  uint32_t flush_us; /* out: RESOURCE_FLUSH round trip (the host shows it), microseconds */
+  uint64_t reserved[2];
+};                   /* 64 bytes */
+#define GPU_IOC_SCANOUT_BLOB     GPU_IOWR(GPU_IOC_MAGIC, 20, struct gpu_scanout_blob)
 
 /* Venus pure helpers (gpu_abi.c), exported for the kernel unit suite. */
 int gpu_abi_m2_req_size(unsigned long req);
 int gpu_abi_ctx2_ok(const struct gpu_ctx_create2* c, uint32_t max_rings);
 int gpu_abi_blob_ok(const struct gpu_res_create_blob* b);
 int gpu_abi_submit2_ok(const struct gpu_submit2* s, uint32_t num_rings);
+/* P7: SCANOUT_BLOB argument check against the blob's size (1 ok). */
+int gpu_abi_scanout_ok(const struct gpu_scanout_blob* s, uint64_t blob_size);
 /* map_info -> mapping attribute: 0 = WB, 1 = WC, 2 = UC (never more
  * cacheable than the host). */
 int gpu_abi_map_cache_mode(uint32_t map_info);

@@ -65,7 +65,9 @@ do_patch() {
   local V="$SRC/src/virtio/vulkan"
   cp "$ROOT/src/user/cp/vn_renderer_hobbyos.c" "$V/"
   cp "$ROOT/src/include/gpu_abi.h" "$V/"
-  python3 - "$V" <<'EOF'
+  cp "$ROOT/tools/mesa/venus/hb_present_stats.h" "$ROOT/tools/mesa/venus/hb_wsi_x11.h" \
+     "$SRC/src/vulkan/wsi/"
+  python3 - "$V" "$SRC/src/vulkan/wsi" <<'EOF'
 import sys, re
 v = sys.argv[1]
 m = open(v + '/meson.build').read()
@@ -166,6 +168,216 @@ if dd:
     c = c.replace(old, 'parse_debug_string(os_get_option("VN_DEBUG") ? os_get_option("VN_DEBUG") : "%s", vn_debug_options)' % dd, 1)
     open(v + '/vn_common.c', 'w').write(c)
     print("VN_DEBUG default:", dd)
+# ---- P7 (lane C6-p7, docs/cp-p7.md): zero-copy fullscreen present + the
+# present-cost instrument.  The software X11 WSI gets a driver hook
+# (wsi_device.hobbyos_scanout) that venus fills with GPU_IOC_SCANOUT_BLOB;
+# x11_present_to_x11_sw() tries it before xcb_put_image
+# (tools/mesa/venus/hb_wsi_x11.h) and completes present ids
+# (VK_KHR_present_wait) on both paths; [HBP] rows split every present into
+# acquire / submit / wait / flip / geometry (tools/mesa/venus/hb_present_stats.h).
+ws = sys.argv[2]
+h = open(ws + '/wsi_common.h').read()
+old = '   bool sw;\n'
+assert h.count(old) == 1
+h = h.replace(old, old + """
+   /* HobbyOS P7 (tools/mesa/venus/hb_wsi_x11.h): put `memory` (a linear
+    * width x height image, `stride` bytes per row, virtio-gpu `format`) on
+    * the scanout for X window `window`.  0, -EPERM/-EBUSY (not now: present
+    * through X), other -errno (never again). */
+   int (*hobbyos_scanout)(VkDevice device, VkDeviceMemory memory, uint32_t width,
+                          uint32_t height, uint32_t stride, uint32_t format,
+                          uint32_t window, uint32_t *set_us, uint32_t *flush_us);
+""", 1)
+open(ws + '/wsi_common.h', 'w').write(h)
+
+c = open(ws + '/wsi_common.c').read()
+old = '#include "wsi_common_private.h"\n'
+assert c.count(old) == 1
+c = c.replace(old, old + '#define HB_PSTATS_DEFINE\n#include "hb_present_stats.h"\n', 1)
+old = """   VkResult result = swapchain->acquire_next_image(swapchain, pAcquireInfo,
+                                                   pImageIndex);
+"""
+assert c.count(old) == 1
+c = c.replace(old, """   const uint64_t hb_t0 = hb_tsc();
+   VkResult result = swapchain->acquire_next_image(swapchain, pAcquireInfo,
+                                                   pImageIndex);
+   hb_pstats_add(HB_PS_ACQ, hb_tsc() - hb_t0);
+""", 1)
+old = """VkResult
+wsi_common_queue_present(const struct wsi_device *wsi,
+                         struct vk_queue *queue,
+                         const VkPresentInfoKHR *pPresentInfo)
+{
+"""
+assert c.count(old) == 1
+c = c.replace(old, """static VkResult
+hb_wsi_common_queue_present(const struct wsi_device *wsi,
+                            struct vk_queue *queue,
+                            const VkPresentInfoKHR *pPresentInfo);
+static __thread uint64_t hb_wait_cyc;
+
+/* P7 instrument: [HBP] sub = this call minus its fence waits (wait). */
+VkResult
+wsi_common_queue_present(const struct wsi_device *wsi,
+                         struct vk_queue *queue,
+                         const VkPresentInfoKHR *pPresentInfo)
+{
+   hb_wait_cyc = 0;
+   const uint64_t t0 = hb_tsc();
+   VkResult r = hb_wsi_common_queue_present(wsi, queue, pPresentInfo);
+   const uint64_t dt = hb_tsc() - t0;
+   hb_pstats_add(HB_PS_SUB, dt > hb_wait_cyc ? dt - hb_wait_cyc : 0);
+   hb_pstats_add(HB_PS_WAIT, hb_wait_cyc);
+   return r;
+}
+
+static VkResult
+hb_wsi_common_queue_present(const struct wsi_device *wsi,
+                            struct vk_queue *queue,
+                            const VkPresentInfoKHR *pPresentInfo)
+{
+""", 1)
+old = """         MESA_TRACE_SCOPE("throttle");
+         results[i] = wsi->WaitForFences(vk_device_to_handle(dev),
+                                         1, &swapchain->fences[image_index],
+                                         true, ~0ull);
+"""
+assert c.count(old) == 1
+c = c.replace(old, """         MESA_TRACE_SCOPE("throttle");
+         const uint64_t hb_tw = hb_tsc();
+         results[i] = wsi->WaitForFences(vk_device_to_handle(dev),
+                                         1, &swapchain->fences[image_index],
+                                         true, ~0ull);
+         hb_wait_cyc += hb_tsc() - hb_tw;
+""", 1)
+old = """      if (wsi->sw) {
+         wsi->WaitForFences(vk_device_to_handle(dev),
+                            1, &swapchain->fences[image_index], true, ~0ull);
+      }
+"""
+assert c.count(old) == 1
+c = c.replace(old, """      if (wsi->sw) {
+         const uint64_t hb_tw = hb_tsc();
+         wsi->WaitForFences(vk_device_to_handle(dev),
+                            1, &swapchain->fences[image_index], true, ~0ull);
+         hb_wait_cyc += hb_tsc() - hb_tw;
+      }
+""", 1)
+open(ws + '/wsi_common.c', 'w').write(c)
+
+x = open(ws + '/wsi_common_x11.c').read()
+old = """/**
+ * Send image to X server unaccelerated (software drivers).
+ */
+static VkResult
+x11_present_to_x11_sw(struct x11_swapchain *chain, uint32_t image_index)
+{"""
+assert x.count(old) == 1
+x = x.replace(old, '#include "hb_wsi_x11.h"\n\n' + old, 1)
+old = """   uint64_t max_req_len = xcb_get_maximum_request_length(chain->conn);
+
+   if (image->rectangle_count > 0) {"""
+assert x.count(old) == 1
+x = x.replace(old, """   uint64_t max_req_len = xcb_get_maximum_request_length(chain->conn);
+
+   const uint64_t hb_t0 = hb_tsc();
+   int hb_refused = 0;
+   const int hb_so = hb_x11_scanout(chain, image_index, &hb_refused);
+   if (hb_so)
+      goto hb_after_put;
+
+   if (image->rectangle_count > 0) {""", 1)
+old = """   xcb_flush(chain->conn);
+
+   /* We don't have queued present here.
+    * Immediately let application acquire again, but query geometry first so
+    * we can report OUT_OF_DATE on resize. */
+   xcb_generic_error_t *err;
+
+   xcb_get_geometry_reply_t *geom = xcb_get_geometry_reply(chain->conn, geom_cookie, &err);
+   VkResult result = VK_SUCCESS;"""
+assert x.count(old) == 1
+x = x.replace(old, """hb_after_put:
+   if (hb_so) {
+      /* On the scanout: no X traffic.  A size change of a fullscreen window
+       * ends the X server's grant, and the next present (put_image) checks
+       * the geometry again. */
+      hb_pstats_add(HB_PS_FLIP, hb_tsc() - hb_t0);
+      xcb_discard_reply(chain->conn, geom_cookie.sequence);
+      hb_x11_present_done(chain, image);
+      hb_pstats_present(1, 0);
+      wsi_queue_push(&chain->acquire_queue, image_index);
+      return x11_swapchain_result(chain, VK_SUCCESS);
+   }
+   xcb_flush(chain->conn);
+   hb_pstats_add(HB_PS_FLIP, hb_tsc() - hb_t0);
+
+   /* We don't have queued present here.
+    * Immediately let application acquire again, but query geometry first so
+    * we can report OUT_OF_DATE on resize. */
+   xcb_generic_error_t *err;
+
+   const uint64_t hb_tg = hb_tsc();
+   xcb_get_geometry_reply_t *geom = xcb_get_geometry_reply(chain->conn, geom_cookie, &err);
+   hb_pstats_add(HB_PS_GEOM, hb_tsc() - hb_tg);
+   hb_x11_present_done(chain, image);
+   hb_pstats_present(2, hb_refused);
+   VkResult result = VK_SUCCESS;""", 1)
+open(ws + '/wsi_common_x11.c', 'w').write(x)
+
+# venus: fill the hook
+w = open(v + '/vn_wsi.c').read()
+old = """   physical_dev->wsi_device.supports_scanout = false;
+"""
+assert w.count(old) == 1
+w = w.replace(old, old + """#ifdef VN_HOBBYOS
+   if (vn_renderer_hobbyos_has_scanout(physical_dev->instance->renderer))
+      physical_dev->wsi_device.hobbyos_scanout = vn_hobbyos_wsi_scanout;
+#endif
+""", 1)
+old = 'static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL\nvn_wsi_proc_addr'
+assert w.count(old) == 1
+w = w.replace(old, """#ifdef VN_HOBBYOS
+/* P7 (docs/cp-p7.md): the software WSI's scanout hook -> the blob behind
+ * the image's VkDeviceMemory -> GPU_IOC_SCANOUT_BLOB. */
+static int
+vn_hobbyos_wsi_scanout(VkDevice dev_h, VkDeviceMemory mem_h, uint32_t width,
+                       uint32_t height, uint32_t stride, uint32_t format,
+                       uint32_t window, uint32_t *set_us, uint32_t *flush_us)
+{
+   struct vn_device *dev = vn_device_from_handle(dev_h);
+   struct vn_device_memory *mem = vn_device_memory_from_handle(mem_h);
+   if (!dev || !mem || !mem->base_bo)
+      return -EINVAL;
+   return vn_renderer_hobbyos_scanout(dev->renderer, mem->base_bo, width, height,
+                                      stride, format, window, set_us, flush_us);
+}
+#endif
+
+""" + old, 1)
+if '#include <errno.h>' not in w:
+    w = '#include <errno.h>\n' + w
+open(v + '/vn_wsi.c', 'w').write(w)
+
+h = open(v + '/vn_renderer.h').read()
+old = """#ifdef VN_HOBBYOS
+/* HobbyOS /dev/gpu (src/user/cp/vn_renderer_hobbyos.c, docs/gpu-abi.md §10) */
+VkResult
+vn_renderer_create_hobbyos(struct vn_instance *instance,
+                           const VkAllocationCallbacks *alloc,
+                           struct vn_renderer **renderer);
+"""
+assert h.count(old) == 1
+h = h.replace(old, old + """/* P7 (docs/gpu-abi.md §10.7): blob scanout of a bo; 0 or -errno. */
+bool
+vn_renderer_hobbyos_has_scanout(struct vn_renderer *renderer);
+int
+vn_renderer_hobbyos_scanout(struct vn_renderer *renderer, struct vn_renderer_bo *bo,
+                            uint32_t width, uint32_t height, uint32_t stride,
+                            uint32_t format, uint32_t window, uint32_t *set_us,
+                            uint32_t *flush_us);
+""", 1)
+open(v + '/vn_renderer.h', 'w').write(h)
 print("patched", v)
 EOF
   say "patch: Mesa 26.2.6 (sha256 ok) + vn_renderer_hobbyos.c + gpu_abi.h + meson/vn_renderer.h hooks"
@@ -215,6 +427,8 @@ do_build() {
   # vn_renderer_hobbyos.c / gpu_abi.h may have changed since the patch step.
   cp "$ROOT/src/user/cp/vn_renderer_hobbyos.c" "$SRC/src/virtio/vulkan/"
   cp "$ROOT/src/include/gpu_abi.h" "$SRC/src/virtio/vulkan/"
+  cp "$ROOT/tools/mesa/venus/hb_present_stats.h" "$ROOT/tools/mesa/venus/hb_wsi_x11.h" \
+     "$SRC/src/vulkan/wsi/"
   ninja -C "$B" -j"$JOBS" src/virtio/vulkan/libvulkan_virtio.so > "$WORK/build.log" 2>&1 || {
     grep -E 'error|Error' "$WORK/build.log" | head -30; tail -20 "$WORK/build.log"; die "build failed"; }
   ninja -C "$B" -j"$JOBS" >> "$WORK/build.log" 2>&1 || { tail -30 "$WORK/build.log"; die "build failed"; }

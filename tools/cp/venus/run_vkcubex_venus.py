@@ -50,6 +50,21 @@ def venus_stage(disk, args, tmp):
     m("mcopy", "-o", "-i", disk, os.path.join(VNS, "share/vulkan/icd.d/virtio_icd.x86_64.json"),
       "::/CP/VK/share/vulkan/icd.d/virtio_icd.x86_64.json")
     P5.log("venus: staged /CP/VK/lib/libvulkan_virtio.so + virtio_icd.x86_64.json; lvp ICD JSON removed")
+    # P7 (C6-p7): VENUS_XSESSION_ENV="K=V;K2=V2" adds lines to ::/X11/XSESSION.ENV
+    # (the session's environment, inherited by /VKCUBEX.ELF), e.g. HB_SCANOUT=0
+    # for the put_image baseline.
+    extra = [kv for kv in os.environ.get("VENUS_XSESSION_ENV", "").split(";") if kv]
+    if extra:
+        envf = os.path.join(tmp, "XSESSION.ENV")
+        r = m("mtype", "-i", disk, "::/X11/XSESSION.ENV", check=False)
+        with open(envf, "w") as f:
+            f.write(r.stdout if r.returncode == 0 else "")
+            if r.returncode == 0 and r.stdout and not r.stdout.endswith("\n"):
+                f.write("\n")
+            for kv in extra:
+                f.write(kv + "\n")
+        m("mcopy", "-o", "-i", disk, envf, "::/X11/XSESSION.ENV")
+        P5.log("venus: XSESSION.ENV += " + " ".join(extra))
 
 
 def main():

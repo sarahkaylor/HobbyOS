@@ -80,6 +80,7 @@ struct hobbyos {
    struct vn_renderer base;
    struct vn_instance *instance;
    int fd;
+   bool has_scanout; /* GPU_FEAT_SCANOUT_BLOB (P7) */
    uint32_t ctx_id;
    uint32_t num_rings;
    struct {
@@ -653,6 +654,7 @@ hobbyos_init(struct hobbyos *hb)
              gp.value);
       return VK_ERROR_INITIALIZATION_FAILED;
    }
+   hb->has_scanout = (gp.value & GPU_FEAT_SCANOUT_BLOB) != 0;
    if (!(gp.value & GPU_FEAT_FENCE_IRQ))
       vn_log(hb->instance, "hobbyos: fences are polled (no device interrupt)");
 
@@ -711,6 +713,46 @@ hobbyos_init(struct hobbyos *hb)
    hb->base.sync_ops.read = hobbyos_sync_read;
    hb->base.sync_ops.write = hobbyos_sync_write;
    return VK_SUCCESS;
+}
+
+/* ---- P7: blob scanout (docs/gpu-abi.md §10.7, docs/cp-p7.md) ----------- */
+
+bool
+vn_renderer_hobbyos_has_scanout(struct vn_renderer *renderer)
+{
+   return renderer && renderer->ops.destroy == hobbyos_destroy &&
+          ((struct hobbyos *)renderer)->has_scanout;
+}
+
+int
+vn_renderer_hobbyos_scanout(struct vn_renderer *renderer, struct vn_renderer_bo *bo,
+                            uint32_t width, uint32_t height, uint32_t stride,
+                            uint32_t format, uint32_t window, uint32_t *set_us,
+                            uint32_t *flush_us)
+{
+   if (!vn_renderer_hobbyos_has_scanout(renderer))
+      return -ENODEV;
+   struct hobbyos *hb = (struct hobbyos *)renderer;
+   struct gpu_scanout_blob sb = {
+      .res_id = bo ? bo->res_id : 0,
+      .width = width,
+      .height = height,
+      .format = format,
+      .stride = stride,
+      .window = window,
+   };
+   int r = hb_ioctl(hb, GPU_IOC_SCANOUT_BLOB, &sb);
+   static int rows;
+   if (r && r != -EPERM && r != -EBUSY && rows++ < 8)
+      vn_log(hb->instance, "SCANOUT_BLOB res=%u %ux%u stride=%u fmt=%u win=0x%x: %s",
+             sb.res_id, width, height, stride, format, window, strerror(-r));
+   if (r == 0) {
+      if (set_us)
+         *set_us = sb.set_us;
+      if (flush_us)
+         *flush_us = sb.flush_us;
+   }
+   return r;
 }
 
 VkResult
