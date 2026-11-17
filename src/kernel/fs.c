@@ -2503,10 +2503,7 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
   FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_EXT2DIR) { /* cp/ext2 */
     if (!ubuf || bufsize <= 0) return -EINVAL;
-    ylock_acquire(&f->lock);
-    int er = ext2v_getdents64(f, ubuf, bufsize);
-    ylock_release(&f->lock);
-    return er;
+    return ext2v_getdents64(f, ubuf, bufsize); /* cp/ext2w: no f->lock (file_read) */
   }
   if (f->type == FILE_TYPE_TMPFSDIR) { /* cp/sys */
     if (!ubuf || bufsize <= 0) return -EINVAL;
@@ -3464,6 +3461,15 @@ int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
   int err = 0;
   int r = 0;
   int li = f1_pos_index(pg, fd);
+  /* cp/ext2w (C8 stop 6): ext2 reads at `off` directly -- no pos_lock, no
+     cursor juggling, no lock held while the caller's memory is written. */
+  if (li >= 0 && gfile(li)->type == FILE_TYPE_EXT2) {
+    if (n > 0x7FFFFFFF) n = 0x7FFFFFFF;
+    /* the destination materialized writable first, as file_read_user does
+       (-EFAULT for a hole instead of a kernel-mode fault in the copy) */
+    if (n > 0 && p->as && vm_range_ok(p, ubuf, (uint64_t)n, 1) != 0) return -EFAULT;
+    return ext2v_pread(gfile(li), (void *)(uintptr_t)ubuf, (int)n, off);
+  }
   ylock_t *plk = (li >= 0) ? &gfile(li)->pos_lock : 0;
   if (plk) ylock_acquire(plk);
   int64_t saved = file_seek(pg, fd, 0, 1 /* SEEK_CUR */, &err);
@@ -3488,6 +3494,11 @@ int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
   int err = 0;
   int r = 0;
   int li = f1_pos_index(pg, fd);
+  if (li >= 0 && gfile(li)->type == FILE_TYPE_EXT2) { /* cp/ext2w: see pread */
+    if (n > 0x7FFFFFFF) n = 0x7FFFFFFF;
+    if (n > 0 && p->as && vm_range_ok(p, ubuf, (uint64_t)n, 0) != 0) return -EFAULT;
+    return ext2v_pwrite(gfile(li), (const void *)(uintptr_t)ubuf, (int)n, off);
+  }
   ylock_t *plk = (li >= 0) ? &gfile(li)->pos_lock : 0;
   if (plk) ylock_acquire(plk);
   int64_t saved = file_seek(pg, fd, 0, 1, &err);
@@ -3609,12 +3620,13 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   } else if (f->type == FILE_TYPE_FAT16) {
     return fat16_read(f, buf, size);
   } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
-    /* cp/ext2: the cursor is per open file description, so serialise on its
-       slot lock like FAT16's writers do. */
-    ylock_acquire(&f->lock);
-    int er = ext2v_read(f, buf, size);
-    ylock_release(&f->lock);
-    return er;
+    /* cp/ext2w (C8 stop 6): NO f->lock here.  ext2v_read copies to the
+       caller's memory with no lock held -- a fault there may park the thread
+       (the rewound-syscall park) or kill it, and a ylock held across that is
+       never released (measured: [MUTEX-SELF] on this f->lock in
+       linux_probe_e2fault).  The cursor is read and advanced under
+       ext2_lock, chunk by chunk. */
+    return ext2v_read(f, buf, size);
   } else if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR) {
     ylock_acquire(&f->lock); /* cp/sys: per-description cursor */
     int tr = tmpfs_read(f, buf, size);
@@ -3971,10 +3983,7 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
       file_obj_invalidate_all();
     return wr;
   } else if (f->type == FILE_TYPE_EXT2 || f->type == FILE_TYPE_EXT2DIR) {
-    ylock_acquire(&f->lock); /* cp/ext2: see file_read */
-    int ew = ext2v_write(f, buf, size);
-    ylock_release(&f->lock);
-    return ew;
+    return ext2v_write(f, buf, size); /* cp/ext2w: no f->lock (see file_read) */
   } else if (f->type == FILE_TYPE_TMPFS || f->type == FILE_TYPE_TMPFSDIR) {
     ylock_acquire(&f->lock); /* cp/sys */
     int tw = tmpfs_write(f, buf, size);

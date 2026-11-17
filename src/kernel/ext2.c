@@ -1110,7 +1110,7 @@ static int free_xattr(struct ext2_fs *fs, struct e2i *in) {
 }
 
 static int is_open(const struct ext2_fs *fs, uint32_t ino) {
-  for (int i = 0; i < EXT2_OPEN_MAX; i++)
+  for (uint32_t i = 0; i < fs->open_hi; i++)
     if (fs->open[i].ino == ino && fs->open[i].refs) return 1;
   return 0;
 }
@@ -2196,24 +2196,28 @@ int ext2_resolve(struct ext2_fs *fs, const char *mnt, const char *abs,
 
 int ext2_iget(struct ext2_fs *fs, uint32_t ino) {
   int freei = -1;
-  for (int i = 0; i < EXT2_OPEN_MAX; i++) {
+  for (uint32_t i = 0; i < fs->open_hi; i++) {
     if (fs->open[i].refs && fs->open[i].ino == ino) {
       fs->open[i].refs++;
       return 0;
     }
-    if (!fs->open[i].refs && freei < 0) freei = i;
+    if (!fs->open[i].refs && freei < 0) freei = (int)i;
   }
-  if (freei < 0) return -ENFILE;
+  if (freei < 0) {
+    if (fs->open_hi >= EXT2_OPEN_MAX) return -ENFILE;
+    freei = (int)fs->open_hi++;
+  }
   fs->open[freei].ino = ino;
   fs->open[freei].refs = 1;
   return 0;
 }
 
 int ext2_iput(struct ext2_fs *fs, uint32_t ino) {
-  for (int i = 0; i < EXT2_OPEN_MAX; i++) {
+  for (uint32_t i = 0; i < fs->open_hi; i++) {
     if (fs->open[i].refs && fs->open[i].ino == ino) {
       if (--fs->open[i].refs == 0) {
         fs->open[i].ino = 0;
+        while (fs->open_hi && !fs->open[fs->open_hi - 1].refs) fs->open_hi--;
         if (!fs->ro) return maybe_delete(fs, ino);
       }
       return 0;
@@ -2514,6 +2518,7 @@ int ext2_mount(struct ext2_fs *fs, const struct ext2_dev *dev, int force_ro) {
     fs->open[i].ino = 0;
     fs->open[i].refs = 0;
   }
+  fs->open_hi = 0;
   fs->corrupt = 0;
   fs->sb_dirty = 0;
   fs->alloc_hint = 0;

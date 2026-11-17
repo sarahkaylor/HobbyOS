@@ -42,6 +42,11 @@ int ext2v_open(char *abs, int flags, int mode, struct file *f);
 void ext2v_close(struct file *f);
 int ext2v_read(struct file *f, void *buf, int size);
 int ext2v_write(struct file *f, const void *buf, int size);
+/* cp/ext2w: positioned I/O (the cursor is untouched).  These and read/write
+ * touch user memory with NO lock held (ext2_lock, f->lock, pos_lock): a
+ * fault that parks or kills the thread there must not leave a lock behind. */
+int ext2v_pread(struct file *f, void *buf, int size, int64_t off);
+int ext2v_pwrite(struct file *f, const void *buf, int size, int64_t off);
 int64_t ext2v_size(struct file *f);
 int ext2v_ftruncate(struct file *f, int64_t len);
 int ext2v_fsync(struct file *f);

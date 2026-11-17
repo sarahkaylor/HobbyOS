@@ -1,0 +1,28 @@
+build=0
+[LP] FAIL pread kept making progress (worst gap ms) (30174)
+[LP] FAIL both threads ran (preads) (9267)
+pfx_gate: e2fault probe rc=1 PASS rows=1 skips=0; e2fsck -fn rc=0 (cpdata: 13/131072 files (0.0% non-contiguous), 21322/524288 blocks)
+pfx_gate: FAIL (1)
+run 1: flusher exits=1 halt=0 rip7009=0
+[E2W] ext2_lock wait 2000 ms: holder pid=4 site=0x70014B61 held_ms=2000 waiter site=0x7001290C
+[YLOCK-STALL] site=ext2_lock lock=ext2_lock addr=0x7026F9E4 pc=0x1 extra=0x100000 cpu=2
+[YLOCK-WEDGE] site=ext2_lock lock=ext2_lock addr=0x7026F9E4 pc=0x1 extra=0x2 cpu=2
+[YLOCK-OWNER] ext2_lock pid=4 cpu=1 pcb_live=1 ost=3 osys=17
+  [YLOCK] f->lock held=1 owner_cpu=1 nwait=0 waiters=-
+  [YLOCK] ? held=1 owner_cpu=1 nwait=0 waiters=-
+[IDLESTUCK] cpu=4 rounds=19 t=30080
+[IDLESTUCK] slot=2 pid=2 st=5 wake=30280 futex=0x0 rip=0x1000002740 PROBE.ELF
+[LP] FAIL pread kept making progress (worst gap ms) (30014)
+[LP] FAIL both threads ran (preads) (14137)
+pfx_gate: e2fault probe rc=1 PASS rows=1 skips=0; e2fsck -fn rc=0 (cpdata: 13/131072 files (0.0% non-contiguous), 21322/524288 blocks)
+pfx_gate: FAIL (1)
+run 2: flusher exits=1 halt=0 rip7009=0
+[E2W] ext2_lock wait 2000 ms: holder pid=4 site=0x70014B61 held_ms=2000 waiter site=0x7001290C
+[YLOCK-STALL] site=ext2_lock lock=ext2_lock addr=0x7026F9E4 pc=0x3 extra=0x100000 cpu=1
+[YLOCK-WEDGE] site=ext2_lock lock=ext2_lock addr=0x7026F9E4 pc=0x3 extra=0x2 cpu=3
+[YLOCK-OWNER] ext2_lock pid=4 cpu=3 pcb_live=1 ost=3 osys=17
+  [YLOCK] f->lock held=1 owner_cpu=3 nwait=0 waiters=-
+  [YLOCK] ? held=1 owner_cpu=3 nwait=0 waiters=-
+[IDLESTUCK] cpu=2 rounds=25 t=30077
+[IDLESTUCK] slot=2 pid=2 st=5 wake=30277 futex=0x0 rip=0x1000002740 PROBE.ELF
+ALLDONE

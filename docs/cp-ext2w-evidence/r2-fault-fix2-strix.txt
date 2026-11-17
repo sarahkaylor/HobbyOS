@@ -1,0 +1,11 @@
+build=0
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: PASS
+run 1: flusher exits=1 halt=1 rip7009=0
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: PASS
+run 2: flusher exits=1 halt=1 rip7009=0
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: PASS
+run 3: flusher exits=1 halt=1 rip7009=0
+ALLDONE

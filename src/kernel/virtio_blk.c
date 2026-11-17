@@ -771,6 +771,12 @@ static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
     if ((spins++ & 0x3FF) == 0) {
       extern volatile uint64_t cpu_heartbeat_ms[];
       cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+      /* cp/ext2w (C8 stop 9): no voluntary yield here.  An arch_yield() from
+         a kernel task in this wait (tried: 8861a362) let two CPUs run the
+         flusher on its one stack -- a kernel-mode fault on a user pid with
+         the flusher's RSP in linux_probe_e2churn -- the L78 shape the
+         stress thread's comment describes.  The tick still preempts a
+         kernel task here; a user syscall's continuation never moves. */
     }
 
     /* Drain every VALID completion at the head.  Validity is the phase tag,

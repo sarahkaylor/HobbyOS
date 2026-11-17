@@ -1,0 +1,18 @@
+build=0
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: PASS
+run 1: flusher exits=1 halt=2 rip7009=0
+[IDLESTUCK] slot=1 pid=1 st=3 wake=0 futex=0x0 rip=0x700e9cc6 ext2flush
+[IDLESTUCK] slot=3 pid=3 st=5 wake=60171 futex=0x0 rip=0x10000x020704000 0P0RO1B0E8.E0L0F55
+pfx_gate: e2fault probe rc=1 PASS rows=1 skips=0; e2fsck -fn rc=0 (cpdata: 13/131072 files (0.0% non-contiguous), 21322/524288 blocks)
+pfx_gate: FAIL (1)
+run 2: flusher exits=0 halt=0 rip7009=0
+[YLOCK-STALL] site=f->lock lock=f->lock addr=0x704D4708 pc=0x4 extra=0x100000 cpu=4
+[YLOCK-WEDGE] site=f->lock lock=f->lock addr=0x704D4708 pc=0x4 extra=0x1 cpu=4
+[YLOCK-OWNER] f->lock pid=4 cpu=4 pcb_live=1 ost=3 osys=17
+  [YLOCK] f->lock held=1 owner_cpu=4 nwait=1 waiters=
+  [YLOCK] ? held=1 owner_cpu=4 nwait=0 waiters=-
+[IDLESTUCK] cpu=6 rounds=4785 t=60071
+[IDLESTUCK] slot=1 pid=1 st=3 wake=0 futex=0x0 rip=0x700e9cc6 ext2flush
+[IDLESTUCK] slot=4 pid=4 st=3 wake=0 futex=0x0 rip=0x1000002740 PROBE.ELF
+ALLDONE

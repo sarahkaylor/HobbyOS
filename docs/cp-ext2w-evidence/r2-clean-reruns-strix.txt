@@ -1,0 +1,4 @@
+reg_gate rc=0 == removed /srv/nfs/cp-ext2w-reg
+ext2w_gate rc=0 ext2w_gate: PASS
+pfx_gate(e2stress e2fault e2churn) rc=1 pfx_gate: FAIL (1)
+ALLDONE

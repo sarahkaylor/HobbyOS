@@ -1,0 +1,6 @@
+== ext2w-run4 end 10:23:52 rc=0
+[P8W] +   438.1 s  04:23:52  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 3
+== e2fsck -fn after the boot: rc=0 (cpdata: 1049/1048576 files (0.9% non-contiguous), 139645/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+ALLDONE

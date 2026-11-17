@@ -1,0 +1,14 @@
+# linux_probe_e2fault run 2 on the bounce-only fix (8861a362, strix): the console
+# rows copied from obj/fault-2/e2fault.console.log before a later run reused
+# the directory.  A pread64 (osys=17) holding f->lock and its pos_lock faulted
+# in the user copy; the same CPU then wanted f->lock again (file_close).
+[LP] PASS setup: 48 MiB ext2 file, ext2 + FAT mappable files (0)
+[LP] info e2fault: pread into a window remapped (FAT file / ext2 file / anon) under it, 60 s
+[MUTEX-SELF] site=f->lock lock=f->lock addr=0x704D4708 pc=0x70033F13 cpu=4
+[YLOCK-STALL] site=f->lock lock=f->lock addr=0x704D4708 pc=0x4 extra=0x100000 cpu=4
+[YLOCK-WEDGE] site=f->lock lock=f->lock addr=0x704D4708 pc=0x4 extra=0x1 cpu=4
+[YLOCK-OWNER] f->lock pid=4 cpu=4 pcb_live=1 ost=3 osys=17
+  [YLOCK] f->lock held=1 owner_cpu=4 nwait=1 waiters=
+  [YLOCK] ? held=1 owner_cpu=4 nwait=0 waiters=-
+# pc 0x70033F13 symbolizes to file_close (llvm-addr2line, that tree's kernel).
+# Fixed by 264c1cdf (no ylock held across ext2 user copies); 3/3 PASS after.
