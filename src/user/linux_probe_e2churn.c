@@ -104,6 +104,9 @@ static void writer(int idx, uint64_t t_end) {
       big_off += sizeof b;
       (void)fdatasync(bigfd);
     }
+    /* sync(2), not only fsync: fsync leaves the superblock's counts for the
+       next full commit, so only a sync makes the cache wholly clean */
+    if (idx == NW - 1) { usleep(30000); sync(); }
     tick((uint8_t)idx);
     /* every writer waits for the next 600 ms window boundary: the cache is
        clean for ~0.5 s of every window, then dirty again -- the old flusher
