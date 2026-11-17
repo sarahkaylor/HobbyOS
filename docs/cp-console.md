@@ -223,5 +223,37 @@ continuation, and a row the tick interrupts after a quiet 60 ms.
 
 ## 6. Cost: serial bytes and boot time
 
-See the lane report and `docs/cp-console-evidence/` for the measured P5 runs before and
-after (strix, KVM, `-smp 8 -m 12G`).
+strix (Zen 5, KVM, `-smp 8 -m 12G`). Before = the integ7 batch (cyberpunk 8c1007cb, the
+same kernel code as this lane's base). After = this branch. Details are in
+`docs/cp-console-evidence/p5-bytes-time.txt`.
+
+| run | serial bytes | lines | boot (QEMU start to `[P5] done`) | grade |
+|---|---|---|---|---|
+| P5 integ7 #1 / #2 | 5 966 505 / 6 072 582 | 68 323 / 69 833 | 339 s / 344 s | FAIL / FAIL (the second is the interleaving) |
+| P5 lane #1 / #4 | 290 344 / 285 962 | 3 554 / 3 510 | 326 s / 310 s | PASS / PASS |
+| P5 lane #3 | 287 093 | 3 510 | 304 s | probes PASS; one `explorer.exe memory fault` (§7) |
+| Venus P6 integ7 | — | — | 293 s | PASS |
+| Venus P6 lane #2 / #3 | 278 190 / 267 942 | 3 350 / 3 270 | 274 s / 269 s | PASS / PASS |
+| P2 integ7 → lane | 1 978 137 → 207 200 | | wineboot -i 16.7 s, echo 3.5 s, winprobe 3.4 s (integ7: echo 7.9 s, winprobe 7.3 s) | PASS ×2 |
+| P4 integ7 → lane | 2 962 816 → 263 872 | | | PASS ×2 |
+| P8 lavapipe integ7 → lane | 6 622 056 → 557 362 | | main menu at launch + 256 s | menu |
+
+The serial log shrinks by about 95 %, and P5 boots 5–10 % faster. Most of the gain is the
+diagnostic filter. The 16-byte FIFO burst saves one port exit per byte on the rest. In
+P5 run 1 the console held back 28 426 `[PUB]`, 6 000 `[MR]` and 4 637 `[ALIVE-SET]` rows,
+with `forced=0 broken=0 raw=0`.
+
+## 7. Open items
+
+- `linux_probe_clock`'s semaphore ping-pong now finishes inside 1 ms (it was 7–15 ms,
+  when `[FUTEX]` rows went to the serial). The probe's `el == 0` case is fixed here.
+  Other timing probes may find the kernel faster than they assumed.
+- `reg_gate` (C3-ext2w) failed in the batch: `wineboot -i` timed out after
+  `[RESUME-PREFLIGHT] … -> QUARANTINE` on wineserver. In an A/B of four reruns it passed
+  once on the lane and failed three times with `[YLOCK-STALL]` rows: twice on the lane,
+  and once on the **base**, with another guest of this lane running. It is not a console
+  regression, but it is not green.
+- One `explorer.exe` read fault in a P5 run, on a present read-only file region (kind 7):
+  the PE-loader class C1-pe left open.
+- The Venus harnesses take their QEMU line from `tools/cp/host-venus.sh`, so `CP_DIAG`
+  does not reach them yet.

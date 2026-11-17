@@ -1,0 +1,76 @@
+# Gate P5 (vkcube d3d11 d3d12 fullscr) serial bytes and boot time per run, strix (Zen 5, KVM, -smp 8 -m 12G).
+# before = integ7 batch on cyberpunk 8c1007cb (same kernel code as this lane's base 058fd3d5)
+# after  = this lane; boot time = boot_wine_p5.py's 'boot finished after N s' (QEMU start to [P5] done)
+
+run        tree   serial_bytes    lines   boot_s  verdict
+p5         before      5966505    68323      339  [P5W] FAIL: vkcube: 0 screendump(s)
+p5b        before      6072582    69833      344  [P5W] FAIL: fullscr: launcher end row for fscheck: (none)
+p5.1       after        290344     3554      326  [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s u
+p5.2       after        244031     2967      174  harness: QMP screendump timed out
+p5.3       after        287093     3510      304  [P5W] FAIL: 1 fault line(s): [KERNEL] pid=166 (explorer.exe)
+p5.4       after        285962     3510      310  [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s u
+
+# Venus P6 rerun (vkcube d3d11 d3d12), same columns
+p6         before            -        -      293  [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine
+p6.1       after        263880     3240      270  [P5W] FAIL: d3d11: 1 screendump(s)
+p6.2       after        278190     3350      274  [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine
+p6.3       after        267942     3270      269  [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine
+
+# P2 / P4 / P8 serial bytes, before (integ7) and after
+     1978137    23360  /home/sarah/cp/integ/obj/wine-p2/serial.log
+     2962816    33505  /home/sarah/cp/integ/obj/p4/integ10/serial.log
+     6622056    77426  /home/sarah/cp/integ/obj/cp-p8/integ10-lvp/serial.log
+      207200     2466  console-logs/p2.1.serial
+      207819     2469  console-logs/p2.2.serial
+      263872     3058  console-logs/p4.1.serial
+      267594     3099  console-logs/p4.2.serial
+      163512     1983  console-logs/p8-lvp.1.serial
+      557362     5597  console-logs/p8-lvp.2.serial
+
+# per-tag counts of the lane's P5 run 1 (compare tagcount-integ7.txt)
+== console-logs/p5.1.serial lines 3555 bytes 290345
+[THRS]                       412 lines     53096 bytes  18.3%
+[X]                          602 lines     36370 bytes  12.5%
+[ALIVE-SET]                  159 lines     24168 bytes   8.3%
+[GDT]                        321 lines     21351 bytes   7.4%
+[NFSRTT]                     179 lines     17739 bytes   6.1%
+[PUBS]                        70 lines     11013 bytes   3.8%
+(other)                      400 lines     10578 bytes   3.6%
+[RDP]                         80 lines      8534 bytes   2.9%
+[KERNEL]                     119 lines      7520 bytes   2.6%
+[NFSRA]                       37 lines      6950 bytes   2.4%
+[LNFSD]                       64 lines      6662 bytes   2.3%
+[PBI]                         27 lines      5766 bytes   2.0%
+[NFSNET]                      37 lines      5357 bytes   1.8%
+[PFE]                         24 lines      4848 bytes   1.7%
+[RDF]                         48 lines      4675 bytes   1.6%
+[NFSLS]                       83 lines      4669 bytes   1.6%
+[EXEC]                        64 lines      4521 bytes   1.6%
+[MPROT]                       40 lines      4520 bytes   1.6%
+[COW]                         24 lines      4368 bytes   1.5%
+[EXITPC]                      79 lines      4168 bytes   1.4%
+[LMMAP]                       40 lines      3274 bytes   1.1%
+[BADELR]                      20 lines      2594 bytes   0.9%
+v                             25 lines      2388 bytes   0.8%
+[VMRT]                        24 lines      2240 bytes   0.8%
+
+# the console's own [CONS] rows in P5 run 1
+[CONS] lines=1587 user=49 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off: pub=13563 mr=4623 futex=0 alive=613 resume=34 blkd=10 pecow=0 anonf=5 (CP_DIAG=all to print)
+[CONS] lines=2016 user=102 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off: pub=23588 mr=6000 futex=0 alive=2492 resume=97 blkd=22 pecow=0 anonf=7 (CP_DIAG=all to print)
+[CONS] lines=2287 user=477 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off: pub=28426 mr=6000 futex=0 alive=4637 resume=158 blkd=34 pecow=0 anonf=10 (CP_DIAG=all to print)
+[CONS] lines=2533 user=598 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off: pub=33275 mr=6000 futex=0 alive=6793 resume=217 blkd=46 pecow=0 anonf=17 (CP_DIAG=all to print)
+[CONS] lines=2841 user=640 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off: pub=38576 mr=6000 futex=0 alive=8571 resume=249 blkd=58 pecow=0 anonf=19 (CP_DIAG=all to print)
+# [CONS!] (forced / raw) rows in every lane serial:
+0 console-logs/p2.1.serial
+0 console-logs/p2.2.serial
+0 console-logs/p4.1.serial
+0 console-logs/p4.2.serial
+0 console-logs/p5.1.serial
+0 console-logs/p5.2.serial
+0 console-logs/p5.3.serial
+0 console-logs/p5.4.serial
+0 console-logs/p6venus.1.serial
+0 console-logs/p6venus.2.serial
+0 console-logs/p6venus.3.serial
+1 console-logs/p8-lvp.1.serial
+1 console-logs/p8-lvp.2.serial

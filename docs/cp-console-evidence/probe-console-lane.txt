@@ -22,3 +22,12 @@ t3_linux_probe: FAIL — console reached its done marker but lp_check_console.py
 # tier had appended mid-row at the [IDLESTUCK] marker: the one 'torn' row above), same console log:
 lp_check_console: kernel rows intact 26862/26862, user rows intact 12774/12774, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
 lp_check_console: PASS -- clean
+
+# final kernel (afe7cb38 = head), batch + reruns:
+/home/sarah/cp/lanes/console-gates.txt:console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 24864/24864, user rows intact 12278/12279, interleaved lines 0, torn rows 1, missing 1, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+/home/sarah/cp/lanes/console-rerun.txt:console#1 rc=0 lp_check_console: kernel rows intact 24714/24714, user rows intact 12163/12163, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+/home/sarah/cp/lanes/console-rerun.txt:console#2 rc=0 lp_check_console: kernel rows intact 25404/25404, user rows intact 12404/12404, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+# batch run: the one 'torn' user row is t3_tier.sh's two-write stall note with guest bytes between its writes;
+# re-checked with the final checker (593746b9) on the kept console:
+lp_check_console: kernel rows intact 24864/24864, user rows intact 12279/12279, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: PASS -- clean
