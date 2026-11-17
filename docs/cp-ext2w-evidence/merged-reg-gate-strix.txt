@@ -1,0 +1,77 @@
+== build: kernel + disk (intel, test), regp launchers
+== export: /srv/nfs/cp-ext2w-reg (Wine stage), 127.0.0.1 only, ro
+== exports.sh: add /srv/nfs/cp-ext2w-reg ok (non-cp lines unchanged)
+== stage: glibc 2.31 under /LIB64 + /lib64/ld
+== boot 1: wineboot -i, reg add, wineserver -k, no sync
+qemu-slot: slot 3 of 4 held by pid 2700724 07:22:42
+[RG] regp launcher (C3-ext2w) phase 1
+[RG] begin wineboot : wineboot -i
+[E2W] flusher idle exit commits=8 timer=1 sync=0 closewb=1 press=0 midop=0 evictwb=1 blk_w=72 blk_r=21 cmds=87 ra=0 nopre=0 write_n=1 kcyc/write pf=1 lock=0 core=8 note=1 unlock=0
+[E2W] flusher idle exit commits=10 timer=2 sync=0 closewb=3 press=0 midop=0 evictwb=3 blk_w=120 blk_r=24 cmds=108 ra=0 nopre=0 write_n=3 kcyc/write pf=7 lock=0 core=21 note=0 unlock=0
+[E2W] flusher idle exit commits=81 timer=9 sync=0 closewb=775 press=1 midop=0 evictwb=775 blk_w=51909 blk_r=2376 cmds=2283 ra=0 nopre=0 write_n=779 kcyc/write pf=48 lock=0 core=57 note=0 unlock=13
+[E2W] flusher idle exit commits=135 timer=12 sync=0 closewb=900 press=1 midop=0 evictwb=900 blk_w=55255 blk_r=3519 cmds=3490 ra=633 nopre=0 write_n=1086 kcyc/write pf=36 lock=0 core=43 note=0 unlock=9
+[E2W] flusher idle exit commits=140 timer=13 sync=0 closewb=902 press=1 midop=0 evictwb=902 blk_w=55307 blk_r=3582 cmds=3567 ra=667 nopre=0 write_n=1088 kcyc/write pf=36 lock=0 core=43 note=0 unlock=9
+[E2W] flusher idle exit commits=143 timer=14 sync=0 closewb=904 press=1 midop=0 evictwb=904 blk_w=55339 blk_r=3776 cmds=3656 ra=805 nopre=0 write_n=1090 kcyc/write pf=36 lock=0 core=43 note=0 unlock=9
+[RG] end wineboot status=0 ms=26845
+[E2W] flusher idle exit commits=144 timer=15 sync=0 closewb=907 press=1 midop=0 evictwb=907 blk_w=55797 blk_r=3888 cmds=3730 ra=862 nopre=0 write_n=1540 kcyc/write pf=26 lock=0 core=31 note=0 unlock=7
+[RG] quiesce after wineboot: extra=0 ms=9235
+[RG] begin regadd : wine reg add HKCU\Software\CpTest /v X /d Y /f
+[RG] end regadd status=0 ms=8173
+[RG] begin regadd-hklm : wine reg add HKLM\Software\CpTest /v X /d Y /f
+[RG] end regadd-hklm status=0 ms=1508
+[RG] begin kill : wineserver -k
+[RG] end kill status=0 ms=399
+[RG] quiesce after kill: extra=0 ms=0
+[RG] done
+[E2W] flusher idle exit commits=145 timer=16 sync=0 closewb=910 press=1 midop=0 evictwb=910 blk_w=56258 blk_r=3920 cmds=3778 ra=862 nopre=0 write_n=1990 kcyc/write pf=20 lock=0 core=24 note=0 unlock=5
+[HOST] ok   reg add exit 0
+[HOST] ok   wineserver -k exit 0 in 399 ms (Wine SIGKILLs the server at 10.5 s)
+[HOST] ok   boot 1 halted
+[HOST] ok   e2fsck -fn after b1 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+[HOST] ok   pfx/user.reg on the disk holds [Software\\CpTest] "X"="Y" (23191 bytes)
+[HOST] ok   pfx/system.reg on the disk holds the HKLM key (1811981 bytes)
+[HOST] ok   HKLM reg add exit 0
+[HOST] ok   no reg*.tmp left in pfx/
+== boot 2: wine reg query
+qemu-slot: slot 3 of 4 held by pid 2707230 07:23:34
+[RG] regp launcher (C3-ext2w) phase 2
+[RG] begin regquery : wine reg query HKCU\Software\CpTest /v X
+[RG] end regquery status=0 ms=12488
+[RG] begin regquery-hklm : wine reg query HKLM\Software\CpTest /v X
+[RG] end regquery-hklm status=0 ms=2217
+[RG] begin kill0 : wineserver -k
+[RG] end kill0 status=0 ms=369
+[RG] quiesce after kill0: extra=0 ms=0
+[RG] race round 0: clients done=3 ok=3 ms=18101
+[RG] begin race-kill : wineserver -k
+[RG] end race-kill status=0 ms=1083
+[RG] quiesce after race: extra=0 ms=0
+[RG] race round 1: clients done=3 ok=3 ms=14032
+[RG] begin race-kill : wineserver -k
+[RG] end race-kill status=0 ms=541
+[RG] quiesce after race: extra=0 ms=0
+[RG] race round 2: clients done=3 ok=3 ms=9744
+[RG] begin race-kill : wineserver -k
+[RG] end race-kill status=0 ms=781
+[RG] quiesce after race: extra=0 ms=0
+[RG] race round 3: clients done=3 ok=2 ms=9204
+[RG] begin race-kill : wineserver -k
+[RG] end race-kill status=0 ms=383
+[RG] quiesce after race: extra=0 ms=0
+[RG] begin kill : wineserver -k
+[RG] end kill status=256 ms=219
+[RG] quiesce after kill: extra=0 ms=0
+[RG] done
+== reg query output (kernel rows removed): HKEY_CURRENT_USER\Software\CpTest X REG_SZ Y HKEY_LOCAL_MACHINE\Software\CpTest X REG_SZ Y 
+[HOST] ok   boot 2: reg query prints X REG_SZ Y
+[HOST] ok   reg query exit 0
+[HOST] ok   boot 2: HKLM reg query prints X REG_SZ Y
+[RG] race round 0: clients done=3 ok=3 ms=18101
+[RG] race round 1: clients done=3 ok=3 ms=14032
+[RG] race round 2: clients done=3 ok=3 ms=9744
+[RG] race round 3: clients done=3 ok=2 ms=9204
+[HOST] ok   boot 2: 4 race rounds of 3 concurrent Wine clients all finished, no wedge (C8 stop 6); clients exit 0: 11 of 12
+[HOST] ok   e2fsck -fn after b2 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+reg_gate: PASS
+== exports.sh: remove /srv/nfs/cp-ext2w-reg ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-ext2w-reg

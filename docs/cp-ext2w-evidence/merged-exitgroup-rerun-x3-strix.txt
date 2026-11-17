@@ -1,0 +1,6 @@
+[LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 496 ms)
+[LP] done rc=0
+[LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 290 ms)
+[LP] done rc=0
+[LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 261 ms)
+[LP] done rc=0

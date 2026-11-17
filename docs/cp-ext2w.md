@@ -228,6 +228,20 @@ write-backs interleaved) 173: **0 unsafe**; the same batches in plain block
 order: **44 unsafe of 156** (first: `Directory inode 16, block #0, offset 0:
 directory corrupted`).
 
+### 5.6 The full batch on the merged tree (`cyberpunk` 15ad4a35 + this lane, 294dbc82)
+
+`batch-merged-lane-294dbc82-strix.txt`: build, every probe rc 0 except
+`exitgroup` X7 once (15/20 concurrent exit_group callers over its 1000 ms bound,
+worst 3,259 ms, all four slots busy; 3 reruns of the same kernel: 0 bad, worst
+496/290/261 ms; no ext2 in that probe), `ext2_gate` PASS, `exec_gate` PASS,
+`rsize_guard` PASS, unit 453 run / 2 failed (the known `virtio_gpu_test.c:214`,
+`:244`), `nfs_proto_test` PASS, host 38/40, ARM build rc 0, `rsize_scan`
+PASS, `pfx_gate` PASS (pfx 72, bigobj 30, fatcoh 17, ext2w 25, e2stress 5),
+`ext2w_gate` PASS (bench + 8/8 crash points clean), `reg_gate` PASS (race
+rounds 4/4 finished, 11 of 12 clients exit 0), `ext2_test` PASS.  `castscan`
+flagged one new site (the lock diagnostic's return address); fixed in
+60fcc7b4, rerun: 0 outside the allowlist.
+
 ## 6a. Lock order (C8 stop 6 review)
 
 | lock | kind | taken under | takes |
