@@ -518,3 +518,101 @@ both involve C3-ext2w's new write-back (the flusher task and the NVMe
 completion wait), and both struck in the 2 of 4 boots that did not reach
 the menu.  The PE-loader start-up corruption (old stop 5, now C1-pe's) did
 not recur in runs 7–10.
+
+## 9. On `integ6` (+ cp-pe, + cp-venus): the RX 9070 XT through Venus
+
+`cp-game` merged `integ6` @ 6568e323 (42562cae).  `run-p8.sh` gained
+`P8_GPU=venus` (lavapipe stays the default).  It reuses C6-venus's pieces
+unchanged:
+- `boot_p8.py --gpu venus` takes the QEMU argv and environment from
+  `tools/cp/host-venus.sh` (`argv`/`env`): virtio-gpu-gl `venus=true,
+  blob=true,hostmem=8G`, a memfd-backed 12 GiB guest, `egl-headless` on
+  renderD129, the dma-buf/deny shim with `CP_SHIM_DENY=/dev/dri/card1:
+  /dev/dri/renderD128`, and `MESA_VK_DEVICE_SELECT=1002:7550`.  The ext2
+  data disk is the only addition, appended as `nvme-ns nsid=2`.
+- Screendumps use C6's `pmemsave` fallback (`tools/cp/venus/p5venus.py`,
+  `_patch_qmp`), because QMP screendump answers "no surface" on
+  egl-headless.
+- The guest Vulkan tree is C5's loader with lavapipe's ICD removed and the
+  Venus ICD from `~/cp/venus-build` added (present_wait hidden, synchronous
+  present), so Venus is the only GPU.
+- `VKD3D_FEATURE_LEVEL` is unset by default on Venus.
+- `WINEDEBUG` now carries `+fps`, so winevulkan's `trace:fps … @ approx N
+  fps` rows are the frame-rate sample (both GPUs).
+
+`hostmem=8G` is the host-visible BAR window (a host mapping), not guest
+RAM; the guest stays `-m 12288M`.
+
+### 9.1 What the Radeon gives the game (`p8d3d12caps.exe`, run11)
+
+Adapter "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))", vendor
+0x1002, device 0x7550, 16,304 MiB dedicated.  `CreateDevice(12_0)` succeeds
+natively.  Max FL **12_1** (0xc100), shader model **6.7**,
+TiledResourcesTier 4, ConservativeRaster 3, wave lanes 32..64.  RT tier 1.1
+and mesh-shader tier 0 match P0's Venus column.
+
+**Render-node fencing under the game's load** (every Venus boot, at launch
+and at the end): `qemu-system-x86` holds `/dev/dri/renderD129`;
+`virgl_render_server` holds none; its GPU thread (`virgl-2-gpu_ren`) holds
+`/dev/dri/renderD129`.  renderD128 is never open.
+
+### 9.2 Boots, in order (strix, `-m 12288M -smp 8 -cpu host`)
+
+| run | config | furthest point | stop |
+|---|---|---|---|
+| run11-venus | recipe | first window +46 s, intro rendering at 9–66 fps | **stop 11**: a game thread executes in the exe's `.rdata` (PC 0x143059FC0, rsp 0x14F355FC58) at about +100 s; Wine "Unhandled page fault on execute access"; the game's CrashReporter.exe cannot start (it is .NET and the recipe disables mscoree) |
+| run12-venus | recipe | intro at 44–65 fps; screendump of the intro frame at +61 s (`evidence/cp-game/venus/s003-t000061.png`) | stop 11 variant: the main thread reads NULL+0xF8 at PC 0x1422CA324 (exe .text) at about +70 s |
+| run13-lvp-integ6 | **lavapipe** on the same integ6 tree | **main menu at +297 s** (OCR ×3), menu at ~10 fps, 3,929 MiB pool free | **Gate P8 passes on integ6 too**, so the integ6 kernel is fine and stop 11 is specific to the Venus path |
+| run14-venus | recipe + `VN_DEBUG=result` | — | **stop 10** (harness, fixed): `chdir /GAME/bin/x64` ENOENT and `wine: failed to open "Z:\GAME\…"`.  C3-ext2w was running a copy of this harness (`~/cp/lanes/ext2w-p8`).  Its `exports.sh add /srv/nfs/cp-game` failed ("already exported") and its EXIT trap removed the shared line mid-boot (journal: `ext2w-p8 … tee /etc/exports` at 03:32).  Fix: the game export is now reference-counted under `/tmp/cp-game-export.lock`; see below |
+| run15-venus | recipe + `VN_DEBUG=result` | intro at 40–62 fps | stop 11, **identical** to run11 (same PC, same rsp); VN_DEBUG prints no failing VkResult |
+| run16-venus | + `DXVK_CONFIG=dxgi.customVendorId=10005` (DXGI reports Mesa, as on lavapipe) | intro at 48–68 fps | stop 11 variant: the same thread now *writes* into `.rdata` (VA 0x143040348 from PC 0x140195769).  The vendor path (AMD AGS / FidelityFX) is not the cause |
+| run17-venus | + `VKD3D_FRAME_RATE=10` | intro at 45–60 fps (no cap took effect) | stop 11, identical |
+| run18-venus | + `VKD3D_FEATURE_LEVEL=12_0` + `VKD3D_SHADER_MODEL=6_0` (lavapipe's D3D12 caps, confirmed by p8caps) | intro at 46–65 fps | stop 11, identical |
+
+**Stop 11, the open Venus blocker**: deterministic, Venus-only, still open.
+
+What is established:
+- The same game thread (stack around 0x14F355Fxxx) either calls into
+  (0x143059FC0) or writes (0x143040348) the exe's read-only `.rdata`, 60–100 s
+  after launch, during the intro.  In four of the six crashing boots it is
+  the same PC with the same rsp.
+- It is not the kernel: lavapipe on the same integ6 kernel reaches the menu
+  (run13).
+- It is not the vendor-specific path: run16 reported the Mesa vendor id.
+- It is not the D3D12 feature tier: run18 used lavapipe's caps.
+- No Vulkan call fails (run15, `VN_DEBUG=result`).
+
+What is left:
+- Frame rate.  Venus runs the intro at ~50 fps, lavapipe at ~7–10, and the
+  frame-rate cap did not take effect in run17.
+- Venus' memory path: host-visible blob mappings, WB per `map_info`;
+  vkd3d-proton uses device-local-host-visible memory for UPLOAD.
+- Present timing (synchronous software-WSI present on Venus).
+
+The caller is game code (return address 0x1411ACB81 in `.text`).  It looks
+like a game object whose contents are not what the game expects; that could
+be data the GPU path handed back (a readback or mapped buffer) or a race the
+higher frame rate exposes.
+
+**Owner:** C6-venus, with C8 helping.  Next experiments:
+- a working frame cap, e.g. DXVK's `dxgi.maxFrameRate` (it applies to DXVK
+  swapchains only; the game uses vkd3d-proton's, so it needs something
+  else), or `HOBBYOS_VN_ASYNC_PRESENT` variants;
+- forcing vkd3d-proton to keep UPLOAD out of host-visible VRAM
+  (`VKD3D_CONFIG=no_upload_hvv`);
+- `WINEDEBUG=+seh` around the fault.
+
+**Time to the main menu on Venus: not reached** (P0's Linux Venus guest: 41 s).
+**Frame-pool use on Venus**: 11,204 MiB free before launch, 8,891–9,085 MiB
+at +44–74 s.  So about 2.1–2.3 GiB is in use during the intro, against about
+5 GiB at the same point on lavapipe, which keeps "VRAM" in guest RAM.
+**fps on Venus** (winevulkan `+fps`): 44–68 fps during the intro (run12:
+median ~49).  Lavapipe at the same intro: about 7 fps.  No menu sample, since
+Venus never reached the menu.
+
+**Stop 10 fix (harness):** `run-p8.sh` registers each run in
+`/tmp/cp-game-export.users/<pid>` under `/tmp/cp-game-export.lock`.  The
+first user adds the `/srv/nfs/cp-game` export through `exports.sh`; the last
+user, after dead pids are pruned, removes it.  A failed add no longer
+removes anything.  Another lane's *older copy* of `run-p8.sh` still has the
+old trap: whoever runs the game export should pull the fixed harness.
