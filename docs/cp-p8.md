@@ -8,7 +8,7 @@ guests on the box) on tree `cyberpunk` @ 949ba008 plus this lane's harness
 commits.  Evidence: `docs/cp-game-evidence/*.txt`; screendumps (git-ignored)
 under `evidence/cp-game/`.
 
-**Result.** The recipe launches the game in the guest's X session with every
+**Result (wave 5, first pass on 949ba008).** The recipe launches the game in the guest's X session with every
 P8 setting in place, and the game runs for up to 42 s (guest clock; the
 tightest bracket is run 3's 30–33 s).  In that time the process tree logs 96
 loaddll rows, including vkd3d-proton's `d3d12.dll`/`d3d12core.dll` and DXVK's
@@ -21,6 +21,13 @@ the **wineserver's fd table is full (`MAX_OPEN_FDS` 256)**.  The wineserver's
 itself crashes on HobbyOS's non-Linux `recvmsg` semantics.  No game window
 appeared, so the Gate P8 main menu was not reached.  The ranked blockers are
 in §6.
+
+**Update (integ5, §8): GATE P8 PASSED.**  On `integ5` (C1-k5's fd and
+SCM_RIGHTS fixes, C3-ext2w, C4-x3) the same recipe reaches the game's
+**main menu** on lavapipe.  In run10 that is launch + 328 s, with the menu
+items confirmed by OCR three times, `-m 12G`, and about 7.4 GiB of the
+11.25 GiB frame pool in use at the menu.  Two of the four integ5 game boots
+instead stopped in the ext2 write-back path (§8.3).
 
 ## 1. The recipe (`tools/cp/p8/`)
 
@@ -372,7 +379,7 @@ Furthest screendump: the X desktop with no game window
 xeyes and the clock).  Every shot after launch was identical to the
 pre-launch baseline; OCR finds only `xeyes`.
 
-## 7. Next run, once C1-k5 lands
+## 7. Next run, once C1-k5 lands (done: §8)
 
 `P8_PHASE=probe` first: `p8fdcount` should report ≫ 253 and S1–S3 should
 pass if the `unix.c` change went in.  Then a game boot with the same command.
@@ -380,3 +387,134 @@ The stop rules (first-run screens, menu OCR, stall) are already armed for
 the first game window.  Raise `P8_GAME_S`/`TIMEOUT_S` once the game gets
 past 60 s: shader compilation on lavapipe will be slow and silent (the stall
 rule counts only launcher and Wine rows).
+
+## 8. On `integ5` (C1-k5 + C3-ext2w + C4-x3 merged): the main menu
+
+`cp-game` merged `integ5` @ efd3a765 (6dad01a0).  That brings `cyberpunk`
+15ad4a35 (main in), C1-k5 (`MAX_OPEN_FDS` 4096, RLIMIT_NOFILE 1024/4096, a
+16384-file table, Linux SCM_RIGHTS truncation, ENFILE, env 2048 B / 128
+entries with E2BIG, fadvise64), C3-ext2w (ext2 write-back) and C4-x3 (the
+tree builds its own one-screen XHOBBY.BIN with MIT-SHM, so the harness no
+longer stages the override; `P8_XHOBBY` is now diagnostics only).  The
+x64 frame pool is 11,520 MiB on this tree (`[FRAME] frames=2949120
+total_mib=11520 … extents=3 hi_mib=6144`), up from 5.25 GiB.
+
+### 8.1 Probes (`P8_PHASE=probe`, probe3)
+
+| row | 949ba008 | integ5 |
+|---|---|---|
+| E1/E2 execve env | PASS | PASS |
+| E3 spawn_ex 40 entries / 1,560 B | FAIL 13/40 | **PASS** 40/40 (1,583 B) |
+| E5 spawn_ex 80 entries / 3,120 B (new row) | — | **PASS**: refused, errno 7 (E2BIG) |
+| p8fdcount | 253 | **600 of 600** |
+| S1–S3 SCM_RIGHTS into a full table | FAIL ×3 | **PASS ×3** (the table filled at 1019: soft RLIMIT_NOFILE 1024) |
+| K1/K2 SIGKILL, leader exited | FAIL ×2 | FAIL ×2 (not fixed, as expected; the launcher keeps polling) |
+
+`p8fdcount` now also prints the frame pool: `statfs("/tmp")` on HobbyOS's
+tmpfs reports free frames (`[P8MEM] frames_free=… free_mib=…`).
+
+### 8.2 Boots, in order
+
+The prefix image was rebuilt on integ5 (`wineboot -i` 45 s; e2fsck rc 0
+before and after seeding; settings 0 of 36 keys differ).
+
+| run | config | furthest point | stop |
+|---|---|---|---|
+| run7 | the recipe | game +46 s: **first game window** (1280×720 borderless, black, titled "Cyberpunk 2077 (C) 2020 by CD Projekt RED"); D3D12 device on llvmpipe, about 37 s of PSO creation, swapchain 1280×720 ×3 | **stop 8**: guest-wide wedge about 120 s after boot.  CPU0 at rip 0x7009 with pid −1, right after the C3-ext2w flusher task (pid 219) exited.  CPUs 1–6 sit in kernel `select`/poll paths with IF=0 for 237 s; CPU7 runs the game |
+| run8 | the recipe | game +92 s: **the game's logo rendered on lavapipe**; +108 s the studio screen | **stop 9**: the X session's output relay stops.  An `ext2flush` task (pid 241) is pinned in `nvme_wait_cid` on CPU7 for 183 s; XSESSION (pid 1) stays RUNNING/claimed by CPU7 at one pc, so the relay pipe fills.  Every console writer blocks, `P8FD.ELF` in `writev` and the Wine processes too, and the game stalls (and later hits its own int3) |
+| run9-tmpcache | **diagnostic**: Mesa and vkd3d caches on tmpfs (`/tmp/mc`, `Z:\tmp`), everything else the recipe | game +279 s: **MAIN MENU** | none from the kernel.  The run stopped on a false positive: the account-offer pattern matched the menu's own "CD PROJEKT RED ACCOUNT" corner button.  Fixed in `boot_p8.py` |
+| **run10** | **the recipe as committed** (caches on ext2), the fixed stop rule | game +328 s: **MAIN MENU**, confirmed by OCR three times (+328/+334/+339 s) | **GATE P8 PASS**; the run ended on the menu rule |
+
+**Gate P8 evidence (run10, `docs/cp-game-evidence/p8-run10-GATE-integ5-strix.txt`):**
+- `evidence/cp-game/run10/s019-t000328.png`, `s020-t000334.png` and
+  `s021-t000339.png`.
+- OCR of the menu items in all three: **NEW GAME, LOAD GAME, SETTINGS,
+  (MODS), CREDITS, QUIT GAME**.
+- No first-run screen appeared: the preseeded profile carried the user's
+  choices.  The only keys sent were two Spaces at "PRESS … TO CONTINUE".
+- e2fsck rc 0 afterwards.  The vkd3d-proton cache was written to ext2
+  (`C:\vc`: 1 file, 17,684,080 B); `/EXT/mc` stayed empty, so lavapipe
+  wrote no Mesa disk cache.
+- The game copy census was unchanged.
+
+**Wall times, run10** (host clock; guest boot to launch 33 s; launch + …):
+
+| point | launch + |
+|---|---|
+| first window | 61 s |
+| logo | 77–92 s |
+| studio and legal screens | 108–140 s |
+| seizure warning | 156 s |
+| intro | 171–250 s |
+| title prompt | 266 s |
+| Space #1 | 266 s, no effect |
+| Space #2 | 313 s |
+| main menu | **328 s** |
+
+Launch → menu was 328 s, about 5.5 min.  The P0 Linux guest on Venus took
+41 s, but that was a real GPU against lavapipe here.  The shader-compile
+phase (vkd3d-proton PSO creation until "stopped creating new PSOs") runs
+from about launch +35 s to +70 s, before the first presented frame.  In
+two of two boots the first Space at the title prompt did not take and the
+second did; perhaps the prompt is not accepting input yet when it first
+renders.  Not investigated.
+
+**Gate P8 evidence, earlier (run9-tmpcache, diagnostic config):**
+- `evidence/cp-game/run9/s012-t000279.png`, the main menu.
+- OCR of its menu items (tesseract `--psm 11`): **NEW GAME, LOAD GAME,
+  SETTINGS, MODS, CREDITS, QUIT GAME**.
+- No modal: the user's preseeded profile carried the agreement, the
+  account offer and the telemetry choice, so no first-run screen appeared.
+- The only keys sent were two Spaces at the title prompt "PRESS … TO
+  CONTINUE".  The first, at game+233 s, did not take; the second, at
+  game+265 s, did.
+
+**Wall times, run9-tmpcache** (guest boot to launch 31 s; host clock):
+
+| point | launch + |
+|---|---|
+| D3D12 device + PSO phase starts | ~35 s (vkd3d-proton log 65 s; the Wine clock starts at boot) |
+| first window (black) | 46–76 s (run7 46 s, run8 61 s, run9 76 s) |
+| PSO creation ends, swapchain created | ~70 s; this is the shader-compile phase seen as vkd3d-proton's PSO/cache flushes |
+| logo | 92 s |
+| studio, legal and seizure screens | 108–201 s |
+| title prompt | 233 s |
+| main menu | 279 s (after the second Space) |
+
+**Memory (the 12 GiB question)**, as `[P8MEM]` rows of the 11,520 MiB
+frame pool.  Run10 (the recipe) had 11,147 MiB free before the game, 5,999
+at t=95 s, 4,639 at t=186 s, 4,031 at t=246 s, and **3,934–3,955 MiB
+at the menu (t=307–337 s)**.  So about **7.4 GiB of the pool is in use at
+the menu**.  Run9 (diagnostic):
+
+| point | free |
+|---|---|
+| before the game | 11,147 MiB |
+| t=5 s | 10,748 MiB |
+| t=186 s | 4,724 MiB |
+| t=216 s (title) | 4,116 MiB |
+| t=246 s | 4,029 MiB |
+
+So about 7.1 GiB is in use near the menu.  That covers the game, the Wine
+session, lavapipe's "VRAM" (system memory) and, in this diagnostic run,
+the Mesa/vkd3d caches in tmpfs.  Runs 7/8 (caches on ext2) were at
+7,397–7,597 MiB free at t=66–71 s and 6,598 MiB at t=101 s.  Per-process
+RSS is not observable in the guest yet (no `/proc/<pid>/status`).
+**12 GiB is not the limit at the menu**: about 4 GiB of the pool is left.
+Gameplay will need more (P0 host peak RSS 3.9–4.0 GiB plus 3.2 GiB VRAM).
+
+### 8.3 Stops on integ5, in order (all intermittent: 2 of 4 game boots)
+
+| # | stop | evidence | owner |
+|---|---|---|---|
+| 8 | **Guest-wide wedge about 120 s into the boot.**  CPU0 sits at rip 0x7009 (IF=0, pid −1) right after the ext2 flusher task (pid 219) exited via `kernel_exit`.  CPUs 1–6 spin in the kernel (select/poll paths, `spinlock_acquire_irqsave`) for 237 s, probably waiting on CPU0 (an IPI/TLB shootdown that a CPU with IF=0 never answers).  CPU7 keeps running the game | run7; `p8-run7-integ5-strix.txt` (the watchdog dump, symbolized: `flusher_task` ext2_vfs.c:253, `safe_wfi`) | **C3-ext2w** (flusher lifecycle; `kernel_exit` of a kernel task) |
+| 9 | **An `ext2flush` task is pinned in `nvme_wait_cid` on CPU7 for 183 s.**  XSESSION (pid 1) stays RUNNING/claimed by CPU7 at one pc, so the X session's output relay stops.  Every process that writes to the console blocks, `P8FD.ELF` in `writev` and the Wine processes too, and the game stalls; it later executes its own int3 | run8; `p8-run8-integ5-strix.txt` (`nvme_wait_cid` virtio_blk.c:760; `[BLKI] nvme ioq depth=16`) | **C3-ext2w** (multi-block NVMe command path / a lost completion), plus the scheduler question of why a process claimed by a CPU that runs something else never moves (integrator) |
+| — | `boot_p8.py` matched the menu's "CD PROJEKT RED ACCOUNT" corner button as the account offer | run9-tmpcache | C8, **fixed** (the pattern now needs "SKIP FOR NOW" / "Unlock Unique Features" / "Cross-progression") |
+| — | the first Space at the title prompt does not take | run9, run10 | C8 harness (sends up to four, 20 s apart); not a blocker |
+| 7 (old) | SIGKILL of a group whose leader exited | probe3 K1/K2 still FAIL | unowned (integrator) |
+
+Runs 9 and 10 reached the menu, run 10 with the full recipe.  Stops 8 and 9
+both involve C3-ext2w's new write-back (the flusher task and the NVMe
+completion wait), and both struck in the 2 of 4 boots that did not reach
+the menu.  The PE-loader start-up corruption (old stop 5, now C1-pe's) did
+not recur in runs 7–10.
