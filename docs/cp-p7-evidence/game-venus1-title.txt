@@ -1,0 +1,568 @@
+=================== Cyberpunk 2077 boot p7-venus1 (strix): run-p8.sh unchanged, P8_GPU=venus, VENUS_BUILD=~/cp/p7work/venus-p7, VENUS_VNC=1,
+P8_PROFILE = a copy of ~/cp/game-profile with only /video/display/WindowMode changed BorderlessWindowed -> Fullscreen
+--- timeline
++     0.0 s  10:59:44  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
++     7.3 s  10:59:51  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    24.3 s  11:00:08  warm-up result: [P8] warm-up: display driver loaded
++    33.4 s  11:00:17  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    33.5 s  11:00:17  dri nodes at game launch: qemu-system-x86/2127063: /dev/dri/renderD129
++    33.5 s  11:00:17  dri nodes at game launch: virgl_render_se/2128081: -
++    33.5 s  11:00:17  dri nodes at game launch: virgl-2-gpu_ren/2143752: /dev/dri/renderD129
++    33.6 s  11:00:17  baseline screendump 1920x1080 (desktop before the game's window)
++    79.4 s  11:01:03  first screen change after launch (45.5% of the screen differs from the baseline): s002-t000046
++   142.4 s  11:02:06  title prompt 'PRESS ... TO CONTINUE' at s006-t000108: sent one Space (#1)
+--- serial: the game window, the swapchain, the scanout, fps (winevulkan +fps) and [HBP]
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] hobbyos: fullscreen window 0x6000af 1920x1080
+[X] hobbyos: fullscreen window 0x0 0x0
+[X]  80.407:013c:0140:info:vkd3d-proton:dxgi_vk_swap_chain_init: Creating swapchain (1280 x 720), BufferCount = 3.
+[P7] scanout X fullscreen window/size 20971570 125830200 seq=0
+[X] hobbyos: fullscreen window 0x1400032 1920x1080
+[P7] scanout taken res/window 4159 20971570 seq=1
+[NFSRTT] periodic[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 0.01fps, total 0.01fps
+[P7] scanout back (blob freed) 4159 0 seq=1
+[P7] scanout taken res/window 4162 20971570 seq=2
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.47fps, total 61.13fps
+[X] [HBP] pid=92 n=133 fps=66.5 path=scanout acq=1/4 sub=8109/197624 wait=15/263 flip=7888/15661 geom=0/0 set=168 flush=7349 us scanout=133 putimage=0 refused=0 total=133
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 70.81fps, total 65.98fps
+[X] [HBP] pid=92 n=145 fps=72.3 path=scanout acq=1/22 sub=8755/164343 wait=29/1605 flip=8348/16589 geom=0/0 set=140 flush=7543 us scanout=145 putimage=0 refused=0 total=278
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 71.56fps, total 67.98fps
+[X] [HBP] pid=92 n=142 fps=71.0 path=scanout acq=1/7 sub=9135/209836 wait=55/5723 flip=8399/13999 geom=0/0 set=159 flush=7860 us scanout=142 putimage=0 refused=0 total=420
+[NFSRTT] pump_calls=63758704 pump_hits=[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 77.18fps, total 70.22fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 76.77fps, total 71.50fps
+[X] [HBP] pid=92 n=157 fps=78.2 path=scanout acq=1/20 sub=7242/15486 wait=19/956 flip=7877/14304 geom=0/0 set=145 flush=7143 us scanout=157 putimage=0 refused=0 total=577
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 28.40fps, total 57.38fps
+[X] [HBP] pid=92 n=83 fps=23.6 path=scanout acq=1/8 sub=8311/171107 wait=15/84 flip=7189/12433 geom=0/0 set=102 flush=6610 us scanout=83 putimage=0 refused=0 total=660
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.98fps, total 57.80fps
+[X] [HBP] pid=92 n=106 fps=52.9 path=scanout acq=1/9 sub=11499/212456 wait=30/1274 flip=8904/15024 geom=0/0 set=351 flush=7745 us scanout=106 putimage=0 refused=0 total=766
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.92fps, total 58.23fps
+[X] [HBP] pid=92 n=143 fps=71.3 path=scanout acq=1/32 sub=9569/175665 wait=36/2263 flip=8456/17335 geom=0/0 set=200 flush=7637 us scanout=143 putimage=0 refused=0 total=909
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 68.97fps, total 59.24fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 25.23fps, total 52.45fps
+[X] [HBP] pid=92 n=142 fps=31.3 path=scanout acq=1/2 sub=8186/19996 wait=16/126 flip=8214/15268 geom=0/0 set=189 flush=7616 us scanout=142 putimage=0 refused=0 total=1051
+[BLKD] cc=[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 69.06fps, total 53.61fps
+[X] [HBP] pid=92 n=145 fps=72.1 path=scanout acq=1/26 sub=7696/18249 wait=14/145 flip=8371/16354 geom=0/0 set=144 flush=7918 us scanout=145 putimage=0 refused=0 total=1196
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 67.02fps, total 54.48fps
+[X] [HBP] pid=92 n=114 fps=56.5 path=scanout acq=1/4 sub=9886/183988 wait=16/355 flip=8818/16459 geom=0/0 set=230 flush=8235 us scanout=114 putimage=0 refused=0 total=1310
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.63fps, total 54.37fps
+[NFSRTT] periodic want=30208 n=1 sock_us=0 send_us=0 wait_us=100 wait_max_us=100 wait_min_us=100[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 69.24fps, total 55.23fps
+[NFSRTT] periodic want=16612 n=1 sock_us=0 send_us=0[X] [HBP] pid=92 n=131 fps=65.3 path=scanout acq=1/7 sub=8909/26904 wait=37/2759 flip=8684/14843 geom=0/0 set=365 flush=7963 us scanout=131 putimage=0 refused=0 total=1441
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 69.77fps, total 56.02fps
+[X] [HBP] pid=92 n=140 fps=67.2 path=scanout acq=1/4 sub=8059/194178 wait=34/1808 flip=7735/12284 geom=0/0 set=142 flush=7383 us scanout=140 putimage=0 refused=0 total=1581
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 49.04fps, total 55.66fps
+[X] [HBP] pid=92 n=69 fps=34.4 path=scanout acq=1/2 sub=5216/13465 wait=12/102 flip=9668/171277 geom=0/0 set=150 flush=6911 us scanout=69 putimage=0 refused=0 total=1650
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 33.84fps, total 54.58fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 48.86fps, total 54.31fps
+[X] [HBP] pid=92 n=96 fps=47.8 path=scanout acq=1/9 sub=5656/13200 wait=10/40 flip=6902/11273 geom=0/0 set=158 flush=6574 us scanout=96 putimage=0 refused=0 total=1746
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 27.32fps, total 53.10fps
+[X] [HBP] pid=92 n=65 fps=32.4 path=scanout acq=2/9 sub=6020/14535 wait=11/44 flip=7563/14477 geom=0/0 set=319 flush=7001 us scanout=65 putimage=0 refused=0 total=1811
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 47.90fps, total 52.88fps
+[X] [HBP] pid=92 n=97 fps=48.5 path=scanout acq=1/5 sub=5680/11375 wait=10/62 flip=6837/11548 geom=0/0 set=166 flush=6604 us scanout=97 putimage=0 refused=0 total=1908
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 47.52fps, total 52.66fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 47.75fps, total 52.47fps
+[X] [HBP] pid=92 n=95 fps=47.4 path=scanout acq=1/4 sub=4460/8425 wait=9/38 flip=6812/10759 geom=0/0 set=150 flush=6526 us scanout=95 putimage=0 refused=0 total=2003
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 14.35fps, total 49.75fps
+[X] [HBP] pid=92 n=40 fps=13.9 path=scanout acq=1/2 sub=3717/6273 wait=14/116 flip=6419/8619 geom=0/0 set=291 flush=6063 us scanout=40 putimage=0 refused=0 total=2043
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 36.47fps, total 49.28fps
+[X] [HBP] pid=92 n=72 fps=33.0 path=scanout acq=1/8 sub=6442/17647 wait=15/218 flip=7611/12863 geom=0/0 set=251 flush=7110 us scanout=72 putimage=0 refused=0 total=2115
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 42.08fps, total 49.03fps
+[X] [HBP] pid=92 n=105 fps=51.7 path=scanout acq=1/8 sub=6947/16527 wait=19/594 flip=6939/12154 geom=0/0 set=170 flush=6683 us scanout=105 putimage=0 refused=0 total=2220
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.57fps, total 49.08fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.63fps, total 49.20fps
+[X] [HBP] pid=92 n=107 fps=53.3 path=scanout acq=1/21 sub=6546/14569 wait=10/65 flip=7013/10399 geom=0/0 set=133 flush=6806 us scanout=107 putimage=0 refused=0 total=2327
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 48.18fps, total 49.17fps
+[X] [HBP] pid=92 n=86 fps=42.6 path=scanout acq=1/4 sub=5891/13400 wait=11/47 flip=6726/11825 geom=0/0 set=145 flush=6468 us scanout=86 putimage=0 refused=0 total=2413
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 41.53fps, total 48.94fps
+[X] [HBP] pid=92 n=76 fps=37.8 path=scanout acq=1/6 sub=6480/17004 wait=11/90 flip=7411/12419 geom=0/0 set=363 flush=6907 us scanout=76 putimage=0 refused=0 total=2489
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 33.64fps, total 48.49fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 43.45fps, total 48.35fps
+[X] [HBP] pid=92 n=89 fps=44.3 path=scanout acq=1/7 sub=7970/217932 wait=11/36 flip=6887/11527 geom=0/0 set=173 flush=6600 us scanout=89 putimage=0 refused=0 total=2578
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.19fps, total 48.48fps
+[X] [HBP] pid=92 n=99 fps=49.2 path=scanout acq=1/7 sub=5262/12035 wait=10/33 flip=6415/10190 geom=0/0 set=140 flush=6207 us scanout=99 putimage=0 refused=0 total=2677
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 45.82fps, total 48.41fps
+[X] [HBP] pid=92 n=92 fps=45.8 path=scanout acq=1/15 sub=5816/12171 wait=13/71 flip=6768/9938 geom=0/0 set=205 flush=6482 us scanout=92 putimage=0 refused=0 total=2769
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 44.88fps, total 48.32fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 49.10fps, total 48.34fps
+[X] [HBP] pid=92 n=100 fps=49.9 path=scanout acq=1/5 sub=5157/9490 wait=9/29 flip=6520/10806 geom=0/0 set=152 flush=6304 us scanout=100 putimage=0 refused=0 total=2869
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 37.82fps, total 48.08fps
+[X] [HBP] pid=92 n=72 fps=35.8 path=scanout acq=1/9 sub=5837/12157 wait=12/59 flip=7247/12867 geom=0/0 set=217 flush=6850 us scanout=72 putimage=0 refused=0 total=2941
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 32.56fps, total 47.70fps
+[NFSRTT] periodic want=24576 n=1 sock_us=0 send_us=[X] [HBP] pid=92 n=63 fps=31.5 path=scanout acq=1/4 sub=4774/10093 wait=12/78 flip=6666/10478 geom=0/0 set=190 flush=6372 us scanout=63 putimage=0 refused=0 total=3004
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 31.15fps, total 47.31fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.42fps, total 47.43fps
+[X] [HBP] pid=92 n=97 fps=48.1 path=scanout acq=1/2 sub=5835/167101 wait=10/47 flip=6859/12560 geom=0/0 set=133 flush=6574 us scanout=97 putimage=0 refused=0 total=3101
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.78fps, total 47.62fps
+[X] [HBP] pid=92 n=104 fps=51.8 path=scanout acq=1/5 sub=5281/171283 wait=9/36 flip=6418/9477 geom=0/0 set=146 flush=6203 us scanout=104 putimage=0 refused=0 total=3205
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.28fps, total 47.72fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 12.55fps, total 46.16fps
+[X] [HBP] pid=92 n=98 fps=23.5 path=scanout acq=0/2 sub=3737/11400 wait=9/75 flip=6141/8251 geom=0/0 set=118 flush=5966 us scanout=98 putimage=0 refused=0 total=3303
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.62fps, total 46.39fps
+[X] [HBP] pid=92 n=102 fps=50.1 path=scanout acq=1/4 sub=4269/10937 wait=9/33 flip=6817/10930 geom=0/0 set=150 flush=6592 us scanout=102 putimage=0 refused=0 total=3405
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 38.49fps, total 46.23fps
+[X] [HBP] pid=92 n=95 fps=47.5 path=scanout acq=1/6 sub=6205/170182 wait=9/46 flip=6552/9423 geom=0/0 set=142 flush=6349 us scanout=95 putimage=0 refused=0 total=3500
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.96fps, total 46.39fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.52fps, total 46.47fps
+[X] [HBP] pid=92 n=106 fps=52.9 path=scanout acq=1/2 sub=6162/175601 wait=9/23 flip=6662/10356 geom=0/0 set=176 flush=6397 us scanout=106 putimage=0 refused=0 total=3606
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.33fps, total 46.66fps
+[X] [HBP] pid=92 n=103 fps=51.4 path=scanout acq=1/22 sub=4289/9821 wait=10/29 flip=6754/9645 geom=0/0 set=135 flush=6555 us scanout=103 putimage=0 refused=0 total=3709
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.43fps, total 46.73fps
+[X] [HBP] pid=92 n=105 fps=52.0 path=scanout acq=1/1 sub=4500/12303 wait=10/76 flip=6791/11803 geom=0/0 set=133 flush=6580 us scanout=105 putimage=0 refused=0 total=3814
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.30fps, total 46.81fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.26fps, total 46.87fps
+[X] [HBP] pid=92 n=106 fps=52.8 path=scanout acq=1/5 sub=4634/12918 wait=18/773 flip=6953/10104 geom=0/0 set=140 flush=6705 us scanout=106 putimage=0 refused=0 total=3920
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.87fps, total 47.10fps
+[X] [HBP] pid=92 n=110 fps=54.8 path=scanout acq=1/1 sub=4102/14229 wait=9/64 flip=6802/10627 geom=0/0 set=139 flush=6591 us scanout=110 putimage=0 refused=0 total=4030
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 47.40fps, total 47.11fps
+[X] [HBP] pid=92 n=96 fps=47.8 path=scanout acq=1/2 sub=5537/15099 wait=11/57 flip=7238/10558 geom=0/0 set=236 flush=6852 us scanout=96 putimage=0 refused=0 total=4126
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 48.34fps, total 47.13fps
+[X] [HBP] pid=92 n=103 fps=51.4 path=scanout acq=1/2 sub=6907/225525 wait=10/54 flip=7333/10617 geom=0/0 set=160 flush=7082 us scanout=103 putimage=0 refused=0 total=4229
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 49.27fps, total 47.17fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.85fps, total 47.34fps
+[X] [HBP] pid=92 n=106 fps=52.9 path=scanout acq=1/2 sub=5975/175314 wait=9/33 flip=7018/12146 geom=0/0 set=121 flush=6823 us scanout=106 putimage=0 refused=0 total=4335
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.45fps, total 47.41fps
+[X] [HBP] pid=92 n=107 fps=53.5 path=scanout acq=1/2 sub=4222/15677 wait=10/49 flip=6787/10212 geom=0/0 set=172 flush=6545 us scanout=107 putimage=0 refused=0 total=4442
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.60fps, total 47.49fps
+[X] [HBP] pid=92 n=107 fps=53.2 path=scanout acq=1/5 sub=4645/13814 wait=9/33 flip=6670/13097 geom=0/0 set=132 flush=6466 us scanout=107 putimage=0 refused=0 total=4549
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.06fps, total 47.55fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.48fps, total 47.67fps
+[X] [HBP] pid=92 n=103 fps=51.4 path=scanout acq=1/2 sub=4604/56195 wait=9/24 flip=6670/10755 geom=0/0 set=128 flush=6479 us scanout=103 putimage=0 refused=0 total=4652
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.70fps, total 47.75fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 5.15fps, total 46.61fps
+0[X] [HBP] pid=92 n=77 fps=20.3 path=scanout acq=1/1 sub=3110/8354 wait=8/22 flip=5919/8014 geom=0/0 set=97 flush=5767 us scanout=77 putimage=0 refused=0 total=4729
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.32fps, total 46.78fps
+[X] [HBP] pid=92 n=107 fps=53.4 path=scanout acq=1/1 sub=4536/13132 wait=9/38 flip=6778/11821 geom=0/0 set=146 flush=6566 us scanout=107 putimage=0 refused=0 total=4836
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.25fps, total 46.86fps
+[X] [HBP] pid=92 n=109 fps=54.5 path=scanout acq=1/2 sub=6289/157194 wait=10/91 flip=6900/12232 geom=0/0 set=148 flush=6681 us scanout=109 putimage=0 refused=0 total=4945
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.11fps, total 46.93fps
+[X] [HBP] pid=92 n=108 fps=53.7 path=scanout acq=1/2 sub=4153/10883 wait=8/29 flip=6739/11318 geom=0/0 set=143 flush=6532 us scanout=108 putimage=0 refused=0 total=5053
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.19fps, total 47.02fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.54fps, total 47.17fps
+[X] [HBP] pid=92 n=106 fps=52.7 path=scanout acq=1/2 sub=4581/13778 wait=8/26 flip=6918/10712 geom=0/0 set=120 flush=6726 us scanout=106 putimage=0 refused=0 total=5159
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.28fps, total 47.24fps
+[X] [HBP] pid=92 n=109 fps=54.2 path=scanout acq=1/1 sub=5423/165652 wait=9/24 flip=6601/10422 geom=0/0 set=129 flush=6414 us scanout=109 putimage=0 refused=0 total=5268
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.53fps, total 47.31fps
+[X] [HBP] pid=92 n=108 fps=53.8 path=scanout acq=1/9 sub=4412/14377 wait=9/29 flip=6738/11896 geom=0/0 set=150 flush=6518 us scanout=108 putimage=0 refused=0 total=5376
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.76fps, total 47.37fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.74fps, total 47.48fps
+[X] [HBP] pid=92 n=101 fps=50.4 path=scanout acq=1/2 sub=4180/12133 wait=9/28 flip=7055/10495 geom=0/0 set=136 flush=6833 us scanout=101 putimage=0 refused=0 total=5477
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 49.57fps, total 47.50fps
+[X] [HBP] pid=92 n=106 fps=52.9 path=scanout acq=1/2 sub=4498/19006 wait=13/335 flip=6933/10517 geom=0/0 set=140 flush=6733 us scanout=106 putimage=0 refused=0 total=5583
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.63fps, total 47.57fps
+[X] [HBP] pid=92 n=108 fps=53.7 path=scanout acq=1/2 sub=5865/170339 wait=9/29 flip=6881/10573 geom=0/0 set=154 flush=6658 us scanout=108 putimage=0 refused=0 total=5691
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.79fps, total 47.62fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.59fps, total 47.78fps
+[X] [HBP] pid=92 n=109 fps=54.5 path=scanout acq=1/2 sub=6395/185915 wait=11/89 flip=6895/13348 geom=0/0 set=183 flush=6648 us scanout=109 putimage=0 refused=0 total=5800
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.00fps, total 47.81fps
+[X] [HBP] pid=92 n=107 fps=53.0 path=scanout acq=1/2 sub=4143/12391 wait=9/21 flip=6797/12035 geom=0/0 set=131 flush=6597 us scanout=107 putimage=0 refused=0 total=5907
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.86fps, total 47.86fps
+[X] [HBP] pid=92 n=107 fps=53.3 path=scanout acq=1/1 sub=3867/12694 wait=9/21 flip=6566/9839 geom=0/0 set=142 flush=6355 us scanout=107 putimage=0 refused=0 total=6014
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.76fps, total 47.91fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.31fps, total 48.02fps
+[X] [HBP] pid=92 n=107 fps=53.2 path=scanout acq=1/7 sub=4306/13553 wait=9/34 flip=6488/9514 geom=0/0 set=136 flush=6288 us scanout=107 putimage=0 refused=0 total=6121
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.64fps, total 48.08fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 7.65fps, total 47.20fps
+[X] [HBP] pid=92 n=87 fps=22.0 path=scanout acq=0/1 sub=3766/12264 wait=9/27 flip=6240/8921 geom=0/0 set=126 flush=6050 us scanout=87 putimage=0 refused=0 total=6208
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.68fps, total 47.34fps
+[X] [HBP] pid=92 n=109 fps=54.4 path=scanout acq=1/2 sub=6005/173166 wait=10/62 flip=6801/10853 geom=0/0 set=171 flush=6558 us scanout=109 putimage=0 refused=0 total=6317
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.56fps, total 47.40fps
+[X] [HBP] pid=92 n=109 fps=54.2 path=scanout acq=1/2 sub=3906/12320 wait=11/111 flip=6733/12614 geom=0/0 set=160 flush=6488 us scanout=109 putimage=0 refused=0 total=6426
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.83fps, total 47.45fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.50fps, total 47.52fps
+[X] [HBP] pid=92 n=110 fps=54.6 path=scanout acq=1/2 sub=4433/16290 wait=9/29 flip=6840/10874 geom=0/0 set=156 flush=6611 us scanout=110 putimage=0 refused=0 total=6536
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.62fps, total 47.63fps
+[X] [HBP] pid=92 n=106 fps=52.9 path=scanout acq=1/1 sub=4117/9536 wait=9/24 flip=6511/10095 geom=0/0 set=145 flush=6304 us scanout=106 putimage=0 refused=0 total=6642
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.02fps, total 47.68fps
+[X] [HBP] pid=92 n=107 fps=53.4 path=scanout acq=1/2 sub=6323/204915 wait=9/32 flip=6737/10617 geom=0/0 set=151 flush=6511 us scanout=107 putimage=0 refused=0 total=6749
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.50fps, total 47.71fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.57fps, total 47.74fps
+[X] [HBP] pid=92 n=106 fps=52.5 path=scanout acq=1/2 sub=4113/13378 wait=10/116 flip=6634/10450 geom=0/0 set=117 flush=6420 us scanout=106 putimage=0 refused=0 total=6855
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.47fps, total 47.85fps
+[X] [HBP] pid=92 n=108 fps=53.2 path=scanout acq=1/1 sub=5679/173419 wait=10/58 flip=6858/10400 geom=0/0 set=133 flush=6645 us scanout=108 putimage=0 refused=0 total=6963
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.30fps, total 47.89fps
+[X] [HBP] pid=92 n=105 fps=52.1 path=scanout acq=1/3 sub=6363/215319 wait=9/26 flip=6561/10204 geom=0/0 set=121 flush=6371 us scanout=105 putimage=0 refused=0 total=7068
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.66fps, total 47.92fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.62fps, total 47.96fps
+[X] [HBP] pid=92 n=108 fps=53.6 path=scanout acq=1/1 sub=4485/12133 wait=9/29 flip=6685/11715 geom=0/0 set=155 flush=6457 us scanout=108 putimage=0 refused=0 total=7176
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.77fps, total 48.05fps
+[X] [HBP] pid=92 n=108 fps=53.9 path=scanout acq=1/7 sub=5583/175756 wait=9/28 flip=6533/11495 geom=0/0 set=154 flush=6314 us scanout=108 putimage=0 refused=0 total=7284
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.05fps, total 48.10fps
+[X] [HBP] pid=92 n=106 fps=53.0 path=scanout acq=1/3 sub=4142/14349 wait=10/59 flip=6544/10552 geom=0/0 set=173 flush=6297 us scanout=106 putimage=0 refused=0 total=7390
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.32fps, total 48.13fps
+[X] [HBP] pid=92 n=112 fps=56.0 path=scanout acq=1/2 sub=4310/11710 wait=9/27 flip=6800/10829 geom=0/0 set=113 flush=6624 us scanout=112 putimage=0 refused=0 total=7502
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.89fps, total 48.20fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.38fps, total 48.24fps
+[X] [HBP] pid=92 n=106 fps=52.9 path=scanout acq=1/2 sub=4472/13708 wait=9/34 flip=6395/10726 geom=0/0 set=161 flush=6167 us scanout=106 putimage=0 refused=0 total=7608
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.81fps, total 48.36fps
+[PROCLOCK-HOLD] cpu=1 acq=3893520 rel=3893520 last=release last_ms=242532 site=0x00000000700F2C12 owner_site3=0x00000000700A8ACC rel_site=0x00000000700F2C12 iretq_ms=242532 locked_at_iretq=0 det_entry=0 det_exit=0 det_stage=0[X] 0
+ dump_self=0[X] [HBP] pid=92 n=83 fps=21.5 path=scanout acq=0/1 sub=3525/10809 wait=8/62 flip=6094/8570 geom=0/0 set=127 flush=5904 us scanout=83 putimage=0 refused=0 total=7691
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.73fps, total 47.74fps
+[X] [HBP] pid=92 n=112 fps=55.8 path=scanout acq=1/2 sub=5664/176600 wait=11/378 flip=6555/9921 geom=0/0 set=159 flush=6325 us scanout=112 putimage=0 refused=0 total=7803
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.08fps, total 47.81fps
+[X] [HBP] pid=92 n=111 fps=55.3 path=scanout acq=1/2 sub=4047/11608 wait=9/40 flip=6432/9294 geom=0/0 set=138 flush=6230 us scanout=111 putimage=0 refused=0 total=7914
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.60fps, total 47.85fps
+[X] [HBP] pid=92 n=107 fps=53.5 path=scanout acq=1/2 sub=4242/12027 wait=9/37 flip=6545/10009 geom=0/0 set=126 flush=6356 us scanout=107 putimage=0 refused=0 total=8021
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.38fps, total 47.89fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.81fps, total 47.97fps
+[X] [HBP] pid=92 n=107 fps=53.2 path=scanout acq=1/2 sub=4287/15282 wait=8/39 flip=6650/9328 geom=0/0 set=117 flush=6455 us scanout=107 putimage=0 refused=0 total=8128
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.76fps, total 48.01fps
+[X] [HBP] pid=92 n=112 fps=55.5 path=scanout acq=1/7 sub=5403/165110 wait=9/43 flip=6836/11707 geom=0/0 set=153 flush=6613 us scanout=112 putimage=0 refused=0 total=8240
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.64fps, total 48.07fps
+[X] [HBP] pid=92 n=103 fps=50.9 path=scanout acq=1/2 sub=3930/12798 wait=9/33 flip=6383/9227 geom=0/0 set=123 flush=6198 us scanout=103 putimage=0 refused=0 total=8343
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 48.41fps, total 48.07fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.51fps, total 48.16fps
+[X] [HBP] pid=92 n=108 fps=53.9 path=scanout acq=1/2 sub=5729/165701 wait=10/125 flip=6466/9516 geom=0/0 set=126 flush=6261 us scanout=108 putimage=0 refused=0 total=8451
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.56fps, total 48.20fps
+[X] [HBP] pid=92 n=106 fps=52.7 path=scanout acq=1/7 sub=4013/10636 wait=9/33 flip=6555/9473 geom=0/0 set=151 flush=6340 us scanout=106 putimage=0 refused=0 total=8557
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 49.83fps, total 48.21fps
+[X] [HBP] pid=92 n=107 fps=53.3 path=scanout acq=1/2 sub=4086/13118 wait=11/172 flip=6486/9886 geom=0/0 set=133 flush=6287 us scanout=107 putimage=0 refused=0 total=8664
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.94fps, total 48.24fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.19fps, total 48.27fps
+[X] [HBP] pid=92 n=104 fps=52.0 path=scanout acq=1/1 sub=4251/12428 wait=13/331 flip=6642/9886 geom=0/0 set=137 flush=6402 us scanout=104 putimage=0 refused=0 total=8768
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.43fps, total 48.34fps
+[X] [HBP] pid=92 n=105 fps=52.4 path=scanout acq=1/2 sub=5237/177222 wait=16/341 flip=6567/9202 geom=0/0 set=145 flush=6350 us scanout=105 putimage=0 refused=0 total=8873
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.62fps, total 48.37fps
+[X] [HBP] pid=92 n=107 fps=53.3 path=scanout acq=1/2 sub=3331/8994 wait=9/24 flip=6158/8675 geom=0/0 set=116 flush=5963 us scanout=107 putimage=0 refused=0 total=8980
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.38fps, total 48.40fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.08fps, total 48.45fps
+[X] [HBP] pid=92 n=113 fps=56.0 path=scanout acq=1/1 sub=5103/170552 wait=9/35 flip=6183/8504 geom=0/0 set=111 flush=5988 us scanout=113 putimage=0 refused=0 total=9093
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.84fps, total 48.56fps
+[X] [HBP] pid=92 n=85 fps=22.6 path=scanout acq=0/1 sub=27610/2072548 wait=9/50 flip=9786/330839 geom=0/0 set=115 flush=5805 us scanout=85 putimage=0 refused=0 total=9178
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 2.77fps, total 47.95fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.96fps, total 48.05fps
+[X] [HBP] pid=92 n=108 fps=53.8 path=scanout acq=1/1 sub=3863/14921 wait=9/67 flip=6514/14312 geom=0/0 set=135 flush=6312 us scanout=108 putimage=0 refused=0 total=9286
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.98fps, total 48.08fps
+[X] [HBP] pid=92 n=111 fps=55.3 path=scanout acq=1/1 sub=5253/167027 wait=12/314 flip=6388/12101 geom=0/0 set=128 flush=6197 us scanout=111 putimage=0 refused=0 total=9397
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.68fps, total 48.13fps
+[X] [HBP] pid=92 n=109 fps=54.2 path=scanout acq=1/2 sub=3398/12351 wait=8/27 flip=6339/11918 geom=0/0 set=118 flush=6149 us scanout=109 putimage=0 refused=0 total=9506
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.04fps, total 48.16fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.14fps, total 48.24fps
+[X] [HBP] pid=92 n=108 fps=53.9 path=scanout acq=1/2 sub=3357/9252 wait=8/25 flip=6133/9352 geom=0/0 set=107 flush=5969 us scanout=108 putimage=0 refused=0 total=9614
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.03fps, total 48.26fps
+[X] [HBP] pid=92 n=102 fps=50.9 path=scanout acq=1/1 sub=3374/9219 wait=9/29 flip=6177/8947 geom=0/0 set=109 flush=6002 us scanout=102 putimage=0 refused=0 total=9716
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 42.38fps, total 48.22fps
+[X] [HBP] pid=92 n=83 fps=41.0 path=scanout acq=1/2 sub=8195/192168 wait=9/46 flip=7348/14687 geom=0/0 set=321 flush=6736 us scanout=83 putimage=0 refused=0 total=9799
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 41.94fps, total 48.17fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.67fps, total 48.24fps
+[X] [HBP] pid=92 n=108 fps=53.4 path=scanout acq=1/2 sub=4938/170883 wait=9/34 flip=6347/9404 geom=0/0 set=122 flush=6156 us scanout=108 putimage=0 refused=0 total=9907
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.02fps, total 48.28fps
+[X] [HBP] pid=92 n=107 fps=53.5 path=scanout acq=1/2 sub=3531/11370 wait=9/63 flip=6310/9413 geom=0/0 set=135 flush=6116 us scanout=107 putimage=0 refused=0 total=10014
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.13fps, total 48.30fps
+[X] [HBP] pid=92 n=108 fps=53.6 path=scanout acq=1/2 sub=3410/11162 wait=9/25 flip=6251/8452 geom=0/0 set=141 flush=6025 us scanout=108 putimage=0 refused=0 total=10122
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.56fps, total 48.33fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 41.59fps, total 48.27fps
+[X] [HBP] pid=92 n=88 fps=43.8 path=scanout acq=1/10 sub=5088/14261 wait=10/31 flip=7136/11930 geom=0/0 set=361 flush=6620 us scanout=88 putimage=0 refused=0 total=10210
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.15fps, total 48.32fps
+[X] [HBP] pid=92 n=102 fps=51.0 path=scanout acq=1/2 sub=3520/12205 wait=12/159 flip=6343/10997 geom=0/0 set=162 flush=6098 us scanout=102 putimage=0 refused=0 total=10312
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.26fps, total 48.34fps
+[X] [HBP] pid=92 n=107 fps=53.5 path=scanout acq=1/2 sub=3393/8787 wait=10/41 flip=6335/9408 geom=0/0 set=146 flush=6113 us scanout=107 putimage=0 refused=0 total=10419
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.63fps, total 48.36fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 39.92fps, total 48.30fps
+[X] [HBP] pid=92 n=86 fps=42.6 path=scanout acq=1/2 sub=5385/16427 wait=15/344 flip=7243/15544 geom=0/0 set=270 flush=6583 us scanout=86 putimage=0 refused=0 total=10505
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.20fps, total 48.34fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 4.79fps, total 47.89fps
+[X] [HBP] pid=92 n=83 fps=23.1 path=scanout acq=1/2 sub=3202/8959 wait=9/34 flip=6172/8595 geom=0/0 set=145 flush=5945 us scanout=83 putimage=0 refused=0 total=10588
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.92fps, total 47.94fps
+[X] [HBP] pid=92 n=111 fps=51.5 path=scanout acq=1/2 sub=3449/9368 wait=9/74 flip=6262/9135 geom=0/0 set=163 flush=6034 us scanout=111 putimage=0 refused=0 total=10699
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 47.43fps, total 47.94fps
+[X] [HBP] pid=92 n=89 fps=44.1 path=scanout acq=1/2 sub=4710/10518 wait=10/84 flip=7034/11687 geom=0/0 set=262 flush=6570 us scanout=89 putimage=0 refused=0 total=10788
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 41.94fps, total 47.90fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.04fps, total 47.93fps
+[X] [HBP] pid=92 n=106 fps=52.6 path=scanout acq=1/2 sub=3568/8880 wait=10/30 flip=6322/9259 geom=0/0 set=143 flush=6107 us scanout=106 putimage=0 refused=0 total=10894
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.02fps, total 48.00fps
+[X] [HBP] pid=92 n=107 fps=53.5 path=scanout acq=1/2 sub=3527/9019 wait=10/104 flip=6396/9374 geom=0/0 set=146 flush=6175 us scanout=107 putimage=0 refused=0 total=11001
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 49.15fps, total 48.01fps
+[X] [HBP] pid=92 n=90 fps=44.6 path=scanout acq=1/5 sub=5398/20422 wait=10/40 flip=7048/11008 geom=0/0 set=353 flush=6536 us scanout=90 putimage=0 refused=0 total=11091
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 39.55fps, total 47.95fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 48.88fps, total 47.96fps
+[X] [HBP] pid=92 n=99 fps=49.3 path=scanout acq=1/2 sub=3973/10898 wait=9/33 flip=6527/9536 geom=0/0 set=163 flush=6264 us scanout=99 putimage=0 refused=0 total=11190
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.51fps, total 48.03fps
+[X] [HBP] pid=92 n=107 fps=53.3 path=scanout acq=1/2 sub=3637/10092 wait=9/35 flip=6291/9277 geom=0/0 set=120 flush=6107 us scanout=107 putimage=0 refused=0 total=11297
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.42fps, total 48.05fps
+[X] [HBP] pid=92 n=106 fps=52.9 path=scanout acq=1/2 sub=5064/167372 wait=9/26 flip=6325/9151 geom=0/0 set=132 flush=6130 us scanout=106 putimage=0 refused=0 total=11403
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.28fps, total 48.07fps
+[X] [HBP] pid=92 n=108 fps=53.7 path=scanout acq=1/1 sub=3901/13370 wait=9/68 flip=6480/10975 geom=0/0 set=126 flush=6291 us scanout=108 putimage=0 refused=0 total=11511
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.49fps, total 48.10fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.36fps, total 48.16fps
+[X] [HBP] pid=92 n=107 fps=53.4 path=scanout acq=1/6 sub=3459/11729 wait=10/29 flip=6265/9391 geom=0/0 set=112 flush=6097 us scanout=107 putimage=0 refused=0 total=11618
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.23fps, total 48.20fps
+[X] [HBP] pid=92 n=106 fps=52.4 path=scanout acq=1/2 sub=6148/195477 wait=9/33 flip=6577/13928 geom=0/0 set=196 flush=6265 us scanout=106 putimage=0 refused=0 total=11724
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 38.51fps, total 48.14fps
+[X] [HBP] pid=92 n=73 fps=36.4 path=scanout acq=1/2 sub=8257/25920 wait=10/36 flip=8298/14200 geom=0/0 set=570 flush=7367 us scanout=73 putimage=0 refused=0 total=11797
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 38.16fps, total 48.08fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.88fps, total 48.16fps
+[X] [HBP] pid=92 n=116 fps=57.7 path=scanout acq=1/2 sub=3456/9709 wait=9/41 flip=6495/9611 geom=0/0 set=132 flush=6294 us scanout=116 putimage=0 refused=0 total=11913
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.99fps, total 48.22fps
+ dump_self=0[X] [HBP] pid=92 n=98 fps=26.4 path=scanout acq=1/1 sub=24983/2120895 wait=9/25 flip=6073/8261 geom=0/0 set=110 flush=5906 us scanout=98 putimage=0 refused=0 total=12011
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 11.58fps, total 47.79fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.02fps, total 47.86fps
+[X] [HBP] pid=92 n=104 fps=47.3 path=scanout acq=1/1 sub=3684/12951 wait=9/59 flip=6336/11326 geom=0/0 set=131 flush=6132 us scanout=104 putimage=0 refused=0 total=12115
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.13fps, total 47.87fps
+[X] [HBP] pid=92 n=109 fps=54.4 path=scanout acq=1/1 sub=3495/12538 wait=9/25 flip=6308/9333 geom=0/0 set=145 flush=6095 us scanout=109 putimage=0 refused=0 total=12224
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 49.54fps, total 47.88fps
+[X] [HBP] pid=92 n=97 fps=48.3 path=scanout acq=1/2 sub=6649/159802 wait=11/149 flip=6906/12041 geom=0/0 set=252 flush=6488 us scanout=97 putimage=0 refused=0 total=12321
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 48.57fps, total 47.89fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.94fps, total 47.95fps
+[X] [HBP] pid=92 n=109 fps=54.2 path=scanout acq=1/2 sub=3725/14935 wait=13/347 flip=6468/9533 geom=0/0 set=152 flush=6251 us scanout=109 putimage=0 refused=0 total=12430
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.99fps, total 47.97fps
+[X] [HBP] pid=92 n=107 fps=53.4 path=scanout acq=4/373 sub=3361/8656 wait=9/43 flip=6370/9880 geom=0/0 set=146 flush=6142 us scanout=107 putimage=0 refused=0 total=12537
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.60fps, total 48.00fps
+[X] [HBP] pid=92 n=107 fps=53.5 path=scanout acq=1/1 sub=3464/11451 wait=9/34 flip=7810/170459 geom=0/0 set=125 flush=6126 us scanout=107 putimage=0 refused=0 total=12644
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.15fps, total 48.02fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.06fps, total 48.08fps
+[X] [HBP] pid=92 n=110 fps=54.8 path=scanout acq=1/2 sub=5105/162011 wait=9/43 flip=6309/9020 geom=0/0 set=128 flush=6120 us scanout=110 putimage=0 refused=0 total=12754
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.46fps, total 48.10fps
+[X] [HBP] pid=92 n=94 fps=46.5 path=scanout acq=1/2 sub=5980/186823 wait=10/33 flip=8513/182893 geom=0/0 set=276 flush=6267 us scanout=94 putimage=0 refused=0 total=12848
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 44.25fps, total 48.08fps
+[X] [HBP] pid=92 n=106 fps=53.0 path=scanout acq=1/2 sub=3498/11496 wait=9/33 flip=6316/9266 geom=0/0 set=147 flush=6100 us scanout=106 putimage=0 refused=0 total=12954
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.83fps, total 48.10fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.14fps, total 48.16fps
+[X] [HBP] pid=92 n=108 fps=53.7 path=scanout acq=1/2 sub=3604/11013 wait=11/338 flip=6453/10526 geom=0/0 set=168 flush=6222 us scanout=108 putimage=0 refused=0 total=13062
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.26fps, total 48.17fps
+[X] [HBP] pid=92 n=108 fps=53.9 path=scanout acq=1/2 sub=3437/10013 wait=10/91 flip=6255/9167 geom=0/0 set=127 flush=6055 us scanout=108 putimage=0 refused=0 total=13170
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.90fps, total 48.20fps
+[X] [HBP] pid=92 n=94 fps=46.9 path=scanout acq=1/2 sub=5870/171660 wait=10/33 flip=7019/9880 geom=0/0 set=187 flush=6650 us scanout=94 putimage=0 refused=0 total=13264
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 44.02fps, total 48.17fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.25fps, total 48.23fps
+[X] [HBP] pid=92 n=110 fps=54.9 path=scanout acq=1/2 sub=3583/10598 wait=9/51 flip=6362/9866 geom=0/0 set=129 flush=6173 us scanout=110 putimage=0 refused=0 total=13374
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.86fps, total 48.26fps
+ wait_pc2=0x000000007010C877[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 10.28fps, total 47.87fps
+[X] [HBP] pid=92 n=97 fps=24.0 path=scanout acq=1/1 sub=3233/9715 wait=9/26 flip=6027/8569 geom=0/0 set=121 flush=5829 us scanout=97 putimage=0 refused=0 total=13471
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.64fps, total 47.93fps
+[X] [HBP] pid=92 n=110 fps=54.9 path=scanout acq=1/2 sub=3535/8908 wait=9/25 flip=6391/9060 geom=0/0 set=137 flush=6171 us scanout=110 putimage=0 refused=0 total=13581
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.49fps, total 47.96fps
+[X] [HBP] pid=92 n=99 fps=49.4 path=scanout acq=1/2 sub=4424/14463 wait=9/40 flip=6800/12904 geom=0/0 set=214 flush=6440 us scanout=99 putimage=0 refused=0 total=13680
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 45.42fps, total 47.94fps
+[X] [HBP] pid=92 n=108 fps=53.9 path=scanout acq=1/2 sub=3782/13160 wait=8/20 flip=6378/9195 geom=0/0 set=138 flush=6172 us scanout=108 putimage=0 refused=0 total=13788
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.75fps, total 47.97fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.97fps, total 48.04fps
+[X] [HBP] pid=92 n=113 fps=55.7 path=scanout acq=1/2 sub=3432/8557 wait=9/41 flip=6293/9650 geom=0/0 set=128 flush=6109 us scanout=113 putimage=0 refused=0 total=13901
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.81fps, total 48.07fps
+[X] [HBP] pid=92 n=109 fps=54.2 path=scanout acq=1/3 sub=3438/9559 wait=9/75 flip=6349/11095 geom=0/0 set=128 flush=6151 us scanout=109 putimage=0 refused=0 total=14010
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.25fps, total 48.09fps
+[X] [HBP] pid=92 n=110 fps=54.9 path=scanout acq=1/2 sub=3923/10520 wait=8/21 flip=6412/10289 geom=0/0 set=115 flush=6235 us scanout=110 putimage=0 refused=0 total=14120
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.68fps, total 48.12fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.85fps, total 48.16fps
+[X] [HBP] pid=92 n=100 fps=49.9 path=scanout acq=1/9 sub=4551/12764 wait=9/53 flip=6783/12216 geom=0/0 set=172 flush=6462 us scanout=100 putimage=0 refused=0 total=14220
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 47.71fps, total 48.15fps
+[X] [HBP] pid=92 n=109 fps=53.8 path=scanout acq=1/6 sub=3589/12108 wait=9/26 flip=6254/11039 geom=0/0 set=137 flush=6045 us scanout=109 putimage=0 refused=0 total=14329
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.81fps, total 48.19fps
+[X] [HBP] pid=92 n=117 fps=58.0 path=scanout acq=1/2 sub=3310/10963 wait=9/69 flip=6147/10487 geom=0/0 set=145 flush=5944 us scanout=117 putimage=0 refused=0 total=14446
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.48fps, total 48.23fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.05fps, total 48.30fps
+[X] [HBP] pid=92 n=107 fps=53.3 path=scanout acq=1/5 sub=3285/8454 wait=9/29 flip=6130/10122 geom=0/0 set=128 flush=5919 us scanout=107 putimage=0 refused=0 total=14553
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 43.16fps, total 48.27fps
+[X] [HBP] pid=92 n=98 fps=48.8 path=scanout acq=1/4 sub=3039/7789 wait=10/33 flip=6195/10551 geom=0/0 set=222 flush=5892 us scanout=98 putimage=0 refused=0 total=14651
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.16fps, total 48.29fps
+[X] [HBP] pid=92 n=109 fps=54.1 path=scanout acq=1/20 sub=4792/177469 wait=8/19 flip=6127/8391 geom=0/0 set=157 flush=5905 us scanout=109 putimage=0 refused=0 total=14760
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.70fps, total 48.31fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.26fps, total 48.34fps
+[X] [HBP] pid=92 n=103 fps=50.9 path=scanout acq=1/2 sub=3150/8658 wait=10/65 flip=6158/8329 geom=0/0 set=139 flush=5936 us scanout=103 putimage=0 refused=0 total=14863
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.16fps, total 48.36fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 8.01fps, total 48.02fps
+[X] [HBP] pid=92 n=79 fps=21.8 path=scanout acq=1/9 sub=2877/4291 wait=9/25 flip=5973/7139 geom=0/0 set=143 flush=5764 us scanout=79 putimage=0 refused=0 total=14942
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 64.24fps, total 48.09fps
+[X] [HBP] pid=92 n=120 fps=56.6 path=scanout acq=1/2 sub=3264/8674 wait=8/43 flip=6078/9629 geom=0/0 set=120 flush=5891 us scanout=120 putimage=0 refused=0 total=15062
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 46.80fps, total 48.09fps
+[X] [HBP] pid=92 n=107 fps=53.2 path=scanout acq=1/2 sub=3502/14693 wait=9/57 flip=6179/9810 geom=0/0 set=186 flush=5892 us scanout=107 putimage=0 refused=0 total=15169
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.59fps, total 48.13fps
+[X] [HBP] pid=92 n=83 fps=40.9 path=scanout acq=1/2 sub=7719/213193 wait=9/37 flip=6790/13964 geom=0/0 set=324 flush=6281 us scanout=83 putimage=0 refused=0 total=15252
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 35.24fps, total 48.06fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.18fps, total 48.10fps
+[X] [HBP] pid=92 n=108 fps=53.7 path=scanout acq=1/2 sub=4582/159426 wait=9/29 flip=6159/11092 geom=0/0 set=145 flush=5931 us scanout=108 putimage=0 refused=0 total=15360
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.68fps, total 48.13fps
+[X] [HBP] pid=92 n=109 fps=54.3 path=scanout acq=1/2 sub=2932/8697 wait=8/27 flip=5959/8415 geom=0/0 set=140 flush=5754 us scanout=109 putimage=0 refused=0 total=15469
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.56fps, total 48.15fps
+[X] [HBP] pid=92 n=118 fps=59.0 path=scanout acq=1/8 sub=3694/8917 wait=8/25 flip=6180/8616 geom=0/0 set=131 flush=5989 us scanout=118 putimage=0 refused=0 total=15587
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.90fps, total 48.20fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.43fps, total 48.25fps
+[X] [HBP] pid=92 n=106 fps=52.6 path=scanout acq=1/2 sub=3292/11224 wait=10/102 flip=6106/9626 geom=0/0 set=146 flush=5901 us scanout=106 putimage=0 refused=0 total=15693
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.30fps, total 48.28fps
+[X] [HBP] pid=92 n=118 fps=58.7 path=scanout acq=0/2 sub=3523/11692 wait=8/44 flip=6006/8123 geom=0/0 set=95 flush=5853 us scanout=118 putimage=0 refused=0 total=15811
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.37fps, total 48.31fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.75fps, total 48.34fps
+[X] [HBP] pid=92 n=113 fps=55.7 path=scanout acq=1/1 sub=2950/8628 wait=8/24 flip=5899/10370 geom=0/0 set=105 flush=5709 us scanout=113 putimage=0 refused=0 total=15924
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 63.25fps, total 48.41fps
+[X] [HBP] pid=92 n=116 fps=57.3 path=scanout acq=1/2 sub=3767/13393 wait=8/61 flip=6153/12272 geom=0/0 set=136 flush=5923 us scanout=116 putimage=0 refused=0 total=16040
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 47.59fps, total 48.40fps
+[X] [HBP] pid=92 n=87 fps=43.5 path=scanout acq=2/52 sub=6456/18885 wait=23/1097 flip=7062/12720 geom=0/0 set=399 flush=6480 us scanout=87 putimage=0 refused=0 total=16127
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 41.20fps, total 48.37fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.72fps, total 48.38fps
+[X] [HBP] pid=92 n=103 fps=51.2 path=scanout acq=1/7 sub=3312/10106 wait=9/30 flip=6259/10983 geom=0/0 set=151 flush=6040 us scanout=103 putimage=0 refused=0 total=16230
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 59.37fps, total 48.43fps
+[X] [HBP] pid=92 n=109 fps=54.2 path=scanout acq=1/2 sub=3285/8649 wait=8/34 flip=6009/8198 geom=0/0 set=115 flush=5835 us scanout=109 putimage=0 refused=0 total=16339
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.04fps, total 48.46fps
+3[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 10.92fps, total 48.13fps
+ acq=[X] [HBP] pid=92 n=97 fps=24.0 path=scanout acq=1/2 sub=3283/8740 wait=8/25 flip=6165/9407 geom=0/0 set=130 flush=5943 us scanout=97 putimage=0 refused=0 total=16436
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.75fps, total 48.15fps
+[X] [HBP] pid=92 n=103 fps=51.5 path=scanout acq=1/2 sub=3520/10779 wait=10/50 flip=6377/9746 geom=0/0 set=170 flush=6084 us scanout=103 putimage=0 refused=0 total=16539
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.54fps, total 48.18fps
+[X] [HBP] pid=92 n=108 fps=53.7 path=scanout acq=1/2 sub=3259/9353 wait=9/86 flip=6097/8348 geom=0/0 set=135 flush=5900 us scanout=108 putimage=0 refused=0 total=16647
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.19fps, total 48.20fps
+[X] [HBP] pid=92 n=102 fps=50.7 path=scanout acq=1/2 sub=3937/16935 wait=10/119 flip=6332/9666 geom=0/0 set=162 flush=6061 us scanout=102 putimage=0 refused=0 total=16749
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 47.75fps, total 48.20fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.23fps, total 48.23fps
+[X] [HBP] pid=92 n=97 fps=48.4 path=scanout acq=1/2 sub=5776/203402 wait=9/29 flip=6318/11693 geom=0/0 set=176 flush=6003 us scanout=97 putimage=0 refused=0 total=16846
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 45.69fps, total 48.22fps
+[X] [HBP] pid=92 n=104 fps=52.0 path=scanout acq=1/2 sub=3219/7961 wait=9/23 flip=6226/8980 geom=0/0 set=168 flush=5885 us scanout=104 putimage=0 refused=0 total=16950
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.52fps, total 48.24fps
+[X] [HBP] pid=92 n=118 fps=58.7 path=scanout acq=1/1 sub=3107/9192 wait=8/26 flip=6003/8335 geom=0/0 set=130 flush=5799 us scanout=118 putimage=0 refused=0 total=17068
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.92fps, total 48.28fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.55fps, total 48.32fps
+[X] [HBP] pid=92 n=108 fps=53.8 path=scanout acq=1/6 sub=3123/8674 wait=9/27 flip=5977/8259 geom=0/0 set=110 flush=5807 us scanout=108 putimage=0 refused=0 total=17176
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.30fps, total 48.34fps
+[X] [HBP] pid=92 n=111 fps=55.3 path=scanout acq=1/1 sub=3079/8642 wait=9/63 flip=5911/8294 geom=0/0 set=103 flush=5747 us scanout=111 putimage=0 refused=0 total=17287
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.68fps, total 48.37fps
+[X] [HBP] pid=92 n=113 fps=56.5 path=scanout acq=1/1 sub=3037/8494 wait=8/25 flip=5860/8196 geom=0/0 set=99 flush=5693 us scanout=113 putimage=0 refused=0 total=17400
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.35fps, total 48.39fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.40fps, total 48.43fps
+[X] [HBP] pid=92 n=102 fps=50.7 path=scanout acq=1/2 sub=3438/12846 wait=9/24 flip=6281/11329 geom=0/0 set=163 flush=6023 us scanout=102 putimage=0 refused=0 total=17502
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.25fps, total 48.44fps
+[X] [HBP] pid=92 n=113 fps=56.3 path=scanout acq=1/2 sub=3045/8685 wait=9/29 flip=5957/9350 geom=0/0 set=113 flush=5791 us scanout=113 putimage=0 refused=0 total=17615
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.70fps, total 48.47fps
+[X] [HBP] pid=92 n=114 fps=56.8 path=scanout acq=1/2 sub=3679/33706 wait=9/27 flip=6161/10593 geom=0/0 set=119 flush=5965 us scanout=114 putimage=0 refused=0 total=17729
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.30fps, total 48.50fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 62.38fps, total 48.56fps
+[X] [HBP] pid=92 n=115 fps=56.9 path=scanout acq=1/2 sub=4770/168129 wait=8/21 flip=5973/8461 geom=0/0 set=101 flush=5805 us scanout=115 putimage=0 refused=0 total=17844
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.30fps, total 48.59fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 7.18fps, total 48.31fps
+[X] [HBP] pid=92 n=89 fps=23.6 path=scanout acq=0/1 sub=5403/183170 wait=8/35 flip=6019/9525 geom=0/0 set=129 flush=5837 us scanout=89 putimage=0 refused=0 total=17933
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.12fps, total 48.33fps
+[X] [HBP] pid=92 n=113 fps=56.3 path=scanout acq=1/1 sub=3101/8582 wait=8/41 flip=5909/8192 geom=0/0 set=111 flush=5743 us scanout=113 putimage=0 refused=0 total=18046
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.49fps, total 48.35fps
+[X] [HBP] pid=92 n=81 fps=39.1 path=scanout acq=1/8 sub=5844/26489 wait=10/52 flip=7125/11223 geom=0/0 set=297 flush=6406 us scanout=81 putimage=0 refused=0 total=18127
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 31.06fps, total 48.28fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.38fps, total 48.30fps
+[X] [HBP] pid=92 n=104 fps=51.8 path=scanout acq=1/3 sub=3867/18511 wait=10/64 flip=6467/10620 geom=0/0 set=263 flush=6110 us scanout=104 putimage=0 refused=0 total=18231
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.92fps, total 48.35fps
+[X] [HBP] pid=92 n=113 fps=56.3 path=scanout acq=1/2 sub=3364/10792 wait=8/34 flip=6036/10524 geom=0/0 set=110 flush=5841 us scanout=113 putimage=0 refused=0 total=18344
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.59fps, total 48.38fps
+[X] [HBP] pid=92 n=123 fps=61.1 path=scanout acq=0/1 sub=3508/12331 wait=8/31 flip=6009/9437 geom=0/0 set=103 flush=5822 us scanout=123 putimage=0 refused=0 total=18467
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.93fps, total 48.43fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.96fps, total 48.49fps
+[X] [HBP] pid=92 n=128 fps=63.4 path=scanout acq=0/2 sub=4560/153768 wait=8/75 flip=5981/8254 geom=0/0 set=100 flush=5824 us scanout=128 putimage=0 refused=0 total=18595
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 64.07fps, total 48.55fps
+[X] [HBP] pid=92 n=120 fps=60.0 path=scanout acq=1/1 sub=4094/79902 wait=8/31 flip=5985/8496 geom=0/0 set=103 flush=5832 us scanout=120 putimage=0 refused=0 total=18715
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.01fps, total 48.60fps
+[X] [HBP] pid=92 n=127 fps=63.3 path=scanout acq=0/1 sub=3460/9018 wait=8/65 flip=5950/8213 geom=0/0 set=94 flush=5805 us scanout=127 putimage=0 refused=0 total=18842
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.13fps, total 48.64fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.74fps, total 48.68fps
+[X] [HBP] pid=92 n=121 fps=60.1 path=scanout acq=1/2 sub=3456/8791 wait=8/24 flip=6099/8291 geom=0/0 set=120 flush=5924 us scanout=121 putimage=0 refused=0 total=18963
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 63.49fps, total 48.74fps
+[X] [HBP] pid=92 n=116 fps=57.9 path=scanout acq=1/1 sub=3143/9418 wait=8/21 flip=5855/8932 geom=0/0 set=95 flush=5700 us scanout=116 putimage=0 refused=0 total=19079
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.74fps, total 48.77fps
+[X] [HBP] pid=92 n=113 fps=56.1 path=scanout acq=1/1 sub=3060/8471 wait=9/40 flip=5912/8119 geom=0/0 set=100 flush=5763 us scanout=113 putimage=0 refused=0 total=19192
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.34fps, total 48.79fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.79fps, total 48.81fps
+[X] [HBP] pid=92 n=115 fps=57.0 path=scanout acq=1/3 sub=2894/8456 wait=9/80 flip=5843/8518 geom=0/0 set=105 flush=5687 us scanout=115 putimage=0 refused=0 total=19307
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.47fps, total 48.85fps
+[X] [HBP] pid=92 n=105 fps=51.8 path=scanout acq=1/2 sub=5850/199218 wait=9/41 flip=6304/10549 geom=0/0 set=178 flush=6026 us scanout=105 putimage=0 refused=0 total=19412
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.16fps, total 48.85fps
+[X] [HBP] pid=92 n=80 fps=20.4 path=scanout acq=1/2 sub=30684/2181166 wait=9/49 flip=10494/339659 geom=0/0 set=203 flush=5993 us scanout=80 putimage=0 refused=0 total=19492
+6393[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 7.97fps, total 48.55fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.69fps, total 48.59fps
+[X] [HBP] pid=92 n=113 fps=55.9 path=scanout acq=1/4 sub=4582/167012 wait=8/75 flip=6010/8527 geom=0/0 set=137 flush=5815 us scanout=113 putimage=0 refused=0 total=19605
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.22fps, total 48.62fps
+[X] [HBP] pid=92 n=119 fps=58.8 path=scanout acq=1/2 sub=3084/8598 wait=7/30 flip=5949/10268 geom=0/0 set=108 flush=5771 us scanout=119 putimage=0 refused=0 total=19724
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.71fps, total 48.64fps
+[X] [HBP] pid=92 n=103 fps=51.2 path=scanout acq=1/2 sub=4657/161567 wait=10/41 flip=6154/11086 geom=0/0 set=177 flush=5869 us scanout=103 putimage=0 refused=0 total=19827
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.16fps, total 48.65fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.36fps, total 48.69fps
+[X] [HBP] pid=92 n=107 fps=53.4 path=scanout acq=1/2 sub=4769/180285 wait=9/30 flip=6176/8768 geom=0/0 set=162 flush=5922 us scanout=107 putimage=0 refused=0 total=19934
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.23fps, total 48.70fps
+[X] [HBP] pid=92 n=113 fps=56.3 path=scanout acq=1/2 sub=3110/8608 wait=9/93 flip=6024/8170 geom=0/0 set=124 flush=5819 us scanout=113 putimage=0 refused=0 total=20047
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.18fps, total 48.73fps
+[X] [HBP] pid=92 n=122 fps=60.8 path=scanout acq=1/2 sub=3681/10325 wait=9/55 flip=6171/8966 geom=0/0 set=123 flush=5993 us scanout=122 putimage=0 refused=0 total=20169
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.51fps, total 48.77fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.51fps, total 48.82fps
+[X] [HBP] pid=92 n=112 fps=55.9 path=scanout acq=1/12 sub=3061/8441 wait=9/35 flip=5972/8099 geom=0/0 set=122 flush=5787 us scanout=112 putimage=0 refused=0 total=20281
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.82fps, total 48.83fps
+[X] [HBP] pid=92 n=115 fps=57.3 path=scanout acq=1/2 sub=3162/8754 wait=8/24 flip=5889/8140 geom=0/0 set=110 flush=5713 us scanout=115 putimage=0 refused=0 total=20396
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.69fps, total 48.84fps
+[X] [HBP] pid=92 n=98 fps=48.9 path=scanout acq=1/2 sub=3298/9354 wait=10/25 flip=6152/9253 geom=0/0 set=207 flush=5861 us scanout=98 putimage=0 refused=0 total=20494
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 49.70fps, total 48.85fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.07fps, total 48.89fps
+[X] [HBP] pid=92 n=111 fps=55.1 path=scanout acq=1/2 sub=3031/8476 wait=8/38 flip=5959/8209 geom=0/0 set=131 flush=5774 us scanout=111 putimage=0 refused=0 total=20605
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.03fps, total 48.91fps
+[X] [HBP] pid=92 n=112 fps=55.4 path=scanout acq=1/2 sub=3614/14940 wait=9/52 flip=6305/20772 geom=0/0 set=140 flush=6030 us scanout=112 putimage=0 refused=0 total=20717
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 47.87fps, total 48.91fps
+[X] [HBP] pid=92 n=103 fps=51.1 path=scanout acq=1/6 sub=4747/157570 wait=10/39 flip=6283/9228 geom=0/0 set=206 flush=5964 us scanout=103 putimage=0 refused=0 total=20820
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.86fps, total 48.92fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 63.29fps, total 48.97fps
+[X] [HBP] pid=92 n=120 fps=59.9 path=scanout acq=1/5 sub=3257/8689 wait=10/148 flip=5970/8252 geom=0/0 set=120 flush=5774 us scanout=120 putimage=0 refused=0 total=20940
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.92fps, total 48.99fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 5.91fps, total 48.74fps
+[X] [HBP] pid=92 n=77 fps=21.4 path=scanout acq=1/2 sub=3586/11702 wait=9/45 flip=6250/8758 geom=0/0 set=204 flush=5950 us scanout=77 putimage=0 refused=0 total=21017
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.30fps, total 48.76fps
+[X] [HBP] pid=92 n=111 fps=51.6 path=scanout acq=1/2 sub=3022/8567 wait=8/30 flip=6017/8202 geom=0/0 set=115 flush=5834 us scanout=111 putimage=0 refused=0 total=21128
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.34fps, total 48.78fps
+[X] [HBP] pid=92 n=109 fps=54.3 path=scanout acq=1/8 sub=2849/5494 wait=9/32 flip=5819/8031 geom=0/0 set=95 flush=5670 us scanout=109 putimage=0 refused=0 total=21237
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.95fps, total 48.79fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.21fps, total 48.81fps
+[X] [HBP] pid=92 n=115 fps=56.9 path=scanout acq=1/1 sub=3327/8528 wait=9/23 flip=5891/8225 geom=0/0 set=88 flush=5753 us scanout=115 putimage=0 refused=0 total=21352
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 65.16fps, total 48.87fps
+[X] [HBP] pid=92 n=117 fps=58.4 path=scanout acq=1/2 sub=3125/8566 wait=8/43 flip=5945/8509 geom=0/0 set=122 flush=5754 us scanout=117 putimage=0 refused=0 total=21469
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 37.21fps, total 48.83fps
+[X] [HBP] pid=92 n=68 fps=33.9 path=scanout acq=1/2 sub=10007/202950 wait=13/143 flip=7791/16839 geom=0/0 set=533 flush=6917 us scanout=68 putimage=0 refused=0 total=21537
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 39.89fps, total 48.80fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.23fps, total 48.82fps
+[X] [HBP] pid=92 n=113 fps=56.1 path=scanout acq=1/36 sub=3088/8456 wait=9/35 flip=5971/8297 geom=0/0 set=114 flush=5793 us scanout=113 putimage=0 refused=0 total=21650
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 69.81fps, total 48.89fps
+[X] [HBP] pid=92 n=129 fps=64.4 path=scanout acq=0/2 sub=3512/9486 wait=8/62 flip=5931/8208 geom=0/0 set=108 flush=5773 us scanout=129 putimage=0 refused=0 total=21779
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 61.29fps, total 48.94fps
+[X] [HBP] pid=92 n=121 fps=60.1 path=scanout acq=1/2 sub=3134/8628 wait=8/60 flip=5933/8218 geom=0/0 set=105 flush=5776 us scanout=121 putimage=0 refused=0 total=21900
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.18fps, total 48.96fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.59fps, total 49.00fps
+[X] [HBP] pid=92 n=122 fps=60.7 path=scanout acq=1/1 sub=3159/8485 wait=7/19 flip=5831/8124 geom=0/0 set=88 flush=5691 us scanout=122 putimage=0 refused=0 total=22022
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 62.01fps, total 49.04fps
+[X] [HBP] pid=92 n=114 fps=56.7 path=scanout acq=1/3 sub=3251/9821 wait=9/42 flip=6062/9487 geom=0/0 set=142 flush=5865 us scanout=114 putimage=0 refused=0 total=22136
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.56fps, total 49.06fps
+[X] [HBP] pid=92 n=111 fps=55.2 path=scanout acq=1/2 sub=5120/174544 wait=9/24 flip=6142/10945 geom=0/0 set=161 flush=5874 us scanout=111 putimage=0 refused=0 total=22247
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 48.57fps, total 49.06fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.69fps, total 49.06fps
+[X] [HBP] pid=92 n=102 fps=50.5 path=scanout acq=1/3 sub=3480/14619 wait=20/974 flip=6228/10550 geom=0/0 set=191 flush=5961 us scanout=102 putimage=0 refused=0 total=22349
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 64.15fps, total 49.11fps
+[X] [HBP] pid=92 n=120 fps=59.7 path=scanout acq=1/6 sub=4617/163108 wait=9/76 flip=5946/8319 geom=0/0 set=121 flush=5764 us scanout=120 putimage=0 refused=0 total=22469
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.40fps, total 49.12fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 8.70fps, total 48.87fps
+[X] [HBP] pid=92 n=76 fps=19.8 path=scanout acq=1/2 sub=3656/10283 wait=9/24 flip=6524/12021 geom=0/0 set=226 flush=6195 us scanout=76 putimage=0 refused=0 total=22545
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.60fps, total 48.88fps
+[X] [HBP] pid=92 n=108 fps=50.4 path=scanout acq=1/4 sub=4641/169824 wait=10/72 flip=5965/8202 geom=0/0 set=126 flush=5773 us scanout=108 putimage=0 refused=0 total=22653
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 57.62fps, total 48.91fps
+[X] [HBP] pid=92 n=120 fps=59.7 path=scanout acq=1/3 sub=3319/8596 wait=7/37 flip=5943/8250 geom=0/0 set=113 flush=5783 us scanout=120 putimage=0 refused=0 total=22773
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.19fps, total 48.93fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 43.50fps, total 48.91fps
+[X] [HBP] pid=92 n=93 fps=46.2 path=scanout acq=1/5 sub=3664/19370 wait=12/128 flip=6452/9365 geom=0/0 set=201 flush=6142 us scanout=93 putimage=0 refused=0 total=22866
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 43.48fps, total 48.89fps
+[X] [HBP] pid=92 n=78 fps=38.6 path=scanout acq=1/7 sub=2954/4787 wait=13/63 flip=5965/6757 geom=0/0 set=131 flush=5771 us scanout=78 putimage=0 refused=0 total=22944
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 34.94fps, total 48.85fps
+[X] [HBP] pid=92 n=89 fps=44.4 path=scanout acq=1/4 sub=5003/158705 wait=11/30 flip=6049/8141 geom=0/0 set=123 flush=5864 us scanout=89 putimage=0 refused=0 total=23033
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.95fps, total 48.87fps
+[X] [HBP] pid=92 n=128 fps=63.6 path=scanout acq=0/2 sub=5154/202870 wait=7/31 flip=6020/8247 geom=0/0 set=104 flush=5861 us scanout=128 putimage=0 refused=0 total=23161
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 60.69fps, total 48.91fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.32fps, total 48.94fps
+[X] [HBP] pid=92 n=109 fps=54.2 path=scanout acq=1/7 sub=3681/10487 wait=9/30 flip=6512/9880 geom=0/0 set=136 flush=6273 us scanout=109 putimage=0 refused=0 total=23270
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.59fps, total 48.96fps
+[X] [HBP] pid=92 n=114 fps=56.5 path=scanout acq=1/2 sub=3483/10484 wait=8/35 flip=6111/11658 geom=0/0 set=122 flush=5929 us scanout=114 putimage=0 refused=0 total=23384
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.96fps, total 48.97fps
+[X] [HBP] pid=92 n=107 fps=53.4 path=scanout acq=1/4 sub=2961/8343 wait=8/29 flip=5969/8539 geom=0/0 set=130 flush=5782 us scanout=107 putimage=0 refused=0 total=23491
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 53.57fps, total 48.98fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 49.64fps, total 48.99fps
+[X] [HBP] pid=92 n=90 fps=45.0 path=scanout acq=1/4 sub=5080/15446 wait=10/25 flip=6792/12330 geom=0/0 set=249 flush=6395 us scanout=90 putimage=0 refused=0 total=23581
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 45.73fps, total 48.98fps
+[X] [HBP] pid=92 n=104 fps=51.7 path=scanout acq=1/7 sub=4918/167487 wait=10/48 flip=6298/10730 geom=0/0 set=160 flush=6064 us scanout=104 putimage=0 refused=0 total=23685
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 54.56fps, total 48.99fps
+[X] [HBP] pid=92 n=109 fps=54.4 path=scanout acq=1/24 sub=4941/196934 wait=8/24 flip=5993/8847 geom=0/0 set=136 flush=5792 us scanout=109 putimage=0 refused=0 total=23794
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 50.26fps, total 49.00fps
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 56.37fps, total 49.02fps
+[X] [HBP] pid=92 n=103 fps=51.4 path=scanout acq=1/4 sub=3248/8557 wait=9/36 flip=6213/8210 geom=0/0 set=171 flush=5950 us scanout=103 putimage=0 refused=0 total=23897
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 52.56fps, total 49.03fps
+ cap=[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 5.93fps, total 48.79fps
+[X] [HBP] pid=92 n=81 fps=21.3 path=scanout acq=1/3 sub=3128/8425 wait=8/22 flip=6095/8370 geom=0/0 set=130 flush=5891 us scanout=81 putimage=0 refused=0 total=23978
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.59fps, total 48.80fps
+[X] [HBP] pid=92 n=97 fps=48.4 path=scanout acq=1/27 sub=3023/8470 wait=13/326 flip=5954/8178 geom=0/0 set=124 flush=5757 us scanout=97 putimage=0 refused=0 total=24075
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 51.55fps, total 48.81fps
+[X] [HBP] pid=92 n=111 fps=55.3 path=scanout acq=1/1 sub=3083/8708 wait=9/31 flip=5931/8239 geom=0/0 set=122 flush=5756 us scanout=111 putimage=0 refused=0 total=24186
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 55.22fps, total 48.83fps
+[X] [HBP] pid=92 n=118 fps=58.6 path=scanout acq=1/1 sub=3304/8605 wait=8/40 flip=6024/9449 geom=0/0 set=98 flush=5835 us scanout=118 putimage=0 refused=0 total=24304
+[X] 01b0:trace:fps:win32u_vkQueuePresentKHR 0x10400d1f10 @ approx 58.36fps, total 48.86fps
+(stopped by hand at +500 s: the title prompt took the harness's one early Space at +142 s and its OCR never read the prompt again on the 1920x1080 upscaled title; the next run uses a native 1920x1080 window)

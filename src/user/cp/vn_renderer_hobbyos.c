@@ -33,6 +33,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 
 #include "virtio/virtio-gpu/venus_hw.h"
 #include "util/os_time.h"
@@ -80,6 +81,7 @@ struct hobbyos {
    struct vn_renderer base;
    struct vn_instance *instance;
    int fd;
+   bool has_scanout; /* GPU_FEAT_SCANOUT_BLOB (P7) */
    uint32_t ctx_id;
    uint32_t num_rings;
    struct {
@@ -101,6 +103,24 @@ hb_ioctl(struct hobbyos *hb, unsigned long req, void *arg)
 }
 
 /* ---- fences ------------------------------------------------------------ */
+
+/* P7 diagnostic (docs/cp-p7.md §3.2): a sync pointer that cannot be one.
+ * Venus' async present died in pthread_mutex_lock(0x9) = &((struct
+ * hobbyos_sync *)1)->mutex; this names the caller instead of faulting. */
+static int
+hb_bad_sync(struct hobbyos *hb, const void *s, const char *op, uint32_t i, uint32_t n,
+            const void *caller)
+{
+   if ((uintptr_t)s >= 4096)
+      return 0;
+   static int rows;
+   if (rows++ < 16)
+      vn_log(hb->instance,
+             "BAD SYNC %p in %s [%u/%u] tid=%ld caller=%p (vn_renderer_create_hobbyos at %p)", s,
+             op, i, n, (long)syscall(SYS_gettid), caller, (void *)vn_renderer_create_hobbyos);
+   return 1;
+}
+
 
 /* 0 signalled, -ETIMEDOUT, other -errno */
 static int
@@ -214,6 +234,8 @@ hobbyos_sync_reset(struct vn_renderer *renderer, struct vn_renderer_sync *sync)
 {
    (void)renderer;
    struct hobbyos_sync *s = (struct hobbyos_sync *)sync;
+   if (hb_bad_sync((struct hobbyos *)renderer, s, "sync_reset", 0, 1, __builtin_return_address(0)))
+      return VK_ERROR_DEVICE_LOST;
    mtx_lock(&s->mutex);
    s->value = 0;
    s->npend = 0;
@@ -228,6 +250,8 @@ hobbyos_sync_read(struct vn_renderer *renderer,
 {
    struct hobbyos *hb = (struct hobbyos *)renderer;
    struct hobbyos_sync *s = (struct hobbyos_sync *)sync;
+   if (hb_bad_sync((struct hobbyos *)renderer, s, "sync_read", 0, 1, __builtin_return_address(0)))
+      return VK_ERROR_DEVICE_LOST;
    mtx_lock(&s->mutex);
    hb_sync_collect_locked(hb, s);
    *val = s->value;
@@ -242,6 +266,8 @@ hobbyos_sync_write(struct vn_renderer *renderer,
 {
    (void)renderer;
    struct hobbyos_sync *s = (struct hobbyos_sync *)sync;
+   if (hb_bad_sync((struct hobbyos *)renderer, s, "sync_write", 0, 1, __builtin_return_address(0)))
+      return VK_ERROR_DEVICE_LOST;
    mtx_lock(&s->mutex);
    if (val > s->value)
       s->value = val;
@@ -291,6 +317,10 @@ hobbyos_wait(struct vn_renderer *renderer, const struct vn_renderer_wait *wait)
 {
    struct hobbyos *hb = (struct hobbyos *)renderer;
    const int64_t abs = os_time_get_absolute_timeout(wait->timeout);
+   for (uint32_t i = 0; i < wait->sync_count; i++)
+      if (hb_bad_sync(hb, wait->syncs[i], wait->wait_any ? "wait_any" : "wait_all", i,
+                      wait->sync_count, __builtin_return_address(0)))
+         return VK_ERROR_DEVICE_LOST;
 
    if (!wait->wait_any || wait->sync_count == 1) {
       for (uint32_t i = 0; i < wait->sync_count; i++) {
@@ -653,6 +683,7 @@ hobbyos_init(struct hobbyos *hb)
              gp.value);
       return VK_ERROR_INITIALIZATION_FAILED;
    }
+   hb->has_scanout = (gp.value & GPU_FEAT_SCANOUT_BLOB) != 0;
    if (!(gp.value & GPU_FEAT_FENCE_IRQ))
       vn_log(hb->instance, "hobbyos: fences are polled (no device interrupt)");
 
@@ -711,6 +742,46 @@ hobbyos_init(struct hobbyos *hb)
    hb->base.sync_ops.read = hobbyos_sync_read;
    hb->base.sync_ops.write = hobbyos_sync_write;
    return VK_SUCCESS;
+}
+
+/* ---- P7: blob scanout (docs/gpu-abi.md §10.7, docs/cp-p7.md) ----------- */
+
+bool
+vn_renderer_hobbyos_has_scanout(struct vn_renderer *renderer)
+{
+   return renderer && renderer->ops.destroy == hobbyos_destroy &&
+          ((struct hobbyos *)renderer)->has_scanout;
+}
+
+int
+vn_renderer_hobbyos_scanout(struct vn_renderer *renderer, struct vn_renderer_bo *bo,
+                            uint32_t width, uint32_t height, uint32_t stride,
+                            uint32_t format, uint32_t window, uint32_t *set_us,
+                            uint32_t *flush_us)
+{
+   if (!vn_renderer_hobbyos_has_scanout(renderer))
+      return -ENODEV;
+   struct hobbyos *hb = (struct hobbyos *)renderer;
+   struct gpu_scanout_blob sb = {
+      .res_id = bo ? bo->res_id : 0,
+      .width = width,
+      .height = height,
+      .format = format,
+      .stride = stride,
+      .window = window,
+   };
+   int r = hb_ioctl(hb, GPU_IOC_SCANOUT_BLOB, &sb);
+   static int rows;
+   if (r && r != -EPERM && r != -EBUSY && rows++ < 8)
+      vn_log(hb->instance, "SCANOUT_BLOB res=%u %ux%u stride=%u fmt=%u win=0x%x: %s",
+             sb.res_id, width, height, stride, format, window, strerror(-r));
+   if (r == 0) {
+      if (set_us)
+         *set_us = sb.set_us;
+      if (flush_us)
+         *flush_us = sb.flush_us;
+   }
+   return r;
 }
 
 VkResult

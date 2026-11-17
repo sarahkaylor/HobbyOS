@@ -45,6 +45,14 @@
 #ifndef P5_SECS
 #define P5_SECS "65"
 #endif
+/* The probes' window size (C6-p7: -DP5_W='"fs"' runs them fullscreen,
+   src/user/cp/vkcubex.c / d3d1[12]tri.c; P5_H is then ignored). */
+#ifndef P5_W
+#define P5_W "640"
+#endif
+#ifndef P5_H
+#define P5_H "480"
+#endif
 #ifndef P5_BOOT_QUIESCE_S
 #define P5_BOOT_QUIESCE_S 3600 /* winep2: the NFS page-in of wineboot -i (docs/cp-nfs.md §7) */
 #endif
@@ -206,7 +214,7 @@ int main(int argc, char **argv) {
     int want = argc <= 1;
     for (int i = 1; i < argc; i++) if (streq(argv[i], tags[k])) want = 1;
     if (!want) continue;
-    char *a[] = { (char *)"wine", (char *)exes[k], (char *)P5_SECS, (char *)"640", (char *)"480", 0 };
+    char *a[] = { (char *)"wine", (char *)exes[k], (char *)P5_SECS, (char *)P5_W, (char *)P5_H, 0 };
     step(tags[k], "/CP/WINE/bin/wine", a, 900);
   }
   for (int i = 1; i < argc; i++) {

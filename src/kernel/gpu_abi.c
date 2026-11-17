@@ -325,10 +325,17 @@ static void gpu_client_teardown_unlocked(struct gpu_abi_client* c) {
  * lookup that never matches, because no client can ever be created. */
 static void gpu_m2_release_maps(struct process* p, int pid, int fd);
 
+#ifdef __x86_64__
+int virtio_gpu_x64_scanout_release(int pid, int fd, uint32_t res_id); /* P7 */
+#endif
+
 void gpu_abi_release_fd(struct process* p, int fd) {
   if (!p) return;
   struct process* g = process_group(p);
   int pid = g ? g->pid : p->pid;
+#ifdef __x86_64__
+  virtio_gpu_x64_scanout_release(pid, fd, 0); /* P7: the screen goes back first */
+#endif
   gpu_m2_release_maps(p, pid, fd); /* P6: user mappings of this fd's blobs */
   struct gpu_abi_client snapshot;
   int have = 0;
@@ -778,7 +785,7 @@ int gpu_abi_m2_req_size(unsigned long req) {
     case GPU_IOC_RES_UNMAP_BLOB: return (int)sizeof(struct gpu_res_unmap_blob);
     case GPU_IOC_SUBMIT2: return (int)sizeof(struct gpu_submit2);
     case GPU_IOC_FENCE_WAIT2: return (int)sizeof(struct gpu_fence_wait2);
-    case GPU_IOC_SCANOUT_BLOB: return 64;
+    case GPU_IOC_SCANOUT_BLOB: return (int)sizeof(struct gpu_scanout_blob);
     default: return -1;
   }
 }
@@ -814,6 +821,24 @@ int gpu_abi_submit2_ok(const struct gpu_submit2* s, uint32_t num_rings) {
   if ((s->cs_size & 3u) || s->cs_size > GPU_ABI_MAX_SUBMIT) return 0;
   if (s->cs_size && !s->cs) return 0;
   if (!s->cs_size && !(s->flags & GPU_SUBMIT2_F_FENCE)) return 0; /* nothing to do */
+  return 1;
+}
+
+/* P7 (docs/gpu-abi.md §10.7). */
+int gpu_abi_scanout_ok(const struct gpu_scanout_blob* s, uint64_t blob_size) {
+  if (!s || s->res_id == 0) return 0;
+  if (s->flags || s->padding || s->reserved[0] || s->reserved[1]) return 0;
+  if (s->width < 16 || s->height < 16 || s->width > 4096 || s->height > 4096) return 0;
+  switch (s->format) {
+    case GPU_SCANOUT_FMT_B8G8R8A8:
+    case GPU_SCANOUT_FMT_B8G8R8X8:
+    case GPU_SCANOUT_FMT_R8G8B8A8:
+    case GPU_SCANOUT_FMT_R8G8B8X8: break;
+    default: return 0;
+  }
+  if ((s->stride & 3u) || s->stride < s->width * 4u) return 0;
+  if ((uint64_t)s->stride * s->height > blob_size) return 0;
+  if (s->window == 0) return 0;
   return 1;
 }
 
@@ -1267,7 +1292,37 @@ static void gpu_m2_drop_map(struct process* p, int pid, int fd, uint32_t res_id)
 }
 
 static void gpu_m2_unref_hook(struct process* p, int pid, int fd, uint32_t res_id) {
+  virtio_gpu_x64_scanout_release(pid, fd, res_id); /* P7: never scan out a freed blob */
   gpu_m2_drop_map(p, pid, fd, res_id);
+}
+
+/* P7 (docs/gpu-abi.md §10.7): GPU_IOC_SCANOUT_BLOB. */
+static int gpu_m2_scanout_blob(struct process* p, int fd, uint64_t arg) {
+  struct gpu_scanout_blob sb;
+  if (vm_user_read(p, arg, &sb, sizeof(sb)) != 0) return -EFAULT;
+  if (!(virtio_gpu_3d_features() & GPU_FEAT_SCANOUT_BLOB)) return -ENODEV;
+  int pid = gpu_m2_pid(p);
+  if (sb.res_id == 0) {
+    virtio_gpu_x64_scanout_release(pid, fd, 0);
+    sb.seqno = 0;
+    sb.set_us = sb.flush_us = 0;
+    return vm_kwrite(p, arg, &sb, sizeof(sb)) == 0 ? 0 : -EFAULT;
+  }
+  if (!gpu_m2_owns_res(p, fd, sb.res_id)) return -EINVAL;
+  uint64_t bsize = 0;
+  uint32_t bflags = 0;
+  int mapped = 0;
+  if (virtio_gpu_3d_blob_info(sb.res_id, &bsize, &bflags, &mapped) != 0) return -EINVAL;
+  if (!gpu_abi_scanout_ok(&sb, bsize)) return -EINVAL;
+  struct vgpu_scanout_req rq = {sb.res_id, sb.width, sb.height, sb.format, sb.stride};
+  uint64_t seq = 0;
+  uint32_t su = 0, fu = 0;
+  int rc = virtio_gpu_x64_scanout_flip(pid, fd, sb.window, &rq, &seq, &su, &fu);
+  if (rc != 0) return rc;
+  sb.seqno = seq;
+  sb.set_us = su;
+  sb.flush_us = fu;
+  return vm_kwrite(p, arg, &sb, sizeof(sb)) == 0 ? 0 : -EFAULT;
 }
 
 static int gpu_m2_res_unmap_blob(struct process* p, int fd, uint64_t arg) {
@@ -1435,7 +1490,7 @@ static int gpu_abi_m2_ioctl(struct process* p, int fd, unsigned long req, uint64
     case GPU_IOC_RES_UNMAP_BLOB: return gpu_m2_res_unmap_blob(p, fd, arg);
     case GPU_IOC_SUBMIT2: return gpu_m2_submit2(p, fd, arg);
     case GPU_IOC_FENCE_WAIT2: return gpu_m2_fence_wait2(p, fd, arg);
-    case GPU_IOC_SCANOUT_BLOB: return -ENOSYS;
+    case GPU_IOC_SCANOUT_BLOB: return gpu_m2_scanout_blob(p, fd, arg);
     default: return -ENOTTY;
   }
 }

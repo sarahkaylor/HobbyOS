@@ -50,6 +50,78 @@ def venus_stage(disk, args, tmp):
     m("mcopy", "-o", "-i", disk, os.path.join(VNS, "share/vulkan/icd.d/virtio_icd.x86_64.json"),
       "::/CP/VK/share/vulkan/icd.d/virtio_icd.x86_64.json")
     P5.log("venus: staged /CP/VK/lib/libvulkan_virtio.so + virtio_icd.x86_64.json; lvp ICD JSON removed")
+    # P7 (C6-p7): VENUS_F5=<A> also starts tools/cp/venus/p7occlude (occluder at
+    # t=A s, then a RandR 1280x720 / 1920x1080 round trip) beside vkcubex, and a
+    # thread answers its "[OCC] shot NAME" rows with VNC screendumps (F5 test).
+    f5 = os.environ.get("VENUS_F5")
+    if f5:
+        occ = os.path.join(P5.VK, "bin", "p7occlude")
+        m("mcopy", "-o", "-i", disk, occ, "::/P7OCC.ELF")
+        start = os.path.join(tmp, "XSTART.TXT")
+        with open(start, "a") as f:
+            f.write(f"/P7OCC.ELF {f5}\n")
+        m("mcopy", "-o", "-i", disk, start, "::XSTART.TXT")
+        P5.log("venus: F5 probe staged: /P7OCC.ELF " + f5)
+        _start_shooter(os.path.dirname(disk))
+    # P7 (C6-p7): VENUS_XSESSION_ENV="K=V;K2=V2" adds lines to ::/X11/XSESSION.ENV
+    # (the session's environment, inherited by /VKCUBEX.ELF), e.g. HB_SCANOUT=0
+    # for the put_image baseline.
+    extra = [kv for kv in os.environ.get("VENUS_XSESSION_ENV", "").split(";") if kv]
+    if extra:
+        envf = os.path.join(tmp, "XSESSION.ENV")
+        r = m("mtype", "-i", disk, "::/X11/XSESSION.ENV", check=False)
+        with open(envf, "w") as f:
+            f.write(r.stdout if r.returncode == 0 else "")
+            if r.returncode == 0 and r.stdout and not r.stdout.endswith("\n"):
+                f.write("\n")
+            for kv in extra:
+                f.write(kv + "\n")
+        m("mcopy", "-o", "-i", disk, envf, "::/X11/XSESSION.ENV")
+        P5.log("venus: XSESSION.ENV += " + " ".join(extra))
+
+
+def _start_shooter(out):
+    """Answer p7occlude's "[OCC] shot NAME" rows (and vkcubex's exit) with VNC
+    screendumps of the glass: out/f5-NAME.ppm (+ .png)."""
+    import re
+    import threading
+    import time
+    import vncshot
+
+    serial = os.path.join(out, "serial.log")
+    sock = os.path.join(out, "vnc-sock")
+
+    def run():
+        done = set()
+        t_end = time.time() + 1800
+        while time.time() < t_end:
+            try:
+                txt = open(serial, "rb").read().decode("latin-1")
+            except OSError:
+                time.sleep(1)
+                continue
+            names = re.findall(r"\[OCC\] shot (\w+)", txt)
+            if "[VK] done rc=" in txt:
+                names.append("exit")
+            for n in names:
+                if n in done:
+                    continue
+                done.add(n)
+                if n == "exit":
+                    time.sleep(1.0)
+                path = os.path.join(out, f"f5-{n}.ppm")
+                try:
+                    w, h = vncshot.shot(sock, path)
+                    subprocess.run([sys.executable, os.path.join(REPO, "skills/hobbyos-screenshot/scripts/ppm2png.py"),
+                                    path, path[:-4] + ".png"], capture_output=True)
+                    P5.log(f"F5 screendump {n}: {w}x{h} (VNC, the glass)")
+                except Exception as e:  # noqa: BLE001
+                    P5.log(f"F5 screendump {n} failed: {e}")
+            if "exit" in done:
+                return
+            time.sleep(0.3)
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def main():

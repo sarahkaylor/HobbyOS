@@ -48,6 +48,7 @@
 #include "lock.h"
 #include "arch/cpu.h"
 #include "kmem.h"
+#include "errno.h"
 
 /* R6: mode constants live in display_mode.h (single shared definition). */
 #define GPU_SCREEN_W DISPLAY_WIDTH
@@ -1122,6 +1123,8 @@ void virtio_gpu_flush(void) {
 
 int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect* rects, int count) {
   if (!rects || count < 0) return 0;
+  if (count == 1 && rects[0].x == VGPU_FSCTL_MAGIC) /* P7: the X server's report */
+    return virtio_gpu_x64_fsctl_decode(rects[0].x, rects[0].y, rects[0].w, rects[0].h, 0, 0, 0);
   uint64_t total_area = 0;
   for (int i = 0; i < count; i++) {
     const struct virtio_gpu_xrect *r = &rects[i];
@@ -1136,9 +1139,16 @@ int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect* rects, int count) {
   return 1;
 }
 
+/* P7 (below): the X server's control rect, and the desktop flushes a blob
+ * on the scanout suppresses. */
+static int vgpu_fsctl_flush(const struct virtio_gpu_xrect* rects, int count);
+static int vgpu_so_active;
+static uint64_t vgpu_so_suppressed;
+
 void virtio_gpu_flush_rects(const struct virtio_gpu_xrect* rects, int count) {
   if (!rects || count <= 0) return;
   if (count > VGPU_RECT_MAX) count = VGPU_RECT_MAX;
+  if (vgpu_fsctl_flush(rects, count)) return;
 
   /* WD probe (WD_X64_FLUSH_PROBE=1): time-series of the KERNEL fb at
    * browser-window monitor points on every large (near full-screen)
@@ -1176,7 +1186,11 @@ void virtio_gpu_flush_rects(const struct virtio_gpu_xrect* rects, int count) {
 #endif /* WD_X64_FLUSH_PROBE */
 
   uint64_t flags = spinlock_acquire_irqsave(&gpu_lock);
-  if (gpu_mode == VGPU_MODE_VIRTIO) {
+  if (gpu_mode == VGPU_MODE_VIRTIO && vgpu_so_active) {
+    /* P7: a client's blob is on the scanout.  The desktop keeps drawing into
+     * the framebuffer; the hand-back transfers all of it. */
+    vgpu_so_suppressed++;
+  } else if (gpu_mode == VGPU_MODE_VIRTIO) {
     for (int i = 0; i < count; i++) {
       int32_t x, y, w, h;
       if (!virtio_gpu_x64_clamp_rect(rects[i].x, rects[i].y, rects[i].w, rects[i].h,
@@ -1199,6 +1213,212 @@ void virtio_gpu_flush_rects(const struct virtio_gpu_xrect* rects, int count) {
 
 uint32_t* virtio_gpu_get_framebuffer(void) {
   return framebuffer;
+}
+
+/* ------------------------------------------------------------------ */
+/* P7 (docs/cyberpunk.md AD-6, F5; docs/gpu-abi.md §10.7): blob scanout  */
+/* ------------------------------------------------------------------ */
+/*
+ * Scanout 0 shows either the desktop (2D resource 1 = `framebuffer`, which
+ * the X server draws) or ONE client's blob.  The arbitration is here, so it
+ * holds whatever the client does:
+ *
+ *   grant   the X server reports, through a control rect on its flush path,
+ *           the one window that covers its whole screen unobscured (its
+ *           clipList is the screen) and the screen size; a flip is granted
+ *           only for that window at exactly that size.
+ *   flip    SET_SCANOUT_BLOB(res) + RESOURCE_FLUSH(res), synchronous: when
+ *           the call returns the host display has taken the image.
+ *   aside   while a blob owns the scanout the desktop's flushes are dropped
+ *           (the X server keeps drawing into `framebuffer`).
+ *   back    on the owner's release, its fd close / blob unref (gpu_abi.c),
+ *           or a changed X report (focus loss, a window on top, a mode
+ *           change): SET_SCANOUT(resource 1) + a full transfer and flush.
+ *
+ * Everything below runs under gpu_lock, like every other control command.
+ */
+struct vgpu_so_owner {
+  int pid, fd;
+  uint32_t res_id, window, w, h;
+};
+static struct vgpu_so_owner vgpu_so;
+static uint32_t vgpu_fs_window, vgpu_fs_w, vgpu_fs_h; /* the X server's report */
+static uint64_t vgpu_so_seq;
+static uint32_t vgpu_so_restores, vgpu_so_refusals, vgpu_so_rows;
+static struct virtio_gpu_set_scanout_blob gpu_req_sblob;
+
+extern uint64_t timer_get_us(void);
+
+int virtio_gpu_x64_fsctl_decode(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t* window,
+                                uint32_t* sw, uint32_t* sh) {
+  if (x != VGPU_FSCTL_MAGIC || y != VGPU_FSCTL_OP_FS) return 0;
+  uint32_t ww = (uint32_t)h >> 16, hh = (uint32_t)h & 0xFFFFu;
+  /* A window needs a real screen size; "no window" may say 0x0. */
+  if (w != 0 && (ww < 16 || hh < 16 || ww > GPU_SCREEN_W || hh > GPU_SCREEN_H)) return 0;
+  if (w < 0) return 0; /* X ids are 29-bit */
+  if (window) *window = (uint32_t)w;
+  if (sw) *sw = ww;
+  if (sh) *sh = hh;
+  return 1;
+}
+
+static void vgpu_so_row(const char* what, uint32_t a, uint32_t b) {
+  if (vgpu_so_rows >= 64) return;
+  vgpu_so_rows++;
+  uart_puts("[P7] scanout ");
+  uart_puts(what);
+  uart_puts(" ");
+  print_int((int)a);
+  uart_puts(" ");
+  print_int((int)b);
+  uart_puts(" seq=");
+  print_int((int)vgpu_so_seq);
+  uart_puts("\n");
+}
+
+/* Scanout back to the desktop: resource 1, then all of `framebuffer`. */
+static int vgpu_restore_desktop_locked(const char* why) {
+  if (!vgpu_so_active) return 0;
+  vgpu_so_active = 0;
+  vgpu_so_restores++;
+  gpu_req_scanout.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
+  gpu_req_scanout.hdr.flags = 0;
+  gpu_req_scanout.hdr.fence_id = 0;
+  gpu_req_scanout.hdr.ctx_id = 0;
+  gpu_req_scanout.hdr.padding = 0;
+  gpu_req_scanout.r.x = 0;
+  gpu_req_scanout.r.y = 0;
+  gpu_req_scanout.r.width = GPU_SCREEN_W;
+  gpu_req_scanout.r.height = GPU_SCREEN_H;
+  gpu_req_scanout.scanout_id = 0;
+  gpu_req_scanout.resource_id = 1;
+  int r = gpu_transact(&gpu_req_scanout, sizeof(gpu_req_scanout), 0, 0);
+  int r2 = vgpu_rect_present(0, 0, GPU_SCREEN_W, GPU_SCREEN_H);
+  vgpu_so_row(why, vgpu_so.res_id, (uint32_t)(r | r2) ? 1u : 0u);
+  vgpu_so.pid = 0;
+  vgpu_so.fd = -1;
+  vgpu_so.res_id = 0;
+  gpu_isr_ack();
+  return (r == 0 && r2 == 0) ? 0 : -1;
+}
+
+int virtio_gpu_x64_scanout_flip(int pid, int fd, uint32_t window, const struct vgpu_scanout_req* rq,
+                                uint64_t* seqno, uint32_t* set_us, uint32_t* flush_us) {
+  if (gpu_mode != VGPU_MODE_VIRTIO || !virtio_gpu_x64_blob_negotiated) return -ENODEV;
+  if (!rq || !rq->res_id) return -EINVAL;
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_lock);
+  if (vgpu_so_active && (vgpu_so.pid != pid || vgpu_so.fd != fd)) {
+    spinlock_release_irqrestore(&gpu_lock, fl);
+    return -EBUSY;
+  }
+  if (window == 0 || window != vgpu_fs_window || rq->width != vgpu_fs_w ||
+      rq->height != vgpu_fs_h) {
+    vgpu_so_refusals++;
+    if (vgpu_so_refusals <= 8) vgpu_so_row("refused window", window, vgpu_fs_window);
+    vgpu_restore_desktop_locked("back (not granted)");
+    spinlock_release_irqrestore(&gpu_lock, fl);
+    return -EPERM;
+  }
+  uint64_t t0 = timer_get_us();
+  gpu_req_sblob.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT_BLOB;
+  gpu_req_sblob.hdr.flags = 0;
+  gpu_req_sblob.hdr.fence_id = 0;
+  gpu_req_sblob.hdr.ctx_id = 0;
+  gpu_req_sblob.hdr.padding = 0;
+  gpu_req_sblob.r.x = 0;
+  gpu_req_sblob.r.y = 0;
+  gpu_req_sblob.r.width = rq->width;
+  gpu_req_sblob.r.height = rq->height;
+  gpu_req_sblob.scanout_id = 0;
+  gpu_req_sblob.resource_id = rq->res_id;
+  gpu_req_sblob.width = rq->width;
+  gpu_req_sblob.height = rq->height;
+  gpu_req_sblob.format = rq->format;
+  gpu_req_sblob.padding = 0;
+  for (int i = 0; i < 4; i++) {
+    gpu_req_sblob.strides[i] = i == 0 ? rq->stride : 0;
+    gpu_req_sblob.offsets[i] = 0;
+  }
+  int r = gpu_transact(&gpu_req_sblob, sizeof(gpu_req_sblob), 0, 0);
+  uint64_t t1 = timer_get_us();
+  if (r != 0) {
+    uint32_t rt = gpu_resp.type;
+    vgpu_so_row("SET_SCANOUT_BLOB failed res/resp", rq->res_id, rt);
+    vgpu_restore_desktop_locked("back (device error)");
+    spinlock_release_irqrestore(&gpu_lock, fl);
+    return -EIO;
+  }
+  int first = !vgpu_so_active || vgpu_so.w != rq->width || vgpu_so.h != rq->height;
+  vgpu_so_active = 1;
+  vgpu_so.pid = pid;
+  vgpu_so.fd = fd;
+  vgpu_so.res_id = rq->res_id;
+  vgpu_so.window = window;
+  vgpu_so.w = rq->width;
+  vgpu_so.h = rq->height;
+  gpu_req_flush.hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
+  gpu_req_flush.hdr.flags = 0;
+  gpu_req_flush.hdr.fence_id = 0;
+  gpu_req_flush.hdr.ctx_id = 0;
+  gpu_req_flush.hdr.padding = 0;
+  gpu_req_flush.r.x = 0;
+  gpu_req_flush.r.y = 0;
+  gpu_req_flush.r.width = rq->width;
+  gpu_req_flush.r.height = rq->height;
+  gpu_req_flush.resource_id = rq->res_id;
+  gpu_req_flush.padding = 0;
+  int r2 = gpu_transact(&gpu_req_flush, sizeof(gpu_req_flush), 0, 0);
+  uint64_t t2 = timer_get_us();
+  uint64_t seq = ++vgpu_so_seq;
+  if (first) vgpu_so_row("taken res/window", rq->res_id, window);
+  gpu_isr_ack();
+  spinlock_release_irqrestore(&gpu_lock, fl);
+  if (seqno) *seqno = seq;
+  if (set_us) *set_us = (uint32_t)(t1 - t0);
+  if (flush_us) *flush_us = (uint32_t)(t2 - t1);
+  return r2 == 0 ? 0 : -EIO;
+}
+
+int virtio_gpu_x64_scanout_release(int pid, int fd, uint32_t res_id) {
+  if (gpu_mode != VGPU_MODE_VIRTIO) return 0;
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_lock);
+  int did = 0;
+  if (vgpu_so_active && vgpu_so.pid == pid && (fd < 0 || vgpu_so.fd == fd) &&
+      (res_id == 0 || vgpu_so.res_id == res_id)) {
+    vgpu_restore_desktop_locked(res_id ? "back (blob freed)" : "back (released)");
+    did = 1;
+  }
+  spinlock_release_irqrestore(&gpu_lock, fl);
+  return did;
+}
+
+/* The X server's report (SYS_FLUSH_FB_RECTS, one control rect).  1 when the
+ * batch was a control rect (consumed), 0 for ordinary damage. */
+static int vgpu_fsctl_flush(const struct virtio_gpu_xrect* rects, int count) {
+  uint32_t win = 0, w = 0, h = 0;
+  if (count != 1 || rects[0].x != VGPU_FSCTL_MAGIC) return 0;
+  if (!virtio_gpu_x64_fsctl_decode(rects[0].x, rects[0].y, rects[0].w, rects[0].h, &win, &w, &h))
+    return 1;
+  uint64_t fl = spinlock_acquire_irqsave(&gpu_lock);
+  if (win != vgpu_fs_window || w != vgpu_fs_w || h != vgpu_fs_h) {
+    vgpu_fs_window = win;
+    vgpu_fs_w = w;
+    vgpu_fs_h = h;
+    vgpu_so_row("X fullscreen window/size", win, (w << 16) | h);
+    if (vgpu_so_active && gpu_mode == VGPU_MODE_VIRTIO &&
+        (vgpu_so.window != win || vgpu_so.w != w || vgpu_so.h != h))
+      vgpu_restore_desktop_locked("back (X revoked)");
+  }
+  spinlock_release_irqrestore(&gpu_lock, fl);
+  return 1;
+}
+
+void virtio_gpu_x64_scanout_stats(uint64_t* flips, uint32_t* restores, uint32_t* refusals,
+                                  uint64_t* suppressed) {
+  if (flips) *flips = vgpu_so_seq;
+  if (restores) *restores = vgpu_so_restores;
+  if (refusals) *refusals = vgpu_so_refusals;
+  if (suppressed) *suppressed = vgpu_so_suppressed;
 }
 
 #endif /* __x86_64__ */

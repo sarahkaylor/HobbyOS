@@ -1,0 +1,152 @@
+=================== Wine run vkput1: vkcube.exe fs 1920x1080, Mesa with HB_SCANOUT=0 baked in (put_image baseline), sync present
+[VK] done rc=0
+[P5W] vkcube: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: vkcube each ran >= 60 s under Wine with two distinct, recognisable screendumps
+rc=0
+[X] [VK] win32: window 000000000003002A 1920x1080 client (fullscreen popup), created+shown in 234.9 ms
+[X] [VK] RESULT frames=2410 wall=65011.8 ms fps=37.07 | per-frame total median 24.87 p90 29.05 worst(after frame 0) 883.94 ms | swapchain 1920x1080 4 images FIFO | recreated=0 suboptimal=0
+[X] [VK] done rc=0
+[X] [HBP] pid=191 n=57 fps=25.8 path=putimage acq=13649/20108 sub=1494/9138 wait=5738/10504 flip=38762/879085 geom=1/2 set=0 flush=0 us scanout=0 putimage=57 refused=0 total=204
+[X] [HBP] pid=191 n=75 fps=37.4 path=putimage acq=15048/32206 sub=447/9163 wait=7917/12328 flip=26678/117206 geom=1/3 set=0 flush=0 us scanout=0 putimage=75 refused=0 total=668
+[X] [HBP] pid=191 n=76 fps=37.9 path=putimage acq=15931/95908 sub=297/8257 wait=8374/12158 flip=26359/105398 geom=1/5 set=0 flush=0 us scanout=0 putimage=76 refused=0 total=1123
+[X] [HBP] pid=191 n=80 fps=39.6 path=putimage acq=13895/17173 sub=395/8858 wait=7440/11992 flip=25194/119691 geom=1/2 set=0 flush=0 us scanout=0 putimage=80 refused=0 total=1550
+[X] [HBP] pid=191 n=77 fps=38.3 path=putimage acq=15744/95894 sub=286/8469 wait=7861/11941 flip=26053/108640 geom=1/7 set=0 flush=0 us scanout=0 putimage=77 refused=0 total=2007
+=================== Wine run d3dfs1: d3d12+d3d11 fs, scanout, sync present (venus-build, before async default)
+[D3D12] done rc=0
+[P5W] d3d12: PASS
+[P5W] d3d11: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: d3d12, d3d11 each ran >= 60 s under Wine with two distinct, recognisable screendumps
+rc=0
+[X] [D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[P7] scanout taken res/window 4112 10485819 seq=1
+[X] [D3D11] RESULT frames=4604 wall=65014.4 ms fps=70.82 | per-frame median 10.91 p90 20.17 worst(after frame 0) 1325.35 ms
+[P7] scanout back (blob freed) 4115 0 seq=4604
+[X] [D3D11] done rc=0
+[X] [D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[P7] scanout taken res/window 4126 10485819 seq=4605
+[P7] scanout back (blob freed) 4126 0 seq=4605
+[P7] scanout taken res/window 4129 10485819 seq=4606
+[X] [D3D12] RESULT frames=3559 wall=65013.0 ms fps=54.74 | per-frame median 18.98 p90 22.29 worst(after frame 0) 936.65 ms
+[P7] scanout back (blob freed) 4131 0 seq=8163
+[X] [D3D12] done rc=0
+[X] [HBP] pid=184 n=141 fps=70.4 path=scanout acq=1/7 sub=201/1702 wait=5348/14415 flip=7121/11294 geom=0/0 set=191 flush=6848 us scanout=141 putimage=0 refused=0 total=422
+[X] [HBP] pid=184 n=145 fps=72.5 path=scanout acq=0/1 sub=153/780 wait=5268/21122 flip=6680/10931 geom=0/0 set=138 flush=6470 us scanout=145 putimage=0 refused=0 total=1375
+[X] [HBP] pid=184 n=147 fps=73.1 path=scanout acq=0/2 sub=162/1485 wait=6073/111805 flip=6825/10199 geom=0/0 set=128 flush=6633 us scanout=147 putimage=0 refused=0 total=2283
+[X] [HBP] pid=184 n=152 fps=75.8 path=scanout acq=1/8 sub=145/526 wait=5684/105654 flip=6698/9964 geom=0/0 set=134 flush=6499 us scanout=152 putimage=0 refused=0 total=3177
+[X] [HBP] pid=184 n=147 fps=73.5 path=scanout acq=0/1 sub=158/515 wait=5433/14332 flip=6778/10172 geom=0/0 set=118 flush=6596 us scanout=147 putimage=0 refused=0 total=4007
+[X] [HBP] pid=195 n=92 fps=45.8 path=scanout acq=0/2 sub=150/264 wait=11928/19523 flip=7870/17557 geom=0/0 set=97 flush=7719 us scanout=92 putimage=0 refused=0 total=274
+[X] [HBP] pid=195 n=130 fps=64.9 path=scanout acq=0/2 sub=157/479 wait=6734/16130 flip=6886/11495 geom=0/0 set=100 flush=6715 us scanout=130 putimage=0 refused=0 total=900
+[X] [HBP] pid=195 n=115 fps=57.5 path=scanout acq=0/1 sub=153/457 wait=8822/30882 flip=6791/12873 geom=0/0 set=110 flush=6627 us scanout=115 putimage=0 refused=0 total=1550
+[X] [HBP] pid=195 n=102 fps=50.9 path=scanout acq=0/2 sub=160/480 wait=10777/15913 flip=6926/12339 geom=0/0 set=99 flush=6781 us scanout=102 putimage=0 refused=0 total=2153
+[X] [HBP] pid=195 n=107 fps=53.3 path=scanout acq=0/2 sub=164/491 wait=9651/17935 flip=7218/13975 geom=0/0 set=104 flush=7056 us scanout=107 putimage=0 refused=0 total=2793
+=================== Wine run d3dfs2: d3d12+d3d11+vkcube fs, scanout, ASYNC present (final default venus-p7) -- A of the A/B
+[P5W] d3d12: PASS
+[P5W] d3d11: PASS
+[P5W] vkcube: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: d3d12, d3d11, vkcube each ran >= 60 s under Wine with two distinct, recognisable screendumps
+rc=0
+[X] [VK] win32: window 000000000003002A 1920x1080 client (fullscreen popup), created+shown in 256.8 ms
+[P7] scanout taken res/window 4107 14680110 seq=1
+[X] [VK] RESULT frames=4997 wall=65014.9 ms fps=76.86 | per-frame total median 12.44 p90 19.96 worst(after frame 0) 846.93 ms | swapchain 1920x1080 4 images FIFO | recreated=0 suboptimal=0
+[P7] scanout back (blob freed) 4107 0 seq=4997
+[X] [VK] done rc=0
+[X] [D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[X] [D3D11] RESULT frames=6359 wall=65003.9 ms fps=97.82 | per-frame median 10.21 p90 11.98 worst(after frame 0) 1195.35 ms
+[P7] scanout back (blob freed) 4122 0 seq=11356
+[X] [D3D11] done rc=0
+[X] [D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[P7] scanout taken res/window 4134 14680123 seq=11357
+[P7] scanout back (blob freed) 4134 0 seq=11357
+[P7] scanout taken res/window 4137 14680123 seq=11358
+[X] [D3D12] RESULT frames=6529 wall=65006.5 ms fps=100.44 | per-frame median 9.35 p90 16.44 worst(after frame 0) 927.92 ms
+[P7] scanout back (blob freed) 4139 0 seq=17885
+[X] [D3D12] done rc=0
+[X] [HBP] pid=184 n=169 fps=84.5 path=scanout acq=1/21 sub=9319/89549 wait=8/92 flip=6736/11970 geom=0/0 set=155 flush=6474 us scanout=169 putimage=0 refused=0 total=535
+[X] [HBP] pid=184 n=110 fps=54.9 path=scanout acq=1/9 sub=15331/556623 wait=10/169 flip=6945/10136 geom=0/0 set=103 flush=6785 us scanout=110 putimage=0 refused=0 total=1420
+[X] [HBP] pid=184 n=159 fps=79.0 path=scanout acq=1/15 sub=9686/100976 wait=9/59 flip=7082/12301 geom=0/0 set=169 flush=6824 us scanout=159 putimage=0 refused=0 total=2345
+[X] [HBP] pid=184 n=144 fps=71.9 path=scanout acq=1/28 sub=11464/97232 wait=12/199 flip=7257/14043 geom=0/0 set=131 flush=7035 us scanout=144 putimage=0 refused=0 total=3332
+[X] [HBP] pid=184 n=141 fps=70.2 path=scanout acq=1/21 sub=11310/28685 wait=9/48 flip=7997/94642 geom=0/0 set=189 flush=7130 us scanout=141 putimage=0 refused=0 total=4142
+[X] [HBP] pid=189 n=170 fps=84.8 path=scanout acq=1/25 sub=8005/98634 wait=5/61 flip=8670/13275 geom=0/0 set=82 flush=8249 us scanout=170 putimage=0 refused=0 total=170
+[X] [HBP] pid=189 n=194 fps=96.7 path=scanout acq=1/15 sub=7090/93863 wait=6/39 flip=7540/14373 geom=0/0 set=160 flush=7212 us scanout=194 putimage=0 refused=0 total=1124
+[X] [HBP] pid=189 n=204 fps=101.6 path=scanout acq=1/56 sub=5880/11797 wait=7/72 flip=7339/27602 geom=0/0 set=155 flush=6951 us scanout=204 putimage=0 refused=0 total=2406
+[X] [HBP] pid=189 n=212 fps=105.9 path=scanout acq=1/35 sub=6336/97390 wait=6/65 flip=7144/9545 geom=0/0 set=142 flush=6891 us scanout=212 putimage=0 refused=0 total=3694
+[X] [HBP] pid=189 n=219 fps=109.4 path=scanout acq=1/23 sub=5915/8909 wait=5/41 flip=6954/8841 geom=0/0 set=92 flush=6771 us scanout=219 putimage=0 refused=0 total=4810
+[X] [HBP] pid=189 n=209 fps=104.5 path=scanout acq=1/47 sub=6384/98715 wait=6/23 flip=7248/27941 geom=0/0 set=135 flush=6901 us scanout=209 putimage=0 refused=0 total=6061
+[X] [HBP] pid=201 n=211 fps=105.2 path=scanout acq=1/2 sub=5686/9500 wait=7/41 flip=7050/8907 geom=0/0 set=133 flush=6819 us scanout=211 putimage=0 refused=0 total=961
+[X] [HBP] pid=201 n=219 fps=109.4 path=scanout acq=0/19 sub=5995/98755 wait=5/25 flip=6807/9373 geom=0/0 set=66 flush=6651 us scanout=219 putimage=0 refused=0 total=2227
+[X] [HBP] pid=201 n=219 fps=109.4 path=scanout acq=0/1 sub=6018/97473 wait=5/19 flip=6764/8359 geom=0/0 set=60 flush=6639 us scanout=219 putimage=0 refused=0 total=3336
+[X] [HBP] pid=201 n=204 fps=101.7 path=scanout acq=1/2 sub=6401/119449 wait=7/54 flip=7163/9750 geom=0/0 set=144 flush=6892 us scanout=204 putimage=0 refused=0 total=4595
+[X] [HBP] pid=201 n=218 fps=108.8 path=scanout acq=0/16 sub=5469/9173 wait=5/27 flip=6801/9251 geom=0/0 set=76 flush=6649 us scanout=218 putimage=0 refused=0 total=5882
+=================== Wine run d3dfs3: same, SYNC present (venus-p7sync: HOBBYOS_VN_ASYNC_PRESENT=0 baked) -- B of the A/B, run right after d3dfs2
+[P5W] d3d12: PASS
+[P5W] d3d11: PASS
+[P5W] vkcube: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: d3d12, d3d11, vkcube each ran >= 60 s under Wine with two distinct, recognisable screendumps
+rc=0
+[X] [VK] win32: window 000000000003002A 1920x1080 client (fullscreen popup), created+shown in 236.8 ms
+[P7] scanout taken res/window 4107 10485806 seq=1
+[X] [VK] RESULT frames=4737 wall=65002.5 ms fps=72.87 | per-frame total median 11.55 p90 15.84 worst(after frame 0) 1113.23 ms | swapchain 1920x1080 4 images FIFO | recreated=0 suboptimal=0
+[P7] scanout back (blob freed) 4107 0 seq=4737
+[X] [VK] done rc=0
+[X] [D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[P7] scanout taken res/window 4120 10485819 seq=4738
+[X] [D3D11] RESULT frames=4537 wall=65002.4 ms fps=69.80 | per-frame median 11.08 p90 20.43 worst(after frame 0) 1130.81 ms
+[P7] scanout back (blob freed) 4120 0 seq=9274
+[X] [D3D11] done rc=0
+[X] [D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[P7] scanout taken res/window 4134 10485819 seq=9275
+[P7] scanout back (blob freed) 4134 0 seq=9275
+[P7] scanout taken res/window 4137 10485819 seq=9276
+[X] [D3D12] RESULT frames=4217 wall=65015.0 ms fps=64.86 | per-frame median 10.01 p90 20.21 worst(after frame 0) 3149.37 ms
+[X] [D3D12] done rc=0
+[X] [HBP] pid=186 n=188 fps=93.5 path=scanout acq=1/13 sub=91/471 wait=3001/13912 flip=6074/10766 geom=0/0 set=83 flush=5928 us scanout=188 putimage=0 refused=0 total=505
+[X] [HBP] pid=186 n=99 fps=49.0 path=scanout acq=1/11 sub=120/1378 wait=3032/12785 flip=6625/9725 geom=0/0 set=123 flush=6416 us scanout=99 putimage=0 refused=0 total=1387
+[X] [HBP] pid=186 n=163 fps=81.5 path=scanout acq=1/11 sub=111/734 wait=3160/14722 flip=6868/11832 geom=0/0 set=118 flush=6661 us scanout=163 putimage=0 refused=0 total=2322
+[X] [HBP] pid=186 n=156 fps=77.8 path=scanout acq=1/22 sub=132/1379 wait=2979/13436 flip=7164/13638 geom=0/0 set=113 flush=6955 us scanout=156 putimage=0 refused=0 total=3206
+[X] [HBP] pid=186 n=127 fps=63.4 path=scanout acq=1/11 sub=3851/475706 wait=3523/88330 flip=6652/13443 geom=0/0 set=77 flush=6486 us scanout=127 putimage=0 refused=0 total=4002
+[X] [HBP] pid=190 n=146 fps=72.7 path=scanout acq=0/2 sub=183/3679 wait=4831/15285 flip=7207/13823 geom=0/0 set=146 flush=6818 us scanout=146 putimage=0 refused=0 total=146
+[X] [HBP] pid=190 n=143 fps=71.5 path=scanout acq=0/8 sub=139/268 wait=6069/111092 flip=7065/10479 geom=0/0 set=75 flush=6929 us scanout=143 putimage=0 refused=0 total=887
+[X] [HBP] pid=190 n=143 fps=71.3 path=scanout acq=4/335 sub=158/714 wait=5045/17059 flip=7340/13087 geom=0/0 set=133 flush=7132 us scanout=143 putimage=0 refused=0 total=1741
+[X] [HBP] pid=190 n=137 fps=68.4 path=scanout acq=1/31 sub=146/610 wait=5526/21859 flip=6961/10476 geom=0/0 set=81 flush=6813 us scanout=137 putimage=0 refused=0 total=2598
+[X] [HBP] pid=190 n=151 fps=75.5 path=scanout acq=0/2 sub=143/302 wait=5364/14996 flip=7119/97086 geom=0/0 set=81 flush=6381 us scanout=151 putimage=0 refused=0 total=3504
+[X] [HBP] pid=190 n=139 fps=69.2 path=scanout acq=0/2 sub=136/290 wait=5729/14978 flip=7267/11032 geom=0/0 set=104 flush=7102 us scanout=139 putimage=0 refused=0 total=4457
+[X] [HBP] pid=201 n=138 fps=68.8 path=scanout acq=0/1 sub=139/585 wait=5209/15597 flip=7717/10991 geom=0/0 set=91 flush=7555 us scanout=138 putimage=0 refused=0 total=797
+[X] [HBP] pid=201 n=39 fps=19.4 path=scanout acq=0/1 sub=199/2344 wait=6435/14300 flip=6532/9172 geom=0/0 set=111 flush=6349 us scanout=39 putimage=0 refused=0 total=1610
+[X] [HBP] pid=201 n=151 fps=75.5 path=scanout acq=0/1 sub=148/1180 wait=5000/15028 flip=6678/10594 geom=0/0 set=90 flush=6510 us scanout=151 putimage=0 refused=0 total=2394
+[X] [HBP] pid=201 n=156 fps=77.9 path=scanout acq=0/2 sub=139/840 wait=5589/291407 flip=5706/9377 geom=0/0 set=56 flush=5595 us scanout=156 putimage=0 refused=0 total=3353
+=================== Wine run p6win2: P6 rows windowed 640x480, final default (async on, present_wait on, scanout available)
+[P5W] vkcube: PASS
+[P5W] d3d11: PASS
+[P5W] d3d12: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps
+rc=0
+[X] [VK] win32: window 0000000000030028 640x480 client, created+shown in 247.7 ms
+[X] [VK] RESULT frames=11977 wall=65001.2 ms fps=184.26 | per-frame total median 4.50 p90 9.75 worst(after frame 0) 792.51 ms | swapchain 640x480 4 images FIFO | recreated=0 suboptimal=0
+[X] [VK] done rc=0
+[X] [D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[X] [D3D11] RESULT frames=7100 wall=65465.3 ms fps=108.45 | per-frame median 7.68 p90 14.93 worst(after frame 0) 1286.22 ms
+[X] [D3D11] done rc=0
+[X] [D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[X] [D3D12] RESULT frames=13047 wall=65001.9 ms fps=200.72 | per-frame median 4.47 p90 7.96 worst(after frame 0) 888.06 ms
+[X] [D3D12] done rc=0
+[X] [HBP] pid=188 n=386 fps=192.9 path=putimage acq=1285/23833 sub=3962/83450 wait=78/4144 flip=5141/90807 geom=1/25 set=0 flush=0 us scanout=0 putimage=386 refused=386 total=1136
+[X] [HBP] pid=188 n=392 fps=195.9 path=putimage acq=1274/15964 sub=3880/16222 wait=50/4198 flip=5064/80932 geom=1/2 set=0 flush=0 us scanout=0 putimage=392 refused=392 total=3346
+[X] [HBP] pid=188 n=370 fps=184.7 path=putimage acq=1117/21857 sub=3894/22065 wait=41/3800 flip=5370/84587 geom=1/2 set=0 flush=0 us scanout=0 putimage=370 refused=370 total=5603
+[X] [HBP] pid=188 n=377 fps=188.4 path=putimage acq=1123/7448 sub=3923/93472 wait=122/7141 flip=5255/97675 geom=1/15 set=0 flush=0 us scanout=0 putimage=377 refused=377 total=7858
+[X] [HBP] pid=188 n=383 fps=190.9 path=putimage acq=1312/11548 sub=3895/11821 wait=38/3550 flip=5198/89979 geom=1/2 set=0 flush=0 us scanout=0 putimage=383 refused=383 total=9997
+[X] [HBP] pid=193 n=214 fps=106.4 path=putimage acq=1/3 sub=6771/18570 wait=36/6443 flip=9042/107465 geom=1/7 set=0 flush=0 us scanout=0 putimage=214 refused=214 total=214
+[X] [HBP] pid=193 n=182 fps=90.9 path=putimage acq=3/476 sub=7352/114810 wait=6/40 flip=10949/125843 geom=1/9 set=0 flush=0 us scanout=0 putimage=182 refused=182 total=1288
+[X] [HBP] pid=193 n=214 fps=106.9 path=putimage acq=1/41 sub=6472/111787 wait=40/6681 flip=9234/120482 geom=1/23 set=0 flush=0 us scanout=0 putimage=214 refused=214 total=2476
+[X] [HBP] pid=193 n=252 fps=125.4 path=putimage acq=1/28 sub=5675/13916 wait=80/6490 flip=7874/98277 geom=0/8 set=0 flush=0 us scanout=0 putimage=252 refused=252 total=3820
+[X] [HBP] pid=193 n=252 fps=126.0 path=putimage acq=1/70 sub=6362/103282 wait=39/8515 flip=7859/110906 geom=0/1 set=0 flush=0 us scanout=0 putimage=252 refused=252 total=5332
+[X] [HBP] pid=193 n=250 fps=124.2 path=putimage acq=0/7 sub=6042/96857 wait=6/77 flip=7976/121816 geom=1/30 set=0 flush=0 us scanout=0 putimage=250 refused=250 total=6847
+[X] [HBP] pid=205 n=416 fps=207.9 path=putimage acq=0/15 sub=3220/8114 wait=63/3582 flip=3519/91519 geom=0/2 set=0 flush=0 us scanout=0 putimage=416 refused=416 total=2442
+[X] [HBP] pid=205 n=421 fps=210.0 path=putimage acq=0/14 sub=3124/10649 wait=62/3484 flip=3281/96075 geom=8/3410 set=0 flush=0 us scanout=0 putimage=421 refused=421 total=4960
+[X] [HBP] pid=205 n=425 fps=212.4 path=putimage acq=0/5 sub=3465/86856 wait=69/3487 flip=3291/90319 geom=1/68 set=0 flush=0 us scanout=0 putimage=425 refused=425 total=7249
+[X] [HBP] pid=205 n=419 fps=209.2 path=putimage acq=0/17 sub=3292/97616 wait=63/3409 flip=3545/8663 geom=0/2 set=0 flush=0 us scanout=0 putimage=419 refused=419 total=9760
+[X] [HBP] pid=205 n=414 fps=206.8 path=putimage acq=0/8 sub=3358/96816 wait=49/3541 flip=3408/9667 geom=0/1 set=0 flush=0 us scanout=0 putimage=414 refused=414 total=12228

@@ -503,14 +503,14 @@ memory region is gone, so the next `MAP_BLOB` can reuse the range safely.
   oldest to retire.  A context destroyed with fences in flight retires them as
   failed (`done` jumps to the last issued seqno) after `CTX_DESTROY`.
 
-New error rows: `-ENOSYS` (`SCANOUT_BLOB`, reserved), `-ENOMEM` (the
+New error rows: `-ENOSYS` (`SCANOUT_BLOB`, reserved until §10.7), `-ENOMEM` (the
 host-visible window or the caller's address space has no room),
 `-EOPNOTSUPP` (`MAP_BLOB` of a blob without `MAPPABLE`, or a device without a
 host-visible window).
 
 ### 10.6 Not in v2
 
-`SET_SCANOUT_BLOB` (P7, AD-6, F5), guest-memory blobs, dma-buf/sync-file
+`SET_SCANOUT_BLOB` (P7, AD-6, F5: added by §10.7), guest-memory blobs, dma-buf/sync-file
 export and import, resource UUIDs, cross-device sharing, more than one context
 per fd, and kernel copies through `vm_user_read`/`vm_kwrite` (ioctl structs,
 cross-process writes) of a user range that lies in a mapped blob: those go
@@ -518,3 +518,79 @@ through the direct map, which does not cover the window, so they answer
 `-EFAULT` instead of faulting the kernel.  `read()`/`pread()` into a mapped
 blob are fine: since cp-sync, `file_read_user()` materializes the destination
 and `file_read()` writes it through the caller's own mapping.
+
+### 10.7 P7 amendment: `GPU_IOC_SCANOUT_BLOB` (AD-6, F5; lane C6-p7)
+
+Status: **F3 amendment, lane C6-p7 (`docs/cyberpunk.md` §6 P7, §7.2f;
+`docs/cp-p7.md`).**  Additive: request 20 was reserved (`-ENOSYS`) in v2, so
+`GPU_PARAM_ABI_VERSION` stays **2**; a client tests
+`GPU_FEAT_SCANOUT_BLOB` (bit 5 of `GPU_PARAM_FEATURES`, set whenever
+`RESOURCE_BLOB` was negotiated) instead.  Nothing else in §10 changes.
+
+```c
+#define GPU_FEAT_SCANOUT_BLOB  (1u << 5)
+#define GPU_SCANOUT_FMT_B8G8R8A8 1   /* virtio-gpu format numbers */
+#define GPU_SCANOUT_FMT_B8G8R8X8 2
+#define GPU_SCANOUT_FMT_R8G8B8A8 67
+#define GPU_SCANOUT_FMT_R8G8B8X8 134
+struct gpu_scanout_blob {
+  uint32_t res_id;   /* a blob of this fd's context; 0 = hand the scanout back */
+  uint32_t flags;    /* 0 */
+  uint32_t width, height;    /* the image = the scanout mode, 16..4096 */
+  uint32_t format;   /* GPU_SCANOUT_FMT_* */
+  uint32_t stride;   /* bytes per row, >= width*4, a multiple of 4; image at offset 0 */
+  uint32_t window;   /* the X window the image is presented to (nonzero) */
+  uint32_t padding;  /* 0 */
+  uint64_t seqno;    /* out: this flip's number (device-wide, monotonic) */
+  uint32_t set_us;   /* out: SET_SCANOUT_BLOB round trip, us */
+  uint32_t flush_us; /* out: RESOURCE_FLUSH round trip, us */
+  uint64_t reserved[2];      /* 0 */
+};                   /* 64 bytes */
+#define GPU_IOC_SCANOUT_BLOB GPU_IOWR(GPU_IOC_MAGIC, 20, struct gpu_scanout_blob)
+```
+
+| nr | request | struct | emits (virtio-gpu) |
+|---|---|---|---|
+| 20 | `GPU_IOC_SCANOUT_BLOB` | `gpu_scanout_blob` | `SET_SCANOUT_BLOB` (0x010D, scanout 0, the whole image) then `RESOURCE_FLUSH` (0x0104) of the blob; on hand-back `SET_SCANOUT` (0x0103) of resource 1 + `TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH` of the whole desktop |
+
+**Synchronous.**  Both commands are control-queue transactions under the
+GPU lock, like every other one; when the call returns the host display has
+taken the image (on `egl-headless`, QEMU has read it back into its console
+surface).  The flip is the present's completion: `VK_KHR_present_wait` ids
+complete when it returns.
+
+**Who may flip (F5).**  The kernel grants a flip only for the X window the X
+server reports as covering its whole screen unobscured, at exactly that
+screen size.  The report travels on the X server's existing flush syscall
+(`SYS_FLUSH_FB_RECTS`) as **one** control rect `{x = 0x48425037 "HBP7",
+y = 1, w = window (0 = none), h = screen_w << 16 | screen_h}`, accepted by
+`virtio_gpu_flush_args_ok()` only alone and only in that form (it was
+`-EINVAL` before).  XHOBBY reports the one window whose clipList is the whole
+screen (clip lists partition the screen, so there is at most one), each time
+that changes.
+
+**Arbitration.**  One owner at a time, `(process group, fd)`.  While a blob
+owns scanout 0 the desktop's flushes are dropped (the X server keeps drawing
+into the framebuffer).  The screen goes back to resource 1 -- set, full
+transfer, full flush -- when the owner calls with `res_id 0`, when it flips
+without a grant (the X report changed: focus loss, a window on top, unmap, a
+RandR mode change), when the X report changes under it, when the owning fd
+is closed (`gpu_abi_release_fd`, so also on exit or a kill), and before the
+blob on the scanout is unreferenced.
+
+| errno | meaning | WSI action |
+|---|---|---|
+| 0 | the image is on the glass | skip `xcb_put_image` |
+| `-EPERM` | not granted now | present through X this frame, try again next frame |
+| `-EBUSY` | another fd owns the scanout | as `-EPERM` |
+| `-EINVAL` | bad arguments, not this fd's blob, image larger than the blob | stop trying |
+| `-ENODEV` | no blob scanout on this device | stop trying |
+| `-EIO` | the device refused (QEMU: the blob has no dma-buf, bad format/stride) | stop trying |
+
+**Host requirement.**  QEMU (`virgl_cmd_set_scanout_blob`, 10.2.1) scans out
+only a blob whose resource has a dma-buf (`virgl_renderer_resource_get_info`
+fd); Venus' host-visible device memory is exported as a dma-buf (it is how
+QEMU maps it), so the software WSI's linear blit target qualifies.  QEMU
+ignores `offsets[0]` (`qemu_dmabuf_new(..., &offset = 0, ...)`), hence the
+"image at offset 0" rule.
+

@@ -16,6 +16,9 @@
  * i.e. every present is an xcb_put_image of the swapchain image.
  *
  *   vkcubex [seconds] [W] [H] [present_mode]   default: 65 640 480 fifo
+ *           W = fs: fullscreen (C6-p7, Gate P7): a window covering the whole
+ *           screen, unobscured -- X: override-redirect at 0,0, root size;
+ *           Win32: WS_POPUP | WS_EX_TOPMOST at 0,0, SM_CXSCREEN x SM_CYSCREEN
  *   vkcube.exe --idle SECS | --winprobe        Wine session warm-up (w32_warm)
  *           present_mode: fifo | mailbox | immediate (falls back to fifo)
  *
@@ -139,6 +142,7 @@ static void prefault(const char *when) { vk_row("prefault (%s): n/a for a PE ima
 
 #ifdef _WIN32
 /* ---- Win32 window ------------------------------------------------------------ */
+static int g_fs; /* W = fs: fullscreen */
 static HWND hwnd;
 static HINSTANCE hinst;
 static volatile int w32_quit, w32_resized;
@@ -157,22 +161,32 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   }
 }
 
-static void plat_open(uint32_t W, uint32_t H) {
+static void plat_open(uint32_t *pW, uint32_t *pH) {
+  uint32_t W = *pW, H = *pH;
   hinst = GetModuleHandleA(NULL);
   WNDCLASSA wc = {.style = CS_HREDRAW | CS_VREDRAW, .lpfnWndProc = wndproc, .hInstance = hinst,
                   .hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW), .lpszClassName = "vkcube"};
   if (!RegisterClassA(&wc)) fail("RegisterClass");
   RECT r = {0, 0, (LONG)W, (LONG)H};
   AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-  w32_w = W; w32_h = H;
   double t0 = vk_now_ms();
-  hwnd = CreateWindowExA(0, "vkcube", "vkcube.exe (Wine, winevulkan, lavapipe)", WS_OVERLAPPEDWINDOW,
-                         40, 40, r.right - r.left, r.bottom - r.top, NULL, NULL, hinst, NULL);
+  if (g_fs) {
+    W = (uint32_t)GetSystemMetrics(SM_CXSCREEN);
+    H = (uint32_t)GetSystemMetrics(SM_CYSCREEN);
+    *pW = W; *pH = H;
+    hwnd = CreateWindowExA(WS_EX_TOPMOST, "vkcube", "vkcube.exe fullscreen", WS_POPUP, 0, 0, (int)W,
+                           (int)H, NULL, NULL, hinst, NULL);
+  } else {
+    hwnd = CreateWindowExA(0, "vkcube", "vkcube.exe (Wine, winevulkan, lavapipe)", WS_OVERLAPPEDWINDOW,
+                           40, 40, r.right - r.left, r.bottom - r.top, NULL, NULL, hinst, NULL);
+  }
+  w32_w = W; w32_h = H;
   if (!hwnd) fail("CreateWindowEx");
   ShowWindow(hwnd, SW_SHOWNORMAL);
   UpdateWindow(hwnd);
   w32_resized = 0;
-  vk_row("win32: window %p %ux%u client, created+shown in %.1f ms", (void *)hwnd, W, H, vk_now_ms() - t0);
+  vk_row("win32: window %p %ux%u client%s, created+shown in %.1f ms", (void *)hwnd, W, H,
+         g_fs ? " (fullscreen popup)" : "", vk_now_ms() - t0);
 }
 
 static int plat_pump(uint32_t *w, uint32_t *h, int *resized) {
@@ -196,6 +210,7 @@ static void plat_surface(void) {
 static void plat_close(void) { DestroyWindow(hwnd); }
 #else
 /* ---- X ------------------------------------------------------------------------ */
+static int g_fs; /* W = fs: fullscreen */
 static xcb_connection_t *xc;
 static xcb_window_t xwin;
 static xcb_atom_t wm_delete;
@@ -208,7 +223,8 @@ static xcb_atom_t atom(const char *name) {
   return a;
 }
 
-static void plat_open(uint32_t W, uint32_t H) {
+static void plat_open(uint32_t *pW, uint32_t *pH) {
+  uint32_t W = *pW, H = *pH;
   int scr_i = 0;
   double t0 = vk_now_ms();
   xc = xcb_connect(NULL, &scr_i);
@@ -229,11 +245,24 @@ static void plat_open(uint32_t W, uint32_t H) {
     free(q);
   }
   xwin = xcb_generate_id(xc);
-  uint32_t vals[2] = {scr->black_pixel,
+  if (g_fs) {
+    W = scr->width_in_pixels;
+    H = scr->height_in_pixels;
+    *pW = W; *pH = H;
+  }
+  /* value order follows the CW bit order: BACK_PIXEL, OVERRIDE_REDIRECT, EVENT_MASK */
+  uint32_t vals[3] = {scr->black_pixel, 1,
                       XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_KEY_PRESS};
-  xcb_create_window(xc, XCB_COPY_FROM_PARENT, xwin, scr->root, 40, 40, (uint16_t)W, (uint16_t)H, 0,
-                    XCB_WINDOW_CLASS_INPUT_OUTPUT, scr->root_visual,
-                    XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, vals);
+  if (g_fs)
+    xcb_create_window(xc, XCB_COPY_FROM_PARENT, xwin, scr->root, 0, 0, (uint16_t)W, (uint16_t)H, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, scr->root_visual,
+                      XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK, vals);
+  else {
+    vals[1] = vals[2];
+    xcb_create_window(xc, XCB_COPY_FROM_PARENT, xwin, scr->root, 40, 40, (uint16_t)W, (uint16_t)H, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, scr->root_visual,
+                      XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, vals);
+  }
   const char *title = "vkcube (lavapipe, X11 WSI)";
   xcb_change_property(xc, XCB_PROP_MODE_REPLACE, xwin, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
                       (uint32_t)strlen(title), title);
@@ -242,7 +271,7 @@ static void plat_open(uint32_t W, uint32_t H) {
   xcb_change_property(xc, XCB_PROP_MODE_REPLACE, xwin, protos, XCB_ATOM_ATOM, 32, 1, &wm_delete);
   xcb_map_window(xc, xwin);
   xcb_flush(xc);
-  vk_row("x11: window 0x%x %ux%u mapped", xwin, W, H);
+  vk_row("x11: window 0x%x %ux%u mapped%s", xwin, W, H, g_fs ? " (fullscreen, override-redirect)" : "");
 }
 
 /* returns 0 normally, 1 on close request; updates the size on ConfigureNotify */
@@ -620,6 +649,7 @@ int main(int argc, char **argv) {
   if (argc > 1 && (!strcmp(argv[1], "--idle") || !strcmp(argv[1], "--winprobe"))) return w32_warm(argc, argv);
 #endif
   int secs = argc > 1 ? atoi(argv[1]) : 65;
+  g_fs = argc > 2 && !strcmp(argv[2], "fs");
   uint32_t W = argc > 2 ? (uint32_t)atoi(argv[2]) : 640;
   uint32_t H = argc > 3 ? (uint32_t)atoi(argv[3]) : 480;
   const char *pms = argc > 4 ? argv[4] : "fifo";
@@ -632,7 +662,7 @@ int main(int argc, char **argv) {
   vk_row("vkcubex start (C5-vk2, " SURFACE_EXT "): %d s, %ux%u, present mode %s, pid %d", secs, W, H, pms, (int)getpid());
   vk_report_env();
   prefault("startup");
-  plat_open(W, H);
+  plat_open(&W, &H);
   if (vk_load_loader() != 0) { vk_row("done rc=1"); return 1; }
   init_vulkan();
   /* lavapipe's 60 MiB is never a writev() source; touching it took 13 s in

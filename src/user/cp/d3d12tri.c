@@ -32,6 +32,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define NBUF 2
 
@@ -129,6 +130,12 @@ static void barrier(ID3D12GraphicsCommandList *cl, ID3D12Resource *r, D3D12_RESO
 int main(int argc, char **argv) {
   int secs = argc > 1 ? atoi(argv[1]) : 65;
   UINT W = argc > 2 ? (UINT)atoi(argv[2]) : 640, H = argc > 3 ? (UINT)atoi(argv[3]) : 480;
+  /* W = fs (C6-p7, Gate P7): a borderless WS_POPUP covering the whole screen */
+  const int fs = argc > 2 && !strcmp(argv[2], "fs");
+  if (fs) {
+    W = (UINT)GetSystemMetrics(SM_CXSCREEN);
+    H = (UINT)GetSystemMetrics(SM_CYSCREEN);
+  }
   if (secs < 1) secs = 1;
   row("d3d12tri start (C5-vk2): %d s, %ux%u, pid %lu", secs, W, H, (unsigned long)GetCurrentProcessId());
   const char *ov = getenv("WINEDLLOVERRIDES");
@@ -152,8 +159,10 @@ int main(int argc, char **argv) {
   RegisterClassA(&wc);
   RECT r = {0, 0, (LONG)W, (LONG)H};
   AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-  HWND hwnd = CreateWindowExA(0, "d3d12tri", "d3d12tri.exe (vkd3d-proton 3.1, lavapipe)", WS_OVERLAPPEDWINDOW,
-                              720, 560, r.right - r.left, r.bottom - r.top, NULL, NULL, hi, NULL);
+  HWND hwnd = fs ? CreateWindowExA(WS_EX_TOPMOST, "d3d12tri", "d3d12tri.exe fullscreen", WS_POPUP, 0, 0, (int)W,
+                                   (int)H, NULL, NULL, hi, NULL)
+                 : CreateWindowExA(0, "d3d12tri", "d3d12tri.exe (vkd3d-proton 3.1, lavapipe)", WS_OVERLAPPEDWINDOW,
+                                   720, 560, r.right - r.left, r.bottom - r.top, NULL, NULL, hi, NULL);
   if (!hwnd) { row("FAIL CreateWindowEx"); row("done rc=1"); return 1; }
   ShowWindow(hwnd, SW_SHOWNORMAL);
   UpdateWindow(hwnd);

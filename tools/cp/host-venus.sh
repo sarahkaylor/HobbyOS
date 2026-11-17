@@ -36,7 +36,8 @@
 #      CPU (host), RENDER (/dev/dri/renderD129), VKDEV (1002:7550), SHIM (1),
 #      VENUS_BUILD (~/cp/venus-build: shim .so lives in $VENUS_BUILD/shim),
 #      OVMF (~/.local/share/OVMF/OVMF_CODE_4M.fd), QEMU (qemu-system-x86_64),
-#      VENUS_TRACE (comma list of QEMU trace patterns, e.g. virtio_gpu_cmd_*).
+#      VENUS_TRACE (comma list of QEMU trace patterns, e.g. virtio_gpu_cmd_*),
+#      VENUS_VNC (1: -vnc unix:WORK/vnc-sock, for tools/cp/venus/vncshot.py).
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
@@ -111,6 +112,14 @@ argv() {
         -qmp "unix:$work/qmp-sock,server,nowait"
         -d guest_errors -D "$work/qemu-debug.log"
     )
+    # P7 (docs/cp-p7.md §4): VENUS_VNC=1 adds a VNC listener on a unix socket
+    # in WORK.  egl-headless reads every flushed GL scanout back into the
+    # console surface, so tools/cp/venus/vncshot.py sees what is on the glass
+    # (QMP screendump cannot: "no surface" for a GL scanout).  Never a TCP port.
+    if [ "${VENUS_VNC:-0}" = 1 ]; then
+        rm -f "$work/vnc-sock"
+        a+=(-vnc "unix:$work/vnc-sock")
+    fi
     if [ -n "${VENUS_TRACE:-}" ]; then
         local t IFS=,
         for t in $VENUS_TRACE; do a+=(-trace "enable=$t"); done

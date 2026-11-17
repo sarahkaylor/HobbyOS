@@ -1,0 +1,122 @@
+=================== full batch on cp-p7 (strix, ~/cp/p7work/btree = this lane at cbdbfedc; kernel + X server identical to HEAD; script = ~/cp/integ-gates10.sh with the tree path, cp-p7 export names, the P6 Venus row on this lane's Mesa (VENUS_WORK=~/cp/p7work/venus-p7 VENUS_VNC=1) and the P8 rows removed -- the game boots are game-venus*.txt)
+host load average during the batch: 15-31 (four to six guests on strix: other lanes' boots)
+tree cp-p7 cbdbfedc (kernel/X as 6705c360) + tools/cp/venus F5 probe; Mesa ~/cp/p7work/venus-p7
+tree cp-p7 cbdbfedc (kernel/X as 6705c360) + tools/cp/venus F5 probe; Mesa ~/cp/p7work/venus-p7
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pemap rc=1 t3_linux_probe: FAIL — pemap never printed '[LP] done rc=0' (tier rc=1)
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/p7work/btree)
+unit rc=1 Tests failed! Tests run:    462 Tests failed: 3  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 364 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=1 pfx_gate: FAIL (1)
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=0 == removed /srv/nfs/cp-ext2w-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+exitgroup#2 rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+exitgroup#3 rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+gate_p2 rc=0 G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=444; [P2] ps-extra count=0)
+gate_p4 rc=0 [P4G] qemu: qemu-system-x86_64 -M q35,vmport=on -enable-kvm -cpu host -smp 8 -m 12288M -drive if=pflash,format=raw,readonly=on,file=/home/sarah/cp/p7work/btree/obj/p4/integ10/ovmf.fd -display none -serial file:/home/sarah/cp/p7work/btree/obj/p4/integ10/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/p7work/btree/obj/p4/integ10/disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-gpu-pci -vga none -action shutdown=poweroff -qmp unix:/home/sarah/cp/p7work/btree/obj/p4/integ10/qmp.sock,server,nowait [P4G] q
+gate_p5 rc=1 [P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics) [P5W] slot 2 acquired 11:26:38; boot: -smp 8 -m 12288M -cpu host (KVM) [P5W] qemu pid 2378952 [P5W] +0 s: (no [P5] row yet) [P5W] screendump vkcube-t20s.ppm at +102 s; QEMU guests on the host now (incl. this one): 5 [P5W] screendump vkcube-t50s.ppm at +132 s; QEMU guests on the host now (incl. this one): 5 [P5W] screendump d3d11-t20s.ppm at +173 s; QEMU guests on the host now (incl. this one): 5 [P5W] screendump d3d11-t50s.ppm at +202 s; QEMU guests on the host now (incl. this one): 5 [P5W] screendump d3d12-t20s.ppm at +246 s; QEMU guests on the host now (incl. this one): 5 [P5W] screendump fs-M3-1280x720.ppm at +30
+thrstorm rc=0 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=189 ms=60621) [TS] PASS T3 stop (bad=0 first=0) 
+k5probes rc=0 [P8ENV] E1 execve env: 40/40 entries intact -> PASS [P8ENV] E2 malformed entries: 0 -> PASS [P8ENV] E3 spawn_ex env: 40/40 entries intact -> PASS [P8ENV] E4 malformed entries: 0 -> PASS [K5P] E5 spawn_ex env > HO_ENV_LEN: rc=-1 errno=7 -> PASS [P8SCM] S1 recvmsg ret=4 errno=0 -> PASS [P8SCM] S2 MSG_CTRUNC=1 fd_delivered=-1 -> PASS [P8SCM] S3 second recvmsg ret=-1 errno=11 -> PASS PASS  E5 spawn_ex env > HO_ENV_LEN 
+gate_p6_venus rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=245564 saturated=62188 bbox=(44, 70, 682, 548) hash=d6905b87e4892122 [P5W] vkcube vkcube-t50s.ppm: clear=239272 saturated=68512 bbox=(44, 70, 682, 548) hash=dcb80e6a52e2264e [P5W] vkcube: PASS [P5W] d3d11 d3d11-t20s.ppm: clear=237256 saturated=48252 bbox=(724, 70, 1362, 548) hash=e90426f57149625c [P5W] d3d11 d3d11-t50s.ppm: clear=237280 saturated=48264 bbox=(724
+ALLDONE
+
+=================== reruns of the rows that differ from integ7, lane kernel (~/cp/lanes/p7)
+rerun in ~/cp/lanes/p7 (same kernel/X as the batch tree) 2026-11-17T11:20:30-06:00 load: 15.30 17.41 16.41
+pemap rc=0 [LP] done rc=0  load: 19.71 18.28 16.72
+pemap rc=0 [LP] done rc=0  load: 20.05 18.52 16.85
+exitgroup rc=1 [LP] done rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)  load: 15.72 17.51 16.66
+exitgroup rc=1 [LP] done rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)  load: 14.92 16.90 16.52
+pfx_gate rc=0 pfx_gate: PASS load: 19.93 17.33 16.77
+unit rc=1 Tests failed! Tests run:    462 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  [LOCKHEALTH-IRQOFF] cpu=0 max_us=6733 total_us=1496400 worst_lock=vm_lock pc=0x701302C4 load: 20.49 17.90 17.00
+DONE
+
+=================== the same reruns on the BASE kernel (basetree = btree with the six GPU kernel files from 058fd3d5), right after
+BASE kernel (058fd3d5 GPU files) rerun 2026-11-17T11:32:50-06:00 load: 28.36 20.02 17.74
+pemap rc=0 [LP] done rc=0  load: 31.27 23.30 19.20
+pemap rc=0 [LP] done rc=0  load: 27.87 23.13 19.26
+exitgroup rc=1 [LP] done rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)  load: 22.56 22.52 19.35
+exitgroup rc=1 [LP] done rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)  load: 15.51 20.52 18.91
+pfx_gate rc=0 pfx_gate: PASS load: 15.90 18.12 18.31
+unit rc=1 Tests failed! Tests run:    461 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  [LOCKHEALTH-IRQOFF] cpu=0 max_us=9585 total_us=1456232 worst_lock=- pc=0x0 load: 17.73 18.34 18.38
+DONE
+
+=================== exitgroup X7 rows (lane batch, lane rerun, base rerun)
+[LP] FAIL X7 two concurrent exit_group callers x20 (6 bad, worst 1919 ms)
+[LP] FAIL X7 two concurrent exit_group callers x20 (7 bad, worst 2443 ms)
+[LP] FAIL X7 two concurrent exit_group callers x20 (12 bad, worst 4540 ms)
+[LP] FAIL X7 two concurrent exit_group callers x20 (3 bad, worst 1190 ms)
+[LP] FAIL X7 two concurrent exit_group callers x20 (2 bad, worst 1138 ms)
+[LP] FAIL X7 two concurrent exit_group callers x20 (1 bad, worst 1008 ms)
+[LP] FAIL X7 two concurrent exit_group callers x20 (3 bad, worst 1214 ms)
+[LP] FAIL X7 two concurrent exit_group callers x20 (1 bad, worst 1322 ms)
+
+=================== batch pemap / pfx_gate e2fault / unit IRQ-off rows (each passed on rerun)
+[LP] FAIL V1 COW memfd: 1 of 12 iterations stale; first iter 2: A read the old value 12046 more times after B's change returned (c0=14597415)
+[LP] FAIL V2 COW file: 2 of 12 iterations stale; first iter 3: A read the old value 6225 more times after B's change returned (c0=10900204)
+[LCOMPAT] fault-no-handler pid=4 sig=11 ipc=0x0x700F17DA rsp=0x0x1080032E90 vec=14 cr2=0x0x1080000000 live=3 -> default action
+[LOCKHEALTH] blockhold=0 selflock=0 classerr=0 irqsave_proc=0 irqoff_max_us=112666 irqoff_total_us=1428175 reg_used=530 reg_dropped=0
+[LOCKHEALTH-IRQOFF] cpu=0 max_us=112666 total_us=1430075 worst_lock=- pc=0x0
+      the [LOCKHEALTH-IRQOFF] line for the lock and PC)
+
+=================== P5 (lavapipe) d3d12: one screendump: the probe stalled 9.8 s around t=45-55 s on the loaded host, so its t=45s/t=50s rows never printed (the harness shoots on t=50s); it ran 65 s with done rc=0
+[X] [D3D12] t=5s frames=1155 window fps=230.92
+[X] [D3D12] t=40s frames=12514 window fps=224.37
+[X] [D3D12] t=55s frames=14466 window fps=133.24
+[X] [D3D12] t=55s frames=14467 window fps=266.81
+[X] [D3D12] t=55s frames=14526 window fps=171.22
+[X] [D3D12] t=60s frames=16476 window fps=389.85
+[X] [D3D12] t=65s frames=18279 window fps=341.54
+[X] [D3D12] RESULT frames=18279 wall=65281.4 ms fps=280.00 | per-frame median 2.22 p90 3.27 worst(after frame 0) 9781.93 ms
+[X] [D3D12] done rc=0
+(integ7 reference: vkcube graded FAIL with 0 screendumps, same class)

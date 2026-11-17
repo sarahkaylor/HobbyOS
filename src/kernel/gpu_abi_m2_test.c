@@ -214,6 +214,81 @@ static void test_gpu_m2_window(void) {
 }
 #endif
 
+/* P7 (docs/gpu-abi.md §10.7): the SCANOUT_BLOB request, its argument check
+ * and the X server's fullscreen control rect. */
+static void test_gpu_m2_scanout(void) {
+  uart_puts("  Running test_gpu_m2_scanout...\n");
+  tests_run++;
+  EXPECT_EQ((int)sizeof(struct gpu_scanout_blob), 64);
+  EXPECT_EQ((int)((GPU_IOC_SCANOUT_BLOB >> 16) & 0x3FFF), 64);
+  EXPECT_EQ((int)(GPU_IOC_SCANOUT_BLOB >> 30), 3); /* read|write: seqno, timings out */
+  EXPECT_EQ(gpu_abi_m2_req_size(GPU_IOC_SCANOUT_BLOB), 64);
+#ifdef __x86_64__
+  /* No process: refused before anything reaches the device (ARM: no 3D). */
+  EXPECT_EQ(gpu_abi_ioctl(0, -1, GPU_IOC_SCANOUT_BLOB, 0), -EINVAL);
+#endif
+  struct gpu_scanout_blob b = {0};
+  b.res_id = 7;
+  b.width = 1920;
+  b.height = 1080;
+  b.format = GPU_SCANOUT_FMT_B8G8R8A8;
+  b.stride = 1920 * 4;
+  b.window = 0x400007;
+  const uint64_t sz = 1920ull * 4 * 1080;
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz), 1);
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz - 4096), 0);  /* image past the blob */
+  EXPECT_EQ(gpu_abi_scanout_ok(0, sz), 0);
+  b.stride = 1920 * 4 - 4;                             /* row shorter than width*4 */
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz), 0);
+  b.stride = 1920 * 4 + 2;                             /* not dword aligned */
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz * 2), 0);
+  b.stride = 2048 * 4;                                 /* padded rows are fine */
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, 2048ull * 4 * 1080), 1);
+  b.stride = 1920 * 4;
+  b.format = 3;                                        /* A8R8G8B8: not a swapchain format */
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz), 0);
+  b.format = GPU_SCANOUT_FMT_R8G8B8A8;
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz), 1);
+  b.window = 0;                                        /* the grant names a window */
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz), 0);
+  b.window = 1;
+  b.width = 8;                                         /* QEMU's minimum is 16 */
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz), 0);
+  b.width = 1920;
+  b.flags = 1;                                         /* reserved */
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz), 0);
+  b.flags = 0;
+  b.reserved[1] = 5;
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz), 0);
+  b.reserved[1] = 0;
+  b.res_id = 0;                                        /* release is not a flip */
+  EXPECT_EQ(gpu_abi_scanout_ok(&b, sz), 0);
+#ifdef __x86_64__
+  EXPECT_EQ((int)sizeof(struct virtio_gpu_set_scanout_blob), 96);
+  uint32_t w = 0, sw = 0, sh = 0;
+  EXPECT_EQ(virtio_gpu_x64_fsctl_decode(VGPU_FSCTL_MAGIC, VGPU_FSCTL_OP_FS, 0x400007,
+                                        (1920 << 16) | 1080, &w, &sw, &sh), 1);
+  EXPECT_EQ((int)w, 0x400007);
+  EXPECT_EQ((int)sw, 1920);
+  EXPECT_EQ((int)sh, 1080);
+  EXPECT_EQ(virtio_gpu_x64_fsctl_decode(VGPU_FSCTL_MAGIC, VGPU_FSCTL_OP_FS, 0, 0, &w, &sw, &sh), 1);
+  EXPECT_EQ((int)w, 0); /* "no fullscreen window" */
+  EXPECT_EQ(virtio_gpu_x64_fsctl_decode(0, 0, 1920, 1080, 0, 0, 0), 0); /* ordinary damage */
+  EXPECT_EQ(virtio_gpu_x64_fsctl_decode(VGPU_FSCTL_MAGIC, 2, 5, (1920 << 16) | 1080, 0, 0, 0), 0);
+  EXPECT_EQ(virtio_gpu_x64_fsctl_decode(VGPU_FSCTL_MAGIC, VGPU_FSCTL_OP_FS, 5, (4000 << 16) | 1080,
+                                        0, 0, 0), 0); /* bigger than the panel */
+  EXPECT_EQ(virtio_gpu_x64_fsctl_decode(VGPU_FSCTL_MAGIC, VGPU_FSCTL_OP_FS, -5, (1920 << 16) | 1080,
+                                        0, 0, 0), 0);
+  /* The flush path's syscall-boundary check accepts exactly that control rect. */
+  struct virtio_gpu_xrect cr = {VGPU_FSCTL_MAGIC, VGPU_FSCTL_OP_FS, 0x400007, (1280 << 16) | 720};
+  EXPECT_EQ(virtio_gpu_flush_args_ok(&cr, 1), 1);
+  struct virtio_gpu_xrect two[2] = {cr, cr};
+  EXPECT_EQ(virtio_gpu_flush_args_ok(two, 2), 0); /* only alone */
+  cr.y = 9;
+  EXPECT_EQ(virtio_gpu_flush_args_ok(&cr, 1), 0);
+#endif
+}
+
 void gpu_abi_m2_test_suite(void) {
   uart_puts("gpu_abi_m2_test_suite:\n");
   test_gpu_m2_layout();
@@ -222,6 +297,7 @@ void gpu_abi_m2_test_suite(void) {
   test_gpu_m2_blob_ok();
   test_gpu_m2_submit2_ok();
   test_gpu_m2_cache_and_deadline();
+  test_gpu_m2_scanout();
 #ifdef __x86_64__
   test_gpu_m2_window();
 #endif
