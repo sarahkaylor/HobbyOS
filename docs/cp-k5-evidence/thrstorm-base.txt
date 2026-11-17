@@ -1,0 +1,78 @@
+# C1-k5: thrstorm.exe (256 threads, events + pipes, 60 s) under console Wine on the UNCHANGED kernel
+# tree: cyberpunk @ 949ba008 + the probe commit cede0b03 (no kernel change); host strix (Zen 5), guest intel MODE=test KVM 8 vCPU 12 GiB
+# cmd: K5_OUT=obj/cp-k5/ts-base TIMEOUT_S=2400 bash tools/cp/k5/run-thrstorm.sh
+# result: thrstorm printed its header and never its T1 row; k5wine SIGKILLed it at the 900 s step timeout; the guest
+# then stayed wedged (the launcher never returned from waitpid) and the QEMU was stopped by hand (own PID only).
+
+[K5] k5wine launcher (C1-k5)
+[K5] ps-before count=1
+[K5] mount 10.0.2.2:/srv/nfs/cp-k5-ts -> /CP ok
+[K5] begin wineboot : wineboot -i
+[K5] end wineboot status=0 ms=30270
+[K5] quiesce after wineboot: extra=0
+[K5] begin thrstorm : wine Z:\CP\K5\thrstorm.exe 60
+[TS] thrstorm (C1-k5): threads=256 secs=60 pid=32
+[K5] timeout thrstorm after 900s: SIGKILL pid=102
+--- census rows (sysinfo(3) processes; first/last)
+[K5] census t=10s slots=9 biggest_same_name=2
+[K5] census t=900s slots=2 biggest_same_name=1
+--- kernel [IDLESTUCK] rows naming thrstorm.exe (distinct)
+[IDLESTUCK] slot=102 pid=102 st=9 wake=0 futex=0x0 rip=0x10803279e0 thrstorm.exe
+[IDLESTUCK] slot=10 pid=10 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=11 pid=11 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=12 pid=12 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=176 pid=176 st=5 wake=0 futex=0x0 rip=0x10800503ca thrstorm.exe
+[IDLESTUCK] slot=17 pid=17 st=5 wake=0 futex=0x0 rip=0x10800503ca explorer.exe
+[IDLESTUCK] slot=20 pid=20 st=5 wake=0 futex=0x0 rip=0x10800503ca explorer.exe
+[IDLESTUCK] slot=25 pid=25 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=26 pid=26 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=28 pid=28 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=29 pid=29 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=30 pid=30 st=8 wake=0 futex=0x1080732080 rip=0x108017895d winedevice.exe
+[IDLESTUCK] slot=31 pid=31 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=38 pid=38 st=8 wake=33274 futex=0x10807320a0 rip=0x108017895d services.exe
+[IDLESTUCK] slot=40 pid=40 st=5 wake=0 futex=0x0 rip=0x10800503ca svchost.exe
+[IDLESTUCK] slot=41 pid=41 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=42 pid=42 st=8 wake=33625 futex=0x10807320b0 rip=0x108017895d services.exe
+[IDLESTUCK] slot=43 pid=43 st=5 wake=0 futex=0x0 rip=0x10800503ca svchost.exe
+[IDLESTUCK] slot=44 pid=44 st=5 wake=0 futex=0x0 rip=0x10800503ca svchost.exe
+[IDLESTUCK] slot=46 pid=46 st=5 wake=0 futex=0x0 rip=0x10800503ca plugplay.exe
+[IDLESTUCK] slot=47 pid=47 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=48 pid=48 st=5 wake=0 futex=0x0 rip=0x10800503ca plugplay.exe
+[IDLESTUCK] slot=49 pid=49 st=5 wake=0 futex=0x0 rip=0x10800503ca plugplay.exe
+[IDLESTUCK] slot=4 pid=4 st=5 wake=0 futex=0x0 rip=0x1080050390 start.exe
+[IDLESTUCK] slot=50 pid=50 st=5 wake=0 futex=0x0 rip=0x10800503ca plugplay.exe
+[IDLESTUCK] slot=51 pid=51 st=5 wake=0 futex=0x0 rip=0x108005065a winedevice.exe
+[IDLESTUCK] slot=61 pid=61 st=8 wake=33624 futex=0x10807320fc rip=0x108017895d services.exe
+[IDLESTUCK] slot=62 pid=62 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=64 pid=64 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=65 pid=65 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=66 pid=66 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=67 pid=67 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=68 pid=68 st=5 wake=0 futex=0x0 rip=0x10800503ca services.exe
+[IDLESTUCK] slot=69 pid=69 st=8 wake=0 futex=0x108073211c rip=0x108017895d winedevice.exe
+[IDLESTUCK] slot=6 pid=6 st=3 wake=30101 futex=0x0 rip=0x10800d8ee0 wineserver
+[IDLESTUCK] slot=73 pid=73 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=74 pid=74 st=5 wake=0 futex=0x0 rip=0x10800503ca winedevice.exe
+[IDLESTUCK] slot=76 pid=76 st=5 wake=0 futex=0x0 rip=0x10800503ca plugplay.exe
+[IDLESTUCK] slot=77 pid=77 st=8 wake=33649 futex=0x1080abd140 rip=0x108017895d plugplay.exe
+[IDLESTUCK] slot=78 pid=78 st=7 wake=0 futex=0x0 rip=0x1080142c3a wineboot.exe
+[IDLESTUCK] slot=80 pid=80 st=3 wake=0 futex=0x0 rip=0x1080050390 winemenubuilder
+[IDLESTUCK] slot=81 pid=81 st=3 wake=0 futex=0x0 rip=0x1080142f3f wineboot.exe
+[IDLESTUCK] slot=82 pid=82 st=1 wake=0 futex=0x0 rip=0x0 
+--- grader
+S1 thrstorm done rc=0, exit 0        : FAIL   ()
+S2 storm >= 60s, rounds > 0          : FAIL   (rounds/ms: none)
+S3 wineserver -k, nothing left        : FAIL   (; )
+S4 no fault line                      : PASS   (0 lines)
+
+# host reference (strix Linux, Wine 11.0 console build in a private glibc-2.31 chroot, 20 s run):
+[TS] thrstorm (C1-k5): threads=256 secs=20 pid=32
+[TS] PASS T1 create (threads=256 why=0)
+[TS] PASS T1 start (started=256 toolhelp=257)
+[TS] info startup ms=221
+[TS] t=10s rounds=1432 trips=366592 worst_round_ms=18 threads=257
+[TS] t=20s rounds=2899 trips=742144 worst_round_ms=18 threads=257
+[TS] PASS T2 storm (rounds=2899 ms=20007)
+[TS] PASS T3 stop (bad=0 first=0)
+[TS] done rc=0
