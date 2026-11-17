@@ -1714,9 +1714,42 @@ int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
  * instead of at the 10 ms re-scan slice.  Per CPU: a scan runs on one CPU
  * from reset to park (a syscall is never preempted in kernel mode). */
 static uint64_t fs_poll_cap[MAX_CPUS];
+/* C1-k6 round 2: and the key filter of what it scanned (poll_key_bit of
+   every pipe/eventfd; ~0 for an fd whose notifications carry no key). */
+static uint64_t fs_poll_bloom[MAX_CPUS];
 void fs_poll_cap_reset(void) {
   uint32_t c = get_cpuid();
-  if (c < MAX_CPUS) fs_poll_cap[c] = 0;
+  if (c < MAX_CPUS) {
+    fs_poll_cap[c] = 0;
+    fs_poll_bloom[c] = 0;
+  }
+}
+static void fs_poll_bloom_note(uint64_t bits) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS) fs_poll_bloom[c] |= bits;
+}
+uint64_t fs_poll_bloom_get(void) {
+  uint32_t c = get_cpuid();
+  return c < MAX_CPUS ? fs_poll_bloom[c] : ~0ull;
+}
+/* C1-k6 round 2: the notification key of fd's object: 0..63 (a pipe, an
+   eventfd: poll_notify_obj), 64 (notifies without a key: AF_UNIX,
+   signalfd, /dev/null), 65 (does not notify: the scan's slice finds it). */
+int file_poll_keybit(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 64;
+  int g = p->open_fds[fd];
+  if (g < 0 || g >= MAX_GLOBAL_FILES) return 64;
+  struct file *f = gfile(g);
+  if (f->type == FILE_TYPE_PIPE) return f->pipe.ptr ? poll_key_bit(f->pipe.ptr) : 64;
+  if (f->type == FILE_TYPE_EVENTFD) {
+    extern const void *l_eventfd_key(int slot);
+    return poll_key_bit(l_eventfd_key(f->eventfd.slot));
+  }
+  if (f->type == FILE_TYPE_UNIXSOCK || f->type == FILE_TYPE_SIGNALFD ||
+      f->type == FILE_TYPE_DEVNULL)
+    return 64;
+  return 65;
 }
 void fs_poll_cap_note(uint64_t us) {
   uint32_t c = get_cpuid();
@@ -1751,12 +1784,20 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
   if (f->type == FILE_TYPE_PIPE) {
     struct pipe *pp = f->pipe.ptr;
     if (!pp) return -1;
-    uint64_t flags = spinlock_acquire_irqsave(&pp->lock);
-    uint32_t count = pp->count;
-    uint32_t readers = pp->reader_count;
-    uint32_t writers = pp->writer_count;
-    int writable = pipe_writable(pp); /* C1-k4: capacity is per pipe now */
-    spinlock_release_irqrestore(&pp->lock, flags);
+    fs_poll_bloom_note(1ull << poll_key_bit(pp)); /* C1-k6 round 2 */
+    /* C1-k6 round 2 (docs/cp-k6.md §12): no pipe lock.  A readiness probe
+       is a snapshot either way, and the poll protocol covers the race: a
+       writer updates count under the lock and THEN bumps poll_event_seq
+       (poll_notify), and a poller snapshots the sequence BEFORE it scans,
+       so a stale "not ready" read here makes poll_park_locked refuse the
+       park.  The lock pair (irqsave, lock audit, two get_cpuid) per fd was
+       most of an epoll scan: wineserver rescans ~200 pipes per wake. */
+    uint32_t count = __atomic_load_n(&pp->count, __ATOMIC_ACQUIRE);
+    uint32_t readers = __atomic_load_n(&pp->reader_count, __ATOMIC_ACQUIRE);
+    uint32_t writers = __atomic_load_n(&pp->writer_count, __ATOMIC_ACQUIRE);
+    uint32_t cap = __atomic_load_n(&pp->cap, __ATOMIC_ACQUIRE);
+    uint32_t space = cap > count ? cap - count : 0;
+    int writable = cap > PIPE_BUF_ATOMIC ? space >= PIPE_BUF_ATOMIC : space > 0;
 
     if (f->pipe.end == 0) {
       /* Read end: data ready; EOF (last writer closed) also reports
@@ -1782,6 +1823,7 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
 
   if (f->type == FILE_TYPE_UNIXSOCK) { /* P4 */
     if (!f->usock.ptr) return -1;
+    fs_poll_bloom_note(POLL_KEYLESS_BIT); /* C1-k6 round 2: unix.c notifies keyless */
     usock_probe(f->usock.ptr, f->usock.end, r, w, e, hup);
     return 0;
   }
@@ -1818,10 +1860,13 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
   }
   if (f->type == FILE_TYPE_EVENTFD) {
     extern void l_eventfd_probe(int slot, int *r, int *w);
+    extern const void *l_eventfd_key(int slot);
+    fs_poll_bloom_note(1ull << poll_key_bit(l_eventfd_key(f->eventfd.slot)));
     l_eventfd_probe(f->eventfd.slot, r, w);
     return 0;
   }
   if (f->type == FILE_TYPE_SIGNALFD) {
+    fs_poll_bloom_note(POLL_KEYLESS_BIT); /* C1-k6 round 2: keyless */
     /* C1-k6: readable when the POLLING thread has a signal of the mask
        pending (Linux signalfd_poll checks current's pending sets). */
     extern int l_signalfd_ready(struct file *f);
@@ -1880,7 +1925,10 @@ static int fs_poll_park(struct process *p, uint64_t seen, int all_notify,
     spinlock_release_irqrestore(&proc_lock, flags);
     return -2;
   }
-  if (poll_park_locked(p, seen)) {
+  /* C1-k6 round 2: woken only by the objects this scan named (a set with
+     an fd that notifies without a key has ~0; an empty filter still wakes
+     on keyless notifications) */
+  if (poll_park_bloom_locked(p, seen, fs_poll_bloom_get())) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return 1;
   }

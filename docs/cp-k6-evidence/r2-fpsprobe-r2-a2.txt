@@ -1,0 +1,70 @@
+== strix, fpsprobe (Venus, -smp 8, 12 GiB, default Venus ICD ~/cp/venus-build); kernel: r2-a2
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/k6-dev2/obj/cp-p9/r2-a2
+phase           rows          game s   median     p10     min     max    mean
+launch           102          20-173     81.3    70.3     0.0   130.8    89.0
+menu              10         174-188     94.6    88.7    77.3   120.5    99.1
+loading           52         189-266     64.7    22.8    13.7    87.8    57.6
+world             57         268-355     21.0    15.0     6.5    29.1    20.9
+prof-fp-world     13         356-374     22.2    20.0    18.5    23.8    22.0
+prof-fp-stack     19         376-404     23.9    20.7    14.3    27.2    23.3
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             11171   11171   11171  (1 rows)
+   launch           10554    8829    8829  (6 rows)
+   menu              8837    8837    8837  (1 rows)
+   loading           8034    7429    7429  (2 rows)
+   world             7230    7112    7112  (3 rows)
+   prof-fp-world     7105    7105    7105  (1 rows)
+   prof-fp-stack     7106    7106    7106  (1 rows)
+== game process ([THRS]): max threads 46, max anon 141042 MiB, max res 4424 MiB (59 rows)
+== phases (host s since boot, game s since launch, name)
+   25.3 0.0 launch
+   198.8 173.4 menu
+   198.8 173.4 menu
+   214.6 189.3 loading
+   292.0 266.7 world
+   381.0 355.7 prof-fp-world
+   401.0 375.7 world
+   401.0 375.7 prof-fp-stack
+   431.2 405.9 world
+
+== /home/sarah/cp/lanes/k6-dev2/obj/cp-p9/r2-a2/prof-fp-world.txt: 1576 vCPU samples
+   idle (HLT)     1038   65.9 %
+   user            270   17.1 %
+   kernel          268   17.0 %
+== per vCPU (idle / kernel / user %)
+   cpu0:  100 /    0 /    0
+   cpu1:   50 /   24 /   25
+   cpu2:   56 /   22 /   21
+   cpu3:   62 /   20 /   18
+   cpu4:   67 /   17 /   16
+   cpu5:   65 /   17 /   18
+   cpu6:   61 /   19 /   20
+   cpu7:   65 /   17 /   18
+== kernel, top symbols (% of all samples)
+     2.8 %  virtio_gpu_x64_transact_ex
+     2.7 %  spin_acquire_raw
+     1.6 %  safe_wfi
+     1.5 %  sched_wake_idle_cpu
+     1.3 %  virtio_gpu_x64_kick
+     1.1 %  gpu_m2_fence_wait2
+     1.0 %  general_interrupt_inner
+     0.7 %  hrt_arch_arm_us
+     0.4 %  l_futex_wake_locked
+     0.3 %  proc_reap_parked_locked
+     0.3 %  vmmouse_drain_nolock
+     0.2 %  f1_probe_fd
+     0.2 %  process_check_sleeping_us
+     0.2 %  timer_get_ms
+     0.2 %  lock_audit_held_push
+     0.1 %  file_poll_keybit
+     0.1 %  vm_kwrite
+     0.1 %  l_tmr_epoll_wait_common
+
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 50.05 ms max 50.14 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 50.03 ms max 50.05 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 50.20 ms max 50.39 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.27 ms max 50.49 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 50.25 ms max 50.46 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 51.40 ms max 52.76 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 500.1 ms, tick 498 ms

@@ -1,0 +1,19 @@
+== linux_probe_ipclat, strix guest; integ9 adb81ee4 (tree k6-dev)
+[LP] I0 syscall floor: getppid 191 ns, pipe write+read (same thread) 680 ns
+[LP] I1 epoll server, 1 fd                 n=2000 rt_us p50=26 p90=44 p99=61 max=119  34301 round trips/s PASS
+[LP] I2 epoll server, 64 fds               n=2000 rt_us p50=24 p90=42 p99=72 max=106  35249 round trips/s PASS
+[LP] I3 epoll server, 256 fds              n=2000 rt_us p50=27 p90=36 p99=55 max=173  34690 round trips/s PASS
+[LP] I4 poll server, 256 fds               n=2000 rt_us p50=35 p90=44 p99=73 max=115  28035 round trips/s PASS
+[LP] I5 epoll 256 fds, 4 clients           n=8000 rt_us p50=64 p90=74 p99=112 max=1136  59642 round trips/s PASS
+[LP] done rc=0
+
+== the same probe on the strix Linux host
+[LP] I0 syscall floor: getppid 42 ns, pipe write+read (same thread) 164 ns
+[LP] I1 epoll server, 1 fd                 n=2000 rt_us p50=3 p90=4 p99=4 max=18  326850 round trips/s PASS
+[LP] I2 epoll server, 64 fds               n=2000 rt_us p50=3 p90=4 p99=11 max=2965  210948 round trips/s PASS
+[LP] I3 epoll server, 256 fds              n=2000 rt_us p50=3 p90=4 p99=6 max=28  303030 round trips/s PASS
+[LP] I4 poll server, 256 fds               n=2000 rt_us p50=20 p90=22 p99=34 max=103  47985 round trips/s PASS
+[LP] I5 epoll 256 fds, 4 clients           n=8000 rt_us p50=2 p90=4 p99=10 max=39  1189237 round trips/s PASS
+[LP] done rc=0
+
+== cp-k6 round 2 (5ae97d4d, tree k6): the gate-batch run

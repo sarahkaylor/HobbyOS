@@ -1323,6 +1323,11 @@ int l_eventfd_new(unsigned int initval, int flags) {
   return slot;
 }
 
+/* C1-k6 round 2: an eventfd's poll notification key. */
+const void *l_eventfd_key(int slot) {
+  return (slot >= 0 && slot < L_EVENTFD_SLOTS) ? (const void *)&l_efd[slot] : 0;
+}
+
 void l_eventfd_release(int slot) {
   if (slot < 0 || slot >= L_EVENTFD_SLOTS) return;
   uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
@@ -1390,7 +1395,7 @@ int l_eventfd_read(struct file *f, void *buf, int size) {
       return r;
     }
     l_efd_drain(&wake);
-    poll_notify();
+    poll_notify_obj(&l_efd[slot]); /* C1-k6 round 2: keyed */
     if (l_copy_to_user(current_process(), (uint64_t)(uintptr_t)buf, &v, 8) != 0) {
       /* Put the value back: the read did not happen. */
       fl = spinlock_acquire_irqsave(&l_efd_lock);
@@ -1431,7 +1436,7 @@ int l_eventfd_write(struct file *f, const void *buf, int size) {
       return r;
     }
     l_efd_drain(&wake);
-    if (v) poll_notify();
+    if (v) poll_notify_obj(&l_efd[slot]); /* C1-k6 round 2: keyed */
     return 8;
   }
 }
@@ -1527,7 +1532,9 @@ int l_signalfd_read(struct file *f, void *buf, int size) {
       else grp->sig_pending &= ~bit;
       rec[n].sig = sig;
       rec[n].code = directed ? -6 /* SI_TKILL */ : 0 /* SI_USER */;
-      rec[n].pid = 0; /* the sender is not recorded */
+      /* C1-k6 round 2: the sender's tgid (0 = the kernel) */
+      rec[n].pid = directed ? cur->sig_sender[sig]
+                            : ((own & bit) ? cur->sig_sender[sig] : grp->sig_sender[sig]);
       rec[n].status = 0;
       if (sig == 17 /* SIGCHLD */ && grp && grp->sig_child_pid > 0) {
         int st = grp->sig_child_status;
@@ -1579,6 +1586,31 @@ int l_signalfd_read(struct file *f, void *buf, int size) {
       return i ? i * L_SSI_SIZE : -EFAULT;
   }
   return n * L_SSI_SIZE;
+}
+
+/* C1-k6 round 2: dequeue the lowest pending signal of `mask` for `cur`
+   (its directed set, its own, the group's), as a signalfd read does.
+   Returns the signal number or 0; *code / *pid as in signalfd_siginfo. */
+int l_sig_dequeue(struct process *cur, uint64_t mask, int *code, int *pid) {
+  struct process *grp = process_group(cur);
+  uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+  uint64_t dir = cur->sig_pending_dir & mask;
+  uint64_t own = cur->sig_pending & mask;
+  uint64_t sh = (grp && grp != cur) ? (grp->sig_pending & mask) : 0;
+  uint64_t any = dir | own | sh;
+  int sig = 0;
+  if (any) {
+    sig = __builtin_ctzll(any) + 1;
+    uint64_t bit = 1ull << (sig - 1);
+    int directed = (dir & bit) != 0;
+    if (directed) cur->sig_pending_dir &= ~bit;
+    else if (own & bit) cur->sig_pending &= ~bit;
+    else grp->sig_pending &= ~bit;
+    *code = directed ? -6 : 0;
+    *pid = (directed || (own & bit)) ? cur->sig_sender[sig] : grp->sig_sender[sig];
+  }
+  spinlock_release_irqrestore(&proc_lock, pf);
+  return sig;
 }
 
 static int l_fd_signalfd_common(struct process *p, struct trap_frame *tf,

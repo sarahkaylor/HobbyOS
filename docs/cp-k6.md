@@ -360,3 +360,67 @@ Five fpsprobe boots (P9 harness, Venus, 12 GiB) on this lane's kernels went
 to the main menu (+fps rows: menu median 41-90 fps) and four loaded the
 user's save into the world (the fifth was a harness menu-navigation miss);
 §10 has the numbers.
+
+## 12. Round 2: the wake path (integrator round-2 items)
+
+Starting point: integ9 (adb81ee4: cyberpunk with C0-console, cp-p7, cp-play,
+cp-k6, cp-fork).  An fpsprobe on integ9 as it is: world median 17.5 fps,
+kernel 33.8 %, `spin_acquire_raw` 9.6 %, idle 51.5 % (`r2-fpsprobe-integ9.txt`).
+
+The new probe `linux_probe_ipclat` times the wineserver round trip (a client
+writes its request pipe and blocks reading its reply pipe; a single-threaded
+server sleeps in epoll_wait over every client's request pipe): on integ9
+24-29 us per round trip (the strix host: 3 us), 29 us with 256 fds in the
+set; one trivial syscall costs 154-191 ns, so the time was the wake, the
+switch and the rescans, not syscall entry.
+
+| change | where | effect |
+|---|---|---|
+| **sync wake**: a wake inside a user thread's syscall (pipe/AF_UNIX/eventfd write, futex wake, poll notify of one waiter) defers its IPI; if the waker parks within its next 30 us (its next syscall: Wine writes the request, then reads the reply) the woken thread is that CPU's next pick (no IPI, no HLT exit on another vCPU); otherwise the syscall exit or this CPU's one-shot at the end of the window sends the IPI | `process.c` `sched_wake_sync`, `sched_sync_flush_ex`; `trap.c` trap nesting (`sched_trap_depth/sys`) | ipclat 1 fd: 26 -> 4-6 us |
+| **READY hint**: a 512-bit "maybe READY" mask set by every READY transition (`proc_mark_ready`, all 31 sites), read by the pick, the idle loop and the idle fast check instead of 512 PCB state fields (~11 KiB apart: 512 cache misses under proc_lock per pick); stale bits are cleared at the pick, and a full scan every 10 ms repairs a missed one | `process.h`, `process.c`, the READY sites in `linux_compat_thr.c` and both `trap.c` | pick cost O(8 words + READY slots) |
+| **lock-free pipe readiness probe** (the poll protocol already covers the race: count is updated under the pipe lock and THEN the sequence moves) | `fs.c` `f1_probe_fd` | 256-fd epoll scan 25 -> ~12 us |
+| **keyed notifications**: `poll_notify_obj(pipe or eventfd)` sets one of 63 key bits (`poll_key_bit`); a parked poller carries the filter of the keys its scan saw (`poll_bloom`, bit 63 = "has a keyless fd": AF_UNIX, signalfd) and only matching pollers are woken; keyless `poll_notify()` still wakes everyone | `process.c` `poll_notify_bits`, `fs.c`, `pipe.c`, `linux_compat_fd.c` | no thundering herd for pipe events |
+| **event-driven epoll**: each entry keeps its object's key; a keyed notification marks the sets whose filter has it; the next wait rechecks only those entries, the keyless and non-notifying ones and the ones it reported last time (level-triggered); full scans after epoll_ctl, keyless notifications, a full maxevents, every 64th wait, and with more than one waiter | `linux_compat_timers.c` | ipclat 256 fds: 29 -> 6 us |
+| syscall table walk cached per number; the stack-parity detector hashed (8 probes, was a 512-entry linear search per syscall) | `linux_compat.c` | a few hundred ns per syscall |
+| ICR pair written with interrupts off (an IRQ-path send between the two writes could redirect an IPI) | `process.c` `resched_cpu` | correctness |
+| `rem` written for a relative nanosleep/clock_nanosleep ended by a signal (at the resume, in the thread's own AS); signalfd's `ssi_pid` = the sender's tgid | `linux_compat.c`, `linux_compat_thr.c`, `process.c`, `linux_compat_fd.c` | hrtimer C10, sigfd S12 |
+| `rt_sigtimedwait` takes a signal of its set that is pending (it was an `-EAGAIN` stub; blocked SIG_DFL signals are queued since §4); nothing pending is still `-EAGAIN` at once (no blocking wait, the stub's Mono note) | `linux_compat_proc.c`, `linux_compat_fd.c` `l_sig_dequeue` | sigfd S10's cleanup |
+
+Not done: a real per-CPU run queue (the pick still runs under proc_lock; the
+hint removes its scan, not its lock), per-object wait lists for AF_UNIX
+(keyless), and futex hash buckets (the futex wake scans `l_thr[]`, 32 KiB
+of contiguous 64-byte slots, which the profile does not show).
+`vm_touch` is no longer in the top of the profile.
+
+### 12.1 Round-2 results (strix)
+
+`linux_probe_ipclat` (guest; host: 3 us everywhere):
+
+| row | integ9 | round 2 |
+|---|---|---|
+| I0 syscall floor (getppid / pipe write+read on one thread) | 191 / 680 ns | 157-181 / 464-619 ns |
+| I1 epoll server, 1 fd, round trip p50 | 26 us | **4 us** |
+| I2 64 fds | 24 us | **5 us** |
+| I3 256 fds | 27 us | **6 us** |
+| I4 poll server, 256 fds | 35 us | 17 us |
+| I5 4 clients against 256 fds | 64 us, 59.6k/s | 63 us, 51.7k/s |
+
+(I5: four clients serialise on the one server; the sync wake keeps the
+server on the waker's CPU, so this row does not improve.)
+
+fpsprobe (Venus, `-smp 8 -m 12G`, the default Venus ICD `~/cp/venus-build`
+for both kernels -- not cp-p7's rebuilt Mesa):
+
+| run | world median | world p10 | menu median | kernel % | spin % | idle % | user % |
+|---|---|---|---|---|---|---|---|
+| integ9-a | 17.5 | 9.2 | 94.1 | 33.8 | 9.6 | 51.5 | 14.7 |
+| integ9-b | 20.4 | 11.4 | 73.9 | 31.7 | 7.9 | 52.6 | 15.7 |
+| round 2 a1 | **24.0** | 15.9 | 125.2 | **22.8** | **4.8** | 60.3 | 16.9 |
+| round 2 a2 | **21.0** | 15.0 | 94.6 | **17.0** | **2.7** | 65.9 | 17.1 |
+
+The fps medians move with strix's load (other lanes' guests share it); the
+profile does not: the kernel share is down by a third to a half and the spin
+by two thirds, and the guest is now 60-66 % idle in the world.  What spins
+now (a2's stack words, `r2-fpsprobe-r2-a2-stack.txt`) is the Venus fence
+path (`virtio_gpu_3d_fence_kick_check`, `gpu_m2_fence_wait2`; C6-p7's
+files) and futex.  p8caps in these boots: 50x Sleep(1) = 51.3-52.1 ms.

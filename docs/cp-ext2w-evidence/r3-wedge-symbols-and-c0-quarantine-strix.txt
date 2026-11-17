@@ -1,0 +1,39 @@
+# llvm-addr2line -f -i -e hobbyos.elf (cp-ext2w3 256188da kernel text; the probe-only commit c3c75d3c does not move kernel text)
+0x700f5c8f spin_acquire_raw src/kernel/arch/x64/locks.c:0
+0x700f5c94 ?? src/kernel/arch/x64/locks.c:0
+0x701071cc resume_preflight_c src/kernel/arch/x64/trap.c:6831
+0x700F6254 spinlock_acquire_irqsave src/kernel/arch/x64/locks.c:598
+0x700F6292 spinlock_release_irqrestore src/kernel/arch/x64/locks.c:698
+0x700AE035 start_scheduler src/kernel/process.c:0
+0x700AD7AF start_scheduler src/kernel/process.c:0
+0x700A4482 process_others_alive src/kernel/process.c:3079
+0x7009DFEC schedule src/kernel/process.c:0
+0x700F5CA9 spinlock_release src/kernel/arch/x64/locks.c:553
+0x70078172 ls_cpu src/kernel/lockscale.c:272 lock_audit_held_push src/kernel/lockscale.c:313
+0x700dd182 vm_map_page src/kernel/vm.c:0
+0x700deff7 vm_touch src/kernel/vm.c:2243
+0x700f3896 safe_wfi src/kernel/arch/x64/cpu.c:44
+7673aef4 [('vm_lock', '0x0', 8)]
+74D57988 [('proc_lock', '0x0', 8)]
+701071cc [('resume_preflight_c', '0x5c', 1705)]
+
+# C0-console batch reg_gate boot 1 (strix ~/cp/lanes/console/obj/ext2w-reg/serial-b1.txt lines 796-814, read-only)
+[MPROT] a=0x000000108005A000 len=0x0000000000001000 prot=1 rc=0 r=0x000000108005A000+0x0000000000001000 rprot=1
+[MPROT] a=0x0000001080039000 len=0x0000000000001000 prot=1 rc=0 r=0x0000001080039000+0x0000000000001000 rprot=1
+[MPROT] a=0x0000001080003000 len=0x0000000000001000 prot=1 rc=0 r=0x0000001080003000+0x0000000000001000 rprot=1
+[MPROT] a=0x0000001080032000 len=0x0000000000001000 prot=1 rc=0 r=0x0000001080032000+0x0000000000001000 rprot=1
+[LCOMPAT] readlink exe pid=11 bufsz=4095 -> 44
+/LIB64/libgcc_s.so.1
+[MPROT] a=0x0000001080330000 len=0x0000000000001000 prot=1 rc=0 r=0x0000001080330000+0x0000000000001000 rprot=1
+[MPROT] a=0x00000010802E8000 len=0x0000000000002000 prot=1 rc=0 r=0x00000010802C1000+0x0000000000029000 rprot=1
+[BADELR] picking a user slot with an implausible frame.elr=0x0000000140008412 slot=11 pid=11 sp=0x00007FFFFE1FFB58 services.exe
+[LMMAP] big pid=12 base=0x0x1080732000 len=0x0x8000000 prot=0 flags=0x0x4022
+[BADELR] picking a user slot with an implausible frame.elr=0x0000000140007ACD slot=11 pid=11 sp=0x00007FFFFE1FFB60 services.exe
+[EPOLLHW] pid=7 n=16
+[RESUME-PREFLIGHT] pid=7 cs=0x0000800000000000 rip=0xFFFF800200C02000 as=0x0000000076704AF8 -> QUARANTINE
+[BLOCKHOLD] site=schedule pc=0x700A1569 extra=0x1 cpu=2
+[KERNEL] Process 14: wineboot.exe exited unexpectedly or gracefully.
+[EXEC] load pid=15 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 7 14
+[EXITPC] pid=14 last_user_pc=0x1080143146 code=0x0
+[EXEC] enter pid=15 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 0 4096
+[LMMAP] big pid=15 base=0x0x110000 len=0x0x67EF0000 prot=0 flags=0x0x4032

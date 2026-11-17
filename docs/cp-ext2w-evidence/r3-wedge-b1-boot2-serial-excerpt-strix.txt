@@ -1,0 +1,150 @@
+# reg_gate loop b run 1, boot 2 (tree ext2w3b = cp-ext2w3 256188da, base cyberpunk c0dbe5a2): excerpt of the serial
+# lines 440-460 (first EPOLLHW), 990-1100 (panic, LOCKFOREVER, STALLBREAK, IDLESTUCK), 1147-1170 (watchdog)
+--- serial lines 445,452
+[LNR] path=/tmp/.config routed=0 rel=(null)
+[LNR] path=/tmp/.config routed=0 rel=(null)
+[LNR] path=/tmp/.local routed=0 rel=(null)
+[LNR] path=/tmp/.local routed=0 rel=(null)
+[EPOLLHW] pid=7 n=16
+[LMMAP] big pid=16 base=0x0x1080732000 len=0x0x8000000 prot=0 flags=0x0x4022
+[TXT] n=1024 bad=0
+[KERNEL] Process 14: winemenubuilder exited unexpectedly or gracefully.
+--- serial lines 990,1100
+/LIB64/libgcc_s.so.1
+[TXT] n=4608 bad=0
+[PUBS] n=77824 exec=5626 xzero=3 file_xzero=3 anon_xzero=3 xunv=0 idc=4728 idf=0 | fault_anon xzero=3 xunv=0 | img xzero=3 xunv=0
+/LIB64/libnss_dns.so.2
+/LIB64/libresolv.so.2
+003c:err:winediag:getaddrinfo Failed to resolve your host name IP
+[EPOLLHW] pid=86 n=16
+[KERNEL] Process 91: wineboot.exe exited unexpectedly or gracefully.
+[EXITPC] pid=91 last_user_pc=0x1080143146 code=0x0
+[EXEC] load pid=92 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 5 14
+[EXEC] enter pid=92 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 0 4096
+/lib64/ld-linux-x86-64.so.2
+/LIB64/libdl.so.2
+/LIB64/libpthread.so.0
+/LIB64/libc.so.6
+/LIB64/libgcc_s.so.1
+[PUBS] n=81920 exec=5859 xzero=3 file_xzero=3 anon_xzero=3 xunv=0 idc=4959 idf=0 | fault_anon xzero=3 xunv=0 | img xzero=3 xunv=0
+/LIB64/libm.so.6
+[KERNEL] Process 93: wineboot.exe exited unexpectedly or gracefully.
+[EXITPC] pid=93 last_user_pc=0x1080143146 code=0x0
+[EXEC] load pid=94 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 3 14
+[EXEC] enter pid=94 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 0 4096
+/lib64/ld-linux-x86-64.so.2
+/LIB64/libdl.so.2
+/LIB64/libpthread.so.0
+/LIB64/libc.so.6
+/LIB64/libgcc_s.so.1
+[TXT] n=5120 bad=0
+[PUBS] n=86016 exec=6115 xzero=3 file_xzero=3 anon_xzero=3 xunv=0 idc=5213 idf=0 | fault_anon xzero=3 xunv=0 | img xzero=3 xunv=0
+KERNEL PANIC: stack smashing detected (SEC-4 canary)
+  smasher pc=0x00000000700f5c94 call_site=0x00000000700f5c8f (resolve: llvm-addr2line -e hobbyos.elf <call_site>)
+  rsp=0xffff800023ffe718 rbp=0xffff800023ffe7a0 guard=0x493e7ada95199bf2
+  found=0x00000000701071cc delta=0xb6c18525daf6d5da
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[PANIC-SINK-VIOLATION] panic_putc from a returning path (suppressed=1)
+
+
+[LOCKFOREVER] cpu=1 lock=0x000000007673aef4 owner=6 owner_hb_age=439 held_n=1 h0x0000000070078172@0x0000000000000006 pc=0x00000000700f6254 pc2=0x00000000700dd182
+[LOCKFOREVER] cpu=2 lock=0x000000007673aef4 owner=6 owner_hb_age=442 held_n=1 h0x0000000070078172@0x0000000000000006 pc=0x00000000700f6254 pc2=0x00000000700deff7
+
+[LOCKFOREVER] cpu=0 lock=0x000000007673aef4 owner=6 owner_hb_age=663 held_n=1 h0x0000000070078172@0x0000000000000006 pc=0x00000000700f6254 pc2=0x00000000700deff7
+
+[LOCKFOREVER] cpu=1 lock=0x000000007673aef4 owner=6 owner_hb_age=886 pc=0x00000000700f6254 pc2=0x00000000700dd182
+
+[LOCKFOREVER] cpu=2 lock=0x000000007673aef4 owner=6 owner_hb_age=909 pc=0x00000000700f6254 pc2=0x00000000700deff7
+
+[LOCKFOREVER] cpu=0 lock=0x000000007673aef4 owner=6 owner_hb_age=1179 pc=0x00000000700f6254 pc2=0x00000000700deff7
+
+[LOCKFOREVER] cpu=1 lock=0x000000007673aef4 owner=6 owner_hb_age=1367 pc=0x00000000700f6254 pc2=0x00000000700dd182
+
+[LOCKFOREVER] cpu=2 lock=0x000000007673aef4 owner=6 owner_hb_age=1381 pc=0x00000000700f6254 pc2=0x00000000700deff7
+
+[LOCKFOREVER] cpu=0 lock=0x000000007673aef4 owner=6 owner_hb_age=1675 pc=0x00000000700f6254 pc2=0x00000000700deff7
+
+[LOCKFOREVER] cpu=1 lock=0x000000007673aef4 owner=6 owner_hb_age=1819 pc=0x00000000700f6254 pc2=0x00000000700dd182
+
+[LOCKFOREVER] cpu=2 lock=0x000000007673aef4 owner=6 owner_hb_age=1854 pc=0x00000000700f6254 pc2=0x00000000700deff7
+
+[STALLBREAK] cpu=0 lock=0x000000007673aef4 owner_cpu=5 stale_ms=2066 owner_pc=0x0000000000000000 owner_pc2=0x0000000000000000 waiter_stage=0 pc=0x00000000700f6254
+[KERNEL] Process 95: winemenubuilder exited unexpectedly or gracefully.
+[EXITPC] pid=95 last_user_pc=0x1080143146 code=0x0
+[EXEC] load pid=96 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 4 14
+[EXEC] enter pid=96 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 0 4096
+/lib64/ld-linux-x86-64.so.2
+/LIB64/libdl.so.2
+/LIB64/libpthread.so.0
+/LIB64/libc.so.6
+/LIB64/libgcc_s.so.1
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[NFSIO] bytes=0x0x0000000002726192 rpcs=0x0x0000000000000525 ms=0x0x0000000000007537
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[CONS] lines=1028 user=29 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off: pub=6372 mr=2236 futex=0 alive=122 resume=18 blkd=11 pecow=0 anonf=3 (CP_DIAG=all to print)
+[NFSIO] bytes=0x0x0000000002726192 rpcs=0x0x0000000000000525 ms=0x0x000000000000ea6b
+[IDLESTUCK] cpu=3 rounds=20001 t=74828
+[IDLESTUCK] slot=1 pid=1 st=3 wake=0 futex=0x0 rip=0x700f3896 ext2flush
+[IDLESTUCK] slot=3 pid=3 st=5 wake=74848 futex=0x0 rip=0x1000005844 REGP.BIN
+[SIGST] slot=3 pid=3 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=0
+[IDLESTUCK] slot=78 pid=78 st=5 wake=0 futex=0x0 rip=0x1080050390 wine
+[SIGST] slot=78 pid=78 st=5 inh=0 susp=0 fsig=0 pend=65536 dir=0 gpend=65536 since=68055
+[IDLESTUCK] slot=80 pid=80 st=5 wake=0 futex=0x0 rip=0x1080050390 wine
+[SIGST] slot=80 pid=80 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=68047
+[IDLESTUCK] slot=82 pid=82 st=5 wake=0 futex=0x0 rip=0x1080050390 wine
+[SIGST] slot=82 pid=82 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=68028
+[IDLESTUCK] slot=86 pid=86 st=3 wake=0 futex=0x0 rip=0x1080127648 wineserver
+[IDLESTUCK] slot=90 pid=90 st=5 wake=0 futex=0x0 rip=0x1080050390 wineboot.exe
+[SIGST] slot=90 pid=90 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=0
+[IDLESTUCK] slot=92 pid=92 st=5 wake=0 futex=0x0 rip=0x1080050390 winemenubuilder
+[SIGST] slot=92 pid=92 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=0
+[IDLESTUCK] slot=94 pid=94 st=5 wake=0 futex=0x0 rip=0x1080050390 services.exe
+[SIGST] slot=94 pid=94 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=0
+[IDLESTUCK] slot=96 pid=96 st=5 wake=0 futex=0x0 rip=0x1080050390 wine
+[SIGST] slot=96 pid=96 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=0
+[IDLESTUCK] claims: c0=1/0/0 c1=-1/3334/0 c2=-1/5919/0 c3=-1/5944/0 c4=-1/6536/0 c5=86/8/0 c6=-1/6083/0 c7=-1/6289/0 lock_owner=4 locked=1 park_returns=0 lock_addr=0x0000000074D57988
+[PROCLOCK-HOLD] cpu=0 acq=125752 rel=125752 last=release last_ms=74808 site=0x00000000700F6292 owner_site3=0x00000000700A4482 rel_site=0x00000000700F6292 iretq_ms=16929 locked_at_iretq=1 det_entry=15150 det_exit=15150 det_stage=4 dump_self=0
+[PROCLOCK-HOLD] cpu=1 acq=115101 rel=115101 last=release last_ms=74828 site=0x00000000700F6292 owner_site3=0x00000000700AD7AF rel_site=0x00000000700F6292 iretq_ms=74348 locked_at_iretq=1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=0
+[PROCLOCK-HOLD] cpu=2 acq=98912 rel=98912 last=release last_ms=74828 site=0x00000000700F6292 owner_site3=0x00000000700AD7AF rel_site=0x00000000700F6292 iretq_ms=72838 locked_at_iretq=1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=0
+[PROCLOCK-HOLD] cpu=3 acq=36454 rel=36453 last=acquire last_ms=74828 site=0x00000000700F6254 owner_site3=0x00000000700AE035 rel_site=0x00000000700F6292 iretq_ms=74598 locked_at_iretq=1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=1
+[PROCLOCK-HOLD] cpu=4 acq=21920 rel=21920 last=release last_ms=74828 site=0x00000000700F6292 owner_site3=0x00000000700AD7AF rel_site=0x00000000700F6292 iretq_ms=74098 locked_at_iretq=1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=0
+[PROCLOCK-HOLD] cpu=5 acq=2394 rel=2394 last=release last_ms=9041 site=0x00000000700F5CA9 owner_site3=0x000000007009DFEC rel_site=0x00000000700F5CA9 iretq_ms=9031 locked_at_iretq=1 det_entry=6081 det_exit=6081 det_stage=4 dump_self=0
+[PROCLOCK-HOLD] cpu=6 acq=20189 rel=20189 last=release last_ms=74828 site=0x00000000700F6292 owner_site3=0x00000000700AD7AF rel_site=0x00000000700F6292 iretq_ms=71579 locked_at_iretq=1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=0
+[PROCLOCK-HOLD] cpu=7 acq=20305 rel=20305 last=release last_ms=74828 site=0x00000000700F6292 owner_site3=0x00000000700AD7AF rel_site=0x00000000700F6292 iretq_ms=67559 locked_at_iretq=1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=0
+[LOCKDIAG] wait_cpu=0 lock=0x0000000074D57988 owner_cpu=3 owner_pid=-1 owner_site=0x00000000700F6254 owner_site2=0x00000000700AE035 wait_pid=1 wait_stage=0 wait_pc=0x00000000700F6254 wait_pc2=0x00000000700A4482 owner_wd_rip=0x00000000700F3896 owner_wd_pid=-1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=1 owner_in_user=0
+[LOCKDIAG] wait_cpu=1 lock=0x0000000074D57988 owner_cpu=3 owner_pid=-1 owner_site=0x00000000700F6254 owner_site2=0x00000000700AE035 wait_pid=-1 wait_stage=0 wait_pc=0x00000000700F6254 wait_pc2=0x000000007009DFEC owner_wd_rip=0x00000000700F3896 owner_wd_pid=-1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=1 owner_in_user=0
+[LOCKDIAG] wait_cpu=2 lock=0x0000000074D57988 owner_cpu=3 owner_pid=-1 owner_site=0x00000000700F6254 owner_site2=0x00000000700AE035 wait_pid=-1 wait_stage=0 wait_pc=0x00000000700F6254 wait_pc2=0x000000007009DFEC owner_wd_rip=0x00000000700F3896 owner_wd_pid=-1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=1 owner_in_user=0
+[LOCKDIAG] wait_cpu=4 lock=0x0000000074D57988 owner_cpu=3 owner_pid=-1 owner_site=0x00000000700F6254 owner_site2=0x00000000700AE035 wait_pid=-1 wait_stage=0 wait_pc=0x00000000700F6254 wait_pc2=0x000000007009DFEC owner_wd_rip=0x00000000700F3896 owner_wd_pid=-1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=1 owner_in_user=0
+[LOCKDIAG] wait_cpu=6 lock=0x0000000074D57988 owner_cpu=3 owner_pid=-1 owner_site=0x00000000700F6254 owner_site2=0x00000000700AE035 wait_pid=-1 wait_stage=0 wait_pc=0x00000000700F6254 wait_pc2=0x000000007009DFEC owner_wd_rip=0x00000000700F3896 owner_wd_pid=-1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=1 owner_in_user=0
+[LOCKDIAG] wait_cpu=7 lock=0x0000000074D57988 owner_cpu=3 owner_pid=-1 owner_site=0x00000000700F6254 owner_site2=0x00000000700AE035 wait_pid=-1 wait_stage=0 wait_pc=0x00000000700F6254 wait_pc2=0x000000007009DFEC owner_wd_rip=0x00000000700F3896 owner_wd_pid=-1 det_entry=74828 det_exit=74828 det_stage=4 dump_self=1 owner_in_user=0
+[STALLBREAK-DIAG] lock=0x000000007673AEF4 owner_cpu=5 owner_pid=86 owner_site=0x0000000000000000 owner_site2=0x0000000000000000 wait_cpu=0 wait_pid=1 wait_stage=0 wait_pc=0x00000000700F6254 wait_pc2=0x00000000700DEFF7
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+--- serial lines 1147,1172
+[WATCHDOG] console silent for more than 20s
+  [NFSIO] bytes=0x0x0000000002726192 rpcs=0x0x0000000000000525 uptime_ms=0x0x0000000000055767
+  CPU0 rip=0x00000000700f3896 rflags=0x0000000000000283 vec=32 err=0x0000000000000000 cr2=0x00000010801440c0 pid=1 resume_pid=1 resume_sp=0xffff800023ffefc8 age_ms=0 syscall=19
+  CPU1 rip=0x00000000700f3896 rflags=0x0000000000000212 pid=-1 resume_pid=3 resume_sp=0x00000017fffffda0 age_ms=10 syscall=19
+  CPU2 rip=0x00000000700f3896 rflags=0x0000000000000212 pid=-1 resume_pid=3 resume_sp=0x00000017fffffda0 age_ms=10 syscall=19
+  CPU3 rip=0x00000000700f3896 rflags=0x0000000000000212 pid=-1 resume_pid=3 resume_sp=0x00000017fffffda0 age_ms=10 syscall=19
+  CPU4 rip=0x00000000700f3896 rflags=0x0000000000000212 pid=-1 resume_pid=3 resume_sp=0x00000017fffffda0 age_ms=10 syscall=19
+  CPU5 rip=0x00000000700f3896 rflags=0x0000000000000287 vec=129 err=0x0000000000000000 cr2=0x00000010800eb110 pid=1 resume_pid=1 resume_sp=0xffff800023ffefc8 age_ms=341014 syscall=232
+  CPU6 rip=0x00000000700f3896 rflags=0x0000000000000212 pid=-1 resume_pid=3 resume_sp=0x00000017fffffda0 age_ms=10 syscall=19
+  CPU7 rip=0x00000000700f3896 rflags=0x0000000000000212 pid=-1 resume_pid=3 resume_sp=0x00000017fffffda0 age_ms=10 syscall=19
+  CSTK cpu5: 0x000000007007821e 0x0000000070078172 0x0000000070043abd 0x0000000070043e14 0x0000000070068196 0x0000000070035986 0x00000000700468e6 0x000000007004721d 0x0000000070078172 0x000000007007821e 0x000000007007378d 0x000000007007821e 0x0000000070030102 0x0000000070078172 0x000000007007821e 0x0000000070078172
+  CDATA cpu5 cur~=0x00000000768d5b78: 0x0000000070078172 0x0000000074d21610 0x00000000700f6254 0x00000000768d5c20 0x00000000700f5c2c 0x00000000768d5cf0 0x0000000000000002 0x493e7ada95199bf2 0x00000000756bf220 0x00000000768d5cc4 0x0000000000000001 0x00000000768d5cc0
+[IDLESTUCK] cpu=3 rounds=17199 t=350148
+[IDLESTUCK] slot=1 pid=1 st=3 wake=0 futex=0x0 rip=0x700f3896 ext2flush
+[IDLESTUCK] slot=3 pid=3 st=5 wake=350245 futex=0x0 rip=0x1000005844 REGP.BIN
+[SIGST] slot=3 pid=3 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=0
+[IDLESTUCK] slot=78 pid=78 st=5 wake=0 futex=0x0 rip=0x1080050390 wine
+[SIGST] slot=78 pid=78 st=5 inh=0 susp=0 fsig=0 pend=65536 dir=0 gpend=65536 since=343375
+[IDLESTUCK] slot=80 pid=80 st=5 wake=0 futex=0x0 rip=0x1080050390 wine
+[SIGST] slot=80 pid=80 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=343367
+[IDLESTUCK] slot=82 pid=82 st=5 wake=0 futex=0x0 rip=0x1080050390 wine
+[SIGST] slot=82 pid=82 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=343348
+[IDLESTUCK] slot=86 pid=86 st=3 wake=0 futex=0x0 rip=0x1080127648 wineserver
+[IDLESTUCK] slot=90 pid=90 st=5 wake=0 futex=0x0 rip=0x1080050390 wineboot.exe
+[SIGST] slot=90 pid=90 st=5 inh=0 susp=0 fsig=0 pend=0 dir=0 gpend=0 since=0
+[IDLESTUCK] slot=92 pid=92 st=5 wake=0 futex=0x0 rip=0x1080050390 winemenubuilder

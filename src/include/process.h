@@ -49,6 +49,12 @@ struct cpu_local {
   uint64_t cpu_id;
   struct process *current_proc;
   uint64_t initialized;  /* 48: set by trap_init_core_with_id on each core */
+  /* 56 (C6-p7b): slot + 1 of the KERNEL TASK whose stack this CPU is still
+     executing on after schedule() gave that task up (saved it, made it
+     READY or parked it, and claimed the next slot); 0 = none.  enter_user_space
+     clears it (`mov qword ptr gs:[56], 0`) once it has finished with the old
+     stack.  See kstack_pin_set() in process.c. */
+  uint64_t kstack_pin;
 } __attribute__((packed));
 
 extern struct cpu_local cpu_locals[];
@@ -727,7 +733,43 @@ struct process {
      ru_grp_sys_us / ru_ch_sys_us the system-time parts of ru_run_us /
      ru_grp_us / ru_ch_us.  ru_utime is the rest. */
   uint64_t ru_kin_us, ru_ksl_us, ru_sys_us, ru_grp_sys_us, ru_ch_sys_us;
+  /* C1-k6 round 2 (docs/cp-k6.md §12): the 64-bit key filter of a parked
+     poller -- the objects (pipes, eventfds) its scan found, one bit each
+     (poll_key_bit).  A keyed poll_notify_obj() wakes only pollers whose
+     filter has that bit; ~0 is "wake me for anything". */
+  uint64_t poll_bloom;
+  /* C1-k6 round 2: nanosleep/clock_nanosleep's `rem` (relative sleeps):
+     the user pointer and the deadline of the current sleep, and "a signal
+     ended it" -- the remaining time is written at the resume, in the
+     thread's own address space (process_signal_resume_deliver). */
+  uint64_t ns_rem_uptr, ns_rem_deadline;
+  int ns_rem_pending;
+  /* C1-k6 round 2: who sent each pending signal (the sender's tgid), for
+     signalfd's ssi_pid. */
+  int16_t sig_sender[HO_SIG_MAX];
 };
+
+/* C1-k6 round 2 (docs/cp-k6.md §12): a 512-bit "maybe READY" hint, one bit
+ * per slot (pid == slot).  Every transition to READY goes through
+ * proc_mark_ready(), which sets the bit; the scheduler's pick and the idle
+ * loop read the eight words instead of the state field of 512 PCBs of
+ * ~11 KiB each (512 cache misses under proc_lock on every pick), and clear a
+ * bit whose slot is not READY.  A transition that bypasses this helper (a
+ * unit test) is caught by the full scan the scheduler still does every
+ * 10 ms. */
+#define PROC_HINT_WORDS ((MAX_PROCESSES + 63) / 64)
+extern uint64_t sched_ready_hint[PROC_HINT_WORDS];
+static inline void proc_hint_ready(int pid) {
+  if (pid >= 0 && pid < MAX_PROCESSES)
+    __atomic_fetch_or(&sched_ready_hint[pid >> 6], 1ull << (pid & 63),
+                      __ATOMIC_SEQ_CST);
+}
+#define proc_mark_ready(p)                                                   \
+  do {                                                                       \
+    struct process *pmr_ = (p);                                              \
+    pmr_->state = PROC_STATE_READY;                                          \
+    proc_hint_ready(pmr_->pid);                                              \
+  } while (0)
 
 /* C1-k6: set / read a park deadline in microseconds (timer_get_us base). */
 static inline void proc_set_deadline_us(struct process *p, uint64_t us) {
@@ -1066,8 +1108,19 @@ void process_wakeup(int pid);
  * scan again) when any event happened since.  Dekker-ordered: either the
  * notifier sees the registration or the poller sees the event. */
 void poll_notify(void);
+/* C1-k6 round 2: a readiness change of ONE object (a pipe, an eventfd).
+   poll_notify() is the keyless form (every poller, every epoll set). */
+void poll_notify_obj(const void *obj);
+static inline int poll_key_bit(const void *obj) {
+  return (int)(((((uint64_t)(uintptr_t)obj >> 4) * 0x9E3779B97F4A7C15ULL) >> 58) % 63);
+}
+/* Bit 63 of a key filter: "an fd here notifies without a key" (AF_UNIX,
+   signalfd).  Keyless notifications carry every bit, so they reach it; a
+   keyed one (0..62) reaches only its own bit. */
+#define POLL_KEYLESS_BIT (1ull << 63)
 uint64_t poll_seq_snapshot(void);
 int poll_park_locked(struct process *p, uint64_t seen);
+int poll_park_bloom_locked(struct process *p, uint64_t seen, uint64_t bloom);
 void poll_unpark(struct process *p);
 void process_cancel_park(struct process *p);
 /* C1-k4: may a blocking syscall commit its park?  Not when a kill

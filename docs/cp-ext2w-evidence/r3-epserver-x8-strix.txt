@@ -1,0 +1,23 @@
+# t3_linux_probe epserver x8, strix ~/cp/lanes/ext2w3b at cp-ext2w3 c3c75d3c (kernel = 256188da). Linux host: high-water 81, done rc=0.
+# hw = [EPOLLHW] rows (n=16, n=32); wedge = YLOCK-WEDGE|STALLBREAK]|RESUME-PREFLIGHT|FATAL rows
+ep run 1 rc=0 [LP] info epserver: server epoll high-water 62 entries [LP] done rc=0  hw=2 wedge=0 13:42
+ep run 2 rc=0 [LP] info epserver: server epoll high-water 62 entries [LP] done rc=0  hw=2 wedge=0 13:44
+ep run 3 rc=0 [LP] info epserver: server epoll high-water 62 entries [LP] done rc=0  hw=2 wedge=0 13:46
+ep run 4 rc=0 [LP] info epserver: server epoll high-water 61 entries [LP] done rc=0  hw=2 wedge=0 13:48
+ep run 5 rc=0 [LP] info epserver: server epoll high-water 62 entries [LP] done rc=0  hw=2 wedge=0 13:50
+ep run 6 rc=0 [LP] info epserver: server epoll high-water 61 entries [LP] done rc=0  hw=2 wedge=0 13:52
+ep run 7 rc=0 [LP] info epserver: server epoll high-water 61 entries [LP] done rc=0  hw=2 wedge=0 13:54
+ep run 8 rc=0 [LP] info epserver: server epoll high-water 62 entries [LP] done rc=0  hw=2 wedge=0 13:56
+ALLDONE
+--- run 1 probe rows
+[LP] info epserver: 40 clients at a time for 90 s, one epoll set in the server
+[LP] PASS setup: pipe pool (220)
+[EPOLLHW] pid=3 n=16
+[EPOLLHW] pid=3 n=32
+[LP] info epserver: server epoll high-water 62 entries
+[LP] PASS the server kept answering (worst gap between finished clients, ms) (2726)
+[LP] PASS every client finished (0)
+[LP] PASS every answer was right (bad clients) (0)
+[LP] PASS clients completed (220)
+[LP] PASS the server exited normally (0)
+[LP] done rc=0

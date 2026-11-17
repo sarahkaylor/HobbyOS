@@ -34,6 +34,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,6 +46,7 @@
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/timerfd.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -363,6 +365,39 @@ static void c_cputime(const char *id) {
       id, r, (long long)dc, (long long)dt, ok ? "PASS" : "FAIL");
 }
 
+/* C10 (C1-k6 round 2): a signal that ends a relative nanosleep and
+   clock_nanosleep leaves the remaining time in rem */
+static void on_usr1(int s) { (void)s; }
+static void c_rem(const char *id) {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_handler = on_usr1;
+  sigaction(SIGUSR1, &sa, 0);
+  long r[2];
+  long long left_ms[2];
+  for (int k = 0; k < 2; k++) {
+    pid_t me = getpid();
+    pid_t c = fork();
+    if (c == 0) {
+      struct timespec d = {0, 100000000};
+      nanosleep(&d, 0);
+      kill(me, SIGUSR1);
+      _exit(0);
+    }
+    struct timespec req = {1, 0}, rem = {-1, -1};
+    if (k == 0) r[k] = syscall(SYS_nanosleep, &req, &rem) == 0 ? 0 : -errno;
+    else r[k] = syscall(SYS_clock_nanosleep, CLOCK_MONOTONIC, 0, &req, &rem) == 0 ? 0 : -errno;
+    left_ms[k] = (long long)rem.tv_sec * 1000 + rem.tv_nsec / 1000000;
+    int st;
+    waitpid(c, &st, 0);
+  }
+  int ok = r[0] == -EINTR && r[1] == -EINTR && left_ms[0] > 700 && left_ms[0] < 950 &&
+           left_ms[1] > 700 && left_ms[1] < 950;
+  if (!ok) fails++;
+  row("%s EINTR leaves rem: nanosleep rc=%ld rem=%lldms  clock_nanosleep rc=%ld rem=%lldms %s",
+      id, r[0], left_ms[0], r[1], left_ms[1], ok ? "PASS" : "FAIL");
+}
+
 int main(int argc, char **argv) {
   int only_load = argc > 1 && !strcmp(argv[1], "load");
   setvbuf(stdout, NULL, _IOLBF, 0);
@@ -405,6 +440,7 @@ int main(int argc, char **argv) {
           ok ? "PASS" : "FAIL");
     }
     c_cputime("C9");
+    c_rem("C10");
   }
 
   /* load: 8 burners (one per guest CPU) plus this thread */

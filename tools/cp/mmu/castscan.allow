@@ -371,3 +371,5 @@ src/kernel/fs.c	I2P	return ext2v_pwrite(gfile(li), (const void *)(uintptr_t)ubuf
 src/kernel/arch/x64/trap.c	P2I	idt_set_gate(132, (uint64_t)exception_132, 0x08, 0x8E);
 src/kernel/frame.c	P2I	frame_raw_hex((uint64_t)(uintptr_t)__builtin_return_address(0));
 src/kernel/linux_compat_fd.c	P2I	if (l_copy_to_user(cur, (uint64_t)(uintptr_t)buf + (uint64_t)i * L_SSI_SIZE,
+# C1-k6 round 2: poll_key_bit hashes an object pointer into a notification key bit (never dereferenced).
+src/include/process.h	P2I	return (int)(((((uint64_t)(uintptr_t)obj >> 4) * 0x9E3779B97F4A7C15ULL) >> 58) % 63);

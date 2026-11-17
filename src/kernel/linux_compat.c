@@ -281,7 +281,10 @@ static int l_core_nanosleep(struct process *p, struct trap_frame *tf) {
     return 1;
   }
   if (us > L_US_FOREVER) us = L_US_FOREVER;
-  if (us > 0) l_block_until_us(tf, timer_get_us() + (uint64_t)us, L_SYS_nanosleep, 0);
+  /* C1-k6 round 2: `rem` is written if a signal ends the sleep */
+  p->ns_rem_uptr = l_arg(tf, 1);
+  p->ns_rem_deadline = timer_get_us() + (uint64_t)us;
+  if (us > 0) l_block_until_us(tf, p->ns_rem_deadline, L_SYS_nanosleep, 0);
   else tf->regs[0] = 0;
   return 1;
 }
@@ -385,6 +388,9 @@ static int l_core_clock_nanosleep(struct process *p, struct trap_frame *tf) {
   if (!abstime) {
     if (us > L_US_FOREVER) us = L_US_FOREVER;
     deadline = mono + (uint64_t)us;
+    /* C1-k6 round 2: a relative sleep's `rem` is written if a signal ends it */
+    p->ns_rem_uptr = l_arg(tf, 3);
+    p->ns_rem_deadline = deadline;
   } else if (kind == 1) {
     deadline = (uint64_t)us; /* CLOCK_MONOTONIC is timer_get_us (b8cc46c8) */
   } else {
@@ -450,7 +456,13 @@ static void l_skw_check(struct process *p, struct trap_frame *tf) {
   if (!rip)
     return;
   struct l_skw_site *slot = 0;
-  for (int i = 0; i < 512; i++) {
+  /* C1-k6 round 2 (docs/cp-k6.md §12): a hashed probe of 8 entries, not a
+     linear search of all 512 on every Linux-ABI syscall (it was the largest
+     fixed cost of a syscall).  A site that finds its 8 entries full is not
+     recorded, as a full table never recorded one. */
+  uint32_t h = (uint32_t)(((rip >> 1) ^ (rip >> 13) ^ ((uint64_t)p->pid * 0x9E3779B1u)) & 511);
+  for (int k = 0; k < 8; k++) {
+    int i = (int)((h + (uint32_t)k) & 511);
     if (l_skw[i].used && l_skw[i].pid == (uint32_t)p->pid &&
         l_skw[i].rip == rip) {
       if (l_skw[i].par != par && l_skw_rows < 12) {
@@ -499,6 +511,7 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     p->sig_park_nr = 0;
     p->sys_entry_pc = tf->elr;
     p->poll_waiting = 0; /* C1-k4: a poll registration belongs to one syscall */
+    if (!p->ns_rem_pending) p->ns_rem_uptr = 0; /* C1-k6 round 2: one sleep's */
   }
 #ifdef RW_SC_RING
   /* L85: open a history slot BEFORE the handler runs, so a fault inside the
@@ -531,33 +544,19 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
 #else
 #define L_DISPATCH_RET(v) do { fat16_flush_pending(); return (v); } while (0)
 #endif
-  if (l_tab_tmpfs) {
-    for (unsigned i = 0; l_tab_tmpfs[i].fn; i++) {
-      if ((uint64_t)(int64_t)l_tab_tmpfs[i].nr == nr) {
-        int _t = l_tab_tmpfs[i].fn(p, tf);
-        if (_t) L_DISPATCH_RET(_t);
-        break;
-      }
-    }
-  }
-  if (l_tab_ext2) {
-    for (unsigned i = 0; l_tab_ext2[i].fn; i++) {
-      if ((uint64_t)(int64_t)l_tab_ext2[i].nr == nr) {
-        int _e = l_tab_ext2[i].fn(p, tf);
-        if (_e) L_DISPATCH_RET(_e);
-        break;
-      }
-    }
-  }
-  if (l_tab_vfsx) {
-    for (unsigned i = 0; l_tab_vfsx[i].fn; i++) {
-      if ((uint64_t)(int64_t)l_tab_vfsx[i].nr == nr) {
-        int _e = l_tab_vfsx[i].fn(p, tf);
-        if (_e) L_DISPATCH_RET(_e);
-        break;
-      }
-    }
-  }
+  /* C1-k6 round 2 (docs/cp-k6.md §12): the table walk -- three optional
+     decline-capable tables, then the first match in the main tables -- was a
+     linear search of every table on every syscall (all of them, for a
+     number only the native switch handles, like read or write).  The tables
+     are link-time constants, so the walk's result per number is computed
+     once and kept: the same handlers, in the same order. */
+  struct l_dc_ent {
+    uint8_t built;
+    const struct l_sysent *pre[3];
+    const struct l_sysent *fin;
+    const struct l_sysent *fin_tab;
+  };
+  static struct l_dc_ent l_dc[512];
   const struct l_sysent *const tables[] = {
     l_tab_core,
     (const struct l_sysent *)l_tab_fd,
@@ -569,29 +568,55 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     (const struct l_sysent *)l_tab_shm,
     (const struct l_sysent *)l_tab_cons,
   };
-  for (unsigned t = 0; t < sizeof tables / sizeof tables[0]; t++) {
-    const struct l_sysent *tab = tables[t];
-    if (!tab) continue;
-    for (unsigned i = 0; tab[i].fn; i++) {
-      if ((uint64_t)(int64_t)tab[i].nr == nr) {
-#ifdef RW_TRACE_MEM
-        /* The memory table is traced here, not in each handler: every handler
-           has several exits and a second exit path would drift.  Arguments are
-           read BEFORE the call (the handler writes regs[0]) and the return
-           value is what the handler left in regs[0]. */
-        if (tab == (const struct l_sysent *)l_tab_mem) {
-          uint64_t a0 = l_arg(tf, 0), a1 = l_arg(tf, 1), a2 = l_arg(tf, 2);
-          uint64_t a3 = l_arg(tf, 3), a4 = l_arg(tf, 4), a5 = l_arg(tf, 5);
-          int64_t r = tab[i].fn(p, tf);
-          l_mem_trace(tab[i].name, p, a0, a1, a2, a3, a4, a5,
-                      (int64_t)tf->regs[0]);
-          L_DISPATCH_RET((int)r);
-        }
-#endif
-        int _r = tab[i].fn(p, tf);
-        L_DISPATCH_RET(_r);
-      }
+  struct l_dc_ent dcl;
+  struct l_dc_ent *dc = nr < 512 ? &l_dc[nr] : &dcl;
+  if (nr >= 512 || !__atomic_load_n(&dc->built, __ATOMIC_ACQUIRE)) {
+    struct l_dc_ent e = {0};
+    const struct l_sysent *const pres[3] = {l_tab_tmpfs, l_tab_ext2, l_tab_vfsx};
+    for (int k = 0; k < 3; k++) {
+      if (!pres[k]) continue;
+      for (unsigned i = 0; pres[k][i].fn; i++)
+        if ((uint64_t)(int64_t)pres[k][i].nr == nr) { e.pre[k] = &pres[k][i]; break; }
     }
+    for (unsigned t = 0; t < sizeof tables / sizeof tables[0] && !e.fin; t++) {
+      const struct l_sysent *tab = tables[t];
+      if (!tab) continue;
+      for (unsigned i = 0; tab[i].fn; i++)
+        if ((uint64_t)(int64_t)tab[i].nr == nr) { e.fin = &tab[i]; e.fin_tab = tab; break; }
+    }
+    if (nr < 512) {
+      dc->pre[0] = e.pre[0];
+      dc->pre[1] = e.pre[1];
+      dc->pre[2] = e.pre[2];
+      dc->fin = e.fin;
+      dc->fin_tab = e.fin_tab;
+      __atomic_store_n(&dc->built, 1, __ATOMIC_RELEASE);
+    } else {
+      dcl = e;
+    }
+  }
+  for (int k = 0; k < 3; k++) {
+    if (!dc->pre[k]) continue;
+    int _t = dc->pre[k]->fn(p, tf);
+    if (_t) L_DISPATCH_RET(_t);
+  }
+  if (dc->fin) {
+#ifdef RW_TRACE_MEM
+    /* The memory table is traced here, not in each handler: every handler
+       has several exits and a second exit path would drift.  Arguments are
+       read BEFORE the call (the handler writes regs[0]) and the return
+       value is what the handler left in regs[0]. */
+    if (dc->fin_tab == (const struct l_sysent *)l_tab_mem) {
+      uint64_t a0 = l_arg(tf, 0), a1 = l_arg(tf, 1), a2 = l_arg(tf, 2);
+      uint64_t a3 = l_arg(tf, 3), a4 = l_arg(tf, 4), a5 = l_arg(tf, 5);
+      int64_t r = dc->fin->fn(p, tf);
+      l_mem_trace(dc->fin->name, p, a0, a1, a2, a3, a4, a5,
+                  (int64_t)tf->regs[0]);
+      L_DISPATCH_RET((int)r);
+    }
+#endif
+    int _r = dc->fin->fn(p, tf);
+    L_DISPATCH_RET(_r);
   }
   L_DISPATCH_RET(0);
 #undef L_DISPATCH_RET
