@@ -12,12 +12,15 @@
  *   DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB (+ cmd) -> GPU_IOC_RES_CREATE_BLOB
  *   DRM_IOCTL_VIRTGPU_MAP + mmap      -> GPU_IOC_RES_MAP_BLOB (kernel picks VA)
  *   DRM_IOCTL_VIRTGPU_EXECBUFFER      -> GPU_IOC_SUBMIT2 (ring_idx, fence)
- *   drm_syncobj (sim)                 -> binary syncs on (ring, seqno) fences,
+ *   drm_syncobj (timeline)            -> timeline syncs on (ring, seqno) fences,
  *                                        waited with GPU_IOC_FENCE_WAIT2
  *
- * Syncs are binary (has_timeline_sync = false), exactly like Mesa's own
- * simulated-syncobj fallback for kernels without timeline syncobjs: venus then
- * runs timeline semaphores on its feedback path.  No dma-buf: import/export
+ * Syncs are timelines (has_timeline_sync = true): a sync remembers the
+ * (value, ring, seqno) of every submit that will raise it, and a wait for a
+ * value blocks in GPU_IOC_FENCE_WAIT2 on the earliest such fence.  (Until
+ * de1b34d9 they were binary, like Mesa's simulated syncobj; venus then ran
+ * timeline semaphores on its feedback path, which polls with vn_relax'
+ * sleeps.)  No dma-buf: import/export
  * are refused, so venus' WSI takes the software path (vn_wsi_init: no
  * EXT_external_memory_dma_buf -> sw_device).
  *
@@ -52,13 +55,25 @@ struct hobbyos_bo {
    uint32_t blob_flags;
 };
 
+/* A timeline sync (vn_renderer.h: "a uint64_t counter, modelled after a
+ * timeline VkSemaphore").  `value` is what is known signalled (CPU writes and
+ * retired submits); `pend` lists the submits that will raise it, each a
+ * (value, ring, seqno) kernel fence.  The counter is max(value, every retired
+ * pend[i].value): a retired fence on any ring proves its value was reached. */
+#define HB_SYNC_PEND_INLINE 8
+struct hb_pend {
+   uint64_t value;
+   uint64_t seqno;
+   uint32_t ring;
+};
+
 struct hobbyos_sync {
    struct vn_renderer_sync base; /* first: venus only ever holds this pointer */
    mtx_t mutex;
-   bool signaled;
-   bool pending;
-   uint32_t ring;
-   uint64_t seqno;
+   uint64_t value;
+   uint32_t npend, cap;
+   struct hb_pend *pend;
+   struct hb_pend inline_pend[HB_SYNC_PEND_INLINE];
 };
 
 struct hobbyos {
@@ -101,29 +116,50 @@ hb_fence_wait(struct hobbyos *hb, uint32_t ring, uint64_t seqno, uint64_t timeou
    return hb_ioctl(hb, GPU_IOC_FENCE_WAIT2, &w);
 }
 
-/* Fold a retired pending fence into `signaled`.  Caller holds s->mutex. */
+/* Retire every pending entry whose fence is done (non-blocking) and fold its
+ * value in.  Caller holds s->mutex. */
 static void
-hb_sync_update_locked(struct hobbyos *hb, struct hobbyos_sync *s, uint64_t timeout_ns)
+hb_sync_collect_locked(struct hobbyos *hb, struct hobbyos_sync *s)
 {
-   if (s->signaled || !s->pending)
-      return;
-   const uint32_t ring = s->ring;
-   const uint64_t seqno = s->seqno;
-   int r;
-   if (timeout_ns) {
-      /* never sleep holding the sync's mutex */
-      mtx_unlock(&s->mutex);
-      r = hb_fence_wait(hb, ring, seqno, timeout_ns);
-      mtx_lock(&s->mutex);
-      if (!s->pending || s->ring != ring || s->seqno != seqno)
-         return; /* re-armed or reset meanwhile */
-   } else {
-      r = hb_fence_wait(hb, ring, seqno, 0);
+   uint32_t j = 0;
+   for (uint32_t i = 0; i < s->npend; i++) {
+      struct hb_pend e = s->pend[i];
+      if (e.value <= s->value)
+         continue; /* already implied */
+      int r = hb_fence_wait(hb, e.ring, e.seqno, 0);
+      if (r == 0 || r == -EINVAL) {
+         /* -EINVAL: the context forgot it (destroyed) -- treat as done */
+         if (e.value > s->value)
+            s->value = e.value;
+         continue;
+      }
+      s->pend[j++] = e;
    }
-   if (r == 0) {
-      s->pending = false;
-      s->signaled = true;
+   s->npend = j;
+   /* entries at or below the new value are implied too */
+   j = 0;
+   for (uint32_t i = 0; i < s->npend; i++)
+      if (s->pend[i].value > s->value)
+         s->pend[j++] = s->pend[i];
+   s->npend = j;
+}
+
+static bool
+hb_sync_push_locked(struct hobbyos_sync *s, uint64_t value, uint32_t ring, uint64_t seqno)
+{
+   if (s->npend == s->cap) {
+      uint32_t nc = s->cap * 2;
+      struct hb_pend *np = malloc(nc * sizeof(*np));
+      if (!np)
+         return false;
+      memcpy(np, s->pend, s->npend * sizeof(*np));
+      if (s->pend != s->inline_pend)
+         free(s->pend);
+      s->pend = np;
+      s->cap = nc;
    }
+   s->pend[s->npend++] = (struct hb_pend){ .value = value, .seqno = seqno, .ring = ring };
+   return true;
 }
 
 static VkResult
@@ -136,7 +172,9 @@ hobbyos_sync_create(struct vn_renderer *renderer,
    if (!s)
       return VK_ERROR_OUT_OF_HOST_MEMORY;
    mtx_init(&s->mutex, mtx_plain);
-   s->signaled = initial_val != 0;
+   s->value = initial_val;
+   s->pend = s->inline_pend;
+   s->cap = HB_SYNC_PEND_INLINE;
    *out_sync = &s->base;
    return VK_SUCCESS;
 }
@@ -156,6 +194,8 @@ hobbyos_sync_destroy(struct vn_renderer *renderer, struct vn_renderer_sync *sync
 {
    (void)renderer;
    struct hobbyos_sync *s = (struct hobbyos_sync *)sync;
+   if (s->pend != s->inline_pend)
+      free(s->pend);
    mtx_destroy(&s->mutex);
    free(s);
 }
@@ -175,8 +215,8 @@ hobbyos_sync_reset(struct vn_renderer *renderer, struct vn_renderer_sync *sync)
    (void)renderer;
    struct hobbyos_sync *s = (struct hobbyos_sync *)sync;
    mtx_lock(&s->mutex);
-   s->signaled = false;
-   s->pending = false;
+   s->value = 0;
+   s->npend = 0;
    mtx_unlock(&s->mutex);
    return VK_SUCCESS;
 }
@@ -189,8 +229,8 @@ hobbyos_sync_read(struct vn_renderer *renderer,
    struct hobbyos *hb = (struct hobbyos *)renderer;
    struct hobbyos_sync *s = (struct hobbyos_sync *)sync;
    mtx_lock(&s->mutex);
-   hb_sync_update_locked(hb, s, 0);
-   *val = s->signaled ? 1 : 0;
+   hb_sync_collect_locked(hb, s);
+   *val = s->value;
    mtx_unlock(&s->mutex);
    return VK_SUCCESS;
 }
@@ -203,22 +243,47 @@ hobbyos_sync_write(struct vn_renderer *renderer,
    (void)renderer;
    struct hobbyos_sync *s = (struct hobbyos_sync *)sync;
    mtx_lock(&s->mutex);
-   s->pending = false;
-   s->signaled = val != 0;
+   if (val > s->value)
+      s->value = val;
    mtx_unlock(&s->mutex);
    return VK_SUCCESS;
 }
 
-/* state of one sync for a wait pass: 1 signalled, 0 pending, -1 idle
- * (unsignalled with nothing submitted) */
+/* One step of a wait for `target` on `s`: 1 reached; 0 not yet, and if a
+ * pending submit will reach it, (*ring, *seqno) is the earliest such fence;
+ * -1 not yet and nothing submitted can reach it (wait for submit). */
 static int
-hb_sync_poll(struct hobbyos *hb, struct hobbyos_sync *s, uint64_t timeout_ns)
+hb_sync_check(struct hobbyos *hb, struct hobbyos_sync *s, uint64_t target,
+              uint32_t *ring, uint64_t *seqno)
 {
    mtx_lock(&s->mutex);
-   hb_sync_update_locked(hb, s, timeout_ns);
-   int st = s->signaled ? 1 : (s->pending ? 0 : -1);
+   hb_sync_collect_locked(hb, s);
+   int st;
+   if (s->value >= target) {
+      st = 1;
+   } else {
+      st = -1;
+      uint64_t best = UINT64_MAX;
+      for (uint32_t i = 0; i < s->npend; i++) {
+         if (s->pend[i].value >= target && s->pend[i].seqno < best) {
+            best = s->pend[i].seqno;
+            *ring = s->pend[i].ring;
+            *seqno = s->pend[i].seqno;
+            st = 0;
+         }
+      }
+   }
    mtx_unlock(&s->mutex);
    return st;
+}
+
+static uint64_t
+hb_left(int64_t abs)
+{
+   if (abs == OS_TIMEOUT_INFINITE)
+      return UINT64_MAX;
+   const int64_t now = os_time_get_nano();
+   return abs > now ? (uint64_t)(abs - now) : 0;
 }
 
 static VkResult
@@ -227,62 +292,60 @@ hobbyos_wait(struct vn_renderer *renderer, const struct vn_renderer_wait *wait)
    struct hobbyos *hb = (struct hobbyos *)renderer;
    const int64_t abs = os_time_get_absolute_timeout(wait->timeout);
 
-   if (!wait->wait_any) {
-      /* every sync, each with what is left of the timeout */
+   if (!wait->wait_any || wait->sync_count == 1) {
       for (uint32_t i = 0; i < wait->sync_count; i++) {
          struct hobbyos_sync *s = (struct hobbyos_sync *)wait->syncs[i];
          for (;;) {
-            const int64_t now = os_time_get_nano();
-            uint64_t left = abs == OS_TIMEOUT_INFINITE ? UINT64_MAX
-                            : abs > now                ? (uint64_t)(abs - now)
-                                                       : 0;
-            int st = hb_sync_poll(hb, s, left);
+            uint32_t ring = 0;
+            uint64_t seqno = 0;
+            int st = hb_sync_check(hb, s, wait->sync_values[i], &ring, &seqno);
             if (st == 1)
                break;
+            uint64_t left = hb_left(abs);
             if (left == 0)
                return VK_TIMEOUT;
             if (st == -1) {
-               /* Nothing submitted yet: wait-for-submit, like drm_syncobj's
-                * WAIT_FOR_SUBMIT that the virtgpu backend always sets.  Another
-                * thread (venus' async present, vkd3d's submit thread) may be
-                * about to submit it; Mesa's sim syncobj returns ETIME here. */
-               os_time_sleep(200);
+               /* Nothing submitted reaches it yet: wait for submit, like
+                * drm_syncobj's WAIT_FOR_SUBMIT (another thread may submit or
+                * write it). */
+               os_time_sleep(100);
                continue;
             }
-            if (abs != OS_TIMEOUT_INFINITE && os_time_get_nano() >= abs)
-               return VK_TIMEOUT;
+            int r = hb_fence_wait(hb, ring, seqno, left);
+            if (r != 0 && r != -ETIMEDOUT && r != -EINVAL)
+               return VK_ERROR_DEVICE_LOST;
          }
       }
       return VK_SUCCESS;
    }
 
-   /* wait_any: poll all, then block briefly on the first pending one */
+   /* wait_any over several syncs: poll all, then sleep on one candidate for a
+    * short slice and look again. */
    for (;;) {
-      int first_pending = -1;
-      bool any_pending = false;
+      bool have = false;
+      uint32_t ring = 0;
+      uint64_t seqno = 0;
       for (uint32_t i = 0; i < wait->sync_count; i++) {
-         int st = hb_sync_poll(hb, (struct hobbyos_sync *)wait->syncs[i], 0);
+         uint32_t r1 = 0;
+         uint64_t s1 = 0;
+         int st = hb_sync_check(hb, (struct hobbyos_sync *)wait->syncs[i], wait->sync_values[i],
+                                &r1, &s1);
          if (st == 1)
             return VK_SUCCESS;
-         if (st == 0) {
-            any_pending = true;
-            if (first_pending < 0)
-               first_pending = (int)i;
+         if (st == 0 && !have) {
+            have = true;
+            ring = r1;
+            seqno = s1;
          }
       }
-      const int64_t now = os_time_get_nano();
-      if (abs != OS_TIMEOUT_INFINITE && now >= abs)
+      uint64_t left = hb_left(abs);
+      if (left == 0)
          return VK_TIMEOUT;
-      if (!any_pending) {
-         os_time_sleep(200); /* wait-for-submit, see the wait_all branch */
+      if (!have) {
+         os_time_sleep(100);
          continue;
       }
-      uint64_t slice = 1000000ull; /* 1 ms, then look at the others again */
-      if (abs != OS_TIMEOUT_INFINITE && (uint64_t)(abs - now) < slice)
-         slice = (uint64_t)(abs - now);
-      if (wait->sync_count == 1)
-         slice = abs == OS_TIMEOUT_INFINITE ? UINT64_MAX : (uint64_t)(abs - now);
-      hb_sync_poll(hb, (struct hobbyos_sync *)wait->syncs[first_pending], slice);
+      hb_fence_wait(hb, ring, seqno, left < 1000000ull ? left : 1000000ull);
    }
 }
 
@@ -308,11 +371,10 @@ hobbyos_submit(struct vn_renderer *renderer, const struct vn_renderer_submit_bat
    for (uint32_t i = 0; i < batch->sync_count; i++) {
       struct hobbyos_sync *sy = (struct hobbyos_sync *)batch->syncs[i];
       mtx_lock(&sy->mutex);
-      sy->signaled = false;
-      sy->pending = true;
-      sy->ring = batch->ring_idx;
-      sy->seqno = s.seqno;
+      bool ok = hb_sync_push_locked(sy, batch->sync_values[i], batch->ring_idx, s.seqno);
       mtx_unlock(&sy->mutex);
+      if (!ok)
+         return VK_ERROR_OUT_OF_HOST_MEMORY;
    }
    return VK_SUCCESS;
 }
@@ -541,7 +603,10 @@ hobbyos_init_renderer_info(struct hobbyos *hb)
 
    info->has_dma_buf_import = false;
    info->has_external_sync = false;
-   info->has_timeline_sync = false;
+   /* Timeline syncs on (ring, seqno) fences (hobbyos_sync above): venus then
+    * waits for timeline semaphores and fences in FENCE_WAIT2 (IRQ-woken)
+    * instead of polling its feedback slots with vn_relax' sleeps. */
+   info->has_timeline_sync = true;
    info->has_implicit_fencing = false;
    info->has_guest_vram = false;
    info->max_timeline_count = hb->num_rings;

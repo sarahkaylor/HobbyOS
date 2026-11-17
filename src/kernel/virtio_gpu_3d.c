@@ -1452,6 +1452,8 @@ static const uint32_t gpu3d_hist_ub[GPU3D_HIST_N] = {25, 50, 100, 200, 500, 1000
                                                      11000, 0xFFFFFFFFu};
 static uint32_t gpu3d_hist[GPU3D_HIST_N];
 static uint32_t gpu3d_retire_irq = 0, gpu3d_retire_inline = 0;
+static uint32_t gpu3d_retire_tick = 0; /* waiter's tick re-check found it done */
+void virtio_gpu_3d_note_tick_retire(void) { gpu3d_retire_tick++; }
 extern int virtio_gpu_x64_drain_from_irq;
 extern uint64_t timer_get_us(void);
 
@@ -1466,6 +1468,8 @@ static void gpu3d_fence_stats_row(const char* why) {
   print_int((int)gpu3d_retire_inline);
   uart_puts(" errors=");
   print_int((int)gpu3d_fence_errors);
+  uart_puts(" waiter_tick_finds=");
+  print_int((int)gpu3d_retire_tick);
   uart_puts(" post->retire_us");
   for (int i = 0; i < GPU3D_HIST_N; i++) {
     uart_puts(i + 1 < GPU3D_HIST_N ? " <=" : " >");
@@ -1610,6 +1614,7 @@ int virtio_gpu_3d_ctx_create2(uint32_t capset_id, uint32_t num_rings, const char
   if (!gpu3d_capset_by_id(capset_id) || capset_id > 0xFF) return -EINVAL;
   if (num_rings == 0 || num_rings > GPU_MAX_RINGS) return -EINVAL;
   if (gpu3d_m2_tables() != 0) return -ENOMEM;
+  virtio_gpu_x64_irq_late_enable();
 
   uint64_t fl = virtio_gpu_x64_lock();
   int si = -1;

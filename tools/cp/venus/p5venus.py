@@ -123,6 +123,11 @@ def _patch_read(p5lib):
 
 
 def install():
+    # SIGTERM -> SystemExit, so the harness's `finally` stops its QEMU (a
+    # SIGTERMed python otherwise dies leaving the guest running, holding the
+    # disk image's write lock and a slot).
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     _patch_qmp()
     if P5DIR not in sys.path:
         sys.path.insert(0, P5DIR)

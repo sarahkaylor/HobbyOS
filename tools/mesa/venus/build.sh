@@ -115,6 +115,45 @@ w = w.replace(old, """   const bool use_sw_device =
       !physical_dev->base.vk.supported_extensions
           .EXT_external_memory_dma_buf ||""", 1)
 open(v + '/vn_wsi.c', 'w').write(w)
+# Present synchronously on HobbyOS (docs/cp-venus.md §6.1): venus' async
+# present thread (vn_wsi_present_async, used when the renderer has no implicit
+# fencing) deadlocked against DXVK's / vkd3d-proton's present threads and
+# Mesa's X11 software-WSI queue thread -- every thread of d3d11tri.exe parked
+# in a futex after frame 1.  HOBBYOS_VN_ASYNC_PRESENT=1 restores it at run time.
+old = """   if (!dev->renderer->info.has_implicit_fencing &&
+       !VN_PERF(NO_ASYNC_PRESENT)) {"""
+assert w.count(old) == 1
+w = w.replace(old, """   if (!dev->renderer->info.has_implicit_fencing &&
+       !VN_PERF(NO_ASYNC_PRESENT) && !vn_hobbyos_sync_present()) {""", 1)
+w = w.replace('static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL\nvn_wsi_proc_addr', """static bool
+vn_hobbyos_sync_present(void)
+{
+#ifdef VN_HOBBYOS
+   const char *e = getenv("HOBBYOS_VN_ASYNC_PRESENT");
+   return !(e && e[0] == '1');
+#else
+   return false;
+#endif
+}
+
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+vn_wsi_proc_addr""", 1)
+assert 'vn_hobbyos_sync_present(void)' in w
+open(v + '/vn_wsi.c', 'w').write(w)
+# No VK_KHR_present_wait{,2} on HobbyOS (docs/cp-venus.md §6.1).  Venus
+# advertises them unconditionally; lavapipe does not.  DXVK and vkd3d-proton
+# pace frames with vkWaitForPresentKHR when it exists, and on the X11
+# software-WSI path (XHOBBY: no DRI3, images go out with PutImage) the present
+# id it waits for never completes -- d3d11tri stopped after frame 1 and
+# d3d12tri after frame 0, every thread parked in a futex, while vkcube (no
+# present wait) ran.  Without the extensions both fall back to fences, as on
+# lavapipe.
+pd = open(v + '/vn_physical_device.c').read()
+for ext in ('KHR_present_wait', 'KHR_present_wait2'):
+    old = '   exts->%s = true;\n' % ext
+    assert pd.count(old) == 1, ext
+    pd = pd.replace(old, '#ifndef VN_HOBBYOS\n' + old + '#endif\n', 1)
+open(v + '/vn_physical_device.c', 'w').write(pd)
 # Diagnostics: VENUS_DEBUG_DEFAULT=<VN_DEBUG list> bakes a default for builds
 # whose processes get no environment (Wine children of the P5 launcher).
 import os

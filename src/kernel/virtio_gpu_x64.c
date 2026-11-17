@@ -940,6 +940,37 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
  * holds, then wake the fence sleepers outside the lock. */
 int virtio_gpu_x64_drain_from_irq = 0; /* P6: fence statistics only */
 
+/* P6: called once, from process context after boot (the first CTX_CREATE2).
+ * Two things bring-up cannot do: (1) the PIC is (re)initialised by gic_init()
+ * AFTER virtio_gpu_init(), which masks every line again, so the unmask done at
+ * bring-up is lost unless another device on the same line re-enables it; (2)
+ * a PCI INTx line is level-triggered and on q35 the GPU shares it with the
+ * legacy virtio-net, so the PIC must be in level mode for it (ELCR), or an
+ * edge is lost whenever the net holds the line.  Logs the ELCR before/after. */
+void virtio_gpu_x64_irq_late_enable(void) {
+  static int done;
+  if (done || virtio_gpu_x64_irq_vector < 0) return;
+  done = 1;
+  int irq = virtio_gpu_x64_irq_vector - 32;
+  uint16_t port = irq < 8 ? 0x4D0 : 0x4D1;
+  uint8_t bit = (uint8_t)(1u << (irq & 7));
+  uint8_t before = inb(port);
+  if (!(before & bit)) outb(port, (uint8_t)(before | bit));
+  uint8_t after = inb(port);
+  extern void gic_enable_interrupt(uint32_t intid);
+  gic_enable_interrupt((uint32_t)virtio_gpu_x64_irq_vector);
+  uint8_t mask = irq < 8 ? inb(0x21) : inb(0xA1);
+  uart_puts("[VIRGL3D] irq late-enable line=");
+  print_int(irq);
+  uart_puts(" elcr_before=");
+  uart_print_hex(before);
+  uart_puts(" elcr_after=");
+  uart_print_hex(after);
+  uart_puts(" pic_mask=");
+  uart_print_hex(mask);
+  uart_puts("\n");
+}
+
 void virtio_gpu_x64_handle_irq(void) {
   gpu_isr_ack();
   uint64_t fl = spinlock_acquire_irqsave(&gpu_lock);

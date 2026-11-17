@@ -1308,18 +1308,42 @@ static int gpu_m2_fence_wait2(struct process* p, int fd, uint64_t arg) {
     }
     return -ETIMEDOUT;
   }
-  /* A restarted wait (deadline already set) whose fence is still pending has
-   * slept >= 2 s: dump the context's fence state (rate-limited) -- the stall
-   * report the WSI's infinite waits otherwise never produce. */
+  /* A restarted wait (deadline already set): drain + kick before parking
+   * again.  The device's INTx can be lost -- on q35 it shares line 10 with the
+   * legacy virtio-net, and an edge-mode PIC drops the GPU's edge while the
+   * net holds the line (measured: a d3d12tri waiter parked 2 s on a fence the
+   * used ring had long retired).  So a parked waiter also re-checks every
+   * tick; the IRQ remains the fast path. */
   if (fw.deadline_ms != 0) {
+    rc = virtio_gpu_3d_fence_kick_check(fw.ctx_id, fw.ring_idx, fw.seqno);
+    if (rc != -EAGAIN) {
+      if (rc == 0) virtio_gpu_3d_note_tick_retire();
+      return rc;
+    }
+    /* Still pending after >= 2 s: dump the context's fence state (rate-limited)
+     * -- the stall report an infinite WSI wait otherwise never produces. */
+    static struct { int tid; uint64_t seqno, first_ms; } seen[32];
     static uint64_t last_dump_ms;
     static int dumps;
-    if (now - last_dump_ms >= 1000 && dumps < 64) {
+    int k, slot = -1;
+    for (k = 0; k < 32; k++)
+      if (seen[k].tid == p->pid && seen[k].seqno == fw.seqno) break;
+    if (k == 32) {
+      for (k = 0; k < 32; k++)
+        if (seen[k].tid == 0 || now - seen[k].first_ms > 60000) { slot = k; break; }
+      if (slot < 0) slot = (int)(now % 32);
+      seen[slot].tid = p->pid;
+      seen[slot].seqno = fw.seqno;
+      seen[slot].first_ms = now;
+      k = slot;
+    }
+    if (now - seen[k].first_ms >= 2000 && now - last_dump_ms >= 1000 && dumps < 64) {
       last_dump_ms = now;
       dumps++;
       gpu_abi_say("[VENUS] stall pid=", gpu_m2_pid(p));
       gpu_abi_say(" tid=", p->pid);
-      gpu_abi_say(" waits ctx=", (int)fw.ctx_id);
+      gpu_abi_say(" waits_ms=", (int)(now - seen[k].first_ms));
+      gpu_abi_say(" ctx=", (int)fw.ctx_id);
       gpu_abi_say(" ring=", (int)fw.ring_idx);
       uart_puts(" seqno=");
       extern void uart_print_hex(uint64_t val);
@@ -1328,9 +1352,9 @@ static int gpu_m2_fence_wait2(struct process* p, int fd, uint64_t arg) {
       virtio_gpu_3d_fence_dump(fw.ctx_id);
     }
   }
-  /* Self-wake every 2 s so a stall is reported even for an infinite wait. */
-  uint64_t wake = (fw.deadline_ms == ~0ull) ? now + 2000 : fw.deadline_ms;
-  if (wake > now + 2000) wake = now + 2000;
+  /* Park until the IRQ wakes us, the deadline, or the next tick. */
+  uint64_t wake = now + 1;
+  if (fw.deadline_ms != ~0ull && fw.deadline_ms < wake) wake = fw.deadline_ms;
   return virtio_gpu_3d_fence_park(fw.ctx_id, fw.ring_idx, fw.seqno, wake);
 }
 
