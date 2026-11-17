@@ -38,7 +38,10 @@
 #define EXT2_CACHE_MAX 4096     /* cache slots (one block each) */
 #define EXT2_HASH_N 4096
 #define EXT2_RUN_MAX 128        /* blocks in one device command run */
-#define EXT2_OPEN_MAX 512       /* distinct open inodes (== MAX_GLOBAL_FILES) */
+#define EXT2_OPEN_MAX 16384     /* distinct open inodes: one per open file
+                                   description at most, so == the x86_64
+                                   MAX_GLOBAL_FILES (C1-k5: 16384); scans stop
+                                   at open_hi, the highest slot in use */
 
 #define EXT2_EXTERNAL 1         /* ext2_resolve: path left the filesystem */
 
@@ -153,6 +156,7 @@ struct ext2_fs {
   uint64_t ra_next;
 
   struct ext2_open_ref open[EXT2_OPEN_MAX];
+  uint32_t open_hi;       /* open[] slots >= open_hi are all free */
 
   /* statistics (host test + kernel diagnostics) */
   uint64_t st_dev_reads, st_dev_writes, st_hits;

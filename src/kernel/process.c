@@ -3019,19 +3019,71 @@ void process_exit(struct trap_frame *tf) {
   schedule(tf, 0);
 }
 
+/* cp/ext2w (docs/cp-p8.md stops 8/9): a kernel task runs on a stack inside
+ * its own memory block.  kernel_exit used to set the slot FREE, release the
+ * block, drop this CPU's claim and re-enable interrupts -- and only then
+ * leave the stack.  In that window another CPU could hand the slot and the
+ * block to a new process and clear it (process_create zeroes the block) under
+ * our live frames, or a tick could push an interrupt frame onto the released
+ * stack: measured as CPU0 resuming at rip 0x7009 right after an ext2flush
+ * exit, and as two live kernel tasks sharing one stack (the same resume_sp).
+ * Now the slot stays EXITED and claimed by this CPU with interrupts off until
+ * the CPU is on its scheduler stack; kernel_exit_finish() (start_scheduler,
+ * jmp_val 2) drops the claim and releases the block from there. */
+static volatile int kexit_pending[MAX_CPUS]; /* slot + 1 of the dying task */
+
 void kernel_exit(void) {
   struct process *cur = current_process();
+  interrupts_disable(); /* stays off until kernel_exit_finish */
   if (cur) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    cur->state = PROC_STATE_FREE;
-    proc_release_mem_locked(cur);
-    set_current_process_pid(get_cpuid(), -1);
-    vm_arch_restore_kernel(); /* P2.2 (S2): kernel thread ran to exit */
-    spinlock_release_irqrestore(&proc_lock, flags);
+    cur->state = PROC_STATE_EXITED; /* claimed: no reaper frees it */
+    kexit_pending[get_cpuid()] = (int)(cur - proc_table) + 1;
+    spinlock_release_irqrestore(&proc_lock, flags); /* IF stays 0 */
   }
 
   extern void kernel_thread_exit_jump(void);
   kernel_thread_exit_jump();
+}
+
+/* On this CPU's scheduler stack, after a kernel task's kernel_exit. */
+static void kernel_exit_finish(uint32_t cpu) {
+  if (cpu >= MAX_CPUS || !kexit_pending[cpu])
+    return;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int k = kexit_pending[cpu] - 1;
+  kexit_pending[cpu] = 0;
+  set_current_process_pid(cpu, -1);
+  vm_arch_restore_kernel(); /* P2.2 (S2): kernel thread ran to exit */
+  if (k >= 0 && k < MAX_PROCESSES) {
+    struct process *p = &proc_table[k];
+    if (p->state == PROC_STATE_EXITED && p->is_kernel_process) {
+      proc_release_mem_locked(p);
+      p->state = PROC_STATE_FREE;
+    }
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+}
+
+/* cp/ext2w: does any process other than slot `self` still exist in a state
+ * the wave-end predicate counts (or that may become so)?  The ext2 flusher
+ * exits only when nothing else is left, so the halt that follows has a clean
+ * cache and the flusher never churns through kernel_exit. */
+int process_others_alive(int self) {
+  int n = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (i == self)
+      continue;
+    int st = proc_table[i].state;
+    if (st != PROC_STATE_FREE && st != PROC_STATE_EXITED &&
+        st != PROC_STATE_THREAD_DONE) {
+      n++;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return n;
 }
 
 /**
@@ -5343,6 +5395,7 @@ void start_scheduler(void) {
     // longjmp restored the stack pointer to SP_EL0.
     // We must switch back to EL1h (using SP_EL1) and copy the stack pointer over.
     arch_kernel_thread_exit_handler();
+    kernel_exit_finish(cpu); /* cp/ext2w: release a dying task's block here */
   }
 
   while (1) {

@@ -152,14 +152,12 @@ static __attribute__((noinline)) void lock(void) {
  *   - cache pressure: more than half the cache dirty at a call boundary
  *   - inside an operation only when no clean or early-writable buffer is
  *     left (ext2.c free_slot), or an allocation needs this batch's frees
- *   - shutdown: the flusher keeps the machine alive until the cache is
- *     clean, so the wave's halt comes after the last commit.
+ *   - shutdown: the flusher (one task from mount) exits only when nothing
+ *     else is alive and the cache is clean, so the halt follows the last
+ *     commit.
  * Every commit above except the in-operation one runs under the ext2 lock at
  * a syscall boundary, so it writes a state some syscall sequence produced. */
 #define EXT2W_TIMER_MS 1000u  /* oldest dirty data waits at most ~1 s */
-#define EXT2W_LINGER_MS 200u  /* a clean flusher exits after this (it is a
-                                 process: process censuses see it, and a
-                                 halt waits for it) */
 
 static volatile int g_flusher;          /* 1: a flusher task exists */
 static volatile uint64_t g_dirty_since; /* ms the cache first went dirty, 0 = clean */
@@ -250,9 +248,21 @@ static int commit_locked(uint64_t *counter) {
   return rc;
 }
 
+/* cp/ext2w (docs/cp-p8.md stops 8/9): ONE long-lived flusher, started at
+ * mount, so it is in every process census taken after boot and kernel_exit
+ * runs once per boot instead of once per dirty episode (the old per-episode
+ * task exited and respawned hundreds of times a session).  It polls every
+ * 50 ms with safe_wfi, as the kernel's other driver threads do (a kernel task
+ * that parks BLOCKED through arch_yield is the measured L78 stack-smash
+ * shape, so it stays READY and is preempted like any task), commits when the
+ * oldest dirty buffer is EXT2W_TIMER_MS old, and exits only when the cache is
+ * clean and no other process is left -- the end of a wave, so the halt comes
+ * after the last commit. */
+static int g_flusher_pid = -1;
+
 static void flusher_task(void *arg) {
   (void)arg;
-  uint64_t clean_since = timer_get_ms();
+  int seen_other = 0;
   for (;;) {
     uint64_t now = timer_get_ms();
     uint64_t ds = g_dirty_since;
@@ -260,27 +270,40 @@ static void flusher_task(void *arg) {
       lock();
       (void)commit_locked(&g_ncommit_timer);
       ylock_release(&g_lock);
-      clean_since = timer_get_ms();
-    } else if (!ds && now - clean_since >= EXT2W_LINGER_MS) {
-      /* Exit only while holding the lock, so a writer that dirtied the cache
-         after the check above sees g_flusher == 0 and starts a new one. */
+    }
+    int others = process_others_alive(g_flusher_pid);
+    if (others) seen_other = 1;
+    if (seen_other && !others) {
       lock();
       if (!ext2_dirty(&g_fs)) {
         g_dirty_since = 0;
         __atomic_store_n(&g_flusher, 0, __ATOMIC_SEQ_CST);
         ylock_release(&g_lock);
-        e2w_row("flusher idle exit");
+        e2w_row("flusher exit (nothing else alive, cache clean)");
         kernel_exit();
         return;
       }
-      if (!g_dirty_since) g_dirty_since = timer_get_ms();
+      (void)commit_locked(&g_ncommit_timer);
       ylock_release(&g_lock);
-    } else if (ds) {
-      clean_since = now;
     }
     uint64_t t0 = timer_get_ms();
     while (timer_get_ms() - t0 < 50) safe_wfi();
   }
+}
+
+static int flusher_start(void) {
+  int pid = process_create_kernel_nowait(flusher_task, 0);
+  if (pid > 0) {
+    g_flusher_pid = pid;
+    struct process *fp = process_get_pcb(pid);
+    if (fp) {
+      const char *nm = "ext2flush";
+      int i = 0;
+      for (; nm[i] && i < 31; i++) fp->name[i] = nm[i];
+      fp->name[i] = 0;
+    }
+  }
+  return pid;
 }
 
 /* Release the lock after a call that may have dirtied the cache.  `mutated`
@@ -300,17 +323,8 @@ static void unlock_flush(int mutated) {
     }
   }
   ylock_release(&g_lock);
-  int fpid = spawn ? process_create_kernel_nowait(flusher_task, 0) : 0;
-  if (spawn && fpid > 0) {
-    struct process *fp = process_get_pcb(fpid);
-    if (fp) {
-      const char *nm = "ext2flush";
-      int i = 0;
-      for (; nm[i] && i < 31; i++) fp->name[i] = nm[i];
-      fp->name[i] = 0;
-    }
-  }
-  if (spawn && fpid < 0) {
+  /* the flusher is started at mount; this only covers a failed start */
+  if (spawn && flusher_start() < 0) {
     /* No task slot: commit now instead of leaving data unscheduled. */
     lock();
     (void)commit_locked(&g_ncommit_press);
@@ -401,6 +415,9 @@ void ext2v_init(void) {
     return;
   }
   g_mounted = 1;
+  /* cp/ext2w: the one flusher, from boot (see flusher_task) */
+  g_flusher = 1;
+  if (flusher_start() < 0) g_flusher = 0;
   kl_s(&kl, "[EXT2] mounted " EXT2V_MNT " ");
   kl_s(&kl, desc);
   kl_c(&kl, '\n');

@@ -1082,6 +1082,9 @@ extern int cpu_current_pids[];
 int process_state_locked(int pid);
 int process_try_wake_locked(int pid); /* 1 = was BLOCKED, now READY */
 void set_current_process_pid(uint32_t cpu, int pid);
+/* cp/ext2w: 1 when any slot other than `self` is live or being created
+ * (not FREE/EXITED/THREAD_DONE).  The ext2 flusher's exit test. */
+int process_others_alive(int self);
 
 struct sys_procinfo {
   int pid;

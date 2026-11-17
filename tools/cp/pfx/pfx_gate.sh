@@ -12,9 +12,11 @@
 #   e2stress  6 processes x 3 threads + racing "servers" at once in one ext2
 #           directory: create/rename/fsync/F_SETLK/getdents/mmap-read (C8
 #           stop 6, linux_probe_e2stress.c)
+#   e2churn 150 s of ext2 dirty/clean windows + poll/select/pipe traffic
+#           (C8 stops 8/9, linux_probe_e2churn.c)
 # A probe that SKIPs a row here is a failure: the disk is attached.
 #
-# Usage: bash tools/cp/pfx/pfx_gate.sh [probe...]   (default: all five)
+# Usage: bash tools/cp/pfx/pfx_gate.sh [probe...]   (default: all six)
 # Env: LP_TIMEOUT (default 600), GATE_DIR (default <tree>/obj/pfx-gate).
 # Every boot holds one QEMU slot (tools/cp/qemu-slot.sh), one slot per boot.
 set -u
@@ -23,7 +25,7 @@ D="${GATE_DIR:-$ROOT/obj/pfx-gate}"
 PATH="/usr/sbin:/sbin:$PATH"
 PROBES="$*"
 if [ -z "$PROBES" ]; then
-  for p in pfx bigobj fatcoh ext2w e2stress; do [ -f "$ROOT/src/user/linux_probe_$p.c" ] && PROBES="$PROBES $p"; done
+  for p in pfx bigobj fatcoh ext2w e2stress e2churn; do [ -f "$ROOT/src/user/linux_probe_$p.c" ] && PROBES="$PROBES $p"; done
 fi
 fails=0
 rm -rf "$D" && mkdir -p "$D"
