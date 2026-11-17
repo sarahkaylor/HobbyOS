@@ -36,5 +36,10 @@ clang --sysroot="$SRC/sysroot-glibc231" -O2 -g -Wall -Wextra -fPIE -pie -I"$SRC/
   -I"$X11DEV/include" -fuse-ld=lld -L"$X11DEV/lib" -Wl,-rpath-link,"$X11DEV/lib" \
   -Wl,--disable-new-dtags,-rpath,/CP/X11/lib:/CP/VK/lib -Wl,--build-id=sha1 \
   -o "$M/stage-x11/CP/VK/bin/vkcubex" "$P/vkcubex.c" -lxcb -ldl -lm >&2
+# the F5 hand-back probe (docs/cp-p7.md §2.3)
+clang --sysroot="$SRC/sysroot-glibc231" -O2 -g -Wall -Wextra -fPIE -pie -I"$X11DEV/include" \
+  -fuse-ld=lld -L"$X11DEV/lib" -Wl,-rpath-link,"$X11DEV/lib" \
+  -Wl,--disable-new-dtags,-rpath,/CP/X11/lib -Wl,--build-id=sha1 \
+  -o "$M/stage-x11/CP/VK/bin/p7occlude" "$REPO/tools/cp/venus/p7occlude.c" -lxcb-randr -lxcb >&2
 echo "p7-vktree: $M ($(ls "$M/stage-x11/CP/VK/share/vulkan/icd.d"), vkcubex from $P/vkcubex.c)" >&2
 echo "$M"
