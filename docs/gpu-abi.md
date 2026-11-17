@@ -456,7 +456,10 @@ memory region is gone, so the next `MAP_BLOB` can reuse the range safely.
   Venus binds each `VkQueue` to one of rings 1..63, and the host signals that
   ring when the queue has finished the work submitted before the fence.
 * **Seqnos.** `SUBMIT2` with `GPU_SUBMIT2_F_FENCE` takes the next value of a
-  device-wide 64-bit counter (starting at 1), sends `SUBMIT_3D` with
+  device-wide 64-bit counter that starts above 2^32 (QEMU retires an M1
+  global fence by comparing ids across its whole fence queue without looking
+  at the ring flag, so a ring fence numbered below an M1 fence id could be
+  answered early), sends `SUBMIT_3D` with
   `hdr.flags = FENCE | INFO_RING_IDX`, `hdr.fence_id = seqno`,
   `hdr.ring_idx = ring_idx`, and **returns immediately** with `seqno`.  A
   fenced submit's command stream is at most 256 bytes (Venus sends 0–32: a
@@ -478,6 +481,11 @@ memory region is gone, so the next `MAP_BLOB` can reuse the range safely.
   wake, Linux-style).  The kernel writes the absolute deadline into
   `deadline_ms` on the first park so a restarted wait keeps the original
   deadline; a caller sets `deadline_ms = 0` before each new wait.
+* **Ring 0 is slow on this host.** QEMU 10.2.1 answers CPU-ring (ring 0)
+  fences from its 10 ms virgl fence poll: measured submit 14 µs p50, signal
+  10.0 ms p50 (`docs/cp-venus-evidence/step3-transport-probe.txt`).  Venus
+  fences VkQueue work on rings 1..63; ring 0 only serves
+  `vn_renderer_submit_simple_sync`.
 * **Limits.** 32 async fences in flight device-wide
   (`GPU_PARAM_FENCE_SLOTS`); a `SUBMIT2` that finds none free waits for the
   oldest to retire.  A context destroyed with fences in flight retires them as

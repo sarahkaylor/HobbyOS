@@ -825,8 +825,13 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
    * debugfs structs are read-modify-write (ctx/res ids out, submit fence out),
    * so the handler owns the copy-in/copy-out: gpu_abi_ioctl() takes the user
    * pointer and does every access through vm_user_read/vm_kwrite. */
-  if (file_is_devgpu(p, fd))
-    return l_ret(tf, gpu_abi_ioctl(p, fd, (unsigned long)req, arg));
+  if (file_is_devgpu(p, fd)) {
+    int gr = gpu_abi_ioctl(p, fd, (unsigned long)req, arg);
+    /* P6 (docs/gpu-abi.md §10.5): FENCE_WAIT2 parks with the native -2
+       convention; the ioctl restarts on wake and re-checks its fence. */
+    if (gr == GPU_ABI_PARKED) return l_park(p, tf);
+    return l_ret(tf, gr);
+  }
   if (req == (uint32_t)L_F_GETFL) return l_ret(tf, file_fcntl(p, fd, K_F_GETFL, 0));
   if (req == (uint32_t)L_F_SETFL) return l_ret(tf, file_fcntl(p, fd, K_F_SETFL, arg));
   return l_ret(tf, -ENOTTY);

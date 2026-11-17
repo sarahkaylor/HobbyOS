@@ -200,4 +200,138 @@ int gpu_abi_submit_flags_ok(uint32_t flags);
 #define GPU_IOC_FENCE_WAIT      GPU_IOWR(GPU_IOC_MAGIC, 9, struct gpu_fence_wait)
 #define GPU_IOC_TRANSFER        GPU_IOW(GPU_IOC_MAGIC, 10, struct gpu_transfer)
 
+
+/* ------------------------------------------------------------------ */
+/* Venus amendment (Cyberpunk F3, ABI version 2; docs/gpu-abi.md §10).  */
+/* Requests 11..20.  M1 requests 1..10 are unchanged.                  */
+/* ------------------------------------------------------------------ */
+#define GPU_ABI_VERSION_VENUS 2
+
+struct gpu_param {
+  uint32_t param;
+  uint32_t padding;
+  uint64_t value; /* out */
+};
+#define GPU_PARAM_ABI_VERSION       1
+#define GPU_PARAM_FEATURES          2
+#define GPU_PARAM_HOST_VISIBLE_SIZE 3
+#define GPU_PARAM_MAX_RINGS         4
+#define GPU_PARAM_NUM_CAPSETS       5
+#define GPU_PARAM_FENCE_SLOTS       6
+
+#define GPU_FEAT_VIRGL         (1u << 0)
+#define GPU_FEAT_RESOURCE_BLOB (1u << 1)
+#define GPU_FEAT_CONTEXT_INIT  (1u << 2)
+#define GPU_FEAT_HOST_VISIBLE  (1u << 3)
+#define GPU_FEAT_FENCE_IRQ     (1u << 4)
+
+#define GPU_MAX_RINGS 64
+
+struct gpu_capset_info2 {
+  uint32_t index;       /* in */
+  uint32_t capset_id;   /* out */
+  uint32_t max_version; /* out */
+  uint32_t max_size;    /* out */
+};
+
+struct gpu_capset2 {
+  uint32_t capset_id; /* in */
+  uint32_t version;   /* in: 0..max_version */
+  uint32_t size;      /* in: capacity; out: bytes written */
+  uint32_t padding;
+  uint64_t blob;      /* in: user pointer */
+};
+
+struct gpu_ctx_create2 {
+  uint32_t capset_id; /* in: 4 = Venus */
+  uint32_t num_rings; /* in: 1..GPU_MAX_RINGS; ring 0 is the CPU ring */
+  uint32_t flags;     /* in: 0 */
+  uint32_t ctx_id;    /* out */
+  char name[32];      /* in: debug name, NUL-padded */
+};
+
+#define GPU_BLOB_MEM_GUEST        1 /* not in v2 */
+#define GPU_BLOB_MEM_HOST3D       2
+#define GPU_BLOB_MEM_HOST3D_GUEST 3 /* not in v2 */
+#define GPU_BLOB_FLAG_MAPPABLE     (1u << 0)
+#define GPU_BLOB_FLAG_SHAREABLE    (1u << 1)
+#define GPU_BLOB_FLAG_CROSS_DEVICE (1u << 2)
+
+struct gpu_res_create_blob {
+  uint32_t ctx_id;
+  uint32_t blob_mem;   /* GPU_BLOB_MEM_HOST3D */
+  uint32_t blob_flags; /* GPU_BLOB_FLAG_* */
+  uint32_t res_id;     /* out */
+  uint64_t blob_id;
+  uint64_t size;       /* bytes; rounded up to 4 KiB */
+  uint64_t cmd;        /* optional command stream submitted before the create */
+  uint32_t cmd_size;   /* 0, or dword-aligned <= 128 KiB */
+  uint32_t padding;
+};
+
+#define GPU_MAP_CACHE_NONE     0
+#define GPU_MAP_CACHE_CACHED   1
+#define GPU_MAP_CACHE_UNCACHED 2
+#define GPU_MAP_CACHE_WC       3
+
+struct gpu_res_map_blob {
+  uint32_t res_id;
+  uint32_t map_info; /* out: GPU_MAP_CACHE_* (the host's answer) */
+  uint64_t va;       /* out */
+  uint64_t size;     /* out */
+};
+
+struct gpu_res_unmap_blob {
+  uint32_t res_id;
+  uint32_t padding;
+};
+
+#define GPU_SUBMIT2_F_FENCE (1u << 0)
+/* A fenced SUBMIT2's stream is carried in the fence slot when it is at most
+ * this long; a longer one goes first as an unfenced submit. */
+#define GPU_SUBMIT2_FENCED_CS_MAX 256
+
+struct gpu_submit2 {
+  uint32_t ctx_id;
+  uint32_t flags;    /* GPU_SUBMIT2_F_* */
+  uint32_t ring_idx; /* < the context's num_rings */
+  uint32_t cs_size;  /* bytes, dword-aligned, <= 128 KiB (0 legal when fenced) */
+  uint64_t cs;       /* user pointer */
+  uint64_t seqno;    /* out: fence seqno, 0 when unfenced */
+};
+
+struct gpu_fence_wait2 {
+  uint32_t ctx_id;
+  uint32_t ring_idx;
+  uint64_t seqno;
+  uint64_t timeout_ns;  /* 0 = poll, UINT64_MAX = forever */
+  uint64_t deadline_ms; /* kernel scratch for the restarted wait: 0 on entry */
+};
+
+#define GPU_IOC_GET_PARAM        GPU_IOWR(GPU_IOC_MAGIC, 11, struct gpu_param)
+#define GPU_IOC_GET_CAPSET_INFO2 GPU_IOWR(GPU_IOC_MAGIC, 12, struct gpu_capset_info2)
+#define GPU_IOC_GET_CAPSET2      GPU_IOWR(GPU_IOC_MAGIC, 13, struct gpu_capset2)
+#define GPU_IOC_CTX_CREATE2      GPU_IOWR(GPU_IOC_MAGIC, 14, struct gpu_ctx_create2)
+#define GPU_IOC_RES_CREATE_BLOB  GPU_IOWR(GPU_IOC_MAGIC, 15, struct gpu_res_create_blob)
+#define GPU_IOC_RES_MAP_BLOB     GPU_IOWR(GPU_IOC_MAGIC, 16, struct gpu_res_map_blob)
+#define GPU_IOC_RES_UNMAP_BLOB   GPU_IOW(GPU_IOC_MAGIC, 17, struct gpu_res_unmap_blob)
+#define GPU_IOC_SUBMIT2          GPU_IOWR(GPU_IOC_MAGIC, 18, struct gpu_submit2)
+#define GPU_IOC_FENCE_WAIT2      GPU_IOWR(GPU_IOC_MAGIC, 19, struct gpu_fence_wait2)
+#define GPU_IOC_SCANOUT_BLOB     GPU_IOC(GPU_IOC_WRITE, GPU_IOC_MAGIC, 20, 64) /* P7 */
+
+/* Venus pure helpers (gpu_abi.c), exported for the kernel unit suite. */
+int gpu_abi_m2_req_size(unsigned long req);
+int gpu_abi_ctx2_ok(const struct gpu_ctx_create2* c, uint32_t max_rings);
+int gpu_abi_blob_ok(const struct gpu_res_create_blob* b);
+int gpu_abi_submit2_ok(const struct gpu_submit2* s, uint32_t num_rings);
+/* map_info -> mapping attribute: 0 = WB, 1 = WC, 2 = UC (never more
+ * cacheable than the host). */
+int gpu_abi_map_cache_mode(uint32_t map_info);
+/* FENCE_WAIT2 deadline arithmetic: the absolute deadline in ms for a wait
+ * starting at now_ms (UINT64_MAX = never), saturating. */
+uint64_t gpu_abi_deadline_ms(uint64_t now_ms, uint64_t timeout_ns);
+/* The park/restart sentinel FENCE_WAIT2 returns to the compat ioctl path
+ * (the NATIVE -2 convention, docs in linux_compat_fd.c). */
+#define GPU_ABI_PARKED (-2)
+
 #endif /* GPU_ABI_H */
