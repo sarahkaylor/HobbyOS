@@ -283,8 +283,6 @@ static void flusher_guard_row(const char *why, long a, unsigned long b) {
   kl_i(&kl, a);
   kl_s(&kl, " b=");
   kl_hex(&kl, b);
-  kl_s(&kl, " sp~=");
-  kl_hex(&kl, (unsigned long)(uintptr_t)&kl);
   kl_c(&kl, '\n');
   kl_emit(&kl);
 }
