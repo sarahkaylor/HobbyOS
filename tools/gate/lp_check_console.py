@@ -33,7 +33,7 @@ TOTALS = re.compile(r"\[LP\] console totals kernel=(\d+) user=(\d+) cpus=0x([0-9
 
 def kpayload(cpu, seq):
     n = 40 + (seq * 7 + cpu * 13) % 160
-    return "".join(ALPHA[(seq + i * 31 + cpu) % 62] for i in range(n))
+    return "".join(ALPHA[(seq + i * 7 + cpu) % 62] for i in range(n))
 
 
 def ulen(w, s):

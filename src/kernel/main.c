@@ -1,5 +1,6 @@
 #include "fat16.h"
 #include "kline.h"
+#include "console.h"
 #include "fs.h"
 #include "gic.h"
 #include "mmu.h"
@@ -36,11 +37,9 @@ extern void uart_init(void);
 extern void uart_putc(char c);
 extern void uart_puts(const char *s);
 
-/* The single console lock lives in the per-arch uart.c; the print helpers
-   serialize against uart_puts/uart_putc with it so UART output has exactly
-   one lock (previously uart_puts used uart_lock while print_int used a
-   second, print_lock — bytes interleaved under real SMP). */
-extern spinlock_t uart_lock;
+/* C0-console: every print helper here ends in the line-atomic console
+   (src/kernel/kconsole.c, docs/cp-console.md); there is no uart_lock to take. */
+extern uint32_t get_cpuid(void);
 extern void panic_putc(char c);
 extern void uart_putc_dbg(char c); /* GB-097: lock-free NON-panic sink */
 void print_int_raw(int val);
@@ -68,6 +67,7 @@ void irq_handler_c(struct trap_frame *tf) {
   } else if (intid == 30) {
     // Timer PPI
     timer_reload();
+    cons_tick(get_cpuid()); /* C0-console: stale partial lines (printing only) */
   }
 
   gic_end_interrupt(intid);
@@ -76,37 +76,26 @@ void irq_handler_c(struct trap_frame *tf) {
 /**
  * Prints a signed integer to the UART in decimal format.
  *
- * Takes the ONE console lock (uart_lock, shared with uart_puts/uart_putc)
- * for the whole write so multi-char output cannot interleave with other
- * console writers.  The per-char writes go through the lock-free
- * uart_putc_dbg because we already hold the lock -- and because this is a
- * RETURNING path: GB-097 reserves the panic_* sink for non-returning
- * callers and reports a [PANIC-SINK-VIOLATION] for any other user, which
- * is what the old print_int_raw() delegation did on every call.
+ * C0-console: formats into a local buffer and hands it to the line-atomic
+ * console (src/kernel/kconsole.c), which keeps it in this CPU's line slot with
+ * the rest of the row; the row reaches the wire whole, under one lock hold.
  */
-static void print_int_locked(int val) {
-  if (val < 0) {
-    uart_putc_dbg('-');
-    val = -val;
-  }
-  if (val == 0) {
-    uart_putc_dbg('0');
-    return;
-  }
-  char buf[16];
-  int idx = 0;
-  while (val > 0) {
-    buf[idx++] = (char)('0' + (val % 10));
-    val /= 10;
-  }
-  while (idx > 0)
-    uart_putc_dbg(buf[--idx]);
-}
-
 void print_int(int val) {
-  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  print_int_locked(val);
-  spinlock_release_irqrestore(&uart_lock, flags);
+  char buf[16];
+  int idx = 0, n = 0;
+  char out[16];
+  unsigned int u = val < 0 ? 0u - (unsigned int)val : (unsigned int)val;
+  if (u == 0)
+    buf[idx++] = '0';
+  while (u > 0) {
+    buf[idx++] = (char)('0' + (u % 10));
+    u /= 10;
+  }
+  if (val < 0)
+    out[n++] = '-';
+  while (idx > 0)
+    out[n++] = buf[--idx];
+  cons_kwrite(out, n);
 }
 
 /** Lock-free decimal print — deadlock diagnostics only. */
@@ -131,21 +120,16 @@ void print_int_raw(int val) {
 
 /**
  * Prints a 64-bit value to the UART in hexadecimal format (e.g., 0xABC123).
- * Same rule as print_int(): the lock-free NON-panic sink while uart_lock is
- * held, because this is a returning path.
+ * Same path as print_int(): one piece of this CPU's current console line.
  */
-static void print_hex_locked(uint64_t val) {
-  static const char hex_chars[] = "0123456789ABCDEF";
-  uart_putc_dbg('0');
-  uart_putc_dbg('x');
-  for (int i = 60; i >= 0; i -= 4)
-    uart_putc_dbg(hex_chars[(val >> i) & 0xF]);
-}
-
 void uart_print_hex(uint64_t val) {
-  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  print_hex_locked(val);
-  spinlock_release_irqrestore(&uart_lock, flags);
+  static const char hex_chars[] = "0123456789ABCDEF";
+  char out[18];
+  out[0] = '0';
+  out[1] = 'x';
+  for (int i = 0; i < 16; i++)
+    out[2 + i] = hex_chars[(val >> (60 - 4 * i)) & 0xF];
+  cons_kwrite(out, 18);
 }
 
 /** Lock-free hex print — deadlock diagnostics only. */

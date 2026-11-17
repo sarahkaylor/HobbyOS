@@ -3874,14 +3874,16 @@ int console_write_user(struct process *p, const void *buf, int size) {
                      pathological, but dropping bytes is never acceptable */
     }
     {
-      extern spinlock_t uart_lock;
-      extern void uart_putc_dbg(char c);
-      uint64_t uflags = spinlock_acquire_irqsave(&uart_lock);
-      for (int i = 0; i < emit; i++)
-        uart_putc_dbg(stage[i]); /* GB-097: lock-free char sink; uart_lock is
-                                    already held and this is a RETURNING path,
-                                    so it must not be the panic sink */
-      spinlock_release_irqrestore(&uart_lock, uflags);
+      /* C0-console: the window goes out under ONE console lock hold; a
+         trailing partial line is held for this thread until its newline
+         (or ~30 ms), so a line written in pieces stays one line
+         (src/kernel/kconsole.c, docs/cp-console.md). */
+      extern void cons_user_write(uint64_t who, const char *s, int n);
+      /* keyed by the calling THREAD: file_write passes the group leader */
+      struct process *me = current_process();
+      if (!me)
+        me = p;
+      cons_user_write(me ? (uint64_t)(uint32_t)me->pid + 1 : 0, stage, emit);
     }
     /* Advance by the completed (emitted) bytes of this window.  A partial
        trailing line (emit stopped at the last newline, before the window's

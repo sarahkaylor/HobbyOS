@@ -43,7 +43,7 @@ static int cstr_len(uint32_t cpu, uint32_t seq) {
 }
 
 static char cstr_ch(uint32_t cpu, uint32_t seq, int i) {
-  return cstr_alpha[(seq + (uint32_t)i * 31u + cpu) % 62u];
+  return cstr_alpha[(seq + (uint32_t)i * 7u + cpu) % 62u];
 }
 
 static void cstr_fmt(struct kline *k, uint32_t cpu, int kind, uint32_t seq) {

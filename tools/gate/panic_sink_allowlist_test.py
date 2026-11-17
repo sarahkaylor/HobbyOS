@@ -32,7 +32,7 @@ SYMBOLS = re.compile(r"\b(panic_puts2?|panic_putc2?|panic_print_hex2?)\b")
 ALLOW = {
     # ---- the sink itself: definitions + the violation reporter ----
     "src/kernel/arch/x64/uart.c": (26, "definitions, panic_claim/enter/leave, violation + claim-loser + GB-204 suppressed reports + GB-209 COM2 record + one COM1 summary"),
-    "src/kernel/arch/arm/uart.c": (16, "arm definitions; arm has no COM2 violation channel (15->16 in f89a8177: rsp=/live=/lr in the arm fault dump)"),
+    "src/kernel/arch/arm/uart.c": (15, "arm definitions; arm has no COM2 violation channel (15->16 in f89a8177: rsp=/live=/lr in the arm fault dump; 16->15 in C0-console: a comment naming the sink went with the raw body)"),
     "src/host/locksteal_test.c": (1, "host-test shim that stands in for the sink"),
 
     # ---- non-returning diagnostics: they end in halt/reboot by construction ----

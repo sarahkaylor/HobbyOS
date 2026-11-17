@@ -65,6 +65,10 @@ extern void print_int(int val);
 volatile uint8_t cpu_halted[MAX_CPUS];
 
 void cpu_halt_record(uint32_t cpu) {
+  /* C0-console: a halting CPU's partial console line would otherwise stay in
+     its line slot for ever (src/kernel/kconsole.c). */
+  extern void cons_flush_local(void);
+  cons_flush_local();
   if (cpu < MAX_CPUS)
     cpu_halted[cpu] = 1;
 }

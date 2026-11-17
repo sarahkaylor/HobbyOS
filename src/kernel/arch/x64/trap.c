@@ -5032,6 +5032,12 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   if (tf->vector == 32) {
     // PIT/LAPIC timer interrupt
     uint32_t intid = gic_acknowledge_interrupt();
+    {
+      /* C0-console: push this CPU's stale partial console lines out
+         (printing only; src/kernel/kconsole.c). */
+      extern void cons_tick(uint32_t cpu);
+      cons_tick(cpu);
+    }
 
     if (cpu == 0) {
       // The PIT is the global time base and is wired to the boot core only.
