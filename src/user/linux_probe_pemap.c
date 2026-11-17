@@ -25,6 +25,8 @@
  *  V4 MAP_FIXED anon   B replaces A's anonymous page with MAP_FIXED; A must
  *                      see the new page
  *  V5 MAP_FIXED file   B replaces it with a MAP_FIXED file page
+ *  V6 COW, sleeper     A read the page, then sleeps in futex_wait; B writes
+ *                      it (COW) and wakes A; A must read B's value
  *  S1 storm            -p children at a time, -c in all, each running -i
  *                      Wine-style image loads of every data file: map, COW
  *                      tails + "relocations", mprotect per section, pread
@@ -274,6 +276,55 @@ static int vis_one(int row, const char *file, char *why, size_t whyn) {
   munmap(pg, PG);
   if (fd >= 0) close(fd);
   if (pfd[0] >= 0) { close(pfd[0]); close(pfd[1]); }
+  return ret;
+}
+
+/* V6: the reader is ASLEEP in futex_wait when the copy-on-write happens (the
+   Wine shape: a thread waits for a server reply or an event while another
+   initializes a global; it wakes and reads it). */
+static volatile int v6_flag;
+static volatile uint64_t v6_seen;
+static volatile uint64_t *v6_page;
+static volatile int v6_ready;
+static void *v6_a(void *v) {
+  (void)v;
+  volatile uint64_t *p = v6_page;
+  uint64_t x = p[0]; /* the TLB entry: object frame, read-only */
+  (void)x;
+  v6_ready = 1;
+  while (!v6_flag) syscall(SYS_futex, &v6_flag, 0 /* FUTEX_WAIT */, 0, 0, 0, 0);
+  v6_seen = p[0];
+  return 0;
+}
+static int v6_one(char *why, size_t whyn) {
+  int fd = memfd("pemap6");
+  uint64_t w[512];
+  for (int i = 0; i < 512; i++) w[i] = 0xB0B0000ULL + (uint64_t)i;
+  if (fd < 0 || write(fd, w, sizeof w) != (ssize_t)sizeof w) { snprintf(why, whyn, "memfd errno=%d", errno); return 9; }
+  uint64_t *pg = mmap(0, PG, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+  if (pg == MAP_FAILED) { snprintf(why, whyn, "mmap errno=%d", errno); close(fd); return 9; }
+  uint64_t old = pg[0];
+  v6_page = pg;
+  v6_flag = 0;
+  v6_ready = 0;
+  v6_seen = 0;
+  pthread_t t;
+  pthread_create(&t, 0, v6_a, 0);
+  while (!v6_ready) {}
+  struct timespec ts = {0, 50 * 1000 * 1000};
+  nanosleep(&ts, 0); /* A is in futex_wait */
+  pg[0] = ~old;      /* copy-on-write */
+  v6_flag = 1;
+  syscall(SYS_futex, &v6_flag, 1 /* FUTEX_WAKE */, 1, 0, 0, 0);
+  pthread_join(t, 0);
+  int ret = 0;
+  if (v6_seen != ~old) {
+    snprintf(why, whyn, "A woke and read 0x%llx, want 0x%llx (the pre-write value 0x%llx)",
+             (unsigned long long)v6_seen, (unsigned long long)~old, (unsigned long long)old);
+    ret = 1;
+  }
+  munmap(pg, PG);
+  close(fd);
   return ret;
 }
 
@@ -618,6 +669,16 @@ int main(int argc, char **argv) {
       else if (!bad) out("[LP] PASS %s (%d iterations, slack %d)\n", names[row], ITERS, SLACK);
       fails += bad;
     }
+  }
+  if (!storm_only) {
+    int nbad = 0;
+    char why[240] = "", first[240] = "";
+    for (int it = 0; it < ITERS; it++) {
+      int r = v6_one(why, sizeof why);
+      if (r) { if (!nbad) snprintf(first, sizeof first, "iter %d: %s", it, why); nbad++; }
+    }
+    if (nbad) { out("[LP] FAIL V6 COW while the reader sleeps: %d of %d iterations stale; first %s\n", nbad, ITERS, first); fails++; }
+    else out("[LP] PASS V6 COW while the reader sleeps in futex_wait (%d iterations)\n", ITERS);
   }
   fails += storm(par, total, iters);
   out("[LP] done rc=%d\n", fails);
