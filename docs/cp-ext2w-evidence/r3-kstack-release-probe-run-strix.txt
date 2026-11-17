@@ -1,0 +1,26 @@
+# cp-ext2w3-kprobe 9c3a9ccf (= edb0f175 + the scheduler probe in r3-kstack-release-probe-for-c1k6.patch.txt), one reg_gate run in strix ~/cp/lanes/ext2w3k
+kprobe run 1 rc=0 == removed /srv/nfs/cp-ext2w3-kp | rows b1=5 b2=4 | last=[KSTACK-RELEASE] n=4 cpu=5 pid=1 rsp=0xFFFF800023FFE740 resume_sp=0xFFFF800023FFEEB8 (READY while this CPU is on its stack) |  13:57
+--- serial-b1: every [KSTACK-RELEASE] row (rows at n=1..4 and every 1024th)
+[KSTACK-RELEASE] n=1 cpu=1 pid=1 rsp=0xFFFF800023FFE890 resume_sp=0xFFFF800023FFF000 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=2 cpu=3 pid=2 rsp=0xFFFF800025FFE890 resume_sp=0xFFFF800025FFF000 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=3 cpu=1 pid=1 rsp=0xFFFF800023FFE890 resume_sp=0xFFFF800023FFF000 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=4 cpu=3 pid=2 rsp=0xFFFF800025FFE890 resume_sp=0xFFFF800025FFF000 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=1024 cpu=7 pid=1 rsp=0xFFFF800023FFE740 resume_sp=0xFFFF800023FFEEB8 (READY while this CPU is on its stack)
+--- serial-b2: every [KSTACK-RELEASE] row (rows at n=1..4 and every 1024th)
+[KSTACK-RELEASE] n=1 cpu=5 pid=1 rsp=0xFFFF800023FFE890 resume_sp=0xFFFF800023FFF000 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=2 cpu=4 pid=2 rsp=0xFFFF800025FFE890 resume_sp=0xFFFF800025FFF000 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=3 cpu=4 pid=2 rsp=0xFFFF800025FFBDD0 resume_sp=0xFFFF800025FFC548 (READY while this CPU is on its stack)
+[KSTACK-RELEASE] n=4 cpu=5 pid=1 rsp=0xFFFF800023FFE740 resume_sp=0xFFFF800023FFEEB8 (READY while this CPU is on its stack)
+--- reg_gate log tail
+[HOST] ok   reg query exit 0
+[HOST] ok   boot 2: HKLM reg query prints X REG_SZ Y
+[RG] race round 0: clients done=3 ok=3 ms=4660
+[RG] race round 1: clients done=3 ok=3 ms=4782
+[RG] race round 2: clients done=3 ok=3 ms=9414
+[RG] race round 3: clients done=3 ok=3 ms=7497
+[HOST] ok   boot 2: 4 race rounds of 3 concurrent Wine clients all finished, no wedge (C8 stop 6); clients exit 0: 12 of 12
+[HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E80AC gft_static+0x148cc = global file slot 64 pos_lock;
+[HOST] ok   e2fsck -fn after b2 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+reg_gate: PASS
+== exports.sh: remove /srv/nfs/cp-ext2w3-kp ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-ext2w3-kp

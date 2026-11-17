@@ -82,15 +82,34 @@ done
 [ -n "$OVMF_SRC" ] || die "no OVMF_CODE_4M.fd"
 OVMF="$OUT/OVMF_CODE_4M.fd"; [ -f "$OVMF" ] || cp "$OVMF_SRC" "$OVMF"
 
+# A boot whose serial stops growing for SILENT_S seconds is wedged: the HMP
+# monitor (a unix socket in $OUT) dumps every vCPU's registers twice, 2 s
+# apart, into $OUT/wedge-regs-<boot>.txt, and the boot ends there instead of
+# at TIMEOUT_S.  rg_wedge_rows names each vCPU's RIP from hobbyos.elf.
+SILENT_S="${SILENT_S:-300}"
 rg_boot() { # rg_boot <log>: one boot, ends at System halt
   local log="$1"
+  local mon="$OUT/mon-$(basename "$log" .log).sock" regs="$OUT/wedge-regs-$(basename "$log" .log).txt"
   : >"$log"
+  rm -f "$mon" "$regs"
   bash "$ROOT/tools/cp/qemu-slot.sh" bash -c '
     ( make -o disk.img ARCH=intel MODE=test EDK2_X86_64='"$OVMF"' CPDATA='"$PIMG"' run \
-           QEMU_ARGS="-display none -enable-kvm" >>'"$log"' 2>&1 & )
+           QEMU_ARGS="-display none -enable-kvm -monitor unix:'"$mon"',server,nowait" >>'"$log"' 2>&1 & )
+    last=0; quiet=0
     for i in $(seq 1 '"$TIMEOUT_S"'); do
       grep -aq "System halt" '"$log"' && sleep 1 && break
       [ $i -gt 30 ] && ! fuser '"$IMG"' >/dev/null 2>&1 && break
+      sz=$(stat -c %s '"$log"' 2>/dev/null || echo 0)
+      if [ "$sz" = "$last" ]; then quiet=$((quiet + 1)); else quiet=0; last=$sz; fi
+      if [ $quiet -ge '"$SILENT_S"' ] && [ -S '"$mon"' ]; then
+        for k in 1 2; do
+          { echo "== info registers -a (sample $k, serial silent $quiet s)"
+            printf "info registers -a\n" | socat -t 3 - UNIX-CONNECT:'"$mon"' 2>&1 | tr -d "\r"
+          } >> '"$regs"'
+          sleep 2
+        done
+        break
+      fi
       sleep 1
     done
     for qp in $(fuser '"$IMG"' 2>/dev/null); do kill "$qp" 2>/dev/null; done
@@ -186,6 +205,14 @@ for b in "$B1" "$B2"; do
   # a kernel stack smash or the flusher's own stack guard (ext2_vfs.c)
   grep -aq 'stack smashing detected\|E2W-KSTACK\]' "$b" &&
     bad "$bn: $(grep -a -A1 'stack smashing detected\|E2W-KSTACK\]' "$b" | head -3 | tr '\n' ' ')"
+done
+for r in "$OUT"/wedge-regs-*.txt; do # a wedged boot: name every vCPU's RIP
+  [ -f "$r" ] || continue
+  bad "$(basename "$r" .txt): serial silent ${SILENT_S} s, vCPU registers dumped"
+  grep -ao "^CPU#[0-9]*\|RIP=[0-9a-f]*" "$r" | paste - - | sort -u | while read -r cpu rip; do
+    a=0x${rip#RIP=}
+    echo "[HOST] info $(basename "$r" .txt): $cpu rip=$a $(llvm-addr2line -f -e hobbyos.elf "$a" 2>/dev/null | head -1)"
+  done
 done
 fsck_img b2
 if [ "$fails" = 0 ]; then echo "reg_gate: PASS"; else echo "reg_gate: FAIL ($fails)"; fi
