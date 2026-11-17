@@ -613,6 +613,42 @@ struct l_epoll {
   struct le_ent *e; /* LE_FDS entries (frame pool, kept with the slot) */
 };
 static struct l_epoll le[LE_MAX];
+
+/* C1-k6 round 2 (docs/cp-k6.md §12): event-driven rescans.  Each entry
+ * remembers its object's notification key (file_poll_keybit: 0..62, 64 =
+ * notifies without a key, 65 = never notifies), refreshed by every full
+ * scan.  A keyed poll_notify_obj() ORs its bit into le_pend of each set
+ * whose filter has it; the next wait rechecks only the entries that bit
+ * names, the keyless and non-notifying entries, and the entries it
+ * reported last time (level-triggered: they may still be ready).  A full
+ * scan runs after any epoll_ctl, after a keyless notification, when the
+ * last wait filled maxevents, every 64th wait, and whenever more than one
+ * thread waits on the set.  wineserver rescanned all ~200 of its pipes on
+ * every wake (linux_probe_ipclat I3). */
+#define LE_RECENT 32
+static uint8_t le_kbit[LE_MAX][LE_FDS];
+static uint64_t le_interest[LE_MAX];   /* filter of the entries' keys */
+static uint64_t le_pend[LE_MAX];       /* keys notified since the last take */
+static uint8_t le_full[LE_MAX];        /* the next wait must scan everything */
+static uint8_t le_has_other[LE_MAX];   /* entries with key 64/65 exist */
+static int le_waiters[LE_MAX];
+static uint32_t le_waits[LE_MAX];
+static uint16_t le_recent[LE_MAX][LE_RECENT];
+static int le_nrecent[LE_MAX];         /* -1: overflowed (full next time) */
+static uint64_t le_scans_full, le_scans_part, le_scan_entries;
+static int le_wait_on[MAX_PROCESSES]; /* slot+1 the thread is counted on */
+
+void lt_epoll_pend_bits(uint64_t bits) {
+  for (int i = 0; i < LE_MAX; i++) {
+    if (!__atomic_load_n(&le[i].used, __ATOMIC_RELAXED)) continue;
+    if (bits == ~0ull) {
+      __atomic_store_n(&le_full[i], 1, __ATOMIC_SEQ_CST);
+      continue;
+    }
+    if (__atomic_load_n(&le_interest[i], __ATOMIC_RELAXED) & bits)
+      __atomic_fetch_or(&le_pend[i], bits, __ATOMIC_SEQ_CST);
+  }
+}
 static spinlock_t le_lock; /* C1-k5: slot claim (zero-init = unlocked) */
 /* C1-k4: the deadline belongs to the WAITER (several threads may wait on one
    epoll instance), not to the instance; 0 = none. */
@@ -640,6 +676,11 @@ int lt_epoll_new(void) {
       }
       le[i].pid = grp->pid;
       le[i].n = 0;
+      le_full[i] = 1; /* C1-k6 round 2: a fresh set scans everything */
+      le_pend[i] = 0;
+      le_interest[i] = 0;
+      le_nrecent[i] = 0;
+      le_waits[i] = 0;
       le[i].rot = 0;
       le[i].hw = 0;
       le[i].busy = 0;
@@ -681,6 +722,7 @@ static int l_tmr_epoll_ctl(struct process *p, struct trap_frame *tf) {
   int slot = lt_epoll_of(p, epfd);
   if (slot < 0) return l_ret(tf, -EINVAL);
   struct l_epoll *e = &le[slot];
+  __atomic_store_n(&le_full[slot], 1, __ATOMIC_SEQ_CST); /* C1-k6 round 2 */
   if (op == L_EPOLL_DEL) {
     for (int i = 0; i < e->n; i++)
       if (e->e[i].fd == fd) {
@@ -733,6 +775,8 @@ static int l_tmr_epoll_ctl(struct process *p, struct trap_frame *tf) {
   e->e[i].fd = fd;
   e->e[i].events = ev.events;
   e->e[i].data = ev.data;
+  /* C1-k6 round 2: a waiter parked on the old filter rescans */
+  if (__atomic_load_n(&le_waiters[slot], __ATOMIC_RELAXED)) poll_notify();
   return l_ret(tf, 0);
 }
 
@@ -753,7 +797,22 @@ static int l_tmr_epoll_wait_common(struct process *p, struct trap_frame *tf,
   if (maxev <= 0) return l_ret(tf, -EINVAL);
   struct l_epoll *e = &le[slot];
   int me = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+  extern int file_poll_keybit(struct process *p, int fd);
   poll_unpark(p);
+  /* a waiter counts once across its rewound restarts (le_wait_on) */
+  if (le_wait_on[me] != slot + 1) {
+    if (le_wait_on[me] > 0)
+      __atomic_fetch_sub(&le_waiters[le_wait_on[me] - 1], 1, __ATOMIC_SEQ_CST);
+    le_wait_on[me] = slot + 1;
+    __atomic_fetch_add(&le_waiters[slot], 1, __ATOMIC_SEQ_CST);
+  }
+#define LE_DONE()                                                          \
+  do {                                                                     \
+    if (le_wait_on[me] == slot + 1) {                                      \
+      le_wait_on[me] = 0;                                                  \
+      __atomic_fetch_sub(&le_waiters[slot], 1, __ATOMIC_SEQ_CST);          \
+    }                                                                      \
+  } while (0)
   for (;;) {
     uint64_t seen = poll_seq_snapshot(); /* C1-k4: before the scan */
     extern void fs_poll_cap_reset(void);
@@ -763,8 +822,41 @@ static int l_tmr_epoll_wait_common(struct process *p, struct trap_frame *tf,
     int n = e->n;
     int out = 0;
     int start = (n > 0) ? (e->rot % n) : 0;
+    /* C1-k6 round 2: full or partial (see le_kbit above) */
+    int full = __atomic_exchange_n(&le_full[slot], 0, __ATOMIC_SEQ_CST) ||
+               (le_waits[slot]++ & 63) == 0 || le_nrecent[slot] < 0 ||
+               __atomic_load_n(&le_waiters[slot], __ATOMIC_RELAXED) > 1;
+    uint64_t pend = __atomic_exchange_n(&le_pend[slot], 0, __ATOMIC_SEQ_CST);
+    int nrec = full ? 0 : le_nrecent[slot];
+    if (full) {
+      le_scans_full++;
+      uint64_t interest = 0;
+      int other = 0;
+      for (int k = 0; k < n; k++) {
+        int kb = file_poll_keybit(p, e->e[k].fd);
+        le_kbit[slot][k] = (uint8_t)kb;
+        if (kb < 63) interest |= 1ull << kb;
+        else { interest |= POLL_KEYLESS_BIT; other = 1; }
+      }
+      __atomic_store_n(&le_interest[slot], interest, __ATOMIC_SEQ_CST);
+      le_has_other[slot] = (uint8_t)other;
+    } else {
+      le_scans_part++;
+    }
+    int nrecent_new = 0;
     for (int k = 0; k < n && out < maxev; k++) {
       int i = (start + k) % n;
+      if (!full) {
+        int kb = le_kbit[slot][i];
+        int look = kb >= 63 || ((pend >> kb) & 1);
+        for (int r = 0; !look && r < nrec; r++)
+          if (le_recent[slot][r] == i) look = 1;
+        if (!look) {
+          if (all_notify && kb == 65) all_notify = 0;
+          continue;
+        }
+      }
+      le_scan_entries++;
       short want = 0;
       if (e->e[i].events & 0x1) want |= 0x1; /* EPOLLIN  -> POLLIN  */
       if (e->e[i].events & 0x4) want |= 0x4; /* EPOLLOUT -> POLLOUT */
@@ -772,6 +864,8 @@ static int l_tmr_epoll_wait_common(struct process *p, struct trap_frame *tf,
       if (rv & 0x20) continue; /* POLLNVAL: epoll never reports a dead fd */
       if (all_notify && !file_fd_notifies(p, e->e[i].fd)) all_notify = 0;
       if (!rv) continue;
+      if (nrecent_new < LE_RECENT) le_recent[slot][nrecent_new++] = (uint16_t)i;
+      else nrecent_new = LE_RECENT + 1;
       struct {
         uint32_t events;
         uint64_t data;
@@ -782,11 +876,15 @@ static int l_tmr_epoll_wait_common(struct process *p, struct trap_frame *tf,
       if (rv & 0x8) ev.events |= 0x8;   /* POLLERR  -> EPOLLERR  */
       if (rv & 0x10) ev.events |= 0x10; /* POLLHUP -> EPOLLHUP  */
       ev.data = e->e[i].data;
-      if (l_copy_to_user(p, uev + (uint64_t)out * sizeof ev, &ev, sizeof ev) != 0)
+      if (l_copy_to_user(p, uev + (uint64_t)out * sizeof ev, &ev, sizeof ev) != 0) {
+        LE_DONE();
         return l_ret(tf, -EFAULT);
+      }
       out++;
       e->rot = i + 1;
     }
+    /* C1-k6 round 2: what the next partial wait must recheck */
+    le_nrecent[slot] = (out >= maxev || nrecent_new > LE_RECENT) ? -1 : nrecent_new;
     if (out > 0) {
       le_deadline[me] = 0;
       /* C1-k4: a level-triggered set that answers every wait at once for
@@ -824,13 +922,14 @@ static int l_tmr_epoll_wait_common(struct process *p, struct trap_frame *tf,
         }
         e->busy = 0;
       }
+      LE_DONE();
       return l_ret(tf, out);
     }
     e->busy = 0;
     uint64_t now = timer_get_us();
-    if (timeout_us == 0) { le_deadline[me] = 0; return l_ret(tf, 0); }
+    if (timeout_us == 0) { le_deadline[me] = 0; LE_DONE(); return l_ret(tf, 0); }
     if (le_deadline[me] == 0 && timeout_us > 0) le_deadline[me] = now + (uint64_t)timeout_us;
-    if (le_deadline[me] && now >= le_deadline[me]) { le_deadline[me] = 0; return l_ret(tf, 0); }
+    if (le_deadline[me] && now >= le_deadline[me]) { le_deadline[me] = 0; LE_DONE(); return l_ret(tf, 0); }
     uint64_t wake = now + (all_notify ? 250000 : 10000);
     if (le_deadline[me] && le_deadline[me] < wake) wake = le_deadline[me];
     {
@@ -844,10 +943,14 @@ static int l_tmr_epoll_wait_common(struct process *p, struct trap_frame *tf,
     if (linux_compat_sig_deliverable(p)) {
       spinlock_release_irqrestore(&proc_lock, flags);
       le_deadline[me] = 0;
+      LE_DONE();
       return l_ret(tf, -EINTR);
     }
     if (process_park_ok_locked(p)) { /* C1-k4: never re-park the dead */
-      if (poll_park_locked(p, seen)) {
+      /* C1-k6 round 2: woken by the keys of this set's entries (and every
+         keyless notification, via POLL_KEYLESS_BIT when it has such fds) */
+      if (poll_park_bloom_locked(p, seen,
+                                 __atomic_load_n(&le_interest[slot], __ATOMIC_RELAXED))) {
         spinlock_release_irqrestore(&proc_lock, flags);
         continue; /* an event raced the scan */
       }
@@ -862,6 +965,7 @@ static int l_tmr_epoll_wait_common(struct process *p, struct trap_frame *tf,
     schedule(tf, 0);
     return 1;
   }
+#undef LE_DONE
 }
 
 static int l_tmr_epoll_wait(struct process *p, struct trap_frame *tf) {

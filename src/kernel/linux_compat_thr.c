@@ -1297,7 +1297,7 @@ static int l_futex_wake_locked(struct addr_space *as, uint64_t uaddr,
     p->futex_uaddr = 0;
     p->wake_ms = 0;
     p->context[0] = 0; /* WAIT returns 0 on wake */
-    p->state = PROC_STATE_READY;
+    proc_mark_ready(p);
     if (ev) {
       if (woke < 4) {
         ev->woke_pids[woke] = p->pid;
@@ -1606,7 +1606,7 @@ static int l_pi_handoff_locked(struct addr_space *as, uint64_t uaddr,
   np->futex_uaddr = 0;
   np->wake_ms = 0;
   np->context[0] = 0; /* futex_lock_pi returns 0 = "you own it now" */
-  np->state = PROC_STATE_READY;
+  proc_mark_ready(np);
   return np->pid;
 }
 
@@ -2427,8 +2427,12 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     }
 #endif
     spinlock_release_irqrestore(&proc_lock, flags);
-    /* L52: do not leave the woken thread waiting for the next 100 Hz tick. */
-    if (woke > 0)
+    /* L52: do not leave the woken thread waiting for the next 100 Hz tick.
+       C1-k6 round 2: one woken waiter takes the sync wake. */
+    if (woke == 1 && ev.nwoke >= 1) {
+      extern void sched_wake_sync(int idx);
+      sched_wake_sync(ev.woke_pids[0]);
+    } else if (woke > 0)
       sched_wake_idle_cpu();
 #ifdef RW_FUTXW
     futxw_wake(p, uaddr, val, fx_parked, fx_pre, futxw_word(p, uaddr), woke,
@@ -4389,7 +4393,7 @@ void linux_compat_signal_interrupt(struct process *t) {
                    t->futex_uaddr);
     t->futex_uaddr = 0;
     t->wake_ms = 0;
-    t->state = PROC_STATE_READY;
+    proc_mark_ready(t);
     return;
   }
   if (t->state == PROC_STATE_BLOCKED) {
@@ -4434,6 +4438,7 @@ void linux_compat_signal_interrupt(struct process *t) {
       t->context[0] = (uint64_t)(int64_t)-EINTR;
       t->sig_park_kind = 0;
       t->sig_park_nr = 0;
+      if (t->ns_rem_uptr) t->ns_rem_pending = 1; /* C1-k6 round 2: write rem */
       l_sig_wake_row(t, sig, "sleep", 0);
     } else if ((int)t->context[0] == L_SYS_HOS_VFORK_WAIT &&
                t->vfork_child) {
@@ -4466,7 +4471,7 @@ void linux_compat_signal_interrupt(struct process *t) {
       return;
     }
     t->wake_ms = 0;
-    t->state = PROC_STATE_READY;
+    proc_mark_ready(t);
   }
 }
 

@@ -18,6 +18,7 @@
  *   S9  a BLOCKED SIG_DFL SIGTERM does not kill; the signalfd reads it
  *   S10 signalfd(fd, {USR2}): the mask is replaced (USR1 no longer read)
  *   S11 the errors: sizemask 4, bad flags, a non-signalfd fd -> EINVAL
+ *   S12 ssi_pid is the sending process (a forked child's kill)
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -238,6 +239,27 @@ int main(void) {
   verdict("S11", "EINVAL: sizemask 4, bad flags, a pipe fd",
           e_size == -EINVAL && e_flag == -EINVAL && e_fd == -EINVAL,
           "size=%ld flags=%ld pipe=%ld", e_size, e_flag, e_fd);
+
+  /* S12 (C1-k6 round 2): ssi_pid names the sender */
+  {
+    sigset_t mu;
+    sigemptyset(&mu);
+    sigaddset(&mu, SIGUSR1);
+    long f12 = sfd(-1, &mu, 8, 0);
+    pid_t sender = fork();
+    if (sender == 0) {
+      kill(getppid(), SIGUSR1);
+      _exit(0);
+    }
+    memset(s, 0, sizeof s);
+    ssize_t n12 = f12 >= 0 ? read((int)f12, s, sizeof s[0]) : -1;
+    int st12;
+    waitpid(sender, &st12, 0);
+    while (read((int)fd, s + 1, sizeof s[0]) == 128) {} /* the child's SIGCHLD */
+    verdict("S12", "ssi_pid is the sender", n12 == 128 && s[0].signo == SIGUSR1 &&
+            (pid_t)s[0].pid == sender, "read=%zd signo=%u pid=%u sender=%d", n12, s[0].signo,
+            s[0].pid, (int)sender);
+  }
 
   row("done rc=%d", fails);
   return fails;

@@ -1539,10 +1539,30 @@ static int l_proc_sched_getscheduler(struct process *p, struct trap_frame *tf) {
  * it: report "nothing pending" with -EAGAIN and let the caller retry.  glibc's
  * sigwait loops tolerate it; Mono reaches thread creation and the managed
  * runtime with this answer (measured). */
+/* C1-k6 round 2: a signal of the set that IS pending is taken now (blocked
+ * SIG_DFL signals are queued since round 1, docs/cp-k6.md §4): its number
+ * is returned and siginfo filled (si_signo, si_code, si_pid).  Nothing
+ * pending is still -EAGAIN at once, whatever the timeout (no blocking wait:
+ * the Mono note above). */
 static int l_proc_rt_sigtimedwait(struct process *p, struct trap_frame *tf) {
-  (void)p;
-  (void)tf;
-  return l_ret(tf, -EAGAIN);
+  extern int l_sig_dequeue(struct process *cur, uint64_t mask, int *code, int *pid);
+  uint64_t uset = l_arg(tf, 0), uinfo = l_arg(tf, 1);
+  if (l_arg(tf, 3) != 8) return l_ret(tf, -EINVAL);
+  uint64_t set = 0;
+  if (!uset || l_copy_from_user(p, &set, uset, 8) != 0) return l_ret(tf, -EFAULT);
+  set &= ~((1ull << (9 - 1)) | (1ull << (19 - 1)));
+  int code = 0, pid = 0;
+  int sig = l_sig_dequeue(p, set, &code, &pid);
+  if (!sig) return l_ret(tf, -EAGAIN);
+  if (uinfo) {
+    uint8_t si[128];
+    for (int i = 0; i < 128; i++) si[i] = 0;
+    uint32_t v[6] = {(uint32_t)sig, 0, (uint32_t)code, 0, (uint32_t)pid, 0};
+    for (int w = 0; w < 6; w++)
+      for (int b = 0; b < 4; b++) si[w * 4 + b] = (uint8_t)(v[w] >> (8 * b));
+    if (l_copy_to_user(p, uinfo, si, sizeof si) != 0) return l_ret(tf, -EFAULT);
+  }
+  return l_ret(tf, sig);
 }
 
 

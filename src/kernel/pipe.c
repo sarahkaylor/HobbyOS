@@ -254,7 +254,7 @@ void pipe_close(struct pipe *p, int end) {
   if (drop)
     pipe_free_frames(phys);
   drain_wakeup_mask(&wake_mask);
-  poll_notify(); /* C1-k4: EOF / EPIPE is a readiness change */
+  poll_notify_obj(p); /* C1-k4: EOF / EPIPE is a readiness change (C1-k6 round 2: keyed) */
 }
 
 /* C1-k4: is a Linux-ABI caller asking?  The blocking-write-in-full and
@@ -359,7 +359,7 @@ int pipe_read_ex(struct pipe *p, void *buf, int n, int nonblock) {
     spinlock_release(&p->lock);
     drain_wakeup_mask(&wake_mask);
     if (i > 0)
-      poll_notify(); /* C1-k4: space freed (POLLOUT) */
+      poll_notify_obj(p); /* C1-k4: space freed (POLLOUT) */
     return i;
   }
 }
@@ -509,7 +509,7 @@ int pipe_writev_ex(struct pipe *p, const struct pipe_seg *seg, int nseg,
       spinlock_release(&p->lock);
       drain_wakeup_mask(&wake_mask);
       if (w > 0)
-        poll_notify(); /* C1-k4: data arrived (POLLIN) */
+        poll_notify_obj(p); /* C1-k4: data arrived (POLLIN) */
       if (done > 0)
         return (int)done;
       return nonblock ? -EAGAIN : 0;
@@ -520,7 +520,7 @@ int pipe_writev_ex(struct pipe *p, const struct pipe_seg *seg, int nseg,
     spinlock_release(&p->lock);
     drain_wakeup_mask(&wake_mask);
     if (w > 0)
-      poll_notify();
+      poll_notify_obj(p);
     uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
     spinlock_acquire(&p->lock);
     left = total - done;

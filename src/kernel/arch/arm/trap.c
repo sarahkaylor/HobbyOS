@@ -884,7 +884,7 @@ static void sys_spawn_worker(void *arg) {
     if (caller->state == PROC_STATE_WAIT_SPAWN) {
       caller->spawn_retval = child_pid;
       caller->context[0] = child_pid; // return value in x0
-      caller->state = PROC_STATE_READY;
+      proc_mark_ready(caller);
     }
     spinlock_release_irqrestore(&proc_lock, flags);
   }
@@ -999,7 +999,7 @@ static void sys_spawn(struct trap_frame *tf) {
       flags = spinlock_acquire_irqsave(&proc_lock);
       caller->spawn_retval = -1;
       caller->context[0] = (uint64_t)-1;
-      caller->state = PROC_STATE_READY;
+      proc_mark_ready(caller);
       spinlock_release_irqrestore(&proc_lock, flags);
       tf->regs[0] = (uint64_t)-1;
     }
@@ -1031,7 +1031,7 @@ static void sys_spawn_ex_worker(void *arg) {
     if (caller->state == PROC_STATE_WAIT_SPAWN) {
       caller->spawn_retval = r;
       caller->context[0] = (uint64_t)(int64_t)r; /* return value in x0 */
-      caller->state = PROC_STATE_READY;
+      proc_mark_ready(caller);
     }
     spinlock_release_irqrestore(&proc_lock, flags);
   }
@@ -1149,7 +1149,7 @@ static void sys_spawn_ex(struct trap_frame *tf) {
     flags = spinlock_acquire_irqsave(&proc_lock);
     caller->spawn_retval = -EAGAIN;
     caller->context[0] = (uint64_t)(int64_t)-EAGAIN;
-    caller->state = PROC_STATE_READY;
+    proc_mark_ready(caller);
     spinlock_release_irqrestore(&proc_lock, flags);
     tf->regs[0] = (uint64_t)(int64_t)-EAGAIN;
   }

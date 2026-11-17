@@ -572,7 +572,7 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
 #endif
   proc_table[pid].context[34] = 0;          // x64: force is_kernel_process classification
   proc_table[pid].context[35] = 0;          //      (a fresh user program resumes as 0x1B/0x23)
-  proc_table[pid].state = PROC_STATE_READY; // Mark as runnable!
+  proc_mark_ready(&proc_table[pid]); // Mark as runnable!
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
@@ -989,7 +989,7 @@ static void sig_wake_leader_locked(struct process *grp, int sig) {
     return;
   if (grp->state == PROC_STATE_BLOCKED && grp->wake_ms > 0) {
     grp->wake_ms = 0;
-    grp->state = PROC_STATE_READY;
+    proc_mark_ready(grp);
   }
 }
 
@@ -1030,7 +1030,7 @@ static void reap_deliver_locked(struct process *grp) {
         user_rusage_store(parent, parent->wait4_rusage, &ru);
       parent->wait4_rusage = 0;
     }
-    parent->state = PROC_STATE_READY;
+    proc_mark_ready(parent);
     /* Deliver the reap: the anchor's PCB slot is now reusable. */
     grp->state = PROC_STATE_FREE;
     grp->exit_status = 0;
@@ -1677,7 +1677,7 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
   p->context[32] = 0x04;                   // SPSR = EL1t (Execution Level 1, use SP_EL0)
   p->context[0] = (uint64_t)arg;           // x0 = first argument on ARM64
 #endif
-  p->state = PROC_STATE_READY;
+  proc_mark_ready(p);
   /* L52: a fresh process must not wait for the 100 Hz tick to get a CPU. */
   sched_wake_idle_cpu();
 
@@ -1949,6 +1949,25 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
 static void resched_cpu(uint32_t c);
 static int scheduler_started_peek(void);
 static volatile uint8_t sched_kick_pending[MAX_CPUS]; /* see sched_wake_idle_cpu */
+/* C1-k6 round 2 (docs/cp-k6.md §12): the sync wake.  A wake made inside a
+ * user thread's syscall (a pipe or AF_UNIX write, an eventfd write, a futex
+ * wake, a poll notify) does not IPI an idle CPU at once: it is parked here,
+ * and either this CPU's next schedule() -- because the waker is about to
+ * block, the ping-pong shape of every wineserver request and reply -- runs
+ * the woken thread itself (no IPI, no HLT exit on another vCPU), or the
+ * syscall's return to user sends the IPI (trap.c general_interrupt_handler).
+ * Linux's WF_SYNC wakeups for pipes do the same.  One deferred wake per CPU;
+ * a second one is sent at once. */
+static volatile int sched_defer_slot[MAX_CPUS]; /* +1; 0 = none */
+/* When the syscall that deferred returns to user mode, the wake waits at
+   most SCHED_SYNC_WINDOW_US more for this thread's next park (Wine's client
+   writes its request and reads the reply in two syscalls); this CPU's
+   one-shot is armed for the end of the window, and the fire sends it. */
+#define SCHED_SYNC_WINDOW_US 30
+static volatile uint64_t sched_defer_until[MAX_CPUS]; /* 0 = still in the syscall */
+volatile int sched_trap_depth[MAX_CPUS];        /* trap.c: nesting depth */
+volatile int sched_trap_sys[MAX_CPUS];          /* the outer trap is a syscall */
+static uint64_t sched_sync_local, sched_sync_ipi;
 static uint64_t hrt_armed_us[MAX_CPUS];
 static int hrt_boost_idx[MAX_CPUS]; /* +1; 0 = none (written by the fire) */
 static uint64_t hrt_fires, hrt_fires_empty, hrt_arms;
@@ -1987,6 +2006,41 @@ static void hrt_cover_locked(uint32_t cpu, uint64_t d, uint64_t now) {
  * scan, kept as the backstop).  Under proc_lock. */
 static uint64_t sleep_next_us, sleep_full_us;
 
+/* C1-k6 round 2: the READY hint (process.h proc_mark_ready) and the last
+   full pick scan, which also repairs the hint (a READY slot whose bit is
+   clear: a transition that did not use proc_mark_ready). */
+uint64_t sched_ready_hint[PROC_HINT_WORDS];
+static uint64_t sched_hint_full_us;
+static uint64_t sched_hint_repairs;
+static inline int hint_test(const uint64_t *h, int idx) {
+  return (int)((h[idx >> 6] >> (idx & 63)) & 1);
+}
+static inline void hint_clear_locked(int idx) {
+  __atomic_fetch_and(&sched_ready_hint[idx >> 6], ~(1ull << (idx & 63)),
+                     __ATOMIC_SEQ_CST);
+}
+/* Caller holds proc_lock.  Fills h with the bits to examine: the hint, or
+   every slot when the 10 ms full scan is due. */
+static int sched_hint_snapshot_locked(uint64_t *h, uint64_t now_us) {
+  int full = (now_us - sched_hint_full_us >= 10000) || now_us < sched_hint_full_us;
+  for (int w = 0; w < PROC_HINT_WORDS; w++)
+    h[w] = full ? ~0ull : __atomic_load_n(&sched_ready_hint[w], __ATOMIC_SEQ_CST);
+  if (full) sched_hint_full_us = now_us;
+  return full;
+}
+/* Caller holds proc_lock: slot idx was examined.  Keep the hint exact for
+   it: clear a stale bit, repair a missing one. */
+static inline int hint_check_locked(int idx, int full) {
+  int ready = proc_table[idx].state == PROC_STATE_READY;
+  int bit = hint_test(sched_ready_hint, idx);
+  if (!ready && bit) hint_clear_locked(idx);
+  else if (ready && !bit && full) {
+    proc_hint_ready(idx);
+    sched_hint_repairs++;
+  }
+  return ready;
+}
+
 static int process_check_sleeping_us(uint64_t current_us, int *first,
                                      uint64_t *next) {
   int woke = 0;
@@ -2002,7 +2056,7 @@ static int process_check_sleeping_us(uint64_t current_us, int *first,
       continue;
     }
     if (st == PROC_STATE_BLOCKED) {
-      proc_table[i].state = PROC_STATE_READY;
+      proc_mark_ready(&proc_table[i]);
       proc_table[i].wake_ms = 0;
     } else {
       /* P1.2 (design section 5): FUTEX waiters time out here.  The resume
@@ -2023,7 +2077,7 @@ static int process_check_sleeping_us(uint64_t current_us, int *first,
       }
       proc_table[i].futex_uaddr = 0;
       proc_table[i].wake_ms = 0;
-      proc_table[i].state = PROC_STATE_READY;
+      proc_mark_ready(&proc_table[i]);
     }
     if (first && *first < 0) *first = i;
     woke++;
@@ -2063,8 +2117,68 @@ int sched_hrt_fire(void) {
   if (!woke) hrt_fires_empty++;
   if (first >= 0) hrt_boost_idx[cpu] = first + 1;
   if (next) hrt_cover_locked(cpu, next, timer_get_us());
+  {
+    /* C1-k6 round 2: keep a pending sync-wake window's end armed. */
+    uint64_t until = sched_defer_until[cpu], tn = timer_get_us();
+    if (sched_defer_slot[cpu] && until > tn &&
+        (hrt_armed_us[cpu] == 0 || hrt_armed_us[cpu] > until) &&
+        hrt_arch_arm_us(until, tn))
+      hrt_armed_us[cpu] = until;
+  }
   spinlock_release_irqrestore(&proc_lock, flags);
   return woke;
+}
+
+/* C1-k6 round 2: wake slot `idx` (already READY) the sync way, see above. */
+void sched_wake_sync(int idx) {
+  uint32_t cpu = get_cpuid();
+  if (idx >= 0 && idx < MAX_PROCESSES && cpu < MAX_CPUS &&
+      sched_trap_depth[cpu] == 1 && sched_trap_sys[cpu] &&
+      __atomic_load_n(&sched_defer_slot[cpu], __ATOMIC_RELAXED) == 0) {
+    struct process *c = current_process();
+    if (c && !c->is_kernel_process) {
+      sched_defer_until[cpu] = 0;
+      __atomic_store_n(&sched_defer_slot[cpu], idx + 1, __ATOMIC_RELAXED);
+      return;
+    }
+  }
+  sched_wake_idle_cpu();
+}
+
+/* C1-k6 round 2: a return to user mode (or a one-shot fire, `fire`=1)
+   with a deferred wake.  The first return opens the window and arms the
+   one-shot for its end; a later one, or the fire, past the end sends the
+   IPI.  `now_ipi` sends it at once (the idle loop: nobody here will park). */
+void sched_sync_flush_ex(int now_ipi) {
+  uint32_t cpu = get_cpuid();
+  if (cpu >= MAX_CPUS || !__atomic_load_n(&sched_defer_slot[cpu], __ATOMIC_RELAXED))
+    return;
+  uint64_t now = timer_get_us();
+  if (!now_ipi) {
+    uint64_t until = sched_defer_until[cpu];
+    if (until == 0) {
+      until = now + SCHED_SYNC_WINDOW_US;
+      sched_defer_until[cpu] = until;
+      /* Lowering this CPU's own armed time without proc_lock keeps the
+         coverage invariant (an earlier fire only rescans). */
+      uint64_t a = hrt_armed_us[cpu];
+      if ((a == 0 || a <= now || a > until) && hrt_arch_arm_us(until, now))
+        hrt_armed_us[cpu] = until;
+      return;
+    }
+    if (now < until)
+      return;
+  }
+  if (__atomic_exchange_n(&sched_defer_slot[cpu], 0, __ATOMIC_RELAXED)) {
+    sched_sync_ipi++;
+    sched_wake_idle_cpu();
+  }
+}
+void sched_sync_flush(void) { sched_sync_flush_ex(0); }
+
+void sched_sync_stats(uint64_t *local, uint64_t *ipi) {
+  if (local) *local = sched_sync_local;
+  if (ipi) *ipi = sched_sync_ipi;
 }
 
 /* C1-k6: cover a deadline that is not a park (an armed Linux timer). */
@@ -2220,7 +2334,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
         ru_vol = 1;
       if (cur->state == PROC_STATE_RUNNING) {
         save_context(cur, tf);
-        cur->state = PROC_STATE_READY;
+        proc_mark_ready(cur);
       } else if (cur->state == PROC_STATE_READY) {
         /* A wake raced the caller's block-to-schedule gap (the -2/EAGAIN
            retry path sets BLOCKED, returns to the trap, which then calls
@@ -2256,6 +2370,24 @@ void schedule(struct trap_frame *tf, int is_yield) {
       (void)process_check_sleeping_us(now_us, 0, 0);
   }
 
+  /* C1-k6 round 2: a deferred sync wake.  If this CPU's thread is parking,
+     the woken slot is this pick (below); otherwise it gets its IPI now. */
+  {
+    int ds = __atomic_exchange_n(&sched_defer_slot[cpu], 0, __ATOMIC_RELAXED) - 1;
+    if (ds >= 0) {
+      int parking = current_pid >= 0 &&
+                    proc_table[current_pid].state != PROC_STATE_RUNNING &&
+                    proc_table[current_pid].state != PROC_STATE_READY;
+      if (parking && proc_table[ds].state == PROC_STATE_READY && !hrt_boost_idx[cpu]) {
+        hrt_boost_idx[cpu] = ds + 1;
+        sched_sync_local++;
+      } else {
+        sched_sync_ipi++;
+        sched_wake_idle_cpu();
+      }
+    }
+  }
+
   /* C1-k6: the slot the one-shot just woke on this CPU is tried first. */
   int hrt_boost = hrt_boost_idx[cpu] - 1;
   hrt_boost_idx[cpu] = 0;
@@ -2269,9 +2401,13 @@ void schedule(struct trap_frame *tf, int is_yield) {
       current_search_pid = (hrt_boost + MAX_PROCESSES - 1) % MAX_PROCESSES;
     }
     hrt_boost = -1;
+    uint64_t pick_hint[PROC_HINT_WORDS];
+    int pick_full = sched_hint_snapshot_locked(pick_hint, timer_get_us());
     for (int i = 1; i <= MAX_PROCESSES; i++) {
       int idx = (current_search_pid + i) % MAX_PROCESSES;
-      if (proc_table[idx].state != PROC_STATE_READY)
+      /* C1-k6 round 2: only slots the READY hint names (or all, on the
+         10 ms full scan); the state of every other PCB is not touched. */
+      if (!hint_test(pick_hint, idx) || !hint_check_locked(idx, pick_full))
         continue;
       /* GB-057: never pick a BROKEN user slot -- one with no address space AND no
          physical base to overlay.
@@ -2461,6 +2597,10 @@ void schedule(struct trap_frame *tf, int is_yield) {
       cpu_heartbeat_ms[cpu] = timer_get_ms();
       __atomic_store_n(&sched_last_pick_ms, cpu_heartbeat_ms[cpu], __ATOMIC_RELAXED);
       proc_table[next].state = PROC_STATE_RUNNING;
+      /* C1-k6 round 2: resuming a context ends every trap this CPU had
+         open (the switch never returns through them). */
+      sched_trap_depth[cpu] = 0;
+      sched_trap_sys[cpu] = 0;
       struct trap_frame local_tf;
       restore_context(&proc_table[next], &local_tf);
 
@@ -3403,6 +3543,11 @@ static void resched_cpu(uint32_t c) {
   }
   volatile uint32_t *icr_hi = (volatile uint32_t *)phys_to_virt(0xFEE00310);
   volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00300);
+  /* C1-k6 round 2: interrupts off around the ICR pair, so a send from an
+     interrupt on this CPU (the one-shot's kick) cannot land between the
+     ICR_HIGH and ICR_LOW writes and redirect this IPI. */
+  uint64_t rf;
+  __asm__ volatile("pushfq; popq %0; cli" : "=r"(rf)::"memory");
   *icr_hi = (uint32_t)(c << 24);
   *icr_lo = 0x00002081u; /* fixed delivery, vector 0x81, level assert, edge */
   for (int i = 0; i < 200000; i++) {
@@ -3410,6 +3555,7 @@ static void resched_cpu(uint32_t c) {
       break;
     __asm__ volatile("pause" ::: "memory");
   }
+  if (rf & 0x200) __asm__ volatile("sti" ::: "memory");
 #endif
 }
 
@@ -4063,6 +4209,12 @@ int process_signal_directed(int pid, int sig, int directed) {
     pender = (task && task->is_thread) ? task : target;
     pender->sig_pending |= (1ull << (sig - 1));
   }
+  {
+    /* C1-k6 round 2: the sender, for signalfd's ssi_pid (0 = the kernel) */
+    struct process *snd = current_process();
+    struct process *sg = snd ? process_group(snd) : 0;
+    pender->sig_sender[sig] = (int16_t)((sg && !snd->is_kernel_process) ? sg->pid : 0);
+  }
   /* M6/L45: per-target rows for the two Boehm stop-the-world signals.  The
      global [SIG] rows are capped at 400 and the interesting pids (the pool
      workers created last) never made it into them.  A SIGPWR/SIGXCPU that is
@@ -4557,6 +4709,17 @@ void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
      GC_suspend_ack_sem for ever (measured, section 23).  The compat engine
      wants the group ANCHOR (handlers/restorer live there) and plants the
      frame on the resumed thread's context.  Native threads keep the old rule. */
+  /* C1-k6 round 2: a relative nanosleep ended by a signal returns the time
+     left in `rem` (Linux).  The thread's AS is installed here. */
+  if (p->ns_rem_pending) {
+    p->ns_rem_pending = 0;
+    uint64_t now = timer_get_us();
+    uint64_t left = p->ns_rem_deadline > now ? p->ns_rem_deadline - now : 0;
+    int64_t ts[2] = {(int64_t)(left / 1000000), (int64_t)(left % 1000000) * 1000};
+    if (p->as && vm_touch(p, p->ns_rem_uptr, sizeof ts, 1) == 0)
+      (void)vm_kwrite(p, p->ns_rem_uptr, ts, sizeof ts);
+    p->ns_rem_uptr = 0;
+  }
   struct process *grp = process_group(p);
   if (p->is_thread && !(grp->abi_flags & PROC_FLAG_LINUX_ABI))
     return;
@@ -5075,7 +5238,7 @@ void process_vfork_release_locked(struct process *c) {
   par->vfork_child = 0;
   if (par->state == PROC_STATE_BLOCKED) {
     par->wake_ms = 0;
-    par->state = PROC_STATE_READY;
+    proc_mark_ready(par);
     sched_wake_idle_cpu();
   }
 }
@@ -5306,7 +5469,7 @@ static int process_fork_common(struct trap_frame *tf, int mode) {
     parent->vfork_child = child->pid;
     parent->vfork_ret = child->pid;
   }
-  child->state = PROC_STATE_READY;
+  proc_mark_ready(child);
   spinlock_release_irqrestore(&proc_lock, flags);
   /* L52: pthread_create's waiter blocks on a semaphore for this child's
      first schedule; without a poke that is a full tick (measured 9 ms). */
@@ -5343,12 +5506,12 @@ void process_wakeup(int pid) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   int woke = 0;
   if (proc_table[pid].state == PROC_STATE_BLOCKED) {
-    proc_table[pid].state = PROC_STATE_READY;
+    proc_mark_ready(&proc_table[pid]);
     woke = 1;
   }
   spinlock_release_irqrestore(&proc_lock, flags);
   if (woke)
-    sched_wake_idle_cpu();
+    sched_wake_sync(pid); /* C1-k6 round 2 */
 }
 
 /* C1-k4: poll/select/epoll_wait wakeups (see process.h).  Pollers used to
@@ -5365,8 +5528,15 @@ uint64_t poll_seq_snapshot(void) {
 }
 
 int poll_park_locked(struct process *p, uint64_t seen) {
+  return poll_park_bloom_locked(p, seen, ~0ull);
+}
+
+/* C1-k6 round 2: park as a poller woken only by notifications whose key
+   meets `bloom` (and by every keyless one). */
+int poll_park_bloom_locked(struct process *p, uint64_t seen, uint64_t bloom) {
   if (!p || p->pid <= 0 || p->pid >= MAX_PROCESSES)
     return 0;
+  p->poll_bloom = bloom;
   pid_mask_set(&poll_waiters, p->pid);
   p->poll_waiting = 1;
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -5397,8 +5567,17 @@ void poll_unpark(struct process *p) {
     p->poll_waiting = 0;
 }
 
-void poll_notify(void) {
+/* C1-k6 round 2 (docs/cp-k6.md §12): wake the pollers whose key filter
+ * meets `bits` (~0 = all), and tell the epoll sets (their next wait
+ * rescans only the entries those keys name).  The sequence word moves for
+ * every notification, keyed or not, so the park-vs-event race is the one
+ * C1-k4 closed. */
+static void poll_notify_bits(uint64_t bits) {
   __atomic_fetch_add(&poll_event_seq, 1, __ATOMIC_SEQ_CST);
+  {
+    extern void lt_epoll_pend_bits(uint64_t bits) __attribute__((weak));
+    if (lt_epoll_pend_bits) lt_epoll_pend_bits(bits);
+  }
   int any = 0;
   for (int wi = 0; wi < PID_MASK_WORDS; wi++)
     if (__atomic_load_n(&poll_waiters.w[wi], __ATOMIC_SEQ_CST)) {
@@ -5411,23 +5590,36 @@ void poll_notify(void) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   for (int wi = 0; wi < PID_MASK_WORDS; wi++) {
     uint64_t x = poll_waiters.w[wi];
-    poll_waiters.w[wi] = 0;
+    uint64_t keep = 0;
     while (x) {
-      int pid = (wi << 6) + __builtin_ctzll(x);
+      int b = __builtin_ctzll(x);
+      int pid = (wi << 6) + b;
       x &= x - 1;
       if (pid >= MAX_PROCESSES)
         continue;
       struct process *q = &proc_table[pid];
-      if (q->poll_waiting && q->state == PROC_STATE_BLOCKED) {
-        q->poll_waiting = 0;
-        q->state = PROC_STATE_READY;
-        woke = 1;
+      if (!q->poll_waiting || q->state != PROC_STATE_BLOCKED)
+        continue; /* stale registration: drop the bit */
+      if (!(q->poll_bloom & bits)) {
+        keep |= 1ull << b; /* parked on other objects: still a waiter */
+        continue;
       }
+      q->poll_waiting = 0;
+      proc_mark_ready(q);
+      woke = woke ? -1 : pid + 1; /* one: the sync wake; more: IPI */
     }
+    poll_waiters.w[wi] = keep;
   }
   spinlock_release_irqrestore(&proc_lock, flags);
-  if (woke)
+  if (woke > 0)
+    sched_wake_sync(woke - 1); /* C1-k6 round 2 */
+  else if (woke < 0)
     sched_wake_idle_cpu();
+}
+
+void poll_notify(void) { poll_notify_bits(~0ull); }
+void poll_notify_obj(const void *obj) {
+  poll_notify_bits(obj ? 1ull << poll_key_bit(obj) : ~0ull);
 }
 
 /* Scheduler-state access for the blocking lock (see process.h).  Caller holds
@@ -5444,7 +5636,7 @@ int process_try_wake_locked(int pid) {
     return 0;
   if (proc_table[pid].state != PROC_STATE_BLOCKED)
     return 0;
-  proc_table[pid].state = PROC_STATE_READY;
+  proc_mark_ready(&proc_table[pid]);
   return 1;
 }
 
@@ -5457,7 +5649,7 @@ void process_wake_all(void) {
   int woke = 0;
   for (int i = 0; i < MAX_PROCESSES; i++) {
     if (proc_table[i].state == PROC_STATE_BLOCKED && proc_table[i].wake_ms == 0) {
-      proc_table[i].state = PROC_STATE_READY;
+      proc_mark_ready(&proc_table[i]);
       woke = 1;
     }
   }
@@ -5759,13 +5951,21 @@ void start_scheduler(void) {
     {
       static uint32_t fast_idle_pass[MAX_CPUS];
       uint32_t fc = get_cpuid();
+      if (fc < MAX_CPUS) { /* C1-k6 round 2: no trap is open in the idle loop */
+        sched_trap_depth[fc] = 0;
+        sched_trap_sys[fc] = 0;
+        if (sched_defer_slot[fc]) sched_sync_flush_ex(1);
+      }
       uint64_t nu = timer_get_us();
       uint64_t snx = __atomic_load_n(&sleep_next_us, __ATOMIC_RELAXED);
       uint64_t sfu = __atomic_load_n(&sleep_full_us, __ATOMIC_RELAXED);
       int work = (snx && nu >= snx) || nu - sfu >= 10000 || nu < sfu;
-      for (int i = 0; !work && i < MAX_PROCESSES; i++)
-        if (__atomic_load_n(&proc_table[i].state, __ATOMIC_RELAXED) == PROC_STATE_READY)
+      /* C1-k6 round 2: the READY hint, not 512 PCB state fields */
+      for (int w = 0; !work && w < PROC_HINT_WORDS; w++)
+        if (__atomic_load_n(&sched_ready_hint[w], __ATOMIC_RELAXED))
           work = 1;
+      if (!work && nu - __atomic_load_n(&sched_hint_full_us, __ATOMIC_RELAXED) >= 10000)
+        work = 1; /* the full pick scan is due */
       if (!work && fc < MAX_CPUS && cpu_current_pids[fc] < 0 &&
           (++fast_idle_pass[fc] & 63) != 0) {
         cpu_heartbeat_ms[fc] = timer_get_ms();
@@ -5776,8 +5976,10 @@ void start_scheduler(void) {
     }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     process_check_sleeping();
+    uint64_t idle_hint[PROC_HINT_WORDS];
+    int idle_full = sched_hint_snapshot_locked(idle_hint, timer_get_us());
     for (int i = 0; i < MAX_PROCESSES; i++) {
-      if (proc_table[i].state != PROC_STATE_READY)
+      if (!hint_test(idle_hint, i) || !hint_check_locked(i, idle_full))
         continue;
       /* GB-057: same rule as the pick in schedule() -- never hand a frame to a
          BROKEN user slot (no AS *and* no physical base; a v1 process has `as == 0`
@@ -5943,7 +6145,7 @@ void start_scheduler(void) {
           proc_table[last_pid].state == PROC_STATE_RUNNING) {
         uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
         if (proc_table[last_pid].state == PROC_STATE_RUNNING)
-          proc_table[last_pid].state = PROC_STATE_READY;
+          proc_mark_ready(&proc_table[last_pid]);
         spinlock_release_irqrestore(&proc_lock, f2);
       }
     }
@@ -6056,7 +6258,7 @@ void start_scheduler(void) {
             uart_puts(" ");
             uart_puts(proc_table[k].name);
             uart_puts(" from RUNNING with no claiming CPU\n");
-            proc_table[k].state = PROC_STATE_READY;
+            proc_mark_ready(&proc_table[k]);
           } else if (!slot_as_on_live_cpu(k) &&
                      lostwake_stale_claim_reclaimable(k)) {
             /* L9 arm-and-confirm: a single stale sample cannot prove the
@@ -6227,7 +6429,7 @@ void start_scheduler(void) {
           uart_puts(" -> -EAGAIN (its worker never reported)\n");
           proc_table[k].spawn_retval = -EAGAIN;
           proc_table[k].context[0] = (uint64_t)(int64_t)-EAGAIN;
-          proc_table[k].state = PROC_STATE_READY;
+          proc_mark_ready(&proc_table[k]);
           proc_table[k].spawn_deadline_ms = 0;
         }
       }
@@ -7476,7 +7678,7 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
       spinlock_release_irqrestore(&proc_lock, f2);
       return -EINVAL;
     }
-    t->state = PROC_STATE_READY;
+    proc_mark_ready(t);
     spinlock_release_irqrestore(&proc_lock, f2);
   }
 
@@ -7571,7 +7773,7 @@ int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
     if (linux_compat_sig_clone && (caller->abi_flags & PROC_FLAG_LINUX_ABI))
       linux_compat_sig_clone(caller, t);
   }
-  t->state = PROC_STATE_READY;
+  proc_mark_ready(t);
   return t->pid;
 }
 #endif
@@ -7862,7 +8064,7 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
       m->futex_uaddr = 0;
       m->wake_ms = 0;
       m->context[0] = 0; /* resume value: 0 on wake */
-      m->state = PROC_STATE_READY;
+      proc_mark_ready(m);
       if (woke < 4) {
         ev.woke_pids[woke] = m->pid;
         ev.nwoke = (uint8_t)(woke + 1);

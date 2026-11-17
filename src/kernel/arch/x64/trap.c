@@ -1364,7 +1364,7 @@ static void sys_spawn_worker(void *arg) {
     if (caller->state == PROC_STATE_WAIT_SPAWN) {
       caller->spawn_retval = child_pid;
       caller->context[0] = child_pid; // return value in rax / x0
-      caller->state = PROC_STATE_READY;
+      proc_mark_ready(caller);
     }
     spinlock_release_irqrestore(&proc_lock, flags);
   }
@@ -1480,7 +1480,7 @@ static void sys_spawn(struct trap_frame *tf) {
       flags = spinlock_acquire_irqsave(&proc_lock);
       caller->spawn_retval = -1;
       caller->context[0] = (uint64_t)-1;
-      caller->state = PROC_STATE_READY;
+      proc_mark_ready(caller);
       spinlock_release_irqrestore(&proc_lock, flags);
       tf->regs[0] = (uint64_t)-1;
     }
@@ -1512,7 +1512,7 @@ static void sys_spawn_ex_worker(void *arg) {
     if (caller->state == PROC_STATE_WAIT_SPAWN) {
       caller->spawn_retval = r;
       caller->context[0] = (uint64_t)(int64_t)r; /* return value in rax */
-      caller->state = PROC_STATE_READY;
+      proc_mark_ready(caller);
     }
     spinlock_release_irqrestore(&proc_lock, flags);
   }
@@ -1642,7 +1642,7 @@ static void sys_spawn_ex(struct trap_frame *tf) {
     flags = spinlock_acquire_irqsave(&proc_lock);
     caller->spawn_retval = -EAGAIN;
     caller->context[0] = (uint64_t)(int64_t)-EAGAIN;
-    caller->state = PROC_STATE_READY;
+    proc_mark_ready(caller);
     spinlock_release_irqrestore(&proc_lock, flags);
     tf->regs[0] = (uint64_t)(int64_t)-EAGAIN;
   }
@@ -4802,6 +4802,15 @@ void general_interrupt_handler(struct trap_frame *tf) {
   extern void ru_trap_exit(void);
   int from_user = (tf->cs & 3) == 3;
   if (from_user) ru_trap_enter();
+  /* C1-k6 round 2: trap nesting, for the sync wake (process.c
+     sched_wake_sync defers a wake only inside a user thread's own syscall). */
+  extern volatile int sched_trap_depth[MAX_CPUS];
+  extern volatile int sched_trap_sys[MAX_CPUS];
+  extern void sched_sync_flush(void);
+  uint32_t tcpu = get_cpuid();
+  if (tcpu < MAX_CPUS) {
+    if (sched_trap_depth[tcpu]++ == 0) sched_trap_sys[tcpu] = from_user && tf->vector == 0x80;
+  }
   /* Always-on lock audit: an IRQ handler must never try to park on a ylock_t,
    * and rank rules do not govern acquisitions from exception context (see
    * lock.h).  Both instruments are told, in every build. */
@@ -4814,6 +4823,15 @@ void general_interrupt_handler(struct trap_frame *tf) {
   lockdbg_irq_exit();
 #endif
   lock_audit_irq_exit();
+  /* C1-k6 round 2: back to the interrupted context on this CPU; a wake the
+     syscall deferred and no park consumed gets its IPI now. */
+  if (tcpu < MAX_CPUS && tcpu == get_cpuid()) {
+    if (--sched_trap_depth[tcpu] <= 0) {
+      sched_trap_depth[tcpu] = 0;
+      sched_trap_sys[tcpu] = 0;
+      sched_sync_flush();
+    }
+  }
   if (from_user) ru_trap_exit();
 }
 
@@ -5180,6 +5198,8 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     lapic_send_eoi();
     extern int sched_hrt_fire(void);
     extern int sched_kick_idle_cpus(int n);
+    extern void sched_sync_flush_ex(int now_ipi);
+    sched_sync_flush_ex(0); /* C1-k6 round 2: a sync-wake window that ended */
     int woke = sched_hrt_fire();
     {
       /* A Linux timer due now raises its signal / counts its expiry here,
