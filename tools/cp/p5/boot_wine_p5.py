@@ -38,8 +38,20 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run_icewm_test import Qmp  # noqa: E402
 from p5lib import acquire_slot, census, guests_running, qemu_cmd, read, release_slot  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from console_rows import resync  # noqa: E402
+import re  # noqa: E402
 
 PFX = {"vkcube": "[VK]", "d3d11": "[D3D11]", "d3d12": "[D3D12]", "fullscr": "[FS]"}
+# C0-console: the rows this grader reads are found anywhere in a serial line
+# (tools/cp/console_rows.py), not only at its start.
+ROW_TAGS = ["P5", "VK", "D3D11", "D3D12", "FS", "NFSHARD", "NFLK"]
+
+
+def done0(rows, pfx):
+    """'<pfx> done rc=0' with nothing glued to the number."""
+    rx = re.compile(re.escape(pfx) + r" done rc=0(\D|$)")
+    return any(rx.match(r) for r in rows)
 # fullscr: screendump name -> (serial trigger, mode on the glass or None = desktop)
 FS_SHOTS = [("fs-M3-1280x720", "[FS] hold M3 ", (1280, 720)),
             ("fs-M4-1920x1080", "[FS] hold M4 ", (1920, 1080)),
@@ -138,9 +150,10 @@ def main():
 
 def grade(args, probes, serial, shots):
     # XSESSION relays its children's stdout/stderr with an "[X] " prefix; the
-    # probes' rows arrive as "[X] [VK] ...".  Grade the unprefixed rows.
-    ser = "\n".join(ln[4:] if ln.startswith("[X] ") else ln for ln in read(serial).splitlines())
-    lines = ser.splitlines()
+    # probes' rows arrive as "[X] [VK] ...".  Grade the unprefixed rows, each
+    # cut out of its serial line wherever its tag stands (C0-console).
+    lines = resync(read(serial), ROW_TAGS)
+    ser = "\n".join(lines)
     fails = []
     log("--- [P5] rows and probe rows (serial) ---")
     for ln in lines:
@@ -165,7 +178,7 @@ def grade(args, probes, serial, shots):
             kv = dict(t.split("=", 1) for t in res[-1].split() if t.count("=") == 1)
             if float(kv.get("wall", "0")) < 60000 or int(kv.get("frames", "0")) <= 0:
                 fails.append(f"{p}: {res[-1]} (< 60 s)"); ok = False
-        if f"{PFX[p]} done rc=0" not in rows:
+        if not done0(rows, PFX[p]):
             fails.append(f"{p}: no '{PFX[p]} done rc=0'"); ok = False
         endrow = [ln for ln in span.splitlines() if ln.startswith(f"[P5] end {p} ")]
         if not endrow or " status=0 " not in endrow[-1] + " ":
@@ -204,7 +217,6 @@ def grade(args, probes, serial, shots):
     # lose nothing.  VOID on "[NFSHARD] GIVE UP", a failed lookup
     # ("[NFLK] retry ... rc=-1"), or no-reply rows with no hard-mount rows at
     # all (an old kernel that may have zero-filled the read).
-    import re
     noreply = [ln for ln in lines if "rpc: no reply from server" in ln]
     hard = [ln for ln in lines if "[NFSHARD] retry" in ln]
     waited = [int(m.group(1)) for ln in hard for m in [re.search(r"waited_ms=(\d+)", ln)] if m]
@@ -250,7 +262,7 @@ def grade_fullscr(args, ser, shots, fails):
         if not e or " status=0 " not in e[-1] + " ":
             fails.append(f"fullscr: launcher end row for {tag}: {e[-1] if e else '(none)'}"); ok = False
     rows = [ln for ln in ser.splitlines() if ln.startswith("[FS]")]
-    if sum(1 for r in rows if r.startswith("[FS] done rc=0")) != 2:
+    if sum(1 for r in rows if done0([r], "[FS]")) != 2:
         fails.append("fullscr: want two '[FS] done rc=0' rows (run + check)"); ok = False
     if any(" FAIL " in r + " " for r in rows):
         fails.append("fullscr: " + next(r for r in rows if " FAIL " in r + " ")); ok = False

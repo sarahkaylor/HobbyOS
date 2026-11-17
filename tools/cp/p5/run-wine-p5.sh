@@ -34,6 +34,7 @@
 #      P5_CFLAGS (extra launcher -D flags, diagnostics only),
 #      P5_XHOBBY + P5_XHOBBY_SHA256 (an X server build to stage over ::/XHOBBY.BIN),
 #      P5_XSESSION_ENV ("K=V;K2=V2" lines appended to ::/X11/XSESSION.ENV)
+#      P5_OUT (default obj/cp-p5/wine: build logs, disk copy, serial.log, screendumps)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT" || exit 2
@@ -46,7 +47,9 @@ EXPORT="${P5_EXPORT:-/srv/nfs/cp-vk2-p5}"
 PROBES="${P5_PROBES:-vkcube d3d11 d3d12}"
 WDBG="${P5_WINEDEBUG:-err+all,fixme-all}"
 TIMEOUT_S="${TIMEOUT_S:-7200}"
-OUT="$ROOT/obj/cp-p5/wine"; mkdir -p "$OUT"
+# P5_OUT: the run's work/output dir.  The Venus P6 rerun (tools/cp/venus/
+# run-wine-venus.sh) passes its own, so a P6 run never overwrites P5's evidence.
+OUT="${P5_OUT:-$ROOT/obj/cp-p5/wine}"; mkdir -p "$OUT"
 IMG="$ROOT/disk.img"
 die() { echo "wine-p5: $*" >&2; exit 2; }
 export MAKEFLAGS="${MAKEFLAGS:--j16}" TOOLS_SKIP="${TOOLS_SKIP:-1}"

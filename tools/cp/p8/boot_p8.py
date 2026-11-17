@@ -38,6 +38,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools", "cp", "p5"))
 from run_icewm_test import Qmp  # noqa: E402
+sys.path.insert(0, os.path.join(REPO, "tools", "cp"))
+from console_rows import resync  # noqa: E402
 from p5lib import acquire_slot, guests_running, ppm, read, release_slot  # noqa: E402
 
 MENU_WORDS = ["NEW GAME", "LOAD GAME", "CONTINUE", "SETTINGS", "CREDITS", "QUIT GAME", "ADDITIONAL CONTENT"]
@@ -133,7 +135,9 @@ def dri_nodes(qemu_pid):
 
 
 def unprefix(text):
-    return "\n".join(ln[4:] if ln.startswith("[X] ") else ln for ln in text.splitlines())
+    # C0-console: launcher rows are cut out of their serial line wherever the
+    # tag stands (tools/cp/console_rows.py), and "[X] " is dropped.
+    return "\n".join(resync(text, ["P8"]))
 
 
 def png(ppm_path, png_path):
@@ -239,8 +243,8 @@ def main():
             # progress = launcher rows and the children's relayed output; the
             # kernel's idle/futex dumps ([IDLESTUCK], [ALIVE-SET]...) keep the
             # serial log growing while nothing happens, so they do not count.
-            # (line starts only: kernel rows get spliced with "[X] " mid-line)
-            prog = len(re.findall(r"(?m)^\[(?:X|P8)\] ", raw))
+            # (anywhere in a line: C0-console's second line of defence)
+            prog = len(re.findall(r"\[(?:X|P8)\] ", raw))
             if prog != last_size:
                 last_size, last_change = prog, time.time()
             ser = unprefix(raw)

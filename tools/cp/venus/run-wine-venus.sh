@@ -14,6 +14,8 @@
 # Env: as run-wine-p5.sh (CP_WINE_STAGE, WINE_BUILD, CP_X11_WORK, CP_P5_PE,
 #      P5_EXPORT default /srv/nfs/cp-venus-p5, P5_XHOBBY..., P5_XSESSION_ENV),
 #      VENUS_WORK (~/cp/venus-build), CP_VK_SRC (C5's work dir, ~/cp/vk2-build).
+#      P5_OUT (default obj/cp-p5/venus: its own dir, so P5's obj/cp-p5/wine
+#      evidence survives a P6 rerun; C0-console).
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 VW=${VENUS_WORK:-$HOME/cp/venus-build}
@@ -31,4 +33,5 @@ echo "== merged Vulkan tree $M: $(ls "$M/stage-x11/CP/VK/share/vulkan/icd.d")"
 cd "$REPO"
 CP_VK_WORK="$M" VENUS_P5=1 PYTHONPATH="$REPO/tools/cp/venus/pyhook${PYTHONPATH:+:$PYTHONPATH}" \
   P5_EXPORT="${P5_EXPORT:-/srv/nfs/cp-venus-p5}" P5_PROBES="${P5_PROBES:-d3d12}" \
+  P5_OUT="${P5_OUT:-$REPO/obj/cp-p5/venus}" \
   bash tools/cp/p5/run-wine-p5.sh

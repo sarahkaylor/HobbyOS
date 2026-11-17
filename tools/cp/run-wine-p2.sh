@@ -224,7 +224,7 @@ if [ -n "$PFX" ]; then
     CPDATA_FORCE=1 bash tools/cp/mkcpdata.sh "$PIMG" 8G || die "mkcpdata"
     stage "$OUT/winep2-b1.bin" ::/WINEP2.BIN
     p2_boot "$OUT/serial-b1.log" "$PIMG"
-    tr -d '\r' < "$OUT/serial-b1.log" > "$OUT/serial-b1.txt"
+    python3 tools/cp/console_rows.py P2,WP < "$OUT/serial-b1.log" > "$OUT/serial-b1.txt"
     fsck_img b1
     manifest b1
     # keep the boot-1 disk: P2_PFX_ONLY=2 re-runs boot 2 on a copy of it
@@ -232,7 +232,7 @@ if [ -n "$PFX" ]; then
   fi
   stage "$OUT/winep2-b2.bin" ::/WINEP2.BIN
   p2_boot "$OUT/serial-b2.log" "$PIMG"
-  tr -d '\r' < "$OUT/serial-b2.log" > "$OUT/serial-b2.txt"
+  python3 tools/cp/console_rows.py P2,WP < "$OUT/serial-b2.log" > "$OUT/serial-b2.txt"
   fsck_img b2
   manifest b2
   cp "$OUT/serial-b2.log" "$LOG"
@@ -248,7 +248,10 @@ PIMG="$OUT/cpdata-pfx.img"
 # under pipefail a found marker reads as missing (measured: "hello" printed,
 # G1 graded FAIL).
 set +o pipefail
-tr -d '\r' < "$LOG" > "$OUT/serial.txt"
+# C0-console: grade rows cut out of their serial lines wherever their tag
+# stands (tools/cp/console_rows.py), not only rows that start a line; the raw
+# log stays in $LOG.
+python3 tools/cp/console_rows.py P2,WP < "$LOG" > "$OUT/serial.txt" || tr -d '\r' < "$LOG" > "$OUT/serial.txt"
 S="$OUT/serial.txt"
 span() { awk -v t="$1" '$0 ~ "\\[P2\\] begin "t" :" {on=1; next} $0 ~ "\\[P2\\] end "t" " {on=0} on' "$S"; }
 endrow() { grep -a "\[P2\] end $1 " "$S" | tail -1; }
@@ -257,7 +260,7 @@ echo "== the P2 rows"
 grep -aE '^\[P2\]|\[WP\] (FAIL|done)|^hello$' "$S" | grep -av ' ps-' || echo "(no [P2] rows)"
 echo
 G1=FAIL; G2=FAIL; G3=FAIL
-span echo | grep -qx 'hello' && endrow echo | grep -q 'status=0 ' && G1=PASS
+span echo | grep -qE '^hello($|\[[A-Z])' && endrow echo | grep -q 'status=0 ' && G1=PASS
 miss=0
 while IFS= read -r m; do
   [ -n "$m" ] || continue

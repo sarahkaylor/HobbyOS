@@ -346,7 +346,7 @@ def main():
                 q.click(x0 + 282, y0 + 427)   # Cancel
                 time.sleep(3)
                 shot("winecfg-closed")
-                m = ser.wait(r"\[P4\] end winecfg status=(\S+)", 120)
+                m = ser.wait(r"\[P4\] end winecfg status=(-?\d+)", 120)
                 st = m.group(1) if m else "?"
                 log(f"winecfg: {changed}/3 tab clicks changed the dialog; exit status {st}")
                 if changed == 3 and st == "0":
@@ -380,7 +380,7 @@ def main():
                 time.sleep(3)
                 shot("notepad-save-prompt")
                 q.keys("n")
-                m = ser.wait(r"\[P4\] end notepad status=(\S+)", 120)
+                m = ser.wait(r"\[P4\] end notepad status=(-?\d+)", 120)
                 st = m.group(1) if m else "?"
                 log(f"notepad exit status {st}")
                 if dark1 > dark0 + 150 and st == "0":
