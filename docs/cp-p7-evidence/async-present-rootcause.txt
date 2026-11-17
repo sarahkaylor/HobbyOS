@@ -1,0 +1,70 @@
+=================== Wine run async2 (async present ON, before the fix: diagnostic build; Mesa defaults: HOBBYOS_VN_ASYNC_PRESENT=1;HB_PRESENT_WAIT=0)
+[P5W] FAIL: d3d11: launcher end row [P5] end d3d11 status=768 ms=3333
+[P5W] FAIL: d3d11: 0 screendump(s)
+[P5W] FAIL: d3d12: no RESULT row
+[P5W] FAIL: d3d12: no '[D3D12] done rc=0'
+[P5W] FAIL: d3d12: launcher end row [P5] end d3d12 status=768 ms=3327
+[P5W] FAIL: d3d12: 0 screendump(s)
+[P5W] FAIL: 2 fault line(s): [KERNEL] pid=189 (d3d11tri.exe) memory fault VA=0x0000000000000019 PC=0x0000001080047FC4 rw=r  in=HOLE region=NONE rsp=0x00000001000FD2D8 live=10 inH=0 cr3frame
+rc=1
+--- serial
+[X] [D3D11] render loop: 65 s
+ size_k=[X] [D3D11] frame 0: 77.07 ms
+[X] [D3D11] frame 1: 16.64 ms
+[X] [D3D11] frame 2: 1.96 ms
+[KERNEL] pid=189 (d3d11tri.exe) memory fault VA=0x0000000000000019 PC=0x0000001080047FC4 rw=r  in=HOLE region=NONE rsp=0x00000001000FD2D8 live=10 inH=0 cr3frame=0x000000027EA42000 asroot=0x000000027EA42000 sys=16 ret=0x0000000000000000 rbx=0x0000000000000000 rdi=0x0000000000000009 rsi=0x0000000000000000 rbp=0x0000000000000001 rbp0=<unreadable> -> killed
+[SIGDUMP] pid=189 tgid=188 nm=d3d11tri.exe rip=0x0000001080047FC4 rsp=0x00000001000FD2D8 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x0000000000000019
+[SGPR] rax=0x000000108C000B80 rbx=0x0000000000000000 rcx=0x0000000000000000 rdx=0x0000000000000000
+[SGPR] rsi=0x0000000000000000 rdi=0x0000000000000009 rbp=0x0000000000000001 r8=0x0000000000000000
+[SGPR] r9=0x0000000000000000 r10=0x00000001000FD2FC r11=0x0000000000000246 r12=0x0000000000000009
+[SGPR] r13=0x0000000000000001 r14=0x00000001000FD3D0 r15=0x00000010400C4068
+[STK+00] 0x0000001082390BA6 0x000000108C000B80 0x0000001082320983 0x00000001000FD3D0 0x0000000000000000 0x0000000100000006 0x0000001800000001 0x00000001000FD390 0x000000010000006F 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x00000001000FD550 0x0000000000000002 0x00000010400A8ED0 0x00000010400A8ED0
+[X] 013c:err:msvcrt:_wassert (L"!status && \"vkQueueSubmit2\"",L"/home/sarah/cp/wine-build-x/src/wine-11.0/dlls/winevulkan/loader_thunks.c",6648)
+[X] [D3D12] render loop: 65 s
+[X] [D3D12] frame 0: 73.08 ms (back buffer 0)
+[X] [D3D12] frame 1: 43.19 ms (back buffer 1)
+[X] [D3D12] frame 2: 6.44 ms (back buffer 0)
+[KERNEL] pid=203 (d3d12tri.exe) memory fault VA=0x0000000000000019 PC=0x0000001080047FC4 rw=r  in=HOLE region=NONE rsp=0x00000001003FD2D8 live=9 inH=0 cr3frame=0x0000000282342000 asroot=0x0000000282342000 sys=16 ret=0x0000000000000040 rbx=0x0000000000000000 rdi=0x0000000000000009 rsi=0x0000000000000000 rbp=0x0000000000000001 rbp0=<unreadable> -> killed
+[SIGDUMP] pid=203 tgid=199 nm=d3d12tri.exe rip=0x0000001080047FC4 rsp=0x00000001003FD2D8 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x0000000000000019
+[SGPR] rax=0x000000108C029EB0 rbx=0x0000000000000000 rcx=0x0000000000000000 rdx=0x0000000000000000
+[SGPR] rsi=0x0000000000000000 rdi=0x0000000000000009 rbp=0x0000000000000001 r8=0x0000000000000000
+[SGPR] r9=0x0000000000000000 r10=0x00000001003FD2CC r11=0x0000000000000246 r12=0x0000000000000009
+[SGPR] r13=0x0000000000000001 r14=0x00000001003FD3D0 r15=0x000000108C01F5B8
+[STK+00] 0x00000010823A0BA6 0x000000108C029EB0 0x0000001082330983 0x00000001003FD3D0 0x0000000B400A31D0 0x000000010000000A 0x0000001800000001 0x00000001003FD390 0x0000000100000242 0x0000000000000000 0x0000000000000000 0x0000000000000000 0x00000001003FD550 0x0000000000000002 0x00000010400B66C0 0x00000010400B66C0
+[X] 0168:err:msvcrt:_wassert (L"!status && \"vkQueueSubmit2\"",L"/home/sarah/cp/wine-build-x/src/wine-11.0/dlls/winevulkan/loader_thunks.c",6648)
+=================== Wine run async3 (async present ON, with the queue-lock fix; Mesa defaults: HOBBYOS_VN_ASYNC_PRESENT=1;HB_PRESENT_WAIT=0)
+[D3D11] done rc=0
+[D3D12] done rc=0
+[P5W] d3d11: PASS
+[P5W] d3d12: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps
+rc=0
+--- serial
+[X] [D3D11] render loop: 65 s
+[X] [D3D11] frame 0: 87.10 ms
+[X] [D3D11] frame 1: 7.41 ms
+[X] [D3D11] frame 2: 1.98 ms
+[X] [D3D11] RESULT frames=7462 wall=65001.1 ms fps=114.80 | per-frame median 7.67 p90 14.75 worst(after frame 0) 1014.99 ms
+[X] [D3D11] done rc=0
+[X] [D3D12] render loop: 65 s
+[X] [D3D12] frame 0: 88.50 ms (back buffer 0)
+[X] [D3D12] frame 1: 61.64 ms (back buffer 1)
+[X] [D3D12] frame 2: 7.12 ms (back buffer 0)
+[X] [D3D12] RESULT frames=10847 wall=65002.8 ms fps=166.87 | per-frame median 4.84 p90 9.46 worst(after frame 0) 1264.26 ms
+[X] [D3D12] done rc=0
+=================== symbolization of async2's fault (strix)
+[STK+00] word 0 = 0x1082390BA6: the only call to pthread_mutex_lock whose return address
+ends in ...ba6 is Mesa's mtx_lock wrapper (libvulkan_virtio.so+0x164ba6), so
+libvulkan_virtio.so was loaded at 0x108222C000.  Word 2 = 0x1082320983 = +0xf4983:
+   f496f:	49 8b 46 18          	mov    0x18(%r14),%rax          ; batch->syncs
+   f4973:	4a 8b 2c e8          	mov    (%rax,%r13,8),%rbp       ; syncs[i], i = r13 = 1
+   f4977:	4c 8d 65 08          	lea    0x8(%rbp),%r12           ; &sync->mutex = 9
+   f497b:	4c 89 e7             	mov    %r12,%rdi
+   f497e:	e8 1d 02 07 00       	call   164ba0 <mtx_lock>
+   f4983:	...
+addr2line: hobbyos_submit, src/virtio/vulkan/vn_renderer_hobbyos.c:404
+(the mtx_lock(&sy->mutex) of each batch sync).  Registers agree: rbp = 1, r12 = 9,
+r13 = 1, r14 = 0x1000FD3D0 (the batch on the stack).  The [VNQ] count/fill check
+stayed silent: syncs[1] was written correctly and overwritten later by the other
+thread's sync_vals[0] (== 1) in the queue's shared temp storage.

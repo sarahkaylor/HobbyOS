@@ -55,6 +55,17 @@ done
 [ -f "$LCXX/include/c++/v1/vector" ] || die "no libc++ at $LCXX (C5-vk2's build)"
 [ -f "$X11PC/xcb.pc" ] || die "no X11 pc files at $X11PC"
 
+# P7: HB_MESA_ENV_DEFAULTS="K=V;K2=V2" bakes environment defaults into the
+# build (hb_getenv in hb_present_stats.h), for processes whose environment the
+# harness cannot set (Wine under the P5 launcher).  The environment wins.
+hb_env_defaults() {
+  local d="${HB_MESA_ENV_DEFAULTS:-}" f="$SRC/src/vulkan/wsi/hb_env_defaults.h"
+  local want="#define HB_ENV_DEFAULTS \"$d\""
+  [ -f "$f" ] && [ "$(cat "$f")" = "$want" ] || echo "$want" > "$f"
+  [ -n "$d" ] && say "env defaults baked in: $d"
+  return 0
+}
+
 do_patch() {
   echo "$MESA_SHA256  $TARBALL" | sha256sum -c --quiet - || die "Mesa tarball sha256 mismatch"
   rm -rf "$WORK/src"; mkdir -p "$WORK/src"
@@ -67,6 +78,7 @@ do_patch() {
   cp "$ROOT/src/include/gpu_abi.h" "$V/"
   cp "$ROOT/tools/mesa/venus/hb_present_stats.h" "$ROOT/tools/mesa/venus/hb_wsi_x11.h" \
      "$SRC/src/vulkan/wsi/"
+  hb_env_defaults
   python3 - "$V" "$SRC/src/vulkan/wsi" <<'EOF'
 import sys, re
 v = sys.argv[1]
@@ -117,12 +129,11 @@ w = w.replace(old, """   const bool use_sw_device =
       !physical_dev->base.vk.supported_extensions
           .EXT_external_memory_dma_buf ||""", 1)
 open(v + '/vn_wsi.c', 'w').write(w)
-# Present synchronously on HobbyOS (docs/cp-venus.md §6.1): with venus' async
-# present thread (vn_wsi_present_async, used when the renderer has no implicit
-# fencing) and timeline syncs, d3d11tri and d3d12tri die at frame 2 in
-# pthread_mutex_lock(0x9) (run 12, present_wait already hidden); synchronous
-# present passes both (run 11).  HOBBYOS_VN_ASYNC_PRESENT=1 restores it at run
-# time.
+# Venus' async present (vn_wsi_present_async, used when the renderer has no
+# implicit fencing).  C6-venus turned it off (docs/cp-venus.md §6.1: d3d11tri
+# and d3d12tri died at frame 2 in pthread_mutex_lock(0x9)); P7 found the cause
+# (the queue-lock race below, docs/cp-p7.md §3.2) and fixed it, so it is on
+# again.  HOBBYOS_VN_ASYNC_PRESENT=0 presents synchronously.
 old = """   if (!dev->renderer->info.has_implicit_fencing &&
        !VN_PERF(NO_ASYNC_PRESENT)) {"""
 assert w.count(old) == 1
@@ -132,8 +143,8 @@ w = w.replace('static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL\nvn_wsi_proc_addr
 vn_hobbyos_sync_present(void)
 {
 #ifdef VN_HOBBYOS
-   const char *e = getenv("HOBBYOS_VN_ASYNC_PRESENT");
-   return !(e && e[0] == '1');
+   const char *e = hb_getenv("HOBBYOS_VN_ASYNC_PRESENT");
+   return e && e[0] == '0';
 #else
    return false;
 #endif
@@ -151,11 +162,31 @@ open(v + '/vn_wsi.c', 'w').write(w)
 # d3d12tri after frame 0, every thread parked in a futex, while vkcube (no
 # present wait) ran.  Without the extensions both fall back to fences, as on
 # lavapipe.
+#
+# P7 (lane C6-p7, docs/cp-p7.md §3): the software WSI now completes present
+# ids (tools/mesa/venus/hb_wsi_x11.h: after put_image, or once the image is on
+# the scanout), so the extensions come back.  HB_PRESENT_WAIT=0 (environment or
+# HB_MESA_ENV_DEFAULTS) hides them again.
 pd = open(v + '/vn_physical_device.c').read()
 for ext in ('KHR_present_wait', 'KHR_present_wait2'):
     old = '   exts->%s = true;\n' % ext
     assert pd.count(old) == 1, ext
-    pd = pd.replace(old, '#ifndef VN_HOBBYOS\n' + old + '#endif\n', 1)
+    pd = pd.replace(old, '   exts->%s = vn_hobbyos_present_wait();\n' % ext, 1)
+anchor = '#include "vn_physical_device.h"\n'
+assert pd.count(anchor) == 1
+pd = pd.replace(anchor, anchor + '''#include "hb_present_stats.h" /* hb_getenv (P7) */
+
+static bool
+vn_hobbyos_present_wait(void)
+{
+#ifdef VN_HOBBYOS
+   const char *e = hb_getenv("HB_PRESENT_WAIT");
+   return !(e && e[0] == '0');
+#else
+   return true;
+#endif
+}
+''', 1)
 open(v + '/vn_physical_device.c', 'w').write(pd)
 # Diagnostics: VENUS_DEBUG_DEFAULT=<VN_DEBUG list> bakes a default for builds
 # whose processes get no environment (Wine children of the P5 launcher).
@@ -168,6 +199,143 @@ if dd:
     c = c.replace(old, 'parse_debug_string(os_get_option("VN_DEBUG") ? os_get_option("VN_DEBUG") : "%s", vn_debug_options)' % dd, 1)
     open(v + '/vn_common.c', 'w').write(c)
     print("VN_DEBUG default:", dd)
+# ---- P7 (lane C6-p7, docs/cp-p7.md §3.2): the async-present fault.
+# vn_queue_submission_count_semaphore() counts a signal semaphore whose payload
+# is an imported sync fd (vn_semaphore_is_sync_fd), but
+# vn_queue_submission_init_syncs() fills only SYNC / TIMELINE_SYNC payloads, and
+# it reads sem->payload again, later.  When the two disagree the renderer
+# batch carries sync_count entries of which the last were never written: the
+# per-queue temp storage is reused, so the hole holds the previous submit's
+# sync_vals[0] == 1, and hobbyos_submit() locks &((sync *)1)->mutex == 0x9
+# (docs/cp-venus.md §6.1 item 3).  Log the mismatch (once per kind) and submit
+# only the entries that were filled.
+q = open(v + '/vn_queue.c').read()
+old = """   if (submit->fence_handle != VK_NULL_HANDLE) {
+      VK_FROM_HANDLE(vn_fence, fence, submit->fence_handle);
+
+      assert(fence->payload->type == VN_SYNC_TYPE_SYNC);
+
+      submit->temp.syncs[sync_index] = fence->payload->sync;
+      submit->temp.sync_vals[sync_index] = 1;
+
+      /* fence is backed by renderer sync without renderer object */
+      submit->fence_handle = VK_NULL_HANDLE;
+   }
+}
+"""
+assert q.count(old) == 1
+q = q.replace(old, """   if (submit->fence_handle != VK_NULL_HANDLE) {
+      VK_FROM_HANDLE(vn_fence, fence, submit->fence_handle);
+
+      assert(fence->payload->type == VN_SYNC_TYPE_SYNC);
+
+      submit->temp.syncs[sync_index] = fence->payload->sync;
+      submit->temp.sync_vals[sync_index++] = 1;
+
+      /* fence is backed by renderer sync without renderer object */
+      submit->fence_handle = VK_NULL_HANDLE;
+   }
+#ifdef VN_HOBBYOS
+   if (sync_index != submit->sync_count) {
+      static int hb_rows;
+      if (hb_rows++ < 16) {
+         char types[64] = "";
+         int n = 0;
+         for (uint32_t i = 0; i < sig_count && n < 56; i++) {
+            VK_FROM_HANDLE(vn_semaphore, sem, vn_get_signal_semaphore(submit, i));
+            n += snprintf(types + n, sizeof types - n, "%s%d%s", i ? "," : "",
+                          (int)sem->payload->type, sem->sync_fd_export ? "x" : "");
+         }
+         fprintf(stderr, "[VNQ] submit counted %u renderer syncs, filled %u; "
+                 "signal semaphore payload types now [%s] -- submitting the filled ones\\n",
+                 submit->sync_count, sync_index, types);
+      }
+      submit->sync_count = sync_index;
+   }
+#endif
+}
+""", 1)
+open(v + '/vn_queue.c', 'w').write(q)
+
+# ---- P7 (lane C6-p7, docs/cp-p7.md §3.2): THE ROOT CAUSE of the async-present
+# fault (pthread_mutex_lock(0x9) at frame 2, docs/cp-venus.md §6.1 item 3).
+# Measured (run async2): the fault is hobbyos_submit() locking
+# batch->syncs[1] == (sync *)1 inside the APP thread's vkQueueSubmit2, with
+# the count/fill check above silent -- syncs[1] was filled right and then
+# overwritten.  The batch lives in the queue's shared temp storage
+# (queue->storage), and venus' async present thread submits on the same
+# VkQueue.  vn_wsi_flush() only *waits* for the present thread to release
+# queue_mutex at the start of an app submit; it does not hold it.  On a
+# renderer without implicit fencing or external sync (HobbyOS, vtest), the
+# present thread's vn_wsi_fence_wait() drops queue_mutex while it waits for
+# the blit fence, so the app's submit starts, then the present thread
+# re-locks and submits again (the present's own fence/semaphore submits)
+# into the same storage: its sync_vals[0] == 1 lands on the app's syncs[1].
+# Linux virtgpu never opens that window (has_external_sync).
+# Fix: an app-thread submit HOLDS queue_mutex for its whole duration once
+# async present is running (vn_wsi_queue_lock/unlock), instead of the
+# lock/unlock barrier.
+w = open(v + '/vn_wsi.c').read()
+old = """void
+vn_wsi_flush(VkQueue queue_handle)
+{"""
+assert w.count(old) == 1
+w = w.replace(old, """/* P7: hold queue_mutex across an app-thread queue submission (see build.sh). */
+bool
+vn_wsi_queue_lock(VkQueue queue_handle)
+{
+   struct vn_queue *queue = vn_queue_from_handle(queue_handle);
+   if (!queue->async_present.initialized ||
+       queue->async_present.tid == vn_gettid())
+      return false;
+   simple_mtx_lock(&queue->async_present.queue_mutex);
+   return true;
+}
+
+void
+vn_wsi_queue_unlock(VkQueue queue_handle, bool locked)
+{
+   struct vn_queue *queue = vn_queue_from_handle(queue_handle);
+   if (locked)
+      simple_mtx_unlock(&queue->async_present.queue_mutex);
+}
+
+""" + old, 1)
+open(v + '/vn_wsi.c', 'w').write(w)
+hh = open(v + '/vn_wsi.h').read()
+old = 'vn_wsi_flush(VkQueue queue_handle);\n'
+assert hh.count(old) >= 1
+hh = hh.replace(old, old + '\nbool\nvn_wsi_queue_lock(VkQueue queue_handle);\n\nvoid\nvn_wsi_queue_unlock(VkQueue queue_handle, bool locked);\n', 1)
+open(v + '/vn_wsi.h', 'w').write(hh)
+q = open(v + '/vn_queue.c').read()
+wrappers = []
+for name, params, args in (
+        ('vn_QueueSubmit', 'VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSubmits, VkFence fence',
+         'queue, submitCount, pSubmits, fence'),
+        ('vn_QueueSubmit2', 'VkQueue queue, uint32_t submitCount, const VkSubmitInfo2 *pSubmits, VkFence fence',
+         'queue, submitCount, pSubmits, fence'),
+        ('vn_QueueBindSparse', 'VkQueue queue, uint32_t bindInfoCount, const VkBindSparseInfo *pBindInfo, VkFence fence',
+         'queue, bindInfoCount, pBindInfo, fence')):
+    old = 'VKAPI_ATTR VkResult VKAPI_CALL\n%s(' % name
+    assert q.count(old) == 1, name
+    i = q.index(old)
+    q = q[:i] + 'static VkResult\nvn_hb_%s_locked(' % name + q[i + len(old):]
+    j = q.index('   vn_wsi_flush(queue);\n', i)
+    assert j - i < 600, name
+    q = q[:j] + q[j + len('   vn_wsi_flush(queue);\n'):]
+    wrappers.append("""
+VKAPI_ATTR VkResult VKAPI_CALL
+%s(%s)
+{
+   const bool locked = vn_wsi_queue_lock(queue);
+   VkResult result = vn_hb_%s_locked(%s);
+   vn_wsi_queue_unlock(queue, locked);
+   return result;
+}
+""" % (name, params, name, args))
+q = q.rstrip('\n') + '\n\n/* P7: app-thread submissions hold the async-present queue lock (build.sh). */' + ''.join(wrappers)
+open(v + '/vn_queue.c', 'w').write(q)
+
 # ---- P7 (lane C6-p7, docs/cp-p7.md): zero-copy fullscreen present + the
 # present-cost instrument.  The software X11 WSI gets a driver hook
 # (wsi_device.hobbyos_scanout) that venus fills with GPU_IOC_SCANOUT_BLOB;
@@ -357,6 +525,8 @@ vn_hobbyos_wsi_scanout(VkDevice dev_h, VkDeviceMemory mem_h, uint32_t width,
 """ + old, 1)
 if '#include <errno.h>' not in w:
     w = '#include <errno.h>\n' + w
+w = w.replace('#include "vn_wsi.h"\n', '#include "vn_wsi.h"\n#include "hb_present_stats.h" /* hb_getenv (P7) */\n', 1)
+assert 'hb_present_stats.h' in w
 open(v + '/vn_wsi.c', 'w').write(w)
 
 h = open(v + '/vn_renderer.h').read()
@@ -429,6 +599,7 @@ do_build() {
   cp "$ROOT/src/include/gpu_abi.h" "$SRC/src/virtio/vulkan/"
   cp "$ROOT/tools/mesa/venus/hb_present_stats.h" "$ROOT/tools/mesa/venus/hb_wsi_x11.h" \
      "$SRC/src/vulkan/wsi/"
+  hb_env_defaults
   ninja -C "$B" -j"$JOBS" src/virtio/vulkan/libvulkan_virtio.so > "$WORK/build.log" 2>&1 || {
     grep -E 'error|Error' "$WORK/build.log" | head -30; tail -20 "$WORK/build.log"; die "build failed"; }
   ninja -C "$B" -j"$JOBS" >> "$WORK/build.log" 2>&1 || { tail -30 "$WORK/build.log"; die "build failed"; }

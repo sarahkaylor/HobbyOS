@@ -53,7 +53,7 @@ hb_x11_scanout(struct x11_swapchain *chain, uint32_t image_index, int *refused)
    if (!wsi->hobbyos_scanout || hb_x11_scanout_state < 0)
       return 0;
    if (hb_x11_scanout_state == 0) {
-      const char *e = getenv("HB_SCANOUT");
+      const char *e = hb_getenv("HB_SCANOUT");
       hb_x11_scanout_state = (e && e[0] == '0') ? -1 : 1;
       if (hb_x11_scanout_state < 0)
          return 0;
