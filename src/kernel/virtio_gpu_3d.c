@@ -1425,6 +1425,7 @@ struct gpu3d_fslot {
   uint32_t ctx_id;
   uint32_t ring;
   uint64_t seqno;
+  uint64_t t_post_us; /* for the post -> retire histogram */
   struct virtio_gpu_ctrl_hdr resp;
   uint8_t req[sizeof(struct virtio_gpu_cmd_submit) + GPU_SUBMIT2_FENCED_CS_MAX]
       __attribute__((aligned(64)));
@@ -1439,6 +1440,36 @@ static volatile int gpu3d_wake_pending = 0;
 static struct pid_mask gpu3d_waiters;
 static uint32_t gpu3d_fence_errors = 0;
 static uint32_t gpu3d_fence_retired = 0;
+/* post -> retire latency histogram (us bucket upper bounds) and where the
+ * retirement was seen (the INTx handler vs a transaction's drain). */
+#define GPU3D_HIST_N 10
+static const uint32_t gpu3d_hist_ub[GPU3D_HIST_N] = {25, 50, 100, 200, 500, 1000, 2000, 5000,
+                                                     11000, 0xFFFFFFFFu};
+static uint32_t gpu3d_hist[GPU3D_HIST_N];
+static uint32_t gpu3d_retire_irq = 0, gpu3d_retire_inline = 0;
+extern int virtio_gpu_x64_drain_from_irq;
+extern uint64_t timer_get_us(void);
+
+static void gpu3d_fence_stats_row(const char* why) {
+  uart_puts("[VENUS] fence stats (");
+  uart_puts(why);
+  uart_puts(") retired=");
+  print_int((int)gpu3d_fence_retired);
+  uart_puts(" irq=");
+  print_int((int)gpu3d_retire_irq);
+  uart_puts(" inline=");
+  print_int((int)gpu3d_retire_inline);
+  uart_puts(" errors=");
+  print_int((int)gpu3d_fence_errors);
+  uart_puts(" post->retire_us");
+  for (int i = 0; i < GPU3D_HIST_N; i++) {
+    uart_puts(i + 1 < GPU3D_HIST_N ? " <=" : " >");
+    print_int((int)(i + 1 < GPU3D_HIST_N ? gpu3d_hist_ub[i] : gpu3d_hist_ub[i - 1]));
+    uart_puts(":");
+    print_int((int)gpu3d_hist[i]);
+  }
+  uart_puts("\n");
+}
 static struct virtio_gpu_ctx_create gpu3d_req_ctx2;
 static struct virtio_gpu_resource_create_blob gpu3d_req_blob;
 static struct virtio_gpu_resource_map_blob gpu3d_req_map;
@@ -1650,6 +1681,7 @@ static void gpu3d_m2_ctx_gone_locked(uint32_t ctx_id) {
     gpu3d_zero(b, sizeof(*b));
   }
   struct gpu3d_ctx2* c2 = gpu3d_ctx2_find(ctx_id);
+  if (c2) gpu3d_fence_stats_row("ctx_destroy");
   if (c2) {
     /* Orphaned slots (if any) are ignored when they complete. */
     for (int k = 0; k < VGPU_ASYNC_SLOTS; k++)
@@ -1875,6 +1907,15 @@ void virtio_gpu_3d_async_done(int slot, uint32_t resp_type) {
     }
   }
   gpu3d_fence_retired++;
+  {
+    uint64_t now = timer_get_us();
+    uint64_t d = now >= f->t_post_us ? now - f->t_post_us : 0;
+    int b = 0;
+    while (b + 1 < GPU3D_HIST_N && d > gpu3d_hist_ub[b]) b++;
+    gpu3d_hist[b]++;
+    if (virtio_gpu_x64_drain_from_irq) gpu3d_retire_irq++;
+    else gpu3d_retire_inline++;
+  }
   f->used = 0;
   gpu3d_wake_pending = 1;
 }
@@ -1957,6 +1998,7 @@ int virtio_gpu_3d_submit2(uint32_t ctx_id, uint32_t ring_idx, int fenced, const 
     f->ctx_id = ctx_id;
     f->ring = ring_idx;
     f->seqno = seq;
+    f->t_post_us = timer_get_us();
     if (virtio_gpu_x64_post_async(k, f->req, (uint32_t)(sizeof(*sc) + len), &f->resp,
                                   sizeof(f->resp)) != 0) {
       f->used = 0;
@@ -1983,6 +2025,21 @@ int virtio_gpu_3d_fence_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno
     rc = (seqno <= c2->done[ring_idx]) ? 0 : -EAGAIN;
   virtio_gpu_x64_unlock(fl);
   if (gpu3d_wake_pending) virtio_gpu_3d_fence_wake();
+  return rc;
+}
+
+int virtio_gpu_3d_fence_kick_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno) {
+  if (!gpu3d_ready) return -ENODEV;
+  uint64_t fl = virtio_gpu_x64_lock();
+  virtio_gpu_x64_kick();
+  virtio_gpu_x64_drain();
+  struct gpu3d_ctx2* c2 = gpu3d_ctx2_find(ctx_id);
+  int rc;
+  if (!c2 || ring_idx >= c2->num_rings || seqno == 0 || seqno > c2->issued[ring_idx])
+    rc = -EINVAL;
+  else
+    rc = (seqno <= c2->done[ring_idx]) ? 0 : -EAGAIN;
+  virtio_gpu_x64_unlock(fl);
   return rc;
 }
 

@@ -525,6 +525,17 @@ static void vgpu_drain_locked(void) {
 
 void virtio_gpu_x64_drain(void) { vgpu_drain_locked(); }
 
+/* P6: notify the control queue with nothing new in it.  QEMU's virgl device
+ * retires fences when it handles a queue notification (and otherwise only
+ * from a 10 ms poll timer), so a waiter that kicks sees a finished GPU fence
+ * without waiting for the timer.  Caller holds gpu_lock. */
+void virtio_gpu_x64_kick(void) {
+  if (gpu_failed || gpu_qsize == 0 || !gpu_notify) return;
+  arch_memory_barrier();
+  *(volatile uint16_t*)(gpu_notify + (uint64_t)gpu_notify_off * gpu_notify_mult) =
+      (uint16_t)VGPU_QUEUE_ID;
+}
+
 /* P6: queue one fenced command on slot `slot` without waiting.  The request
  * and response buffers belong to the slot until virtio_gpu_3d_async_done().
  * Caller holds gpu_lock. */
@@ -927,10 +938,14 @@ static int vgpu_bringup(uint32_t bus, uint32_t slot) {
 /* P6: the device interrupt.  Read ISR first (deasserts INTx; a completion
  * published after the drain raises it again), then retire what the used ring
  * holds, then wake the fence sleepers outside the lock. */
+int virtio_gpu_x64_drain_from_irq = 0; /* P6: fence statistics only */
+
 void virtio_gpu_x64_handle_irq(void) {
   gpu_isr_ack();
   uint64_t fl = spinlock_acquire_irqsave(&gpu_lock);
+  virtio_gpu_x64_drain_from_irq = 1;
   vgpu_drain_locked();
+  virtio_gpu_x64_drain_from_irq = 0;
   spinlock_release_irqrestore(&gpu_lock, fl);
   virtio_gpu_3d_fence_wake();
 }

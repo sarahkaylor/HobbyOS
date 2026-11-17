@@ -837,6 +837,11 @@ uint64_t gpu_abi_deadline_ms(uint64_t now_ms, uint64_t timeout_ns) {
 #ifdef __x86_64__
 #include "virtio_gpu_blob.h"
 extern uint64_t timer_get_ms(void);
+extern uint64_t timer_get_us(void);
+/* Kick-poll budget of one FENCE_WAIT2 before it parks (see there). */
+#ifndef GPU_M2_KICK_SPIN_US
+#define GPU_M2_KICK_SPIN_US 4000
+#endif
 
 /* One user mapping of a blob (for teardown at fd close). */
 #define GPU_M2_MAX_MAPS 4096
@@ -1234,6 +1239,19 @@ static int gpu_m2_fence_wait2(struct process* p, int fd, uint64_t arg) {
   int rc = virtio_gpu_3d_fence_check(fw.ctx_id, fw.ring_idx, fw.seqno);
   if (rc != -EAGAIN) return rc;
   if (fw.timeout_ns == 0) return -ETIMEDOUT;
+  /* Kick-poll before parking (docs/gpu-abi.md §10.5): QEMU retires a finished
+   * fence when it handles a queue notification, otherwise only from its 10 ms
+   * poll timer.  Spin with kicks for up to GPU_M2_KICK_SPIN_US (once per wait,
+   * not again after a restart), then park for the IRQ. */
+  if (fw.deadline_ms == 0) {
+    uint64_t t0 = timer_get_us(), budget = GPU_M2_KICK_SPIN_US;
+    if (fw.timeout_ns / 1000ull < budget) budget = fw.timeout_ns / 1000ull;
+    while (timer_get_us() - t0 < budget) {
+      rc = virtio_gpu_3d_fence_kick_check(fw.ctx_id, fw.ring_idx, fw.seqno);
+      if (rc != -EAGAIN) return rc;
+      for (int k = 0; k < 2000; k++) __asm__ volatile("pause");
+    }
+  }
   uint64_t now = timer_get_ms();
   if (fw.deadline_ms == 0) {
     /* First park: fix the deadline in the caller's struct so the restarted

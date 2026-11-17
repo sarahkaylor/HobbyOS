@@ -84,6 +84,9 @@ extern int virtio_gpu_x64_irq_vector; /* -1 = no interrupt (polled) */
 int virtio_gpu_x64_post_async(int slot, const void* req, uint32_t req_len, void* resp,
                               uint32_t resp_len);
 void virtio_gpu_x64_drain(void);
+void virtio_gpu_x64_kick(void);
+/* Kick the queue, drain, and report (ctx, ring, seqno): 0 done, -EAGAIN, -EINVAL. */
+int virtio_gpu_3d_fence_kick_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno);
 void virtio_gpu_3d_async_done(int slot, uint32_t resp_type);
 /* The device interrupt (trap.c). */
 void virtio_gpu_x64_handle_irq(void);
