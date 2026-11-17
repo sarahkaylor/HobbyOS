@@ -426,7 +426,23 @@ static int l_core_time(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
-static const struct l_sysent l_tab_core[] = { {L_SYS_time, l_core_time, "time"}, {L_SYS_gettimeofday, l_core_gettimeofday, "gettimeofday"}, {L_SYS_nanosleep, l_core_nanosleep, "nanosleep"}, {L_SYS_clock_nanosleep, l_core_clock_nanosleep, "clock_nanosleep"}, {L_SYS_getpid, l_core_getpid, "getpid"}, {L_SYS_getppid, l_core_getppid, "getppid"}, {L_SYS_getuid, l_core_getuid, "getuid"}, {L_SYS_getgid, l_core_getuid, "getgid"}, {L_SYS_geteuid, l_core_getuid, "geteuid"}, {L_SYS_getegid, l_core_getuid, "getegid"}, {L_SYS_gettid, l_core_gettid, "gettid"}, {L_SYS_set_tid_address, l_core_set_tid, "set_tid_address"}, {L_SYS_sched_yield, l_core_yield, "sched_yield"},
+#if defined(KERNEL_MODE_TEST) && defined(__x86_64__)
+/* C1-k6: private L_SYS_hb_wfi_test (0x4845, test kernels only, far above
+   every real x86_64 number): process.c sched_wfi_test_op, for
+   linux_probe_wfibound.  Release kernels answer -ENOSYS. */
+#define L_SYS_hb_wfi_test 0x4845
+static int l_core_wfi_test(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  extern int64_t sched_wfi_test_op(int op, int64_t a);
+  tf->regs[0] = (uint64_t)sched_wfi_test_op((int)l_arg(tf, 0), (int64_t)l_arg(tf, 1));
+  return 1;
+}
+#define L_WFI_TEST_ENT {L_SYS_hb_wfi_test, l_core_wfi_test, "hb_wfi_test"},
+#else
+#define L_WFI_TEST_ENT
+#endif
+
+static const struct l_sysent l_tab_core[] = { L_WFI_TEST_ENT {L_SYS_time, l_core_time, "time"}, {L_SYS_gettimeofday, l_core_gettimeofday, "gettimeofday"}, {L_SYS_nanosleep, l_core_nanosleep, "nanosleep"}, {L_SYS_clock_nanosleep, l_core_clock_nanosleep, "clock_nanosleep"}, {L_SYS_getpid, l_core_getpid, "getpid"}, {L_SYS_getppid, l_core_getppid, "getppid"}, {L_SYS_getuid, l_core_getuid, "getuid"}, {L_SYS_getgid, l_core_getuid, "getgid"}, {L_SYS_geteuid, l_core_getuid, "geteuid"}, {L_SYS_getegid, l_core_getuid, "getegid"}, {L_SYS_gettid, l_core_gettid, "gettid"}, {L_SYS_set_tid_address, l_core_set_tid, "set_tid_address"}, {L_SYS_sched_yield, l_core_yield, "sched_yield"},
   L_SYSENT_END
 };
 
