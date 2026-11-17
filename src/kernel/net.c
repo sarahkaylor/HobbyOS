@@ -1315,6 +1315,8 @@ int net_socket_available(struct socket_pcb* pcb) {
 
 int net_socket_send(struct socket_pcb* pcb, const void* buf, uint32_t len) {
   if (!pcb) return -1;
+  /* GB-308: a loopback peer's transport is this ring, not the wire. */
+  if (pcb->peer) return net_socket_lo_send(pcb, buf, len);
   pcb->local_ip = local_ip;
   if (pcb->protocol == IP_PROTO_TCP) {
     if (pcb->state != SOCKET_ESTABLISHED) return -1;
@@ -1426,6 +1428,15 @@ static void net_rx_pump(void) {
 int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
   if (!pcb) return -1;
 
+  /* GB-308: a loopback reader blocks until the peer writes or closes.  The
+   * 5 s wire timeout below would turn an idle-but-open connection into -1
+   * (EIO) for a Java socket read, so skip it: a peer close sets
+   * SOCKET_CLOSED and the ring loop then finishes with 0 bytes = EOF. */
+  if (pcb->peer) {
+    while (pcb->rx_head == pcb->rx_tail && pcb->state != SOCKET_CLOSED)
+      safe_wfi();
+  }
+
   // Suspend execution until data arrives in the socket's internal ring buffer
   uint64_t start = timer_get_ms();
   while (pcb->rx_head == pcb->rx_tail && pcb->state != SOCKET_CLOSED) {
@@ -1525,6 +1536,18 @@ int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int
 
 void net_socket_close(struct socket_pcb* pcb) {
   if (!pcb) return;
+  /* GB-308: unlink a loopback pair.  The survivor keeps its data (FIN, not
+   * RST) and reads EOF once the ring drains, which is what a Java socket
+   * expects after the peer closes. */
+  if (pcb->peer) {
+    uint64_t fl = spinlock_acquire_irqsave(&net_lock);
+    struct socket_pcb *p = pcb->peer;
+    pcb->peer = 0;
+    if (p->peer == pcb) p->peer = 0;
+    p->state = SOCKET_CLOSED;
+    spinlock_release_irqrestore(&net_lock, fl);
+  }
+  pcb->listening = 0;
   if (pcb->protocol == IP_PROTO_TCP && pcb->state == SOCKET_ESTABLISHED) {
     pcb->state = SOCKET_FIN_WAIT;
     send_tcp_segment(pcb, 0x11, NULL, 0); // FIN | ACK
@@ -1575,4 +1598,159 @@ void net_get_mac(uint8_t mac[6]) {
   for (int i = 0; i < 6; i++) {
     mac[i] = local_mac[i];
   }
+}
+
+
+/* ======================= GB-308: loopback peers ==========================
+ * HobbyOS has no TCP stack, so an AF_INET socket could not be connected at
+ * all: fs.c answered -EOPNOTSUPP and every Java ServerSocket/Socket pair died
+ * with "Operation not supported".  This is not a TCP implementation -- it is
+ * the smallest honest transport that makes stream sockets work inside one
+ * machine: the listener and the client are paired pcb to pcb, and bytes move
+ * through the same rx ring the wire path uses.
+ *
+ * Deliberately NOT modelled: segment boundaries, retransmission, windows,
+ * half-close state machine, TIME_WAIT.  None are observable on loopback where
+ * both ends are this kernel, and pretending otherwise would only add states
+ * that nothing exercises.
+ */
+
+/* 127.0.0.1 in network byte order, independent of host endianness. */
+#define LO_IP_WIRE 0x7F000001u
+
+static struct socket_pcb *lo_find_listener(uint16_t port_host) {
+  struct socket_pcb *lp = 0;
+  uint64_t fl = spinlock_acquire_irqsave(&net_lock);
+  for (int i = 0; i < MAX_SOCKETS; i++) {
+    if (!sockets[i].in_use) continue;
+    if (sockets[i].listening && sockets[i].bound_port == port_host) {
+      lp = &sockets[i];
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&net_lock, fl);
+  return lp;
+}
+
+int net_socket_bind_lo(struct socket_pcb *pcb, uint16_t port_host) {
+  if (!pcb) return -1;
+  if (port_host != 0) {
+    if (lo_find_listener(port_host) && lo_find_listener(port_host) != pcb)
+      return -EADDRINUSE;
+    pcb->bound_port = port_host;
+    pcb->local_port = port_host;
+  } else {
+    /* Port 0: keep the ephemeral port net_socket_create() already chose, so
+     * getsockname() reports the one bind() actually got. */
+    pcb->bound_port = pcb->local_port;
+  }
+  return 0;
+}
+
+int net_socket_listen_lo(struct socket_pcb *pcb, int backlog) {
+  if (!pcb) return -1;
+  if (!pcb->bound_port) return -EINVAL;
+  if (backlog < 1) backlog = 1;
+  if (backlog > 16) backlog = 16;
+  pcb->listening = 1;
+  pcb->lo_backlog = backlog;
+  return 0;
+}
+
+int net_socket_is_listening_lo(struct socket_pcb *pcb) {
+  return pcb && pcb->listening;
+}
+
+int net_socket_connect_lo(struct socket_pcb *pcb, uint32_t ip_be,
+                          uint16_t port_be) {
+  if (!pcb) return -1;
+  uint32_t ip_host = ntohl(ip_be);
+  if (ip_host != LO_IP_WIRE) return 0;      /* not loopback: the caller uses the wire */
+  uint16_t port_host = (uint16_t)((port_be >> 8) | (port_be << 8));
+
+  struct socket_pcb *lp = 0;
+  uint64_t fl = spinlock_acquire_irqsave(&net_lock);
+  for (int i = 0; i < MAX_SOCKETS; i++) {
+    if (!sockets[i].in_use) continue;
+    if (sockets[i].listening && sockets[i].bound_port == port_host) {
+      lp = &sockets[i];
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&net_lock, fl);
+  if (!lp) return -ECONNREFUSED;
+
+  struct socket_pcb *sp = net_socket_create(IP_PROTO_TCP);
+  if (!sp) return -ENFILE;
+
+  sp->remote_ip = pcb->local_ip ? pcb->local_ip : ip_be;
+  sp->remote_port = pcb->local_port;   /* host order, as the stack keeps it */
+  sp->local_ip = ip_be;
+  sp->local_port = port_host;
+  sp->state = SOCKET_ESTABLISHED;
+  pcb->state = SOCKET_ESTABLISHED;
+  pcb->remote_ip = ip_be;
+  pcb->remote_port = port_host;
+  sp->peer = pcb;
+  pcb->peer = sp;
+
+  fl = spinlock_acquire_irqsave(&net_lock);
+  int used = lp->lo_tail - lp->lo_head;
+  if (used >= (lp->lo_backlog ? lp->lo_backlog : 16) || used >= 16) {
+    /* Backlog full: drop the pairing and report it, as a real stack would
+     * refuse the handshake rather than queue without bound. */
+    sp->peer = 0;
+    pcb->peer = 0;
+    sp->state = SOCKET_CLOSED;
+    pcb->state = SOCKET_CLOSED;
+    spinlock_release_irqrestore(&net_lock, fl);
+    return -ECONNREFUSED;
+  }
+  lp->lo_q[lp->lo_tail % 16] = sp;
+  lp->lo_tail++;
+  spinlock_release_irqrestore(&net_lock, fl);
+  return 1;                                  /* paired on loopback */
+}
+
+int net_socket_accept_lo(struct socket_pcb *lp, struct socket_pcb **out) {
+  if (!lp || !lp->listening) return -EINVAL;
+  if (!out) return -EINVAL;
+  uint64_t fl = spinlock_acquire_irqsave(&net_lock);
+  if (lp->lo_head == lp->lo_tail) {
+    spinlock_release_irqrestore(&net_lock, fl);
+    if (lp->nonblock) return -EAGAIN;
+    return -2;                               /* nothing pending: caller parks */
+  }
+  struct socket_pcb *sp = lp->lo_q[lp->lo_head % 16];
+  lp->lo_head++;
+  spinlock_release_irqrestore(&net_lock, fl);
+  *out = sp;
+  return 0;
+}
+
+int net_socket_lo_send(struct socket_pcb *pcb, const void *buf, uint32_t len) {
+  struct socket_pcb *p = pcb ? pcb->peer : 0;
+  if (!p) return -1;
+  const uint8_t *s = (const uint8_t *)buf;
+  uint32_t done = 0;
+  while (done < len) {
+    uint64_t fl = spinlock_acquire_irqsave(&net_lock);
+    uint32_t used = p->rx_tail - p->rx_head;
+    uint32_t room = used < SOCKET_RX_BUF_SIZE ? SOCKET_RX_BUF_SIZE - used : 0;
+    if (room == 0) {
+      spinlock_release_irqrestore(&net_lock, fl);
+      if (p->state == SOCKET_CLOSED) return done ? (int)done : -1;
+      /* Backpressure: the peer's reader drains the ring; nothing here may
+       * hold net_lock while it spins. */
+      safe_wfi();
+      continue;
+    }
+    uint32_t n = (len - done) < room ? (len - done) : room;
+    for (uint32_t i = 0; i < n; i++)
+      p->rx_buf[(p->rx_tail + i) % SOCKET_RX_BUF_SIZE] = s[done + i];
+    p->rx_tail += n;
+    spinlock_release_irqrestore(&net_lock, fl);
+    done += n;
+  }
+  return (int)done;
 }

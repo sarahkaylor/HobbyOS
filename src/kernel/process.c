@@ -4597,10 +4597,13 @@ static int process_fork_common(struct trap_frame *tf, int mode) {
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   child->parent_pid = group->pid;
-  /* P1: a fork of a Linux-ABI process is a Linux-ABI process.  It used to
-     inherit the slot's stale abi_flags instead, so a child that landed on a
-     slot last used by a native/kernel task had every Linux syscall routed to
-     the native table (measured: exit_group/exit "Unknown System Call" loop). */
+  /* P1 / GB-308 (both sides fixed this): a fork of a Linux-ABI process is a
+     Linux-ABI process.  It used to inherit the slot's stale abi_flags (or 0),
+     so its syscalls were dispatched as NATIVE ones (measured on cyberpunk: an
+     exit_group/exit "Unknown System Call" loop; on main: close(3) became
+     SYS_FORK, dup2(33) SYS_FTRUNCATE, execve unknown, grandchildren at pids
+     3,4,5).  The FD_CLOEXEC mask is copied below with the fd table
+     (fd_cloexec_copy, cp/exec); main's duplicate word loop was dropped. */
   child->abi_flags = group->abi_flags;
 
   for (int i = 0; i < 32; i++) {

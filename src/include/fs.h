@@ -221,7 +221,20 @@ int file_dup(struct process *p, int fd);
 int file_dup2(struct process *p, int oldfd, int newfd);
 int file_gfd_is_pipe(int gfd);
 int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame *tf);
+/* GB-308: read into a USER virtual range — bounces through a kernel buffer and
+ * vm_kwrite() so an unbacked destination page cannot fault in kernel mode. */
+int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
+                   struct trap_frame *tf);
+/* GB-308: positioned I/O that is atomic and cursor-neutral (the native layer
+ * has only a cursor, so this serialises seek+read/write+restore). */
+int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                    int64_t off, struct trap_frame *tf);
+int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                     int64_t off, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
+
+/* GB-308: open flags of an fd (-EBADF if absent), for the mmap access check. */
+int file_open_flags(struct process *p, int fd, uint32_t *out);
 /* WK-1 M3: length-bounded console write from user space, shared by
  * SYS_WRITE_CONSOLE (0001) and the fd-1/2 console fallback in file_write
  * (0002).  Emits exactly `size` bytes and returns size; -EFAULT on an
@@ -243,6 +256,8 @@ int file_eventfd_create(struct process *p, unsigned int initval, int flags);
 int file_fd_is_dir(struct process *p, int fd);
 int file_connect(struct process *p, uint32_t ip, uint16_t port, int protocol);
 int file_mkdir(struct process *p, const char *path);
+/* mkdir with POSIX errnos (0 / -EEXIST / -ENOENT); see file_mkdir_errno. */
+int file_mkdir_errno(struct process *p, const char *path);
 
 // Helpers for process management
 /**

@@ -63,6 +63,17 @@ fi
 # Apps menu (pinned lists read from desktop.c; files from THIS disk).
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
+
+if [ -d "$HERE/icons" ]; then
+  mdir -i "$DISK" ::/ICEWM >/dev/null 2>&1 || "$MMD" -i "$DISK" ::/ICEWM
+  mdir -i "$DISK" ::/ICEWM/icons >/dev/null 2>&1 || "$MMD" -i "$DISK" ::/ICEWM/icons
+  for ic in "$HERE/icons"/*.xpm; do
+    [ -f "$ic" ] || continue
+    "$MCOPY" -o -i "$DISK" "$ic" "::/ICEWM/icons/$(basename "$ic")"
+  done
+  echo "[x11-stage] staged branded icons from $HERE/icons to ::/ICEWM/icons"
+fi
+
 gen=$(mktemp -d)
 sh "$HERE/gen-icewm-menu.sh" "$DISK" "$REPO/src/user/desktop.c" "$gen"
 mdir -i "$DISK" ::/ICEWM >/dev/null 2>&1 || "$MMD" -i "$DISK" ::/ICEWM

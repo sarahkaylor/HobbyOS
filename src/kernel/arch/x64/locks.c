@@ -507,6 +507,9 @@ void lockdbg_irq_restore(uint64_t flags) {
 void spinlock_acquire(spinlock_t *lock) {
   kernel_preempt_disable();
   spin_acquire_raw(lock);
+  /* GB-308: the audit recorded an address inside this function (see
+   * lock_audit_site_override); point it at the acquiring line instead. */
+  lock_audit_site_override((uint64_t)__builtin_return_address(0));
 }
 
 static void spin_release_raw(spinlock_t *lock) {

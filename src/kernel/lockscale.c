@@ -243,6 +243,26 @@ void kernel_preempt_enable(void) {
   }
 }
 
+/* GB-308: name the ACQUIRING function, not the lock primitive.
+ *
+ * Every site this file records was taken with __builtin_return_address(0)
+ * inside spin_acquire_raw(), i.e. it always pointed at an instruction in
+ * spinlock_acquire() itself -- a [BLOCKHOLD] line that says "a spinlock" and
+ * never which lock or which caller.  The primitive knows its own caller, so it
+ * calls this once the acquire has succeeded and both the held row and the
+ * preempt site name the line that took the lock.
+ */
+void lock_audit_site_override(uint64_t pc) {
+  uint32_t c = ls_cpu();
+  if (c >= MAX_CPUS)
+    return;
+  uint8_t n = ls_held_n[c];
+  if (n > 0 && n <= LS_HELD_SLOTS)
+    ls_held_pc[c][n - 1] = pc;
+  if (ls_preempt[c] > 0)
+    ls_preempt_site[c] = pc;
+}
+
 int kernel_preempt_count(void) { return ls_preempt[ls_cpu()]; }
 
 void kernel_preempt_reset(void) { ls_preempt[ls_cpu()] = 0; }

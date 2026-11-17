@@ -282,6 +282,7 @@ uint32_t lock_audit_ylock_stalls(void); /* count of reported ylock stalls */
 uint32_t lock_audit_ylock_steals(void); /* ylocks reclaimed from dead owners */
 
 void kernel_preempt_disable(void);
+void lock_audit_site_override(uint64_t pc);
 void kernel_preempt_enable(void);
 int kernel_preempt_count(void);
 void kernel_preempt_reset(void);

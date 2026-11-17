@@ -1069,8 +1069,11 @@ static int l_proc_umask(struct process *p, struct trap_frame *tf) {
 /* ---- access / faccessat ------------------------------------------------ */
 
 /* Every compat process is uid 0, so R_OK/W_OK always pass for an existing
-   path; X_OK needs an execute bit, which a FAT16 file (mode 0644) does not
-   have.  That is the same answer stat() gives, and the two must agree. */
+   path.  X_OK needs an execute bit: FAT16 has none of its own, so regular
+   files are reported 0755 (Linux vfat's mode= behaviour) and X_OK passes for
+   them.  stat() and access() read the same fill, and they must agree -- they
+   did not while only the fd-based fill in fs.c carried the exec bits, and
+   Files.isExecutable() stayed false for every file as a result. */
 static int l_access_check(struct process *p, uint64_t upath, int mode) {
   if (mode & ~7) return -EINVAL;
   char path[256];
