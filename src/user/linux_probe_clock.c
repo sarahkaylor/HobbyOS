@@ -271,7 +271,9 @@ static void case_sem_pingpong(void) {
   long t1 = mono_ms(&ns1);
   pthread_join(t, NULL);
   long el = (t0 < 0 || t1 < 0) ? -1 : t1 - t0;
-  long per_us = (el > 0) ? el * 1000 / 200 : -1;
+  /* C1-k6: 200 round trips can now finish inside one millisecond of this
+     ms clock (total_ms=0); that is per_us 0, not a failure. */
+  long per_us = (el >= 0) ? el * 1000 / 200 : -1;
   row("sem_pingpong n=200 total_ms=%ld per_us=%ld", el, per_us);
   verdict("sem_pingpong_under_1ms", el >= 0 && per_us >= 0 && per_us < 1000);
   sem_destroy(&pp_a);
