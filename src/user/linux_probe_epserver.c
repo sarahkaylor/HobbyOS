@@ -116,6 +116,7 @@ static void *cli_thread(void *a) {
     pthread_mutex_unlock(c->mu);
     if (!ok) { c->bad++; break; }
     if (ans != req * 2654435761u + 7u) c->bad++;
+    usleep(3000); /* clients live long enough to overlap (the set grows) */
   }
   return 0;
 }
@@ -158,7 +159,7 @@ int main(int argc, char **argv) {
       if (c == 0) {
         srand((unsigned)(pr * 7919 + 1));
         pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
-        struct cli a = {rq[pr][1], rp[pr][0], 50 + (pr * 37) % 350, 0, &mu};
+        struct cli a = {rq[pr][1], rp[pr][0], 100 + (pr * 37) % 300, 0, &mu};
         struct cli b = a;
         b.n = a.n / 2;
         pthread_t t;
@@ -212,6 +213,7 @@ int main(int argc, char **argv) {
   ck(live == 0, "every client finished", live);
   ck(badc == 0, "every answer was right (bad clients)", badc);
   ck(done >= 48, "clients completed", done);
+  /* (the high-water row above says whether the set crossed 16 and 32) */
   ck(WIFEXITED(sst) && WEXITSTATUS(sst) == 0, "the server exited normally", sst);
   out("[LP] done rc=%d\n", fails);
   return fails ? 1 : 0;
