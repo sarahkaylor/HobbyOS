@@ -1,0 +1,42 @@
+# [BLKTOKW] token wait-time distribution, last row of each linux_probe_fatren boot (strix, KVM, 8 vCPU, 30 s of traffic).
+# Rows are printed every 1024 waits, so "waits" is a multiple of 1024.  A "wait" is an acquire that did not get the token
+# at once; "halts" = waits that halted at least once; "ipis" = wake IPIs sent by releases (wake-all: a halted waiter that
+# loses the race halts again, ~3 IPIs per halted wait under this load).
+# This probe is deliberately pathological (6-8 processes hammering FAT/ext2 metadata: ~11 000 token waits/s).
+# Reading: median < 100 us; ~95 % < 1 ms; ~0.3 % > 10 ms; a starvation tail to 0.05-2.3 s (the token is not FIFO:
+# a halted waiter pays the IPI latency while spinners take the token; also true of the old halt loop).
+# CPU cost of the (since dropped) 50 us spin phase <= waits * 50 us: ~15 vCPU-s per 30 s run, at this load.
+# integ9-based development cuts (all with a 50 us spin, no C1-k6 bound): ipi = first cut; ipi2 = release takes the sleeper
+# set; ipi3 / ipi3ext = kernel tasks never halt (ext = with /EXT writers).  The final design is measured on integ10 in
+# k6-bound-ab-strix.txt (kC).
+ipi-1: [LP] done rc=0
+ [BLKTOKW] waits=282624 halts=88742 ipis=799324 mean_us=309 max_us=2300659 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=91860,132923,39705,17499,624,13
+ipi-2: [LP] done rc=0
+ [BLKTOKW] waits=405504 halts=107706 ipis=1197347 mean_us=225 max_us=160759 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=147105,187150,47687,23022,536,4
+ipi-3: [LP] done rc=0
+ [BLKTOKW] waits=320512 halts=105302 ipis=1006875 mean_us=296 max_us=511017 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=87516,166154,45559,20389,886,8
+ipi-4: [LP] done rc=0
+ [BLKTOKW] waits=352256 halts=112213 ipis=1099335 mean_us=275 max_us=118287 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=100260,180587,49137,21353,915,4
+ipi-5: [LP] done rc=0
+ [BLKTOKW] waits=333824 halts=109935 ipis=1034757 mean_us=285 max_us=850598 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=88400,180467,44163,19952,824,18
+ipi2-1: [LP] done rc=0
+ [BLKTOKW] waits=228352 halts=84307 ipis=664856 mean_us=408 max_us=520292 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=55017,117262,38733,16154,1154,32
+ipi2-2: [LP] done rc=0
+ [BLKTOKW] waits=370688 halts=106627 ipis=1099020 mean_us=265 max_us=1513922 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=91093,211348,47376,20136,723,12
+ipi2-3: [LP] done rc=0
+ [BLKTOKW] waits=414720 halts=105075 ipis=1150247 mean_us=215 max_us=631531 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=129834,211152,50297,23112,319,6
+ipi3-1: [LP] done rc=0
+ [BLKTOKW] waits=337920 halts=119492 ipis=993608 mean_us=278 max_us=46646 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=75446,190002,50791,20776,905,0
+ipi3-2: [LP] done rc=0
+ [BLKTOKW] waits=358400 halts=102453 ipis=1090164 mean_us=275 max_us=71353 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=102879,182407,47321,25252,541,0
+ipi3ext-1: [LP] done rc=0
+ [BLKTOKW] waits=332800 halts=110136 ipis=1069619 mean_us=326 max_us=486690 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=72337,183405,52312,23911,823,12
+ipi3ext-2: [LP] done rc=0
+ [BLKTOKW] waits=307200 halts=107608 ipis=983612 mean_us=347 max_us=1201788 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=65396,166852,51078,23057,810,7
+ipi3ext-3: [LP] done rc=0
+ [BLKTOKW] waits=332800 halts=112299 ipis=1091651 mean_us=331 max_us=1317750 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=70357,188033,50279,23185,939,7
+
+# Ordinary workloads, final cp-fat 0cd94906 (gate batch, last [BLKTOKW] row of the boot):
+#   Gate P4 (IceWM/X + Wine on the FAT root): waits=6029 halts=92 ipis=253 mean_us=57 max_us=29783 hist=5937,13,31,42,6,0
+#   Gate P2 (Wine console):                   waits=909  halts=9  ipis=12  mean_us=6  max_us=1736  hist=900,0,8,1,0,0
+# i.e. the release wake costs a few hundred IPIs per boot outside the stress probe.

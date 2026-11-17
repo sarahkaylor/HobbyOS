@@ -1,0 +1,98 @@
+# C3-fat gate batch on strix: cp-fat 0cd94906 = integ10 49e83499 + 5 (code identical to the final branch head; later commits are docs only).
+# Script: strix:~/cp/cpfat-gates.sh (strix:~/cp/integ-gates12.sh minus P5/P6/P7/P8/thrstorm/k5, own tree/exports, + reruns); logs strix:~/cp/cpfat-gates/.
+# Parity reference: integ10's batch strix:~/cp/integ-gates13.txt (same base).
+tree cp-fat 0cd94906 (integ10 49e83499 + 5) start 18:28:18
+build rc=0 18:29:06
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 26196/26199, user rows intact 11844/11846, interleaved lines 0, torn rows 1, missing 5, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 19:06:46
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/console)
+unit rc=1 Tests failed! Tests run:    463 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed kconsole=kconsole_test: PASS (0 failures)
+castscan rc=0 castscan: 371 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=0 == removed /srv/nfs/cp-fat-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+infra end 19:25:36
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 19:26:21
+gate_p4#1 rc=0 [P4G] qemu: qemu-system-x86_64 -M q35,vmport=on -enable-kvm -cpu host -smp 8 -m 12288M -drive if=pflash,format=raw,readonly=on,file=/home/sarah/cp/lanes/console/obj/p4/cpfat-1/ovmf.fd -display none -serial file:/home/sarah/cp/lanes/console/obj/p4/cpfat-1/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/console/obj/p4/cpfat-1/disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-gpu-pci -vga none -action shutdown=poweroff -qmp unix:/home/sarah/cp/lanes/console/obj/p4/cpfat-1/qmp.sock,server,nowait [P4G] qemu pid 1683657 [P4G] clip row: [RI] phase clip total n=70 rel=70 abs=0 dx=850 dy=25 lastabs=0,0 cursor=835,428 inside=1 [P4G] modes: fullscreen (magenta) window bbox on the glass (0, 0, 1278, 718, 921600) [P4G] winecfg dialog face bbox (4, 30, 412, 474, 28824) [P4G] winecfg tab libraries: region hash d75e74c3f3ffe411 -> b585f8d695dab704 [P4G] winecfg tab graphics: region hash b585f8d695dab704 -> 3416f27e601e9893 [P4G] winecfg tab audio: region hash 3416f27e601e9893 -> f2ff0749893d8a2f [P4G] winecfg: 3/3 tab clicks changed the dialog; exit status 0 [P4G] notepad edit area bbox (0, 0, 1918, 1078, 711232) [P4G] notepad: dark pixels in the edit area 6410 -> 7014 [P4G] notepad exit status 0 [P4G] NFS failure rows: rpc-no-reply=0 nflk-rc-1=0 nfspipe-stall=0 [P4G] NOTE: info: fullscreen window bbox (0, 0, 1278, 718, 921600) (expect (0, 0, 1278, 718) at 1280x720) [P4G] G1 PASS [P4G] G2 PASS [P4G] G3 PASS  19:29:56
+rerun console#1 rc=0 [LP] done rc=0lp_check_console: kernel rows intact 26139/26139, user rows intact 12212/12212, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+rerun console#2 rc=0 [LP] done rc=0lp_check_console: kernel rows intact 26304/26304, user rows intact 12362/12362, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+rerun killgrp#1 rc=0 [LP] done rc=0
+rerun killgrp#2 rc=0 [LP] done rc=0
+rerun fatren#1 rc=0 [LP] done rc=0
+rerun fatren#2 rc=0 [LP] done rc=0
+ALLDONE 19:34:25
+
+# integ-gates13 (integ10 base) rows that differ or matter:
+console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 25774/25779, user rows intact 11783/11783, interleaved lines 0, torn rows 1, missing 5, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+killgrp rc=0 [LP] done rc=0
+unit rc=1 Tests failed! Tests run:    462 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+host [host-tests] done: 38/40 passed kconsole=kconsole_test: PASS (0 failures)
+ext2w_gate rc=1 ext2w_gate: FAIL (1)
+reg_gate rc=0 == removed /srv/nfs/cp-integ-reg
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 17:52:43

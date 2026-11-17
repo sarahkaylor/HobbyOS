@@ -1,0 +1,278 @@
+# linux_probe_fatren per-boot rows (strix).  Variants: base = integ9 adb81ee4 + probe; kstack = cp-fat FAT fixes + diag + C1-k6 kstack fix (scratch branch cp-fat-kstackab); fix = + token pause-poll (dropped); ipi/ipi2/ipiext-v1 = IPI-waker first cuts; ipi3/ipi3ext = kernel tasks never halt (ext = with /EXT ext2 writers).  All integ9-based; integ10 rows: k6-bound-ab-strix.txt.
+## base+diag (adb81ee4 + [BLKTOK] diag only; probe v1: R1 errors were fatal) -- fatren-1
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x4 extra=0x100000 cpu=5
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x4 extra=0x100000 cpu=2
+[LP] FAIL worker 0: R1 rename TMP->NEW errno=2 g=100
+[LP] FAIL worker 1: R1 rename TMP->NEW errno=2 g=85
+[LP] PASS W1 every worker kept moving (ops: 0=99 1=84 2=2880 3=9248 4=8639 5=7389) (30)
+[LP] note V1 /FATREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12 n=2048 gen=1 want gen=99
+[LP] note V1 /FATREN/d129258b8fb6c48f6c0317f05e005001-x86_64.cache-12 n=2048 gen=1 want gen=84
+[LP] FAIL V1 every final cache file holds its last generation (2)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=3
+
+## prefix (FAT fixes + diag, token wait still safe_wfi) -- fatren-2
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x1 extra=0x100000 cpu=7
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x1 extra=0x100000 cpu=2
+[YLOCK-WEDGE] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x1 extra=0x5 cpu=2
+[YLOCK-OWNER] fat_wr_lock pid=5 cpu=1 pcb_live=1 ost=3 osys=1
+[BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D3C3B on_cpu=-1 me pid=7 cpu=2 holds=- long_waits=0
+
+## prefix (FAT fixes + diag, token wait still safe_wfi) -- fatren-3
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x2 extra=0x100000 cpu=0
+[YLOCK-WEDGE] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x2 extra=0x3 cpu=0
+[YLOCK-OWNER] fat_wr_lock pid=6 cpu=2 pcb_live=1 ost=3 osys=0
+[BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D3C3B on_cpu=-1 me pid=4 cpu=0 holds=- long_waits=0
+
+## prefix (FAT fixes + diag, token wait still safe_wfi) -- fatren-4
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x7 extra=0x100000 cpu=5
+[YLOCK-WEDGE] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x7 extra=0x4 cpu=1
+[YLOCK-OWNER] fat_lock pid=5 cpu=7 pcb_live=1 ost=3 osys=2
+[BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D4C38 on_cpu=-1 me pid=7 cpu=1 holds=- long_waits=0
+[LP] FAIL W1 worker 0 made no progress for 20 s (ops: 0=0 1=0 2=0 3=0 4=0 5=0) -- a filesystem wedge (P9-8 shape)
+[YLOCK-STEAL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x5 cpu=1
+[BLKTOK] wait>2s in_use=1 inside=1 holder pid=3 cpu=5 held_ms=0 site=0x700D4C38 st=4 kern=0 osys=1 on_cpu=5 me pid=5 cpu=7 holds=fat_lock long_waits=1
+[BLKTOK] wait-ended in_use=1 inside=0 holder pid=5 cpu=7 held_ms=0 site=0x700D4C38 st=4 kern=0 osys=2 on_cpu=7 me pid=5 cpu=7 holds=fat_lock long_waits=1
+[LP] done rc=1
+
+## base run 1
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x7 extra=0x100000 cpu=2
+[YLOCK-WEDGE] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x7 extra=0x4 cpu=6
+[YLOCK-OWNER] fat_lock pid=5 cpu=7 pcb_live=1 ost=3 osys=2
+[LP] FAIL W1 worker 2 made no progress for 20 s (ops: 0=1 1=1 2=0 3=0 4=0 5=0) -- a filesystem wedge (P9-8 shape)
+[YLOCK-STEAL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x5 cpu=6
+[LP] done rc=1
+
+## base run 2
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x5 extra=0x100000 cpu=4
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x5 extra=0x100000 cpu=3
+[LP] FAIL worker 1: 6 failed rounds, first: R1 rename TMP->NEW errno=2 g=308
+[LP] PASS W1 every worker kept moving (ops: 0=576 1=343 2=1530 3=3652 4=2636 5=5028) (30)
+[LP] FAIL V1 every final cache file holds its last generation (2)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=2
+
+## kstack run 1
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x6 extra=0x100000 cpu=4
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x6 extra=0x100000 cpu=4
+[LP] PASS W1 every worker kept moving (ops: 0=629 1=446 2=1156 3=2864 4=9836 5=6704) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## kstack run 2
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x3 extra=0x100000 cpu=1
+[YLOCK-WEDGE] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x3 extra=0x4 cpu=4
+[YLOCK-OWNER] fat_lock pid=5 cpu=3 pcb_live=1 ost=3 osys=2
+[BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D7128 on_cpu=-1 me pid=6 cpu=4 holds=- long_waits=0
+
+## kstack run 3
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x2 extra=0x100000 cpu=4
+[YLOCK-WEDGE] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x2 extra=0x4 cpu=4
+[YLOCK-OWNER] fat_lock pid=5 cpu=2 pcb_live=1 ost=3 osys=2
+[BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D7128 on_cpu=-1 me pid=7 cpu=4 holds=- long_waits=0
+
+## fix run 1
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[LP] PASS W1 every worker kept moving (ops: 0=652 1=698 2=1114 3=9172 4=9400 5=9536) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## fix run 2
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[LP] PASS W1 every worker kept moving (ops: 0=672 1=665 2=1133 3=9041 4=9290 5=9272) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## fix run 3
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[LP] PASS W1 every worker kept moving (ops: 0=657 1=639 2=1146 3=8522 4=8550 5=8329) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## fix run 4
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x7 extra=0x100000 cpu=2
+[LP] PASS W1 every worker kept moving (ops: 0=578 1=570 2=979 3=8617 4=8122 5=8493) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## fix run 5
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[LP] PASS W1 every worker kept moving (ops: 0=579 1=583 2=954 3=8384 4=8540 5=8624) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi run 1
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[BLKTOK] wait>2s in_use=1 inside=1 holder pid=4 cpu=5 held_ms=0 site=0x700D6068 st=3 kern=0 osys=1 on_cpu=5 me pid=5 cpu=6 holds=- long_waits=1
+[BLKTOK] wait-ended in_use=1 inside=0 holder pid=5 cpu=6 held_ms=0 site=0x700D6068 st=3 kern=0 osys=1 on_cpu=6 me pid=5 cpu=6 holds=- long_waits=1
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x6 extra=0x100000 cpu=7
+[LP] PASS W1 every worker kept moving (ops: 0=748 1=639 2=1075 3=7389 4=13986 5=10898) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi run 2
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x6 extra=0x100000 cpu=1
+[LP] PASS W1 every worker kept moving (ops: 0=871 1=809 2=1542 3=12943 4=11740 5=9429) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi run 3
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x3 extra=0x100000 cpu=6
+[LP] PASS W1 every worker kept moving (ops: 0=828 1=985 2=1119 3=5060 4=6882 5=7864) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi run 4
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x5 extra=0x100000 cpu=6
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x4 extra=0x100000 cpu=6
+[LP] PASS W1 every worker kept moving (ops: 0=1052 1=900 2=1203 3=5809 4=7902 5=8951) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi run 5
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x3 extra=0x100000 cpu=1
+[LP] PASS W1 every worker kept moving (ops: 0=1043 1=831 2=1121 3=5970 4=7117 5=10917) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi2 run 1
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x5 extra=0x100000 cpu=4
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x6 extra=0x100000 cpu=0
+[LP] PASS W1 every worker kept moving (ops: 0=702 1=592 2=732 3=5753 4=7397 5=15840) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi2 run 2
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[LP] PASS W1 every worker kept moving (ops: 0=1086 1=902 2=1249 3=5885 4=7581 5=8868) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi2 run 3
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x3 extra=0x100000 cpu=5
+[LP] PASS W1 every worker kept moving (ops: 0=922 1=872 2=1593 3=11951 4=10582 5=8752) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipiext-v1 run 1
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[BLKTOK] wait>2s in_use=1 inside=1 holder pid=7 cpu=4 held_ms=0 site=0x700D50AB st=3 kern=0 osys=217 on_cpu=4 me pid=1 cpu=1 holds=- long_waits=1
+[YLOCK-STALL] site=ext2_lock lock=ext2_lock addr=0x7028E9EC extra=0x100000 cpu=2
+[BLKTOK] wait-ended in_use=1 inside=0 holder pid=1 cpu=3 held_ms=0 site=0x700D631E st=3 kern=1 osys=-1 on_cpu=3 me pid=1 cpu=3 holds=- long_waits=1
+[YLOCK-WEDGE] site=ext2_lock lock=ext2_lock addr=0x7028E9EC extra=0x2 cpu=0
+[YLOCK-OWNER] ext2_lock pid=1 cpu=0 pcb_live=1 ost=2 osys=-1
+[BLKTOK] at-ylock-wedge in_use=1 inside=1 holder pid=5 cpu=1 held_ms=0 site=0x700D6068 st=3 kern=0 osys=1 on_cpu=1 me pid=11 cpu=0 holds=ext2_lock long_waits=1
+[BLKTOK] wait>2s in_use=1 inside=1 holder pid=10 cpu=2 held_ms=0 site=0x700D631E st=3 kern=0 osys=3 on_cpu=2 me pid=4 cpu=7 holds=- long_waits=2
+[BLKTOK] wait>2s in_use=1 inside=1 holder pid=10 cpu=2 held_ms=0 site=0x700D631E st=3 kern=0 osys=3 on_cpu=2 me pid=8 cpu=6 holds=- long_waits=3
+[BLKTOK] wait-ended in_use=1 inside=0 holder pid=8 cpu=6 held_ms=0 site=0x700D50AB st=3 kern=0 osys=2 on_cpu=6 me pid=8 cpu=6 holds=- long_waits=3
+[BLKTOK] wait-ended in_use=1 inside=0 holder pid=4 cpu=7 held_ms=0 site=0x700D50AB st=3 kern=0 osys=82 on_cpu=7 me pid=4 cpu=7 holds=- long_waits=3
+
+## ipiext-v1 run 2
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=ext2_lock lock=ext2_lock addr=0x7028E9EC extra=0x100000 cpu=4
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x5 extra=0x100000 cpu=2
+[YLOCK-WEDGE] site=ext2_lock lock=ext2_lock addr=0x7028E9EC extra=0x2 cpu=4
+[YLOCK-OWNER] ext2_lock pid=1 cpu=0 pcb_live=1 ost=2 osys=-1
+[BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D50AB on_cpu=-1 me pid=10 cpu=4 holds=f->lock long_waits=0
+[YLOCK-WEDGE] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x5 extra=0x4 cpu=2
+[YLOCK-OWNER] fat_wr_lock pid=5 cpu=5 pcb_live=1 ost=3 osys=1
+[BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D50AB on_cpu=-1 me pid=8 cpu=2 holds=- long_waits=0
+
+## ipi3 run 1
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x3 extra=0x100000 cpu=6
+[LP] PASS W1 every worker kept moving (ops: 0=1023 1=853 2=1089 3=7937 4=6827 5=15385) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi3 run 2
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[LP] PASS W1 every worker kept moving (ops: 0=642 1=638 2=1774 3=7094 4=5834 5=8959) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi3ext run 1
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x6 extra=0x100000 cpu=2
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB14 pc=0x6 extra=0x100000 cpu=3
+[LP] PASS W1 every worker kept moving (ops: 0=641 1=618 2=979 3=9141 4=9568 5=9024 6=12090 7=12304) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi3ext run 2
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x4 extra=0x100000 cpu=3
+[LP] PASS W1 every worker kept moving (ops: 0=599 1=592 2=895 3=8812 4=9343 5=8989 6=11459 7=11106) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0
+
+## ipi3ext run 3
+[LP] PASS S1 FAT subdirectory exists (0)
+[LP] PASS S2 read-only target written (12288)
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x2 extra=0x100000 cpu=7
+[LP] PASS W1 every worker kept moving (ops: 0=660 1=636 2=983 3=9928 4=9312 5=9417 6=11874 7=11986) (30)
+[LP] PASS V1 every final cache file holds its last generation (0)
+[LP] PASS V1 no .TMP/.NEW left in the subdirectory (0)
+[LP] done rc=0

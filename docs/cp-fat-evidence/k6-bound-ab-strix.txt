@@ -1,0 +1,61 @@
+# C3-fat: linux_probe_fatren on integ10 (49e83499) + cp-fat + C1-k6's 9d47b051 (1 ms halt bound), strix (KVM, 8 vCPU).
+# One boot per row, 30 s of traffic.  "ext" = with the /EXT ext2 writers (CPDATA, a 2 GiB sparse data disk).
+#   kA = token wait is plain safe_wfi() (BLK_TOKEN_RELEASE_WAKE 0): the 1 ms bound alone
+#   kB = release wake + a 50 us pause-spin before the halt
+#   kC = release wake, no spin, first cut (bug: see summary)
+#   kF2 = final cp-fat 0cd94906 + 9d47b051
+# ops: per-worker op counts (0,1 = fontconfig renamers; 2 = root renamer; 3-5 = open/read/stat; 6,7 = ext2 writers).
+# [BLKTOKW]: waits (multiple of 1024: last running row) halts ipis mean/max and the <10us,<100us,<1ms,<10ms,<100ms,more histogram.
+#
+# Summary (FAT-only, 4 boots each, 0 wedges in every variant):
+#            renamers (0+1)   open/read (3+4+5)   mean wait   waits that halted, and how long       wake IPIs / run
+#   kA            ~1580            ~17 900           ~350 us   ~6 %, each >= 1 ms (the bound)              0
+#   kB            ~1580            ~26 000           ~290 us   ~30 %, mostly < 1 ms                  ~920 000
+#   kC            ~1140            ~26 000           ~405 us   first cut of the no-spin loop: a user waiter's FIRST failed
+#                                                              check halted UNREGISTERED (nothing wakes it; the bound did)
+#   kF2 (final)   ~1350            ~35 000           ~320 us   ~80 %, mostly 10 us - 1 ms           ~990 000
+# kF2 = final cp-fat 0cd94906 + 9d47b051; its 4 boots ran concurrently with the F1 boots below (more host contention).
+# The bound alone makes fatren pass.  The release wake roughly doubles open/read throughput under this load and moves a
+# halted wait from >= 1 ms to tens-hundreds of us, for ~1M directed IPIs per 30 s of a deliberately pathological load
+# (~10 000 token waits/s; an ordinary boot has a few hundred waits in total).  Renames are ~15 % slower (the token is not
+# FIFO; the readers win more often).
+#
+# Without the bound (cp-fat alone, the configuration that lands first), the first no-spin cut wedged 4 of 4 (G rows):
+# the unregistered first halt above.  The final loop never halts unregistered and passes 4 of 4 (F1 rows, 2 with /EXT).
+
+kA-1: [LP] done rc=0 ops: 0=838 1=816 2=1706 3=6096 4=5957 5=6136 | waits=344064 halts=19816 ipis=0 mean_us=349 max_us=635281 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=324240,75,215,16123,3396,15 | 0 wedges
+kA-2: [LP] done rc=0 ops: 0=800 1=791 2=1697 3=5808 4=5780 5=6216 | waits=344064 halts=19792 ipis=0 mean_us=351 max_us=253474 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=324260,63,205,15836,3684,16 | 0 wedges
+kA-3: [LP] done rc=0 ops: 0=775 1=768 2=1659 3=5881 4=6031 5=5904 | waits=327680 halts=19288 ipis=0 mean_us=358 max_us=506253 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=308383,81,209,15461,3532,14 | 0 wedges
+kA-4: [LP] done rc=0 ops: 0=774 1=758 2=1780 3=5989 4=5880 5=5997 | waits=339968 halts=19715 ipis=0 mean_us=353 max_us=193266 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=320248,61,196,15772,3682,9 | 0 wedges
+kAext-1: [LP] done rc=0 ops: 0=465 1=460 2=926 3=5112 4=5144 5=5048 6=16324 7=16280 | waits=303104 halts=15452 ipis=0 mean_us=405 max_us=268416 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=287646,42,124,10948,4337,7 | 0 wedges
+kAext-2: [LP] done rc=0 ops: 0=495 1=474 2=1007 3=4918 4=5378 5=5513 6=18312 7=18514 | waits=333824 halts=16820 ipis=0 mean_us=362 max_us=232933 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=316995,48,160,12640,3972,9 | 0 wedges
+kB-1: [LP] done rc=0 ops: 0=659 1=791 2=983 3=8313 4=8729 5=15693 | waits=275456 halts=102037 ipis=772989 mean_us=334 max_us=64655 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=72224,133458,47539,21467,768,0 | 0 wedges
+kB-2: [LP] done rc=0 ops: 0=901 1=709 2=1243 3=9610 4=10375 5=9471 | waits=312343 halts=97014 ipis=821791 mean_us=267 max_us=548715 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=96661,151913,42545,20956,246,22 | 0 wedges
+kB-3: [LP] done rc=0 ops: 0=989 1=830 2=1176 3=5532 4=6780 5=7600 | waits=332800 halts=94955 ipis=965557 mean_us=299 max_us=1629653 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=78592,192968,39892,20564,761,23 | 1 wedges
+kB-4: [LP] done rc=0 ops: 0=715 1=719 2=1847 3=8617 4=7484 5=6809 | waits=377856 halts=103113 ipis=1113070 mean_us=255 max_us=202119 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=112695,193077,45423,26342,318,1 | 0 wedges
+kBext-1: [LP] done rc=0 ops: 0=756 1=754 2=1193 3=9798 4=9759 5=9688 6=13196 7=13559 | waits=392192 halts=117984 ipis=1242122 mean_us=268 max_us=65063 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=88780,225553,51686,25509,664,0 | 0 wedges
+kBext-2: [LP] done rc=0 ops: 0=641 1=626 2=1005 3=8784 4=8982 5=8986 6=11023 7=11008 | waits=326656 halts=115331 ipis=1070661 mean_us=328 max_us=129746 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=67087,180967,51854,25967,780,1 | 0 wedges
+kC-1: [LP] done rc=0 ops: 0=486 1=493 2=918 3=9121 4=10246 5=9403 | waits=206848 halts=91018 ipis=219758 mean_us=459 max_us=477700 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=115909,6977,51844,31934,170,14 | 0 wedges
+kC-2: [LP] done rc=0 ops: 0=632 1=645 2=1228 3=8403 4=9296 5=10470 | waits=275456 halts=111463 ipis=261104 mean_us=346 max_us=473016 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=164088,8276,65303,37657,125,7 | 0 wedges
+kC-3: [LP] done rc=0 ops: 0=534 1=560 2=1109 3=8941 4=8038 5=8211 | waits=236544 halts=100070 ipis=242519 mean_us=410 max_us=688081 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=136567,7561,59110,33232,63,11 | 0 wedges
+kC-4: [LP] done rc=0 ops: 0=566 1=629 2=1187 3=7512 4=6875 5=7085 | waits=244736 halts=99712 ipis=242181 mean_us=403 max_us=662303 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=145133,7938,58935,32672,51,7 | 0 wedges
+F1-f3: [LP] done rc=0 ops: 0=1058 1=649 2=660 3=3456 4=4532 5=17766 | waits=304128 halts=266445 ipis=1110893 mean_us=330 max_us=151048 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=38704,187964,58761,17336,1358,5 | wedges=0
+F1-f4: [LP] done rc=0 ops: 0=800 1=599 2=1011 3=5892 4=19644 5=16628 | waits=362496 halts=296154 ipis=1252628 mean_us=266 max_us=748176 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=67950,208043,67008,18637,846,12 | wedges=0
+F1-fe1: [LP] done rc=0 ops: 0=664 1=668 2=1321 3=7625 4=7014 5=7200 6=6770 7=6309 | waits=359424 halts=316418 ipis=1326747 mean_us=325 max_us=1649708 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=43976,233912,60602,19883,1002,49 | wedges=0
+F1-fe2: [LP] done rc=0 ops: 0=825 1=692 2=1133 3=8308 4=8159 5=7818 6=7549 7=7518 | waits=359424 halts=313556 ipis=1302101 mean_us=312 max_us=799777 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=46965,229498,61898,20101,923,39 | wedges=0
+G-1 (first cut, no bound): [LP] done rc=1 | [YLOCK-OWNER] fat_lock pid=5 cpu=7 pcb_live=1 ost=3 osys=2
+ [BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700DA178 on_cpu=-1 me pid=6 cpu=0 holds=- long_waits=0
+ 
+G-2 (first cut, no bound):  | [YLOCK-OWNER] fat_lock pid=4 cpu=5 pcb_live=1 ost=3 osys=2
+ [BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D91BB on_cpu=-1 me pid=3 cpu=6 holds=- long_waits=0
+ 
+G-s1 (first cut, no bound): [LP] done rc=1 | [YLOCK-OWNER] fat_lock pid=4 cpu=7 pcb_live=1 ost=3 osys=82
+ [BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D91BB on_cpu=-1 me pid=6 cpu=6 holds=- long_waits=0
+ 
+G-d3 (first cut, no bound):  | [YLOCK-OWNER] fat_wr_lock pid=3 cpu=6 pcb_live=1 ost=3 osys=1
+ [BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700DB0A8 on_cpu=-1 me pid=4 cpu=0 holds=- long_waits=0 sleepers=0x0
+ 
+kF2-1: [LP] done rc=0 ops: 0=464 1=492 2=2025 3=9155 4=5468 5=4096 | waits=337920 halts=260584 ipis=1156566 mean_us=293 max_us=379423 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=79602,152209,78776,27198,119,16 | wedges=0
+kF2-2: [LP] done rc=0 ops: 0=917 1=671 2=714 3=15587 4=6772 5=7869 | waits=260096 halts=220726 ipis=889677 mean_us=382 max_us=204704 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=40407,142434,55945,20345,946,19 | wedges=0
+kF2-3: [LP] done rc=0 ops: 0=866 1=715 2=1004 3=8597 4=18813 5=21577 | waits=328704 halts=262776 ipis=1049562 mean_us=269 max_us=120882 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=67277,165627,73273,22150,373,4 | wedges=0
+kF2-4: [LP] done rc=0 ops: 0=698 1=575 2=788 3=17400 4=8733 5=16546 | waits=264192 halts=213601 ipis=849778 mean_us=336 max_us=141081 hist(<10us,<100us,<1ms,<10ms,<100ms,more)=51612,122744,68074,21215,544,3 | wedges=0

@@ -1,0 +1,11 @@
+# test_fat16_rename_fontconfig_cache on integ10 + cp-fat with fat16.c reverted to integ10 (pre-fix), strix, run_unit_tests_intel.sh.
+# Known reds: virtio_gpu_test.c:214/:244.  The new test fails at generation 2 (the final keeps generation 1: the short-name
+# compare skipped the unlink).  With the fix (gate batch, unit row): 463 run, 2 failed (only the two virtio_gpu rows).
+Tests failed!
+  Running test_fat16_rename_fontconfig_cache...
+    fcren: final holds generation 1 at generation 2
+EXPECT_EQ FAILED: bad_bytes == 0 at src/kernel/fat16_test.c:1829
+EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:214
+EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:244
+Tests run:    463
+Tests failed: 3
