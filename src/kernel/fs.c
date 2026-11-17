@@ -3465,6 +3465,9 @@ int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
      cursor juggling, no lock held while the caller's memory is written. */
   if (li >= 0 && gfile(li)->type == FILE_TYPE_EXT2) {
     if (n > 0x7FFFFFFF) n = 0x7FFFFFFF;
+    /* the destination materialized writable first, as file_read_user does
+       (-EFAULT for a hole instead of a kernel-mode fault in the copy) */
+    if (n > 0 && p->as && vm_range_ok(p, ubuf, (uint64_t)n, 1) != 0) return -EFAULT;
     return ext2v_pread(gfile(li), (void *)(uintptr_t)ubuf, (int)n, off);
   }
   ylock_t *plk = (li >= 0) ? &gfile(li)->pos_lock : 0;
@@ -3493,6 +3496,7 @@ int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
   int li = f1_pos_index(pg, fd);
   if (li >= 0 && gfile(li)->type == FILE_TYPE_EXT2) { /* cp/ext2w: see pread */
     if (n > 0x7FFFFFFF) n = 0x7FFFFFFF;
+    if (n > 0 && p->as && vm_range_ok(p, ubuf, (uint64_t)n, 0) != 0) return -EFAULT;
     return ext2v_pwrite(gfile(li), (const void *)(uintptr_t)ubuf, (int)n, off);
   }
   ylock_t *plk = (li >= 0) ? &gfile(li)->pos_lock : 0;
