@@ -10,8 +10,37 @@ extern void print_int(int val);
 extern void uart_puts(const char* s);
 extern void uart_print_hex(uint64_t val);
 
-static struct pipe pipes[MAX_GLOBAL_FILES / 2];
+/* C1-k5 (docs/cp-k5.md §1): up to MAX_GLOBAL_FILES / 2 pipes (8192 on
+ * x86_64; one pipe = two open files).  A struct pipe is ~930 B, so the old
+ * static pool at that size would be ~7.4 MiB of BSS.  The first PIPE_STATIC
+ * stay static; the rest come in frame-pool chunks of PIPE_CHUNK, allocated
+ * when every materialised pipe is busy and never freed (file slots keep raw
+ * struct pipe pointers).  pipe_slot(i) is the only accessor. */
+#define PIPES_MAX (MAX_GLOBAL_FILES / 2)
+#define PIPE_STATIC (GFT_STATIC / 2)
+#define PIPE_CHUNK 64
+#define PIPE_NCHUNK ((PIPES_MAX - PIPE_STATIC + PIPE_CHUNK - 1) / PIPE_CHUNK + 1)
+#define PIPE_CHUNK_PAGES ((int)((PIPE_CHUNK * sizeof(struct pipe) + 4095) / 4096))
+static struct pipe pipes_static[PIPE_STATIC];
+static struct pipe *volatile pipe_chunk[PIPE_NCHUNK];
+static int pipes_live; /* materialised pipes (under pipes_lock) */
+static int pipes_hint; /* where the next free-pipe scan starts */
 static spinlock_t pipes_lock;
+
+static inline struct pipe *pipe_slot(int i) {
+  if (i < PIPE_STATIC) return &pipes_static[i];
+  int k = i - PIPE_STATIC;
+  return pipe_chunk[k / PIPE_CHUNK] + (k % PIPE_CHUNK);
+}
+
+static void pipe_slot_init(struct pipe *p) {
+  uint8_t *b = (uint8_t *)p;
+  for (uint64_t k = 0; k < sizeof *p; k++) b[k] = 0;
+  p->reader_count = 0;
+  p->writer_count = 0;
+  p->cap = PIPE_SIZE;
+  spinlock_init(&p->lock);
+}
 extern spinlock_t proc_lock;
 
 /* C1-k4: byte `i` of the ring (native inline buffer or the frame ring). */
@@ -29,16 +58,30 @@ void pipes_init(void) {
   spinlock_init(&pipes_lock);
 /* PROCESS class: pipe syscalls only; the IRQ side never touches the pool. */
   lock_register(&pipes_lock, "pipes_lock", LOCK_RANK_BACKEND, LOCK_CLASS_PROCESS);
-  for (int i = 0; i < MAX_GLOBAL_FILES / 2; i++) {
-    pipes[i].reader_count = 0;
-    pipes[i].writer_count = 0;
-    pipes[i].cap = PIPE_SIZE;
-    for (int k = 0; k < PIPE_PAGES; k++) {
-      pipes[i].pg[k] = 0;
-      pipes[i].pg_phys[k] = 0;
-    }
-    spinlock_init(&pipes[i].lock);
+  pipes_live = PIPE_STATIC;
+  pipes_hint = 0;
+  for (int i = 0; i < PIPE_STATIC; i++)
+    pipe_slot_init(&pipes_static[i]);
+}
+
+/* C1-k5: add one chunk of pipes (frames taken with no lock held). */
+static int pipes_grow(int live) {
+  if (live >= PIPES_MAX) return -1;
+  uint64_t pa = frame_alloc_contig(PIPE_CHUNK_PAGES);
+  if (!pa) return -1;
+  struct pipe *c = (struct pipe *)phys_to_virt(pa);
+  for (int k = 0; k < PIPE_CHUNK; k++) pipe_slot_init(&c[k]);
+  int ci = (live - PIPE_STATIC) / PIPE_CHUNK;
+  spinlock_acquire(&pipes_lock);
+  int mine = (pipes_live == live && !pipe_chunk[ci]);
+  if (mine) {
+    pipe_chunk[ci] = c;
+    pipes_live = live + PIPE_CHUNK > PIPES_MAX ? PIPES_MAX : live + PIPE_CHUNK;
   }
+  spinlock_release(&pipes_lock);
+  if (!mine)
+    for (int k = 0; k < PIPE_CHUNK_PAGES; k++) frame_free(pa + (uint64_t)k * 4096);
+  return 0;
 }
 
 static void pipe_free_frames(uint64_t *phys) {
@@ -83,42 +126,54 @@ int pipe_alloc_ex(struct file **f0, struct file **f1, int linux) {
         phys[k] = 0;
     }
   }
+  for (;;) {
   spinlock_acquire(&pipes_lock);
-  for (int i = 0; i < MAX_GLOBAL_FILES / 2; i++) {
+  int live = pipes_live;
+  int span = live - PIPE_STATIC;
+  int h = (pipes_hint >= 0 && pipes_hint < span) ? pipes_hint : 0;
+  /* C1-k5: static pipes first, lowest first (the old order); then the
+     chunks from a rotating hint. */
+  for (int n = 0; n < live; n++) {
+    int i = n < PIPE_STATIC ? n
+                            : PIPE_STATIC + ((h + n - PIPE_STATIC) % (span > 0 ? span : 1));
+    struct pipe *pp = pipe_slot(i);
     /* C1-k4: the free test and the (re)initialisation happen under the
        pipe's own lock, the lock pipe_close() detaches the old ring under. */
-    spinlock_acquire(&pipes[i].lock);
-    if (pipes[i].reader_count == 0 && pipes[i].writer_count == 0) {
-      pipes[i].reader_count = 1;
-      pipes[i].writer_count = 1;
-      pipes[i].head = 0;
-      pipes[i].tail = 0;
-      pipes[i].count = 0;
+    spinlock_acquire(&pp->lock);
+    if (pp->reader_count == 0 && pp->writer_count == 0) {
+      pp->reader_count = 1;
+      pp->writer_count = 1;
+      pp->head = 0;
+      pp->tail = 0;
+      pp->count = 0;
       for (int k = 0; k < PIPE_PAGES; k++) {
-        pipes[i].pg_phys[k] = big ? phys[k] : 0;
-        pipes[i].pg[k] = big ? (uint8_t *)phys_to_virt(phys[k]) : 0;
+        pp->pg_phys[k] = big ? phys[k] : 0;
+        pp->pg[k] = big ? (uint8_t *)phys_to_virt(phys[k]) : 0;
       }
-      pipes[i].cap = big ? PIPE_SIZE_LINUX : PIPE_SIZE;
-      pipes[i].reader_pid_mask = (struct pid_mask){0};
-      pipes[i].writer_pid_mask = (struct pid_mask){0};
-      spinlock_release(&pipes[i].lock);
+      pp->cap = big ? PIPE_SIZE_LINUX : PIPE_SIZE;
+      pp->reader_pid_mask = (struct pid_mask){0};
+      pp->writer_pid_mask = (struct pid_mask){0};
+      spinlock_release(&pp->lock);
 
       (*f0)->type = FILE_TYPE_PIPE;
-      (*f0)->pipe.ptr = &pipes[i];
+      (*f0)->pipe.ptr = pp;
       (*f0)->pipe.end = 0; // Read end
 
       (*f1)->type = FILE_TYPE_PIPE;
-      (*f1)->pipe.ptr = &pipes[i];
+      (*f1)->pipe.ptr = pp;
       (*f1)->pipe.end = 1; // Write end
 
+      if (i >= PIPE_STATIC) pipes_hint = i + 1 - PIPE_STATIC;
       spinlock_release(&pipes_lock);
       return 0;
     }
-    spinlock_release(&pipes[i].lock);
+    spinlock_release(&pp->lock);
   }
   spinlock_release(&pipes_lock);
+  if (pipes_grow(live) == 0) continue; /* C1-k5: a fresh chunk, rescan */
   pipe_free_frames(phys);
   return -1;
+  }
 }
 
 int pipe_alloc(struct file **f0, struct file **f1) {

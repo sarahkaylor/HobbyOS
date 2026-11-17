@@ -46,8 +46,12 @@
 #include "kline.h"
 #include "linux_syscall.h"
 #include "process.h"
+#include "frame.h" /* C1-k5: epoll entry arrays */
+#include "kmem.h"
 
-#define LT_MAX 48
+/* C1-k5: 256 (was 48): one table holds every itimer, POSIX timer and timerfd
+   in the system; a slot is 56 B. */
+#define LT_MAX 256
 
 /* Same contract as every other l_tab_* handler: write the result and say
    "answered" (linux_compat_fd.c/linux_compat_mem.c each carry this three-line
@@ -511,13 +515,25 @@ static int l_tmr_delete(struct process *p, struct trap_frame *tf) {
  * Now 1024 fds per instance (the game: ~190 threads), 16 instances, and the
  * wait is woken by poll_notify() instead of re-scanning in 10 ms slices.
  */
+/* C1-k5 (docs/cp-k5.md §3): one interest list holds up to MAX_OPEN_FDS fds
+ * (a set can name every fd its process can open), 64 instances system-wide.
+ * The entry array (16 B x 4096 = 64 KiB) is no longer inline: it comes from
+ * the frame pool the first time a slot is used and stays with the slot (the
+ * static part is ~100 B per instance). */
 #ifdef __x86_64__
-#define LE_MAX 16
-#define LE_FDS 1024
+#define LE_MAX 64
+#define LE_FDS MAX_OPEN_FDS
 #else
 #define LE_MAX 8 /* the compat class is x86_64-only; keep ARM's .bss small */
 #define LE_FDS 32
 #endif
+#define LE_ENT_PAGES ((int)((LE_FDS * 16 + 4095) / 4096))
+struct le_ent {
+  int fd;
+  uint32_t events;
+  uint64_t data;
+};
+_Static_assert(sizeof(struct le_ent) == 16, "le_ent is 16 bytes");
 struct l_epoll {
   int used;
   int pid;
@@ -527,13 +543,10 @@ struct l_epoll {
   uint64_t busy_t0;   /* ms of the first of them */
   uint64_t spin_rows; /* [EPOLLSPIN] rows printed */
   int hw;    /* C1-k4: high-water mark of n (one [EPOLLHW] row per new 2^k) */
-  struct {
-    int fd;
-    uint32_t events;
-    uint64_t data;
-  } e[LE_FDS];
+  struct le_ent *e; /* LE_FDS entries (frame pool, kept with the slot) */
 };
 static struct l_epoll le[LE_MAX];
+static spinlock_t le_lock; /* C1-k5: slot claim (zero-init = unlocked) */
 /* C1-k4: the deadline belongs to the WAITER (several threads may wait on one
    epoll instance), not to the instance; 0 = none. */
 static uint64_t le_deadline[MAX_PROCESSES];
@@ -543,7 +556,21 @@ int lt_epoll_new(void) {
   if (!grp) return -EINVAL;
   for (int i = 0; i < LE_MAX; i++)
     if (!le[i].used) {
+      uint64_t fl = spinlock_acquire_irqsave(&le_lock);
+      if (le[i].used) {
+        spinlock_release_irqrestore(&le_lock, fl);
+        continue;
+      }
       le[i].used = 1;
+      spinlock_release_irqrestore(&le_lock, fl);
+      if (!le[i].e) {
+        uint64_t pa = frame_alloc_contig(LE_ENT_PAGES);
+        if (!pa) {
+          le[i].used = 0;
+          return -ENOMEM;
+        }
+        le[i].e = (struct le_ent *)phys_to_virt(pa);
+      }
       le[i].pid = grp->pid;
       le[i].n = 0;
       le[i].rot = 0;

@@ -8,7 +8,8 @@
  *
  * Layout of this file:
  *   1. byte helpers, canonical paths
- *   2. block cache (write-back inside one operation; callers flush)
+ *   2. block cache (write-back across operations; the caller commits with
+ *      ext2_flush, the ordered commit in section 8 -- cp/ext2w)
  *   3. superblock / group descriptors / bitmaps / allocation
  *   4. inodes and the block map (direct + 1/2/3-level indirect)
  *   5. regular-file read / write / truncate
@@ -123,8 +124,34 @@ static int e2_under(const char *mnt, const char *path) {
 /* 2. block cache                                                           */
 /* ======================================================================== */
 
-#define BG_READ 1 /* fill from the device */
-#define BG_ZERO 2 /* fresh block: zero-filled, never read */
+/* cp/ext2w (docs/cp-ext2w.md): the cache is WRITE-BACK across syscalls.  A
+ * buffer changed by an operation stays dirty until ext2_flush() -- the
+ * ordered commit in section 8 -- writes it; the caller (ext2_vfs.c) decides
+ * when (fsync/sync/last close/timer/pressure).  Between commits only two
+ * classes of dirty buffer may reach the disk on their own, because writing
+ * them early can never make the on-disk state worse:
+ *   K_DATA  regular-file contents (the on-disk metadata either already points
+ *           at the block, or does not reference it at all);
+ *   NEW     any block allocated since the last commit (its bit is clear in the
+ *           committed bitmap, so nothing on disk refers to it; and a block
+ *           freed since the last commit is never handed out again before the
+ *           next one -- balloc/ialloc skip bits set in the committed image).
+ * Everything else (bitmaps, inode tables, directories, indirect blocks, the
+ * group descriptors) is written only by a commit. */
+
+#define BG_READ 1   /* fill from the device */
+#define BG_ZERO 2   /* fresh block: zero-filled, never read (marked dirty) */
+#define BG_NOREAD 4 /* the caller overwrites the whole block: no read, no zero */
+
+#define K_OTHER 0 /* existing metadata: directory, indirect, xattr blocks */
+#define K_DATA 1  /* regular-file contents, slow-symlink text */
+#define K_BBM 2   /* block bitmap (aux = group) */
+#define K_IBM 3   /* inode bitmap (aux = group) */
+#define K_ITAB 4  /* inode-table block (aux = its first inode number) */
+#define K_GDT 5   /* group-descriptor block */
+
+static int ext2_commit(struct ext2_fs *fs);
+static int writeback_evictable(struct ext2_fs *fs);
 
 static int valid_blk(const struct ext2_fs *fs, uint32_t b) {
   return b >= fs->first_data_block && b < fs->blocks_count && b != 0;
@@ -135,22 +162,36 @@ static int corrupt(struct ext2_fs *fs) {
   return -EIO;
 }
 
-static int dev_rd(struct ext2_fs *fs, uint32_t blk, void *buf) {
-  fs->st_dev_reads++;
-  return fs->dev.read(fs->dev.ctx, (uint64_t)blk * fs->spb, buf, fs->spb) == 0
-             ? 0
-             : -EIO;
+/* One device call for `n` consecutive blocks starting at `blk`. */
+static int dev_run(struct ext2_fs *fs, uint32_t blk, void *const *bufs,
+                   uint32_t n, int wr) {
+  if (wr)
+    fs->st_dev_writes += n;
+  else
+    fs->st_dev_reads += n;
+  uint64_t sec = (uint64_t)blk * fs->spb;
+  if (fs->dev.rwv) {
+    fs->st_cmds++;
+    return fs->dev.rwv(fs->dev.ctx, sec, bufs, n, fs->spb, wr) == 0 ? 0 : -EIO;
+  }
+  for (uint32_t i = 0; i < n; i++) {
+    fs->st_cmds++;
+    int r = wr ? fs->dev.write(fs->dev.ctx, sec + (uint64_t)i * fs->spb,
+                               bufs[i], fs->spb)
+               : fs->dev.read(fs->dev.ctx, sec + (uint64_t)i * fs->spb,
+                              bufs[i], fs->spb);
+    if (r != 0) return -EIO;
+  }
+  return 0;
 }
 
-static int dev_wr(struct ext2_fs *fs, uint32_t blk, const void *buf) {
-  fs->st_dev_writes++;
-  return fs->dev.write(fs->dev.ctx, (uint64_t)blk * fs->spb, buf, fs->spb) == 0
-             ? 0
-             : -EIO;
+static int dev_rd(struct ext2_fs *fs, uint32_t blk, void *buf) {
+  void *b[1] = {buf};
+  return dev_run(fs, blk, b, 1, 0);
 }
 
 static uint32_t hidx(uint32_t blk) {
-  return (blk * 2654435761u) >> 22; /* 10 bits: EXT2_HASH_N == 1024 */
+  return (blk * 2654435761u) >> 20; /* 12 bits: EXT2_HASH_N == 4096 */
 }
 
 static struct ext2_cbuf *cache_find(struct ext2_fs *fs, uint32_t blk) {
@@ -176,6 +217,169 @@ static void hash_remove(struct ext2_fs *fs, int32_t slot) {
   }
 }
 
+/* ---- pre-images (committed images of bitmap / inode-table blocks) ------ */
+
+static uint8_t *pre_get(struct ext2_fs *fs) {
+  if (fs->npre_free) return fs->prepool[--fs->npre_free];
+  if (fs->npre_total >= fs->cache_cap) return 0;
+  uint8_t *p = (uint8_t *)fs->alloc_buf(4096);
+  if (p) fs->npre_total++;
+  return p;
+}
+
+static void pre_put(struct ext2_fs *fs, struct ext2_cbuf *c) {
+  if (!c->pre) return;
+  if (fs->npre_free < EXT2_CACHE_MAX) fs->prepool[fs->npre_free++] = c->pre;
+  c->pre = 0;
+}
+
+static void mark_dirty(struct ext2_fs *fs, struct ext2_cbuf *c) {
+  if (!c->dirty) {
+    c->dirty = 1;
+    fs->ndirty++;
+  }
+}
+
+static void mark_clean(struct ext2_fs *fs, struct ext2_cbuf *c) {
+  if (c->dirty) {
+    c->dirty = 0;
+    if (fs->ndirty) fs->ndirty--;
+  }
+  pre_put(fs, c);
+}
+
+/* Call BEFORE changing a buffer: tags its commit class, captures the
+ * committed image of a bitmap / inode-table block at its first change since
+ * the last commit, and marks it dirty. */
+static void bmod(struct ext2_fs *fs, struct ext2_cbuf *c, int kind,
+                 uint32_t aux) {
+  c->kind = (uint8_t)kind;
+  c->aux = aux;
+  if ((kind == K_BBM || kind == K_IBM || kind == K_ITAB) && !c->dirty &&
+      !c->pre) {
+    uint8_t *p = pre_get(fs);
+    if (p) {
+      memcpy(p, c->data, fs->bs);
+      c->pre = p;
+    } else {
+      fs->st_nopre++;
+    }
+  }
+  mark_dirty(fs, c);
+}
+
+/* The group-descriptor block of group g, from the cache only (no I/O: used
+ * inside eviction and the commit).  Pinned for the mount's lifetime when
+ * fs->ordered. */
+static struct ext2_cbuf *gd_cached(struct ext2_fs *fs, uint32_t g,
+                                   uint32_t *off) {
+  uint64_t byte = (uint64_t)g * 32u;
+  *off = (uint32_t)(byte & (fs->bs - 1));
+  return cache_find(fs, fs->gdt_block + (uint32_t)(byte >> fs->log_bs));
+}
+
+/* The cached block-bitmap buffer of group g (no I/O), or NULL. */
+static struct ext2_cbuf *bbm_cached(struct ext2_fs *fs, uint32_t g, int inode) {
+  if (g >= fs->groups) return 0;
+  uint32_t off;
+  struct ext2_cbuf *gd = gd_cached(fs, g, &off);
+  if (!gd) return 0;
+  uint32_t b = rd32(gd->data + off + (inode ? 4 : 0));
+  return valid_blk(fs, b) ? cache_find(fs, b) : 0;
+}
+
+/* Allocated since the last commit (clear in the committed bitmap)? */
+static int blk_is_new(struct ext2_fs *fs, uint32_t blk) {
+  if (!fs->ordered || blk < fs->first_data_block) return 0;
+  uint32_t g = (blk - fs->first_data_block) / fs->bpg;
+  uint32_t bit = (blk - fs->first_data_block) % fs->bpg;
+  struct ext2_cbuf *bm = bbm_cached(fs, g, 0);
+  if (!bm || !bm->pre) return 0;
+  return !(bm->pre[bit >> 3] & (1u << (bit & 7)));
+}
+
+/* May this dirty buffer be written outside a commit? */
+static int early_ok(struct ext2_fs *fs, struct ext2_cbuf *c) {
+  if (c->kind == K_DATA) return 1;
+  if (c->kind == K_OTHER) return blk_is_new(fs, c->blk);
+  return 0;
+}
+
+/* A clean, unpinned slot by the clock (second chance), or -1. */
+static int32_t clock_victim(struct ext2_fs *fs) {
+  for (uint32_t n = 0; n < 2 * fs->ncache; n++) {
+    uint32_t i = fs->clock;
+    fs->clock = (fs->clock + 1) % fs->ncache;
+    struct ext2_cbuf *v = &fs->cache[i];
+    if (v->pin) continue;
+    if (!v->valid) return (int32_t)i;
+    if (v->dirty) continue;
+    if (v->ref) {
+      v->ref = 0;
+      continue;
+    }
+    return (int32_t)i;
+  }
+  return -1;
+}
+
+static int32_t free_slot(struct ext2_fs *fs, int *err) {
+  if (fs->ncache < fs->cache_cap) {
+    /* Always the largest block size: buffers outlive a mount (they are
+       never freed) and a later mount may use a bigger block. */
+    uint8_t *d = (uint8_t *)fs->alloc_buf(4096);
+    if (d) {
+      int32_t slot = (int32_t)fs->ncache++;
+      struct ext2_cbuf *c = &fs->cache[slot];
+      c->data = d;
+      c->valid = 0;
+      c->dirty = 0;
+      c->pin = 0;
+      c->pre = 0;
+      c->hnext = -1;
+      return slot;
+    }
+  }
+  int32_t slot = clock_victim(fs);
+  if (slot < 0 && writeback_evictable(fs) > 0) slot = clock_victim(fs);
+  if (slot < 0 && !fs->in_commit) {
+    /* Only commit-class blocks are dirty: commit inside the operation (the
+       old write-through behaviour, now the exception). */
+    fs->st_midop++;
+    if (ext2_commit(fs) != 0) {
+      *err = -EIO;
+      return -1;
+    }
+    slot = clock_victim(fs);
+  }
+  if (slot < 0) {
+    *err = -ENOMEM;
+    return -1;
+  }
+  struct ext2_cbuf *v = &fs->cache[slot];
+  if (v->valid) {
+    hash_remove(fs, slot);
+    mark_clean(fs, v);
+    v->valid = 0;
+  }
+  return slot;
+}
+
+static void slot_publish(struct ext2_fs *fs, int32_t slot, uint32_t blk) {
+  struct ext2_cbuf *c = &fs->cache[slot];
+  c->blk = blk;
+  c->valid = 1;
+  c->dirty = 0;
+  c->kind = K_OTHER;
+  c->aux = 0;
+  c->ref = 1;
+  c->pin = 1;
+  c->pre = 0;
+  uint32_t h = hidx(blk);
+  c->hnext = fs->hash[h];
+  fs->hash[h] = slot;
+}
+
 /* Get a pinned buffer for `blk`.  NULL with *err on failure. */
 static struct ext2_cbuf *bget(struct ext2_fs *fs, uint32_t blk, int how,
                               int *err) {
@@ -187,72 +391,24 @@ static struct ext2_cbuf *bget(struct ext2_fs *fs, uint32_t blk, int how,
   if (c) {
     fs->st_hits++;
     c->pin++;
-    c->age = ++fs->clock;
+    c->ref = 1;
     if (how & BG_ZERO) {
       memset(c->data, 0, fs->bs);
-      c->dirty = 1;
+      mark_dirty(fs, c);
     }
     return c;
   }
-  int32_t slot = -1;
-  if (fs->ncache < fs->cache_cap) {
-    /* Always the largest block size: buffers outlive a mount (they are
-       never freed) and a later mount may use a bigger block. */
-    uint8_t *d = (uint8_t *)fs->alloc_buf(4096);
-    if (d) {
-      slot = (int32_t)fs->ncache++;
-      fs->cache[slot].data = d;
-      fs->cache[slot].valid = 0;
-      fs->cache[slot].dirty = 0;
-      fs->cache[slot].pin = 0;
-      fs->cache[slot].hnext = -1;
-    }
-  }
-  if (slot < 0) {
-    /* Evict the least recently used unpinned slot (an invalid one first). */
-    uint32_t best_age = 0xFFFFFFFFu;
-    for (uint32_t i = 0; i < fs->ncache; i++) {
-      struct ext2_cbuf *v = &fs->cache[i];
-      if (v->pin) continue;
-      if (!v->valid) {
-        slot = (int32_t)i;
-        break;
-      }
-      if (v->age < best_age) {
-        best_age = v->age;
-        slot = (int32_t)i;
-      }
-    }
-    if (slot < 0) {
-      *err = -ENOMEM;
-      return 0;
-    }
-    struct ext2_cbuf *v = &fs->cache[slot];
-    if (v->valid) {
-      if (v->dirty && dev_wr(fs, v->blk, v->data) != 0) {
-        *err = -EIO;
-        return 0;
-      }
-      hash_remove(fs, slot);
-      v->valid = 0;
-      v->dirty = 0;
-    }
-  }
+  int32_t slot = free_slot(fs, err);
+  if (slot < 0) return 0;
   c = &fs->cache[slot];
   if (how & BG_ZERO) {
     memset(c->data, 0, fs->bs);
-  } else if (dev_rd(fs, blk, c->data) != 0) {
+  } else if (!(how & BG_NOREAD) && dev_rd(fs, blk, c->data) != 0) {
     *err = -EIO;
     return 0;
   }
-  c->blk = blk;
-  c->valid = 1;
-  c->dirty = (how & BG_ZERO) ? 1 : 0;
-  c->pin = 1;
-  c->age = ++fs->clock;
-  uint32_t h = hidx(blk);
-  c->hnext = fs->hash[h];
-  fs->hash[h] = slot;
+  slot_publish(fs, slot, blk);
+  if (how & BG_ZERO) mark_dirty(fs, c);
   return c;
 }
 
@@ -260,18 +416,89 @@ static void brelse(struct ext2_cbuf *c) {
   if (c && c->pin) c->pin--;
 }
 
-static void bdirty(struct ext2_cbuf *c) { c->dirty = 1; }
-
 /* A freed block's cached copy must never be written back over its next
  * owner's data. */
 static void binval(struct ext2_fs *fs, uint32_t blk) {
   struct ext2_cbuf *c = cache_find(fs, blk);
   if (!c) return;
   int32_t slot = (int32_t)(c - fs->cache);
-  c->dirty = 0;
+  mark_clean(fs, c);
   if (c->pin) return; /* still referenced: becomes clean garbage, evicted later */
   hash_remove(fs, slot);
   c->valid = 0;
+}
+
+/* ---- sorted runs -------------------------------------------------------- */
+
+/* Heap sort of slot indices by block number. */
+static void sort_slots(struct ext2_fs *fs, uint32_t *v, uint32_t n) {
+  if (n < 2) return;
+  for (uint32_t s = n / 2; s-- > 0;) {
+    uint32_t r = s;
+    for (;;) {
+      uint32_t ch = 2 * r + 1;
+      if (ch >= n) break;
+      if (ch + 1 < n && fs->cache[v[ch + 1]].blk > fs->cache[v[ch]].blk) ch++;
+      if (fs->cache[v[r]].blk >= fs->cache[v[ch]].blk) break;
+      uint32_t t = v[r];
+      v[r] = v[ch];
+      v[ch] = t;
+      r = ch;
+    }
+  }
+  for (uint32_t end = n - 1; end > 0; end--) {
+    uint32_t t = v[0];
+    v[0] = v[end];
+    v[end] = t;
+    uint32_t r = 0;
+    for (;;) {
+      uint32_t ch = 2 * r + 1;
+      if (ch >= end) break;
+      if (ch + 1 < end && fs->cache[v[ch + 1]].blk > fs->cache[v[ch]].blk) ch++;
+      if (fs->cache[v[r]].blk >= fs->cache[v[ch]].blk) break;
+      t = v[r];
+      v[r] = v[ch];
+      v[ch] = t;
+      r = ch;
+    }
+  }
+}
+
+/* Write slots v[0..n) (sorted) in runs of consecutive blocks; `pre` selects
+ * each buffer's pre-image instead of its data. */
+static int write_runs(struct ext2_fs *fs, const uint32_t *v, uint32_t n,
+                      int pre) {
+  void *bufs[EXT2_RUN_MAX];
+  uint32_t i = 0;
+  while (i < n) {
+    struct ext2_cbuf *c0 = &fs->cache[v[i]];
+    uint32_t k = 0;
+    while (i + k < n && k < EXT2_RUN_MAX) {
+      struct ext2_cbuf *c = &fs->cache[v[i + k]];
+      if (c->blk != c0->blk + k) break;
+      bufs[k] = (pre && c->pre) ? c->pre : c->data;
+      k++;
+    }
+    if (dev_run(fs, c0->blk, bufs, k, 1) != 0) return -EIO;
+    i += k;
+  }
+  return 0;
+}
+
+/* Write back every unpinned dirty buffer that may go early (K_DATA, NEW), in
+ * runs.  Returns how many became clean (eviction found nothing clean). */
+static int writeback_evictable(struct ext2_fs *fs) {
+  uint32_t n = 0;
+  for (uint32_t i = 0; i < fs->ncache; i++) {
+    struct ext2_cbuf *c = &fs->cache[i];
+    if (c->valid && c->dirty && !c->pin && early_ok(fs, c)) fs->ordv2[n++] = i;
+  }
+  if (n == 0) return 0;
+  fs->st_evict_wb++;
+  sort_slots(fs, fs->ordv2, n);
+  if (write_runs(fs, fs->ordv2, n, 0) != 0) return 0;
+  for (uint32_t k = 0; k < n; k++) mark_clean(fs, &fs->cache[fs->ordv2[k]]);
+  return (int)n;
 }
 
 /* ======================================================================== */
@@ -321,10 +548,10 @@ static int gd_adjust(struct ext2_fs *fs, uint32_t g, int dfb, int dfi,
   struct ext2_cbuf *c = bget(fs, blk, BG_READ, &err);
   if (!c) return err;
   uint8_t *p = c->data + off;
+  bmod(fs, c, K_GDT, 0);
   wr16(p + 12, (uint32_t)((int)rd16(p + 12) + dfb));
   wr16(p + 14, (uint32_t)((int)rd16(p + 14) + dfi));
   wr16(p + 16, (uint32_t)((int)rd16(p + 16) + ddirs));
-  bdirty(c);
   brelse(c);
   return 0;
 }
@@ -335,20 +562,35 @@ static uint32_t group_nblocks(const struct ext2_fs *fs, uint32_t g) {
   return left < fs->bpg ? left : fs->bpg;
 }
 
-/* First zero bit at or after `start` in [0, nbits); -1 when none. */
-static int64_t find_zero(const uint8_t *bm, uint32_t nbits, uint32_t start) {
+/* First bit at or after `start` in [0, nbits) that is zero in `bm` and, when
+ * `pre` is given (the committed image, cp/ext2w), zero there too: a block or
+ * inode freed since the last commit is still referenced on disk, so it is not
+ * reused before the next commit.  -1 when none. */
+static int64_t find_zero(const uint8_t *bm, const uint8_t *pre, uint32_t nbits,
+                         uint32_t start) {
   for (uint32_t i = start; i < nbits;) {
-    if ((i & 7) == 0 && bm[i >> 3] == 0xFF) {
+    uint8_t m = bm[i >> 3] | (pre ? pre[i >> 3] : 0);
+    if ((i & 7) == 0 && m == 0xFF) {
       i += 8;
       continue;
     }
-    if (!(bm[i >> 3] & (1u << (i & 7)))) return i;
+    if (!(m & (1u << (i & 7)))) return i;
     i++;
   }
   return -1;
 }
 
-static int balloc(struct ext2_fs *fs, uint32_t goal, uint32_t *out) {
+/* Bits freed since the last commit exist (an allocation that found nothing
+ * may succeed after a commit). */
+static int pending_frees(struct ext2_fs *fs, int inode) {
+  for (uint32_t i = 0; i < fs->ncache; i++) {
+    struct ext2_cbuf *c = &fs->cache[i];
+    if (c->valid && c->pre && c->kind == (inode ? K_IBM : K_BBM)) return 1;
+  }
+  return 0;
+}
+
+static int balloc1(struct ext2_fs *fs, uint32_t goal, uint32_t *out) {
   if (fs->free_blocks == 0) return -ENOSPC;
   uint32_t g0 = 0, bit0 = 0;
   if (goal >= fs->first_data_block && goal < fs->blocks_count) {
@@ -365,8 +607,8 @@ static int balloc(struct ext2_fs *fs, uint32_t goal, uint32_t *out) {
     struct ext2_cbuf *c = bget(fs, v.bbitmap, BG_READ, &err);
     if (!c) return err;
     uint32_t start = (i == 0) ? bit0 : 0;
-    int64_t bit = find_zero(c->data, nbits, start);
-    if (bit < 0 && start) bit = find_zero(c->data, nbits, 0);
+    int64_t bit = find_zero(c->data, c->pre, nbits, start);
+    if (bit < 0 && start) bit = find_zero(c->data, c->pre, nbits, 0);
     if (bit < 0) {
       brelse(c);
       continue; /* descriptor count disagrees with its bitmap: next group */
@@ -378,8 +620,8 @@ static int balloc(struct ext2_fs *fs, uint32_t goal, uint32_t *out) {
       brelse(c);
       return corrupt(fs);
     }
+    bmod(fs, c, K_BBM, g);
     c->data[bit >> 3] |= (uint8_t)(1u << (bit & 7));
-    bdirty(c);
     brelse(c);
     err = gd_adjust(fs, g, -1, 0, 0);
     if (err) return err;
@@ -390,6 +632,16 @@ static int balloc(struct ext2_fs *fs, uint32_t goal, uint32_t *out) {
     return 0;
   }
   return -ENOSPC;
+}
+
+static int balloc(struct ext2_fs *fs, uint32_t goal, uint32_t *out) {
+  int rc = balloc1(fs, goal, out);
+  if (rc == -ENOSPC && !fs->in_commit && pending_frees(fs, 0)) {
+    fs->st_midop++;
+    if (ext2_commit(fs) != 0) return -EIO;
+    rc = balloc1(fs, goal, out);
+  }
+  return rc;
 }
 
 static int bfree(struct ext2_fs *fs, uint32_t blk) {
@@ -405,8 +657,8 @@ static int bfree(struct ext2_fs *fs, uint32_t blk) {
     brelse(c);
     return corrupt(fs); /* double free: the tree pointed at a free block */
   }
+  bmod(fs, c, K_BBM, g);
   c->data[bit >> 3] &= (uint8_t)~(1u << (bit & 7));
-  bdirty(c);
   brelse(c);
   binval(fs, blk);
   err = gd_adjust(fs, g, 1, 0, 0);
@@ -416,8 +668,8 @@ static int bfree(struct ext2_fs *fs, uint32_t blk) {
   return 0;
 }
 
-static int ialloc(struct ext2_fs *fs, uint32_t pgroup, int is_dir,
-                  uint32_t *out) {
+static int ialloc1(struct ext2_fs *fs, uint32_t pgroup, int is_dir,
+                   uint32_t *out) {
   if (fs->free_inodes == 0) return -ENOSPC;
   uint32_t start = pgroup < fs->groups ? pgroup : 0;
   if (is_dir) {
@@ -447,13 +699,13 @@ static int ialloc(struct ext2_fs *fs, uint32_t pgroup, int is_dir,
     if (minbit >= fs->ipg) continue;
     struct ext2_cbuf *c = bget(fs, v.ibitmap, BG_READ, &err);
     if (!c) return err;
-    int64_t bit = find_zero(c->data, fs->ipg, minbit);
+    int64_t bit = find_zero(c->data, c->pre, fs->ipg, minbit);
     if (bit < 0) {
       brelse(c);
       continue;
     }
+    bmod(fs, c, K_IBM, g);
     c->data[bit >> 3] |= (uint8_t)(1u << (bit & 7));
-    bdirty(c);
     brelse(c);
     err = gd_adjust(fs, g, 0, -1, is_dir ? 1 : 0);
     if (err) return err;
@@ -463,6 +715,17 @@ static int ialloc(struct ext2_fs *fs, uint32_t pgroup, int is_dir,
     return 0;
   }
   return -ENOSPC;
+}
+
+static int ialloc(struct ext2_fs *fs, uint32_t pgroup, int is_dir,
+                  uint32_t *out) {
+  int rc = ialloc1(fs, pgroup, is_dir, out);
+  if (rc == -ENOSPC && !fs->in_commit && pending_frees(fs, 1)) {
+    fs->st_midop++;
+    if (ext2_commit(fs) != 0) return -EIO;
+    rc = ialloc1(fs, pgroup, is_dir, out);
+  }
+  return rc;
 }
 
 static int ifree_bitmap(struct ext2_fs *fs, uint32_t ino, int is_dir) {
@@ -477,8 +740,8 @@ static int ifree_bitmap(struct ext2_fs *fs, uint32_t ino, int is_dir) {
     brelse(c);
     return corrupt(fs);
   }
+  bmod(fs, c, K_IBM, g);
   c->data[bit >> 3] &= (uint8_t)~(1u << (bit & 7));
-  bdirty(c);
   brelse(c);
   err = gd_adjust(fs, g, 0, 1, is_dir ? -1 : 0);
   if (err) return err;
@@ -547,6 +810,7 @@ static int iwrite(struct ext2_fs *fs, uint32_t ino, const struct e2i *in) {
   struct ext2_cbuf *c = bget(fs, blk, BG_READ, &err);
   if (!c) return err;
   uint8_t *p = c->data + off;
+  bmod(fs, c, K_ITAB, ino - off / fs->inode_size);
   wr16(p + 0, in->mode);
   wr16(p + 2, in->uid & 0xFFFF);
   wr16(p + 120, in->uid >> 16);
@@ -563,7 +827,6 @@ static int iwrite(struct ext2_fs *fs, uint32_t ino, const struct e2i *in) {
   for (int i = 0; i < 15; i++) wr32(p + 40 + 4 * i, in->block[i]);
   wr32(p + 104, in->file_acl);
   if (S_ISREG_(in->mode)) wr32(p + 108, (uint32_t)(in->size >> 32));
-  bdirty(c);
   brelse(c);
   return 0;
 }
@@ -575,8 +838,8 @@ static int izero(struct ext2_fs *fs, uint32_t ino) {
   if (err) return err;
   struct ext2_cbuf *c = bget(fs, blk, BG_READ, &err);
   if (!c) return err;
+  bmod(fs, c, K_ITAB, ino - off / fs->inode_size);
   memset(c->data + off, 0, fs->inode_size);
-  bdirty(c);
   brelse(c);
   return 0;
 }
@@ -675,7 +938,7 @@ static int bmap(struct ext2_fs *fs, struct e2i *in, uint32_t ino,
         return err;
       }
       wr32(e, nxt);
-      bdirty(c);
+      bmod(fs, c, K_OTHER, 0);
       in->blocks += fs->spb;
       *idirty = 1;
       if (level < depth - 1) {
@@ -765,7 +1028,7 @@ static int trunc_tree(struct ext2_fs *fs, uint32_t *ptr, int depth,
     if (r && !rc) rc = r;
     if (nc != ch) {
       wr32(c->data + 4 * i, nc);
-      bdirty(c);
+      bmod(fs, c, K_OTHER, 0);
     }
     if (nc) any = 1;
   }
@@ -815,8 +1078,8 @@ static int zero_tail(struct ext2_fs *fs, struct e2i *in, uint32_t ino,
   if (err || !pblk) return err;
   struct ext2_cbuf *c = bget(fs, pblk, BG_READ, &err);
   if (!c) return err;
+  bmod(fs, c, K_DATA, 0);
   memset(c->data + boff, 0, fs->bs - boff);
-  bdirty(c);
   brelse(c);
   return 0;
 }
@@ -837,7 +1100,7 @@ static int free_xattr(struct ext2_fs *fs, struct e2i *in) {
   uint32_t refs = rd32(c->data + 4);
   if (refs > 1) {
     wr32(c->data + 4, refs - 1);
-    bdirty(c);
+    bmod(fs, c, K_OTHER, 0);
     brelse(c);
     return 0;
   }
@@ -895,6 +1158,47 @@ int ext2_file_size(struct ext2_fs *fs, uint32_t ino, uint64_t *size) {
   return 0;
 }
 
+/* cp/ext2w: blocks read ahead into the cache after a sequential miss. */
+#define EXT2_RA_BLOCKS 32
+
+/* Read ahead: logical blocks [lblk, lblk + n) of the file, while they are
+ * allocated, physically consecutive and not cached, into cache slots in one
+ * device call.  Best effort (an error just stops the read-ahead). */
+static void read_ahead(struct ext2_fs *fs, struct e2i *in, uint32_t ino,
+                       uint64_t lblk, uint32_t n) {
+  void *bufs[EXT2_RA_BLOCKS];
+  struct ext2_cbuf *cs[EXT2_RA_BLOCKS];
+  uint32_t first = 0, k = 0;
+  if (n > EXT2_RA_BLOCKS) n = EXT2_RA_BLOCKS;
+  while (k < n) {
+    uint32_t pblk;
+    int fresh, idirty = 0;
+    if (bmap(fs, in, ino, lblk + k, 0, &pblk, &fresh, &idirty) || !pblk) break;
+    if (k == 0) first = pblk;
+    else if (pblk != first + k) break;
+    if (cache_find(fs, pblk)) break;
+    int err;
+    struct ext2_cbuf *c = bget(fs, pblk, BG_NOREAD, &err);
+    if (!c) break;
+    c->valid = 0; /* not readable until the device call below lands */
+    cs[k] = c;
+    bufs[k] = c->data;
+    k++;
+  }
+  if (k == 0) return;
+  int rc = dev_run(fs, first, bufs, k, 0);
+  for (uint32_t i = 0; i < k; i++) {
+    brelse(cs[i]);
+    if (rc == 0) {
+      cs[i]->valid = 1;
+      cs[i]->ref = 0; /* read-ahead: first in line for eviction until used */
+    } else {
+      hash_remove(fs, (int32_t)(cs[i] - fs->cache)); /* still invalid */
+    }
+  }
+  if (rc == 0) fs->st_ra += k;
+}
+
 int64_t ext2_read(struct ext2_fs *fs, uint32_t ino, uint64_t off, void *buf,
                   uint64_t len) {
   struct e2i in;
@@ -906,6 +1210,7 @@ int64_t ext2_read(struct ext2_fs *fs, uint32_t ino, uint64_t off, void *buf,
   if (len > in.size - off) len = in.size - off;
   uint8_t *dst = (uint8_t *)buf;
   uint64_t done = 0;
+  uint64_t last_lblk = (in.size - 1) >> fs->log_bs;
   while (done < len) {
     uint64_t pos = off + done;
     uint64_t lblk = pos >> fs->log_bs;
@@ -919,12 +1224,42 @@ int64_t ext2_read(struct ext2_fs *fs, uint32_t ino, uint64_t off, void *buf,
     if (!pblk) {
       memset(dst + done, 0, (size_t)n);
     } else if (boff == 0 && n == fs->bs && !cache_find(fs, pblk)) {
-      if (dev_rd(fs, pblk, dst + done) != 0) return done ? (int64_t)done : -EIO;
+      /* cp/ext2w: whole uncached blocks go straight into the caller's buffer,
+         a run of physically consecutive ones in one device call */
+      void *bufs[EXT2_RUN_MAX];
+      uint32_t k = 1;
+      bufs[0] = dst + done;
+      while (k < EXT2_RUN_MAX && done + (uint64_t)(k + 1) * fs->bs <= len) {
+        uint32_t nb;
+        int fr, id2 = 0;
+        if (bmap(fs, &in, ino, lblk + k, 0, &nb, &fr, &id2) || nb != pblk + k ||
+            cache_find(fs, nb))
+          break;
+        bufs[k] = dst + done + (uint64_t)k * fs->bs;
+        k++;
+      }
+      if (dev_run(fs, pblk, bufs, k, 0) != 0) return done ? (int64_t)done : -EIO;
+      n = (uint64_t)k * fs->bs;
+      int seq = fs->ra_ino == ino && fs->ra_next == lblk;
+      fs->ra_ino = ino;
+      fs->ra_next = lblk + k;
+      uint64_t nx = lblk + k;
+      if (seq && done + n >= len && nx <= last_lblk)
+        read_ahead(fs, &in, ino, nx,
+                   (uint32_t)(last_lblk - nx + 1 < EXT2_RA_BLOCKS ? last_lblk - nx + 1
+                                                                  : EXT2_RA_BLOCKS));
     } else {
+      int seq = !cache_find(fs, pblk) && fs->ra_ino == ino && fs->ra_next == lblk;
       struct ext2_cbuf *c = bget(fs, pblk, BG_READ, &err);
       if (!c) return done ? (int64_t)done : err;
       memcpy(dst + done, c->data + boff, (size_t)n);
       brelse(c);
+      fs->ra_ino = ino;
+      fs->ra_next = lblk + 1;
+      if (seq && lblk < last_lblk)
+        read_ahead(fs, &in, ino, lblk + 1,
+                   (uint32_t)(last_lblk - lblk < EXT2_RA_BLOCKS ? last_lblk - lblk
+                                                                : EXT2_RA_BLOCKS));
     }
     done += n;
   }
@@ -969,20 +1304,14 @@ int64_t ext2_write(struct ext2_fs *fs, uint32_t ino, uint64_t off,
     int fresh;
     rc = bmap(fs, &in, ino, lblk, 1, &pblk, &fresh, &idirty);
     if (rc) break;
-    if (boff == 0 && n == fs->bs) {
-      struct ext2_cbuf *c = cache_find(fs, pblk);
-      if (c) {
-        memcpy(c->data, src + done, fs->bs);
-        bdirty(c);
-      } else if (dev_wr(fs, pblk, src + done) != 0) {
-        rc = -EIO;
-        break;
-      }
-    } else {
-      struct ext2_cbuf *c = bget(fs, pblk, fresh ? BG_ZERO : BG_READ, &rc);
+    {
+      /* cp/ext2w: into the cache (write-back); a whole block is never read */
+      int how = (boff == 0 && n == fs->bs) ? BG_NOREAD
+                                           : (fresh ? BG_ZERO : BG_READ);
+      struct ext2_cbuf *c = bget(fs, pblk, how, &rc);
       if (!c) break;
+      bmod(fs, c, K_DATA, 0);
       memcpy(c->data + boff, src + done, (size_t)n);
-      bdirty(c);
       brelse(c);
     }
     done += n;
@@ -1170,7 +1499,7 @@ static int dir_add(struct ext2_fs *fs, uint32_t dino, const char *name,
         } else {
           dent_put(fs, c->data + off, ino, d.rec_len, name, len, ftype);
         }
-        bdirty(c);
+        bmod(fs, c, K_OTHER, 0);
         brelse(c);
         dir_touch(fs, &din);
         return iwrite(fs, dino, &din);
@@ -1191,7 +1520,7 @@ static int dir_add(struct ext2_fs *fs, uint32_t dino, const char *name,
   struct ext2_cbuf *c = bget(fs, pblk, BG_ZERO, &err);
   if (!c) return err;
   dent_put(fs, c->data, ino, fs->bs, name, len, ftype);
-  bdirty(c);
+  bmod(fs, c, K_OTHER, 0);
   brelse(c);
   din.size += fs->bs;
   dir_touch(fs, &din);
@@ -1215,7 +1544,7 @@ static int dir_remove(struct ext2_fs *fs, uint32_t dino,
   } else {
     wr32(c->data + loc->off, 0);
   }
-  bdirty(c);
+  bmod(fs, c, K_OTHER, 0);
   brelse(c);
   struct e2i din;
   err = dir_inode(fs, dino, &din);
@@ -1232,7 +1561,7 @@ static int dir_retarget(struct ext2_fs *fs, uint32_t dino,
   if (!c) return err;
   wr32(c->data + loc->off, ino);
   if (fs->filetype) c->data[loc->off + 7] = ftype;
-  bdirty(c);
+  bmod(fs, c, K_OTHER, 0);
   brelse(c);
   struct e2i din;
   err = dir_inode(fs, dino, &din);
@@ -1420,7 +1749,7 @@ int ext2_mkdir(struct ext2_fs *fs, uint32_t dir, const char *name, int len,
   }
   dent_put(fs, c->data, *ino, 12, ".", 1, EXT2_FT_DIR);
   dent_put(fs, c->data + 12, dir, fs->bs - 12, "..", 2, EXT2_FT_DIR);
-  bdirty(c);
+  bmod(fs, c, K_OTHER, 0);
   brelse(c);
   in.links = 2;
   in.size = fs->bs;
@@ -1437,7 +1766,12 @@ int ext2_mkdir(struct ext2_fs *fs, uint32_t dir, const char *name, int len,
   err = dir_inode(fs, dir, &pin);
   if (err) return err;
   pin.links++;
-  return iwrite(fs, dir, &pin);
+  err = iwrite(fs, dir, &pin);
+  /* cp/ext2w: a new directory is committed by the mkdir that makes it, so a
+     batch never holds a new directory with entries inside it (the commit's
+     inode-table passes order one level of new directory, not a chain). */
+  if (!err && !fs->in_commit) err = ext2_commit(fs);
+  return err;
 }
 
 int ext2_symlink(struct ext2_fs *fs, uint32_t dir, const char *name, int len,
@@ -1469,7 +1803,7 @@ int ext2_symlink(struct ext2_fs *fs, uint32_t dir, const char *name, int len,
       return err;
     }
     for (int i = 0; i < tlen; i++) c->data[i] = (uint8_t)target[i];
-    bdirty(c);
+    bmod(fs, c, K_DATA, 0);
     brelse(c);
     in.block[0] = blk;
     in.blocks = fs->spb;
@@ -1629,7 +1963,7 @@ static int set_dotdot(struct ext2_fs *fs, uint32_t dino, uint32_t parent) {
   struct ext2_cbuf *c = bget(fs, loc.pblk, BG_READ, &err2);
   if (!c) return err2;
   wr32(c->data + loc.off, parent);
-  bdirty(c);
+  bmod(fs, c, K_OTHER, 0);
   brelse(c);
   return 0;
 }
@@ -1888,18 +2222,225 @@ int ext2_iput(struct ext2_fs *fs, uint32_t ino) {
   return -EINVAL;
 }
 
-int ext2_flush(struct ext2_fs *fs) {
-  int rc = 0;
+/* ---- cp/ext2w: the ordered commit (docs/cp-ext2w.md section 2) --------- */
+
+/* Phase classes (cbuf.ph) and the order they are written in. */
+#define PH_EARLY 1 /* file data; any block allocated since the last commit */
+#define PH_BM 2    /* bitmaps: committed | current (allocations only) */
+#define PH_IT 3    /* inode tables (written up to three times, see below) */
+#define PH_META 4  /* existing directory / indirect / xattr blocks */
+#define PH_GDT 5   /* group descriptors (with the final bitmaps) */
+
+/* cbuf.two flags, computed per commit */
+#define F_FREED 1  /* an inode in the block was freed since the last commit */
+#define F_LINK 2   /* a live inode's link count dropped */
+#define F_DIR 4    /* a directory inode in the block changed */
+#define F_BMFREE 8 /* a bitmap lost bits (frees) */
+
+/* Images a buffer is written with. */
+#define IMG_CUR 0  /* the cached state */
+#define IMG_BMU 1  /* bitmap: committed | current */
+#define IMG_H1 2   /* inode table: freed inodes, link drops AND directories held */
+#define IMG_H2 3   /* inode table: freed inodes and link drops held */
+#define IMG_H3 4   /* inode table: link drops held (the frees land) */
+
+static int bytes_differ(const uint8_t *a, const uint8_t *b, uint32_t n) {
+  for (uint32_t i = 0; i < n; i++)
+    if (a[i] != b[i]) return 1;
+  return 0;
+}
+
+static int itab_slot_freed(struct ext2_fs *fs, struct ext2_cbuf *ib,
+                           uint32_t ino) {
+  if (!ib || !ib->pre || ino < 1 || ino > fs->inodes_count) return 0;
+  uint32_t bit = (ino - 1) % fs->ipg;
+  uint8_t m = (uint8_t)(1u << (bit & 7));
+  return (ib->pre[bit >> 3] & m) && !(ib->data[bit >> 3] & m);
+}
+
+static struct ext2_cbuf *itab_ibm(struct ext2_fs *fs, struct ext2_cbuf *c) {
+  if (c->aux < 1 || c->aux > fs->inodes_count) return 0;
+  return bbm_cached(fs, (c->aux - 1) / fs->ipg, 1);
+}
+
+/* Which held-back images of an inode-table block differ from its current
+ * state (the F_* flags). */
+static uint8_t itab_flags(struct ext2_fs *fs, struct ext2_cbuf *c) {
+  if (!c->pre || c->aux < 1 || c->aux > fs->inodes_count) return 0;
+  uint32_t isz = fs->inode_size, per = fs->bs / isz;
+  struct ext2_cbuf *ib = itab_ibm(fs, c);
+  uint8_t f = 0;
+  for (uint32_t k = 0; k < per; k++) {
+    const uint8_t *cur = c->data + k * isz, *old = c->pre + k * isz;
+    if (!bytes_differ(cur, old, isz)) continue;
+    if (itab_slot_freed(fs, ib, c->aux + k)) {
+      f |= F_FREED;
+      continue;
+    }
+    if (rd16(old) && rd16(cur + 26) < rd16(old + 26)) f |= F_LINK;
+    if (S_ISDIR_(rd16(cur)) || S_ISDIR_(rd16(old))) f |= F_DIR;
+  }
+  return f;
+}
+
+/* Build an image of `c` into dst. */
+static void make_img(struct ext2_fs *fs, struct ext2_cbuf *c, int img,
+                     uint8_t *dst) {
+  if (img == IMG_BMU) {
+    for (uint32_t i = 0; i < fs->bs; i++)
+      dst[i] = (uint8_t)(c->pre[i] | c->data[i]);
+    return;
+  }
+  memcpy(dst, c->data, fs->bs);
+  if (img != IMG_H1 && img != IMG_H2 && img != IMG_H3) return;
+  uint32_t isz = fs->inode_size, per = fs->bs / isz;
+  struct ext2_cbuf *ib = itab_ibm(fs, c);
+  for (uint32_t k = 0; k < per; k++) {
+    uint8_t *d = dst + k * isz;
+    const uint8_t *old = c->pre + k * isz;
+    if (itab_slot_freed(fs, ib, c->aux + k)) {
+      if (img != IMG_H3) memcpy(d, old, isz); /* an entry may still name it */
+      continue;
+    }
+    if (img == IMG_H1 && (S_ISDIR_(rd16(d)) || S_ISDIR_(rd16(old)))) {
+      memcpy(d, old, isz); /* directories go after the inodes they name */
+      continue;
+    }
+    if (rd16(old) && rd16(d + 26) < rd16(old + 26))
+      wr16(d + 26, rd16(old + 26)); /* links drop after the entry goes */
+  }
+}
+
+/* Write slots v[0..n) (sorted by block) in runs, each with image img[k]. */
+static int write_imgs(struct ext2_fs *fs, const uint32_t *v, const uint8_t *img,
+                      uint32_t n) {
+  void *bufs[EXT2_RUN_MAX];
+  uint32_t i = 0;
+  while (i < n) {
+    struct ext2_cbuf *c0 = &fs->cache[v[i]];
+    uint32_t k = 0, sc = 0;
+    while (i + k < n && k < EXT2_RUN_MAX) {
+      struct ext2_cbuf *c = &fs->cache[v[i + k]];
+      if (c->blk != c0->blk + k) break;
+      if (img[i + k] != IMG_CUR && c->pre) {
+        if (sc == fs->nscratch) {
+          uint8_t *b = (uint8_t *)fs->alloc_buf(4096);
+          if (!b) break; /* run ends here; the next one reuses scratch */
+          fs->scratch[fs->nscratch++] = b;
+        }
+        make_img(fs, c, img[i + k], fs->scratch[sc]);
+        bufs[k] = fs->scratch[sc++];
+      } else {
+        bufs[k] = c->data;
+      }
+      k++;
+    }
+    if (k == 0) return -EIO; /* no scratch memory at all */
+    if (dev_run(fs, c0->blk, bufs, k, 1) != 0) return -EIO;
+    i += k;
+  }
+  return 0;
+}
+
+/* The image `c` is written with in write pass `pass`, or -1 (not in it).
+ *   1 file data and every block allocated since the last commit
+ *   2 bitmaps as committed | current: the allocations, not the frees
+ *   3 inode tables with freed inodes, link-count drops and every changed
+ *     directory inode held at their committed records (the new non-directory
+ *     inodes land: the entries of pass 1's new directory blocks name them)
+ *   4 inode tables with the directories (their blocks and the inodes they
+ *     name are on the disk now); frees and link drops still held
+ *   5 existing directory / indirect / xattr blocks (new entries name inodes
+ *     passes 3-4 wrote; removed entries go before the frees)
+ *   6 inode tables with the frees (a removed directory's '..' stops
+ *     counting), link drops still held
+ *   7 inode tables final (the link drops)
+ *   8 bitmaps final (the freed bits), group descriptors */
+static int pass_img(const struct ext2_cbuf *c, int pass) {
+  uint8_t f = c->two;
+  int held = (f & (F_FREED | F_LINK)) != 0;
+  switch (pass) {
+  case 1: return c->ph == PH_EARLY ? IMG_CUR : -1;
+  case 2:
+    if (c->ph != PH_BM) return -1;
+    return (f & F_BMFREE) ? IMG_BMU : IMG_CUR;
+  case 3:
+    if (c->ph != PH_IT) return -1;
+    return (f & F_DIR) ? IMG_H1 : held ? IMG_H2 : IMG_CUR;
+  case 4:
+    if (c->ph != PH_IT || !(f & F_DIR)) return -1;
+    return held ? IMG_H2 : IMG_CUR;
+  case 5: return c->ph == PH_META ? IMG_CUR : -1;
+  case 6:
+    if (c->ph != PH_IT || !(f & F_FREED)) return -1;
+    return (f & F_LINK) ? IMG_H3 : IMG_CUR;
+  case 7: return (c->ph == PH_IT && (f & F_LINK)) ? IMG_CUR : -1;
+  case 8:
+    if (c->ph == PH_GDT || (c->ph == PH_BM && (f & F_BMFREE))) return IMG_CUR;
+    return -1;
+  }
+  return -1;
+}
+
+static int commit_pass(struct ext2_fs *fs, uint32_t n, int pass) {
+  static uint8_t imgv[EXT2_CACHE_MAX];
+  uint32_t m = 0;
+  for (uint32_t k = 0; k < n; k++)
+    if (pass_img(&fs->cache[fs->ordv[k]], pass) >= 0) fs->ordv2[m++] = fs->ordv[k];
+  if (m == 0) return 0;
+  sort_slots(fs, fs->ordv2, m);
+  for (uint32_t k = 0; k < m; k++)
+    imgv[k] = (uint8_t)pass_img(&fs->cache[fs->ordv2[k]], pass);
+  return write_imgs(fs, fs->ordv2, imgv, m);
+}
+
+static int ext2_commit_sb(struct ext2_fs *fs, int sb_lazy);
+static int ext2_commit(struct ext2_fs *fs) { return ext2_commit_sb(fs, 0); }
+
+static int ext2_commit_sb(struct ext2_fs *fs, int sb_lazy) {
+  if (fs->in_commit) return 0;
+  uint32_t n = 0;
   for (uint32_t i = 0; i < fs->ncache; i++) {
     struct ext2_cbuf *c = &fs->cache[i];
-    if (c->valid && c->dirty) {
-      if (dev_wr(fs, c->blk, c->data) != 0)
-        rc = -EIO;
-      else
-        c->dirty = 0;
+    if (c->valid && c->dirty) fs->ordv[n++] = i;
+  }
+  int want_sb = fs->sb_dirty && !fs->ro &&
+                (!sb_lazy || fs->feat_ro != fs->feat_ro_disk);
+  if (n == 0 && !want_sb) return 0;
+  fs->in_commit = 1;
+  fs->st_commits++;
+  int rc = 0;
+  for (uint32_t k = 0; k < n; k++) {
+    struct ext2_cbuf *c = &fs->cache[fs->ordv[k]];
+    c->two = 0;
+    if (!fs->ordered) {
+      c->ph = c->kind == K_GDT ? PH_GDT : PH_META; /* plain block order */
+      continue;
+    }
+    switch (c->kind) {
+    case K_DATA: c->ph = PH_EARLY; break;
+    case K_BBM:
+    case K_IBM:
+      c->ph = PH_BM;
+      if (c->pre) {
+        for (uint32_t i = 0; i < fs->bs; i++)
+          if (c->pre[i] & ~c->data[i]) {
+            c->two = F_BMFREE;
+            break;
+          }
+      }
+      break;
+    case K_ITAB: c->ph = PH_IT; c->two = itab_flags(fs, c); break;
+    case K_GDT: c->ph = PH_GDT; break;
+    default: c->ph = blk_is_new(fs, c->blk) ? PH_EARLY : PH_META; break;
     }
   }
-  if (fs->sb_dirty && !fs->ro) {
+  for (int pass = 1; pass <= 8 && rc == 0; pass++) rc = commit_pass(fs, n, pass);
+  for (uint32_t k = 0; k < n; k++) {
+    struct ext2_cbuf *c = &fs->cache[fs->ordv[k]];
+    if (rc == 0) mark_clean(fs, c);
+  }
+  if (rc == 0 && want_sb) {
     uint8_t *s = fs->sb_raw;
     wr32(s + 12, fs->free_blocks);
     wr32(s + 16, fs->free_inodes);
@@ -1907,12 +2448,24 @@ int ext2_flush(struct ext2_fs *fs) {
     if (t) wr32(s + 48, t);
     wr32(s + 100, fs->feat_ro);
     fs->st_dev_writes++;
-    if (fs->dev.write(fs->dev.ctx, 2, s, 2) != 0)
+    fs->st_cmds++;
+    if (fs->dev.write(fs->dev.ctx, 2, s, 2) != 0) {
       rc = -EIO;
-    else
+    } else {
       fs->sb_dirty = 0;
+      fs->feat_ro_disk = fs->feat_ro;
+    }
   }
+  fs->in_commit = 0;
   return rc;
+}
+
+int ext2_flush(struct ext2_fs *fs) { return ext2_commit(fs); }
+int ext2_flush_file(struct ext2_fs *fs) { return ext2_commit_sb(fs, 1); }
+
+int ext2_writeback_early(struct ext2_fs *fs) {
+  if (fs->in_commit || fs->ro) return 0;
+  return writeback_evictable(fs);
 }
 
 int ext2_statfs(struct ext2_fs *fs, struct ext2_statfs *st) {
@@ -1941,13 +2494,22 @@ int ext2_mount(struct ext2_fs *fs, const struct ext2_dev *dev, int force_ro) {
   if (nkeep > fs->cache_cap) nkeep = fs->cache_cap;
   for (int i = 0; i < EXT2_HASH_N; i++) fs->hash[i] = -1;
   for (uint32_t i = 0; i < nkeep; i++) {
-    fs->cache[i].valid = 0;
-    fs->cache[i].dirty = 0;
-    fs->cache[i].pin = 0;
-    fs->cache[i].hnext = -1;
+    struct ext2_cbuf *c = &fs->cache[i];
+    pre_put(fs, c); /* a previous mount's pre-images go back to the pool */
+    c->valid = 0;
+    c->dirty = 0;
+    c->pin = 0;
+    c->hnext = -1;
+    c->kind = K_OTHER;
+    c->ref = 0;
   }
   fs->ncache = nkeep;
   fs->clock = 0;
+  fs->ndirty = 0;
+  fs->in_commit = 0;
+  fs->ordered = 0;
+  fs->ra_ino = 0;
+  fs->ra_next = 0;
   for (int i = 0; i < EXT2_OPEN_MAX; i++) {
     fs->open[i].ino = 0;
     fs->open[i].refs = 0;
@@ -1956,6 +2518,8 @@ int ext2_mount(struct ext2_fs *fs, const struct ext2_dev *dev, int force_ro) {
   fs->sb_dirty = 0;
   fs->alloc_hint = 0;
   fs->st_dev_reads = fs->st_dev_writes = fs->st_hits = 0;
+  fs->st_cmds = fs->st_commits = fs->st_midop = fs->st_evict_wb = 0;
+  fs->st_nopre = fs->st_ra = 0;
   if (!dev || !dev->read || !dev->write || !fs->alloc_buf) return -EINVAL;
   fs->dev = *dev;
   if (dev->nsectors < 4) return -EINVAL;
@@ -1989,6 +2553,7 @@ int ext2_mount(struct ext2_fs *fs, const struct ext2_dev *dev, int force_ro) {
     fs->feat_incompat = rd32(s + 96);
     fs->feat_ro = rd32(s + 100);
   }
+  fs->feat_ro_disk = fs->feat_ro;
   if (fs->feat_incompat & ~(uint32_t)EXT2_INCOMPAT_SUPP) return -ENOTSUP;
   fs->filetype = (fs->feat_incompat & EXT2_FEATURE_INCOMPAT_FILETYPE) != 0;
   fs->ro = force_ro || (fs->feat_ro & ~(uint32_t)EXT2_RO_COMPAT_SUPP) != 0;
@@ -2017,6 +2582,18 @@ int ext2_mount(struct ext2_fs *fs, const struct ext2_dev *dev, int force_ro) {
     struct gdv v;
     int err = gd_read(fs, g, &v);
     if (err) return err == -EIO && fs->corrupt ? -EINVAL : err;
+  }
+  /* cp/ext2w: the commit classifies blocks through the group descriptors
+     without I/O, so they stay cached (pinned) for the mount's lifetime.  A
+     table too large for that leaves the commit in plain block order. */
+  if (gdt_blocks <= fs->cache_cap / 4) {
+    for (uint32_t b = 0; b < (uint32_t)gdt_blocks; b++) {
+      int err;
+      struct ext2_cbuf *c = bget(fs, fs->gdt_block + b, BG_READ, &err);
+      if (!c) return err;
+      c->kind = K_GDT; /* stays pinned */
+    }
+    fs->ordered = 1;
   }
   struct e2i root;
   int err = iread(fs, EXT2_ROOT_INO, &root);

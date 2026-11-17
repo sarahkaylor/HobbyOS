@@ -1,0 +1,47 @@
+# C1-k5: linux_probe_fdscale on the UNCHANGED kernel (tree = cyberpunk @ 949ba008 + only the new probe source)
+# host: strix (Zen 5), guest: intel MODE=test, 8 vCPU KVM, 12 GiB, under tools/cp/qemu-slot.sh
+# cmd: LP_TIMEOUT=600 bash tools/cp/qemu-slot.sh bash tools/gate/t3_linux_probe.sh fdscale
+
+t3_linux_probe: building /home/sarah/cp/lanes/k5/obj/intel/probe_fdscale.elf
+=== t3_linux_probe: fdscale (deadline 600s, log /home/sarah/cp/lanes/k5/obj/linux_probe_fdscale.log) ===
+[LP] info F1 initial soft=256 hard=256
+[LP] info 3: hard 256 < 4096
+[LP] FAIL F1 rlimit status=0x100 hard 256 < 4096 (71 ms)
+[LP] info 4: open past soft: errno=0 after 201 opens (want EMFILE)
+[LP] FAIL F2 soft_limit status=0x100 open past soft: errno=0 after 201 opens (want EMFILE) (77 ms)
+[LP] info 6: child: pipe #125 failed errno=24
+[LP] info 5: parent: pipe #125 failed errno=24
+[LP] FAIL F3 pipes3000 status=0x100 parent: pipe #125 failed errno=24 (138 ms)
+[LP] info 7: poll: pipe #126 failed errno=24
+[LP] FAIL F4 poll2000 status=0x100 poll: pipe #126 failed errno=24 (67 ms)
+[LP] info 8: epoll: pipe #126 failed errno=24
+[LP] FAIL F5 epoll2000 status=0x100 epoll: pipe #126 failed errno=24 (69 ms)
+[LP] info 9: select: pipe #126 failed errno=24
+[LP] FAIL F6 select_big status=0x100 select: pipe #126 failed errno=24 (66 ms)
+[LP] info 10: eventfd #252 errno=24
+[LP] FAIL F7 fd_kinds status=0x100 eventfd #252 errno=24 (63 ms)
+[LP] info 11: dup2 -> 4000 errno=9
+[LP] FAIL F8 dup_high status=0x100 dup2 -> 4000 errno=9 (63 ms)
+[LP] info 12: spinning thread's RUSAGE_THREAD cpu=0 ms after 400 ms spin
+[LP] FAIL F9 rusage status=0x100 spinning thread's RUSAGE_THREAD cpu=0 ms after 400 ms spin (466 ms)
+[LP] info 14: thread 42 pipes errno=24
+[LP] FAIL F10 wine_shape status=0x100 thread 42 pipes errno=24 (117 ms)
+[LP] done rc=10
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+t3_linux_probe: FAIL — fdscale never printed '[LP] done rc=0' (tier rc=1)
+
+# same ELF on the strix Linux host (reference kernel), ulimit -Hn 524288:
+[LP] info F1 initial soft=1024 hard=524288
+[LP] PASS F1 rlimit (20 ms)
+[LP] PASS F2 soft_limit (20 ms)
+[LP] info F3 3000 pipes live, parent maxfd=4005
+[LP] PASS F3 pipes3000 (20 ms)
+[LP] PASS F4 poll2000 (164 ms)
+[LP] PASS F5 epoll2000 (164 ms)
+[LP] PASS F6 select_big (164 ms)
+[LP] PASS F7 fd_kinds (20 ms)
+[LP] PASS F8 dup_high (21 ms)
+[LP] info F9 spinner=398ms self=398ms child=400ms nvcsw=0->5
+[LP] PASS F9 rusage (856 ms)
+[LP] PASS F10 wine_shape (285 ms)
+[LP] done rc=0

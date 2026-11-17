@@ -880,17 +880,21 @@ static int l_proc_tgkill(struct process *p, struct trap_frame *tf) {
 #define L_RLIMIT_DATA 2
 #define L_RLIMIT_CORE 4
 
-/* Every limit this kernel can state truthfully.  RLIMIT_NOFILE is the fd
-   table (64, MAX_OPEN_FDS); RLIMIT_STACK is the 8 MiB demand-paged main stack
-   (vm.h USER_MAIN_STK_SIZE).  The two are hard limits, so cur == max.  A
-   resource the kernel does not model reads back as RLIM_INFINITY except
-   RLIMIT_CORE, which is genuinely 0 (no core dumps) — the alternative was
-   inventing numbers, and a program that sizes a buffer from a made-up
-   RLIMIT_NOFILE would fail somewhere unrelated. */
-static int l_rlimit_get(int resource, linux_rlimit_t *rl) {
+/* Every limit this kernel can state truthfully.  RLIMIT_NOFILE is real
+   (C1-k5, docs/cp-k5.md §2): a per-group soft/hard pair, hard <= the table
+   (MAX_OPEN_FDS), soft honoured by every fd-allocating path in fs.c.
+   RLIMIT_STACK is the 8 MiB demand-paged main stack (vm.h
+   USER_MAIN_STK_SIZE), a hard limit, so cur == max.  A resource the kernel
+   does not model reads back as RLIM_INFINITY except RLIMIT_CORE, which is
+   genuinely 0 (no core dumps) -- the alternative was inventing numbers. */
+static int l_rlimit_get(struct process *g, int resource, linux_rlimit_t *rl) {
   switch (resource) {
   case L_RLIMIT_NOFILE:
-    rl->rlim_cur = rl->rlim_max = (uint64_t)MAX_OPEN_FDS;
+    rl->rlim_cur = (uint64_t)process_fd_limit(g);
+    rl->rlim_max = (g && g->rlim_nofile_max) ? (uint64_t)g->rlim_nofile_max
+                                             : (uint64_t)MAX_OPEN_FDS;
+    if (rl->rlim_max > (uint64_t)MAX_OPEN_FDS) rl->rlim_max = (uint64_t)MAX_OPEN_FDS;
+    if (rl->rlim_cur > rl->rlim_max) rl->rlim_cur = rl->rlim_max;
     return 0;
   case L_RLIMIT_STACK:
     rl->rlim_cur = rl->rlim_max = (uint64_t)USER_MAIN_STK_SIZE;
@@ -912,21 +916,32 @@ static int l_rlimit_get(int resource, linux_rlimit_t *rl) {
   }
 }
 
-/* setrlimit is ACCEPTED and not enforced (nothing in the kernel enforces a
-   limit today; the fd table and stack are fixed).  Returning 0 keeps a program
-   that lowers its own soft limit working; returning EPERM would break a
-   perfectly reasonable caller for a limit it cannot observe. */
+/* setrlimit semantics (Linux do_prlimit): cur > max is -EINVAL.  Every compat
+   process is uid 0 (CAP_SYS_RESOURCE), so the hard limit may also be raised,
+   up to the table (Linux: sysctl nr_open; beyond it -EPERM).  RLIMIT_NOFILE
+   is stored on the group anchor; the other resources are validated and
+   accepted, not enforced (nothing in the kernel enforces them; refusing would
+   break a program that lowers its own soft limit). */
+static int l_rlimit_set(struct process *g, int resource, const linux_rlimit_t *nr) {
+  linux_rlimit_t cur;
+  int rc = l_rlimit_get(g, resource, &cur);
+  if (rc != 0) return rc;
+  if (nr->rlim_cur > nr->rlim_max) return -EINVAL;
+  if (resource != L_RLIMIT_NOFILE) return 0;
+  if (nr->rlim_max > (uint64_t)MAX_OPEN_FDS) return -EPERM;
+  if (!g) return -ESRCH;
+  g->rlim_nofile_max = (uint32_t)nr->rlim_max;
+  g->rlim_nofile_cur = (uint32_t)nr->rlim_cur;
+  return 0;
+}
+
 static int l_proc_setrlimit(struct process *p, struct trap_frame *tf) {
-  (void)p;
   int resource = (int)l_argi(tf, 0);
   uint64_t url = l_arg(tf, 1);
   if (!url) return l_ret(tf, -EFAULT);
   linux_rlimit_t rl;
   if (l_copy_from_user(p, &rl, url, sizeof rl) != 0) return l_ret(tf, -EFAULT);
-  linux_rlimit_t cur;
-  int rc = l_rlimit_get(resource, &cur);
-  if (rc != 0) return l_ret(tf, rc);
-  return l_ret(tf, 0);
+  return l_ret(tf, l_rlimit_set(process_group(p), resource, &rl));
 }
 
 static int l_proc_getrlimit(struct process *p, struct trap_frame *tf) {
@@ -934,37 +949,38 @@ static int l_proc_getrlimit(struct process *p, struct trap_frame *tf) {
   uint64_t url = l_arg(tf, 1);
   if (!url) return l_ret(tf, -EFAULT);
   linux_rlimit_t rl;
-  int rc = l_rlimit_get(resource, &rl);
+  int rc = l_rlimit_get(process_group(p), resource, &rl);
   if (rc != 0) return l_ret(tf, rc);
   if (l_copy_to_user(p, url, &rl, sizeof rl) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
 }
 
-/* prlimit64(pid, resource, new, old).  pid 0 or self only: cross-process limit
-   manipulation would need a permission model this kernel does not have, and
-   -EPERM is the honest answer for another live pid. */
+/* prlimit64(pid, resource, new, old).  pid 0, the caller, or any live process
+   (every compat process is uid 0: Linux's permission check passes).  old is
+   read before new is applied, as Linux does. */
 static int l_proc_prlimit64(struct process *p, struct trap_frame *tf) {
   int pid = (int)l_argi(tf, 0);
   int resource = (int)l_argi(tf, 1);
   uint64_t unew = l_arg(tf, 2);
   uint64_t uold = l_arg(tf, 3);
-  int self = p ? p->pid : -1;
-  if (pid != 0 && pid != self) {
-    struct process *t = process_get_pcb(pid);
+  struct process *t = p;
+  if (pid != 0 && !(p && (pid == p->pid || pid == process_group(p)->pid))) {
+    t = process_get_pcb(pid);
     if (!t || t->state == PROC_STATE_FREE || t->state == PROC_STATE_EXITED)
       return l_ret(tf, -ESRCH);
-    return l_ret(tf, -EPERM);
   }
+  struct process *g = process_group(t);
+  linux_rlimit_t nr;
+  if (unew && l_copy_from_user(p, &nr, unew, sizeof nr) != 0) return l_ret(tf, -EFAULT);
   linux_rlimit_t rl;
-  int rc = l_rlimit_get(resource, &rl);
+  int rc = l_rlimit_get(g, resource, &rl);
   if (rc != 0) return l_ret(tf, rc);
+  if (unew) {
+    rc = l_rlimit_set(g, resource, &nr);
+    if (rc != 0) return l_ret(tf, rc);
+  }
   if (uold) {
     if (l_copy_to_user(p, uold, &rl, sizeof rl) != 0) return l_ret(tf, -EFAULT);
-  }
-  if (unew) {
-    linux_rlimit_t nr;
-    if (l_copy_from_user(p, &nr, unew, sizeof nr) != 0) return l_ret(tf, -EFAULT);
-    /* accepted, not enforced — see l_proc_setrlimit */
   }
   return l_ret(tf, 0);
 }
@@ -1042,9 +1058,11 @@ static int l_proc_times(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
-/* getrusage(who, struct rusage *) — 144 bytes, all-zero except the two
-   timevals, which are 0 for the same reason times()' counters are.  who must
-   be one of SELF / CHILDREN / THREAD. */
+/* getrusage(who, struct rusage *) -- 144 bytes (C1-k5, docs/cp-k5.md §4).
+   RUSAGE_THREAD is the calling thread, RUSAGE_SELF the whole group (exited
+   threads included), RUSAGE_CHILDREN every reaped descendant; CPU time comes
+   from schedule()'s accounting (all of it in ru_utime), nvcsw/nivcsw are real
+   switch counts.  O(1): no slot walk, no lock. */
 static int l_proc_getrusage(struct process *p, struct trap_frame *tf) {
   int who = (int)l_argi(tf, 0);
   uint64_t uru = l_arg(tf, 1);
@@ -1052,9 +1070,11 @@ static int l_proc_getrusage(struct process *p, struct trap_frame *tf) {
     return l_ret(tf, -EINVAL);
   if (!uru) return l_ret(tf, -EFAULT);
   if (!l_user_ok(p, uru, sizeof(linux_rusage_t), 1)) return l_ret(tf, -EFAULT);
-  uint8_t blob[144];
-  l_zero(blob, sizeof blob);
-  if (l_copy_to_user(p, uru, blob, sizeof blob) != 0) return l_ret(tf, -EFAULT);
+  struct ho_rusage ru;
+  process_rusage(p, who, &ru);
+  typedef char ru_size_assert[sizeof ru == 144 ? 1 : -1];
+  (void)sizeof(ru_size_assert);
+  if (l_copy_to_user(p, uru, &ru, sizeof ru) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
 }
 
@@ -1069,8 +1089,11 @@ static int l_proc_umask(struct process *p, struct trap_frame *tf) {
 /* ---- access / faccessat ------------------------------------------------ */
 
 /* Every compat process is uid 0, so R_OK/W_OK always pass for an existing
-   path; X_OK needs an execute bit, which a FAT16 file (mode 0644) does not
-   have.  That is the same answer stat() gives, and the two must agree. */
+   path.  X_OK needs an execute bit: FAT16 has none of its own, so regular
+   files are reported 0755 (Linux vfat's mode= behaviour) and X_OK passes for
+   them.  stat() and access() read the same fill, and they must agree -- they
+   did not while only the fd-based fill in fs.c carried the exec bits, and
+   Files.isExecutable() stayed false for every file as a result. */
 static int l_access_check(struct process *p, uint64_t upath, int mode) {
   if (mode & ~7) return -EINVAL;
   char path[256];

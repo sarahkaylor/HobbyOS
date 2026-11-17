@@ -107,6 +107,12 @@
 #define SYS_FUTEX         (73)  /* (uaddr, op, val, timeout_ms) -> 0/count | -EAGAIN
   *  | -ETIMEDOUT | -EINVAL | -EFAULT | -ENOSYS */
 #define SYS_THREAD_EXIT   (74)  /* (retval) -> noreturn (exits this thread) */
+/* GB-308: exit_group(2)'s group meaning, as an INTERNAL dispatch marker.  The
+ * x64 Linux-ABI lane remaps 231 onto this instead of SYS_EXIT because SYS_EXIT
+ * carves out clone(2) children (they only end their own thread), and the group
+ * meaning is exactly what a compat program's exit_group asks for.  Never a
+ * syscall number any program can pass: it lives above the native table. */
+#define SYS_EXIT_GROUP    (0x2000)
 #define SYS_SET_TLS       (75)  /* (tls) -> 0 | -EINVAL */
 
 /* P4 (docs/browser/p4-ipc-design.md section 6.2; integrator consent
@@ -263,8 +269,17 @@
  * Both paths must be canonical absolute paths (see src/include/vfs_bind.h). */
 #define SYS_VFS_BIND      (105)
 
+/* cp/x3 (docs/cp-x3.md): System V shared memory for native processes
+ * (XHOBBY.BIN's MIT-SHM), one multiplexed row over the table the compat
+ * class's shmget/shmat/shmdt/shmctl use (src/kernel/linux_compat_shm.c).
+ *   SYS_SHM (op, a1, a2, a3): op 0 shmget(key, size, flg) -> id
+ *     1 shmat(id, addr, flg) -> addr   2 shmdt(addr) -> 0
+ *     3 shmctl(id, cmd, struct shmid_ds* (x86_64 Linux layout)) -> 0
+ *   all -> -errno on failure. */
+#define SYS_SHM           (106)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
  * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
-#define SYS_MAX           (105)
+#define SYS_MAX           (106)
 
 #endif /* SYSCALL_H */

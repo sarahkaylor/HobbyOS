@@ -74,7 +74,7 @@ src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], kpath, s
 src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], kpath, sizeof kpath)) { /* L73 */
 src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], ksrc, sizeof ksrc) || /* L73 */
 src/kernel/arch/x64/trap.c	I2P	if (!u_strcpy((const char *)tf->regs[5], ktgt, sizeof ktgt)) { /* L73 */
-src/kernel/arch/x64/trap.c	I2P	if (process_read_envp(cur, (const char *const *)tf->regs[3], envbuf,
+src/kernel/arch/x64/trap.c	I2P	int er = process_read_envp(cur, (const char *const *)tf->regs[3], envbuf,
 src/kernel/arch/x64/trap.c	I2P	if (u_strcpy((const char *)tf->regs[5], kfile, sizeof kfile)) { /* L73 */
 src/kernel/arch/x64/trap.c	I2P	int *fds = (int *)tf->regs[5]; // rdi
 src/kernel/arch/x64/trap.c	I2P	int *len = (int *)tf->regs[7]; // r8
@@ -159,7 +159,6 @@ src/kernel/arch/x64/trap.c	P2I	if (!urects || ((uint64_t)urects & 3) != 0 ||
 src/kernel/arch/x64/trap.c	P2I	if (!val || !len || !sys_user_range((uint64_t)val, sizeof(int), 1) ||
 src/kernel/arch/x64/trap.c	P2I	if ((rd && !sys_user_range_ok((uint64_t)rd, sizeof(struct fd_set_k))) ||
 src/kernel/arch/x64/trap.c	P2I	if (argv && sys_user_range_ok((uint64_t)argv, sizeof(char *)) &&
-src/kernel/arch/x64/trap.c	P2I	if (badvec_should_arm((uint64_t)tf, tf->cs, tf->vector, badvec_pid(),
 src/kernel/arch/x64/trap.c	P2I	if (caller && sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 1)) {
 src/kernel/arch/x64/trap.c	P2I	if (cur && buf && sys_user_range((uint64_t)buf, (uint64_t)size, 1)) {
 src/kernel/arch/x64/trap.c	P2I	if (plen < 0 || !sys_user_range((uint64_t)out, sizeof *out, 1)) {
@@ -226,14 +225,10 @@ src/kernel/fs.c	I2P	uint8_t *w = (uint8_t *)uarg;
 src/kernel/fs.c	P2I	if (vm_user_read(p, (uint64_t)(s + done), stage, n) != 0)
 src/kernel/fs_test.c	P2I	return file_fcntl(p, fd, cmd, (uint64_t)flock_buf);
 src/kernel/linux_compat_fd.c	I2P	int r = file_poll(p, (struct k_pollfd *)ufds, (int)nfds, timeout);
-src/kernel/linux_compat_fd.c	I2P	int r = file_read(p, fd, (void *)ubuf, (int)len, tf);
 src/kernel/linux_compat_fd.c	I2P	int r = file_write(p, fd, (const void *)ubuf, (int)len, tf);
 src/kernel/linux_compat_fd.c	I2P	r = file_write(p, fd, (const void *)(uintptr_t)io[0], (int)io[1], tf);
 src/kernel/linux_compat_fd.c	P2I	if (l_copy_from_user(current_process(), &v, (uint64_t)(uintptr_t)buf, 8) != 0)
 src/kernel/linux_compat_fd.c	P2I	if (l_copy_to_user(current_process(), (uint64_t)(uintptr_t)buf, &v, 8) != 0) {
-src/kernel/linux_compat_misc.c	I2P	int r = file_read(p, fd, (void *)(uintptr_t)base, chunk, tf);
-src/kernel/linux_compat_misc.c	I2P	int r = file_read(p, fd, (void *)(uintptr_t)buf, (int)n, tf);
-src/kernel/linux_compat_misc.c	I2P	int r = file_write(p, fd, (const void *)(uintptr_t)buf, (int)n, tf);
 src/kernel/linux_compat_proc.c	I2P	st.ss_sp = (void *)(uintptr_t)l_altstack[slot].ss_sp;
 src/kernel/linux_compat_proc.c	P2I	l_altstack[slot].ss_sp = (uint64_t)(uintptr_t)st.ss_sp;
 src/kernel/linux_compat_thr.c	I2P	(volatile uint64_t *)l_sf_addr(base, L_SF_UC + L_UC_STACK);
@@ -366,3 +361,9 @@ src/kernel/linux_compat_thr.c	I2P	uint32_t w = *(volatile uint32_t *)(uintptr_t)
 src/kernel/arch/x64/trap.c	I2P	sg[ns].base = (const uint8_t *)(uintptr_t)base;
 src/kernel/fs.c	P2I	(uint64_t)(uintptr_t)buf, tf);
 src/kernel/pipe.c	P2I	return pipe_writev_ex(p, &sg, 1, 0, (uint64_t)(uintptr_t)buf, tf);
+# cp-sync (merge of main): main's GB-308 sites, reviewed.  A return address and a trap-frame address as integers (lock audit, badvec window test); a USER VA handed to file_read_user as an integer; and the user-VA casts that moved from linux_compat_misc.c/linux_compat_fd.c into fs.c file_read_user/file_pwrite_user (the range is materialized with vm_range_ok first, P1).
+src/kernel/arch/x64/locks.c	P2I	lock_audit_site_override((uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/trap.c	P2I	badvec_should_arm((uint64_t)tf, tf->cs, tf->vector, badvec_pid(),
+src/kernel/arch/x64/trap.c	P2I	int ret = file_read_user(caller, fd, (uint64_t)buf, size, tf);
+src/kernel/fs.c	I2P	int r = file_read(cur, fd, (void *)(uintptr_t)(ubuf + (uint64_t)done), chunk, tf);
+src/kernel/fs.c	I2P	r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);

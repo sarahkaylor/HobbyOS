@@ -26,6 +26,10 @@
  * the host script screendumps on their "t=20s"/"t=50s" progress rows.
  *
  * argv[1..]: the probe tags to run (vkcube d3d11 d3d12; default: all three).
+ * "fullscr" (C4-x3, opt-in, never part of the default) runs
+ *   wine Z:\CP\P5\FS\fullscr.exe run 6000   (1280x720 / 1920x1080 / 1280x720
+ *                                           fullscreen, exits without restoring)
+ *   wine Z:\CP\P5\FS\fullscr.exe check 30000 (the desktop mode came back)
  */
 #include <fcntl.h>
 #include <errno.h>
@@ -204,6 +208,18 @@ int main(int argc, char **argv) {
     if (!want) continue;
     char *a[] = { (char *)"wine", (char *)exes[k], (char *)P5_SECS, (char *)"640", (char *)"480", 0 };
     step(tags[k], "/CP/WINE/bin/wine", a, 900);
+  }
+  for (int i = 1; i < argc; i++) {
+    if (!streq(argv[i], "fullscr")) continue;
+    char *a_fs[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\FS\\fullscr.exe", (char *)"run",
+                     (char *)"6000", 0 };
+    step("fullscr", "/CP/WINE/bin/wine", a_fs, 300);
+    char *a_ck[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\FS\\fullscr.exe", (char *)"check",
+                     (char *)"30000", 0 };
+    step("fscheck", "/CP/WINE/bin/wine", a_ck, 120);
+    usleep(3000000); /* the harness screendumps the restored desktop */
+    pc("[P5] fullscr restored-desktop shot\n");
+    usleep(2000000);
   }
 
   char *a_k[] = { (char *)"wineserver", (char *)"-k", 0 };

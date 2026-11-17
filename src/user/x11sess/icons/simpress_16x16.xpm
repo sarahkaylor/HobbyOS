@@ -1,0 +1,23 @@
+/* XPM */
+static char * simpress_16x16_xpm[] = {
+"16 16 4 1",
+"  c None",
+". c #E66100",
+"O c #E66100",
+"W c #FFFFFF",
+"                ",
+"  ......... ..  ",
+"  .......... .  ",
+"  ..WWWW.WWW.   ",
+"  ..WWWWWWWW..  ",
+"  ..WWWWWWWW..  ",
+"  ..WWOWWWWW..  ",
+"  ..WWOOWWWW..  ",
+"  ..WWOOOWWW..  ",
+"  ..WWOOOOWW..  ",
+"  ..WWOOOOOW..  ",
+"  ..WWWWWWWW..  ",
+"  ..WWWWWWWW..  ",
+"  ............  ",
+"  ............  ",
+"                "};

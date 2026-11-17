@@ -10,6 +10,7 @@
 #include "blk_cache.h"
 #include "virtio_blk.h"
 #include "process.h"
+static int *vm_test_fdt_take(void); /* C1-k5: fake fd tables (below) */
 
 extern void uart_puts(const char *s);
 extern void print_int(int v);
@@ -449,6 +450,7 @@ static void test_vm_mmap_family(void) {
      suite may have left holding a real file — and a regular-file fd is now
      a legal (file-backed) mmap source.  fd 3 CLOSED is the deterministic
      "not a mappable fd" case: -ENOTSUP, unchanged. */
+  fake.open_fds = vm_test_fdt_take(); /* C1-k5: the table is a pointer */
   fake.open_fds[3] = -1;
   EXPECT_EQ(vm_mmap(&fake, 0, 0x1000, VM_PROT_READ, VM_MAP_PRIVATE, 3, 0),
             -ENOTSUP);
@@ -813,7 +815,8 @@ static void test_vm_memfd_private_cow(void) {
  * contiguously at create -- plus one frame per materialized page; a MAP_SHARED
  * mapping of all of it costs each address space its page tables (one 4 KiB
  * table per 2 MiB, ~100 + the upper levels).  Everything comes back at
- * teardown + unref.  At the 1 GiB cap the array is 513 contiguous frames. */
+ * teardown + unref.  At the 4 GiB cap (cp-sync; 1 GiB before) the array is
+ * 2049 contiguous frames. */
 static void test_vm_big_object_cost(void) {
   tests_run++;
   uart_puts("  Running test_vm_big_object_cost...\n");
@@ -880,10 +883,10 @@ static void test_vm_big_object_cost(void) {
   EXPECT_EQ((g != 0), 1);
   if (g) {
     int garr = free0 - frame_free_count();
-    uart_puts("  [VMCOST] 1 GiB (VM_OBJ_MAX_BYTES) object: frame array=");
+    uart_puts("  [VMCOST] 4 GiB (VM_OBJ_MAX_BYTES) object: frame array=");
     print_int(garr);
     uart_puts(" contiguous frames\n");
-    EXPECT_EQ(garr, 513);
+    EXPECT_EQ(garr, (int)((VM_OBJ_MAX_FRAMES * 8) / FRAME_SIZE) + 1); /* 2049 at 4 GiB */
     vm_object_unref(g);
   }
   EXPECT_EQ((vm_object_create(VM_OBJ_MEMFD, VM_OBJ_MAX_BYTES + FRAME_SIZE) == 0), 1);
@@ -1300,12 +1303,22 @@ static int vm_file_fixture(uint16_t *cluster, uint32_t *size) {
   return (*cluster != 0 && *size == VM_FILE_LEN) ? 0 : -1;
 }
 
-/* A fake process with a usable fd table (open_fds[] must read -1 = free). */
+/* A fake process with a usable fd table (open_fds[] must read -1 = free).
+ * C1-k5: struct process holds a POINTER to its table now (process.c
+ * process_fdt_alloc); a fake takes the next of four static tables, so the
+ * two fakes a test holds at once never share one. */
+static int vm_test_fdt[4][MAX_OPEN_FDS];
+static int vm_test_fdt_next;
+static int *vm_test_fdt_take(void) {
+  int *t = vm_test_fdt[vm_test_fdt_next++ & 3];
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    t[i] = -1;
+  return t;
+}
 static void vm_file_proc_init(struct process *p, struct addr_space *as) {
   for (unsigned i = 0; i < sizeof(*p); i++)
     ((unsigned char *)p)[i] = 0;
-  for (int i = 0; i < MAX_OPEN_FDS; i++)
-    p->open_fds[i] = -1;
+  p->open_fds = vm_test_fdt_take();
   p->num_open_fds = 0;
   p->as = as;
 }

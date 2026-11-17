@@ -89,3 +89,62 @@ __attribute__((weak)) double cbrt(double x)
         y = y - (y * y * y - ax) / (3.0 * y * y);
     return x < 0 ? -y : y;
 }
+
+/* System V shared memory for MIT-SHM (lane C4-x3, docs/cp-x3.md): the
+ * kernel's SYS_SHM row (src/include/syscall.h, 106) multiplexes the four
+ * calls over the same segment table the compat class's shmget/shmat/shmdt/
+ * shmctl use, so a Wine client's IPC_PRIVATE segment id is attachable here.
+ * Native ABI: aarch64 x8 = number, x0..x3; x86_64 rax, rdi/rsi/rdx/r10. */
+#include <sys/shm.h>
+#define HB_SYS_SHM 106
+static long hb_shm_sys(long op, long a1, long a2, long a3)
+{
+#ifdef __x86_64__
+    long ret;
+    register long rdi __asm__("rdi") = op;
+    register long rsi __asm__("rsi") = a1;
+    register long rdx __asm__("rdx") = a2;
+    register long r10 __asm__("r10") = a3;
+    __asm__ volatile("syscall\n"
+                     : "=a"(ret)
+                     : "a"((long) HB_SYS_SHM), "r"(rdi), "r"(rsi), "r"(rdx), "r"(r10)
+                     : "rcx", "r11", "memory");
+    return ret;
+#else
+    register long x8 __asm__("x8") = HB_SYS_SHM;
+    register long x0 __asm__("x0") = op;
+    register long x1 __asm__("x1") = a1;
+    register long x2 __asm__("x2") = a2;
+    register long x3 __asm__("x3") = a3;
+    __asm__ volatile("svc #0\n"
+                     : "=r"(x0)
+                     : "r"(x8), "r"(x0), "r"(x1), "r"(x2), "r"(x3)
+                     : "memory");
+    return x0;
+#endif
+}
+static long hb_shm_ret(long r)
+{
+    if (r < 0 && r > -4096) {
+        errno = (int) -r;
+        return -1;
+    }
+    return r;
+}
+__attribute__((weak)) int shmget(key_t key, size_t size, int shmflg)
+{
+    return (int) hb_shm_ret(hb_shm_sys(0, (long) key, (long) size, (long) shmflg));
+}
+__attribute__((weak)) void *shmat(int shmid, const void *shmaddr, int shmflg)
+{
+    long r = hb_shm_ret(hb_shm_sys(1, (long) shmid, (long) shmaddr, (long) shmflg));
+    return (void *) r;          /* -1 == (void *) -1 on failure */
+}
+__attribute__((weak)) int shmdt(const void *shmaddr)
+{
+    return (int) hb_shm_ret(hb_shm_sys(2, (long) shmaddr, 0, 0));
+}
+__attribute__((weak)) int shmctl(int shmid, int cmd, struct shmid_ds *buf)
+{
+    return (int) hb_shm_ret(hb_shm_sys(3, (long) shmid, (long) cmd, (long) buf));
+}

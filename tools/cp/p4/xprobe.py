@@ -11,8 +11,13 @@ HB_SECOND_SCREEN=0, the /CP/X11 runtime tree and glibc 2.31 on the FAT disk
   after "[XP] randr hold":  a screendump; the red 1280x720 window must fill
                             exactly the top-left 1280x720 of the glass, the
                             rest black.
-PASS needs: screens=1 + XINERAMA + Composite, the raw sums from the relative
-slave, the RandR rows (refused offset, set, restore) and the screendump.
+  after "[XP] shm hold":    (C4-x3) a screendump; the 256x192 MIT-SHM pattern
+                            the probe XShmPutImage'd at (64,64) must be on the
+                            glass pixel for pixel.
+PASS needs: screens=1 + XINERAMA + Composite, MIT-SHM listed and its rows
+(XShmPutImage/XShmGetImage round trip, ShmCreatePixmap, window readback), the
+raw sums from the relative slave, the RandR rows (refused offset, set,
+restore) and both screendumps.
 
   bash tools/cp/qemu-slot.sh python3 tools/cp/p4/xprobe.py [--out DIR]
 Env: CP_X11_WORK (default ~/cp/x11-build-x2), CP_SYSROOT (default
@@ -94,6 +99,22 @@ def main():
     fails = []
     try:
         q = Qmp(qmp_path)
+        if ser.wait(r"\[XP\] shm hold|\[XP\] FAIL shm|\[XP\] raw ready", 300) and \
+                re.search(r"\[XP\] shm hold", ser.text):
+            time.sleep(1.0)
+            p = os.path.join(a.out, "shm-pattern.ppm")
+            q.shot(p)
+            px, w, h = ppm(p)
+            bad = 0
+            if px:
+                for yy in range(0, 192, 7):
+                    for xx in range(0, 256, 5):
+                        o = ((64 + yy) * w + 64 + xx) * 3
+                        want = bytes((((xx * 5) & 0xff), ((yy * 3) & 0xff), (((xx ^ yy) * 7) & 0xff)))
+                        bad += 1 if px[o:o + 3] != want else 0
+            log(f"shm screendump: {bad} of {(192 // 7 + 1) * (256 // 5 + 1)} sampled pattern pixels differ")
+            if not px or bad:
+                fails.append(f"shm screendump: {bad} pattern pixels differ")
         if not ser.wait(r"\[XP\] raw ready", 300):
             fails.append("probe never reached raw ready")
             raise SystemExit
@@ -132,8 +153,11 @@ def main():
     for r in rows:
         print("  " + r, flush=True)
     for ln in ser.text.splitlines():
-        if "hobbyos: randr" in ln or "hobbyos: one screen" in ln:
+        if "hobbyos: randr" in ln or "hobbyos: one screen" in ln or "[SHM]" in ln:
             print("  " + ln.strip(), flush=True)
+    for need in ("[XP] MIT-SHM listed=yes", "[XP] shm roundtrip ok", "[XP] shm window ok"):
+        if not any(r.startswith(need) for r in rows):
+            fails.append("missing row " + need)
     tot = [r for r in rows if r.startswith("[XP] raw total")]
     if not any("dx=4050 dy=25" in r for r in tot):
         fails.append("raw sums != dx=4050 dy=25 on any source: " + "; ".join(tot))

@@ -1,0 +1,12 @@
+[LP] info e2stress: 6 workers x 3 threads + 2 x 4 racing servers, 20 s, dir /EXT/st
+[LP] done rc=0
+pfx_gate: e2stress probe rc=0 PASS rows=5 skips=0; e2fsck -fn rc=0 (cpdata: 43/131072 files (0.0% non-contiguous), 9563/524288 blocks)
+pfx_gate: PASS
+[LP] info e2stress: 6 workers x 3 threads + 2 x 4 racing servers, 20 s, dir /EXT/st
+[LP] done rc=0
+pfx_gate: e2stress probe rc=0 PASS rows=5 skips=0; e2fsck -fn rc=0 (cpdata: 46/131072 files (0.0% non-contiguous), 9588/524288 blocks)
+pfx_gate: PASS
+[LP] info e2stress: 6 workers x 3 threads + 2 x 4 racing servers, 20 s, dir /EXT/st
+[LP] done rc=0
+pfx_gate: e2stress probe rc=0 PASS rows=5 skips=0; e2fsck -fn rc=0 (cpdata: 47/131072 files (0.0% non-contiguous), 9612/524288 blocks)
+pfx_gate: PASS

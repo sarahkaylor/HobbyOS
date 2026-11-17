@@ -5,6 +5,7 @@
 #   vkcube.exe     src/user/cp/vkcubex.c   (VK_KHR_win32_surface; vulkan-1.dll)
 #   d3d11tri.exe   src/user/cp/d3d11tri.c  (DXVK d3d11 + dxgi)
 #   d3d12tri.exe   src/user/cp/d3d12tri.c  (vkd3d-proton d3d12 + DXVK dxgi)
+#   fullscr.exe    src/user/cp/fullscr.c   (C4-x3: CDS_FULLSCREEN mode switches, GDI)
 #
 # Exactly tools/cp/build-winprobe.sh's recipe (no MinGW, no download): clang 21
 # -target x86_64-windows with Wine's own Windows headers, linked by winegcc
@@ -49,6 +50,7 @@ build() { # $1 source  $2 exe  [extra cflags...]
 build vkcubex.c  vkcube.exe   -I"$VKH" -I"$ROOT/src/user/cp"
 build d3d11tri.c d3d11tri.exe
 build d3d12tri.c d3d12tri.exe
-for e in vkcube d3d11tri d3d12tri; do
+build fullscr.c  fullscr.exe
+for e in vkcube d3d11tri d3d12tri fullscr; do
   echo "build-pe: $e.exe imports: $(llvm-objdump -p "$OUT/$e.exe" 2>/dev/null | sed -n 's/^ *DLL Name: //p' | tr '\n' ' ')"
 done

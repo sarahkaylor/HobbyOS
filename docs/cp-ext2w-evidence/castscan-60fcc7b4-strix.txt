@@ -1,0 +1,1 @@
+castscan: 363 int<->pointer sites outside kmem.h; 0 not in the allowlist; 2 allowlisted rows no longer present

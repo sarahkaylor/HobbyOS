@@ -537,6 +537,7 @@ static int usock_stream_recv(struct usock *u, int end, const struct k_iovec *io,
   if (!u || cap < 0) return -EINVAL;
   if (nfds_out) *nfds_out = 0;
   struct process *grp = gfds_out ? process_group(current_process()) : 0;
+  int linux_rx = grp && (grp->abi_flags & PROC_FLAG_LINUX_ABI); /* C1-k5 */
   while (1) {
     spinlock_acquire(&u->lock);
     if (!u->connected) {
@@ -570,7 +571,13 @@ static int usock_stream_recv(struct usock *u, int end, const struct k_iovec *io,
     if (rec >= 0) {
       rec_n = c->msg_nfds[rec];
       int want = rec_n < maxfds ? rec_n : maxfds;
-      if (gfds_out && want > 0 && grp &&
+      /* C1-k5 (with C8-game, docs/cp-p8.md stop 2b): a Linux-ABI receiver
+         gets Linux's scm_detach_fds semantics -- the data is delivered, the
+         fds that do not fit are closed and MSG_CTRUNC is set (the install
+         loop below); a full table never fails the read nor leaves the
+         record queued.  wineserver's receive_fd depends on it.  Native
+         callers keep the P4 rule (EMFILE, record not consumed). */
+      if (gfds_out && want > 0 && grp && !linux_rx &&
           grp->num_open_fds + want > MAX_OPEN_FDS) {
         spinlock_release(&u->lock);
         return -EMFILE; /* not consumed: the record keeps its refs */
@@ -619,6 +626,7 @@ static int usock_stream_recv(struct usock *u, int end, const struct k_iovec *io,
             gfds_out[installed++] = ufd;
             continue;
           }
+          if (ctrl_trunc) *ctrl_trunc = 1; /* C1-k5: table full: dropped */
         } else if (ctrl_trunc) {
           *ctrl_trunc = 1;
         }
@@ -711,8 +719,11 @@ static int usock_msg_recv(struct usock *u, int end, const struct k_iovec *io,
       spinlock_release(&u->lock);
       return -EINVAL; /* no receiver fd table to install into */
     }
-    if (grp && grp->num_open_fds + deliver > MAX_OPEN_FDS) {
-      /* §4.2: message NOT consumed, refs stay with the queued message. */
+    if (grp && !(grp->abi_flags & PROC_FLAG_LINUX_ABI) &&
+        grp->num_open_fds + deliver > MAX_OPEN_FDS) {
+      /* §4.2: message NOT consumed, refs stay with the queued message.
+         C1-k5: native callers only; a Linux-ABI receiver takes the message
+         and loses the fds that do not fit (MSG_CTRUNC, below), as Linux. */
       spinlock_release(&u->lock);
       return -EMFILE;
     }
@@ -750,7 +761,10 @@ static int usock_msg_recv(struct usock *u, int end, const struct k_iovec *io,
     for (int f = 0; f < deliver; f++) {
       int ufd = fs_msg_install_gfd(grp, gdeliver[f]);
       if (ufd < 0) {
-        fs_close_global(gdeliver[f]); /* capacity pre-checked; safety net */
+        /* C1-k5: a full table (Linux-ABI: not pre-checked) drops the fd
+           and says so, as Linux's scm_detach_fds does. */
+        fs_close_global(gdeliver[f]);
+        if (ctrl_trunc) *ctrl_trunc = 1;
         continue;
       }
       if (cmsg_cloexec) fd_cloexec_set(grp->fd_cloexec, ufd);

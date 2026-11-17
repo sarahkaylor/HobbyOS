@@ -54,10 +54,59 @@ static int dev_read(void *ctx, uint64_t sector, void *buf, uint32_t n) {
   return r == (ssize_t)n * 512 ? 0 : -1;
 }
 
+/* cp/ext2w: a write log for the crash-prefix scenario (every device write in
+ * order, split into 512-byte sectors' worth of blocks of the fs block size). */
+struct wrec {
+  uint64_t sector;
+  uint32_t nsec;
+  uint8_t *data;
+};
+static struct wrec *wlog;
+static int wlog_n, wlog_cap, wlog_on;
+static uint64_t dev_calls;
+
+static void wlog_add(uint64_t sector, const void *buf, uint32_t n) {
+  if (!wlog_on) return;
+  if (wlog_n == wlog_cap) {
+    wlog_cap = wlog_cap ? wlog_cap * 2 : 256;
+    wlog = realloc(wlog, (size_t)wlog_cap * sizeof *wlog);
+  }
+  wlog[wlog_n].sector = sector;
+  wlog[wlog_n].nsec = n;
+  wlog[wlog_n].data = malloc((size_t)n * 512);
+  memcpy(wlog[wlog_n].data, buf, (size_t)n * 512);
+  wlog_n++;
+}
+
+static void wlog_clear(void) {
+  for (int i = 0; i < wlog_n; i++) free(wlog[i].data);
+  wlog_n = 0;
+}
+
 static int dev_write(void *ctx, uint64_t sector, const void *buf, uint32_t n) {
   (void)ctx;
+  dev_calls++;
+  wlog_add(sector, buf, n);
   ssize_t r = pwrite(img_fd, buf, (size_t)n * 512, (off_t)(sector * 512));
   return r == (ssize_t)n * 512 ? 0 : -1;
+}
+
+/* The vectored op (as the kernel's NVMe path offers it). */
+static int dev_rwv(void *ctx, uint64_t sector, void *const *bufs, uint32_t nbuf,
+                   uint32_t each, int wr) {
+  (void)ctx;
+  dev_calls++;
+  for (uint32_t i = 0; i < nbuf; i++) {
+    uint64_t sec = sector + (uint64_t)i * each;
+    size_t len = (size_t)each * 512;
+    if (wr) {
+      wlog_add(sec, bufs[i], each);
+      if (pwrite(img_fd, bufs[i], len, (off_t)(sec * 512)) != (ssize_t)len) return -1;
+    } else if (pread(img_fd, bufs[i], len, (off_t)(sec * 512)) != (ssize_t)len) {
+      return -1;
+    }
+  }
+  return 0;
 }
 
 static void *host_alloc(uint32_t n) {
@@ -76,7 +125,10 @@ static int mount_img(const char *img, int ro, int cache) {
   if (img_fd < 0) return -EIO;
   struct stat st;
   fstat(img_fd, &st);
-  struct ext2_dev d = {0, dev_read, dev_write, (uint64_t)st.st_size / 512};
+  struct ext2_dev d = {0, dev_read, dev_write, (uint64_t)st.st_size / 512, 0};
+  /* cp/ext2w: the vectored path for the bigger caches, the per-block
+     fallback for the tiny ones (both stay covered) */
+  if (cache >= 64) d.rwv = dev_rwv;
   FS.now = host_now;
   FS.alloc_buf = host_alloc;
   FS.cache_cap = (uint32_t)cache;
@@ -1184,6 +1236,200 @@ static void scenario_large_1k(void) {
   CHECK(ok, "debugfs-mapped tail blocks match the written bytes");
 }
 
+/* ---- cp/ext2w: crash-prefix check of the ordered commit ------------------
+ *
+ * For every batch: the image as the previous commit left it, then EVERY
+ * prefix of the device writes the batch made (eviction write-backs and the
+ * commit, split per block) is checked with e2fsck -fn.  A prefix may show only
+ * repairable leaks (docs/cp-ext2w.md section 2.3): '-' bitmap differences,
+ * wrong free/directory counts, unattached inodes, link counts that are too
+ * HIGH.  Anything else -- a reference to a free block or inode ('+' bitmap
+ * differences), a directory entry naming a deleted or uninitialised inode,
+ * illegal or multiply-claimed blocks, a link count too low -- is a failure.
+ * The same batches with the commit in plain block order (fs->ordered = 0,
+ * the pre-ext2w behaviour) must show such failures, or the check proves
+ * nothing. */
+static int fsck_class(const char *img, char *why, size_t wcap) {
+  static char out[65536];
+  int rc = capture(out, sizeof out, "%s -fn %s 2>&1", e2fsck_bin, img);
+  if (rc == 0) return 0;
+  int worst = 1;
+  why[0] = 0;
+  char *save = 0;
+  for (char *ln = strtok_r(out, "\n", &save); ln; ln = strtok_r(0, "\n", &save)) {
+    while (*ln == ' ') ln++;
+    if (!*ln) continue;
+    static const char *ok_pfx[] = {
+        "e2fsck ", "Pass ", "Fix? no", "Clear? no", "Connect to /lost+found? no",
+        "Free blocks count wrong", "Free inodes count wrong",
+        "Directories count wrong", "Unattached inode", "Unattached zero-length inode",
+        "Padding at end of", "Inode bitmap differences:", "Block bitmap differences:",
+        "Fix? yes", "/lost+found not found", "Create? no", "Relocate? no", 0};
+    int ok = 0;
+    for (int i = 0; ok_pfx[i]; i++)
+      if (!strncmp(ln, ok_pfx[i], strlen(ok_pfx[i]))) ok = 1;
+    if (strstr(ln, "***** WARNING: Filesystem still has errors")) ok = 1;
+    if (strstr(ln, " files (") && strstr(ln, " blocks")) ok = 1; /* summary */
+    if (!strncmp(ln, "Block bitmap differences:", 25) ||
+        !strncmp(ln, "Inode bitmap differences:", 25)) {
+      if (strchr(ln + 25, '+')) ok = 0; /* in use but marked free */
+    }
+    if (!strncmp(ln, "Unconnected directory inode", 27)) ok = 1; /* -> lost+found */
+    if (!strncmp(ln, "'..' in ", 8)) ok = 1; /* a moved/unconnected dir's parent */
+    unsigned ino = 0, a = 0, b = 0;
+    if (sscanf(ln, "Inode %u ref count is %u, should be %u", &ino, &a, &b) == 3)
+      ok = a > b || b == a + 1; /* too high: a leak; one short: a rename's
+                                   second name (Linux ext2 alike) */
+    if (!ok) {
+      worst = 2;
+      if (!why[0]) snprintf(why, wcap, "%s", ln);
+      if (getenv("EXT2_CRASH_VERBOSE")) printf("    danger: %s\n", ln);
+    }
+  }
+  return worst;
+}
+
+static int crash_apply(const char *img, const struct wrec *w, int blk_bytes,
+                       int part) {
+  int fd = open(img, O_RDWR);
+  if (fd < 0) return -1;
+  uint64_t off = w->sector * 512 + (uint64_t)part * (uint64_t)blk_bytes;
+  ssize_t r = pwrite(fd, w->data + (size_t)part * (size_t)blk_bytes,
+                     (size_t)blk_bytes, (off_t)off);
+  close(fd);
+  return r == blk_bytes ? 0 : -1;
+}
+
+/* One random batch of namespace and data operations under /EXT/c. */
+static void crash_batch(uint32_t *seed, int round) {
+  static uint8_t buf[60000];
+  char a[64], b2[64];
+  for (int op = 0; op < 24; op++) {
+    *seed = *seed * 1103515245u + 12345u;
+    uint32_t r = *seed >> 8;
+    int f1 = (int)(r % 12), f2 = (int)((r >> 4) % 12);
+    snprintf(a, sizeof a, "/EXT/c/f%d", f1);
+    snprintf(b2, sizeof b2, "/EXT/c/f%d", f2);
+    switch ((r >> 9) % 9) {
+    case 0:
+    case 1: { /* write (often past 12 blocks: indirect) */
+      size_t n = 1 + (r >> 13) % sizeof buf;
+      fill(buf, n, r);
+      (void)put(a, ((r >> 3) & 1) ? 0 : (r % 9000), buf, n);
+      break;
+    }
+    case 2: { /* rename over */
+      uint32_t d1, d2;
+      char n1[256], n2[256];
+      int l1, l2;
+      if (parent_of(a, &d1, n1, &l1) == 0 && parent_of(b2, &d2, n2, &l2) >= -ENOENT && f1 != f2)
+        (void)ext2_rename(&FS, d1, n1, l1, d2, n2, l2);
+      break;
+    }
+    case 3: (void)unlink_at(a); break;
+    case 4: { /* truncate */
+      uint32_t ino = ino_of(a);
+      if (ino) (void)ext2_truncate(&FS, ino, (r >> 11) % 70000);
+      break;
+    }
+    case 5: { /* mkdir / rmdir */
+      char d[64];
+      snprintf(d, sizeof d, "/EXT/c/d%d", f1 % 4);
+      uint32_t dir;
+      char nm[256];
+      int ln;
+      int rc = parent_of(d, &dir, nm, &ln);
+      if (rc == -ENOENT) (void)mkdir_p(d);
+      else if (rc == 0) (void)ext2_rmdir(&FS, dir, nm, ln);
+      break;
+    }
+    case 6: { /* hard link */
+      uint32_t ino = ino_of(a), dir;
+      char nm[256];
+      int ln;
+      if (ino && f1 != f2 && parent_of(b2, &dir, nm, &ln) == -ENOENT)
+        (void)ext2_link(&FS, ino, dir, nm, ln);
+      break;
+    }
+    case 7: { /* a file inside a subdirectory */
+      char p2[80];
+      snprintf(p2, sizeof p2, "/EXT/c/d%d/g%d", f1 % 4, f2);
+      fill(buf, 3000, r);
+      (void)put(p2, 0, buf, 1 + (r % 3000));
+      break;
+    }
+    default: { /* create + delete in the same batch */
+      char t[64];
+      snprintf(t, sizeof t, "/EXT/c/tmp%d", round);
+      fill(buf, 20000, r);
+      (void)put(t, 0, buf, 20000);
+      (void)unlink_at(t);
+      break;
+    }
+    }
+  }
+}
+
+static void scenario_crash(int bs, int ordered, int rounds, int *danger_out, int cache) {
+  char img[300], base[300], test[300];
+  snprintf(img, sizeof img, "%s/crash%d.img", tmpdir, bs);
+  snprintf(base, sizeof base, "%s/crash%d.base", tmpdir, bs);
+  snprintf(test, sizeof test, "%s/crash%d.test", tmpdir, bs);
+  run("rm -f %s && truncate -s 24M %s", img, img);
+  CHECK(run("%s -q -F -t ext2 -b %d -O ^dir_index %s >/dev/null 2>&1", mke2fs_bin,
+            bs, img) == 0, "mke2fs crash bs=%d", bs);
+  int rc = mount_img(img, 0, cache);
+  CHECK(rc == 0, "crash mount rc=%d", rc);
+  if (rc) return;
+  if (!ordered) FS.ordered = 0;
+  printf("scenario crash bs=%d %s commit, %d batches, cache %d\n", bs,
+         ordered ? "ORDERED" : "plain-order (pre-ext2w)", rounds, cache);
+  CHECK(mkdir_p("/EXT/c") == 0, "mkdir c");
+  CHECK(ext2_flush(&FS) == 0, "first commit");
+  uint32_t seed = 777u + (uint32_t)bs;
+  int prefixes = 0, leaks = 0, dangers = 0;
+  char first[512] = "";
+  for (int round = 0; round < rounds; round++) {
+    run("cp %s %s", img, base);
+    wlog_clear();
+    wlog_on = 1;
+    crash_batch(&seed, round);
+    rc = ext2_flush(&FS);
+    wlog_on = 0;
+    CHECK(rc == 0, "commit %d rc=%d", round, rc);
+    run("cp %s %s", base, test);
+    for (int k = 0; k < wlog_n; k++) {
+      int parts = (int)(wlog[k].nsec * 512 / (uint32_t)bs);
+      if (parts < 1) parts = 1;
+      for (int part = 0; part < parts; part++) {
+        char why[400];
+        int c = fsck_class(test, why, sizeof why);
+        prefixes++;
+        if (c == 1) leaks++;
+        if (c == 2) {
+          dangers++;
+          if (!first[0])
+            snprintf(first, sizeof first, "batch %d write %d/%d: %s", round, k,
+                     wlog_n, why);
+        }
+        int bb = (int)(wlog[k].nsec * 512) < bs ? (int)(wlog[k].nsec * 512) : bs;
+        CHECK(crash_apply(test, &wlog[k], bb, part) == 0, "apply");
+      }
+    }
+    char why[400];
+    CHECK(fsck_class(test, why, sizeof why) == 0, "batch %d complete: clean (%s)",
+          round, why);
+  }
+  umount_img();
+  CHECK(fsck(img, "after crash batches") == 0, "crash image clean");
+  printf("  crash prefixes checked=%d clean=%d leak-only=%d DANGER=%d midop=%llu evictwb=%llu%s%s\n",
+         prefixes, prefixes - leaks - dangers, leaks, dangers,
+         (unsigned long long)FS.st_midop, (unsigned long long)FS.st_evict_wb,
+         first[0] ? "  first: " : "", first);
+  *danger_out = dangers;
+  wlog_clear();
+}
+
 int main(void) {
   if (find_tool(mke2fs_bin, sizeof mke2fs_bin, "mke2fs") ||
       find_tool(e2fsck_bin, sizeof e2fsck_bin, "e2fsck") ||
@@ -1211,6 +1457,19 @@ int main(void) {
   scenario_longpath();
   scenario_large_1k();
   scenario_corrupt();
+  {
+    int d1 = 0, d4 = 0, dplain = 0;
+    int de = 0;
+    scenario_crash(1024, 1, 6, &d1, 512);
+    scenario_crash(4096, 1, 12, &d4, 512);
+    /* a cache too small for one batch: eviction write-backs of data/new
+       blocks interleave with the batch (still safe); in-operation commits
+       (midop) are the documented exception and are counted, not graded */
+    scenario_crash(4096, 1, 6, &de, 12);
+    CHECK(d1 == 0 && d4 == 0, "ordered commit: no crash prefix is worse than a leak");
+    scenario_crash(4096, 0, 8, &dplain, 512);
+    CHECK(dplain > 0, "plain-order commit shows unsafe prefixes (the check is sensitive)");
+  }
   if (failures && getenv("EXT2_TEST_KEEP"))
     printf("ext2_test: scratch kept at %s\n", tmpdir);
   else

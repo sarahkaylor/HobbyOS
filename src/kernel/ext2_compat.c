@@ -349,19 +349,21 @@ static int e2c_ftruncate(struct process *p, struct trap_frame *tf) {
 
 static int e2c_fsync(struct process *p, struct trap_frame *tf) {
   if (file_fd_is_ext2(p, (int)l_argi(tf, 0)) != 1) return 0; /* l_misc_fsync */
-  return ret(tf, ext2v_sync());
+  return ret(tf, ext2v_fsync(0)); /* cp/ext2w: superblock counts deferred */
 }
 
-/* fdatasync: ext2 flushes; every other open fd has no write-back cache (the
-   same answer fsync gives them).  A closed fd is EBADF. */
+/* fdatasync: ext2 flushes.  Every other fd is declined (return 0) to
+   linux_compat_fd.c's l_fd_fsync, which flushes a FAT16 file's MAP_SHARED
+   pages (main's GB-308, merged by cp-sync) and answers 0 for the rest, the
+   same answer fsync gives them.  A closed fd is EBADF there too. */
 static int e2c_fdatasync(struct process *p, struct trap_frame *tf) {
   int k = file_fd_is_ext2(p, (int)l_argi(tf, 0));
-  if (k < 0) return ret(tf, -EBADF);
-  return ret(tf, k ? ext2v_sync() : 0);
+  if (k != 1) return 0; /* not ext2: l_fd_fsync */
+  return ret(tf, ext2v_fsync(0)); /* cp/ext2w: superblock counts deferred */
 }
 
 /* cp/pfx: sync(2) and syncfs(2).  ext2 is the only filesystem here with
-   state to flush (write-through at each mutating syscall, plus the MAP_SHARED
+   state to flush (the write-back cache, cp/ext2w, plus the MAP_SHARED
    write-back pages); Linux's sync never fails.  syncfs needs a valid fd. */
 static int e2c_sync(struct process *p, struct trap_frame *tf) {
   (void)p;
@@ -465,8 +467,12 @@ static int e2c_faccessat(struct process *p, struct trap_frame *tf) {
    when no such mapping exists (one atomic load). */
 static int e2c_msync(struct process *p, struct trap_frame *tf) {
   (void)p;
-  (void)tf;
-  ext2_obj_sync_all();
+  /* cp/ext2w: MS_SYNC (4) also commits the write-back cache, so the stores
+     are on the disk when msync returns (Linux: the range; here: all). */
+  if (l_argi(tf, 2) & 4)
+    (void)ext2v_sync();
+  else
+    ext2_obj_sync_all();
   return 0;
 }
 

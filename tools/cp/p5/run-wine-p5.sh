@@ -28,7 +28,8 @@
 #      CP_VK_WORK (default ~/cp/vk-build), CP_X11_WORK (default ~/cp/x11-build)
 #      CP_P5_PE   (default ~/cp/vk2-pe: dxvk/*.dll, vkd3d/*.dll, the x64 DLLs only)
 #      GLIBC231_LIB (default $CP_VK_WORK/sysroot-glibc231/lib/x86_64-linux-gnu)
-#      P5_EXPORT (default /srv/nfs/cp-vk2-p5), P5_PROBES (default "vkcube d3d11 d3d12"),
+#      P5_EXPORT (default /srv/nfs/cp-vk2-p5), P5_PROBES (default "vkcube d3d11 d3d12";
+#                 "fullscr" is C4-x3's opt-in fullscreen mode-switch probe),
 #      P5_WINEDEBUG (default err+all,fixme-all), TIMEOUT_S (default 7200),
 #      P5_CFLAGS (extra launcher -D flags, diagnostics only),
 #      P5_XHOBBY + P5_XHOBBY_SHA256 (an X server build to stage over ::/XHOBBY.BIN),
@@ -101,7 +102,7 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM HUP
 
 echo "== export dir: $EXPORT (WINE, X11, VK, P5)"
-sudo -n mkdir -p "$EXPORT/WINE" "$EXPORT/X11" "$EXPORT/VK" "$EXPORT/P5/VK" "$EXPORT/P5/D3D11" "$EXPORT/P5/D3D12" && MADE_DIR=1
+sudo -n mkdir -p "$EXPORT/WINE" "$EXPORT/X11" "$EXPORT/VK" "$EXPORT/P5/VK" "$EXPORT/P5/D3D11" "$EXPORT/P5/D3D12" "$EXPORT/P5/FS" && MADE_DIR=1
 sudo -n rsync -a --delete "$WINE/" "$EXPORT/WINE/" || die "rsync wine"
 sudo -n rsync -aL --delete "$X11W/stage/CP/X11/" "$EXPORT/X11/" || die "rsync x11"
 sudo -n rsync -aL --delete --exclude include --exclude cmake --exclude pkgconfig \
@@ -109,6 +110,7 @@ sudo -n rsync -aL --delete --exclude include --exclude cmake --exclude pkgconfig
 sudo -n cp "$OUT/pe/vkcube.exe" "$EXPORT/P5/VK/"
 sudo -n cp "$OUT/pe/d3d11tri.exe" "$PE/dxvk/d3d11.dll" "$PE/dxvk/dxgi.dll" "$PE/dxvk/d3d10core.dll" "$EXPORT/P5/D3D11/"
 sudo -n cp "$OUT/pe/d3d12tri.exe" "$PE/vkd3d/d3d12.dll" "$PE/vkd3d/d3d12core.dll" "$PE/dxvk/dxgi.dll" "$EXPORT/P5/D3D12/"
+sudo -n cp "$OUT/pe/fullscr.exe" "$EXPORT/P5/FS/"
 sudo -n chmod -R a+rX "$EXPORT"
 ( cd "$EXPORT" && find P5 VK/lib VK/share -type f | sort | while read -r f; do
     printf '%s %10d %s\n' "$(sha256sum "$f" | cut -c1-16)" "$(stat -c %s "$f")" "$f"; done ) | tee "$OUT/export-manifest.txt"
@@ -137,6 +139,11 @@ if [ -n "${P5_XHOBBY:-}" ]; then
   echo "${P5_XHOBBY_SHA256}  $OUT/XHOBBY.BIN" | sha256sum -c --quiet - || die "P5_XHOBBY sha256 mismatch"
   stage "$OUT/XHOBBY.BIN" ::/XHOBBY.BIN
   echo "== X server: $P5_XHOBBY (sha256 $P5_XHOBBY_SHA256) staged as ::/XHOBBY.BIN"
+else
+  # cp/x3: the tree's own server (make's x11-staged keeps it current).
+  rm -f "$OUT/XHOBBY.disk"
+  mcopy -o -i "$D" ::/XHOBBY.BIN "$OUT/XHOBBY.disk" 2>/dev/null &&
+    echo "== X server: the tree's ::/XHOBBY.BIN, sha256 $(sha256sum "$OUT/XHOBBY.disk" | cut -d' ' -f1)"
 fi
 # P5_XSESSION_ENV: extra KEY=VALUE lines (';'-separated) for ::/X11/XSESSION.ENV.
 if [ -n "${P5_XSESSION_ENV:-}" ]; then

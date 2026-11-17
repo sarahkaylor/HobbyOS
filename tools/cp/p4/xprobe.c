@@ -16,6 +16,16 @@
  *                          a red full-screen window, "[XP] randr hold" (the
  *                          harness screendumps), then back to the original
  *                          mode; also a refused request (a CRTC offset)
+ *   X5 MIT-SHM (C4-x3)     the extension list (xdpyinfo's), XShmQueryVersion,
+ *                          then winex11's exact sequence: XShmCreateImage,
+ *                          shmget(IPC_PRIVATE, IPC_CREAT|0700), shmat,
+ *                          XShmAttach + XSync, IPC_RMID; a pattern goes up
+ *                          with XShmPutImage (into a pixmap and a mapped
+ *                          window) and comes back with XShmGetImage into a
+ *                          second segment and with plain XGetImage; with
+ *                          shared pixmaps, XShmCreatePixmap over the first
+ *                          segment reads back the same bytes; "[XP] shm hold"
+ *                          (the harness screendumps the window)
  *
  * Rows: "[XP] ..."; final "[XP] done rc=<failures>".
  */
@@ -23,6 +33,11 @@
 #include <X11/Xutil.h>
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/Xrandr.h>
+#include <X11/extensions/XShm.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -172,6 +187,148 @@ static void randr_phase(Display *dpy) {
   XRRFreeScreenResources(res);
 }
 
+/* ---- X5: MIT-SHM ------------------------------------------------------- */
+
+#define SW 256
+#define SH 192
+static uint32_t pat(int x, int y) {
+  return (uint32_t)((x * 5) & 0xff) << 16 | (uint32_t)((y * 3) & 0xff) << 8 |
+         (uint32_t)(((x ^ y) * 7) & 0xff);
+}
+
+/* winex11's create_shm_image (dlls/winex11.drv/bitblt.c), step for step. */
+static XImage *shm_image(Display *dpy, Visual *vis, int depth, XShmSegmentInfo *si,
+                         const char *tag) {
+  si->shmid = -1;
+  XImage *im = XShmCreateImage(dpy, vis, depth, ZPixmap, NULL, si, SW, SH);
+  if (!im) { ROW("FAIL shm %s: XShmCreateImage", tag); return NULL; }
+  si->shmid = shmget(IPC_PRIVATE, (size_t)im->bytes_per_line * SH, IPC_CREAT | 0700);
+  if (si->shmid < 0) { ROW("FAIL shm %s: shmget errno=%d", tag, errno); XDestroyImage(im); return NULL; }
+  si->shmaddr = shmat(si->shmid, 0, 0);
+  if (si->shmaddr == (char *)-1) {
+    ROW("FAIL shm %s: shmat errno=%d", tag, errno);
+    shmctl(si->shmid, IPC_RMID, 0);
+    XDestroyImage(im);
+    return NULL;
+  }
+  si->readOnly = False;
+  xerr_code = 0;
+  Status ok = XShmAttach(dpy, si);
+  XSync(dpy, False);
+  int e = xerr_code;
+  shmctl(si->shmid, IPC_RMID, 0); /* winex11: right after the server attached */
+  ROW("shm %s: shmid=%d addr=%p bpl=%d XShmAttach=%d xerr=%d", tag, si->shmid,
+      (void *)si->shmaddr, im->bytes_per_line, (int)ok, e);
+  if (!ok || e) { shmdt(si->shmaddr); XDestroyImage(im); return NULL; }
+  im->data = si->shmaddr;
+  return im;
+}
+
+static int cmp_img(XImage *im, const char *tag) {
+  int bad = 0, fx = -1, fy = -1;
+  uint32_t got = 0;
+  for (int y = 0; y < SH; y++)
+    for (int x = 0; x < SW; x++) {
+      uint32_t v = (uint32_t)XGetPixel(im, x, y) & 0xffffff;
+      if (v != pat(x, y)) { if (!bad) { fx = x; fy = y; got = v; } bad++; }
+    }
+  ROW("shm %s: %s (%d of %d pixels differ%s)", tag, bad ? "MISMATCH" : "match", bad, SW * SH,
+      bad ? "" : "");
+  if (bad) ROW("shm %s: first diff at %d,%d got 0x%06x want 0x%06x", tag, fx, fy, got, pat(fx, fy));
+  return bad == 0;
+}
+
+static void shm_phase(Display *dpy) {
+  int n = 0;
+  char **ext = XListExtensions(dpy, &n);
+  char line[1024];
+  int o = 0, have_shm = 0;
+  for (int i = 0; i < n && o < (int)sizeof line - 40; i++) {
+    o += snprintf(line + o, sizeof line - o, "%s%s", i ? " " : "", ext[i]);
+    if (!strcmp(ext[i], "MIT-SHM")) have_shm = 1;
+  }
+  ROW("extensions n=%d: %s", n, line);
+  XFreeExtensionList(ext);
+  ROW("MIT-SHM listed=%s", have_shm ? "yes" : "no");
+  int maj = 0, min = 0;
+  Bool pix = False;
+  if (!have_shm || !XShmQueryVersion(dpy, &maj, &min, &pix)) {
+    ROW("FAIL shm: no MIT-SHM"); fails++; return;
+  }
+  ROW("shm version %d.%d sharedPixmaps=%d pixmapFormat=%d", maj, min, (int)pix,
+      XShmPixmapFormat(dpy));
+  int scr = DefaultScreen(dpy);
+  Visual *vis = DefaultVisual(dpy, scr);
+  int depth = DefaultDepth(dpy, scr);
+  Window root = RootWindow(dpy, scr);
+  XSetErrorHandler(on_xerr);
+  XShmSegmentInfo up, down;
+  XImage *a = shm_image(dpy, vis, depth, &up, "up");
+  XImage *b = a ? shm_image(dpy, vis, depth, &down, "down") : NULL;
+  if (!a || !b) { fails++; return; }
+  for (int y = 0; y < SH; y++)
+    for (int x = 0; x < SW; x++) XPutPixel(a, x, y, pat(x, y));
+  GC gc = XCreateGC(dpy, root, 0, NULL);
+  /* 1: pixmap round trip */
+  Pixmap pm = XCreatePixmap(dpy, root, SW, SH, depth);
+  xerr_code = 0;
+  XShmPutImage(dpy, pm, gc, a, 0, 0, 0, 0, SW, SH, False);
+  XSync(dpy, False);
+  memset(b->data, 0, (size_t)b->bytes_per_line * SH);
+  Status g = XShmGetImage(dpy, pm, b, 0, 0, AllPlanes);
+  XSync(dpy, False);
+  ROW("shm pixmap: XShmPutImage+XShmGetImage status=%d xerr=%d", (int)g, xerr_code);
+  int ok = g && !xerr_code && cmp_img(b, "pixmap ShmGetImage");
+  XImage *plain = XGetImage(dpy, pm, 0, 0, SW, SH, AllPlanes, ZPixmap);
+  ok = ok && plain && cmp_img(plain, "pixmap XGetImage");
+  if (plain) XDestroyImage(plain);
+  if (!ok) fails++;
+  ROW("shm roundtrip %s", ok ? "ok" : "FAILED");
+  /* 2: shared pixmap over the "up" segment (ShmCreatePixmap) */
+  if (pix) {
+    xerr_code = 0;
+    Pixmap sp = XShmCreatePixmap(dpy, root, up.shmaddr, &up, SW, SH, depth);
+    XImage *spi = XGetImage(dpy, sp, 0, 0, SW, SH, AllPlanes, ZPixmap);
+    XSync(dpy, False);
+    int pok = spi && !xerr_code && cmp_img(spi, "ShmCreatePixmap XGetImage");
+    ROW("shm pixmap-shared %s xerr=%d", pok ? "ok" : "FAILED", xerr_code);
+    if (!pok) fails++;
+    if (spi) XDestroyImage(spi);
+    XFreePixmap(dpy, sp);
+  }
+  /* 3: a mapped window, for the screendump and a window readback */
+  XSetWindowAttributes wa;
+  wa.override_redirect = True;
+  wa.background_pixel = 0;
+  Window w = XCreateWindow(dpy, root, 64, 64, SW, SH, 0, CopyFromParent, InputOutput,
+                           CopyFromParent, CWOverrideRedirect | CWBackPixel, &wa);
+  XMapRaised(dpy, w);
+  XSync(dpy, False);
+  usleep(300000);
+  XShmPutImage(dpy, w, gc, a, 0, 0, 0, 0, SW, SH, False);
+  XSync(dpy, False);
+  memset(b->data, 0, (size_t)b->bytes_per_line * SH);
+  g = XShmGetImage(dpy, w, b, 0, 0, AllPlanes);
+  XSync(dpy, False);
+  int wok = g && cmp_img(b, "window ShmGetImage");
+  ROW("shm window %s", wok ? "ok" : "FAILED");
+  if (!wok) fails++;
+  ROW("shm hold 4000 ms (pattern %dx%d at 64,64)", SW, SH);
+  usleep(4000000);
+  XDestroyWindow(dpy, w);
+  XFreePixmap(dpy, pm);
+  XFreeGC(dpy, gc);
+  XShmDetach(dpy, &up);
+  XShmDetach(dpy, &down);
+  XSync(dpy, False);
+  shmdt(up.shmaddr);
+  shmdt(down.shmaddr);
+  a->data = b->data = NULL;
+  XDestroyImage(a);
+  XDestroyImage(b);
+  ROW("shm detached");
+}
+
 int main(void) {
   Display *dpy = XOpenDisplay(NULL);
   if (!dpy) { ROW("FAIL XOpenDisplay"); ROW("done rc=1"); return 1; }
@@ -180,13 +337,14 @@ int main(void) {
   int comp = XQueryExtension(dpy, "Composite", &op, &ev, &er);
   ROW("screens=%d XINERAMA=%s Composite=%s", ScreenCount(dpy), xin ? "yes" : "no", comp ? "yes" : "no");
   if (ScreenCount(dpy) != 1 || !xin || !comp) fails++;
+  if (!getenv("XP_NO_SHM")) shm_phase(dpy);
   int xi_opcode;
   if (!XQueryExtension(dpy, "XInputExtension", &xi_opcode, &ev, &er) ||
       XIQueryVersion(dpy, &maj, &min) != Success) {
     ROW("FAIL XI2"); fails++;
   } else {
     list_devices(dpy, XIAllDevices, "xi2");
-    raw_phase(dpy, xi_opcode);
+    if (!getenv("XP_NO_RAW")) raw_phase(dpy, xi_opcode); /* host runs: no QMP input */
   }
   randr_phase(dpy);
   ROW("done rc=%d", fails);

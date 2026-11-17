@@ -45,8 +45,8 @@ on_disk() { printf '%s\n' "$ROOT" | grep -qx "$1"; }
 label() { case "${1%.BIN}" in *_*) printf '_%s' "${1%.BIN}" ;; *) printf '%s' "${1%.BIN}" ;; esac; }
 
 # X-stack / session binaries are not desktop apps (and XEYESR/XCALCR keep
-# their own real-X entries below).
-SKIP="XSESSION.BIN XHOBBY.BIN ICEWM.BIN ICEWMBG.BIN ICEWMHNT.BIN ICESH.BIN HBHOST.BIN XFILES.BIN XEYESR.BIN XCALCR.BIN DOOML.BIN"
+# their own real-X entries below). LibreOffice apps are native X11 apps in Office menu.
+SKIP="XSESSION.BIN XHOBBY.BIN ICEWM.BIN ICEWMBG.BIN ICEWMHNT.BIN ICESH.BIN HBHOST.BIN XFILES.BIN XEYESR.BIN XCALCR.BIN DOOML.BIN SOFFICE.BIN SWRITER.BIN SCALC.BIN SIMPRESS.BIN SDRAW.BIN SMATH.BIN SBASE.BIN"
 skipped() { for s in $SKIP; do [ "$1" = "$s" ] && return 0; done; return 1; }
 in_list() { printf '%s\n' "$2" | grep -qx "$1"; }
 
@@ -56,6 +56,15 @@ M="$OUT/menu"
   echo "# from src/user/desktop.c (pinned_apps/pinned_games) and this disk's files."
   echo "# Native HobbyOS programs run in an X window through HBHOST.BIN (icewm.md §9)."
   on_disk XFILES.BIN && echo 'prog "Files (X11)" folder /XFILES.BIN'
+  echo 'menu "Office" folder {'
+  on_disk SOFFICE.BIN  && echo '    prog "LibreOffice" libreoffice SOFFICE.BIN'
+  on_disk SWRITER.BIN  && echo '    prog "LibreOffice Writer" swriter SWRITER.BIN'
+  on_disk SCALC.BIN    && echo '    prog "LibreOffice Calc" scalc SCALC.BIN'
+  on_disk SIMPRESS.BIN && echo '    prog "LibreOffice Impress" simpress SIMPRESS.BIN'
+  on_disk SDRAW.BIN    && echo '    prog "LibreOffice Draw" sdraw SDRAW.BIN'
+  on_disk SMATH.BIN    && echo '    prog "LibreOffice Math" smath SMATH.BIN'
+  on_disk SBASE.BIN    && echo '    prog "LibreOffice Base" sbase SBASE.BIN'
+  echo '}'
   echo 'separator'
   echo 'menu "Apps" folder {'
   # RimWorld first, and through HBHOST like every other native entry: the
@@ -129,6 +138,7 @@ T="$OUT/toolbar"
     on_disk "$a" && echo "prog \"$(label "$a")\" app HBHOST.BIN $a"
   done
   on_disk XFILES.BIN && echo 'prog "Files (X11)" folder XFILES.BIN'
+  on_disk SOFFICE.BIN && echo 'prog "LibreOffice" libreoffice SOFFICE.BIN'
   on_disk XEYESR.BIN && echo 'prog "XEyes" xload XEYESR.BIN'
   on_disk XCALCR.BIN && echo 'prog "XCalc" app XCALCR.BIN'
 } > "$T"

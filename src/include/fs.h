@@ -190,14 +190,27 @@ struct file {
                                         epoll table */
     } epollfd;
   };
+  int gidx;                        /**< C1-k5: this slot's global index (the
+                                        table is chunked, fs.c gfile) */
+  ylock_t pos_lock;                /**< C1-k5: the positioned-I/O lock (was
+                                        fs.c's static f1_pos_locks[]) */
 };
 
 /* L55: 512, not 128.  MAX_OPEN_FDS is now 256 per process, and this table is
  * the one every local fd indexes: leaving it at 128 would have made the wider
  * per-process table unusable (a single process could still only reach 128
  * distinct open files, and the desktop/launcher/socket slots share the rest).
- * One slot is ~400 B, so the extra 384 slots cost ~150 KiB of BSS. */
+ * One slot is ~400 B, so the extra 384 slots cost ~150 KiB of BSS.
+ * C1-k5: 16384 on x86_64 (Wine: ~3 pipes = 6 files per thread, in two
+ * processes).  Only GFT_STATIC slots are static; the rest are frame-pool
+ * chunks allocated on demand (fs.c gfile, docs/cp-k5.md §1).  ARM stays at
+ * 512, all static. */
+#ifdef __x86_64__
+#define MAX_GLOBAL_FILES 16384
+#else
 #define MAX_GLOBAL_FILES 512
+#endif
+#define GFT_STATIC 512
 
 void fs_init(void);
 struct trap_frame;
@@ -219,9 +232,26 @@ int fs_read_ext2_file(const char *path, uint8_t **buf_out, uint32_t *size_out,
 int file_close(struct process *p, int fd);
 int file_dup(struct process *p, int fd);
 int file_dup2(struct process *p, int oldfd, int newfd);
+/* C1-k5: F_DUPFD -- lowest free fd >= minfd below RLIMIT_NOFILE. */
+int file_dup_min(struct process *p, int fd, int minfd);
 int file_gfd_is_pipe(int gfd);
 int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame *tf);
+/* GB-308: read into a USER virtual range.  cp-sync: materializes the range
+ * writable (vm_range_ok, P1) and then reads into it directly, so an unbacked
+ * destination page cannot fault in kernel mode (main's bounce buffer split
+ * 64 KiB NFS reads; see fs.c). */
+int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
+                   struct trap_frame *tf);
+/* GB-308: positioned I/O that is atomic and cursor-neutral (the native layer
+ * has only a cursor, so this serialises seek+read/write+restore). */
+int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                    int64_t off, struct trap_frame *tf);
+int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
+                     int64_t off, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
+
+/* GB-308: open flags of an fd (-EBADF if absent), for the mmap access check. */
+int file_open_flags(struct process *p, int fd, uint32_t *out);
 /* WK-1 M3: length-bounded console write from user space, shared by
  * SYS_WRITE_CONSOLE (0001) and the fd-1/2 console fallback in file_write
  * (0002).  Emits exactly `size` bytes and returns size; -EFAULT on an
@@ -243,6 +273,8 @@ int file_eventfd_create(struct process *p, unsigned int initval, int flags);
 int file_fd_is_dir(struct process *p, int fd);
 int file_connect(struct process *p, uint32_t ip, uint16_t port, int protocol);
 int file_mkdir(struct process *p, const char *path);
+/* mkdir with POSIX errnos (0 / -EEXIST / -ENOENT); see file_mkdir_errno. */
+int file_mkdir_errno(struct process *p, const char *path);
 
 // Helpers for process management
 /**
@@ -418,6 +450,10 @@ int file_ftruncate(struct process *p, int fd, int64_t length);
  * SYN retransmission while a program waits in select(). */
 int file_select(struct process *p, int nfds, struct fd_set_k *rd,
                 struct fd_set_k *wr, struct fd_set_k *ex, int timeout_ms);
+/* C1-k5: the same engine over sets of nwords 32-bit words (<= MAX_OPEN_FDS
+ * bits); the compat select/pselect6 path. */
+int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
+                      uint32_t *ex, int nwords, int timeout_ms);
 
 /* P1: drop a pid's remembered select deadline (group teardown / thread
  * death: a parked select must not resurrect a dead thread's slice). */

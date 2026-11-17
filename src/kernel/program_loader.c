@@ -628,8 +628,19 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
   return 0;
 }
 
-#define COMPAT_MAX_ARGV 16
-#define COMPAT_MAX_ENV 24
+/* GB-308: was 16.  A Linux-ABI process silently lost argv[17] and beyond --
+ * measured 21 args in, argc=16 delivered, which truncated `keytool -genkeypair
+ * -storepass changeit ...` at its password flag and made every real JDK tool
+ * invocation subtly wrong with no diagnostic.  HO_EXEC_MAX_ARGS is 128 and the
+ * flat-string path already allows HO_EXEC_ARGV_LEN per element, so matching
+ * that ceiling is the honest limit rather than a silent 16. */
+#define COMPAT_MAX_ARGV 128
+/* C1-k5 (C8-game stop 1): 128 entries, was 24 (the excess was dropped
+   silently).  The env strings no longer pass through the 512-byte `s`
+   buffer either: they are copied straight from the PCB blob (HO_ENV_LEN),
+   so one entry may be as long as the blob.  More entries than this is
+   -E2BIG for the spawn.  Stack cost: envp[] 1 KiB + off[] 512 B. */
+#define COMPAT_MAX_ENV 128
 #define COMPAT_STR_MAX 512
 
 /* Write `s` (with its NUL) at the descending stack cursor and report its
@@ -725,30 +736,41 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
   if (argc < 0) argc = 0;
   if (envc < 0) envc = 0;
   if (argc > COMPAT_MAX_ARGV) argc = COMPAT_MAX_ARGV;
-  if (envc > COMPAT_MAX_ENV) envc = COMPAT_MAX_ENV;
+  if (envc > COMPAT_MAX_ENV) return -E2BIG; /* C1-k5: no silent truncation */
 
   /* Strings first, highest address first, so the arrays below them can be laid
-     down front-to-back without tracking each string's end. */
+     down front-to-back without tracking each string's end.  C1-k5: each env
+     entry is copied straight from the PCB blob (no 512-byte bounce). */
   int have_ldpath = 0;
-  for (int i = envc - 1; i >= 0; i--) {
-    int n = sys_readenv(grp, i, s, (int)sizeof s);
-    if (n < 0) {
-      s[0] = '\0';
-      n = 0;
+  {
+    /* start offsets of the envc entries in grp->env */
+    static const char kEmpty[1] = {0};
+    int off[COMPAT_MAX_ENV];
+    int pos = 0;
+    for (int i = 0; i < envc; i++) {
+      off[i] = pos < HO_ENV_LEN ? pos : -1;
+      while (pos < HO_ENV_LEN && grp->env[pos]) pos++;
+      if (pos < HO_ENV_LEN) pos++;
     }
-    /* Does the parent already own the library path?  Compared byte-wise: the
-       kernel is freestanding (no strncmp). */
-    {
-      static const char kLd[] = "LD_LIBRARY_PATH=";
-      int is_ld = 1;
-      for (int j = 0; kLd[j]; j++) {
-        if (s[j] != kLd[j]) { is_ld = 0; break; }
+    for (int i = envc - 1; i >= 0; i--) {
+      const char *e = off[i] >= 0 ? &grp->env[off[i]] : kEmpty;
+      int n = 0;
+      while (off[i] >= 0 && off[i] + n < HO_ENV_LEN && e[n]) n++;
+      /* Does the parent already own the library path?  Compared byte-wise:
+         the kernel is freestanding (no strncmp). */
+      {
+        static const char kLd[] = "LD_LIBRARY_PATH=";
+        int is_ld = 1;
+        for (int j = 0; kLd[j]; j++) {
+          if (j >= n || e[j] != kLd[j]) { is_ld = 0; break; }
+        }
+        if (is_ld) have_ldpath = 1;
       }
-      if (is_ld) have_ldpath = 1;
+      sp -= (uint64_t)n + 1;
+      if (n > 0 && vm_kwrite(child, sp, e, n) != 0) return -EFAULT;
+      if (vm_kwrite(child, sp + (uint64_t)n, kEmpty, 1) != 0) return -EFAULT;
+      envp[i] = sp;
     }
-    sp -= (uint64_t)n + 1;
-    if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
-    envp[i] = sp;
   }
   /* F3 (plan Appendix A, docs/rw-ldso-design.md): the frozen DSO resolution
      order is DT_RUNPATH -> LD_LIBRARY_PATH -> /LIB64, and /LIB64 is where the
@@ -1401,11 +1423,13 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       process_set_entry(pid, elf_entry, USER_MAIN_STK_TOP_V2);
     } else
 #endif
-    if (compat_stack_block(child, pid, elf_entry, elf_exe_entry, elf_phdr,
-                           elf_phnum, elf_interp_base, filename) != 0) {
-      uart_puts("v2 loader: startup block write failed\n");
+    int sbr = compat_stack_block(child, pid, elf_entry, elf_exe_entry, elf_phdr,
+                                 elf_phnum, elf_interp_base, filename);
+    if (sbr != 0) {
+      uart_puts(sbr == -E2BIG ? "v2 loader: startup block: env has more than COMPAT_MAX_ENV entries (E2BIG)\n"
+                              : "v2 loader: startup block write failed\n");
       process_free(pid);
-      return -EFAULT;
+      return sbr == -E2BIG ? -E2BIG : -EFAULT;
     }
   } else if (is_elf) {
     /* Native track (static ET_DYN or PT_INTERP): arguments come from the PCB
@@ -1767,6 +1791,7 @@ void proc_split_argv(struct process *p, const char *args) {
   if (pos < HO_EXEC_ARGV_LEN)
     p->eargv[pos] = '\0';
   p->eargc = narg;
+
 }
 
 /* P2.5 (S5): is [addr, addr+len) readable (write=0) / writable (write=1)

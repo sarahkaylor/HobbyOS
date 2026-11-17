@@ -140,6 +140,13 @@ int blk_data_present(void);
 uint64_t blk_data_sectors(void);
 int blk_data_read(uint64_t sector, void *buf, uint32_t count);
 int blk_data_write(uint64_t sector, const void *buf, uint32_t count);
+/* cp/ext2w: `nbuf` buffers of `nsec_each` sectors each, to/from consecutive
+ * sectors from `sector`, in multi-block NVMe commands (PRP lists, up to the
+ * controller's MDTS).  0 or -1. */
+int blk_data_rw_vec(uint64_t sector, void *const *bufs, uint32_t nbuf,
+                    uint32_t nsec_each, int wr);
+/* cp/ext2w diagnostics: namespace-2 commands issued and sectors moved. */
+void blk_data_stats(uint64_t *cmds, uint64_t *sectors, uint32_t *max_sectors);
 
 #ifdef KERNEL_MODE_UNIT_TEST
 /**

@@ -1,0 +1,51 @@
+qemu-slot: slot 4 of 4 held by pid 1611596 06:12:29
+t3_linux_probe: building /home/sarah/cp/lanes/ext2w/obj/intel/probe_fattrunc.elf
+make: Entering directory '/home/sarah/cp/lanes/ext2w'
+musl-gcc -static-pie -fPIE -O1 -g -Wall -Wextra -o obj/intel/probe_fattrunc.elf src/user/linux_probe_fattrunc.c
+make: Leaving directory '/home/sarah/cp/lanes/ext2w'
+=== t3_linux_probe: fattrunc (deadline 300s, log /home/sarah/cp/lanes/ext2w/obj/linux_probe_fattrunc.log) ===
+--- probe rows ---
+[LP] fattrunc probe (C3-ext2w): file /FATTRUNC.BIN
+[LP] PASS setup 12288-byte file (pages a/b/c) (0)
+[LP] PASS setup three mappings (2)
+[LP] PASS setup views resident (99)
+[LP] PASS T1 ftruncate 12288 -> 5000 (2)
+[LP] PASS T1 shared: bytes before the new end kept (97)
+[LP] PASS T1 shared: page 1 reads zeros after 5000 (0)
+[LP] PASS T1 shared: resident page 2 is SIGBUS (7)
+[LP] PASS T2 private RO: page 1 truncated content (0)
+[LP] PASS T2 private RO: untouched page 2 is SIGBUS (7)
+[LP] PASS T3 private RW: COW page 0 kept, page 1 reads through (88)
+[LP] PASS T3 private RW: COW copy past the cut discarded (SIGBUS) (7)
+[LP] PASS T6 read() ends at 5000 (0)
+[LP] PASS T4 regrow to 12288 (2)
+[LP] PASS T4 shared: regrown range reads zeros (0)
+[LP] PASS T4 private views: regrown page 2 reads zeros (0)
+[LP] PASS T4 shared: a write() into the regrown page is seen (78)
+[LP] PASS T5 setup shared view resident (2)
+[LP] PASS T5 open(O_TRUNC) of the mapped file (2)
+[LP] PASS T5 page 0 is SIGBUS after O_TRUNC (7)
+[LP] PASS T5 page 1 is SIGBUS after O_TRUNC (7)
+[LP] PASS T5 size 0 (0)
+[LP] done rc=0
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+[LCOMPAT] fault sig=7 pid=3 tgid=3 tls=0x100000B258 live_fs=0x0x100000B258
+[LCOMPAT] fault-no-handler pid=3 sig=7 ipc=0x0x100000167A rsp=0x0x17FFFFFCF0 vec=14 cr2=0x0x1080002000 live=1 -> default action
+[LCOMPAT] fault sig=7 pid=4 tgid=4 tls=0x100000B258 live_fs=0x0x100000B258
+[LCOMPAT] fault-no-handler pid=4 sig=7 ipc=0x0x100000167A rsp=0x0x17FFFFFCF0 vec=14 cr2=0x0x1080005000 live=1 -> default action
+[LCOMPAT] fault sig=7 pid=5 tgid=5 tls=0x100000B258 live_fs=0x0x100000B258
+[LCOMPAT] fault-no-handler pid=5 sig=7 ipc=0x0x100000167A rsp=0x0x17FFFFFCF0 vec=14 cr2=0x0x1080008000 live=1 -> default action
+[LCOMPAT] fault sig=7 pid=6 tgid=6 tls=0x100000B258 live_fs=0x0x100000B258
+[LCOMPAT] fault-no-handler pid=6 sig=7 ipc=0x0x100000167A rsp=0x0x17FFFFFCF0 vec=14 cr2=0x0x1080000000 live=1 -> default action
+[LCOMPAT] fault-no-handler pid=7 sig=7 ipc=0x0x100000167A rsp=0x0x17FFFFFCF0 vec=14 cr2=0x0x1080001000 live=1 -> default action
+--- faults / exits ---
+[EXITPC] pid=4 last_user_pc=0x10000028EB code=0x40000007
+[KERNEL] pid=5 (PROBE.ELF) memory fault VA=0x0000001080008000 PC=0x000000100000167A rw=r  in=BUS region=0x0000001080006000+0x0000000000003000 prot=3 kind=7 rsp=0x00000017FFFFFCF0 live=1 inH=0 cr3frame=0x0000000200CA9000 asroot=0x0000000200CA9000 sys=14 ret=0x0000000000000000 rbx=0x0000001080000000 rdi=0x0000001080008000 rsi=0x00000017FFFFFC20 rbp=0x0000000000000003 rbp0=<unreadable> -> killed
+[EXITPC] pid=5 last_user_pc=0x10000028EB code=0x40000007
+[KERNEL] pid=6 (PROBE.ELF) memory fault VA=0x0000001080000000 PC=0x000000100000167A rw=r  in=BUS region=0x0000001080000000+0x0000000000003000 prot=1 kind=7 rsp=0x00000017FFFFFCF0 live=1 inH=0 cr3frame=0x0000000200C86000 asroot=0x0000000200C86000 sys=14 ret=0x0000000000000000 rbx=0x0000000000000003 rdi=0x0000001080000000 rsi=0x00000017FFFFFC20 rbp=0x0000001080000000 rbp0=<unreadable> -> killed
+[EXITPC] pid=6 last_user_pc=0x10000028EB code=0x40000007
+[KERNEL] pid=7 (PROBE.ELF) memory fault VA=0x0000001080001000 PC=0x000000100000167A rw=r  in=BUS region=0x0000001080000000+0x0000000000003000 prot=1 kind=7 rsp=0x00000017FFFFFCF0 live=1 inH=0 cr3frame=0x0000000200C86000 asroot=0x0000000200C86000 sys=14 ret=0x0000000000000000 rbx=0x0000000000000003 rdi=0x0000001080001000 rsi=0x00000017FFFFFC20 rbp=0x0000001080000000 rbp0=<unreadable> -> killed
+[EXITPC] pid=7 last_user_pc=0x10000028EB code=0x40000007
+[EXITPC] pid=2 last_user_pc=0x100000365E code=0x0
+t3_linux_probe: PASS — fattrunc reached its done marker

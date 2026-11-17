@@ -386,7 +386,10 @@ static void test_file_poll_engine(void) {
   /* Argument validation. */
   struct k_pollfd fds[2];
   EXPECT_EQ(file_poll(cur, fds, -1, 0), -EINVAL);
-  EXPECT_EQ(file_poll(cur, fds, K_FD_SETSIZE + 1, 0), -EINVAL);
+  /* C1-k5: the engine's own bound is the fd table now (the native sys_poll
+     still refuses nfds > K_FD_SETSIZE before calling it; the compat poll
+     bounds nfds by RLIMIT_NOFILE). */
+  EXPECT_EQ(file_poll(cur, fds, MAX_OPEN_FDS + 1, 0), -EINVAL);
 
   /* Pipe with data reports POLLIN; empty pipe with 0 timeout reports 0. */
   int pfd[2];

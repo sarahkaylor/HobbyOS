@@ -1,0 +1,38 @@
+# linux_probe_shm: base5 kernel (949ba008, probe file added) vs lane, strix KVM, tools/gate/t3_linux_probe.sh shm, LP_TIMEOUT=300
+## base (~/cp/lanes/x3-base)
+t3_linux_probe: building /home/sarah/cp/lanes/x3-base/obj/intel/probe_shm.elf
+=== t3_linux_probe: shm (deadline 300s, log /home/sarah/cp/lanes/x3-base/obj/linux_probe_shm.log) ===
+[LP] shm probe (C4-x3): System V shared memory
+[LP] FAIL M1 shmget(IPC_PRIVATE, 1 MiB) id=-1 errno=38
+[LP] done rc=10
+[LCOMPAT] ENOSYS nr=29 name=PROBE.ELF pid=2 rip=0x10000027A3 rdi=0x0
+t3_linux_probe: FAIL — shm never printed '[LP] done rc=0' (tier rc=1)
+## lane (cp-x3)
+t3_linux_probe: building /home/sarah/cp/lanes/x3/obj/intel/probe_shm.elf
+=== t3_linux_probe: shm (deadline 300s, log /home/sarah/cp/lanes/x3/obj/linux_probe_shm.log) ===
+[LP] shm probe (C4-x3): System V shared memory
+[LP] PASS M1 shmget(IPC_PRIVATE, 1 MiB) id=256 errno=0
+[LP] PASS M2 shmat -> 0x1080000000, 1 MiB pattern reads back
+[LP] PASS M3 IPC_STAT rc=0 segsz=1048576 mode=600 nattch=1 cpid=2 (me 2)
+[LP] PASS M4 child shmat of the same id: saw parent's bytes=Y, parent sees child's bytes=yes
+[LP] PASS M5 nattch: in child 3 (want 3), after child's shmdt 2 (want 2), after exit 1 (want 1; 50 ms after waitpid)
+[LP] PASS M6 IPC_RMID while attached: rmid=0 reattach=ok nattch=2 dt=0,0 then IPC_STAT=-1 errno=22
+[LP] PASS M7 keyed: create=512 excl=-1/17 find=512 big=-1/22 unknown=-1/2 set=0 mode=604
+[LP] PASS M8 shmdt(non-shm)=-1/22 shmat(bad id)=0xffffffffffffffff/22
+[LP] PASS M9 SHM_RDONLY write: child status 0xb (want SIGSEGV)
+[LP] PASS M10 40 x 16 MiB segments: free before 11488 MiB, after 11488 MiB (drop 0 MiB)
+[LP] done rc=0
+t3_linux_probe: PASS — shm reached its done marker
+## strix host kernel (Linux), same ELF
+[LP] shm probe (C4-x3): System V shared memory
+[LP] PASS M1 shmget(IPC_PRIVATE, 1 MiB) id=65549 errno=0
+[LP] PASS M2 shmat -> 0x77a6736a0000, 1 MiB pattern reads back
+[LP] PASS M3 IPC_STAT rc=0 segsz=1048576 mode=600 nattch=1 cpid=1949959 (me 1949959)
+[LP] PASS M4 child shmat of the same id: saw parent's bytes=Y, parent sees child's bytes=yes
+[LP] PASS M5 nattch: in child 3 (want 3), after child's shmdt 2 (want 2), after exit 1 (want 1; 0 ms after waitpid)
+[LP] PASS M6 IPC_RMID while attached: rmid=0 reattach=ok nattch=2 dt=0,0 then IPC_STAT=-1 errno=22
+[LP] PASS M7 keyed: create=65550 excl=-1/17 find=65550 big=-1/22 unknown=-1/2 set=0 mode=604
+[LP] PASS M8 shmdt(non-shm)=-1/22 shmat(bad id)=0xffffffffffffffff/22
+[LP] PASS M9 SHM_RDONLY write: child status 0x8b (want SIGSEGV)
+[LP] PASS M10 40 x 16 MiB segments: free before 62783 MiB, after 62797 MiB (drop -15 MiB)
+[LP] done rc=0

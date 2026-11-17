@@ -1,0 +1,93 @@
+# Gate P4 rerun with the TREE-BUILT X server (no override): tools/cp/p4/run-p4.sh, strix KVM, -smp 8 -m 12288M, 4 guests on the host
+# tree: cp-x3 696b24d3 (cyberpunk 949ba008 + SysV shm + MIT-SHM); Wine ~/cp/wine-build-x; X stage ~/cp/x11-build-x2; WINEDEBUG=err+all,fixme-all,+loaddll
+# command: CP_WINE_STAGE=$HOME/cp/wine-build-x/stage/CP/WINE CP_X11_STAGE=$HOME/cp/x11-build-x2/stage/CP/X11 WINE_EXPORT=/srv/nfs/cp-x3-p4 P4_WINEDEBUG=err+all,fixme-all,+loaddll P4_OUT=$PWD/obj/p4/run1 PATH=$HOME/.local/bin:$PATH MAKEFLAGS=-j16 TOOLS_SKIP=1 bash tools/cp/p4/run-p4.sh
+== X server: the tree's ::/XHOBBY.BIN, sha256 9b161eded42374e06415d4033a35763aff8f6a061d8f34b5a0eebff95cbafa07
+== X server rows
+== the P4 rows
+6[P4] winep4 launcher (C4-x2)
+[P4] mount 10.0.2.2:/srv/nfs/cp-x3-p4 -> /CP ok
+[P4] begin wineboot : wineboot -i
+[P4] end wineboot status=0 ms=55900
+[P4] quiesce after wineboot: extra=0
+[P4] begin hold : desktop holder (background)
+[P4] hold pid=119
+[P4] warm-up done
+[P4] begin rawinput : wine Z:\CP\P4\rawinput.exe 120000
+[X] [RI] PASS RegisterRawInputDevices
+[X] [RI] window hwnd=0x10056 rect=200,150,840,630 fg=1 screen=1920x1080
+[X] [RI] phase free ready cursor=520,403
+[X] [RI] phase free total n=10 rel=10 abs=0 dx=70 dy=30 lastabs=0,0 cursor=590,433
+[X] [RI] PASS ClipCursor got=204,180,836,626
+[X] [RI] phase clip ready cursor=520,403 clip=204,180,836,626
+[X] [RI] phase clip total n=69 rel=69 abs=0 dx=850 dy=25 lastabs=0,0 cursor=835,428 inside=1
+[X] [RI] done rc=0
+[P4] end rawinput status=0 ms=15725
+[P4] begin modes : wine Z:\CP\P4\rawinput.exe modes
+[X] [RI] modes count=36 current=1920x1080 has1280x720=1
+[X] [RI] ChangeDisplaySettingsEx 1280x720 rc=0 metrics=1280x720 current=1280x720
+[X] [RI] modes hold 4000 ms
+[X] [RI] restore rc=0 current=1920x1080
+[X] [RI] done rc=0
+[P4] end modes status=0 ms=9368
+[P4] begin winecfg : wine winecfg
+[P4] end winecfg status=0 ms=23011
+[P4] begin notepad : wine notepad
+[P4] end notepad status=0 ms=17594
+[P4] begin kill : wineserver -k
+[P4] end kill status=0 ms=329
+[P4] leftover pid=119 name=rawinput.exe
+[P4] done
+== X server rows
+[X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+[X] hobbyos: randr: crtc off 0x0 on screen 1920x1080
+[X] hobbyos: randr: screen 0 now 1280x720 (338x190 mm)
+[X] hobbyos: randr: crtc mode 1280x720 on screen 1280x720
+[X] hobbyos: randr: crtc off 0x0 on screen 1280x720
+[X] hobbyos: randr: screen 0 now 1920x1080 (508x286 mm)
+[X] hobbyos: randr: crtc mode 1920x1080 on screen 1920x1080
+== MIT-SHM rows (kernel [SHM]: a Wine process's shmget + XHOBBY's shmat of the same id)
+[SHM] get pid=20 (wineboot.exe) a=0 b=0x30000 -> 256
+[SHM] at pid=20 (wineboot.exe) a=256 b=0x1081653000 -> 196608
+[SHM] at pid=3 (/XHOBBY.BIN) a=256 b=0x1080000000 -> 196608
+[SHM] rmid pid=20 (wineboot.exe) a=256 b=0x0 -> 0
+[SHM] get pid=184 (rawinput.exe) a=0 b=0x140000 -> 512
+[SHM] at pid=184 (rawinput.exe) a=512 b=0x1081605000 -> 1310720
+[SHM] at pid=3 (/XHOBBY.BIN) a=512 b=0x1080000000 -> 1310720
+[SHM] rmid pid=184 (rawinput.exe) a=512 b=0x0 -> 0
+[SHM] get pid=186 (rawinput.exe) a=0 b=0x3C0000 -> 768
+[SHM] at pid=186 (rawinput.exe) a=768 b=0x1081605000 -> 3932160
+[SHM] at pid=3 (/XHOBBY.BIN) a=768 b=0x1080000000 -> 3932160
+[SHM] rmid pid=186 (rawinput.exe) a=768 b=0x0 -> 0
+[SHM] get pid=196 (winecfg.exe) a=0 b=0x100000 -> 1024
+[SHM] at pid=196 (winecfg.exe) a=1024 b=0x1082151000 -> 1048576
+[SHM] at pid=3 (/XHOBBY.BIN) a=1024 b=0x1080000000 -> 1048576
+[SHM] rmid pid=196 (winecfg.exe) a=1024 b=0x0 -> 0
+[SHM] get pid=200 (notepad.exe) a=0 b=0x300000 -> 1280
+[SHM] at pid=200 (notepad.exe) a=1280 b=0x1082051000 -> 3145728
+[SHM] at pid=3 (/XHOBBY.BIN) a=1280 b=0x1080000000 -> 3145728
+[SHM] rmid pid=200 (notepad.exe) a=1280 b=0x0 -> 0
+[SHM] get pid=200 (notepad.exe) a=0 b=0x30000 -> 257
+[SHM] at pid=200 (notepad.exe) a=257 b=0x10823B1000 -> 196608
+[SHM] at pid=3 (/XHOBBY.BIN) a=257 b=0x1080300000 -> 196608
+[SHM] rmid pid=200 (notepad.exe) a=257 b=0x0 -> 0
+raw serial: /home/sarah/cp/lanes/x3/obj/p4/run1/serial.log; screendumps: /home/sarah/cp/lanes/x3/obj/p4/run1/*.png
+exports.sh: remove /srv/nfs/cp-x3-p4 ok (non-cp lines unchanged)
+== export line removed (exports.sh)
+== removed /srv/nfs/cp-x3-p4
+[P4G] qemu pid 1534127
+[P4G] clip row: [RI] phase clip total n=69 rel=69 abs=0 dx=850 dy=25 lastabs=0,0 cursor=835,428 inside=1
+[P4G] modes: fullscreen (magenta) window bbox on the glass (0, 0, 1278, 718, 921600)
+[P4G] winecfg dialog face bbox (4, 30, 412, 474, 28824)
+[P4G] winecfg tab libraries: region hash d75e74c3f3ffe411 -> b585f8d695dab704
+[P4G] winecfg tab graphics: region hash b585f8d695dab704 -> 3416f27e601e9893
+[P4G] winecfg tab audio: region hash 3416f27e601e9893 -> f2ff0749893d8a2f
+[P4G] winecfg: 3/3 tab clicks changed the dialog; exit status 0
+[P4G] notepad edit area bbox (0, 0, 1918, 1078, 711232)
+[P4G] notepad: dark pixels in the edit area 6407 -> 7008
+[P4G] notepad exit status 0
+[P4G] NFS failure rows: rpc-no-reply=0 nflk-rc-1=0 nfspipe-stall=0
+[P4G] NOTE: info: fullscreen window bbox (0, 0, 1278, 718, 921600) (expect (0, 0, 1278, 718) at 1280x720)
+[P4G] G1 PASS
+[P4G] G2 PASS
+[P4G] G3 PASS
+faults=0 drain_timeouts=0 unhandled=0

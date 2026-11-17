@@ -4,6 +4,18 @@ ARCH ?= intel
 # --- OS Detection ---
 # Detect whether we are on macOS (Homebrew) or Linux (system packages)
 UNAME_S := $(shell uname -s)
+
+# GB-308: OS was never defined anywhere, so `$(filter macos,$(OS))` was always
+# empty and ICU_CC stayed on the kernel compiler.  On macOS that means the ICU
+# host/target build dies in configure/link with
+#   ld: tapi error: malformed file ... libSystem.B.tbd: unknown architecture
+# unless the caller happened to pass OS=macos (two workers lost a whole session
+# to this).  Derive it, so a plain `make` and `make OS=macos` agree.
+ifeq ($(UNAME_S),Darwin)
+OS ?= macos
+else
+OS ?= $(shell echo $(UNAME_S) | tr 'A-Z' 'a-z')
+endif
 ifeq ($(UNAME_S),Darwin)
   OS := macos
 else
@@ -56,6 +68,9 @@ else
 endif
 
 # Mode selection (desktop or test)
+ifneq ($(filter lo_test_run lo_test_build,$(MAKECMDGOALS)),)
+  MODE ?= lo_test
+endif
 MODE ?= desktop
 # Default core count for `make run` (browser-capable desktop; 4-8 cores is
 # the standing requirement — never ship -smp 1 as the default).
@@ -464,6 +479,9 @@ else ifeq ($(MODE),selfhost)
   # The driver script path is passed as argv[1] (main.c KERNEL_MODE_SELFHOST
   # branch); the driver's own default is /SRC/SELFHOST.RUN.
   CFLAGS += -DKERNEL_MODE_SELFHOST
+else ifeq ($(MODE),lo_test)
+  CFLAGS += -DKERNEL_MODE_LO_TEST
+  USER_CFLAGS += -DKERNEL_MODE_LO_TEST
 else ifeq ($(MODE),soak)
   # P8.2 (browser.md §6): the soak — the standard test wave plus TORTURE.BIN
   # running its bounded soak loop (28-minute cap; main.c's KERNEL_SOAK_WAVE
@@ -2455,6 +2473,230 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/sqltest.elf $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlite3.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sqltest.elf $(SQLTEST_BIN)
 
+# =============================================================================
+# LibreOffice Application Suite & In-Guest E2E Test Suite (LO_TEST.BIN)
+# =============================================================================
+
+LO_TEST_BIN = $(OBJ_DIR)/lo_test.bin
+LO_TEST_SRC = src/user/libreoffice/test/lo_test.c
+LO_TEST_OBJ = $(OBJ_DIR)/lo_test.o
+
+LO_X11_DIR ?= third_party/x11/build/$(ARCH)
+LO_HDRS = $(wildcard src/user/libreoffice/include/*.h)
+
+LO_INCLUDES = -Isrc/user/libreoffice/include \
+              -I$(LO_X11_DIR)/prefix/include \
+              -I$(LO_X11_DIR)/prefix/include/freetype2 \
+              -Ithird_party/sqlite-amalgamation-3490200 \
+              -Isrc/user/x11/include \
+              -Isrc/user_include \
+              -Isrc/libc/include \
+              -Isrc/include
+
+LO_CORE_OBJS ?= $(OBJ_DIR)/lo_zip.o \
+                $(OBJ_DIR)/lo_xml.o \
+                $(OBJ_DIR)/lo_vcl.o \
+                $(OBJ_DIR)/lo_ui.o \
+                $(OBJ_DIR)/lo_writer.o \
+                $(OBJ_DIR)/lo_calc.o \
+                $(OBJ_DIR)/lo_impress.o \
+                $(OBJ_DIR)/lo_draw.o \
+                $(OBJ_DIR)/lo_math.o \
+                $(OBJ_DIR)/lo_base.o \
+                $(OBJ_DIR)/lo_soffice.o
+
+LO_OBJ_DEPS = $(OBJ_DIR)/sqlite_os.o \
+              $(OBJ_DIR)/sqlite3.o \
+              $(OBJ_DIR)/libcxx.a \
+              $(OBJ_DIR)/libc.a
+
+LO_X11_LIBS = $(LO_X11_DIR)/prefix/lib/libexpat.a \
+              $(LO_X11_DIR)/prefix/lib/libfreetype.a \
+              $(LO_X11_DIR)/prefix/lib/libpng16.a \
+              $(LO_X11_DIR)/prefix/lib/libz.a \
+              $(LO_X11_DIR)/prefix/lib/libX11.a \
+              $(LO_X11_DIR)/prefix/lib/libxcb.a \
+              $(LO_X11_DIR)/prefix/lib/libXau.a
+
+LO_LIBS = $(LO_OBJ_DEPS) $(LO_X11_LIBS)
+
+# Ensure X11 client & FreeType2 static libraries exist before compiling/linking
+# LibreOffice (also serialized after x11-staged when using the same build dir).
+.PHONY: lo-x11-libs
+lo-x11-libs: $(OBJ_DIR)/libc.a $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libcxx.a
+ifeq ($(X11_BUILD_DIR),$(LO_X11_DIR))
+ifneq ($(filter icewm,$(DESKTOP))$(filter lo_test,$(MODE)),)
+lo-x11-libs: x11-staged
+endif
+endif
+	@if [ -f "$(LO_X11_DIR)/prefix/lib/libX11.a" ] && \
+	    [ -f "$(LO_X11_DIR)/prefix/lib/libfreetype.a" ] && \
+	    [ -f "$(LO_X11_DIR)/prefix/lib/libexpat.a" ] && \
+	    [ -f "$(LO_X11_DIR)/prefix/lib/libpng16.a" ] && \
+	    [ -f "$(LO_X11_DIR)/prefix/lib/libz.a" ]; then \
+	  exit 0; \
+	fi; \
+	echo "[libreoffice] building X11 & FreeType2 prerequisites (third_party/x11/build.sh --arch $(ARCH) --stage all)"; \
+	bash third_party/x11/build.sh --arch $(ARCH) --stage all -j $(or $(X11_JOBS),8)
+
+LO_COMP_DEPS = $(USER_HDRS) $(LO_HDRS) $(SQLITE_DIR)/sqlite3.h | lo-x11-libs
+
+$(OBJ_DIR)/lo_zip.o: src/user/libreoffice/core/lo_zip.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/lo_xml.o: src/user/libreoffice/core/lo_xml.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/lo_vcl.o: src/user/libreoffice/core/lo_vcl.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/lo_ui.o: src/user/libreoffice/core/lo_ui.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/liblocore.a: $(OBJ_DIR)/lo_zip.o $(OBJ_DIR)/lo_xml.o $(OBJ_DIR)/lo_vcl.o $(OBJ_DIR)/lo_ui.o
+	@mkdir -p $(OBJ_DIR)
+	$(AR) rcs $@.$$$$ $^ && mv -f $@.$$$$ $@
+
+$(OBJ_DIR)/lo_writer.o: src/user/libreoffice/writer/lo_writer.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/lo_calc.o: src/user/libreoffice/calc/lo_calc.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/lo_impress.o: src/user/libreoffice/impress/lo_impress.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/lo_draw.o: src/user/libreoffice/draw/lo_draw.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/lo_math.o: src/user/libreoffice/math/lo_math.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/lo_base.o: src/user/libreoffice/base/lo_base.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/lo_soffice.o: src/user/libreoffice/soffice/lo_soffice.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+LO_TEST_SRCS = $(wildcard src/user/libreoffice/test/*.c)
+
+$(LO_TEST_OBJ): $(LO_TEST_SRC) $(LO_TEST_SRCS) $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(LO_TEST_BIN): $(LO_TEST_OBJ) $(LO_CORE_OBJS) $(LO_OBJ_DEPS) src/user/linker.ld | lo-x11-libs
+	$(LD) -T src/user/linker.ld -e _start --gc-sections \
+	  -o $(OBJ_DIR)/lo_test.elf \
+	  $(LO_TEST_OBJ) $(LO_CORE_OBJS) $(LO_OBJ_DEPS) $(LO_X11_LIBS)
+	$(OBJCOPY) -O binary $(OBJ_DIR)/lo_test.elf $(LO_TEST_BIN)
+
+SOFFICE_BIN  = $(OBJ_DIR)/soffice.bin
+SWRITER_BIN  = $(OBJ_DIR)/swriter.bin
+SCALC_BIN    = $(OBJ_DIR)/scalc.bin
+SIMPRESS_BIN = $(OBJ_DIR)/simpress.bin
+SDRAW_BIN    = $(OBJ_DIR)/sdraw.bin
+SMATH_BIN    = $(OBJ_DIR)/smath.bin
+SBASE_BIN    = $(OBJ_DIR)/sbase.bin
+
+LIBREOFFICE_BINS = $(SOFFICE_BIN) $(SWRITER_BIN) $(SCALC_BIN) $(SIMPRESS_BIN) $(SDRAW_BIN) $(SMATH_BIN) $(SBASE_BIN)
+
+$(OBJ_DIR)/soffice_main.o: src/user/libreoffice/soffice/soffice_main.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/writer_main.o: src/user/libreoffice/writer/writer_main.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/calc_main.o: src/user/libreoffice/calc/calc_main.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/impress_main.o: src/user/libreoffice/impress/impress_main.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/draw_main.o: src/user/libreoffice/draw/draw_main.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/math_main.o: src/user/libreoffice/math/math_main.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/base_main.o: src/user/libreoffice/base/base_main.c $(LO_COMP_DEPS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(LO_INCLUDES) -c $< -o $@
+
+$(SOFFICE_BIN): $(OBJ_DIR)/soffice_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) src/user/linker.ld | lo-x11-libs
+	$(LD) -T src/user/linker.ld -e _start --gc-sections \
+	  -o $(OBJ_DIR)/soffice.elf \
+	  $(OBJ_DIR)/soffice_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) $(LO_X11_LIBS)
+	$(OBJCOPY) -O binary $(OBJ_DIR)/soffice.elf $(SOFFICE_BIN)
+
+$(SWRITER_BIN): $(OBJ_DIR)/writer_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) src/user/linker.ld | lo-x11-libs
+	$(LD) -T src/user/linker.ld -e _start --gc-sections \
+	  -o $(OBJ_DIR)/swriter.elf \
+	  $(OBJ_DIR)/writer_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) $(LO_X11_LIBS)
+	$(OBJCOPY) -O binary $(OBJ_DIR)/swriter.elf $(SWRITER_BIN)
+
+$(SCALC_BIN): $(OBJ_DIR)/calc_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) src/user/linker.ld | lo-x11-libs
+	$(LD) -T src/user/linker.ld -e _start --gc-sections \
+	  -o $(OBJ_DIR)/scalc.elf \
+	  $(OBJ_DIR)/calc_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) $(LO_X11_LIBS)
+	$(OBJCOPY) -O binary $(OBJ_DIR)/scalc.elf $(SCALC_BIN)
+
+$(SIMPRESS_BIN): $(OBJ_DIR)/impress_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) src/user/linker.ld | lo-x11-libs
+	$(LD) -T src/user/linker.ld -e _start --gc-sections \
+	  -o $(OBJ_DIR)/simpress.elf \
+	  $(OBJ_DIR)/impress_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) $(LO_X11_LIBS)
+	$(OBJCOPY) -O binary $(OBJ_DIR)/simpress.elf $(SIMPRESS_BIN)
+
+$(SDRAW_BIN): $(OBJ_DIR)/draw_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) src/user/linker.ld | lo-x11-libs
+	$(LD) -T src/user/linker.ld -e _start --gc-sections \
+	  -o $(OBJ_DIR)/sdraw.elf \
+	  $(OBJ_DIR)/draw_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) $(LO_X11_LIBS)
+	$(OBJCOPY) -O binary $(OBJ_DIR)/sdraw.elf $(SDRAW_BIN)
+
+$(SMATH_BIN): $(OBJ_DIR)/math_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) src/user/linker.ld | lo-x11-libs
+	$(LD) -T src/user/linker.ld -e _start --gc-sections \
+	  -o $(OBJ_DIR)/smath.elf \
+	  $(OBJ_DIR)/math_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) $(LO_X11_LIBS)
+	$(OBJCOPY) -O binary $(OBJ_DIR)/smath.elf $(SMATH_BIN)
+
+$(SBASE_BIN): $(OBJ_DIR)/base_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) src/user/linker.ld | lo-x11-libs
+	$(LD) -T src/user/linker.ld -e _start --gc-sections \
+	  -o $(OBJ_DIR)/sbase.elf \
+	  $(OBJ_DIR)/base_main.o $(LO_CORE_OBJS) $(LO_OBJ_DEPS) $(LO_X11_LIBS)
+	$(OBJCOPY) -O binary $(OBJ_DIR)/sbase.elf $(SBASE_BIN)
+
+.PHONY: lo_test lo_test_build lo_test_run libreoffice_test lo_apps libreoffice
+lo_test: $(LO_TEST_BIN)
+lo_apps: $(LIBREOFFICE_BINS)
+libreoffice: $(LIBREOFFICE_BINS)
+
+lo_test_build:
+	$(MAKE) MODE=lo_test $(TARGET) disk.img
+
+lo_test_run:
+	@if [ ! -f $(TARGET) ] || [ ! -f disk.img ]; then $(MAKE) MODE=lo_test lo_test_build; fi
+	$(QEMU_CMD)
+
+libreoffice_test:
+	python3 tools/run_libreoffice_test.py --arch $(ARCH) $(LO_TEST_ARGS)
+
+
 # --- IceWM session (icewm.md §4.3/§4.5, lane session) --------------------
 # XSESSION.BIN: the X session launcher (src/user/x11sess/xsession.c).  The
 # named-AF_UNIX readiness probe compiles in only when the kernel ABI has the
@@ -2509,6 +2751,17 @@ icewm-stubs: $(X11STUB_BINS)
 # source with third_party/x11/build.sh (default build dir only — an explicit
 # X11_BUILD_DIR that lacks them is an error, never a silent rebuild).
 X11_REQUIRED_BINS = XHOBBY.BIN ICEWM.BIN
+# cp/x3: a build dir that already HAS XHOBBY.BIN/ICEWM.BIN used to be taken
+# as-is, so a tree whose server or window-manager sources changed (C4-x2's
+# one-screen DDX, MIT-SHM, IceWM patches) kept booting whatever the dir was
+# first built with.  When any input of a stage is newer than the dir's last
+# check of that stage, the stage is re-run; build.sh's content keys make that
+# a no-op (a few seconds) when nothing really changed.
+X11_COMMON_INPUTS = third_party/x11/build.sh third_party/x11/cross $(OBJ_DIR)/libc.a
+X11_server_INPUTS = third_party/x11/ddx third_party/x11/patches/xserver \
+  third_party/x11/build-server.sh third_party/x11/pins/server.txt
+X11_icewm_INPUTS = third_party/x11/icewm third_party/x11/patches/icewm \
+  third_party/x11/build-icewm.sh third_party/x11/pins/icewm.txt
 # The runtime prerequisites build.sh links every flat .BIN against: listing
 # them here makes the outer make build them first, so build.sh's own
 # `make obj/<arch>/libc.a` is a no-op instead of rewriting libc.a while a
@@ -2516,6 +2769,16 @@ X11_REQUIRED_BINS = XHOBBY.BIN ICEWM.BIN
 .PHONY: x11-staged
 x11-staged: $(OBJ_DIR)/libc.a $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libcxx.a
 	@missing=""; for b in $(X11_REQUIRED_BINS); do [ -f "$(X11_BUILD_DIR)/bin/$$b" ] || missing="$$missing $$b"; done; \
+	if [ -z "$$missing" ] && [ "$(X11_BUILD_DIR)" = "third_party/x11/build/$(ARCH)" ] && [ -f third_party/x11/build.sh ]; then \
+	  for st in server icewm; do \
+	    case $$st in server) ins="$(X11_server_INPUTS)";; *) ins="$(X11_icewm_INPUTS)";; esac; \
+	    chk="$(X11_BUILD_DIR)/.$$st-inputs-checked"; \
+	    new=""; [ -f "$$chk" ] && new="$$(find $$ins $(X11_COMMON_INPUTS) -newer "$$chk" 2>/dev/null | head -1)"; \
+	    if [ ! -f "$$chk" ] || [ -n "$$new" ]; then \
+	      echo "[x11] $$st inputs changed$${new:+ ($$new)}: re-running build.sh --stage $$st (cached when the key matches)"; \
+	      bash third_party/x11/build.sh --arch $(ARCH) --stage $$st -j $(or $(X11_JOBS),8) || exit 1; \
+	      touch "$$chk"; fi; \
+	  done; fi; \
 	if [ -z "$$missing" ]; then echo "[x11] using $(X11_BUILD_DIR)"; exit 0; fi; \
 	if [ "$(X11_BUILD_DIR)" != "third_party/x11/build/$(ARCH)" ]; then \
 	  echo "[x11] ERROR: X11_BUILD_DIR=$(X11_BUILD_DIR) lacks:$$missing (expected in $(X11_BUILD_DIR)/bin/)"; exit 1; fi; \
@@ -2577,6 +2840,21 @@ disk.img: browser-staged tools-staged
 # The browser's TLS trust store is a disk input, not a build artefact: if the
 # bundle is missing the disk must not be built silently-https-broken.
 disk.img: certs/cacert.pem
+
+# LibreOffice suite (`make run` completeness): build and stage all 7 apps into
+# every disk.img (skipped only when X11_BUILD_DIR is the synthetic x11stub dir).
+# cp-sync (merge of main): ...and when the X client prefix the suite links
+# against has not been built.  Without that, lo-x11-libs would run
+# third_party/x11/build.sh --stage all (a from-source X stack build) inside
+# every `make disk.img`, which the cyberpunk gate trees do not carry.
+# LO_ON_DISK=1 forces the suite in, LO_ON_DISK= keeps it out.
+LO_ON_DISK ?= $(if $(filter %/x11stub,$(X11_BUILD_DIR)),,$(if $(wildcard $(LO_X11_DIR)/prefix/lib/libX11.a),1,))
+ifneq ($(LO_ON_DISK),)
+disk.img: $(LIBREOFFICE_BINS)
+endif
+ifeq ($(MODE),lo_test)
+disk.img: $(LO_TEST_BIN) $(LIBREOFFICE_BINS) $(XSESSION_BIN) x11-staged
+endif
 
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(POLLTSTBRK_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(STAGE4K_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(SELFHOST_BIN) $(MODE_FILE) $(XCRYPT_BIN) $(NES_BIN) $(DOOM_BIN) $(DOOML_BIN) $(SDL_APP_PIE)
 
@@ -2727,6 +3005,18 @@ endif
 	$(MCOPY) -i disk.img $(SHELL_TEST_BIN) ::/SHTEST.BIN
 	$(MCOPY) -i disk.img $(PS_BIN) ::/PS.BIN
 	$(MCOPY) -i disk.img $(FREE_BIN) ::/FREE.BIN
+ifeq ($(MODE),lo_test)
+	$(MCOPY) -i disk.img $(LO_TEST_BIN) ::/LO_TEST.BIN
+endif
+ifneq ($(LO_ON_DISK),)
+	$(MCOPY) -i disk.img $(SOFFICE_BIN) ::/SOFFICE.BIN
+	$(MCOPY) -i disk.img $(SWRITER_BIN) ::/SWRITER.BIN
+	$(MCOPY) -i disk.img $(SCALC_BIN) ::/SCALC.BIN
+	$(MCOPY) -i disk.img $(SIMPRESS_BIN) ::/SIMPRESS.BIN
+	$(MCOPY) -i disk.img $(SDRAW_BIN) ::/SDRAW.BIN
+	$(MCOPY) -i disk.img $(SMATH_BIN) ::/SMATH.BIN
+	$(MCOPY) -i disk.img $(SBASE_BIN) ::/SBASE.BIN
+endif
 	$(MCOPY) -i disk.img $(UPTIME_BIN) ::/UPTIME.BIN
 	$(MCOPY) -i disk.img $(KILL_BIN) ::/KILL.BIN
 	$(MCOPY) -i disk.img $(BASENAME_BIN) ::/BASENAME.BIN
@@ -2913,6 +3203,10 @@ endif
 	done
 ifeq ($(DESKTOP),icewm)
 	# icewm.md §4.3/§4.4: X binaries + data tree + XSESSION.BIN (DESKTOP=icewm only).
+	sh src/user/x11sess/stage-disk.sh disk.img "$(X11_BUILD_DIR)" $(XSESSION_BIN) "$(MCOPY)" "$(MMD)"
+endif
+ifeq ($(MODE),lo_test)
+	# Stage full X11 assets (/X11/US.XKM, fonts, XHOBBY.BIN) for in-guest GUI tests
 	sh src/user/x11sess/stage-disk.sh disk.img "$(X11_BUILD_DIR)" $(XSESSION_BIN) "$(MCOPY)" "$(MMD)"
 endif
 	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
