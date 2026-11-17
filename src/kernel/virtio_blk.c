@@ -2357,7 +2357,8 @@ int blk_data_read(uint64_t sector, void *buf, uint32_t count) {
 }
 
 int blk_data_write(uint64_t sector, const void *buf, uint32_t count) {
-  void *b[1] = {(void *)(uintptr_t)buf};
+  void *b[1];
+  memcpy(&b[0], &buf, sizeof buf); /* drop const: a write only reads it */
   return ns2_rw_vec(sector, b, 1, count, 1);
 }
 
