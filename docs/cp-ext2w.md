@@ -365,10 +365,15 @@ controller at 2 s.
 
 ### 7.4 Stop 9 -- a long NVMe wait pinning a CPU
 
-`nvme_wait_cid` now yields between polls when the waiter is a kernel task
-(the flusher) and the command has been outstanding for more than 2 ms
-(interrupts on only; a user syscall's continuation never moves, trap.c's
-0x81 guard).  The run-8 picture itself (a task RUNNING and claimed by CPU7
+A yield in `nvme_wait_cid` for kernel tasks (tried in 8861a362, as asked)
+was reverted: in one `linux_probe_e2churn` run a user pid took a kernel-mode
+fault with the flusher's RSP while CPU0 ran the flusher -- two CPUs on one
+kernel-task stack, the L78 `arch_yield`-from-a-kernel-thread shape that
+`virtio_blk.c`'s stress-thread comment records.  The wait stays a poll; the
+tick preempts a kernel task inside it as anywhere else, so a slow command
+does not pin its CPU for a kernel task (a user syscall's continuation never
+moves, trap.c's 0x81 guard).  Making NVMe completion IRQ-driven with a real
+park is the clean answer and is left to the driver/scheduler owners.  The run-8 picture itself (a task RUNNING and claimed by CPU7
 while CPU7 ran the flusher) is the shared-stack corruption of §7.1: two
 contexts on one stack.  Can an idle CPU steal a task claimed by a busy one?
 No: a RUNNING slot is resumed only by the CPU that claims it
