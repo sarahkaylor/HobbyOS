@@ -149,7 +149,7 @@ JSON).
 | **D3D12 triangle (vkd3d-proton 3.1) under Wine on Venus** | **PASS**: 12 374 frames / 65 s = 190 fps (run 11); final config run 13: 11 463 frames = 176 fps; two screendumps each | `probe2-d3d-venus-PASS.txt`, `probe2-final-run13.txt` |
 | D3D11 triangle (DXVK 3.1.1) under Wine on Venus | PASS: 7 994 frames / 65 s = 123 fps (run 11); run 13: 7 666 frames = 118 fps | `probe2-d3d-venus-PASS.txt`, `probe2-final-run13.txt` |
 | vkcube.exe under Wine on Venus | PASS (with the P5 device-name override); run 13: 13 248 frames = 204 fps | `probe2-wine-venus.txt`, `probe2-final-run13.txt` |
-| full batch at parity | see `gate-batch.txt` | `gate-batch.txt` |
+| full batch at parity | **parity** on bacc6aae (code == HEAD): all 36 t3 probes + ext2/exec/pfx/rsize gates pass first time; unit 460 run, the same 2 base failures as C0-sync; host 38/40 (C0-sync 37/40); castscan, arm ok | `gate-batch.txt` |
 
 ### 6.1 The D3D stall (closed): root cause and fixes
 

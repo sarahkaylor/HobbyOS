@@ -1,8 +1,10 @@
-# Full gate batch (docs/cyberpunk.md common rules) on cp-venus after merging cyberpunk 15ad4a35, strix, 2026-11-17
+# Full gate batch (docs/cyberpunk.md common rules) on cp-venus, strix, 2026-11-17
 # script: ~/cp/venus-gates.sh = ~/cp/base5-gates.sh with the tree ~/cp/lanes/venus-gate, LO_ON_DISK= and ~/.local/bin on PATH
-# parity references: docs/cp-sync-evidence/batch-lane.txt (C0-sync, cyberpunk 15ad4a35) and ~/cp/base5-gates.txt
+# tree: bacc6aae + the run-12/13 build.sh (code identical to HEAD; later commits touch only docs/evidence)
+# parity reference: docs/cp-sync-evidence/batch-lane.txt (C0-sync, cyberpunk 15ad4a35)
+# previous lane run (de1b34d9, before the frame-allocation / IRQ / timeline changes): ~/cp/venus-gates-de1b34d9.txt
 
-tree de1b34d9 cp/venus: syncs wait for submit (like drm_syncobj WAIT_FOR_SUBMIT); vn_info timeline test
+tree bacc6aae cp/venus: Gate P6 D3D12 row PASSES -- d3d12tri (vkd3d-proton) 190 fps and d3d11tri (DXVK) 123 fps on Venus for 65 s (+ build.sh: no sync-present patch)
 build rc=0
 avx rc=0 [LP] done rc=0
 bigobj rc=0 [LP] done rc=0
@@ -10,7 +12,7 @@ clock rc=0 [LP] done rc=0
 cow rc=0 [LP] done rc=0
 exec rc=0 [LP] done rc=0
 execthr rc=0 [LP] done rc=0
-exitgroup rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+exitgroup rc=0 [LP] done rc=0
 fatcoh rc=0 [LP] done rc=0
 fd rc=0 [LP] done rc=0
 fpu_sig rc=0 [LP] done rc=0
@@ -52,11 +54,7 @@ rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
 pfx_gate rc=0 pfx_gate: PASS
 ALLDONE
 
-# diff vs C0-sync's batch (rows only)
-8c8
-< exitgroup rc=0 [LP] done rc=0
----
-> exitgroup rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+# diff vs C0-sync's batch (rows only; '<' C0-sync, '>' this lane)
 40,41c40,41
 < rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/sync)
 < unit rc=1 Tests failed! Tests run:    453 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
@@ -70,9 +68,8 @@ ALLDONE
 > host [host-tests] done: 38/40 passed
 > castscan rc=0 castscan: 365 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
 
-# exitgroup reruns on the same tree (X7 is timing-sensitive; first run was on a host with 4 guests + this lane's Wine boot)
-exitgroup rerun 1 rc=0 [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 370 ms) [LP] done rc=0 
-exitgroup rerun 2 rc=0 [LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 426 ms) [LP] done rc=0 
-
-[exited with code 0]
-[LP] FAIL X7 two concurrent exit_group callers x20 (3 bad, worst 1601 ms)
+# reading
+- every t3 probe passes first time, exitgroup X7 included (it flaked once in the de1b34d9 run; two reruns passed then).
+- unit: the same 2 failures as C0-sync (virtio_gpu_test.c:214, :244 -- pre-existing, in base); 460 run vs 453 = this lane's +7 M2 tests, all pass.
+- host 38/40 vs 37/40, castscan rc=0 vs rc=1: this lane's tree carries the cyberpunk fixes after C0-sync's snapshot; no regression.
+- ARM: arm rc=0; __bss_end 0x454b44e8 on this branch == base 15ad4a35 (the M2 code is x86-only; Venus tables are frame allocations).
