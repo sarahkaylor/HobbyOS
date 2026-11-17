@@ -548,6 +548,131 @@ vn_renderer_hobbyos_scanout(struct vn_renderer *renderer, struct vn_renderer_bo 
                             uint32_t *flush_us);
 """, 1)
 open(v + '/vn_renderer.h', 'w').write(h)
+# ---- C6-present (docs/cp-present.md): the [HBV] instrument -- where venus'
+# own threads wait (ring replies by command type, vn_relax sleeps/yields, ring
+# notifies, renderer submits and waits, app-thread queue submits).  Counters
+# live in hb_present_stats.h's one global; the row is printed with [HBP].
+c = open(v + '/vn_common.c').read()
+c = c.replace('#include "vn_common.h"\n', '#include "vn_common.h"\n#include "hb_present_stats.h" /* [HBV] */\n', 1)
+old = """   if (*iter < (1 << busy_wait_order)) {
+      thrd_yield();
+      return;
+   }
+"""
+assert c.count(old) == 1
+c = c.replace(old, """   if (*iter < (1 << busy_wait_order)) {
+      thrd_yield();
+      hb_vstats_add(HB_VS_YIELD, 0);
+      return;
+   }
+""", 1)
+old = """   os_time_sleep(base_sleep_us << shift);
+}"""
+assert c.count(old) == 1
+c = c.replace(old, """   const uint64_t hb_t0 = hb_tsc();
+   os_time_sleep(base_sleep_us << shift);
+   hb_vstats_add(state->reason_str[0] == 't' || !strcmp(state->reason_str, "ring seqno")
+                    ? HB_VS_SLP_R : HB_VS_SLP_O, hb_tsc() - hb_t0);
+}""", 1)
+open(v + '/vn_common.c', 'w').write(c)
+
+r = open(v + '/vn_ring.c').read()
+r = r.replace('#include "vn_ring.h"\n', '#include "vn_ring.h"\n#include "hb_present_stats.h" /* [HBV] */\n', 1)
+old = """   struct vn_relax_state relax_state = vn_relax_init(ring->instance, reason);
+   do {
+      if (vn_ring_get_seqno_status(ring, seqno)) {
+         vn_relax_fini(&relax_state);
+         return;
+      }
+      vn_relax(&relax_state);
+   } while (true);
+}"""
+assert r.count(old) == 1
+r = r.replace(old, """   if (vn_ring_get_seqno_status(ring, seqno))
+      return;
+   const uint64_t hb_t0 = hb_tsc();
+   struct vn_relax_state relax_state = vn_relax_init(ring->instance, reason);
+   do {
+      if (vn_ring_get_seqno_status(ring, seqno)) {
+         vn_relax_fini(&relax_state);
+         hb_vstats_add(reason == VN_RELAX_REASON_RING_SEQNO ? HB_VS_RING : HB_VS_TLS,
+                       hb_tsc() - hb_t0);
+         return;
+      }
+      vn_relax(&relax_state);
+   } while (true);
+}""", 1)
+old = """      struct vn_relax_state relax_state =
+         vn_relax_init(ring->instance, VN_RELAX_REASON_RING_SPACE);
+      do {
+         vn_relax(&relax_state);
+         if (vn_ring_has_space(ring, size, &head)) {
+            vn_relax_fini(&relax_state);
+            return head;
+         }
+      } while (true);"""
+assert r.count(old) == 1
+r = r.replace(old, """      const uint64_t hb_t0 = hb_tsc();
+      struct vn_relax_state relax_state =
+         vn_relax_init(ring->instance, VN_RELAX_REASON_RING_SPACE);
+      do {
+         vn_relax(&relax_state);
+         if (vn_ring_has_space(ring, size, &head)) {
+            vn_relax_fini(&relax_state);
+            hb_vstats_add(HB_VS_SPACE, hb_tsc() - hb_t0);
+            return head;
+         }
+      } while (true);""", 1)
+old = """      vn_renderer_submit_simple(ring->instance->renderer, notify_ring_data,
+                                vn_cs_encoder_get_len(&local_enc));"""
+assert r.count(old) == 1
+r = r.replace(old, """      const uint64_t hb_t0 = hb_tsc();
+      vn_renderer_submit_simple(ring->instance->renderer, notify_ring_data,
+                                vn_cs_encoder_get_len(&local_enc));
+      hb_vstats_add(HB_VS_NOTIFY, hb_tsc() - hb_t0);""", 1)
+old = """   vn_cs_encoder_commit(&submit->command);
+
+   size_t reply_offset = 0;"""
+assert r.count(old) == 1
+r = r.replace(old, """   vn_cs_encoder_commit(&submit->command);
+   const uint32_t hb_type = submit->command.buffer_count && submit->command.buffers[0].base
+                               ? *(const uint32_t *)submit->command.buffers[0].base
+                               : ~0u;
+
+   size_t reply_offset = 0;""", 1)
+old = """         vn_ring_wait_seqno(ring, submit->ring_seqno);
+      } else {"""
+assert r.count(old) == 1
+r = r.replace(old, """         const uint64_t hb_t0 = hb_tsc();
+         vn_ring_wait_seqno(ring, submit->ring_seqno);
+         hb_vstats_cmd(hb_type, hb_tsc() - hb_t0);
+      } else {""", 1)
+open(v + '/vn_ring.c', 'w').write(r)
+
+q = open(v + '/vn_queue.c').read()
+q = q.replace('#include "vn_queue.h"\n', '#include "vn_queue.h"\n#include "hb_present_stats.h" /* [HBV] */\n', 1)
+old = """   const bool locked = vn_wsi_queue_lock(queue);
+   VkResult result = vn_hb_"""
+assert q.count(old) == 3
+q = q.replace(old, """   const uint64_t hb_t0 = hb_tsc();
+   const bool locked = vn_wsi_queue_lock(queue);
+   VkResult result = vn_hb_""")
+old = """   vn_wsi_queue_unlock(queue, locked);
+   return result;"""
+assert q.count(old) == 3
+q = q.replace(old, """   vn_wsi_queue_unlock(queue, locked);
+   hb_vstats_add(HB_VS_QSUB, hb_tsc() - hb_t0);
+   hb_vtid_add(1, hb_tsc() - hb_t0);
+   return result;""")
+open(v + '/vn_queue.c', 'w').write(q)
+c = open(ws + '/wsi_common.c').read()
+for fn, call in (('wsi_WaitForPresentKHR', '   return swapchain->wait_for_present(swapchain, presentId, timeout);\n'),
+                 ('wsi_WaitForPresent2KHR', '   return swapchain->wait_for_present2(swapchain, info->presentId, info->timeout);\n')):
+    assert c.count(call) == 1, fn
+    c = c.replace(call, call.replace('   return ', '   const uint64_t hb_t0 = hb_tsc();\n   VkResult hb_r = ').replace(';\n', ';\n') +
+                  '   const uint64_t hb_dt = hb_tsc() - hb_t0;\n   hb_vstats_add(HB_VS_PWAIT, hb_dt);\n   hb_vtid_add(2, hb_dt);\n   return hb_r;\n', 1)
+open(ws + '/wsi_common.c', 'w').write(c)
+print("patched [HBV]", v)
 print("patched", v)
 EOF
   say "patch: Mesa 26.2.6 (sha256 ok) + vn_renderer_hobbyos.c + gpu_abi.h + meson/vn_renderer.h hooks"

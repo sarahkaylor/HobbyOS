@@ -1,0 +1,54 @@
+# tools/cp/present/fpsprobe-stack.p9 -- tools/cp/p9/fpsprobe.p9 with a kernel-stack PC profile (C6-present, docs/cp-present.md)
+# play.p9's load sequence, 3 minutes of walking, a guest PC profile, then stop.
+# (play.p9's header follows.)
+# Main menu -> LOAD GAME -> ManualSave-86 (the user's save, "The Ripperdoc",
+# Megabuilding H10 atrium, Little China, Watson), ~10.5 min of play with QMP
+# keyboard + relative mouse (walk, turn, sprint, map), F5 quick save, QUIT GAME.
+# The sequences come from the interactive boot ctl1 (docs/cp-p9.md §2):
+#  * menus: the focus is hidden until the first key; taps need ~0.8 s
+#    spacing (boot_p9 `key` default); `seek` reads the highlighted row's
+#    position from the screendump, so no tap count is trusted (gateA1: in the
+#    main menu "up" past CONTINUE lands on the patch-notes button).
+#  * LOAD GAME groups saves by playthrough; "0" expands every group; the
+#    Ripperdoc group (ManualSave-86) is the last entry, above the
+#    Cross Progression button.
+#  * the save's world: walking forward from the start meets Jackie (a talk
+#    trigger, not a choice); the street is behind and to the left.
+
+phase menu
+shot menu
+# ---- LOAD GAME -> ManualSave-86 ---------------------------------------------
+seek menu-load main down 6 LOAD GAME
+key ret
+expect loadlist 30 LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression
+key 0
+wait 2
+# the list with both groups expanded (ctl1): Streetkid/AutoSave-16 group at
+# the top, then the second Streetkid group whose one entry, "The Ripperdoc"
+# (ManualSave-86), has its frame centred at screen row 509
+expect loadlist-ripperdoc 10 Ripperdoc
+listseek loadlist-focus down 8 509
+phase loading
+key ret
+expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 6
+phase world
+expect inworld 60 RIPPERDOC|Jackie
+shot world-start
+
+# ---- 3 minutes of walking, then stop (no save) -------------------------------
+hold w 3000
+look 1200 0 40 16
+repeat 6
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+wait 3
+shot fp-loop
+end
+prof 20 10 fp-world stack
+stop
