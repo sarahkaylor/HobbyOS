@@ -1,0 +1,63 @@
+# tools/cp/p9/reload.p9 -- Gate P9 boot B (lane C9-play, docs/cp-p9.md §3):
+# a fresh boot on boot A's data disk (P9_FROM=<boot A run>).  Shows the save
+# list (OCR: boot A's quick save is there), loads the newest save with
+# CONTINUE (= the quick save boot A made last), checks by OCR + screendump
+# that it is the same place, quick-saves again WITHOUT moving (so the two
+# saves' metadata playerPosition can be compared on the host, tools/cp/p9/
+# saves.sh), then QUIT GAME.
+phase menu
+shot menu
+expect menu-continue 10 CONTINUE
+# the save list first (evidence only), then back
+seek menu-load main down 6 LOAD GAME
+key ret
+expect loadlist 30 LOAD\s*GAME
+key 0
+wait 3
+shot loadlist
+# boot A's quick save and the game's own autosave join ManualSave-86 in the
+# Ripperdoc group: three "The Ripperdoc" entries (gateB4: OCR of the full screen
+# does not read the small save names like "QuickSave-0")
+expect loadlist-newsaves 10 Ripperdoc.*Ripperdoc.*Ripperdoc
+key esc
+wait 4
+# CONTINUE = the most recent save
+seek menu-continue main up 6 CONTINUE
+phase loading
+key ret
+expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 6
+phase world
+expect inworld 60 RIPPERDOC|Jackie
+shot reloaded-place
+wait 10
+shot reloaded-place2
+prof 20 10 reload-world
+# kernel call chains of the busy vCPUs (docs/cp-p9.md §5: proc_lock)
+prof 30 4 reload-stack stack
+# 2 minutes in the world (frame-rate sample on the reloaded save)
+phase save
+key f5
+wait 5
+shot resaved
+phase world
+repeat 5
+hold w 4000
+look 400 0 20 16
+down shift
+hold w 4000
+up shift
+wait 3
+shot rl-loop
+end
+phase quit
+key esc
+wait 4
+seek pause-quit pause down 9 QUIT GAME
+exit_ok
+key ret
+wait 3
+expect quit-confirm 10 sure.{0,20}quit
+key ret
+wait_exit 180

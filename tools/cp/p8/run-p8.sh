@@ -41,6 +41,14 @@
 #      P8_VKD3D_FL (VKD3D_FEATURE_LEVEL; default 12_0 on lavapipe, unset on Venus),
 #      P8_GPU (lavapipe | venus), VENUS_BUILD (~/cp/venus-build), HOSTMEM (Venus
 #      BAR window, host-venus.sh default 8G: a host mapping, not guest RAM).
+# P9 hooks (lane C9-play, docs/cp-p9.md; tools/cp/p9/run-p9.sh sets them):
+#      P8_BASE (run dir parent, default obj/cp-p8), P8_SEEDED (the seeded image a
+#      game boot copies, default $P8_BASE/pfx-seeded.img), P8_CPDATA_FROM (copy
+#      THIS data image instead, e.g. the previous P9 boot's cpdata.img with the
+#      game's own save on it), P8_BOOT (the boot/watch script, default
+#      tools/cp/p8/boot_p8.py), P8_BOOT_ARGS (extra args for it), P8_MEM above
+#      12288 (P9 game boots only, at most 32768: the boot script takes
+#      /tmp/cp-bigguest.lock inside the slot, docs/cyberpunk.md §7.2f).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT" || exit 2
@@ -70,8 +78,12 @@ WDBG="${P8_WINEDEBUG:-+loaddll,fixme-all,+fps}"   # +fps: winevulkan's "N fps" r
 GPU="${P8_GPU:-lavapipe}"
 VENUS_BUILD="${VENUS_BUILD:-$HOME/cp/venus-build}"
 TIMEOUT_S="${TIMEOUT_S:-5400}"
-BASE="$ROOT/obj/cp-p8"
-SEEDED="$BASE/pfx-seeded.img"
+BASE="${P8_BASE:-$ROOT/obj/cp-p8}"
+SEEDED="${P8_SEEDED:-$BASE/pfx-seeded.img}"
+BOOT="${P8_BOOT:-tools/cp/p8/boot_p8.py}"
+MEM_MIB="${P8_MEM:-12288}"
+case "$MEM_MIB" in *[!0-9]*|'') echo "run-p8: P8_MEM must be MiB" >&2; exit 2;; esac
+[ "$MEM_MIB" -le 32768 ] || { echo "run-p8: P8_MEM above 32768 MiB is not approved" >&2; exit 2; }
 IMG="$ROOT/disk.img"
 die() { echo "run-p8: $*" >&2; exit 2; }
 case "$GPU" in lavapipe|venus) ;; *) die "P8_GPU must be lavapipe or venus";; esac
@@ -101,8 +113,12 @@ done
 case "$EXPORT" in /srv/nfs/cp-?*) ;; *) die "P8_EXPORT must be /srv/nfs/cp-<name> ($EXPORT)";; esac
 [ "$EXPORT" != "$GAME" ] || die "P8_EXPORT must not be the game copy"
 [ -e "$EXPORT" ] && die "$EXPORT already exists: not this run's to reuse or delete; remove it by hand"
+if [ "$MEM_MIB" -gt 12288 ] && { [ "$PHASE" != game ] || [ "$BOOT" = tools/cp/p8/boot_p8.py ]; }; then
+  die "P8_MEM=$MEM_MIB: guests above 12 GiB are for P9 game boots only (P8_BOOT=tools/cp/p9/boot_p9.py)"
+fi
 if [ "$PHASE" = game ]; then
-  [ -f "$SEEDED" ] || die "no $SEEDED: run P8_PHASE=pfx first"
+  if [ -n "${P8_CPDATA_FROM:-}" ]; then [ -f "$P8_CPDATA_FROM" ] || die "no P8_CPDATA_FROM=$P8_CPDATA_FROM"
+  else [ -f "$SEEDED" ] || die "no $SEEDED: run P8_PHASE=pfx first"; fi
   [ -f "$GAME/bin/x64/Cyberpunk2077.exe" ] || die "no game copy at $GAME"
 fi
 
@@ -128,6 +144,7 @@ musl-gcc -static-pie -fPIE -O1 -Wall -o "$OUT/p8env.elf" src/user/cp/p8envprobe.
 musl-gcc -static-pie -fPIE -O1 -Wall -o "$OUT/p8fd.elf" src/user/cp/p8fdcount.c || die "p8fdcount"
 musl-gcc -static-pie -fPIE -O1 -Wall -o "$OUT/p8scm.elf" src/user/cp/p8scmprobe.c || die "p8scmprobe"
 musl-gcc -static-pie -fPIE -O1 -Wall -o "$OUT/p8kill.elf" src/user/cp/p8killprobe.c -lpthread || die "p8killprobe"
+musl-gcc -static-pie -fPIE -O1 -Wall -o "$OUT/p9fork.elf" src/user/cp/p9forkprobe.c -lpthread || die "p9forkprobe"
 if [ "$PHASE" = game ]; then
   CP_VK_WORK="$VKW" bash tools/cp/p5/build-pe.sh "$OUT/pe" >"$OUT/pe-build.log" 2>&1 ||
     { cat "$OUT/pe-build.log"; die "PE warm-up client"; }
@@ -247,6 +264,7 @@ stage "$OUT/p8env.elf" ::/P8ENV.ELF
 stage "$OUT/p8fd.elf" ::/P8FD.ELF
 stage "$OUT/p8scm.elf" ::/P8SCM.ELF
 stage "$OUT/p8kill.elf" ::/P8KILL.ELF
+stage "$OUT/p9fork.elf" ::/P9FORK.ELF
 if [ -n "$XHOBBY" ]; then
   [ -n "$XHOBBY_SHA" ] || die "P8_XHOBBY needs P8_XHOBBY_SHA256"
   cp "$XHOBBY" "$OUT/XHOBBY.BIN"
@@ -268,16 +286,18 @@ if [ "$PHASE" = pfx ] || [ "$PHASE" = probe ]; then
   CPDATA_FORCE=1 bash tools/cp/mkcpdata.sh "$CPD" 16G || die "mkcpdata"
 else
   CPD="$OUT/cpdata.img"
-  cp --sparse=always "$SEEDED" "$CPD"
-  echo "== data disk: a copy of $SEEDED"
+  SRC_IMG="${P8_CPDATA_FROM:-$SEEDED}"
+  cp --sparse=always "$SRC_IMG" "$CPD"
+  echo "== data disk: a copy of $SRC_IMG"
 fi
 
 echo "== boot (deadline ${TIMEOUT_S}s; one QEMU slot for the boot only)"
 BPH="$PHASE"; [ "$PHASE" = probe ] && BPH=pfx   # the same "wait for [P8] done" boot
 BA=(--out "$OUT" --disk "$D" --cpdata "$CPD" --phase "$BPH" --timeout "$TIMEOUT_S" --gpu "$GPU"
-    --smp "${P8_SMP:-8}" --mem "${P8_MEM:-12288}" --stall-s "${P8_STALL_S:-1200}")
+    --smp "${P8_SMP:-8}" --mem "$MEM_MIB" --stall-s "${P8_STALL_S:-1200}")
 [ "${P8_PRESS_CONTINUE:-1}" = 1 ] && BA+=(--press-continue)
-python3 tools/cp/p8/boot_p8.py "${BA[@]}"
+# shellcheck disable=SC2086
+python3 "$BOOT" "${BA[@]}" ${P8_BOOT_ARGS:-}
 rc=$?
 tr -d '\r' < "$OUT/serial.log" > "$OUT/serial.txt" 2>/dev/null
 
