@@ -1,0 +1,28 @@
+# exitgroup X7 (two concurrent exit_group callers, a run is 'bad' above 1000 ms) is load-sensitive on BOTH trees
+# host strix, 4 QEMU slots shared with other lanes; load average shown after each run
+
+## lane f98ffad7, inside the final batch (batch row FAIL):
+[LP] FAIL X7 two concurrent exit_group callers x20 (3 bad, worst 1400 ms)
+## lane 053a5745, inside batch 2: FAIL X7 (5 bad, worst 1541 ms); then standalone x3 (see gates-lane.txt): 0 bad, worst 363/387/376 ms
+
+## cyberpunk 15ad4a35 (no lane change; ~/cp/lanes/k5-base), standalone x3 while the lane batch ran:
+base run1 rc=1
+[LP] FAIL X7 two concurrent exit_group callers x20 (12 bad, worst 2758 ms)
+ 02:04:03 up 2 days,  8:42, 67 users,  load average: 10.24, 12.85, 11.74
+base run2 rc=1
+[LP] FAIL X7 two concurrent exit_group callers x20 (12 bad, worst 3087 ms)
+ 02:06:04 up 2 days,  8:44, 67 users,  load average: 14.02, 13.34, 12.05
+base run3 rc=0
+[LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 831 ms)
+ 02:07:47 up 2 days,  8:46, 67 users,  load average: 14.53, 13.80, 12.36
+
+## lane f98ffad7 standalone after the final batch:
+lane final run1 rc=1
+[LP] FAIL X7 two concurrent exit_group callers x20 (4 bad, worst 1239 ms)
+ 02:17:42 up 2 days,  8:56, 67 users,  load average: 13.94, 13.99, 13.34
+lane final run2 rc=0
+[LP] PASS X7 two concurrent exit_group callers x20 (0 bad, worst 420 ms)
+ 02:19:06 up 2 days,  8:57, 67 users,  load average: 11.41, 13.12, 13.08
+
+# Reading: the row fails on the unmodified cyberpunk tree too (2 of 3, worse worst-case) under the same host load;
+# not a lane regression.  Suggest the row's 1000 ms bound scale with load, or run exitgroup with fewer neighbours.
