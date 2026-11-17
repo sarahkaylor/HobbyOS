@@ -424,3 +424,102 @@ by two thirds, and the guest is now 60-66 % idle in the world.  What spins
 now (a2's stack words, `r2-fpsprobe-r2-a2-stack.txt`) is the Venus fence
 path (`virtio_gpu_3d_fence_kick_check`, `gpu_m2_fence_wait2`; C6-p7's
 files) and futex.  p8caps in these boots: 50x Sleep(1) = 51.3-52.1 ms.
+
+## 13. Kernel-task stack sharing (integrator top priority; C6-p7b's fix adopted)
+
+The race C3-ext2w proved: a kernel task runs in ring 0 on its own stack, so
+the interrupt that preempts it (a yield's int 0x81, the 100 Hz broadcast,
+a blk-cache wait) runs schedule() on THAT stack.  schedule() saved the
+task, made it READY, claimed the next slot and dropped proc_lock, then ran
+the switch tail (resume diagnostics, vm_touch, the next thread's signal
+delivery, enter_user_space's frame check) still on the task's stack; another
+CPU could pick the task in that window and resume it at its saved RSP, onto
+the frames the first CPU was still using.  integ9's P5 fullscreen crash is
+this: CPU 6 and CPU 7 both faulting in spin_acquire_raw(&proc_lock) on one
+stack (same RSP on both), then [UNOWNED-FREED] and [LOSTWAKE].
+
+C1-k6 wrote a fix of its own first (defer the READY publication until the
+CPU is off the stack; kept on branch `cp-k6-kstack-defer`, not proposed);
+the integrator asked for C6-p7b's instead, which covers the whole tail with
+one rule and has the stronger probe:
+
+* ce37286a (C6-p7b 5564bd40) -- detector: `cpu_locals.kstack_pin` (gs:[56])
+  names the kernel task whose stack this CPU is still on, set under
+  proc_lock when schedule() gives a kernel task up, cleared by
+  enter_user_space just before the iretq and by start_scheduler after the
+  nothing-READY longjmp; both pick sites report a pinned pick as
+  [KSTACK-SHARE].  Probe `linux_probe_kstack` (6 kernel tasks yielding in a
+  loop for 4 s against 4 churning user processes, 2 rounds, canaries in each
+  task's frame) through the test-only syscall 0x4B5354 (-ENOSYS on release
+  kernels) and its console checker `tools/gate/lp_check_kstack.py` (FAIL on
+  any [KSTACK-SHARE], kernel fault or lock-strand row).
+* 63733ef8 (C6-p7b a0235c57) -- fix: both pick sites skip a kernel task
+  whose pin another CPU holds (the task stays READY; it is picked a few us
+  later).  In this tree every pick goes through those two loops: round 2's
+  READY hint and the one-shot's boost (`hrt_boost_idx`) only choose where
+  the schedule() loop starts and which slots it examines, and the sync wake
+  picks through the same loop, so the pin check covers them.  User tasks
+  have no such window: their kernel frames are on the per-CPU stack and a
+  user resume is claimed before proc_lock drops.
+
+Gate row (strix): `kstack`
+
+| tree | result |
+|---|---|
+| round 2 + detector (ce37286a), run 1 | FAIL: wedged after S1 (probe never finished) |
+| round 2 + detector (ce37286a), run 2 | FAIL: [KSTACK-SHARE] n >= 4096 within the first round, `FATAL: Exception in Kernel Mode`, [STALLBREAK] on a lock whose owner CPU's stack was shared |
+| round 2 + fix (63733ef8), gate batch | PASS: yields 31127 + 28201, share=0, canary_bad=0 (lp_check_kstack PASS) |
+
+Gate batch on 63733ef8 (strix, `docs/cp-k6-evidence/r2-gates-63733ef8.txt`):
+every t3 probe PASS (54 incl. kstack and console), ext2_gate, exec_gate,
+rsize_guard, nfs_proto, host 38/40 + kconsole, castscan 0 new, ARM build,
+rsize_scan, panic_sink, pfx_gate, reg_gate, ext2_test_host, exitgroup x3,
+P2 G1-G3, P4, P5 (vkcube, d3d11, d3d12, fullscr: the row integ9 crashed in)
+all PASS; unit 462 run / 2 known reds (virtio_gpu_test 214, 244), as integ9;
+ext2w_gate FAIL (1) (crash1: e2fsck rc=4, block-bitmap leak after the QMP
+quit) -- integ9's own batch fails the same way (crash7), and so did the
+round-2 batch on 5ae97d4d (crash2, plus a harness QMP-socket miss on crash8).
+
+(C6-p7b's own numbers on integ9 + its series: detector FAIL with 16
+SHARE rows and a kernel #PF; fix PASS, 65847 yields, share=0,
+pin_skips=7829.)
+
+## 14. A halt on behalf of a task wakes by itself (C3-fat's P9-8, systemic half)
+
+C3-fat found P9-8 is a lost wakeup: blk_token_acquire waits in safe_wfi()
+(`sti; hlt`) and blk_token_release wakes nobody, so the waiter looks again
+only at its CPU's next interrupt -- and an AP's only periodic interrupt is
+CPU 0's broadcast 0x81.  CPU 0 inside a syscall runs with IF=0 (SFMASK
+0x47700), so when it spins there (on a ylock the halted CPU holds) the tick
+stops for every AP and the holder never wakes.  C3-fat fixes its own NVMe
+token wait; the systemic part is here.
+
+Fix: `safe_wfi()` (x86_64) now does `cli; sched_wfi_bound(); sti; hlt`.
+`sched_wfi_bound()` (process.c), when this CPU claims a slot (a kernel task
+or a syscall waiting on a device, not the idle loop, which is woken by the
+IPIs that hand it work), makes sure this CPU's own LAPIC one-shot (round 1's
+vector 0x84) fires within 1 ms: an earlier armed deadline is kept, a later
+one is pulled in and re-covered by the fire's rescan.  IF=0 from the arm to
+the hlt, so the one-shot cannot fire before the CPU halts.  Every safe_wfi
+wait site (virtio_blk 7, net 5, process.c's claimed halts, ext2_vfs,
+lockscale, virtio_gpu) is bounded without touching them; the cost is one
+LAPIC write per halt and a 0x84 fire per 1 ms of halting.  The ylock spin
+itself is unchanged (enabling IF inside it is only safe for callers that
+allow it, which the lock cannot know).
+
+Probe `linux_probe_wfibound` (test syscall 0x4845, test kernels only):
+W1 = longest of 200 halts from a syscall (limit 2500 us); W2 = the P9-8
+shape: a thread halts in the kernel for a flag that no wakeup announces, a
+second thread on CPU 0 sets it with IF=0 and spins until the waiter saw it
+(limit 20 ms; the spinner gives up at 500 ms).
+
+| tree (strix, run 1 / run 2) | W1 longest halt | W2 waiter latency |
+|---|---|---|
+| bound off (local experiment: the call removed) | FAIL 10647 / 10095 us | FAIL 500107, 500099, 500100 / 500099, 500107 us (and one 20 us: another interrupt) |
+| bound on (first build) | PASS 1045 / 1036 us | PASS 996, 1012 / 1013, 1033 us |
+| bound on (9d47b051, the committed probe) | PASS 1038 / 1052 us | PASS 979, 1032, 1005 / 990, 1006, 1000 us |
+
+The 500 ms rows are the wedge: the waiter saw the flag only when CPU 0 gave
+up and its tick came back.
+
+Evidence: `docs/cp-k6-evidence/r2-kstack.txt`, `docs/cp-k6-evidence/r2-wfibound.txt`.
