@@ -1022,6 +1022,62 @@ one Gate P2 run. Downloads beyond what strix already holds (DXVK 3.1.1 and
 vkd3d-proton 3.1 from `docs/cp-pins.md`, any X library, glslang) wait for the
 user's approval through the integrator.
 
+### 7.2e Wave 5 (v5, 2026-11-16) — main in, Venus, the P8 groundwork and a first game boot
+
+Wave 5 starts from `cyberpunk` @ edd8ebbf (Gates P2–P5 passed). The gate host is
+still `strix`, with the §7.4 rules: QEMU slots (up to four guests), `exports.sh`,
+`MAKEFLAGS=-j16`, and the NFS READ-size guards. The parity reference is
+`strix:~/cp/base5` = edd8ebbf, with results in `~/cp/base5-gates.txt`.
+
+The user decided three things on 2026-11-16:
+- **P6 starts now.** The user's uncommitted `gpu_abi.c` work in the main checkout
+  (RimWorld TRANSFER fixes and debug output) stays untouched. C6 builds on
+  `cyberpunk`'s copy of the file, after `main` is merged in. Any conflict is
+  resolved when the user commits that work.
+- **The game is copied once to `strix:/srv/nfs/cp-game`.** This is a read-only
+  copy of the Steam install (63 GB, file modes `a-w`). Only the C8 harness
+  exports it, with the approved localhost read-only form through `exports.sh`.
+  Nothing writes to `/mnt/fast`, and nothing reads it again. Game files never go
+  in a worktree or a commit, and `tools/cp/check-no-game-files.sh` runs before
+  every C8 commit.
+- **A first in-guest game boot on lavapipe is allowed this wave.** It will be
+  slow. Its job is to find P8's unplanned work early, not to measure fps.
+
+The first-run profile comes from P0's host prefix: `user.gls`, `EnabledMods.json`,
+`HDRUserSettings.json` and `UserSettings.json`. It is staged read-only at
+`strix:~/cp/game-profile/`. The first-run screens are never automated (§0.2
+item 1).
+
+Two facts shape this wave:
+- **`main` is 1,449 commits ahead** (the OpenJDK 27 and LibreOffice ports on
+  the same x86_64 Linux-ABI lane, plus the scratch prune). 15 files changed on
+  both sides, among them `linux_compat_{fd,mem,misc,proc}.c`, `trap.c`,
+  `process.c`, `vm.h`, `fs.c`, `fat16.c`, `net.c` and the `Makefile`. The
+  longer the merge waits, the worse it gets. C0-sync merges `main` first.
+  Every other lane merges `cyberpunk` once C0-sync lands, before its final gate.
+- **P8's known ceilings are in the kernel, not in Wine.** Today's limits are
+  256 fds per process, 512 open files system-wide and 256 poll fds. Wine uses
+  3 pipes per thread, and the game runs 173–190 threads (§0.2 item 13). The
+  prefix is on ext2 at ~125 KB/s for 4 KiB writes.
+
+| Lane | Scope (milestone) | Owns | Must not touch |
+|---|---|---|---|
+| **C0-sync** | Merge `main` @ b1f3ef56 into `cyberpunk` (one merge commit plus fix-ups). On conflicts, keep both sides' behaviour. Keep the cp/nfs side of `nfs.c`/`net.c` (§7.4). Main's new x86_64 ABI syscalls and cyberpunk's compat fixes must both survive. Gate: the full batch at parity with base5; Gate P2, `pfx_gate`, Gate P4 and Gate P5 reruns; main's own runnable x86_64 regressions (the OpenJDK hello/UI gates, the Doom ELF), with no banned targets | the merge and its conflict fix-ups, `Makefile` merge hunks | new features; `/etc` |
+| **C1-k5** | P8 scale: `MAX_OPEN_FDS` ≥ 4096 per process with a real `RLIMIT_NOFILE` (get/set/prlimit), the system-wide file table ≥ 16384 (allocated, not static, if it grows the kernel image), poll/ppoll/select/epoll limits to match, eventfd/timerfd counts, cheap `getrusage(RUSAGE_THREAD)`, and `MAX_PROCESSES` headroom checked against 256 Wine threads. Probes: a Linux probe that opens 3000 pipes and polls 2000 fds; a Windows probe (`src/user/cp/thrstorm*`) that starts 256 threads, each waiting on events and a pipe, for 60 s under Wine. Both fail on base. Gate: both probes, plus the full batch at parity | the fd table and limits in `fs.c`/`file_obj.h`/`linux_compat_fd.c`, `poll`/`epoll` limits, rusage in `linux_compat_proc.c`, the process-table sizing in `process.c`, the new probes | ext2/NFS internals, `vm.c` |
+| **C3-ext2w** | P3/P8 storage speed: batched write-through for ext2 (dirty blocks coalesced and written by `fsync`/`syncfs`/close/a short timer, with ordering rules written down), multi-block NVMe read and write commands, and FAT `ftruncate`/`O_TRUNC` under a live mapping (§0.2 item 18). Gate: ≥ 20× the 4 KiB write rate (from ~125 KB/s; report MB/s for 4 KiB and 1 MiB writes); a `wine reg add` survives `wineserver -k` and a reboot; `e2fsck -fn` clean after a pull-the-plug test (`quit` over QMP right after `sync` returns); `pfx_gate`, `ext2_gate` and the full batch at parity | `src/kernel/ext2*.c`, the block cache, the NVMe driver's command path, `fat16.c` truncate, the file-object truncate path in `vm.c`, `tools/cp/pfx/`, `tools/cp/ext2*` | NFS, the fd table (C1-k5) |
+| **C4-x3** | X for P7/P8: MIT-SHM in XHOBBY (attach, PutImage, GetImage, Pixmap if cheap) over the compat class's SysV shm or memfd. C4-x2's one-screen DDX built by the tree's own `third_party/x11` rule, so P4/P5 run with no `XHOBBY.BIN` override. RandR modes 1280×720 and 1920×1080 that Wine can switch to and back. Wine fullscreen at 1280×720 under IceWM. Gate: P4 and P5 rerun with the tree-built server; `xdpyinfo` lists MIT-SHM and an XShm probe round-trips; a Wine fullscreen screendump at 1280×720 | `src/user/x11/**`, `third_party/x11` build rules, `tools/cp/x11/`, `tools/cp/p4/`, `tools/cp/p5/` (harness only) | kernel (report SysV shm gaps to C1-k5 with a probe) |
+| **C6-venus** | P6: the host recipe (`tools/cp/host-venus.sh`: QEMU 10.2.1 `virtio-gpu-gl` with `venus=on,blob=on,hostmem=`, `/usr/libexec/virgl_render_server`, memfd-backed guest RAM, rendering on the RX 9070 XT `renderD129`, headless, never the user's display). The kernel M2 transport (`CONTEXT_INIT`, `RESOURCE_BLOB`, the host-visible shm region mapped into user space with the right cache attributes, blob create/map/unmap, ring fences completed from the IRQ path). The `docs/gpu-abi.md` M2 amendment (F3). Mesa `vn_renderer_hobbyos.c` with `-Dvulkan-drivers=virtio`. Probes: Linux `vkcube` on Venus, then the P5 D3D12 triangle on Venus, and a fence-latency benchmark. Host recipe and Mesa backend first; the kernel after C0-sync lands. Gate P6 | `src/kernel/virtio_gpu_3d.c`, `src/kernel/gpu_abi.c`, `src/include/gpu_abi.h`, `docs/gpu-abi.md`, `tools/cp/venus/`, `tools/cp/host-venus.sh`, the Mesa Venus build under `tools/mesa/` | the user's main checkout; the GUI session, Steam, `/mnt/fast` |
+| **C8-game** | P8 scouting on lavapipe: the launch recipe (`tools/cp/p8/`): the game over NFS from `/srv/nfs/cp-game`, the prefix on ext2 preseeded from `~/cp/game-profile`, `--launcher-skip`, the vkd3d-proton/DXVK overrides and `mscoree,mshtml=`, `VKD3D_SHADER_CACHE_PATH`/`MESA_SHADER_CACHE_DIR` on ext2, the game's directory read-only. Boot it, and push it as far as it goes. Record every stop in order (fault rows, the missing syscall/ioctl, the Wine/vkd3d log line) and fix it, or hand it over: fix in your own files; for files another lane owns, write a minimal reproducing probe plus a proposed diff and report it. Never automate the first-run screens. Gate: P8's main menu if it gets there; otherwise a ranked list of blockers, each with evidence, and the furthest screendump | `tools/cp/p8/`, `src/user/cp/p8*`, `docs/cp-p8.md` | game files in git; `/mnt/fast`; Steam |
+
+Merge order: C0-sync first. Then, in whatever order they go green: C1-k5,
+C3-ext2w, C4-x3 and C6-venus (C1-k5 and C3-ext2w both touch `vm.c`/`fs.c` in
+different functions; the integrator resolves). C8-game's harness merges at the
+end, with its blocker list. Every merge is re-gated on the merged tree with the
+full batch, both NFS guards, `pfx_gate`, and one Gate P2 run. Any guest larger
+than 12 GiB, any download (Mesa is already on strix; virglrenderer is
+installed), and any `/etc` change other than `exports.sh` wait for the user's
+approval through the integrator.
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
