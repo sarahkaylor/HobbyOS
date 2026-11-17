@@ -1430,7 +1430,19 @@ static int l_fd_fsync(struct process *p, struct trap_frame *tf) {
   uint16_t cl = 0;
   uint32_t sz = 0;
   int r = file_fat16_ident(p, fd, &cl, &sz);
-  if (r != 0) return l_ret(tf, r);
+  if (r == -EBADF) return l_ret(tf, -EBADF);
+  if (r != 0) {
+    /* cp-sync (merge of main): every other open fd keeps its earlier answer.
+       This row is consulted before l_tab_misc's l_misc_fsync, so without this
+       arm fsync() of a pipe, socket, memfd, NFS file or /dev/fb0 answered
+       -ENOTSUP (and /dev/fb0 lost its GB-032 present verb).  ext2 and tmpfs
+       fds never get here: their tables answer first. */
+    if (file_fd_is_devfb(p, fd)) {
+      extern void virtio_gpu_flush(void);
+      virtio_gpu_flush();
+    }
+    return l_ret(tf, 0);
+  }
   return l_ret(tf, l_mem_fsync_file(p, cl, sz, tf));
 }
 
