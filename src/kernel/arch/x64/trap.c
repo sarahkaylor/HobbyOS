@@ -1097,6 +1097,18 @@ static void sys_gettime(struct trap_frame *tf) {
     tf->regs[0] = -EINVAL;
     return;
   }
+  if (clk == 1 || clk == 4 || clk == 6 || clk == 7) {
+    /* P8 stop 11 (C6-venus): the monotonic clocks at microsecond resolution
+     * (the TSC timer_get_ms() already floors), not whole milliseconds -- a
+     * Windows game's QueryPerformanceCounter is this clock under Wine, and a
+     * 1 ms QPC makes every interval below 1 ms read as zero. */
+    extern uint64_t timer_get_us(void);
+    uint64_t us = timer_get_us();
+    *sec = (int64_t)(us / 1000000);
+    *nsec = (int64_t)((us % 1000000) * 1000);
+    tf->regs[0] = 0;
+    return;
+  }
   *sec = (int64_t)(ms / 1000);
   *nsec = (int64_t)((ms % 1000) * 1000000);
   tf->regs[0] = 0;
