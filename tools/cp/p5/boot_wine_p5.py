@@ -168,6 +168,11 @@ def grade(args, probes, serial, shots):
             continue
         b = ser.rfind(f"[P5] begin {p} ")
         e = ser.find(f"[P5] end {p} ", b) if b >= 0 else -1
+        if b >= 0 and e < 0:
+            # no end row (destroyed or never printed): grade the probe's rows up
+            # to the next probe instead of an empty span (C0-console)
+            nb = ser.find("[P5] begin ", b + 1)
+            e = nb - 200 if nb >= 0 else len(ser)
         span = ser[b:e + 200] if b >= 0 else ""
         rows = [ln for ln in span.splitlines() if ln.startswith(PFX[p])]
         res = [r for r in rows if r.startswith(f"{PFX[p]} RESULT ")]

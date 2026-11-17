@@ -80,7 +80,15 @@ def qemu_cmd(out, disk, cpdata, args):
            "-action", "shutdown=poweroff",
            "-qmp", f"unix:{qmp},server,nowait",
            "-enable-kvm", "-cpu", args.cpu]
+    cmd += diag_args()
     return cmd, qmp, serial
+
+
+def diag_args():
+    """C0-console: CP_DIAG=all (or a class list) turns the console's held-back
+    diagnostic rows back on, through QEMU fw_cfg (docs/cp-console.md §3)."""
+    d = os.environ.get("CP_DIAG")
+    return ["-fw_cfg", "name=opt/hobbyos/diag,string=" + d] if d else []
 
 
 def venus_qemu_cmd(out, disk, cpdata, args):
@@ -89,7 +97,7 @@ def venus_qemu_cmd(out, disk, cpdata, args):
     namespace 2 appended to its QEMU argv."""
     hv = os.path.join(REPO, "tools", "cp", "host-venus.sh")
     env = dict(os.environ, MEM=f"{args.mem}M", SMP=str(args.smp), CPU=args.cpu)
-    extra = ["-drive", f"file={cpdata},format=raw,id=cpdata,if=none", "-device", "nvme-ns,drive=cpdata,nsid=2"]
+    extra = ["-drive", f"file={cpdata},format=raw,id=cpdata,if=none", "-device", "nvme-ns,drive=cpdata,nsid=2"] + diag_args()
     argv = [ln for ln in subprocess.run(["bash", hv, "argv", disk, out] + extra, capture_output=True, text=True,
                                         check=True, env=env).stdout.splitlines() if ln]
     envv = [ln for ln in subprocess.run(["bash", hv, "env"], capture_output=True, text=True, check=True,

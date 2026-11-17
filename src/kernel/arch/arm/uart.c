@@ -57,8 +57,9 @@ void cons_hw_irqrestore(uint64_t f) {
 
 int cons_hw_irqs_on(uint64_t f) { return (f & 0x80) == 0; }
 
-uint64_t cons_hw_ctx(uint32_t cpu) {
-  return cpu < MAX_CPUS ? (uint64_t)(int64_t)(cpu_current_pids[cpu] + 1) : 0;
+const void *cons_hw_ctx(uint32_t cpu) {
+  (void)cpu; /* current_process() reads this CPU's slot, lock-free */
+  return (const void *)current_process();
 }
 
 int cons_hw_in_panic(void) { return 0; }

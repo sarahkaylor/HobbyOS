@@ -74,7 +74,7 @@ void cons_hw_tx(const char *s, int n);   /* raw bytes, '\n' -> "\r\n"   */
 uint64_t cons_hw_irqsave(void);          /* mask IRQs, return old state */
 void cons_hw_irqrestore(uint64_t flags);
 int cons_hw_irqs_on(uint64_t flags);     /* were IRQs enabled in flags  */
-uint64_t cons_hw_ctx(uint32_t cpu);      /* the running thread, or 0    */
+const void *cons_hw_ctx(uint32_t cpu);   /* the running thread, or 0    */
 int cons_hw_in_panic(void);              /* a fatal record is printing  */
 int cons_hw_bootarg(char *buf, int cap); /* fw_cfg opt/hobbyos/diag     */
 void cons_hw_relax(void);

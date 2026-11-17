@@ -15,11 +15,13 @@
 static char wire[1 << 16];
 static int wn;
 static uint32_t cur_cpu;
-static uint64_t cur_ctx[MAX_CPUS];
+static const void *cur_ctx[MAX_CPUS];
+static char ctxs[1024];
+static char stackbuf[0x20000];
 static int cur_irqon = 1;
 static uint64_t now_us = 1000;
 static int halted[MAX_CPUS];
-uint64_t cons_host_sp = 0x10000;
+const char *cons_host_sp = stackbuf + 0x10000;
 static int fails;
 
 uint32_t get_cpuid(void) { return cur_cpu; }
@@ -34,13 +36,13 @@ void cons_hw_tx(const char *s, int n) {
 uint64_t cons_hw_irqsave(void) { int was = cur_irqon; cur_irqon = 0; return (uint64_t)was; }
 void cons_hw_irqrestore(uint64_t f) { cur_irqon = (int)f; }
 int cons_hw_irqs_on(uint64_t f) { return f != 0; }
-uint64_t cons_hw_ctx(uint32_t cpu) { return cur_ctx[cpu]; }
+const void *cons_hw_ctx(uint32_t cpu) { return cur_ctx[cpu]; }
 int cons_hw_in_panic(void) { return 0; }
 int cons_hw_bootarg(char *b, int cap) { (void)b; (void)cap; return 0; }
 void cons_hw_relax(void) { now_us += 50; }
 
 static void reset(void) { wn = 0; wire[0] = 0; }
-static void on(uint32_t cpu, uint64_t ctx) { cur_cpu = cpu; cur_ctx[cpu] = ctx; }
+static void on(uint32_t cpu, int ctx) { cur_cpu = cpu; cur_ctx[cpu] = ctx ? (const void *)&ctxs[ctx] : 0; }
 static void kw(const char *s) { cons_kwrite(s, -1); }
 
 #define EXPECT(name, want)                                                  \
@@ -66,16 +68,16 @@ int main(void) {
 
   /* T2 an interrupt on the same CPU, mid-row: masked IRQs AND a far stack */
   reset();
-  on(0, 100); cur_irqon = 1; cons_host_sp = 0x10000; kw("[A] part1 ");
-  cur_irqon = 0; cons_host_sp = 0x10000 - 900; kw("  CSTK cpu4: 0x1 0x2\n");
-  cur_irqon = 1; cons_host_sp = 0x10000; kw("part2\n");
+  on(0, 100); cur_irqon = 1; cons_host_sp = stackbuf + 0x10000; kw("[A] part1 ");
+  cur_irqon = 0; cons_host_sp = stackbuf + 0x10000 - 900; kw("  CSTK cpu4: 0x1 0x2\n");
+  cur_irqon = 1; cons_host_sp = stackbuf + 0x10000; kw("part2\n");
   EXPECT("T2 IRQ row on the same CPU gets its own line", "  CSTK cpu4: 0x1 0x2\n[A] part1 part2\n");
 
   /* T3 a row printed across an irqsave lock: IRQ state flips, stack does not */
   reset();
-  on(0, 100); cur_irqon = 1; cons_host_sp = 0x10000; kw("[A] locked=");
-  cur_irqon = 0; cons_host_sp = 0x10000 - 64; kw("7");
-  cur_irqon = 1; cons_host_sp = 0x10000; kw("\n");
+  on(0, 100); cur_irqon = 1; cons_host_sp = stackbuf + 0x10000; kw("[A] locked=");
+  cur_irqon = 0; cons_host_sp = stackbuf + 0x10000 - 64; kw("7");
+  cur_irqon = 1; cons_host_sp = stackbuf + 0x10000; kw("\n");
   EXPECT("T3 row across an irqsave lock stays one line", "[A] locked=7\n");
 
   /* T4 another thread on the same CPU (kernel thread preempted mid-row) */

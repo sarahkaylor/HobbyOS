@@ -112,8 +112,8 @@ void cons_hw_irqrestore(uint64_t f) {
 
 int cons_hw_irqs_on(uint64_t f) { return (f & 0x200) != 0; }
 
-uint64_t cons_hw_ctx(uint32_t cpu) {
-  return cpu < MAX_CPUS ? (uint64_t)(uintptr_t)cpu_locals[cpu].current_proc : 0;
+const void *cons_hw_ctx(uint32_t cpu) {
+  return cpu < MAX_CPUS ? (const void *)cpu_locals[cpu].current_proc : 0;
 }
 
 void cons_hw_relax(void) { __asm__ volatile("pause"); }

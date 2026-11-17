@@ -60,8 +60,8 @@ extern int cpu_is_halted(uint32_t cpu);
 #endif
 
 struct cons_slot {
-  uint64_t ctx;   /* cons_hw_ctx() at the last append */
-  uint64_t sp;    /* stack pointer at the last append */
+  const void *ctx; /* cons_hw_ctx() at the last append */
+  const char *sp;  /* stack pointer at the last append */
   uint64_t t_us;  /* first byte of the pending piece */
   uint8_t used;   /* a context owns this slot */
   uint8_t irqon;  /* interrupts were enabled at the last append */
@@ -294,8 +294,10 @@ uint32_t cons_diag_parse(const char *s, int n) {
 
 /* ---- kernel line slots ------------------------------------------------ */
 
+/* A wire id per slot: 2 + its index (0 = no open line, 1 = "unknown", user
+   ids have bit 63 set). */
 static uint64_t slot_id(struct cons_slot *sl) {
-  return (uint64_t)(uintptr_t)sl;
+  return 2 + (uint64_t)(sl - &cons_slot[0][0]);
 }
 
 /* Push a slot's bytes to the wire.  ends: they finish the line. */
@@ -325,11 +327,12 @@ static void slot_push(uint32_t cpu, struct cons_slot *sl, int ends) {
   }
 }
 
-static int sp_far(uint64_t a, uint64_t b) {
-  return (a > b ? a - b : b - a) > CONS_NEST_SP;
+static int sp_far(const char *a, const char *b) {
+  long d = (long)(a - b);
+  return (d < 0 ? -d : d) > CONS_NEST_SP;
 }
 
-static struct cons_slot *slot_for(uint32_t cpu, uint64_t ctx, int irqon, uint64_t sp) {
+static struct cons_slot *slot_for(uint32_t cpu, const void *ctx, int irqon, const char *sp) {
   struct cons_slot *s = cons_slot[cpu];
   struct cons_slot *free_s = 0, *idle = 0, *oldest = 0;
   for (int i = 0; i < CONS_SLOTS; i++) {
@@ -384,12 +387,12 @@ void cons_kwrite(const char *s, int n) {
   }
   cons_nest[cpu] = 1;
 #ifdef CONS_HOST_TEST
-  uint64_t sp = cons_host_sp;
+  const char *sp = cons_host_sp;
 #else
   volatile char here = 0;
-  uint64_t sp = (uint64_t)(uintptr_t)&here;
+  const char *sp = (const char *)&here;
 #endif
-  uint64_t ctx = cons_hw_ctx(cpu);
+  const void *ctx = cons_hw_ctx(cpu);
   int irqon = cons_hw_irqs_on(fl);
   struct cons_slot *sl = slot_for(cpu, ctx, irqon, sp);
   sl->ctx = ctx;

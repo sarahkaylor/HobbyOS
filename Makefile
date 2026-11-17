@@ -347,7 +347,7 @@ ifeq ($(ARCH),intel)
   # nothing" on the icewm desktop, while the keyboard path worked fine because
   # keys are not routed through a pointer device).  tools/rw/rw_desktop_drive.py
   # and the GUI gates all drive the desktop through absolute events.
-  QEMU_CMD = $(QEMU) -M q35,vmport=on $(X64_CPU_ARGS) -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M q35,vmport=on $(X64_CPU_ARGS) -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(CP_DIAG_FWCFG) $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
@@ -726,6 +726,18 @@ TARGET = hobbyos.elf
 SRC_DIR = src/kernel
 
 # Find all .c and .s files in both src/kernel and the architecture directory
+# C0-console (docs/cp-console.md §3): the diagnostic rows the console holds
+# back by default ([PUB], [MR] s=, [FUTEX], [ALIVE-SET] slot=, [RESUME-*],
+# [BLKD] cc=, [PECOW], [ANONF]).  Boot knob, no rebuild:  CP_DIAG=all (or a
+# list: CP_DIAG=pub,futex) on any `make ... run` adds the QEMU fw_cfg file
+# opt/hobbyos/diag; the cp harnesses pass CP_DIAG through the same way.
+# Build knob: CP_DIAG_DEFAULT=all bakes the default into the kernel.
+cp_diag_comma := ,
+CP_DIAG_FWCFG = $(if $(CP_DIAG),-fw_cfg name=opt/hobbyos/diag$(cp_diag_comma)string=$(CP_DIAG))
+ifneq ($(CP_DIAG_DEFAULT),)
+  CFLAGS += -DCP_DIAG_DEFAULT='"$(CP_DIAG_DEFAULT)"'
+endif
+
 C_SRCS = $(wildcard $(SRC_DIR)/*.c) $(wildcard $(ARCH_DIR)/*.c)
 ASM_SRCS = $(wildcard $(SRC_DIR)/*.s) $(wildcard $(ARCH_DIR)/*.s)
 

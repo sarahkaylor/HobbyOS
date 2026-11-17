@@ -228,6 +228,8 @@ def qemu_cmd(out, disk, ovmf, mem):
            "-device", "virtio-gpu-pci", "-vga", "none",
            "-action", "shutdown=poweroff",
            "-qmp", f"unix:{qmp},server,nowait"]
+    if os.environ.get("CP_DIAG"):  # C0-console: diagnostic rows back on (docs/cp-console.md)
+        cmd += ["-fw_cfg", "name=opt/hobbyos/diag,string=" + os.environ["CP_DIAG"]]
     return cmd, qmp, serial
 
 
