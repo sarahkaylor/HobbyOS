@@ -698,7 +698,7 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
   }
 
   struct file *f = file_alloc();
-  if (!f) return -EMFILE;
+  if (!f) return -ENFILE; /* C1-k5 (C8-game stop 2): the SYSTEM table, as Linux */
   f->open_flags = (uint32_t)flags;
   /* Remember the name this fd was opened under: /proc/self/fd/N is a link to
      it, and re-opening through that link must go back to the SAME file.  The
@@ -1184,7 +1184,7 @@ int file_socket(struct process *p, int domain, int type, int protocol) {
     if (p->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
 
     struct file *f = file_alloc();
-    if (!f) return -EMFILE;
+    if (!f) return -ENFILE; /* C1-k5: the system table */
     struct usock *u = usock_alloc_single(utype);
     if (!u) {
       f->type = FILE_TYPE_EMPTY;
@@ -1225,7 +1225,7 @@ int file_socket(struct process *p, int domain, int type, int protocol) {
   if (p->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
 
   struct file *f = file_alloc();
-  if (!f) return -EMFILE;
+  if (!f) return -ENFILE; /* C1-k5: the system table */
 
   struct socket_pcb *pcb = net_socket_create(proto);
   if (!pcb) {
@@ -3802,25 +3802,12 @@ int file_fd_notifies(struct process *p, int fd) {
  */
 int file_pipe(struct process *cur, int fds[2]) {
   cur = process_group(cur); /* P1 (D7): the fd table is group state */
-  if (!cur || cur->num_open_fds + 2 > MAX_OPEN_FDS) return -1;
+  if (!cur || cur->num_open_fds + 2 > MAX_OPEN_FDS) return -EMFILE;
 
-  struct file *f0 = file_alloc();
-  struct file *f1 = file_alloc();
-  if (!f0 || !f1) {
-    if (f0) f0->type = FILE_TYPE_EMPTY;
-    if (f1) f1->type = FILE_TYPE_EMPTY;
-    return -1;
-  }
-
-  /* C1-k4: a Linux-ABI creator gets Linux's 64 KiB ring. */
-  if (pipe_alloc_ex(&f0, &f1, (cur->abi_flags & PROC_FLAG_LINUX_ABI) != 0) != 0) {
-    f0->type = FILE_TYPE_EMPTY;
-    f1->type = FILE_TYPE_EMPTY;
-    return -1;
-  }
-  f0->open_flags = 0; /* O_RDONLY (Linux F_GETFL of a pipe read end) */
-  f1->open_flags = 1; /* O_WRONLY */
-
+  /* C1-k5: find the two fds FIRST (the old order allocated the files and the
+     pipe, then leaked both when the table was full), and tell the two limits
+     apart: a full fd table is -EMFILE, a full file table or pipe pool
+     -ENFILE (Linux).  Callers that only test != 0 are unaffected. */
   int user_fd0 = -1, user_fd1 = -1;
   for (int i = FD_STDIO_FIRST; i < process_fd_limit(cur); i++) {
     if (cur->open_fds[i] == -1) {
@@ -3831,11 +3818,26 @@ int file_pipe(struct process *cur, int fds[2]) {
       }
     }
   }
+  if (user_fd0 == -1 || user_fd1 == -1) return -EMFILE;
 
-  if (user_fd0 == -1 || user_fd1 == -1) {
-    // This should have been caught by the num_open_fds check, but just in case
-    return -1;
+  struct file *f0 = file_alloc();
+  struct file *f1 = file_alloc();
+  if (!f0 || !f1) {
+    if (f0) { f0->type = FILE_TYPE_EMPTY; f0->ref_count = 0; }
+    if (f1) { f1->type = FILE_TYPE_EMPTY; f1->ref_count = 0; }
+    return -ENFILE;
   }
+
+  /* C1-k4: a Linux-ABI creator gets Linux's 64 KiB ring. */
+  if (pipe_alloc_ex(&f0, &f1, (cur->abi_flags & PROC_FLAG_LINUX_ABI) != 0) != 0) {
+    f0->type = FILE_TYPE_EMPTY;
+    f0->ref_count = 0;
+    f1->type = FILE_TYPE_EMPTY;
+    f1->ref_count = 0;
+    return -ENFILE;
+  }
+  f0->open_flags = 0; /* O_RDONLY (Linux F_GETFL of a pipe read end) */
+  f1->open_flags = 1; /* O_WRONLY */
 
   cur->open_fds[user_fd0] = get_global_fd(f0);
   cur->open_fds[user_fd1] = get_global_fd(f1);
@@ -4322,7 +4324,7 @@ int file_socketpair(struct process *p, int domain, int type, int proto,
   if (!f0 || !f1) {
     if (f0) { f0->type = FILE_TYPE_EMPTY; f0->ref_count = 0; }
     if (f1) { f1->type = FILE_TYPE_EMPTY; f1->ref_count = 0; }
-    return -EMFILE;
+    return -ENFILE; /* C1-k5: the system table */
   }
   struct usock *u = usock_alloc_pair(utype);
   if (!u) {

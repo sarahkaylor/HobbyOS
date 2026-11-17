@@ -639,7 +639,7 @@ static int l_fd_pipe2(struct process *p, struct trap_frame *tf) {
 
   int kfds[2] = {-1, -1};
   int r = file_pipe(p, kfds);
-  if (r != 0) return l_ret(tf, -EMFILE);
+  if (r != 0) return l_ret(tf, r < -1 ? r : -EMFILE); /* C1-k5: EMFILE/ENFILE */
   if (flags & L_O_NONBLOCK) {
     (void)file_fcntl(p, kfds[0], K_F_SETFL, K_O_NONBLOCK);
     (void)file_fcntl(p, kfds[1], K_F_SETFL, K_O_NONBLOCK);
@@ -792,6 +792,23 @@ static int l_fd_select(struct process *p, struct trap_frame *tf) {
  * compat surface has no signal-mask swap. */
 static int l_fd_pselect6(struct process *p, struct trap_frame *tf) {
   return l_select_common(p, tf, 1);
+}
+
+/* C1-k5 (C8-game: the wineserver calls it once per boot): fadvise64(fd,
+ * offset, len, advice).  Advice is only a hint and this kernel has no
+ * readahead policy to tune, so a valid call is 0 -- Linux's answers for the
+ * invalid ones: EBADF for a closed fd, ESPIPE for a pipe, EINVAL for an
+ * unknown advice (POSIX_FADV_NORMAL..NOREUSE = 0..5) or a negative len. */
+static int l_fd_fadvise64(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  int64_t len = l_argi(tf, 2);
+  int advice = (int)l_argi(tf, 3);
+  struct process *pg = process_group(p);
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS || pg->open_fds[fd] < 0)
+    return l_ret(tf, -EBADF);
+  if (file_gfd_is_pipe(pg->open_fds[fd])) return l_ret(tf, -ESPIPE);
+  if (advice < 0 || advice > 5 || len < 0) return l_ret(tf, -EINVAL);
+  return l_ret(tf, 0);
 }
 
 /* ---- ioctl / fcntl ------------------------------------------------------ */
@@ -1483,6 +1500,7 @@ const struct l_sysent l_tab_fd[] = {
   {L_SYS_select, l_fd_select, "select"},
   {L_SYS_pselect6, l_fd_pselect6, "pselect6"},
   {L_SYS_ppoll, l_fd_ppoll, "ppoll"},
+  {L_SYS_fadvise64, l_fd_fadvise64, "fadvise64"},
   {L_SYS_ioctl, l_fd_ioctl, "ioctl"},
   {L_SYS_fcntl, l_fd_fcntl, "fcntl"},
   /* cp/sys (docs/cp-sys.md): rows Wine reaches */

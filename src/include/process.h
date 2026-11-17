@@ -251,7 +251,18 @@ struct addr_space;
  * every one of those rt_sigaction calls answered -EINVAL (measured: Mono 6.12
  * printed `[LCOMPAT] sigaction refused sig=32/33/35` and never reached managed
  * code).  The pending set therefore had to widen from uint32_t to uint64_t. */
-#define HO_ENV_LEN 512
+/* C1-k5 (C8-game stop 1): 2048, was 512.  The P8 launcher's env (Wine + DXVK
+ * + vkd3d + cache paths) is 626 bytes; past the blob spawn_ex/execve now fail
+ * with E2BIG instead of truncating.  Cost: struct process and spawn_ex_pool
+ * each grow 1.5 KiB per slot (x86_64: 2 x 768 KiB of BSS).  The native
+ * execve keeps its copy in a frame, not on the kernel stack (trap.c).  ARM
+ * keeps 512 (and the old truncating behaviour, process_read_envp). */
+#ifdef __x86_64__
+#define HO_ENV_LEN 2048
+#else
+#define HO_ENV_LEN 512 /* ARM: its .bss must stay inside the limine placement
+                          window (linker.ld), and the compat class is x86-only */
+#endif
 
 /* cp/exec: the cwd and the /proc/self/exe path hold a full VFS path
  * (VFS_PATH_MAX in vfs.h; equality asserted where both headers meet). */

@@ -3357,18 +3357,40 @@ int process_read_envp(struct process *p, const char *const *envp, char *dst,
       sp |= ((uint64_t)(*(volatile uint8_t *)(slot + (uint64_t)k))) << (8 * k);
     if (sp == 0)
       return 0; /* end of envp */
+    /* C1-k5 (C8-game stop 1): an environment that does not fit the blob is
+       -2 (the trap layer answers -E2BIG, as Linux does past ARG_MAX).  It
+       used to be truncated silently: a P8 launcher's 21-entry/626-byte env
+       reached Wine as 512 bytes and Wine died in strlen(NULL). */
     int room = cap - pos;
+#ifdef __x86_64__
     if (room < 2)
-      return 0; /* blob full: truncate the rest (mirrors argv, D3.1) */
+      return -2;
     int len = exec_read_str(p, sp, dst + pos, room);
     if (len < 0)
       return -1;
-    (*count_out)++;
     if (len >= room - 1)
-      return 0; /* entry consumed the remaining room */
+      return -2; /* the entry did not fit with its NUL */
+#else
+    /* ARM: the 512-byte blob truncates, as before (no compat class). */
+    if (room < 2)
+      return 0;
+    int len = exec_read_str(p, sp, dst + pos, room);
+    if (len < 0)
+      return -1;
+    if (len >= room - 1) {
+      (*count_out)++;
+      return 0;
+    }
+#endif
+    (*count_out)++;
     pos += len + 1; /* keep the NUL separator */
+    dst[pos] = '\0';
   }
-  return 0; /* count cap reached: truncate the rest */
+#ifdef __x86_64__
+  return -2; /* more than HO_EXEC_MAX_ARGS entries */
+#else
+  return 0;
+#endif
 }
 
 void process_exec_apply(struct process *grp, const char *env, int envc) {
