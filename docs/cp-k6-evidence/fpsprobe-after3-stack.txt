@@ -1,0 +1,115 @@
+== strix, fpsprobe (Venus, -smp 8, 12 GiB); kernel: after (0352bd42)
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/k6-dev2/obj/cp-p9/k6-after3-stack
+phase           rows          game s   median     p10     min     max    mean
+launch            55          29-112     70.6    52.1     0.0   107.3    69.6
+menu              18         118-140     80.3    64.2    54.1    89.8    78.0
+loading           58         141-228     67.0    22.3     5.8   116.5    59.6
+world             57         230-316     17.4    12.2     8.5    22.1    16.8
+prof-fp-world     14         318-337     20.8    16.4    15.8    22.3    19.6
+prof-fp-stack     20         339-368     21.0    17.3    14.8    22.7    20.3
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             11179   11179   11179  (1 rows)
+   launch           10575    8832    8856  (4 rows)
+   menu              8837    8837    8837  (1 rows)
+   loading           8268    7420    7420  (3 rows)
+   world             7284    7102    7102  (3 rows)
+   prof-fp-world     7066    7066    7066  (1 rows)
+   prof-fp-stack     7065    7065    7065  (1 rows)
+== game process ([THRS]): max threads 50, max anon 141057 MiB, max res 4506 MiB (71 rows)
+== phases (host s since boot, game s since launch, name)
+   70.8 0.0 launch
+   185.5 114.7 menu
+   185.5 114.7 menu
+   211.3 140.6 loading
+   300.3 229.6 world
+   388.4 317.7 prof-fp-world
+   408.5 337.8 world
+   408.5 337.8 prof-fp-stack
+   438.7 368.0 world
+
+== guest PC profile prof-fp-stack
+== /home/sarah/cp/lanes/k6-dev2/obj/cp-p9/k6-after3-stack/prof-fp-stack.txt: 936 vCPU samples
+   idle (HLT)      487   52.0 %
+   kernel          303   32.4 %
+   user            146   15.6 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   87 /   13 /    0
+   cpu1:   39 /   39 /   21
+   cpu2:   40 /   38 /   21
+   cpu3:   38 /   43 /   19
+   cpu4:   46 /   37 /   17
+   cpu5:   56 /   32 /   13
+   cpu6:   51 /   31 /   18
+   cpu7:   58 /   26 /   15
+== kernel, top symbols (% of all samples)
+     7.2 %  spin_acquire_raw
+     3.1 %  linux_compat_dispatch
+     2.8 %  safe_wfi
+     2.1 %  sched_wake_idle_cpu
+     1.5 %  virtio_gpu_x64_transact_ex
+     1.4 %  virtio_gpu_x64_kick
+     1.2 %  general_interrupt_inner
+     1.1 %  schedule
+     1.0 %  virtio_blk_watch_mmio
+     0.9 %  gpu_m2_fence_wait2
+     0.7 %  get_cpuid
+     0.6 %  f1_probe_fd
+     0.5 %  lock_audit_irqoff_end
+     0.5 %  lock_audit_held_push
+     0.5 %  x64_v2_walk_alloc
+     0.5 %  proc_reap_parked_locked
+     0.5 %  timer_get_ms
+     0.4 %  input_drain_nolock
+     0.4 %  start_scheduler
+     0.4 %  virtio_gpu_x64_handle_irq
+     0.3 %  vm_arch_switch
+     0.3 %  virtio_gpu_x64_post_async
+     0.3 %  spin_release_raw
+     0.2 %  vm_touch
+     0.2 %  arch_get_user_sp
+== user buckets (% of all samples)
+     9.8 %  user: game exe (Cyberpunk2077.exe image)
+     4.3 %  user: unix .so (glibc, Wine unix side, Mesa Venus, X11)
+     1.5 %  user: PE DLLs (Wine builtins, vkd3d-proton, DXVK, game DLLs)
+== kernel stack words (rough callers, innermost first) for the top leaves
+   spin_acquire_raw:
+          6  uart_puts < enter_user_space < schedule < lock_audit_held_push < spinlock_acquire_irqsave
+          5  uart_puts < enter_user_space < schedule
+          4  lock_audit_held_push < uart_puts < spinlock_acquire_irqsave < spin_acquire_raw < schedule
+          2  fs_poll_park < spinlock_acquire_irqsave < uart_puts < lock_audit_held_pop < spin_release_raw
+          2  uart_puts < linux_compat_sig_deliverable < l_select_common < spin_acquire_raw
+          2  common_trap_wrapper
+          2  uart_puts < spin_release_raw < l_thr_futex
+          2  uart_puts < spinlock_acquire_irqsave < spin_acquire_raw < lock_audit_held_pop < lock_audit_held_push
+   linux_compat_dispatch:
+         14  uart_puts < spin_acquire_raw < vm_touch < spinlock_acquire_irqsave < lock_audit_held_pop
+          4  uart_puts < lock_audit_held_pop < spin_release_raw < fs_poll_park < file_poll_us
+          2  uart_puts < sys_read < sync_lower_handler_c
+          2  uart_puts < vm_range_ok < sys_select < sync_lower_handler_c
+          2  uart_puts < sched_wake_idle_cpu < pipe_read_ex < file_read_user < sys_read
+          2  uart_puts < sys_poll < sync_lower_handler_c
+          1  uart_puts < spin_acquire_raw < lock_audit_held_pop < spin_release_raw < vm_touch
+          1  uart_puts < spin_acquire_raw < sched_wake_idle_cpu < lock_audit_held_pop < spin_release_raw
+   safe_wfi:
+         23  uart_puts < start_scheduler
+          2  start_scheduler < uart_puts
+          1  flusher_task
+   sched_wake_idle_cpu:
+          3  uart_puts < lock_audit_held_pop < spin_release_raw < vm_touch < file_read_user
+          2  uart_puts < enter_user_space < schedule < lock_audit_held_push < spinlock_acquire
+          1  uart_puts < sys_poll < sync_lower_handler_c < spinlock_acquire_irqsave
+          1  uart_puts < vm_touch < enter_user_space < schedule < watchdog_tick
+          1  uart_puts < watchdog_tick < l_fd_select
+          1  uart_puts < watchdog_tick
+          1  uart_puts < vm_range_ok < sys_select < sync_lower_handler_c
+          1  uart_puts < gpu_m2_submit2 < l_fd_ioctl < l_copy_from_user
+
+== p8caps timing rows
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 50.04 ms max 51.97 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 50.03 ms max 50.05 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 50.23 ms max 51.21 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.34 ms max 50.40 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 50.30 ms max 50.53 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 51.23 ms max 51.67 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 500.1 ms, tick 499 ms

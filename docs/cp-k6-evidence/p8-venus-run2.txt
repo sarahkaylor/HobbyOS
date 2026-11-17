@@ -1,0 +1,22 @@
+== P8 on Venus (run 2: P8_GPU=venus run-p8.sh, kernel 0352bd42), strix
+main-menu
++   144.3 s  13:07:07  main menu OCR at s007-t000109: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   150.0 s  13:07:13  main menu OCR at s008-t000115: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   155.6 s  13:07:19  main menu OCR at s009-t000120: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
++   157.8 s  13:07:21  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 3
+
+== winevulkan +fps (approx) rows, launch to menu
+k6-venus: rows=65 median=80.6 p10=36.4 max=109.8
+integ10-venus2: rows=107 median=46.6 p10=37.2 max=70.5
+integ10-venus3: rows=96 median=48.2 p10=39.5 max=67.9
+(integ10-venus2/3 = integ7 reference boots, read from the integrator tree logs)
+
+== p8caps timing rows
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 50.03 ms max 51.93 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 50.03 ms max 50.05 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 50.28 ms max 50.33 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.27 ms max 50.48 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 50.30 ms max 50.44 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 51.37 ms max 51.63 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 500.0 ms, tick 498 ms

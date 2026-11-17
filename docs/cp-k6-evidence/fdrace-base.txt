@@ -1,0 +1,13 @@
+== strix guest (KVM -cpu host, 8 vCPU, 12 GiB), tools/gate/t3_linux_probe.sh fdrace, tree base (cyberpunk 058fd3d5 + the probe source), 2026-11-17T10:26:35-06:00
+qemu-slot: slot 3 of 4 held by pid 1714118 16:21:01
+t3_linux_probe: building /home/sarah/cp/lanes/k6-base/obj/intel/probe_fdrace.elf
+make: Entering directory '/home/sarah/cp/lanes/k6-base'
+musl-gcc -static-pie -fPIE -O1 -g -Wall -Wextra -o obj/intel/probe_fdrace.elf src/user/linux_probe_fdrace.c
+make: Leaving directory '/home/sarah/cp/lanes/k6-base'
+=== t3_linux_probe: fdrace (deadline 300s, log /home/sarah/cp/lanes/k6-base/obj/linux_probe_fdrace.log) ===
+--- probe rows ---
+[LP] D1 eventfd/timerfd/epoll/memfd x16 threads rounds=300 fds=19200 dup_numbers=1764 wrong_type=616 failed_creates=7710 -> FAIL
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+t3_linux_probe: FAIL — fdrace never printed '[LP] done rc=0' (tier rc=1)

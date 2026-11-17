@@ -1,0 +1,77 @@
+== run 1: k6-gates.sh on cp-k6 a06a49b5 (strix, 2026-11-17T12:10:34-06:00)
+tree 
+tree 
+build rc=0
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/k6)
+unit rc=1 Tests failed! Tests run:    461 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed
+castscan rc=0 castscan: 367 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=1 pfx_gate: FAIL (1)
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=0 == removed /srv/nfs/cp-ext2w-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+exitgroup#2 rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+exitgroup#3 rc=1 t3_linux_probe: FAIL — exitgroup never printed '[LP] done rc=0' (tier rc=1)
+gate_p2 rc=0 G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=435; [P2] ps-extra count=0)
+gate_p4 rc=0 [P4G] qemu: qemu-system-x86_64 -M q35,vmport=on -enable-kvm -cpu host -smp 8 -m 12288M -drive if=pflash,format=raw,readonly=on,file=/home/sarah/cp/lanes/k6/obj/p4/integ10/ovmf.fd -display none -serial file:/home/sarah/cp/lanes/k6/obj/p4/integ10/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/k6/obj/p4/integ10/disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-gpu-pci -vga none -action shutdown=poweroff -qmp unix:/home/sarah/cp/lanes/k6/obj/p4/integ10/qmp.sock,server,nowait [P4G] qemu pid 2547735 [P4G] clip row: [RI] phase clip total n=69 rel=69 abs=0 dx=850 dy=25 lastabs=0,0 cursor=835,428 inside=1 [P4G] modes: fullscreen (magenta) window bbox on the glass (0, 0, 1278, 718, 921600) [P4G] winecfg dialog face bbox (4, 30, 412, 474, 28824) [P4G] winecfg tab libraries: region hash d75e74c3f3ffe411 -> b585f8d695dab704 [P4G] winecfg tab graphics: region hash b585f8d695dab704 -> 3416f27e601e9893 [P4G] winecfg tab audio: region hash 3416f27e601e9893 -> f2ff0749893d8a2f [P4G] winecfg: 3/3 tab clicks changed the dialog; exit status 0 [P4G] notepad edit area bbox (0, 0, 1918, 1078, 711264) [P4G] notepad: dark pixels in the edit area 6448 -> 7047 [P4G] notepad exit status 0 [P4G] NFS failure rows: rpc-no-reply=0 nflk-rc-1=0 nfspipe-stall=0 [P4G] NOTE: info: fullscreen window bbox (0, 0, 1278, 718, 921600) (expect (0, 0, 1278, 718) at 1280x720) [P4G] G1 PASS [P4G] G2 PASS [P4G] G3 PASS 
+gate_p5 rc=0 [P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics) [P5W] slot 2 acquired 11:48:59; boot: -smp 8 -m 12288M -cpu host (KVM) [P5W] qemu pid 2575872 [P5W] +0 s: (no [P5] row yet) [P5W] screendump vkcube-t20s.ppm at +101 s; QEMU guests on the host now (incl. this one): 3 [P5W] screendump vkcube-t50s.ppm at +131 s; QEMU guests on the host now (incl. this one): 3 [P5W] screendump d3d11-t20s.ppm at +173 s; QEMU guests on the host now (incl. this one): 2 [P5W] screendump d3d11-t50s.ppm at +203 s; QEMU guests on the host now (incl. this one): 3 [P5W] screendump d3d12-t20s.ppm at +245 s; QEMU guests on the host now (incl. this one): 3 [P5W] screendump d3d12-t50s.ppm at +275 s; QEMU guests on the host now (incl. this one): 3 [P5W] screendump fs-M3-1280x720.ppm at +299 s [P5W] +301 s: [P5] begin fullscr : wine Z:\CP\P5\FS\fullscr.exe run 6000 [P5W] screendump fs-M4-1920x1080.ppm at +308 s [P5W] screendump fs-M5-1280x720.ppm at +318 s [P5W] screendump fs-restored.ppm at +327 s [P5W] guests on the host at the end of the run: 1 (incl. none of ours) [P5W] boot finished after 352 s; lock released [P5W] --- [P5] rows and probe rows (serial) --- [P5W] vkcube vkcube-t20s.ppm: clear=247032 saturated=60724 bbox=(44, 70, 682, 548) hash=0bb1f2e0fc41993c [P5W] vkcube vkcube-t50s.ppm: clear=242828 saturated=64920 bbox=(44, 70, 682, 548) hash=1cd8407fede7a413 [P5W] vkcube: PASS [P5W] d3d11 d3d11-t20s.ppm: clear=237252 saturated=48312 bbox=(724, 70, 1362, 548) hash=47bed3e384b205b8 [P5W] d3d11 d3d11-t50s.ppm: clear=237256 saturated=48296 bbox=(724, 70, 1362, 548) hash=1ebc2282d5624308 [P5W] d3d11: PASS [P5W] d3d12 d3d12-t20s.ppm: clear=237328 saturated=46476 bbox=(724, 574, 1362, 1052) hash=8f8aa135a3575818 [P5W] d3d12 d3d12-t50s.ppm: clear=237312 saturated=46580 bbox=(724, 574, 1362, 1052) hash=4b3c8af826cd19b0 [P5W] d3d12: PASS [P5W] fullscr fs-M3-1280x720: glass 1920x1080, markers ok, non-black outside the mode: 0 [P5W] fullscr fs-M4-1920x1080: glass 1920x1080, markers ok, non-black outside the mode: 0 [P5W] fullscr fs-M5-1280x720: glass 1920x1080, markers ok, non-black outside the mode: 0 [P5W] fullscr fs-restored: glass 1920x1080, (8,8)=f9f5f0 (1271,8)=505078 (1910,1070)=181838 -> pattern gone [P5W] fullscr: PASS [P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0 [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps 
+thrstorm rc=0 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=263 ms=60167) [TS] PASS T3 stop (bad=0 first=0) 
+k5probes rc=0 [P8ENV] E1 execve env: 40/40 entries intact -> PASS [P8ENV] E2 malformed entries: 0 -> PASS [P8ENV] E3 spawn_ex env: 40/40 entries intact -> PASS [P8ENV] E4 malformed entries: 0 -> PASS [K5P] E5 spawn_ex env > HO_ENV_LEN: rc=-1 errno=7 -> PASS [P8SCM] S1 recvmsg ret=4 errno=0 -> PASS [P8SCM] S2 MSG_CTRUNC=1 fd_delivered=-1 -> PASS [P8SCM] S3 second recvmsg ret=-1 errno=11 -> PASS PASS  E5 spawn_ex env > HO_ENV_LEN 
+p8_pfx rc=0 == exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged) == removed /srv/nfs/cp-game-p8 
+gate_p8_venus rc=0 [P8W] +    85.6 s  12:00:26  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 2    +    49.8 s  11:59:50  game process ended: [P8] end game status=0 ms=20634    +    85.6 s  12:00:26  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 2 
+ALLDONE

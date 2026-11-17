@@ -1,0 +1,27 @@
+== clock probe: run-2 batch (unfixed probe, HEAD 0352bd42 kernel) vs the fixed probe (07b62408) on the same kernel, strix guest
+[LP] sem_pingpong n=200 total_ms=0 per_us=-1
+[LP] sem_pingpong_under_1ms FAIL
+-- fixed probe x2:
+[LP] sem_pingpong n=200 total_ms=0 per_us=0
+[LP] sem_pingpong_under_1ms PASS
+[LP] sem_pingpong n=200 total_ms=0 per_us=0
+[LP] sem_pingpong_under_1ms PASS
+clock rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+ALLDONE
+
+== pemap: run-2 batch FAIL (once), then HEAD x6 and the previous kernel x4
+[LP] FAIL V1 COW memfd: 2 of 12 iterations stale; first iter 6: A read the old value 6267 more times after B's change returned (c0=16411225)
+t3_linux_probe: FAIL — pemap never printed '[LP] done rc=0' (tier rc=1)
+-- HEAD (0352bd42):
+pemap rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+-- previous (4ef19867):
+pemap rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0

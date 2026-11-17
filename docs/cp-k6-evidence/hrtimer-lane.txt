@@ -1,0 +1,44 @@
+== strix guest (KVM -cpu host, 8 vCPU, 12 GiB), tools/gate/t3_linux_probe.sh hrtimer, tree lane (cp-k6 working tree), 2026-11-17T10:27:21-06:00
+qemu-slot: slot 3 of 4 held by pid 1761364 16:27:13
+t3_linux_probe: building /home/sarah/cp/lanes/k6/obj/intel/probe_hrtimer.elf
+make: Entering directory '/home/sarah/cp/lanes/k6'
+make: 'obj/intel/probe_hrtimer.elf' is up to date.
+make: Leaving directory '/home/sarah/cp/lanes/k6'
+=== t3_linux_probe: hrtimer (deadline 300s, log /home/sarah/cp/lanes/k6/obj/linux_probe_hrtimer.log) ===
+--- probe rows ---
+[LP] hrtimer probe: start (mono=1203645us real=1794932837000643us)
+[LP] H1 nanosleep 1000us                   n=200 err_us p50=23 p90=32 p99=4476 min=19 max=5371 hist[<50:194 <100:0 <200:0 <500:0 <1m:0 <2m:2 <5m:3 <10m:1 >=10m:0] early=0 badcalls=0 PASS
+[LP] H2 nanosleep 100us                    n=200 err_us p50=26 p90=28 p99=32 min=16 max=33 hist[<50:200 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H3 nanosleep 10us                     n=200 err_us p50=18 p90=21 p99=29 min=13 max=31 hist[<50:200 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H4 clock_nanosleep MONO ABSTIME 1ms   n=200 err_us p50=21 p90=29 p99=39 min=16 max=52 hist[<50:199 <100:1 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H5 futex WAIT timeout 1000us          n=200 err_us p50=23 p90=31 p99=56 min=10 max=61 hist[<50:198 <100:2 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H6 poll(0 fds, 1ms)                   n=200 err_us p50=22 p90=30 p99=40 min=18 max=48 hist[<50:200 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H7 ppoll(0 fds, 100us)                n=200 err_us p50=28 p90=30 p99=35 min=14 max=41 hist[<50:200 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H8 select(0, {0,1000})                n=200 err_us p50=24 p90=31 p99=40 min=8 max=66 hist[<50:199 <100:1 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H9 epoll_wait(empty, 1ms)             n=200 err_us p50=23 p90=29 p99=43 min=18 max=50 hist[<50:199 <100:1 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H10 epoll_pwait2(empty, 200us)         n=200 err_us p50=23 p90=33 p99=39 min=17 max=54 hist[<50:199 <100:1 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H11 timerfd 1ms period, read           n=200 err_us p50=27 p90=33 p99=58 min=22 max=158 hist[<50:197 <100:2 <200:1 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H12 poll(timerfd one-shot 1ms)         n=200 err_us p50=24 p90=31 p99=40 min=8 max=73 hist[<50:199 <100:1 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] C1 clock_nanosleep REALTIME        rel2ms rc=0 took=2022us  abs+2ms rc=0 took=2029us  abs-past rc=0 took=2us PASS
+[LP] C2 clock_nanosleep MONOTONIC       rel2ms rc=0 took=2033us  abs+2ms rc=0 took=2019us  abs-past rc=0 took=2us PASS
+[LP] C3 clock_nanosleep BOOTTIME        rel2ms rc=0 took=2023us  abs+2ms rc=0 took=2033us  abs-past rc=0 took=4us PASS
+[LP] C4 clock_nanosleep TAI             rel2ms rc=0 took=2036us  abs+2ms rc=0 took=2019us  abs-past rc=0 took=3us PASS
+[LP] C5 clock_nanosleep REALTIME_ALARM  rel2ms rc=0 took=2031us  abs+2ms rc=0 took=2027us  abs-past rc=0 took=4us PASS
+[LP] C6 clock_nanosleep BOOTTIME_ALARM  rel2ms rc=0 took=2028us  abs+2ms rc=0 took=2030us  abs-past rc=0 took=2us PASS
+[LP] C7 clock_nanosleep MONOTONIC_RAW   rel rc=-95 abs rc=-95 want=-95 PASS
+[LP] C7 clock_nanosleep REALTIME_COARSE rel rc=-95 abs rc=-95 want=-95 PASS
+[LP] C7 clock_nanosleep MONOTONIC_COARSE rel rc=-95 abs rc=-95 want=-95 PASS
+[LP] C7 clock_nanosleep THREAD_CPUTIME  rel rc=-95 abs rc=-95 want=-95 PASS
+[LP] C8 clock_nanosleep id 10           rel rc=-22 abs rc=-22 want=-22 PASS
+[LP] C8 clock_nanosleep id 12           rel rc=-22 abs rc=-22 want=-22 PASS
+[LP] C8 clock_nanosleep tv_nsec=1e9 rc=-22 want=-22 PASS
+[LP] C9 clock_nanosleep PROCESS_CPUTIME rel30ms rc=0 cpu_advanced=30125us wall=24599us PASS
+[LP] L1 nanosleep 1000us                   n=200 err_us p50=19 p90=20 p99=31 min=17 max=33 hist[<50:200 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] L2 futex WAIT timeout 1000us          n=200 err_us p50=19 p90=21 p99=25 min=18 max=30 hist[<50:200 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] L3 epoll_wait(empty, 1ms)             n=200 err_us p50=19 p90=22 p99=32 min=16 max=10024 hist[<50:199 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:1] early=0 badcalls=0 PASS
+[LP] done rc=0
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+[EXITPC] pid=2 last_user_pc=0x1000004F7E code=0x0
+t3_linux_probe: PASS — hrtimer reached its done marker

@@ -1,0 +1,26 @@
+== strix guest, the lane kernel BEFORE the set_tid_address fix (a06a49b5 minus that hunk): K7 still failed there and on base
+qemu-slot: slot 3 of 4 held by pid 1763843 16:27:52
+t3_linux_probe: building /home/sarah/cp/lanes/k6/obj/intel/probe_killgrp.elf
+make: Entering directory '/home/sarah/cp/lanes/k6'
+make: 'obj/intel/probe_killgrp.elf' is up to date.
+make: Leaving directory '/home/sarah/cp/lanes/k6'
+=== t3_linux_probe: killgrp (deadline 200s, log /home/sarah/cp/lanes/k6/obj/linux_probe_killgrp.log) ===
+--- probe rows ---
+[LP] K3 kill(pid,0) on a leader-exited group     rc=0 errno=0 -> PASS
+[LP] K1 SIGKILL: the group is reaped             kill rc=0 waited=0ms -> PASS
+[LP] K2 SIGKILL: status is killed-by-9           status=0x9 -> PASS
+[LP] K4 SIGTERM (SIG_DFL) terminates it          kill rc=0 waited=0ms status=0xf -> PASS
+[LP] K5 SIGUSR1 (handler) runs on a worker       kill rc=0 waited=50ms status=0x2a00 -> PASS
+[LP] K6 a worker's exit_group(7)                 waited=350ms status=0x700 -> PASS
+[LP] K7 the last thread returns                  waited=-2ms status=0x9 -> FAIL
+[LP] done rc=1
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+[EXITPC] pid=3 last_user_pc=0x1000003447 code=0x9 killed
+[EXITPC] pid=6 last_user_pc=0x1000003447 code=0xF killed
+[EXITPC] pid=10 last_user_pc=0x1000002281 code=0x2A
+[EXITPC] pid=13 last_user_pc=0x1000002281 code=0x7
+[EXITPC] pid=15 last_user_pc=0x1000003447 code=0x9 killed
+[EXITPC] pid=2 last_user_pc=0x100000451E code=0x1
+t3_linux_probe: FAIL — killgrp never printed '[LP] done rc=0' (tier rc=1)

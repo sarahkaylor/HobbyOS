@@ -1,0 +1,7 @@
+== strix Linux host (7.0.0-43-generic), unprivileged, static musl probe_rusage.elf (the same source as the guest run)
+[LP] R1 user-mode spin (RUSAGE_SELF)       wall=300007us utime+=299959us stime+=0us -> PASS
+[LP] R2 getppid() loop (RUSAGE_SELF)       wall=300006us utime+=133754us stime+=166106us -> PASS
+[LP] R3 getppid() loop (RUSAGE_THREAD)     wall=300000us utime+=155282us stime+=144262us -> PASS
+[LP] R4 a child's getppid() loop (CHILDREN) wall=300195us utime+=140025us stime+=160028us -> PASS
+[LP] done rc=0
+exit=0

@@ -1,0 +1,79 @@
+== strix, fpsprobe (Venus, -smp 8, 12 GiB); kernel: after (0352bd42)
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/k6-dev2/obj/cp-p9/k6-after2
+phase           rows          game s   median     p10     min     max    mean
+launch            91          27-173     60.3    44.0     0.0    98.6    60.0
+menu              11         175-189     70.0    67.8    65.1    86.4    73.5
+loading           65         191-290     59.2    22.8     9.5    92.4    55.9
+world             62         296-385     18.7    11.7     8.4    23.4    17.7
+prof-fp-world     14         386-406     21.4    18.5    16.8    23.7    21.2
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             11172   11172   11172  (1 rows)
+   launch           10337    8813    8815  (6 rows)
+   menu              8822    8822    8822  (1 rows)
+   loading           8101    7395    7395  (3 rows)
+   world             7215    7088    7088  (3 rows)
+   prof-fp-world     7086    7086    7086  (1 rows)
+== game process ([THRS]): max threads 47, max anon 141058 MiB, max res 4486 MiB (80 rows)
+== phases (host s since boot, game s since launch, name)
+   28.8 0.0 launch
+   202.3 173.5 menu
+   202.3 173.5 menu
+   219.6 190.9 loading
+   319.3 290.5 world
+   415.0 386.2 prof-fp-world
+   435.0 406.2 world
+
+== guest PC profile prof-fp-world
+== /home/sarah/cp/lanes/k6-dev2/obj/cp-p9/k6-after2/prof-fp-world.txt: 1528 vCPU samples
+   idle (HLT)      808   52.9 %
+   kernel          486   31.8 %
+   user            234   15.3 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   91 /    9 /    0
+   cpu1:   46 /   36 /   18
+   cpu2:   45 /   35 /   20
+   cpu3:   42 /   39 /   19
+   cpu4:   51 /   33 /   16
+   cpu5:   50 /   33 /   17
+   cpu6:   49 /   36 /   15
+   cpu7:   49 /   34 /   18
+== kernel, top symbols (% of all samples)
+     8.9 %  spin_acquire_raw
+     2.6 %  linux_compat_dispatch
+     2.1 %  sched_wake_idle_cpu
+     2.0 %  virtio_gpu_x64_kick
+     1.6 %  virtio_gpu_x64_transact_ex
+     1.6 %  safe_wfi
+     1.0 %  schedule
+     0.9 %  general_interrupt_inner
+     0.7 %  gpu_m2_fence_wait2
+     0.7 %  lock_audit_irqoff_end
+     0.6 %  proc_reap_parked_locked
+     0.5 %  lock_audit_irqoff_begin
+     0.5 %  virtio_blk_watch_mmio
+     0.5 %  f1_probe_fd
+     0.4 %  timer_get_ms
+     0.3 %  vm_arch_switch
+     0.3 %  input_drain_nolock
+     0.3 %  lock_audit_held_push
+     0.3 %  slot_claimed_only_by_halted_cpus
+     0.3 %  sync_lower_handler_c
+     0.3 %  lock_audit_held_pop
+     0.3 %  arch_memory_barrier
+     0.2 %  uart_puts
+     0.2 %  frame_alloc_zeroed
+     0.2 %  vm_arch_shootdown
+== user buckets (% of all samples)
+    10.6 %  user: game exe (Cyberpunk2077.exe image)
+     3.0 %  user: unix .so (glibc, Wine unix side, Mesa Venus, X11)
+     1.7 %  user: PE DLLs (Wine builtins, vkd3d-proton, DXVK, game DLLs)
+
+== p8caps timing rows
+[X] [P8CAPS] timing: 20 GPU fence waits done, completed=20
+[X] [P8CAPS] timing: Sleep(50)                      min 50.06 ms max 51.87 ms (qpf 10000000)
+[X] [P8CAPS] timing: SleepEx(50)                    min 50.04 ms max 50.16 ms (qpf 10000000)
+[X] [P8CAPS] timing: WaitForSingleObject(event,50)  min 50.32 ms max 50.99 ms (qpf 10000000)
+[X] [P8CAPS] timing: hires timer 50                 min 50.27 ms max 51.97 ms (qpf 10000000)
+[X] [P8CAPS] timing: timer 50                       min 50.24 ms max 50.59 ms (qpf 10000000)
+[X] [P8CAPS] timing: 50x Sleep(1)                   min 51.35 ms max 52.27 ms (qpf 10000000)
+[X] [P8CAPS] timing: Sleep(500): qpc 500.1 ms, tick 499 ms
