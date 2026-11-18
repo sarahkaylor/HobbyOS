@@ -1070,10 +1070,23 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
 /* M6/L59: the complete flush.  Same effect as the shootdown handler's reload
  * (vector 0x82) but local and without an IPI: used by the present-leaf retry
  * path after INVLPG alone has failed to change the hardware's mind. */
+/* A full flush of THIS CPU's translations for `as` -- never a switch.
+ * H7-fault: it used to load as->root_phys whatever CR3 held.  vm_handle_fault's
+ * retry path calls it for the faulting AS, which a real fault always runs on,
+ * but the unit tier faults a test AS from kernel context: CR3 was left on that
+ * AS's root without v2_active_root knowing, the test tore the AS down, and
+ * every later test ran on a freed PML4.  It went unnoticed only because the
+ * forward-walking frame allocator did not reuse the frame for a while; with
+ * vm.c's zeroed-frame stash the root was reused (FAT directory data) and the
+ * next ioremap read (nvme_ready_now) took a kernel #PF.  Reload only when CR3
+ * already is this root. */
 void vm_arch_reload_cr3(struct addr_space *as) {
   if (!as || !as->root_phys)
     return;
-  uint64_t cr3 = as->root_phys;
+  uint64_t cr3;
+  __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+  if ((cr3 & X64_OA_MASK) != (as->root_phys & X64_OA_MASK))
+    return;
   __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
 }
 
