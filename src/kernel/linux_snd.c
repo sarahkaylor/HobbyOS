@@ -164,6 +164,12 @@ static struct {
   uint64_t vis, clk, vis_us, vis_rem;
   uint64_t held, st_held0, st_maxahead; /* xruns the play clock held back */
   int in_hold;
+  /* H5-audio2 zero detector (zero_scan): runs of exact-zero frames in what
+     the writer sends -- QEMU never makes zeros, so every zero in the WAV
+     came through WRITEI */
+  uint64_t z_run, z_t_us, z_q_vis, z_q_hw, z_call_n, z_prep_us;
+  uint32_t z_calls, z_call_all;
+  uint64_t z_runs, st_z0;
 } S;
 
 static spinlock_t lsnd_lock;
@@ -438,6 +444,7 @@ static void stat_reset_locked(uint64_t now) {
   S.st_xruns0 = S.xruns;
   S.st_dry0 = S.dry;
   S.st_held0 = S.held;
+  S.st_z0 = S.z_runs;
   S.st_maxahead = 0;
   S.st_maxgap_us = S.st_maxlat_us = S.st_maxwr_us = S.st_max100 = 0;
   S.st_minq = ~0ull;
@@ -479,6 +486,8 @@ static void stat_row_locked(uint64_t now) {
   kl_i(&kl, (long)(S.held - S.st_held0));
   kl_s(&kl, " maxahead=");
   kl_i(&kl, (long)S.st_maxahead);
+  kl_s(&kl, " zeros=+");
+  kl_i(&kl, (long)(S.z_runs - S.st_z0));
   kl_c(&kl, '\n');
   kl_emit(&kl);
   stat_reset_locked(now);
@@ -627,6 +636,7 @@ int linux_snd_open(int minor, uint32_t flags) {
     S.dring_n = 0;
     S.dry = 0;
     S.held = 0;
+    S.z_run = S.z_runs = S.z_prep_us = 0;
     S.st_t0_us = 0;
     spinlock_release_irqrestore(&lsnd_lock, fl);
   }
@@ -1082,6 +1092,76 @@ static int do_sw_params(struct process *p, uint64_t arg) {
   return cout(p, arg, b, sizeof b);
 }
 
+/* H5-audio2: find runs of >= 5 ms of exact-zero frames in a WRITEI's frames
+ * (already in the ring at [appl0, appl0 + n)) and print one row per run (the
+ * first 64, then every 64th): how much was queued (by the play clock and by
+ * hw) when it began, whether the WRITEI that began it was all zeros and how
+ * long it was (winealsa's lead-in is a WRITEI of exactly period - held
+ * zeros), how many WRITEIs it spanned and how long after the last PREPARE it
+ * began.  Lock: lsnd_lock (the row is one kline). */
+static void zero_end_locked(uint64_t now) {
+  if (S.z_run >= (S.rate ? S.rate : 48000) / 200) {
+    S.z_runs++;
+    if (S.z_runs <= 64 || (S.z_runs & 63) == 0) {
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SND] zeros n=");
+      kl_i(&kl, (long)S.z_runs);
+      kl_s(&kl, " t_ms=");
+      kl_i(&kl, S.run_start_us ? (long)((int64_t)(S.z_t_us - S.run_start_us) / 1000) : -1);
+      kl_s(&kl, " frames=");
+      kl_i(&kl, (long)S.z_run);
+      kl_s(&kl, " q_vis=");
+      kl_i(&kl, (long)S.z_q_vis);
+      kl_s(&kl, " q_hw=");
+      kl_i(&kl, (long)S.z_q_hw);
+      kl_s(&kl, " call_frames=");
+      kl_i(&kl, (long)S.z_call_n);
+      kl_s(&kl, " call_all_zero=");
+      kl_i(&kl, (long)S.z_call_all);
+      kl_s(&kl, " calls=");
+      kl_i(&kl, (long)S.z_calls);
+      kl_s(&kl, " since_prepare_ms=");
+      kl_i(&kl, S.z_prep_us ? (long)((int64_t)(S.z_t_us - S.z_prep_us) / 1000) : -1);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  (void)now;
+  S.z_run = 0;
+}
+
+static void zero_scan_locked(uint64_t appl0, uint64_t n) {
+  if (S.channels == 0 || S.frame_bytes == 0) return;
+  uint64_t now = timer_get_us();
+  int all = 1;
+  for (uint64_t i = 0; i < n && all; i++) {
+    const int16_t *f = (const int16_t *)(lsnd_ring + ((appl0 + i) % S.buffer) * S.frame_bytes);
+    for (uint32_t c = 0; c < S.channels; c++)
+      if (f[c]) all = 0;
+  }
+  if (S.z_run) S.z_calls++;
+  for (uint64_t i = 0; i < n; i++) {
+    const int16_t *f = (const int16_t *)(lsnd_ring + ((appl0 + i) % S.buffer) * S.frame_bytes);
+    int z = 1;
+    for (uint32_t c = 0; c < S.channels; c++)
+      if (f[c]) z = 0;
+    if (z) {
+      if (!S.z_run) {
+        S.z_t_us = now;
+        S.z_q_vis = appl0 + i - S.vis;
+        S.z_q_hw = appl0 + i - S.hw;
+        S.z_call_n = n;
+        S.z_call_all = (uint32_t)all;
+        S.z_calls = 1;
+      }
+      S.z_run++;
+    } else if (S.z_run) {
+      zero_end_locked(now);
+    }
+  }
+}
+
 /* WRITEI_FRAMES: copy what fits; park when nothing fits (blocking fd). */
 static int do_writei(struct process *p, uint64_t arg, int nonblock) {
   uint8_t x[24];
@@ -1140,6 +1220,7 @@ static int do_writei(struct process *p, uint64_t arg, int nonblock) {
   }
   int need_start = 0;
   fl = spinlock_acquire_irqsave(&lsnd_lock);
+  zero_scan_locked(appl, done);
   S.appl += done;
   {
     uint64_t now = timer_get_us();
@@ -1293,6 +1374,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     }
     S.hw = S.appl = S.submit = 0;
     S.vis = S.clk = 0;
+    S.z_prep_us = timer_get_us();
     S.epoch++;
     S.inflight = 0;
     S.avail_max = 0;
