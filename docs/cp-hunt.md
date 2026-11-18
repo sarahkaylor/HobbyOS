@@ -16,6 +16,23 @@ H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
 
 <!-- RESULTS -->
 
+## Old logs on strix: the census (`classify.py --mine`, `mine_report.py`)
+
+Every `serial.log` / `serial.txt` / `*.serial` under `~/cp/integ1*/`,
+`~/cp/lanes/*-logs/`, `~/cp/integ/obj/cp-p8*|cp-p9*` and every
+`~/cp/**/obj/cp-p8*|cp-p9*` (595 paths) was read once.  Copies of one boot
+(the integ batches copy `serial.log` to `~/cp/integ1N/p8-*.serial`;
+`serial.txt` is `serial.log` without CRs) are counted once: the key is the
+sha256 of the CR-stripped bytes.  That leaves **147 distinct boots, 128 of
+them game boots** (146 duplicates dropped).  Full output:
+`docs/cp-hunt-evidence/mine-census.txt`.  The older boots (wave 5 / early
+wave 6, before C0-console) interleave rows from two CPUs on the serial
+console, so the classifier cuts every kernel row at the next row tag and keys
+it on its first six normalised words.
+
+<!-- CENSUS -->
+
+
 ## Harness (`tools/cp/hunt/`, new)
 
 | file | what |
