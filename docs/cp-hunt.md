@@ -32,7 +32,58 @@ the big-guest lock.
 
 ### Round 2 findings and status changes
 
-{R2FIND}
+| ID | symptom | rate | first-seen evidence | signature | layer | severity | status |
+|---|---|---|---|---|---|---|---|
+| **H1-17** | at a 1920×1080 game resolution with H2's `--game-res`, the main-menu seek works (the menu does scale 1.5×), but the save-list seek fails: `game_view()` scales with PIL's default bicubic, which blends the 1–2 px cyan focus frame below `list_focus()`'s colour test (the target entry reads as a 1-row sliver) | 1/1 stock boot (h2-fq1); 0/1 with NEAREST (h2-fq2nn passes the whole fpsprobe, world 34.5) | `cp-hunt-evidence/r2-1080p-listseek.txt` | `LISTSEEK FAILED loadlist-focus: no entry focused at y=509.0 after 8 taps` | harness (`boot_p9.game_view`) | harness | open: one-word diff below (H2-early) |
+| **H1-16** | `run-p8.sh`'s new prefix-stamp warning (209a5ce4) fires when the stamp matches: `.update-timestamp` ends in CR LF, so `"$PSTAMP" != "$WSTAMP"` though both print the same number | {B16} | `cp-hunt-evidence/r2-prefix-stamp-cr.txt` | `== WARNING: prefix stamp 1794996799 != …/wine.inf mtime 1794996799` | harness (`tools/cp/p8/run-p8.sh`) | cosmetic (a false alarm on every boot) | open: diff below (H2-early) |
+| **H1-18** | `run-hunt.sh`'s one-boot lock was `/tmp/cp-hunt-lane.lock` for every tree; another lane's copy (audio2-base) held it, and this lane's boot waited ~10 min behind theirs | 1 wait (h2-rl1) | `h2-rl1` start 08:17 → its log starts 08:27 | `fuser /tmp/cp-hunt-lane.lock` → audio2-base's run-hunt | this lane's harness | harness | **fixed in e11b0700** (lock per tree) |
+
+**H1-12, the two ways around it.**
+* `tools/cp/hunt/reload2.p9`: the reload takes CONTINUE from the **fresh**
+  main menu, where the focus always behaves, and skips reload.p9's detour
+  through the save list (the evidence that the save is boot A's is the
+  position: an immediate F5 after loading writes a quick save whose
+  `playerPosition` equals boot A's).  {R12RATE}
+* By hand in h2-ctl1: after Esc from Settings the menu showed no focus for
+  two Up taps; a relative mouse move of +60 then −60 (QMP `rel` events) and
+  the next Up gave NEW GAME, Down gave LOAD GAME (`r2-ctl-preset-focus.txt`).
+  In the same boot the save list → Esc left the focus visible, so H1-12 is
+  intermittent, not 3/3.  Proposed for `boot_p9.seek()` (H2-early, untested
+  in an unattended boot):
+
+  ```diff
+                       d = direction if label is None else ("down" if want > names.index(label) else "up")
+  +                    if label is None and i >= 1:
+  +                        # cp-hunt H1-12: back from a sub-menu the main menu can show no
+  +                        # keyboard focus until the pointer moves; a net-zero wiggle brings it back
+  +                        send([{"type": "rel", "data": {"axis": "x", "value": 60}}]); tick(0.1)
+  +                        send([{"type": "rel", "data": {"axis": "x", "value": -60}}]); tick(0.5)
+  ```
+
+**H1-17 diff** (`tools/cp/p9/boot_p9.py` `game_view`, H2-early), verified by
+h2-fq2nn through `tools/cp/hunt/boot_p9_nn.py`, which is boot_p9 with only
+this replaced:
+
+```diff
+-        return g.resize((1280, 720))
++        return g.resize((1280, 720), Image.NEAREST)   # keep the 1-2 px focus frames (cp-hunt H1-17)
+```
+
+**H1-16 diff** (`tools/cp/p8/run-p8.sh` ~307, H2-early):
+
+```diff
+-  PSTAMP="$(debugfs -R 'cat /pfx/.update-timestamp' "$CPD" 2>/dev/null | head -1 | cut -d' ' -f1)"
++  PSTAMP="$(debugfs -R 'cat /pfx/.update-timestamp' "$CPD" 2>/dev/null | head -1 | tr -d '\r' | cut -d' ' -f1)"
+```
+
+**The graphics preset (round 1's open item).**  On the GRAPHICS tab Right on
+Quick Preset moves the focus to RUN BENCHMARK instead of changing it; **Enter
+changes it**.  One Enter took "Custom" to "Ray Tracing Overdrive" (path
+tracing; vkd3d-proton reports DXR 1.1 on the 9070 XT through Venus), saved by
+the game on leaving Settings (Texture High, Crowd High, FSR2).  The save then
+loaded and played on it at 15.5–18.8 fps world median with no `[VENUS]`
+stall, fence or submit error and no device-lost row (1/1, h2-ctl1).
+
 
 ## Round 1 result (integ15)
 
