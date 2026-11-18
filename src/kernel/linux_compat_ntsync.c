@@ -547,6 +547,22 @@ static uint64_t ns_deadline_us(uint64_t timeout_ns, uint32_t flags) {
   return abs_us ? abs_us : 1;
 }
 
+/* A satisfied wait: report the index (Linux: even when a signal is
+   pending; the handler then runs at this syscall's exit). */
+static int ns_done(struct process *p, struct trap_frame *tf, uint64_t arg,
+                   int32_t sig, uint32_t od, uint32_t cnt) {
+  uint32_t idx = (uint32_t)sig;
+  ns_maybe_row();
+  if (idx == cnt) ns_st.alerts++;
+  /* ntsync_wait_args.index is at byte 20 */
+  if (l_copy_to_user(p, arg + 20, &idx, 4) != 0) return ns_ret(tf, -EFAULT);
+  if (od) {
+    ns_st.ownerdead++;
+    return ns_ret(tf, -EOWNERDEAD);
+  }
+  return ns_ret(tf, 0);
+}
+
 /* Is this ioctl the re-execution of the thread's parked wait?  Only a park
    leaves a record queued while the thread runs again (every other exit tears
    it down), so a match on slot generation, request and args pointer is it. */
@@ -652,6 +668,16 @@ static int ns_wait(struct process *p, struct trap_frame *tf, struct ns_obj *dev,
   /* look, or park */
   for (;;) {
     int res; /* 0 = done, 1 = signal, 2 = timeout, 3 = parked, 4 = dying */
+    if (__atomic_load_n(&q->signaled, __ATOMIC_ACQUIRE) != -1) {
+      /* satisfied (q->signaled leaves -1 only under ns_lock, and only once
+         per queued wait): no proc_lock on the uncontended path */
+      uint64_t fl = spinlock_acquire_irqsave(&ns_lock);
+      int32_t sig = q->signaled;
+      uint32_t od = q->ownerdead, cnt = q->count;
+      ns_q_teardown_locked(q);
+      spinlock_release_irqrestore(&ns_lock, fl);
+      return ns_done(p, tf, arg, sig, od, cnt);
+    }
     uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
     /* under proc_lock, the lock a signal sender holds: a signal cannot slip
        between this look and the park (the futex / eventfd rule) */
@@ -691,16 +717,7 @@ static int ns_wait(struct process *p, struct trap_frame *tf, struct ns_obj *dev,
       ns_st.timeouts++;
       return ns_ret(tf, -ETIMEDOUT);
     }
-    /* satisfied: report the index (Linux: even when a signal is pending) */
-    uint32_t idx = (uint32_t)sig;
-    if (idx == cnt) ns_st.alerts++;
-    /* ntsync_wait_args.index is at byte 20 */
-    if (l_copy_to_user(p, arg + 20, &idx, 4) != 0) return ns_ret(tf, -EFAULT);
-    if (od) {
-      ns_st.ownerdead++;
-      return ns_ret(tf, -EOWNERDEAD);
-    }
-    return ns_ret(tf, 0);
+    return ns_done(p, tf, arg, sig, od, cnt);
   }
 }
 
