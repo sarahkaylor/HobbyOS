@@ -161,7 +161,7 @@ BENIGN = [
     (r"CreateDXGIFactory2: Ignoring flags|MakeWindowAssociation: Ignoring flags", "DXVK: flags it does not implement"),
     (r"winediag:.*ntsync", "ntsync availability note"),
     (r"wineusb|hidclass|plugplay", "no USB / HID devices"),
-    (r"wine: failed to start .*syswow64", "no 32-bit Wine: the prefix update's Wow64Install step (stale prefix stamp, see cp-hunt H1-07)"),
+    (r"wine: failed to start .*syswow64", "no 32-bit Wine: the prefix update's Wow64Install step (stale prefix stamp, cp-hunt H1-04)"),
 ]
 BENIGN_RX = [(re.compile(p), why) for p, why in BENIGN]
 
