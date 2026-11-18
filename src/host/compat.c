@@ -10,6 +10,9 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <signal.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #include "../user_include/libc.h"
 #include "../user_include/graphics/graphics.h"
@@ -129,6 +132,33 @@ int get_args(char *buf, int size) {
   return 0;
 }
 
+/* Every child spawn2() really starts is killed and reaped when the host test
+ * exits.  The desktop host tests (editor_test_host) launch EDITOR.BIN through
+ * the real desktop code and then exit() from a flush callback; nothing reaped
+ * the ./EDITOR.BIN_host child, which sat in a pipe read under init forever --
+ * one per `make host_tests` (strix: ~70 across the lane trees, up to 2 days
+ * old).  atexit covers exit()/return; on Linux PR_SET_PDEATHSIG also covers a
+ * parent killed by HOST_RUN's timeout or a signal.  Guard:
+ * tools/host/spawn_reap_test.py. */
+#define HOST_SPAWN_MAX 64
+static pid_t host_spawned[HOST_SPAWN_MAX];
+static int host_spawned_n = 0;
+
+static void host_reap_spawned(void) {
+  for (int i = 0; i < host_spawned_n; i++) {
+    pid_t c = host_spawned[i];
+    host_spawned[i] = 0;
+    if (c <= 0) continue;
+    /* Only a child that is still ours and still running is killed: one the
+     * test already waited for is gone (ECHILD), so its pid is never signalled
+     * after it could have been reused. */
+    if (waitpid(c, NULL, WNOHANG) != 0) continue;
+    kill(c, SIGKILL);
+    waitpid(c, NULL, 0);
+  }
+  host_spawned_n = 0;
+}
+
 int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
   if (mock_spawn2_intercept) {
     snprintf(mock_spawn2_last_file, sizeof(mock_spawn2_last_file), "%s", filename);
@@ -137,9 +167,16 @@ int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, con
     mock_spawn2_last_stderr = stderr_fd;
     return mock_spawn2_result;
   }
+  pid_t parent = getpid();
   pid_t pid = fork();
   if (pid < 0) return -1;
   if (pid == 0) {
+#ifdef __linux__
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    if (getppid() != parent) _exit(1); /* the parent is already gone */
+#else
+    (void)parent;
+#endif
     if (stdin_fd >= 0 && stdin_fd != 0) {
       dup2(stdin_fd, 0);
       close(stdin_fd);
@@ -160,8 +197,10 @@ int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, con
     char *argv[] = {host_filename, NULL};
     execv(host_filename, argv);
     perror("execv failed");
-    exit(1);
+    _exit(1);
   }
+  if (host_spawned_n == 0) atexit(host_reap_spawned);
+  if (host_spawned_n < HOST_SPAWN_MAX) host_spawned[host_spawned_n++] = pid;
   return pid;
 }
 
