@@ -9,9 +9,9 @@
 #include "gpu_abi.h"
 #include "errno.h"
 #include <stdint.h>
+#include "linux_snd.h"
 #ifdef __x86_64__
 #include "virtio_gpu_blob.h"
-#include "linux_snd.h"
 #endif
 
 /* H4-kglitch (docs/cp-kglitch.md §3): the ioctl park sentinels are not errno
