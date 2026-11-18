@@ -45,6 +45,7 @@
 #include "linux_syscall.h"
 #include "lock.h"
 #include "process.h"
+#include "ntsync.h" /* C2-ntsync: ntsync_thread_waiting */
 #include "timer.h"
 #include "vm.h"
 
@@ -4329,6 +4330,10 @@ static int l_park_is_rewound(struct process *t) {
 /* Linux's -ERESTARTNOHAND / -ERESTART_RESTARTBLOCK calls: EINTR even under
    SA_RESTART.  Everything else that parks rewound is -ERESTARTSYS. */
 static int l_rewound_restartable(struct process *t) {
+  /* C2-ntsync: a parked ntsync wait answers -EINTR to a handled signal
+     (its queue entries go before the handler runs; ntsync.h). */
+  if ((int)t->context[0] == 16 && ntsync_thread_waiting(t))
+    return 0;
   switch ((int)t->context[0]) {
   case 7:   /* poll */
   case 23:  /* select */
