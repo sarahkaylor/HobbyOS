@@ -1192,7 +1192,9 @@ static void sys_write(struct trap_frame *tf) {
          rich negative errno (e.g. -EPIPE from a closed pipe peer) passes
          through; only the legacy -1 keeps the historical EBADF mapping
          for the older backends.  -2 is the restart marker handled above. */
-      tf->regs[0] = (ret == -1) ? (uint64_t)-EBADF : (uint64_t)(int64_t)ret;
+      /* H4-kglitch K8: a memfd/tmpfs write's -1 is a real EPERM (a seal) */
+      tf->regs[0] = (ret == -1) ? (uint64_t)-(int64_t)file_fail_errno(caller, fd)
+                                : (uint64_t)(int64_t)ret;
     } else {
       tf->regs[0] = ret;
     }
@@ -1285,6 +1287,7 @@ static void compat_writev(struct trap_frame *tf) {
       schedule(tf, 0);
       return;
     }
+    if (r == -1) r = -file_fail_errno(c, fd); /* H4-kglitch K9: not -EPERM for a closed fd */
     if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)r; return; }
     total += r;
     /* Short write: Linux stops here and returns the partial total, NOT the next
@@ -1331,6 +1334,7 @@ static void compat_readv(struct trap_frame *tf) {
       schedule(tf, 0);
       return;
     }
+    if (r == -1) r = -EBADF; /* H4-kglitch K9: fs.c's generic -1, as read(2) maps it */
     if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : r); return; }
     total += r;
     if ((uint64_t)r < len) { tf->regs[0] = (uint64_t)total; return; }

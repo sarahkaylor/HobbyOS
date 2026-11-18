@@ -1765,6 +1765,22 @@ uint64_t fs_poll_bloom_get(void) {
 /* C1-k6 round 2: the notification key of fd's object: 0..63 (a pipe, an
    eventfd: poll_notify_obj), 64 (notifies without a key: AF_UNIX,
    signalfd, /dev/null), 65 (does not notify: the scan's slice finds it). */
+/* H4-kglitch round 2 (K8/K9): the Linux errno for fs.c's generic -1 on
+ * `fd`.  The syscall routes used to map every -1 to EBADF (read/write) or
+ * pass it through as -EPERM (readv/writev/pread64/pwrite64).  A tmpfs or
+ * memfd write's only -1 is a real -EPERM (a sealed or immutable object,
+ * tmpfs.c / vm.c), which Linux reports as EPERM; everything else that
+ * answers the generic -1 (a closed fd, the wrong pipe end, ...) is EBADF. */
+int file_fail_errno(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return EBADF;
+  int g = p->open_fds[fd];
+  if (g < 0 || g >= MAX_GLOBAL_FILES) return EBADF;
+  struct file *f = gfile(g);
+  if (f->type == FILE_TYPE_MEMFD || f->type == FILE_TYPE_TMPFS) return EPERM;
+  return EBADF;
+}
+
 int file_poll_keybit(struct process *p, int fd) {
   p = process_group(p);
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 64;

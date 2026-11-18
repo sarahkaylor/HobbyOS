@@ -99,6 +99,7 @@ static int l_misc_readv(struct process *p, struct trap_frame *tf) {
         schedule(tf, 0);
         return 1;
       }
+      if (r == -1) r = -EBADF; /* H4-kglitch K9: fs.c's generic -1 (closed fd), as read(2) */
       if (r < 0) return l_misc_ret(tf, total > 0 ? total : r);
       total += r;
       base += (uint64_t)r;
@@ -129,6 +130,7 @@ static int l_misc_pread64(struct process *p, struct trap_frame *tf) {
     schedule(tf, 0);
     return 1;
   }
+  if (r == -1) r = -EBADF; /* H4-kglitch K9: was answered as -EPERM */
   return l_misc_ret(tf, r);
 }
 
@@ -145,6 +147,9 @@ static int l_misc_pwrite64(struct process *p, struct trap_frame *tf) {
     schedule(tf, 0);
     return 1;
   }
+  /* H4-kglitch K9: fs.c's generic -1 was answered as -EPERM (a closed fd);
+     a memfd/tmpfs write's -1 really is EPERM (K8) */
+  if (r == -1) r = -file_fail_errno(p, fd);
   return l_misc_ret(tf, r);
 }
 
