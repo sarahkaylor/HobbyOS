@@ -1,0 +1,101 @@
+# C6-present gate batch on cp-present (f131f594 + 2 commits: the [THRW] three-row fix) = integ10 49e83499 + this lane; strix; script ~/cp/lanes/present-gates.sh = ~/cp/integ-gates12.sh with this tree/exports (P4, thrstorm, k5probes, P8 lavapipe/pfx dropped: not touched; P8 Venus on obj/cp-p9/pfx-saves.img), logs ~/cp/lanes/present-gates/
+# parity references: ~/cp/integ-gates13.txt (integ10 49e83499) and ~/cp/integ-gates12.txt (integ9)
+tree  start 18:27:12
+build rc=0 18:27:25
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 24832/24885, user rows intact 11303/11314, interleaved lines 0, torn rows 7, missing 64, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 18:57:19
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/venus)
+unit rc=1 Tests failed! Tests run:    462 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed kconsole=kconsole_test: PASS (0 failures)
+castscan rc=0 castscan: 368 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=1 == removed /srv/nfs/cp-present-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+infra end 19:19:36
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 19:20:55
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 280 s; lock released serial=280234 19:26:31
+venus_mesa rc=0 cp-venus-mesa: audit: ok (1921696 bytes)
+gate_p6_venus#1 rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=246188 saturated=61556 bbox=(44, 70, 682, 548) hash=f7a3b5ee635dd52e [P5W] vkcube vkcube-t50s.ppm: clear=245548 saturated=62192 bbox=(44, 70, 682, 548) hash=89818b71e52fe0d0 [P5W] vkcube: PASS [P5W] d3d11 d3d11-t20s.ppm: clear=237240 saturated=48260 bbox=(724, 70, 1362, 548) hash=651b94fcfad886a2 [P5W] d3d11 d3d11-t50s.ppm: clear=237252 satu
+gate_p7_fullscreen rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=1730880 saturated=342720 bbox=(0, 0, 1918, 1078) hash=28963b9922890203 [P5W] vkcube vkcube-t50s.ppm: clear=1737792 saturated=335808 bbox=(0, 0, 1918, 1078) hash=c0318c68eb90c8a8 [P5W] vkcube: PASS [P5W] d3d12 d3d12-t20s.ppm: clear=1601856 saturated=310008 bbox=(0, 0, 1918, 1078) hash=01e53b7c94c4502d [P5W] d3d12 d3d12-t50s.ppm: clear=1601
+gate_p8_venus rc=0    +   137.8 s  19:37:33  main menu OCR at s009-t000114: ['NEW GAME', 'LOAD GAME', 'CONTINUE', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   143.4 s  19:37:38  main menu OCR at s010-t000120: ['NEW GAME', 'LOAD GAME', 'CONTINUE', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   145.6 s  19:37:40  verdict: mai 19:37:40
+ALLDONE 19:37:40
+
+## reruns of the two reds (same tree, right after the batch)
+console rerun: lp_check_console: kernel rows intact 26949/26949, user rows intact 12283/12283, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+reg_gate rerun: rc=0 == removed /srv/nfs/cp-present-reg
+first run of the batch (before the [THRW] split) console: console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 25444/25458, user rows intact 11767/11777, interleaved lines 0, torn rows 4, missing 24, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+integ10 (integ-gates13) console: console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 25774/25779, user rows intact 11783/11783, interleaved lines 0, torn rows 1, missing 5, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+
+## reg_gate first-run failure row
+[HOST] FAIL serial-b2: [YLOCK-WEDGE]: [YLOCK-WEDGE] site=? lock=? addr=0x704DCF8C pc=0x1 extra=0x1 cpu=6 [YLOCK-OWNER] ? pid=240 cpu=1 pcb_live=1 ost=3 osys=17 
+reg_gate: FAIL (1)
+
+## P7 fullscreen [HBP] rows (lane, unlocked flip)
+[P7] scanout flip unlocked async/sync 1 0 seq=0
+[X] [HBP] pid=185 n=228 fps=113.7 path=scanout acq=0/4 sub=7749/9848 wait=2/16 flip=5659/8064 geom=0/0 set=53 flush=5524 us scanout=228 putimage=0 refused=0 total=980
+[X] [HBP] pid=185 n=226 fps=112.9 path=scanout acq=1/15 sub=7966/10252 wait=26/5491 flip=5814/9409 geom=0/0 set=76 flush=5627 us scanout=226 putimage=0 refused=0 total=5406
+[X] [HBP] pid=190 n=237 fps=118.2 path=scanout acq=0/18 sub=7659/9266 wait=3/32 flip=7337/8897 geom=0/0 set=61 flush=7193 us scanout=237 putimage=0 refused=0 total=3279

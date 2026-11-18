@@ -88,13 +88,18 @@ interrupt, or in user mode), READY (runnable, not on a CPU), in a futex, or
 blocked — in which syscall.  Every 5 s one row per busy group:
 
 ```
-[THRW] pid=92 ticks=500 run=2.62 ready=1.01 futex=27.27 blk 0:12.08 23:3.88 ...
-       kern=1.49 trap=… ksys 23:0.43 16:0.36 0:0.20 202:0.15 228:0.14 ...
-       top 92:91/1/25/…(…) 96:91/1/24/… 121:26/0/… Cyberpunk2077.e
+[THRW] pid=92 ticks=500 run=2.39 ready=0.24 futex=27.30 blk 0:11.99 23:4.93 16:0.10 kern=1.02 trap=0.19 Cyberpunk2077.e
+[THRWK] pid=92 ksys 16:0.46 202:0.18 14:0.05 228:0.03
+[THRWT] pid=92 top 96:59/3/11/2(202=3,14=1) 92:31/2/6/1(202=1)
 ```
 
-`run/ready/futex/kern` are average thread counts; `top` lists the group's
-three busiest threads as `tid:run%/ready%/kern%/trap%(syscall=%…)`.
+(Three rows, each under the kernel's 256-byte `kline`: one row ran past it
+in a busy group and fused with the next writer's — §9.)
+
+`run/ready/futex/kern/trap` are average thread counts (`trap`: in the
+kernel but not in a syscall — a fault or an interrupt); `blk`/`ksys` split
+the blocked / in-a-syscall threads by syscall number; `top` lists the
+group's three busiest threads as `tid:run%/ready%/kern%/trap%(syscall=%…)`.
 
 ## 3. What was ruled out, with numbers
 
@@ -296,3 +301,34 @@ python3 -I tools/cp/p9/prof.py obj/cp-p9/pr-k5/prof-fp-world.txt hobbyos.elf
 | `integ10-rebaseline-strix.txt` | every integ10 fpsprobe boot, kernel-labelled |
 | `play-pr-play1-strix.txt`, `play-pr10-play-strix.txt` | play.p9 on the cp-play r2 kernel and on integ10, both with the lane |
 | `gates-strix.txt` | the gate batch (§9) |
+
+## 9. Gates (strix, cp-present = integ10 49e83499 + this lane; `docs/cp-present-evidence/gates-strix.txt`)
+
+Batch `~/cp/lanes/present-gates.sh` (the integrator's `integ-gates12.sh` with
+this tree and `cp-present-*` exports).  Parity references:
+`~/cp/integ-gates13.txt` (integ10) and `~/cp/integ-gates12.txt` (integ9).
+
+| gate | lane | integ10 (gates13) |
+|---|---|---|
+| 1 build (MODE=test) | ok | ok |
+| 2 every `linux_probe_*` (55) | 54 pass; **console** torn 7 / missing 64 → **rerun PASS** (0/0, 26949/26949) | console torn 1 / missing 5 |
+| 3 ext2_gate | PASS | PASS |
+| 4 unit | 462 run, 2 failed: `virtio_gpu_test.c:214/:244` | same |
+| 5 host | 38/40, kconsole PASS | same |
+| 6 castscan | 368, 0 new | same |
+| 7 ARM build | ok | ok |
+| 8 exec_gate, rsize_scan, rsize_guard | PASS ×3 | PASS ×3 |
+| 9 pfx_gate | PASS | PASS |
+| ext2w_gate / reg_gate / ext2_test_host / exitgroup ×3 | PASS / FAIL (`[YLOCK-WEDGE]` serial-b2) → **rerun PASS** / PASS / 3 PASS | FAIL / PASS / PASS / 3 PASS |
+| P2 | G1 G2 G3 PASS | PASS |
+| P5 (vkcube, d3d11, d3d12, fullscr) | **PASS** (fullscreen row included) | PASS ×3 |
+| Venus P6 row (vkcube, d3d11, d3d12 on Venus) | PASS | PASS |
+| P7 fullscreen on Venus (the unlocked flip) | PASS, `[P7] scanout flip unlocked`, 113–118 fps | PASS |
+| P8 on Venus | main menu (OCR ×2) at +138 s | — (gates13 ran P8 lavapipe) |
+
+The first run of the batch, with `[THRW]` still one row, also graded the
+console probe torn (4 / 24): its row ran past the 256-byte `kline` in the
+probe's 17-thread group and fused with the next row.  Split into three rows
+(d4914e14, §2.3); the second batch's console failure is the integ10 class
+(`[CONS!]` forced writes after 200 ms waits, no `[THRW]` text in the torn
+rows) and passed on rerun.
