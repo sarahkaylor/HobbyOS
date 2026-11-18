@@ -1,0 +1,57 @@
+# H5-audio2: candidate winealsa.drv patch (Wine 11.0) -- NOT applied, NOT built, for the integrator's approval
+# (deliberately not in tools/cp/wine-patches/: build-wine.sh applies every *.patch there).
+#
+# Why: every exact-zero run in the game WAV came from WRITEIs of exactly period - held zeros
+# (the kernel's [SND] zeros rows, a2-lane-fp5: call_all_zero=1, call_frames=480/384/182), i.e.
+# alsa_write_data's lead-in.  The lead-in fires when data_in_alsa_frames == 0 and held < period.
+# Wine 11.0 counts min(data_in_alsa, avail) as played each period, where avail is the FREE space:
+# that equals what played since the last period only if the last period filled the buffer.  A
+# client with little padding leaves the buffer part-empty, so the estimate empties data_in_alsa
+# while ALSA still holds data -- 5 of the 10 game-stream zero runs in a2-lane-fp5 began with
+# 13-26 ms still queued (q_vis=626..1258).  The patch counts played = data_in_alsa minus what
+# ALSA still holds (buffer - avail).
+#
+# Model A/B (host only, tools/cp/audio2/atone.c acct=orig|fix on the LSND_HOST_QEMU model,
+# lane kernel, 20 s each, two runs per row; strix):
+#   83:static long n_xrun_state, n_epipe, n_leadin, n_ticks, n_late15, n_late25, n_late40;
+#   154:    n_leadin++;
+#   327:             "leadin=+%ld starved_fill=%ld written_s=+%.2f stalls=%ld\n",
+#   orig-fill_1_skip_8: xrun_state=356 epipe=31 leadin=13 silence_s=0.130 zero_rows=13 zero_rows_into_nonempty(q_vis>240)=1 wavgaps: dropouts=12 wavgaps: dropout_ms_total=120.0 
+#   orig-fill_2_skip_4: xrun_state=7 epipe=1 leadin=17 silence_s=0.170 zero_rows=9 zero_rows_into_nonempty(q_vis>240)=1 wavgaps: dropouts=8 wavgaps: dropout_ms_total=140.0 
+#   fix-fill_1_skip_8: xrun_state=393 epipe=25 leadin=2 silence_s=0.020 zero_rows=2 zero_rows_into_nonempty(q_vis>240)=0 wavgaps: dropouts=1 wavgaps: dropout_ms_total=10.0 
+#   fix-fill_2_skip_4: xrun_state=179 epipe=24 leadin=22 silence_s=0.220 zero_rows=9 zero_rows_into_nonempty(q_vis>240)=0 wavgaps: dropouts=8 wavgaps: dropout_ms_total=180.0 
+#   orig-fill_1_skip_8: xrun_state=362 epipe=27 leadin=14 silence_s=0.140 zero_rows=14 zero_rows_into_nonempty(q_vis>240)=1 wavgaps: dropouts=13 wavgaps: dropout_ms_total=130.0 
+#   orig-fill_2_skip_4: xrun_state=9 epipe=0 leadin=18 silence_s=0.180 zero_rows=11 zero_rows_into_nonempty(q_vis>240)=0 wavgaps: dropouts=10 wavgaps: dropout_ms_total=150.0 
+#   fix-fill_1_skip_8: xrun_state=390 epipe=38 leadin=2 silence_s=0.020 zero_rows=2 zero_rows_into_nonempty(q_vis>240)=0 wavgaps: dropouts=1 wavgaps: dropout_ms_total=10.0 
+#   fix-fill_2_skip_4:  zero_rows=13 zero_rows_into_nonempty(q_vis>240)=0 wavgaps: dropouts=12 wavgaps: dropout_ms_total=160.0 
+#   
+#   [exited with code 0]
+# Mixed: with a client that renders one period per event and skips 1 in 8, the fix removes the
+# lead-ins (12-13 -> 1 dropouts); with two periods per event and 1 in 4 skipped it does not
+# (8-10 -> 8-12; the second fix run did not finish its 20 s within the 60 s timeout) and the
+# correct padding makes the client render less, so more real xruns
+# (7-9 -> 179).  Not validated in a game boot.  Recommendation: do not apply as is; if the
+# integrator wants it tried, build it with its own CP_WINE_WORK and run two fp720 audio boots.
+#
+--- a/dlls/winealsa.drv/alsa.c	2026-11-18 09:53:02.555977569 -0600
++++ b/dlls/winealsa.drv/alsa.c	2026-11-18 09:53:02.567228772 -0600
+@@ -1400,7 +1400,18 @@
+     else
+         max_copy_frames = 0;
+ 
+-    data_frames_played = min(stream->data_in_alsa_frames, avail);
++    /* What ALSA still holds is buffer - avail.  "avail" alone is the free
++     * space, which equals what played since the last period only when the
++     * previous period filled the buffer; when it did not (the client keeps
++     * little padding), counting all of avail as played emptied
++     * data_in_alsa_frames while ALSA still held data, and the lead-in below
++     * then wrote a period of silence in front of it. */
++    {
++        snd_pcm_uframes_t queued = avail < stream->alsa_bufsize_frames ?
++            stream->alsa_bufsize_frames - avail : 0;
++        data_frames_played = stream->data_in_alsa_frames > queued ?
++            stream->data_in_alsa_frames - queued : 0;
++    }
+     stream->data_in_alsa_frames -= data_frames_played;
+ 
+     if(stream->held_frames > data_frames_played){

@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -43,6 +44,10 @@ static void dump_hw(const char *tag, const void *a) {
 }
 
 void linux_snd_init(void);
+/* H5-audio2: the QEMU model's timer thread delivers the completion "IRQ"
+   (linux_snd_irq) under this lock; every kernel entry here takes it too. */
+extern pthread_mutex_t lsnd_host_big;
+#define BIG(x) (pthread_mutex_lock(&lsnd_host_big), (x), pthread_mutex_unlock(&lsnd_host_big))
 static int minor_of[4096];
 static int inited;
 
@@ -63,11 +68,12 @@ static int snd_open(const char *path, int flags, int *handled) {
   init_once();
   int m = linux_snd_path_minor(path);
   if (m < 0) { errno = ENOENT; return -1; }
-  int r = linux_snd_open(m, (uint32_t)flags);
+  int r;
+  BIG(r = linux_snd_open(m, (uint32_t)flags));
   if (r < 0) { errno = -r; return -1; }
   int (*ro)(const char *, int, ...) = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, "open");
   int fd = ro("/dev/null", O_RDWR | (flags & (O_NONBLOCK | O_CLOEXEC)));
-  if (fd < 0 || fd >= 4096) { linux_snd_release(m); errno = EMFILE; return -1; }
+  if (fd < 0 || fd >= 4096) { BIG(linux_snd_release(m)); errno = EMFILE; return -1; }
   minor_of[fd] = m;
   fprintf(stderr, "[SHIM] open %s -> fd %d (minor %d)\n", path, fd, m);
   return fd;
@@ -102,7 +108,7 @@ int close(int fd) {
   if (served(fd)) {
     int m = minor_of[fd];
     minor_of[fd] = -1;
-    linux_snd_release(m);
+    BIG(linux_snd_release(m));
   }
   return r(fd);
 }
@@ -120,7 +126,8 @@ int ioctl(int fd, unsigned long req, ...) {
   int tr = getenv("LSND_TRACE") && ((uint32_t)req == 0xC2604110u || (uint32_t)req == 0xC2604111u);
   if (tr) dump_hw((uint32_t)req == 0xC2604110u ? "REFINE in " : "PARAMS in ", arg);
   for (;;) {
-    int r = linux_snd_ioctl(0, minor_of[fd], (uint32_t)fl, (uint32_t)req, (uint64_t)(uintptr_t)arg);
+    int r;
+    BIG(r = linux_snd_ioctl(0, minor_of[fd], (uint32_t)fl, (uint32_t)req, (uint64_t)(uintptr_t)arg));
     if (tr && r != LSND_PARKED) {
       fprintf(stderr, "[TRACE]   -> r=%d\n", r);
       if (r == 0) dump_hw("       out", arg);
@@ -155,7 +162,7 @@ int poll(struct pollfd *fds, nfds_t n, int timeout) {
       fds[i].revents = 0;
       if (!served(fds[i].fd)) continue;
       int rd, wr, er;
-      linux_snd_poll_probe(minor_of[fds[i].fd], &rd, &wr, &er);
+      BIG(linux_snd_poll_probe(minor_of[fds[i].fd], &rd, &wr, &er));
       if (rd && (fds[i].events & POLLIN)) fds[i].revents |= POLLIN;
       if (wr && (fds[i].events & POLLOUT)) fds[i].revents |= POLLOUT;
       if (er) fds[i].revents |= POLLERR;

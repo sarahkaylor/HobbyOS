@@ -149,6 +149,28 @@ static struct {
   /* stats */
   uint64_t xruns, chunks, frames_done;
   uint64_t n_sync_ptr, n_writei, n_status, n_refine, n_parks;
+  /* H5-audio2 timing instrument (docs/cp-audio2.md §3): rate-limited rows
+     only, a [SND] stat row every 10 s while running and the xrun row's
+     context.  *_us are timer_get_us() stamps. */
+  uint64_t slot_post_us[SLOTS];
+  uint64_t last_done_us, last_writei_us, last_ioctl_us, run_start_us;
+  uint32_t dring_us_lo[32]; /* completion ring: low 32 bits of the stamp */
+  uint32_t dring_fr[32];
+  uint32_t dring_n;
+  uint64_t st_t0_us, st_frames0, st_xruns0, st_dry0, dry;
+  uint64_t st_maxgap_us, st_maxlat_us, st_maxwr_us, st_max100, st_minq;
+  /* H5-audio2 play clock (vis_update_locked): `vis` is hw limited to the
+     guest's real time -- how far the stream can really have played */
+  uint64_t vis, clk, vis_us, vis_rem;
+  uint64_t held, st_held0, st_maxahead; /* xruns the play clock held back */
+  int in_hold;
+  /* H5-audio2 zero detector (zero_scan): runs of exact-zero frames in what
+     the writer sends -- QEMU never makes zeros, so every zero in the WAV
+     came through WRITEI */
+  uint64_t z_run, z_t_us, z_q_vis, z_q_hw, z_call_n, z_prep_us;
+  uint32_t z_calls, z_call_all;
+  uint64_t z_runs, st_z0;
+  uint64_t gap_us, gap_at_us; /* the last service gap > 50 ms while running */
 } S;
 
 static spinlock_t lsnd_lock;
@@ -314,6 +336,78 @@ static uint64_t avail_locked(void) {
   return used >= S.buffer ? 0 : S.buffer - used;
 }
 
+/* H5-audio2 (docs/cp-audio2.md §1): the underrun rule runs on a play clock.
+ *
+ * hw advances when QEMU returns a TX message, and QEMU returns one as soon
+ * as its mixing engine has COPIED the frames (a 1024-frame buffer filled at
+ * every 10 ms audio tick), not when they have played.  Worse, QEMU's audio
+ * backends are rate-controlled against QEMU's virtual clock: time in which
+ * the device had nothing -- a host stall that froze the whole guest, a late
+ * writer -- is owed and paid back by draining up to the whole mixing buffer
+ * per tick.  Measured (strix, idle guest): after one 270 ms host stall the
+ * device completed 10560 frames in 100 ms (2.2x real time) for ~200 ms, and
+ * winealsa's 40 ms buffer took an xrun on every 10 ms writer tick -- 19 from
+ * one stall; a writer that keeps one period queued underran on every tick
+ * with no stall at all.  Each winealsa recovery puts a period of silence in
+ * front of the music (cp-hunt H1-01).
+ *
+ * So the xrun rule uses `vis` = min(hw, clk), where clk advances at real
+ * time and is kept within [hw - buffer, hw + period] (vis_update_locked).
+ * A device that plays
+ * at real time or slower is unchanged (vis == hw, so a writer that really is
+ * late still underruns); a device that runs ahead of the clock cannot drain
+ * the writer's buffer faster than the music plays.
+ *
+ * Only the xrun rule uses vis.  avail, hw_ptr, DELAY, poll and drain stay on
+ * hw (no waiter depends on the clock, nothing needs a timer).  Reporting vis
+ * to user space as well was tried (62f90f9a) and reverted: it did not reduce
+ * the game's WAV dropouts (those are winealsa's lead-in, whose accounting
+ * over-counts either way, docs/cp-audio2.md §1) and it cost smaller TX
+ * messages.  SYNC_PTR services the stream on every call, so the clock is
+ * fresh when the writer looks. */
+static void vis_start_locked(void) {
+  S.vis = S.clk = S.hw;
+  S.vis_us = timer_get_us();
+  S.vis_rem = 0;
+  S.in_hold = 0;
+}
+
+static void vis_update_locked(uint64_t now) {
+  if (S.state != ST_RUNNING && S.state != ST_DRAINING) return;
+  uint64_t dt = now > S.vis_us ? now - S.vis_us : 0;
+  S.vis_us = now;
+  /* no completion, no SYNC_PTR, no WRITEI for 50 ms while running: the
+     guest (or at least the writer and the completion IRQ) was not running --
+     on strix, a host stall (the [CONS] stalls= rows) */
+  if (dt > 50000u && S.state == ST_RUNNING) {
+    S.gap_us = dt;
+    S.gap_at_us = now;
+  }
+  uint64_t r = S.rate ? S.rate : 48000;
+  if (dt > 10000000u) dt = 10000000u; /* no overflow; 10 s is "everything" */
+  uint64_t x = dt * r + S.vis_rem;
+  S.vis_rem = x % 1000000u;
+  /* clk runs at real time.  It may lead hw by at most one period (hw moves
+     in whole TX messages, so a device on time is up to a message "behind"
+     between completions; more than that, the device really is late and the
+     lead is not saved up -- after a host stall the guest's clock jumped but
+     the device's has not), and it never trails hw by more than a buffer: a
+     writer that stops after a long catch-up still underruns within one
+     buffer time (that bound can never cause an xrun itself: appl >= hw >
+     hw - buffer). */
+  uint64_t c = S.clk + x / 1000000u;
+  if (c > S.hw + S.period) c = S.hw + S.period;
+  if (S.hw > S.buffer && c < S.hw - S.buffer) c = S.hw - S.buffer;
+  S.clk = c;
+  S.vis = c < S.hw ? c : S.hw;
+  if (S.hw - S.vis > S.st_maxahead) S.st_maxahead = S.hw - S.vis;
+}
+
+static uint64_t avail_vis_locked(void) {
+  uint64_t used = S.appl - S.vis;
+  return used >= S.buffer ? 0 : S.buffer - used;
+}
+
 static void submit_locked(void) {
   if (S.state != ST_RUNNING && S.state != ST_DRAINING) return;
   uint64_t ring_pa = kimg_pa(lsnd_ring);
@@ -327,14 +421,92 @@ static void submit_locked(void) {
     if (slot < 0 || slot >= SLOTS) break;
     S.slot_epoch[slot] = S.epoch;
     S.slot_frames[slot] = (uint32_t)n;
+    S.slot_post_us[slot] = timer_get_us();
     S.submit += n;
     S.inflight++;
     S.chunks++;
   }
 }
 
+/* frames the device completed in the last `win_us` (the completion ring) */
+static uint64_t done_within_locked(uint64_t now, uint64_t win_us) {
+  uint64_t f = 0;
+  uint32_t n = S.dring_n < 32 ? S.dring_n : 32;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t k = (S.dring_n - 1 - i) & 31;
+    uint32_t age = (uint32_t)now - S.dring_us_lo[k];
+    if (age > win_us) break;
+    f += S.dring_fr[k];
+  }
+  return f;
+}
+
+static void stat_reset_locked(uint64_t now) {
+  S.st_t0_us = now;
+  S.st_frames0 = S.frames_done;
+  S.st_xruns0 = S.xruns;
+  S.st_dry0 = S.dry;
+  S.st_held0 = S.held;
+  S.st_z0 = S.z_runs;
+  S.st_maxahead = 0;
+  S.st_maxgap_us = S.st_maxlat_us = S.st_maxwr_us = S.st_max100 = 0;
+  S.st_minq = ~0ull;
+}
+
+/* one row per 10 s of a running stream: what the device and the writer did */
+static void stat_row_locked(uint64_t now) {
+  if (!S.st_t0_us) {
+    stat_reset_locked(now);
+    return;
+  }
+  uint64_t el = now - S.st_t0_us;
+  if (el < 10000000u) return;
+  uint64_t fr = S.frames_done - S.st_frames0;
+  uint64_t exp = el * (S.rate ? S.rate : 48000) / 1000000u;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[SND] stat t_ms=");
+  kl_i(&kl, (long)((now - S.run_start_us) / 1000));
+  kl_s(&kl, " frames=");
+  kl_i(&kl, (long)fr);
+  kl_s(&kl, " wall_frames=");
+  kl_i(&kl, (long)exp);
+  kl_s(&kl, " max100ms=");
+  kl_i(&kl, (long)S.st_max100);
+  kl_s(&kl, " maxgap_us=");
+  kl_i(&kl, (long)S.st_maxgap_us);
+  kl_s(&kl, " maxlat_us=");
+  kl_i(&kl, (long)S.st_maxlat_us);
+  kl_s(&kl, " maxwr_us=");
+  kl_i(&kl, (long)S.st_maxwr_us);
+  kl_s(&kl, " minq=");
+  kl_i(&kl, S.st_minq == ~0ull ? -1 : (long)S.st_minq);
+  kl_s(&kl, " dry=+");
+  kl_i(&kl, (long)(S.dry - S.st_dry0));
+  kl_s(&kl, " xruns=+");
+  kl_i(&kl, (long)(S.xruns - S.st_xruns0));
+  kl_s(&kl, " held=+");
+  kl_i(&kl, (long)(S.held - S.st_held0));
+  kl_s(&kl, " maxahead=");
+  kl_i(&kl, (long)S.st_maxahead);
+  kl_s(&kl, " zeros=+");
+  kl_i(&kl, (long)(S.z_runs - S.st_z0));
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+  stat_reset_locked(now);
+}
+
 static void check_xrun_locked(void) {
   if (S.state == ST_RUNNING && S.stop_thr < S.boundary && avail_locked() >= S.stop_thr) {
+    if (avail_vis_locked() < S.stop_thr) { /* the device ran ahead of the clock */
+      if (!S.in_hold) S.held++;
+      S.in_hold = 1;
+      return;
+    }
+  } else {
+    S.in_hold = 0;
+  }
+  if (S.state == ST_RUNNING && S.stop_thr < S.boundary && avail_vis_locked() >= S.stop_thr) {
     S.state = ST_XRUN;
     S.xruns++;
     S.trigger_us = timer_get_us();
@@ -350,6 +522,20 @@ static void check_xrun_locked(void) {
       kl_i(&kl, (long)S.frames_done);
       kl_s(&kl, " chunks=");
       kl_i(&kl, (long)S.chunks);
+      /* H5-audio2: who missed the deadline -- the writer (wr_ago: time since
+         the last WRITEI that moved appl) or the device (done100ms: frames it
+         completed in the last 100 ms; 4800 is real time at 48 kHz) */
+      uint64_t now = S.trigger_us;
+      kl_s(&kl, " t_ms=");
+      kl_i(&kl, (long)((now - S.run_start_us) / 1000));
+      kl_s(&kl, " wr_ago_us=");
+      kl_i(&kl, S.last_writei_us ? (long)(now - S.last_writei_us) : -1);
+      kl_s(&kl, " io_ago_us=");
+      kl_i(&kl, S.last_ioctl_us ? (long)(now - S.last_ioctl_us) : -1);
+      kl_s(&kl, " done100ms=");
+      kl_i(&kl, (long)done_within_locked(now, 100000));
+      kl_s(&kl, " done40ms=");
+      kl_i(&kl, (long)done_within_locked(now, 40000));
       kl_c(&kl, '\n');
       kl_emit(&kl);
     }
@@ -364,20 +550,46 @@ static void reap_cb(int slot, uint32_t status, void *ctx) {
   S.hw += S.slot_frames[slot];
   S.frames_done += S.slot_frames[slot];
   if (S.inflight > 0) S.inflight--;
+  uint64_t now = timer_get_us();
+  if (S.slot_post_us[slot] && now - S.slot_post_us[slot] > S.st_maxlat_us)
+    S.st_maxlat_us = now - S.slot_post_us[slot];
+  if (S.last_done_us && now - S.last_done_us > S.st_maxgap_us) S.st_maxgap_us = now - S.last_done_us;
+  S.last_done_us = now;
+  uint32_t k = S.dring_n++ & 31;
+  S.dring_us_lo[k] = (uint32_t)now;
+  S.dring_fr[k] = S.slot_frames[slot];
 }
 
 /* Reap completions and keep the device fed.  Returns 1 when anything moved. */
 static int service_locked(void) {
   int n = virtio_snd_tx_reap(reap_cb, 0);
+  uint64_t now = timer_get_us();
   if (n > 0) {
     if (S.hw > S.appl) S.hw = S.appl; /* never: the device returns what we gave it */
+  }
+  vis_update_locked(now);
+  if (n > 0) {
     uint64_t av = avail_locked();
     if (av > S.avail_max) S.avail_max = av;
-    check_xrun_locked();
-    if (S.state == ST_DRAINING && S.hw >= S.appl) S.state = ST_SETUP;
   }
+  if (n > 0) {
+    if (S.state == ST_RUNNING) {
+      uint64_t q = S.appl - S.hw;
+      if (q < S.st_minq) S.st_minq = q;
+      if (S.inflight == 0) S.dry++;
+      uint64_t d100 = done_within_locked(now, 100000);
+      if (d100 > S.st_max100) S.st_max100 = d100;
+      stat_row_locked(now);
+    }
+    if (S.state == ST_DRAINING && S.hw >= S.appl) {
+      S.state = ST_SETUP;
+      S.vis = S.clk = S.hw;
+    }
+  }
+  int was = S.state;
+  check_xrun_locked(); /* also between completions: the play clock moves on */
   submit_locked();
-  return n > 0;
+  return n > 0 || S.state != was;
 }
 
 void linux_snd_irq(void) {
@@ -416,13 +628,20 @@ int linux_snd_open(int minor, uint32_t flags) {
     uint64_t fl = spinlock_acquire_irqsave(&lsnd_lock);
     S.open = 1;
     S.state = ST_OPEN;
-    S.hw = S.appl = S.submit = 0;
+    S.hw = S.appl = S.submit = S.vis = S.clk = 0;
     S.epoch++;
     S.inflight = 0;
     S.user_pversion = 0;
     S.tstamp_mode = S.tstamp_type = 0;
     S.xruns = S.chunks = S.frames_done = 0;
     S.n_sync_ptr = S.n_writei = S.n_status = S.n_refine = S.n_parks = 0;
+    S.last_done_us = S.last_writei_us = S.last_ioctl_us = S.run_start_us = 0;
+    S.dring_n = 0;
+    S.dry = 0;
+    S.held = 0;
+    S.z_run = S.z_runs = S.z_prep_us = 0;
+    S.gap_us = S.gap_at_us = 0;
+    S.st_t0_us = 0;
     spinlock_release_irqrestore(&lsnd_lock, fl);
   }
   ylock_release(&lsnd_op);
@@ -466,6 +685,8 @@ void linux_snd_release(int minor) {
     kl_i(&kl, (long)S.n_refine);
     kl_s(&kl, " parks=");
     kl_i(&kl, (long)S.n_parks);
+    kl_s(&kl, " held=");
+    kl_i(&kl, (long)S.held);
     {
       struct vsnd_stats vs;
       virtio_snd_stats(&vs);
@@ -731,6 +952,8 @@ static int do_start(void) {
   fl = spinlock_acquire_irqsave(&lsnd_lock);
   S.state = ST_RUNNING;
   S.trigger_us = timer_get_us();
+  if (!S.run_start_us) S.run_start_us = S.trigger_us;
+  vis_start_locked();
   submit_locked();
   spinlock_release_irqrestore(&lsnd_lock, fl);
   return 0;
@@ -823,7 +1046,7 @@ static int do_hw_params(struct process *p, uint64_t arg, int refine_only) {
   S.avail_min = period;
   S.start_thr = 1;
   S.stop_thr = buffer;
-  S.hw = S.appl = S.submit = 0;
+  S.hw = S.appl = S.submit = S.vis = S.clk = 0;
   S.epoch++;
   S.inflight = 0;
   S.state = ST_SETUP;
@@ -871,6 +1094,80 @@ static int do_sw_params(struct process *p, uint64_t arg) {
   cpy(b + 64, &S.boundary, 8);
   spinlock_release_irqrestore(&lsnd_lock, fl);
   return cout(p, arg, b, sizeof b);
+}
+
+/* H5-audio2: find runs of >= 5 ms of exact-zero frames in a WRITEI's frames
+ * (already in the ring at [appl0, appl0 + n)) and print one row per run (the
+ * first 64, then every 64th): how much was queued (by the play clock and by
+ * hw) when it began, whether the WRITEI that began it was all zeros and how
+ * long it was (winealsa's lead-in is a WRITEI of exactly period - held
+ * zeros), how many WRITEIs it spanned and how long after the last PREPARE it
+ * began.  Lock: lsnd_lock (the row is one kline). */
+static void zero_end_locked(uint64_t now) {
+  if (S.z_run >= (S.rate ? S.rate : 48000) / 200) {
+    S.z_runs++;
+    if (S.z_runs <= 64 || (S.z_runs & 63) == 0) {
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SND] zeros n=");
+      kl_i(&kl, (long)S.z_runs);
+      kl_s(&kl, " t_ms=");
+      kl_i(&kl, S.run_start_us ? (long)((int64_t)(S.z_t_us - S.run_start_us) / 1000) : -1);
+      kl_s(&kl, " frames=");
+      kl_i(&kl, (long)S.z_run);
+      kl_s(&kl, " q_vis=");
+      kl_i(&kl, (long)S.z_q_vis);
+      kl_s(&kl, " q_hw=");
+      kl_i(&kl, (long)S.z_q_hw);
+      kl_s(&kl, " call_frames=");
+      kl_i(&kl, (long)S.z_call_n);
+      kl_s(&kl, " call_all_zero=");
+      kl_i(&kl, (long)S.z_call_all);
+      kl_s(&kl, " calls=");
+      kl_i(&kl, (long)S.z_calls);
+      kl_s(&kl, " gap_ms=");
+      kl_i(&kl, (long)(S.gap_us / 1000));
+      kl_s(&kl, " since_gap_ms=");
+      kl_i(&kl, S.gap_at_us ? (long)((int64_t)(S.z_t_us - S.gap_at_us) / 1000) : -1);
+      kl_s(&kl, " since_prepare_ms=");
+      kl_i(&kl, S.z_prep_us ? (long)((int64_t)(S.z_t_us - S.z_prep_us) / 1000) : -1);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
+  (void)now;
+  S.z_run = 0;
+}
+
+static void zero_scan_locked(uint64_t appl0, uint64_t n) {
+  if (S.channels == 0 || S.frame_bytes == 0) return;
+  uint64_t now = timer_get_us();
+  int all = 1;
+  for (uint64_t i = 0; i < n && all; i++) {
+    const int16_t *f = (const int16_t *)(lsnd_ring + ((appl0 + i) % S.buffer) * S.frame_bytes);
+    for (uint32_t c = 0; c < S.channels; c++)
+      if (f[c]) all = 0;
+  }
+  if (S.z_run) S.z_calls++;
+  for (uint64_t i = 0; i < n; i++) {
+    const int16_t *f = (const int16_t *)(lsnd_ring + ((appl0 + i) % S.buffer) * S.frame_bytes);
+    int z = 1;
+    for (uint32_t c = 0; c < S.channels; c++)
+      if (f[c]) z = 0;
+    if (z) {
+      if (!S.z_run) {
+        S.z_t_us = now;
+        S.z_q_vis = appl0 + i - S.vis;
+        S.z_q_hw = appl0 + i - S.hw;
+        S.z_call_n = n;
+        S.z_call_all = (uint32_t)all;
+        S.z_calls = 1;
+      }
+      S.z_run++;
+    } else if (S.z_run) {
+      zero_end_locked(now);
+    }
+  }
 }
 
 /* WRITEI_FRAMES: copy what fits; park when nothing fits (blocking fd). */
@@ -931,7 +1228,14 @@ static int do_writei(struct process *p, uint64_t arg, int nonblock) {
   }
   int need_start = 0;
   fl = spinlock_acquire_irqsave(&lsnd_lock);
+  zero_scan_locked(appl, done);
   S.appl += done;
+  {
+    uint64_t now = timer_get_us();
+    if (S.state == ST_RUNNING && S.last_writei_us && now - S.last_writei_us > S.st_maxwr_us)
+      S.st_maxwr_us = now - S.last_writei_us;
+    S.last_writei_us = now;
+  }
   if (S.state == ST_PREPARED && S.appl - S.hw >= S.start_thr) need_start = 1;
   submit_locked();
   spinlock_release_irqrestore(&lsnd_lock, fl);
@@ -1034,7 +1338,9 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     if (r) return r;
     uint32_t flags;
     cpy(&flags, b, 4);
-    if (flags & 1u) service(); /* SNDRV_PCM_SYNC_PTR_HWSYNC */
+    (void)(flags & 1u); /* SNDRV_PCM_SYNC_PTR_HWSYNC or not: the play clock moves
+                           with time, so every SYNC_PTR services the stream */
+    service();
     fl = spinlock_acquire_irqsave(&lsnd_lock);
     uint64_t bd = S.boundary ? S.boundary : ~0ull;
     if (!(flags & 2u) && S.state != ST_OPEN) { /* !SYNC_PTR_APPL: apply the user's appl_ptr */
@@ -1075,6 +1381,8 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
       return -EBUSY;
     }
     S.hw = S.appl = S.submit = 0;
+    S.vis = S.clk = 0;
+    S.z_prep_us = timer_get_us();
     S.epoch++;
     S.inflight = 0;
     S.avail_max = 0;
@@ -1091,6 +1399,8 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     S.epoch++;
     S.inflight = 0;
     S.appl = S.submit = S.hw;
+    if (S.vis > S.hw) S.vis = S.hw;
+    if (S.clk > S.hw) S.clk = S.hw;
     spinlock_release_irqrestore(&lsnd_lock, fl);
     return 0;
   case PCM_START: return do_start();
@@ -1117,6 +1427,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     if (push && S.state == ST_RUNNING) S.state = ST_PAUSED;
     else if (!push && S.state == ST_PAUSED) {
       S.state = ST_RUNNING;
+      vis_start_locked();
       submit_locked();
     } else r = -EBADFD;
     S.trigger_us = timer_get_us();
@@ -1177,8 +1488,10 @@ int linux_snd_ioctl(struct process *p, int minor, uint32_t open_flags, uint32_t 
   int r;
   if (minor == LSND_MINOR_CONTROL)
     r = ctl_ioctl(p, req, arg);
-  else
+  else {
+    S.last_ioctl_us = timer_get_us();
     r = pcm_ioctl(p, req, arg, (open_flags & 0x800u) != 0 /* O_NONBLOCK */);
+  }
   ylock_release(&lsnd_op);
   return r;
 }
