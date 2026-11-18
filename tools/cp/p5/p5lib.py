@@ -33,6 +33,10 @@ def qemu_cmd(work, disk, args):
            "-enable-kvm", "-cpu", args.cpu]
     if os.environ.get("CP_DIAG"):  # C0-console: diagnostic rows back on (docs/cp-console.md)
         cmd += ["-fw_cfg", "name=opt/hobbyos/diag,string=" + os.environ["CP_DIAG"]]
+    if os.environ.get("CP_AUDIO_WAV"):  # C4-audio: opt-in virtio-sound -> WAV file (docs/cp-audio.md)
+        cmd += ["-audiodev", "wav,id=cpsnd0,path=" + os.environ["CP_AUDIO_WAV"] +
+                ",out.frequency=48000,out.channels=2,out.format=s16",
+                "-device", "virtio-sound-pci,audiodev=cpsnd0,streams=1"]
     return cmd, qmp, serial
 
 

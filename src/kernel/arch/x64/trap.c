@@ -4865,6 +4865,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern int virtio_net_irq;
   extern int virtio_gpu_x64_irq_vector;      /* P6: -1 = polled */
   extern void virtio_gpu_x64_handle_irq(void);
+  extern int virtio_snd_irq_vector;          /* C4-audio: -1 = no device */
 
   uint32_t cpu = get_cpuid();
   if (cpu < MAX_CPUS && tf->vector != 1) {
@@ -5170,6 +5171,19 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     uint32_t intid = gic_acknowledge_interrupt();
     extern void virtio_input_handle_irq(int irq);
     virtio_input_handle_irq(intid);
+    gic_end_interrupt(intid);
+  } else if (virtio_snd_irq_vector != -1 && tf->vector == (uint32_t)virtio_snd_irq_vector) {
+    /* C4-audio (docs/cp-audio.md): virtio-sound TX completions.  q35 shares
+       INTx lines, so a GPU/net device on the same line is served too. */
+    extern void virtio_snd_handle_irq(void);
+    uint32_t intid = gic_acknowledge_interrupt();
+    virtio_snd_handle_irq();
+    if (virtio_gpu_x64_irq_vector != -1 && tf->vector == (uint32_t)virtio_gpu_x64_irq_vector)
+      virtio_gpu_x64_handle_irq();
+    if (virtio_net_irq != -1 && tf->vector == (uint32_t)virtio_net_irq) {
+      extern void virtio_net_handle_irq(void);
+      virtio_net_handle_irq();
+    }
     gic_end_interrupt(intid);
   } else if (virtio_gpu_x64_irq_vector != -1 &&
              tf->vector == (uint32_t)virtio_gpu_x64_irq_vector) {

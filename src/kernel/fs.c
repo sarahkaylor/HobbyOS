@@ -21,6 +21,8 @@
 #include "ext2_vfs.h" /* cp/ext2: the /EXT data disk */
 #include "tmpfs.h" /* cp/sys: the compat /tmp */
 #include "arch/cpu.h" /* C1-k6: get_cpuid for the per-CPU poll cap */
+#include "linux_snd.h" /* C4-audio: /dev/snd ALSA nodes */
+#include "virtio_snd.h"
 
 /* C1-k5 (docs/cp-k5.md §1): the system-wide open-file table is MAX_GLOBAL_FILES
  * (16384 on x86_64) slots.  One slot is ~1.2 KiB (path[VFS_PATH_MAX]), so a
@@ -866,6 +868,19 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
       f->open_flags = (uint32_t)flags;
     } else if (isgpu) {
       f->type = FILE_TYPE_DEVGPU;
+      f->open_flags = (uint32_t)flags;
+    } else if (linux_snd_path_minor(filename) >= 0) {
+      /* C4-audio (docs/cp-audio.md): ALSA control / playback PCM node; ENOENT
+         without a virtio-sound device, EBUSY for a second PCM opener. */
+      int sminor = linux_snd_path_minor(filename);
+      int sr = linux_snd_open(sminor, (uint32_t)flags);
+      if (sr < 0) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return sr;
+      }
+      f->type = FILE_TYPE_DEVSND;
+      f->snd.minor = sminor;
       f->open_flags = (uint32_t)flags;
     } else {
       f->type = FILE_TYPE_EMPTY;
@@ -1749,6 +1764,7 @@ int file_poll_keybit(struct process *p, int fd) {
   if (f->type == FILE_TYPE_UNIXSOCK || f->type == FILE_TYPE_SIGNALFD ||
       f->type == FILE_TYPE_DEVNULL)
     return 64;
+  if (f->type == FILE_TYPE_DEVSND) return poll_key_bit(linux_snd_poll_key()); /* C4-audio */
   return 65;
 }
 void fs_poll_cap_note(uint64_t us) {
@@ -1863,6 +1879,14 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
     extern const void *l_eventfd_key(int slot);
     fs_poll_bloom_note(1ull << poll_key_bit(l_eventfd_key(f->eventfd.slot)));
     l_eventfd_probe(f->eventfd.slot, r, w);
+    return 0;
+  }
+  if (f->type == FILE_TYPE_DEVSND) {
+    /* C4-audio: a playback PCM is writable at avail >= avail_min; the TX
+       completion IRQ notifies with this key, and the scan's slice covers a
+       device without a usable INTx line. */
+    fs_poll_bloom_note(1ull << poll_key_bit(linux_snd_poll_key()));
+    linux_snd_poll_probe(f->snd.minor, r, w, e);
     return 0;
   }
   if (f->type == FILE_TYPE_SIGNALFD) {
@@ -2288,7 +2312,8 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   } else {
     *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK ||
              f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL ||
-             f->type == FILE_TYPE_DEVFB || f->type == FILE_TYPE_DEVGPU)
+             f->type == FILE_TYPE_DEVFB || f->type == FILE_TYPE_DEVGPU ||
+             f->type == FILE_TYPE_DEVSND)
                 ? ESPIPE : EINVAL;
     return -1;
   }
@@ -2465,6 +2490,10 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     /* M1: the 3D ABI node -- character device, root-only in spirit but 0666
        like the other device nodes (there is no uid model on this node). */
     k_stat_fill(st, K_DEV_DEVFS, 5, K_S_IFCHR | 0666, 0);
+    return 0;
+  case FILE_TYPE_DEVSND: /* C4-audio: char 116:minor, as Linux's ALSA nodes */
+    k_stat_fill(st, K_DEV_DEVFS, 16 + (uint32_t)f->snd.minor, K_S_IFCHR | 0660, 0);
+    st->st_rdev = (116u << 8) | (uint32_t)f->snd.minor;
     return 0;
   case FILE_TYPE_EXT2:
   case FILE_TYPE_EXT2DIR: { /* cp/ext2: the inode's real fields */
@@ -2876,6 +2905,15 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
     st->st_rdev = fs_streq(path, "/dev/null") ? K_RDEV_NULL : K_RDEV_CONSOLE;
     return 0;
   }
+  /* C4-audio: the ALSA nodes stat() as char 116:minor while the device is up. */
+  {
+    int sm = linux_snd_path_minor(path);
+    if (sm >= 0 && virtio_snd_present()) {
+      k_stat_fill(st, K_DEV_DEVFS, 16 + (uint32_t)sm, K_S_IFCHR | 0660, 0);
+      st->st_rdev = (116u << 8) | (uint32_t)sm;
+      return 0;
+    }
+  }
   /* AD-9 (M6): Unity resolves its executable with
        realpath("/proc/self/exe", buf)
      and glibc's realpath lstat()s every component.  Without these entries it
@@ -3037,6 +3075,7 @@ int file_close(struct process *cur, int fd) {
   file_lock_key(f, &lock_key);
   int desc_last = 0;
   int isgpu = (f->type == FILE_TYPE_DEVGPU); /* M1: released after f->lock */
+  int snd_last = -1; /* C4-audio: ALSA minor whose last reference went away */
 
   /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
    * blocked peers, which takes proc_lock — and the documented order is
@@ -3083,6 +3122,8 @@ int file_close(struct process *cur, int fd) {
       l_signalfd_count(-1); /* C1-k6 */
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
+    } else if (f->type == FILE_TYPE_DEVSND) {
+      snd_last = f->snd.minor;
     }
     /* FILE_TYPE_NFS keeps no backend state: nothing to release. */
     f->type = FILE_TYPE_EMPTY;
@@ -3095,6 +3136,8 @@ int file_close(struct process *cur, int fd) {
   /* M1 /dev/gpu: dropping the fd drops the client's context and resources.
    * Outside f->lock (the release path sends control commands). */
   if (isgpu) gpu_abi_release_fd(cur, fd);
+  /* C4-audio: the device teardown sends control commands: outside f->lock. */
+  if (snd_last >= 0) linux_snd_release(snd_last);
 
   vfs_lock_release_posix(cur->pid, &lock_key);
   if (desc_last) vfs_lock_release_desc(g_fd + 1);
@@ -3203,6 +3246,7 @@ void fs_close_global(int g_fd) {
   struct pipe *pp = 0;
   struct usock *uu = 0;
   int bend = 0;
+  int snd_last = -1; /* C4-audio */
 
   ylock_acquire(&f->lock);
   if (f->type == FILE_TYPE_EMPTY) {
@@ -3238,6 +3282,8 @@ void fs_close_global(int g_fd) {
       l_signalfd_count(-1); /* C1-k6 */
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
+    } else if (f->type == FILE_TYPE_DEVSND) {
+      snd_last = f->snd.minor; /* C4-audio */
     }
     f->type = FILE_TYPE_EMPTY;
   }
@@ -3247,6 +3293,7 @@ void fs_close_global(int g_fd) {
 
   if (pp) pipe_close(pp, bend);
   else if (uu) usock_close(uu, bend);
+  if (snd_last >= 0) linux_snd_release(snd_last);
 }
 
 /**
@@ -4728,6 +4775,18 @@ int file_is_devgpu(struct process *p, int fd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return 0;
   return gfile(gfd)->type == FILE_TYPE_DEVGPU;
+}
+
+/* C4-audio: the ALSA minor behind `fd`, or -1 (the compat ioctl route). */
+int file_devsnd_minor(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return -1;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return -1;
+  struct file *f = gfile(gfd);
+  return f->type == FILE_TYPE_DEVSND ? f->snd.minor : -1;
 }
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) for memfd (design 4.3, OQ7 minimal set:

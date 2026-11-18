@@ -578,6 +578,13 @@ void main(void) {
     uart_puts("VirtIO Network initialization failed!\n");
   }
 
+  /* C4-audio (docs/cp-audio.md): virtio-sound + the /dev/snd ALSA nodes.
+     Silent when no device is attached (every default QEMU line). */
+  {
+    extern void linux_snd_init(void);
+    linux_snd_init();
+  }
+
 #ifdef __x86_64__
   // Start the Remote PCIe sharing subsystem (RDMA over UDP).
   // Reads opt/pcishare from QEMU fw_cfg; if not present returns immediately.
