@@ -298,6 +298,18 @@ else
   SRC_IMG="${P8_CPDATA_FROM:-$SEEDED}"
   cp --sparse=always "$SRC_IMG" "$CPD"
   echo "== data disk: a copy of $SRC_IMG"
+  # cp-hunt H1-04: the seeded prefix must have been made by THIS Wine stage,
+  # or every game boot re-runs wineboot's prefix update (~10 s, writes the
+  # prefix, opens H1-05's find_gpu race).  Wine compares the prefix's
+  # .update-timestamp with wine.inf's mtime (rsync -a keeps it in the export).
+  PSTAMP="$(debugfs -R 'cat /pfx/.update-timestamp' "$CPD" 2>/dev/null | head -1 | cut -d' ' -f1)"
+  WSTAMP="$(stat -c %Y "$WINE/share/wine/wine.inf" 2>/dev/null)"
+  if [ -n "$WSTAMP" ] && [ "$PSTAMP" != "$WSTAMP" ]; then
+    echo "== WARNING: prefix stamp ${PSTAMP:-none} != $WINE/share/wine/wine.inf mtime $WSTAMP:" \
+         "the seeded prefix was made by another Wine stage; every boot re-runs wineboot's update (re-run P8_PHASE=pfx with this stage)"
+  else
+    echo "== prefix stamp $PSTAMP matches this Wine stage"
+  fi
 fi
 
 echo "== boot (deadline ${TIMEOUT_S}s; one QEMU slot for the boot only)"

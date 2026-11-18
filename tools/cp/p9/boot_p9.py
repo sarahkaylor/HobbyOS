@@ -82,6 +82,71 @@ def log(msg):
     print(f"[P9W] {msg}", flush=True)
 
 
+# The main/pause menu rows: (label, centre y) in the canonical layout the
+# tables were measured in (ctl1: the game's 1280x720 picture at 320,180 of a
+# 1920x1080 frame).
+MENUS = {
+    "main": [("CONTINUE", 469), ("NEW GAME", 506), ("LOAD GAME", 544), ("SETTINGS", 581),
+             ("MODS", 618), ("CREDITS", 656), ("QUIT GAME", 692)],
+    "pause": [("RESUME", 470), ("SAVE GAME", 510), ("LOAD GAME", 550), ("MODS", 592),
+              ("SETTINGS", 632), ("CREDITS", 672), ("EXIT TO MAIN MENU", 712), ("QUIT GAME", 752)],
+}
+
+
+def game_view(im, xscreen, game_res="1280x720"):
+    """the game's own picture at the 1280x720 scale every crop and row table
+    here was measured on.  A 1280x720 game: the window at 320,180 of a
+    1920x1080 X screen, or the whole (top-left of the) shot with a 1280x720 X
+    screen (scanout blob or desktop glass).  H1-08 (cp-hunt): a 1920x1080 game
+    fills a 1920x1080 X screen and its UI is 1.5x larger, so it is scaled
+    down to 1280x720 instead (before, the rows were looked for unscaled and
+    never found: SEEK FAILED at 1080p)."""
+    if game_res != "1280x720":
+        gw, gh = (int(v) for v in game_res.split("x"))
+        g = im if im.size == (gw, gh) else im.crop((0, 0, gw, gh))
+        return g.resize((1280, 720))
+    if im.size == (1920, 1080) and xscreen == "1920x1080":
+        return im.crop((320, 180, 1600, 900))
+    return im if im.size == (1280, 720) else im.crop((0, 0, 1280, 720))
+
+
+def canon_image(im, xscreen, game_res="1280x720"):
+    """game_view() pasted at 320,180 of a black 1920x1080 frame: the layout of
+    MENUS and of the save-list frame search"""
+    from PIL import Image
+    c = Image.new("RGB", (1920, 1080))
+    c.paste(game_view(im, xscreen, game_res), (320, 180))
+    return c
+
+
+def focus_in(im, menu):
+    """the highlighted (yellow-framed) row of a main/pause menu in a canon
+    image: (label or None, centre y or None, (y0, y1) or None)"""
+    px = im.load()
+    # the highlight's yellow is ~(230,190,60) on pmemsave shots but as dim as
+    # ~(170,125,40) on VNC shots of the glass (r2-play-scan1); red rows have
+    # g ~70.  Main menu: stop above the orange Phantom Liberty banner (y 736..777).
+    ymax = 715 if menu == "main" else 790
+    ys = [y for y in range(420, ymax)
+          if sum(1 for x in range(400, 800, 2)
+                 if px[x, y][0] > 140 and px[x, y][1] > 95 and px[x, y][2] < 90) > 2]
+    cl = []
+    for y in ys:                      # clusters: frame lines + text, gaps <= 12
+        if not cl or y - cl[-1][1] > 12:
+            cl.append([y, y])
+        cl[-1][1] = y
+    cl = [c for c in cl if c[1] - c[0] >= 20]   # a framed row is ~36 px tall
+    if not cl:
+        return None, None, None
+    y0, y1 = max(cl, key=lambda c: c[1] - c[0])
+    yc = (y0 + y1) / 2
+    label = None
+    for lab, ry in MENUS[menu]:
+        if abs(ry - yc) <= 12:
+            label = lab
+    return label, yc, (y0, y1)
+
+
 class Serial:
     """Incremental reader: only new bytes each call, complete lines only."""
 
@@ -131,6 +196,8 @@ def main():
     ap.add_argument("--script", required=True)
     ap.add_argument("--menu-hits", type=int, default=2)
     ap.add_argument("--xscreen", default="1920x1080", help="XHOBBY's screen size (run-p8.sh P8_XSCREEN)")
+    ap.add_argument("--game-res", default="1280x720",
+                    help="the game's own Resolution setting (run-p9.sh P9_GAME_RES; cp-hunt H1-08)")
     args = ap.parse_args()
     # SIGTERM -> SystemExit so `finally` stops QEMU and drops the locks (gateA2:
     # a plain SIGTERM left its 32 GiB guest running without a slot).
@@ -365,8 +432,7 @@ def main():
             try:
                 from PIL import Image
                 im = Image.open(os.path.join(shots_dir, name + ".png")).convert("RGB")
-                ox, oy = (0, 0) if im.size == (1280, 720) or args.xscreen != "1920x1080" else (320, 180)
-                c = im.crop((ox + 300, oy + 540, ox + 980, oy + 660))
+                c = game_view(im, args.xscreen, args.game_res).crop((300, 540, 980, 660))
                 # the prompt is red text (~239,79,73): keep red pixels as black ink
                 g = Image.new("L", c.size, 255)
                 cpx, gpx = c.load(), g.load()
@@ -395,8 +461,7 @@ def main():
             try:
                 from PIL import Image
                 im = Image.open(os.path.join(shots_dir, name + ".png")).convert("RGB")
-                ox, oy = (0, 0) if im.size == (1280, 720) or args.xscreen != "1920x1080" else (320, 180)
-                c = im.crop((ox + 100, oy + 260, ox + 440, oy + 540))
+                c = game_view(im, args.xscreen, args.game_res).crop((100, 260, 440, 540))
                 g = Image.new("L", c.size, 255)
                 cpx, gpx = c.load(), g.load()
                 for y in range(c.size[1]):
@@ -558,58 +623,21 @@ def main():
             # 320,180) of the main and pause menus, measured on ctl1's screendumps.
             # The highlighted row is yellow text in a yellow frame; OCR of that crop
             # was unreliable (MODS -> 'MOOS', QUIT GAME -> 'TT AME'), its y is not.
-            MENUS = {
-                "main": [("CONTINUE", 469), ("NEW GAME", 506), ("LOAD GAME", 544), ("SETTINGS", 581),
-                         ("MODS", 618), ("CREDITS", 656), ("QUIT GAME", 692)],
-                "pause": [("RESUME", 470), ("SAVE GAME", 510), ("LOAD GAME", 550), ("MODS", 592),
-                          ("SETTINGS", 632), ("CREDITS", 672), ("EXIT TO MAIN MENU", 712), ("QUIT GAME", 752)],
-            }
-
             def canon(name):
-                """the shot in the 1920x1080 layout the row tables were measured
-                in (ctl1: the 1280x720 game window at 320,180 of a 1920x1080 X
-                screen).  With a 1280x720 X screen the game is the whole screen:
-                a VNC shot of a scanout blob is 1280x720, a shot of the desktop
-                path shows it top-left on the 1920x1080 glass."""
                 from PIL import Image
                 im = Image.open(os.path.join(shots_dir, name + ".png")).convert("RGB")
-                if im.size == (1920, 1080) and args.xscreen == "1920x1080":
-                    return im
-                g = im.crop((0, 0, 1280, 720)) if im.size != (1280, 720) else im
-                c = Image.new("RGB", (1920, 1080))
-                c.paste(g, (320, 180))
-                return c
+                return canon_image(im, args.xscreen, args.game_res)
 
             def focus_row(tag, menu):
                 """the highlighted row of a main/pause menu: (label, y) or (None, y)"""
                 name, _ = shoot(tag, do_ocr=False)
                 if not name:
                     return None, None
-                im = canon(name)
-                px = im.load()
-                # the highlight's yellow is ~(230,190,60) on pmemsave shots but as
-                # dim as ~(170,125,40) on VNC shots of the glass (r2-play-scan1);
-                # red rows have g ~70.  Main menu: stop above the orange Phantom
-                # Liberty banner (y 736..777).
-                ymax = 715 if menu == "main" else 790
-                ys = [y for y in range(420, ymax)
-                      if sum(1 for x in range(400, 800, 2)
-                             if px[x, y][0] > 140 and px[x, y][1] > 95 and px[x, y][2] < 90) > 2]
-                cl = []
-                for y in ys:                      # clusters: frame lines + text, gaps <= 12
-                    if not cl or y - cl[-1][1] > 12:
-                        cl.append([y, y])
-                    cl[-1][1] = y
-                cl = [c for c in cl if c[1] - c[0] >= 20]   # a framed row is ~36 px tall
-                if not cl:
+                label, yc, rows = focus_in(canon(name), menu)
+                if rows is None:
                     log(f"focus {name}: no highlighted row")
                     return None, None
-                y0, y1 = max(cl, key=lambda c: c[1] - c[0])
-                yc = (y0 + y1) / 2
-                label = None
-                for lab, ry in MENUS[menu]:
-                    if abs(ry - yc) <= 12:
-                        label = lab
+                y0, y1 = rows
                 log(f"focus {name}: rows {y0}..{y1} centre {yc:.0f} -> {label}")
                 return label, yc
 
