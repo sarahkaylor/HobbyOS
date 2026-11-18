@@ -1,0 +1,21 @@
+# H1-hunt: audio dropouts in h-fp2 (strix, P9 fpsprobe 1280x720, Venus, CP_AUDIO_WAV, wine-cp winealsa: 48 kHz s16 2ch, period 480 frames = 10 ms, 4 periods)
+# tools/cp/hunt/wavgaps.py + tools/cp/audio/wavcheck.py on the WAV (then deleted: game content)
+wavgaps: duration_s=350.04
+wavgaps: active_s=328.8
+wavgaps: first_active_s=20.26
+wavgaps: last_active_s=350.04
+wavgaps: dropouts=10
+wavgaps: dropout_ms_total=750.0
+wavgaps: dropouts_first=[(132.94, 140.0, -23.7, -23.3), (135.45, 120.0, -22.6, -19.5), (137.98, 10.0, -23.8, -23.8), (143.51, 100.0, -23.6, -23.9), (143.66, 10.0, -23.9, -25.6), (143.71, 20.0, -25.6, -31.2), (143.94, 200.0, -23.9, -20.3), (219.08, 120.0, -35.0, -34.5), (219.65, 10.0, -36.9, -33.6), (316.72, 20.0, -33.5, -32.7)]
+wavgaps: edge_clicks=0
+wavgaps: gaps_ge_500ms=0
+wavgaps: wall_s=363.8
+wavgaps: wav_over_wall=0.9622
+wavcheck: file=/home/sarah/cp/lanes/hunt-wav/h-fp2.wav rate=48000 channels=2 duration_s=350.044 rms_dbfs=-23.1 active_rms_dbfs=-22.9 active_s=329.5 first_active_s=20.200000000000003 peak_hz_median=70.0 tone_hz=None tone_s=None active_peak_dbfs=-2.0 verdict=PASS
+[P9W] +   141.3 s  03:23:31  phase menu
+[P9W] +   141.3 s  03:23:31  phase menu
+[P9W] +   165.6 s  03:23:55  phase loading
+[SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=0 parks=0 irqs=92800 tx=0 ctl=1 ctl_timeouts=0
+[SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=0 parks=0 irqs=92813 tx=0 ctl=1 ctl_timeouts=0
+[SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=92833 tx=0 ctl=1 ctl_timeouts=0
+# WAV t=0 = game s 13.8 (wall 363.8 - 350.0): the dropouts at WAV 132.9-143.9 s are game s 146.7-157.7 (the save's loading, phase loading 141-238), 219 s -> 233 (end of loading), 316.7 -> 330.5 (world). Every run is a whole number of 10 ms periods with -20..-36 dBFS on both sides: an underrun, not the game's own silence. The kernel's xrun counter is printed only at PCM close, which never happens before QEMU stops (no in-guest confirmation).

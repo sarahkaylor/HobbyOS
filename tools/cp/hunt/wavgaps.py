@@ -84,13 +84,13 @@ def analyse(path, log=None):
         b += first
         ms = (b - a) * 1000.0 / rate
         if ms >= 500:
-            gaps.append((round(a / rate, 2), round(ms)))
+            gaps.append((round(float(a) / rate, 2), int(round(ms))))
             continue
         if ms < 5:
             continue
         pre, post = mono[max(0, a - ctx):a], mono[b:b + ctx]
         if dbfs(pre) >= -40 and dbfs(post) >= -40:
-            drops.append((round(a / rate, 2), round(ms, 1), round(dbfs(pre), 1), round(dbfs(post), 1)))
+            drops.append((round(float(a) / rate, 2), round(float(ms), 1), round(dbfs(pre), 1), round(dbfs(post), 1)))
             for e in (a, b):
                 if 0 < e < n and np.max(np.abs(x[e] - x[e - 1])) > 0.6:
                     clicks += 1
@@ -100,7 +100,7 @@ def analyse(path, log=None):
         if (b - a) >= 50:
             s = (act[0] + a) * 0.01
             if not any(abs(s - g[0]) < 0.5 for g in gaps):
-                gaps.append((round(s, 2), int((b - a) * 10)))
+                gaps.append((round(float(s), 2), int((b - a) * 10)))
     gaps.sort()
     res["dropouts"] = len(drops)
     res["dropout_ms_total"] = round(sum(d[1] for d in drops), 1)
@@ -112,6 +112,11 @@ def analyse(path, log=None):
     if ww:
         res.update(ww)
         res["wav_over_wall"] = round(res["duration_s"] / ww["wall_s"], 4) if ww["wall_s"] > 0 else None
+        # QEMU keeps writing (silence included) until it stops, so the WAV's
+        # t=0 is (wall - duration) s after the launch: dropouts in game seconds
+        off = ww["wall_s"] - res["duration_s"]
+        res["wav_t0_game_s"] = round(off, 1)
+        res["dropouts_game_s"] = [round(d[0] + off, 1) for d in drops]
     return res
 
 
