@@ -114,8 +114,7 @@ that sets `uart_last_activity_ms = now + 1` and expects no report:
      return;
    }
 ```
-(The same test is in `src/kernel/arch/arm/trap.c`'s watchdog if it reads the
-clock before printing.)
+(x86_64 only: the ARM `trap.c` has no such watchdog compare.)
 
 **H1-03 (pre-game stall).**  In h-soak1 the serial file stopped growing for
 ~145 s right after IceWM started and the launcher's first row came only at
