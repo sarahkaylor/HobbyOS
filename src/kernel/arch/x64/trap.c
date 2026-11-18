@@ -182,6 +182,8 @@ void trap_exit_frame_check(uint64_t *frame) {
    per-trap log -- a diagnostic that reports on every trap exit would be a
    per-trap cost and a per-trap flood). */
 volatile uint64_t trap_exit_bad_rip_seen;
+/* C1-k7: the hole bounds the inline exit check compares against (asm). */
+const uint64_t trap_khole_lo = KIMG_BASE, trap_khole_hi = CP_KHOLE_HI;
 
 void restore_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
@@ -6919,6 +6921,21 @@ __asm__(
 "       [rsp+264]/[rsp+272]/[rsp+256] -- the vector, error and spsr slots\n"
 "       (measured live: [EXITFRAME] spsr_slot=0x7003D87F).  Push below the\n"
 "       frame, run the check, then advance past the frame. */\n"
+"    /* C1-k7: the GB-057 check inline (it was a call and 16 stack ops on\n"
+"       every return); the C reporter runs only for a suspect RIP: below\n"
+"       0x1000 at either privilege, or a user RIP in the kernel hole. */\n"
+"    push rax\n"
+"    mov rax, [rsp + 288]\n"
+"    cmp rax, 0x1000\n"
+"    jb 61f\n"
+"    test byte ptr [rsp + 296], 3\n"
+"    jz 62f\n"
+"    cmp rax, qword ptr [rip + trap_khole_lo]\n"
+"    jb 62f\n"
+"    cmp rax, qword ptr [rip + trap_khole_hi]\n"
+"    jae 62f\n"
+"61:\n"
+"    pop rax\n"
 "    push rax\n"
 "    push rcx\n"
 "    /* cp/wine2: and every other caller-saved register the C check may\n"\
@@ -6940,6 +6957,10 @@ __asm__(
 "    pop rsi\n"
 "    pop rcx\n"
 "    pop rax\n"
+"    jmp 63f\n"
+"62:\n"
+"    pop rax\n"
+"63:\n"
 "    add rsp, 264\n"
 "    add rsp, 16\n"
 "    /* restore the process's rdi from its saved slot: the frame_check\n"\
@@ -7151,6 +7172,21 @@ __asm__(
 "    mov rax, [rsp]\n"
 "    /* GB-123: see the common_trap_exit note -- the check pushes below the\n"
 "       frame, never into it; advance past the frame only afterwards. */\n"
+"    /* C1-k7: the GB-057 check inline (it was a call and 16 stack ops on\n"
+"       every return); the C reporter runs only for a suspect RIP: below\n"
+"       0x1000 at either privilege, or a user RIP in the kernel hole. */\n"
+"    push rax\n"
+"    mov rax, [rsp + 288]\n"
+"    cmp rax, 0x1000\n"
+"    jb 71f\n"
+"    test byte ptr [rsp + 296], 3\n"
+"    jz 72f\n"
+"    cmp rax, qword ptr [rip + trap_khole_lo]\n"
+"    jb 72f\n"
+"    cmp rax, qword ptr [rip + trap_khole_hi]\n"
+"    jae 72f\n"
+"71:\n"
+"    pop rax\n"
 "    push rax\n"
 "    push rcx\n"
 "    /* cp/wine2: and every other caller-saved register the C check may\n"\
@@ -7172,6 +7208,10 @@ __asm__(
 "    pop rsi\n"
 "    pop rcx\n"
 "    pop rax\n"
+"    jmp 73f\n"
+"72:\n"
+"    pop rax\n"
+"73:\n"
 "    add rsp, 264\n"
 "    add rsp, 16\n"
 "    /* restore the process's rdi from its saved slot: the frame_check\n"\
