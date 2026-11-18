@@ -71,7 +71,8 @@ case "$KIND" in
   fp720|fp1080|play|reload|soak|settings|script)
         P9=1
         case "$KIND" in
-          fp720|fp1080) S=tools/cp/p9/fpsprobe.p9 ;;
+          fp720) S=tools/cp/p9/fpsprobe.p9 ;;
+          fp1080) S="${HUNT_SCRIPT:-tools/cp/hunt/fpsprobe-blind.p9}" ;;
           play) S=tools/cp/p9/play.p9 ;;
           reload) S=tools/cp/p9/reload.p9 ;;
           soak) S=tools/cp/hunt/soak.p9 ;;
