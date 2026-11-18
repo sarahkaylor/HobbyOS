@@ -1,6 +1,6 @@
 # H1-hunt round 2: run-p8.sh's prefix-stamp warning (209a5ce4, cp-hunt H1-04) fires when the stamp matches (strix, integ17, h2-play1)
-== WARNING: prefix stamp 1794996799 != /home/sarah/cp/wine-cp2/stage/CP/WINE/share/wine/wine.inf mtime 1794996799: the seeded prefix was made by another Wine stage; every boot re-runs wineboot's update (re-run P8_PHASE=
+== WARNING: prefix stamp 1794996799CR (\r) != /home/sarah/cp/wine-cp2/stage/CP/WINE/share/wine/wine.inf mtime 1794996799: the seeded prefix was made by another Wine stage; every boot re-runs wineboot's update (re-run P8_PHASE=
 # od -c of debugfs cat /pfx/.update-timestamp of the seeded image (built by this lane with wine-cp2):
 0000000   1   7   9   4   9   9   6   7   9   9  \r  \n
 0000014
-# the stamp line ends in , so "$PSTAMP" != "$WSTAMP" although both print 1794996799; Wine's own strtoul ignores the , and the serial shows no wine.inf reinstall (no InstallHinfSection rows) in this boot.
+# the stamp line ends in CR (\r), so "$PSTAMP" != "$WSTAMP" although both print 1794996799; Wine's own strtoul ignores the CR (\r), and the serial shows no wine.inf reinstall (no InstallHinfSection rows) in this boot.
