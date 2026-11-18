@@ -43,7 +43,7 @@ H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
   26.3) — the same as 720p, so the frame is not GPU-fill bound; the 10-minute
   play boot 30.5 (p10 21.8) and the 28-minute soak 35.9 (p10 23.9).  The 9070
   XT was 33–54 % busy in the world phases.  That is ~3–5 fps above cp-k7's
-  integ11 numbers (25.5–27.9), on integ15 with ntsync.
+  integ11 numbers (25.5–27.9), on integ15 (C1-k7 and C2-ntsync merged; not an A/B, other lanes' guests differ).
 * **Soak (28 min in the world):** no fps decay (phase medians 34.5 → 43.0,
   scene-dependent), the game's resident memory 4309 → 4473 MiB (+5.9
   MiB/min, flat over the last two phases), virtual anon +33 MiB, threads 48
