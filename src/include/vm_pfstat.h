@@ -27,6 +27,12 @@ enum pf_kind {
 
 #define PF_HB 17 /* histogram buckets: < 1,2,4,...,32768 us, and the rest */
 
+/* H7-fault round 2: who asked for a TLB shootdown ([PFS] rows) */
+enum pf_shoot_site {
+  PFS_OTHER = 0, PFS_MUNMAP, PFS_JIT, PFS_MMAP, PFS_MPROT, PFS_ZAP, PFS_FIXED,
+  PFS_COW, PFS_COWSHARE, PFS_RETRY, PFS_FORK, PFS_TRUNC, PFS_N
+};
+
 #if defined(__x86_64__)
 static inline uint64_t pf_tsc(void) {
   uint32_t lo, hi;
@@ -48,7 +54,10 @@ void pfstat_lock_releasing(void);
 void pfstat_frame_alloc(uint64_t phys);
 void pfstat_zeroed(uint64_t phys, uint64_t tsc);
 /* mmu.c */
-void pfstat_shoot(uint64_t tsc, int targets);
+void pfstat_shoot_site(int site); /* the next shootdown on this CPU is `site`'s */
+/* targets: CPUs IPI'd; running: ... of which ran a thread of the AS;
+   slow: ... of which took >= 1 ms to acknowledge; slowmask: which */
+void pfstat_shoot(uint64_t tsc, int targets, int running, int slow, uint32_t slowmask);
 /* trap.c: a trap from user mode that returned to the same thread. */
 void pfstat_trap(uint64_t vector, uint64_t tsc);
 /* per-thread totals (tsc), for [AWAY] */
@@ -67,7 +76,10 @@ static inline void pfstat_lock_acquired(uint64_t t, int site) { (void)t; (void)s
 static inline void pfstat_lock_releasing(void) {}
 static inline void pfstat_frame_alloc(uint64_t phys) { (void)phys; }
 static inline void pfstat_zeroed(uint64_t phys, uint64_t tsc) { (void)phys; (void)tsc; }
-static inline void pfstat_shoot(uint64_t tsc, int targets) { (void)tsc; (void)targets; }
+static inline void pfstat_shoot_site(int site) { (void)site; }
+static inline void pfstat_shoot(uint64_t tsc, int targets, int running, int slow, uint32_t slowmask) {
+  (void)tsc; (void)targets; (void)running; (void)slow; (void)slowmask;
+}
 static inline void pfstat_trap(uint64_t vector, uint64_t tsc) { (void)vector; (void)tsc; }
 static inline uint64_t pfstat_thr_pf(int slot) { (void)slot; return 0; }
 static inline uint64_t pfstat_thr_irq(int slot) { (void)slot; return 0; }

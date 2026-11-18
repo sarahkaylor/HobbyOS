@@ -877,7 +877,7 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
   if (zapped) {
     for (int t = 0; t < MAX_PROCESSES; t++)
       if (touched[t / 64] & (1ULL << (t % 64)))
-        vm_arch_shootdown(&vm_as_pool[t]);
+        pfstat_shoot_site(PFS_TRUNC), vm_arch_shootdown(&vm_as_pool[t]);
   }
   flags = vm_lock_acq(__LINE__);
   for (int i = nnf; i < old_nf; i++) {
@@ -1106,7 +1106,8 @@ struct vm_tlb_batch {
 static void vtb_init(struct vm_tlb_batch *b);
 static void vtb_hold_objects_locked(struct vm_tlb_batch *b, struct addr_space *as,
                                     uint64_t base, uint64_t len);
-static void vtb_finish(struct vm_tlb_batch *b, struct addr_space *as);
+static void vtb_finish_site(struct vm_tlb_batch *b, struct addr_space *as, int site);
+#define vtb_finish(b, as) vtb_finish_site((b), (as), PFS_OTHER)
 static void vm_zap_range_defer(struct addr_space *as, uint64_t base, uint64_t len,
                                struct vm_tlb_batch *b);
 
@@ -1138,7 +1139,7 @@ int vm_region_install_fixed(struct addr_space *as, uint64_t base,
                                    obj_off) != 0)
     rc = -ENOMEM;
   vm_lock_rel(fl);
-  vtb_finish(&tb, as);
+  vtb_finish_site(&tb, as, PFS_FIXED);
   return rc;
 }
 
@@ -2561,6 +2562,7 @@ static int vm_cow_share_break_locked(struct addr_space *as, struct vm_region *r,
 static uint32_t pe_cow_n, pe_cow_peer_n;
 static void vm_cow_shootdown(struct addr_space *as, int pid, uint64_t va, int okind,
                              uint64_t off, int kernel_write) {
+  pfstat_shoot_site(PFS_COW);
   vm_arch_shootdown(as);
   uint32_t n = __atomic_add_fetch(&pe_cow_n, 1u, __ATOMIC_RELAXED);
 #ifdef __x86_64__
@@ -2719,8 +2721,10 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       vm_lock_rel(fl);
       if (brc < 0)
         return -2;
-      if (brc > 0)
+      if (brc > 0) {
+        pfstat_shoot_site(PFS_COWSHARE);
         vm_arch_shootdown(as);
+      }
       retouch = 0;
       continue;
     } else if (write && r->obj && (r->flags & VM_MAP_PRIVATE) &&
@@ -3553,8 +3557,10 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
       pfstat_kind(PFK_COW);
       vm_lock_rel(fl);
       vm_arch_flush_va(as, a);
-      if (brc > 0)
+      if (brc > 0) {
+        pfstat_shoot_site(PFS_COWSHARE);
         vm_arch_shootdown(as); /* C1-pe: readers of the shared frame */
+      }
       return 0;
     }
   }
@@ -3739,6 +3745,7 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
                       VM_PW_VMFIX);
           vm_lock_rel(fl);
           vm_arch_flush_va(as, a);
+          pfstat_shoot_site(PFS_RETRY);
           vm_arch_shootdown(as);
           if (oldfr)
             frame_free(oldfr);
@@ -3758,8 +3765,10 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
        reload is the architecturally complete flush.  Only worth it once the
        first retry has already failed, so the common one-fault case keeps the
        cheap invlpg. */
-    if (rc_now >= 1)
+    if (rc_now >= 1) {
+      pfstat_shoot_site(PFS_RETRY);
       vm_arch_shootdown(as);
+    }
     vm_arch_flush_va(as, a);
     if (rc_now >= 1)
       vm_arch_reload_cr3(as);
@@ -5288,7 +5297,7 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
   }
   vm_lock_rel(fl);
   /* ---- end of the critical section ------------------------------------ */
-  vtb_finish(&tb, as); /* C1-pe: shoot down, then release the old frames */
+  vtb_finish_site(&tb, as, PFS_MMAP); /* C1-pe: shoot down, then release the old frames */
 
   if (rc == 0)
     mr_sel(base, len, mr_w); /* L56 probe: one row per chosen base */
@@ -5368,9 +5377,11 @@ static void vtb_hold_objects_locked(struct vm_tlb_batch *b,
 }
 
 /* Shoot down, then release.  Caller holds NO spinlock. */
-static void vtb_finish(struct vm_tlb_batch *b, struct addr_space *as) {
-  if (b->flush || b->n || b->chain)
+static void vtb_finish_site(struct vm_tlb_batch *b, struct addr_space *as, int site) {
+  if (b->flush || b->n || b->chain) {
+    pfstat_shoot_site(site);
     vm_arch_shootdown(as);
+  }
   for (int i = 0; i < b->n; i++)
     frame_free(b->fr[i]);
   while (b->chain) {
@@ -5414,7 +5425,7 @@ void vm_zap_span(struct addr_space *as, uint64_t base, uint64_t len) {
   vtb_hold_objects_locked(&b, as, base, len);
   vm_zap_range_defer(as, base, len, &b);
   vm_lock_rel(fl);
-  vtb_finish(&b, as);
+  vtb_finish_site(&b, as, PFS_ZAP);
 }
 
 /* C1-k4: munmap's core -- zap + forget the region span, then shoot down and
@@ -5430,7 +5441,7 @@ static int vm_unmap_span_jit(struct addr_space *as, uint64_t base,
   if (rc == 0 && jit)
     vm_jit_release(as, base, len); /* a freed code chunk is reusable */
   vm_lock_rel(fl);
-  vtb_finish(&b, as);
+  vtb_finish_site(&b, as, jit ? PFS_JIT : PFS_MUNMAP);
   return rc;
 }
 
@@ -5649,7 +5660,7 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
     }
   }
   vm_lock_rel(fl);
-  vtb_finish(&tb, as);
+  vtb_finish_site(&tb, as, PFS_MPROT);
   return rc == 0 ? 0 : -ENOMEM;
 }
 
@@ -6015,14 +6026,18 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   /* C1-fork: the parent's shared leaves went read-only (local invlpg each);
      other threads of the parent may still hold writable translations, and a
      store through one after the child started would reach the child. */
-  if (src_marked)
+  if (src_marked) {
+    pfstat_shoot_site(PFS_FORK);
     vm_arch_shootdown(src);
+  }
   return 0;
 
 fail:
   /* The caller tears `dst` down (it may be a process PCB's AS). */
-  if (src_marked)
+  if (src_marked) {
+    pfstat_shoot_site(PFS_FORK);
     vm_arch_shootdown(src);
+  }
   ASCLONE("fail", i, 0);
   #undef ASCLONE
   return -1;

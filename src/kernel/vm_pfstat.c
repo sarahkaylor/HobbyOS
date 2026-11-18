@@ -78,6 +78,12 @@ struct pf_cpu {
   uint64_t sh_tsc;
   uint32_t tr_n[PFT_N];
   uint64_t tr_tsc[PFT_N];
+  /* round 2: shootdowns by site */
+  int sh_site;
+  uint32_t ss_n[PFS_N], ss_tg[PFS_N], ss_run[PFS_N], ss_slow[PFS_N];
+  uint64_t ss_tsc[PFS_N];
+  uint64_t ss_mx[PFS_N];
+  uint32_t slow_cpu[MAX_CPUS]; /* slow acks by target CPU */
   /* interval maxima (the emitter zeroes them) */
   uint64_t mx[PFK_N];
   uint64_t lw_mx, lh_mx, glw_mx, glh_mx, z_mx, sh_mx;
@@ -282,14 +288,30 @@ void pfstat_zeroed(uint64_t phys, uint64_t tsc) {
   }
 }
 
-void pfstat_shoot(uint64_t tsc, int targets) {
+void pfstat_shoot_site(int site) {
+  if (site > 0 && site < PFS_N) pf_me()->sh_site = site;
+}
+
+void pfstat_shoot(uint64_t tsc, int targets, int running, int slow, uint32_t slowmask) {
   struct pf_open *o = &pf_op[pf_slot()];
   if (o->depth > 0) o->sh += tsc;
   struct pf_cpu *c = pf_me();
+  int st = c->sh_site;
+  c->sh_site = 0;
+  if (st < 0 || st >= PFS_N) st = 0;
+  if (!targets) return; /* nobody else ran the AS: no IPI, nothing to count */
   c->sh_n++;
   c->sh_tsc += tsc;
   c->sh_tg += (uint32_t)targets;
   if (tsc > c->sh_mx) c->sh_mx = tsc;
+  c->ss_n[st]++;
+  c->ss_tsc[st] += tsc;
+  c->ss_tg[st] += (uint32_t)targets;
+  c->ss_run[st] += (uint32_t)running;
+  c->ss_slow[st] += (uint32_t)slow;
+  if (tsc > c->ss_mx[st]) c->ss_mx[st] = tsc;
+  for (int k = 0; k < MAX_CPUS; k++)
+    if (slowmask & (1u << k)) c->slow_cpu[k]++;
 }
 
 uint64_t pfstat_thr_pf(int slot) {
@@ -323,6 +345,9 @@ static struct {
   uint64_t sh_tsc;
   uint32_t tr_n[PFT_N];
   uint64_t tr_tsc[PFT_N];
+  uint32_t ss_n[PFS_N], ss_tg[PFS_N], ss_run[PFS_N], ss_slow[PFS_N];
+  uint64_t ss_tsc[PFS_N];
+  uint32_t slow_cpu[MAX_CPUS];
 } pf_prev, pf_sum;
 static uint64_t pf_thr_prev[MAX_PROCESSES], pf_thr_prev_irq[MAX_PROCESSES];
 
@@ -334,6 +359,7 @@ static void pf_emit(uint64_t now_ms) {
   __builtin_memset(&pf_sum, 0, sizeof pf_sum);
   uint64_t mx[PFK_N] = {0}, lw_mx = 0, lh_mx = 0, glw_mx = 0, glh_mx = 0, z_mx = 0, sh_mx = 0;
   uint64_t tr_mx[PFT_N] = {0};
+  uint64_t ss_mx[PFS_N] = {0};
   int glw_site = 0, glh_site = 0;
   for (int ci = 0; ci < MAX_CPUS; ci++) {
     struct pf_cpu *c = &pf_pc[ci];
@@ -363,6 +389,16 @@ static void pf_emit(uint64_t now_ms) {
     pf_sum.sh_n += c->sh_n;
     pf_sum.sh_tg += c->sh_tg;
     pf_sum.sh_tsc += c->sh_tsc;
+    for (int t = 0; t < PFS_N; t++) {
+      pf_sum.ss_n[t] += c->ss_n[t];
+      pf_sum.ss_tg[t] += c->ss_tg[t];
+      pf_sum.ss_run[t] += c->ss_run[t];
+      pf_sum.ss_slow[t] += c->ss_slow[t];
+      pf_sum.ss_tsc[t] += c->ss_tsc[t];
+      if (c->ss_mx[t] > ss_mx[t]) ss_mx[t] = c->ss_mx[t];
+      c->ss_mx[t] = 0;
+    }
+    for (int k = 0; k < MAX_CPUS; k++) pf_sum.slow_cpu[k] += c->slow_cpu[k];
     for (int t = 0; t < PFT_N; t++) {
       pf_sum.tr_n[t] += c->tr_n[t];
       pf_sum.tr_tsc[t] += c->tr_tsc[t];
@@ -508,6 +544,44 @@ static void pf_emit(uint64_t now_ms) {
   }
   kl_c(&kl, '\n');
   kl_emit(&kl);
+
+  /* [PFS] shootdowns by site: n/us/max_us/targets/running/slow, then the
+     target CPUs that acknowledged >= 1 ms late */
+  {
+    static const char *const sn[PFS_N] = {"other", "munmap", "jit", "mmap", "mprot", "zap",
+                                          "fixed", "cow", "cowshare", "retry", "fork", "trunc"};
+    int any = 0;
+    for (int t = 0; t < PFS_N; t++) any |= D(ss_n[t]) != 0;
+    if (any) {
+      kl_init(&kl);
+      kl_s(&kl, "[PFS] t=");
+      kl_u(&kl, now_ms);
+      for (int t = 0; t < PFS_N; t++) {
+        if (!D(ss_n[t])) continue;
+        kl_c(&kl, ' ');
+        kl_s(&kl, sn[t]);
+        kl_c(&kl, '=');
+        kl_u(&kl, D(ss_n[t]));
+        kl_c(&kl, '/');
+        kl_us(&kl, D(ss_tsc[t]));
+        kl_c(&kl, '/');
+        kl_us(&kl, ss_mx[t]);
+        kl_c(&kl, '/');
+        kl_u(&kl, D(ss_tg[t]));
+        kl_c(&kl, '/');
+        kl_u(&kl, D(ss_run[t]));
+        kl_c(&kl, '/');
+        kl_u(&kl, D(ss_slow[t]));
+      }
+      kl_s(&kl, " slowcpu=");
+      for (int k = 0; k < MAX_CPUS; k++) {
+        if (k) kl_c(&kl, ',');
+        kl_u(&kl, D(slow_cpu[k]));
+      }
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
 #undef D
   pf_prev = pf_sum;
 

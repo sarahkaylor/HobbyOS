@@ -1191,25 +1191,29 @@ void vm_arch_shootdown(struct addr_space *as) {
     x64_tlb_service();
     __asm__ volatile("pause");
   }
-  uint32_t targets = 0;
+  uint32_t targets = 0, running = 0;
   for (uint32_t c = 0; c < ncpu; c++) {
     if (c == me)
       continue;
     int hit = (__atomic_load_n(&v2_active_root[c], __ATOMIC_ACQUIRE) == root);
-    if (!hit) {
+    int run = 0; /* H7-fault: a thread of this AS is this CPU's current one */
+    {
       extern int current_pid_of_cpu(uint32_t cpu);
       int pid = current_pid_of_cpu(c);
       if (pid > 0) {
         struct process *p = process_get_pcb(pid);
         if (p && process_group(p) && process_group(p)->as == as)
-          hit = 1;
+          run = 1;
       }
     }
-    if (hit)
+    if (hit || run)
       targets |= 1u << c;
+    if (run)
+      running |= 1u << c;
   }
   if (!targets) {
     __atomic_store_n(&x64_tlb_lock, 0, __ATOMIC_RELEASE);
+    pfstat_shoot(0, 0, 0, 0, 0); /* consume the site tag */
     return;
   }
   if (me < MAX_CPUS)
@@ -1226,6 +1230,11 @@ void vm_arch_shootdown(struct addr_space *as) {
       x64_send_ipi(c, 0x82);
     }
   uint64_t t0 = x64_rdtsc(), last = t0;
+  uint32_t slowmask = 0; /* H7-fault: targets still pending after 1 ms */
+  extern uint64_t timer_tsc_per_ms(void);
+  uint64_t tsc_ms = timer_tsc_per_ms();
+  if (!tsc_ms)
+    tsc_ms = 3000000ULL;
   for (;;) {
     uint32_t left = 0;
     for (uint32_t c = 0; c < ncpu; c++)
@@ -1234,6 +1243,8 @@ void vm_arch_shootdown(struct addr_space *as) {
         left |= 1u << c;
     if (!left)
       break;
+    if (!slowmask && x64_rdtsc() - t0 > tsc_ms)
+      slowmask = left; /* who is late */
     uint64_t now = x64_rdtsc();
     if (now - t0 > 6000000000ULL) {
       for (uint32_t c = 0; c < ncpu; c++)
@@ -1264,7 +1275,8 @@ void vm_arch_shootdown(struct addr_space *as) {
   }
   __atomic_store_n(&x64_tlb_root, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&x64_tlb_lock, 0, __ATOMIC_RELEASE);
-  pfstat_shoot(x64_rdtsc() - sh_t0, __builtin_popcount(targets));
+  pfstat_shoot(x64_rdtsc() - sh_t0, __builtin_popcount(targets), __builtin_popcount(running),
+               __builtin_popcount(slowmask), slowmask);
 }
 
 /* Called from the vector 0x82 handler (trap.c): never schedules, never
