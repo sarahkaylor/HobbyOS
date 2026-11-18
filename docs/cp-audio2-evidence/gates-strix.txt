@@ -1,0 +1,102 @@
+# H5-audio2 gate batch (~/cp/lanes/audio2-gates-g.sh = ~/cp/integ-gates16.sh rows for the lane tree, own exports, wine-cp2 stage), strix, tree ~/cp/lanes/audio2-g at a213a9c1
+# probe rows: 64 rc=0, 0 non-zero
+tree audio2 start 08:13:33
+build rc=0 08:14:27
+avx rc=0 [LP] done rc=0
+badelr rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0lp_check_console: kernel rows intact 25743/25743, user rows intact 11973/11973, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+exitrace rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+ntsync rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+sigint rc=0 [LP] done rc=0
+sigret rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 09:44:21
+snd_probe_device rc=0 run-probe-snd: probe rc=0 run-probe-snd: wavcheck rc=0 run-probe-snd: PASS  
+unit rc=0 Tests run:    463 Tests failed: 0  
+host  kconsole=
+linux_snd_params_test rc=0 linux_snd_params_test: 24 checks, 0 failed
+pace_host_test rc=0 pace-host-test: calm PASS -- 0 xruns after the first second (2 in all), 0 stalls pace-host-test: stall PASS -- 1 xruns after the first second (2 in all), 5 stalls pace-host-test: lowpad PASS -- 1 xruns after the first second (2 in all), 0 stalls pace-host-test: PASS 
+xrun_host_test rc=0 xrun-host-test: PASS -- the xrun was reported while the PCM was open
+host_alsa_test rc=0 host-alsa-test: PASS
+castscan rc=0 castscan: 373 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+infra end 09:51:23
+gate_p2 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 09:53:27
+gate_p5 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  10:01:31
+gate_p8_venus rc=0    +   207.5 s  10:09:22  main menu OCR at s011-t000145: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   213.0 s  10:09:27  main menu OCR at s012-t000151: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   215.2 s  10:09:30  verdict: main-menu; QEMU stopped, sl 10:09:30
+ALLDONE 10:09:30
+# host_tests: no [host-tests] done row: t4_compat_selftest fails on the tree, not the code -- src/host/t4_parity.sh runs git status, and this strix tree s .git is a stale worktree link (wave-8 brief: ignore it): "self-test: FAIL — the flip modified src/host/compat.c in the tree"
+# H5-audio2 final-code rows (044b517e) in ~/cp/lanes/audio2-f (fresh obj/, no .git so t4_compat_selftest sees an untouched tree), strix, ~/cp/lanes/audio2-final.sh
+# the delta 044b517e vs a213a9c1 (full batch above) is linux_snd.c only (runtime paths with the device present; P2/P5/P8 boots have no sound device: /dev/snd is ENOENT there) plus host-side tools
+tree audio2-f (044b517e) start 10:15:19
+build rc=0 10:16:53
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0
+snd_probe_device rc=0 run-probe-snd: probe rc=0 run-probe-snd: wavcheck rc=0 run-probe-snd: PASS  
+unit rc=0 Tests run:    463 Tests failed: 0  
+host [host-tests] done: 40/42 passed kconsole=kconsole_test: PASS (0 failures) errors=1
+linux_snd_params_test rc=0 linux_snd_params_test: 24 checks, 0 failed
+pace_host_test rc=0 pace-host-test: calm PASS -- 0 xruns after the first second (1 in all), 0 stalls pace-host-test: stall PASS -- 0 xruns after the first second (1 in all), 5 stalls pace-host-test: lowpad PASS -- 5 xruns after the first second (8 in all), 0 stalls pace-host-test: PASS 
+xrun_host_test rc=0 xrun-host-test: PASS -- the xrun was reported while the PCM was open
+host_alsa_test rc=0 host-alsa-test: PASS
+castscan rc=0 castscan: 373 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+FINALDONE 10:25:16
+# host_tests reds: [host_tests] FAILED: python3 tools/t5/run_t5_tests.py (exit 2) -- continuing -- the known t5 gaming.md pair (integ16: 39/41)

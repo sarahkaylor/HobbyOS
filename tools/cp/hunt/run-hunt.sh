@@ -27,7 +27,9 @@
 #
 # Env: HUNT_AUDIO=1, HUNT_FROM (P9 run under obj/cp-p9 to start from),
 #      HUNT_BOOT (P9: another boot script in place of tools/cp/p9/boot_p9.py),
-#      HUNT_LOGS (default ~/cp/lanes/hunt-logs), anything run-p8/run-p9 take.
+#      HUNT_LOGS (default ~/cp/lanes/hunt-logs), HUNT_EXPORT (export name
+#      prefix, default /srv/nfs/cp-hunt: -p8 / -p9 are appended; another
+#      lane's own name, H5-audio2), anything run-p8/run-p9 take.
 # One boot of this tree at a time (flock /tmp/cp-hunt-lane.<tree>.lock); the QEMU
 # slot and the big-guest lock are taken inside the harnesses, for the boot only.
 set -uo pipefail
@@ -40,6 +42,7 @@ export PATH="$HOME/.local/bin:$PATH" MAKEFLAGS=-j16 TOOLS_SKIP=1
 # wave 8b: the patched Wine stage (cp-winefix) is the default
 export CP_WINE_STAGE="${CP_WINE_STAGE:-$HOME/cp/wine-cp2/stage/CP/WINE}" WINE_BUILD="${WINE_BUILD:-$HOME/cp/wine-cp2}"
 export VENUS_BUILD="${VENUS_BUILD:-$HOME/cp/lanes/hunt-venus}" VENUS_VNC=1
+EXP="${HUNT_EXPORT:-/srv/nfs/cp-hunt}"
 # one boot per TREE (a lane), not per host: other lanes copy this script into
 # their trees, and a shared /tmp/cp-hunt-lane.lock made their boots and this
 # lane's wait for each other (round 2, 2026-11-18).  HUNT_LOCK overrides.
@@ -74,13 +77,13 @@ sampler() {
 
 P9=0
 case "$KIND" in
-  p8v)  set -- env P8_GPU=venus P8_RUN="$RUN" P8_EXPORT=/srv/nfs/cp-hunt-p8 TIMEOUT_S="${TIMEOUT_S:-3600}" \
+  p8v)  set -- env P8_GPU=venus P8_RUN="$RUN" P8_EXPORT="$EXP-p8" TIMEOUT_S="${TIMEOUT_S:-3600}" \
           P8_STALL_S="${P8_STALL_S:-600}" P8_GAME_S="${P8_GAME_S:-3000}" bash tools/cp/p8/run-p8.sh ;;
-  p8l)  set -- env P8_RUN="$RUN" P8_EXPORT=/srv/nfs/cp-hunt-p8 TIMEOUT_S="${TIMEOUT_S:-5400}" \
+  p8l)  set -- env P8_RUN="$RUN" P8_EXPORT="$EXP-p8" TIMEOUT_S="${TIMEOUT_S:-5400}" \
           P8_STALL_S="${P8_STALL_S:-600}" P8_GAME_S="${P8_GAME_S:-5000}" bash tools/cp/p8/run-p8.sh ;;
   win)  IMG="$ROOT/obj/cp-hunt/cpdata-windowed.img"
         [ -f "$IMG" ] || bash tools/cp/hunt/prep-settings.sh "$ROOT/obj/cp-p8/pfx-seeded.img" "$IMG" WindowMode=Windowed:0 >&2 || exit 2
-        set -- env P8_GPU=venus P8_RUN="$RUN" P8_EXPORT=/srv/nfs/cp-hunt-p8 P8_CPDATA_FROM="$IMG" TIMEOUT_S="${TIMEOUT_S:-3600}" \
+        set -- env P8_GPU=venus P8_RUN="$RUN" P8_EXPORT="$EXP-p8" P8_CPDATA_FROM="$IMG" TIMEOUT_S="${TIMEOUT_S:-3600}" \
           P8_STALL_S="${P8_STALL_S:-600}" P8_GAME_S="${P8_GAME_S:-3000}" bash tools/cp/p8/run-p8.sh ;;
   fp720|fp1080|play|reload|reload2|soak|settings|script)
         P9=1
@@ -96,7 +99,7 @@ case "$KIND" in
           settings) S=tools/cp/hunt/settings.p9 ;;
           script) S="${HUNT_SCRIPT:?HUNT_SCRIPT}" ;;
         esac
-        X=(P9_SCRIPT="$S" P9_RUN="$RUN" P8_EXPORT=/srv/nfs/cp-hunt-p9)
+        X=(P9_SCRIPT="$S" P9_RUN="$RUN" P8_EXPORT="$EXP-p9")
         if [ "$KIND" = fp1080 ]; then
           # a P9 "from" run whose data disk says Resolution=1920x1080 (prep-settings.sh)
           SRC="$ROOT/obj/cp-p9/hunt-src1080"
