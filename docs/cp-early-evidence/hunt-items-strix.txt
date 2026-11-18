@@ -34,3 +34,13 @@ Venus path (host-venus.sh HV_DRIVE_CACHE from boot_p8), run vcache-1, game-phase
    +    21.3 s  07:23:25  warm-up result: [P8] warm-up: display driver loaded
 QEMU argv (paths shortened): if=pflash,format=raw,file=.../ovmf.fd,cache=unsafe | file=.../disk.img,format=raw,id=disk0,if=none,cache=unsafe | file=.../cpdata.img,format=raw,id=cpdata,if=none,cache=unsafe
 (a caps-only boot grades launcher-ended-before-game by design: no game was started)
+
+Final harness (5784e671: cache=unsafe default, stamp warning), full game boot f7, lavapipe, ~/cp/lanes/early-b:
+f7 gpu=lavapipe == verdict: main-menu  GDT: 70 /CP/WINE/share/wine/fonts=56; 1 /GAME/engine/config/base=7; 6 /GAME/r6/config=6;
+== drive cache: unsafe
+[P8W] +     3.3 s  07:46:28  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +   253.4 s  07:50:38  main menu OCR at s014-t000232: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   259.0 s  07:50:43  main menu OCR at s015-t000237: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   264.7 s  07:50:49  main menu OCR at s016-t000243: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+== e2fsck -fn after the boot: rc=0 (cpdata: 1050/1048576 files (0.9% non-contiguous), 139648/4194304 blocks)
+== verdict: main-menu
