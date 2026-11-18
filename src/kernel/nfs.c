@@ -143,6 +143,7 @@ volatile uint32_t nfs_pipe_stalls;
 #define NFS_RTT_HB 13
 volatile uint32_t nfs_rtt_h[NFS_RTT_HB], nfs_late_h[NFS_RTT_HB];
 volatile uint32_t nfs_pipe_stale, nfs_late_orig, nfs_serial_stale;
+volatile uint32_t nfs_late_used; /* ... of which completed their READ */
 static int nfs_rtt_bucket(uint64_t us) {
   int b = 0;
   uint64_t lim = 128;
@@ -315,6 +316,8 @@ void nfs_perf_dump(const char *why) {
     kl_i(&kl, (long)nfs_pipe_stale);
     kl_s(&kl, " late_orig=");
     kl_i(&kl, (long)nfs_late_orig);
+    kl_s(&kl, " late_used=");
+    kl_i(&kl, (long)nfs_late_used);
     kl_s(&kl, " sstale=");
     kl_i(&kl, (long)nfs_serial_stale);
     kl_s(&kl, " rxq_max=");
@@ -1698,9 +1701,16 @@ static volatile int32_t nfs_inflight_bytes;
  * 32 KiB reply per MiB even with a single READ in flight ("[NFSPIPE] stall
  * inflight=1 ... budget=32768"), and every loss cost the full 500 ms RPC
  * timeout.  Replies that arrive at all arrive within ~100 ms (run23
- * wait_max_us=99153), so the first wait is 150 ms; a re-sent READ gets the
- * full NFS_RPC_TIMEOUT_MS. */
-#define NFS_PIPE_TIMEOUT_MS 150
+ * wait_max_us=99153), so the first wait was 150 ms; a re-sent READ gets the
+ * full NFS_RPC_TIMEOUT_MS.
+ * H7-fault (docs/cp-fault.md §3): 150 -> 50 ms.  In game boots every answered
+ * READ came back within 64 ms (fp720 [NFSRTH], 4 boots: 99.96 % under 4 ms,
+ * the slowest ten 16-64 ms), while a lost reply stayed lost (late_ms=-1,
+ * resend answered in 8 ms) and the pipeline sat out the whole timeout: the
+ * 150-260 ms pauses of H1-13.  A reply that is merely late is not wasted any
+ * more (the original is accepted when it comes after its re-send), so a
+ * wait shorter than the slowest reply costs one extra READ, not time. */
+#define NFS_PIPE_TIMEOUT_MS 50
 
 /* Where byte `rel` of a pipelined read lands: one flat buffer, or (segs) a
  * list of NFS_RA_BYTES readahead windows. */
@@ -1998,6 +2008,22 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
     int idx = -1;
     for (int i = 0; i < NFS_READ_DEPTH; i++)
       if (slot[i].state == 1 && slot[i].xid == rxid) { idx = i; break; }
+    /* H7-fault (docs/cp-fault.md §3): the ORIGINAL reply of a READ that
+       timed out and was re-sent is the same bytes: take whichever comes
+       first.  (The re-sent READ's own reply is then a stale datagram.)  A
+       short first wait is only safe because a late reply is not wasted. */
+    if (idx < 0 && rxid)
+      for (int i = 0; i < NFS_READ_DEPTH; i++)
+        if (slot[i].state == 1 && slot[i].oxid == rxid) {
+          idx = i;
+          nfs_late_orig++;
+          nfs_late_used++;
+          uint64_t nowu = timer_get_us();
+          nfs_late_h[nfs_rtt_bucket(nowu - slot[i].t_first)]++;
+          if (rsr.on && rsr.late_us < 0) rsr.late_us = (int64_t)(nowu - rsr.t_stall);
+          if (rsr.on) rsr.retired[i] = 0;
+          break;
+        }
     if (idx < 0) {                      /* stale or duplicate datagram */
       /* H7-fault: is it the ORIGINAL reply of a READ that timed out? */
       int late = 0;
@@ -2020,7 +2046,8 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
     if (pr != RPC_OK) continue;
 
     stalls = 0;
-    if (rsr.on && rsr.resend_us < 0 && slot[idx].oxid && slot[idx].off == rsr.off)
+    if (rsr.on && rsr.resend_us < 0 && slot[idx].oxid && slot[idx].off == rsr.off &&
+        rxid == slot[idx].xid)
       rsr.resend_us = (int64_t)(timer_get_us() - rsr.t_stall);
     __sync_fetch_and_sub(&nfs_inflight_bytes, (int32_t)slot[idx].want);
     mine -= (int32_t)slot[idx].want;
