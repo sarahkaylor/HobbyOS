@@ -1,0 +1,50 @@
+# H5-audio2 cheap repro A/B (strix, Zen 5, KVM, QEMU 10.2.1, -smp 8 -m 12G test-mode wave, other lanes' guests beside it)
+# ATONE.ELF 150 s per row (tools/cp/audio2/repro-batch.sh), WAV via QEMU wav audiodev, graded by wavgaps.py then deleted
+# base = integ16 + timing rows (d4608be1 kernel), lane = play clock (44b83122 kernel; a213a9c1 adds the one-buffer bound, not in these rows)
+# columns: kernel xruns (close row) / held (xruns the play clock held back) / player late40 (ticks > 40 ms late) / player xrun_state recoveries / console host stalls / WAV dropouts
+base1-idle 07:58:33 xruns=363 late40=22 xrun_state=361 epipe=2 leadin=1 cons:stalls=27 stolen_ms=7158 duration_s=150.04 dropouts=0 dropout_ms_total=0 
+base1-stall 08:03:17 xruns=306 late40=25 xrun_state=305 epipe=1 leadin=1 cons:stalls=31 stolen_ms=7327 duration_s=150.04 dropouts=0 dropout_ms_total=0 
+base1-lowpad 08:07:28 xruns=11331 late40=17 xrun_state=11327 epipe=4 leadin=1 cons:stalls=22 stolen_ms=4868 duration_s=147.02 dropouts=0 dropout_ms_total=0 
+base1-load 08:11:48 xruns=2504 late40=429 xrun_state=2455 epipe=49 leadin=8 cons:stalls=301 stolen_ms=28275 duration_s=135.91 dropouts=7 dropout_ms_total=70.0 
+lane1-idle 07:58:20 xruns=1 late40=18 xrun_state=1 epipe=0 leadin=1 cons:stalls=26 stolen_ms=7515 duration_s=150.04 dropouts=0 dropout_ms_total=0 
+lane1-stall 08:03:12 xruns=1 late40=23 xrun_state=1 epipe=0 leadin=1 cons:stalls=32 stolen_ms=8074 duration_s=149.92 dropouts=0 dropout_ms_total=0 
+lane1-lowpad 08:07:16 xruns=10 late40=15 xrun_state=10 epipe=0 leadin=1 cons:stalls=16 stolen_ms=3186 duration_s=147.1 dropouts=0 dropout_ms_total=0 
+lane1-load 08:10:51 xruns=46 late40=150 xrun_state=43 epipe=3 leadin=1 cons:stalls=102 stolen_ms=21803 duration_s=144.35 dropouts=0 dropout_ms_total=0 
+-- base1-idle close: [SND] pcm closed: chunks=15005 frames=7202400 xruns=363 sync_ptr=104381 writei=14410 status=0 refine=42 parks=3 irqs=13945 tx=15005 ctl=6 ctl_timeouts=0
+-- lane1-idle close: [SND] pcm closed: chunks=15005 frames=7202400 xruns=1 sync_ptr=101425 writei=14529 status=0 refine=42 parks=3 held=159 irqs=13996 tx=15005 ctl=6 ctl_timeouts=0
+-- base1-lowpad close: [SND] pcm closed: chunks=14702 frames=7056960 xruns=11331 sync_ptr=205208 writei=14715 status=0 refine=42 parks=1 irqs=14294 tx=14702 ctl=6 ctl_timeouts=0
+-- lane1-lowpad close: [SND] pcm closed: chunks=14710 frames=7060800 xruns=10 sync_ptr=103162 writei=14681 status=0 refine=42 parks=3 held=287 irqs=14346 tx=14710 ctl=6 ctl_timeouts=0
+-- base1-load close: [SND] pcm closed: chunks=13592 frames=6524160 xruns=2504 sync_ptr=99969 writei=10515 status=0 refine=42 parks=3 irqs=9836 tx=13592 ctl=6 ctl_timeouts=0
+-- lane1-load close: [SND] pcm closed: chunks=14435 frames=6928800 xruns=46 sync_ptr=86312 writei=11882 status=0 refine=42 parks=3 held=1248 irqs=11130 tx=14435 ctl=6 ctl_timeouts=0
+
+# the first idle boot (idle1, instrumented kernel, no fix, no injected stall): the 10 s windows around a 270 ms host stall
+[SND] stat t_ms=40038 frames=480480 wall_frames=480231 max100ms=5280 maxgap_us=10685 maxlat_us=30923 maxwr_us=19989 minq=480 dry=+0 xruns=+0
+[AT] stat t=50.0 ticks=4988 late15=3 late25=3 late40=2 maxgap_ms=273.6 xrun_state=+0 epipe=+0 leadin=+0 starved_fill=1 written_s=+9.87 stalls=0
+[SND] stat t_ms=50043 frames=476640 wall_frames=480246 max100ms=10560 maxgap_us=282690 maxlat_us=293498 maxwr_us=273602 minq=480 dry=+0 xruns=+0
+[AT] stat t=60.0 ticks=6001 late15=3 late25=3 late40=2 maxgap_ms=13.0 xrun_state=+19 epipe=+0 leadin=+0 starved_fill=1 written_s=+10.13 stalls=0
+[SND] stat t_ms=60044 frames=483840 wall_frames=480010 max100ms=10560 maxgap_us=204747 maxlat_us=224732 maxwr_us=20094 minq=0 dry=+19 xruns=+19
+# the cascade after it: one xrun per 10 ms writer tick, the writer wrote < 5 ms before each, the device returned 3840 frames (80 ms) per 40 ms
+[SND] xrun n=6 frames_done=2418240 chunks=5038 t_ms=50544 wr_ago_us=204774 io_ago_us=4783 done100ms=1920 done40ms=1920
+[SND] xrun n=7 frames_done=2419200 chunks=5040 t_ms=50554 wr_ago_us=4273 io_ago_us=4267 done100ms=2880 done40ms=2880
+[SND] xrun n=8 frames_done=2420160 chunks=5042 t_ms=50564 wr_ago_us=3873 io_ago_us=3871 done100ms=3840 done40ms=3840
+[SND] xrun n=9 frames_done=2421120 chunks=5044 t_ms=50574 wr_ago_us=3945 io_ago_us=3940 done100ms=4800 done40ms=3840
+[SND] xrun n=10 frames_done=2422080 chunks=5046 t_ms=50584 wr_ago_us=3974 io_ago_us=3972 done100ms=5760 done40ms=3840
+[SND] xrun n=11 frames_done=2423040 chunks=5048 t_ms=50594 wr_ago_us=3979 io_ago_us=3973 done100ms=6720 done40ms=3840
+[SND] xrun n=12 frames_done=2424000 chunks=5050 t_ms=50604 wr_ago_us=3730 io_ago_us=3728 done100ms=7680 done40ms=3840
+[SND] xrun n=20 frames_done=2431680 chunks=5066 t_ms=50685 wr_ago_us=4223 io_ago_us=4222 done100ms=9600 done40ms=3840
+[SND] xrun n=24 frames_done=2435520 chunks=5074 t_ms=50725 wr_ago_us=4320 io_ago_us=4318 done100ms=9600 done40ms=3840
+[CONS] lines=232 user=150 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 usurped=0 stalls=8 stolen_ms=1760
+
+# lane idle row: device ran ahead (maxahead frames) and the clock held the xruns back
+[SND] stat t_ms=10015 frames=480480 wall_frames=480265 max100ms=10080 maxgap_us=134116 maxlat_us=145307 maxwr_us=125406 minq=0 dry=+3 xruns=+1 held=+2 maxahead=6363
+[SND] stat t_ms=20023 frames=480480 wall_frames=480368 max100ms=6240 maxgap_us=42184 maxlat_us=53164 maxwr_us=33226 minq=480 dry=+0 xruns=+0 held=+0 maxahead=6411
+[SND] stat t_ms=30033 frames=480480 wall_frames=480472 max100ms=10560 maxgap_us=374407 maxlat_us=394501 maxwr_us=379805 minq=0 dry=+37 xruns=+0 held=+20 maxahead=18167
+[SND] stat t_ms=40038 frames=480480 wall_frames=480257 max100ms=11040 maxgap_us=697251 maxlat_us=775271 maxwr_us=695895 minq=0 dry=+8 xruns=+0 held=+7 maxahead=35850
+[SND] stat t_ms=50040 frames=480000 wall_frames=480114 max100ms=10560 maxgap_us=366520 maxlat_us=377971 maxwr_us=358235 minq=0 dry=+1 xruns=+0 held=+1 maxahead=35900
+
+# QEMU stderr in the console logs (audio_rate_get_bytes): rate-control resets per run
+base1-load: 19
+base1-lowpad: 2
+base-hs1: 3
+lane1-load: 7
+lane1-lowpad: 2
