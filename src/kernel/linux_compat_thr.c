@@ -3223,6 +3223,22 @@ static void l_sf_check_restore(struct process *cur, uint64_t frame_rsp,
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
+  if (delta != 0) {
+    /* H4-kglitch: a nested delivery (a signal taken inside a handler)
+       planted a second frame over the first, and l_sf_last keeps only the
+       newest plant, so the OUTER frame's return looked like a mismatch
+       ("[SFX] MISMATCH ... delta=576" on a nested fault).  A restored rsp
+       that equals an earlier plant of this pid in the ring is that outer
+       return: no mismatch (linux_probe_sigint I6). */
+    uint32_t n = l_sf_ring_n < L_SF_RING ? l_sf_ring_n : L_SF_RING;
+    for (uint32_t i = 0; i < n; i++) {
+      struct l_sf_diag *r = &l_sf_ring[(l_sf_ring_n - 1 - i) % L_SF_RING];
+      if (r->pid == (uint32_t)cur->pid && r->sp == frame_rsp) {
+        delta = 0;
+        break;
+      }
+    }
+  }
   if (delta != 0 && l_sf_xrows < 8) {
     l_sf_xrows++;
     struct kline kl;
