@@ -60,8 +60,14 @@ static void test_gpu_m2_req_size(void) {
   EXPECT_EQ(gpu_abi_req_size(GPU_IOC_GET_PARAM), -1);
   /* Same number, wrong size: not a Venus request. */
   EXPECT_EQ(gpu_abi_m2_req_size(GPU_IOC(GPU_IOC_READ | GPU_IOC_WRITE, 'g', 18, 24)), -1);
-  /* Routing: a Venus request without a process is -EINVAL, not -ENOTTY. */
+  /* Routing: a Venus request without a process is -EINVAL, not -ENOTTY.
+   * ARM has no 3D transport: the M2 dispatcher is the -ENODEV stub, which is
+   * still "routed to M2", not -ENOTTY (same guard as test_gpu_m2_scanout). */
+#ifdef __x86_64__
   EXPECT_EQ(gpu_abi_ioctl(0, 3, GPU_IOC_SUBMIT2, 0x1000), -EINVAL);
+#else
+  EXPECT_EQ(gpu_abi_ioctl(0, 3, GPU_IOC_SUBMIT2, 0x1000), -ENODEV);
+#endif
   EXPECT_EQ(gpu_abi_ioctl(0, 3, GPU_IOC(GPU_IOC_READ, 'g', 21, 8), 0x1000), -ENOTTY);
 }
 

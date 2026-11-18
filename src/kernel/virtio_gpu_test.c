@@ -210,8 +210,11 @@ static void test_gpu_abi_pages_for(void) {
   EXPECT_EQ(gpu_abi_pages_for(4097), 2);
   EXPECT_EQ(gpu_abi_pages_for(64 * 64 * 4), 4);        /* the M1 probe buffer */
   EXPECT_EQ(gpu_abi_pages_for(64ull * 1024 * 1024), 16384);
-  /* Over the transport's per-attach cap: refuse rather than truncate. */
-  EXPECT_EQ(gpu_abi_pages_for(64ull * 1024 * 1024 + 1), 0);
+  /* Over the transport's per-attach cap: refuse rather than truncate.  The cap
+   * is GPU_ABI_MAX_BYTES, 512 MiB since 53a315cc (it was 64 MiB when these rows
+   * were written; the stale 64 MiB + 1 row was a known red ever since). */
+  EXPECT_EQ(gpu_abi_pages_for(512ull * 1024 * 1024), 131072);
+  EXPECT_EQ(gpu_abi_pages_for(512ull * 1024 * 1024 + 1), 0);
   EXPECT_EQ(gpu_abi_pages_for(0xFFFFFFFFFFFFFFFFull), 0);
 }
 
@@ -240,7 +243,10 @@ static void test_gpu_abi_res_ok(void) {
    * buffer is legal and must not trip the 16384 texel dimension limit. */
   r.width = 1024 * 1024;
   EXPECT_EQ(gpu_abi_res_ok(&r), 1);
+  /* The buffer ceiling is the 512 MiB backing cap (GPU_ABI_MAX_BYTES). */
   r.width = 65 * 1024 * 1024;
+  EXPECT_EQ(gpu_abi_res_ok(&r), 1);
+  r.width = 512u * 1024 * 1024 + 1;
   EXPECT_EQ(gpu_abi_res_ok(&r), 0);
   r = (struct gpu_res_create){ .ctx_id = 1, .target = 2, .format = 67,
                                .bind = 0xA, .width = 1920, .height = 1080,
