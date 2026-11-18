@@ -128,7 +128,12 @@ boots on strix show the same 120 s trigger and a +150 s launch
 (lanes/kglitch-s2 kg-stack1, lanes/play r2-fps-scan5).  Candidates: the
 UART TX path waiting on a 16550 that QEMU's main loop is not draining (its
 `-serial file:` write blocked; the host was at loadavg 36 with ~79 GB page
-cache), or a console lock held across the wait.  `run-hunt.sh`'s sampler now
+cache), or a console lock held across the wait.  The same delay, without
+the 120 s trigger, shows in the time from the QEMU start to the launcher's
+first NFS mount in this lane's boots: 6–45 s in 8 of the first 13 boots,
+71, 87, 90, 127 and 142 s in the other 5 (h-p8v2, h-p8l2, h-p8v3, h-play1,
+h-soak1), with identical serial content and no correlation with host load
+(max loadavg in the first minute 14–36 either way).  `run-hunt.sh`'s sampler now
 records the serial file size and the host's Dirty/Writeback each second, so
 the next occurrence shows which (boots from h-p8v4 on).
 
