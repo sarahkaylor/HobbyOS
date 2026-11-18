@@ -1,0 +1,21 @@
+# H7-03: the unit tier on 24af248d-equivalent sources (zeroed-frame stash, no CR3 fix), strix, 2026-11-18 15:4x
+# qemu.log excerpt: the suite reaches test_v2_image_first_page, takes a kernel #PF, the guest resets and re-runs
+  Running test_vm_demand_fault...
+[VMRT] pid=0 va=0x0x1080000000 leaf=0x8000000212875007 present=1 prev=-1 prot=3 kind=3 w=0
+...
+[VMK] retry-budget pid=0 va=0x0x1080000000 n=4 leaf=0x8000000212875007 base=0x0x1080000000 prot=3 kind=3
+  Running test_v2_image_first_page...
+/BIG.BIN
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000000
+  RIP: 0x00000000701224A5  RSP: 0x00000000775498A0
+  RAX: 0xFFFF808000000000 ...
+  STACK[0]: 0x4F4C2D5249444DE5        <- "\xe5MDIR-LO": FAT directory bytes in the page-table frame
+[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=14 rip=0x00000000701224A5 cr2=0xFFFF808000000014 pid=-1 err=0 cr3=0x000000021287A000 pd480=0x00000001FC000083
+BdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" ...      <- reset; "RUNNING KERNEL UNIT TESTS" again (3 times in 20 min)
+# addr2line -e hobbyos.elf 0x701224A5 -> nvme_ready_now (src/kernel/virtio_blk.c:1074) <- virtio_blk_read_raw (:2292)
+# cr3 = a root next to the test AS's frames (leaves 0x212875007, 0x21287B007): the retry path's
+# vm_arch_reload_cr3(as) had loaded the test AS's root; the test tore the AS down; the stash's allocation
+# pattern reused that frame.  Bisect (same session): instrument-only af9da50b 463/0 in 20 s;
+# + stash: hangs (resets) at this test; + stash + LIFO: same.  With 4112438a: 464/0 (frame_test_warm_lifo added).
+# frame_test_warm_lifo before the LIFO (stash + parked accounting, no LIFO): EXPECT_EQ FAILED: same == 1 at
+#   src/kernel/frame_test.c:123  -- "[warm] f=0x0000000200000000 g=0x0000000200101000"; after: g == f.

@@ -4,6 +4,13 @@
 #include "arch/cpu.h"
 #include "kmem.h"
 
+/* H7-fault (docs/cp-fault.md §3): RX backlog and TX ring counters for the
+   NFS stall rows; defined on both arches (nfs.c prints them), counted by the
+   x86_64 PCI driver below. */
+volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
+volatile uint32_t virtio_net_tx_waits, virtio_net_tx_drops, virtio_net_tx_wait_max_us;
+volatile uint32_t virtio_net_rx_reuse_risk;
+
 #ifdef __x86_64__
 #define NUM_RX_BUFFERS 512
 #else
@@ -340,6 +347,11 @@ int virtio_net_init(void) {
   return 0;
 }
 
+/* H7-fault (docs/cp-fault.md §3): sends that found all NUM_TX_SLOTS in
+   flight (the device -- QEMU's main loop for a user netdev -- had not taken
+   the last 16 frames), sends dropped after the bounded spin, and the longest
+   wait.  net_socket_send's UDP path ignores the drop, so an NFS READ that is
+   dropped here is a reply that never comes. */
 int virtio_net_send(const void *buf, uint32_t len) {
   /*
   uart_puts("[VIRTIO_NET] Sending packet, len=");
@@ -363,14 +375,24 @@ int virtio_net_send(const void *buf, uint32_t len) {
   uint16_t in_flight = tx_submit_idx - tx_ack_used_idx;
   if (in_flight >= NUM_TX_SLOTS) {
     // All slots in-flight — spin briefly for device to consume one.
+    extern uint64_t timer_get_us(void);
+    uint64_t tw0 = timer_get_us();
+    virtio_net_tx_waits++;
     int spin = 0;
     while (*(volatile uint16_t*)&tx_vq.used.idx == tx_ack_used_idx) {
       __asm__ volatile("pause");
       if (++spin > 100000) {
         // Timeout — drop the packet rather than hang.
+        virtio_net_tx_drops++;
+        uint32_t w = (uint32_t)(timer_get_us() - tw0);
+        if (w > virtio_net_tx_wait_max_us) virtio_net_tx_wait_max_us = w;
         spinlock_release_irqrestore(&net_tx_lock, flags);
         return -1;
       }
+    }
+    {
+      uint32_t w = (uint32_t)(timer_get_us() - tw0);
+      if (w > virtio_net_tx_wait_max_us) virtio_net_tx_wait_max_us = w;
     }
     tx_ack_used_idx = *(volatile uint16_t*)&tx_vq.used.idx;
   }
@@ -429,6 +451,28 @@ int virtio_net_send(const void *buf, uint32_t len) {
 // handle_irq tries to acquire net_lock → deadlock on single CPU.
 volatile int virtio_net_provider_active = 0;
 
+/* H7-fault: the deepest RX backlog a processing pass found (entries filled
+   by the device and not yet processed), and how often it reached every
+   posted buffer (the device had nowhere to put the next frame). */
+/* H7-fault: a frame's descriptor is handed back to the device BEFORE
+   net_rx_packet reads its buffer (see the comment in the loops).  If the
+   device filled every other posted buffer meanwhile, it may already be
+   writing the next frame into this one: count those reads (a torn frame is a
+   lost IP fragment, an NFS reply that never completes). */
+static void virtio_net_rx_note_reuse(uint16_t used_at_requeue) {
+  uint32_t posted = rx_qsize / 2;
+  if (posted > NUM_RX_BUFFERS) posted = NUM_RX_BUFFERS;
+  uint16_t adv = (uint16_t)(*rx_used_idx - used_at_requeue);
+  if (adv + 1u >= posted) virtio_net_rx_reuse_risk++;
+}
+static void virtio_net_rx_note_backlog(void) {
+  uint32_t pend = (uint16_t)(*rx_used_idx - rx_ack_used_idx);
+  if (pend > virtio_net_rx_backlog_max) virtio_net_rx_backlog_max = pend;
+  uint32_t posted = rx_qsize / 2;
+  if (posted > NUM_RX_BUFFERS) posted = NUM_RX_BUFFERS;
+  if (pend >= posted) virtio_net_rx_ring_full++;
+}
+
 void virtio_net_handle_irq(void) {
   if (io_base == 0 || !net_rx_ready) return;
   dbg_handle_irq_calls++;
@@ -448,6 +492,7 @@ void virtio_net_handle_irq(void) {
   }
 
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+  virtio_net_rx_note_backlog();
 
   // Process all pending packets in the RX used ring
   int irq_processed = 0;
@@ -501,8 +546,10 @@ void virtio_net_handle_irq(void) {
         rdma_log_count++;
       }
 
+      uint16_t used_at = *rx_used_idx;
       spinlock_release_irqrestore(&net_lock, flags);
       net_rx_packet(rx_buffers[buffer_idx], packet_len);
+      virtio_net_rx_note_reuse(used_at);
       flags = spinlock_acquire_irqsave(&net_lock);
     }
   }
@@ -549,6 +596,7 @@ void virtio_net_poll_rx(void) {
   }
 
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+  virtio_net_rx_note_backlog();
 
   int poll_processed = 0;
   while (rx_ack_used_idx != *rx_used_idx) {
@@ -575,8 +623,10 @@ void virtio_net_poll_rx(void) {
 
     if (len > sizeof(struct virtio_net_hdr)) {
       uint32_t packet_len = len - sizeof(struct virtio_net_hdr);
+      uint16_t used_at = *rx_used_idx;
       spinlock_release_irqrestore(&net_lock, flags);
       net_rx_packet(rx_buffers[buffer_idx], packet_len);
+      virtio_net_rx_note_reuse(used_at);
       flags = spinlock_acquire_irqsave(&net_lock);
     }
   }
@@ -593,6 +643,13 @@ void virtio_net_poll_rx(void) {
 
 int virtio_net_is_active(void) {
   return io_base != 0;
+}
+
+/* H7-fault: RX used-ring entries the device has filled and no path has
+   processed yet (a peek: no lock, no side effect). */
+uint32_t virtio_net_rx_pending(void) {
+  if (io_base == 0 || !net_rx_ready || !rx_used_idx) return 0;
+  return (uint16_t)(*rx_used_idx - rx_ack_used_idx);
 }
 
 #else

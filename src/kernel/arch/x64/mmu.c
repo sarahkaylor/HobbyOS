@@ -6,6 +6,7 @@
 #include "vm.h"
 #include "display_mode.h" /* DISPLAY_STRIDE_BYTES/HEIGHT: full fb size (GB-065) */
 #include "kmem.h"
+#include "vm_pfstat.h" /* H7-fault */
 
 extern uint32_t get_cpuid(void);
 extern void uart_puts(const char *s);
@@ -1069,10 +1070,23 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
 /* M6/L59: the complete flush.  Same effect as the shootdown handler's reload
  * (vector 0x82) but local and without an IPI: used by the present-leaf retry
  * path after INVLPG alone has failed to change the hardware's mind. */
+/* A full flush of THIS CPU's translations for `as` -- never a switch.
+ * H7-fault: it used to load as->root_phys whatever CR3 held.  vm_handle_fault's
+ * retry path calls it for the faulting AS, which a real fault always runs on,
+ * but the unit tier faults a test AS from kernel context: CR3 was left on that
+ * AS's root without v2_active_root knowing, the test tore the AS down, and
+ * every later test ran on a freed PML4.  It went unnoticed only because the
+ * forward-walking frame allocator did not reuse the frame for a while; with
+ * vm.c's zeroed-frame stash the root was reused (FAT directory data) and the
+ * next ioremap read (nvme_ready_now) took a kernel #PF.  Reload only when CR3
+ * already is this root. */
 void vm_arch_reload_cr3(struct addr_space *as) {
   if (!as || !as->root_phys)
     return;
-  uint64_t cr3 = as->root_phys;
+  uint64_t cr3;
+  __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+  if ((cr3 & X64_OA_MASK) != (as->root_phys & X64_OA_MASK))
+    return;
   __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
 }
 
@@ -1200,6 +1214,7 @@ void vm_arch_shootdown(struct addr_space *as) {
   }
   if (me < MAX_CPUS)
     x64_tlb_last_targets[me] = (uint8_t)__builtin_popcount(targets);
+  uint64_t sh_t0 = x64_rdtsc(); /* H7-fault: [PFL] shoot= */
   __atomic_store_n(&x64_tlb_root, root, __ATOMIC_RELEASE);
   for (uint32_t c = 0; c < ncpu; c++)
     if (targets & (1u << c))
@@ -1249,6 +1264,7 @@ void vm_arch_shootdown(struct addr_space *as) {
   }
   __atomic_store_n(&x64_tlb_root, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&x64_tlb_lock, 0, __ATOMIC_RELEASE);
+  pfstat_shoot(x64_rdtsc() - sh_t0, __builtin_popcount(targets));
 }
 
 /* Called from the vector 0x82 handler (trap.c): never schedules, never

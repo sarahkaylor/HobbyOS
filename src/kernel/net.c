@@ -809,6 +809,30 @@ static struct ipr_slot *ipr_add(struct ipv4_hdr *ip, const uint8_t *payload,
   return done;
 }
 
+/* H7-fault (docs/cp-fault.md §3): reassembly slots still collecting, and the
+   payload bytes / age of the fullest one -- read at an NFS stall to tell "a
+   reply arrived in part" from "nothing of it arrived".  A racy peek. */
+void net_ipr_peek(uint32_t *collecting, uint32_t *have, uint32_t *age_ms) {
+  uint32_t n = 0, h = 0, age = 0;
+  uint64_t now = timer_get_ms();
+  for (int i = 0; i < IPR_SLOTS; i++) {
+    if (ipr[i].state != 1) continue;
+    n++;
+    if (ipr[i].have >= h) {
+      h = ipr[i].have;
+      age = (uint32_t)(now - ipr[i].t_ms);
+    }
+  }
+  *collecting = n;
+  *have = h;
+  *age_ms = age;
+}
+
+/* H7-fault: the last frame net_rx_packet saw: ethertype, IP protocol,
+   fragment field, IP total length, and the uptime (ms). */
+volatile uint32_t net_rx_last_type, net_rx_last_frag, net_rx_last_len;
+volatile uint64_t net_rx_last_ms;
+
 static void ipr_release(struct ipr_slot *sl) {
   uint64_t fl = spinlock_acquire_irqsave(&ipr_lock);
   ipr_free_locked(sl);
@@ -818,6 +842,16 @@ static void ipr_release(struct ipr_slot *sl) {
 void net_rx_packet(uint8_t* packet, uint32_t len) {
   if (len < sizeof(struct eth_hdr)) return;
   struct eth_hdr* eth = (struct eth_hdr*)packet;
+  net_rx_last_type = (uint32_t)ntohs(eth->type) << 8;
+  net_rx_last_frag = 0;
+  net_rx_last_len = len;
+  net_rx_last_ms = timer_get_ms();
+  if (ntohs(eth->type) == ETH_TYPE_IPV4 && len >= sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr)) {
+    const struct ipv4_hdr *lip = (const struct ipv4_hdr *)(packet + sizeof(struct eth_hdr));
+    net_rx_last_type |= lip->protocol;
+    net_rx_last_frag = ntohs(lip->frag_off);
+    net_rx_last_len = ntohs(lip->total_len);
+  }
 
   /*
   if (ntohs(eth->type) == ETH_TYPE_ARP) {
@@ -1481,6 +1515,22 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
 }
 
 int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int timeout_ms) {
+  return net_socket_recv_timeout_st(pcb, buf, len, timeout_ms, 0);
+}
+
+/* H7-fault: RX frames processed by either path (virtio_net.c), and the used
+   ring's unprocessed entries, for net_wait_st. */
+static uint32_t net_rx_frames(void) {
+#if defined(__x86_64__)
+  extern volatile uint32_t dbg_poll_rx_pkts, dbg_handle_irq_pkts;
+  return dbg_poll_rx_pkts + dbg_handle_irq_pkts;
+#else
+  return 0;
+#endif
+}
+
+int net_socket_recv_timeout_st(struct socket_pcb* pcb, void* buf, uint32_t len,
+                               int timeout_ms, struct net_wait_st *st) {
   if (!pcb) return -1;
 
   /* Like net_socket_recv() but with a caller-provided timeout: the NFS RPC
@@ -1501,11 +1551,30 @@ int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int
    * safe_wfi() stays in net_socket_recv() (the 5 s variant other callers
    * use) so a wedged peer still parks instead of burning a core. */
   uint64_t start = timer_get_ms();
+  uint64_t prev_us = st ? timer_get_us() : 0;
+  uint32_t rx0 = st ? net_rx_frames() : 0;
+  if (st) st->iters = st->gap_max_us = st->pend = st->rxpk = 0;
   while (pcb->rx_head == pcb->rx_tail && pcb->state != SOCKET_CLOSED) {
-    if ((int)(timer_get_ms() - start) > timeout_ms) return -1;
+    if (st) {
+      uint64_t now_us = timer_get_us();
+      if (now_us - prev_us > st->gap_max_us) st->gap_max_us = (uint32_t)(now_us - prev_us);
+      prev_us = now_us;
+      st->iters++;
+    }
+    if ((int)(timer_get_ms() - start) > timeout_ms) {
+      if (st) {
+#if defined(__x86_64__)
+        extern uint32_t virtio_net_rx_pending(void);
+        st->pend = virtio_net_rx_pending();
+#endif
+        st->rxpk = net_rx_frames() - rx0;
+      }
+      return -1;
+    }
     net_rx_pump();
     cpu_relax();
   }
+  if (st) st->rxpk = net_rx_frames() - rx0;
 
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
   int have_dgram = (pcb->protocol == IP_PROTO_UDP &&

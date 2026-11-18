@@ -28,6 +28,7 @@
 #include "process.h"
 #include "virtio_gpu.h" /* GB-025 / M3: the scanout framebuffer address */
 #include "vdisplay.h"   /* L84: a hosted process maps its private surface */
+#include "vm_pfstat.h" /* H7-fault: [PF*] fault-cost rows */
 
 extern void uart_puts(const char *s);
 extern void print_int(int v);
@@ -68,6 +69,154 @@ extern int process_create_kernel_nowait(void (*entry)(void *), void *arg);
 #define VM_REGION_GROW_STEP 64
 
 static spinlock_t vm_lock;
+
+/* H7-fault (docs/cp-fault.md §2): every vm_lock pair in this file goes through
+ * these two, so [PFL] can name the line that waited or held longest (vml=) and
+ * charge a fault its own wait and hold (lw=/lh=).  Two rdtsc per pair on
+ * x86_64; plain lock calls elsewhere.  always_inline keeps the spinlock's own
+ * call-site bookkeeping (lock audit, held-lock table) pointing at the caller. */
+/* H7-fault: console rows are never printed under vm_lock.  A row costs a
+ * trapped port write per byte and waits for the console wire, so a [PUB] /
+ * [PUBS] row printed by a fault held the lock every other faulting CPU spins
+ * on for 4-15 ms.  vm_row() parks the row in this CPU's record while the
+ * lock is held; vm_lock_rel() prints it after the release.  (vm_lock is not
+ * recursive, so "held on this CPU" is one flag; IRQs are off while it is.) */
+struct vm_lkcpu {
+  int held;
+  int npend;
+  struct kline pend[2];
+} __attribute__((aligned(64)));
+static struct vm_lkcpu vm_lk_pc[MAX_CPUS];
+static void vm_row(struct kline *kl) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS && vm_lk_pc[c].held) {
+    if (vm_lk_pc[c].npend < 2)
+      vm_lk_pc[c].pend[vm_lk_pc[c].npend++] = *kl;
+    return; /* a third row in one hold is dropped (diagnostics only) */
+  }
+  kl_emit(kl);
+}
+
+static inline __attribute__((always_inline)) uint64_t vm_lock_acq(int site) {
+#if defined(__x86_64__)
+  uint64_t t = pf_tsc();
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  pfstat_lock_acquired(t, site);
+#else
+  (void)site;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+#endif
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS)
+    vm_lk_pc[c].held = 1;
+  return fl;
+}
+/* The rare release that has rows to print (kept out of line: the copies
+   would otherwise sit in the stack frame of every vm_lock user). */
+static __attribute__((noinline)) void vm_lock_rel_rows(uint64_t fl,
+                                                       struct vm_lkcpu *lc) {
+  struct kline pend[2];
+  int np = lc->npend;
+  for (int i = 0; i < np; i++)
+    pend[i] = lc->pend[i];
+  lc->npend = 0;
+  pfstat_lock_releasing();
+  spinlock_release_irqrestore(&vm_lock, fl);
+  for (int i = 0; i < np; i++)
+    kl_emit(&pend[i]);
+}
+static inline __attribute__((always_inline)) void vm_lock_rel(uint64_t fl) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS) {
+    struct vm_lkcpu *lc = &vm_lk_pc[c];
+    lc->held = 0;
+    if (lc->npend) {
+      vm_lock_rel_rows(fl, lc);
+      return;
+    }
+  }
+  pfstat_lock_releasing();
+  spinlock_release_irqrestore(&vm_lock, fl);
+}
+
+/* H7-fault (docs/cp-fault.md §4): ZEROED FRAMES ARE MADE BEFORE vm_lock.
+ *
+ * The fault paths took a frame and zeroed it while holding vm_lock -- the one
+ * irqsave lock every fault of every address space takes.  A zero is ~0.2 us
+ * on guest RAM the host has already backed, but the frame allocator walks
+ * the pool forwards, so a streaming game keeps touching guest RAM the host
+ * has never backed: that first store faults on the HOST (a THP allocation
+ * and zero of 2 MiB, or a compaction stall, docs/cp-fork.md §2), measured
+ * at 80 us to milliseconds, and every other faulting CPU spins behind it
+ * with interrupts off.  Each CPU now keeps VM_ZSTASH zeroed frames, topped
+ * up at the start of a fault or a touch with no lock held; the locked paths
+ * take one from the stash and fall back to frame_alloc_zeroed() only when it
+ * is empty (a thread that migrated, a burst deeper than the stash).  x86_64
+ * only (the Linux ABI); ARM keeps the inline zero. */
+#if defined(__x86_64__)
+#define VM_ZSTASH 4
+struct vm_zstash {
+  uint64_t fr[VM_ZSTASH];
+  int n;
+} __attribute__((aligned(64)));
+static struct vm_zstash vm_zs[MAX_CPUS];
+static inline uint64_t vm_zs_irqoff(void) {
+  uint64_t f;
+  __asm__ volatile("pushfq\n\tpop %0\n\tcli" : "=r"(f) : : "memory");
+  return f;
+}
+static inline void vm_zs_irqrestore(uint64_t f) {
+  __asm__ volatile("push %0\n\tpopfq" : : "r"(f) : "memory", "cc");
+}
+/* No lock held: fill this CPU's stash (bounded: VM_ZSTASH frames). */
+static void vm_zstash_fill(void) {
+  for (int k = 0; k < VM_ZSTASH; k++) {
+    uint64_t f = vm_zs_irqoff();
+    uint32_t c = get_cpuid();
+    int full = c >= MAX_CPUS || vm_zs[c].n >= VM_ZSTASH;
+    vm_zs_irqrestore(f);
+    if (full)
+      return;
+    uint64_t fr = frame_alloc_zeroed();
+    if (!fr)
+      return;
+    f = vm_zs_irqoff();
+    c = get_cpuid();
+    if (c < MAX_CPUS && vm_zs[c].n < VM_ZSTASH) {
+      vm_zs[c].fr[vm_zs[c].n++] = fr;
+      frame_parked_add(1);
+      fr = 0;
+    }
+    vm_zs_irqrestore(f);
+    if (fr) {
+      frame_free(fr); /* migrated onto a full stash */
+      return;
+    }
+  }
+}
+/* Interrupts off (under vm_lock): a zeroed frame, from the stash if it can. */
+static uint64_t vm_zframe(void) {
+  uint64_t f = vm_zs_irqoff();
+  uint32_t c = get_cpuid();
+  uint64_t fr = 0;
+  if (c < MAX_CPUS && vm_zs[c].n > 0)
+    fr = vm_zs[c].fr[--vm_zs[c].n];
+  vm_zs_irqrestore(f);
+  if (fr)
+    frame_parked_add(-1);
+  return fr ? fr : frame_alloc_zeroed();
+}
+uint32_t vm_zstash_frames(void) { /* unit tests: frames parked in stashes */
+  uint32_t n = 0;
+  for (int c = 0; c < MAX_CPUS; c++)
+    n += (uint32_t)vm_zs[c].n;
+  return n;
+}
+#else
+static inline void vm_zstash_fill(void) {}
+static inline uint64_t vm_zframe(void) { return frame_alloc_zeroed(); }
+uint32_t vm_zstash_frames(void) { return 0; }
+#endif
 static struct addr_space vm_as_pool[MAX_PROCESSES];
 static int vm_lock_ready;
 
@@ -173,11 +322,11 @@ struct addr_space *vm_as_create(uint64_t tgid) {
       kl_s(&k, " epoch="); kl_i(&k, (long)o_epoch);
       kl_s(&k, "\n"); kl_emit(&k); } }
   }
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   struct addr_space *as = &vm_as_pool[tgid];
   if (as->ver == AS_V2) {
     uint64_t owner_epoch = as->img_epoch;
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     /* GB-124: distinguish a pid-reuse AS collision from frame OOM — the idle
        reaper / slot reuse can hand us a pid whose AS pool entry is still
        AS_V2 (its teardown raced or never ran), which is a different defect
@@ -189,7 +338,7 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   }
   uint64_t arr = frame_alloc_zeroed();
   if (!arr) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     { static int c_oom; if (c_oom<3){c_oom++; uart_puts("[GB124-AS] fail: frame OOM\n");} }
     return 0;
   }
@@ -223,12 +372,12 @@ struct addr_space *vm_as_create(uint64_t tgid) {
     as->regions = 0;
     as->cap = 0;
     frame_free(arr);
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     { static int c_root; if (c_root<3){c_root++; uart_puts("[GB124-AS] fail: root alloc\n");} }
     return 0;
   }
   as->root_phys = root;
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return as;
 }
 
@@ -245,14 +394,14 @@ int vm_as_set_layout(struct addr_space *as, int layout) {
   if (layout != VM_LAYOUT_COMPAT)
     return -1;
 #ifdef __x86_64__
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   int rc = vm_arch_set_compat(as);
   if (rc == 0) {
     as->layout = VM_LAYOUT_COMPAT;
     as->va_lo = CP_COMPAT_FLOOR;
     as->va_hi = CP_VA_HI;
   }
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   return rc;
 #else
   return -1;
@@ -273,9 +422,9 @@ void vm_as_teardown(struct addr_space *as) {
     kl_s(&k, " res="); kl_i(&k, (long)as->resident_frames);
     kl_s(&k, "\n"); kl_emit(&k); } }
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   if (as->ver != AS_V2) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     return;
   }
   uint64_t root = as->root_phys;
@@ -299,7 +448,7 @@ void vm_as_teardown(struct addr_space *as) {
   as->retry_va = 0; /* w5 (iv): stale retry state must not survive teardown */
   as->retry_count = 0;
   as->img_epoch++; /* L9 (prefetch): abort any stale background task */
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
 
   /* M6/L63: the image's sum table is a contiguous frame run. */
   if (sums) {
@@ -368,7 +517,7 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
     vm_obj_zero(a, (uint64_t)af * FRAME_SIZE); /* 0 == not materialized */
     arr = (uint64_t *)phys_to_virt(a);
   }
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   struct vm_object *o = 0;
   for (int i = 0; i < VM_OBJ_MAX; i++) {
     if (!vm_objects[i].used) {
@@ -377,7 +526,7 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
     }
   }
   if (!o) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     for (int i = 0; arr && i < af; i++)
       frame_free(virt_to_phys(arr) + (uint64_t)i * FRAME_SIZE);
     return 0;
@@ -391,7 +540,7 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
   o->arr_frames = af;
   o->frames = arr;
   o->wgen = 0;
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return o;
 }
 
@@ -438,19 +587,19 @@ void vm_object_ref(struct vm_object *o) {
   if (!o)
     return;
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   vm_object_ref_locked(o);
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
 }
 
 void vm_object_unref(struct vm_object *o) {
   if (!o)
     return;
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   if (!o->used || o->refs > 1) {
     vm_object_unref_locked(o);
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     return;
   }
   /* cp/pfx: the last reference.  Detach the frame array under vm_lock (the
@@ -463,7 +612,7 @@ void vm_object_unref(struct vm_object *o) {
   o->frames = 0;
   o->arr_frames = 0;
   vm_object_free_locked(o); /* no array left: only resets the slot */
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   if (arr) {
     uint64_t cap = (uint64_t)af * (FRAME_SIZE / sizeof(uint64_t));
     for (uint64_t i = 0; i < cap; i++)
@@ -486,7 +635,7 @@ uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off) {
   if (idx >= (uint64_t)o->nr_frames)
     return 0; /* past the capacity */
   if (!o->frames[idx]) {
-    uint64_t fr = frame_alloc_zeroed();
+    uint64_t fr = vm_zframe(); /* H7-fault: zeroed before vm_lock */
     if (!fr)
       return 0;
     o->frames[idx] = fr;
@@ -507,9 +656,9 @@ uint64_t vm_object_peek(struct vm_object *o, uint64_t off) {
   if (!o)
     return 0;
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   uint64_t fr = vm_object_peek_locked(o, off);
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return fr;
 }
 
@@ -517,21 +666,21 @@ uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr) 
   if (!o || !fr)
     return 0;
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   uint64_t idx = off / FRAME_SIZE;
   if (!o->used || idx >= (uint64_t)o->nr_frames) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     frame_free(fr);
     return 0;
   }
   if (o->frames[idx]) {
     uint64_t peer = o->frames[idx]; /* a peer filled it first */
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     frame_free(fr);
     return peer;
   }
   o->frames[idx] = fr;
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return fr;
 }
 
@@ -547,28 +696,28 @@ uint64_t vm_object_install_page_gen(struct vm_object *o, uint64_t off, uint64_t 
   if (!o || !fr)
     return 0;
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   uint64_t idx = off / FRAME_SIZE;
   if (!o->used || idx >= (uint64_t)o->nr_frames) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     frame_free(fr);
     return 0;
   }
   if (o->frames[idx]) { /* a peer filled it first; a refresh keeps it current */
     uint64_t peer = o->frames[idx];
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     frame_free(fr);
     return peer;
   }
   if (o->wgen != gen) { /* a write landed after this fill read the disk */
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     frame_free(fr);
     if (stale)
       *stale = 1;
     return 0;
   }
   o->frames[idx] = fr;
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return fr;
 }
 
@@ -577,7 +726,7 @@ int vm_object_file_writers(uint16_t cluster, struct vm_object **out, int max) {
     return 0;
   vm_lock_init_once();
   int n = 0;
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   for (int i = 0; i < VM_OBJ_MAX && n < max; i++) {
     struct vm_object *o = &vm_objects[i];
     if (!o->used || o->kind != VM_OBJ_FILE || o->file_start_cluster != cluster)
@@ -586,7 +735,7 @@ int vm_object_file_writers(uint16_t cluster, struct vm_object **out, int max) {
     o->refs++;
     out[n++] = o;
   }
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return n;
 }
 
@@ -646,17 +795,17 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
   if (!o)
     return -EINVAL;
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   if (!o->used || size > VM_OBJ_MAX_BYTES) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     return -EINVAL;
   }
   if (size < o->size && (o->seals & VM_SEAL_SHRINK)) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     return -EPERM;
   }
   if (size > o->size && (o->seals & VM_SEAL_GROW)) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     return -EPERM;
   }
   int nnf = (int)((size + FRAME_SIZE - 1) / FRAME_SIZE);
@@ -677,7 +826,7 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
     }
     uint64_t na = frame_alloc_contig(naf);
     if (!na) {
-      spinlock_release_irqrestore(&vm_lock, flags);
+      vm_lock_rel(flags);
       return -ENOMEM;
     }
     vm_obj_zero(na, (uint64_t)naf * FRAME_SIZE);
@@ -702,7 +851,7 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
         vm_obj_zero(o->frames[i], FRAME_SIZE);
     o->nr_frames = nnf;
     o->size = size;
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     return 0;
   }
   /* cp/wine2: SHRINK.  The pages past the new end used to be freed while
@@ -724,13 +873,13 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
   o->nr_frames = nnf;
   o->size = size;
   vm_object_ref_locked(o);
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   if (zapped) {
     for (int t = 0; t < MAX_PROCESSES; t++)
       if (touched[t / 64] & (1ULL << (t % 64)))
         vm_arch_shootdown(&vm_as_pool[t]);
   }
-  flags = spinlock_acquire_irqsave(&vm_lock);
+  flags = vm_lock_acq(__LINE__);
   for (int i = nnf; i < old_nf; i++) {
     if (i >= o->nr_frames && o->frames[i]) { /* not regrown meanwhile */
       frame_free(o->frames[i]);
@@ -738,7 +887,7 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
     }
   }
   vm_object_unref_locked(o);
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return 0;
 }
 
@@ -746,9 +895,9 @@ uint64_t vm_object_size(struct vm_object *o) {
   if (!o)
     return 0;
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   uint64_t s = o->used ? o->size : 0;
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return s;
 }
 
@@ -756,18 +905,18 @@ int vm_object_add_seals(struct vm_object *o, uint64_t seals) {
   if (!o)
     return -EINVAL;
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   if (!o->used) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     return -EINVAL;
   }
   if (o->seals & VM_SEAL_SEAL) {
-    spinlock_release_irqrestore(&vm_lock, flags);
+    vm_lock_rel(flags);
     return -EPERM; /* F_SEAL_SEAL latches: no further seals (Linux) */
   }
   o->seals |= seals & (VM_SEAL_SEAL | VM_SEAL_SHRINK | VM_SEAL_GROW |
                        VM_SEAL_WRITE);
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return 0;
 }
 
@@ -775,9 +924,9 @@ uint64_t vm_object_get_seals(struct vm_object *o) {
   if (!o)
     return 0;
   vm_lock_init_once();
-  uint64_t flags = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t flags = vm_lock_acq(__LINE__);
   uint64_t s = o->used ? o->seals : 0;
-  spinlock_release_irqrestore(&vm_lock, flags);
+  vm_lock_rel(flags);
   return s;
 }
 
@@ -888,10 +1037,10 @@ static int vm_region_remove_locked(struct addr_space *as, uint64_t base,
 int vm_region_insert(struct addr_space *as, uint64_t base, uint64_t len,
                      uint16_t prot, uint16_t kind, uint32_t flags,
                      struct vm_object *obj, uint64_t obj_off) {
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   int rc = vm_region_insert_locked(as, base, len, prot, kind, flags, obj,
                                    obj_off);
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   return rc;
 }
 
@@ -914,7 +1063,7 @@ int vm_region_alloc_hole(struct addr_space *as, uint64_t start, uint64_t limit,
                          uint64_t obj_off, uint64_t *out_base) {
   if (!as || !out_base || len == 0)
     return -EINVAL;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   uint64_t base = vm_hole_find(as, start, limit, len);
   int rc = 0;
   if (!base)
@@ -924,7 +1073,7 @@ int vm_region_alloc_hole(struct addr_space *as, uint64_t start, uint64_t limit,
     rc = -ENOMEM;
   else
     *out_base = base;
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   return rc;
 }
 
@@ -977,7 +1126,7 @@ int vm_region_install_fixed(struct addr_space *as, uint64_t base,
      and their frames are released only after every CPU has flushed. */
   struct vm_tlb_batch tb;
   vtb_init(&tb);
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   int rc = 0;
   if (as->ver == AS_V2) {
     vtb_hold_objects_locked(&tb, as, base, len);
@@ -988,7 +1137,7 @@ int vm_region_install_fixed(struct addr_space *as, uint64_t base,
   else if (vm_region_insert_locked(as, base, len, prot, kind, flags, obj,
                                    obj_off) != 0)
     rc = -ENOMEM;
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   vtb_finish(&tb, as);
   return rc;
 }
@@ -1008,7 +1157,7 @@ int vm_as_census(struct addr_space *as, int *nr, int *anon, int *stack,
                  uint64_t *resident, uint64_t *peak) {
   if (!as || as->ver != AS_V2)
     return -1;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   int n = as->nr;
   int a = 0, s = 0;
   uint64_t ab = 0, bg = 0;
@@ -1025,7 +1174,7 @@ int vm_as_census(struct addr_space *as, int *nr, int *anon, int *stack,
   }
   uint64_t res = (uint64_t)as->resident_frames;
   uint64_t pk = (uint64_t)as->peak_frames;
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   if (nr) *nr = n;
   if (anon) *anon = a;
   if (stack) *stack = s;
@@ -1046,7 +1195,7 @@ struct vm_region *vm_region_above(struct addr_space *as, uint64_t va,
                                   uint64_t limit) {
   if (!as || as->ver != AS_V2)
     return 0;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   struct vm_region *out = 0;
   for (int i = 0; i < as->nr; i++) {
     struct vm_region *r = &as->regions[i];
@@ -1055,7 +1204,7 @@ struct vm_region *vm_region_above(struct addr_space *as, uint64_t va,
       break;
     }
   }
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   return out;
 }
 
@@ -1131,9 +1280,9 @@ static int vm_region_remove_locked(struct addr_space *as, uint64_t base,
 }
 
 int vm_region_remove(struct addr_space *as, uint64_t base, uint64_t len) {
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   int rc = vm_region_remove_locked(as, base, len);
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   return rc;
 }
 
@@ -1172,35 +1321,35 @@ int vm_map_page(struct addr_space *as, uint64_t va, uint64_t phys,
     return -1;
   if ((va & 0xFFF) || !vm_va_is_user(as, va))
     return -1;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   int rc = vm_arch_map(as, va, phys, prot, kind);
   if (rc == 0) {
     as->resident_frames++;
     if (as->resident_frames > as->peak_frames)
       as->peak_frames = as->resident_frames;
   }
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   return rc;
 }
 
 int vm_unmap_page(struct addr_space *as, uint64_t va) {
   if (!as || as->ver != AS_V2)
     return -1;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   if (vm_arch_walk(as, va, 0) == 0) {
     as->resident_frames--;
   }
   vm_arch_unmap(as, va);
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   return 0;
 }
 
 int vm_prot_page(struct addr_space *as, uint64_t va, uint16_t prot) {
   if (!as || as->ver != AS_V2)
     return -1;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   vm_arch_prot(as, va, prot);
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   return 0;
 }
 
@@ -1255,7 +1404,7 @@ static int vm_cow_page_locked(struct addr_space *as, struct vm_region *r,
   uint64_t leaf = 0;
   if (vm_arch_walk(as, a, &leaf) != 0)
     return 0; /* absent: the fill path makes the private copy */
-  uint64_t fr = frame_alloc_zeroed();
+  uint64_t fr = vm_zframe(); /* H7-fault: a frame touched before vm_lock */
   if (!fr)
     return -ENOMEM;
   vm_frame_copy(fr, vm_arch_leaf_phys(leaf), FRAME_SIZE);
@@ -1324,7 +1473,7 @@ static int vm_obj_private_fill_locked(struct addr_space *as,
   int src = VM_PUB_ZERO;
   if (write) {
     uint64_t objfr = vm_object_peek_locked(o, off);
-    fr = frame_alloc_zeroed();
+    fr = vm_zframe(); /* H7-fault */
     if (!fr)
       return -ENOMEM;
     if (objfr) {
@@ -1572,7 +1721,7 @@ void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot
     kl_i(&kl, zero);
     kl_s(&kl, verified ? " ver=1" : " ver=0");
     kl_c(&kl, '\n');
-    kl_emit(&kl);
+    vm_row(&kl); /* H7-fault: after vm_lock if held */
     vm_pub_rows_printed++;
   }
 
@@ -1606,7 +1755,7 @@ void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot
       kl_i(&kl, (long)vm_pw_xunv[i]);
     }
     kl_c(&kl, '\n');
-    kl_emit(&kl);
+    vm_row(&kl); /* H7-fault: after vm_lock if held */
   }
 }
 
@@ -2012,13 +2161,13 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
                                    int cow, int who) {
   struct vm_object *o = 0;
   uint64_t off = 0;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   struct vm_region *r = vm_region_find(as, a);
   if (as->ver != AS_V2 || !r || !r->obj ||
       (r->obj->kind != VM_OBJ_FILE && r->obj->kind != VM_OBJ_NFS &&
        r->obj->kind != VM_OBJ_EXT2) ||
       a < r->base || a + FRAME_SIZE > r->base + r->len) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     return -EFAULT;
   }
   o = r->obj;
@@ -2026,11 +2175,13 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   int is_exec = (r->prot & VM_PROT_EXEC) != 0;
   int pub_priv = (r->flags & VM_MAP_PRIVATE) != 0; /* for the row */
   vm_object_ref_locked(o); /* hold it across the unlocked disk read */
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
 
+  uint64_t t_io = pf_tsc(); /* H7-fault: the page's source, cache or device */
   uint64_t src = (o->kind == VM_OBJ_NFS)    ? nfs_obj_page(o, off)
                  : (o->kind == VM_OBJ_EXT2) ? ext2_obj_page(o, off) /* cp/ext2b */
                                             : file_obj_page(o, off);
+  pfstat_io(pf_tsc() - t_io);
   uint64_t priv = 0;
   int beyond_eof = 0;
   if (!src) {
@@ -2038,9 +2189,9 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
        (ld.so maps p_memsz in one call).  It reads as zero.  A page *inside*
        the file that failed to read is still -EIO: zero-filling mapped text
        would corrupt the image. */
-    uint64_t flz = spinlock_acquire_irqsave(&vm_lock);
+    uint64_t flz = vm_lock_acq(__LINE__);
     int beyond = (off / FRAME_SIZE) >= (uint64_t)o->nr_frames;
-    spinlock_release_irqrestore(&vm_lock, flz);
+    vm_lock_rel(flz);
     if (!beyond) {
       vm_object_unref(o);
       return -EIO;
@@ -2096,8 +2247,11 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
      trusted.  The rescue is therefore diagnostic only: it RECORDS that the
      cache holds zeros where the device has content, and never publishes. */
   uint64_t rescue = 0;
-  if (src && !is_exec && vm_page_zero(src))
+  if (src && !is_exec && vm_page_zero(src)) {
+    uint64_t t_rs = pf_tsc();
     rescue = vm_data_page_rescue(o, off);
+    pfstat_io(pf_tsc() - t_rs);
+  }
   if (rescue) { frame_free(rescue); rescue = 0; }
   int verified = 0;
   int verify_zero = 0;
@@ -2110,7 +2264,10 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
     }
     vm_frame_copy(priv, rescue ? rescue : src, FRAME_SIZE);
     if (exec_backed) {
-      if (vm_exec_page_verify(o, off, priv, &verify_zero) != 0) {
+      uint64_t t_vf = pf_tsc();
+      int vrc = vm_exec_page_verify(o, off, priv, &verify_zero);
+      pfstat_io(pf_tsc() - t_vf);
+      if (vrc != 0) {
         frame_free(priv);
         vm_object_unref(o);
         return -EIO;
@@ -2135,7 +2292,7 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   uint16_t pub_prot = 0;
   int rescue_published = 0;
 
-  fl = spinlock_acquire_irqsave(&vm_lock);
+  fl = vm_lock_acq(__LINE__);
   struct vm_region *r2 = vm_region_find(as, a);
   if (as->ver != AS_V2) {
     rc = -ESRCH;
@@ -2176,7 +2333,7 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
       rc = 0;
     }
   }
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
 
   if (pub_ok)
     vm_pub_note(as, a, off, pub_prot, pub_priv,
@@ -2375,7 +2532,7 @@ static int vm_cow_share_break_locked(struct addr_space *as, struct vm_region *r,
     vm_arch_cow_clear(as, a, r->prot);
     return 0;
   }
-  uint64_t fr = frame_alloc();
+  uint64_t fr = vm_zframe(); /* H7-fault: a frame touched before vm_lock */
   if (!fr)
     return -ENOMEM;
   vm_frame_copy(fr, ph, FRAME_SIZE);
@@ -2448,24 +2605,25 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
   uint64_t end = va + len - 1;
   int retouch = 0;
   for (uint64_t a = va & ~0xFFFULL; a <= end; a += FRAME_SIZE) {
-    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    vm_zstash_fill(); /* H7-fault: no lock held */
+    uint64_t fl = vm_lock_acq(__LINE__);
     struct vm_region *r = vm_region_find(as, a);
     if (!r || a + FRAME_SIZE > r->base + r->len) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -1; /* -EFAULT: hole / region crossed mid-page */
     }
     if (write && !(r->prot & VM_PROT_WRITE)) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -1; /* -EFAULT */
     }
     if (!write && !(r->prot & VM_PROT_READ)) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -1;
     }
     /* M6/L69: a mapping whose page-in already failed with EIO answers the
        same error without another device read (see VM_MAP_IOERR). */
     if (r->flags & VM_MAP_IOERR) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -1;
     }
     /* S3/S4 (design sections 3/4.1): demand-materialize an absent page.
@@ -2478,7 +2636,7 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
          disk read runs WITHOUT vm_lock (v2_image_materialize takes it
          itself for the final map). */
       if (r->kind == VMK_IMG && as->img_active) {
-        spinlock_release_irqrestore(&vm_lock, fl);
+        vm_lock_rel(fl);
         int mrc = v2_image_materialize(as, a);
         if (mrc != 0)
           return (mrc == -ENOMEM) ? -2 : -1;
@@ -2496,7 +2654,7 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
            and skipped L60's verification entirely (the 0x9AD000 publish). */
         int is_exec = (r->prot & VM_PROT_EXEC) != 0;
         int cow = (write || is_exec) && (r->flags & VM_MAP_PRIVATE);
-        spinlock_release_irqrestore(&vm_lock, fl);
+        vm_lock_rel(fl);
         int mrc = vm_file_obj_materialize(as, a, cow, VM_PW_TOUCH_OBJ);
         if (mrc != 0)
           return (mrc == -ENOMEM) ? -2 : -1;
@@ -2509,7 +2667,7 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       /* cp/wine2: MAP_PRIVATE over a memfd / tmpfs object (no disk I/O). */
       if (r->obj && (r->flags & VM_MAP_PRIVATE)) {
         int prc = vm_obj_private_fill_locked(as, r, a, write, VM_PW_TOUCH_OBJ);
-        spinlock_release_irqrestore(&vm_lock, fl);
+        vm_lock_rel(fl);
         if (prc != 0)
           return (prc == -ENOMEM) ? -2 : -1;
         continue;
@@ -2519,13 +2677,13 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       if (shared) {
         fr = vm_object_page_locked(r->obj, (a - r->base) + r->obj_off);
         if (!fr) {
-          spinlock_release_irqrestore(&vm_lock, fl);
+          vm_lock_rel(fl);
           return -2; /* -ENOMEM */
         }
       } else {
-        fr = frame_alloc_zeroed();
+        fr = vm_zframe(); /* H7-fault: zeroed before vm_lock */
         if (!fr) {
-          spinlock_release_irqrestore(&vm_lock, fl);
+          vm_lock_rel(fl);
           return -2; /* -ENOMEM */
         }
       }
@@ -2533,7 +2691,7 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       if (rc != 0) {
         if (!shared)
           frame_free(fr); /* the object still owns a shared frame */
-        spinlock_release_irqrestore(&vm_lock, fl);
+        vm_lock_rel(fl);
         return -2;
       }
       as->resident_frames++;
@@ -2543,8 +2701,14 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
          page (zero-fill) or an anonymous object's page: both are `src=zero`
          by definition, so an executable page here is a JIT/anon page whose
          bytes the writer supplies -- legal, counted, never alarmed. */
-      vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot, !shared,
-                  VM_PUB_ZERO, fr, 0, VM_PW_TOUCH_ANON);
+      /* H7-fault: noted after vm_lock (see vm_handle_fault's anon path) */
+      uint64_t pub_off = (a - r->base) + r->obj_off;
+      uint16_t pub_prot = r->prot;
+      vm_lock_rel(fl);
+      vm_pub_note(as, a, pub_off, pub_prot, !shared, VM_PUB_ZERO, fr, 0,
+                  VM_PW_TOUCH_ANON);
+      retouch = 0;
+      continue;
     } else if (write && vm_touch_leaf_cow_locked(as, a)) {
       /* C1-fork: a kernel write into a page shared copy-on-write since a
          fork must land in this AS's own copy (vm_kwrite stores through the
@@ -2552,7 +2716,7 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       uint64_t leaf = 0;
       (void)vm_arch_walk(as, a, &leaf);
       int brc = vm_cow_share_break_locked(as, r, a, leaf);
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       if (brc < 0)
         return -2;
       if (brc > 0)
@@ -2572,17 +2736,17 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       int okind = r->obj->kind;
       uint64_t ooff = (a - r->base) + r->obj_off;
       if (vm_cow_page_locked(as, r, a) != 0) {
-        spinlock_release_irqrestore(&vm_lock, fl);
+        vm_lock_rel(fl);
         return -2; /* -ENOMEM */
       }
       /* C1-pe: the kernel's write lands in the copy; every other CPU must
          stop translating this VA to the object's frame first (V3). */
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       vm_cow_shootdown(as, p->pid, a, okind, ooff, 1);
       retouch = 0;
       continue;
     }
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     retouch = 0;
   }
   return 0;
@@ -2719,12 +2883,12 @@ int vm_user_read(struct process *p, uint64_t va, void *dst, int len) {
     if (vm_touch(p, page, 1, 0) != 0)
       return -1;
 
-    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    uint64_t fl = vm_lock_acq(__LINE__);
     struct vm_region *r = vm_region_find(as, a);
     uint64_t leaf = 0;
     if (!r || !(r->prot & VM_PROT_READ) || (page + FRAME_SIZE > r->base + r->len) ||
         vm_arch_walk(as, page, &leaf) != 0) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -1; /* peer unmapped/protected between touch and lock */
     }
     uint64_t pa = vm_arch_leaf_phys(leaf) + (a & (FRAME_SIZE - 1));
@@ -2733,14 +2897,14 @@ int vm_user_read(struct process *p, uint64_t va, void *dst, int len) {
        host-visible window, which the direct map does not cover.  Refuse the
        copy (EFAULT) instead of faulting the kernel. */
     if (pa >= DMAP_RAM_MAX) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -1;
     }
 #endif
     const volatile unsigned char *src = (const volatile unsigned char *)phys_to_virt(pa);
     for (int k = 0; k < in_page; k++)
       d[i + k] = src[k]; /* under vm_lock: frame cannot be freed/unmapped */
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     i += in_page;
   }
   return 0;
@@ -2789,19 +2953,19 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
     if (vm_touch(p, page, 1, 1) != 0)
       return -1;
 
-    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    uint64_t fl = vm_lock_acq(__LINE__);
     struct vm_region *r = vm_region_find(as, a);
     uint64_t leaf = 0;
     if (!r || !(r->prot & VM_PROT_WRITE) || (page + FRAME_SIZE > r->base + r->len) ||
         vm_arch_walk(as, page, &leaf) != 0) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -1; /* peer unmapped/protected between touch and lock */
     }
 #ifdef __x86_64__
     /* C1-fork: a fork re-shared the page between the touch and this lock
        (another thread forked): break the share again, then retry. */
     if (vm_arch_leaf_cow(leaf)) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       if (++kw_retry > 8)
         return -1;
       continue;
@@ -2814,14 +2978,14 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
        host-visible window, which the direct map does not cover.  Refuse the
        copy (EFAULT) instead of faulting the kernel. */
     if (pa >= DMAP_RAM_MAX) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -1;
     }
 #endif
     volatile unsigned char *dst = (volatile unsigned char *)phys_to_virt(pa);
     for (int k = 0; k < in_page; k++)
       dst[k] = s[i + k]; /* under vm_lock: frame cannot be freed/unmapped */
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     i += in_page;
   }
   return 0;
@@ -3001,10 +3165,10 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
      catches a device that answers the same zeros twice. */
   int img_exec = 0, img_verified = 0;
   {
-    uint64_t fl0 = spinlock_acquire_irqsave(&vm_lock);
+    uint64_t fl0 = vm_lock_acq(__LINE__);
     struct vm_region *rr = vm_region_find(as, a);
     img_exec = rr && (rr->prot & VM_PROT_EXEC);
-    spinlock_release_irqrestore(&vm_lock, fl0);
+    vm_lock_rel(fl0);
   }
   /* M6/L63: a page entirely past the image has no file bytes to verify.  It
      is legal for data (`.bss`), never for code.  The IMAGE region is sized
@@ -3149,28 +3313,28 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
     }
   }
 
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   if (as->ver != AS_V2) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     frame_free(fr);
     return -ESRCH; /* AS torn down while we were reading; drop the frame */
   }
   struct vm_region *r2 = vm_region_find(as, a);
   if (!r2 || r2->kind != VMK_IMG || !as->img_active ||
       a < r2->base || a + FRAME_SIZE > r2->base + r2->len) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     frame_free(fr);
     return -EFAULT; /* region gone / no longer image-backed */
   }
   if (vm_arch_walk(as, a, 0) == 0) {
     /* A peer CPU faulted and mapped the same page while we read. */
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     frame_free(fr);
     return 0;
   }
   int rc = vm_arch_map(as, a, fr, r2->prot, VMK_IMG);
   if (rc != 0) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     frame_free(fr);
     return -ENOMEM;
   }
@@ -3179,7 +3343,7 @@ static int v2_image_materialize(struct addr_space *as, uint64_t a) {
     as->peak_frames = as->resident_frames;
   int64_t pub_priv = (r2->flags & VM_MAP_PRIVATE) != 0;
   uint16_t pub_prot = r2->prot;
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   /* An exec image page that reached the map was either verified by the
      two-read gate (full page) or IS the file's tail (n == want, the rest
      defined-zero past EOF).  `verified` is about the bytes, not about the
@@ -3285,11 +3449,11 @@ static int vm_page_io_error(struct addr_space *as, uint64_t a,
   if (why)
     *why = "EIO";
   if (as) {
-    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    uint64_t fl = vm_lock_acq(__LINE__);
     struct vm_region *r = vm_region_find(as, a);
     if (r && (r->prot & VM_PROT_EXEC))
       r->flags |= VM_MAP_IOERR;
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
   }
   return 2;
 }
@@ -3299,8 +3463,24 @@ static int vm_page_io_error(struct addr_space *as, uint64_t a,
    loop that walks fresh anonymous pages (the [ANONF] row). */
 uint64_t vm_dbg_fault_rip;
 
+/* H7-fault: every fault is timed and classified for the [PF*] rows
+   (vm_pfstat.c); the body marks the path that resolved it. */
+static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
+                                int exec, const char **why);
 int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why) {
+  struct process *pcp = current_process();
+  pfstat_begin(pcp && pcp->in_sys, va);
+  vm_zstash_fill(); /* H7-fault: no lock held yet */
+  int rc = vm_handle_fault_body(grp, va, write, exec, why);
+  if (rc != 0)
+    pfstat_kind(PFK_ERR);
+  pfstat_end();
+  return rc;
+}
+
+static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
+                                int exec, const char **why) {
   if (why)
     *why = "V1";
   if (!grp || !grp->as)
@@ -3310,10 +3490,10 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   if (write && exec && why)
     *why = "PROT";
 
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   struct vm_region *r = vm_region_find(as, a);
   if (!r || a < r->base || a + FRAME_SIZE > r->base + r->len) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     if (why)
       *why = "HOLE";
     return 1; /* guard page / inter-region hole: clean kill */
@@ -3321,7 +3501,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   if ((write && !(r->prot & VM_PROT_WRITE)) ||
       (exec && !(r->prot & VM_PROT_EXEC)) ||
       (!write && !exec && !(r->prot & VM_PROT_READ))) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     if (why)
       *why = "PROT";
     return 1;
@@ -3331,7 +3511,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
      page the file cannot deliver will not start being deliverable because the
      faulting instruction retried. */
   if (r->flags & VM_MAP_IOERR) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     if (why)
       *why = "EIO";
     return 2;
@@ -3364,13 +3544,14 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     if (vm_arch_walk(as, a, &leaf) == 0 && vm_arch_leaf_cow(leaf)) {
       int brc = vm_cow_share_break_locked(as, r, a, leaf);
       if (brc < 0) {
-        spinlock_release_irqrestore(&vm_lock, fl);
+        vm_lock_rel(fl);
         if (why)
           *why = "OOM";
         return 1;
       }
       vm_fault_resolved(as);
-      spinlock_release_irqrestore(&vm_lock, fl);
+      pfstat_kind(PFK_COW);
+      vm_lock_rel(fl);
       vm_arch_flush_va(as, a);
       if (brc > 0)
         vm_arch_shootdown(as); /* C1-pe: readers of the shared frame */
@@ -3385,7 +3566,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
       int okind = r->obj->kind;
       uint64_t ooff = (a - r->base) + r->obj_off;
       if (vm_cow_page_locked(as, r, a) != 0) {
-        spinlock_release_irqrestore(&vm_lock, fl);
+        vm_lock_rel(fl);
         if (why)
           *why = "OOM";
         return 1;
@@ -3393,7 +3574,8 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
       /* The mapping changed under this VA: the next fault here is a new
          event, not a repeat of this one. */
       vm_fault_resolved(as);
-      spinlock_release_irqrestore(&vm_lock, fl);
+      pfstat_kind(PFK_COW);
+      vm_lock_rel(fl);
       vm_arch_flush_va(as, a);
       /* C1-pe: another thread of this AS running on another CPU may still
          translate this VA to the object's frame (it read the page before
@@ -3426,6 +3608,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
        or the repeat count.  [VMRT] does, and it is bounded: a healthy run has
        none, this bug has a handful. */
     uint64_t leaf = 0;
+    pfstat_kind(PFK_RETRY);
     int have_leaf = (vm_arch_walk(as, a, &leaf) == 0);
     int rslot = rty_slot();
     int rc_now = (rslot && rty_va[rslot] == a) ? rty_n[rslot] : -1;
@@ -3483,7 +3666,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
           kl_emit(&kl);
         }
       }
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       if (why)
         *why = "PROT";
       return 1;
@@ -3516,7 +3699,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
       }
       rty_va[rslot] = 0;
       rty_n[rslot] = 0;
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       vm_arch_flush_va(as, a);
       return 0;
     } else if (rslot && write && rty_n[rslot] == 2 && !r->obj) {
@@ -3554,7 +3737,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
           vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot,
                       (r->flags & VM_MAP_PRIVATE) != 0, VM_PUB_COPY, nf, 1,
                       VM_PW_VMFIX);
-          spinlock_release_irqrestore(&vm_lock, fl);
+          vm_lock_rel(fl);
           vm_arch_flush_va(as, a);
           vm_arch_shootdown(as);
           if (oldfr)
@@ -3569,7 +3752,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     } else if (rslot) {
       rty_n[rslot]++;
     }
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     /* A stale *paging-structure* entry (a parent table installed by another
        CPU) is not always covered by INVLPG on every microarchitecture; a CR3
        reload is the architecturally complete flush.  Only worth it once the
@@ -3588,7 +3771,8 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
      it.  The disk read must NOT run under vm_lock (see the helper), so
      release first; the helper re-checks under the lock before mapping. */
   if (r->kind == VMK_IMG && as->img_active) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    pfstat_kind(PFK_IMG);
+    vm_lock_rel(fl);
     int mrc = v2_image_materialize(as, a);
     if (mrc != 0) {
       if (mrc == -EIO)
@@ -3662,7 +3846,10 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     int cow = (write && (r->flags & VM_MAP_PRIVATE)) ||
               (is_text && (r->flags & VM_MAP_PRIVATE));
     uint64_t off_dbg = (a - r->base) + r->obj_off;
-    spinlock_release_irqrestore(&vm_lock, fl);
+    pfstat_kind(r->obj->kind == VM_OBJ_NFS    ? PFK_NFS
+                : r->obj->kind == VM_OBJ_EXT2 ? PFK_EXT2
+                                              : PFK_FAT);
+    vm_lock_rel(fl);
     int mrc = vm_file_obj_materialize(as, a, cow, VM_PW_FAULT_OBJ);
     if (mrc != 0) {
       if (mrc == -EIO)
@@ -3683,35 +3870,37 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   /* cp/wine2: MAP_PRIVATE over a memfd / tmpfs object -- read-through to the
      object's frame (read-only) until written, a private copy on write. */
   if (r->obj && (r->flags & VM_MAP_PRIVATE)) {
+    pfstat_kind(PFK_PRIV);
     int prc = vm_obj_private_fill_locked(as, r, a, write, VM_PW_FAULT_OBJ);
     if (prc != 0) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       if (why)
         *why = (prc == -ENOMEM) ? "OOM" : "BUS";
       return 1;
     }
     vm_fault_resolved(as);
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     return 0; /* the instruction retries (ELR/CR2 untouched) */
   }
 
   uint64_t fr;
   int shared = (r->obj != 0);
+  pfstat_kind(shared ? PFK_SHOBJ : PFK_ANON);
   if (shared) {
     uint64_t soff = (a - r->base) + r->obj_off;
     fr = vm_object_page_locked(r->obj, soff);
     if (!fr) {
       /* C1-k4: past the object's last page is SIGBUS (Linux), not OOM. */
       int beyond = r->obj->used && soff / FRAME_SIZE >= (uint64_t)r->obj->nr_frames;
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       if (why)
         *why = beyond ? "BUS" : "OOM";
       return 1;
     }
   } else {
-    fr = frame_alloc_zeroed();
+    fr = vm_zframe(); /* H7-fault: zeroed before vm_lock (vm_zstash_fill) */
     if (!fr) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       if (why)
         *why = "OOM";
       return 1; /* design section 3: OOM kills the faulting process */
@@ -3721,7 +3910,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   if (rc != 0) {
     if (!shared)
       frame_free(fr); /* the object still owns a shared frame */
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     if (why)
       *why = "OOM";
     return 1;
@@ -3729,9 +3918,13 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
   as->resident_frames++;
   if (as->resident_frames > as->peak_frames)
     as->peak_frames = as->resident_frames;
-  /* M6/L63: anonymous publish (zero-fill or an anonymous object's page). */
-  vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot, !shared,
-              VM_PUB_ZERO, fr, 0, VM_PW_FAULT_ANON);
+  /* M6/L63: anonymous publish (zero-fill or an anonymous object's page).
+     H7-fault: noted after vm_lock is released (below) -- it scans the page
+     and prints a [PUB]/[PUBS] row every 1024/4096 publishes, and a console
+     row under the one fault lock held every other faulting CPU for 4-15 ms
+     (ab-lane-fp1 [PFX] rows: kind=anon zero=7 lh=4043..15235). */
+  uint64_t pub_off = (a - r->base) + r->obj_off;
+  uint16_t pub_prot = r->prot;
   /* M6/L72: WHO IS TOUCHING FRESH ANONYMOUS PAGES?
    *
    * The post-load park grows resident memory at one page per 6.1 ms for 19
@@ -3743,14 +3936,16 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
    * instruction (`rip`, stashed by the #PF path in trap.c), the region's
    * identity and whether the page came from a shared object -- enough to name
    * the site and, with the 6.1 ms cadence, the loop. */
+  struct kline kf;
+  int anonf_emit = 0;
   {
     extern uint64_t vm_dbg_fault_rip;
     extern struct process *current_process(void);
     static unsigned l_anonf;
     unsigned k = __atomic_fetch_add(&l_anonf, 1u, __ATOMIC_RELAXED);
-    if ((k & 4095u) == 0) {
+    anonf_emit = (k & 4095u) == 0;
+    if (anonf_emit) {
       struct process *cp = current_process();
-      struct kline kf;
       kl_init(&kf);
       kl_s(&kf, "[ANONF] n=");
       kl_i(&kf, (long)k);
@@ -3775,11 +3970,14 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
       kl_s(&kf, " rip=");
       kl_hex(&kf, (unsigned long)vm_dbg_fault_rip);
       kl_c(&kf, '\n');
-      kl_emit(&kf);
     }
   }
   vm_fault_resolved(as);
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
+  vm_pub_note(as, a, pub_off, pub_prot, !shared, VM_PUB_ZERO, fr, 0,
+              VM_PW_FAULT_ANON);
+  if (anonf_emit)
+    kl_emit(&kf); /* H7-fault: built under vm_lock, printed after it */
   return 0; /* the instruction retries (ELR/CR2 untouched) */
 }
 
@@ -3862,15 +4060,15 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
   uint32_t epoch, fsize;
   uint16_t cluster;
   {
-    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    uint64_t fl = vm_lock_acq(__LINE__);
     if (as->ver != AS_V2 || !as->img_active) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -1;
     }
     epoch = as->img_epoch;
     cluster = as->img_start_cluster;
     fsize = as->img_file_size;
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
   }
 
   uint64_t img_pages = ((uint64_t)fsize + FRAME_SIZE - 1) / FRAME_SIZE;
@@ -3901,9 +4099,9 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
   uint64_t page = start_page;
   uint64_t endp = start_page + npages;
   while (page < endp) {
-    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    uint64_t fl = vm_lock_acq(__LINE__);
     int alive = v2_prefetch_alive_locked(as, epoch, cluster, fsize);
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     if (!alive) {
       st->stopped = 1;
       break;
@@ -3942,7 +4140,7 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
 
       /* Already resident (the eager first page, a demand fault ahead of
          us, or a peer)?  Skip without a frame. */
-      fl = spinlock_acquire_irqsave(&vm_lock);
+      fl = vm_lock_acq(__LINE__);
       /* w5 (iii): re-validate liveness in the SAME critical section as
          the walk.  The batch-top alive check is a separate window; a
          peer CPU can tear the AS down between it and this walk, and a
@@ -3950,7 +4148,7 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
          (vm_arch_walk+0x2c, FAR 0xFFFF...F000).  The map path below
          already re-checks alive2; the presence probe must too. */
       if (!v2_prefetch_alive_locked(as, epoch, cluster, fsize)) {
-        spinlock_release_irqrestore(&vm_lock, fl);
+        vm_lock_rel(fl);
         st->stopped = 1;
         stop = 1;
         break;
@@ -3958,7 +4156,7 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
       int present = (vm_arch_walk(as, va, 0) == 0);
       struct vm_region *rp = vm_region_find(as, va);
       int page_exec = rp && (rp->prot & VM_PROT_EXEC);
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       if (present) {
         st->skipped++;
         st->processed++;
@@ -4010,7 +4208,7 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
       /* Re-validate under vm_lock and install if still absent: a peer
          (demand fault / eager fill) may have mapped the page while we
          read -- the loser drops its frame. */
-      fl = spinlock_acquire_irqsave(&vm_lock);
+      fl = vm_lock_acq(__LINE__);
       int mapped = 0;
       uint16_t pub_prot = 0;
       int pub_priv = 0;
@@ -4030,7 +4228,7 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
           }
         }
       }
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
 
       if (mapped)
         vm_pub_note(as, va, ppos, pub_prot, pub_priv, VM_PUB_FILE, fr,
@@ -4091,17 +4289,17 @@ void vm_image_prefetch_autostart(struct addr_space *as) {
   int pid;
   uint32_t epoch, fsize;
   uint16_t cluster;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   if (as->ver != AS_V2 || !as->img_active ||
       as->img_file_size < V2_PREFETCH_MIN_BYTES) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     return;
   }
   pid = (int)as->tgid;
   epoch = as->img_epoch;
   cluster = as->img_start_cluster;
   fsize = as->img_file_size;
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
 
   if (pid <= 0 || pid >= MAX_PROCESSES)
     return;
@@ -4546,7 +4744,7 @@ static void mr_sel(uint64_t base, uint64_t len, char where) {
 static int mr_blocker(struct addr_space *as, uint64_t base, uint64_t len,
                       uint64_t *bb, uint64_t *bl, int *bk) {
   uint64_t end = base + len;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   int found = 0;
   for (int i = 0; i < as->nr; i++) {
     struct vm_region *r = &as->regions[i];
@@ -4558,7 +4756,7 @@ static int mr_blocker(struct addr_space *as, uint64_t base, uint64_t len,
       break;
     }
   }
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   return found;
 }
 
@@ -4973,7 +5171,7 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
    * the lock drops can be chosen again by a peer, and the second insert is
    * then refused as -ENOMEM.  Do not split this, and do not add an allocation
    * or a console write here. */
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   if (is_fixed) {
     /* MAP_FIXED replaces whatever was mapped in range, atomically. */
     base = addr;
@@ -5088,7 +5286,7 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
                                      obj_off) != 0)
       rc = -ENOMEM;
   }
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   /* ---- end of the critical section ------------------------------------ */
   vtb_finish(&tb, as); /* C1-pe: shoot down, then release the old frames */
 
@@ -5212,10 +5410,10 @@ void vm_zap_span(struct addr_space *as, uint64_t base, uint64_t len) {
     return;
   struct vm_tlb_batch b;
   vtb_init(&b);
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   vtb_hold_objects_locked(&b, as, base, len);
   vm_zap_range_defer(as, base, len, &b);
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   vtb_finish(&b, as);
 }
 
@@ -5225,13 +5423,13 @@ static int vm_unmap_span_jit(struct addr_space *as, uint64_t base,
                              uint64_t len, int jit) {
   struct vm_tlb_batch b;
   vtb_init(&b);
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   vtb_hold_objects_locked(&b, as, base, len);
   vm_zap_range_defer(as, base, len, &b);
   int rc = vm_region_remove_locked(as, base, len);
   if (rc == 0 && jit)
     vm_jit_release(as, base, len); /* a freed code chunk is reusable */
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   vtb_finish(&b, as);
   return rc;
 }
@@ -5275,32 +5473,32 @@ int vm_mremap_carry_private(struct process *grp, uint64_t src, uint64_t dst,
   struct addr_space *as = grp->as;
   int n = 0;
   for (uint64_t off = 0; off < len; off += FRAME_SIZE) {
-    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    uint64_t fl = vm_lock_acq(__LINE__);
     struct vm_region *rs = vm_region_find(as, src + off);
     struct vm_region *rd = vm_region_find(as, dst + off);
     uint64_t leaf = 0;
     if (!rs || !rd || !rs->obj || !(rs->flags & VM_MAP_PRIVATE) ||
         vm_arch_walk(as, src + off, &leaf) != 0 ||
         vm_arch_walk(as, dst + off, 0) == 0) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       continue;
     }
     uint64_t ph = vm_arch_leaf_phys(leaf);
     uint64_t objfr =
         vm_object_peek_locked(rs->obj, (src + off - rs->base) + rs->obj_off);
     if (objfr && ph == objfr) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       continue; /* still reading through: refaults from the object */
     }
     uint64_t fr = frame_alloc_zeroed();
     if (!fr) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -ENOMEM;
     }
     vm_frame_copy(fr, ph, FRAME_SIZE);
     if (vm_arch_map(as, dst + off, fr, rd->prot, rd->kind) != 0) {
       frame_free(fr);
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -ENOMEM;
     }
     as->resident_frames++;
@@ -5309,7 +5507,7 @@ int vm_mremap_carry_private(struct process *grp, uint64_t src, uint64_t dst,
     vm_pub_note(as, dst + off, (dst + off - rd->base) + rd->obj_off, rd->prot, 1,
                 VM_PUB_COPY, fr, 1, VM_PW_COW);
     n++;
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
   }
   return n;
 }
@@ -5372,14 +5570,14 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
   struct vm_tlb_batch tb;
   vtb_init(&tb);
   uint16_t old_or = 0;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = vm_lock_acq(__LINE__);
   /* The range must be fully mapped (design 4.1: else -ENOMEM).  P1: walked
      region by region, not page by page -- a 64 GiB PROT_NONE reservation is
      16 M pages and this runs with IRQs off. */
   for (uint64_t a = addr; a < addr + len;) {
     struct vm_region *r = vm_region_find(as, a);
     if (!r) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       return -ENOMEM;
     }
     old_or |= r->prot;
@@ -5393,7 +5591,7 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
      refused mprotect into an unbounded refault loop). */
   int rc = vm_prot_set_span(as, addr, len, p);
   if (rc != 0) {
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     return -ENOMEM;
   }
   /* Resident pages: re-encode in place, or ZAP for PROT_NONE (design
@@ -5450,7 +5648,7 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
       uart_puts("\n");
     }
   }
-  spinlock_release_irqrestore(&vm_lock, fl);
+  vm_lock_rel(fl);
   vtb_finish(&tb, as);
   return rc == 0 ? 0 : -ENOMEM;
 }
@@ -5673,15 +5871,15 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   int i = 0;
   while (i < src->nr) {
     struct vm_region r;
-    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    uint64_t fl = vm_lock_acq(__LINE__);
     if (i >= src->nr) {
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       break;
     }
     r = src->regions[i];
     int irc = vm_region_insert_locked(dst, r.base, r.len, r.prot, r.kind, r.flags,
                                       r.obj, r.obj_off);
-    spinlock_release_irqrestore(&vm_lock, fl);
+    vm_lock_rel(fl);
     if (irc != 0) {
       uart_puts("[VM] clone: insert failed i=");
       print_int(i);
@@ -5697,12 +5895,12 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
     uint64_t a = r.base;
     while (a < end) {
       int copied = 0, steps = 0, err = 0;
-      fl = spinlock_acquire_irqsave(&vm_lock);
+      fl = vm_lock_acq(__LINE__);
       uint64_t bt0 = timer_get_us();
       /* The region must still be the one we copied (same index, same base):
          a peer's munmap may have shrunk the list. */
       if (i >= src->nr || src->regions[i].base != r.base) {
-        spinlock_release_irqrestore(&vm_lock, fl);
+        vm_lock_rel(fl);
         break;
       }
       while (a < end && copied < CLONE_BATCH && steps < CLONE_SCAN) {
@@ -5796,7 +5994,7 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
         if (bus > vm_clone_stat_max_us)
           vm_clone_stat_max_us = bus;
       }
-      spinlock_release_irqrestore(&vm_lock, fl);
+      vm_lock_rel(fl);
       if (err) {
         if (err == 2)
           ASCLONE("alloc-private", i, a);
